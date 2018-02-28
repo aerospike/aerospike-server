@@ -703,13 +703,8 @@ emigrate_signal(emigration *emig)
 		uint64_t now = cf_getms();
 
 		if (signal_xmit_ms + MIGRATE_RETRANSMIT_SIGNAL_MS < now) {
-			msg_incr_ref(m);
-
-			if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_CTRL) !=
-					AS_FABRIC_SUCCESS) {
-				as_fabric_msg_put(m);
-			}
-
+			as_fabric_retransmit(emig->dest, m,
+					AS_FABRIC_CHANNEL_CTRL);
 			signal_xmit_ms = now;
 		}
 
@@ -759,13 +754,8 @@ emigration_send_start(emigration *emig)
 
 		if (cf_queue_sz(emig->ctrl_q) == 0 &&
 				start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
-			msg_incr_ref(m);
-
-			if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_CTRL) !=
-					AS_FABRIC_SUCCESS) {
-				as_fabric_msg_put(m);
-			}
-
+			as_fabric_retransmit(emig->dest, m,
+					AS_FABRIC_CHANNEL_CTRL);
 			start_xmit_ms = now;
 		}
 
@@ -851,13 +841,8 @@ emigration_send_done(emigration *emig)
 		uint64_t now = cf_getms();
 
 		if (done_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
-			msg_incr_ref(m);
-
-			if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_CTRL) !=
-					AS_FABRIC_SUCCESS) {
-				as_fabric_msg_put(m);
-			}
-
+			as_fabric_retransmit(emig->dest, m,
+					AS_FABRIC_CHANNEL_CTRL);
 			done_xmit_ms = now;
 		}
 
@@ -1037,11 +1022,8 @@ emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 	uint64_t now = (uint64_t)udata;
 
 	if (ri_ctrl->xmit_ms + ns->migrate_retransmit_ms < now) {
-		msg_incr_ref(ri_ctrl->m);
-
-		if (as_fabric_send(ri_ctrl->emig->dest, ri_ctrl->m,
+		if (as_fabric_retransmit(ri_ctrl->emig->dest, ri_ctrl->m,
 				AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(ri_ctrl->m);
 			return -1; // this will stop the reduce
 		}
 
