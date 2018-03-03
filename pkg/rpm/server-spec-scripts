@@ -1,0 +1,9 @@
+%pre server-@EDITION@
+if ! id -g aerospike >/dev/null 2>&1; then
+	echo "Adding group aerospike"
+	/usr/sbin/groupadd -r aerospike
+fi
+if ! id -u aerospike >/dev/null 2>&1; then
+	echo "Adding user aerospike"
+	/usr/sbin/useradd -r -d /opt/aerospike -c 'Aerospike server' -g aerospike -s /sbin/nologin aerospike
+fi

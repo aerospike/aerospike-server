@@ -1,0 +1,25 @@
+#!/bin/bash
+################################################################################
+#
+# Restart Script for Aerospike
+#
+# Inherits definitions from aerospike run script
+#
+################################################################################
+
+main() {
+
+  try "$0 stop --home ${AEROSPIKE_HOME}"
+  if [ $? -ne 0 ]; then
+    exit $?
+  else
+    info "stopped"
+  fi
+
+  try "$0 start --home ${AEROSPIKE_HOME}"
+  if [ $? -ne 0 ]; then
+    exit $?
+  else
+    info "started"
+  fi
+}

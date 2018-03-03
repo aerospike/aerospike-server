@@ -1,0 +1,11 @@
+[Unit]
+Description=Aerospike Telemetry Agent
+After=network.target
+Wants=network.target
+
+[Service]
+User=aerospike
+Group=aerospike
+EnvironmentFile=/etc/sysconfig/aerospike_telemetry
+PermissionsStartOnly=True
+ExecStart=/opt/aerospike/telemetry/telemetry.py $TELEMETRY_CONFIG_FILE start --fgdaemon

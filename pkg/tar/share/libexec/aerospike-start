@@ -1,0 +1,105 @@
+#!/bin/bash
+################################################################################
+#
+# Start Script for Aerospike
+#
+# Inherits definitions from aerospike run script
+#
+################################################################################
+
+process_stopped() {
+  debug "process stopped"
+  return 0
+}
+
+process_running() {
+  error "process running."
+  exit 1
+}
+
+process_died() {
+  debug "aerospike (pid=$1) died abruptly. Cleaning up"
+  sudo rm -f $2
+  return 0
+}
+
+set_shmall() {
+  mem=`/sbin/sysctl -n kernel.shmall`
+  min=4294967296
+  if [ ${#mem} -le ${#min} ]
+  then
+    if [ $mem -lt $min ]
+    then
+      info "kernel.shmall too low, setting to 4G pages"
+      /sbin/sysctl -w kernel.shmall=$min
+    fi
+  fi
+}
+
+set_shmmax() {
+  mem=`/sbin/sysctl -n kernel.shmmax`
+  min=1073741824
+  if [ ${#mem} -le ${#min} ]
+  then
+    if [ $mem -lt $min ]
+    then
+      info "kernel.shmmax too low, setting to 1GB"
+      /sbin/sysctl -w kernel.shmmax=$min
+    fi
+  fi
+}
+
+set_socket_buffer_limit() {
+  name=${1}; path=${2}; size=${3}
+  curr=$(cat ${path})
+
+  if [ ${curr} -lt ${size} ]; then
+    info "increasing ${name} socket buffer limit (${path}): ${curr} -> ${size}"
+    echo ${size} >${path}
+  fi
+}
+
+set_socket_buffer_limits() {
+  set_socket_buffer_limit read /proc/sys/net/core/rmem_max 15728640
+  set_socket_buffer_limit write /proc/sys/net/core/wmem_max 5242880
+}
+
+main() {
+
+  if [ ! -f ${AEROSPIKE_HOME}/etc/aerospike.conf ]; then
+    error "directory is not initialized. Run 'aerospike init' before continuing."
+    exit 1
+  fi
+
+  local me=$(whoami)
+  debug "i am $me"
+  if [[ ${me} != "root" ]]; then
+    error "super-user privileges required for this operation. Try the command using sudo."
+    exit 1
+  fi
+
+  debug "starting"
+
+  # check the process
+  process_check
+  debug "process checked"
+
+  # setup environment
+  debug "setting up environment"
+  set_shmall
+  set_shmmax
+  set_socket_buffer_limits
+  ulimit -n 100000
+
+  debug "starting..."
+  ${AEROSPIKE_DAEMON} --instance ${AEROSPIKE_INST} --config ${AEROSPIKE_HOME}/etc/aerospike.conf &>var/log/console.log
+  console=$(cat var/log/console.log)
+  if [ $? -eq 0 ] && [ -z "${console}" ]; then
+    info "started"
+  else
+    error "start failed due to an error."
+    print "${console}" 1>&2
+    print 1>&2
+    exit 1
+  fi
+}

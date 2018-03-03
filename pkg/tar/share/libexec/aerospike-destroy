@@ -1,0 +1,26 @@
+#!/bin/bash
+################################################################################
+#
+# Destroy Script for Aerospike
+#
+# Inherits definitions from aerospike run script
+#
+################################################################################
+
+################################################################################
+# MAIN
+################################################################################
+
+main() {
+
+  try "$0 stop --home ${AEROSPIKE_HOME}"
+  if [ $? -ne 0 ]; then
+    exit $?
+  fi
+
+  try "rm -rf ${AEROSPIKE_HOME}/bin"
+  try "rm -rf ${AEROSPIKE_HOME}/etc"
+  try "rm -rf ${AEROSPIKE_HOME}/share"
+  try "rm -rf ${AEROSPIKE_HOME}/var"
+
+}

@@ -1,0 +1,97 @@
+# Aerospike Server
+# Makefile.in
+#
+# Define project global settings for compiler options.
+#
+
+# [Note:  "DEPTH" must be defined by the "include"ing Makefile.]
+
+# Common variable definitions:
+include $(DEPTH)/make_in/Makefile.vars
+
+CF_INCLUDE_DIR = $(DEPTH)/common/src/include
+CF_LIB_DIR     = $(DEPTH)/common/target/$(PLATFORM)/lib
+
+AS_CFLAGS += -D_FILE_OFFSET_BITS=64 -std=gnu99 -D_REENTRANT -D_GNU_SOURCE
+
+# Use the enhanced memory allocator (rather than the default version in the Common module.)
+AS_CFLAGS += -DENHANCED_ALLOC
+
+LIBRARIES += -lcrypto
+
+LIBRARIES += -lpthread -lrt -ldl -lz -lm
+
+# Location of source files being compiled:
+#   "" (the default) means "src".  Automatically set to "../m4/" during non-zero macro expansion build phases.
+SRCDIR =
+
+INCLUDES += -I$(JEMALLOC)/include
+LIBRARIES := $(JEMALLOC)/lib/libjemalloc.a $(LIBRARIES)
+
+# Popular values:
+#   x86_64 for 64-bit Intel
+#   i686 for 32-bit Intel
+MARCH_NATIVE = $(shell uname -m)
+
+# If GCC v4.4.7 or later, use DWARF version 4, othewise use version 2:
+ifeq ($(shell $(DEPTH)/build/VersionCheck.py 'gcc -dumpversion' 4.4.7), 1)
+  DWARF_VERSION=4
+else
+  DWARF_VERSION=2
+endif
+
+# Overrride optimizations via: make O=n
+O = 3 
+
+ifeq ($(DOPROFILE),1)
+  OPTFLAGS = -O$(O) -fPIE -pg -fprofile-arcs -ftest-coverage -DDOPROFILE
+else
+  OPTFLAGS = -O$(O)
+endif
+
+# Strict aliasing is really interesting. -fno-strict-aliasing relaxes the coding rules, but makes
+# some code run a little slower. I'm not seeing a real difference at the moment, so turning it off
+# I think to get the real speed, you turn on -fstrict-aliasing, and the appropriate -W, which 
+# generates a few warnings in our code where type punning is used for printf sanity. This
+# also interacts with the restrict keyword, which I understand in theory, but attempts to use
+# it throw errors out of the compiler so I don't understand it yet.
+#
+# Removing the frame pointers does add a few percent in speed, too, but we need better debugging
+# at this point...
+#
+# And the jury's a little out on -mss3 and -msse4. They aren't turned on by -march=native,
+# even though native should understand that those are the preferred types, and available.
+#
+# Tree vectorize is turned on the in the O3 mechanism. It's fascinating to turn on the tree vectorize
+# debugs. Very rarely do we have loops that vectorize, because we often use functions in our loops.
+# and, sometimes loops are vectorized but will need lengths greater than 20 or 30 to show speed improvements,
+# loops of this size are unlikely in our code.
+#
+# O3 also enables -finline-functions, among other things.
+COMMON_CFLAGS = -gdwarf-$(DWARF_VERSION) -g3 $(OPTFLAGS) -fno-common -fno-strict-aliasing -Wall $(AS_CFLAGS) $(AS_EE_CFLAGS)
+
+# Code generated for the "nocona" architecture has been determined to run well on a wide variety of current machines.
+ifneq ($(ARCH),$(filter $(ARCH),ppc64 ppc64le))
+  COMMON_CFLAGS += -march=nocona
+endif
+
+# Generate dependency files.
+COMMON_CFLAGS += -MMD
+
+# Require strict warning-free compilation.
+COMMON_CFLAGS += -Werror
+
+CFLAGS = $(COMMON_CFLAGS) -DMARCH_$(MARCH_NATIVE)
+
+# Define a macro for the base source file name.
+DEF_FN += -D__FILENAME__=\"$(notdir $<)\"
+
+# Alternative Compiler Flags Settings:
+# Note:  "native" is optimized for the build environment, which might not be the same as the deployment environment:
+#CFAGS_NATIVE = $(COMMON_CFLAGS) -march=native
+#CFLAGS_64 = $(COMMON_FLAGS) -DMARCH_x86_64
+#CFLAGS_32 = $(COMMON_CFLAGS) -DMARCH_i686
+
+LDFLAGS = -rdynamic -L$(CF_LIB_DIR)
+
+STRIP = strip -p -v -s

@@ -1,0 +1,20 @@
+#!/bin/tcsh -f
+#
+#    File:   get-jem-stats
+#
+#    Description:
+#       Endlessly poll the Aerospike server for its JEMalloc statistics.
+#       Polling interval is specified by the single, optional command-line
+#       argument, which defaults to 600 sec. = 10 min.
+#
+#    Usage:
+#       prompt% get-jem-stats {<PollIntervalSec:Default=600>}
+#
+
+set INTERVAL = 600
+if ($#argv == 1) set INTERVAL = $argv[1]
+
+while (1)
+  asinfo -v jem-stats: >& /dev/null
+  sleep $INTERVAL
+end

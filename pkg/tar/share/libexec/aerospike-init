@@ -1,0 +1,211 @@
+#!/bin/bash
+################################################################################
+#
+# Initialization Script for Aerospike
+#
+# Inherits definitions from aerospike run script
+#
+################################################################################
+
+# AEROSPIKE_USER=root
+# AEROSPIKE_GROUP=root
+# AEROSPIKE_SERVICE_ADDR=any
+# AEROSPIKE_SERVICE_PORT=3000
+# AEROSPIKE_MULTICAST_ADDR=239.1.99.222
+# AEROSPIKE_MULTICAST_PORT=9918
+# AEROSPIKE_FABRIC_PORT=3001
+# AEROSPIKE_INFO_PORT=3003
+# AEROSPIKE_INST=1
+
+AEROSPIKE_DEFAULT_USER=$(whoami)
+AEROSPIKE_DEFAULT_GROUP=$(whoami)
+AEROSPIKE_DEFAULT_SERVICE_ADDR=any
+AEROSPIKE_DEFAULT_SERVICE_PORT=3000
+AEROSPIKE_DEFAULT_MULTICAST_ADDR=239.1.99.222
+AEROSPIKE_DEFAULT_MULTICAST_PORT=9918
+AEROSPIKE_DEFAULT_FABRIC_PORT=3001
+AEROSPIKE_DEFAULT_INFO_PORT=3003
+AEROSPIKE_DEFAULT_INST=1
+
+aerospike_user() {
+  echo ${AEROSPIKE_USER:-$AEROSPIKE_DEFAULT_USER}
+}
+
+aerospike_group() {
+  echo ${AEROSPIKE_GROUP:-$AEROSPIKE_DEFAULT_GROUP}
+}
+
+aerospike_service_addr() {
+  echo ${AEROSPIKE_SERVICE_ADDR:-$AEROSPIKE_DEFAULT_SERVICE_ADDR}
+}
+
+aerospike_service_port() {
+  echo ${AEROSPIKE_SERVICE_PORT:-$AEROSPIKE_DEFAULT_SERVICE_PORT}
+}
+
+aerospike_multicast_addr() {
+  echo ${AEROSPIKE_MULTICAST_ADDR:-$AEROSPIKE_DEFAULT_MULTICAST_ADDR}
+}
+
+aerospike_multicast_port() {
+  echo ${AEROSPIKE_MULTICAST_PORT:-$AEROSPIKE_DEFAULT_MULTICAST_PORT}
+}
+
+aerospike_fabric_port() {
+  echo ${AEROSPIKE_FABRIC_PORT:-$(expr $(aerospike_service_port) + 1)}
+}
+
+aerospike_info_port() {
+  echo ${AEROSPIKE_INFO_PORT:-$(expr $(aerospike_service_port) + 3)}
+}
+
+aerospike_inst() {
+  echo ${AEROSPIKE_INST:-$AEROSPIKE_DEFAULT_INST}
+}
+
+
+################################################################################
+#
+# FUNCTIONS
+#
+################################################################################
+
+parseopt() {
+  case $1 in
+    "--local" )
+      AEROSPIKE_LOCAL=1
+      return 1
+      ;;
+    "--user" | "-u" )
+      AEROSPIKE_USER=$2
+      return 2
+      ;;
+    "--group" | "-g" )
+      AEROSPIKE_GROUP=$2
+      return 2
+      ;;
+    "--instance" | "-i" )
+      AEROSPIKE_INST=$2
+      return 2
+      ;;
+    "--service-addr" | "-h" )
+      AEROSPIKE_SERVICE_ADDR=$2
+      return 2
+      ;;
+    "--service-port" | "-p" )
+      AEROSPIKE_SERVICE_PORT=$2
+      return 2
+      ;;
+    "--multicast-addr" )
+      AEROSPIKE_MULTICAST_ADDR=$2
+      return 2
+      ;;
+    "--multicast-port" )
+      AEROSPIKE_MULTICAST_PORT=$2
+      return 2
+      ;;
+    "--fabric-port" )
+      AEROSPIKE_FABRIC_PORT=$2
+      return 2
+      ;;
+    "--info-port" )
+      AEROSPIKE_INFO_PORT=$2
+      return 2
+      ;;
+    "--home" )
+      AEROSPIKE_HOME=$(readlink -m $2)
+      return 2
+      ;;
+    * )
+      default_parseopt $*
+      return $?
+      ;;
+  esac
+}
+
+render() {
+  python ${SCRIPT_LIB}/aerospike-render.py $1 \
+    home=${AEROSPIKE_HOME} \
+    user=$(aerospike_user) \
+    group=$(aerospike_group) \
+    service_addr=$(aerospike_service_addr) \
+    service_port=$(aerospike_service_port) \
+    multicast_addr=$(aerospike_multicast_addr) \
+    multicast_port=$(aerospike_multicast_port) \
+    fabric_port=$(aerospike_fabric_port) \
+    info_port=$(aerospike_info_port)
+}
+
+main() {
+
+  local owner=$(aerospike_user)
+  local group=$(aerospike_group)
+
+  # base directories
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}"
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/etc"
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share"
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/var"
+  
+  # bin directory
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/bin"
+  try "install -m 755 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/bin/aerospike ${AEROSPIKE_HOME}/share/bin/aerospike"
+
+  # lib files
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/lib"
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/lib/*  ${AEROSPIKE_HOME}/share/lib/."
+
+  # libexec files
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/libexec"
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/libexec/*  ${AEROSPIKE_HOME}/share/libexec/."
+  
+  # command man pages
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/man"
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/man/aerospike-init.man  ${AEROSPIKE_HOME}/share/man/."
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/man/aerospike-destroy.man  ${AEROSPIKE_HOME}/share/man/."
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/man/aerospike-restart.man  ${AEROSPIKE_HOME}/share/man/."
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/man/aerospike-start.man    ${AEROSPIKE_HOME}/share/man/."
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/man/aerospike-status.man   ${AEROSPIKE_HOME}/share/man/."
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/man/aerospike-stop.man     ${AEROSPIKE_HOME}/share/man/."
+
+  # configuration template
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/etc"
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/etc/aerospike.conf ${AEROSPIKE_HOME}/share/etc/aerospike.conf"
+  
+  # install lua files
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/udf/lua"
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/udf/lua/*.lua ${AEROSPIKE_HOME}/share/udf/lua/."
+  
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/udf/lua/external"
+  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/udf/lua/external/*.lua ${AEROSPIKE_HOME}/share/udf/lua/external/."
+
+  # instance local aerospike script
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/bin"
+  try "echo '#!/bin/bash' > ${AEROSPIKE_HOME}/bin/aerospike"
+  try "echo '. ${AEROSPIKE_HOME}/etc/aerospike.rc' >> ${AEROSPIKE_HOME}/bin/aerospike"
+  try "echo '${AEROSPIKE_HOME}/share/bin/aerospike \$*' >> ${AEROSPIKE_HOME}/bin/aerospike"
+  try "chmod 755 ${AEROSPIKE_HOME}/bin/aerospike"
+  try "install -m 755 -o ${owner} -g ${group} -C ${AEROSPIKE_DAEMON} ${AEROSPIKE_HOME}/bin/asd"
+
+  # runtime/work directories
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/var/log"
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/var/run"
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/var/smd"
+  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/var/udf/lua"
+
+  # render the configuration file
+  if [ ! -f ${AEROSPIKE_HOME}/etc/aerospike.conf ]; then
+    try "render ${SCRIPT_HOME}/etc/aerospike.conf > ${AEROSPIKE_HOME}/etc/aerospike.conf"
+    try "chmod 644 ${AEROSPIKE_HOME}/etc/aerospike.conf"
+    try "chown ${owner}:${group} ${AEROSPIKE_HOME}/etc/aerospike.conf"
+  fi
+
+  # add rc file
+  if [ ! -f ${AEROSPIKE_HOME}/etc/aerospike.rc ]; then
+    try "echo 'export AEROSPIKE_DAEMON=${AEROSPIKE_HOME}/bin/asd' >> ${AEROSPIKE_HOME}/etc/aerospike.rc"
+    try "echo 'export AEROSPIKE_INST=$(aerospike_inst)' >> ${AEROSPIKE_HOME}/etc/aerospike.rc"
+    try "echo 'export AEROSPIKE_CONF=${AEROSPIKE_HOME}/etc/aerospike.conf' >> ${AEROSPIKE_HOME}/etc/aerospike.rc"
+    try "chmod 644 ${AEROSPIKE_HOME}/etc/aerospike.rc"
+    try "chown ${owner}:${group} ${AEROSPIKE_HOME}/etc/aerospike.rc"
+  fi
+}

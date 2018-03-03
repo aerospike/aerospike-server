@@ -1,0 +1,34 @@
+.TH "aerospike status" 1 "1 APRIL 2014" "aerospike status" "aerospike manual" 
+
+.SH NAME
+
+aerospike status \- get the status of aerospike server daemon
+
+.SH SYNOPSIS
+
+aerospike status [--home PATH]
+
+.SH DESCRIPTION
+
+.PP 
+Get the status of the aerospike server daemon. The program will assume the current directory is the aerospike home directory. 
+
+To override the home directory, specify the `--home PATH` option.
+
+.SH OPTIONS
+
+.IP "--home PATH"
+
+The directory to use as the aerospike home directory. 
+
+.SH EXAMPLES
+
+.HP
+To status aerospike running in the current directory:
+
+aerospike status
+
+.HP 
+To status aerospike running a different home directory, such as '/usr/share/aerospike':
+
+aerospike status --home /usr/share/aerospike

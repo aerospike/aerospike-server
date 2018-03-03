@@ -1,0 +1,93 @@
+#!/bin/bash
+echo "This will help to migrate your existing citrusleaf conf to the new aerospike conf"
+
+OLDCONF='/etc/citrusleaf/citrusleaf.conf'
+NEWCONF='/etc/aerospike/aerospike.conf'
+
+autorun="${1:-no}"
+
+echolines(){
+echo -e "\n"
+}
+
+exitonerror()
+{
+echolines
+echo "Error running last command $msg. Non zero exit value returned. Exitting"
+exit
+}
+
+
+[ $autorun=="y" ]||read -p "Enter old config file [$OLDCONF]" oldconf
+#Check if older config exist
+if [ ! -f $oldconf ] 
+then echo "Old config $oldconf not found."
+$0
+exit
+else
+echo "Older citrusleaf.conf found. Proceeding with migration."
+
+cp -v $OLDCONF $NEWCONF.from_citrus
+if [ $? != '0' ]
+then echo "Error copying $OLDCONF to $NEWCONF.from_citrus. Please check permissions. (run $0 as sudo?)"
+exitonerror
+fi
+cp -v $OLDCONF $NEWCONF.2to3
+if [ $? != '0' ]
+then exitonerror
+fi
+
+declare -a config_updates
+#Escape any slashes and spaces while adding to the array
+config_updates=(["user\ citrusleaf"]="user\ aerospike" ["group\ citrusleaf"]="group\ aerospike" ["cld"]="asd" ["clxdr.log"]="aerospike\/asxdr.log" ["\/var\/log\/citrusleaf.log"]="\/var\/log\/aerospike\/aerospike.log" ["\/etc\/citrusleaf\/"]="\/etc\/aerospike\/")
+
+for key in "${!config_updates[@]}"
+do val=${config_updates["$key"]}
+#Check if the key exists in the file
+if [ `grep "$key" $NEWCONF.2to3|wc -l` -gt 0 ]
+then
+#For each instance of key in file, prompt for sed replace
+for line in `grep -inr "$key" $NEWCONF.2to3|cut -f 1 -d ':'`
+do
+
+#Format the srcline and target line for prompting only
+srcline=`sed -n "$line,${line}p" $NEWCONF.2to3|sed -e 's/^ *//g' -e 's/ *$//g'`
+targetline=`echo $srcline|sed "s/$key/$val/"`
+[ $autorun=="y" ]||read -p "Move $srcline to $targetline (y/n)[y] :" sedyes
+sedyes="${sedyes:-y}"
+if [ $sedyes != 'y' ]
+then echo "Not moving $srcline to $targetline"
+echolines
+else
+echo "Moving $srcline to $targetline"
+sed -i "${line}s/${key}/${val}/" $NEWCONF.2to3
+if [ $? != '0' ]
+then exitonerror
+fi
+echolines
+#if [ $key == "\/etc\/citrusleaf\/" ]
+for f in $srcline
+do srcfile=`echo $f|grep "$key"`
+destfile=`echo $srcfile|sed "s/$key/$val/"`
+if [ `echo $srcfile|wc -w` -gt 0 ] && [ -f $srcfile ]
+then
+ mv -v $srcfile $destfile
+echolines
+fi #end if [ `echo $srcfile|wc -w` -gt 0 ] && [ $srcfile -nt $destfile ]
+
+done
+
+
+fi #end if [ $sedyes !='y' ]
+done #end for line in `grep -inr "$key" $NEWCONF.2to3|cut -f 1 -d ':'`
+fi #end if [ `grep "$key" $NEWCONF.2to3|wc -l` -gt 0 ]
+done #end for key in "${!config_updates[@]}"
+
+
+fi #end if [ ! -f $oldconf ]
+
+
+cp -v $NEWCONF.2to3 $NEWCONF
+
+echolines
+echo -e "INFO:Please remove older citrusleaf packages if installed."

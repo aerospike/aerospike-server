@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+#   File:         build/prep-ce
+#   Description:  Prepare for building from Community Edition source distribution.
+#   Usage:        prompt$ build/prep-ce
+#
+#   Executing this script replaces the version-related build scripts with versions
+#   using frozen version information instead of regenerating it every time.
+#
+
+mv build/gen_version{,.ORIG}
+cat > build/gen_version <<EOF
+cat version.c
+EOF
+chmod ugo+x build/gen_version
+
+mv build/version{,.ORIG}
+grep build_id version.c | sed 's/.*\"\(.*\)\";/echo \1/' > build/version
+chmod ugo+x build/version

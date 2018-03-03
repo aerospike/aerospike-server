@@ -1,0 +1,54 @@
+/*
+ * replica_ping.h
+ *
+ * Copyright (C) 2017 Aerospike, Inc.
+ *
+ * Portions may be licensed to Aerospike, Inc. under one or more contributor
+ * license agreements.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option) any
+ * later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/
+ */
+
+#pragma once
+
+//==========================================================
+// Includes.
+//
+
+#include <stdbool.h>
+
+#include "msg.h"
+#include "node.h"
+
+#include "transaction/rw_request.h"
+
+
+//==========================================================
+// Forward declarations.
+//
+
+struct as_transaction_s;
+struct rw_request_s;
+
+
+//==========================================================
+// Public API.
+//
+
+bool repl_ping_check(struct as_transaction_s* tr);
+void repl_ping_make_message(struct rw_request_s* rw, struct as_transaction_s* tr);
+void repl_ping_setup_rw(struct rw_request_s* rw, struct as_transaction_s* tr, repl_ping_done_cb repl_ping_cb, timeout_done_cb timeout_cb);
+void repl_ping_reset_rw(struct rw_request_s* rw, struct as_transaction_s* tr, repl_ping_done_cb cb);
+void repl_ping_handle_op(cf_node node, msg* m);
+void repl_ping_handle_ack(cf_node node, msg* m);

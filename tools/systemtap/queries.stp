@@ -1,0 +1,145 @@
+/*
+ 
+*/
+
+
+probe process("./target/Linux-x86_64/bin/asd").mark("trans__demarshal")
+{
+    printf("%d %d ASD_trans_demarshal nodeid=%0x msgp=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__starting")
+{
+    printf("%d %d ASD_query_starting nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__qtrsetup_starting")
+{
+    printf("%d %d ASD_query_qtrsetup_starting nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__qtrsetup_finished")
+{
+    printf("%d %d ASD_query_qtrsetup_finished nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__init")
+{
+    printf("%d %d ASD_query_init nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__done")
+{
+    printf("%d %d ASD_query_done nodeid=%0x taskid=%0x nrecs=%d\n",
+           gettimeofday_us(), tid(), $arg1, $arg2, $arg3);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__trans_done")
+{
+    printf("%d %d ASD_query_trans_done nodeid=%0x taskid=%0x qtr=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2, $arg3);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__qtr_alloc")
+{
+    printf("%d %d ASD_query_qtr_alloc nodeid=%0x taskid=%0x qtr=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2, $arg3);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__qtr_free")
+{
+    printf("%d %d ASD_query_qtr_free nodeid=%0x taskid=%0x qtr=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2, $arg3);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__ioreq_starting")
+{
+    printf("%d %d ASD_query_ioreq_starting nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__ioreq_finished")
+{
+    printf("%d %d ASD_query_ioreq_finished nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+/*
+// These are a little verbose ...
+probe process("./target/Linux-x86_64/bin/asd").mark("query__io_starting")
+{
+    printf("%d %d ASD_query_io_starting nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__io_notmatch")
+{
+    printf("%d %d ASD_query_io_notmatch nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__io_error")
+{
+    printf("%d %d ASD_query_io_error nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__io_finished")
+{
+    printf("%d %d ASD_query_io_finished nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+*/
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__netio_starting")
+{
+    printf("%d %d ASD_query_netio_starting nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__netio_finished")
+{
+    printf("%d %d ASD_query_netio_finished nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__addfin")
+{
+    printf("%d %d ASD_query_addfin nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__sendpacket_starting")
+{
+    printf("%d %d ASD_sendpacket_starting nodeid=%0x pos=%d len=%d\n",
+           gettimeofday_us(), tid(), $arg1, $arg2, $arg3);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__sendpacket_continue")
+{
+    printf("%d %d ASD_sendpacket_continue nodeid=%0x pos=%d\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("query__sendpacket_finished")
+{
+    printf("%d %d ASD_sendpacket_finished nodeid=%0x\n",
+           gettimeofday_us(), tid(), $arg1);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("sindex__msgrange_starting")
+{
+    printf("%d %d ASD_sindex_msgrange_starting nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}
+
+probe process("./target/Linux-x86_64/bin/asd").mark("sindex__msgrange_finished")
+{
+    printf("%d %d ASD_sindex_msgrange_finished nodeid=%0x taskid=%0x\n",
+           gettimeofday_us(), tid(), $arg1, $arg2);
+}

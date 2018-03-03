@@ -1,0 +1,277 @@
+#!/usr/bin/env python
+
+import sys
+import fileinput
+import datetime
+import traceback
+
+ntasks = 0
+tasks = {}
+
+nnodes = 0
+nodes = {}
+
+substates = {}
+
+counts = {}
+
+def fieldorder(field):
+    """Sorts nodeid and taskid to the begining of the field lists"""
+    if   field[0:6] == 'nodeid': return '0' + field
+    elif field[0:6] == 'taskid': return '1' + field
+    else: return field
+
+def substate_starting(tstamp, parent, child):
+    global substates
+    substates[child] = tstamp
+
+def substate_finished(tstamp, child, statedelta):
+    global substates
+    if child not in substates:
+        return
+    dt = tstamp - substates[child] 
+    del substates[child]
+    statedelta.append((child[0], dt))
+
+def count_increment(child, countchange):
+    global counts
+    if child not in counts:
+        counts[child] = 1
+    else:
+        counts[child] += 1
+    countchange.append((child[0], counts[child]))
+
+def count_decrement(child, countchange):
+    global counts
+    if child in counts:
+        counts[child] -= 1
+    else:
+        counts[child] = 0
+    countchange.append((child[0], counts[child]))
+    if counts[child] == 0:
+        del counts[child]
+
+def process_line(line):
+    global ntasks
+    global tasks
+    global nnodes
+    global nodes
+
+    result = ''
+
+    fields = line.split()
+    tstamp = long(fields[0])
+    tid = long(fields[1])
+    evtstr = fields[2]
+
+    taskid = None
+    delta = None
+
+    # ----------------------------------------------------------------
+    # Map some fields to nicer names/sumbols
+    # ----------------------------------------------------------------
+
+    for field in fields[3:]:
+        name, value = field.split('=')
+
+        # Taskid gets mapped to an ordinal.
+        if name == 'taskid':
+            taskid = value
+            if not taskid in tasks:
+                ntasks += 1
+                tasks[taskid] = (ntasks, tstamp)
+            delta = tstamp - tasks[taskid][1]
+
+        # Nodid gets mapped to an ordinal.
+        elif name == 'nodeid':
+            nodeid = value.upper()
+            if not nodeid in nodes:
+                nnodes += 1
+                nodes[nodeid] = nnodes
+
+    # ----------------------------------------------------------------
+    # Manage substates
+    # ----------------------------------------------------------------
+
+    statedelta = []
+    countchange = []
+
+    # ---- cliquery
+
+    if evtstr == 'CLI_query_foreach_starting':
+        substate_starting(tstamp,
+                          (None,),
+                          ('cliquery', taskid))
+
+    if evtstr == 'CLI_query_foreach_finished':
+        substate_finished(tstamp,
+                          ('cliquery', taskid),
+                          statedelta)
+
+    # ---- cliquerycmd
+
+    if evtstr == 'CLI_query_command_execute':
+        substate_starting(tstamp,
+                          ('CLI_query_foreach', taskid),
+                          ('cliquerycmd', taskid, nodeid))
+
+    if evtstr == 'CLI_query_command_complete':
+        substate_finished(tstamp,
+                          ('cliquerycmd', taskid, nodeid),
+                          statedelta)
+
+    # ---- preinit
+
+    if evtstr == 'ASD_trans_prepare':
+        substate_starting(tstamp,
+                          ('CLI_query_command', taskid, nodeid),
+                          ('preinit', taskid, nodeid))
+
+    if evtstr == 'ASD_query_init':
+        substate_finished(tstamp,
+                          ('preinit', taskid, nodeid),
+                          statedelta)
+
+    # ---- asdquery
+
+    if evtstr == 'ASD_query_init':
+        substate_starting(tstamp,
+                          ('CLI_query_command', taskid, nodeid),
+                          ('asdquery', taskid, nodeid))
+        count_increment(('concurqueries', nodeid), countchange)
+
+    if evtstr == 'ASD_query_done':
+        substate_finished(tstamp,
+                          ('asdquery', taskid, nodeid),
+                          statedelta)
+        count_decrement(('concurqueries', nodeid), countchange)
+
+    # ---- querygen
+
+    if evtstr == 'ASD_query_init':
+        substate_starting(tstamp,
+                          ('CLI_query_command', taskid, nodeid),
+                          ('querygen', taskid, nodeid))
+
+    if evtstr == 'ASD_query_ioreq_starting':
+        substate_finished(tstamp,
+                          ('querygen', taskid, nodeid),
+                          statedelta)
+
+    # ---- queryxmt
+
+    if evtstr == 'CLI_query_command_execute':
+        substate_starting(tstamp,
+                          ('CLI_query_command', taskid, nodeid),
+                          ('queryxmt', taskid, nodeid))
+
+    if evtstr == 'ASD_trans_prepare':
+        substate_finished(tstamp,
+                          ('queryxmt', taskid, nodeid),
+                          statedelta)
+
+    # ---- qtrsetup
+
+    if evtstr == 'ASD_query_qtrsetup_starting':
+        substate_starting(tstamp,
+                          ('CLI_query_command', taskid, nodeid),
+                          ('qtrsetup', taskid, nodeid))
+
+    if evtstr == 'ASD_query_qtrsetup_finished':
+        substate_finished(tstamp,
+                          ('qtrsetup', taskid, nodeid),
+                          statedelta)
+
+    # ---- recparse
+
+    if evtstr == 'CLI_query_recparse_starting':
+        substate_starting(tstamp,
+                          ('CLI_query_command', taskid, nodeid),
+                          ('recparse', taskid, nodeid))
+
+    if evtstr == 'CLI_query_recparse_finished':
+        substate_finished(tstamp,
+                          ('recparse', taskid, nodeid),
+                          statedelta)
+
+    # Augment the record with state deltas.
+    #
+    for child, dt in statedelta:
+        fields.append("%s=%.3f" % (child, float(dt) / 1000.0))
+    for child, count in countchange:
+        fields.append("%s=%d" % (child, count))
+
+
+    # ----------------------------------------------------------------
+    # Print an output record
+    # ----------------------------------------------------------------
+
+    # Print the timestamp formatted in localtime.
+    result += datetime.datetime.fromtimestamp(float(tstamp) / 1000000.0).strftime('%Y-%m-%d %H:%M:%S.%f')
+
+    # Threadid
+    result += " %7s" % ("[%d]" % (tid,),)
+
+    # If we've got a taskid print the delta time
+    if taskid:
+        result += " %7.3f" % (float(delta) / 1000.0)
+    else:
+        result += "  ------"
+
+    # Print the event name
+    result += " %-32s" % (evtstr,)
+
+    # Print the rest of the event
+    sawnodeid = False
+    sawtaskid = False
+    padded = False
+    for field in sorted(fields[3:], key=fieldorder):
+        name, value = field.split('=')
+        if name == 'nodeid':
+            result += " N%-2d" % (nodes[value.upper()],)
+            sawnodeid = True
+        elif name == 'taskid':
+            if not sawnodeid:
+                result += " -- "
+            result += " Q%06d" % (tasks[value][0],)
+            sawtaskid = True
+        else:
+            if not padded:
+                padded = True
+                if not sawtaskid:
+                    result += " -------"
+            result += ' ' + field
+
+    # All done
+    if not padded:
+        padded = True
+        if not sawtaskid:
+            result += " -------"
+
+    return result
+
+def dump_nodes():
+    global nodes
+    pairs = []
+    for nodeid, nid in nodes.iteritems():
+        pairs.append((nodeid, nid))
+    for nodeid, nid in sorted(pairs, key=lambda pair: pair[1]):
+        print "N%-2d\t%s" % (nid, nodeid)
+
+def dump_tasks():
+    global tasks
+    pairs = []
+    for (taskid, (tid, tstamp)) in tasks.iteritems():
+        print tid, taskid
+
+for line in fileinput.input():
+    try:
+        print process_line(line)
+    except Exception as ex:
+        print >> sys.stderr, "Exception processing: "
+        print >> sys.stderr, line
+        traceback.print_exc(file=sys.stderr)
+
+dump_nodes()
+
+# dump_tasks()

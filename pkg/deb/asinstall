@@ -1,0 +1,66 @@
+#!/bin/bash
+# Install Aerospike server and tools on Debian6/Debian7/Ubuntu12.  
+# This script must be run as root or sudo.
+
+#------------------
+# Verify User
+#------------------
+
+if [ $EUID -ne 0 ]
+then
+	echo "This script requires root or sudo privileges."
+	exit 1
+fi
+
+#---------------
+# Check argparse
+#---------------
+fn=/tmp/pkgexists
+
+cat <<EOF >$fn
+try:
+	import argparse
+	print(1)
+except:
+	print(0)
+EOF
+
+has_argparse=`python $fn`
+rm $fn
+
+if [ "$has_argparse" = "0" ]
+then
+	echo Installing python-argparse
+	apt-get -y install python-argparse
+fi
+
+#---------------
+# Install tools
+#---------------
+echo Installing tools
+
+# Use default arguments if none passed in.
+if [ $# -eq 0 ]
+then
+	echo dpkg -i aerospike-tools-*.deb
+	dpkg -i aerospike-tools-*.deb
+else
+	echo dpkg "$@" aerospike-tools-*.deb
+	dpkg "$@" aerospike-tools-*.deb
+fi
+
+#---------------
+# Install server
+#---------------
+echo Installing server
+
+# Use default arguments if none passed in.
+if [ $# -eq 0 ]
+then
+	echo dpkg -i aerospike-server-*.deb
+	dpkg -i aerospike-server-*.deb
+else
+	echo dpkg "$@" aerospike-server-*.deb
+	dpkg "$@" aerospike-server-*.deb
+fi
+

@@ -1,0 +1,4 @@
+ASD_CONFIG_FILE=/etc/aerospike/aerospike.conf
+
+# Uncomment to start with cold start
+#ASD_COLDSTART="--cold-start"

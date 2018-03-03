@@ -1,0 +1,2 @@
+[Service]
+Environment="ASD_OPTIONS=--cold-start"

@@ -1,0 +1,1 @@
+d /run/aerospike 0755 aerospike aerospike -

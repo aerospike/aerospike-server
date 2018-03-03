@@ -1,0 +1,34 @@
+.TH "aerospike destroy" 1 "1 APRIL 2014" "aerospike destroy" "aerospike manual" 
+
+.SH NAME
+
+aerospike destroy \- destroy aerospike home directory daemon
+
+.SH SYNOPSIS
+
+aerospike destroy [--home PATH]
+
+.SH DESCRIPTION
+
+.PP 
+Destroy the home directory for aerospike. This will remove all directories which were created by the `init` command.
+
+To override the home directory, specify the `--home PATH` option.
+
+.SH OPTIONS
+
+.IP "--home PATH"
+
+The directory to use as the aerospike home directory. 
+
+.SH EXAMPLES
+
+.HP
+To destroy aerospike running in the current directory:
+
+aerospike destroy
+
+.HP 
+To destroy aerospike running a different home directory, such as '/usr/share/aerospike':
+
+aerospike destroy --home /usr/share/aerospike

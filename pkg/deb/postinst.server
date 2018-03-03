@@ -1,0 +1,31 @@
+#!/bin/sh
+
+set -e
+
+case "$1" in
+  configure)
+
+  # create aerospike group if it isn't already there
+  if ! getent group aerospike >/dev/null; then
+    groupadd -r aerospike
+  fi
+
+  # create aerospike user if it isn't already there
+  if ! getent passwd aerospike >/dev/null; then
+    useradd -r -d /opt/aerospike -c 'Aerospike server' -g aerospike -s /sbin/nologin aerospike
+  fi
+
+  for dir in /opt/aerospike /var/log/aerospike /var/run/aerospike ; do
+    if [ -d $dir ]; then
+      chown -R aerospike:aerospike $dir
+    fi
+  done
+
+  if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null 2>&1 || true
+  fi
+
+  ;;
+esac
+
+exit 0

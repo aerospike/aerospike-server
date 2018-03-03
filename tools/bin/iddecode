@@ -1,0 +1,76 @@
+#!/usr/bin/python
+#
+#    File:   iddecode
+#
+#    Description:
+#       Decode an Aerospike node ID by default into the MAC address and fabric TCP port:
+#
+#             MAC address @ fabric TCP port
+#
+#       The "-ras" option decodes it as a static Rack Aware format node ID:
+#
+#             group ID + node ID @ fabric TCP port
+#
+#       The "-rad" option decodes it as a dynamic Rack Aware format node ID:
+#
+#             group ID + IP address @ fabric TCP port
+#
+
+import sys
+
+rack_aware = False
+
+def usage():
+   print 'Usage: ' + sys.argv[0] + ' [-ra{s,d}] <NodeId>'
+   print '  Decode Aerospike server <NodeId>.'
+   print '  Use {static,dynamic} Rack Aware interpretation if the "-ra{s,d}" option is supplied.'
+   exit(-1)
+
+def decode_ip_addr(ipaddr):
+   d = ipaddr & 0xff
+   ipaddr >>= 8
+   c = ipaddr & 0xff
+   ipaddr >>= 8
+   b = ipaddr & 0xff
+   ipaddr >>= 8
+   a = ipaddr & 0xff
+   return str(a) + "." + str(b) + "." + str(c) + "." + str(d)
+
+if len(sys.argv) < 2 or len(sys.argv) > 3:
+   usage()
+
+id_pos = 1
+if len(sys.argv) == 3:
+   if sys.argv[1][0:3] == '-ra':
+      if sys.argv[1][3:4] == 'd':
+        rack_aware = 'dynamic'
+      else:
+        rack_aware = 'static'
+      id_pos += 1
+   else:
+      usage()
+
+rid = sys.argv[id_pos]
+l = 16 - len(rid)
+nid = '0' * l + rid
+port = int(nid[0:4], 16)
+
+print("Aerospike Node ID: " + rid + " ="),
+
+if rack_aware:
+   group_str = nid[4:8]
+   group_id = int(group_str, 16)
+   node_str = nid[8:17]
+   node_id = int(node_str, 16)
+   if rack_aware == 'dynamic':
+     node_id_str = decode_ip_addr(node_id)
+   else:
+     node_id_str = str(node_id)
+   print("Group ID: " + str(group_id) + " (0x" + group_str + ") + Node ID: " + node_id_str + " (0x" + node_str + ")"),
+else:
+   MAC = nid[14:16]
+   for i in xrange(12,3,-2):
+      MAC = MAC + ':' + nid[i:i+2]
+   print(MAC),
+
+print("@ " + str(port))

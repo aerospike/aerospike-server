@@ -1,0 +1,1 @@
+%config(noreplace) /etc/aerospike/telemetry.conf

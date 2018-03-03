@@ -1,0 +1,5 @@
+%files server-@EDITION@
+%defattr(-,root,root)
+/usr/bin/asd
+/usr/bin/asmigrate2to3
+/usr/bin/asfixownership

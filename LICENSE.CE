@@ -1,0 +1,25 @@
+================================================================================
+
+AEROSPIKE SERVER LICENSE
+
+The Aerospike Server Community Edition is made available under the terms of
+the GNU Affero General Public License version 3 (AGPLv3), as stated in the
+file `LICENSE-AGPL`.
+
+Individual files may be made available under their own specific license, 
+all compatible with AGPLv3. Please see individual files for details.
+
+================================================================================
+
+AEROSPIKE MODULE LICENSE
+
+The following directories and their subdirectories thereof are made available 
+under the terms of the Apache License, version 2.0, as stated in the file
+`LICENSE-APACHE`, or a compatible license stated in the file itself. Please
+see individual files for details.
+
+  - modules/common
+  - modules/lua-core
+  - modules/mod-lua
+  - modules/telemetry
+

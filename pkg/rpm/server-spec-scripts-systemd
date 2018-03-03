@@ -1,0 +1,4 @@
+%post server-@EDITION@
+/bin/systemctl --system daemon-reload &> /dev/null || :
+%postun server-@EDITION@
+/bin/systemctl --system daemon-reload &> /dev/null || :

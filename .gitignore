@@ -1,0 +1,20 @@
+.DS_Store
+.cproject
+.project
+.settings
+/vg.log
+TAGS
+run
+target
+
+# emacs backup / temp files
+*~
+\#*\#
+.\#*
+
+# TLS credentials
+key.pem
+cert.pem
+chain.pem
+cacert.pem
+cbl.txt

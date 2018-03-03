@@ -1,0 +1,66 @@
+#!/bin/bash
+# Install Aerospike server and tools on RHEL/Fedora/Centos 6.  
+# This script must be run as root or sudo.
+
+#------------------
+# Verify User
+#------------------
+
+if [ $EUID -ne 0 ]
+then
+	echo "This script requires root or sudo privileges."
+	exit 1
+fi
+
+#---------------
+# Check argparse
+#---------------
+fn=/tmp/pkgexists
+
+cat <<EOF >$fn
+try:
+	import argparse
+	print(1)
+except:
+	print(0)
+EOF
+
+has_argparse=`python $fn`
+rm $fn
+
+if [ "$has_argparse" = "0" ]
+then
+	echo Installing python-argparse
+	rpm -Uvh python-argparse-1.2.1-2.el6.noarch.rpm
+fi
+
+#---------------
+# Install tools
+#---------------
+echo Installing tools
+
+# Use default arguments if none passed in.
+if [ $# -eq 0 ]
+then
+	echo rpm -Uvh aerospike-tools-*.rpm
+	rpm -Uvh aerospike-tools-*.rpm
+else
+	echo rpm "$@" aerospike-tools-*.rpm
+	rpm "$@" aerospike-tools-*.rpm
+fi
+
+#---------------
+# Install server
+#---------------
+echo Installing server
+
+# Use default arguments if none passed in.
+if [ $# -eq 0 ]
+then
+	echo rpm -Uvh aerospike-server-*.rpm
+	rpm -Uvh aerospike-server-*.rpm
+else
+	echo rpm "$@" aerospike-server-*.rpm
+	rpm "$@" aerospike-server-*.rpm
+fi
+

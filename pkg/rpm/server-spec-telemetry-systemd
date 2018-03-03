@@ -1,0 +1,2 @@
+/usr/lib/systemd/system/aerospike_telemetry.service
+%config(noreplace) /etc/sysconfig/aerospike_telemetry

@@ -1,0 +1,8 @@
+/etc/systemd/system/aerospike.service.d/aerospike.conf
+/etc/systemd/system/aerospike.service.d/aerospike.conf.coldstart
+/etc/systemd/system/aerospike.service.d/aerospike.conf.default
+/usr/bin/asd-coldstart
+/usr/bin/asd-systemd-helper
+/usr/lib/systemd/system/aerospike.service
+%config /etc/tmpfiles.d/aerospike.conf
+%config(noreplace) /etc/sysconfig/aerospike

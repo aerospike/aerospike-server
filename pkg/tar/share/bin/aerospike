@@ -1,0 +1,224 @@
+#!/bin/bash
+################################################################################
+#
+# Run Script for Aerospike
+#
+################################################################################
+
+SCRIPT_PATH=$0
+SCRIPT_NAME=$(basename $SCRIPT_PATH)
+SCRIPT_HOME=$(cd $(dirname $SCRIPT_PATH)/..; pwd)
+SCRIPT_BIN=${SCRIPT_HOME}/bin
+SCRIPT_LIB=${SCRIPT_HOME}/lib
+SCRIPT_LIBEXEC=${SCRIPT_HOME}/libexec
+SCRIPT_MAN=${SCRIPT_HOME}/man
+
+if [ ! AEROSPIKE_DAEMON ]; then
+  AEROSPIKE_DAEMON=${SCRIPT_BIN}/asd
+fi
+AEROSPIKE_HOME=$(pwd)
+
+DEBUG=0
+
+################################################################################
+#
+# FUNCTIONS
+#
+################################################################################
+
+print() {
+  printf "$1\n"
+}
+
+debug() {
+  [ $DEBUG == 1 ] && print "$(tput setaf 0)$(tput bold)debug:$(tput sgr0) $1"
+}
+
+info() {
+  print "$(tput setaf 4)$(tput bold)info:$(tput sgr0) $1"
+}
+
+warning() {
+  print "$(tput setaf 3)$(tput bold)warning:$(tput sgr0) $1" >&2
+}
+
+error() {
+  print "$(tput setaf 1)$(tput bold)error:$(tput sgr0) $1"
+}
+
+# try an operation and log the result
+try() {
+  local cmd="$1"
+  local msg="$2"
+  
+  if [[ -z $msg ]]; then
+    msg="$cmd"
+  fi
+  
+  rc=0
+  debug "$msg"
+  if [ $DEBUG ] && [ $DEBUG -gt 0 ]; then
+    eval "$cmd"
+    rc=$?
+  else
+    eval "$cmd" &>/dev/null
+    rc=$?
+  fi
+
+  if [[ $rc -eq 0 ]]; then
+    debug "$msg"
+  else
+    error "$msg"
+  fi
+
+  return $rc
+}
+
+default_parseopt() {
+  case $1 in
+    "--debug" )
+      DEBUG=1
+      debug "DEBUG MODE"
+      return 1
+      ;;
+    "--help" )
+      help
+      exit 0
+      ;;
+    "--home" )
+      if [ -z $2 ]; then
+        error "--home requires a PATH."
+        exit 1
+      fi
+      if [ ! -d $2 ]; then
+        error "--home requires a valid PATH: $2"
+        exit 1
+      fi
+      AEROSPIKE_HOME=$(cd $2; pwd)
+      return 2
+      ;;
+    * )
+      error "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+}
+
+parseopt() {
+  default_parseopt $*
+  return $?
+}
+
+parseopts() {
+  while (( "$#" )); do
+    case $1 in
+      "--"* | "-"* )
+        parseopt $*
+        shift $?
+        ;;
+
+      * )
+        COMMAND=$1
+        debug "running ${COMMAND}"
+        if [ ! ${COMMAND} ]; then
+          error "Command is not specified."
+          usage >&2
+          exit 1
+        elif [ ! -f ${SCRIPT_LIBEXEC}/aerospike-${COMMAND} ]; then
+          error "'$COMMAND' is not a valid command."
+          usage >&2
+          exit 1
+        else
+          source ${SCRIPT_LIBEXEC}/aerospike-${COMMAND}
+        fi
+        shift
+        ;;
+
+    esac
+  done
+}
+
+process_running() {
+  debug "process running"
+  return 0
+}
+
+process_stopped() {
+  debug "process stopped"
+  return 0
+}
+
+process_died() {
+  debug "process died"
+  return 0
+}
+
+process_check() {
+  local pid_file=${AEROSPIKE_HOME}/var/run/aerospike.pid
+  if [ -f ${pid_file} ]; then
+    debug "${pid_file} exists."
+    pid=$(cat ${pid_file})
+    debug "${pid_file} => ${pid}"
+    pline=$(ps -p $pid -o "command=")
+    if [ $? -eq 0 ]; then
+      debug "pid ${pid} found: ${pline}"
+      if [[ "${pline}" == *${AEROSPIKE_HOME}/etc/aerospike.conf* ]]; then
+        debug "aerospike is running as ${pid}"
+        process_running ${pid} ${pid_file}
+        return $?
+      else
+        debug "pid ${pid} does not match expected command."
+        process_died ${pid} ${pid_file}
+        return $?
+      fi
+    else
+      debug "pid ${pid} not found"
+      process_died ${pid} ${pid_file}
+      return $?
+    fi
+  else
+    process_stopped
+    return $?
+  fi
+}
+
+usage() {
+  #      |--------------------------------------------------------------------------------|
+  print ""
+  print "usage: aerospike COMMAND [OPTIONS]"
+  print
+  print "$(tput bold)COMMANDS$(tput sgr0)"
+  for script in ${SCRIPT_LIBEXEC}/aerospike-*; do
+    s=$(basename ${script})
+    s=${s#aerospike-}
+    s=${s%.sh}
+    print "   $s"
+  done
+  print 
+  print "Use 'aerospike COMMAND --help' for command specific help." 
+  print
+  #     |--------------------------------------------------------------------------------|
+}
+
+help() {
+  if [ -f ${SCRIPT_MAN}/aerospike-${COMMAND}.man ]; then
+    man ${SCRIPT_MAN}/aerospike-${COMMAND}.man
+  elif [ -z ${COMMAND} ]; then
+    usage
+  else
+    print "No help available for '${COMMAND}'"
+  fi
+}
+
+################################################################################
+#
+# MAIN
+#
+################################################################################
+
+parseopts $*
+if [ ! ${COMMAND} ]; then
+  usage
+else
+  main
+fi

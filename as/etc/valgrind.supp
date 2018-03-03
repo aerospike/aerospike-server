@@ -1,0 +1,190 @@
+# I hope one can put comments in here
+# this supression file allows backtraces under  valgrind
+# Put the following block in `~/valgrind.supp`, then run `valgrind --suppressions=/home/bob/valgrind.supp` 
+# (note that `valgrind` doesn't understand `~` in pathnames).
+
+# malloc known supressions
+# 
+{
+   alloc-namespaces
+   Memcheck:Leak
+   fun:malloc
+   fun:cf_malloc_at
+   fun:cf_rc_alloc_at
+   fun:as_namespace_create
+   fun:as_config_init
+   fun:main
+}
+
+{
+   index-trees
+   Memcheck:Leak
+   fun:malloc
+   fun:cf_malloc_at
+   fun:cf_rc_alloc_at
+   fun:as_index_tree_create
+   fun:as_partition_reinit
+   fun:as_partition_balance_new
+   fun:as_paxos_init
+   fun:main
+}
+
+##
+# we always send uninit data to the network, so it says, and it's always ok
+#
+{
+   SendToUninit-xxx
+   Memcheck:Param
+   socketcall.sendto(msg)
+   fun:send
+   fun:as_msg_send_reply
+   fun:single_transaction_response
+   fun:send_response
+   fun:send_success
+   fun:send_result
+   fun:udf_apply_record
+   fun:udf_rw_local
+   fun:internal_rw_start
+   fun:as_rw_start
+   fun:as_write_start
+   fun:thr_tsvc
+}
+
+{
+   SendToUninit-222
+   Memcheck:Param
+   socketcall.sendto(msg)
+   fun:send
+   fun:as_msg_send_reply
+   fun:single_transaction_response
+   fun:thr_tsvc_read
+   fun:rw_complete
+   fun:internal_rw_start
+   fun:as_rw_start
+   fun:thr_tsvc
+   fun:start_thread
+   obj:*
+}
+{
+   SendToUninit-333
+   Memcheck:Param
+   socketcall.sendto(msg)
+   fun:send
+   fun:as_msg_send_reply
+   fun:single_transaction_response
+   fun:send_response.isra.3.constprop.4
+   fun:udf_apply_record
+   fun:udf_rw_local
+   fun:internal_rw_start
+   fun:as_rw_start
+   fun:thr_tsvc
+   fun:start_thread
+}
+
+{
+   udf_write_1
+   Memcheck:Param
+   socketcall.sendto(msg)
+   fun:send
+   fun:as_msg_send_reply
+   fun:single_transaction_response
+   fun:send_response
+   fun:udf_apply_record
+   fun:udf_rw_local
+   fun:internal_rw_start
+   fun:as_rw_start
+   fun:thr_tsvc
+   fun:start_thread
+   obj:*
+}
+
+{
+   udf_write_2
+   Memcheck:Param
+   socketcall.sendto(msg)
+   fun:send
+   fun:as_msg_send_reply
+   fun:thr_tsvc_read
+   fun:rw_complete
+   fun:internal_rw_start
+   fun:as_rw_start
+   fun:thr_tsvc
+   fun:start_thread
+   obj:*
+}
+
+{
+   udf_write_3
+   Memcheck:Param
+   socketcall.sendto(msg)
+   fun:send
+   fun:as_msg_send_reply
+   fun:single_transaction_response
+   fun:send_response
+   fun:send_result
+   fun:udf_rw_local
+   fun:internal_rw_start
+   fun:as_rw_start
+   fun:thr_tsvc
+   fun:start_thread
+   obj:*
+}
+
+
+#
+# known issues  - reasonably well investigated
+#
+
+{
+   libc-execinfo-backtrace
+   Memcheck:Addr4
+   obj:/lib/tls/i686/cmov/libc-2.7.so
+   obj:/lib/ld-2.7.so
+   fun:__libc_dlopen_mode
+   obj:/lib/tls/i686/cmov/libc-2.7.so
+   fun:pthread_once
+   fun:cf_fault_event
+}
+
+{
+   storage-files-write
+   Memcheck:Param
+   write(buf)
+   obj:/usr/lib/debug/libpthread-2.8.90.so
+   fun:write_bins
+   fun:as_storage_record_close_files
+   fun:as_storage_record_close
+   fun:write_local
+   fun:as_write_start
+   fun:thr_tsvc
+   fun:start_thread
+   fun:clone
+   obj:*
+}
+
+{
+   storage-header-write
+   Memcheck:Param
+   write(buf)
+   obj:/lib64/libpthread-2.11.1.so
+   fun:as_storage_write_header
+   fun:as_storage_info_flush_ssd
+   fun:init_ssd_devices
+   fun:as_storage_namespace_init_ssd
+   fun:as_storage_namespace_init
+   fun:main
+   obj:*
+}
+
+{
+   uninitalized_fabric_message
+   Memcheck:Param
+   socketcall.sendto(msg)
+   fun:send
+   fun:fabric_process_writable
+   fun:fabric_worker_fn
+   fun:start_thread
+   fun:clone
+}
+
+

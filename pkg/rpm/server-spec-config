@@ -1,0 +1,10 @@
+%defattr(-,aerospike,aerospike)
+/opt/aerospike
+%defattr(-,root,root)
+%config(noreplace) /etc/aerospike/aerospike.conf
+%dir /etc/aerospike
+/etc/aerospike/irqbalance-ban.sh
+%dir /etc/aerospike/sample
+/etc/aerospike/sample/README.md
+/etc/aerospike/sample/aerospike_ssd.conf
+/etc/aerospike/sample/aerospike_mesh.conf

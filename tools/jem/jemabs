@@ -1,0 +1,40 @@
+#!/usr/bin/env python
+#
+#    File:   jemabs
+#
+#    Description:
+#       Compute the JEMalloc arenas with the greatest absolute size over time.
+#
+#    Usage:
+#       prompt% jemabs {{<JEMDataFile:Default:'jemdata'>} <ThreholdMB:Default=200> <StartIteration:Default=0> <EndIteration:Default=<Last>>}
+#
+
+from jemdefs import *
+
+pkg = sys.argv.pop(1) if len(sys.argv) > 1 and not sys.argv[1].isdigit() else 'jemdata'
+__import__(pkg, fromlist=['load']).load(arenas, total, active, mapped)
+
+def printabs(thresh_mb = 200, start = 0, end = len(table)):
+    thresh = thresh_mb * one_meg
+    for i in xrange(start, end):
+        print 'Absolutes from iteration # ' + str(i) + ' above ' + readable(thresh) + ':'
+        for arena in sorted(table[i].keys()):
+            if arena is 'sum':
+                continue
+            try:
+                entry  = table[i][arena]
+                total  = float(entry['total'])
+                active = float(entry['active'])
+                mapped = float(entry['mapped'])
+            except Exception as e:
+                print 'caught exception', e, type(e), 'at iteration =', i
+                return
+
+            if (abs(total) >= thresh):
+                print 'arena: ', arena, ' total: ', readable(total)
+            if (abs(active) >= thresh):
+                print 'arena: ', arena, ' active: ', readable(active)
+            if (abs(mapped) >= thresh):
+                print 'arena: ', arena, ' mapped: ', readable(mapped)
+
+printabs(*[int(x) for x in sys.argv[1:]])

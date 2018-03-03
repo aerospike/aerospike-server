@@ -1,0 +1,121 @@
+#!/usr/bin/env python2
+
+from __future__ import print_function
+from sys import stdin, stdout, stderr
+from optparse import OptionParser
+from subprocess import Popen, PIPE, CalledProcessError
+from re import match
+
+addr_map = {}
+
+def check_output(args):
+	proc = Popen(args, stdout = PIPE)
+	out, _ = proc.communicate()
+	res = proc.poll()
+
+	if res != 0:
+		raise CalledProcessError(res, args[0])
+
+	return out
+
+def map_address(addr, asd_path):
+	if not addr in addr_map:
+		try:
+			resolv = check_output(["addr2line", "-e", asd_path, addr])
+
+		except OSError:
+			print("The addr2line command is not available. You might have to install the binutils package.", file = stderr)
+			raise SystemExit(1)
+
+		except CalledProcessError:
+			print("The addr2line command failed.", file = stderr)
+			raise SystemExit(1)
+
+		addr_map[addr] = resolv.rstrip()
+
+	return addr_map[addr]
+
+def parse_mem(in_path):
+	time = None
+	aggr = {}
+
+	try:
+		f = stdin if in_path == '-' else open(in_path, "r")
+		for line in f:
+			line = line.rstrip()
+			m = match("^-+ ([^-]+) -+$", line)
+
+			if m:
+				new_time = m.group(1)
+				print("Processing memory dump of {0}".format(new_time), file = stderr)
+
+				if time:
+					print("More than one memory dump in {0}".format(in_path), file = stderr)
+					raise SystemExit(1)
+
+				time = new_time
+				continue
+
+			m = match("^0x([0-9a-f]+) +([0-9]+) +0x([0-9a-f]+) +0x([0-9a-f]+)$", line)
+
+			if m:
+				(addr_s, tid_s, size_hi_s, size_lo_s) = m.group(1, 2, 3, 4)
+
+				addr = int(addr_s, 16)
+				tid = int(tid_s, 16)
+				size_hi = int(size_hi_s, 16)
+				size_lo = int(size_lo_s, 16)
+
+				size = size_hi * 2 ** 64 + size_lo
+
+				if (size >= 2 ** 127):
+					size -= 2 ** 128
+
+				if not addr in aggr:
+					aggr[addr] = 0
+
+				aggr[addr] += size
+				continue
+
+			print("Invalid line in {0}: {1}".format(in_path, line), file = stderr)
+			raise SystemExit(1)
+
+	except IOError:
+		print("Cannot open file {0}".format(in_path), file = stderr)
+		raise SystemExit(1)
+
+	return aggr
+
+parser = OptionParser()
+parser.add_option("-i", "--in", dest = "in_path", help = "read memory accounting info from FILE; defaults to \"-\", which means stdin", metavar = "FILE")
+parser.add_option("-o", "--out", dest = "out_path", help = "write aggregated memory accounting info to FILE; defaults to \"-\", which means stdout", metavar = "FILE")
+parser.add_option("-a", "--asd", dest = "asd_path", help = "read line number information from Aerospike server executable ASD; defaults to /usr/bin/asd", metavar = "ASD")
+
+(opts, args) = parser.parse_args()
+
+if not opts.asd_path:
+	opts.asd_path = "/usr/bin/asd"
+
+if not opts.in_path:
+	opts.in_path = "-"
+
+if not opts.out_path:
+	opts.out_path = "-"
+
+aggr = parse_mem(opts.in_path)
+
+try:
+	f = stdout if opts.out_path == '-' else open(opts.out_path, "w")
+
+	for addr in sorted(aggr):
+		addr_s = "0x{0:x}".format(addr)
+		site = map_address(addr_s, opts.asd_path)
+
+		if aggr[addr] > 0:
+			print("{0}|{1}|{2}".format(site, addr_s, aggr[addr]), file = f)
+
+except IOError:
+	print("Cannot open file {0}".format(opts.out_path), file = stderr)
+	raise SystemExit(1)
+
+raise SystemExit(0)

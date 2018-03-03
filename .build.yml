@@ -1,0 +1,41 @@
+name: aerospike-server
+
+environment:
+  EEREPO: modules/ee
+
+dependency:
+  - url: git@github.com:citrusleaf/aerospike-server-enterprise
+    dir: $EEREPO
+
+container:
+  - base:
+      - docker.qe.aerospike.com/build/aerospike-server:centos-6
+      - docker.qe.aerospike.com/build/aerospike-server:centos-7
+      - docker.qe.aerospike.com/build/aerospike-server:debian-7
+      - docker.qe.aerospike.com/build/aerospike-server:debian-8
+      - docker.qe.aerospike.com/build/aerospike-server:ubuntu-12.04
+      - docker.qe.aerospike.com/build/aerospike-server:ubuntu-14.04
+      - docker.qe.aerospike.com/build/aerospike-server:ubuntu-16.04
+
+build:
+  - name: community
+    environment:
+      EEREPO:
+    script:
+      - make
+      - make $PKG
+      - make tar
+      - make source
+      - cp -p modules/telemetry/{README,TELEMETRY}.md
+    artifact:
+      - pkg/packages/*
+      - modules/telemetry/TELEMETRY.md
+  - name: enterprise
+    environment:
+      EEREPO: /work/source/$EEREPO
+    script:
+      - make +ee
+      - make $PKG+ee
+      - make source+ee
+    artifact:
+      - pkg/packages/*

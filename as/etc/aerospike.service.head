@@ -1,0 +1,14 @@
+[Unit]
+Description=Aerospike Server
+After=network.target
+Wants=network.target
+
+[Service]
+LimitNOFILE=100000
+TimeoutSec=15
+User=root
+Group=root
+EnvironmentFile=/etc/sysconfig/aerospike
+PermissionsStartOnly=True
+ExecStartPre=/usr/bin/asd-systemd-helper
+ExecStart=/usr/bin/asd $ASD_OPTIONS --config-file $ASD_CONFIG_FILE --fgdaemon

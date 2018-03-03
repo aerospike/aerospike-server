@@ -1,0 +1,34 @@
+.TH "aerospike restart" 1 "1 APRIL 2014" "aerospike restart" "aerospike manual" 
+
+.SH NAME
+
+aerospike restart \- restart aerospike server daemon
+
+.SH SYNOPSIS
+
+aerospike restart [--home PATH]
+
+.SH DESCRIPTION
+
+.PP 
+Restart the aerospike server daemon. The program will assume the current directory is the aerospike home directory. 
+
+To override the home directory, specify the `--home PATH` option.
+
+.SH OPTIONS
+
+.IP "--home PATH"
+
+The directory to use as the aerospike home directory. 
+
+.SH EXAMPLES
+
+.HP
+To restart aerospike running in the current directory:
+
+aerospike restart
+
+.HP 
+To restart aerospike running a different home directory, such as '/usr/share/aerospike':
+
+aerospike restart --home /usr/share/aerospike

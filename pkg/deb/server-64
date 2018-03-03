@@ -1,0 +1,9 @@
+Package: aerospike-server-@EDITION@
+Version: @VERSION@-1
+Section: Databases
+Priority: optional
+Architecture: amd64
+Depends: libc6 (>= 2.7)@DEPS@
+Maintainer: Aerospike, Inc. <support@aerospike.com>
+Description: The Aerospike distributed datastore allows fully scalable and reliable data storage with elastic server properties.
+Installed-Size: @SIZE@

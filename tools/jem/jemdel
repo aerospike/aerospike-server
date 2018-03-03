@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+#
+#    File:   jemdel
+#
+#    Description:
+#       Compute the JEMalloc arenas with the greatest change ("delta") over time.
+#
+#    Usage:
+#       prompt% jemdel {{<JEMDataFile:Default:'jemdata'>} <ThreholdMB:Default=200> <StartIteration:Default=0> <EndIteration:Default=<Last>>}
+#
+
+from jemdefs import *
+
+pkg = sys.argv.pop(1) if len(sys.argv) > 1 and not sys.argv[1].isdigit() else 'jemdata'
+__import__(pkg, fromlist=['load']).load(arenas, total, active, mapped)
+
+def printdelta(thresh_mb = 200, first = 0, start = 1, end = len(table)):
+    thresh = thresh_mb * one_meg
+    for last in xrange(start, end):
+        print 'Deltas from iteration # ' + str(first) + ' to ' + str(last) + ' above ' + readable(thresh) + ':'
+        for arena in sorted(table[first].keys()):
+            if arena is 'sum':
+                continue
+            try:
+                entry   = table[first][arena]
+                total0  = entry['total']
+                active0 = entry['active']
+                mapped0 = entry['mapped']
+            except Exception as e:
+                print 'caught exception', e, type(e), 'at iteration =', i
+
+            entry   = table[last][arena]
+            total1  = entry['total']
+            active1 = entry['active']
+            mapped1 = entry['mapped']
+
+            dt = float(total1 - total0)
+            if (abs(dt) >= thresh):
+                print 'arena: ', arena, ' delta total: ', readable(dt)
+
+            dm = float(mapped1 - mapped0)
+            if (abs(dm) >= thresh):
+                print 'arena: ', arena, ' delta mapped: ', readable(dm)
+
+printdelta(*[int(x) for x in sys.argv[1:]])

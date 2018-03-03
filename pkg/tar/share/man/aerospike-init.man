@@ -1,0 +1,77 @@
+.TH "aerospike init" 1 "1 APRIL 2014" "aerospike init" "aerospike manual" 
+
+.SH NAME
+
+aerospike init \- initialize aerospike home directory
+
+.SH SYNOPSIS
+
+aerospike init [OPTIONS]
+
+.SH DESCRIPTION
+
+.PP 
+Initialize the home directory for aerospike. This will populate the directory with default configurations, files and directories.
+
+.SH OPTIONS
+
+.IP "--home PATH"
+
+The directory to initialize as the aerospike home directory. 
+
+.IP "--user UID"
+
+The user that will own the home directory and be used for running asd.
+
+.IP "--group GID"
+
+The group that will own the home directory and be used for running asd.
+
+.IP "--instance INT"
+
+Each instance of asd on a machine must have a unique instance id. Values can be between 0 and 15.
+
+.IP "--service-addr,-h IPADDR"
+
+The address asd will bind to. If not specified, then it will default to 'any'.
+
+.IP "--service-port,-p INT"
+
+The port asd will bind to.  If not specified, then it will default to the 3000.
+
+.IP "--multicast-addr IPADDR"
+
+The address asd will use for communicating heartbeat (status) with other nodes in a cluster.
+
+.IP "--multicast-port INT"
+
+The port asd will use for communicating heartbeat (status) with other nodes in a cluster.
+
+.IP "--fabric-port INT"
+
+The port asd will use for communicating with other nodes in a cluster. If not specified, then it will default to the `service-port + 1`.
+
+.IP "--info-port INT"
+
+The port asd will use for servicing info requests. If not specified, then it will default to the `service-port + 3`.
+
+.SH EXAMPLES
+
+
+.HP
+To initialize the current directory:
+
+aerospike init
+
+.HP 
+To initialize a different directory, such as '/usr/share/aerospike':
+
+aerospike init --home /usr/share/aerospike
+
+.HP 
+To initialize two instances, you need to assign each a unique instance identifier and port number:
+
+aerospike init --home ~/aerospike1 --instance 1 -p 3000
+
+aerospike init --home ~/aerospike2 --instance 2 -p 3010
+

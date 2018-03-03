@@ -1,0 +1,13 @@
+#!/bin/bash
+
+ASD_DIR=/etc/systemd/system/aerospike.service.d
+AS_CONF=$ASD_DIR/aerospike.conf
+
+cp -pf $ASD_DIR/aerospike.conf.coldstart $AS_CONF
+systemctl daemon-reload
+
+echo "Cold Starting Aerospike"
+systemctl start aerospike
+
+cp -pf $ASD_DIR/aerospike.conf.default $AS_CONF
+systemctl daemon-reload

@@ -1,0 +1,4 @@
+#!/bin/bash
+SCRIPT_PATH=$0
+SCRIPT_HOME=$(cd $(dirname ${SCRIPT_PATH})/..; pwd)
+AEROSPIKE_DAEMON=${SCRIPT_HOME}/bin/asd ${SCRIPT_HOME}/share/bin/aerospike $@

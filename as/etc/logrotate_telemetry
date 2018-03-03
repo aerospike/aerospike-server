@@ -1,0 +1,12 @@
+/var/log/aerospike/telemetry.log {
+    daily
+    rotate 5
+    dateext
+    compress
+    olddir /var/log/aerospike
+    missingok
+    notifempty
+    postrotate
+        service aerospike_telemetry try-restart > /dev/null 2>&1 || true
+    endscript
+}

@@ -1,0 +1,16 @@
+# Aerospike Server
+# Makefile.targets
+#
+# Common Makefile targets, dependencies, and pattern-matching rules.
+#
+
+strip:	$(SERVER)
+	$(STRIP) $(SERVER) -o $(SERVER).stripped
+
+-include $(DEPENDENCIES)
+
+$(OBJECT_DIR)/%.o: %.c
+	$(CC) $(CFLAGS) $(DEF_FN) -o $@$(SUFFIX) -c $(INCLUDES) $(SRCDIR)$<
+
+$(OBJECT_DIR)/%.o: %.cc
+	$(CXX) $(CXXFLAGS) $(CFLAGS) $(DEF_FN) -o $@$(SUFFIX) -c $(INCLUDES) $(SRCDIR)$<

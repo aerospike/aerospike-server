@@ -1,0 +1,20 @@
+Name: aerospike
+Version: @VERSION@
+Release: 1%{?dist}
+Summary: The Aerospike Database
+License: Proprietary
+Group: Application
+BuildArch: x86_64
+Vendor: Aerospike, Inc.
+
+%description
+The Aerospike distributed datastore allows fully scalable
+and reliable data storage with elastic server properties.
+
+%define _topdir pkg/dist
+%define __spec_install_post /usr/lib/rpm/brp-compress
+%package server-@EDITION@
+Summary: Aerospike server
+Group: Applications
+%description server-@EDITION@
+This package contains all of the code for running the Aerospike server.
