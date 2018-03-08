@@ -4451,6 +4451,10 @@ cfg_add_storage_file(as_namespace* ns, char* file_name)
 			ns->storage_files[i] = file_name;
 			break;
 		}
+
+		if (strcmp(file_name, ns->storage_files[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage file %s", ns->name, file_name);
+		}
 	}
 
 	if (i == AS_STORAGE_MAX_FILES) {
@@ -4468,6 +4472,15 @@ cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name)
 			ns->storage_devices[i] = device_name;
 			ns->storage_shadows[i] = shadow_name;
 			break;
+		}
+
+		if (strcmp(device_name, ns->storage_devices[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage device %s", ns->name, device_name);
+		}
+
+		if (shadow_name && ns->storage_shadows[i] &&
+				strcmp(shadow_name, ns->storage_shadows[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage shadow device %s", ns->name, shadow_name);
 		}
 	}
 
