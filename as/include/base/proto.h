@@ -164,7 +164,7 @@ typedef struct as_proto_s {
 	uint8_t		version;
 	uint8_t		type;
 	uint64_t	sz: 48;
-	uint8_t		data[];
+	uint8_t		data[0];
 } __attribute__ ((__packed__)) as_proto;
 
 /*
@@ -176,7 +176,7 @@ typedef struct as_proto_s {
 typedef struct as_comp_proto_s {
 	as_proto    proto;     // Protocol header
 	uint64_t    org_sz;    // Original size of compressed data hold in 'data'
-	uint8_t data[];        // Compressed data
+	uint8_t data[0];        // Compressed data
 }  as_comp_proto;
 
 /* as_msg_field
@@ -209,7 +209,7 @@ typedef struct as_msg_field_s {
 	/* NB: field_sz is sizeof(type) + sizeof(data) */
 	uint32_t field_sz; // get the data size through the accessor function, don't worry, it's a small macro
 	uint8_t type;   // ordering matters :-( see as_transaction_prepare
-	uint8_t data[];
+	uint8_t data[0];
 } __attribute__((__packed__)) as_msg_field;
 
 // For as_transaction::field_types, a bit-field to mark which fields are in the
@@ -273,7 +273,7 @@ typedef struct as_msg_op_s {
 	uint8_t  particle_type;
 	uint8_t  version; // now unused
 	uint8_t  name_sz;
-	uint8_t	 name[]; // UTF-8
+	uint8_t	 name[0]; // UTF-8
 	// there's also a value here but you can't have two variable size arrays
 } __attribute__((__packed__)) as_msg_op;
 
@@ -319,7 +319,7 @@ typedef struct as_msg_s {
 	/*14 [x10] (22) */	uint32_t	transaction_ttl;
 	/*18 [x12] (26) */	uint16_t	n_fields;	// number of fields
 	/*20 [x14] (28) */	uint16_t	n_ops;		// number of operations
-	/*22 [x16] (30) */	uint8_t		data[];		// data contains first the fields, then the ops
+	/*22 [x16] (30) */	uint8_t		data[0];	// data contains first the fields, then the ops
 } __attribute__((__packed__)) as_msg;
 
 /* as_ms

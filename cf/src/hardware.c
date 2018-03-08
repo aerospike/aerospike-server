@@ -864,7 +864,7 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 			continue;
 		}
 
-		char path[100];
+		char path[500];
 		snprintf(path, sizeof(path), "/proc/%s/cmdline", ent.d_name);
 
 		limit = sizeof(cmd) - 1;

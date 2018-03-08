@@ -5367,7 +5367,7 @@ info_get_services_x(cf_shash *h, info_node_proj_fn proj, cf_dyn_buf *db, uint64_
 
 	cf_dyn_buf_append_char(db, '[');
 
-	char strip[7];
+	char strip[20];
 	snprintf(strip, sizeof(strip), ":%d", best_port);
 
 	services_printer sp = { .proj = proj, .db = db, .strip = strip, .since = since,

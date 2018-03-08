@@ -158,7 +158,7 @@ typedef enum {
 typedef struct as_particle_s {
 	uint8_t		metadata;		// used by the iparticle for is_integer and inuse, as well as version in multi bin mode only
 								// used by *particle for type
-	uint8_t		data[];
+	uint8_t		data[0];
 } __attribute__ ((__packed__)) as_particle;
 
 // Bit Flag constants used for the particle state value (4 bits, 16 values)
@@ -171,7 +171,7 @@ typedef struct as_particle_s {
 typedef struct as_particle_iparticle_s {
 	uint8_t		version: 4;		// now unused - and can't be used in single-bin config
 	uint8_t		state: 4;		// see AS_BIN_STATE_...
-	uint8_t		data[];
+	uint8_t		data[0];
 } __attribute__ ((__packed__)) as_particle_iparticle;
 
 /* Particle function declarations */
@@ -269,7 +269,7 @@ struct as_bin_s {
 // structs in memory, accessed via this struct.
 typedef struct as_bin_space_s {
 	uint16_t	n_bins;
-	as_bin		bins[];
+	as_bin		bins[0];
 } __attribute__ ((__packed__)) as_bin_space;
 
 // TODO - Do we really need to pad as_bin to 12 bytes for thread safety?
@@ -286,7 +286,7 @@ typedef struct as_rec_space_s {
 
 	// So far the key is the only extra record metadata we store in memory.
 	uint32_t		key_size;
-	uint8_t			key[];
+	uint8_t			key[0];
 } __attribute__ ((__packed__)) as_rec_space;
 
 // For copying as_bin structs without the last 3 bytes.
