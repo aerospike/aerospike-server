@@ -52,7 +52,7 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
 * The required CentOS 6/7 package to install is: `gcc-c++`.
 
-* The required Debian 7/8 and Ubuntu 10/12/14/16 package to install is: `g++`.
+* The required Debian 7/8/9 and Ubuntu 10/12/14/16 package to install is: `g++`.
 
 #### OpenSSL
 
@@ -62,7 +62,7 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 * The CentOS 6/7 OpenSSL packages to install are:  `openssl`,
 `openssl-devel`, `openssl-static`.
 
-* The Debian 7/8 and Ubuntu 10/12/14/16 OpenSSL packages to install are:
+* The Debian 7/8/9 and Ubuntu 10/12/14/16 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
 
 #### Lua 5.1
@@ -79,7 +79,7 @@ by the build environment.  In that case:
 	* The CentOS 6/7 Lua packages to install are:  `lua`,
 `lua-devel`, and `lua-static`.
 
-	* The Debian 7/8 and Ubuntu 10/12/14/16 Lua packages to install are:
+	* The Debian 7/8/9 and Ubuntu 10/12/14/16 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
