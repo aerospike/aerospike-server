@@ -237,7 +237,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_bool(db, "cluster_is_member", ! as_clustering_is_orphan()); // not in ticker
 	as_hb_info_duplicates_get(db); // not in ticker
 	info_append_uint32(db, "cluster_clock_skew_stop_writes_sec", clock_skew_stop_writes_sec()); // not in ticker
-	info_append_uint64(db, "cluster_clock_skew", as_skew_monitor_skew());
+	info_append_uint64(db, "cluster_clock_skew_ms", as_skew_monitor_skew());
 	as_skew_monitor_info(db);
 
 	info_append_uint64(db, "uptime", (cf_getms() - g_start_ms) / 1000); // not in ticker
