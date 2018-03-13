@@ -3762,7 +3762,6 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 		uint32_t items_count, cdt_result_data *result)
 {
 	define_order_index2(rm_ic, map->ele_count, 2 * items_count);
-	uint32_t rm_count = 0;
 
 	for (uint32_t i = 0; i < items_count; i++) {
 		cdt_payload key = {
@@ -3795,21 +3794,19 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 
 		order_index_set(&rm_ic, 2 * i, find_key.idx);
 		order_index_set(&rm_ic, (2 * i) + 1, count);
-		rm_count += count;
 	}
 
 	bool inverted = result_data_is_inverted(result);
 	bool need_mask = b || result_data_is_return_elements(result) ||
-			(inverted && result_data_is_return_index(result));
+			result->type == RESULT_TYPE_COUNT ||
+			(inverted && result->type != RESULT_TYPE_NONE);
 	cond_define_cdt_idx_mask(rm_mask, map->ele_count, need_mask);
 	uint32_t rm_sz = 0;
-
-	if (inverted) {
-		rm_count = map->ele_count - rm_count;
-	}
+	uint32_t rm_count = 0;
 
 	if (need_mask) {
 		cdt_idx_mask_set_by_irc(rm_mask, &rm_ic, NULL, inverted);
+		rm_count = cdt_idx_mask_bit_count(rm_mask, map->ele_count);
 	}
 
 	if (b) {
@@ -4049,7 +4046,7 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	uint32_t rm_count = 0;
+	uint32_t rc_count = 0;
 
 	for (uint32_t i = 0; i < items_count; i++) {
 		cdt_payload value = {
@@ -4074,22 +4071,20 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 
 		order_index_set(&rm_rc, 2 * i, rank);
 		order_index_set(&rm_rc, (2 * i) + 1, count);
-		rm_count += count;
+		rc_count += count;
 	}
 
 	bool inverted = result_data_is_inverted(result);
 	bool need_mask = b || result_data_is_return_elements(result) ||
-			(inverted && (result_data_is_return_index(result) ||
-					result_data_is_return_rank(result)));
+			result->type == RESULT_TYPE_COUNT ||
+			(inverted && result->type != RESULT_TYPE_NONE);
 	cond_define_cdt_idx_mask(rm_mask, map->ele_count, need_mask);
 	uint32_t rm_sz = 0;
-
-	if (inverted) {
-		rm_count = map->ele_count - rm_count;
-	}
+	uint32_t rm_count = 0;
 
 	if (need_mask) {
 		cdt_idx_mask_set_by_irc(rm_mask, &rm_rc, &map->value_idx, inverted);
+		rm_count = cdt_idx_mask_bit_count(rm_mask, map->ele_count);
 	}
 
 	if (b) {
@@ -4115,7 +4110,7 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 			}
 		}
 		else {
-			result_data_set_by_irc(result, &rm_rc, &map->value_idx, rm_count);
+			result_data_set_by_irc(result, &rm_rc, &map->value_idx, rc_count);
 		}
 		break;
 	}
@@ -4130,7 +4125,7 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 			}
 		}
 		else {
-			result_data_set_by_irc(result, &rm_rc, NULL, rm_count);
+			result_data_set_by_irc(result, &rm_rc, NULL, rc_count);
 		}
 		break;
 	case RESULT_TYPE_COUNT:

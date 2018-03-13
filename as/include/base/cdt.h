@@ -384,6 +384,7 @@ void cdt_idx_mask_set_by_irc(uint64_t *mask, const order_index *rankcount, const
 void cdt_idx_mask_invert(uint64_t *mask, uint32_t ele_count);
 
 uint64_t cdt_idx_mask_get(const uint64_t *mask, uint32_t idx);
+size_t cdt_idx_mask_bit_count(const uint64_t *mask, uint32_t ele_count);
 
 bool cdt_idx_mask_is_set(const uint64_t *mask, uint32_t idx);
 
