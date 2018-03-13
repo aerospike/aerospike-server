@@ -2090,8 +2090,13 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 {
 	cf_assert(result->is_multi, AS_PARTICLE, "not supported");
 
+	if (! list_full_offset_index_fill_all(list_full_offidx_p(list))) {
+		cf_warning(AS_PARTICLE, "packed_list_get_remove_all_by_value_list_ordered() invalid list");
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	define_order_index2(rm_rc, list->ele_count, 2 * items_count);
-	uint32_t rm_count = 0;
+	uint32_t rc_count = 0;
 
 	for (uint32_t i = 0; i < items_count; i++) {
 		cdt_payload value = { items_pk->buffer + items_pk->offset };
@@ -2115,28 +2120,19 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 
 		order_index_set(&rm_rc, 2 * i, rank);
 		order_index_set(&rm_rc, (2 * i) + 1, count);
-		rm_count += count;
+		rc_count += count;
 	}
 
-	bool inverted = result_data_is_inverted(result);
 	uint32_t rm_sz = 0;
-	bool need_mask = (b || (inverted &&
-			(result_data_is_return_elements(result) ||
-					result_data_is_return_rank(result) ||
-					result_data_is_return_index(result))));
+	uint32_t rm_count = 0;
+	bool inverted = result_data_is_inverted(result);
+	bool need_mask = (b || result->type == RESULT_TYPE_COUNT ||
+			(inverted && result->type != RESULT_TYPE_NONE));
 	cond_define_cdt_idx_mask(rm_mask, list->ele_count, need_mask);
-
-	if (inverted) {
-		if (! list_full_offset_index_fill_all(list_full_offidx_p(list))) {
-			cf_warning(AS_PARTICLE, "packed_list_get_remove_all_by_value_list_ordered() invalid list");
-			return -AS_PROTO_RESULT_FAIL_PARAMETER;
-		}
-
-		rm_count = list->ele_count - rm_count;
-	}
 
 	if (need_mask) {
 		cdt_idx_mask_set_by_irc(rm_mask, &rm_rc, NULL, inverted);
+		rm_count = cdt_idx_mask_bit_count(rm_mask, list->ele_count);
 	}
 
 	if (b) {
@@ -2174,7 +2170,7 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 					list->ele_count);
 		}
 		else {
-			result_data_set_by_irc(result, &rm_rc, NULL, rm_count);
+			result_data_set_by_irc(result, &rm_rc, NULL, rc_count);
 		}
 		break;
 	case RESULT_TYPE_VALUE: {

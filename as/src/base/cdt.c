@@ -2341,6 +2341,27 @@ cdt_idx_mask_get(const uint64_t *mask, uint32_t idx)
 	return mask[idx / 64];
 }
 
+size_t
+cdt_idx_mask_bit_count(const uint64_t *mask, uint32_t ele_count)
+{
+	size_t mask_count = cdt_idx_mask_count(ele_count);
+
+	if (mask_count == 0) {
+		return 0;
+	}
+
+	mask_count--;
+
+	uint64_t last_mask = (1ULL << (ele_count % 64)) - 1;
+	size_t sum = cf_bit_count64(mask[mask_count] & last_mask);
+
+	for (size_t i = 0; i < mask_count; i++) {
+		sum += cf_bit_count64(mask[i]);
+	}
+
+	return sum;
+}
+
 bool
 cdt_idx_mask_is_set(const uint64_t *mask, uint32_t idx)
 {
