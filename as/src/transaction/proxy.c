@@ -279,14 +279,14 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 
 	pr.ns = ns;
 
+	msg_incr_ref(m); // reference for the hash
+
 	cf_shash_put(g_proxy_hash, &tid, &pr);
 
 	tr->msgp = NULL; // pattern, not needed
 	tr->from.any = NULL; // pattern, not needed
 
 	// Send fabric message to remote node.
-
-	msg_incr_ref(m);
 
 	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
