@@ -1041,7 +1041,7 @@ cf_rc_release(void *p)
 {
 	cf_rc_header *head = (cf_rc_header *)p - 1;
 	int32_t rc = cf_atomic32_decr(&head->rc);
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow");
+	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
 	return rc;
 }
 
@@ -1050,7 +1050,7 @@ cf_rc_releaseandfree(void *p)
 {
 	cf_rc_header *head = (cf_rc_header *)p - 1;
 	int32_t rc = cf_atomic32_decr(&head->rc);
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow");
+	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
 
 	if (rc > 0) {
 		return rc;
