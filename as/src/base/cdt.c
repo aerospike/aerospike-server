@@ -2350,10 +2350,14 @@ cdt_idx_mask_bit_count(const uint64_t *mask, uint32_t ele_count)
 		return 0;
 	}
 
-	mask_count--;
+	size_t sum = 0;
 
-	uint64_t last_mask = (1ULL << (ele_count % 64)) - 1;
-	size_t sum = cf_bit_count64(mask[mask_count] & last_mask);
+	if (ele_count % 64 != 0) {
+		uint64_t last_mask = (1ULL << (ele_count % 64)) - 1;
+
+		mask_count--;
+		sum = cf_bit_count64(mask[mask_count] & last_mask);
+	}
 
 	for (size_t i = 0; i < mask_count; i++) {
 		sum += cf_bit_count64(mask[i]);
