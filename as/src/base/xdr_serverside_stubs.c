@@ -37,7 +37,6 @@ void as_xdr_start()
 
 void as_xdr_shutdown()
 {
-	return -1;
 }
 
 void xdr_broadcast_lastshipinfo(uint64_t val[])
