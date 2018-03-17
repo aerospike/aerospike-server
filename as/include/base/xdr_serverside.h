@@ -61,8 +61,7 @@ typedef uint64_t xdr_dirty_bins[2];
 int as_xdr_init();
 void xdr_config_post_process();
 void as_xdr_start();
-int as_xdr_shutdown();
-void xdr_sig_handler(int signum);
+void as_xdr_shutdown();
 
 void xdr_clear_dirty_bins(xdr_dirty_bins *dirty);
 void xdr_fill_dirty_bins(xdr_dirty_bins *dirty);

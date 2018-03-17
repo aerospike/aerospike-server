@@ -35,13 +35,9 @@ void as_xdr_start()
 {
 }
 
-int as_xdr_shutdown()
+void as_xdr_shutdown()
 {
 	return -1;
-}
-
-void xdr_sig_handler(int signum)
-{
 }
 
 void xdr_broadcast_lastshipinfo(uint64_t val[])

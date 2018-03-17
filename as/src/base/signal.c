@@ -95,8 +95,6 @@ as_sig_handle_abort(int sig_num)
 	cf_warning(AS_AS, "SIGABRT received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	xdr_sig_handler(sig_num);
-
 	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_abort);
 }
@@ -106,8 +104,6 @@ as_sig_handle_bus(int sig_num)
 {
 	cf_warning(AS_AS, "SIGBUS received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
-
-	xdr_sig_handler(sig_num);
 
 	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_bus);
@@ -119,8 +115,6 @@ as_sig_handle_fpe(int sig_num)
 {
 	cf_warning(AS_AS, "SIGFPE received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
-
-	xdr_sig_handler(sig_num);
 
 	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_fpe);
@@ -157,8 +151,6 @@ as_sig_handle_int(int sig_num)
 		_exit(1);
 	}
 
-	xdr_sig_handler(sig_num);
-
 	pthread_mutex_unlock(&g_main_deadlock);
 }
 
@@ -180,8 +172,6 @@ as_sig_handle_segv(int sig_num)
 	cf_warning(AS_AS, "SIGSEGV received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	xdr_sig_handler(sig_num);
-
 	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_segv);
 }
@@ -197,8 +187,6 @@ as_sig_handle_term(int sig_num)
 		_exit(0);
 	}
 
-	xdr_sig_handler(sig_num);
-
 	pthread_mutex_unlock(&g_main_deadlock);
 }
 
@@ -208,8 +196,6 @@ as_sig_handle_usr1(int sig_num)
 {
 	cf_warning(AS_AS, "SIGUSR1 received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
-
-	xdr_sig_handler(sig_num);
 
 	PRINT_CALL_STACK(CF_INFO);
 	reraise_signal(SIGABRT, as_sig_handle_abort);
