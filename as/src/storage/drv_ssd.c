@@ -3800,7 +3800,9 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 		ssd->swb_free_q = cf_queue_create(sizeof(void*), true);
 
 		if (! ns->storage_data_in_memory) {
-			ssd->post_write_q = cf_queue_create(sizeof(void*), false);
+			// TODO - hide the storage_commit_to_device usage.
+			ssd->post_write_q = cf_queue_create(sizeof(void*),
+					ns->storage_commit_to_device);
 		}
 
 		snprintf(histname, sizeof(histname), "{%s}-%s-read", ns->name, ssd->name);
