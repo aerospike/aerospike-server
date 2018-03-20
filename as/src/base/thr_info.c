@@ -1805,7 +1805,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
-		info_append_uint32(db, "storage-engine.write-threads", ns->storage_write_threads);
 	}
 
 	info_append_uint32(db, "sindex.num-partitions", ns->sindex_num_partitions);
