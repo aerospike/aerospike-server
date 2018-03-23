@@ -567,6 +567,30 @@ as_fabric_send_list(const cf_node *nodes, uint32_t node_count, msg *m,
 	return ret;
 }
 
+int
+as_fabric_retransmit(cf_node node_id, msg *m, as_fabric_channel channel)
+{
+	// This function assumes the sender holds only a single reference to the
+	// msg. Do not use this function when there may be more than one reference
+	// to an unsent msg.
+
+	if (cf_rc_count(m) > 1) {
+		// Msg should already be in the fabric queue - success.
+		return AS_FABRIC_SUCCESS;
+	}
+
+	msg_incr_ref(m);
+
+	int err = as_fabric_send(node_id, m, channel);
+
+	if (err != AS_FABRIC_SUCCESS) {
+		as_fabric_msg_put(m);
+		return err;
+	}
+
+	return AS_FABRIC_SUCCESS;
+}
+
 // TODO - make static registration
 void
 as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz,
