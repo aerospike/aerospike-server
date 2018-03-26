@@ -1390,6 +1390,14 @@ cfg_end_context(cfg_parser_state* p_state)
 	cf_detail(AS_CFG, "end context: %s -> %s", CFG_PARSER_STATES[prev_context], CFG_PARSER_STATES[p_state->current]);
 }
 
+void
+cfg_parser_done(cfg_parser_state* p_state)
+{
+	if (p_state->depth != 0) {
+		cf_crash_nostack(AS_CFG, "parsing - final context missing '}'?");
+	}
+}
+
 //------------------------------------------------
 // Given a token, return switch case identifier.
 //
@@ -3560,6 +3568,8 @@ as_config_init(const char* config_file)
 			break;
 		}
 	}
+
+	cfg_parser_done(&state);
 
 	fclose(FD);
 
