@@ -75,8 +75,6 @@ struct drv_ssd_s;
 #define SSD_HEADER_FLAG_CP			0x02
 #define SSD_HEADER_FLAG_TRUSTED		0x04
 
-#define MAX_SSD_THREADS 20
-
 
 //------------------------------------------------
 // Device header.
@@ -225,7 +223,7 @@ typedef struct drv_ssd_s
 	ssd_alloc_table	*alloc_table;
 
 	pthread_t		maintenance_thread;
-	pthread_t		write_worker_thread[MAX_SSD_THREADS];
+	pthread_t		write_worker_thread;
 	pthread_t		shadow_worker_thread;
 	pthread_t		defrag_thread;
 

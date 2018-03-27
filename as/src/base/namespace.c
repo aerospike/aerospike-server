@@ -180,7 +180,6 @@ as_namespace_create(char *name)
 	ns->storage_min_avail_pct = 5; // stop writes when < 5% disk is writable
 	ns->storage_post_write_queue = 256; // number of wblocks per device used as post-write cache
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
-	ns->storage_write_threads = 1;
 
 	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_INDEX;
 

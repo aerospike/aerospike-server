@@ -1531,21 +1531,13 @@ ssd_shadow_worker(void *arg)
 void
 ssd_start_write_worker_threads(drv_ssds *ssds)
 {
-	if (ssds->ns->storage_write_threads > MAX_SSD_THREADS) {
-		cf_warning(AS_DRV_SSD, "configured number of write threads %u greater than max, using %d instead",
-				ssds->ns->storage_write_threads, MAX_SSD_THREADS);
-		ssds->ns->storage_write_threads = MAX_SSD_THREADS;
-	}
-
-	cf_info(AS_DRV_SSD, "{%s} starting write worker threads", ssds->ns->name);
+	cf_info(AS_DRV_SSD, "{%s} starting write worker thread", ssds->ns->name);
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		for (uint32_t j = 0; j < ssds->ns->storage_write_threads; j++) {
-			pthread_create(&ssd->write_worker_thread[j], 0, ssd_write_worker,
-					(void*)ssd);
-		}
+		pthread_create(&ssd->write_worker_thread, 0, ssd_write_worker,
+				(void*)ssd);
 
 		if (ssd->shadow_name) {
 			pthread_create(&ssd->shadow_worker_thread, 0, ssd_shadow_worker,
@@ -4301,9 +4293,7 @@ as_storage_shutdown_ssd(as_namespace *ns)
 		drv_ssd *ssd = &ssds->ssds[i];
 		void *p_void;
 
-		for (uint32_t j = 0; j < ssds->ns->storage_write_threads; j++) {
-			pthread_join(ssd->write_worker_thread[j], &p_void);
-		}
+		pthread_join(ssd->write_worker_thread, &p_void);
 
 		if (ssd->shadow_name) {
 			pthread_join(ssd->shadow_worker_thread, &p_void);

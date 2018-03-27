@@ -753,7 +753,6 @@ struct as_namespace_s {
 	uint32_t		storage_min_avail_pct;
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
-	uint32_t		storage_write_threads;
 
 	uint32_t		sindex_num_partitions;
 
