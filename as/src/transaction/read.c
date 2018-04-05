@@ -508,7 +508,7 @@ read_local(as_transaction* tr)
 
 	if ((m->info1 & AS_MSG_INFO1_GET_ALL) != 0) {
 		p_ops = NULL;
-		n_bins = as_bin_inuse_count(&rd);
+		n_bins = rd.n_bins;
 		as_bin_get_all_p(&rd, response_bins);
 	}
 	else {

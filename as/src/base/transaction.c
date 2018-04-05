@@ -237,15 +237,8 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 			as_msg_swap_field(p_field);
 		}
 
-		p_read = as_msg_field_skip(p_field);
-
-		if (! p_read) {
+		if (! (p_read = as_msg_field_skip(p_field))) {
 			cf_warning(AS_PROTO, "bad as_msg_field");
-			return false;
-		}
-
-		if (p_read > p_end) {
-			cf_warning(AS_PROTO, "incomplete as_msg_field value");
 			return false;
 		}
 
@@ -258,7 +251,7 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 	// Parse and swap bin-ops, if any.
 	for (uint16_t n = 0; n < m->n_ops; n++) {
 		if (p_read + sizeof(as_msg_op) > p_end) {
-			cf_warning(AS_PROTO, "incomplete as_msg_op");
+			cf_warning(AS_PROTO, "incomplete as_msg");
 			return false;
 		}
 
@@ -268,15 +261,8 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 			as_msg_swap_op(op);
 		}
 
-		p_read = as_msg_op_skip(op);
-
-		if (! p_read) {
+		if (! (p_read = as_msg_op_skip(op))) {
 			cf_warning(AS_PROTO, "bad as_msg_op");
-			return false;
-		}
-
-		if (p_read > p_end) {
-			cf_warning(AS_PROTO, "incomplete as_msg_op data");
 			return false;
 		}
 	}
