@@ -195,6 +195,9 @@ typedef struct drv_ssd_s
 	cf_atomic64		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
 	cf_atomic64		n_wblock_writes;		// total number of swbs added to the swb_write_q by writes
 
+	cf_atomic64		n_wblock_defrag_io_skips;	// total number of wblocks empty on defrag_wblock_q pop
+	cf_atomic64		n_wblock_direct_frees;		// total number of wblocks freed by other than defrag
+
 	volatile uint64_t n_tomb_raider_reads;	// relevant for enterprise edition only
 
 	cf_atomic32		defrag_sweep;		// defrag sweep flag

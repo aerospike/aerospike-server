@@ -342,6 +342,7 @@ swb_dereference_and_release(drv_ssd *ssd, uint32_t wblock_id,
 
 		// Free wblock if all three gating conditions hold.
 		if (inuse_sz == 0) {
+			cf_atomic64_incr(&ssd->n_wblock_direct_frees);
 			push_wblock_to_free_q(ssd, wblock_id, FREE_TO_HEAD);
 		}
 		// Queue wblock for defrag if applicable.
@@ -504,6 +505,7 @@ ssd_block_free(drv_ssd *ssd, uint64_t rblock_id, uint64_t n_rblocks, char *msg)
 			p_wblock_state->state != WBLOCK_STATE_DEFRAG) {
 		// Free wblock if all three gating conditions hold.
 		if (resulting_inuse_sz == 0) {
+			cf_atomic64_incr(&ssd->n_wblock_direct_frees);
 			push_wblock_to_free_q(ssd, wblock_id, FREE_TO_HEAD);
 		}
 		// Queue wblock for defrag if appropriate.
@@ -768,8 +770,6 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	}
 
 	int record_count = 0;
-	int num_old_records = 0;
-	int num_deleted_records = 0;
 
 	ssd_wblock_state* p_wblock_state = &ssd->alloc_table->wblock_state[wblock_id];
 
@@ -780,6 +780,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	cf_atomic32_set(&p_wblock_state->n_vac_dests, 1);
 
 	if (cf_atomic32_get(p_wblock_state->inuse_sz) == 0) {
+		cf_atomic64_incr(&ssd->n_wblock_defrag_io_skips);
 		goto Finished;
 	}
 
@@ -852,12 +853,6 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 		if (rv == 0) {
 			record_count++;
 		}
-		else if (rv == -1) {
-			num_old_records++;
-		}
-		else if (rv == -2) {
-			num_deleted_records++;
-		}
 
 		wblock_offset = next_wblock_offset;
 	}
@@ -868,10 +863,6 @@ Finished:
 	// e.g. if a dropped partition's tree is not done purging. In this case, we
 	// may have found deleted records in the wblock whose used-size contribution
 	// has not yet been subtracted.
-
-	cf_detail(AS_DRV_SSD, "device %s: wblock-id %u defragged, final in-use-sz %d records (%d:%d:%d)",
-			ssd->name, wblock_id, cf_atomic32_get(p_wblock_state->inuse_sz),
-			record_count, num_old_records, num_deleted_records);
 
 	ssd_release_vacated_wblock(ssd, wblock_id, p_wblock_state);
 
@@ -2084,6 +2075,7 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 void
 ssd_log_stats(drv_ssd *ssd, uint64_t *p_prev_n_total_writes,
 		uint64_t *p_prev_n_defrag_reads, uint64_t *p_prev_n_defrag_writes,
+		uint64_t *p_prev_n_defrag_io_skips, uint64_t *p_prev_n_direct_frees,
 		uint64_t *p_prev_n_tomb_raider_reads)
 {
 	uint64_t n_defrag_reads = cf_atomic64_get(ssd->n_defrag_wblock_reads);
@@ -2091,11 +2083,19 @@ ssd_log_stats(drv_ssd *ssd, uint64_t *p_prev_n_total_writes,
 	uint64_t n_total_writes = cf_atomic64_get(ssd->n_wblock_writes) +
 			n_defrag_writes;
 
+	uint64_t n_defrag_io_skips = cf_atomic64_get(ssd->n_wblock_defrag_io_skips);
+	uint64_t n_direct_frees = cf_atomic64_get(ssd->n_wblock_direct_frees);
+
 	float total_write_rate = (float)(n_total_writes - *p_prev_n_total_writes) /
 			(float)LOG_STATS_INTERVAL_sec;
 	float defrag_read_rate = (float)(n_defrag_reads - *p_prev_n_defrag_reads) /
 			(float)LOG_STATS_INTERVAL_sec;
 	float defrag_write_rate = (float)(n_defrag_writes - *p_prev_n_defrag_writes) /
+			(float)LOG_STATS_INTERVAL_sec;
+
+	float defrag_io_skip_rate = (float)(n_defrag_io_skips - *p_prev_n_defrag_io_skips) /
+			(float)LOG_STATS_INTERVAL_sec;
+	float direct_free_rate = (float)(n_direct_frees - *p_prev_n_direct_frees) /
 			(float)LOG_STATS_INTERVAL_sec;
 
 	uint64_t n_tomb_raider_reads = ssd->n_tomb_raider_reads;
@@ -2134,9 +2134,16 @@ ssd_log_stats(drv_ssd *ssd, uint64_t *p_prev_n_total_writes,
 			n_defrag_writes, defrag_write_rate,
 			shadow_str, tomb_raider_str);
 
+	cf_detail(AS_DRV_SSD, "{%s} %s: defrag-io-skips (%lu,%.1f) direct-frees (%lu,%.1f)",
+			ssd->ns->name, ssd->name,
+			n_defrag_io_skips, defrag_io_skip_rate,
+			n_direct_frees, direct_free_rate);
+
 	*p_prev_n_total_writes = n_total_writes;
 	*p_prev_n_defrag_reads = n_defrag_reads;
 	*p_prev_n_defrag_writes = n_defrag_writes;
+	*p_prev_n_defrag_io_skips = n_defrag_io_skips;
+	*p_prev_n_direct_frees = n_direct_frees;
 	*p_prev_n_tomb_raider_reads = n_tomb_raider_reads;
 
 	if (cf_queue_sz(ssd->free_wblock_q) == 0) {
@@ -2288,6 +2295,8 @@ run_ssd_maintenance(void *udata)
 	uint64_t prev_n_total_writes = 0;
 	uint64_t prev_n_defrag_reads = 0;
 	uint64_t prev_n_defrag_writes = 0;
+	uint64_t prev_n_defrag_io_skips = 0;
+	uint64_t prev_n_direct_frees = 0;
 	uint64_t prev_n_tomb_raider_reads = 0;
 
 	uint64_t prev_n_writes_flush = 0;
@@ -2315,7 +2324,8 @@ run_ssd_maintenance(void *udata)
 
 		if (now >= prev_log_stats + LOG_STATS_INTERVAL) {
 			ssd_log_stats(ssd, &prev_n_total_writes, &prev_n_defrag_reads,
-					&prev_n_defrag_writes, &prev_n_tomb_raider_reads);
+					&prev_n_defrag_writes, &prev_n_defrag_io_skips,
+					&prev_n_direct_frees, &prev_n_tomb_raider_reads);
 			prev_log_stats = now;
 			next = next_time(now, LOG_STATS_INTERVAL, next);
 		}
@@ -2804,9 +2814,6 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 	// Set/reset the record's void-time, truncating it if beyond max-ttl.
 	if (block->void_time > ns->cold_start_max_void_time) {
-		cf_detail(AS_DRV_SSD, "record-add truncating void-time %lu > max %u",
-				block->void_time, ns->cold_start_max_void_time);
-
 		r->void_time = ns->cold_start_max_void_time;
 		ssd->record_add_max_ttl_counter++;
 	}
