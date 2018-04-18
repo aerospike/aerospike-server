@@ -1,6 +1,6 @@
 #!/bin/bash
 
-rev=`git describe`
+rev=`git describe --abbrev=7`
 subbuild=`echo $rev | awk -F'-' '{print $2}'`
 
 if [ "$subbuild" != "" ]
