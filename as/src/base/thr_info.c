@@ -1822,8 +1822,38 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 void
 info_security_config_get(cf_dyn_buf *db)
 {
+	info_append_bool(db, "enable-ldap", g_config.sec_cfg.ldap_enabled);
 	info_append_bool(db, "enable-security", g_config.sec_cfg.security_enabled);
+	info_append_uint32(db, "ldap-login-threads", g_config.sec_cfg.n_ldap_login_threads);
 	info_append_uint32(db, "privilege-refresh-period", g_config.sec_cfg.privilege_refresh_period);
+
+	info_append_bool(db, "ldap.disable-tls", g_config.sec_cfg.ldap_tls_disabled);
+	info_append_uint32(db, "ldap.polling-period", g_config.sec_cfg.ldap_polling_period);
+	info_append_string_safe(db, "ldap.query-base-dn", g_config.sec_cfg.ldap_query_base_dn);
+	info_append_string_safe(db, "ldap.query-user-dn", g_config.sec_cfg.ldap_query_user_dn);
+	info_append_string_safe(db, "ldap.query-user-password-file", g_config.sec_cfg.ldap_query_user_password_file);
+	info_append_string_safe(db, "ldap.role-query-base-dn", g_config.sec_cfg.ldap_role_query_base_dn);
+
+	for (int i = 0; i < MAX_ROLE_QUERY_PATTERNS; i++) {
+		if (! g_config.sec_cfg.ldap_role_query_patterns[i]) {
+			break;
+		}
+
+		info_append_string(db, "ldap.role-query-pattern", g_config.sec_cfg.ldap_role_query_patterns[i]);
+	}
+
+	info_append_bool(db, "ldap.role-query-search-ou", g_config.sec_cfg.ldap_role_query_search_ou);
+	info_append_string_safe(db, "ldap.server", g_config.sec_cfg.ldap_server);
+	info_append_uint32(db, "ldap.session-ttl", g_config.sec_cfg.ldap_session_ttl);
+	info_append_string_safe(db, "ldap.tls-ca-file", g_config.sec_cfg.ldap_tls_ca_file);
+
+	info_append_string_safe(db, "ldap.token-hash-method",
+			(g_config.sec_cfg.ldap_token_hash_method == AS_LDAP_EVP_SHA_256 ? "sha-256" :
+					(g_config.sec_cfg.ldap_token_hash_method == AS_LDAP_EVP_SHA_256 ? "sha-512" : "illegal")));
+
+	info_append_string_safe(db, "ldap.user-dn-pattern", g_config.sec_cfg.ldap_user_dn_pattern);
+	info_append_string_safe(db, "ldap.user-query-pattern", g_config.sec_cfg.ldap_user_query_pattern);
+
 	info_append_uint32(db, "report-authentication-sinks", g_config.sec_cfg.report.authentication);
 	info_append_uint32(db, "report-data-op-sinks", g_config.sec_cfg.report.data_op);
 	info_append_uint32(db, "report-sys-admin-sinks", g_config.sec_cfg.report.sys_admin);
@@ -3091,12 +3121,31 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 	else if (strcmp(context, "security") == 0) {
 		context_len = sizeof(context);
 		if (0 == as_info_parameter_get(params, "privilege-refresh-period", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || val < 10 || val > 60 * 60 * 24) {
-				cf_warning(AS_INFO, "privilege-refresh-period must be an unsigned integer between 10 and 86400");
+			if (0 != cf_str_atoi(context, &val) || val < PRIVILEGE_REFRESH_PERIOD_MIN || val > PRIVILEGE_REFRESH_PERIOD_MAX) {
+				cf_warning(AS_INFO, "privilege-refresh-period must be an unsigned integer between %u and %u",
+						PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of privilege-refresh-period from %u to %d", g_config.sec_cfg.privilege_refresh_period, val);
 			g_config.sec_cfg.privilege_refresh_period = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "ldap.polling-period", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < LDAP_POLLING_PERIOD_MIN || val > LDAP_POLLING_PERIOD_MAX) {
+				cf_warning(AS_INFO, "ldap.polling-period must be an unsigned integer between %u and %u",
+						LDAP_POLLING_PERIOD_MIN, LDAP_POLLING_PERIOD_MAX);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of ldap.pollling-period from %u to %d", g_config.sec_cfg.ldap_polling_period, val);
+			g_config.sec_cfg.ldap_polling_period = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "ldap.session-ttl", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < LDAP_SESSION_TTL_MIN || val > LDAP_SESSION_TTL_MAX) {
+				cf_warning(AS_INFO, "ldap.session-ttl must be an unsigned integer between %u and %u",
+						LDAP_SESSION_TTL_MIN, LDAP_SESSION_TTL_MAX);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of ldap.session-ttl from %u to %d", g_config.sec_cfg.ldap_session_ttl, val);
+			g_config.sec_cfg.ldap_session_ttl = (uint32_t)val;
 		}
 		else {
 			goto Error;

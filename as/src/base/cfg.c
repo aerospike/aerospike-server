@@ -105,6 +105,7 @@ void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
 uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
 void cfg_set_cluster_name(char* cluster_name);
+void cfg_add_ldap_role_query_pattern(char* pattern);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
 void cfg_init_serv_spec(cf_serv_spec* spec_p);
@@ -219,7 +220,14 @@ cfg_set_defaults()
 	strcpy(c->mod_lua.user_path, "/opt/aerospike/usr/udf/lua");
 
 	// TODO - security set default config API?
+	// Security defaults.
+	c->sec_cfg.n_ldap_login_threads = 8;
 	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
+	// Security LDAP defaults.
+	c->sec_cfg.ldap_polling_period = 60 * 5;
+	c->sec_cfg.ldap_session_ttl = 60 * 60 * 24;
+	c->sec_cfg.ldap_token_hash_method = AS_LDAP_EVP_SHA_256;
+	// Security syslog defaults.
 	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
 }
 
@@ -656,10 +664,33 @@ typedef enum {
 	CASE_MOD_LUA_USER_PATH,
 
 	// Security options:
+	CASE_SECURITY_ENABLE_LDAP,
 	CASE_SECURITY_ENABLE_SECURITY,
+	CASE_SECURITY_LDAP_LOGIN_THREADS,
 	CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD,
+	CASE_SECURITY_LDAP_BEGIN,
 	CASE_SECURITY_LOG_BEGIN,
 	CASE_SECURITY_SYSLOG_BEGIN,
+
+	// Security LDAP options:
+	CASE_SECURITY_LDAP_DISABLE_TLS,
+	CASE_SECURITY_LDAP_POLLING_PERIOD,
+	CASE_SECURITY_LDAP_QUERY_BASE_DN,
+	CASE_SECURITY_LDAP_QUERY_USER_DN,
+	CASE_SECURITY_LDAP_QUERY_USER_PASSWORD_FILE,
+	CASE_SECURITY_LDAP_ROLE_QUERY_BASE_DN,
+	CASE_SECURITY_LDAP_ROLE_QUERY_PATTERN,
+	CASE_SECURITY_LDAP_ROLE_QUERY_SEARCH_OU,
+	CASE_SECURITY_LDAP_SERVER,
+	CASE_SECURITY_LDAP_SESSION_TTL,
+	CASE_SECURITY_LDAP_TLS_CA_FILE,
+	CASE_SECURITY_LDAP_TOKEN_HASH_METHOD,
+	CASE_SECURITY_LDAP_USER_DN_PATTERN,
+	CASE_SECURITY_LDAP_USER_QUERY_PATTERN,
+
+	// Security LDAP token encryption options (value tokens):
+	CASE_SECURITY_LDAP_TOKEN_HASH_METHOD_SHA_256,
+	CASE_SECURITY_LDAP_TOKEN_HASH_METHOD_SHA_512,
 
 	// Security (Aerospike) log options:
 	CASE_SECURITY_LOG_REPORT_AUTHENTICATION,
@@ -1165,11 +1196,37 @@ const cfg_opt MOD_LUA_OPTS[] = {
 };
 
 const cfg_opt SECURITY_OPTS[] = {
+		{ "enable-ldap",					CASE_SECURITY_ENABLE_LDAP },
 		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
+		{ "ldap-login-threads",				CASE_SECURITY_LDAP_LOGIN_THREADS },
 		{ "privilege-refresh-period",		CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD },
+		{ "ldap",							CASE_SECURITY_LDAP_BEGIN },
 		{ "log",							CASE_SECURITY_LOG_BEGIN },
 		{ "syslog",							CASE_SECURITY_SYSLOG_BEGIN },
 		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt SECURITY_LDAP_OPTS[] = {
+		{ "disable-tls",					CASE_SECURITY_LDAP_DISABLE_TLS },
+		{ "polling-period",					CASE_SECURITY_LDAP_POLLING_PERIOD },
+		{ "query-base-dn",					CASE_SECURITY_LDAP_QUERY_BASE_DN },
+		{ "query-user-dn",					CASE_SECURITY_LDAP_QUERY_USER_DN },
+		{ "query-user-password-file",		CASE_SECURITY_LDAP_QUERY_USER_PASSWORD_FILE },
+		{ "role-query-base-dn",				CASE_SECURITY_LDAP_ROLE_QUERY_BASE_DN },
+		{ "role-query-pattern",				CASE_SECURITY_LDAP_ROLE_QUERY_PATTERN },
+		{ "role-query-search-ou",			CASE_SECURITY_LDAP_ROLE_QUERY_SEARCH_OU },
+		{ "server",							CASE_SECURITY_LDAP_SERVER },
+		{ "session-ttl",					CASE_SECURITY_LDAP_SESSION_TTL },
+		{ "tls-ca-file",					CASE_SECURITY_LDAP_TLS_CA_FILE },
+		{ "token-hash-method",				CASE_SECURITY_LDAP_TOKEN_HASH_METHOD },
+		{ "user-dn-pattern",				CASE_SECURITY_LDAP_USER_DN_PATTERN },
+		{ "user-query-pattern",				CASE_SECURITY_LDAP_USER_QUERY_PATTERN },
+		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS[] = {
+		{ "sha-256",						CASE_SECURITY_LDAP_TOKEN_HASH_METHOD_SHA_256 },
+		{ "sha-512",						CASE_SECURITY_LDAP_TOKEN_HASH_METHOD_SHA_512 }
 };
 
 const cfg_opt SECURITY_LOG_OPTS[] = {
@@ -1270,6 +1327,8 @@ const int NUM_NAMESPACE_SINDEX_OPTS					= sizeof(NAMESPACE_SINDEX_OPTS) / sizeof
 const int NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS		= sizeof(NAMESPACE_GEO2DSPHERE_WITHIN_OPTS) / sizeof(cfg_opt);
 const int NUM_MOD_LUA_OPTS							= sizeof(MOD_LUA_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_OPTS							= sizeof(SECURITY_OPTS) / sizeof(cfg_opt);
+const int NUM_SECURITY_LDAP_OPTS					= sizeof(SECURITY_LDAP_OPTS) / sizeof(cfg_opt);
+const int NUM_SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS	= sizeof(SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_LOG_OPTS						= sizeof(SECURITY_LOG_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_OPTS								= sizeof(XDR_OPTS) / sizeof(cfg_opt);
@@ -1319,7 +1378,7 @@ typedef enum {
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
 	NAMESPACE, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
-	SECURITY, SECURITY_LOG, SECURITY_SYSLOG,
+	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DATACENTER,
 	// Used parsing separate file, but shares this enum:
 	XDR_SEC_CREDENTIALS,
@@ -1335,7 +1394,7 @@ const char* CFG_PARSER_STATES[] = {
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO", "NETWORK_TLS",
 		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
-		"SECURITY", "SECURITY_LOG", "SECURITY_SYSLOG",
+		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG", "SECURITY_SYSLOG",
 		"XDR", "XDR_DATACENTER",
 		// Used parsing separate file, but shares corresponding enum:
 		"XDR_SEC_CREDENTIALS"
@@ -3344,17 +3403,94 @@ as_config_init(const char* config_file)
 		//
 		case SECURITY:
 			switch (cfg_find_tok(line.name_tok, SECURITY_OPTS, NUM_SECURITY_OPTS)) {
+			case CASE_SECURITY_ENABLE_LDAP:
+				c->sec_cfg.ldap_enabled = cfg_bool(&line);
+				break;
 			case CASE_SECURITY_ENABLE_SECURITY:
 				c->sec_cfg.security_enabled = cfg_bool(&line);
 				break;
+			case CASE_SECURITY_LDAP_LOGIN_THREADS:
+				c->sec_cfg.n_ldap_login_threads = cfg_u32(&line, 1, 64);
+				break;
 			case CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD:
-				c->sec_cfg.privilege_refresh_period = cfg_u32(&line, 10, 60 * 60 * 24);
+				c->sec_cfg.privilege_refresh_period = cfg_u32(&line, PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
+				break;
+			case CASE_SECURITY_LDAP_BEGIN:
+				cfg_begin_context(&state, SECURITY_LDAP);
 				break;
 			case CASE_SECURITY_LOG_BEGIN:
 				cfg_begin_context(&state, SECURITY_LOG);
 				break;
 			case CASE_SECURITY_SYSLOG_BEGIN:
 				cfg_begin_context(&state, SECURITY_SYSLOG);
+				break;
+			case CASE_CONTEXT_END:
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse security::ldap context items.
+		//
+		case SECURITY_LDAP:
+			switch (cfg_find_tok(line.name_tok, SECURITY_LDAP_OPTS, NUM_SECURITY_LDAP_OPTS)) {
+			case CASE_SECURITY_LDAP_DISABLE_TLS:
+				c->sec_cfg.ldap_tls_disabled = cfg_bool(&line);
+				break;
+			case CASE_SECURITY_LDAP_POLLING_PERIOD:
+				c->sec_cfg.ldap_polling_period = cfg_u32(&line, LDAP_POLLING_PERIOD_MIN, LDAP_POLLING_PERIOD_MAX);
+				break;
+			case CASE_SECURITY_LDAP_QUERY_BASE_DN:
+				c->sec_cfg.ldap_query_base_dn = cfg_strdup(&line, true);
+				break;
+			case CASE_SECURITY_LDAP_QUERY_USER_DN:
+				c->sec_cfg.ldap_query_user_dn = cfg_strdup(&line, true);
+				break;
+			case CASE_SECURITY_LDAP_QUERY_USER_PASSWORD_FILE:
+				c->sec_cfg.ldap_query_user_password_file = cfg_strdup(&line, true);
+				break;
+			case CASE_SECURITY_LDAP_ROLE_QUERY_BASE_DN:
+				c->sec_cfg.ldap_role_query_base_dn = cfg_strdup(&line, true);
+				break;
+			case CASE_SECURITY_LDAP_ROLE_QUERY_PATTERN:
+				cfg_add_ldap_role_query_pattern(cfg_strdup(&line, true));
+				break;
+			case CASE_SECURITY_LDAP_ROLE_QUERY_SEARCH_OU:
+				c->sec_cfg.ldap_role_query_search_ou = cfg_bool(&line);
+				break;
+			case CASE_SECURITY_LDAP_SERVER:
+				c->sec_cfg.ldap_server = cfg_strdup(&line, true);
+				break;
+			case CASE_SECURITY_LDAP_SESSION_TTL:
+				c->sec_cfg.ldap_session_ttl = cfg_u32(&line, LDAP_SESSION_TTL_MIN, LDAP_SESSION_TTL_MAX);
+				break;
+			case CASE_SECURITY_LDAP_TLS_CA_FILE:
+				c->sec_cfg.ldap_tls_ca_file = cfg_strdup(&line, true);
+				break;
+			case CASE_SECURITY_LDAP_TOKEN_HASH_METHOD:
+				switch (cfg_find_tok(line.val_tok_1, SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS, NUM_SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS)) {
+				case CASE_SECURITY_LDAP_TOKEN_HASH_METHOD_SHA_256:
+					c->sec_cfg.ldap_token_hash_method = AS_LDAP_EVP_SHA_256;
+					break;
+				case CASE_SECURITY_LDAP_TOKEN_HASH_METHOD_SHA_512:
+					c->sec_cfg.ldap_token_hash_method = AS_LDAP_EVP_SHA_512;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_SECURITY_LDAP_USER_DN_PATTERN:
+				c->sec_cfg.ldap_user_dn_pattern = cfg_strdup(&line, true);
+				break;
+			case CASE_SECURITY_LDAP_USER_QUERY_PATTERN:
+				c->sec_cfg.ldap_user_query_pattern = cfg_strdup(&line, true);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -4515,6 +4651,23 @@ void
 cfg_set_cluster_name(char* cluster_name){
 	if(!as_config_cluster_name_set(cluster_name)){
 		cf_crash_nostack(AS_CFG, "cluster name '%s' is not allowed", cluster_name);
+	}
+}
+
+void
+cfg_add_ldap_role_query_pattern(char* pattern)
+{
+	int i;
+
+	for (i = 0; i < MAX_ROLE_QUERY_PATTERNS; i++) {
+		if (g_config.sec_cfg.ldap_role_query_patterns[i] == NULL) {
+			g_config.sec_cfg.ldap_role_query_patterns[i] = pattern;
+			break;
+		}
+	}
+
+	if (i == MAX_ROLE_QUERY_PATTERNS) {
+		cf_crash_nostack(AS_CFG, "too many ldap role query patterns");
 	}
 }
 

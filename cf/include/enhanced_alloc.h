@@ -108,7 +108,11 @@ void *cf_alloc_realloc_arena(void *p, size_t sz, int32_t arena);
 
 #define cf_strdup(_s)            strdup(_s)
 #define cf_strndup(_s, _n)       strndup(_s, _n)
-#define cf_asprintf(_s, _f, ...) asprintf(_s, _f, __VA_ARGS__)
+
+#define cf_asprintf(_s, _f, ...) ({ \
+	int32_t _n = asprintf(_s, _f, __VA_ARGS__); \
+	_n; \
+})
 
 #define cf_free(_p)              free(_p)
 

@@ -93,6 +93,7 @@ struct as_transaction_s;
 #define AS_SEC_ERR_EXPIRED_PASSWORD		63	// expired password
 #define AS_SEC_ERR_FORBIDDEN_PASSWORD	64	// forbidden password (e.g. recently used)
 #define AS_SEC_ERR_CREDENTIAL			65	// no credential or bad credential
+#define AS_SEC_ERR_EXPIRED_SESSION		66	// expired session token
 	// ... room for more ...
 #define AS_SEC_ERR_ROLE					70	// no role(s) or unknown role(s)
 #define AS_SEC_ERR_ROLE_EXISTS			71	// role already exists
@@ -100,6 +101,12 @@ struct as_transaction_s;
 	// Permission errors.
 #define AS_SEC_ERR_NOT_AUTHENTICATED	80	// socket not authenticated
 #define AS_SEC_ERR_ROLE_VIOLATION		81	// role (privilege) violation
+	// LDAP-related errors.
+#define AS_SEC_ERR_LDAP_NOT_ENABLED		90	// LDAP features not enabled
+#define AS_SEC_ERR_LDAP_SETUP			91	// LDAP setup error
+#define AS_SEC_ERR_LDAP_TLS_SETUP		92	// LDAP TLS setup error
+#define AS_SEC_ERR_LDAP_AUTHENTICATION	93	// error authenticating LDAP user
+#define AS_SEC_ERR_LDAP_QUERY			94	// error querying LDAP server (e.g. polling for roles)
 
 // UDF Errors (100 - 109)
 #define AS_PROTO_RESULT_FAIL_UDF_EXECUTION     100

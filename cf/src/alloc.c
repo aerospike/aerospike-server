@@ -77,6 +77,9 @@ typedef struct site_info_s {
 // Old glibc versions don't provide this; work around compiler warning.
 void *aligned_alloc(size_t align, size_t sz);
 
+// When fortification is disabled, glibc's headers don't provide this.
+int32_t __asprintf_chk(char **res, int32_t flags, const char *form, ...);
+
 const char *jem_malloc_conf = "narenas:" STR(N_ARENAS);
 
 extern size_t je_chunksize_mask;
@@ -891,23 +894,43 @@ strndup(const char *s, size_t n)
 	return s2;
 }
 
-int32_t
-asprintf(char **res, const char *form, ...)
+static int32_t
+do_asprintf(char **res, const char *form, va_list va, const void *ra)
 {
 	char buff[25000];
-
-	va_list va;
-	va_start(va, form);
-
 	int32_t n = vsnprintf(buff, sizeof(buff), form, va);
-
-	va_end(va);
 
 	if ((size_t)n >= sizeof(buff)) {
 		cf_crash(CF_ALLOC, "asprintf overflow len %d", n);
 	}
 
-	*res = do_strdup(buff, (size_t)n, __builtin_return_address(0));
+	*res = do_strdup(buff, (size_t)n, ra);
+	return n;
+}
+
+int32_t
+asprintf(char **res, const char *form, ...)
+{
+	va_list va;
+	va_start(va, form);
+
+	int32_t n = do_asprintf(res, form, va, __builtin_return_address(0));
+
+	va_end(va);
+	return n;
+}
+
+int32_t
+__asprintf_chk(char **res, int32_t flags, const char *form, ...)
+{
+	(void)flags;
+
+	va_list va;
+	va_start(va, form);
+
+	int32_t n = do_asprintf(res, form, va, __builtin_return_address(0));
+
+	va_end(va);
 	return n;
 }
 
