@@ -4104,8 +4104,9 @@ thr_info_fn(void *unused)
 		// write the data buffer
 		if (cf_socket_send_all(&fd_h->sock, db.buf, db.used_sz,
 				MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
-			cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d",
-					CSFD(&fd_h->sock), errno);
+			cf_info(AS_INFO, "error sending to %s - fd %d sz %zu %s",
+					fd_h->client, CSFD(&fd_h->sock), db.used_sz,
+					cf_strerror(errno));
 			as_end_of_transaction_force_close(fd_h);
 			fd_h = NULL;
 		}
