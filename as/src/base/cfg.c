@@ -2579,6 +2579,7 @@ as_config_init(const char* config_file)
 				cfg_begin_context(&state, NETWORK_INFO);
 				break;
 			case CASE_NETWORK_TLS_BEGIN:
+				cfg_enterprise_only(&line);
 				tls_spec = cfg_create_tls_spec(c, line.val_tok_1);
 				cfg_begin_context(&state, NETWORK_TLS);
 				break;
@@ -2865,31 +2866,24 @@ as_config_init(const char* config_file)
 		case NETWORK_TLS:
 			switch (cfg_find_tok(line.name_tok, NETWORK_TLS_OPTS, NUM_NETWORK_TLS_OPTS)) {
 			case CASE_NETWORK_TLS_CA_FILE:
-				cfg_enterprise_only(&line);
 				tls_spec->ca_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_TLS_CA_PATH:
-				cfg_enterprise_only(&line);
 				tls_spec->ca_path = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_TLS_CERT_BLACKLIST:
-				cfg_enterprise_only(&line);
 				tls_spec->cert_blacklist = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_TLS_CERT_FILE:
-				cfg_enterprise_only(&line);
 				tls_spec->cert_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_TLS_CIPHER_SUITE:
-				cfg_enterprise_only(&line);
 				tls_spec->cipher_suite = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_TLS_KEY_FILE:
-				cfg_enterprise_only(&line);
 				tls_spec->key_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_TLS_PROTOCOLS:
-				cfg_enterprise_only(&line);
 				tls_spec->protocols = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_CONTEXT_END:
