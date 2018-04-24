@@ -1627,6 +1627,7 @@ map_add_items_unordered(const packed_map *map, as_bin *b,
 		order_index *val_ord, as_bin *result, const map_add_control *control)
 {
 	define_cdt_idx_mask(rm_mask, map->ele_count);
+	define_cdt_idx_mask(found_mask, val_ord->max_idx);
 	uint32_t rm_count = 0;
 	uint32_t rm_sz = 0;
 
@@ -1646,7 +1647,9 @@ map_add_items_unordered(const packed_map *map, as_bin *b,
 		order_index_find_rank_by_value(val_ord, &value, val_off, &find);
 
 		if (find.found) {
-			// ADD for [unique] & [key exist].
+			cdt_idx_mask_set(found_mask, find.result);
+
+			// ADD for [key exist].
 			if (! control->allow_overwrite) {
 				return -AS_PROTO_RESULT_FAIL_ELEMENT_EXISTS;
 			}
@@ -1655,18 +1658,20 @@ map_add_items_unordered(const packed_map *map, as_bin *b,
 			rm_count++;
 			rm_sz += offset_index_get_delta_const(&map->offidx, i);
 		}
-		else {
-			// REPLACE for ![key exist].
-			if (! control->allow_create) {
-				return -AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND;
-			}
-		}
 	}
 
 	uint32_t dup_count;
 	uint32_t dup_sz;
 
 	order_index_sorted_mark_dup_eles(val_ord, val_off, &dup_count, &dup_sz);
+
+	if (! control->allow_create) {
+		// REPLACE for ![key exist].
+		if (cdt_idx_mask_bit_count(found_mask, val_ord->max_idx) !=
+				val_ord->max_idx - dup_count) {
+			return -AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND;
+		}
+	}
 
 	uint32_t new_ele_count = map->ele_count - rm_count +
 			val_ord->max_idx - dup_count;
