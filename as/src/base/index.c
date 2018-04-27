@@ -50,7 +50,7 @@
 
 
 //==========================================================
-// Constants and typedefs.
+// Typedefs & constants.
 //
 
 typedef enum {
