@@ -1873,6 +1873,14 @@ packed_list_get_remove_by_value_interval(const packed_list *list, as_bin *b,
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 
+		if (count == 0) {
+			if (! list_result_data_set_not_found(result, 0)) {
+				return -AS_PROTO_RESULT_FAIL_PARAMETER;
+			}
+
+			return AS_PROTO_RESULT_OK;
+		}
+
 		return packed_list_get_remove_by_index_range(list, b, alloc_buf,
 				(int64_t)rank, (uint64_t)count, result);
 	}
