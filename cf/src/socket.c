@@ -931,22 +931,18 @@ int32_t
 cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags)
 {
 	if (sock->ssl) {
-		ssize_t rv = tls_socket_send(sock, buff, size, flags, 0);
-		if (rv < 0) {
-			// errno is set by tls_socket_send.
-			if (errno == ETIMEDOUT) {
-				errno = EAGAIN;
-			}
-			return -1;
+		ssize_t res = tls_socket_send(sock, buff, size, flags, 0);
+
+		if (res < 0 && errno == ETIMEDOUT) {
+			// Make the caller call again with the same buff and the same size,
+			// which is what OpenSSL wants.
+			errno = EAGAIN;
 		}
-		else {
-			// This might be a partial return.
-			return rv;
-		}
+
+		return res;
 	}
-	else {
-		return cf_socket_send_to(sock, buff, size, flags, NULL);
-	}
+
+	return cf_socket_send_to(sock, buff, size, flags, NULL);
 }
 
 int32_t
@@ -980,22 +976,18 @@ int32_t
 cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags)
 {
 	if (sock->ssl) {
-		ssize_t rv = tls_socket_recv(sock, buff, size, flags, 0);
-		if (rv < 0) {
-			// errno is set by tls_socket_send.
-			if (errno == ETIMEDOUT) {
-				errno = EAGAIN;
-			}
-			return -1;
+		ssize_t res = tls_socket_recv(sock, buff, size, flags, 0);
+
+		// We only get ETIMEDOUT, if we read never read any bytes. In case of
+		// a partial read, we get the number of bytes instead.
+		if (res < 0 && errno == ETIMEDOUT) {
+			errno = EAGAIN;
 		}
-		else {
-			// This might be a partial return.
-			return rv;
-		}
+
+		return res;
 	}
-	else {
-		return cf_socket_recv_from(sock, buff, size, flags, NULL);
-	}
+
+	return cf_socket_recv_from(sock, buff, size, flags, NULL);
 }
 
 static bool
@@ -1032,30 +1024,27 @@ socket_wait(const cf_socket *sock, uint16_t events, int32_t timeout)
 	}
 }
 
-int32_t
-cf_socket_send_to_all(cf_socket *sock, const void *buffp, size_t size, int32_t flags,
-		const cf_sock_addr *addr, int32_t timeout)
+static int32_t
+do_try_send_all(cf_socket *sock, const void *buffp, size_t size, int32_t flags,
+		int32_t timeout)
 {
-	cf_assert(sock->ssl == NULL, CF_SOCKET, "cannot use cf_socket_send_to_all() with TLS");
-
 	uint8_t *buff = (uint8_t *) buffp;
 	cf_detail(CF_SOCKET, "Blocking send on FD %d, size = %zu", sock->fd, size);
 	size_t off = 0;
 
 	while (off < size) {
-		ssize_t count = cf_socket_send_to(sock, buff + off, size - off, flags, addr);
+		ssize_t count = cf_socket_send(sock, buff + off, size - off, flags);
 
 		if (count < 0) {
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
-				if (socket_wait(sock, POLLOUT, timeout)) {
+				if (timeout > 0 && socket_wait(sock, POLLOUT, timeout)) {
 					continue;
 				}
 
 				cf_debug(CF_SOCKET, "Timeout during blocking send on FD %d", sock->fd);
-				errno = ETIMEDOUT;
-				return -1;
+				return off;
 			}
 
 			return -1;
@@ -1072,33 +1061,63 @@ cf_socket_send_to_all(cf_socket *sock, const void *buffp, size_t size, int32_t f
 	}
 
 	cf_detail(CF_SOCKET, "Blocking send on FD %d complete", sock->fd);
-	return 0;
+	return off;
 }
 
 int32_t
 cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
 		int32_t timeout)
 {
+	int32_t res;
+
 	if (sock->ssl) {
-		return tls_socket_send(sock, buff, size, flags, timeout);
+		res = tls_socket_send(sock, buff, size, flags, timeout);
 	}
 	else {
-		return cf_socket_send_to_all(sock, buff, size, flags, NULL, timeout);
+		res = do_try_send_all(sock, buff, size, flags, timeout);
 	}
+
+	if (res < 0) {
+		return -1;
+	}
+
+	// Only ever happens for non-TLS.
+	if (res < size) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+
+	return 0;
 }
 
 int32_t
-cf_socket_recv_from_all(cf_socket *sock, void *buffp, size_t size, int32_t flags,
-		cf_sock_addr *addr, int32_t timeout)
+cf_socket_try_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags)
 {
-	cf_assert(sock->ssl == NULL, CF_SOCKET, "cannot use cf_socket_recv_from_all() with TLS");
+	if (sock->ssl) {
+		int32_t res = tls_socket_send(sock, buff, size, flags, 5);
 
+		if (res < 0 && errno == ETIMEDOUT) {
+			// Make the caller call again with the same buff and the same size,
+			// which is what OpenSSL wants.
+			res = 0;
+		}
+
+		return res;
+	}
+
+	return do_try_send_all(sock, buff, size, flags, 0);
+}
+
+static int32_t
+do_recv_all(cf_socket *sock, void *buffp, size_t size, int32_t flags,
+		int32_t timeout)
+{
 	uint8_t *buff = (uint8_t *) buffp;
 	cf_detail(CF_SOCKET, "Blocking receive on FD %d, size = %zu", sock->fd, size);
 	size_t off = 0;
 
 	while (off < size) {
-		ssize_t count = cf_socket_recv_from(sock, buff + off, size - off, flags, addr);
+		ssize_t count = cf_socket_recv(sock, buff + off, size - off, flags);
 
 		if (count < 0) {
 			if (errno == EAGAIN) {
@@ -1132,11 +1151,21 @@ int32_t
 cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout)
 {
 	if (sock->ssl) {
-		return tls_socket_recv(sock, buff, size, flags, timeout);
+		int32_t res = tls_socket_recv(sock, buff, size, flags, timeout);
+
+		if (res < 0) {
+			return -1;
+		}
+
+		if (res < size) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
+
+		return 0;
 	}
-	else {
-		return cf_socket_recv_from_all(sock, buff, size, flags, NULL, timeout);
-	}
+
+	return do_recv_all(sock, buff, size, flags, timeout);
 }
 
 static void

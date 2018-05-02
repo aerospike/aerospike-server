@@ -49,6 +49,12 @@
 #define BATCH_MAX_TRANSACTION_SIZE (1024 * 1024 * 10) // 10MB
 #define BATCH_REPEAT_SIZE 25  // index(4),digest(20) and repeat(1)
 
+#define BATCH_FINAL_TIMEOUT (30UL * 1000 * 1000 * 1000) // 30 seconds
+
+#define BATCH_SUCCESS 0
+#define BATCH_ERROR -1
+#define BATCH_DELAY 1
+
 //---------------------------------------------------------
 // TYPES
 //---------------------------------------------------------
@@ -82,10 +88,14 @@ struct as_batch_shared_s {
 	cl_msg* msgp;
 	as_batch_buffer* buffer;
 	uint64_t start;
+	uint64_t end;
 	uint32_t tran_count_response;
 	uint32_t tran_count;
 	uint32_t tran_max;
+	uint32_t buffer_offset;
+	as_batch_buffer* delayed_buffer;
 	int result_code;
+	bool in_trailer;
 	bool bad_response_fd;
 };
 
@@ -121,20 +131,10 @@ static pthread_mutex_t batch_resize_lock;
 //---------------------------------------------------------
 
 static int
-as_batch_send(cf_socket *sock, uint8_t* buf, size_t len, int flags)
-{
-	if (cf_socket_send_all(sock, buf, len, flags, CF_SOCKET_TIMEOUT) < 0) {
-		// Common when a client aborts.
-		cf_debug(AS_BATCH, "Batch send response error, errno %d fd %d", errno, CSFD(sock));
-		return -1;
-	}
-
-	return 0;
-}
-
-static int
 as_batch_send_error(as_transaction* btr, int result_code)
 {
+	// Send error back to client for batch transaction that failed before
+	// placing any sub-transactions on transaction queue.
 	cl_msg m;
 	m.proto.version = PROTO_VERSION;
 	m.proto.type = PROTO_TYPE_AS_MSG;
@@ -153,7 +153,16 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	int status = as_batch_send(&btr->from.proto_fd_h->sock, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
+	cf_socket* sock = &btr->from.proto_fd_h->sock;
+	int status = 0;
+
+	// Use blocking send because error occured before batch transaction was
+	// placed on batch queue.
+	if (cf_socket_send_all(sock, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
+		// Common when a client aborts.
+		cf_debug(AS_BATCH, "Batch send response error, errno %d fd %d", errno, CSFD(sock));
+		status = -1;
+	}
 
 	as_end_of_transaction(btr->from.proto_fd_h, status != 0);
 	btr->from.proto_fd_h = NULL;
@@ -170,84 +179,31 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	return status;
 }
 
-static void
-as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
+static int
+as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer, int32_t flags)
 {
-	// Don't send buffer if an error has already occurred.
-	if (shared->bad_response_fd || shared->result_code) {
-		return;
+	cf_socket* sock = &shared->fd_h->sock;
+	uint8_t* buf = (uint8_t*)&buffer->proto;
+	size_t size = sizeof(as_proto) + buffer->size;
+	size_t off = shared->buffer_offset;
+	size_t remaining = size - off;
+
+	ssize_t sent = cf_socket_try_send_all(sock, buf + off, remaining, flags);
+
+	if (sent < 0) {
+		return BATCH_ERROR;
 	}
 
-	// Send buffer block to client socket.
-	buffer->proto.version = PROTO_VERSION;
-	buffer->proto.type = PROTO_TYPE_AS_MSG;
-	buffer->proto.sz = buffer->size;
-	as_proto_swap(&buffer->proto);
-
-	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*)&buffer->proto, sizeof(as_proto) + buffer->size, MSG_NOSIGNAL | MSG_MORE);
-
-	if (status) {
-		// Socket error. Release shared->fd_h after all sub-transactions are
-		// complete - shared->fd_h needed for security filter.
-		shared->bad_response_fd = true;
-		cf_atomic64_incr(&g_stats.batch_index_errors);
-	}
-}
-
-static void
-as_batch_send_final(as_batch_shared* shared)
-{
-	// Send protocol trailer to client socket.
-	if (shared->bad_response_fd) {
-		as_end_of_transaction_force_close(shared->fd_h);
-		shared->fd_h = NULL;
-		return;
+	if (sent < remaining) {
+		shared->buffer_offset += sent;
+		return BATCH_DELAY;
 	}
 
-	cl_msg m;
-	m.proto.version = PROTO_VERSION;
-	m.proto.type = PROTO_TYPE_AS_MSG;
-	m.proto.sz = sizeof(as_msg);
-	as_proto_swap(&m.proto);
-	m.msg.header_sz = sizeof(as_msg);
-	m.msg.info1 = 0;
-	m.msg.info2 = 0;
-	m.msg.info3 = AS_MSG_INFO3_LAST;
-	m.msg.unused = 0;
-	m.msg.result_code = shared->result_code;
-	m.msg.generation = 0;
-	m.msg.record_ttl = 0;
-	m.msg.transaction_ttl = 0;
-	m.msg.n_fields = 0;
-	m.msg.n_ops = 0;
-	as_msg_swap_header(&m.msg);
-
-	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
-
-	as_end_of_transaction(shared->fd_h, status != 0);
-	shared->fd_h = NULL;
-
-	// For now the model is timeouts don't appear in histograms.
-	if (shared->result_code != AS_PROTO_RESULT_FAIL_TIMEOUT) {
-		G_HIST_ACTIVATE_INSERT_DATA_POINT(batch_index_hist, shared->start);
-	}
-
-	// Check final return code in order to update statistics.
-	if (status == 0 && shared->result_code == 0) {
-		cf_atomic64_incr(&g_stats.batch_index_complete);
-	}
-	else {
-		if (shared->result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-			cf_atomic64_incr(&g_stats.batch_index_timeout);
-		}
-		else {
-			cf_atomic64_incr(&g_stats.batch_index_errors);
-		}
-	}
+	return BATCH_SUCCESS;
 }
 
 static inline void
-as_batch_free(as_batch_shared* shared, as_batch_queue* batch_queue)
+as_batch_free(as_batch_queue* queue, as_batch_shared* shared)
 {
 	// Destroy lock
 	pthread_mutex_destroy(&shared->lock);
@@ -259,7 +215,199 @@ as_batch_free(as_batch_shared* shared, as_batch_queue* batch_queue)
 	// It's critical that this count is decremented after the transaction is
 	// completely finished with the queue because "shutdown threads" relies
 	// on this information when performing graceful shutdown.
-	cf_atomic32_decr(&batch_queue->count);
+	cf_atomic32_decr(&queue->count);
+}
+
+static inline void
+as_batch_release_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
+{
+	if (as_buffer_pool_push_limit(&batch_buffer_pool, buffer, buffer->capacity,
+			g_config.batch_max_unused_buffers) != 0) {
+		// The push frees buffer on failure, so we just increment stat.
+		cf_atomic64_incr(&g_stats.batch_index_destroyed_buffers);
+	}
+}
+
+static void
+as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer, int status)
+{
+	as_batch_release_buffer(shared, buffer);
+
+	as_end_of_transaction(shared->fd_h, status != 0);
+	shared->fd_h = NULL;
+
+	// For now the model is timeouts don't appear in histograms.
+	if (shared->result_code != AS_PROTO_RESULT_FAIL_TIMEOUT) {
+		G_HIST_ACTIVATE_INSERT_DATA_POINT(batch_index_hist, shared->start);
+	}
+
+	// Check return code in order to update statistics.
+	if (status == 0 && shared->result_code == 0) {
+		cf_atomic64_incr(&g_stats.batch_index_complete);
+	}
+	else {
+		if (shared->result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+			cf_atomic64_incr(&g_stats.batch_index_timeout);
+		}
+		else {
+			cf_atomic64_incr(&g_stats.batch_index_errors);
+		}
+	}
+	as_batch_free(queue, shared);
+}
+
+static bool
+as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+{
+	// Send protocol trailer to client socket.
+	if (shared->bad_response_fd) {
+		as_batch_release_buffer(shared, buffer);
+		as_end_of_transaction_force_close(shared->fd_h);
+		shared->fd_h = NULL;
+		as_batch_free(queue, shared);
+		return true;
+	}
+
+	// Use existing buffer to store trailer message.
+	as_proto* proto = &buffer->proto;
+	proto->version = PROTO_VERSION;
+	proto->type = PROTO_TYPE_AS_MSG;
+	proto->sz = sizeof(as_msg);
+	as_proto_swap(proto);
+
+	as_msg* msg = (as_msg*)buffer->data;
+	msg->header_sz = sizeof(as_msg);
+	msg->info1 = 0;
+	msg->info2 = 0;
+	msg->info3 = AS_MSG_INFO3_LAST;
+	msg->unused = 0;
+	msg->result_code = shared->result_code;
+	msg->generation = 0;
+	msg->record_ttl = 0;
+	msg->transaction_ttl = 0;
+	msg->n_fields = 0;
+	msg->n_ops = 0;
+	as_msg_swap_header(msg);
+
+	buffer->size = sizeof(as_msg);
+	shared->buffer_offset = 0;
+
+	int status = as_batch_send_buffer(shared, buffer, MSG_NOSIGNAL);
+
+	if (status == BATCH_DELAY) {
+		shared->in_trailer = true;
+		return false;
+	}
+
+	as_batch_complete(queue, shared, buffer, status);
+	return true;
+}
+
+static inline bool
+as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+{
+	// Wait till all transactions have been received before sending
+	// trailer and releasing memory.
+	shared->tran_count_response += buffer->tran_count;
+
+	if (shared->tran_count_response == shared->tran_max) {
+		// Keep last buffer to send trailer message.
+		return as_batch_send_trailer(queue, shared, buffer);
+	}
+
+	// Release buffer.
+	as_batch_release_buffer(shared, buffer);
+	return true;
+}
+
+static inline bool
+as_batch_buffer_sent(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer, int status)
+{
+	// Return if done with buffer.
+	if (status != BATCH_SUCCESS) {
+		// Socket error.
+		shared->bad_response_fd = true;
+		cf_atomic64_incr(&g_stats.batch_index_errors);
+	}
+
+	return as_batch_buffer_end(queue, shared, buffer);
+}
+
+static inline bool
+as_batch_timeout(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+{
+	if (cf_getns() >= shared->end) {
+		shared->bad_response_fd = true;
+		as_batch_buffer_end(queue, shared, buffer);
+		cf_atomic64_incr(&g_stats.batch_index_timeout);
+		return true;
+	}
+
+	return false;
+}
+
+static bool
+as_batch_send_delayed(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+{
+	// If we get here, other buffers in this batch can't have affected or
+	// reacted to this batch's status. All that happened is this buffer was
+	// delayed. Therefore, we don't need to check for error conditions.
+
+	int status = as_batch_send_buffer(shared, buffer, MSG_NOSIGNAL | MSG_MORE);
+
+	if (status == BATCH_DELAY) {
+		return false;
+	}
+
+	if (shared->in_trailer) {
+		// Batch trailer send complete.
+		as_batch_complete(queue, shared, buffer, status);
+		return true;
+	}
+
+	return as_batch_buffer_sent(queue, shared, buffer, status);
+}
+
+static bool
+as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+{
+	cf_assert(buffer->capacity != 0, AS_BATCH, "buffer capacity 0");
+
+	// Don't send buffer if an error has already occurred.
+	if (shared->bad_response_fd || shared->result_code) {
+		return as_batch_buffer_end(queue, shared, buffer);
+	}
+
+	shared->buffer_offset = 0;
+
+	// Send buffer block to client socket.
+	buffer->proto.version = PROTO_VERSION;
+	buffer->proto.type = PROTO_TYPE_AS_MSG;
+	buffer->proto.sz = buffer->size;
+	as_proto_swap(&buffer->proto);
+
+	int status = as_batch_send_buffer(shared, buffer, MSG_NOSIGNAL | MSG_MORE);
+
+	if (status == BATCH_DELAY) {
+		return false;
+	}
+
+	return as_batch_buffer_sent(queue, shared, buffer, status);
+}
+
+static inline void
+as_batch_delay_buffer(as_batch_queue* queue, cf_queue* response_queue,
+		as_batch_response* response)
+{
+	// Delay buffer after yielding to other threads.
+	cf_atomic64_incr(&g_stats.batch_index_delay);
+
+	// If this is the only transaction on this thread, avoid tight loop.
+	if (queue->count == 1) {
+		pthread_yield();
+	}
+
+	cf_queue_push(response_queue, response);
 }
 
 static void
@@ -281,27 +429,40 @@ as_batch_worker(void* udata)
 		}
 
 		buffer = response.buffer;
-		shared->tran_count_response += buffer->tran_count;
 
-		if (buffer->capacity) {
-			// Send buffer block to client.
-			as_batch_send_buffer(shared, buffer);
-
-			if (as_buffer_pool_push_limit(&batch_buffer_pool, buffer, buffer->capacity, g_config.batch_max_unused_buffers) != 0) {
-				cf_atomic64_incr(&g_stats.batch_index_destroyed_buffers);
+		if (! shared->delayed_buffer) {
+			if (as_batch_send_response(batch_queue, shared, buffer)) {
+				continue;
 			}
+
+			if (as_batch_timeout(batch_queue, shared, buffer)) {
+				continue;
+			}
+
+			// Socket blocked.
+			shared->delayed_buffer = buffer;
+			as_batch_delay_buffer(batch_queue, response_queue, &response);
 		}
 		else {
-			// Server error buffers should not be put into buffer pool.
-			cf_free(buffer);
-			cf_atomic64_incr(&g_stats.batch_index_destroyed_buffers);
-		}
+			// Try first delayed buffer in batch only.
+			if (shared->delayed_buffer == buffer) {
+				if (as_batch_send_delayed(batch_queue, shared, buffer)) {
+					shared->delayed_buffer = NULL;
+					continue;
+				}
 
-		// Wait till all transactions have been received before sending
-		// final batch entry and releasing memory.
-		if (shared->tran_count_response == shared->tran_max) {
-			as_batch_send_final(shared);
-			as_batch_free(shared, batch_queue);
+				if (as_batch_timeout(batch_queue, shared, buffer)) {
+					continue;
+				}
+
+				// Socket blocked again.
+				as_batch_delay_buffer(batch_queue, response_queue, &response);
+			}
+			else {
+				// Other buffers in batch must also be delayed, but without
+				// thread yield.
+				cf_queue_push(response_queue, &response);
+			}
 		}
 	}
 
@@ -459,16 +620,7 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 			buffer = as_batch_buffer_create(batch_buffer_pool.buffer_size);
 		}
 		else {
-			cf_warning(AS_BATCH, "Failed to pop new batch buffer: %d", status);
-			// Try to allocate small buffer with just header.
-			as_batch_buffer* buffer = cf_malloc(sizeof(as_batch_buffer));
-			buffer->capacity = 0;
-			buffer->size = 0;
-			buffer->tran_count = 1;
-			buffer->writers = 2;
-			shared->buffer = buffer;
-			shared->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-			return 0;
+			cf_crash(AS_BATCH, "Failed to pop new batch buffer: %d", status);
 		}
 	}
 
@@ -708,6 +860,12 @@ as_batch_queue_task(as_transaction* btr)
 		cf_free(shared);
 		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 	}
+
+	// Batch delay timeout is twice batch timeout if batch timeout is defined.
+	// If batch timeout is zero, batch delay timeout is 30 seconds.
+	shared->end = btr->start_time + ((bmsg->transaction_ttl != 0) ?
+			((uint64_t)bmsg->transaction_ttl * 1000 * 1000 * 2) :
+			BATCH_FINAL_TIMEOUT);
 
 	shared->start = btr->start_time;
 	shared->fd_h = btr->from.proto_fd_h;

@@ -271,10 +271,9 @@ CF_MUST_CHECK int32_t cf_socket_recv(cf_socket *sock, void *buff, size_t size, i
 CF_MUST_CHECK int32_t cf_socket_send_to(cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags);
 
-CF_MUST_CHECK int32_t cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr, int32_t timeout);
 CF_MUST_CHECK int32_t cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout);
-CF_MUST_CHECK int32_t cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr, int32_t timeout);
 CF_MUST_CHECK int32_t cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_try_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags);
 
 void cf_socket_write_shutdown(cf_socket *sock);
 void cf_socket_shutdown(cf_socket *sock);
