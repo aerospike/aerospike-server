@@ -36,11 +36,11 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_rchash.h"
 
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
+#include "rchash.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

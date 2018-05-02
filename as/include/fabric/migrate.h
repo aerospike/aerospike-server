@@ -32,10 +32,10 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_rchash.h"
 
 #include "msg.h"
 #include "node.h"
+#include "rchash.h"
 #include "shash.h"
 
 #include "fabric/hb.h"

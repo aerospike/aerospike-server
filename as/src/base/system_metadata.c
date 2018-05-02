@@ -38,9 +38,9 @@
 #include "aerospike/as_stringmap.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_rchash.h"
 
 #include "msg.h"
+#include "rchash.h"
 #include "shash.h"
 
 #include "base/cfg.h"

@@ -65,12 +65,12 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_ll.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_vector.h"
 
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
+#include "rchash.h"
 #include "shash.h"
 #include "socket.h"
 #include "tls.h"

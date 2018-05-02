@@ -45,11 +45,11 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_rchash.h"
 
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
+#include "rchash.h"
 #include "shash.h"
 
 #include "base/cfg.h"
