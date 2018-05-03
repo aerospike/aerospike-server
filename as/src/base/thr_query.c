@@ -3216,7 +3216,7 @@ as_query_init()
 	cf_detail(AS_QUERY, "Initialize %d Query Worker threads.", g_config.query_threads);
 
 	// global job hash to keep track of the query job
-	cf_rchash_create(&g_query_job_hash, cf_rchash_fn_u32, NULL, sizeof(uint64_t), 64, CF_RCHASH_MANY_LOCK);
+	g_query_job_hash = cf_rchash_create(cf_rchash_fn_u32, NULL, sizeof(uint64_t), 64, CF_RCHASH_MANY_LOCK);
 
 	// I/O threads
 	g_query_qwork_pool = cf_queue_create(sizeof(query_work *), true);

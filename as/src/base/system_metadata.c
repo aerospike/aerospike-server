@@ -1212,7 +1212,7 @@ static as_smd_t *as_smd_create(void)
 	smd->state = AS_SMD_STATE_IDLE;
 
 	// Create the System Metadata modules hash table.
-	cf_rchash_create(&(smd->modules), cf_rchash_fn_fnv32, modules_rchash_destructor_fn, 0, 127, CF_RCHASH_BIG_LOCK);
+	smd->modules = cf_rchash_create(cf_rchash_fn_fnv32, modules_rchash_destructor_fn, 0, 127, CF_RCHASH_BIG_LOCK);
 
 	// Create the scoreboard hash table.
 	smd->scoreboard = cf_shash_create(cf_shash_fn_ptr, sizeof(cf_node), sizeof(cf_shash *), 127, CF_SHASH_BIG_LOCK);
@@ -1874,10 +1874,10 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
 	module_obj->module = cf_strdup(item->module_name);
 
 	// Create the module's local metadata hash table.
-	cf_rchash_create(&(module_obj->my_metadata), cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_BIG_LOCK);
+	module_obj->my_metadata = cf_rchash_create(cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_BIG_LOCK);
 
 	// Create the module's external metadata hash table.
-	cf_rchash_create(&(module_obj->external_metadata), cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_BIG_LOCK);
+	module_obj->external_metadata = cf_rchash_create(cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_BIG_LOCK);
 
 	// Add the module to the modules hash table.
 	if (CF_RCHASH_OK != (retval = cf_rchash_put_unique(smd->modules, item->module_name, strlen(item->module_name) + 1, module_obj))) {
@@ -2991,8 +2991,7 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 		cf_debug(AS_SMD, "no merge cb registered ~~ performing default merge policy: union");
 
 		// No merge policy registered ~~ Default to union.
-		cf_rchash *merge_hash = NULL;
-		cf_rchash_create(&merge_hash, cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, 0);
+		cf_rchash *merge_hash = cf_rchash_create(cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, 0);
 
 		// Run through all metadata items in all node's lists.
 		for (int i = 0; i < list_num; i++) {

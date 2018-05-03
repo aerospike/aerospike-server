@@ -427,7 +427,7 @@ as_fabric_init()
 
 	pthread_mutex_init(&g_fabric.node_hash_lock, 0);
 
-	cf_rchash_create(&g_fabric.node_hash, cf_nodeid_rchash_fn,
+	g_fabric.node_hash = cf_rchash_create(cf_nodeid_rchash_fn,
 			fabric_node_destructor, sizeof(cf_node), 128, 0);
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
@@ -2619,7 +2619,7 @@ tid_code_clear(uint64_t tid)
 void
 as_fabric_transact_init()
 {
-	cf_rchash_create(&g_fabric_transact_xmit_hash, cf_rchash_fn_u32,
+	g_fabric_transact_xmit_hash = cf_rchash_create(cf_rchash_fn_u32,
 			fabric_transact_xmit_destructor, sizeof(uint64_t), 64,
 			CF_RCHASH_MANY_LOCK);
 

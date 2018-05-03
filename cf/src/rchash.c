@@ -35,6 +35,8 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 
+#include "fault.h"
+
 
 //==========================================================
 // Typedefs & constants.
@@ -61,7 +63,7 @@ typedef struct cf_rchash_ele_v_s {
 //
 
 // Variable key size public API.
-int cf_rchash_put_v(cf_rchash *h, const void *key, uint32_t key_size, void *object);
+void cf_rchash_put_v(cf_rchash *h, const void *key, uint32_t key_size, void *object);
 int cf_rchash_put_unique_v(cf_rchash *h, const void *key, uint32_t key_size, void *object);
 int cf_rchash_get_v(cf_rchash *h, const void *key, uint32_t key_size, void **object_r);
 int cf_rchash_delete_object_v(cf_rchash *h, const void *key, uint32_t key_size, void *object);
@@ -76,7 +78,7 @@ static inline void cf_rchash_unlock(pthread_mutex_t *l);
 static inline cf_rchash_ele_f *cf_rchash_get_bucket(cf_rchash *h, uint32_t i);
 static inline cf_rchash_ele_v *cf_rchash_get_bucket_v(cf_rchash *h, uint32_t i);
 static inline void cf_rchash_fill_element(cf_rchash_ele_f *e, cf_rchash *h, const void *key, void *object);
-static inline int cf_rchash_fill_element_v(cf_rchash_ele_v *e, cf_rchash *h, const void *key, uint32_t key_size, void *object);
+static inline void cf_rchash_fill_element_v(cf_rchash_ele_v *e, cf_rchash *h, const void *key, uint32_t key_size, void *object);
 static inline void cf_rchash_size_incr(cf_rchash *h);
 static inline void cf_rchash_size_decr(cf_rchash *h);
 static inline void cf_rchash_release_object(cf_rchash *h, void *object);
@@ -120,20 +122,17 @@ cf_rchash_fn_zstr(const void *key, uint32_t key_size)
 // Public API.
 //
 
-int
-cf_rchash_create(cf_rchash **h_r, cf_rchash_hash_fn h_fn,
-		cf_rchash_destructor_fn d_fn, uint32_t key_size, uint32_t n_buckets,
-		uint32_t flags)
+// TODO - change API to just return pointer?
+cf_rchash *
+cf_rchash_create(cf_rchash_hash_fn h_fn, cf_rchash_destructor_fn d_fn,
+		uint32_t key_size, uint32_t n_buckets, uint32_t flags)
 {
-	if (! h_r || ! h_fn || n_buckets == 0) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(h_fn && n_buckets != 0 &&
+			// Can't have both lock options, but can opt for no locks at all.
+			((flags & CF_RCHASH_BIG_LOCK) == 0 ||
+			 (flags & CF_RCHASH_MANY_LOCK) == 0), CF_MISC, "bad param");
 
 	cf_rchash *h = cf_malloc(sizeof(cf_rchash));
-
-	if (! h) {
-		return CF_RCHASH_ERR;
-	}
 
 	h->h_fn = h_fn;
 	h->d_fn = d_fn;
@@ -141,13 +140,6 @@ cf_rchash_create(cf_rchash **h_r, cf_rchash_hash_fn h_fn,
 	h->n_buckets = n_buckets;
 	h->flags = flags;
 	h->n_elements = 0;
-
-	// Can't have both lock options, but can opt for no locks at all.
-	if ((flags & CF_RCHASH_BIG_LOCK) != 0 &&
-			(flags & CF_RCHASH_MANY_LOCK) != 0) {
-		cf_free(h);
-		return CF_RCHASH_ERR;
-	}
 
 	// key_size == 0 always serves as flag to use variable key size public API.
 	if (key_size == 0) {
@@ -157,30 +149,18 @@ cf_rchash_create(cf_rchash **h_r, cf_rchash_hash_fn h_fn,
 		h->table = cf_calloc(n_buckets, sizeof(cf_rchash_ele_f) + key_size);
 	}
 
-	if (! h->table) {
-		cf_free(h);
-		return CF_RCHASH_ERR;
-	}
-
 	if ((flags & CF_RCHASH_BIG_LOCK) != 0) {
 		pthread_mutex_init(&h->big_lock, NULL);
 	}
 	else if ((flags & CF_RCHASH_MANY_LOCK) != 0) {
 		h->bucket_locks = cf_malloc(sizeof(pthread_mutex_t) * n_buckets);
 
-		if (! h->bucket_locks) {
-			cf_free(h);
-			return CF_RCHASH_ERR;
-		}
-
 		for (uint32_t i = 0; i < n_buckets; i++) {
 			pthread_mutex_init(&h->bucket_locks[i], NULL);
 		}
 	}
 
-	*h_r = h;
-
-	return CF_RCHASH_OK;
+	return h;
 }
 
 
@@ -217,6 +197,8 @@ cf_rchash_destroy(cf_rchash *h)
 uint32_t
 cf_rchash_get_size(const cf_rchash *h)
 {
+	cf_assert(h, CF_MISC, "bad param");
+
 	// For now, not bothering with different methods per lock mode.
 	return as_load_uint32(&h->n_elements);
 }
@@ -224,20 +206,17 @@ cf_rchash_get_size(const cf_rchash *h)
 
 // If key is not already in hash, insert it with specified rc_malloc'd object.
 // If key is already in hash, replace (and release) existing object.
-int
+void
 cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 {
-	if (! h || ! key || ! object) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(h && key && object, CF_MISC, "bad param");
 
 	if (h->key_size == 0) {
-		return cf_rchash_put_v(h, key, key_size, object);
+		cf_rchash_put_v(h, key, key_size, object);
+		return;
 	}
 
-	if (h->key_size != key_size) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -247,7 +226,7 @@ cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 	if (! e->object) {
 		cf_rchash_fill_element(e, h, key, object);
 		cf_rchash_unlock(l);
-		return CF_RCHASH_OK;
+		return;
 	}
 
 	cf_rchash_ele_f *e_head = e;
@@ -266,15 +245,10 @@ cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 		cf_rchash_unlock(l);
 		cf_rchash_release_object(h, free_object);
 
-		return CF_RCHASH_OK;
+		return;
 	}
 
 	e = (cf_rchash_ele_f *)cf_malloc(sizeof(cf_rchash_ele_f) + key_size);
-
-	if (! e) {
-		cf_rchash_unlock(l);
-		return CF_RCHASH_ERR;
-	}
 
 	cf_rchash_fill_element(e, h, key, object);
 
@@ -283,8 +257,6 @@ cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 	e_head->next = e;
 
 	cf_rchash_unlock(l);
-
-	return CF_RCHASH_OK;
 }
 
 
@@ -293,17 +265,13 @@ int
 cf_rchash_put_unique(cf_rchash *h, const void *key, uint32_t key_size,
 		void *object)
 {
-	if (! h || ! key || ! object) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(h && key && object, CF_MISC, "bad param");
 
 	if (h->key_size == 0) {
 		return cf_rchash_put_unique_v(h, key, key_size, object);
 	}
 
-	if (h->key_size != key_size) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -330,11 +298,6 @@ cf_rchash_put_unique(cf_rchash *h, const void *key, uint32_t key_size,
 
 	e = (cf_rchash_ele_f *)cf_malloc(sizeof(cf_rchash_ele_f) + key_size);
 
-	if (! e) {
-		cf_rchash_unlock(l);
-		return CF_RCHASH_ERR;
-	}
-
 	cf_rchash_fill_element(e, h, key, object);
 
 	// Insert just after head.
@@ -356,17 +319,13 @@ cf_rchash_put_unique(cf_rchash *h, const void *key, uint32_t key_size,
 int
 cf_rchash_get(cf_rchash *h, const void *key, uint32_t key_size, void **object_r)
 {
-	if (! h || ! key) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(h && key, CF_MISC, "bad param");
 
 	if (h->key_size == 0) {
 		return cf_rchash_get_v(h, key, key_size, object_r);
 	}
 
-	if (h->key_size != key_size) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -416,17 +375,13 @@ int
 cf_rchash_delete_object(cf_rchash *h, const void *key, uint32_t key_size,
 		void *object)
 {
-	if (! h || ! key) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(h && key, CF_MISC, "bad param");
 
 	if (h->key_size == 0) {
 		return cf_rchash_delete_object_v(h, key, key_size, object);
 	}
 
-	if (h->key_size != key_size) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -499,9 +454,7 @@ cf_rchash_delete_object(cf_rchash *h, const void *key, uint32_t key_size,
 int
 cf_rchash_reduce(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 {
-	if (! h || ! reduce_fn) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(h && reduce_fn, CF_MISC, "bad param");
 
 	if (h->key_size == 0) {
 		return cf_rchash_reduce_v(h, reduce_fn, udata);
@@ -587,12 +540,10 @@ cf_rchash_reduce(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 // Local helpers - variable key size public API.
 //
 
-int
+void
 cf_rchash_put_v(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 {
-	if (key_size == 0) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -600,10 +551,9 @@ cf_rchash_put_v(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 
 	// Most common case should be insert into empty bucket.
 	if (! e->object) {
-		int rv = cf_rchash_fill_element_v(e, h, key, key_size, object);
-
+		cf_rchash_fill_element_v(e, h, key, key_size, object);
 		cf_rchash_unlock(l);
-		return rv;
+		return;
 	}
 
 	cf_rchash_ele_v *e_head = e;
@@ -622,29 +572,18 @@ cf_rchash_put_v(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 		cf_rchash_unlock(l);
 		cf_rchash_release_object(h, free_object);
 
-		return CF_RCHASH_OK;
+		return;
 	}
 
 	e = (cf_rchash_ele_v *)cf_malloc(sizeof(cf_rchash_ele_v));
 
-	if (! e) {
-		cf_rchash_unlock(l);
-		return CF_RCHASH_ERR;
-	}
-
-	if (cf_rchash_fill_element_v(e, h, key, key_size, object) != CF_RCHASH_OK) {
-		cf_free(e);
-		cf_rchash_unlock(l);
-		return CF_RCHASH_ERR;
-	}
+	cf_rchash_fill_element_v(e, h, key, key_size, object);
 
 	// Insert just after head.
 	e->next = e_head->next;
 	e_head->next = e;
 
 	cf_rchash_unlock(l);
-
-	return CF_RCHASH_OK;
 }
 
 
@@ -652,9 +591,7 @@ int
 cf_rchash_put_unique_v(cf_rchash *h, const void *key, uint32_t key_size,
 		void *object)
 {
-	if (key_size == 0) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -662,10 +599,9 @@ cf_rchash_put_unique_v(cf_rchash *h, const void *key, uint32_t key_size,
 
 	// Most common case should be insert into empty bucket.
 	if (! e->object) {
-		int rv = cf_rchash_fill_element_v(e, h, key, key_size, object);
-
+		cf_rchash_fill_element_v(e, h, key, key_size, object);
 		cf_rchash_unlock(l);
-		return rv;
+		return CF_RCHASH_OK;
 	}
 
 	cf_rchash_ele_v *e_head = e;
@@ -682,16 +618,7 @@ cf_rchash_put_unique_v(cf_rchash *h, const void *key, uint32_t key_size,
 
 	e = (cf_rchash_ele_v *)cf_malloc(sizeof(cf_rchash_ele_v));
 
-	if (! e) {
-		cf_rchash_unlock(l);
-		return CF_RCHASH_ERR;
-	}
-
-	if (cf_rchash_fill_element_v(e, h, key, key_size, object) != CF_RCHASH_OK) {
-		cf_free(e);
-		cf_rchash_unlock(l);
-		return CF_RCHASH_ERR;
-	}
+	cf_rchash_fill_element_v(e, h, key, key_size, object);
 
 	// Insert just after head.
 	e->next = e_head->next;
@@ -707,9 +634,7 @@ int
 cf_rchash_get_v(cf_rchash *h, const void *key, uint32_t key_size,
 		void **object_r)
 {
-	if (key_size == 0) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -741,9 +666,7 @@ int
 cf_rchash_delete_object_v(cf_rchash *h, const void *key, uint32_t key_size,
 		void *object)
 {
-	if (key_size == 0) {
-		return CF_RCHASH_ERR;
-	}
+	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
 	pthread_mutex_t *l = cf_rchash_lock(h, hash);
@@ -1002,15 +925,11 @@ cf_rchash_fill_element(cf_rchash_ele_f *e, cf_rchash *h, const void *key,
 }
 
 
-static inline int
+static inline void
 cf_rchash_fill_element_v(cf_rchash_ele_v *e, cf_rchash *h, const void *key,
 		uint32_t key_size, void *object)
 {
 	e->key = cf_malloc(key_size);
-
-	if (! e->key) {
-		return CF_RCHASH_ERR;
-	}
 
 	memcpy(e->key, key, key_size);
 	e->key_size = key_size;
@@ -1018,8 +937,6 @@ cf_rchash_fill_element_v(cf_rchash_ele_v *e, cf_rchash *h, const void *key,
 	e->object = object;
 
 	cf_rchash_size_incr(h);
-
-	return CF_RCHASH_OK;
 }
 
 

@@ -91,11 +91,11 @@ uint32_t cf_rchash_fn_zstr(const void *key, uint32_t key_size);
 // Public API.
 //
 
-int cf_rchash_create(cf_rchash **h_r, cf_rchash_hash_fn h_fn, cf_rchash_destructor_fn d_fn, uint32_t key_size, uint32_t n_buckets, uint32_t flags);
+cf_rchash *cf_rchash_create(cf_rchash_hash_fn h_fn, cf_rchash_destructor_fn d_fn, uint32_t key_size, uint32_t n_buckets, uint32_t flags);
 void cf_rchash_destroy(cf_rchash *h);
 uint32_t cf_rchash_get_size(const cf_rchash *h);
 
-int cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object);
+void cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object);
 int cf_rchash_put_unique(cf_rchash *h, const void *key, uint32_t key_size, void *object);
 
 int cf_rchash_get(cf_rchash *h, const void *key, uint32_t key_size, void **object_r);

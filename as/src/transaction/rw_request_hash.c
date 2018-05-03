@@ -115,7 +115,7 @@ int rw_msg_cb(cf_node id, msg* m, void* udata);
 void
 as_rw_init()
 {
-	cf_rchash_create(&g_rw_request_hash, rw_request_hash_fn,
+	g_rw_request_hash = cf_rchash_create(rw_request_hash_fn,
 			rw_request_hdestroy, sizeof(rw_request_hkey), 32 * 1024,
 			CF_RCHASH_MANY_LOCK);
 
@@ -145,23 +145,18 @@ transaction_status
 rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 		as_transaction* tr)
 {
-	int insert_rv;
-
-	while ((insert_rv = cf_rchash_put_unique(g_rw_request_hash, hkey,
-			sizeof(*hkey), rw)) != CF_RCHASH_OK) {
-		cf_assert(insert_rv == CF_RCHASH_ERR_FOUND, AS_RW, "put-unique error");
+	while (cf_rchash_put_unique(g_rw_request_hash, hkey, sizeof(*hkey), rw) !=
+			CF_RCHASH_OK) {
 		// rw_request with this digest already in hash - get it.
 
 		rw_request* rw0;
-		int get_rv = cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey),
-				(void**)&rw0);
 
-		if (get_rv == CF_RCHASH_ERR_NOT_FOUND) {
-			// Try insertion again immediately.
+		if (cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey),
+				(void**)&rw0) != CF_RCHASH_OK) {
+			// But now it's gone - try insertion again immediately.
 			continue;
 		}
 		// else - got it - handle "hot key" scenario.
-		cf_assert(get_rv == CF_RCHASH_OK, AS_RW, "cf_rchash_get error");
 
 		pthread_mutex_lock(&rw0->lock);
 
