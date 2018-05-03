@@ -191,6 +191,12 @@ as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer, int32_t f
 	ssize_t sent = cf_socket_try_send_all(sock, buf + off, remaining, flags);
 
 	if (sent < 0) {
+		shared->bad_response_fd = true;
+
+		if (! shared->in_trailer) {
+			cf_atomic64_incr(&g_stats.batch_index_errors);
+		}
+
 		return BATCH_ERROR;
 	}
 
@@ -200,22 +206,6 @@ as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer, int32_t f
 	}
 
 	return BATCH_SUCCESS;
-}
-
-static inline void
-as_batch_free(as_batch_queue* queue, as_batch_shared* shared)
-{
-	// Destroy lock
-	pthread_mutex_destroy(&shared->lock);
-
-	// Release memory
-	cf_free(shared->msgp);
-	cf_free(shared);
-
-	// It's critical that this count is decremented after the transaction is
-	// completely finished with the queue because "shutdown threads" relies
-	// on this information when performing graceful shutdown.
-	cf_atomic32_decr(&queue->count);
 }
 
 static inline void
@@ -231,8 +221,6 @@ as_batch_release_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 static void
 as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer, int status)
 {
-	as_batch_release_buffer(shared, buffer);
-
 	as_end_of_transaction(shared->fd_h, status != 0);
 	shared->fd_h = NULL;
 
@@ -253,21 +241,23 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffe
 			cf_atomic64_incr(&g_stats.batch_index_errors);
 		}
 	}
-	as_batch_free(queue, shared);
+
+	// Destroy lock
+	pthread_mutex_destroy(&shared->lock);
+
+	// Release memory
+	cf_free(shared->msgp);
+	cf_free(shared);
+
+	// It's critical that this count is decremented after the transaction is
+	// completely finished with the queue because "shutdown threads" relies
+	// on this information when performing graceful shutdown.
+	cf_atomic32_decr(&queue->count);
 }
 
 static bool
 as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
 {
-	// Send protocol trailer to client socket.
-	if (shared->bad_response_fd) {
-		as_batch_release_buffer(shared, buffer);
-		as_end_of_transaction_force_close(shared->fd_h);
-		shared->fd_h = NULL;
-		as_batch_free(queue, shared);
-		return true;
-	}
-
 	// Use existing buffer to store trailer message.
 	as_proto* proto = &buffer->proto;
 	proto->version = PROTO_VERSION;
@@ -295,42 +285,43 @@ as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared, as_batch_b
 	int status = as_batch_send_buffer(shared, buffer, MSG_NOSIGNAL);
 
 	if (status == BATCH_DELAY) {
-		shared->in_trailer = true;
 		return false;
 	}
 
+	as_batch_release_buffer(shared, buffer);
 	as_batch_complete(queue, shared, buffer, status);
 	return true;
 }
 
 static inline bool
-as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer, int status)
 {
-	// Wait till all transactions have been received before sending
-	// trailer and releasing memory.
+	// If we're invoked for the trailer, we're done. Free buffer and batch.
+	if (shared->in_trailer) {
+		as_batch_release_buffer(shared, buffer);
+		as_batch_complete(queue, shared, buffer, status);
+		return true;
+	}
+
 	shared->tran_count_response += buffer->tran_count;
 
-	if (shared->tran_count_response == shared->tran_max) {
-		// Keep last buffer to send trailer message.
-		return as_batch_send_trailer(queue, shared, buffer);
+	// We haven't yet reached the last buffer. Free buffer.
+	if (shared->tran_count_response < shared->tran_max) {
+		as_batch_release_buffer(shared, buffer);
+		return true;
 	}
 
-	// Release buffer.
-	as_batch_release_buffer(shared, buffer);
-	return true;
-}
-
-static inline bool
-as_batch_buffer_sent(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer, int status)
-{
-	// Return if done with buffer.
-	if (status != BATCH_SUCCESS) {
-		// Socket error.
-		shared->bad_response_fd = true;
-		cf_atomic64_incr(&g_stats.batch_index_errors);
+	// We've reached the last buffer. If we cannot send a trailer, then we're
+	// done. Free buffer and batch.
+	if (shared->bad_response_fd) {
+		as_batch_release_buffer(shared, buffer);
+		as_batch_complete(queue, shared, buffer, status);
+		return true;
 	}
 
-	return as_batch_buffer_end(queue, shared, buffer);
+	// Reuse the last buffer for the trailer.
+	shared->in_trailer = true;
+	return as_batch_send_trailer(queue, shared, buffer);
 }
 
 static inline bool
@@ -338,7 +329,7 @@ as_batch_timeout(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer
 {
 	if (cf_getns() >= shared->end) {
 		shared->bad_response_fd = true;
-		as_batch_buffer_end(queue, shared, buffer);
+		as_batch_buffer_end(queue, shared, buffer, BATCH_ERROR);
 		cf_atomic64_incr(&g_stats.batch_index_timeout);
 		return true;
 	}
@@ -359,13 +350,7 @@ as_batch_send_delayed(as_batch_queue* queue, as_batch_shared* shared, as_batch_b
 		return false;
 	}
 
-	if (shared->in_trailer) {
-		// Batch trailer send complete.
-		as_batch_complete(queue, shared, buffer, status);
-		return true;
-	}
-
-	return as_batch_buffer_sent(queue, shared, buffer, status);
+	return as_batch_buffer_end(queue, shared, buffer, status);
 }
 
 static bool
@@ -375,7 +360,7 @@ as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_
 
 	// Don't send buffer if an error has already occurred.
 	if (shared->bad_response_fd || shared->result_code) {
-		return as_batch_buffer_end(queue, shared, buffer);
+		return as_batch_buffer_end(queue, shared, buffer, BATCH_ERROR);
 	}
 
 	shared->buffer_offset = 0;
@@ -392,7 +377,7 @@ as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_
 		return false;
 	}
 
-	return as_batch_buffer_sent(queue, shared, buffer, status);
+	return as_batch_buffer_end(queue, shared, buffer, status);
 }
 
 static inline void
@@ -446,8 +431,9 @@ as_batch_worker(void* udata)
 		else {
 			// Try first delayed buffer in batch only.
 			if (shared->delayed_buffer == buffer) {
+				shared->delayed_buffer = NULL;
+
 				if (as_batch_send_delayed(batch_queue, shared, buffer)) {
-					shared->delayed_buffer = NULL;
 					continue;
 				}
 
@@ -456,6 +442,7 @@ as_batch_worker(void* udata)
 				}
 
 				// Socket blocked again.
+				shared->delayed_buffer = buffer;
 				as_batch_delay_buffer(batch_queue, response_queue, &response);
 			}
 			else {
