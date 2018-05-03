@@ -325,7 +325,6 @@ as_batch_timeout(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer
 	if (cf_getns() >= shared->end) {
 		shared->bad_response_fd = true;
 		as_batch_buffer_end(queue, shared, buffer, BATCH_ERROR);
-		cf_atomic64_incr(&g_stats.batch_index_timeout);
 		return true;
 	}
 
