@@ -2979,7 +2979,7 @@ packed_map_get_remove_by_key_interval(const packed_map *map, as_bin *b,
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 
-		if (count == 0) {
+		if (count == 0 && ! result->is_multi) {
 			if (! result_data_set_key_not_found(result, -1)) {
 				cf_warning(AS_PARTICLE, "packed_map_get_remove_by_key_interval() invalid result_type %d", result->type);
 				return -AS_PROTO_RESULT_FAIL_PARAMETER;
