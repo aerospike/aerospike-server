@@ -192,11 +192,6 @@ as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer, int32_t f
 
 	if (sent < 0) {
 		shared->bad_response_fd = true;
-
-		if (! shared->in_trailer) {
-			cf_atomic64_incr(&g_stats.batch_index_errors);
-		}
-
 		return BATCH_ERROR;
 	}
 
