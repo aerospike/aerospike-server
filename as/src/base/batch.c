@@ -49,7 +49,7 @@
 #define BATCH_MAX_TRANSACTION_SIZE (1024 * 1024 * 10) // 10MB
 #define BATCH_REPEAT_SIZE 25  // index(4),digest(20) and repeat(1)
 
-#define BATCH_FINAL_TIMEOUT (30UL * 1000 * 1000 * 1000) // 30 seconds
+#define BATCH_ABANDON_LIMIT (30UL * 1000 * 1000 * 1000) // 30 seconds
 
 #define BATCH_SUCCESS 0
 #define BATCH_ERROR -1
@@ -107,7 +107,8 @@ typedef struct {
 typedef struct {
 	cf_queue* response_queue;
 	cf_queue* complete_queue;
-	cf_atomic32 count;
+	cf_atomic32 tran_count;
+	uint32_t delay_count;
 	volatile bool active;
 } as_batch_queue;
 
@@ -247,7 +248,7 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffe
 	// It's critical that this count is decremented after the transaction is
 	// completely finished with the queue because "shutdown threads" relies
 	// on this information when performing graceful shutdown.
-	cf_atomic32_decr(&queue->count);
+	cf_atomic32_decr(&queue->tran_count);
 }
 
 static bool
@@ -320,7 +321,7 @@ as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buf
 }
 
 static inline bool
-as_batch_timeout(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+as_batch_abandon(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
 {
 	if (cf_getns() >= shared->end) {
 		shared->bad_response_fd = true;
@@ -378,11 +379,10 @@ static inline void
 as_batch_delay_buffer(as_batch_queue* queue, cf_queue* response_queue,
 		as_batch_response* response)
 {
-	// Delay buffer after yielding to other threads.
 	cf_atomic64_incr(&g_stats.batch_index_delay);
 
-	// If this is the only transaction on this thread, avoid tight loop.
-	if (queue->count == 1) {
+	// If all batch transactions on this thread are delayed, avoid tight loop.
+	if (queue->tran_count == queue->delay_count) {
 		pthread_yield();
 	}
 
@@ -414,12 +414,13 @@ as_batch_worker(void* udata)
 				continue;
 			}
 
-			if (as_batch_timeout(batch_queue, shared, buffer)) {
+			if (as_batch_abandon(batch_queue, shared, buffer)) {
 				continue;
 			}
 
 			// Socket blocked.
 			shared->delayed_buffer = buffer;
+			batch_queue->delay_count++;
 			as_batch_delay_buffer(batch_queue, response_queue, &response);
 		}
 		else {
@@ -428,10 +429,12 @@ as_batch_worker(void* udata)
 				shared->delayed_buffer = NULL;
 
 				if (as_batch_send_delayed(batch_queue, shared, buffer)) {
+					batch_queue->delay_count--;
 					continue;
 				}
 
-				if (as_batch_timeout(batch_queue, shared, buffer)) {
+				if (as_batch_abandon(batch_queue, shared, buffer)) {
+					batch_queue->delay_count--;
 					continue;
 				}
 
@@ -465,7 +468,8 @@ as_batch_create_thread_queues(uint32_t begin, uint32_t end)
 		work.batch_queue = &batch_queues[i];
 		work.batch_queue->response_queue = cf_queue_create(sizeof(as_batch_response), true);
 		work.batch_queue->complete_queue = cf_queue_create(sizeof(uint32_t), true);
-		work.batch_queue->count = 0;
+		work.batch_queue->tran_count = 0;
+		work.batch_queue->delay_count = 0;
 		work.batch_queue->active = true;
 
 		int rc = as_thread_pool_queue_task_fixed(&batch_thread_pool, &work);
@@ -482,7 +486,7 @@ static bool
 as_batch_wait(uint32_t begin, uint32_t end)
 {
 	for (uint32_t i = begin; i < end; i++) {
-		if (batch_queues[i].count > 0) {
+		if (batch_queues[i].tran_count > 0) {
 			return false;
 		}
 	}
@@ -842,11 +846,11 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 	}
 
-	// Batch delay timeout is twice batch timeout if batch timeout is defined.
-	// If batch timeout is zero, batch delay timeout is 30 seconds.
+	// Abandon batch at twice batch timeout if batch timeout is defined.
+	// If batch timeout is zero, abandon after 30 seconds.
 	shared->end = btr->start_time + ((bmsg->transaction_ttl != 0) ?
 			((uint64_t)bmsg->transaction_ttl * 1000 * 1000 * 2) :
-			BATCH_FINAL_TIMEOUT);
+			BATCH_ABANDON_LIMIT);
 
 	shared->start = btr->start_time;
 	shared->fd_h = btr->from.proto_fd_h;
@@ -870,7 +874,7 @@ as_batch_queue_task(as_transaction* btr)
 		}
 	}
 	// Increment batch queue transaction count.
-	cf_atomic32_incr(&batch_queue->count);
+	cf_atomic32_incr(&batch_queue->tran_count);
 	shared->response_queue = batch_queue->response_queue;
 
 	// Initialize generic transaction.
@@ -1260,7 +1264,7 @@ as_batch_queues_info(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ',');
 		}
 		as_batch_queue* bq = &batch_queues[i];
-		cf_dyn_buf_append_uint32(db, bq->count);  // Batch count
+		cf_dyn_buf_append_uint32(db, bq->tran_count);  // Batch count
 		cf_dyn_buf_append_char(db, ':');
 		cf_dyn_buf_append_int(db, cf_queue_sz(bq->response_queue));  // Buffer count
 	}
