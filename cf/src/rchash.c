@@ -98,14 +98,12 @@ cf_rchash_fn_u32(const void *key, uint32_t key_size)
 	return *(const uint32_t *)key;
 }
 
-
 // Hash all bytes of key using 32-bit Fowler-Noll-Vo method.
 uint32_t
 cf_rchash_fn_fnv32(const void *key, uint32_t key_size)
 {
 	return cf_hash_fnv32((const uint8_t *)key, (size_t)key_size);
 }
-
 
 // Useful if key is a null-terminated string. (Note - if using fixed-size keys,
 // key must still be padded to correctly compare keys in a bucket.)
@@ -163,7 +161,6 @@ cf_rchash_create(cf_rchash_hash_fn h_fn, cf_rchash_destructor_fn d_fn,
 	return h;
 }
 
-
 void
 cf_rchash_destroy(cf_rchash *h)
 {
@@ -193,7 +190,6 @@ cf_rchash_destroy(cf_rchash *h)
 	cf_free(h);
 }
 
-
 uint32_t
 cf_rchash_get_size(const cf_rchash *h)
 {
@@ -202,7 +198,6 @@ cf_rchash_get_size(const cf_rchash *h)
 	// For now, not bothering with different methods per lock mode.
 	return as_load_uint32(&h->n_elements);
 }
-
 
 // If key is not already in hash, insert it with specified rc_malloc'd object.
 // If key is already in hash, replace (and release) existing object.
@@ -259,7 +254,6 @@ cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 	cf_rchash_unlock(l);
 }
 
-
 // Like cf_rchash_put(), but if key is already in hash, fail.
 int
 cf_rchash_put_unique(cf_rchash *h, const void *key, uint32_t key_size,
@@ -309,7 +303,6 @@ cf_rchash_put_unique(cf_rchash *h, const void *key, uint32_t key_size,
 	return CF_RCHASH_OK;
 }
 
-
 // If key is found, object is returned with extra ref-count. When finished with
 // it, caller must always release the returned object, and must destroy and free
 // the object if the ref-count hits 0 - i.e. caller should do the equivalent of
@@ -352,7 +345,6 @@ cf_rchash_get(cf_rchash *h, const void *key, uint32_t key_size, void **object_r)
 	return CF_RCHASH_ERR_NOT_FOUND;
 }
 
-
 // Removes the key and object from the hash, releasing the "original" ref-count.
 // If this causes the ref-count to hit 0, the object destructor is called and
 // the object is freed.
@@ -362,7 +354,6 @@ cf_rchash_delete(cf_rchash *h, const void *key, uint32_t key_size)
 	// No check to verify the object.
 	return cf_rchash_delete_object(h, key, key_size, NULL);
 }
-
 
 // Like cf_rchash_delete() but checks that object found matches that specified.
 // Threads may race to delete and release the same object - they may be doing a
@@ -439,7 +430,6 @@ cf_rchash_delete_object(cf_rchash *h, const void *key, uint32_t key_size,
 
 	return CF_RCHASH_ERR_NOT_FOUND;
 }
-
 
 // Call the given function (reduce_fn) for every element in the tree.
 //
@@ -586,7 +576,6 @@ cf_rchash_put_v(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 	cf_rchash_unlock(l);
 }
 
-
 int
 cf_rchash_put_unique_v(cf_rchash *h, const void *key, uint32_t key_size,
 		void *object)
@@ -629,7 +618,6 @@ cf_rchash_put_unique_v(cf_rchash *h, const void *key, uint32_t key_size,
 	return CF_RCHASH_OK;
 }
 
-
 int
 cf_rchash_get_v(cf_rchash *h, const void *key, uint32_t key_size,
 		void **object_r)
@@ -660,7 +648,6 @@ cf_rchash_get_v(cf_rchash *h, const void *key, uint32_t key_size,
 
 	return CF_RCHASH_ERR_NOT_FOUND;
 }
-
 
 int
 cf_rchash_delete_object_v(cf_rchash *h, const void *key, uint32_t key_size,
@@ -726,7 +713,6 @@ cf_rchash_delete_object_v(cf_rchash *h, const void *key, uint32_t key_size,
 
 	return CF_RCHASH_ERR_NOT_FOUND;
 }
-
 
 int
 cf_rchash_reduce_v(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
@@ -836,7 +822,6 @@ cf_rchash_destroy_elements(cf_rchash *h)
 	}
 }
 
-
 static inline void
 cf_rchash_destroy_elements_v(cf_rchash *h)
 {
@@ -862,13 +847,11 @@ cf_rchash_destroy_elements_v(cf_rchash *h)
 	}
 }
 
-
 static inline uint32_t
 cf_rchash_calculate_hash(cf_rchash *h, const void *key, uint32_t key_size)
 {
 	return h->h_fn(key, key_size) % h->n_buckets;
 }
-
 
 static inline pthread_mutex_t *
 cf_rchash_lock(cf_rchash *h, uint32_t i)
@@ -889,7 +872,6 @@ cf_rchash_lock(cf_rchash *h, uint32_t i)
 	return l;
 }
 
-
 static inline void
 cf_rchash_unlock(pthread_mutex_t *l)
 {
@@ -898,7 +880,6 @@ cf_rchash_unlock(pthread_mutex_t *l)
 	}
 }
 
-
 static inline cf_rchash_ele_f *
 cf_rchash_get_bucket(cf_rchash *h, uint32_t i)
 {
@@ -906,14 +887,12 @@ cf_rchash_get_bucket(cf_rchash *h, uint32_t i)
 			((sizeof(cf_rchash_ele_f) + h->key_size) * i));
 }
 
-
 static inline cf_rchash_ele_v *
 cf_rchash_get_bucket_v(cf_rchash *h, uint32_t i)
 {
 	return (cf_rchash_ele_v *)((uint8_t *)h->table +
 			(sizeof(cf_rchash_ele_v) * i));
 }
-
 
 static inline void
 cf_rchash_fill_element(cf_rchash_ele_f *e, cf_rchash *h, const void *key,
@@ -923,7 +902,6 @@ cf_rchash_fill_element(cf_rchash_ele_f *e, cf_rchash *h, const void *key,
 	e->object = object;
 	cf_rchash_size_incr(h);
 }
-
 
 static inline void
 cf_rchash_fill_element_v(cf_rchash_ele_v *e, cf_rchash *h, const void *key,
@@ -939,7 +917,6 @@ cf_rchash_fill_element_v(cf_rchash_ele_v *e, cf_rchash *h, const void *key,
 	cf_rchash_size_incr(h);
 }
 
-
 static inline void
 cf_rchash_size_incr(cf_rchash *h)
 {
@@ -947,14 +924,12 @@ cf_rchash_size_incr(cf_rchash *h)
 	as_incr_int32(&h->n_elements);
 }
 
-
 static inline void
 cf_rchash_size_decr(cf_rchash *h)
 {
 	// For now, not bothering with different methods per lock mode.
 	as_decr_int32(&h->n_elements);
 }
-
 
 static inline void
 cf_rchash_release_object(cf_rchash *h, void *object)
