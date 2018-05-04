@@ -1,7 +1,7 @@
 /*
  * msg.c
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -32,6 +32,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/param.h>
 
 #include "aerospike/as_msgpack.h"
 #include "citrusleaf/alloc.h"
@@ -60,6 +61,8 @@ typedef struct msg_field_hdr_s {
 	uint8_t content[];
 } __attribute__ ((__packed__)) msg_field_hdr;
 
+#define BUF_FIELD_HDR_SZ (sizeof(msg_field_hdr) + sizeof(uint32_t))
+
 
 //==========================================================
 // Globals.
@@ -78,14 +81,21 @@ static msg_type_entry g_mte[M_TYPE_MAX];
 // Forward declarations.
 //
 
-static size_t msg_get_field_wire_size(msg_field_type type, size_t field_sz);
-static uint32_t msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf);
+static uint32_t msg_get_field_wire_size(msg_field_type type, uint32_t field_sz);
+static uint32_t msg_field_write_hdr(const msg_field *mf, msg_field_type type, uint8_t *buf);
+static uint32_t msg_field_write_buf(const msg_field *mf, msg_field_type type, uint8_t *buf);
 static void msg_field_save(msg *m, msg_field *mf);
 
 
 //==========================================================
 // Inlines.
 //
+
+static inline bool
+mf_type_is_int(msg_field_type type)
+{
+	return type == M_FT_UINT32 || type == M_FT_UINT64;
+}
 
 static inline msg_field_type
 mf_type(const msg_field *mf, msg_type type)
@@ -253,6 +263,111 @@ msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count)
 	return sz;
 }
 
+// Returns iovec count.
+size_t
+msg_to_iov_buf(const msg *m, uint8_t *buf, size_t buf_sz, uint32_t *msg_sz_r)
+{
+	uint32_t body_sz = 0;
+	uint32_t int_fields = 0;
+	uint32_t set_fields = 0;
+
+	for (uint16_t i = 0; i < m->n_fields; i++) {
+		const msg_field *mf = &m->f[i];
+
+		if (mf->is_set) {
+			msg_field_type type = mf_type(mf, m->type);
+
+			set_fields++;
+			body_sz += msg_get_field_wire_size(type, mf->field_sz);
+
+			if (mf_type_is_int(type)) {
+				int_fields++;
+			}
+		}
+	}
+
+	struct iovec *iov = (struct iovec *)buf;
+	uint32_t buf_fields = set_fields - int_fields;
+	uint32_t max_iov = MAX(1, 2 * buf_fields);
+
+	cf_assert(buf_sz >= max_iov * sizeof(struct iovec) + sizeof(msg_hdr) +
+			int_fields * (sizeof(msg_field_hdr) + sizeof(uint64_t)),
+			AS_FABRIC, "buf_sz %lu too small", buf_sz);
+
+	uint8_t *ptr = buf + max_iov * sizeof(struct iovec);
+	msg_hdr * const hdr = (msg_hdr *)ptr;
+	uint16_t first_buf = m->n_fields;
+
+	hdr->size = cf_swap_to_be32(body_sz);
+	hdr->type = cf_swap_to_be16(m->type);
+	iov->iov_base = ptr;
+	ptr += sizeof(msg_hdr);
+
+	// Pack all INT types.
+	for (uint16_t i = 0; i < m->n_fields; i++) {
+		const msg_field *mf = &m->f[i];
+
+		if (mf->is_set) {
+			msg_field_type type = mf_type(mf, m->type);
+
+			if (mf_type_is_int(type)) {
+				ptr += msg_field_write_buf(mf, type, ptr);
+			}
+			else if (first_buf == m->n_fields) {
+				first_buf = i;
+			}
+		}
+	}
+
+	iov->iov_len = ptr - (uint8_t *)iov->iov_base;
+
+	if (buf_fields == 0) {
+		*msg_sz_r = body_sz + sizeof(msg_hdr);
+		return 1;
+	}
+
+	// Pack first buf.
+	{
+		const msg_field *mf = &m->f[first_buf];
+		msg_field_type type = mf_type(mf, m->type);
+
+		msg_field_write_hdr(mf, type, ptr);
+		iov->iov_len += BUF_FIELD_HDR_SZ;
+		ptr += BUF_FIELD_HDR_SZ;
+		iov++;
+		iov->iov_base = mf->u.any_buf;
+		iov->iov_len = mf->field_sz;
+		iov++;
+	}
+
+	// Pack remaining buf.
+	for (uint16_t i = first_buf + 1; i < m->n_fields; i++) {
+		const msg_field *mf = &m->f[i];
+
+		if (! mf->is_set) {
+			continue;
+		}
+
+		msg_field_type type = mf_type(mf, m->type);
+
+		if (! mf_type_is_int(type)) {
+			msg_field_write_hdr(mf, type, ptr);
+			iov->iov_base = ptr;
+			iov->iov_len = BUF_FIELD_HDR_SZ;
+			ptr += BUF_FIELD_HDR_SZ;
+			iov++;
+			iov->iov_base = mf->u.any_buf;
+			iov->iov_len = mf->field_sz;
+			iov++;
+		}
+	}
+
+	cf_assert(ptr <= buf + buf_sz, AS_PARTICLE, "ptr out of bounds %p > buf %p + buf_sz %zu", ptr, buf, buf_sz);
+	*msg_sz_r = body_sz + sizeof(msg_hdr);
+
+	return iov - (struct iovec *)buf;
+}
+
 size_t
 msg_to_wire(const msg *m, uint8_t *buf)
 {
@@ -266,9 +381,10 @@ msg_to_wire(const msg *m, uint8_t *buf)
 
 	for (uint16_t i = 0; i < m->n_fields; i++) {
 		const msg_field *mf = &m->f[i];
+		msg_field_type type = mf_type(mf, m->type);
 
 		if (mf->is_set) {
-			buf += msg_field_stamp(mf, m->type, buf);
+			buf += msg_field_write_buf(mf, type, buf);
 		}
 	}
 
@@ -284,34 +400,54 @@ msg_to_wire(const msg *m, uint8_t *buf)
 // Public API - parse flattened data into messages.
 //
 
-int
+bool
 msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 {
-	if (bufsz < sizeof(msg_hdr)) {
-		return -1;
+	uint32_t sz;
+	msg_type type;
+
+	if (! msg_parse_hdr(&sz, &type, buf, bufsz)) {
+		cf_warning(CF_MSG, "msg_parse() invalid bufsz %zu too small", bufsz);
+		return false;
 	}
 
-	const msg_hdr *hdr = (const msg_hdr *)buf;
-	buf += sizeof(msg_hdr);
-
-	uint32_t sz = cf_swap_from_be32(hdr->size);
-	uint16_t type = cf_swap_from_be16(hdr->type);
-
 	if (bufsz < sz + sizeof(msg_hdr)) {
-		return -2;
+		cf_warning(CF_MSG, "msg_parse() bufsz %zu < msg sz %u + %zu", bufsz, sz, sizeof(msg_hdr));
+		return false;
 	}
 
 	if (m->type != type) {
 		cf_ticker_warning(CF_MSG, "parsed type %d for msg type %d", type, m->type);
-		return -3;
+		return false;
 	}
 
+	return msg_parse_fields(m, buf + sizeof(msg_hdr), sz);
+}
+
+bool
+msg_parse_hdr(uint32_t *size_r, msg_type *type_r, const uint8_t *buf, size_t sz)
+{
+	if (sz < sizeof(msg_hdr)) {
+		return false;
+	}
+
+	const msg_hdr *hdr = (const msg_hdr *)buf;
+
+	*size_r = cf_swap_from_be32(hdr->size);
+	*type_r = (msg_type)cf_swap_from_be16(hdr->type);
+
+	return true;
+}
+
+bool
+msg_parse_fields(msg *m, const uint8_t *buf, size_t sz)
+{
 	const uint8_t *eob = buf + sz;
 	size_t left = sz;
 
 	while (left != 0) {
 		if (left < sizeof(msg_field_hdr) + sizeof(uint32_t)) {
-			return -4;
+			return false;
 		}
 
 		const msg_field_hdr *fhdr = (const msg_field_hdr *)buf;
@@ -320,7 +456,7 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 		uint32_t id = (uint32_t)cf_swap_from_be16(fhdr->id);
 		msg_field_type ft = (msg_field_type)fhdr->type;
 		size_t fsz;
-		uint32_t size = 0;
+		uint32_t fsz_sz = 0;
 
 		switch (ft) {
 		case M_FT_UINT32:
@@ -330,14 +466,14 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 			fsz = sizeof(uint64_t);
 			break;
 		default:
-			size = sizeof(uint32_t);
 			fsz = cf_swap_from_be32(*(const uint32_t *)buf);
+			fsz_sz = sizeof(uint32_t);
 			buf += sizeof(uint32_t);
 			break;
 		}
 
-		if (left < sizeof(msg_field_hdr) + size + fsz) {
-			return -5;
+		if (left < sizeof(msg_field_hdr) + fsz_sz + fsz) {
+			return false;
 		}
 
 		msg_field *mf;
@@ -392,23 +528,7 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 
 	m->just_parsed = true;
 
-	return 0;
-}
-
-int
-msg_get_initial(uint32_t *size_r, msg_type *type_r, const uint8_t *buf,
-		uint32_t bufsz)
-{
-	if (bufsz < sizeof(msg_hdr)) {
-		return -1;
-	}
-
-	const msg_hdr *hdr = (const msg_hdr *)buf;
-
-	*size_r = cf_swap_from_be32(hdr->size) + (uint32_t)sizeof(msg_hdr);
-	*type_r = (msg_type)cf_swap_from_be16(hdr->type);
-
-	return 0;
+	return true;
 }
 
 void
@@ -481,25 +601,21 @@ msg_preserve_all_fields(msg *m)
 // Public API - set fields in messages.
 //
 
-int
+void
 msg_set_uint32(msg *m, int field_id, uint32_t v)
 {
 	m->f[field_id].is_set = true;
 	m->f[field_id].u.ui32 = v;
-
-	return 0;
 }
 
-int
+void
 msg_set_uint64(msg *m, int field_id, uint64_t v)
 {
 	m->f[field_id].is_set = true;
 	m->f[field_id].u.ui64 = v;
-
-	return 0;
 }
 
-int
+void
 msg_set_str(msg *m, int field_id, const char *v, msg_set_type type)
 {
 	msg_field *mf = &m->f[field_id];
@@ -532,11 +648,9 @@ msg_set_str(msg *m, int field_id, const char *v, msg_set_type type)
 	}
 
 	mf->is_set = true;
-
-	return 0;
 }
 
-int
+void
 msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t sz,
 		msg_set_type type)
 {
@@ -570,11 +684,9 @@ msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t sz,
 	}
 
 	mf->is_set = true;
-
-	return 0;
 }
 
-int
+void
 msg_set_uint32_array_size(msg *m, int field_id, uint32_t count)
 {
 	msg_field *mf = &m->f[field_id];
@@ -585,11 +697,9 @@ msg_set_uint32_array_size(msg *m, int field_id, uint32_t count)
 	mf->u.ui32_a = cf_malloc(mf->field_sz);
 	mf->is_set = true;
 	mf->is_free = true;
-
-	return 0;
 }
 
-int
+void
 msg_set_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t v)
 {
 	msg_field *mf = &m->f[field_id];
@@ -598,11 +708,9 @@ msg_set_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t v)
 	cf_assert(idx < (mf->field_sz >> 2), CF_MSG, "msg_set_uint32_array() idx out of bounds");
 
 	mf->u.ui32_a[idx] = cf_swap_to_be32(v);
-
-	return 0;
 }
 
-int
+void
 msg_set_uint64_array_size(msg *m, int field_id, uint32_t count)
 {
 	msg_field *mf = &m->f[field_id];
@@ -613,11 +721,9 @@ msg_set_uint64_array_size(msg *m, int field_id, uint32_t count)
 	mf->u.ui64_a = cf_malloc(mf->field_sz);
 	mf->is_set = true;
 	mf->is_free = true;
-
-	return 0;
 }
 
-int
+void
 msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v)
 {
 	msg_field *mf = &m->f[field_id];
@@ -626,8 +732,6 @@ msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v)
 	cf_assert(idx < (mf->field_sz >> 3), CF_MSG, "msg_set_uint64_array() idx out of bounds");
 
 	mf->u.ui64_a[idx] = cf_swap_to_be64(v);
-
-	return 0;
 }
 
 void
@@ -1092,8 +1196,8 @@ msg_dump(const msg *m, const char *info)
 // Local helpers.
 //
 
-static size_t
-msg_get_field_wire_size(msg_field_type type, size_t field_sz)
+static uint32_t
+msg_get_field_wire_size(msg_field_type type, uint32_t field_sz)
 {
 	switch (type) {
 	case M_FT_UINT32:
@@ -1113,15 +1217,13 @@ msg_get_field_wire_size(msg_field_type type, size_t field_sz)
 		break;
 	}
 
-	return sizeof(msg_field_hdr) + sizeof(uint32_t) + field_sz;
+	return BUF_FIELD_HDR_SZ + field_sz;
 }
 
-// Returns the number of bytes written.
 static uint32_t
-msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf)
+msg_field_write_hdr(const msg_field *mf, msg_field_type type, uint8_t *buf)
 {
 	msg_field_hdr *hdr = (msg_field_hdr *)buf;
-	msg_field_type type = mf_type(mf, mtype);
 
 	buf += sizeof(msg_field_hdr);
 
@@ -1139,11 +1241,6 @@ msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf)
 		break;
 	}
 
-	uint32_t fsz;
-	uint32_t *p_fsz = (uint32_t *)buf;
-
-	buf += sizeof(uint32_t);
-
 	switch (type) {
 	case M_FT_STR:
 	case M_FT_BUF:
@@ -1152,17 +1249,28 @@ msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf)
 	case M_FT_ARRAY_STR:
 	case M_FT_ARRAY_BUF:
 	case M_FT_MSGPACK:
-		fsz = mf->field_sz;
-		memcpy(buf, mf->u.any_buf, fsz);
+		*(uint32_t *)buf = cf_swap_to_be32(mf->field_sz);
 		break;
 	default:
 		cf_crash(CF_MSG, "unexpected field type %d", type);
-		return 0;
 	}
 
-	*p_fsz = cf_swap_to_be32(fsz);
+	return 0; // incomplete
+}
 
-	return (uint32_t)(sizeof(msg_field_hdr) + sizeof(uint32_t) + fsz);
+// Returns the number of bytes written.
+static uint32_t
+msg_field_write_buf(const msg_field *mf, msg_field_type type, uint8_t *buf)
+{
+	uint32_t hdr_sz = msg_field_write_hdr(mf, type, buf);
+
+	if (hdr_sz != 0) {
+		return hdr_sz;
+	}
+
+	memcpy(buf + BUF_FIELD_HDR_SZ, mf->u.any_buf, mf->field_sz);
+
+	return (uint32_t)(BUF_FIELD_HDR_SZ + mf->field_sz);
 }
 
 static void

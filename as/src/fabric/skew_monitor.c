@@ -406,9 +406,7 @@ static void
 skew_monitor_hb_plugin_set_fn(msg* msg)
 {
 	cf_clock send_ts = cf_clock_getabsolute();
-	if (msg_set_uint64(msg, AS_HB_MSG_SKEW_MONITOR_DATA, send_ts) != 0) {
-		CRASH("error setting current timestamp on msg");
-	}
+	msg_set_uint64(msg, AS_HB_MSG_SKEW_MONITOR_DATA, send_ts);
 
 	// Update self skew.
 	as_hlc_timestamp send_hlc_ts = as_hlc_timestamp_now();

@@ -1,7 +1,7 @@
 /*
  * msg.h
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/socket.h>
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_vector.h"
@@ -169,14 +170,16 @@ void msg_incr_ref(msg *m);
 
 size_t msg_get_wire_size(const msg *m);
 size_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count);
+size_t msg_to_iov_buf(const msg *m, uint8_t *buf, size_t buf_sz, uint32_t *msg_sz_r);
 size_t msg_to_wire(const msg *m, uint8_t *buf);
 
 //------------------------------------------------
 // Parse flattened data into messages.
 //
 
-int msg_parse(msg *m, const uint8_t *buf, size_t bufsz);
-int msg_get_initial(uint32_t *size_r, msg_type *type_r, const uint8_t *buf, uint32_t bufsz);
+bool msg_parse(msg *m, const uint8_t *buf, size_t bufsz);
+bool msg_parse_hdr(uint32_t *size_r, msg_type *type_r, const uint8_t *buf, size_t sz);
+bool msg_parse_fields(msg *m, const uint8_t *buf, size_t sz);
 
 void msg_reset(msg *m);
 void msg_preserve_fields(msg *m, uint32_t n_field_ids, ...);
@@ -186,15 +189,15 @@ void msg_preserve_all_fields(msg *m);
 // Set fields in messages.
 //
 
-int msg_set_uint32(msg *m, int field_id, uint32_t v);
-int msg_set_uint64(msg *m, int field_id, uint64_t v);
-int msg_set_str(msg *m, int field_id, const char *v, msg_set_type type);
-int msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t sz, msg_set_type type);
+void msg_set_uint32(msg *m, int field_id, uint32_t v);
+void msg_set_uint64(msg *m, int field_id, uint64_t v);
+void msg_set_str(msg *m, int field_id, const char *v, msg_set_type type);
+void msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t sz, msg_set_type type);
 
-int msg_set_uint32_array_size(msg *m, int field_id, uint32_t count);
-int msg_set_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t v);
-int msg_set_uint64_array_size(msg *m, int field_id, uint32_t count);
-int msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v);
+void msg_set_uint32_array_size(msg *m, int field_id, uint32_t count);
+void msg_set_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t v);
+void msg_set_uint64_array_size(msg *m, int field_id, uint32_t count);
+void msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v);
 
 void msg_msgpack_list_set_uint32(msg *m, int field_id, const uint32_t *buf, uint32_t count);
 void msg_msgpack_list_set_buf(msg *m, int field_id, const cf_vector *v);

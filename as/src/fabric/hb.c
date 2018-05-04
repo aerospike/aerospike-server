@@ -2934,12 +2934,8 @@ static void
 msg_node_list_set(msg* msg, int field_id, cf_node* node_list,
 		size_t node_length)
 {
-	if (msg_set_buf(msg, field_id, (uint8_t*)node_list,
-			sizeof(cf_node) * node_length, MSG_SET_COPY) != 0) {
-		CRASH("error setting adjacency list on msg");
-	}
-
-	return;
+	msg_set_buf(msg, field_id, (uint8_t*)node_list,
+			sizeof(cf_node) * node_length, MSG_SET_COPY);
 }
 
 /**
@@ -2971,10 +2967,8 @@ msg_info_reply_set(msg* msg, as_hb_mesh_info_reply* response,
 		CRASH("error setting info reply on msg");
 	}
 
-	if (msg_set_buf(msg, AS_HB_MSG_INFO_REPLY, (uint8_t*)response,
-			response_size, MSG_SET_COPY) != 0) {
-		CRASH("error setting info reply on msg");
-	}
+	msg_set_buf(msg, AS_HB_MSG_INFO_REPLY, (uint8_t*)response, response_size,
+			MSG_SET_COPY);
 
 	return;
 }
@@ -3056,11 +3050,9 @@ msg_published_endpoints_fill(const as_endpoint_list* published_endpoint_list,
 		// Set the source address
 		size_t endpoint_list_size = 0;
 		as_endpoint_list_sizeof(published_endpoint_list, &endpoint_list_size);
-		if (msg_set_buf(msg, AS_HB_MSG_ENDPOINTS,
+		msg_set_buf(msg, AS_HB_MSG_ENDPOINTS,
 				(uint8_t*)published_endpoint_list, endpoint_list_size,
-				MSG_SET_COPY) != 0) {
-			CRASH("error setting heartbeat address on msg");
-		}
+				MSG_SET_COPY);
 	}
 }
 
@@ -3074,14 +3066,10 @@ msg_src_fields_fill(msg* msg)
 	bool is_mesh = hb_is_mesh();
 
 	// Set the hb protocol id / version.
-	if (msg_set_uint32(msg, AS_HB_MSG_ID, hb_protocol_identifier_get()) != 0) {
-		CRASH("error setting heartbeat protocol on msg");
-	}
+	msg_set_uint32(msg, AS_HB_MSG_ID, hb_protocol_identifier_get());
 
 	// Set the source node.
-	if (msg_set_uint64(msg, AS_HB_MSG_NODE, config_self_nodeid_get()) != 0) {
-		CRASH("error setting node id on msg");
-	}
+	msg_set_uint64(msg, AS_HB_MSG_NODE, config_self_nodeid_get());
 
 	endpoint_list_to_msg_udata udata;
 	udata.msg = msg;
@@ -3093,10 +3081,7 @@ msg_src_fields_fill(msg* msg)
 	}
 
 	// Set the send hlc timestamp
-	if (msg_set_uint64(msg, AS_HB_MSG_HLC_TIMESTAMP, as_hlc_timestamp_now())
-			!= 0) {
-		CRASH("error setting send timestamp on msg");
-	}
+	msg_set_uint64(msg, AS_HB_MSG_HLC_TIMESTAMP, as_hlc_timestamp_now());
 }
 
 /**
@@ -3108,9 +3093,7 @@ static void
 msg_type_set(msg* msg, as_hb_msg_type msg_type)
 {
 	// Set the message type.
-	if (msg_set_uint32(msg, AS_HB_MSG_TYPE, msg_type) != 0) {
-		CRASH("error setting type on msg");
-	}
+	msg_set_uint32(msg, AS_HB_MSG_TYPE, msg_type);
 }
 
 /*
@@ -3962,8 +3945,7 @@ channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len)
 
 	// Parse the uncompressed buffer.
 	parsed =
-			msg_parse(msg, uncompressed_buffer, uncompressed_buffer_length)
-					== 0 ?
+			msg_parse(msg, uncompressed_buffer, uncompressed_buffer_length) ?
 					AS_HB_CHANNEL_MSG_READ_SUCCESS :
 					AS_HB_CHANNEL_MSG_PARSE_FAIL;
 
@@ -3994,8 +3976,8 @@ channel_message_parse(msg* msg, void* buffer, int buffer_content_len)
 	// Peek into the buffer to get hold of the message type.
 	msg_type type = 0;
 	uint32_t msg_size = 0;
-	if (msg_get_initial(&msg_size, &type, (uint8_t*)buffer, buffer_content_len)
-			!= 0 || type != msg->type) {
+	if (! msg_parse_hdr(&msg_size, &type, (uint8_t*)buffer, buffer_content_len)
+			|| type != msg->type) {
 		// Pre check because msg_parse considers this a warning but this would
 		// be common when protocol version between nodes do not match.
 		DEBUG("message type mismatch - expected:%d received:%d", msg->type,
@@ -4003,7 +3985,7 @@ channel_message_parse(msg* msg, void* buffer, int buffer_content_len)
 		return AS_HB_CHANNEL_MSG_PARSE_FAIL;
 	}
 
-	bool parsed = msg_parse(msg, buffer, buffer_content_len) == 0;
+	bool parsed = msg_parse(msg, buffer, buffer_content_len);
 
 	if (parsed) {
 		if (msg_is_set(msg, AS_HB_MSG_COMPRESSED_PAYLOAD)) {
@@ -7633,10 +7615,8 @@ hb_plugin_set_fn(msg* msg)
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	as_config_cluster_name_get(cluster_name);
 
-	if (cluster_name[0] != '\0'
-			&& msg_set_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name,
-					MSG_SET_COPY) != 0) {
-		CRASH("error setting cluster name on msg");
+	if (cluster_name[0] != '\0') {
+		msg_set_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name, MSG_SET_COPY);
 	}
 }
 

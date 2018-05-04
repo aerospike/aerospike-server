@@ -1,7 +1,7 @@
 /*
  * socket.c
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -545,6 +545,12 @@ cf_socket_enable_nagle(cf_socket *sock)
 }
 
 void
+cf_socket_set_cork(cf_socket *sock, int cork)
+{
+	setsockopt(sock->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(int));
+}
+
+void
 cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count)
 {
 	static const int32_t flag = 1;
@@ -946,6 +952,50 @@ cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags)
 }
 
 int32_t
+cf_socket_send_msg(cf_socket *sock, struct msghdr *m, int32_t flags)
+{
+	if (sock->ssl) {
+		int32_t bytes = 0;
+		struct iovec *v = m->msg_iov;
+
+		for (socklen_t i = 0; i < m->msg_iovlen; i++) {
+			int rv = tls_socket_send(sock, v->iov_base, v->iov_len, flags, 0);
+
+			if (rv < 0) {
+				// errno is set by tls_socket_send.
+				if (errno == ETIMEDOUT) {
+					errno = EAGAIN;
+				}
+
+				if (errno == EAGAIN && bytes != 0) {
+					break; // partial send
+				}
+
+				return rv;
+			}
+			else if (rv < v->iov_len) {
+				bytes += rv;
+				break;
+			}
+
+			bytes += rv;
+			v++;
+		}
+
+		return bytes;
+	}
+
+	int32_t res = sendmsg(sock->fd, m, flags | MSG_NOSIGNAL);
+
+	if (res < 0) {
+		cf_debug(CF_SOCKET, "Error while sending on FD %d: %d (%s)",
+				sock->fd, errno, cf_strerror(errno));
+	}
+
+	return res;
+}
+
+int32_t
 cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
 {
 	cf_assert(sock->ssl == NULL, CF_SOCKET, "cannot use cf_socket_recv_from() with TLS");
@@ -988,6 +1038,50 @@ cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags)
 	}
 
 	return cf_socket_recv_from(sock, buff, size, flags, NULL);
+}
+
+int32_t
+cf_socket_recv_msg(cf_socket *sock, struct msghdr *m, int32_t flags)
+{
+	if (sock->ssl) {
+		int32_t bytes = 0;
+		struct iovec *v = m->msg_iov;
+
+		for (socklen_t i = 0; i < m->msg_iovlen; i++) {
+			int rv = tls_socket_recv(sock, v->iov_base, v->iov_len, flags, 0);
+
+			if (rv < 0) {
+				// errno is set by tls_socket_recv.
+				if (errno == ETIMEDOUT) {
+					errno = EAGAIN;
+				}
+
+				if (errno == EAGAIN && bytes != 0) {
+					break; // partial recv
+				}
+
+				return rv;
+			}
+			else if (rv < v->iov_len) {
+				bytes += rv;
+				break;
+			}
+
+			bytes += rv;
+			v++;
+		}
+
+		return bytes;
+	}
+
+	int32_t res = recvmsg(sock->fd, m, flags);
+
+	if (res < 0) {
+		cf_debug(CF_SOCKET, "Error while receiving on FD %d: %d (%s)",
+				sock->fd, errno, cf_strerror(errno));
+	}
+
+	return res;
 }
 
 static bool

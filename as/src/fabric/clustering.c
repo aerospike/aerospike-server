@@ -2369,10 +2369,7 @@ clustering_hb_plugin_set_fn(msg* msg)
 		cf_vector_get(&g_register.succession_list, i, &succession[i]);
 	}
 
-	if (msg_set_buf(msg, AS_HB_MSG_PAXOS_DATA, payload, payload_size,
-			MSG_SET_COPY) != 0) {
-		CRASH("error setting succession list on msg");
-	}
+	msg_set_buf(msg, AS_HB_MSG_PAXOS_DATA, payload, payload_size, MSG_SET_COPY);
 
 	CLUSTERING_UNLOCK();
 }
@@ -3546,16 +3543,12 @@ static void
 msg_src_fields_fill(msg* msg)
 {
 	// Set the hb protocol id / version.
-	if (msg_set_uint32(msg, AS_CLUSTERING_MSG_ID,
-			clustering_protocol_identifier_get()) != 0) {
-		CRASH("error setting clustering protocol on msg");
-	}
+	msg_set_uint32(msg, AS_CLUSTERING_MSG_ID,
+			clustering_protocol_identifier_get());
 
 	// Set the send timestamp
-	if (msg_set_uint64(msg, AS_CLUSTERING_MSG_HLC_TIMESTAMP,
-			as_hlc_timestamp_now()) != 0) {
-		CRASH("error setting send timestamp on msg");
-	}
+	msg_set_uint64(msg, AS_CLUSTERING_MSG_HLC_TIMESTAMP,
+			as_hlc_timestamp_now());
 }
 
 /**
@@ -3602,9 +3595,7 @@ static void
 msg_type_set(msg* msg, as_clustering_msg_type msg_type)
 {
 	// Set the message type.
-	if (msg_set_uint32(msg, AS_CLUSTERING_MSG_TYPE, msg_type) != 0) {
-		CRASH("error setting type on msg");
-	}
+	msg_set_uint32(msg, AS_CLUSTERING_MSG_TYPE, msg_type);
 }
 
 /**
@@ -3632,10 +3623,7 @@ msg_proposed_principal_get(msg* msg, cf_node* nodeid)
 static void
 msg_proposed_principal_set(msg* msg, cf_node nodeid)
 {
-	if (msg_set_uint64(msg, AS_CLUSTERING_MSG_PROPOSED_PRINCIPAL, nodeid)
-			!= 0) {
-		CRASH("error setting proposed principal");
-	}
+	msg_set_uint64(msg, AS_CLUSTERING_MSG_PROPOSED_PRINCIPAL, nodeid);
 }
 
 /**
@@ -3665,10 +3653,7 @@ static void
 msg_sequence_number_set(msg* msg, as_paxos_sequence_number sequence_number)
 {
 	// Set the message type.
-	if (msg_set_uint64(msg, AS_CLUSTERING_MSG_SEQUENCE_NUMBER, sequence_number)
-			!= 0) {
-		CRASH("error setting sequence number on msg");
-	}
+	msg_set_uint64(msg, AS_CLUSTERING_MSG_SEQUENCE_NUMBER, sequence_number);
 }
 
 /**
@@ -3698,10 +3683,7 @@ static void
 msg_cluster_key_field_set(msg* msg, as_cluster_key cluster_key,
 		as_clustering_msg_field field)
 {
-	// Set the cluster key.
-	if (msg_set_uint64(msg, field, cluster_key) != 0) {
-		CRASH("error setting cluster key on msg");
-	}
+	msg_set_uint64(msg, field, cluster_key);
 }
 
 /**
@@ -3765,10 +3747,8 @@ msg_succession_list_field_set(msg* msg, cf_vector* succession_list,
 		cf_vector_get(succession_list, i, &succession_buffer[i]);
 	}
 
-	if (msg_set_buf(msg, field, (uint8_t*)succession_buffer, buffer_size,
-			MSG_SET_COPY) != 0) {
-		CRASH("error setting succession list on msg");
-	}
+	msg_set_buf(msg, field, (uint8_t*)succession_buffer, buffer_size,
+			MSG_SET_COPY);
 
 	BUFFER_FREE(succession_buffer, buffer_size);
 }

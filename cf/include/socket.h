@@ -1,7 +1,7 @@
 /*
  * socket.h
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -241,6 +241,7 @@ void cf_socket_disable_blocking(cf_socket *sock);
 void cf_socket_enable_blocking(cf_socket *sock);
 void cf_socket_disable_nagle(cf_socket *sock);
 void cf_socket_enable_nagle(cf_socket *sock);
+void cf_socket_set_cork(cf_socket *sock, int cork);
 void cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count);
 void cf_socket_set_send_buffer(cf_socket *sock, int32_t size);
 void cf_socket_set_receive_buffer(cf_socket *sock, int32_t size);
@@ -268,8 +269,10 @@ CF_MUST_CHECK int32_t cf_socket_available(cf_socket *sock);
 
 CF_MUST_CHECK int32_t cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags);
+CF_MUST_CHECK int32_t cf_socket_recv_msg(cf_socket *sock, struct msghdr *m, int32_t flags);
 CF_MUST_CHECK int32_t cf_socket_send_to(cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags);
+CF_MUST_CHECK int32_t cf_socket_send_msg(cf_socket *sock, struct msghdr *m, int32_t flags);
 
 CF_MUST_CHECK int32_t cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout);
 CF_MUST_CHECK int32_t cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags, int32_t timeout);

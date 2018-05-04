@@ -1,7 +1,7 @@
 /*
  * fabric.h
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -99,8 +99,8 @@ void as_fabric_msg_queue_dump(void);
 // as_fabric
 //
 
-int as_fabric_init(void);
-int as_fabric_start(void);
+void as_fabric_init(void);
+void as_fabric_start(void);
 void as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count);
 int as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel);
 int as_fabric_send_list(const cf_node *nodes, uint32_t node_count, msg *m, as_fabric_channel channel);
