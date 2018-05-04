@@ -324,6 +324,9 @@ static inline bool
 as_batch_abandon(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
 {
 	if (cf_getns() >= shared->end) {
+		cf_warning(AS_BATCH, "abandoned batch from %s with %u transactions after %lu ms",
+				shared->fd_h->client, shared->tran_max,
+				(shared->end - shared->start) / 1000000);
 		shared->bad_response_fd = true;
 		as_batch_buffer_end(queue, shared, buffer, BATCH_ERROR);
 		return true;
@@ -376,8 +379,7 @@ as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_
 }
 
 static inline void
-as_batch_delay_buffer(as_batch_queue* queue, cf_queue* response_queue,
-		as_batch_response* response)
+as_batch_delay_buffer(as_batch_queue* queue)
 {
 	cf_atomic64_incr(&g_stats.batch_index_delay);
 
@@ -385,8 +387,6 @@ as_batch_delay_buffer(as_batch_queue* queue, cf_queue* response_queue,
 	if (queue->tran_count == queue->delay_count) {
 		pthread_yield();
 	}
-
-	cf_queue_push(response_queue, response);
 }
 
 static void
@@ -421,10 +421,10 @@ as_batch_worker(void* udata)
 			// Socket blocked.
 			shared->delayed_buffer = buffer;
 			batch_queue->delay_count++;
-			as_batch_delay_buffer(batch_queue, response_queue, &response);
+			as_batch_delay_buffer(batch_queue);
 		}
 		else {
-			// Try first delayed buffer in batch only.
+			// Batch is delayed - try only original delayed buffer.
 			if (shared->delayed_buffer == buffer) {
 				shared->delayed_buffer = NULL;
 
@@ -440,14 +440,12 @@ as_batch_worker(void* udata)
 
 				// Socket blocked again.
 				shared->delayed_buffer = buffer;
-				as_batch_delay_buffer(batch_queue, response_queue, &response);
+				as_batch_delay_buffer(batch_queue);
 			}
-			else {
-				// Other buffers in batch must also be delayed, but without
-				// thread yield.
-				cf_queue_push(response_queue, &response);
-			}
+			// else - delayed by another buffer in this batch, just re-queue.
 		}
+
+		cf_queue_push(response_queue, &response);
 	}
 
 	// Send back completion notification.
