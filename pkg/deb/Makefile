@@ -17,7 +17,7 @@ comma:= ,
 empty:=
 space:= $(empty) $(empty)
 
-ifeq ($(OS),$(filter $(OS),debian8 debian9 ubuntu16.04))
+ifeq ($(OS),$(filter $(OS),debian8 debian9 ubuntu16.04 ubuntu18.04))
 	USE_SYSTEMD = 1
 	CONF_VERSION = _systemd
 	DEPS = 
