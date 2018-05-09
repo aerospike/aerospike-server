@@ -58,8 +58,8 @@
 #include "storage/storage.h"
 
 
-#define AS_STORAGE_MAX_DEVICES (64) // maximum devices per namespace
-#define AS_STORAGE_MAX_FILES (64) // maximum files per namespace
+#define AS_STORAGE_MAX_DEVICES (128) // maximum devices per namespace
+#define AS_STORAGE_MAX_FILES (128) // maximum files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
