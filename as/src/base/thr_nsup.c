@@ -982,16 +982,7 @@ run_nsup(void *arg)
 			if (eval_hwm_breached(ns)) {
 				// Eviction is necessary.
 
-				linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
 				linear_hist_reset(ns->evict_hist, now, ttl_range, ns->evict_hist_buckets);
-				linear_hist_clear(ns->ttl_hist, now, ttl_range);
-
-				for (uint32_t j = 0; j < num_sets; j++) {
-					uint32_t set_id = j + 1;
-
-					linear_hist_clear(ns->set_obj_size_hists[set_id], 0, cf_atomic32_get(ns->obj_size_hist_max));
-					linear_hist_clear(ns->set_ttl_hists[set_id], now, ttl_range);
-				}
 
 				evict_prep_info cb_info1;
 
