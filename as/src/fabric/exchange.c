@@ -2464,13 +2464,7 @@ exchange_exchanging_pre_commit()
 		if (ns->eventual_regime != 0) {
 			ns->eventual_regime += 2;
 
-			// TODO - until future storage format change, we'll use partition 0
-			// to save and restore ns->eventual_regime.
-
-			// Ok to not take partition lock.
-			as_partition* p = &ns->partitions[0];
-
-			as_storage_info_set(ns, p, true);
+			as_storage_save_regime(ns);
 
 			INFO("{%s} eventual-regime %u ready", ns->name,
 					ns->eventual_regime);

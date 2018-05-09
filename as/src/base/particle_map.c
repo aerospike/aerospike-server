@@ -38,6 +38,7 @@
 #include "base/cdt.h"
 #include "base/datamodel.h"
 #include "base/particle.h"
+#include "base/particle_blob.h"
 #include "base/proto.h"
 
 
@@ -72,9 +73,7 @@ uint32_t map_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
 void map_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
-int32_t map_size_from_flat(const uint8_t *flat, uint32_t flat_size);
-int map_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp);
-int map_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp);
+const uint8_t *map_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
 uint32_t map_flat_size(const as_particle *p);
 uint32_t map_to_flat(const as_particle *p, uint8_t *flat);
 
@@ -106,8 +105,8 @@ const as_particle_vtable map_vtable = {
 		map_size_from_msgpack,
 		map_from_msgpack,
 
-		map_size_from_flat,
-		map_cast_from_flat,
+		blob_skip_flat,
+		blob_cast_from_flat,
 		map_from_flat,
 		map_flat_size,
 		map_to_flat
@@ -873,35 +872,29 @@ map_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 // Handle on-device "flat" format.
 //
 
-int32_t
-map_size_from_flat(const uint8_t *flat, uint32_t flat_size)
+const uint8_t *
+map_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 {
-	// TODO - maybe never used
-	return -1;
-}
+	if (flat + sizeof(map_flat) > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat map");
+		return NULL;
+	}
 
-int
-map_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp)
-{
-	// Cast temp buffer from disk to data-not-in-memory.
-	map_flat *p_map_flat = (map_flat *)flat;
-
-	// This assumes map_flat is the same as map_mem.
-	*pp = (as_particle *)p_map_flat;
-
-	return 0;
-}
-
-int
-map_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
-{
 	const map_flat *p_map_flat = (const map_flat *)flat;
+
+	flat += sizeof(map_flat) + p_map_flat->sz;
+
+	if (flat > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat map");
+		return NULL;
+	}
+
 	packed_map map;
 
 	// This path implies disk-backed data-in-memory so fill_idxs -> true.
 	if (! packed_map_init(&map, p_map_flat->data, p_map_flat->sz, true)) {
 		cf_warning(AS_PARTICLE, "map_from_flat() invalid packed map");
-		return -1;
+		return NULL;
 	}
 
 	if (map.flags == 0) {
@@ -914,36 +907,32 @@ map_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
 
 		*pp = (as_particle *)p_map_mem;
 
-		return 0;
+		return flat;
 	}
 
 	uint8_t flags = map_adjust_incoming_flags(map.flags);
 	define_map_packer(mpk, map.ele_count, flags, map.content_sz);
 	as_particle *p = map_packer_create_particle(&mpk, NULL);
 
-	if (! p) {
-		return -1;
-	}
-
 	map_packer_write_hdridx(&mpk);
 	memcpy(mpk.write_ptr, map.contents, map.content_sz);
 
 	if (! map_packer_fill_offset_index(&mpk)) {
 		cf_free(p);
-		return -1;
+		return NULL;
 	}
 
 	if (order_index_is_valid(&mpk.value_idx)) {
 		if (! order_index_set_sorted(&mpk.value_idx, &map.offidx,
 				map.contents, map.content_sz, SORT_BY_VALUE)) {
 			cf_free(p);
-			return -1;
+			return NULL;
 		}
 	}
 
 	*pp = p;
 
-	return 0;
+	return flat;
 }
 
 uint32_t

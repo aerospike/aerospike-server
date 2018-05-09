@@ -90,15 +90,16 @@ as_record_is_live(const as_record* r)
 
 
 int
-as_record_get_live(as_index_tree* tree, cf_digest* keyd, as_index_ref* r_ref,
-		as_namespace* ns)
+as_record_get_live(as_index_tree* tree, const cf_digest* keyd,
+		as_index_ref* r_ref, as_namespace* ns)
 {
 	return as_index_get_vlock(tree, keyd, r_ref);
 }
 
 
 int
-as_record_exists_live(as_index_tree* tree, cf_digest* keyd, as_namespace* ns)
+as_record_exists_live(as_index_tree* tree, const cf_digest* keyd,
+		as_namespace* ns)
 {
 	return as_record_exists(tree, keyd);
 }

@@ -1,7 +1,7 @@
 /*
- * olock.h
+ * xmem.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,30 +20,21 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * An object lock system allows fewer locks to be created
- */
-
 #pragma once
 
-#include <stdbool.h>
-#include <stdint.h>
 
-#include <citrusleaf/cf_digest.h>
+//==========================================================
+// Typedefs & constants.
+//
 
-#include <cf_mutex.h>
+typedef enum {
+	CF_XMEM_TYPE_UNDEFINED = -1,
 
+	CF_XMEM_TYPE_SHMEM = 0,
+	CF_XMEM_TYPE_PMEM,
+	CF_XMEM_TYPE_SSD,
 
-typedef struct olock_s {
-	uint32_t n_locks;
-	uint32_t mask;
-	cf_mutex locks[];
-} olock;
+	CF_NUM_XMEM_TYPES
+} cf_xmem_type;
 
-void olock_lock(olock *ol, cf_digest *d);
-void olock_vlock(olock *ol, cf_digest *d, cf_mutex **vlock);
-void olock_unlock(olock *ol, cf_digest *d);
-olock *olock_create(uint32_t n_locks, bool mutex);
-void olock_destroy(olock *o);
-
-extern olock *g_record_locks;
+#define CF_XMEM_MAX_MOUNTS 16

@@ -91,6 +91,10 @@ sl_ix_t g_full_sl_ix_table[AS_CLUSTER_SZ * AS_PARTITIONS];
 // Only partition_balance hooks into exchange.
 extern cf_node* as_exchange_succession_unsafe();
 
+// Helpers - generic.
+void create_trees(as_partition* p, as_namespace* ns);
+void drop_trees(as_partition* p);
+
 // Helpers - balance partitions.
 void fill_global_tables();
 void apply_single_replica_limit_ap(as_namespace* ns);
@@ -415,7 +419,7 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 
 	if (! is_self_final_master(p)) {
 		immigrate_start_advance_non_master_version(ns, p);
-		as_storage_info_set(ns, p, true);
+		as_storage_info_set(ns, p);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -460,7 +464,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	if (p->pending_immigrations == 0 &&
 			! as_partition_version_same(&p->version, &p->final_version)) {
 		p->version = p->final_version;
-		as_storage_info_set(ns, p, true);
+		as_storage_info_set(ns, p);
 	}
 
 	if (! is_self_final_master(p)) {
@@ -553,10 +557,10 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 	}
 
 	// Not a replica - drop partition.
-	if (! is_self_replica(p)) {
+	if (! is_self_replica(p) && ! as_partition_version_is_null(&p->version)) {
 		p->version = ZERO_VERSION;
-		as_storage_info_set(ns, p, true);
-		drop_trees(p, ns);
+		drop_trees(p);
+		as_storage_info_set(ns, p);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -584,12 +588,26 @@ pb_task_init(pb_task* task, cf_node dest, as_namespace* ns,
 
 
 void
-drop_trees(as_partition* p, as_namespace* ns)
+create_trees(as_partition* p, as_namespace* ns)
 {
-	as_index_tree* temp = p->vp;
+	cf_assert(! p->tree, AS_PARTITION, "unexpected - tree already exists");
 
-	p->vp = as_index_tree_create(&ns->tree_shared, ns->arena);
-	as_index_tree_release(temp);
+	as_partition_advance_tree_id(p, ns->name);
+
+	p->tree = as_index_tree_create(&ns->tree_shared, p->tree_id,
+			as_partition_tree_done, (void*)p);
+}
+
+
+void
+drop_trees(as_partition* p)
+{
+	if (! p->tree) {
+		return; // CP signals can get here - 0e/0r versions are witnesses
+	}
+
+	as_index_tree_release(p->tree);
+	p->tree = NULL;
 
 	// TODO - consider p->n_tombstones?
 	cf_atomic64_set(&p->max_void_time, 0);
@@ -787,9 +805,10 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 		memset(dupls, 0, sizeof(dupls));
 
+		as_partition_version orig_version = p->version;
+
 		// TEMPORARY debugging.
 		uint32_t debug_n_immigrators = 0;
-		as_partition_version debug_orig = ZERO_VERSION;
 
 		if (working_master_n == -1) {
 			// No existing versions - assign fresh version to replicas.
@@ -810,7 +829,6 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 			// TEMPORARY debugging.
 			debug_n_immigrators = n_immigrators;
-			debug_orig = p->version;
 
 			if (n_immigrators != 0) {
 				// Migrations required - advance versions for next rebalance,
@@ -836,8 +854,6 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 				// No migrations required - drop superfluous non-replica
 				// partitions immediately.
 				p->version = ZERO_VERSION;
-				as_storage_info_set(ns, p, false);
-				drop_trees(p, ns);
 			}
 		}
 
@@ -845,9 +861,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			p->working_master = ns_node_seq[working_master_n];
 		}
 
-		if (! as_partition_version_is_null(&p->version)) {
-			as_storage_info_set(ns, p, false);
-		}
+		commit_changed_version(p, ns, &orig_version);
 
 		ns_pending_immigrations += (uint32_t)p->pending_immigrations;
 		ns_pending_emigrations += (uint32_t)p->pending_emigrations;
@@ -856,7 +870,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 		if (pid < 20) {
 			cf_debug(AS_PARTITION, "ck%012lX %02u (%d %d) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
 					as_exchange_cluster_key(), pid, p->pending_emigrations,
-					p->pending_immigrations, VERSION_AS_STRING(&debug_orig),
+					p->pending_immigrations, VERSION_AS_STRING(&orig_version),
 					VERSION_AS_STRING(&p->version), self_n, working_master_n,
 					p->n_replicas, n_dupl, debug_n_immigrators);
 		}
@@ -865,10 +879,6 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 		pthread_mutex_unlock(&p->lock);
 	}
-
-	// Commit partition versions to device.
-	// TODO - always flush each partition's version on storage format change.
-	as_storage_info_flush(ns);
 
 	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u) expected-signals %u fresh-partitions %u",
 			ns->name, ns_pending_emigrations, ns_pending_immigrations,
@@ -1364,11 +1374,36 @@ fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
 	for (uint32_t n = 1; n < ns->cluster_size; n++) {
 		const as_partition_version* version = INPUT_VERSION(n);
 
-		// Note - 0e versions (CP) are witnesses.
+		// Note - 0e/0r versions (CP) are witnesses.
 		if (n < p->n_replicas || ! as_partition_version_is_null(version)) {
 			p->witnesses[p->n_witnesses++] = ns_node_seq[n];
 		}
 	}
+}
+
+
+// If version changed, create/drop trees as appropriate, and store.
+void
+commit_changed_version(as_partition* p, struct as_namespace_s* ns,
+		as_partition_version* orig_version)
+{
+	if (as_partition_version_same(&p->version, orig_version)) {
+		return;
+	}
+
+	if (! as_partition_version_has_data(orig_version) &&
+			as_partition_version_has_data(&p->version)) {
+		create_trees(p, ns);
+	}
+
+	if (as_partition_version_has_data(orig_version) &&
+			! as_partition_version_has_data(&p->version)) {
+		// FIXME - temporary paranoia.
+		cf_assert(p->tree, AS_PARTITION, "unexpected - null tree");
+		drop_trees(p);
+	}
+
+	as_storage_info_set(ns, p);
 }
 
 
@@ -1426,7 +1461,7 @@ emigrate_done_advance_non_master_version_ap(as_namespace* ns, as_partition* p,
 	}
 	// else - must already be a parent.
 
-	as_storage_info_set(ns, p, true);
+	as_storage_info_set(ns, p);
 }
 
 
@@ -1451,6 +1486,6 @@ immigrate_done_advance_final_master_version_ap(as_namespace* ns,
 {
 	if (! as_partition_version_same(&p->version, &p->final_version)) {
 		p->version = p->final_version;
-		as_storage_info_set(ns, p, true);
+		as_storage_info_set(ns, p);
 	}
 }

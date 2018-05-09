@@ -39,8 +39,14 @@
 #include "base/proto.h"
 
 
-// INTEGER particle interface function declarations are in particle_int.h since
-// INTEGER functions are used by other particles derived from INTEGER.
+// Some INTEGER particle interface function declarations are in
+// particle_integer.h since INTEGER functions are used by other particles.
+
+// Handle on-device "flat" format.
+const uint8_t *integer_skip_flat(const uint8_t *flat, const uint8_t *end);
+const uint8_t *integer_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
+uint32_t integer_flat_size(const as_particle *p);
+uint32_t integer_to_flat(const as_particle *p, uint8_t *flat);
 
 
 //==========================================================
@@ -70,8 +76,8 @@ const as_particle_vtable integer_vtable = {
 		integer_size_from_msgpack,
 		integer_from_msgpack,
 
-		integer_size_from_flat,
-		integer_cast_from_flat,
+		integer_skip_flat,
+		integer_from_flat, // cast copies embedded value out
 		integer_from_flat,
 		integer_flat_size,
 		integer_to_flat
@@ -90,7 +96,7 @@ typedef struct integer_mem_s {
 typedef struct integer_flat_s {
 	uint8_t		type;
 	uint8_t		size;
-	uint64_t	i;
+	uint8_t		data[];
 } __attribute__ ((__packed__)) integer_flat;
 
 
@@ -362,57 +368,82 @@ integer_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **
 // Handle on-device "flat" format.
 //
 
-int32_t
-integer_size_from_flat(const uint8_t *flat, uint32_t flat_size)
+const uint8_t *
+integer_skip_flat(const uint8_t *flat, const uint8_t *end)
 {
-	// Integer values live in the as_bin instead of a pointer.
-	return 0;
-}
+	if (flat + sizeof(integer_flat) > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat integer");
+		return NULL;
+	}
 
-int
-integer_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp)
-{
 	integer_flat *p_int_flat = (integer_flat *)flat;
-	// Assume type is correct, since we got here.
 
-	// Sanity check lengths.
-	if (p_int_flat->size != 8 || flat_size != sizeof(integer_flat)) {
-		cf_warning(AS_PARTICLE, "unexpected flat integer/float: flat_size %u, len %u",
-				flat_size, p_int_flat->size);
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
-	}
-
-	// Integer values live in an as_bin instead of a pointer. Also, flat
-	// integers are host order, so no byte swap.
-	*pp = (as_particle *)p_int_flat->i;
-
-	return 0;
+	return flat + sizeof(integer_flat) + p_int_flat->size;
 }
 
-int
-integer_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
+const uint8_t *
+integer_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 {
-	const integer_flat *p_int_flat = (const integer_flat *)flat;
-	// Assume type is correct, since we got here.
+	if (flat + sizeof(integer_flat) > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat integer");
+		return NULL;
+	}
 
-	// Sanity check lengths.
-	if (p_int_flat->size != 8 || flat_size != sizeof(integer_flat)) {
-		cf_warning(AS_PARTICLE, "unexpected flat integer/float: flat_size %u, len %u",
-				flat_size, p_int_flat->size);
-		return -1; // TODO - AS_PROTO error code seems inappropriate?
+	const integer_flat *p_int_flat = (const integer_flat *)flat;
+	// Type is correct, since we got here - no need to check against end.
+
+	flat += sizeof(integer_flat) + p_int_flat->size;
+
+	if (flat > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat integer");
+		return NULL;
+	}
+
+	uint64_t i;
+
+	switch (p_int_flat->size) {
+	case 8:
+		i = *(uint64_t *)p_int_flat->data;
+		break;
+	case 4:
+		i = *(uint32_t *)p_int_flat->data;
+		break;
+	case 2:
+		i = *(uint16_t *)p_int_flat->data;
+		break;
+	case 1:
+		i = *(uint8_t *)p_int_flat->data;
+		break;
+	default:
+		cf_warning(AS_PARTICLE, "invalid flat integer size");
+		return NULL;
 	}
 
 	// Integer values live in an as_bin instead of a pointer. Also, flat
 	// integers are host order, so no byte swap.
-	*pp = (as_particle *)p_int_flat->i;
+	*pp = (as_particle *)i;
 
-	return 0;
+	return flat;
 }
 
 uint32_t
 integer_flat_size(const as_particle *p)
 {
-	return sizeof(integer_flat);
+	uint64_t i = (uint64_t)p;
+
+	if ((i & ~0xFFFFffffL) != 0) {
+		return (uint32_t)(sizeof(integer_flat) + 8);
+	}
+
+	if ((i & ~0xFFFFL) != 0) {
+		return (uint32_t)(sizeof(integer_flat) + 4);
+	}
+
+	if ((i & ~0xFFL) != 0) {
+		return (uint32_t)(sizeof(integer_flat) + 2);
+	}
+
+	return (uint32_t)(sizeof(integer_flat) + 1);
 }
 
 uint32_t
@@ -421,10 +452,27 @@ integer_to_flat(const as_particle *p, uint8_t *flat)
 	integer_flat *p_int_flat = (integer_flat *)flat;
 
 	// Already wrote the type.
-	p_int_flat->size = 8;
-	p_int_flat->i = (uint64_t)p;
 
-	return integer_flat_size(p);
+	uint64_t i = (uint64_t)p;
+
+	if ((i & ~0xFFFFffffL) != 0) {
+		p_int_flat->size = 8;
+		*(uint64_t *)p_int_flat->data = i;
+	}
+	else if ((i & ~0xFFFFL) != 0) {
+		p_int_flat->size = 4;
+		*(uint32_t *)p_int_flat->data = (uint32_t)i;
+	}
+	else if ((i & ~0xFFL) != 0) {
+		p_int_flat->size = 2;
+		*(uint16_t *)p_int_flat->data = (uint16_t)i;
+	}
+	else {
+		p_int_flat->size = 1;
+		*(uint8_t *)p_int_flat->data = (uint8_t)i;
+	}
+
+	return (uint32_t)(sizeof(integer_flat) + p_int_flat->size);
 }
 
 

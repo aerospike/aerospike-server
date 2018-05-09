@@ -82,7 +82,9 @@ typedef struct as_partition_s {
 
 	uint32_t id;
 
-	struct as_index_tree_s* vp;
+	uint8_t tree_id;
+	uint64_t tree_ids_used; // bit map
+	struct as_index_tree_s* tree;
 
 	cf_atomic64 n_tombstones; // relevant only for enterprise edition
 	cf_atomic64 max_void_time; // TODO - convert to 32-bit ...
@@ -171,7 +173,6 @@ void as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime);
 void as_partition_get_replica_stats(struct as_namespace_s* ns, repl_stats* p_stats);
 
 void as_partition_reserve(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
-int as_partition_reserve_timeout(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, int timeout_ms);
 int as_partition_reserve_replica(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node);
 int as_partition_reserve_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, bool would_dup_res, cf_node* node);
@@ -181,6 +182,9 @@ int as_partition_reserve_xdr_read(struct as_namespace_s* ns, uint32_t pid, as_pa
 void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_reservation* src);
 
 void as_partition_release(as_partition_reservation* rsv);
+
+void as_partition_advance_tree_id(as_partition* p, const char* ns_name);
+void as_partition_tree_done(uint8_t id, void* udata);
 
 void as_partition_getinfo_str(cf_dyn_buf* db);
 
@@ -223,13 +227,7 @@ as_partition_version_has_data(const as_partition_version* version)
 static inline bool
 as_partition_version_same(const as_partition_version* v1, const as_partition_version* v2)
 {
-	return v1->ckey == v2->ckey &&
-			v1->family == v2->family &&
-			// Note - master flag not included in definition of "same".
-			v1->subset == v2->subset &&
-			// Note - could probably exclude these too...
-			v1->evade == v2->evade &&
-			v1->revived == v2->revived;
+	return *(uint64_t*)v1 == *(uint64_t*)v2;
 }
 
 static inline uint32_t

@@ -39,7 +39,6 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "base/rec_props.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
@@ -100,6 +99,7 @@ udf_storage_record_open(udf_record *urecord)
 	as_storage_rd_load_bins(rd, urecord->stack_bins); // TODO - handle error returned
 	urecord->starting_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
+	as_storage_record_get_set_name(rd);
 	as_storage_record_get_key(rd);
 
 	urecord->flag   |= UDF_RECORD_FLAG_STORAGE_OPEN;
@@ -130,17 +130,6 @@ udf_storage_record_close(udf_record *urecord)
 	if (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) {
 		as_index_ref   *r_ref = urecord->r_ref;
 		as_storage_rd  *rd    = urecord->rd;
-
-		// In case allow update is not set .. the record has been opened for
-		// the aggregation. Do not do any rec property update.
-		// Pick info from index and put it in storage record.
-		size_t  rec_props_data_size = as_storage_record_rec_props_size(rd);
-		uint8_t rec_props_data[rec_props_data_size];
-		if (urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES) {
-			if (rec_props_data_size > 0) {
-				as_storage_record_set_rec_props(rd, rec_props_data);
-			}
-		}
 
 		bool has_bins = as_bin_inuse_has(rd);
 
@@ -359,7 +348,7 @@ udf_record_cache_get(udf_record * urecord, const char * name)
 		cf_detail(AS_UDF, "udf_record_get: %s find", name);
 		for ( uint32_t i = 0; i < urecord->nupdates; i++ ) {
 			udf_record_bin * bin = &(urecord->updates[i]);
-			if ( strncmp(name, bin->name, AS_ID_BIN_SZ) == 0 ) {
+			if ( strncmp(name, bin->name, AS_BIN_NAME_MAX_SZ) == 0 ) {
 				cf_detail(AS_UDF, "Bin %s found, type(%d)", name, bin->value->type );
 				return bin->value; // note it's OK if the bin contains a nil
 			}
@@ -413,7 +402,7 @@ udf_record_cache_set(udf_record * urecord, const char * name, as_val * value,
 		udf_record_bin * bin = &(urecord->updates[i]);
 
 		// bin exists, then we will release old value and set new value.
-		if ( strncmp(name, bin->name, AS_ID_BIN_SZ) == 0 ) {
+		if ( strncmp(name, bin->name, AS_BIN_NAME_MAX_SZ) == 0 ) {
 			cf_detail(AS_UDF, "udf_record_set: %s found", name);
 
 			// release previously set value
@@ -436,7 +425,7 @@ udf_record_cache_set(udf_record * urecord, const char * name, as_val * value,
 	if ( ! modified ) {
 		if ( urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
 			udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
-			strncpy(bin->name, name, AS_ID_BIN_SZ);
+			strncpy(bin->name, name, AS_BIN_NAME_MAX_SZ);
 			bin->value = (as_val *) value;
 			bin->dirty = dirty;
 			urecord->nupdates++;
@@ -555,7 +544,7 @@ udf_record_param_check_w_bin(const as_rec *rec, const char *bname, char *fname, 
 		return UDF_ERR_INTERNAL_PARAMETER;
 	}
 
-	if (strlen(bname) >= AS_ID_BIN_SZ) {
+	if (strlen(bname) >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_UDF, "Invalid Parameter: bin name %s too big", bname);
 		return UDF_ERR_PARAMETER;
 	}
@@ -762,10 +751,10 @@ udf_record_gen(const as_rec * rec)
 
 // Local utility.
 static as_val *
-as_val_from_flat_key(uint8_t * flat_key, uint32_t size)
+as_val_from_flat_key(const uint8_t * flat_key, uint32_t size)
 {
 	uint8_t type = *flat_key;
-	uint8_t * key = flat_key + 1;
+	const uint8_t * key = flat_key + 1;
 
 	switch ( type ) {
 		case AS_PARTICLE_TYPE_INTEGER:
@@ -887,7 +876,7 @@ udf_record_bin_names(const as_rec *rec, as_rec_bin_names_callback callback, void
 		}
 		else {
 			nbins = urecord->rd->n_bins;
-			bin_names = alloca(nbins * AS_ID_BIN_SZ);
+			bin_names = alloca(nbins * AS_BIN_NAME_MAX_SZ);
 			for (uint16_t i = 0; i < nbins; i++) {
 				as_bin *b = &urecord->rd->bins[i];
 				if (! as_bin_inuse(b)) {
@@ -895,17 +884,17 @@ udf_record_bin_names(const as_rec *rec, as_rec_bin_names_callback callback, void
 					break;
 				}
 				const char * name = as_bin_get_name_from_id(urecord->rd->ns, b->id);
-				strcpy(bin_names + (i * AS_ID_BIN_SZ), name);
+				strcpy(bin_names + (i * AS_BIN_NAME_MAX_SZ), name);
 			}
 		}
-		callback(bin_names, nbins, AS_ID_BIN_SZ, udata);
+		callback(bin_names, nbins, AS_BIN_NAME_MAX_SZ, udata);
 		return 0;
 	}
 	else {
 		cf_warning(AS_UDF, "Error in getting bin names: no record found");
 		bin_names = alloca(1);
 		*bin_names = 0;
-		callback(bin_names, 1, AS_ID_BIN_SZ, udata);
+		callback(bin_names, 1, AS_BIN_NAME_MAX_SZ, udata);
 		return -1;
 	}
 }

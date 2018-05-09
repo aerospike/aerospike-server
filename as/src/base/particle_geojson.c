@@ -95,7 +95,7 @@ const as_particle_vtable geojson_vtable = {
 		geojson_size_from_msgpack,
 		geojson_from_msgpack,
 
-		blob_size_from_flat,
+		blob_skip_flat,
 		blob_cast_from_flat,
 		blob_from_flat,
 		blob_flat_size,

@@ -70,7 +70,7 @@ const as_particle_vtable blob_vtable = {
 		blob_size_from_msgpack,
 		blob_from_msgpack,
 
-		blob_size_from_flat,
+		blob_skip_flat,
 		blob_cast_from_flat,
 		blob_from_flat,
 		blob_flat_size,
@@ -318,50 +318,56 @@ blob_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 // Handle on-device "flat" format.
 //
 
-int32_t
-blob_size_from_flat(const uint8_t *flat, uint32_t flat_size)
+const uint8_t *
+blob_skip_flat(const uint8_t *flat, const uint8_t *end)
 {
-	blob_flat *p_blob_flat = (blob_flat *)flat;
-	// Assume type is correct, since we got here.
-
-	// Sanity check length.
-	if (p_blob_flat->size != flat_size - sizeof(blob_flat)) {
-		cf_warning(AS_PARTICLE, "unexpected flat blob/string: flat size %u, len %u",
-				flat_size, p_blob_flat->size);
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+	if (flat + sizeof(blob_flat) > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat blob/string");
+		return NULL;
 	}
 
-	// Flat value is same as in-memory value.
-	return (int32_t)(sizeof(blob_mem) + p_blob_flat->size);
+	blob_flat *p_blob_flat = (blob_flat *)flat;
+
+	return flat + sizeof(blob_flat) + p_blob_flat->size;
 }
 
-int
-blob_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp)
+const uint8_t *
+blob_cast_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 {
-	// Sizing is only a sanity check.
-	int32_t mem_size = blob_size_from_flat(flat, flat_size);
-
-	if (mem_size < 0) {
-		return mem_size;
+	if (flat + sizeof(blob_flat) > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat blob/string");
+		return NULL;
 	}
+
+	const blob_flat *p_blob_flat = (const blob_flat *)flat;
 
 	// We can do this only because the flat and in-memory formats are identical.
-	*pp = (as_particle *)flat;
+	*pp = (as_particle *)p_blob_flat;
 
-	return 0;
+	return flat + sizeof(blob_flat) + p_blob_flat->size;
 }
 
-int
-blob_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
+const uint8_t *
+blob_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 {
-	int32_t mem_size = blob_size_from_flat(flat, flat_size);
-
-	if (mem_size < 0) {
-		return mem_size;
+	if (flat + sizeof(blob_flat) > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat blob/string");
+		return NULL;
 	}
 
-	blob_mem *p_blob_mem = (blob_mem *)cf_malloc_ns((size_t)mem_size);
 	const blob_flat *p_blob_flat = (const blob_flat *)flat;
+
+	// Flat value is same as in-memory value.
+	size_t mem_size = sizeof(blob_mem) + p_blob_flat->size;
+
+	flat += mem_size; // blob_mem same size as blob_flat
+
+	if (flat > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat blob/string");
+		return NULL;
+	}
+
+	blob_mem *p_blob_mem = (blob_mem *)cf_malloc_ns(mem_size);
 
 	p_blob_mem->type = p_blob_flat->type;
 	p_blob_mem->sz = p_blob_flat->size;
@@ -369,7 +375,7 @@ blob_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
 
 	*pp = (as_particle *)p_blob_mem;
 
-	return 0;
+	return flat;
 }
 
 uint32_t

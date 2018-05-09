@@ -43,7 +43,6 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
-#include "base/rec_props.h"
 #include "base/secondary_index.h"
 #include "base/truncate.h"
 #include "base/xdr_serverside.h"
@@ -114,16 +113,10 @@ next_generation(uint16_t local, uint16_t remote, as_namespace* ns)
 //  0 - found existing record
 // -1 - failure - could not allocate arena stage
 int
-as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref,
-		as_namespace *ns)
+as_record_get_create(as_index_tree *tree, const cf_digest *keyd,
+		as_index_ref *r_ref, as_namespace *ns)
 {
-	int rv;
-
-	while ((rv = as_index_get_insert_vlock(tree, keyd, r_ref)) == -2) {
-		// rv = -2 - found "half created" or deleted record, wait for other
-		// thread to finish, and try again.
-		usleep(50);
-	}
+	int rv = as_index_get_insert_vlock(tree, keyd, r_ref);
 
 	if (rv == 1) {
 		cf_atomic64_incr(&ns->n_objects);
@@ -137,7 +130,7 @@ as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref,
 //  0 - found
 // -1 - not found
 int
-as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref)
+as_record_get(as_index_tree *tree, const cf_digest *keyd, as_index_ref *r_ref)
 {
 	return as_index_get_vlock(tree, keyd, r_ref);
 }
@@ -148,20 +141,17 @@ as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref)
 void
 as_record_done(as_index_ref *r_ref, as_namespace *ns)
 {
-	if (! r_ref->skip_lock) {
+	uint16_t rc = as_index_release(r_ref->r);
+
+	if (rc != 0) {
+		cf_assert(rc != (uint16_t)-1, AS_RECORD, "index ref-count underflow");
 		cf_mutex_unlock(r_ref->olock);
-	}
-
-	int rc = as_index_release(r_ref->r);
-
-	if (rc > 0) {
 		return;
 	}
 
-	cf_assert(rc == 0, AS_RECORD, "index ref-count %d", rc);
-
 	as_record_destroy(r_ref->r, ns);
 	cf_arenax_free(ns->arena, r_ref->r_h);
+	cf_mutex_unlock(r_ref->olock);
 }
 
 
@@ -172,10 +162,11 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 // Returns:
 //  0 - found
 // -1 - not found
+// -2 - can't lock
 int
-as_record_exists(as_index_tree *tree, cf_digest *keyd)
+as_record_exists(as_index_tree *tree, const cf_digest *keyd)
 {
-	return as_index_exists(tree, keyd);
+	return as_index_try_exists(tree, keyd);
 }
 
 
@@ -189,6 +180,7 @@ as_record_is_expired(const as_record *r)
 
 // Called when writes encounter a "doomed" record, to delete the doomed record
 // and create a new one in place without giving up the record lock.
+// FIXME - won't be able to "rescue" with future sindex method - will go away.
 void
 as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 {
@@ -372,8 +364,6 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 	as_index_tree *tree = rr->rsv->tree;
 
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
-
 	int rv = as_record_get_create(tree, rr->keyd, &r_ref, ns);
 
 	if (rv < 0) {
@@ -443,15 +433,13 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 		as_storage_record_open(ns, r, &rd);
 	}
 
-	// Assemble rec-props.
-	size_t rec_props_data_size = as_rec_props_size_all(
-			(const uint8_t *)rr->set_name, rr->set_name_len, rr->key,
-			rr->key_size);
-	uint8_t rec_props_data[rec_props_data_size];
+	// Prepare to store set name, if there is one.
+	rd.set_name = rr->set_name;
+	rd.set_name_len = rr->set_name_len;
 
-	as_rec_props_fill_all(&rd.rec_props, rec_props_data,
-			(const uint8_t *)rr->set_name, rr->set_name_len, rr->key,
-			rr->key_size);
+	// Prepare to store key, if there is one.
+	rd.key = rr->key;
+	rd.key_size = rr->key_size;
 
 	// Split according to configuration to replace local record.
 	bool is_delete = false;

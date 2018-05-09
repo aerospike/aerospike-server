@@ -29,8 +29,6 @@
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
-#include "base/rec_props.h"
-
 
 // Forward declarations.
 struct as_bin_s;
@@ -38,7 +36,7 @@ struct as_index_s;
 struct as_partition_s;
 struct as_namespace_s;
 struct drv_ssd_s;
-struct drv_ssd_block_s;
+struct ssd_record_s;
 
 
 typedef enum {
@@ -52,22 +50,27 @@ typedef struct as_storage_rd_s {
 	struct as_index_s		*r;
 	struct as_namespace_s	*ns;
 
-	as_rec_props			rec_props;
-
 	struct as_bin_s			*bins;
 	uint16_t				n_bins;
 
 	bool					record_on_device;
 	bool					ignore_record_on_device;
 
+	// Shortcuts for handling set name storage:
+	uint32_t				set_name_len;
+	const char				*set_name;
+
 	// Parameters used when handling key storage:
 	uint32_t				key_size;
-	uint8_t					*key;
+	const uint8_t			*key;
 
 	bool					is_durable_delete; // enterprise only
 
 	// Specific to storage type AS_STORAGE_ENGINE_SSD:
-	struct drv_ssd_block_s	*block;
+	struct ssd_record_s		*block;
+	const uint8_t			*block_end;
+	const uint8_t			*block_bins;
+	uint16_t				block_n_bins;
 	uint8_t					*must_free_block;
 	struct drv_ssd_s		*ssd;
 } as_storage_rd;
@@ -102,15 +105,19 @@ extern bool as_storage_has_space(struct as_namespace_s *ns);
 extern void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
 // Storage of generic data into device headers.
-extern void as_storage_info_set(struct as_namespace_s *ns, const struct as_partition_s *p, bool flush);
+extern void as_storage_info_set(struct as_namespace_s *ns, const struct as_partition_s *p);
 extern void as_storage_info_get(struct as_namespace_s *ns, struct as_partition_s *p);
-extern int as_storage_info_flush(struct as_namespace_s *ns);
+extern void as_storage_load_regime(struct as_namespace_s *ns);
+extern void as_storage_save_regime(struct as_namespace_s *ns);
 extern void as_storage_save_evict_void_time(struct as_namespace_s *ns, uint32_t evict_void_time);
 
 // Statistics.
 extern int as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
 extern int as_storage_ticker_stats(struct as_namespace_s *ns); // prints SSD histograms to the info ticker
 extern int as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD histograms
+
+// Get record storage metadata.
+extern uint32_t as_storage_record_size(const struct as_namespace_s *ns, const struct as_index_s *r);
 
 
 //------------------------------------------------
@@ -121,12 +128,11 @@ extern int as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears 
 extern uint64_t as_storage_record_get_n_bytes_memory(as_storage_rd *rd);
 extern void as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint64_t start_bytes);
 extern void as_storage_record_drop_from_mem_stats(as_storage_rd *rd);
+extern void as_storage_record_get_set_name(as_storage_rd *rd);
 extern bool as_storage_record_get_key(as_storage_rd *rd);
-extern size_t as_storage_record_rec_props_size(as_storage_rd *rd);
-extern void as_storage_record_set_rec_props(as_storage_rd *rd, uint8_t* rec_props_data);
 
 // Called only at shutdown to flush all device write-queues.
-extern void as_storage_shutdown();
+extern void as_storage_shutdown(uint32_t instance);
 
 
 //------------------------------------------------
@@ -169,14 +175,17 @@ extern bool as_storage_overloaded_ssd(struct as_namespace_s *ns);
 extern bool as_storage_has_space_ssd(struct as_namespace_s *ns);
 extern void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
-extern void as_storage_info_set_ssd(struct as_namespace_s *ns, const struct as_partition_s *p, bool flush);
+extern void as_storage_info_set_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
 extern void as_storage_info_get_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
-extern int as_storage_info_flush_ssd(struct as_namespace_s *ns);
+extern void as_storage_load_regime_ssd(struct as_namespace_s *ns);
+extern void as_storage_save_regime_ssd(struct as_namespace_s *ns);
 extern void as_storage_save_evict_void_time_ssd(struct as_namespace_s *ns, uint32_t evict_void_time);
 
 extern int as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
 extern int as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
 extern int as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
+
+extern uint32_t as_storage_record_size_ssd(const struct as_index_s *r);
 
 // Called by "base class" functions but not via table.
 extern bool as_storage_record_get_key_ssd(as_storage_rd *rd);

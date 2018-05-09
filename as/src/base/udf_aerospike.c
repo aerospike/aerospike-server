@@ -103,7 +103,7 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 
 	// Check quality of bname -- check that it is proper length, then make sure
 	// that the bin exists.
-	if (strlen(bname) >= AS_ID_BIN_SZ) {
+	if (strlen(bname) >= AS_BIN_NAME_MAX_SZ) {
 		// Can't read bin if name too large.
 		cf_warning(AS_UDF, "udf_aerospike_delbin: Invalid Parameters [bin name(%s) too big]... Fail", bname);
 		return -1;
@@ -494,19 +494,6 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	}
 
 	{
-		// This is _NOT_ for writing to the storage but for simply performing sizing
-		// calculation. If we know the upper bounds of size of rec_props.. we could 
-		// avoid this work and check with that much correction ... 
-		//
-		// See
-		//  - udf_rw_post_processing for building rec_props for replication
-		//  - udf_record_close for building rec_props for writing it to storage
-		size_t  rec_props_data_size = as_storage_record_rec_props_size(rd);
-		uint8_t rec_props_data[rec_props_data_size];
-		if (rec_props_data_size > 0) {
-			as_storage_record_set_rec_props(rd, rec_props_data);
-		}
-
 		if (! as_storage_record_size_and_check(rd)) {
 			cf_warning(AS_UDF, "record failed storage size check, will not be updated");
 			failmax = (int)urecord->nupdates;
@@ -778,6 +765,9 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 
 	// open up storage
 	as_storage_record_create(tr->rsv.ns, r_ref->r, rd);
+
+	// Shortcut for set name storage.
+	as_storage_record_get_set_name(rd);
 
 	// If the message has a key, apply it to the record.
 	if (! get_msg_key(tr, rd)) {

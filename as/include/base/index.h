@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -45,26 +46,29 @@
 typedef struct as_index_s {
 
 	// offset: 0
-	cf_atomic32 rc;
+	uint16_t rc;
+
+	// offset: 2
+	uint8_t : 8; // reserved for bigger rc, if needed
+
+	// offset: 3
+	uint8_t tree_id: 6;
+	uint8_t color: 1;
+	uint8_t : 1;
 
 	// offset: 4
 	cf_digest keyd;
 
 	// offset: 24
-	uint64_t right_h: 40;
 	uint64_t left_h: 40;
+	uint64_t right_h: 40;
 
 	// offset: 34
-	// Don't use the free bits here for record info - this is accessed outside
-	// the record lock.
-	uint16_t color: 1;
-	uint16_t unused_but_unsafe: 15;
-
-	// Everything below here is used under the record lock.
+	uint16_t set_id_bits: 10;
+	uint16_t : 6;
 
 	// offset: 36
-	uint32_t tombstone: 1;
-	uint32_t cenotaph: 1;
+	uint32_t : 2;
 	uint32_t void_time: 30;
 
 	// offset: 40
@@ -73,19 +77,18 @@ typedef struct as_index_s {
 
 	// offset: 47
 	// Used by the storage engines.
-	uint64_t rblock_id: 34;		// can address 2^34 * 128b = 2Tb drive
-	uint64_t n_rblocks: 14;		// is enough for 1Mb/128b = 8K rblocks
-	uint64_t file_id: 6;		// can spec 2^6 = 64 drives
-
-	uint64_t set_id_bits: 10;	// do not use directly, used for set-ID
+	uint64_t rblock_id: 37;		// can address 2^37 * 16b = 2Tb drive
+	uint64_t n_rblocks: 19;		// is enough for 8Mb/16b = 512K rblocks
+	uint64_t file_id: 7;		// can spec 2^7 = 128 drives
+	uint64_t key_stored: 1;
 
 	// offset: 55
 	// In single-bin mode for data-in-memory namespaces, this offset is cast to
 	// an as_bin, but only 4 bits get used (for the iparticle state). The other
 	// 4 bits are used for replication state and index flags.
 	uint8_t repl_state: 2;
-	uint8_t unused_flag: 1;
-	uint8_t key_stored: 1;
+	uint8_t tombstone: 1;
+	uint8_t cenotaph: 1;
 	uint8_t single_bin_state: 4; // used indirectly, only in single-bin mode
 
 	// offset: 56
@@ -101,6 +104,8 @@ typedef struct as_index_s {
 
 } __attribute__ ((__packed__)) as_index;
 
+COMPILER_ASSERT(sizeof(as_index) == 64);
+
 #define AS_INDEX_SINGLE_BIN_OFFSET 55 // can't use offsetof() with bit fields
 
 
@@ -108,7 +113,21 @@ typedef struct as_index_s {
 // Accessor functions for bits in as_index.
 //
 
+#define as_index_reserve(_r) { \
+	uint16_t rc = as_aaf_uint16(&(_r->rc), 1); \
+	cf_assert(rc != 0, AS_INDEX, "ref-count overflow"); \
+}
+
+#define as_index_release(_r) as_aaf_uint16(&(_r->rc), -1)
+
+#define TREE_ID_NUM_BITS	6
+#define MAX_NUM_TREE_IDS	(1 << TREE_ID_NUM_BITS) // 64
+#define TREE_ID_MASK		(MAX_NUM_TREE_IDS - 1) // 0x3F
+
+COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
+
 // Size in bytes of as_index, currently the same for all namespaces.
+// FIXME - we should just get rid of this.
 static inline
 uint32_t as_index_size_get(as_namespace *ns)
 {
@@ -117,8 +136,12 @@ uint32_t as_index_size_get(as_namespace *ns)
 
 // Fast way to clear the record portion of as_index.
 // Note - relies on current layout and size of as_index!
+// FIXME - won't be able to "rescue" with future sindex method - will go away.
 static inline
-void as_index_clear_record_info(as_index *index) {
+void as_index_clear_record_info(as_index *index)
+{
+	index->set_id_bits = 0;
+
 	*(uint32_t*)((uint8_t*)index + 36) = 0;
 
 	uint64_t *p_clear = (uint64_t*)((uint8_t*)index + 40);
@@ -129,7 +152,7 @@ void as_index_clear_record_info(as_index *index) {
 }
 
 // Generation 0 is never written, and generation plays no role in record
-// destruction, so it works to flag both "half created" and deleted records.
+// destruction, so it works to flag deleted records.
 static inline
 void as_index_invalidate_record(as_index *index) {
 	index->generation = 0;
@@ -232,7 +255,6 @@ const char *as_index_get_set_name(as_index *index, as_namespace *ns) {
 
 // Container for as_index pointer with lock and location.
 struct as_index_ref_s {
-	bool				skip_lock;
 	as_index			*r;
 	cf_arenax_handle	r_h;
 	cf_mutex			*olock;
@@ -243,13 +265,17 @@ struct as_index_ref_s {
 // Index tree.
 //
 
+typedef void (*as_index_tree_done_fn) (uint8_t id, void *udata);
+
 typedef struct as_index_tree_s {
+	uint8_t					id;
+	as_index_tree_done_fn	done_cb;
+	void					*udata;
+
 	// Data common to all trees in a namespace.
 	as_index_tree_shared	*shared;
 
-	// Where we allocate from and free to. Left out of 'shared' since we may
-	// later use multiple arenas per namespace.
-	cf_arenax				*arena;
+	cf_atomic64				n_elements;
 
 	// Variable length data, dependent on configuration.
 	uint8_t					data[];
@@ -260,15 +286,19 @@ typedef struct as_index_tree_s {
 // as_index_tree variable length data components.
 //
 
+#define NUM_LOCK_PAIRS 256 // per partition
+
 typedef struct as_lock_pair_s {
 	// Note: reduce_lock's scope is always inside of lock's scope.
 	cf_mutex lock;        // insert, delete vs. insert, delete, get
 	cf_mutex reduce_lock; // insert, delete vs. reduce
 } as_lock_pair;
 
+#define NUM_SPRIG_BITS 28 // 3.5 bytes - yes, that's a lot of sprigs
+
 typedef struct as_sprig_s {
-	cf_arenax_handle	root_h;
-	uint64_t			n_elements;
+	uint64_t n_elements: 24; // max 16M records per sprig
+	uint64_t root_h: 40;
 } as_sprig;
 
 static inline as_lock_pair *
@@ -291,9 +321,10 @@ tree_sprigs(as_index_tree *tree)
 void as_index_tree_gc_init();
 int as_index_tree_gc_queue_size();
 
-as_index_tree *as_index_tree_create(as_index_tree_shared *shared, cf_arenax *arena);
-as_index_tree *as_index_tree_resume(as_index_tree_shared *shared, cf_arenax *arena, as_treex *treex);
-void as_index_tree_shutdown(as_index_tree *tree, as_treex *treex);
+as_index_tree *as_index_tree_create(as_index_tree_shared *shared, uint8_t id, as_index_tree_done_fn cb, void *udata);
+as_index_tree *as_index_tree_resume(as_index_tree_shared *shared, as_treex* xmem_trees, uint32_t pid, as_index_tree_done_fn cb, void *udata);
+void as_index_tree_block(as_index_tree *tree);
+void as_index_tree_reserve(as_index_tree *tree);
 int as_index_tree_release(as_index_tree *tree);
 uint64_t as_index_tree_size(as_index_tree *tree);
 
@@ -305,13 +336,11 @@ void as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count, as_inde
 void as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
 void as_index_reduce_partial_live(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 
-int as_index_exists(as_index_tree *tree, cf_digest *keyd);
-int as_index_get_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
-int as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
-int as_index_delete(as_index_tree *tree, cf_digest *keyd);
-
-#define as_index_reserve(_r) cf_atomic32_incr(&(_r->rc))
-#define as_index_release(_r) cf_atomic32_decr(&(_r->rc))
+int as_index_try_exists(as_index_tree *tree, const cf_digest *keyd);
+int as_index_try_get_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
+int as_index_get_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
+int as_index_get_insert_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
+int as_index_delete(as_index_tree *tree, const cf_digest *keyd);
 
 
 //------------------------------------------------
@@ -328,6 +357,30 @@ typedef struct as_index_sprig_s {
 	as_lock_pair	*pair;
 	as_sprig		*sprig;
 } as_index_sprig;
+
+int as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd);
+
+static inline void
+as_index_sprig_from_keyd(as_index_tree *tree, as_index_sprig *isprig,
+		const cf_digest *keyd)
+{
+	// Get the 28 most significant non-pid bits in the digest. Note - this is
+	// hardwired around the way we currently extract the (12 bit) partition-ID
+	// from the digest.
+	uint32_t bits = (((uint32_t)keyd->digest[1] & 0xF0) << 20) |
+			((uint32_t)keyd->digest[2] << 16) |
+			((uint32_t)keyd->digest[3] << 8) |
+			(uint32_t)keyd->digest[4];
+
+	uint32_t lock_i = bits >> tree->shared->locks_shift;
+	uint32_t sprig_i = bits >> tree->shared->sprigs_shift;
+
+	isprig->destructor = tree->shared->destructor;
+	isprig->destructor_udata = tree->shared->destructor_udata;
+	isprig->arena = tree->shared->arena;
+	isprig->pair = tree_locks(tree) + lock_i;
+	isprig->sprig = tree_sprigs(tree) + sprig_i;
+}
 
 #define SENTINEL_H 0
 

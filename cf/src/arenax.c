@@ -34,6 +34,7 @@
 #include <sys/types.h>
 
 #include "fault.h"
+#include "xmem.h"
 
 
 //==========================================================
@@ -77,16 +78,10 @@ cf_arenax_errstr(cf_arenax_err err)
 // Create a cf_arenax object in persistent memory. Also create and attach the
 // first arena stage in persistent memory.
 void
-cf_arenax_init(cf_arenax* arena, key_t key_base, uint32_t element_size,
+cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
+		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
 		uint32_t stage_capacity, uint32_t max_stages, uint32_t flags)
 {
-	if (stage_capacity == 0) {
-		stage_capacity = MAX_STAGE_CAPACITY;
-	}
-	else if (stage_capacity > MAX_STAGE_CAPACITY) {
-		cf_crash(CF_ARENAX, "stage capacity %u too large", stage_capacity);
-	}
-
 	if (max_stages == 0) {
 		max_stages = CF_ARENAX_MAX_STAGES;
 	}
@@ -94,6 +89,8 @@ cf_arenax_init(cf_arenax* arena, key_t key_base, uint32_t element_size,
 		cf_crash(CF_ARENAX, "max stages %u too large", max_stages);
 	}
 
+	arena->xmem_type = xmem_type;
+	arena->xmem_type_cfg = xmem_type_cfg;
 	arena->key_base = key_base;
 	arena->element_size = element_size;
 	arena->stage_capacity = stage_capacity;

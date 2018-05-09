@@ -55,7 +55,6 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "base/rec_props.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/meta_batch.h"

@@ -38,6 +38,7 @@
 #include "hist.h"
 #include "linear_hist.h"
 #include "vmapx.h"
+#include "xmem.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -136,6 +137,8 @@ as_namespace_create(char *name)
 	// Non-0/NULL/false configuration defaults.
 	//
 
+	ns->xmem_type = CF_XMEM_TYPE_UNDEFINED;
+
 	ns->cfg_replication_factor = 2;
 	ns->replication_factor = 0; // gets set on rebalance
 	ns->memory_size = 1024LL * 1024LL * 1024LL * 4LL; // default memory limit is 4G per namespace
@@ -151,6 +154,7 @@ as_namespace_create(char *name)
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
 	ns->hwm_disk_pct = 50; // evict when device usage exceeds 50%
 	ns->hwm_memory_pct = 60; // evict when memory usage exceeds 50% of namespace memory-size
+	ns->index_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->max_ttl = MAX_ALLOWED_TTL; // 10 years
 	ns->migrate_order = 5;
 	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds
@@ -160,8 +164,7 @@ as_namespace_create(char *name)
 	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
-	ns->tree_shared.n_lock_pairs = 8;
-	ns->tree_shared.n_sprigs = 64;
+	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
 
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
@@ -197,9 +200,7 @@ as_namespace_create(char *name)
 void
 as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 {
-	uint32_t stage_capacity = as_mem_check();
-
-	as_namespaces_setup(cold_start_cmd, instance, stage_capacity);
+	as_namespaces_setup(cold_start_cmd, instance);
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace *ns = g_config.namespaces[ns_ix];
@@ -212,6 +213,8 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition_init(ns, pid);
 		}
+
+		as_namespace_finish_setup(ns, instance);
 
 		as_truncate_init(ns);
 		as_sindex_init(ns);

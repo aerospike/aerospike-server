@@ -78,3 +78,98 @@ cf_bit_count64(uint64_t x)
 
 	return (uint32_t)((x * 0x0101010101010101) >> 56);
 }
+
+// Number of bytes occupied by val converted to a "uintvar".
+static inline uint32_t
+uintvar_size(uint32_t val)
+{
+	if ((val & 0xFFFFff80) == 0) {
+		return 1;
+	}
+
+	if ((val & 0xFFFFc000) == 0) {
+		return 2;
+	}
+
+	if ((val & 0xFFE00000) == 0) {
+		return 3;
+	}
+
+	if ((val & 0xF0000000) == 0) {
+		return 4;
+	}
+
+	return 5;
+}
+
+static inline uint8_t *
+uintvar_pack(uint8_t *buf, uint32_t val)
+{
+	if ((val & 0xFFFFff80) == 0) { // one byte only - most common
+		*buf++ = (uint8_t)val;
+		return buf;
+	}
+
+	if ((val & 0xFFFFc000) == 0) { // two bytes - next most common
+		*buf++ = (uint8_t)(val >> 7) | 0x80;
+		*buf++ = (uint8_t)(val & 0x7F);
+		return buf;
+	}
+
+	// More explicit cases have odd performance testing results, so just loop
+	// for everything that would take more than two bytes...
+
+	for (int i = 4; i > 0; i--) {
+		uint32_t shift_val = val >> (7 * i);
+
+		if (shift_val != 0) {
+			*buf++ = (uint8_t)(shift_val | 0x80);
+		}
+	}
+
+	*buf++ = (uint8_t)(val & 0x7F);
+
+	return buf;
+}
+
+static inline uint32_t
+uintvar_parse(const uint8_t** pp_read, const uint8_t* end)
+{
+	const uint8_t* p_read = *pp_read;
+
+	if (p_read >= end) {
+		*pp_read = NULL;
+		return 0;
+	}
+
+	if ((*p_read & 0x80) == 0) { // one byte only - most common - done
+		*pp_read = p_read + 1;
+		return *p_read;
+	}
+
+	if (*p_read == 0x80) { // leading zeros are illegal
+		*pp_read = NULL;
+		return 0;
+	}
+
+	uint32_t val = 0;
+
+	do {
+		val |= *p_read++ & 0x7F;
+		val <<= 7;
+
+		if (p_read >= end) {
+			break;
+		}
+
+		if ((*p_read & 0x80) == 0) { // no continuation bit - last byte - done
+			val |= *p_read;
+			*pp_read = p_read + 1;
+			return val;
+		}
+	} while ((val & 0xFE000000) == 0); // don't shift significant bits off top
+
+	*pp_read = NULL;
+
+	return 0;
+}

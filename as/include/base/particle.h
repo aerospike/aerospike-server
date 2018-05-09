@@ -57,9 +57,9 @@ typedef uint32_t (*as_particle_size_from_msgpack_fn) (const uint8_t *packed, uin
 typedef void (*as_particle_from_msgpack_fn) (const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
-typedef int32_t (*as_particle_size_from_flat_fn) (const uint8_t *flat, uint32_t flat_size);
-typedef int (*as_particle_cast_from_flat_fn) (uint8_t *flat, uint32_t flat_size, as_particle **pp);
-typedef int (*as_particle_from_flat_fn) (const uint8_t *flat, uint32_t flat_size, as_particle **pp);
+typedef const uint8_t * (*as_particle_skip_flat_fn) (const uint8_t *flat, const uint8_t *end);
+typedef const uint8_t * (*as_particle_cast_from_flat_fn) (const uint8_t *flat, const uint8_t *end, as_particle **pp);
+typedef const uint8_t * (*as_particle_from_flat_fn) (const uint8_t *flat, const uint8_t *end, as_particle **pp);
 typedef uint32_t (*as_particle_flat_size_fn) (const as_particle *p);
 typedef uint32_t (*as_particle_to_flat_fn) (const as_particle *p, uint8_t *flat);
 
@@ -90,7 +90,7 @@ typedef struct as_particle_vtable_s {
 	as_particle_size_from_msgpack_fn		size_from_msgpack_fn;
 	as_particle_from_msgpack_fn				from_msgpack_fn;
 
-	as_particle_size_from_flat_fn			size_from_flat_fn; // TODO - unused - remove?
+	as_particle_skip_flat_fn				skip_flat_fn;
 	as_particle_cast_from_flat_fn			cast_from_flat_fn;
 	as_particle_from_flat_fn				from_flat_fn;
 	as_particle_flat_size_fn				flat_size_fn;

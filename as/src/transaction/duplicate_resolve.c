@@ -87,7 +87,6 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, as_exchange_cluster_key());
 
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
 
 	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) == 0) {
 		as_record* r = r_ref.r;
@@ -188,7 +187,6 @@ dup_res_handle_request(cf_node node, msg* m)
 	as_partition_reserve(ns, as_partition_getid(keyd), &rsv);
 
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
 
 	if (as_record_get(rsv.tree, keyd, &r_ref) != 0) {
 		done_handle_request(&rsv, NULL, NULL);

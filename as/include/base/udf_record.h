@@ -32,7 +32,6 @@
 #include "citrusleaf/cf_atomic.h"
 
 #include "base/datamodel.h"
-#include "base/rec_props.h"
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
 #include "storage/storage.h"
@@ -42,7 +41,7 @@
 #define UDF_RECORD_BIN_ULIMIT 512
 
 typedef struct udf_record_bin_s {
-	char				name[AS_ID_BIN_SZ];
+	char				name[AS_BIN_NAME_MAX_SZ];
 	as_val *			value;
 	as_val *			oldvalue; // keeps track of old value in case rollback is required
 	bool				dirty;

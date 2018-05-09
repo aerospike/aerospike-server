@@ -208,7 +208,7 @@ rw_request_hash_fn(const void* key, uint32_t key_size)
 {
 	rw_request_hkey* hkey = (rw_request_hkey*)key;
 
-	return *(uint32_t*)&hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE1];
+	return *(uint32_t*)&hkey->keyd.digest[DIGEST_HASH_BASE_BYTE];
 }
 
 

@@ -669,8 +669,6 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	// Find record in index.
 
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
-
 	int get_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref);
 
 	if (get_rv == 0 && as_record_is_doomed(r_ref.r, ns)) {
@@ -894,13 +892,6 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 	xdr_dirty_bins dirty_bins;
 
 	if (urecord_op == UDF_OPTYPE_WRITE || urecord_op == UDF_OPTYPE_DELETE) {
-		size_t rec_props_data_size = as_storage_record_rec_props_size(rd);
-		uint8_t rec_props_data[rec_props_data_size];
-
-		if (rec_props_data_size > 0) {
-			as_storage_record_set_rec_props(rd, rec_props_data);
-		}
-
 		as_msg* m = &tr->msgp->msg;
 
 		// Convert message TTL special value if appropriate.
@@ -911,6 +902,7 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 
 		update_metadata_in_index(tr, true, r);
 
+		// Pickle for replication.
 		pickle_all(rd, rw);
 
 		tr->generation = r->generation;

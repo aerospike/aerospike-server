@@ -43,7 +43,6 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
-#include "base/rec_props.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
@@ -104,31 +103,20 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 
 	repl_write_flag_pickle(tr, rw->pickled_buf, &info);
 
-	msg_set_buf(m, RW_FIELD_RECORD, (void*)rw->pickled_buf, rw->pickled_sz,
+	msg_set_buf(m, RW_FIELD_RECORD, rw->pickled_buf, rw->pickled_sz,
 			MSG_SET_HANDOFF_MALLOC);
+	rw->pickled_buf = NULL; // make sure destructor doesn't free this
 
-	// Make sure destructor doesn't free this.
-	rw->pickled_buf = NULL;
+	if (rw->set_name) {
+		msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t*)rw->set_name,
+				rw->set_name_len, MSG_SET_COPY);
+		// rw->set_name points directly into vmap - never free it.
+	}
 
-	// TODO - replace rw->pickled_rec_props with individual fields.
-	if (rw->pickled_rec_props.p_data) {
-		const char* set_name;
-		uint32_t set_name_size;
-
-		if (as_rec_props_get_value(&rw->pickled_rec_props,
-				CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
-				(uint8_t**)&set_name) == 0) {
-			msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
-					set_name_size - 1, MSG_SET_COPY);
-		}
-
-		uint32_t key_size;
-		uint8_t* key;
-
-		if (as_rec_props_get_value(&rw->pickled_rec_props,
-				CL_REC_PROPS_FIELD_KEY, &key_size, &key) == 0) {
-			msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
-		}
+	if (rw->key) {
+		msg_set_buf(m, RW_FIELD_KEY, rw->key, rw->key_size,
+				MSG_SET_HANDOFF_MALLOC);
+		rw->key = NULL; // make sure destructor doesn't free this
 	}
 
 	if (info != 0) {
@@ -496,7 +484,6 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	as_index_tree* tree = rsv->tree;
 
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
 
 	if (as_record_get(tree, keyd, &r_ref) != 0) {
 		return; // not found is ok from master's perspective.

@@ -1,7 +1,7 @@
 /*
- * namespace_cold.c
+ * namespace_ce.c
  *
- * Copyright (C) 2014 Aerospike, Inc.
+ * Copyright (C) 2014-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,6 +20,10 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+//==========================================================
+// Includes.
+//
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -33,63 +37,50 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 
-static bool
-check_capacity(uint32_t capacity)
+
+//==========================================================
+// Forward declarations.
+//
+
+static void setup_namespace(as_namespace* ns);
+
+
+//==========================================================
+// Public API.
+//
+
+void
+as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance)
 {
-	uint8_t* test_index_stages[g_config.n_namespaces];
-	uint8_t* test_data_blocks[g_config.n_namespaces];
-	uint32_t i;
-
-	for (i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-		uint64_t stage_size = (uint64_t)as_index_size_get(ns) * capacity;
-
-		if ((test_index_stages[i] = cf_try_malloc(stage_size)) == NULL) {
-			break;
-		}
-
-		// Memory for overhead and data, proportional to (= to) stage size.
-		if ((test_data_blocks[i] = cf_try_malloc(stage_size)) == NULL) {
-			cf_free(test_index_stages[i]);
-			break;
-		}
-	}
-
-	for (uint32_t j = 0; j < i; j++) {
-		cf_free(test_index_stages[j]);
-		cf_free(test_data_blocks[j]);
-	}
-
-	return i == g_config.n_namespaces;
+	// For enterprise version only.
 }
 
-#define MIN_STAGE_CAPACITY (MAX_STAGE_CAPACITY / 8)
-#define NS_MIN_MB (((sizeof(as_index) * MIN_STAGE_CAPACITY) * 2) / (1024 * 1024))
 
-uint32_t
-as_mem_check()
+//==========================================================
+// Private API - for enterprise separation only.
+//
+
+void
+as_namespaces_setup(bool cold_start_cmd, uint32_t instance)
 {
-	uint32_t capacity;
-
-	for (capacity = MAX_STAGE_CAPACITY; capacity >= MIN_STAGE_CAPACITY; capacity /= 2) {
-		if (check_capacity(capacity)) {
-			break;
-		}
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		setup_namespace(g_config.namespaces[i]);
 	}
-
-	if (capacity < MIN_STAGE_CAPACITY) {
-		cf_crash_nostack(AS_NAMESPACE, "server requires at least %luMb of memory per namespace", NS_MIN_MB);
-	}
-
-	if (capacity < MAX_STAGE_CAPACITY) {
-		cf_info(AS_NAMESPACE, "detected small memory profile - will size arena stages 1/%u max", MAX_STAGE_CAPACITY / capacity);
-	}
-
-	return capacity;
 }
+
+void
+as_namespace_finish_setup(as_namespace *ns, uint32_t instance)
+{
+	// For enterprise version only.
+}
+
+
+//==========================================================
+// Local helpers.
+//
 
 static void
-setup_namespace(as_namespace* ns, uint32_t stage_capacity)
+setup_namespace(as_namespace* ns)
 {
 	ns->cold_start = true;
 
@@ -113,9 +104,9 @@ setup_namespace(as_namespace* ns, uint32_t stage_capacity)
 	//
 
 	if (! ns->single_bin) {
-		ns->p_bin_name_vmap = (cf_vmapx*)cf_malloc(cf_vmapx_sizeof(VMAP_BIN_NAME_MAX_SZ, MAX_BIN_NAMES));
+		ns->p_bin_name_vmap = (cf_vmapx*)cf_malloc(cf_vmapx_sizeof(AS_BIN_NAME_MAX_SZ, MAX_BIN_NAMES));
 
-		cf_vmapx_init(ns->p_bin_name_vmap, VMAP_BIN_NAME_MAX_SZ, MAX_BIN_NAMES, 4096, VMAP_BIN_NAME_MAX_SZ);
+		cf_vmapx_init(ns->p_bin_name_vmap, AS_BIN_NAME_MAX_SZ, MAX_BIN_NAMES, 4096, AS_BIN_NAME_MAX_SZ);
 	}
 
 	//--------------------------------------------
@@ -123,20 +114,10 @@ setup_namespace(as_namespace* ns, uint32_t stage_capacity)
 	//
 
 	ns->arena = (cf_arenax*)cf_malloc(cf_arenax_sizeof());
+	ns->tree_shared.arena = ns->arena;
 
-	cf_arenax_init(ns->arena, 0, as_index_size_get(ns), stage_capacity, 0, CF_ARENAX_BIGLOCK);
-}
+	uint32_t element_size = as_index_size_get(ns);
+	uint32_t stage_capacity = (uint32_t)(ns->index_stage_size / element_size);
 
-void
-as_namespaces_setup(bool cold_start_cmd, uint32_t instance, uint32_t stage_capacity)
-{
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		setup_namespace(g_config.namespaces[i], stage_capacity);
-	}
-}
-
-void
-as_namespace_xmem_trusted(as_namespace *ns)
-{
-	// For enterprise version only.
+	cf_arenax_init(ns->arena, ns->xmem_type, ns->xmem_type_cfg, 0, element_size, stage_capacity, 0, CF_ARENAX_BIGLOCK);
 }

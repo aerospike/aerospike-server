@@ -40,7 +40,6 @@
 
 #include "base/datamodel.h"
 #include "base/proto.h"
-#include "base/rec_props.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
@@ -94,7 +93,10 @@ rw_request_create(cf_digest* keyd)
 
 	rw->pickled_buf = NULL;
 	rw->pickled_sz = 0;
-	as_rec_props_clear(&rw->pickled_rec_props);
+	rw->set_name = NULL;
+	rw->set_name_len = 0;
+	rw->key = NULL;
+	rw->key_size = 0;
 
 	rw->response_db.buf = NULL;
 	rw->response_db.is_stack = false;
@@ -144,8 +146,8 @@ rw_request_destroy(rw_request* rw)
 		cf_free(rw->pickled_buf);
 	}
 
-	if (rw->pickled_rec_props.p_data) {
-		cf_free(rw->pickled_rec_props.p_data);
+	if (rw->key) {
+		cf_free(rw->key);
 	}
 
 	cf_dyn_buf_free(&rw->response_db);

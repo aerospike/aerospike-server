@@ -37,18 +37,11 @@
 //
 
 as_index_tree *
-as_index_tree_resume(as_index_tree_shared *shared, cf_arenax *arena,
-		as_treex *treex)
+as_index_tree_resume(as_index_tree_shared *shared, as_treex *xmem_trees,
+		uint32_t pid, as_index_tree_done_fn cb, void *udata)
 {
 	cf_crash(AS_INDEX, "CE code called as_index_tree_resume()");
 	return NULL;
-}
-
-
-void
-as_index_tree_shutdown(as_index_tree *tree, as_treex *treex)
-{
-	// For enterprise version only.
 }
 
 

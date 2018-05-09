@@ -809,20 +809,20 @@ bin_names_from_op(as_msg* m, int* result)
 		return NULL;
 	}
 
-	cf_vector* v  = cf_vector_create(AS_ID_BIN_SZ, m->n_ops, 0);
+	cf_vector* v  = cf_vector_create(AS_BIN_NAME_MAX_SZ, m->n_ops, 0);
 
 	as_msg_op* op = NULL;
 	int n = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
-		if (op->name_sz >= AS_ID_BIN_SZ) {
+		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
 			cf_warning(AS_SCAN, "basic scan job bin name too long");
 			cf_vector_destroy(v);
 			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
 			return NULL;
 		}
 
-		char bin_name[AS_ID_BIN_SZ];
+		char bin_name[AS_BIN_NAME_MAX_SZ];
 
 		memcpy(bin_name, op->name, op->name_sz);
 		bin_name[op->name_sz] = 0;

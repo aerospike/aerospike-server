@@ -57,6 +57,12 @@ uint32_t float_asval_to_wire(const as_val *val, uint8_t *wire);
 // Handle msgpack translation.
 void float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
+// Handle on-device "flat" format.
+const uint8_t *float_skip_flat(const uint8_t *flat, const uint8_t *end);
+const uint8_t *float_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
+uint32_t float_flat_size(const as_particle *p);
+uint32_t float_to_flat(const as_particle *p, uint8_t *flat);
+
 
 //==========================================================
 // FLOAT particle interface - vtable.
@@ -85,12 +91,22 @@ const as_particle_vtable float_vtable = {
 		integer_size_from_msgpack,
 		float_from_msgpack,
 
-		integer_size_from_flat,
-		integer_cast_from_flat,
-		integer_from_flat,
-		integer_flat_size,
-		integer_to_flat
+		float_skip_flat,
+		float_from_flat, // cast copies embedded value out
+		float_from_flat,
+		float_flat_size,
+		float_to_flat
 };
+
+
+//==========================================================
+// Typedefs & constants.
+//
+
+typedef struct float_flat_s {
+	uint8_t		type;
+	uint64_t	i;
+} __attribute__ ((__packed__)) float_flat;
 
 
 //==========================================================
@@ -197,4 +213,51 @@ float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp
 	as_unpack_double(&pk, &x);
 
 	*(double *)pp = x;
+}
+
+//------------------------------------------------
+// Handle on-device "flat" format.
+//
+
+const uint8_t *
+float_skip_flat(const uint8_t *flat, const uint8_t *end)
+{
+	// Type is correct, since we got here - no need to check against end.
+	return flat + sizeof(float_flat);
+}
+
+const uint8_t *
+float_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
+{
+	const float_flat *p_float_flat = (const float_flat *)flat;
+
+	flat += sizeof(float_flat);
+
+	if (flat > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat float");
+		return NULL;
+	}
+
+	// Float values live in an as_bin instead of a pointer. Also, flat floats
+	// are host order, so no byte swap.
+	*pp = (as_particle *)p_float_flat->i;
+
+	return flat;
+}
+
+uint32_t
+float_flat_size(const as_particle *p)
+{
+	return sizeof(float_flat);
+}
+
+uint32_t
+float_to_flat(const as_particle *p, uint8_t *flat)
+{
+	float_flat *p_float_flat = (float_flat *)flat;
+
+	// Already wrote the type.
+	p_float_flat->i = (uint64_t)p;
+
+	return float_flat_size(p);
 }

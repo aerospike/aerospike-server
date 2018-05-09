@@ -1,7 +1,7 @@
 /*
  * roster_ce.c
  *
- * Copyright (C) 2017 Aerospike, Inc.
+ * Copyright (C) 2017-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.

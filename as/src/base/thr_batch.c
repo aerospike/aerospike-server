@@ -145,7 +145,6 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 
 			if (rv == 0) {
 				as_index_ref r_ref;
-				r_ref.skip_lock = false;
 				int rec_rv = as_record_get_live(rsv.tree, &bmd->keyd, &r_ref, ns);
 
 				if (rec_rv == 0) {
@@ -351,14 +350,14 @@ as_binlist_from_op(as_msg* msg)
 		return 0;
 	}
 
-	cf_vector* binlist = cf_vector_create(AS_ID_BIN_SZ, 5, 0);
+	cf_vector* binlist = cf_vector_create(AS_BIN_NAME_MAX_SZ, 5, 0);
 	as_msg_op* op = 0;
 	int n = 0;
 	int len;
-	char name[AS_ID_BIN_SZ];
+	char name[AS_BIN_NAME_MAX_SZ];
 
 	while ((op = as_msg_op_iterate(msg, op, &n))) {
-		len = (op->name_sz <= AS_ID_BIN_SZ - 1)? op->name_sz : AS_ID_BIN_SZ - 1;
+		len = (op->name_sz < AS_BIN_NAME_MAX_SZ) ? op->name_sz : AS_BIN_NAME_MAX_SZ - 1;
 		memcpy(name, op->name, len);
 		name[len] = 0;
 		cf_vector_append(binlist, name);

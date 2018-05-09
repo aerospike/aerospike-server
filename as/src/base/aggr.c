@@ -112,7 +112,6 @@ static int
 aopen(aggr_state *astate, const cf_digest *digest)
 {
 	udf_record   * urecord  = as_rec_source(astate->urec);
-	as_index_ref   * r_ref  = urecord->r_ref;
 	as_transaction * tr     = urecord->tr;
 
 	int pid                = as_partition_getid(digest);
@@ -131,7 +130,6 @@ aopen(aggr_state *astate, const cf_digest *digest)
 	tr->rsv.tree        = astate->rsv->tree;
 	tr->keyd            = urecord->keyd;
 
-	r_ref->skip_lock    = false;
 	if (udf_record_open(urecord) == 0) {
 		astate->rec_open   = true;
 		return 0;
@@ -283,7 +281,6 @@ int
 as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void * udata, as_result * ap_res)
 {
 	as_index_ref    r_ref;
-	r_ref.skip_lock   = false;
 	as_storage_rd   rd;
 	bzero(&rd, sizeof(as_storage_rd));
 	as_transaction  tr;

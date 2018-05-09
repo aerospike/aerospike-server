@@ -141,7 +141,7 @@ run_cold_start_evict_prep(void* udata)
 
 	while ((pid = (int)cf_atomic32_incr(p_info->p_pid)) < AS_PARTITIONS) {
 		// Don't bother with partition reservations - it's startup.
-		as_index_reduce_live(ns->partitions[pid].vp, cold_start_evict_prep_reduce_cb, &cb_info);
+		as_index_reduce_live(ns->partitions[pid].tree, cold_start_evict_prep_reduce_cb, &cb_info);
 	}
 
 	return NULL;
@@ -172,7 +172,7 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (void_time != 0) {
 		if (! p_info->sets_not_evicting[set_id] &&
 				void_time < ns->cold_start_threshold_void_time) {
-			as_index_delete(p_partition->vp, &r->keyd);
+			as_index_delete(p_partition->tree, &r->keyd);
 			p_info->num_evicted++;
 		}
 	}
@@ -218,7 +218,7 @@ run_cold_start_evict(void* udata)
 		as_partition* p_partition = &ns->partitions[pid];
 
 		cb_info.p_partition = p_partition;
-		as_index_reduce_live(p_partition->vp, cold_start_evict_reduce_cb, &cb_info);
+		as_index_reduce_live(p_partition->tree, cold_start_evict_reduce_cb, &cb_info);
 	}
 
 	cf_atomic32_add(&p_info->total_evicted, cb_info.num_evicted);
@@ -593,7 +593,8 @@ add_to_obj_size_histograms(as_namespace* ns, as_index* r)
 {
 	uint32_t set_id = as_index_get_set_id(r);
 	linear_hist* set_obj_size_hist = ns->set_obj_size_hists[set_id];
-	uint64_t n_rblocks = r->n_rblocks;
+	uint64_t n_rblocks = r->n_rblocks + 1;
+	// FIXME - deal with these storage histograms!
 
 	linear_hist_insert_data_point(ns->obj_size_hist, n_rblocks);
 

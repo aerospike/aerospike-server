@@ -39,6 +39,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/particle.h"
+#include "base/particle_blob.h"
 #include "base/proto.h"
 
 
@@ -73,9 +74,7 @@ uint32_t list_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
 void list_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
-int32_t list_size_from_flat(const uint8_t *flat, uint32_t flat_size);
-int list_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp);
-int list_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp);
+const uint8_t *list_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
 uint32_t list_flat_size(const as_particle *p);
 uint32_t list_to_flat(const as_particle *p, uint8_t *flat);
 
@@ -107,8 +106,8 @@ const as_particle_vtable list_vtable = {
 		list_size_from_msgpack,
 		list_from_msgpack,
 
-		list_size_from_flat,
-		list_cast_from_flat,
+		blob_skip_flat,
+		blob_cast_from_flat,
 		list_from_flat,
 		list_flat_size,
 		list_to_flat
@@ -605,48 +604,42 @@ list_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 // Handle on-device "flat" format.
 //
 
-int32_t
-list_size_from_flat(const uint8_t *flat, uint32_t flat_size)
+const uint8_t *
+list_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 {
-	// TODO - maybe never used
-	return -1;
-}
+	if (flat + sizeof(list_flat) > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat list");
+		return NULL;
+	}
 
-int
-list_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp)
-{
-	// Cast temp buffer from disk to data-not-in-memory.
-	list_flat *p_list_flat = (list_flat *)flat;
-
-	// This assumes list_flat is the same as list_mem.
-	*pp = (as_particle *)p_list_flat;
-
-	return 0;
-}
-
-int
-list_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
-{
 	// Convert temp buffer from disk to data-in-memory.
 	const list_flat *p_list_flat = (const list_flat *)flat;
+
+	flat += sizeof(list_flat) + p_list_flat->sz;
+
+	if (flat > end) {
+		cf_warning(AS_PARTICLE, "incomplete flat list");
+		return NULL;
+	}
+
 	packed_list list;
 
 	if (! packed_list_init(&list, p_list_flat->data, p_list_flat->sz)) {
 		cf_warning(AS_PARTICLE, "list_from_flat() invalid packed list");
-		return -1;
+		return NULL;
 	}
 
 	list_mem *p_list_mem = packed_list_pack_mem(&list, NULL);
 
 	if (! p_list_mem) {
 		cf_warning(AS_PARTICLE, "list_from_flat() failed to create particle");
-		return -1;
+		return NULL;
 	}
 
 	p_list_mem->type = p_list_flat->type;
 	*pp = (as_particle *)p_list_mem;
 
-	return 0;
+	return flat;
 }
 
 uint32_t

@@ -36,12 +36,10 @@
 
 #include "cf_mutex.h"
 #include "fault.h"
-#include "olock.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "base/rec_props.h"
 #include "base/thr_info.h"
 #include "fabric/partition.h"
 
@@ -167,11 +165,12 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->r = r;
 	rd->ns = ns;
-	as_rec_props_clear(&rd->rec_props);
 	rd->bins = 0;
 	rd->n_bins = 0;
 	rd->record_on_device = false;
 	rd->ignore_record_on_device = false;
+	rd->set_name_len = 0;
+	rd->set_name = NULL;
 	rd->key_size = 0;
 	rd->key = NULL;
 	rd->is_durable_delete = false;
@@ -198,11 +197,12 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->r = r;
 	rd->ns = ns;
-	as_rec_props_clear(&rd->rec_props);
 	rd->bins = 0;
 	rd->n_bins = 0;
 	rd->record_on_device = true;
 	rd->ignore_record_on_device = false;
+	rd->set_name_len = 0;
+	rd->set_name = NULL;
 	rd->key_size = 0;
 	rd->key = NULL;
 	rd->is_durable_delete = false;
@@ -398,17 +398,17 @@ as_storage_defrag_sweep(as_namespace *ns)
 // as_storage_info_set
 //
 
-typedef void (*as_storage_info_set_fn)(as_namespace *ns, const as_partition *p, bool flush);
+typedef void (*as_storage_info_set_fn)(as_namespace *ns, const as_partition *p);
 static const as_storage_info_set_fn as_storage_info_set_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support info
 	as_storage_info_set_ssd
 };
 
 void
-as_storage_info_set(as_namespace *ns, const as_partition *p, bool flush)
+as_storage_info_set(as_namespace *ns, const as_partition *p)
 {
 	if (as_storage_info_set_table[ns->storage_type]) {
-		as_storage_info_set_table[ns->storage_type](ns, p, flush);
+		as_storage_info_set_table[ns->storage_type](ns, p);
 	}
 }
 
@@ -431,23 +431,39 @@ as_storage_info_get(as_namespace *ns, as_partition *p)
 }
 
 //--------------------------------------
-// as_storage_info_flush
+// as_storage_load_regime
 //
 
-typedef int (*as_storage_info_flush_fn)(as_namespace *ns);
-static const as_storage_info_flush_fn as_storage_info_flush_table[AS_NUM_STORAGE_ENGINES] = {
-	NULL, // memory doesn't support info
-	as_storage_info_flush_ssd
+typedef void (*as_storage_load_regime_fn)(as_namespace *ns);
+static const as_storage_load_regime_fn as_storage_load_regime_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't store info
+	as_storage_load_regime_ssd
 };
 
-int
-as_storage_info_flush(as_namespace *ns)
+void
+as_storage_load_regime(as_namespace *ns)
 {
-	if (as_storage_info_flush_table[ns->storage_type]) {
-		return as_storage_info_flush_table[ns->storage_type](ns);
+	if (as_storage_load_regime_table[ns->storage_type]) {
+		as_storage_load_regime_table[ns->storage_type](ns);
 	}
+}
 
-	return 0;
+//--------------------------------------
+// as_storage_save_regime
+//
+
+typedef void (*as_storage_save_regime_fn)(as_namespace *ns);
+static const as_storage_save_regime_fn as_storage_save_regime_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't store info
+	as_storage_save_regime_ssd
+};
+
+void
+as_storage_save_regime(as_namespace *ns)
+{
+	if (as_storage_save_regime_table[ns->storage_type]) {
+		as_storage_save_regime_table[ns->storage_type](ns);
+	}
 }
 
 //--------------------------------------
@@ -528,6 +544,27 @@ as_storage_histogram_clear_all(as_namespace *ns)
 	return 0;
 }
 
+//--------------------------------------
+// as_storage_record_size
+//
+
+typedef uint32_t (*as_storage_record_size_fn)(const as_record *r);
+static const as_storage_record_size_fn as_storage_record_size_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support record stored size.
+	as_storage_record_size_ssd
+};
+
+uint32_t
+as_storage_record_size(const as_namespace *ns, const as_record *r)
+{
+	if (as_storage_record_size_table[ns->storage_type]) {
+		return as_storage_record_size_table[ns->storage_type](r);
+	}
+
+	return 0;
+}
+
+
 
 //==========================================================
 // Generic functions that don't use "v-tables".
@@ -593,6 +630,16 @@ as_storage_record_drop_from_mem_stats(as_storage_rd *rd)
 			-(int64_t)drop_bytes);
 }
 
+void
+as_storage_record_get_set_name(as_storage_rd *rd)
+{
+	rd->set_name = as_index_get_set_name(rd->r, rd->ns);
+
+	if (rd->set_name) {
+		rd->set_name_len = strlen(rd->set_name);
+	}
+}
+
 bool
 as_storage_record_get_key(as_storage_rd *rd)
 {
@@ -613,74 +660,26 @@ as_storage_record_get_key(as_storage_rd *rd)
 	return false;
 }
 
-size_t
-as_storage_record_rec_props_size(as_storage_rd *rd)
-{
-	size_t rec_props_data_size = 0;
-
-	const char *set_name = as_index_get_set_name(rd->r, rd->ns);
-
-	if (set_name) {
-		rec_props_data_size += as_rec_props_sizeof_field(strlen(set_name) + 1);
-	}
-
-	if (rd->key) {
-		rec_props_data_size += as_rec_props_sizeof_field(rd->key_size);
-	}
-
-	return rec_props_data_size;
-}
-
-// Populates rec_props struct in rd, using index info where possible. Assumes
-// relevant information is ready:
-// - set name
-// - record key
-// Relies on caller's properly allocated rec_props_data.
 void
-as_storage_record_set_rec_props(as_storage_rd *rd, uint8_t* rec_props_data)
-{
-	as_rec_props_init(&(rd->rec_props), rec_props_data);
-
-	if (as_index_has_set(rd->r)) {
-		const char *set_name = as_index_get_set_name(rd->r, rd->ns);
-		as_rec_props_add_field(&(rd->rec_props), CL_REC_PROPS_FIELD_SET_NAME,
-				strlen(set_name) + 1, (uint8_t *)set_name);
-	}
-
-	if (rd->key) {
-		as_rec_props_add_field(&(rd->rec_props), CL_REC_PROPS_FIELD_KEY,
-				rd->key_size, rd->key);
-	}
-}
-
-void
-as_storage_shutdown(void)
+as_storage_shutdown(uint32_t instance)
 {
 	cf_info(AS_STORAGE, "initiating storage shutdown ...");
-
-	// Pull all record locks - stops everything writing to current swbs such
-	// that each write's record lock scope is either completed or never entered.
-
-	for (uint32_t n = 0; n < g_record_locks->n_locks; n++) {
-		cf_mutex_lock(&g_record_locks->locks[n]);
-	}
-
-	// Now flush everything outstanding to storage devices.
-
  	cf_info(AS_STORAGE, "flushing data to storage ...");
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
 		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-
-			// For now this is only needed for warm-restartable namespaces.
+			// Lock all record locks - stops everything writing to current swbs
+			// such that each write's record lock scope is either completed or
+			// never entered.
 			for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 				as_partition_shutdown(ns, pid);
 			}
 
+			// Now flush everything outstanding to storage devices.
 			as_storage_shutdown_ssd(ns);
-			as_namespace_xmem_trusted(ns);
+			as_namespace_xmem_shutdown(ns, instance);
 		}
 	}
 

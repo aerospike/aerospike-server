@@ -108,7 +108,6 @@ int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_statistics(char *name, char *subtree, cf_dyn_buf *db);
 void as_storage_show_wblock_stats(as_namespace *ns);
 void as_storage_summarize_wblock_stats(as_namespace *ns);
-int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wblock_id);
 
 
 as_stats g_stats = { 0 }; // separate .c file not worth it
@@ -318,7 +317,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint32(db, "query_long_running", g_query_long_running);
 
 	info_append_uint64(db, "sindex_ucgarbage_found", g_stats.query_false_positives);
-	info_append_uint64(db, "sindex_gc_locktimedout", g_stats.sindex_gc_timedout);
+	info_append_uint64(db, "sindex_gc_retries", g_stats.sindex_gc_retries);
 	info_append_uint64(db, "sindex_gc_list_creation_time", g_stats.sindex_gc_list_creation_time);
 	info_append_uint64(db, "sindex_gc_list_deletion_time", g_stats.sindex_gc_list_deletion_time);
 	info_append_uint64(db, "sindex_gc_objects_validated", g_stats.sindex_gc_objects_validated);
@@ -935,83 +934,6 @@ info_command_dump_msgs(char *name, char *params, cf_dyn_buf *db)
 	}
 
 	cf_dyn_buf_append_string(db, "ok");
-	return(0);
-}
-
-static int
-is_numeric_string(char *str)
-{
-	if (!*str)
-		return 0;
-
-	while (isdigit(*str))
-		str++;
-
-	return (!*str);
-}
-
-int
-info_command_dump_wb(char *name, char *params, cf_dyn_buf *db)
-{
-	as_namespace *ns;
-	int device_index, wblock_id;
-	char param_str[100];
-	int param_str_len;
-
-	/*
-	 *  Command Format:  "dump-wb:ns=<Namespace>;dev=<DeviceID>;id=<WBlockId>"
-	 *
-	 *   where <Namespace> is the name of the namespace,
-	 *         <DeviceID> is the drive number (a non-negative integer), and
-	 *         <WBlockID> is a non-negative integer corresponding to an active wblock.
-	 */
-	param_str[0] = '\0';
-	param_str_len = sizeof(param_str);
-	if (!as_info_parameter_get(params, "ns", param_str, &param_str_len)) {
-		if (!(ns = as_namespace_get_byname(param_str))) {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"ns\" value must be the name of an existing namespace, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	} else {
-		cf_warning(AS_INFO, "The \"%s:\" command requires an argument of the form \"ns=<Namespace>\"", name);
-		cf_dyn_buf_append_string(db, "error");
-		return 0;
-	}
-
-	param_str[0] = '\0';
-	param_str_len = sizeof(param_str);
-	if (!as_info_parameter_get(params, "dev", param_str, &param_str_len)) {
-		if (!is_numeric_string(param_str) || (0 > (device_index = atoi(param_str)))) {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"dev\" value must be a non-negative integer, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	} else {
-		cf_warning(AS_INFO, "The \"%s:\" command requires an argument of the form \"dev=<DeviceID>\"", name);
-		cf_dyn_buf_append_string(db, "error");
-		return 0;
-	}
-
-	param_str[0] = '\0';
-	param_str_len = sizeof(param_str);
-	if (!as_info_parameter_get(params, "id", param_str, &param_str_len)) {
-		if (!is_numeric_string(param_str) || (0 > (wblock_id = atoi(param_str)))) {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"id\" value must be a non-negative integer, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	} else {
-		cf_warning(AS_INFO, "The \"%s:\" command requires an argument of the form \"id=<WBlockID>\"", name);
-		cf_dyn_buf_append_string(db, "error");
-		return 0;
-	}
-
-	if (!as_storage_analyze_wblock(ns, device_index, (uint32_t) wblock_id))
-		cf_dyn_buf_append_string(db, "ok");
-	else
-		cf_dyn_buf_append_string(db, "error");
-
 	return(0);
 }
 
@@ -1745,12 +1667,20 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
 	info_append_uint32(db, "high-water-disk-pct", ns->hwm_disk_pct);
 	info_append_uint32(db, "high-water-memory-pct", ns->hwm_memory_pct);
+	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
+
+	info_append_string(db, "index-type",
+			ns->xmem_type == CF_XMEM_TYPE_UNDEFINED ? "undefined" :
+					(ns->xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
+							(ns->xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
+									(ns->xmem_type == CF_XMEM_TYPE_SSD ? "ssd" :
+											"illegal"))));
+
 	info_append_uint64(db, "max-ttl", ns->max_ttl);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	info_append_uint32(db, "obj-size-hist-max", ns->obj_size_hist_max); // not original, may have been rounded
-	info_append_uint32(db, "partition-tree-locks", ns->tree_shared.n_lock_pairs);
 	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
 	info_append_uint32(db, "rack-id", ns->rack_id);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
@@ -1761,6 +1691,17 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "tomb-raider-eligible-age", ns->tomb_raider_eligible_age);
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
+
+	if (ns->xmem_type == CF_XMEM_TYPE_PMEM ||
+			ns->xmem_type == CF_XMEM_TYPE_SSD) {
+		for (uint32_t i = 0; i < CF_XMEM_MAX_MOUNTS; i++) {
+			if (! ns->xmem_mounts[i]) {
+				break;
+			}
+
+			info_append_string(db, "index-type.mount", ns->xmem_mounts[i]);
+		}
+	}
 
 	info_append_string(db, "storage-engine",
 			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY ? "memory" :
@@ -6447,9 +6388,9 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	if (imd->bname && strlen(imd->bname) >= AS_ID_BIN_SZ) {
+	if (imd->bname && strlen(imd->bname) >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_INFO, "%s : Failed. Bin Name longer than allowed %d",
-				cmd, AS_ID_BIN_SZ - 1);
+				cmd, AS_BIN_NAME_MAX_SZ - 1);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Bin Name too long");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
@@ -6904,7 +6845,7 @@ as_info_init()
 	// All commands accepted by asinfo/telnet
 	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
 				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
-				"dump-si;dump-skew;dump-smd;dump-wb;dump-wb-summary;feature-key;get-config;get-sl;hist-dump;"
+				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"racks;recluster;revive;roster;roster-set;service;services;services-alumni;services-alumni-reset;set-config;"
@@ -6982,7 +6923,6 @@ as_info_init()
 	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-skew", info_command_dump_skew, PERM_LOGGING_CTRL);              // Print information about clock skew
 	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
-	as_info_set_command("dump-wb", info_command_dump_wb, PERM_LOGGING_CTRL);                  // Print debug information about Write Bocks (WB) to the log file.
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.

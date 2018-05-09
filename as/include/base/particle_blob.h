@@ -56,8 +56,8 @@ uint32_t blob_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
 void blob_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
-int32_t blob_size_from_flat(const uint8_t *flat, uint32_t flat_size);
-int blob_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp);
-int blob_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp);
+const uint8_t *blob_skip_flat(const uint8_t *flat, const uint8_t *end);
+const uint8_t *blob_cast_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
+const uint8_t *blob_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
 uint32_t blob_flat_size(const as_particle *p);
 uint32_t blob_to_flat(const as_particle *p, uint8_t *flat);

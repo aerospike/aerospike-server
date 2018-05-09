@@ -296,7 +296,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	const char *set_name = as_index_get_set_name(r, ns);
 	size_t set_name_len = set_name ? strlen(set_name) : 0;
 
-	uint8_t* key = NULL;
+	const uint8_t* key = NULL;
 	uint32_t key_size = 0;
 
 	if (include_key && r->key_stored == 1) {
@@ -333,7 +333,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			n_select_bins = cf_vector_size(select_bins);
 
 			for (uint32_t i = 0; i < n_select_bins; i++) {
-				char bin_name[AS_ID_BIN_SZ];
+				char bin_name[AS_BIN_NAME_MAX_SZ];
 
 				cf_vector_get(select_bins, i, (void*)&bin_name);
 
@@ -442,7 +442,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 
 	if (select_bins) {
 		for (uint32_t i = 0; i < n_select_bins; i++) {
-			char bin_name[AS_ID_BIN_SZ];
+			char bin_name[AS_BIN_NAME_MAX_SZ];
 
 			cf_vector_get(select_bins, i, (void*)&bin_name);
 

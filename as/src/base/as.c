@@ -438,7 +438,7 @@ main(int argc, char **argv)
 	// Received a shutdown signal.
 	//
 
-	as_storage_shutdown();
+	as_storage_shutdown(instance);
 	as_xdr_shutdown();
 	as_smd_shutdown(g_smd);
 

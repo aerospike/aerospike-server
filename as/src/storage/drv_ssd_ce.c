@@ -26,9 +26,15 @@
 #include <stdint.h>
 #include "fault.h"
 #include "base/datamodel.h"
-#include "base/rec_props.h"
 #include "storage/storage.h"
 
+
+void
+ssd_resume_devices_one_phase(drv_ssds* ssds)
+{
+	// Should not get here - for enterprise version only.
+	cf_crash(AS_DRV_SSD, "cold start called ssd_resume_devices()");
+}
 
 void
 ssd_resume_devices(drv_ssds* ssds)
@@ -47,14 +53,33 @@ run_ssd_cool_start(void* udata)
 }
 
 void
-ssd_header_init_cfg(const as_namespace* ns, ssd_device_header* header)
+ssd_header_init_cfg(const as_namespace* ns, drv_ssd* ssd,
+		ssd_device_header* header)
 {
+	if (ns->single_bin) {
+		header->common.prefix.flags |= SSD_HEADER_FLAG_SINGLE_BIN;
+	}
 }
 
-bool
-ssd_header_is_valid_cfg(const as_namespace* ns, const ssd_device_header* header)
+void
+ssd_header_validate_cfg(const as_namespace* ns, drv_ssd* ssd,
+		const ssd_device_header* header)
 {
-	return true;
+	if ((header->common.prefix.flags & SSD_HEADER_FLAG_SINGLE_BIN) != 0) {
+		if (! ns->single_bin) {
+			cf_crash(AS_DRV_SSD, "device has 'single-bin' data but 'single-bin' is not configured");
+		}
+	}
+	else {
+		if (ns->single_bin) {
+			cf_crash(AS_DRV_SSD, "device has multi-bin data but 'single-bin' is configured");
+		}
+	}
+}
+
+void
+ssd_flush_final_cfg(as_namespace* ns)
+{
 }
 
 bool
@@ -67,22 +92,15 @@ ssd_cold_start_is_valid_n_bins(uint32_t n_bins)
 	return n_bins <= BIN_NAMES_QUOTA;
 }
 
-bool
-ssd_cold_start_is_record_truncated(as_namespace* ns, const drv_ssd_block* block,
-		const as_rec_props* p_props)
-{
-	return false;
-}
-
 void
-ssd_cold_start_adjust_cenotaph(as_namespace* ns, const drv_ssd_block* block,
-		as_record* r)
+ssd_cold_start_adjust_cenotaph(as_namespace* ns, bool block_has_bins,
+		uint32_t block_void_time, as_record* r)
 {
 	// Nothing to do - relevant for enterprise version only.
 }
 
 void
-ssd_cold_start_transition_record(as_namespace* ns, const drv_ssd_block* block,
+ssd_cold_start_transition_record(as_namespace* ns, const ssd_record* block,
 		as_record* r, bool is_create)
 {
 	// Nothing to do - relevant for enterprise version only.
@@ -95,7 +113,7 @@ ssd_cold_start_drop_cenotaphs(as_namespace* ns)
 }
 
 void
-ssd_adjust_versions(as_namespace* ns, ssd_device_header* header)
+ssd_adjust_versions(as_namespace* ns, ssd_common_pmeta* pmeta)
 {
 	// Nothing to do - relevant for enterprise version only.
 }
@@ -131,24 +149,6 @@ ssd_write_bins(as_storage_rd *rd)
 }
 
 void
-ssd_init_trusted(as_namespace* ns)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-bool
-ssd_is_untrusted(as_namespace *ns, uint8_t header_flags)
-{
-	return false;
-}
-
-void
-ssd_set_trusted(as_namespace* ns)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-void
 as_storage_start_tomb_raider_ssd(as_namespace* ns)
 {
 	// Tomb raider is for enterprise version only.
@@ -167,15 +167,23 @@ ssd_init_encryption_key(as_namespace* ns)
 }
 
 void
-ssd_do_encrypt(const uint8_t* key, uint64_t off, drv_ssd_block* block)
+ssd_do_encrypt(const uint8_t* key, uint64_t off, ssd_record* block)
 {
 	// Should not get here - for enterprise version only.
 	cf_crash(AS_DRV_SSD, "community edition called ssd_do_encrypt()");
 }
 
 void
-ssd_do_decrypt(const uint8_t* key, uint64_t off, drv_ssd_block* block)
+ssd_do_decrypt(const uint8_t* key, uint64_t off, ssd_record* block)
 {
 	// Should not get here - for enterprise version only.
 	cf_crash(AS_DRV_SSD, "community edition called ssd_do_decrypt()");
+}
+
+void
+ssd_do_decrypt_whole(const uint8_t* key, uint64_t off, uint32_t n_rblocks,
+		ssd_record* block)
+{
+	// Should not get here - for enterprise version only.
+	cf_crash(AS_DRV_SSD, "community edition called ssd_do_decrypt_whole()");
 }

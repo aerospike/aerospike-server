@@ -86,7 +86,7 @@ static inline void
 as_bin_init_w_len(as_namespace *ns, as_bin *b, const uint8_t *name, size_t len)
 {
 	as_bin_init_nameless(b);
-	as_bin_set_id_from_name_buf(ns, b, name, len);
+	as_bin_set_id_from_name_w_len(ns, b, name, len);
 	// Don't touch b->unused - like b->id, it's past the end of its enclosing
 	// as_index if single-bin, data-in-memory.
 }
@@ -267,19 +267,6 @@ as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins)
 }
 
 
-uint16_t
-as_bin_inuse_count(as_storage_rd *rd)
-{
-	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		if (! as_bin_inuse(&rd->bins[i])) {
-			return i;
-		}
-	}
-
-	return rd->n_bins;
-}
-
-
 void
 as_bin_get_all_p(as_storage_rd *rd, as_bin **bin_ptrs)
 {
@@ -354,37 +341,6 @@ as_bin_get_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len)
 }
 
 
-// Does not check bin name length or quota.
-as_bin *
-as_bin_create(as_storage_rd *rd, const char *name)
-{
-	if (rd->ns->single_bin) {
-		if (as_bin_inuse(rd->bins)) {
-			cf_crash(AS_BIN, "single bin create found bin in use");
-		}
-
-		as_bin_init_nameless(rd->bins);
-
-		return rd->bins;
-	}
-
-	as_bin *b = NULL;
-
-	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		if (! as_bin_inuse(&rd->bins[i])) {
-			b = &rd->bins[i];
-			break;
-		}
-	}
-
-	if (b) {
-		as_bin_init(rd->ns, b, name);
-	}
-
-	return b;
-}
-
-
 as_bin *
 as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 		int *result)
@@ -401,7 +357,7 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 		return rd->bins;
 	}
 
-	if (len >= AS_ID_BIN_SZ) {
+	if (len >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_BIN, "bin name too long (%lu)", len);
 		*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
 		return NULL;
@@ -411,10 +367,10 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 
 	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, (const char *)name, len,
 			&id) != CF_VMAPX_OK &&
-			cf_vmapx_count(ns->p_bin_name_vmap) >= BIN_NAMES_QUOTA) {
-		CF_ZSTR_DEFINE(zname, AS_ID_BIN_SZ, name, len);
+			cf_vmapx_count(ns->p_bin_name_vmap) >= MAX_BIN_NAMES) {
+		CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
 
-		cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %s",
+		cf_warning(AS_BIN, "{%s} bin-name vmap full - can't add new bin-name %s",
 				ns->name, zname);
 
 		*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
@@ -538,7 +494,7 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
 	}
 	else {
 		if (cf_vmapx_count(ns->p_bin_name_vmap) >= BIN_NAMES_QUOTA) {
-			CF_ZSTR_DEFINE(zname, AS_ID_BIN_SZ, name, len);
+			CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
 
 			cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %s",
 					ns->name, zname);

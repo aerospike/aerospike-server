@@ -222,6 +222,24 @@ as_particle_asval_to_client(const as_val *val, as_msg_op *op)
 	return added_size;
 }
 
+const uint8_t *
+as_particle_skip_flat(const uint8_t *flat, const uint8_t *end)
+{
+	if (flat >= end) {
+		cf_warning(AS_PARTICLE, "incomplete flat particle");
+		return NULL;
+	}
+
+	as_particle_type type = safe_particle_type(*flat);
+
+	if (type == AS_PARTICLE_TYPE_BAD) {
+		return NULL;
+	}
+
+	// Skip the flat particle.
+	return particle_vtable[type]->skip_flat_fn(flat, end);
+}
+
 
 //==========================================================
 // as_bin particle functions.
@@ -898,45 +916,43 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 // Handle on-device "flat" format.
 //
 
-// TODO - re-do to leave original intact on failure.
-int
-as_bin_particle_cast_from_flat(as_bin *b, uint8_t *flat, uint32_t flat_size)
+const uint8_t *
+as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
 {
-	if (as_bin_inuse(b)) {
-		// TODO - just crash?
-		cf_warning(AS_PARTICLE, "cast from flat into used bin");
-		return -1;
+	cf_assert(! as_bin_inuse(b), AS_PARTICLE, "cast from flat into used bin");
+
+	if (flat >= end) {
+		cf_warning(AS_PARTICLE, "incomplete flat particle");
+		return NULL;
 	}
 
 	as_particle_type type = safe_particle_type(*flat);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -1;
+		return NULL;
 	}
 
 	// Cast the new particle into the bin.
-	int result = particle_vtable[type]->cast_from_flat_fn(flat, flat_size, &b->particle);
+	flat = particle_vtable[type]->cast_from_flat_fn(flat, end, &b->particle);
 
 	// Set the bin's iparticle metadata.
-	if (result == 0) {
+	if (flat) {
 		as_bin_state_set_from_type(b, type);
 	}
-	else {
-		as_bin_set_empty(b);
-	}
+	// else - bin remains empty.
 
-	return result;
+	return flat;
 }
 
 // TODO - re-do to leave original intact on failure.
-int
-as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uint32_t flat_size)
+const uint8_t *
+as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
 {
 	uint8_t old_type = as_bin_get_particle_type(b);
 	as_particle_type new_type = safe_particle_type(*flat);
 
 	if (new_type == AS_PARTICLE_TYPE_BAD) {
-		return -1;
+		return NULL;
 	}
 
 	// Just destroy the old particle, if any - we're replacing it.
@@ -945,27 +961,23 @@ as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uint32_t flat_
 	}
 
 	// Load the new particle into the bin.
-	int result = particle_vtable[new_type]->from_flat_fn(flat, flat_size, &b->particle);
+	flat = particle_vtable[new_type]->from_flat_fn(flat, end, &b->particle);
 
 	// Set the bin's iparticle metadata.
-	if (result == 0) {
+	if (flat) {
 		as_bin_state_set_from_type(b, new_type);
 	}
 	else {
 		as_bin_set_empty(b);
 	}
 
-	return result;
+	return flat;
 }
 
 uint32_t
 as_bin_particle_flat_size(as_bin *b)
 {
-	if (! as_bin_inuse(b)) {
-		// TODO - just crash?
-		cf_warning(AS_PARTICLE, "flat sizing unused bin");
-		return 0;
-	}
+	cf_assert(as_bin_inuse(b), AS_PARTICLE, "flat sizing unused bin");
 
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -975,11 +987,7 @@ as_bin_particle_flat_size(as_bin *b)
 uint32_t
 as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 {
-	if (! as_bin_inuse(b)) {
-		// TODO - just crash?
-		cf_warning(AS_PARTICLE, "flattening unused bin");
-		return 0;
-	}
+	cf_assert(as_bin_inuse(b), AS_PARTICLE, "flattening unused bin");
 
 	uint8_t type = as_bin_get_particle_type(b);
 

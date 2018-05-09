@@ -139,6 +139,26 @@ cf_vmapx_get_by_name(const cf_vmapx* vmap, const char* name, void** pp_value)
 	return CF_VMAPX_OK;
 }
 
+// Same as above, but non-null-terminated name.
+cf_vmapx_err
+cf_vmapx_get_by_name_w_len(const cf_vmapx* vmap, const char* name,
+		size_t name_len, void** pp_value)
+{
+	if (name_len >= vmap->key_size) {
+		return CF_VMAPX_ERR_NAME_NOT_FOUND;
+	}
+
+	uint32_t index;
+
+	if (! vhash_get(vmap->hash, name, name_len, &index)) {
+		return CF_VMAPX_ERR_NAME_NOT_FOUND;
+	}
+
+	*pp_value = vmapx_value_ptr(vmap, index);
+
+	return CF_VMAPX_OK;
+}
+
 // Get index by null-terminated name. May pass null p_index to check existence.
 cf_vmapx_err
 cf_vmapx_get_index(const cf_vmapx* vmap, const char* name, uint32_t* p_index)

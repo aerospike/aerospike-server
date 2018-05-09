@@ -254,13 +254,13 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 
 	rw->pickled_buf = as_record_pickle(rd, &rw->pickled_sz);
 
-	// TODO - we could avoid this copy (and maybe even not do this here at all)
-	// if all callers malloc'd rd->rec_props.p_data upstream for hand-off...
-	if (rd->rec_props.p_data) {
-		rw->pickled_rec_props.size = rd->rec_props.size;
-		rw->pickled_rec_props.p_data = cf_malloc(rd->rec_props.size);
-		memcpy(rw->pickled_rec_props.p_data, rd->rec_props.p_data,
-				rd->rec_props.size);
+	rw->set_name = rd->set_name;
+	rw->set_name_len = rd->set_name_len;
+
+	if (rd->key) {
+		rw->key = cf_malloc(rd->key_size);
+		rw->key_size = rd->key_size;
+		memcpy(rw->key, rd->key, rd->key_size);
 	}
 }
 

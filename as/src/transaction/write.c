@@ -92,14 +92,14 @@ bool check_msg_set_name(as_transaction* tr, const char* set_name);
 int write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		bool increment_generation, rw_request* rw, bool* is_delete,
 		xdr_dirty_bins* dirty_bins);
-int write_master_dim(as_transaction* tr, const char* set_name,
-		as_storage_rd* rd, bool record_level_replace, bool increment_generation,
-		rw_request* rw, bool* is_delete, xdr_dirty_bins* dirty_bins);
+int write_master_dim(as_transaction* tr, as_storage_rd* rd,
+		bool record_level_replace, bool increment_generation, rw_request* rw,
+		bool* is_delete, xdr_dirty_bins* dirty_bins);
 int write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		bool must_fetch_data, bool increment_generation, rw_request* rw,
 		bool* is_delete, xdr_dirty_bins* dirty_bins);
-int write_master_ssd(as_transaction* tr, const char* set_name,
-		as_storage_rd* rd, bool must_fetch_data, bool record_level_replace,
+int write_master_ssd(as_transaction* tr, as_storage_rd* rd,
+		bool must_fetch_data, bool record_level_replace,
 		bool increment_generation, rw_request* rw, bool* is_delete,
 		xdr_dirty_bins* dirty_bins);
 
@@ -539,7 +539,6 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	// Find or create as_index, populate as_index_ref, lock record.
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
 	as_record* r = NULL;
 	bool record_created = false;
 
@@ -655,18 +654,16 @@ write_master(rw_request* rw, as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
+	// Shortcut for set name storage.
+	if (set_name) {
+		rd.set_name = set_name;
+		rd.set_name_len = strlen(set_name);
+	}
+
 	// Deal with key storage as needed.
 	if ((result = handle_msg_key(tr, &rd)) != 0) {
 		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
 		return TRANS_DONE_ERROR;
-	}
-
-	// Assemble record properties from index information.
-	size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
-	uint8_t rec_props_data[rec_props_data_size];
-
-	if (rec_props_data_size > 0) {
-		as_storage_record_set_rec_props(&rd, rec_props_data);
 	}
 
 	// Convert message TTL special value if appropriate.
@@ -691,7 +688,7 @@ write_master(rw_request* rw, as_transaction* tr)
 					rw, &is_delete, &dirty_bins);
 		}
 		else {
-			result = write_master_dim(tr, set_name, &rd,
+			result = write_master_dim(tr, &rd,
 					record_level_replace, increment_generation,
 					rw, &is_delete, &dirty_bins);
 		}
@@ -703,7 +700,7 @@ write_master(rw_request* rw, as_transaction* tr)
 					rw, &is_delete, &dirty_bins);
 		}
 		else {
-			result = write_master_ssd(tr, set_name, &rd,
+			result = write_master_ssd(tr, &rd,
 					must_fetch_data, record_level_replace, increment_generation,
 					rw, &is_delete, &dirty_bins);
 		}
@@ -909,7 +906,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			return AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
 		}
 
-		if (op->name_sz >= AS_ID_BIN_SZ) {
+		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: bin name too long (%d) ", ns->name, op->name_sz);
 			return AS_PROTO_RESULT_FAIL_BIN_NAME;
 		}
@@ -1130,7 +1127,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 
 int
-write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
+write_master_dim(as_transaction* tr, as_storage_rd* rd,
 		bool record_level_replace, bool increment_generation, rw_request* rw,
 		bool* is_delete, xdr_dirty_bins* dirty_bins)
 {
@@ -1259,8 +1256,8 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	//
 
 	if (record_has_sindex(r, ns) &&
-			write_sindex_update(ns, set_name, &tr->keyd, old_bins, n_old_bins,
-					new_bins, n_new_bins)) {
+			write_sindex_update(ns, rd->set_name, &tr->keyd, old_bins,
+					n_old_bins, new_bins, n_new_bins)) {
 		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 	}
 
@@ -1410,10 +1407,9 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 
 int
-write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
-		bool must_fetch_data, bool record_level_replace,
-		bool increment_generation, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins)
+write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
+		bool record_level_replace, bool increment_generation, rw_request* rw,
+		bool* is_delete, xdr_dirty_bins* dirty_bins)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1539,8 +1535,8 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	//
 
 	if (has_sindex &&
-			write_sindex_update(ns, set_name, &tr->keyd, old_bins, n_old_bins,
-					new_bins, n_new_bins)) {
+			write_sindex_update(ns, rd->set_name, &tr->keyd, old_bins,
+					n_old_bins, new_bins, n_new_bins)) {
 		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 	}
 

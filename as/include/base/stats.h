@@ -85,7 +85,7 @@ typedef struct as_stats_s {
 
 	// Query & secondary index stats.
 	cf_atomic64		query_false_positives;
-	cf_atomic64		sindex_gc_timedout; // number of times sindex gc iteration timed out waiting for partition lock
+	cf_atomic64		sindex_gc_retries; // number of times sindex gc skips iteration on failure to get record lock
 	uint64_t		sindex_gc_list_creation_time; // cumulative sum of list creation phase in sindex gc
 	uint64_t		sindex_gc_list_deletion_time; // cumulative sum of list deletion phase in sindex gc
 	uint64_t		sindex_gc_objects_validated; // cumulative sum of sindex objects validated

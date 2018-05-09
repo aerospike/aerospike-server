@@ -41,7 +41,6 @@
 #include "node.h"
 
 #include "base/proto.h"
-#include "base/rec_props.h"
 #include "base/transaction.h"
 #include "fabric/hb.h"
 #include "fabric/partition.h"
@@ -128,7 +127,10 @@ typedef struct rw_request_s {
 	// Store pickled data, for use in replica write.
 	uint8_t*			pickled_buf;
 	size_t				pickled_sz;
-	as_rec_props		pickled_rec_props;
+	const char*			set_name; // points directly into vmap - never free it
+	uint32_t			set_name_len;
+	uint8_t*			key;
+	uint32_t			key_size;
 
 	// Store ops' responses here.
 	cf_dyn_buf			response_db;

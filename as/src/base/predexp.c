@@ -38,6 +38,7 @@
 
 #include "base/particle.h"
 #include "geospatial/geospatial.h"
+#include "storage/storage.h"
 
 typedef enum {
 	PREDEXP_FALSE = 0,		// Matching nodes only
@@ -74,7 +75,7 @@ struct predexp_eval_base_s {
 };
 
 struct predexp_var_s {
-	char					vname[AS_ID_BIN_SZ];
+	char					vname[AS_BIN_NAME_MAX_SZ];
 	as_bin					bin;
 	as_predexp_var_t*		next;
 };
@@ -1041,7 +1042,7 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 
 typedef struct predexp_eval_bin_s {
 	predexp_eval_t			base;
-	char					bname[AS_ID_BIN_SZ];
+	char					bname[AS_BIN_NAME_MAX_SZ];
 	uint8_t					type;
 } predexp_eval_bin_t;
 
@@ -1172,7 +1173,7 @@ build_bin(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 
 typedef struct predexp_eval_var_s {
 	predexp_eval_t			base;
-	char					vname[AS_ID_BIN_SZ];
+	char					vname[AS_BIN_NAME_MAX_SZ];
 	uint8_t					type;
 } predexp_eval_var_t;
 
@@ -1310,7 +1311,8 @@ eval_rec_device_size(predexp_eval_t* bp,
 	// predexp_eval_rec_device_size_t* dp =
 	//     (predexp_eval_rec_device_size_t *) bp;
 
-	int64_t rec_device_size = argsp->md->n_rblocks * 128;
+	int64_t rec_device_size =
+			(int64_t)as_storage_record_size(argsp->ns, argsp->md);
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
 	as_bin_particle_integer_set(&wbinp->bin, rec_device_size);
@@ -1586,7 +1588,7 @@ typedef struct predexp_eval_iter_s {
 	uint8_t					type;
 	predexp_eval_t*			lchild;		// per-element expr
 	predexp_eval_t*			rchild;		// collection
-	char					vname[AS_ID_BIN_SZ];
+	char					vname[AS_BIN_NAME_MAX_SZ];
 } predexp_eval_iter_t;
 
 static void

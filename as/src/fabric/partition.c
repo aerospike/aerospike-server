@@ -75,12 +75,11 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 	p->id = pid;
 
 	if (ns->cold_start) {
-		p->vp = as_index_tree_create(&ns->tree_shared, ns->arena);
+		return; // trees are created later when we know which ones we own
 	}
-	else {
-		p->vp = as_index_tree_resume(&ns->tree_shared, ns->arena,
-				&ns->xmem_roots[pid * ns->tree_shared.n_sprigs]);
-	}
+
+	p->tree = as_index_tree_resume(&ns->tree_shared, ns->xmem_trees, pid,
+			as_partition_tree_done, (void*)p);
 }
 
 
@@ -89,10 +88,28 @@ as_partition_shutdown(as_namespace* ns, uint32_t pid)
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	while (true) {
+		pthread_mutex_lock(&p->lock);
 
-	as_index_tree_shutdown(p->vp,
-			&ns->xmem_roots[pid * ns->tree_shared.n_sprigs]);
+		as_index_tree* tree = p->tree;
+		as_index_tree_reserve(tree);
+
+		pthread_mutex_unlock(&p->lock);
+
+		// Must come outside partition lock, since transactions may take
+		// partition lock under the record (sprig) lock.
+		as_index_tree_block(tree);
+
+		// If lucky, this remains locked and we complete shutdown.
+		pthread_mutex_lock(&p->lock);
+
+		if (tree == p->tree) {
+			break; // lucky - same tree we blocked
+		}
+
+		// Bad luck - blocked a tree that just got switched, block the new one.
+		pthread_mutex_unlock(&p->lock);
+	}
 }
 
 
@@ -328,28 +345,6 @@ as_partition_reserve(as_namespace* ns, uint32_t pid,
 }
 
 
-// TODO - what if partition is unavailable?
-int
-as_partition_reserve_timeout(as_namespace* ns, uint32_t pid,
-		as_partition_reservation* rsv, int timeout_ms)
-{
-	as_partition* p = &ns->partitions[pid];
-
-	struct timespec tp;
-	cf_set_wait_timespec(timeout_ms, &tp);
-
-	if (pthread_mutex_timedlock(&p->lock, &tp) != 0) {
-		return -1;
-	}
-
-	partition_reserve_lockfree(p, ns, rsv);
-
-	pthread_mutex_unlock(&p->lock);
-
-	return 0;
-}
-
-
 int
 as_partition_reserve_replica(as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv)
@@ -536,6 +531,53 @@ as_partition_release(as_partition_reservation* rsv)
 
 
 void
+as_partition_advance_tree_id(as_partition* p, const char* ns_name)
+{
+	uint32_t n_hanging;
+
+	// Find first available tree-id past current one. Should be very next one.
+	for (n_hanging = 0; n_hanging < MAX_NUM_TREE_IDS; n_hanging++) {
+		p->tree_id = (p->tree_id + 1) & TREE_ID_MASK;
+
+		uint64_t id_mask = 1UL << p->tree_id;
+
+		if ((p->tree_ids_used & id_mask) == 0) {
+			// Claim tree-id. Claim is relinquished when tree is destroyed.
+			p->tree_ids_used |= id_mask;
+			break;
+		}
+	}
+
+	// If no available tree-ids, just stop. Should never happen.
+	if (n_hanging == MAX_NUM_TREE_IDS) {
+		cf_crash(AS_PARTITION, "{%s} pid %u has %u dropped trees hanging",
+				ns_name, p->id, n_hanging);
+	}
+
+	// Too many hanging trees - ref-count leak? Offer chance to warm restart.
+	if (n_hanging > MAX_NUM_TREE_IDS / 2) {
+		cf_warning(AS_PARTITION, "{%s} pid %u has %u dropped trees hanging",
+				ns_name, p->id, n_hanging);
+	}
+}
+
+
+// Callback made when dropped as_index_tree is finally destroyed.
+void
+as_partition_tree_done(uint8_t id, void* udata)
+{
+	as_partition* p = (as_partition*)udata;
+
+	pthread_mutex_lock(&p->lock);
+
+	// Relinquish tree-id.
+	p->tree_ids_used &= ~(1UL << id);
+
+	pthread_mutex_unlock(&p->lock);
+}
+
+
+void
 as_partition_getinfo_str(cf_dyn_buf* db)
 {
 	size_t db_sz = db->used_sz;
@@ -570,7 +612,7 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_int(db, p->pending_immigrations);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint32(db, as_index_tree_size(p->vp));
+			cf_dyn_buf_append_uint32(db, as_index_tree_size(p->tree));
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->n_tombstones);
 			cf_dyn_buf_append_char(db, ':');
@@ -719,7 +761,7 @@ accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects,
 		uint64_t* p_n_tombstones)
 {
 	int64_t n_tombstones = (int64_t)p->n_tombstones;
-	int64_t n_objects = (int64_t)as_index_tree_size(p->vp) - n_tombstones;
+	int64_t n_objects = (int64_t)as_index_tree_size(p->tree) - n_tombstones;
 
 	*p_n_objects += n_objects > 0 ? (uint64_t)n_objects : 0;
 	*p_n_tombstones += (uint64_t)n_tombstones;
@@ -730,11 +772,11 @@ void
 partition_reserve_lockfree(as_partition* p, as_namespace* ns,
 		as_partition_reservation* rsv)
 {
-	cf_rc_reserve(p->vp);
+	as_index_tree_reserve(p->tree);
 
 	rsv->ns = ns;
 	rsv->p = p;
-	rsv->tree = p->vp;
+	rsv->tree = p->tree;
 	rsv->regime = p->regime;
 	rsv->n_dupl = p->n_dupl;
 

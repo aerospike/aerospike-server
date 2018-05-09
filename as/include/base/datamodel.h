@@ -47,10 +47,10 @@
 #include "node.h"
 #include "shash.h"
 #include "vmapx.h"
+#include "xmem.h"
 
 #include "base/cfg.h"
 #include "base/proto.h"
-#include "base/rec_props.h"
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "fabric/hb.h"
@@ -68,12 +68,14 @@
 #define MAX_ALLOWED_TTL (3600 * 24 * 365 * 10) // 10 years
 
 // [0-1] for partition-id
-// [1-2] for tree sprigs and locks
-// [2-3] for the olock
-// [4-7] for rw_request hash
-#define DIGEST_SCRAMBLE_BYTE1		4
+// [1-4] for tree sprigs and locks
+// [2-3] for the olock - TODO - to be deprecated
+// [5-7] unused
 // [8-11] for SSD device hash
 #define DIGEST_STORAGE_BASE_BYTE	8
+// [12-15] for rw_request hash
+#define DIGEST_HASH_BASE_BYTE		12
+// [16-19] unused
 
 /* SYNOPSIS
  * Data model
@@ -91,18 +93,15 @@ typedef struct as_index_s as_record;
 typedef struct as_bin_s as_bin;
 typedef struct as_index_ref_s as_index_ref;
 typedef struct as_set_s as_set;
-typedef struct as_treex_s as_treex;
 
 struct as_index_tree_s;
 
 
-/* AS_ID_[NAMESPACE,SET,BIN,INAME]_SZ
- * The maximum length, in bytes, of an identification field; by convention,
- * these values are null-terminated UTF-8 */
 #define AS_ID_NAMESPACE_SZ 32
-#define AS_ID_BIN_SZ 15 // size used in storage format
+
 #define AS_ID_INAME_SZ 256
-#define VMAP_BIN_NAME_MAX_SZ ((AS_ID_BIN_SZ + 3) & ~3) // round up to multiple of 4
+
+#define AS_BIN_NAME_MAX_SZ 16 // changing this breaks warm restart
 #define MAX_BIN_NAMES 0x10000 // no need for more - numeric ID is 16 bits
 #define BIN_NAMES_QUOTA (MAX_BIN_NAMES / 2) // don't add more names than this via client transactions
 
@@ -190,6 +189,8 @@ extern uint32_t as_particle_size_from_asval(const as_val *val);
 extern uint32_t as_particle_asval_client_value_size(const as_val *val);
 extern uint32_t as_particle_asval_to_client(const as_val *val, as_msg_op *op);
 
+extern const uint8_t *as_particle_skip_flat(const uint8_t *flat, const uint8_t *end);
+
 // as_bin particle function declarations
 
 extern void as_bin_particle_destroy(as_bin *b, bool free_particle);
@@ -223,8 +224,8 @@ extern as_val *as_bin_particle_to_asval(const as_bin *b);
 extern int as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size);
 
 // flat:
-extern int as_bin_particle_cast_from_flat(as_bin *b, uint8_t *flat, uint32_t flat_size);
-extern int as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uint32_t flat_size);
+extern const uint8_t *as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
+extern const uint8_t *as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
 extern uint32_t as_bin_particle_flat_size(as_bin *b);
 extern uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
 
@@ -339,10 +340,22 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 }
 
 static inline bool
-as_bin_inuse_has(as_storage_rd *rd)
+as_bin_inuse_has(const as_storage_rd *rd)
 {
 	// In-use bins are at the beginning - only need to check the first bin.
 	return (rd->n_bins && as_bin_inuse(rd->bins));
+}
+
+static inline uint16_t
+as_bin_inuse_count(const as_storage_rd *rd)
+{
+	for (uint16_t i = 0; i < rd->n_bins; i++) {
+		if (! as_bin_inuse(&rd->bins[i])) {
+			return i;
+		}
+	}
+
+	return rd->n_bins;
 }
 
 static inline void
@@ -430,12 +443,10 @@ extern void as_bin_init(as_namespace *ns, as_bin *b, const char *name);
 extern void as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from);
 extern int as_storage_rd_load_n_bins(as_storage_rd *rd);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
-extern uint16_t as_bin_inuse_count(as_storage_rd *rd);
 extern void as_bin_get_all_p(as_storage_rd *rd, as_bin **bin_ptrs);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len);
-extern as_bin *as_bin_create(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
 extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
@@ -459,11 +470,11 @@ extern uint16_t plain_generation(uint16_t regime_generation, const as_namespace*
 extern void as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms, const as_namespace* ns);
 extern void as_record_increment_generation(as_record *r, const as_namespace* ns);
 extern bool as_record_is_live(const as_record *r);
-extern int as_record_get_create(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
-extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref);
-extern int as_record_get_live(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
-extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd);
-extern int as_record_exists_live(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
+extern int as_record_get_create(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_get(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref);
+extern int as_record_get_live(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_exists(struct as_index_tree_s *tree, const cf_digest *keyd);
+extern int as_record_exists_live(struct as_index_tree_s *tree, const cf_digest *keyd, as_namespace *ns);
 extern void as_record_rescue(as_index_ref *r_ref, as_namespace *ns);
 
 extern void as_record_destroy_bins_from(as_storage_rd *rd, uint16_t from);
@@ -563,11 +574,12 @@ typedef void (*as_index_value_destructor) (struct as_index_s* v, void* udata);
 
 // TODO - would be nice to put this in as_index.h:
 typedef struct as_index_tree_shared_s {
+	cf_arenax*		arena;
+
 	as_index_value_destructor destructor;
 	void*			destructor_udata;
 
-	// Number of lock pairs and sprigs per partition tree.
-	uint32_t		n_lock_pairs;
+	// Number of sprigs per partition tree.
 	uint32_t		n_sprigs;
 
 	// Bit-shifts used to calculate indexes from digest bits.
@@ -577,6 +589,16 @@ typedef struct as_index_tree_shared_s {
 	// Offset into as_index_tree struct's variable-sized data.
 	uint32_t		sprigs_offset;
 } as_index_tree_shared;
+
+
+typedef struct as_sprigx_s {
+	uint64_t root_h: 40;
+} __attribute__ ((__packed__)) as_sprigx;
+
+typedef struct as_treesx_s {
+	int block_ix[AS_PARTITIONS];
+	as_sprigx sprigxs[0];
+} as_treex;
 
 
 struct as_namespace_s {
@@ -589,6 +611,10 @@ struct as_namespace_s {
 	// Persistent memory.
 	//
 
+	// Persistent memory type (default is shmem).
+	cf_xmem_type	xmem_type;
+	const void*		xmem_type_cfg;
+
 	// Persistent memory "base" block ID for this namespace.
 	uint32_t		xmem_id;
 
@@ -596,7 +622,7 @@ struct as_namespace_s {
 	uint8_t*		xmem_base;
 
 	// Pointer to partition tree info in persistent memory "treex" block.
-	as_treex*		xmem_roots;
+	as_treex*		xmem_trees;
 
 	// Pointer to arena structure (not stages) in persistent memory base block.
 	cf_arenax*		arena;
@@ -712,6 +738,7 @@ struct as_namespace_s {
 	uint32_t		evict_tenths_pct;
 	uint32_t		hwm_disk_pct;
 	uint32_t		hwm_memory_pct;
+	uint64_t		index_stage_size;
 	uint64_t		max_ttl;
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
@@ -725,6 +752,8 @@ struct as_namespace_s {
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
 	as_write_commit_level write_commit_level;
 	cf_vector		xdr_dclist_v;
+
+	const char*		xmem_mounts[CF_XMEM_MAX_MOUNTS];
 
 	as_storage_type storage_type;
 
@@ -1119,8 +1148,8 @@ as_set_stop_writes(as_set *p_set) {
 // These bin functions must be below definition of struct as_namespace_s:
 
 static inline void
-as_bin_set_id_from_name_buf(as_namespace *ns, as_bin *b, const uint8_t *buf,
-		int len) {
+as_bin_set_id_from_name_w_len(as_namespace *ns, as_bin *b, const uint8_t *buf,
+		size_t len) {
 	if (! ns->single_bin) {
 		b->id = as_bin_get_or_assign_id_w_len(ns, (const char *)buf, len);
 	}
@@ -1153,7 +1182,8 @@ struct as_msg_field_s;
 /* Namespace function declarations */
 extern as_namespace *as_namespace_create(char *name);
 extern void as_namespaces_init(bool cold_start_cmd, uint32_t instance);
-extern void as_namespaces_setup(bool cold_start_cmd, uint32_t instance, uint32_t stage_capacity);
+extern void as_namespaces_setup(bool cold_start_cmd, uint32_t instance);
+extern void as_namespace_finish_setup(as_namespace *ns, uint32_t instance);
 extern bool as_namespace_configure_sets(as_namespace *ns);
 extern as_namespace *as_namespace_get_byname(char *name);
 extern as_namespace *as_namespace_get_byid(uint32_t id);
@@ -1187,15 +1217,7 @@ as_namespace_start_mode_str(const as_namespace *ns)
 }
 
 // Persistent Memory Management
-
-struct as_treex_s {
-	uint64_t root_h: 40;
-} __attribute__ ((__packed__));
-
-void as_namespace_xmem_trusted(as_namespace *ns);
-
-// Not namespace class functions, but they live in namespace.c:
-uint32_t as_mem_check();
+void as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance);
 
 // XXX POST-JUMP - remove in "six months".
 static inline uint32_t

@@ -465,7 +465,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		as_storage_record_close(&rd);
 	}
 
-	// Generate a binless pickle. but don't generate pickled rec-props - these
+	// Generate a binless pickle, but don't generate pickled rec-props - these
 	// are useless for a drop.
 	rw->pickled_sz = sizeof(uint16_t);
 	rw->pickled_buf = cf_malloc(rw->pickled_sz);

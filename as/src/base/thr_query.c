@@ -1580,7 +1580,6 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 	ASD_QUERY_IO_STARTING(nodeid, qtr->trid);
 
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
 	int rec_rv      = as_record_get_live(rsv->tree, dig, &r_ref, ns);
 
 	if (rec_rv == 0) {
@@ -1853,7 +1852,6 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 		}
 
 		as_index_ref r_ref;
-		r_ref.skip_lock = false;
 
 		if (as_record_get_live(rsv->tree, keyd, &r_ref, qtr->ns) != 0) {
 			query_release_partition(qtr, rsv);

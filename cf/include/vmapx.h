@@ -81,6 +81,7 @@ uint32_t cf_vmapx_count(const cf_vmapx* vmap);
 
 cf_vmapx_err cf_vmapx_get_by_index(const cf_vmapx* vmap, uint32_t index, void** pp_value);
 cf_vmapx_err cf_vmapx_get_by_name(const cf_vmapx* vmap, const char* name, void** pp_value);
+cf_vmapx_err cf_vmapx_get_by_name_w_len(const cf_vmapx* vmap, const char* name, size_t name_len, void** pp_value);
 
 cf_vmapx_err cf_vmapx_get_index(const cf_vmapx* vmap, const char* name, uint32_t* p_index);
 cf_vmapx_err cf_vmapx_get_index_w_len(const cf_vmapx* vmap, const char* name, size_t name_len, uint32_t* p_index);

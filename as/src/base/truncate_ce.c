@@ -26,6 +26,9 @@
 
 #include "base/truncate.h"
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "base/datamodel.h"
 
 
@@ -42,6 +45,14 @@ as_truncate_done_startup(as_namespace* ns)
 void
 as_truncate_list_cenotaphs(as_namespace* ns)
 {
+}
+
+
+bool
+as_truncate_lut_is_truncated(uint64_t rec_lut, as_namespace* ns,
+		const char* set_name, uint32_t set_name_len)
+{
+	return false;
 }
 
 

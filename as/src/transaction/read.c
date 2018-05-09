@@ -425,7 +425,6 @@ read_local(as_transaction* tr)
 	as_namespace* ns = tr->rsv.ns;
 
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
 
 	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) != 0) {
 		read_local_done(tr, NULL, NULL, AS_PROTO_RESULT_FAIL_NOT_FOUND);

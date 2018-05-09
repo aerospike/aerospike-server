@@ -257,15 +257,24 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 	as_partition_reservation rsv;
 	uint32_t pid = as_partition_getid(keyd);
 
-	int timeout_ms = 2;
-	if (as_partition_reserve_timeout(ns, pid, &rsv, timeout_ms) != 0 ) {
-		cf_atomic64_incr(&g_stats.sindex_gc_timedout);
-		return AS_SINDEX_GC_SKIP_ITERATION;
-	}
+	as_partition_reserve(ns, pid, &rsv);
 
-	int rv = AS_SINDEX_GC_ERROR;
-	if (as_record_exists_live(rsv.tree, keyd, rsv.ns) != 0) {
+	int rv;
+	switch (as_record_exists_live(rsv.tree, keyd, rsv.ns)) {
+	case 0: // found (will pass)
+		rv = AS_SINDEX_GC_ERROR;
+		break;
+	case -1: // not found (will garbage collect)
 		rv = AS_SINDEX_GC_OK;
+		break;
+	case -2: // can't lock (may deadlock)
+		rv = AS_SINDEX_GC_SKIP_ITERATION;
+		cf_atomic64_incr(&g_stats.sindex_gc_retries);
+		break;
+	default:
+		cf_crash(AS_SINDEX, "unexpected return code");
+		rv = AS_SINDEX_GC_ERROR; // shut up compiler
+		break;
 	}
 	as_partition_release(&rsv);
 	return rv;
@@ -459,10 +468,10 @@ as_sindex__process_ret(as_sindex *si, int ret, as_sindex_op op,
 int
 as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 {
-	int len  = strlen(imd->bname);
-	if (len >= AS_ID_BIN_SZ) {
-		cf_warning(AS_SINDEX, "bin name %s of size %d too big. Max size allowed is %d",
-							imd->bname, len, AS_ID_BIN_SZ-1);
+	size_t len = strlen(imd->bname);
+	if (len >= AS_BIN_NAME_MAX_SZ) {
+		cf_warning(AS_SINDEX, "bin name %s of len %zu too big. Max len allowed is %d",
+							imd->bname, len, AS_BIN_NAME_MAX_SZ - 1);
 		return AS_SINDEX_ERR;
 	}
 
@@ -471,11 +480,7 @@ as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 		return AS_SINDEX_ERR;
 	}
 
-	// An extra strncpy to remove valgrind warning
-	char bname[AS_ID_BIN_SZ];
-	strncpy(bname, imd->bname, AS_ID_BIN_SZ);
-	imd->binid = as_bin_get_or_assign_id(ns, bname);
-	cf_debug(AS_SINDEX, " Assigned %d for %s", imd->binid, imd->bname);
+	imd->binid = as_bin_get_or_assign_id_w_len(ns, imd->bname, len);
 
 	return AS_SINDEX_OK;
 }
@@ -2078,7 +2083,7 @@ as_sindex_extract_bin_from_path(char * path_str, char *bin)
 		end++;
 	}
 
-	if (end > 0 && end < AS_ID_BIN_SZ) {
+	if (end > 0 && end < AS_BIN_NAME_MAX_SZ) {
 		strncpy(bin, path_str, end);
 		bin[end] = '\0';
 	}
@@ -2348,16 +2353,16 @@ as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp, int * num_bins)
 	int numbins         = *data++;
 	*num_bins           = numbins;
 
-	cf_vector *binlist  = cf_vector_create(AS_ID_BIN_SZ, numbins, 0);
+	cf_vector *binlist  = cf_vector_create(AS_BIN_NAME_MAX_SZ, numbins, 0);
 
 	for (int i = 0; i < numbins; i++) {
 		int binnamesz = *data++;
-		if (binnamesz <= 0 || binnamesz > AS_ID_BIN_SZ - 1) {
+		if (binnamesz <= 0 || binnamesz >= AS_BIN_NAME_MAX_SZ) {
 			cf_warning(AS_SINDEX, "Size of the bin name in bin list of sindex query is out of bounds. Size %d", binnamesz);
 			cf_vector_destroy(binlist);
 			return NULL;
 		}
-		char binname[AS_ID_BIN_SZ];
+		char binname[AS_BIN_NAME_MAX_SZ];
 		memcpy(&binname, data, binnamesz);
 		binname[binnamesz] = 0;
 		cf_vector_set(binlist, i, (void *)binname);
@@ -2366,7 +2371,7 @@ as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp, int * num_bins)
 
 	cf_debug(AS_SINDEX, "Queried Bin List %d ", numbins);
 	for (int i = 0; i < cf_vector_size(binlist); i++) {
-		char binname[AS_ID_BIN_SZ];
+		char binname[AS_BIN_NAME_MAX_SZ];
 		cf_vector_get(binlist, i, (void*)&binname);
 		cf_debug(AS_SINDEX,  " String Queried is |%s| \n", binname);
 	}
@@ -2432,7 +2437,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		strncpy(srange->bin_path, (char *)data, bin_path_len);
 		srange->bin_path[bin_path_len] = '\0';
 
-		char binname[AS_ID_BIN_SZ];
+		char binname[AS_BIN_NAME_MAX_SZ];
 		if (as_sindex_extract_bin_from_path(srange->bin_path, binname) == AS_SINDEX_OK) {
 			int16_t id = as_bin_get_id(ns, binname);
 			if (id != -1) {

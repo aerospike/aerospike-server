@@ -32,6 +32,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "xmem.h"
+
 
 //==========================================================
 // Typedefs & constants.
@@ -42,6 +44,12 @@
 
 #ifndef CF_ARENAX_MAX_STAGES
 #define CF_ARENAX_MAX_STAGES 256
+#endif
+
+#define CF_ARENAX_MIN_STAGE_SIZE (128L * 1024L * 1024L) // 128M
+
+#ifndef CF_ARENAX_MAX_STAGE_SIZE
+#define CF_ARENAX_MAX_STAGE_SIZE (1024L * 1024L * 1024L) // 1G
 #endif
 
 typedef uint64_t cf_arenax_handle;
@@ -60,15 +68,15 @@ typedef enum {
 // For enterprise separation only.
 //
 
-// Element is indexed by 24 bits.
-#define ELEMENT_ID_NUM_BITS 24
-#define ELEMENT_ID_MASK ((1UL << ELEMENT_ID_NUM_BITS) - 1) // 0xFFffff
-
-#define MAX_STAGE_CAPACITY (1 << ELEMENT_ID_NUM_BITS) // 16 M
+// Element is indexed by 28 bits.
+#define ELEMENT_ID_NUM_BITS 28
+#define ELEMENT_ID_MASK ((1UL << ELEMENT_ID_NUM_BITS) - 1) // 0xFFFffff
 
 // DO NOT access this member data directly - use the API!
 typedef struct cf_arenax_s {
 	// Configuration (passed in constructors).
+	cf_xmem_type		xmem_type;
+	const void*			xmem_type_cfg;
 	key_t				key_base;
 	uint32_t			element_size;
 	uint32_t			stage_capacity;
@@ -108,7 +116,8 @@ typedef struct free_element_s {
 size_t cf_arenax_sizeof();
 const char* cf_arenax_errstr(cf_arenax_err err);
 
-void cf_arenax_init(cf_arenax* arena, key_t key_base, uint32_t element_size,
+void cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
+		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
 		uint32_t stage_capacity, uint32_t max_stages, uint32_t flags);
 
 cf_arenax_handle cf_arenax_alloc(cf_arenax* arena);
