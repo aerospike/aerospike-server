@@ -27,8 +27,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ucontext.h>
 #include "dynbuf.h"
 
 
@@ -324,39 +326,70 @@ extern void cf_fault_cache_event(cf_fault_context context,
 
 #define MAX_BACKTRACE_DEPTH 50
 
-// This must literally be the direct clib "free()", because "strings" is
-// allocated by "backtrace_symbols()".
-#define PRINT_STACKTRACE() \
-do { \
-	void *bt[MAX_BACKTRACE_DEPTH]; \
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
-	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, "stacktrace: found %d frames", sz); \
-	char **strings = backtrace_symbols(bt, sz); \
-	if (strings) { \
-		for (int i = 0; i < sz; i++) { \
-			cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, "stacktrace: frame %d: %s", i, strings[i]); \
-		} \
-		free(strings); \
-	} \
-	else { \
-		cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, "stacktrace: found no symbols"); \
-	} \
-} while (0);
+extern char __executable_start;
 
-#define PRINT_CALL_STACK(severity) \
+#define PRINT_SIGNAL_CONTEXT(_ctx) \
 do { \
+	ucontext_t *uc = _ctx; \
+	mcontext_t *mc = &uc->uc_mcontext; \
+	uint64_t *gregs = (uint64_t *)&mc->gregs[0]; \
+	\
+	char regs[1000]; \
+	int32_t off = 0; \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "rax %016lx rbx %016lx ", \
+		gregs[REG_RAX], gregs[REG_RBX]); \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "rcx %016lx rdx %016lx ", \
+		gregs[REG_RCX], gregs[REG_RDX]); \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "rsi %016lx rdi %016lx ", \
+		gregs[REG_RSI], gregs[REG_RDI]); \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "rsp %016lx rip %016lx ", \
+		gregs[REG_RSP], gregs[REG_RIP]); \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "r8 %016lx r9 %016lx ", \
+		gregs[REG_R8], gregs[REG_R9]); \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "r10 %016lx r11 %016lx ", \
+		gregs[REG_R10], gregs[REG_R11]); \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "r12 %016lx r13 %016lx ", \
+		gregs[REG_R12], gregs[REG_R13]); \
+	\
+	off += snprintf(regs + off, sizeof(regs) - off, "r14 %016lx r15 %016lx", \
+		gregs[REG_R14], gregs[REG_R15]); \
+	\
+	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+			"stacktrace: registers: %s", regs); \
+	\
 	void *bt[MAX_BACKTRACE_DEPTH]; \
+	char trace[MAX_BACKTRACE_DEPTH * 20]; \
+	\
 	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
-	cf_fault_event(AS_AS, severity, __FILENAME__, __LINE__, "call stack: found %d frames", sz); \
-	char **strings = backtrace_symbols(bt, sz); \
-	if (strings) { \
+	off = 0; \
+	\
+	for (int i = 0; i < sz; i++) { \
+		off += snprintf(trace + off, sizeof(trace) - off, " 0x%lx", \
+				(uint64_t)bt[i]); \
+	} \
+	\
+	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+			"stacktrace: found %d frames:%s offset 0x%lx", sz, trace, \
+			(uint64_t)&__executable_start); \
+	\
+	char **syms = backtrace_symbols(bt, sz); \
+	\
+	if (syms) { \
 		for (int i = 0; i < sz; i++) { \
-			cf_fault_event(AS_AS, severity, __FILENAME__, __LINE__, "call stack: frame %d: %s", i, strings[i]); \
+			cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+					"stacktrace: frame %d: %s", i, syms[i]); \
 		} \
-		free(strings); \
 	} \
 	else { \
-		cf_fault_event(AS_AS, severity, __FILENAME__, __LINE__, "call stack: found no symbols"); \
+		cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+				"stacktrace: found no symbols"); \
 	} \
 } while (0);
 
