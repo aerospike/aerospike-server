@@ -20,24 +20,122 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+//==========================================================
+// Includes.
+//
+
 #include "hist.h"
 
-#include <pthread.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "fault.h"
 
 
 //==========================================================
-// Histogram with logarithmic buckets.
+// Typedefs & constants.
+//
+
+// e.g. units=bytes:[128K-256K)=12345:[256K-512K)=54321 ... \0
+#define SNAPSHOT_SIZE (5 + 1 + 5 + 1 + (N_BUCKETS * (1 + 11 + 1 + 20)) + 1)
+
+// TODO - may want different tags for units other than bytes.
+static const char *SNAPSHOT_TAGS[] = {
+		"0",
+		"1",  "2",  "4",  "8",  "16",  "32",  "64",  "128",  "256",  "512",
+		"1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
+		"1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M",
+		"1G", "2G", "4G", "8G", "16G", "32G", "64G", "128G", "256G", "512G",
+		"1T", "2T", "4T", "8T", "16T", "32T", "64T", "128T", "256T", "512T",
+		"1P", "2P", "4P", "8P", "16P", "32P", "64P", "128P", "256P", "512P",
+		"1E", "2E", "4E", "8E", "inf"
+};
+
+COMPILER_ASSERT(sizeof(SNAPSHOT_TAGS) / sizeof(const char *) == N_BUCKETS + 1);
+
+//------------------------------------------------
+// BYTE_MSB[n] returns the position of the most
+// significant bit. If no bits are set (n = 0) it
+// returns 0. Otherwise the positions are 1 ... 8
+// from low to high, so e.g. n = 13 returns 4:
+//
+//		bits:		0  0  0  0  1  1  0  1
+//		position:	8  7  6  5 [4] 3  2  1
+//
+static const char BYTE_MSB[] = {
+		0, 1, 2, 2, 3, 3, 3, 3,  4, 4, 4, 4, 4, 4, 4, 4,
+		5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5,
+		6, 6, 6, 6, 6, 6, 6, 6,  6, 6, 6, 6, 6, 6, 6, 6,
+		6, 6, 6, 6, 6, 6, 6, 6,  6, 6, 6, 6, 6, 6, 6, 6,
+
+		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
+		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
+		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
+		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
+
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
+
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
+		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8
+};
+
+
+//==========================================================
+// Inlines & macros.
+//
+
+//------------------------------------------------
+// Returns the position of the most significant
+// bit of n. Positions are 1 ... 64 from low to
+// high, so:
+//
+//		n			msb(n)
+//		--------	------
+//		0			0
+//		1			1
+//		2 ... 3		2
+//		4 ... 7		3
+//		8 ... 15	4
+//		etc.
+//
+static inline int
+msb(uint64_t n)
+{
+	int shift = 0;
+
+	while (true) {
+		uint64_t n_div_256 = n >> 8;
+
+		if (n_div_256 == 0) {
+			return shift + (int)BYTE_MSB[n];
+		}
+
+		n = n_div_256;
+		shift += 8;
+	}
+
+	// Should never get here.
+	cf_crash(AS_INFO, "end of msb()");
+	return -1;
+}
+
+
+//==========================================================
+// Public API.
 //
 
 //------------------------------------------------
@@ -83,6 +181,9 @@ histogram_create(const char *name, histogram_scale scale)
 		break;
 	}
 
+	cf_mutex_init(&h->info_lock);
+	h->info_snapshot = NULL;
+
 	return h;
 }
 
@@ -93,7 +194,7 @@ void
 histogram_clear(histogram *h)
 {
 	for (int i = 0; i < N_BUCKETS; i++) {
-		cf_atomic64_set(&h->counts[i], 0);
+		as_store_uint64(&h->counts[i], 0);
 	}
 }
 
@@ -111,7 +212,7 @@ histogram_dump(histogram *h)
 	uint64_t counts[N_BUCKETS];
 
 	for (b = 0; b < N_BUCKETS; b++) {
-		counts[b] = cf_atomic64_get(h->counts[b]);
+		counts[b] = as_load_uint64(&h->counts[b]);
 	}
 
 	int i = N_BUCKETS;
@@ -167,72 +268,6 @@ histogram_dump(histogram *h)
 }
 
 //------------------------------------------------
-// BYTE_MSB[n] returns the position of the most
-// significant bit. If no bits are set (n = 0) it
-// returns 0. Otherwise the positions are 1 ... 8
-// from low to high, so e.g. n = 13 returns 4:
-//
-//		bits:		0  0  0  0  1  1  0  1
-//		position:	8  7  6  5 [4] 3  2  1
-//
-static const char BYTE_MSB[] = {
-		0, 1, 2, 2, 3, 3, 3, 3,  4, 4, 4, 4, 4, 4, 4, 4,
-		5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5,
-		6, 6, 6, 6, 6, 6, 6, 6,  6, 6, 6, 6, 6, 6, 6, 6,
-		6, 6, 6, 6, 6, 6, 6, 6,  6, 6, 6, 6, 6, 6, 6, 6,
-
-		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
-		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
-		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
-		7, 7, 7, 7, 7, 7, 7, 7,  7, 7, 7, 7, 7, 7, 7, 7,
-
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
-
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
-		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8
-};
-
-//------------------------------------------------
-// Returns the position of the most significant
-// bit of n. Positions are 1 ... 64 from low to
-// high, so:
-//
-//		n			msb(n)
-//		--------	------
-//		0			0
-//		1			1
-//		2 ... 3		2
-//		4 ... 7		3
-//		8 ... 15	4
-//		etc.
-//
-static int
-msb(uint64_t n)
-{
-	int shift = 0;
-
-	while (true) {
-		uint64_t n_div_256 = n >> 8;
-
-		if (n_div_256 == 0) {
-			return shift + (int)BYTE_MSB[n];
-		}
-
-		n = n_div_256;
-		shift += 8;
-	}
-
-	// Should never get here.
-	cf_crash(AS_INFO, "end of msb()");
-	return -1;
-}
-
-//------------------------------------------------
 // Insert a time interval data point. The interval
 // is time elapsed since start_ns, converted to
 // milliseconds or microseconds as appropriate.
@@ -280,7 +315,7 @@ histogram_insert_data_point(histogram *h, uint64_t start_ns)
 		}
 	}
 
-	cf_atomic64_incr(&h->counts[bucket]);
+	as_incr_uint64(&h->counts[bucket]);
 
 	return end_ns;
 }
@@ -301,5 +336,54 @@ histogram_insert_data_point(histogram *h, uint64_t start_ns)
 void
 histogram_insert_raw(histogram *h, uint64_t value)
 {
-	cf_atomic64_incr(&h->counts[msb(value)]);
+	as_incr_uint64(&h->counts[msb(value)]);
+}
+
+//------------------------------------------------
+// Same as above, but not thread safe.
+//
+void
+histogram_insert_raw_unsafe(histogram *h, uint64_t value)
+{
+	h->counts[msb(value)]++;
+}
+
+//------------------------------------------------
+// Save a snapshot of this histogram. This should
+// be done rarely, preferably from one thread.
+//
+void
+histogram_save_info(histogram *h)
+{
+	cf_mutex_lock(&h->info_lock);
+
+	// Allocate lazily so all histograms don't incur the ~2K penalty.
+	if (! h->info_snapshot) {
+		h->info_snapshot = cf_malloc(SNAPSHOT_SIZE);
+	}
+
+	int prefix_len = sprintf(h->info_snapshot, "units=%s", h->scale_tag);
+	char *at = h->info_snapshot + prefix_len;
+
+	for (uint32_t b = 0; b < N_BUCKETS; b++) {
+		uint64_t count = h->counts[b];
+
+		if (count != 0) {
+			at += sprintf(at, ":[%s-%s)=%lu", SNAPSHOT_TAGS[b],
+					SNAPSHOT_TAGS[b + 1], count);
+		}
+	}
+
+	cf_mutex_unlock(&h->info_lock);
+}
+
+//------------------------------------------------
+// Retrieve a snapshot of this histogram.
+//
+void
+histogram_get_info(histogram *h, cf_dyn_buf *db)
+{
+	cf_mutex_lock(&h->info_lock);
+	cf_dyn_buf_append_string(db, h->info_snapshot ? h->info_snapshot : "");
+	cf_mutex_unlock(&h->info_lock);
 }

@@ -1477,6 +1477,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
 	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
+	info_append_uint32(db, "object-size-hist-period", g_config.object_size_hist_period);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
 	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
@@ -1680,7 +1681,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
-	info_append_uint32(db, "obj-size-hist-max", ns->obj_size_hist_max); // not original, may have been rounded
 	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
 	info_append_uint32(db, "rack-id", ns->rack_id);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
@@ -2036,6 +2036,12 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of nsup-period from %d to %d ", g_config.nsup_period, val);
 			g_config.nsup_period = val;
+		}
+		else if (0 == as_info_parameter_get(params, "object-size-hist-period", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			cf_info(AS_INFO, "Changing value of object-size-hist-period from %d to %d ", g_config.object_size_hist_period, val);
+			g_config.object_size_hist_period = val;
 		}
 		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
 			if (!as_config_cluster_name_set(context)) {
@@ -2642,16 +2648,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of tomb-raider-sleep of ns %s from %u to %d", ns->name, ns->storage_tomb_raider_sleep, val);
 			ns->storage_tomb_raider_sleep = (uint32_t)val;
-		}
-		else if (0 == as_info_parameter_get(params, "obj-size-hist-max", context, &context_len)) {
-			uint32_t hist_max = (uint32_t)atoi(context);
-			uint32_t round_to = OBJ_SIZE_HIST_NUM_BUCKETS;
-			uint32_t round_max = hist_max ? ((hist_max + round_to - 1) / round_to) * round_to : round_to;
-			if (round_max != hist_max) {
-				cf_info(AS_INFO, "rounding obj-size-hist-max %u up to %u", hist_max, round_max);
-			}
-			cf_info(AS_INFO, "Changing value of obj-size-hist-max of ns %s to %u", ns->name, round_max);
-			cf_atomic32_set(&ns->obj_size_hist_max, round_max); // in 128-byte blocks
 		}
 		else if (0 == as_info_parameter_get(params, "rack-id", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
@@ -6025,13 +6021,13 @@ info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db)
 }
 
 int
-info_command_hist_dump(char *name, char *params, cf_dyn_buf *db)
+info_command_histogram(char *name, char *params, cf_dyn_buf *db)
 {
 	char value_str[128];
 	int  value_str_len = sizeof(value_str);
 
-	if (0 != as_info_parameter_get(params, "ns", value_str, &value_str_len)) {
-		cf_info(AS_INFO, "hist-dump %s command: no namespace specified", name);
+	if (0 != as_info_parameter_get(params, "namespace", value_str, &value_str_len)) {
+		cf_info(AS_INFO, "histogram %s command: no namespace specified", name);
 		cf_dyn_buf_append_string(db, "error-no-namespace");
 		return 0;
 	}
@@ -6039,16 +6035,16 @@ info_command_hist_dump(char *name, char *params, cf_dyn_buf *db)
 	as_namespace *ns = as_namespace_get_byname(value_str);
 
 	if (!ns) {
-		cf_info(AS_INFO, "hist-dump %s command: unknown namespace: %s", name, value_str);
+		cf_info(AS_INFO, "histogram %s command: unknown namespace: %s", name, value_str);
 		cf_dyn_buf_append_string(db, "error-unknown-namespace");
 		return 0;
 	}
 
 	value_str_len = sizeof(value_str);
 
-	if (0 != as_info_parameter_get(params, "hist", value_str, &value_str_len)) {
-		cf_info(AS_INFO, "hist-dump %s command:", name);
-		cf_dyn_buf_append_string(db, "error-no-hist-name");
+	if (0 != as_info_parameter_get(params, "type", value_str, &value_str_len)) {
+		cf_info(AS_INFO, "histogram %s command:", name);
+		cf_dyn_buf_append_string(db, "error-no-histogram-specified");
 
 		return 0;
 	}
@@ -6060,8 +6056,7 @@ info_command_hist_dump(char *name, char *params, cf_dyn_buf *db)
 
 	as_info_parameter_get(params, "set", set_name_str, &set_name_str_len);
 
-	// format is ns1:ns_hist1=bucket_count,offset,b1,b2,b3...;
-	as_namespace_get_hist_info(ns, set_name_str, value_str, db, true);
+	as_namespace_get_hist_info(ns, set_name_str, value_str, db);
 
 	return 0;
 }
@@ -6845,7 +6840,7 @@ as_info_init()
 	// All commands accepted by asinfo/telnet
 	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
 				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
-				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;hist-dump;"
+				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;histogram;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"racks;recluster;revive;roster;roster-set;service;services;services-alumni;services-alumni-reset;set-config;"
@@ -6926,7 +6921,7 @@ as_info_init()
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
-	as_info_set_command("hist-dump", info_command_hist_dump, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
+	as_info_set_command("histogram", info_command_histogram, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
 	as_info_set_command("hist-track-start", info_command_hist_track, PERM_SERVICE_CTRL);      // Start or Restart histogram tracking.
 	as_info_set_command("hist-track-stop", info_command_hist_track, PERM_SERVICE_CTRL);       // Stop histogram tracking.
 	as_info_set_command("jem-stats", info_command_jem_stats, PERM_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.

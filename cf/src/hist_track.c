@@ -39,7 +39,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <citrusleaf/cf_atomic.h>
+#include <aerospike/as_atomic.h>
 #include <citrusleaf/alloc.h>
 
 #include "dynbuf.h"
@@ -313,7 +313,7 @@ cf_hist_track_dump(cf_hist_track* this)
 	uint64_t total_count = 0;
 
 	for (int j = 0; j < N_BUCKETS; j++) {
-		counts[j] = cf_atomic64_get(this->hist.counts[j]);
+		counts[j] = as_load_uint64(&this->hist.counts[j]);
 		total_count += counts[j];
 	}
 

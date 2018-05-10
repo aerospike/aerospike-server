@@ -22,11 +22,26 @@
 
 #pragma once
 
+//==========================================================
+// Includes.
+//
+
 #include <stdint.h>
+
 #include "dynbuf.h"
 
 
+//==========================================================
+// Typedefs & constants.
+//
+
 typedef struct linear_hist_s linear_hist;
+
+typedef enum {
+	LINEAR_HIST_SECONDS,
+	LINEAR_HIST_SIZE,
+	LINEAR_HIST_SCALE_MAX_PLUS_1
+} linear_hist_scale;
 
 typedef struct linear_hist_threshold_s {
 	uint32_t value;
@@ -36,11 +51,14 @@ typedef struct linear_hist_threshold_s {
 	uint64_t target_count;
 } linear_hist_threshold;
 
-//------------------------------------------------
-// These must all be called from the same thread!
+
+//==========================================================
+// Public API.
 //
 
-linear_hist *linear_hist_create(const char *name, uint32_t start, uint32_t max_offset, uint32_t num_buckets);
+// These must all be called from the same thread!
+
+linear_hist *linear_hist_create(const char *name, linear_hist_scale scale, uint32_t start, uint32_t max_offset, uint32_t num_buckets);
 void linear_hist_destroy(linear_hist *h);
 void linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset, uint32_t num_buckets);
 void linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset);
@@ -54,8 +72,5 @@ uint64_t linear_hist_get_threshold_for_subtotal(linear_hist *h, uint64_t subtota
 void linear_hist_dump(linear_hist *h);
 void linear_hist_save_info(linear_hist *h);
 
-//------------------------------------------------
 // This call is thread-safe.
-//
-
 void linear_hist_get_info(linear_hist *h, cf_dyn_buf *db);

@@ -72,6 +72,8 @@
 
 static bool eval_stop_writes(as_namespace *ns);
 static bool eval_hwm_breached(as_namespace *ns);
+static void collect_size_histograms(as_namespace *ns);
+static void size_histograms_reduce_cb(as_index_ref* r_ref, void* udata);
 
 
 //==========================================================
@@ -368,7 +370,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 		prep_thread_infos[n].ns = ns;
 		prep_thread_infos[n].p_pid = &pid;
 		prep_thread_infos[n].i_cpu = n;
-		prep_thread_infos[n].hist = linear_hist_create("thread-hist", now, ttl_range, n_buckets);
+		prep_thread_infos[n].hist = linear_hist_create("thread-hist", LINEAR_HIST_SECONDS, now, ttl_range, n_buckets);
 		prep_thread_infos[n].sets_not_evicting = sets_not_evicting;
 
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_infos[n]) != 0) {
@@ -586,24 +588,6 @@ queue_for_delete(as_namespace* ns, cf_digest* p_digest)
 }
 
 //------------------------------------------------
-// Insert data into object size histograms.
-//
-static void
-add_to_obj_size_histograms(as_namespace* ns, as_index* r)
-{
-	uint32_t set_id = as_index_get_set_id(r);
-	linear_hist* set_obj_size_hist = ns->set_obj_size_hists[set_id];
-	uint64_t n_rblocks = r->n_rblocks + 1;
-	// FIXME - deal with these storage histograms!
-
-	linear_hist_insert_data_point(ns->obj_size_hist, n_rblocks);
-
-	if (set_obj_size_hist) {
-		linear_hist_insert_data_point(set_obj_size_hist, n_rblocks);
-	}
-}
-
-//------------------------------------------------
 // Insert data into TTL histograms.
 //
 static void
@@ -639,8 +623,6 @@ evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_namespace* ns = p_info->ns;
 	uint32_t set_id = as_index_get_set_id(r);
 	uint32_t void_time = r->void_time;
-
-	add_to_obj_size_histograms(ns, r);
 
 	if (void_time != 0) {
 		if (! p_info->sets_not_evicting[set_id]) {
@@ -721,12 +703,10 @@ expire_reduce_cb(as_index_ref* r_ref, void* udata)
 			p_info->num_expired++;
 		}
 		else {
-			add_to_obj_size_histograms(ns, r);
 			add_to_ttl_histograms(ns, r);
 		}
 	}
 	else {
-		add_to_obj_size_histograms(ns, r);
 		p_info->num_0_void_time++;
 	}
 
@@ -763,22 +743,6 @@ reduce_master_partitions(as_namespace* ns, as_index_reduce_fn cb, void* udata, u
 }
 
 //------------------------------------------------
-// Lazily create and clear a set's size histogram.
-//
-static void
-clear_set_obj_size_hist(as_namespace* ns, uint32_t set_id)
-{
-	if (! ns->set_obj_size_hists[set_id]) {
-		char hist_name[HISTOGRAM_NAME_SIZE];
-
-		sprintf(hist_name, "%s set %u object size histogram", ns->name, set_id);
-		ns->set_obj_size_hists[set_id] = linear_hist_create(hist_name, 0, 0, OBJ_SIZE_HIST_NUM_BUCKETS);
-	}
-
-	linear_hist_clear(ns->set_obj_size_hists[set_id], 0, cf_atomic32_get(ns->obj_size_hist_max));
-}
-
-//------------------------------------------------
 // Lazily create and clear a set's TTL histogram.
 //
 static void
@@ -788,7 +752,7 @@ clear_set_ttl_hist(as_namespace* ns, uint32_t set_id, uint32_t now, uint64_t ttl
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
 		sprintf(hist_name, "%s set %u ttl histogram", ns->name, set_id);
-		ns->set_ttl_hists[set_id] = linear_hist_create(hist_name, 0, 0, TTL_HIST_NUM_BUCKETS);
+		ns->set_ttl_hists[set_id] = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, TTL_HIST_NUM_BUCKETS);
 	}
 
 	linear_hist_clear(ns->set_ttl_hists[set_id], now, ttl_range);
@@ -932,8 +896,6 @@ run_nsup(void *arg)
 
 			cf_info(AS_NSUP, "{%s} nsup-start", ns->name);
 
-			linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
-
 			// The "now" used for all expiration and eviction.
 			uint32_t now = as_record_void_time_get();
 
@@ -958,7 +920,6 @@ run_nsup(void *arg)
 			for (uint32_t j = 0; j < num_sets; j++) {
 				uint32_t set_id = j + 1;
 
-				clear_set_obj_size_hist(ns, set_id);
 				clear_set_ttl_hist(ns, set_id, now, ttl_range);
 
 				as_set* p_set;
@@ -1047,16 +1008,12 @@ run_nsup(void *arg)
 				n_0_void_time_records = cb_info.num_0_void_time;
 			}
 
-			linear_hist_dump(ns->obj_size_hist);
-			linear_hist_save_info(ns->obj_size_hist);
 			linear_hist_dump(ns->ttl_hist);
 			linear_hist_save_info(ns->ttl_hist);
 
 			for (uint32_t j = 0; j < num_sets; j++) {
 				uint32_t set_id = j + 1;
 
-				linear_hist_dump(ns->set_obj_size_hists[set_id]);
-				linear_hist_save_info(ns->set_obj_size_hists[set_id]);
 				linear_hist_dump(ns->set_ttl_hists[set_id]);
 				linear_hist_save_info(ns->set_ttl_hists[set_id]);
 			}
@@ -1101,6 +1058,33 @@ run_stop_writes(void *arg)
 }
 
 //------------------------------------------------
+// Size-histogram thread "run" function.
+//
+void *
+run_size_histograms(void *arg)
+{
+	uint64_t last_time = 0; // not now - make sure we run once right away
+
+	while (true) {
+		sleep(1); // wake up every 1 second to check
+
+		uint64_t curr_time = cf_get_seconds();
+
+		if (curr_time - last_time < g_config.object_size_hist_period) {
+			continue; // period has not elapsed
+		}
+
+		last_time = curr_time;
+
+		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+			collect_size_histograms(g_config.namespaces[ns_ix]);
+		}
+	}
+
+	return NULL;
+}
+
+//------------------------------------------------
 // Start supervisor threads.
 //
 void
@@ -1133,6 +1117,12 @@ as_nsup_start()
 	// Start thread to do stop-writes evaluation.
 	if (0 != pthread_create(&thread, &attrs, run_stop_writes, NULL)) {
 		cf_crash(AS_NSUP, "nsup stop-writes thread create failed");
+	}
+
+	// Start thread to do size histograms. TODO - eventually consolidate with
+	// nsup when we expire/evict via SMD and include non-masters.
+	if (0 != pthread_create(&thread, &attrs, run_size_histograms, NULL)) {
+		cf_crash(AS_NSUP, "nsup size-histograms thread create failed");
 	}
 }
 
@@ -1265,4 +1255,74 @@ eval_hwm_breached(as_namespace *ns)
 	cf_atomic32_set(&ns->hwm_breached, hwm_breached ? 1 : 0);
 
 	return hwm_breached;
+}
+
+static void
+collect_size_histograms(as_namespace *ns)
+{
+	histogram_clear(ns->obj_size_log_hist);
+	linear_hist_clear(ns->obj_size_lin_hist, 0, ns->storage_write_block_size);
+
+	uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
+
+	for (uint32_t j = 0; j < num_sets; j++) {
+		uint32_t set_id = j + 1;
+
+		if (ns->set_obj_size_log_hists[set_id]) {
+			histogram_clear(ns->set_obj_size_log_hists[set_id]);
+			linear_hist_clear(ns->set_obj_size_lin_hists[set_id], 0, ns->storage_write_block_size);
+		}
+		else {
+			char hist_name[HISTOGRAM_NAME_SIZE];
+			const char* set_name = as_namespace_get_set_name(ns, set_id);
+
+			sprintf(hist_name, "{%s}-%s-object-size-log2", ns->name, set_name);
+			ns->set_obj_size_log_hists[set_id] = histogram_create(hist_name, HIST_SIZE);
+
+			sprintf(hist_name, "{%s}-%s-object-size-linear", ns->name, set_name);
+			ns->set_obj_size_lin_hists[set_id] = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, ns->storage_write_block_size, OBJ_SIZE_HIST_NUM_BUCKETS);
+		}
+	}
+
+	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+		as_partition_reservation rsv;
+		as_partition_reserve(ns, pid, &rsv);
+
+		as_index_reduce_live(rsv.tree, size_histograms_reduce_cb, (void*)ns);
+
+		as_partition_release(&rsv);
+	}
+
+	histogram_save_info(ns->obj_size_log_hist);
+	linear_hist_save_info(ns->obj_size_lin_hist);
+
+	for (uint32_t j = 0; j < num_sets; j++) {
+		uint32_t set_id = j + 1;
+
+		histogram_save_info(ns->set_obj_size_log_hists[set_id]);
+		linear_hist_save_info(ns->set_obj_size_lin_hists[set_id]);
+	}
+}
+
+static void
+size_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
+{
+	as_index* r = r_ref->r;
+	as_namespace* ns = (as_namespace*)udata;
+
+	uint32_t size = as_storage_record_size(ns, r);
+
+	histogram_insert_raw_unsafe(ns->obj_size_log_hist, size);
+	linear_hist_insert_data_point(ns->obj_size_lin_hist, size);
+
+	uint32_t set_id = as_index_get_set_id(r);
+	histogram* set_obj_size_log_hist = ns->set_obj_size_log_hists[set_id];
+	linear_hist* set_obj_size_lin_hist = ns->set_obj_size_lin_hists[set_id];
+
+	if (set_obj_size_log_hist) {
+		histogram_insert_raw_unsafe(set_obj_size_log_hist, size);
+		linear_hist_insert_data_point(set_obj_size_lin_hist, size);
+	}
+
+	as_record_done(r_ref, ns);
 }

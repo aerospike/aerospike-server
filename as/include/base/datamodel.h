@@ -62,7 +62,7 @@
 #define AS_STORAGE_MAX_FILES (128) // maximum files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
-#define OBJ_SIZE_HIST_NUM_BUCKETS 100
+#define OBJ_SIZE_HIST_NUM_BUCKETS 1024
 #define TTL_HIST_NUM_BUCKETS 100
 
 #define MAX_ALLOWED_TTL (3600 * 24 * 365 * 10) // 10 years
@@ -743,7 +743,6 @@ struct as_namespace_s {
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
-	cf_atomic32		obj_size_hist_max; // TODO - doesn't need to be atomic, really.
 	uint32_t		rack_id;
 	as_read_consistency_level read_consistency_level;
 	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin
@@ -1065,10 +1064,12 @@ struct as_namespace_s {
 	histogram*		device_read_size_hist;
 	histogram*		device_write_size_hist;
 
-	// Histograms of master object storage sizes. (Meaningful for drive-backed
+	// Histograms of object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)
-	linear_hist*	obj_size_hist;
-	linear_hist*	set_obj_size_hists[AS_SET_MAX_COUNT + 1];
+	histogram*		obj_size_log_hist;
+	histogram*		set_obj_size_log_hists[AS_SET_MAX_COUNT + 1];
+	linear_hist*	obj_size_lin_hist;
+	linear_hist*	set_obj_size_lin_hists[AS_SET_MAX_COUNT + 1];
 
 	// Histograms used for general eviction and expiration.
 	linear_hist*	evict_hist; // not just for info
@@ -1201,8 +1202,7 @@ extern void as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf
 extern void as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id, int64_t delta_bytes);
 extern void as_namespace_release_set_id(as_namespace *ns, uint16_t set_id);
 extern void as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns);
-extern void as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
-		cf_dyn_buf *db, bool show_ns);
+extern void as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name, cf_dyn_buf *db);
 
 static inline bool
 as_namespace_cool_restarts(const as_namespace *ns)

@@ -159,7 +159,6 @@ as_namespace_create(char *name)
 	ns->migrate_order = 5;
 	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds
 	ns->migrate_sleep = 1;
-	ns->obj_size_hist_max = OBJ_SIZE_HIST_NUM_BUCKETS;
 	ns->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_PROTO;
 	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
@@ -624,26 +623,33 @@ as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns)
 }
 
 
+// e.g. for ttl:
+// units=seconds:hist-width=2582800:bucket-width=25828:buckets=0,0,0 ...
+//
+// e.g. for object-size-linear:
+// units=bytes:hist-width=131072:bucket-width=128:buckets=16000,8000,0,0 ...
+//
+// e.g. for object-size:
+// units=bytes:[64-128)=16000:[128-256)=8000 ...
 void
 as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
-		cf_dyn_buf *db, bool show_ns)
+		cf_dyn_buf *db)
 {
-	if (show_ns) {
-		cf_dyn_buf_append_string(db, ns->name);
-		cf_dyn_buf_append_char(db, ':');
-	}
-
 	if (set_name == NULL || set_name[0] == 0) {
 		if (strcmp(hist_name, "ttl") == 0) {
-			cf_dyn_buf_append_string(db, "ttl=");
 			linear_hist_get_info(ns->ttl_hist, db);
-			cf_dyn_buf_append_char(db, ';');
 		}
-		else if (strcmp(hist_name, "objsz") == 0) {
+		else if (strcmp(hist_name, "object-size") == 0) {
 			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-				cf_dyn_buf_append_string(db, "objsz=");
-				linear_hist_get_info(ns->obj_size_hist, db);
-				cf_dyn_buf_append_char(db, ';');
+				histogram_get_info(ns->obj_size_log_hist, db);
+			}
+			else {
+				cf_dyn_buf_append_string(db, "hist-not-applicable");
+			}
+		}
+		else if (strcmp(hist_name, "object-size-linear") == 0) {
+			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+				linear_hist_get_info(ns->obj_size_lin_hist, db);
 			}
 			else {
 				cf_dyn_buf_append_string(db, "hist-not-applicable");
@@ -658,38 +664,47 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 
 	uint16_t set_id = as_namespace_get_set_id(ns, set_name);
 
-	if (set_id != INVALID_SET_ID) {
-		if (strcmp(hist_name, "ttl") == 0) {
-			if (ns->set_ttl_hists[set_id]) {
-				cf_dyn_buf_append_string(db, "ttl=");
-				linear_hist_get_info(ns->set_ttl_hists[set_id], db);
-				cf_dyn_buf_append_char(db, ';');
+	if (set_id == INVALID_SET_ID) {
+		cf_dyn_buf_append_string(db, "error-unknown-set-name");
+		return;
+	}
+
+	if (strcmp(hist_name, "ttl") == 0) {
+		if (ns->set_ttl_hists[set_id]) {
+			linear_hist_get_info(ns->set_ttl_hists[set_id], db);
+		}
+		else {
+			cf_dyn_buf_append_string(db, "hist-unavailable");
+		}
+	}
+	else if (strcmp(hist_name, "object-size") == 0) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+			if (ns->set_obj_size_log_hists[set_id]) {
+				histogram_get_info(ns->set_obj_size_log_hists[set_id], db);
 			}
 			else {
 				cf_dyn_buf_append_string(db, "hist-unavailable");
 			}
 		}
-		else if (strcmp(hist_name, "objsz") == 0) {
-			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-				if (ns->set_obj_size_hists[set_id]) {
-					cf_dyn_buf_append_string(db, "objsz=");
-					linear_hist_get_info(ns->set_obj_size_hists[set_id], db);
-					cf_dyn_buf_append_char(db, ';');
-				}
-				else {
-					cf_dyn_buf_append_string(db, "hist-unavailable");
-				}
+		else {
+			cf_dyn_buf_append_string(db, "hist-not-applicable");
+		}
+	}
+	else if (strcmp(hist_name, "object-size-linear") == 0) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+			if (ns->set_obj_size_lin_hists[set_id]) {
+				linear_hist_get_info(ns->set_obj_size_lin_hists[set_id], db);
 			}
 			else {
-				cf_dyn_buf_append_string(db, "hist-not-applicable");
+				cf_dyn_buf_append_string(db, "hist-unavailable");
 			}
 		}
 		else {
-			cf_dyn_buf_append_string(db, "error-unknown-hist-name");
+			cf_dyn_buf_append_string(db, "hist-not-applicable");
 		}
 	}
 	else {
-		cf_dyn_buf_append_string(db, "error-unknown-set-name");
+		cf_dyn_buf_append_string(db, "error-unknown-hist-name");
 	}
 }
 

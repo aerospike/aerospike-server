@@ -20,14 +20,12 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-
 //==========================================================
 // Includes.
 //
 
 #include "linear_hist.h"
 
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -35,22 +33,26 @@
 
 #include "citrusleaf/alloc.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "fault.h"
 
 
 //==========================================================
-// Private class data.
+// Typedefs & constants.
 //
 
 #define LINEAR_HIST_NAME_SIZE 512
-#define INFO_SNAPSHOT_SIZE 2048
+
+#define LINEAR_HIST_TAG_SECONDS	"seconds"
+#define LINEAR_HIST_TAG_SIZE	"bytes"
 
 struct linear_hist_s {
 	char name[LINEAR_HIST_NAME_SIZE];
+	const char* scale_tag;
 
-	pthread_mutex_t info_lock;
-	char info_snapshot[INFO_SNAPSHOT_SIZE];
+	cf_mutex info_lock;
+	char* info_snapshot;
 
 	uint32_t num_buckets;
 	uint64_t *counts;
@@ -58,6 +60,9 @@ struct linear_hist_s {
 	uint32_t start;
 	uint32_t bucket_width;
 };
+
+// e.g. units=bytes:hist-width=131072:bucket-width=1024:buckets=
+#define PREFIX_SIZE (5 + 1 + 5 + 1 + 10 + 1 + 10 + 1 + 12 + 1 + 10 + 1 + 7 + 1)
 
 
 //==========================================================
@@ -68,31 +73,35 @@ struct linear_hist_s {
 // Create a linear histogram.
 //
 linear_hist*
-linear_hist_create(const char *name, uint32_t start, uint32_t max_offset,
-		uint32_t num_buckets)
+linear_hist_create(const char *name, linear_hist_scale scale, uint32_t start,
+		uint32_t max_offset, uint32_t num_buckets)
 {
-	if (! (name && strlen(name) < LINEAR_HIST_NAME_SIZE)) {
-		cf_crash(AS_INFO, "linear_hist_create - bad name %s",
-				name ? name : "<null>");
-	}
-
-	if (start + max_offset < start) {
-		cf_crash(AS_INFO, "linear_hist_create - max_offset overflow");
-	}
-
-	if (num_buckets == 0) {
-		cf_crash(AS_INFO, "linear_hist_create - 0 num_buckets");
-	}
+	cf_assert(name, AS_INFO, "null histogram name");
+	cf_assert(strlen(name) < LINEAR_HIST_NAME_SIZE, AS_INFO,
+			"bad histogram name %s", name);
+	cf_assert(scale >= 0 && scale < LINEAR_HIST_SCALE_MAX_PLUS_1, AS_INFO,
+			"bad histogram scale %d", scale);
+	cf_assert(start + max_offset >= start, AS_INFO, "max_offset overflow");
+	cf_assert(num_buckets != 0, AS_INFO, "num_buckets 0");
 
 	linear_hist *h = cf_malloc(sizeof(linear_hist));
 
 	strcpy(h->name, name);
 
-	if (0 != pthread_mutex_init(&h->info_lock, NULL)) {
-		cf_crash(AS_INFO, "linear_hist_create - mutex init failed");
+	switch (scale) {
+	case LINEAR_HIST_SECONDS:
+		h->scale_tag = LINEAR_HIST_TAG_SECONDS;
+		break;
+	case LINEAR_HIST_SIZE:
+		h->scale_tag = LINEAR_HIST_TAG_SIZE;
+		break;
+	default:
+		cf_crash(AS_INFO, "%s: unrecognized histogram scale %d", name, scale);
+		break;
 	}
 
-	h->info_snapshot[0] = 0;
+	cf_mutex_init(&h->info_lock);
+	h->info_snapshot = NULL;
 
 	h->num_buckets = num_buckets;
 	h->counts = cf_malloc(sizeof(uint64_t) * num_buckets);
@@ -108,7 +117,7 @@ linear_hist_create(const char *name, uint32_t start, uint32_t max_offset,
 void
 linear_hist_destroy(linear_hist *h)
 {
-	pthread_mutex_destroy(&h->info_lock);
+	cf_mutex_destroy(&h->info_lock);
 	cf_free(h->counts);
 	cf_free(h);
 }
@@ -120,6 +129,8 @@ void
 linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset,
 		uint32_t num_buckets)
 {
+	cf_assert(num_buckets != 0, AS_INFO, "num_buckets 0");
+
 	if (h->num_buckets == num_buckets) {
 		linear_hist_clear(h, start, max_offset);
 		return;
@@ -331,27 +342,32 @@ linear_hist_dump(linear_hist *h)
 void
 linear_hist_save_info(linear_hist *h)
 {
-	pthread_mutex_lock(&h->info_lock);
-
-	if (h->num_buckets > 100) {
-		// For now, just don't bother if there's too much to save.
-		sprintf(h->info_snapshot, "%u,%u ...", h->num_buckets, h->bucket_width);
-
-		pthread_mutex_unlock(&h->info_lock);
+	// For now, just don't bother if there's too much to save.
+	if (h->num_buckets > 1024) {
 		return;
 	}
 
-	// Write num_buckets, the bucket width, and the first bucket's count.
-	int i = 0;
-	int pos = snprintf(h->info_snapshot, INFO_SNAPSHOT_SIZE, "%u,%u,%lu",
-			h->num_buckets, h->bucket_width, h->counts[i++]);
+	cf_mutex_lock(&h->info_lock);
 
-	while (pos < INFO_SNAPSHOT_SIZE && i < h->num_buckets) {
-		pos += snprintf(h->info_snapshot + pos, INFO_SNAPSHOT_SIZE - pos,
-				",%lu", h->counts[i++]);
+	size_t size = PREFIX_SIZE + (h->num_buckets * (20 + 1)) + 1;
+
+	// Allocate such that all histograms incur minimum penalty.
+	h->info_snapshot = cf_realloc(h->info_snapshot, size);
+
+	int prefix_len = sprintf(h->info_snapshot,
+			"units=%s:hist-width=%u:bucket-width=%u:buckets=",
+			h->scale_tag, h->num_buckets * h->bucket_width, h->bucket_width);
+	char *at = h->info_snapshot + prefix_len;
+
+	for (uint32_t b = 0; b < h->num_buckets; b++) {
+		uint64_t count = h->counts[b];
+
+		at += sprintf(at, "%lu,", count);
 	}
 
-	pthread_mutex_unlock(&h->info_lock);
+	*(at - 1) = 0;
+
+	cf_mutex_unlock(&h->info_lock);
 }
 
 //------------------------------------------------
@@ -360,7 +376,7 @@ linear_hist_save_info(linear_hist *h)
 void
 linear_hist_get_info(linear_hist *h, cf_dyn_buf *db)
 {
-	pthread_mutex_lock(&h->info_lock);
-	cf_dyn_buf_append_string(db, h->info_snapshot);
-	pthread_mutex_unlock(&h->info_lock);
+	cf_mutex_lock(&h->info_lock);
+	cf_dyn_buf_append_string(db, h->info_snapshot ? h->info_snapshot : "");
+	cf_mutex_unlock(&h->info_lock);
 }

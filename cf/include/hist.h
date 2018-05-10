@@ -22,16 +22,19 @@
 
 #pragma once
 
-#include <pthread.h>
+//==========================================================
+// Includes.
+//
+
 #include <stdbool.h>
 #include <stdint.h>
-#include "citrusleaf/cf_atomic.h"
+
+#include "cf_mutex.h"
 #include "dynbuf.h"
 
 
 //==========================================================
-// Histogram with logarithmic buckets, used for all the
-// latency metrics.
+// Typedefs & constants.
 //
 
 #define N_BUCKETS (1 + 64)
@@ -56,12 +59,23 @@ typedef struct histogram_s {
 	char name[HISTOGRAM_NAME_SIZE];
 	const char* scale_tag;
 	uint32_t time_div;
-	cf_atomic64 counts[N_BUCKETS];
+	cf_mutex info_lock;
+	char* info_snapshot;
+	uint64_t counts[N_BUCKETS];
 } histogram;
 
-extern histogram *histogram_create(const char *name, histogram_scale scale);
-extern void histogram_clear(histogram *h);
-extern void histogram_dump(histogram *h );
 
-extern uint64_t histogram_insert_data_point(histogram *h, uint64_t start_ns);
-extern void histogram_insert_raw(histogram *h, uint64_t value);
+//==========================================================
+// Public API.
+//
+
+histogram *histogram_create(const char *name, histogram_scale scale);
+void histogram_clear(histogram *h);
+void histogram_dump(histogram *h );
+
+uint64_t histogram_insert_data_point(histogram *h, uint64_t start_ns);
+void histogram_insert_raw(histogram *h, uint64_t value);
+void histogram_insert_raw_unsafe(histogram *h, uint64_t value);
+
+void histogram_save_info(histogram *h);
+void histogram_get_info(histogram *h, cf_dyn_buf *db);

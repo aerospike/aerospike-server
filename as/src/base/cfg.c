@@ -105,7 +105,6 @@ as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_xmem_mount(as_namespace* ns, const char* mount);
 void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
-uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
 void cfg_set_cluster_name(char* cluster_name);
 void cfg_add_ldap_role_query_pattern(char* pattern);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
@@ -154,6 +153,7 @@ cfg_set_defaults()
 	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
 	c->nsup_period = 120; // run nsup once every 2 minutes
 	c->nsup_startup_evict = true;
+	c->object_size_hist_period = 60 * 60; // every hour
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
@@ -296,6 +296,7 @@ typedef enum {
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_NSUP_STARTUP_EVICT,
+	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
 	CASE_SERVICE_QUERY_BUFPOOL_SIZE,
@@ -550,7 +551,6 @@ typedef enum {
 	CASE_NAMESPACE_MIGRATE_ORDER,
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
-	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
 	CASE_NAMESPACE_PARTITION_TREE_SPRIGS,
 	CASE_NAMESPACE_RACK_ID,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
@@ -570,6 +570,7 @@ typedef enum {
 	CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER,
 	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_LOW_WATER_PCT,
+	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
 	CASE_NAMESPACE_PARTITION_TREE_LOCKS,
 	CASE_NAMESPACE_SI_BEGIN,
 
@@ -827,6 +828,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
+		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
 		{ "query-bufpool-size",				CASE_SERVICE_QUERY_BUFPOOL_SIZE },
@@ -1082,7 +1084,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
-		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
 		{ "partition-tree-sprigs",			CASE_NAMESPACE_PARTITION_TREE_SPRIGS },
 		{ "rack-id",						CASE_NAMESPACE_RACK_ID },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
@@ -1101,6 +1102,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "demo-write-multiplier",			CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER },
 		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "low-water-pct",					CASE_NAMESPACE_LOW_WATER_PCT },
+		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
 		{ "partition-tree-locks",			CASE_NAMESPACE_PARTITION_TREE_LOCKS },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
 		{ "}",								CASE_CONTEXT_END }
@@ -2350,6 +2352,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_STARTUP_EVICT:
 				c->nsup_startup_evict = cfg_bool(&line);
 				break;
+			case CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD:
+				c->object_size_hist_period = cfg_u32_no_checks(&line);
+				break;
 			case CASE_SERVICE_PROTO_FD_IDLE_MS:
 				c->proto_fd_idle_ms = cfg_int_no_checks(&line);
 				break;
@@ -3096,9 +3101,6 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_MIGRATE_SLEEP:
 				ns->migrate_sleep = cfg_u32_no_checks(&line);
 				break;
-			case CASE_NAMESPACE_OBJ_SIZE_HIST_MAX:
-				ns->obj_size_hist_max = cfg_obj_size_hist_max(cfg_u32_no_checks(&line));
-				break;
 			case CASE_NAMESPACE_PARTITION_TREE_SPRIGS:
 				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, NUM_LOCK_PAIRS, 1 << NUM_SPRIG_BITS);
 				break;
@@ -3178,6 +3180,7 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER:
 			case CASE_NAMESPACE_HIGH_WATER_PCT:
 			case CASE_NAMESPACE_LOW_WATER_PCT:
+			case CASE_NAMESPACE_OBJ_SIZE_HIST_MAX:
 			case CASE_NAMESPACE_PARTITION_TREE_LOCKS:
 				cfg_deprecated_name_tok(&line);
 				break;
@@ -4204,17 +4207,18 @@ as_config_post_process(as_config* c, const char* config_file)
 		sprintf(hist_name, "{%s}-udf-sub-response", ns->name);
 		ns->udf_sub_response_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
 
-		// Linear 'nsup' histograms.
-		// Note - histograms' ranges MUST be set before use.
+		// 'nsup' histograms.
 
-		sprintf(hist_name, "%s object size histogram", ns->name);
-		ns->obj_size_hist = linear_hist_create(hist_name, 0, 0, OBJ_SIZE_HIST_NUM_BUCKETS);
+		sprintf(hist_name, "{%s}-object-size-log2", ns->name);
+		ns->obj_size_log_hist = histogram_create(hist_name, HIST_SIZE);
+		sprintf(hist_name, "{%s}-object-size-linear", ns->name);
+		ns->obj_size_lin_hist = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, ns->storage_write_block_size, OBJ_SIZE_HIST_NUM_BUCKETS);
 
-		sprintf(hist_name, "%s evict histogram", ns->name);
-		ns->evict_hist = linear_hist_create(hist_name, 0, 0, ns->evict_hist_buckets);
+		sprintf(hist_name, "{%s}-evict", ns->name);
+		ns->evict_hist = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, ns->evict_hist_buckets);
 
-		sprintf(hist_name, "%s ttl histogram", ns->name);
-		ns->ttl_hist = linear_hist_create(hist_name, 0, 0, TTL_HIST_NUM_BUCKETS);
+		sprintf(hist_name, "{%s}-ttl", ns->name);
+		ns->ttl_hist = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, TTL_HIST_NUM_BUCKETS);
 	}
 }
 
@@ -4749,20 +4753,6 @@ cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name)
 	if (i == AS_STORAGE_MAX_DEVICES) {
 		cf_crash_nostack(AS_CFG, "namespace %s - too many storage devices", ns->name);
 	}
-}
-
-uint32_t
-cfg_obj_size_hist_max(uint32_t hist_max)
-{
-	uint32_t round_to = OBJ_SIZE_HIST_NUM_BUCKETS;
-	uint32_t round_max = hist_max != 0 ?
-			((hist_max + round_to - 1) / round_to) * round_to : round_to;
-
-	if (round_max != hist_max) {
-		cf_info(AS_CFG, "rounding obj-size-hist-max %u up to %u", hist_max, round_max);
-	}
-
-	return round_max; // in 128-byte blocks
 }
 
 void
