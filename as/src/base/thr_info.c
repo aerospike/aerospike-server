@@ -6840,8 +6840,8 @@ as_info_init()
 	// All commands accepted by asinfo/telnet
 	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
 				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
-				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;histogram;"
-				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
+				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;"
+				"hist-track-start;hist-track-stop;histogram;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"racks;recluster;revive;roster;roster-set;service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
@@ -6921,9 +6921,9 @@ as_info_init()
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
-	as_info_set_command("histogram", info_command_histogram, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
 	as_info_set_command("hist-track-start", info_command_hist_track, PERM_SERVICE_CTRL);      // Start or Restart histogram tracking.
 	as_info_set_command("hist-track-stop", info_command_hist_track, PERM_SERVICE_CTRL);       // Stop histogram tracking.
+	as_info_set_command("histogram", info_command_histogram, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
 	as_info_set_command("jem-stats", info_command_jem_stats, PERM_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.
 	as_info_set_command("latency", info_command_hist_track, PERM_NONE);                       // Returns latency and throughput information.
 	as_info_set_command("log-message", info_command_log_message, PERM_NONE);                  // Log a message.
