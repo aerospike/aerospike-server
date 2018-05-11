@@ -24,7 +24,6 @@
  * namespace supervisor
  */
 
-#include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -32,7 +31,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 #include <sys/param.h> // for MIN and MAX
 
@@ -869,28 +867,25 @@ run_nsup(void *arg)
 	// Garbage-collect long-expired proles, one partition per loop.
 	int prole_pids[g_config.n_namespaces];
 
-	for (int n = 0; n < g_config.n_namespaces; n++) {
-		prole_pids[n] = -1;
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		prole_pids[ns_ix] = -1;
 	}
 
 	uint64_t last_time = cf_get_seconds();
 
-	for ( ; ; ) {
-		// Wake up every 1 second to check the nsup timeout.
-		struct timespec delay = { 1, 0 };
-		nanosleep(&delay, NULL);
+	while (true) {
+		sleep(1); // wake up every second to check
 
 		uint64_t curr_time = cf_get_seconds();
 
-		if ((curr_time - last_time) < g_config.nsup_period) {
-			continue; // period has not been reached for running eviction check
+		if (curr_time - last_time < g_config.nsup_period) {
+			continue; // period has not elapsed
 		}
 
 		last_time = curr_time;
 
-		// Iterate over every namespace.
-		for (int i = 0; i < g_config.n_namespaces; i++) {
-			as_namespace *ns = g_config.namespaces[i];
+		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+			as_namespace *ns = g_config.namespaces[ns_ix];
 
 			uint64_t start_ms = cf_getms();
 
@@ -1032,7 +1027,7 @@ run_nsup(void *arg)
 
 			// Garbage-collect long-expired proles, one partition per loop.
 			if (g_config.prole_extra_ttl != 0) {
-				prole_pids[i] = garbage_collect_next_prole_partition(ns, prole_pids[i]);
+				prole_pids[ns_ix] = garbage_collect_next_prole_partition(ns, prole_pids[ns_ix]);
 			}
 		}
 	}
@@ -1063,17 +1058,19 @@ run_stop_writes(void *arg)
 void *
 run_size_histograms(void *arg)
 {
-	uint64_t last_time = 0; // not now - make sure we run once right away
+	bool wait = false; // make sure we run once right away on startup
+	uint64_t last_time = 0;
 
 	while (true) {
-		sleep(1); // wake up every 1 second to check
+		sleep(1); // wake up every second to check
 
 		uint64_t curr_time = cf_get_seconds();
 
-		if (curr_time - last_time < g_config.object_size_hist_period) {
+		if (wait && curr_time - last_time < g_config.object_size_hist_period) {
 			continue; // period has not elapsed
 		}
 
+		wait = true;
 		last_time = curr_time;
 
 		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
@@ -1260,6 +1257,12 @@ eval_hwm_breached(as_namespace *ns)
 static void
 collect_size_histograms(as_namespace *ns)
 {
+	if (ns->storage_type != AS_STORAGE_ENGINE_SSD || ns->n_objects == 0) {
+		return;
+	}
+
+	cf_info(AS_NSUP, "{%s} collecting object size info ...", ns->name);
+
 	histogram_clear(ns->obj_size_log_hist);
 	linear_hist_clear(ns->obj_size_lin_hist, 0, ns->storage_write_block_size);
 
@@ -1302,6 +1305,8 @@ collect_size_histograms(as_namespace *ns)
 		histogram_save_info(ns->set_obj_size_log_hists[set_id]);
 		linear_hist_save_info(ns->set_obj_size_lin_hists[set_id]);
 	}
+
+	cf_info(AS_NSUP, "{%s} ... done collecting object size info", ns->name);
 }
 
 static void
