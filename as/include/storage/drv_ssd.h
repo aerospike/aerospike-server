@@ -372,7 +372,6 @@ typedef struct ssd_rec_props_s {
 } ssd_rec_props;
 
 // Warm and cool restart.
-void ssd_resume_devices_one_phase(drv_ssds *ssds);
 void ssd_resume_devices(drv_ssds *ssds);
 void *run_ssd_cool_start(void *udata);
 void ssd_load_wblock_queues(drv_ssds *ssds);

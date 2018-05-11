@@ -3265,8 +3265,7 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 	// Warm or cool restart.
 	if (! ns->cold_start) {
 		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
-		ssd_resume_devices_one_phase(ssds);
-//		ssd_resume_devices(ssds);
+		ssd_resume_devices(ssds);
 
 		if (as_namespace_cool_restarts(ns)) {
 			// Cool restart - fire off threads to load record data - will signal

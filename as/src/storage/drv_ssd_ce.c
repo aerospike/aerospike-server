@@ -30,13 +30,6 @@
 
 
 void
-ssd_resume_devices_one_phase(drv_ssds* ssds)
-{
-	// Should not get here - for enterprise version only.
-	cf_crash(AS_DRV_SSD, "cold start called ssd_resume_devices()");
-}
-
-void
 ssd_resume_devices(drv_ssds* ssds)
 {
 	// Should not get here - for enterprise version only.
