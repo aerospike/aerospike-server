@@ -1469,6 +1469,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
 	info_append_int(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
+	info_append_bool(db, "log-millis", cf_fault_is_logging_millis());
 	info_append_uint32(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
 	info_append_uint32(db, "migrate-threads", g_config.n_migrate_threads);
 	info_append_uint32(db, "min-cluster-size", g_config.clustering_config.cluster_size_min);
