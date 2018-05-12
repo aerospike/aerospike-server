@@ -14,9 +14,9 @@ container:
       - docker.qe.aerospike.com/build/aerospike-server:debian-7
       - docker.qe.aerospike.com/build/aerospike-server:debian-8
       - docker.qe.aerospike.com/build/aerospike-server:debian-9
-      - docker.qe.aerospike.com/build/aerospike-server:ubuntu-12.04
       - docker.qe.aerospike.com/build/aerospike-server:ubuntu-14.04
       - docker.qe.aerospike.com/build/aerospike-server:ubuntu-16.04
+      - docker.qe.aerospike.com/build/aerospike-server:ubuntu-18.04
 
 build:
   - name: community
