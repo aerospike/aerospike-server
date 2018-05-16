@@ -335,31 +335,16 @@ do { \
 	uint64_t *gregs = (uint64_t *)&mc->gregs[0]; \
 	\
 	char regs[1000]; \
-	int32_t off = 0; \
 	\
-	off += snprintf(regs + off, sizeof(regs) - off, "rax %016lx rbx %016lx ", \
-		gregs[REG_RAX], gregs[REG_RBX]); \
-	\
-	off += snprintf(regs + off, sizeof(regs) - off, "rcx %016lx rdx %016lx ", \
-		gregs[REG_RCX], gregs[REG_RDX]); \
-	\
-	off += snprintf(regs + off, sizeof(regs) - off, "rsi %016lx rdi %016lx ", \
-		gregs[REG_RSI], gregs[REG_RDI]); \
-	\
-	off += snprintf(regs + off, sizeof(regs) - off, "rsp %016lx rip %016lx ", \
-		gregs[REG_RSP], gregs[REG_RIP]); \
-	\
-	off += snprintf(regs + off, sizeof(regs) - off, "r8 %016lx r9 %016lx ", \
-		gregs[REG_R8], gregs[REG_R9]); \
-	\
-	off += snprintf(regs + off, sizeof(regs) - off, "r10 %016lx r11 %016lx ", \
-		gregs[REG_R10], gregs[REG_R11]); \
-	\
-	off += snprintf(regs + off, sizeof(regs) - off, "r12 %016lx r13 %016lx ", \
-		gregs[REG_R12], gregs[REG_R13]); \
-	\
-	off += snprintf(regs + off, sizeof(regs) - off, "r14 %016lx r15 %016lx", \
-		gregs[REG_R14], gregs[REG_R15]); \
+	snprintf(regs, sizeof(regs), \
+		"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx " \
+		"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx " \
+		"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx", \
+		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX], \
+		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP], \
+		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11], \
+		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15], \
+		gregs[REG_RIP]); \
 	\
 	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
 			"stacktrace: registers: %s", regs); \
@@ -368,7 +353,7 @@ do { \
 	char trace[MAX_BACKTRACE_DEPTH * 20]; \
 	\
 	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
-	off = 0; \
+	int off = 0; \
 	\
 	for (int i = 0; i < sz; i++) { \
 		off += snprintf(trace + off, sizeof(trace) - off, " 0x%lx", \
