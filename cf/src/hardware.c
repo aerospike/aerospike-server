@@ -249,6 +249,7 @@ path_exists(const char *path)
 
 	if (stat(path, &stat_info) < 0) {
 		if (errno == ENOENT) {
+			cf_detail(CF_HARDWARE, "path %s does not exist", path);
 			return false;
 		}
 
@@ -256,6 +257,42 @@ path_exists(const char *path)
 				path, errno, cf_strerror(errno));
 	}
 
+	cf_detail(CF_HARDWARE, "path %s exists", path);
+	return true;
+}
+
+static bool
+path_works(const char *path)
+{
+	int32_t fd = open(path, O_RDONLY);
+
+	if (fd < 0) {
+		if (errno == ENOENT || errno == EINVAL) {
+			cf_detail(CF_HARDWARE, "path %s does not work (open): %d (%s)",
+					path, errno, cf_strerror(errno));
+			return false;
+		}
+
+		cf_crash(CF_HARDWARE, "error while verifying path %s (open): %d (%s)",
+				path, errno, cf_strerror(errno));
+	}
+
+	uint8_t buff[1000];
+
+	if (read(fd, buff, sizeof(buff)) < 0) {
+		if (errno == EINVAL) {
+			cf_detail(CF_HARDWARE, "path %s does not work (read): %d (%s)",
+					path, errno, cf_strerror(errno));
+			CF_NEVER_FAILS(close(fd));
+			return false;
+		}
+
+		cf_crash(CF_HARDWARE, "error while verifying path %s (read): %d (%s)",
+				path, errno, cf_strerror(errno));
+	}
+
+	cf_detail(CF_HARDWARE, "path %s works", path);
+	CF_NEVER_FAILS(close(fd));
 	return true;
 }
 
@@ -943,10 +980,10 @@ interface_queues(const char *if_name, const char *format)
 	while (true) {
 		char path[1000];
 		snprintf(path, sizeof(path), format, if_name, n_queues);
-		cf_detail(CF_HARDWARE, "checking for path %s", path);
+		cf_detail(CF_HARDWARE, "checking for working path %s", path);
 
-		if (!path_exists(path)) {
-			cf_detail(CF_HARDWARE, "path not found");
+		if (!path_works(path)) {
+			cf_detail(CF_HARDWARE, "path does not work");
 			break;
 		}
 
@@ -962,14 +999,14 @@ static uint16_t
 interface_rx_queues(const char *if_name)
 {
 	cf_detail(CF_HARDWARE, "getting receive queues for interface %s", if_name);
-	return interface_queues(if_name, "/sys/class/net/%s/queues/rx-%hu");
+	return interface_queues(if_name, "/sys/class/net/%s/queues/rx-%hu/rps_cpus");
 }
 
 static uint16_t
 interface_tx_queues(const char *if_name)
 {
 	cf_detail(CF_HARDWARE, "getting transmit queues for interface %s", if_name);
-	return interface_queues(if_name, "/sys/class/net/%s/queues/tx-%hu");
+	return interface_queues(if_name, "/sys/class/net/%s/queues/tx-%hu/xps_cpus");
 }
 
 static int
