@@ -562,6 +562,53 @@ info_get_replicas(char *name, cf_dyn_buf *db)
 //
 
 int
+info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
+{
+	// Command format: "cluster-stable:namespace=<namespace-name>"
+
+	if (! as_partition_balance_are_migrations_allowed()) {
+		cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+		return 0;
+	}
+
+	char param_str[AS_ID_NAMESPACE_SZ] = { 0 };
+	int param_str_len = (int)sizeof(param_str);
+	int rv = as_info_parameter_get(params, "namespace", param_str, &param_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "namespace parameter value too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-namespace");
+		return 0;
+	}
+
+	if (rv == -1) {
+		cf_warning(AS_INFO, "namespace not specified");
+		cf_dyn_buf_append_string(db, "ERROR::no-namespace");
+		return 0;
+	}
+
+	as_namespace *ns = as_namespace_get_byname(param_str);
+
+	if (! ns) {
+		cf_warning(AS_INFO, "unknown namespace %s", param_str);
+		cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
+		return 0;
+	}
+
+	if (ns->migrate_tx_partitions_remaining +
+			ns->migrate_rx_partitions_remaining +
+			ns->n_unavailable_partitions +
+			ns->n_dead_partitions != 0) {
+		cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+		return 0;
+	}
+
+	cf_dyn_buf_append_uint64_x(db, as_exchange_cluster_key());
+
+	return 0;
+}
+
+int
 info_command_get_sl(char *name, char *params, cf_dyn_buf *db)
 {
 	// Command Format:  "get-sl:"
@@ -6831,7 +6878,7 @@ as_info_init()
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
 	static char features[1024];
-	strcat(features, "peers;cdt-list;cdt-map;pipelining;geo;float;batch-index;replicas;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features, "peers;cdt-list;cdt-map;cluster-stable;pipelining;geo;float;batch-index;replicas;replicas-all;replicas-master;replicas-prole;udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
 	as_hb_mode hb_mode;
@@ -6851,7 +6898,7 @@ as_info_init()
 				false);
 	/*
 	 * help intentionally does not include the following:
-	 * cluster-generation;features;objects;
+	 * cluster-generation;cluster-stable;features;objects;
 	 * partition-generation;partition-info;partitions;replicas-master;
 	 * replicas-prole;replicas-read;replicas-write;throughput
 	 */
@@ -6907,6 +6954,7 @@ as_info_init()
 	as_info_set_tree("statistics", info_get_tree_statistics);
 
 	// Define commands
+	as_info_set_command("cluster-stable", info_command_cluster_stable, PERM_NONE);            // Returns cluster key if cluster is stable.
 	as_info_set_command("config-get", info_command_config_get, PERM_NONE);                    // Returns running config for specified context.
 	as_info_set_command("config-set", info_command_config_set, PERM_SET_CONFIG);              // Set a configuration parameter at run time, configuration parameter must be dynamic.
 	as_info_set_command("dump-cluster", info_command_dump_cluster, PERM_LOGGING_CTRL);        // Print debug information about clustering and exchange to the log file.
