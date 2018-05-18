@@ -647,6 +647,9 @@ struct as_namespace_s {
 	// If true, read storage devices to build index at startup.
 	bool			cold_start;
 
+	// If true, device headers indicate previous shutdown was not clean.
+	bool			dirty_restart;
+
 	// Flag for ticker during initial loading of records from device.
 	bool			loading_records;
 

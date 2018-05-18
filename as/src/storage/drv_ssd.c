@@ -3183,7 +3183,6 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 	// At least one device is not fresh. Check that all non-fresh devices match.
 
 	bool fresh_drive = false;
-	bool untrusted_drive = false;
 	bool non_commit_drive = false;
 	ssd_common_prefix *prefix_first = &headers[first_used]->common.prefix;
 
@@ -3225,7 +3224,7 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		if ((prefix_i->flags & SSD_HEADER_FLAG_TRUSTED) == 0) {
 			cf_info(AS_DRV_SSD, "{%s} device %s prior shutdown not clean",
 					ns->name, ssd->name);
-			untrusted_drive = true;
+			ns->dirty_restart = true;
 		}
 
 		if ((prefix_i->flags & SSD_HEADER_FLAG_COMMIT_TO_DEVICE) == 0) {
@@ -3241,7 +3240,7 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 	ssds->common->prefix.random = random;
 	ssds->common->prefix.flags &= ~SSD_HEADER_FLAG_TRUSTED;
 
-	if (fresh_drive || (untrusted_drive && non_commit_drive)) {
+	if (fresh_drive || (ns->dirty_restart && non_commit_drive)) {
 		ssd_adjust_versions(ns, ssds->common->pmeta);
 	}
 
