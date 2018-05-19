@@ -2066,7 +2066,6 @@ as_hb_info_config_get(cf_dyn_buf* db)
 		info_append_addrs(db, "heartbeat.address", &g_config.hb_serv_spec.bind);
 		info_append_uint32(db, "heartbeat.port",
 				(uint32_t)g_config.hb_serv_spec.bind_port);
-		mesh_seed_host_list_get(db, false);
 		info_append_addrs(db, "heartbeat.tls-address",
 				&g_config.hb_tls_serv_spec.bind);
 		info_append_uint32(db, "heartbeat.tls-port",
