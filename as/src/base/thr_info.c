@@ -347,17 +347,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	return 0;
 }
 
-cf_atomic32	 g_node_info_generation = 0;
-
-
-int
-info_get_cluster_generation(char *name, cf_dyn_buf *db)
-{
-	cf_dyn_buf_append_int(db, g_node_info_generation);
-
-	return(0);
-}
-
 void
 info_get_printable_cluster_name(char *cluster_name)
 {
@@ -4914,7 +4903,6 @@ info_clustering_event_listener(const as_exchange_cluster_changed_event* event, v
 	uint32_t after = cf_shash_get_size(g_info_node_info_hash);
 	cf_debug(AS_INFO, "After removal, info hash has %u element(s)", after);
 
-	cf_atomic32_incr(&g_node_info_generation);
 	cf_debug(AS_INFO, "info_clustering_event_listener took %" PRIu64 " ms", cf_getms() - start_ms);
 
 	// Trigger an immediate tend to start peer list update across the cluster.
@@ -6898,7 +6886,7 @@ as_info_init()
 				false);
 	/*
 	 * help intentionally does not include the following:
-	 * cluster-generation;cluster-stable;features;objects;
+	 * cluster-stable;features;objects;
 	 * partition-generation;partition-info;partitions;replicas-master;
 	 * replicas-prole;replicas-read;replicas-write;throughput
 	 */
@@ -6907,7 +6895,6 @@ as_info_init()
 	as_info_set_dynamic("alumni-clear-std", info_get_alumni_clear_std, false);        // Supersedes "services-alumni" for non-TLS service.
 	as_info_set_dynamic("alumni-tls-std", info_get_alumni_tls_std, false);            // Supersedes "services-alumni" for TLS service.
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
-	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
 	as_info_set_dynamic("cluster-name", info_get_cluster_name, false);                // Returns cluster name.
 	as_info_set_dynamic("endpoints", info_get_endpoints, false);                      // Returns the expanded bind / access address configuration.
 	as_info_set_dynamic("feature-key", info_get_features, false);                     // Returns the contents of the feature key (except signature).
