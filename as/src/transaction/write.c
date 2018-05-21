@@ -771,12 +771,12 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 	as_namespace* ns = tr->rsv.ns;
 
 	if (r_ref) {
-		if (record_created) {
-			as_index_delete(tree, &tr->keyd);
-		}
-
 		if (rd) {
 			as_storage_record_close(rd);
+		}
+
+		if (record_created) {
+			as_index_delete(tree, &tr->keyd);
 		}
 
 		as_record_done(r_ref, ns);

@@ -136,21 +136,18 @@ as_record_get(as_index_tree *tree, const cf_digest *keyd, as_index_ref *r_ref)
 }
 
 
-// Done with record - unlock, release, and if ref-count hits 0, destroy record
-// and free arena element.
+// Done with record - unlock. If record was removed from tree and is not
+// reserved (by reduce), destroy record and free arena element.
 void
 as_record_done(as_index_ref *r_ref, as_namespace *ns)
 {
-	uint16_t rc = as_index_release(r_ref->r);
+	as_record *r = r_ref->r;
 
-	if (rc != 0) {
-		cf_assert(rc != (uint16_t)-1, AS_RECORD, "index ref-count underflow");
-		cf_mutex_unlock(r_ref->olock);
-		return;
+	if (! as_index_is_valid_record(r) && r->rc == 0) {
+		as_record_destroy(r, ns);
+		cf_arenax_free(ns->arena, r_ref->r_h);
 	}
 
-	as_record_destroy(r_ref->r, ns);
-	cf_arenax_free(ns->arena, r_ref->r_h);
 	cf_mutex_unlock(r_ref->olock);
 }
 
@@ -529,12 +526,12 @@ void
 record_replace_failed(as_remote_record *rr, as_index_ref* r_ref,
 		as_storage_rd* rd, bool is_create)
 {
-	if (is_create) {
-		as_index_delete(rr->rsv->tree, rr->keyd);
-	}
-
 	if (rd) {
 		as_storage_record_close(rd);
+	}
+
+	if (is_create) {
+		as_index_delete(rr->rsv->tree, rr->keyd);
 	}
 
 	as_record_done(r_ref, rr->rsv->ns);

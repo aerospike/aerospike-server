@@ -46,7 +46,7 @@
 typedef struct as_index_s {
 
 	// offset: 0
-	uint16_t rc;
+	uint16_t rc; // for now, incremented & decremented only when reducing sprig
 
 	// offset: 2
 	uint8_t : 8; // reserved for bigger rc, if needed

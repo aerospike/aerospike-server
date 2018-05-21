@@ -90,7 +90,6 @@ static cf_queue g_gc_queue;
 
 void *run_index_tree_gc(void *unused);
 void as_index_tree_destroy(as_index_tree *tree);
-bool as_index_sprig_done(as_index_sprig *isprig, as_index *r, cf_arenax_handle r_h);
 
 uint64_t as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 void as_index_sprig_traverse(as_index_sprig *isprig, cf_arenax_handle r_h, as_index_ph_array *v_a);
@@ -453,26 +452,6 @@ as_index_tree_destroy(as_index_tree *tree)
 }
 
 
-bool
-as_index_sprig_done(as_index_sprig *isprig, as_index *r, cf_arenax_handle r_h)
-{
-	uint16_t rc = as_index_release(r);
-
-	if (rc != 0) {
-		cf_assert(rc != (uint16_t)-1, AS_INDEX, "index ref-count underflow");
-		return false;
-	}
-
-	if (isprig->destructor) {
-		isprig->destructor(r, isprig->destructor_udata);
-	}
-
-	cf_arenax_free(isprig->arena, r_h);
-
-	return true;
-}
-
-
 //==========================================================
 // Local helpers - reduce a sprig.
 //
@@ -528,9 +507,20 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 		r_ref.olock = &isprig->pair->lock;
 		cf_mutex_lock(r_ref.olock);
 
+		uint16_t rc = as_index_release(r_ref.r);
+
+		cf_assert(rc != (uint16_t)-1, AS_INDEX, "ref-count underflow");
+
 		// Ignore this record if it's been deleted.
 		if (! as_index_is_valid_record(r_ref.r)) {
-			as_index_sprig_done(isprig, r_ref.r, r_ref.r_h);
+			if (rc == 0) {
+				if (isprig->destructor) {
+					isprig->destructor(r_ref.r, isprig->destructor_udata);
+				}
+
+				cf_arenax_free(isprig->arena, r_ref.r_h);
+			}
+
 			cf_mutex_unlock(r_ref.olock);
 			continue;
 		}
@@ -587,11 +577,15 @@ as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h)
 	as_index_sprig_traverse_purge(isprig, r->left_h);
 	as_index_sprig_traverse_purge(isprig, r->right_h);
 
-	// There should be no (extra) references to records during a tree purge -
-	// anything that references a record should also have reserved the tree.
-	if (! as_index_sprig_done(isprig, r, r_h)) {
-		cf_crash(AS_INDEX, "sprig purge found referenced record");
+	// There should be no references during a tree purge (reduce should have
+	// reserved the tree).
+	cf_assert(r->rc == 0, AS_INDEX, "purge found referenced record");
+
+	if (isprig->destructor) {
+		isprig->destructor(r, isprig->destructor_udata);
 	}
+
+	cf_arenax_free(isprig->arena, r_h);
 }
 
 
@@ -630,7 +624,6 @@ as_index_sprig_try_get_vlock(as_index_sprig *isprig, const cf_digest *keyd,
 		return rv;
 	}
 
-	as_index_reserve(index_ref->r);
 	index_ref->olock = &isprig->pair->lock;
 
 	return 0;
@@ -651,7 +644,6 @@ as_index_sprig_get_vlock(as_index_sprig *isprig, const cf_digest *keyd,
 		return rv;
 	}
 
-	as_index_reserve(index_ref->r);
 	index_ref->olock = &isprig->pair->lock;
 
 	return 0;
@@ -702,7 +694,6 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 				index_ref->r = t;
 				index_ref->r_h = t_h;
 
-				as_index_reserve(t);
 				index_ref->olock = &isprig->pair->lock;
 
 				return 0;
@@ -747,8 +738,6 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 	as_index *n = RESOLVE_H(n_h);
 
 	memset(n, 0, sizeof(as_index));
-
-	n->rc = 2; // one for create (eventually balanced by delete), one for caller
 
 	n->tree_id = tree_id;
 	n->keyd = *keyd;
@@ -923,9 +912,6 @@ as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd)
 
 	// Flag record as deleted.
 	as_index_invalidate_record(r);
-
-	// We may now destroy r, which is no longer in the sprig.
-	as_index_sprig_done(isprig, r, r_h);
 
 	// Rely on n_elements being little endian at the beginning of as_sprig. Only
 	// needs to be atomic during warm restart, but not worth special case.

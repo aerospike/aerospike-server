@@ -139,11 +139,11 @@ udf_storage_record_close(udf_record *urecord)
 				urecord->flag &= ~UDF_RECORD_FLAG_HAS_UPDATES; // TODO - necessary?
 			}
 
+			as_storage_record_close(rd);
+
 			if (! has_bins) {
 				write_delete_record(r_ref->r, urecord->tr->rsv.tree);
 			}
-
-			as_storage_record_close(rd);
 		} else {
 			// Should never happen.
 			cf_warning(AS_UDF, "Unexpected Internal Error (null r_ref)");
