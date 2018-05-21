@@ -311,7 +311,7 @@ as_index_try_exists(as_index_tree *tree, const cf_digest *keyd)
 
 
 // If there's an element with specified digest in the tree, return a locked
-// and reserved reference to it in index_ref.
+// reference to it in index_ref.
 //
 // Returns:
 //		 0 - found (reference returned in index_ref)
@@ -333,7 +333,7 @@ as_index_try_get_vlock(as_index_tree *tree, const cf_digest *keyd,
 
 
 // If there's an element with specified digest in the tree, return a locked
-// and reserved reference to it in index_ref.
+// reference to it in index_ref.
 //
 // Returns:
 //		 0 - found (reference returned in index_ref)
@@ -354,9 +354,8 @@ as_index_get_vlock(as_index_tree *tree, const cf_digest *keyd,
 
 
 // If there's an element with specified digest in the tree, return a locked
-// and reserved reference to it in index_ref. If not, create an element with
-// this digest, insert it into the tree, and return a locked and reserved
-// reference to it in index_ref.
+// reference to it in index_ref. If not, create an element with this digest,
+// insert it into the tree, and return a locked reference to it in index_ref.
 //
 // Returns:
 //		 1 - created and inserted (reference returned in index_ref)
