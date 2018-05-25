@@ -248,8 +248,8 @@ start_repl_ping(rw_request* rw, as_transaction* tr)
 bool
 read_dup_res_cb(rw_request* rw)
 {
-	BENCHMARK_NEXT_DATA_POINT(rw, read, dup_res);
-	BENCHMARK_NEXT_DATA_POINT(rw, batch_sub, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, read, FROM_CLIENT, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, batch_sub, FROM_BATCH, dup_res);
 
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
@@ -306,8 +306,8 @@ repl_ping_after_dup_res(rw_request* rw, as_transaction* tr)
 void
 repl_ping_cb(rw_request* rw)
 {
-	BENCHMARK_NEXT_DATA_POINT(rw, read, repl_ping);
-	BENCHMARK_NEXT_DATA_POINT(rw, batch_sub, repl_ping);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, read, FROM_CLIENT, repl_ping);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, batch_sub, FROM_BATCH, repl_ping);
 
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);

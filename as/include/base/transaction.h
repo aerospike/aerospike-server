@@ -95,6 +95,13 @@ struct as_namespace_s;
 	} \
 }
 
+#define BENCHMARK_NEXT_DATA_POINT_FROM(trw, name, orig, tok) \
+{ \
+	if (trw->rsv.ns->name##_benchmarks_enabled && trw->origin == orig && trw->benchmark_time != 0) { \
+		trw->benchmark_time = histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, trw->benchmark_time); \
+	} \
+}
+
 
 //==========================================================
 // Client socket information - as_file_handle.

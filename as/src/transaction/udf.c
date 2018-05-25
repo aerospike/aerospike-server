@@ -321,8 +321,8 @@ as_udf_start(as_transaction* tr)
 
 	status = udf_master(rw, tr);
 
-	BENCHMARK_NEXT_DATA_POINT(tr, udf, master);
-	BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM(tr, udf, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM(tr, udf_sub, FROM_IUDF, master);
 
 	// If error or UDF was a read, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
@@ -433,8 +433,8 @@ start_udf_repl_write_forget(rw_request* rw, as_transaction* tr)
 bool
 udf_dup_res_cb(rw_request* rw)
 {
-	BENCHMARK_NEXT_DATA_POINT(rw, udf, dup_res);
-	BENCHMARK_NEXT_DATA_POINT(rw, udf_sub, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf, FROM_CLIENT, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf_sub, FROM_IUDF, dup_res);
 
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
@@ -456,8 +456,8 @@ udf_dup_res_cb(rw_request* rw)
 
 	transaction_status status = udf_master(rw, &tr);
 
-	BENCHMARK_NEXT_DATA_POINT((&tr), udf, master);
-	BENCHMARK_NEXT_DATA_POINT((&tr), udf_sub, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), udf, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), udf_sub, FROM_IUDF, master);
 
 	if (status == TRANS_WAITING) {
 		// Note - new tr now owns msgp, make sure rw destructor doesn't free it.
@@ -518,8 +518,8 @@ udf_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr)
 void
 udf_repl_write_cb(rw_request* rw)
 {
-	BENCHMARK_NEXT_DATA_POINT(rw, udf, repl_write);
-	BENCHMARK_NEXT_DATA_POINT(rw, udf_sub, repl_write);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf, FROM_CLIENT, repl_write);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf_sub, FROM_IUDF, repl_write);
 
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
