@@ -113,12 +113,17 @@ COMPILER_ASSERT(sizeof(as_index) == 64);
 // Accessor functions for bits in as_index.
 //
 
-#define as_index_reserve(_r) { \
+#define as_index_reserve(_r) ({ \
 	uint16_t rc = as_aaf_uint16(&(_r->rc), 1); \
 	cf_assert(rc != 0, AS_INDEX, "ref-count overflow"); \
-}
+	rc; \
+})
 
-#define as_index_release(_r) as_aaf_uint16(&(_r->rc), -1)
+#define as_index_release(_r) ({ \
+	uint16_t rc = as_aaf_uint16(&(_r->rc), -1); \
+	cf_assert(rc != (uint16_t)-1, AS_INDEX, "ref-count underflow"); \
+	rc; \
+})
 
 #define TREE_ID_NUM_BITS	6
 #define MAX_NUM_TREE_IDS	(1 << TREE_ID_NUM_BITS) // 64

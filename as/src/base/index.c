@@ -508,8 +508,6 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 
 		uint16_t rc = as_index_release(r_ref.r);
 
-		cf_assert(rc != (uint16_t)-1, AS_INDEX, "ref-count underflow");
-
 		// Ignore this record if it's been deleted.
 		if (! as_index_is_valid_record(r_ref.r)) {
 			if (rc == 0) {
