@@ -4067,38 +4067,6 @@ as_storage_defrag_sweep_ssd(as_namespace *ns)
 //
 
 void
-as_storage_info_set_ssd(as_namespace *ns, const as_partition *p)
-{
-	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-	ssd_common_pmeta *pmeta = &ssds->common->pmeta[p->id];
-
-	cf_mutex_lock(&ssds->flush_lock);
-
-	pmeta->version = p->version;
-	pmeta->tree_id = p->tree_id;
-
-	for (int i = 0; i < ssds->n_ssds; i++) {
-		drv_ssd *ssd = &ssds->ssds[i];
-
-		ssd_write_header(ssd, (uint8_t*)ssds->common, (uint8_t*)pmeta,
-				sizeof(*pmeta));
-	}
-
-	cf_mutex_unlock(&ssds->flush_lock);
-}
-
-
-void
-as_storage_info_get_ssd(as_namespace *ns, as_partition *p)
-{
-	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-	ssd_common_pmeta *pmeta = &ssds->common->pmeta[p->id];
-
-	p->version = pmeta->version;
-}
-
-
-void
 as_storage_load_regime_ssd(as_namespace *ns)
 {
 	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
@@ -4144,6 +4112,68 @@ as_storage_save_evict_void_time_ssd(as_namespace *ns, uint32_t evict_void_time)
 		ssd_write_header(ssd, (uint8_t*)ssds->common,
 				(uint8_t*)&ssds->common->prefix.last_evict_void_time,
 				sizeof(ssds->common->prefix.last_evict_void_time));
+	}
+
+	cf_mutex_unlock(&ssds->flush_lock);
+}
+
+
+void
+as_storage_load_pmeta_ssd(as_namespace *ns, as_partition *p)
+{
+	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+	ssd_common_pmeta *pmeta = &ssds->common->pmeta[p->id];
+
+	p->version = pmeta->version;
+}
+
+
+void
+as_storage_save_pmeta_ssd(as_namespace *ns, const as_partition *p)
+{
+	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+	ssd_common_pmeta *pmeta = &ssds->common->pmeta[p->id];
+
+	cf_mutex_lock(&ssds->flush_lock);
+
+	pmeta->version = p->version;
+	pmeta->tree_id = p->tree_id;
+
+	for (int i = 0; i < ssds->n_ssds; i++) {
+		drv_ssd *ssd = &ssds->ssds[i];
+
+		ssd_write_header(ssd, (uint8_t*)ssds->common, (uint8_t*)pmeta,
+				sizeof(*pmeta));
+	}
+
+	cf_mutex_unlock(&ssds->flush_lock);
+}
+
+
+void
+as_storage_cache_pmeta_ssd(as_namespace *ns, const as_partition *p)
+{
+	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+	ssd_common_pmeta *pmeta = &ssds->common->pmeta[p->id];
+
+	pmeta->version = p->version;
+	pmeta->tree_id = p->tree_id;
+}
+
+
+void
+as_storage_flush_all_pmeta_ssd(as_namespace *ns)
+{
+	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+
+	cf_mutex_lock(&ssds->flush_lock);
+
+	for (int i = 0; i < ssds->n_ssds; i++) {
+		drv_ssd *ssd = &ssds->ssds[i];
+
+		ssd_write_header(ssd, (uint8_t*)ssds->common,
+				(uint8_t*)ssds->common->pmeta,
+				sizeof(ssds->common->pmeta));
 	}
 
 	cf_mutex_unlock(&ssds->flush_lock);
@@ -4260,6 +4290,10 @@ void
 as_storage_shutdown_ssd(as_namespace *ns)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+
+	if (! ns->storage_commit_to_device) {
+		as_storage_flush_all_pmeta_ssd(ns);
+	}
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];

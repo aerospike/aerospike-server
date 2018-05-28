@@ -39,6 +39,6 @@ as_storage_record_write_memory(as_storage_rd* rd)
 }
 
 void
-as_storage_info_get_memory(as_namespace *ns, as_partition *p)
+as_storage_load_pmeta_memory(as_namespace *ns, as_partition *p)
 {
 }

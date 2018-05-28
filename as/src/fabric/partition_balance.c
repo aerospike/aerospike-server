@@ -184,7 +184,7 @@ as_partition_balance_init()
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
 
-			as_storage_info_get(ns, p);
+			as_storage_load_pmeta(ns, p);
 
 			if (as_partition_version_has_data(&p->version)) {
 				as_partition_isolate_version(ns, p);
@@ -419,7 +419,7 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 
 	if (! is_self_final_master(p)) {
 		immigrate_start_advance_non_master_version(ns, p);
-		as_storage_info_set(ns, p);
+		as_storage_save_pmeta(ns, p);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -464,7 +464,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	if (p->pending_immigrations == 0 &&
 			! as_partition_version_same(&p->version, &p->final_version)) {
 		p->version = p->final_version;
-		as_storage_info_set(ns, p);
+		as_storage_save_pmeta(ns, p);
 	}
 
 	if (! is_self_final_master(p)) {
@@ -560,7 +560,7 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 	if (! is_self_replica(p) && ! as_partition_version_is_null(&p->version)) {
 		p->version = ZERO_VERSION;
 		drop_trees(p);
-		as_storage_info_set(ns, p);
+		as_storage_save_pmeta(ns, p);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -879,6 +879,8 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 		pthread_mutex_unlock(&p->lock);
 	}
+
+	as_storage_flush_all_pmeta(ns);
 
 	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u) expected-signals %u fresh-partitions %u",
 			ns->name, ns_pending_emigrations, ns_pending_immigrations,
@@ -1403,7 +1405,12 @@ commit_changed_version(as_partition* p, struct as_namespace_s* ns,
 		drop_trees(p);
 	}
 
-	as_storage_info_set(ns, p);
+	if (ns->storage_commit_to_device) {
+		as_storage_save_pmeta(ns, p);
+	}
+	else {
+		as_storage_cache_pmeta(ns, p);
+	}
 }
 
 
@@ -1461,7 +1468,7 @@ emigrate_done_advance_non_master_version_ap(as_namespace* ns, as_partition* p,
 	}
 	// else - must already be a parent.
 
-	as_storage_info_set(ns, p);
+	as_storage_save_pmeta(ns, p);
 }
 
 
@@ -1486,6 +1493,6 @@ immigrate_done_advance_final_master_version_ap(as_namespace* ns,
 {
 	if (! as_partition_version_same(&p->version, &p->final_version)) {
 		p->version = p->final_version;
-		as_storage_info_set(ns, p);
+		as_storage_save_pmeta(ns, p);
 	}
 }

@@ -395,42 +395,6 @@ as_storage_defrag_sweep(as_namespace *ns)
 }
 
 //--------------------------------------
-// as_storage_info_set
-//
-
-typedef void (*as_storage_info_set_fn)(as_namespace *ns, const as_partition *p);
-static const as_storage_info_set_fn as_storage_info_set_table[AS_NUM_STORAGE_ENGINES] = {
-	NULL, // memory doesn't support info
-	as_storage_info_set_ssd
-};
-
-void
-as_storage_info_set(as_namespace *ns, const as_partition *p)
-{
-	if (as_storage_info_set_table[ns->storage_type]) {
-		as_storage_info_set_table[ns->storage_type](ns, p);
-	}
-}
-
-//--------------------------------------
-// as_storage_info_get
-//
-
-typedef void (*as_storage_info_get_fn)(as_namespace *ns, as_partition *p);
-static const as_storage_info_get_fn as_storage_info_get_table[AS_NUM_STORAGE_ENGINES] = {
-	as_storage_info_get_memory,
-	as_storage_info_get_ssd
-};
-
-void
-as_storage_info_get(as_namespace *ns, as_partition *p)
-{
-	if (as_storage_info_get_table[ns->storage_type]) {
-		as_storage_info_get_table[ns->storage_type](ns, p);
-	}
-}
-
-//--------------------------------------
 // as_storage_load_regime
 //
 
@@ -481,6 +445,78 @@ as_storage_save_evict_void_time(as_namespace *ns, uint32_t evict_void_time)
 {
 	if (as_storage_save_evict_void_time_table[ns->storage_type]) {
 		as_storage_save_evict_void_time_table[ns->storage_type](ns, evict_void_time);
+	}
+}
+
+//--------------------------------------
+// as_storage_load_pmeta
+//
+
+typedef void (*as_storage_load_pmeta_fn)(as_namespace *ns, as_partition *p);
+static const as_storage_load_pmeta_fn as_storage_load_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
+	as_storage_load_pmeta_memory,
+	as_storage_load_pmeta_ssd
+};
+
+void
+as_storage_load_pmeta(as_namespace *ns, as_partition *p)
+{
+	if (as_storage_load_pmeta_table[ns->storage_type]) {
+		as_storage_load_pmeta_table[ns->storage_type](ns, p);
+	}
+}
+
+//--------------------------------------
+// as_storage_save_pmeta
+//
+
+typedef void (*as_storage_save_pmeta_fn)(as_namespace *ns, const as_partition *p);
+static const as_storage_save_pmeta_fn as_storage_save_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support info
+	as_storage_save_pmeta_ssd
+};
+
+void
+as_storage_save_pmeta(as_namespace *ns, const as_partition *p)
+{
+	if (as_storage_save_pmeta_table[ns->storage_type]) {
+		as_storage_save_pmeta_table[ns->storage_type](ns, p);
+	}
+}
+
+//--------------------------------------
+// as_storage_cache_pmeta
+//
+
+typedef void (*as_storage_cache_pmeta_fn)(as_namespace *ns, const as_partition *p);
+static const as_storage_cache_pmeta_fn as_storage_cache_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support info
+	as_storage_cache_pmeta_ssd
+};
+
+void
+as_storage_cache_pmeta(as_namespace *ns, const as_partition *p)
+{
+	if (as_storage_cache_pmeta_table[ns->storage_type]) {
+		as_storage_cache_pmeta_table[ns->storage_type](ns, p);
+	}
+}
+
+//--------------------------------------
+// as_storage_flush_all_pmeta
+//
+
+typedef void (*as_storage_flush_all_pmeta_fn)(as_namespace *ns);
+static const as_storage_flush_all_pmeta_fn as_storage_flush_all_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support info
+	as_storage_flush_all_pmeta_ssd
+};
+
+void
+as_storage_flush_all_pmeta(as_namespace *ns)
+{
+	if (as_storage_flush_all_pmeta_table[ns->storage_type]) {
+		as_storage_flush_all_pmeta_table[ns->storage_type](ns);
 	}
 }
 

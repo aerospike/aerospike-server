@@ -105,11 +105,13 @@ extern bool as_storage_has_space(struct as_namespace_s *ns);
 extern void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
 // Storage of generic data into device headers.
-extern void as_storage_info_set(struct as_namespace_s *ns, const struct as_partition_s *p);
-extern void as_storage_info_get(struct as_namespace_s *ns, struct as_partition_s *p);
 extern void as_storage_load_regime(struct as_namespace_s *ns);
 extern void as_storage_save_regime(struct as_namespace_s *ns);
 extern void as_storage_save_evict_void_time(struct as_namespace_s *ns, uint32_t evict_void_time);
+extern void as_storage_load_pmeta(struct as_namespace_s *ns, struct as_partition_s *p);
+extern void as_storage_save_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
+extern void as_storage_cache_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
+extern void as_storage_flush_all_pmeta(struct as_namespace_s *ns);
 
 // Statistics.
 extern int as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
@@ -145,7 +147,7 @@ extern int as_storage_namespace_destroy_memory(struct as_namespace_s *ns);
 
 extern int as_storage_record_write_memory(as_storage_rd *rd);
 
-extern void as_storage_info_get_memory(struct as_namespace_s *ns, struct as_partition_s *p);
+extern void as_storage_load_pmeta_memory(struct as_namespace_s *ns, struct as_partition_s *p);
 
 extern int as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
 
@@ -175,11 +177,13 @@ extern bool as_storage_overloaded_ssd(struct as_namespace_s *ns);
 extern bool as_storage_has_space_ssd(struct as_namespace_s *ns);
 extern void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
-extern void as_storage_info_set_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
-extern void as_storage_info_get_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
 extern void as_storage_load_regime_ssd(struct as_namespace_s *ns);
 extern void as_storage_save_regime_ssd(struct as_namespace_s *ns);
 extern void as_storage_save_evict_void_time_ssd(struct as_namespace_s *ns, uint32_t evict_void_time);
+extern void as_storage_load_pmeta_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
+extern void as_storage_save_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
+extern void as_storage_cache_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
+extern void as_storage_flush_all_pmeta_ssd(struct as_namespace_s *ns);
 
 extern int as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
 extern int as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
