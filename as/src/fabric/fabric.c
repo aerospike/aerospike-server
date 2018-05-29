@@ -538,27 +538,36 @@ int
 as_fabric_send_list(const cf_node *nodes, uint32_t node_count, msg *m,
 		as_fabric_channel channel)
 {
-	if (! nodes) {
-		node_list nl;
+	cf_assert(nodes && node_count != 0, AS_FABRIC, "nodes list null or empty");
 
-		fabric_get_node_list(&nl);
-		return as_fabric_send_list(nl.nodes, nl.count, m, channel);
-	}
-
-	int ret = AS_FABRIC_SUCCESS;
+	// TODO - if we implement an out-of-scope response when sending to self,
+	// remove this deferral.
+	bool send_self = false;
 
 	for (uint32_t i = 0; i < node_count; i++) {
+		if (nodes[i] == g_config.self_node) {
+			send_self = true;
+			continue;
+		}
+
 		msg_incr_ref(m);
 
-		if ((ret = as_fabric_send(nodes[i], m, channel)) != AS_FABRIC_SUCCESS) {
-			// Leave the reference for the sake of caller.
-			break;
+		int ret = as_fabric_send(nodes[i], m, channel);
+
+		if (ret != AS_FABRIC_SUCCESS) {
+			as_fabric_msg_put(m);
+			return ret; // caller releases main reference on failure
 		}
+	}
+
+	if (send_self) {
+		// Shortcut - use main reference for fabric.
+		return as_fabric_send(g_config.self_node, m, channel);
 	}
 
 	as_fabric_msg_put(m); // release main reference
 
-	return ret;
+	return AS_FABRIC_SUCCESS;
 }
 
 int
