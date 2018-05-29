@@ -139,8 +139,6 @@ typedef struct fabric_state_s {
 	as_fabric_msg_fn	msg_cb[M_TYPE_MAX];
 	void 				*msg_udata[M_TYPE_MAX];
 
-	cf_queue			msg_pool_queue[M_TYPE_MAX]; // a pool of reusable msgs
-
 	fabric_recv_thread_pool recv_pool[AS_FABRIC_N_CHANNELS];
 
 	cf_mutex			send_lock;
@@ -349,17 +347,7 @@ as_fabric_msg_get(msg_type type)
 		return NULL;
 	}
 
-	msg *m = NULL;
-
-	if (cf_queue_pop(&g_fabric.msg_pool_queue[type], &m, CF_QUEUE_NOWAIT) !=
-			CF_QUEUE_OK) {
-		m = msg_create(type);
-	}
-	else {
-		msg_incr_ref(m);
-	}
-
-	return m;
+	return msg_create(type);
 }
 
 void
@@ -367,13 +355,7 @@ as_fabric_msg_put(msg *m)
 {
 	if (cf_rc_release(m) == 0) {
 		msg_reset(m);
-
-		if (cf_queue_sz(&g_fabric.msg_pool_queue[m->type]) > 128) {
-			msg_put(m);
-		}
-		else {
-			cf_queue_push(&g_fabric.msg_pool_queue[m->type], &m);
-		}
+		msg_put(m);
 	}
 }
 
@@ -387,14 +369,12 @@ as_fabric_msg_queue_dump()
 	int total_alloced_msgs = 0;
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
-		int q_sz = cf_queue_sz(&g_fabric.msg_pool_queue[i]);
 		int num_of_type = cf_atomic_int_get(g_num_msgs_by_type[i]);
 
 		total_alloced_msgs += num_of_type;
 
-		if (q_sz || num_of_type) {
-			cf_info(AS_FABRIC, "|msgq[%d]| = %d ; alloc'd = %d", i, q_sz, num_of_type);
-			total_q_sz += q_sz;
+		if (num_of_type) {
+			cf_info(AS_FABRIC, "alloc'd = %d", num_of_type);
 		}
 	}
 
@@ -430,11 +410,6 @@ as_fabric_init()
 
 	g_fabric.node_hash = cf_rchash_create(cf_nodeid_rchash_fn,
 			fabric_node_destructor, sizeof(cf_node), 128, 0);
-
-	for (int i = 0; i < M_TYPE_MAX; i++) {
-		cf_queue_init(&g_fabric.msg_pool_queue[i], sizeof(msg *),
-				CF_QUEUE_ALLOCSZ, true);
-	}
 
 	g_published_endpoint_list = NULL;
 	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
