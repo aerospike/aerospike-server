@@ -2827,6 +2827,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "strong-consistency-allow-expunge", context, &context_len)) {
+			if (! ns->cp) {
+				cf_warning(AS_INFO, "{%s} 'strong-consistency-allow-expunge' is only applicable with 'strong-consistency'", ns->name);
+				goto Error;
+			}
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of strong-consistency-allow-expunge of ns %s from %s to %s", ns->name, bool_val[ns->cp_allow_drops], context);
 				ns->cp_allow_drops = true;
