@@ -88,7 +88,7 @@ typedef struct as_partition_s {
 	struct as_index_tree_s* tree;
 
 	cf_atomic64 n_tombstones; // relevant only for enterprise edition
-	cf_atomic64 max_void_time; // TODO - convert to 32-bit ...
+	cf_atomic32 max_void_time; // TODO - do we really need this?
 
 	// Replica information.
 	uint32_t n_nodes; // relevant only for enterprise edition

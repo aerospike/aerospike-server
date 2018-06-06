@@ -237,7 +237,7 @@ get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 	uint64_t max_void_time = 0;
 
 	for (int n = 0; n < AS_PARTITIONS; n++) {
-		uint64_t partition_max_void_time = cf_atomic64_get(ns->partitions[n].max_void_time);
+		uint64_t partition_max_void_time = cf_atomic32_get(ns->partitions[n].max_void_time);
 
 		if (partition_max_void_time > max_void_time) {
 			max_void_time = partition_max_void_time;
@@ -773,7 +773,7 @@ get_ttl_range(as_namespace* ns, uint32_t now)
 
 		as_partition_release(&rsv);
 
-		uint64_t partition_max_void_time = cf_atomic64_get(ns->partitions[n].max_void_time);
+		uint64_t partition_max_void_time = cf_atomic32_get(ns->partitions[n].max_void_time);
 
 		if (partition_max_void_time > max_master_void_time) {
 			max_master_void_time = partition_max_void_time;

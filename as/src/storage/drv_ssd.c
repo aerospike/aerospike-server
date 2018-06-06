@@ -2748,7 +2748,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 	}
 
 	// Update maximum void-time.
-	cf_atomic64_setmax(&p_partition->max_void_time, r->void_time);
+	cf_atomic32_setmax(&p_partition->max_void_time, (int32_t)r->void_time);
 
 	// If data is in memory, load bins and particles, adjust secondary index.
 	if (ns->storage_data_in_memory) {

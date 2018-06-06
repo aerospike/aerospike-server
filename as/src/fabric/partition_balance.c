@@ -598,7 +598,7 @@ drop_trees(as_partition* p)
 	p->tree = NULL;
 
 	// TODO - consider p->n_tombstones?
-	cf_atomic64_set(&p->max_void_time, 0);
+	cf_atomic32_set(&p->max_void_time, 0);
 }
 
 
