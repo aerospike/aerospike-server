@@ -26,7 +26,6 @@
 
 #include "fabric/partition.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -36,6 +35,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_b64.h"
 
+#include "cf_mutex.h"
 #include "fault.h"
 #include "node.h"
 
@@ -70,7 +70,7 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 	// Note - as_partition has been zeroed since it's a member of as_namespace.
 	// Set non-zero members.
 
-	pthread_mutex_init(&p->lock, NULL);
+	cf_mutex_init(&p->lock);
 
 	p->id = pid;
 
@@ -82,36 +82,34 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 			as_partition_tree_done, (void*)p);
 }
 
-
 void
 as_partition_shutdown(as_namespace* ns, uint32_t pid)
 {
 	as_partition* p = &ns->partitions[pid];
 
 	while (true) {
-		pthread_mutex_lock(&p->lock);
+		cf_mutex_lock(&p->lock);
 
 		as_index_tree* tree = p->tree;
 		as_index_tree_reserve(tree);
 
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 
 		// Must come outside partition lock, since transactions may take
 		// partition lock under the record (sprig) lock.
 		as_index_tree_block(tree);
 
 		// If lucky, this remains locked and we complete shutdown.
-		pthread_mutex_lock(&p->lock);
+		cf_mutex_lock(&p->lock);
 
 		if (tree == p->tree) {
 			break; // lucky - same tree we blocked
 		}
 
 		// Bad luck - blocked a tree that just got switched, block the new one.
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 	}
 }
-
 
 void
 as_partition_freeze(as_partition* p)
@@ -134,7 +132,6 @@ as_partition_freeze(as_partition* p)
 	memset(p->witnesses, 0, sizeof(p->witnesses));
 }
 
-
 // Get a list of all nodes (excluding self) that are replicas for a specified
 // partition: place the list in *nv and return the number of nodes found.
 uint32_t
@@ -142,7 +139,7 @@ as_partition_get_other_replicas(as_partition* p, cf_node* nv)
 {
 	uint32_t n_other_replicas = 0;
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {
 		// Don't ever include yourself.
@@ -154,32 +151,30 @@ as_partition_get_other_replicas(as_partition* p, cf_node* nv)
 		nv[n_other_replicas++] = p->replicas[repl_ix];
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return n_other_replicas;
 }
-
 
 cf_node
 as_partition_writable_node(as_namespace* ns, uint32_t pid)
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	if (p->n_replicas == 0) {
 		// This partition is unavailable.
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return (cf_node)0;
 	}
 
 	cf_node best_node = find_best_node(p, false);
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return best_node;
 }
-
 
 // If this node is an eventual master, return the acting master, else return 0.
 cf_node
@@ -187,7 +182,7 @@ as_partition_proxyee_redirect(as_namespace* ns, uint32_t pid)
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	cf_node node = (cf_node)0;
 
@@ -196,11 +191,10 @@ as_partition_proxyee_redirect(as_namespace* ns, uint32_t pid)
 		node = p->working_master;
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return node;
 }
-
 
 // TODO - deprecate in "six months".
 void
@@ -234,7 +228,6 @@ as_partition_get_replicas_prole_str(cf_dyn_buf* db)
 	}
 }
 
-
 void
 as_partition_get_replicas_master_str(cf_dyn_buf* db)
 {
@@ -254,7 +247,6 @@ as_partition_get_replicas_master_str(cf_dyn_buf* db)
 		cf_dyn_buf_chomp(db);
 	}
 }
-
 
 void
 as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime)
@@ -296,7 +288,6 @@ as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime)
 	}
 }
 
-
 void
 as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 {
@@ -305,7 +296,7 @@ as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition* p = &ns->partitions[pid];
 
-		pthread_mutex_lock(&p->lock);
+		cf_mutex_lock(&p->lock);
 
 		int self_n = find_self_in_replicas(p); // -1 if not
 
@@ -325,10 +316,9 @@ as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 					&p_stats->n_non_replica_tombstones);
 		}
 
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 	}
 }
-
 
 // TODO - what if partition is unavailable?
 void
@@ -337,13 +327,12 @@ as_partition_reserve(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	partition_reserve_lockfree(p, ns, rsv);
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 }
-
 
 int
 as_partition_reserve_replica(as_namespace* ns, uint32_t pid,
@@ -351,20 +340,19 @@ as_partition_reserve_replica(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	if (! is_self_replica(p)) {
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 	}
 
 	partition_reserve_lockfree(p, ns, rsv);
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return AS_PROTO_RESULT_OK;
 }
-
 
 // Returns:
 //  0 - reserved - node parameter returns self node
@@ -376,7 +364,7 @@ as_partition_reserve_write(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	// If this partition is frozen, return.
 	if (p->n_replicas == 0) {
@@ -384,7 +372,7 @@ as_partition_reserve_write(as_namespace* ns, uint32_t pid,
 			*node = (cf_node)0;
 		}
 
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return -2;
 	}
 
@@ -396,17 +384,16 @@ as_partition_reserve_write(as_namespace* ns, uint32_t pid,
 
 	// If this node is not the appropriate one, return.
 	if (best_node != g_config.self_node) {
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return -1;
 	}
 
 	partition_reserve_lockfree(p, ns, rsv);
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return 0;
 }
-
 
 // Returns:
 //  0 - reserved - node parameter returns self node
@@ -418,7 +405,7 @@ as_partition_reserve_read(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	// If this partition is unavailable, return.
 	if (p->n_replicas == 0) {
@@ -426,7 +413,7 @@ as_partition_reserve_read(as_namespace* ns, uint32_t pid,
 			*node = (cf_node)0;
 		}
 
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return -2;
 	}
 
@@ -439,17 +426,16 @@ as_partition_reserve_read(as_namespace* ns, uint32_t pid,
 
 	// If this node is not the appropriate one, return.
 	if (best_node != g_config.self_node) {
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return -1;
 	}
 
 	partition_reserve_lockfree(p, ns, rsv);
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return 0;
 }
-
 
 // Reserves all query-able partitions.
 // Returns the number of partitions reserved.
@@ -472,7 +458,6 @@ as_partition_prereserve_query(as_namespace* ns, bool can_partition_query[],
 	return reserved;
 }
 
-
 // Reserve a partition for query.
 // Return value 0 means the reservation was taken, -1 means not.
 int
@@ -481,7 +466,6 @@ as_partition_reserve_query(as_namespace* ns, uint32_t pid,
 {
 	return as_partition_reserve_write(ns, pid, rsv, NULL);
 }
-
 
 // Obtain a partition reservation for XDR reads. Succeeds, if we are sync or
 // zombie for the partition.
@@ -492,7 +476,7 @@ as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	int res = -1;
 
@@ -501,11 +485,10 @@ as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 		res = 0;
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return res;
 }
-
 
 void
 as_partition_reservation_copy(as_partition_reservation* dst,
@@ -522,13 +505,11 @@ as_partition_reservation_copy(as_partition_reservation* dst,
 	}
 }
 
-
 void
 as_partition_release(as_partition_reservation* rsv)
 {
 	as_index_tree_release(rsv->tree);
 }
-
 
 void
 as_partition_advance_tree_id(as_partition* p, const char* ns_name)
@@ -561,21 +542,19 @@ as_partition_advance_tree_id(as_partition* p, const char* ns_name)
 	}
 }
 
-
 // Callback made when dropped as_index_tree is finally destroyed.
 void
 as_partition_tree_done(uint8_t id, void* udata)
 {
 	as_partition* p = (as_partition*)udata;
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	// Relinquish tree-id.
 	p->tree_ids_used &= ~(1UL << id);
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 }
-
 
 void
 as_partition_getinfo_str(cf_dyn_buf* db)
@@ -592,7 +571,7 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
 
-			pthread_mutex_lock(&p->lock);
+			cf_mutex_lock(&p->lock);
 
 			cf_dyn_buf_append_string(db, ns->name);
 			cf_dyn_buf_append_char(db, ':');
@@ -624,7 +603,7 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 
 			cf_dyn_buf_append_char(db, ';');
 
-			pthread_mutex_unlock(&p->lock);
+			cf_mutex_unlock(&p->lock);
 		}
 	}
 
@@ -650,13 +629,12 @@ client_replica_maps_create(as_namespace* ns)
 			repl_ix++) {
 		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
 
-		pthread_mutex_init(&repl_map->write_lock, NULL);
+		cf_mutex_init(&repl_map->write_lock);
 
 		cf_b64_encode((uint8_t*)repl_map->bitmap,
 				(uint32_t)sizeof(repl_map->bitmap), (char*)repl_map->b64map);
 	}
 }
-
 
 void
 client_replica_maps_clear(as_namespace* ns)
@@ -672,7 +650,6 @@ client_replica_maps_clear(as_namespace* ns)
 				(uint32_t)sizeof(repl_map->bitmap), (char*)repl_map->b64map);
 	}
 }
-
 
 bool
 client_replica_maps_update(as_namespace* ns, uint32_t pid)
@@ -705,19 +682,18 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 		volatile uint8_t* bitmap_chunk = repl_map->bitmap + chunk_bitmap_offset;
 		volatile char* b64map_chunk = repl_map->b64map + chunk_b64map_offset;
 
-		pthread_mutex_lock(&repl_map->write_lock);
+		cf_mutex_lock(&repl_map->write_lock);
 
 		*mbyte ^= set_mask;
 		cf_b64_encode((uint8_t*)bitmap_chunk, input_size, (char*)b64map_chunk);
 
-		pthread_mutex_unlock(&repl_map->write_lock);
+		cf_mutex_unlock(&repl_map->write_lock);
 
 		changed = true;
 	}
 
 	return changed;
 }
-
 
 bool
 client_replica_maps_is_partition_queryable(const as_namespace* ns, uint32_t pid)
@@ -755,7 +731,6 @@ find_best_node(const as_partition* p, bool is_read)
 	return p->replicas[0]; // final master as a last resort
 }
 
-
 void
 accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects,
 		uint64_t* p_n_tombstones)
@@ -766,7 +741,6 @@ accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects,
 	*p_n_objects += n_objects > 0 ? (uint64_t)n_objects : 0;
 	*p_n_tombstones += (uint64_t)n_tombstones;
 }
-
 
 void
 partition_reserve_lockfree(as_partition* p, as_namespace* ns,
@@ -785,14 +759,13 @@ partition_reserve_lockfree(as_partition* p, as_namespace* ns,
 	}
 }
 
-
 // TODO - deprecate in "six months".
 cf_node
 partition_getreplica_prole(as_namespace* ns, uint32_t pid)
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	// Check is this is a master node.
 	cf_node best_node = find_best_node(p, false);
@@ -806,11 +779,10 @@ partition_getreplica_prole(as_namespace* ns, uint32_t pid)
 		best_node = find_best_node(p, true);
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return best_node;
 }
-
 
 char
 partition_descriptor(const as_partition* p)
@@ -827,7 +799,6 @@ partition_descriptor(const as_partition* p)
 
 	return as_partition_version_has_data(&p->version) ? 'Z' : 'X';
 }
-
 
 int
 partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid)

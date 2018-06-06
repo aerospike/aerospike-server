@@ -35,6 +35,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "node.h"
 
@@ -78,7 +79,7 @@ typedef struct as_partition_version_string_s {
 } as_partition_version_string;
 
 typedef struct as_partition_s {
-	pthread_mutex_t lock;
+	cf_mutex lock;
 
 	uint32_t id;
 
@@ -137,7 +138,7 @@ typedef struct repl_stats_s {
 #define CLIENT_B64MAP_BYTES (((CLIENT_BITMAP_BYTES + 2) / 3) * 4)
 
 typedef struct client_replica_map_s {
-	pthread_mutex_t write_lock;
+	cf_mutex write_lock;
 
 	volatile uint8_t bitmap[CLIENT_BITMAP_BYTES];
 	volatile char b64map[CLIENT_B64MAP_BYTES];
