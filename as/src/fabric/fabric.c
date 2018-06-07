@@ -1872,9 +1872,11 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 
 	uint32_t read_ahead_sz = fc->r_sz - fc->r_buf_sz;
 	uint32_t mem_sz = fc->r_buf_sz;
-	bool is_bigbuf = (fc->r_bigbuf != NULL);
+	uint8_t *p_bigbuf = fc->r_bigbuf; // malloc handoff
 
-	if (is_bigbuf) {
+	fc->r_bigbuf = NULL;
+
+	if (p_bigbuf) {
 		fc->r_sz = read_ahead_sz;
 		mem_sz = 0;
 	}
@@ -1894,17 +1896,14 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 	}
 
 	uint8_t stack_mem[mem_sz + 1]; // +1 to account for mem_sz == 0
-	uint8_t *buf_ptr;
 
 	memcpy(stack_mem, fc->r_buf, mem_sz);
 	fc->r_sz -= mem_sz;
 	memmove(fc->r_buf, fc->r_buf + mem_sz, fc->r_sz);
 
-	if (is_bigbuf) {
-		buf_ptr = fc->r_bigbuf; // malloc handoff
-		fc->r_bigbuf = NULL;
-	}
-	else {
+	uint8_t *buf_ptr = p_bigbuf;
+
+	if (! buf_ptr) {
 		buf_ptr = stack_mem;
 		mem_sz -= fc->r_buf_sz;
 	}
@@ -1930,14 +1929,14 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 
 		if (! m) {
 			cf_warning(AS_FABRIC, "Failed to create message for type %d (max %d)", type, M_TYPE_MAX);
-			cf_free(is_bigbuf ? buf_ptr : NULL);
+			cf_free(p_bigbuf);
 			return false;
 		}
 
 		if (! msg_parse_fields(m, buf_ptr, msg_sz)) {
 			cf_warning(AS_FABRIC, "msg_parse_fields failed for fc %p", fc);
 			as_fabric_msg_put(m);
-			cf_free(is_bigbuf ? buf_ptr : NULL);
+			cf_free(p_bigbuf);
 			return false;
 		}
 
@@ -1954,9 +1953,9 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 			as_fabric_msg_put(m);
 		}
 
-		if (is_bigbuf) {
-			is_bigbuf = false;
-			cf_free(buf_ptr);
+		if (p_bigbuf) {
+			cf_free(p_bigbuf);
+			p_bigbuf = NULL;
 			buf_ptr = stack_mem;
 		}
 		else {
