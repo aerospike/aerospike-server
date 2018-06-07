@@ -503,20 +503,20 @@ as_storage_cache_pmeta(as_namespace *ns, const as_partition *p)
 }
 
 //--------------------------------------
-// as_storage_flush_all_pmeta
+// as_storage_flush_pmeta
 //
 
-typedef void (*as_storage_flush_all_pmeta_fn)(as_namespace *ns);
-static const as_storage_flush_all_pmeta_fn as_storage_flush_all_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
+typedef void (*as_storage_flush_pmeta_fn)(as_namespace *ns, uint32_t start_pid, uint32_t n_partitions);
+static const as_storage_flush_pmeta_fn as_storage_flush_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support info
-	as_storage_flush_all_pmeta_ssd
+	as_storage_flush_pmeta_ssd
 };
 
 void
-as_storage_flush_all_pmeta(as_namespace *ns)
+as_storage_flush_pmeta(as_namespace *ns, uint32_t start_pid, uint32_t n_partitions)
 {
-	if (as_storage_flush_all_pmeta_table[ns->storage_type]) {
-		as_storage_flush_all_pmeta_table[ns->storage_type](ns);
+	if (as_storage_flush_pmeta_table[ns->storage_type]) {
+		as_storage_flush_pmeta_table[ns->storage_type](ns, start_pid, n_partitions);
 	}
 }
 

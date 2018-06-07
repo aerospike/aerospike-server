@@ -167,7 +167,7 @@ uint32_t find_self(const cf_node* ns_node_seq, const struct as_namespace_s* ns);
 uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns, uint32_t working_master_n, uint32_t n_dupl);
 void queue_namespace_migrations(as_partition* p, struct as_namespace_s* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], cf_queue* mq);
 void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
-void commit_changed_version(as_partition* p, struct as_namespace_s* ns, as_partition_version* orig_version);
+void handle_version_change(as_partition* p, struct as_namespace_s* ns, as_partition_version* orig_version);
 
 void emigrate_done_advance_non_master_version(struct as_namespace_s* ns, as_partition* p, uint32_t tx_flags);
 void emigrate_done_advance_non_master_version_ap(struct as_namespace_s* ns, as_partition* p, uint32_t tx_flags);

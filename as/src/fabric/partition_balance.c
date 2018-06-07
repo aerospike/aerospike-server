@@ -848,7 +848,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			p->working_master = ns_node_seq[working_master_n];
 		}
 
-		commit_changed_version(p, ns, &orig_version);
+		handle_version_change(p, ns, &orig_version);
 
 		ns_pending_immigrations += (uint32_t)p->pending_immigrations;
 		ns_pending_emigrations += (uint32_t)p->pending_emigrations;
@@ -867,7 +867,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 		cf_mutex_unlock(&p->lock);
 	}
 
-	as_storage_flush_all_pmeta(ns);
+	as_storage_flush_pmeta(ns, 0, AS_PARTITIONS);
 
 	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u) expected-signals %u fresh-partitions %u",
 			ns->name, ns_pending_emigrations, ns_pending_immigrations,
@@ -1356,9 +1356,9 @@ fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
 	}
 }
 
-// If version changed, create/drop trees as appropriate, and store.
+// If version changed, create/drop trees as appropriate, and cache for storage.
 void
-commit_changed_version(as_partition* p, struct as_namespace_s* ns,
+handle_version_change(as_partition* p, struct as_namespace_s* ns,
 		as_partition_version* orig_version)
 {
 	if (as_partition_version_same(&p->version, orig_version)) {
@@ -1377,12 +1377,7 @@ commit_changed_version(as_partition* p, struct as_namespace_s* ns,
 		drop_trees(p);
 	}
 
-	if (ns->storage_commit_to_device) {
-		as_storage_save_pmeta(ns, p);
-	}
-	else {
-		as_storage_cache_pmeta(ns, p);
-	}
+	as_storage_cache_pmeta(ns, p);
 }
 
 

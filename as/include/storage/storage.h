@@ -111,7 +111,7 @@ extern void as_storage_save_evict_void_time(struct as_namespace_s *ns, uint32_t 
 extern void as_storage_load_pmeta(struct as_namespace_s *ns, struct as_partition_s *p);
 extern void as_storage_save_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
 extern void as_storage_cache_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
-extern void as_storage_flush_all_pmeta(struct as_namespace_s *ns);
+extern void as_storage_flush_pmeta(struct as_namespace_s *ns, uint32_t start_pid, uint32_t n_partitions);
 
 // Statistics.
 extern int as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
@@ -183,7 +183,7 @@ extern void as_storage_save_evict_void_time_ssd(struct as_namespace_s *ns, uint3
 extern void as_storage_load_pmeta_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
 extern void as_storage_save_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
 extern void as_storage_cache_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
-extern void as_storage_flush_all_pmeta_ssd(struct as_namespace_s *ns);
+extern void as_storage_flush_pmeta_ssd(struct as_namespace_s *ns, uint32_t start_pid, uint32_t n_partitions);
 
 extern int as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
 extern int as_storage_ticker_stats_ssd(struct as_namespace_s *ns);

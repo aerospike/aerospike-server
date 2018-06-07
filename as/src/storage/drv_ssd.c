@@ -4162,18 +4162,19 @@ as_storage_cache_pmeta_ssd(as_namespace *ns, const as_partition *p)
 
 
 void
-as_storage_flush_all_pmeta_ssd(as_namespace *ns)
+as_storage_flush_pmeta_ssd(as_namespace *ns, uint32_t start_pid,
+		uint32_t n_partitions)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+	ssd_common_pmeta *pmeta = &ssds->common->pmeta[start_pid];
 
 	cf_mutex_lock(&ssds->flush_lock);
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		ssd_write_header(ssd, (uint8_t*)ssds->common,
-				(uint8_t*)ssds->common->pmeta,
-				sizeof(ssds->common->pmeta));
+		ssd_write_header(ssd, (uint8_t*)ssds->common, (uint8_t*)pmeta,
+				sizeof(ssd_common_pmeta) * n_partitions);
 	}
 
 	cf_mutex_unlock(&ssds->flush_lock);
@@ -4290,10 +4291,6 @@ void
 as_storage_shutdown_ssd(as_namespace *ns)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-
-	if (! ns->storage_commit_to_device) {
-		as_storage_flush_all_pmeta_ssd(ns);
-	}
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
