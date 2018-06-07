@@ -602,6 +602,15 @@ typedef struct as_treesx_s {
 
 
 struct as_namespace_s {
+	//--------------------------------------------
+	// Data partitions - first, to 64-byte align.
+	//
+
+	as_partition partitions[AS_PARTITIONS];
+
+	//--------------------------------------------
+	// Name & ID.
+	//
 
 	char name[AS_ID_NAMESPACE_SZ];
 	uint32_t id; // this is 1-based
@@ -1078,12 +1087,6 @@ struct as_namespace_s {
 	linear_hist*	evict_hist; // not just for info
 	linear_hist*	ttl_hist;
 	linear_hist*	set_ttl_hists[AS_SET_MAX_COUNT + 1];
-
-	//--------------------------------------------
-	// Data partitions.
-	//
-
-	as_partition partitions[AS_PARTITIONS];
 
 	//--------------------------------------------
 	// Information for rebalancing.

@@ -79,41 +79,58 @@ typedef struct as_partition_version_string_s {
 } as_partition_version_string;
 
 typedef struct as_partition_s {
-	cf_mutex lock;
-
-	uint32_t id;
-
-	uint8_t tree_id;
-	uint64_t tree_ids_used; // bit map
-	struct as_index_tree_s* tree;
+	//--------------------------------------------
+	// Used during every transaction.
+	//
 
 	cf_atomic64 n_tombstones; // relevant only for enterprise edition
 	cf_atomic32 max_void_time; // TODO - do we really need this?
 
-	// Replica information.
-	uint32_t n_nodes; // relevant only for enterprise edition
-	uint32_t n_replicas;
-	cf_node replicas[AS_CLUSTER_SZ];
+	cf_mutex lock;
 
-	// Rebalance & migration related:
-
-	as_partition_version final_version;
-	as_partition_version version;
-	int pending_emigrations;
-	int pending_immigrations;
-	bool immigrators[AS_CLUSTER_SZ];
+	struct as_index_tree_s* tree;
 
 	cf_node working_master;
 
-	uint32_t n_dupl;
-	cf_node dupls[AS_CLUSTER_SZ];
+	uint32_t regime; // relevant only for enterprise edition
 
-	uint32_t n_witnesses;
-	cf_node witnesses[AS_CLUSTER_SZ];
+	uint32_t n_nodes; // relevant only for enterprise edition
+	uint32_t n_replicas;
+	uint32_t n_dupl;
+
+	// @ 48 bytes - room for 2 replicas within above 64-byte cache line.
+	cf_node replicas[AS_CLUSTER_SZ];
+
+	uint8_t align_1[16];
+	// @ 64-byte-aligned boundary.
+
+	//--------------------------------------------
+	// Used only when cluster is in flux.
+	//
+
+	uint32_t id;
 
 	bool must_appeal; // relevant only for enterprise edition
 
-	uint32_t regime; // relevant only for enterprise edition
+	uint8_t tree_id;
+	uint64_t tree_ids_used; // bit map
+
+	as_partition_version final_version;
+	as_partition_version version;
+
+	int pending_emigrations;
+	int pending_immigrations;
+
+	uint32_t n_witnesses;
+
+	// @ 48 bytes - room for 2 duplicates within above 64-byte cache line.
+	cf_node dupls[AS_CLUSTER_SZ];
+
+	uint8_t align_2[16];
+	// @ 64-byte-aligned boundary.
+
+	bool immigrators[AS_CLUSTER_SZ];
+	cf_node witnesses[AS_CLUSTER_SZ];
 } as_partition;
 
 typedef struct as_partition_reservation_s {
