@@ -959,7 +959,11 @@ cf_socket_send_msg(cf_socket *sock, struct msghdr *m, int32_t flags)
 		struct iovec *v = m->msg_iov;
 
 		for (socklen_t i = 0; i < m->msg_iovlen; i++) {
-			int rv = tls_socket_send(sock, v->iov_base, v->iov_len, flags, 0);
+			int rv = 0;
+
+			if (v->iov_len > 0) {
+				rv = tls_socket_send(sock, v->iov_base, v->iov_len, flags, 0);
+			}
 
 			if (rv < 0) {
 				// errno is set by tls_socket_send.
