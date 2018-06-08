@@ -760,21 +760,17 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 		cf_mutex_lock(&p->lock);
 
+		p->working_master = (cf_node)0;
+
 		p->n_replicas = ns->replication_factor;
-		memset(p->replicas, 0, sizeof(p->replicas));
 		memcpy(p->replicas, ns_node_seq, p->n_replicas * sizeof(cf_node));
+
+		p->n_dupl = 0;
 
 		p->pending_emigrations = 0;
 		p->pending_immigrations = 0;
-		memset(p->immigrators, 0, sizeof(p->immigrators));
-
-		p->working_master = (cf_node)0;
-
-		p->n_dupl = 0;
-		memset(p->dupls, 0, sizeof(p->dupls));
 
 		p->n_witnesses = 0;
-		memset(p->witnesses, 0, sizeof(p->witnesses));
 
 		uint32_t self_n = find_self(ns_node_seq, ns);
 
@@ -789,8 +785,6 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 		uint32_t n_dupl = 0;
 		cf_node dupls[ns->cluster_size];
-
-		memset(dupls, 0, sizeof(dupls));
 
 		as_partition_version orig_version = p->version;
 
@@ -1085,6 +1079,8 @@ uint32_t
 fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		uint32_t working_master_n, uint32_t n_dupl)
 {
+	memset(p->immigrators, 0, ((sizeof(bool) * ns->cluster_size) + 31) & -32);
+
 	uint32_t n_immigrators = 0;
 
 	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {

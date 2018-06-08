@@ -114,22 +114,16 @@ as_partition_shutdown(as_namespace* ns, uint32_t pid)
 void
 as_partition_freeze(as_partition* p)
 {
-	// TODO - rearrange as_partition so we can call memset() here?
+	p->working_master = (cf_node)0;
+
 	p->n_nodes = 0;
 	p->n_replicas = 0;
-	memset(p->replicas, 0, sizeof(p->replicas));
+	p->n_dupl = 0;
 
 	p->pending_emigrations = 0;
 	p->pending_immigrations = 0;
-	memset(p->immigrators, 0, sizeof(p->immigrators));
-
-	p->working_master = (cf_node)0;
-
-	p->n_dupl = 0;
-	memset(p->dupls, 0, sizeof(p->dupls));
 
 	p->n_witnesses = 0;
-	memset(p->witnesses, 0, sizeof(p->witnesses));
 }
 
 // Get a list of all nodes (excluding self) that are replicas for a specified
