@@ -477,6 +477,11 @@ typedef struct as_exchange_s
 	 * This node's data payload for current round.
 	 */
 	cf_dyn_buf self_data_dyn_buf[AS_NAMESPACE_SZ];
+
+	/**
+	 * This node's exchange data fabric message to send for current round.
+	 */
+	msg* data_msg;
 } as_exchange;
 
 /**
@@ -1656,15 +1661,18 @@ exchange_data_msg_send_pending_ack()
 		goto Exit;
 	}
 
-	msg* data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
-	exchange_msg_data_payload_set(data_msg);
+	if (! g_exchange.data_msg) {
+		g_exchange.data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
+		msg_incr_ref(g_exchange.data_msg);
+		exchange_msg_data_payload_set(g_exchange.data_msg);
+	}
 
 	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
 			"sending exchange data to nodes:", unacked_nodes,
 			num_unacked_nodes);
 
-	exchange_msg_send_list(data_msg, unacked_nodes, num_unacked_nodes,
-			"error sending exchange data");
+	exchange_msg_send_list(g_exchange.data_msg, unacked_nodes,
+			num_unacked_nodes, "error sending exchange data");
 Exit:
 	EXCHANGE_UNLOCK();
 }
@@ -2081,6 +2089,12 @@ exchange_reset_for_new_round(cf_vector* new_succession_list,
 	exchange_node_states_reset();
 
 	g_exchange.cluster_key = new_cluster_key;
+
+	if (g_exchange.data_msg) {
+		as_fabric_msg_put(g_exchange.data_msg);
+		g_exchange.data_msg = NULL;
+	}
+
 	EXCHANGE_UNLOCK();
 }
 
