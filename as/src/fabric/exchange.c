@@ -1663,13 +1663,14 @@ exchange_data_msg_send_pending_ack()
 
 	if (! g_exchange.data_msg) {
 		g_exchange.data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
-		msg_incr_ref(g_exchange.data_msg);
 		exchange_msg_data_payload_set(g_exchange.data_msg);
 	}
 
 	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
 			"sending exchange data to nodes:", unacked_nodes,
 			num_unacked_nodes);
+
+	msg_incr_ref(g_exchange.data_msg);
 
 	exchange_msg_send_list(g_exchange.data_msg, unacked_nodes,
 			num_unacked_nodes, "error sending exchange data");
