@@ -864,12 +864,17 @@ ssd_start_defrag_threads(drv_ssds *ssds)
 {
 	cf_info(AS_DRV_SSD, "{%s} starting defrag threads", ssds->ns->name);
 
+	pthread_t thread;
+	pthread_attr_t attrs;
+
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		if (pthread_create(&ssd->defrag_thread, NULL, run_defrag,
-				(void*)ssd) != 0) {
-			cf_crash(AS_DRV_SSD, "%s defrag thread failed", ssd->name);
+		if (pthread_create(&thread, &attrs, run_defrag, (void*)ssd) != 0) {
+			cf_crash(AS_DRV_SSD, "failed to create defrag thread");
 		}
 	}
 }
@@ -1016,7 +1021,7 @@ ssd_load_wblock_queues(drv_ssds *ssds)
 
 		if (pthread_create(&q_load_threads[i], NULL, run_load_queues,
 				(void*)ssd) != 0) {
-			cf_crash(AS_DRV_SSD, "%s load queues thread failed", ssd->name);
+			cf_crash(AS_DRV_SSD, "failed to create load queues thread");
 		}
 	}
 
@@ -1605,17 +1610,21 @@ ssd_shadow_worker(void *arg)
 void
 ssd_start_write_worker_threads(drv_ssds *ssds)
 {
-	cf_info(AS_DRV_SSD, "{%s} starting write worker thread", ssds->ns->name);
+	cf_info(AS_DRV_SSD, "{%s} starting write worker threads", ssds->ns->name);
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		pthread_create(&ssd->write_worker_thread, 0, ssd_write_worker,
-				(void*)ssd);
+		if (pthread_create(&ssd->write_worker_thread, 0, ssd_write_worker,
+				(void*)ssd) != 0) {
+			cf_crash(AS_DRV_SSD, "failed to create write thread");
+		}
 
 		if (ssd->shadow_name) {
-			pthread_create(&ssd->shadow_worker_thread, 0, ssd_shadow_worker,
-					(void*)ssd);
+			if (pthread_create(&ssd->shadow_worker_thread, 0, ssd_shadow_worker,
+					(void*)ssd) != 0) {
+				cf_crash(AS_DRV_SSD, "failed to create shadow write thread");
+			}
 		}
 	}
 }
@@ -2372,10 +2381,19 @@ ssd_start_maintenance_threads(drv_ssds *ssds)
 	cf_info(AS_DRV_SSD, "{%s} starting device maintenance threads",
 			ssds->ns->name);
 
+	pthread_t thread;
+	pthread_attr_t attrs;
+
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd* ssd = &ssds->ssds[i];
 
-		pthread_create(&ssd->maintenance_thread, 0, run_ssd_maintenance, ssd);
+		if (pthread_create(&thread, &attrs, run_ssd_maintenance,
+				(void*)ssd) != 0) {
+			cf_crash(AS_DRV_SSD, "failed to create maintenance thread");
+		}
 	}
 }
 
@@ -2486,7 +2504,7 @@ ssd_init_header(as_namespace *ns, drv_ssd *ssd)
 }
 
 
-bool
+void
 ssd_empty_header(int fd, const char* device_name)
 {
 	void *h = cf_valloc(SSD_HEADER_SIZE);
@@ -2494,23 +2512,17 @@ ssd_empty_header(int fd, const char* device_name)
 	memset(h, 0, SSD_HEADER_SIZE);
 
 	if (0 != lseek(fd, 0, SEEK_SET)) {
-		cf_warning(AS_DRV_SSD, "device %s: empty header: seek error: %s",
+		cf_crash(AS_DRV_SSD, "device %s: empty header: seek error: %s",
 				device_name, cf_strerror(errno));
-		cf_free(h);
-		return false;
 	}
 
 	if (SSD_HEADER_SIZE != write(fd, h, SSD_HEADER_SIZE)) {
-		cf_warning(AS_DRV_SSD, "device %s: empty header: write error: %s",
+		cf_crash(AS_DRV_SSD, "device %s: empty header: write error: %s",
 				device_name, cf_strerror(errno));
-		cf_free(h);
-		return false;
 	}
 
 	cf_free(h);
 	fsync(fd);
-
-	return true;
 }
 
 
@@ -3016,7 +3028,6 @@ run_ssd_cold_start(void *udata)
 	drv_ssd *ssd = lri->ssd;
 	drv_ssds *ssds = lri->ssds;
 	cf_queue *complete_q = lri->complete_q;
-	void *complete_udata = lri->complete_udata;
 	void *complete_rc = lri->complete_rc;
 
 	cf_free(lri);
@@ -3043,15 +3054,17 @@ run_ssd_cold_start(void *udata)
 
 		pthread_mutex_destroy(&ns->cold_start_evict_lock);
 
-		cf_queue_push(complete_q, &complete_udata);
-		cf_rc_free(complete_rc);
-
 		as_truncate_list_cenotaphs(ns);
 		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 
 		ssd_start_maintenance_threads(ssds);
 		ssd_start_write_worker_threads(ssds);
 		ssd_start_defrag_threads(ssds);
+
+		void *_t = NULL;
+
+		cf_queue_push(complete_q, &_t);
+		cf_rc_free(complete_rc);
 	}
 
 	return NULL;
@@ -3059,7 +3072,7 @@ run_ssd_cold_start(void *udata)
 
 
 void
-start_loading_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
+start_loading_records(drv_ssds *ssds, cf_queue *complete_q)
 {
 	as_namespace *ns = ssds->ns;
 
@@ -3084,11 +3097,13 @@ start_loading_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		lri->ssds = ssds;
 		lri->ssd = ssd;
 		lri->complete_q = complete_q;
-		lri->complete_udata = udata;
 		lri->complete_rc = p;
 
-		pthread_create(&thread, &attrs,
-				ns->cold_start ? run_ssd_cold_start : run_ssd_cool_start, lri);
+		if (pthread_create(&thread, &attrs,
+				ns->cold_start ? run_ssd_cold_start : run_ssd_cool_start,
+				(void*)lri) != 0) {
+			cf_crash(AS_DRV_SSD, "failed to create record load thread");
+		}
 	}
 }
 
@@ -3116,8 +3131,8 @@ ssd_flush_header(drv_ssds *ssds, ssd_device_header **headers)
 }
 
 
-bool
-ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
+void
+ssd_init_synchronous(drv_ssds *ssds)
 {
 	uint64_t random = 0;
 
@@ -3149,11 +3164,11 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		// Shouldn't find all fresh headers here during warm or cool restart.
 		if (! ns->cold_start) {
 			// There's no going back to cold start now - do so the harsh way.
-			cf_crash(AS_DRV_SSD, "{%s}: found all %d devices fresh during %s restart",
+			cf_crash(AS_DRV_SSD, "{%s} found all %d devices fresh during %s restart",
 					ns->name, n_ssds, as_namespace_start_mode_str(ns));
 		}
 
-		cf_info(AS_DRV_SSD, "namespace %s: found all %d devices fresh, initializing to random %lu",
+		cf_info(AS_DRV_SSD, "{%s} found all %d devices fresh, initializing to random %lu",
 				ns->name, n_ssds, random);
 
 		ssds->common = cf_valloc(ROUND_UP_COMMON);
@@ -3177,7 +3192,9 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		as_truncate_list_cenotaphs(ns); // all will show as cenotaph
 		as_truncate_done_startup(ns);
 
-		return true;
+		ssds->all_fresh = true; // won't need to scan devices
+
+		return;
 	}
 
 	// At least one device is not fresh. Check that all non-fresh devices match.
@@ -3266,16 +3283,7 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 		ssd_resume_devices(ssds);
 
-		if (as_namespace_cool_restarts(ns)) {
-			// Cool restart - fire off threads to load record data - will signal
-			// completion when threads are all done.
-			start_loading_records(ssds, complete_q, udata);
-
-			// Make sure caller doesn't signal completion.
-			return false;
-		}
-
-		return true; // warm restart (done)
+		return; // warm restart, or warm restart phase of cool restart, is done
 	}
 
 	// Cold start - we can now create our partition trees.
@@ -3319,13 +3327,6 @@ ssd_load_records(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 	}
 
 	ns->cold_start_max_void_time = now + (uint32_t)ns->max_ttl;
-
-	// Fire off threads to load record data - will signal completion when
-	// threads are all done.
-	start_loading_records(ssds, complete_q, udata);
-
-	// Make sure caller doesn't signal completion.
-	return false;
 }
 
 
@@ -3461,7 +3462,7 @@ find_io_min_size(int fd, const char *ssd_name)
 }
 
 
-int
+void
 ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 {
 	int n_ssds;
@@ -3492,9 +3493,8 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 		int fd = open(ssd->name, ssd->open_flag, S_IRUSR | S_IWUSR);
 
 		if (-1 == fd) {
-			cf_warning(AS_DRV_SSD, "unable to open device %s: %s", ssd->name,
+			cf_crash(AS_DRV_SSD, "unable to open device %s: %s", ssd->name,
 					cf_strerror(errno));
-			return -1;
 		}
 
 		uint64_t size = 0;
@@ -3505,10 +3505,7 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 		ssd->io_min_size = find_io_min_size(fd, ssd->name);
 
 		if (ns->cold_start && ns->storage_cold_start_empty) {
-			if (! ssd_empty_header(fd, ssd->name)) {
-				close(fd);
-				return -1;
-			}
+			ssd_empty_header(fd, ssd->name);
 
 			cf_info(AS_DRV_SSD, "cold-start-empty - erased header of %s",
 					ssd->name);
@@ -3528,12 +3525,10 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 	}
 
 	*ssds_p = ssds;
-
-	return 0;
 }
 
 
-int
+void
 ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 {
 	int n_shadows = 0;
@@ -3546,13 +3541,13 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 
 	if (n_shadows == 0) {
 		// No shadows - a normal deployment.
-		return 0;
+		return;
 	}
 
+	// TODO - should check this when parsing config file!
 	if (n_shadows != ssds->n_ssds) {
-		cf_warning(AS_DRV_SSD, "configured %d devices but only %d shadows",
+		cf_crash(AS_DRV_SSD, "configured %d devices but only %d shadows",
 				ssds->n_ssds, n_shadows);
-		return -1;
 	}
 
 	// Check shadow devices.
@@ -3564,9 +3559,8 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 		int fd = open(ssd->shadow_name, ssd->open_flag, S_IRUSR | S_IWUSR);
 
 		if (-1 == fd) {
-			cf_warning(AS_DRV_SSD, "unable to open shadow device %s: %s",
+			cf_crash(AS_DRV_SSD, "unable to open shadow device %s: %s",
 					ssd->shadow_name, cf_strerror(errno));
-			return -1;
 		}
 
 		uint64_t size = 0;
@@ -3574,17 +3568,12 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 		ioctl(fd, BLKGETSIZE64, &size); // gets the number of bytes
 
 		if (size < ssd->file_size) {
-			cf_warning(AS_DRV_SSD, "shadow device %s is smaller than main device - %lu < %lu",
+			cf_crash(AS_DRV_SSD, "shadow device %s is smaller than main device - %lu < %lu",
 					ssd->shadow_name, size, ssd->file_size);
-			close(fd);
-			return -1;
 		}
 
 		if (ns->cold_start && ns->storage_cold_start_empty) {
-			if (! ssd_empty_header(fd, ssd->shadow_name)) {
-				close(fd);
-				return -1;
-			}
+			ssd_empty_header(fd, ssd->shadow_name);
 
 			cf_info(AS_DRV_SSD, "cold-start-empty - erased header of %s",
 					ssd->shadow_name);
@@ -3601,12 +3590,10 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 					ns->storage_scheduler_mode);
 		}
 	}
-
-	return 0;
 }
 
 
-int
+void
 ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 {
 	int n_ssds;
@@ -3638,8 +3625,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 				cf_info(AS_DRV_SSD, "cold-start-empty - no file %s", ssd->name);
 			}
 			else {
-				cf_warning(AS_DRV_SSD, "failed remove: errno %d", errno);
-				return -1;
+				cf_crash(AS_DRV_SSD, "failed remove: errno %d", errno);
 			}
 		}
 
@@ -3649,9 +3635,8 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 		int fd = open(ssd->name, ssd->open_flag | O_CREAT, S_IRUSR | S_IWUSR);
 
 		if (-1 == fd) {
-			cf_warning(AS_DRV_SSD, "unable to open file %s: %s", ssd->name,
+			cf_crash(AS_DRV_SSD, "unable to open file %s: %s", ssd->name,
 					cf_strerror(errno));
-			return -1;
 		}
 
 		ssd->file_size = check_file_size(ns, ns->storage_filesize, "file");
@@ -3659,9 +3644,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 
 		// Truncate will grow or shrink the file to the correct size.
 		if (0 != ftruncate(fd, (off_t)ssd->file_size)) {
-			cf_warning(AS_DRV_SSD, "unable to truncate file: errno %d", errno);
-			close(fd);
-			return -1;
+			cf_crash(AS_DRV_SSD, "unable to truncate file: errno %d", errno);
 		}
 
 		close(fd);
@@ -3673,8 +3656,6 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 	}
 
 	*ssds_p = ssds;
-
-	return 0;
 }
 
 
@@ -3705,32 +3686,21 @@ ssd_set_trusted(drv_ssds *ssds)
 // Storage API implementation: startup, shutdown, etc.
 //
 
-int
-as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
-		void *udata)
+void
+as_storage_namespace_init_ssd(as_namespace *ns)
 {
 	drv_ssds *ssds;
 
 	if (ns->storage_devices[0]) {
-		if (0 != ssd_init_devices(ns, &ssds)) {
-			cf_warning(AS_DRV_SSD, "{%s} can't initialize devices", ns->name);
-			return -1;
-		}
-
-		if (0 != ssd_init_shadows(ns, ssds)) {
-			cf_warning(AS_DRV_SSD, "{%s} can't initialize shadows", ns->name);
-			return -1;
-		}
+		ssd_init_devices(ns, &ssds);
+		ssd_init_shadows(ns, ssds);
 	}
 	else if (ns->storage_files[0]) {
-		if (0 != ssd_init_files(ns, &ssds)) {
-			cf_warning(AS_DRV_SSD, "{%s} can't initialize files", ns->name);
-			return -1;
-		}
+		ssd_init_files(ns, &ssds);
 	}
 	else {
-		cf_warning(AS_DRV_SSD, "{%s} has no devices or files", ns->name);
-		return -1;
+		// TODO - should check this when parsing config file!
+		cf_crash(AS_DRV_SSD, "{%s} has no devices or files", ns->name);
 	}
 
 	cf_mutex_init(&ssds->flush_lock);
@@ -3817,23 +3787,35 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 		ssd_init_commit(ssd);
 	}
 
-	// Attempt to load the data.
-	//
-	// Return value 'false' means it's going to take a long time and will later
-	// asynchronously signal completion via the complete_q, 'true' means it's
-	// finished, signal here.
+	// Will load headers and, if warm or cool restart, resume persisted index.
+	ssd_init_synchronous(ssds);
+}
 
-	if (ssd_load_records(ssds, complete_q, udata)) {
-		ssd_load_wblock_queues(ssds);
 
-		cf_queue_push(complete_q, &udata);
+void
+as_storage_namespace_load_ssd(as_namespace *ns, cf_queue *complete_q)
+{
+	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 
-		ssd_start_maintenance_threads(ssds);
-		ssd_start_write_worker_threads(ssds);
-		ssd_start_defrag_threads(ssds);
+	// If devices have data, and it's cold start or cool restart, scan devices.
+	if (! ssds->all_fresh &&
+			(ns->cold_start || as_namespace_cool_restarts(ns))) {
+		// Fire off threads to scan devices to build index and/or load record
+		// data into memory - will signal completion when threads are all done.
+		start_loading_records(ssds, complete_q);
+		return;
 	}
+	// else - fresh devices or warm restart, this namespace is ready to roll.
 
-	return 0;
+	ssd_load_wblock_queues(ssds);
+
+	ssd_start_maintenance_threads(ssds);
+	ssd_start_write_worker_threads(ssds);
+	ssd_start_defrag_threads(ssds);
+
+	void *_t = NULL;
+
+	cf_queue_push(complete_q, &_t);
 }
 
 

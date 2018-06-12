@@ -215,8 +215,7 @@ typedef enum {
 //------------------------------------------------
 // Per-device information.
 //
-typedef struct drv_ssd_s
-{
+typedef struct drv_ssd_s {
 	struct as_namespace_s *ns;
 
 	char			*name;				// this device's name
@@ -279,10 +278,8 @@ typedef struct drv_ssd_s
 
 	ssd_alloc_table	*alloc_table;
 
-	pthread_t		maintenance_thread;
 	pthread_t		write_worker_thread;
 	pthread_t		shadow_worker_thread;
-	pthread_t		defrag_thread;
 
 	histogram		*hist_read;
 	histogram		*hist_large_block_read;
@@ -295,8 +292,7 @@ typedef struct drv_ssd_s
 //------------------------------------------------
 // Per-namespace storage information.
 //
-typedef struct drv_ssds_s
-{
+typedef struct drv_ssds_s {
 	struct as_namespace_s	*ns;
 	ssd_device_common		*common;
 
@@ -307,6 +303,9 @@ typedef struct drv_ssds_s
 	// Indexed by previous device-id to get new device-id. -1 means device is
 	// "fresh" or absent. Used only at startup to fix index elements' file-id.
 	int8_t device_translation[AS_STORAGE_MAX_DEVICES];
+
+	// Used only at startup, set true if all devices are fresh.
+	bool all_fresh;
 
 	cf_mutex			flush_lock;
 
@@ -333,7 +332,6 @@ typedef struct ssd_load_records_info_s {
 	drv_ssds *ssds;
 	drv_ssd *ssd;
 	cf_queue *complete_q;
-	void *complete_udata;
 	void *complete_rc;
 } ssd_load_records_info;
 

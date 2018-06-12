@@ -141,7 +141,7 @@ extern void as_storage_shutdown(uint32_t instance);
 // AS_STORAGE_ENGINE_MEMORY functions.
 //
 
-extern int as_storage_namespace_init_memory(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_namespace_init_memory(struct as_namespace_s *ns);
 extern void as_storage_start_tomb_raider_memory(struct as_namespace_s *ns);
 extern int as_storage_namespace_destroy_memory(struct as_namespace_s *ns);
 
@@ -156,7 +156,8 @@ extern int as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct
 // AS_STORAGE_ENGINE_SSD functions.
 //
 
-extern int as_storage_namespace_init_ssd(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_namespace_init_ssd(struct as_namespace_s *ns);
+extern void as_storage_namespace_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q);
 extern void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
 extern void as_storage_loading_records_ticker_ssd(); // called directly by as_storage_init()
 extern int as_storage_namespace_destroy_ssd(struct as_namespace_s *ns);
