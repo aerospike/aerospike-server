@@ -59,6 +59,22 @@ static const as_storage_namespace_init_fn as_storage_namespace_init_table[AS_NUM
 	as_storage_namespace_init_ssd
 };
 
+void
+as_storage_init()
+{
+	// Includes resuming indexes for warm and cool restarts.
+
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		as_storage_namespace_init_table[ns->storage_type](ns);
+	}
+}
+
+//--------------------------------------
+// as_storage_load
+//
+
 typedef void (*as_storage_namespace_load_fn)(as_namespace *ns, cf_queue *complete_q);
 static const as_storage_namespace_load_fn as_storage_namespace_load_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no load phase
@@ -68,17 +84,9 @@ static const as_storage_namespace_load_fn as_storage_namespace_load_table[AS_NUM
 #define TICKER_INTERVAL (5 * 1000) // 5 seconds
 
 void
-as_storage_init()
+as_storage_load()
 {
-	// Phase 1 - includes resuming indexes for warm and cool restarts.
-
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-
-		as_storage_namespace_init_table[ns->storage_type](ns);
-	}
-
-	// Phase 2 - includes device scans for cold starts and cool restarts.
+	// Includes device scans for cold starts and cool restarts.
 
 	cf_queue complete_q;
 
@@ -97,7 +105,7 @@ as_storage_init()
 		}
 	}
 
-	// Wait to complete phase 2 - cold starts or cool restarts may take a while.
+	// Wait for completion - cold starts or cool restarts may take a while.
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		void *_t;

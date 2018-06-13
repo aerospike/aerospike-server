@@ -358,13 +358,17 @@ main(int argc, char **argv)
 	// structures are initialized. Secondary index system metadata is restored.
 	as_namespaces_init(cold_start_cmd, instance);
 
-	// Initialize the storage system. For cold starts, this includes reading
-	// all the objects off the drives. This may block for a long time. The
-	// defrag subsystem starts operating at the end of this call.
+	// Initialize the storage system. For warm and cool restarts, this includes
+	// fully resuming persisted indexes - this may take a few minutes.
 	as_storage_init();
 
-	// Migrate memory to correct NUMA node (includes restored index arenas).
+	// Migrate memory to correct NUMA node (includes resumed index arenas).
 	cf_topo_migrate_memory();
+
+	// Activate the storage system. For cold starts and cool restarts, this
+	// includes full drive scans - this may take several hours. The defrag
+	// subsystem starts operating at the end of this call.
+	as_storage_load();
 
 	// Populate all secondary indexes. This may block for a long time.
 	as_sindex_boot_populateall();

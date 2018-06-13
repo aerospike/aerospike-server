@@ -82,6 +82,7 @@ typedef struct as_storage_rd_s {
 //
 
 extern void as_storage_init();
+extern void as_storage_load();
 extern void as_storage_start_tomb_raider();
 extern int as_storage_namespace_destroy(struct as_namespace_s *ns);
 
