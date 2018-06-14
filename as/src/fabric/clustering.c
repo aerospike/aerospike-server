@@ -4305,18 +4305,14 @@ paxos_proposer_success()
 }
 
 /**
- * Handle an incoming paxos accepted message.
+ * Indicates if the proposer can accept, accepted messages.
  */
-static void
-paxos_proposer_accepted_handle(as_clustering_internal_event* event)
+static bool
+paxos_proposer_can_accept_accepted(cf_node src_nodeid, msg* msg)
 {
-	cf_node src_nodeid = event->msg_src_nodeid;
-	msg* msg = event->msg;
-
-	DEBUG("received paxos accepted from node %"PRIx64, src_nodeid);
+	bool rv = false;
 
 	CLUSTERING_LOCK();
-
 	// We also allow accepted messages in the idle state to deal with a loss of
 	// the learn message.
 	if (g_proposer.state != AS_PAXOS_PROPOSER_STATE_ACCEPT_SENT
@@ -4347,6 +4343,40 @@ paxos_proposer_accepted_handle(as_clustering_internal_event* event)
 				g_proposer.sequence_number);
 		goto Exit;
 	}
+
+	if (g_proposer.proposed_value.cluster_key == g_register.cluster_key
+			&& vector_equals(&g_proposer.proposed_value.succession_list,
+					&g_register.succession_list)) {
+		// The register is already synced for this proposal. We can ignore this
+		// accepted message.
+		INFO("ignoring paxos accepted from node %"PRIx64" because its proposal id %"PRIu64" is a duplicate",
+				src_nodeid, sequence_number
+		);
+		goto Exit;
+	}
+
+	rv = true;
+Exit:
+	CLUSTERING_UNLOCK();
+	return rv;
+}
+
+/**
+ * Handle an incoming paxos accepted message.
+ */
+static void
+paxos_proposer_accepted_handle(as_clustering_internal_event* event)
+{
+	cf_node src_nodeid = event->msg_src_nodeid;
+	msg* msg = event->msg;
+
+	DEBUG("received paxos accepted from node %"PRIx64, src_nodeid);
+
+	if (!paxos_proposer_can_accept_accepted(src_nodeid, msg)) {
+		return;
+	}
+
+	CLUSTERING_LOCK();
 
 	cf_vector_append_unique(&g_proposer.accepted_received, &src_nodeid);
 
