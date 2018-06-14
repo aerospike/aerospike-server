@@ -2487,7 +2487,6 @@ exchange_exchanging_check_switch_ready_to_commit()
 	EXCHANGE_LOCK();
 
 	cf_vector* node_vector = cf_vector_stack_create(cf_node);
-	bool ready_to_commit = false;
 
 	if (g_exchange.state == AS_EXCHANGE_STATE_REST
 			|| g_exchange.cluster_key == 0) {
@@ -2508,9 +2507,12 @@ exchange_exchanging_check_switch_ready_to_commit()
 		goto Exit;
 	}
 
-	g_exchange.state = AS_EXCHANGE_STATE_READY_TO_COMMIT;
+	if (!exchange_exchanging_pre_commit()) {
+		// Pre-commit failed. We are not ready to commit.
+		goto Exit;
+	}
 
-	ready_to_commit = true;
+	g_exchange.state = AS_EXCHANGE_STATE_READY_TO_COMMIT;
 
 	DEBUG("ready to commit exchange data for cluster key %"PRIx64,
 			g_exchange.cluster_key);
@@ -2518,7 +2520,7 @@ exchange_exchanging_check_switch_ready_to_commit()
 Exit:
 	cf_vector_destroy(node_vector);
 
-	if (ready_to_commit && exchange_exchanging_pre_commit()) {
+	if (g_exchange.state == AS_EXCHANGE_STATE_READY_TO_COMMIT) {
 		exchange_ready_to_commit_msg_send();
 	}
 
