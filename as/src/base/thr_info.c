@@ -1729,15 +1729,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
-	if (ns->xmem_type == CF_XMEM_TYPE_PMEM ||
-			ns->xmem_type == CF_XMEM_TYPE_SSD) {
-		for (uint32_t i = 0; i < CF_XMEM_MAX_MOUNTS; i++) {
-			if (! ns->xmem_mounts[i]) {
-				break;
-			}
-
-			info_append_string(db, "index-type.mount", ns->xmem_mounts[i]);
-		}
+	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
+		info_append_string(db, "index-type.mount", ns->xmem_mounts[i]);
 	}
 
 	info_append_string(db, "storage-engine",
@@ -1745,20 +1738,12 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal")));
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-			if (! ns->storage_devices[i]) {
-				break;
-			}
-
+		for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
 			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
 		}
 
-		for (int i = 0; i < AS_STORAGE_MAX_FILES; i++) {
-			if (! ns->storage_files[i]) {
-				break;
-			}
-
-			info_append_string(db, "storage-engine.file", ns->storage_files[i]);
+		for (uint32_t i = 0; i < ns->n_storage_files; i++) {
+			info_append_string(db, "storage-engine.file", ns->storage_devices[i]);
 		}
 
 		// TODO - how to report the shadows?

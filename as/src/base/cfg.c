@@ -103,8 +103,8 @@ void cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port, bool tls);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_xmem_mount(as_namespace* ns, const char* mount);
-void cfg_add_storage_file(as_namespace* ns, char* file_name);
-void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
+void cfg_add_storage_file(as_namespace* ns, const char* file_name);
+void cfg_add_storage_device(as_namespace* ns, const char* device_name, const char* shadow_name);
 void cfg_set_cluster_name(char* cluster_name);
 void cfg_add_ldap_role_query_pattern(char* pattern);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
@@ -3345,6 +3345,9 @@ as_config_init(const char* config_file)
 				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
+				if (ns->n_storage_devices == 0 && ns->n_storage_files == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} has no devices or files", ns->name);
+				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -4672,7 +4675,7 @@ as_set*
 cfg_add_set(as_namespace* ns)
 {
 	if (ns->sets_cfg_count >= AS_SET_MAX_COUNT) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many sets", ns->name);
+		cf_crash_nostack(AS_CFG, "{%s} too many sets", ns->name);
 	}
 
 	// Lazily allocate temporary sets config array.
@@ -4689,69 +4692,72 @@ cfg_add_set(as_namespace* ns)
 void
 cfg_add_xmem_mount(as_namespace* ns, const char* mount)
 {
-	uint32_t i;
+	if (ns->n_xmem_mounts == CF_XMEM_MAX_MOUNTS) {
+		cf_crash_nostack(AS_CFG, "{%s} too many mounts", ns->name);
+	}
 
-	for (i = 0; i < CF_XMEM_MAX_MOUNTS; i++) {
-		if (! ns->xmem_mounts[i]) {
-			ns->xmem_mounts[i] = mount;
-			break;
-		}
-
+	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
 		if (strcmp(mount, ns->xmem_mounts[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate mount %s", ns->name, mount);
+			cf_crash_nostack(AS_CFG, "{%s} duplicate mount %s", ns->name, mount);
 		}
 	}
 
-	if (i == CF_XMEM_MAX_MOUNTS) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many mounts", ns->name);
-	}
+	ns->xmem_mounts[ns->n_xmem_mounts++] = mount;
 }
 
 void
-cfg_add_storage_file(as_namespace* ns, char* file_name)
+cfg_add_storage_file(as_namespace* ns, const char* file_name)
 {
-	int i;
+	if (ns->n_storage_devices != 0) {
+		cf_crash_nostack(AS_CFG, "{%s} mixture of storage files and devices", ns->name);
+	}
 
-	for (i = 0; i < AS_STORAGE_MAX_FILES; i++) {
-		if (! ns->storage_files[i]) {
-			ns->storage_files[i] = file_name;
-			break;
-		}
+	if (ns->n_storage_files == AS_STORAGE_MAX_DEVICES) {
+		cf_crash_nostack(AS_CFG, "{%s} too many storage files", ns->name);
+	}
 
-		if (strcmp(file_name, ns->storage_files[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage file %s", ns->name, file_name);
+	for (uint32_t i = 0; i < ns->n_storage_files; i++) {
+		if (strcmp(file_name, ns->storage_devices[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage file %s", ns->name, file_name);
 		}
 	}
 
-	if (i == AS_STORAGE_MAX_FILES) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many storage files", ns->name);
-	}
+	ns->storage_devices[ns->n_storage_files++] = file_name;
 }
 
 void
-cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name)
+cfg_add_storage_device(as_namespace* ns, const char* device_name,
+		const char* shadow_name)
 {
-	int i;
+	if (ns->n_storage_files != 0) {
+		cf_crash_nostack(AS_CFG, "{%s} mixture of storage files and devices", ns->name);
+	}
 
-	for (i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-		if (! ns->storage_devices[i]) {
-			ns->storage_devices[i] = device_name;
-			ns->storage_shadows[i] = shadow_name;
-			break;
-		}
+	if (ns->n_storage_devices == AS_STORAGE_MAX_DEVICES) {
+		cf_crash_nostack(AS_CFG, "{%s} too many storage devices", ns->name);
+	}
 
+	for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
 		if (strcmp(device_name, ns->storage_devices[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage device %s", ns->name, device_name);
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage device %s", ns->name, device_name);
 		}
 
 		if (shadow_name && ns->storage_shadows[i] &&
 				strcmp(shadow_name, ns->storage_shadows[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage shadow device %s", ns->name, shadow_name);
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage shadow device %s", ns->name, shadow_name);
 		}
 	}
 
-	if (i == AS_STORAGE_MAX_DEVICES) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many storage devices", ns->name);
+	if (shadow_name) {
+		ns->storage_shadows[ns->n_storage_devices] = shadow_name;
+		ns->n_storage_shadows++;
+	}
+
+	ns->storage_devices[ns->n_storage_devices++] = device_name;
+
+	if (ns->n_storage_shadows != 0 &&
+			ns->n_storage_shadows != ns->n_storage_devices) {
+		cf_crash_nostack(AS_CFG, "{%s} no shadow for device %s", ns->name, device_name);
 	}
 }
 

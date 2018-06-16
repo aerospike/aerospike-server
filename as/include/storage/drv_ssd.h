@@ -218,8 +218,8 @@ typedef enum {
 typedef struct drv_ssd_s {
 	struct as_namespace_s *ns;
 
-	char			*name;				// this device's name
-	char			*shadow_name;		// this device's shadow's name, if any
+	const char		*name;				// this device's name
+	const char		*shadow_name;		// this device's shadow's name, if any
 
 	uint32_t		running;
 

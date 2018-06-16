@@ -58,8 +58,7 @@
 #include "storage/storage.h"
 
 
-#define AS_STORAGE_MAX_DEVICES (128) // maximum devices per namespace
-#define AS_STORAGE_MAX_FILES (128) // maximum files per namespace
+#define AS_STORAGE_MAX_DEVICES (128) // maximum devices or files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 1024
@@ -765,12 +764,15 @@ struct as_namespace_s {
 	cf_vector		xdr_dclist_v;
 
 	const char*		xmem_mounts[CF_XMEM_MAX_MOUNTS];
+	uint32_t		n_xmem_mounts; // indirect config
 
 	as_storage_type storage_type;
 
-	char*			storage_devices[AS_STORAGE_MAX_DEVICES];
-	char*			storage_shadows[AS_STORAGE_MAX_DEVICES];
-	char*			storage_files[AS_STORAGE_MAX_FILES];
+	const char*		storage_devices[AS_STORAGE_MAX_DEVICES];
+	uint32_t		n_storage_devices; // indirect config - if devices array contains raw devices (or partitions)
+	uint32_t		n_storage_files; // indirect config - if devices array contains files
+	const char*		storage_shadows[AS_STORAGE_MAX_DEVICES];
+	uint32_t		n_storage_shadows; // indirect config
 	uint64_t		storage_filesize;
 	char*			storage_scheduler_mode; // relevant for devices only, not files
 	uint32_t		storage_write_block_size;

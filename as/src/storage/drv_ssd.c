@@ -2911,7 +2911,7 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 	uint8_t *buf = cf_valloc(wblock_size);
 
 	bool read_shadow = ssd->shadow_name;
-	char *read_ssd_name = read_shadow ? ssd->shadow_name : ssd->name;
+	const char *read_ssd_name = read_shadow ? ssd->shadow_name : ssd->name;
 	int fd = read_shadow ? ssd_shadow_fd_get(ssd) : ssd_fd_get(ssd);
 	int write_fd = read_shadow ? ssd_fd_get(ssd) : -1;
 
@@ -3465,23 +3465,16 @@ find_io_min_size(int fd, const char *ssd_name)
 void
 ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 {
-	int n_ssds;
-
-	for (n_ssds = 0; n_ssds < AS_STORAGE_MAX_DEVICES; n_ssds++) {
-		if (! ns->storage_devices[n_ssds]) {
-			break;
-		}
-	}
-
-	size_t ssds_size = sizeof(drv_ssds) + (n_ssds * sizeof(drv_ssd));
+	size_t ssds_size = sizeof(drv_ssds) +
+			(ns->n_storage_devices * sizeof(drv_ssd));
 	drv_ssds *ssds = cf_malloc(ssds_size);
 
 	memset(ssds, 0, ssds_size);
-	ssds->n_ssds = n_ssds;
+	ssds->n_ssds = (int)ns->n_storage_devices;
 	ssds->ns = ns;
 
 	// Raw device-specific initialization of drv_ssd structures.
-	for (int i = 0; i < n_ssds; i++) {
+	for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
 		ssd->name = ns->storage_devices[i];
@@ -3531,27 +3524,13 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 void
 ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 {
-	int n_shadows = 0;
-
-	for (int n = 0; n < ssds->n_ssds; n++) {
-		if (ns->storage_shadows[n]) {
-			n_shadows++;
-		}
-	}
-
-	if (n_shadows == 0) {
+	if (ns->n_storage_shadows == 0) {
 		// No shadows - a normal deployment.
 		return;
 	}
 
-	// TODO - should check this when parsing config file!
-	if (n_shadows != ssds->n_ssds) {
-		cf_crash(AS_DRV_SSD, "configured %d devices but only %d shadows",
-				ssds->n_ssds, n_shadows);
-	}
-
 	// Check shadow devices.
-	for (int i = 0; i < n_shadows; i++) {
+	for (uint32_t i = 0; i < ns->n_storage_shadows; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
 		ssd->shadow_name = ns->storage_shadows[i];
@@ -3596,26 +3575,19 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 void
 ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 {
-	int n_ssds;
-
-	for (n_ssds = 0; n_ssds < AS_STORAGE_MAX_FILES; n_ssds++) {
-		if (! ns->storage_files[n_ssds]) {
-			break;
-		}
-	}
-
-	size_t ssds_size = sizeof(drv_ssds) + (n_ssds * sizeof(drv_ssd));
+	size_t ssds_size = sizeof(drv_ssds) +
+			(ns->n_storage_files * sizeof(drv_ssd));
 	drv_ssds *ssds = cf_malloc(ssds_size);
 
 	memset(ssds, 0, ssds_size);
-	ssds->n_ssds = n_ssds;
+	ssds->n_ssds = (int)ns->n_storage_files;
 	ssds->ns = ns;
 
 	// File-specific initialization of drv_ssd structures.
-	for (int i = 0; i < n_ssds; i++) {
+	for (uint32_t i = 0; i < ns->n_storage_files; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		ssd->name = ns->storage_files[i];
+		ssd->name = ns->storage_devices[i];
 
 		if (ns->cold_start && ns->storage_cold_start_empty) {
 			if (0 == remove(ssd->name)) {
@@ -3691,16 +3663,12 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 {
 	drv_ssds *ssds;
 
-	if (ns->storage_devices[0]) {
+	if (ns->n_storage_devices != 0) {
 		ssd_init_devices(ns, &ssds);
 		ssd_init_shadows(ns, ssds);
 	}
-	else if (ns->storage_files[0]) {
-		ssd_init_files(ns, &ssds);
-	}
 	else {
-		// TODO - should check this when parsing config file!
-		cf_crash(AS_DRV_SSD, "{%s} has no devices or files", ns->name);
+		ssd_init_files(ns, &ssds);
 	}
 
 	cf_mutex_init(&ssds->flush_lock);
