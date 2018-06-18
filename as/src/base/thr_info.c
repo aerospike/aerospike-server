@@ -1513,7 +1513,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
-	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
 	info_append_uint32(db, "object-size-hist-period", g_config.object_size_hist_period);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
@@ -1693,6 +1692,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	}
 
 	info_append_bool(db, "data-in-index", ns->data_in_index);
+	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);

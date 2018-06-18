@@ -152,7 +152,6 @@ cfg_set_defaults()
 	c->n_migrate_threads = 1;
 	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
 	c->nsup_period = 120; // run nsup once every 2 minutes
-	c->nsup_startup_evict = true;
 	c->object_size_hist_period = 60 * 60; // every hour
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
@@ -295,7 +294,6 @@ typedef enum {
 	CASE_SERVICE_NODE_ID_INTERFACE,
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_PERIOD,
-	CASE_SERVICE_NSUP_STARTUP_EVICT,
 	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
@@ -370,6 +368,7 @@ typedef enum {
 	CASE_SERVICE_NSUP_QUEUE_ESCAPE,
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
+	CASE_SERVICE_NSUP_STARTUP_EVICT,
 	CASE_SERVICE_NSUP_THREADS,
 	CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE,
 	CASE_SERVICE_PAXOS_PROTOCOL,
@@ -533,6 +532,7 @@ typedef enum {
 	CASE_NAMESPACE_COLD_START_EVICT_TTL,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
+	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
@@ -827,7 +827,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
-		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
@@ -899,6 +898,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-queue-lwm",					CASE_SERVICE_NSUP_QUEUE_LWM },
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
+		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
 		{ "paxos-max-cluster-size",			CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE },
 		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
@@ -1066,6 +1066,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
+		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
@@ -2349,9 +2350,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_PERIOD:
 				c->nsup_period = cfg_u32_no_checks(&line);
 				break;
-			case CASE_SERVICE_NSUP_STARTUP_EVICT:
-				c->nsup_startup_evict = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD:
 				c->object_size_hist_period = cfg_u32_no_checks(&line);
 				break;
@@ -2518,6 +2516,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_QUEUE_LWM:
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
+			case CASE_SERVICE_NSUP_STARTUP_EVICT:
 			case CASE_SERVICE_NSUP_THREADS:
 			case CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE:
 			case CASE_SERVICE_PAXOS_PROTOCOL:
@@ -3027,6 +3026,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_DATA_IN_INDEX:
 				ns->data_in_index = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_DISABLE_COLD_START_EVICTION:
+				ns->cold_start_eviction_disabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_DISABLE_WRITE_DUP_RES:
 				ns->write_dup_res_disabled = cfg_bool(&line);
