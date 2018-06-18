@@ -876,10 +876,11 @@ run_nsup(void *arg)
 	while (true) {
 		sleep(1); // wake up every second to check
 
+		uint64_t period = (uint64_t)g_config.nsup_period;
 		uint64_t curr_time = cf_get_seconds();
 
-		if (curr_time - last_time < g_config.nsup_period) {
-			continue; // period has not elapsed
+		if (period == 0 || curr_time - last_time < period) {
+			continue;
 		}
 
 		last_time = curr_time;
@@ -1064,10 +1065,11 @@ run_size_histograms(void *arg)
 	while (true) {
 		sleep(1); // wake up every second to check
 
+		uint64_t period = (uint64_t)g_config.object_size_hist_period;
 		uint64_t curr_time = cf_get_seconds();
 
-		if (wait && curr_time - last_time < g_config.object_size_hist_period) {
-			continue; // period has not elapsed
+		if (period == 0 || (wait && curr_time - last_time < period)) {
+			continue;
 		}
 
 		wait = true;
