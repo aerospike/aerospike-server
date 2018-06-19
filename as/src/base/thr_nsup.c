@@ -888,6 +888,11 @@ run_nsup(void *arg)
 		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 			as_namespace *ns = g_config.namespaces[ns_ix];
 
+			if (ns->nsup_disabled) {
+				cf_info(AS_NSUP, "{%s} nsup-skipped", ns->name);
+				continue;
+			}
+
 			uint64_t start_ms = cf_getms();
 
 			cf_info(AS_NSUP, "{%s} nsup-start", ns->name);

@@ -533,6 +533,7 @@ typedef enum {
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
+	CASE_NAMESPACE_DISABLE_NSUP,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
@@ -1067,6 +1068,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
+		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
@@ -3029,6 +3031,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_DISABLE_COLD_START_EVICTION:
 				ns->cold_start_eviction_disabled = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_DISABLE_NSUP:
+				ns->nsup_disabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_DISABLE_WRITE_DUP_RES:
 				ns->write_dup_res_disabled = cfg_bool(&line);

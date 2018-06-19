@@ -738,6 +738,7 @@ struct as_namespace_s {
 	PAD_BOOL		cp_allow_drops; // relevant only for enterprise edition
 	PAD_BOOL		data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	PAD_BOOL		cold_start_eviction_disabled;
+	PAD_BOOL		nsup_disabled;
 	PAD_BOOL		write_dup_res_disabled;
 	PAD_BOOL		disallow_null_setname;
 	PAD_BOOL		batch_sub_benchmarks_enabled;

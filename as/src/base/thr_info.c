@@ -1693,6 +1693,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	info_append_bool(db, "data-in-index", ns->data_in_index);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
+	info_append_bool(db, "disable-nsup", ns->nsup_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
@@ -2624,6 +2625,19 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of max-ttl memory of ns %s from %"PRIu64" to %"PRIu64" ", ns->name, ns->max_ttl, val);
 			ns->max_ttl = val;
+		}
+		else if (0 == as_info_parameter_get(params, "disable-nsup", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of disable-nsup of ns %s from %s to %s", ns->name, bool_val[ns->nsup_disabled], context);
+				ns->nsup_disabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of disable-nsup of ns %s from %s to %s", ns->name, bool_val[ns->nsup_disabled], context);
+				ns->nsup_disabled = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-order", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 10) {
