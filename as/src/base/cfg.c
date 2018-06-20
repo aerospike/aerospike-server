@@ -631,6 +631,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
+	CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER,
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
 	// Deprecated:
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS,
@@ -1174,6 +1175,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
+		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
 		{ "defrag-max-blocks",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS },
 		{ "defrag-period",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD },
@@ -3336,6 +3338,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
 				ns->storage_post_write_queue = cfg_u32(&line, 0, 4 * 1024);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER:
+				cfg_enterprise_only(&line);
+				ns->storage_serialize_tomb_raider = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP:
 				cfg_enterprise_only(&line);
