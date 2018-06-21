@@ -722,19 +722,10 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (lseek(fd, (off_t)file_offset, SEEK_SET) != (off_t)file_offset) {
-		cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
-				ssd->name, file_offset, errno, cf_strerror(errno));
-		close(fd);
-		fd = -1;
-		goto Finished;
-	}
-
-	ssize_t rlen = read(fd, read_buf, ssd->write_block_size);
-
-	if (rlen != (ssize_t)ssd->write_block_size) {
-		cf_warning(AS_DRV_SSD, "%s: read failed (%ld): errno %d (%s)",
-				ssd->name, rlen, errno, cf_strerror(errno));
+	if (pread(fd, read_buf, ssd->write_block_size, (off_t)file_offset) !=
+			(ssize_t)ssd->write_block_size) {
+		cf_warning(AS_DRV_SSD, "%s: read failed: errno %d (%s)", ssd->name,
+				errno, cf_strerror(errno));
 		close(fd);
 		fd = -1;
 		goto Finished;
@@ -1247,19 +1238,10 @@ ssd_read_record(as_storage_rd *rd)
 
 		uint64_t start_ns = ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-		if (lseek(fd, (off_t)read_offset, SEEK_SET) != (off_t)read_offset) {
-			cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
-					ssd->name, read_offset, errno, cf_strerror(errno));
-			cf_free(read_buf);
-			close(fd);
-			return -1;
-		}
-
-		ssize_t rv = read(fd, read_buf, read_size);
-
-		if (rv != (ssize_t)read_size) {
-			cf_warning(AS_DRV_SSD, "%s: read failed (%ld): size %lu: errno %d (%s)",
-					ssd->name, rv, read_size, errno, cf_strerror(errno));
+		if (pread(fd, read_buf, read_size, (off_t)read_offset) !=
+				(ssize_t)read_size) {
+			cf_warning(AS_DRV_SSD, "%s: read failed: size %lu: errno %d (%s)",
+					ssd->name, read_size, errno, cf_strerror(errno));
 			cf_free(read_buf);
 			close(fd);
 			return -1;
@@ -1442,14 +1424,8 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
-		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
-				ssd->name, write_offset, errno, cf_strerror(errno));
-	}
-
-	ssize_t rv_s = write(fd, swb->buf, ssd->write_block_size);
-
-	if (rv_s != (ssize_t)ssd->write_block_size) {
+	if (pwrite(fd, swb->buf, ssd->write_block_size, write_offset) !=
+			(ssize_t)ssd->write_block_size) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->name, errno, cf_strerror(errno));
 	}
@@ -1470,14 +1446,8 @@ ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
-		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
-				ssd->shadow_name, write_offset, errno, cf_strerror(errno));
-	}
-
-	ssize_t rv_s = write(fd, swb->buf, ssd->write_block_size);
-
-	if (rv_s != (ssize_t)ssd->write_block_size) {
+	if (pwrite(fd, swb->buf, ssd->write_block_size, write_offset) !=
+			(ssize_t)ssd->write_block_size) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->shadow_name, errno, cf_strerror(errno));
 	}
@@ -2414,16 +2384,9 @@ ssd_read_header(drv_ssd *ssd)
 	size_t read_size = BYTES_UP_TO_IO_MIN(ssd, sizeof(ssd_device_header));
 	ssd_device_header *header = cf_valloc(read_size);
 
-	if (lseek(fd, 0, SEEK_SET) != 0) {
-		cf_crash(AS_DRV_SSD, "%s: seek failed: errno %d (%s)", ssd_name,
-				errno, cf_strerror(errno));
-	}
-
-	ssize_t sz = read(fd, (void*)header, read_size);
-
-	if (sz != (ssize_t)read_size) {
-		cf_crash(AS_DRV_SSD, "%s: read failed (%ld): errno %d (%s)", ssd_name,
-				sz, errno, cf_strerror(errno));
+	if (pread(fd, (void*)header, read_size, 0) != (ssize_t)read_size) {
+		cf_crash(AS_DRV_SSD, "%s: read failed: errno %d (%s)", ssd_name, errno,
+				cf_strerror(errno));
 	}
 
 	ssd_common_prefix *prefix = &header->common.prefix;
@@ -2511,14 +2474,9 @@ ssd_empty_header(int fd, const char* device_name)
 
 	memset(h, 0, SSD_HEADER_SIZE);
 
-	if (0 != lseek(fd, 0, SEEK_SET)) {
-		cf_crash(AS_DRV_SSD, "device %s: empty header: seek error: %s",
-				device_name, cf_strerror(errno));
-	}
-
-	if (SSD_HEADER_SIZE != write(fd, h, SSD_HEADER_SIZE)) {
-		cf_crash(AS_DRV_SSD, "device %s: empty header: write error: %s",
-				device_name, cf_strerror(errno));
+	if (pwrite(fd, h, SSD_HEADER_SIZE, 0) != SSD_HEADER_SIZE) {
+		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
+				device_name, errno, cf_strerror(errno));
 	}
 
 	cf_free(h);
@@ -2539,14 +2497,7 @@ ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size)
 
 	int fd = ssd_fd_get(ssd);
 
-	if (lseek(fd, offset, SEEK_SET) != offset) {
-		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: errno %d (%s)",
-				ssd->name, errno, cf_strerror(errno));
-	}
-
-	ssize_t sz = write(fd, (void*)from, size);
-
-	if (sz != (ssize_t)size) {
+	if (pwrite(fd, (void*)from, size, offset) != (ssize_t)size) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->name, errno, cf_strerror(errno));
 	}
@@ -2559,14 +2510,7 @@ ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size)
 
 	fd = ssd_shadow_fd_get(ssd);
 
-	if (lseek(fd, offset, SEEK_SET) != offset) {
-		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: errno %d (%s)",
-				ssd->shadow_name, errno, cf_strerror(errno));
-	}
-
-	sz = write(fd, (void*)from, size);
-
-	if (sz != (ssize_t)size) {
+	if (pwrite(fd, (void*)from, size, offset) != (ssize_t)size) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->shadow_name, errno, cf_strerror(errno));
 	}
@@ -2915,19 +2859,6 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 	int fd = read_shadow ? ssd_shadow_fd_get(ssd) : ssd_fd_get(ssd);
 	int write_fd = read_shadow ? ssd_fd_get(ssd) : -1;
 
-	// Seek past the header.
-
-	if (lseek(fd, SSD_HEADER_SIZE, SEEK_SET) != SSD_HEADER_SIZE) {
-		cf_crash(AS_DRV_SSD, "%s: seek failed: errno %d (%s)", read_ssd_name,
-				errno, cf_strerror(errno));
-	}
-
-	if (read_shadow &&
-			lseek(write_fd, SSD_HEADER_SIZE, SEEK_SET) != SSD_HEADER_SIZE) {
-		cf_crash(AS_DRV_SSD, "%s: seek failed: errno %d (%s)", ssd->name,
-				errno, cf_strerror(errno));
-	}
-
 	// Loop over all wblocks, unless we encounter 10 contiguous unused wblocks.
 
 	ssd->sweep_wblock_id = SSD_HEADER_SIZE / (uint32_t)wblock_size;
@@ -2936,13 +2867,15 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 	uint32_t n_unused_wblocks = 0;
 
 	while (file_offset < ssd->file_size && n_unused_wblocks < 10) {
-		if (read(fd, buf, wblock_size) != wblock_size) {
+		if (pread(fd, buf, wblock_size, (off_t)file_offset) !=
+				(ssize_t)wblock_size) {
 			cf_crash(AS_DRV_SSD, "%s: read failed: errno %d (%s)",
 					read_ssd_name, errno, cf_strerror(errno));
 		}
 
 		if (read_shadow &&
-				write(write_fd, (void*)buf, wblock_size) != wblock_size) {
+				pwrite(write_fd, (void*)buf, wblock_size, (off_t)file_offset) !=
+						(ssize_t)wblock_size) {
 			cf_crash(AS_DRV_SSD, "%s: write failed: errno %d (%s)", ssd->name,
 					errno, cf_strerror(errno));
 		}
@@ -3437,17 +3370,11 @@ check_file_size(as_namespace *ns, uint64_t file_size, const char *tag)
 static uint64_t
 find_io_min_size(int fd, const char *ssd_name)
 {
-	off_t off = lseek(fd, 0, SEEK_SET);
-
-	if (off != 0) {
-		cf_crash(AS_DRV_SSD, "%s: seek error %s", ssd_name, cf_strerror(errno));
-	}
-
 	uint8_t *buf = cf_valloc(HI_IO_MIN_SIZE);
 	size_t read_sz = LO_IO_MIN_SIZE;
 
 	while (read_sz <= HI_IO_MIN_SIZE) {
-		if (read(fd, (void*)buf, read_sz) == (ssize_t)read_sz) {
+		if (pread(fd, (void*)buf, read_sz, 0) == (ssize_t)read_sz) {
 			cf_free(buf);
 			return read_sz;
 		}
