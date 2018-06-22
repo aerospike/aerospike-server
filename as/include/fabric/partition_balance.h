@@ -164,6 +164,7 @@ void fill_translation(int translation[], const struct as_namespace_s* ns);
 void fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix, cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, const int translation[]);
 void rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t n_ids, uint32_t n_racks, uint32_t start_n);
 uint32_t find_self(const cf_node* ns_node_seq, const struct as_namespace_s* ns);
+int shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, int working_master_n, const as_partition_version* working_master_version);
 uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns, uint32_t working_master_n, uint32_t n_dupl);
 void queue_namespace_migrations(as_partition* p, struct as_namespace_s* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], cf_queue* mq);
 void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
@@ -183,10 +184,11 @@ bool immigrate_yield();
 //
 
 static inline bool
-is_family_same(const as_partition_version* v1, const as_partition_version* v2)
+is_same_as_full_master(const as_partition_version* mv, const as_partition_version* v)
 {
-	return v1->ckey == v2->ckey && v1->family == v2->family &&
-			v1->family != VERSION_FAMILY_UNIQUE;
+	// Works for CP too, even with family check.
+	return v->subset == 0 && mv->ckey == v->ckey && mv->family == v->family &&
+			mv->family != VERSION_FAMILY_UNIQUE;
 }
 
 // Define macros for accessing the full node-seq and sl-ix arrays.

@@ -120,6 +120,13 @@ is_self_final_master(const as_partition* p)
 	return p->replicas[0] == g_config.self_node;
 }
 
+static inline bool
+is_family_same(const as_partition_version* v1, const as_partition_version* v2)
+{
+	return v1->ckey == v2->ckey && v1->family == v2->family &&
+			v1->family != VERSION_FAMILY_UNIQUE;
+}
+
 
 //==========================================================
 // Public API - regulate migrations.
@@ -775,11 +782,11 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 		uint32_t self_n = find_self(ns_node_seq, ns);
 
 		as_partition_version final_version = {
-				.ckey = as_exchange_cluster_key()
+				.ckey = as_exchange_cluster_key(),
+				.master = self_n == 0 ? 1 : 0
 		};
 
 		p->final_version = final_version;
-		p->final_version.master = self_n == 0 ? 1 : 0;
 
 		int working_master_n = find_working_master_ap(p, ns_sl_ix, ns);
 
@@ -990,7 +997,7 @@ find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		// one after split brains. Also, the flag is only to prevent superfluous
 		// master swaps on rebalance when rack-aware.)
 		if (version->master == 1) {
-			return n;
+			return shift_working_master(p, ns_sl_ix, ns, n, version);
 		}
 		// else - keep going but remember the best so far.
 
@@ -1005,6 +1012,26 @@ find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
 	}
 
 	return best_n;
+}
+
+int
+shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix,
+		const as_namespace* ns, int working_master_n,
+		const as_partition_version* working_master_version)
+{
+	if (working_master_n == 0 || working_master_version->subset == 1) {
+		return working_master_n; // can only shift full masters
+	}
+
+	for (int n = 0; n < working_master_n; n++) {
+		const as_partition_version* version = INPUT_VERSION(n);
+
+		if (is_same_as_full_master(working_master_version, version)) {
+			return n; // master flag will get shifted later
+		}
+	}
+
+	return working_master_n;
 }
 
 uint32_t
