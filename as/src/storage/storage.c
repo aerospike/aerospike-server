@@ -67,7 +67,9 @@ as_storage_init()
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		as_storage_namespace_init_table[ns->storage_type](ns);
+		if (as_storage_namespace_init_table[ns->storage_type]) {
+			as_storage_namespace_init_table[ns->storage_type](ns);
+		}
 	}
 }
 
