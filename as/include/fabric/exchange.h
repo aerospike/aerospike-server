@@ -146,6 +146,11 @@ cf_node
 as_exchange_principal();
 
 /**
+ * Output exchange cluster state for info.
+ */
+void as_exchange_cluster_info(cf_dyn_buf* db);
+
+/**
  * Lock before setting or getting exchanged info from non-exchange thread.
  */
 void

@@ -230,8 +230,7 @@ info_segv_test(char *name, cf_dyn_buf *db)
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
-	info_append_uint32(db, "cluster_size", as_exchange_cluster_size());
-	info_append_uint64_x(db, "cluster_key", as_exchange_cluster_key()); // not in ticker
+	as_exchange_cluster_info(db);
 	info_append_bool(db, "cluster_integrity", as_clustering_has_integrity()); // not in ticker
 	info_append_bool(db, "cluster_is_member", ! as_clustering_is_orphan()); // not in ticker
 	as_hb_info_duplicates_get(db); // not in ticker

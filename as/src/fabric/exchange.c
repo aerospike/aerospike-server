@@ -74,8 +74,24 @@
  * =================
  *
  * There are different sections for each state. Each state has a dispatcher
- * which delegates the event handing to a state specific function. All state is
- * protected under a single lock.
+ * which delegates the event handing to a state specific function.
+ *
+ * Locks
+ * =====
+ *  1. g_exchanage_lock - protected the exchange state machine.
+ *  2. g_exchange_info_lock - prevents update of exchanged data for a round while
+ * exchange is in progress
+ *  3. g_exchange_commited_cluster_lock - a higher
+ * granularity, committed cluster r/w lock,used to allow read access to
+ * committed cluster data even while exchange is busy and holding on to the
+ * global exchange state machine lock.
+ *  4. g_external_event_publisher_lock - ensure order of external events
+ * published is maintained.
+ *
+ * Lock order
+ * ==========
+ * Locks to be obtained in the order mentioned above and relinquished in the
+ * reverse order.
  */
 
 /*
@@ -422,11 +438,6 @@ typedef struct as_exchange_s
 	as_cluster_key cluster_key;
 
 	/**
-	 * Cluster size - size of the succession list.
-	 */
-	uint32_t cluster_size;
-
-	/**
 	 * Exchange's copy of the succession list.
 	 */
 	cf_vector succession_list;
@@ -435,6 +446,11 @@ typedef struct as_exchange_s
 	 * The principal node in current succession list. Always the first node.
 	 */
 	cf_node principal;
+
+	/**
+	 * Committed cluster generation.
+	 */
+	uint64_t committed_cluster_generation;
 
 	/**
 	 * Last committed cluster key.
@@ -624,6 +640,58 @@ pthread_mutex_t g_exchanged_info_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t g_exchange_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 /**
+ * Acquire a lock on the exchange subsystem.
+ */
+#define EXCHANGE_LOCK()							\
+({												\
+	pthread_mutex_lock (&g_exchange_lock);		\
+	LOCK_DEBUG("locked in %s", __FUNCTION__);	\
+})
+
+/**
+ * Relinquish the lock on the exchange subsystem.
+ */
+#define EXCHANGE_UNLOCK()							\
+({													\
+	pthread_mutex_unlock (&g_exchange_lock);		\
+	LOCK_DEBUG("unLocked in %s", __FUNCTION__);		\
+})
+
+/**
+ * Global lock to set or get committed exchange cluster. This is a lower
+ * granularity lock to allow read access to committed cluster even while
+ * exchange is busy for example rebalancing under the exchange lock.
+ */
+pthread_rwlock_t g_exchange_commited_cluster_lock = PTHREAD_RWLOCK_INITIALIZER;
+
+/**
+ * Acquire a read lock on the committed exchange cluster.
+ */
+#define EXCHANGE_COMMITTED_CLUSTER_RLOCK()						\
+({																\
+	pthread_rwlock_rdlock (&g_exchange_commited_cluster_lock);	\
+	LOCK_DEBUG("committed data locked in %s", __FUNCTION__);	\
+})
+
+/**
+ * Acquire a write lock on the committed exchange cluster.
+ */
+#define EXCHANGE_COMMITTED_CLUSTER_WLOCK()						\
+({																\
+	pthread_rwlock_wrlock (&g_exchange_commited_cluster_lock);	\
+	LOCK_DEBUG("committed data locked in %s", __FUNCTION__);	\
+})
+
+/**
+ * Relinquish the lock on the committed exchange cluster.
+ */
+#define EXCHANGE_COMMITTED_CLUSTER_UNLOCK()						\
+({																\
+	pthread_rwlock_unlock (&g_exchange_commited_cluster_lock);	\
+	LOCK_DEBUG("committed data unLocked in %s", __FUNCTION__);	\
+})
+
+/**
  * Singleton external events publisher.
  */
 static as_exchange_external_event_publisher g_external_event_publisher;
@@ -708,24 +776,6 @@ static pthread_mutex_t g_external_event_publisher_lock =
 #else
 #define LOCK_DEBUG(format, ...)
 #endif
-
-/**
- * Acquire a lock on the exchange subsystem.
- */
-#define EXCHANGE_LOCK()							\
-({												\
-	pthread_mutex_lock (&g_exchange_lock);		\
-	LOCK_DEBUG("locked in %s", __FUNCTION__);	\
-})
-
-/**
- * Relinquish the lock on the exchange subsystem.
- */
-#define EXCHANGE_UNLOCK()							\
-({													\
-	pthread_mutex_unlock (&g_exchange_lock);		\
-	LOCK_DEBUG("unLocked in %s", __FUNCTION__);		\
-})
 
 /**
  * Timer event generation interval.
@@ -1987,6 +2037,34 @@ exchange_namespace_payload_is_valid(as_exchange_ns_vinfos_payload* ns_payload,
  */
 
 /**
+ * Update committed exchange cluster data.
+ * @param cluster_key the new cluster key.
+ * @param succession the new succession. Can be NULL, for orphan state.
+ */
+static void
+exchange_commited_cluster_update(as_cluster_key cluster_key,
+								 cf_vector* succession)
+{
+	EXCHANGE_COMMITTED_CLUSTER_WLOCK();
+	g_exchange.committed_cluster_key = cluster_key;
+	vector_clear(&g_exchange.committed_succession_list);
+
+	if (succession && cf_vector_size(succession) > 0) {
+		vector_copy(&g_exchange.committed_succession_list,
+					&g_exchange.succession_list);
+		g_exchange.committed_cluster_size = cf_vector_size(succession);
+		cf_vector_get(succession, 0, &g_exchange.committed_principal);
+	}
+	else {
+		g_exchange.committed_cluster_size = 0;
+		g_exchange.committed_principal = 0;
+	}
+
+	g_exchange.committed_cluster_generation++;
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
+}
+
+/**
  * Indicates if self node is the cluster principal.
  */
 static bool
@@ -2080,10 +2158,6 @@ exchange_reset_for_new_round(cf_vector* new_succession_list,
 		vector_copy(&g_exchange.succession_list, new_succession_list);
 		// Set the principal node.
 		cf_vector_get(&g_exchange.succession_list, 0, &g_exchange.principal);
-		g_exchange.cluster_size = cf_vector_size(new_succession_list);
-	}
-	else {
-		g_exchange.cluster_size = 0;
 	}
 
 	// Reset accumulated node states.
@@ -2106,10 +2180,7 @@ static void
 exchange_orphan_commit()
 {
 	EXCHANGE_LOCK();
-	g_exchange.committed_cluster_key = 0;
-	g_exchange.committed_cluster_size = 0;
-	g_exchange.committed_principal = 0;
-	vector_clear(&g_exchange.committed_succession_list);
+	exchange_commited_cluster_update(0, NULL);
 	WARNING("blocking client transactions in orphan state!");
 	as_partition_balance_revert_to_orphan();
 	g_exchange.orphan_state_are_transactions_blocked = true;
@@ -2964,11 +3035,7 @@ exchange_data_commit()
 
 	// Exchange is done, use the current cluster details as the committed
 	// cluster details.
-	g_exchange.committed_cluster_key = g_exchange.cluster_key;
-	g_exchange.committed_cluster_size = g_exchange.cluster_size;
-	g_exchange.committed_principal = g_exchange.principal;
-	vector_clear(&g_exchange.committed_succession_list);
-	vector_copy(&g_exchange.committed_succession_list,
+	exchange_commited_cluster_update(g_exchange.cluster_key,
 			&g_exchange.succession_list);
 
 	// Force an update of the skew, to ensure new nodes if any have been checked
@@ -3011,12 +3078,14 @@ exchange_ready_to_commit_commit_msg_handle(as_exchange_event* msg_event)
 
 	// Queue up a cluster change event for downstream sub systems.
 	as_exchange_cluster_changed_event cluster_change_event;
+
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 	cluster_change_event.cluster_key = g_exchange.committed_cluster_key;
 	cluster_change_event.succession = vector_to_array(
 			&g_exchange.committed_succession_list);
 	cluster_change_event.cluster_size = g_exchange.committed_cluster_size;
-
 	exchange_external_event_queue(&cluster_change_event);
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 
 Exit:
 	EXCHANGE_UNLOCK();
@@ -3246,8 +3315,11 @@ exchange_init()
 
 	cf_vector_init(&g_exchange.succession_list, sizeof(cf_node),
 	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+
+	EXCHANGE_COMMITTED_CLUSTER_WLOCK();
 	cf_vector_init(&g_exchange.committed_succession_list, sizeof(cf_node),
 	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 
 	// Initialize exchange fabric messaging.
 	exchange_msg_init();
@@ -3401,13 +3473,14 @@ as_exchange_cluster_size()
 void
 as_exchange_succession(cf_vector* succession)
 {
-	EXCHANGE_LOCK();
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 	vector_copy(succession, &g_exchange.committed_succession_list);
-	EXCHANGE_UNLOCK();
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }
 
 /**
- * Return the committed succession list.
+ * Return the committed succession list. For internal use within the scope
+ * exchange_data_commit function call.
  */
 cf_node*
 as_exchange_succession_unsafe()
@@ -3421,7 +3494,7 @@ as_exchange_succession_unsafe()
 void
 as_exchange_info_get_succession(cf_dyn_buf* db)
 {
-	EXCHANGE_LOCK();
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 
 	cf_node* nodes = vector_to_array(&g_exchange.committed_succession_list);
 
@@ -3437,7 +3510,7 @@ as_exchange_info_get_succession(cf_dyn_buf* db)
 	// Always succeeds.
 	cf_dyn_buf_append_string(db, "\nok");
 
-	EXCHANGE_UNLOCK();
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }
 
 /**
@@ -3447,6 +3520,18 @@ cf_node
 as_exchange_principal()
 {
 	return g_exchange.committed_principal;
+}
+
+/**
+ * Exchange cluster state output for info calls.
+ */
+void as_exchange_cluster_info(cf_dyn_buf* db) {
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
+	info_append_uint32(db, "cluster_size", g_exchange.committed_cluster_size);
+	info_append_uint64_x(db, "cluster_key", g_exchange.committed_cluster_key);
+	info_append_uint64(db, "cluster_generation", g_exchange.committed_cluster_generation);
+	info_append_uint64_x(db, "cluster_principal", g_exchange.committed_principal);
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }
 
 /**
