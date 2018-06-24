@@ -748,6 +748,8 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	*is_delete = n_new_bins == 0;
 
+	cf_ll_buf_free(&particles_llb);
+
 	return AS_PROTO_RESULT_OK;
 }
 
@@ -828,7 +830,9 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	*is_delete = n_new_bins == 0;
 
-	return 0;
+	cf_ll_buf_free(&particles_llb);
+
+	return AS_PROTO_RESULT_OK;
 }
 
 
