@@ -582,8 +582,18 @@ typedef enum {
 typedef enum {
 	AS_CDT_LIST_MODIFY_DEFAULT = 0x00,
 	AS_CDT_LIST_ADD_UNIQUE = 0x01,
-	AS_CDT_LIST_INSERT_BOUNDED = 0x02
+	AS_CDT_LIST_INSERT_BOUNDED = 0x02,
+	AS_CDT_LIST_NO_FAIL = 0x04,
+	AS_CDT_LIST_DO_PARTIAL = 0x08,
 } as_cdt_list_modify_flags;
+
+typedef enum {
+	AS_CDT_MAP_MODIFY_DEFAULT = 0x00,
+	AS_CDT_MAP_NO_OVERWRITE = 0x01,
+	AS_CDT_MAP_NO_CREATE = 0x02,
+	AS_CDT_MAP_NO_FAIL = 0x04,
+	AS_CDT_MAP_DO_PARTIAL = 0x08,
+} as_cdt_map_modify_flags;
 
 typedef enum as_cdt_optype_e {
 	// ------------------------------------------------------------------------
