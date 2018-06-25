@@ -269,6 +269,7 @@ static int packed_list_get_remove_by_index_range(const packed_list *list, as_bin
 static int packed_list_get_remove_by_value_interval(const packed_list *list, as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *value_start, const cdt_payload *value_end, cdt_result_data *result);
 static int packed_list_get_remove_by_rank_range(const packed_list *list, as_bin *b, rollback_alloc *alloc_buf, int64_t rank, uint64_t count, cdt_result_data *result);
 static int packed_list_get_remove_all_by_value_list(const packed_list *list, as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *value_list, cdt_result_data *result);
+static int packed_list_get_remove_by_rel_rank_range(const packed_list *list, as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *value, int64_t rank, uint64_t count, cdt_result_data *result);
 
 static int packed_list_insert(const packed_list *list, as_bin *b, rollback_alloc *alloc_buf, int64_t index, const cdt_payload *payload, bool payload_is_list, uint64_t mod_flags, cdt_result_data *result);
 static int packed_list_add_ordered(const packed_list *list, as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *payload, bool unique, cdt_result_data *result);
@@ -301,6 +302,7 @@ static int list_remove_by_index_range(as_bin *b, rollback_alloc *alloc_buf, int6
 static int list_remove_by_value_interval(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *value_start, const cdt_payload *value_end, cdt_result_data *result);
 static int list_remove_by_rank_range(as_bin *b, rollback_alloc *alloc_buf, int64_t rank, uint64_t count, cdt_result_data *result);
 static int list_remove_all_by_value_list(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *value_list, cdt_result_data *result);
+static int list_remove_by_rel_rank_range(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *value, int64_t rank, uint64_t count, cdt_result_data *result);
 
 static uint8_t *list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags, uint32_t content_sz, uint32_t ele_count, uint32_t idx_trunc, const offset_index *old_offidx, offset_index *new_offidx);
 
@@ -2308,6 +2310,43 @@ packed_list_get_remove_all_by_value_list(const packed_list *list, as_bin *b,
 }
 
 static int
+packed_list_get_remove_by_rel_rank_range(const packed_list *list, as_bin *b,
+		rollback_alloc *alloc_buf, const cdt_payload *value, int64_t rank,
+		uint64_t count, cdt_result_data *result)
+{
+	vla_list_full_offidx_if_invalid(u, list);
+
+	if (list_is_ordered(list)) {
+		uint32_t rel_rank;
+		uint32_t temp;
+
+		if (! packed_list_find_rank_range_by_value_interval_ordered(list,
+				value, value, &rel_rank, &temp, result->is_multi)) {
+			return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		}
+
+		calc_rel_index_count(rank, count, rel_rank, &rank, &count);
+
+		return packed_list_get_remove_by_index_range(list, b, alloc_buf, rank,
+				count, result);
+	}
+
+	uint32_t rel_rank;
+	uint32_t temp;
+
+	if (! packed_list_find_rank_range_by_value_interval_unordered(list,
+			value, value, &rel_rank, &temp, NULL,
+			result_data_is_inverted(result), result->is_multi)) {
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
+	calc_rel_index_count(rank, count, rel_rank, &rank, &count);
+
+	return packed_list_get_remove_by_rank_range(list, b, alloc_buf, rank,
+			count, result);
+}
+
+static int
 packed_list_insert(const packed_list *list, as_bin *b,
 		rollback_alloc *alloc_buf, int64_t index, const cdt_payload *payload,
 		bool payload_is_list, uint64_t mod_flags, cdt_result_data *result)
@@ -3338,6 +3377,22 @@ list_remove_all_by_value_list(as_bin *b, rollback_alloc *alloc_buf,
 			value_list, result);
 }
 
+static int
+list_remove_by_rel_rank_range(as_bin *b, rollback_alloc *alloc_buf,
+		const cdt_payload *value, int64_t rank, uint64_t count,
+		cdt_result_data *result)
+{
+	packed_list list;
+
+	if (! packed_list_init_from_bin(&list, b)) {
+		cf_warning(AS_PARTICLE, "list_remove_by_rel_rank_range() invalid list");
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
+	return packed_list_get_remove_by_rel_rank_range(&list, b, alloc_buf, value,
+			rank, count, result);
+}
+
 // Return ptr to packed + ele_start.
 static uint8_t *
 list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags,
@@ -3767,6 +3822,27 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		ret = list_remove_by_rank_range(b, alloc_buf, rank, count, &result);
 		break;
 	}
+	case AS_CDT_OP_LIST_REMOVE_BY_VALUE_REL_RANK_RANGE: {
+		if (! as_bin_inuse(b)) {
+			return true; // no-op
+		}
+
+		uint64_t result_type;
+		cdt_payload value;
+		int64_t rank;
+		uint64_t count = UINT32_MAX;
+
+		if (! CDT_OP_TABLE_GET_PARAMS(state, &result_type, &value, &rank,
+				&count)) {
+			cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+			return false;
+		}
+
+		result_data_set(&result, result_type, true);
+		ret = list_remove_by_rel_rank_range(b, alloc_buf, &value, rank, count,
+				&result);
+		break;
+	}
 	default:
 		cf_warning(AS_PARTICLE, "cdt_process_state_packed_list_modify_optype() invalid cdt op: %d", optype);
 		cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
@@ -3955,6 +4031,23 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state,
 		result_data_set(&result, result_type, true);
 		ret = packed_list_get_remove_by_rank_range(&list, NULL, NULL, rank,
 				count, &result);
+		break;
+	}
+	case AS_CDT_OP_LIST_GET_BY_VALUE_REL_RANK_RANGE: {
+		uint64_t result_type;
+		cdt_payload value;
+		int64_t rank;
+		uint64_t count = UINT32_MAX;
+
+		if (! CDT_OP_TABLE_GET_PARAMS(state, &result_type, &value, &rank,
+				&count)) {
+			cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+			return false;
+		}
+
+		result_data_set(&result, result_type, true);
+		ret = packed_list_get_remove_by_rel_rank_range(&list, NULL, NULL,
+				&value, rank, count, &result);
 		break;
 	}
 	default:

@@ -244,6 +244,7 @@ static const uint8_t msgpack_nil[1] = {0xC0};
 //
 
 bool calc_index_count(int64_t in_index, uint64_t in_count, uint32_t ele_count, uint32_t *out_index, uint32_t *out_count, bool is_multi);
+void calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index, int64_t *out_index, uint64_t *out_count);
 
 // cdt_result_data
 bool result_data_set_not_found(cdt_result_data *rd, int64_t index);
