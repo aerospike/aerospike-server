@@ -735,7 +735,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	// Write the record to storage.
 	if ((result = as_record_write_from_pickle(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} write_master: failed write ", ns->name);
+		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		cf_ll_buf_free(&particles_llb);
 		return -result;
