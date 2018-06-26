@@ -6663,6 +6663,10 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_KEY_REL_INDEX_RANGE: {
+		if (! as_bin_inuse(b)) {
+			return true; // no-op
+		}
+
 		uint64_t result_type;
 		cdt_payload value;
 		int64_t index;
@@ -6680,6 +6684,10 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_VALUE_REL_RANK_RANGE: {
+		if (! as_bin_inuse(b)) {
+			return true; // no-op
+		}
+
 		uint64_t result_type;
 		cdt_payload value;
 		int64_t rank;
