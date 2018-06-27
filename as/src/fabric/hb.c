@@ -4720,7 +4720,7 @@ channel_tender(void* arg)
 		DETAIL("tending channel");
 
 		for (int32_t i = 0; i < nevents; i++) {
-			cf_socket* socket = events[i].data;
+			cf_socket* socket = events[i].data.ptr;
 			if (channel_cf_sockets_contains(
 					g_hb.channel_state.listening_sockets, socket)
 					&& hb_is_mesh()) {
