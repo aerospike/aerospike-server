@@ -21,3 +21,6 @@
 	path = modules/jemalloc
 	url = https://github.com/aerospike/jemalloc.git
 	ignore = dirty
+[submodule "modules/common"]
+	path = modules/common
+	url = https://github.com/brihh/aerospike-common
