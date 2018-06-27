@@ -1336,20 +1336,6 @@ if (((size) > STACK_ALLOC_LIMIT()) && buffer) {cf_free(buffer);}
 #define DEBUG(format, ...) cf_debug(AS_CLUSTERING, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_CLUSTERING, format, ##__VA_ARGS__)
 
-#ifdef TRACE_ENABLED
-#define TRACE(format, ...) cf_detail(AS_CLUSTERING, format, ##__VA_ARGS__)
-#else
-#define TRACE(format, ...)
-#endif
-
-#ifdef TRACE_ENABLED
-#define TRACE_LOG(context, format, ...) cf_detail(context, format, ##__VA_ARGS__)
-#else
-#define TRACE_LOG(context, format, ...)
-#endif
-
-#define CF_TRACE CF_FAULT_SEVERITY_UNDEF
-
 #define ASSERT(expression, message, ...)				\
 if (!(expression)) {WARNING(message, ##__VA_ARGS__);}
 
@@ -2629,12 +2615,12 @@ quantum_interval_earliest_start_time()
 									&g_quantum_interval_generator.fault[i]));
 		}
 
-		TRACE("Fault:%s event_ts:%"PRIu64,
+		DETAIL("Fault:%s event_ts:%"PRIu64,
 				g_quantum_interval_generator.vtable[i].fault_log_str,
 				g_quantum_interval_generator.fault[i].event_ts);
 	}
 
-	TRACE("Last Quantum interval:%"PRIu64,
+	DETAIL("Last Quantum interval:%"PRIu64,
 			g_quantum_interval_generator.last_quantum_start_time);
 
 	cf_clock start_time = g_quantum_interval_generator.last_quantum_start_time
@@ -5609,7 +5595,7 @@ register_is_sycn_pending()
 	CLUSTERING_LOCK();
 	bool sync_pending = cf_vector_size(&g_register.sync_pending) > 0;
 	log_cf_node_vector("pending register sync:", &g_register.sync_pending,
-			CF_TRACE);
+			CF_DETAIL);
 	CLUSTERING_UNLOCK();
 	return sync_pending;
 }
@@ -8112,7 +8098,7 @@ as_clustering_cf_node_array_event(cf_fault_severity severity,
 		cf_fault_context context, char* file_name, int line, char* message,
 		cf_node* nodes, int node_count)
 {
-	if (!cf_context_at_severity(context, severity) && severity != CF_TRACE) {
+	if (!cf_context_at_severity(context, severity) && severity != CF_DETAIL) {
 		return;
 	}
 
