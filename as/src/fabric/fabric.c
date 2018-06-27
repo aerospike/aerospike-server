@@ -2201,7 +2201,7 @@ run_fabric_recv(void *arg)
 		int32_t n = cf_poll_wait(poll, events, FABRIC_EPOLL_RECV_EVENTS, -1);
 
 		for (int32_t i = 0; i < n; i++) {
-			fabric_connection *fc = events[i].data;
+			fabric_connection *fc = events[i].data.ptr;
 
 			if (fc->node && ! fc->node->live) {
 				fabric_connection_disconnect(fc);
@@ -2266,7 +2266,7 @@ run_fabric_send(void *arg)
 		int32_t n = cf_poll_wait(poll, events, FABRIC_EPOLL_SEND_EVENTS, -1);
 
 		for (int32_t i = 0; i < n; i++) {
-			fabric_connection *fc = events[i].data;
+			fabric_connection *fc = events[i].data.ptr;
 
 			if (fc->node && ! fc->node->live) {
 				fabric_connection_disconnect(fc);
@@ -2336,7 +2336,7 @@ run_fabric_accept(void *arg)
 		int32_t n = cf_poll_wait(g_accept_poll, events, 64, -1);
 
 		for (int32_t i = 0; i < n; i++) {
-			cf_socket *ssock = events[i].data;
+			cf_socket *ssock = events[i].data.ptr;
 
 			if (cf_sockets_has_socket(&sockset, ssock)) {
 				cf_socket csock;
@@ -2367,7 +2367,7 @@ run_fabric_accept(void *arg)
 				cf_poll_add_socket(g_accept_poll, &fc->sock, events, fc);
 			}
 			else {
-				fabric_connection *fc = events[i].data;
+				fabric_connection *fc = events[i].data.ptr;
 
 				if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
 					fabric_connection_release(fc);
