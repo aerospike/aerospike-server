@@ -2378,10 +2378,22 @@ ssd_read_header(drv_ssd *ssd)
 	as_namespace *ns = ssd->ns;
 
 	bool use_shadow = ns->cold_start && ssd->shadow_name;
-	const char *ssd_name = use_shadow ? ssd->shadow_name : ssd->name;
-	int fd = use_shadow ? ssd_shadow_fd_get(ssd) : ssd_fd_get(ssd);
 
-	size_t read_size = BYTES_UP_TO_IO_MIN(ssd, sizeof(ssd_device_header));
+	const char *ssd_name;
+	int fd;
+	size_t read_size;
+
+	if (use_shadow) {
+		ssd_name = ssd->shadow_name;
+		fd = ssd_shadow_fd_get(ssd);
+		read_size = BYTES_UP_TO_SHADOW_IO_MIN(ssd, sizeof(ssd_device_header));
+	}
+	else {
+		ssd_name = ssd->name;
+		fd = ssd_fd_get(ssd);
+		read_size = BYTES_UP_TO_IO_MIN(ssd, sizeof(ssd_device_header));
+	}
+
 	ssd_device_header *header = cf_valloc(read_size);
 
 	if (pread(fd, (void*)header, read_size, 0) != (ssize_t)read_size) {
@@ -2487,17 +2499,17 @@ ssd_empty_header(int fd, const char* device_name)
 void
 ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size)
 {
-	off_t orig_offset = from - header;
+	off_t offset = from - header;
 
-	off_t offset = BYTES_DOWN_TO_IO_MIN(ssd, orig_offset);
-	off_t end_offset = BYTES_UP_TO_IO_MIN(ssd, orig_offset + size);
+	off_t flush_offset = BYTES_DOWN_TO_IO_MIN(ssd, offset);
+	off_t flush_end_offset = BYTES_UP_TO_IO_MIN(ssd, offset + size);
 
-	from = header + offset;
-	size = end_offset - offset;
+	uint8_t *flush = header + flush_offset;
+	size_t flush_sz = flush_end_offset - flush_offset;
 
 	int fd = ssd_fd_get(ssd);
 
-	if (pwrite(fd, (void*)from, size, offset) != (ssize_t)size) {
+	if (pwrite(fd, (void*)flush, flush_sz, flush_offset) != (ssize_t)flush_sz) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->name, errno, cf_strerror(errno));
 	}
@@ -2508,9 +2520,15 @@ ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size)
 		return;
 	}
 
+	flush_offset = BYTES_DOWN_TO_SHADOW_IO_MIN(ssd, offset);
+	flush_end_offset = BYTES_UP_TO_SHADOW_IO_MIN(ssd, offset + size);
+
+	flush = header + flush_offset;
+	flush_sz = flush_end_offset - flush_offset;
+
 	fd = ssd_shadow_fd_get(ssd);
 
-	if (pwrite(fd, (void*)from, size, offset) != (ssize_t)size) {
+	if (pwrite(fd, (void*)flush, flush_sz, flush_offset) != (ssize_t)flush_sz) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->shadow_name, errno, cf_strerror(errno));
 	}
@@ -3478,6 +3496,8 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 					ssd->shadow_name, size, ssd->file_size);
 		}
 
+		ssd->shadow_io_min_size = find_io_min_size(fd, ssd->shadow_name);
+
 		if (ns->cold_start && ns->storage_cold_start_empty) {
 			ssd_empty_header(fd, ssd->shadow_name);
 
@@ -3487,8 +3507,8 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 
 		close(fd);
 
-		cf_info(AS_DRV_SSD, "shadow device %s is compatible with main device",
-				ssd->shadow_name);
+		cf_info(AS_DRV_SSD, "shadow device %s is compatible with main device, shadow-io-min-size %lu",
+				ssd->shadow_name, ssd->shadow_io_min_size);
 
 		if (ns->storage_scheduler_mode) {
 			// Set scheduler mode specified in config file.

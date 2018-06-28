@@ -263,7 +263,10 @@ typedef struct drv_ssd_s {
 	bool			data_in_memory;
 
 	uint64_t		io_min_size;		// device IO operations are aligned and sized in multiples of this
-	uint64_t		commit_min_size;	// commit (write) operations are aligned and sized in multiples of this
+	uint64_t		shadow_io_min_size;	// shadow device IO operations are aligned and sized in multiples of this
+
+	uint64_t		commit_min_size;		// commit (write) operations are aligned and sized in multiples of this
+	uint64_t		shadow_commit_min_size;	// shadow commit (write) operations are aligned and sized in multiples of this
 
 	cf_atomic64		inuse_size;			// number of bytes in actual use on this device
 
@@ -498,6 +501,18 @@ static inline uint64_t BYTES_DOWN_TO_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 // Round bytes up to a multiple of device's minimum IO operation size.
 static inline uint64_t BYTES_UP_TO_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 	return (bytes + (ssd->io_min_size - 1)) & -ssd->io_min_size;
+}
+
+// Round bytes down to a multiple of shadow device's minimum IO operation size.
+static inline uint64_t
+BYTES_DOWN_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
+	return bytes & -ssd->shadow_io_min_size;
+}
+
+// Round bytes up to a multiple of shadow device's minimum IO operation size.
+static inline uint64_t
+BYTES_UP_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
+	return (bytes + (ssd->shadow_io_min_size - 1)) & -ssd->shadow_io_min_size;
 }
 
 
