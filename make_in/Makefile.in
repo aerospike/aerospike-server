@@ -75,6 +75,11 @@ ifneq ($(ARCH),$(filter $(ARCH),ppc64 ppc64le))
   COMMON_CFLAGS += -march=nocona
 endif
 
+# The type char is unsigned by default on PPC -- we want signed
+ifeq ($(ARCH),$(filter $(ARCH),ppc64 ppc64le))
+  COMMON_CFLAGS += -fsigned-char
+endif
+
 # Generate dependency files.
 COMMON_CFLAGS += -MMD
 

@@ -1348,7 +1348,8 @@ if (((size) > STACK_ALLOC_LIMIT()) && buffer) {cf_free(buffer);}
 #define TRACE_LOG(context, format, ...)
 #endif
 
-#define CF_TRACE CF_FAULT_SEVERITY_UNDEF
+//bri//#define CF_TRACE CF_FAULT_SEVERITY_UNDEF
+#define CF_TRACE CF_DETAIL
 
 #define ASSERT(expression, message, ...)				\
 if (!(expression)) {WARNING(message, ##__VA_ARGS__);}

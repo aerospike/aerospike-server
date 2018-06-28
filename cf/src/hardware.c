@@ -376,6 +376,7 @@ read_index(const char *path, uint16_t *val)
 	char *end;
 	uint64_t x = strtoul(buff, &end, 10);
 
+	x = (x / 8) & 0x0F; // hack for Power numbering
 	if (*end != '\0' || x >= CPU_SETSIZE) {
 		cf_warning(CF_HARDWARE, "invalid index \"%s\" in %s", buff, path);
 		return FILE_RES_ERROR;

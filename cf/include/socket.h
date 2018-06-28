@@ -153,11 +153,7 @@ typedef struct cf_poll_s {
 	int32_t fd;
 } __attribute__((packed)) cf_poll;
 
-// This precisely matches the epoll_event struct.
-typedef struct cf_poll_event_s {
-	uint32_t events;
-	void *data;
-} __attribute__((packed)) cf_poll_event;
+typedef struct epoll_event cf_poll_event;
 
 typedef struct cf_msock_cfg_s {
 	cf_sock_owner owner;

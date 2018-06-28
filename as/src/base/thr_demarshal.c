@@ -436,7 +436,7 @@ thr_demarshal(void *unused)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			cf_socket *ssock = events[i].data;
+			cf_socket *ssock = events[i].data.ptr;
 
 			if (cf_sockets_has_socket(&g_sockets, ssock)) {
 				// Accept new connections on the service socket.
@@ -543,7 +543,7 @@ thr_demarshal(void *unused)
 			}
 			else {
 				bool has_extra_ref   = false;
-				as_file_handle *fd_h = events[i].data;
+				as_file_handle *fd_h = events[i].data.ptr;
 				if (fd_h == 0) {
 					cf_info(AS_DEMARSHAL, "event with null handle, continuing");
 					goto NextEvent;
