@@ -611,7 +611,7 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "tip command received: params %s", params);
 
-	char host_str[50];
+	char host_str[DNS_NAME_MAX_SIZE];
 	int  host_str_len = sizeof(host_str);
 
 	char port_str[50];
@@ -628,7 +628,7 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 	 */
 
 	if (0 != as_info_parameter_get(params, "host", host_str, &host_str_len)) {
-		cf_warning(AS_INFO, "tip command: no host, must add a host parameter");
+		cf_warning(AS_INFO, "tip command: no host, must add a host parameter - maximum %d characters", DNS_NAME_MAX_LEN);
 		goto Exit;
 	}
 

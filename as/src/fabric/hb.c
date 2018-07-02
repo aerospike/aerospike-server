@@ -644,7 +644,7 @@ typedef struct as_hb_mesh_seed_s
 	/**
 	 * The name / ip address of this seed mesh host.
 	 */
-	char seed_host_name[HOST_NAME_MAX];
+	char seed_host_name[DNS_NAME_MAX_SIZE];
 
 	/**
 	 * The port of this seed mesh host.
@@ -1373,7 +1373,8 @@ typedef struct as_hb_mesh_tip_clear_udata_s
 	/**
 	 * Host IP or DNS name to be cleared from seed list.
 	 */
-	char host[HOST_NAME_MAX];
+	char host[DNS_NAME_MAX_SIZE];
+
 	/**
 	 * Listening port of the host.
 	 */
@@ -2278,9 +2279,9 @@ as_hb_mesh_tip_clear(char* host, int port)
 		return (-1);
 	}
 
-	if (host == NULL || host[0] == '\0'
-			|| strnlen(host, HOST_NAME_MAX) == HOST_NAME_MAX) {
-		WARNING("incorrect host or port");
+	if (host == NULL || host[0] == 0
+			|| strnlen(host, DNS_NAME_MAX_SIZE) == DNS_NAME_MAX_SIZE) {
+		WARNING("invalid tip clear host:%s or port:%d", host, port);
 		return (-1);
 	}
 
@@ -2295,7 +2296,7 @@ as_hb_mesh_tip_clear(char* host, int port)
 	// tip-clear should only be used to cleanup seed list after decommisioning
 	// an ip.
 	as_hb_mesh_tip_clear_udata mesh_tip_clear_reduce_udata;
-	strncpy(mesh_tip_clear_reduce_udata.host, host, HOST_NAME_MAX);
+	strncpy(mesh_tip_clear_reduce_udata.host, host, DNS_NAME_MAX_SIZE);
 	mesh_tip_clear_reduce_udata.port = port;
 	mesh_tip_clear_reduce_udata.entry_deleted = false;
 	mesh_tip_clear_reduce_udata.nodeid = 0;
@@ -3850,7 +3851,7 @@ channel_accept_connection(cf_socket* lsock)
 	// Update the stats to reflect to a new connection opened.
 	cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
 
-	char caddr_str[HOST_NAME_MAX];
+	char caddr_str[DNS_NAME_MAX_SIZE];
 	cf_sock_addr_to_string_safe(&caddr, caddr_str, sizeof(caddr_str));
 	DEBUG("new connection from %s", caddr_str);
 
@@ -6732,11 +6733,11 @@ mesh_tip(char* host, int port, bool tls)
 	as_hb_mesh_seed new_seed = { { 0 } };
 
 	// Check validity of hostname and port.
-	int hostname_len = strnlen(host, HOST_NAME_MAX);
-	if (hostname_len <= 0 || hostname_len == HOST_NAME_MAX) {
+	int hostname_len = strnlen(host, DNS_NAME_MAX_SIZE);
+	if (hostname_len <= 0 || hostname_len == DNS_NAME_MAX_SIZE) {
 		// Invalid hostname.
 		WARNING("mesh seed host %s exceeds allowed %d characters", host,
-				HOST_NAME_MAX);
+				DNS_NAME_MAX_LEN);
 		goto Exit;
 	}
 	if (port <= 0 || port > USHRT_MAX) {
@@ -6993,7 +6994,7 @@ mesh_listening_sockets_open()
 
 	// Compute min MTU across all binding interfaces.
 	int min_mtu = -1;
-	char addr_string[HOST_NAME_MAX];
+	char addr_string[DNS_NAME_MAX_SIZE];
 	for (uint32_t i = 0; i < bind_cfg->n_cfgs; ++i) {
 		const cf_sock_cfg* sock_cfg = &bind_cfg->cfgs[i];
 		cf_ip_addr_to_string_safe(&sock_cfg->addr, addr_string,
@@ -7182,7 +7183,7 @@ multicast_listening_sockets_open()
 
 	// Compute min MTU across all binding interfaces.
 	int min_mtu = -1;
-	char addr_string[HOST_NAME_MAX];
+	char addr_string[DNS_NAME_MAX_SIZE];
 	for (uint32_t i = 0; i < mserv_cfg->n_cfgs; ++i) {
 		const cf_msock_cfg* sock_cfg = &mserv_cfg->cfgs[i];
 		cf_ip_addr_to_string_safe(&sock_cfg->addr, addr_string,
