@@ -2399,8 +2399,12 @@ packed_list_insert(const packed_list *list, as_bin *b,
 	}
 
 	if (mod_flags_is_bounded(mod_flags) && (uint32_t)index > list->ele_count) {
-		result_data_set_int(result, list->ele_count);
-		return AS_PROTO_RESULT_OK; // no-op
+		if (mod_flags_is_no_fail(mod_flags)) {
+			result_data_set_int(result, list->ele_count);
+			return AS_PROTO_RESULT_OK; // no-op
+		}
+
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	uint32_t rm_sz = 0;
