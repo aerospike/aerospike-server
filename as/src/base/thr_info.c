@@ -552,16 +552,41 @@ info_get_replicas(char *name, cf_dyn_buf *db)
 int
 info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 {
-	// Command format: "cluster-stable:namespace=<namespace-name>"
+	// Command format:
+	// "cluster-stable:[size=<target-size>];[namespace=<namespace-name>]"
+
+	uint64_t begin_cluster_key = as_exchange_cluster_key();
 
 	if (! as_partition_balance_are_migrations_allowed()) {
 		cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
 		return 0;
 	}
 
-	char param_str[AS_ID_NAMESPACE_SZ] = { 0 };
-	int param_str_len = (int)sizeof(param_str);
-	int rv = as_info_parameter_get(params, "namespace", param_str, &param_str_len);
+	char size_str[3] = { 0 }; // max cluster size is 128
+	int size_str_len = (int)sizeof(size_str);
+	int rv = as_info_parameter_get(params, "size", size_str, &size_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "size parameter value too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-size");
+		return 0;
+	}
+
+	if (rv == 0) {
+		int target_size;
+
+		cf_str_atoi(size_str, &target_size);
+
+		if (target_size != as_exchange_cluster_size()) {
+			cf_dyn_buf_append_string(db, "ERROR::cluster-not-specified-size");
+			return 0;
+		}
+	}
+
+	char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
+	int ns_name_len = (int)sizeof(ns_name);
+
+	rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
 
 	if (rv == -2) {
 		cf_warning(AS_INFO, "namespace parameter value too long");
@@ -570,28 +595,38 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 	}
 
 	if (rv == -1) {
-		cf_warning(AS_INFO, "namespace not specified");
-		cf_dyn_buf_append_string(db, "ERROR::no-namespace");
-		return 0;
+		// Check if migrations are complete for all namespaces.
+
+		if (as_partition_balance_remaining_migrations() != 0) {
+			cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+			return 0;
+		}
+	}
+	else {
+		// Check if migrations are complete for the requested namespace only.
+		as_namespace *ns = as_namespace_get_byname(ns_name);
+
+		if (! ns) {
+			cf_warning(AS_INFO, "unknown namespace %s", ns_name);
+			cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
+			return 0;
+		}
+
+		if (ns->migrate_tx_partitions_remaining +
+				ns->migrate_rx_partitions_remaining +
+				ns->n_unavailable_partitions +
+				ns->n_dead_partitions != 0) {
+			cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+			return 0;
+		}
 	}
 
-	as_namespace *ns = as_namespace_get_byname(param_str);
-
-	if (! ns) {
-		cf_warning(AS_INFO, "unknown namespace %s", param_str);
-		cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
-		return 0;
-	}
-
-	if (ns->migrate_tx_partitions_remaining +
-			ns->migrate_rx_partitions_remaining +
-			ns->n_unavailable_partitions +
-			ns->n_dead_partitions != 0) {
+	if (begin_cluster_key != as_exchange_cluster_key()) {
+		// Verify that the cluster didn't change while during the collection.
 		cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
-		return 0;
 	}
 
-	cf_dyn_buf_append_uint64_x(db, as_exchange_cluster_key());
+	cf_dyn_buf_append_uint64_x(db, begin_cluster_key);
 
 	return 0;
 }
