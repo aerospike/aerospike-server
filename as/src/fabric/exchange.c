@@ -2437,7 +2437,8 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 		}
 	}
 
-	if (namespace_data->eventual_regime > ns->eventual_regime) {
+	if (ns->eventual_regime != 0 &&
+			namespace_data->eventual_regime > ns->eventual_regime) {
 		ns->eventual_regime = namespace_data->eventual_regime;
 	}
 
@@ -2520,11 +2521,10 @@ exchange_exchanging_pre_commit()
 		memset(ns->roster, 0, sizeof(ns->roster));
 		memset(ns->roster_rack_ids, 0, sizeof(ns->roster_rack_ids));
 
-		ns->eventual_regime = 0;
+		// Note - not clearing ns->eventual_regime - prior non-0 value means CP.
 		// Note - not clearing ns->rebalance_regime - it's not set here.
 		memset(ns->rebalance_regimes, 0, sizeof(ns->rebalance_regimes));
 
-		// Reset ns cluster size to zero.
 		ns->cluster_size = 0;
 	}
 
