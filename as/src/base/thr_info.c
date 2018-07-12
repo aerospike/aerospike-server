@@ -553,7 +553,7 @@ int
 info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 {
 	// Command format:
-	// "cluster-stable:[size=<target-size>];[namespace=<namespace-name>]"
+	// "cluster-stable:[size=<target-size>];[ignore-migrations=<bool>];[namespace=<namespace-name>]"
 
 	uint64_t begin_cluster_key = as_exchange_cluster_key();
 
@@ -583,41 +583,73 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 		}
 	}
 
-	char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
-	int ns_name_len = (int)sizeof(ns_name);
+	bool ignore_migrations = false;
 
-	rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
+	char ignore_migrations_str[5] = { 0 };
+	int ignore_migrations_str_len = (int)sizeof(ignore_migrations_str);
+
+	rv = as_info_parameter_get(params, "ignore-migrations",
+			ignore_migrations_str, &ignore_migrations_str_len);
 
 	if (rv == -2) {
-		cf_warning(AS_INFO, "namespace parameter value too long");
-		cf_dyn_buf_append_string(db, "ERROR::bad-namespace");
+		cf_warning(AS_INFO, "ignore-migrations value too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-ignore-migrations");
 		return 0;
 	}
 
-	if (rv == -1) {
-		// Check if migrations are complete for all namespaces.
-
-		if (as_partition_balance_remaining_migrations() != 0) {
-			cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+	if (rv == 0) {
+		if (strcmp(ignore_migrations_str, "true") == 0 ||
+				strcmp(ignore_migrations_str, "yes") == 0) {
+			ignore_migrations = true;
+		}
+		else if (strcmp(ignore_migrations_str, "false") == 0 ||
+				strcmp(ignore_migrations_str, "no") == 0) {
+			ignore_migrations = false;
+		}
+		else {
+			cf_warning(AS_INFO, "ignore-migrations value invalid");
+			cf_dyn_buf_append_string(db, "ERROR::bad-ignore-migrations");
 			return 0;
 		}
 	}
-	else {
-		// Check if migrations are complete for the requested namespace only.
-		as_namespace *ns = as_namespace_get_byname(ns_name);
 
-		if (! ns) {
-			cf_warning(AS_INFO, "unknown namespace %s", ns_name);
-			cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
+	if (! ignore_migrations) {
+		char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
+		int ns_name_len = (int)sizeof(ns_name);
+
+		rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
+
+		if (rv == -2) {
+			cf_warning(AS_INFO, "namespace parameter value too long");
+			cf_dyn_buf_append_string(db, "ERROR::bad-namespace");
 			return 0;
 		}
 
-		if (ns->migrate_tx_partitions_remaining +
-				ns->migrate_rx_partitions_remaining +
-				ns->n_unavailable_partitions +
-				ns->n_dead_partitions != 0) {
-			cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
-			return 0;
+		if (rv == -1) {
+			// Ensure migrations are complete for all namespaces.
+
+			if (as_partition_balance_remaining_migrations() != 0) {
+				cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+				return 0;
+			}
+		}
+		else {
+			// Ensure migrations are complete for the requested namespace only.
+			as_namespace *ns = as_namespace_get_byname(ns_name);
+
+			if (! ns) {
+				cf_warning(AS_INFO, "unknown namespace %s", ns_name);
+				cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
+				return 0;
+			}
+
+			if (ns->migrate_tx_partitions_remaining +
+					ns->migrate_rx_partitions_remaining +
+					ns->n_unavailable_partitions +
+					ns->n_dead_partitions != 0) {
+				cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+				return 0;
+			}
 		}
 	}
 
