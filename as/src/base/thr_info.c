@@ -573,9 +573,13 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 	}
 
 	if (rv == 0) {
-		int target_size;
+		uint32_t target_size;
 
-		cf_str_atoi(size_str, &target_size);
+		if (cf_str_atoi_u32(size_str, &target_size) != 0) {
+			cf_warning(AS_INFO, "non-integer size parameter");
+			cf_dyn_buf_append_string(db, "ERROR::bad-size");
+			return 0;
+		}
 
 		if (target_size != as_exchange_cluster_size()) {
 			cf_dyn_buf_append_string(db, "ERROR::cluster-not-specified-size");
@@ -6160,7 +6164,11 @@ info_command_histogram(char *name, char *params, cf_dyn_buf *db)
 	int set_name_str_len = sizeof(set_name_str);
 	set_name_str[0] = 0;
 
-	as_info_parameter_get(params, "set", set_name_str, &set_name_str_len);
+	if (as_info_parameter_get(params, "set", set_name_str, &set_name_str_len) == -2) {
+		cf_warning(AS_INFO, "set name too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-set-name");
+		return 0;
+	}
 
 	as_namespace_get_hist_info(ns, set_name_str, value_str, db);
 

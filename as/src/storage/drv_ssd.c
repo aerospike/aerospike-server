@@ -533,11 +533,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 	// fresh device), so derive it from the digest each time.
 	drv_ssd *ssd = &ssds->ssds[ssd_get_file_id(ssds, &block->keyd)];
 
-	if (! ssd) {
-		cf_warning(AS_DRV_SSD, "{%s} defrag_move_record: no drv_ssd for file_id %u",
-				ssds->ns->name, ssd->file_id);
-		return;
-	}
+	cf_assert(ssd, AS_DRV_SSD, "{%s} null ssd", ssds->ns->name);
 
 	uint32_t ssd_n_rblocks = block->n_rblocks;
 	uint32_t write_size = N_RBLOCKS_TO_SIZE(ssd_n_rblocks);
@@ -1865,13 +1861,7 @@ ssd_write(as_storage_rd *rd)
 	// fresh device), so derive it from the digest each time.
 	rd->ssd = &ssds->ssds[ssd_get_file_id(ssds, &r->keyd)];
 
-	drv_ssd *ssd = rd->ssd;
-
-	if (! ssd) {
-		cf_warning(AS_DRV_SSD, "{%s} ssd_write: no drv_ssd for file_id %u",
-				rd->ns->name, ssd_get_file_id(ssds, &r->keyd));
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
-	}
+	cf_assert(rd->ssd, AS_DRV_SSD, "{%s} null ssd", rd->ns->name);
 
 	int rv = ssd_write_bins(rd);
 
