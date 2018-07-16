@@ -553,6 +553,7 @@ typedef enum {
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
 	CASE_NAMESPACE_PARTITION_TREE_SPRIGS,
+	CASE_NAMESPACE_PREFER_UNIFORM_BALANCE,
 	CASE_NAMESPACE_RACK_ID,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
 	CASE_NAMESPACE_SET_BEGIN,
@@ -1089,6 +1090,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
 		{ "partition-tree-sprigs",			CASE_NAMESPACE_PARTITION_TREE_SPRIGS },
+		{ "prefer-uniform-balance",			CASE_NAMESPACE_PREFER_UNIFORM_BALANCE },
 		{ "rack-id",						CASE_NAMESPACE_RACK_ID },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
@@ -3112,6 +3114,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_PARTITION_TREE_SPRIGS:
 				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, NUM_LOCK_PAIRS, 1 << NUM_SPRIG_BITS);
+				break;
+			case CASE_NAMESPACE_PREFER_UNIFORM_BALANCE:
+				cfg_enterprise_only(&line);
+				ns->cfg_prefer_uniform_balance = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_RACK_ID:
 				cfg_enterprise_only(&line);

@@ -189,17 +189,17 @@ typedef struct as_exchange_node_namespace_data_s
 	as_exchange_ns_vinfos_payload* partition_versions;
 
 	/**
-	 * Sending node's rack id for this namespace.
+	 * Sender's rack id.
 	 */
 	uint32_t rack_id;
 
 	/**
-	 * Sending node's roster generation for this namespace.
+	 * Sender's roster generation.
 	 */
 	uint32_t roster_generation;
 
 	/**
-	 * Sending node's roster count for this namespace.
+	 * Sender's roster count.
 	 */
 	uint32_t roster_count;
 
@@ -222,6 +222,11 @@ typedef struct as_exchange_node_namespace_data_s
 	 * Sender's rebalance regime for this namespace.
 	 */
 	uint32_t rebalance_regime;
+
+	/**
+	 * Sender's rebalance flags for this namespace.
+	 */
+	uint32_t rebalance_flags;
 } as_exchange_node_namespace_data;
 
 /**
@@ -490,7 +495,7 @@ typedef struct as_exchange_s
 	cf_shash* nodeid_to_node_state;
 
 	/**
-	 * This node's data payload for current round.
+	 * Self node's partition version payload for current round.
 	 */
 	cf_dyn_buf self_data_dyn_buf[AS_NAMESPACE_SZ];
 
@@ -568,7 +573,6 @@ typedef struct as_exchange_external_event_publisher_s
 	uint32_t event_listener_count;
 } as_exchange_external_event_publisher;
 
-
 /*
  * ----------------------------------------------------------------------------
  * Externs
@@ -589,6 +593,14 @@ as_skew_monitor_update();
 static as_exchange g_exchange = { 0 };
 
 /**
+ * Rebalance flags.
+ */
+typedef enum
+{
+	AS_EXCHANGE_REBALANCE_FLAG_UNIFORM = 0x01
+} as_exchange_rebalance_flags;
+
+/**
  * The fields in the exchange message. Should never change the order or elements
  * in between.
  */
@@ -605,6 +617,7 @@ typedef enum
 	AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS,
 	AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES,
 	AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
+	AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
 
 	NUM_EXCHANGE_MSG_FIELDS
 } as_exchange_msg_fields;
@@ -623,7 +636,8 @@ static const msg_template exchange_msg_template[] = {
 		{ AS_EXCHANGE_MSG_NS_ROSTERS, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK }
+		{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK },
+		{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK }
 };
 
 COMPILER_ASSERT(sizeof(exchange_msg_template) / sizeof(msg_template) ==
@@ -1474,6 +1488,11 @@ exchange_msg_data_payload_set(msg* msg)
 	uint32_t eventual_regimes[ns_count];
 	uint32_t rebalance_regimes[ns_count];
 
+	bool have_rebalance_flags = false;
+	uint32_t rebalance_flags[ns_count];
+
+	memset(rebalance_flags, 0, sizeof(rebalance_flags));
+
 	pthread_mutex_lock(&g_exchanged_info_lock);
 
 	for (uint32_t ns_ix = 0; ns_ix < ns_count; ns_ix++) {
@@ -1526,6 +1545,14 @@ exchange_msg_data_payload_set(msg* msg)
 		if (eventual_regimes[ns_ix] != 0 || rebalance_regimes[ns_ix] != 0) {
 			have_regimes = true;
 		}
+
+		if (ns->cfg_prefer_uniform_balance) {
+			rebalance_flags[ns_ix] |= AS_EXCHANGE_REBALANCE_FLAG_UNIFORM;
+		}
+
+		if (rebalance_flags[ns_ix] != 0) {
+			have_rebalance_flags = true;
+		}
 	}
 
 	msg_msgpack_list_set_buf(msg, AS_EXCHANGE_MSG_NAMESPACES, &namespace_list);
@@ -1550,6 +1577,11 @@ exchange_msg_data_payload_set(msg* msg)
 				eventual_regimes, ns_count);
 		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
 				rebalance_regimes, ns_count);
+	}
+
+	if (have_rebalance_flags) {
+		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
+				rebalance_flags, ns_count);
 	}
 
 	pthread_mutex_unlock(&g_exchanged_info_lock);
@@ -1851,10 +1883,10 @@ exchange_data_namespace_payload_add(as_namespace* ns, cf_dyn_buf* dyn_buf)
 }
 
 /**
- * Prepare the exchanged data payloads.
+ * Prepare the exchanged data payloads for current exchange round.
  */
 static void
-exchange_data_payloads_prepare()
+exchange_data_payload_prepare()
 {
 	EXCHANGE_LOCK();
 
@@ -1956,6 +1988,16 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 					&num_namespace_elements_sent)
 					|| num_namespaces_sent != num_namespace_elements_sent)) {
 		WARNING("received invalid rebalance regimes from node %"PRIx64,
+				msg_event->msg_source);
+		return 0;
+	}
+
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS)
+			&& (!msg_msgpack_container_get_count(msg_event->msg,
+					AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
+					&num_namespace_elements_sent)
+					|| num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid rebalance flags from node %"PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
@@ -2244,8 +2286,8 @@ exchange_cluster_change_handle(as_clustering_event* clustering_event)
 	INFO("data exchange started with cluster key %"PRIx64,
 			g_exchange.cluster_key);
 
-	// Prepare the data payloads.
-	exchange_data_payloads_prepare();
+	// Prepare the data payload.
+	exchange_data_payload_prepare();
 
 	EXCHANGE_UNLOCK();
 
@@ -2443,6 +2485,12 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 	}
 
 	ns->rebalance_regimes[sl_ix] = namespace_data->rebalance_regime;
+
+	// Prefer uniform balance only if all nodes prefer it.
+	if ((namespace_data->rebalance_flags &
+			AS_EXCHANGE_REBALANCE_FLAG_UNIFORM) == 0) {
+		ns->prefer_uniform_balance = false;
+	}
 }
 
 /**
@@ -2526,6 +2574,9 @@ exchange_exchanging_pre_commit()
 		memset(ns->rebalance_regimes, 0, sizeof(ns->rebalance_regimes));
 
 		ns->cluster_size = 0;
+
+		// Any node that does not prefer uniform balance will set this false.
+		ns->prefer_uniform_balance = true;
 	}
 
 	// Fill the namespace partition version info in succession list order.
@@ -2537,7 +2588,7 @@ exchange_exchanging_pre_commit()
 	}
 
 	// Collected all exchanged data - do final configuration consistency checks.
-	if (! exchange_data_pre_commit_ap_cp_check()) {
+	if (!exchange_data_pre_commit_ap_cp_check()) {
 		WARNING("abandoned exchange - fix configuration conflict");
 		pthread_mutex_unlock(&g_exchanged_info_lock);
 		EXCHANGE_UNLOCK();
@@ -2653,9 +2704,11 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 
 		uint32_t eventual_regimes[num_namespaces_sent];
 		uint32_t rebalance_regimes[num_namespaces_sent];
+		uint32_t rebalance_flags[num_namespaces_sent];
 
 		memset(eventual_regimes, 0, sizeof(eventual_regimes));
 		memset(rebalance_regimes, 0, sizeof(rebalance_regimes));
+		memset(rebalance_flags, 0, sizeof(rebalance_flags));
 
 		if (!msg_msgpack_list_get_buf_array_presized(msg_event->msg,
 				AS_EXCHANGE_MSG_NAMESPACES, &namespace_list)) {
@@ -2730,6 +2783,17 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			goto Exit;
 		}
 
+		uint32_t num_rebalance_flags = num_namespaces_sent;
+
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS)
+				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+						AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, rebalance_flags,
+						&num_rebalance_flags)) {
+			WARNING("received invalid rebalance flags from node %"PRIx64,
+					msg_event->msg_source);
+			goto Exit;
+		}
+
 		node_state.data->num_namespaces = 0;
 
 		for (uint32_t i = 0; i < num_namespaces_sent; i++) {
@@ -2753,6 +2817,7 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			namespace_data->roster_generation = roster_generations[i];
 			namespace_data->eventual_regime = eventual_regimes[i];
 			namespace_data->rebalance_regime = rebalance_regimes[i];
+			namespace_data->rebalance_flags = rebalance_flags[i];
 
 			// Copy partition versions.
 			msg_buf_ele* partition_versions_element = cf_vector_getp(
@@ -2794,8 +2859,8 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 					goto Exit;
 				}
 
-				namespace_data->roster =
-						cf_realloc(namespace_data->roster, roster_ele->sz);
+				namespace_data->roster = cf_realloc(namespace_data->roster,
+						roster_ele->sz);
 
 				memcpy(namespace_data->roster, roster_ele->ptr, roster_ele->sz);
 
@@ -2807,17 +2872,18 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 					if (rri_ele->sz != 0) {
 						rri_ele_sz = rri_ele->sz;
 
-						if (rri_ele_sz !=
-								namespace_data->roster_count * sizeof(uint32_t)) {
+						if (rri_ele_sz
+								!= namespace_data->roster_count
+										* sizeof(uint32_t)) {
 							WARNING(
 									"received invalid roster-rack-ids for namespace %s from node %"PRIx64,
-									matching_namespace->name, msg_event->msg_source);
+									matching_namespace->name,
+									msg_event->msg_source);
 							goto Exit;
 						}
 
-						namespace_data->roster_rack_ids =
-								cf_realloc(namespace_data->roster_rack_ids,
-										rri_ele_sz);
+						namespace_data->roster_rack_ids = cf_realloc(
+								namespace_data->roster_rack_ids, rri_ele_sz);
 
 						memcpy(namespace_data->roster_rack_ids, rri_ele->ptr,
 								rri_ele_sz);

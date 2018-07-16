@@ -1790,6 +1790,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
+	info_append_bool(db, "prefer-uniform-balance", ns->cfg_prefer_uniform_balance);
 	info_append_uint32(db, "rack-id", ns->rack_id);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
@@ -3160,6 +3161,23 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of geo2dsphere-within-max-cells of ns %s from %d to %d ",
 					ns->name, ns->geo2dsphere_within_max_cells, val);
 			ns->geo2dsphere_within_max_cells = val;
+		}
+		else if (0 == as_info_parameter_get(params, "prefer-uniform-balance", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "prefer-uniform-balance is enterprise-only");
+				goto Error;
+			}
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of prefer-uniform-balance of ns %s from %s to %s", ns->name, bool_val[ns->cfg_prefer_uniform_balance], context);
+				ns->cfg_prefer_uniform_balance = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of prefer-uniform-balance of ns %s from %s to %s", ns->name, bool_val[ns->cfg_prefer_uniform_balance], context);
+				ns->cfg_prefer_uniform_balance = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else {
 			if (as_xdr_set_config_ns(ns->name, params) == false) {
@@ -5824,6 +5842,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
 	}
+
+	// Partition balance state.
+
+	info_append_bool(db, "effective_prefer_uniform_balance", ns->prefer_uniform_balance);
 
 	// Migration stats.
 

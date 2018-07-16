@@ -756,6 +756,8 @@ struct as_namespace_s {
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
+	bool			cfg_prefer_uniform_balance; // relevant only for enterprise edition
+	bool			prefer_uniform_balance; // indirect config - can become disabled if any other node reports disabled
 	uint32_t		rack_id;
 	as_read_consistency_level read_consistency_level;
 	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin

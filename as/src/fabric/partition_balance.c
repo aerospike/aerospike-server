@@ -1,7 +1,7 @@
 /*
  * partition_balance.c
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -38,7 +38,6 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
-#include "compare.h"
 #include "fault.h"
 #include "node.h"
 
@@ -98,7 +97,6 @@ void drop_trees(as_partition* p);
 // Helpers - balance partitions.
 void fill_global_tables();
 void apply_single_replica_limit_ap(as_namespace* ns);
-uint32_t rack_count(const as_namespace* ns);
 int find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns);
 uint32_t find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t working_master_n, cf_node dupls[]);
 void advance_version_ap(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns, uint32_t self_n,	uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[]);
@@ -613,8 +611,6 @@ drop_trees(as_partition* p)
 // Local helpers - balance partitions.
 //
 
-// fill_global_tables()
-//
 //  Succession list - all nodes in cluster
 //  +---------------+
 //  | A | B | C | D |
@@ -719,9 +715,10 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 	uint32_t n_racks = rack_count(ns);
 
-	// If a namespace is not on all nodes or is rack aware, it can't use the
-	// global node sequence and index tables.
-	bool ns_not_equal_global = ns_less_than_global || n_racks != 1;
+	// If a namespace is not on all nodes or is rack aware or uniform balance
+	// is preferred, it can't use the global node sequence and index tables.
+	bool ns_not_equal_global = ns_less_than_global || n_racks != 1 ||
+			ns->prefer_uniform_balance;
 
 	// The translation array is used to convert global table rows to namespace
 	// rows, if  necessary.
@@ -729,6 +726,17 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 	if (ns_less_than_global) {
 		fill_translation(translation, ns);
+	}
+
+	uint32_t claims_size = ns->prefer_uniform_balance ?
+			ns->replication_factor * ns->cluster_size : 0;
+	uint32_t claims[claims_size];
+	uint32_t target_claims[claims_size];
+
+	if (ns->prefer_uniform_balance) {
+		memset(claims, 0, sizeof(claims));
+		init_target_claims(ns->replication_factor, ns->cluster_size,
+				target_claims);
 	}
 
 	uint32_t ns_pending_immigrations = 0;
@@ -758,7 +766,12 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			fill_namespace_rows(full_node_seq, full_sl_ix, ns_node_seq,
 					ns_sl_ix, ns, translation);
 
-			if (n_racks != 1) {
+			if (ns->prefer_uniform_balance) {
+				uniform_adjust_row(ns_node_seq, ns->cluster_size, ns_sl_ix,
+						ns->replication_factor, claims, target_claims,
+						ns->rack_ids, n_racks);
+			}
+			else if (n_racks != 1) {
 				rack_aware_adjust_row(ns_node_seq, ns_sl_ix,
 						ns->replication_factor, ns->rack_ids, ns->cluster_size,
 						n_racks, 1);
@@ -900,31 +913,6 @@ apply_single_replica_limit_ap(as_namespace* ns)
 
 	cf_info(AS_PARTITION, "{%s} replication factor is %u", ns->name,
 			ns->replication_factor);
-}
-
-uint32_t
-rack_count(const as_namespace* ns)
-{
-	uint32_t ids[ns->cluster_size];
-
-	memcpy(ids, ns->rack_ids, sizeof(ids));
-	qsort(ids, ns->cluster_size, sizeof(uint32_t), cf_compare_uint32_desc);
-
-	if (ids[0] == ids[ns->cluster_size - 1]) {
-		return 1; // common path - not rack-aware
-	}
-
-	uint32_t n_racks = 1;
-	uint32_t cur_id = ids[0];
-
-	for (uint32_t i = 1; i < ns->cluster_size; i++) {
-		if (ids[i] != cur_id) {
-			cur_id = ids[i];
-			n_racks++;
-		}
-	}
-
-	return n_racks;
 }
 
 void
