@@ -92,6 +92,7 @@ void log_line_appeals(as_namespace* ns);
 void log_line_migrations(as_namespace* ns);
 void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 		size_t sindex_mem, size_t data_mem);
+void log_line_persistent_index_usage(as_namespace* ns, size_t used_size);
 void log_line_device_usage(as_namespace* ns);
 
 void log_line_client(as_namespace* ns);
@@ -189,7 +190,9 @@ log_ticker_frame(uint64_t delta_time)
 		uint64_t n_objects = ns->n_objects;
 		uint64_t n_tombstones = ns->n_tombstones;
 
-		size_t index_mem = as_index_size_get(ns) * (n_objects + n_tombstones);
+		size_t index_used = as_index_size_get(ns) * (n_objects + n_tombstones);
+
+		size_t index_mem = as_namespace_index_persisted(ns) ? 0 : index_used;
 		size_t sindex_mem = ns->n_bytes_sindex_memory;
 		size_t data_mem = ns->n_bytes_memory;
 		size_t total_mem = index_mem + sindex_mem + data_mem;
@@ -204,6 +207,7 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_appeals(ns);
 		log_line_migrations(ns);
 		log_line_memory_usage(ns, total_mem, index_mem, sindex_mem, data_mem);
+		log_line_persistent_index_usage(ns, index_used);
 		log_line_device_usage(ns);
 
 		log_line_client(ns);
@@ -494,6 +498,30 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 				index_mem,
 				sindex_mem,
 				mem_used_pct
+				);
+	}
+}
+
+
+void
+log_line_persistent_index_usage(as_namespace* ns, size_t used_size)
+{
+	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
+		uint64_t used_pct = used_size * 100 / ns->mounts_size_limit;
+
+		cf_info(AS_INFO, "{%s} index-pmem-usage: used-bytes %lu used-pct %lu",
+				ns->name,
+				used_size,
+				used_pct
+				);
+	}
+	else if (ns->xmem_type == CF_XMEM_TYPE_SSD) {
+		uint64_t used_pct = used_size * 100 / ns->mounts_size_limit;
+
+		cf_info(AS_INFO, "{%s} index-device-usage: used-bytes %lu used-pct %lu",
+				ns->name,
+				used_size,
+				used_pct
 				);
 	}
 }

@@ -119,5 +119,5 @@ setup_namespace(as_namespace* ns)
 	uint32_t element_size = as_index_size_get(ns);
 	uint32_t stage_capacity = (uint32_t)(ns->index_stage_size / element_size);
 
-	cf_arenax_init(ns->arena, ns->xmem_type, ns->xmem_type_cfg, 0, element_size, stage_capacity, 0, CF_ARENAX_BIGLOCK);
+	cf_arenax_init(ns->arena, ns->xmem_type, ns->xmem_type_cfg, 0, element_size, 1, stage_capacity, 0, CF_ARENAX_BIGLOCK);
 }

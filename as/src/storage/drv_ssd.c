@@ -733,13 +733,21 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 
 	ssd_fd_put(ssd, fd);
 
+	bool prefetch = cf_arenax_want_prefetch(ssd->ns->arena);
+
+	if (prefetch) {
+		ssd_prefetch_wblock(ssd, file_offset, read_buf);
+	}
+
 	size_t indent = 0; // current offset within the wblock, in bytes
 
 	while (indent < ssd->write_block_size &&
 			cf_atomic32_get(p_wblock_state->inuse_sz) != 0) {
 		ssd_record *block = (ssd_record*)&read_buf[indent];
 
-		ssd_decrypt(ssd, file_offset + indent, block);
+		if (! prefetch) {
+			ssd_decrypt(ssd, file_offset + indent, block);
+		}
 
 		if (block->magic != SSD_BLOCK_MAGIC) {
 			// First block must have magic.
@@ -2874,6 +2882,8 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 	uint64_t file_offset = SSD_HEADER_SIZE;
 	uint32_t n_unused_wblocks = 0;
 
+	bool prefetch = cf_arenax_want_prefetch(ssd->ns->arena);
+
 	while (file_offset < ssd->file_size && n_unused_wblocks < 10) {
 		if (pread(fd, buf, wblock_size, (off_t)file_offset) !=
 				(ssize_t)wblock_size) {
@@ -2888,12 +2898,18 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 					errno, cf_strerror(errno));
 		}
 
+		if (prefetch) {
+			ssd_prefetch_wblock(ssd, file_offset, buf);
+		}
+
 		size_t indent = 0; // current offset within wblock, in bytes
 
 		while (indent < wblock_size) {
 			ssd_record *block = (ssd_record*)&buf[indent];
 
-			ssd_decrypt(ssd, file_offset + indent, block);
+			if (! prefetch) {
+				ssd_decrypt(ssd, file_offset + indent, block);
+			}
 
 			// Look for record magic.
 			if (block->magic != SSD_BLOCK_MAGIC) {

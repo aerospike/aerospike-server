@@ -26,9 +26,27 @@
 
 #include "arenax.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "citrusleaf/alloc.h"
 #include "fault.h"
+
+
+//==========================================================
+// Public API.
+//
+
+bool
+cf_arenax_want_prefetch(cf_arenax* arena)
+{
+	return false;
+}
+
+void
+cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles,
+		uint32_t n_puddles)
+{
+}
 
 
 //==========================================================
@@ -56,4 +74,18 @@ cf_arenax_add_stage(cf_arenax* arena)
 	arena->stages[arena->stage_count++] = p_stage;
 
 	return CF_ARENAX_OK;
+}
+
+cf_arenax_handle
+cf_arenax_alloc_chunked(cf_arenax* arena, cf_arenax_puddle* puddle)
+{
+	cf_crash(AS_INDEX, "CE code called cf_arenax_alloc_chunked()");
+	return 0;
+}
+
+void
+cf_arenax_free_chunked(cf_arenax* arena, cf_arenax_handle h,
+		cf_arenax_puddle* puddle)
+{
+	cf_crash(AS_INDEX, "CE code called cf_arenax_free_chunked()");
 }

@@ -29,6 +29,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -40,10 +42,12 @@
 #include "fault.h"
 
 extern int capset(cap_user_header_t header, cap_user_data_t data);
+extern int capget(cap_user_header_t header, cap_user_data_t data);
 
 
-static bool g_hold_caps = false;
-static bool g_clear_caps = false;
+static uint32_t g_startup_caps[2] = { 0, 0 }; // held during startup
+static uint32_t g_runtime_caps[2] = { 0, 0 }; // held forever
+static bool g_kept_caps = false;
 
 
 void
@@ -53,13 +57,19 @@ cf_process_privsep(uid_t uid, gid_t gid)
 		return;
 	}
 
-	// If appropriate, make all capabilities survive the UID/GID switch.
-	if (g_hold_caps) {
+	uint32_t caps[2] = {
+		g_startup_caps[0] | g_runtime_caps[0],
+		g_startup_caps[1] | g_runtime_caps[1]
+	};
+
+	// If required, make capabilities survive the UID/GID switch.
+
+	if (caps[0] != 0 || caps[1] != 0) {
 		if (0 > prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0)) {
 			cf_crash(CF_MISC, "prctl: %s", cf_strerror(errno));
 		}
 
-		g_clear_caps = true;
+		g_kept_caps = true;
 	}
 
 	// Drop all auxiliary groups.
@@ -75,32 +85,126 @@ cf_process_privsep(uid_t uid, gid_t gid)
 	if (0 > setuid(uid)) {
 		cf_crash(CF_MISC, "setuid: %s", cf_strerror(errno));
 	}
-}
 
+	// If we made the capabilities survive, reduce them to the desired set.
 
-// TODO - if we get more customers of this API, we could switch to either using
-// a 'hold counter', or a more involved scheme where individual capabilities can
-// be kept and revoked.
-
-void
-cf_process_holdcap(void)
-{
-	g_hold_caps = true;
-}
-
-
-void
-cf_process_clearcap(void)
-{
-	if (! g_clear_caps) {
+	if (! g_kept_caps) {
 		return;
 	}
 
 	struct __user_cap_header_struct cap_head = {
-		.version = _LINUX_CAPABILITY_VERSION_2
+		.version = _LINUX_CAPABILITY_VERSION_3
 	};
 
-	struct __user_cap_data_struct cap_data[2] = { { 0 } };
+	struct __user_cap_data_struct cap_data[2] = {
+		{ .permitted = caps[0], .effective = caps[0] },
+		{ .permitted = caps[1], .effective = caps[1] }
+	};
+
+	if (0 > capset(&cap_head, cap_data)) {
+		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
+	}
+}
+
+
+void
+cf_process_add_startup_cap(int cap)
+{
+	g_startup_caps[cap >> 5] = 1 << (cap & 0x1f);
+}
+
+
+void
+cf_process_add_runtime_cap(int cap)
+{
+	g_runtime_caps[cap >> 5] = 1 << (cap & 0x1f);
+}
+
+
+void
+cf_process_drop_startup_caps(void)
+{
+	if (! g_kept_caps) {
+		return;
+	}
+
+	struct __user_cap_header_struct cap_head = {
+		.version = _LINUX_CAPABILITY_VERSION_3
+	};
+
+	struct __user_cap_data_struct cap_data[2] = {
+		{ .permitted = g_runtime_caps[0] },
+		{ .permitted = g_runtime_caps[1] }
+	};
+
+	if (0 > capset(&cap_head, cap_data)) {
+		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
+	}
+}
+
+
+bool
+cf_process_has_cap(int cap)
+{
+	struct __user_cap_header_struct cap_head = {
+		.version = _LINUX_CAPABILITY_VERSION_3
+	};
+
+	struct __user_cap_data_struct cap_data[2];
+
+	if (0 > capget(&cap_head, cap_data)) {
+		cf_crash(CF_MISC, "capget: %s", cf_strerror(errno));
+	}
+
+	uint32_t perm = cap_data[cap >> 5].permitted;
+
+	return (perm & (1 << (cap & 0x1f))) != 0;
+}
+
+
+void
+cf_process_enable_cap(int cap)
+{
+	if (! g_kept_caps) {
+		return;
+	}
+
+	struct __user_cap_header_struct cap_head = {
+		.version = _LINUX_CAPABILITY_VERSION_3
+	};
+
+	struct __user_cap_data_struct cap_data[2];
+
+	if (0 > capget(&cap_head, cap_data)) {
+		cf_crash(CF_MISC, "capget: %s", cf_strerror(errno));
+	}
+
+	cap_data[cap >> 5].effective |= 1 << (cap & 0x1f);
+
+	if (0 > capset(&cap_head, cap_data)) {
+		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
+	}
+}
+
+
+void
+cf_process_disable_cap(int cap)
+{
+	if (! g_kept_caps) {
+		return;
+	}
+
+	struct __user_cap_header_struct cap_head = {
+		.version = _LINUX_CAPABILITY_VERSION_3
+	};
+
+	struct __user_cap_data_struct cap_data[2];
+
+	if (0 > capget(&cap_head, cap_data)) {
+		cf_crash(CF_MISC, "capget: %s", cf_strerror(errno));
+	}
+
+	cap_data[cap >> 5].effective &= ~(1 << (cap & 0x1f));
 
 	if (0 > capset(&cap_head, cap_data)) {
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));

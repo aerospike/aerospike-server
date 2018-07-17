@@ -119,6 +119,7 @@ typedef struct as_config_s {
 	uint32_t		hist_track_slice; // period in seconds at which to cache histogram data
 	char*			hist_track_thresholds; // comma-separated bucket (ms) values to track
 	int				n_info_threads;
+	bool			keep_caps_ssd_health;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
 	uint32_t		migrate_max_num_incoming;
 	uint32_t		n_migrate_threads;

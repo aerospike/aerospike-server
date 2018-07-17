@@ -54,3 +54,8 @@ cf_topo_cpu_index cf_topo_socket_cpu(const cf_socket *sock);
 
 void cf_topo_pin_to_core(cf_topo_core_index i_core);
 void cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu);
+
+int32_t cf_nvme_get_age(const char *path);
+int64_t cf_file_system_get_size(const char *path);
+
+void cf_page_cache_dirty_limits(void);

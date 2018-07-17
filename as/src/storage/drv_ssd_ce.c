@@ -180,3 +180,10 @@ ssd_do_decrypt_whole(const uint8_t* key, uint64_t off, uint32_t n_rblocks,
 	// Should not get here - for enterprise version only.
 	cf_crash(AS_DRV_SSD, "community edition called ssd_do_decrypt_whole()");
 }
+
+void
+ssd_prefetch_wblock(drv_ssd *ssd, uint64_t file_offset, uint8_t *read_buf)
+{
+	// Should not get here - for enterprise version only.
+	cf_crash(AS_DRV_SSD, "community edition called ssd_prefetch_wblock()");
+}

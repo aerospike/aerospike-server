@@ -145,7 +145,7 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 
 	if (! as_index_is_valid_record(r) && r->rc == 0) {
 		as_record_destroy(r, ns);
-		cf_arenax_free(ns->arena, r_ref->r_h);
+		cf_arenax_free(ns->arena, r_ref->r_h, r_ref->puddle);
 	}
 
 	cf_mutex_unlock(r_ref->olock);

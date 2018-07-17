@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <linux/capability.h>
 #include <sys/resource.h>
 
 #include "aerospike/mod_lua_config.h"
@@ -44,6 +45,7 @@
 #include "arenax.h"
 #include "bits.h"
 #include "cf_str.h"
+#include "daemon.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "hardware.h"
@@ -112,6 +114,7 @@ void cfg_create_all_histograms();
 void cfg_init_serv_spec(cf_serv_spec* spec_p);
 cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
 char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
+void cfg_keep_cap(bool keep, bool* what, int32_t cap);
 
 void xdr_cfg_add_datacenter(char* dc, uint32_t nsid);
 void xdr_cfg_add_node_addr_port(dc_config_opt *dc_cfg, char* addr, int port);
@@ -285,6 +288,7 @@ typedef enum {
 	CASE_SERVICE_HIST_TRACK_SLICE,
 	CASE_SERVICE_HIST_TRACK_THRESHOLDS,
 	CASE_SERVICE_INFO_THREADS,
+	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
 	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_LOG_MILLIS,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
@@ -602,9 +606,13 @@ typedef enum {
 
 	// Namespace index-type pmem options:
 	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT,
+	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT,
+	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT,
 
 	// Namespace index-type ssd options:
 	CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT,
+	CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_HIGH_WATER_PCT,
+	CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_SIZE_LIMIT,
 
 	// Namespace storage-engine device options:
 	// Normally visible, in canonical configuration file order:
@@ -821,6 +829,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "hist-track-slice",				CASE_SERVICE_HIST_TRACK_SLICE },
 		{ "hist-track-thresholds",			CASE_SERVICE_HIST_TRACK_THRESHOLDS },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
+		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "log-millis",						CASE_SERVICE_LOG_MILLIS},
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
@@ -1145,11 +1154,15 @@ const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
 
 const cfg_opt NAMESPACE_INDEX_TYPE_PMEM_OPTS[] = {
 		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT },
+		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT },
+		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
 const cfg_opt NAMESPACE_INDEX_TYPE_SSD_OPTS[] = {
 		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT },
+		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_HIGH_WATER_PCT },
+		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -2329,6 +2342,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_INFO_THREADS:
 				c->n_info_threads = cfg_int_no_checks(&line);
 				break;
+			case CASE_SERVICE_KEEP_CAPS_SSD_HEALTH:
+				cfg_keep_cap(cfg_bool(&line), &c->keep_caps_ssd_health, CAP_SYS_ADMIN);
+				break;
 			case CASE_SERVICE_LOG_LOCAL_TIME:
 				cf_fault_use_local_time(cfg_bool(&line));
 				break;
@@ -3090,7 +3106,6 @@ as_config_init(const char* config_file)
 					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_PMEM);
 					break;
 				case CASE_NAMESPACE_INDEX_TYPE_SSD:
-					cf_crash_nostack(AS_CFG, "{%s} index-type ssd not yet supported", ns->name);
 					ns->xmem_type = CF_XMEM_TYPE_SSD;
 					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_SSD);
 					break;
@@ -3240,6 +3255,12 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT:
 				cfg_add_xmem_mount(ns, cfg_strdup(&line, true));
 				break;
+			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT:
+				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT:
+				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
 				break;
@@ -3258,8 +3279,16 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT:
 				cfg_add_xmem_mount(ns, cfg_strdup(&line, true));
 				break;
+			case CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_HIGH_WATER_PCT:
+				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_SIZE_LIMIT:
+				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
+				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
+				// TODO - main() doesn't yet support initialization as root.
+				cf_page_cache_dirty_limits();
 				break;
 			case CASE_NOT_FOUND:
 			default:
@@ -4128,12 +4157,20 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		client_replica_maps_create(ns);
 
+		uint32_t sprigs_offset = sizeof(as_lock_pair) * NUM_LOCK_PAIRS;
+		uint32_t puddles_offset = 0;
+
+		if (ns->xmem_type == CF_XMEM_TYPE_SSD) {
+			puddles_offset = sprigs_offset + sizeof(as_sprig) * ns->tree_shared.n_sprigs;
+		}
+
 		// Note - ns->tree_shared.arena is set later when it's allocated.
 		ns->tree_shared.destructor			= (as_index_value_destructor)as_record_destroy;
 		ns->tree_shared.destructor_udata	= (void*)ns;
 		ns->tree_shared.locks_shift			= NUM_SPRIG_BITS - cf_msb(NUM_LOCK_PAIRS);
 		ns->tree_shared.sprigs_shift		= NUM_SPRIG_BITS - cf_msb(ns->tree_shared.n_sprigs);
-		ns->tree_shared.sprigs_offset		= sizeof(as_lock_pair) * NUM_LOCK_PAIRS;
+		ns->tree_shared.sprigs_offset		= sprigs_offset;
+		ns->tree_shared.puddles_offset		= puddles_offset;
 
 		ssd_init_encryption_key(ns);
 
@@ -4936,6 +4973,17 @@ cfg_link_tls(const char* which, char** our_name)
 
 	return tls_spec;
 }
+
+void
+cfg_keep_cap(bool keep, bool* what, int32_t cap)
+{
+	*what = keep;
+
+	if (keep) {
+		cf_process_add_runtime_cap(cap);
+	}
+}
+
 
 //==========================================================
 // XDR utilities.

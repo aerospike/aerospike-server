@@ -585,8 +585,9 @@ typedef struct as_index_tree_shared_s {
 	uint32_t		locks_shift;
 	uint32_t		sprigs_shift;
 
-	// Offset into as_index_tree struct's variable-sized data.
+	// Offsets into as_index_tree struct's variable-sized data.
 	uint32_t		sprigs_offset;
+	uint32_t		puddles_offset;
 } as_index_tree_shared;
 
 
@@ -594,7 +595,7 @@ typedef struct as_sprigx_s {
 	uint64_t root_h: 40;
 } __attribute__ ((__packed__)) as_sprigx;
 
-typedef struct as_treesx_s {
+typedef struct as_treex_s {
 	int block_ix[AS_PARTITIONS];
 	as_sprigx sprigxs[0];
 } as_treex;
@@ -769,6 +770,8 @@ struct as_namespace_s {
 
 	const char*		xmem_mounts[CF_XMEM_MAX_MOUNTS];
 	uint32_t		n_xmem_mounts; // indirect config
+	uint32_t		mounts_hwm_pct;
+	uint64_t		mounts_size_limit;
 
 	as_storage_type storage_type;
 
@@ -1227,6 +1230,13 @@ static inline const char*
 as_namespace_start_mode_str(const as_namespace *ns)
 {
 	return as_namespace_cool_restarts(ns) ? "cool" : "warm";
+}
+
+static inline bool
+as_namespace_index_persisted(const as_namespace *ns)
+{
+	return ns->xmem_type == CF_XMEM_TYPE_PMEM ||
+			ns->xmem_type == CF_XMEM_TYPE_SSD;
 }
 
 // Persistent Memory Management

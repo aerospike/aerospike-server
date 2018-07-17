@@ -48,6 +48,7 @@
 #include "meminfo.h"
 #include "shash.h"
 #include "socket.h"
+#include "xmem.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"
@@ -1574,6 +1575,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
 	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
 	info_append_int(db, "info-threads", g_config.n_info_threads);
+	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_bool(db, "log-millis", cf_fault_is_logging_millis());
 	info_append_uint32(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
@@ -1803,6 +1805,11 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
 		info_append_string(db, "index-type.mount", ns->xmem_mounts[i]);
+	}
+
+	if (as_namespace_index_persisted(ns)) {
+		info_append_uint32(db, "index-type.mounts-high-water-pct", ns->mounts_hwm_pct);
+		info_append_uint64(db, "index-type.mounts-size-limit", ns->mounts_size_limit);
 	}
 
 	info_append_string(db, "storage-engine",
@@ -2788,6 +2795,35 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			else {
 				goto Error;
 			}
+		}
+		else if (0 == as_info_parameter_get(params, "mounts-high-water-pct", context, &context_len)) {
+			if (! as_namespace_index_persisted(ns)) {
+				cf_warning(AS_INFO, "mounts-high-water-pct is not relevant for this index-type");
+				goto Error;
+			}
+
+			if (0 != cf_str_atoi(context, &val) || val < 0 || val > 100) {
+				goto Error;
+			}
+
+			cf_info(AS_INFO, "Changing value of mounts-high-water-pct of ns %s from %u to %d ", ns->name, ns->mounts_hwm_pct, val);
+			ns->mounts_hwm_pct = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "mounts-size-limit", context, &context_len)) {
+			if (! as_namespace_index_persisted(ns)) {
+				cf_warning(AS_INFO, "mounts-size-limit is not relevant for this index-type");
+				goto Error;
+			}
+
+			uint64_t val;
+			uint64_t min = (ns->xmem_type == CF_XMEM_TYPE_SSD ? 4 : 1) * 1024UL * 1024UL *1024UL;
+
+			if (0 != cf_str_atoi_u64(context, &val) || val < min) {
+				goto Error;
+			}
+
+			cf_info(AS_INFO, "Changing value of mounts-size-limit of ns %s from %"PRIu64" to %"PRIu64, ns->name, ns->mounts_size_limit, val);
+			ns->mounts_size_limit = val;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -5746,6 +5782,39 @@ info_get_sindexes(char *name, cf_dyn_buf *db)
 	return info_get_tree_sindexes(name, "", db);
 }
 
+static void
+add_index_health(as_namespace *ns, cf_dyn_buf *db)
+{
+	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
+		char key[100];
+		snprintf(key, sizeof(key), "index_health[%u].id", i);
+
+		info_append_string(db, key, ns->xmem_mounts[i]);
+
+		snprintf(key, sizeof(key), "index_health[%u].age", i);
+
+		int32_t age = cf_nvme_get_age(ns->xmem_mounts[i]);
+		info_append_int(db, key, age);
+	}
+}
+
+static void
+add_data_health(as_namespace *ns, cf_dyn_buf *db)
+{
+	uint32_t n = ns->n_storage_devices + ns->n_storage_files;
+
+	for (uint32_t i = 0; i < n; i++) {
+		char key[100];
+		snprintf(key, sizeof(key), "data_health[%u].id", i);
+
+		info_append_string(db, key, ns->storage_devices[i]);
+
+		snprintf(key, sizeof(key), "data_health[%u].age", i);
+
+		int32_t age = cf_nvme_get_age(ns->storage_devices[i]);
+		info_append_int(db, key, age);
+	}
+}
 
 void
 info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
@@ -5799,8 +5868,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Memory usage stats.
 
+	uint64_t index_used = as_index_size_get(ns) * (ns->n_objects + ns->n_tombstones);
+
 	uint64_t data_memory = ns->n_bytes_memory;
-	uint64_t index_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_tombstones);
+	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;
 	uint64_t sindex_memory = ns->n_bytes_sindex_memory;
 	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 
@@ -5822,6 +5893,22 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		info_append_int(db, "available_bin_names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
 	}
 
+	// Persistent index stats.
+
+	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
+		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
+
+		info_append_uint64(db, "index_pmem_used_bytes", index_used);
+		info_append_uint64(db, "index_pmem_used_pct", used_pct);
+	}
+	else if (ns->xmem_type == CF_XMEM_TYPE_SSD) {
+		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
+
+		info_append_uint64(db, "index_device_used_bytes", index_used);
+		info_append_uint64(db, "index_device_used_pct", used_pct);
+		add_index_health(ns, db);
+	}
+
 	// Persistent storage stats.
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -5841,6 +5928,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		if (! ns->storage_data_in_memory) {
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
+
+		add_data_health(ns, db);
 	}
 
 	// Partition balance state.

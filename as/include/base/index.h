@@ -262,6 +262,7 @@ const char *as_index_get_set_name(as_index *index, as_namespace *ns) {
 struct as_index_ref_s {
 	as_index			*r;
 	cf_arenax_handle	r_h;
+	cf_arenax_puddle	*puddle;
 	cf_mutex			*olock;
 };
 
@@ -318,6 +319,33 @@ tree_sprigs(as_index_tree *tree)
 	return (as_sprig*)(tree->data + tree->shared->sprigs_offset);
 }
 
+static inline cf_arenax_puddle *
+tree_puddle_for_sprig(as_index_tree *tree, int sprig_i)
+{
+	uint32_t puddles_offset = tree->shared->puddles_offset;
+	return puddles_offset == 0 ?
+			NULL : (cf_arenax_puddle*)(tree->data + puddles_offset) + sprig_i;
+}
+
+static inline cf_arenax_puddle *
+tree_puddles(as_index_tree *tree)
+{
+	return tree_puddle_for_sprig(tree, 0);
+}
+
+static inline size_t
+tree_puddles_size(as_index_tree_shared *shared)
+{
+	return shared->puddles_offset == 0 ?
+			0 : sizeof(cf_arenax_puddle) * shared->n_sprigs;
+}
+
+static inline uint32_t
+tree_puddles_count(as_index_tree_shared *shared)
+{
+	return shared->puddles_offset == 0 ? 0 : shared->n_sprigs;
+}
+
 
 //------------------------------------------------
 // as_index_tree public API.
@@ -355,14 +383,18 @@ int as_index_delete(as_index_tree *tree, const cf_digest *keyd);
 // Container for sprig-level function parameters.
 typedef struct as_index_sprig_s {
 	as_index_value_destructor destructor;
-	void			*destructor_udata;
+	void *destructor_udata;
 
-	cf_arenax		*arena;
+	cf_arenax *arena;
 
-	as_lock_pair	*pair;
-	as_sprig		*sprig;
+	as_lock_pair *pair;
+	as_sprig *sprig;
+	cf_arenax_puddle *puddle;
 } as_index_sprig;
 
+uint64_t as_index_sprig_keyd_reduce_partial(as_index_sprig *isprig, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+
+int as_index_sprig_get_vlock(as_index_sprig *isprig, const cf_digest *keyd, as_index_ref *index_ref);
 int as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd);
 
 static inline void
@@ -385,6 +417,7 @@ as_index_sprig_from_keyd(as_index_tree *tree, as_index_sprig *isprig,
 	isprig->arena = tree->shared->arena;
 	isprig->pair = tree_locks(tree) + lock_i;
 	isprig->sprig = tree_sprigs(tree) + sprig_i;
+	isprig->puddle = tree_puddle_for_sprig(tree, sprig_i);
 }
 
 #define SENTINEL_H 0

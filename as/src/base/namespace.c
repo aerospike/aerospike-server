@@ -166,6 +166,9 @@ as_namespace_create(char *name)
 	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
 
+	ns->mounts_hwm_pct = 80; // evict when persisted index usage exceeds 80%
+	ns->mounts_size_limit = 1024UL * 1024UL * 1024UL * 16UL; // default persisted index size is 16G across all mounts
+
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 	ns->storage_data_in_memory = true;
 	// Note - default true is consistent with AS_STORAGE_ENGINE_MEMORY, but

@@ -365,6 +365,9 @@ main(int argc, char **argv)
 	// Migrate memory to correct NUMA node (includes resumed index arenas).
 	cf_topo_migrate_memory();
 
+	// Drop capabilities that we kept only for initialization.
+	cf_process_drop_startup_caps();
+
 	// Activate the storage system. For cold starts and cool restarts, this
 	// includes full drive scans - this may take several hours. The defrag
 	// subsystem starts operating at the end of this call.

@@ -405,6 +405,7 @@ void ssd_header_validate_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, cons
 void ssd_flush_final_cfg(struct as_namespace_s *ns);
 bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
 void ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size);
+void ssd_prefetch_wblock(drv_ssd *ssd, uint64_t file_offset, uint8_t *read_buf);
 
 // Durability.
 void ssd_init_commit(drv_ssd *ssd);

@@ -27,7 +27,10 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <libgen.h>
 #include <limits.h>
+#include <mntent.h>
+#include <regex.h>
 #include <sched.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -41,8 +44,11 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 
+#include <linux/capability.h>
 #include <linux/ethtool.h>
 #include <linux/if.h>
 #include <linux/limits.h>
@@ -62,6 +68,35 @@
 #if !defined SO_INCOMING_CPU
 #define SO_INCOMING_CPU 49
 #endif
+
+// The linux/nvme_ioctl.h kernel header came in Linux 4.4, but we'd like to
+// allow compilation with older kernel headers.
+//
+// Also, we need to be prepared for this IOCTL to fail with EINVAL, when we
+// run on older kernels that don't support it.
+
+#define NVME_IOCTL_ADMIN_CMD _IOWR('N', 0x41, struct nvme_admin_cmd)
+
+struct nvme_admin_cmd {
+	uint8_t opcode;
+	uint8_t flags;
+	uint16_t rsvd1;
+	uint32_t nsid;
+	uint32_t cdw2;
+	uint32_t cdw3;
+	uint64_t metadata;
+	uint64_t addr;
+	uint32_t metadata_len;
+	uint32_t data_len;
+	uint32_t cdw10;
+	uint32_t cdw11;
+	uint32_t cdw12;
+	uint32_t cdw13;
+	uint32_t cdw14;
+	uint32_t cdw15;
+	uint32_t timeout_ms;
+	uint32_t result;
+};
 
 #define INVALID_INDEX ((uint16_t)-1)
 #define POLICY_SCRIPT "/etc/aerospike/irqbalance-ban.sh"
@@ -702,7 +737,7 @@ pin_to_numa_node(cf_topo_numa_node_index a_numa_node)
 	set_mempolicy_safe(MPOL_BIND, &to_mask, 65);
 
 	// Make sure we can migrate shared memory that we later attach and map.
-	cf_process_holdcap();
+	cf_process_add_startup_cap(CAP_SYS_NICE);
 }
 
 static uint32_t
@@ -1809,9 +1844,6 @@ cf_topo_migrate_memory(void)
 		// Unlike select(), we have to pass "number of valid bits + 1".
 		migrate_pages_safe(0, 65, &from_mask, &to_mask);
 	}
-
-	// We had kept capabilities so we could do this migrate - revoke them now.
-	cf_process_clearcap();
 }
 
 void
@@ -1825,4 +1857,426 @@ cf_topo_info(void)
 		cf_info(CF_HARDWARE, "detected %hu CPU(s), %hu core(s) on NUMA node %hu of %hu",
 				g_n_cpus, g_n_cores, g_i_numa_node, g_n_numa_nodes);
 	}
+}
+
+static int32_t
+query_health(const char *path)
+{
+	static const uint32_t SZ_BUFF = 512;
+
+	cf_detail(CF_HARDWARE, "querying health of %s", path);
+
+	if (access(path, R_OK) < 0 && errno == EACCES) {
+		cf_detail(CF_HARDWARE, "insufficient privileges to open %s", path);
+		return -1;
+	}
+
+	if (!cf_process_has_cap(CAP_SYS_ADMIN)) {
+		cf_detail(CF_HARDWARE, "insufficient privileges to query %s", path);
+		return -1;
+	}
+
+	int32_t fd = open(path, O_RDONLY);
+
+	if (fd < 0) {
+		cf_warning(CF_HARDWARE, "failed to open %s: %d (%s)",
+				path, errno, cf_strerror(errno));
+		return -1;
+	}
+
+	uint8_t *buff = cf_valloc(SZ_BUFF);
+
+	// Silence Valgrind, which doesn't know about this ioctl.
+
+	memset(buff, 0, SZ_BUFF);
+
+	// NVMe specification: https://bit.ly/2HPAS99
+	//
+	//   - See 4.2 for overall command format.
+	//   - See 5.14 for specifics of the Get Log page command.
+	//
+	// "0's based value" in the spec means that a value x in a data
+	// structure actually means x + 1.
+
+	uint32_t numdl = (SZ_BUFF / 4) - 1;	// number of dwords lower (0's based)
+	uint32_t lid = 2;					// log page identifier: 2 (SMART log)
+
+	uint32_t cdw10 = (numdl << 16) | lid;
+
+	struct nvme_admin_cmd cmd = {
+		.opcode = 0x02,			// Get Log Page
+		.nsid = 0xffffffff,		// no namespace
+		.addr = (uint64_t)buff,	// result buffer
+		.data_len = SZ_BUFF,	// size of result buffer
+		.cdw10 = cdw10			// command arguments
+	};
+
+	cf_process_enable_cap(CAP_SYS_ADMIN);
+
+	int32_t res = ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
+
+	cf_process_disable_cap(CAP_SYS_ADMIN);
+
+	if (res < 0) {
+		// Older kernels that don't support the IOCTL return EINVAL.
+		if (errno != EINVAL) {
+			cf_warning(CF_HARDWARE, "failed to submit command to %s: %d (%s)",
+					path, errno, cf_strerror(errno));
+		}
+
+		cf_free(buff);
+		close(fd);
+		return -1;
+	}
+
+	if (res > 0){
+		cf_warning(CF_HARDWARE, "failed to submit command to %s: 0x%x",
+				path, res);
+		cf_free(buff);
+		close(fd);
+		return -1;
+	}
+
+	int32_t perc = buff[5];
+	cf_detail(CF_HARDWARE, "percentage used %d", perc);
+
+	// Reported percentage used may exceed 100, when a drive lives longer
+	// than predicted by its vendor.
+
+	if (perc > 100) {
+		perc = 100;
+	}
+
+	cf_free(buff);
+	close(fd);
+	return perc;
+}
+
+static int32_t
+match(const char *str, const char *rstr)
+{
+	regex_t rex;
+
+	if (regcomp(&rex, rstr, REG_EXTENDED | REG_NOSUB) != 0) {
+		cf_crash(CF_HARDWARE, "invalid regular expression: %s", rstr);
+	}
+
+	bool ok = regexec(&rex, str, 0, NULL, 0) == 0;
+	regfree(&rex);
+
+	return ok ? 1 : 0;
+}
+
+static int32_t
+filter_dev(const struct dirent *ent)
+{
+	return match(ent->d_name, "^nvme[[:digit:]]+$") > 0;
+}
+
+static int32_t
+filter_ns(const struct dirent *ent)
+{
+	return match(ent->d_name, "^nvme[[:digit:]]+n[[:digit:]]+$") > 0;
+}
+
+static int32_t
+filter_part(const struct dirent *ent)
+{
+	return match(ent->d_name,
+			"^nvme[[:digit:]]+n[[:digit:]]+p[[:digit:]]+$") > 0;
+}
+
+static int32_t
+check_dev(const char *path, uint32_t maj, uint32_t min)
+{
+	cf_detail(CF_HARDWARE, "checking %s against (%u, %u)", path, maj, min);
+
+	char dev[1000];
+	snprintf(dev, sizeof(dev), "%s/dev", path);
+
+	FILE *fh = fopen(dev, "r");
+
+	if (fh == NULL) {
+		cf_warning(CF_HARDWARE, "failed to open %s", dev);
+		return -1;
+	}
+
+	uint32_t maj2, min2;
+
+	if (fscanf(fh, "%u:%u\n", &maj2, &min2) != 2) {
+		cf_warning(CF_HARDWARE, "failed to read from %s", dev);
+		fclose(fh);
+		return -1;
+	}
+
+	fclose(fh);
+
+	return maj == maj2 && min == min2 ? 1 : 0;
+}
+
+static int32_t
+get_health_dev(const char *path)
+{
+	cf_detail(CF_HARDWARE, "getting health for device %s", path);
+
+	struct stat st;
+
+	if (stat(path, &st) < 0) {
+		cf_warning(CF_HARDWARE, "failed to query meta data for %s: %d (%s)",
+				path, errno, cf_strerror(errno));
+		return -1;
+	}
+
+	uint32_t maj = major(st.st_rdev);
+	uint32_t min = minor(st.st_rdev);
+
+	cf_detail(CF_HARDWARE, "device (%u, %u)", maj, min);
+
+	const char *root_path = "/sys/class/nvme";
+	struct dirent *found = NULL;
+
+	cf_detail(CF_HARDWARE, "root %s", root_path);
+
+	struct dirent **devs = NULL;
+	int32_t n_devs = scandir(root_path, &devs, filter_dev, alphasort);
+
+	for (int32_t i_dev = 0; found == NULL && i_dev < n_devs; ++i_dev) {
+		char dev_path[1000];
+		snprintf(dev_path, sizeof(dev_path), "%s/%s",
+				root_path, devs[i_dev]->d_name);
+
+		cf_detail(CF_HARDWARE, "device %s", dev_path);
+
+		if (check_dev(dev_path, maj, min) > 0) {
+			found = devs[i_dev];
+		}
+
+		struct dirent **nss = NULL;
+		int32_t n_nss = scandir(dev_path, &nss, filter_ns, alphasort);
+
+		for (int32_t i_ns = 0; found == NULL && i_ns < n_nss; ++i_ns) {
+			char ns_path[1000];
+			snprintf(ns_path, sizeof(ns_path), "%s/%s",
+					dev_path, nss[i_ns]->d_name);
+
+			cf_detail(CF_HARDWARE, "namespace %s", ns_path);
+
+			if (check_dev(ns_path, maj, min) > 0) {
+				found = devs[i_dev];
+			}
+
+			struct dirent **parts = NULL;
+			int32_t n_parts = scandir(ns_path, &parts, filter_part, alphasort);
+
+			for (int32_t i_part = 0; found == NULL && i_part < n_parts;
+					++i_part) {
+				char part_path[1000];
+				snprintf(part_path, sizeof(part_path), "%s/%s",
+						ns_path, parts[i_part]->d_name);
+
+				cf_detail(CF_HARDWARE, "partition %s", part_path);
+
+				if (check_dev(part_path, maj, min) > 0) {
+					found = devs[i_dev];
+				}
+			}
+
+			for (int32_t i_part = 0; i_part < n_parts; ++i_part) {
+				free(parts[i_part]);
+			}
+
+			free(parts);
+		}
+
+		for (int32_t i_ns = 0; i_ns < n_nss; ++i_ns) {
+			free(nss[i_ns]);
+		}
+
+		free(nss);
+	}
+
+	for (int32_t i_dev = 0; i_dev < n_devs; ++i_dev) {
+		if (devs[i_dev] != found) {
+			free(devs[i_dev]);
+		}
+	}
+
+	free(devs);
+
+	if (found == NULL) {
+		cf_detail(CF_HARDWARE, "no NVMe device for %s (%u, %u)",
+				path, maj, min);
+		return -1;
+	}
+
+	char dev_node[1000];
+	snprintf(dev_node, sizeof(dev_node), "/dev/%s", found->d_name);
+
+	cf_detail(CF_HARDWARE, "NVMe device is %s", dev_node);
+	free(found);
+
+	return query_health(dev_node);
+}
+
+static int32_t
+get_health_file(const char *path)
+{
+	cf_detail(CF_HARDWARE, "getting health for file %s", path);
+
+	char *real_path = realpath(path, NULL);
+
+	if (real_path == NULL) {
+		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)",
+				path, errno, cf_strerror(errno));
+		return -1;
+	}
+
+	cf_detail(CF_HARDWARE, "resolved path %s", real_path);
+
+	FILE *fh = setmntent("/proc/mounts", "r");
+
+	struct mntent mnt;
+	char buff[1000];
+
+	size_t best_len = 0;
+	char best_dev[1000];
+
+	while (getmntent_r(fh, &mnt, buff, sizeof(buff))) {
+		cf_detail(CF_HARDWARE, "mount point %s", mnt.mnt_dir);
+		char *real_mount = realpath(mnt.mnt_dir, NULL);
+
+		if (real_mount == NULL) {
+			cf_detail(CF_HARDWARE,
+					"failed to resolve mount point %s: %d (%s)",
+					mnt.mnt_dir, errno, cf_strerror(errno));
+			continue;
+		}
+
+		cf_detail(CF_HARDWARE, "resolved mount point %s", real_mount);
+
+		size_t mount_len = strlen(real_mount);
+
+		if (mount_len > best_len &&
+				strncmp(real_path, real_mount, mount_len) == 0) {
+			strcpy(best_dev, mnt.mnt_fsname);
+			best_len = mount_len;
+			cf_detail(CF_HARDWARE, "best %s with length %zu",
+					best_dev, best_len);
+		}
+
+		free(real_mount);
+	}
+
+	endmntent(fh);
+	free(real_path);
+
+	if (best_len == 0) {
+		cf_warning(CF_HARDWARE, "no mount point found for %s", path);
+		return -1;
+	}
+
+	if (strncmp(best_dev, "/dev", 4) != 0) {
+		cf_detail(CF_HARDWARE, "invalid device %s found for %s",
+				best_dev, path);
+		return -1;
+	}
+
+	char *real_dev = realpath(best_dev, NULL);
+
+	int32_t res = get_health_dev(real_dev);
+
+	free(real_dev);
+	return res;
+}
+
+// Retrieve the "Percentage Used" health indicator of an NVMe drive.
+// The path argument may identify one of the following:
+//
+//   - Mount point of an NVMe-backed file system
+//   - File or directory in an NVMe-backed file system
+//   - NVMe device (e.g., /dev/nvme0)
+//   - NVMe namespace (e.g., /dev/nvme0n1)
+//   - NVMe partition (e.g., /dev/nvme0n1p1)
+//
+// Returns 0 (new drive) through 100 (expected lifetime used up) on
+// success, or -1 on failure.
+
+int32_t
+cf_nvme_get_age(const char *path)
+{
+	cf_detail(CF_HARDWARE, "getting health for %s", path);
+
+	struct stat st;
+
+	if (stat(path, &st) < 0) {
+		cf_warning(CF_HARDWARE, "failed to query meta data for %s: %d (%s)",
+				path, errno, cf_strerror(errno));
+		return -1;
+	}
+
+	if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode)) {
+		return get_health_file(path);
+	}
+
+	if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
+		return get_health_dev(path);
+	}
+
+	cf_warning(CF_HARDWARE, "%s has unknown type 0x%x",
+			path, st.st_mode & S_IFMT);
+	return -1;
+}
+
+int64_t
+cf_file_system_get_size(const char *path)
+{
+	struct stat file;
+
+	if (stat(path, &file) < 0) {
+		switch (errno) {
+		case ENOENT:
+			cf_warning(CF_HARDWARE, "mount point %s does not exist", path);
+			break;
+
+		case EACCES:
+			cf_warning(CF_HARDWARE, "access to mount point %s denied", path);
+			break;
+
+		default:
+			cf_warning(CF_HARDWARE,
+					"error while querying mount point %s: %d (%s)", path,
+					errno, cf_strerror(errno));
+			break;
+		}
+
+		return -1;
+	}
+
+	if (!S_ISDIR(file.st_mode)) {
+		cf_warning(CF_HARDWARE, "mount point %s is not a directory", path);
+		return -1;
+	}
+
+	struct statfs fs;
+
+	if (statfs(path, &fs) < 0) {
+		cf_warning(CF_HARDWARE,
+				"error while querying mount point %s: %d (%s)", path,
+				errno, cf_strerror(errno));
+		return -1;
+	}
+
+	int64_t sz = (int64_t)fs.f_bsize * (int64_t)fs.f_blocks;
+
+	cf_detail(CF_HARDWARE, "file system size of %s is %ld", path, sz);
+	return sz;
+}
+
+void
+cf_page_cache_dirty_limits(void)
+{
+	write_file_safe("/proc/sys/vm/dirty_bytes", "16777216", 8);
+	write_file_safe("/proc/sys/vm/dirty_background_bytes", "1", 1);
+	write_file_safe("/proc/sys/vm/dirty_expire_centisecs", "1", 1);
+	write_file_safe("/proc/sys/vm/dirty_writeback_centisecs", "10", 2);
 }
