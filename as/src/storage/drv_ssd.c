@@ -2594,7 +2594,7 @@ void
 apply_rec_props(as_record* r, as_namespace* ns, const ssd_rec_props* props)
 {
 	// Set record's set-id. (If it already has one, assume they're the same.)
-	if (! as_index_has_set(r) && props->set_name) {
+	if (as_index_get_set_id(r) == INVALID_SET_ID && props->set_name) {
 		as_index_set_set_w_len(r, ns, props->set_name, props->set_name_len,
 				false);
 	}

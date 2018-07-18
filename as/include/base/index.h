@@ -203,11 +203,6 @@ void as_index_set_set_id(as_index *index, uint16_t set_id) {
 	index->set_id_bits = set_id;
 }
 
-static inline
-bool as_index_has_set(const as_index *index) {
-	return index->set_id_bits != 0;
-}
-
 
 //------------------------------------------------
 // Set-ID helpers.
@@ -237,11 +232,6 @@ int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
 
 static inline
 const char *as_index_get_set_name(as_index *index, as_namespace *ns) {
-	// TODO - don't really need this check - remove?
-	if (! as_index_has_set(index)) {
-		return NULL;
-	}
-
 	return as_namespace_get_set_name(ns, as_index_get_set_id(index));
 }
 
