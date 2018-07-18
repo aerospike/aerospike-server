@@ -3488,7 +3488,7 @@ ssd_init_shadow_devices(as_namespace *ns, drv_ssds *ssds)
 
 		int fd = open(ssd->shadow_name, ssd->open_flag, S_IRUSR | S_IWUSR);
 
-		if (-1 == fd) {
+		if (fd == -1) {
 			cf_crash(AS_DRV_SSD, "unable to open shadow device %s: %s",
 					ssd->shadow_name, cf_strerror(errno));
 		}
@@ -3543,7 +3543,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 		ssd->name = ns->storage_devices[i];
 
 		if (ns->cold_start && ns->storage_cold_start_empty) {
-			if (0 == remove(ssd->name)) {
+			if (unlink(ssd->name) == 0) {
 				cf_info(AS_DRV_SSD, "cold-start-empty - removed %s", ssd->name);
 			}
 			else if (errno == ENOENT) {
@@ -3559,7 +3559,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 		// Validate that file can be opened, create it if it doesn't exist.
 		int fd = open(ssd->name, ssd->open_flag | O_CREAT, S_IRUSR | S_IWUSR);
 
-		if (-1 == fd) {
+		if (fd == -1) {
 			cf_crash(AS_DRV_SSD, "unable to open file %s: %s", ssd->name,
 					cf_strerror(errno));
 		}
@@ -3568,7 +3568,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 		ssd->io_min_size = LO_IO_MIN_SIZE;
 
 		// Truncate will grow or shrink the file to the correct size.
-		if (0 != ftruncate(fd, (off_t)ssd->file_size)) {
+		if (ftruncate(fd, (off_t)ssd->file_size) != 0) {
 			cf_crash(AS_DRV_SSD, "unable to truncate file: errno %d", errno);
 		}
 
@@ -3581,6 +3581,64 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 	}
 
 	*ssds_p = ssds;
+}
+
+
+void
+ssd_init_shadow_files(as_namespace *ns, drv_ssds *ssds)
+{
+	if (ns->n_storage_shadows == 0) {
+		// No shadows - a normal deployment.
+		return;
+	}
+
+	// Check shadow files.
+	for (uint32_t i = 0; i < ns->n_storage_shadows; i++) {
+		drv_ssd *ssd = &ssds->ssds[i];
+
+		ssd->shadow_name = ns->storage_shadows[i];
+
+		if (ns->cold_start && ns->storage_cold_start_empty) {
+			if (unlink(ssd->shadow_name) == 0) {
+				cf_info(AS_DRV_SSD, "cold-start-empty - removed %s",
+						ssd->shadow_name);
+			}
+			else if (errno == ENOENT) {
+				cf_info(AS_DRV_SSD, "cold-start-empty - no shadow file %s",
+						ssd->shadow_name);
+			}
+			else {
+				cf_crash(AS_DRV_SSD, "failed remove: errno %d", errno);
+			}
+		}
+
+		// Validate that file can be opened, create it if it doesn't exist.
+		int fd = open(ssd->shadow_name, ssd->open_flag | O_CREAT,
+				S_IRUSR | S_IWUSR);
+
+		if (fd == -1) {
+			cf_crash(AS_DRV_SSD, "unable to open shadow file %s: %s",
+					ssd->shadow_name, cf_strerror(errno));
+		}
+
+		// Truncate will grow or shrink the file to the correct size.
+		if (ftruncate(fd, (off_t)ssd->file_size) != 0) {
+			cf_crash(AS_DRV_SSD, "unable to truncate file: errno %d", errno);
+		}
+
+		ssd->shadow_io_min_size = LO_IO_MIN_SIZE;
+
+		if (ns->cold_start && ns->storage_cold_start_empty) {
+			ssd_empty_header(fd, ssd->shadow_name);
+
+			cf_info(AS_DRV_SSD, "cold-start-empty - erased header of %s",
+					ssd->shadow_name);
+		}
+
+		close(fd);
+
+		cf_info(AS_DRV_SSD, "shadow file %s is initialized", ssd->shadow_name);
+	}
 }
 
 
@@ -3622,6 +3680,7 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 	}
 	else {
 		ssd_init_files(ns, &ssds);
+		ssd_init_shadow_files(ns, ssds);
 	}
 
 	cf_mutex_init(&ssds->flush_lock);
