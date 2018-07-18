@@ -3628,13 +3628,6 @@ ssd_init_shadow_files(as_namespace *ns, drv_ssds *ssds)
 
 		ssd->shadow_io_min_size = LO_IO_MIN_SIZE;
 
-		if (ns->cold_start && ns->storage_cold_start_empty) {
-			ssd_empty_header(fd, ssd->shadow_name);
-
-			cf_info(AS_DRV_SSD, "cold-start-empty - erased header of %s",
-					ssd->shadow_name);
-		}
-
 		close(fd);
 
 		cf_info(AS_DRV_SSD, "shadow file %s is initialized", ssd->shadow_name);
