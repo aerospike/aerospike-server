@@ -3473,7 +3473,7 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 
 
 void
-ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
+ssd_init_shadow_devices(as_namespace *ns, drv_ssds *ssds)
 {
 	if (ns->n_storage_shadows == 0) {
 		// No shadows - a normal deployment.
@@ -3618,7 +3618,7 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 
 	if (ns->n_storage_devices != 0) {
 		ssd_init_devices(ns, &ssds);
-		ssd_init_shadows(ns, ssds);
+		ssd_init_shadow_devices(ns, ssds);
 	}
 	else {
 		ssd_init_files(ns, &ssds);

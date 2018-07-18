@@ -597,7 +597,7 @@ typedef enum {
 	// Namespace index-type options (value tokens):
 	CASE_NAMESPACE_INDEX_TYPE_SHMEM,
 	CASE_NAMESPACE_INDEX_TYPE_PMEM,
-	CASE_NAMESPACE_INDEX_TYPE_SSD,
+	CASE_NAMESPACE_INDEX_TYPE_FLASH,
 
 	// Namespace storage-engine options (value tokens):
 	CASE_NAMESPACE_STORAGE_MEMORY,
@@ -609,10 +609,10 @@ typedef enum {
 	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT,
 	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT,
 
-	// Namespace index-type ssd options:
-	CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT,
-	CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_HIGH_WATER_PCT,
-	CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_SIZE_LIMIT,
+	// Namespace index-type flash options:
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT,
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT,
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT,
 
 	// Namespace storage-engine device options:
 	// Normally visible, in canonical configuration file order:
@@ -1143,7 +1143,7 @@ const cfg_opt NAMESPACE_WRITE_COMMIT_OPTS[] = {
 const cfg_opt NAMESPACE_INDEX_TYPE_OPTS[] = {
 		{ "shmem",							CASE_NAMESPACE_INDEX_TYPE_SHMEM },
 		{ "pmem",							CASE_NAMESPACE_INDEX_TYPE_PMEM },
-		{ "ssd",							CASE_NAMESPACE_INDEX_TYPE_SSD }
+		{ "flash",							CASE_NAMESPACE_INDEX_TYPE_FLASH }
 };
 
 const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
@@ -1159,10 +1159,10 @@ const cfg_opt NAMESPACE_INDEX_TYPE_PMEM_OPTS[] = {
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt NAMESPACE_INDEX_TYPE_SSD_OPTS[] = {
-		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT },
-		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_HIGH_WATER_PCT },
-		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_SIZE_LIMIT },
+const cfg_opt NAMESPACE_INDEX_TYPE_FLASH_OPTS[] = {
+		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT },
+		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT },
+		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1376,7 +1376,7 @@ const int NUM_NAMESPACE_WRITE_COMMIT_OPTS			= sizeof(NAMESPACE_WRITE_COMMIT_OPTS
 const int NUM_NAMESPACE_INDEX_TYPE_OPTS				= sizeof(NAMESPACE_INDEX_TYPE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_PMEM_OPTS) / sizeof(cfg_opt);
-const int NUM_NAMESPACE_INDEX_TYPE_SSD_OPTS			= sizeof(NAMESPACE_INDEX_TYPE_SSD_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_FLASH_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_ENABLE_XDR_OPTS			= sizeof(NAMESPACE_SET_ENABLE_XDR_OPTS) / sizeof(cfg_opt);
@@ -1434,7 +1434,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_FILE, LOGGING_CONSOLE,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
-	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_SSD, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
+	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DATACENTER,
@@ -3105,9 +3105,9 @@ as_config_init(const char* config_file)
 					ns->xmem_type = CF_XMEM_TYPE_PMEM;
 					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_PMEM);
 					break;
-				case CASE_NAMESPACE_INDEX_TYPE_SSD:
-					ns->xmem_type = CF_XMEM_TYPE_SSD;
-					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_SSD);
+				case CASE_NAMESPACE_INDEX_TYPE_FLASH:
+					ns->xmem_type = CF_XMEM_TYPE_FLASH;
+					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_FLASH);
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -3274,15 +3274,15 @@ as_config_init(const char* config_file)
 		//----------------------------------------
 		// Parse namespace::index-type ssd context items.
 		//
-		case NAMESPACE_INDEX_TYPE_SSD:
-			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_SSD_OPTS, NUM_NAMESPACE_INDEX_TYPE_SSD_OPTS)) {
-			case CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT:
+		case NAMESPACE_INDEX_TYPE_FLASH:
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_FLASH_OPTS, NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS)) {
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT:
 				cfg_add_xmem_mount(ns, cfg_strdup(&line, true));
 				break;
-			case CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_HIGH_WATER_PCT:
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT:
 				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
 				break;
-			case CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNTS_SIZE_LIMIT:
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT:
 				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
 				break;
 			case CASE_CONTEXT_END:
@@ -4160,7 +4160,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		uint32_t sprigs_offset = sizeof(as_lock_pair) * NUM_LOCK_PAIRS;
 		uint32_t puddles_offset = 0;
 
-		if (ns->xmem_type == CF_XMEM_TYPE_SSD) {
+		if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 			puddles_offset = sprigs_offset + sizeof(as_sprig) * ns->tree_shared.n_sprigs;
 		}
 

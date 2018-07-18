@@ -1784,7 +1784,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 			ns->xmem_type == CF_XMEM_TYPE_UNDEFINED ? "undefined" :
 					(ns->xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
 							(ns->xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
-									(ns->xmem_type == CF_XMEM_TYPE_SSD ? "ssd" :
+									(ns->xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :
 											"illegal"))));
 
 	info_append_uint64(db, "max-ttl", ns->max_ttl);
@@ -2816,7 +2816,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 
 			uint64_t val;
-			uint64_t min = (ns->xmem_type == CF_XMEM_TYPE_SSD ? 4 : 1) * 1024UL * 1024UL *1024UL;
+			uint64_t min = (ns->xmem_type == CF_XMEM_TYPE_FLASH ? 4 : 1) * 1024UL * 1024UL *1024UL;
 
 			if (0 != cf_str_atoi_u64(context, &val) || val < min) {
 				goto Error;
@@ -5901,11 +5901,11 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		info_append_uint64(db, "index_pmem_used_bytes", index_used);
 		info_append_uint64(db, "index_pmem_used_pct", used_pct);
 	}
-	else if (ns->xmem_type == CF_XMEM_TYPE_SSD) {
+	else if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
 
-		info_append_uint64(db, "index_device_used_bytes", index_used);
-		info_append_uint64(db, "index_device_used_pct", used_pct);
+		info_append_uint64(db, "index_flash_used_bytes", index_used);
+		info_append_uint64(db, "index_flash_used_pct", used_pct);
 		add_index_health(ns, db);
 	}
 

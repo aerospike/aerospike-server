@@ -1236,7 +1236,7 @@ static inline bool
 as_namespace_index_persisted(const as_namespace *ns)
 {
 	return ns->xmem_type == CF_XMEM_TYPE_PMEM ||
-			ns->xmem_type == CF_XMEM_TYPE_SSD;
+			ns->xmem_type == CF_XMEM_TYPE_FLASH;
 }
 
 // Persistent Memory Management
