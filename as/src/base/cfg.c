@@ -105,7 +105,7 @@ void cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port, bool tls);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_xmem_mount(as_namespace* ns, const char* mount);
-void cfg_add_storage_file(as_namespace* ns, const char* file_name);
+void cfg_add_storage_file(as_namespace* ns, const char* file_name, const char* shadow_name);
 void cfg_add_storage_device(as_namespace* ns, const char* device_name, const char* shadow_name);
 void cfg_set_cluster_name(char* cluster_name);
 void cfg_add_ldap_role_query_pattern(char* pattern);
@@ -3306,7 +3306,7 @@ as_config_init(const char* config_file)
 				cfg_add_storage_device(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILE:
-				cfg_add_storage_file(ns, cfg_strdup(&line, true));
+				cfg_add_storage_file(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE:
 				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
@@ -4762,7 +4762,8 @@ cfg_add_xmem_mount(as_namespace* ns, const char* mount)
 }
 
 void
-cfg_add_storage_file(as_namespace* ns, const char* file_name)
+cfg_add_storage_file(as_namespace* ns, const char* file_name,
+		const char* shadow_name)
 {
 	if (ns->n_storage_devices != 0) {
 		cf_crash_nostack(AS_CFG, "{%s} mixture of storage files and devices", ns->name);
@@ -4776,9 +4777,23 @@ cfg_add_storage_file(as_namespace* ns, const char* file_name)
 		if (strcmp(file_name, ns->storage_devices[i]) == 0) {
 			cf_crash_nostack(AS_CFG, "{%s} duplicate storage file %s", ns->name, file_name);
 		}
+
+		if (shadow_name && ns->storage_shadows[i] &&
+				strcmp(shadow_name, ns->storage_shadows[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage shadow file %s", ns->name, shadow_name);
+		}
+	}
+
+	if (shadow_name) {
+		ns->storage_shadows[ns->n_storage_shadows++] = shadow_name;
 	}
 
 	ns->storage_devices[ns->n_storage_files++] = file_name;
+
+	if (ns->n_storage_shadows != 0 &&
+			ns->n_storage_shadows != ns->n_storage_files) {
+		cf_crash_nostack(AS_CFG, "{%s} no shadow for file %s", ns->name, file_name);
+	}
 }
 
 void
@@ -4805,8 +4820,7 @@ cfg_add_storage_device(as_namespace* ns, const char* device_name,
 	}
 
 	if (shadow_name) {
-		ns->storage_shadows[ns->n_storage_devices] = shadow_name;
-		ns->n_storage_shadows++;
+		ns->storage_shadows[ns->n_storage_shadows++] = shadow_name;
 	}
 
 	ns->storage_devices[ns->n_storage_devices++] = device_name;
