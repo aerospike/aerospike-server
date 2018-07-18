@@ -131,14 +131,6 @@ COMPILER_ASSERT(sizeof(as_index) == 64);
 
 COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
 
-// Size in bytes of as_index, currently the same for all namespaces.
-// FIXME - we should just get rid of this.
-static inline
-uint32_t as_index_size_get(as_namespace *ns)
-{
-	return (uint32_t)sizeof(as_index);
-}
-
 // Fast way to clear the record portion of as_index.
 // Note - relies on current layout and size of as_index!
 // FIXME - won't be able to "rescue" with future sindex method - will go away.

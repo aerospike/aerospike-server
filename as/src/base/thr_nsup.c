@@ -1148,12 +1148,11 @@ eval_stop_writes(as_namespace *ns)
 
 	// Compute memory usage for namespace. Note that persisted index is not
 	// counted against stop-writes.
-	uint64_t index_sz = as_namespace_index_persisted(ns) ?
-			0 : ns->n_objects * as_index_size_get(ns);
-	uint64_t tombstone_index_sz = ns->n_tombstones * as_index_size_get(ns);
+	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
+			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
 	uint64_t data_in_memory_sz = ns->n_bytes_memory;
-	uint64_t memory_sz = index_sz + tombstone_index_sz + data_in_memory_sz + sindex_sz;
+	uint64_t memory_sz = index_mem_sz + sindex_sz + data_in_memory_sz;
 
 	// Possible reasons for stopping writes.
 	static const char* reasons[] = {
@@ -1183,18 +1182,18 @@ eval_stop_writes(as_namespace *ns)
 	}
 
 	if (why_stopped != 0) {
-		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu) limit:%lu, disk avail-pct:%d",
+		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
 				ns->name, reasons[why_stopped],
-				memory_sz, index_sz, data_in_memory_sz, mem_stop_writes,
+				memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_stop_writes,
 				device_avail_pct);
 
 		cf_atomic32_set(&ns->stop_writes, 1);
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu) limit:%lu, disk avail-pct:%d",
+	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
 			ns->name,
-			memory_sz, index_sz, data_in_memory_sz, mem_stop_writes,
+			memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_stop_writes,
 			device_avail_pct);
 
 	cf_atomic32_set(&ns->stop_writes, 0);
@@ -1205,8 +1204,7 @@ eval_stop_writes(as_namespace *ns)
 static bool
 eval_hwm_breached(as_namespace *ns)
 {
-	uint64_t index_sz =
-			(ns->n_tombstones + ns->n_objects) * as_index_size_get(ns);
+	uint64_t index_sz = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 
 	uint64_t index_mem_sz = 0;
 	uint64_t index_dev_sz = 0;

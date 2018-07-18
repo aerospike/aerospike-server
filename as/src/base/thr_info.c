@@ -5868,7 +5868,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Memory usage stats.
 
-	uint64_t index_used = as_index_size_get(ns) * (ns->n_objects + ns->n_tombstones);
+	uint64_t index_used = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 
 	uint64_t data_memory = ns->n_bytes_memory;
 	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;

@@ -190,7 +190,7 @@ log_ticker_frame(uint64_t delta_time)
 		uint64_t n_objects = ns->n_objects;
 		uint64_t n_tombstones = ns->n_tombstones;
 
-		size_t index_used = as_index_size_get(ns) * (n_objects + n_tombstones);
+		size_t index_used = (n_objects + n_tombstones) * sizeof(as_index);
 
 		size_t index_mem = as_namespace_index_persisted(ns) ? 0 : index_used;
 		size_t sindex_mem = ns->n_bytes_sindex_memory;
