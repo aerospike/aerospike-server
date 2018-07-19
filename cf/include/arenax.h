@@ -83,7 +83,6 @@ typedef struct cf_arenax_s {
 	const void*			xmem_type_cfg;
 	key_t				key_base;
 	uint32_t			element_size;
-	uint32_t			chunk_count;
 	uint32_t			stage_capacity;
 	uint32_t			max_stages;
 	uint32_t			flags;
@@ -93,11 +92,6 @@ typedef struct cf_arenax_s {
 
 	// Free-element list (non-chunked allocations).
 	cf_arenax_handle	free_h;
-
-	// Arena pool (free chunked allocations).
-	size_t				pool_len;
-	cf_arenax_chunk*	pool_buf;
-	size_t				pool_i;
 
 	// Where to end-allocate.
 	uint32_t			at_stage_id;
@@ -109,6 +103,15 @@ typedef struct cf_arenax_s {
 	// Current stages.
 	uint32_t			stage_count;
 	uint8_t*			stages[CF_ARENAX_MAX_STAGES];
+
+	// Flash index related members at end to avoid full warm restart converter.
+
+	uint32_t			chunk_count; // is 1 for non-flash indexes
+
+	// Arena pool (free chunked allocations).
+	size_t				pool_len;
+	cf_arenax_chunk*	pool_buf;
+	size_t				pool_i;
 } cf_arenax;
 
 typedef struct free_element_s {
