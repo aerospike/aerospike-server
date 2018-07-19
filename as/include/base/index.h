@@ -224,13 +224,6 @@ int as_index_set_set_w_len(as_index *index, as_namespace *ns,
 }
 
 static inline
-int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
-		bool apply_restrictions) {
-	return as_index_set_set_w_len(index, ns, set_name, strlen(set_name),
-		apply_restrictions);
-}
-
-static inline
 const char *as_index_get_set_name(as_index *index, as_namespace *ns) {
 	return as_namespace_get_set_name(ns, as_index_get_set_id(index));
 }

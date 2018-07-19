@@ -2791,9 +2791,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 				as_bin_set_id_from_name_w_len(ns, b, p_read, name_len);
 			}
 			else {
-				int rv;
-
-				b = as_bin_create_from_buf(&rd, p_read, name_len, &rv);
+				b = as_bin_create_from_buf(&rd, p_read, name_len, NULL);
 
 				if (! b) {
 					// TODO - should maybe fail gracefully?
