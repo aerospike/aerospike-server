@@ -573,6 +573,27 @@ as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes
 }
 
 //--------------------------------------
+// as_storage_device_stats
+//
+
+typedef void (*as_storage_device_stats_fn)(as_namespace *ns, uint32_t device_ix, storage_device_stats *stats);
+static const as_storage_device_stats_fn as_storage_device_stats_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL,
+	as_storage_device_stats_ssd
+};
+
+void
+as_storage_device_stats(as_namespace *ns, uint32_t device_ix, storage_device_stats *stats)
+{
+	if (as_storage_device_stats_table[ns->storage_type]) {
+		as_storage_device_stats_table[ns->storage_type](ns, device_ix, stats);
+		return;
+	}
+
+	memset(stats, 0, sizeof(storage_device_stats));
+}
+
+//--------------------------------------
 // as_storage_ticker_stats
 //
 

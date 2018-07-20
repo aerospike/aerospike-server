@@ -75,6 +75,20 @@ typedef struct as_storage_rd_s {
 	struct drv_ssd_s		*ssd;
 } as_storage_rd;
 
+typedef struct storage_device_stats_s {
+	uint64_t used_sz;
+	uint32_t free_wblock_q_sz;
+
+	uint32_t write_q_sz;
+	uint64_t n_writes;
+
+	uint32_t defrag_q_sz;
+	uint64_t n_defrag_reads;
+	uint64_t n_defrag_writes;
+
+	uint32_t shadow_write_q_sz;
+} storage_device_stats;
+
 
 //------------------------------------------------
 // Generic "base class" functions that call
@@ -116,6 +130,7 @@ extern void as_storage_flush_pmeta(struct as_namespace_s *ns, uint32_t start_pid
 
 // Statistics.
 extern int as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
+extern void as_storage_device_stats(struct as_namespace_s *ns, uint32_t device_ix, storage_device_stats *stats);
 extern int as_storage_ticker_stats(struct as_namespace_s *ns); // prints SSD histograms to the info ticker
 extern int as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD histograms
 
@@ -188,6 +203,7 @@ extern void as_storage_cache_pmeta_ssd(struct as_namespace_s *ns, const struct a
 extern void as_storage_flush_pmeta_ssd(struct as_namespace_s *ns, uint32_t start_pid, uint32_t n_partitions);
 
 extern int as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
+extern void as_storage_device_stats_ssd(struct as_namespace_s *ns, uint32_t device_ix, storage_device_stats *stats);
 extern int as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
 extern int as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
 

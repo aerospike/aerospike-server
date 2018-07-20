@@ -66,6 +66,12 @@ void info_append_uint32(cf_dyn_buf *db, const char *name, uint32_t value);
 void info_append_uint64(cf_dyn_buf *db, const char *name, uint64_t value);
 void info_append_uint64_x(cf_dyn_buf *db, const char *name, uint64_t value);
 
+// Append indexed name with optional attribute and value: name[ix].attr=value;
+void info_append_indexed_string(cf_dyn_buf *db, const char *name, uint32_t ix, const char *attr, const char *value);
+void info_append_indexed_int(cf_dyn_buf *db, const char *name, uint32_t ix, const char *attr, int value);
+void info_append_indexed_uint32(cf_dyn_buf *db, const char *name, uint32_t ix, const char *attr, uint32_t value);
+void info_append_indexed_uint64(cf_dyn_buf *db, const char *name, uint32_t ix, const char *attr, uint64_t value);
+
 typedef struct cf_buf_builder_s {
 	size_t	alloc_sz;
 	size_t	used_sz;

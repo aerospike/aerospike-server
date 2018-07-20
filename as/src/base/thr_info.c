@@ -83,6 +83,7 @@
 #include "fabric/partition_balance.h"
 #include "fabric/roster.h"
 #include "fabric/skew_monitor.h"
+#include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
@@ -1804,7 +1805,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
 	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
-		info_append_string(db, "index-type.mount", ns->xmem_mounts[i]);
+		info_append_indexed_string(db, "index-type.mount", i, NULL, ns->xmem_mounts[i]);
 	}
 
 	if (as_namespace_index_persisted(ns)) {
@@ -1817,15 +1818,17 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal")));
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-		for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
-			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
-		}
+		uint32_t n = ns->n_storage_devices + ns->n_storage_files;
+		const char* tag = ns->n_storage_devices != 0 ?
+				"storage-engine.device" : "storage-engine.file";
 
-		for (uint32_t i = 0; i < ns->n_storage_files; i++) {
-			info_append_string(db, "storage-engine.file", ns->storage_devices[i]);
-		}
+		for (uint32_t i = 0; i < n; i++) {
+			info_append_indexed_string(db, tag, i, NULL, ns->storage_devices[i]);
 
-		// TODO - how to report the shadows?
+			if (ns->n_storage_shadows != 0) {
+				info_append_indexed_string(db, tag, i, "shadow", ns->storage_shadows[i]);
+			}
+		}
 
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_string_safe(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode);
@@ -5783,36 +5786,39 @@ info_get_sindexes(char *name, cf_dyn_buf *db)
 }
 
 static void
-add_index_health(as_namespace *ns, cf_dyn_buf *db)
+add_index_device_stats(as_namespace *ns, cf_dyn_buf *db)
 {
 	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
-		char key[100];
-		snprintf(key, sizeof(key), "index_health[%u].id", i);
-
-		info_append_string(db, key, ns->xmem_mounts[i]);
-
-		snprintf(key, sizeof(key), "index_health[%u].age", i);
-
-		int32_t age = cf_nvme_get_age(ns->xmem_mounts[i]);
-		info_append_int(db, key, age);
+		info_append_indexed_int(db, "index-type.mount", i, "age",
+				cf_nvme_get_age(ns->xmem_mounts[i]));
 	}
 }
 
 static void
-add_data_health(as_namespace *ns, cf_dyn_buf *db)
+add_data_device_stats(as_namespace *ns, cf_dyn_buf *db)
 {
 	uint32_t n = ns->n_storage_devices + ns->n_storage_files;
+	const char* tag = ns->n_storage_devices != 0 ?
+			"storage-engine.device" : "storage-engine.file";
 
 	for (uint32_t i = 0; i < n; i++) {
-		char key[100];
-		snprintf(key, sizeof(key), "data_health[%u].id", i);
+		storage_device_stats stats;
+		as_storage_device_stats(ns, i, &stats);
 
-		info_append_string(db, key, ns->storage_devices[i]);
+		info_append_indexed_uint64(db, tag, i, "used_bytes", stats.used_sz);
+		info_append_indexed_uint32(db, tag, i, "free_wblocks", stats.free_wblock_q_sz);
 
-		snprintf(key, sizeof(key), "data_health[%u].age", i);
+		info_append_indexed_uint32(db, tag, i, "write_q", stats.write_q_sz);
+		info_append_indexed_uint64(db, tag, i, "writes", stats.n_writes);
 
-		int32_t age = cf_nvme_get_age(ns->storage_devices[i]);
-		info_append_int(db, key, age);
+		info_append_indexed_uint32(db, tag, i, "defrag_q", stats.defrag_q_sz);
+		info_append_indexed_uint64(db, tag, i, "defrag_reads", stats.n_defrag_reads);
+		info_append_indexed_uint64(db, tag, i, "defrag_writes", stats.n_defrag_writes);
+
+		info_append_indexed_uint32(db, tag, i, "shadow_write_q", stats.shadow_write_q_sz);
+
+		info_append_indexed_int(db, tag, i, "age",
+				cf_nvme_get_age(ns->storage_devices[i]));
 	}
 }
 
@@ -5906,7 +5912,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 		info_append_uint64(db, "index_flash_used_bytes", index_used);
 		info_append_uint64(db, "index_flash_used_pct", used_pct);
-		add_index_health(ns, db);
+
+		add_index_device_stats(ns, db);
 	}
 
 	// Persistent storage stats.
@@ -5929,7 +5936,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
 
-		add_data_health(ns, db);
+		add_data_device_stats(ns, db);
 	}
 
 	// Partition balance state.

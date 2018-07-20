@@ -4176,6 +4176,28 @@ as_storage_stats_ssd(as_namespace *ns, int *available_pct,
 }
 
 
+void
+as_storage_device_stats_ssd(struct as_namespace_s *ns, uint32_t device_ix,
+		storage_device_stats *stats)
+{
+	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+	drv_ssd *ssd = &ssds->ssds[device_ix];
+
+	stats->used_sz = ssd->inuse_size;
+	stats->free_wblock_q_sz = cf_queue_sz(ssd->free_wblock_q);
+
+	stats->write_q_sz = cf_queue_sz(ssd->swb_write_q);
+	stats->n_writes = ssd->n_wblock_writes;
+
+	stats->defrag_q_sz = cf_queue_sz(ssd->defrag_wblock_q);
+	stats->n_defrag_reads = ssd->n_defrag_wblock_reads;
+	stats->n_defrag_writes = ssd->n_defrag_wblock_writes;
+
+	stats->shadow_write_q_sz = ssd->swb_shadow_q ?
+			cf_queue_sz(ssd->swb_shadow_q) : 0;
+}
+
+
 int
 as_storage_ticker_stats_ssd(as_namespace *ns)
 {
