@@ -192,7 +192,7 @@ static cf_atomic64 g_skew = 0;
  * Self HLC delta over the last skew window. Access should under the self skew
  * data lock.
  */
-static as_skew_ring_buffer g_self_skew_ring_buffer = { 0 };
+static as_skew_ring_buffer g_self_skew_ring_buffer = { { 0 } };
 
 /**
  * Lock for self skew ring buffer.
