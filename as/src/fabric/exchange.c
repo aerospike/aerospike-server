@@ -743,7 +743,6 @@ static pthread_mutex_t g_external_event_publisher_lock =
 /**
  * Used to limit potentially long log lines. Includes space for NULL terminator.
  */
-#define LOG_LENGTH_MAX() (800)
 #define CRASH(format, ...) cf_crash(AS_EXCHANGE, format, ##__VA_ARGS__)
 #define WARNING(format, ...) cf_warning(AS_EXCHANGE, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_EXCHANGE, format, ##__VA_ARGS__)

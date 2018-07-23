@@ -2365,6 +2365,7 @@ clustering_hb_plugin_set_fn(msg* msg)
  */
 static void
 clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
+		as_hb_plugin_node_data* prev_plugin_data,
 		as_hb_plugin_node_data* plugin_data)
 {
 	// Lockless check to prevent deadlocks.
@@ -2378,7 +2379,7 @@ clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	size_t payload_size;
 
 	if (msg_get_buf(msg, AS_HB_MSG_PAXOS_DATA, (uint8_t**)&payload,
-			&payload_size, MSG_GET_DIRECT) != 0) {
+					&payload_size, MSG_GET_DIRECT) != 0) {
 		cf_ticker_warning(AS_CLUSTERING,
 				"received empty clustering payload in heartbeat pulse from node %"PRIx64,
 				source);

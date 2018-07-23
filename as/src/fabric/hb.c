@@ -1719,7 +1719,7 @@ static int hb_adjacency_free_data_reduce(const void* key, void* data, void* udat
 static void hb_clear();
 static int hb_adjacency_iterate_reduce(const void* key, void* data, void* udata);
 static void hb_plugin_set_fn(msg* msg);
-static void hb_plugin_parse_data_fn(msg* msg, cf_node source, as_hb_plugin_node_data* plugin_data);
+static void hb_plugin_parse_data_fn(msg* msg, cf_node source, as_hb_plugin_node_data* prev_plugin_data, as_hb_plugin_node_data* plugin_data);
 static msg* hb_msg_get();
 static void hb_msg_return(msg* msg);
 static void hb_plugin_msg_fill(msg* msg);
@@ -1747,7 +1747,7 @@ static bool hb_msg_is_obsolete(as_hb_channel_event* event, as_hlc_timestamp send
 static void hb_endpoint_change_tracker_update(uint64_t* tracker, bool endpoint_changed);
 static bool hb_endpoint_change_tracker_is_normal(uint64_t tracker);
 static bool hb_endpoint_change_tracker_has_changed(uint64_t tracker);
-static void hb_adjacent_node_update(as_hb_channel_event* msg_event, as_hb_adjacent_node* adjacent_node, bool plugin_data_changed[]);
+static int hb_adjacent_node_update(as_hb_channel_event* msg_event, as_hb_adjacent_node* adjacent_node, bool plugin_data_changed[]);
 static bool hb_node_can_consider_adjacent(as_hb_adjacent_node* adjacent_node);
 static void hb_channel_on_self_pulse(as_hb_channel_event* msg_event);
 static void hb_channel_on_pulse(as_hb_channel_event* msg_event);
@@ -2028,6 +2028,16 @@ as_hb_tx_interval_set(uint32_t new_interval)
 	}
 	config_tx_interval_set(new_interval);
 	return (0);
+}
+
+/**
+ * Get the maximum number of missed heartbeat intervals after which a node is
+ * considered expired.
+ */
+uint32_t
+as_hb_max_intervals_missed_get()
+{
+	return config_max_intervals_missed_get();
 }
 
 /**
@@ -7625,6 +7635,7 @@ hb_plugin_set_fn(msg* msg)
  */
 static void
 hb_plugin_parse_data_fn(msg* msg, cf_node source,
+		as_hb_plugin_node_data* prev_plugin_data,
 		as_hb_plugin_node_data* plugin_data)
 {
 	size_t adj_length = 0;
@@ -7738,8 +7749,14 @@ hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node,
 				curr_data->data_size = 0;
 			}
 
+			if (prev_data->data == NULL) {
+				prev_data->data = cf_malloc(HB_PLUGIN_DATA_DEFAULT_SIZE);
+				prev_data->data_capacity = HB_PLUGIN_DATA_DEFAULT_SIZE;
+				prev_data->data_size = 0;
+			}
+
 			// Parse message data into current data.
-			(plugins[i]).parse_fn(msg, source, curr_data);
+			(plugins[i]).parse_fn(msg, source, prev_data, curr_data);
 
 			if (!plugins[i].change_listener) {
 				// No change listener configured. Skip detecting change.
@@ -7759,8 +7776,8 @@ hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node,
 				continue;
 			}
 
-			if (prev_data_size
-					!= curr_data_size|| prev_data_blob == NULL || curr_data_blob == NULL) {
+			if (prev_data_size != curr_data_size || prev_data_blob == NULL
+					|| curr_data_blob == NULL) {
 				// Plugin data definitely changed, as the data sizes differ or
 				// exactly one of old or new data pointers is NULL.
 				plugin_data_changed[i] = true;
@@ -8381,18 +8398,41 @@ hb_endpoint_change_tracker_has_changed(uint64_t tracker)
 
 /**
  * Update adjacent node data on receiving a valid pulse message.
+ *
+ * @return 0 if the update was successfully applied, -1 if the update should be
+ * rejected.
  */
-static void
+static int
 hb_adjacent_node_update(as_hb_channel_event* msg_event,
 		as_hb_adjacent_node* adjacent_node, bool plugin_data_changed[])
 {
 	msg* msg = msg_event->msg;
+
 	cf_node source = 0;
 	// Channel has validated the source. Don't bother checking here.
 	msg_nodeid_get(msg, &source);
 
-	// Update all fields irrespective of whether this is a new node.
 	msg_id_get(msg, &adjacent_node->protocol_version);
+
+	as_hlc_timestamp send_ts = adjacent_node->last_msg_hlc_ts.send_ts;
+
+	if (hb_endpoint_change_tracker_has_changed(
+			adjacent_node->endpoint_change_tracker)) {
+		// Allow a little more slack for obsolete checking because the two nodes
+		// might not have matching send timestamps.
+		send_ts = as_hlc_timestamp_subtract_ms(send_ts,
+				config_tx_interval_get());
+	}
+
+	if (hb_msg_is_obsolete(msg_event, send_ts)) {
+		WARNING("ignoring delayed heartbeat - expected timestamp less than %" PRIu64" but was  %" PRIu64 " from node: %" PRIx64,
+				send_ts,
+				msg_event->msg_hlc_ts.send_ts, source);
+		return -1;
+	}
+
+	// Populate plugin data.
+	hb_plugin_msg_parse(msg, adjacent_node, g_hb.plugins, plugin_data_changed);
 
 	// Get the ip address.
 	as_endpoint_list* msg_endpoint_list;
@@ -8402,9 +8442,6 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 		// Update the endpoints.
 		endpoint_list_copy(&adjacent_node->endpoint_list, msg_endpoint_list);
 	}
-
-	// Populate plugin data.
-	hb_plugin_msg_parse(msg, adjacent_node, g_hb.plugins, plugin_data_changed);
 
 	// Update the last updated time.
 	adjacent_node->last_updated_monotonic_ts = cf_getms();
@@ -8435,8 +8472,8 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 	as_endpoint_list* prev_fabric_endpoints =
 			as_fabric_hb_plugin_get_endpoint_list(prev_data);
 
-	// Endpoints changed if this is not the first update where there is no
-	// previous data or if the endpoint lists do not match.
+	// Endpoints changed if this is not the first update and if the endpoint
+	// lists do not match.
 	bool endpoints_changed = prev_fabric_endpoints != NULL
 			&& !as_endpoint_lists_are_equal(curr_fabric_endpoints,
 					prev_fabric_endpoints);
@@ -8455,6 +8492,8 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 
 	hb_endpoint_change_tracker_update(&adjacent_node->endpoint_change_tracker,
 			endpoints_changed);
+
+	return 0;
 }
 
 /**
@@ -8469,7 +8508,7 @@ hb_node_can_consider_adjacent(as_hb_adjacent_node* adjacent_node)
 }
 
 /**
- * Process a pulse from source having the out node-id.
+ * Process a pulse from source having our node-id.
  */
 static void
 hb_channel_on_self_pulse(as_hb_channel_event* msg_event)
@@ -8477,7 +8516,10 @@ hb_channel_on_self_pulse(as_hb_channel_event* msg_event)
 	bool plugin_data_changed[AS_HB_PLUGIN_SENTINEL] = { 0 };
 
 	HB_LOCK();
-	hb_adjacent_node_update(msg_event, &g_hb.self_node, plugin_data_changed);
+	if (hb_adjacent_node_update(msg_event, &g_hb.self_node, plugin_data_changed)
+			!= 0) {
+		goto Exit;
+	}
 
 	as_hb_plugin_node_data* curr_data =
 			&g_hb.self_node.plugin_data[AS_HB_PLUGIN_FABRIC][g_hb.self_node.plugin_data_cycler
@@ -8500,6 +8542,7 @@ hb_channel_on_self_pulse(as_hb_channel_event* msg_event)
 		cf_atomic_int_incr(&g_stats.heartbeat_received_self);
 	}
 
+Exit:
 	HB_UNLOCK();
 }
 
@@ -8536,27 +8579,15 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 		hb_on_probation_node_get(source, &adjacent_node);
 	}
 
-	// Update the adjacent node with contents of the message. If the msg is
-	// obsolete
-	hb_adjacent_node_update(msg_event, &adjacent_node, plugin_data_changed);
-	as_hlc_timestamp send_ts = adjacent_node.last_msg_hlc_ts.send_ts;
+	// Update the adjacent node with contents of the message.
+	if (hb_adjacent_node_update(msg_event, &adjacent_node, plugin_data_changed)
+			!= 0) {
+		// Update rejected.
+		goto Exit;
+	}
 
 	// Check if this node needs to be on probation.
 	should_be_on_probation = !hb_node_can_consider_adjacent(&adjacent_node);
-
-	if (hb_endpoint_change_tracker_has_changed(
-			adjacent_node.endpoint_change_tracker)) {
-		// Allow a little more slack for obsolete checking because the two nodes
-		// might not have matching send timestamps.
-		send_ts = as_hlc_timestamp_subtract_ms(send_ts, config_tx_interval_get());
-	}
-
-	if (hb_msg_is_obsolete(msg_event, send_ts)) {
-		WARNING("ignoring delayed heartbeat - expected timestamp less than %" PRIu64" but was  %" PRIu64 " from node: %" PRIx64,
-				send_ts,
-				msg_event->msg_hlc_ts.send_ts, source);
-		goto Exit;
-	}
 
 	cf_atomic_int_incr(&g_stats.heartbeat_received_foreign);
 
@@ -8576,7 +8607,7 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 		}
 	}
 
-	// Update plugin data, update times, etc.
+	// Move the node to appropriate hash.
 	cf_shash_put(should_be_on_probation ? g_hb.on_probation : g_hb.adjacency,
 			&source, &adjacent_node);
 

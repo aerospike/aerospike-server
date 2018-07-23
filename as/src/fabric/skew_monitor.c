@@ -67,10 +67,6 @@
  *
  * where ALPHA is set to weigh current values more over older values.
  *
- * Cluster wide clock ckew is updated at periodic intervals. A low water mark
- * breach of the skew generates warnings and a high water mark breach causes
- * (TODO: ????).
- *
  * Design
  * =======
  * The monitor is ticks on heartbeat message sends without requiring an
@@ -86,10 +82,27 @@
  */
 
 /**
- * Weightage of current clock delta over current moving average. For now weigh
- * recent values heavily over older values.
+ * Maximum allowed deviation in HLC clocks. A peer node's HLC clock will be
+ * considered bad if the difference between self HLC and peer's HLC exceeds this
+ * value.
+ *
+ * This value allows a node that barely synchronizes HLC once per node timeout.
  */
-#define ALPHA (0.65)
+#define HLC_DEVIATION_MAX_MS (as_hb_node_timeout_get())
+
+/**
+ * Max allowed streak of bad HLC clock readings for a peer node. During the
+ * allowed streak,
+ * the peer node will be assumed to have hlc delta same as self node. Limited
+ * between 3 and 5.
+ */
+#define BAD_HLC_STREAK_MAX (MIN(5, MAX(3, as_hb_max_intervals_missed_get() / 2)))
+
+/**
+ * Ring buffer maximum capacity. The actual capacity is a function of the
+ * heartbeat node timeout.
+ */
+#define RING_BUFFER_CAPACITY_MAX (100)
 
 /*
  * ----------------------------------------------------------------------------
@@ -97,10 +110,15 @@
  * ----------------------------------------------------------------------------
  */
 #define CRASH(format, ...) cf_crash(AS_SKEW, format, ##__VA_ARGS__)
+#define TICKER_WARNING(format, ...)					\
+cf_ticker_warning(AS_SKEW, format, ##__VA_ARGS__)
 #define WARNING(format, ...) cf_warning(AS_SKEW, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_SKEW, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_SKEW, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_SKEW, format, ##__VA_ARGS__)
+#define ring_buffer_log(buffer, message, severity)		\
+ring_buffer_log_event(buffer, message, severity, AS_SKEW,		\
+		__FILENAME__, __LINE__);
 
 /*
  * ----------------------------------------------------------------------------
@@ -109,21 +127,41 @@
  */
 
 /**
- * A struct to hold and its skew related information.
+ * Ring buffer holding a window of skew delta for a node.
  */
-typedef struct as_skew_monitor_node_skew_data_s
+typedef struct as_skew_ring_buffer_s
+{
+	int64_t data[RING_BUFFER_CAPACITY_MAX];
+	int start;
+	int size;
+	int capacity;
+} as_skew_ring_buffer;
+
+/**
+ * Skew plugin data stored for all adjacent nodes.
+ */
+typedef struct as_skew_plugin_data_s
+{
+	as_skew_ring_buffer ring_buffer;
+	uint8_t bad_hlc_streak;
+} as_skew_plugin_data;
+
+/**
+ * Skew summary for a node for the current skew update interval.
+ */
+typedef struct as_skew_node_summary_s
 {
 	cf_node nodeid;
 	int64_t delta;
-} as_skew_monitor_node_skew_data;
+} as_skew_node_summary;
 
 /**
- * HB plugin data iterate to get node hlc deltas.
+ * HB plugin data iterate struct to get node hlc deltas.
  */
 typedef struct as_skew_monitor_hlc_delta_udata_s
 {
 	int num_nodes;
-	as_skew_monitor_node_skew_data skew_data[AS_CLUSTER_SZ];
+	as_skew_node_summary skew_summary[AS_CLUSTER_SZ];
 } as_skew_monitor_hlc_delta_udata;
 
 /*
@@ -143,17 +181,23 @@ as_hb_msg_send_hlc_ts_get(msg* msg, as_hlc_timestamp* send_ts);
 /**
  * Last time skew was checked.
  */
-cf_atomic64 g_last_skew_check_time = 0;
+static cf_atomic64 g_last_skew_check_time = 0;
 
 /**
  * Current value of clock skew.
  */
-cf_atomic64 g_skew = 0;
+static cf_atomic64 g_skew = 0;
 
 /**
- * Moving average of the clock skew for self node.
+ * Self HLC delta over the last skew window. Access should under the self skew
+ * data lock.
  */
-volatile int64_t g_self_skew_avg = 0;
+static as_skew_ring_buffer g_self_skew_ring_buffer = { 0 };
+
+/**
+ * Lock for self skew ring buffer.
+ */
+static pthread_mutex_t g_self_skew_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 /*
  * ----------------------------------------------------------------------------
@@ -182,6 +226,133 @@ skew_monitor_outlier_detection_threshold()
 
 /*
  * ----------------------------------------------------------------------------
+ * Ring buffer related
+ * ----------------------------------------------------------------------------
+ */
+
+/**
+ * Log contents of the ring buffer.
+ */
+static void
+ring_buffer_log_event(as_skew_ring_buffer* ring_buffer, char* prefix,
+		cf_fault_severity severity, cf_fault_context context, char* file_name,
+		int line)
+{
+	int max_per_line = 25;
+	int max_bytes_per_value = 21;	// Include the space as well
+	char log_buffer[(max_per_line * max_bytes_per_value) + 1];	// For the NULL terminator.
+	char* value_buffer_start = log_buffer;
+
+	if (prefix) {
+		value_buffer_start += sprintf(log_buffer, "%s", prefix);
+	}
+
+	for (int i = 0; i < ring_buffer->size; i++) {
+		char* buffer = value_buffer_start;
+		for (int j = 0; j < max_per_line && i < ring_buffer->size; j++) {
+			buffer += sprintf(buffer, "%ld ", ring_buffer->data[(ring_buffer->start + i) % ring_buffer->capacity]);
+			i++;
+		}
+
+		// Overwrite the space from the last node on the log line only if there
+		// is atleast one node output
+		if (buffer != value_buffer_start) {
+			*(buffer - 1) = 0;
+			cf_fault_event(context, severity, file_name, line, "%s",
+					log_buffer);
+		}
+	}
+}
+
+/**
+ * Get the representative hlc delta value for current ring buffer contents.
+ */
+static int64_t
+ring_buffer_hlc_delta(as_skew_ring_buffer* buffer)
+{
+	int64_t max_delta = 0;
+
+	for (int i = 0; i < buffer->size; i++) {
+		int64_t delta = buffer->data[(buffer->start + i) % buffer->capacity];
+		if (delta > max_delta) {
+			max_delta = delta;
+		}
+	}
+
+	return max_delta;
+}
+
+/**
+ * The current capacity of the ring buffer based on heartbeat node timeout,
+ * which determines how much skew history is maintained.
+ */
+static int
+ring_buffer_current_capacity()
+{
+	// Maintain a history for one node timeout interval
+	return MIN(RING_BUFFER_CAPACITY_MAX, as_hb_max_intervals_missed_get());
+}
+
+/**
+ * Adjust the contents of the ring buffer to new capacity.
+ */
+static void
+ring_buffer_adjust_to_capacity(as_skew_ring_buffer* buffer,
+		const int new_capacity)
+{
+	if (buffer->capacity == new_capacity) {
+		// No adjustments to data needed.
+		return;
+	}
+
+	// Will only happen if the heartbeat node timeout is changed of if this is
+	// the first insert.
+	int new_size = buffer->size;
+	if (buffer->size > new_capacity) {
+		int shrink_by = buffer->size - new_capacity;
+		// Drop the oldest values and copy over the rest.
+		buffer->start = (buffer->start + shrink_by) % buffer->capacity;
+		new_size = new_capacity;
+	}
+
+	// Shift values to be retained to start of the data array. Since this is not
+	// a frequent operations use the simple technique of making a copy.
+	int64_t adjusted_data[RING_BUFFER_CAPACITY_MAX];
+	for (int i = 0; i < new_size; i++) {
+		int buffer_index = (buffer->start + i) % buffer->capacity;
+		adjusted_data[i] = buffer->data[buffer_index];
+	}
+
+	// Reset the buffer to start at index 0 and have new capacity.
+	memcpy(buffer->data, adjusted_data, new_size);
+	buffer->capacity = new_capacity;
+	buffer->start = 0;
+	buffer->size = new_size;
+}
+
+/**
+ * Insert a new delta into the ring_buffer.
+ */
+static void
+ring_buffer_insert(as_skew_ring_buffer* buffer, const int64_t delta)
+{
+	ring_buffer_adjust_to_capacity(buffer, ring_buffer_current_capacity());
+
+	int insert_index = 0;
+	if (buffer->size == buffer->capacity) {
+		insert_index = buffer->start;
+		buffer->start = (buffer->start + 1) % buffer->capacity;
+	}
+	else {
+		insert_index = buffer->size;
+		buffer->size++;
+	}
+
+	buffer->data[insert_index] = delta;
+}
+
+/*
+ * ----------------------------------------------------------------------------
  * HLC delta related
  * ----------------------------------------------------------------------------
  */
@@ -198,19 +369,23 @@ skew_monitor_delta_collect_iterate(cf_node nodeid, void* plugin_data,
 	as_skew_monitor_hlc_delta_udata* deltas =
 			(as_skew_monitor_hlc_delta_udata*)udata;
 
-	if (!plugin_data || plugin_data_size < sizeof(uint64_t)) {
+	if (!plugin_data || plugin_data_size < sizeof(as_skew_plugin_data)) {
 		// Assume missing nodes share the same delta as self.
 		// Note: self node will not be in adjacency list and hence will also
 		// follow same code path.
-		delta = g_self_skew_avg;
+		pthread_mutex_lock(&g_self_skew_lock);
+		delta = ring_buffer_hlc_delta(&g_self_skew_ring_buffer);
+		pthread_mutex_unlock(&g_self_skew_lock);
 	}
 	else {
-		delta = *(int64_t*)plugin_data;
+		as_skew_plugin_data* skew_plugin_data =
+				(as_skew_plugin_data*)plugin_data;
+		delta = ring_buffer_hlc_delta(&skew_plugin_data->ring_buffer);
 	}
 
 	int index = deltas->num_nodes;
-	deltas->skew_data[index].delta = delta;
-	deltas->skew_data[index].nodeid = nodeid;
+	deltas->skew_summary[index].delta = delta;
+	deltas->skew_summary[index].nodeid = nodeid;
 	deltas->num_nodes++;
 }
 
@@ -242,7 +417,7 @@ skew_monitor_compute_skew()
 	int64_t max = INT64_MIN;
 
 	for (int i = 0; i < udata.num_nodes; i++) {
-		int64_t delta = udata.skew_data[i].delta;
+		int64_t delta = udata.skew_summary[i].delta;
 		if (delta < min) {
 			min = delta;
 		}
@@ -268,13 +443,11 @@ skew_monitor_update()
 	cf_atomic64_set(&g_last_skew_check_time, now);
 
 	uint64_t skew = skew_monitor_compute_skew();
-	uint64_t avg_skew = cf_atomic64_get(g_skew);
-	avg_skew = ALPHA * skew + (1 - ALPHA) * avg_skew;
-	cf_atomic64_set(&g_skew, avg_skew);
+	cf_atomic64_set(&g_skew, skew);
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
-		handle_clock_skew(ns, avg_skew);
+		handle_clock_skew(ns, skew);
 	}
 }
 
@@ -290,8 +463,8 @@ skew_monitor_update()
 static int
 skew_monitor_hlc_delta_compare(const void* o1, const void* o2)
 {
-	int64_t delta1 = ((as_skew_monitor_node_skew_data*)o1)->delta;
-	int64_t delta2 = ((as_skew_monitor_node_skew_data*)o2)->delta;
+	int64_t delta1 = ((as_skew_node_summary*)o1)->delta;
+	int64_t delta2 = ((as_skew_node_summary*)o2)->delta;
 
 	return delta1 > delta2 ? 1 : (delta1 == delta2 ? 0 : -1);
 }
@@ -318,19 +491,18 @@ skew_monitor_median_index(int from, int to)
  * Outliers should have space to hold at least AS_CLUSTER_SZ nodes.
  */
 static uint32_t
-skew_monitor_outliers_from_skew_data(cf_vector* outliers,
+skew_monitor_outliers_from_skew_summary(cf_vector* outliers,
 		as_skew_monitor_hlc_delta_udata* udata)
 {
 	// Use inter-quartile distance to detect outliers.
 	// Sort the deltas in ascending order.
-	qsort(udata->skew_data, udata->num_nodes,
-			sizeof(as_skew_monitor_node_skew_data),
+	qsort(udata->skew_summary, udata->num_nodes, sizeof(as_skew_node_summary),
 			skew_monitor_hlc_delta_compare);
 	int q2_index = skew_monitor_median_index(0, udata->num_nodes - 1);
 	int q3_index = skew_monitor_median_index(q2_index, udata->num_nodes - 1);
 	int q1_index = skew_monitor_median_index(0, q2_index);
-	int64_t q3 = udata->skew_data[q3_index].delta;
-	int64_t q1 = udata->skew_data[q1_index].delta;
+	int64_t q3 = udata->skew_summary[q3_index].delta;
+	int64_t q1 = udata->skew_summary[q1_index].delta;
 
 	// Compute the inter quartile range. Lower bound iqr to network latency to
 	// allow that allow some fuzziness with tigth clock grouping.
@@ -342,10 +514,10 @@ skew_monitor_outliers_from_skew_data(cf_vector* outliers,
 
 	// Isolate outliers
 	for (int i = 0; i < udata->num_nodes; i++) {
-		if (udata->skew_data[i].delta < lower_bound
-				|| udata->skew_data[i].delta > upper_bound) {
+		if (udata->skew_summary[i].delta < lower_bound
+				|| udata->skew_summary[i].delta > upper_bound) {
 			if (outliers) {
-				cf_vector_append(outliers, &udata->skew_data[i].nodeid);
+				cf_vector_append(outliers, &udata->skew_summary[i].nodeid);
 			}
 
 			num_outliers++;
@@ -385,7 +557,7 @@ skew_monitor_outliers(cf_vector* outliers)
 	as_hb_plugin_data_iterate(&succession, AS_HB_PLUGIN_SKEW_MONITOR,
 			skew_monitor_delta_collect_iterate, &udata);
 
-	num_outliers = skew_monitor_outliers_from_skew_data(outliers, &udata);
+	num_outliers = skew_monitor_outliers_from_skew_summary(outliers, &udata);
 
 Cleanup:
 	cf_vector_destroy(&succession);
@@ -412,8 +584,10 @@ skew_monitor_hb_plugin_set_fn(msg* msg)
 	as_hlc_timestamp send_hlc_ts = as_hlc_timestamp_now();
 	int64_t clock_delta = as_hlc_physical_ts_get(send_hlc_ts) - send_ts;
 
-	// Update the average delta for self.
-	g_self_skew_avg = clock_delta * ALPHA + (1 - ALPHA) * (g_self_skew_avg);
+	// Update the clock delta for self.
+	pthread_mutex_lock(&g_self_skew_lock);
+	ring_buffer_insert(&g_self_skew_ring_buffer, clock_delta);
+	pthread_mutex_unlock(&g_self_skew_lock);
 
 	cf_clock now = cf_getms();
 	if (cf_atomic64_get(g_last_skew_check_time) + skew_check_interval() < now) {
@@ -427,51 +601,97 @@ skew_monitor_hb_plugin_set_fn(msg* msg)
  */
 static void
 skew_monitor_hb_plugin_parse_data_fn(msg* msg, cf_node source,
+		as_hb_plugin_node_data* prev_plugin_data,
 		as_hb_plugin_node_data* plugin_data)
 {
 	cf_clock send_ts = 0;
 	as_hlc_timestamp send_hlc_ts = 0;
+	as_hlc_timestamp hlc_now = as_hlc_timestamp_now();
+
 	if (msg_get_uint64(msg, AS_HB_MSG_SKEW_MONITOR_DATA, &send_ts) != 0
 			|| as_hb_msg_send_hlc_ts_get(msg, &send_hlc_ts) != 0) {
-		// Pre CP mode node. For now assumes it shares the same delta with hlc
+		// Pre SC mode node. For now assumes it shares the same delta with hlc
 		// as us.
-		send_hlc_ts = as_hlc_timestamp_now();
+		send_hlc_ts = hlc_now;
 		send_ts = cf_clock_getabsolute();
 	}
 
-	size_t required_capacity = sizeof(int64_t);
+	size_t required_capacity = sizeof(as_skew_plugin_data);
 	if (required_capacity > plugin_data->data_capacity) {
 		plugin_data->data = cf_realloc(plugin_data->data, required_capacity);
 
 		if (plugin_data->data == NULL) {
-			CRASH(
-					"error allocating space for storing succession list for node %"PRIx64,
-					source);
+			CRASH("error allocating skew data for node %lx", source);
 		}
 		plugin_data->data_capacity = required_capacity;
+	}
+
+	if (plugin_data->data_size == 0) {
+		// First data point.
 		memset(plugin_data->data, 0, required_capacity);
 	}
 
-	int64_t clock_delta = as_hlc_physical_ts_get(send_hlc_ts) - send_ts;
-	int64_t* average_clock_delta = (int64_t*)plugin_data->data;
-
-	if (plugin_data->data_size == 0) {
-		// This is the first data point.
-		*average_clock_delta = clock_delta;
+	if (prev_plugin_data->data_size != 0) {
+		// Copy over older values to carry forward.
+		memcpy(plugin_data->data, prev_plugin_data->data, required_capacity);
 	}
 
+	as_skew_plugin_data* skew_plugin_data =
+			(as_skew_plugin_data*)plugin_data->data;
+
+	int64_t hlc_diff_ms = abs(as_hlc_timestamp_diff_ms(send_hlc_ts, hlc_now));
+
+	if (hlc_diff_ms > HLC_DEVIATION_MAX_MS) {
+		if (skew_plugin_data->bad_hlc_streak < BAD_HLC_STREAK_MAX) {
+			skew_plugin_data->bad_hlc_streak++;
+			INFO("node %lx HLC not in sync - hlc %lu self-hlc %lu diff %ld",
+					source, send_hlc_ts, hlc_now, hlc_diff_ms);
+		}
+		else {
+			// Long running streak.
+			TICKER_WARNING("node %lx HLC not in sync", source);
+		}
+	}
+	else {
+		// End the bad streak if the source is in one.
+		skew_plugin_data->bad_hlc_streak = 0;
+	}
+
+	int64_t delta = 0;
+	if ((skew_plugin_data->bad_hlc_streak > 0)
+			&& skew_plugin_data->bad_hlc_streak <= BAD_HLC_STREAK_MAX) {
+		// The peer is in a tolerable bad hlc streak. Assume it has nominal hlc
+		// delta. This is most likely a restarted or a new node that hasn't
+		// caught up with the cluster HLC yet.
+		pthread_mutex_lock(&g_self_skew_lock);
+		delta = ring_buffer_hlc_delta(&g_self_skew_ring_buffer);
+		pthread_mutex_unlock(&g_self_skew_lock);
+	}
+	else {
+		// This measurement is safe to use.
+		delta = as_hlc_physical_ts_get(send_hlc_ts) - send_ts;
+	}
+
+	// Update the ring buffer with the new delta.
+	ring_buffer_insert(&skew_plugin_data->ring_buffer, delta);
+
+	if (cf_context_at_severity(AS_SKEW, CF_DETAIL)) {
+		// Temporary debugging.
+		char message[100];
+		sprintf(message, "Insert for node: %lx - ", source);
+		ring_buffer_log(&skew_plugin_data->ring_buffer, message, CF_DETAIL);
+	}
+
+	// Ensure the data size is set correctly.
 	plugin_data->data_size = required_capacity;
 
-	// update the average
-	*average_clock_delta = clock_delta * ALPHA
-			+ (1 - ALPHA) * (*average_clock_delta);
-
-	DETAIL("node %"PRIx64" hlc:%lu clock:%lu delta:%ld moving-average:%ld", source, send_hlc_ts, send_ts, clock_delta, *average_clock_delta);
+	DETAIL("node %lx - hlc:%lu clock:%lu delta:%ld", source, send_hlc_ts,
+			send_ts, delta);
 }
 
 /*
  * ----------------------------------------------------------------------------
- * Protceted API only mean for clustering.
+ * Protceted API only meant for clustering.
  * ----------------------------------------------------------------------------
  */
 
@@ -593,7 +813,7 @@ as_skew_monitor_dump()
 			skew_monitor_delta_collect_iterate, &udata);
 
 	for (int i = 0; i < udata.num_nodes; i++) {
-		INFO("CSM:    node:%"PRIx64" hlc-delta:%ld", udata.skew_data[i].nodeid, udata.skew_data[i].delta);
+		INFO("CSM:    node:%lx hlc-delta:%ld", udata.skew_summary[i].nodeid, udata.skew_summary[i].delta);
 	}
 
 	// Log the outliers.
