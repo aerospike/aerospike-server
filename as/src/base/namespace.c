@@ -141,7 +141,6 @@ as_namespace_create(char *name)
 
 	ns->cfg_replication_factor = 2;
 	ns->replication_factor = 0; // gets set on rebalance
-	ns->memory_size = 1024LL * 1024LL * 1024LL * 4LL; // default memory limit is 4G per namespace
 
 	ns->sets_enable_xdr = true; // ship all the sets by default
 	ns->ns_allow_nonxdr_writes = true; // allow nonxdr writes by default
@@ -167,14 +166,12 @@ as_namespace_create(char *name)
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
 
 	ns->mounts_hwm_pct = 80; // evict when persisted index usage exceeds 80%
-	ns->mounts_size_limit = 1024UL * 1024UL * 1024UL * 16UL; // default persisted index size is 16G across all mounts
 
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 	ns->storage_data_in_memory = true;
 	// Note - default true is consistent with AS_STORAGE_ENGINE_MEMORY, but
 	// cfg.c will set default false for AS_STORAGE_ENGINE_SSD.
 
-	ns->storage_filesize = 1024UL * 1024UL * 1024UL * 16UL; // default file size is 16G per file
 	ns->storage_scheduler_mode = NULL; // null indicates default is to not change scheduler mode
 	ns->storage_write_block_size = 1024 * 1024;
 	ns->storage_defrag_lwm_pct = 50; // defrag if occupancy of block is < 50%

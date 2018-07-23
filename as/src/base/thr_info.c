@@ -5886,7 +5886,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "memory_used_index_bytes", index_memory);
 	info_append_uint64(db, "memory_used_sindex_bytes", sindex_memory);
 
-	uint64_t free_pct = (ns->memory_size != 0 && (ns->memory_size > used_memory)) ?
+	uint64_t free_pct = ns->memory_size > used_memory ?
 			((ns->memory_size - used_memory) * 100L) / ns->memory_size : 0;
 
 	info_append_uint64(db, "memory_free_pct", free_pct);

@@ -2985,7 +2985,7 @@ as_config_init(const char* config_file)
 				cfg_renamed_name_tok(&line, "memory-size");
 				// No break.
 			case CASE_NAMESPACE_MEMORY_SIZE:
-				ns->memory_size = cfg_u64_no_checks(&line);
+				ns->memory_size = cfg_u64(&line, 1024 * 1024, ULONG_MAX);
 				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
 				ns->default_ttl = cfg_seconds_no_checks(&line);
@@ -3221,6 +3221,9 @@ as_config_init(const char* config_file)
 				cfg_begin_context(&state, NAMESPACE_SI);
 				break;
 			case CASE_CONTEXT_END:
+				if (ns->memory_size == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'memory-size'", ns->name);
+				}
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
 					cf_crash_nostack(AS_CFG, "ns %s data-in-index can't be true unless storage-engine is device and both single-bin and data-in-memory are true", ns->name);
 				}
@@ -3262,6 +3265,9 @@ as_config_init(const char* config_file)
 				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
 				break;
 			case CASE_CONTEXT_END:
+				if (ns->mounts_size_limit == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
+				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -3286,6 +3292,9 @@ as_config_init(const char* config_file)
 				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
 				break;
 			case CASE_CONTEXT_END:
+				if (ns->mounts_size_limit == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
+				}
 				cfg_end_context(&state);
 				// TODO - main() doesn't yet support initialization as root.
 				cf_page_cache_dirty_limits();
@@ -3395,6 +3404,9 @@ as_config_init(const char* config_file)
 			case CASE_CONTEXT_END:
 				if (ns->n_storage_devices == 0 && ns->n_storage_files == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} has no devices or files", ns->name);
+				}
+				if (ns->n_storage_files != 0 && ns->storage_filesize == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
 				}
 				cfg_end_context(&state);
 				break;
