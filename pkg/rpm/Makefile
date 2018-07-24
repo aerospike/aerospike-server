@@ -17,7 +17,7 @@ ifeq ($(OS),el7)
 endif
 
 ifeq ($(USE_EE),1)
-all:	dist-xdr package clean
+all:	dist-ee package clean
 else
 all:	dist package clean
 endif
@@ -49,9 +49,6 @@ endif
 	cat $(DEPTH)/as/etc/README.sample.conf.md > $(BUILD_ROOT)/etc/aerospike/sample/README.md
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_ssd.conf
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_mesh.conf
-ifeq ($(EDITION),enterprise)
-	install -pm 644 $(DEPTH)/as/etc/aerospike_all_flash$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_all_flash.conf
-endif
 
 ifeq ($(USE_SYSTEMD),1)
 	cat $(DEPTH)/as/etc/aerospike.service.head >> $(PKG)/rpm/aerospike.service
@@ -157,5 +154,6 @@ endif
 	rm -rf $(SOURCE_ROOT)/*
 
 ifeq ($(USE_EE),1)
-  include $(EEREPO)/xdr/make_in/Makefile.rpm.in
+  include $(AS_EE)/make_in/Makefile.rpm.in
+  include $(XDR)/make_in/Makefile.rpm.in
 endif
