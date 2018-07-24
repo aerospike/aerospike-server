@@ -24,7 +24,6 @@
 
 #include <errno.h>
 #include <grp.h>
-#include <limits.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <stdbool.h>
@@ -1763,7 +1762,7 @@ cfg_int_no_checks(const cfg_line* p_line)
 {
 	int64_t value = cfg_i64_no_checks(p_line);
 
-	if (value < INT_MIN || value > INT_MAX) {
+	if (value < INT32_MIN || value > INT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1789,7 +1788,7 @@ cfg_int_val2_no_checks(const cfg_line* p_line)
 {
 	int64_t value = cfg_i64_val2_no_checks(p_line);
 
-	if (value < INT_MIN || value > INT_MAX) {
+	if (value < INT32_MIN || value > INT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1802,7 +1801,7 @@ cfg_int_val3_no_checks(const cfg_line* p_line)
 {
 	int64_t value = cfg_i64_val3_no_checks(p_line);
 
-	if (value < INT_MIN || value > INT_MAX) {
+	if (value < INT32_MIN || value > INT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1946,7 +1945,7 @@ cfg_u32_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
 
-	if (value > UINT_MAX) {
+	if (value > UINT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %lu overflows unsigned int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1992,7 +1991,7 @@ cfg_u16_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
 
-	if (value > USHRT_MAX) {
+	if (value > UINT16_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %lu overflows unsigned short",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -2024,7 +2023,7 @@ cfg_u8_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
 
-	if (value > UCHAR_MAX) {
+	if (value > UINT8_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %lu overflows unsigned char",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -2091,7 +2090,7 @@ cfg_seconds(const cfg_line* p_line, uint32_t min, uint32_t max)
 
 // Minimum & maximum port numbers:
 const int CFG_MIN_PORT = 1024;
-const int CFG_MAX_PORT = USHRT_MAX;
+const int CFG_MAX_PORT = UINT16_MAX;
 
 cf_ip_port
 cfg_port(const cfg_line* p_line)
@@ -2781,7 +2780,7 @@ as_config_init(const char* config_file)
 				c->hb_config.tx_interval = cfg_u32(&line, AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
-				c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT_MAX);
+				c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT32_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MTU:
 				c->hb_config.override_mtu = cfg_u32_no_checks(&line);
@@ -2985,7 +2984,7 @@ as_config_init(const char* config_file)
 				cfg_renamed_name_tok(&line, "memory-size");
 				// No break.
 			case CASE_NAMESPACE_MEMORY_SIZE:
-				ns->memory_size = cfg_u64(&line, 1024 * 1024, ULONG_MAX);
+				ns->memory_size = cfg_u64(&line, 1024 * 1024, UINT64_MAX);
 				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
 				ns->default_ttl = cfg_seconds_no_checks(&line);
