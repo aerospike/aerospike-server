@@ -2319,14 +2319,16 @@ as_hb_mesh_tip_clear(char* host, int port)
 	}
 
 	// Refresh the mapping between the seeds and the mesh hosts.
-	mesh_seed_inactive_refresh_get_unsafe(NULL);
+	mesh_seed_inactive_refresh_get_unsafe (NULL);
 	cf_shash_reduce(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
 			mesh_tip_clear_reduce, &mesh_tip_clear_reduce_udata);
 
 	// Remove the seed entry in case we do not find a matching mesh entry.
 	// Will happen trivially if this seed could not be connected.
-	mesh_tip_clear_reduce_udata.entry_deleted |= mesh_seed_delete_unsafe(
-			mesh_seed_find_unsafe(host, port)) == 0;
+	mesh_tip_clear_reduce_udata.entry_deleted =
+			mesh_tip_clear_reduce_udata.entry_deleted
+					|| mesh_seed_delete_unsafe(
+							mesh_seed_find_unsafe(host, port)) == 0;
 
 	MESH_UNLOCK();
 	return mesh_tip_clear_reduce_udata.entry_deleted ? 0 : -1;
@@ -2757,8 +2759,8 @@ endpoint_list_equal_process(const as_endpoint_list* endpoint_list, void* udata)
 	endpoint_list_equal_check_udata* equal_udata =
 			(endpoint_list_equal_check_udata*)udata;
 
-	equal_udata->are_equal |= as_endpoint_lists_are_equal(endpoint_list,
-			equal_udata->other);
+	equal_udata->are_equal = equal_udata->are_equal
+			|| as_endpoint_lists_are_equal(endpoint_list, equal_udata->other);
 }
 
 /*
@@ -4032,8 +4034,9 @@ channel_endpoint_find_iterate_fn(const as_endpoint* endpoint, void* udata)
 		return;
 	}
 
-	iterate_data->found |= (cf_sock_addr_compare(&sock_addr,
-			iterate_data->addr_to_search) == 0);
+	iterate_data->found = iterate_data->found
+			|| (cf_sock_addr_compare(&sock_addr, iterate_data->addr_to_search)
+					== 0);
 }
 
 /**
@@ -5544,7 +5547,7 @@ mesh_node_status_string(as_hb_mesh_node_status status)
 		"inactive",
 		"endpoint-unknown" };
 
-	if (status > AS_HB_MESH_NODE_STATUS_SENTINEL) {
+	if (status >= AS_HB_MESH_NODE_STATUS_SENTINEL) {
 		return "corrupted";
 	}
 	return status_str[status];

@@ -104,6 +104,12 @@
  */
 #define RING_BUFFER_CAPACITY_MAX (100)
 
+/**
+ * Threshold for  (absolute deviation/median absolute deviation) beyond which
+ * nodes are labelled outliers.
+ */
+#define MAD_RATIO_OUTLIER_THRESHOLD 2
+
 /*
  * ----------------------------------------------------------------------------
  * Logging
@@ -116,8 +122,7 @@ cf_ticker_warning(AS_SKEW, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_SKEW, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_SKEW, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_SKEW, format, ##__VA_ARGS__)
-#define ring_buffer_log(buffer, message, severity)		\
-ring_buffer_log_event(buffer, message, severity, AS_SKEW,		\
+#define ring_buffer_log(buffer, message, severity) ring_buffer_log_event(buffer, message, severity, AS_SKEW,	\
 		__FILENAME__, __LINE__);
 
 /*
@@ -250,7 +255,9 @@ ring_buffer_log_event(as_skew_ring_buffer* ring_buffer, char* prefix,
 	for (int i = 0; i < ring_buffer->size; i++) {
 		char* buffer = value_buffer_start;
 		for (int j = 0; j < max_per_line && i < ring_buffer->size; j++) {
-			buffer += sprintf(buffer, "%ld ", ring_buffer->data[(ring_buffer->start + i) % ring_buffer->capacity]);
+			buffer += sprintf(buffer, "%ld ",
+					ring_buffer->data[(ring_buffer->start + i)
+							% ring_buffer->capacity]);
 			i++;
 		}
 
@@ -461,29 +468,32 @@ skew_monitor_update()
  * Comparator for deltas.
  */
 static int
-skew_monitor_hlc_delta_compare(const void* o1, const void* o2)
+skew_monitor_hlc_float_compare(const void* o1, const void* o2)
 {
-	int64_t delta1 = ((as_skew_node_summary*)o1)->delta;
-	int64_t delta2 = ((as_skew_node_summary*)o2)->delta;
-
-	return delta1 > delta2 ? 1 : (delta1 == delta2 ? 0 : -1);
+	float v1 = *(float*)o1;
+	float v2 = *(float*)o2;
+	return v1 > v2 ? 1 : (v1 == v2 ? 0 : -1);
 }
 
 /**
  * Compute the median of the data.
+ *
  * @param values the values sorted.
  * @param from the start index (inclusive)
  * @param to the end index (inclusive)
  * @return the index of the median element
  */
-static int
-skew_monitor_median_index(int from, int to)
+static float
+skew_monitor_median(float* values, int num_elements)
 {
-	int numElements = to - from + 1;
-	if (numElements < 0) {
-		return from;
+	if (num_elements % 2 == 0) {
+		int median_left = (num_elements - 1) / 2;
+		int median_right = median_left + 1;
+		return (values[median_left] + values[median_right]) / 2.0f;
 	}
-	return (to + from) / 2;
+
+	int median_index = (num_elements / 2);
+	return (float)values[median_index];
 }
 
 /**
@@ -494,33 +504,56 @@ static uint32_t
 skew_monitor_outliers_from_skew_summary(cf_vector* outliers,
 		as_skew_monitor_hlc_delta_udata* udata)
 {
-	// Use inter-quartile distance to detect outliers.
-	// Sort the deltas in ascending order.
-	qsort(udata->skew_summary, udata->num_nodes, sizeof(as_skew_node_summary),
-			skew_monitor_hlc_delta_compare);
-	int q2_index = skew_monitor_median_index(0, udata->num_nodes - 1);
-	int q3_index = skew_monitor_median_index(q2_index, udata->num_nodes - 1);
-	int q1_index = skew_monitor_median_index(0, q2_index);
-	int64_t q3 = udata->skew_summary[q3_index].delta;
-	int64_t q1 = udata->skew_summary[q1_index].delta;
+	// Use Median Absolute Deviation(MAD) to detect outliers, in general the
+	// delta distribution would be symmetric and very close to the median.
+	int num_nodes = udata->num_nodes;
+	float deltas[num_nodes];
+	for (int i = 0; i < num_nodes; i++) {
+		deltas[i] = udata->skew_summary[i].delta;
+	}
 
-	// Compute the inter quartile range. Lower bound iqr to network latency to
-	// allow that allow some fuzziness with tigth clock grouping.
-	int64_t iqr = MAX(q3 - q1, g_config.fabric_latency_max_ms);
-	double lower_bound = q1 - 1.5 * iqr;
-	double upper_bound = q3 + 1.5 * iqr;
+	// Compute median.
+	qsort(deltas, num_nodes, sizeof(float), skew_monitor_hlc_float_compare);
+	float median = skew_monitor_median(deltas, num_nodes);
+
+	// Compute absolute deviation from median.
+	float abs_dev[num_nodes];
+	for (int i = 0; i < num_nodes; i++) {
+		abs_dev[i] = fabsf(deltas[i] - median);
+	}
+
+	// Compute MAD.
+	qsort(abs_dev, num_nodes, sizeof(float), skew_monitor_hlc_float_compare);
+	float mad = skew_monitor_median(abs_dev, num_nodes);
 
 	uint32_t num_outliers = 0;
 
-	// Isolate outliers
-	for (int i = 0; i < udata->num_nodes; i++) {
-		if (udata->skew_summary[i].delta < lower_bound
-				|| udata->skew_summary[i].delta > upper_bound) {
-			if (outliers) {
-				cf_vector_append(outliers, &udata->skew_summary[i].nodeid);
-			}
+	if (mad < 0.001f) {
+		// Most deltas are very close to the median. Call values significantly
+		// away as outliers.
+		for (int i = 0; i < udata->num_nodes; i++) {
+			if (fabsf(udata->skew_summary[i].delta - median)
+					> skew_monitor_outlier_detection_threshold()) {
+				if (outliers) {
+					cf_vector_append(outliers, &udata->skew_summary[i].nodeid);
+				}
 
-			num_outliers++;
+				num_outliers++;
+			}
+		}
+	}
+	else {
+		// Any node with delta deviating significantly compared to MAD is an
+		// outlier.
+		for (int i = 0; i < udata->num_nodes; i++) {
+			if ((fabsf(udata->skew_summary[i].delta - median) / mad)
+					> MAD_RATIO_OUTLIER_THRESHOLD) {
+				if (outliers) {
+					cf_vector_append(outliers, &udata->skew_summary[i].nodeid);
+				}
+
+				num_outliers++;
+			}
 		}
 	}
 
@@ -813,7 +846,8 @@ as_skew_monitor_dump()
 			skew_monitor_delta_collect_iterate, &udata);
 
 	for (int i = 0; i < udata.num_nodes; i++) {
-		INFO("CSM:    node:%lx hlc-delta:%ld", udata.skew_summary[i].nodeid, udata.skew_summary[i].delta);
+		INFO("CSM:    node:%lx hlc-delta:%ld", udata.skew_summary[i].nodeid,
+				udata.skew_summary[i].delta);
 	}
 
 	// Log the outliers.

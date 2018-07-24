@@ -114,9 +114,9 @@ static cf_atomic64 g_prev_wall_clock;
 #define LOGICAL_TS_MASK 0x000000000000ffff
 
 /**
- * Print the skew warning once every five seconds.
+ * Inform when HLC jumps by more than this amount.
  */
-#define SKEW_WARNING_INTERVAL_MS() (5000)
+#define HLC_JUMP_WARN 5000
 
 /**
  * Logging macros.
@@ -139,7 +139,8 @@ hlc_wall_clock_get();
 static as_hlc_timestamp
 hlc_ts_get();
 static bool
-hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value);
+hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
+		cf_node source);
 static cf_clock
 hlc_physical_ts_get(as_hlc_timestamp hlc_ts);
 static uint16_t
@@ -217,7 +218,7 @@ as_hlc_timestamp_now()
 		hlc_physical_ts_set(&new_hlc_ts, new_hlc_physical_ts);
 		hlc_logical_ts_set(&new_hlc_ts, new_hlc_logical_ts);
 
-		if (hlc_ts_set(current_hlc_ts, new_hlc_ts)) {
+		if (hlc_ts_set(current_hlc_ts, new_hlc_ts, g_config.self_node)) {
 			hlc_physical_ts_on_set(new_hlc_physical_ts, wall_clock_physical_ts);
 			DETAIL("changed HLC value from %" PRIu64 " to %" PRIu64,
 					current_hlc_ts, new_hlc_ts);
@@ -296,7 +297,7 @@ as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
 		hlc_physical_ts_set(&new_hlc_ts, new_hlc_physical_ts);
 		hlc_logical_ts_set(&new_hlc_ts, new_hlc_logical_ts);
 
-		if (hlc_ts_set(current_hlc_ts, new_hlc_ts)) {
+		if (hlc_ts_set(current_hlc_ts, new_hlc_ts, source)) {
 			hlc_physical_ts_on_set(new_hlc_physical_ts, wall_clock_physical_ts);
 			DETAIL("message received from node %" PRIx64 " with HLC %" PRIu64 " - changed HLC value from %" PRIu64 " to %" PRIu64,
 					source, send_ts, current_hlc_ts, new_hlc_ts);
@@ -507,7 +508,7 @@ hlc_logical_ts_incr(uint16_t* logical_ts, cf_clock* physical_ts,
 		cf_clock wall_clock_now)
 {
 	(*logical_ts)++;
-	if (logical_ts == 0) {
+	if (*logical_ts == 0) {
 		(*physical_ts)++;
 	}
 	cf_clock physical_component_diff = *physical_ts - g_prev_physical_component;
@@ -546,12 +547,21 @@ hlc_ts_get()
 /**
  * Set a new value for the global timestamp atomically.
  *
+ * @param old_value the old value.
  * @param new_value the new value for the global timestamp.
+ * @param source the source node that caused this jump update in HLC, self if we
+ * are advancing the clock, peer node if advance is caused on message receipt.
  * @return true on successful set, false on failure to do an atomic set.
  */
 static bool
-hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value)
+hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
+		cf_node source)
 {
 	// Default to ck atomic check and set.
+	cf_clock jump = hlc_physical_ts_get(new_value)
+			- hlc_physical_ts_get(old_value);
+	if (jump > HLC_JUMP_WARN && old_value > 0) {
+		INFO("HLC jumped by %"PRIu64" ms cause:%"PRIx64" old:%"PRIu64" new:%"PRIu64, jump, source, old_value, new_value);
+	}
 	return ck_pr_cas_64(&g_now, old_value, new_value);
 }

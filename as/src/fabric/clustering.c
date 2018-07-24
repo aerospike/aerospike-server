@@ -1114,7 +1114,7 @@ typedef struct as_clustering_external_event_publisher_s
  * ----------------------------------------------------------------------------
  */
 static void
-internal_event_dispatch(as_clustering_internal_event* timer_event);
+internal_event_dispatch(as_clustering_internal_event* event);
 static bool
 clustering_is_our_principal(cf_node nodeid);
 static bool
