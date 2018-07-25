@@ -8,4 +8,3 @@
 /etc/aerospike/sample/README.md
 /etc/aerospike/sample/aerospike_ssd.conf
 /etc/aerospike/sample/aerospike_mesh.conf
-/etc/aerospike/sample/aerospike_all_flash.conf
