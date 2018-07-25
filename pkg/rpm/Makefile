@@ -123,6 +123,7 @@ else
 endif
 
 ifeq ($(USE_EE),1)
+	cat $(EEREPO)/pkg/rpm/as-files >> $(PKG)/rpm/aerospike.spec
 	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
 endif
 	cat $(PKG)/rpm/server-spec-config >> $(PKG)/rpm/aerospike.spec
