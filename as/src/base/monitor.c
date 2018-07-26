@@ -101,7 +101,7 @@ as_mon_register(const char *module)
 {
 	if (!module) return AS_MON_ERR;
 	as_mon *mon_obj = (as_mon *) cf_rc_alloc(sizeof(as_mon));
-	as_mon_cb *cb = cf_malloc(sizeof(as_mon_cb));
+	as_mon_cb *cb = &mon_obj->cb;
 	as_mon_module_slot mod;
 
 	if(!strcmp(module, AS_MON_MODULES[QUERY_MOD])) {
@@ -148,7 +148,6 @@ as_mon_register(const char *module)
 	}
 	// Setup mon object
 	mon_obj->type  = cf_strdup(module);
-	memcpy(&mon_obj->cb, cb, sizeof(as_mon_cb));
 
 	g_as_mon_curr_mod_count++;
 	g_as_mon_module[mod] = mon_obj;
