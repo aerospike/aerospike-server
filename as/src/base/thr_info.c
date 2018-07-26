@@ -6612,6 +6612,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		cf_warning(AS_INFO, "%s : Failed. Invalid Bin Path '%s'.", cmd, path_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
 				"Invalid Bin path");
+		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
 
