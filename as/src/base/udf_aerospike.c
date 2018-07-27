@@ -405,8 +405,12 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	// something wrong it can be rolled back. The deletes will go through
 	// successfully generally.
 
+	as_val* old_values[urecord->nupdates];
+
 	// In first iteration, just calculate how many new bins need to be created
 	for(uint32_t i = 0; i < urecord->nupdates; i++ ) {
+		old_values[i] = NULL;
+
 		if ( urecord->updates[i].dirty ) {
 			char *      k = urecord->updates[i].name;
 			if ( k != NULL ) {
@@ -450,7 +454,6 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 
 	// In second iteration apply updates.
 	for(uint32_t i = 0; i < urecord->nupdates; i++ ) {
-		urecord->updates[i].oldvalue  = NULL;
 		if ( urecord->updates[i].dirty && rc == 0) {
 
 			char *      k = urecord->updates[i].name;
@@ -460,7 +463,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 				if ( v == NULL || v->type == AS_NIL ) {
 					// if the value is NIL, then do a delete
 					cf_detail(AS_UDF, "execute update: position %d deletes bin %s", i, k);
-					urecord->updates[i].oldvalue = udf_record_storage_get(urecord, k);
+					old_values[i] = udf_record_storage_get(urecord, k);
 					// Only case delete fails if bin is not found that is 
 					// as good as delete. Ignore return code !!
 					udf_aerospike_delbin(urecord, k);
@@ -472,12 +475,12 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 				else {
 					// otherwise, it is a set
 					cf_detail(AS_UDF, "execute update: position %d sets bin %s", i, k);
-					urecord->updates[i].oldvalue = udf_record_storage_get(urecord, k);
+					old_values[i] = udf_record_storage_get(urecord, k);
 					rc = udf_aerospike_setbin(urecord, i, k, v);
 					if (rc) {
-						if (urecord->updates[i].oldvalue) {
-							as_val_destroy(urecord->updates[i].oldvalue);
-							urecord->updates[i].oldvalue = NULL;
+						if (old_values[i]) {
+							as_val_destroy(old_values[i]);
+							old_values[i] = NULL;
 						} 
 						failmax = i;
 						goto Rollback;
@@ -538,12 +541,10 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	// Clean up oldvalue cache and reset dirty. All the changes made 
 	// here has made to the particle buffer. Nothing will now be backed out.
 	for (uint32_t i = 0; i < urecord->nupdates; i++) {
-		udf_record_bin * bin = &urecord->updates[i];
-		if (bin->oldvalue != NULL ) {
-			as_val_destroy(bin->oldvalue);
-			bin->oldvalue = NULL;
+		if (old_values[i]) {
+			as_val_destroy(old_values[i]);
 		}
-		bin->dirty    = false;
+		urecord->updates[i].dirty = false;
 	}
 	return rc;
 
@@ -553,7 +554,7 @@ Rollback:
 		if (urecord->updates[i].dirty) {
 			char *      k = urecord->updates[i].name;
 			// Pick the oldvalue for rollback
-			as_val *    v = urecord->updates[i].oldvalue;
+			as_val *    v = old_values[i];
 			if ( k != NULL ) {
 				if ( v == NULL || v->type == AS_NIL ) {
 					// if the value is NIL, then do a delete
