@@ -368,10 +368,6 @@ udf_record_cache_free(udf_record * urecord)
 			as_val_destroy(bin->value);
 			bin->value = NULL;
 		}
-		if ( bin->oldvalue != NULL ) {
-			as_val_destroy(bin->oldvalue);
-			bin->oldvalue = NULL;
-		}
 	}
 
 	for (uint32_t i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
