@@ -44,7 +44,6 @@
 typedef struct udf_record_bin_s {
 	char				name[AS_ID_BIN_SZ];
 	as_val *			value;
-	as_val *			oldvalue; // keeps track of old value in case rollback is required
 	bool				dirty;
 	void                *particle_buf;
 } udf_record_bin;
