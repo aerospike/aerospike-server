@@ -74,11 +74,10 @@ void
 repl_write_make_message(rw_request* rw, as_transaction* tr)
 {
 	if (rw->dest_msg) {
-		msg_reset(rw->dest_msg);
+		as_fabric_msg_put(rw->dest_msg);
 	}
-	else {
-		rw->dest_msg = as_fabric_msg_get(M_TYPE_RW);
-	}
+
+	rw->dest_msg = as_fabric_msg_get(M_TYPE_RW);
 
 	// TODO - remove this when we're comfortable:
 	cf_assert(rw->pickled_buf, AS_RW, "making repl-write msg with null pickle");
