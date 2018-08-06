@@ -219,7 +219,6 @@ cfg_set_defaults()
 	// Mod-lua defaults.
 	c->mod_lua.server_mode      = true;
 	c->mod_lua.cache_enabled    = true;
-	strcpy(c->mod_lua.system_path, "/opt/aerospike/sys/udf/lua");
 	strcpy(c->mod_lua.user_path, "/opt/aerospike/usr/udf/lua");
 
 	// TODO - security set default config API?
@@ -686,8 +685,9 @@ typedef enum {
 
 	// Mod-lua options:
 	CASE_MOD_LUA_CACHE_ENABLED,
-	CASE_MOD_LUA_SYSTEM_PATH,
 	CASE_MOD_LUA_USER_PATH,
+	// Deprecated:
+	CASE_MOD_LUA_SYSTEM_PATH,
 
 	// Security options:
 	CASE_SECURITY_ENABLE_LDAP,
@@ -1244,8 +1244,8 @@ const cfg_opt NAMESPACE_GEO2DSPHERE_WITHIN_OPTS[] = {
 
 const cfg_opt MOD_LUA_OPTS[] = {
 		{ "cache-enabled",					CASE_MOD_LUA_CACHE_ENABLED },
-		{ "system-path",					CASE_MOD_LUA_SYSTEM_PATH },
 		{ "user-path",						CASE_MOD_LUA_USER_PATH },
+		{ "system-path",					CASE_MOD_LUA_SYSTEM_PATH },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -3547,11 +3547,11 @@ as_config_init(const char* config_file)
 			case CASE_MOD_LUA_CACHE_ENABLED:
 				c->mod_lua.cache_enabled = cfg_bool(&line);
 				break;
-			case CASE_MOD_LUA_SYSTEM_PATH:
-				cfg_strcpy(&line, c->mod_lua.system_path, sizeof(c->mod_lua.system_path));
-				break;
 			case CASE_MOD_LUA_USER_PATH:
 				cfg_strcpy(&line, c->mod_lua.user_path, sizeof(c->mod_lua.user_path));
+				break;
+			case CASE_MOD_LUA_SYSTEM_PATH:
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);

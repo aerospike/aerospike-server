@@ -340,7 +340,6 @@ main(int argc, char **argv)
 
 	// Check that required directories are set up properly.
 	validate_directory(c->work_directory, "work");
-	validate_directory(c->mod_lua.system_path, "Lua system");
 	validate_directory(c->mod_lua.user_path, "Lua user");
 	validate_smd_directory();
 
