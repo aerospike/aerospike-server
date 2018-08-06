@@ -118,12 +118,7 @@ endif
 
 	install -d $(OPT_AS)/data
 	install -d $(OPT_AS)/smd
-	install -d $(OPT_AS)/sys/udf/lua/external
 	install -d $(OPT_AS)/usr/udf/lua
-	install -pm 644 $(DEPTH)/modules/lua-core/src/*.lua $(OPT_AS)/sys/udf/lua
-	for FILE in `find $(DEPTH)/modules/lua-core/src/external -type f` ; do \
-	   install -pm 644 $$FILE $(OPT_AS)/sys/udf/lua/external ; \
-	done
 
 	install -d $(OPT_AS)/bin
 	install -pm 755 $(DEPTH)/tools/memacct/asparsemem $(OPT_AS)/bin

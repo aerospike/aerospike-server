@@ -174,10 +174,6 @@ main() {
   
   # install lua files
   try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/udf/lua"
-  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/udf/lua/*.lua ${AEROSPIKE_HOME}/share/udf/lua/."
-  
-  try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/share/udf/lua/external"
-  try "install -m 644 -o ${owner} -g ${group} -C ${SCRIPT_HOME}/udf/lua/external/*.lua ${AEROSPIKE_HOME}/share/udf/lua/external/."
 
   # instance local aerospike script
   try "install -m 755 -o ${owner} -g ${group} -Dd ${AEROSPIKE_HOME}/bin"
