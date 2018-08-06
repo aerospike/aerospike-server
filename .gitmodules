@@ -9,9 +9,6 @@
 	path = modules/jansson
 	url = https://github.com/aerospike/jansson.git
 	ignore = dirty
-[submodule "modules/lua-core"]
-	path = modules/lua-core
-	url = https://github.com/aerospike/aerospike-lua-core.git
 [submodule "modules/luajit"]
 	path = modules/luajit
 	url = https://github.com/aerospike/luajit.git
