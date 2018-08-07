@@ -71,7 +71,7 @@ endif
 COMMON_CFLAGS = -gdwarf-$(DWARF_VERSION) -g3 $(OPTFLAGS) -fno-common -fno-strict-aliasing -Wall $(AS_CFLAGS) $(AS_EE_CFLAGS)
 
 # Code generated for the "nocona" architecture has been determined to run well on a wide variety of current machines.
-ifneq ($(ARCH),$(filter $(ARCH),ppc64 ppc64le))
+ifneq ($(ARCH),$(filter $(ARCH),ppc64 ppc64le, aarch64))
   COMMON_CFLAGS += -march=nocona
 endif
 

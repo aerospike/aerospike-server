@@ -31,7 +31,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#if !defined(MARCH_aarch64)
 #include <xmmintrin.h>
+#endif
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -47,6 +50,9 @@
 #include "base/datamodel.h"
 #include "base/stats.h"
 
+#if defined(MARCH_aarch64)
+#define _mm_prefetch(X, Y) __builtin_prefetch(X)
+#endif
 
 //==========================================================
 // Typedefs & constants.

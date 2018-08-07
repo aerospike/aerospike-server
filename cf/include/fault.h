@@ -328,6 +328,60 @@ extern void cf_fault_cache_event(cf_fault_context context,
 
 extern char __executable_start;
 
+#if defined(MARCH_aarch64)
+#define PRINT_SIGNAL_CONTEXT(_ctx) \
+do { \
+	ucontext_t *uc = _ctx; \
+	mcontext_t *mc = &uc->uc_mcontext; \
+	uint64_t *gregs = (uint64_t *)&mc->regs[0]; \
+	uint64_t *pc = (uint64_t *)&mc->pc; \
+	uint64_t *sp = (uint64_t *)&mc->sp; \
+	\
+	char regs[1000]; \
+	\
+	snprintf(regs, sizeof(regs), \
+		"x1 %016lx x2 %016lx x3 %016lx x4 %016lx x5 %016lx x6 %016lx" \
+		"x7 %016lx x8 %016lx x9 %016lx x10 %016lx x11 %016lx x12 %016lx" \
+		"x13 %016lx x14 %016lx x15 %016lx x16 %016lx x17 %016lx x18 %016lx" \
+		"x19 %016lx x20 %016lx x21 %016lx x22 %016lx x23 %016lx x24 %016lx" \
+		"x25 %016lx x26 %016lx x27 %016lx x28 %016lx x29 %016lx LR %016lx" \
+		"PC %016lx SP %016lx ", gregs[0], gregs[1], gregs[2], gregs[3], gregs[4], gregs[5], \
+		gregs[6], gregs[7], gregs[8], gregs[9], gregs[10], gregs[11], gregs[12], gregs[13], \
+		gregs[14], gregs[15], gregs[16], gregs[17], gregs[18], gregs[19], gregs[20], gregs[21], \
+		gregs[22], gregs[23], gregs[24], gregs[25], gregs[26], gregs[27], gregs[28], gregs[29],*pc ,*sp); \
+	\
+	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+			"stacktrace: registers: %s", regs); \
+	\
+	void *bt[MAX_BACKTRACE_DEPTH]; \
+	char trace[MAX_BACKTRACE_DEPTH * 20]; \
+	\
+	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
+	int off = 0; \
+	\
+	for (int i = 0; i < sz; i++) { \
+		off += snprintf(trace + off, sizeof(trace) - off, " 0x%lx", \
+				(uint64_t)bt[i]); \
+	} \
+	\
+	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+			"stacktrace: found %d frames:%s offset 0x%lx", sz, trace, \
+			(uint64_t)&__executable_start); \
+	\
+	char **syms = backtrace_symbols(bt, sz); \
+	\
+	if (syms) { \
+		for (int i = 0; i < sz; i++) { \
+			cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+					"stacktrace: frame %d: %s", i, syms[i]); \
+		} \
+	} \
+	else { \
+		cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
+				"stacktrace: found no symbols"); \
+	} \
+} while (0);
+#else
 #define PRINT_SIGNAL_CONTEXT(_ctx) \
 do { \
 	ucontext_t *uc = _ctx; \
@@ -377,6 +431,8 @@ do { \
 				"stacktrace: found no symbols"); \
 	} \
 } while (0);
+#endif
+
 
 // The "regular" versions.
 #define __SEVLOG(severity, context, __msg, ...) \
