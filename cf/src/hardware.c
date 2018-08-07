@@ -76,6 +76,7 @@
 // run on older kernels that don't support it.
 
 #define NVME_IOCTL_ADMIN_CMD _IOWR('N', 0x41, struct nvme_admin_cmd)
+#define NVME_SC_INVALID_LOG_PAGE 0x109
 
 struct nvme_admin_cmd {
 	uint8_t opcode;
@@ -1930,8 +1931,12 @@ query_health(const char *path)
 	}
 
 	if (res > 0){
-		cf_warning(CF_HARDWARE, "failed to submit command to %s: 0x%x",
-				path, res);
+		// Some virtualized environments don't provide a SMART log page.
+		if (res != NVME_SC_INVALID_LOG_PAGE) {
+			cf_warning(CF_HARDWARE, "failed to submit command to %s: 0x%x",
+					path, res);
+		}
+
 		cf_free(buff);
 		close(fd);
 		return -1;
