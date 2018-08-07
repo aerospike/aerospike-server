@@ -92,6 +92,27 @@ process_pb_tasks(cf_queue* tq)
 	}
 }
 
+uint32_t
+rack_count(const as_namespace* ns)
+{
+	return 1;
+}
+
+void
+init_target_claims(uint32_t n_replicas, uint32_t n_nodes,
+		uint32_t* replicas_target_claims)
+{
+	cf_crash(AS_PARTITION, "CE code called init_target_claims()");
+}
+
+void
+uniform_adjust_row(cf_node* node_seq, uint32_t n_nodes, sl_ix_t* ns_sl_ix,
+		uint32_t n_replicas, uint32_t* claims, const uint32_t* target_claims,
+		const uint32_t* rack_ids, uint32_t n_racks)
+{
+	cf_crash(AS_PARTITION, "CE code called uniform_adjust_row()");
+}
+
 void
 rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
 		uint32_t replication_factor, const uint32_t* rack_ids, uint32_t n_ids,

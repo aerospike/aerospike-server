@@ -17,7 +17,7 @@ ifeq ($(OS),el7)
 endif
 
 ifeq ($(USE_EE),1)
-all:	dist-xdr package clean
+all:	dist-ee package clean
 else
 all:	dist package clean
 endif
@@ -123,6 +123,7 @@ else
 endif
 
 ifeq ($(USE_EE),1)
+	cat $(EEREPO)/pkg/rpm/as-files >> $(PKG)/rpm/aerospike.spec
 	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
 endif
 	cat $(PKG)/rpm/server-spec-config >> $(PKG)/rpm/aerospike.spec
@@ -154,5 +155,6 @@ endif
 	rm -rf $(SOURCE_ROOT)/*
 
 ifeq ($(USE_EE),1)
-  include $(EEREPO)/xdr/make_in/Makefile.rpm.in
+  include $(AS_EE)/make_in/Makefile.rpm.in
+  include $(XDR)/make_in/Makefile.rpm.in
 endif

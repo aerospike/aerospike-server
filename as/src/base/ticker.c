@@ -1,7 +1,7 @@
 /*
  * ticker.c
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -92,6 +92,7 @@ void log_line_appeals(as_namespace* ns);
 void log_line_migrations(as_namespace* ns);
 void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 		size_t sindex_mem, size_t data_mem);
+void log_line_persistent_index_usage(as_namespace* ns, size_t used_size);
 void log_line_device_usage(as_namespace* ns);
 
 void log_line_client(as_namespace* ns);
@@ -161,7 +162,6 @@ run_ticker(void* arg)
 	return NULL;
 }
 
-
 void
 log_ticker_frame(uint64_t delta_time)
 {
@@ -189,7 +189,9 @@ log_ticker_frame(uint64_t delta_time)
 		uint64_t n_objects = ns->n_objects;
 		uint64_t n_tombstones = ns->n_tombstones;
 
-		size_t index_mem = as_index_size_get(ns) * (n_objects + n_tombstones);
+		size_t index_used = (n_objects + n_tombstones) * sizeof(as_index);
+
+		size_t index_mem = as_namespace_index_persisted(ns) ? 0 : index_used;
 		size_t sindex_mem = ns->n_bytes_sindex_memory;
 		size_t data_mem = ns->n_bytes_memory;
 		size_t total_mem = index_mem + sindex_mem + data_mem;
@@ -204,6 +206,7 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_appeals(ns);
 		log_line_migrations(ns);
 		log_line_memory_usage(ns, total_mem, index_mem, sindex_mem, data_mem);
+		log_line_persistent_index_usage(ns, index_used);
 		log_line_device_usage(ns);
 
 		log_line_client(ns);
@@ -225,7 +228,6 @@ log_ticker_frame(uint64_t delta_time)
 
 	cf_dump_ticker_cache();
 }
-
 
 void
 log_line_clock()
@@ -249,7 +251,6 @@ log_line_clock()
 
 	cf_dyn_buf_free(&outliers_db);
 }
-
 
 void
 log_line_system_memory()
@@ -277,7 +278,6 @@ log_line_system_memory()
 			);
 }
 
-
 void
 log_line_in_progress()
 {
@@ -290,7 +290,6 @@ log_line_in_progress()
 			as_index_tree_gc_queue_size()
 			);
 }
-
 
 void
 log_line_fds()
@@ -313,7 +312,6 @@ log_line_fds()
 			);
 }
 
-
 void
 log_line_heartbeat()
 {
@@ -321,7 +319,6 @@ log_line_heartbeat()
 			g_stats.heartbeat_received_self, g_stats.heartbeat_received_foreign
 			);
 }
-
 
 void
 log_fabric_rate(uint64_t delta_time)
@@ -353,7 +350,6 @@ log_fabric_rate(uint64_t delta_time)
 			);
 }
 
-
 void
 log_line_early_fail()
 {
@@ -377,7 +373,6 @@ log_line_early_fail()
 			);
 }
 
-
 void
 log_line_batch_index()
 {
@@ -394,7 +389,6 @@ log_line_batch_index()
 			);
 }
 
-
 void
 log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp)
 {
@@ -407,7 +401,6 @@ log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp)
 			mp->n_non_replica_objects
 			);
 }
-
 
 void
 log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
@@ -428,7 +421,6 @@ log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 			);
 }
 
-
 void
 log_line_appeals(as_namespace* ns)
 {
@@ -443,7 +435,6 @@ log_line_appeals(as_namespace* ns)
 				);
 	}
 }
-
 
 void
 log_line_migrations(as_namespace* ns)
@@ -469,7 +460,6 @@ log_line_migrations(as_namespace* ns)
 		cf_info(AS_INFO, "{%s} migrations: complete", ns->name);
 	}
 }
-
 
 void
 log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
@@ -498,6 +488,28 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 	}
 }
 
+void
+log_line_persistent_index_usage(as_namespace* ns, size_t used_size)
+{
+	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
+		uint64_t used_pct = used_size * 100 / ns->mounts_size_limit;
+
+		cf_info(AS_INFO, "{%s} index-pmem-usage: used-bytes %lu used-pct %lu",
+				ns->name,
+				used_size,
+				used_pct
+				);
+	}
+	else if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		uint64_t used_pct = used_size * 100 / ns->mounts_size_limit;
+
+		cf_info(AS_INFO, "{%s} index-flash-usage: used-bytes %lu used-pct %lu",
+				ns->name,
+				used_size,
+				used_pct
+				);
+	}
+}
 
 void
 log_line_device_usage(as_namespace* ns)
@@ -536,7 +548,6 @@ log_line_device_usage(as_namespace* ns)
 				);
 	}
 }
-
 
 void
 log_line_client(as_namespace* ns)
@@ -587,7 +598,6 @@ log_line_client(as_namespace* ns)
 			);
 }
 
-
 void
 log_line_xdr_client(as_namespace* ns)
 {
@@ -610,7 +620,6 @@ log_line_xdr_client(as_namespace* ns)
 			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found
 			);
 }
-
 
 void
 log_line_batch_sub(as_namespace* ns)
@@ -639,7 +648,6 @@ log_line_batch_sub(as_namespace* ns)
 			);
 }
 
-
 void
 log_line_scan(as_namespace* ns)
 {
@@ -667,7 +675,6 @@ log_line_scan(as_namespace* ns)
 			);
 }
 
-
 void
 log_line_query(as_namespace* ns)
 {
@@ -691,7 +698,6 @@ log_line_query(as_namespace* ns)
 			n_udf_bg_success, n_udf_bg_failure
 			);
 }
-
 
 void
 log_line_udf_sub(as_namespace* ns)
@@ -719,7 +725,6 @@ log_line_udf_sub(as_namespace* ns)
 			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error
 			);
 }
-
 
 void
 log_line_retransmits(as_namespace* ns)
@@ -758,7 +763,6 @@ log_line_retransmits(as_namespace* ns)
 			);
 }
 
-
 void
 log_line_re_repl(as_namespace* ns)
 {
@@ -775,7 +779,6 @@ log_line_re_repl(as_namespace* ns)
 			n_re_repl_success, n_re_repl_error, n_re_repl_timeout
 			);
 }
-
 
 void
 log_line_special_errors(as_namespace* ns)
@@ -794,7 +797,6 @@ log_line_special_errors(as_namespace* ns)
 			n_fail_record_too_big
 			);
 }
-
 
 void
 dump_global_histograms()
@@ -833,7 +835,6 @@ dump_global_histograms()
 
 	as_query_histogram_dumpall();
 }
-
 
 void
 dump_namespace_histograms(as_namespace* ns)

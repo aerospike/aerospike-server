@@ -58,8 +58,7 @@
 #include "storage/storage.h"
 
 
-#define AS_STORAGE_MAX_DEVICES (128) // maximum devices per namespace
-#define AS_STORAGE_MAX_FILES (128) // maximum files per namespace
+#define AS_STORAGE_MAX_DEVICES (128) // maximum devices or files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 1024
@@ -435,11 +434,9 @@ as_bin_get_particle_type(const as_bin *b) {
 
 /* Bin function declarations */
 extern int16_t as_bin_get_id(as_namespace *ns, const char *name);
-extern uint16_t as_bin_get_or_assign_id(as_namespace *ns, const char *name);
 extern uint16_t as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len);
 extern const char* as_bin_get_name_from_id(as_namespace *ns, uint16_t id);
 extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
-extern void as_bin_init(as_namespace *ns, as_bin *b, const char *name);
 extern void as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from);
 extern int as_storage_rd_load_n_bins(as_storage_rd *rd);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
@@ -586,8 +583,9 @@ typedef struct as_index_tree_shared_s {
 	uint32_t		locks_shift;
 	uint32_t		sprigs_shift;
 
-	// Offset into as_index_tree struct's variable-sized data.
+	// Offsets into as_index_tree struct's variable-sized data.
 	uint32_t		sprigs_offset;
+	uint32_t		puddles_offset;
 } as_index_tree_shared;
 
 
@@ -595,13 +593,22 @@ typedef struct as_sprigx_s {
 	uint64_t root_h: 40;
 } __attribute__ ((__packed__)) as_sprigx;
 
-typedef struct as_treesx_s {
+typedef struct as_treex_s {
 	int block_ix[AS_PARTITIONS];
 	as_sprigx sprigxs[0];
 } as_treex;
 
 
 struct as_namespace_s {
+	//--------------------------------------------
+	// Data partitions - first, to 64-byte align.
+	//
+
+	as_partition partitions[AS_PARTITIONS];
+
+	//--------------------------------------------
+	// Name & ID.
+	//
 
 	char name[AS_ID_NAMESPACE_SZ];
 	uint32_t id; // this is 1-based
@@ -729,6 +736,8 @@ struct as_namespace_s {
 	PAD_BOOL		cp; // relevant only for enterprise edition
 	PAD_BOOL		cp_allow_drops; // relevant only for enterprise edition
 	PAD_BOOL		data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
+	PAD_BOOL		cold_start_eviction_disabled;
+	PAD_BOOL		nsup_disabled;
 	PAD_BOOL		write_dup_res_disabled;
 	PAD_BOOL		disallow_null_setname;
 	PAD_BOOL		batch_sub_benchmarks_enabled;
@@ -746,6 +755,8 @@ struct as_namespace_s {
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
+	bool			cfg_prefer_uniform_balance; // relevant only for enterprise edition
+	bool			prefer_uniform_balance; // indirect config - can become disabled if any other node reports disabled
 	uint32_t		rack_id;
 	as_read_consistency_level read_consistency_level;
 	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin
@@ -756,12 +767,17 @@ struct as_namespace_s {
 	cf_vector		xdr_dclist_v;
 
 	const char*		xmem_mounts[CF_XMEM_MAX_MOUNTS];
+	uint32_t		n_xmem_mounts; // indirect config
+	uint32_t		mounts_hwm_pct;
+	uint64_t		mounts_size_limit;
 
 	as_storage_type storage_type;
 
-	char*			storage_devices[AS_STORAGE_MAX_DEVICES];
-	char*			storage_shadows[AS_STORAGE_MAX_DEVICES];
-	char*			storage_files[AS_STORAGE_MAX_FILES];
+	const char*		storage_devices[AS_STORAGE_MAX_DEVICES];
+	uint32_t		n_storage_devices; // indirect config - if devices array contains raw devices (or partitions)
+	uint32_t		n_storage_files; // indirect config - if devices array contains files
+	const char*		storage_shadows[AS_STORAGE_MAX_DEVICES];
+	uint32_t		n_storage_shadows; // indirect config
 	uint64_t		storage_filesize;
 	char*			storage_scheduler_mode; // relevant for devices only, not files
 	uint32_t		storage_write_block_size;
@@ -783,6 +799,7 @@ struct as_namespace_s {
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
+	PAD_BOOL		storage_serialize_tomb_raider; // relevant only for enterprise edition
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 
 	uint32_t		sindex_num_partitions;
@@ -1080,12 +1097,6 @@ struct as_namespace_s {
 	linear_hist*	set_ttl_hists[AS_SET_MAX_COUNT + 1];
 
 	//--------------------------------------------
-	// Data partitions.
-	//
-
-	as_partition partitions[AS_PARTITIONS];
-
-	//--------------------------------------------
 	// Information for rebalancing.
 	//
 
@@ -1159,13 +1170,6 @@ as_bin_set_id_from_name_w_len(as_namespace *ns, as_bin *b, const uint8_t *buf,
 	}
 }
 
-static inline void
-as_bin_set_id_from_name(as_namespace *ns, as_bin *b, const char *name) {
-	if (! ns->single_bin) {
-		b->id = as_bin_get_or_assign_id(ns, name);
-	}
-}
-
 static inline size_t
 as_bin_memcpy_name(as_namespace *ns, uint8_t *buf, as_bin *b) {
 	size_t len = 0;
@@ -1217,6 +1221,13 @@ static inline const char*
 as_namespace_start_mode_str(const as_namespace *ns)
 {
 	return as_namespace_cool_restarts(ns) ? "cool" : "warm";
+}
+
+static inline bool
+as_namespace_index_persisted(const as_namespace *ns)
+{
+	return ns->xmem_type == CF_XMEM_TYPE_PMEM ||
+			ns->xmem_type == CF_XMEM_TYPE_FLASH;
 }
 
 // Persistent Memory Management

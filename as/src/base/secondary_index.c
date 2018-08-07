@@ -3960,10 +3960,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	as_sindex_metadata *imd = si->imd;
 	// Validate Set name. Other function do this check while
 	// performing searching for simatch.
-	const char *setname = NULL;
-	if (as_index_has_set(rd->r)) {
-		setname = as_index_get_set_name(rd->r, si->ns);
-	}
+	const char *setname = as_index_get_set_name(rd->r, si->ns);
 
 	if (!as_sindex__setname_match(imd, setname)) {
 		SINDEX_GRUNLOCK();

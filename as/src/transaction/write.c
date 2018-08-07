@@ -739,7 +739,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 	// Or (normally) adjust max void-time.
 	else if (r->void_time != 0) {
-		cf_atomic64_setmax(&tr->rsv.p->max_void_time, r->void_time);
+		cf_atomic32_setmax(&tr->rsv.p->max_void_time, (int32_t)r->void_time);
 	}
 
 	will_replicate(r, ns);

@@ -275,6 +275,59 @@ info_append_uint64_x(cf_dyn_buf *db, const char *name, uint64_t value)
 	cf_dyn_buf_append_char(db, ';');
 }
 
+static inline void
+append_indexed_name(cf_dyn_buf *db, const char *name, uint32_t ix,
+		const char *attr)
+{
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '[');
+	cf_dyn_buf_append_uint32(db, ix);
+	cf_dyn_buf_append_char(db, ']');
+
+	if (attr) {
+		cf_dyn_buf_append_char(db, '.');
+		cf_dyn_buf_append_string(db, attr);
+	}
+
+	cf_dyn_buf_append_char(db, '=');
+}
+
+void
+info_append_indexed_string(cf_dyn_buf *db, const char *name, uint32_t ix,
+		const char *attr, const char *value)
+{
+	append_indexed_name(db, name, ix, attr);
+	cf_dyn_buf_append_string(db, value);
+	cf_dyn_buf_append_char(db, ';');
+}
+
+void
+info_append_indexed_int(cf_dyn_buf *db, const char *name, uint32_t ix,
+		const char *attr, int value)
+{
+	append_indexed_name(db, name, ix, attr);
+	cf_dyn_buf_append_int(db, value);
+	cf_dyn_buf_append_char(db, ';');
+}
+
+void
+info_append_indexed_uint32(cf_dyn_buf *db, const char *name, uint32_t ix,
+		const char *attr, uint32_t value)
+{
+	append_indexed_name(db, name, ix, attr);
+	cf_dyn_buf_append_uint32(db, value);
+	cf_dyn_buf_append_char(db, ';');
+}
+
+void
+info_append_indexed_uint64(cf_dyn_buf *db, const char *name, uint32_t ix,
+		const char *attr, uint64_t value)
+{
+	append_indexed_name(db, name, ix, attr);
+	cf_dyn_buf_append_uint64(db, value);
+	cf_dyn_buf_append_char(db, ';');
+}
+
 
 
 void

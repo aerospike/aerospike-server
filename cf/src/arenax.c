@@ -33,6 +33,8 @@
 #include <string.h>
 #include <sys/types.h>
 
+#include "citrusleaf/alloc.h"
+
 #include "fault.h"
 #include "xmem.h"
 
@@ -80,7 +82,8 @@ cf_arenax_errstr(cf_arenax_err err)
 void
 cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
-		uint32_t stage_capacity, uint32_t max_stages, uint32_t flags)
+		uint32_t chunk_count, uint32_t stage_capacity, uint32_t max_stages,
+		uint32_t flags)
 {
 	if (max_stages == 0) {
 		max_stages = CF_ARENAX_MAX_STAGES;
@@ -93,6 +96,7 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	arena->xmem_type_cfg = xmem_type_cfg;
 	arena->key_base = key_base;
 	arena->element_size = element_size;
+	arena->chunk_count = chunk_count;
 	arena->stage_capacity = stage_capacity;
 	arena->max_stages = max_stages;
 	arena->flags = flags;
@@ -101,9 +105,21 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 
 	arena->free_h = 0;
 
+	if (chunk_count == 1) {
+		arena->pool_len = 0;
+		arena->pool_buf = NULL;
+	}
+	else {
+		arena->pool_len = arena->stage_capacity;
+		arena->pool_buf =
+				cf_malloc(arena->pool_len * sizeof(cf_arenax_chunk));
+	}
+
+	arena->pool_i = 0;
+
 	// Skip 0:0 so null handle is never used.
 	arena->at_stage_id = 0;
-	arena->at_element_id = 1;
+	arena->at_element_id = arena->chunk_count;
 
 	if ((flags & CF_ARENAX_BIGLOCK) != 0) {
 		pthread_mutex_init(&arena->lock, NULL);
@@ -118,13 +134,17 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	}
 
 	// Clear the null element - allocation bypasses it, but it may be read.
-	memset(cf_arenax_resolve(arena, 0), 0, element_size);
+	memset(cf_arenax_resolve(arena, 0), 0, element_size * chunk_count);
 }
 
 // Allocate an element within the arena.
 cf_arenax_handle
-cf_arenax_alloc(cf_arenax* arena)
+cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 {
+	if (puddle != NULL) {
+		return cf_arenax_alloc_chunked(arena, puddle);
+	}
+
 	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
 		pthread_mutex_lock(&arena->lock);
 	}
@@ -172,8 +192,13 @@ cf_arenax_alloc(cf_arenax* arena)
 
 // Free an element.
 void
-cf_arenax_free(cf_arenax* arena, cf_arenax_handle h)
+cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle)
 {
+	if (puddle != NULL) {
+		cf_arenax_free_chunked(arena, h, puddle);
+		return;
+	}
+
 	free_element* p_free_element = cf_arenax_resolve(arena, h);
 
 	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {

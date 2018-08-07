@@ -53,7 +53,7 @@
 // as_storage_init
 //
 
-typedef int (*as_storage_namespace_init_fn)(as_namespace *ns, cf_queue *complete_q, void *udata);
+typedef void (*as_storage_namespace_init_fn)(as_namespace *ns);
 static const as_storage_namespace_init_fn as_storage_namespace_init_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_namespace_init_memory,
 	as_storage_namespace_init_ssd
@@ -62,30 +62,62 @@ static const as_storage_namespace_init_fn as_storage_namespace_init_table[AS_NUM
 void
 as_storage_init()
 {
-	cf_queue *complete_q = cf_queue_create(sizeof(void*), true);
+	// Includes resuming indexes for warm and cool restarts.
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
 		if (as_storage_namespace_init_table[ns->storage_type]) {
-			if (0 != as_storage_namespace_init_table[ns->storage_type](ns, complete_q, NULL)) {
-				cf_crash(AS_STORAGE, "could not initialize storage for namespace %s", ns->name);
-			}
-		}
-		else {
-			cf_crash(AS_STORAGE, "invalid storage type for namespace %s", ns->name);
+			as_storage_namespace_init_table[ns->storage_type](ns);
 		}
 	}
+}
+
+//--------------------------------------
+// as_storage_load
+//
+
+typedef void (*as_storage_namespace_load_fn)(as_namespace *ns, cf_queue *complete_q);
+static const as_storage_namespace_load_fn as_storage_namespace_load_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no load phase
+	as_storage_namespace_load_ssd
+};
+
+#define TICKER_INTERVAL (5 * 1000) // 5 seconds
+
+void
+as_storage_load()
+{
+	// Includes device scans for cold starts and cool restarts.
+
+	cf_queue complete_q;
+
+	cf_queue_init(&complete_q, sizeof(void*), g_config.n_namespaces, true);
+
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		if (as_storage_namespace_load_table[ns->storage_type]) {
+			as_storage_namespace_load_table[ns->storage_type](ns, &complete_q);
+		}
+		else {
+			void *_t = NULL;
+
+			cf_queue_push(&complete_q, &_t);
+		}
+	}
+
+	// Wait for completion - cold starts or cool restarts may take a while.
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		void *_t;
 
-		while (CF_QUEUE_OK != cf_queue_pop(complete_q, &_t, 2000)) {
+		while (cf_queue_pop(&complete_q, &_t, TICKER_INTERVAL) != CF_QUEUE_OK) {
 			as_storage_loading_records_ticker_ssd();
 		}
 	}
 
-	cf_queue_destroy(complete_q);
+	cf_queue_destroy(&complete_q);
 }
 
 //--------------------------------------
@@ -503,20 +535,20 @@ as_storage_cache_pmeta(as_namespace *ns, const as_partition *p)
 }
 
 //--------------------------------------
-// as_storage_flush_all_pmeta
+// as_storage_flush_pmeta
 //
 
-typedef void (*as_storage_flush_all_pmeta_fn)(as_namespace *ns);
-static const as_storage_flush_all_pmeta_fn as_storage_flush_all_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
+typedef void (*as_storage_flush_pmeta_fn)(as_namespace *ns, uint32_t start_pid, uint32_t n_partitions);
+static const as_storage_flush_pmeta_fn as_storage_flush_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support info
-	as_storage_flush_all_pmeta_ssd
+	as_storage_flush_pmeta_ssd
 };
 
 void
-as_storage_flush_all_pmeta(as_namespace *ns)
+as_storage_flush_pmeta(as_namespace *ns, uint32_t start_pid, uint32_t n_partitions)
 {
-	if (as_storage_flush_all_pmeta_table[ns->storage_type]) {
-		as_storage_flush_all_pmeta_table[ns->storage_type](ns);
+	if (as_storage_flush_pmeta_table[ns->storage_type]) {
+		as_storage_flush_pmeta_table[ns->storage_type](ns, start_pid, n_partitions);
 	}
 }
 
@@ -538,6 +570,27 @@ as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes
 	}
 
 	return 0;
+}
+
+//--------------------------------------
+// as_storage_device_stats
+//
+
+typedef void (*as_storage_device_stats_fn)(as_namespace *ns, uint32_t device_ix, storage_device_stats *stats);
+static const as_storage_device_stats_fn as_storage_device_stats_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL,
+	as_storage_device_stats_ssd
+};
+
+void
+as_storage_device_stats(as_namespace *ns, uint32_t device_ix, storage_device_stats *stats)
+{
+	if (as_storage_device_stats_table[ns->storage_type]) {
+		as_storage_device_stats_table[ns->storage_type](ns, device_ix, stats);
+		return;
+	}
+
+	memset(stats, 0, sizeof(storage_device_stats));
 }
 
 //--------------------------------------
@@ -599,7 +652,6 @@ as_storage_record_size(const as_namespace *ns, const as_record *r)
 
 	return 0;
 }
-
 
 
 //==========================================================

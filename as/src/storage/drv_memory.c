@@ -20,49 +20,32 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * in-memory storage engine driver
- *
- */
+//==========================================================
+// Includes.
+//
 
-#include <stdbool.h>
+#include "storage/storage.h"
+
 #include <stdint.h>
-
-#include "citrusleaf/cf_queue.h"
 
 #include "base/datamodel.h"
 #include "base/truncate.h"
-#include "storage/storage.h"
 
 
-/* SYNOPSIS
- * In-memory storage driver
- *
- * This code almost entirely performs no-ops, because all the in-memory state
- * is correct already.
- * Note that this code is mostly for the NON-PERSISTENT main memory namespace.
- * The File-backed (persistent) main memory namespace is NOT type 1 (MM) for
- * some calls, but is instead treated as type 2 (SSD);  hence in some cases
- * the SSD functions, like as_storage_bin_can_fit(), are applied with an SSD
- * context rather than a transient main memory context.  (tjl)
- */
+//==========================================================
+// Public API - storage API implementation.
+//
 
-int
-as_storage_namespace_init_memory(as_namespace *ns, cf_queue *complete_q, void *udata)
+void
+as_storage_namespace_init_memory(as_namespace *ns)
 {
 	as_truncate_done_startup(ns);
-
-	void *_t = NULL;
-
-	cf_queue_push(complete_q, &_t);
-
-	return 0;
 }
 
 int
 as_storage_namespace_destroy_memory(as_namespace *ns)
 {
-	return(0);
+	return 0;
 }
 
 int
@@ -71,8 +54,10 @@ as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_t *used_dis
 	if (available_pct) {
 		*available_pct = 100;
 	}
+
 	if (used_disk_bytes) {
 		*used_disk_bytes = 0;
 	}
-	return(0);
+
+	return 0;
 }

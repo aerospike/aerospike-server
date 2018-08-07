@@ -48,6 +48,7 @@
 #include "meminfo.h"
 #include "shash.h"
 #include "socket.h"
+#include "xmem.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"
@@ -82,6 +83,7 @@
 #include "fabric/partition_balance.h"
 #include "fabric/roster.h"
 #include "fabric/skew_monitor.h"
+#include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
@@ -230,8 +232,7 @@ info_segv_test(char *name, cf_dyn_buf *db)
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
-	info_append_uint32(db, "cluster_size", as_exchange_cluster_size());
-	info_append_uint64_x(db, "cluster_key", as_exchange_cluster_key()); // not in ticker
+	as_exchange_cluster_info(db);
 	info_append_bool(db, "cluster_integrity", as_clustering_has_integrity()); // not in ticker
 	info_append_bool(db, "cluster_is_member", ! as_clustering_is_orphan()); // not in ticker
 	as_hb_info_duplicates_get(db); // not in ticker
@@ -553,46 +554,117 @@ info_get_replicas(char *name, cf_dyn_buf *db)
 int
 info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 {
-	// Command format: "cluster-stable:namespace=<namespace-name>"
+	// Command format:
+	// "cluster-stable:[size=<target-size>];[ignore-migrations=<bool>];[namespace=<namespace-name>]"
+
+	uint64_t begin_cluster_key = as_exchange_cluster_key();
 
 	if (! as_partition_balance_are_migrations_allowed()) {
 		cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
 		return 0;
 	}
 
-	char param_str[AS_ID_NAMESPACE_SZ] = { 0 };
-	int param_str_len = (int)sizeof(param_str);
-	int rv = as_info_parameter_get(params, "namespace", param_str, &param_str_len);
+	char size_str[3] = { 0 }; // max cluster size is 128
+	int size_str_len = (int)sizeof(size_str);
+	int rv = as_info_parameter_get(params, "size", size_str, &size_str_len);
 
 	if (rv == -2) {
-		cf_warning(AS_INFO, "namespace parameter value too long");
-		cf_dyn_buf_append_string(db, "ERROR::bad-namespace");
+		cf_warning(AS_INFO, "size parameter value too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-size");
 		return 0;
 	}
 
-	if (rv == -1) {
-		cf_warning(AS_INFO, "namespace not specified");
-		cf_dyn_buf_append_string(db, "ERROR::no-namespace");
+	if (rv == 0) {
+		uint32_t target_size;
+
+		if (cf_str_atoi_u32(size_str, &target_size) != 0) {
+			cf_warning(AS_INFO, "non-integer size parameter");
+			cf_dyn_buf_append_string(db, "ERROR::bad-size");
+			return 0;
+		}
+
+		if (target_size != as_exchange_cluster_size()) {
+			cf_dyn_buf_append_string(db, "ERROR::cluster-not-specified-size");
+			return 0;
+		}
+	}
+
+	bool ignore_migrations = false;
+
+	char ignore_migrations_str[5] = { 0 };
+	int ignore_migrations_str_len = (int)sizeof(ignore_migrations_str);
+
+	rv = as_info_parameter_get(params, "ignore-migrations",
+			ignore_migrations_str, &ignore_migrations_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "ignore-migrations value too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-ignore-migrations");
 		return 0;
 	}
 
-	as_namespace *ns = as_namespace_get_byname(param_str);
-
-	if (! ns) {
-		cf_warning(AS_INFO, "unknown namespace %s", param_str);
-		cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
-		return 0;
+	if (rv == 0) {
+		if (strcmp(ignore_migrations_str, "true") == 0 ||
+				strcmp(ignore_migrations_str, "yes") == 0) {
+			ignore_migrations = true;
+		}
+		else if (strcmp(ignore_migrations_str, "false") == 0 ||
+				strcmp(ignore_migrations_str, "no") == 0) {
+			ignore_migrations = false;
+		}
+		else {
+			cf_warning(AS_INFO, "ignore-migrations value invalid");
+			cf_dyn_buf_append_string(db, "ERROR::bad-ignore-migrations");
+			return 0;
+		}
 	}
 
-	if (ns->migrate_tx_partitions_remaining +
-			ns->migrate_rx_partitions_remaining +
-			ns->n_unavailable_partitions +
-			ns->n_dead_partitions != 0) {
+	if (! ignore_migrations) {
+		char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
+		int ns_name_len = (int)sizeof(ns_name);
+
+		rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
+
+		if (rv == -2) {
+			cf_warning(AS_INFO, "namespace parameter value too long");
+			cf_dyn_buf_append_string(db, "ERROR::bad-namespace");
+			return 0;
+		}
+
+		if (rv == -1) {
+			// Ensure migrations are complete for all namespaces.
+
+			if (as_partition_balance_remaining_migrations() != 0) {
+				cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+				return 0;
+			}
+		}
+		else {
+			// Ensure migrations are complete for the requested namespace only.
+			as_namespace *ns = as_namespace_get_byname(ns_name);
+
+			if (! ns) {
+				cf_warning(AS_INFO, "unknown namespace %s", ns_name);
+				cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
+				return 0;
+			}
+
+			if (ns->migrate_tx_partitions_remaining +
+					ns->migrate_rx_partitions_remaining +
+					ns->n_unavailable_partitions +
+					ns->n_dead_partitions != 0) {
+				cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
+				return 0;
+			}
+		}
+	}
+
+	if (begin_cluster_key != as_exchange_cluster_key()) {
+		// Verify that the cluster didn't change while during the collection.
 		cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
-		return 0;
 	}
 
-	cf_dyn_buf_append_uint64_x(db, as_exchange_cluster_key());
+	cf_dyn_buf_append_uint64_x(db, begin_cluster_key);
 
 	return 0;
 }
@@ -612,7 +684,7 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "tip command received: params %s", params);
 
-	char host_str[50];
+	char host_str[DNS_NAME_MAX_SIZE];
 	int  host_str_len = sizeof(host_str);
 
 	char port_str[50];
@@ -629,7 +701,7 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 	 */
 
 	if (0 != as_info_parameter_get(params, "host", host_str, &host_str_len)) {
-		cf_warning(AS_INFO, "tip command: no host, must add a host parameter");
+		cf_warning(AS_INFO, "tip command: no host, must add a host parameter - maximum %d characters", DNS_NAME_MAX_LEN);
 		goto Exit;
 	}
 
@@ -1504,6 +1576,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
 	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
 	info_append_int(db, "info-threads", g_config.n_info_threads);
+	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_bool(db, "log-millis", cf_fault_is_logging_millis());
 	info_append_uint32(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
@@ -1513,7 +1586,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
-	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
 	info_append_uint32(db, "object-size-hist-period", g_config.object_size_hist_period);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
@@ -1693,6 +1765,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	}
 
 	info_append_bool(db, "data-in-index", ns->data_in_index);
+	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
+	info_append_bool(db, "disable-nsup", ns->nsup_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
@@ -1711,7 +1785,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 			ns->xmem_type == CF_XMEM_TYPE_UNDEFINED ? "undefined" :
 					(ns->xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
 							(ns->xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
-									(ns->xmem_type == CF_XMEM_TYPE_SSD ? "ssd" :
+									(ns->xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :
 											"illegal"))));
 
 	info_append_uint64(db, "max-ttl", ns->max_ttl);
@@ -1719,6 +1793,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
+	info_append_bool(db, "prefer-uniform-balance", ns->cfg_prefer_uniform_balance);
 	info_append_uint32(db, "rack-id", ns->rack_id);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
@@ -1729,15 +1804,13 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
-	if (ns->xmem_type == CF_XMEM_TYPE_PMEM ||
-			ns->xmem_type == CF_XMEM_TYPE_SSD) {
-		for (uint32_t i = 0; i < CF_XMEM_MAX_MOUNTS; i++) {
-			if (! ns->xmem_mounts[i]) {
-				break;
-			}
+	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
+		info_append_indexed_string(db, "index-type.mount", i, NULL, ns->xmem_mounts[i]);
+	}
 
-			info_append_string(db, "index-type.mount", ns->xmem_mounts[i]);
-		}
+	if (as_namespace_index_persisted(ns)) {
+		info_append_uint32(db, "index-type.mounts-high-water-pct", ns->mounts_hwm_pct);
+		info_append_uint64(db, "index-type.mounts-size-limit", ns->mounts_size_limit);
 	}
 
 	info_append_string(db, "storage-engine",
@@ -1745,23 +1818,17 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal")));
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-			if (! ns->storage_devices[i]) {
-				break;
+		uint32_t n = ns->n_storage_devices + ns->n_storage_files;
+		const char* tag = ns->n_storage_devices != 0 ?
+				"storage-engine.device" : "storage-engine.file";
+
+		for (uint32_t i = 0; i < n; i++) {
+			info_append_indexed_string(db, tag, i, NULL, ns->storage_devices[i]);
+
+			if (ns->n_storage_shadows != 0) {
+				info_append_indexed_string(db, tag, i, "shadow", ns->storage_shadows[i]);
 			}
-
-			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
 		}
-
-		for (int i = 0; i < AS_STORAGE_MAX_FILES; i++) {
-			if (! ns->storage_files[i]) {
-				break;
-			}
-
-			info_append_string(db, "storage-engine.file", ns->storage_files[i]);
-		}
-
-		// TODO - how to report the shadows?
 
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_string_safe(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode);
@@ -1783,6 +1850,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
+		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 	}
 
@@ -1957,7 +2025,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "transaction-max-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
-			cf_info(AS_INFO, "Changing value of transaction-retry-ms from %"PRIu64" to %d ", (g_config.transaction_max_ns / 1000000), val);
+			cf_info(AS_INFO, "Changing value of transaction-max-ms from %"PRIu64" to %d ", (g_config.transaction_max_ns / 1000000), val);
 			g_config.transaction_max_ns = (uint64_t)val * 1000000;
 		}
 		else if (0 == as_info_parameter_get(params, "transaction-pending-limit", context, &context_len)) {
@@ -2640,6 +2708,19 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of max-ttl memory of ns %s from %"PRIu64" to %"PRIu64" ", ns->name, ns->max_ttl, val);
 			ns->max_ttl = val;
 		}
+		else if (0 == as_info_parameter_get(params, "disable-nsup", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of disable-nsup of ns %s from %s to %s", ns->name, bool_val[ns->nsup_disabled], context);
+				ns->nsup_disabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of disable-nsup of ns %s from %s to %s", ns->name, bool_val[ns->nsup_disabled], context);
+				ns->nsup_disabled = false;
+			}
+			else {
+				goto Error;
+			}
+		}
 		else if (0 == as_info_parameter_get(params, "migrate-order", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 10) {
 				goto Error;
@@ -2717,6 +2798,35 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			else {
 				goto Error;
 			}
+		}
+		else if (0 == as_info_parameter_get(params, "mounts-high-water-pct", context, &context_len)) {
+			if (! as_namespace_index_persisted(ns)) {
+				cf_warning(AS_INFO, "mounts-high-water-pct is not relevant for this index-type");
+				goto Error;
+			}
+
+			if (0 != cf_str_atoi(context, &val) || val < 0 || val > 100) {
+				goto Error;
+			}
+
+			cf_info(AS_INFO, "Changing value of mounts-high-water-pct of ns %s from %u to %d ", ns->name, ns->mounts_hwm_pct, val);
+			ns->mounts_hwm_pct = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "mounts-size-limit", context, &context_len)) {
+			if (! as_namespace_index_persisted(ns)) {
+				cf_warning(AS_INFO, "mounts-size-limit is not relevant for this index-type");
+				goto Error;
+			}
+
+			uint64_t val;
+			uint64_t min = (ns->xmem_type == CF_XMEM_TYPE_FLASH ? 4 : 1) * 1024UL * 1024UL *1024UL;
+
+			if (0 != cf_str_atoi_u64(context, &val) || val < min) {
+				goto Error;
+			}
+
+			cf_info(AS_INFO, "Changing value of mounts-size-limit of ns %s from %"PRIu64" to %"PRIu64, ns->name, ns->mounts_size_limit, val);
+			ns->mounts_size_limit = val;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -2827,6 +2937,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "strong-consistency-allow-expunge", context, &context_len)) {
+			if (! ns->cp) {
+				cf_warning(AS_INFO, "{%s} 'strong-consistency-allow-expunge' is only applicable with 'strong-consistency'", ns->name);
+				goto Error;
+			}
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of strong-consistency-allow-expunge of ns %s from %s to %s", ns->name, bool_val[ns->cp_allow_drops], context);
 				ns->cp_allow_drops = true;
@@ -3086,6 +3200,23 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of geo2dsphere-within-max-cells of ns %s from %d to %d ",
 					ns->name, ns->geo2dsphere_within_max_cells, val);
 			ns->geo2dsphere_within_max_cells = val;
+		}
+		else if (0 == as_info_parameter_get(params, "prefer-uniform-balance", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "prefer-uniform-balance is enterprise-only");
+				goto Error;
+			}
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of prefer-uniform-balance of ns %s from %s to %s", ns->name, bool_val[ns->cfg_prefer_uniform_balance], context);
+				ns->cfg_prefer_uniform_balance = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of prefer-uniform-balance of ns %s from %s to %s", ns->name, bool_val[ns->cfg_prefer_uniform_balance], context);
+				ns->cfg_prefer_uniform_balance = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else {
 			if (as_xdr_set_config_ns(ns->name, params) == false) {
@@ -5654,6 +5785,42 @@ info_get_sindexes(char *name, cf_dyn_buf *db)
 	return info_get_tree_sindexes(name, "", db);
 }
 
+static void
+add_index_device_stats(as_namespace *ns, cf_dyn_buf *db)
+{
+	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
+		info_append_indexed_int(db, "index-type.mount", i, "age",
+				cf_nvme_get_age(ns->xmem_mounts[i]));
+	}
+}
+
+static void
+add_data_device_stats(as_namespace *ns, cf_dyn_buf *db)
+{
+	uint32_t n = ns->n_storage_devices + ns->n_storage_files;
+	const char* tag = ns->n_storage_devices != 0 ?
+			"storage-engine.device" : "storage-engine.file";
+
+	for (uint32_t i = 0; i < n; i++) {
+		storage_device_stats stats;
+		as_storage_device_stats(ns, i, &stats);
+
+		info_append_indexed_uint64(db, tag, i, "used_bytes", stats.used_sz);
+		info_append_indexed_uint32(db, tag, i, "free_wblocks", stats.free_wblock_q_sz);
+
+		info_append_indexed_uint32(db, tag, i, "write_q", stats.write_q_sz);
+		info_append_indexed_uint64(db, tag, i, "writes", stats.n_writes);
+
+		info_append_indexed_uint32(db, tag, i, "defrag_q", stats.defrag_q_sz);
+		info_append_indexed_uint64(db, tag, i, "defrag_reads", stats.n_defrag_reads);
+		info_append_indexed_uint64(db, tag, i, "defrag_writes", stats.n_defrag_writes);
+
+		info_append_indexed_uint32(db, tag, i, "shadow_write_q", stats.shadow_write_q_sz);
+
+		info_append_indexed_int(db, tag, i, "age",
+				cf_nvme_get_age(ns->storage_devices[i]));
+	}
+}
 
 void
 info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
@@ -5707,8 +5874,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Memory usage stats.
 
+	uint64_t index_used = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
+
 	uint64_t data_memory = ns->n_bytes_memory;
-	uint64_t index_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_tombstones);
+	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;
 	uint64_t sindex_memory = ns->n_bytes_sindex_memory;
 	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 
@@ -5717,7 +5886,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "memory_used_index_bytes", index_memory);
 	info_append_uint64(db, "memory_used_sindex_bytes", sindex_memory);
 
-	uint64_t free_pct = (ns->memory_size != 0 && (ns->memory_size > used_memory)) ?
+	uint64_t free_pct = ns->memory_size > used_memory ?
 			((ns->memory_size - used_memory) * 100L) / ns->memory_size : 0;
 
 	info_append_uint64(db, "memory_free_pct", free_pct);
@@ -5728,6 +5897,23 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// Remaining bin-name slots (yes, this can be negative).
 	if (! ns->single_bin) {
 		info_append_int(db, "available_bin_names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
+	}
+
+	// Persistent index stats.
+
+	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
+		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
+
+		info_append_uint64(db, "index_pmem_used_bytes", index_used);
+		info_append_uint64(db, "index_pmem_used_pct", used_pct);
+	}
+	else if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
+
+		info_append_uint64(db, "index_flash_used_bytes", index_used);
+		info_append_uint64(db, "index_flash_used_pct", used_pct);
+
+		add_index_device_stats(ns, db);
 	}
 
 	// Persistent storage stats.
@@ -5749,7 +5935,13 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		if (! ns->storage_data_in_memory) {
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
+
+		add_data_device_stats(ns, db);
 	}
+
+	// Partition balance state.
+
+	info_append_bool(db, "effective_prefer_uniform_balance", ns->prefer_uniform_balance);
 
 	// Migration stats.
 
@@ -6090,7 +6282,11 @@ info_command_histogram(char *name, char *params, cf_dyn_buf *db)
 	int set_name_str_len = sizeof(set_name_str);
 	set_name_str[0] = 0;
 
-	as_info_parameter_get(params, "set", set_name_str, &set_name_str_len);
+	if (as_info_parameter_get(params, "set", set_name_str, &set_name_str_len) == -2) {
+		cf_warning(AS_INFO, "set name too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-set-name");
+		return 0;
+	}
 
 	as_namespace_get_hist_info(ns, set_name_str, value_str, db);
 
@@ -6416,6 +6612,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		cf_warning(AS_INFO, "%s : Failed. Invalid Bin Path '%s'.", cmd, path_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
 				"Invalid Bin path");
+		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
 

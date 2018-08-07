@@ -75,6 +75,20 @@ typedef struct as_storage_rd_s {
 	struct drv_ssd_s		*ssd;
 } as_storage_rd;
 
+typedef struct storage_device_stats_s {
+	uint64_t used_sz;
+	uint32_t free_wblock_q_sz;
+
+	uint32_t write_q_sz;
+	uint64_t n_writes;
+
+	uint32_t defrag_q_sz;
+	uint64_t n_defrag_reads;
+	uint64_t n_defrag_writes;
+
+	uint32_t shadow_write_q_sz;
+} storage_device_stats;
+
 
 //------------------------------------------------
 // Generic "base class" functions that call
@@ -82,6 +96,7 @@ typedef struct as_storage_rd_s {
 //
 
 extern void as_storage_init();
+extern void as_storage_load();
 extern void as_storage_start_tomb_raider();
 extern int as_storage_namespace_destroy(struct as_namespace_s *ns);
 
@@ -111,10 +126,11 @@ extern void as_storage_save_evict_void_time(struct as_namespace_s *ns, uint32_t 
 extern void as_storage_load_pmeta(struct as_namespace_s *ns, struct as_partition_s *p);
 extern void as_storage_save_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
 extern void as_storage_cache_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
-extern void as_storage_flush_all_pmeta(struct as_namespace_s *ns);
+extern void as_storage_flush_pmeta(struct as_namespace_s *ns, uint32_t start_pid, uint32_t n_partitions);
 
 // Statistics.
 extern int as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
+extern void as_storage_device_stats(struct as_namespace_s *ns, uint32_t device_ix, storage_device_stats *stats);
 extern int as_storage_ticker_stats(struct as_namespace_s *ns); // prints SSD histograms to the info ticker
 extern int as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD histograms
 
@@ -141,7 +157,7 @@ extern void as_storage_shutdown(uint32_t instance);
 // AS_STORAGE_ENGINE_MEMORY functions.
 //
 
-extern int as_storage_namespace_init_memory(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_namespace_init_memory(struct as_namespace_s *ns);
 extern void as_storage_start_tomb_raider_memory(struct as_namespace_s *ns);
 extern int as_storage_namespace_destroy_memory(struct as_namespace_s *ns);
 
@@ -156,7 +172,8 @@ extern int as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct
 // AS_STORAGE_ENGINE_SSD functions.
 //
 
-extern int as_storage_namespace_init_ssd(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_namespace_init_ssd(struct as_namespace_s *ns);
+extern void as_storage_namespace_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q);
 extern void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
 extern void as_storage_loading_records_ticker_ssd(); // called directly by as_storage_init()
 extern int as_storage_namespace_destroy_ssd(struct as_namespace_s *ns);
@@ -183,9 +200,10 @@ extern void as_storage_save_evict_void_time_ssd(struct as_namespace_s *ns, uint3
 extern void as_storage_load_pmeta_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
 extern void as_storage_save_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
 extern void as_storage_cache_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
-extern void as_storage_flush_all_pmeta_ssd(struct as_namespace_s *ns);
+extern void as_storage_flush_pmeta_ssd(struct as_namespace_s *ns, uint32_t start_pid, uint32_t n_partitions);
 
 extern int as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
+extern void as_storage_device_stats_ssd(struct as_namespace_s *ns, uint32_t device_ix, storage_device_stats *stats);
 extern int as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
 extern int as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
 

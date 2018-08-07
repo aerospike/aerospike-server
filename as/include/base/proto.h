@@ -582,8 +582,18 @@ typedef enum {
 typedef enum {
 	AS_CDT_LIST_MODIFY_DEFAULT = 0x00,
 	AS_CDT_LIST_ADD_UNIQUE = 0x01,
-	AS_CDT_LIST_INSERT_BOUNDED = 0x02
+	AS_CDT_LIST_INSERT_BOUNDED = 0x02,
+	AS_CDT_LIST_NO_FAIL = 0x04,
+	AS_CDT_LIST_DO_PARTIAL = 0x08,
 } as_cdt_list_modify_flags;
+
+typedef enum {
+	AS_CDT_MAP_MODIFY_DEFAULT = 0x00,
+	AS_CDT_MAP_NO_OVERWRITE = 0x01,
+	AS_CDT_MAP_NO_CREATE = 0x02,
+	AS_CDT_MAP_NO_FAIL = 0x04,
+	AS_CDT_MAP_DO_PARTIAL = 0x08,
+} as_cdt_map_modify_flags;
 
 typedef enum as_cdt_optype_e {
 	// ------------------------------------------------------------------------
@@ -627,6 +637,7 @@ typedef enum as_cdt_optype_e {
 	AS_CDT_OP_LIST_GET_BY_INDEX_RANGE       = 24,
 	AS_CDT_OP_LIST_GET_BY_VALUE_INTERVAL    = 25,
 	AS_CDT_OP_LIST_GET_BY_RANK_RANGE        = 26,
+	AS_CDT_OP_LIST_GET_BY_VALUE_REL_RANK_RANGE = 27,
 
 	// REMOVE_BYs
 	AS_CDT_OP_LIST_REMOVE_BY_INDEX          = 32,
@@ -639,6 +650,7 @@ typedef enum as_cdt_optype_e {
 	AS_CDT_OP_LIST_REMOVE_BY_INDEX_RANGE    = 37,
 	AS_CDT_OP_LIST_REMOVE_BY_VALUE_INTERVAL = 38,
 	AS_CDT_OP_LIST_REMOVE_BY_RANK_RANGE     = 39,
+	AS_CDT_OP_LIST_REMOVE_BY_VALUE_REL_RANK_RANGE = 40,
 
 	// ------------------------------------------------------------------------
 	// Map Operation
@@ -676,6 +688,9 @@ typedef enum as_cdt_optype_e {
 	AS_CDT_OP_MAP_REMOVE_BY_VALUE_INTERVAL			= 86,
 	AS_CDT_OP_MAP_REMOVE_BY_RANK_RANGE				= 87,
 
+	AS_CDT_OP_MAP_REMOVE_BY_KEY_REL_INDEX_RANGE		= 88,
+	AS_CDT_OP_MAP_REMOVE_BY_VALUE_REL_RANK_RANGE	= 89,
+
 	// Read ops
 	AS_CDT_OP_MAP_SIZE								= 96,
 
@@ -695,6 +710,9 @@ typedef enum as_cdt_optype_e {
 	AS_CDT_OP_MAP_GET_BY_KEY_LIST					= 107,
 	AS_CDT_OP_MAP_GET_BY_VALUE_LIST					= 108,
 
+	AS_CDT_OP_MAP_GET_BY_KEY_REL_INDEX_RANGE		= 109,
+	AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE		= 110
+
 } as_cdt_optype;
 
-#define AS_CDT_OP_LIST_LAST AS_CDT_OP_LIST_REMOVE_BY_RANK_RANGE
+#define AS_CDT_OP_LIST_LAST AS_CDT_OP_LIST_REMOVE_BY_VALUE_REL_RANK_RANGE

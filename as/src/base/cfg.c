@@ -24,7 +24,6 @@
 
 #include <errno.h>
 #include <grp.h>
-#include <limits.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <stdbool.h>
@@ -33,6 +32,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <linux/capability.h>
 #include <sys/resource.h>
 
 #include "aerospike/mod_lua_config.h"
@@ -44,6 +44,7 @@
 #include "arenax.h"
 #include "bits.h"
 #include "cf_str.h"
+#include "daemon.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "hardware.h"
@@ -103,8 +104,8 @@ void cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port, bool tls);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_xmem_mount(as_namespace* ns, const char* mount);
-void cfg_add_storage_file(as_namespace* ns, char* file_name);
-void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
+void cfg_add_storage_file(as_namespace* ns, const char* file_name, const char* shadow_name);
+void cfg_add_storage_device(as_namespace* ns, const char* device_name, const char* shadow_name);
 void cfg_set_cluster_name(char* cluster_name);
 void cfg_add_ldap_role_query_pattern(char* pattern);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
@@ -112,6 +113,7 @@ void cfg_create_all_histograms();
 void cfg_init_serv_spec(cf_serv_spec* spec_p);
 cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
 char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
+void cfg_keep_cap(bool keep, bool* what, int32_t cap);
 
 void xdr_cfg_add_datacenter(char* dc, uint32_t nsid);
 void xdr_cfg_add_node_addr_port(dc_config_opt *dc_cfg, char* addr, int port);
@@ -152,7 +154,6 @@ cfg_set_defaults()
 	c->n_migrate_threads = 1;
 	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
 	c->nsup_period = 120; // run nsup once every 2 minutes
-	c->nsup_startup_evict = true;
 	c->object_size_hist_period = 60 * 60; // every hour
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
@@ -286,6 +287,7 @@ typedef enum {
 	CASE_SERVICE_HIST_TRACK_SLICE,
 	CASE_SERVICE_HIST_TRACK_THRESHOLDS,
 	CASE_SERVICE_INFO_THREADS,
+	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
 	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_LOG_MILLIS,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
@@ -295,7 +297,6 @@ typedef enum {
 	CASE_SERVICE_NODE_ID_INTERFACE,
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_PERIOD,
-	CASE_SERVICE_NSUP_STARTUP_EVICT,
 	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
@@ -370,6 +371,7 @@ typedef enum {
 	CASE_SERVICE_NSUP_QUEUE_ESCAPE,
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
+	CASE_SERVICE_NSUP_STARTUP_EVICT,
 	CASE_SERVICE_NSUP_THREADS,
 	CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE,
 	CASE_SERVICE_PAXOS_PROTOCOL,
@@ -533,6 +535,8 @@ typedef enum {
 	CASE_NAMESPACE_COLD_START_EVICT_TTL,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
+	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
+	CASE_NAMESPACE_DISABLE_NSUP,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
@@ -552,6 +556,7 @@ typedef enum {
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
 	CASE_NAMESPACE_PARTITION_TREE_SPRIGS,
+	CASE_NAMESPACE_PREFER_UNIFORM_BALANCE,
 	CASE_NAMESPACE_RACK_ID,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
 	CASE_NAMESPACE_SET_BEGIN,
@@ -591,7 +596,7 @@ typedef enum {
 	// Namespace index-type options (value tokens):
 	CASE_NAMESPACE_INDEX_TYPE_SHMEM,
 	CASE_NAMESPACE_INDEX_TYPE_PMEM,
-	CASE_NAMESPACE_INDEX_TYPE_SSD,
+	CASE_NAMESPACE_INDEX_TYPE_FLASH,
 
 	// Namespace storage-engine options (value tokens):
 	CASE_NAMESPACE_STORAGE_MEMORY,
@@ -600,9 +605,13 @@ typedef enum {
 
 	// Namespace index-type pmem options:
 	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT,
+	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT,
+	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT,
 
-	// Namespace index-type ssd options:
-	CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT,
+	// Namespace index-type flash options:
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT,
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT,
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT,
 
 	// Namespace storage-engine device options:
 	// Normally visible, in canonical configuration file order:
@@ -630,6 +639,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
+	CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER,
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
 	// Deprecated:
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS,
@@ -818,6 +828,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "hist-track-slice",				CASE_SERVICE_HIST_TRACK_SLICE },
 		{ "hist-track-thresholds",			CASE_SERVICE_HIST_TRACK_THRESHOLDS },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
+		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "log-millis",						CASE_SERVICE_LOG_MILLIS},
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
@@ -827,7 +838,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
-		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
@@ -899,6 +909,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-queue-lwm",					CASE_SERVICE_NSUP_QUEUE_LWM },
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
+		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
 		{ "paxos-max-cluster-size",			CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE },
 		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
@@ -1066,6 +1077,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
+		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
+		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
@@ -1085,6 +1098,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
 		{ "partition-tree-sprigs",			CASE_NAMESPACE_PARTITION_TREE_SPRIGS },
+		{ "prefer-uniform-balance",			CASE_NAMESPACE_PREFER_UNIFORM_BALANCE },
 		{ "rack-id",						CASE_NAMESPACE_RACK_ID },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
@@ -1128,7 +1142,7 @@ const cfg_opt NAMESPACE_WRITE_COMMIT_OPTS[] = {
 const cfg_opt NAMESPACE_INDEX_TYPE_OPTS[] = {
 		{ "shmem",							CASE_NAMESPACE_INDEX_TYPE_SHMEM },
 		{ "pmem",							CASE_NAMESPACE_INDEX_TYPE_PMEM },
-		{ "ssd",							CASE_NAMESPACE_INDEX_TYPE_SSD }
+		{ "flash",							CASE_NAMESPACE_INDEX_TYPE_FLASH }
 };
 
 const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
@@ -1139,11 +1153,15 @@ const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
 
 const cfg_opt NAMESPACE_INDEX_TYPE_PMEM_OPTS[] = {
 		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT },
+		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT },
+		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt NAMESPACE_INDEX_TYPE_SSD_OPTS[] = {
-		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT },
+const cfg_opt NAMESPACE_INDEX_TYPE_FLASH_OPTS[] = {
+		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT },
+		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT },
+		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1171,6 +1189,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
+		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
 		{ "defrag-max-blocks",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS },
 		{ "defrag-period",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD },
@@ -1356,7 +1375,7 @@ const int NUM_NAMESPACE_WRITE_COMMIT_OPTS			= sizeof(NAMESPACE_WRITE_COMMIT_OPTS
 const int NUM_NAMESPACE_INDEX_TYPE_OPTS				= sizeof(NAMESPACE_INDEX_TYPE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_PMEM_OPTS) / sizeof(cfg_opt);
-const int NUM_NAMESPACE_INDEX_TYPE_SSD_OPTS			= sizeof(NAMESPACE_INDEX_TYPE_SSD_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_FLASH_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_ENABLE_XDR_OPTS			= sizeof(NAMESPACE_SET_ENABLE_XDR_OPTS) / sizeof(cfg_opt);
@@ -1414,7 +1433,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_FILE, LOGGING_CONSOLE,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
-	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_SSD, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
+	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DATACENTER,
@@ -1743,7 +1762,7 @@ cfg_int_no_checks(const cfg_line* p_line)
 {
 	int64_t value = cfg_i64_no_checks(p_line);
 
-	if (value < INT_MIN || value > INT_MAX) {
+	if (value < INT32_MIN || value > INT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1769,7 +1788,7 @@ cfg_int_val2_no_checks(const cfg_line* p_line)
 {
 	int64_t value = cfg_i64_val2_no_checks(p_line);
 
-	if (value < INT_MIN || value > INT_MAX) {
+	if (value < INT32_MIN || value > INT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1782,7 +1801,7 @@ cfg_int_val3_no_checks(const cfg_line* p_line)
 {
 	int64_t value = cfg_i64_val3_no_checks(p_line);
 
-	if (value < INT_MIN || value > INT_MAX) {
+	if (value < INT32_MIN || value > INT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1926,7 +1945,7 @@ cfg_u32_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
 
-	if (value > UINT_MAX) {
+	if (value > UINT32_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %lu overflows unsigned int",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -1972,7 +1991,7 @@ cfg_u16_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
 
-	if (value > USHRT_MAX) {
+	if (value > UINT16_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %lu overflows unsigned short",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -2004,7 +2023,7 @@ cfg_u8_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
 
-	if (value > UCHAR_MAX) {
+	if (value > UINT8_MAX) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s %lu overflows unsigned char",
 				p_line->num, p_line->name_tok, value);
 	}
@@ -2071,7 +2090,7 @@ cfg_seconds(const cfg_line* p_line, uint32_t min, uint32_t max)
 
 // Minimum & maximum port numbers:
 const int CFG_MIN_PORT = 1024;
-const int CFG_MAX_PORT = USHRT_MAX;
+const int CFG_MAX_PORT = UINT16_MAX;
 
 cf_ip_port
 cfg_port(const cfg_line* p_line)
@@ -2322,6 +2341,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_INFO_THREADS:
 				c->n_info_threads = cfg_int_no_checks(&line);
 				break;
+			case CASE_SERVICE_KEEP_CAPS_SSD_HEALTH:
+				cfg_keep_cap(cfg_bool(&line), &c->keep_caps_ssd_health, CAP_SYS_ADMIN);
+				break;
 			case CASE_SERVICE_LOG_LOCAL_TIME:
 				cf_fault_use_local_time(cfg_bool(&line));
 				break;
@@ -2348,9 +2370,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_NSUP_PERIOD:
 				c->nsup_period = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_NSUP_STARTUP_EVICT:
-				c->nsup_startup_evict = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD:
 				c->object_size_hist_period = cfg_u32_no_checks(&line);
@@ -2518,6 +2537,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_QUEUE_LWM:
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
+			case CASE_SERVICE_NSUP_STARTUP_EVICT:
 			case CASE_SERVICE_NSUP_THREADS:
 			case CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE:
 			case CASE_SERVICE_PAXOS_PROTOCOL:
@@ -2760,7 +2780,7 @@ as_config_init(const char* config_file)
 				c->hb_config.tx_interval = cfg_u32(&line, AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
-				c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT_MAX);
+				c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT32_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MTU:
 				c->hb_config.override_mtu = cfg_u32_no_checks(&line);
@@ -2964,7 +2984,7 @@ as_config_init(const char* config_file)
 				cfg_renamed_name_tok(&line, "memory-size");
 				// No break.
 			case CASE_NAMESPACE_MEMORY_SIZE:
-				ns->memory_size = cfg_u64_no_checks(&line);
+				ns->memory_size = cfg_u64(&line, 1024 * 1024, UINT64_MAX);
 				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
 				ns->default_ttl = cfg_seconds_no_checks(&line);
@@ -3028,6 +3048,12 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_DATA_IN_INDEX:
 				ns->data_in_index = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_DISABLE_COLD_START_EVICTION:
+				ns->cold_start_eviction_disabled = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_DISABLE_NSUP:
+				ns->nsup_disabled = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_DISABLE_WRITE_DUP_RES:
 				ns->write_dup_res_disabled = cfg_bool(&line);
 				break;
@@ -3078,10 +3104,9 @@ as_config_init(const char* config_file)
 					ns->xmem_type = CF_XMEM_TYPE_PMEM;
 					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_PMEM);
 					break;
-				case CASE_NAMESPACE_INDEX_TYPE_SSD:
-					cf_crash_nostack(AS_CFG, "{%s} index-type ssd not yet supported", ns->name);
-					ns->xmem_type = CF_XMEM_TYPE_SSD;
-					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_SSD);
+				case CASE_NAMESPACE_INDEX_TYPE_FLASH:
+					ns->xmem_type = CF_XMEM_TYPE_FLASH;
+					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_FLASH);
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -3103,6 +3128,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_PARTITION_TREE_SPRIGS:
 				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, NUM_LOCK_PAIRS, 1 << NUM_SPRIG_BITS);
+				break;
+			case CASE_NAMESPACE_PREFER_UNIFORM_BALANCE:
+				cfg_enterprise_only(&line);
+				ns->cfg_prefer_uniform_balance = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_RACK_ID:
 				cfg_enterprise_only(&line);
@@ -3191,6 +3220,9 @@ as_config_init(const char* config_file)
 				cfg_begin_context(&state, NAMESPACE_SI);
 				break;
 			case CASE_CONTEXT_END:
+				if (ns->memory_size == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'memory-size'", ns->name);
+				}
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
 					cf_crash_nostack(AS_CFG, "ns %s data-in-index can't be true unless storage-engine is device and both single-bin and data-in-memory are true", ns->name);
 				}
@@ -3225,7 +3257,16 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT:
 				cfg_add_xmem_mount(ns, cfg_strdup(&line, true));
 				break;
+			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT:
+				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT:
+				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				break;
 			case CASE_CONTEXT_END:
+				if (ns->mounts_size_limit == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
+				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -3238,13 +3279,24 @@ as_config_init(const char* config_file)
 		//----------------------------------------
 		// Parse namespace::index-type ssd context items.
 		//
-		case NAMESPACE_INDEX_TYPE_SSD:
-			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_SSD_OPTS, NUM_NAMESPACE_INDEX_TYPE_SSD_OPTS)) {
-			case CASE_NAMESPACE_INDEX_TYPE_SSD_MOUNT:
+		case NAMESPACE_INDEX_TYPE_FLASH:
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_FLASH_OPTS, NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS)) {
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT:
 				cfg_add_xmem_mount(ns, cfg_strdup(&line, true));
 				break;
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT:
+				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT:
+				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
+				break;
 			case CASE_CONTEXT_END:
+				if (ns->mounts_size_limit == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
+				}
 				cfg_end_context(&state);
+				// TODO - main() doesn't yet support initialization as root.
+				cf_page_cache_dirty_limits();
 				break;
 			case CASE_NOT_FOUND:
 			default:
@@ -3262,7 +3314,7 @@ as_config_init(const char* config_file)
 				cfg_add_storage_device(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILE:
-				cfg_add_storage_file(ns, cfg_strdup(&line, true));
+				cfg_add_storage_file(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE:
 				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
@@ -3330,6 +3382,10 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
 				ns->storage_post_write_queue = cfg_u32(&line, 0, 4 * 1024);
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER:
+				cfg_enterprise_only(&line);
+				ns->storage_serialize_tomb_raider = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP:
 				cfg_enterprise_only(&line);
 				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
@@ -3345,6 +3401,12 @@ as_config_init(const char* config_file)
 				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
+				if (ns->n_storage_devices == 0 && ns->n_storage_files == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} has no devices or files", ns->name);
+				}
+				if (ns->n_storage_files != 0 && ns->storage_filesize == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
+				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -4106,12 +4168,20 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		client_replica_maps_create(ns);
 
+		uint32_t sprigs_offset = sizeof(as_lock_pair) * NUM_LOCK_PAIRS;
+		uint32_t puddles_offset = 0;
+
+		if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+			puddles_offset = sprigs_offset + sizeof(as_sprig) * ns->tree_shared.n_sprigs;
+		}
+
 		// Note - ns->tree_shared.arena is set later when it's allocated.
 		ns->tree_shared.destructor			= (as_index_value_destructor)as_record_destroy;
 		ns->tree_shared.destructor_udata	= (void*)ns;
 		ns->tree_shared.locks_shift			= NUM_SPRIG_BITS - cf_msb(NUM_LOCK_PAIRS);
 		ns->tree_shared.sprigs_shift		= NUM_SPRIG_BITS - cf_msb(ns->tree_shared.n_sprigs);
-		ns->tree_shared.sprigs_offset		= sizeof(as_lock_pair) * NUM_LOCK_PAIRS;
+		ns->tree_shared.sprigs_offset		= sprigs_offset;
+		ns->tree_shared.puddles_offset		= puddles_offset;
 
 		ssd_init_encryption_key(ns);
 
@@ -4672,7 +4742,7 @@ as_set*
 cfg_add_set(as_namespace* ns)
 {
 	if (ns->sets_cfg_count >= AS_SET_MAX_COUNT) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many sets", ns->name);
+		cf_crash_nostack(AS_CFG, "{%s} too many sets", ns->name);
 	}
 
 	// Lazily allocate temporary sets config array.
@@ -4689,69 +4759,86 @@ cfg_add_set(as_namespace* ns)
 void
 cfg_add_xmem_mount(as_namespace* ns, const char* mount)
 {
-	uint32_t i;
+	if (ns->n_xmem_mounts == CF_XMEM_MAX_MOUNTS) {
+		cf_crash_nostack(AS_CFG, "{%s} too many mounts", ns->name);
+	}
 
-	for (i = 0; i < CF_XMEM_MAX_MOUNTS; i++) {
-		if (! ns->xmem_mounts[i]) {
-			ns->xmem_mounts[i] = mount;
-			break;
-		}
-
+	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
 		if (strcmp(mount, ns->xmem_mounts[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate mount %s", ns->name, mount);
+			cf_crash_nostack(AS_CFG, "{%s} duplicate mount %s", ns->name, mount);
 		}
 	}
 
-	if (i == CF_XMEM_MAX_MOUNTS) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many mounts", ns->name);
-	}
+	ns->xmem_mounts[ns->n_xmem_mounts++] = mount;
 }
 
 void
-cfg_add_storage_file(as_namespace* ns, char* file_name)
+cfg_add_storage_file(as_namespace* ns, const char* file_name,
+		const char* shadow_name)
 {
-	int i;
-
-	for (i = 0; i < AS_STORAGE_MAX_FILES; i++) {
-		if (! ns->storage_files[i]) {
-			ns->storage_files[i] = file_name;
-			break;
-		}
-
-		if (strcmp(file_name, ns->storage_files[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage file %s", ns->name, file_name);
-		}
+	if (ns->n_storage_devices != 0) {
+		cf_crash_nostack(AS_CFG, "{%s} mixture of storage files and devices", ns->name);
 	}
 
-	if (i == AS_STORAGE_MAX_FILES) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many storage files", ns->name);
+	if (ns->n_storage_files == AS_STORAGE_MAX_DEVICES) {
+		cf_crash_nostack(AS_CFG, "{%s} too many storage files", ns->name);
 	}
-}
 
-void
-cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name)
-{
-	int i;
-
-	for (i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-		if (! ns->storage_devices[i]) {
-			ns->storage_devices[i] = device_name;
-			ns->storage_shadows[i] = shadow_name;
-			break;
-		}
-
-		if (strcmp(device_name, ns->storage_devices[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage device %s", ns->name, device_name);
+	for (uint32_t i = 0; i < ns->n_storage_files; i++) {
+		if (strcmp(file_name, ns->storage_devices[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage file %s", ns->name, file_name);
 		}
 
 		if (shadow_name && ns->storage_shadows[i] &&
 				strcmp(shadow_name, ns->storage_shadows[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "namespace %s - duplicate storage shadow device %s", ns->name, shadow_name);
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage shadow file %s", ns->name, shadow_name);
 		}
 	}
 
-	if (i == AS_STORAGE_MAX_DEVICES) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many storage devices", ns->name);
+	if (shadow_name) {
+		ns->storage_shadows[ns->n_storage_shadows++] = shadow_name;
+	}
+
+	ns->storage_devices[ns->n_storage_files++] = file_name;
+
+	if (ns->n_storage_shadows != 0 &&
+			ns->n_storage_shadows != ns->n_storage_files) {
+		cf_crash_nostack(AS_CFG, "{%s} no shadow for file %s", ns->name, file_name);
+	}
+}
+
+void
+cfg_add_storage_device(as_namespace* ns, const char* device_name,
+		const char* shadow_name)
+{
+	if (ns->n_storage_files != 0) {
+		cf_crash_nostack(AS_CFG, "{%s} mixture of storage files and devices", ns->name);
+	}
+
+	if (ns->n_storage_devices == AS_STORAGE_MAX_DEVICES) {
+		cf_crash_nostack(AS_CFG, "{%s} too many storage devices", ns->name);
+	}
+
+	for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
+		if (strcmp(device_name, ns->storage_devices[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage device %s", ns->name, device_name);
+		}
+
+		if (shadow_name && ns->storage_shadows[i] &&
+				strcmp(shadow_name, ns->storage_shadows[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage shadow device %s", ns->name, shadow_name);
+		}
+	}
+
+	if (shadow_name) {
+		ns->storage_shadows[ns->n_storage_shadows++] = shadow_name;
+	}
+
+	ns->storage_devices[ns->n_storage_devices++] = device_name;
+
+	if (ns->n_storage_shadows != 0 &&
+			ns->n_storage_shadows != ns->n_storage_devices) {
+		cf_crash_nostack(AS_CFG, "{%s} no shadow for device %s", ns->name, device_name);
 	}
 }
 
@@ -4911,6 +4998,17 @@ cfg_link_tls(const char* which, char** our_name)
 
 	return tls_spec;
 }
+
+void
+cfg_keep_cap(bool keep, bool* what, int32_t cap)
+{
+	*what = keep;
+
+	if (keep) {
+		cf_process_add_runtime_cap(cap);
+	}
+}
+
 
 //==========================================================
 // XDR utilities.
