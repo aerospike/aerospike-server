@@ -1,7 +1,7 @@
 /*
  * signal.c
  *
- * Copyright (C) 2010-2014 Aerospike, Inc.
+ * Copyright (C) 2010-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -21,11 +21,11 @@
  */
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h>
 
 #include "fault.h"
 
