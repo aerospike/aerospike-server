@@ -763,6 +763,7 @@ struct as_namespace_s {
 	uint32_t		stop_writes_pct;
 	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
+	uint32_t		transaction_pending_limit; // 0 means no limit
 	as_write_commit_level write_commit_level;
 	cf_vector		xdr_dclist_v;
 

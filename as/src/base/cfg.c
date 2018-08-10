@@ -164,7 +164,6 @@ cfg_set_defaults()
 	c->scan_threads = 4;
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
-	c->transaction_pending_limit = 20;
 	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
 	c->n_transaction_threads_per_queue = 4;
 	as_sindex_gconfig_default(c);
@@ -324,7 +323,6 @@ typedef enum {
 	CASE_SERVICE_SINDEX_GC_PERIOD,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
-	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_QUEUES,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
 	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE,
@@ -336,6 +334,7 @@ typedef enum {
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
+	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
 	// Deprecated:
 	CASE_SERVICE_AUTO_DUN,
@@ -567,6 +566,7 @@ typedef enum {
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
 	CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE,
 	CASE_NAMESPACE_TOMB_RAIDER_PERIOD,
+	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
 	// Deprecated:
 	CASE_NAMESPACE_ALLOW_VERSIONS,
@@ -866,7 +866,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
-		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
 		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
@@ -876,6 +875,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
+		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
 		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
@@ -1110,6 +1110,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
 		{ "tomb-raider-eligible-age",		CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE },
 		{ "tomb-raider-period",				CASE_NAMESPACE_TOMB_RAIDER_PERIOD },
+		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
 		{ "allow-versions",					CASE_NAMESPACE_ALLOW_VERSIONS },
 		{ "demo-read-multiplier",			CASE_NAMESPACE_DEMO_READ_MULTIPLIER },
@@ -2455,9 +2456,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_TRANSACTION_MAX_MS:
 				c->transaction_max_ns = cfg_u64_no_checks(&line) * 1000000;
 				break;
-			case CASE_SERVICE_TRANSACTION_PENDING_LIMIT:
-				c->transaction_pending_limit = cfg_u32_no_checks(&line);
-				break;
 			case CASE_SERVICE_TRANSACTION_QUEUES:
 				c->n_transaction_queues = cfg_u32(&line, 1, MAX_TRANSACTION_QUEUES);
 				break;
@@ -2501,6 +2499,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION:
 				cfg_obsolete(&line, "please use namespace-context 'write-commit-level-override' and/or write transaction policy");
+				break;
+			case CASE_SERVICE_TRANSACTION_PENDING_LIMIT:
+				cfg_obsolete(&line, "please use namespace-context 'transaction-pending-limit'");
 				break;
 			case CASE_SERVICE_TRANSACTION_REPEATABLE_READ:
 				cfg_obsolete(&line, "please use namespace-context 'read-consistency-level-override' and/or read transaction policy");
@@ -3186,6 +3187,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_TOMB_RAIDER_PERIOD:
 				cfg_enterprise_only(&line);
 				ns->tomb_raider_period = cfg_seconds_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT:
+				ns->transaction_pending_limit = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_WRITE_COMMIT_OPTS, NUM_NAMESPACE_WRITE_COMMIT_OPTS)) {

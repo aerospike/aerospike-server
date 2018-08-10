@@ -215,6 +215,8 @@ rw_request_hash_fn(const void* key, uint32_t key_size)
 transaction_status
 handle_hot_key(rw_request* rw0, as_transaction* tr)
 {
+	as_namespace* ns = tr->rsv.ns;
+
 	if (rw0->is_set_up &&
 			rw0->origin == FROM_PROXY && tr->origin == FROM_PROXY &&
 			rw0->from.proxy_node == tr->from.proxy_node &&
@@ -232,12 +234,12 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 
 		return TRANS_WAITING;
 	}
-	else if (g_config.transaction_pending_limit != 0 &&
-			rw0->wait_queue_depth > g_config.transaction_pending_limit) {
+	else if (ns->transaction_pending_limit != 0 &&
+			rw0->wait_queue_depth > ns->transaction_pending_limit) {
 		// If we're over the hot key pending limit, fail this transaction.
-		cf_detail_digest(AS_RW, &tr->keyd, "{%s} key busy ", tr->rsv.ns->name);
+		cf_detail_digest(AS_RW, &tr->keyd, "{%s} key busy ", ns->name);
 
-		cf_atomic64_incr(&tr->rsv.ns->n_fail_key_busy);
+		cf_atomic64_incr(&ns->n_fail_key_busy);
 		tr->result_code = AS_PROTO_RESULT_FAIL_KEY_BUSY;
 
 		return TRANS_DONE_ERROR;

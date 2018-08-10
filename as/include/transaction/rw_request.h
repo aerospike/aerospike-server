@@ -41,7 +41,6 @@
 #include "node.h"
 
 #include "base/proto.h"
-#include "base/transaction.h"
 #include "fabric/hb.h"
 #include "fabric/partition.h"
 
@@ -52,9 +51,11 @@
 
 struct as_batch_shared_s;
 struct as_file_handle_s;
+struct as_transaction_s;
 struct cl_msg_s;
 struct iudf_origin_s;
 struct rw_request_s;
+struct rw_wait_ele_s;
 
 
 //==========================================================
@@ -65,12 +66,6 @@ typedef bool (*dup_res_done_cb) (struct rw_request_s* rw);
 typedef void (*repl_write_done_cb) (struct rw_request_s* rw);
 typedef void (*repl_ping_done_cb) (struct rw_request_s* rw);
 typedef void (*timeout_done_cb) (struct rw_request_s* rw);
-
-typedef struct rw_wait_ele_s {
-	as_transaction			tr; // TODO - only needs to be transaction head
-	struct rw_wait_ele_s*	next;
-} rw_wait_ele;
-
 
 typedef struct rw_request_s {
 
@@ -118,8 +113,8 @@ typedef struct rw_request_s {
 
 	pthread_mutex_t		lock;
 
-	rw_wait_ele*		wait_queue_head;
-	rw_wait_ele*		wait_queue_tail;
+	struct rw_wait_ele_s* wait_queue_head;
+	struct rw_wait_ele_s* wait_queue_tail;
 	uint32_t			wait_queue_depth;
 
 	bool				is_set_up; // TODO - redundant with timeout_cb
@@ -176,8 +171,8 @@ typedef struct rw_request_s {
 
 rw_request* rw_request_create();
 void rw_request_destroy(rw_request* rw);
-void rw_request_wait_q_push(rw_request* rw, as_transaction* tr);
-void rw_request_wait_q_push_head(rw_request* rw, as_transaction* tr);
+void rw_request_wait_q_push(rw_request* rw, struct as_transaction_s* tr);
+void rw_request_wait_q_push_head(rw_request* rw, struct as_transaction_s* tr);
 
 
 static inline void

@@ -47,6 +47,16 @@
 
 
 //==========================================================
+// Typedefs & constants.
+//
+
+typedef struct rw_wait_ele_s {
+	uint8_t tr_head[AS_TRANSACTION_HEAD_SIZE];
+	struct rw_wait_ele_s* next;
+} rw_wait_ele;
+
+
+//==========================================================
 // Globals.
 //
 
@@ -170,9 +180,10 @@ rw_request_destroy(rw_request* rw)
 
 	while (e) {
 		rw_wait_ele* next = e->next;
+		as_transaction* tr = (as_transaction*)e->tr_head;
 
-		e->tr.from_flags |= FROM_FLAG_RESTART;
-		as_tsvc_enqueue(&e->tr);
+		tr->from_flags |= FROM_FLAG_RESTART;
+		as_tsvc_enqueue(tr);
 
 		cf_free(e);
 		e = next;
@@ -185,7 +196,7 @@ rw_request_wait_q_push(rw_request* rw, as_transaction* tr)
 {
 	rw_wait_ele* e = cf_malloc(sizeof(rw_wait_ele));
 
-	as_transaction_copy_head(&e->tr, tr);
+	as_transaction_copy_head((as_transaction*)e->tr_head, tr);
 	tr->from.any = NULL;
 	tr->msgp = NULL;
 
@@ -210,7 +221,7 @@ rw_request_wait_q_push_head(rw_request* rw, as_transaction* tr)
 	rw_wait_ele* e = cf_malloc(sizeof(rw_wait_ele));
 	cf_assert(e, AS_RW, "alloc rw_wait_ele");
 
-	as_transaction_copy_head(&e->tr, tr);
+	as_transaction_copy_head((as_transaction*)e->tr_head, tr);
 	tr->from.any = NULL;
 	tr->msgp = NULL;
 

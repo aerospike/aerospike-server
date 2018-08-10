@@ -1617,7 +1617,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
 	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
-	info_append_uint32(db, "transaction-pending-limit", g_config.transaction_pending_limit);
 	info_append_uint32(db, "transaction-queues", g_config.n_transaction_queues);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
 	info_append_uint32(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
@@ -1802,6 +1801,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "strong-consistency-allow-expunge", ns->cp_allow_drops);
 	info_append_uint32(db, "tomb-raider-eligible-age", ns->tomb_raider_eligible_age);
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
+	info_append_uint32(db, "transaction-pending-limit", ns->transaction_pending_limit);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
 	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
@@ -2027,12 +2027,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of transaction-max-ms from %"PRIu64" to %d ", (g_config.transaction_max_ns / 1000000), val);
 			g_config.transaction_max_ns = (uint64_t)val * 1000000;
-		}
-		else if (0 == as_info_parameter_get(params, "transaction-pending-limit", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of transaction-pending-limit from %d to %d ", g_config.transaction_pending_limit, val);
-			g_config.transaction_pending_limit = val;
 		}
 		else if (0 == as_info_parameter_get(params, "ticker-interval", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
@@ -2766,6 +2760,13 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of tomb-raider-sleep of ns %s from %u to %d", ns->name, ns->storage_tomb_raider_sleep, val);
 			ns->storage_tomb_raider_sleep = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "transaction-pending-limit", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of transaction-pending-limit of ns %s from %d to %d ", ns->name, ns->transaction_pending_limit, val);
+			ns->transaction_pending_limit = val;
 		}
 		else if (0 == as_info_parameter_get(params, "rack-id", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
