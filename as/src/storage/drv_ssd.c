@@ -1300,8 +1300,12 @@ ssd_read_record(as_storage_rd *rd)
 		return -1;
 	}
 
-	rd->key_size = props.key_size;
-	rd->key = props.key;
+	if (props.key) {
+		rd->key_size = props.key_size;
+		rd->key = props.key;
+	}
+	// else - if updating record without key, leave rd (msg) key to be stored.
+
 	rd->block_n_bins = (uint16_t)props.n_bins;
 
 	rd->block = block;
