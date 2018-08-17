@@ -131,6 +131,12 @@ typedef struct inter_hash_s {
 
 extern const as_partition_version ZERO_VERSION;
 
+#define REBALANCE_FLUSH_SIZE 4096
+#define PMETA_SIZE 16 // sizeof(ssd_common_pmeta) without including drv_ssd.h
+
+#define PIDS_PER_GROUP (REBALANCE_FLUSH_SIZE / PMETA_SIZE) // 256
+#define NUM_PID_GROUPS (AS_PARTITIONS / PIDS_PER_GROUP) // 16
+
 
 //------------------------------------------------
 // Globals.
