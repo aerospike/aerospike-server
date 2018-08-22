@@ -4321,12 +4321,11 @@ as_storage_shutdown_ssd(as_namespace *ns)
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
-		void *p_void;
 
-		pthread_join(ssd->write_worker_thread, &p_void);
+		pthread_join(ssd->write_worker_thread, NULL);
 
 		if (ssd->shadow_name) {
-			pthread_join(ssd->shadow_worker_thread, &p_void);
+			pthread_join(ssd->shadow_worker_thread, NULL);
 		}
 	}
 
