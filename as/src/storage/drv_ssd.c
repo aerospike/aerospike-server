@@ -3289,79 +3289,6 @@ ssd_init_synchronous(drv_ssds *ssds)
 }
 
 
-// Set a device's system block scheduler mode.
-static int
-ssd_set_scheduler_mode(const char* device_name, const char* mode)
-{
-	if (strncmp(device_name, "/dev/", 5)) {
-		cf_warning(AS_DRV_SSD, "storage: invalid device name %s, did not set scheduler mode",
-				device_name);
-		return -1;
-	}
-
-	char device_tag[(strlen(device_name) - 5) + 1];
-
-	strcpy(device_tag, device_name + 5);
-
-	// Replace any slashes in the device tag with '!' - this is the naming
-	// convention in /sys/block.
-	char* p_char = device_tag;
-
-	while (*p_char) {
-		if (*p_char == '/') {
-			*p_char = '!';
-		}
-
-		p_char++;
-	}
-
-	char scheduler_file_name[17 + strlen(device_tag) + 3 + 16 + 1];
-
-	strcpy(scheduler_file_name, "/sys/class/block/");
-	strcat(scheduler_file_name, device_tag);
-
-	// Determine if this device is a partition.
-	char partition_file_name[strlen(scheduler_file_name) + 10 + 1];
-
-	strcpy(partition_file_name, scheduler_file_name);
-	strcat(partition_file_name, "/partition");
-
-	FILE* partition_file = fopen(partition_file_name, "r");
-
-	if (partition_file) {
-		fclose(partition_file);
-
-		// This device is a partition, get parent device.
-		strcat(scheduler_file_name, "/..");
-	}
-
-	strcat(scheduler_file_name, "/queue/scheduler");
-
-	FILE* scheduler_file = fopen(scheduler_file_name, "w");
-
-	if (! scheduler_file) {
-		cf_warning(AS_DRV_SSD, "storage: couldn't open %s, did not set scheduler mode: %s",
-				scheduler_file_name, cf_strerror(errno));
-		return -1;
-	}
-
-	if (fwrite(mode, strlen(mode), 1, scheduler_file) != 1) {
-		fclose(scheduler_file);
-
-		cf_warning(AS_DRV_SSD, "storage: couldn't write %s to %s, did not set scheduler mode",
-				mode, scheduler_file_name);
-		return -1;
-	}
-
-	fclose(scheduler_file);
-
-	cf_info(AS_DRV_SSD, "storage: set device %s scheduler mode to %s",
-			device_name, mode);
-
-	return 0;
-}
-
-
 static uint64_t
 check_file_size(as_namespace *ns, uint64_t file_size, const char *tag)
 {
@@ -3466,7 +3393,7 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 
 		if (ns->storage_scheduler_mode) {
 			// Set scheduler mode specified in config file.
-			ssd_set_scheduler_mode(ssd->name, ns->storage_scheduler_mode);
+			cf_storage_set_scheduler(ssd->name, ns->storage_scheduler_mode);
 		}
 	}
 
@@ -3520,7 +3447,7 @@ ssd_init_shadow_devices(as_namespace *ns, drv_ssds *ssds)
 
 		if (ns->storage_scheduler_mode) {
 			// Set scheduler mode specified in config file.
-			ssd_set_scheduler_mode(ssd->shadow_name,
+			cf_storage_set_scheduler(ssd->shadow_name,
 					ns->storage_scheduler_mode);
 		}
 	}

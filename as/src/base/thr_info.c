@@ -1085,6 +1085,54 @@ info_command_dump_rw_request_hash(char *name, char *params, cf_dyn_buf *db)
 	return(0);
 }
 
+int
+info_command_physical_devices(char *name, char *params, cf_dyn_buf *db)
+{
+	// Command format: "physical-devices:path=<path>"
+	//
+	// <path> can specify a device partition, file path, mount directory, etc.
+	// ... anything backed by one or more physical devices.
+
+	char path_str[1024] = { 0 };
+	int path_str_len = (int)sizeof(path_str);
+	int rv = as_info_parameter_get(params, "path", path_str, &path_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "path too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-path");
+		return 0;
+	}
+
+	// For now path is mandatory.
+	if (rv == -1) {
+		cf_warning(AS_INFO, "path not specified");
+		cf_dyn_buf_append_string(db, "ERROR::no-path");
+		return 0;
+	}
+
+	cf_storage_device_info *device_info = cf_storage_get_device_info(path_str);
+
+	if (device_info == NULL) {
+		cf_warning(AS_INFO, "can't get device info for %s", path_str);
+		cf_dyn_buf_append_string(db, "ERROR::no-device-info");
+		return 0;
+	}
+
+	for (uint32_t i = 0; i < device_info->n_phys; i++) {
+		cf_dyn_buf_append_string(db, "physical-device=");
+		cf_dyn_buf_append_string(db, device_info->phys[i].dev_path);
+		cf_dyn_buf_append_char(db, ':');
+		cf_dyn_buf_append_string(db, "age=");
+		cf_dyn_buf_append_int(db, device_info->phys[i].nvme_age);
+
+		cf_dyn_buf_append_char(db, ';');
+	}
+
+	cf_dyn_buf_chomp(db);
+
+	return 0;
+}
+
 typedef struct rack_node_s {
 	uint32_t rack_id;
 	cf_node node;
@@ -5786,12 +5834,32 @@ info_get_sindexes(char *name, cf_dyn_buf *db)
 	return info_get_tree_sindexes(name, "", db);
 }
 
+static int32_t
+oldest_nvme_age(const char *path)
+{
+	cf_storage_device_info *info = cf_storage_get_device_info(path);
+
+	if (info == NULL) {
+		return -1;
+	}
+
+	int32_t oldest = -1;
+
+	for (int32_t i = 0; i < info->n_phys; ++i) {
+		if (info->phys[i].nvme_age > oldest) {
+			oldest = info->phys[i].nvme_age;
+		}
+	}
+
+	return oldest;
+}
+
 static void
 add_index_device_stats(as_namespace *ns, cf_dyn_buf *db)
 {
 	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
 		info_append_indexed_int(db, "index-type.mount", i, "age",
-				cf_nvme_get_age(ns->xmem_mounts[i]));
+				oldest_nvme_age(ns->xmem_mounts[i]));
 	}
 }
 
@@ -5819,7 +5887,7 @@ add_data_device_stats(as_namespace *ns, cf_dyn_buf *db)
 		info_append_indexed_uint32(db, tag, i, "shadow_write_q", stats.shadow_write_q_sz);
 
 		info_append_indexed_int(db, tag, i, "age",
-				cf_nvme_get_age(ns->storage_devices[i]));
+				oldest_nvme_age(ns->storage_devices[i]));
 	}
 }
 
@@ -7076,7 +7144,7 @@ as_info_init()
 				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
 				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;"
 				"hist-track-start;hist-track-stop;histogram;jem-stats;jobs;latency;log;log-set;"
-				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
+				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;physical-devices;"
 				"racks;recluster;revive;roster;roster-set;service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;"
@@ -7166,6 +7234,7 @@ as_info_init()
 	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, PERM_NONE);     // The delta update version of "peers-clear-std".
 	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, PERM_NONE);         // The delta update version of "peers-tls-alt".
 	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, PERM_NONE);         // The delta update version of "peers-tls-std".
+	as_info_set_command("physical-devices", info_command_physical_devices, PERM_NONE);        // Physical device information.
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
 	as_info_set_command("recluster", info_command_recluster, PERM_NONE);                      // Force cluster to re-form. FIXME - what permission?
 	as_info_set_command("revive", info_command_revive, PERM_NONE);                            // Mark all partitions as "trusted".

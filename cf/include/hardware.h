@@ -40,6 +40,8 @@ typedef uint16_t cf_topo_numa_node_index;
 typedef uint16_t cf_topo_core_index;
 typedef uint16_t cf_topo_cpu_index;
 
+#define CF_TOPO_INVALID_INDEX ((cf_topo_numa_node_index)-1)
+
 void cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 		const cf_addr_list *addrs);
 void cf_topo_force_map_memory(const uint8_t *from, size_t size);
@@ -55,7 +57,21 @@ cf_topo_cpu_index cf_topo_socket_cpu(const cf_socket *sock);
 void cf_topo_pin_to_core(cf_topo_core_index i_core);
 void cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu);
 
-int32_t cf_nvme_get_age(const char *path);
-int64_t cf_file_system_get_size(const char *path);
+#define CF_STORAGE_MAX_PHYS 100
+
+typedef struct cf_storage_device_s {
+	char *dev_path;
+	uint32_t n_phys;
+
+	struct {
+		char *dev_path;
+		cf_topo_numa_node_index numa_node;
+		int32_t nvme_age;
+	} phys[CF_STORAGE_MAX_PHYS];
+} cf_storage_device_info;
+
+cf_storage_device_info *cf_storage_get_device_info(const char *path);
+void cf_storage_set_scheduler(const char *path, const char *sched);
+int64_t cf_storage_file_system_size(const char *path);
 
 void cf_page_cache_dirty_limits(void);

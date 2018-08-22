@@ -30,6 +30,7 @@
 #include <libgen.h>
 #include <limits.h>
 #include <mntent.h>
+#include <pthread.h>
 #include <regex.h>
 #include <sched.h>
 #include <stdbool.h>
@@ -57,9 +58,11 @@
 
 #include "daemon.h"
 #include "fault.h"
+#include "shash.h"
 #include "socket.h"
 
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 
 #include "warnings.h"
 
@@ -143,6 +146,42 @@ static cf_topo_os_cpu_index g_cpu_index_to_os_cpu_index[CPU_SETSIZE];
 static cf_topo_cpu_index g_os_cpu_index_to_cpu_index[CPU_SETSIZE];
 
 static cf_topo_numa_node_index g_i_numa_node;
+
+#define DEVICE_PATH_SIZE 1024
+#define DEVICE_NAME_SIZE 256
+
+#define MAX_DEVICE_CHILDREN 100
+#define MAX_DEVICE_SCHEDULERS 100
+
+typedef struct dev_key_s {
+	uint32_t major;
+	uint32_t minor;
+} dev_key_t;
+
+typedef struct dev_node_s {
+	uint32_t n_children;
+	struct dev_node_s *children[MAX_DEVICE_CHILDREN];
+
+	char name[DEVICE_NAME_SIZE];
+	char dev_path[DEVICE_PATH_SIZE];
+
+	char sys_home[DEVICE_PATH_SIZE];
+	char sys_sched[DEVICE_PATH_SIZE];
+} dev_node_t;
+
+typedef struct path_data_s {
+	cf_storage_device_info info;
+
+	uint32_t n_sys_scheds;
+	const char *sys_scheds[MAX_DEVICE_SCHEDULERS];
+
+	cf_clock mod_time;
+} path_data_t;
+
+static cf_shash *g_dev_graph;
+
+static pthread_mutex_t g_path_data_lock = PTHREAD_MUTEX_INITIALIZER;
+static cf_shash *g_path_data;
 
 static file_res
 read_file(const char *path, void *buff, size_t *limit)
@@ -237,8 +276,8 @@ opendir_safe(const char *path)
 	DIR *dir = opendir(path);
 
 	if (dir == NULL) {
-		cf_crash(CF_HARDWARE, "error while opening directory: %d (%s)",
-				errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE, "error while opening directory %s: %d (%s)",
+				path, errno, cf_strerror(errno));
 	}
 
 	return dir;
@@ -281,9 +320,9 @@ closedir_safe(DIR *dir)
 static bool
 path_exists(const char *path)
 {
-	struct stat stat_info;
+	struct stat st;
 
-	if (stat(path, &stat_info) < 0) {
+	if (stat(path, &st) < 0) {
 		if (errno == ENOENT) {
 			cf_detail(CF_HARDWARE, "path %s does not exist", path);
 			return false;
@@ -295,6 +334,24 @@ path_exists(const char *path)
 
 	cf_detail(CF_HARDWARE, "path %s exists", path);
 	return true;
+}
+
+static bool
+path_is_dir(const char *path)
+{
+	struct stat st;
+
+	if (stat(path, &st) < 0) {
+		cf_crash(CF_HARDWARE, "error while checking path %s: %d (%s)",
+				path, errno, cf_strerror(errno));
+	}
+
+	bool is_dir = S_ISDIR(st.st_mode);
+
+	cf_detail(CF_HARDWARE, "path %s is %s directory", path, is_dir ?
+			"a" : "not a");
+
+	return is_dir;
 }
 
 static bool
@@ -395,9 +452,10 @@ mask_to_string(cpu_set_t *mask, char *buff, size_t limit)
 }
 
 static file_res
-read_index(const char *path, uint16_t *val)
+read_value(const char *path, int64_t *val)
 {
-	cf_detail(CF_HARDWARE, "reading index from file %s", path);
+	cf_detail(CF_HARDWARE, "reading value from file %s", path);
+
 	char buff[100];
 	size_t limit = sizeof(buff);
 	file_res res = read_file(path, buff, &limit);
@@ -407,17 +465,82 @@ read_index(const char *path, uint16_t *val)
 	}
 
 	buff[limit - 1] = '\0';
-	cf_detail(CF_HARDWARE, "parsing index \"%s\"", buff);
+
+	cf_detail(CF_HARDWARE, "parsing value \"%s\"", buff);
 
 	char *end;
-	uint64_t x = strtoul(buff, &end, 10);
+	int64_t x = strtol(buff, &end, 10);
 
 	if (*end != '\0' || x >= CPU_SETSIZE) {
-		cf_warning(CF_HARDWARE, "invalid index \"%s\" in %s", buff, path);
+		cf_warning(CF_HARDWARE, "invalid value \"%s\" in %s", buff, path);
+		return FILE_RES_ERROR;
+	}
+
+	*val = x;
+	return FILE_RES_OK;
+}
+
+static file_res
+read_index(const char *path, uint16_t *val)
+{
+	int64_t x;
+	file_res res = read_value(path, &x);
+
+	if (res != FILE_RES_OK) {
+		return res;
+	}
+
+	if (x < 0) {
+		cf_warning(CF_HARDWARE, "invalid index in %s", path);
 		return FILE_RES_ERROR;
 	}
 
 	*val = (uint16_t)x;
+	return FILE_RES_OK;
+}
+
+static file_res
+read_numa_node(const char *path, cf_topo_numa_node_index *i_numa_node)
+{
+	int64_t x;
+	file_res res = read_value(path, &x);
+
+	if (res != FILE_RES_OK) {
+		return res;
+	}
+
+	if (x < 0) {
+		cf_detail(CF_HARDWARE, "no NUMA node in %s", path);
+		return FILE_RES_ERROR;
+	}
+
+	*i_numa_node = (cf_topo_numa_node_index)x;
+	return FILE_RES_OK;
+}
+
+static file_res
+read_device_numbers(const char *path, uint32_t *major, uint32_t *minor)
+{
+	cf_detail(CF_HARDWARE, "reading device numbers from file %s", path);
+
+	char buff[100];
+	size_t limit = sizeof(buff);
+	file_res res = read_file(path, buff, &limit);
+
+	if (res != FILE_RES_OK) {
+		return res;
+	}
+
+	buff[limit - 1] = '\0';
+
+	cf_detail(CF_HARDWARE, "parsing device numbers \"%s\"", buff);
+
+	if (sscanf(buff, "%u:%u\n", major, minor) != 2) {
+		cf_warning(CF_HARDWARE, "invalid device numbers \"%s\" in %s", buff,
+				path);
+		return FILE_RES_ERROR;
+	}
+
 	return FILE_RES_OK;
 }
 
@@ -548,6 +671,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 		if (res != FILE_RES_OK) {
 			cf_crash(CF_HARDWARE, "error while reading OS package index from %s", path);
+			break;
 		}
 
 		cf_detail(CF_HARDWARE, "OS package index is %hu", i_os_package);
@@ -570,6 +694,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 		if (res != FILE_RES_OK) {
 			cf_crash(CF_HARDWARE, "error while reading OS core index from %s", path);
+			break;
 		}
 
 		cf_detail(CF_HARDWARE, "OS core index is %hu", i_os_core);
@@ -1860,28 +1985,380 @@ cf_topo_info(void)
 	}
 }
 
+static uint32_t
+dev_key_hash(const void *k)
+{
+	const dev_key_t *key = k;
+	return (1 + key->major) * (1 + key->minor);
+}
+
+static void
+add_child(const dev_key_t *key, dev_node_t *node, const dev_key_t *child_key,
+		dev_node_t *child_node)
+{
+	cf_detail(CF_HARDWARE, "parent %u:%u -> child %u:%u",
+			key->major, key->minor, child_key->major, child_key->minor);
+
+	node->children[node->n_children] = child_node;
+	++node->n_children;
+}
+
+static void
+collect_edges(const char *sys_dir, const char *prefix, bool flip,
+		const dev_key_t *key, dev_node_t *node)
+{
+	cf_detail(CF_HARDWARE, "collecting devices in %s", sys_dir);
+
+	if (!path_exists(sys_dir)) {
+		return;
+	}
+
+	size_t prefix_len = strlen(prefix);
+
+	DIR *dir = opendir_safe(sys_dir);
+	struct dirent ent;
+
+	while (readdir_safe(dir, &ent) >= 0) {
+		cf_detail(CF_HARDWARE, "considering %s", ent.d_name);
+
+		if (prefix_len > 0 && strncmp(ent.d_name, prefix, prefix_len) != 0) {
+			cf_detail(CF_HARDWARE, "prefix mismatch");
+			continue;
+		}
+
+		char sys_path[DEVICE_PATH_SIZE];
+		snprintf(sys_path, DEVICE_PATH_SIZE, "%s/%s", sys_dir, ent.d_name);
+
+		if (!path_is_dir(sys_path)) {
+			cf_detail(CF_HARDWARE, "not a directory");
+			continue;
+		}
+
+		snprintf(sys_path, DEVICE_PATH_SIZE, "%s/%s/dev", sys_dir, ent.d_name);
+
+		dev_key_t sub_key;
+
+		if (read_device_numbers(sys_path, &sub_key.major, &sub_key.minor) !=
+				FILE_RES_OK) {
+			cf_detail(CF_HARDWARE, "no device numbers");
+			continue;
+		}
+
+		dev_node_t *sub_node;
+
+		if (cf_shash_get(g_dev_graph, &sub_key, &sub_node) != CF_SHASH_OK) {
+			cf_warning(CF_HARDWARE, "no node for sub device %s/%s (%u:%u)",
+					sys_dir, ent.d_name, sub_key.major, sub_key.minor);
+			continue;
+		}
+
+		if (!flip) {
+			add_child(&sub_key, sub_node, key, node);
+		}
+		else {
+			add_child(key, node, &sub_key, sub_node);
+		}
+	}
+
+	closedir_safe(dir);
+}
+
 static int32_t
-query_health(const char *path)
+create_device_edges(const void *k, void *v, void *udata)
+{
+	(void)udata;
+
+	const dev_key_t *key = k;
+	dev_node_t **node = v;
+
+	cf_detail(CF_HARDWARE, "creating edges for %s", (*node)->sys_home);
+
+	// Collect partitions on a device.
+	collect_edges((*node)->sys_home, (*node)->name, false, key, *node);
+
+	char sys_slaves[DEVICE_PATH_SIZE + 7]; // +7 to silence the compiler
+	snprintf(sys_slaves, DEVICE_PATH_SIZE + 7, "%s/slaves", (*node)->sys_home);
+
+	// Collect inter-device dependencies.
+	collect_edges(sys_slaves, "", true, key, *node);
+
+	return CF_SHASH_OK;
+}
+
+static void
+build_device_graph(void)
+{
+	// Step 1. Create a device map entry for each device. Don't yet link them
+	// into a device dependency graph.
+
+	static const char *sys_dirs[] = {
+		"/sys/class/nvme",
+		"/sys/class/block",
+		NULL
+	};
+
+	g_dev_graph = cf_shash_create(dev_key_hash, sizeof(dev_key_t),
+			sizeof(dev_node_t *), 256, 0);
+
+	for (int32_t i_dir = 0; sys_dirs[i_dir] != NULL; ++i_dir) {
+		const char *sys_dir = sys_dirs[i_dir];
+
+		cf_detail(CF_HARDWARE, "collecting devices in %s", sys_dir);
+
+		if (!path_exists(sys_dir)) {
+			cf_detail(CF_HARDWARE, "directory does not exist");
+			continue;
+		}
+
+		DIR *dir = opendir_safe(sys_dir);
+		struct dirent ent;
+
+		while (readdir_safe(dir, &ent) >= 0) {
+			cf_detail(CF_HARDWARE, "considering %s", ent.d_name);
+
+			char sys_path[DEVICE_PATH_SIZE];
+			snprintf(sys_path, DEVICE_PATH_SIZE, "%s/%s/dev", sys_dir,
+					ent.d_name);
+
+			dev_key_t key;
+
+			if (read_device_numbers(sys_path, &key.major, &key.minor) !=
+					FILE_RES_OK) {
+				cf_detail(CF_HARDWARE, "no device numbers");
+				continue;
+			}
+
+			dev_node_t *node = cf_malloc(sizeof(dev_node_t));
+			memset(node, 0, sizeof(dev_node_t));
+
+			snprintf(node->name, DEVICE_NAME_SIZE, "%s", ent.d_name);
+			snprintf(node->dev_path, DEVICE_PATH_SIZE, "/dev/%s", ent.d_name);
+
+			snprintf(node->sys_home, DEVICE_PATH_SIZE, "%s/%s", sys_dir,
+					ent.d_name);
+
+			snprintf(sys_path, DEVICE_PATH_SIZE, "%s/%s/queue/scheduler",
+					sys_dir, ent.d_name);
+
+			if (path_exists(sys_path)) {
+				strcpy(node->sys_sched, sys_path);
+			}
+
+			cf_detail(CF_HARDWARE, "new device %s (%u:%u), home %s, "
+					"scheduler %s", node->dev_path, key.major, key.minor,
+					node->sys_home, node->sys_sched[0] != 0 ?
+							node->sys_sched : "-");
+
+			if (cf_shash_put_unique(g_dev_graph, &key, &node) != CF_SHASH_OK) {
+				cf_warning(CF_HARDWARE, "duplicate device %s (%u:%u)",
+						node->dev_path, key.major, key.minor);
+			}
+		}
+
+		closedir_safe(dir);
+	}
+
+	// Step 2. Link the devices in the device map to create the device
+	// dependency graph. Here's an example graph path for logical volume
+	// lv_foo on encrypted partition sda3:
+	//
+	// lv_foo 253:1 -> sda3_crypt 253:0 -> sda3 8:3 -> sda 8:0
+	//
+	// In short: Going from parents to children takes you closer to
+	// physical devices.
+	//
+	// Devices can have multiple parents, e.g., sda could have sda1, sda2,
+	// and sda3.
+	//
+	// Devices can also have multiple children, e.g., lv_bar could have
+	// children sda1 and sdb1.
+
+	cf_detail(CF_HARDWARE, "creating device edges");
+	cf_shash_reduce(g_dev_graph, create_device_edges, NULL);
+}
+
+static char *
+get_mounted_device(const char *fs_path)
+{
+	cf_detail(CF_HARDWARE, "mapping mount point %s", fs_path);
+
+	char *fs_real = realpath(fs_path, NULL);
+
+	if (fs_real == NULL) {
+		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)",
+				fs_path, errno, cf_strerror(errno));
+		return NULL;
+	}
+
+	cf_detail(CF_HARDWARE, "resolved path %s", fs_real);
+
+	FILE *fh = setmntent("/proc/mounts", "r");
+
+	struct mntent mnt;
+	char buff[1000];
+
+	size_t best_len = 0;
+	char best_path[DEVICE_PATH_SIZE];
+
+	while (getmntent_r(fh, &mnt, buff, sizeof(buff)) != NULL) {
+		cf_detail(CF_HARDWARE, "mount point %s", mnt.mnt_dir);
+
+		char *mount_real = realpath(mnt.mnt_dir, NULL);
+
+		if (mount_real == NULL) {
+			// Don't warn; current user may simply not be allowed access to all
+			// mount points.
+			cf_detail(CF_HARDWARE,
+					"failed to resolve mount point %s: %d (%s)",
+					mnt.mnt_dir, errno, cf_strerror(errno));
+			continue;
+		}
+
+		cf_detail(CF_HARDWARE, "resolved mount point %s", mount_real);
+
+		size_t len = strlen(mount_real);
+
+		if (len > best_len && strncmp(fs_real, mount_real, len) == 0) {
+			strcpy(best_path, mnt.mnt_fsname);
+			best_len = len;
+			cf_detail(CF_HARDWARE, "new best %s with length %zu",
+					best_path, best_len);
+		}
+
+		free(mount_real);
+	}
+
+	endmntent(fh);
+	free(fs_real);
+
+	if (best_len == 0) {
+		cf_warning(CF_HARDWARE, "no mount point found for %s", fs_path);
+		return NULL;
+	}
+
+	if (strncmp(best_path, "/dev", 4) != 0) {
+		// Don't warn; could be tmpfs, etc.
+		cf_detail(CF_HARDWARE, "invalid device %s found for %s", best_path,
+				fs_path);
+		return NULL;
+	}
+
+	char *best_real = realpath(best_path, NULL);
+
+	if (best_real == NULL) {
+		cf_warning(CF_HARDWARE,
+				"failed to resolve mounted device %s: %d (%s)", best_path,
+				errno, cf_strerror(errno));
+		return NULL;
+	}
+
+	// Return a result allocated with the cf_*() allocation functions.
+
+	char *res = cf_strdup(best_real);
+	free(best_real);
+
+	cf_detail(CF_HARDWARE, "mount point is %s", res);
+	return res;
+}
+
+static bool
+get_dev_key(const char *dev_path, dev_key_t *key)
+{
+	cf_detail(CF_HARDWARE, "getting device key for %s", dev_path);
+
+	struct stat st;
+
+	if (stat(dev_path, &st) < 0) {
+		cf_warning(CF_HARDWARE, "failed to query meta data for %s: %d (%s)",
+				dev_path, errno, cf_strerror(errno));
+		return false;
+	}
+
+	if (!S_ISBLK(st.st_mode) && !S_ISCHR(st.st_mode)) {
+		cf_warning(CF_HARDWARE, "%s is not a device", dev_path);
+		return false;
+	}
+
+	key->major = major(st.st_rdev);
+	key->minor = minor(st.st_rdev);
+
+	cf_detail(CF_HARDWARE, "device key %u:%u", key->major, key->minor);
+	return true;
+}
+
+static cf_topo_numa_node_index
+get_numa_node(const char *sys_path)
+{
+	cf_detail(CF_HARDWARE, "finding NUMA node for %s", sys_path);
+
+	char *sys_real = realpath(sys_path, NULL);
+
+	if (sys_real == NULL) {
+		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)",
+				sys_path, errno, cf_strerror(errno));
+		return INVALID_INDEX;
+	}
+
+	cf_topo_numa_node_index res = INVALID_INDEX;
+
+	for (int32_t i = 0; i < 25; ++i) {
+		cf_detail(CF_HARDWARE, "considering %s", sys_real);
+
+		char sys_numa[DEVICE_PATH_SIZE];
+		snprintf(sys_numa, DEVICE_PATH_SIZE, "%s/numa_node", sys_real);
+
+		cf_topo_numa_node_index tmp;
+
+		if (read_numa_node(sys_numa, &tmp) == FILE_RES_OK) {
+			cf_detail(CF_HARDWARE, "NUMA node found");
+			res = tmp;
+			break;
+		}
+
+		int32_t i_slash = -1;
+
+		for (int32_t k = 0; sys_real[k] != 0; ++k) {
+			if (sys_real[k] == '/') {
+				i_slash = k;
+			}
+		}
+
+		if (i_slash < 1) {
+			break;
+		}
+
+		sys_real[i_slash] = 0;
+	}
+
+	free(sys_real);
+	return res;
+}
+
+static int32_t
+get_nvme_age(const char *dev_path)
 {
 	static const uint32_t SZ_BUFF = 512;
 
-	cf_detail(CF_HARDWARE, "querying health of %s", path);
-
-	if (access(path, R_OK) < 0 && errno == EACCES) {
-		cf_detail(CF_HARDWARE, "insufficient privileges to open %s", path);
-		return -1;
-	}
+	cf_detail(CF_HARDWARE, "getting age for %s", dev_path);
 
 	if (!cf_process_has_cap(CAP_SYS_ADMIN)) {
-		cf_detail(CF_HARDWARE, "insufficient privileges to query %s", path);
+		cf_detail(CF_HARDWARE, "insufficient privileges to query %s",
+				dev_path);
 		return -1;
 	}
 
-	int32_t fd = open(path, O_RDONLY);
+	int32_t fd = open(dev_path, O_RDONLY);
 
 	if (fd < 0) {
-		cf_warning(CF_HARDWARE, "failed to open %s: %d (%s)",
-				path, errno, cf_strerror(errno));
+		if (errno == EACCES) {
+			cf_detail(CF_HARDWARE, "insufficient privileges to open %s",
+					dev_path);
+		}
+		else {
+			cf_warning(CF_HARDWARE, "failed to open %s: %d (%s)",
+					dev_path, errno, cf_strerror(errno));
+		}
+
 		return -1;
 	}
 
@@ -1914,15 +2391,17 @@ query_health(const char *path)
 
 	cf_process_enable_cap(CAP_SYS_ADMIN);
 
+	cf_detail(CF_HARDWARE, "querying %s", dev_path);
 	int32_t res = ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
 
 	cf_process_disable_cap(CAP_SYS_ADMIN);
 
 	if (res < 0) {
 		// Older kernels that don't support the IOCTL return EINVAL.
-		if (errno != EINVAL) {
+		// Submitting to non-NVMe devices causes ENOTTY.
+		if (errno != EINVAL && errno != ENOTTY) {
 			cf_warning(CF_HARDWARE, "failed to submit command to %s: %d (%s)",
-					path, errno, cf_strerror(errno));
+					dev_path, errno, cf_strerror(errno));
 		}
 
 		cf_free(buff);
@@ -1934,7 +2413,7 @@ query_health(const char *path)
 		// Some virtualized environments don't provide a SMART log page.
 		if (res != NVME_SC_INVALID_LOG_PAGE) {
 			cf_warning(CF_HARDWARE, "failed to submit command to %s: 0x%x",
-					path, res);
+					dev_path, res);
 		}
 
 		cf_free(buff);
@@ -1942,298 +2421,255 @@ query_health(const char *path)
 		return -1;
 	}
 
-	int32_t perc = buff[5];
-	cf_detail(CF_HARDWARE, "percentage used %d", perc);
+	// 0 <= age <= 255 - reported percentage used may exceed 100, when a drive
+	// lives longer than predicted by its vendor.
 
-	// Reported percentage used may exceed 100, when a drive lives longer
-	// than predicted by its vendor.
-
-	if (perc > 100) {
-		perc = 100;
-	}
+	int32_t age = buff[5];
+	cf_detail(CF_HARDWARE, "percentage lived %d", age);
 
 	cf_free(buff);
 	close(fd);
-	return perc;
+
+	return age;
 }
 
-static int32_t
-match(const char *str, const char *rstr)
+static void
+update_path_data(path_data_t *data)
 {
-	regex_t rex;
+	cf_storage_device_info *info = &data->info;
 
-	if (regcomp(&rex, rstr, REG_EXTENDED | REG_NOSUB) != 0) {
-		cf_crash(CF_HARDWARE, "invalid regular expression: %s", rstr);
+	cf_detail(CF_HARDWARE, "updating path data for %s", info->dev_path);
+
+	for (uint32_t i = 0; i < info->n_phys; ++i) {
+		cf_detail(CF_HARDWARE, "updating %s", info->phys[i].dev_path);
+		info->phys[i].nvme_age = get_nvme_age(info->phys[i].dev_path);
 	}
 
-	bool ok = regexec(&rex, str, 0, NULL, 0) == 0;
-	regfree(&rex);
-
-	return ok ? 1 : 0;
+	data->mod_time = cf_get_seconds();
 }
 
-static int32_t
-filter_dev(const struct dirent *ent)
+static void
+visit_children(path_data_t *data, dev_node_t *node)
 {
-	return match(ent->d_name, "^nvme[[:digit:]]+$") > 0;
-}
+	cf_storage_device_info *info = &data->info;
 
-static int32_t
-filter_ns(const struct dirent *ent)
-{
-	return match(ent->d_name, "^nvme[[:digit:]]+n[[:digit:]]+$") > 0;
-}
+	cf_detail(CF_HARDWARE, "considering %s for %s", node->dev_path,
+			info->dev_path);
 
-static int32_t
-filter_part(const struct dirent *ent)
-{
-	return match(ent->d_name,
-			"^nvme[[:digit:]]+n[[:digit:]]+p[[:digit:]]+$") > 0;
-}
+	if (node->sys_sched[0] != 0) {
+		cf_detail(CF_HARDWARE, "found scheduler %s", node->sys_sched);
 
-static int32_t
-check_dev(const char *path, uint32_t maj, uint32_t min)
-{
-	cf_detail(CF_HARDWARE, "checking %s against (%u, %u)", path, maj, min);
+		uint32_t n_sys_scheds = data->n_sys_scheds;
 
-	char dev[1000];
-	snprintf(dev, sizeof(dev), "%s/dev", path);
+		if (n_sys_scheds >= CF_STORAGE_MAX_PHYS) {
+			cf_warning(CF_HARDWARE, "too many schedulers for %s",
+					info->dev_path);
+			return;
+		}
 
-	FILE *fh = fopen(dev, "r");
-
-	if (fh == NULL) {
-		cf_warning(CF_HARDWARE, "failed to open %s", dev);
-		return -1;
+		data->sys_scheds[n_sys_scheds] = node->sys_sched;
+		++data->n_sys_scheds;
 	}
 
-	uint32_t maj2, min2;
+	if (node->n_children == 0) {
+		cf_detail(CF_HARDWARE, "found physical device");
 
-	if (fscanf(fh, "%u:%u\n", &maj2, &min2) != 2) {
-		cf_warning(CF_HARDWARE, "failed to read from %s", dev);
-		fclose(fh);
-		return -1;
+		uint32_t n_phys = info->n_phys;
+
+		if (n_phys >= CF_STORAGE_MAX_PHYS) {
+			cf_warning(CF_HARDWARE, "too many physical devices for %s",
+					info->dev_path);
+			return;
+		}
+
+		info->phys[n_phys].dev_path = node->dev_path;
+		info->phys[n_phys].numa_node = get_numa_node(node->sys_home);
+		info->phys[n_phys].nvme_age = -1;
+
+		++info->n_phys;
+		return;
 	}
 
-	fclose(fh);
+	cf_detail(CF_HARDWARE, "examining children");
 
-	return maj == maj2 && min == min2 ? 1 : 0;
+	for (uint32_t i = 0; i < node->n_children; ++i) {
+		visit_children(data, node->children[i]);
+	}
 }
 
-static int32_t
-get_health_dev(const char *path)
+static path_data_t *
+new_path_data(const char *any_path)
 {
-	cf_detail(CF_HARDWARE, "getting health for device %s", path);
+	cf_detail(CF_HARDWARE, "creating path data for %s", any_path);
 
+	path_data_t *data = cf_malloc(sizeof(path_data_t));
 	struct stat st;
 
-	if (stat(path, &st) < 0) {
+	if (stat(any_path, &st) < 0) {
 		cf_warning(CF_HARDWARE, "failed to query meta data for %s: %d (%s)",
-				path, errno, cf_strerror(errno));
-		return -1;
+				any_path, errno, cf_strerror(errno));
+		cf_free(data);
+		return NULL;
 	}
 
-	uint32_t maj = major(st.st_rdev);
-	uint32_t min = minor(st.st_rdev);
-
-	cf_detail(CF_HARDWARE, "device (%u, %u)", maj, min);
-
-	const char *root_path = "/sys/class/nvme";
-	struct dirent *found = NULL;
-
-	cf_detail(CF_HARDWARE, "root %s", root_path);
-
-	struct dirent **devs = NULL;
-	int32_t n_devs = scandir(root_path, &devs, filter_dev, alphasort);
-
-	for (int32_t i_dev = 0; found == NULL && i_dev < n_devs; ++i_dev) {
-		char dev_path[1000];
-		snprintf(dev_path, sizeof(dev_path), "%s/%s",
-				root_path, devs[i_dev]->d_name);
-
-		cf_detail(CF_HARDWARE, "device %s", dev_path);
-
-		if (check_dev(dev_path, maj, min) > 0) {
-			found = devs[i_dev];
-		}
-
-		struct dirent **nss = NULL;
-		int32_t n_nss = scandir(dev_path, &nss, filter_ns, alphasort);
-
-		for (int32_t i_ns = 0; found == NULL && i_ns < n_nss; ++i_ns) {
-			char ns_path[1000];
-			snprintf(ns_path, sizeof(ns_path), "%s/%s",
-					dev_path, nss[i_ns]->d_name);
-
-			cf_detail(CF_HARDWARE, "namespace %s", ns_path);
-
-			if (check_dev(ns_path, maj, min) > 0) {
-				found = devs[i_dev];
-			}
-
-			struct dirent **parts = NULL;
-			int32_t n_parts = scandir(ns_path, &parts, filter_part, alphasort);
-
-			for (int32_t i_part = 0; found == NULL && i_part < n_parts;
-					++i_part) {
-				char part_path[1000];
-				snprintf(part_path, sizeof(part_path), "%s/%s",
-						ns_path, parts[i_part]->d_name);
-
-				cf_detail(CF_HARDWARE, "partition %s", part_path);
-
-				if (check_dev(part_path, maj, min) > 0) {
-					found = devs[i_dev];
-				}
-			}
-
-			for (int32_t i_part = 0; i_part < n_parts; ++i_part) {
-				free(parts[i_part]);
-			}
-
-			free(parts);
-		}
-
-		for (int32_t i_ns = 0; i_ns < n_nss; ++i_ns) {
-			free(nss[i_ns]);
-		}
-
-		free(nss);
-	}
-
-	for (int32_t i_dev = 0; i_dev < n_devs; ++i_dev) {
-		if (devs[i_dev] != found) {
-			free(devs[i_dev]);
-		}
-	}
-
-	free(devs);
-
-	if (found == NULL) {
-		cf_detail(CF_HARDWARE, "no NVMe device for %s (%u, %u)",
-				path, maj, min);
-		return -1;
-	}
-
-	char dev_node[1000];
-	snprintf(dev_node, sizeof(dev_node), "/dev/%s", found->d_name);
-
-	cf_detail(CF_HARDWARE, "NVMe device is %s", dev_node);
-	free(found);
-
-	return query_health(dev_node);
-}
-
-static int32_t
-get_health_file(const char *path)
-{
-	cf_detail(CF_HARDWARE, "getting health for file %s", path);
-
-	char *real_path = realpath(path, NULL);
-
-	if (real_path == NULL) {
-		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)",
-				path, errno, cf_strerror(errno));
-		return -1;
-	}
-
-	cf_detail(CF_HARDWARE, "resolved path %s", real_path);
-
-	FILE *fh = setmntent("/proc/mounts", "r");
-
-	struct mntent mnt;
-	char buff[1000];
-
-	size_t best_len = 0;
-	char best_dev[1000];
-
-	while (getmntent_r(fh, &mnt, buff, sizeof(buff))) {
-		cf_detail(CF_HARDWARE, "mount point %s", mnt.mnt_dir);
-		char *real_mount = realpath(mnt.mnt_dir, NULL);
-
-		if (real_mount == NULL) {
-			cf_detail(CF_HARDWARE,
-					"failed to resolve mount point %s: %d (%s)",
-					mnt.mnt_dir, errno, cf_strerror(errno));
-			continue;
-		}
-
-		cf_detail(CF_HARDWARE, "resolved mount point %s", real_mount);
-
-		size_t mount_len = strlen(real_mount);
-
-		if (mount_len > best_len &&
-				strncmp(real_path, real_mount, mount_len) == 0) {
-			strcpy(best_dev, mnt.mnt_fsname);
-			best_len = mount_len;
-			cf_detail(CF_HARDWARE, "best %s with length %zu",
-					best_dev, best_len);
-		}
-
-		free(real_mount);
-	}
-
-	endmntent(fh);
-	free(real_path);
-
-	if (best_len == 0) {
-		cf_warning(CF_HARDWARE, "no mount point found for %s", path);
-		return -1;
-	}
-
-	if (strncmp(best_dev, "/dev", 4) != 0) {
-		cf_detail(CF_HARDWARE, "invalid device %s found for %s",
-				best_dev, path);
-		return -1;
-	}
-
-	char *real_dev = realpath(best_dev, NULL);
-
-	int32_t res = get_health_dev(real_dev);
-
-	free(real_dev);
-	return res;
-}
-
-// Retrieve the "Percentage Used" health indicator of an NVMe drive.
-// The path argument may identify one of the following:
-//
-//   - Mount point of an NVMe-backed file system
-//   - File or directory in an NVMe-backed file system
-//   - NVMe device (e.g., /dev/nvme0)
-//   - NVMe namespace (e.g., /dev/nvme0n1)
-//   - NVMe partition (e.g., /dev/nvme0n1p1)
-//
-// Returns 0 (new drive) through 100 (expected lifetime used up) on
-// success, or -1 on failure.
-
-int32_t
-cf_nvme_get_age(const char *path)
-{
-	cf_detail(CF_HARDWARE, "getting health for %s", path);
-
-	struct stat st;
-
-	if (stat(path, &st) < 0) {
-		cf_warning(CF_HARDWARE, "failed to query meta data for %s: %d (%s)",
-				path, errno, cf_strerror(errno));
-		return -1;
-	}
+	cf_storage_device_info *info = &data->info;
 
 	if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode)) {
-		return get_health_file(path);
+		cf_detail(CF_HARDWARE, "%s is a file or directory", any_path);
+		info->dev_path = get_mounted_device(any_path);
+
+		if (info->dev_path == NULL) {
+			cf_free(data);
+			return NULL;
+		}
+	}
+	else if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
+		cf_detail(CF_HARDWARE, "%s is a device", any_path);
+		info->dev_path = cf_strdup(any_path);
+	}
+	else {
+		cf_warning(CF_HARDWARE, "%s with unknown type 0x%x", any_path,
+				st.st_mode & S_IFMT);
+		cf_free(data);
+		return NULL;
 	}
 
-	if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
-		return get_health_dev(path);
+	cf_detail(CF_HARDWARE, "mapping device %s", info->dev_path);
+
+	dev_key_t key;
+
+	if (!get_dev_key(info->dev_path, &key)) {
+		cf_free(info->dev_path);
+		cf_free(data);
+		return NULL;
 	}
 
-	cf_warning(CF_HARDWARE, "%s has unknown type 0x%x",
-			path, st.st_mode & S_IFMT);
-	return -1;
+	dev_node_t *node;
+
+	if (cf_shash_get(g_dev_graph, &key, &node) != CF_SHASH_OK) {
+		cf_warning(CF_HARDWARE, "no node for device key %u:%u", key.major,
+				key.minor);
+		cf_free(info->dev_path);
+		cf_free(data);
+		return NULL;
+	}
+
+	cf_detail(CF_HARDWARE, "collecting dependency info");
+
+	data->n_sys_scheds = 0;
+	info->n_phys = 0;
+
+	visit_children(data, node);
+
+	cf_detail(CF_HARDWARE, "populating NVMe age");
+	update_path_data(data);
+
+	return data;
+}
+
+static path_data_t *
+get_path_data(const char *any_path)
+{
+	cf_detail(CF_HARDWARE, "getting path data for %s", any_path);
+
+	pthread_mutex_lock(&g_path_data_lock);
+
+	if (g_dev_graph == NULL) {
+		build_device_graph();
+	}
+
+	if (g_path_data == NULL) {
+		g_path_data = cf_shash_create(cf_shash_fn_zstr,
+				DEVICE_PATH_SIZE, sizeof(path_data_t *), 256, 0);
+	}
+
+	size_t len = strlen(any_path);
+
+	if (len >= DEVICE_PATH_SIZE) {
+		cf_warning(CF_HARDWARE, "device path %s is too long", any_path);
+		pthread_mutex_unlock(&g_path_data_lock);
+		return NULL;
+	}
+
+	char key[DEVICE_PATH_SIZE];
+
+	memcpy(key, any_path, len);
+	memset(key + len, 0, DEVICE_PATH_SIZE - len);
+
+	path_data_t *data;
+
+	if (cf_shash_get(g_path_data, key, &data) != CF_SHASH_OK) {
+		cf_detail(CF_HARDWARE, "no path data");
+
+		data = new_path_data(any_path);
+
+		if (data == NULL) {
+			pthread_mutex_unlock(&g_path_data_lock);
+			return NULL;
+		}
+
+		cf_shash_put_unique(g_path_data, key, &data);
+	}
+	else {
+		cf_detail(CF_HARDWARE, "existing path data");
+	}
+
+	cf_clock now = cf_get_seconds();
+
+	if (now > data->mod_time + 86400) {
+		update_path_data(data);
+	}
+
+	pthread_mutex_unlock(&g_path_data_lock);
+	return data;
+}
+
+cf_storage_device_info *
+cf_storage_get_device_info(const char *path)
+{
+	cf_detail(CF_HARDWARE, "getting device info for %s", path);
+
+	path_data_t *data = get_path_data(path);
+
+	if (data == NULL) {
+		return NULL;
+	}
+
+	return &data->info;
+}
+
+void
+cf_storage_set_scheduler(const char *path, const char *sched)
+{
+	cf_detail(CF_HARDWARE, "setting scheduler for %s to %s", path, sched);
+
+	path_data_t *data = get_path_data(path);
+
+	if (data == NULL) {
+		cf_warning(CF_HARDWARE, "couldn't find path data for %s", path);
+		return;
+	}
+
+	bool failed = false;
+
+	for (uint32_t i = 0; i < data->n_sys_scheds; ++i) {
+		if (write_file(data->sys_scheds[i], sched, strlen(sched)) !=
+				FILE_RES_OK) {
+			failed = true;
+		}
+	}
+
+	if (failed) {
+		cf_warning(CF_HARDWARE, "couldn't set scheduler for %s to %s", path,
+				sched);
+	}
+	else {
+		cf_info(CF_HARDWARE, "set scheduler for %s to %s", path, sched);
+	}
 }
 
 int64_t
-cf_file_system_get_size(const char *path)
+cf_storage_file_system_size(const char *path)
 {
 	struct stat file;
 
