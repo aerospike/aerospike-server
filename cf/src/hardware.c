@@ -253,7 +253,14 @@ write_file(const char *path, const void *buff, size_t limit)
 	while (total < limit) {
 		cf_detail(CF_HARDWARE, "writing %zd byte(s) at offset %zu", limit - total, total);
 		ssize_t len = write(fd, (uint8_t *)buff + total, limit - total);
-		CF_NEVER_FAILS(len);
+
+		if (len < 0) {
+			cf_warning(CF_HARDWARE, "error while writing to file %s: %d (%s)",
+					path, errno, cf_strerror(errno));
+			CF_NEVER_FAILS(close(fd));
+			return FILE_RES_ERROR;
+		}
+
 		total += (size_t)len;
 	}
 
