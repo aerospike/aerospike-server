@@ -1,7 +1,7 @@
 /*
  * migrate.c
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -19,11 +19,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
-
-// migrate.c
-// Moves a partition from one machine to another using the fabric messaging
-// system.
-
 
 //==========================================================
 // Includes.
