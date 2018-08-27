@@ -17,6 +17,13 @@ if [ ${#mem} -le ${#min} ]; then
     fi
 fi
 
+maxc=$(cat /proc/sys/net/core/somaxconn)
+
+if [ ${maxc} -lt 512 ]; then
+	echo "Increasing listen backlog from ${maxc} to 512"
+	echo 512 >/proc/sys/net/core/somaxconn
+fi
+
 set_socket_buffer_limit() {
 	name=${1}; path=${2}; size=${3}
 	curr=$(cat ${path})

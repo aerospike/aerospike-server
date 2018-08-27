@@ -56,6 +56,15 @@ set_shmmax() {
 	fi
 }
 
+set_listen_backlog() {
+	maxc=$(cat /proc/sys/net/core/somaxconn)
+
+	if [ ${maxc} -lt 512 ]; then
+		echo "Increasing listen backlog from ${maxc} to 512"
+		echo 512 >/proc/sys/net/core/somaxconn
+	fi
+}
+
 set_socket_buffer_limit() {
 	name=${1}; path=${2}; size=${3}
 	curr=$(cat ${path})
@@ -87,6 +96,7 @@ start() {
 	[ -x $ASD ] || exit 0
 	set_shmall
 	set_shmmax
+	set_listen_backlog
 	set_socket_buffer_limits
 	create_piddir
 	echo -n $"Starting and checking aerospike: "
@@ -103,6 +113,7 @@ coldstart() {
 	[ -x $ASD ] || exit 0
 	set_shmall
 	set_shmmax
+	set_listen_backlog
 	set_socket_buffer_limits
 	create_piddir
 	echo -n $"Cold-starting aerospike: "
