@@ -513,6 +513,7 @@ typedef enum {
 	CASE_NETWORK_TLS_CERT_FILE,
 	CASE_NETWORK_TLS_CIPHER_SUITE,
 	CASE_NETWORK_TLS_KEY_FILE,
+	CASE_NETWORK_TLS_KEY_FILE_PASSWORD,
 	CASE_NETWORK_TLS_PROTOCOLS,
 
 	// Namespace options:
@@ -1058,6 +1059,7 @@ const cfg_opt NETWORK_TLS_OPTS[] = {
 		{ "cert-file",						CASE_NETWORK_TLS_CERT_FILE },
 		{ "cipher-suite",					CASE_NETWORK_TLS_CIPHER_SUITE },
 		{ "key-file",						CASE_NETWORK_TLS_KEY_FILE },
+		{ "key-file-password",				CASE_NETWORK_TLS_KEY_FILE_PASSWORD },
 		{ "protocols",						CASE_NETWORK_TLS_PROTOCOLS },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -2959,6 +2961,9 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_TLS_KEY_FILE:
 				tls_spec->key_file = cfg_strdup_no_checks(&line);
 				break;
+			case CASE_NETWORK_TLS_KEY_FILE_PASSWORD:
+				tls_spec->key_file_password = cfg_strdup_no_checks(&line);
+				break;
 			case CASE_NETWORK_TLS_PROTOCOLS:
 				tls_spec->protocols = cfg_strdup_no_checks(&line);
 				break;
@@ -3991,15 +3996,23 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	cf_info(AS_CFG, "node-id %lx", c->self_node);
 
-	// Resolve TLS names in all TLS configurations.
+	// Resolve TLS names and read key file passwords for all TLS
+	// configurations.
 
 	for (uint32_t i = 0; i < g_config.n_tls_specs; ++i) {
-		if (g_config.tls_specs[i].name == NULL) {
+		cf_tls_spec *tspec = &g_config.tls_specs[i];
+
+		if (tspec->name == NULL) {
 			cf_crash_nostack(AS_CFG, "nameless TLS configuration section");
 		}
 
-		g_config.tls_specs[i].name =
-				cfg_resolve_tls_name(g_config.tls_specs[i].name, g_config.cluster_name, NULL);
+		tspec->name = cfg_resolve_tls_name(tspec->name, g_config.cluster_name, NULL);
+
+		if (tspec->key_file_password == NULL) {
+			continue;
+		}
+
+		tspec->pw_string = tls_read_password(tspec->key_file_password);
 	}
 
 	// Populate access ports from configuration.

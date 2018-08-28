@@ -71,6 +71,12 @@ tls_socket_close(cf_socket *sock)
 	}
 }
 
+char *tls_read_password(const char *path)
+{
+	cf_crash(CF_TLS, "unexpected TLS state");
+	return NULL;
+}
+
 cf_tls_info *
 tls_config_server_context(cf_tls_spec *tspec, bool auth_client, uint32_t n_peer_names, char **peer_names)
 {

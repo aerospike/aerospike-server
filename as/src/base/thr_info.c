@@ -1755,6 +1755,9 @@ info_network_config_get(cf_dyn_buf *db)
 		snprintf(key, sizeof(key), "tls[%u].key_file", i);
 		info_append_string_safe(db, key, spec->key_file);
 
+		snprintf(key, sizeof(key), "tls[%u].key_file_password", i);
+		info_append_string_safe(db, key, spec->key_file_password);
+
 		snprintf(key, sizeof(key), "tls[%u].ca_file", i);
 		info_append_string_safe(db, key, spec->ca_file);
 

@@ -34,6 +34,8 @@ typedef struct cf_tls_spec_s {
 	char *cert_file;
 	char *cipher_suite;
 	char *key_file;
+	char *key_file_password;
+	char *pw_string;
 	char *name;
 	char *protocols;
 } cf_tls_spec;
@@ -48,6 +50,7 @@ void tls_socket_term(cf_socket *sock);
 int tls_socket_shutdown(cf_socket *sock);
 void tls_socket_close(cf_socket *sock);
 
+char *tls_read_password(const char *path);
 cf_tls_info *tls_config_server_context(cf_tls_spec *tspec, bool auth_client, uint32_t n_peer_names, char **peer_names);
 cf_tls_info *tls_config_intra_context(cf_tls_spec *tspec, const char *which);
 
