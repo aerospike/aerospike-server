@@ -215,12 +215,11 @@ typedef enum {
 //------------------------------------------------
 // Per-device information.
 //
-typedef struct drv_ssd_s
-{
+typedef struct drv_ssd_s {
 	struct as_namespace_s *ns;
 
-	char			*name;				// this device's name
-	char			*shadow_name;		// this device's shadow's name, if any
+	const char		*name;				// this device's name
+	const char		*shadow_name;		// this device's shadow's name, if any
 
 	uint32_t		running;
 
@@ -264,7 +263,10 @@ typedef struct drv_ssd_s
 	bool			data_in_memory;
 
 	uint64_t		io_min_size;		// device IO operations are aligned and sized in multiples of this
-	uint64_t		commit_min_size;	// commit (write) operations are aligned and sized in multiples of this
+	uint64_t		shadow_io_min_size;	// shadow device IO operations are aligned and sized in multiples of this
+
+	uint64_t		commit_min_size;		// commit (write) operations are aligned and sized in multiples of this
+	uint64_t		shadow_commit_min_size;	// shadow commit (write) operations are aligned and sized in multiples of this
 
 	cf_atomic64		inuse_size;			// number of bytes in actual use on this device
 
@@ -279,10 +281,8 @@ typedef struct drv_ssd_s
 
 	ssd_alloc_table	*alloc_table;
 
-	pthread_t		maintenance_thread;
 	pthread_t		write_worker_thread;
 	pthread_t		shadow_worker_thread;
-	pthread_t		defrag_thread;
 
 	histogram		*hist_read;
 	histogram		*hist_large_block_read;
@@ -295,8 +295,7 @@ typedef struct drv_ssd_s
 //------------------------------------------------
 // Per-namespace storage information.
 //
-typedef struct drv_ssds_s
-{
+typedef struct drv_ssds_s {
 	struct as_namespace_s	*ns;
 	ssd_device_common		*common;
 
@@ -307,6 +306,9 @@ typedef struct drv_ssds_s
 	// Indexed by previous device-id to get new device-id. -1 means device is
 	// "fresh" or absent. Used only at startup to fix index elements' file-id.
 	int8_t device_translation[AS_STORAGE_MAX_DEVICES];
+
+	// Used only at startup, set true if all devices are fresh.
+	bool all_fresh;
 
 	cf_mutex			flush_lock;
 
@@ -333,7 +335,6 @@ typedef struct ssd_load_records_info_s {
 	drv_ssds *ssds;
 	drv_ssd *ssd;
 	cf_queue *complete_q;
-	void *complete_udata;
 	void *complete_rc;
 } ssd_load_records_info;
 
@@ -404,6 +405,7 @@ void ssd_header_validate_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, cons
 void ssd_flush_final_cfg(struct as_namespace_s *ns);
 bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
 void ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size);
+void ssd_prefetch_wblock(drv_ssd *ssd, uint64_t file_offset, uint8_t *read_buf);
 
 // Durability.
 void ssd_init_commit(drv_ssd *ssd);
@@ -500,6 +502,18 @@ static inline uint64_t BYTES_DOWN_TO_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 // Round bytes up to a multiple of device's minimum IO operation size.
 static inline uint64_t BYTES_UP_TO_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 	return (bytes + (ssd->io_min_size - 1)) & -ssd->io_min_size;
+}
+
+// Round bytes down to a multiple of shadow device's minimum IO operation size.
+static inline uint64_t
+BYTES_DOWN_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
+	return bytes & -ssd->shadow_io_min_size;
+}
+
+// Round bytes up to a multiple of shadow device's minimum IO operation size.
+static inline uint64_t
+BYTES_UP_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
+	return (bytes + (ssd->shadow_io_min_size - 1)) & -ssd->shadow_io_min_size;
 }
 
 

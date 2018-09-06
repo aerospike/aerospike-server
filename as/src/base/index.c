@@ -90,7 +90,7 @@ typedef struct as_index_ele_s {
 	as_index				*me;
 } as_index_ele;
 
-const size_t MAX_STACK_ARRAY_BYTES = 128 * 1024;
+static const size_t MAX_STACK_ARRAY_BYTES = 128 * 1024;
 
 
 //==========================================================
@@ -113,7 +113,6 @@ void as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h)
 
 int as_index_sprig_try_exists(as_index_sprig *isprig, const cf_digest *keyd);
 int as_index_sprig_try_get_vlock(as_index_sprig *isprig, const cf_digest *keyd, as_index_ref *index_ref);
-int as_index_sprig_get_vlock(as_index_sprig *isprig, const cf_digest *keyd, as_index_ref *index_ref);
 int as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id, const cf_digest *keyd, as_index_ref *index_ref);
 
 int as_index_sprig_search_lockless(as_index_sprig *isprig, const cf_digest *keyd, as_index **ret, cf_arenax_handle *ret_h);
@@ -134,6 +133,7 @@ as_index_sprig_from_i(as_index_tree *tree, as_index_sprig *isprig,
 	isprig->arena = tree->shared->arena;
 	isprig->pair = tree_locks(tree) + lock_i;
 	isprig->sprig = tree_sprigs(tree) + sprig_i;
+	isprig->puddle = tree_puddle_for_sprig(tree, sprig_i);
 }
 
 
@@ -176,7 +176,10 @@ as_index_tree_create(as_index_tree_shared *shared, uint8_t id,
 {
 	size_t locks_size = sizeof(cf_mutex) * NUM_LOCK_PAIRS * 2;
 	size_t sprigs_size = sizeof(as_sprig) * shared->n_sprigs;
-	size_t tree_size = sizeof(as_index_tree) + locks_size + sprigs_size;
+	size_t puddles_size = tree_puddles_size(shared);
+
+	size_t tree_size = sizeof(as_index_tree) +
+			locks_size + sprigs_size + puddles_size;
 
 	as_index_tree *tree = cf_rc_alloc(tree_size);
 
@@ -198,6 +201,7 @@ as_index_tree_create(as_index_tree_shared *shared, uint8_t id,
 
 	// The tree starts empty.
 	memset(tree_sprigs(tree), 0, sprigs_size);
+	memset(tree_puddles(tree), 0, puddles_size);
 
 	return tree;
 }
@@ -292,8 +296,14 @@ as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count,
 		as_index_sprig isprig;
 		as_index_sprig_from_i(tree, &isprig, (uint32_t)i);
 
-		sample_count -= as_index_sprig_reduce_partial(&isprig, sample_count, cb,
-				udata);
+		if (tree_puddles(tree) != NULL) {
+			sample_count -= as_index_sprig_keyd_reduce_partial(&isprig,
+					sample_count, cb, udata);
+		}
+		else {
+			sample_count -= as_index_sprig_reduce_partial(&isprig,
+					sample_count, cb, udata);
+		}
 
 		if (sample_count == 0) {
 			break;
@@ -452,6 +462,9 @@ as_index_tree_destroy(as_index_tree *tree)
 		as_index_sprig_traverse_purge(&isprig, isprig.sprig->root_h);
 	}
 
+	cf_arenax_reclaim(tree->shared->arena, tree_puddles(tree),
+			tree_puddles_count(tree->shared));
+
 	as_lock_pair *pair = tree_locks(tree);
 	as_lock_pair *pair_end = pair + NUM_LOCK_PAIRS;
 
@@ -518,6 +531,7 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 
 		r_ref.r = v_a->indexes[i].r;
 		r_ref.r_h = v_a->indexes[i].r_h;
+		r_ref.puddle = isprig->puddle;
 
 		r_ref.olock = &isprig->pair->lock;
 		cf_mutex_lock(r_ref.olock);
@@ -531,7 +545,7 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 					isprig->destructor(r_ref.r, isprig->destructor_udata);
 				}
 
-				cf_arenax_free(isprig->arena, r_ref.r_h);
+				cf_arenax_free(isprig->arena, r_ref.r_h, r_ref.puddle);
 			}
 
 			cf_mutex_unlock(r_ref.olock);
@@ -598,7 +612,7 @@ as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h)
 		isprig->destructor(r, isprig->destructor_udata);
 	}
 
-	cf_arenax_free(isprig->arena, r_h);
+	cf_arenax_free(isprig->arena, r_h, isprig->puddle);
 }
 
 
@@ -637,6 +651,7 @@ as_index_sprig_try_get_vlock(as_index_sprig *isprig, const cf_digest *keyd,
 		return rv;
 	}
 
+	index_ref->puddle = isprig->puddle;
 	index_ref->olock = &isprig->pair->lock;
 
 	return 0;
@@ -657,6 +672,7 @@ as_index_sprig_get_vlock(as_index_sprig *isprig, const cf_digest *keyd,
 		return rv;
 	}
 
+	index_ref->puddle = isprig->puddle;
 	index_ref->olock = &isprig->pair->lock;
 
 	return 0;
@@ -706,6 +722,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 				index_ref->r = t;
 				index_ref->r_h = t_h;
 
+				index_ref->puddle = isprig->puddle;
 				index_ref->olock = &isprig->pair->lock;
 
 				return 0;
@@ -739,7 +756,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 	cf_arenax_handle old_root = isprig->sprig->root_h;
 
 	// Make the new element.
-	cf_arenax_handle n_h = cf_arenax_alloc(isprig->arena);
+	cf_arenax_handle n_h = cf_arenax_alloc(isprig->arena, isprig->puddle);
 
 	if (n_h == 0) {
 		cf_warning(AS_INDEX, "arenax alloc failed");
@@ -789,6 +806,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 	index_ref->r = n;
 	index_ref->r_h = n_h;
 
+	index_ref->puddle = isprig->puddle;
 	index_ref->olock = &isprig->pair->lock;
 
 	return 1;

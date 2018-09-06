@@ -58,3 +58,16 @@ as_index_reduce_partial_live(as_index_tree *tree, uint64_t sample_count,
 {
 	as_index_reduce_partial(tree, sample_count, cb, udata);
 }
+
+
+//==========================================================
+// Private API - for enterprise separation only.
+//
+
+uint64_t
+as_index_sprig_keyd_reduce_partial(as_index_sprig *isprig,
+		uint64_t sample_count, as_index_reduce_fn cb, void *udata)
+{
+	cf_crash(AS_INDEX, "CE code called as_index_sprig_keyd_reduce_partial()");
+	return 0;
+}

@@ -364,15 +364,9 @@ udf_record_cache_free(udf_record * urecord)
 
 	for (uint32_t i = 0; i < urecord->nupdates; i ++ ) {
 		udf_record_bin * bin = &urecord->updates[i];
-		if ( bin->name[0] != '\0' && bin->value != NULL ) {
-			bin->name[0] = '\0';
+		if ( bin->value != NULL ) {
 			as_val_destroy(bin->value);
 			bin->value = NULL;
-		}
-		if ( bin->name[0] != '\0' && bin->oldvalue != NULL ) {
-			bin->name[0] = '\0';
-			as_val_destroy(bin->oldvalue);
-			bin->oldvalue = NULL;
 		}
 	}
 

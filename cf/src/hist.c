@@ -142,7 +142,7 @@ msb(uint64_t n)
 // Create a histogram. There's no destroy(), but
 // you can just cf_free() the histogram.
 //
-histogram*
+histogram *
 histogram_create(const char *name, histogram_scale scale)
 {
 	cf_assert(name, AS_INFO, "null histogram name");
@@ -154,7 +154,7 @@ histogram_create(const char *name, histogram_scale scale)
 	histogram *h = cf_malloc(sizeof(histogram));
 
 	strcpy(h->name, name);
-	memset((void *)&h->counts, 0, sizeof(h->counts));
+	memset((void *)h->counts, 0, sizeof(h->counts));
 
 	// If histogram_insert_data_point() is called for a size or count histogram,
 	// the divide by 0 will crash - consider that a high-performance assert.

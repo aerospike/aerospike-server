@@ -145,7 +145,7 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 
 	if (! as_index_is_valid_record(r) && r->rc == 0) {
 		as_record_destroy(r, ns);
-		cf_arenax_free(ns->arena, r_ref->r_h);
+		cf_arenax_free(ns->arena, r_ref->r_h, r_ref->puddle);
 	}
 
 	cf_mutex_unlock(r_ref->olock);
@@ -735,7 +735,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	// Write the record to storage.
 	if ((result = as_record_write_from_pickle(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} write_master: failed write ", ns->name);
+		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		cf_ll_buf_free(&particles_llb);
 		return -result;
@@ -747,6 +747,8 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	}
 
 	*is_delete = n_new_bins == 0;
+
+	cf_ll_buf_free(&particles_llb);
 
 	return AS_PROTO_RESULT_OK;
 }
@@ -828,7 +830,9 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	*is_delete = n_new_bins == 0;
 
-	return 0;
+	cf_ll_buf_free(&particles_llb);
+
+	return AS_PROTO_RESULT_OK;
 }
 
 

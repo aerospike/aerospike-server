@@ -74,8 +74,24 @@
  * =================
  *
  * There are different sections for each state. Each state has a dispatcher
- * which delegates the event handing to a state specific function. All state is
- * protected under a single lock.
+ * which delegates the event handing to a state specific function.
+ *
+ * Locks
+ * =====
+ *  1. g_exchanage_lock - protected the exchange state machine.
+ *  2. g_exchange_info_lock - prevents update of exchanged data for a round while
+ * exchange is in progress
+ *  3. g_exchange_commited_cluster_lock - a higher
+ * granularity, committed cluster r/w lock,used to allow read access to
+ * committed cluster data even while exchange is busy and holding on to the
+ * global exchange state machine lock.
+ *  4. g_external_event_publisher_lock - ensure order of external events
+ * published is maintained.
+ *
+ * Lock order
+ * ==========
+ * Locks to be obtained in the order mentioned above and relinquished in the
+ * reverse order.
  */
 
 /*
@@ -173,17 +189,17 @@ typedef struct as_exchange_node_namespace_data_s
 	as_exchange_ns_vinfos_payload* partition_versions;
 
 	/**
-	 * Sending node's rack id for this namespace.
+	 * Sender's rack id.
 	 */
 	uint32_t rack_id;
 
 	/**
-	 * Sending node's roster generation for this namespace.
+	 * Sender's roster generation.
 	 */
 	uint32_t roster_generation;
 
 	/**
-	 * Sending node's roster count for this namespace.
+	 * Sender's roster count.
 	 */
 	uint32_t roster_count;
 
@@ -206,6 +222,11 @@ typedef struct as_exchange_node_namespace_data_s
 	 * Sender's rebalance regime for this namespace.
 	 */
 	uint32_t rebalance_regime;
+
+	/**
+	 * Sender's rebalance flags for this namespace.
+	 */
+	uint32_t rebalance_flags;
 } as_exchange_node_namespace_data;
 
 /**
@@ -422,11 +443,6 @@ typedef struct as_exchange_s
 	as_cluster_key cluster_key;
 
 	/**
-	 * Cluster size - size of the succession list.
-	 */
-	uint32_t cluster_size;
-
-	/**
 	 * Exchange's copy of the succession list.
 	 */
 	cf_vector succession_list;
@@ -435,6 +451,11 @@ typedef struct as_exchange_s
 	 * The principal node in current succession list. Always the first node.
 	 */
 	cf_node principal;
+
+	/**
+	 * Committed cluster generation.
+	 */
+	uint64_t committed_cluster_generation;
 
 	/**
 	 * Last committed cluster key.
@@ -474,9 +495,14 @@ typedef struct as_exchange_s
 	cf_shash* nodeid_to_node_state;
 
 	/**
-	 * This node's data payload for current round.
+	 * Self node's partition version payload for current round.
 	 */
 	cf_dyn_buf self_data_dyn_buf[AS_NAMESPACE_SZ];
+
+	/**
+	 * This node's exchange data fabric message to send for current round.
+	 */
+	msg* data_msg;
 } as_exchange;
 
 /**
@@ -547,7 +573,6 @@ typedef struct as_exchange_external_event_publisher_s
 	uint32_t event_listener_count;
 } as_exchange_external_event_publisher;
 
-
 /*
  * ----------------------------------------------------------------------------
  * Externs
@@ -568,6 +593,14 @@ as_skew_monitor_update();
 static as_exchange g_exchange = { 0 };
 
 /**
+ * Rebalance flags.
+ */
+typedef enum
+{
+	AS_EXCHANGE_REBALANCE_FLAG_UNIFORM = 0x01
+} as_exchange_rebalance_flags;
+
+/**
  * The fields in the exchange message. Should never change the order or elements
  * in between.
  */
@@ -584,6 +617,7 @@ typedef enum
 	AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS,
 	AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES,
 	AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
+	AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
 
 	NUM_EXCHANGE_MSG_FIELDS
 } as_exchange_msg_fields;
@@ -602,7 +636,8 @@ static const msg_template exchange_msg_template[] = {
 		{ AS_EXCHANGE_MSG_NS_ROSTERS, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK }
+		{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK },
+		{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK }
 };
 
 COMPILER_ASSERT(sizeof(exchange_msg_template) / sizeof(msg_template) ==
@@ -617,6 +652,58 @@ pthread_mutex_t g_exchanged_info_lock = PTHREAD_MUTEX_INITIALIZER;
  * Global lock to serialize all reads and writes to the exchange state.
  */
 pthread_mutex_t g_exchange_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+
+/**
+ * Acquire a lock on the exchange subsystem.
+ */
+#define EXCHANGE_LOCK()							\
+({												\
+	pthread_mutex_lock (&g_exchange_lock);		\
+	LOCK_DEBUG("locked in %s", __FUNCTION__);	\
+})
+
+/**
+ * Relinquish the lock on the exchange subsystem.
+ */
+#define EXCHANGE_UNLOCK()							\
+({													\
+	pthread_mutex_unlock (&g_exchange_lock);		\
+	LOCK_DEBUG("unLocked in %s", __FUNCTION__);		\
+})
+
+/**
+ * Global lock to set or get committed exchange cluster. This is a lower
+ * granularity lock to allow read access to committed cluster even while
+ * exchange is busy for example rebalancing under the exchange lock.
+ */
+pthread_rwlock_t g_exchange_commited_cluster_lock = PTHREAD_RWLOCK_INITIALIZER;
+
+/**
+ * Acquire a read lock on the committed exchange cluster.
+ */
+#define EXCHANGE_COMMITTED_CLUSTER_RLOCK()						\
+({																\
+	pthread_rwlock_rdlock (&g_exchange_commited_cluster_lock);	\
+	LOCK_DEBUG("committed data locked in %s", __FUNCTION__);	\
+})
+
+/**
+ * Acquire a write lock on the committed exchange cluster.
+ */
+#define EXCHANGE_COMMITTED_CLUSTER_WLOCK()						\
+({																\
+	pthread_rwlock_wrlock (&g_exchange_commited_cluster_lock);	\
+	LOCK_DEBUG("committed data locked in %s", __FUNCTION__);	\
+})
+
+/**
+ * Relinquish the lock on the committed exchange cluster.
+ */
+#define EXCHANGE_COMMITTED_CLUSTER_UNLOCK()						\
+({																\
+	pthread_rwlock_unlock (&g_exchange_commited_cluster_lock);	\
+	LOCK_DEBUG("committed data unLocked in %s", __FUNCTION__);	\
+})
 
 /**
  * Singleton external events publisher.
@@ -656,7 +743,6 @@ static pthread_mutex_t g_external_event_publisher_lock =
 /**
  * Used to limit potentially long log lines. Includes space for NULL terminator.
  */
-#define LOG_LENGTH_MAX() (800)
 #define CRASH(format, ...) cf_crash(AS_EXCHANGE, format, ##__VA_ARGS__)
 #define WARNING(format, ...) cf_warning(AS_EXCHANGE, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_EXCHANGE, format, ##__VA_ARGS__)
@@ -703,24 +789,6 @@ static pthread_mutex_t g_external_event_publisher_lock =
 #else
 #define LOCK_DEBUG(format, ...)
 #endif
-
-/**
- * Acquire a lock on the exchange subsystem.
- */
-#define EXCHANGE_LOCK()							\
-({												\
-	pthread_mutex_lock (&g_exchange_lock);		\
-	LOCK_DEBUG("locked in %s", __FUNCTION__);	\
-})
-
-/**
- * Relinquish the lock on the exchange subsystem.
- */
-#define EXCHANGE_UNLOCK()							\
-({													\
-	pthread_mutex_unlock (&g_exchange_lock);		\
-	LOCK_DEBUG("unLocked in %s", __FUNCTION__);		\
-})
 
 /**
  * Timer event generation interval.
@@ -1419,6 +1487,11 @@ exchange_msg_data_payload_set(msg* msg)
 	uint32_t eventual_regimes[ns_count];
 	uint32_t rebalance_regimes[ns_count];
 
+	bool have_rebalance_flags = false;
+	uint32_t rebalance_flags[ns_count];
+
+	memset(rebalance_flags, 0, sizeof(rebalance_flags));
+
 	pthread_mutex_lock(&g_exchanged_info_lock);
 
 	for (uint32_t ns_ix = 0; ns_ix < ns_count; ns_ix++) {
@@ -1471,6 +1544,14 @@ exchange_msg_data_payload_set(msg* msg)
 		if (eventual_regimes[ns_ix] != 0 || rebalance_regimes[ns_ix] != 0) {
 			have_regimes = true;
 		}
+
+		if (ns->cfg_prefer_uniform_balance) {
+			rebalance_flags[ns_ix] |= AS_EXCHANGE_REBALANCE_FLAG_UNIFORM;
+		}
+
+		if (rebalance_flags[ns_ix] != 0) {
+			have_rebalance_flags = true;
+		}
 	}
 
 	msg_msgpack_list_set_buf(msg, AS_EXCHANGE_MSG_NAMESPACES, &namespace_list);
@@ -1495,6 +1576,11 @@ exchange_msg_data_payload_set(msg* msg)
 				eventual_regimes, ns_count);
 		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
 				rebalance_regimes, ns_count);
+	}
+
+	if (have_rebalance_flags) {
+		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
+				rebalance_flags, ns_count);
 	}
 
 	pthread_mutex_unlock(&g_exchanged_info_lock);
@@ -1656,15 +1742,19 @@ exchange_data_msg_send_pending_ack()
 		goto Exit;
 	}
 
-	msg* data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
-	exchange_msg_data_payload_set(data_msg);
+	if (! g_exchange.data_msg) {
+		g_exchange.data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
+		exchange_msg_data_payload_set(g_exchange.data_msg);
+	}
 
 	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
 			"sending exchange data to nodes:", unacked_nodes,
 			num_unacked_nodes);
 
-	exchange_msg_send_list(data_msg, unacked_nodes, num_unacked_nodes,
-			"error sending exchange data");
+	msg_incr_ref(g_exchange.data_msg);
+
+	exchange_msg_send_list(g_exchange.data_msg, unacked_nodes,
+			num_unacked_nodes, "error sending exchange data");
 Exit:
 	EXCHANGE_UNLOCK();
 }
@@ -1792,10 +1882,10 @@ exchange_data_namespace_payload_add(as_namespace* ns, cf_dyn_buf* dyn_buf)
 }
 
 /**
- * Prepare the exchanged data payloads.
+ * Prepare the exchanged data payloads for current exchange round.
  */
 static void
-exchange_data_payloads_prepare()
+exchange_data_payload_prepare()
 {
 	EXCHANGE_LOCK();
 
@@ -1901,6 +1991,16 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 		return 0;
 	}
 
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS)
+			&& (!msg_msgpack_container_get_count(msg_event->msg,
+					AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
+					&num_namespace_elements_sent)
+					|| num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid rebalance flags from node %"PRIx64,
+				msg_event->msg_source);
+		return 0;
+	}
+
 	return num_namespaces_sent;
 }
 
@@ -1976,6 +2076,34 @@ exchange_namespace_payload_is_valid(as_exchange_ns_vinfos_payload* ns_payload,
  * Common across all states
  * ----------------------------------------------------------------------------
  */
+
+/**
+ * Update committed exchange cluster data.
+ * @param cluster_key the new cluster key.
+ * @param succession the new succession. Can be NULL, for orphan state.
+ */
+static void
+exchange_commited_cluster_update(as_cluster_key cluster_key,
+								 cf_vector* succession)
+{
+	EXCHANGE_COMMITTED_CLUSTER_WLOCK();
+	g_exchange.committed_cluster_key = cluster_key;
+	vector_clear(&g_exchange.committed_succession_list);
+
+	if (succession && cf_vector_size(succession) > 0) {
+		vector_copy(&g_exchange.committed_succession_list,
+					&g_exchange.succession_list);
+		g_exchange.committed_cluster_size = cf_vector_size(succession);
+		cf_vector_get(succession, 0, &g_exchange.committed_principal);
+	}
+	else {
+		g_exchange.committed_cluster_size = 0;
+		g_exchange.committed_principal = 0;
+	}
+
+	g_exchange.committed_cluster_generation++;
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
+}
 
 /**
  * Indicates if self node is the cluster principal.
@@ -2071,16 +2199,18 @@ exchange_reset_for_new_round(cf_vector* new_succession_list,
 		vector_copy(&g_exchange.succession_list, new_succession_list);
 		// Set the principal node.
 		cf_vector_get(&g_exchange.succession_list, 0, &g_exchange.principal);
-		g_exchange.cluster_size = cf_vector_size(new_succession_list);
-	}
-	else {
-		g_exchange.cluster_size = 0;
 	}
 
 	// Reset accumulated node states.
 	exchange_node_states_reset();
 
 	g_exchange.cluster_key = new_cluster_key;
+
+	if (g_exchange.data_msg) {
+		as_fabric_msg_put(g_exchange.data_msg);
+		g_exchange.data_msg = NULL;
+	}
+
 	EXCHANGE_UNLOCK();
 }
 
@@ -2091,10 +2221,7 @@ static void
 exchange_orphan_commit()
 {
 	EXCHANGE_LOCK();
-	g_exchange.committed_cluster_key = 0;
-	g_exchange.committed_cluster_size = 0;
-	g_exchange.committed_principal = 0;
-	vector_clear(&g_exchange.committed_succession_list);
+	exchange_commited_cluster_update(0, NULL);
 	WARNING("blocking client transactions in orphan state!");
 	as_partition_balance_revert_to_orphan();
 	g_exchange.orphan_state_are_transactions_blocked = true;
@@ -2158,8 +2285,8 @@ exchange_cluster_change_handle(as_clustering_event* clustering_event)
 	INFO("data exchange started with cluster key %"PRIx64,
 			g_exchange.cluster_key);
 
-	// Prepare the data payloads.
-	exchange_data_payloads_prepare();
+	// Prepare the data payload.
+	exchange_data_payload_prepare();
 
 	EXCHANGE_UNLOCK();
 
@@ -2351,11 +2478,18 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 		}
 	}
 
-	if (namespace_data->eventual_regime > ns->eventual_regime) {
+	if (ns->eventual_regime != 0 &&
+			namespace_data->eventual_regime > ns->eventual_regime) {
 		ns->eventual_regime = namespace_data->eventual_regime;
 	}
 
 	ns->rebalance_regimes[sl_ix] = namespace_data->rebalance_regime;
+
+	// Prefer uniform balance only if all nodes prefer it.
+	if ((namespace_data->rebalance_flags &
+			AS_EXCHANGE_REBALANCE_FLAG_UNIFORM) == 0) {
+		ns->prefer_uniform_balance = false;
+	}
 }
 
 /**
@@ -2434,12 +2568,14 @@ exchange_exchanging_pre_commit()
 		memset(ns->roster, 0, sizeof(ns->roster));
 		memset(ns->roster_rack_ids, 0, sizeof(ns->roster_rack_ids));
 
-		ns->eventual_regime = 0;
+		// Note - not clearing ns->eventual_regime - prior non-0 value means CP.
 		// Note - not clearing ns->rebalance_regime - it's not set here.
 		memset(ns->rebalance_regimes, 0, sizeof(ns->rebalance_regimes));
 
-		// Reset ns cluster size to zero.
 		ns->cluster_size = 0;
+
+		// Any node that does not prefer uniform balance will set this false.
+		ns->prefer_uniform_balance = true;
 	}
 
 	// Fill the namespace partition version info in succession list order.
@@ -2451,7 +2587,7 @@ exchange_exchanging_pre_commit()
 	}
 
 	// Collected all exchanged data - do final configuration consistency checks.
-	if (! exchange_data_pre_commit_ap_cp_check()) {
+	if (!exchange_data_pre_commit_ap_cp_check()) {
 		WARNING("abandoned exchange - fix configuration conflict");
 		pthread_mutex_unlock(&g_exchanged_info_lock);
 		EXCHANGE_UNLOCK();
@@ -2487,7 +2623,6 @@ exchange_exchanging_check_switch_ready_to_commit()
 	EXCHANGE_LOCK();
 
 	cf_vector* node_vector = cf_vector_stack_create(cf_node);
-	bool ready_to_commit = false;
 
 	if (g_exchange.state == AS_EXCHANGE_STATE_REST
 			|| g_exchange.cluster_key == 0) {
@@ -2508,9 +2643,12 @@ exchange_exchanging_check_switch_ready_to_commit()
 		goto Exit;
 	}
 
-	g_exchange.state = AS_EXCHANGE_STATE_READY_TO_COMMIT;
+	if (!exchange_exchanging_pre_commit()) {
+		// Pre-commit failed. We are not ready to commit.
+		goto Exit;
+	}
 
-	ready_to_commit = true;
+	g_exchange.state = AS_EXCHANGE_STATE_READY_TO_COMMIT;
 
 	DEBUG("ready to commit exchange data for cluster key %"PRIx64,
 			g_exchange.cluster_key);
@@ -2518,7 +2656,7 @@ exchange_exchanging_check_switch_ready_to_commit()
 Exit:
 	cf_vector_destroy(node_vector);
 
-	if (ready_to_commit && exchange_exchanging_pre_commit()) {
+	if (g_exchange.state == AS_EXCHANGE_STATE_READY_TO_COMMIT) {
 		exchange_ready_to_commit_msg_send();
 	}
 
@@ -2565,9 +2703,11 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 
 		uint32_t eventual_regimes[num_namespaces_sent];
 		uint32_t rebalance_regimes[num_namespaces_sent];
+		uint32_t rebalance_flags[num_namespaces_sent];
 
 		memset(eventual_regimes, 0, sizeof(eventual_regimes));
 		memset(rebalance_regimes, 0, sizeof(rebalance_regimes));
+		memset(rebalance_flags, 0, sizeof(rebalance_flags));
 
 		if (!msg_msgpack_list_get_buf_array_presized(msg_event->msg,
 				AS_EXCHANGE_MSG_NAMESPACES, &namespace_list)) {
@@ -2642,6 +2782,17 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			goto Exit;
 		}
 
+		uint32_t num_rebalance_flags = num_namespaces_sent;
+
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS)
+				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+						AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, rebalance_flags,
+						&num_rebalance_flags)) {
+			WARNING("received invalid rebalance flags from node %"PRIx64,
+					msg_event->msg_source);
+			goto Exit;
+		}
+
 		node_state.data->num_namespaces = 0;
 
 		for (uint32_t i = 0; i < num_namespaces_sent; i++) {
@@ -2665,6 +2816,7 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			namespace_data->roster_generation = roster_generations[i];
 			namespace_data->eventual_regime = eventual_regimes[i];
 			namespace_data->rebalance_regime = rebalance_regimes[i];
+			namespace_data->rebalance_flags = rebalance_flags[i];
 
 			// Copy partition versions.
 			msg_buf_ele* partition_versions_element = cf_vector_getp(
@@ -2706,8 +2858,8 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 					goto Exit;
 				}
 
-				namespace_data->roster =
-						cf_realloc(namespace_data->roster, roster_ele->sz);
+				namespace_data->roster = cf_realloc(namespace_data->roster,
+						roster_ele->sz);
 
 				memcpy(namespace_data->roster, roster_ele->ptr, roster_ele->sz);
 
@@ -2719,17 +2871,18 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 					if (rri_ele->sz != 0) {
 						rri_ele_sz = rri_ele->sz;
 
-						if (rri_ele_sz !=
-								namespace_data->roster_count * sizeof(uint32_t)) {
+						if (rri_ele_sz
+								!= namespace_data->roster_count
+										* sizeof(uint32_t)) {
 							WARNING(
 									"received invalid roster-rack-ids for namespace %s from node %"PRIx64,
-									matching_namespace->name, msg_event->msg_source);
+									matching_namespace->name,
+									msg_event->msg_source);
 							goto Exit;
 						}
 
-						namespace_data->roster_rack_ids =
-								cf_realloc(namespace_data->roster_rack_ids,
-										rri_ele_sz);
+						namespace_data->roster_rack_ids = cf_realloc(
+								namespace_data->roster_rack_ids, rri_ele_sz);
 
 						memcpy(namespace_data->roster_rack_ids, rri_ele->ptr,
 								rri_ele_sz);
@@ -2947,11 +3100,7 @@ exchange_data_commit()
 
 	// Exchange is done, use the current cluster details as the committed
 	// cluster details.
-	g_exchange.committed_cluster_key = g_exchange.cluster_key;
-	g_exchange.committed_cluster_size = g_exchange.cluster_size;
-	g_exchange.committed_principal = g_exchange.principal;
-	vector_clear(&g_exchange.committed_succession_list);
-	vector_copy(&g_exchange.committed_succession_list,
+	exchange_commited_cluster_update(g_exchange.cluster_key,
 			&g_exchange.succession_list);
 
 	// Force an update of the skew, to ensure new nodes if any have been checked
@@ -2994,12 +3143,14 @@ exchange_ready_to_commit_commit_msg_handle(as_exchange_event* msg_event)
 
 	// Queue up a cluster change event for downstream sub systems.
 	as_exchange_cluster_changed_event cluster_change_event;
+
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 	cluster_change_event.cluster_key = g_exchange.committed_cluster_key;
 	cluster_change_event.succession = vector_to_array(
 			&g_exchange.committed_succession_list);
 	cluster_change_event.cluster_size = g_exchange.committed_cluster_size;
-
 	exchange_external_event_queue(&cluster_change_event);
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 
 Exit:
 	EXCHANGE_UNLOCK();
@@ -3229,8 +3380,11 @@ exchange_init()
 
 	cf_vector_init(&g_exchange.succession_list, sizeof(cf_node),
 	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+
+	EXCHANGE_COMMITTED_CLUSTER_WLOCK();
 	cf_vector_init(&g_exchange.committed_succession_list, sizeof(cf_node),
 	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 
 	// Initialize exchange fabric messaging.
 	exchange_msg_init();
@@ -3384,13 +3538,14 @@ as_exchange_cluster_size()
 void
 as_exchange_succession(cf_vector* succession)
 {
-	EXCHANGE_LOCK();
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 	vector_copy(succession, &g_exchange.committed_succession_list);
-	EXCHANGE_UNLOCK();
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }
 
 /**
- * Return the committed succession list.
+ * Return the committed succession list. For internal use within the scope
+ * exchange_data_commit function call.
  */
 cf_node*
 as_exchange_succession_unsafe()
@@ -3404,7 +3559,7 @@ as_exchange_succession_unsafe()
 void
 as_exchange_info_get_succession(cf_dyn_buf* db)
 {
-	EXCHANGE_LOCK();
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 
 	cf_node* nodes = vector_to_array(&g_exchange.committed_succession_list);
 
@@ -3420,7 +3575,7 @@ as_exchange_info_get_succession(cf_dyn_buf* db)
 	// Always succeeds.
 	cf_dyn_buf_append_string(db, "\nok");
 
-	EXCHANGE_UNLOCK();
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }
 
 /**
@@ -3430,6 +3585,18 @@ cf_node
 as_exchange_principal()
 {
 	return g_exchange.committed_principal;
+}
+
+/**
+ * Exchange cluster state output for info calls.
+ */
+void as_exchange_cluster_info(cf_dyn_buf* db) {
+	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
+	info_append_uint32(db, "cluster_size", g_exchange.committed_cluster_size);
+	info_append_uint64_x(db, "cluster_key", g_exchange.committed_cluster_key);
+	info_append_uint64(db, "cluster_generation", g_exchange.committed_cluster_generation);
+	info_append_uint64_x(db, "cluster_principal", g_exchange.committed_principal);
+	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }
 
 /**
