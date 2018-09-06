@@ -2351,7 +2351,10 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 		}
 	}
 
-	if (namespace_data->eventual_regime > ns->eventual_regime) {
+	// HOTFIX
+	// Check ns->cp here since upgrades directly from 3.13 may have polluted
+	// other nodes with bogus regimes - for AP, ignore them and leave regime 0.
+	if (ns->cp && namespace_data->eventual_regime > ns->eventual_regime) {
 		ns->eventual_regime = namespace_data->eventual_regime;
 	}
 
