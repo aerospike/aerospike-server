@@ -533,10 +533,6 @@ int udf_cask_info_remove(char *name, char * params, cf_dyn_buf * out) {
 	}
 
 	// now check if such a file-name exists :
-	if (!g_config.mod_lua.user_path)
-	{
-		return -1;
-	}
 
 	snprintf(file_path, 1024, "%s/%s", g_config.mod_lua.user_path, filename);
 

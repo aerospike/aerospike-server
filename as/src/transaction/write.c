@@ -739,7 +739,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 	// Or (normally) adjust max void-time.
 	else if (r->void_time != 0) {
-		cf_atomic64_setmax(&tr->rsv.p->max_void_time, r->void_time);
+		cf_atomic32_setmax(&tr->rsv.p->max_void_time, (int32_t)r->void_time);
 	}
 
 	will_replicate(r, ns);
@@ -870,10 +870,9 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) != 0 ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
-	bool must_fetch_data = false;
-
 	bool increment_generation = false;
 
+	bool single_bin_write_first = false;
 	bool has_read_all_op = false;
 	bool generates_response_bin = false;
 
@@ -893,7 +892,6 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			}
 
 			must_not_create = true;
-			must_fetch_data = true;
 			continue;
 		}
 
@@ -917,14 +915,16 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: bin delete can't have record-level replace flag ", ns->name);
 				return AS_PROTO_RESULT_FAIL_PARAMETER;
 			}
+
+			if (ns->single_bin && i == 0) {
+				single_bin_write_first = true;
+			}
 		}
 		else if (OP_IS_MODIFY(op->op)) {
 			if (record_level_replace) {
 				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: modify op can't have record-level replace flag ", ns->name);
 				return AS_PROTO_RESULT_FAIL_PARAMETER;
 			}
-
-			must_fetch_data = true;
 		}
 		else if (op_is_read_all(op, m)) {
 			if (respond_all_ops) {
@@ -938,11 +938,9 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			}
 
 			has_read_all_op = true;
-			must_fetch_data = true;
 		}
 		else if (op->op == AS_MSG_OP_READ) {
 			generates_response_bin = true;
-			must_fetch_data = true;
 		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
 			if (record_level_replace) {
@@ -951,11 +949,9 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			}
 
 			generates_response_bin = true; // CDT modify may generate a response bin
-			must_fetch_data = true;
 		}
 		else if (op->op == AS_MSG_OP_CDT_READ) {
 			generates_response_bin = true;
-			must_fetch_data = true;
 		}
 	}
 
@@ -967,6 +963,13 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	if (info1_get_all && ! has_read_all_op) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: get-all flag set with no read-all op ", ns->name);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
+	bool must_fetch_data = ! record_level_replace;
+	// Multi-bin case may modify this to force fetch if there's a sindex.
+
+	if (single_bin_write_first && must_fetch_data) {
+		must_fetch_data = false;
 	}
 
 	*p_must_not_create = must_not_create;
@@ -1417,9 +1420,9 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	as_record* r = rd->r;
 	bool has_sindex = record_has_sindex(r, ns);
 
-	// If it's not touch or modify, determine if we must read existing record.
+	// For sindex, we must read existing record even if replacing.
 	if (! must_fetch_data) {
-		must_fetch_data = has_sindex || ! record_level_replace;
+		must_fetch_data = has_sindex;
 	}
 
 	rd->ignore_record_on_device = ! must_fetch_data;

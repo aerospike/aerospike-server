@@ -237,7 +237,7 @@ get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 	uint64_t max_void_time = 0;
 
 	for (int n = 0; n < AS_PARTITIONS; n++) {
-		uint64_t partition_max_void_time = cf_atomic64_get(ns->partitions[n].max_void_time);
+		uint64_t partition_max_void_time = cf_atomic32_get(ns->partitions[n].max_void_time);
 
 		if (partition_max_void_time > max_void_time) {
 			max_void_time = partition_max_void_time;
@@ -326,7 +326,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	}
 
 	// We want to evict, but are we allowed to do so?
-	if (! g_config.nsup_startup_evict) {
+	if (ns->cold_start_eviction_disabled) {
 		cf_warning(AS_NSUP, "{%s} hwm breached but not allowed to evict", ns->name);
 		pthread_mutex_unlock(&ns->cold_start_evict_lock);
 		return true;
@@ -773,7 +773,7 @@ get_ttl_range(as_namespace* ns, uint32_t now)
 
 		as_partition_release(&rsv);
 
-		uint64_t partition_max_void_time = cf_atomic64_get(ns->partitions[n].max_void_time);
+		uint64_t partition_max_void_time = cf_atomic32_get(ns->partitions[n].max_void_time);
 
 		if (partition_max_void_time > max_master_void_time) {
 			max_master_void_time = partition_max_void_time;
@@ -876,16 +876,22 @@ run_nsup(void *arg)
 	while (true) {
 		sleep(1); // wake up every second to check
 
+		uint64_t period = (uint64_t)g_config.nsup_period;
 		uint64_t curr_time = cf_get_seconds();
 
-		if (curr_time - last_time < g_config.nsup_period) {
-			continue; // period has not elapsed
+		if (period == 0 || curr_time - last_time < period) {
+			continue;
 		}
 
 		last_time = curr_time;
 
 		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 			as_namespace *ns = g_config.namespaces[ns_ix];
+
+			if (ns->nsup_disabled) {
+				cf_info(AS_NSUP, "{%s} nsup-skipped", ns->name);
+				continue;
+			}
 
 			uint64_t start_ms = cf_getms();
 
@@ -1064,10 +1070,11 @@ run_size_histograms(void *arg)
 	while (true) {
 		sleep(1); // wake up every second to check
 
+		uint64_t period = (uint64_t)g_config.object_size_hist_period;
 		uint64_t curr_time = cf_get_seconds();
 
-		if (wait && curr_time - last_time < g_config.object_size_hist_period) {
-			continue; // period has not elapsed
+		if (period == 0 || (wait && curr_time - last_time < period)) {
+			continue;
 		}
 
 		wait = true;
@@ -1139,14 +1146,15 @@ eval_stop_writes(as_namespace *ns)
 
 	as_storage_stats(ns, &device_avail_pct, NULL);
 
-	// Compute memory usage for namespace.
-	uint64_t index_sz = ns->n_objects * as_index_size_get(ns);
-	uint64_t tombstone_index_sz = ns->n_tombstones * as_index_size_get(ns);
+	// Compute memory usage for namespace. Note that persisted index is not
+	// counted against stop-writes.
+	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
+			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
 	uint64_t data_in_memory_sz = ns->n_bytes_memory;
-	uint64_t memory_sz = index_sz + tombstone_index_sz + data_in_memory_sz + sindex_sz;
+	uint64_t memory_sz = index_mem_sz + sindex_sz + data_in_memory_sz;
 
-	// Possible reasons for eviction or stopping writes.
+	// Possible reasons for stopping writes.
 	static const char* reasons[] = {
 			NULL,									// 0x0
 			"(memory)",								// 0x1
@@ -1159,99 +1167,114 @@ eval_stop_writes(as_namespace *ns)
 	};
 
 	// Check if the writes should be stopped.
-	bool stop_writes = false;
 	uint32_t why_stopped = 0x0;
 
 	if (memory_sz > mem_stop_writes) {
-		stop_writes = true;
-		why_stopped = 0x1;
+		why_stopped |= 0x1;
 	}
 
 	if (device_avail_pct < (int)ns->storage_min_avail_pct) {
-		stop_writes = true;
 		why_stopped |= 0x2;
 	}
 
 	if (is_xdr_digestlog_low(ns)) {
-		stop_writes = true;
 		why_stopped |= 0x4;
 	}
 
-	if (stop_writes) {
-		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu) limit:%lu, disk avail-pct:%d",
+	if (why_stopped != 0) {
+		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
 				ns->name, reasons[why_stopped],
-				memory_sz, index_sz, data_in_memory_sz, mem_stop_writes,
+				memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_stop_writes,
 				device_avail_pct);
-	}
-	else {
-		cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu) limit:%lu, disk avail-pct:%d",
-				ns->name,
-				memory_sz, index_sz, data_in_memory_sz, mem_stop_writes,
-				device_avail_pct);
+
+		cf_atomic32_set(&ns->stop_writes, 1);
+		return true;
 	}
 
-	cf_atomic32_set(&ns->stop_writes, stop_writes ? 1 : 0);
+	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
+			ns->name,
+			memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_stop_writes,
+			device_avail_pct);
 
-	return stop_writes;
+	cf_atomic32_set(&ns->stop_writes, 0);
+
+	return false;
 }
 
 static bool
 eval_hwm_breached(as_namespace *ns)
 {
-	// Compute the high-watermark - memory.
+	uint64_t index_sz = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
+
+	uint64_t index_mem_sz = 0;
+	uint64_t index_dev_sz = 0;
+	uint64_t pix_hwm = 0;
+
+	if (as_namespace_index_persisted(ns)) {
+		index_dev_sz = index_sz;
+		pix_hwm = (ns->mounts_size_limit * ns->mounts_hwm_pct) / 100;
+	}
+	else {
+		index_mem_sz = index_sz;
+	}
+
+	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
+	uint64_t data_in_memory_sz = ns->n_bytes_memory;
+	uint64_t memory_sz = index_mem_sz + sindex_sz + data_in_memory_sz;
 	uint64_t mem_hwm = (ns->memory_size * ns->hwm_memory_pct) / 100;
 
-	// Compute the high-watermark - disk.
-	uint64_t ssd_hwm = (ns->ssd_size * ns->hwm_disk_pct) / 100;
-
-	// Compute disk usage for namespace.
 	uint64_t used_disk_sz = 0;
 
 	as_storage_stats(ns, NULL, &used_disk_sz);
 
-	// Compute memory usage for namespace.
-	uint64_t index_sz = ns->n_objects * as_index_size_get(ns);
-	uint64_t tombstone_index_sz = ns->n_tombstones * as_index_size_get(ns);
-	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
-	uint64_t data_in_memory_sz = ns->n_bytes_memory;
-	uint64_t memory_sz = index_sz + tombstone_index_sz + data_in_memory_sz + sindex_sz;
+	uint64_t ssd_hwm = (ns->ssd_size * ns->hwm_disk_pct) / 100;
 
 	// Possible reasons for eviction.
-	// (We don't use all combinations, but in case we change our minds...)
 	static const char* reasons[] = {
-		NULL, "(memory)", "(disk)", "(memory & disk)"
+			NULL,								// 0x0
+			"(memory)",							// 0x1
+			"(index-device)",					// 0x2
+			"(memory & index-device)",			// 0x3 (0x1 | 0x2)
+			"(disk)",							// 0x4
+			"(memory & disk)",					// 0x5 (0x1 | 0x4)
+			"(index-device & disk)",			// 0x6 (0x2 | 0x4)
+			"(memory & index-device & disk)"	// 0x7 (0x1 | 0x2 | 0x4)
 	};
 
-	// Check if either high water mark is breached.
-	bool hwm_breached = false;
 	uint32_t how_breached = 0x0;
 
 	if (memory_sz > mem_hwm) {
-		hwm_breached = true;
-		how_breached = 0x1;
+		how_breached |= 0x1;
 	}
 
-	if (used_disk_sz > ssd_hwm) {
-		hwm_breached = true;
+	if (index_dev_sz > pix_hwm) {
 		how_breached |= 0x2;
 	}
 
-	if (hwm_breached) {
-		cf_warning(AS_NSUP, "{%s} breached eviction hwm %s, memory sz:%lu (%lu + %lu) hwm:%lu, disk sz:%lu hwm:%lu",
+	if (used_disk_sz > ssd_hwm) {
+		how_breached |= 0x4;
+	}
+
+	if (how_breached != 0) {
+		cf_warning(AS_NSUP, "{%s} breached eviction hwm %s, memory sz:%lu (%lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
 				ns->name, reasons[how_breached],
-				memory_sz, index_sz, data_in_memory_sz, mem_hwm,
+				memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_hwm,
+				index_dev_sz, pix_hwm,
 				used_disk_sz, ssd_hwm);
-	}
-	else {
-		cf_debug(AS_NSUP, "{%s} neither eviction hwm breached, memory sz:%lu (%lu + %lu) hwm:%lu, disk sz:%lu hwm:%lu",
-				ns->name,
-				memory_sz, index_sz, data_in_memory_sz, mem_hwm,
-				used_disk_sz, ssd_hwm);
+
+		cf_atomic32_set(&ns->hwm_breached, 1);
+		return true;
 	}
 
-	cf_atomic32_set(&ns->hwm_breached, hwm_breached ? 1 : 0);
+	cf_debug(AS_NSUP, "{%s} no eviction hwm breached, memory sz:%lu (%lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
+			ns->name,
+			memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_hwm,
+			index_dev_sz, pix_hwm,
+			used_disk_sz, ssd_hwm);
 
-	return hwm_breached;
+	cf_atomic32_set(&ns->hwm_breached, 0);
+
+	return false;
 }
 
 static void

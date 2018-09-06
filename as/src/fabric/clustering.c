@@ -1114,7 +1114,7 @@ typedef struct as_clustering_external_event_publisher_s
  * ----------------------------------------------------------------------------
  */
 static void
-internal_event_dispatch(as_clustering_internal_event* timer_event);
+internal_event_dispatch(as_clustering_internal_event* event);
 static bool
 clustering_is_our_principal(cf_node nodeid);
 static bool
@@ -1335,21 +1335,6 @@ if (((size) > STACK_ALLOC_LIMIT()) && buffer) {cf_free(buffer);}
 #define INFO(format, ...) cf_info(AS_CLUSTERING, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_CLUSTERING, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_CLUSTERING, format, ##__VA_ARGS__)
-
-#ifdef TRACE_ENABLED
-#define TRACE(format, ...) cf_detail(AS_CLUSTERING, format, ##__VA_ARGS__)
-#else
-#define TRACE(format, ...)
-#endif
-
-#ifdef TRACE_ENABLED
-#define TRACE_LOG(context, format, ...) cf_detail(context, format, ##__VA_ARGS__)
-#else
-#define TRACE_LOG(context, format, ...)
-#endif
-
-//bri//#define CF_TRACE CF_FAULT_SEVERITY_UNDEF
-#define CF_TRACE CF_DETAIL
 
 #define ASSERT(expression, message, ...)				\
 if (!(expression)) {WARNING(message, ##__VA_ARGS__);}
@@ -2380,6 +2365,7 @@ clustering_hb_plugin_set_fn(msg* msg)
  */
 static void
 clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
+		as_hb_plugin_node_data* prev_plugin_data,
 		as_hb_plugin_node_data* plugin_data)
 {
 	// Lockless check to prevent deadlocks.
@@ -2393,7 +2379,7 @@ clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	size_t payload_size;
 
 	if (msg_get_buf(msg, AS_HB_MSG_PAXOS_DATA, (uint8_t**)&payload,
-			&payload_size, MSG_GET_DIRECT) != 0) {
+					&payload_size, MSG_GET_DIRECT) != 0) {
 		cf_ticker_warning(AS_CLUSTERING,
 				"received empty clustering payload in heartbeat pulse from node %"PRIx64,
 				source);
@@ -2630,12 +2616,12 @@ quantum_interval_earliest_start_time()
 									&g_quantum_interval_generator.fault[i]));
 		}
 
-		TRACE("Fault:%s event_ts:%"PRIu64,
+		DETAIL("Fault:%s event_ts:%"PRIu64,
 				g_quantum_interval_generator.vtable[i].fault_log_str,
 				g_quantum_interval_generator.fault[i].event_ts);
 	}
 
-	TRACE("Last Quantum interval:%"PRIu64,
+	DETAIL("Last Quantum interval:%"PRIu64,
 			g_quantum_interval_generator.last_quantum_start_time);
 
 	cf_clock start_time = g_quantum_interval_generator.last_quantum_start_time
@@ -4306,18 +4292,14 @@ paxos_proposer_success()
 }
 
 /**
- * Handle an incoming paxos accepted message.
+ * Indicates if the proposer can accept, accepted messages.
  */
-static void
-paxos_proposer_accepted_handle(as_clustering_internal_event* event)
+static bool
+paxos_proposer_can_accept_accepted(cf_node src_nodeid, msg* msg)
 {
-	cf_node src_nodeid = event->msg_src_nodeid;
-	msg* msg = event->msg;
-
-	DEBUG("received paxos accepted from node %"PRIx64, src_nodeid);
+	bool rv = false;
 
 	CLUSTERING_LOCK();
-
 	// We also allow accepted messages in the idle state to deal with a loss of
 	// the learn message.
 	if (g_proposer.state != AS_PAXOS_PROPOSER_STATE_ACCEPT_SENT
@@ -4348,6 +4330,40 @@ paxos_proposer_accepted_handle(as_clustering_internal_event* event)
 				g_proposer.sequence_number);
 		goto Exit;
 	}
+
+	if (g_proposer.proposed_value.cluster_key == g_register.cluster_key
+			&& vector_equals(&g_proposer.proposed_value.succession_list,
+					&g_register.succession_list)) {
+		// The register is already synced for this proposal. We can ignore this
+		// accepted message.
+		INFO("ignoring paxos accepted from node %"PRIx64" because its proposal id %"PRIu64" is a duplicate",
+				src_nodeid, sequence_number
+		);
+		goto Exit;
+	}
+
+	rv = true;
+Exit:
+	CLUSTERING_UNLOCK();
+	return rv;
+}
+
+/**
+ * Handle an incoming paxos accepted message.
+ */
+static void
+paxos_proposer_accepted_handle(as_clustering_internal_event* event)
+{
+	cf_node src_nodeid = event->msg_src_nodeid;
+	msg* msg = event->msg;
+
+	DEBUG("received paxos accepted from node %"PRIx64, src_nodeid);
+
+	if (!paxos_proposer_can_accept_accepted(src_nodeid, msg)) {
+		return;
+	}
+
+	CLUSTERING_LOCK();
 
 	cf_vector_append_unique(&g_proposer.accepted_received, &src_nodeid);
 
@@ -5580,7 +5596,7 @@ register_is_sycn_pending()
 	CLUSTERING_LOCK();
 	bool sync_pending = cf_vector_size(&g_register.sync_pending) > 0;
 	log_cf_node_vector("pending register sync:", &g_register.sync_pending,
-			CF_TRACE);
+			CF_DETAIL);
 	CLUSTERING_UNLOCK();
 	return sync_pending;
 }
@@ -8083,7 +8099,7 @@ as_clustering_cf_node_array_event(cf_fault_severity severity,
 		cf_fault_context context, char* file_name, int line, char* message,
 		cf_node* nodes, int node_count)
 {
-	if (!cf_context_at_severity(context, severity) && severity != CF_TRACE) {
+	if (!cf_context_at_severity(context, severity) && severity != CF_DETAIL) {
 		return;
 	}
 

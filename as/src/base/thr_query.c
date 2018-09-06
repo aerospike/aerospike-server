@@ -498,7 +498,6 @@ qwork_poolrelease(query_work *qwork)
 	qwork->qtr   = 0;
 	qwork->type  = QUERY_WORK_TYPE_NONE;
 
-	int ret = AS_QUERY_OK;
 	if (cf_queue_sz(g_query_qwork_pool) < AS_QUERY_MAX_QREQ) {
 		cf_detail(AS_QUERY, "Pushed qwork %p", qwork);
 		cf_queue_push(g_query_qwork_pool, &qwork);
@@ -506,8 +505,8 @@ qwork_poolrelease(query_work *qwork)
 		cf_detail(AS_QUERY, "Freed qwork %p", qwork);
 		cf_free(qwork);
 	}
-	if (ret != CF_QUEUE_OK) ret = AS_QUERY_ERR;
-	return ret;
+
+	return AS_QUERY_OK;
 }
 
 static query_work *

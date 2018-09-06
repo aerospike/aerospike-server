@@ -67,6 +67,9 @@ struct as_namespace_s;
 
 #define AS_CLUSTER_NAME_SZ 65
 
+#define DNS_NAME_MAX_LEN 255
+#define DNS_NAME_MAX_SIZE (DNS_NAME_MAX_LEN + 1)
+
 #define MAX_DEMARSHAL_THREADS 256
 #define MAX_BATCH_THREADS 256
 #define MAX_TLS_SPECS 10
@@ -116,13 +119,13 @@ typedef struct as_config_s {
 	uint32_t		hist_track_slice; // period in seconds at which to cache histogram data
 	char*			hist_track_thresholds; // comma-separated bucket (ms) values to track
 	int				n_info_threads;
+	bool			keep_caps_ssd_health;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
 	uint32_t		migrate_max_num_incoming;
 	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
 	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t		nsup_period;
-	PAD_BOOL		nsup_startup_evict;
 	uint32_t		object_size_hist_period;
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	int				proto_slow_netio_sleep_ms; // dynamic only

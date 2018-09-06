@@ -215,7 +215,7 @@ as_batch_release_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 }
 
 static void
-as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer, int status)
+as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 {
 	as_end_of_transaction(shared->fd_h, status != 0);
 	shared->fd_h = NULL;
@@ -285,7 +285,7 @@ as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared, as_batch_b
 	}
 
 	as_batch_release_buffer(shared, buffer);
-	as_batch_complete(queue, shared, buffer, status);
+	as_batch_complete(queue, shared, status);
 	return true;
 }
 
@@ -295,7 +295,7 @@ as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buf
 	// If we're invoked for the trailer, we're done. Free buffer and batch.
 	if (shared->in_trailer) {
 		as_batch_release_buffer(shared, buffer);
-		as_batch_complete(queue, shared, buffer, status);
+		as_batch_complete(queue, shared, status);
 		return true;
 	}
 
@@ -311,7 +311,7 @@ as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buf
 	// done. Free buffer and batch.
 	if (shared->bad_response_fd) {
 		as_batch_release_buffer(shared, buffer);
-		as_batch_complete(queue, shared, buffer, status);
+		as_batch_complete(queue, shared, status);
 		return true;
 	}
 

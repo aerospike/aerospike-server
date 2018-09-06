@@ -315,22 +315,25 @@ typedef struct as_hb_plugin_node_data_s
  * A function to parse plugin data for a node into an in memory object. Should
  * be fast and never acquire locks.
  *
- * The parameter plugin_data->data will always be pointer to a previously
- * allocated memory location. plugin_data->data_capacity will indicate the
- * capacity of this memory. Implementations should reuse this previously
- * allocated data blob to avoid the overhead of heap  allocations. If current
- * data capacity is greater than the new data size please invoke cf_realloc and
- * get a new block for current data and update plugin_data->data and
- * plugin_data->data_capacity accordingly.
+ * The parameter plugin_data->data will always point to a pre-allocated memory
+ * location. plugin_data->data_capacity will indicate the capacity of this
+ * memory. Implementations should reuse this pre-allocated data blob to avoid
+ * the overhead of heap  allocations. If current data capacity is greater than
+ * the new data size please invoke cf_realloc and get a new block for current
+ * data and update plugin_data->data and plugin_data->data_capacity accordingly.
  *
- * This function should always data_size correctly before returning. Set
+ * This function should always update data_size correctly before returning. Set
  * plugin_data->data_size = 0 for no plugin data.
  *
  * @param hb_message the heartbeat message.
  * @param source the source node.
+ * @param plugin_data_prev plugin data structure from the previous heartbeat to
+ * be used to accumulate historical data.
+ * Field plugin_data_prev->data_size will be zero if this the first heartbeat
+ * from the source.
  * @param plugin_data (output) plugin data structure to output parsed data.
  */
-typedef void (*as_hb_plugin_parse_data_fn)(msg* hb_message, cf_node source, as_hb_plugin_node_data* plugin_data);
+typedef void (*as_hb_plugin_parse_data_fn)(msg* hb_message, cf_node source, as_hb_plugin_node_data* plugin_data_prev, as_hb_plugin_node_data* plugin_data);
 
 /**
  * A listener for detecting changes to this plugin's data for a particular node.
@@ -415,6 +418,8 @@ void as_hb_override_mtu_set(int mtu);
 uint32_t as_hb_tx_interval_get();
 
 int as_hb_tx_interval_set(uint32_t new_interval);
+
+uint32_t as_hb_max_intervals_missed_get();
 
 int as_hb_max_intervals_missed_set(uint32_t new_max);
 

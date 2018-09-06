@@ -469,15 +469,14 @@ as_sindex__gc_fn(void *udata)
 
 	uint64_t last_time = cf_get_seconds();
 
-	for ( ; ; ) {
-		// Wake up every 1 second to check the gc timeout.
-		struct timespec delay = { 1, 0 };
-		nanosleep(&delay, NULL);
+	while (true) {
+		sleep(1); // wake up every second to check
 
+		uint64_t period = (uint64_t)g_config.sindex_gc_period;
 		uint64_t curr_time = cf_get_seconds();
 
-		if ((curr_time - last_time) < g_config.sindex_gc_period) {
-			continue; // period has not been reached for running gc check
+		if (period == 0 || curr_time - last_time < period) {
+			continue;
 		}
 
 		last_time = curr_time;
@@ -526,6 +525,8 @@ as_sindex__gc_fn(void *udata)
 			update_gc_stat(&ctx.stat);
 		}
 	}
+
+	return NULL;
 }
 
 

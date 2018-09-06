@@ -1,7 +1,7 @@
 /*
  * partition_balance.c
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,7 +26,6 @@
 
 #include "fabric/partition_balance.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,7 +37,7 @@
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 
-#include "compare.h"
+#include "cf_mutex.h"
 #include "fault.h"
 #include "node.h"
 
@@ -98,7 +97,6 @@ void drop_trees(as_partition* p);
 // Helpers - balance partitions.
 void fill_global_tables();
 void apply_single_replica_limit_ap(as_namespace* ns);
-uint32_t rack_count(const as_namespace* ns);
 int find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns);
 uint32_t find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t working_master_n, cf_node dupls[]);
 void advance_version_ap(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns, uint32_t self_n,	uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[]);
@@ -120,6 +118,13 @@ is_self_final_master(const as_partition* p)
 	return p->replicas[0] == g_config.self_node;
 }
 
+static inline bool
+is_family_same(const as_partition_version* v1, const as_partition_version* v2)
+{
+	return v1->ckey == v2->ckey && v1->family == v2->family &&
+			v1->family != VERSION_FAMILY_UNIQUE;
+}
+
 
 //==========================================================
 // Public API - regulate migrations.
@@ -133,13 +138,11 @@ as_partition_balance_disallow_migrations()
 	g_allow_migrations = false;
 }
 
-
 bool
 as_partition_balance_are_migrations_allowed()
 {
 	return g_allow_migrations;
 }
-
 
 void
 as_partition_balance_synchronize_migrations()
@@ -152,8 +155,8 @@ as_partition_balance_synchronize_migrations()
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
 
-			pthread_mutex_lock(&p->lock);
-			pthread_mutex_unlock(&p->lock);
+			cf_mutex_lock(&p->lock);
+			cf_mutex_unlock(&p->lock);
 		}
 	}
 
@@ -199,7 +202,6 @@ as_partition_balance_init()
 	partition_balance_init();
 }
 
-
 // Has the node resolved as operating either in a multi-node cluster or as a
 // single-node cluster?
 bool
@@ -207,7 +209,6 @@ as_partition_balance_is_init_resolved()
 {
 	return g_init_balance_done;
 }
-
 
 void
 as_partition_balance_revert_to_orphan()
@@ -223,12 +224,12 @@ as_partition_balance_revert_to_orphan()
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
 
-			pthread_mutex_lock(&p->lock);
+			cf_mutex_lock(&p->lock);
 
 			as_partition_freeze(p);
 			as_partition_isolate_version(ns, p);
 
-			pthread_mutex_unlock(&p->lock);
+			cf_mutex_unlock(&p->lock);
 		}
 
 		ns->n_unavailable_partitions = AS_PARTITIONS;
@@ -236,7 +237,6 @@ as_partition_balance_revert_to_orphan()
 
 	cf_atomic32_incr(&g_partition_generation);
 }
-
 
 void
 as_partition_balance()
@@ -283,7 +283,6 @@ as_partition_balance()
 	cf_queue_destroy(&mq);
 }
 
-
 uint64_t
 as_partition_balance_remaining_migrations()
 {
@@ -308,15 +307,14 @@ as_partition_balance_remaining_migrations()
 bool
 as_partition_pending_migrations(as_partition* p)
 {
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	bool pending = p->pending_immigrations + p->pending_emigrations > 0;
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return pending;
 }
-
 
 void
 as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
@@ -324,19 +322,19 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	if (! g_allow_migrations || orig_cluster_key != as_exchange_cluster_key()) {
 		cf_debug(AS_PARTITION, "{%s:%u} emigrate_done - cluster key mismatch",
 				ns->name, pid);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return;
 	}
 
 	if (p->pending_emigrations == 0) {
 		cf_warning(AS_PARTITION, "{%s:%u} emigrate_done - no pending emigrations",
 				ns->name, pid);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return;
 	}
 
@@ -373,7 +371,7 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 		}
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	if (w_ix >= 0) {
 		while (cf_queue_pop(&mq, &task, CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
@@ -384,20 +382,19 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 	}
 }
 
-
 as_migrate_result
 as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		uint64_t orig_cluster_key, cf_node source_node)
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	if (! g_allow_migrations || orig_cluster_key != as_exchange_cluster_key() ||
 			immigrate_yield()) {
 		cf_debug(AS_PARTITION, "{%s:%u} immigrate_start - cluster key mismatch",
 				ns->name, pid);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_AGAIN;
 	}
 
@@ -407,13 +404,13 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		cf_debug(AS_PARTITION, "{%s:%u} immigrate_start - exceeded max_num_incoming",
 				ns->name, pid);
 		cf_atomic32_decr(&g_migrate_num_incoming);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_AGAIN;
 	}
 
 	if (! partition_immigration_is_valid(p, source_node, ns, "start")) {
 		cf_atomic32_decr(&g_migrate_num_incoming);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_FAIL;
 	}
 
@@ -422,11 +419,10 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		as_storage_save_pmeta(ns, p);
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return AS_MIGRATE_OK;
 }
-
 
 as_migrate_result
 as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
@@ -434,19 +430,19 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	if (! g_allow_migrations || orig_cluster_key != as_exchange_cluster_key()) {
 		cf_debug(AS_PARTITION, "{%s:%u} immigrate_done - cluster key mismatch",
 				ns->name, pid);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_FAIL;
 	}
 
 	cf_atomic32_decr(&g_migrate_num_incoming);
 
 	if (! partition_immigration_is_valid(p, source_node, ns, "done")) {
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_FAIL;
 	}
 
@@ -472,7 +468,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 			cf_atomic32_incr(&g_partition_generation);
 		}
 
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_OK;
 	}
 
@@ -492,7 +488,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	if (p->pending_immigrations != 0) {
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_OK;
 	}
 
@@ -522,7 +518,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		}
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	while (cf_queue_pop(&mq, &task, 0) == CF_QUEUE_OK) {
 		as_migrate_emigrate(&task);
@@ -533,26 +529,25 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	return AS_MIGRATE_OK;
 }
 
-
 as_migrate_result
 as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 		uint64_t orig_cluster_key)
 {
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_lock(&p->lock);
+	cf_mutex_lock(&p->lock);
 
 	if (! g_allow_migrations || orig_cluster_key != as_exchange_cluster_key()) {
 		cf_debug(AS_PARTITION, "{%s:%u} all_done - cluster key mismatch",
 				ns->name, pid);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_FAIL;
 	}
 
 	if (p->pending_emigrations != 0) {
 		cf_debug(AS_PARTITION, "{%s:%u} all_done - eagain",
 				ns->name, pid);
-		pthread_mutex_unlock(&p->lock);
+		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_AGAIN;
 	}
 
@@ -563,7 +558,7 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 		as_storage_save_pmeta(ns, p);
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	cf_mutex_unlock(&p->lock);
 
 	return AS_MIGRATE_OK;
 }
@@ -586,7 +581,6 @@ pb_task_init(pb_task* task, cf_node dest, as_namespace* ns,
 	task->cluster_key = cluster_key;
 }
 
-
 void
 create_trees(as_partition* p, as_namespace* ns)
 {
@@ -597,7 +591,6 @@ create_trees(as_partition* p, as_namespace* ns)
 	p->tree = as_index_tree_create(&ns->tree_shared, p->tree_id,
 			as_partition_tree_done, (void*)p);
 }
-
 
 void
 drop_trees(as_partition* p)
@@ -610,7 +603,7 @@ drop_trees(as_partition* p)
 	p->tree = NULL;
 
 	// TODO - consider p->n_tombstones?
-	cf_atomic64_set(&p->max_void_time, 0);
+	cf_atomic32_set(&p->max_void_time, 0);
 }
 
 
@@ -618,8 +611,6 @@ drop_trees(as_partition* p)
 // Local helpers - balance partitions.
 //
 
-// fill_global_tables()
-//
 //  Succession list - all nodes in cluster
 //  +---------------+
 //  | A | B | C | D |
@@ -709,7 +700,6 @@ fill_global_tables()
 	}
 }
 
-
 void
 balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 {
@@ -725,9 +715,10 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 	uint32_t n_racks = rack_count(ns);
 
-	// If a namespace is not on all nodes or is rack aware, it can't use the
-	// global node sequence and index tables.
-	bool ns_not_equal_global = ns_less_than_global || n_racks != 1;
+	// If a namespace is not on all nodes or is rack aware or uniform balance
+	// is preferred, it can't use the global node sequence and index tables.
+	bool ns_not_equal_global = ns_less_than_global || n_racks != 1 ||
+			ns->prefer_uniform_balance;
 
 	// The translation array is used to convert global table rows to namespace
 	// rows, if  necessary.
@@ -737,150 +728,173 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 		fill_translation(translation, ns);
 	}
 
+	uint32_t claims_size = ns->prefer_uniform_balance ?
+			ns->replication_factor * ns->cluster_size : 0;
+	uint32_t claims[claims_size];
+	uint32_t target_claims[claims_size];
+
+	if (ns->prefer_uniform_balance) {
+		memset(claims, 0, sizeof(claims));
+		init_target_claims(ns->replication_factor, ns->cluster_size,
+				target_claims);
+	}
+
 	uint32_t ns_pending_immigrations = 0;
 	uint32_t ns_pending_emigrations = 0;
 	uint32_t ns_pending_signals = 0;
 
 	uint32_t ns_fresh_partitions = 0;
 
-	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		as_partition* p = &ns->partitions[pid];
+	for (uint32_t pid_group = 0; pid_group < NUM_PID_GROUPS; pid_group++) {
+		uint32_t start_pid = pid_group * PIDS_PER_GROUP;
+		uint32_t end_pid = start_pid + PIDS_PER_GROUP;
 
-		cf_node* full_node_seq = &FULL_NODE_SEQ(pid, 0);
-		sl_ix_t* full_sl_ix = &FULL_SL_IX(pid, 0);
+		for (uint32_t pid = start_pid; pid < end_pid; pid++) {
+			as_partition* p = &ns->partitions[pid];
 
-		// Usually a namespace can simply use the global tables...
-		cf_node* ns_node_seq = full_node_seq;
-		sl_ix_t* ns_sl_ix = full_sl_ix;
+			cf_node* full_node_seq = &FULL_NODE_SEQ(pid, 0);
+			sl_ix_t* full_sl_ix = &FULL_SL_IX(pid, 0);
 
-		cf_node stack_node_seq[ns_not_equal_global ? ns->cluster_size : 0];
-		sl_ix_t stack_sl_ix[ns_not_equal_global ? ns->cluster_size : 0];
+			// Usually a namespace can simply use the global tables...
+			cf_node* ns_node_seq = full_node_seq;
+			sl_ix_t* ns_sl_ix = full_sl_ix;
 
-		// ... but sometimes a namespace is different.
-		if (ns_not_equal_global) {
-			ns_node_seq = stack_node_seq;
-			ns_sl_ix = stack_sl_ix;
+			cf_node stack_node_seq[ns_not_equal_global ? ns->cluster_size : 0];
+			sl_ix_t stack_sl_ix[ns_not_equal_global ? ns->cluster_size : 0];
 
-			fill_namespace_rows(full_node_seq, full_sl_ix, ns_node_seq,
-					ns_sl_ix, ns, translation);
+			// ... but sometimes a namespace is different.
+			if (ns_not_equal_global) {
+				ns_node_seq = stack_node_seq;
+				ns_sl_ix = stack_sl_ix;
 
-			if (n_racks != 1) {
-				rack_aware_adjust_row(ns_node_seq, ns_sl_ix,
-						ns->replication_factor, ns->rack_ids, ns->cluster_size,
-						n_racks, 1);
-			}
-		}
+				fill_namespace_rows(full_node_seq, full_sl_ix, ns_node_seq,
+						ns_sl_ix, ns, translation);
 
-		pthread_mutex_lock(&p->lock);
-
-		p->n_replicas = ns->replication_factor;
-		memset(p->replicas, 0, sizeof(p->replicas));
-		memcpy(p->replicas, ns_node_seq, p->n_replicas * sizeof(cf_node));
-
-		p->pending_emigrations = 0;
-		p->pending_immigrations = 0;
-		memset(p->immigrators, 0, sizeof(p->immigrators));
-
-		p->working_master = (cf_node)0;
-
-		p->n_dupl = 0;
-		memset(p->dupls, 0, sizeof(p->dupls));
-
-		p->n_witnesses = 0;
-		memset(p->witnesses, 0, sizeof(p->witnesses));
-
-		uint32_t self_n = find_self(ns_node_seq, ns);
-
-		as_partition_version final_version = {
-				.ckey = as_exchange_cluster_key()
-		};
-
-		p->final_version = final_version;
-		p->final_version.master = self_n == 0 ? 1 : 0;
-
-		int working_master_n = find_working_master_ap(p, ns_sl_ix, ns);
-
-		uint32_t n_dupl = 0;
-		cf_node dupls[ns->cluster_size];
-
-		memset(dupls, 0, sizeof(dupls));
-
-		as_partition_version orig_version = p->version;
-
-		// TEMPORARY debugging.
-		uint32_t debug_n_immigrators = 0;
-
-		if (working_master_n == -1) {
-			// No existing versions - assign fresh version to replicas.
-			working_master_n = 0;
-
-			if (self_n < p->n_replicas) {
-				p->version = p->final_version;
-			}
-
-			ns_fresh_partitions++;
-		}
-		else {
-			n_dupl = find_duplicates_ap(p, ns_node_seq, ns_sl_ix, ns,
-					(uint32_t)working_master_n, dupls);
-
-			uint32_t n_immigrators = fill_immigrators(p, ns_sl_ix, ns,
-					(uint32_t)working_master_n, n_dupl);
-
-			// TEMPORARY debugging.
-			debug_n_immigrators = n_immigrators;
-
-			if (n_immigrators != 0) {
-				// Migrations required - advance versions for next rebalance,
-				// queue migrations for this rebalance.
-
-				advance_version_ap(p, ns_sl_ix, ns, self_n,
-						(uint32_t)working_master_n, n_dupl, dupls);
-
-				queue_namespace_migrations(p, ns, self_n,
-						ns_node_seq[working_master_n], n_dupl, dupls, mq);
-
-				if (self_n == 0) {
-					fill_witnesses(p, ns_node_seq, ns_sl_ix, ns);
-					ns_pending_signals += p->n_witnesses;
+				if (ns->prefer_uniform_balance) {
+					uniform_adjust_row(ns_node_seq, ns->cluster_size, ns_sl_ix,
+							ns->replication_factor, claims, target_claims,
+							ns->rack_ids, n_racks);
+				}
+				else if (n_racks != 1) {
+					rack_aware_adjust_row(ns_node_seq, ns_sl_ix,
+							ns->replication_factor, ns->rack_ids,
+							ns->cluster_size, n_racks, 1);
 				}
 			}
-			else if (self_n < p->n_replicas) {
-				// No migrations required - refresh replicas' versions (only
-				// truly necessary if replication factor decreased).
-				p->version = p->final_version;
+
+			cf_mutex_lock(&p->lock);
+
+			p->working_master = (cf_node)0;
+
+			p->n_replicas = ns->replication_factor;
+			memcpy(p->replicas, ns_node_seq, p->n_replicas * sizeof(cf_node));
+
+			p->n_dupl = 0;
+
+			p->pending_emigrations = 0;
+			p->pending_immigrations = 0;
+
+			p->n_witnesses = 0;
+
+			uint32_t self_n = find_self(ns_node_seq, ns);
+
+			as_partition_version final_version = {
+					.ckey = as_exchange_cluster_key(),
+					.master = self_n == 0 ? 1 : 0
+			};
+
+			p->final_version = final_version;
+
+			int working_master_n = find_working_master_ap(p, ns_sl_ix, ns);
+
+			uint32_t n_dupl = 0;
+			cf_node dupls[ns->cluster_size];
+
+			as_partition_version orig_version = p->version;
+
+			// TEMPORARY debugging.
+			uint32_t debug_n_immigrators = 0;
+
+			if (working_master_n == -1) {
+				// No existing versions - assign fresh version to replicas.
+				working_master_n = 0;
+
+				if (self_n < p->n_replicas) {
+					p->version = p->final_version;
+				}
+
+				ns_fresh_partitions++;
 			}
 			else {
-				// No migrations required - drop superfluous non-replica
-				// partitions immediately.
-				p->version = ZERO_VERSION;
+				n_dupl = find_duplicates_ap(p, ns_node_seq, ns_sl_ix, ns,
+						(uint32_t)working_master_n, dupls);
+
+				uint32_t n_immigrators = fill_immigrators(p, ns_sl_ix, ns,
+						(uint32_t)working_master_n, n_dupl);
+
+				// TEMPORARY debugging.
+				debug_n_immigrators = n_immigrators;
+
+				if (n_immigrators != 0) {
+					// Migrations required - advance versions for next
+					// rebalance, queue migrations for this rebalance.
+
+					advance_version_ap(p, ns_sl_ix, ns, self_n,
+							(uint32_t)working_master_n, n_dupl, dupls);
+
+					queue_namespace_migrations(p, ns, self_n,
+							ns_node_seq[working_master_n], n_dupl, dupls, mq);
+
+					if (self_n == 0) {
+						fill_witnesses(p, ns_node_seq, ns_sl_ix, ns);
+						ns_pending_signals += p->n_witnesses;
+					}
+				}
+				else if (self_n < p->n_replicas) {
+					// No migrations required - refresh replicas' versions (only
+					// truly necessary if replication factor decreased).
+					p->version = p->final_version;
+				}
+				else {
+					// No migrations required - drop superfluous non-replica
+					// partitions immediately.
+					p->version = ZERO_VERSION;
+				}
 			}
+
+			if (self_n == 0 || self_n == working_master_n) {
+				p->working_master = ns_node_seq[working_master_n];
+			}
+
+			handle_version_change(p, ns, &orig_version);
+
+			ns_pending_immigrations += (uint32_t)p->pending_immigrations;
+			ns_pending_emigrations += (uint32_t)p->pending_emigrations;
+
+			// TEMPORARY debugging.
+			if (pid < 20) {
+				cf_debug(AS_PARTITION, "ck%012lX %02u (%d %d) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
+						as_exchange_cluster_key(), pid, p->pending_emigrations,
+						p->pending_immigrations,
+						VERSION_AS_STRING(&orig_version),
+						VERSION_AS_STRING(&p->version), self_n,
+						working_master_n, p->n_replicas, n_dupl,
+						debug_n_immigrators);
+			}
+
+			client_replica_maps_update(ns, pid);
 		}
 
-		if (self_n == 0 || self_n == working_master_n) {
-			p->working_master = ns_node_seq[working_master_n];
+		// Flush partition metadata for this group of partitions ...
+		as_storage_flush_pmeta(ns, start_pid, PIDS_PER_GROUP);
+
+		// ... and unlock the group.
+		for (uint32_t pid = start_pid; pid < end_pid; pid++) {
+			as_partition* p = &ns->partitions[pid];
+
+			cf_mutex_unlock(&p->lock);
 		}
-
-		commit_changed_version(p, ns, &orig_version);
-
-		ns_pending_immigrations += (uint32_t)p->pending_immigrations;
-		ns_pending_emigrations += (uint32_t)p->pending_emigrations;
-
-		// TEMPORARY debugging.
-		if (pid < 20) {
-			cf_debug(AS_PARTITION, "ck%012lX %02u (%d %d) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
-					as_exchange_cluster_key(), pid, p->pending_emigrations,
-					p->pending_immigrations, VERSION_AS_STRING(&orig_version),
-					VERSION_AS_STRING(&p->version), self_n, working_master_n,
-					p->n_replicas, n_dupl, debug_n_immigrators);
-		}
-
-		client_replica_maps_update(ns, pid);
-
-		pthread_mutex_unlock(&p->lock);
 	}
-
-	as_storage_flush_all_pmeta(ns);
 
 	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u) expected-signals %u fresh-partitions %u",
 			ns->name, ns_pending_emigrations, ns_pending_immigrations,
@@ -896,7 +910,6 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 	ns->migrate_signals_remaining = ns_pending_signals;
 }
-
 
 void
 apply_single_replica_limit_ap(as_namespace* ns)
@@ -915,33 +928,6 @@ apply_single_replica_limit_ap(as_namespace* ns)
 			ns->replication_factor);
 }
 
-
-uint32_t
-rack_count(const as_namespace* ns)
-{
-	uint32_t ids[ns->cluster_size];
-
-	memcpy(ids, ns->rack_ids, sizeof(ids));
-	qsort(ids, ns->cluster_size, sizeof(uint32_t), cf_compare_uint32_desc);
-
-	if (ids[0] == ids[ns->cluster_size - 1]) {
-		return 1; // common path - not rack-aware
-	}
-
-	uint32_t n_racks = 1;
-	uint32_t cur_id = ids[0];
-
-	for (uint32_t i = 1; i < ns->cluster_size; i++) {
-		if (ids[i] != cur_id) {
-			cur_id = ids[i];
-			n_racks++;
-		}
-	}
-
-	return n_racks;
-}
-
-
 void
 fill_translation(int translation[], const as_namespace* ns)
 {
@@ -952,7 +938,6 @@ fill_translation(int translation[], const as_namespace* ns)
 				g_succession[full_n] == ns->succession[ns_n] ? ns_n++ : -1;
 	}
 }
-
 
 void
 fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix,
@@ -982,7 +967,6 @@ fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix,
 	}
 }
 
-
 uint32_t
 find_self(const cf_node* ns_node_seq, const as_namespace* ns)
 {
@@ -993,7 +977,6 @@ find_self(const cf_node* ns_node_seq, const as_namespace* ns)
 
 	return (uint32_t)n;
 }
-
 
 // Preference: Vm > V > Ve > Vs > Vse > absent.
 int
@@ -1015,7 +998,7 @@ find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		// one after split brains. Also, the flag is only to prevent superfluous
 		// master swaps on rebalance when rack-aware.)
 		if (version->master == 1) {
-			return n;
+			return shift_working_master(p, ns_sl_ix, ns, n, version);
 		}
 		// else - keep going but remember the best so far.
 
@@ -1032,6 +1015,25 @@ find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
 	return best_n;
 }
 
+int
+shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix,
+		const as_namespace* ns, int working_master_n,
+		const as_partition_version* working_master_version)
+{
+	if (working_master_n == 0 || working_master_version->subset == 1) {
+		return working_master_n; // can only shift full masters
+	}
+
+	for (int n = 0; n < working_master_n; n++) {
+		const as_partition_version* version = INPUT_VERSION(n);
+
+		if (is_same_as_full_master(working_master_version, version)) {
+			return n; // master flag will get shifted later
+		}
+	}
+
+	return working_master_n;
+}
 
 uint32_t
 find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq,
@@ -1101,11 +1103,12 @@ find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq,
 	return remove_node(dupls, n_dupl, ns_node_seq[working_master_n]);
 }
 
-
 uint32_t
 fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		uint32_t working_master_n, uint32_t n_dupl)
 {
+	memset(p->immigrators, 0, ((sizeof(bool) * ns->cluster_size) + 31) & -32);
+
 	uint32_t n_immigrators = 0;
 
 	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {
@@ -1121,7 +1124,6 @@ fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 
 	return n_immigrators;
 }
-
 
 void
 advance_version_ap(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
@@ -1211,7 +1213,6 @@ advance_version_ap(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 	// else - leave version as-is.
 }
 
-
 uint32_t
 fill_family_versions(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		const as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl,
@@ -1257,7 +1258,6 @@ fill_family_versions(const as_partition* p, const sl_ix_t* ns_sl_ix,
 	return n_families;
 }
 
-
 bool
 has_replica_parent(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		const as_namespace* ns, const as_partition_version* subset_version,
@@ -1278,7 +1278,6 @@ has_replica_parent(const as_partition* p, const sl_ix_t* ns_sl_ix,
 	return false;
 }
 
-
 uint32_t
 find_family(const as_partition_version* self_version, uint32_t n_families,
 		const as_partition_version family_versions[])
@@ -1291,7 +1290,6 @@ find_family(const as_partition_version* self_version, uint32_t n_families,
 
 	return VERSION_FAMILY_UNIQUE;
 }
-
 
 void
 queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n,
@@ -1368,7 +1366,6 @@ queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n,
 	}
 }
 
-
 void
 fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
 		const sl_ix_t* ns_sl_ix, as_namespace* ns)
@@ -1383,10 +1380,9 @@ fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
 	}
 }
 
-
-// If version changed, create/drop trees as appropriate, and store.
+// If version changed, create/drop trees as appropriate, and cache for storage.
 void
-commit_changed_version(as_partition* p, struct as_namespace_s* ns,
+handle_version_change(as_partition* p, struct as_namespace_s* ns,
 		as_partition_version* orig_version)
 {
 	if (as_partition_version_same(&p->version, orig_version)) {
@@ -1405,12 +1401,7 @@ commit_changed_version(as_partition* p, struct as_namespace_s* ns,
 		drop_trees(p);
 	}
 
-	if (ns->storage_commit_to_device) {
-		as_storage_save_pmeta(ns, p);
-	}
-	else {
-		as_storage_cache_pmeta(ns, p);
-	}
+	as_storage_cache_pmeta(ns, p);
 }
 
 
@@ -1449,7 +1440,6 @@ partition_immigration_is_valid(const as_partition* p, cf_node source_node,
 	return true;
 }
 
-
 void
 emigrate_done_advance_non_master_version_ap(as_namespace* ns, as_partition* p,
 		uint32_t tx_flags)
@@ -1471,7 +1461,6 @@ emigrate_done_advance_non_master_version_ap(as_namespace* ns, as_partition* p,
 	as_storage_save_pmeta(ns, p);
 }
 
-
 void
 immigrate_start_advance_non_master_version_ap(as_partition* p)
 {
@@ -1485,7 +1474,6 @@ immigrate_start_advance_non_master_version_ap(as_partition* p)
 		// Leave evade flag as-is.
 	}
 }
-
 
 void
 immigrate_done_advance_final_master_version_ap(as_namespace* ns,

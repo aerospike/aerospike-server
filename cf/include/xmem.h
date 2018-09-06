@@ -32,7 +32,7 @@ typedef enum {
 
 	CF_XMEM_TYPE_SHMEM = 0,
 	CF_XMEM_TYPE_PMEM,
-	CF_XMEM_TYPE_SSD,
+	CF_XMEM_TYPE_FLASH,
 
 	CF_NUM_XMEM_TYPES
 } cf_xmem_type;

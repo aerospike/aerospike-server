@@ -328,7 +328,7 @@ static int fabric_rate_fc_reduce_fn(const void *key, void *data, void *udata);
 
 // Heartbeat.
 static void fabric_hb_plugin_set_fn(msg *m);
-static void fabric_hb_plugin_parse_data_fn(msg *m, cf_node source, as_hb_plugin_node_data *plugin_data);
+static void fabric_hb_plugin_parse_data_fn(msg *m, cf_node source, as_hb_plugin_node_data *prev_plugin_data,  as_hb_plugin_node_data *plugin_data);
 static void fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata);
 
 
@@ -2457,6 +2457,7 @@ fabric_hb_plugin_set_fn(msg *m)
 // Plugin function that parses succession list out of a heartbeat pulse message.
 static void
 fabric_hb_plugin_parse_data_fn(msg *m, cf_node source,
+		as_hb_plugin_node_data *prev_plugin_data,
 		as_hb_plugin_node_data *plugin_data)
 {
 	if (m->type == M_TYPE_HEARTBEAT_V2) {

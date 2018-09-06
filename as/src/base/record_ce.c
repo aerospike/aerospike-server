@@ -47,19 +47,16 @@ clock_skew_stop_writes_sec()
 	return 0;
 }
 
-
 void
 handle_clock_skew(as_namespace* ns, uint64_t skew_ms)
 {
 }
-
 
 uint16_t
 plain_generation(uint16_t regime_generation, const as_namespace* ns)
 {
 	return regime_generation;
 }
-
 
 void
 as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms,
@@ -71,7 +68,6 @@ as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms,
 	}
 }
 
-
 void
 as_record_increment_generation(as_record *r, const as_namespace* ns)
 {
@@ -81,13 +77,11 @@ as_record_increment_generation(as_record *r, const as_namespace* ns)
 	}
 }
 
-
 bool
 as_record_is_live(const as_record* r)
 {
 	return true;
 }
-
 
 int
 as_record_get_live(as_index_tree* tree, const cf_digest* keyd,
@@ -96,14 +90,12 @@ as_record_get_live(as_index_tree* tree, const cf_digest* keyd,
 	return as_index_get_vlock(tree, keyd, r_ref);
 }
 
-
 int
 as_record_exists_live(as_index_tree* tree, const cf_digest* keyd,
 		as_namespace* ns)
 {
 	return as_record_exists(tree, keyd);
 }
-
 
 void
 as_record_drop_stats(as_record* r, as_namespace* ns)
@@ -112,7 +104,6 @@ as_record_drop_stats(as_record* r, as_namespace* ns)
 
 	cf_atomic64_decr(&ns->n_objects);
 }
-
 
 int
 as_record_write_from_pickle(as_storage_rd* rd)
