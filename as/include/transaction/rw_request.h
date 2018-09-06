@@ -162,6 +162,9 @@ typedef struct rw_request_s {
 
 	bool				tie_was_replicated; // enterprise only
 
+	// Node health related stat, to track replication latency.
+	uint64_t			repl_start_us;
+
 } rw_request;
 
 

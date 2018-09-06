@@ -83,6 +83,7 @@ char *cf_fault_context_strings[] = {
 		"fabric",
 		"geo",
 		"hb",
+		"health",
 		"hlc",
 		"index",
 		"info",

@@ -56,6 +56,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/health.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
@@ -1241,6 +1242,7 @@ ssd_read_record(as_storage_rd *rd)
 		int fd = ssd_fd_get(ssd);
 
 		uint64_t start_ns = ns->storage_benchmarks_enabled ? cf_getns() : 0;
+		uint64_t start_us = as_health_sample_device_read() ? cf_getus() : 0;
 
 		if (pread(fd, read_buf, read_size, (off_t)read_offset) !=
 				(ssize_t)read_size) {
@@ -1254,6 +1256,8 @@ ssd_read_record(as_storage_rd *rd)
 		if (start_ns != 0) {
 			histogram_insert_data_point(ssd->hist_read, start_ns);
 		}
+
+		as_health_add_device_latency(ns->id, r->file_id, start_us);
 
 		ssd_fd_put(ssd, fd);
 

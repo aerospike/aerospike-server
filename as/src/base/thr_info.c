@@ -57,6 +57,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/features.h"
+#include "base/health.h"
 #include "base/index.h"
 #include "base/monitor.h"
 #include "base/scan.h"
@@ -1618,6 +1619,7 @@ info_service_config_get(cf_dyn_buf *db)
 
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
+	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
 	info_append_string(db, "feature-key-file", g_config.feature_key_file);
 	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
@@ -1869,7 +1871,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal")));
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-		uint32_t n = ns->n_storage_devices + ns->n_storage_files;
+		uint32_t n = as_namespace_device_count(ns);
 		const char* tag = ns->n_storage_devices != 0 ?
 				"storage-engine.device" : "storage-engine.file";
 
@@ -2443,6 +2445,9 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
 				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
 			}
+			else {
+				goto Error;
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-svc", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -2455,6 +2460,22 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				histogram_clear(g_stats.svc_demarshal_hist);
 				histogram_clear(g_stats.svc_queue_hist);
 			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-health-check", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-health-check to %s", context);
+				g_config.health_check_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-health-check to %s", context);
+				g_config.health_check_enabled = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "enable-hist-info", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -2465,6 +2486,9 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_info(AS_INFO, "Changing value of enable-hist-info to %s", context);
 				g_config.info_hist_enabled = false;
 				histogram_clear(g_stats.info_hist);
+			}
+			else {
+				goto Error;
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "query-microbenchmark", context, &context_len)) {
@@ -5794,6 +5818,20 @@ info_get_namespaces(char *name, cf_dyn_buf *db)
 }
 
 int
+info_get_health_outliers(char *name, cf_dyn_buf *db)
+{
+	as_health_get_outliers(db);
+	return(0);
+}
+
+int
+info_get_health_stats(char *name, cf_dyn_buf *db)
+{
+	as_health_get_stats(db);
+	return(0);
+}
+
+int
 info_get_logs(char *name, cf_dyn_buf *db)
 {
 	cf_fault_sink_strlist(db);
@@ -5869,7 +5907,7 @@ add_index_device_stats(as_namespace *ns, cf_dyn_buf *db)
 static void
 add_data_device_stats(as_namespace *ns, cf_dyn_buf *db)
 {
-	uint32_t n = ns->n_storage_devices + ns->n_storage_files;
+	uint32_t n = as_namespace_device_count(ns);
 	const char* tag = ns->n_storage_devices != 0 ?
 			"storage-engine.device" : "storage-engine.file";
 
@@ -7146,7 +7184,7 @@ as_info_init()
 	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
 				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
 				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;"
-				"hist-track-start;hist-track-stop;histogram;jem-stats;jobs;latency;log;log-set;"
+				"health-outliers;health-stats;hist-track-start;hist-track-stop;histogram;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;physical-devices;"
 				"racks;recluster;revive;roster;roster-set;service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
@@ -7168,6 +7206,8 @@ as_info_init()
 	as_info_set_dynamic("endpoints", info_get_endpoints, false);                      // Returns the expanded bind / access address configuration.
 	as_info_set_dynamic("feature-key", info_get_features, false);                     // Returns the contents of the feature key (except signature).
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
+	as_info_set_dynamic("health-outliers", info_get_health_outliers, false);          // Returns a list of outliers.
+	as_info_set_dynamic("health-stats", info_get_health_stats, false);                // Returns health stats.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.
 	as_info_set_dynamic("objects", info_get_objects, false);                          // Returns the number of objects stored on this server.

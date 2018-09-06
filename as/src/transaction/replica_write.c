@@ -41,6 +41,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/health.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
@@ -163,6 +164,10 @@ repl_write_setup_rw(rw_request* rw, as_transaction* tr,
 
 	// Allow retransmit thread to destroy rw_request as soon as we unlock.
 	rw->is_set_up = true;
+
+	if (as_health_sample_replica_write()) {
+		rw->repl_start_us = cf_getus();
+	}
 }
 
 
@@ -186,6 +191,10 @@ repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
 
 	for (uint32_t i = 0; i < rw->n_dest_nodes; i++) {
 		rw->dest_complete[i] = false;
+	}
+
+	if (as_health_sample_replica_write()) {
+		rw->repl_start_us = cf_getus();
 	}
 }
 
@@ -384,6 +393,9 @@ repl_write_handle_ack(cf_node node, msg* m)
 	}
 
 	rw->dest_complete[i] = true;
+
+	as_health_add_ns_latency(node, ns_id, AS_HEALTH_NS_REPL_LAT,
+			rw->repl_start_us);
 
 	for (uint32_t j = 0; j < rw->n_dest_nodes; j++) {
 		if (! rw->dest_complete[j]) {

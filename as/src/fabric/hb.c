@@ -43,6 +43,7 @@
 #include "socket.h"
 
 #include "base/cfg.h"
+#include "base/health.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "fabric/endpoint.h"
@@ -7477,6 +7478,7 @@ hb_event_queue(as_hb_internal_event_type event_type, const cf_node* nodes,
 		case AS_HB_INTERNAL_NODE_ARRIVE:
 			event.evt = AS_HB_NODE_ARRIVE;
 			event.event_time = event.event_detected_time;
+			as_health_add_node_counter(event.nodeid, AS_HEALTH_NODE_ARRIVALS);
 			break;
 		case AS_HB_INTERNAL_NODE_DEPART:
 			event.evt = AS_HB_NODE_DEPART;

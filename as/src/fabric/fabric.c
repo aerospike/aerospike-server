@@ -77,6 +77,7 @@
 #include "tls.h"
 
 #include "base/cfg.h"
+#include "base/health.h"
 #include "base/stats.h"
 #include "fabric/endpoint.h"
 #include "fabric/hb.h"
@@ -1035,6 +1036,8 @@ fabric_node_connect(fabric_node *node, uint32_t ch)
 	msg *m = as_fabric_msg_get(M_TYPE_FABRIC);
 
 	cf_atomic64_incr(&g_stats.fabric_connections_opened);
+	as_health_add_node_counter(node->node_id, AS_HEALTH_NODE_FABRIC_FDS);
+
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node);
 	msg_set_uint32(m, FS_CHANNEL, ch);
 	m->benchmark_time = g_config.fabric_benchmarks_enabled ? cf_getns() : 0;

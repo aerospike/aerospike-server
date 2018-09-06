@@ -171,6 +171,7 @@ typedef enum {
 	AS_FABRIC,
 	AS_GEO,
 	AS_HB,
+	AS_HEALTH,
 	AS_HLC,
 	AS_INDEX,
 	AS_INFO,

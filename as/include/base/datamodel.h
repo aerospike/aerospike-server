@@ -1218,6 +1218,13 @@ as_namespace_cool_restarts(const as_namespace *ns)
 	return ns->storage_data_in_memory && ! ns->data_in_index;
 }
 
+static inline uint32_t
+as_namespace_device_count(const as_namespace *ns)
+{
+	// Only one of them will ever be non-zero.
+	return ns->n_storage_devices + ns->n_storage_files;
+}
+
 static inline const char*
 as_namespace_start_mode_str(const as_namespace *ns)
 {

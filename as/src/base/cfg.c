@@ -279,6 +279,7 @@ typedef enum {
 	CASE_SERVICE_CLUSTER_NAME,
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
+	CASE_SERVICE_ENABLE_HEALTH_CHECK,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FEATURE_KEY_FILE,
 	CASE_SERVICE_HIST_TRACK_BACK,
@@ -823,6 +824,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
+		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "feature-key-file",				CASE_SERVICE_FEATURE_KEY_FILE },
 		{ "hist-track-back",				CASE_SERVICE_HIST_TRACK_BACK },
@@ -2324,6 +2326,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
 				c->svc_benchmarks_enabled = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_ENABLE_HEALTH_CHECK:
+				c->health_check_enabled = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_ENABLE_HIST_INFO:
 				c->info_hist_enabled = cfg_bool(&line);

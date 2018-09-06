@@ -47,6 +47,7 @@
 
 #include "base/batch.h"
 #include "base/datamodel.h"
+#include "base/health.h"
 #include "base/proto.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
@@ -291,6 +292,8 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
+
+	as_health_add_node_counter(dst, AS_HEALTH_NODE_PROXIES);
 }
 
 

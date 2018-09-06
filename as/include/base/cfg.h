@@ -113,6 +113,7 @@ typedef struct as_config_s {
 	as_clustering_config clustering_config;
 	PAD_BOOL		fabric_benchmarks_enabled;
 	PAD_BOOL		svc_benchmarks_enabled;
+	PAD_BOOL		health_check_enabled;
 	PAD_BOOL		info_hist_enabled;
 	const char*		feature_key_file;
 	uint32_t		hist_track_back; // total time span in seconds over which to cache data

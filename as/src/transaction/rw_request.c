@@ -135,6 +135,8 @@ rw_request_create(cf_digest* keyd)
 
 	rw->tie_was_replicated = false;
 
+	rw->repl_start_us = 0;
+
 	return rw;
 }
 

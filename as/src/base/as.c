@@ -44,6 +44,7 @@
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/health.h"
 #include "base/index.h"
 #include "base/json_init.h"
 #include "base/monitor.h"
@@ -405,6 +406,7 @@ main(int argc, char **argv)
 	// cluster nodes, and ultimately with clients.
 
 	as_smd_start(g_smd);		// enables receiving cluster state change events
+	as_health_start();			// starts before fabric and hb to capture them
 	as_fabric_start();			// may send & receive fabric messages
 	as_xdr_start();				// XDR should start before it joins other nodes
 	as_hb_start();				// start inter-node heartbeat
