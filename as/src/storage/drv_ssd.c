@@ -4105,7 +4105,10 @@ as_storage_info_get_ssd(as_namespace *ns, as_partition *p)
 	info_buf *b = (info_buf*)
 			(ssds->header->info_data + (SSD_HEADER_INFO_STRIDE * p->id));
 
-	if (p->id == 0) {
+	// HOTFIX
+	// Check ns->cp here since upgrades directly from 3.13 find the value 24 in
+	// the regime spot on device - for AP, ignore it and leave regime 0.
+	if (ns->cp && p->id == 0) {
 		ns->eventual_regime = b->regime;
 		ns->rebalance_regime = b->regime;
 	}
