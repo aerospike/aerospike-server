@@ -43,7 +43,7 @@ extern int as_info_set(const char *name, const char *value, bool def);
 // For dynamic items - you will get called when the name is requested. The
 // dynbuf will be fully set up for you - just add the information you want to
 // return.
-extern int as_info_set_dynamic(char *name, as_info_get_value_fn gv_fn, bool def);
+extern int as_info_set_dynamic(const char *name, as_info_get_value_fn gv_fn, bool def);
 
 // For tree items - you will get called when the name is requested, and it will
 // have the name you registered (name) and the subtree portion (value). The
@@ -52,7 +52,7 @@ extern int as_info_set_dynamic(char *name, as_info_get_value_fn gv_fn, bool def)
 extern int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
 
 // For commands - you will be called with the parameters.
-extern int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
+extern int as_info_set_command(const char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
 int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 

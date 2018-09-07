@@ -195,6 +195,7 @@ typedef enum {
 	AS_RW_CLIENT, // special detail context
 	AS_SCAN,
 	AS_SECURITY,
+	AS_SERVICE_LIST,
 	AS_SINDEX,
 	AS_SKEW,
 	AS_SMD,

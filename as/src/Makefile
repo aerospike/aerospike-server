@@ -54,8 +54,8 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
 
-FABRIC_HEADERS += clustering.h endpoint.h exchange.h fabric.h hb.h hlc.h meta_batch.h migrate.h partition.h partition_balance.h roster.h skew_monitor.h
-FABRIC_SOURCES += clustering.c endpoint.c exchange.c fabric.c hb.c hlc.c migrate.c partition.c partition_balance.c skew_monitor.c
+FABRIC_HEADERS += clustering.h endpoint.h exchange.h fabric.h hb.h hlc.h meta_batch.h migrate.h partition.h partition_balance.h roster.h service_list.h skew_monitor.h
+FABRIC_SOURCES += clustering.c endpoint.c exchange.c fabric.c hb.c hlc.c migrate.c partition.c partition_balance.c service_list.c skew_monitor.c
 ifneq ($(USE_EE),1)
   FABRIC_SOURCES += meta_batch_ce.c
   FABRIC_SOURCES += migrate_ce.c

@@ -107,6 +107,7 @@ char *cf_fault_context_strings[] = {
 		"rw-client",
 		"scan",
 		"security",
+		"service-list",
 		"sindex",
 		"skew",
 		"smd",
