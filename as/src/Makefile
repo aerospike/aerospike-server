@@ -94,8 +94,12 @@ INCLUDES += -I$(AI)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
-INCLUDES += -I$(S2)
-INCLUDES += -I$(XDR_INCLUDES)
+ifdef S2
+  INCLUDES += -I$(S2)
+endif
+ifdef XDR_INCLUDES
+  INCLUDES += -I$(XDR_INCLUDES)
+endif
 
 ifeq ($(USE_LUAJIT),1)
   INCLUDES += -I$(LUAJIT)/src
