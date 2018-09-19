@@ -950,7 +950,11 @@ update_reduce(const void *key, void *data, void *udata)
 
 	int32_t res = as_fabric_send(node, m, AS_FABRIC_CHANNEL_CTRL);
 
-	if (res != AS_FABRIC_SUCCESS) {
+	if (res == AS_FABRIC_ERR_NO_NODE) {
+		cf_detail(AS_SERVICE_LIST, "unknown node %lx", node);
+		as_fabric_msg_put(m);
+	}
+	else if (res != AS_FABRIC_SUCCESS) {
 		cf_warning(AS_SERVICE_LIST, "error while sending %s to %lx: %d",
 				op_str(op), node, res);
 		as_fabric_msg_put(m);
