@@ -20,25 +20,17 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#pragma once
+
 //==========================================================
 // Includes.
 //
 
-#pragma once
-
 #include <stdbool.h>
+#include <stdint.h>
 
-#include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_vector.h"
-
+#include "dynbuf.h"
 #include "node.h"
-
-
-//==========================================================
-// Forward declarations.
-//
-
-struct cf_dyn_buf_s;
 
 
 //==========================================================
@@ -79,8 +71,8 @@ extern __thread uint64_t g_replica_write_counter;
 // Public API.
 //
 
-void as_health_get_outliers(struct cf_dyn_buf_s *db);
-void as_health_get_stats(struct cf_dyn_buf_s *db);
+void as_health_get_outliers(cf_dyn_buf* db);
+void as_health_get_stats(cf_dyn_buf* db);
 void as_health_start();
 
 // Not called directly - called by inline wrappers below.

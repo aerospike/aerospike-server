@@ -27,10 +27,15 @@
 #include "base/health.h"
 
 #include <pthread.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
