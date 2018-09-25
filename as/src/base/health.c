@@ -26,14 +26,17 @@
 
 #include "base/health.h"
 
+#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>
 
 #include "citrusleaf/cf_atomic.h"
 
 #include "cf_mutex.h"
+#include "dynbuf.h"
 #include "errno.h"
 #include "fault.h"
+#include "node.h"
 #include "shash.h"
 
 #include "base/cfg.h"
@@ -328,9 +331,6 @@ health_add_device_latency(uint32_t ns_id, uint32_t d_id, uint64_t start_us)
 	uint64_t delta_us = cf_getus() - start_us;
 	health_stat* hs = &g_local_stats.device_read_lat[ns_id - 1][d_id];
 
-	cf_debug(AS_HEALTH, "device stat: ns %s device %s delta-us %lu",
-			g_config.namespaces[ns_id - 1]->name, hs->id, delta_us);
-
 	add_latency_sample(hs, delta_us);
 }
 
@@ -342,8 +342,6 @@ health_add_node_counter(cf_node node, as_health_node_stat_type type)
 	if (cf_shash_get(g_stats, &node, &ps) != CF_SHASH_OK) {
 		ps = create_node(node);
 	}
-
-	cf_debug(AS_HEALTH, "node stat: node %lx type %d", node, type);
 
 	add_counter_sample(&ps->node_stats[type]);
 }
@@ -358,9 +356,6 @@ health_add_ns_latency(cf_node node, uint32_t ns_id,
 	if (cf_shash_get(g_stats, &node, &ps) != CF_SHASH_OK) {
 		ps = create_node(node);
 	}
-
-	cf_debug(AS_HEALTH, "ns stat: node %lx ns %s type %d delta-us %lu", node,
-			g_config.namespaces[ns_id - 1]->name, type, delta_us);
 
 	add_latency_sample(&ps->ns_stats[ns_id - 1][type], delta_us);
 }
