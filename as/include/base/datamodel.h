@@ -1136,7 +1136,7 @@ struct as_namespace_s {
 
 #define INVALID_SET_ID 0
 
-#define IS_SET_EVICTION_DISABLED(p_set)		(cf_atomic32_get(p_set->disable_eviction) == 1)
+#define IS_SET_EVICTION_DISABLED(p_set)		(cf_atomic32_get(&p_set->disable_eviction) == 1)
 #define DISABLE_SET_EVICTION(p_set, on_off)	(cf_atomic32_set(&p_set->disable_eviction, on_off ? 1 : 0))
 
 typedef enum {
@@ -1161,8 +1161,8 @@ struct as_set_s {
 
 static inline bool
 as_set_stop_writes(as_set *p_set) {
-	uint64_t n_objects = cf_atomic64_get(p_set->n_objects);
-	uint64_t stop_writes_count = cf_atomic64_get(p_set->stop_writes_count);
+	uint64_t n_objects = cf_atomic64_get(&p_set->n_objects);
+	uint64_t stop_writes_count = cf_atomic64_get(&p_set->stop_writes_count);
 
 	return stop_writes_count != 0 && n_objects >= stop_writes_count;
 }

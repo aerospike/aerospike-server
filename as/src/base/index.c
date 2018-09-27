@@ -249,7 +249,7 @@ as_index_tree_release(as_index_tree *tree)
 uint64_t
 as_index_tree_size(as_index_tree *tree)
 {
-	return tree ? cf_atomic64_get(tree->n_elements) : 0;
+	return tree ? cf_atomic64_get(&tree->n_elements) : 0;
 }
 
 

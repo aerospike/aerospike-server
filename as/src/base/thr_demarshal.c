@@ -311,7 +311,7 @@ thr_demarshal_set_buffer(cf_socket *sock, buffer_type type, int size)
 		return -1; // cf_crash() should have a "noreturn" attribute, but is a macro
 	}
 
-	int tmp = ck_pr_load_int(max);
+	int tmp = cf_atomic_int_get(max);
 
 	if (tmp < 0) {
 		if (thr_demarshal_read_integer(proc, &tmp) < 0) {

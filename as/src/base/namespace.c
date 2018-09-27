@@ -720,15 +720,15 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	// Statistics:
 
 	cf_dyn_buf_append_string(db, "objects=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_objects));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(&p_set->n_objects));
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "tombstones=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_tombstones));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(&p_set->n_tombstones));
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "memory_data_bytes=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_bytes_memory));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(&p_set->n_bytes_memory));
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "truncate_lut=");
@@ -738,22 +738,22 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	// Configuration:
 
 	cf_dyn_buf_append_string(db, "stop-writes-count=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->stop_writes_count));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(&p_set->stop_writes_count));
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "set-enable-xdr=");
 
-	if (cf_atomic32_get(p_set->enable_xdr) == AS_SET_ENABLE_XDR_TRUE) {
+	if (cf_atomic32_get(&p_set->enable_xdr) == AS_SET_ENABLE_XDR_TRUE) {
 		cf_dyn_buf_append_string(db, "true");
 	}
-	else if (cf_atomic32_get(p_set->enable_xdr) == AS_SET_ENABLE_XDR_FALSE) {
+	else if (cf_atomic32_get(&p_set->enable_xdr) == AS_SET_ENABLE_XDR_FALSE) {
 		cf_dyn_buf_append_string(db, "false");
 	}
-	else if (cf_atomic32_get(p_set->enable_xdr) == AS_SET_ENABLE_XDR_DEFAULT) {
+	else if (cf_atomic32_get(&p_set->enable_xdr) == AS_SET_ENABLE_XDR_DEFAULT) {
 		cf_dyn_buf_append_string(db, "use-default");
 	}
 	else {
-		cf_dyn_buf_append_uint32(db, cf_atomic32_get(p_set->enable_xdr));
+		cf_dyn_buf_append_uint32(db, cf_atomic32_get(&p_set->enable_xdr));
 	}
 
 	cf_dyn_buf_append_char(db, ':');

@@ -379,7 +379,7 @@ as_job_info(as_job* _job, as_mon_jobstat* stat)
 	stat->progress_pct		= as_job_progress(_job);
 	stat->run_time			= active_ms;
 	stat->time_since_done	= since_finish_ms;
-	stat->recs_read			= cf_atomic64_get(_job->n_records_read);
+	stat->recs_read			= cf_atomic64_get(&_job->n_records_read);
 
 	strcpy(stat->ns, _job->ns->name);
 	strcpy(stat->set, as_job_safe_set_name(_job));

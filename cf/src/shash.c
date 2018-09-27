@@ -175,7 +175,7 @@ cf_shash_get_size(cf_shash *h)
 	cf_assert(h, CF_MISC, "bad param");
 
 	// For now, not bothering with different methods per lock mode.
-	return cf_atomic32_get(h->n_elements);
+	return cf_atomic32_get(&h->n_elements);
 }
 
 void

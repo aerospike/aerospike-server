@@ -541,7 +541,7 @@ hlc_logical_ts_set(as_hlc_timestamp* hlc_ts, uint16_t logical_ts)
 static as_hlc_timestamp
 hlc_ts_get()
 {
-	return ck_pr_load_64(&g_now);
+	return cf_atomic64_get(&g_now);
 }
 
 /**

@@ -879,7 +879,7 @@ run_emigration_reinserter(void *arg)
 	emigration_state emig_state;
 
 	// Reduce over the reinsert hash until finished.
-	while ((emig_state = cf_atomic32_get(emig->state)) != EMIG_STATE_ABORTED) {
+	while ((emig_state = cf_atomic32_get(&emig->state)) != EMIG_STATE_ABORTED) {
 		if (emig->cluster_key != as_exchange_cluster_key()) {
 			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 			return NULL;
@@ -1010,7 +1010,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	uint32_t waits = 0;
 
-	while (cf_atomic32_get(emig->bytes_emigrating) > MAX_BYTES_EMIGRATING &&
+	while (cf_atomic32_get(&emig->bytes_emigrating) > MAX_BYTES_EMIGRATING &&
 			emig->cluster_key == as_exchange_cluster_key()) {
 		usleep(1000);
 

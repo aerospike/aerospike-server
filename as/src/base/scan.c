@@ -596,8 +596,8 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	if (job->fail_on_cluster_change &&
-			(cf_atomic_int_get(ns->migrate_tx_partitions_remaining) != 0 ||
-			 cf_atomic_int_get(ns->migrate_rx_partitions_remaining) != 0)) {
+			(cf_atomic_int_get(&ns->migrate_tx_partitions_remaining) != 0 ||
+			 cf_atomic_int_get(&ns->migrate_rx_partitions_remaining) != 0)) {
 		// TODO - was AS_PROTO_RESULT_FAIL_UNAVAILABLE - ok?
 		cf_warning(AS_SCAN, "basic scan job not started - migration");
 		as_job_destroy(_job);
@@ -1298,7 +1298,7 @@ udf_bg_scan_job_finish(as_job* _job)
 {
 	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 
-	while (cf_atomic32_get(job->n_active_tr) != 0) {
+	while (cf_atomic32_get(&job->n_active_tr) != 0) {
 		usleep(100);
 	}
 
@@ -1339,9 +1339,9 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 
 	sprintf(extra, ":udf-filename=%s:udf-function=%s:udf-active=%u:udf-success=%lu:udf-failed=%lu",
 			job->origin.def.filename, job->origin.def.function,
-			cf_atomic32_get(job->n_active_tr),
-			cf_atomic64_get(job->n_successful_tr),
-			cf_atomic64_get(job->n_failed_tr));
+			cf_atomic32_get(&job->n_active_tr),
+			cf_atomic64_get(&job->n_successful_tr),
+			cf_atomic64_get(&job->n_failed_tr));
 }
 
 //----------------------------------------------------------
@@ -1382,7 +1382,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_record_done(r_ref, ns);
 
 	// TODO - replace this mechanism with signal-based counter?
-	while (cf_atomic32_get(job->n_active_tr) >
+	while (cf_atomic32_get(&job->n_active_tr) >
 			g_config.scan_max_udf_transactions) {
 		usleep(50);
 	}

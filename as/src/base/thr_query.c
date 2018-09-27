@@ -679,7 +679,7 @@ query_release_prereserved_partitions(as_query_transaction * qtr)
 static inline void
 query_update_stats(as_query_transaction *qtr)
 {
-	uint64_t rows = cf_atomic64_get(qtr->n_result_records);
+	uint64_t rows = cf_atomic64_get(&qtr->n_result_records);
 
 	switch (qtr->job_type) {
 		case QUERY_TYPE_LOOKUP:
@@ -900,7 +900,7 @@ query_netio_start_cb(void *udata, int seq)
 
 	// It is needed to send all the packets in sequence
 	// A packet can be requeued after being half sent.
-	if (seq > cf_atomic32_get(qtr->netio_pop_seq)) {
+	if (seq > cf_atomic32_get(&qtr->netio_pop_seq)) {
 		return AS_NETIO_CONTINUE;
 	}
 
@@ -952,7 +952,7 @@ query_netio_finish_cb(void *data, int retcode)
 static int
 query_netio_wait(as_query_transaction *qtr)
 {
-	return (cf_atomic32_get(qtr->n_io_outstanding) > MAX_OUTSTANDING_IO_REQ) ? AS_QUERY_ERR : AS_QUERY_OK;
+	return (cf_atomic32_get(&qtr->n_io_outstanding) > MAX_OUTSTANDING_IO_REQ) ? AS_QUERY_ERR : AS_QUERY_OK;
 }
 
 // Returns AS_NETIO_OK always
@@ -1911,7 +1911,7 @@ query_process_udfreq(query_work *qudf)
 
 		for (int i = 0; i < keys_arr->num; i++) {
 
-			while (cf_atomic32_get(qtr->n_udf_tr_queued) >= (AS_QUERY_MAX_UDF_TRANSACTIONS * (qtr->priority / 10 + 1))) {
+			while (cf_atomic32_get(&qtr->n_udf_tr_queued) >= (AS_QUERY_MAX_UDF_TRANSACTIONS * (qtr->priority / 10 + 1))) {
 				usleep(g_config.query_sleep_us);
 				query_check_timeout(qtr);
 				if (qtr_failed(qtr)) {
@@ -1982,7 +1982,7 @@ query_process_ioreq(query_work *qio)
 				goto Cleanup;
 			}
 
-			int64_t nresults = cf_atomic64_get(qtr->n_result_records);
+			int64_t nresults = cf_atomic64_get(&qtr->n_result_records);
 			if (nresults > 0 && (nresults % qtr->priority == 0))
 			{
 				usleep(g_config.query_sleep_us);
@@ -2293,13 +2293,13 @@ query_qtr_enqueue(as_query_transaction *qtr, bool is_requeue)
 	cf_atomic64 * queue_full_err;
 	if (qtr->short_running) {
 		limit          = g_config.query_short_q_max_size;
-		size           = cf_atomic32_get(g_query_short_running);
+		size           = cf_atomic32_get(&g_query_short_running);
 		q              = g_query_short_queue;
 		queue_full_err = &qtr->ns->query_short_queue_full;
 	}
 	else {
 		limit          = g_config.query_long_q_max_size;
-		size           = cf_atomic32_get(g_query_long_running);
+		size           = cf_atomic32_get(&g_query_long_running);
 		q              = g_query_long_queue;
 		queue_full_err = &qtr->ns->query_long_queue_full;
 	}
@@ -2361,14 +2361,14 @@ query_qtr_check_and_requeue(as_query_transaction *qtr)
 	// Step 1: If the query batch is done then wait for number of outstanding qwork to
 	// finish. This may slow down query responses get the better model
 	if (qtr_finished(qtr)) {
-		if ((cf_atomic32_get(qtr->n_qwork_active) == 0)
-				&& (cf_atomic32_get(qtr->n_io_outstanding) == 0)
-				&& (cf_atomic32_get(qtr->n_udf_tr_queued) == 0)) {
+		if ((cf_atomic32_get(&qtr->n_qwork_active) == 0)
+				&& (cf_atomic32_get(&qtr->n_io_outstanding) == 0)
+				&& (cf_atomic32_get(&qtr->n_udf_tr_queued) == 0)) {
 			cf_detail(AS_QUERY, "Request is finished");
 			return AS_QUERY_DONE;
 		}
 		do_enqueue = true;
-		cf_detail(AS_QUERY, "Request not finished qwork(%d) io(%d)", cf_atomic32_get(qtr->n_qwork_active), cf_atomic32_get(qtr->n_io_outstanding));
+		cf_detail(AS_QUERY, "Request not finished qwork(%d) io(%d)", cf_atomic32_get(&qtr->n_qwork_active), cf_atomic32_get(&qtr->n_io_outstanding));
 	}
 
 	// Step 2: Client is slow requeue
@@ -2380,7 +2380,7 @@ query_qtr_check_and_requeue(as_query_transaction *qtr)
 	// checking number of records read. Please note that it makes sure the false
 	// entries in secondary index does not effect this decision. All short running
 	// queries perform I/O in the batch thread context.
-	if ((cf_atomic64_get(qtr->n_result_records) >= g_config.query_threshold)
+	if ((cf_atomic64_get(&qtr->n_result_records) >= g_config.query_threshold)
 			&& qtr->short_running) {
 		qtr->short_running       = false;
 		// Change batch size to the long running job batch size value
@@ -2389,16 +2389,16 @@ query_qtr_check_and_requeue(as_query_transaction *qtr)
 		cf_atomic32_incr(&g_query_long_running);
 		cf_atomic64_incr(&qtr->ns->query_long_reqs);
 		cf_atomic64_decr(&qtr->ns->query_short_reqs);
-		cf_detail(AS_QUERY, "Query Queued Into Long running thread pool %ld %d", cf_atomic64_get(qtr->n_result_records), qtr->short_running);
+		cf_detail(AS_QUERY, "Query Queued Into Long running thread pool %ld %d", cf_atomic64_get(&qtr->n_result_records), qtr->short_running);
 		do_enqueue = true;
 	}
 
 	if (do_enqueue) {
 		int ret = AS_QUERY_OK;
 		qtr_lock(qtr);
-		if ((cf_atomic32_get(qtr->n_qwork_active) != 0)
-				|| (cf_atomic32_get(qtr->n_io_outstanding) != 0)
-				|| (cf_atomic32_get(qtr->n_udf_tr_queued) != 0)) {
+		if ((cf_atomic32_get(&qtr->n_qwork_active) != 0)
+				|| (cf_atomic32_get(&qtr->n_io_outstanding) != 0)
+				|| (cf_atomic32_get(&qtr->n_udf_tr_queued) != 0)) {
 			cf_detail(AS_QUERY, "Job Setup for Requeue %p", qtr);
 
 			// Release of one of the above will perform requeue... look for
@@ -2418,7 +2418,7 @@ static bool
 query_process_inline(as_query_transaction *qtr)
 {
 	if (   g_config.query_req_in_query_thread
-		|| (cf_atomic32_get((qtr)->n_qwork_active) > g_config.query_req_max_inflight)
+		|| (cf_atomic32_get(&qtr->n_qwork_active) > g_config.query_req_max_inflight)
 		|| (qtr && qtr->short_running)
 		|| (qtr && qtr_finished(qtr))) {
 		return true;
@@ -2466,7 +2466,7 @@ qtr_process(as_query_transaction *qtr)
 static int
 query_check_bound(as_query_transaction *qtr)
 {
-	if (cf_atomic64_get(qtr->n_result_records) > g_config.query_rec_count_bound) {
+	if (cf_atomic64_get(&qtr->n_result_records) > g_config.query_rec_count_bound) {
 		return AS_QUERY_ERR;
 	}
 	return AS_QUERY_OK;
@@ -3025,7 +3025,7 @@ as_query_list_job_reduce_fn(const void *key, uint32_t keylen, void *object, void
 	cf_dyn_buf_append_string(db, ":job_type=");
 	cf_dyn_buf_append_int(db, qtr->job_type);
 	cf_dyn_buf_append_string(db, ":n_result_records=");
-	cf_dyn_buf_append_uint64(db, cf_atomic_int_get(qtr->n_result_records));
+	cf_dyn_buf_append_uint64(db, cf_atomic_int_get(&qtr->n_result_records));
 	cf_dyn_buf_append_string(db, ":run_time=");
 	cf_dyn_buf_append_uint64(db, (cf_getns() - qtr->start_time) / 1000);
 	cf_dyn_buf_append_string(db, ":state=");
@@ -3304,7 +3304,7 @@ as_query_worker_reinit(int set_size, int *actual_size)
 
 	pthread_rwlock_wrlock(&g_query_lock);
 	// Add threads if count is increased
-	int i = cf_atomic32_get(g_query_worker_threadcnt);
+	int i = cf_atomic32_get(&g_query_worker_threadcnt);
 	g_config.query_worker_threads = set_size;
 	if (set_size > g_query_worker_threadcnt) {
 		for (; i < set_size; i++) {
@@ -3349,7 +3349,7 @@ as_query_reinit(int set_size, int *actual_size)
 
 	pthread_rwlock_wrlock(&g_query_lock);
 	// Add threads if count is increased
-	int i = cf_atomic32_get(g_query_threadcnt);
+	int i = cf_atomic32_get(&g_query_threadcnt);
 
 	// make it multiple of 2
 	if (set_size % 2 != 0)

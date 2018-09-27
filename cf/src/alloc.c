@@ -46,7 +46,6 @@
 
 #include "fault.h"
 
-#include "aerospike/ck/ck_pr.h"
 #include "citrusleaf/cf_atomic.h"
 
 #include "warnings.h"
@@ -165,7 +164,7 @@ hook_get_site_id(const void *ra)
 	uint32_t site_id = (uint32_t)(uint64_t)ra & (MAX_SITES - 1);
 
 	for (uint32_t i = 0; i < MAX_SITES; ++i) {
-		const void *site_ra = ck_pr_load_ptr(g_site_ras + site_id);
+		const void *site_ra = cf_atomic_p_get(&g_site_ras[site_id]);
 
 		// The allocation site is already registered and we found its
 		// slot. Return the slot index.
@@ -180,7 +179,7 @@ hook_get_site_id(const void *ra)
 		// slot index.
 
 		if (site_ra == NULL && ck_pr_cas_ptr(g_site_ras + site_id, NULL, (void *)ra)) {
-			ck_pr_inc_32(&g_n_site_ras);
+			cf_atomic32_incr(&g_n_site_ras);
 			return site_id;
 		}
 
@@ -196,7 +195,7 @@ hook_get_site_id(const void *ra)
 static uint32_t
 hook_new_site_info_id(void)
 {
-	uint32_t info_id = ck_pr_faa_32(&g_n_site_infos, 1);
+	uint32_t info_id = __atomic_fetch_add(&g_n_site_infos, 1, __ATOMIC_SEQ_CST);
 
 	if (info_id >= g_n_site_infos) {
 		cf_crash(CF_ALLOC, "site info pool exhausted");
@@ -297,7 +296,7 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA %p, invalid site ID", jem_sz, p, ra);
 	}
 
-	const void *data_ra = ck_pr_load_ptr(g_site_ras + site_id);
+	const void *data_ra = cf_atomic_p_get(g_site_ras + site_id);
 
 	if (delta == 0xffff) {
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA %p, potential double free, possibly freed before with RA %p",
@@ -509,7 +508,7 @@ cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *map
 	}
 
 	if (site_count) {
-		*site_count = ck_pr_load_32(&g_n_site_ras);
+		*site_count = cf_atomic32_get(&g_n_site_ras);
 	}
 }
 
@@ -592,11 +591,11 @@ cf_alloc_log_site_infos(const char *file)
 	}
 
 	time_to_file(fh);
-	uint32_t n_site_infos = ck_pr_load_32(&g_n_site_infos);
+	uint32_t n_site_infos = cf_atomic32_get(&g_n_site_infos);
 
 	for (uint32_t i = 1; i < n_site_infos; ++i) {
 		site_info *info = g_site_infos + i;
-		const void *ra = ck_pr_load_ptr(g_site_ras + info->site_id);
+		const void *ra = cf_atomic_p_get(g_site_ras + info->site_id);
 		fprintf(fh, "0x%016" PRIx64 " %9d 0x%016zx 0x%016zx\n", (uint64_t)ra, info->thread_id,
 				info->size_hi, info->size_lo);
 	}
