@@ -99,10 +99,10 @@ rack_count(const as_namespace* ns)
 }
 
 void
-init_target_claims(uint32_t n_replicas, uint32_t n_nodes,
-		uint32_t* replicas_target_claims)
+init_target_claims_ap(const as_namespace* ns, const int translation[],
+		uint32_t* target_claims)
 {
-	cf_crash(AS_PARTITION, "CE code called init_target_claims()");
+	cf_crash(AS_PARTITION, "CE code called init_target_claims_ap()");
 }
 
 void

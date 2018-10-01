@@ -729,14 +729,13 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	}
 
 	uint32_t claims_size = ns->prefer_uniform_balance ?
-			ns->replication_factor * ns->cluster_size : 0;
+			ns->replication_factor * g_cluster_size : 0;
 	uint32_t claims[claims_size];
 	uint32_t target_claims[claims_size];
 
 	if (ns->prefer_uniform_balance) {
 		memset(claims, 0, sizeof(claims));
-		init_target_claims(ns->replication_factor, ns->cluster_size,
-				target_claims);
+		init_target_claims_ap(ns, translation, target_claims);
 	}
 
 	uint32_t ns_pending_immigrations = 0;

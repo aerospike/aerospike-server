@@ -168,7 +168,7 @@ void process_pb_tasks(cf_queue* tq);
 void balance_namespace_ap(struct as_namespace_s* ns, cf_queue* mq);
 uint32_t rack_count(const struct as_namespace_s* ns);
 void fill_translation(int translation[], const struct as_namespace_s* ns);
-void init_target_claims(uint32_t n_replicas, uint32_t n_nodes, uint32_t* target_claims);
+void init_target_claims_ap(const struct as_namespace_s* ns, const int translation[], uint32_t* target_claims);
 void fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix, cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, const int translation[]);
 void uniform_adjust_row(cf_node* node_seq, uint32_t n_nodes, sl_ix_t* ns_sl_ix, uint32_t n_replicas, uint32_t* claims, const uint32_t* target_claims, const uint32_t* rack_ids, uint32_t n_racks);
 void rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t n_ids, uint32_t n_racks, uint32_t start_n);
