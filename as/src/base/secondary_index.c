@@ -4081,7 +4081,7 @@ void
 as_sindex_init_smd()
 {
 	int retval = as_smd_create_module(SINDEX_MODULE,
-				as_smd_majority_consensus_merge, NULL,
+				NULL, NULL,
 				NULL, NULL,
 				as_sindex_smd_accept_cb, NULL,
 				NULL, NULL);

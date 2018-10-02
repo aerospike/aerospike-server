@@ -3241,6 +3241,8 @@ static uint32_t key2idx_get_index(as_hashmap *map, const char *key)
 	return new_index;
 }
 
+// TODO - currently this is unused (was used by sindex), but leaving it around
+// until SMD rewrite, just in case...
 int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
 									as_smd_item_list_t **lists_to_merge, size_t num_list, void *udata)
 {
