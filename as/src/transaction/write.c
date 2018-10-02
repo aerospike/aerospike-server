@@ -569,7 +569,7 @@ write_master(rw_request* rw, as_transaction* tr)
 		int rv = as_record_get_create(tree, &tr->keyd, &r_ref, ns);
 
 		if (rv < 0) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: fail as_record_get_create() ", ns->name);
+			cf_detail_digest(AS_RW, &tr->keyd, "{%s} write_master: fail as_record_get_create() ", ns->name);
 			write_master_failed(tr, 0, record_created, tree, 0, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return TRANS_DONE_ERROR;
 		}

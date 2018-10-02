@@ -58,7 +58,7 @@ cf_arenax_err
 cf_arenax_add_stage(cf_arenax* arena)
 {
 	if (arena->stage_count >= arena->max_stages) {
-		cf_warning(CF_ARENAX, "can't allocate more than %u arena stages",
+		cf_ticker_warning(CF_ARENAX, "can't allocate more than %u arena stages",
 				arena->max_stages);
 		return CF_ARENAX_ERR_STAGE_CREATE;
 	}
@@ -66,7 +66,8 @@ cf_arenax_add_stage(cf_arenax* arena)
 	uint8_t* p_stage = (uint8_t*)cf_try_malloc(arena->stage_size);
 
 	if (! p_stage) {
-		cf_warning(CF_ARENAX, "could not allocate %zu-byte arena stage %u",
+		cf_ticker_warning(CF_ARENAX,
+				"could not allocate %zu-byte arena stage %u",
 				arena->stage_size, arena->stage_count);
 		return CF_ARENAX_ERR_STAGE_CREATE;
 	}

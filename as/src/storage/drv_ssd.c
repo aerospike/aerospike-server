@@ -2682,7 +2682,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 	int rv = as_record_get_create(p_partition->tree, &block->keyd, &r_ref, ns);
 
 	if (rv < 0) {
-		cf_warning_digest(AS_DRV_SSD, &block->keyd, "record-add as_record_get_create() failed ");
+		cf_detail_digest(AS_DRV_SSD, &block->keyd, "record-add as_record_get_create() failed ");
 		return;
 	}
 

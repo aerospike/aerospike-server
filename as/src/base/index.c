@@ -743,7 +743,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 	cf_arenax_handle n_h = cf_arenax_alloc(isprig->arena, isprig->puddle);
 
 	if (n_h == 0) {
-		cf_warning(AS_INDEX, "arenax alloc failed");
+		cf_ticker_warning(AS_INDEX, "arenax alloc failed");
 		cf_mutex_unlock(&isprig->pair->reduce_lock);
 		cf_mutex_unlock(&isprig->pair->lock);
 		return -1;
