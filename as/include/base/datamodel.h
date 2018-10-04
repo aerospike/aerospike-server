@@ -791,15 +791,14 @@ struct as_namespace_s {
 	uint32_t		storage_defrag_queue_min;
 	uint32_t		storage_defrag_sleep;
 	int				storage_defrag_startup_minimum;
-	PAD_BOOL		storage_disable_odirect;
 	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
-	PAD_BOOL		storage_enable_osync;
 	char*			storage_encryption_key_file;
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_fsync_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
+	PAD_BOOL		storage_read_page_cache;
 	PAD_BOOL		storage_serialize_tomb_raider; // relevant only for enterprise edition
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 

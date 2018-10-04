@@ -205,6 +205,7 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->set_name = NULL;
 	rd->key_size = 0;
 	rd->key = NULL;
+	rd->read_page_cache = false;
 	rd->is_durable_delete = false;
 
 	if (as_storage_record_create_table[ns->storage_type]) {
@@ -237,6 +238,7 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->set_name = NULL;
 	rd->key_size = 0;
 	rd->key = NULL;
+	rd->read_page_cache = false;
 	rd->is_durable_delete = false;
 
 	if (as_storage_record_open_table[ns->storage_type]) {

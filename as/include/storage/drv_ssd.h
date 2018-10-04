@@ -26,11 +26,13 @@
 // Includes.
 //
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
@@ -58,11 +60,6 @@ struct drv_ssd_s;
 // Typedefs & constants.
 //
 
-// Linux has removed O_DIRECT, but not its functionality.
-#ifndef O_DIRECT
-#define O_DIRECT 00040000
-#endif
-
 #define SSD_HEADER_OLD_MAGIC	(0x4349747275730707L)
 #define SSD_HEADER_MAGIC		(0x4349747275730322L)
 #define SSD_VERSION				3
@@ -85,8 +82,6 @@ struct drv_ssd_s;
 // SSD_HEADER_SIZE must be a power of 2 and >= MAX_WRITE_BLOCK_SIZE.
 // Do NOT change SSD_HEADER_SIZE!
 #define SSD_HEADER_SIZE (8 * 1024 * 1024)
-
-// FIXME - remove when fmt-chg is done and no COMPILER_ASSERT collisions.
 
 
 //------------------------------------------------
@@ -233,6 +228,7 @@ typedef struct drv_ssd_s {
 	ssd_write_buf	*defrag_swb;		// swb currently being filled by defrag
 
 	cf_queue		*fd_q;				// queue of open fds
+	cf_queue		*fd_cache_q;		// queue of open fds that use page cache
 	cf_queue		*shadow_fd_q;		// queue of open fds on shadow, if any
 
 	cf_queue		*free_wblock_q;		// IDs of free wblocks
@@ -400,6 +396,9 @@ conflict_resolution_pol ssd_cold_start_policy(struct as_namespace_s *ns);
 void ssd_cold_start_init_repl_state(struct as_namespace_s *ns, struct as_index_s* r);
 
 // Miscellaneous.
+int ssd_fd_get(drv_ssd *ssd);
+int ssd_shadow_fd_get(drv_ssd *ssd);
+void ssd_fd_put(drv_ssd *ssd, int fd);
 void ssd_header_init_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, ssd_device_header *header);
 void ssd_header_validate_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, const ssd_device_header *header);
 void ssd_flush_final_cfg(struct as_namespace_s *ns);
@@ -544,4 +543,55 @@ ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks,
 	if (ssd->ns->storage_encryption_key_file != NULL) {
 		ssd_do_decrypt_whole(ssd->encryption_key, off, n_rblocks, block);
 	}
+}
+
+
+//
+// Device IO.
+//
+
+static inline bool
+pread_all(int fd, void* buf, size_t size, off_t offset)
+{
+	ssize_t result;
+
+	while ((result = pread(fd, buf, size, offset)) != (ssize_t)size) {
+		if (result < 0) {
+			return false; // let the caller log errors
+		}
+
+		if (result == 0) { // should only happen if caller passed 0 size
+			errno = EINVAL;
+			return false;
+		}
+
+		buf += result;
+		offset += result;
+		size -= result;
+	}
+
+	return true;
+}
+
+static inline bool
+pwrite_all(int fd, void* buf, size_t size, off_t offset)
+{
+	ssize_t result;
+
+	while ((result = pwrite(fd, buf, size, offset)) != (ssize_t)size) {
+		if (result < 0) {
+			return false; // let the caller log errors
+		}
+
+		if (result == 0) { // should only happen if caller passed 0 size
+			errno = EINVAL;
+			return false;
+		}
+
+		buf += result;
+		offset += result;
+		size -= result;
+	}
+
+	return true;
 }

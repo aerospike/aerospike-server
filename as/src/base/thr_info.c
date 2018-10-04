@@ -1860,15 +1860,14 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
 		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
 		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
-		info_append_bool(db, "storage-engine.disable-odirect", ns->storage_disable_odirect);
 		info_append_bool(db, "storage-engine.enable-benchmarks-storage", ns->storage_benchmarks_enabled);
-		info_append_bool(db, "storage-engine.enable-osync", ns->storage_enable_osync);
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.fsync-max-sec", ns->storage_fsync_max_us / 1000000);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
+		info_append_bool(db, "storage-engine.read-page-cache", ns->storage_read_page_cache);
 		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 	}
@@ -3143,6 +3142,19 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_info(AS_INFO, "Changing value of enable-hist-proxy of ns %s from %s to %s", ns->name, bool_val[ns->proxy_hist_enabled], context);
 				ns->proxy_hist_enabled = false;
 				histogram_clear(ns->proxy_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "read-page-cache", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of read-page-cache of ns %s from %s to %s", ns->name, bool_val[ns->storage_read_page_cache], context);
+				ns->storage_read_page_cache = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of read-page-cache of ns %s from %s to %s", ns->name, bool_val[ns->storage_read_page_cache], context);
+				ns->storage_read_page_cache = false;
 			}
 			else {
 				goto Error;

@@ -107,6 +107,26 @@ ssd_fd_get(drv_ssd *ssd)
 
 
 int
+ssd_fd_cache_get(drv_ssd *ssd)
+{
+	int fd = -1;
+	int rv = cf_queue_pop(ssd->fd_cache_q, (void*)&fd, CF_QUEUE_NOWAIT);
+
+	if (rv != CF_QUEUE_OK) {
+		fd = open(ssd->name, ssd->open_flag & ~(O_DIRECT | O_DSYNC),
+				S_IRUSR | S_IWUSR);
+
+		if (-1 == fd) {
+			cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED open: errno %d (%s)",
+					ssd->name, errno, cf_strerror(errno));
+		}
+	}
+
+	return fd;
+}
+
+
+int
 ssd_shadow_fd_get(drv_ssd *ssd)
 {
 	int fd = -1;
@@ -126,10 +146,17 @@ ssd_shadow_fd_get(drv_ssd *ssd)
 
 
 // Save an open file descriptor in the pool
-static inline void
+void
 ssd_fd_put(drv_ssd *ssd, int fd)
 {
 	cf_queue_push(ssd->fd_q, (void*)&fd);
+}
+
+
+static inline void
+ssd_fd_cache_put(drv_ssd *ssd, int fd)
+{
+	cf_queue_push(ssd->fd_cache_q, (void*)&fd);
 }
 
 
@@ -719,8 +746,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (pread(fd, read_buf, ssd->write_block_size, (off_t)file_offset) !=
-			(ssize_t)ssd->write_block_size) {
+	if (! pread_all(fd, read_buf, ssd->write_block_size, (off_t)file_offset)) {
 		cf_warning(AS_DRV_SSD, "%s: read failed: errno %d (%s)", ssd->name,
 				errno, cf_strerror(errno));
 		close(fd);
@@ -1239,13 +1265,12 @@ ssd_read_record(as_storage_rd *rd)
 
 		read_buf = cf_valloc(read_size);
 
-		int fd = ssd_fd_get(ssd);
+		int fd = rd->read_page_cache ? ssd_fd_cache_get(ssd) : ssd_fd_get(ssd);
 
 		uint64_t start_ns = ns->storage_benchmarks_enabled ? cf_getns() : 0;
 		uint64_t start_us = as_health_sample_device_read() ? cf_getus() : 0;
 
-		if (pread(fd, read_buf, read_size, (off_t)read_offset) !=
-				(ssize_t)read_size) {
+		if (! pread_all(fd, read_buf, read_size, (off_t)read_offset)) {
 			cf_warning(AS_DRV_SSD, "%s: read failed: size %lu: errno %d (%s)",
 					ssd->name, read_size, errno, cf_strerror(errno));
 			cf_free(read_buf);
@@ -1259,7 +1284,12 @@ ssd_read_record(as_storage_rd *rd)
 
 		as_health_add_device_latency(ns->id, r->file_id, start_us);
 
-		ssd_fd_put(ssd, fd);
+		if (rd->read_page_cache) {
+			ssd_fd_cache_put(ssd, fd);
+		}
+		else {
+			ssd_fd_put(ssd, fd);
+		}
 
 		block = (ssd_record*)(read_buf + record_buf_indent);
 		ssd_decrypt_whole(ssd, record_offset, r->n_rblocks, block);
@@ -1436,8 +1466,7 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (pwrite(fd, swb->buf, ssd->write_block_size, write_offset) !=
-			(ssize_t)ssd->write_block_size) {
+	if (! pwrite_all(fd, swb->buf, ssd->write_block_size, write_offset)) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->name, errno, cf_strerror(errno));
 	}
@@ -1458,8 +1487,7 @@ ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (pwrite(fd, swb->buf, ssd->write_block_size, write_offset) !=
-			(ssize_t)ssd->write_block_size) {
+	if (! pwrite_all(fd, swb->buf, ssd->write_block_size, write_offset)) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->shadow_name, errno, cf_strerror(errno));
 	}
@@ -2402,7 +2430,7 @@ ssd_read_header(drv_ssd *ssd)
 
 	ssd_device_header *header = cf_valloc(read_size);
 
-	if (pread(fd, (void*)header, read_size, 0) != (ssize_t)read_size) {
+	if (! pread_all(fd, (void*)header, read_size, 0)) {
 		cf_crash(AS_DRV_SSD, "%s: read failed: errno %d (%s)", ssd_name, errno,
 				cf_strerror(errno));
 	}
@@ -2492,7 +2520,7 @@ ssd_empty_header(int fd, const char* device_name)
 
 	memset(h, 0, SSD_HEADER_SIZE);
 
-	if (pwrite(fd, h, SSD_HEADER_SIZE, 0) != SSD_HEADER_SIZE) {
+	if (! pwrite_all(fd, h, SSD_HEADER_SIZE, 0)) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				device_name, errno, cf_strerror(errno));
 	}
@@ -2515,7 +2543,7 @@ ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size)
 
 	int fd = ssd_fd_get(ssd);
 
-	if (pwrite(fd, (void*)flush, flush_sz, flush_offset) != (ssize_t)flush_sz) {
+	if (! pwrite_all(fd, (void*)flush, flush_sz, flush_offset)) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->name, errno, cf_strerror(errno));
 	}
@@ -2534,7 +2562,7 @@ ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size)
 
 	fd = ssd_shadow_fd_get(ssd);
 
-	if (pwrite(fd, (void*)flush, flush_sz, flush_offset) != (ssize_t)flush_sz) {
+	if (! pwrite_all(fd, (void*)flush, flush_sz, flush_offset)) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->shadow_name, errno, cf_strerror(errno));
 	}
@@ -2891,15 +2919,13 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 	bool prefetch = cf_arenax_want_prefetch(ssd->ns->arena);
 
 	while (file_offset < ssd->file_size && n_unused_wblocks < 10) {
-		if (pread(fd, buf, wblock_size, (off_t)file_offset) !=
-				(ssize_t)wblock_size) {
+		if (! pread_all(fd, buf, wblock_size, (off_t)file_offset)) {
 			cf_crash(AS_DRV_SSD, "%s: read failed: errno %d (%s)",
 					read_ssd_name, errno, cf_strerror(errno));
 		}
 
-		if (read_shadow &&
-				pwrite(write_fd, (void*)buf, wblock_size, (off_t)file_offset) !=
-						(ssize_t)wblock_size) {
+		if (read_shadow && ! pwrite_all(write_fd, (void*)buf, wblock_size,
+				(off_t)file_offset)) {
 			cf_crash(AS_DRV_SSD, "%s: write failed: errno %d (%s)", ssd->name,
 					errno, cf_strerror(errno));
 		}
@@ -3331,7 +3357,7 @@ find_io_min_size(int fd, const char *ssd_name)
 	size_t read_sz = LO_IO_MIN_SIZE;
 
 	while (read_sz <= HI_IO_MIN_SIZE) {
-		if (pread(fd, (void*)buf, read_sz, 0) == (ssize_t)read_sz) {
+		if (pread_all(fd, (void*)buf, read_sz, 0)) {
 			cf_free(buf);
 			return read_sz;
 		}
@@ -3362,14 +3388,11 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 		drv_ssd *ssd = &ssds->ssds[i];
 
 		ssd->name = ns->storage_devices[i];
-
-		ssd->open_flag = O_RDWR |
-				(ns->storage_disable_odirect ? 0 : O_DIRECT) |
-				(ns->storage_enable_osync ? O_SYNC : 0);
+		ssd->open_flag = O_RDWR | O_DIRECT | O_DSYNC;
 
 		int fd = open(ssd->name, ssd->open_flag, S_IRUSR | S_IWUSR);
 
-		if (-1 == fd) {
+		if (fd == -1) {
 			cf_crash(AS_DRV_SSD, "unable to open device %s: %s", ssd->name,
 					cf_strerror(errno));
 		}
@@ -3487,7 +3510,8 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 			}
 		}
 
-		ssd->open_flag = O_RDWR;
+		ssd->open_flag = O_RDWR |
+				(ns->storage_commit_to_device ? O_DIRECT | O_DSYNC : 0);
 
 		// Validate that file can be opened, create it if it doesn't exist.
 		int fd = open(ssd->name, ssd->open_flag | O_CREAT, S_IRUSR | S_IWUSR);
@@ -3654,6 +3678,7 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 		// Note: free_wblock_q, defrag_wblock_q created after loading devices.
 
 		ssd->fd_q = cf_queue_create(sizeof(int), true);
+		ssd->fd_cache_q = cf_queue_create(sizeof(int), true);
 
 		if (ssd->shadow_name) {
 			ssd->shadow_fd_q = cf_queue_create(sizeof(int), true);

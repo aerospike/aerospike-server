@@ -457,6 +457,9 @@ read_local(as_transaction* tr)
 
 	as_storage_record_open(ns, r, &rd);
 
+	// If configuration permits, allow reads to use page cache.
+	rd.read_page_cache = ns->storage_read_page_cache;
+
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
 	if (as_transaction_has_key(tr) &&

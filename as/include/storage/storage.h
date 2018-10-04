@@ -64,6 +64,7 @@ typedef struct as_storage_rd_s {
 	uint32_t				key_size;
 	const uint8_t			*key;
 
+	bool					read_page_cache;
 	bool					is_durable_delete; // enterprise only
 
 	// Specific to storage type AS_STORAGE_ENGINE_SSD:
