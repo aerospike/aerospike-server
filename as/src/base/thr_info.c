@@ -45,7 +45,6 @@
 #include "cf_str.h"
 #include "dynbuf.h"
 #include "fault.h"
-#include "meminfo.h"
 #include "shash.h"
 #include "socket.h"
 #include "xmem.h"
@@ -196,6 +195,115 @@ info_segv_test(char *name, cf_dyn_buf *db)
 }
 #endif
 
+// TODO: This function should move elsewhere.
+void
+sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
+{
+	if (free_mem != NULL) {
+		*free_mem = 0;
+	}
+
+	if (free_pct != NULL) {
+		*free_pct = 0;
+	}
+
+	int32_t fd = open("/proc/meminfo", O_RDONLY, 0);
+
+	if (fd < 0) {
+		cf_warning(AS_INFO, "failed to open /proc/meminfo: %d", errno);
+		return;
+	}
+
+	char buf[4096] = { 0 };
+	size_t limit = sizeof(buf);
+	size_t total = 0;
+
+	while (total < limit) {
+		ssize_t len = read(fd, buf + total, limit - total);
+
+		if (len < 0) {
+			cf_warning(AS_INFO, "couldn't read /proc/meminfo: %d", errno);
+			close(fd);
+			return;
+		}
+
+		if (len == 0) {
+			break; // EOF
+		}
+
+		total += (size_t)len;
+	}
+
+	close(fd);
+
+	if (total == limit) {
+		cf_warning(AS_INFO, "/proc/meminfo exceeds %zu bytes", limit);
+		return;
+	}
+
+	uint64_t mem_total = 0;
+	uint64_t active = 0;
+	uint64_t inactive = 0;
+	uint64_t cached = 0;
+	uint64_t buffers = 0;
+	uint64_t shmem = 0;
+
+	char* cur = buf;
+	char* save_ptr;
+
+	// We split each line into two fields separated by ':'. strtoul() will
+	// safely ignore the spaces and 'kB' (if present).
+	while (true) {
+		char* name_tok = strtok_r(cur, ":", &save_ptr);
+
+		if (name_tok == NULL) {
+			break; // no more lines
+		}
+
+		cur = NULL;
+
+		char* value_tok = strtok_r(cur, "\r\n", &save_ptr);
+
+		if (value_tok == NULL) {
+			cf_warning(AS_INFO, "/proc/meminfo line missing value token");
+			return;
+		}
+
+		if (strcmp(name_tok, "MemTotal") == 0) {
+			mem_total = strtoul(value_tok, NULL, 0);
+		}
+		else if (strcmp(name_tok, "Active") == 0) {
+			active = strtoul(value_tok, NULL, 0);
+		}
+		else if (strcmp(name_tok, "Inactive") == 0) {
+			inactive = strtoul(value_tok, NULL, 0);
+		}
+		else if (strcmp(name_tok, "Cached") == 0) {
+			cached = strtoul(value_tok, NULL, 0);
+		}
+		else if (strcmp(name_tok, "Buffers") == 0) {
+			buffers = strtoul(value_tok, NULL, 0);
+		}
+		else if (strcmp(name_tok, "Shmem") == 0) {
+			shmem = strtoul(value_tok, NULL, 0);
+		}
+	}
+
+	// Add the cached memory and buffers, which are effectively available if and
+	// when needed. Caution: subtract the shared memory, which is included in
+	// the cached memory, but is not available.
+	uint64_t avail = mem_total - active - inactive + cached + buffers - shmem;
+
+	if (free_mem != NULL) {
+		*free_mem = avail * 1024;
+	}
+
+	if (free_pct != NULL) {
+		*free_pct = mem_total == 0 ? 0 : (avail * 100) / mem_total;
+	}
+}
+
+
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
@@ -209,12 +317,9 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint64(db, "uptime", (cf_getms() - g_start_ms) / 1000); // not in ticker
 
-	int freepct;
-	bool swapping;
-
-	cf_meminfo(NULL, NULL, &freepct, &swapping);
-	info_append_int(db, "system_free_mem_pct", freepct);
-	info_append_bool(db, "system_swapping", swapping);
+	uint32_t free_pct;
+	sys_mem_info(NULL, &free_pct);
+	info_append_int(db, "system_free_mem_pct", free_pct);
 
 	size_t allocated_kbytes;
 	size_t active_kbytes;
@@ -1717,29 +1822,29 @@ info_network_config_get(cf_dyn_buf *db)
 		snprintf(key, sizeof(key), "tls[%u].name", i);
 		info_append_string_safe(db, key, spec->name);
 
-		snprintf(key, sizeof(key), "tls[%u].cert_file", i);
-		info_append_string_safe(db, key, spec->cert_file);
-
-		snprintf(key, sizeof(key), "tls[%u].key_file", i);
-		info_append_string_safe(db, key, spec->key_file);
-
-		snprintf(key, sizeof(key), "tls[%u].key_file_password", i);
-		info_append_string_safe(db, key, spec->key_file_password);
-
-		snprintf(key, sizeof(key), "tls[%u].ca_file", i);
+		snprintf(key, sizeof(key), "tls[%u].ca-file", i);
 		info_append_string_safe(db, key, spec->ca_file);
 
-		snprintf(key, sizeof(key), "tls[%u].ca_path", i);
+		snprintf(key, sizeof(key), "tls[%u].ca-path", i);
 		info_append_string_safe(db, key, spec->ca_path);
 
-		snprintf(key, sizeof(key), "tls[%u].cert_blacklist", i);
+		snprintf(key, sizeof(key), "tls[%u].cert-blacklist", i);
 		info_append_string_safe(db, key, spec->cert_blacklist);
+
+		snprintf(key, sizeof(key), "tls[%u].cert-file", i);
+		info_append_string_safe(db, key, spec->cert_file);
+
+		snprintf(key, sizeof(key), "tls[%u].cipher-suite", i);
+		info_append_string_safe(db, key, spec->cipher_suite);
+
+		snprintf(key, sizeof(key), "tls[%u].key-file", i);
+		info_append_string_safe(db, key, spec->key_file);
+
+		snprintf(key, sizeof(key), "tls[%u].key-file-password", i);
+		info_append_string_safe(db, key, spec->key_file_password);
 
 		snprintf(key, sizeof(key), "tls[%u].protocols", i);
 		info_append_string_safe(db, key, spec->protocols);
-
-		snprintf(key, sizeof(key), "tls[%u].cipher_suite", i);
-		info_append_string_safe(db, key, spec->cipher_suite);
 	}
 }
 

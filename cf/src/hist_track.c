@@ -703,13 +703,15 @@ threshold_to_bucket(int threshold)
 static int
 thresholds_to_buckets(const char* thresholds, uint32_t buckets[])
 {
-	// Copy since strtok() is destructive.
+	// Copy since strtok_r() is destructive.
 	char toks[strlen(thresholds) + 1];
 
 	strcpy(toks, thresholds);
 
+	char* save_ptr;
+	char* tok = strtok_r(toks, ",", &save_ptr);
+
 	int i = 0;
-	char* tok = strtok(toks, ",");
 
 	while (tok) {
 		if (i == MAX_NUM_COLS) {
@@ -725,7 +727,7 @@ thresholds_to_buckets(const char* thresholds, uint32_t buckets[])
 
 		buckets[i++] = (uint32_t)b;
 
-		tok = strtok(NULL, ",");
+		tok = strtok_r(NULL, ",", &save_ptr);
 	}
 
 	return i;

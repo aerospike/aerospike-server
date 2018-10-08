@@ -10,11 +10,11 @@ endif
 
 HEADERS += arenax.h bits.h cf_mutex.h cf_str.h compare.h daemon.h dynbuf.h
 HEADERS += enhanced_alloc.h fault.h hist.h hist_track.h linear_hist.h
-HEADERS += mem_count.h meminfo.h msg.h node.h rchash.h shash.h socket.h tls.h
+HEADERS += msg.h node.h rchash.h shash.h socket.h tls.h
 HEADERS += vmapx.h xmem.h
 
 SOURCES += alloc.c arenax.c cf_mutex.c cf_str.c daemon.c dynbuf.c fault.c
-SOURCES += hardware.c hist.c hist_track.c linear_hist.c meminfo.c msg.c node.c
+SOURCES += hardware.c hist.c hist_track.c linear_hist.c msg.c node.c
 SOURCES += rchash.c shash.c socket.c vmapx.c
 ifneq ($(USE_EE),1)
   SOURCES += arenax_ce.c socket_ce.c tls_ce.c

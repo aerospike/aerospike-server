@@ -44,7 +44,6 @@
 #include "fault.h"
 #include "hist.h"
 #include "hist_track.h"
-#include "meminfo.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -255,11 +254,10 @@ log_line_clock()
 void
 log_line_system_memory()
 {
-	uint64_t freemem;
-	int freepct;
-	bool swapping;
+	uint64_t free_mem;
+	uint32_t free_pct;
 
-	cf_meminfo(NULL, &freemem, &freepct, &swapping);
+	sys_mem_info(&free_mem, &free_pct);
 
 	size_t allocated_kbytes;
 	size_t active_kbytes;
@@ -269,10 +267,9 @@ log_line_system_memory()
 	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
 			&efficiency_pct, NULL);
 
-	cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d%s heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
-			freemem / 1024,
-			freepct,
-			swapping ? " SWAPPING!" : "",
+	cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
+			free_mem / 1024,
+			free_pct,
 			allocated_kbytes, active_kbytes, mapped_kbytes,
 			efficiency_pct
 			);
