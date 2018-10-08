@@ -58,6 +58,7 @@
 #define MAX_IDLE_SEC (60 * 30) // 30 min
 #define MAX_ID_SZ 200
 #define MAX_NODES_TRACKED (2 * AS_CLUSTER_SZ)
+#define MIN_CONFIDENCE_PCT 50
 #define MOV_AVG_COEFF 0.5
 #define SAMPLE_PERIOD_US (50 * 1000) // sampling 50ms for every sec
 #define SEC_US (1000 * 1000)
@@ -536,11 +537,11 @@ create_local_stats()
 static peer_stats*
 create_node(cf_node node)
 {
-	peer_stats* ps = cf_malloc(sizeof(peer_stats));
-
-	memset(ps, 0, sizeof(peer_stats));
-
 	size_t buckets_sz;
+
+	peer_stats* ps = cf_malloc(sizeof(peer_stats));
+	memset(ps, 0, sizeof(peer_stats));
+	ps->is_in_cluster = true;
 
 	for (uint32_t type = 0; type < AS_HEALTH_NODE_TYPE_MAX; type++) {
 		buckets_sz = sizeof(bucket) * node_stat_spec[type].n_buckets;
@@ -645,7 +646,8 @@ find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold,
 				(((mov_avg - q2) * 100 / mov_avg) + 0.5);
 		// TODO - heuristic to filter on confidence level?
 
-		if (mov_avg > upper_bound && mov_avg > threshold) {
+		if (mov_avg > upper_bound && mov_avg > threshold &&
+				confidence_pct >= MIN_CONFIDENCE_PCT) {
 			outlier outlier = {
 					.confidence_pct = confidence_pct,
 					.id = ma[i].id,
