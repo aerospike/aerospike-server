@@ -249,7 +249,7 @@ sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 	uint64_t shmem = 0;
 
 	char* cur = buf;
-	char* save_ptr;
+	char* save_ptr = NULL;
 
 	// We split each line into two fields separated by ':'. strtoul() will
 	// safely ignore the spaces and 'kB' (if present).

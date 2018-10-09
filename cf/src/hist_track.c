@@ -708,7 +708,7 @@ thresholds_to_buckets(const char* thresholds, uint32_t buckets[])
 
 	strcpy(toks, thresholds);
 
-	char* save_ptr;
+	char* save_ptr = NULL;
 	char* tok = strtok_r(toks, ",", &save_ptr);
 
 	int i = 0;
