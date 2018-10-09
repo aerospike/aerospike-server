@@ -260,9 +260,9 @@ sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 			break; // no more lines
 		}
 
-		cur = NULL;
+		cur = NULL; // all except first name_tok use NULL
 
-		char* value_tok = strtok_r(cur, "\r\n", &save_ptr);
+		char* value_tok = strtok_r(NULL, "\r\n", &save_ptr);
 
 		if (value_tok == NULL) {
 			cf_warning(AS_INFO, "/proc/meminfo line missing value token");
