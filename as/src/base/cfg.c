@@ -289,6 +289,7 @@ typedef enum {
 	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
 	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_LOG_MILLIS,
+	CASE_SERVICE_MIGRATE_FILL_DELAY,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_THREADS,
 	CASE_SERVICE_MIN_CLUSTER_SIZE,
@@ -834,6 +835,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "log-millis",						CASE_SERVICE_LOG_MILLIS},
+		{ "migrate-fill-delay",				CASE_SERVICE_MIGRATE_FILL_DELAY },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
 		{ "min-cluster-size",				CASE_SERVICE_MIN_CLUSTER_SIZE },
@@ -2357,6 +2359,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_LOG_MILLIS:
 				cf_fault_log_millis(cfg_bool(&line));
+				break;
+			case CASE_SERVICE_MIGRATE_FILL_DELAY:
+				cfg_enterprise_only(&line);
+				c->migrate_fill_delay = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING:
 				c->migrate_max_num_incoming = cfg_u32(&line, 0, AS_MIGRATE_LIMIT_MAX_NUM_INCOMING);

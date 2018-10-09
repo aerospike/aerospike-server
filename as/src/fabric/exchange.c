@@ -597,7 +597,8 @@ static as_exchange g_exchange = { 0 };
  */
 typedef enum
 {
-	AS_EXCHANGE_REBALANCE_FLAG_UNIFORM = 0x01
+	AS_EXCHANGE_REBALANCE_FLAG_UNIFORM = 0x01,
+	AS_EXCHANGE_REBALANCE_FLAG_QUIESCE = 0x02
 } as_exchange_rebalance_flags;
 
 /**
@@ -1549,6 +1550,10 @@ exchange_msg_data_payload_set(msg* msg)
 			rebalance_flags[ns_ix] |= AS_EXCHANGE_REBALANCE_FLAG_UNIFORM;
 		}
 
+		if (ns->pending_quiesce) {
+			rebalance_flags[ns_ix] |= AS_EXCHANGE_REBALANCE_FLAG_QUIESCE;
+		}
+
 		if (rebalance_flags[ns_ix] != 0) {
 			have_rebalance_flags = true;
 		}
@@ -2490,6 +2495,15 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 			AS_EXCHANGE_REBALANCE_FLAG_UNIFORM) == 0) {
 		ns->prefer_uniform_balance = false;
 	}
+
+	bool is_node_quiesced = (namespace_data->rebalance_flags &
+			AS_EXCHANGE_REBALANCE_FLAG_QUIESCE) != 0;
+
+	if (node == g_config.self_node) {
+		ns->is_quiesced = is_node_quiesced;
+	}
+
+	ns->quiesced[sl_ix] = is_node_quiesced;
 }
 
 /**
@@ -2562,6 +2576,9 @@ exchange_exchanging_pre_commit()
 		memset(ns->cluster_versions, 0, sizeof(ns->cluster_versions));
 
 		memset(ns->rack_ids, 0, sizeof(ns->rack_ids));
+
+		ns->is_quiesced = false;
+		memset(ns->quiesced, 0, sizeof(ns->quiesced));
 
 		ns->roster_generation = 0;
 		ns->roster_count = 0;

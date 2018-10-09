@@ -70,6 +70,8 @@ struct pb_task_s;
 
 #define TX_FLAGS_NONE           ((uint32_t) 0x0)
 #define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
+#define TX_FLAGS_LEAD           ((uint32_t) 0x2)
+#define TX_FLAGS_CONTINGENT     ((uint32_t) 0x4)
 
 
 //==========================================================
@@ -195,6 +197,7 @@ typedef struct immigration_hkey_s {
 // Globals.
 extern cf_rchash *g_emigration_hash;
 extern cf_rchash *g_immigration_hash;
+extern cf_queue g_emigration_q;
 
 
 // Emigration, immigration, & pickled record destructors.
@@ -202,6 +205,8 @@ void emigration_release(emigration *emig);
 void immigration_release(immigration *immig);
 
 // Emigration.
+void emigrate_fill_queue_init();
+void emigrate_queue_push(emigration *emig);
 bool should_emigrate_record(emigration *emig, struct as_index_ref_s *r_ref);
 uint32_t emigration_pack_info(const emigration *emig, const struct as_index_s *r);
 

@@ -187,7 +187,7 @@ static void validate_smd_directory();
 int
 main(int argc, char **argv)
 {
-	g_start_ms = cf_getms();
+	g_start_sec = cf_get_seconds();
 
 	// Initialize memory allocation.
 	cf_alloc_init();

@@ -132,6 +132,7 @@ typedef enum {
 typedef struct emigration_pop_info_s {
 	uint32_t order;
 	uint64_t dest_score;
+	uint32_t type;
 	uint64_t n_elements;
 
 	uint64_t avoid_dest;
@@ -150,10 +151,10 @@ typedef struct emigration_reinsert_ctrl_s {
 
 cf_rchash *g_emigration_hash = NULL;
 cf_rchash *g_immigration_hash = NULL;
+cf_queue g_emigration_q;
 
 static uint64_t g_avoid_dest = 0;
 static cf_atomic32 g_emigration_id = 0;
-static cf_queue g_emigration_q;
 static cf_queue g_emigration_slow_q;
 
 
@@ -246,6 +247,8 @@ as_migrate_init()
 		cf_crash(AS_MIGRATE, "failed to create immigration reaper thread");
 	}
 
+	emigrate_fill_queue_init();
+
 	as_fabric_register_msg_fn(M_TYPE_MIGRATE, migrate_mt, sizeof(migrate_mt),
 			MIG_MSG_SCRATCH_SIZE, migrate_receive_msg_cb, NULL);
 }
@@ -278,7 +281,7 @@ as_migrate_emigrate(const pb_task *task)
 
 	cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_instance_count);
 
-	cf_queue_push(&g_emigration_q, &emig);
+	emigrate_queue_push(emig);
 }
 
 
@@ -538,6 +541,7 @@ emigration_pop(emigration **emigp)
 
 	best.order = 0xFFFFffff;
 	best.dest_score = 0;
+	best.type = 0;
 	best.n_elements = 0xFFFFffffFFFFffff;
 
 	best.avoid_dest = 0;
@@ -578,15 +582,20 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 
 	uint32_t order = emig->rsv.ns->migrate_order;
 	uint64_t dest_score = (uint64_t)emig->dest - best->avoid_dest;
+	uint32_t type = (emig->tx_flags & TX_FLAGS_LEAD) != 0 ?
+			2 : ((emig->tx_flags & TX_FLAGS_CONTINGENT) != 0 ? 1 : 0);
 	uint64_t n_elements = as_index_tree_size(emig->rsv.tree);
 
 	if (order < best->order ||
 			(order == best->order &&
-					(dest_score > best->dest_score ||
-							(dest_score == best->dest_score &&
-									n_elements < best->n_elements)))) {
+				(dest_score > best->dest_score ||
+					(dest_score == best->dest_score &&
+						(type > best->type ||
+							(type == best->type &&
+								n_elements < best->n_elements)))))) {
 		best->order = order;
 		best->dest_score = dest_score;
+		best->type = type;
 		best->n_elements = n_elements;
 
 		g_avoid_dest = (uint64_t)emig->dest;

@@ -859,6 +859,7 @@ struct as_namespace_s {
 	cf_atomic_int	migrate_rx_partitions_active;
 	cf_atomic_int	migrate_tx_partitions_initial;
 	cf_atomic_int	migrate_tx_partitions_remaining;
+	cf_atomic_int	migrate_tx_partitions_lead_remaining;
 	cf_atomic_int	migrate_rx_partitions_initial;
 	cf_atomic_int	migrate_rx_partitions_remaining;
 	cf_atomic_int	migrate_signals_active;
@@ -1104,6 +1105,12 @@ struct as_namespace_s {
 	cf_node succession[AS_CLUSTER_SZ];
 	as_partition_version cluster_versions[AS_CLUSTER_SZ][AS_PARTITIONS];
 	uint32_t rack_ids[AS_CLUSTER_SZ]; // is observed-rack-ids in CP mode
+
+	// Quiescence - relevant only for enterprise edition.
+	uint32_t active_size;
+	bool pending_quiesce;
+	bool is_quiesced;
+	bool quiesced[AS_CLUSTER_SZ];
 
 	// Observed nodes - relevant only for enterprise edition.
 	uint32_t observed_cluster_size;

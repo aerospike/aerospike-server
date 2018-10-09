@@ -122,6 +122,7 @@ typedef struct as_config_s {
 	int				n_info_threads;
 	bool			keep_caps_ssd_health;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
+	uint32_t		migrate_fill_delay;
 	uint32_t		migrate_max_num_incoming;
 	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
@@ -266,6 +267,7 @@ bool as_config_cluster_name_set(const char* cluster_name);
 bool as_config_cluster_name_matches(const char* cluster_name);
 
 bool as_config_error_enterprise_only();
+bool as_info_error_enterprise_only(); // TODO - until we have an info split
 
 extern as_config g_config;
 

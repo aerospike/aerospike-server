@@ -32,6 +32,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "fault.h"
 #include "node.h"
 
 #include "fabric/hb.h"
@@ -106,6 +107,9 @@ as_migrate_result as_partition_migrations_all_done(struct as_namespace_s* ns, ui
 // Counter that tells clients partition ownership has changed.
 extern cf_atomic32 g_partition_generation;
 
+// Time of last rebalance.
+extern uint64_t g_rebalance_sec;
+
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -166,16 +170,19 @@ void balance_namespace(struct as_namespace_s* ns, cf_queue* mq);
 void prepare_for_appeals();
 void process_pb_tasks(cf_queue* tq);
 void balance_namespace_ap(struct as_namespace_s* ns, cf_queue* mq);
+void set_active_size(struct as_namespace_s* ns);
 uint32_t rack_count(const struct as_namespace_s* ns);
 void fill_translation(int translation[], const struct as_namespace_s* ns);
 void init_target_claims_ap(const struct as_namespace_s* ns, const int translation[], uint32_t* target_claims);
 void fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix, cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, const int translation[]);
+void quiesce_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
 void uniform_adjust_row(cf_node* node_seq, uint32_t n_nodes, sl_ix_t* ns_sl_ix, uint32_t n_replicas, uint32_t* claims, const uint32_t* target_claims, const uint32_t* rack_ids, uint32_t n_racks);
 void rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t n_ids, uint32_t n_racks, uint32_t start_n);
 uint32_t find_self(const cf_node* ns_node_seq, const struct as_namespace_s* ns);
 int shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, int working_master_n, const as_partition_version* working_master_version);
 uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns, uint32_t working_master_n, uint32_t n_dupl);
-void queue_namespace_migrations(as_partition* p, struct as_namespace_s* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], cf_queue* mq);
+void emig_lead_flags_ap(const as_partition* p, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t lead_flags[]);
+void queue_namespace_migrations(as_partition* p, struct as_namespace_s* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], const uint32_t lead_flags[], cf_queue* mq);
 void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
 void handle_version_change(as_partition* p, struct as_namespace_s* ns, as_partition_version* orig_version);
 

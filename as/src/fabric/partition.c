@@ -121,6 +121,7 @@ as_partition_freeze(as_partition* p)
 	p->n_dupl = 0;
 
 	p->pending_emigrations = 0;
+	p->pending_lead_emigrations = 0;
 	p->pending_immigrations = 0;
 
 	p->n_witnesses = 0;
@@ -556,8 +557,8 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 	size_t db_sz = db->used_sz;
 
 	cf_dyn_buf_append_string(db, "namespace:partition:state:n_replicas:replica:"
-			"n_dupl:working_master:emigrates:immigrates:records:tombstones:"
-			"regime:version:final_version;");
+			"n_dupl:working_master:emigrates:lead_emigrates:immigrates:records:"
+			"tombstones:regime:version:final_version;");
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
@@ -581,9 +582,11 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64_x(db, p->working_master);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, p->pending_emigrations);
+			cf_dyn_buf_append_uint32(db, p->pending_emigrations);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, p->pending_immigrations);
+			cf_dyn_buf_append_uint32(db, p->pending_lead_emigrations);
+			cf_dyn_buf_append_char(db, ':');
+			cf_dyn_buf_append_uint32(db, p->pending_immigrations);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint32(db, as_index_tree_size(p->tree));
 			cf_dyn_buf_append_char(db, ':');

@@ -118,20 +118,28 @@ typedef struct as_partition_s {
 	as_partition_version final_version;
 	as_partition_version version;
 
-	int pending_emigrations;
-	int pending_immigrations;
+	uint16_t pending_emigrations;
+	uint16_t pending_lead_emigrations;
+	uint16_t pending_immigrations;
 
-	uint32_t n_witnesses;
+	uint16_t n_witnesses;
 
-	// @ 48 bytes - room for 2 duplicates within above 64-byte cache line.
+	// @ 40 bytes - room for 3 duplicates within above 64-byte cache line.
 	cf_node dupls[AS_CLUSTER_SZ];
 
-	uint8_t align_2[16];
+	uint8_t align_2[24];
 	// @ 64-byte-aligned boundary.
 
 	bool immigrators[AS_CLUSTER_SZ];
+	// Byte alignment depends on AS_CLUSTER_SZ - pad below to realign.
+
+	uint8_t align_3[AS_CLUSTER_SZ == 8 ? 56 : 0];
+	// @ 64-byte-aligned boundary.
+
 	cf_node witnesses[AS_CLUSTER_SZ];
 } as_partition;
+
+COMPILER_ASSERT(sizeof(as_partition) % 64 == 0);
 
 typedef struct as_partition_reservation_s {
 	struct as_namespace_s* ns;

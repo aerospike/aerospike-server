@@ -86,4 +86,4 @@ void sys_mem_info(uint64_t *free_mem, uint32_t *free_pct);
 extern bool g_mstats_enabled;
 
 // Needed by main():
-extern uint64_t g_start_ms;
+extern uint64_t g_start_sec;

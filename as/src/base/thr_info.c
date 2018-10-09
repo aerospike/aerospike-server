@@ -115,7 +115,7 @@ void as_storage_summarize_wblock_stats(as_namespace *ns);
 
 as_stats g_stats = { 0 }; // separate .c file not worth it
 
-uint64_t g_start_ms; // start time of the server
+uint64_t g_start_sec; // start time of the server
 
 static cf_queue *g_info_work_q = 0;
 
@@ -307,6 +307,8 @@ sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
+	uint64_t now_sec = cf_get_seconds();
+
 	as_exchange_cluster_info(db);
 	info_append_bool(db, "cluster_integrity", as_clustering_has_integrity()); // not in ticker
 	info_append_bool(db, "cluster_is_member", ! as_clustering_is_orphan()); // not in ticker
@@ -315,7 +317,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "cluster_clock_skew_ms", as_skew_monitor_skew());
 	as_skew_monitor_info(db);
 
-	info_append_uint64(db, "uptime", (cf_getms() - g_start_ms) / 1000); // not in ticker
+	info_append_uint64(db, "uptime", now_sec - g_start_sec); // not in ticker
 
 	uint32_t free_pct;
 	sys_mem_info(NULL, &free_pct);
@@ -400,6 +402,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	char paxos_principal[16 + 1];
 	sprintf(paxos_principal, "%lX", as_exchange_principal());
 	info_append_string(db, "paxos_principal", paxos_principal);
+
+	info_append_uint64(db, "time_since_rebalance", now_sec - g_rebalance_sec); // not in ticker
 
 	info_append_bool(db, "migrate_allowed", as_partition_balance_are_migrations_allowed());
 	info_append_uint64(db, "migrate_partitions_remaining", as_partition_balance_remaining_migrations());
@@ -1205,6 +1209,48 @@ info_command_physical_devices(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+int
+info_command_quiesce(char *name, cf_dyn_buf *db)
+{
+	// Command format: "quiesce:"
+
+	if (as_info_error_enterprise_only()) {
+		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
+
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		g_config.namespaces[ns_ix]->pending_quiesce = true;
+	}
+
+	cf_dyn_buf_append_string(db, "ok");
+
+	cf_info(AS_INFO, "quiesced this node");
+
+	return 0;
+}
+
+int
+info_command_quiesce_undo(char *name, cf_dyn_buf *db)
+{
+	// Command format: "quiesce-undo:"
+
+	if (as_info_error_enterprise_only()) {
+		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
+
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		g_config.namespaces[ns_ix]->pending_quiesce = false;
+	}
+
+	cf_dyn_buf_append_string(db, "ok");
+
+	cf_info(AS_INFO, "un-quiesced this node");
+
+	return 0;
+}
+
 typedef struct rack_node_s {
 	uint32_t rack_id;
 	cf_node node;
@@ -1265,6 +1311,11 @@ int
 info_command_racks(char *name, char *params, cf_dyn_buf *db)
 {
 	// Command format: "racks:{namespace=<namespace-name>}"
+
+	if (as_info_error_enterprise_only()) {
+		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
 
 	char param_str[AS_ID_NAMESPACE_SZ] = { 0 };
 	int param_str_len = (int)sizeof(param_str);
@@ -1700,6 +1751,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_bool(db, "log-millis", cf_fault_is_logging_millis());
+	info_append_uint32(db, "migrate-fill-delay", g_config.migrate_fill_delay);
 	info_append_uint32(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
 	info_append_uint32(db, "migrate-threads", g_config.n_migrate_threads);
 	info_append_uint32(db, "min-cluster-size", g_config.clustering_config.cluster_size_min);
@@ -2270,6 +2322,17 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of cluster-name to '%s'", context);
+		}
+		else if (0 == as_info_parameter_get(params, "migrate-fill-delay", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "migrate-fill-delay is enterprise-only");
+				goto Error;
+			}
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of migrate-fill-delay from %u to %d ", g_config.migrate_fill_delay, val);
+			g_config.migrate_fill_delay = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -2882,6 +2945,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->migrate_sleep = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "tomb-raider-eligible-age", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "tomb-raider-eligible-age is enterprise-only");
+				goto Error;
+			}
 			uint64_t val;
 			if (cf_str_atoi_seconds(context, &val) != 0) {
 				cf_warning(AS_INFO, "tomb-raider-eligible-age must be an unsigned number with time unit (s, m, h, or d)");
@@ -2891,6 +2958,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->tomb_raider_eligible_age = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "tomb-raider-period", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "tomb-raider-period is enterprise-only");
+				goto Error;
+			}
 			uint64_t val;
 			if (cf_str_atoi_seconds(context, &val) != 0) {
 				cf_warning(AS_INFO, "tomb-raider-period must be an unsigned number with time unit (s, m, h, or d)");
@@ -2900,6 +2971,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->tomb_raider_period = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "tomb-raider-sleep", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "tomb-raider-sleep is enterprise-only");
+				goto Error;
+			}
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
@@ -3742,6 +3817,11 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 int
 info_command_revive(char *name, char *params, cf_dyn_buf *db)
 {
+	if (as_info_error_enterprise_only()) {
+		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
+
 	char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
 	int ns_name_len = (int)sizeof(ns_name);
 	int rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
@@ -3866,6 +3946,11 @@ namespace_roster_info(as_namespace *ns, cf_dyn_buf *db)
 int
 info_command_roster(char *name, char *params, cf_dyn_buf *db)
 {
+	if (as_info_error_enterprise_only()) {
+		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
+
 	char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
 	int ns_name_len = (int)sizeof(ns_name);
 	int rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
@@ -3917,6 +4002,11 @@ info_command_roster(char *name, char *params, cf_dyn_buf *db)
 int
 info_command_roster_set(char *name, char *params, cf_dyn_buf *db)
 {
+	if (as_info_error_enterprise_only()) {
+		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
+
 	// Get the namespace name.
 
 	char ns_name[AS_ID_NAMESPACE_SZ];
@@ -4905,6 +4995,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Partition balance state.
 
+	info_append_bool(db, "pending_quiesce", ns->pending_quiesce);
+	info_append_bool(db, "effective_is_quiesced", ns->is_quiesced);
+	info_append_uint64(db, "n_nodes_quiesced", ns->cluster_size - ns->active_size);
+
 	info_append_bool(db, "effective_prefer_uniform_balance", ns->prefer_uniform_balance);
 
 	// Migration stats.
@@ -4919,6 +5013,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64(db, "migrate_tx_partitions_initial", ns->migrate_tx_partitions_initial);
 	info_append_uint64(db, "migrate_tx_partitions_remaining", ns->migrate_tx_partitions_remaining);
+	info_append_uint64(db, "migrate_tx_partitions_lead_remaining", ns->migrate_tx_partitions_lead_remaining);
 
 	info_append_uint64(db, "migrate_rx_partitions_initial", ns->migrate_rx_partitions_initial);
 	info_append_uint64(db, "migrate_rx_partitions_remaining", ns->migrate_rx_partitions_remaining);
@@ -5984,7 +6079,8 @@ as_info_init()
 				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;"
 				"health-outliers;health-stats;hist-track-start;hist-track-stop;histogram;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;physical-devices;"
-				"racks;recluster;revive;roster;roster-set;service;services;services-alumni;services-alumni-reset;set-config;"
+				"quiesce;quiesce-undo;racks;recluster;revive;roster;roster-set;"
+				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;"
 				"smd;statistics;status;tip;tip-clear;truncate;truncate-undo;version;",
@@ -6076,6 +6172,8 @@ as_info_init()
 	as_info_set_command("peers-tls-alt", as_service_list_command, PERM_NONE);                 // The delta update version of "peers-tls-alt".
 	as_info_set_command("peers-tls-std", as_service_list_command, PERM_NONE);                 // The delta update version of "peers-tls-std".
 	as_info_set_command("physical-devices", info_command_physical_devices, PERM_NONE);        // Physical device information.
+	as_info_set_dynamic("quiesce", info_command_quiesce, PERM_SERVICE_CTRL);                  // Quiesce this node.
+	as_info_set_dynamic("quiesce-undo", info_command_quiesce_undo, PERM_SERVICE_CTRL);        // Un-quiesce this node.
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
 	as_info_set_command("recluster", info_command_recluster, PERM_NONE);                      // Force cluster to re-form. FIXME - what permission?
 	as_info_set_command("revive", info_command_revive, PERM_NONE);                            // Mark all partitions as "trusted".

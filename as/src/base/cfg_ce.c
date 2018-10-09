@@ -51,6 +51,13 @@ as_config_error_enterprise_only()
 	return true;
 }
 
+// TODO - until we have an info split.
+bool
+as_info_error_enterprise_only()
+{
+	return true;
+}
+
 
 //==========================================================
 // Private API - for enterprise separation only.

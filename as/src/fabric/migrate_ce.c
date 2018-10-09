@@ -30,6 +30,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "citrusleaf/cf_queue.h"
+
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -48,6 +50,17 @@ const uint32_t MY_MIG_FEATURES = 0;
 //==========================================================
 // Community Edition API.
 //
+
+void
+emigrate_fill_queue_init()
+{
+}
+
+void
+emigrate_queue_push(emigration *emig)
+{
+	cf_queue_push(&g_emigration_q, &emig);
+}
 
 bool
 should_emigrate_record(emigration *emig, as_index_ref *r_ref)

@@ -44,8 +44,8 @@
 // COMPILER_ASSERT(sizeof(my_int_array) / sizeof(int) == MY_INT_ARRAY_SIZE);
 //
 #define CGLUE(a, b) a##b
-#define CVERIFY(expr, line) typedef char CGLUE(compiler_assert_failed_on_line_, line)[(expr) ? 1 : -1]
-#define COMPILER_ASSERT(expr) CVERIFY(expr, __LINE__)
+#define CVERIFY(expr, counter) typedef char CGLUE(compiler_assert_failed_, counter)[(expr) ? 1 : -1]
+#define COMPILER_ASSERT(expr) CVERIFY(expr, __COUNTER__)
 
 // Use CF_MUST_CHECK with declarations to force caller to handle return value.
 //

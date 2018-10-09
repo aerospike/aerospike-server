@@ -63,6 +63,7 @@ const as_partition_version ZERO_VERSION = { 0 };
 //
 
 cf_atomic32 g_partition_generation = (uint32_t)-1;
+uint64_t g_rebalance_sec;
 
 // Using int for 4-byte size, but maintaining bool semantics.
 // TODO - ok as non-volatile, but should selectively load/store in the future.
@@ -279,6 +280,8 @@ as_partition_balance()
 	g_allow_migrations = true;
 	cf_detail(AS_PARTITION, "allow migrations");
 
+	g_rebalance_sec = cf_get_seconds(); // must precede process_pb_tasks()
+
 	process_pb_tasks(&mq);
 	cf_queue_destroy(&mq);
 }
@@ -309,7 +312,7 @@ as_partition_pending_migrations(as_partition* p)
 {
 	cf_mutex_lock(&p->lock);
 
-	bool pending = p->pending_immigrations + p->pending_emigrations > 0;
+	bool pending = p->pending_immigrations + p->pending_emigrations != 0;
 
 	cf_mutex_unlock(&p->lock);
 
@@ -344,8 +347,13 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 			cf_atomic_int_decr(&ns->migrate_tx_partitions_remaining);
 
 	if (migrates_tx_remaining < 0){
-		cf_warning(AS_PARTITION, "{%s:%u} (%d,%ld) emigrate_done - counter went negative",
+		cf_warning(AS_PARTITION, "{%s:%u} (%hu,%ld) emigrate_done - counter went negative",
 				ns->name, pid, p->pending_emigrations, migrates_tx_remaining);
+	}
+
+	if ((tx_flags & TX_FLAGS_LEAD) != 0) {
+		p->pending_lead_emigrations--;
+		cf_atomic_int_decr(&ns->migrate_tx_partitions_lead_remaining);
 	}
 
 	if (! is_self_final_master(p)) {
@@ -366,7 +374,7 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 
 		for (w_ix = 0; w_ix < (int)p->n_witnesses; w_ix++) {
 			pb_task_init(&task, p->witnesses[w_ix], ns, pid, orig_cluster_key,
-					PB_TASK_EMIG_SIGNAL_ALL_DONE, TX_FLAGS_NONE);
+					PB_TASK_EMIG_SIGNAL_ALL_DONE, TX_FLAGS_CONTINGENT);
 			cf_queue_push(&mq, &task);
 		}
 	}
@@ -453,7 +461,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 	// Sanity-check only.
 	if (migrates_rx_remaining < 0) {
-		cf_warning(AS_PARTITION, "{%s:%u} (%d,%ld) immigrate_done - counter went negative",
+		cf_warning(AS_PARTITION, "{%s:%u} (%hu,%ld) immigrate_done - counter went negative",
 				ns->name, pid, p->pending_immigrations, migrates_rx_remaining);
 	}
 
@@ -503,7 +511,8 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
 			if (p->immigrators[repl_ix]) {
 				pb_task_init(&task, p->replicas[repl_ix], ns, pid,
-						orig_cluster_key, PB_TASK_EMIG_TRANSFER, TX_FLAGS_NONE);
+						orig_cluster_key, PB_TASK_EMIG_TRANSFER,
+						TX_FLAGS_CONTINGENT);
 				cf_queue_push(&mq, &task);
 			}
 		}
@@ -511,9 +520,9 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	else {
 		cf_queue_init(&mq, sizeof(pb_task), p->n_witnesses, false);
 
-		for (uint32_t w_ix = 0; w_ix < p->n_witnesses; w_ix++) {
+		for (uint16_t w_ix = 0; w_ix < p->n_witnesses; w_ix++) {
 			pb_task_init(&task, p->witnesses[w_ix], ns, pid, orig_cluster_key,
-					PB_TASK_EMIG_SIGNAL_ALL_DONE, TX_FLAGS_NONE);
+					PB_TASK_EMIG_SIGNAL_ALL_DONE, TX_FLAGS_CONTINGENT);
 			cf_queue_push(&mq, &task);
 		}
 	}
@@ -551,8 +560,9 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 		return AS_MIGRATE_AGAIN;
 	}
 
-	// Not a replica - drop partition.
-	if (! is_self_replica(p) && ! as_partition_version_is_null(&p->version)) {
+	// Not a replica and not quiesced - drop partition.
+	if (! is_self_replica(p) && ! as_partition_version_is_null(&p->version) &&
+			! ns->is_quiesced) {
 		p->version = ZERO_VERSION;
 		drop_trees(p);
 		as_storage_save_pmeta(ns, p);
@@ -713,12 +723,16 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	// Figure out effective replication factor in the face of node failures.
 	apply_single_replica_limit_ap(ns);
 
+	// Active size will be less than cluster size if nodes are quiesced.
+	set_active_size(ns);
+
 	uint32_t n_racks = rack_count(ns);
 
 	// If a namespace is not on all nodes or is rack aware or uniform balance
-	// is preferred, it can't use the global node sequence and index tables.
+	// is preferred or nodes are quiesced, it can't use the global node sequence
+	// and index tables.
 	bool ns_not_equal_global = ns_less_than_global || n_racks != 1 ||
-			ns->prefer_uniform_balance;
+			ns->prefer_uniform_balance || ns->active_size != ns->cluster_size;
 
 	// The translation array is used to convert global table rows to namespace
 	// rows, if  necessary.
@@ -738,8 +752,9 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 		init_target_claims_ap(ns, translation, target_claims);
 	}
 
-	uint32_t ns_pending_immigrations = 0;
 	uint32_t ns_pending_emigrations = 0;
+	uint32_t ns_pending_lead_emigrations = 0;
+	uint32_t ns_pending_immigrations = 0;
 	uint32_t ns_pending_signals = 0;
 
 	uint32_t ns_fresh_partitions = 0;
@@ -769,15 +784,19 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 				fill_namespace_rows(full_node_seq, full_sl_ix, ns_node_seq,
 						ns_sl_ix, ns, translation);
 
+				if (ns->active_size != ns->cluster_size) {
+					quiesce_adjust_row(ns_node_seq, ns_sl_ix, ns);
+				}
+
 				if (ns->prefer_uniform_balance) {
-					uniform_adjust_row(ns_node_seq, ns->cluster_size, ns_sl_ix,
+					uniform_adjust_row(ns_node_seq, ns->active_size, ns_sl_ix,
 							ns->replication_factor, claims, target_claims,
 							ns->rack_ids, n_racks);
 				}
 				else if (n_racks != 1) {
 					rack_aware_adjust_row(ns_node_seq, ns_sl_ix,
 							ns->replication_factor, ns->rack_ids,
-							ns->cluster_size, n_racks, 1);
+							ns->active_size, n_racks, 1);
 				}
 			}
 
@@ -791,6 +810,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			p->n_dupl = 0;
 
 			p->pending_emigrations = 0;
+			p->pending_lead_emigrations = 0;
 			p->pending_immigrations = 0;
 
 			p->n_witnesses = 0;
@@ -841,8 +861,13 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 					advance_version_ap(p, ns_sl_ix, ns, self_n,
 							(uint32_t)working_master_n, n_dupl, dupls);
 
+					uint32_t lead_flags[ns->replication_factor];
+
+					emig_lead_flags_ap(p, ns_sl_ix, ns, lead_flags);
+
 					queue_namespace_migrations(p, ns, self_n,
-							ns_node_seq[working_master_n], n_dupl, dupls, mq);
+							ns_node_seq[working_master_n], n_dupl, dupls,
+							lead_flags, mq);
 
 					if (self_n == 0) {
 						fill_witnesses(p, ns_node_seq, ns_sl_ix, ns);
@@ -857,7 +882,9 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 				else {
 					// No migrations required - drop superfluous non-replica
 					// partitions immediately.
-					p->version = ZERO_VERSION;
+					if (! ns->is_quiesced) {
+						p->version = ZERO_VERSION;
+					}
 				}
 			}
 
@@ -867,12 +894,13 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 			handle_version_change(p, ns, &orig_version);
 
-			ns_pending_immigrations += (uint32_t)p->pending_immigrations;
-			ns_pending_emigrations += (uint32_t)p->pending_emigrations;
+			ns_pending_emigrations += p->pending_emigrations;
+			ns_pending_lead_emigrations += p->pending_lead_emigrations;
+			ns_pending_immigrations += p->pending_immigrations;
 
 			// TEMPORARY debugging.
 			if (pid < 20) {
-				cf_debug(AS_PARTITION, "ck%012lX %02u (%d %d) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
+				cf_debug(AS_PARTITION, "ck%012lX %02u (%hu %hu) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
 						as_exchange_cluster_key(), pid, p->pending_emigrations,
 						p->pending_immigrations,
 						VERSION_AS_STRING(&orig_version),
@@ -895,14 +923,15 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 		}
 	}
 
-	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u) expected-signals %u fresh-partitions %u",
-			ns->name, ns_pending_emigrations, ns_pending_immigrations,
-			ns_pending_signals, ns_fresh_partitions);
+	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u,%u) expected-signals %u fresh-partitions %u",
+			ns->name, ns_pending_emigrations, ns_pending_lead_emigrations,
+			ns_pending_immigrations, ns_pending_signals, ns_fresh_partitions);
 
 	ns->n_unavailable_partitions = 0;
 
 	ns->migrate_tx_partitions_initial = ns_pending_emigrations;
 	ns->migrate_tx_partitions_remaining = ns_pending_emigrations;
+	ns->migrate_tx_partitions_lead_remaining = ns_pending_lead_emigrations;
 
 	ns->migrate_rx_partitions_initial = ns_pending_immigrations;
 	ns->migrate_rx_partitions_remaining = ns_pending_immigrations;
@@ -1292,7 +1321,8 @@ find_family(const as_partition_version* self_version, uint32_t n_families,
 
 void
 queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n,
-		cf_node working_master, uint32_t n_dupl, cf_node dupls[], cf_queue* mq)
+		cf_node working_master, uint32_t n_dupl, cf_node dupls[],
+		const uint32_t lead_flags[], cf_queue* mq)
 {
 	pb_task task;
 
@@ -1300,13 +1330,13 @@ queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n,
 		// <><><><><><>  Final Master  <><><><><><>
 
 		if (g_config.self_node == working_master) {
-			p->pending_immigrations = (int)n_dupl;
+			p->pending_immigrations = (uint16_t)n_dupl;
 		}
 		else {
 			// Remove self from duplicates.
 			n_dupl = remove_node(dupls, n_dupl, g_config.self_node);
 
-			p->pending_immigrations = (int)n_dupl + 1;
+			p->pending_immigrations = (uint16_t)n_dupl + 1;
 		}
 
 		if (n_dupl != 0) {
@@ -1329,9 +1359,14 @@ queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n,
 		for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
 			if (p->immigrators[repl_ix]) {
 				p->pending_emigrations++;
+
+				if (lead_flags[repl_ix] != TX_FLAGS_NONE) {
+					p->pending_lead_emigrations++;
+				}
+
 				pb_task_init(&task, p->replicas[repl_ix], ns, p->id,
 						as_exchange_cluster_key(), PB_TASK_EMIG_TRANSFER,
-						TX_FLAGS_NONE);
+						lead_flags[repl_ix]);
 				cf_queue_push(mq, &task);
 			}
 		}
@@ -1347,16 +1382,26 @@ queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n,
 		}
 
 		p->pending_emigrations = 1;
+
+		if (lead_flags[0] != TX_FLAGS_NONE) {
+			p->pending_lead_emigrations = 1;
+		}
+
 		pb_task_init(&task, p->replicas[0], ns, p->id,
 				as_exchange_cluster_key(), PB_TASK_EMIG_TRANSFER,
-				TX_FLAGS_ACTING_MASTER);
+				TX_FLAGS_ACTING_MASTER | lead_flags[0]);
 		cf_queue_push(mq, &task);
 	}
 	else if (contains_self(dupls, n_dupl)) {
 		p->pending_emigrations = 1;
+
+		if (lead_flags[0] != TX_FLAGS_NONE) {
+			p->pending_lead_emigrations = 1;
+		}
+
 		pb_task_init(&task, p->replicas[0], ns, p->id,
 				as_exchange_cluster_key(), PB_TASK_EMIG_TRANSFER,
-				TX_FLAGS_NONE);
+				lead_flags[0]);
 		cf_queue_push(mq, &task);
 	}
 
@@ -1429,7 +1474,7 @@ partition_immigration_is_valid(const as_partition* p, cf_node source_node,
 	}
 
 	if (failure_reason) {
-		cf_warning(AS_PARTITION, "{%s:%u} immigrate_%s - source %lx working-master %lx pending-immigrations %d - %s",
+		cf_warning(AS_PARTITION, "{%s:%u} immigrate_%s - source %lx working-master %lx pending-immigrations %hu - %s",
 				ns->name, p->id, tag, source_node, p->working_master,
 				p->pending_immigrations, failure_reason);
 

@@ -92,6 +92,12 @@ process_pb_tasks(cf_queue* tq)
 	}
 }
 
+void
+set_active_size(as_namespace* ns)
+{
+	ns->active_size = ns->cluster_size;
+}
+
 uint32_t
 rack_count(const as_namespace* ns)
 {
@@ -103,6 +109,12 @@ init_target_claims_ap(const as_namespace* ns, const int translation[],
 		uint32_t* target_claims)
 {
 	cf_crash(AS_PARTITION, "CE code called init_target_claims_ap()");
+}
+
+void
+quiesce_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, as_namespace* ns)
+{
+	cf_crash(AS_PARTITION, "CE code called quiesce_adjust_row()");
 }
 
 void
@@ -119,6 +131,15 @@ rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
 		uint32_t n_racks, uint32_t start_n)
 {
 	cf_crash(AS_PARTITION, "CE code called rack_aware_adjust_row()");
+}
+
+void
+emig_lead_flags_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
+		const as_namespace* ns, uint32_t lead_flags[])
+{
+	for (uint32_t repl_ix = 0; repl_ix < ns->replication_factor; repl_ix++) {
+		lead_flags[repl_ix] = TX_FLAGS_LEAD;
+	}
 }
 
 void
