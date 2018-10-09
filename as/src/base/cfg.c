@@ -642,6 +642,8 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER,
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
+	// Obsoleted:
+	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
 	// Deprecated:
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD,
@@ -1197,6 +1199,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "read-page-cache",				CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE },
 		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
+		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
 		{ "defrag-max-blocks",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS },
 		{ "defrag-period",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD },
 		{ "enable-osync",					CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC },
@@ -1587,14 +1590,8 @@ void
 cfg_obsolete(const cfg_line* p_line, const char* message)
 {
 	cf_crash_nostack(AS_CFG, "line %d :: '%s' is obsolete%s%s",
-			p_line->num, p_line->name_tok, message ? " - " : "", message);
-}
-
-void
-cfg_not_supported(const cfg_line* p_line, const char* feature)
-{
-	cf_crash_nostack(AS_CFG, "line %d :: illegal value '%s' for config parameter '%s' - feature %s is not supported",
-			p_line->num, p_line->val_tok_1, p_line->name_tok, feature);
+			p_line->num, p_line->name_tok, message ? " - " : "",
+					message ? message : "");
 }
 
 char*
@@ -3406,6 +3403,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP:
 				cfg_enterprise_only(&line);
 				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT:
+				cfg_obsolete(&line, "please use 'read-page-cache' instead");
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS:
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD:
