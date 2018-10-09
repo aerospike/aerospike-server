@@ -139,6 +139,8 @@ as_index_tree_gc_init()
 	if (pthread_create(&thread, &attrs, run_index_tree_gc, NULL) != 0) {
 		cf_crash(AS_INDEX, "failed to create garbage collection thread");
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 

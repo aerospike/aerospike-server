@@ -723,6 +723,8 @@ as_netio_init()
 			(void *)&g_netio_slow_queue) != 0) {
 		cf_crash(AS_PROTO, "failed to create netio slow thread");
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 // Based on io object, send buffer to the network, or queue for retry.

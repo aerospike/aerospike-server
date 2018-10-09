@@ -478,6 +478,8 @@ as_fabric_start()
 	if (pthread_create(&thread, &attrs, run_fabric_accept, NULL) != 0) {
 		cf_crash(AS_FABRIC, "could not create fabric accept thread");
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 void
@@ -2100,6 +2102,8 @@ fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size)
 
 		cf_vector_append(&pool->threads, &thread);
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 static void
@@ -2641,6 +2645,8 @@ as_fabric_transact_init()
 	if (pthread_create(&thread, &attrs, run_fabric_transact, NULL) != 0) {
 		cf_crash(AS_FABRIC, "could not create fabric transact thread");
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 void

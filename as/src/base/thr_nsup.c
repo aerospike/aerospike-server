@@ -1128,6 +1128,8 @@ as_nsup_start()
 	if (0 != pthread_create(&thread, &attrs, run_size_histograms, NULL)) {
 		cf_crash(AS_NSUP, "nsup size-histograms thread create failed");
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 

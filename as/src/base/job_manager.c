@@ -220,6 +220,8 @@ create_threads(as_priority_thread_pool* pool, uint32_t count)
 		}
 	}
 
+	pthread_attr_destroy(&attrs);
+
 	return n_threads_created;
 }
 

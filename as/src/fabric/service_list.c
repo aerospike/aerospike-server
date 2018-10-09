@@ -374,6 +374,8 @@ as_service_list_init(void)
 	if (pthread_create(&th, &attr, run_update_thread, NULL) != 0) {
 		cf_crash(AS_SERVICE_LIST, "error while creating update thread");
 	}
+
+	pthread_attr_destroy(&attr);
 }
 
 int32_t

@@ -247,6 +247,8 @@ as_migrate_init()
 		cf_crash(AS_MIGRATE, "failed to create immigration reaper thread");
 	}
 
+	pthread_attr_destroy(&attrs);
+
 	emigrate_fill_queue_init();
 
 	as_fabric_register_msg_fn(M_TYPE_MIGRATE, migrate_mt, sizeof(migrate_mt),
@@ -315,6 +317,8 @@ as_migrate_set_num_xmit_threads(uint32_t n_threads)
 
 			g_config.n_migrate_threads++;
 		}
+
+		pthread_attr_destroy(&attrs);
 	}
 }
 

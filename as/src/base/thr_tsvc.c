@@ -524,6 +524,8 @@ tsvc_add_threads(uint32_t qid, uint32_t n_threads)
 			cf_warning(AS_TSVC, "tsvc queue %u failed thread create", qid);
 		}
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 

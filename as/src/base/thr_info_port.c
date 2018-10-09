@@ -309,6 +309,8 @@ as_info_port_start()
 		cf_crash(AS_INFO_PORT, "failed to create info port thread");
 	}
 
+	pthread_attr_destroy(&attrs);
+
 	// For orderly startup log, wait for endpoint setup.
 	while (! g_started) {
 		usleep(1000);

@@ -129,6 +129,8 @@ as_rw_init()
 		cf_crash(AS_RW, "failed to create retransmit thread");
 	}
 
+	pthread_attr_destroy(&attrs);
+
 	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt),
 			RW_MSG_SCRATCH_SIZE, rw_msg_cb, NULL);
 }

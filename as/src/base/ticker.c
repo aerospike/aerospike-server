@@ -124,6 +124,8 @@ as_ticker_start()
 	if (pthread_create(&thread, &attrs, run_ticker, NULL) != 0) {
 		cf_crash(AS_INFO, "failed to create ticker thread");
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 

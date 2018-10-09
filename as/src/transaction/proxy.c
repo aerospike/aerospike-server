@@ -212,6 +212,8 @@ as_proxy_init()
 		cf_crash(AS_PROXY, "failed to create proxy timeout thread");
 	}
 
+	pthread_attr_destroy(&attrs);
+
 	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt),
 			PROXY_MSG_SCRATCH_SIZE, proxy_msg_cb, NULL);
 }

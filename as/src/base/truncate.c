@@ -534,6 +534,8 @@ truncate_all(as_namespace* ns)
 			// TODO - be forgiving? Is there any point?
 		}
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 

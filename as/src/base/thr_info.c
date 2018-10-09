@@ -6233,5 +6233,7 @@ as_info_init()
 		}
 	}
 
+	pthread_attr_destroy(&thr_attr);
+
 	return(0);
 }

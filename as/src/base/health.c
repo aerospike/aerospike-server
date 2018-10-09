@@ -328,6 +328,8 @@ as_health_start()
 		cf_crash(AS_HEALTH, "could not create health monitor thread: %s",
 				cf_strerror(errno));
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 void

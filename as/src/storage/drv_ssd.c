@@ -899,6 +899,8 @@ ssd_start_defrag_threads(drv_ssds *ssds)
 			cf_crash(AS_DRV_SSD, "failed to create defrag thread");
 		}
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 
@@ -2399,6 +2401,8 @@ ssd_start_maintenance_threads(drv_ssds *ssds)
 			cf_crash(AS_DRV_SSD, "failed to create maintenance thread");
 		}
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 
@@ -3094,6 +3098,8 @@ start_loading_records(drv_ssds *ssds, cf_queue *complete_q)
 			cf_crash(AS_DRV_SSD, "failed to create record load thread");
 		}
 	}
+
+	pthread_attr_destroy(&attrs);
 }
 
 
