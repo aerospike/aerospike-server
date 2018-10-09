@@ -312,7 +312,7 @@ static void list_offset_index_rm_mask_cpy(offset_index *dst, const offset_index 
 
 // list_full_offset_index
 static inline void list_full_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz);
-static bool list_full_offset_index_fill_to(offset_index *offidx, uint32_t index);
+static bool list_full_offset_index_fill_to(offset_index *offidx, uint32_t index, bool check_storage);
 
 // list_order_index
 static int list_order_index_sort_cmp_fn(const void *x, const void *y, void *p);
@@ -400,6 +400,16 @@ list_size_from_wire(const uint8_t *wire_value, uint32_t value_size)
 		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
+	as_unpacker pk = {
+			.buffer = list.contents,
+			.length = list.content_sz
+	};
+
+	if (cdt_get_storage_list_sz(&pk, list.ele_count) != list.content_sz) {
+		cf_warning(AS_PARTICLE, "list_size_from_wire() invalid packed list: ele_count %u offset %u content_sz %u", list.ele_count, pk.offset, list.content_sz);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	return (int32_t)(sizeof(list_mem) + packed_list_mem_sz(&list, true, NULL));
 }
 
@@ -411,11 +421,9 @@ list_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	// It works for data-not-in-memory but we'll incur a memcpy that could be
 	// eliminated.
 	packed_list list;
+	bool is_valid = packed_list_init(&list, wire_value, value_size);
 
-	if (! packed_list_init(&list, wire_value, value_size)) {
-		cf_warning(AS_PARTICLE, "list_from_wire() invalid packed list");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
-	}
+	cf_assert(is_valid, AS_PARTICLE, "list_from_wire() invalid packed list");
 
 	list_mem *p_list_mem = packed_list_pack_mem(&list, (list_mem *)*pp);
 
@@ -1067,7 +1075,7 @@ packed_list_find_idx_offset(const packed_list *list, uint32_t index)
 		if (offset_index_is_valid(&list->offidx)) {
 			offset_index *offidx = (offset_index *)&list->offidx;
 
-			if (! list_full_offset_index_fill_to(offidx, index)) {
+			if (! list_full_offset_index_fill_to(offidx, index, false)) {
 				return 0;
 			}
 
@@ -1077,7 +1085,7 @@ packed_list_find_idx_offset(const packed_list *list, uint32_t index)
 		define_offset_index(offidx, list->contents, list->content_sz,
 				list->ele_count);
 
-		if (! list_full_offset_index_fill_to(&offidx, index)) {
+		if (! list_full_offset_index_fill_to(&offidx, index, false)) {
 			return 0;
 		}
 
@@ -2008,7 +2016,7 @@ packed_list_get_remove_by_rank_range(const packed_list *list, as_bin *b,
 
 	vla_list_full_offidx_if_invalid(full, list);
 
-	if (! list_full_offset_index_fill_all(full.offidx)) {
+	if (! list_full_offset_index_fill_all(full.offidx, false)) {
 		cf_warning(AS_PARTICLE, "packed_list_get_remove_by_rank_range() invalid packed list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -2109,7 +2117,7 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 {
 	cf_assert(result->is_multi, AS_PARTICLE, "not supported");
 
-	if (! list_full_offset_index_fill_all(list_full_offidx_p(list))) {
+	if (! list_full_offset_index_fill_all(list_full_offidx_p(list), false)) {
 		cf_warning(AS_PARTICLE, "packed_list_get_remove_all_by_value_list_ordered() invalid list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -2385,12 +2393,18 @@ packed_list_insert(const packed_list *list, as_bin *b,
 		}
 
 		param_count = (uint32_t)payload_count;
-		payload_hdr_sz = as_pack_list_header_get_size((uint32_t)payload_count);
+		payload_hdr_sz = as_pack_list_header_get_size(param_count);
 
 		if (payload_hdr_sz > payload->sz) {
 			cf_warning(AS_PARTICLE, "packed_list_insert() invalid list header: payload->size=%d", payload->sz);
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
+	}
+
+	if (! cdt_check_storage_list_contents(payload->ptr + payload_hdr_sz,
+			payload->sz - payload_hdr_sz, param_count)) {
+		cf_warning(AS_PARTICLE, "packed_list_insert() invalid payload");
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	if (index > INT32_MAX || (index = calc_index(index, list->ele_count)) < 0) {
@@ -2623,7 +2637,7 @@ packed_list_add_items_ordered(const packed_list *list, as_bin *b,
 	define_offset_index(val_off, items->ptr + hdr_sz, items->sz - hdr_sz,
 			val_count);
 
-	if (! list_full_offset_index_fill_all(&val_off) ||
+	if (! list_full_offset_index_fill_all(&val_off, true) ||
 			! list_order_index_sort(&val_ord, &val_off,
 					AS_CDT_SORT_ASCENDING)) {
 		cf_warning(AS_PARTICLE, "packed_list_add_items_ordered() invalid list");
@@ -2696,7 +2710,7 @@ packed_list_add_items_ordered(const packed_list *list, as_bin *b,
 		}
 	}
 
-	if (! list_full_offset_index_fill_all(full.offidx)) {
+	if (! list_full_offset_index_fill_all(full.offidx, false)) {
 		cf_warning(AS_PARTICLE, "packed_list_add_items_ordered() invalid list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -3098,7 +3112,7 @@ list_set_flags(as_bin *b, rollback_alloc *alloc_buf, uint8_t set_flags,
 	else {
 		vla_list_full_offidx_if_invalid(full, &list);
 
-		if (! list_full_offset_index_fill_all(full.offidx)) {
+		if (! list_full_offset_index_fill_all(full.offidx, false)) {
 			cf_warning(AS_PARTICLE, "list_set_flags() invalid list");
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
@@ -3326,7 +3340,7 @@ list_sort(as_bin *b, rollback_alloc *alloc_buf, as_cdt_sort_flags sort_flags)
 
 	vla_list_full_offidx_if_invalid(full, &list);
 
-	if (! list_full_offset_index_fill_all(full.offidx)) {
+	if (! list_full_offset_index_fill_all(full.offidx, false)) {
 		cf_warning(AS_PARTICLE, "list_sort() invalid list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -4221,7 +4235,8 @@ list_full_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr,
 }
 
 static bool
-list_full_offset_index_fill_to(offset_index *offidx, uint32_t index)
+list_full_offset_index_fill_to(offset_index *offidx, uint32_t index,
+		bool check_storage)
 {
 	uint32_t start = offset_index_get_filled(offidx);
 
@@ -4238,7 +4253,7 @@ list_full_offset_index_fill_to(offset_index *offidx, uint32_t index)
 	};
 
 	for (uint32_t i = start; i < index; i++) {
-		if (as_unpack_size(&pk) <= 0) {
+		if (cdt_get_msgpack_sz(&pk, check_storage) == 0) {
 			return false;
 		}
 
@@ -4251,9 +4266,10 @@ list_full_offset_index_fill_to(offset_index *offidx, uint32_t index)
 }
 
 bool
-list_full_offset_index_fill_all(offset_index *offidx)
+list_full_offset_index_fill_all(offset_index *offidx, bool check_storage)
 {
-	return list_full_offset_index_fill_to(offidx, offidx->_.ele_count);
+	return list_full_offset_index_fill_to(offidx, offidx->_.ele_count,
+			check_storage);
 }
 
 

@@ -587,6 +587,16 @@ map_size_from_wire(const uint8_t *wire_value, uint32_t value_size)
 		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
+	as_unpacker pk = {
+			.buffer = map.contents,
+			.length = map.content_sz
+	};
+
+	if (cdt_get_storage_list_sz(&pk, 2 * map.ele_count) != map.content_sz) {
+		cf_warning(AS_PARTICLE, "map_size_from_wire() invalid packed map: ele_count %u offset %u content_sz %u", map.ele_count, pk.offset, map.content_sz);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	if (map.flags == 0) {
 		return (int32_t)(sizeof(map_mem) + value_size);
 	}
@@ -607,11 +617,9 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	// It works for data-not-in-memory but we'll incur a memcpy that could be
 	// eliminated.
 	packed_map map;
+	bool is_valid = packed_map_init(&map, wire_value, value_size, false);
 
-	if (! packed_map_init(&map, wire_value, value_size, false)) {
-		cf_warning(AS_PARTICLE, "map_size_from_wire() invalid packed map");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
-	}
+	cf_assert(is_valid, AS_PARTICLE, "map_from_wire() invalid packed map");
 
 	map_mem *p_map_mem = (map_mem *)*pp;
 
@@ -1532,6 +1540,12 @@ map_add(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *key,
 		const cdt_payload *value, as_bin *result,
 		const map_add_control *control)
 {
+	if (! cdt_check_storage_list_contents(key->ptr, key->sz, 1) ||
+			! cdt_check_storage_list_contents(value->ptr, value->sz, 1)) {
+		cf_warning(AS_PARTICLE, "map_add() invalid params");
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	packed_map map;
 
 	if (! packed_map_init_from_bin(&map, b, true)) {
@@ -2044,6 +2058,12 @@ map_add_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *items,
 		}
 
 		items_count--;
+	}
+
+	if (! cdt_check_storage_list_contents(pk.buffer + pk.offset,
+			pk.length - pk.offset, (uint32_t)items_count * 2)) {
+		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter");
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	packed_map map;

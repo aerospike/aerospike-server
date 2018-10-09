@@ -246,6 +246,11 @@ static const uint8_t msgpack_nil[1] = {0xC0};
 bool calc_index_count(int64_t in_index, uint64_t in_count, uint32_t ele_count, uint32_t *out_index, uint32_t *out_count, bool is_multi);
 void calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index, int64_t *out_index, uint64_t *out_count);
 
+uint32_t cdt_get_storage_value_sz(as_unpacker *pk);
+uint32_t cdt_get_msgpack_sz(as_unpacker *pk, bool check_storage);
+uint32_t cdt_get_storage_list_sz(as_unpacker *pk, uint32_t count);
+bool cdt_check_storage_list_contents(const uint8_t *buf, uint32_t sz, uint32_t count);
+
 // cdt_result_data
 bool result_data_set_not_found(cdt_result_data *rd, int64_t index);
 void result_data_set_list_int2x(cdt_result_data *rd, int64_t i1, int64_t i2);
@@ -396,7 +401,7 @@ uint32_t cdt_idx_mask_get_content_sz(const uint64_t *mask, uint32_t count, const
 void cdt_idx_mask_print(const uint64_t *mask, uint32_t ele_count, const char *name);
 
 // list
-bool list_full_offset_index_fill_all(offset_index *offidx);
+bool list_full_offset_index_fill_all(offset_index *offidx, bool is_storage);
 bool list_order_index_sort(order_index *ordidx, const offset_index *full_offidx, as_cdt_sort_flags flags);
 
 bool list_param_parse(const cdt_payload *items, as_unpacker *pk, uint32_t *count_r);

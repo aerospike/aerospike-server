@@ -357,6 +357,75 @@ unpack_map_value(as_unpacker *pk, cdt_payload *payload_r)
 	return true;
 }
 
+uint32_t
+cdt_get_storage_value_sz(as_unpacker *pk)
+{
+	if (as_unpack_peek_is_ext(pk)) {
+		as_msgpack_ext ext;
+		uint32_t offset = pk->offset;
+
+		if (as_unpack_ext(pk, &ext) != 0) {
+			return 0;
+		}
+
+		if (ext.type == 0xff) {
+			return 0;
+		}
+
+		return pk->offset - offset;
+	}
+
+	int64_t sz = as_unpack_size(pk);
+
+	return sz > 0 ? (uint32_t)sz : 0;
+}
+
+uint32_t
+cdt_get_msgpack_sz(as_unpacker *pk, bool check_storage)
+{
+	if (check_storage) {
+		return cdt_get_storage_value_sz(pk);
+	}
+
+	int64_t sz = as_unpack_size(pk);
+
+	return sz > 0 ? (uint32_t)sz : 0;
+}
+
+uint32_t
+cdt_get_storage_list_sz(as_unpacker *pk, uint32_t count)
+{
+	uint32_t sum = 0;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t ret = cdt_get_storage_value_sz(pk);
+
+		if (ret == 0) {
+			return 0;
+		}
+
+		sum += ret;
+	}
+
+	return sum;
+}
+
+bool
+cdt_check_storage_list_contents(const uint8_t *buf, uint32_t sz, uint32_t count)
+{
+	as_unpacker pk = {
+			.buffer = buf,
+			.length = sz
+	};
+
+	if (cdt_get_storage_list_sz(&pk, count) != pk.length) {
+		cf_warning(AS_PARTICLE, "cdt_check_storage_list_content() invalid msgpack: count %u offset %u length %u", count, pk.offset, pk.length);
+		return false;
+	}
+
+	return true;
+}
+
 
 //==========================================================
 // cdt_result_data
@@ -944,7 +1013,7 @@ cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 	}
 
 	cdt_state->type = (as_cdt_optype)type64;
-	cdt_state->ele_count = (uint32_t)ele_count;
+	cdt_state->ele_count = (uint32_t)ele_count - 1;
 
 	return true;
 }
@@ -1516,7 +1585,7 @@ offset_index_find_items(offset_index *full_offidx,
 		return false; // dummy return to quash warning
 	}
 
-	if (! list_full_offset_index_fill_all(&items_offidx)) {
+	if (! list_full_offset_index_fill_all(&items_offidx, false)) {
 		cf_warning(AS_PARTICLE, "offset_index_find_items() invalid parameter key list");
 		return false;
 	}
@@ -2573,15 +2642,6 @@ list_param_parse(const cdt_payload *items, as_unpacker *pk, uint32_t *count_r)
 	pk->length = items->sz;
 
 	int64_t items_hdr = as_unpack_list_header_element_count(pk);
-
-	if (items_hdr > 0 && as_unpack_peek_is_ext(pk)) {
-		if (as_unpack_size(pk) <= 0) {
-			cf_warning(AS_PARTICLE, "list_param_parse() invalid parameter");
-			return false;
-		}
-
-		items_hdr--;
-	}
 
 	if (items_hdr < 0 || items_hdr > CDT_MAX_PARAM_LIST_COUNT) {
 		cf_warning(AS_PARTICLE, "list_param_parse() invalid param items_hdr %ld", items_hdr);
