@@ -923,9 +923,9 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 		}
 	}
 
-	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u,%u) expected-signals %u fresh-partitions %u",
-			ns->name, ns_pending_emigrations, ns_pending_lead_emigrations,
-			ns_pending_immigrations, ns_pending_signals, ns_fresh_partitions);
+	cf_info(AS_PARTITION, "{%s} rebalanced: expected-migrations (%u,%u,%u) fresh-partitions %u",
+			ns->name, ns_pending_emigrations, ns_pending_immigrations,
+			ns_pending_signals, ns_fresh_partitions);
 
 	ns->n_unavailable_partitions = 0;
 
