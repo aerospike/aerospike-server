@@ -5466,8 +5466,8 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	char cmd[128];
-	snprintf(cmd, 128, "%s %s", OP, indexname_str);
+	char cmd[512];
+	sprintf(cmd, "%s %s", OP, indexname_str);
 
 	char ns_str[AS_ID_NAMESPACE_SZ];
 	int ns_len       = sizeof(ns_str);

@@ -2307,7 +2307,7 @@ as_hb_mesh_tip_clear(char* host, int port)
 	// tip-clear should only be used to cleanup seed list after decommisioning
 	// an ip.
 	as_hb_mesh_tip_clear_udata mesh_tip_clear_reduce_udata;
-	strncpy(mesh_tip_clear_reduce_udata.host, host, DNS_NAME_MAX_SIZE);
+	strcpy(mesh_tip_clear_reduce_udata.host, host);
 	mesh_tip_clear_reduce_udata.port = port;
 	mesh_tip_clear_reduce_udata.entry_deleted = false;
 	mesh_tip_clear_reduce_udata.nodeid = 0;
@@ -6767,7 +6767,7 @@ mesh_tip(char* host, int port, bool tls)
 	}
 
 	mesh_seed_status_change(&new_seed, AS_HB_MESH_NODE_CHANNEL_INACTIVE);
-	strncpy(new_seed.seed_host_name, host, sizeof(new_seed.seed_host_name));
+	strcpy(new_seed.seed_host_name, host);
 	new_seed.seed_port = port;
 	new_seed.seed_tls = tls;
 

@@ -1251,10 +1251,10 @@ as_smd_t *as_smd_init(void)
 	// better place when SMD is overhauled.
 
 	char smd_path[MAX_PATH_LEN];
-	char smd_save_path[MAX_PATH_LEN];
+	char smd_save_path[MAX_PATH_LEN + 5];
 
-	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
-	snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
+	sprintf(smd_path, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
+	sprintf(smd_save_path, "%s.save", smd_path);
 
 	struct stat buf;
 	bool both_gone =
@@ -1622,7 +1622,7 @@ static int as_smd_read(char *module, json_t **module_smd)
 	size_t load_flags = JSON_REJECT_DUPLICATES;
 	json_error_t json_error;
 
-	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, module);
+	sprintf(smd_path, "%s/smd/%s.smd", g_config.work_directory, module);
 
 	// Check if the persisted metadata file exists before attempting to read it.
 	struct stat buf;
@@ -1655,11 +1655,11 @@ static int as_smd_write(char *module, json_t *module_smd)
 	int retval = 0;
 
 	char smd_path[MAX_PATH_LEN];
-	char smd_save_path[MAX_PATH_LEN];
+	char smd_save_path[MAX_PATH_LEN + 5];
 	size_t dump_flags = JSON_INDENT(3) | JSON_ENSURE_ASCII | JSON_PRESERVE_ORDER;
 
-	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, module);
-	snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
+	sprintf(smd_path, "%s/smd/%s.smd", g_config.work_directory, module);
+	sprintf(smd_save_path, "%s.save", smd_path);
 
 	if (json_dump_file(module_smd, smd_save_path, dump_flags) < 0) {
 		cf_warning(AS_SMD, "failed to dump System Metadata for module \"%s\" to file \"%s\": %s (%d)", module, smd_path, cf_strerror(errno), errno);
