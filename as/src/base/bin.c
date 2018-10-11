@@ -96,29 +96,37 @@ as_bin_get_id(as_namespace *ns, const char *name)
 }
 
 
-uint16_t
-as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len)
+bool
+as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len,
+		uint16_t *id)
 {
-	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
+	// May later replace with assert if we never call with single-bin.
+	if (ns->single_bin) {
+		return true;
+	}
 
 	uint32_t idx;
 
 	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, name, len, &idx) ==
 			CF_VMAPX_OK) {
-		return (uint16_t)idx;
+		*id = (uint16_t)idx;
+		return true;
 	}
+
+	// TODO - add a check for legal bin name characters here.
 
 	cf_vmapx_err result = cf_vmapx_put_unique_w_len(ns->p_bin_name_vmap, name,
 			len, &idx);
 
 	if (! (result == CF_VMAPX_OK || result == CF_VMAPX_ERR_NAME_EXISTS)) {
-		// Tedious to handle safely for all usage paths, so for now...
 		CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
-
-		cf_crash(AS_BIN, "adding bin name %s, vmap err %d", zname, result);
+		cf_warning(AS_BIN, "adding bin name %s, vmap err %d", zname, result);
+		return false;
 	}
 
-	return (uint16_t)idx;
+	*id = (uint16_t)idx;
+
+	return true;
 }
 
 
@@ -302,21 +310,9 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 		return rd->bins;
 	}
 
+	// TODO - already handled (with generic warning) by vmap - remove check?
 	if (len >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_BIN, "bin name too long (%lu)", len);
-		*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
-		return NULL;
-	}
-
-	uint32_t id = (uint32_t)-1;
-
-	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, (const char *)name, len,
-			&id) != CF_VMAPX_OK &&
-			cf_vmapx_count(ns->p_bin_name_vmap) >= MAX_BIN_NAMES) {
-		CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
-
-		cf_warning(AS_BIN, "{%s} bin-name vmap full - can't add new bin-name %s",
-				ns->name, zname);
 
 		if (result) {
 			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
@@ -338,11 +334,12 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 
 	as_bin_init_nameless(b);
 
-	if (id == (uint32_t)-1) {
-		b->id = as_bin_get_or_assign_id_w_len(ns, (const char *)name, len);
-	}
-	else {
-		b->id = (uint16_t)id;
+	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
+		if (result) {
+			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
+		}
+
+		return NULL;
 	}
 
 	return b;
@@ -373,52 +370,55 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
 		return rd->bins;
 	}
 
-	uint32_t id = (uint32_t)-1;
-	uint16_t i;
-	as_bin *b;
+	uint32_t id;
 
 	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, (const char *)name, len,
 			&id) == CF_VMAPX_OK) {
-		for (i = 0; i < rd->n_bins; i++) {
-			b = &rd->bins[i];
+		for (uint16_t i = 0; i < rd->n_bins; i++) {
+			as_bin *b = &rd->bins[i];
 
 			if (! as_bin_inuse(b)) {
-				break;
+				as_bin_init_nameless(b);
+				b->id = (uint16_t)id;
+				return b;
 			}
 
 			if ((uint32_t)b->id == id) {
 				return b;
 			}
 		}
+
+		cf_crash(AS_BIN, "ran out of allocated bins in rd");
 	}
-	else {
-		if (cf_vmapx_count(ns->p_bin_name_vmap) >= BIN_NAMES_QUOTA) {
-			CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
+	// else - bin name is new.
 
-			cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %s",
-					ns->name, zname);
+	if (cf_vmapx_count(ns->p_bin_name_vmap) >= BIN_NAMES_QUOTA) {
+		CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
 
-			if (result) {
-				*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
-			}
+		cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %s",
+				ns->name, zname);
 
-			return NULL;
+		if (result) {
+			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
 		}
 
-		i = as_bin_inuse_count(rd);
+		return NULL;
 	}
+
+	uint16_t i = as_bin_inuse_count(rd);
 
 	cf_assert(i < rd->n_bins, AS_BIN, "ran out of allocated bins in rd");
 
-	b = &rd->bins[i];
+	as_bin *b = &rd->bins[i];
 
 	as_bin_init_nameless(b);
 
-	if (id == (uint32_t)-1) {
-		b->id = as_bin_get_or_assign_id_w_len(ns, (const char *)name, len);
-	}
-	else {
-		b->id = (uint16_t)id;
+	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
+		if (result) {
+			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
+		}
+
+		return NULL;
 	}
 
 	return b;

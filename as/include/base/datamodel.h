@@ -434,7 +434,7 @@ as_bin_get_particle_type(const as_bin *b) {
 
 /* Bin function declarations */
 extern int16_t as_bin_get_id(as_namespace *ns, const char *name);
-extern uint16_t as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len);
+extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len, uint16_t *id);
 extern const char* as_bin_get_name_from_id(as_namespace *ns, uint16_t id);
 extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
 extern void as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from);
@@ -1169,12 +1169,10 @@ as_set_stop_writes(as_set *p_set) {
 
 // These bin functions must be below definition of struct as_namespace_s:
 
-static inline void
+static inline bool
 as_bin_set_id_from_name_w_len(as_namespace *ns, as_bin *b, const uint8_t *buf,
 		size_t len) {
-	if (! ns->single_bin) {
-		b->id = as_bin_get_or_assign_id_w_len(ns, (const char *)buf, len);
-	}
+	return as_bin_get_or_assign_id_w_len(ns, (const char *)buf, len, &b->id);
 }
 
 static inline size_t

@@ -480,7 +480,14 @@ as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 		return AS_SINDEX_ERR;
 	}
 
-	imd->binid = as_bin_get_or_assign_id_w_len(ns, imd->bname, len);
+	uint16_t id;
+
+	if (! as_bin_get_or_assign_id_w_len(ns, imd->bname, len, &id)) {
+		cf_warning(AS_SINDEX, "Bin %s not added. Assign id failed", imd->bname);
+		return AS_SINDEX_ERR;
+	}
+
+	imd->binid = id;
 
 	return AS_SINDEX_OK;
 }

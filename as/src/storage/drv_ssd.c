@@ -1411,9 +1411,11 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 				return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 			}
 
-			// TODO - should maybe fail gracefully? (Crashes internally.)
-			as_bin_set_id_from_name_w_len(rd->ns, &rd->bins[i], p_read,
-					name_len);
+			if (! as_bin_set_id_from_name_w_len(rd->ns, &rd->bins[i], p_read,
+					name_len)) {
+				cf_warning(AS_DRV_SSD, "flat bin name failed to assign id");
+				return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+			}
 
 			p_read += name_len;
 		}
@@ -2827,8 +2829,10 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 					sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 				}
 
-				// TODO - should maybe fail gracefully? (Crashes internally.)
-				as_bin_set_id_from_name_w_len(ns, b, p_read, name_len);
+				if (! as_bin_set_id_from_name_w_len(ns, b, p_read, name_len)) {
+					// TODO - should maybe fail gracefully?
+					cf_crash(AS_DRV_SSD, "bin id assignment failed");
+				}
 			}
 			else {
 				b = as_bin_create_from_buf(&rd, p_read, name_len, NULL);
