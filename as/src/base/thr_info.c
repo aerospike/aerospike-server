@@ -6067,7 +6067,7 @@ as_info_init()
 	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
+	as_info_set("help", "bins;build;build_os;build_time;cluster-name;config-get;config-set;"
 				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
 				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;"
 				"health-outliers;health-stats;hist-track-start;hist-track-stop;histogram;jem-stats;jobs;latency;log;log-set;"
