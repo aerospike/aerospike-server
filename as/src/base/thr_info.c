@@ -6158,7 +6158,7 @@ as_info_init()
 	as_info_set_command("histogram", info_command_histogram, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
 	as_info_set_command("jem-stats", info_command_jem_stats, PERM_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.
 	as_info_set_command("latency", info_command_hist_track, PERM_NONE);                       // Returns latency and throughput information.
-	as_info_set_command("log-message", info_command_log_message, PERM_NONE);                  // Log a message.
+	as_info_set_command("log-message", info_command_log_message, PERM_LOGGING_CTRL);          // Log a message.
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("peers-clear-alt", as_service_list_command, PERM_NONE);               // The delta update version of "peers-clear-alt".
 	as_info_set_command("peers-clear-std", as_service_list_command, PERM_NONE);               // The delta update version of "peers-clear-std".
@@ -6168,10 +6168,10 @@ as_info_init()
 	as_info_set_dynamic("quiesce", info_command_quiesce, PERM_SERVICE_CTRL);                  // Quiesce this node.
 	as_info_set_dynamic("quiesce-undo", info_command_quiesce_undo, PERM_SERVICE_CTRL);        // Un-quiesce this node.
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
-	as_info_set_command("recluster", info_command_recluster, PERM_NONE);                      // Force cluster to re-form. FIXME - what permission?
-	as_info_set_command("revive", info_command_revive, PERM_NONE);                            // Mark all partitions as "trusted".
+	as_info_set_command("recluster", info_command_recluster, PERM_SERVICE_CTRL);              // Force cluster to re-form.
+	as_info_set_command("revive", info_command_revive, PERM_SERVICE_CTRL);                    // Mark all partitions as "trusted".
 	as_info_set_command("roster", info_command_roster, PERM_NONE);                            // Roster information.
-	as_info_set_command("roster-set", info_command_roster_set, PERM_NONE);                    // Set the entire roster. FIXME - what permission?
+	as_info_set_command("roster-set", info_command_roster_set, PERM_SERVICE_CTRL);            // Set the entire roster.
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
