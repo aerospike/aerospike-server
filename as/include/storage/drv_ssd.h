@@ -284,7 +284,6 @@ typedef struct drv_ssd_s {
 	histogram		*hist_large_block_read;
 	histogram		*hist_write;
 	histogram		*hist_shadow_write;
-	histogram		*hist_fsync;
 } drv_ssd;
 
 

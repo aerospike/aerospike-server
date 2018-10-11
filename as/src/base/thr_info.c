@@ -2019,8 +2019,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
 		info_append_bool(db, "storage-engine.enable-benchmarks-storage", ns->storage_benchmarks_enabled);
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
+		info_append_bool(db, "storage-engine.flush-files", ns->storage_flush_files);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
-		info_append_uint64(db, "storage-engine.fsync-max-sec", ns->storage_fsync_max_us / 1000000);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
@@ -3084,13 +3084,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of flush-max-ms of ns %s from %lu to %d", ns->name, ns->storage_flush_max_us / 1000, val);
 			ns->storage_flush_max_us = (uint64_t)val * 1000;
-		}
-		else if (0 == as_info_parameter_get(params, "fsync-max-sec", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val)) {
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of fsync-max-sec of ns %s from %lu to %d", ns->name, ns->storage_fsync_max_us / 1000000, val);
-			ns->storage_fsync_max_us = (uint64_t)val * 1000000;
 		}
 		else if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {

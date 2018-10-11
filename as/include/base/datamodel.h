@@ -793,8 +793,8 @@ struct as_namespace_s {
 	int				storage_defrag_startup_minimum;
 	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
 	char*			storage_encryption_key_file;
+	bool			storage_flush_files;
 	uint64_t		storage_flush_max_us;
-	uint64_t		storage_fsync_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device

@@ -2237,23 +2237,6 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 }
 
 
-void
-ssd_fsync(drv_ssd *ssd)
-{
-	int fd = ssd_fd_get(ssd);
-
-	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
-
-	fsync(fd);
-
-	if (start_ns != 0) {
-		histogram_insert_data_point(ssd->hist_fsync, start_ns);
-	}
-
-	ssd_fd_put(ssd, fd);
-}
-
-
 // Check all wblocks to load a device's defrag queue at runtime. Triggered only
 // when defrag-lwm-pct is increased by manual intervention.
 void
@@ -2324,7 +2307,6 @@ run_ssd_maintenance(void *udata)
 	uint64_t prev_log_stats = now;
 	uint64_t prev_free_swbs = now;
 	uint64_t prev_flush = now;
-	uint64_t prev_fsync = now;
 
 	// If any job's (initial) interval is less than MAX_INTERVAL and we want it
 	// done on its interval the first time through, add a next_time() call for
@@ -2358,14 +2340,6 @@ run_ssd_maintenance(void *udata)
 			ssd_flush_current_swb(ssd, &prev_n_writes_flush, &prev_size_flush);
 			prev_flush = now;
 			next = next_time(now, flush_max_us, next);
-		}
-
-		uint64_t fsync_max_us = ns->storage_fsync_max_us;
-
-		if (fsync_max_us != 0 && now >= prev_fsync + fsync_max_us) {
-			ssd_fsync(ssd);
-			prev_fsync = now;
-			next = next_time(now, fsync_max_us, next);
 		}
 
 		if (cf_atomic32_get(ssd->defrag_sweep) != 0) {
@@ -2532,7 +2506,6 @@ ssd_empty_header(int fd, const char* device_name)
 	}
 
 	cf_free(h);
-	fsync(fd);
 }
 
 
@@ -3521,7 +3494,8 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 		}
 
 		ssd->open_flag = O_RDWR |
-				(ns->storage_commit_to_device ? O_DIRECT | O_DSYNC : 0);
+				(ns->storage_commit_to_device || ns->storage_flush_files ?
+						O_DIRECT | O_DSYNC : 0);
 
 		// Validate that file can be opened, create it if it doesn't exist.
 		int fd = open(ssd->name, ssd->open_flag | O_CREAT, S_IRUSR | S_IWUSR);
@@ -3721,9 +3695,6 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 			snprintf(histname, sizeof(histname), "{%s}-%s-shadow-write", ns->name, ssd->name);
 			ssd->hist_shadow_write = histogram_create(histname, HIST_MILLISECONDS);
 		}
-
-		snprintf(histname, sizeof(histname), "{%s}-%s-fsync", ns->name, ssd->name);
-		ssd->hist_fsync = histogram_create(histname, HIST_MILLISECONDS);
 
 		ssd_init_commit(ssd);
 	}
@@ -4186,8 +4157,6 @@ as_storage_ticker_stats_ssd(as_namespace *ns)
 		if (ssd->hist_shadow_write) {
 			histogram_dump(ssd->hist_shadow_write);
 		}
-
-		histogram_dump(ssd->hist_fsync);
 	}
 
 	return 0;
@@ -4209,8 +4178,6 @@ as_storage_histogram_clear_ssd(as_namespace *ns)
 		if (ssd->hist_shadow_write) {
 			histogram_clear(ssd->hist_shadow_write);
 		}
-
-		histogram_clear(ssd->hist_fsync);
 	}
 
 	return 0;

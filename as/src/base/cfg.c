@@ -634,8 +634,8 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_FILES,
 	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
-	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
@@ -644,6 +644,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
 	// Obsoleted:
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
+	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
 	// Deprecated:
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD,
@@ -1191,8 +1192,8 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "defrag-startup-minimum",			CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM },
 		{ "enable-benchmarks-storage",		CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE },
 		{ "encryption-key-file",			CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE },
+		{ "flush-files",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_FILES },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
-		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
@@ -1200,6 +1201,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
+		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
 		{ "defrag-max-blocks",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS },
 		{ "defrag-period",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD },
 		{ "enable-osync",					CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC },
@@ -3378,11 +3380,11 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->storage_encryption_key_file = cfg_strdup(&line, true);
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_FILES:
+				ns->storage_flush_files = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
-				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC:
-				ns->storage_fsync_max_us = cfg_u64_no_checks(&line) * 1000000;
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64_no_checks(&line);
@@ -3406,6 +3408,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT:
 				cfg_obsolete(&line, "please use 'read-page-cache' instead");
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC:
+				cfg_obsolete(&line, "please use 'flush-files' instead");
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS:
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD:
