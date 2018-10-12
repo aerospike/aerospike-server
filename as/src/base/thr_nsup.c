@@ -308,9 +308,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	uint32_t now = as_record_void_time_get();
 
 	// Update threshold void-time if we're past it.
-	if (now > cf_atomic32_get(ns->cold_start_threshold_void_time)) {
-		cf_atomic32_set(&ns->cold_start_threshold_void_time, now);
-	}
+	cf_atomic32_setmax(&ns->cold_start_threshold_void_time, now);
 
 	// Are we out of control?
 	if (eval_stop_writes(ns)) {
