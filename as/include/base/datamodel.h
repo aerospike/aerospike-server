@@ -663,7 +663,7 @@ struct as_namespace_s {
 	// For cold start eviction.
 	pthread_mutex_t	cold_start_evict_lock;
 	uint32_t		cold_start_record_add_count;
-	cf_atomic32		cold_start_threshold_void_time;
+	uint32_t		cold_start_threshold_void_time;
 	uint32_t		cold_start_max_void_time;
 
 	//--------------------------------------------

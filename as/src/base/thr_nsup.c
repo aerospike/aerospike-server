@@ -284,7 +284,7 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 		return 0;
 	}
 
-	cf_atomic32_set(&ns->cold_start_threshold_void_time, threshold.value);
+	ns->cold_start_threshold_void_time = threshold.value;
 
 	return subtotal;
 }
@@ -308,8 +308,8 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	uint32_t now = as_record_void_time_get();
 
 	// Update threshold void-time if we're past it.
-	if (now > cf_atomic32_get(ns->cold_start_threshold_void_time)) {
-		cf_atomic32_set(&ns->cold_start_threshold_void_time, now);
+	if (now > ns->cold_start_threshold_void_time) {
+		ns->cold_start_threshold_void_time = now;
 	}
 
 	// Are we out of control?
@@ -399,7 +399,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 		return true;
 	}
 
-	cf_info(AS_NSUP, "{%s} cold start found %lu records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
+	cf_info(AS_NSUP, "{%s} cold start found %lu records eligible for eviction, evict ttl %u", ns->name, n_evictable, ns->cold_start_threshold_void_time - now);
 
 	// Reduce all partitions to evict based on the thresholds.
 	evict_thread_info thread_info = {
