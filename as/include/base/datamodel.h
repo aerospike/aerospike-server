@@ -791,9 +791,9 @@ struct as_namespace_s {
 	uint32_t		storage_defrag_queue_min;
 	uint32_t		storage_defrag_sleep;
 	int				storage_defrag_startup_minimum;
+	bool			storage_direct_files;
 	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
 	char*			storage_encryption_key_file;
-	bool			storage_flush_files;
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;

@@ -3494,7 +3494,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 		}
 
 		ssd->open_flag = O_RDWR |
-				(ns->storage_commit_to_device || ns->storage_flush_files ?
+				(ns->storage_commit_to_device || ns->storage_direct_files ?
 						O_DIRECT | O_DSYNC : 0);
 
 		// Validate that file can be opened, create it if it doesn't exist.
