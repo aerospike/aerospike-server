@@ -88,6 +88,7 @@ struct drv_ssd_s;
 // Device header.
 //
 
+// TODO - were we going to change 'prefix' to 'base'?
 typedef struct ssd_common_prefix_s {
 	uint64_t	magic;
 	uint32_t	version;
@@ -103,7 +104,7 @@ typedef struct ssd_common_prefix_s {
 // Because we pad explicitly:
 COMPILER_ASSERT(sizeof(ssd_common_prefix) <= HI_IO_MIN_SIZE);
 
-// FIXME - deal with the name and the name of as_storage_info_set/get!
+// TODO - deal with the name and the name of as_storage_info_set/get!
 typedef struct ssd_common_pmeta_s {
 	as_partition_version version;
 	uint8_t		tree_id;

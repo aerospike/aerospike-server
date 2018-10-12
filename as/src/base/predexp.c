@@ -122,7 +122,7 @@ destroy_list(predexp_eval_t* bp)
 // Tag Definitions
 // ----------------------------------------------------------------
 
-// FIXME - these need to be in common w/ the clients
+// TODO - put in common to share with clients?
 //
 #define AS_PREDEXP_AND					1
 #define AS_PREDEXP_OR					2

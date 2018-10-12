@@ -3516,7 +3516,6 @@ as_config_init(const char* config_file)
 		case NAMESPACE_SINDEX:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
 			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
-				// FIXME - minimum should be 1, but currently crashes.
 				ns->sindex_num_partitions = cfg_u32(&line, MIN_PARTITIONS_PER_INDEX, MAX_PARTITIONS_PER_INDEX);
 				break;
 			case CASE_CONTEXT_END:
