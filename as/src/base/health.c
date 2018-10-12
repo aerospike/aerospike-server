@@ -269,7 +269,7 @@ as_health_get_outliers(cf_dyn_buf* db)
 		outlier cur;
 		cf_vector_get(g_outliers, i, &cur);
 
-		cf_dyn_buf_append_string(db, "node=");
+		cf_dyn_buf_append_string(db, "id=");
 		cf_dyn_buf_append_string(db, cur.id);
 		cf_dyn_buf_append_char(db, ':');
 
@@ -377,17 +377,16 @@ static int32_t
 clear_data_reduce_fn(const void* key, void* data, void* udata)
 {
 	peer_stats* ps = *(peer_stats**)data;
-	size_t buckets_sz;
 
 	for (uint32_t type = 0; type < AS_HEALTH_NODE_TYPE_MAX; type++) {
-		buckets_sz = sizeof(bucket) * node_stat_spec[type].n_buckets;
+		size_t buckets_sz = sizeof(bucket) * node_stat_spec[type].n_buckets;
 		memset(ps->node_stats[type].buckets, 0, buckets_sz);
 		ps->node_stats[type].cur_bucket = 0;
 	}
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		for (uint32_t type = 0; type < AS_HEALTH_NS_TYPE_MAX; type++) {
-			buckets_sz = sizeof(bucket) * ns_stat_spec[type].n_buckets;
+			size_t buckets_sz = sizeof(bucket) * ns_stat_spec[type].n_buckets;
 			memset(ps->ns_stats[ns_ix][type].buckets, 0, buckets_sz);
 			ps->ns_stats[ns_ix][type].cur_bucket = 0;
 		}
@@ -528,7 +527,6 @@ create_local_stats()
 		for (uint32_t d_id = 0; d_id < n_devices; d_id++) {
 			health_stat* hs = &device_stats[d_id];
 			hs->buckets = cf_malloc(buckets_sz);
-
 			memset(hs->buckets, 0, buckets_sz);
 			hs->cur_bucket = 0;
 			strncpy(hs->id, ns->storage_devices[d_id], MAX_ID_SZ);
@@ -539,14 +537,12 @@ create_local_stats()
 static peer_stats*
 create_node(cf_node node)
 {
-	size_t buckets_sz;
-
 	peer_stats* ps = cf_malloc(sizeof(peer_stats));
 	memset(ps, 0, sizeof(peer_stats));
 	ps->is_in_cluster = true;
 
 	for (uint32_t type = 0; type < AS_HEALTH_NODE_TYPE_MAX; type++) {
-		buckets_sz = sizeof(bucket) * node_stat_spec[type].n_buckets;
+		size_t buckets_sz = sizeof(bucket) * node_stat_spec[type].n_buckets;
 		health_stat* hs = &ps->node_stats[type];
 		hs->buckets = cf_malloc(buckets_sz);
 		memset(hs->buckets, 0, buckets_sz);
@@ -555,7 +551,7 @@ create_node(cf_node node)
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		for (uint32_t type = 0; type < AS_HEALTH_NS_TYPE_MAX; type++) {
-			buckets_sz = sizeof(bucket) * ns_stat_spec[type].n_buckets;
+			size_t buckets_sz = sizeof(bucket) * ns_stat_spec[type].n_buckets;
 			health_stat* hs = &ps->ns_stats[ns_ix][type];
 			hs->buckets = cf_malloc(buckets_sz);
 			memset(hs->buckets, 0, buckets_sz);
@@ -646,7 +642,6 @@ find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold,
 		double mov_avg = ma[i].value;
 		uint32_t confidence_pct = (uint32_t)
 				(((mov_avg - q2) * 100 / mov_avg) + 0.5);
-		// TODO - heuristic to filter on confidence level?
 
 		if (mov_avg > upper_bound && mov_avg > threshold &&
 				confidence_pct >= MIN_CONFIDENCE_PCT) {
