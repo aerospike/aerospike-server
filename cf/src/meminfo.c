@@ -126,7 +126,7 @@ cf_meminfo(uint64_t *physmem, uint64_t *freemem, int *freepct, bool *swapping)
 	if (freemem) *freemem = availableMem * 1024L;
 
 	// just easier to do this kind of thing in one place
-	if (freepct) *freepct = (100L * availableMem) / physMem;
+	if (freepct) *freepct = physMem == 0 ? 0 : (100L * availableMem) / physMem;
 
 	if (swapping) {
 		*swapping = false;
