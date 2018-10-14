@@ -40,7 +40,7 @@ struct as_transaction_s;
 // Typedefs & constants.
 //
 
-#define MAX_TRANSACTION_QUEUES 128
+#define MAX_TRANSACTION_QUEUES 256
 #define MAX_TRANSACTION_THREADS_PER_QUEUE 256
 
 
