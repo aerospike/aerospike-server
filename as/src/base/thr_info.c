@@ -1210,7 +1210,7 @@ info_command_physical_devices(char *name, char *params, cf_dyn_buf *db)
 }
 
 int
-info_command_quiesce(char *name, cf_dyn_buf *db)
+info_command_quiesce(char *name, char *params, cf_dyn_buf *db)
 {
 	// Command format: "quiesce:"
 
@@ -1231,7 +1231,7 @@ info_command_quiesce(char *name, cf_dyn_buf *db)
 }
 
 int
-info_command_quiesce_undo(char *name, cf_dyn_buf *db)
+info_command_quiesce_undo(char *name, char *params, cf_dyn_buf *db)
 {
 	// Command format: "quiesce-undo:"
 
@@ -6165,8 +6165,8 @@ as_info_init()
 	as_info_set_command("peers-tls-alt", as_service_list_command, PERM_NONE);                 // The delta update version of "peers-tls-alt".
 	as_info_set_command("peers-tls-std", as_service_list_command, PERM_NONE);                 // The delta update version of "peers-tls-std".
 	as_info_set_command("physical-devices", info_command_physical_devices, PERM_NONE);        // Physical device information.
-	as_info_set_dynamic("quiesce", info_command_quiesce, PERM_SERVICE_CTRL);                  // Quiesce this node.
-	as_info_set_dynamic("quiesce-undo", info_command_quiesce_undo, PERM_SERVICE_CTRL);        // Un-quiesce this node.
+	as_info_set_command("quiesce", info_command_quiesce, PERM_SERVICE_CTRL);                  // Quiesce this node.
+	as_info_set_command("quiesce-undo", info_command_quiesce_undo, PERM_SERVICE_CTRL);        // Un-quiesce this node.
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
 	as_info_set_command("recluster", info_command_recluster, PERM_SERVICE_CTRL);              // Force cluster to re-form.
 	as_info_set_command("revive", info_command_revive, PERM_SERVICE_CTRL);                    // Mark all partitions as "trusted".
