@@ -125,6 +125,6 @@ void *cf_rc_alloc(size_t sz);
 void cf_rc_free(void *p);
 
 int32_t cf_rc_count(const void *p);
-int32_t cf_rc_reserve(void *p);
-int32_t cf_rc_release(void *p);
-int32_t cf_rc_releaseandfree(void *p);
+uint32_t cf_rc_reserve(void *p);
+uint32_t cf_rc_release(void *p);
+uint32_t cf_rc_releaseandfree(void *p);

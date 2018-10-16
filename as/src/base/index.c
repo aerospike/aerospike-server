@@ -229,13 +229,13 @@ as_index_tree_release(as_index_tree *tree)
 		return 0;
 	}
 
-	int rc = cf_rc_release(tree);
+	unsigned rc = cf_rc_release(tree);
 
 	if (rc > 0) {
 		return 1;
 	}
 
-	cf_assert(rc == 0, AS_INDEX, "tree ref-count %d", rc);
+	cf_assert(rc == 0, AS_INDEX, "tree ref-count %u", rc);
 
 	// TODO - call as_index_tree_destroy() directly if tree is empty?
 

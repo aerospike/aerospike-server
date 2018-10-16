@@ -856,12 +856,12 @@ int
 qtr_release(as_query_transaction *qtr, char *fname, int lineno)
 {
 	if (qtr) {
-		int val = cf_rc_release(qtr);
+		unsigned val = cf_rc_release(qtr);
 		if (val == 0) {
-			cf_detail(AS_QUERY, "Released qtr [%s:%d] %p %d ", fname, lineno, qtr, val);
+			cf_detail(AS_QUERY, "Released qtr [%s:%d] %p %u ", fname, lineno, qtr, val);
 			query_transaction_done(qtr);
 		}
-		cf_detail(AS_QUERY, "Released qtr [%s:%d] %p %d ", fname, lineno, qtr, val);
+		cf_detail(AS_QUERY, "Released qtr [%s:%d] %p %u ", fname, lineno, qtr, val);
 	}
 	return AS_QUERY_OK;
 }
@@ -872,8 +872,8 @@ qtr_reserve(as_query_transaction *qtr, char *fname, int lineno)
 	if (!qtr) {
 		return AS_QUERY_ERR;
 	}
-	int val = cf_rc_reserve(qtr);
-	cf_detail(AS_QUERY, "Reserved qtr [%s:%d] %p %d ", fname, lineno, qtr, val);
+	unsigned val = cf_rc_reserve(qtr);
+	cf_detail(AS_QUERY, "Reserved qtr [%s:%d] %p %u ", fname, lineno, qtr, val);
 	return AS_QUERY_OK;
 }
 // **************************************************************************************************

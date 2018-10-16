@@ -1051,28 +1051,28 @@ cf_rc_free(void *p)
 	jem_sdallocx(head, jem_sz, 0);
 }
 
-int32_t
+uint32_t
 cf_rc_reserve(void *p)
 {
 	cf_rc_header *head = (cf_rc_header *)p - 1;
 	return cf_atomic32_incr(&head->rc);
 }
 
-int32_t
+uint32_t
 cf_rc_release(void *p)
 {
 	cf_rc_header *head = (cf_rc_header *)p - 1;
-	int32_t rc = cf_atomic32_decr(&head->rc);
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
+	uint32_t rc = cf_atomic32_decr(&head->rc);
+	cf_assert(rc < UINT32_MAX, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
 	return rc;
 }
 
-int32_t
+uint32_t
 cf_rc_releaseandfree(void *p)
 {
 	cf_rc_header *head = (cf_rc_header *)p - 1;
-	int32_t rc = cf_atomic32_decr(&head->rc);
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
+	uint32_t rc = cf_atomic32_decr(&head->rc);
+	cf_assert(rc < UINT32_MAX, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
 
 	if (rc > 0) {
 		return rc;

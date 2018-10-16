@@ -210,7 +210,7 @@ msg_create(msg_type type)
 void
 msg_destroy(msg *m)
 {
-	int cnt = cf_rc_release(m);
+	unsigned cnt = cf_rc_release(m);
 
 	if (cnt == 0) {
 		for (uint32_t i = 0; i < m->n_fields; i++) {
