@@ -307,7 +307,7 @@ geojson_size_from_asval(const as_val *val)
 	size_t jsz = as_geojson_len(pg);
 
 	// Compute the size; we won't be writing any cellids ...
-	return geojson_size(0, jsz);
+	return (uint32_t)(sizeof(geojson_mem) + (0 * sizeof(uint64_t)) + jsz);
 }
 
 void
@@ -380,7 +380,7 @@ geojson_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 	size_t jsz = (size_t)packed_size;
 
 	// Compute the size; we won't be writing any cellids ...
-	return geojson_size(0, jsz);
+	return (uint32_t)(sizeof(geojson_mem) + (0 * sizeof(uint64_t)) + jsz);
 }
 
 void
