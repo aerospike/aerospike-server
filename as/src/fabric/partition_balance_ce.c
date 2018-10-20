@@ -55,6 +55,13 @@ as_partition_balance_revive(as_namespace* ns)
 }
 
 bool
+as_partition_balance_protect_roster_set(as_namespace* ns)
+{
+	cf_warning(AS_PARTITION, "protect-roster-set is an enterprise feature");
+	return true;
+}
+
+bool
 as_partition_pre_emigrate_done(as_namespace* ns, uint32_t pid,
 		uint64_t orig_cluster_key, uint32_t tx_flags)
 {
