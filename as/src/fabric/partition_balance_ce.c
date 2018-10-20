@@ -142,6 +142,14 @@ emig_lead_flags_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
 	}
 }
 
+bool
+drop_superfluous_version(as_partition* p, as_namespace* ns)
+{
+	p->version = ZERO_VERSION;
+
+	return true;
+}
+
 void
 emigrate_done_advance_non_master_version(as_namespace* ns, as_partition* p,
 		uint32_t tx_flags)

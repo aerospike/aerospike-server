@@ -562,8 +562,7 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 
 	// Not a replica and not quiesced - drop partition.
 	if (! is_self_replica(p) && ! as_partition_version_is_null(&p->version) &&
-			! ns->is_quiesced) {
-		p->version = ZERO_VERSION;
+			drop_superfluous_version(p, ns)) {
 		drop_trees(p);
 		as_storage_save_pmeta(ns, p);
 	}
@@ -882,9 +881,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 				else {
 					// No migrations required - drop superfluous non-replica
 					// partitions immediately.
-					if (! ns->is_quiesced) {
-						p->version = ZERO_VERSION;
-					}
+					drop_superfluous_version(p, ns);
 				}
 			}
 
