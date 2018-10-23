@@ -2237,6 +2237,56 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 }
 
 
+void
+ssd_flush_defrag_swb(drv_ssd *ssd, uint64_t *p_prev_n_defrag_writes)
+{
+	uint64_t n_defrag_writes = cf_atomic64_get(ssd->n_defrag_wblock_writes);
+
+	// If there's an active defrag load, we don't need to flush.
+	if (n_defrag_writes != *p_prev_n_defrag_writes) {
+		*p_prev_n_defrag_writes = n_defrag_writes;
+		return;
+	}
+
+	pthread_mutex_lock(&ssd->defrag_lock);
+
+	n_defrag_writes = cf_atomic64_get(ssd->n_defrag_wblock_writes);
+
+	// Must check under the lock, could be racing a current swb just queued.
+	if (n_defrag_writes != *p_prev_n_defrag_writes) {
+
+		pthread_mutex_unlock(&ssd->defrag_lock);
+
+		*p_prev_n_defrag_writes = n_defrag_writes;
+		return;
+	}
+
+	// Flush the defrag swb if it isn't empty, and has been written to since
+	// last flushed.
+
+	ssd_write_buf *swb = ssd->defrag_swb;
+
+	if (swb && swb->n_vacated != 0) {
+		// Clean the end of the buffer before flushing.
+		if (ssd->write_block_size != swb->pos) {
+			memset(&swb->buf[swb->pos], 0, ssd->write_block_size - swb->pos);
+		}
+
+		// Flush it.
+		ssd_flush_swb(ssd, swb);
+
+		if (ssd->shadow_name) {
+			ssd_shadow_flush_swb(ssd, swb);
+		}
+
+		// The whole point - free source wblocks.
+		swb_release_all_vacated_wblocks(swb);
+	}
+
+	pthread_mutex_unlock(&ssd->defrag_lock);
+}
+
+
 // Check all wblocks to load a device's defrag queue at runtime. Triggered only
 // when defrag-lwm-pct is increased by manual intervention.
 void
@@ -2301,12 +2351,15 @@ run_ssd_maintenance(void *udata)
 	uint64_t prev_n_writes_flush = 0;
 	uint32_t prev_size_flush = 0;
 
+	uint64_t prev_n_defrag_writes_flush = 0;
+
 	uint64_t now = cf_getus();
 	uint64_t next = now + MAX_INTERVAL;
 
 	uint64_t prev_log_stats = now;
 	uint64_t prev_free_swbs = now;
 	uint64_t prev_flush = now;
+	uint64_t prev_defrag_flush = now;
 
 	// If any job's (initial) interval is less than MAX_INTERVAL and we want it
 	// done on its interval the first time through, add a next_time() call for
@@ -2340,6 +2393,14 @@ run_ssd_maintenance(void *udata)
 			ssd_flush_current_swb(ssd, &prev_n_writes_flush, &prev_size_flush);
 			prev_flush = now;
 			next = next_time(now, flush_max_us, next);
+		}
+
+		static const uint64_t DEFRAG_FLUSH_MAX_US = 3UL * 1000 * 1000; // 3 sec
+
+		if (now >= prev_defrag_flush + DEFRAG_FLUSH_MAX_US) {
+			ssd_flush_defrag_swb(ssd, &prev_n_defrag_writes_flush);
+			prev_defrag_flush = now;
+			next = next_time(now, DEFRAG_FLUSH_MAX_US, next);
 		}
 
 		if (cf_atomic32_get(ssd->defrag_sweep) != 0) {
