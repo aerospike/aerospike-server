@@ -563,5 +563,5 @@ hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
 	if (jump > HLC_JUMP_WARN && old_value > 0) {
 		INFO("HLC jumped by %"PRIu64" ms cause:%"PRIx64" old:%"PRIu64" new:%"PRIu64, jump, source, old_value, new_value);
 	}
-	return ck_pr_cas_64(&g_now, old_value, new_value);
+       return cf_atomic64_cas(&g_now, &old_value, new_value);
 }

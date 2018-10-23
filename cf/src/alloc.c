@@ -178,7 +178,8 @@ hook_get_site_id(const void *ra)
 		// this slot in the meantime, keep looping. Otherwise return the
 		// slot index.
 
-		if (site_ra == NULL && ck_pr_cas_ptr(g_site_ras + site_id, NULL, (void *)ra)) {
+		void *old_value = NULL;
+		if (cf_atomic_p_cas(g_site_ras + site_id, &old_value, ra)) {
 			cf_atomic32_incr(&g_n_site_ras);
 			return site_id;
 		}
