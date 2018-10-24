@@ -170,7 +170,14 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 	uint64_t now = cf_clepoch_milliseconds();
 	uint64_t lut;
 
-	if (lut_str) {
+	if (strcmp(lut_str, "now") == 0) {
+		// Use a last-update-time threshold of now.
+		lut = now;
+
+		cf_info(AS_TRUNCATE, "{%s} got command to truncate to now (%lu)",
+				smd_key, lut);
+	}
+	else {
 		uint64_t utc_nanosec = strtoul(lut_str, NULL, 0);
 
 		// Last update time as human-readable UTC seconds.
@@ -204,13 +211,6 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 
 		cf_info(AS_TRUNCATE, "{%s} got command to truncate to %s (%lu)",
 				smd_key, utc_sec, lut);
-	}
-	else {
-		// Use a last-update-time threshold of now.
-		lut = now;
-
-		cf_info(AS_TRUNCATE, "{%s} got command to truncate to now (%lu)",
-				smd_key, lut);
 	}
 
 	char smd_value[13 + 1]; // 0xFFffffFFFF (40 bits) is 13 decimal characters

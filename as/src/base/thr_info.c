@@ -4090,13 +4090,14 @@ info_command_protect_roster_set(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
-// Format is one of:
+// Format is:
 //
-//	truncate:namespace=<ns-name>;set=<set-name>;lut=<UTC-nanosec-string>
-//	truncate:namespace=<ns-name>;set=<set-name>
+//	truncate:namespace=<ns-name>;lut=<UTC-nanosec-string>[;set=<set-name>]
 //
-//	truncate:namespace=<ns-name>;lut=<UTC-nanosec-string>
-//	truncate:namespace=<ns-name>
+//	... where the special lut value "now" means use this server's current time.
+//	(The lut parameter is required for safety: if an info tool user accidentally
+//	forgets quotes around the command, it is chopped at the first semicolon, and
+//	could accidentally decimate a namespace.)
 //
 int
 info_command_truncate(char *name, char *params, cf_dyn_buf *db)
@@ -4113,6 +4114,18 @@ info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
+	// Get the threshold last-update-time.
+
+	char lut_str[24]; // allow decimal, hex or octal in C constant format
+	int lut_str_len = (int)sizeof(lut_str);
+	int lut_rv = as_info_parameter_get(params, "lut", lut_str, &lut_str_len);
+
+	if (lut_rv != 0 || lut_str_len == 0) {
+		cf_warning(AS_INFO, "truncate command: missing or invalid last-update-time in command");
+		cf_dyn_buf_append_string(db, "ERROR::last-update-time");
+		return 0;
+	}
+
 	// Get the set-name if there is one.
 
 	char set_name[AS_SET_NAME_MAX_SIZE];
@@ -4125,34 +4138,18 @@ info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	// Get the threshold last-update-time if there is one.
-
-	char lut_str[24]; // allow decimal, hex or octal in C constant format
-	int lut_str_len = (int)sizeof(lut_str);
-	int lut_rv = as_info_parameter_get(params, "lut", lut_str, &lut_str_len);
-
-	if (lut_rv == -2 || (lut_rv == 0 && lut_str_len == 0)) {
-		cf_warning(AS_INFO, "truncate command: invalid last-update-time in command");
-		cf_dyn_buf_append_string(db, "ERROR::last-update-time");
-		return 0;
-	}
-
 	// Issue the truncate command.
 
-	bool ok = as_truncate_cmd(ns_name,
-			set_rv == 0 ? set_name : NULL,
-			lut_rv == 0 ? lut_str : NULL);
+	bool ok = as_truncate_cmd(ns_name, set_rv == 0 ? set_name : NULL, lut_str);
 
 	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate");
 
 	return 0;
 }
 
-// Format is one of:
+// Format is:
 //
-//	truncate-undo:namespace=<ns-name>;set=<set-name>
-//
-//	truncate-undo:namespace=<ns-name>
+//	truncate-undo:namespace=<ns-name>[;set=<set-name>]
 //
 int
 info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
