@@ -406,13 +406,13 @@ as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 void
 as_release_file_handle(as_file_handle *proto_fd_h)
 {
-	int rc = cf_rc_release(proto_fd_h);
+	unsigned rc = cf_rc_release(proto_fd_h);
 
 	if (rc > 0) {
 		return;
 	}
 	else if (rc < 0) {
-		cf_warning(AS_PROTO, "release file handle: negative ref-count %d", rc);
+		cf_warning(AS_PROTO, "release file handle: negative ref-count %u", rc);
 		return;
 	}
 

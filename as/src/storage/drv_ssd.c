@@ -275,7 +275,7 @@ ssd_release_vacated_wblock(drv_ssd *ssd, uint32_t wblock_id,
 	p_wblock_state->state = WBLOCK_STATE_NONE;
 
 	// Free the wblock if it's empty.
-	if (cf_atomic32_get(p_wblock_state->inuse_sz) == 0 &&
+	if (cf_atomic32_get(&p_wblock_state->inuse_sz) == 0 &&
 			// TODO - given assertions above, this condition is superfluous:
 			! p_wblock_state->swb) {
 		push_wblock_to_free_q(ssd, wblock_id, FREE_TO_HEAD);
@@ -366,7 +366,7 @@ swb_dereference_and_release(drv_ssd *ssd, uint32_t wblock_id,
 	wblock_state->swb = 0;
 
 	if (wblock_state->state != WBLOCK_STATE_DEFRAG) {
-		uint32_t inuse_sz = cf_atomic32_get(wblock_state->inuse_sz);
+		uint32_t inuse_sz = cf_atomic32_get(&wblock_state->inuse_sz);
 
 		// Free wblock if all three gating conditions hold.
 		if (inuse_sz == 0) {
@@ -412,10 +412,10 @@ swb_get(drv_ssd *ssd)
 			&ssd->alloc_table->wblock_state[swb->wblock_id];
 
 	// Sanity checks.
-	if (cf_atomic32_get(p_wblock_state->inuse_sz) != 0) {
+	if (cf_atomic32_get(&p_wblock_state->inuse_sz) != 0) {
 		cf_warning(AS_DRV_SSD, "device %s: wblock-id %u inuse-size %u off free-q",
 				ssd->name, swb->wblock_id,
-				cf_atomic32_get(p_wblock_state->inuse_sz));
+				cf_atomic32_get(&p_wblock_state->inuse_sz));
 	}
 	if (p_wblock_state->swb) {
 		cf_warning(AS_DRV_SSD, "device %s: wblock-id %u swb not null off free-q",
@@ -694,7 +694,7 @@ ssd_is_full(drv_ssd *ssd, uint32_t wblock_id)
 
 	cf_mutex_lock(&p_wblock_state->LOCK);
 
-	if (cf_atomic32_get(p_wblock_state->inuse_sz) == 0) {
+	if (cf_atomic32_get(&p_wblock_state->inuse_sz) == 0) {
 		// Lucky - wblock is empty, let ssd_defrag_wblock() free it.
 		cf_mutex_unlock(&p_wblock_state->LOCK);
 
@@ -736,7 +736,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	// Make sure this can't decrement to 0 while defragging this wblock.
 	cf_atomic32_set(&p_wblock_state->n_vac_dests, 1);
 
-	if (cf_atomic32_get(p_wblock_state->inuse_sz) == 0) {
+	if (cf_atomic32_get(&p_wblock_state->inuse_sz) == 0) {
 		cf_atomic64_incr(&ssd->n_wblock_defrag_io_skips);
 		goto Finished;
 	}
@@ -769,7 +769,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	size_t indent = 0; // current offset within the wblock, in bytes
 
 	while (indent < ssd->write_block_size &&
-			cf_atomic32_get(p_wblock_state->inuse_sz) != 0) {
+			cf_atomic32_get(&p_wblock_state->inuse_sz) != 0) {
 		ssd_record *block = (ssd_record*)&read_buf[indent];
 
 		if (! prefetch) {
@@ -1461,7 +1461,7 @@ void
 ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 {
 	// Wait for all writers to finish.
-	while (cf_atomic32_get(swb->n_writers) != 0) {
+	while (cf_atomic32_get(&swb->n_writers) != 0) {
 		;
 	}
 
@@ -1525,7 +1525,7 @@ ssd_write_sanity_checks(drv_ssd *ssd, ssd_write_buf *swb)
 void
 ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 {
-	if (cf_atomic32_get(ssd->ns->storage_post_write_queue) == 0 ||
+	if (cf_atomic32_get(&ssd->ns->storage_post_write_queue) == 0 ||
 			swb->skip_post_write_q) {
 		swb_dereference_and_release(ssd, swb->wblock_id, swb);
 	}
@@ -1537,7 +1537,7 @@ ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 	if (ssd->post_write_q) {
 		// Release post-write queue swbs if we're over the limit.
 		while ((uint32_t)cf_queue_sz(ssd->post_write_q) >
-				cf_atomic32_get(ssd->ns->storage_post_write_queue)) {
+				cf_atomic32_get(&ssd->ns->storage_post_write_queue)) {
 			ssd_write_buf* cached_swb;
 
 			if (CF_QUEUE_OK != cf_queue_pop(ssd->post_write_q, &cached_swb,
@@ -1950,7 +1950,7 @@ as_storage_show_wblock_stats(as_namespace *ns)
 
 			for (uint32_t i = 0; i < at->n_wblocks; i++) {
 				ssd_wblock_state *wblock_state = &at->wblock_state[i];
-				uint32_t inuse_sz = cf_atomic32_get(wblock_state->inuse_sz);
+				uint32_t inuse_sz = cf_atomic32_get(&wblock_state->inuse_sz);
 
 				if (inuse_sz == 0) {
 					num_free_blocks++;
@@ -2024,7 +2024,7 @@ as_storage_summarize_wblock_stats(as_namespace *ns)
 
 		for (uint32_t i = 0; i < at->n_wblocks; i++) {
 			ssd_wblock_state *wblock_state = &at->wblock_state[i];
-			uint32_t inuse_sz = cf_atomic32_get(wblock_state->inuse_sz);
+			uint32_t inuse_sz = cf_atomic32_get(&wblock_state->inuse_sz);
 
 			if (inuse_sz > ssd->write_block_size) {
 				cf_warning(AS_DRV_SSD, "wblock size (%d > %d) too large ~~ not counting in histogram",
@@ -2094,13 +2094,13 @@ ssd_log_stats(drv_ssd *ssd, uint64_t *p_prev_n_total_writes,
 		uint64_t *p_prev_n_defrag_io_skips, uint64_t *p_prev_n_direct_frees,
 		uint64_t *p_prev_n_tomb_raider_reads)
 {
-	uint64_t n_defrag_reads = cf_atomic64_get(ssd->n_defrag_wblock_reads);
-	uint64_t n_defrag_writes = cf_atomic64_get(ssd->n_defrag_wblock_writes);
-	uint64_t n_total_writes = cf_atomic64_get(ssd->n_wblock_writes) +
+	uint64_t n_defrag_reads = cf_atomic64_get(&ssd->n_defrag_wblock_reads);
+	uint64_t n_defrag_writes = cf_atomic64_get(&ssd->n_defrag_wblock_writes);
+	uint64_t n_total_writes = cf_atomic64_get(&ssd->n_wblock_writes) +
 			n_defrag_writes;
 
-	uint64_t n_defrag_io_skips = cf_atomic64_get(ssd->n_wblock_defrag_io_skips);
-	uint64_t n_direct_frees = cf_atomic64_get(ssd->n_wblock_direct_frees);
+	uint64_t n_defrag_io_skips = cf_atomic64_get(&ssd->n_wblock_defrag_io_skips);
+	uint64_t n_direct_frees = cf_atomic64_get(&ssd->n_wblock_direct_frees);
 
 	float total_write_rate = (float)(n_total_writes - *p_prev_n_total_writes) /
 			(float)LOG_STATS_INTERVAL_sec;
@@ -2189,7 +2189,7 @@ void
 ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 		uint32_t *p_prev_size)
 {
-	uint64_t n_writes = cf_atomic64_get(ssd->n_wblock_writes);
+	uint64_t n_writes = cf_atomic64_get(&ssd->n_wblock_writes);
 
 	// If there's an active write load, we don't need to flush.
 	if (n_writes != *p_prev_n_writes) {
@@ -2200,7 +2200,7 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 
 	pthread_mutex_lock(&ssd->write_lock);
 
-	n_writes = cf_atomic64_get(ssd->n_wblock_writes);
+	n_writes = cf_atomic64_get(&ssd->n_wblock_writes);
 
 	// Must check under the lock, could be racing a current swb just queued.
 	if (n_writes != *p_prev_n_writes) {
@@ -2252,7 +2252,7 @@ ssd_defrag_sweep(drv_ssd *ssd)
 
 		cf_mutex_lock(&p_wblock_state->LOCK);
 
-		uint32_t inuse_sz = cf_atomic32_get(p_wblock_state->inuse_sz);
+		uint32_t inuse_sz = cf_atomic32_get(&p_wblock_state->inuse_sz);
 
 		if (! p_wblock_state->swb &&
 				p_wblock_state->state != WBLOCK_STATE_DEFRAG &&
@@ -2342,7 +2342,7 @@ run_ssd_maintenance(void *udata)
 			next = next_time(now, flush_max_us, next);
 		}
 
-		if (cf_atomic32_get(ssd->defrag_sweep) != 0) {
+		if (cf_atomic32_get(&ssd->defrag_sweep) != 0) {
 			// May take long enough to mess up other jobs' schedules, but it's a
 			// very rare manually-triggered intervention.
 			ssd_defrag_sweep(ssd);

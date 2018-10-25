@@ -370,7 +370,7 @@ as_fabric_msg_queue_dump()
 	int total_alloced_msgs = 0;
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
-		int num_of_type = cf_atomic_int_get(g_num_msgs_by_type[i]);
+		int num_of_type = cf_atomic_int_get(&g_num_msgs_by_type[i]);
 
 		total_alloced_msgs += num_of_type;
 
@@ -379,7 +379,7 @@ as_fabric_msg_queue_dump()
 		}
 	}
 
-	int num_msgs = cf_atomic_int_get(g_num_msgs);
+	int num_msgs = cf_atomic_int_get(&g_num_msgs);
 
 	if (abs(num_msgs - total_alloced_msgs) > 2) {
 		cf_warning(AS_FABRIC, "num msgs (%d) != total alloc'd msgs (%d)", num_msgs, total_alloced_msgs);

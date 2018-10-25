@@ -1099,8 +1099,8 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 
 	// A good thing to cache the stats first.
 	uint64_t ns_objects  = ns->n_objects;
-	uint64_t si_objects  = cf_atomic64_get(si->stats.n_objects);
-	uint64_t pending     = cf_atomic64_get(si->stats.recs_pending);
+	uint64_t si_objects  = cf_atomic64_get(&si->stats.n_objects);
+	uint64_t pending     = cf_atomic64_get(&si->stats.recs_pending);
 
 	uint64_t n_keys      = ai_btree_get_numkeys(si->imd);
 	uint64_t i_size      = ai_btree_get_isize(si->imd);
@@ -1121,24 +1121,24 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 		}
 	}
 
-	info_append_uint64(db, "loadtime", cf_atomic64_get(si->stats.loadtime));
+	info_append_uint64(db, "loadtime", cf_atomic64_get(&si->stats.loadtime));
 	// writes
-	info_append_uint64(db, "write_success", cf_atomic64_get(si->stats.n_writes) - cf_atomic64_get(si->stats.write_errs));
-	info_append_uint64(db, "write_error", cf_atomic64_get(si->stats.write_errs));
+	info_append_uint64(db, "write_success", cf_atomic64_get(&si->stats.n_writes) - cf_atomic64_get(&si->stats.write_errs));
+	info_append_uint64(db, "write_error", cf_atomic64_get(&si->stats.write_errs));
 	// delete
-	info_append_uint64(db, "delete_success", cf_atomic64_get(si->stats.n_deletes) - cf_atomic64_get(si->stats.delete_errs));
-	info_append_uint64(db, "delete_error", cf_atomic64_get(si->stats.delete_errs));
+	info_append_uint64(db, "delete_success", cf_atomic64_get(&si->stats.n_deletes) - cf_atomic64_get(&si->stats.delete_errs));
+	info_append_uint64(db, "delete_error", cf_atomic64_get(&si->stats.delete_errs));
 	// defrag
-	info_append_uint64(db, "stat_gc_recs", cf_atomic64_get(si->stats.n_defrag_records));
-	info_append_uint64(db, "stat_gc_time", cf_atomic64_get(si->stats.defrag_time));
+	info_append_uint64(db, "stat_gc_recs", cf_atomic64_get(&si->stats.n_defrag_records));
+	info_append_uint64(db, "stat_gc_time", cf_atomic64_get(&si->stats.defrag_time));
 
 	// Cache values
-	uint64_t agg        = cf_atomic64_get(si->stats.n_aggregation);
-	uint64_t agg_rec    = cf_atomic64_get(si->stats.agg_num_records);
-	uint64_t agg_size   = cf_atomic64_get(si->stats.agg_response_size);
-	uint64_t lkup       = cf_atomic64_get(si->stats.n_lookup);
-	uint64_t lkup_rec   = cf_atomic64_get(si->stats.lookup_num_records);
-	uint64_t lkup_size  = cf_atomic64_get(si->stats.lookup_response_size);
+	uint64_t agg        = cf_atomic64_get(&si->stats.n_aggregation);
+	uint64_t agg_rec    = cf_atomic64_get(&si->stats.agg_num_records);
+	uint64_t agg_size   = cf_atomic64_get(&si->stats.agg_response_size);
+	uint64_t lkup       = cf_atomic64_get(&si->stats.n_lookup);
+	uint64_t lkup_rec   = cf_atomic64_get(&si->stats.lookup_num_records);
+	uint64_t lkup_size  = cf_atomic64_get(&si->stats.lookup_response_size);
 	uint64_t query      = agg      + lkup;
 	uint64_t query_rec  = agg_rec  + lkup_rec;
 	uint64_t query_size = agg_size + lkup_size;
@@ -1739,7 +1739,7 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 void
 as_sindex_clear_stats_on_empty_index(as_sindex *si)
 {
-	cf_atomic64_add(&si->stats.n_deletes, cf_atomic64_get(si->stats.n_objects));
+	cf_atomic64_add(&si->stats.n_deletes, cf_atomic64_get(&si->stats.n_objects));
 	cf_atomic64_set(&si->stats.n_keys, 0);
 	cf_atomic64_set(&si->stats.n_objects, 0);
 }
@@ -4413,11 +4413,11 @@ as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint
 			si_name = si->imd->iname;
 		}
 		else {
-			si_memory = (uint64_t)cf_atomic64_get(ns->n_bytes_sindex_memory);
+			si_memory = (uint64_t)cf_atomic64_get(&ns->n_bytes_sindex_memory);
 			si_name = "<all>";
 		}
 
-		uint64_t n_objects       = cf_atomic64_get(ns->n_objects);
+		uint64_t n_objects       = cf_atomic64_get(&ns->n_objects);
 		uint64_t pct_obj_scanned = n_objects == 0 ? 100 : ((n_obj_scanned * 100) / n_objects);
 		uint64_t elapsed         = (cf_getms() - start_time);
 		uint64_t est_time        = (elapsed * n_objects)/n_obj_scanned - elapsed;
@@ -4441,7 +4441,7 @@ as_sindex_ticker_done(as_namespace * ns, as_sindex * si, uint64_t start_time)
 		si_name = si->imd->iname;
 	}
 	else {
-		si_memory = (uint64_t)cf_atomic64_get(ns->n_bytes_sindex_memory);
+		si_memory = (uint64_t)cf_atomic64_get(&ns->n_bytes_sindex_memory);
 		si_name = "<all>";
 	}
 

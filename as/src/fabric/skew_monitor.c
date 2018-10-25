@@ -623,7 +623,7 @@ skew_monitor_hb_plugin_set_fn(msg* msg)
 	pthread_mutex_unlock(&g_self_skew_lock);
 
 	cf_clock now = cf_getms();
-	if (cf_atomic64_get(g_last_skew_check_time) + skew_check_interval() < now) {
+	if (cf_atomic64_get(&g_last_skew_check_time) + skew_check_interval() < now) {
 		skew_monitor_update();
 	}
 }
@@ -768,7 +768,7 @@ as_skew_monitor_init()
 uint64_t
 as_skew_monitor_skew()
 {
-	return cf_atomic64_get(g_skew);
+	return cf_atomic64_get(&g_skew);
 }
 
 /**

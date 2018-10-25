@@ -812,7 +812,7 @@ write_master_preprocessing(as_transaction* tr)
 	}
 
 	// ns->stop_writes is set by thr_nsup if configured threshold is breached.
-	if (cf_atomic32_get(ns->stop_writes) == 1) {
+	if (cf_atomic32_get(&ns->stop_writes) == 1) {
 		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_OUT_OF_SPACE);
 		return false;
 	}

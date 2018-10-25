@@ -81,6 +81,11 @@ COMMON_CFLAGS += -MMD
 # Require strict warning-free compilation.
 COMMON_CFLAGS += -Werror
 
+ifdef GCC_ATOMICS
+COMMON_CFLAGS += -DGCC_ATOMICS=1
+endif
+
+
 CFLAGS = $(COMMON_CFLAGS) -DMARCH_$(MARCH_NATIVE)
 
 # Define a macro for the base source file name.
