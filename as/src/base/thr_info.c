@@ -640,7 +640,7 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	char size_str[3] = { 0 }; // max cluster size is 128
+	char size_str[4] = { 0 }; // max cluster size is 128
 	int size_str_len = (int)sizeof(size_str);
 	int rv = as_info_parameter_get(params, "size", size_str, &size_str_len);
 
@@ -667,7 +667,7 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 
 	bool ignore_migrations = false;
 
-	char ignore_migrations_str[5] = { 0 };
+	char ignore_migrations_str[6] = { 0 };
 	int ignore_migrations_str_len = (int)sizeof(ignore_migrations_str);
 
 	rv = as_info_parameter_get(params, "ignore-migrations",
