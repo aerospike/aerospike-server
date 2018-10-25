@@ -498,8 +498,7 @@ read_index(const char *path, uint16_t *val)
 	}
 
 	if (x < 0) {
-		cf_warning(CF_HARDWARE, "invalid index in %s", path);
-		return FILE_RES_ERROR;
+		x = 0;
 	}
 
 	*val = (uint16_t)x;
