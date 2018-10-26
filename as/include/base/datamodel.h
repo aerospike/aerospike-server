@@ -725,27 +725,27 @@ struct as_namespace_s {
 	uint64_t		memory_size;
 	uint64_t		default_ttl;
 
-	PAD_BOOL		enable_xdr;
-	PAD_BOOL		sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping
-	PAD_BOOL		ns_forward_xdr_writes; // namespace-level flag to enable forwarding of xdr writes
-	PAD_BOOL		ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
-	PAD_BOOL		ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
+	bool			enable_xdr;
+	bool			sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping
+	bool			ns_forward_xdr_writes; // namespace-level flag to enable forwarding of xdr writes
+	bool			ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
+	bool			ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
 
 	uint32_t		cold_start_evict_ttl;
 	conflict_resolution_pol conflict_resolution_policy;
-	PAD_BOOL		cp; // relevant only for enterprise edition
-	PAD_BOOL		cp_allow_drops; // relevant only for enterprise edition
-	PAD_BOOL		data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
-	PAD_BOOL		cold_start_eviction_disabled;
-	PAD_BOOL		nsup_disabled;
-	PAD_BOOL		write_dup_res_disabled;
-	PAD_BOOL		disallow_null_setname;
-	PAD_BOOL		batch_sub_benchmarks_enabled;
-	PAD_BOOL		read_benchmarks_enabled;
-	PAD_BOOL		udf_benchmarks_enabled;
-	PAD_BOOL		udf_sub_benchmarks_enabled;
-	PAD_BOOL		write_benchmarks_enabled;
-	PAD_BOOL		proxy_hist_enabled;
+	bool			cp; // relevant only for enterprise edition
+	bool			cp_allow_drops; // relevant only for enterprise edition
+	bool			data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
+	bool			cold_start_eviction_disabled;
+	bool			nsup_disabled;
+	bool			write_dup_res_disabled;
+	bool			disallow_null_setname;
+	bool			batch_sub_benchmarks_enabled;
+	bool			read_benchmarks_enabled;
+	bool			udf_benchmarks_enabled;
+	bool			udf_sub_benchmarks_enabled;
+	bool			write_benchmarks_enabled;
+	bool			proxy_hist_enabled;
 	uint32_t		evict_hist_buckets;
 	uint32_t		evict_tenths_pct;
 	uint32_t		hwm_disk_pct;
@@ -759,7 +759,7 @@ struct as_namespace_s {
 	bool			prefer_uniform_balance; // indirect config - can become disabled if any other node reports disabled
 	uint32_t		rack_id;
 	as_read_consistency_level read_consistency_level;
-	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin
+	bool			single_bin; // restrict the namespace to objects with exactly one bin
 	uint32_t		stop_writes_pct;
 	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
@@ -782,29 +782,29 @@ struct as_namespace_s {
 	uint64_t		storage_filesize;
 	char*			storage_scheduler_mode; // relevant for devices only, not files
 	uint32_t		storage_write_block_size;
-	PAD_BOOL		storage_data_in_memory;
+	bool			storage_data_in_memory;
 
-	PAD_BOOL		storage_cold_start_empty;
-	PAD_BOOL		storage_commit_to_device; // relevant only for enterprise edition
+	bool			storage_cold_start_empty;
+	bool			storage_commit_to_device; // relevant only for enterprise edition
 	uint32_t		storage_commit_min_size; // relevant only for enterprise edition
 	uint32_t		storage_defrag_lwm_pct;
 	uint32_t		storage_defrag_queue_min;
 	uint32_t		storage_defrag_sleep;
 	int				storage_defrag_startup_minimum;
 	bool			storage_direct_files;
-	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
+	bool			storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
 	char*			storage_encryption_key_file;
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
-	PAD_BOOL		storage_read_page_cache;
-	PAD_BOOL		storage_serialize_tomb_raider; // relevant only for enterprise edition
+	bool			storage_read_page_cache;
+	bool			storage_serialize_tomb_raider; // relevant only for enterprise edition
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 
 	uint32_t		sindex_num_partitions;
 
-	PAD_BOOL		geo2dsphere_within_strict;
+	bool			geo2dsphere_within_strict;
 	uint16_t		geo2dsphere_within_min_level;
 	uint16_t		geo2dsphere_within_max_level;
 	uint16_t		geo2dsphere_within_max_cells;
@@ -1036,12 +1036,12 @@ struct as_namespace_s {
 	histogram*		query_rec_count_hist;
 	histogram*		re_repl_hist; // relevant only for enterprise edition
 
-	PAD_BOOL		read_hist_active;
-	PAD_BOOL		write_hist_active;
-	PAD_BOOL		udf_hist_active;
-	PAD_BOOL		query_hist_active;
-	PAD_BOOL		query_rec_count_hist_active;
-	PAD_BOOL		re_repl_hist_active; // relevant only for enterprise edition
+	bool			read_hist_active;
+	bool			write_hist_active;
+	bool			udf_hist_active;
+	bool			query_hist_active;
+	bool			query_rec_count_hist_active;
+	bool			re_repl_hist_active; // relevant only for enterprise edition
 
 	// Activate-by-config histograms.
 

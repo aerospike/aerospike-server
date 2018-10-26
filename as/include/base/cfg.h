@@ -74,14 +74,6 @@ struct as_namespace_s;
 #define MAX_BATCH_THREADS 256
 #define MAX_TLS_SPECS 10
 
-// Declare bools with PAD_BOOL so they can't share a 4-byte space with other
-// bools, chars or shorts. This prevents adjacent bools set concurrently in
-// different threads (albeit very unlikely) from interfering with each other.
-// Add others (e.g. PAD_UINT8, PAD_UINT16 ...) as needed.
-#define PGLUE(a, b) a##b
-#define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
-#define PAD_BOOL PBOOL(__LINE__)
-
 typedef struct as_config_s {
 
 	// The order here matches that in the configuration parser's enum,
@@ -111,10 +103,10 @@ typedef struct as_config_s {
 	uint32_t		n_batch_index_threads;
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
-	PAD_BOOL		fabric_benchmarks_enabled;
-	PAD_BOOL		svc_benchmarks_enabled;
-	PAD_BOOL		health_check_enabled;
-	PAD_BOOL		info_hist_enabled;
+	bool			fabric_benchmarks_enabled;
+	bool			svc_benchmarks_enabled;
+	bool			health_check_enabled;
+	bool			info_hist_enabled;
 	const char*		feature_key_file;
 	uint32_t		hist_track_back; // total time span in seconds over which to cache data
 	uint32_t		hist_track_slice; // period in seconds at which to cache histogram data
@@ -134,21 +126,21 @@ typedef struct as_config_s {
 	uint32_t		query_bsize;
 	uint64_t		query_buf_size; // dynamic only
 	uint32_t		query_bufpool_size;
-	PAD_BOOL		query_in_transaction_thr;
+	bool			query_in_transaction_thr;
 	uint32_t		query_long_q_max_size;
-	PAD_BOOL		query_enable_histogram;
-	PAD_BOOL		partitions_pre_reserved; // query will reserve all partitions up front
+	bool			query_enable_histogram;
+	bool			partitions_pre_reserved; // query will reserve all partitions up front
 	uint32_t		query_priority;
 	uint64_t		query_sleep_us;
 	uint64_t		query_rec_count_bound;
-	PAD_BOOL		query_req_in_query_thread;
+	bool			query_req_in_query_thread;
 	uint32_t		query_req_max_inflight;
 	uint32_t		query_short_q_max_size;
 	uint32_t		query_threads;
 	uint32_t		query_threshold;
 	uint64_t		query_untracked_time_ms;
 	uint32_t		query_worker_threads;
-	PAD_BOOL		run_as_daemon;
+	bool			run_as_daemon;
 	uint32_t		scan_max_active; // maximum number of active scans allowed
 	uint32_t		scan_max_done; // maximum number of finished scans kept for monitoring
 	uint32_t		scan_max_udf_transactions; // maximum number of active transactions per UDF background scan
@@ -167,7 +159,7 @@ typedef struct as_config_s {
 	// For special debugging or bug-related repair:
 
 	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
-	PAD_BOOL		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
+	bool		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
 	uint32_t		prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
 
 	//--------------------------------------------
@@ -204,7 +196,7 @@ typedef struct as_config_s {
 
 	uint32_t		n_fabric_channel_fds[AS_FABRIC_N_CHANNELS];
 	uint32_t		n_fabric_channel_recv_threads[AS_FABRIC_N_CHANNELS];
-	PAD_BOOL		fabric_keepalive_enabled;
+	bool			fabric_keepalive_enabled;
 	int				fabric_keepalive_intvl;
 	int				fabric_keepalive_probes;
 	int				fabric_keepalive_time;
