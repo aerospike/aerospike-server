@@ -590,6 +590,27 @@ info_get_partition_info(char *name, cf_dyn_buf *db)
 	return(0);
 }
 
+int
+info_get_rack_ids(char *name, cf_dyn_buf *db)
+{
+	if (as_info_error_enterprise_only()) {
+		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
+
+	as_partition_balance_effective_rack_ids(db);
+
+	return 0;
+}
+
+int
+info_get_rebalance_generation(char *name, cf_dyn_buf *db)
+{
+	cf_dyn_buf_append_uint64(db, g_rebalance_generation);
+
+	return 0;
+}
+
 // Deprecate in "six months".
 int
 info_get_replicas_prole(char *name, cf_dyn_buf *db)
@@ -6113,7 +6134,7 @@ as_info_init()
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
 	static char features[1024];
-	strcat(features, "lut-now;peers;cdt-list;cdt-map;cluster-stable;pipelining;geo;float;batch-index;replicas;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features, "batch-index;cdt-list;cdt-map;cluster-stable;float;geo;lut-now;peers;pipelining;rack-ids;replicas;replicas-all;replicas-master;replicas-prole;udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
 	as_hb_mode hb_mode;
@@ -6135,7 +6156,8 @@ as_info_init()
 	/*
 	 * help intentionally does not include the following:
 	 * cluster-stable;features;objects;
-	 * partition-generation;partition-info;partitions;replicas-master;
+	 * partition-generation;partition-info;partitions;
+	 * rack-ids;rebalance-generation;replicas-master;
 	 * replicas-prole;replicas-read;replicas-write;throughput
 	 */
 
@@ -6159,6 +6181,8 @@ as_info_init()
 	as_info_set_dynamic("peers-generation", as_service_list_dynamic, false);          // Returns the generation of the peers-*-* services lists.
 	as_info_set_dynamic("peers-tls-alt", as_service_list_dynamic, false);             // Supersedes "services-alternate" for TLS, alternate addresses.
 	as_info_set_dynamic("peers-tls-std", as_service_list_dynamic, false);             // Supersedes "services" for TLS, standard addresses.
+	as_info_set_dynamic("rack-ids", info_get_rack_ids, false);                        // Effective rack-ids for all namespaces on this node.
+	as_info_set_dynamic("rebalance-generation", info_get_rebalance_generation, false); // How many rebalances we've done.
 	as_info_set_dynamic("replicas", info_get_replicas, false);                        // Same as replicas-all, but includes regime.
 	as_info_set_dynamic("replicas-all", info_get_replicas_all, false);                // Base 64 encoded binary representation of partitions this node is replica for.
 	as_info_set_dynamic("replicas-master", info_get_replicas_master, false);          // Base 64 encoded binary representation of partitions this node is master (replica) for.

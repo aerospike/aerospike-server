@@ -32,6 +32,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "dynbuf.h"
 #include "fault.h"
 #include "node.h"
 
@@ -91,6 +92,7 @@ void as_partition_balance();
 uint64_t as_partition_balance_remaining_migrations();
 bool as_partition_balance_revive(struct as_namespace_s* ns);
 bool as_partition_balance_protect_roster_set(struct as_namespace_s* ns);
+void as_partition_balance_effective_rack_ids(cf_dyn_buf* db);
 
 
 //==========================================================
@@ -110,6 +112,9 @@ extern cf_atomic32 g_partition_generation;
 
 // Time of last rebalance.
 extern uint64_t g_rebalance_sec;
+
+// Count rebalances.
+extern uint64_t g_rebalance_generation;
 
 
 //==========================================================

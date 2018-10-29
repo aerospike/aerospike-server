@@ -31,6 +31,8 @@
 
 #include "citrusleaf/cf_queue.h"
 
+#include "dynbuf.h"
+#include "fault.h"
 #include "node.h"
 
 #include "base/datamodel.h"
@@ -59,6 +61,12 @@ as_partition_balance_protect_roster_set(as_namespace* ns)
 {
 	cf_warning(AS_PARTITION, "protect-roster-set is an enterprise feature");
 	return true;
+}
+
+void
+as_partition_balance_effective_rack_ids(cf_dyn_buf* db)
+{
+	cf_crash(AS_PARTITION, "CE code called as_partition_balance_effective_rack_ids()");
 }
 
 bool

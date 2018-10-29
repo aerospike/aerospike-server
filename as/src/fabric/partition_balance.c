@@ -64,6 +64,7 @@ const as_partition_version ZERO_VERSION = { 0 };
 
 cf_atomic32 g_partition_generation = (uint32_t)-1;
 uint64_t g_rebalance_sec;
+uint64_t g_rebalance_generation = 0;
 
 // Using int for 4-byte size, but maintaining bool semantics.
 // TODO - ok as non-volatile, but should selectively load/store in the future.
@@ -284,6 +285,8 @@ as_partition_balance()
 
 	process_pb_tasks(&mq);
 	cf_queue_destroy(&mq);
+
+	g_rebalance_generation++;
 }
 
 uint64_t
