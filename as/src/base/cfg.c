@@ -3562,10 +3562,10 @@ as_config_init(const char* config_file)
 				ns->geo2dsphere_within_strict = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL:
-				ns->geo2dsphere_within_min_level = cfg_u16(&line, 0, 30);
+				ns->geo2dsphere_within_min_level = cfg_u16(&line, 0, MAX_REGION_LEVELS);
 				break;
 			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL:
-				ns->geo2dsphere_within_max_level = cfg_u16(&line, 0, 30);
+				ns->geo2dsphere_within_max_level = cfg_u16(&line, 0, MAX_REGION_LEVELS);
 				break;
 			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS:
 				ns->geo2dsphere_within_max_cells = cfg_u16(&line, 1, MAX_REGION_CELLS);
