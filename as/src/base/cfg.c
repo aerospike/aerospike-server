@@ -5080,14 +5080,15 @@ xdr_cfg_add_datacenter(char* name)
 		cf_crash_nostack(AS_CFG, "Cannot have more than %d datacenters", DC_MAX_NUM);
 	}
 
-	xdr_dest_config* dest_cfg;
-	dest_cfg = &g_dest_xcfg_opt[g_dc_count];
+	xdr_dest_config* dest_cfg = &g_dest_xcfg_opt[g_dc_count];
+
 	dest_cfg->name = name;
 	dest_cfg->id = g_dc_count;
 	xdr_config_dest_defaults(dest_cfg);
 
 	return dest_cfg;
 }
+
 void
 xdr_cfg_associate_datacenter(char* dc, uint32_t nsid)
 {
