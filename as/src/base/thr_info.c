@@ -6139,7 +6139,7 @@ as_info_init()
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
 	static char features[1024];
-	strcat(features, "batch-index;cdt-list;cdt-map;cluster-stable;float;geo;lut-now;peers;pipelining;rack-ids;replicas;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features, "batch-index;cdt-list;cdt-map;cluster-stable;float;geo;lut-now;peers;pipelining;replicas;replicas-all;replicas-master;replicas-prole;udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
 	as_hb_mode hb_mode;
