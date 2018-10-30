@@ -3437,20 +3437,45 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_info(AS_INFO, "Changing value of write-commit-level-override of ns %s from %s to %s", ns->name, original_value, context);
 			}
 		}
+		else if (0 == as_info_parameter_get(params, "geo2dsphere-within-min-level", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-min-level %s is not a number", ns->name, context);
+				goto Error;
+			}
+			if (val < 0 || val > MAX_REGION_LEVELS) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-min-level %d must be between %u and %u",
+						ns->name, val, 0, MAX_REGION_LEVELS);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of geo2dsphere-within-min-level of ns %s from %u to %d ",
+					ns->name, ns->geo2dsphere_within_min_level, val);
+			ns->geo2dsphere_within_min_level = val;
+		}
+		else if (0 == as_info_parameter_get(params, "geo2dsphere-within-max-level", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-level %s is not a number", ns->name, context);
+				goto Error;
+			}
+			if (val < 0 || val > MAX_REGION_LEVELS) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-level %d must be between %u and %u",
+						ns->name, val, 0, MAX_REGION_LEVELS);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of geo2dsphere-within-max-level of ns %s from %u to %d ",
+					ns->name, ns->geo2dsphere_within_max_level, val);
+			ns->geo2dsphere_within_max_level = val;
+		}
 		else if (0 == as_info_parameter_get(params, "geo2dsphere-within-max-cells", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %s is not a number", ns->name, context);
 				goto Error;
 			}
-			if (val <= 0) {
-				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %u must be > 0", ns->name, val);
+			if (val < 1 || val > MAX_REGION_CELLS) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %d must be between %u and %u",
+						ns->name, val, 1, MAX_REGION_CELLS);
 				goto Error;
 			}
-			if ((uint32_t)val > (MAX_REGION_CELLS)) {
-				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %u must be <= %u", ns->name, val, MAX_REGION_CELLS);
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of geo2dsphere-within-max-cells of ns %s from %d to %d ",
+			cf_info(AS_INFO, "Changing value of geo2dsphere-within-max-cells of ns %s from %u to %d ",
 					ns->name, ns->geo2dsphere_within_max_cells, val);
 			ns->geo2dsphere_within_max_cells = val;
 		}
