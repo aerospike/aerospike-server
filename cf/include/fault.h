@@ -204,6 +204,8 @@ typedef enum {
 	AS_TSVC,
 	AS_UDF,
 	AS_XDR,
+	AS_XDR_CLIENT,
+	AS_XDR_HTTP,
 	CF_FAULT_CONTEXT_UNDEF
 } cf_fault_context;
 

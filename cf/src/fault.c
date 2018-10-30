@@ -115,7 +115,9 @@ char *cf_fault_context_strings[] = {
 		"truncate",
 		"tsvc",
 		"udf",
-		"xdr"
+		"xdr",
+		"xdr-client",
+		"xdr-http"
 };
 
 COMPILER_ASSERT(sizeof(cf_fault_context_strings) / sizeof(char*) == CF_FAULT_CONTEXT_UNDEF);

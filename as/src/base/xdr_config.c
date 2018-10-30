@@ -25,15 +25,22 @@
  */
 
 #include <string.h>
+
+#include "citrusleaf/alloc.h"
+
+#include "fault.h"
+
 #include "base/xdr_config.h"
 
-void xdr_config_defaults()
+void
+xdr_config_defaults()
 {
 	xdr_config *c = &g_xcfg;
 	memset(c, 0, sizeof(xdr_config));
 
 	c->xdr_section_configured = false;	// Indicates if XDR is configured or not
 	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
+	c->xdr_enable_http = false;			// Static config which spawn http machinery and also checks feature key
 	c->xdr_digestlog_path = NULL;		// Path where the digest information is written to the disk
 	c->xdr_info_port = 0;
 	c->xdr_max_ship_throughput = 0;		// XDR TPS limit
@@ -55,19 +62,34 @@ void xdr_config_defaults()
 	c->xdr_handle_failednode = true;
 	c->xdr_handle_linkdown = true;
 	c->xdr_digestlog_iowait_ms = 500;
+}
 
-	for (uint32_t index = 0; index < DC_MAX_NUM; index++) {
-		g_dc_xcfg_opt[index].dc_name = NULL;
-		g_dc_xcfg_opt[index].dc_node_v.vector = NULL;
-		g_dc_xcfg_opt[index].dc_addr_map_v.vector = NULL;
-		g_dc_xcfg_opt[index].dc_security_cfg.sec_config_file = NULL;
-		g_dc_xcfg_opt[index].dc_use_alternate_services = false;
-		g_dc_xcfg_opt[index].dc_connections = 64;
-		g_dc_xcfg_opt[index].dc_connections_idle_ms = 55000;
-	}
+void
+xdr_config_dest_defaults(xdr_dest_config *dest_cfg)
+{
+	// Assume its aerospike dest type unless otherwise specified
+	dest_cfg->dc_type = XDR_CFG_DEST_AEROSPIKE;
+
+	// Common
+	dest_cfg->dc_security_cfg.sec_config_file = NULL;
+	dest_cfg->dc_tls_spec_name = NULL;
+	dest_cfg->dc_tls_spec = NULL;
+
+	// Aerospike destination
+	cf_vector_pointer_init(&dest_cfg->aero.dc_nodes, 10, 0);
+	xdr_dest_aero_config *aero_conf = &dest_cfg->aero;
+	aero_conf->dc_use_alternate_services = false;
+	aero_conf->dc_connections = 64;
+	aero_conf->dc_connections_idle_ms = 55000;
+	cf_vector_pointer_init(&aero_conf->dc_addr_map_v, 10, 0);
+
+	// HTTP destination
+	xdr_dest_http_config *http_conf = &dest_cfg->http;
+	http_conf->verbose = false;
+	http_conf->version_str = cf_strdup(XDR_CFG_HTTP_VERSION_2);
+	cf_vector_init(&http_conf->urls, sizeof(void *), 10, 0); // pointer vector
 }
 
 xdr_config		g_xcfg = { 0 };
-dc_config_opt	g_dc_xcfg_opt[DC_MAX_NUM];
+xdr_dest_config	g_dest_xcfg_opt[DC_MAX_NUM];
 int				g_dc_count = 0;
-

@@ -115,9 +115,11 @@ cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
 char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
 void cfg_keep_cap(bool keep, bool* what, int32_t cap);
 
-void xdr_cfg_add_datacenter(char* dc, uint32_t nsid);
-void xdr_cfg_add_node_addr_port(dc_config_opt *dc_cfg, char* addr, int port);
-void xdr_cfg_add_tls_node(dc_config_opt *dc_cfg, char* addr, char *tls_name, int port);
+xdr_dest_config* xdr_cfg_add_datacenter(char* name);
+void xdr_cfg_associate_datacenter(char* dc, uint32_t nsid);
+void xdr_cfg_add_http_url(xdr_dest_config* dest_cfg, char* url);
+void xdr_cfg_add_node_addr_port(xdr_dest_config* dest_cfg, char* addr, int port);
+void xdr_cfg_add_tls_node(xdr_dest_config* dest_cfg, char* addr, char* tls_name, int port);
 
 
 //==========================================================
@@ -742,6 +744,7 @@ typedef enum {
 	// XDR options:
 	// Normally visible, in canonical configuration file order:
 	CASE_XDR_ENABLE_XDR,
+	CASE_XDR_ENABLE_XDR_HTTP,
 	CASE_XDR_DIGESTLOG_PATH,
 	CASE_XDR_DATACENTER_BEGIN,
 	// Normally hidden:
@@ -765,6 +768,7 @@ typedef enum {
 
 	// XDR (remote) datacenter options:
 	// Normally visible, in canonical configuration file order:
+	CASE_XDR_DATACENTER_DC_TYPE,
 	CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT,
 	// Normally hidden:
 	CASE_XDR_DATACENTER_DC_CONNECTIONS,
@@ -772,6 +776,8 @@ typedef enum {
 	CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP,
 	CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE,
 	CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES,
+	CASE_XDR_DATACENTER_HTTP_URL,
+	CASE_XDR_DATACENTER_HTTP_VERSION,
 	CASE_XDR_DATACENTER_TLS_NAME,
 	CASE_XDR_DATACENTER_TLS_NODE,
 
@@ -1317,6 +1323,7 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 const cfg_opt XDR_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
 		{ "enable-xdr",						CASE_XDR_ENABLE_XDR },
+		{ "enable-xdr-http",				CASE_XDR_ENABLE_XDR_HTTP },
 		{ "xdr-digestlog-path",				CASE_XDR_DIGESTLOG_PATH },
 		{ "datacenter",						CASE_XDR_DATACENTER_BEGIN },
 		{ "xdr-client-threads",				CASE_XDR_CLIENT_THREADS },
@@ -1341,12 +1348,15 @@ const cfg_opt XDR_OPTS[] = {
 
 const cfg_opt XDR_DATACENTER_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
+		{ "dc-type",						CASE_XDR_DATACENTER_DC_TYPE },
 		{ "dc-node-address-port",			CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT },
 		{ "dc-connections",					CASE_XDR_DATACENTER_DC_CONNECTIONS },
 		{ "dc-connections-idle-ms",			CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS },
 		{ "dc-int-ext-ipmap",				CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP },
 		{ "dc-security-config-file",		CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE },
 		{ "dc-use-alternate-services",		CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES },
+		{ "http-url",						CASE_XDR_DATACENTER_HTTP_URL },
+		{ "http-version",					CASE_XDR_DATACENTER_HTTP_VERSION },
 		{ "tls-name",						CASE_XDR_DATACENTER_TLS_NAME },
 		{ "tls-node",						CASE_XDR_DATACENTER_TLS_NODE },
 		{ "}",								CASE_CONTEXT_END }
@@ -1421,6 +1431,21 @@ const char* DEVICE_SCHEDULER_MODES[] = {
 };
 
 const int NUM_DEVICE_SCHEDULER_MODES = sizeof(DEVICE_SCHEDULER_MODES) / sizeof(const char*);
+
+const char* XDR_DESTINATION_TYPES[] = {
+		XDR_CFG_DEST_AEROSPIKE,		// remote Aerospike cluster
+		XDR_CFG_DEST_HTTP			// HTTP server
+};
+
+const int NUM_XDR_DESTINATION_TYPES = sizeof(XDR_DESTINATION_TYPES) / sizeof(const char*);
+
+const char* XDR_HTTP_VERSION_TYPES[] = {
+		XDR_CFG_HTTP_VERSION_1,
+		XDR_CFG_HTTP_VERSION_2,
+		XDR_CFG_HTTP_VERSION_2_PRIOR_KNOWLEDGE
+};
+
+const int NUM_XDR_HTTP_VERSION_TYPES = sizeof(XDR_HTTP_VERSION_TYPES) / sizeof(const char*);
 
 
 //==========================================================
@@ -2146,7 +2171,7 @@ as_config_init(const char* config_file)
 	cfg_parser_state_init(&state);
 
 	as_namespace* ns = NULL;
-	dc_config_opt *cur_dc_cfg = NULL;
+	xdr_dest_config *cur_dest_cfg = NULL;
 	cf_tls_spec* tls_spec = NULL;
 	cf_fault_sink* sink = NULL;
 	as_set* p_set = NULL; // local variable used for set initialization
@@ -3036,7 +3061,7 @@ as_config_init(const char* config_file)
 				ns->ns_forward_xdr_writes = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
-				xdr_cfg_add_datacenter(cfg_strdup(&line, true), ns->id);
+				xdr_cfg_associate_datacenter(cfg_strdup(&line, true), ns->id);
 				break;
 			case CASE_NAMESPACE_ALLOW_NONXDR_WRITES:
 				ns->ns_allow_nonxdr_writes = cfg_bool(&line);
@@ -3763,24 +3788,19 @@ as_config_init(const char* config_file)
 			case CASE_XDR_ENABLE_XDR:
 				g_xcfg.xdr_global_enabled = cfg_bool(&line);
 				break;
+			case CASE_XDR_ENABLE_XDR_HTTP:
+				g_xcfg.xdr_enable_http = cfg_bool(&line);
+				break;
 			case CASE_XDR_DIGESTLOG_PATH:
 				g_xcfg.xdr_digestlog_path = cfg_strdup(&line, true);
 				g_xcfg.xdr_digestlog_file_size = cfg_u64_val2_no_checks(&line);
 				break;
 			case CASE_XDR_DATACENTER_BEGIN:
-				if (g_dc_count == DC_MAX_NUM) {
-					cf_crash_nostack(AS_CFG, "Cannot have more than %d datacenters", DC_MAX_NUM);
-				}
-
-				cur_dc_cfg = &g_dc_xcfg_opt[g_dc_count];
-				cur_dc_cfg->dc_name = cfg_strdup(&line, true);
-				cur_dc_cfg->dc_id = g_dc_count;
-				cf_vector_pointer_init(&cur_dc_cfg->dc_node_v, 10, 0);
-				cf_vector_pointer_init(&cur_dc_cfg->dc_addr_map_v, 10, 0);
+				cur_dest_cfg = xdr_cfg_add_datacenter(cfg_strdup(&line, true));
 				cfg_begin_context(&state, XDR_DATACENTER);
 				break;
 			case CASE_XDR_CLIENT_THREADS:
-				g_xcfg.xdr_client_threads = cfg_u32_no_checks(&line);
+				g_xcfg.xdr_client_threads = cfg_u32(&line, 1, XDR_MAX_CLIENT_THREADS);
 				break;
 			case CASE_XDR_COMPRESSION_THRESHOLD:
 				g_xcfg.xdr_compression_threshold = cfg_u32_no_checks(&line);
@@ -3848,29 +3868,38 @@ as_config_init(const char* config_file)
 			case CASE_CONTEXT_BEGIN:
 				// Allow open brace on its own line to begin this context.
 				break;
+			case CASE_XDR_DATACENTER_DC_TYPE:
+				cur_dest_cfg->dc_type = cfg_strdup_one_of(&line, XDR_DESTINATION_TYPES, NUM_XDR_DESTINATION_TYPES);
+				break;
 			case CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT:
-				xdr_cfg_add_node_addr_port(cur_dc_cfg, cfg_strdup(&line, true), cfg_port_val2(&line));
+				xdr_cfg_add_node_addr_port(cur_dest_cfg, cfg_strdup(&line, true), cfg_port_val2(&line));
 				break;
 			case CASE_XDR_DATACENTER_DC_CONNECTIONS:
-				cur_dc_cfg->dc_connections = cfg_u32_no_checks(&line);
+				cur_dest_cfg->aero.dc_connections = cfg_u32_no_checks(&line);
 				break;
 			case CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS:
-				cur_dc_cfg->dc_connections_idle_ms = cfg_u32_no_checks(&line);
+				cur_dest_cfg->aero.dc_connections_idle_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP:
-				xdr_cfg_add_int_ext_mapping(cur_dc_cfg, cfg_strdup(&line, true), cfg_strdup_val2(&line, true));
+				xdr_cfg_add_int_ext_mapping(&cur_dest_cfg->aero, cfg_strdup(&line, true), cfg_strdup_val2(&line, true));
 				break;
 			case CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE:
-				cur_dc_cfg->dc_security_cfg.sec_config_file = cfg_strdup(&line, true);
+				cur_dest_cfg->dc_security_cfg.sec_config_file = cfg_strdup(&line, true);
 				break;
 			case CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES:
-				cur_dc_cfg->dc_use_alternate_services = cfg_bool(&line);
+				cur_dest_cfg->aero.dc_use_alternate_services = cfg_bool(&line);
+				break;
+			case CASE_XDR_DATACENTER_HTTP_URL:
+				xdr_cfg_add_http_url(cur_dest_cfg, cfg_strdup(&line, true));
+				break;
+			case CASE_XDR_DATACENTER_HTTP_VERSION:
+				cur_dest_cfg->http.version_str = cfg_strdup_one_of(&line, XDR_HTTP_VERSION_TYPES, NUM_XDR_HTTP_VERSION_TYPES);
 				break;
 			case CASE_XDR_DATACENTER_TLS_NAME:
-				cur_dc_cfg->tls_our_name = cfg_strdup_no_checks(&line);
+				cur_dest_cfg->dc_tls_spec_name = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_XDR_DATACENTER_TLS_NODE:
-				xdr_cfg_add_tls_node(cur_dc_cfg, cfg_strdup(&line, true), cfg_strdup_val2(&line, true), cfg_port_val3(&line));
+				xdr_cfg_add_tls_node(cur_dest_cfg, cfg_strdup(&line, true), cfg_strdup_val2(&line, true), cfg_port_val3(&line));
 				break;
 			case CASE_CONTEXT_END:
 				g_dc_count++;
@@ -5044,10 +5073,25 @@ cfg_keep_cap(bool keep, bool* what, int32_t cap)
 // XDR utilities.
 //
 
-void
-xdr_cfg_add_datacenter(char* dc, uint32_t nsid)
+xdr_dest_config*
+xdr_cfg_add_datacenter(char* name)
 {
-	cf_vector *v = &g_config.namespaces[nsid-1]->xdr_dclist_v;
+	if (g_dc_count == DC_MAX_NUM) {
+		cf_crash_nostack(AS_CFG, "Cannot have more than %d datacenters", DC_MAX_NUM);
+	}
+
+	xdr_dest_config* dest_cfg;
+	dest_cfg = &g_dest_xcfg_opt[g_dc_count];
+	dest_cfg->name = name;
+	dest_cfg->id = g_dc_count;
+	xdr_config_dest_defaults(dest_cfg);
+
+	return dest_cfg;
+}
+void
+xdr_cfg_associate_datacenter(char* dc, uint32_t nsid)
+{
+	cf_vector* v = &g_config.namespaces[nsid-1]->xdr_dclist_v;
 
 	// Crash if datacenter with same name already exists.
 	for (uint32_t index = 0; index < cf_vector_size(v); index++) {
@@ -5062,13 +5106,20 @@ xdr_cfg_add_datacenter(char* dc, uint32_t nsid)
 }
 
 void
-xdr_cfg_add_node_addr_port(dc_config_opt *dc_cfg, char* addr, int port)
+xdr_cfg_add_http_url(xdr_dest_config* dest_cfg, char* url)
 {
-	xdr_cfg_add_tls_node(dc_cfg, addr, NULL, port);
+	// Remember that we are only putting pointer in the vector
+	cf_vector_append(&dest_cfg->http.urls, &url);
 }
 
 void
-xdr_cfg_add_tls_node(dc_config_opt *dc_cfg, char* addr, char *tls_name, int port)
+xdr_cfg_add_node_addr_port(xdr_dest_config* dest_cfg, char* addr, int port)
+{
+	xdr_cfg_add_tls_node(dest_cfg, addr, NULL, port);
+}
+
+void
+xdr_cfg_add_tls_node(xdr_dest_config* dest_cfg, char* addr, char* tls_name, int port)
 {
 	// Add the element to the vector.
 	node_addr_port* nap = (node_addr_port*)cf_malloc(sizeof(node_addr_port));
@@ -5077,5 +5128,5 @@ xdr_cfg_add_tls_node(dc_config_opt *dc_cfg, char* addr, char *tls_name, int port
 	nap->tls_name = tls_name;
 	nap->port = port;
 
-	cf_vector_pointer_append(&dc_cfg->dc_node_v, nap);
+	cf_vector_pointer_append(&dest_cfg->aero.dc_nodes, nap);
 }

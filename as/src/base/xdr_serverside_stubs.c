@@ -119,7 +119,6 @@ bool is_xdr_nsup_deletes_enabled()
 	return false;
 }
 
-void xdr_cfg_add_int_ext_mapping(dc_config_opt *dc_cfg, char* orig, char* alt)
+void xdr_cfg_add_int_ext_mapping(xdr_dest_aero_config *dc_cfg, char* orig, char* alt)
 {
 }
-

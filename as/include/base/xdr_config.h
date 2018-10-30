@@ -45,6 +45,15 @@
 #define NAMESPACE_MAX_NUM	32
 #define DC_MAX_NUM			32
 
+#define XDR_MAX_CLIENT_THREADS 64
+
+#define XDR_CFG_DEST_AEROSPIKE		"aerospike"
+#define XDR_CFG_DEST_HTTP			"http"
+
+#define XDR_CFG_HTTP_VERSION_1 "v1"
+#define XDR_CFG_HTTP_VERSION_2 "v2"
+#define XDR_CFG_HTTP_VERSION_2_PRIOR_KNOWLEDGE "v2-prior-knowledge"
+
 typedef struct xdr_node_lst_s {
 	cf_node		node;
 	uint64_t	time[DC_MAX_NUM];
@@ -66,6 +75,7 @@ typedef struct xdr_config_s {
 
 	bool		xdr_section_configured;
 	bool		xdr_global_enabled;
+	bool		xdr_enable_http;
 
 	// Ring buffer configuration
 	char		*xdr_digestlog_path;
@@ -103,26 +113,40 @@ typedef struct xdr_security_config_s {
 	char		*password;
 } xdr_security_config;
 
-typedef struct dc_config_opt_s {
-	 char					*dc_name;
-	 int					dc_id;
-	 cf_vector				dc_node_v;
-	 cf_vector				dc_addr_map_v;
-	 uint32_t				dc_connections;
-	 uint32_t				dc_connections_idle_ms;
-	 xdr_security_config	dc_security_cfg;
-	 bool					dc_use_alternate_services;
-	 char					*tls_our_name;
-	 cf_tls_spec			*tls_spec;
-} dc_config_opt;
+typedef struct xdr_dest_aero_config_s {
+	cf_vector				dc_nodes;
+	cf_vector				dc_addr_map_v;
+	uint32_t				dc_connections;
+	uint32_t				dc_connections_idle_ms;
+	bool					dc_use_alternate_services;
+} xdr_dest_aero_config;
+
+typedef struct xdr_dest_http_config_s {
+	cf_vector				urls;
+	char					*version_str;
+	bool					verbose;
+} xdr_dest_http_config;
+
+typedef struct xdr_dest_config_s {
+	char					*dc_type;
+	char					*name;
+	int						id;
+	char					*dc_tls_spec_name;
+	cf_tls_spec				*dc_tls_spec;
+	xdr_security_config	dc_security_cfg;
+
+	struct xdr_dest_aero_config_s	aero;
+	struct xdr_dest_http_config_s	http;
+} xdr_dest_config;
 
 //==========================================================
 // Public API.
 //
 
 void xdr_config_defaults();
+void xdr_config_dest_defaults(xdr_dest_config *dest_conf);
 bool xdr_read_security_configfile(xdr_security_config* sc);
 
 extern xdr_config g_xcfg;
 extern int g_dc_count;
-extern dc_config_opt g_dc_xcfg_opt[DC_MAX_NUM];
+extern xdr_dest_config g_dest_xcfg_opt[DC_MAX_NUM];
