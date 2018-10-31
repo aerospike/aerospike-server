@@ -78,11 +78,6 @@ typedef struct as_stats_s {
 	cf_atomic64		batch_index_created_buffers; // not in ticker
 	cf_atomic64		batch_index_destroyed_buffers; // not in ticker
 
-	// "Old" batch stats.
-	cf_atomic64		batch_initiate; // not in ticker
-	cf_atomic64		batch_errors; // not in ticker
-	cf_atomic64		batch_timeout; // not in ticker
-
 	// Query & secondary index stats.
 	cf_atomic64		query_false_positives;
 	cf_atomic64		sindex_gc_retries; // number of times sindex gc skips iteration on failure to get record lock

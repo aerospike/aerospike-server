@@ -51,7 +51,6 @@
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/stats.h"
-#include "base/thr_batch.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/xdr_serverside.h"
@@ -266,7 +265,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	if (as_transaction_is_multi_record(tr)) {
 		if (m->transaction_ttl != 0) {
-			// Old batch and queries may specify transaction_ttl, but don't use
+			// Queries may specify transaction_ttl, but don't use
 			// g_config.transaction_max_ns as a default. Assuming specified TTL
 			// is large enough that it's not worth checking for timeout here.
 			tr->end_time = tr->start_time +
@@ -274,16 +273,9 @@ as_tsvc_process_transaction(as_transaction *tr)
 		}
 
 		if (as_transaction_is_batch_direct(tr)) {
-			// Old batch.
-			if (! as_security_check_data_op(tr, ns, PERM_READ)) {
-				as_multi_rec_transaction_error(tr, tr->result_code);
-				goto Cleanup;
-			}
-
-			if ((rv = as_batch_direct_queue_task(tr, ns)) != 0) {
-				as_multi_rec_transaction_error(tr, rv);
-				cf_atomic64_incr(&g_stats.batch_errors);
-			}
+			// Old batch - deprecated.
+			as_multi_rec_transaction_error(tr,
+					AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE);
 		}
 		else if (as_transaction_is_query(tr)) {
 			// Query.

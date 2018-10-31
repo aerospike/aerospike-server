@@ -1155,7 +1155,7 @@ query_add_response(void *void_qtr, as_storage_rd *rd)
 
 	// TODO - check and handle error result (< 0 - drive IO) explicitly?
 	size_t msg_sz = (size_t)as_msg_make_response_bufbuilder(NULL, rd,
-			qtr->no_bin_data, true, true, qtr->binlist);
+			qtr->no_bin_data, qtr->binlist);
 	int ret = 0;
 
 	pthread_mutex_lock(&qtr->buf_mutex);
@@ -1171,7 +1171,7 @@ query_add_response(void *void_qtr, as_storage_rd *rd)
 	}
 
 	int32_t result = as_msg_make_response_bufbuilder(&qtr->bb_r, rd,
-			qtr->no_bin_data, true, true, qtr->binlist);
+			qtr->no_bin_data, qtr->binlist);
 
 	if (result < 0) {
 		ret = result;
