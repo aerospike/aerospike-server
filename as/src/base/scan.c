@@ -759,8 +759,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (job->no_bin_data) {
 		// TODO - suppose the predexp needs bin values???
 
-		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, true, true,
-				NULL);
+		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL);
 	}
 	else {
 		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
@@ -777,7 +776,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 			return;
 		}
 
-		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false, true, true,
+		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false,
 				job->bin_names);
 	}
 

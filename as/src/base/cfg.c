@@ -143,11 +143,9 @@ cfg_set_defaults()
 
 	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
 	c->n_proto_fd_max = 15000;
-	c->n_batch_threads = 4;
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
-	c->batch_priority = 200; // # of rows between a quick context switch?
 	c->feature_key_file = "/etc/aerospike/features.conf";
 	c->hist_track_back = 300;
 	c->hist_track_slice = 10;
@@ -272,12 +270,10 @@ typedef enum {
 	// Normally hidden:
 	CASE_SERVICE_ADVERTISE_IPV6,
 	CASE_SERVICE_AUTO_PIN,
-	CASE_SERVICE_BATCH_THREADS,
+	CASE_SERVICE_BATCH_INDEX_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
-	CASE_SERVICE_BATCH_PRIORITY,
-	CASE_SERVICE_BATCH_INDEX_THREADS,
 	CASE_SERVICE_CLUSTER_NAME,
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
@@ -343,7 +339,9 @@ typedef enum {
 	// Deprecated:
 	CASE_SERVICE_AUTO_DUN,
 	CASE_SERVICE_AUTO_UNDUN,
+	CASE_SERVICE_BATCH_PRIORITY,
 	CASE_SERVICE_BATCH_RETRANSMIT,
+	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_CLIB_LIBRARY,
 	CASE_SERVICE_DEFRAG_QUEUE_ESCAPE,
 	CASE_SERVICE_DEFRAG_QUEUE_HWM,
@@ -825,12 +823,10 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
 		{ "advertise-ipv6",					CASE_SERVICE_ADVERTISE_IPV6 },
 		{ "auto-pin",						CASE_SERVICE_AUTO_PIN },
-		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
+		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
-		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
-		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
@@ -893,7 +889,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
 		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
+		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
 		{ "batch-retransmit",				CASE_SERVICE_BATCH_RETRANSMIT },
+		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "clib-library",					CASE_SERVICE_CLIB_LIBRARY },
 		{ "defrag-queue-escape",			CASE_SERVICE_DEFRAG_QUEUE_ESCAPE },
 		{ "defrag-queue-hwm",				CASE_SERVICE_DEFRAG_QUEUE_HWM },
@@ -2326,8 +2324,8 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
-			case CASE_SERVICE_BATCH_THREADS:
-				c->n_batch_threads = cfg_int(&line, 0, MAX_BATCH_THREADS);
+			case CASE_SERVICE_BATCH_INDEX_THREADS:
+				c->n_batch_index_threads = cfg_u32(&line, 1, MAX_BATCH_THREADS);
 				break;
 			case CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE:
 				c->batch_max_buffers_per_queue = cfg_u32_no_checks(&line);
@@ -2337,12 +2335,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS:
 				c->batch_max_unused_buffers = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_BATCH_PRIORITY:
-				c->batch_priority = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_BATCH_INDEX_THREADS:
-				c->n_batch_index_threads = cfg_u32(&line, 1, MAX_BATCH_THREADS);
 				break;
 			case CASE_SERVICE_CLUSTER_NAME:
 				cfg_set_cluster_name(line.val_tok_1);
@@ -2545,7 +2537,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_AUTO_DUN:
 			case CASE_SERVICE_AUTO_UNDUN:
+			case CASE_SERVICE_BATCH_PRIORITY:
 			case CASE_SERVICE_BATCH_RETRANSMIT:
+			case CASE_SERVICE_BATCH_THREADS:
 			case CASE_SERVICE_CLIB_LIBRARY:
 			case CASE_SERVICE_DEFRAG_QUEUE_ESCAPE:
 			case CASE_SERVICE_DEFRAG_QUEUE_HWM:

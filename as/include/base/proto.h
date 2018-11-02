@@ -193,7 +193,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_SET					1
 #define AS_MSG_FIELD_TYPE_KEY					2
 #define AS_MSG_FIELD_TYPE_DIGEST_RIPE			4
-#define AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY		6
+#define AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY		6 // old batch - deprecated
 #define AS_MSG_FIELD_TYPE_TRID					7
 #define AS_MSG_FIELD_TYPE_SCAN_OPTIONS			8
 #define AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT		9
@@ -225,7 +225,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_SET				0x00000002
 #define AS_MSG_FIELD_BIT_KEY				0x00000004
 #define AS_MSG_FIELD_BIT_DIGEST_RIPE		0x00000008
-#define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY	0x00000010
+#define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY	0x00000010 // old batch - deprecated
 #define AS_MSG_FIELD_BIT_TRID				0x00000020
 #define AS_MSG_FIELD_BIT_SCAN_OPTIONS		0x00000040
 #define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT		0x00000080
@@ -492,8 +492,7 @@ cl_msg *as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint16_t bin_count, struct as_namespace_s *ns, cl_msg *msgp_in,
 		size_t *msg_sz_in, uint64_t trid);
 int32_t as_msg_make_response_bufbuilder(cf_buf_builder **bb_r,
-		struct as_storage_rd_s *rd, bool no_bin_data, bool include_key,
-		bool skip_empty_records, cf_vector *select_bins);
+		struct as_storage_rd_s *rd, bool no_bin_data, cf_vector *select_bins);
 cl_msg *as_msg_make_val_response(bool success, const as_val *val,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		uint64_t trid, size_t *p_msg_sz);

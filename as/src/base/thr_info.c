@@ -60,7 +60,6 @@
 #include "base/index.h"
 #include "base/monitor.h"
 #include "base/scan.h"
-#include "base/thr_batch.h"
 #include "base/thr_demarshal.h"
 #include "base/thr_info_port.h"
 #include "base/thr_sindex.h"
@@ -380,11 +379,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "batch_index_huge_buffers", g_stats.batch_index_huge_buffers);
 	info_append_uint64(db, "batch_index_created_buffers", g_stats.batch_index_created_buffers);
 	info_append_uint64(db, "batch_index_destroyed_buffers", g_stats.batch_index_destroyed_buffers);
-
-	info_append_uint64(db, "batch_initiate", g_stats.batch_initiate);
-	info_append_int(db, "batch_queue", as_batch_direct_queue_size());
-	info_append_uint64(db, "batch_error", g_stats.batch_errors);
-	info_append_uint64(db, "batch_timeout", g_stats.batch_timeout);
 
 	info_append_int(db, "scans_active", as_scan_get_active_job_count());
 
@@ -1754,12 +1748,10 @@ info_service_config_get(cf_dyn_buf *db)
 
 	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
 	info_append_string(db, "auto-pin", auto_pin_string());
-	info_append_int(db, "batch-threads", g_config.n_batch_threads);
+	info_append_uint32(db, "batch-index-threads", g_config.n_batch_index_threads);
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
-	info_append_uint32(db, "batch-priority", g_config.batch_priority);
-	info_append_uint32(db, "batch-index-threads", g_config.n_batch_index_threads);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	info_get_printable_cluster_name(cluster_name);
@@ -2277,12 +2269,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			if (0 != as_batch_threads_resize(val))
 				goto Error;
 		}
-		else if (0 == as_info_parameter_get(params, "batch-threads", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			if (0 != as_batch_direct_threads_resize(val))
-				goto Error;
-		}
 		else if (0 == as_info_parameter_get(params, "batch-max-requests", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
@@ -2300,12 +2286,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of batch-max-unused-buffers from %d to %d ", g_config.batch_max_unused_buffers, val);
 			g_config.batch_max_unused_buffers = val;
-		}
-		else if (0 == as_info_parameter_get(params, "batch-priority", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of batch-priority from %d to %d ", g_config.batch_priority, val);
-			g_config.batch_priority = val;
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-max", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))

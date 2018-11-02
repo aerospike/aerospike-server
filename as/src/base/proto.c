@@ -281,13 +281,10 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 	return msgp;
 }
 
-// FIXME - only old batch sets include_key false - remove parameter ???
-// FIXME - only old batch sets skip_empty_records false - remove parameter ???
 // Pass NULL bb_r for sizing only. Return value is size if >= 0, error if < 0.
 int32_t
 as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
-		bool no_bin_data, bool include_key, bool skip_empty_records,
-		cf_vector *select_bins)
+		bool no_bin_data, cf_vector *select_bins)
 {
 	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
@@ -299,7 +296,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	const uint8_t* key = NULL;
 	uint32_t key_size = 0;
 
-	if (include_key && r->key_stored == 1) {
+	if (r->key_stored == 1) {
 		if (! as_storage_record_get_key(rd)) {
 			cf_warning(AS_PROTO, "can't get key - skipping record");
 			return -1;
@@ -351,7 +348,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			}
 
 			// Don't return an empty record.
-			if (skip_empty_records && n_bins_matched == 0) {
+			if (n_bins_matched == 0) {
 				return 0;
 			}
 		}
