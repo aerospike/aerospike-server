@@ -23,7 +23,6 @@
 #include "base/thr_info_port.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,6 +34,7 @@
 #include "citrusleaf/cf_atomic.h"
 
 #include "cf_str.h"
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "socket.h"
@@ -201,7 +201,7 @@ thr_info_port_writable(info_port_state *ips)
 
 // Demarshal info socket connections.
 void *
-thr_info_port_fn(void *arg)
+run_info_port(void *arg)
 {
 	cf_poll poll;
 	cf_debug(AS_INFO_PORT, "Info port process started");
@@ -281,8 +281,6 @@ thr_info_port_fn(void *arg)
 					continue;
 				}
 			}
-
-			pthread_testcancel();
 		}
 	}
 
@@ -299,17 +297,7 @@ as_info_port_start()
 
 	cf_info(AS_INFO_PORT, "starting info port thread");
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&thread, &attrs, thr_info_port_fn, NULL) != 0) {
-		cf_crash(AS_INFO_PORT, "failed to create info port thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_info_port, NULL);
 
 	// For orderly startup log, wait for endpoint setup.
 	while (! g_started) {

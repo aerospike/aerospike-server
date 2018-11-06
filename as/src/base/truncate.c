@@ -26,7 +26,6 @@
 
 #include "base/truncate.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +38,8 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "shash.h"
 #include "vmapx.h"
@@ -124,7 +125,7 @@ as_truncate_init(as_namespace* ns)
 	truncate_startup_hash_init(ns);
 
 	ns->truncate.state = TRUNCATE_IDLE;
-	pthread_mutex_init(&ns->truncate.state_lock, 0);
+	cf_mutex_init(&ns->truncate.state_lock);
 }
 
 
@@ -460,7 +461,7 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 
 	// Truncate to new last-update-time.
 
-	pthread_mutex_lock(&ns->truncate.state_lock);
+	cf_mutex_lock(&ns->truncate.state_lock);
 
 	switch (ns->truncate.state) {
 	case TRUNCATE_IDLE:
@@ -479,7 +480,7 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 		break;
 	}
 
-	pthread_mutex_unlock(&ns->truncate.state_lock);
+	cf_mutex_unlock(&ns->truncate.state_lock);
 }
 
 
@@ -522,20 +523,9 @@ truncate_all(as_namespace* ns)
 
 	cf_atomic64_set(&ns->truncate.n_records_this_run, 0);
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 	for (uint32_t i = 0; i < NUM_TRUNCATE_THREADS; i++) {
-		if (pthread_create(&thread, &attrs, run_truncate, (void*)ns) != 0) {
-			cf_crash(AS_TRUNCATE, "failed to create truncate thread");
-			// TODO - be forgiving? Is there any point?
-		}
+		cf_thread_create_detached(run_truncate, (void*)ns);
 	}
-
-	pthread_attr_destroy(&attrs);
 }
 
 
@@ -568,7 +558,7 @@ void
 truncate_finish(as_namespace* ns)
 {
 	if (cf_atomic32_decr(&ns->truncate.n_threads_running) == 0) {
-		pthread_mutex_lock(&ns->truncate.state_lock);
+		cf_mutex_lock(&ns->truncate.state_lock);
 
 		ns->truncate.n_records += ns->truncate.n_records_this_run;
 
@@ -590,7 +580,7 @@ truncate_finish(as_namespace* ns)
 			break;
 		}
 
-		pthread_mutex_unlock(&ns->truncate.state_lock);
+		cf_mutex_unlock(&ns->truncate.state_lock);
 	}
 }
 

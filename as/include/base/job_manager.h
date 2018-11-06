@@ -22,13 +22,14 @@
 
 #pragma once
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_queue_priority.h"
+
+#include "cf_mutex.h"
 
 struct as_job_s;
 struct as_job_manager_s;
@@ -42,7 +43,7 @@ struct as_partition_reservation_s;
 //
 
 typedef struct as_priority_thread_pool_s {
-	pthread_mutex_t		lock;
+	cf_mutex			lock;
 	cf_queue_priority*	dispatch_queue;
 	cf_queue*			complete_queue;
 	uint32_t			n_threads;
@@ -117,7 +118,7 @@ typedef struct as_job_s {
 	uint16_t					set_id;
 
 	// Handle active phase:
-	pthread_mutex_t				requeue_lock;
+	cf_mutex					requeue_lock;
 	int							priority;
 	cf_atomic32					active_rc;
 	volatile int				next_pid;
@@ -145,7 +146,7 @@ void as_job_active_release(as_job* _job);
 //
 
 typedef struct as_job_manager_s {
-	pthread_mutex_t			lock;
+	cf_mutex				lock;
 	cf_queue*				active_jobs;
 	cf_queue*				finished_jobs;
 	as_priority_thread_pool	thread_pool;

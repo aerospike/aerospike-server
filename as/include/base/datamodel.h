@@ -27,7 +27,6 @@
 #pragma once
 
 #include <limits.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +38,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "arenax.h"
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "hist.h"
 #include "hist_track.h"
@@ -661,7 +661,7 @@ struct as_namespace_s {
 	bool			loading_records;
 
 	// For cold start eviction.
-	pthread_mutex_t	cold_start_evict_lock;
+	cf_mutex		cold_start_evict_lock;
 	uint32_t		cold_start_record_add_count;
 	uint32_t		cold_start_threshold_void_time;
 	uint32_t		cold_start_max_void_time;

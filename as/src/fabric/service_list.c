@@ -37,7 +37,9 @@
 
 #include <sys/time.h>
 
+#include "cf_mutex.h"
 #include "cf_str.h"
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "msg.h"
@@ -323,7 +325,7 @@ static uint64_t g_in_gen = 0;
 
 // Locking order: g_peers_lock before g_info_lock.
 
-static pthread_mutex_t g_peers_lock = PTHREAD_MUTEX_INITIALIZER;
+static cf_mutex g_peers_lock = CF_MUTEX_INIT;
 static pthread_rwlock_t g_info_lock = PTHREAD_RWLOCK_INITIALIZER;
 
 // These hash tables are created without locks.
@@ -364,18 +366,7 @@ as_service_list_init(void)
 			SCRATCH_SZ, handle_fabric_message, NULL);
 
 	as_exchange_register_listener(handle_cluster_change, NULL);
-
-	pthread_attr_t attr;
-	pthread_t th;
-
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&th, &attr, run_update_thread, NULL) != 0) {
-		cf_crash(AS_SERVICE_LIST, "error while creating update thread");
-	}
-
-	pthread_attr_destroy(&attr);
+	cf_thread_create_detached(run_update_thread, NULL);
 }
 
 int32_t
@@ -423,13 +414,13 @@ as_service_list_command(char *key, char *par, cf_dyn_buf *db)
 	// storing it in g_info as recalc() does.
 
 	const filter_t *val_par = peer_val->filter;
-	pthread_mutex_lock(&g_peers_lock);
+	cf_mutex_lock(&g_peers_lock);
 
 	peer_val->build(db, peer_val->proj, &(filter_t){
 		.tls = val_par->tls, .present = false, .since = since
 	});
 
-	pthread_mutex_unlock(&g_peers_lock);
+	cf_mutex_unlock(&g_peers_lock);
 	return 0;
 }
 
@@ -594,7 +585,7 @@ static void
 purge_alumni(void)
 {
 	cf_detail(AS_SERVICE_LIST, "purging alumni");
-	pthread_mutex_lock(&g_peers_lock);
+	cf_mutex_lock(&g_peers_lock);
 
 	uint64_t old_gen = g_in_gen;
 
@@ -604,7 +595,7 @@ purge_alumni(void)
 		recalc();
 	}
 
-	pthread_mutex_unlock(&g_peers_lock);
+	cf_mutex_unlock(&g_peers_lock);
 }
 
 // handle_cluster_change() is authoritative for who's currently a peer and
@@ -695,13 +686,13 @@ handle_cluster_change(const as_exchange_cluster_changed_event *ev, void *udata)
 			rem, (int32_t)n_rem);
 
 	if (n_add + n_rem > 0) {
-		pthread_mutex_lock(&g_peers_lock);
+		cf_mutex_lock(&g_peers_lock);
 
 		set_present(add, n_add, true);
 		set_present(rem, n_rem, false);
 		recalc();
 
-		pthread_mutex_unlock(&g_peers_lock);
+		cf_mutex_unlock(&g_peers_lock);
 		wake_up();
 	}
 
@@ -754,7 +745,7 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 
 	cf_detail(AS_SERVICE_LIST, "op %s gen %u", op_str(op), gen);
 
-	pthread_mutex_lock(&g_peers_lock);
+	cf_mutex_lock(&g_peers_lock);
 
 	peer_t *p = find_peer(node);
 	bool change = false;
@@ -776,7 +767,7 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 			dump_peer(node, p);
 		}
 
-		pthread_mutex_unlock(&g_peers_lock);
+		cf_mutex_unlock(&g_peers_lock);
 		as_fabric_msg_put(m);
 
 		return 0;
@@ -786,7 +777,7 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 		cf_warning(AS_SERVICE_LIST, "invalid service list op %d from node %lx",
 				op, node);
 
-		pthread_mutex_unlock(&g_peers_lock);
+		cf_mutex_unlock(&g_peers_lock);
 		as_fabric_msg_put(m);
 
 		return 0;
@@ -853,12 +844,12 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 	if (res != AS_FABRIC_SUCCESS) {
 		cf_warning(AS_SERVICE_LIST, "error while sending OP_ACK to %lx: %d",
 				node, res);
-		pthread_mutex_unlock(&g_peers_lock);
+		cf_mutex_unlock(&g_peers_lock);
 		as_fabric_msg_put(m);
 		return 0;
 	}
 
-	pthread_mutex_unlock(&g_peers_lock);
+	cf_mutex_unlock(&g_peers_lock);
 
 	// No as_fabric_msg_put(), since we reused the original message to
 	// send the ACK.
@@ -985,13 +976,13 @@ run_update_thread(void *udata)
 			.now_ms = cf_getms(), .retrans_at_ms = 0
 		};
 
-		pthread_mutex_lock(&g_peers_lock);
+		cf_mutex_lock(&g_peers_lock);
 
 		cf_detail(AS_SERVICE_LIST,
 				"----------------------------------------- updating");
 		cf_shash_reduce(g_peers, update_reduce, &ctx);
 
-		pthread_mutex_unlock(&g_peers_lock);
+		cf_mutex_unlock(&g_peers_lock);
 
 		int32_t wait;
 

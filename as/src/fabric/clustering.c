@@ -32,6 +32,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_random.h"
 
+#include "cf_thread.h"
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -1857,9 +1858,7 @@ static void
 timer_start()
 {
 	CLUSTERING_LOCK();
-	if (pthread_create(&g_timer.timer_tid, 0, timer_thr, NULL) != 0) {
-		CRASH("could not create timer thread: %s", cf_strerror(errno));
-	}
+	g_timer.timer_tid = cf_thread_create_joinable(timer_thr, NULL);
 	CLUSTERING_UNLOCK();
 }
 
@@ -1870,7 +1869,7 @@ static void
 timer_stop()
 {
 	CLUSTERING_LOCK();
-	pthread_join(g_timer.timer_tid, NULL);
+	cf_thread_join(g_timer.timer_tid);
 	CLUSTERING_UNLOCK();
 }
 
@@ -5499,13 +5498,8 @@ external_event_publisher_start()
 {
 	CLUSTERING_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_CLUSTERING_SYS_STATE_RUNNING;
-
-	// Start the event publishing thread.
-	if (pthread_create(&g_external_event_publisher.event_publisher_tid, 0,
-			external_event_publisher_thr, NULL) != 0) {
-		CRASH("could not create event publishing thread: %s",
-				cf_strerror(errno));
-	}
+	g_external_event_publisher.event_publisher_tid =
+			cf_thread_create_joinable(external_event_publisher_thr, NULL);
 	CLUSTERING_EVENT_PUBLISHER_UNLOCK();
 }
 
@@ -5521,7 +5515,7 @@ external_event_publisher_stop()
 	CLUSTERING_EVENT_PUBLISHER_UNLOCK();
 
 	external_event_publisher_thr_wakeup();
-	pthread_join(g_external_event_publisher.event_publisher_tid, NULL);
+	cf_thread_join(g_external_event_publisher.event_publisher_tid);
 
 	CLUSTERING_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_CLUSTERING_SYS_STATE_STOPPED;

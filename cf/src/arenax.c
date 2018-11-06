@@ -26,7 +26,6 @@
 
 #include "arenax.h"
  
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,6 +34,7 @@
 
 #include "citrusleaf/alloc.h"
 
+#include "cf_mutex.h"
 #include "fault.h"
 #include "xmem.h"
 
@@ -122,7 +122,7 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	arena->at_element_id = arena->chunk_count;
 
 	if ((flags & CF_ARENAX_BIGLOCK) != 0) {
-		pthread_mutex_init(&arena->lock, NULL);
+		cf_mutex_init(&arena->lock);
 	}
 
 	arena->stage_count = 0;
@@ -146,7 +146,7 @@ cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 	}
 
 	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		pthread_mutex_lock(&arena->lock);
+		cf_mutex_lock(&arena->lock);
 	}
 
 	cf_arenax_handle h;
@@ -164,7 +164,7 @@ cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 		if (arena->at_element_id >= arena->stage_capacity) {
 			if (cf_arenax_add_stage(arena) != CF_ARENAX_OK) {
 				if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-					pthread_mutex_unlock(&arena->lock);
+					cf_mutex_unlock(&arena->lock);
 				}
 
 				return 0;
@@ -180,7 +180,7 @@ cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 	}
 
 	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		pthread_mutex_unlock(&arena->lock);
+		cf_mutex_unlock(&arena->lock);
 	}
 
 	if ((arena->flags & CF_ARENAX_CALLOC) != 0) {
@@ -202,7 +202,7 @@ cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle)
 	free_element* p_free_element = cf_arenax_resolve(arena, h);
 
 	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		pthread_mutex_lock(&arena->lock);
+		cf_mutex_lock(&arena->lock);
 	}
 
 	p_free_element->magic = FREE_MAGIC;
@@ -210,7 +210,7 @@ cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle)
 	arena->free_h = h;
 
 	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		pthread_mutex_unlock(&arena->lock);
+		cf_mutex_unlock(&arena->lock);
 	}
 }
 

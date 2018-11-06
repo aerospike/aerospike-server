@@ -28,7 +28,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -47,6 +46,8 @@
 #include "citrusleaf/cf_ll.h"
 #include "citrusleaf/cf_vector.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "socket.h"
@@ -62,7 +63,6 @@
 #include "base/secondary_index.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/udf_memtracker.h"
 #include "fabric/exchange.h"
 #include "fabric/partition.h"
 #include "transaction/udf.h"
@@ -408,7 +408,7 @@ typedef struct conn_scan_job_s {
 	as_job			_base;
 
 	// Derived class data:
-	pthread_mutex_t	fd_lock;
+	cf_mutex		fd_lock;
 	as_file_handle*	fd_h;
 	int32_t			fd_timeout;
 
@@ -429,7 +429,7 @@ void conn_scan_job_info(conn_scan_job* job, as_mon_jobstat* stat);
 void
 conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h, uint32_t timeout)
 {
-	pthread_mutex_init(&job->fd_lock, NULL);
+	cf_mutex_init(&job->fd_lock);
 
 	job->fd_h = fd_h;
 	job->fd_h->fh_info |= FH_INFO_DONOT_REAP;
@@ -445,7 +445,7 @@ conn_scan_job_disown_fd(conn_scan_job* job)
 
 	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 
-	pthread_mutex_destroy(&job->fd_lock);
+	cf_mutex_destroy(&job->fd_lock);
 }
 
 void
@@ -462,7 +462,7 @@ conn_scan_job_finish(conn_scan_job* job)
 		conn_scan_job_release_fd(job, size_sent == 0);
 	}
 
-	pthread_mutex_destroy(&job->fd_lock);
+	cf_mutex_destroy(&job->fd_lock);
 }
 
 bool
@@ -470,10 +470,10 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 {
 	as_job* _job = (as_job*)job;
 
-	pthread_mutex_lock(&job->fd_lock);
+	cf_mutex_lock(&job->fd_lock);
 
 	if (! job->fd_h) {
-		pthread_mutex_unlock(&job->fd_lock);
+		cf_mutex_unlock(&job->fd_lock);
 		// Job already abandoned.
 		return false;
 	}
@@ -486,14 +486,14 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 				AS_JOB_FAIL_RESPONSE_TIMEOUT : AS_JOB_FAIL_RESPONSE_ERROR;
 
 		conn_scan_job_release_fd(job, true);
-		pthread_mutex_unlock(&job->fd_lock);
+		cf_mutex_unlock(&job->fd_lock);
 		as_job_manager_abandon_job(_job->mgr, _job, reason);
 		return false;
 	}
 
 	job->net_io_bytes += size_sent;
 
-	pthread_mutex_unlock(&job->fd_lock);
+	cf_mutex_unlock(&job->fd_lock);
 	return true;
 }
 
@@ -662,8 +662,8 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	// TODO - guts don't check buf_builder realloc failures rigorously.
 	cf_buf_builder_free(bb);
 
-	cf_detail(AS_SCAN, "%s:%u basic scan job %lu in thread %lu took %lu ms",
-			rsv->ns->name, rsv->p->id, _job->trid, pthread_self(),
+	cf_detail(AS_SCAN, "%s:%u basic scan job %lu in thread %d took %lu ms",
+			rsv->ns->name, rsv->p->id, _job->trid, cf_thread_sys_tid(),
 			cf_getms() - slice_start);
 }
 

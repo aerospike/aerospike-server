@@ -26,7 +26,6 @@
 
 #include "rchash.h"
 
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -35,6 +34,7 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 
+#include "cf_mutex.h"
 #include "fault.h"
 
 
@@ -73,8 +73,8 @@ int cf_rchash_reduce_v(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 static inline void cf_rchash_destroy_elements(cf_rchash *h);
 static inline void cf_rchash_destroy_elements_v(cf_rchash *h);
 static inline uint32_t cf_rchash_calculate_hash(cf_rchash *h, const void *key, uint32_t key_size);
-static inline pthread_mutex_t *cf_rchash_lock(cf_rchash *h, uint32_t i);
-static inline void cf_rchash_unlock(pthread_mutex_t *l);
+static inline cf_mutex *cf_rchash_lock(cf_rchash *h, uint32_t i);
+static inline void cf_rchash_unlock(cf_mutex *l);
 static inline cf_rchash_ele_f *cf_rchash_get_bucket(cf_rchash *h, uint32_t i);
 static inline cf_rchash_ele_v *cf_rchash_get_bucket_v(cf_rchash *h, uint32_t i);
 static inline void cf_rchash_fill_element(cf_rchash_ele_f *e, cf_rchash *h, const void *key, void *object);
@@ -148,13 +148,13 @@ cf_rchash_create(cf_rchash_hash_fn h_fn, cf_rchash_destructor_fn d_fn,
 	}
 
 	if ((flags & CF_RCHASH_BIG_LOCK) != 0) {
-		pthread_mutex_init(&h->big_lock, NULL);
+		cf_mutex_init(&h->big_lock);
 	}
 	else if ((flags & CF_RCHASH_MANY_LOCK) != 0) {
-		h->bucket_locks = cf_malloc(sizeof(pthread_mutex_t) * n_buckets);
+		h->bucket_locks = cf_malloc(sizeof(cf_mutex) * n_buckets);
 
 		for (uint32_t i = 0; i < n_buckets; i++) {
-			pthread_mutex_init(&h->bucket_locks[i], NULL);
+			cf_mutex_init(&h->bucket_locks[i]);
 		}
 	}
 
@@ -176,11 +176,11 @@ cf_rchash_destroy(cf_rchash *h)
 	}
 
 	if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
-		pthread_mutex_destroy(&h->big_lock);
+		cf_mutex_destroy(&h->big_lock);
 	}
 	else if ((h->flags & CF_RCHASH_MANY_LOCK) != 0) {
 		for (uint32_t i = 0; i < h->n_buckets; i++) {
-			pthread_mutex_destroy(&h->bucket_locks[i]);
+			cf_mutex_destroy(&h->bucket_locks[i]);
 		}
 
 		cf_free(h->bucket_locks);
@@ -214,7 +214,7 @@ cf_rchash_put(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_f *e = cf_rchash_get_bucket(h, hash);
 
 	// Most common case should be insert into empty bucket.
@@ -268,7 +268,7 @@ cf_rchash_put_unique(cf_rchash *h, const void *key, uint32_t key_size,
 	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_f *e = cf_rchash_get_bucket(h, hash);
 
 	// Most common case should be insert into empty bucket.
@@ -321,7 +321,7 @@ cf_rchash_get(cf_rchash *h, const void *key, uint32_t key_size, void **object_r)
 	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_f *e = cf_rchash_get_bucket(h, hash);
 
 	while (e && e->object) {
@@ -375,7 +375,7 @@ cf_rchash_delete_object(cf_rchash *h, const void *key, uint32_t key_size,
 	cf_assert(key_size == h->key_size, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_f *e = cf_rchash_get_bucket(h, hash);
 
 	cf_rchash_ele_f *e_prev = NULL;
@@ -451,15 +451,15 @@ cf_rchash_reduce(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 	}
 
 	if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
-		pthread_mutex_lock(&h->big_lock);
+		cf_mutex_lock(&h->big_lock);
 	}
 
 	for (uint32_t i = 0; i < h->n_buckets; i++) {
-		pthread_mutex_t *bucket_lock = NULL;
+		cf_mutex *bucket_lock = NULL;
 
 		if ((h->flags & CF_RCHASH_MANY_LOCK) != 0) {
 			bucket_lock = &h->bucket_locks[i];
-			pthread_mutex_lock(bucket_lock);
+			cf_mutex_lock(bucket_lock);
 		}
 
 		cf_rchash_ele_f *e = cf_rchash_get_bucket(h, i);
@@ -502,11 +502,11 @@ cf_rchash_reduce(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 				// Caller says stop iterating.
 
 				if (bucket_lock) {
-					pthread_mutex_unlock(bucket_lock);
+					cf_mutex_unlock(bucket_lock);
 				}
 
 				if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
-					pthread_mutex_unlock(&h->big_lock);
+					cf_mutex_unlock(&h->big_lock);
 				}
 
 				return rv;
@@ -514,12 +514,12 @@ cf_rchash_reduce(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 		}
 
 		if (bucket_lock) {
-			pthread_mutex_unlock(bucket_lock);
+			cf_mutex_unlock(bucket_lock);
 		}
 	}
 
 	if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
-		pthread_mutex_unlock(&h->big_lock);
+		cf_mutex_unlock(&h->big_lock);
 	}
 
 	return CF_RCHASH_OK;
@@ -536,7 +536,7 @@ cf_rchash_put_v(cf_rchash *h, const void *key, uint32_t key_size, void *object)
 	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_v *e = cf_rchash_get_bucket_v(h, hash);
 
 	// Most common case should be insert into empty bucket.
@@ -583,7 +583,7 @@ cf_rchash_put_unique_v(cf_rchash *h, const void *key, uint32_t key_size,
 	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_v *e = cf_rchash_get_bucket_v(h, hash);
 
 	// Most common case should be insert into empty bucket.
@@ -625,7 +625,7 @@ cf_rchash_get_v(cf_rchash *h, const void *key, uint32_t key_size,
 	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_v *e = cf_rchash_get_bucket_v(h, hash);
 
 	while (e && e->object) {
@@ -656,7 +656,7 @@ cf_rchash_delete_object_v(cf_rchash *h, const void *key, uint32_t key_size,
 	cf_assert(key_size != 0, CF_MISC, "bad param");
 
 	uint32_t hash = cf_rchash_calculate_hash(h, key, key_size);
-	pthread_mutex_t *l = cf_rchash_lock(h, hash);
+	cf_mutex *l = cf_rchash_lock(h, hash);
 	cf_rchash_ele_v *e = cf_rchash_get_bucket_v(h, hash);
 
 	cf_rchash_ele_v *e_prev = NULL;
@@ -718,15 +718,15 @@ int
 cf_rchash_reduce_v(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 {
 	if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
-		pthread_mutex_lock(&h->big_lock);
+		cf_mutex_lock(&h->big_lock);
 	}
 
 	for (uint32_t i = 0; i < h->n_buckets; i++) {
-		pthread_mutex_t *bucket_lock = NULL;
+		cf_mutex *bucket_lock = NULL;
 
 		if ((h->flags & CF_RCHASH_MANY_LOCK) != 0) {
 			bucket_lock = &h->bucket_locks[i];
-			pthread_mutex_lock(bucket_lock);
+			cf_mutex_lock(bucket_lock);
 		}
 
 		cf_rchash_ele_v *e = cf_rchash_get_bucket_v(h, i);
@@ -771,11 +771,11 @@ cf_rchash_reduce_v(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 				// Caller says stop iterating.
 
 				if (bucket_lock) {
-					pthread_mutex_unlock(bucket_lock);
+					cf_mutex_unlock(bucket_lock);
 				}
 
 				if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
-					pthread_mutex_unlock(&h->big_lock);
+					cf_mutex_unlock(&h->big_lock);
 				}
 
 				return rv;
@@ -783,12 +783,12 @@ cf_rchash_reduce_v(cf_rchash *h, cf_rchash_reduce_fn reduce_fn, void *udata)
 		}
 
 		if (bucket_lock) {
-			pthread_mutex_unlock(bucket_lock);
+			cf_mutex_unlock(bucket_lock);
 		}
 	}
 
 	if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
-		pthread_mutex_unlock(&h->big_lock);
+		cf_mutex_unlock(&h->big_lock);
 	}
 
 	return CF_RCHASH_OK;
@@ -853,10 +853,10 @@ cf_rchash_calculate_hash(cf_rchash *h, const void *key, uint32_t key_size)
 	return h->h_fn(key, key_size) % h->n_buckets;
 }
 
-static inline pthread_mutex_t *
+static inline cf_mutex *
 cf_rchash_lock(cf_rchash *h, uint32_t i)
 {
-	pthread_mutex_t *l = NULL;
+	cf_mutex *l = NULL;
 
 	if ((h->flags & CF_RCHASH_BIG_LOCK) != 0) {
 		l = &h->big_lock;
@@ -866,17 +866,17 @@ cf_rchash_lock(cf_rchash *h, uint32_t i)
 	}
 
 	if (l) {
-		pthread_mutex_lock(l);
+		cf_mutex_lock(l);
 	}
 
 	return l;
 }
 
 static inline void
-cf_rchash_unlock(pthread_mutex_t *l)
+cf_rchash_unlock(cf_mutex *l)
 {
 	if (l) {
-		pthread_mutex_unlock(l);
+		cf_mutex_unlock(l);
 	}
 }
 

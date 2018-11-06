@@ -32,6 +32,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "shash.h"
@@ -1144,13 +1145,9 @@ exchange_external_event_publisher_start()
 {
 	EXTERNAL_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_EXCHANGE_SYS_STATE_RUNNING;
-
-	// Start the event publishing thread.
-	if (pthread_create(&g_external_event_publisher.event_publisher_tid, 0,
-			exchange_external_event_publisher_thr, NULL) != 0) {
-		CRASH("could not create event publishing thread: %s",
-				cf_strerror(errno));
-	}
+	g_external_event_publisher.event_publisher_tid =
+			cf_thread_create_joinable(exchange_external_event_publisher_thr,
+					NULL);
 	EXTERNAL_EVENT_PUBLISHER_UNLOCK();
 }
 
@@ -1165,7 +1162,7 @@ external_event_publisher_stop()
 	EXTERNAL_EVENT_PUBLISHER_UNLOCK();
 
 	exchange_external_event_publisher_thr_wakeup();
-	pthread_join(g_external_event_publisher.event_publisher_tid, NULL);
+	cf_thread_join(g_external_event_publisher.event_publisher_tid);
 
 	EXTERNAL_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_EXCHANGE_SYS_STATE_STOPPED;
@@ -3434,11 +3431,10 @@ exchange_stop()
 		return;
 	}
 
-	// Ungaurded state, but this should be ok.
+	// Unguarded state, but this should be ok.
 	g_exchange.sys_state = AS_EXCHANGE_SYS_STATE_SHUTTING_DOWN;
 
-	// Wait for the relanabce send thread to finish.
-	pthread_join(g_exchange.timer_tid, NULL);
+	cf_thread_join(g_exchange.timer_tid);
 
 	EXCHANGE_LOCK();
 
@@ -3466,12 +3462,8 @@ exchange_start()
 
 	g_exchange.sys_state = AS_EXCHANGE_SYS_STATE_RUNNING;
 
-	// Start the timer thread.
-	if (0
-			!= pthread_create(&g_exchange.timer_tid, 0, exchange_timer_thr,
-					&g_exchange)) {
-		CRASH("could not create exchange thread: %s", cf_strerror(errno));
-	}
+	g_exchange.timer_tid = cf_thread_create_joinable(exchange_timer_thr,
+			(void*)&g_exchange);
 
 	DEBUG("exchange module started");
 

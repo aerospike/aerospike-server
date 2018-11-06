@@ -40,6 +40,7 @@
 #include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_vector.h"
 
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "socket.h"
@@ -705,23 +706,8 @@ as_netio_init()
 	cf_queue_init(&g_netio_queue, sizeof(as_netio), 64, true);
 	cf_queue_init(&g_netio_slow_queue, sizeof(as_netio), 64, true);
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&thread, &attrs, run_netio,
-			(void *)&g_netio_queue) != 0) {
-		cf_crash(AS_PROTO, "failed to create netio thread");
-	}
-
-	if (pthread_create(&thread, &attrs, run_netio,
-			(void *)&g_netio_slow_queue) != 0) {
-		cf_crash(AS_PROTO, "failed to create netio slow thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_netio, (void *)&g_netio_queue);
+	cf_thread_create_detached(run_netio, (void *)&g_netio_slow_queue);
 }
 
 // Based on io object, send buffer to the network, or queue for retry.

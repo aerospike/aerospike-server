@@ -29,7 +29,6 @@
 
 #include <fcntl.h>
 #include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -50,6 +49,7 @@
 
 #include "bits.h"
 #include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "hist.h"
 #include "vmapx.h"
@@ -357,9 +357,9 @@ swb_dereference_and_release(drv_ssd *ssd, uint32_t wblock_id,
 	cf_mutex_lock(&wblock_state->LOCK);
 
 	if (swb != wblock_state->swb) {
-		cf_warning(AS_DRV_SSD, "releasing wrong swb! %p (%d) != %p (%d), thread %lu",
+		cf_warning(AS_DRV_SSD, "releasing wrong swb! %p (%d) != %p (%d), thread %d",
 			swb, (int32_t)swb->wblock_id, wblock_state->swb,
-			(int32_t)wblock_state->swb->wblock_id, pthread_self());
+			(int32_t)wblock_state->swb->wblock_id, cf_thread_sys_tid());
 	}
 
 	swb_release(wblock_state->swb);
@@ -566,7 +566,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 	uint32_t ssd_n_rblocks = block->n_rblocks;
 	uint32_t write_size = N_RBLOCKS_TO_SIZE(ssd_n_rblocks);
 
-	pthread_mutex_lock(&ssd->defrag_lock);
+	cf_mutex_lock(&ssd->defrag_lock);
 
 	ssd_write_buf *swb = ssd->defrag_swb;
 
@@ -576,7 +576,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "defrag_move_record: couldn't get swb");
-			pthread_mutex_unlock(&ssd->defrag_lock);
+			cf_mutex_unlock(&ssd->defrag_lock);
 			return;
 		}
 	}
@@ -601,7 +601,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "defrag_move_record: couldn't get swb");
-			pthread_mutex_unlock(&ssd->defrag_lock);
+			cf_mutex_unlock(&ssd->defrag_lock);
 			return;
 		}
 	}
@@ -629,7 +629,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 		cf_atomic32_incr(&p_wblock_state->n_vac_dests);
 	}
 
-	pthread_mutex_unlock(&ssd->defrag_lock);
+	cf_mutex_unlock(&ssd->defrag_lock);
 
 	ssd_block_free(src_ssd, old_rblock_id, old_n_rblocks, "defrag-write");
 }
@@ -886,21 +886,11 @@ ssd_start_defrag_threads(drv_ssds *ssds)
 {
 	cf_info(AS_DRV_SSD, "{%s} starting defrag threads", ssds->ns->name);
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		if (pthread_create(&thread, &attrs, run_defrag, (void*)ssd) != 0) {
-			cf_crash(AS_DRV_SSD, "failed to create defrag thread");
-		}
+		cf_thread_create_detached(run_defrag, (void*)ssd);
 	}
-
-	pthread_attr_destroy(&attrs);
 }
 
 
@@ -1038,19 +1028,16 @@ ssd_load_wblock_queues(drv_ssds *ssds)
 	cf_info(AS_DRV_SSD, "{%s} loading free & defrag queues", ssds->ns->name);
 
 	// Split this task across multiple threads.
-	pthread_t q_load_threads[ssds->n_ssds];
+	cf_tid tids[ssds->n_ssds];
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		if (pthread_create(&q_load_threads[i], NULL, run_load_queues,
-				(void*)ssd) != 0) {
-			cf_crash(AS_DRV_SSD, "failed to create load queues thread");
-		}
+		tids[i] = cf_thread_create_joinable(run_load_queues, (void*)ssd);
 	}
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
-		pthread_join(q_load_threads[i], NULL);
+		cf_thread_join(tids[i]);
 	}
 	// Now we're single-threaded again.
 
@@ -1557,7 +1544,7 @@ ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 
 // Thread "run" function that flushes write buffers to device.
 void *
-ssd_write_worker(void *arg)
+run_write(void *arg)
 {
 	drv_ssd *ssd = (drv_ssd*)arg;
 
@@ -1593,7 +1580,7 @@ ssd_write_worker(void *arg)
 
 // Thread "run" function that flushes write buffers to shadow device.
 void *
-ssd_shadow_worker(void *arg)
+run_shadow(void *arg)
 {
 	drv_ssd *ssd = (drv_ssd*)arg;
 
@@ -1622,23 +1609,17 @@ ssd_shadow_worker(void *arg)
 
 
 void
-ssd_start_write_worker_threads(drv_ssds *ssds)
+ssd_start_write_threads(drv_ssds *ssds)
 {
-	cf_info(AS_DRV_SSD, "{%s} starting write worker threads", ssds->ns->name);
+	cf_info(AS_DRV_SSD, "{%s} starting write threads", ssds->ns->name);
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		if (pthread_create(&ssd->write_worker_thread, 0, ssd_write_worker,
-				(void*)ssd) != 0) {
-			cf_crash(AS_DRV_SSD, "failed to create write thread");
-		}
+		ssd->write_tid = cf_thread_create_joinable(run_write, (void*)ssd);
 
 		if (ssd->shadow_name) {
-			if (pthread_create(&ssd->shadow_worker_thread, 0, ssd_shadow_worker,
-					(void*)ssd) != 0) {
-				cf_crash(AS_DRV_SSD, "failed to create shadow write thread");
-			}
+			ssd->shadow_tid = cf_thread_create_joinable(run_shadow, (void*)ssd);
 		}
 	}
 }
@@ -1808,7 +1789,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 	}
 
 	// Reserve the portion of the current swb where this record will be written.
-	pthread_mutex_lock(&ssd->write_lock);
+	cf_mutex_lock(&ssd->write_lock);
 
 	ssd_write_buf *swb = ssd->current_swb;
 
@@ -1818,7 +1799,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
-			pthread_mutex_unlock(&ssd->write_lock);
+			cf_mutex_unlock(&ssd->write_lock);
 			return -AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
 		}
 	}
@@ -1842,7 +1823,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
-			pthread_mutex_unlock(&ssd->write_lock);
+			cf_mutex_unlock(&ssd->write_lock);
 			return -AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
 		}
 	}
@@ -1854,7 +1835,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 	swb->pos += write_size;
 	cf_atomic32_incr(&swb->n_writers);
 
-	pthread_mutex_unlock(&ssd->write_lock);
+	cf_mutex_unlock(&ssd->write_lock);
 	// May now write this record concurrently with others in this swb.
 
 	// Flatten data into the block.
@@ -2198,14 +2179,14 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 		return;
 	}
 
-	pthread_mutex_lock(&ssd->write_lock);
+	cf_mutex_lock(&ssd->write_lock);
 
 	n_writes = cf_atomic64_get(ssd->n_wblock_writes);
 
 	// Must check under the lock, could be racing a current swb just queued.
 	if (n_writes != *p_prev_n_writes) {
 
-		pthread_mutex_unlock(&ssd->write_lock);
+		cf_mutex_unlock(&ssd->write_lock);
 
 		*p_prev_n_writes = n_writes;
 		*p_prev_size = 0;
@@ -2233,7 +2214,7 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 		}
 	}
 
-	pthread_mutex_unlock(&ssd->write_lock);
+	cf_mutex_unlock(&ssd->write_lock);
 }
 
 
@@ -2248,14 +2229,14 @@ ssd_flush_defrag_swb(drv_ssd *ssd, uint64_t *p_prev_n_defrag_writes)
 		return;
 	}
 
-	pthread_mutex_lock(&ssd->defrag_lock);
+	cf_mutex_lock(&ssd->defrag_lock);
 
 	n_defrag_writes = cf_atomic64_get(ssd->n_defrag_wblock_writes);
 
 	// Must check under the lock, could be racing a current swb just queued.
 	if (n_defrag_writes != *p_prev_n_defrag_writes) {
 
-		pthread_mutex_unlock(&ssd->defrag_lock);
+		cf_mutex_unlock(&ssd->defrag_lock);
 
 		*p_prev_n_defrag_writes = n_defrag_writes;
 		return;
@@ -2283,7 +2264,7 @@ ssd_flush_defrag_swb(drv_ssd *ssd, uint64_t *p_prev_n_defrag_writes)
 		swb_release_all_vacated_wblocks(swb);
 	}
 
-	pthread_mutex_unlock(&ssd->defrag_lock);
+	cf_mutex_unlock(&ssd->defrag_lock);
 }
 
 
@@ -2424,22 +2405,11 @@ ssd_start_maintenance_threads(drv_ssds *ssds)
 	cf_info(AS_DRV_SSD, "{%s} starting device maintenance threads",
 			ssds->ns->name);
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd* ssd = &ssds->ssds[i];
 
-		if (pthread_create(&thread, &attrs, run_ssd_maintenance,
-				(void*)ssd) != 0) {
-			cf_crash(AS_DRV_SSD, "failed to create maintenance thread");
-		}
+		cf_thread_create_detached(run_ssd_maintenance, (void*)ssd);
 	}
-
-	pthread_attr_destroy(&attrs);
 }
 
 
@@ -3083,13 +3053,13 @@ run_ssd_cold_start(void *udata)
 		ssd_cold_start_drop_cenotaphs(ns);
 		ssd_load_wblock_queues(ssds);
 
-		pthread_mutex_destroy(&ns->cold_start_evict_lock);
+		cf_mutex_destroy(&ns->cold_start_evict_lock);
 
 		as_truncate_list_cenotaphs(ns);
 		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 
 		ssd_start_maintenance_threads(ssds);
-		ssd_start_write_worker_threads(ssds);
+		ssd_start_write_threads(ssds);
 		ssd_start_defrag_threads(ssds);
 
 		void *_t = NULL;
@@ -3115,12 +3085,6 @@ start_loading_records(drv_ssds *ssds, cf_queue *complete_q)
 		cf_rc_reserve(p);
 	}
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 		ssd_load_records_info *lri = cf_malloc(sizeof(ssd_load_records_info));
@@ -3130,14 +3094,10 @@ start_loading_records(drv_ssds *ssds, cf_queue *complete_q)
 		lri->complete_q = complete_q;
 		lri->complete_rc = p;
 
-		if (pthread_create(&thread, &attrs,
+		cf_thread_create_detached(
 				ns->cold_start ? run_ssd_cold_start : run_ssd_cool_start,
-				(void*)lri) != 0) {
-			cf_crash(AS_DRV_SSD, "failed to create record load thread");
-		}
+						(void*)lri);
 	}
-
-	pthread_attr_destroy(&attrs);
 }
 
 
@@ -3331,9 +3291,7 @@ ssd_init_synchronous(drv_ssds *ssds)
 
 	// Initialize the cold start eviction machinery.
 
-	if (0 != pthread_mutex_init(&ns->cold_start_evict_lock, NULL)) {
-		cf_crash(AS_DRV_SSD, "failed cold start eviction mutex init");
-	}
+	cf_mutex_init(&ns->cold_start_evict_lock);
 
 	uint32_t now = as_record_void_time_get();
 
@@ -3710,8 +3668,8 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 		ssd->ns = ns;
 		ssd->file_id = i;
 
-		pthread_mutex_init(&ssd->write_lock, 0);
-		pthread_mutex_init(&ssd->defrag_lock, 0);
+		cf_mutex_init(&ssd->write_lock);
+		cf_mutex_init(&ssd->defrag_lock);
 
 		ssd->running = true;
 
@@ -3783,7 +3741,7 @@ as_storage_namespace_load_ssd(as_namespace *ns, cf_queue *complete_q)
 	ssd_load_wblock_queues(ssds);
 
 	ssd_start_maintenance_threads(ssds);
-	ssd_start_write_worker_threads(ssds);
+	ssd_start_write_threads(ssds);
 	ssd_start_defrag_threads(ssds);
 
 	void *_t = NULL;
@@ -4269,8 +4227,8 @@ as_storage_shutdown_ssd(as_namespace *ns)
 		drv_ssd *ssd = &ssds->ssds[i];
 
 		// Stop the maintenance thread from (also) flushing the swbs.
-		pthread_mutex_lock(&ssd->write_lock);
-		pthread_mutex_lock(&ssd->defrag_lock);
+		cf_mutex_lock(&ssd->write_lock);
+		cf_mutex_lock(&ssd->defrag_lock);
 
 		// Flush current swb by pushing it to write-q.
 		if (ssd->current_swb) {
@@ -4316,10 +4274,10 @@ as_storage_shutdown_ssd(as_namespace *ns)
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		pthread_join(ssd->write_worker_thread, NULL);
+		cf_thread_join(ssd->write_tid);
 
 		if (ssd->shadow_name) {
-			pthread_join(ssd->shadow_worker_thread, NULL);
+			cf_thread_join(ssd->shadow_tid);
 		}
 	}
 

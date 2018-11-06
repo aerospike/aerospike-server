@@ -23,7 +23,6 @@
 #include <sys/time.h>
 #include <assert.h>
 #include <errno.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 

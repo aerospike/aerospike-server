@@ -26,12 +26,12 @@
 
 #include "vmapx.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
+#include "cf_mutex.h"
 #include "fault.h"
 
 #include "citrusleaf/alloc.h"
@@ -75,7 +75,7 @@ cf_vmapx_init(cf_vmapx* vmap, uint32_t value_size, uint32_t max_count,
 	vmap->key_size = max_name_size;
 	vmap->hash = vhash_create(max_name_size, hash_size);
 
-	pthread_mutex_init(&vmap->write_lock, 0);
+	cf_mutex_init(&vmap->write_lock);
 }
 
 // Don't call after failed cf_vmapx_create() or cf_vmapx_resume() call - those
@@ -88,7 +88,7 @@ cf_vmapx_release(cf_vmapx* vmap)
 		return;
 	}
 
-	pthread_mutex_destroy(&vmap->write_lock);
+	cf_mutex_destroy(&vmap->write_lock);
 
 	vhash_destroy(vmap->hash);
 }
@@ -209,18 +209,18 @@ cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name, size_t name_len,
 		return CF_VMAPX_ERR_BAD_PARAM;
 	}
 
-	pthread_mutex_lock(&vmap->write_lock);
+	cf_mutex_lock(&vmap->write_lock);
 
 	// If name is found, return existing name's index, ignore p_value.
 	if (vhash_get(vmap->hash, name, name_len, p_index)) {
-		pthread_mutex_unlock(&vmap->write_lock);
+		cf_mutex_unlock(&vmap->write_lock);
 		return CF_VMAPX_ERR_NAME_EXISTS;
 	}
 
 	// Make sure name has no illegal premature null-terminator.
 	for (uint32_t i = 0; i < name_len; i++) {
 		if (name[i] == 0) {
-			pthread_mutex_unlock(&vmap->write_lock);
+			cf_mutex_unlock(&vmap->write_lock);
 			return CF_VMAPX_ERR_BAD_PARAM;
 		}
 	}
@@ -229,7 +229,7 @@ cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name, size_t name_len,
 
 	// If vmap is full, can't add more.
 	if (count >= vmap->max_count) {
-		pthread_mutex_unlock(&vmap->write_lock);
+		cf_mutex_unlock(&vmap->write_lock);
 		return CF_VMAPX_ERR_FULL;
 	}
 
@@ -246,7 +246,7 @@ cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name, size_t name_len,
 	// Add to hash.
 	vhash_put(vmap->hash, value_ptr, name_len, count);
 
-	pthread_mutex_unlock(&vmap->write_lock);
+	cf_mutex_unlock(&vmap->write_lock);
 
 	if (p_index) {
 		*p_index = count;

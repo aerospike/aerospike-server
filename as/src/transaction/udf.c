@@ -26,7 +26,6 @@
 
 #include "transaction/udf.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -46,6 +45,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "fault.h"
 
@@ -59,7 +59,6 @@
 #include "base/udf_arglist.h"
 #include "base/udf_cask.h"
 #include "base/udf_record.h"
-#include "base/udf_timer.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
@@ -94,6 +93,9 @@ typedef struct udf_call_s {
 
 as_aerospike g_as_aerospike;
 
+// Deadline per UDF.
+static __thread uint64_t g_end_ns;
+
 
 //==========================================================
 // Forward declarations.
@@ -116,11 +118,12 @@ void udf_timeout_cb(rw_request* rw);
 transaction_status udf_master(rw_request* rw, as_transaction* tr);
 udf_optype udf_master_apply(udf_call* call, rw_request* rw);
 int udf_apply_record(udf_call* call, as_rec* rec, as_result* result);
-uint64_t udf_end_time(time_tracker* tt);
 void udf_finish(udf_record* urecord, rw_request* rw, udf_optype* record_op);
 udf_optype udf_finish_op(udf_record* urecord);
 void udf_post_processing(udf_record* urecord, rw_request* rw,
 		udf_optype urecord_op);
+bool udf_timer_timedout(const as_timer* timer);
+uint64_t udf_timer_timeslice(const as_timer* timer);
 
 void update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 		int ret, bool is_success);
@@ -395,12 +398,12 @@ start_udf_dup_res(rw_request* rw, as_transaction* tr)
 
 	dup_res_make_message(rw, tr);
 
-	pthread_mutex_lock(&rw->lock);
+	cf_mutex_lock(&rw->lock);
 
 	dup_res_setup_rw(rw, tr, udf_dup_res_cb, udf_timeout_cb);
 	send_rw_messages(rw);
 
-	pthread_mutex_unlock(&rw->lock);
+	cf_mutex_unlock(&rw->lock);
 }
 
 
@@ -411,12 +414,12 @@ start_udf_repl_write(rw_request* rw, as_transaction* tr)
 
 	repl_write_make_message(rw, tr);
 
-	pthread_mutex_lock(&rw->lock);
+	cf_mutex_lock(&rw->lock);
 
 	repl_write_setup_rw(rw, tr, udf_repl_write_cb, udf_timeout_cb);
 	send_rw_messages(rw);
 
-	pthread_mutex_unlock(&rw->lock);
+	cf_mutex_unlock(&rw->lock);
 }
 
 
@@ -802,15 +805,18 @@ udf_master_apply(udf_call* call, rw_request* rw)
 int
 udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 {
-	time_tracker udf_timer_tracker = {
-		.udata		= as_rec_source(rec),
-		.end_time	= udf_end_time
-	};
-
-	udf_timer_setup(&udf_timer_tracker);
+	// timedout callback gives no 'udata' per UDF - use thread-local.
+	g_end_ns = ((udf_record*)rec->data)->tr->end_time;
 
 	as_timer timer;
-	as_timer_init(&timer, &udf_timer_tracker, &udf_timer_hooks);
+
+	static const as_timer_hooks udf_timer_hooks = {
+		.destroy	= NULL,
+		.timedout	= udf_timer_timedout,
+		.timeslice	= udf_timer_timeslice
+	};
+
+	as_timer_init(&timer, NULL, &udf_timer_hooks);
 
 	as_udf_context ctx = {
 		.as			= &g_as_aerospike,
@@ -818,25 +824,8 @@ udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 		.memtracker	= NULL
 	};
 
-	int apply_rv = as_module_apply_record(&mod_lua, &ctx, call->def->filename,
+	return as_module_apply_record(&mod_lua, &ctx, call->def->filename,
 			call->def->function, rec, call->def->arglist, result);
-
-	udf_timer_cleanup();
-
-	return apply_rv;
-}
-
-
-uint64_t
-udf_end_time(time_tracker* tt)
-{
-	udf_record* urecord = (udf_record*)tt->udata;
-
-	if (! urecord) {
-		return -1; // TODO - should be impossible.
-	}
-
-	return urecord->tr->end_time;
 }
 
 
@@ -954,6 +943,30 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 						XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP,
 				set_id, NULL);
 	}
+}
+
+
+bool
+udf_timer_timedout(const as_timer* timer)
+{
+	uint64_t now = cf_getns();
+
+	if (now < g_end_ns) {
+		return false;
+	}
+
+	cf_warning(AS_UDF, "UDF timed out %lu ms ago", (now - g_end_ns) / 1000000);
+
+	return true;
+}
+
+
+uint64_t
+udf_timer_timeslice(const as_timer* timer)
+{
+	uint64_t now = cf_getns();
+
+	return g_end_ns > now ? (g_end_ns - now) / 1000000 : 1;
 }
 
 

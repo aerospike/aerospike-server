@@ -26,7 +26,6 @@
 
 #include "shash.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,6 +34,7 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 
+#include "cf_mutex.h"
 #include "fault.h"
 
 
@@ -57,8 +57,8 @@ typedef struct cf_shash_ele_s {
 static inline void cf_shash_clear_table(cf_shash *h);
 static inline void cf_shash_destroy_elements(cf_shash *h);
 static inline uint32_t cf_shash_calculate_hash(cf_shash *h, const void *key);
-static inline pthread_mutex_t *cf_shash_lock(cf_shash *h, uint32_t i);
-static inline void cf_shash_unlock(pthread_mutex_t *l);
+static inline cf_mutex *cf_shash_lock(cf_shash *h, uint32_t i);
+static inline void cf_shash_unlock(cf_mutex *l);
 static inline cf_shash_ele *cf_shash_get_bucket(cf_shash *h, uint32_t i);
 static inline void cf_shash_fill_element(cf_shash_ele *e, cf_shash *h, const void *key, const void *value);
 static inline void cf_shash_size_incr(cf_shash *h);
@@ -132,13 +132,13 @@ cf_shash_create(cf_shash_hash_fn h_fn, uint32_t key_size, uint32_t value_size,
 	cf_shash_clear_table(h);
 
 	if ((flags & CF_SHASH_BIG_LOCK) != 0) {
-		pthread_mutex_init(&h->big_lock, NULL);
+		cf_mutex_init(&h->big_lock);
 	}
 	else if ((flags & CF_SHASH_MANY_LOCK) != 0) {
-		h->bucket_locks = cf_malloc(sizeof(pthread_mutex_t) * n_buckets);
+		h->bucket_locks = cf_malloc(sizeof(cf_mutex) * n_buckets);
 
 		for (uint32_t i = 0; i < n_buckets; i++) {
-			pthread_mutex_init(&h->bucket_locks[i], NULL);
+			cf_mutex_init(&h->bucket_locks[i]);
 		}
 	}
 
@@ -155,11 +155,11 @@ cf_shash_destroy(cf_shash *h)
 	cf_shash_destroy_elements(h);
 
 	if ((h->flags & CF_SHASH_BIG_LOCK) != 0) {
-		pthread_mutex_destroy(&h->big_lock);
+		cf_mutex_destroy(&h->big_lock);
 	}
 	else if ((h->flags & CF_SHASH_MANY_LOCK) != 0) {
 		for (uint32_t i = 0; i < h->n_buckets; i++) {
-			pthread_mutex_destroy(&h->bucket_locks[i]);
+			cf_mutex_destroy(&h->bucket_locks[i]);
 		}
 
 		cf_free(h->bucket_locks);
@@ -184,7 +184,7 @@ cf_shash_put(cf_shash *h, const void *key, const void *value)
 	cf_assert(h && key && value, CF_MISC, "bad param");
 
 	uint32_t hash = cf_shash_calculate_hash(h, key);
-	pthread_mutex_t *l = cf_shash_lock(h, hash);
+	cf_mutex *l = cf_shash_lock(h, hash);
 	cf_shash_ele *e = cf_shash_get_bucket(h, hash);
 
 	// Most common case should be insert into empty bucket.
@@ -224,7 +224,7 @@ cf_shash_put_unique(cf_shash *h, const void *key, const void *value)
 	cf_assert(h && key && value, CF_MISC, "bad param");
 
 	uint32_t hash = cf_shash_calculate_hash(h, key);
-	pthread_mutex_t *l = cf_shash_lock(h, hash);
+	cf_mutex *l = cf_shash_lock(h, hash);
 	cf_shash_ele *e = cf_shash_get_bucket(h, hash);
 
 	// Most common case should be insert into empty bucket.
@@ -266,7 +266,7 @@ cf_shash_update(cf_shash *h, const void *key, void *value_old, void *value_new,
 	cf_assert(h && key && update_fn, CF_MISC, "bad param");
 
 	uint32_t hash = cf_shash_calculate_hash(h, key);
-	pthread_mutex_t *l = cf_shash_lock(h, hash);
+	cf_mutex *l = cf_shash_lock(h, hash);
 	cf_shash_ele *e = cf_shash_get_bucket(h, hash);
 
 	// Insert new value into empty bucket.
@@ -315,7 +315,7 @@ cf_shash_get(cf_shash *h, const void *key, void *value)
 	cf_assert(h && key, CF_MISC, "bad param");
 
 	uint32_t hash = cf_shash_calculate_hash(h, key);
-	pthread_mutex_t *l = cf_shash_lock(h, hash);
+	cf_mutex *l = cf_shash_lock(h, hash);
 	cf_shash_ele *e = cf_shash_get_bucket(h, hash);
 
 	while (e && e->in_use) {
@@ -338,12 +338,12 @@ cf_shash_get(cf_shash *h, const void *key, void *value)
 
 int
 cf_shash_get_vlock(cf_shash *h, const void *key, void **value_r,
-		pthread_mutex_t **vlock_r)
+		cf_mutex **vlock_r)
 {
 	cf_assert(h && key && value_r && vlock_r, CF_MISC, "bad param");
 
 	uint32_t hash = cf_shash_calculate_hash(h, key);
-	pthread_mutex_t *l = cf_shash_lock(h, hash);
+	cf_mutex *l = cf_shash_lock(h, hash);
 	cf_shash_ele *e = cf_shash_get_bucket(h, hash);
 
 	while (e && e->in_use) {
@@ -426,17 +426,17 @@ cf_shash_delete_all(cf_shash *h)
 	cf_assert(h, CF_MISC, "bad param");
 
 	if ((h->flags & CF_SHASH_BIG_LOCK) != 0) {
-		pthread_mutex_lock(&h->big_lock);
+		cf_mutex_lock(&h->big_lock);
 	}
 
 	uint8_t *bucket = (uint8_t*)h->table;
 
 	for (uint32_t i = 0; i < h->n_buckets; i++) {
-		pthread_mutex_t *bucket_lock = NULL;
+		cf_mutex *bucket_lock = NULL;
 
 		if ((h->flags & CF_SHASH_MANY_LOCK) != 0) {
 			bucket_lock = &h->bucket_locks[i];
-			pthread_mutex_lock(bucket_lock);
+			cf_mutex_lock(bucket_lock);
 		}
 
 		cf_shash_ele *e = ((cf_shash_ele *)bucket)->next;
@@ -458,14 +458,14 @@ cf_shash_delete_all(cf_shash *h)
 		}
 
 		if (bucket_lock) {
-			pthread_mutex_unlock(bucket_lock);
+			cf_mutex_unlock(bucket_lock);
 		}
 
 		bucket += h->ele_size;
 	}
 
 	if ((h->flags & CF_SHASH_BIG_LOCK) != 0) {
-		pthread_mutex_unlock(&h->big_lock);
+		cf_mutex_unlock(&h->big_lock);
 	}
 }
 
@@ -475,17 +475,17 @@ cf_shash_reduce(cf_shash *h, cf_shash_reduce_fn reduce_fn, void *udata)
 	cf_assert(h && reduce_fn, CF_MISC, "bad param");
 
 	if ((h->flags & CF_SHASH_BIG_LOCK) != 0) {
-		pthread_mutex_lock(&h->big_lock);
+		cf_mutex_lock(&h->big_lock);
 	}
 
 	uint8_t *bucket = (uint8_t*)h->table;
 
 	for (uint32_t i = 0; i < h->n_buckets; i++) {
-		pthread_mutex_t *bucket_lock = NULL;
+		cf_mutex *bucket_lock = NULL;
 
 		if ((h->flags & CF_SHASH_MANY_LOCK) != 0) {
 			bucket_lock = &h->bucket_locks[i];
-			pthread_mutex_lock(bucket_lock);
+			cf_mutex_lock(bucket_lock);
 		}
 
 		cf_shash_ele *e = (cf_shash_ele *)bucket;
@@ -527,11 +527,11 @@ cf_shash_reduce(cf_shash *h, cf_shash_reduce_fn reduce_fn, void *udata)
 				// Caller says stop iterating.
 
 				if (bucket_lock) {
-					pthread_mutex_unlock(bucket_lock);
+					cf_mutex_unlock(bucket_lock);
 				}
 
 				if ((h->flags & CF_SHASH_BIG_LOCK) != 0) {
-					pthread_mutex_unlock(&h->big_lock);
+					cf_mutex_unlock(&h->big_lock);
 				}
 
 				return rv;
@@ -539,14 +539,14 @@ cf_shash_reduce(cf_shash *h, cf_shash_reduce_fn reduce_fn, void *udata)
 		}
 
 		if (bucket_lock) {
-			pthread_mutex_unlock(bucket_lock);
+			cf_mutex_unlock(bucket_lock);
 		}
 
 		bucket += h->ele_size;
 	}
 
 	if ((h->flags & CF_SHASH_BIG_LOCK) != 0) {
-		pthread_mutex_unlock(&h->big_lock);
+		cf_mutex_unlock(&h->big_lock);
 	}
 
 	return CF_SHASH_OK;
@@ -596,10 +596,10 @@ cf_shash_calculate_hash(cf_shash *h, const void *key)
 	return h->h_fn(key) % h->n_buckets;
 }
 
-static inline pthread_mutex_t *
+static inline cf_mutex *
 cf_shash_lock(cf_shash *h, uint32_t i)
 {
-	pthread_mutex_t *l = NULL;
+	cf_mutex *l = NULL;
 
 	if ((h->flags & CF_SHASH_BIG_LOCK) != 0) {
 		l = &h->big_lock;
@@ -609,17 +609,17 @@ cf_shash_lock(cf_shash *h, uint32_t i)
 	}
 
 	if (l) {
-		pthread_mutex_lock(l);
+		cf_mutex_lock(l);
 	}
 
 	return l;
 }
 
 static inline void
-cf_shash_unlock(pthread_mutex_t *l)
+cf_shash_unlock(cf_mutex *l)
 {
 	if (l) {
-		pthread_mutex_unlock(l);
+		cf_mutex_unlock(l);
 	}
 }
 
@@ -659,7 +659,7 @@ cf_shash_delete_or_pop(cf_shash *h, const void *key, void *value)
 	cf_assert(h && key, CF_MISC, "bad param");
 
 	uint32_t hash = cf_shash_calculate_hash(h, key);
-	pthread_mutex_t *l = cf_shash_lock(h, hash);
+	cf_mutex *l = cf_shash_lock(h, hash);
 	cf_shash_ele *e = cf_shash_get_bucket(h, hash);
 
 	cf_shash_ele *e_prev = NULL;

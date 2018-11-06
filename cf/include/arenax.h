@@ -26,12 +26,12 @@
 // Includes.
 //
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "cf_mutex.h"
 #include "xmem.h"
 
 
@@ -98,7 +98,7 @@ typedef struct cf_arenax_s {
 	uint32_t			at_element_id;
 
 	// Thread safety.
-	pthread_mutex_t		lock;
+	cf_mutex			lock;
 
 	// Current stages.
 	uint32_t			stage_count;

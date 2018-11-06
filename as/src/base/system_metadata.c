@@ -39,6 +39,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "cf_thread.h"
 #include "msg.h"
 #include "rchash.h"
 #include "shash.h"
@@ -500,12 +501,6 @@ typedef struct smd_pending_merge_s {
  *  Internal representation of the state of the System Metadata module.
  */
 struct as_smd_s {
-
-	// System Metadata thread ID.
-	pthread_t thr_id;
-
-	// System Metadata thread attributes.
-	pthread_attr_t thr_attr;
 
 	// Is the System Metadata module up and running?
 	as_smd_state_t state;
@@ -1223,14 +1218,7 @@ static as_smd_t *as_smd_create(void)
 	cf_queue_init(&smd->pending_merge_queue, sizeof(smd_pending_merge), 128, false);
 
 	// Create the System Metadata thread.
-
-	if (pthread_attr_init(&(smd->thr_attr))) {
-		cf_crash(AS_SMD, "failed to initialize the System Metadata thread attributes");
-	}
-
-	if (pthread_create(&(smd->thr_id), &(smd->thr_attr), as_smd_thr, smd)) {
-		cf_crash(AS_SMD, "failed to create the System Metadata thread");
-	}
+	cf_thread_create_detached(as_smd_thr, (void *)smd);
 
 	// Send an INIT message to the System Metadata thread.
 	if (as_smd_send_event(smd, as_smd_create_cmd_event(AS_SMD_CMD_INIT))) {
@@ -1510,8 +1498,6 @@ void as_smd_dump_metadata(as_smd_t *smd, as_smd_cmd_t *cmd)
 	// Print info. about the System Metadata system.
 	cf_info(AS_SMD, "System Metadata Status:");
 	cf_info(AS_SMD, "-----------------------");
-	cf_info(AS_SMD, "thr_id: 0x%lx", smd->thr_id);
-	cf_info(AS_SMD, "thr_attr: %p", &smd->thr_attr);
 	cf_info(AS_SMD, "state: %s", AS_SMD_STATE_NAME(smd->state));
 	cf_info(AS_SMD, "number of modules: %d", cf_rchash_get_size(smd->modules));
 	cf_info(AS_SMD, "number of pending messages in queue: %d", cf_queue_sz(smd->msgq));

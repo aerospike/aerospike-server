@@ -26,7 +26,6 @@
 
 #include "transaction/rw_request.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -35,6 +34,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "fault.h"
 
@@ -93,7 +93,7 @@ rw_request_create(cf_digest* keyd)
 	rw->last_update_time	= 0;
 	// End of as_transaction look-alike.
 
-	pthread_mutex_init(&rw->lock, NULL);
+	cf_mutex_init(&rw->lock);
 
 	rw->wait_queue_head = NULL;
 	rw->wait_queue_tail = NULL;
@@ -176,7 +176,7 @@ rw_request_destroy(rw_request* rw)
 		as_partition_release(&rw->rsv);
 	}
 
-	pthread_mutex_destroy(&rw->lock);
+	cf_mutex_destroy(&rw->lock);
 
 	rw_wait_ele* e = rw->wait_queue_head;
 

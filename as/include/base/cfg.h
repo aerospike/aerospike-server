@@ -27,7 +27,6 @@
 //
 
 #include <grp.h>
-#include <pthread.h>
 #include <pwd.h>
 #include <stdbool.h>
 #include <stdint.h>

@@ -28,8 +28,7 @@ BASE_HEADERS += particle.h particle_blob.h particle_integer.h predexp.h
 BASE_HEADERS += proto.h scan.h secondary_index.h security.h security_config.h stats.h system_metadata.h
 BASE_HEADERS += thr_info.h thr_query.h thr_sindex.h
 BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h truncate.h
-BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h
-BASE_HEADERS += udf_memtracker.h udf_record.h udf_timer.h
+BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h udf_record.h
 BASE_HEADERS += xdr_serverside.h xdr_config.h
 
 BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c health.c index.c job_manager.c json_init.c
@@ -39,8 +38,7 @@ BASE_SOURCES += particle_list.c particle_map.c particle_string.c predexp.c
 BASE_SOURCES += proto.c record.c scan.c signal.c secondary_index.c system_metadata.c
 BASE_SOURCES += thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c
 BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c truncate.c
-BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
-BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
+BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c udf_record.c
 BASE_SOURCES += xdr_config.c
 
 ifneq ($(USE_EE),1)

@@ -26,8 +26,9 @@
 // Includes.
 //
 
-#include <pthread.h>
 #include <stdint.h>
+
+#include "cf_mutex.h"
 
 
 //==========================================================
@@ -73,8 +74,8 @@ typedef struct cf_rchash_s {
 	uint32_t flags;
 	uint32_t n_elements;
 	void *table;
-	pthread_mutex_t *bucket_locks;
-	pthread_mutex_t big_lock;
+	cf_mutex *bucket_locks;
+	cf_mutex big_lock;
 } cf_rchash;
 
 

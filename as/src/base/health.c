@@ -26,7 +26,6 @@
 
 #include "base/health.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,6 +37,7 @@
 #include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "errno.h"
 #include "fault.h"
@@ -319,18 +319,7 @@ as_health_start()
 
 	cf_info(AS_HEALTH, "starting health monitor thread");
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&thread, &attrs, run_health, NULL) != 0) {
-		cf_crash(AS_HEALTH, "could not create health monitor thread: %s",
-				cf_strerror(errno));
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_health, NULL);
 }
 
 void

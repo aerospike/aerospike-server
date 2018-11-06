@@ -26,10 +26,11 @@
 // Includes.
 //
 
-#include <pthread.h>
 #include <stdint.h>
 
 #include <citrusleaf/cf_atomic.h>
+
+#include "cf_mutex.h"
 
 
 //==========================================================
@@ -71,8 +72,8 @@ typedef struct cf_shash_s {
 	uint32_t flags;
 	cf_atomic32 n_elements;
 	void *table;
-	pthread_mutex_t *bucket_locks;
-	pthread_mutex_t big_lock;
+	cf_mutex *bucket_locks;
+	cf_mutex big_lock;
 } cf_shash;
 
 
@@ -100,7 +101,7 @@ int cf_shash_put_unique(cf_shash *h, const void *key, const void *value);
 void cf_shash_update(cf_shash *h, const void *key, void *value_old, void *value_new, cf_shash_update_fn update_fn, void *udata);
 
 int cf_shash_get(cf_shash *h, const void *key, void *value);
-int cf_shash_get_vlock(cf_shash *h, const void *key, void **value_r, pthread_mutex_t **vlock_r);
+int cf_shash_get_vlock(cf_shash *h, const void *key, void **value_r, cf_mutex **vlock_r);
 
 int cf_shash_delete(cf_shash *h, const void *key);
 int cf_shash_delete_lockfree(cf_shash *h, const void *key);

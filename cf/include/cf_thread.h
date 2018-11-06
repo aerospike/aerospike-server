@@ -1,7 +1,7 @@
 /*
- * cf_mutex.h
+ * cf_thread.h
  *
- * Copyright (C) 2017 Aerospike, Inc.
+ * Copyright (C) 2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,46 +22,61 @@
 
 #pragma once
 
-
 //==========================================================
 // Includes.
 //
 
-#include <stdbool.h>
-#include <stdint.h>
+#include <pthread.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 
 //==========================================================
 // Typedefs & constants.
 //
 
-typedef struct cf_mutex_s {
-	uint32_t u32;
-} cf_mutex __attribute__ ((aligned(4)));
-
-typedef struct cf_condition_s {
-	uint32_t seq;
-} cf_condition __attribute__ ((aligned(4)));
-
-#define CF_MUTEX_INIT { 0 }
-#define cf_mutex_init(__m) (__m)->u32 = 0
-#define cf_mutex_destroy(__m) // no-op
-
-#define CF_CONDITION_INIT { 0 }
-#define cf_condition_init(__m) (__m)->seq = 0
-#define cf_condition_destroy(__m) // no-op
+typedef pthread_t cf_tid;
+typedef void* (*cf_thread_run_fn) (void* udata);
 
 
 //==========================================================
 // Public API.
 //
 
-void cf_mutex_lock(cf_mutex *m);
-void cf_mutex_unlock(cf_mutex *m);
-bool cf_mutex_trylock(cf_mutex *m);
+void cf_thread_init(void);
+cf_tid cf_thread_create_detached(cf_thread_run_fn run, void* udata);
+cf_tid cf_thread_create_joinable(cf_thread_run_fn run, void* udata);
 
-void cf_mutex_lock_spin(cf_mutex *m);
-void cf_mutex_unlock_spin(cf_mutex *m);
+static inline void
+cf_thread_join(cf_tid tid)
+{
+	pthread_join(tid, NULL);
+}
 
-void cf_condition_wait(cf_condition *c, cf_mutex *m);
-void cf_condition_signal(cf_condition *c);
+static inline void
+cf_thread_cancel(cf_tid tid)
+{
+	pthread_cancel(tid);
+}
+
+static inline void
+cf_thread_disable_cancel(void)
+{
+	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+}
+
+static inline void
+cf_thread_test_cancel(void)
+{
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	pthread_testcancel();
+	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+}
+
+// Prefer this to cf_tid (i.e. pthread_t) for logging, etc.
+static inline pid_t
+cf_thread_sys_tid(void)
+{
+	return (pid_t)syscall(SYS_gettid);
+}

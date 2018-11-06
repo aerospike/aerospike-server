@@ -36,9 +36,11 @@
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "cf_mutex.h"
 #include "hardware.h"
 #include "socket.h"
 #include <errno.h>
+#include <pthread.h>
 #include <unistd.h>
 
 //---------------------------------------------------------
@@ -82,7 +84,7 @@ typedef struct {
 } __attribute__((__packed__)) as_batch_buffer;
 
 struct as_batch_shared_s {
-	pthread_mutex_t lock;
+	cf_mutex lock;
 	cf_queue* response_queue;
 	as_file_handle* fd_h;
 	cl_msg* msgp;
@@ -125,7 +127,7 @@ static as_thread_pool batch_thread_pool;
 static as_buffer_pool batch_buffer_pool;
 
 static as_batch_queue batch_queues[MAX_BATCH_THREADS];
-static pthread_mutex_t batch_resize_lock;
+static cf_mutex batch_resize_lock;
 
 //---------------------------------------------------------
 // STATIC FUNCTIONS
@@ -239,7 +241,7 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 	}
 
 	// Destroy lock
-	pthread_mutex_destroy(&shared->lock);
+	cf_mutex_destroy(&shared->lock);
 
 	// Release memory
 	cf_free(shared->msgp);
@@ -385,7 +387,7 @@ as_batch_delay_buffer(as_batch_queue* queue)
 
 	// If all batch transactions on this thread are delayed, avoid tight loop.
 	if (queue->tran_count == queue->delay_count) {
-		pthread_yield();
+		pthread_yield(); // not cf_thread_yield() - we're using as_thread_pool
 	}
 }
 
@@ -631,7 +633,7 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 	as_batch_buffer* buffer;
 	uint8_t* data;
 
-	pthread_mutex_lock(&shared->lock);
+	cf_mutex_lock(&shared->lock);
 	*complete = (++shared->tran_count == shared->tran_max);
 	buffer = shared->buffer;
 
@@ -639,7 +641,7 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 		// No previous buffer.  Get new buffer.
 		data = as_batch_buffer_pop(shared, size);
 		*buffer_out = shared->buffer;
-		pthread_mutex_unlock(&shared->lock);
+		cf_mutex_unlock(&shared->lock);
 	}
 	else if (buffer->size + size <= buffer->capacity) {
 		// Result fits into existing block.  Reserve a slot.
@@ -648,7 +650,7 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 		buffer->tran_count++;
 		cf_atomic32_incr(&buffer->writers);
 		*buffer_out = buffer;
-		pthread_mutex_unlock(&shared->lock);
+		cf_mutex_unlock(&shared->lock);
 	}
 	else {
 		// Result does not fit into existing block.
@@ -658,7 +660,7 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 		// Get new buffer.
 		data = as_batch_buffer_pop(shared, size);
 		*buffer_out = shared->buffer;
-		pthread_mutex_unlock(&shared->lock);
+		cf_mutex_unlock(&shared->lock);
 
 		as_batch_buffer_complete(shared, prev_buffer);
 	}
@@ -691,7 +693,7 @@ as_batch_terminate(as_batch_shared* shared, uint32_t tran_count, int result_code
 	as_batch_buffer* buffer;
 	bool complete;
 
-	pthread_mutex_lock(&shared->lock);
+	cf_mutex_lock(&shared->lock);
 	buffer = shared->buffer;
 	shared->result_code = result_code;
 	shared->tran_count += tran_count;
@@ -708,7 +710,7 @@ as_batch_terminate(as_batch_shared* shared, uint32_t tran_count, int result_code
 		buffer->tran_count += tran_count;
 		cf_atomic32_incr(&buffer->writers);
 	}
-	pthread_mutex_unlock(&shared->lock);
+	cf_mutex_unlock(&shared->lock);
 	as_batch_transaction_end(shared, buffer, complete);
 }
 
@@ -719,10 +721,7 @@ as_batch_terminate(as_batch_shared* shared, uint32_t tran_count, int result_code
 int
 as_batch_init()
 {
-	if (pthread_mutex_init(&batch_resize_lock, NULL)) {
-		cf_warning(AS_BATCH, "Failed to initialize batch resize lock");
-		return -1;
-	}
+	cf_mutex_init(&batch_resize_lock);
 
 	// Default 'batch-index-threads' can't be set before call to cf_topo_init().
 	if (g_config.n_batch_index_threads == 0) {
@@ -838,11 +837,7 @@ as_batch_queue_task(as_transaction* btr)
 
 	memset(shared, 0, sizeof(as_batch_shared));
 
-	if (pthread_mutex_init(&shared->lock, NULL)) {
-		cf_warning(AS_BATCH, "Failed to initialize batch lock");
-		cf_free(shared);
-		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-	}
+	cf_mutex_init(&shared->lock);
 
 	// Abandon batch at twice batch timeout if batch timeout is defined.
 	// If batch timeout is zero, abandon after 30 seconds.
@@ -1194,10 +1189,7 @@ as_batch_threads_resize(uint32_t threads)
 		return -1;
 	}
 
-	if (pthread_mutex_lock(&batch_resize_lock)) {
-		cf_warning(AS_BATCH, "Batch resize lock failed");
-		return -2;
-	}
+	cf_mutex_lock(&batch_resize_lock);
 
 	// Resize thread pool.  The threads will wait for graceful shutdown on downwards resize.
 	uint32_t threads_orig = batch_thread_pool.thread_size;
@@ -1243,17 +1235,14 @@ as_batch_threads_resize(uint32_t threads)
 			}
 		}
 	}
-	pthread_mutex_unlock(&batch_resize_lock);
+	cf_mutex_unlock(&batch_resize_lock);
 	return status;
 }
 
 void
 as_batch_queues_info(cf_dyn_buf* db)
 {
-	if (pthread_mutex_lock(&batch_resize_lock)) {
-		cf_warning(AS_BATCH, "Batch info resize lock failed");
-		return;
-	}
+	cf_mutex_lock(&batch_resize_lock);
 
 	uint32_t max = batch_thread_pool.thread_size;
 
@@ -1266,7 +1255,7 @@ as_batch_queues_info(cf_dyn_buf* db)
 		cf_dyn_buf_append_char(db, ':');
 		cf_dyn_buf_append_int(db, cf_queue_sz(bq->response_queue));  // Buffer count
 	}
-	pthread_mutex_unlock(&batch_resize_lock);
+	cf_mutex_unlock(&batch_resize_lock);
 }
 
 int
@@ -1283,10 +1272,10 @@ as_batch_destroy()
 	as_thread_pool_destroy(&batch_thread_pool);
 	as_buffer_pool_destroy(&batch_buffer_pool);
 
-	pthread_mutex_lock(&batch_resize_lock);
+	cf_mutex_lock(&batch_resize_lock);
 	as_batch_shutdown_thread_queues(0, batch_thread_pool.thread_size);
-	pthread_mutex_unlock(&batch_resize_lock);
-	pthread_mutex_destroy(&batch_resize_lock);
+	cf_mutex_unlock(&batch_resize_lock);
+	cf_mutex_destroy(&batch_resize_lock);
 }
 
 as_file_handle*

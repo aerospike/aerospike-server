@@ -24,7 +24,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -41,6 +40,7 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_b64.h"
 
+#include "cf_mutex.h"
 #include "shash.h"
 
 
@@ -1093,13 +1093,13 @@ cf_fault_cache_event(cf_fault_context context, cf_fault_severity severity,
 
 	while (true) {
 		uint32_t *valp = NULL;
-		pthread_mutex_t *lockp = NULL;
+		cf_mutex *lockp = NULL;
 
 		if (cf_shash_get_vlock(g_ticker_hash, &key, (void**)&valp, &lockp) ==
 				CF_SHASH_OK) {
 			// Already in hash - increment count and don't log it.
 			(*valp)++;
-			pthread_mutex_unlock(lockp);
+			cf_mutex_unlock(lockp);
 			break;
 		}
 		// else - not found, add it to hash and log it.

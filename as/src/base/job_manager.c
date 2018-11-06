@@ -26,7 +26,6 @@
 
 #include "base/job_manager.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,6 +39,8 @@
 #include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_queue_priority.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 
 #include "base/cfg.h"
@@ -122,7 +123,7 @@ int compare_cb(void* buf, void* task);
 bool
 as_priority_thread_pool_init(as_priority_thread_pool* pool, uint32_t n_threads)
 {
-	pthread_mutex_init(&pool->lock, NULL);
+	cf_mutex_init(&pool->lock);
 
 	// Initialize queues.
 	pool->dispatch_queue = cf_queue_priority_create(sizeof(queue_task), true);
@@ -140,14 +141,14 @@ as_priority_thread_pool_shutdown(as_priority_thread_pool* pool)
 	shutdown_threads(pool, pool->n_threads);
 	cf_queue_priority_destroy(pool->dispatch_queue);
 	cf_queue_destroy(pool->complete_queue);
-	pthread_mutex_destroy(&pool->lock);
+	cf_mutex_destroy(&pool->lock);
 }
 
 bool
 as_priority_thread_pool_resize(as_priority_thread_pool* pool,
 		uint32_t n_threads)
 {
-	pthread_mutex_lock(&pool->lock);
+	cf_mutex_lock(&pool->lock);
 
 	bool result = true;
 
@@ -165,7 +166,7 @@ as_priority_thread_pool_resize(as_priority_thread_pool* pool,
 		}
 	}
 
-	pthread_mutex_unlock(&pool->lock);
+	cf_mutex_unlock(&pool->lock);
 
 	return result;
 }
@@ -206,23 +207,11 @@ as_priority_thread_pool_change_task_priority(as_priority_thread_pool* pool,
 uint32_t
 create_threads(as_priority_thread_pool* pool, uint32_t count)
 {
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	uint32_t n_threads_created = 0;
-	pthread_t thread;
-
 	for (uint32_t i = 0; i < count; i++) {
-		if (pthread_create(&thread, &attrs, run_pool_thread, pool) == 0) {
-			n_threads_created++;
-		}
+		cf_thread_create_detached(run_pool_thread, (void*)pool);
 	}
 
-	pthread_attr_destroy(&attrs);
-
-	return n_threads_created;
+	return count;
 }
 
 void
@@ -309,7 +298,7 @@ as_job_init(as_job* _job, const as_job_vtable* vtable,
 	_job->set_id	= set_id;
 	_job->priority	= safe_priority(priority);
 
-	pthread_mutex_init(&_job->requeue_lock, NULL);
+	cf_mutex_init(&_job->requeue_lock);
 }
 
 void
@@ -326,10 +315,10 @@ as_job_slice(void* task)
 		return;
 	}
 
-	pthread_mutex_lock(&_job->requeue_lock);
+	cf_mutex_lock(&_job->requeue_lock);
 
 	if (_job->abandoned != 0) {
-		pthread_mutex_unlock(&_job->requeue_lock);
+		cf_mutex_unlock(&_job->requeue_lock);
 		as_partition_release(&rsv);
 		as_job_active_release(_job);
 		return;
@@ -340,7 +329,7 @@ as_job_slice(void* task)
 		as_job_manager_requeue_job(_job->mgr, _job);
 	}
 
-	pthread_mutex_unlock(&_job->requeue_lock);
+	cf_mutex_unlock(&_job->requeue_lock);
 
 	_job->vtable.slice_fn(_job, &rsv);
 
@@ -360,7 +349,7 @@ as_job_destroy(as_job* _job)
 {
 	_job->vtable.destroy_fn(_job);
 
-	pthread_mutex_destroy(&_job->requeue_lock);
+	cf_mutex_destroy(&_job->requeue_lock);
 	cf_free(_job);
 }
 
@@ -482,9 +471,7 @@ as_job_manager_init(as_job_manager* mgr, uint32_t max_active, uint32_t max_done,
 	mgr->max_active	= max_active;
 	mgr->max_done	= max_done;
 
-	if (pthread_mutex_init(&mgr->lock, NULL) != 0) {
-		cf_crash(AS_JOB, "job manager failed mutex init");
-	}
+	cf_mutex_init(&mgr->lock);
 
 	mgr->active_jobs = cf_queue_create(sizeof(as_job*), false);
 	mgr->finished_jobs = cf_queue_create(sizeof(as_job*), false);
@@ -497,18 +484,18 @@ as_job_manager_init(as_job_manager* mgr, uint32_t max_active, uint32_t max_done,
 int
 as_job_manager_start_job(as_job_manager* mgr, as_job* _job)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 
 	if (cf_queue_sz(mgr->active_jobs) >= mgr->max_active) {
 		cf_warning(AS_JOB, "max of %u jobs currently active", mgr->max_active);
-		pthread_mutex_unlock(&mgr->lock);
+		cf_mutex_unlock(&mgr->lock);
 		return AS_JOB_FAIL_FORBIDDEN;
 	}
 
 	// Make sure trid is unique.
 	if (as_job_manager_find_any(mgr, _job->trid)) {
 		cf_warning(AS_JOB, "job with trid %lu already active", _job->trid);
-		pthread_mutex_unlock(&mgr->lock);
+		cf_mutex_unlock(&mgr->lock);
 		return AS_JOB_FAIL_PARAMETER;
 	}
 
@@ -518,7 +505,7 @@ as_job_manager_start_job(as_job_manager* mgr, as_job* _job)
 	as_priority_thread_pool_queue_task(&mgr->thread_pool, as_job_slice, _job,
 			_job->priority);
 
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 	return 0;
 }
 
@@ -532,23 +519,23 @@ as_job_manager_requeue_job(as_job_manager* mgr, as_job* _job)
 void
 as_job_manager_finish_job(as_job_manager* mgr, as_job* _job)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 
 	as_job_manager_remove_active(mgr, _job->trid);
 	_job->finish_ms = cf_getms();
 	cf_queue_push(mgr->finished_jobs, &_job);
 	as_job_manager_evict_finished_jobs(mgr);
 
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 }
 
 void
 as_job_manager_abandon_job(as_job_manager* mgr, as_job* _job, int reason)
 {
-	pthread_mutex_lock(&_job->requeue_lock);
+	cf_mutex_lock(&_job->requeue_lock);
 	_job->abandoned = reason;
 	bool found = as_priority_thread_pool_remove_task(&mgr->thread_pool, _job);
-	pthread_mutex_unlock(&_job->requeue_lock);
+	cf_mutex_unlock(&_job->requeue_lock);
 
 	if (found) {
 		as_job_active_release(_job);
@@ -558,21 +545,21 @@ as_job_manager_abandon_job(as_job_manager* mgr, as_job* _job, int reason)
 bool
 as_job_manager_abort_job(as_job_manager* mgr, uint64_t trid)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 
 	as_job* _job = as_job_manager_find_active(mgr, trid);
 
 	if (! _job) {
-		pthread_mutex_unlock(&mgr->lock);
+		cf_mutex_unlock(&mgr->lock);
 		return false;
 	}
 
-	pthread_mutex_lock(&_job->requeue_lock);
+	cf_mutex_lock(&_job->requeue_lock);
 	_job->abandoned = AS_JOB_FAIL_USER_ABORT;
 	bool found = as_priority_thread_pool_remove_task(&mgr->thread_pool, _job);
-	pthread_mutex_unlock(&_job->requeue_lock);
+	cf_mutex_unlock(&_job->requeue_lock);
 
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 
 	if (found) {
 		as_job_active_release(_job);
@@ -584,12 +571,12 @@ as_job_manager_abort_job(as_job_manager* mgr, uint64_t trid)
 int
 as_job_manager_abort_all_jobs(as_job_manager* mgr)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 
 	int n_jobs = cf_queue_sz(mgr->active_jobs);
 
 	if (n_jobs == 0) {
-		pthread_mutex_unlock(&mgr->lock);
+		cf_mutex_unlock(&mgr->lock);
 		return 0;
 	}
 
@@ -603,13 +590,13 @@ as_job_manager_abort_all_jobs(as_job_manager* mgr)
 	for (int i = 0; i < n_jobs; i++) {
 		as_job* _job = _jobs[i];
 
-		pthread_mutex_lock(&_job->requeue_lock);
+		cf_mutex_lock(&_job->requeue_lock);
 		_job->abandoned = AS_JOB_FAIL_USER_ABORT;
 		found[i] = as_priority_thread_pool_remove_task(&mgr->thread_pool, _job);
-		pthread_mutex_unlock(&_job->requeue_lock);
+		cf_mutex_unlock(&_job->requeue_lock);
 	}
 
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 
 	for (int i = 0; i < n_jobs; i++) {
 		if (found[i]) {
@@ -624,22 +611,22 @@ bool
 as_job_manager_change_job_priority(as_job_manager* mgr, uint64_t trid,
 		int priority)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 
 	as_job* _job = as_job_manager_find_active(mgr, trid);
 
 	if (! _job) {
-		pthread_mutex_unlock(&mgr->lock);
+		cf_mutex_unlock(&mgr->lock);
 		return false;
 	}
 
-	pthread_mutex_lock(&_job->requeue_lock);
+	cf_mutex_lock(&_job->requeue_lock);
 	_job->priority = safe_priority(priority);
 	as_priority_thread_pool_change_task_priority(&mgr->thread_pool, _job,
 			_job->priority);
-	pthread_mutex_unlock(&_job->requeue_lock);
+	cf_mutex_unlock(&_job->requeue_lock);
 
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 	return true;
 }
 
@@ -652,10 +639,10 @@ as_job_manager_limit_active_jobs(as_job_manager* mgr, uint32_t max_active)
 void
 as_job_manager_limit_finished_jobs(as_job_manager* mgr, uint32_t max_done)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 	mgr->max_done = max_done;
 	as_job_manager_evict_finished_jobs(mgr);
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 }
 
 void
@@ -667,12 +654,12 @@ as_job_manager_resize_thread_pool(as_job_manager* mgr, uint32_t n_threads)
 as_mon_jobstat*
 as_job_manager_get_job_info(as_job_manager* mgr, uint64_t trid)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 
 	as_job* _job = as_job_manager_find_any(mgr, trid);
 
 	if (! _job) {
-		pthread_mutex_unlock(&mgr->lock);
+		cf_mutex_unlock(&mgr->lock);
 		return NULL;
 	}
 
@@ -681,7 +668,7 @@ as_job_manager_get_job_info(as_job_manager* mgr, uint64_t trid)
 	memset(stat, 0, sizeof(as_mon_jobstat));
 	as_job_info(_job, stat);
 
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 	return stat; // caller must free this
 }
 
@@ -690,13 +677,13 @@ as_job_manager_get_info(as_job_manager* mgr, int* size)
 {
 	*size = 0;
 
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 
 	int n_jobs = cf_queue_sz(mgr->active_jobs) +
 				 cf_queue_sz(mgr->finished_jobs);
 
 	if (n_jobs == 0) {
-		pthread_mutex_unlock(&mgr->lock);
+		cf_mutex_unlock(&mgr->lock);
 		return NULL;
 	}
 
@@ -715,7 +702,7 @@ as_job_manager_get_info(as_job_manager* mgr, int* size)
 		as_job_info(_jobs[i], &stats[i]);
 	}
 
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 
 	*size = n_jobs;
 	return stats; // caller must free this
@@ -724,9 +711,9 @@ as_job_manager_get_info(as_job_manager* mgr, int* size)
 int
 as_job_manager_get_active_job_count(as_job_manager* mgr)
 {
-	pthread_mutex_lock(&mgr->lock);
+	cf_mutex_lock(&mgr->lock);
 	int n_jobs = cf_queue_sz(mgr->active_jobs);
-	pthread_mutex_unlock(&mgr->lock);
+	cf_mutex_unlock(&mgr->lock);
 
 	return n_jobs;
 }
