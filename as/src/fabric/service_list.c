@@ -31,6 +31,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -388,14 +389,15 @@ int32_t
 as_service_list_command(char *key, char *par, cf_dyn_buf *db)
 {
 	cf_detail(AS_SERVICE_LIST, "handling info command %s %s", key, par);
-	uint64_t since;
 
-	if (cf_str_atoi_u64(par, &since) < 0) {
-		cf_warning(AS_INFO, "invalid %s generation %s", key, par);
-		cf_dyn_buf_append_string(db, "Error: Invalid generation '");
-		cf_dyn_buf_append_string(db, par);
-		cf_dyn_buf_append_string(db, "'");
-		return 0;
+	uint64_t since = 0;
+
+	// Hack to avoid generic parameter parsing for now, no error checking ...
+	static const char prefix[] = "generation=";
+	static const size_t prefix_len = sizeof(prefix) - 1;
+
+	if (strncmp(par, prefix, prefix_len) == 0) {
+		since = strtoul(par + prefix_len, NULL, 10);
 	}
 
 	// Find the build and projection functions for the given key.

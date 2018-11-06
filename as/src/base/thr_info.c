@@ -5076,7 +5076,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_bool(db, "pending_quiesce", ns->pending_quiesce);
 	info_append_bool(db, "effective_is_quiesced", ns->is_quiesced);
-	info_append_uint64(db, "n_nodes_quiesced", ns->cluster_size - ns->active_size);
+	info_append_uint64(db, "nodes_quiesced", ns->cluster_size - ns->active_size);
 
 	info_append_bool(db, "effective_prefer_uniform_balance", ns->prefer_uniform_balance);
 
