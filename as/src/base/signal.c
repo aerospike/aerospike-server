@@ -20,13 +20,13 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include "cf_mutex.h"
 #include "fault.h"
 
 
@@ -47,7 +47,7 @@ extern const char aerospike_build_os[];
 //
 
 // The mutex that the main function deadlocks on after starting the service.
-extern cf_mutex g_main_deadlock;
+extern pthread_mutex_t g_main_deadlock;
 extern bool g_startup_complete;
 
 
@@ -162,7 +162,7 @@ as_sig_handle_int(int sig_num, siginfo_t *info, void *ctx)
 		_exit(1);
 	}
 
-	cf_mutex_unlock(&g_main_deadlock);
+	pthread_mutex_unlock(&g_main_deadlock);
 }
 
 // We get here if we intentionally trigger the signal.
@@ -198,7 +198,7 @@ as_sig_handle_term(int sig_num, siginfo_t *info, void *ctx)
 		_exit(0);
 	}
 
-	cf_mutex_unlock(&g_main_deadlock);
+	pthread_mutex_unlock(&g_main_deadlock);
 }
 
 // We get here on cf_crash() and cf_assert().
