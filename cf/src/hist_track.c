@@ -31,7 +31,6 @@
 
 #include "hist_track.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,6 +41,7 @@
 #include <aerospike/as_atomic.h>
 #include <citrusleaf/alloc.h>
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "hist.h"
@@ -98,7 +98,7 @@ struct cf_hist_track_s {
 	uint32_t		num_rows;
 	uint32_t		write_row_n;
 	uint32_t		oldest_row_n;
-	pthread_mutex_t	rows_lock;
+	cf_mutex		rows_lock;
 	uint32_t		slice_sec;
 	uint32_t		buckets[MAX_NUM_COLS];
 	uint32_t		num_cols;
@@ -138,7 +138,7 @@ cf_hist_track_create(const char* name, histogram_scale scale)
 
 	cf_hist_track* this = (cf_hist_track*)cf_malloc(sizeof(cf_hist_track));
 
-	pthread_mutex_init(&this->rows_lock, NULL);
+	cf_mutex_init(&this->rows_lock);
 
 	// Base histogram setup, same as in histogram_create():
 	strcpy(this->hist.name, name);
@@ -183,7 +183,7 @@ void
 cf_hist_track_destroy(cf_hist_track* this)
 {
 	cf_hist_track_stop(this);
-	pthread_mutex_destroy(&this->rows_lock);
+	cf_mutex_destroy(&this->rows_lock);
 	cf_free(this);
 }
 
@@ -225,7 +225,7 @@ cf_hist_track_start(cf_hist_track* this, uint32_t back_sec, uint32_t slice_sec,
 		}
 	}
 
-	pthread_mutex_lock(&this->rows_lock);
+	cf_mutex_lock(&this->rows_lock);
 
 	if (this->rows) {
 		cf_free(this->rows);
@@ -244,7 +244,7 @@ cf_hist_track_start(cf_hist_track* this, uint32_t back_sec, uint32_t slice_sec,
 
 	this->num_cols = (uint32_t)num_cols;
 
-	pthread_mutex_unlock(&this->rows_lock);
+	cf_mutex_unlock(&this->rows_lock);
 
 	return true;
 }
@@ -255,14 +255,14 @@ cf_hist_track_start(cf_hist_track* this, uint32_t back_sec, uint32_t slice_sec,
 void
 cf_hist_track_stop(cf_hist_track* this)
 {
-	pthread_mutex_lock(&this->rows_lock);
+	cf_mutex_lock(&this->rows_lock);
 
 	if (this->rows) {
 		cf_free(this->rows);
 		this->rows = NULL;
 	}
 
-	pthread_mutex_unlock(&this->rows_lock);
+	cf_mutex_unlock(&this->rows_lock);
 }
 
 //------------------------------------------------
@@ -289,10 +289,10 @@ cf_hist_track_dump(cf_hist_track* this)
 	histogram_dump((histogram*)this);
 
 	// If tracking is enabled, save a row in the cache.
-	pthread_mutex_lock(&this->rows_lock);
+	cf_mutex_lock(&this->rows_lock);
 
 	if (! this->rows) {
-		pthread_mutex_unlock(&this->rows_lock);
+		cf_mutex_unlock(&this->rows_lock);
 		return;
 	}
 
@@ -302,7 +302,7 @@ cf_hist_track_dump(cf_hist_track* this)
 	if (this->write_row_n != 0 &&
 			now_ts - get_row(this, this->write_row_n - 1)->timestamp <
 			this->slice_sec) {
-		pthread_mutex_unlock(&this->rows_lock);
+		cf_mutex_unlock(&this->rows_lock);
 		return;
 	}
 
@@ -338,7 +338,7 @@ cf_hist_track_dump(cf_hist_track* this)
 		this->oldest_row_n++;
 	}
 
-	pthread_mutex_unlock(&this->rows_lock);
+	cf_mutex_unlock(&this->rows_lock);
 }
 
 //------------------------------------------------
@@ -367,11 +367,11 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 		uint32_t duration_sec, uint32_t slice_sec, bool throughput_only,
 		cf_hist_track_info_format info_fmt, cf_dyn_buf* db_p)
 {
-	pthread_mutex_lock(&this->rows_lock);
+	cf_mutex_lock(&this->rows_lock);
 
 	if (! this->rows) {
 		cf_dyn_buf_append_string(db_p, "error-not-tracking;");
-		pthread_mutex_unlock(&this->rows_lock);
+		cf_mutex_unlock(&this->rows_lock);
 		return;
 	}
 
@@ -379,7 +379,7 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 
 	if (start_row_n == -1) {
 		cf_dyn_buf_append_string(db_p, "error-no-data-yet-or-back-too-small;");
-		pthread_mutex_unlock(&this->rows_lock);
+		cf_mutex_unlock(&this->rows_lock);
 		return;
 	}
 
@@ -395,7 +395,7 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 		output_slice(this, prev_row_p, row_p, diff_sec, num_cols, info_fmt,
 				db_p);
 
-		pthread_mutex_unlock(&this->rows_lock);
+		cf_mutex_unlock(&this->rows_lock);
 		return;
 	}
 
@@ -428,7 +428,7 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 				"error-slice-too-big-or-back-too-small;");
 	}
 
-	pthread_mutex_unlock(&this->rows_lock);
+	cf_mutex_unlock(&this->rows_lock);
 }
 
 //------------------------------------------------
@@ -439,10 +439,10 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 void
 cf_hist_track_get_settings(cf_hist_track* this, cf_dyn_buf* db_p)
 {
-	pthread_mutex_lock(&this->rows_lock);
+	cf_mutex_lock(&this->rows_lock);
 
 	if (! this->rows) {
-		pthread_mutex_unlock(&this->rows_lock);
+		cf_mutex_unlock(&this->rows_lock);
 		return;
 	}
 
@@ -473,7 +473,7 @@ cf_hist_track_get_settings(cf_hist_track* this, cf_dyn_buf* db_p)
 
 	cf_dyn_buf_append_string(db_p, output);
 
-	pthread_mutex_unlock(&this->rows_lock);
+	cf_mutex_unlock(&this->rows_lock);
 }
 
 

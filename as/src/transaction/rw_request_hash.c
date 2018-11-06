@@ -26,7 +26,6 @@
 
 #include "transaction/rw_request_hash.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +36,8 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -119,17 +120,7 @@ as_rw_init()
 			rw_request_hdestroy, sizeof(rw_request_hkey), 32 * 1024,
 			CF_RCHASH_MANY_LOCK);
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&thread, &attrs, run_retransmit, NULL) != 0) {
-		cf_crash(AS_RW, "failed to create retransmit thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_retransmit, NULL);
 
 	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt),
 			RW_MSG_SCRATCH_SIZE, rw_msg_cb, NULL);
@@ -160,11 +151,11 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 		}
 		// else - got it - handle "hot key" scenario.
 
-		pthread_mutex_lock(&rw0->lock);
+		cf_mutex_lock(&rw0->lock);
 
 		transaction_status status = handle_hot_key(rw0, tr);
 
-		pthread_mutex_unlock(&rw0->lock);
+		cf_mutex_unlock(&rw0->lock);
 		rw_request_release(rw0);
 
 		return status; // rw_request was not inserted in the hash
@@ -289,17 +280,17 @@ retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata)
 	}
 
 	if (now->now_ns > rw->end_time) {
-		pthread_mutex_lock(&rw->lock);
+		cf_mutex_lock(&rw->lock);
 
 		rw->timeout_cb(rw);
 
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 
 		return CF_RCHASH_REDUCE_DELETE;
 	}
 
 	if (rw->xmit_ms < now->now_ms) {
-		pthread_mutex_lock(&rw->lock);
+		cf_mutex_lock(&rw->lock);
 
 		if (rw->from.any) {
 			rw->xmit_ms = now->now_ms + rw->retry_interval_ms;
@@ -310,7 +301,7 @@ retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata)
 		}
 		// else - lost race against dup-res or repl-write callback.
 
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 	}
 
 	return 0;

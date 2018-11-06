@@ -37,6 +37,7 @@
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "cf_thread.h"
 #include "fault.h"
 #include "node.h"
 #include "shash.h"
@@ -5028,10 +5029,8 @@ channel_start()
 	channel_events_enabled_set(true);
 
 	// Start the channel tender.
-	if (pthread_create(&g_hb.channel_state.channel_tender_tid, 0,
-			channel_tender, &g_hb) != 0) {
-		CRASH("could not create channel tender thread: %s", cf_strerror(errno));
-	}
+	g_hb.channel_state.channel_tender_tid =
+			cf_thread_create_joinable(channel_tender, (void*)&g_hb);
 
 Exit:
 	CHANNEL_UNLOCK();
@@ -5065,7 +5064,7 @@ channel_stop()
 	g_hb.channel_state.status = AS_HB_STATUS_SHUTTING_DOWN;
 
 	// Wait for the channel tender thread to finish.
-	pthread_join(g_hb.channel_state.channel_tender_tid, NULL);
+	cf_thread_join(g_hb.channel_state.channel_tender_tid);
 
 	CHANNEL_LOCK();
 
@@ -7068,10 +7067,8 @@ mesh_start()
 	g_hb.mode_state.mesh_state.status = AS_HB_STATUS_RUNNING;
 
 	// Start the mesh tender thread.
-	if (pthread_create(&g_hb.mode_state.mesh_state.mesh_tender_tid, 0,
-			mesh_tender, &g_hb) != 0) {
-		CRASH("could not create channel tender thread: %s", cf_strerror(errno));
-	}
+	g_hb.mode_state.mesh_state.mesh_tender_tid =
+			cf_thread_create_joinable(mesh_tender, (void*)&g_hb);
 
 	MESH_UNLOCK();
 }
@@ -7091,7 +7088,7 @@ mesh_stop()
 	g_hb.mode_state.mesh_state.status = AS_HB_STATUS_SHUTTING_DOWN;
 
 	// Wait for the channel tender thread to finish.
-	pthread_join(g_hb.mode_state.mesh_state.mesh_tender_tid, NULL);
+	cf_thread_join(g_hb.mode_state.mesh_state.mesh_tender_tid);
 
 	MESH_LOCK();
 
@@ -8165,10 +8162,8 @@ static void
 hb_tx_start()
 {
 	// Start the transmitter thread.
-	if (pthread_create(&g_hb.transmitter_tid, 0, hb_transmitter, &g_hb) != 0) {
-		CRASH("could not create heartbeat transmitter thread: %s",
-				cf_strerror(errno));
-	}
+	g_hb.transmitter_tid = cf_thread_create_joinable(hb_transmitter,
+			(void*)&g_hb);
 }
 
 /**
@@ -8179,7 +8174,7 @@ hb_tx_stop()
 {
 	DETAIL("waiting for the transmitter thread to stop");
 	// Wait for the adjacency tender thread to stop.
-	pthread_join(g_hb.transmitter_tid, NULL);
+	cf_thread_join(g_hb.transmitter_tid);
 }
 
 /**
@@ -8189,11 +8184,8 @@ static void
 hb_adjacency_tender_start()
 {
 	// Start the transmitter thread.
-	if (pthread_create(&g_hb.adjacency_tender_tid, 0, hb_adjacency_tender,
-			&g_hb) != 0) {
-		CRASH("could not create heartbeat adjacency tender thread: %s",
-				cf_strerror(errno));
-	}
+	g_hb.adjacency_tender_tid = cf_thread_create_joinable(hb_adjacency_tender,
+			(void*)&g_hb);
 }
 
 /**
@@ -8203,7 +8195,7 @@ static void
 hb_adjacency_tender_stop()
 {
 	// Wait for the adjacency tender thread to stop.
-	pthread_join(g_hb.adjacency_tender_tid, NULL);
+	cf_thread_join(g_hb.adjacency_tender_tid);
 }
 
 /**

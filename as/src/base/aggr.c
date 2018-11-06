@@ -38,7 +38,6 @@
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "base/udf_arglist.h"
-#include "base/udf_memtracker.h"
 #include "base/udf_record.h"
 #include "fabric/partition.h"
 

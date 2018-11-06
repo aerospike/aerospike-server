@@ -26,9 +26,11 @@
 // Includes.
 //
 
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "cf_mutex.h"
+#include "fault.h"
 
 
 //==========================================================
@@ -50,13 +52,18 @@ typedef struct cf_vmapx_s {
 	vhash*				hash;
 
 	// Generic.
-	pthread_mutex_t		write_lock;
+	cf_mutex			write_lock;
+
+	// Pad to 64 bytes.
+	uint8_t				pad[36];
 
 	//<><><><><><><><><><><> 64 bytes <><><><><><><><><><><>
 
 	// Vector data.
 	uint8_t				values[];
 } cf_vmapx;
+
+COMPILER_ASSERT(offsetof(cf_vmapx, values) == 64);
 
 typedef enum {
 	CF_VMAPX_OK = 0,

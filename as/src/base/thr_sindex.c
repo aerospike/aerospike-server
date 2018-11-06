@@ -52,6 +52,7 @@
 
 #include "ai_obj.h"
 #include "ai_btree.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "shash.h"
 
@@ -70,9 +71,6 @@ int as_sbld_build(as_sindex* si);
 // All this is global because Aerospike Index is single threaded
 pthread_rwlock_t g_sindex_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 pthread_rwlock_t g_ai_rwlock     = PTHREAD_RWLOCK_INITIALIZER;
-pthread_t g_sindex_populate_th;
-pthread_t g_sindex_destroy_th;
-pthread_t g_sindex_gc_th;
 
 cf_queue *g_sindex_populate_q;
 cf_queue *g_sindex_destroy_q;
@@ -571,18 +569,11 @@ as_sindex_thr_init()
 	}
 
 	g_sindex_populate_q = cf_queue_create(sizeof(as_sindex *), true);
-	if (0 != pthread_create(&g_sindex_populate_th, 0, as_sindex__populate_fn, 0)) {
-		cf_crash(AS_SINDEX, " Could not create sindex populate thread ");
-	}
-
 	g_sindex_destroy_q = cf_queue_create(sizeof(as_sindex *), true);
-	if (0 != pthread_create(&g_sindex_destroy_th, 0, as_sindex__destroy_fn, 0)) {
-		cf_crash(AS_SINDEX, " Could not create sindex destroy thread ");
-	}
 
-	if (0 != pthread_create(&g_sindex_gc_th, 0, as_sindex__gc_fn, 0)) {
-		cf_crash(AS_SINDEX, " Could not create sindex gc thread ");
-	}
+	cf_thread_create_detached(as_sindex__populate_fn, NULL);
+	cf_thread_create_detached(as_sindex__destroy_fn, NULL);
+	cf_thread_create_detached(as_sindex__gc_fn, NULL);
 
 	g_sindex_populateall_done_q = cf_queue_create(sizeof(int), true);
 	// At the beginning it is false. It is set to true when all the sindex

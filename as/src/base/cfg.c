@@ -24,7 +24,6 @@
 
 #include <errno.h>
 #include <grp.h>
-#include <pthread.h>
 #include <pwd.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -43,6 +42,7 @@
 
 #include "arenax.h"
 #include "bits.h"
+#include "cf_mutex.h"
 #include "cf_str.h"
 #include "daemon.h"
 #include "dynbuf.h"
@@ -4350,14 +4350,14 @@ as_config_post_process(as_config* c, const char* config_file)
 // Public API - Cluster name.
 //
 
-pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
+static cf_mutex g_config_lock = CF_MUTEX_INIT;
 
 void
 as_config_cluster_name_get(char* cluster_name)
 {
-	pthread_mutex_lock(&g_config_lock);
+	cf_mutex_lock(&g_config_lock);
 	strcpy(cluster_name, g_config.cluster_name);
-	pthread_mutex_unlock(&g_config_lock);
+	cf_mutex_unlock(&g_config_lock);
 }
 
 bool
@@ -4374,14 +4374,17 @@ as_config_cluster_name_set(const char* cluster_name)
 		return false;
 	}
 
-	pthread_mutex_lock(&g_config_lock);
+	cf_mutex_lock(&g_config_lock);
+
 	if (strcmp(cluster_name,"null") == 0){
 		// 'null' is a special value representing an unset cluster-name.
 		strcpy(g_config.cluster_name, "");
-	} else {
+	}
+	else {
 		strcpy(g_config.cluster_name, cluster_name);
 	}
-	pthread_mutex_unlock(&g_config_lock);
+
+	cf_mutex_unlock(&g_config_lock);
 
 	return true;
 }
@@ -4389,9 +4392,9 @@ as_config_cluster_name_set(const char* cluster_name)
 bool
 as_config_cluster_name_matches(const char* cluster_name)
 {
-	pthread_mutex_lock(&g_config_lock);
+	cf_mutex_lock(&g_config_lock);
 	bool matches = strcmp(cluster_name, g_config.cluster_name) == 0;
-	pthread_mutex_unlock(&g_config_lock);
+	cf_mutex_unlock(&g_config_lock);
 	return matches;
 }
 

@@ -26,7 +26,6 @@
 
 #include "transaction/write.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,6 +34,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "fault.h"
 
@@ -276,12 +276,12 @@ start_write_dup_res(rw_request* rw, as_transaction* tr)
 
 	dup_res_make_message(rw, tr);
 
-	pthread_mutex_lock(&rw->lock);
+	cf_mutex_lock(&rw->lock);
 
 	dup_res_setup_rw(rw, tr, write_dup_res_cb, write_timeout_cb);
 	send_rw_messages(rw);
 
-	pthread_mutex_unlock(&rw->lock);
+	cf_mutex_unlock(&rw->lock);
 }
 
 
@@ -292,12 +292,12 @@ start_write_repl_write(rw_request* rw, as_transaction* tr)
 
 	repl_write_make_message(rw, tr);
 
-	pthread_mutex_lock(&rw->lock);
+	cf_mutex_lock(&rw->lock);
 
 	repl_write_setup_rw(rw, tr, write_repl_write_cb, write_timeout_cb);
 	send_rw_messages(rw);
 
-	pthread_mutex_unlock(&rw->lock);
+	cf_mutex_unlock(&rw->lock);
 }
 
 

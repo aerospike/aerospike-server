@@ -26,13 +26,13 @@
 // Includes.
 //
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "citrusleaf/cf_atomic.h"
 
+#include "cf_mutex.h"
 #include "shash.h"
 
 
@@ -58,7 +58,7 @@ typedef struct as_truncate_s {
 	uint64_t lut;
 	cf_shash* startup_set_hash; // relevant only for enterprise edition
 	truncate_state state;
-	pthread_mutex_t state_lock;
+	cf_mutex state_lock;
 	cf_atomic32 n_threads_running;
 	cf_atomic32 pid;
 	cf_atomic64 n_records_this_run;

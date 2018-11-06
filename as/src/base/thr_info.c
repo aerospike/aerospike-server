@@ -25,7 +25,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -42,7 +41,9 @@
 #include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_vector.h"
 
+#include "cf_mutex.h"
 #include "cf_str.h"
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "shash.h"
@@ -3533,16 +3534,16 @@ Error:
 }
 
 // Protect all set-config commands from concurrency issues.
-static pthread_mutex_t g_set_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
+static cf_mutex g_set_cfg_lock = CF_MUTEX_INIT;
 
 int
 info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 {
-	pthread_mutex_lock(&g_set_cfg_lock);
+	cf_mutex_lock(&g_set_cfg_lock);
 
 	int result = info_command_config_set_threadsafe(name, params, db);
 
-	pthread_mutex_unlock(&g_set_cfg_lock);
+	cf_mutex_unlock(&g_set_cfg_lock);
 
 	return result;
 }
@@ -4284,7 +4285,7 @@ append_sec_err_str(cf_dyn_buf *db, uint32_t result, as_sec_perm cmd_perm) {
 	}
 }
 
-static pthread_mutex_t		g_info_lock = PTHREAD_MUTEX_INITIALIZER;
+static cf_mutex g_info_lock = CF_MUTEX_INIT;
 info_static		*static_head = 0;
 info_dynamic	*dynamic_head = 0;
 info_tree		*tree_head = 0;
@@ -4592,7 +4593,7 @@ int
 as_info_set_dynamic(const char *name, as_info_get_value_fn gv_fn, bool def)
 {
 	int rv = -1;
-	pthread_mutex_lock(&g_info_lock);
+	cf_mutex_lock(&g_info_lock);
 
 	info_dynamic *e = dynamic_head;
 	while (e) {
@@ -4614,7 +4615,7 @@ as_info_set_dynamic(const char *name, as_info_get_value_fn gv_fn, bool def)
 	}
 	rv = 0;
 
-	pthread_mutex_unlock(&g_info_lock);
+	cf_mutex_unlock(&g_info_lock);
 	return(rv);
 }
 
@@ -4628,7 +4629,7 @@ int
 as_info_set_tree(char *name, as_info_get_tree_fn gv_fn)
 {
 	int rv = -1;
-	pthread_mutex_lock(&g_info_lock);
+	cf_mutex_lock(&g_info_lock);
 
 	info_tree *e = tree_head;
 	while (e) {
@@ -4649,7 +4650,7 @@ as_info_set_tree(char *name, as_info_get_tree_fn gv_fn)
 	}
 	rv = 0;
 
-	pthread_mutex_unlock(&g_info_lock);
+	cf_mutex_unlock(&g_info_lock);
 	return(rv);
 }
 
@@ -4663,7 +4664,7 @@ int
 as_info_set_command(const char *name, as_info_command_fn command_fn, as_sec_perm required_perm)
 {
 	int rv = -1;
-	pthread_mutex_lock(&g_info_lock);
+	cf_mutex_lock(&g_info_lock);
 
 	info_command *e = command_head;
 	while (e) {
@@ -4685,7 +4686,7 @@ as_info_set_command(const char *name, as_info_command_fn command_fn, as_sec_perm
 	}
 	rv = 0;
 
-	pthread_mutex_unlock(&g_info_lock);
+	cf_mutex_unlock(&g_info_lock);
 	return(rv);
 }
 
@@ -4698,7 +4699,7 @@ as_info_set_command(const char *name, as_info_command_fn command_fn, as_sec_perm
 int
 as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool def)
 {
-	pthread_mutex_lock(&g_info_lock);
+	cf_mutex_lock(&g_info_lock);
 
 	// Delete case
 	if (value_sz == 0 || value == 0) {
@@ -4757,7 +4758,7 @@ as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool de
 		}
 	}
 
-	pthread_mutex_unlock(&g_info_lock);
+	cf_mutex_unlock(&g_info_lock);
 	return(0);
 
 }
@@ -6304,18 +6305,10 @@ as_info_init()
 
 	// Spin up the Info threads *after* all static and dynamic Info commands have been added
 	// so we can guarantee that the static and dynamic lists will never again be changed.
-	pthread_attr_t thr_attr;
-	pthread_attr_init(&thr_attr);
-	pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
 
 	for (int i = 0; i < g_config.n_info_threads; i++) {
-		pthread_t tid;
-		if (0 != pthread_create(&tid, &thr_attr, thr_info_fn, (void *) 0 )) {
-			cf_crash(AS_INFO, "pthread_create: %s", cf_strerror(errno));
-		}
+		cf_thread_create_detached(thr_info_fn, NULL);
 	}
-
-	pthread_attr_destroy(&thr_attr);
 
 	return(0);
 }

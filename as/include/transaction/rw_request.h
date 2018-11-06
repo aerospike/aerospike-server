@@ -26,7 +26,6 @@
 // Includes.
 //
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -36,6 +35,7 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "msg.h"
 #include "node.h"
@@ -111,7 +111,7 @@ typedef struct rw_request_s {
 	// End of as_transaction look-alike.
 	//------------------------------------------------------
 
-	pthread_mutex_t		lock;
+	cf_mutex			lock;
 
 	struct rw_wait_ele_s* wait_queue_head;
 	struct rw_wait_ele_s* wait_queue_tail;

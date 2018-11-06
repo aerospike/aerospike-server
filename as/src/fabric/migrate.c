@@ -26,7 +26,6 @@
 
 #include "fabric/migrate.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -41,6 +40,8 @@
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -226,28 +227,12 @@ as_migrate_init()
 			CF_RCHASH_BIG_LOCK);
 
 	// Looks like an as_priority_thread_pool, but the reduce-pop is different.
-
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 	for (uint32_t i = 0; i < g_config.n_migrate_threads; i++) {
-		if (pthread_create(&thread, &attrs, run_emigration, NULL) != 0) {
-			cf_crash(AS_MIGRATE, "failed to create emigration thread");
-		}
+		cf_thread_create_detached(run_emigration, NULL);
 	}
 
-	if (pthread_create(&thread, &attrs, run_emigration_slow, NULL) != 0) {
-		cf_crash(AS_MIGRATE, "failed to create emigration slow thread");
-	}
-
-	if (pthread_create(&thread, &attrs, run_immigration_reaper, NULL) != 0) {
-		cf_crash(AS_MIGRATE, "failed to create immigration reaper thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_emigration_slow, NULL);
+	cf_thread_create_detached(run_immigration_reaper, NULL);
 
 	emigrate_fill_queue_init();
 
@@ -303,22 +288,10 @@ as_migrate_set_num_xmit_threads(uint32_t n_threads)
 	}
 	else {
 		// Increase the number of migrate transmit threads to n_threads.
-		pthread_t thread;
-		pthread_attr_t attrs;
-
-		pthread_attr_init(&attrs);
-		pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 		while (g_config.n_migrate_threads < n_threads) {
-			if (pthread_create(&thread, &attrs, run_emigration, NULL) != 0) {
-				cf_warning(AS_MIGRATE, "failed to create emigration thread");
-				return;
-			}
-
+			cf_thread_create_detached(run_emigration, NULL);
 			g_config.n_migrate_threads++;
 		}
-
-		pthread_attr_destroy(&attrs);
 	}
 }
 
@@ -806,18 +779,15 @@ emigrate_tree(emigration *emig)
 
 	cf_atomic32_set(&emig->state, EMIG_STATE_ACTIVE);
 
-	pthread_t thread;
-
-	if (pthread_create(&thread, NULL, run_emigration_reinserter, emig) != 0) {
-		cf_crash(AS_MIGRATE, "could not start reinserter thread");
-	}
+	cf_tid tid = cf_thread_create_joinable(run_emigration_reinserter,
+			(void*)emig);
 
 	as_index_reduce(emig->rsv.tree, emigrate_tree_reduce_fn, emig);
 
 	// Sets EMIG_STATE_FINISHED only if not already EMIG_STATE_ABORTED.
 	cf_atomic32_setmax(&emig->state, EMIG_STATE_FINISHED);
 
-	pthread_join(thread, NULL);
+	cf_thread_join(tid);
 
 	return emig->state != EMIG_STATE_ABORTED;
 }
@@ -1637,7 +1607,7 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 	}
 
 	emigration_reinsert_ctrl *ri_ctrl = NULL;
-	pthread_mutex_t *vlock;
+	cf_mutex *vlock;
 
 	if (cf_shash_get_vlock(emig->reinsert_hash, &insert_id, (void **)&ri_ctrl,
 			&vlock) == CF_SHASH_OK) {
@@ -1656,7 +1626,7 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 			cf_warning(AS_MIGRATE, "insert ack: unexpected source %lx", src);
 		}
 
-		pthread_mutex_unlock(vlock);
+		cf_mutex_unlock(vlock);
 	}
 
 	emigration_release(emig);

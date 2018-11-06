@@ -26,7 +26,6 @@
 
 #include "transaction/replica_write.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,6 +34,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_mutex.h"
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -340,12 +340,12 @@ repl_write_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	pthread_mutex_lock(&rw->lock);
+	cf_mutex_lock(&rw->lock);
 
 	if (rw->tid != tid || rw->repl_write_complete) {
 		// Extra ack - rw_request is newer transaction for same digest, or ack
 		// is arriving after rw_request was aborted.
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -356,7 +356,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	if (! rw->from.any) {
 		// Lost race against timeout in retransmit thread.
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -367,7 +367,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	if (i == -1) {
 		cf_warning(AS_RW, "repl-write ack: from non-dest node %lx", node);
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -375,7 +375,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	if (rw->dest_complete[i]) {
 		// Extra ack for this replica write.
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -386,7 +386,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 	// If it makes sense, retransmit replicas. Note - rw->dest_complete[i] not
 	// yet set true, so that retransmit will go to this remote node.
 	if (repl_write_should_retransmit_replicas(rw, result_code)) {
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -400,7 +400,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 	for (uint32_t j = 0; j < rw->n_dest_nodes; j++) {
 		if (! rw->dest_complete[j]) {
 			// Still haven't heard from all replicas.
-			pthread_mutex_unlock(&rw->lock);
+			cf_mutex_unlock(&rw->lock);
 			rw_request_release(rw);
 			as_fabric_msg_put(m);
 			return;
@@ -413,7 +413,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	rw->repl_write_complete = true;
 
-	pthread_mutex_unlock(&rw->lock);
+	cf_mutex_unlock(&rw->lock);
 	rw_request_hash_delete(&hkey, rw);
 	rw_request_release(rw);
 	as_fabric_msg_put(m);

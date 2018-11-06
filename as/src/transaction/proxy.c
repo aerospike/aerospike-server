@@ -27,7 +27,6 @@
 #include "transaction/proxy.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,6 +37,8 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "msg.h"
@@ -202,17 +203,7 @@ as_proxy_init()
 	g_proxy_hash = cf_shash_create(cf_shash_fn_u32, sizeof(uint32_t),
 			sizeof(proxy_request), 4 * 1024, CF_SHASH_MANY_LOCK);
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&thread, &attrs, run_proxy_timeout, NULL) != 0) {
-		cf_crash(AS_PROXY, "failed to create proxy timeout thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_proxy_timeout, NULL);
 
 	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt),
 			PROXY_MSG_SCRATCH_SIZE, proxy_msg_cb, NULL);
@@ -469,7 +460,7 @@ void
 proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 {
 	proxy_request* pr;
-	pthread_mutex_t* lock;
+	cf_mutex* lock;
 
 	if (cf_shash_get_vlock(g_proxy_hash, &tid, (void**)&pr, &lock) !=
 			CF_SHASH_OK) {
@@ -493,7 +484,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 			as_fabric_msg_put(pr->fab_msg);
 		}
 
-		pthread_mutex_unlock(lock);
+		cf_mutex_unlock(lock);
 		return;
 	}
 
@@ -530,7 +521,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	as_fabric_msg_put(pr->fab_msg);
 
 	cf_shash_delete_lockfree(g_proxy_hash, &tid);
-	pthread_mutex_unlock(lock);
+	cf_mutex_unlock(lock);
 }
 
 

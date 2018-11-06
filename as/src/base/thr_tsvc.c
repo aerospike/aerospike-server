@@ -26,7 +26,6 @@
 
 #include "base/thr_tsvc.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,6 +39,7 @@
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "cf_thread.h"
 #include "fault.h"
 #include "hardware.h"
 #include "node.h"
@@ -501,23 +501,11 @@ Cleanup:
 void
 tsvc_add_threads(uint32_t qid, uint32_t n_threads)
 {
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 	for (uint32_t n = 0; n < n_threads; n++) {
-		if (pthread_create(&thread, &attrs, run_tsvc,
-				(void*)(uint64_t)qid) == 0) {
-			g_queues_n_threads[qid]++;
-		}
-		else {
-			cf_warning(AS_TSVC, "tsvc queue %u failed thread create", qid);
-		}
+		cf_thread_create_detached(run_tsvc, (void*)(uint64_t)qid);
 	}
 
-	pthread_attr_destroy(&attrs);
+	g_queues_n_threads[qid] += n_threads;
 }
 
 
@@ -529,8 +517,9 @@ tsvc_remove_threads(uint32_t qid, uint32_t n_threads)
 	for (uint32_t n = 0; n < n_threads; n++) {
 		// Send terminator (transaction with NULL msgp).
 		cf_queue_push(g_transaction_queues[qid], &death_tr);
-		g_queues_n_threads[qid]--;
 	}
+
+	g_queues_n_threads[qid] -= n_threads;
 }
 
 

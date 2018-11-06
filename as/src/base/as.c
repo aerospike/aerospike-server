@@ -23,7 +23,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -36,6 +35,8 @@
 
 #include "citrusleaf/alloc.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "daemon.h"
 #include "fault.h"
 #include "hardware.h"
@@ -160,7 +161,7 @@ static const char SMD_DIR_NAME[] = "/smd";
 // Globals.
 //
 
-pthread_mutex_t g_main_deadlock = PTHREAD_MUTEX_INITIALIZER;
+cf_mutex g_main_deadlock = CF_MUTEX_INIT;
 bool g_startup_complete = false;
 bool g_shutdown_started = false;
 
@@ -187,6 +188,9 @@ int
 main(int argc, char **argv)
 {
 	g_start_sec = cf_get_seconds();
+
+	// Initialize cf_thread wrapper.
+	cf_thread_init();
 
 	// Initialize memory allocation.
 	cf_alloc_init();
@@ -428,17 +432,17 @@ main(int argc, char **argv)
 
 	// Stop this thread from finishing. Intentionally deadlocking on a mutex is
 	// a remarkably efficient way to do this.
-	pthread_mutex_lock(&g_main_deadlock);
+	cf_mutex_lock(&g_main_deadlock);
 	g_startup_complete = true;
-	pthread_mutex_lock(&g_main_deadlock);
+	cf_mutex_lock(&g_main_deadlock);
 
 	// When the service is running, you are here (deadlocked) - the signals that
 	// stop the service (yes, these signals always occur in this thread) will
 	// unlock the mutex, allowing us to continue.
 
 	g_shutdown_started = true;
-	pthread_mutex_unlock(&g_main_deadlock);
-	pthread_mutex_destroy(&g_main_deadlock);
+	cf_mutex_unlock(&g_main_deadlock);
+	cf_mutex_destroy(&g_main_deadlock);
 
 	//--------------------------------------------
 	// Received a shutdown signal.

@@ -28,7 +28,6 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <malloc.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>

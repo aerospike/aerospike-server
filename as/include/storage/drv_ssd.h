@@ -27,7 +27,6 @@
 //
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,6 +37,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "hist.h"
 
@@ -219,13 +219,13 @@ typedef struct drv_ssd_s {
 
 	uint32_t		running;
 
-	pthread_mutex_t	write_lock;			// lock protects writes to current swb
+	cf_mutex		write_lock;			// lock protects writes to current swb
 	ssd_write_buf	*current_swb;		// swb currently being filled by writes
 
 	int				commit_fd;			// relevant for enterprise edition only
 	int				shadow_commit_fd;	// relevant for enterprise edition only
 
-	pthread_mutex_t	defrag_lock;		// lock protects writes to defrag swb
+	cf_mutex		defrag_lock;		// lock protects writes to defrag swb
 	ssd_write_buf	*defrag_swb;		// swb currently being filled by defrag
 
 	cf_queue		*fd_q;				// queue of open fds
@@ -278,8 +278,8 @@ typedef struct drv_ssd_s {
 
 	ssd_alloc_table	*alloc_table;
 
-	pthread_t		write_worker_thread;
-	pthread_t		shadow_worker_thread;
+	cf_tid			write_tid;
+	cf_tid			shadow_tid;
 
 	histogram		*hist_read;
 	histogram		*hist_large_block_read;
@@ -373,7 +373,7 @@ void ssd_resume_devices(drv_ssds *ssds);
 void *run_ssd_cool_start(void *udata);
 void ssd_load_wblock_queues(drv_ssds *ssds);
 void ssd_start_maintenance_threads(drv_ssds *ssds);
-void ssd_start_write_worker_threads(drv_ssds *ssds);
+void ssd_start_write_threads(drv_ssds *ssds);
 void ssd_start_defrag_threads(drv_ssds *ssds);
 const uint8_t* ssd_read_record_meta(const ssd_record* block, const uint8_t* end, ssd_rec_props* props, bool single_bin);
 bool ssd_check_bins(const uint8_t* p_read, const uint8_t* end, uint32_t n_bins, bool single_bin); // TODO - demote when cool start unwinds on failure

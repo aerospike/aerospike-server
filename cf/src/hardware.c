@@ -30,7 +30,6 @@
 #include <libgen.h>
 #include <limits.h>
 #include <mntent.h>
-#include <pthread.h>
 #include <regex.h>
 #include <sched.h>
 #include <stdbool.h>
@@ -56,6 +55,7 @@
 #include <linux/mempolicy.h>
 #include <linux/sockios.h>
 
+#include "cf_mutex.h"
 #include "daemon.h"
 #include "fault.h"
 #include "shash.h"
@@ -180,7 +180,7 @@ typedef struct path_data_s {
 
 static cf_shash *g_dev_graph;
 
-static pthread_mutex_t g_path_data_lock = PTHREAD_MUTEX_INITIALIZER;
+static cf_mutex g_path_data_lock = CF_MUTEX_INIT;
 static cf_shash *g_path_data;
 
 static file_res
@@ -2579,7 +2579,7 @@ get_path_data(const char *any_path)
 {
 	cf_detail(CF_HARDWARE, "getting path data for %s", any_path);
 
-	pthread_mutex_lock(&g_path_data_lock);
+	cf_mutex_lock(&g_path_data_lock);
 
 	if (g_dev_graph == NULL) {
 		build_device_graph();
@@ -2594,7 +2594,7 @@ get_path_data(const char *any_path)
 
 	if (len >= DEVICE_PATH_SIZE) {
 		cf_warning(CF_HARDWARE, "device path %s is too long", any_path);
-		pthread_mutex_unlock(&g_path_data_lock);
+		cf_mutex_unlock(&g_path_data_lock);
 		return NULL;
 	}
 
@@ -2611,7 +2611,7 @@ get_path_data(const char *any_path)
 		data = new_path_data(any_path);
 
 		if (data == NULL) {
-			pthread_mutex_unlock(&g_path_data_lock);
+			cf_mutex_unlock(&g_path_data_lock);
 			return NULL;
 		}
 
@@ -2627,7 +2627,7 @@ get_path_data(const char *any_path)
 		update_path_data(data);
 	}
 
-	pthread_mutex_unlock(&g_path_data_lock);
+	cf_mutex_unlock(&g_path_data_lock);
 	return data;
 }
 

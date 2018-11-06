@@ -111,6 +111,8 @@
 #include "ai_btree.h"
 #include "bt.h"
 #include "bt_iterator.h"
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "rchash.h"
 
 #include "base/aggr.h"
@@ -122,7 +124,6 @@
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/udf_memtracker.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
@@ -217,10 +218,10 @@ typedef struct as_query_transaction_s {
 	cf_atomic32              netio_pop_seq;
 
 	/********************** IO Buf Builder ***********************************/
-	pthread_mutex_t          buf_mutex;
+	cf_mutex                 buf_mutex;
 	cf_buf_builder         * bb_r;
 	/****************** Query State and Result Code **************************/
-	pthread_mutex_t          slock;
+	cf_mutex                 slock;
 	bool                     do_requeue;
 	qtr_state                state;
 	int                      result_code;
@@ -304,13 +305,11 @@ static cf_rchash      * g_query_job_hash = NULL;
 // Buf Builder Pool
 static cf_queue       * g_query_response_bb_pool  = 0;
 static cf_queue       * g_query_qwork_pool         = 0;
-pthread_mutex_t         g_query_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+cf_mutex                g_query_pool_mutex = CF_MUTEX_INIT;
 as_query_transaction  * g_query_pool_head = NULL;
 size_t                  g_query_pool_count = 0;
 //
 // GENERATOR
-static pthread_t        g_query_threads[AS_QUERY_MAX_THREADS];
-static pthread_attr_t   g_query_th_attr;
 static cf_queue       * g_query_short_queue     = 0;
 static cf_queue       * g_query_long_queue      = 0;
 static cf_atomic32      g_query_threadcnt       = 0;
@@ -319,8 +318,6 @@ cf_atomic32             g_query_short_running   = 0;
 cf_atomic32             g_query_long_running    = 0;
 
 // I/O & AGGREGATOR
-static pthread_t       g_query_worker_threads[AS_QUERY_MAX_WORKER_THREADS];
-static pthread_attr_t  g_query_worker_th_attr;
 static cf_queue     *  g_query_work_queue    = 0;
 static cf_atomic32     g_query_worker_threadcnt = 0;
 // **************************************************************************************************
@@ -391,13 +388,13 @@ do {                                                                   \
 static void
 qtr_lock(as_query_transaction *qtr) {
 	if (qtr) {
-		pthread_mutex_lock(&qtr->slock);
+		cf_mutex_lock(&qtr->slock);
 	}
 }
 static void
 qtr_unlock(as_query_transaction *qtr) {
 	if (qtr) {
-		pthread_mutex_unlock(&qtr->slock);
+		cf_mutex_unlock(&qtr->slock);
 	}
 }
 // **************************************************************************************************
@@ -410,7 +407,7 @@ qtr_unlock(as_query_transaction *qtr) {
 static as_query_transaction *
 qtr_alloc()
 {
-	pthread_mutex_lock(&g_query_pool_mutex);
+	cf_mutex_lock(&g_query_pool_mutex);
 
 	as_query_transaction * qtr;
 
@@ -423,14 +420,14 @@ qtr_alloc()
 		cf_rc_reserve(qtr);
 	}
 
-	pthread_mutex_unlock(&g_query_pool_mutex);
+	cf_mutex_unlock(&g_query_pool_mutex);
 	return qtr;
 }
 
 static void
 qtr_free(as_query_transaction * qtr)
 {
-	pthread_mutex_lock(&g_query_pool_mutex);
+	cf_mutex_lock(&g_query_pool_mutex);
 
 	if (g_query_pool_count >= AS_QUERY_MAX_QTR_POOL) {
 		cf_rc_free(qtr);
@@ -442,7 +439,7 @@ qtr_free(as_query_transaction * qtr)
 		++g_query_pool_count;
 	}
 
-	pthread_mutex_unlock(&g_query_pool_mutex);
+	cf_mutex_unlock(&g_query_pool_mutex);
 }
 // **************************************************************************************************
 
@@ -787,7 +784,7 @@ query_run_teardown(as_query_transaction *qtr)
 		qtr->bb_r = NULL;
 	}
 
-	pthread_mutex_destroy(&qtr->buf_mutex);
+	cf_mutex_destroy(&qtr->buf_mutex);
 }
 
 static void
@@ -804,7 +801,7 @@ query_teardown(as_query_transaction *qtr)
 	else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
 		iudf_origin_destroy(&qtr->origin);
 	}
-	pthread_mutex_destroy(&qtr->slock);
+	cf_mutex_destroy(&qtr->slock);
 }
 
 static void
@@ -1158,11 +1155,11 @@ query_add_response(void *void_qtr, as_storage_rd *rd)
 			qtr->no_bin_data, qtr->binlist);
 	int ret = 0;
 
-	pthread_mutex_lock(&qtr->buf_mutex);
+	cf_mutex_lock(&qtr->buf_mutex);
 	cf_buf_builder *bb_r = qtr->bb_r;
 	if (bb_r == NULL) {
 		// Assert that query is aborted if bb_r is found to be null
-		pthread_mutex_unlock(&qtr->buf_mutex);
+		cf_mutex_unlock(&qtr->buf_mutex);
 		return AS_QUERY_ERR;
 	}
 
@@ -1180,7 +1177,7 @@ query_add_response(void *void_qtr, as_storage_rd *rd)
 				bb_r->alloc_sz - bb_r->used_sz, msg_sz);
 	}
 	cf_atomic64_incr(&qtr->n_result_records);
-	pthread_mutex_unlock(&qtr->buf_mutex);
+	cf_mutex_unlock(&qtr->buf_mutex);
 	return ret;
 }
 
@@ -1688,11 +1685,11 @@ query_add_val_response(void *void_qtr, const as_val *val, bool success)
 		cf_warning(AS_PROTO, "particle to buf: could not copy data!");
 	}
 
-	pthread_mutex_lock(&qtr->buf_mutex);
+	cf_mutex_lock(&qtr->buf_mutex);
 	cf_buf_builder *bb_r = qtr->bb_r;
 	if (bb_r == NULL) {
 		// Assert that query is aborted if bb_r is found to be null
-		pthread_mutex_unlock(&qtr->buf_mutex);
+		cf_mutex_unlock(&qtr->buf_mutex);
 		return AS_QUERY_ERR;
 	}
 
@@ -1703,7 +1700,7 @@ query_add_val_response(void *void_qtr, const as_val *val, bool success)
 	as_msg_make_val_response_bufbuilder(val, &qtr->bb_r, msg_sz, success);
 	cf_atomic64_incr(&qtr->n_result_records);
 
-	pthread_mutex_unlock(&qtr->buf_mutex);
+	cf_mutex_unlock(&qtr->buf_mutex);
 	return 0;
 }
 
@@ -2248,7 +2245,7 @@ query_run_setup(as_query_transaction *qtr)
 	qtr->netio_push_seq      = 0;
 	qtr->netio_pop_seq       = 1;
 	qtr->blocking            = false;
-	pthread_mutex_init(&qtr->buf_mutex, NULL);
+	cf_mutex_init(&qtr->buf_mutex);
 
 	// Aerospike Index object initialization
 	qtr->result_code              = AS_PROTO_RESULT_OK;
@@ -2890,7 +2887,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	rv = AS_QUERY_OK;
 
-	pthread_mutex_init(&qtr->slock, NULL);
+	cf_mutex_init(&qtr->slock);
 	qtr->state         = AS_QTR_STATE_INIT;
 	qtr->do_requeue    = false;
 	qtr->short_running = true;
@@ -3220,38 +3217,16 @@ as_query_init()
 	g_query_response_bb_pool = cf_queue_create(sizeof(void *), true);
 	g_query_work_queue = cf_queue_create(sizeof(query_work *), true);
 
-	// Create the query worker threads detached so we don't need to join with them.
-	if (pthread_attr_init(&g_query_worker_th_attr)) {
-		cf_crash(AS_SINDEX, "failed to initialize the query worker thread attributes");
-	}
-	if (pthread_attr_setdetachstate(&g_query_worker_th_attr, PTHREAD_CREATE_DETACHED)) {
-		cf_crash(AS_SINDEX, "failed to set the query worker thread attributes to the detached state");
-	}
-	int max = g_config.query_worker_threads;
-	for (int i = 0; i < max; i++) {
-		pthread_create(&g_query_worker_threads[i], &g_query_worker_th_attr,
-				qwork_th, (void*)g_query_work_queue);
+	for (uint32_t i = 0; i < g_config.query_worker_threads; i++) {
+		cf_thread_create_detached(qwork_th, (void*)g_query_work_queue);
 	}
 
 	g_query_short_queue = cf_queue_create(sizeof(as_query_transaction *), true);
 	g_query_long_queue = cf_queue_create(sizeof(as_query_transaction *), true);
 
-	// Create the query threads detached so we don't need to join with them.
-	if (pthread_attr_init(&g_query_th_attr)) {
-		cf_crash(AS_SINDEX, "failed to initialize the query thread attributes");
-	}
-	if (pthread_attr_setdetachstate(&g_query_th_attr, PTHREAD_CREATE_DETACHED)) {
-		cf_crash(AS_SINDEX, "failed to set the query thread attributes to the detached state");
-	}
-
-	max = g_config.query_threads;
-	for (int i = 0; i < max; i += 2) {
-		if (pthread_create(&g_query_threads[i], &g_query_th_attr,
-					query_th, (void*)g_query_short_queue)
-				|| pthread_create(&g_query_threads[i + 1], &g_query_th_attr,
-						query_th, (void*)g_query_long_queue)) {
-			cf_crash(AS_QUERY, "Failed to create query transaction threads for query short queue");
-		}
+	for (uint32_t i = 0; i < g_config.query_threads; i += 2) {
+		cf_thread_create_detached(query_th, (void*)g_query_short_queue);
+		cf_thread_create_detached(query_th, (void*)g_query_long_queue);
 	}
 
 	char hist_name[64];
@@ -3309,10 +3284,7 @@ as_query_worker_reinit(int set_size, int *actual_size)
 	if (set_size > g_query_worker_threadcnt) {
 		for (; i < set_size; i++) {
 			cf_detail(AS_QUERY, "Creating thread %d", i);
-			if (0 != pthread_create(&g_query_worker_threads[i], &g_query_worker_th_attr,
-					qwork_th, (void*)g_query_work_queue)) {
-				break;
-			}
+			cf_thread_create_detached(qwork_th, (void*)g_query_work_queue);
 		}
 		g_config.query_worker_threads = i;
 	}
@@ -3357,17 +3329,10 @@ as_query_reinit(int set_size, int *actual_size)
 
 	g_config.query_threads = set_size;
 	if (set_size > g_query_threadcnt) {
-		for (; i < set_size; i++) {
+		for (; i < set_size; i += 2) {
 			cf_detail(AS_QUERY, "Creating thread %d", i);
-			if (0 != pthread_create(&g_query_threads[i], &g_query_th_attr,
-					query_th, (void*)g_query_short_queue)) {
-				break;
-			}
-			i++;
-			if (0 != pthread_create(&g_query_threads[i], &g_query_th_attr,
-					query_th, (void*)g_query_long_queue)) {
-				break;
-			}
+			cf_thread_create_detached(query_th, (void*)g_query_short_queue);
+			cf_thread_create_detached(query_th, (void*)g_query_long_queue);
 		}
 		g_config.query_threads = i;
 	}

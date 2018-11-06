@@ -26,7 +26,6 @@
 
 #include "transaction/duplicate_resolve.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,6 +34,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_mutex.h"
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -314,12 +314,12 @@ dup_res_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	pthread_mutex_lock(&rw->lock);
+	cf_mutex_lock(&rw->lock);
 
 	if (rw->tid != tid || rw->dup_res_complete) {
 		// Extra ack - rw_request is newer transaction for same digest, or ack
 		// is arriving after rw_request was aborted or finished dup-res.
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -330,7 +330,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	if (i == -1) {
 		cf_warning(AS_RW, "dup-res ack: from non-dest node %lx", node);
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -338,7 +338,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	if (rw->dest_complete[i]) {
 		// Extra ack for this duplicate.
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -355,7 +355,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 	if (dup_res_should_retry_transaction(rw, result_code)) {
 		if (! rw->from.any) {
 			// Lost race against timeout in retransmit thread.
-			pthread_mutex_unlock(&rw->lock);
+			cf_mutex_unlock(&rw->lock);
 			rw_request_release(rw);
 			as_fabric_msg_put(m);
 			return;
@@ -373,7 +373,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 		rw->dup_res_complete = true;
 
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_hash_delete(&hkey, rw);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
@@ -410,7 +410,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 	for (uint32_t j = 0; j < rw->n_dest_nodes; j++) {
 		if (! rw->dest_complete[j]) {
 			// Still haven't heard from all duplicates.
-			pthread_mutex_unlock(&rw->lock);
+			cf_mutex_unlock(&rw->lock);
 			rw_request_release(rw);
 			return;
 		}
@@ -427,7 +427,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 	// winner - may save a future transaction from re-fetching the duplicates.
 	// Note - nsup deletes don't get here, so check using rw->from.any is ok.
 	if (! rw->from.any) {
-		pthread_mutex_unlock(&rw->lock);
+		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		return;
 	}
@@ -438,7 +438,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	rw->dup_res_complete = true;
 
-	pthread_mutex_unlock(&rw->lock);
+	cf_mutex_unlock(&rw->lock);
 
 	if (delete_from_hash) {
 		rw_request_hash_delete(&hkey, rw);

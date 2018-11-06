@@ -52,7 +52,6 @@
 #include "fabric/fabric.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -68,6 +67,7 @@
 #include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -319,7 +319,6 @@ static bool fabric_connect_endpoint_filter(const as_endpoint *endpoint, void *ud
 
 // Thread functions.
 static void *run_fabric_recv(void *arg);
-static void run_fabric_recv_cleanup(void *arg);
 static void *run_fabric_send(void *arg);
 static void *run_fabric_accept(void *arg);
 
@@ -440,12 +439,6 @@ as_fabric_init()
 void
 as_fabric_start()
 {
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
 	g_fabric.sends =
 			cf_malloc(sizeof(send_entry) * g_config.n_fabric_send_threads);
 	g_fabric.send_head = g_fabric.sends;
@@ -458,10 +451,7 @@ as_fabric_start()
 		g_fabric.sends[i].count = 0;
 		g_fabric.sends[i].next = g_fabric.sends + i + 1;
 
-		if (pthread_create(&thread, &attrs, run_fabric_send,
-				&g_fabric.sends[i]) != 0) {
-			cf_crash(AS_FABRIC, "could not create fabric send thread");
-		}
+		cf_thread_create_detached(run_fabric_send, (void*)&g_fabric.sends[i]);
 	}
 
 	g_fabric.sends[g_config.n_fabric_send_threads - 1].next = NULL;
@@ -475,11 +465,7 @@ as_fabric_start()
 
 	cf_info(AS_FABRIC, "starting fabric accept thread");
 
-	if (pthread_create(&thread, &attrs, run_fabric_accept, NULL) != 0) {
-		cf_crash(AS_FABRIC, "could not create fabric accept thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_fabric_accept, NULL);
 }
 
 void
@@ -2074,7 +2060,7 @@ static void
 fabric_recv_thread_pool_init(fabric_recv_thread_pool *pool, uint32_t size,
 		uint32_t pool_id)
 {
-	cf_vector_init(&pool->threads, sizeof(pthread_t), size, 0);
+	cf_vector_init(&pool->threads, sizeof(cf_tid), size, 0);
 	cf_poll_create(&pool->poll);
 	pool->pool_id = pool_id;
 }
@@ -2084,26 +2070,17 @@ static void
 fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size)
 {
 	while (size < cf_vector_size(&pool->threads)) {
-		pthread_t th;
-		cf_vector_pop(&pool->threads, &th);
-		pthread_cancel(th);
+		cf_tid tid;
+
+		cf_vector_pop(&pool->threads, &tid);
+		cf_thread_cancel(tid);
 	}
-
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
 
 	while (size > cf_vector_size(&pool->threads)) {
-		if (pthread_create(&thread, &attrs, run_fabric_recv, pool) != 0) {
-			cf_crash(AS_FABRIC, "could not create fabric recv thread");
-		}
+		cf_tid tid = cf_thread_create_detached(run_fabric_recv, (void*)pool);
 
-		cf_vector_append(&pool->threads, &thread);
+		cf_vector_append(&pool->threads, &tid);
 	}
-
-	pthread_attr_destroy(&attrs);
 }
 
 static void
@@ -2180,8 +2157,7 @@ fabric_connect_endpoint_filter(const as_endpoint *endpoint, void *udata)
 static void *
 run_fabric_recv(void *arg)
 {
-	int oldstate;
-	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldstate);
+	cf_thread_disable_cancel();
 
 	fabric_recv_thread_pool *pool = (fabric_recv_thread_pool *)arg;
 	static int worker_id_counter = 0;
@@ -2190,12 +2166,8 @@ run_fabric_recv(void *arg)
 
 	cf_detail(AS_FABRIC, "run_fabric_recv() created index %lu", worker_id);
 
-	pthread_cleanup_push(run_fabric_recv_cleanup, (void *)worker_id);
-
 	while (true) {
-		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
-		pthread_testcancel();
-		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldstate);
+		cf_thread_test_cancel();
 
 		cf_poll_event events[FABRIC_EPOLL_RECV_EVENTS];
 		int32_t n = cf_poll_wait(poll, events, FABRIC_EPOLL_RECV_EVENTS, -1);
@@ -2241,16 +2213,7 @@ run_fabric_recv(void *arg)
 		}
 	}
 
-	pthread_cleanup_pop(0);
 	return NULL;
-}
-
-static void
-run_fabric_recv_cleanup(void *arg)
-{
-	uint64_t worker_id = (uint64_t)arg;
-
-	cf_detail(AS_FABRIC, "run_fabric_recv() canceling index %lu", worker_id);
 }
 
 static void *
@@ -2636,17 +2599,7 @@ as_fabric_transact_init()
 			fabric_transact_xmit_destructor, sizeof(uint64_t), 64,
 			CF_RCHASH_MANY_LOCK);
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&thread, &attrs, run_fabric_transact, NULL) != 0) {
-		cf_crash(AS_FABRIC, "could not create fabric transact thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_fabric_transact, NULL);
 }
 
 void

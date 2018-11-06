@@ -28,7 +28,6 @@
 
 #include <malloc.h>
 #include <mcheck.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,6 +39,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "hist.h"
@@ -115,17 +115,7 @@ void dump_namespace_histograms(as_namespace* ns);
 void
 as_ticker_start()
 {
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	if (pthread_create(&thread, &attrs, run_ticker, NULL) != 0) {
-		cf_crash(AS_INFO, "failed to create ticker thread");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_ticker, NULL);
 }
 
 

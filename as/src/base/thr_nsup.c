@@ -24,7 +24,6 @@
  * namespace supervisor
  */
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,6 +39,8 @@
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "cf_mutex.h"
+#include "cf_thread.h"
 #include "fault.h"
 #include "hardware.h"
 #include "linear_hist.h"
@@ -297,11 +298,11 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 bool
 as_cold_start_evict_if_needed(as_namespace* ns)
 {
-	pthread_mutex_lock(&ns->cold_start_evict_lock);
+	cf_mutex_lock(&ns->cold_start_evict_lock);
 
 	// Only go further than here every thousand record add attempts.
 	if (ns->cold_start_record_add_count++ % EVAL_WRITE_STATE_FREQUENCY != 0) {
-		pthread_mutex_unlock(&ns->cold_start_evict_lock);
+		cf_mutex_unlock(&ns->cold_start_evict_lock);
 		return true;
 	}
 
@@ -315,20 +316,20 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	// Are we out of control?
 	if (eval_stop_writes(ns)) {
 		cf_warning(AS_NSUP, "{%s} hit stop-writes limit", ns->name);
-		pthread_mutex_unlock(&ns->cold_start_evict_lock);
+		cf_mutex_unlock(&ns->cold_start_evict_lock);
 		return false;
 	}
 
 	// If we don't need to evict, we're done.
 	if (! eval_hwm_breached(ns)) {
-		pthread_mutex_unlock(&ns->cold_start_evict_lock);
+		cf_mutex_unlock(&ns->cold_start_evict_lock);
 		return true;
 	}
 
 	// We want to evict, but are we allowed to do so?
 	if (ns->cold_start_eviction_disabled) {
 		cf_warning(AS_NSUP, "{%s} hwm breached but not allowed to evict", ns->name);
-		pthread_mutex_unlock(&ns->cold_start_evict_lock);
+		cf_mutex_unlock(&ns->cold_start_evict_lock);
 		return true;
 	}
 
@@ -358,7 +359,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 
 	// Split these tasks across multiple threads.
 	uint32_t n_cpus = cf_topo_count_cpus();
-	pthread_t evict_threads[n_cpus];
+	cf_tid tids[n_cpus];
 
 	// Reduce all partitions to build the eviction histogram.
 	evict_prep_thread_info prep_thread_infos[n_cpus];
@@ -371,13 +372,12 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 		prep_thread_infos[n].hist = linear_hist_create("thread-hist", LINEAR_HIST_SECONDS, now, ttl_range, n_buckets);
 		prep_thread_infos[n].sets_not_evicting = sets_not_evicting;
 
-		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_infos[n]) != 0) {
-			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %u", ns->name, n);
-		}
+		tids[n] = cf_thread_create_joinable(run_cold_start_evict_prep,
+				(void*)&prep_thread_infos[n]);
 	}
 
 	for (uint32_t n = 0; n < n_cpus; n++) {
-		pthread_join(evict_threads[n], NULL);
+		cf_thread_join(tids[n]);
 
 		if (n == 0) {
 			continue;
@@ -395,7 +395,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 
 	if (n_evictable == 0) {
 		cf_warning(AS_NSUP, "{%s} hwm breached but no records to evict", ns->name);
-		pthread_mutex_unlock(&ns->cold_start_evict_lock);
+		cf_mutex_unlock(&ns->cold_start_evict_lock);
 		return true;
 	}
 
@@ -412,19 +412,18 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	};
 
 	for (uint32_t n = 0; n < n_cpus; n++) {
-		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict, (void*)&thread_info) != 0) {
-			cf_crash(AS_NSUP, "{%s} failed to create evict thread %u", ns->name, n);
-		}
+		tids[n] = cf_thread_create_joinable(run_cold_start_evict,
+				(void*)&thread_info);
 	}
 
 	for (uint32_t n = 0; n < n_cpus; n++) {
-		pthread_join(evict_threads[n], NULL);
+		cf_thread_join(tids[n]);
 	}
 	// Now we're single-threaded again.
 
 	cf_info(AS_NSUP, "{%s} cold start evicted %u records, found %u 0-void-time records", ns->name, thread_info.total_evicted, thread_info.total_0_void_time);
 
-	pthread_mutex_unlock(&ns->cold_start_evict_lock);
+	cf_mutex_unlock(&ns->cold_start_evict_lock);
 	return true;
 }
 
@@ -1102,34 +1101,10 @@ as_nsup_start()
 
 	cf_info(AS_NSUP, "starting namespace supervisor threads");
 
-	pthread_t thread;
-	pthread_attr_t attrs;
-
-	pthread_attr_init(&attrs);
-	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-	// Start thread to handle all nsup-generated deletions.
-	if (0 != pthread_create(&thread, &attrs, run_nsup_delete, NULL)) {
-		cf_crash(AS_NSUP, "nsup delete thread create failed");
-	}
-
-	// Start namespace supervisor thread to do expiration & eviction.
-	if (0 != pthread_create(&thread, &attrs, run_nsup, NULL)) {
-		cf_crash(AS_NSUP, "nsup thread create failed");
-	}
-
-	// Start thread to do stop-writes evaluation.
-	if (0 != pthread_create(&thread, &attrs, run_stop_writes, NULL)) {
-		cf_crash(AS_NSUP, "nsup stop-writes thread create failed");
-	}
-
-	// Start thread to do size histograms. TODO - eventually consolidate with
-	// nsup when we expire/evict via SMD and include non-masters.
-	if (0 != pthread_create(&thread, &attrs, run_size_histograms, NULL)) {
-		cf_crash(AS_NSUP, "nsup size-histograms thread create failed");
-	}
-
-	pthread_attr_destroy(&attrs);
+	cf_thread_create_detached(run_nsup_delete, NULL);
+	cf_thread_create_detached(run_nsup, NULL);
+	cf_thread_create_detached(run_stop_writes, NULL);
+	cf_thread_create_detached(run_size_histograms, NULL);
 }
 
 
