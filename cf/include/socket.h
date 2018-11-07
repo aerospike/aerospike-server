@@ -31,6 +31,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
+#include "dns.h"
 #include "fault.h"
 #include "msg.h"
 #include "node.h"
@@ -172,11 +173,14 @@ typedef struct cf_mserv_cfg_s {
 	cf_msock_cfg cfgs[CF_SOCK_CFG_MAX];
 } cf_mserv_cfg;
 
+typedef void (*cf_ip_addr_from_string_cb)(bool is_resolved, const char* name, const cf_ip_addr *addrs, const uint32_t n_addrs, void *udata);
+
 void cf_socket_set_advertise_ipv6(bool advertise);
 bool cf_socket_advertises_ipv6(void);
 
 CF_MUST_CHECK int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 CF_MUST_CHECK int32_t cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs, uint32_t *n_addrs);
+void cf_ip_addr_from_string_multi_a(const char *string, cf_ip_addr_from_string_cb cb, void *udata);
 CF_MUST_CHECK int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 void cf_ip_addr_to_string_safe(const cf_ip_addr *addr, char *string, size_t size);
 CF_MUST_CHECK int32_t cf_ip_addr_to_string_multi(const cf_ip_addr *addrs, uint32_t n_addrs, char *string, size_t size);
@@ -339,4 +343,7 @@ CF_MUST_CHECK int32_t cf_socket_parse_netlink(bool allow_v6, uint32_t family, ui
 void cf_socket_fix_client(cf_socket *sock);
 void cf_socket_fix_bind(cf_serv_cfg *serv_cfg);
 void cf_socket_fix_server(cf_socket *sock);
+
+extern addrinfo g_cf_ip_addr_dns_hints;
+CF_MUST_CHECK int32_t cf_ip_addr_from_addrinfo(const char *name, const addrinfo *info, cf_ip_addr *addrs, uint32_t *n_addrs);
 #endif

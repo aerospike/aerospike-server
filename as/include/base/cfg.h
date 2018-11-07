@@ -66,9 +66,6 @@ struct as_namespace_s;
 
 #define AS_CLUSTER_NAME_SZ 65
 
-#define DNS_NAME_MAX_LEN 255
-#define DNS_NAME_MAX_SIZE (DNS_NAME_MAX_LEN + 1)
-
 #define MAX_DEMARSHAL_THREADS 256
 #define MAX_BATCH_THREADS 256
 #define MAX_TLS_SPECS 10

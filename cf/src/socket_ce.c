@@ -1,7 +1,7 @@
 /*
  * socket_ce.c
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -35,9 +35,12 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "dns.h"
 #include "fault.h"
 
 #include "citrusleaf/alloc.h"
+
+addrinfo g_cf_ip_addr_dns_hints = { .ai_flags = 0, .ai_family = AF_INET };
 
 static char *
 safe_strndup(const char *string, size_t length)
@@ -64,78 +67,17 @@ cf_socket_advertises_ipv6(void)
 }
 
 int32_t
-cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs, uint32_t *n_addrs)
+cf_ip_addr_from_addrinfo(const char *name, const addrinfo *info,
+		cf_ip_addr *addrs, uint32_t *n_addrs)
 {
-	if (strcmp(string, "any") == 0) {
-		if (*n_addrs < 1) {
-			cf_warning(CF_SOCKET, "Too many IP addresses");
-			return -1;
-		}
-
-		cf_ip_addr_set_any(&addrs[0]);
-		*n_addrs = 1;
-		return 0;
-	}
-
-	if (strcmp(string, "local") == 0) {
-		if (*n_addrs < 1) {
-			cf_warning(CF_SOCKET, "Too many IP addresses");
-			return -1;
-		}
-
-		cf_ip_addr_set_local(&addrs[0]);
-		*n_addrs = 1;
-		return 0;
-	}
-
-	if (cf_inter_is_inter_name(string)) {
-		cf_ip_addr if_addrs[CF_SOCK_CFG_MAX];
-		uint32_t n_if_addrs = CF_SOCK_CFG_MAX;
-
-		if (cf_inter_get_addr_name(if_addrs, &n_if_addrs, string) < 0) {
-			cf_warning(CF_SOCKET, "Error while getting interface addresses for '%s'", string);
-			return -1;
-		}
-
-		if (n_if_addrs == 0) {
-			cf_warning(CF_SOCKET, "Interface %s does not have any IP addresses", string);
-			return -1;
-		}
-
-		if (n_if_addrs > *n_addrs) {
-			cf_warning(CF_SOCKET, "Too many IP addresses");
-			return -1;
-		}
-
-		for (uint32_t i = 0; i < n_if_addrs; ++i) {
-			cf_ip_addr_copy(&if_addrs[i], &addrs[i]);
-		}
-
-		*n_addrs = n_if_addrs;
-		return 0;
-	}
-
-	int32_t res = -1;
-	struct addrinfo *info = NULL;
-	static struct addrinfo hints = {
-		.ai_flags = 0,
-		.ai_family = AF_INET
-	};
-
-	int32_t x = getaddrinfo(string, NULL, &hints, &info);
-
-	if (x != 0) {
-		cf_warning(CF_SOCKET, "Error while converting address '%s': %s", string, gai_strerror(x));
-		goto cleanup0;
-	}
-
 	uint32_t i = 0;
 
-	for (struct addrinfo *walker = info; walker != NULL; walker = walker->ai_next) {
+	for (const addrinfo *walker = info; walker != NULL;
+			walker = walker->ai_next) {
 		if (walker->ai_socktype == SOCK_STREAM) {
 			if (i >= *n_addrs) {
-				cf_warning(CF_SOCKET, "Too many IP addresses");
-				goto cleanup1;
+				cf_warning(CF_SOCKET, "Too many IP addresses for '%s'", name);
+				return -1;
 			}
 
 			struct sockaddr_in *sai = (struct sockaddr_in *)walker->ai_addr;
@@ -144,15 +86,14 @@ cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs, uint32_t *n_
 		}
 	}
 
+	if (i == 0) {
+		cf_warning(CF_SOCKET, "No valid addresses for '%s'", name);
+		return -1;
+	}
+
 	cf_ip_addr_sort(addrs, i);
 	*n_addrs = i;
-	res = 0;
-
-cleanup1:
-	freeaddrinfo(info);
-
-cleanup0:
-	return res;
+	return 0;
 }
 
 bool

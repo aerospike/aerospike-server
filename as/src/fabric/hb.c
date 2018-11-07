@@ -38,6 +38,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_thread.h"
+#include "dns.h"
 #include "fault.h"
 #include "node.h"
 #include "shash.h"
@@ -1383,6 +1384,16 @@ typedef struct as_hb_mesh_tip_clear_udata_s
 	int port;
 
 	/**
+	 * Number of IP addresses to match.
+	 */
+	uint32_t n_addrs;
+
+	/**
+	 * IP addresses to match.
+ 	*/
+	cf_ip_addr* addrs;
+
+	/**
 	 * Node id if a specific node-id needs to be removed as well.
 	 */
 	cf_node nodeid;
@@ -2307,11 +2318,21 @@ as_hb_mesh_tip_clear(char* host, int port)
 	// We should not be required to use this mechanism now.
 	// tip-clear should only be used to cleanup seed list after decommisioning
 	// an ip.
+	cf_ip_addr addrs[CF_SOCK_CFG_MAX];
+	uint32_t n_addrs = CF_SOCK_CFG_MAX;
+
 	as_hb_mesh_tip_clear_udata mesh_tip_clear_reduce_udata;
 	strcpy(mesh_tip_clear_reduce_udata.host, host);
 	mesh_tip_clear_reduce_udata.port = port;
 	mesh_tip_clear_reduce_udata.entry_deleted = false;
 	mesh_tip_clear_reduce_udata.nodeid = 0;
+
+	if (cf_ip_addr_from_string_multi(host, addrs, &n_addrs) != 0) {
+		n_addrs = 0;
+	}
+
+	mesh_tip_clear_reduce_udata.addrs = addrs;
+	mesh_tip_clear_reduce_udata.n_addrs = n_addrs;
 
 	int seed_index = mesh_seed_find_unsafe(host, port);
 	if (seed_index >= 0) {
@@ -5579,6 +5600,48 @@ mesh_seed_destroy(as_hb_mesh_seed* seed)
 	MESH_UNLOCK();
 }
 
+static void
+mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname,
+		const cf_ip_addr *addrs, uint32_t n_addrs, void *udata)
+{
+	MESH_LOCK();
+	cf_vector* seeds = &g_hb.mode_state.mesh_state.seeds;
+	int element_count = cf_vector_size(seeds);
+	for (int i = 0; i < element_count; i++) {
+		as_hb_mesh_seed* seed = cf_vector_getp(seeds, i);
+
+		if ((strncmp(seed->seed_host_name, hostname,
+				sizeof(seed->seed_host_name)) != 0)
+				|| seed->resolved_endpoint_list != NULL) {
+			continue;
+		}
+
+		cf_serv_cfg temp_serv_cfg;
+		cf_serv_cfg_init(&temp_serv_cfg);
+
+		cf_sock_cfg sock_cfg;
+		cf_sock_cfg_init(&sock_cfg,
+				seed->seed_tls ?
+						CF_SOCK_OWNER_HEARTBEAT_TLS : CF_SOCK_OWNER_HEARTBEAT);
+		sock_cfg.port = seed->seed_port;
+
+		for (int i = 0; i < n_addrs; i++) {
+			cf_ip_addr_copy(&addrs[i], &sock_cfg.addr);
+			if (cf_serv_cfg_add_sock_cfg(&temp_serv_cfg, &sock_cfg)) {
+				CRASH("error initializing resolved address list");
+			}
+
+			DETAIL("resolved mesh node hostname %s to %s", seed->seed_host_name,
+					cf_ip_addr_print(&addrs[i]));
+		}
+
+		seed->resolved_endpoint_list = as_endpoint_list_from_serv_cfg(
+				&temp_serv_cfg);
+	}
+
+	MESH_UNLOCK();
+}
+
 /**
  * Fill the endpoint list for a mesh seed using the mesh seed hostname and port.
  * returns the
@@ -5604,43 +5667,11 @@ mesh_seed_endpoint_list_fill(as_hb_mesh_seed* seed)
 		return -1;
 	}
 
-	uint32_t n_resolved_addresses = CF_SOCK_CFG_MAX;
-	cf_ip_addr resolved_addresses[n_resolved_addresses];
-
-	// Resolve and get all IPv4/IPv6 ip addresses.
+	// Resolve and get all IPv4/IPv6 ip addresses asynchronously.
 	seed->resolved_endpoint_list_ts = now;
-	if (cf_ip_addr_from_string_multi(seed->seed_host_name, resolved_addresses,
-			&n_resolved_addresses) != 0 || n_resolved_addresses == 0) {
-		TICKER_WARNING("failed resolving mesh seed hostname %s",
-				seed->seed_host_name);
-
-		// Hostname resolution failed.
-		return -1;
-	}
-
-	// Convert resolved addresses to an endpoint list.
-	cf_serv_cfg temp_serv_cfg;
-	cf_serv_cfg_init(&temp_serv_cfg);
-
-	cf_sock_cfg sock_cfg;
-	cf_sock_cfg_init(&sock_cfg,
-			seed->seed_tls ?
-					CF_SOCK_OWNER_HEARTBEAT_TLS : CF_SOCK_OWNER_HEARTBEAT);
-	sock_cfg.port = seed->seed_port;
-
-	for (int i = 0; i < n_resolved_addresses; i++) {
-		cf_ip_addr_copy(&resolved_addresses[i], &sock_cfg.addr);
-		if (cf_serv_cfg_add_sock_cfg(&temp_serv_cfg, &sock_cfg)) {
-			CRASH("error initializing resolved address list");
-		}
-
-		DETAIL("resolved mesh node hostname %s to %s", seed->seed_host_name,
-				cf_ip_addr_print(&resolved_addresses[i]));
-	}
-
-	seed->resolved_endpoint_list = as_endpoint_list_from_serv_cfg(
-			&temp_serv_cfg);
-	return seed->resolved_endpoint_list != NULL ? 0 : -1;
+	cf_ip_addr_from_string_multi_a(seed->seed_host_name,
+			mesh_seed_dns_resolve_cb, NULL);
+	return -1;
 }
 
 /**
@@ -6875,31 +6906,25 @@ mesh_tip_clear_reduce(const void* key, void* data, void* udata)
 
 	// See if the address matches any one of the endpoints in the node's
 	// endpoint list.
-	cf_ip_addr addrs[CF_SOCK_CFG_MAX];
-	uint32_t n_addrs = CF_SOCK_CFG_MAX;
+	for (int i = 0; i < tip_clear_udata->n_addrs; i++) {
+		cf_sock_addr sock_addr;
+		cf_ip_addr_copy(&tip_clear_udata->addrs[i], &sock_addr.addr);
+		sock_addr.port = tip_clear_udata->port;
+		as_hb_endpoint_list_addr_find_udata udata;
+		udata.found = false;
+		udata.to_search = &sock_addr;
 
-	if (cf_ip_addr_from_string_multi(tip_clear_udata->host, addrs, &n_addrs)
-			== 0) {
-		for (int i = 0; i < n_addrs; i++) {
-			cf_sock_addr sock_addr;
-			cf_ip_addr_copy(&addrs[i], &sock_addr.addr);
-			sock_addr.port = tip_clear_udata->port;
-			as_hb_endpoint_list_addr_find_udata udata;
-			udata.found = false;
-			udata.to_search = &sock_addr;
+		as_endpoint_list_iterate(mesh_node->endpoint_list,
+				mesh_endpoint_addr_find_iterate, &udata);
 
-			as_endpoint_list_iterate(mesh_node->endpoint_list,
-					mesh_endpoint_addr_find_iterate, &udata);
-
-			if (udata.found) {
-				rv = CF_SHASH_REDUCE_DELETE;
-				goto Exit;
-			}
+		if (udata.found) {
+			rv = CF_SHASH_REDUCE_DELETE;
+			goto Exit;
 		}
-
-		// Not found by endpoint.
-		rv = CF_SHASH_OK;
 	}
+
+	// Not found by endpoint.
+	rv = CF_SHASH_OK;
 
 Exit:
 	if (rv == CF_SHASH_REDUCE_DELETE) {

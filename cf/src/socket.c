@@ -46,11 +46,17 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "dns.h"
 #include "fault.h"
 #include "tls.h"
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
+
+typedef struct dns_resolve_udata_s {
+	cf_ip_addr_from_string_cb cb;
+	void *udata;
+} dns_resolve_udata;
 
 void
 cf_ip_addr_to_string_safe(const cf_ip_addr *addr, char *string, size_t size)
@@ -101,6 +107,145 @@ cf_ip_addr_to_string_multi_safe(const cf_ip_addr *addrs, uint32_t n_addrs, char 
 	if (cf_ip_addr_to_string_multi(addrs, n_addrs, string, size) < 0) {
 		cf_crash(CF_SOCKET, "String buffer overflow");
 	}
+}
+
+static void
+dns_resolve_cb(const int status, const char *name, addrinfo *addrs, void *udata)
+{
+	dns_resolve_udata *wrapped = (dns_resolve_udata*)udata;
+
+	if (status != 0) {
+		cf_ticker_warning(CF_SOCKET, "Error while converting address '%s': %s",
+				name, cf_dns_strerror(status));
+		wrapped->cb(false, name, NULL, 0, wrapped->udata);
+		cf_free(udata);
+		return;
+	}
+
+	uint32_t n_addrs = CF_SOCK_CFG_MAX;
+	cf_ip_addr ip_addrs[CF_SOCK_CFG_MAX];
+
+	int32_t res = cf_ip_addr_from_addrinfo(name, addrs, ip_addrs, &n_addrs);
+	cf_dns_free(addrs);
+
+	if (res < 0) {
+		wrapped->cb(false, name, NULL, 0, wrapped->udata);
+		cf_free(udata);
+		return;
+	}
+
+	wrapped->cb(true, name, ip_addrs, n_addrs, wrapped->udata);
+	cf_free(udata);
+}
+
+static int32_t
+ip_addr_from_string_multi_local(const char *string, cf_ip_addr *addrs,
+		uint32_t *n_addrs)
+{
+	if (strcmp(string, "any") == 0) {
+		if (*n_addrs < 1) {
+			cf_warning(CF_SOCKET, "Too many IP addresses");
+			return -1;
+		}
+
+		cf_ip_addr_set_any(&addrs[0]);
+		*n_addrs = 1;
+		return 0;
+	}
+
+	if (strcmp(string, "local") == 0) {
+		if (*n_addrs < 1) {
+			cf_warning(CF_SOCKET, "Too many IP addresses");
+			return -1;
+		}
+
+		cf_ip_addr_set_local(&addrs[0]);
+		*n_addrs = 1;
+		return 0;
+	}
+
+	if (cf_inter_is_inter_name(string)) {
+		cf_ip_addr if_addrs[CF_SOCK_CFG_MAX];
+		uint32_t n_if_addrs = CF_SOCK_CFG_MAX;
+
+		if (cf_inter_get_addr_name(if_addrs, &n_if_addrs, string) < 0) {
+			cf_warning(CF_SOCKET,
+					"Error while getting interface addresses for '%s'", string);
+			return -1;
+		}
+
+		if (n_if_addrs == 0) {
+			cf_warning(CF_SOCKET, "Interface %s does not have any IP addresses",
+					string);
+			return -1;
+		}
+
+		if (n_if_addrs > *n_addrs) {
+			cf_warning(CF_SOCKET, "Too many IP addresses");
+			return -1;
+		}
+
+		for (uint32_t i = 0; i < n_if_addrs; ++i) {
+			cf_ip_addr_copy(&if_addrs[i], &addrs[i]);
+		}
+
+		*n_addrs = n_if_addrs;
+		return 0;
+	}
+
+	// Return of 1 indicates the input hostname is not a local interface and
+	// needs to be resolved using dns.
+	return 1;
+}
+
+int32_t
+cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs,
+		uint32_t *n_addrs)
+{
+	int32_t res = ip_addr_from_string_multi_local(string, addrs, n_addrs);
+
+	if (res <= 0) {
+		return res;
+	}
+
+	addrinfo *info = NULL;
+	res = cf_dns_resolve(string, &g_cf_ip_addr_dns_hints, &info);
+
+	if (res != 0) {
+		cf_warning(CF_SOCKET, "Error while converting address '%s': %s", string,
+				cf_dns_strerror(res));
+		return -1;
+	}
+
+	res = cf_ip_addr_from_addrinfo(string, info, addrs, n_addrs);
+
+	cf_dns_free(info);
+	return res;
+}
+
+void
+cf_ip_addr_from_string_multi_a(const char *string, cf_ip_addr_from_string_cb cb,
+		void *udata)
+{
+	uint32_t n_addrs = CF_SOCK_CFG_MAX;
+	cf_ip_addr ip_addrs[n_addrs];
+
+	int32_t res = ip_addr_from_string_multi_local(string, ip_addrs, &n_addrs);
+
+	if (res < 0) {
+		cb(false, string, NULL, 0, udata);
+		return;
+	}
+
+	if (res == 0) {
+		cb(true, string, ip_addrs, n_addrs, udata);
+		return;
+	}
+
+	dns_resolve_udata *wrapped = cf_malloc(sizeof(dns_resolve_udata));
+	wrapped->cb = cb;
+	wrapped->udata = udata;
+	cf_dns_resolve_a(string, &g_cf_ip_addr_dns_hints, dns_resolve_cb, wrapped);
 }
 
 int32_t
@@ -904,7 +1049,7 @@ cf_socket_available(cf_socket *sock)
 	safe_ioctl(sock->fd, FIONREAD, &size);
 
 	size += tls_socket_pending(sock);
-	
+
 	return size;
 }
 
@@ -1546,14 +1691,14 @@ void
 cf_poll_add_fd(cf_poll poll, int32_t fd, uint32_t events, void *data)
 {
 	cf_debug(CF_SOCKET,
-			 "Adding FD %d to epoll instance with FD %d, events = 0x%x",
-			 fd, poll.fd, events);
+			"Adding FD %d to epoll instance with FD %d, events = 0x%x",
+			fd, poll.fd, events);
 	struct epoll_event ev = { .events = events, .data.ptr = data };
 
 	if (epoll_ctl(poll.fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
 		cf_crash(CF_SOCKET,
-				 "Error while adding FD %d to epoll instance %d: %d (%s)",
-				 fd, poll.fd, errno, cf_strerror(errno));
+				"Error while adding FD %d to epoll instance %d: %d (%s)",
+				fd, poll.fd, errno, cf_strerror(errno));
 	}
 }
 
