@@ -183,18 +183,6 @@ info_get_aggregated_namespace_stats(cf_dyn_buf *db)
 	info_append_uint64(db, "tombstones", total_tombstones);
 }
 
-// #define INFO_SEGV_TEST 1
-#ifdef INFO_SEGV_TEST
-char *segv_test = "segv test";
-int
-info_segv_test(char *name, cf_dyn_buf *db)
-{
-	*segv_test = 'E';
-	cf_dyn_buf_append_string(db, "segv");
-	return(0);
-}
-#endif
-
 // TODO: This function should move elsewhere.
 void
 sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
@@ -6153,7 +6141,8 @@ as_info_init()
 	as_hb_info_listen_addr_get(&hb_mode, istr, sizeof(istr));
 	as_info_set(hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
-	// All commands accepted by asinfo/telnet
+	// Commands expected via asinfo/telnet. If it's not in this list, it's a
+	// "client-only" command, e.g. for cluster management.
 	as_info_set("help",
 			"bins;build;build_os;build_time;"
 			"cluster-name;config-get;config-set;"
@@ -6217,10 +6206,6 @@ as_info_init()
 	as_info_set_dynamic("services-alumni-reset", as_service_list_dynamic, false);     // Reset the services alumni to equal services.
 	as_info_set_dynamic("sets", info_get_sets, false);                                // Returns set statistics for all or a particular set.
 	as_info_set_dynamic("statistics", info_get_stats, true);                          // Returns system health and usage stats for this server.
-
-#ifdef INFO_SEGV_TEST
-	as_info_set_dynamic("segvtest", info_segv_test, true);
-#endif
 
 	// Tree-based names
 	as_info_set_tree("bins", info_get_tree_bins);           // Returns bin usage information and used bin names for all or a particular namespace.
