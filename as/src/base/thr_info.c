@@ -606,15 +606,6 @@ info_get_rebalance_generation(char *name, cf_dyn_buf *db)
 	return 0;
 }
 
-// Deprecate in "six months".
-int
-info_get_replicas_prole(char *name, cf_dyn_buf *db)
-{
-	as_partition_get_replicas_prole_str(db);
-
-	return(0);
-}
-
 int
 info_get_replicas_master(char *name, cf_dyn_buf *db)
 {
@@ -5076,7 +5067,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_bool(db, "pending_quiesce", ns->pending_quiesce);
 	info_append_bool(db, "effective_is_quiesced", ns->is_quiesced);
-	info_append_uint64(db, "n_nodes_quiesced", ns->cluster_size - ns->active_size);
+	info_append_uint64(db, "nodes_quiesced", ns->cluster_size - ns->active_size);
 
 	info_append_bool(db, "effective_prefer_uniform_balance", ns->prefer_uniform_balance);
 
@@ -6143,34 +6134,48 @@ as_info_init()
 	cf_str_itoa_u64(g_config.self_node, istr, 16);
 	as_info_set("node", istr, true);                     // Node ID. Unique 15 character hex string for each node based on the mac address and port.
 	as_info_set("name", istr, false);                    // Alias to 'node'.
+
 	// Returns list of features supported by this server
 	static char features[1024];
-	strcat(features, "batch-index;cdt-list;cdt-map;cluster-stable;float;geo;lut-now;peers;pipelining;replicas;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features,
+			"batch-index;"
+			"cdt-list;cdt-map;cluster-stable;"
+			"float;"
+			"geo;"
+			"lut-now;"
+			"peers;pipelining;"
+			"replicas;replicas-all;replicas-master;"
+			"udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
+
 	as_hb_mode hb_mode;
 	as_hb_info_listen_addr_get(&hb_mode, istr, sizeof(istr));
-	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
+	as_info_set(hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "bins;build;build_os;build_time;cluster-name;config-get;config-set;"
-				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
-				"dump-si;dump-skew;dump-smd;dump-wb-summary;feature-key;get-config;get-sl;"
-				"health-outliers;health-stats;hist-track-start;hist-track-stop;histogram;jem-stats;jobs;latency;log;log-set;"
-				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;physical-devices;"
-				"protect-roster-set;quiesce;quiesce-undo;racks;recluster;revive;roster;roster-set;"
-				"service;services;services-alumni;services-alumni-reset;set-config;"
-				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
-				"sindex-histogram;"
-				"smd;statistics;status;tip;tip-clear;truncate;truncate-undo;version;",
-				false);
-	/*
-	 * help intentionally does not include the following:
-	 * cluster-stable;features;objects;
-	 * partition-generation;partition-info;partitions;
-	 * rack-ids;rebalance-generation;replicas-master;
-	 * replicas-prole;replicas-read;replicas-write;throughput
-	 */
+	as_info_set("help",
+			"bins;build;build_os;build_time;"
+			"cluster-name;config-get;config-set;"
+			"digests;dump-cluster;dump-fabric;dump-hb;dump-hlc;dump-migrates;"
+			"dump-msgs;dump-rw;dump-si;dump-skew;dump-smd;dump-wb-summary;"
+			"feature-key;"
+			"get-config;get-sl;"
+			"health-outliers;health-stats;hist-track-start;hist-track-stop;"
+			"histogram;"
+			"jem-stats;jobs;"
+			"latency;log;log-set;log-message;logs;"
+			"mcast;mesh;"
+			"name;namespace;namespaces;node;"
+			"physical-devices;protect-roster-set;"
+			"quiesce;quiesce-undo;"
+			"racks;recluster;revive;roster;roster-set;"
+			"service;services;services-alumni;services-alumni-reset;set-config;"
+			"set-log;sets;show-devices;sindex;sindex-create;"
+			"sindex-delete;sindex-histogram;statistics;status;"
+			"tip;tip-clear;truncate;truncate-undo;"
+			"version;",
+			false);
 
 	// Set up some dynamic functions
 	as_info_set_dynamic("alumni-clear-std", as_service_list_dynamic, false);          // Supersedes "services-alumni" for non-TLS service.
@@ -6197,7 +6202,6 @@ as_info_init()
 	as_info_set_dynamic("replicas", info_get_replicas, false);                        // Same as replicas-all, but includes regime.
 	as_info_set_dynamic("replicas-all", info_get_replicas_all, false);                // Base 64 encoded binary representation of partitions this node is replica for.
 	as_info_set_dynamic("replicas-master", info_get_replicas_master, false);          // Base 64 encoded binary representation of partitions this node is master (replica) for.
-	as_info_set_dynamic("replicas-prole", info_get_replicas_prole, false);            // Base 64 encoded binary representation of partitions this node is prole (replica) for.
 	as_info_set_dynamic("service", as_service_list_dynamic, false);                   // IP address and server port for this node, expected to be a single.
 	                                                                                  // address/port per node, may be multiple address if this node is configured.
 	                                                                                  // to listen on multiple interfaces (typically not advised).
