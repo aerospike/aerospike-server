@@ -75,7 +75,7 @@ typedef struct xdr_config_s {
 
 	bool		xdr_section_configured;
 	bool		xdr_global_enabled;
-	bool		xdr_enable_http;
+	bool		xdr_enable_change_notification;
 
 	// Ring buffer configuration
 	char		*xdr_digestlog_path;

@@ -40,7 +40,7 @@ xdr_config_defaults()
 
 	c->xdr_section_configured = false;	// Indicates if XDR is configured or not
 	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
-	c->xdr_enable_http = false;			// Static config which spawn http machinery and also checks feature key
+	c->xdr_enable_change_notification = false;	// Static config which spawns http machinery and also checks feature key
 	c->xdr_digestlog_path = NULL;		// Path where the digest information is written to the disk
 	c->xdr_info_port = 0;
 	c->xdr_max_ship_throughput = 0;		// XDR TPS limit
