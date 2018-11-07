@@ -192,7 +192,6 @@ uint32_t as_partition_get_other_replicas(as_partition* p, cf_node* nv);
 cf_node as_partition_writable_node(struct as_namespace_s* ns, uint32_t pid);
 cf_node as_partition_proxyee_redirect(struct as_namespace_s* ns, uint32_t pid);
 
-void as_partition_get_replicas_prole_str(cf_dyn_buf* db); // deprecate in "six months"
 void as_partition_get_replicas_master_str(cf_dyn_buf* db);
 void as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime);
 

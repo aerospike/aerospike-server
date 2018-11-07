@@ -53,7 +53,6 @@
 cf_node find_best_node(const as_partition* p, bool is_read);
 void accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects, uint64_t* p_n_tombstones);
 void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
-cf_node partition_getreplica_prole(as_namespace* ns, uint32_t pid);
 char partition_descriptor(const as_partition* p);
 int partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid);
 
@@ -189,38 +188,6 @@ as_partition_proxyee_redirect(as_namespace* ns, uint32_t pid)
 	cf_mutex_unlock(&p->lock);
 
 	return node;
-}
-
-// TODO - deprecate in "six months".
-void
-as_partition_get_replicas_prole_str(cf_dyn_buf* db)
-{
-	uint8_t prole_bitmap[CLIENT_BITMAP_BYTES];
-	char b64_bitmap[CLIENT_B64MAP_BYTES];
-
-	size_t db_sz = db->used_sz;
-
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace* ns = g_config.namespaces[ns_ix];
-
-		memset(prole_bitmap, 0, sizeof(uint8_t) * CLIENT_BITMAP_BYTES);
-		cf_dyn_buf_append_string(db, ns->name);
-		cf_dyn_buf_append_char(db, ':');
-
-		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-			if (g_config.self_node == partition_getreplica_prole(ns, pid) ) {
-				prole_bitmap[pid >> 3] |= (0x80 >> (pid & 7));
-			}
-		}
-
-		cf_b64_encode(prole_bitmap, CLIENT_BITMAP_BYTES, b64_bitmap);
-		cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmap, CLIENT_B64MAP_BYTES);
-		cf_dyn_buf_append_char(db, ';');
-	}
-
-	if (db_sz != db->used_sz) {
-		cf_dyn_buf_chomp(db);
-	}
 }
 
 void
@@ -754,31 +721,6 @@ partition_reserve_lockfree(as_partition* p, as_namespace* ns,
 	if (rsv->n_dupl != 0) {
 		memcpy(rsv->dupl_nodes, p->dupls, sizeof(cf_node) * rsv->n_dupl);
 	}
-}
-
-// TODO - deprecate in "six months".
-cf_node
-partition_getreplica_prole(as_namespace* ns, uint32_t pid)
-{
-	as_partition* p = &ns->partitions[pid];
-
-	cf_mutex_lock(&p->lock);
-
-	// Check is this is a master node.
-	cf_node best_node = find_best_node(p, false);
-
-	if (best_node == g_config.self_node) {
-		// It's a master, return 0.
-		best_node = (cf_node)0;
-	}
-	else {
-		// Not a master, see if it's a prole.
-		best_node = find_best_node(p, true);
-	}
-
-	cf_mutex_unlock(&p->lock);
-
-	return best_node;
 }
 
 char
