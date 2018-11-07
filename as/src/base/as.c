@@ -38,6 +38,7 @@
 
 #include "cf_thread.h"
 #include "daemon.h"
+#include "dns.h"
 #include "fault.h"
 #include "hardware.h"
 #include "tls.h"
@@ -383,7 +384,8 @@ main(int argc, char **argv)
 
 	cf_info(AS_AS, "initializing services...");
 
-	as_netio_init();
+	cf_dns_init();				// DNS resolver
+	as_netio_init();			// query responses
 	as_security_init();			// security features
 	as_tsvc_init();				// all transaction handling
 	as_hb_init();				// inter-node heartbeat

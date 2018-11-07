@@ -44,6 +44,7 @@
 #include "cf_mutex.h"
 #include "cf_str.h"
 #include "cf_thread.h"
+#include "dns.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "shash.h"
