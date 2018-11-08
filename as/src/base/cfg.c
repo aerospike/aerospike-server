@@ -742,7 +742,7 @@ typedef enum {
 	// XDR options:
 	// Normally visible, in canonical configuration file order:
 	CASE_XDR_ENABLE_XDR,
-	CASE_XDR_ENABLE_XDR_HTTP,
+	CASE_XDR_ENABLE_CHANGE_NOTIFICATION,
 	CASE_XDR_DIGESTLOG_PATH,
 	CASE_XDR_DATACENTER_BEGIN,
 	// Normally hidden:
@@ -1321,7 +1321,7 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 const cfg_opt XDR_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
 		{ "enable-xdr",						CASE_XDR_ENABLE_XDR },
-		{ "enable-xdr-http",				CASE_XDR_ENABLE_XDR_HTTP },
+		{ "enable-change-notification",		CASE_XDR_ENABLE_CHANGE_NOTIFICATION },
 		{ "xdr-digestlog-path",				CASE_XDR_DIGESTLOG_PATH },
 		{ "datacenter",						CASE_XDR_DATACENTER_BEGIN },
 		{ "xdr-client-threads",				CASE_XDR_CLIENT_THREADS },
@@ -3782,8 +3782,8 @@ as_config_init(const char* config_file)
 			case CASE_XDR_ENABLE_XDR:
 				g_xcfg.xdr_global_enabled = cfg_bool(&line);
 				break;
-			case CASE_XDR_ENABLE_XDR_HTTP:
-				g_xcfg.xdr_enable_http = cfg_bool(&line);
+			case CASE_XDR_ENABLE_CHANGE_NOTIFICATION:
+				g_xcfg.xdr_enable_change_notification = cfg_bool(&line);
 				break;
 			case CASE_XDR_DIGESTLOG_PATH:
 				g_xcfg.xdr_digestlog_path = cfg_strdup(&line, true);
