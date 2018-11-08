@@ -32,8 +32,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <time.h>
 #include <sys/param.h>
+#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -129,15 +129,13 @@ run_ticker(void* arg)
 	uint64_t last_time = cf_getns();
 
 	while (true) {
-		// Wake up every 1 second to check the ticker interval.
-		struct timespec delay = { 1, 0 };
-		nanosleep(&delay, NULL);
+		sleep(1); // wake up every second to check
 
 		uint64_t curr_time = cf_getns();
 		uint64_t delta_time = curr_time - last_time;
 
 		if (delta_time < (uint64_t)g_config.ticker_interval * 1000000000) {
-			continue; // period has not been reached for showing a frame
+			continue;
 		}
 
 		last_time = curr_time;

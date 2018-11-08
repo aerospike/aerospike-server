@@ -649,7 +649,7 @@ run_reaper(void* udata)
 {
 	(void)udata;
 
-	uint64_t last_security_refresh = cf_getns() / 1000000000;
+	uint64_t last_security_refresh = cf_get_seconds();
 
 	while (true) {
 		sleep(1);
