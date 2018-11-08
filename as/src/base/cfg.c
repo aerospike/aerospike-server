@@ -60,7 +60,7 @@
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/security_config.h"
-#include "base/thr_demarshal.h"
+#include "base/service.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
 #include "base/thr_query.h"
@@ -2302,7 +2302,7 @@ as_config_init(const char* config_file)
 				cfg_renamed_name_tok(&line, "proto-fd-max");
 				// No break.
 			case CASE_SERVICE_PROTO_FD_MAX:
-				c->n_proto_fd_max = cfg_int_no_checks(&line);
+				c->n_proto_fd_max = cfg_u32(&line, MIN_PROTO_FD_MAX, UINT32_MAX);
 				break;
 			case CASE_SERVICE_ADVERTISE_IPV6:
 				cf_socket_set_advertise_ipv6(cfg_bool(&line));
@@ -2468,7 +2468,7 @@ as_config_init(const char* config_file)
 				c->scan_threads = cfg_u32(&line, 0, 128);
 				break;
 			case CASE_SERVICE_SERVICE_THREADS:
-				c->n_service_threads = cfg_u32(&line, 1, MAX_DEMARSHAL_THREADS);
+				c->n_service_threads = cfg_u32(&line, 1, MAX_SERVICE_THREADS);
 				break;
 			case CASE_SERVICE_SINDEX_BUILDER_THREADS:
 				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
@@ -3983,11 +3983,11 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	getrlimit(RLIMIT_NOFILE, &fd_limit);
 
-	if (c->n_proto_fd_max < 0 || (rlim_t)c->n_proto_fd_max > fd_limit.rlim_cur) {
-		cf_crash_nostack(AS_CFG, "%lu system file descriptors not enough, config specified %d", fd_limit.rlim_cur, c->n_proto_fd_max);
+	if ((rlim_t)c->n_proto_fd_max > fd_limit.rlim_cur) {
+		cf_crash_nostack(AS_CFG, "%lu system file descriptors not enough, config specified %u", fd_limit.rlim_cur, c->n_proto_fd_max);
 	}
 
-	cf_info(AS_CFG, "system file descriptor limit: %lu, proto-fd-max: %d", fd_limit.rlim_cur, c->n_proto_fd_max);
+	cf_info(AS_CFG, "system file descriptor limit: %lu, proto-fd-max: %u", fd_limit.rlim_cur, c->n_proto_fd_max);
 
 	// Output NUMA topology information.
 	cf_topo_info();

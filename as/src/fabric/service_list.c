@@ -49,7 +49,7 @@
 #include "socket.h"
 
 #include "base/security.h"
-#include "base/thr_demarshal.h"
+#include "base/service.h"
 #include "base/thr_info.h"
 
 #include "citrusleaf/alloc.h"
@@ -246,8 +246,8 @@ static void wake_up(void);
 
 // Local node information.
 
-static char *print_list(const as_info_endpoint *endp, uint32_t limit, char sep,
-		bool legacy);
+static char *print_list(const as_service_endpoint *endp, uint32_t limit,
+		char sep, bool legacy);
 static void enum_addrs(cf_addr_list *addrs);
 static void free_addrs(cf_addr_list *addrs);
 static void populate_local(void);
@@ -1019,7 +1019,8 @@ wake_up(void)
 //
 
 static char *
-print_list(const as_info_endpoint *endp, uint32_t limit, char sep, bool legacy)
+print_list(const as_service_endpoint *endp, uint32_t limit, char sep,
+		bool legacy)
 {
 	cf_detail(AS_SERVICE_LIST, "printing list - count %u port %hu limit %u "
 			"legacy %d", endp->addrs.n_addrs, endp->port, limit,
@@ -1135,7 +1136,7 @@ populate_local(void)
 
 	// Standard lists default to all interface addresses.
 
-	as_info_endpoint endp;
+	as_service_endpoint endp;
 	enum_addrs(&endp.addrs);
 
 	if (g_local.serv == NULL) {

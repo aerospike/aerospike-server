@@ -62,7 +62,7 @@
 #include "base/index.h"
 #include "base/monitor.h"
 #include "base/scan.h"
-#include "base/thr_demarshal.h"
+#include "base/service.h"
 #include "base/thr_info_port.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
@@ -1725,7 +1725,7 @@ info_service_config_get(cf_dyn_buf *db)
 	// Note - no user, group.
 	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
-	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
+	info_append_uint32(db, "proto-fd-max", g_config.n_proto_fd_max);
 
 	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
 	info_append_string(db, "auto-pin", auto_pin_string());
@@ -2269,10 +2269,12 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			g_config.batch_max_unused_buffers = val;
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-max", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
+			if (cf_str_atoi(context, &val) != 0 || val < MIN_PROTO_FD_MAX) {
+				cf_warning(AS_INFO, "invalid proto-fd-max %d", val);
 				goto Error;
-			cf_info(AS_INFO, "Changing value of proto-fd-max from %d to %d ", g_config.n_proto_fd_max, val);
-			g_config.n_proto_fd_max = val;
+			}
+			cf_info(AS_INFO, "Changing value of proto-fd-max from %u to %d ", g_config.n_proto_fd_max, val);
+			g_config.n_proto_fd_max = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-idle-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
