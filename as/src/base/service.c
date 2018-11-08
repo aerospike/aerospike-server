@@ -649,22 +649,13 @@ run_reaper(void* udata)
 {
 	(void)udata;
 
-	uint64_t last_security_refresh = cf_get_seconds();
-
 	while (true) {
 		sleep(1);
 
-		uint64_t now_ns = cf_getns();
-		uint64_t now_sec = now_ns / 1000000000;
+		bool security_refresh = as_security_should_refresh();
 
 		uint64_t kill_ns = (uint64_t)g_config.proto_fd_idle_ms * 1000000;
-		bool security_refresh = false;
-
-		if (now_sec - last_security_refresh >
-				(uint64_t)g_config.sec_cfg.privilege_refresh_period) {
-			security_refresh = true;
-			last_security_refresh = now_sec;
-		}
+		uint64_t now_ns = cf_getns();
 
 		cf_mutex_lock(&g_reaper_lock);
 
