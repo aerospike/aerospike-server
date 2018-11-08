@@ -808,8 +808,8 @@ static void
 query_release_fd(as_file_handle *fd_h, bool force_close)
 {
 	if (fd_h) {
-		fd_h->fh_info &= ~FH_INFO_DONOT_REAP;                                  
-		fd_h->last_used = cf_getms();                   
+		fd_h->do_not_reap = false;
+		fd_h->last_used = cf_getns();
 		as_end_of_transaction(fd_h, force_close);
 	}
 }
@@ -2693,7 +2693,7 @@ query_setup_fd(as_query_transaction *qtr, as_transaction *tr)
 		case QUERY_TYPE_LOOKUP:
 		case QUERY_TYPE_AGGR:
 			qtr->fd_h                = tr->from.proto_fd_h;
-			qtr->fd_h->fh_info      |= FH_INFO_DONOT_REAP;
+			qtr->fd_h->do_not_reap   = true;
 			break;
 		case QUERY_TYPE_UDF_BG:
 			qtr->fd_h  = NULL;

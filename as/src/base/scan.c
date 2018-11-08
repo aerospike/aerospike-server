@@ -432,7 +432,7 @@ conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h, uint32_t timeout)
 	cf_mutex_init(&job->fd_lock);
 
 	job->fd_h = fd_h;
-	job->fd_h->fh_info |= FH_INFO_DONOT_REAP;
+	job->fd_h->do_not_reap = true;
 	job->fd_timeout = timeout == 0 ? -1 : (int32_t)timeout;
 
 	job->net_io_bytes = 0;
@@ -443,7 +443,7 @@ conn_scan_job_disown_fd(conn_scan_job* job)
 {
 	// Just undo conn_scan_job_own_fd(), nothing more.
 
-	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
+	job->fd_h->do_not_reap = false;
 
 	cf_mutex_destroy(&job->fd_lock);
 }
@@ -500,8 +500,8 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 void
 conn_scan_job_release_fd(conn_scan_job* job, bool force_close)
 {
-	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
-	job->fd_h->last_used = cf_getms();
+	job->fd_h->do_not_reap = false;
+	job->fd_h->last_used = cf_getns();
 	as_end_of_transaction(job->fd_h, force_close);
 	job->fd_h = NULL;
 }
@@ -1268,7 +1268,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	if (as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK)) {
-		tr->from.proto_fd_h->last_used = cf_getms();
+		tr->from.proto_fd_h->last_used = cf_getns();
 		as_end_of_transaction_ok(tr->from.proto_fd_h);
 	}
 	else {

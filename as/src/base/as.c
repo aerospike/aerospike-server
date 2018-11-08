@@ -53,6 +53,7 @@
 #include "base/scan.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
+#include "base/service.h"
 #include "base/system_metadata.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
@@ -173,9 +174,8 @@ bool g_shutdown_started = false;
 // Forward declarations.
 //
 
-// signal.c, thr_demarshal.c and thr_nsup.c don't have header files.
+// signal.c and thr_nsup.c don't have header files.
 extern void as_signal_setup();
-extern void as_demarshal_start();
 extern void as_nsup_start();
 
 static void write_pidfile(char *pidfile);
@@ -419,7 +419,7 @@ main(int argc, char **argv)
 	as_exchange_start();		// start the cluster exchange subsystem
 	as_clustering_start();		// clustering-v5 start
 	as_nsup_start();			// may send delete transactions to other nodes
-	as_demarshal_start();		// server will now receive client transactions
+	as_service_start();			// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
 	as_ticker_start();			// only after everything else is started
 

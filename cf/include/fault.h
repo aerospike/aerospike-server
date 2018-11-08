@@ -164,8 +164,6 @@ typedef enum {
 	AS_BIN,
 	AS_CFG,
 	AS_CLUSTERING,
-	AS_COMPRESSION,
-	AS_DEMARSHAL,
 	AS_DRV_SSD,
 	AS_EXCHANGE,
 	AS_FABRIC,
@@ -195,6 +193,7 @@ typedef enum {
 	AS_RW_CLIENT, // special detail context
 	AS_SCAN,
 	AS_SECURITY,
+	AS_SERVICE,
 	AS_SERVICE_LIST,
 	AS_SINDEX,
 	AS_SKEW,

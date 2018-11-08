@@ -176,14 +176,13 @@ typedef struct as_proto_s {
 
 /*
  * zlib decompression API needs original size of the compressed data.
- * So we need to transfer it to another end.
  * This structure packs together -
  * header + original size of data + compressed data
  */
 typedef struct as_comp_proto_s {
-	as_proto    proto;     // Protocol header
-	uint64_t    org_sz;    // Original size of compressed data hold in 'data'
-	uint8_t data[0];        // Compressed data
+	as_proto    proto;
+	uint64_t    orig_sz;
+	uint8_t data[0];
 }  as_comp_proto;
 
 /* as_msg_field

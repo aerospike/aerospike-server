@@ -22,25 +22,24 @@ ifeq ($(USE_EE),1)
   include $(EEREPO)/xdr/make_in/Makefile.vars
 endif
 
-BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h features.h health.h index.h job_manager.h json_init.h
-BASE_HEADERS += monitor.h packet_compression.h
-BASE_HEADERS += particle.h particle_blob.h particle_integer.h predexp.h
-BASE_HEADERS += proto.h scan.h secondary_index.h security.h security_config.h stats.h system_metadata.h
-BASE_HEADERS += thr_info.h thr_query.h thr_sindex.h
-BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h truncate.h
+BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h features.h health.h
+BASE_HEADERS += index.h job_manager.h json_init.h monitor.h particle.h
+BASE_HEADERS += particle_blob.h particle_integer.h predexp.h proto.h scan.h
+BASE_HEADERS += secondary_index.h security.h security_config.h service.h stats.h
+BASE_HEADERS += system_metadata.h thr_info.h thr_query.h thr_sindex.h thr_tsvc.h
+BASE_HEADERS += ticker.h transaction.h transaction_policy.h truncate.h
 BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h udf_record.h
 BASE_HEADERS += xdr_serverside.h xdr_config.h
 
-BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c health.c index.c job_manager.c json_init.c
-BASE_SOURCES += monitor.c namespace.c packet_compression.c
-BASE_SOURCES += particle.c particle_blob.c particle_float.c particle_geojson.c particle_integer.c
-BASE_SOURCES += particle_list.c particle_map.c particle_string.c predexp.c
-BASE_SOURCES += proto.c record.c scan.c signal.c secondary_index.c system_metadata.c
-BASE_SOURCES += thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c
-BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c truncate.c
-BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c udf_record.c
-BASE_SOURCES += xdr_config.c
-
+BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c health.c index.c
+BASE_SOURCES += job_manager.c json_init.c monitor.c namespace.c particle.c
+BASE_SOURCES += particle_blob.c particle_float.c particle_geojson.c
+BASE_SOURCES += particle_integer.c particle_list.c particle_map.c
+BASE_SOURCES += particle_string.c predexp.c proto.c record.c scan.c signal.c
+BASE_SOURCES += secondary_index.c service.c system_metadata.c thr_info.c
+BASE_SOURCES += thr_info_port.c thr_nsup.c thr_query.c thr_sindex.c thr_tsvc.c
+BASE_SOURCES += ticker.c transaction.c truncate.c udf_aerospike.c udf_arglist.c
+BASE_SOURCES += udf_cask.c udf_record.c xdr_config.c
 ifneq ($(USE_EE),1)
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += features_ce.c
@@ -52,8 +51,13 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
 
-FABRIC_HEADERS += clustering.h endpoint.h exchange.h fabric.h hb.h hlc.h meta_batch.h migrate.h partition.h partition_balance.h roster.h service_list.h skew_monitor.h
-FABRIC_SOURCES += clustering.c endpoint.c exchange.c fabric.c hb.c hlc.c migrate.c partition.c partition_balance.c service_list.c skew_monitor.c
+FABRIC_HEADERS += clustering.h endpoint.h exchange.h fabric.h hb.h hlc.h
+FABRIC_HEADERS += meta_batch.h migrate.h partition.h partition_balance.h
+FABRIC_HEADERS += roster.h service_list.h skew_monitor.h
+
+FABRIC_SOURCES += clustering.c endpoint.c exchange.c fabric.c hb.c hlc.c
+FABRIC_SOURCES += migrate.c partition.c partition_balance.c service_list.c
+FABRIC_SOURCES += skew_monitor.c
 ifneq ($(USE_EE),1)
   FABRIC_SOURCES += meta_batch_ce.c
   FABRIC_SOURCES += migrate_ce.c
@@ -72,8 +76,13 @@ ifneq ($(USE_EE),1)
   STORAGE_SOURCES += drv_ssd_ce.c
 endif
 
-TRANSACTION_HEADERS += delete.h duplicate_resolve.h proxy.h re_replicate.h read.h replica_ping.h replica_write.h rw_request_hash.h rw_request.h rw_utils.h udf.h write.h
-TRANSACTION_SOURCES += delete.c duplicate_resolve.c proxy.c read.c replica_write.c rw_request_hash.c rw_request.c rw_utils.c udf.c write.c
+TRANSACTION_HEADERS += delete.h duplicate_resolve.h proxy.h re_replicate.h
+TRANSACTION_HEADERS += read.h replica_ping.h replica_write.h rw_request_hash.h
+TRANSACTION_HEADERS += rw_request.h rw_utils.h udf.h write.h
+
+TRANSACTION_SOURCES += delete.c duplicate_resolve.c proxy.c read.c
+TRANSACTION_SOURCES += replica_write.c rw_request_hash.c rw_request.c rw_utils.c
+TRANSACTION_SOURCES += udf.c write.c
 ifneq ($(USE_EE),1)
   TRANSACTION_SOURCES += delete_ce.c
   TRANSACTION_SOURCES += re_replicate_ce.c
@@ -81,8 +90,17 @@ ifneq ($(USE_EE),1)
   TRANSACTION_SOURCES += rw_utils_ce.c
 endif
 
-HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%) $(TRANSACTION_HEADERS:%=transaction/%)
-SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCES:%=storage/%) $(GEOSPATIAL_SOURCES:%=geospatial/%) $(TRANSACTION_SOURCES:%=transaction/%)
+HEADERS = $(BASE_HEADERS:%=base/%)
+HEADERS += $(FABRIC_HEADERS:%=fabric/%)
+HEADERS += $(STORAGE_HEADERS:%=storage/%)
+HEADERS += $(GEOSPATIAL_HEADERS:%=geospatial/%)
+HEADERS += $(TRANSACTION_HEADERS:%=transaction/%)
+
+SOURCES = $(BASE_SOURCES:%=base/%)
+SOURCES += $(FABRIC_SOURCES:%=fabric/%)
+SOURCES += $(STORAGE_SOURCES:%=storage/%)
+SOURCES += $(GEOSPATIAL_SOURCES:%=geospatial/%)
+SOURCES += $(TRANSACTION_SOURCES:%=transaction/%)
 
 SERVER = $(BIN_DIR)/asd
 

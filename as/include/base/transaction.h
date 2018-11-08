@@ -108,19 +108,17 @@ struct as_namespace_s;
 
 typedef struct as_file_handle_s {
 	char		client[64];		// client identifier (currently ip-addr:port)
-	uint64_t	last_used;		// last ms we read or wrote
-	cf_socket	sock;			// our socket
+	uint64_t	last_used;		// last nanoseconds we read or wrote
+	cf_socket	sock;			// our client socket
 	cf_poll		poll;			// our epoll instance
-	bool		reap_me;		// tells the reaper to come and get us
-	uint32_t	fh_info;		// bitmap containing status info of this file handle
-	as_proto	proto_hdr;
-	as_proto	*proto;
-	uint64_t	proto_unread;
+	bool		reap_me;		// force reaping (overrides do_not_reap)
+	bool		do_not_reap;	// don't reap during mid-transaction idle
+	bool		is_xdr;			// XDR client connection
+	as_proto	proto_hdr;		// space for header when reading it from socket
+	as_proto	*proto;			// complete request message
+	uint64_t	proto_unread;	// bytes not yet read from socket
 	void		*security_filter;
 } as_file_handle;
-
-#define FH_INFO_DONOT_REAP	0x00000001	// this bit indicates that this file handle should not be reaped
-#define FH_INFO_XDR			0x00000002	// the file handle belongs to an XDR connection
 
 // Helpers to release transaction file handles.
 void as_release_file_handle(as_file_handle *proto_fd_h);
@@ -147,7 +145,7 @@ typedef enum {
 // FROM_FLAG_BATCH_SUB.
 //
 typedef enum {
-	// External, comes through demarshal or fabric:
+	// External, comes through service or fabric:
 	FROM_CLIENT	= 1,
 	FROM_PROXY,
 

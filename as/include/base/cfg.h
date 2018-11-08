@@ -66,7 +66,6 @@ struct as_namespace_s;
 
 #define AS_CLUSTER_NAME_SZ 65
 
-#define MAX_DEMARSHAL_THREADS 256
 #define MAX_BATCH_THREADS 256
 #define MAX_TLS_SPECS 10
 
@@ -85,7 +84,7 @@ typedef struct as_config_s {
 	gid_t			gid;
 	uint32_t		paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with replication factor 1
 	char*			pidfile;
-	int				n_proto_fd_max;
+	uint32_t		n_proto_fd_max;
 
 	// Normally hidden:
 

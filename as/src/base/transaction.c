@@ -44,8 +44,8 @@
 #include "base/proto.h"
 #include "base/scan.h"
 #include "base/security.h"
+#include "base/service.h"
 #include "base/stats.h"
-#include "base/thr_demarshal.h"
 #include "fabric/partition.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request.h"
@@ -406,35 +406,19 @@ as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 void
 as_release_file_handle(as_file_handle *proto_fd_h)
 {
-	int rc = cf_rc_release(proto_fd_h);
-
-	if (rc > 0) {
-		return;
-	}
-	else if (rc < 0) {
-		cf_warning(AS_PROTO, "release file handle: negative ref-count %d", rc);
+	if (cf_rc_release(proto_fd_h) != 0) {
 		return;
 	}
 
 	cf_socket_close(&proto_fd_h->sock);
 	cf_socket_term(&proto_fd_h->sock);
-	proto_fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 
-	if (proto_fd_h->proto)	{
-		as_proto *p = proto_fd_h->proto;
-
-		if ((p->version != PROTO_VERSION) || (p->type >= PROTO_TYPE_MAX)) {
-			cf_warning(AS_PROTO, "release file handle: bad proto buf, corruption");
-		}
-		else {
-			cf_free(proto_fd_h->proto);
-			proto_fd_h->proto = NULL;
-		}
+	if (proto_fd_h->proto != NULL) {
+		cf_free(proto_fd_h->proto);
 	}
 
-	if (proto_fd_h->security_filter) {
+	if (proto_fd_h->security_filter != NULL) {
 		as_security_filter_destroy(proto_fd_h->security_filter);
-		proto_fd_h->security_filter = NULL;
 	}
 
 	cf_rc_free(proto_fd_h);
@@ -444,13 +428,11 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 void
 as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 {
-	thr_demarshal_rearm(proto_fd_h);
-
 	if (force_close) {
 		cf_socket_shutdown(&proto_fd_h->sock);
 	}
 
-	as_release_file_handle(proto_fd_h);
+	as_service_rearm(proto_fd_h);
 }
 
 void
