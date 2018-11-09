@@ -9,6 +9,8 @@ dependency:
 
 container:
   - base:
+      - docker.qe.aerospike.com/build/aerospike-server:amazonlinux-1
+      - docker.qe.aerospike.com/build/aerospike-server:amazonlinux-2
       - docker.qe.aerospike.com/build/aerospike-server:centos-6
       - docker.qe.aerospike.com/build/aerospike-server:centos-7
       - docker.qe.aerospike.com/build/aerospike-server:debian-7
