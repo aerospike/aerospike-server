@@ -171,7 +171,7 @@ typedef struct as_proto_s {
 	uint8_t		version;
 	uint8_t		type;
 	uint64_t	sz: 48;
-	uint8_t		data[0];
+	uint8_t		body[0];
 } __attribute__ ((__packed__)) as_proto;
 
 /*

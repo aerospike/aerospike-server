@@ -396,7 +396,7 @@ process_readable(as_file_handle* fd_h)
 {
 	uint8_t* end = fd_h->proto == NULL ?
 			(uint8_t*)&fd_h->proto_hdr + sizeof(as_proto) : // header
-			(uint8_t*)fd_h->proto + sizeof(as_proto) + fd_h->proto->sz; // body
+			fd_h->proto->body + fd_h->proto->sz; // body
 
 	while (true) {
 		int32_t sz = cf_socket_recv(&fd_h->sock, end - fd_h->proto_unread,
@@ -434,7 +434,10 @@ process_readable(as_file_handle* fd_h)
 			return false;
 		}
 
-		if (fd_h->proto_hdr.version != PROTO_VERSION) {
+		// For backward compatibility, allow version 0 with security messages.
+		if (fd_h->proto_hdr.version != PROTO_VERSION &&
+				! (fd_h->proto_hdr.version == 0 &&
+						fd_h->proto_hdr.type == PROTO_TYPE_SECURITY)) {
 			cf_warning(AS_SERVICE, "unsupported proto version %d from %s",
 					fd_h->proto_hdr.version, fd_h->client);
 			return false;
@@ -458,7 +461,7 @@ process_readable(as_file_handle* fd_h)
 		memcpy(fd_h->proto, &fd_h->proto_hdr, sizeof(as_proto));
 
 		fd_h->proto_unread = fd_h->proto->sz;
-		end = (uint8_t*)fd_h->proto + sizeof(as_proto) + fd_h->proto->sz;
+		end = fd_h->proto->body + fd_h->proto->sz;
 	}
 }
 
@@ -631,7 +634,7 @@ start_reaper(void)
 	}
 
 	g_n_slots = (uint32_t)rl.rlim_cur;
-	g_file_handles = cf_calloc(g_n_slots, sizeof(as_proto*));
+	g_file_handles = cf_calloc(g_n_slots, sizeof(as_file_handle*));
 
 	cf_queue_init(&g_free_slots, sizeof(uint32_t), g_n_slots, false);
 

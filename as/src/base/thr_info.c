@@ -4505,7 +4505,7 @@ thr_info_fn(void *unused)
 			info_all(fd_h, &db);
 		}
 		else {
-			info_some((char *)pr->data, (char *)pr->data + pr->sz, fd_h, &db);
+			info_some((char *)pr->body, (char *)pr->body + pr->sz, fd_h, &db);
 		}
 
 		// write the proto header in the space we pre-wrote
