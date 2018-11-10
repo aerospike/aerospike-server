@@ -84,6 +84,7 @@
 #include <unistd.h>
 
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
 
@@ -2477,7 +2478,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 					"Can only handle 8 byte numerics right now %u", startl);
 				goto Cleanup;
 			}
-			start->u.i64  = __cpu_to_be64(*((uint64_t *)data));
+			start->u.i64  = cf_swap_from_be64(*((uint64_t *)data));
 			data         += sizeof(uint64_t);
 
 			// get end point
@@ -2488,7 +2489,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 						"can only handle 8 byte numerics right now %u", endl);
 				goto Cleanup;
 			}
-			end->u.i64  = __cpu_to_be64(*((uint64_t *)data));
+			end->u.i64  = cf_swap_from_be64(*((uint64_t *)data));
 			data       += sizeof(uint64_t);
 			if (start->u.i64 > end->u.i64) {
 				cf_warning(AS_SINDEX,
