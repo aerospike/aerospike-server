@@ -1088,6 +1088,12 @@ const uint8_t*
 ssd_read_record_meta(const ssd_record* block, const uint8_t* end,
 		ssd_rec_props* props, bool single_bin)
 {
+	if (block->unused != 0) {
+		cf_warning_digest(AS_DRV_SSD, &block->keyd,
+				"record has unsupported storage fields ");
+		return NULL;
+	}
+
 	if (block->generation == 0) {
 		return NULL;
 	}
