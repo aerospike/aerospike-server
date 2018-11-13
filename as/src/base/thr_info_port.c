@@ -224,7 +224,7 @@ thr_info_port_fn(void *arg)
 		int32_t n_ev = cf_poll_wait(poll, events, POLL_SZ, -1);
 
 		for (int32_t i = 0; i < n_ev; ++i) {
-			cf_socket *ssock = events[i].data;
+			cf_socket *ssock = events[i].data.ptr;
 
 			if (cf_sockets_has_socket(&g_sockets, ssock)) {
 				cf_socket csock;
@@ -254,7 +254,7 @@ thr_info_port_fn(void *arg)
 				cf_poll_add_socket(poll, &csock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
 			}
 			else {
-				info_port_state *ips = events[i].data;
+				info_port_state *ips = events[i].data.ptr;
 
 				if (ips == NULL) {
 					cf_crash(AS_INFO_PORT, "Event with null handle");

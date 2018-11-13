@@ -94,8 +94,12 @@ INCLUDES += -I$(AI)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
-INCLUDES += -I$(S2)
-INCLUDES += -I$(XDR_INCLUDES)
+ifdef S2
+  INCLUDES += -I$(S2)
+endif
+ifdef XDR_INCLUDES
+  INCLUDES += -I$(XDR_INCLUDES)
+endif
 
 ifeq ($(USE_LUAJIT),1)
   INCLUDES += -I$(LUAJIT)/src
@@ -132,6 +136,7 @@ else
       $(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
       $(wildcard /usr/lib/liblua.a), \
       $(wildcard /usr/lib/powerpc64le-linux-gnu/liblua.a), \
+      $(wildcard /usr/lib/powerpc64le-linux-gnu/liblua$(LUA_SUFFIX).a), \
       $(error Cannot find "liblua.a"))
   else
     LIBRARIES += -llua$(LUA_SUFFIX)

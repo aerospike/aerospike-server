@@ -57,7 +57,14 @@ sys_futex(void *uaddr, int op, int val)
 
 #define xchg(__ptr, __val) __sync_lock_test_and_set(__ptr, __val)
 #define cmpxchg(__ptr, __cmp, __set) __sync_val_compare_and_swap(__ptr, __cmp, __set)
+
+#if defined(__powerpc64__)
+#include <sys/platform/ppc.h>
+#define cpu_relax() __ppc_get_timebase()
+#else
 #define cpu_relax() asm volatile("pause\n": : :"memory")
+#endif
+
 #define unlikely(__expr) __builtin_expect(!! (__expr), 0)
 #define likely(__expr) __builtin_expect(!! (__expr), 1)
 

@@ -31,7 +31,23 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#if defined(__x86_64__) || defined(__i386__) || defined(_MSC_VER)
 #include <xmmintrin.h>
+#elif defined(__powerpc64__)
+// cache prefetch transient
+static inline void
+_mm_prefetch(void *pointer, int unused __attribute__((unused)))
+{
+  __asm__ ( " dcbtt     0,%0;" : : "b" (pointer));
+}
+#else
+#define _mm_prefetch(X, Y) __builtin_prefetch(X)
+#endif
+
+#ifndef _MM_HINT_NTA
+#define _MM_HINT_NTA 0
+#endif
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -694,14 +710,13 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 
 		cf_arenax_handle t_h = isprig->sprig->root_h;
 		as_index *t = RESOLVE_H(t_h);
+		_mm_prefetch(t, _MM_HINT_NTA);
 
 		while (t_h != SENTINEL_H) {
 			ele++;
 			ele->parent = ele - 1;
 			ele->me_h = t_h;
 			ele->me = t;
-
-			_mm_prefetch(t, _MM_HINT_NTA);
 
 			if ((cmp = cf_digest_compare(keyd, &t->keyd)) == 0) {
 				// The element already exists, simply return it.
@@ -717,6 +732,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, uint8_t tree_id,
 
 			t_h = cmp > 0 ? t->left_h : t->right_h;
 			t = RESOLVE_H(t_h);
+			_mm_prefetch(t, _MM_HINT_NTA);
 		}
 
 		// We didn't find the tree element, so we'll be inserting it.
@@ -822,14 +838,13 @@ as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd)
 
 	r_h = isprig->sprig->root_h;
 	r = RESOLVE_H(r_h);
+	_mm_prefetch(r, _MM_HINT_NTA);
 
 	while (r_h != SENTINEL_H) {
 		ele++;
 		ele->parent = ele - 1;
 		ele->me_h = r_h;
 		ele->me = r;
-
-		_mm_prefetch(r, _MM_HINT_NTA);
 
 		int cmp = cf_digest_compare(keyd, &r->keyd);
 
@@ -839,6 +854,7 @@ as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd)
 
 		r_h = cmp > 0 ? r->left_h : r->right_h;
 		r = RESOLVE_H(r_h);
+		_mm_prefetch(r, _MM_HINT_NTA);
 	}
 
 	if (r_h == SENTINEL_H) {
@@ -950,10 +966,9 @@ as_index_sprig_search_lockless(as_index_sprig *isprig, const cf_digest *keyd,
 {
 	cf_arenax_handle r_h = isprig->sprig->root_h;
 	as_index *r = RESOLVE_H(r_h);
+	_mm_prefetch(r, _MM_HINT_NTA);
 
 	while (r_h != SENTINEL_H) {
-		_mm_prefetch(r, _MM_HINT_NTA);
-
 		int cmp = cf_digest_compare(keyd, &r->keyd);
 
 		if (cmp == 0) {
@@ -970,6 +985,7 @@ as_index_sprig_search_lockless(as_index_sprig *isprig, const cf_digest *keyd,
 
 		r_h = cmp > 0 ? r->left_h : r->right_h;
 		r = RESOLVE_H(r_h);
+		_mm_prefetch(r, _MM_HINT_NTA);
 	}
 
 	return -1; // not found
