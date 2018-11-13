@@ -939,7 +939,7 @@ map_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 	}
 
 	if (order_index_is_valid(&mpk.value_idx)) {
-		if (! order_index_set_sorted(&mpk.value_idx, &map.offidx,
+		if (! order_index_set_sorted(&mpk.value_idx, &mpk.offset_idx,
 				map.contents, map.content_sz, SORT_BY_VALUE)) {
 			cf_free(p);
 			return NULL;
