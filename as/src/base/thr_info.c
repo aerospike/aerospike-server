@@ -342,7 +342,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "heartbeat_received_self", g_stats.heartbeat_received_self);
 	info_append_uint64(db, "heartbeat_received_foreign", g_stats.heartbeat_received_foreign);
 
-
 	info_append_uint64(db, "reaped_fds", g_stats.reaper_count); // not in ticker
 
 	info_append_uint64(db, "info_complete", g_stats.info_complete); // not in ticker
