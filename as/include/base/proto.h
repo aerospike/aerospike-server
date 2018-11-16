@@ -164,9 +164,6 @@ struct as_transaction_s;
 
 #define PROTO_SIZE_MAX (128 * 1024 * 1024) // used simply for validation, as we've been corrupting msgp's
 
-#define PROTO_FIELD_LENGTH_MAX	1024
-#define PROTO_OP_LENGTH_MAX		131072
-
 typedef struct as_proto_s {
 	uint8_t		version;
 	uint8_t		type;
