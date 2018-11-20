@@ -2011,6 +2011,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_bool(db, "storage-engine.cold-start-empty", ns->storage_cold_start_empty);
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
 		info_append_uint32(db, "storage-engine.commit-min-size", ns->storage_commit_min_size);
+		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
+		info_append_uint32(db, "storage-engine.compression-level", ns->storage_compression_level);
 		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
 		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
 		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
@@ -3036,6 +3038,44 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 
 			cf_info(AS_INFO, "Changing value of mounts-size-limit of ns %s from %"PRIu64" to %"PRIu64, ns->name, ns->mounts_size_limit, val);
 			ns->mounts_size_limit = val;
+		}
+		else if (0 == as_info_parameter_get(params, "compression", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "compression is enterprise-only");
+				goto Error;
+			}
+			if (as_config_error_enterprise_feature_only("compression")) {
+				cf_warning(AS_INFO, "{%s} feature key does not allow compression", ns->name);
+				goto Error;
+			}
+			const char* orig = NS_COMPRESSION();
+			if (strcmp(context, "none") == 0) {
+				ns->storage_compression = AS_COMPRESSION_NONE;
+			}
+			else if (strcmp(context, "lz4") == 0) {
+				ns->storage_compression = AS_COMPRESSION_LZ4;
+			}
+			else if (strcmp(context, "snappy") == 0) {
+				ns->storage_compression = AS_COMPRESSION_SNAPPY;
+			}
+			else if (strcmp(context, "zstd") == 0) {
+				ns->storage_compression = AS_COMPRESSION_ZSTD;
+			}
+			else {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of compression of ns %s from %s to %s", ns->name, orig, context);
+		}
+		else if (0 == as_info_parameter_get(params, "compression-level", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "compression-level is enterprise-only");
+				goto Error;
+			}
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 9) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of compression-level of ns %s from %u to %d", ns->name, ns->storage_defrag_queue_min, val);
+			ns->storage_compression_level = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -5045,6 +5085,13 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 		info_append_uint64(db, "device_free_pct", free_pct);
 		info_append_int(db, "device_available_pct", available_pct);
+
+		if (ns->storage_compression != AS_COMPRESSION_NONE) {
+			double orig_sz = as_load_double(&ns->comp_avg_orig_sz);
+			double ratio = orig_sz > 0.0 ? ns->comp_avg_comp_sz / orig_sz : 1.0;
+
+			info_append_format(db, "device_compression_ratio", "%.3f", ratio);
+		}
 
 		if (! ns->storage_data_in_memory) {
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));

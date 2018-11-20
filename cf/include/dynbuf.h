@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -53,6 +54,8 @@ extern void cf_dyn_buf_append_int(cf_dyn_buf *db, int i);
 extern void cf_dyn_buf_append_uint64_x(cf_dyn_buf *db, uint64_t i); // HEX FORMAT!
 extern void cf_dyn_buf_append_uint64(cf_dyn_buf *db, uint64_t i);
 extern void cf_dyn_buf_append_uint32(cf_dyn_buf *db, uint32_t i);
+extern void cf_dyn_buf_append_format_va(cf_dyn_buf *db, const char *form, va_list va);
+extern void cf_dyn_buf_append_format(cf_dyn_buf *db, const char *form, ...);
 extern void cf_dyn_buf_chomp(cf_dyn_buf *db);
 extern char *cf_dyn_buf_strdup(cf_dyn_buf *db);
 extern void cf_dyn_buf_free(cf_dyn_buf *db);
@@ -65,6 +68,7 @@ void info_append_string_safe(cf_dyn_buf *db, const char *name, const char *value
 void info_append_uint32(cf_dyn_buf *db, const char *name, uint32_t value);
 void info_append_uint64(cf_dyn_buf *db, const char *name, uint64_t value);
 void info_append_uint64_x(cf_dyn_buf *db, const char *name, uint64_t value);
+void info_append_format(cf_dyn_buf *db, const char *name, const char *form, ...);
 
 // Append indexed name with optional attribute and value: name[ix].attr=value;
 void info_append_indexed_string(cf_dyn_buf *db, const char *name, uint32_t ix, const char *attr, const char *value);

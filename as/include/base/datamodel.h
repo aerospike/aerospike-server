@@ -787,6 +787,8 @@ struct as_namespace_s {
 	bool			storage_cold_start_empty;
 	bool			storage_commit_to_device; // relevant only for enterprise edition
 	uint32_t		storage_commit_min_size; // relevant only for enterprise edition
+	as_compression_method storage_compression; // relevant only for enterprise edition
+	uint32_t		storage_compression_level; // relevant only for enterprise edition
 	uint32_t		storage_defrag_lwm_pct;
 	uint32_t		storage_defrag_queue_min;
 	uint32_t		storage_defrag_sleep;
@@ -848,6 +850,8 @@ struct as_namespace_s {
 
 	// Persistent storage stats.
 
+	double			comp_avg_orig_sz; // relevant only for enterprise edition
+	double			comp_avg_comp_sz; // relevant only for enterprise edition
 	float			cache_read_pct;
 
 	// Migration stats.

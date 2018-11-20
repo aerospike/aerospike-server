@@ -51,6 +51,13 @@ as_config_error_enterprise_only()
 	return true;
 }
 
+bool
+as_config_error_enterprise_feature_only(const char* name)
+{
+	cf_crash(AS_CFG, "community edition checking enterprise feature");
+	return true;
+}
+
 // TODO - until we have an info split.
 bool
 as_info_error_enterprise_only()
