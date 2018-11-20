@@ -628,6 +628,8 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_COLD_START_EMPTY,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_TO_DEVICE,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_MIN_SIZE,
+	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION,
+	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_QUEUE_MIN,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP,
@@ -655,6 +657,12 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_SIGNATURE,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS,
+
+	// Namespace storage device compression options (value tokens):
+	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_NONE,
+	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LZ4,
+	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_SNAPPY,
+	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ZSTD,
 
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
@@ -1190,6 +1198,8 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "cold-start-empty",				CASE_NAMESPACE_STORAGE_DEVICE_COLD_START_EMPTY },
 		{ "commit-to-device",				CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_TO_DEVICE },
 		{ "commit-min-size",				CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_MIN_SIZE },
+		{ "compression",					CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION },
+		{ "compression-level",				CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL },
 		{ "defrag-lwm-pct",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT },
 		{ "defrag-queue-min",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_QUEUE_MIN },
 		{ "defrag-sleep",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP },
@@ -1216,6 +1226,13 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "write-smoothing-period",			CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD },
 		{ "write-threads",					CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS },
 		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS[] = {
+		{ "none",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_NONE },
+		{ "lz4",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LZ4 },
+		{ "snappy",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_SNAPPY },
+		{ "zstd",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ZSTD }
 };
 
 const cfg_opt NAMESPACE_SET_OPTS[] = {
@@ -1397,6 +1414,7 @@ const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeo
 const int NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_FLASH_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS = sizeof(NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_ENABLE_XDR_OPTS			= sizeof(NAMESPACE_SET_ENABLE_XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SI_OPTS						= sizeof(NAMESPACE_SI_OPTS) / sizeof(cfg_opt);
@@ -3380,6 +3398,31 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->storage_commit_min_size = cfg_u32_power_of_2(&line, 0, MAX_WRITE_BLOCK_SIZE);
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION:
+				cfg_enterprise_only(&line);
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS, NUM_NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS)) {
+				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_NONE:
+					ns->storage_compression = AS_COMPRESSION_NONE;
+					break;
+				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LZ4:
+					ns->storage_compression = AS_COMPRESSION_LZ4;
+					break;
+				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_SNAPPY:
+					ns->storage_compression = AS_COMPRESSION_SNAPPY;
+					break;
+				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ZSTD:
+					ns->storage_compression = AS_COMPRESSION_ZSTD;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL:
+				cfg_enterprise_only(&line);
+				ns->storage_compression_level = cfg_u32(&line, 1, 9);
+				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT:
 				ns->storage_defrag_lwm_pct = cfg_u32_no_checks(&line);
 				break;
@@ -3448,6 +3491,9 @@ as_config_init(const char* config_file)
 				}
 				if (ns->n_storage_files != 0 && ns->storage_filesize == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
+				}
+				if (ns->storage_compression_level != 0 && ns->storage_compression != AS_COMPRESSION_ZSTD) {
+					cf_crash_nostack(AS_CFG, "{%s} 'compression-level' is only relevant for 'compression zstd'", ns->name);
 				}
 				cfg_end_context(&state);
 				break;

@@ -22,6 +22,7 @@
 
 #include "dynbuf.h"
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,6 +36,7 @@
 
 
 #define MAX_BACKOFF (1024 * 256)
+#define MAX_FORMAT 100
 
 size_t
 get_new_size(int alloc, int used, int requested)
@@ -180,6 +182,31 @@ cf_dyn_buf_append_uint32(cf_dyn_buf *db, uint32_t i)
 }
 
 void
+cf_dyn_buf_append_format_va(cf_dyn_buf *db, const char *form, va_list va)
+{
+	DB_RESERVE(MAX_FORMAT + 1);
+	int32_t len = vsnprintf((char *)&db->buf[db->used_sz], MAX_FORMAT + 1, form,
+			va);
+
+	if (len > MAX_FORMAT) {
+		len = MAX_FORMAT;
+	}
+
+	db->used_sz += len;
+}
+
+void
+cf_dyn_buf_append_format(cf_dyn_buf *db, const char *form, ...)
+{
+	va_list va;
+	va_start(va, form);
+
+	cf_dyn_buf_append_format_va(db, form, va);
+
+	va_end(va);
+}
+
+void
 cf_dyn_buf_chomp(cf_dyn_buf *db)
 {
 	if (db->used_sz > 0) {
@@ -273,6 +300,20 @@ info_append_uint64_x(cf_dyn_buf *db, const char *name, uint64_t value)
 	cf_dyn_buf_append_char(db, '=');
 	cf_dyn_buf_append_uint64_x(db, value);
 	cf_dyn_buf_append_char(db, ';');
+}
+
+void
+info_append_format(cf_dyn_buf *db, const char *name, const char *form, ...)
+{
+	va_list va;
+	va_start(va, form);
+
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_format_va(db, form, va);
+	cf_dyn_buf_append_char(db, ';');
+
+	va_end(va);
 }
 
 static inline void

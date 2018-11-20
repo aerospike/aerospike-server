@@ -43,6 +43,7 @@
 
 #include "base/datamodel.h"
 #include "fabric/partition.h"
+#include "storage/storage.h"
 
 
 //==========================================================
@@ -344,7 +345,8 @@ typedef struct ssd_record_s {
 	uint32_t has_set: 1;
 	uint32_t has_key: 1;
 	uint32_t has_bins: 1; // i.e. is live
-	uint32_t unused: 3;
+	uint32_t is_compressed: 1;
+	uint32_t unused: 2;
 	uint32_t tree_id: 6;
 
 	// offset: 8
@@ -358,6 +360,13 @@ typedef struct ssd_record_s {
 	uint8_t data[];
 } __attribute__ ((__packed__)) ssd_record;
 
+// Compression metadata - relevant for enterprise only.
+typedef struct ssd_comp_meta_s {
+	as_compression_method method;
+	uint32_t orig_sz;
+	uint32_t comp_sz;
+} ssd_comp_meta;
+
 // Per-record optional metadata container.
 typedef struct ssd_rec_props_s {
 	uint32_t void_time;
@@ -366,6 +375,7 @@ typedef struct ssd_rec_props_s {
 	uint32_t key_size;
 	const uint8_t *key;
 	uint32_t n_bins;
+	ssd_comp_meta cm;
 } ssd_rec_props;
 
 // Warm and cool restart.
@@ -414,6 +424,8 @@ int ssd_write_bins(struct as_storage_rd_s *rd);
 int ssd_buffer_bins(struct as_storage_rd_s *rd);
 uint32_t ssd_record_size(struct as_storage_rd_s *rd);
 void ssd_flatten_record(const struct as_storage_rd_s *rd, uint32_t n_rblocks, ssd_record *block);
+uint8_t *ssd_flatten_record_meta(const struct as_storage_rd_s *rd, uint32_t n_rblocks, const ssd_comp_meta *cm, ssd_record *block);
+uint16_t ssd_flatten_bins(const struct as_storage_rd_s *rd, uint8_t *buf, uint32_t *sz);
 ssd_write_buf *swb_get(drv_ssd *ssd);
 
 // Called in (enterprise-split) storage table function.
@@ -544,6 +556,18 @@ ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks,
 		ssd_do_decrypt_whole(ssd->encryption_key, off, n_rblocks, block);
 	}
 }
+
+
+//
+// Record compression.
+//
+
+uint8_t *ssd_flatten_compress(const struct as_storage_rd_s *rd, uint32_t *write_size);
+uint8_t *ssd_flatten_compression_meta(const ssd_comp_meta *cm, ssd_record *block, uint8_t *buf);
+
+bool ssd_decompress_startup(const ssd_comp_meta *cm, uint32_t max_orig_sz, const uint8_t **read, const uint8_t **end);
+bool ssd_decompress_read(const ssd_comp_meta *cm, struct as_storage_rd_s *rd);
+const uint8_t *ssd_read_compression_meta(const ssd_record* block, const uint8_t *read, const uint8_t* end, ssd_comp_meta* cm);
 
 
 //

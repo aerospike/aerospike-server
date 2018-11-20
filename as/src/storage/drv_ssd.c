@@ -1144,6 +1144,8 @@ ssd_read_record_meta(const ssd_record* block, const uint8_t* end,
 		}
 	}
 
+	p_read = ssd_read_compression_meta(block, p_read, end, &props->cm);
+
 	return p_read > end ? NULL : p_read;
 }
 
@@ -1325,6 +1327,14 @@ ssd_read_record(as_storage_rd *rd)
 
 	if (! rd->block_bins) {
 		cf_warning(AS_DRV_SSD, "read: bad record metadata");
+		cf_free(read_buf);
+		return -1;
+	}
+
+	if (! ssd_decompress_read(&props.cm, rd)) {
+		cf_warning_digest(AS_DRV_SSD, &r->keyd,
+				"{%s} read: bad compressed data (%s:%lu) ",
+				ns->name, ssd->name, record_offset);
 		cf_free(read_buf);
 		return -1;
 	}
@@ -1694,9 +1704,9 @@ ssd_record_size(as_storage_rd *rd)
 }
 
 
-void
-ssd_flatten_record(const as_storage_rd *rd, uint32_t n_rblocks,
-		ssd_record *block)
+uint8_t *
+ssd_flatten_record_meta(const as_storage_rd *rd, uint32_t n_rblocks,
+		const ssd_comp_meta *cm, ssd_record *block)
 {
 	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
@@ -1758,8 +1768,24 @@ ssd_flatten_record(const as_storage_rd *rd, uint32_t n_rblocks,
 		block->has_bins = 0;
 	}
 
-	for (uint16_t i = 0; i < n_used_bins; i++) {
-		as_bin *bin = &rd->bins[i];
+	return ssd_flatten_compression_meta(cm, block, buf);
+}
+
+
+uint16_t
+ssd_flatten_bins(const as_storage_rd *rd, uint8_t *buf, uint32_t *sz)
+{
+	as_namespace *ns = rd->ns;
+
+	uint8_t *start = buf;
+	uint16_t n_bins;
+
+	for (n_bins = 0; n_bins < rd->n_bins; n_bins++) {
+		as_bin *bin = &rd->bins[n_bins];
+
+		if (! as_bin_inuse(bin)) {
+			break;
+		}
 
 		if (! ns->single_bin) {
 			const char *bin_name = as_bin_get_name_from_id(ns, bin->id);
@@ -1770,10 +1796,24 @@ ssd_flatten_record(const as_storage_rd *rd, uint32_t n_rblocks,
 			buf += name_len;
 		}
 
-		uint32_t particle_flat_size = as_bin_particle_to_flat(bin, buf);
-
-		buf += particle_flat_size;
+		buf += as_bin_particle_to_flat(bin, buf);
 	}
+
+	if (sz != NULL) {
+		*sz = (uint32_t)(buf - start);
+	}
+
+	return n_bins;
+}
+
+
+void
+ssd_flatten_record(const as_storage_rd *rd, uint32_t n_rblocks,
+		ssd_record *block)
+{
+	uint8_t *buf = ssd_flatten_record_meta(rd, n_rblocks, NULL, block);
+
+	ssd_flatten_bins(rd, buf, NULL);
 }
 
 
@@ -1793,6 +1833,8 @@ ssd_buffer_bins(as_storage_rd *rd)
 				write_size);
 		return -AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG;
 	}
+
+	uint8_t *flat = ssd_flatten_compress(rd, &write_size);
 
 	// Reserve the portion of the current swb where this record will be written.
 	cf_mutex_lock(&ssd->write_lock);
@@ -1849,7 +1891,12 @@ ssd_buffer_bins(as_storage_rd *rd)
 	uint32_t n_rblocks = SIZE_TO_N_RBLOCKS(write_size);
 	ssd_record *block = (ssd_record*)&swb->buf[swb_pos];
 
-	ssd_flatten_record(rd, n_rblocks, block);
+	if (flat == NULL) {
+		ssd_flatten_record(rd, n_rblocks, block);
+	}
+	else {
+		memcpy(block, flat, write_size);
+	}
 
 	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id) + swb_pos;
 
@@ -2695,6 +2742,12 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 
 	if (! p_read) {
 		cf_warning_digest(AS_DRV_SSD, &block->keyd, "bad metadata for record ");
+		return;
+	}
+
+	if (! ssd_decompress_startup(&props.cm, ns->storage_write_block_size,
+			&p_read, &end)) {
+		cf_warning_digest(AS_DRV_SSD, &block->keyd, "bad compressed data for record ");
 		return;
 	}
 

@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
@@ -45,6 +46,24 @@ typedef enum {
 
 	AS_NUM_STORAGE_ENGINES
 } as_storage_type;
+
+typedef enum {
+	AS_COMPRESSION_NONE,
+	AS_COMPRESSION_LZ4,
+	AS_COMPRESSION_SNAPPY,
+	AS_COMPRESSION_ZSTD,
+
+	AS_COMPRESSION_LAST_PLUS_1
+} as_compression_method;
+
+#define NS_COMPRESSION() ({ \
+		as_compression_method meth = as_load_int32(&ns->storage_compression); \
+		(meth == AS_COMPRESSION_NONE ? "none" : \
+			(meth == AS_COMPRESSION_LZ4 ? "lz4" : \
+				(meth == AS_COMPRESSION_SNAPPY ? "snappy" : \
+					(meth == AS_COMPRESSION_ZSTD ? "zstd" : \
+						"illegal")))); \
+	})
 
 typedef struct as_storage_rd_s {
 	struct as_index_s		*r;

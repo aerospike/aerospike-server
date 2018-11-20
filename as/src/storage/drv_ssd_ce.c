@@ -173,6 +173,48 @@ ssd_do_decrypt(const uint8_t* key, uint64_t off, ssd_record* block)
 	cf_crash(AS_DRV_SSD, "community edition called ssd_do_decrypt()");
 }
 
+uint8_t *
+ssd_flatten_compress(const as_storage_rd *rd, uint32_t *write_size)
+{
+	return NULL;
+}
+
+uint8_t *
+ssd_flatten_compression_meta(const ssd_comp_meta *cm, ssd_record *block,
+		uint8_t *buf)
+{
+	block->is_compressed = 0;
+
+	return buf;
+}
+
+bool
+ssd_decompress_startup(const ssd_comp_meta *cm, uint32_t max_orig_sz,
+		const uint8_t **read, const uint8_t **end)
+{
+	return true;
+}
+
+bool
+ssd_decompress_read(const ssd_comp_meta *cm, as_storage_rd *rd)
+{
+	return true;
+}
+
+const uint8_t *
+ssd_read_compression_meta(const ssd_record* block, const uint8_t *read,
+		const uint8_t* end, ssd_comp_meta *cm)
+{
+	if (block->is_compressed == 0) {
+		return read;
+	}
+
+	cf_warning_digest(AS_DRV_SSD, &block->keyd,
+			"community edition skipped compressed record ");
+
+	return NULL;
+}
+
 void
 ssd_do_decrypt_whole(const uint8_t* key, uint64_t off, uint32_t n_rblocks,
 		ssd_record* block)
