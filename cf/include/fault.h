@@ -156,6 +156,7 @@ typedef enum {
 	CF_SOCKET,
 	CF_TLS,
 	CF_VMAPX,
+	CF_XMEM,
 
 	AS_AGGR,
 	AS_APPEAL,

@@ -68,6 +68,7 @@ char *cf_fault_context_strings[] = {
 		"socket",
 		"tls",
 		"vmapx",
+		"xmem",
 
 		"aggr",
 		"appeal",
