@@ -1178,7 +1178,7 @@ msg_dump(const msg *m, const char *info)
 				{
 					uint32_t n_ints = mf->field_sz >> 3;
 					for (uint32_t j = 0; j < n_ints; j++) {
-						cf_info(CF_MSG, "      idx %u value %llu",
+						cf_info(CF_MSG, "      idx %u value %lu",
 								j, cf_swap_from_be64(mf->u.ui64_a[j]));
 					}
 				}
