@@ -61,17 +61,13 @@ typedef enum {
 // Extract levels from an as_msg.
 //
 
-// Not a strict check: both bits == 0 means ONE, anything else means ALL.
 #define PROTO_CONSISTENCY_LEVEL(asmsg) \
-	((((asmsg).info1 & AS_MSG_INFO1_CONSISTENCY_LEVEL_B0) == 0 && \
-	  ((asmsg).info1 & AS_MSG_INFO1_CONSISTENCY_LEVEL_B1) == 0) ? \
-			AS_READ_CONSISTENCY_LEVEL_ONE : AS_READ_CONSISTENCY_LEVEL_ALL)
+	(((asmsg).info1 & AS_MSG_INFO1_CONSISTENCY_LEVEL_ALL) == 0 ? \
+		AS_READ_CONSISTENCY_LEVEL_ONE : AS_READ_CONSISTENCY_LEVEL_ALL)
 
-// Not a strict check: both bits == 0 means ALL, anything else means MASTER.
 #define PROTO_COMMIT_LEVEL(asmsg) \
-	((((asmsg).info3 & AS_MSG_INFO3_COMMIT_LEVEL_B0) == 0 && \
-	  ((asmsg).info3 & AS_MSG_INFO3_COMMIT_LEVEL_B1) == 0) ? \
-			AS_WRITE_COMMIT_LEVEL_ALL : AS_WRITE_COMMIT_LEVEL_MASTER)
+	(((asmsg).info3 & AS_MSG_INFO3_COMMIT_LEVEL_MASTER) == 0 ? \
+		AS_WRITE_COMMIT_LEVEL_ALL : AS_WRITE_COMMIT_LEVEL_MASTER)
 
 //------------------------------------------------
 // Get levels for a transaction with reservation.
