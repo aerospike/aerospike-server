@@ -339,8 +339,8 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO1_BATCH				(1 << 3) // new batch protocol
 #define AS_MSG_INFO1_XDR				(1 << 4) // operation is being performed by XDR
 #define AS_MSG_INFO1_GET_NO_BINS		(1 << 5) // get record metadata only - no bin metadata or data
-#define AS_MSG_INFO1_CONSISTENCY_LEVEL_B0	(1 << 6) // read consistency level - bit 0
-#define AS_MSG_INFO1_CONSISTENCY_LEVEL_B1	(1 << 7) // read consistency level - bit 1
+#define AS_MSG_INFO1_CONSISTENCY_LEVEL_ALL	(1 << 6) // duplicate resolve reads
+// (Note:  Bit 7 is unused.)
 
 #define AS_MSG_INFO2_WRITE				(1 << 0) // contains a write semantic
 #define AS_MSG_INFO2_DELETE				(1 << 1) // delete record
@@ -352,8 +352,8 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO2_RESPOND_ALL_OPS	(1 << 7) // all bin ops (read, write, or modify) require a response, in request order
 
 #define AS_MSG_INFO3_LAST				(1 << 0) // this is the last of a multi-part message
-#define AS_MSG_INFO3_COMMIT_LEVEL_B0  	(1 << 1) // write commit level - bit 0
-#define AS_MSG_INFO3_COMMIT_LEVEL_B1  	(1 << 2) // write commit level - bit 1
+#define AS_MSG_INFO3_COMMIT_LEVEL_MASTER  	(1 << 1) // "fire and forget" replica writes
+// (Note:  Bit 2 is unused.)
 #define AS_MSG_INFO3_UPDATE_ONLY		(1 << 3) // update existing record only, do not create new record
 #define AS_MSG_INFO3_CREATE_OR_REPLACE	(1 << 4) // completely replace existing record, or create new record
 #define AS_MSG_INFO3_REPLACE_ONLY		(1 << 5) // completely replace existing record, do not create new record
