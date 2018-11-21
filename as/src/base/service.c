@@ -111,7 +111,7 @@ static void* run_service(void* udata);
 static void service_release_file_handle(as_file_handle* fd_h);
 static bool process_readable(as_file_handle* fd_h);
 static void start_transaction(as_file_handle* fd_h);
-static bool decompress_msg(uint8_t* comp_buf, uint8_t** out_buf, uint64_t* out_buf_sz);
+static bool decompress_msg(as_comp_proto* cproto, uint8_t** out_buf, uint64_t* out_buf_sz);
 static void config_xdr_socket(cf_socket* sock);
 static bool peek_namespace_inline(const as_msg* m);
 
@@ -501,15 +501,15 @@ start_transaction(as_file_handle* fd_h)
 		uint8_t* buf = NULL;
 		uint64_t buf_sz = 0;
 
-		if (! decompress_msg((uint8_t*)proto, &buf, &buf_sz)) {
+		if (! decompress_msg((as_comp_proto*)proto, &buf, &buf_sz)) {
 			as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
 		}
 
 		cf_free(proto);
 
-		tr.msgp = (cl_msg*)buf;
-		proto = &tr.msgp->proto;
+		proto = (as_proto*)buf;
+		tr.msgp = (cl_msg*)proto;
 
 		as_proto_swap(proto);
 
@@ -552,9 +552,8 @@ start_transaction(as_file_handle* fd_h)
 }
 
 static bool
-decompress_msg(uint8_t* comp_buf, uint8_t** out_buf, uint64_t* out_buf_sz)
+decompress_msg(as_comp_proto* cproto, uint8_t** out_buf, uint64_t* out_buf_sz)
 {
-	as_comp_proto* cproto = (as_comp_proto*)comp_buf;
 	uint64_t orig_sz = cproto->orig_sz;
 
 	// Hack to handle both little and big endian formats. Some clients wrongly
@@ -569,12 +568,10 @@ decompress_msg(uint8_t* comp_buf, uint8_t** out_buf, uint64_t* out_buf_sz)
 		}
 	}
 
-	comp_buf += sizeof(as_comp_proto);
-
 	uint8_t* decomp_buf = cf_malloc(orig_sz);
 	uint64_t decomp_buf_sz = orig_sz;
 	uint64_t comp_buf_sz = cproto->proto.sz - sizeof(cproto->orig_sz);
-	int rv = uncompress(decomp_buf, &decomp_buf_sz, comp_buf, comp_buf_sz);
+	int rv = uncompress(decomp_buf, &decomp_buf_sz, cproto->data, comp_buf_sz);
 
 	if (rv != Z_OK) {
 		cf_warning(AS_SERVICE, "zlib decompression failed with error %d", rv);

@@ -972,7 +972,7 @@ bool
 cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 {
 	const uint8_t *data = op->name + op->name_sz;
-	uint32_t sz = op->op_sz - 4 - op->name_sz;
+	uint32_t sz = op->op_sz - AS_MSG_OP_FIXED_SZ - op->name_sz;
 
 	if (data[0] == 0) { // TODO - deprecate this in "6 months"
 		if (sz < sizeof(uint16_t)) {

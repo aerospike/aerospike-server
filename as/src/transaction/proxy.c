@@ -253,7 +253,7 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 	msg_set_buf(m, PROXY_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)tr->msgp,
-			as_proto_size_get(&tr->msgp->proto), set_type);
+			sizeof(as_proto) + tr->msgp->proto.sz, set_type);
 
 	// Set up a proxy_request and insert it in the hash.
 

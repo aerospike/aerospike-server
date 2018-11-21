@@ -232,8 +232,23 @@ udf_def_init_from_msg(udf_def* def, const as_transaction* tr)
 		return NULL;
 	}
 
-	as_msg_field_get_strncpy(filename, def->filename, sizeof(def->filename));
-	as_msg_field_get_strncpy(function, def->function, sizeof(def->function));
+	uint32_t filename_len = as_msg_field_get_value_sz(filename);
+
+	if (filename_len >= sizeof(def->filename)) {
+		return NULL;
+	}
+
+	uint32_t function_len = as_msg_field_get_value_sz(function);
+
+	if (function_len >= sizeof(def->function)) {
+		return NULL;
+	}
+
+	memcpy(def->filename, filename->data, filename_len);
+	def->filename[filename_len] = '\0';
+
+	memcpy(def->function, function->data, function_len);
+	def->function[function_len] = '\0';
 
 	as_unpacker unpacker;
 

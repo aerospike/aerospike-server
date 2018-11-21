@@ -271,7 +271,7 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 			op->name_sz = as_bin_memcpy_name(ns, op->name, bins[i]);
 		}
 
-		op->op_sz = 4 + op->name_sz;
+		op->op_sz = AS_MSG_OP_FIXED_SZ + op->name_sz;
 
 		buf += sizeof(as_msg_op) + op->name_sz;
 		buf += as_bin_particle_to_client(bins[i], op);
@@ -455,7 +455,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			op->op = AS_MSG_OP_READ;
 			op->version = 0;
 			op->name_sz = as_bin_memcpy_name(ns, op->name, b);
-			op->op_sz = 4 + op->name_sz;
+			op->op_sz = AS_MSG_OP_FIXED_SZ + op->name_sz;
 
 			buf += sizeof(as_msg_op) + op->name_sz;
 			buf += as_bin_particle_to_client(b, op);
@@ -470,7 +470,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			op->op = AS_MSG_OP_READ;
 			op->version = 0;
 			op->name_sz = as_bin_memcpy_name(ns, op->name, &rd->bins[i]);
-			op->op_sz = 4 + op->name_sz;
+			op->op_sz = AS_MSG_OP_FIXED_SZ + op->name_sz;
 
 			buf += sizeof(as_msg_op) + op->name_sz;
 			buf += as_bin_particle_to_client(&rd->bins[i], op);
@@ -552,7 +552,7 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 	op->op = AS_MSG_OP_READ;
 	op->name_sz = (uint8_t)bin_name_len;
 	memcpy(op->name, bin_name, op->name_sz);
-	op->op_sz = 4 + op->name_sz;
+	op->op_sz = AS_MSG_OP_FIXED_SZ + op->name_sz;
 	op->version = 0;
 
 	as_particle_asval_to_client(val, op);
@@ -609,7 +609,7 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 	op->op = AS_MSG_OP_READ;
 	op->name_sz = (uint8_t)bin_name_len;
 	memcpy(op->name, bin_name, op->name_sz);
-	op->op_sz = 4 + op->name_sz;
+	op->op_sz = AS_MSG_OP_FIXED_SZ + op->name_sz;
 	op->version = 0;
 
 	as_particle_asval_to_client(val, op);
