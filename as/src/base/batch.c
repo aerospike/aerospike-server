@@ -1104,7 +1104,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 				op->name_sz = as_bin_memcpy_name(ns, op->name, bin);
 			}
 
-			op->op_sz = AS_MSG_OP_FIXED_SZ + op->name_sz;
+			op->op_sz = OP_FIXED_SZ + op->name_sz;
 			p += sizeof(as_msg_op) + op->name_sz;
 			p += as_bin_particle_to_client(bin, op);
 			as_msg_swap_op(op);

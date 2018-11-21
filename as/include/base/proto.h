@@ -314,7 +314,7 @@ typedef struct as_msg_op_s {
 	// Note - op value follows name.
 } __attribute__((__packed__)) as_msg_op;
 
-#define AS_MSG_OP_FIXED_SZ (offsetof(as_msg_op, name) - offsetof(as_msg_op, op))
+#define OP_FIXED_SZ (offsetof(as_msg_op, name) - offsetof(as_msg_op, op))
 
 #define AS_MSG_OP_READ          1
 #define AS_MSG_OP_WRITE         2
@@ -621,7 +621,7 @@ as_msg_op_get_value_p(as_msg_op* op)
 static inline uint32_t
 as_msg_op_get_value_sz(const as_msg_op* op)
 {
-	return op->op_sz - (AS_MSG_OP_FIXED_SZ + op->name_sz);
+	return op->op_sz - (OP_FIXED_SZ + op->name_sz);
 }
 
 static inline as_msg_op*
@@ -634,7 +634,7 @@ static inline uint8_t*
 as_msg_op_skip(as_msg_op* op)
 {
 	// At least 4 bytes always follow op_sz.
-	return AS_MSG_OP_FIXED_SZ + (uint32_t)op->name_sz > op->op_sz ?
+	return OP_FIXED_SZ + (uint32_t)op->name_sz > op->op_sz ?
 			NULL : (uint8_t*)as_msg_op_get_next(op);
 }
 
