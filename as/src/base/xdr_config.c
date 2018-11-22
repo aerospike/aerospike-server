@@ -1,7 +1,7 @@
 /*
  * xdr_config.c
  *
- * Copyright (C) 2011-2016 Aerospike, Inc.
+ * Copyright (C) 2011-2018 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
