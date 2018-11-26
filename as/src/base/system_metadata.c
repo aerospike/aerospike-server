@@ -1700,21 +1700,6 @@ static int as_smd_module_restore(as_smd_module_t *module_obj)
 			continue;
 		}
 
-		size_t num_fields = json_object_size(json_item);
-		if (5 != num_fields) {
-			// Warn if the item doesn't have the right number of fields.
-			cf_warning(AS_SMD, "wrong number of fields %zu (expected 5) for object %d in persisted System Metadata for module \"%s\"", num_fields, i, module_obj->module);
-		}
-
-		char *module = (char *) json_string_value(json_object_get(json_item, "module"));
-		if (!module) {
-			cf_warning(AS_SMD, "missing \"module\" for object %d in persisted System Metadata for module \"%s\" ~~ Skipping!", i, module_obj->module);
-			continue;
-		} else if (strcmp(module_obj->module, module)) {
-			cf_warning(AS_SMD, "incorrect module \"%s\" for object %d in persisted System Metadata for module \"%s\" ~~ Skipping!", module, i, module_obj->module);
-			continue;
-		}
-
 		char *key = (char *) json_string_value(json_object_get(json_item, "key"));
 		if (!key) {
 			cf_warning(AS_SMD, "missing \"key\" for object %d in persisted System Metadata for module \"%s\" ~~ Skipping!", i, module_obj->module);
@@ -1751,7 +1736,7 @@ static int as_smd_module_restore(as_smd_module_t *module_obj)
 		}
 
 		// Send the item metadata add command.
-		as_smd_set_metadata_gen_ts(module, key, value, generation, timestamp);
+		as_smd_set_metadata_gen_ts(module_obj->module, key, value, generation, timestamp);
 
 		// Another metadata item was successfully restored.
 		retval++;
