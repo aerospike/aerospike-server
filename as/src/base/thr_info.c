@@ -2019,6 +2019,14 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
 		info_append_bool(db, "storage-engine.direct-files", ns->storage_direct_files);
 		info_append_bool(db, "storage-engine.enable-benchmarks-storage", ns->storage_benchmarks_enabled);
+
+		if (ns->storage_encryption_key_file != NULL) {
+			info_append_string(db, "storage-engine.encryption",
+				ns->storage_encryption == AS_ENCRYPTION_AES_128 ? "aes-128" :
+					(ns->storage_encryption == AS_ENCRYPTION_AES_256 ? "aes-256" :
+						"illegal"));
+		}
+
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);

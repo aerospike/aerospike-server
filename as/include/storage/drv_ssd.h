@@ -124,7 +124,7 @@ typedef struct ssd_device_common_s {
 typedef struct ssd_device_unique_s {
 	uint32_t	device_id;
 	uint32_t	unused;
-	uint8_t		encrypted_key[32];
+	uint8_t		encrypted_key[64];
 	uint8_t		canary[16];
 } ssd_device_unique;
 
@@ -241,7 +241,7 @@ typedef struct drv_ssd_s {
 	cf_queue		*swb_free_q;		// pointers to swbs free and waiting
 	cf_queue		*post_write_q;		// pointers to swbs that have been written but are cached
 
-	uint8_t			encryption_key[32];		// relevant for enterprise edition only
+	uint8_t			encryption_key[64];		// relevant for enterprise edition only
 
 	cf_atomic64		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
 	cf_atomic64		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
@@ -396,9 +396,9 @@ void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 
 // Record encryption.
 void ssd_init_encryption_key(struct as_namespace_s *ns);
-void ssd_do_encrypt(const uint8_t *key, uint64_t off, ssd_record *block);
-void ssd_do_decrypt(const uint8_t *key, uint64_t off, ssd_record *block);
-void ssd_do_decrypt_whole(const uint8_t* key, uint64_t off, uint32_t n_rblocks, ssd_record* block);
+void ssd_encrypt(drv_ssd *ssd, uint64_t off, ssd_record *block);
+void ssd_decrypt(drv_ssd *ssd, uint64_t off, ssd_record *block);
+void ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks, ssd_record *block);
 
 // CP.
 void ssd_adjust_versions(struct as_namespace_s *ns, ssd_common_pmeta* pmeta);
@@ -525,36 +525,6 @@ BYTES_DOWN_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 static inline uint64_t
 BYTES_UP_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 	return (bytes + (ssd->shadow_io_min_size - 1)) & -ssd->shadow_io_min_size;
-}
-
-
-//
-// Record encryption.
-//
-
-static inline void
-ssd_encrypt(drv_ssd *ssd, uint64_t off, ssd_record *block)
-{
-	if (ssd->ns->storage_encryption_key_file != NULL) {
-		ssd_do_encrypt(ssd->encryption_key, off, block);
-	}
-}
-
-static inline void
-ssd_decrypt(drv_ssd *ssd, uint64_t off, ssd_record *block)
-{
-	if (ssd->ns->storage_encryption_key_file != NULL) {
-		ssd_do_decrypt(ssd->encryption_key, off, block);
-	}
-}
-
-static inline void
-ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks,
-		ssd_record *block)
-{
-	if (ssd->ns->storage_encryption_key_file != NULL) {
-		ssd_do_decrypt_whole(ssd->encryption_key, off, n_rblocks, block);
-	}
 }
 
 

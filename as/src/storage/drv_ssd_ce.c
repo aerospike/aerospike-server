@@ -160,17 +160,19 @@ ssd_init_encryption_key(as_namespace* ns)
 }
 
 void
-ssd_do_encrypt(const uint8_t* key, uint64_t off, ssd_record* block)
+ssd_encrypt(drv_ssd *ssd, uint64_t off, ssd_record *block)
 {
-	// Should not get here - for enterprise version only.
-	cf_crash(AS_DRV_SSD, "community edition called ssd_do_encrypt()");
 }
 
 void
-ssd_do_decrypt(const uint8_t* key, uint64_t off, ssd_record* block)
+ssd_decrypt(drv_ssd *ssd, uint64_t off, ssd_record *block)
 {
-	// Should not get here - for enterprise version only.
-	cf_crash(AS_DRV_SSD, "community edition called ssd_do_decrypt()");
+}
+
+void
+ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks,
+		ssd_record *block)
+{
 }
 
 uint8_t *
@@ -213,14 +215,6 @@ ssd_read_compression_meta(const ssd_record* block, const uint8_t *read,
 			"community edition skipped compressed record ");
 
 	return NULL;
-}
-
-void
-ssd_do_decrypt_whole(const uint8_t* key, uint64_t off, uint32_t n_rblocks,
-		ssd_record* block)
-{
-	// Should not get here - for enterprise version only.
-	cf_crash(AS_DRV_SSD, "community edition called ssd_do_decrypt_whole()");
 }
 
 void

@@ -697,7 +697,7 @@ struct as_namespace_s {
 	cf_atomic32		n_reads_from_cache;
 	cf_atomic32		n_reads_from_device;
 
-	uint8_t			storage_encryption_key[32];
+	uint8_t			storage_encryption_key[64];
 
 	//--------------------------------------------
 	// Truncate records.
@@ -795,7 +795,8 @@ struct as_namespace_s {
 	int				storage_defrag_startup_minimum;
 	bool			storage_direct_files;
 	bool			storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
-	char*			storage_encryption_key_file;
+	as_encryption_method storage_encryption; // relevant only for enterprise edition
+	char*			storage_encryption_key_file; // relevant only for enterprise edition
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;

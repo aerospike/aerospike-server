@@ -65,6 +65,13 @@ typedef enum {
 						"illegal")))); \
 	})
 
+typedef enum {
+	AS_ENCRYPTION_AES_128,
+	AS_ENCRYPTION_AES_256,
+
+	AS_ENCRYPTION_LAST_PLUS_1
+} as_encryption_method;
+
 typedef struct as_storage_rd_s {
 	struct as_index_s		*r;
 	struct as_namespace_s	*ns;
