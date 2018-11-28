@@ -39,7 +39,6 @@
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
-#include "errno.h"
 #include "fault.h"
 #include "node.h"
 #include "shash.h"
@@ -47,7 +46,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "fabric/exchange.h"
-#include "storage/drv_ssd.h"
+#include "storage/storage.h"
 
 
 //==========================================================

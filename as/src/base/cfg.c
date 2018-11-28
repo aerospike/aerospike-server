@@ -74,6 +74,7 @@
 #include "fabric/migrate.h"
 #include "fabric/partition_balance.h"
 #include "storage/drv_ssd.h"
+#include "storage/storage.h"
 
 
 //==========================================================

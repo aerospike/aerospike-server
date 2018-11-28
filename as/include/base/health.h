@@ -111,8 +111,8 @@ as_health_add_node_counter(cf_node node, as_health_node_stat_type type)
 }
 
 static inline void
-as_health_add_ns_latency(cf_node node, uint32_t ns_id, as_health_ns_stat_type type,
-		uint64_t start_us)
+as_health_add_ns_latency(cf_node node, uint32_t ns_id,
+		as_health_ns_stat_type type, uint64_t start_us)
 {
 	if (g_health_enabled && start_us != 0) {
 		health_add_ns_latency(node, ns_id, type, start_us);
