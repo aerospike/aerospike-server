@@ -287,7 +287,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 	as_particle_type op_type = safe_particle_type(op->particle_type);
 
 	if (op_type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	uint32_t op_value_size = as_msg_op_get_value_sz(op);
@@ -298,7 +298,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		// Memcache increment is weird - manipulate to create integer.
 		if (operation == AS_MSG_OP_MC_INCR) {
 			if (op_value_size != 2 * sizeof(uint64_t) || op_type != AS_PARTICLE_TYPE_BLOB) {
-				return -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return -AS_ERR_PARAMETER;
 			}
 
 			op_type = AS_PARTICLE_TYPE_INTEGER;
@@ -347,7 +347,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 	switch (operation) {
 	case AS_MSG_OP_MC_INCR:
 		if (op_value_size != 2 * sizeof(uint64_t) || op_type != AS_PARTICLE_TYPE_BLOB) {
-			return -AS_PROTO_RESULT_FAIL_PARAMETER;
+			return -AS_ERR_PARAMETER;
 		}
 		op_type = AS_PARTICLE_TYPE_INTEGER;
 		// op_value_size of 16 will flag operation as memcache increment...
@@ -357,7 +357,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		break;
 	case AS_MSG_OP_MC_APPEND:
 		if (existing_type != AS_PARTICLE_TYPE_STRING) {
-			return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+			return -AS_ERR_INCOMPATIBLE_TYPE;
 		}
 		// no break
 	case AS_MSG_OP_APPEND:
@@ -372,7 +372,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		break;
 	case AS_MSG_OP_MC_PREPEND:
 		if (existing_type != AS_PARTICLE_TYPE_STRING) {
-			return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+			return -AS_ERR_INCOMPATIBLE_TYPE;
 		}
 		// no break
 	case AS_MSG_OP_PREPEND:
@@ -387,7 +387,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		break;
 	default:
 		// TODO - just crash?
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	if (result < 0) {
@@ -408,7 +408,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 	as_particle_type op_type = safe_particle_type(op->particle_type);
 
 	if (op_type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	uint32_t op_value_size = as_msg_op_get_value_sz(op);
@@ -419,7 +419,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 		// Memcache increment is weird - manipulate to create integer.
 		if (operation == AS_MSG_OP_MC_INCR) {
 			if (op_value_size != 2 * sizeof(uint64_t) || op_type != AS_PARTICLE_TYPE_BLOB) {
-				return -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return -AS_ERR_PARAMETER;
 			}
 
 			op_type = AS_PARTICLE_TYPE_INTEGER;
@@ -463,7 +463,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 	switch (operation) {
 	case AS_MSG_OP_MC_INCR:
 		if (op_value_size != 2 * sizeof(uint64_t) || op_type != AS_PARTICLE_TYPE_BLOB) {
-			return -AS_PROTO_RESULT_FAIL_PARAMETER;
+			return -AS_ERR_PARAMETER;
 		}
 		op_type = AS_PARTICLE_TYPE_INTEGER;
 		// op_value_size of 16 will flag operation as memcache increment...
@@ -473,7 +473,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 		break;
 	case AS_MSG_OP_MC_APPEND:
 		if (existing_type != AS_PARTICLE_TYPE_STRING) {
-			return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+			return -AS_ERR_INCOMPATIBLE_TYPE;
 		}
 		// no break
 	case AS_MSG_OP_APPEND:
@@ -487,7 +487,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 		break;
 	case AS_MSG_OP_MC_PREPEND:
 		if (existing_type != AS_PARTICLE_TYPE_STRING) {
-			return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+			return -AS_ERR_INCOMPATIBLE_TYPE;
 		}
 		// no break
 	case AS_MSG_OP_PREPEND:
@@ -501,7 +501,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 		break;
 	default:
 		// TODO - just crash?
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	if (result < 0) {
@@ -522,7 +522,7 @@ as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op)
 	as_particle_type type = safe_particle_type(op->particle_type);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	uint32_t value_size = as_msg_op_get_value_sz(op);
@@ -566,7 +566,7 @@ as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_
 	as_particle_type type = safe_particle_type(op->particle_type);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	uint32_t value_size = as_msg_op_get_value_sz(op);
@@ -609,13 +609,13 @@ as_bin_particle_alloc_from_pickled(as_bin *b, const uint8_t **p_pickled, const u
 
 	if (pickled + 1 + 4 > end) {
 		cf_warning(AS_PARTICLE, "incomplete pickled particle");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	as_particle_type type = safe_particle_type(*pickled++);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	const uint32_t *p32 = (const uint32_t *)pickled;
@@ -627,7 +627,7 @@ as_bin_particle_alloc_from_pickled(as_bin *b, const uint8_t **p_pickled, const u
 	// TODO - does this serve as a value_size sanity check?
 	if (*p_pickled > end) {
 		cf_warning(AS_PARTICLE, "incomplete pickled particle");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	int32_t mem_size = particle_vtable[type]->size_from_wire_fn(value, value_size);
@@ -670,13 +670,13 @@ as_bin_particle_stack_from_pickled(as_bin *b, cf_ll_buf *particles_llb, const ui
 
 	if (pickled + 1 + 4 > end) {
 		cf_warning(AS_PARTICLE, "incomplete pickled particle");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	as_particle_type type = safe_particle_type(*pickled++);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	const uint32_t *p32 = (const uint32_t *)pickled;
@@ -688,7 +688,7 @@ as_bin_particle_stack_from_pickled(as_bin *b, cf_ll_buf *particles_llb, const ui
 	// TODO - does this serve as a value_size sanity check?
 	if (*p_pickled > end) {
 		cf_warning(AS_PARTICLE, "incomplete pickled particle");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	int32_t mem_size = particle_vtable[type]->size_from_wire_fn(value, value_size);
@@ -724,7 +724,7 @@ as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled)
 	if (! as_bin_inuse(b)) {
 		// TODO - just crash?
 		cf_warning(AS_PARTICLE, "comparing to unused bin");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	const uint8_t *pickled = (const uint8_t *)*p_pickled;
@@ -736,7 +736,7 @@ as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled)
 	*p_pickled = (uint8_t *)value + value_size;
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	return particle_vtable[as_bin_get_particle_type(b)]->compare_from_wire_fn(b->particle, type, value, value_size);
@@ -891,11 +891,11 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 	as_particle_type type = as_particle_type_from_msgpack(packed, packed_size);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	if (type == AS_PARTICLE_TYPE_NULL) {
-		return AS_PROTO_RESULT_OK;
+		return AS_OK;
 	}
 
 	uint32_t mem_size = particle_vtable[type]->size_from_msgpack_fn(packed, packed_size);
@@ -909,7 +909,7 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 	// Set the bin's iparticle metadata.
 	as_bin_state_set_from_type(b, type);
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 //------------------------------------------------

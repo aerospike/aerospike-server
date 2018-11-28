@@ -178,13 +178,13 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 		if (! as_storage_record_get_key(rd)) {
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} can't get stored key ",
 					ns->name);
-			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+			return AS_ERR_UNKNOWN;
 		}
 
 		// Check the client-sent key, if any, against the stored key.
 		if (as_transaction_has_key(tr) && ! check_msg_key(m, rd)) {
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} key mismatch ", ns->name);
-			return AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
+			return AS_ERR_KEY_MISMATCH;
 		}
 	}
 	// If we got a key without a digest, it's an old client, not a cue to store
@@ -194,7 +194,7 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 		// data-in-memory, don't allocate the key until we reach the point of no
 		// return. Also don't set AS_INDEX_FLAG_KEY_STORED flag until then.
 		if (! get_msg_key(tr, rd)) {
-			return AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+			return AS_ERR_UNSUPPORTED_FEATURE;
 		}
 	}
 

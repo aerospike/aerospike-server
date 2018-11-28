@@ -129,21 +129,21 @@ int32_t
 integer_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
 {
 	cf_warning(AS_PARTICLE, "concat size for integer/float");
-	return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
 integer_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
 {
 	cf_warning(AS_PARTICLE, "append to integer/float");
-	return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
 integer_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
 {
 	cf_warning(AS_PARTICLE, "prepend to integer/float");
-	return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
@@ -151,7 +151,7 @@ integer_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, ui
 {
 	if (wire_type != AS_PARTICLE_TYPE_INTEGER) {
 		cf_warning(AS_PARTICLE, "increment with non integer type %u", wire_type);
-		return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
 	uint64_t i;
@@ -179,7 +179,7 @@ integer_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, ui
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	(*(uint64_t *)pp) += i;
@@ -214,7 +214,7 @@ integer_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	*pp = (as_particle *)i;
@@ -245,7 +245,7 @@ integer_compare_from_wire(const as_particle *p, as_particle_type wire_type, cons
 		i = (uint64_t)*wire_value;
 		break;
 	default:
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	return (uint64_t)p == i ? 0 : 1;

@@ -62,91 +62,91 @@ struct as_transaction_s;
 //
 
 // Generic.
-#define AS_PROTO_RESULT_OK							0
-#define AS_PROTO_RESULT_FAIL_UNKNOWN				1
-#define AS_PROTO_RESULT_FAIL_NOT_FOUND				2
-#define AS_PROTO_RESULT_FAIL_GENERATION				3
-#define AS_PROTO_RESULT_FAIL_PARAMETER				4
-#define AS_PROTO_RESULT_FAIL_RECORD_EXISTS			5
-	// 6 is unused. (Was AS_PROTO_RESULT_FAIL_BIN_EXISTS.)
-#define AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH	7
-#define AS_PROTO_RESULT_FAIL_OUT_OF_SPACE			8
-#define AS_PROTO_RESULT_FAIL_TIMEOUT				9
-#define AS_PROTO_RESULT_FAIL_ALWAYS_FORBIDDEN		10
-#define AS_PROTO_RESULT_FAIL_UNAVAILABLE			11
-#define AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE		12
-#define AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG			13
-#define AS_PROTO_RESULT_FAIL_KEY_BUSY				14
-#define AS_PROTO_RESULT_FAIL_SCAN_ABORT				15
-#define AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE	16
-	// 17 is unused. (Was AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND.)
-#define AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD		18
-#define AS_PROTO_RESULT_FAIL_KEY_MISMATCH			19
-#define AS_PROTO_RESULT_FAIL_NAMESPACE				20
-#define AS_PROTO_RESULT_FAIL_BIN_NAME				21
-#define AS_PROTO_RESULT_FAIL_FORBIDDEN				22
-#define AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND		23
-#define AS_PROTO_RESULT_FAIL_ELEMENT_EXISTS			24
-#define AS_PROTO_RESULT_FAIL_ENTERPRISE_ONLY		25
+#define AS_OK                           0
+#define AS_ERR_UNKNOWN                  1
+#define AS_ERR_NOT_FOUND                2
+#define AS_ERR_GENERATION               3
+#define AS_ERR_PARAMETER                4
+#define AS_ERR_RECORD_EXISTS            5
+	// 6 is unused. (Was AS_ERR_BIN_EXISTS.)
+#define AS_ERR_CLUSTER_KEY_MISMATCH     7
+#define AS_ERR_OUT_OF_SPACE             8
+#define AS_ERR_TIMEOUT                  9
+#define AS_ERR_ALWAYS_FORBIDDEN         10
+#define AS_ERR_UNAVAILABLE              11
+#define AS_ERR_INCOMPATIBLE_TYPE        12
+#define AS_ERR_RECORD_TOO_BIG           13
+#define AS_ERR_KEY_BUSY                 14
+#define AS_ERR_SCAN_ABORT               15
+#define AS_ERR_UNSUPPORTED_FEATURE      16
+	// 17 is unused. (Was AS_ERR_BIN_NOT_FOUND.)
+#define AS_ERR_DEVICE_OVERLOAD          18
+#define AS_ERR_KEY_MISMATCH             19
+#define AS_ERR_NAMESPACE                20
+#define AS_ERR_BIN_NAME                 21
+#define AS_ERR_FORBIDDEN                22
+#define AS_ERR_ELEMENT_NOT_FOUND        23
+#define AS_ERR_ELEMENT_EXISTS           24
+#define AS_ERR_ENTERPRISE_ONLY          25
 
 // Security. (Defined here to ensure no overlap with other result codes.)
-#define AS_SEC_RESULT_OK_LAST			50 // the last message
+#define AS_SEC_OK_LAST                  50 // the last message
 	// Security message errors.
-#define AS_SEC_ERR_NOT_SUPPORTED		51 // security features not supported
-#define AS_SEC_ERR_NOT_ENABLED			52 // security features not enabled
-#define AS_SEC_ERR_SCHEME				53 // security scheme not supported
-#define AS_SEC_ERR_COMMAND				54 // unrecognized command
-#define AS_SEC_ERR_FIELD				55 // can't parse field
-#define AS_SEC_ERR_STATE				56 // e.g. unexpected command
+#define AS_SEC_ERR_NOT_SUPPORTED        51 // security features not supported
+#define AS_SEC_ERR_NOT_ENABLED          52 // security features not enabled
+#define AS_SEC_ERR_SCHEME               53 // security scheme not supported
+#define AS_SEC_ERR_COMMAND              54 // unrecognized command
+#define AS_SEC_ERR_FIELD                55 // can't parse field
+#define AS_SEC_ERR_STATE                56 // e.g. unexpected command
 	// Security procedure errors.
-#define AS_SEC_ERR_USER					60 // no user or unknown user
-#define AS_SEC_ERR_USER_EXISTS			61 // user already exists
-#define AS_SEC_ERR_PASSWORD				62 // no password or bad password
-#define AS_SEC_ERR_EXPIRED_PASSWORD		63 // expired password
-#define AS_SEC_ERR_FORBIDDEN_PASSWORD	64 // forbidden password (e.g. recently used)
-#define AS_SEC_ERR_CREDENTIAL			65 // no credential or bad credential
-#define AS_SEC_ERR_EXPIRED_SESSION		66 // expired session token
+#define AS_SEC_ERR_USER                 60 // no/unknown user
+#define AS_SEC_ERR_USER_EXISTS          61 // user already exists
+#define AS_SEC_ERR_PASSWORD             62 // no/bad password
+#define AS_SEC_ERR_EXPIRED_PASSWORD     63 // expired password
+#define AS_SEC_ERR_FORBIDDEN_PASSWORD   64 // e.g. recently used password
+#define AS_SEC_ERR_CREDENTIAL           65 // no/bad credential
+#define AS_SEC_ERR_EXPIRED_SESSION      66 // expired session token
 	// ... room for more ...
-#define AS_SEC_ERR_ROLE					70 // no role(s) or unknown role(s)
-#define AS_SEC_ERR_ROLE_EXISTS			71 // role already exists
-#define AS_SEC_ERR_PRIVILEGE			72 // no privileges or unknown privileges
+#define AS_SEC_ERR_ROLE                 70 // no/unknown role(s)
+#define AS_SEC_ERR_ROLE_EXISTS          71 // role already exists
+#define AS_SEC_ERR_PRIVILEGE            72 // no/unknown privilege(s)
 	// Permission errors.
-#define AS_SEC_ERR_NOT_AUTHENTICATED	80 // socket not authenticated
-#define AS_SEC_ERR_ROLE_VIOLATION		81 // role (privilege) violation
+#define AS_SEC_ERR_NOT_AUTHENTICATED    80 // socket not authenticated
+#define AS_SEC_ERR_ROLE_VIOLATION       81 // role (privilege) violation
 	// LDAP-related errors.
-#define AS_SEC_ERR_LDAP_NOT_ENABLED		90 // LDAP features not enabled
-#define AS_SEC_ERR_LDAP_SETUP			91 // LDAP setup error
-#define AS_SEC_ERR_LDAP_TLS_SETUP		92 // LDAP TLS setup error
-#define AS_SEC_ERR_LDAP_AUTHENTICATION	93 // error authenticating LDAP user
-#define AS_SEC_ERR_LDAP_QUERY			94 // error querying LDAP server (e.g. polling for roles)
+#define AS_SEC_ERR_LDAP_NOT_ENABLED     90 // LDAP features not enabled
+#define AS_SEC_ERR_LDAP_SETUP           91 // LDAP setup error
+#define AS_SEC_ERR_LDAP_TLS_SETUP       92 // LDAP TLS setup error
+#define AS_SEC_ERR_LDAP_AUTHENTICATION  93 // error authenticating LDAP user
+#define AS_SEC_ERR_LDAP_QUERY           94 // error querying LDAP server
 
 // UDF.
-#define AS_PROTO_RESULT_FAIL_UDF_EXECUTION			100
+#define AS_ERR_UDF_EXECUTION            100
 
 // Batch.
-#define AS_PROTO_RESULT_FAIL_BATCH_DISABLED			150
-#define AS_PROTO_RESULT_FAIL_BATCH_MAX_REQUESTS		151
-#define AS_PROTO_RESULT_FAIL_BATCH_QUEUES_FULL		152
+#define AS_ERR_BATCH_DISABLED           150
+#define AS_ERR_BATCH_MAX_REQUESTS       151
+#define AS_ERR_BATCH_QUEUES_FULL        152
 
 // Geo.
-#define AS_PROTO_RESULT_FAIL_GEO_INVALID_GEOJSON	160
+#define AS_ERR_GEO_INVALID_GEOJSON      160
 
 // Secondary Index.
-#define AS_PROTO_RESULT_FAIL_INDEX_FOUND			200
-#define AS_PROTO_RESULT_FAIL_INDEX_NOTFOUND			201
-#define AS_PROTO_RESULT_FAIL_INDEX_OOM				202
-#define AS_PROTO_RESULT_FAIL_INDEX_NOTREADABLE		203
-#define AS_PROTO_RESULT_FAIL_INDEX_GENERIC			204
-#define AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN		205
-#define AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT			206
+#define AS_ERR_SINDEX_FOUND             200
+#define AS_ERR_SINDEX_NOT_FOUND         201
+#define AS_ERR_SINDEX_OOM               202
+#define AS_ERR_SINDEX_NOT_READABLE      203
+#define AS_ERR_SINDEX_GENERIC           204
+#define AS_ERR_SINDEX_NAME              205
+#define AS_ERR_SINDEX_MAX_COUNT         206
 
 // Query.
-#define AS_PROTO_RESULT_FAIL_QUERY_USERABORT		210
-#define AS_PROTO_RESULT_FAIL_QUERY_QUEUEFULL		211
-#define AS_PROTO_RESULT_FAIL_QUERY_TIMEOUT			212
-#define AS_PROTO_RESULT_FAIL_QUERY_CBERROR			213
-#define AS_PROTO_RESULT_FAIL_QUERY_NETIO_ERR		214
-#define AS_PROTO_RESULT_FAIL_QUERY_DUPLICATE		215
+#define AS_ERR_QUERY_USER_ABORT         210
+#define AS_ERR_QUERY_QUEUE_FULL         211
+#define AS_ERR_QUERY_TIMEOUT            212
+#define AS_ERR_QUERY_CB                 213
+#define AS_ERR_QUERY_NET_IO             214
+#define AS_ERR_QUERY_DUPLICATE          215
 
 //------------------------------------------------
 // as_proto.
@@ -207,10 +207,10 @@ typedef struct cl_msg_s {
 
 // Bits in info1.
 #define AS_MSG_INFO1_READ                   (1 << 0) // contains a read operation
-#define AS_MSG_INFO1_GET_ALL                (1 << 1) // get all bins, period
+#define AS_MSG_INFO1_GET_ALL                (1 << 1) // get all bins
 	// Bit 2 is unused.
 #define AS_MSG_INFO1_BATCH                  (1 << 3) // batch protocol
-#define AS_MSG_INFO1_XDR                    (1 << 4) // operation is being performed by XDR
+#define AS_MSG_INFO1_XDR                    (1 << 4) // operation is via XDR
 #define AS_MSG_INFO1_GET_NO_BINS            (1 << 5) // get record metadata only - no bin metadata or data
 #define AS_MSG_INFO1_CONSISTENCY_LEVEL_ALL  (1 << 6) // duplicate resolve reads
 	// Bit 7 is unused.
@@ -232,7 +232,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO3_UPDATE_ONLY            (1 << 3) // update existing record only, do not create new record
 #define AS_MSG_INFO3_CREATE_OR_REPLACE      (1 << 4) // completely replace existing record, or create new record
 #define AS_MSG_INFO3_REPLACE_ONLY           (1 << 5) // completely replace existing record, do not create new record
-#define AS_MSG_INFO3_LINEARIZE_READ         (1 << 6) // enterprise only
+#define AS_MSG_INFO3_LINEARIZE_READ         (1 << 6) // (enterprise only)
 	// Bit 7 is unused.
 
 //------------------------------------------------
@@ -274,27 +274,26 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_BATCH_WITH_SET    42
 #define AS_MSG_FIELD_TYPE_PREDEXP           43
 
-// For as_transaction::field_types, a bit-field to mark which fields are in an
-// as_msg.
-#define AS_MSG_FIELD_BIT_NAMESPACE          0x00000001
-#define AS_MSG_FIELD_BIT_SET                0x00000002
-#define AS_MSG_FIELD_BIT_KEY                0x00000004
-#define AS_MSG_FIELD_BIT_DIGEST_RIPE        0x00000008
-#define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY  0x00000010 // old batch - deprecated
-#define AS_MSG_FIELD_BIT_TRID               0x00000020
-#define AS_MSG_FIELD_BIT_SCAN_OPTIONS       0x00000040
-#define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     0x00000080
-#define AS_MSG_FIELD_BIT_INDEX_NAME         0x00000100
-#define	AS_MSG_FIELD_BIT_INDEX_RANGE        0x00000200
-#define AS_MSG_FIELD_BIT_INDEX_TYPE         0x00000400
-#define AS_MSG_FIELD_BIT_UDF_FILENAME       0x00000800
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION       0x00001000
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST        0x00002000
-#define AS_MSG_FIELD_BIT_UDF_OP             0x00004000
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST      0x00008000
-#define AS_MSG_FIELD_BIT_BATCH              0x00010000
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     0x00020000
-#define AS_MSG_FIELD_BIT_PREDEXP            0x00040000
+// Bits in as_transaction.msg_fields indicate which fields are present.
+#define AS_MSG_FIELD_BIT_NAMESPACE          (1 << 0)
+#define AS_MSG_FIELD_BIT_SET                (1 << 1)
+#define AS_MSG_FIELD_BIT_KEY                (1 << 2)
+#define AS_MSG_FIELD_BIT_DIGEST_RIPE        (1 << 3)
+#define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY  (1 << 4) // old batch - deprecated
+#define AS_MSG_FIELD_BIT_TRID               (1 << 5)
+#define AS_MSG_FIELD_BIT_SCAN_OPTIONS       (1 << 6)
+#define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 7)
+#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 8)
+#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 9)
+#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 10)
+#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 11)
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 12)
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 13)
+#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 14)
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 15)
+#define AS_MSG_FIELD_BIT_BATCH              (1 << 16)
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 17)
+#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 18)
 
 // Special message field values.
 #define AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE    (0x08)
@@ -500,9 +499,6 @@ typedef enum {
 	AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE       = 110
 } as_cdt_optype;
 
-// TODO - use first map value in enum?
-#define AS_CDT_OP_LIST_LAST AS_CDT_OP_LIST_REMOVE_BY_VALUE_REL_RANK_RANGE
-
 //------------------------------------------------
 // Query responses.
 //
@@ -511,21 +507,21 @@ typedef int (*as_netio_finish_cb) (void* udata, int retcode);
 typedef int (*as_netio_start_cb) (void* udata, int seq);
 
 typedef struct as_netio_s {
-	as_netio_finish_cb          finish_cb;
-	as_netio_start_cb           start_cb;
-	void*                       data;
-	struct as_file_handle_s*    fd_h;
-	cf_buf_builder*             bb_r;
-	uint32_t                    offset;
-	uint32_t                    seq;
-	bool                        slow;
-	uint64_t                    start_time;
+	as_netio_finish_cb finish_cb;
+	as_netio_start_cb start_cb;
+	void* data;
+	struct as_file_handle_s* fd_h;
+	cf_buf_builder* bb_r;
+	uint32_t offset;
+	uint32_t seq;
+	bool slow;
+	uint64_t start_time;
 } as_netio;
 
-#define AS_NETIO_OK        0
-#define AS_NETIO_CONTINUE  1
-#define AS_NETIO_ERR       2
-#define AS_NETIO_IO_ERR    3
+#define AS_NETIO_OK         0
+#define AS_NETIO_CONTINUE   1
+#define AS_NETIO_ERR        2
+#define AS_NETIO_IO_ERR     3
 
 
 //==========================================================
@@ -678,3 +674,5 @@ as_msg_op_iterate(as_msg* msg, as_msg_op* current, int* n)
 	)
 
 #define OP_IS_TOUCH(op) ((op) == AS_MSG_OP_TOUCH || (op) == AS_MSG_OP_MC_TOUCH)
+
+#define IS_CDT_LIST_OP(op) ((op) < AS_CDT_OP_MAP_SET_TYPE)

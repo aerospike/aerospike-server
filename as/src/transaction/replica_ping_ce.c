@@ -47,7 +47,7 @@ repl_ping_check(as_transaction* tr)
 {
 	if (as_transaction_is_linearized_read(tr)) {
 		cf_warning(AS_RW, "linearized read is an enterprise feature");
-		tr->result_code = AS_PROTO_RESULT_FAIL_ENTERPRISE_ONLY;
+		tr->result_code = AS_ERR_ENTERPRISE_ONLY;
 		return false;
 	}
 

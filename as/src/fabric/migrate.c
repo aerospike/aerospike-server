@@ -1425,10 +1425,9 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		int rv = as_record_replace_if_better(&rr, false, false, false);
 
 		// If replace failed, don't ack - it will be retransmitted.
-		if (! (rv == AS_PROTO_RESULT_OK ||
+		if (! (rv == AS_OK ||
 				// Migrations just treat these errors as successful no-ops:
-				rv == AS_PROTO_RESULT_FAIL_RECORD_EXISTS ||
-				rv == AS_PROTO_RESULT_FAIL_GENERATION)) {
+				rv == AS_ERR_RECORD_EXISTS || rv == AS_ERR_GENERATION)) {
 			immigration_release(immig);
 			as_fabric_msg_put(m);
 			return;

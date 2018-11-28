@@ -105,7 +105,7 @@ set_delete_durablility(const as_transaction* tr, as_storage_rd* rd)
 {
 	if (as_transaction_is_durable_delete(tr)) {
 		cf_warning(AS_RW, "durable delete is an enterprise feature");
-		return AS_PROTO_RESULT_FAIL_ENTERPRISE_ONLY;
+		return AS_ERR_ENTERPRISE_ONLY;
 	}
 
 	return 0;
@@ -157,7 +157,7 @@ bool
 dup_res_should_retry_transaction(rw_request* rw, uint32_t result_code)
 {
 	// TODO - JUMP - can get this from 3.14.x nodes or older - retry if so.
-	return result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+	return result_code == AS_ERR_CLUSTER_KEY_MISMATCH;
 }
 
 
@@ -176,7 +176,7 @@ apply_if_tie(rw_request* rw)
 void
 dup_res_translate_result_code(rw_request* rw)
 {
-	rw->result_code = AS_PROTO_RESULT_OK;
+	rw->result_code = AS_OK;
 }
 
 
@@ -225,7 +225,7 @@ bool
 repl_write_should_retransmit_replicas(rw_request* rw, uint32_t result_code)
 {
 	switch (result_code) {
-	case AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH:
+	case AS_ERR_CLUSTER_KEY_MISMATCH:
 		rw->xmit_ms = 0; // force retransmit on next cycle
 		return true;
 	default:

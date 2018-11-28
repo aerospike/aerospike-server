@@ -502,7 +502,7 @@ start_transaction(as_file_handle* fd_h)
 		uint64_t buf_sz = 0;
 
 		if (! decompress_msg((as_comp_proto*)proto, &buf, &buf_sz)) {
-			as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			as_transaction_demarshal_error(&tr, AS_ERR_UNKNOWN);
 			return;
 		}
 
@@ -516,7 +516,7 @@ start_transaction(as_file_handle* fd_h)
 		if (! as_proto_wrapped_is_valid(proto, buf_sz)) {
 			cf_warning(AS_SERVICE, "decompressed proto: (%d,%d,%lu,%lu)",
 					proto->version, proto->type, (uint64_t)proto->sz, buf_sz);
-			as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			as_transaction_demarshal_error(&tr, AS_ERR_UNKNOWN);
 			return;
 		}
 	}
@@ -537,7 +537,7 @@ start_transaction(as_file_handle* fd_h)
 	}
 
 	if (! as_transaction_prepare(&tr, true)) {
-		as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_PARAMETER);
+		as_transaction_demarshal_error(&tr, AS_ERR_PARAMETER);
 		return;
 	}
 

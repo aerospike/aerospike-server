@@ -163,7 +163,7 @@ as_scan(as_transaction* tr, as_namespace* ns)
 	int result;
 	uint16_t set_id = INVALID_SET_ID;
 
-	if ((result = get_scan_set_id(tr, ns, &set_id)) != AS_PROTO_RESULT_OK) {
+	if ((result = get_scan_set_id(tr, ns, &set_id)) != AS_OK) {
 		return result;
 	}
 
@@ -179,7 +179,7 @@ as_scan(as_transaction* tr, as_namespace* ns)
 		break;
 	default:
 		cf_warning(AS_SCAN, "can't identify scan type");
-		result = AS_PROTO_RESULT_FAIL_PARAMETER;
+		result = AS_ERR_PARAMETER;
 		break;
 	}
 
@@ -271,13 +271,13 @@ get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id)
 		if (set_id == INVALID_SET_ID) {
 			cf_warning(AS_SCAN, "scan msg from %s has unrecognized set %s",
 					tr->from.proto_fd_h->client, set_name);
-			return AS_PROTO_RESULT_FAIL_NOT_FOUND;
+			return AS_ERR_NOT_FOUND;
 		}
 	}
 
 	*p_set_id = set_id;
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 scan_type
@@ -574,7 +574,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 			! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "basic scan job failed msg field processing");
 		cf_free(job);
-		return AS_PROTO_RESULT_FAIL_PARAMETER;
+		return AS_ERR_PARAMETER;
 	}
 
 	as_job_init(_job, &basic_scan_job_vtable, &g_scan_manager, RSV_WRITE,
@@ -590,7 +590,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	job->bin_names = bin_names_from_op(&tr->msgp->msg, &result);
 
-	if (! job->bin_names && result != AS_PROTO_RESULT_OK) {
+	if (! job->bin_names && result != AS_OK) {
 		as_job_destroy(_job);
 		return result;
 	}
@@ -598,10 +598,10 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	if (job->fail_on_cluster_change &&
 			(cf_atomic_int_get(ns->migrate_tx_partitions_remaining) != 0 ||
 			 cf_atomic_int_get(ns->migrate_rx_partitions_remaining) != 0)) {
-		// TODO - was AS_PROTO_RESULT_FAIL_UNAVAILABLE - ok?
+		// TODO - was AS_ERR_UNAVAILABLE - ok?
 		cf_warning(AS_SCAN, "basic scan job not started - migration");
 		as_job_destroy(_job);
-		return AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+		return AS_ERR_CLUSTER_KEY_MISMATCH;
 	}
 
 	// Take ownership of socket from transaction.
@@ -621,7 +621,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 //----------------------------------------------------------
@@ -636,8 +636,7 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	cf_buf_builder* bb = cf_buf_builder_create_size(INIT_BUF_BUILDER_SIZE);
 
 	if (! bb) {
-		as_job_manager_abandon_job(_job->mgr, _job,
-				AS_PROTO_RESULT_FAIL_UNKNOWN);
+		as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -734,7 +733,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 			job->cluster_key != as_exchange_cluster_key()) {
 		as_record_done(r_ref, ns);
 		as_job_manager_abandon_job(_job->mgr, _job,
-				AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
+				AS_ERR_CLUSTER_KEY_MISMATCH);
 		return;
 	}
 
@@ -802,7 +801,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 cf_vector*
 bin_names_from_op(as_msg* m, int* result)
 {
-	*result = AS_PROTO_RESULT_OK;
+	*result = AS_OK;
 
 	if (m->n_ops == 0) {
 		return NULL;
@@ -817,7 +816,7 @@ bin_names_from_op(as_msg* m, int* result)
 		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
 			cf_warning(AS_SCAN, "basic scan job bin name too long");
 			cf_vector_destroy(v);
-			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
+			*result = AS_ERR_BIN_NAME;
 			return NULL;
 		}
 
@@ -903,13 +902,13 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 			! get_scan_socket_timeout(tr, &timeout)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed msg field processing");
 		cf_free(job);
-		return AS_PROTO_RESULT_FAIL_PARAMETER;
+		return AS_ERR_PARAMETER;
 	}
 
 	if (as_transaction_has_predexp(tr)) {
 		cf_warning(AS_SCAN, "aggregation scans do not support predexp filters");
 		cf_free(job);
-		return AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
 	as_job_init(_job, &aggr_scan_job_vtable, &g_scan_manager, RSV_WRITE,
@@ -918,7 +917,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	if (! aggr_scan_init(&job->aggr_call, tr)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
 		as_job_destroy(_job);
-		return AS_PROTO_RESULT_FAIL_PARAMETER;
+		return AS_ERR_PARAMETER;
 	}
 
 	// Take ownership of socket from transaction.
@@ -938,7 +937,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 //----------------------------------------------------------
@@ -953,8 +952,7 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	cf_buf_builder* bb = cf_buf_builder_create_size(INIT_BUF_BUILDER_SIZE);
 
 	if (! bb) {
-		as_job_manager_abandon_job(_job->mgr, _job,
-				AS_PROTO_RESULT_FAIL_UNKNOWN);
+		as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -991,8 +989,7 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 			aggr_scan_add_val_response(&slice, v, false);
 			as_val_destroy(v);
 			cf_free(rs);
-			as_job_manager_abandon_job(_job->mgr, _job,
-					AS_PROTO_RESULT_FAIL_UNKNOWN);
+			as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
 		}
 
 		as_result_destroy(&result);
@@ -1095,8 +1092,7 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (! aggr_scan_add_digest(slice->ll, &r->keyd)) {
 		as_record_done(r_ref, ns);
-		as_job_manager_abandon_job(_job->mgr, _job,
-				AS_PROTO_RESULT_FAIL_UNKNOWN);
+		as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -1233,7 +1229,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	if (! get_scan_options(tr, &options) || ! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed msg field processing");
 		cf_free(job);
-		return AS_PROTO_RESULT_FAIL_PARAMETER;
+		return AS_ERR_PARAMETER;
 	}
 
 	as_job_init(_job, &udf_bg_scan_job_vtable, &g_scan_manager, RSV_WRITE,
@@ -1248,7 +1244,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	if (! udf_def_init_from_msg(&job->origin.def, tr)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed def init");
 		as_job_destroy(_job);
-		return AS_PROTO_RESULT_FAIL_PARAMETER;
+		return AS_ERR_PARAMETER;
 	}
 
 	job->origin.cb = udf_bg_scan_tr_complete;
@@ -1267,7 +1263,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	if (as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK)) {
+	if (as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_OK)) {
 		tr->from.proto_fd_h->last_used = cf_getns();
 		as_end_of_transaction_ok(tr->from.proto_fd_h);
 	}
@@ -1279,7 +1275,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	tr->from.proto_fd_h = NULL;
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 //----------------------------------------------------------

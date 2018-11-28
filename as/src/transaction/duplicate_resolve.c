@@ -190,7 +190,7 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	if (as_record_get(rsv.tree, keyd, &r_ref) != 0) {
 		done_handle_request(&rsv, NULL, NULL);
-		send_dup_res_ack(node, m, AS_PROTO_RESULT_FAIL_NOT_FOUND);
+		send_dup_res_ack(node, m, AS_ERR_NOT_FOUND);
 		return;
 	}
 
@@ -198,8 +198,7 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	int result;
 
-	if ((result = as_partition_check_source(ns, rsv.p, node, NULL)) !=
-			AS_PROTO_RESULT_OK) {
+	if ((result = as_partition_check_source(ns, rsv.p, node, NULL)) != AS_OK) {
 		done_handle_request(&rsv, &r_ref, NULL);
 		send_dup_res_ack(node, m, result);
 		return;
@@ -216,9 +215,8 @@ dup_res_handle_request(cf_node node, msg* m)
 		}
 
 		done_handle_request(&rsv, &r_ref, NULL);
-		send_dup_res_ack(node, m, result == 0 ?
-				AS_PROTO_RESULT_FAIL_RECORD_EXISTS :
-				AS_PROTO_RESULT_FAIL_GENERATION);
+		send_dup_res_ack(node, m,
+				result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION);
 		return;
 	}
 
@@ -273,7 +271,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	}
 
 	done_handle_request(&rsv, &r_ref, &rd);
-	send_dup_res_ack(node, m, AS_PROTO_RESULT_OK);
+	send_dup_res_ack(node, m, AS_OK);
 }
 
 
@@ -416,7 +414,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 		}
 	}
 
-	if (rw->best_dup_result_code == AS_PROTO_RESULT_OK) {
+	if (rw->best_dup_result_code == AS_OK) {
 		apply_winner(rw); // sets rw->result_code to pass along to callback
 	}
 	else {
@@ -488,7 +486,7 @@ send_ack_for_bad_request(cf_node node, msg* m)
 	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
 
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP_ACK);
-	msg_set_uint32(m, RW_FIELD_RESULT, AS_PROTO_RESULT_FAIL_UNKNOWN); // ???
+	msg_set_uint32(m, RW_FIELD_RESULT, AS_ERR_UNKNOWN); // ???
 
 	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
@@ -503,25 +501,25 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 
 	if (msg_get_uint32(m, RW_FIELD_RESULT, &result_code) != 0) {
 		cf_warning(AS_RW, "dup-res ack: no result_code");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
-	if (result_code != AS_PROTO_RESULT_OK) {
+	if (result_code != AS_OK) {
 		return result_code;
 	}
 
 	if (msg_get_uint32(m, RW_FIELD_GENERATION, p_generation) != 0 ||
 			*p_generation == 0) {
 		cf_warning(AS_RW, "dup-res ack: no or bad generation");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
 	if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, p_last_update_time) != 0) {
 		cf_warning(AS_RW, "dup-res ack: no last-update-time");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -541,7 +539,7 @@ apply_winner(rw_request* rw)
 	if (msg_get_buf(m, RW_FIELD_RECORD, &rr.record_buf, &rr.record_buf_sz,
 			MSG_GET_DIRECT) != 0 || rr.record_buf_sz < 2) {
 		cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: no record ");
-		rw->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		rw->result_code = AS_ERR_UNKNOWN;
 		return;
 	}
 
@@ -551,7 +549,7 @@ apply_winner(rw_request* rw)
 
 	if (dup_res_ignore_pickle(rr.record_buf, info)) {
 		cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: binless pickle ");
-		rw->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		rw->result_code = AS_ERR_UNKNOWN;
 		return;
 	}
 
@@ -569,8 +567,8 @@ apply_winner(rw_request* rw)
 			false);
 
 	// Duplicate resolution just treats these errors as successful no-ops:
-	if (rw->result_code == AS_PROTO_RESULT_FAIL_RECORD_EXISTS ||
-			rw->result_code == AS_PROTO_RESULT_FAIL_GENERATION) {
-		rw->result_code = AS_PROTO_RESULT_OK;
+	if (rw->result_code == AS_ERR_RECORD_EXISTS ||
+			rw->result_code == AS_ERR_GENERATION) {
+		rw->result_code = AS_OK;
 	}
 }

@@ -51,7 +51,7 @@ int
 as_partition_check_source(const as_namespace* ns, as_partition* p, cf_node src,
 		bool* from_replica)
 {
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 

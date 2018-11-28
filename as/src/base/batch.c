@@ -173,7 +173,7 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	cf_free(btr->msgp);
 	btr->msgp = 0;
 
-	if (result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+	if (result_code == AS_ERR_TIMEOUT) {
 		cf_atomic64_incr(&g_stats.batch_index_timeout);
 	}
 	else {
@@ -223,7 +223,7 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 	shared->fd_h = NULL;
 
 	// For now the model is timeouts don't appear in histograms.
-	if (shared->result_code != AS_PROTO_RESULT_FAIL_TIMEOUT) {
+	if (shared->result_code != AS_ERR_TIMEOUT) {
 		G_HIST_ACTIVATE_INSERT_DATA_POINT(batch_index_hist, shared->start);
 	}
 
@@ -232,7 +232,7 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 		cf_atomic64_incr(&g_stats.batch_index_complete);
 	}
 	else {
-		if (shared->result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+		if (shared->result_code == AS_ERR_TIMEOUT) {
 			cf_atomic64_incr(&g_stats.batch_index_timeout);
 		}
 		else {
@@ -665,7 +665,7 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 		as_batch_buffer_complete(shared, prev_buffer);
 	}
 
-	if (! (result_code == AS_PROTO_RESULT_OK || result_code == AS_PROTO_RESULT_FAIL_NOT_FOUND)) {
+	if (! (result_code == AS_OK || result_code == AS_ERR_NOT_FOUND)) {
 		// Result code can be set outside of lock because it doesn't matter which transaction's
 		// result code is used as long as it's an error.
 		shared->result_code = result_code;
@@ -762,7 +762,7 @@ as_batch_queue_task(as_transaction* btr)
 
 	if (thread_size == 0 || thread_size > MAX_BATCH_THREADS) {
 		cf_warning(AS_BATCH, "batch-index-threads has been disabled: %d", thread_size);
-		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_BATCH_DISABLED);
+		return as_batch_send_error(btr, AS_ERR_BATCH_DISABLED);
 	}
 	uint32_t queue_index = counter % thread_size;
 
@@ -772,18 +772,18 @@ as_batch_queue_task(as_transaction* btr)
 	if (bproto->sz > PROTO_SIZE_MAX) {
 		cf_warning(AS_BATCH, "can't process message: invalid size %lu should be %d or less",
 				(uint64_t)bproto->sz, PROTO_SIZE_MAX);
-		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_PARAMETER);
+		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
 	if (bproto->type != PROTO_TYPE_AS_MSG) {
 		cf_warning(AS_BATCH, "Invalid proto type. Expected %d Received %d", PROTO_TYPE_AS_MSG, bproto->type);
-		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_PARAMETER);
+		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
 	// Check that the socket is authenticated.
 	uint8_t result = as_security_check(btr->from.proto_fd_h, PERM_NONE);
 
-	if (result != AS_PROTO_RESULT_OK) {
+	if (result != AS_OK) {
 		as_security_log(btr->from.proto_fd_h, result, PERM_NONE, NULL, NULL);
 		return as_batch_send_error(btr, result);
 	}
@@ -801,7 +801,7 @@ as_batch_queue_task(as_transaction* btr)
 	for (int i = 0; i < bmsg->n_fields; i++) {
 		if ((uint8_t*)mf >= limit) {
 			cf_warning(AS_BATCH, "Batch field limit reached");
-			return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_PARAMETER);
+			return as_batch_send_error(btr, AS_ERR_PARAMETER);
 		}
 		as_msg_swap_field(mf);
 		end = as_msg_field_get_next(mf);
@@ -814,7 +814,7 @@ as_batch_queue_task(as_transaction* btr)
 
 	if (! bf) {
 		cf_warning(AS_BATCH, "Batch index field not found");
-		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_PARAMETER);
+		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
 	// Parse batch field
@@ -824,12 +824,12 @@ as_batch_queue_task(as_transaction* btr)
 
 	if (tran_count == 0) {
 		cf_warning(AS_BATCH, "Batch request size is zero");
-		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_PARAMETER);
+		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
 	if (tran_count > g_config.batch_max_requests) {
 		cf_warning(AS_BATCH, "Batch request size %u exceeds max %u", tran_count, g_config.batch_max_requests);
-		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_BATCH_MAX_REQUESTS);
+		return as_batch_send_error(btr, AS_ERR_BATCH_MAX_REQUESTS);
 	}
 
 	// Initialize shared data
@@ -863,7 +863,7 @@ as_batch_queue_task(as_transaction* btr)
 		if (! batch_queue) {
 			cf_warning(AS_BATCH, "Failed to find active batch queue that is not full");
 			cf_free(shared);
-			return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_BATCH_QUEUES_FULL);
+			return as_batch_send_error(btr, AS_ERR_BATCH_QUEUES_FULL);
 		}
 	}
 	// Increment batch queue transaction count.
@@ -1010,7 +1010,7 @@ TranEnd:
 	if (tran_row < tran_count) {
 		// Mismatch between tran_count and actual data.  Terminate transaction.
 		cf_warning(AS_BATCH, "Batch keys mismatch. Expected %u Received %u", tran_count, tran_row);
-		as_batch_terminate(shared, tran_count - tran_row, AS_PROTO_RESULT_FAIL_PARAMETER);
+		as_batch_terminate(shared, tran_count - tran_row, AS_ERR_PARAMETER);
 	}
 
 	// Reset original socket because socket now owned by batch shared.
@@ -1053,7 +1053,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 
 	if (size > BATCH_MAX_TRANSACTION_SIZE) {
 		cf_warning(AS_BATCH, "Record size %zu exceeds max %d", size, BATCH_MAX_TRANSACTION_SIZE);
-		as_batch_add_error(shared, tr->from_data.batch_index, AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG);
+		as_batch_add_error(shared, tr->from_data.batch_index, AS_ERR_RECORD_TOO_BIG);
 		return;
 	}
 
@@ -1121,7 +1121,7 @@ as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* di
 
 	if (size > BATCH_MAX_TRANSACTION_SIZE) {
 		cf_warning(AS_BATCH, "Record size %zu exceeds max %d", size, BATCH_MAX_TRANSACTION_SIZE);
-		as_batch_add_error(shared, index, AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG);
+		as_batch_add_error(shared, index, AS_ERR_RECORD_TOO_BIG);
 		return;
 	}
 

@@ -126,7 +126,7 @@ float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint
 	// For now we won't allow adding integers (or anything else) to floats.
 	if (wire_type != AS_PARTICLE_TYPE_FLOAT) {
 		cf_warning(AS_PARTICLE, "increment with non float type %u", wire_type);
-		return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
 	uint64_t i;
@@ -137,7 +137,7 @@ float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	(*(double *)pp) += *(double *)&i;
@@ -150,7 +150,7 @@ float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t 
 {
 	if (value_size != 8) {
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	return integer_from_wire(wire_type, wire_value, value_size, pp);
@@ -164,7 +164,7 @@ float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const 
 	}
 
 	if (value_size != 8) {
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	return integer_compare_from_wire(p, AS_PARTICLE_TYPE_INTEGER, wire_value, value_size);

@@ -81,13 +81,13 @@ client_delete_update_stats(as_namespace* ns, uint8_t result_code,
 		bool is_xdr_op)
 {
 	switch (result_code) {
-	case AS_PROTO_RESULT_OK:
+	case AS_OK:
 		cf_atomic64_incr(&ns->n_client_delete_success);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_delete_success);
 		}
 		break;
-	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_delete_timeout);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_delete_timeout);
@@ -99,7 +99,7 @@ client_delete_update_stats(as_namespace* ns, uint8_t result_code,
 			cf_atomic64_incr(&ns->n_xdr_delete_error);
 		}
 		break;
-	case AS_PROTO_RESULT_FAIL_NOT_FOUND:
+	case AS_ERR_NOT_FOUND:
 		cf_atomic64_incr(&ns->n_client_delete_not_found);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_delete_not_found);
@@ -118,19 +118,19 @@ as_delete_start(as_transaction* tr)
 {
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_ALWAYS_FORBIDDEN;
+		tr->result_code = AS_ERR_ALWAYS_FORBIDDEN;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
 	}
 
 	if (! validate_delete_durability(tr)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_FORBIDDEN;
+		tr->result_code = AS_ERR_FORBIDDEN;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
 	}
 
 	if (delete_storage_overloaded(tr)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD;
+		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
 	}
@@ -175,7 +175,7 @@ as_delete_start(as_transaction* tr)
 
 	if (insufficient_replica_destinations(tr->rsv.ns, rw->n_dest_nodes)) {
 		rw_request_hash_delete(&hkey, rw);
-		tr->result_code = AS_PROTO_RESULT_FAIL_UNAVAILABLE;
+		tr->result_code = AS_ERR_UNAVAILABLE;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
 	}
@@ -266,7 +266,7 @@ delete_dup_res_cb(rw_request* rw)
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
-	if (tr.result_code != AS_PROTO_RESULT_OK) {
+	if (tr.result_code != AS_OK) {
 		send_delete_response(&tr);
 		return true;
 	}
@@ -276,7 +276,7 @@ delete_dup_res_cb(rw_request* rw)
 			rw->dest_nodes);
 
 	if (insufficient_replica_destinations(tr.rsv.ns, rw->n_dest_nodes)) {
-		tr.result_code = AS_PROTO_RESULT_FAIL_UNAVAILABLE;
+		tr.result_code = AS_ERR_UNAVAILABLE;
 		send_delete_response(&tr);
 		return true;
 	}
@@ -406,9 +406,9 @@ delete_timeout_cb(rw_request* rw)
 
 	switch (rw->origin) {
 	case FROM_CLIENT:
-		as_msg_send_reply(rw->from.proto_fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT, 0,
-				0, NULL, NULL, 0, rw->rsv.ns, rw_request_trid(rw));
-		client_delete_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT,
+		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
+				0, rw->rsv.ns, rw_request_trid(rw));
+		client_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	case FROM_PROXY:
@@ -438,7 +438,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 	if (! generation_check(r, m, ns)) {
 		as_record_done(r_ref, ns);
 		cf_atomic64_incr(&ns->n_fail_generation);
-		tr->result_code = AS_PROTO_RESULT_FAIL_GENERATION;
+		tr->result_code = AS_ERR_GENERATION;
 		return TRANS_DONE_ERROR;
 	}
 
@@ -454,7 +454,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 				! check_msg_key(m, &rd)) {
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
-			tr->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
+			tr->result_code = AS_ERR_KEY_MISMATCH;
 			return TRANS_DONE_ERROR;
 		}
 

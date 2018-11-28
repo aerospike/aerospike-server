@@ -164,10 +164,10 @@ static inline void
 client_proxy_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
-	case AS_PROTO_RESULT_OK:
+	case AS_OK:
 		cf_atomic64_incr(&ns->n_client_proxy_complete);
 		break;
-	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_proxy_timeout);
 		break;
 	default:
@@ -180,10 +180,10 @@ static inline void
 batch_sub_proxy_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
-	case AS_PROTO_RESULT_OK:
+	case AS_OK:
 		cf_atomic64_incr(&ns->n_batch_sub_proxy_complete);
 		break;
-	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_batch_sub_proxy_timeout);
 		break;
 	default:
@@ -413,7 +413,7 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 	if (msg_get_buf(m, PROXY_FIELD_AS_PROTO, &proto, &proto_sz,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_PROXY, "msg get for proto failed");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
 	as_file_handle* fd_h = pr->from.proto_fd_h;
@@ -422,11 +422,11 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		as_end_of_transaction_force_close(fd_h);
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
 	as_end_of_transaction_ok(fd_h);
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -439,7 +439,7 @@ proxyer_handle_batch_response(msg* m, proxy_request* pr)
 	if (msg_get_buf(m, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp, &msgp_sz,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_PROXY, "msg get for proto failed");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
 	cf_digest* keyd;
@@ -452,7 +452,7 @@ proxyer_handle_batch_response(msg* m, proxy_request* pr)
 	as_batch_add_proxy_result(pr->from.batch_shared, pr->batch_index, keyd,
 			msgp, msgp_sz);
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -537,7 +537,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	if (msg_get_buf(m, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_PROXY, "msg get for digest failed");
-		error_response(src, tid, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -547,7 +547,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	if (msg_get_buf(m, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp, &msgp_sz,
 			MSG_GET_COPY_MALLOC) != 0) {
 		cf_warning(AS_PROXY, "msg get for proto failed");
-		error_response(src, tid, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -557,7 +557,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	if (! as_proto_wrapped_is_valid(proto, msgp_sz)) {
 		cf_warning(AS_PROXY, "bad proto: version %u, type %u, sz %lu [%lu]",
 				proto->version, proto->type, (uint64_t)proto->sz, msgp_sz);
-		error_response(src, tid, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -576,7 +576,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	// Proxyer has already done byte swapping in as_msg.
 	if (! as_transaction_prepare(&tr, false)) {
 		cf_warning(AS_PROXY, "bad proxy msg");
-		error_response(src, tid, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -629,15 +629,15 @@ proxy_timeout_reduce_fn(const void* key, void* data, void* udata)
 	switch (pr->origin) {
 	case FROM_CLIENT:
 		// TODO - when it becomes important enough, find a way to echo trid.
-		as_msg_send_reply(pr->from.proto_fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT, 0,
-				0, NULL, NULL, 0, pr->ns, 0);
-		client_proxy_update_stats(pr->ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
+		as_msg_send_reply(pr->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
+				0, pr->ns, 0);
+		client_proxy_update_stats(pr->ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_BATCH:
 		as_batch_add_error(pr->from.batch_shared, pr->batch_index,
-				AS_PROTO_RESULT_FAIL_TIMEOUT);
+				AS_ERR_TIMEOUT);
 		// Note - no worries about msgp, proxy divert copied it.
-		batch_sub_proxy_update_stats(pr->ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
+		batch_sub_proxy_update_stats(pr->ns, AS_ERR_TIMEOUT);
 		break;
 	default:
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", pr->origin);

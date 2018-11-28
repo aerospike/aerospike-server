@@ -133,7 +133,7 @@ blob_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value
 
 	if (wire_type != p_blob_mem->type) {
 		cf_warning(AS_PARTICLE, "type mismatch concat sizing blob/string, %d:%d", p_blob_mem->type, wire_type);
-		return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
 	return (int32_t)(sizeof(blob_mem) + p_blob_mem->sz + value_size);
@@ -146,7 +146,7 @@ blob_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uin
 
 	if (wire_type != p_blob_mem->type) {
 		cf_warning(AS_PARTICLE, "type mismatch appending to blob/string, %d:%d", p_blob_mem->type, wire_type);
-		return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
 	memcpy(p_blob_mem->data + p_blob_mem->sz, wire_value, value_size);
@@ -162,7 +162,7 @@ blob_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, ui
 
 	if (wire_type != p_blob_mem->type) {
 		cf_warning(AS_PARTICLE, "type mismatch prepending to blob/string, %d:%d", p_blob_mem->type, wire_type);
-		return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
 	memmove(p_blob_mem->data + value_size, p_blob_mem->data, p_blob_mem->sz);
@@ -176,7 +176,7 @@ int
 blob_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
 {
 	cf_warning(AS_PARTICLE, "unexpected increment of blob/string");
-	return -AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int32_t

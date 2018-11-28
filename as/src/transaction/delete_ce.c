@@ -53,14 +53,14 @@ delete_master(as_transaction* tr, rw_request* rw)
 {
 	if (as_transaction_is_durable_delete(tr)) {
 		cf_warning(AS_RW, "durable delete is an enterprise feature");
-		tr->result_code = AS_PROTO_RESULT_FAIL_ENTERPRISE_ONLY;
+		tr->result_code = AS_ERR_ENTERPRISE_ONLY;
 		return TRANS_DONE_ERROR;
 	}
 
 	as_index_ref r_ref;
 
 	if (0 != as_record_get(tr->rsv.tree, &tr->keyd, &r_ref)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_NOT_FOUND;
+		tr->result_code = AS_ERR_NOT_FOUND;
 		return TRANS_DONE_ERROR;
 	}
 

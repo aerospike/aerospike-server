@@ -57,7 +57,7 @@ as_security_init(void)
 uint8_t
 as_security_check(const as_file_handle* fd_h, as_sec_perm perm)
 {
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 // Security is an enterprise feature - here, allow all operations.

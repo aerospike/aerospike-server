@@ -1369,7 +1369,7 @@ as_storage_record_load_n_bins_ssd(as_storage_rd *rd)
 	// If record hasn't been read, read it - sets rd->block_n_bins.
 	if (! rd->block && ssd_read_record(rd) != 0) {
 		cf_warning(AS_DRV_SSD, "load_n_bins: failed ssd_read_record()");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	rd->n_bins = rd->block_n_bins;
@@ -1389,7 +1389,7 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 	// rd->block_n_bins.
 	if (! rd->block && ssd_read_record(rd) != 0) {
 		cf_warning(AS_DRV_SSD, "load_bins: failed ssd_read_record()");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	const uint8_t* p_read = rd->block_bins;
@@ -1398,7 +1398,7 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 	for (uint16_t i = 0; i < rd->block_n_bins; i++) {
 		if (p_read >= end) {
 			cf_warning(AS_DRV_SSD, "incomplete flat bin");
-			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+			return -AS_ERR_UNKNOWN;
 		}
 
 		if (! rd->ns->single_bin) {
@@ -1406,18 +1406,18 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 
 			if (name_len >= AS_BIN_NAME_MAX_SZ) {
 				cf_warning(AS_DRV_SSD, "bad flat bin name");
-				return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+				return -AS_ERR_UNKNOWN;
 			}
 
 			if (p_read + name_len > end) {
 				cf_warning(AS_DRV_SSD, "incomplete flat bin");
-				return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+				return -AS_ERR_UNKNOWN;
 			}
 
 			if (! as_bin_set_id_from_name_w_len(rd->ns, &rd->bins[i], p_read,
 					name_len)) {
 				cf_warning(AS_DRV_SSD, "flat bin name failed to assign id");
-				return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+				return -AS_ERR_UNKNOWN;
 			}
 
 			p_read += name_len;
@@ -1425,18 +1425,18 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 
 		if (! (p_read =
 				as_bin_particle_cast_from_flat(&rd->bins[i], p_read, end))) {
-			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+			return -AS_ERR_UNKNOWN;
 		}
 	}
 
 	if (p_read > end) {
 		cf_warning(AS_DRV_SSD, "incomplete flat bin");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	if (p_read + RBLOCK_SIZE <= end) {
 		cf_warning(AS_DRV_SSD, "extra rblocks follow flat bin");
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return -AS_ERR_UNKNOWN;
 	}
 
 	return 0;
@@ -1831,7 +1831,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 	if (write_size > ssd->write_block_size) {
 		cf_detail_digest(AS_DRV_SSD, &r->keyd, "write: size %u - rejecting ",
 				write_size);
-		return -AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG;
+		return -AS_ERR_RECORD_TOO_BIG;
 	}
 
 	uint8_t *flat = ssd_flatten_compress(rd, &write_size);
@@ -1848,7 +1848,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
 			cf_mutex_unlock(&ssd->write_lock);
-			return -AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
+			return -AS_ERR_OUT_OF_SPACE;
 		}
 	}
 
@@ -1872,7 +1872,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
 			cf_mutex_unlock(&ssd->write_lock);
-			return -AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
+			return -AS_ERR_OUT_OF_SPACE;
 		}
 	}
 

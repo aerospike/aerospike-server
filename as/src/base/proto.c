@@ -384,7 +384,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	m->info2 = 0;
 	m->info3 = 0;
 	m->unused = 0;
-	m->result_code = AS_PROTO_RESULT_OK;
+	m->result_code = AS_OK;
 	m->generation = plain_generation(r->generation, ns);
 	m->record_ttl = r->void_time;
 	m->transaction_ttl = 0;
@@ -595,7 +595,7 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 	m->info2 = 0;
 	m->info3 = 0;
 	m->unused = 0;
-	m->result_code = AS_PROTO_RESULT_OK;
+	m->result_code = AS_OK;
 	m->generation = 0;
 	m->record_ttl = 0;
 	m->transaction_ttl = 0;

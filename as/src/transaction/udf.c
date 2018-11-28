@@ -143,10 +143,10 @@ static inline void
 client_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
-	case AS_PROTO_RESULT_OK:
+	case AS_OK:
 		cf_atomic64_incr(&ns->n_client_udf_complete);
 		break;
-	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_udf_timeout);
 		break;
 	default:
@@ -159,10 +159,10 @@ static inline void
 udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
-	case AS_PROTO_RESULT_OK:
+	case AS_OK:
 		cf_atomic64_incr(&ns->n_udf_sub_udf_complete);
 		break;
-	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_udf_sub_udf_timeout);
 		break;
 	default:
@@ -282,14 +282,14 @@ as_udf_start(as_transaction* tr)
 
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_ALWAYS_FORBIDDEN;
+		tr->result_code = AS_ERR_ALWAYS_FORBIDDEN;
 		send_udf_response(tr, NULL);
 		return TRANS_DONE_ERROR;
 	}
 
 	// Don't know if UDF is read or delete - check that we aren't backed up.
 	if (as_storage_overloaded(tr->rsv.ns)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD;
+		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_udf_response(tr, NULL);
 		return TRANS_DONE_ERROR;
 	}
@@ -332,7 +332,7 @@ as_udf_start(as_transaction* tr)
 
 	if (insufficient_replica_destinations(tr->rsv.ns, rw->n_dest_nodes)) {
 		rw_request_hash_delete(&hkey, rw);
-		tr->result_code = AS_PROTO_RESULT_FAIL_UNAVAILABLE;
+		tr->result_code = AS_ERR_UNAVAILABLE;
 		send_udf_response(tr, NULL);
 		return TRANS_DONE_ERROR;
 	}
@@ -457,7 +457,7 @@ udf_dup_res_cb(rw_request* rw)
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
-	if (tr.result_code != AS_PROTO_RESULT_OK) {
+	if (tr.result_code != AS_OK) {
 		send_udf_response(&tr, NULL);
 		return true;
 	}
@@ -467,7 +467,7 @@ udf_dup_res_cb(rw_request* rw)
 			rw->dest_nodes);
 
 	if (insufficient_replica_destinations(tr.rsv.ns, rw->n_dest_nodes)) {
-		tr.result_code = AS_PROTO_RESULT_FAIL_UNAVAILABLE;
+		tr.result_code = AS_ERR_UNAVAILABLE;
 		send_udf_response(&tr, NULL);
 		return true;
 	}
@@ -620,18 +620,17 @@ udf_timeout_cb(rw_request* rw)
 
 	switch (rw->origin) {
 	case FROM_CLIENT:
-		as_msg_send_reply(rw->from.proto_fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT, 0,
-				0, NULL, NULL, 0, rw->rsv.ns, rw_request_trid(rw));
+		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
+				0, rw->rsv.ns, rw_request_trid(rw));
 		// Timeouts aren't included in histograms.
-		client_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
+		client_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_PROXY:
 		break;
 	case FROM_IUDF:
-		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
-				AS_PROTO_RESULT_FAIL_TIMEOUT);
+		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata, AS_ERR_TIMEOUT);
 		// Timeouts aren't included in histograms.
-		udf_sub_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
+		udf_sub_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
@@ -659,7 +658,7 @@ udf_master(rw_request* rw, as_transaction* tr)
 	}
 	else if (! udf_def_init_from_msg(call.def, tr)) {
 		cf_warning(AS_UDF, "failed udf_def_init_from_msg");
-		tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
+		tr->result_code = AS_ERR_PARAMETER;
 		return TRANS_DONE_ERROR;
 	}
 
@@ -703,7 +702,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	if (tr->origin == FROM_IUDF &&
 			(get_rv == -1 || ! as_record_is_live(r_ref.r))) {
 		// Internal UDFs must not create records.
-		tr->result_code = AS_PROTO_RESULT_FAIL_NOT_FOUND;
+		tr->result_code = AS_ERR_NOT_FOUND;
 		process_failure(call, NULL, &rw->response_db);
 		return UDF_OPTYPE_NONE;
 	}
@@ -729,7 +728,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 		if (udf_storage_record_open(&urecord) != 0) {
 			udf_record_close(&urecord);
-			tr->result_code = AS_PROTO_RESULT_FAIL_BIN_NAME; // overloaded... add bin_count error?
+			tr->result_code = AS_ERR_BIN_NAME; // overloaded... add bin_count error?
 			process_failure(call, NULL, &rw->response_db);
 			return UDF_OPTYPE_NONE;
 		}
@@ -742,7 +741,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 			if (! predexp_matches_record(tr->from.iudf_orig->predexp,
 					&predargs)) {
 				udf_record_close(&urecord);
-				tr->result_code = AS_PROTO_RESULT_FAIL_NOT_FOUND; // not ideal
+				tr->result_code = AS_ERR_NOT_FOUND; // not ideal
 				process_failure(call, NULL, &rw->response_db);
 				return UDF_OPTYPE_NONE;
 			}
@@ -754,7 +753,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		if (rd.key) {
 			if (as_transaction_has_key(tr) && ! check_msg_key(m, &rd)) {
 				udf_record_close(&urecord);
-				tr->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
+				tr->result_code = AS_ERR_KEY_MISMATCH;
 				process_failure(call, NULL, &rw->response_db);
 				return UDF_OPTYPE_NONE;
 			}
@@ -763,7 +762,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 			// If the message has a key, apply it to the record.
 			if (! get_msg_key(tr, &rd)) {
 				udf_record_close(&urecord);
-				tr->result_code = AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+				tr->result_code = AS_ERR_UNSUPPORTED_FEATURE;
 				process_failure(call, NULL, &rw->response_db);
 				return UDF_OPTYPE_NONE;
 			}
@@ -802,7 +801,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 		char* rs = as_module_err_string(apply_rv);
 
-		tr->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
+		tr->result_code = AS_ERR_UDF_EXECUTION;
 		process_failure_str(call, rs, strlen(rs), &rw->response_db);
 		cf_free(rs);
 	}
@@ -1074,7 +1073,7 @@ process_result(const as_result* result, udf_call* call, cf_dyn_buf* db)
 	// Failures...
 
 	if (as_val_type(val) == AS_STRING) {
-		call->tr->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
+		call->tr->result_code = AS_ERR_UDF_EXECUTION;
 		process_failure(call, val, db);
 		return;
 	}
@@ -1084,7 +1083,7 @@ process_result(const as_result* result, udf_call* call, cf_dyn_buf* db)
 			"%s:0: in function %s() - error() argument type not handled",
 			call->def->filename, call->def->function);
 
-	call->tr->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
+	call->tr->result_code = AS_ERR_UDF_EXECUTION;
 	process_failure_str(call, lua_err_str, len, db);
 }
 

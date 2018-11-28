@@ -216,10 +216,10 @@ geojson_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 
 	if (! geojson_to_particle(json, jlen, pp)) {
 		cf_warning(AS_PARTICLE, "geojson_from_wire() failed");
-		return -AS_PROTO_RESULT_FAIL_GEO_INVALID_GEOJSON;
+		return -AS_ERR_GEO_INVALID_GEOJSON;
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 uint32_t

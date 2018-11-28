@@ -86,7 +86,7 @@ rw_request_create(cf_digest* keyd)
 	AS_PARTITION_RESERVATION_INIT(rw->rsv);
 
 	rw->end_time			= 0;
-	rw->result_code			= AS_PROTO_RESULT_OK;
+	rw->result_code			= AS_OK;
 	rw->flags				= 0;
 	rw->generation			= 0;
 	rw->void_time			= 0;
@@ -129,7 +129,7 @@ rw_request_create(cf_digest* keyd)
 	rw->n_dest_nodes = 0;
 
 	rw->best_dup_msg = NULL;
-	rw->best_dup_result_code = AS_PROTO_RESULT_OK;
+	rw->best_dup_result_code = AS_OK;
 	rw->best_dup_gen = 0;
 	rw->best_dup_lut = 0;
 

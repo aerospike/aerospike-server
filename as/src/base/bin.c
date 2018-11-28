@@ -315,7 +315,7 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 		cf_warning(AS_BIN, "bin name too long (%lu)", len);
 
 		if (result) {
-			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
+			*result = AS_ERR_BIN_NAME;
 		}
 
 		return NULL;
@@ -336,7 +336,7 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 
 	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
 		if (result) {
-			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
+			*result = AS_ERR_BIN_NAME;
 		}
 
 		return NULL;
@@ -399,7 +399,7 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
 				ns->name, zname);
 
 		if (result) {
-			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
+			*result = AS_ERR_BIN_NAME;
 		}
 
 		return NULL;
@@ -415,7 +415,7 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
 
 	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
 		if (result) {
-			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
+			*result = AS_ERR_BIN_NAME;
 		}
 
 		return NULL;

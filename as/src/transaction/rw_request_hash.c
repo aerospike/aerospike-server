@@ -233,7 +233,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 		cf_detail_digest(AS_RW, &tr->keyd, "{%s} key busy ", ns->name);
 
 		cf_atomic64_incr(&ns->n_fail_key_busy);
-		tr->result_code = AS_PROTO_RESULT_FAIL_KEY_BUSY;
+		tr->result_code = AS_ERR_KEY_BUSY;
 
 		return TRANS_DONE_ERROR;
 	}

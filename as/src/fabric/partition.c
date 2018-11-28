@@ -306,14 +306,14 @@ as_partition_reserve_replica(as_namespace* ns, uint32_t pid,
 
 	if (! is_self_replica(p)) {
 		cf_mutex_unlock(&p->lock);
-		return AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+		return AS_ERR_CLUSTER_KEY_MISMATCH;
 	}
 
 	partition_reserve_lockfree(p, ns, rsv);
 
 	cf_mutex_unlock(&p->lock);
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 // Returns:

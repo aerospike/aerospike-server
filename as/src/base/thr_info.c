@@ -1618,7 +1618,7 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (rv == -2) {
 		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_PROTO_RESULT_FAIL_PARAMETER);
+		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
 		cf_dyn_buf_append_string(db, ":\"module\" parameter too long (> ");
 		cf_dyn_buf_append_int(db, module_len-1);
 		cf_dyn_buf_append_string(db, " chars)");
@@ -1632,7 +1632,7 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (rv == -2) {
 		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_PROTO_RESULT_FAIL_PARAMETER);
+		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
 		cf_dyn_buf_append_string(db, ":\"cmd\" parameter too long (> ");
 		cf_dyn_buf_append_int(db, cmd_len-1);
 		cf_dyn_buf_append_string(db, " chars)");
@@ -1645,13 +1645,13 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (rv == -1) {
 		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_PROTO_RESULT_FAIL_PARAMETER);
+		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
 		cf_dyn_buf_append_string(db, ":no \"trid\" parameter specified");
 		return 0;
 	}
 	else if (rv == -2) {
 		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_PROTO_RESULT_FAIL_PARAMETER);
+		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
 		cf_dyn_buf_append_string(db, ":\"trid\" parameter too long (> ");
 		cf_dyn_buf_append_int(db, job_id_len-1);
 		cf_dyn_buf_append_string(db, " chars)");
@@ -1664,7 +1664,7 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (rv == -2) {
 		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_PROTO_RESULT_FAIL_PARAMETER);
+		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
 		cf_dyn_buf_append_string(db, ":\"value\" parameter too long (> ");
 		cf_dyn_buf_append_int(db, val_len-1);
 		cf_dyn_buf_append_string(db, " chars)");
@@ -4330,7 +4330,7 @@ info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 {
 	uint8_t auth_result = as_security_check(fd_h, PERM_NONE);
 
-	if (auth_result != AS_PROTO_RESULT_OK) {
+	if (auth_result != AS_OK) {
 		as_security_log(fd_h, auth_result, PERM_NONE, "info-all request", NULL);
 		append_sec_err_str(db, auth_result, PERM_NONE);
 		cf_dyn_buf_append_char(db, EOL);
@@ -4372,7 +4372,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 {
 	uint8_t auth_result = as_security_check(fd_h, PERM_NONE);
 
-	if (auth_result != AS_PROTO_RESULT_OK) {
+	if (auth_result != AS_OK) {
 		// TODO - log null-terminated buf as detail?
 		as_security_log(fd_h, auth_result, PERM_NONE, "info request", NULL);
 		append_sec_err_str(db, auth_result, PERM_NONE);
@@ -4481,7 +4481,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 
 					as_security_log(fd_h, result, cmd->required_perm, name, param);
 
-					if (result == AS_PROTO_RESULT_OK) {
+					if (result == AS_OK) {
 						cmd->command_fn(cmd->name, param, db);
 					}
 					else {
@@ -5576,15 +5576,13 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 			&indname_len);
 	if ( ret == -1 ) {
 		cf_warning(AS_INFO, "%s : Failed. Missing Index name.", OP);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Missing Index name");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Missing Index name");
 		return AS_SINDEX_ERR_PARAM;
 	}
 	else if ( ret == -2 ) {
 		cf_warning(AS_INFO, "%s : Failed. Index name longer than allowed %d.",
 				OP, AS_ID_INAME_SZ-1);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Index name too long");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Index name too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
 
@@ -5596,14 +5594,14 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	ret = as_info_parameter_get(params, STR_NS, ns_str, &ns_len);
 	if ( ret == -1 ) {
 		cf_warning(AS_INFO, "%s : Failed. Missing Namespace name.", cmd);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Missing Namespace name");
 		return AS_SINDEX_ERR_PARAM;
 	}
 	else if (ret == -2 ) {
 		cf_warning(AS_INFO, "%s : Failed. Namespace name longer than allowed %d.",
 				cmd, AS_ID_NAMESPACE_SZ - 1);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Namespace name too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -5612,14 +5610,13 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	if (! ns) {
 		cf_warning(AS_INFO, "%s : Failed. Namespace '%s' not found %d",
 				cmd, ns_str, ns_len);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Namespace Not Found");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Namespace Not Found");
 		return AS_SINDEX_ERR_PARAM;
 	}
 	if (ns->single_bin) {
 		cf_warning(AS_INFO, "%s : Failed. Secondary Index is not allowed on single bin "
 				"namespace '%s'.", cmd, ns_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Single bin namespace");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Single bin namespace");
 		return AS_SINDEX_ERR_PARAM;
 	}
 
@@ -5633,7 +5630,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	if (!ret && set_len != 0) {
 		if (as_namespace_get_create_set_w_len(ns, set_str, set_len, NULL, NULL)
 				!= 0) {
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 					"Set name quota full");
 			return AS_SINDEX_ERR_PARAM;
 		}
@@ -5641,8 +5638,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	} else if (ret == -2) {
 		cf_warning(AS_INFO, "%s : Failed. Setname longer than %d for index.",
 				cmd, AS_SET_NAME_MAX_SIZE - 1);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Set name too long");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Set name too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
 
@@ -5676,8 +5672,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	else if (ret == -2) {
 		cf_warning(AS_INFO, "%s : Failed. Indextype str longer than allowed %d.",
 				cmd, AS_SINDEX_TYPE_STR_SIZE-1);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Indextype is too long");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Indextype is too long");
 		return AS_SINDEX_ERR_PARAM;
 
 	}
@@ -5697,7 +5692,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		else {
 			cf_warning(AS_INFO, "%s : Failed. Invalid indextype '%s'.", cmd,
 					indextype_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 					"Invalid indextype. Should be one of [DEFAULT, LIST, MAPKEYS, MAPVALUES]");
 			return AS_SINDEX_ERR_PARAM;
 		}
@@ -5710,8 +5705,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 				&indexdata_len)) {
 		cf_warning(AS_INFO, "%s : Failed. Invalid indexdata '%s'.", cmd,
 				indexdata_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Invalid indexdata");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Invalid indexdata");
 		return AS_SINDEX_ERR_PARAM;
 	}
 
@@ -5720,7 +5714,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	if ((cf_vector_size(str_v)) > 2) {
 		cf_warning(AS_INFO, "%s : Failed. >1 bins specified in indexdata.",
 				cmd);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Number of bins more than 1");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
@@ -5730,8 +5724,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	cf_vector_get(str_v, 0, &path_str);
 	if (! path_str) {
 		cf_warning(AS_INFO, "%s : Failed. Missing Bin Name.", cmd);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Missing Bin name");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Missing Bin name");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -5739,8 +5732,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	if (as_sindex_extract_bin_path(imd, path_str)
 			|| ! imd->bname) {
 		cf_warning(AS_INFO, "%s : Failed. Invalid Bin Path '%s'.", cmd, path_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Invalid Bin path");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Invalid Bin path");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -5748,7 +5740,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	if (imd->bname && strlen(imd->bname) >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_INFO, "%s : Failed. Bin Name longer than allowed %d",
 				cmd, AS_BIN_NAME_MAX_SZ - 1);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Bin Name too long");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Bin Name too long");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -5757,8 +5749,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	cf_vector_get(str_v, 1, &type_str);
 	if (! type_str) {
 		cf_warning(AS_INFO, "%s : Failed. Missing Bin type", cmd);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Missing Bin Type.");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Missing Bin Type.");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -5766,7 +5757,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	as_sindex_ktype ktype = as_sindex_ktype_from_string(type_str);
 	if (ktype == COL_TYPE_INVALID) {
 		cf_warning(AS_INFO, "%s : Failed. Invalid Bin type '%s'.", cmd, type_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Invalid Bin type. Supported types [Numeric, String, Geo2dsphere]");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
@@ -5805,13 +5796,13 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 		cf_warning(AS_INFO, "SINDEX CREATE: Index already exists on namespace '%s', either with same name '%s' or same bin '%s' / type '%s' combination.",
 				imd.ns_name, imd.iname, imd.bname,
 				as_sindex_ktype_str(imd.sktype));
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_FOUND,
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_SINDEX_FOUND,
 				"Index with the same name already exists or this bin has already been indexed.");
 		goto ERR;
 	}
 	else if (res == AS_SINDEX_ERR_MAXCOUNT) {
 		cf_warning(AS_INFO, "SINDEX CREATE : More than %d index are not allowed per namespace.", AS_SINDEX_MAX);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT,
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_SINDEX_MAX_COUNT,
 				"Reached maximum number of sindex allowed");
 		goto ERR;
 	}
@@ -5828,7 +5819,7 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 		if (res != 0) {
 			cf_warning(AS_INFO, "SINDEX CREATE : Queuing the index %s metadata to SMD failed with error %s",
 					imd.iname, as_sindex_err_str(res));
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, as_sindex_err_str(res));
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, as_sindex_err_str(res));
 			goto ERR;
 		}
 	}
@@ -5866,7 +5857,7 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 	if (!as_sindex_delete_checker(ns, &imd)) {
 		cf_warning(AS_INFO, "SINDEX DROP : Index %s:%s does not exist on the system",
 				imd.ns_name, imd.iname);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_NOTFOUND,
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_SINDEX_NOT_FOUND,
 				"Index does not exist on the system.");
 		goto ERR;
 	}
@@ -5887,7 +5878,7 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 		if (0 != res) {
 			cf_warning(AS_INFO, "SINDEX DROP : Queuing the index %s metadata to SMD failed with error %s",
 					imd.iname, as_sindex_err_str(res));
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, as_sindex_err_str(res));
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, as_sindex_err_str(res));
 			goto ERR;
 		}
 	}
@@ -5922,12 +5913,12 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 		if (ret == -2) {
 			cf_warning(AS_INFO, "%s : namespace name exceeds max length %d",
 				sindex_cmd, AS_ID_NAMESPACE_SZ);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Namespace name exceeds max length");
 		}
 		else {
 			cf_warning(AS_INFO, "%s : invalid namespace %s", sindex_cmd, ns_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Namespace Not Specified");
 		}
 		return -1;
@@ -5936,8 +5927,7 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 	*ns = as_namespace_get_byname(ns_str);
 	if (!*ns) {
 		cf_warning(AS_INFO, "%s : namespace %s not found", sindex_cmd, ns_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Namespace Not Found");
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Namespace Not Found");
 		return -1;
 	}
 
@@ -5948,12 +5938,12 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 	if (ret) {
 		if (ret == -2) {
 			cf_warning(AS_INFO, "%s : indexname exceeds max length %d", sindex_cmd, AS_ID_INAME_SZ);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Index Name exceeds max length");
 		}
 		else {
 			cf_warning(AS_INFO, "%s : invalid indexname %s", sindex_cmd, index_name_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
 				"Index Name Not Specified");
 		}
 		return -1;
@@ -5981,7 +5971,7 @@ int info_command_abort_scan(char *name, char *params, cf_dyn_buf *db) {
 
 	if (rv != 0) {
 		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_PROTO_RESULT_FAIL_NOT_FOUND);
+		cf_dyn_buf_append_int(db, AS_ERR_NOT_FOUND);
 		cf_dyn_buf_append_string(db, ":Transaction Not Found");
 	}
 	else {
@@ -6133,7 +6123,7 @@ int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 		as_namespace *ns = as_namespace_get_byname(ns_str);
 		if (!ns) {
 			cf_warning(AS_INFO, "SINDEX LIST : ns %s not found", ns_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Namespace Not Found");
+			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, "Namespace Not Found");
 			return 0;
 		} else {
 			if (as_sindex_list_str(ns, db)) {

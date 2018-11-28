@@ -208,7 +208,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	if (msg_get_buf(m, RW_FIELD_NAMESPACE, &ns_name, &ns_name_len,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "repl_write_handle_op: no namespace");
-		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -216,7 +216,7 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	if (! ns) {
 		cf_warning(AS_RW, "repl_write_handle_op: invalid namespace");
-		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -225,7 +225,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "repl_write_handle_op: no digest");
-		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -233,7 +233,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	uint32_t result = as_partition_reserve_replica(ns, as_partition_getid(keyd),
 			&rsv);
 
-	if (result != AS_PROTO_RESULT_OK) {
+	if (result != AS_OK) {
 		send_repl_write_ack(node, m, result);
 		return;
 	}
@@ -244,7 +244,7 @@ repl_write_handle_op(cf_node node, msg* m)
 			&rr.record_buf_sz, MSG_GET_DIRECT) != 0 || rr.record_buf_sz < 2) {
 		cf_warning(AS_RW, "repl_write_handle_op: no or bad record");
 		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -259,7 +259,7 @@ repl_write_handle_op(cf_node node, msg* m)
 				node);
 
 		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_PROTO_RESULT_OK);
+		send_repl_write_ack(node, m, AS_OK);
 
 		return;
 	}
@@ -268,7 +268,7 @@ repl_write_handle_op(cf_node node, msg* m)
 			rr.generation == 0) {
 		cf_warning(AS_RW, "repl_write_handle_op: no or bad generation");
 		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -276,7 +276,7 @@ repl_write_handle_op(cf_node node, msg* m)
 			&rr.last_update_time) != 0) {
 		cf_warning(AS_RW, "repl_write_handle_op: no last-update-time");
 		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
 	}
 
@@ -479,7 +479,7 @@ parse_result_code(msg* m)
 
 	if (msg_get_uint32(m, RW_FIELD_RESULT, &result_code) != 0) {
 		cf_warning(AS_RW, "repl-write ack: no result_code");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
 	return result_code;

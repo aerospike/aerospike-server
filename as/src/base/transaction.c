@@ -77,7 +77,7 @@ as_transaction_init_body(as_transaction *tr)
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 
 	tr->end_time			= 0;
-	tr->result_code			= AS_PROTO_RESULT_OK;
+	tr->result_code			= AS_OK;
 	tr->flags				= 0;
 	tr->generation			= 0;
 	tr->void_time			= 0;
@@ -313,7 +313,7 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 
 #define UPDATE_ERROR_STATS(name) \
 	if (ns) { \
-		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) { \
+		if (error_code == AS_ERR_TIMEOUT) { \
 			cf_atomic64_incr(&ns->n_##name##_tsvc_timeout); \
 		} \
 		else { \
@@ -329,7 +329,7 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 {
 	if (error_code == 0) {
 		cf_warning(AS_PROTO, "converting error code 0 to 1 (unknown)");
-		error_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		error_code = AS_ERR_UNKNOWN;
 	}
 
 	// The 'from' checks below are unnecessary, only paranoia.
@@ -385,7 +385,7 @@ as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 {
 	if (error_code == 0) {
 		cf_warning(AS_PROTO, "converting error code 0 to 1 (unknown)");
-		error_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		error_code = AS_ERR_UNKNOWN;
 	}
 
 	switch (tr->origin) {

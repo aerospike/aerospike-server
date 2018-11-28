@@ -210,14 +210,14 @@ inline bool as_sindex_isactive(as_sindex *si)
 // Translation from sindex internal error code to generic client visible Aerospike error code
 uint8_t as_sindex_err_to_clienterr(int err, char *fname, int lineno) {
 	switch (err) {
-		case AS_SINDEX_ERR_FOUND:        return AS_PROTO_RESULT_FAIL_INDEX_FOUND;
-		case AS_SINDEX_ERR_INAME_MAXLEN: return AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN;
-		case AS_SINDEX_ERR_MAXCOUNT:     return AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT;
-		case AS_SINDEX_ERR_NOTFOUND:     return AS_PROTO_RESULT_FAIL_INDEX_NOTFOUND;
-		case AS_SINDEX_ERR_NOT_READABLE: return AS_PROTO_RESULT_FAIL_INDEX_NOTREADABLE;
-		case AS_SINDEX_ERR_NO_MEMORY:    return AS_PROTO_RESULT_FAIL_INDEX_OOM;
-		case AS_SINDEX_ERR_PARAM:        return AS_PROTO_RESULT_FAIL_PARAMETER;
-		case AS_SINDEX_OK:               return AS_PROTO_RESULT_OK;
+		case AS_SINDEX_ERR_FOUND:        return AS_ERR_SINDEX_FOUND;
+		case AS_SINDEX_ERR_INAME_MAXLEN: return AS_ERR_SINDEX_NAME;
+		case AS_SINDEX_ERR_MAXCOUNT:     return AS_ERR_SINDEX_MAX_COUNT;
+		case AS_SINDEX_ERR_NOTFOUND:     return AS_ERR_SINDEX_NOT_FOUND;
+		case AS_SINDEX_ERR_NOT_READABLE: return AS_ERR_SINDEX_NOT_READABLE;
+		case AS_SINDEX_ERR_NO_MEMORY:    return AS_ERR_SINDEX_OOM;
+		case AS_SINDEX_ERR_PARAM:        return AS_ERR_PARAMETER;
+		case AS_SINDEX_OK:               return AS_OK;
 
 		// Defensive internal error
 		case AS_SINDEX_ERR:
@@ -226,8 +226,8 @@ uint8_t as_sindex_err_to_clienterr(int err, char *fname, int lineno) {
 		case AS_SINDEX_ERR_TYPE_MISMATCH:
 		case AS_SINDEX_ERR_UNKNOWN_KEYTYPE:
 		default: cf_warning(AS_SINDEX, "%s %d Error at %s,%d",
-							 as_sindex_err_str(err), err, fname, lineno);
-											return AS_PROTO_RESULT_FAIL_INDEX_GENERIC;
+				as_sindex_err_str(err), err, fname, lineno);
+		return AS_ERR_SINDEX_GENERIC;
 	}
 }
 

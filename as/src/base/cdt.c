@@ -540,10 +540,10 @@ result_data_set_index_rank_count(cdt_result_data *rd, uint32_t start,
 	}
 	default:
 		cf_warning(AS_PARTICLE, "result_data_set_index_rank_count() invalid return type %d", rd->type);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 int
@@ -567,7 +567,7 @@ result_data_set_range(cdt_result_data *rd, uint32_t start, uint32_t count,
 	case RESULT_TYPE_RANK_RANGE: {
 		if (result_data_is_inverted(rd)) {
 			cf_warning(AS_PARTICLE, "result_data_set_range() result_type %d not supported with INVERTED flag", rd->type);
-			return -AS_PROTO_RESULT_FAIL_PARAMETER;
+			return -AS_ERR_PARAMETER;
 		}
 
 		result_data_set_list_int2x(rd, start, count);
@@ -575,10 +575,10 @@ result_data_set_range(cdt_result_data *rd, uint32_t start, uint32_t count,
 	}
 	default:
 		cf_warning(AS_PARTICLE, "result_data_set_range() invalid return type %d", rd->type);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 // Does not respect inverted flag.
@@ -1207,19 +1207,19 @@ as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result,
 	cdt_process_state state;
 
 	if (! cdt_process_state_init(&state, op)) {
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	cdt_modify_data udata = {
 			.b = b,
 			.result = result,
 			.alloc_buf = particles_llb,
-			.ret_code = AS_PROTO_RESULT_OK,
+			.ret_code = AS_OK,
 	};
 
 	bool success;
 
-	if ((int)state.type <= (int)AS_CDT_OP_LIST_LAST) {
+	if (IS_CDT_LIST_OP(state.type)) {
 		success = cdt_process_state_packed_list_modify_optype(&state, &udata);
 	}
 	else {
@@ -1240,18 +1240,18 @@ as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result)
 	cdt_process_state state;
 
 	if (! cdt_process_state_init(&state, op)) {
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		return -AS_ERR_PARAMETER;
 	}
 
 	cdt_read_data udata = {
 			.b = b,
 			.result = result,
-			.ret_code = AS_PROTO_RESULT_OK,
+			.ret_code = AS_OK,
 	};
 
 	bool success;
 
-	if ((int)state.type <= AS_CDT_OP_LIST_LAST) {
+	if (IS_CDT_LIST_OP(state.type)) {
 		success = cdt_process_state_packed_list_read_optype(&state, &udata);
 	}
 	else {

@@ -221,7 +221,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 	if (tr->origin == FROM_CLIENT) {
 		uint8_t result = as_security_check(tr->from.proto_fd_h, PERM_NONE);
 
-		if (result != AS_PROTO_RESULT_OK) {
+		if (result != AS_OK) {
 			as_security_log(tr->from.proto_fd_h, result, PERM_NONE, NULL, NULL);
 			as_transaction_error(tr, NULL, (uint32_t)result);
 			goto Cleanup;
@@ -233,7 +233,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	if (! nf) {
 		cf_warning(AS_TSVC, "no namespace in protocol request");
-		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_NAMESPACE);
+		as_transaction_error(tr, NULL, AS_ERR_NAMESPACE);
 		goto Cleanup;
 	}
 
@@ -246,14 +246,14 @@ as_tsvc_process_transaction(as_transaction *tr)
 		cf_warning(AS_TSVC, "unknown namespace %s (%u) in protocol request - check configuration file",
 				ns_name, ns_sz);
 
-		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_NAMESPACE);
+		as_transaction_error(tr, NULL, AS_ERR_NAMESPACE);
 		goto Cleanup;
 	}
 
 	// Have we finished the very first partition balance?
 	if (! as_partition_balance_is_init_resolved()) {
 		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
-		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		as_transaction_error(tr, NULL, AS_ERR_UNAVAILABLE);
 		// Note that we forfeited namespace info above so scan & query don't get
 		// counted as single-record error.
 		goto Cleanup;
@@ -274,8 +274,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 		if (as_transaction_is_batch_direct(tr)) {
 			// Old batch - deprecated.
-			as_multi_rec_transaction_error(tr,
-					AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE);
+			as_multi_rec_transaction_error(tr, AS_ERR_UNSUPPORTED_FEATURE);
 		}
 		else if (as_transaction_is_query(tr)) {
 			// Query.
@@ -327,7 +326,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 	// Did the transaction time out while on the queue?
 	if (cf_getns() > tr->end_time) {
 		cf_debug(AS_TSVC, "transaction timed out in queue");
-		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
+		as_transaction_error(tr, ns, AS_ERR_TIMEOUT);
 		goto Cleanup;
 	}
 
@@ -341,7 +340,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 		if (digest_sz != sizeof(cf_digest)) {
 			cf_warning(AS_TSVC, "digest msg field size %u", digest_sz);
-			as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_PARAMETER);
+			as_transaction_error(tr, ns, AS_ERR_PARAMETER);
 			goto Cleanup;
 		}
 
@@ -393,13 +392,13 @@ as_tsvc_process_transaction(as_transaction *tr)
 	}
 	else {
 		cf_warning(AS_TSVC, "transaction is neither read nor write - unexpected");
-		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_PARAMETER);
+		as_transaction_error(tr, ns, AS_ERR_PARAMETER);
 		goto Cleanup;
 	}
 
 	if (rv == -2) {
 		// Partition is unavailable.
-		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		as_transaction_error(tr, ns, AS_ERR_UNAVAILABLE);
 		goto Cleanup;
 	}
 
@@ -470,8 +469,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.proxy_node = 0; // pattern, not needed
 			break;
 		case FROM_IUDF:
-			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata,
-					AS_PROTO_RESULT_FAIL_UNKNOWN);
+			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, AS_ERR_UNKNOWN);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 			break;
 		case FROM_NSUP:

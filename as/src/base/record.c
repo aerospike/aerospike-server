@@ -353,7 +353,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 
 	if (! as_storage_has_space(ns)) {
 		cf_warning(AS_RECORD, "{%s} record replace: drives full", ns->name);
-		return AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
+		return AS_ERR_OUT_OF_SPACE;
 	}
 
 	CF_ALLOC_SET_NS_ARENA(ns);
@@ -364,7 +364,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 	int rv = as_record_get_create(tree, rr->keyd, &r_ref, ns);
 
 	if (rv < 0) {
-		return AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
+		return AS_ERR_OUT_OF_SPACE;
 	}
 
 	bool is_create = rv == 1;
@@ -378,7 +378,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 		bool from_replica;
 
 		if ((result = as_partition_check_source(ns, rr->rsv->p, rr->src,
-				&from_replica)) != AS_PROTO_RESULT_OK) {
+				&from_replica)) != AS_OK) {
 			record_replace_failed(rr, &r_ref, NULL, is_create);
 			return result;
 		}
@@ -389,7 +389,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 
 	if (! is_create && record_replace_check(r, ns) < 0) {
 		record_replace_failed(rr, &r_ref, NULL, is_create);
-		return AS_PROTO_RESULT_FAIL_FORBIDDEN;
+		return AS_ERR_FORBIDDEN;
 	}
 
 	// If local record is better, no-op or fail.
@@ -397,9 +397,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 			r->generation, r->last_update_time, (uint16_t)rr->generation,
 			rr->last_update_time)) <= 0) {
 		record_replace_failed(rr, &r_ref, NULL, is_create);
-		return result == 0 ?
-				AS_PROTO_RESULT_FAIL_RECORD_EXISTS :
-				AS_PROTO_RESULT_FAIL_GENERATION;
+		return result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION;
 	}
 	// else - remote winner - apply it.
 
@@ -416,7 +414,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 		// Don't write record if it would be truncated.
 		if (as_truncate_record_is_truncated(r, ns)) {
 			record_replace_failed(rr, &r_ref, NULL, is_create);
-			return AS_PROTO_RESULT_OK;
+			return AS_OK;
 		}
 	}
 	// else - not bothering to check that sets match.
@@ -474,7 +472,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 		xdr_write_replica(rr, is_delete, set_id);
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -562,7 +560,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	if (n_new_bins > 1) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: single-bin got %u bins ", ns->name, n_new_bins);
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
 	// Keep old bin intact for unwinding, clear record bin for incoming.
@@ -600,7 +598,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
 	*is_delete = n_new_bins == 0;
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -693,7 +691,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
 	*is_delete = n_new_bins == 0;
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -708,7 +706,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	if (n_new_bins > 1) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: single-bin got %u bins ", ns->name, n_new_bins);
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
 	as_bin stack_bin = { { 0 } };
@@ -750,7 +748,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	cf_ll_buf_free(&particles_llb);
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -832,7 +830,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	cf_ll_buf_free(&particles_llb);
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
@@ -880,7 +878,7 @@ unpickle_bins(as_remote_record *rr, as_storage_rd *rd, cf_ll_buf *particles_llb)
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
 		if (buf >= end) {
 			cf_warning(AS_RECORD, "incomplete pickled record");
-			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+			return AS_ERR_UNKNOWN;
 		}
 
 		uint8_t name_sz = *buf++;
@@ -891,7 +889,7 @@ unpickle_bins(as_remote_record *rr, as_storage_rd *rd, cf_ll_buf *particles_llb)
 
 		if (buf > end) {
 			cf_warning(AS_RECORD, "incomplete pickled record");
-			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+			return AS_ERR_UNKNOWN;
 		}
 
 		int result;
@@ -917,10 +915,10 @@ unpickle_bins(as_remote_record *rr, as_storage_rd *rd, cf_ll_buf *particles_llb)
 
 	if (buf != end) {
 		cf_warning(AS_RECORD, "extra bytes on pickled record");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		return AS_ERR_UNKNOWN;
 	}
 
-	return AS_PROTO_RESULT_OK;
+	return AS_OK;
 }
 
 
