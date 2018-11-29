@@ -73,7 +73,6 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/partition_balance.h"
-#include "storage/drv_ssd.h"
 #include "storage/storage.h"
 
 
@@ -4310,7 +4309,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		ns->tree_shared.sprigs_offset		= sprigs_offset;
 		ns->tree_shared.puddles_offset		= puddles_offset;
 
-		ssd_init_encryption_key(ns);
+		as_storage_cfg_init(ns);
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
 

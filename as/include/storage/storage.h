@@ -61,6 +61,14 @@ typedef enum {
 #define AS_STORAGE_MAX_DEVICES 128 // maximum devices or files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024 * 1024 * 1024 * 1024) // 2Tb
 
+// Artificial limit on write-block-size, in case we ever move to an
+// SSD_HEADER_SIZE that's too big to be a write-block size limit.
+// MAX_WRITE_BLOCK_SIZE must be power of 2 and <= SSD_HEADER_SIZE.
+#define MAX_WRITE_BLOCK_SIZE (8 * 1024 * 1024)
+
+// Artificial limit on write-block-size, must be power of 2 and >= RBLOCK_SIZE.
+#define MIN_WRITE_BLOCK_SIZE (1024 * 1)
+
 typedef enum {
 	AS_COMPRESSION_NONE,
 	AS_COMPRESSION_LZ4,
@@ -140,6 +148,7 @@ typedef struct storage_device_stats_s {
 // through storage-engine "v-tables".
 //
 
+void as_storage_cfg_init(struct as_namespace_s *ns);
 void as_storage_init();
 void as_storage_load();
 void as_storage_start_tomb_raider();
@@ -182,7 +191,6 @@ int as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD
 // Get record storage metadata.
 uint32_t as_storage_record_size(const struct as_namespace_s *ns, const struct as_index_s *r);
 
-
 //------------------------------------------------
 // Generic functions that don't use "v-tables".
 //
@@ -196,7 +204,6 @@ bool as_storage_record_get_key(as_storage_rd *rd);
 
 // Called only at shutdown to flush all device write-queues.
 void as_storage_shutdown(uint32_t instance);
-
 
 //------------------------------------------------
 // AS_STORAGE_ENGINE_MEMORY functions.
@@ -212,11 +219,11 @@ void as_storage_load_pmeta_memory(struct as_namespace_s *ns, struct as_partition
 
 int as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
 
-
 //------------------------------------------------
 // AS_STORAGE_ENGINE_SSD functions.
 //
 
+void as_storage_cfg_init_ssd(struct as_namespace_s *ns);
 void as_storage_namespace_init_ssd(struct as_namespace_s *ns);
 void as_storage_namespace_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q);
 void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);

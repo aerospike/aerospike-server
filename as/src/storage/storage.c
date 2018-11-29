@@ -50,6 +50,24 @@
 //
 
 //--------------------------------------
+// as_storage_cfg_init
+//
+
+typedef void (*as_storage_cfg_init_fn)(as_namespace *ns);
+static const as_storage_cfg_init_fn as_storage_cfg_init_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't need this
+	as_storage_cfg_init_ssd
+};
+
+void
+as_storage_cfg_init(as_namespace *ns)
+{
+	if (as_storage_cfg_init_table[ns->storage_type]) {
+		as_storage_cfg_init_table[ns->storage_type](ns);
+	}
+}
+
+//--------------------------------------
 // as_storage_init
 //
 

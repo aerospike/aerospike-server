@@ -318,14 +318,6 @@ typedef struct drv_ssds_s {
 // Private API - for enterprise separation only.
 //
 
-// Artificial limit on write-block-size, in case we ever move to an
-// SSD_HEADER_SIZE that's too big to be a write-block size limit.
-// MAX_WRITE_BLOCK_SIZE must be power of 2 and <= SSD_HEADER_SIZE.
-#define MAX_WRITE_BLOCK_SIZE	(8 * 1024 * 1024)
-
-// Artificial limit on write-block-size, must be power of 2 and >= RBLOCK_SIZE.
-#define MIN_WRITE_BLOCK_SIZE	(1024 * 1)
-
 #define SSD_BLOCK_MAGIC 0x037AF201 // changed for storage version 3
 
 typedef struct ssd_load_records_info_s {
@@ -395,7 +387,6 @@ void ssd_cold_start_transition_record(struct as_namespace_s *ns, const ssd_recor
 void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 
 // Record encryption.
-void ssd_init_encryption_key(struct as_namespace_s *ns);
 void ssd_encrypt(drv_ssd *ssd, uint64_t off, ssd_record *block);
 void ssd_decrypt(drv_ssd *ssd, uint64_t off, ssd_record *block);
 void ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks, ssd_record *block);

@@ -155,7 +155,7 @@ as_storage_record_write_ssd(as_storage_rd* rd)
 }
 
 void
-ssd_init_encryption_key(as_namespace* ns)
+as_storage_cfg_init_ssd(as_namespace* ns)
 {
 }
 
