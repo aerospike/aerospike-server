@@ -260,14 +260,12 @@ as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 
 		cf_mutex_lock(&p->lock);
 
-		int self_n = find_self_in_replicas(p); // -1 if not
-
 		if (g_config.self_node == p->working_master) {
 			accumulate_replica_stats(p,
 					&p_stats->n_master_objects,
 					&p_stats->n_master_tombstones);
 		}
-		else if (self_n >= 0) {
+		else if (find_self_in_replicas(p) >= 0) { // -1 if not
 			accumulate_replica_stats(p,
 					&p_stats->n_prole_objects,
 					&p_stats->n_prole_tombstones);
@@ -726,9 +724,7 @@ partition_reserve_lockfree(as_partition* p, as_namespace* ns,
 char
 partition_descriptor(const as_partition* p)
 {
-	int self_n = find_self_in_replicas(p); // -1 if not
-
-	if (self_n >= 0) {
+	if (find_self_in_replicas(p) >= 0) { // -1 if not
 		return p->pending_immigrations == 0 ? 'S' : 'D';
 	}
 
@@ -744,11 +740,11 @@ partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid)
 {
 	const as_partition* p = &ns->partitions[pid];
 
-	int self_n = find_self_in_replicas(p); // -1 if not
-
 	if (g_config.self_node == p->working_master) {
 		return 0;
 	}
+
+	int self_n = find_self_in_replicas(p); // -1 if not
 
 	if (self_n > 0 && p->pending_immigrations == 0 &&
 			// Check self_n < n_repl only because n_repl could be out-of-sync
