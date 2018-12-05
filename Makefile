@@ -34,6 +34,8 @@
 #   make stop    - Stop the server.
 #
 
+OS = $(shell build/os_version)
+
 # Common variable definitions:
 include make_in/Makefile.vars
 
@@ -126,7 +128,7 @@ rpm deb tar src:
 	$(MAKE) -C pkg/$@ EDITION=$(EDITION)
 
 $(VERSION_SRC):	targetdirs
-	build/gen_version $(EDITION) $(shell $(DEPTH)/build/os_version) > $(VERSION_SRC)
+	build/gen_version $(EDITION) $(OS) > $(VERSION_SRC)
 
 $(VERSION_OBJ):	$(VERSION_SRC)
 	$(CC) -o $@ -c $<

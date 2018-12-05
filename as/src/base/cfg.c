@@ -3165,7 +3165,6 @@ as_config_init(const char* config_file)
 					ns->xmem_type = CF_XMEM_TYPE_SHMEM;
 					break;
 				case CASE_NAMESPACE_INDEX_TYPE_PMEM:
-					cf_crash_nostack(AS_CFG, "{%s} index-type pmem not yet supported", ns->name);
 					ns->xmem_type = CF_XMEM_TYPE_PMEM;
 					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_PMEM);
 					break;
@@ -3345,7 +3344,7 @@ as_config_init(const char* config_file)
 			break;
 
 		//----------------------------------------
-		// Parse namespace::index-type ssd context items.
+		// Parse namespace::index-type flash context items.
 		//
 		case NAMESPACE_INDEX_TYPE_FLASH:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_FLASH_OPTS, NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS)) {

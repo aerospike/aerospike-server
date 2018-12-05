@@ -2728,3 +2728,24 @@ cf_page_cache_dirty_limits(void)
 	write_file_safe("/proc/sys/vm/dirty_expire_centisecs", "1", 1);
 	write_file_safe("/proc/sys/vm/dirty_writeback_centisecs", "10", 2);
 }
+
+bool
+cf_mount_is_local(const char *path)
+{
+	if (g_i_numa_node == INVALID_INDEX) {
+		cf_detail(CF_HARDWARE, "not NUMA pinned");
+		return true;
+	}
+
+	cf_storage_device_info *info = cf_storage_get_device_info(path);
+	cf_topo_numa_node_index numa_node = info->phys[0].numa_node;
+
+	for (uint32_t i = 1; i < info->n_phys; i++) {
+		if (info->phys[i].numa_node != numa_node) {
+			cf_crash_nostack(CF_HARDWARE, "can't numa pin %s (%s,%s)", path,
+					info->phys[0].dev_path, info->phys[i].dev_path);
+		}
+	}
+
+	return numa_node == g_i_numa_node;
+}

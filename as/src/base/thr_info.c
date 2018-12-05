@@ -5064,6 +5064,16 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// Persistent index stats.
 
 	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
+		// If numa-pinned, not all configured mounts are used.
+		if (g_config.auto_pin == CF_TOPO_AUTO_PIN_NUMA) {
+			for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
+				if (cf_mount_is_local(ns->xmem_mounts[i])) {
+					info_append_indexed_string(db, "local_mount", i, NULL,
+							ns->xmem_mounts[i]);
+				}
+			}
+		}
+
 		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
 
 		info_append_uint64(db, "index_pmem_used_bytes", index_used);

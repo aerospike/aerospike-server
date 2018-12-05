@@ -75,3 +75,5 @@ void cf_storage_set_scheduler(const char *path, const char *sched);
 int64_t cf_storage_file_system_size(const char *path);
 
 void cf_page_cache_dirty_limits(void);
+
+bool cf_mount_is_local(const char *path);
