@@ -57,6 +57,7 @@
 #include "xmem.h"
 
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/security_config.h"
