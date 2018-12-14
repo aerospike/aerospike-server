@@ -41,6 +41,13 @@ typedef void* (*cf_thread_run_fn) (void* udata);
 
 
 //==========================================================
+// Globals.
+//
+
+extern __thread pid_t g_sys_tid;
+
+
+//==========================================================
 // Public API.
 //
 
@@ -78,5 +85,9 @@ cf_thread_test_cancel(void)
 static inline pid_t
 cf_thread_sys_tid(void)
 {
-	return (pid_t)syscall(SYS_gettid);
+	if (g_sys_tid == 0) {
+		g_sys_tid = (pid_t)syscall(SYS_gettid);
+	}
+
+	return g_sys_tid;
 }

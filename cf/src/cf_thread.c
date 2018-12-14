@@ -27,6 +27,7 @@
 #include "cf_thread.h"
 
 #include <pthread.h>
+#include <sys/types.h>
 
 #include "fault.h"
 
@@ -34,6 +35,8 @@
 //==========================================================
 // Globals.
 //
+
+__thread pid_t g_sys_tid = 0;
 
 static pthread_attr_t g_attr_detached;
 
