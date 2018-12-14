@@ -2333,10 +2333,11 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_warning(AS_INFO, "migrate-fill-delay is enterprise-only");
 				goto Error;
 			}
-			if (0 != cf_str_atoi(context, &val)) {
+			uint64_t val;
+			if (0 != cf_str_atoi_seconds(context, &val)) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of migrate-fill-delay from %u to %d ", g_config.migrate_fill_delay, val);
+			cf_info(AS_INFO, "Changing value of migrate-fill-delay from %u to %lu ", g_config.migrate_fill_delay, val);
 			g_config.migrate_fill_delay = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
