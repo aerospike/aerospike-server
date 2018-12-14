@@ -432,9 +432,8 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 	rd.set_name = rr->set_name;
 	rd.set_name_len = rr->set_name_len;
 
-	// Prepare to store key, if there is one.
-	rd.key = rr->key;
-	rd.key_size = rr->key_size;
+	// Note - deal with key after reading existing record (if such), in case
+	// we're dropping the key.
 
 	// Split according to configuration to replace local record.
 	bool is_delete = false;
@@ -643,6 +642,10 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	update_index_metadata(rr, &old_metadata, r);
 
+	// Prepare to store or drop key, as determined by message.
+	rd->key = rr->key;
+	rd->key_size = rr->key_size;
+
 	// Write the record to storage.
 	if ((result = as_record_write_from_pickle(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
@@ -682,10 +685,15 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	as_index_set_bin_space(r, new_bin_space);
 
-	// Accommodate a new stored key - wasn't needed for pickling and writing.
+	// Accommodate a new stored key - wasn't needed for pickling and writing...
 	if (r->key_stored == 0 && rd->key) {
 		as_record_allocate_key(r, rd->key, rd->key_size);
 		r->key_stored = 1;
+	}
+	// ... or drop a stored key.
+	else if (r->key_stored == 1 && ! rd->key) {
+		as_record_remove_key(r);
+		r->key_stored = 0;
 	}
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
@@ -731,6 +739,10 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	update_index_metadata(rr, &old_metadata, r);
 
+	// Prepare to store or drop key, as determined by message.
+	rd->key = rr->key;
+	rd->key_size = rr->key_size;
+
 	// Write the record to storage.
 	if ((result = as_record_write_from_pickle(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
@@ -739,9 +751,13 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 		return -result;
 	}
 
-	// Accommodate a new stored key - wasn't needed for writing.
-	if (r->key_stored == 0 && rr->key) {
+	// Accommodate a new stored key - wasn't needed for writing...
+	if (r->key_stored == 0 && rd->key) {
 		r->key_stored = 1;
+	}
+	// ... or drop a stored key.
+	else if (r->key_stored == 1 && ! rd->key) {
+		r->key_stored = 0;
 	}
 
 	*is_delete = n_new_bins == 0;
@@ -807,6 +823,10 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	update_index_metadata(rr, &old_metadata, r);
 
+	// Prepare to store or drop key, as determined by message.
+	rd->key = rr->key;
+	rd->key_size = rr->key_size;
+
 	// Write the record to storage.
 	if ((result = as_record_write_from_pickle(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
@@ -821,9 +841,13 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 				old_bins, n_old_bins, new_bins, n_new_bins);
 	}
 
-	// Accommodate a new stored key - wasn't needed for writing.
-	if (r->key_stored == 0 && rr->key) {
+	// Accommodate a new stored key - wasn't needed for writing...
+	if (r->key_stored == 0 && rd->key) {
 		r->key_stored = 1;
+	}
+	// ... or drop a stored key.
+	else if (r->key_stored == 1 && ! rd->key) {
+		r->key_stored = 0;
 	}
 
 	*is_delete = n_new_bins == 0;
