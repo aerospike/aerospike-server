@@ -146,15 +146,20 @@ get_msg_key(as_transaction* tr, as_storage_rd* rd)
 		return true;
 	}
 
-	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_KEY);
-
 	if (rd->ns->single_bin && rd->ns->storage_data_in_memory) {
 		cf_warning(AS_RW, "{%s} can't store key if data-in-memory & single-bin",
 				tr->rsv.ns->name);
 		return false;
 	}
 
-	rd->key_size = as_msg_field_get_value_sz(f);
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_KEY);
+
+	// TODO - verify integer key size is (1 + 8) ???
+	if ((rd->key_size = as_msg_field_get_value_sz(f)) == 0) {
+		cf_warning(AS_RW, "msg flat key size is 0");
+		return false;
+	}
+
 	rd->key = f->data;
 
 	return true;
