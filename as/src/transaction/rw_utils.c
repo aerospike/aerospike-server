@@ -154,13 +154,18 @@ get_msg_key(as_transaction* tr, as_storage_rd* rd)
 
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_KEY);
 
-	// TODO - verify integer key size is (1 + 8) ???
 	if ((rd->key_size = as_msg_field_get_value_sz(f)) == 0) {
 		cf_warning(AS_RW, "msg flat key size is 0");
 		return false;
 	}
 
 	rd->key = f->data;
+
+	if (*rd->key == AS_PARTICLE_TYPE_INTEGER &&
+			rd->key_size != 1 + sizeof(uint64_t)) {
+		cf_warning(AS_RW, "bad msg integer key flat size %u", rd->key_size);
+		return false;
+	}
 
 	return true;
 }

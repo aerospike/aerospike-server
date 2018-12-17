@@ -752,7 +752,9 @@ as_val_from_flat_key(const uint8_t * flat_key, uint32_t size)
 
 	switch ( type ) {
 		case AS_PARTICLE_TYPE_INTEGER:
-			// TODO - verify size is (1 + 8) ???
+			if (size != 1 + sizeof(uint64_t)) {
+				return NULL;
+			}
 			// Flat integer keys are in big-endian order.
 			return (as_val *) as_integer_new(cf_swap_from_be64(*(int64_t *)key));
 		case AS_PARTICLE_TYPE_STRING:

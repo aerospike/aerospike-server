@@ -2698,24 +2698,8 @@ apply_rec_props(as_record* r, as_namespace* ns, const ssd_rec_props* props)
 				false);
 	}
 
-	// If a key wasn't stored, and we got one, accommodate it.
-	if (r->key_stored == 0) {
-		if (props->key) {
-			if (ns->storage_data_in_memory) {
-				as_record_allocate_key(r, props->key, props->key_size);
-			}
-
-			r->key_stored = 1;
-		}
-	}
-	// If a key was stored, but we didn't get one, remove the key.
-	else if (! props->key) {
-		if (ns->storage_data_in_memory) {
-			as_record_remove_key(r);
-		}
-
-		r->key_stored = 0;
-	}
+	// Store or drop the key according to the props we read.
+	as_record_finalize_key(r, ns, props->key, props->key_size);
 }
 
 

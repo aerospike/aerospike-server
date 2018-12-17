@@ -888,6 +888,7 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 {
 	as_storage_rd* rd = urecord->rd;
 	as_transaction* tr = urecord->tr;
+	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
 	uint16_t generation = 0;
@@ -912,29 +913,15 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 		tr->void_time = r->void_time;
 		tr->last_update_time = r->last_update_time;
 
-		// Now ok to accommodate a new stored key...
-		if (r->key_stored == 0 && rd->key) {
-			if (rd->ns->storage_data_in_memory) {
-				as_record_allocate_key(r, rd->key, rd->key_size);
-			}
-
-			r->key_stored = 1;
-		}
-		// ... or drop a stored key.
-		else if (r->key_stored == 1 && ! rd->key) {
-			if (rd->ns->storage_data_in_memory) {
-				as_record_remove_key(r);
-			}
-
-			r->key_stored = 0;
-		}
+		// Store or drop the key as appropriate.
+		as_record_finalize_key(r, ns, rd->key, rd->key_size);
 
 		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
 
-		will_replicate(r, rd->ns);
+		will_replicate(r, ns);
 
 		// Collect information for XDR before closing the record.
-		generation = plain_generation(r->generation, rd->ns);
+		generation = plain_generation(r->generation, ns);
 		set_id = as_index_get_set_id(r);
 
 		if (urecord->dirty && urecord_op == UDF_OPTYPE_WRITE) {

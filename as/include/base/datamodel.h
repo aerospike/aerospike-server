@@ -480,8 +480,8 @@ extern void as_record_done(as_index_ref *r_ref, as_namespace *ns);
 
 void as_record_drop_stats(as_record* r, as_namespace* ns);
 
+extern void as_record_finalize_key(as_record* r, as_namespace* ns, const uint8_t* key, uint32_t key_size);
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
-extern void as_record_remove_key(as_record* r);
 extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
 extern uint8_t *as_record_pickle(as_storage_rd *rd, size_t *len_r);
 extern int as_record_write_from_pickle(as_storage_rd *rd);

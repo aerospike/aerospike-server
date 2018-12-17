@@ -263,6 +263,36 @@ as_record_destroy_bins_from(as_storage_rd *rd, uint16_t from)
 }
 
 
+// Note - this is not called on the master write (or durable delete) path, where
+// keys are stored but never dropped. Only a UDF will drop a key on master.
+void
+as_record_finalize_key(as_record *r, as_namespace *ns, const uint8_t *key,
+		uint32_t key_size)
+{
+	// If a key wasn't stored, and we got one, accommodate it.
+	if (r->key_stored == 0) {
+		if (key != NULL) {
+			if (ns->storage_data_in_memory) {
+				as_record_allocate_key(r, key, key_size);
+			}
+
+			r->key_stored = 1;
+		}
+	}
+	// If a key was stored, but we didn't get one, remove the key.
+	else if (key == NULL) {
+		if (ns->storage_data_in_memory) {
+			as_bin_space *bin_space = ((as_rec_space *)r->dim)->bin_space;
+
+			cf_free(r->dim);
+			r->dim = (void *)bin_space;
+		}
+
+		r->key_stored = 0;
+	}
+}
+
+
 // Called only for data-in-memory multi-bin, with no key currently stored.
 // Note - have to modify if/when other metadata joins key in as_rec_space.
 void
@@ -276,18 +306,6 @@ as_record_allocate_key(as_record *r, const uint8_t *key, uint32_t key_size)
 	memcpy((void*)rec_space->key, (const void*)key, key_size);
 
 	r->dim = (void*)rec_space;
-}
-
-
-// Called only for data-in-memory multi-bin, with a key currently stored.
-// Note - have to modify if/when other metadata joins key in as_rec_space.
-void
-as_record_remove_key(as_record *r)
-{
-	as_bin_space *p_bin_space = ((as_rec_space *)r->dim)->bin_space;
-
-	cf_free(r->dim);
-	r->dim = (void *)p_bin_space;
 }
 
 
@@ -685,16 +703,8 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	as_index_set_bin_space(r, new_bin_space);
 
-	// Accommodate a new stored key - wasn't needed for pickling and writing...
-	if (r->key_stored == 0 && rd->key) {
-		as_record_allocate_key(r, rd->key, rd->key_size);
-		r->key_stored = 1;
-	}
-	// ... or drop a stored key.
-	else if (r->key_stored == 1 && ! rd->key) {
-		as_record_remove_key(r);
-		r->key_stored = 0;
-	}
+	// Now ok to store or drop key, as determined by message.
+	as_record_finalize_key(r, ns, rd->key, rd->key_size);
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
 	*is_delete = n_new_bins == 0;
@@ -751,14 +761,8 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 		return -result;
 	}
 
-	// Accommodate a new stored key - wasn't needed for writing...
-	if (r->key_stored == 0 && rd->key) {
-		r->key_stored = 1;
-	}
-	// ... or drop a stored key.
-	else if (r->key_stored == 1 && ! rd->key) {
-		r->key_stored = 0;
-	}
+	// Now ok to store or drop key, as determined by message.
+	as_record_finalize_key(r, ns, rd->key, rd->key_size);
 
 	*is_delete = n_new_bins == 0;
 
@@ -841,14 +845,8 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 				old_bins, n_old_bins, new_bins, n_new_bins);
 	}
 
-	// Accommodate a new stored key - wasn't needed for writing...
-	if (r->key_stored == 0 && rd->key) {
-		r->key_stored = 1;
-	}
-	// ... or drop a stored key.
-	else if (r->key_stored == 1 && ! rd->key) {
-		r->key_stored = 0;
-	}
+	// Now ok to store or drop key, as determined by message.
+	as_record_finalize_key(r, ns, rd->key, rd->key_size);
 
 	*is_delete = n_new_bins == 0;
 
