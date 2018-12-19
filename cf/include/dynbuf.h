@@ -82,13 +82,10 @@ typedef struct cf_buf_builder_s {
 	uint8_t buf[];
 } cf_buf_builder;
 
-extern cf_buf_builder *cf_buf_builder_create();
-extern cf_buf_builder *cf_buf_builder_create_size(size_t sz);
+extern cf_buf_builder *cf_buf_builder_create(size_t sz);
 extern void cf_buf_builder_free(cf_buf_builder *bb);
 extern void cf_buf_builder_reset(cf_buf_builder *bb);
 extern void cf_buf_builder_chomp(cf_buf_builder *bb_r);
-// If you use any binary components, this strdup thing is a bad idea:
-extern char *cf_buf_builder_strdup(cf_buf_builder *bb_r);
 
 extern void cf_buf_builder_append_string(cf_buf_builder **bb_r, const char *s);
 extern void cf_buf_builder_append_char(cf_buf_builder **bb_r, char c);

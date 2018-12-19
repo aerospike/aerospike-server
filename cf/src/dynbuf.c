@@ -528,34 +528,8 @@ cf_buf_builder_chomp(cf_buf_builder *bb)
 	}
 }
 
-char *
-cf_buf_builder_strdup(cf_buf_builder *bb)
-{
-	if (bb->used_sz == 0) {
-		return NULL;
-	}
-
-	char *s = cf_malloc(bb->used_sz+1);
-
-	memcpy(s, bb->buf, bb->used_sz);
-	s[bb->used_sz] = 0;
-
-	return s;
-}
-
 cf_buf_builder *
-cf_buf_builder_create()
-{
-	cf_buf_builder *bb = cf_malloc(1024);
-
-	bb->alloc_sz = 1024 - sizeof(cf_buf_builder);
-	bb->used_sz = 0;
-
-	return bb;
-}
-
-cf_buf_builder *
-cf_buf_builder_create_size(size_t sz)
+cf_buf_builder_create(size_t sz)
 {
 	size_t malloc_sz = (sz < 1024) ? 1024 : sz;
 	cf_buf_builder *bb = cf_malloc(malloc_sz);

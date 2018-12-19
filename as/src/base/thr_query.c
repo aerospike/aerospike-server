@@ -107,6 +107,7 @@
 #include "aerospike/as_val.h"
 #include "aerospike/mod_lua.h"
 #include "citrusleaf/cf_ll.h"
+#include "citrusleaf/cf_queue.h"
 
 #include "ai_btree.h"
 #include "bt.h"
@@ -469,10 +470,7 @@ bb_poolrequest()
 	cf_buf_builder *bb_r;
 	int rv = cf_queue_pop(g_query_response_bb_pool, &bb_r, CF_QUEUE_NOWAIT);
 	if (rv == CF_QUEUE_EMPTY) {
-		bb_r = cf_buf_builder_create_size(g_config.query_buf_size);
-		if (!bb_r) {
-			cf_crash(AS_QUERY, "Allocation Error in Buf builder Pool !!");
-		}
+		bb_r = cf_buf_builder_create(g_config.query_buf_size);
 	} else if (rv == CF_QUEUE_OK) {
 		bb_r->used_sz = 0;
 		cf_detail(AS_QUERY, "Popped %p", bb_r);

@@ -633,13 +633,7 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
 	basic_scan_job* job = (basic_scan_job*)_job;
 	as_index_tree* tree = rsv->tree;
-	cf_buf_builder* bb = cf_buf_builder_create_size(INIT_BUF_BUILDER_SIZE);
-
-	if (! bb) {
-		as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
-		return;
-	}
-
+	cf_buf_builder* bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
 	uint64_t slice_start = cf_getms();
 	basic_scan_slice slice = { job, &bb };
 
@@ -949,15 +943,10 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
 	aggr_scan_job* job = (aggr_scan_job*)_job;
 	cf_ll ll;
-	cf_buf_builder* bb = cf_buf_builder_create_size(INIT_BUF_BUILDER_SIZE);
-
-	if (! bb) {
-		as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
-		return;
-	}
 
 	cf_ll_init(&ll, as_index_keys_ll_destroy_fn, false);
 
+	cf_buf_builder* bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
 	aggr_scan_slice slice = { job, &ll, &bb, rsv };
 
 	as_index_reduce_live(rsv->tree, aggr_scan_job_reduce_cb, (void*)&slice);
