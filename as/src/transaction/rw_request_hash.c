@@ -210,17 +210,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 {
 	as_namespace* ns = tr->rsv.ns;
 
-	if (rw0->is_set_up &&
-			rw0->origin == FROM_PROXY && tr->origin == FROM_PROXY &&
-			rw0->from.proxy_node == tr->from.proxy_node &&
-			rw0->from_data.proxy_tid == tr->from_data.proxy_tid) {
-		// If the new transaction is a retransmitted proxy request, don't
-		// queue it or reply to origin, just drop it and feign success. (Older
-		// servers will retransmit proxy requests - must handle them.)
-
-		return TRANS_DONE_SUCCESS;
-	}
-	else if (tr->origin == FROM_RE_REPL) {
+	if (tr->origin == FROM_RE_REPL) {
 		// Always put this transaction at the head of the original rw_request's
 		// queue - it will be retried (first) when the original is complete.
 		rw_request_wait_q_push_head(rw0, tr);
