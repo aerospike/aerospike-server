@@ -896,9 +896,9 @@ struct as_namespace_s {
 	cf_atomic64		n_client_write_timeout;
 
 	// Subset of n_client_write_... above, respectively.
-	cf_atomic64		n_xdr_write_success;
-	cf_atomic64		n_xdr_write_error;
-	cf_atomic64		n_xdr_write_timeout;
+	cf_atomic64		n_xdr_client_write_success;
+	cf_atomic64		n_xdr_client_write_error;
+	cf_atomic64		n_xdr_client_write_timeout;
 
 	cf_atomic64		n_client_delete_success;
 	cf_atomic64		n_client_delete_error;
@@ -906,10 +906,10 @@ struct as_namespace_s {
 	cf_atomic64		n_client_delete_not_found;
 
 	// Subset of n_client_delete_... above, respectively.
-	cf_atomic64		n_xdr_delete_success;
-	cf_atomic64		n_xdr_delete_error;
-	cf_atomic64		n_xdr_delete_timeout;
-	cf_atomic64		n_xdr_delete_not_found;
+	cf_atomic64		n_xdr_client_delete_success;
+	cf_atomic64		n_xdr_client_delete_error;
+	cf_atomic64		n_xdr_client_delete_timeout;
+	cf_atomic64		n_xdr_client_delete_not_found;
 
 	cf_atomic64		n_client_udf_complete;
 	cf_atomic64		n_client_udf_error;
@@ -997,20 +997,20 @@ struct as_namespace_s {
 	cf_atomic64		n_udf_sub_lang_delete_success;
 	cf_atomic64		n_udf_sub_lang_error;
 
-	// Transaction retransmit stats.
+	// Transaction retransmit stats - 'all' means both client & proxyee origins.
 
-	uint64_t		n_retransmit_client_read_dup_res;
+	uint64_t		n_retransmit_all_read_dup_res;
 
-	uint64_t		n_retransmit_client_write_dup_res;
-	uint64_t		n_retransmit_client_write_repl_write;
+	uint64_t		n_retransmit_all_write_dup_res;
+	uint64_t		n_retransmit_all_write_repl_write;
 
-	uint64_t		n_retransmit_client_delete_dup_res;
-	uint64_t		n_retransmit_client_delete_repl_write;
+	uint64_t		n_retransmit_all_delete_dup_res;
+	uint64_t		n_retransmit_all_delete_repl_write;
 
-	uint64_t		n_retransmit_client_udf_dup_res;
-	uint64_t		n_retransmit_client_udf_repl_write;
+	uint64_t		n_retransmit_all_udf_dup_res;
+	uint64_t		n_retransmit_all_udf_repl_write;
 
-	uint64_t		n_retransmit_batch_sub_dup_res;
+	uint64_t		n_retransmit_all_batch_sub_dup_res;
 
 	uint64_t		n_retransmit_udf_sub_dup_res;
 	uint64_t		n_retransmit_udf_sub_repl_write;

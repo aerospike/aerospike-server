@@ -355,7 +355,9 @@ log_line_early_fail()
 
 	if ((n_demarshal |
 			n_tsvc_client |
+			n_tsvc_proxyee |
 			n_tsvc_batch_sub |
+			n_tsvc_proxyee_batch_sub |
 			n_tsvc_udf_sub) == 0) {
 		return;
 	}
@@ -598,13 +600,13 @@ log_line_client(as_namespace* ns)
 void
 log_line_xdr_client(as_namespace* ns)
 {
-	uint64_t n_write_success = ns->n_xdr_write_success;
-	uint64_t n_write_error = ns->n_xdr_write_error;
-	uint64_t n_write_timeout = ns->n_xdr_write_timeout;
-	uint64_t n_delete_success = ns->n_xdr_delete_success;
-	uint64_t n_delete_error = ns->n_xdr_delete_error;
-	uint64_t n_delete_timeout = ns->n_xdr_delete_timeout;
-	uint64_t n_delete_not_found = ns->n_xdr_delete_not_found;
+	uint64_t n_write_success = ns->n_xdr_client_write_success;
+	uint64_t n_write_error = ns->n_xdr_client_write_error;
+	uint64_t n_write_timeout = ns->n_xdr_client_write_timeout;
+	uint64_t n_delete_success = ns->n_xdr_client_delete_success;
+	uint64_t n_delete_error = ns->n_xdr_client_delete_error;
+	uint64_t n_delete_timeout = ns->n_xdr_client_delete_timeout;
+	uint64_t n_delete_not_found = ns->n_xdr_client_delete_not_found;
 
 	if ((n_write_success | n_write_error | n_write_timeout |
 			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found) == 0) {
@@ -816,35 +818,35 @@ void
 log_line_retransmits(as_namespace* ns)
 {
 	uint64_t n_migrate_record_retransmits = ns->migrate_record_retransmits;
-	uint64_t n_client_read_dup_res = ns->n_retransmit_client_read_dup_res;
-	uint64_t n_client_write_dup_res = ns->n_retransmit_client_write_dup_res;
-	uint64_t n_client_write_repl_write = ns->n_retransmit_client_write_repl_write;
-	uint64_t n_client_delete_dup_res = ns->n_retransmit_client_delete_dup_res;
-	uint64_t n_client_delete_repl_write = ns->n_retransmit_client_delete_repl_write;
-	uint64_t n_client_udf_dup_res = ns->n_retransmit_client_udf_dup_res;
-	uint64_t n_client_udf_repl_write = ns->n_retransmit_client_udf_repl_write;
-	uint64_t n_batch_sub_dup_res = ns->n_retransmit_batch_sub_dup_res;
+	uint64_t n_all_read_dup_res = ns->n_retransmit_all_read_dup_res;
+	uint64_t n_all_write_dup_res = ns->n_retransmit_all_write_dup_res;
+	uint64_t n_all_write_repl_write = ns->n_retransmit_all_write_repl_write;
+	uint64_t n_all_delete_dup_res = ns->n_retransmit_all_delete_dup_res;
+	uint64_t n_all_delete_repl_write = ns->n_retransmit_all_delete_repl_write;
+	uint64_t n_all_udf_dup_res = ns->n_retransmit_all_udf_dup_res;
+	uint64_t n_all_udf_repl_write = ns->n_retransmit_all_udf_repl_write;
+	uint64_t n_all_batch_sub_dup_res = ns->n_retransmit_all_batch_sub_dup_res;
 	uint64_t n_udf_sub_dup_res = ns->n_retransmit_udf_sub_dup_res;
 	uint64_t n_udf_sub_repl_write = ns->n_retransmit_udf_sub_repl_write;
 
 	if ((n_migrate_record_retransmits |
-			n_client_read_dup_res |
-			n_client_write_dup_res | n_client_write_repl_write |
-			n_client_delete_dup_res | n_client_delete_repl_write |
-			n_client_udf_dup_res | n_client_udf_repl_write |
-			n_batch_sub_dup_res |
+			n_all_read_dup_res |
+			n_all_write_dup_res | n_all_write_repl_write |
+			n_all_delete_dup_res | n_all_delete_repl_write |
+			n_all_udf_dup_res | n_all_udf_repl_write |
+			n_all_batch_sub_dup_res |
 			n_udf_sub_dup_res | n_udf_sub_repl_write) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} retransmits: migration %lu client-read %lu client-write (%lu,%lu) client-delete (%lu,%lu) client-udf (%lu,%lu) batch-sub %lu udf-sub (%lu,%lu)",
+	cf_info(AS_INFO, "{%s} retransmits: migration %lu all-read %lu all-write (%lu,%lu) all-delete (%lu,%lu) all-udf (%lu,%lu) all-batch-sub %lu udf-sub (%lu,%lu)",
 			ns->name,
 			n_migrate_record_retransmits,
-			n_client_read_dup_res,
-			n_client_write_dup_res, n_client_write_repl_write,
-			n_client_delete_dup_res, n_client_delete_repl_write,
-			n_client_udf_dup_res, n_client_udf_repl_write,
-			n_batch_sub_dup_res,
+			n_all_read_dup_res,
+			n_all_write_dup_res, n_all_write_repl_write,
+			n_all_delete_dup_res, n_all_delete_repl_write,
+			n_all_udf_dup_res, n_all_udf_repl_write,
+			n_all_batch_sub_dup_res,
 			n_udf_sub_dup_res, n_udf_sub_repl_write
 			);
 }

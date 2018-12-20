@@ -310,7 +310,7 @@ update_retransmit_stats(const rw_request* rw)
 	switch (rw->origin) {
 	case FROM_PROXY:
 		if (rw_request_is_batch_sub(rw)) {
-			ns->n_retransmit_batch_sub_dup_res++;
+			ns->n_retransmit_all_batch_sub_dup_res++;
 			break;
 		}
 		// No break.
@@ -322,37 +322,37 @@ update_retransmit_stats(const rw_request* rw)
 			if (is_dup_res) {
 				if (is_write) {
 					if (is_delete) {
-						ns->n_retransmit_client_delete_dup_res++;
+						ns->n_retransmit_all_delete_dup_res++;
 					}
 					else if (is_udf) {
-						ns->n_retransmit_client_udf_dup_res++;
+						ns->n_retransmit_all_udf_dup_res++;
 					}
 					else {
-						ns->n_retransmit_client_write_dup_res++;
+						ns->n_retransmit_all_write_dup_res++;
 					}
 				}
 				else {
-					ns->n_retransmit_client_read_dup_res++;
+					ns->n_retransmit_all_read_dup_res++;
 				}
 			}
 			else {
 				cf_assert(is_write, AS_RW, "read doing replica write");
 
 				if (is_delete) {
-					ns->n_retransmit_client_delete_repl_write++;
+					ns->n_retransmit_all_delete_repl_write++;
 				}
 				else if (is_udf) {
-					ns->n_retransmit_client_udf_repl_write++;
+					ns->n_retransmit_all_udf_repl_write++;
 				}
 				else {
-					ns->n_retransmit_client_write_repl_write++;
+					ns->n_retransmit_all_write_repl_write++;
 				}
 			}
 		}
 		break;
 	case FROM_BATCH:
 		// For now batch sub transactions are read-only.
-		ns->n_retransmit_batch_sub_dup_res++;
+		ns->n_retransmit_all_batch_sub_dup_res++;
 		break;
 	case FROM_IUDF:
 		if (is_dup_res) {

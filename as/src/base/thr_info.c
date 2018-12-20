@@ -5180,9 +5180,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_write_timeout", ns->n_client_write_timeout);
 
 	// Subset of n_client_write_... above, respectively.
-	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
-	info_append_uint64(db, "xdr_write_error", ns->n_xdr_write_error);
-	info_append_uint64(db, "xdr_write_timeout", ns->n_xdr_write_timeout);
+	info_append_uint64(db, "xdr_client_write_success", ns->n_xdr_client_write_success);
+	info_append_uint64(db, "xdr_client_write_error", ns->n_xdr_client_write_error);
+	info_append_uint64(db, "xdr_client_write_timeout", ns->n_xdr_client_write_timeout);
 
 	info_append_uint64(db, "client_delete_success", ns->n_client_delete_success);
 	info_append_uint64(db, "client_delete_error", ns->n_client_delete_error);
@@ -5190,10 +5190,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_delete_not_found", ns->n_client_delete_not_found);
 
 	// Subset of n_client_delete_... above, respectively.
-	info_append_uint64(db, "xdr_delete_success", ns->n_xdr_delete_success);
-	info_append_uint64(db, "xdr_delete_error", ns->n_xdr_delete_error);
-	info_append_uint64(db, "xdr_delete_timeout", ns->n_xdr_delete_timeout);
-	info_append_uint64(db, "xdr_delete_not_found", ns->n_xdr_delete_not_found);
+	info_append_uint64(db, "xdr_client_delete_success", ns->n_xdr_client_delete_success);
+	info_append_uint64(db, "xdr_client_delete_error", ns->n_xdr_client_delete_error);
+	info_append_uint64(db, "xdr_client_delete_timeout", ns->n_xdr_client_delete_timeout);
+	info_append_uint64(db, "xdr_client_delete_not_found", ns->n_xdr_client_delete_not_found);
 
 	info_append_uint64(db, "client_udf_complete", ns->n_client_udf_complete);
 	info_append_uint64(db, "client_udf_error", ns->n_client_udf_error);
@@ -5281,20 +5281,20 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "udf_sub_lang_delete_success", ns->n_udf_sub_lang_delete_success);
 	info_append_uint64(db, "udf_sub_lang_error", ns->n_udf_sub_lang_error);
 
-	// Transaction retransmit stats.
+	// Transaction retransmit stats - 'all' means both client & proxyee origins.
 
-	info_append_uint64(db, "retransmit_client_read_dup_res", ns->n_retransmit_client_read_dup_res);
+	info_append_uint64(db, "retransmit_all_read_dup_res", ns->n_retransmit_all_read_dup_res);
 
-	info_append_uint64(db, "retransmit_client_write_dup_res", ns->n_retransmit_client_write_dup_res);
-	info_append_uint64(db, "retransmit_client_write_repl_write", ns->n_retransmit_client_write_repl_write);
+	info_append_uint64(db, "retransmit_all_write_dup_res", ns->n_retransmit_all_write_dup_res);
+	info_append_uint64(db, "retransmit_all_write_repl_write", ns->n_retransmit_all_write_repl_write);
 
-	info_append_uint64(db, "retransmit_client_delete_dup_res", ns->n_retransmit_client_delete_dup_res);
-	info_append_uint64(db, "retransmit_client_delete_repl_write", ns->n_retransmit_client_delete_repl_write);
+	info_append_uint64(db, "retransmit_all_delete_dup_res", ns->n_retransmit_all_delete_dup_res);
+	info_append_uint64(db, "retransmit_all_delete_repl_write", ns->n_retransmit_all_delete_repl_write);
 
-	info_append_uint64(db, "retransmit_client_udf_dup_res", ns->n_retransmit_client_udf_dup_res);
-	info_append_uint64(db, "retransmit_client_udf_repl_write", ns->n_retransmit_client_udf_repl_write);
+	info_append_uint64(db, "retransmit_all_udf_dup_res", ns->n_retransmit_all_udf_dup_res);
+	info_append_uint64(db, "retransmit_all_udf_repl_write", ns->n_retransmit_all_udf_repl_write);
 
-	info_append_uint64(db, "retransmit_batch_sub_dup_res", ns->n_retransmit_batch_sub_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_dup_res", ns->n_retransmit_all_batch_sub_dup_res);
 
 	info_append_uint64(db, "retransmit_udf_sub_dup_res", ns->n_retransmit_udf_sub_dup_res);
 	info_append_uint64(db, "retransmit_udf_sub_repl_write", ns->n_retransmit_udf_sub_repl_write);

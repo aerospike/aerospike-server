@@ -134,19 +134,19 @@ client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 	case AS_OK:
 		cf_atomic64_incr(&ns->n_client_write_success);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_write_success);
+			cf_atomic64_incr(&ns->n_xdr_client_write_success);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_write_timeout);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_write_timeout);
+			cf_atomic64_incr(&ns->n_xdr_client_write_timeout);
 		}
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_client_write_error);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_write_error);
+			cf_atomic64_incr(&ns->n_xdr_client_write_error);
 		}
 		break;
 	}

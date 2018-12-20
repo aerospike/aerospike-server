@@ -84,25 +84,25 @@ client_delete_update_stats(as_namespace* ns, uint8_t result_code,
 	case AS_OK:
 		cf_atomic64_incr(&ns->n_client_delete_success);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_delete_success);
+			cf_atomic64_incr(&ns->n_xdr_client_delete_success);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_delete_timeout);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_delete_timeout);
+			cf_atomic64_incr(&ns->n_xdr_client_delete_timeout);
 		}
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_client_delete_error);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_delete_error);
+			cf_atomic64_incr(&ns->n_xdr_client_delete_error);
 		}
 		break;
 	case AS_ERR_NOT_FOUND:
 		cf_atomic64_incr(&ns->n_client_delete_not_found);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_delete_not_found);
+			cf_atomic64_incr(&ns->n_xdr_client_delete_not_found);
 		}
 		break;
 	}
