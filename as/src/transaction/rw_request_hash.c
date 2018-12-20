@@ -308,6 +308,12 @@ update_retransmit_stats(const rw_request* rw)
 	// Note - only one retransmit thread, so no need for atomic increments.
 
 	switch (rw->origin) {
+	case FROM_PROXY:
+		if (rw_request_is_batch_sub(rw)) {
+			ns->n_retransmit_batch_sub_dup_res++;
+			break;
+		}
+		// No break.
 	case FROM_CLIENT: {
 			bool is_write = (m->info2 & AS_MSG_INFO2_WRITE) != 0;
 			bool is_delete = (m->info2 & AS_MSG_INFO2_DELETE) != 0;
@@ -343,9 +349,6 @@ update_retransmit_stats(const rw_request* rw)
 				}
 			}
 		}
-		break;
-	case FROM_PROXY:
-		// For now we don't report proxyee stats.
 		break;
 	case FROM_BATCH:
 		// For now batch sub transactions are read-only.

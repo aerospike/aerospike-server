@@ -111,6 +111,25 @@ client_read_update_stats(as_namespace* ns, uint8_t result_code)
 }
 
 static inline void
+proxyee_read_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_proxyee_read_success);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_proxyee_read_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_proxyee_read_error);
+		break;
+	case AS_ERR_NOT_FOUND:
+		cf_atomic64_incr(&ns->n_proxyee_read_not_found);
+		break;
+	}
+}
+
+static inline void
 batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
@@ -125,6 +144,25 @@ batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 		break;
 	case AS_ERR_NOT_FOUND:
 		cf_atomic64_incr(&ns->n_batch_sub_read_not_found);
+		break;
+	}
+}
+
+static inline void
+proxyee_batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_proxyee_batch_sub_read_success);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_proxyee_batch_sub_read_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_proxyee_batch_sub_read_error);
+		break;
+	case AS_ERR_NOT_FOUND:
+		cf_atomic64_incr(&ns->n_proxyee_batch_sub_read_not_found);
 		break;
 	}
 }
@@ -367,6 +405,12 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 					tr->result_code, tr->generation, tr->void_time, ops,
 					response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr));
 		}
+		if (as_transaction_is_batch_sub(tr)) {
+			proxyee_batch_sub_read_update_stats(tr->rsv.ns, tr->result_code);
+		}
+		else {
+			proxyee_read_update_stats(tr->rsv.ns, tr->result_code);
+		}
 		break;
 	case FROM_BATCH:
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, read_local);
@@ -398,6 +442,12 @@ read_timeout_cb(rw_request* rw)
 		client_read_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_PROXY:
+		if (rw_request_is_batch_sub(rw)) {
+			proxyee_batch_sub_read_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		}
+		else {
+			proxyee_read_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		}
 		break;
 	case FROM_BATCH:
 		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,

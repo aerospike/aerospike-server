@@ -96,7 +96,10 @@ void log_line_device_usage(as_namespace* ns);
 
 void log_line_client(as_namespace* ns);
 void log_line_xdr_client(as_namespace* ns);
+void log_line_proxyee(as_namespace* ns);
+void log_line_xdr_proxyee(as_namespace* ns);
 void log_line_batch_sub(as_namespace* ns);
+void log_line_proxyee_batch_sub(as_namespace* ns);
 void log_line_scan(as_namespace* ns);
 void log_line_query(as_namespace* ns);
 void log_line_udf_sub(as_namespace* ns);
@@ -200,7 +203,10 @@ log_ticker_frame(uint64_t delta_time)
 
 		log_line_client(ns);
 		log_line_xdr_client(ns);
+		log_line_proxyee(ns);
+		log_line_xdr_proxyee(ns);
 		log_line_batch_sub(ns);
+		log_line_proxyee_batch_sub(ns);
 		log_line_scan(ns);
 		log_line_query(ns);
 		log_line_udf_sub(ns);
@@ -342,7 +348,9 @@ log_line_early_fail()
 {
 	uint64_t n_demarshal = g_stats.n_demarshal_error;
 	uint64_t n_tsvc_client = g_stats.n_tsvc_client_error;
+	uint64_t n_tsvc_proxyee = g_stats.n_tsvc_proxyee_error;
 	uint64_t n_tsvc_batch_sub = g_stats.n_tsvc_batch_sub_error;
+	uint64_t n_tsvc_proxyee_batch_sub = g_stats.n_tsvc_proxyee_batch_sub_error;
 	uint64_t n_tsvc_udf_sub = g_stats.n_tsvc_udf_sub_error;
 
 	if ((n_demarshal |
@@ -352,10 +360,12 @@ log_line_early_fail()
 		return;
 	}
 
-	cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-batch-sub %lu tsvc-udf-sub %lu",
+	cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-proxyee %lu tsvc-batch-sub %lu tsvc-proxyee-batch-sub %lu tsvc-udf-sub %lu",
 			n_demarshal,
 			n_tsvc_client,
+			n_tsvc_proxyee,
 			n_tsvc_batch_sub,
+			n_tsvc_proxyee_batch_sub,
 			n_tsvc_udf_sub
 			);
 }
@@ -609,6 +619,73 @@ log_line_xdr_client(as_namespace* ns)
 }
 
 void
+log_line_proxyee(as_namespace* ns)
+{
+	uint64_t n_tsvc_error = ns->n_proxyee_tsvc_error;
+	uint64_t n_tsvc_timeout = ns->n_proxyee_tsvc_timeout;
+	uint64_t n_read_success = ns->n_proxyee_read_success;
+	uint64_t n_read_error = ns->n_proxyee_read_error;
+	uint64_t n_read_timeout = ns->n_proxyee_read_timeout;
+	uint64_t n_read_not_found = ns->n_proxyee_read_not_found;
+	uint64_t n_write_success = ns->n_proxyee_write_success;
+	uint64_t n_write_error = ns->n_proxyee_write_error;
+	uint64_t n_write_timeout = ns->n_proxyee_write_timeout;
+	uint64_t n_delete_success = ns->n_proxyee_delete_success;
+	uint64_t n_delete_error = ns->n_proxyee_delete_error;
+	uint64_t n_delete_timeout = ns->n_proxyee_delete_timeout;
+	uint64_t n_delete_not_found = ns->n_proxyee_delete_not_found;
+	uint64_t n_udf_complete = ns->n_proxyee_udf_complete;
+	uint64_t n_udf_error = ns->n_proxyee_udf_error;
+	uint64_t n_udf_timeout = ns->n_proxyee_udf_timeout;
+	uint64_t n_lang_read_success = ns->n_proxyee_lang_read_success;
+	uint64_t n_lang_write_success = ns->n_proxyee_lang_write_success;
+	uint64_t n_lang_delete_success = ns->n_proxyee_lang_delete_success;
+	uint64_t n_lang_error = ns->n_proxyee_lang_error;
+
+	if ((n_tsvc_error | n_tsvc_timeout |
+			n_read_success | n_read_error | n_read_timeout | n_read_not_found |
+			n_write_success | n_write_error | n_write_timeout |
+			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found |
+			n_udf_complete | n_udf_error | n_udf_timeout |
+			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} proxyee: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
+			ns->name,
+			n_tsvc_error, n_tsvc_timeout,
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found,
+			n_write_success, n_write_error, n_write_timeout,
+			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found,
+			n_udf_complete, n_udf_error, n_udf_timeout,
+			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error
+			);
+}
+
+void
+log_line_xdr_proxyee(as_namespace* ns)
+{
+	uint64_t n_write_success = ns->n_xdr_proxyee_write_success;
+	uint64_t n_write_error = ns->n_xdr_proxyee_write_error;
+	uint64_t n_write_timeout = ns->n_xdr_proxyee_write_timeout;
+	uint64_t n_delete_success = ns->n_xdr_proxyee_delete_success;
+	uint64_t n_delete_error = ns->n_xdr_proxyee_delete_error;
+	uint64_t n_delete_timeout = ns->n_xdr_proxyee_delete_timeout;
+	uint64_t n_delete_not_found = ns->n_xdr_proxyee_delete_not_found;
+
+	if ((n_write_success | n_write_error | n_write_timeout |
+			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} xdr-proxyee: write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu)",
+			ns->name,
+			n_write_success, n_write_error, n_write_timeout,
+			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found
+			);
+}
+
+void
 log_line_batch_sub(as_namespace* ns)
 {
 	uint64_t n_tsvc_error = ns->n_batch_sub_tsvc_error;
@@ -631,6 +708,28 @@ log_line_batch_sub(as_namespace* ns)
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
 			n_proxy_complete, n_proxy_error, n_proxy_timeout,
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found
+			);
+}
+
+void
+log_line_proxyee_batch_sub(as_namespace* ns)
+{
+	uint64_t n_tsvc_error = ns->n_proxyee_batch_sub_tsvc_error;
+	uint64_t n_tsvc_timeout = ns->n_proxyee_batch_sub_tsvc_timeout;
+	uint64_t n_read_success = ns->n_proxyee_batch_sub_read_success;
+	uint64_t n_read_error = ns->n_proxyee_batch_sub_read_error;
+	uint64_t n_read_timeout = ns->n_proxyee_batch_sub_read_timeout;
+	uint64_t n_read_not_found = ns->n_proxyee_batch_sub_read_not_found;
+
+	if ((n_tsvc_error | n_tsvc_timeout |
+			n_read_success | n_read_error | n_read_timeout | n_read_not_found) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} proxyee-batch-sub: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu)",
+			ns->name,
+			n_tsvc_error, n_tsvc_timeout,
 			n_read_success, n_read_error, n_read_timeout, n_read_not_found
 			);
 }

@@ -36,12 +36,8 @@
 #include "node.h"
 #include "socket.h"
 
-#include "base/cfg.h"
-#include "base/index.h"
 #include "base/proto.h"
-#include "base/stats.h"
 #include "fabric/partition.h"
-#include "storage/storage.h"
 
 struct as_namespace_s;
 

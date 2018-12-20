@@ -41,6 +41,7 @@
 #include "node.h"
 
 #include "base/proto.h"
+#include "base/transaction.h"
 #include "fabric/hb.h"
 #include "fabric/partition.h"
 
@@ -177,13 +178,11 @@ void rw_request_destroy(rw_request* rw);
 void rw_request_wait_q_push(rw_request* rw, struct as_transaction_s* tr);
 void rw_request_wait_q_push_head(rw_request* rw, struct as_transaction_s* tr);
 
-
 static inline void
 rw_request_hdestroy(void* pv)
 {
 	rw_request_destroy((rw_request*)pv);
 }
-
 
 static inline void
 rw_request_release(rw_request* rw)
@@ -194,6 +193,11 @@ rw_request_release(rw_request* rw)
 	}
 }
 
+static inline bool
+rw_request_is_batch_sub(const rw_request* rw)
+{
+	return (rw->from_flags & FROM_FLAG_BATCH_SUB) != 0;
+}
 
 // See as_transaction_trid().
 static inline uint64_t

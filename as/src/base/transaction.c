@@ -346,6 +346,12 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
 			tr->from.proxy_node = 0; // pattern, not needed
 		}
+		if (as_transaction_is_batch_sub(tr)) {
+			UPDATE_ERROR_STATS(proxyee_batch_sub);
+		}
+		else {
+			UPDATE_ERROR_STATS(proxyee);
+		}
 		break;
 	case FROM_BATCH:
 		if (tr->from.batch_shared) {

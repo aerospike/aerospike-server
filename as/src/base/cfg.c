@@ -62,6 +62,7 @@
 #include "base/secondary_index.h"
 #include "base/security_config.h"
 #include "base/service.h"
+#include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
 #include "base/thr_query.h"

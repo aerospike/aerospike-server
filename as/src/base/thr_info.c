@@ -348,7 +348,9 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint64(db, "demarshal_error", g_stats.n_demarshal_error);
 	info_append_uint64(db, "early_tsvc_client_error", g_stats.n_tsvc_client_error);
+	info_append_uint64(db, "early_tsvc_proxyee_error", g_stats.n_tsvc_proxyee_error);
 	info_append_uint64(db, "early_tsvc_batch_sub_error", g_stats.n_tsvc_batch_sub_error);
+	info_append_uint64(db, "early_tsvc_proxyee_batch_sub_error", g_stats.n_tsvc_proxyee_batch_sub_error);
 	info_append_uint64(db, "early_tsvc_udf_sub_error", g_stats.n_tsvc_udf_sub_error);
 
 	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
@@ -5202,6 +5204,45 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_lang_delete_success", ns->n_client_lang_delete_success);
 	info_append_uint64(db, "client_lang_error", ns->n_client_lang_error);
 
+	// From-proxy transaction stats.
+
+	info_append_uint64(db, "proxyee_tsvc_error", ns->n_proxyee_tsvc_error);
+	info_append_uint64(db, "proxyee_tsvc_timeout", ns->n_proxyee_tsvc_timeout);
+
+	info_append_uint64(db, "proxyee_read_success", ns->n_proxyee_read_success);
+	info_append_uint64(db, "proxyee_read_error", ns->n_proxyee_read_error);
+	info_append_uint64(db, "proxyee_read_timeout", ns->n_proxyee_read_timeout);
+	info_append_uint64(db, "proxyee_read_not_found", ns->n_proxyee_read_not_found);
+
+	info_append_uint64(db, "proxyee_write_success", ns->n_proxyee_write_success);
+	info_append_uint64(db, "proxyee_write_error", ns->n_proxyee_write_error);
+	info_append_uint64(db, "proxyee_write_timeout", ns->n_proxyee_write_timeout);
+
+	// Subset of n_proxyee_write_... above, respectively.
+	info_append_uint64(db, "xdr_proxyee_write_success", ns->n_xdr_proxyee_write_success);
+	info_append_uint64(db, "xdr_proxyee_write_error", ns->n_xdr_proxyee_write_error);
+	info_append_uint64(db, "xdr_proxyee_write_timeout", ns->n_xdr_proxyee_write_timeout);
+
+	info_append_uint64(db, "proxyee_delete_success", ns->n_proxyee_delete_success);
+	info_append_uint64(db, "proxyee_delete_error", ns->n_proxyee_delete_error);
+	info_append_uint64(db, "proxyee_delete_timeout", ns->n_proxyee_delete_timeout);
+	info_append_uint64(db, "proxyee_delete_not_found", ns->n_proxyee_delete_not_found);
+
+	// Subset of n_proxyee_delete_... above, respectively.
+	info_append_uint64(db, "xdr_proxyee_delete_success", ns->n_xdr_proxyee_delete_success);
+	info_append_uint64(db, "xdr_proxyee_delete_error", ns->n_xdr_proxyee_delete_error);
+	info_append_uint64(db, "xdr_proxyee_delete_timeout", ns->n_xdr_proxyee_delete_timeout);
+	info_append_uint64(db, "xdr_proxyee_delete_not_found", ns->n_xdr_proxyee_delete_not_found);
+
+	info_append_uint64(db, "proxyee_udf_complete", ns->n_proxyee_udf_complete);
+	info_append_uint64(db, "proxyee_udf_error", ns->n_proxyee_udf_error);
+	info_append_uint64(db, "proxyee_udf_timeout", ns->n_proxyee_udf_timeout);
+
+	info_append_uint64(db, "proxyee_lang_read_success", ns->n_proxyee_lang_read_success);
+	info_append_uint64(db, "proxyee_lang_write_success", ns->n_proxyee_lang_write_success);
+	info_append_uint64(db, "proxyee_lang_delete_success", ns->n_proxyee_lang_delete_success);
+	info_append_uint64(db, "proxyee_lang_error", ns->n_proxyee_lang_error);
+
 	// Batch sub-transaction stats.
 
 	info_append_uint64(db, "batch_sub_tsvc_error", ns->n_batch_sub_tsvc_error);
@@ -5215,6 +5256,16 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "batch_sub_read_error", ns->n_batch_sub_read_error);
 	info_append_uint64(db, "batch_sub_read_timeout", ns->n_batch_sub_read_timeout);
 	info_append_uint64(db, "batch_sub_read_not_found", ns->n_batch_sub_read_not_found);
+
+	// From-proxy batch sub-transaction stats.
+
+	info_append_uint64(db, "proxyee_batch_sub_tsvc_error", ns->n_proxyee_batch_sub_tsvc_error);
+	info_append_uint64(db, "proxyee_batch_sub_tsvc_timeout", ns->n_proxyee_batch_sub_tsvc_timeout);
+
+	info_append_uint64(db, "proxyee_batch_sub_read_success", ns->n_proxyee_batch_sub_read_success);
+	info_append_uint64(db, "proxyee_batch_sub_read_error", ns->n_proxyee_batch_sub_read_error);
+	info_append_uint64(db, "proxyee_batch_sub_read_timeout", ns->n_proxyee_batch_sub_read_timeout);
+	info_append_uint64(db, "proxyee_batch_sub_read_not_found", ns->n_proxyee_batch_sub_read_not_found);
 
 	// Internal-UDF sub-transaction stats.
 

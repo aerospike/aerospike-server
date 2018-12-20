@@ -153,6 +153,31 @@ client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 }
 
 static inline void
+proxyee_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_proxyee_write_success);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_proxyee_write_success);
+		}
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_proxyee_write_timeout);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_proxyee_write_timeout);
+		}
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_proxyee_write_error);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_proxyee_write_error);
+		}
+		break;
+	}
+}
+
+static inline void
 append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 {
 	if (as_bin_is_external_particle(b)) {
@@ -452,6 +477,8 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
 					0, tr->rsv.ns, as_transaction_trid(tr));
 		}
+		proxyee_write_update_stats(tr->rsv.ns, tr->result_code,
+				as_transaction_is_xdr(tr));
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
@@ -480,6 +507,8 @@ write_timeout_cb(rw_request* rw)
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	case FROM_PROXY:
+		proxyee_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
+				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
