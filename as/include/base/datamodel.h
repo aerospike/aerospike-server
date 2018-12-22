@@ -922,42 +922,42 @@ struct as_namespace_s {
 
 	// From-proxy transaction stats.
 
-	cf_atomic64		n_proxyee_tsvc_error;
-	cf_atomic64		n_proxyee_tsvc_timeout;
+	cf_atomic64		n_from_proxy_tsvc_error;
+	cf_atomic64		n_from_proxy_tsvc_timeout;
 
-	cf_atomic64		n_proxyee_read_success;
-	cf_atomic64		n_proxyee_read_error;
-	cf_atomic64		n_proxyee_read_timeout;
-	cf_atomic64		n_proxyee_read_not_found;
+	cf_atomic64		n_from_proxy_read_success;
+	cf_atomic64		n_from_proxy_read_error;
+	cf_atomic64		n_from_proxy_read_timeout;
+	cf_atomic64		n_from_proxy_read_not_found;
 
-	cf_atomic64		n_proxyee_write_success;
-	cf_atomic64		n_proxyee_write_error;
-	cf_atomic64		n_proxyee_write_timeout;
+	cf_atomic64		n_from_proxy_write_success;
+	cf_atomic64		n_from_proxy_write_error;
+	cf_atomic64		n_from_proxy_write_timeout;
 
-	// Subset of n_proxyee_write_... above, respectively.
-	cf_atomic64		n_xdr_proxyee_write_success;
-	cf_atomic64		n_xdr_proxyee_write_error;
-	cf_atomic64		n_xdr_proxyee_write_timeout;
+	// Subset of n_from_proxy_write_... above, respectively.
+	cf_atomic64		n_xdr_from_proxy_write_success;
+	cf_atomic64		n_xdr_from_proxy_write_error;
+	cf_atomic64		n_xdr_from_proxy_write_timeout;
 
-	cf_atomic64		n_proxyee_delete_success;
-	cf_atomic64		n_proxyee_delete_error;
-	cf_atomic64		n_proxyee_delete_timeout;
-	cf_atomic64		n_proxyee_delete_not_found;
+	cf_atomic64		n_from_proxy_delete_success;
+	cf_atomic64		n_from_proxy_delete_error;
+	cf_atomic64		n_from_proxy_delete_timeout;
+	cf_atomic64		n_from_proxy_delete_not_found;
 
-	// Subset of n_proxyee_delete_... above, respectively.
-	cf_atomic64		n_xdr_proxyee_delete_success;
-	cf_atomic64		n_xdr_proxyee_delete_error;
-	cf_atomic64		n_xdr_proxyee_delete_timeout;
-	cf_atomic64		n_xdr_proxyee_delete_not_found;
+	// Subset of n_from_proxy_delete_... above, respectively.
+	cf_atomic64		n_xdr_from_proxy_delete_success;
+	cf_atomic64		n_xdr_from_proxy_delete_error;
+	cf_atomic64		n_xdr_from_proxy_delete_timeout;
+	cf_atomic64		n_xdr_from_proxy_delete_not_found;
 
-	cf_atomic64		n_proxyee_udf_complete;
-	cf_atomic64		n_proxyee_udf_error;
-	cf_atomic64		n_proxyee_udf_timeout;
+	cf_atomic64		n_from_proxy_udf_complete;
+	cf_atomic64		n_from_proxy_udf_error;
+	cf_atomic64		n_from_proxy_udf_timeout;
 
-	cf_atomic64		n_proxyee_lang_read_success;
-	cf_atomic64		n_proxyee_lang_write_success;
-	cf_atomic64		n_proxyee_lang_delete_success;
-	cf_atomic64		n_proxyee_lang_error;
+	cf_atomic64		n_from_proxy_lang_read_success;
+	cf_atomic64		n_from_proxy_lang_write_success;
+	cf_atomic64		n_from_proxy_lang_delete_success;
+	cf_atomic64		n_from_proxy_lang_error;
 
 	// Batch sub-transaction stats.
 
@@ -975,13 +975,13 @@ struct as_namespace_s {
 
 	// From-proxy batch sub-transaction stats.
 
-	cf_atomic64		n_proxyee_batch_sub_tsvc_error;
-	cf_atomic64		n_proxyee_batch_sub_tsvc_timeout;
+	cf_atomic64		n_from_proxy_batch_sub_tsvc_error;
+	cf_atomic64		n_from_proxy_batch_sub_tsvc_timeout;
 
-	cf_atomic64		n_proxyee_batch_sub_read_success;
-	cf_atomic64		n_proxyee_batch_sub_read_error;
-	cf_atomic64		n_proxyee_batch_sub_read_timeout;
-	cf_atomic64		n_proxyee_batch_sub_read_not_found;
+	cf_atomic64		n_from_proxy_batch_sub_read_success;
+	cf_atomic64		n_from_proxy_batch_sub_read_error;
+	cf_atomic64		n_from_proxy_batch_sub_read_timeout;
+	cf_atomic64		n_from_proxy_batch_sub_read_not_found;
 
 	// Internal-UDF sub-transaction stats.
 
@@ -997,7 +997,7 @@ struct as_namespace_s {
 	cf_atomic64		n_udf_sub_lang_delete_success;
 	cf_atomic64		n_udf_sub_lang_error;
 
-	// Transaction retransmit stats - 'all' means both client & proxyee origins.
+	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
 	uint64_t		n_retransmit_all_read_dup_res;
 

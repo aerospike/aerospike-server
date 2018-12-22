@@ -156,17 +156,17 @@ client_udf_update_stats(as_namespace* ns, uint8_t result_code)
 }
 
 static inline void
-proxyee_udf_update_stats(as_namespace* ns, uint8_t result_code)
+from_proxy_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_proxyee_udf_complete);
+		cf_atomic64_incr(&ns->n_from_proxy_udf_complete);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_proxyee_udf_timeout);
+		cf_atomic64_incr(&ns->n_from_proxy_udf_timeout);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_proxyee_udf_error);
+		cf_atomic64_incr(&ns->n_from_proxy_udf_error);
 		break;
 	}
 }
@@ -607,7 +607,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
 					0, tr->rsv.ns, as_transaction_trid(tr));
 		}
-		proxyee_udf_update_stats(tr->rsv.ns, tr->result_code);
+		from_proxy_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_IUDF:
 		if (db && db->used_sz != 0) {
@@ -643,7 +643,7 @@ udf_timeout_cb(rw_request* rw)
 		client_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_PROXY:
-		proxyee_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		from_proxy_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_IUDF:
 		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata, AS_ERR_TIMEOUT);
@@ -1018,18 +1018,18 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 	case FROM_PROXY:
 		if (ret == 0 && is_success) {
 			if (op == UDF_OPTYPE_READ) {
-				cf_atomic64_incr(&ns->n_proxyee_lang_read_success);
+				cf_atomic64_incr(&ns->n_from_proxy_lang_read_success);
 			}
 			else if (op == UDF_OPTYPE_DELETE) {
-				cf_atomic64_incr(&ns->n_proxyee_lang_delete_success);
+				cf_atomic64_incr(&ns->n_from_proxy_lang_delete_success);
 			}
 			else if (op == UDF_OPTYPE_WRITE) {
-				cf_atomic64_incr(&ns->n_proxyee_lang_write_success);
+				cf_atomic64_incr(&ns->n_from_proxy_lang_write_success);
 			}
 		}
 		else {
 			cf_info(AS_UDF, "lua error, ret:%d", ret);
-			cf_atomic64_incr(&ns->n_proxyee_lang_error);
+			cf_atomic64_incr(&ns->n_from_proxy_lang_error);
 		}
 		break;
 	case FROM_IUDF:

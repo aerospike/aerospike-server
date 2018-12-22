@@ -347,10 +347,10 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 			tr->from.proxy_node = 0; // pattern, not needed
 		}
 		if (as_transaction_is_batch_sub(tr)) {
-			UPDATE_ERROR_STATS(proxyee_batch_sub);
+			UPDATE_ERROR_STATS(from_proxy_batch_sub);
 		}
 		else {
-			UPDATE_ERROR_STATS(proxyee);
+			UPDATE_ERROR_STATS(from_proxy);
 		}
 		break;
 	case FROM_BATCH:

@@ -63,9 +63,9 @@ typedef struct as_stats_s {
 	// Early transaction errors.
 	cf_atomic64		n_demarshal_error;
 	cf_atomic64		n_tsvc_client_error;
-	cf_atomic64		n_tsvc_proxyee_error;
+	cf_atomic64		n_tsvc_from_proxy_error;
 	cf_atomic64		n_tsvc_batch_sub_error;
-	cf_atomic64		n_tsvc_proxyee_batch_sub_error;
+	cf_atomic64		n_tsvc_from_proxy_batch_sub_error;
 	cf_atomic64		n_tsvc_udf_sub_error;
 
 	// Batch-index stats.

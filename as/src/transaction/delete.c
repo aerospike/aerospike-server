@@ -109,32 +109,32 @@ client_delete_update_stats(as_namespace* ns, uint8_t result_code,
 }
 
 static inline void
-proxyee_delete_update_stats(as_namespace* ns, uint8_t result_code,
+from_proxy_delete_update_stats(as_namespace* ns, uint8_t result_code,
 		bool is_xdr_op)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_proxyee_delete_success);
+		cf_atomic64_incr(&ns->n_from_proxy_delete_success);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_proxyee_delete_success);
+			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_success);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_proxyee_delete_timeout);
+		cf_atomic64_incr(&ns->n_from_proxy_delete_timeout);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_proxyee_delete_timeout);
+			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_timeout);
 		}
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_proxyee_delete_error);
+		cf_atomic64_incr(&ns->n_from_proxy_delete_error);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_proxyee_delete_error);
+			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_error);
 		}
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_proxyee_delete_not_found);
+		cf_atomic64_incr(&ns->n_from_proxy_delete_not_found);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_proxyee_delete_not_found);
+			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_not_found);
 		}
 		break;
 	}
@@ -412,7 +412,7 @@ send_delete_response(as_transaction* tr)
 		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 				tr->result_code, 0, 0, NULL, NULL, 0, tr->rsv.ns,
 				as_transaction_trid(tr));
-		proxyee_delete_update_stats(tr->rsv.ns, tr->result_code,
+		from_proxy_delete_update_stats(tr->rsv.ns, tr->result_code,
 				as_transaction_is_xdr(tr));
 		break;
 	case FROM_NSUP:
@@ -446,7 +446,7 @@ delete_timeout_cb(rw_request* rw)
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	case FROM_PROXY:
-		proxyee_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
+		from_proxy_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	default:
