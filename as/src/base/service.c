@@ -325,6 +325,10 @@ run_service(void* udata)
 	uint64_t sid = (uint64_t)udata;
 	cf_poll poll = g_polls[sid];
 
+	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE) {
+		cf_topo_pin_to_cpu((cf_topo_cpu_index)sid);
+	}
+
 	while (true) {
 		cf_poll_event events[N_EVENTS];
 		int32_t n_events = cf_poll_wait(poll, events, N_EVENTS, -1);
