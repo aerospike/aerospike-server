@@ -695,7 +695,8 @@ emigrate_signal(emigration *emig)
 				CF_QUEUE_OK) {
 			switch (op) {
 			case OPERATION_ALL_DONE_ACK:
-				cf_atomic_int_decr(&ns->migrate_signals_remaining);
+				as_partition_signal_done(ns, emig->rsv.p->id,
+						emig->cluster_key);
 				as_fabric_msg_put(m);
 				return;
 			default:
