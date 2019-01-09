@@ -575,6 +575,26 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 	return AS_MIGRATE_OK;
 }
 
+void
+as_partition_signal_done(as_namespace* ns, uint32_t pid,
+		uint64_t orig_cluster_key)
+{
+	as_partition* p = &ns->partitions[pid];
+
+	cf_mutex_lock(&p->lock);
+
+	if (! g_allow_migrations || orig_cluster_key != as_exchange_cluster_key()) {
+		cf_debug(AS_PARTITION, "{%s:%u} signal_done - cluster key mismatch",
+				ns->name, pid);
+		cf_mutex_unlock(&p->lock);
+		return;
+	}
+
+	cf_atomic_int_decr(&ns->migrate_signals_remaining);
+
+	cf_mutex_unlock(&p->lock);
+}
+
 
 //==========================================================
 // Local helpers - generic.
