@@ -69,8 +69,8 @@
 #include "base/transaction.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
+#include "base/smd.h"
 #include "base/stats.h"
-#include "base/system_metadata.h"
 #include "base/truncate.h"
 #include "base/udf_cask.h"
 #include "base/xdr_config.h"
@@ -1443,42 +1443,6 @@ info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)
 	}
 
 	cf_dyn_buf_append_string(db, "ok");
-	return 0;
-}
-
-/*
- *  Print out System Metadata info.
- */
-int
-info_command_dump_smd(char *name, char *params, cf_dyn_buf *db)
-{
-	cf_debug(AS_INFO, "dump-smd command received: params %s", params);
-
-	bool verbose = false;
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	/*
-	 *  Command Format:  "dump-smd:{verbose=<opt>}" [the "verbose" argument is optional]
-	 *
-	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
-	 */
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
-		if (!strncmp(param_str, "true", 5)) {
-			verbose = true;
-		} else if (!strncmp(param_str, "false", 6)) {
-			verbose = false;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"verbose\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	as_smd_dump(verbose);
-	cf_dyn_buf_append_string(db, "ok");
-
 	return 0;
 }
 
@@ -4244,9 +4208,9 @@ info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the truncate-undo command.
 
-	as_truncate_undo_cmd(ns_name, set_rv == 0 ? set_name : NULL);
+	bool ok = as_truncate_undo_cmd(ns_name, set_rv == 0 ? set_name : NULL);
 
-	cf_dyn_buf_append_string(db, "ok");
+	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate-undo");
 
 	return 0;
 }
@@ -4910,6 +4874,14 @@ int
 info_get_sets(char *name, cf_dyn_buf *db)
 {
 	return info_get_tree_sets(name, "", db);
+}
+
+int
+info_get_smd_info(char *name, cf_dyn_buf *db)
+{
+	as_smd_get_info(db);
+
+	return (0);
 }
 
 int
@@ -5876,12 +5848,10 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 		char smd_key[SINDEX_SMD_KEY_SIZE];
 
 		as_sindex_imd_to_smd_key(&imd, smd_key);
-		res = as_smd_set_metadata(SINDEX_MODULE, smd_key, imd.iname);
 
-		if (res != 0) {
-			cf_warning(AS_INFO, "SINDEX CREATE : Queuing the index %s metadata to SMD failed with error %s",
-					imd.iname, as_sindex_err_str(res));
-			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, as_sindex_err_str(res));
+		if (! as_smd_set_blocking(AS_SMD_MODULE_SINDEX, smd_key, imd.iname, 0)) {
+			cf_dyn_buf_append_string(db, "ERROR::timeout");
+
 			goto ERR;
 		}
 	}
@@ -5931,7 +5901,11 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 		char smd_key[SINDEX_SMD_KEY_SIZE];
 
 		if (as_sindex_delete_imd_to_smd_key(ns, &imd, smd_key)) {
-			res = as_smd_delete_metadata(SINDEX_MODULE, smd_key);
+			if (! as_smd_delete_blocking(AS_SMD_MODULE_SINDEX, smd_key, 0)) {
+				cf_dyn_buf_append_string(db, "ERROR::timeout");
+
+				goto ERR;
+			}
 		}
 		else {
 			res = AS_SINDEX_ERR_NOTFOUND;
@@ -6256,7 +6230,7 @@ as_info_init()
 			"bins;build;build_os;build_time;"
 			"cluster-name;config-get;config-set;"
 			"digests;dump-cluster;dump-fabric;dump-hb;dump-hlc;dump-migrates;"
-			"dump-msgs;dump-rw;dump-si;dump-skew;dump-smd;dump-wb-summary;"
+			"dump-msgs;dump-rw;dump-si;dump-skew;dump-wb-summary;"
 			"feature-key;"
 			"get-config;get-sl;"
 			"health-outliers;health-stats;hist-track-start;hist-track-stop;"
@@ -6314,6 +6288,7 @@ as_info_init()
 	as_info_set_dynamic("services-alumni", as_service_list_dynamic, true);            // All neighbor addresses (services) this server has ever know about.
 	as_info_set_dynamic("services-alumni-reset", as_service_list_dynamic, false);     // Reset the services alumni to equal services.
 	as_info_set_dynamic("sets", info_get_sets, false);                                // Returns set statistics for all or a particular set.
+	as_info_set_dynamic("smd-info", info_get_smd_info, false);                        // Returns SMD state information.
 	as_info_set_dynamic("statistics", info_get_stats, true);                          // Returns system health and usage stats for this server.
 
 	// Tree-based names
@@ -6336,7 +6311,6 @@ as_info_init()
 	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
 	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-skew", info_command_dump_skew, PERM_LOGGING_CTRL);              // Print information about clock skew
-	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.

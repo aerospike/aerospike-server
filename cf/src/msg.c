@@ -85,6 +85,7 @@ static uint32_t msg_get_field_wire_size(msg_field_type type, uint32_t field_sz);
 static uint32_t msg_field_write_hdr(const msg_field *mf, msg_field_type type, uint8_t *buf);
 static uint32_t msg_field_write_buf(const msg_field *mf, msg_field_type type, uint8_t *buf);
 static void msg_field_save(msg *m, msg_field *mf);
+static bool msgpack_list_unpack_hdr(as_unpacker *pk, const msg *m, int field_id, uint32_t *count_r);
 
 
 //==========================================================
@@ -770,6 +771,41 @@ msg_msgpack_list_set_uint32(msg *m, int field_id, const uint32_t *buf,
 }
 
 void
+msg_msgpack_list_set_uint64(msg *m, int field_id, const uint64_t *buf,
+		uint32_t count)
+{
+	msg_field *mf = &m->f[field_id];
+	uint32_t a_sz = as_pack_list_header_get_size(count);
+
+	mf_destroy(mf);
+
+	for (uint32_t i = 0; i < count; i++) {
+		a_sz += as_pack_uint64_size(buf[i]);
+	}
+
+	mf->field_sz = a_sz;
+	mf->u.any_buf = cf_malloc(a_sz);
+
+	as_packer pk = {
+			.buffer = mf->u.any_buf,
+			.offset = 0,
+			.capacity = (int)a_sz,
+	};
+
+	int e = as_pack_list_header(&pk, count);
+
+	cf_assert(e == 0, CF_MSG, "as_pack_list_header failed");
+
+	for (uint32_t i = 0; i < count; i++) {
+		e = as_pack_uint64(&pk, buf[i]);
+		cf_assert(e == 0, CF_MSG, "as_pack_str failed");
+	}
+
+	mf->is_free = true;
+	mf->is_set = true;
+}
+
+void
 msg_msgpack_list_set_buf(msg *m, int field_id, const cf_vector *v)
 {
 	msg_field *mf = &m->f[field_id];
@@ -862,10 +898,16 @@ msg_get_uint64(const msg *m, int field_id, uint64_t *val_r)
 }
 
 int
-msg_get_str(const msg *m, int field_id, char **str_r, size_t *sz_r,
-		msg_get_type type)
+msg_get_str(const msg *m, int field_id, char **str_r, msg_get_type type)
 {
 	if (! m->f[field_id].is_set) {
+		return -1;
+	}
+
+	uint32_t sz = m->f[field_id].field_sz;
+
+	if (sz == 0 || m->f[field_id].u.str[sz - 1] != '\0') {
+		cf_warning(CF_MSG, "msg_get_str: invalid string");
 		return -1;
 	}
 
@@ -877,10 +919,6 @@ msg_get_str(const msg *m, int field_id, char **str_r, size_t *sz_r,
 	}
 	else {
 		cf_crash(CF_MSG, "msg_get_str: illegal msg_get_type");
-	}
-
-	if (sz_r) {
-		*sz_r = m->f[field_id].field_sz;
 	}
 
 	return 0;
@@ -957,43 +995,11 @@ msg_get_uint64_array(const msg *m, int field_id, uint32_t index,
 }
 
 bool
-msg_msgpack_container_get_count(const msg *m, int field_id, uint32_t *count_r)
+msg_msgpack_list_get_count(const msg *m, int field_id, uint32_t *count_r)
 {
-	const msg_field *mf = &m->f[field_id];
+	as_unpacker pk;
 
-	if (! mf->is_set) {
-		return false;
-	}
-
-	as_unpacker pk = {
-			.buffer = (const uint8_t *)mf->u.any_buf,
-			.offset = 0,
-			.length = (int)mf->field_sz
-	};
-
-	as_val_t type = as_unpack_peek_type(&pk);
-	int64_t count;
-
-	switch (type) {
-	case AS_LIST:
-		count = as_unpack_list_header_element_count(&pk);
-		break;
-	case AS_MAP:
-		count = as_unpack_map_header_element_count(&pk);
-		break;
-	default:
-		cf_ticker_warning(CF_MSG, "type %d not a packed container", type);
-		return false;
-	}
-
-	if (count < 0) {
-		cf_ticker_warning(CF_MSG, "invalid packed container type %d", type);
-		return false;
-	}
-
-	*count_r = (uint32_t)count;
-
-	return true;
+	return msgpack_list_unpack_hdr(&pk, m, field_id, count_r);
 }
 
 bool
@@ -1002,53 +1008,66 @@ msg_msgpack_list_get_uint32_array(const msg *m, int field_id, uint32_t *buf_r,
 {
 	cf_assert(buf_r, CF_MSG, "buf_r is null");
 
-	const msg_field *mf = &m->f[field_id];
+	as_unpacker pk;
+	uint32_t count;
 
-	if (! mf->is_set) {
+	if (! msgpack_list_unpack_hdr(&pk, m, field_id, &count)) {
 		return false;
 	}
 
-	as_unpacker pk = {
-			.buffer = (const uint8_t *)mf->u.any_buf,
-			.offset = 0,
-			.length = (int)mf->field_sz
-	};
-
-	as_val_t type = as_unpack_peek_type(&pk);
-	int64_t count;
-
-	switch (type) {
-	case AS_LIST:
-		count = as_unpack_list_header_element_count(&pk);
-		break;
-	default:
-		cf_ticker_warning(CF_MSG, "msg_msgpack_array_get_uint32_array() type %d but expected list", type);
+	if (*count_r < count) {
+		cf_warning(CF_MSG, "count_r %u < %u - too small", *count_r, count);
 		return false;
 	}
 
-	if (count < 0) {
-		cf_ticker_warning(CF_MSG, "invalid packed list type %d", type);
-		return false;
-	}
-
-	if (*count_r < (uint32_t)count) {
-		cf_warning(CF_MSG, "count_r %u < %ld too small", *count_r, count);
-		return false;
-	}
-
-	for (int64_t i = 0; i < count; i++) {
+	for (uint32_t i = 0; i < count; i++) {
 		uint64_t val;
 		int ret = as_unpack_uint64(&pk, &val);
 
 		if (ret != 0 || (val & (0xFFFFffffUL << 32)) != 0) {
-			cf_warning(CF_MSG, "i %ld/%ld invalid packed uint32 ret %d val 0x%lx", i, count, ret, val);
+			cf_warning(CF_MSG, "i %u/%u invalid packed uint32 ret %d val 0x%lx", i, count, ret, val);
 			return false;
 		}
 
 		buf_r[i] = (uint32_t)val;
 	}
 
-	*count_r = (uint32_t)count;
+	*count_r = count;
+
+	return true;
+}
+
+bool
+msg_msgpack_list_get_uint64_array(const msg *m, int field_id, uint64_t *buf_r,
+		uint32_t *count_r)
+{
+	cf_assert(buf_r, CF_MSG, "buf_r is null");
+
+	as_unpacker pk;
+	uint32_t count;
+
+	if (! msgpack_list_unpack_hdr(&pk, m, field_id, &count)) {
+		return false;
+	}
+
+	if (*count_r < count) {
+		cf_warning(CF_MSG, "count_r %u < %u - too small", *count_r, count);
+		return false;
+	}
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint64_t val;
+		int ret = as_unpack_uint64(&pk, &val);
+
+		if (ret != 0) {
+			cf_warning(CF_MSG, "i %u/%u invalid packed uint64 ret %d val 0x%lx", i, count, ret, val);
+			return false;
+		}
+
+		buf_r[i] = val;
+	}
+
+	*count_r = count;
 
 	return true;
 }
@@ -1057,47 +1076,25 @@ bool
 msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r,
 		bool init_vec)
 {
-	const msg_field *mf = &m->f[field_id];
+	as_unpacker pk;
+	uint32_t count;
 
-	if (! mf->is_set) {
-		return false;
-	}
-
-	as_unpacker pk = {
-			.buffer = (const uint8_t *)mf->u.any_buf,
-			.offset = 0,
-			.length = (int)mf->field_sz
-	};
-
-	as_val_t type = as_unpack_peek_type(&pk);
-	int64_t count;
-
-	switch (type) {
-	case AS_LIST:
-		count = as_unpack_list_header_element_count(&pk);
-		break;
-	default:
-		cf_ticker_warning(CF_MSG, "msg_msgpack_array_get_buf_vec_with_init() type %d but expected list", type);
-		return false;
-	}
-
-	if (count < 0) {
-		cf_ticker_warning(CF_MSG, "invalid packed list type %d", type);
+	if (! msgpack_list_unpack_hdr(&pk, m, field_id, &count)) {
 		return false;
 	}
 
 	if (init_vec) {
-		if (cf_vector_init(v_r, sizeof(msg_buf_ele), (uint32_t)count, 0) != 0) {
-			cf_warning(CF_MSG, "vector malloc failed - count %ld", count);
+		if (cf_vector_init(v_r, sizeof(msg_buf_ele), count, 0) != 0) {
+			cf_warning(CF_MSG, "vector malloc failed - count %u", count);
 			return false;
 		}
 	}
-	else if ((uint32_t)count > v_r->capacity) { // TODO - wrap to avoid access of private members?
-		cf_warning(CF_MSG, "count %ld > vector cap %u", count, v_r->capacity);
+	else if (count > v_r->capacity) { // TODO - wrap to avoid access of private members?
+		cf_warning(CF_MSG, "count %u > vector cap %u", count, v_r->capacity);
 		return false;
 	}
 
-	for (int64_t i = 0; i < count; i++) {
+	for (uint32_t i = 0; i < count; i++) {
 		msg_buf_ele ele;
 		int saved_offset = pk.offset;
 
@@ -1112,7 +1109,7 @@ msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r,
 					cf_vector_destroy(v_r);
 				}
 
-				cf_warning(CF_MSG, "i %ld/%ld invalid msgpack element with type %d", i, count, type);
+				cf_warning(CF_MSG, "i %u/%u invalid packed buf", i, count);
 
 				return false;
 			}
@@ -1310,4 +1307,30 @@ msg_field_save(msg *m, msg_field *mf)
 	default:
 		break;
 	}
+}
+
+static bool
+msgpack_list_unpack_hdr(as_unpacker *pk, const msg *m, int field_id,
+		uint32_t *count_r)
+{
+	const msg_field *mf = &m->f[field_id];
+
+	if (! mf->is_set) {
+		return false;
+	}
+
+	pk->buffer = (const uint8_t *)mf->u.any_buf;
+	pk->offset = 0;
+	pk->length = (int)mf->field_sz;
+
+	int64_t count = as_unpack_list_header_element_count(pk);
+
+	if (count < 0) {
+		cf_ticker_warning(CF_MSG, "invalid packed list");
+		return false;
+	}
+
+	*count_r = (uint32_t)count;
+
+	return true;
 }

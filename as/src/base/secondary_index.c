@@ -109,8 +109,8 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/smd.h"
 #include "base/stats.h"
-#include "base/system_metadata.h"
 #include "base/thr_sindex.h"
 #include "base/thr_info.h"
 #include "fabric/partition.h"
@@ -4082,24 +4082,11 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
  *
  */
 
-// Global flag to signal that all secondary index SMD is restored.
-static bool g_sindex_smd_restored = false;
-
 void
 as_sindex_init_smd()
 {
-	int retval = as_smd_create_module(SINDEX_MODULE,
-				NULL, NULL,
-				NULL, NULL,
-				as_sindex_smd_accept_cb, NULL,
-				NULL, NULL);
-
-	cf_assert(retval == 0, AS_SINDEX, "failed to create sindex SMD module (rv %d)", retval);
-
-	// Wait for Secondary Index SMD to be completely restored.
-	while (! g_sindex_smd_restored) {
-		usleep(1000);
-	}
+	as_smd_module_load(AS_SMD_MODULE_SINDEX, as_sindex_smd_accept_cb, NULL,
+			NULL);
 }
 
 /*
@@ -4337,16 +4324,11 @@ as_sindex_delete_imd_to_smd_key(as_namespace *ns, as_sindex_metadata *imd, char 
 	return true;
 }
 
-int
-as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, uint32_t accept_opt)
+void
+as_sindex_smd_accept_cb(const cf_vector *items, as_smd_accept_type accept_type)
 {
-	if ((accept_opt & AS_SMD_ACCEPT_OPT_CREATE) != 0) {
-		g_sindex_smd_restored = true;
-		return 0;
-	}
-
-	for (int i = 0; i < (int)items->num_items; i++) {
-		as_smd_item_t *item = items->item[i];
+	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
+		const as_smd_item *item = cf_vector_get_ptr(items, i);
 		as_sindex_metadata imd;
 
 		memset(&imd, 0, sizeof(imd)); // TODO - arrange to use { 0 } ???
@@ -4364,21 +4346,16 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 			continue;
 		}
 
-		if (item->action == AS_SMD_ACTION_SET) {
+		if (item->value != NULL) {
 			smd_value_to_imd(item->value, &imd); // sets index name
 			as_sindex_smd_create(ns, &imd);
 		}
-		else if (item->action == AS_SMD_ACTION_DELETE) {
-			as_sindex_destroy(ns, &imd);
-		}
 		else {
-			cf_warning(AS_SINDEX, "smd accept cb - unknown action");
+			as_sindex_destroy(ns, &imd);
 		}
 
 		as_sindex_imd_free(&imd);
 	}
-
-	return 0;
 }
 //                                     END - SMD CALLBACKS
 // ************************************************************************************************

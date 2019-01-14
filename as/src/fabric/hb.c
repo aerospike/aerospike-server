@@ -2907,7 +2907,7 @@ msg_type_get(msg* msg, as_hb_msg_type* type)
 static int
 msg_cluster_name_get(msg* msg, char** cluster_name)
 {
-	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name, NULL,
+	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name,
 			MSG_GET_DIRECT) != 0) {
 		return -1;
 	}

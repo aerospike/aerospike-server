@@ -200,6 +200,7 @@ void msg_set_uint64_array_size(msg *m, int field_id, uint32_t count);
 void msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v);
 
 void msg_msgpack_list_set_uint32(msg *m, int field_id, const uint32_t *buf, uint32_t count);
+void msg_msgpack_list_set_uint64(msg *m, int field_id, const uint64_t *buf, uint32_t count);
 void msg_msgpack_list_set_buf(msg *m, int field_id, const cf_vector *v);
 
 //------------------------------------------------
@@ -210,15 +211,16 @@ msg_field_type msg_field_get_type(const msg *m, int field_id);
 bool msg_is_set(const msg *m, int field_id);
 int msg_get_uint32(const msg *m, int field_id, uint32_t *val_r);
 int msg_get_uint64(const msg *m, int field_id, uint64_t *val_r);
-int msg_get_str(const msg *m, int field_id, char **str_r, size_t *sz_r, msg_get_type type);
+int msg_get_str(const msg *m, int field_id, char **str_r, msg_get_type type);
 int msg_get_buf(const msg *m, int field_id, uint8_t **buf_r, size_t *sz_r, msg_get_type type);
 
 int msg_get_uint32_array(const msg *m, int field_id, uint32_t idx, uint32_t *val_r);
 int msg_get_uint64_array_count(const msg *m, int field_id, uint32_t *count_r);
 int msg_get_uint64_array(const msg *m, int field_id, uint32_t idx, uint64_t *val_r);
 
-bool msg_msgpack_container_get_count(const msg *m, int field_id, uint32_t *count_r);
+bool msg_msgpack_list_get_count(const msg *m, int field_id, uint32_t *count_r);
 bool msg_msgpack_list_get_uint32_array(const msg *m, int field_id, uint32_t *buf_r, uint32_t *count_r);
+bool msg_msgpack_list_get_uint64_array(const msg *m, int field_id, uint64_t *buf_r, uint32_t *count_r);
 bool msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r, bool init_vec);
 
 static inline bool

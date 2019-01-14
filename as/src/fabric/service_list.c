@@ -819,8 +819,7 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 		// empty fields from the fabric message. So let's be prepared
 		// for missing fields!
 
-		if (msg_get_str(m, FIELD_PROJS[i].field, to, NULL,
-				MSG_GET_COPY_MALLOC) < 0) {
+		if (msg_get_str(m, FIELD_PROJS[i].field, to, MSG_GET_COPY_MALLOC) < 0) {
 			*to = cf_strdup("");
 		}
 

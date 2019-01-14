@@ -1919,7 +1919,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	uint32_t num_namespaces_sent = 0;
 	uint32_t num_namespace_elements_sent = 0;
 
-	if (!msg_msgpack_container_get_count(msg_event->msg,
+	if (!msg_msgpack_list_get_count(msg_event->msg,
 			AS_EXCHANGE_MSG_NAMESPACES, &num_namespaces_sent)
 			|| num_namespaces_sent > AS_NAMESPACE_SZ) {
 		WARNING("received invalid namespaces from node %"PRIx64,
@@ -1927,7 +1927,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 		return 0;
 	}
 
-	if (!msg_msgpack_container_get_count(msg_event->msg,
+	if (!msg_msgpack_list_get_count(msg_event->msg,
 			AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, &num_namespace_elements_sent)
 			|| num_namespaces_sent != num_namespace_elements_sent) {
 		WARNING("received invalid partition versions from node %"PRIx64,
@@ -1935,7 +1935,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 		return 0;
 	}
 
-	if (!msg_msgpack_container_get_count(msg_event->msg,
+	if (!msg_msgpack_list_get_count(msg_event->msg,
 			AS_EXCHANGE_MSG_NS_RACK_IDS, &num_namespace_elements_sent)
 			|| num_namespaces_sent != num_namespace_elements_sent) {
 		WARNING("received invalid cluster groups from node %"PRIx64,
@@ -1944,7 +1944,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	}
 
 	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS)
-			&& (!msg_msgpack_container_get_count(msg_event->msg,
+			&& (!msg_msgpack_list_get_count(msg_event->msg,
 					AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS,
 					&num_namespace_elements_sent)
 					|| num_namespaces_sent != num_namespace_elements_sent)) {
@@ -1954,7 +1954,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	}
 
 	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS)
-			&& (!msg_msgpack_container_get_count(msg_event->msg,
+			&& (!msg_msgpack_list_get_count(msg_event->msg,
 					AS_EXCHANGE_MSG_NS_ROSTERS,
 					&num_namespace_elements_sent)
 					|| num_namespaces_sent != num_namespace_elements_sent)) {
@@ -1964,7 +1964,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	}
 
 	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS)
-			&& (!msg_msgpack_container_get_count(msg_event->msg,
+			&& (!msg_msgpack_list_get_count(msg_event->msg,
 					AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS,
 					&num_namespace_elements_sent)
 					|| num_namespaces_sent != num_namespace_elements_sent)) {
@@ -1974,7 +1974,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	}
 
 	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES)
-			&& (!msg_msgpack_container_get_count(msg_event->msg,
+			&& (!msg_msgpack_list_get_count(msg_event->msg,
 					AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES,
 					&num_namespace_elements_sent)
 					|| num_namespaces_sent != num_namespace_elements_sent)) {
@@ -1984,7 +1984,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	}
 
 	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES)
-			&& (!msg_msgpack_container_get_count(msg_event->msg,
+			&& (!msg_msgpack_list_get_count(msg_event->msg,
 					AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
 					&num_namespace_elements_sent)
 					|| num_namespaces_sent != num_namespace_elements_sent)) {
@@ -1994,7 +1994,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	}
 
 	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS)
-			&& (!msg_msgpack_container_get_count(msg_event->msg,
+			&& (!msg_msgpack_list_get_count(msg_event->msg,
 					AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
 					&num_namespace_elements_sent)
 					|| num_namespaces_sent != num_namespace_elements_sent)) {

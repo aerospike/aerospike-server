@@ -54,7 +54,7 @@
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/service.h"
-#include "base/system_metadata.h"
+#include "base/smd.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
@@ -355,7 +355,6 @@ main(int argc, char **argv)
 	// nodes or clients yet.)
 
 	as_json_init();				// Jansson JSON API used by System Metadata
-	as_smd_init();				// System Metadata first - others depend on it
 	as_index_tree_gc_init();	// thread to purge dropped index trees
 	as_sindex_thr_init();		// defrag secondary index (ok during population)
 
@@ -411,7 +410,7 @@ main(int argc, char **argv)
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
-	as_smd_start(g_smd);		// enables receiving cluster state change events
+	as_smd_start();				// enables receiving cluster state change events
 	as_health_start();			// starts before fabric and hb to capture them
 	as_fabric_start();			// may send & receive fabric messages
 	as_xdr_start();				// XDR should start before it joins other nodes
@@ -454,7 +453,6 @@ main(int argc, char **argv)
 
 	as_storage_shutdown(instance);
 	as_xdr_shutdown();
-	as_smd_shutdown(g_smd);
 
 	cf_info(AS_AS, "finished clean shutdown - exiting");
 
