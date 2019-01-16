@@ -503,12 +503,6 @@ int udf_cask_info_remove(char *name, char * params, cf_dyn_buf * out) {
 
 	cf_debug(AS_INFO, " Lua file removal full-path is : %s \n", file_path);
 
-	if (stat(file_path, &buf) != 0) {
-		cf_info(AS_UDF, "failed to read file from : %s, error : %s", file_path, cf_strerror(errno));
-		cf_dyn_buf_append_string(out, "error=file_not_found");
-		return -1;
-	}
-
 	if (! as_smd_delete_blocking(AS_SMD_MODULE_UDF, filename, 0)) {
 		cf_warning(AS_UDF, "UDF module '%s' (%s) remove timeout", filename, file_path);
 		cf_dyn_buf_append_string(out, "error=timeout");
