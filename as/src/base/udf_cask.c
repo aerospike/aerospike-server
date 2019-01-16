@@ -486,8 +486,7 @@ int udf_cask_info_remove(char *name, char * params, cf_dyn_buf * out) {
 
 	char    filename[128]   = {0};
 	int     filename_len    = sizeof(filename);
-	char file_path[1024]	= {0};
-	struct stat buf;
+	char file_path[1024]    = {0};
 
 	cf_debug(AS_INFO, "UDF CASK INFO REMOVE");
 
