@@ -3083,7 +3083,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 9) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of compression-level of ns %s from %u to %d", ns->name, ns->storage_defrag_queue_min, val);
+			cf_info(AS_INFO, "Changing value of compression-level of ns %s from %u to %d", ns->name, ns->storage_compression_level, val);
 			ns->storage_compression_level = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
