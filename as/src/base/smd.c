@@ -1651,8 +1651,7 @@ op_full_from_pr(smd_op* op)
 	send_ack_to_pr(op);
 
 	if (op->committed_key == module->cv_key && op->tid == module->cv_tid) {
-		cf_warning(AS_SMD, "{%s} unexpected noop", MODULE_AS_STRING(module));
-		return;
+		return; // normal on retransmits
 	}
 
 	module->cv_key = op->committed_key;
