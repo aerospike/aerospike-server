@@ -1712,7 +1712,7 @@ map_add_items_unordered(const packed_map *map, as_bin *b,
 			if (cdt_idx_mask_is_set(found_mask, i)) {
 				order_index_set(val_ord, i, val_ord->max_idx);
 				dup_count++;
-				dup_sz += offset_index_get_delta_const(val_off, i);
+				dup_sz += offset_index_get_delta_const(val_off, idx);
 			}
 		}
 	}
@@ -1733,7 +1733,8 @@ map_add_items_unordered(const packed_map *map, as_bin *b,
 						if (! cdt_idx_mask_is_set(found_mask, i)) {
 							order_index_set(val_ord, i, val_ord->max_idx);
 							dup_count++;
-							dup_sz += offset_index_get_delta_const(val_off, i);
+							dup_sz += offset_index_get_delta_const(val_off,
+									idx);
 						}
 					}
 				}
@@ -1865,7 +1866,7 @@ map_add_items_ordered(const packed_map *map, as_bin *b,
 					if (control->do_partial) {
 						order_index_set(val_ord, i, val_ord->max_idx); // skip this value
 						dup_count++;
-						dup_sz += offset_index_get_delta_const(val_off, i);
+						dup_sz += sz;
 						continue;
 					}
 
@@ -1889,7 +1890,7 @@ map_add_items_ordered(const packed_map *map, as_bin *b,
 					if (control->do_partial) {
 						order_index_set(val_ord, i, val_ord->max_idx); // skip this value
 						dup_count++;
-						dup_sz += offset_index_get_delta_const(val_off, i);
+						dup_sz += sz;
 						continue;
 					}
 
