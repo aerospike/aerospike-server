@@ -774,14 +774,21 @@ smd_cluster_changed_cb(const as_exchange_cluster_changed_event* ex_event,
 	size_t a_sz = ex_event->cluster_size * sizeof(cf_node);
 	cf_node* succession = cf_malloc(a_sz);
 
-	memcpy(succession, ex_event->succession, a_sz);
+	uint32_t* compatibility_ids = as_exchange_compatibility_ids();
+	uint32_t n_compatible = 0;
+
+	for (uint32_t n = 0; n < ex_event->cluster_size; n++) {
+		if (compatibility_ids[n] >= 1) {
+			succession[n_compatible++] = ex_event->succession[n];
+		}
+	}
 
 	smd_op* op = smd_op_create();
 
 	op->type = SMD_OP_CLUSTER_CHANGED;
 	op->cl_key = ex_event->cluster_key;
 
-	op->node_count = ex_event->cluster_size;
+	op->node_count = n_compatible;
 	op->succession = succession;
 
 	cf_queue_push(&g_smd.event_q, &op);

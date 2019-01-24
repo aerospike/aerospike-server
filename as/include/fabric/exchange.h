@@ -38,6 +38,11 @@
  */
 
 /**
+ * Used by exchange listeners during upgrades for compatibility purposes.
+ */
+#define AS_EXCHANGE_COMPATIBILITY_ID 1
+
+/**
  * Number of quantum intervals in orphan state after which client transactions
  * will be blocked.
  */
@@ -144,6 +149,12 @@ as_exchange_info_get_succession(cf_dyn_buf* db);
  */
 cf_node
 as_exchange_principal();
+
+/**
+ * Used by exchange listeners during upgrades for compatibility purposes.
+ */
+uint32_t*
+as_exchange_compatibility_ids(void);
 
 /**
  * Output exchange cluster state for info.

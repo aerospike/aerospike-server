@@ -6188,12 +6188,16 @@ as_info_init()
 	char vstr[64];
 	sprintf(vstr, "%s build %s", aerospike_build_type, aerospike_build_id);
 
+	char compatibility_id[20];
+	cf_str_itoa(AS_EXCHANGE_COMPATIBILITY_ID, compatibility_id, 10);
+
 	// Set some basic values
 	as_info_set("version", vstr, true);                  // Returns the edition and build number.
 	as_info_set("build", aerospike_build_id, true);      // Returns the build number for this server.
 	as_info_set("build_os", aerospike_build_os, true);   // Return the OS used to create this build.
 	as_info_set("build_time", aerospike_build_time, true); // Return the creation time of this build.
 	as_info_set("edition", aerospike_build_type, true);  // Return the edition of this build.
+	as_info_set("compatibility-id", compatibility_id, true); // Used for compatibility purposes.
 	as_info_set("digests", "RIPEMD160", false);          // Returns the hashing algorithm used by the server for key hashing.
 	as_info_set("status", "ok", false);                  // Always returns ok, used to verify service port is open.
 	as_info_set("STATUS", "OK", false);                  // Always returns OK, used to verify service port is open.

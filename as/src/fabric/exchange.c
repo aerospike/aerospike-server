@@ -236,6 +236,11 @@ typedef struct as_exchange_node_namespace_data_s
 typedef struct as_exchange_node_data_s
 {
 	/**
+	 * Used by exchange listeners during upgrades for compatibility purposes.
+	 */
+	uint32_t compatibility_id;
+
+	/**
 	 * Number of sender's namespaces that have a matching local namespace.
 	 */
 	uint32_t num_namespaces;
@@ -454,6 +459,11 @@ typedef struct as_exchange_s
 	cf_node principal;
 
 	/**
+	 * Used by exchange listeners during upgrades for compatibility purposes.
+	 */
+	uint32_t compatibility_ids[AS_CLUSTER_SZ];
+
+	/**
 	 * Committed cluster generation.
 	 */
 	uint64_t committed_cluster_generation;
@@ -620,6 +630,7 @@ typedef enum
 	AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES,
 	AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
 	AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
+	AS_EXCHANGE_MSG_COMPATIBILITY_ID,
 
 	NUM_EXCHANGE_MSG_FIELDS
 } as_exchange_msg_fields;
@@ -639,7 +650,8 @@ static const msg_template exchange_msg_template[] = {
 		{ AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK }
+		{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK },
+		{ AS_EXCHANGE_MSG_COMPATIBILITY_ID, M_FT_UINT32 }
 };
 
 COMPILER_ASSERT(sizeof(exchange_msg_template) / sizeof(msg_template) ==
@@ -1491,6 +1503,9 @@ exchange_msg_data_payload_set(msg* msg)
 	memset(rebalance_flags, 0, sizeof(rebalance_flags));
 
 	pthread_mutex_lock(&g_exchanged_info_lock);
+
+	msg_set_uint32(msg, AS_EXCHANGE_MSG_COMPATIBILITY_ID,
+			AS_EXCHANGE_COMPATIBILITY_ID);
 
 	for (uint32_t ns_ix = 0; ns_ix < ns_count; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
@@ -2507,11 +2522,13 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
  * Commit exchange data for a given node.
  */
 static void
-exchange_data_pre_commit_for_node(cf_node node)
+exchange_data_pre_commit_for_node(cf_node node, uint32_t ix)
 {
 	EXCHANGE_LOCK();
 	as_exchange_node_state node_state;
 	exchange_node_state_get_safe(node, &node_state);
+
+	g_exchange.compatibility_ids[ix] = node_state.data->compatibility_id;
 
 	for (uint32_t i = 0; i < node_state.data->num_namespaces; i++) {
 		exchange_namespace_payload_pre_commit_for_node(node,
@@ -2564,6 +2581,9 @@ exchange_exchanging_pre_commit()
 	EXCHANGE_LOCK();
 	pthread_mutex_lock(&g_exchanged_info_lock);
 
+	memset(g_exchange.compatibility_ids, 0,
+			sizeof(g_exchange.compatibility_ids));
+
 	// Reset exchange data for all namespaces.
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
@@ -2597,7 +2617,7 @@ exchange_exchanging_pre_commit()
 	for (int i = 0; i < num_nodes; i++) {
 		cf_node node;
 		cf_vector_get(&g_exchange.succession_list, i, &node);
-		exchange_data_pre_commit_for_node(node);
+		exchange_data_pre_commit_for_node(node, i);
 	}
 
 	// Collected all exchanged data - do final configuration consistency checks.
@@ -2693,6 +2713,10 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 	exchange_node_state_get_safe(msg_event->msg_source, &node_state);
 
 	if (!node_state.received) {
+		node_state.data->compatibility_id = 0;
+		msg_get_uint32(msg_event->msg, AS_EXCHANGE_MSG_COMPATIBILITY_ID,
+				&node_state.data->compatibility_id);
+
 		uint32_t num_namespaces_sent = exchange_data_msg_get_num_namespaces(
 				msg_event);
 
@@ -3594,6 +3618,15 @@ cf_node
 as_exchange_principal()
 {
 	return g_exchange.committed_principal;
+}
+
+/**
+ * Used by exchange listeners during upgrades for compatibility purposes.
+ */
+uint32_t*
+as_exchange_compatibility_ids(void)
+{
+	return (uint32_t*)g_exchange.compatibility_ids;
 }
 
 /**
