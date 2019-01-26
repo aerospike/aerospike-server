@@ -978,6 +978,10 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 
 	int32_t mem_size = particle_vtable[type]->size_from_wire_fn(valptr, vallen);
 
+	if (mem_size < 0) {
+		goto Failed;
+	}
+
 	if (mem_size != 0) {
 		dp->bin.particle = cf_malloc((size_t)mem_size);
 	}

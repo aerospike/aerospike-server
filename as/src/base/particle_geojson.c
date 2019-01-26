@@ -194,6 +194,12 @@ geojson_size_from_wire(const uint8_t *wire_value, uint32_t value_size)
 	const uint16_t *p_cells = (const uint16_t *)(wire_value + 1);
 	uint16_t ncells = cf_swap_from_be16(*p_cells);
 	size_t cellsz = ncells * sizeof(uint64_t);
+
+	if ((size_t)value_size < sizeof(uint8_t) + sizeof(uint16_t) + cellsz) {
+		cf_warning(AS_PARTICLE, "geojson_size_from_wire() invalid geojson wire_sz %u < cellsz %zu + 3", value_size, cellsz);
+		return -AS_ERR_GEO_INVALID_GEOJSON;
+	}
+
 	size_t jlen = value_size - sizeof(uint8_t) - sizeof(uint16_t) - cellsz;
 
 	return (int32_t)geojson_particle_sz(MAX_REGION_CELLS, jlen);
