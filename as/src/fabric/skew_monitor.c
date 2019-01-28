@@ -854,7 +854,7 @@ as_skew_monitor_dump()
 	cf_vector_clear(&node_vector);
 	skew_monitor_outliers(&node_vector);
 	if (cf_vector_size(&node_vector)) {
-		as_clustering_log_cf_node_vector(AS_INFO, AS_SKEW,
+		as_clustering_log_cf_node_vector(CF_INFO, AS_SKEW,
 				"CSM: Estimated clock outliers", &node_vector);
 	}
 
