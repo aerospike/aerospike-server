@@ -4125,7 +4125,7 @@ info_command_truncate_namespace(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	// Check for a set-name, for safety. (Did user intend 'truncate-set'?)
+	// Check for a set-name, for safety. (Did user intend 'truncate'?)
 
 	char set_name[1]; // just checking for existence
 	int set_name_len = (int)sizeof(set_name);
@@ -4177,7 +4177,7 @@ info_command_truncate_namespace_undo(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	// Check for a set-name, for safety. (Did user intend 'truncate-set-undo'?)
+	// Check for a set-name, for safety. (Did user intend 'truncate-undo'?)
 
 	char set_name[1]; // just checking for existence
 	int set_name_len = (int)sizeof(set_name);
@@ -4200,12 +4200,12 @@ info_command_truncate_namespace_undo(char *name, char *params, cf_dyn_buf *db)
 
 // Format is:
 //
-//	truncate-set:namespace=<ns-name>;set=<set-name>[;lut=<UTC-nanosec-string>]
+//	truncate:namespace=<ns-name>;set=<set-name>[;lut=<UTC-nanosec-string>]
 //
 //	... where no lut value means use this server's current time.
 //
 int
-info_command_truncate_set(char *name, char *params, cf_dyn_buf *db)
+info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 {
 	// Get the namespace name.
 
@@ -4214,7 +4214,7 @@ info_command_truncate_set(char *name, char *params, cf_dyn_buf *db)
 	int ns_rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
 
 	if (ns_rv != 0 || ns_name_len == 0) {
-		cf_warning(AS_INFO, "truncate-set command: missing or invalid namespace name in command");
+		cf_warning(AS_INFO, "truncate command: missing or invalid namespace name in command");
 		cf_dyn_buf_append_string(db, "ERROR::namespace-name");
 		return 0;
 	}
@@ -4226,7 +4226,7 @@ info_command_truncate_set(char *name, char *params, cf_dyn_buf *db)
 	int set_rv = as_info_parameter_get(params, "set", set_name, &set_name_len);
 
 	if (set_rv != 0 || set_name_len == 0) {
-		cf_warning(AS_INFO, "truncate-set command: missing or invalid set name in command");
+		cf_warning(AS_INFO, "truncate command: missing or invalid set name in command");
 		cf_dyn_buf_append_string(db, "ERROR::set-name");
 		return 0;
 	}
@@ -4238,7 +4238,7 @@ info_command_truncate_set(char *name, char *params, cf_dyn_buf *db)
 	int lut_rv = as_info_parameter_get(params, "lut", lut_str, &lut_str_len);
 
 	if (lut_rv == -2 || (lut_rv == 0 && lut_str_len == 0)) {
-		cf_warning(AS_INFO, "truncate-set command: invalid last-update-time in command");
+		cf_warning(AS_INFO, "truncate command: invalid last-update-time in command");
 		cf_dyn_buf_append_string(db, "ERROR::last-update-time");
 		return 0;
 	}
@@ -4254,10 +4254,10 @@ info_command_truncate_set(char *name, char *params, cf_dyn_buf *db)
 
 // Format is:
 //
-//	truncate-set-undo:namespace=<ns-name>;set=<set-name>
+//	truncate-undo:namespace=<ns-name>;set=<set-name>
 //
 int
-info_command_truncate_set_undo(char *name, char *params, cf_dyn_buf *db)
+info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
 {
 	// Get the namespace name.
 
@@ -4266,7 +4266,7 @@ info_command_truncate_set_undo(char *name, char *params, cf_dyn_buf *db)
 	int ns_rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
 
 	if (ns_rv != 0 || ns_name_len == 0) {
-		cf_warning(AS_INFO, "truncate-set-undo command: missing or invalid namespace name in command");
+		cf_warning(AS_INFO, "truncate-undo command: missing or invalid namespace name in command");
 		cf_dyn_buf_append_string(db, "ERROR::namespace-name");
 		return 0;
 	}
@@ -4278,7 +4278,7 @@ info_command_truncate_set_undo(char *name, char *params, cf_dyn_buf *db)
 	int set_rv = as_info_parameter_get(params, "set", set_name, &set_name_len);
 
 	if (set_rv != 0 || set_name_len == 0) {
-		cf_warning(AS_INFO, "truncate-set-undo command: missing or invalid set name in command");
+		cf_warning(AS_INFO, "truncate-undo command: missing or invalid set name in command");
 		cf_dyn_buf_append_string(db, "ERROR::set-name");
 		return 0;
 	}
@@ -6224,9 +6224,9 @@ as_info_init()
 			"cdt-list;cdt-map;cluster-stable;"
 			"float;"
 			"geo;"
-			"lut-now;"
 			"peers;pipelining;"
 			"replicas;replicas-all;replicas-master;"
+			"truncate-namespace;"
 			"udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
@@ -6256,8 +6256,8 @@ as_info_init()
 			"service;services;services-alumni;services-alumni-reset;set-config;"
 			"set-log;sets;show-devices;sindex;sindex-create;"
 			"sindex-delete;sindex-histogram;statistics;status;"
-			"tip;tip-clear;truncate-namespace;truncate-namespace-undo;"
-			"truncate-set;truncate-set-undo;"
+			"tip;tip-clear;truncate;truncate-namespace;truncate-namespace-undo;"
+			"truncate-undo;"
 			"version;",
 			false);
 
@@ -6352,10 +6352,10 @@ as_info_init()
 	as_info_set_command("throughput", info_command_hist_track, PERM_NONE);                    // Returns throughput info.
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
+	as_info_set_command("truncate", info_command_truncate, PERM_TRUNCATE);                    // Truncate a set.
 	as_info_set_command("truncate-namespace", info_command_truncate_namespace, PERM_TRUNCATE); // Truncate a namespace.
 	as_info_set_command("truncate-namespace-undo", info_command_truncate_namespace_undo, PERM_TRUNCATE); // Undo a truncate-namespace command.
-	as_info_set_command("truncate-set", info_command_truncate_set, PERM_TRUNCATE);            // Truncate a set.
-	as_info_set_command("truncate-set-undo", info_command_truncate_set_undo, PERM_TRUNCATE);  // Undo a truncate-set command.
+	as_info_set_command("truncate-undo", info_command_truncate_undo, PERM_TRUNCATE);          // Undo a truncate (set) command.
 	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);               // Command to XDR module.
 
 	// SINDEX
