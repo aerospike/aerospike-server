@@ -161,7 +161,7 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 
 	strcpy(smd_key, ns_name);
 
-	if (set_name) {
+	if (set_name != NULL) {
 		char* p_write = smd_key + strlen(ns_name);
 
 		*p_write++ = TOK_DELIMITER;
@@ -171,7 +171,7 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 	uint64_t now = cf_clepoch_milliseconds();
 	uint64_t lut;
 
-	if (strcmp(lut_str, "now") == 0) {
+	if (lut_str == NULL) {
 		// Use a last-update-time threshold of now.
 		lut = now;
 
@@ -233,7 +233,7 @@ as_truncate_undo_cmd(const char* ns_name, const char* set_name)
 
 	strcpy(smd_key, ns_name);
 
-	if (set_name) {
+	if (set_name != NULL) {
 		char* p_write = smd_key + strlen(ns_name);
 
 		*p_write++ = TOK_DELIMITER;
@@ -258,7 +258,7 @@ as_truncate_now_is_truncated(struct as_namespace_s* ns, uint16_t set_id)
 
 	as_set* p_set = as_namespace_get_set_by_id(ns, set_id);
 
-	return p_set ? now < p_set->truncate_lut : false;
+	return p_set != NULL ? now < p_set->truncate_lut : false;
 }
 
 
@@ -271,7 +271,7 @@ as_truncate_record_is_truncated(const as_record* r, as_namespace* ns)
 
 	as_set* p_set = as_namespace_get_record_set(ns, r);
 
-	return p_set ? r->last_update_time < p_set->truncate_lut : false;
+	return p_set != NULL ? r->last_update_time < p_set->truncate_lut : false;
 }
 
 
@@ -365,7 +365,7 @@ truncate_smd_accept_cb(char* module, as_smd_item_list_t* items, void* udata,
 		uint32_t ns_len = tok ? (uint32_t)(tok - ns_name) : strlen(ns_name);
 		as_namespace* ns = as_namespace_get_bybuf((uint8_t*)ns_name, ns_len);
 
-		if (! ns) {
+		if (ns == NULL) {
 			cf_detail(AS_TRUNCATE, "skipping invalid ns");
 			continue;
 		}
@@ -427,10 +427,10 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 				lut - now);
 	}
 
-	if (set_name) {
+	if (set_name != NULL) {
 		as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
-		if (! p_set) {
+		if (p_set == NULL) {
 			cf_info(AS_TRUNCATE, "{%s|%s} truncate for nonexistent set",
 					ns->name, set_name);
 			return;
@@ -487,10 +487,10 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 void
 truncate_action_undo(as_namespace* ns, const char* set_name)
 {
-	if (set_name) {
+	if (set_name != NULL) {
 		as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
-		if (! p_set) {
+		if (p_set == NULL) {
 			cf_info(AS_TRUNCATE, "{%s|%s} undo truncate for nonexistent set",
 					ns->name, set_name);
 			return;
@@ -603,7 +603,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_set* p_set = as_namespace_get_record_set(ns, r);
 
 	// Delete records not updated since their set's threshold last-update-time.
-	if (p_set && r->last_update_time < p_set->truncate_lut) {
+	if (p_set != NULL && r->last_update_time < p_set->truncate_lut) {
 		cb_info->n_deleted++;
 		record_delete_adjust_sindex(r, ns);
 		as_index_delete(cb_info->tree, &r->keyd);
