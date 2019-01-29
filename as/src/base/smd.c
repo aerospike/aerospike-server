@@ -1242,7 +1242,7 @@ op_cluster_changed(smd_op* op)
 		}
 
 		if (was_pr && module->state == STATE_SET) {
-			send_set_reply(op->module, false);
+			send_set_reply(module, false);
 		}
 
 		pr_clear_retry_msgs(module);
@@ -1366,7 +1366,7 @@ op_set_to_pr(smd_op* op)
 
 	as_smd_item* item = item_vec_get(&op->items, 0);
 
-	if (module_set_pr(op->module, item->key, item->value)) { // malloc handoff
+	if (module_set_pr(module, item->key, item->value)) { // malloc handoff
 		smd_state next_state = g_smd.node_count == 1 ? STATE_PR : STATE_SET;
 
 		OP_DETAIL("new-key %s move to state %s", item->key,
@@ -1592,7 +1592,7 @@ op_ack_to_pr(smd_op* op)
 	// else - got all acks.
 
 	if (module->state == STATE_SET) {
-		send_set_reply(op->module, true);
+		send_set_reply(module, true);
 	}
 
 	OP_DETAIL("move to state %s", state_str[STATE_PR]);
