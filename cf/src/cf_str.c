@@ -231,7 +231,7 @@ int cf_str_atoi_x64(const char *s, uint64_t *value)
 	return 0;
 }
 
-int cf_str_atoi_seconds(char *s, uint64_t *value)
+int cf_str_atoi_seconds(char *s, uint32_t *value)
 {
 	// Special case: treat -1 the same as 0.
 	if (*s == '-' && *(s + 1) == '1') {
@@ -272,7 +272,10 @@ int cf_str_atoi_seconds(char *s, uint64_t *value)
 	if (*s != 0) {
 		return(-1); // reached a non-num before EOL
 	}
-	*value = i;
+	if (i > UINT32_MAX) {
+		return(-1); // overflows a uint32_t
+	}
+	*value = (uint32_t)i;
 	return(0);
 }
 

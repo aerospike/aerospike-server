@@ -154,9 +154,6 @@ cfg_set_defaults()
 	c->n_info_threads = 16;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
 	c->n_migrate_threads = 1;
-	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
-	c->nsup_period = 120; // run nsup once every 2 minutes
-	c->object_size_hist_period = 60 * 60; // every hour
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
@@ -295,9 +292,6 @@ typedef enum {
 	CASE_SERVICE_MIN_CLUSTER_SIZE,
 	CASE_SERVICE_NODE_ID,
 	CASE_SERVICE_NODE_ID_INTERFACE,
-	CASE_SERVICE_NSUP_DELETE_SLEEP,
-	CASE_SERVICE_NSUP_PERIOD,
-	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
 	CASE_SERVICE_QUERY_BUFPOOL_SIZE,
@@ -332,9 +326,10 @@ typedef enum {
 	// For special debugging or bug-related repair:
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
 	CASE_SERVICE_FABRIC_DUMP_MSGS,
-	CASE_SERVICE_PROLE_EXTRA_TTL,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
+	CASE_SERVICE_NSUP_PERIOD,
+	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
@@ -367,6 +362,7 @@ typedef enum {
 	CASE_SERVICE_MIGRATE_XMIT_SLEEP,
 	CASE_SERVICE_NSUP_AUTO_HWM,
 	CASE_SERVICE_NSUP_AUTO_HWM_PCT,
+	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_MAX_DELETES,
 	CASE_SERVICE_NSUP_QUEUE_HWM,
 	CASE_SERVICE_NSUP_QUEUE_LWM,
@@ -379,6 +375,7 @@ typedef enum {
 	CASE_SERVICE_PAXOS_PROTOCOL,
 	CASE_SERVICE_PAXOS_RECOVERY_POLICY,
 	CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD,
+	CASE_SERVICE_PROLE_EXTRA_TTL,
 	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_SCAN_MEMORY,
 	CASE_SERVICE_SCAN_PRIORITY,
@@ -535,11 +532,9 @@ typedef enum {
 	CASE_NAMESPACE_ALLOW_NONXDR_WRITES,
 	CASE_NAMESPACE_ALLOW_XDR_WRITES,
 	// Normally hidden:
-	CASE_NAMESPACE_COLD_START_EVICT_TTL,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
-	CASE_NAMESPACE_DISABLE_NSUP,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
@@ -554,10 +549,12 @@ typedef enum {
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
 	CASE_NAMESPACE_INDEX_TYPE_BEGIN,
-	CASE_NAMESPACE_MAX_TTL,
 	CASE_NAMESPACE_MIGRATE_ORDER,
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
+	CASE_NAMESPACE_NSUP_HIST_PERIOD,
+	CASE_NAMESPACE_NSUP_PERIOD,
+	CASE_NAMESPACE_NSUP_THREADS,
 	CASE_NAMESPACE_PARTITION_TREE_SPRIGS,
 	CASE_NAMESPACE_PREFER_UNIFORM_BALANCE,
 	CASE_NAMESPACE_RACK_ID,
@@ -573,12 +570,16 @@ typedef enum {
 	CASE_NAMESPACE_TOMB_RAIDER_PERIOD,
 	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
+	// Obsoleted:
+	CASE_NAMESPACE_DISABLE_NSUP,
 	// Deprecated:
 	CASE_NAMESPACE_ALLOW_VERSIONS,
+	CASE_NAMESPACE_COLD_START_EVICT_TTL,
 	CASE_NAMESPACE_DEMO_READ_MULTIPLIER,
 	CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER,
 	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_LOW_WATER_PCT,
+	CASE_NAMESPACE_MAX_TTL,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
 	CASE_NAMESPACE_PARTITION_TREE_LOCKS,
 	CASE_NAMESPACE_SI_BEGIN,
@@ -861,9 +862,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "min-cluster-size",				CASE_SERVICE_MIN_CLUSTER_SIZE },
 		{ "node-id",						CASE_SERVICE_NODE_ID },
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
-		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
-		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
-		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
 		{ "query-bufpool-size",				CASE_SERVICE_QUERY_BUFPOOL_SIZE },
@@ -897,8 +895,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "fabric-dump-msgs",				CASE_SERVICE_FABRIC_DUMP_MSGS },
-		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
+		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
+		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
@@ -930,6 +929,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "migrate-xmit-sleep",				CASE_SERVICE_MIGRATE_XMIT_SLEEP },
 		{ "nsup-auto-hwm",					CASE_SERVICE_NSUP_AUTO_HWM },
 		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
+		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-max-deletes",				CASE_SERVICE_NSUP_MAX_DELETES },
 		{ "nsup-queue-escape",				CASE_SERVICE_NSUP_QUEUE_ESCAPE },
 		{ "nsup-queue-hwm",					CASE_SERVICE_NSUP_QUEUE_HWM },
@@ -942,6 +942,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
 		{ "paxos-recovery-policy",			CASE_SERVICE_PAXOS_RECOVERY_POLICY },
 		{ "paxos-retransmit-period",		CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD },
+		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "scan-memory",					CASE_SERVICE_SCAN_MEMORY },
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
@@ -1102,11 +1103,9 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
 		{ "allow-nonxdr-writes",			CASE_NAMESPACE_ALLOW_NONXDR_WRITES },
 		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
-		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
-		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
@@ -1121,10 +1120,12 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
 		{ "index-type",						CASE_NAMESPACE_INDEX_TYPE_BEGIN },
-		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
+		{ "nsup-hist-period",				CASE_NAMESPACE_NSUP_HIST_PERIOD },
+		{ "nsup-period",					CASE_NAMESPACE_NSUP_PERIOD },
+		{ "nsup-threads",					CASE_NAMESPACE_NSUP_THREADS },
 		{ "partition-tree-sprigs",			CASE_NAMESPACE_PARTITION_TREE_SPRIGS },
 		{ "prefer-uniform-balance",			CASE_NAMESPACE_PREFER_UNIFORM_BALANCE },
 		{ "rack-id",						CASE_NAMESPACE_RACK_ID },
@@ -1140,11 +1141,14 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "tomb-raider-period",				CASE_NAMESPACE_TOMB_RAIDER_PERIOD },
 		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
+		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
 		{ "allow-versions",					CASE_NAMESPACE_ALLOW_VERSIONS },
+		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "demo-read-multiplier",			CASE_NAMESPACE_DEMO_READ_MULTIPLIER },
 		{ "demo-write-multiplier",			CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER },
 		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "low-water-pct",					CASE_NAMESPACE_LOW_WATER_PCT },
+		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
 		{ "partition-tree-locks",			CASE_NAMESPACE_PARTITION_TREE_LOCKS },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
@@ -2119,15 +2123,14 @@ cfg_seconds_no_checks(const cfg_line* p_line)
 				p_line->num, p_line->name_tok);
 	}
 
-	uint64_t value;
+	uint32_t value;
 
-	// TODO - should fix this to guard against overflow, give uint32_t.
-	if (0 != cf_str_atoi_seconds(p_line->val_tok_1, &value)) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must be an unsigned number with time unit (s, m, h, or d), not %s",
+	if (cf_str_atoi_seconds(p_line->val_tok_1, &value) != 0) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be a small enough unsigned number with time unit (s, m, h, or d), not %s",
 				p_line->num, p_line->name_tok, p_line->val_tok_1);
 	}
 
-	return (uint32_t)value;
+	return value;
 }
 
 uint32_t
@@ -2427,15 +2430,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NODE_ID_INTERFACE:
 				c->node_id_interface = cfg_strdup_no_checks(&line);
 				break;
-			case CASE_SERVICE_NSUP_DELETE_SLEEP:
-				c->nsup_delete_sleep = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_NSUP_PERIOD:
-				c->nsup_period = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD:
-				c->object_size_hist_period = cfg_u32_no_checks(&line);
-				break;
 			case CASE_SERVICE_PROTO_FD_IDLE_MS:
 				c->proto_fd_idle_ms = cfg_int_no_checks(&line);
 				break;
@@ -2552,11 +2546,14 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_FABRIC_DUMP_MSGS:
 				c->fabric_dump_msgs = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_PROLE_EXTRA_TTL:
-				c->prole_extra_ttl = cfg_u32_no_checks(&line);
-				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully");
+				break;
+			case CASE_SERVICE_NSUP_PERIOD:
+				cfg_obsolete(&line, "please use namespace-context 'nsup-period'");
+				break;
+			case CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD:
+				cfg_obsolete(&line, "please use namespace-context 'nsup-hist-period'");
 				break;
 			case CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION:
 				cfg_obsolete(&line, "please use namespace-context 'write-commit-level-override' and/or write transaction policy");
@@ -2595,6 +2592,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_MIGRATE_XMIT_SLEEP:
 			case CASE_SERVICE_NSUP_AUTO_HWM:
 			case CASE_SERVICE_NSUP_AUTO_HWM_PCT:
+			case CASE_SERVICE_NSUP_DELETE_SLEEP:
 			case CASE_SERVICE_NSUP_MAX_DELETES:
 			case CASE_SERVICE_NSUP_QUEUE_ESCAPE:
 			case CASE_SERVICE_NSUP_QUEUE_HWM:
@@ -2607,6 +2605,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_PAXOS_PROTOCOL:
 			case CASE_SERVICE_PAXOS_RECOVERY_POLICY:
 			case CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD:
+			case CASE_SERVICE_PROLE_EXTRA_TTL:
 			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
 			case CASE_SERVICE_SCAN_MEMORY:
 			case CASE_SERVICE_SCAN_PRIORITY:
@@ -3054,7 +3053,7 @@ as_config_init(const char* config_file)
 				ns->memory_size = cfg_u64(&line, 1024 * 1024, UINT64_MAX);
 				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
-				ns->default_ttl = cfg_seconds_no_checks(&line);
+				ns->default_ttl = cfg_seconds(&line, 0, MAX_ALLOWED_TTL);
 				break;
 			case CASE_NAMESPACE_STORAGE_ENGINE_BEGIN:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
@@ -3095,9 +3094,6 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_ALLOW_XDR_WRITES:
 				ns->ns_allow_xdr_writes = cfg_bool(&line);
 				break;
-			case CASE_NAMESPACE_COLD_START_EVICT_TTL:
-				ns->cold_start_evict_ttl = cfg_u32_no_checks(&line);
-				break;
 			case CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_CONFLICT_RESOLUTION_OPTS, NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS)) {
 				case CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION:
@@ -3117,9 +3113,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_DISABLE_COLD_START_EVICTION:
 				ns->cold_start_eviction_disabled = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_DISABLE_NSUP:
-				ns->nsup_disabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_DISABLE_WRITE_DUP_RES:
 				ns->write_dup_res_disabled = cfg_bool(&line);
@@ -3180,9 +3173,6 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
-			case CASE_NAMESPACE_MAX_TTL:
-				ns->max_ttl = cfg_seconds(&line, 1, MAX_ALLOWED_TTL);
-				break;
 			case CASE_NAMESPACE_MIGRATE_ORDER:
 				ns->migrate_order = cfg_u32(&line, 1, 10);
 				break;
@@ -3191,6 +3181,15 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_MIGRATE_SLEEP:
 				ns->migrate_sleep = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_NSUP_HIST_PERIOD:
+				ns->nsup_hist_period = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_NSUP_PERIOD:
+				ns->nsup_period = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_NSUP_THREADS:
+				ns->n_nsup_threads = cfg_u32(&line, 1, 128);
 				break;
 			case CASE_NAMESPACE_PARTITION_TREE_SPRIGS:
 				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, NUM_LOCK_PAIRS, 1 << NUM_SPRIG_BITS);
@@ -3273,11 +3272,16 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_DISABLE_NSUP:
+				cfg_obsolete(&line, "please set namespace-context 'nsup-period' to 0 to disable nsup");
+				break;
 			case CASE_NAMESPACE_ALLOW_VERSIONS:
+			case CASE_NAMESPACE_COLD_START_EVICT_TTL:
 			case CASE_NAMESPACE_DEMO_READ_MULTIPLIER:
 			case CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER:
 			case CASE_NAMESPACE_HIGH_WATER_PCT:
 			case CASE_NAMESPACE_LOW_WATER_PCT:
+			case CASE_NAMESPACE_MAX_TTL:
 			case CASE_NAMESPACE_OBJ_SIZE_HIST_MAX:
 			case CASE_NAMESPACE_PARTITION_TREE_LOCKS:
 				cfg_deprecated_name_tok(&line);
@@ -3294,9 +3298,6 @@ as_config_init(const char* config_file)
 				}
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
 					cf_crash_nostack(AS_CFG, "ns %s data-in-index can't be true unless storage-engine is device and both single-bin and data-in-memory are true", ns->name);
-				}
-				if (ns->default_ttl > ns->max_ttl) {
-					cf_crash_nostack(AS_CFG, "ns %s default-ttl can't be > max-ttl", ns->name);
 				}
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
@@ -4406,10 +4407,12 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		// 'nsup' histograms.
 
-		sprintf(hist_name, "{%s}-object-size-log2", ns->name);
-		ns->obj_size_log_hist = histogram_create(hist_name, HIST_SIZE);
-		sprintf(hist_name, "{%s}-object-size-linear", ns->name);
-		ns->obj_size_lin_hist = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, ns->storage_write_block_size, OBJ_SIZE_HIST_NUM_BUCKETS);
+		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+			sprintf(hist_name, "{%s}-object-size-log2", ns->name);
+			ns->obj_size_log_hist = histogram_create(hist_name, HIST_SIZE);
+			sprintf(hist_name, "{%s}-object-size-linear", ns->name);
+			ns->obj_size_lin_hist = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, ns->storage_write_block_size, OBJ_SIZE_HIST_NUM_BUCKETS);
+		}
 
 		sprintf(hist_name, "{%s}-evict", ns->name);
 		ns->evict_hist = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, ns->evict_hist_buckets);

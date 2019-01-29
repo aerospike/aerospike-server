@@ -103,6 +103,15 @@ next_generation(uint16_t local, uint16_t remote, as_namespace* ns)
 	return local == 0xFFFF ? remote == 1 : remote - local == 1;
 }
 
+// Quietly trim void-time. (Clock on remote node different?) TODO - best way?
+static inline uint32_t
+trim_void_time(uint32_t void_time)
+{
+	uint32_t max_void_time = as_record_void_time_get() + MAX_ALLOWED_TTL;
+
+	return void_time > max_void_time ? max_void_time : void_time;
+}
+
 
 //==========================================================
 // Public API - record lock lifecycle.
@@ -864,7 +873,7 @@ update_index_metadata(as_remote_record *rr, index_metadata *old, as_record *r)
 	old->generation = r->generation;
 
 	r->generation = (uint16_t)rr->generation;
-	r->void_time = truncate_void_time(rr->rsv->ns, rr->void_time);
+	r->void_time = trim_void_time(rr->void_time);
 	r->last_update_time = rr->last_update_time;
 }
 

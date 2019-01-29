@@ -61,6 +61,7 @@
 #include "base/health.h"
 #include "base/index.h"
 #include "base/monitor.h"
+#include "base/nsup.h"
 #include "base/scan.h"
 #include "base/service.h"
 #include "base/thr_info_port.h"
@@ -102,8 +103,6 @@
 #define STR_ITYPE_MAPKEYS   "MAPKEYS"
 #define STR_ITYPE_MAPVALUES "MAPVALUES"
 #define STR_BINTYPE         "bintype"
-
-extern int as_nsup_queue_get_size();
 
 int info_get_objects(char *name, cf_dyn_buf *db);
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
@@ -330,7 +329,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_int(db, "tsvc_queue", as_tsvc_queue_get_size());
 	info_append_int(db, "info_queue", as_info_queue_get_size());
-	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
 	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
 	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
 	info_append_int(db, "tree_gc_queue", as_index_tree_gc_queue_size());
@@ -1721,9 +1719,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "min-cluster-size", g_config.clustering_config.cluster_size_min);
 	info_append_uint64_x(db, "node-id", g_config.self_node); // may be configured or auto-generated
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
-	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
-	info_append_uint32(db, "nsup-period", g_config.nsup_period);
-	info_append_uint32(db, "object-size-hist-period", g_config.object_size_hist_period);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
 	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
@@ -1761,7 +1756,6 @@ info_service_config_get(cf_dyn_buf *db)
 
 	info_append_string(db, "debug-allocations", debug_allocations_string());
 	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
-	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
 }
 
 static void
@@ -1877,7 +1871,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_uint64(db, "memory-size", ns->memory_size);
-	info_append_uint64(db, "default-ttl", ns->default_ttl);
+	info_append_uint32(db, "default-ttl", ns->default_ttl);
 
 	info_append_bool(db, "enable-xdr", ns->enable_xdr);
 	info_append_bool(db, "sets-enable-xdr", ns->sets_enable_xdr);
@@ -1891,8 +1885,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_hist_track_get_settings(ns->udf_hist, db);
 	cf_hist_track_get_settings(ns->write_hist, db);
 
-	info_append_uint32(db, "cold-start-evict-ttl", ns->cold_start_evict_ttl);
-
 	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
 		info_append_string(db, "conflict-resolution-policy", "generation");
 	}
@@ -1905,7 +1897,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	info_append_bool(db, "data-in-index", ns->data_in_index);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
-	info_append_bool(db, "disable-nsup", ns->nsup_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
@@ -1927,10 +1918,12 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 									(ns->xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :
 											"illegal"))));
 
-	info_append_uint64(db, "max-ttl", ns->max_ttl);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
+	info_append_uint32(db, "nsup-hist-period", ns->nsup_hist_period);
+	info_append_uint32(db, "nsup-period", ns->nsup_period);
+	info_append_uint32(db, "nsup-threads", ns->n_nsup_threads);
 	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
 	info_append_bool(db, "prefer-uniform-balance", ns->cfg_prefer_uniform_balance);
 	info_append_uint32(db, "rack-id", ns->rack_id);
@@ -2263,24 +2256,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of proto-slow-netio-sleep-ms from %d to %d ", g_config.proto_slow_netio_sleep_ms, val);
 			g_config.proto_slow_netio_sleep_ms = val;
 		}
-		else if (0 == as_info_parameter_get(params, "nsup-delete-sleep", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-delete-sleep from %d to %d ", g_config.nsup_delete_sleep, val);
-			g_config.nsup_delete_sleep = val;
-		}
-		else if (0 == as_info_parameter_get(params, "nsup-period", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-period from %d to %d ", g_config.nsup_period, val);
-			g_config.nsup_period = val;
-		}
-		else if (0 == as_info_parameter_get(params, "object-size-hist-period", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of object-size-hist-period from %d to %d ", g_config.object_size_hist_period, val);
-			g_config.object_size_hist_period = val;
-		}
 		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
 			if (!as_config_cluster_name_set(context)) {
 				goto Error;
@@ -2292,12 +2267,12 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_warning(AS_INFO, "migrate-fill-delay is enterprise-only");
 				goto Error;
 			}
-			uint64_t val;
+			uint32_t val;
 			if (0 != cf_str_atoi_seconds(context, &val)) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of migrate-fill-delay from %u to %lu ", g_config.migrate_fill_delay, val);
-			g_config.migrate_fill_delay = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of migrate-fill-delay from %u to %u ", g_config.migrate_fill_delay, val);
+			g_config.migrate_fill_delay = val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -2324,13 +2299,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "min-cluster-size", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (0 > val) || (as_clustering_cluster_size_min_set(val) < 0))
 				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "prole-extra-ttl", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val)) {
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of prole-extra-ttl from %d to %d ", g_config.prole_extra_ttl, val);
-			g_config.prole_extra_ttl = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-buf-size", context, &context_len)) {
 			uint64_t val = atoll(context);
@@ -2846,47 +2814,17 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->stop_writes_pct = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "default-ttl", context, &context_len)) {
-			uint64_t val;
+			uint32_t val;
 			if (cf_str_atoi_seconds(context, &val) != 0) {
 				cf_warning(AS_INFO, "default-ttl must be an unsigned number with time unit (s, m, h, or d)");
 				goto Error;
 			}
-			if (val > ns->max_ttl) {
-				cf_warning(AS_INFO, "default-ttl must be <= max-ttl (%lu seconds)", ns->max_ttl);
+			if (val > MAX_ALLOWED_TTL) {
+				cf_warning(AS_INFO, "default-ttl must be <= %u seconds", MAX_ALLOWED_TTL);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of default-ttl memory of ns %s from %"PRIu64" to %"PRIu64" ", ns->name, ns->default_ttl, val);
+			cf_info(AS_INFO, "Changing value of default-ttl memory of ns %s from %u to %u", ns->name, ns->default_ttl, val);
 			ns->default_ttl = val;
-		}
-		else if (0 == as_info_parameter_get(params, "max-ttl", context, &context_len)) {
-			uint64_t val;
-			if (cf_str_atoi_seconds(context, &val) != 0) {
-				cf_warning(AS_INFO, "max-ttl must be an unsigned number with time unit (s, m, h, or d)");
-				goto Error;
-			}
-			if (val == 0 || val > MAX_ALLOWED_TTL) {
-				cf_warning(AS_INFO, "max-ttl must be non-zero and <= %u seconds", MAX_ALLOWED_TTL);
-				goto Error;
-			}
-			if (val < ns->default_ttl) {
-				cf_warning(AS_INFO, "max-ttl must be >= default-ttl (%lu seconds)", ns->default_ttl);
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of max-ttl memory of ns %s from %"PRIu64" to %"PRIu64" ", ns->name, ns->max_ttl, val);
-			ns->max_ttl = val;
-		}
-		else if (0 == as_info_parameter_get(params, "disable-nsup", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of disable-nsup of ns %s from %s to %s", ns->name, bool_val[ns->nsup_disabled], context);
-				ns->nsup_disabled = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of disable-nsup of ns %s from %s to %s", ns->name, bool_val[ns->nsup_disabled], context);
-				ns->nsup_disabled = false;
-			}
-			else {
-				goto Error;
-			}
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-order", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 10) {
@@ -2909,31 +2847,52 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of migrate-sleep of ns %s from %u to %d", ns->name, ns->migrate_sleep, val);
 			ns->migrate_sleep = (uint32_t)val;
 		}
+		else if (0 == as_info_parameter_get(params, "nsup-hist-period", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of nsup-hist-period of ns %s from %u to %d", ns->name, ns->nsup_hist_period, val);
+			ns->nsup_hist_period = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "nsup-period", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of nsup-period of ns %s from %u to %d", ns->name, ns->nsup_period, val);
+			ns->nsup_period = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "nsup-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 128) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of nsup-threads of ns %s from %u to %d", ns->name, ns->n_nsup_threads, val);
+			ns->n_nsup_threads = (uint32_t)val;
+		}
 		else if (0 == as_info_parameter_get(params, "tomb-raider-eligible-age", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
 				cf_warning(AS_INFO, "tomb-raider-eligible-age is enterprise-only");
 				goto Error;
 			}
-			uint64_t val;
+			uint32_t val;
 			if (cf_str_atoi_seconds(context, &val) != 0) {
 				cf_warning(AS_INFO, "tomb-raider-eligible-age must be an unsigned number with time unit (s, m, h, or d)");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of tomb-raider-eligible-age of ns %s from %u to %lu", ns->name, ns->tomb_raider_eligible_age, val);
-			ns->tomb_raider_eligible_age = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of tomb-raider-eligible-age of ns %s from %u to %u", ns->name, ns->tomb_raider_eligible_age, val);
+			ns->tomb_raider_eligible_age = val;
 		}
 		else if (0 == as_info_parameter_get(params, "tomb-raider-period", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
 				cf_warning(AS_INFO, "tomb-raider-period is enterprise-only");
 				goto Error;
 			}
-			uint64_t val;
+			uint32_t val;
 			if (cf_str_atoi_seconds(context, &val) != 0) {
 				cf_warning(AS_INFO, "tomb-raider-period must be an unsigned number with time unit (s, m, h, or d)");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of tomb-raider-period of ns %s from %u to %lu", ns->name, ns->tomb_raider_period, val);
-			ns->tomb_raider_period = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of tomb-raider-period of ns %s from %u to %u", ns->name, ns->tomb_raider_period, val);
+			ns->tomb_raider_period = val;
 		}
 		else if (0 == as_info_parameter_get(params, "tomb-raider-sleep", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
@@ -4306,6 +4265,48 @@ info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+// Format is:
+//
+//	eviction-reset:namespace=<ns-name>[;ttl=<seconds-from-now>]
+//
+//	... where no ttl means delete the SMD evict-void-time.
+//
+int
+info_command_eviction_reset(char *name, char *params, cf_dyn_buf *db)
+{
+	// Get the namespace name.
+
+	char ns_name[AS_ID_NAMESPACE_SZ];
+	int ns_name_len = (int)sizeof(ns_name);
+	int ns_rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
+
+	if (ns_rv != 0 || ns_name_len == 0) {
+		cf_warning(AS_INFO, "eviction-reset command: missing or invalid namespace name in command");
+		cf_dyn_buf_append_string(db, "ERROR::namespace-name");
+		return 0;
+	}
+
+	// Get the TTL if there is one.
+
+	char ttl_str[12]; // allow decimal, hex or octal in C constant format
+	int ttl_str_len = (int)sizeof(ttl_str);
+	int ttl_rv = as_info_parameter_get(params, "ttl", ttl_str, &ttl_str_len);
+
+	if (ttl_rv == -2 || (ttl_rv == 0 && ttl_str_len == 0)) {
+		cf_warning(AS_INFO, "eviction-reset command: invalid ttl in command");
+		cf_dyn_buf_append_string(db, "ERROR::ttl");
+		return 0;
+	}
+
+	// Issue the eviction-reset command.
+
+	bool ok = as_nsup_eviction_reset_cmd(ns_name, ttl_rv == 0 ? ttl_str : NULL);
+
+	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::eviction-reset");
+
+	return 0;
+}
+
 //
 // Log a message to the server.
 // Limited to 2048 characters.
@@ -5084,16 +5085,17 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Expiration & eviction (nsup) stats.
 
-	info_append_bool(db, "stop_writes", ns->stop_writes != 0);
-	info_append_bool(db, "hwm_breached", ns->hwm_breached != 0);
+	info_append_bool(db, "stop_writes", ns->stop_writes);
+	info_append_bool(db, "hwm_breached", ns->hwm_breached);
 
 	info_append_uint64(db, "current_time", as_record_void_time_get());
 	info_append_uint64(db, "non_expirable_objects", ns->non_expirable_objects);
 	info_append_uint64(db, "expired_objects", ns->n_expired_objects);
 	info_append_uint64(db, "evicted_objects", ns->n_evicted_objects);
-	info_append_uint64(db, "evict_ttl", ns->evict_ttl);
+	info_append_int(db, "evict_ttl", ns->evict_ttl);
+	info_append_uint32(db, "evict_void_time", ns->evict_void_time);
+	info_append_uint32(db, "smd_evict_void_time", ns->smd_evict_void_time);
 	info_append_uint32(db, "nsup_cycle_duration", ns->nsup_cycle_duration);
-	info_append_uint32(db, "nsup_cycle_sleep_pct", ns->nsup_cycle_sleep_pct);
 
 	// Truncate stats.
 
@@ -6326,6 +6328,7 @@ as_info_init()
 			"cluster-name;config-get;config-set;"
 			"digests;dump-cluster;dump-fabric;dump-hb;dump-hlc;dump-migrates;"
 			"dump-msgs;dump-rw;dump-si;dump-skew;dump-wb-summary;"
+			"eviction-reset;"
 			"feature-key;"
 			"get-config;get-sl;"
 			"health-outliers;health-stats;hist-track-start;hist-track-stop;"
@@ -6408,6 +6411,7 @@ as_info_init()
 	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-skew", info_command_dump_skew, PERM_LOGGING_CTRL);              // Print information about clock skew
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
+	as_info_set_command("eviction-reset", info_command_eviction_reset, PERM_TRUNCATE);        // Delete or manually set SMD evict-void-time.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
 	as_info_set_command("hist-track-start", info_command_hist_track, PERM_SERVICE_CTRL);      // Start or Restart histogram tracking.

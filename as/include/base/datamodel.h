@@ -459,7 +459,7 @@ typedef enum {
 
 /* Record function declarations */
 extern uint32_t clock_skew_stop_writes_sec();
-extern void handle_clock_skew(as_namespace* ns, uint64_t skew_ms);
+extern bool as_record_handle_clock_skew(as_namespace* ns, uint64_t skew_ms);
 extern uint16_t plain_generation(uint16_t regime_generation, const as_namespace* ns);
 extern void as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms, const as_namespace* ns);
 extern void as_record_increment_generation(as_record *r, const as_namespace* ns);
@@ -660,8 +660,10 @@ struct as_namespace_s {
 	// For cold start eviction.
 	cf_mutex		cold_start_evict_lock;
 	uint32_t		cold_start_record_add_count;
-	uint32_t		cold_start_threshold_void_time;
-	uint32_t		cold_start_max_void_time;
+	uint32_t		cold_start_now;
+
+	// For sanity checking at startup (also used during warm or cool restart).
+	uint32_t		startup_max_void_time;
 
 	//--------------------------------------------
 	// Memory management.
@@ -697,6 +699,13 @@ struct as_namespace_s {
 	uint8_t			storage_encryption_key[64];
 
 	//--------------------------------------------
+	// Eviction.
+	//
+
+	uint32_t		smd_evict_void_time;
+	uint32_t		evict_void_time;
+
+	//--------------------------------------------
 	// Truncate records.
 	//
 
@@ -720,7 +729,7 @@ struct as_namespace_s {
 	uint32_t		cfg_replication_factor;
 	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
 	uint64_t		memory_size;
-	uint64_t		default_ttl;
+	uint32_t		default_ttl;
 
 	bool			enable_xdr;
 	bool			sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping
@@ -728,13 +737,11 @@ struct as_namespace_s {
 	bool			ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
 	bool			ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
 
-	uint32_t		cold_start_evict_ttl;
 	conflict_resolution_pol conflict_resolution_policy;
 	bool			cp; // relevant only for enterprise edition
 	bool			cp_allow_drops; // relevant only for enterprise edition
 	bool			data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	bool			cold_start_eviction_disabled;
-	bool			nsup_disabled;
 	bool			write_dup_res_disabled;
 	bool			disallow_null_setname;
 	bool			batch_sub_benchmarks_enabled;
@@ -748,10 +755,12 @@ struct as_namespace_s {
 	uint32_t		hwm_disk_pct;
 	uint32_t		hwm_memory_pct;
 	uint64_t		index_stage_size;
-	uint64_t		max_ttl;
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
+	uint32_t		nsup_hist_period;
+	uint32_t		nsup_period;
+	uint32_t		n_nsup_threads;
 	bool			cfg_prefer_uniform_balance; // relevant only for enterprise edition
 	bool			prefer_uniform_balance; // indirect config - can become disabled if any other node reports disabled
 	uint32_t		rack_id;
@@ -828,18 +837,17 @@ struct as_namespace_s {
 
 	// Expiration & eviction (nsup) stats.
 
-	cf_atomic32		stop_writes;
-	cf_atomic32		hwm_breached;
+	bool			stop_writes;
+	bool			hwm_breached;
 
 	uint64_t		non_expirable_objects;
 
-	cf_atomic64		n_expired_objects;
-	cf_atomic64		n_evicted_objects;
+	uint64_t		n_expired_objects;
+	uint64_t		n_evicted_objects;
 
-	cf_atomic64		evict_ttl;
+	int32_t			evict_ttl; // signed - possible (but weird) it's negative
 
 	uint32_t		nsup_cycle_duration; // seconds taken for most recent nsup cycle
-	uint32_t		nsup_cycle_sleep_pct; // fraction of most recent nsup cycle that was spent sleeping
 
 	// Memory usage stats.
 
@@ -1295,11 +1303,3 @@ as_namespace_index_persisted(const as_namespace *ns)
 
 // Persistent Memory Management
 void as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance);
-
-// XXX POST-JUMP - remove in "six months".
-static inline uint32_t
-truncate_void_time(as_namespace *ns, uint32_t void_time)
-{
-	uint32_t max_void_time = as_record_void_time_get() + (uint32_t)ns->max_ttl;
-	return void_time > max_void_time ? max_void_time : void_time;
-}

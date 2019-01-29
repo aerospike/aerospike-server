@@ -47,9 +47,10 @@ clock_skew_stop_writes_sec()
 	return 0;
 }
 
-void
-handle_clock_skew(as_namespace* ns, uint64_t skew_ms)
+bool
+as_record_handle_clock_skew(as_namespace* ns, uint64_t skew_ms)
 {
+	return false;
 }
 
 uint16_t

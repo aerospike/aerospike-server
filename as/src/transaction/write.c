@@ -841,8 +841,8 @@ write_master_preprocessing(as_transaction* tr)
 		return false;
 	}
 
-	// ns->stop_writes is set by thr_nsup if configured threshold is breached.
-	if (cf_atomic32_get(ns->stop_writes) == 1) {
+	// ns->stop_writes is set by nsup if configured threshold is breached.
+	if (ns->stop_writes) {
 		write_master_failed(tr, 0, false, 0, 0, AS_ERR_OUT_OF_SPACE);
 		return false;
 	}
@@ -853,7 +853,7 @@ write_master_preprocessing(as_transaction* tr)
 		return false;
 	}
 
-	if (! is_valid_ttl(ns, m->record_ttl)) {
+	if (! is_valid_ttl(m->record_ttl)) {
 		cf_warning(AS_RW, "write_master: invalid ttl %u", m->record_ttl);
 		write_master_failed(tr, 0, false, 0, 0, AS_ERR_PARAMETER);
 		return false;

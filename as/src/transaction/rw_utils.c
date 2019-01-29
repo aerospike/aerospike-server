@@ -63,7 +63,7 @@ xdr_allows_write(as_transaction* tr)
 		}
 	}
 	else {
-		if (tr->rsv.ns->ns_allow_nonxdr_writes || tr->origin == FROM_NSUP) {
+		if (tr->rsv.ns->ns_allow_nonxdr_writes) {
 			return true;
 		}
 	}
@@ -461,15 +461,9 @@ remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 
 
 bool
-xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op)
+xdr_must_ship_delete(as_namespace* ns, bool is_xdr_op)
 {
 	if (! is_xdr_delete_shipping_enabled()) {
-		return false;
-	}
-
-	// If this delete is a result of expiration/eviction, don't ship it unless
-	// configured to do so.
-	if (is_nsup_delete && ! is_xdr_nsup_deletes_enabled()) {
 		return false;
 	}
 

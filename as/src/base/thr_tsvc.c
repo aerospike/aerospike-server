@@ -472,8 +472,6 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, AS_ERR_UNKNOWN);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 			break;
-		case FROM_NSUP:
-			break;
 		case FROM_RE_REPL:
 			tr->from.re_repl_orig_cb(tr);
 			tr->from.re_repl_orig_cb = NULL; // pattern, not needed

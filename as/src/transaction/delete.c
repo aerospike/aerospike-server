@@ -184,8 +184,7 @@ as_delete_start(as_transaction* tr)
 	}
 	// else - rw_request is now in hash, continue...
 
-	if (tr->rsv.ns->write_dup_res_disabled ||
-			as_transaction_is_nsup_delete(tr)) {
+	if (tr->rsv.ns->write_dup_res_disabled) {
 		// Note - preventing duplicate resolution this way allows
 		// rw_request_destroy() to handle dup_msg[] cleanup correctly.
 		tr->rsv.n_dupl = 0;
@@ -232,7 +231,7 @@ as_delete_start(as_transaction* tr)
 	}
 
 	// If we don't need to wait for replica write acks, fire and forget.
-	if (as_transaction_is_nsup_delete(tr) || respond_on_master_complete(tr)) {
+	if (respond_on_master_complete(tr)) {
 		start_delete_repl_write_forget(rw, tr);
 		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
@@ -393,7 +392,7 @@ void
 send_delete_response(as_transaction* tr)
 {
 	// Paranoia - shouldn't get here on losing race with timeout.
-	if (! tr->from.any && tr->origin != FROM_NSUP) {
+	if (! tr->from.any) {
 		cf_warning(AS_RW, "transaction origin %u has null 'from'", tr->origin);
 		return;
 	}
@@ -415,8 +414,6 @@ send_delete_response(as_transaction* tr)
 		from_proxy_delete_update_stats(tr->rsv.ns, tr->result_code,
 				as_transaction_is_xdr(tr));
 		break;
-	case FROM_NSUP:
-		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
 		break;
@@ -429,9 +426,6 @@ send_delete_response(as_transaction* tr)
 void
 delete_timeout_cb(rw_request* rw)
 {
-	// Paranoia - remove eventually.
-	cf_assert(rw->origin != FROM_NSUP, AS_RW, "nsup delete got timeout cb");
-
 	if (! rw->from.any) {
 		return; // lost race against dup-res or repl-write callback
 	}
@@ -513,8 +507,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 	as_index_delete(tree, &tr->keyd);
 	as_record_done(r_ref, ns);
 
-	if (xdr_must_ship_delete(ns, as_transaction_is_nsup_delete(tr),
-			as_msg_is_xdr(m))) {
+	if (xdr_must_ship_delete(ns, as_msg_is_xdr(m))) {
 		xdr_write(ns, &tr->keyd, 0, 0, XDR_OP_TYPE_DROP, set_id, NULL);
 	}
 

@@ -58,20 +58,13 @@
 #include "base/datamodel.h"
 #include "base/health.h"
 #include "base/index.h"
+#include "base/nsup.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/truncate.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
-
-
-//==========================================================
-// Forward declarations.
-//
-
-// Defined in thr_nsup.c, for historical reasons.
-extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 
 
 //==========================================================
@@ -2675,20 +2668,6 @@ is_set_evictable(as_namespace* ns, const ssd_rec_props* p_props)
 }
 
 
-bool
-is_record_expired(as_namespace* ns, const ssd_rec_props* p_props)
-{
-	if (p_props->void_time == 0 ||
-			p_props->void_time > ns->cold_start_threshold_void_time) {
-		return false;
-	}
-
-	// If set is not evictable, may have expired but wasn't evicted.
-	return p_props->void_time < as_record_void_time_get() ||
-			is_set_evictable(ns, p_props);
-}
-
-
 void
 apply_rec_props(as_record* r, as_namespace* ns, const ssd_rec_props* props)
 {
@@ -2726,6 +2705,11 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 
 	if (! p_read) {
 		cf_warning_digest(AS_DRV_SSD, &block->keyd, "bad metadata for record ");
+		return;
+	}
+
+	if (props.void_time > ns->startup_max_void_time) {
+		cf_warning_digest(AS_DRV_SSD, &block->keyd, "bad flat record void-time ");
 		return;
 	}
 
@@ -2784,10 +2768,19 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 	// The record we're now reading is the latest version (so far) ...
 
 	// Skip records that have expired.
-	if (is_record_expired(ns, &props)) {
+	if (props.void_time != 0 && ns->cold_start_now > props.void_time) {
 		as_index_delete(p_partition->tree, &block->keyd);
 		as_record_done(&r_ref, ns);
 		ssd->record_add_expired_counter++;
+		return;
+	}
+
+	// Skip records that were evicted.
+	if (props.void_time != 0 && ns->evict_void_time > props.void_time &&
+			is_set_evictable(ns, &props)) {
+		as_index_delete(p_partition->tree, &block->keyd);
+		as_record_done(&r_ref, ns);
+		ssd->record_add_evicted_counter++;
 		return;
 	}
 
@@ -2795,18 +2788,10 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd, const ssd_record* block,
 
 	ssd_cold_start_init_repl_state(ns, r);
 
-	// Set/reset the record's last-update-time and generation.
+	// Set/reset the record's last-update-time generation, and void-time.
 	r->last_update_time = block->last_update_time;
 	r->generation = block->generation;
-
-	// Set/reset the record's void-time, truncating it if beyond max-ttl.
-	if (props.void_time > ns->cold_start_max_void_time) {
-		r->void_time = ns->cold_start_max_void_time;
-		ssd->record_add_max_ttl_counter++;
-	}
-	else {
-		r->void_time = props.void_time;
-	}
+	r->void_time = props.void_time;
 
 	// Update maximum void-time.
 	cf_atomic32_setmax(&p_partition->max_void_time, (int32_t)r->void_time);
@@ -3084,10 +3069,10 @@ run_ssd_cold_start(void *udata)
 
 	ssd_cold_start_sweep(ssds, ssd);
 
-	cf_info(AS_DRV_SSD, "device %s: read complete: UNIQUE %lu (REPLACED %lu) (OLDER %lu) (EXPIRED %lu) (MAX-TTL %lu) records",
+	cf_info(AS_DRV_SSD, "device %s: read complete: UNIQUE %lu (REPLACED %lu) (OLDER %lu) (EXPIRED %lu) (EVICTED %lu) records",
 			ssd->name, ssd->record_add_unique_counter,
 			ssd->record_add_replace_counter, ssd->record_add_older_counter,
-			ssd->record_add_expired_counter, ssd->record_add_max_ttl_counter);
+			ssd->record_add_expired_counter, ssd->record_add_evicted_counter);
 
 	if (cf_rc_release(complete_rc) == 0) {
 		// All drives are done reading.
@@ -3267,6 +3252,7 @@ ssd_init_synchronous(drv_ssds *ssds)
 					ns->name, ssds->ssds[first_used].name, ssd->name);
 		}
 
+		// These should all be 0, unless upgrading from pre-4.5.1.
 		if (prefix_first->last_evict_void_time !=
 				prefix_i->last_evict_void_time) {
 			cf_warning(AS_DRV_SSD, "{%s} devices have inconsistent evict-void-times - ignoring",
@@ -3282,6 +3268,18 @@ ssd_init_synchronous(drv_ssds *ssds)
 
 		if ((prefix_i->flags & SSD_HEADER_FLAG_COMMIT_TO_DEVICE) == 0) {
 			non_commit_drive = true;
+		}
+	}
+
+	// Handle devices' evict threshold - may be upgrading from pre-4.5.1.
+	if (prefix_first->last_evict_void_time != 0) {
+		if (ns->smd_evict_void_time == 0) {
+			ns->smd_evict_void_time = prefix_first->last_evict_void_time;
+			// Leave header threshold in case we don't commit SMD threshold.
+		}
+		else {
+			// Use SMD threshold, may now erase header threshold.
+			prefix_first->last_evict_void_time = 0;
 		}
 	}
 
@@ -3303,6 +3301,11 @@ ssd_init_synchronous(drv_ssds *ssds)
 	for (int i = 0; i < n_ssds; i++) {
 		cf_free(headers[i]);
 	}
+
+	uint32_t now = as_record_void_time_get();
+
+	// Sanity check void-times during startup.
+	ns->startup_max_void_time = now + MAX_ALLOWED_TTL;
 
 	// Cache booleans indicating whether partitions are owned or not. Also
 	// restore tree-ids - note that absent partitions do have tree-ids.
@@ -3332,35 +3335,9 @@ ssd_init_synchronous(drv_ssds *ssds)
 		}
 	}
 
-	// Initialize the cold start eviction machinery.
-
+	// Initialize the cold start expiration and eviction machinery.
 	cf_mutex_init(&ns->cold_start_evict_lock);
-
-	uint32_t now = as_record_void_time_get();
-
-	if (ns->cold_start_evict_ttl == 0xFFFFffff) {
-		// Config file did NOT specify cold-start-evict-ttl.
-		ns->cold_start_threshold_void_time =
-				ssds->common->prefix.last_evict_void_time;
-
-		// Check that it's not already in the past. (Note - includes 0.)
-		if (ns->cold_start_threshold_void_time < now) {
-			ns->cold_start_threshold_void_time = now;
-		}
-		else {
-			cf_info(AS_DRV_SSD, "namespace %s: using saved cold start evict-ttl %u",
-					ns->name, ns->cold_start_threshold_void_time - now);
-		}
-	}
-	else {
-		// Config file specified cold-start-evict-ttl. (0 is a valid value.)
-		ns->cold_start_threshold_void_time = now + ns->cold_start_evict_ttl;
-
-		cf_info(AS_DRV_SSD, "namespace %s: using config-specified cold start evict-ttl %u",
-				ns->name, ns->cold_start_evict_ttl);
-	}
-
-	ns->cold_start_max_void_time = now + (uint32_t)ns->max_ttl;
+	ns->cold_start_now = now;
 }
 
 
@@ -4047,27 +4024,6 @@ as_storage_save_regime_ssd(as_namespace *ns)
 		ssd_write_header(ssd, (uint8_t*)ssds->common,
 				(uint8_t*)&ssds->common->prefix.eventual_regime,
 				sizeof(ssds->common->prefix.eventual_regime));
-	}
-
-	cf_mutex_unlock(&ssds->flush_lock);
-}
-
-
-void
-as_storage_save_evict_void_time_ssd(as_namespace *ns, uint32_t evict_void_time)
-{
-	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
-
-	cf_mutex_lock(&ssds->flush_lock);
-
-	ssds->common->prefix.last_evict_void_time = evict_void_time;
-
-	for (int i = 0; i < ssds->n_ssds; i++) {
-		drv_ssd* ssd = &ssds->ssds[i];
-
-		ssd_write_header(ssd, (uint8_t*)ssds->common,
-				(uint8_t*)&ssds->common->prefix.last_evict_void_time,
-				sizeof(ssds->common->prefix.last_evict_void_time));
 	}
 
 	cf_mutex_unlock(&ssds->flush_lock);

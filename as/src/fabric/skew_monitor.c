@@ -34,6 +34,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/nsup.h"
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
 #include "fabric/hb.h"
@@ -454,7 +455,12 @@ skew_monitor_update()
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
-		handle_clock_skew(ns, skew);
+
+		// Store return values so all handlers warn independently.
+		bool record_stop_writes = as_record_handle_clock_skew(ns, skew);
+		bool nsup_stop_writes = as_nsup_handle_clock_skew(ns, skew);
+
+		ns->clock_skew_stop_writes = record_stop_writes || nsup_stop_writes;
 	}
 }
 

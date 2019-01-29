@@ -23,23 +23,23 @@ ifeq ($(USE_EE),1)
 endif
 
 BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h features.h health.h
-BASE_HEADERS += index.h job_manager.h json_init.h monitor.h particle.h
+BASE_HEADERS += index.h job_manager.h json_init.h monitor.h nsup.h particle.h
 BASE_HEADERS += particle_blob.h particle_integer.h predexp.h proto.h scan.h
 BASE_HEADERS += secondary_index.h security.h security_config.h service.h smd.h
-BASE_HEADERS += stats.h thr_info.h thr_query.h thr_sindex.h thr_tsvc.h
-BASE_HEADERS += ticker.h transaction.h transaction_policy.h truncate.h
-BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h udf_record.h
-BASE_HEADERS += xdr_serverside.h xdr_config.h
+BASE_HEADERS += stats.h thr_info.h thr_query.h thr_sindex.h thr_tsvc.h ticker.h
+BASE_HEADERS += transaction.h transaction_policy.h truncate.h udf_aerospike.h
+BASE_HEADERS += udf_arglist.h udf_cask.h udf_record.h xdr_serverside.h
+BASE_HEADERS += xdr_config.h
 
 BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c health.c index.c
-BASE_SOURCES += job_manager.c json_init.c monitor.c namespace.c particle.c
-BASE_SOURCES += particle_blob.c particle_float.c particle_geojson.c
+BASE_SOURCES += job_manager.c json_init.c monitor.c namespace.c nsup.c
+BASE_SOURCES += particle.c particle_blob.c particle_float.c particle_geojson.c
 BASE_SOURCES += particle_integer.c particle_list.c particle_map.c
 BASE_SOURCES += particle_string.c predexp.c proto.c record.c scan.c signal.c
-BASE_SOURCES += secondary_index.c service.c smd.c thr_info.c
-BASE_SOURCES += thr_info_port.c thr_nsup.c thr_query.c thr_sindex.c thr_tsvc.c
-BASE_SOURCES += ticker.c transaction.c truncate.c udf_aerospike.c udf_arglist.c
-BASE_SOURCES += udf_cask.c udf_record.c xdr_config.c
+BASE_SOURCES += secondary_index.c service.c smd.c thr_info.c thr_info_port.c
+BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
+BASE_SOURCES += truncate.c udf_aerospike.c udf_arglist.c udf_cask.c udf_record.c
+BASE_SOURCES += xdr_config.c
 ifneq ($(USE_EE),1)
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += features_ce.c

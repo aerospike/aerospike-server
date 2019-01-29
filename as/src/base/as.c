@@ -50,6 +50,7 @@
 #include "base/index.h"
 #include "base/json_init.h"
 #include "base/monitor.h"
+#include "base/nsup.h"
 #include "base/scan.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
@@ -174,9 +175,8 @@ bool g_shutdown_started = false;
 // Forward declarations.
 //
 
-// signal.c and thr_nsup.c don't have header files.
+// signal.c doesn't have header file.
 extern void as_signal_setup();
-extern void as_nsup_start();
 
 static void write_pidfile(char *pidfile);
 static void validate_directory(const char *path, const char *log_tag);
@@ -357,6 +357,7 @@ main(int argc, char **argv)
 	as_json_init();				// Jansson JSON API used by System Metadata
 	as_index_tree_gc_init();	// thread to purge dropped index trees
 	as_sindex_thr_init();		// defrag secondary index (ok during population)
+	as_nsup_init();				// load previous evict-void-time(s)
 
 	// Initialize namespaces. Each namespace decides here whether it will do a
 	// warm or cold start. Index arenas, partition structures and index tree
@@ -417,7 +418,7 @@ main(int argc, char **argv)
 	as_hb_start();				// start inter-node heartbeat
 	as_exchange_start();		// start the cluster exchange subsystem
 	as_clustering_start();		// clustering-v5 start
-	as_nsup_start();			// may send delete transactions to other nodes
+	as_nsup_start();			// may send evict-void-time(s) to other nodes
 	as_service_start();			// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
 	as_ticker_start();			// only after everything else is started

@@ -37,7 +37,7 @@ int cf_str_atoi_u32(char *s, uint32_t *value);
 int cf_str_atoi_64(char *s, int64_t *value);
 int cf_str_atoi_u64(char *s, uint64_t *value);
 int cf_str_atoi_x64(const char *s, uint64_t *value);
-int cf_str_atoi_seconds(char *s, uint64_t *value);
+int cf_str_atoi_seconds(char *s, uint32_t *value);
 
 // And this does the same, with radix.
 int cf_str_atoi_u64_x(char *s, uint64_t *value, int radix);

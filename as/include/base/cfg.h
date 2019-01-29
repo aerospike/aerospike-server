@@ -111,9 +111,6 @@ typedef struct as_config_s {
 	uint32_t		migrate_max_num_incoming;
 	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
-	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
-	uint32_t		nsup_period;
-	uint32_t		object_size_hist_period;
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	int				proto_slow_netio_sleep_ms; // dynamic only
 	uint32_t		query_bsize;
@@ -153,7 +150,6 @@ typedef struct as_config_s {
 
 	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
 	bool		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
-	uint32_t		prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
 
 	//--------------------------------------------
 	// network::service context.

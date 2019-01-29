@@ -148,7 +148,6 @@ typedef enum {
 	// Internal, generated on local node:
 	FROM_BATCH,
 	FROM_IUDF,
-	FROM_NSUP,
 	FROM_RE_REPL, // enterprise-only
 
 	FROM_UNDEF	= 0
@@ -357,12 +356,6 @@ static inline bool
 as_transaction_is_xdr(const as_transaction *tr)
 {
 	return (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0;
-}
-
-static inline bool
-as_transaction_is_nsup_delete(const as_transaction *tr)
-{
-	return tr->origin == FROM_NSUP;
 }
 
 static inline bool

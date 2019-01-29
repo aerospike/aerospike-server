@@ -508,7 +508,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			goto Rollback;
 		}
 
-		if (cf_atomic32_get(rd->ns->stop_writes) == 1) {
+		if (rd->ns->stop_writes) {
 			cf_warning(AS_UDF, "UDF failed by stop-writes, record will not be updated");
 			failmax = (int)urecord->nupdates;
 			goto Rollback;
@@ -520,7 +520,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			goto Rollback;
 		}
 
-		if (! is_valid_ttl(rd->ns, urecord->tr->msgp->msg.record_ttl)) {
+		if (! is_valid_ttl(urecord->tr->msgp->msg.record_ttl)) {
 			cf_warning(AS_UDF, "invalid ttl %u", urecord->tr->msgp->msg.record_ttl);
 			failmax = (int)urecord->nupdates;
 			goto Rollback;

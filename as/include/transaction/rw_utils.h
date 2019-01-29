@@ -105,7 +105,7 @@ bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_dig
 void record_delete_adjust_sindex(struct as_index_s* r, struct as_namespace_s* ns);
 void delete_adjust_sindex(struct as_storage_rd_s* rd);
 void remove_from_sindex(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* bins, uint32_t n_bins);
-bool xdr_must_ship_delete(struct as_namespace_s* ns, bool is_nsup_delete, bool is_xdr_op);
+bool xdr_must_ship_delete(struct as_namespace_s* ns, bool is_xdr_op);
 
 
 // TODO - rename as as_record_... and move to record.c?
@@ -150,11 +150,11 @@ op_is_read_all(as_msg_op* op, as_msg* m)
 
 
 static inline bool
-is_valid_ttl(as_namespace* ns, uint32_t ttl)
+is_valid_ttl(uint32_t ttl)
 {
 	// Note - for now, ttl must be as_msg record_ttl.
-	// Note - ttl <= ns->max_ttl includes ttl == TTL_NAMESPACE_DEFAULT.
-	return ttl <= ns->max_ttl ||
+	// Note - ttl <= MAX_ALLOWED_TTL includes ttl == TTL_NAMESPACE_DEFAULT.
+	return ttl <= MAX_ALLOWED_TTL ||
 			ttl == TTL_NEVER_EXPIRE || ttl == TTL_DONT_UPDATE;
 }
 

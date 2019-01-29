@@ -63,7 +63,7 @@ uint32_t pack_info_bits(as_transaction* tr);
 void send_repl_write_ack(cf_node node, msg* m, uint32_t result);
 uint32_t parse_result_code(msg* m);
 void drop_replica(as_partition_reservation* rsv, cf_digest* keyd,
-		bool is_nsup_delete, bool is_xdr_op, cf_node master);
+		bool is_xdr_op, cf_node master);
 
 
 //==========================================================
@@ -253,10 +253,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	msg_get_uint32(m, RW_FIELD_INFO, &info);
 
 	if (repl_write_pickle_is_drop(rr.record_buf, info)) {
-		drop_replica(&rsv, keyd,
-				(info & RW_INFO_NSUP_DELETE) != 0,
-				(info & RW_INFO_XDR) != 0,
-				node);
+		drop_replica(&rsv, keyd, (info & RW_INFO_XDR) != 0, node);
 
 		as_partition_release(&rsv);
 		send_repl_write_ack(node, m, AS_OK);
@@ -351,9 +348,6 @@ repl_write_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	// Paranoia - remove eventually.
-	cf_assert(rw->origin != FROM_NSUP, AS_RW, "nsup delete got repl-write ack");
-
 	if (! rw->from.any) {
 		// Lost race against timeout in retransmit thread.
 		cf_mutex_unlock(&rw->lock);
@@ -437,10 +431,6 @@ pack_info_bits(as_transaction* tr)
 		info |= RW_INFO_SINDEX_TOUCHED;
 	}
 
-	if (as_transaction_is_nsup_delete(tr)) {
-		info |= (RW_INFO_NSUP_DELETE | RW_INFO_NO_REPL_ACK);
-	}
-
 	if (respond_on_master_complete(tr)) {
 		info |= RW_INFO_NO_REPL_ACK;
 	}
@@ -487,8 +477,8 @@ parse_result_code(msg* m)
 
 
 void
-drop_replica(as_partition_reservation* rsv, cf_digest* keyd,
-		bool is_nsup_delete, bool is_xdr_op, cf_node master)
+drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_xdr_op,
+		cf_node master)
 {
 	// Shortcut pointers & flags.
 	as_namespace* ns = rsv->ns;
@@ -512,7 +502,7 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 
-	if (xdr_must_ship_delete(ns, is_nsup_delete, is_xdr_op)) {
+	if (xdr_must_ship_delete(ns, is_xdr_op)) {
 		xdr_write(ns, keyd, 0, master, XDR_OP_TYPE_DROP, set_id, NULL);
 	}
 }

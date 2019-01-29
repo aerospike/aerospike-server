@@ -147,17 +147,18 @@ as_namespace_create(char *name)
 	ns->ns_allow_xdr_writes = true; // allow xdr writes by default
 	cf_vector_pointer_init(&ns->xdr_dclist_v, 3, 0);
 
-	ns->cold_start_evict_ttl = 0xFFFFffff; // unless this is specified via config file, use evict void-time saved in device header
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
 	ns->hwm_disk_pct = 50; // evict when device usage exceeds 50%
 	ns->hwm_memory_pct = 60; // evict when memory usage exceeds 50% of namespace memory-size
 	ns->index_stage_size = 1024L * 1024L * 1024L; // 1G
-	ns->max_ttl = MAX_ALLOWED_TTL; // 10 years
 	ns->migrate_order = 5;
 	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds
 	ns->migrate_sleep = 1;
+	ns->nsup_hist_period = 60 * 60; // 1 hour
+	ns->nsup_period = 2 * 60; // 2 minutes
+	ns->n_nsup_threads = 1;
 	ns->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_PROTO;
 	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day

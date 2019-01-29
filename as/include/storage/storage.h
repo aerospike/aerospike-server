@@ -176,7 +176,6 @@ void as_storage_defrag_sweep(struct as_namespace_s *ns);
 // Storage of generic data into device headers.
 void as_storage_load_regime(struct as_namespace_s *ns);
 void as_storage_save_regime(struct as_namespace_s *ns);
-void as_storage_save_evict_void_time(struct as_namespace_s *ns, uint32_t evict_void_time);
 void as_storage_load_pmeta(struct as_namespace_s *ns, struct as_partition_s *p);
 void as_storage_save_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
 void as_storage_cache_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
@@ -248,7 +247,6 @@ void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
 void as_storage_load_regime_ssd(struct as_namespace_s *ns);
 void as_storage_save_regime_ssd(struct as_namespace_s *ns);
-void as_storage_save_evict_void_time_ssd(struct as_namespace_s *ns, uint32_t evict_void_time);
 void as_storage_load_pmeta_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
 void as_storage_save_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
 void as_storage_cache_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);

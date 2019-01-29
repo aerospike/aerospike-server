@@ -81,7 +81,7 @@ typedef enum {
 
 #define RW_INFO_XDR				0x0001
 #define RW_INFO_NO_REPL_ACK		0x0002
-#define RW_INFO_NSUP_DELETE		0x0004
+#define RW_INFO_UNUSED_4		0x0004 // was nsup delete
 #define RW_INFO_UNUSED_8		0x0008 // was LDT dummy (no data)
 #define RW_INFO_UNUSED_10		0x0010 // was LDT parent record
 #define RW_INFO_UNUSED_20		0x0020 // was LDT subrecord
