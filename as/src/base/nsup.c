@@ -820,7 +820,7 @@ update_stats(as_namespace* ns, uint64_t n_0_void_time,
 
 	ns->nsup_cycle_duration = (uint32_t)(total_duration_ms / 1000);
 
-	cf_info(AS_NSUP, "{%s} nsup-done: exempt %lu expired (%lu,%lu) evicted (%lu,%lu) evict-ttl %d total-ms %lu",
+	cf_info(AS_NSUP, "{%s} nsup-done: non-expirable %lu expired (%lu,%lu) evicted (%lu,%lu) evict-ttl %d total-ms %lu",
 			ns->name,
 			n_0_void_time,
 			ns->n_expired_objects, n_expired_objects,
