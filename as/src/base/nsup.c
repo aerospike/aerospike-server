@@ -206,6 +206,21 @@ as_nsup_init(void)
 			nsup_smd_conflict_cb, NULL);
 }
 
+void
+as_nsup_start(void)
+{
+	cf_info(AS_NSUP, "starting namespace supervisor threads");
+
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		cf_thread_create_detached(run_expire_or_evict, ns);
+		cf_thread_create_detached(run_nsup_histograms, ns);
+	}
+
+	cf_thread_create_detached(run_stop_writes, NULL);
+}
+
 bool
 as_nsup_handle_clock_skew(as_namespace* ns, uint64_t skew_ms)
 {
@@ -223,21 +238,6 @@ as_nsup_handle_clock_skew(as_namespace* ns, uint64_t skew_ms)
 			SKEW_WARN_SEC);
 
 	return false;
-}
-
-void
-as_nsup_start(void)
-{
-	cf_info(AS_NSUP, "starting namespace supervisor threads");
-
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace* ns = g_config.namespaces[ns_ix];
-
-		cf_thread_create_detached(run_expire_or_evict, ns);
-		cf_thread_create_detached(run_nsup_histograms, ns);
-	}
-
-	cf_thread_create_detached(run_stop_writes, NULL);
 }
 
 bool
