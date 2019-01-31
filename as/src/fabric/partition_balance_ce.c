@@ -157,6 +157,13 @@ drop_superfluous_version(as_partition* p, as_namespace* ns)
 	return true;
 }
 
+bool
+adjust_superfluous_version(as_partition* p, as_namespace* ns)
+{
+	cf_crash(AS_PARTITION, "CE code called adjust_superfluous_version()");
+	return false;
+}
+
 void
 emigrate_done_advance_non_master_version(as_namespace* ns, as_partition* p,
 		uint32_t tx_flags)
