@@ -191,6 +191,7 @@ uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, struct as_na
 void emig_lead_flags_ap(const as_partition* p, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t lead_flags[]);
 void queue_namespace_migrations(as_partition* p, struct as_namespace_s* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], const uint32_t lead_flags[], cf_queue* mq);
 bool drop_superfluous_version(as_partition* p, struct as_namespace_s* ns);
+bool adjust_superfluous_version(as_partition* p, struct as_namespace_s* ns);
 void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
 void handle_version_change(as_partition* p, struct as_namespace_s* ns, as_partition_version* orig_version);
 
