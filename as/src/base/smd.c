@@ -329,7 +329,7 @@ static smd_module g_module_table[] = {
 		[AS_SMD_MODULE_SECURITY] = { .name = "security" },
 		[AS_SMD_MODULE_SINDEX] = { .name = "sindex" },
 		[AS_SMD_MODULE_TRUNCATE] = { .name = "truncate" },
-		[AS_SMD_MODULE_UDF] = { .name = "udf" }
+		[AS_SMD_MODULE_UDF] = { .name = "UDF" }
 };
 
 COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) ==
@@ -1920,14 +1920,12 @@ send_set_from_orig(uint32_t set_tid, smd_set_entry* entry)
 {
 	const as_smd_item* item = entry->item;
 
-	entry->cl_key = g_smd.cl_key;
-
 	if (smd_is_pr()) {
 		smd_op op = {
 				.type = SMD_OP_SET_TO_PR,
 				.src = g_config.self_node,
 				.module = entry->module,
-				.cl_key = g_smd.cl_key,
+				.cl_key = entry->cl_key,
 				.tid = set_tid
 		};
 
@@ -1945,7 +1943,7 @@ send_set_from_orig(uint32_t set_tid, smd_set_entry* entry)
 	msg* m = as_fabric_msg_get(M_TYPE_SMD);
 
 	msg_set_uint64(m, SMD_MSG_TID, set_tid);
-	msg_set_uint64(m, SMD_MSG_CLUSTER_KEY, g_smd.cl_key);
+	msg_set_uint64(m, SMD_MSG_CLUSTER_KEY, entry->cl_key);
 	msg_set_uint32(m, SMD_MSG_OP, SMD_OP_SET_TO_PR);
 
 	msg_set_uint32(m, SMD_MSG_MODULE_ID, (uint32_t)entry->module->id);

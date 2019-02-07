@@ -48,7 +48,6 @@
 #include "base/thr_info.h"
 #include <sys/stat.h>
 
-char udf_smd_module_name[] = "UDF";
 char *as_udf_type_name[] = {"LUA", 0};
 
 static int file_read(char *, uint8_t **, size_t *, unsigned char *);
