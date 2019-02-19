@@ -4183,9 +4183,9 @@ info_command_truncate_namespace_undo(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the truncate-undo command.
 
-	bool ok = as_truncate_undo_cmd(ns_name, NULL);
+	as_truncate_undo_cmd(ns_name, NULL);
 
-	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate-undo");
+	cf_dyn_buf_append_string(db, "ok");
 
 	return 0;
 }
@@ -4277,7 +4277,7 @@ info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the truncate-undo command.
 
-	bool ok = as_truncate_undo_cmd(ns_name, set_name);
+	as_truncate_undo_cmd(ns_name, set_name);
 
 	cf_dyn_buf_append_string(db, "ok");
 
