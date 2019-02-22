@@ -137,7 +137,7 @@ cf_dns_init()
  * Resolves hostname to ip addresses asynchronously.
  *
  * @param hostname the hostname/devicename/ip address to resolve. Should be of
- * length less than HOST_NAME_MAX.
+ * length less than or equal to DNS_NAME_MAX_SIZE.
  * @param hints criteria for selecting addresses. Can be NULL.
  * @param cb the call back invoked after resolution, either successful or
  * unsuccessful.
@@ -151,7 +151,7 @@ cf_dns_resolve_a(const char* hostname, addrinfo* hints, cf_dns_resolve_cb cb,
 	// Create a new resolution request.
 	cf_dns_resolve_req req = { { 0 } };
 	strncpy(req.hostname, hostname, sizeof(req.hostname));
-	req.hostname[HOST_NAME_MAX] = 0;
+	req.hostname[DNS_NAME_MAX_SIZE] = 0;
 	memcpy(&req.hints, hints, sizeof(req.hints));
 	req.cb = cb;
 	req.udata = udata;
