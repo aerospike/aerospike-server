@@ -161,6 +161,7 @@ typedef struct vacated_wblock_s {
 typedef struct {
 	cf_atomic32			rc;
 	cf_atomic32			n_writers;	// number of concurrent writers
+	bool				dirty;		// written to since last flushed
 	bool				skip_post_write_q;
 	uint32_t			n_vacated;
 	uint32_t			vacated_capacity;

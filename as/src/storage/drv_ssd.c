@@ -74,6 +74,8 @@
 #define DEFRAG_STARTUP_RESERVE	4
 #define DEFRAG_RUNTIME_RESERVE	4
 
+#define WRITE_IN_PLACE 1
+
 
 //==========================================================
 // Miscellaneous utility functions.
@@ -388,6 +390,7 @@ swb_get(drv_ssd *ssd)
 		swb = swb_create(ssd);
 		swb->rc = 0;
 		swb->n_writers = 0;
+		swb->dirty = false;
 		swb->skip_post_write_q = false;
 		swb->ssd = ssd;
 		swb->wblock_id = STORAGE_INVALID_WBLOCK;
@@ -1869,19 +1872,34 @@ ssd_buffer_bins(as_storage_rd *rd)
 		}
 	}
 
-	// There's enough space - save the position where this record will be
-	// written, and advance swb->pos for the next writer.
-	uint32_t swb_pos = swb->pos;
+	uint32_t n_rblocks = SIZE_TO_N_RBLOCKS(write_size);
+	uint32_t swb_pos;
+	int rv = 0;
 
-	swb->pos += write_size;
+	if (n_rblocks == r->n_rblocks &&
+			swb->wblock_id == RBLOCK_ID_TO_WBLOCK_ID(ssd, r->rblock_id) &&
+			ssd->file_id == r->file_id) {
+		// Stored size is unchanged, and previous version is in this buffer -
+		// just overwrite at the previous position.
+		swb_pos = RBLOCK_ID_TO_OFFSET(r->rblock_id) -
+				WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id);
+		rv = WRITE_IN_PLACE;
+	}
+	else {
+		// There's enough space - save the position where this record will be
+		// written, and advance swb->pos for the next writer.
+		swb_pos = swb->pos;
+		swb->pos += write_size;
+	}
+
 	cf_atomic32_incr(&swb->n_writers);
+	swb->dirty = true;
 
 	cf_mutex_unlock(&ssd->write_lock);
 	// May now write this record concurrently with others in this swb.
 
 	// Flatten data into the block.
 
-	uint32_t n_rblocks = SIZE_TO_N_RBLOCKS(write_size);
 	ssd_record *block = (ssd_record*)&swb->buf[swb_pos];
 
 	if (flat == NULL) {
@@ -1895,12 +1913,14 @@ ssd_buffer_bins(as_storage_rd *rd)
 
 	ssd_encrypt(ssd, write_offset, block);
 
-	r->file_id = ssd->file_id;
-	r->rblock_id = OFFSET_TO_RBLOCK_ID(write_offset);
-	r->n_rblocks = n_rblocks;
+	if (rv != WRITE_IN_PLACE) {
+		r->file_id = ssd->file_id;
+		r->rblock_id = OFFSET_TO_RBLOCK_ID(write_offset);
+		r->n_rblocks = n_rblocks;
 
-	cf_atomic64_add(&ssd->inuse_size, (int64_t)write_size);
-	cf_atomic32_add(&ssd->alloc_table->wblock_state[swb->wblock_id].inuse_sz, (int32_t)write_size);
+		cf_atomic64_add(&ssd->inuse_size, (int64_t)write_size);
+		cf_atomic32_add(&ssd->alloc_table->wblock_state[swb->wblock_id].inuse_sz, (int32_t)write_size);
+	}
 
 	// We are finished writing to the buffer.
 	cf_atomic32_decr(&swb->n_writers);
@@ -1909,7 +1929,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		histogram_insert_raw(ns->device_write_size_hist, write_size);
 	}
 
-	return 0;
+	return rv;
 }
 
 
@@ -1942,6 +1962,9 @@ ssd_write(as_storage_rd *rd)
 
 	if (rv == 0 && old_ssd) {
 		ssd_block_free(old_ssd, old_rblock_id, old_n_rblocks, "ssd-write");
+	}
+	else if (rv == WRITE_IN_PLACE) {
+		return 0; // no need to free old block - it's reused
 	}
 
 	return rv;
@@ -2213,15 +2236,13 @@ ssd_free_swbs(drv_ssd *ssd)
 
 
 void
-ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
-		uint32_t *p_prev_size)
+ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes)
 {
 	uint64_t n_writes = cf_atomic64_get(ssd->n_wblock_writes);
 
 	// If there's an active write load, we don't need to flush.
 	if (n_writes != *p_prev_n_writes) {
 		*p_prev_n_writes = n_writes;
-		*p_prev_size = 0;
 		return;
 	}
 
@@ -2235,7 +2256,6 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 		cf_mutex_unlock(&ssd->write_lock);
 
 		*p_prev_n_writes = n_writes;
-		*p_prev_size = 0;
 		return;
 	}
 
@@ -2244,8 +2264,8 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes,
 
 	ssd_write_buf *swb = ssd->current_swb;
 
-	if (swb && swb->pos != *p_prev_size) {
-		*p_prev_size = swb->pos;
+	if (swb && swb->dirty) {
+		swb->dirty = false;
 
 		// Clean the end of the buffer before flushing.
 		if (ssd->write_block_size != swb->pos) {
@@ -2376,7 +2396,6 @@ run_ssd_maintenance(void *udata)
 	uint64_t prev_n_tomb_raider_reads = 0;
 
 	uint64_t prev_n_writes_flush = 0;
-	uint32_t prev_size_flush = 0;
 
 	uint64_t prev_n_defrag_writes_flush = 0;
 
@@ -2417,7 +2436,7 @@ run_ssd_maintenance(void *udata)
 		uint64_t flush_max_us = ssd_flush_max_us(ns);
 
 		if (flush_max_us != 0 && now >= prev_flush + flush_max_us) {
-			ssd_flush_current_swb(ssd, &prev_n_writes_flush, &prev_size_flush);
+			ssd_flush_current_swb(ssd, &prev_n_writes_flush);
 			prev_flush = now;
 			next = next_time(now, flush_max_us, next);
 		}
