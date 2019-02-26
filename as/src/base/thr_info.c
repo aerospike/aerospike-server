@@ -104,6 +104,7 @@
 #define STR_ITYPE_MAPVALUES "MAPVALUES"
 #define STR_BINTYPE         "bintype"
 
+void info_set_num_info_threads(uint32_t n_threads);
 int info_get_objects(char *name, cf_dyn_buf *db);
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
@@ -1709,7 +1710,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
 	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
 	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
-	info_append_int(db, "info-threads", g_config.n_info_threads);
+	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_bool(db, "log-millis", cf_fault_is_logging_millis());
@@ -2261,6 +2262,17 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of cluster-name to '%s'", context);
+		}
+		else if (0 == as_info_parameter_get(params, "info-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			if (val < 1 || val > MAX_INFO_THREADS) {
+				cf_warning(AS_INFO, "info-threads %d must be between 1 and %u", val, MAX_INFO_THREADS);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of info-threads from %u to %d ", g_config.n_info_threads, val);
+			info_set_num_info_threads((uint32_t)val);
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-fill-delay", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
@@ -4597,6 +4609,10 @@ thr_info_fn(void *unused)
 			cf_crash(AS_TSVC, "unable to pop from info work queue");
 		}
 
+		if (it.fd_h == NULL) {
+			break; // termination signal
+		}
+
 		as_file_handle *fd_h = it.fd_h;
 		as_proto *pr = it.proto;
 
@@ -4662,6 +4678,29 @@ void
 as_info(as_info_transaction *it)
 {
 	cf_queue_push(g_info_work_q, it);
+}
+
+// Called via info command. Caller has sanity-checked n_threads.
+void
+info_set_num_info_threads(uint32_t n_threads)
+{
+	if (g_config.n_info_threads > n_threads) {
+		// Decrease the number of info threads to n_threads.
+		while (g_config.n_info_threads > n_threads) {
+			as_info_transaction death_msg = { 0 };
+
+			// Send terminator (NULL message).
+			as_info(&death_msg);
+			g_config.n_info_threads--;
+		}
+	}
+	else {
+		// Increase the number of info threads to n_threads.
+		while (g_config.n_info_threads < n_threads) {
+			cf_thread_create_detached(thr_info_fn, NULL);
+			g_config.n_info_threads++;
+		}
+	}
 }
 
 // Return the number of pending Info requests in the queue.
@@ -6477,10 +6516,7 @@ as_info_init()
 	as_xdr_info_init();
 	as_service_list_init();
 
-	// Spin up the Info threads *after* all static and dynamic Info commands have been added
-	// so we can guarantee that the static and dynamic lists will never again be changed.
-
-	for (int i = 0; i < g_config.n_info_threads; i++) {
+	for (uint32_t i = 0; i < g_config.n_info_threads; i++) {
 		cf_thread_create_detached(thr_info_fn, NULL);
 	}
 

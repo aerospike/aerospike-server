@@ -2400,7 +2400,7 @@ as_config_init(const char* config_file)
 				// TODO - if config key present but no value (not even space) failure mode is bad...
 				break;
 			case CASE_SERVICE_INFO_THREADS:
-				c->n_info_threads = cfg_int_no_checks(&line);
+				c->n_info_threads = cfg_u32(&line, 1, MAX_INFO_THREADS);
 				break;
 			case CASE_SERVICE_KEEP_CAPS_SSD_HEALTH:
 				cfg_keep_cap(cfg_bool(&line), &c->keep_caps_ssd_health, CAP_SYS_ADMIN);

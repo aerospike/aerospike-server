@@ -32,6 +32,8 @@
 #include "base/security.h"
 #include "base/transaction.h"
 
+#define MAX_INFO_THREADS 256
+
 typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
 typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
 typedef int (*as_info_command_fn) (char *name, char *parameters, cf_dyn_buf *db);
