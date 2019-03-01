@@ -1503,7 +1503,6 @@ immigration_handle_done_request(cf_node src, msg *m)
 
 	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
-		return;
 	}
 }
 
@@ -1568,7 +1567,6 @@ immigration_handle_all_done_request(cf_node src, msg *m)
 
 	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
-		return;
 	}
 }
 

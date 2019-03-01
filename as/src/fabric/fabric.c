@@ -339,25 +339,6 @@ static void fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *
 // msg
 //
 
-msg *
-as_fabric_msg_get(msg_type type)
-{
-	if (type >= M_TYPE_MAX) {
-		return NULL;
-	}
-
-	return msg_create(type);
-}
-
-void
-as_fabric_msg_put(msg *m)
-{
-	if (cf_rc_release(m) == 0) {
-		msg_reset(m);
-		msg_put(m);
-	}
-}
-
 // Log information about existing "msg" objects and queues.
 void
 as_fabric_msg_queue_dump()
@@ -1897,13 +1878,13 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 	}
 
 	while (true) {
-		msg *m = as_fabric_msg_get(type);
-
-		if (! m) {
-			cf_warning(AS_FABRIC, "Failed to create message for type %d (max %d)", type, M_TYPE_MAX);
+		if (! msg_type_is_valid(type)) {
+			cf_warning(AS_FABRIC, "failed to create message for type %u (max %u)", type, M_TYPE_MAX);
 			cf_free(p_bigbuf);
 			return false;
 		}
+
+		msg *m = as_fabric_msg_get(type);
 
 		if (! msg_parse_fields(m, buf_ptr, msg_sz)) {
 			cf_warning(AS_FABRIC, "msg_parse_fields failed for fc %p", fc);

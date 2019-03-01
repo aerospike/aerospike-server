@@ -160,6 +160,7 @@ void msg_put(msg *m);
 //
 
 void msg_type_register(msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz);
+bool msg_type_is_valid(msg_type type);
 msg *msg_create(msg_type type);
 void msg_destroy(msg *m);
 void msg_incr_ref(msg *m);

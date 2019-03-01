@@ -1713,7 +1713,8 @@ op_req_full_from_pr(smd_op* op)
 	msg_set_uint32(m, SMD_MSG_OP, SMD_OP_FULL_TO_PR);
 	module_fill_msg(module, m);
 
-	if (as_fabric_send(g_smd.succession[0], m, AS_FABRIC_CHANNEL_META)) {
+	if (as_fabric_send(g_smd.succession[0], m, AS_FABRIC_CHANNEL_META) !=
+			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }

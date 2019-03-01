@@ -30,6 +30,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "citrusleaf/alloc.h"
+
 #include "msg.h"
 #include "node.h"
 #include "socket.h"
@@ -91,9 +93,23 @@ extern cf_tls_info *g_fabric_tls;
 // msg
 //
 
-msg *as_fabric_msg_get(msg_type type);
-void as_fabric_msg_put(msg *m);
 void as_fabric_msg_queue_dump(void);
+
+static inline msg *
+as_fabric_msg_get(msg_type type)
+{
+	// Never returns NULL. Will assert if type is not registered.
+	return msg_create(type);
+}
+
+static inline void
+as_fabric_msg_put(msg *m)
+{
+	if (cf_rc_release(m) == 0) {
+		msg_reset(m);
+		msg_put(m);
+	}
+}
 
 //------------------------------------------------
 // as_fabric

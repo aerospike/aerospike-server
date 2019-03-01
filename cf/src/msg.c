@@ -140,7 +140,7 @@ void
 msg_type_register(msg_type type, const msg_template *mt, size_t mt_sz,
 		size_t scratch_sz)
 {
-	cf_assert(type >= 0 && type < M_TYPE_MAX, CF_MSG, "invalid type %d", type);
+	cf_assert(type < M_TYPE_MAX, CF_MSG, "unknown type %d", type);
 
 	msg_type_entry *mte = &g_mte[type];
 	uint16_t mt_count = (uint16_t)(mt_sz / sizeof(msg_template));
@@ -173,13 +173,16 @@ msg_type_register(msg_type type, const msg_template *mt, size_t mt_sz,
 	mte->scratch_sz = (uint32_t)scratch_sz;
 }
 
+bool
+msg_type_is_valid(msg_type type)
+{
+	return type < M_TYPE_MAX && g_mte[type].mt != NULL;
+}
+
 msg *
 msg_create(msg_type type)
 {
-	// Caller validates type is in range - this validates it's not unused.
-	if (! g_mte[type].mt) {
-		return NULL;
-	}
+	cf_assert(type < M_TYPE_MAX && g_mte[type].mt != NULL, CF_MSG, "invalid type %u", type);
 
 	const msg_type_entry *mte = &g_mte[type];
 	uint16_t mt_count = mte->entry_count;
