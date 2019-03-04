@@ -74,6 +74,7 @@ xdr_config_dest_defaults(xdr_dest_config *dest_cfg)
 	dest_cfg->dc_security_cfg.sec_config_file = NULL;
 	dest_cfg->dc_tls_spec_name = NULL;
 	dest_cfg->dc_tls_spec = NULL;
+	dest_cfg->dc_ship_bins = true;
 
 	// Aerospike destination
 	cf_vector_pointer_init(&dest_cfg->aero.dc_nodes, 10, 0);

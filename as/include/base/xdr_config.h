@@ -133,6 +133,7 @@ typedef struct xdr_dest_config_s {
 	int						id;
 	char					*dc_tls_spec_name;
 	cf_tls_spec				*dc_tls_spec;
+	bool					dc_ship_bins;
 	xdr_security_config	dc_security_cfg;
 
 	struct xdr_dest_aero_config_s	aero;
