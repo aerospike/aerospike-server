@@ -782,13 +782,14 @@ typedef enum {
 
 	// XDR (remote) datacenter options:
 	// Normally visible, in canonical configuration file order:
-	CASE_XDR_DATACENTER_DC_TYPE,
 	CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT,
 	// Normally hidden:
 	CASE_XDR_DATACENTER_DC_CONNECTIONS,
 	CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS,
 	CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP,
 	CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE,
+	CASE_XDR_DATACENTER_DC_SHIP_BINS,
+	CASE_XDR_DATACENTER_DC_TYPE,
 	CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES,
 	CASE_XDR_DATACENTER_HTTP_URL,
 	CASE_XDR_DATACENTER_HTTP_VERSION,
@@ -1380,12 +1381,13 @@ const cfg_opt XDR_OPTS[] = {
 
 const cfg_opt XDR_DATACENTER_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
-		{ "dc-type",						CASE_XDR_DATACENTER_DC_TYPE },
-		{ "dc-node-address-port",			CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT },
 		{ "dc-connections",					CASE_XDR_DATACENTER_DC_CONNECTIONS },
 		{ "dc-connections-idle-ms",			CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS },
 		{ "dc-int-ext-ipmap",				CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP },
+		{ "dc-node-address-port",			CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT },
 		{ "dc-security-config-file",		CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE },
+		{ "dc-ship-bins",					CASE_XDR_DATACENTER_DC_SHIP_BINS },
+		{ "dc-type",						CASE_XDR_DATACENTER_DC_TYPE },
 		{ "dc-use-alternate-services",		CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES },
 		{ "http-url",						CASE_XDR_DATACENTER_HTTP_URL },
 		{ "http-version",					CASE_XDR_DATACENTER_HTTP_VERSION },
@@ -3954,6 +3956,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE:
 				cur_dest_cfg->dc_security_cfg.sec_config_file = cfg_strdup(&line, true);
+				break;
+			case CASE_XDR_DATACENTER_DC_SHIP_BINS:
+				cur_dest_cfg->dc_ship_bins = cfg_bool(&line);
 				break;
 			case CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES:
 				cur_dest_cfg->aero.dc_use_alternate_services = cfg_bool(&line);
