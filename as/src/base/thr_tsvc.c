@@ -252,10 +252,17 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	// Have we finished the very first partition balance?
 	if (! as_partition_balance_is_init_resolved()) {
-		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
-		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
-		// Note that we forfeited namespace info above so scan & query don't get
-		// counted as single-record error.
+		if (tr->origin == FROM_PROXY) {
+			as_proxy_return_to_sender(tr, ns);
+			tr->from.proxy_node = 0; // pattern, not needed
+		}
+		else {
+			cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
+			as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+			// Note that we forfeited namespace info above so scan & query don't
+			// get counted as single-record error.
+		}
+
 		goto Cleanup;
 	}
 
