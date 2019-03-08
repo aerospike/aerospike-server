@@ -1080,6 +1080,7 @@ fabric_node_send(fabric_node *node, msg *m, as_fabric_channel channel)
 		cf_mutex_unlock(&node->send_idle_fc_queue_lock);
 
 		if ((! cf_socket_exists(&fc->sock)) || fc->failed) {
+			fabric_connection_send_unassign(fc);
 			fabric_connection_release(fc); // send_idle_fc_queue
 			continue;
 		}
@@ -1523,6 +1524,7 @@ fabric_connection_disconnect(fabric_connection *fc)
 
 	if (cf_queue_delete(&node->send_idle_fc_queue[fc->pool->pool_id], &fc,
 			true) == CF_QUEUE_OK) {
+		fabric_connection_send_unassign(fc);
 		fabric_connection_release(fc); // for delete from send_idle_fc_queue
 	}
 
