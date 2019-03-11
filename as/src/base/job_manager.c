@@ -286,7 +286,7 @@ int as_job_partition_reserve(as_job* _job, int pid, as_partition_reservation* rs
 void
 as_job_init(as_job* _job, const as_job_vtable* vtable,
 		as_job_manager* mgr, as_job_rsv_type rsv_type, uint64_t trid,
-		as_namespace* ns, uint16_t set_id, int priority)
+		as_namespace* ns, uint16_t set_id, int priority, const char* client)
 {
 	memset(_job, 0, sizeof(as_job));
 
@@ -297,6 +297,8 @@ as_job_init(as_job* _job, const as_job_vtable* vtable,
 	_job->ns		= ns;
 	_job->set_id	= set_id;
 	_job->priority	= safe_priority(priority);
+
+	strcpy(_job->client, client);
 
 	cf_mutex_init(&_job->requeue_lock);
 }
@@ -372,6 +374,8 @@ as_job_info(as_job* _job, as_mon_jobstat* stat)
 
 	strcpy(stat->ns, _job->ns->name);
 	strcpy(stat->set, as_job_safe_set_name(_job));
+
+	strcpy(stat->client, _job->client);
 
 	char status[64];
 	sprintf(status, "%s(%s)", done ? "done" : "active",

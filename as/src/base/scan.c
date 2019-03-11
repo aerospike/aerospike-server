@@ -510,6 +510,7 @@ void
 conn_scan_job_info(conn_scan_job* job, as_mon_jobstat* stat)
 {
 	stat->net_io_bytes = job->net_io_bytes;
+	stat->socket_timeout = job->fd_timeout;
 }
 
 
@@ -578,7 +579,8 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	as_job_init(_job, &basic_scan_job_vtable, &g_scan_manager, RSV_WRITE,
-			as_transaction_trid(tr), ns, set_id, options.priority);
+			as_transaction_trid(tr), ns, set_id, options.priority,
+			tr->from.proto_fd_h->client);
 
 	job->cluster_key = as_exchange_cluster_key();
 	job->fail_on_cluster_change = options.fail_on_cluster_change;
@@ -607,11 +609,12 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	// Take ownership of socket from transaction.
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout);
 
-	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} priority %u, sample-pct %u%s%s",
+	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} priority %u sample-pct %u%s%s socket-timeout %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
 			_job->priority, job->sample_pct,
 			job->no_bin_data ? ", metadata-only" : "",
-			job->fail_on_cluster_change ? ", fail-on-cluster-change" : "");
+			job->fail_on_cluster_change ? ", fail-on-cluster-change" : "",
+			timeout, _job->client);
 
 	if ((result = as_job_manager_start_job(_job->mgr, _job)) != 0) {
 		cf_warning(AS_SCAN, "basic scan job %lu failed to start (%d)",
@@ -906,7 +909,8 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	as_job_init(_job, &aggr_scan_job_vtable, &g_scan_manager, RSV_WRITE,
-			as_transaction_trid(tr), ns, set_id, options.priority);
+			as_transaction_trid(tr), ns, set_id, options.priority,
+			tr->from.proto_fd_h->client);
 
 	if (! aggr_scan_init(&job->aggr_call, tr)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
@@ -917,9 +921,9 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	// Take ownership of socket from transaction.
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout);
 
-	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} priority %u",
+	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} priority %u socket-timeout %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->priority);
+			_job->priority, timeout, _job->client);
 
 	int result = as_job_manager_start_job(_job->mgr, _job);
 
@@ -1222,7 +1226,8 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	as_job_init(_job, &udf_bg_scan_job_vtable, &g_scan_manager, RSV_WRITE,
-			as_transaction_trid(tr), ns, set_id, options.priority);
+			as_transaction_trid(tr), ns, set_id, options.priority,
+			tr->from.proto_fd_h->client);
 
 	job->origin.predexp = predexp;
 	job->is_durable_delete = as_transaction_is_durable_delete(tr);
@@ -1239,9 +1244,9 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->origin.cb = udf_bg_scan_tr_complete;
 	job->origin.udata = (void*)job;
 
-	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} priority %u",
+	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} priority %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->priority);
+			_job->priority, _job->client);
 
 	int result = as_job_manager_start_job(_job->mgr, _job);
 
@@ -1317,6 +1322,7 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 {
 	strcpy(stat->job_type, scan_type_str(SCAN_TYPE_UDF_BG));
 	stat->net_io_bytes = sizeof(cl_msg); // size of original synchronous fin
+	stat->socket_timeout = CF_SOCKET_TIMEOUT;
 
 	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 	char* extra = stat->jdata + strlen(stat->jdata);

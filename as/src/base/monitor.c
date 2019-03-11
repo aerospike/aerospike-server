@@ -305,9 +305,13 @@ as_mon_populate_jobstat(as_mon_jobstat * job_stat, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ":net-io-bytes=");
 	cf_dyn_buf_append_uint64(db, job_stat->net_io_bytes);
 
-	//	char cpu_data[100];
-	//	sprintf(cpu_data, "%f", job_stat->cpu);
-	//	cf_dyn_buf_append_string(db, cpu_data);
+	cf_dyn_buf_append_string(db, ":socket-timeout=");
+	cf_dyn_buf_append_uint64(db, job_stat->socket_timeout);
+
+	if (job_stat->client[0] != '\0') {
+		cf_dyn_buf_append_string(db, ":from=");
+		cf_dyn_buf_append_string(db, job_stat->client);
+	}
 
 	if (job_stat->jdata[0]) {
 		cf_dyn_buf_append_string(db, job_stat->jdata);

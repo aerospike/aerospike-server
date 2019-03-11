@@ -125,6 +125,7 @@ typedef struct as_job_s {
 	volatile int				abandoned;
 
 	// For tracking:
+	char						client[64];
 	uint64_t					start_ms;
 	uint64_t					finish_ms;
 	cf_atomic64					n_records_read;
@@ -132,8 +133,8 @@ typedef struct as_job_s {
 
 void as_job_init(as_job* _job, const as_job_vtable* vtable,
 		struct as_job_manager_s* manager, as_job_rsv_type rsv_type,
-		uint64_t trid, struct as_namespace_s* ns, uint16_t set_id,
-		int priority);
+		uint64_t trid, struct as_namespace_s* ns, uint16_t set_id, int priority,
+		const char* client);
 void as_job_slice(void* task);
 void as_job_finish(as_job* _job);
 void as_job_destroy(as_job* _job);

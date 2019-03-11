@@ -3056,13 +3056,16 @@ void
 as_query_fill_jobstat(as_query_transaction *qtr, as_mon_jobstat *stat)
 {
 	stat->trid          = qtr->trid;
-	stat->cpu           = 0;                               // not implemented
 	stat->run_time      = (cf_getns() - qtr->start_time) / 1000000;
 	stat->recs_read     = qtr->n_read_success;
 	stat->net_io_bytes  = qtr->net_io_bytes;
 	stat->priority      = qtr->priority;
 
+	// Not relevant:
+	stat->socket_timeout  = 0;
+
 	// Not implemented:
+	stat->client[0]       = '\0';
 	stat->progress_pct    = 0;
 	stat->time_since_done = 0;
 	stat->job_type[0]     = '\0';
