@@ -100,6 +100,7 @@ typedef struct ssd_common_prefix_s {
 	uint32_t	write_block_size;
 	uint32_t	eventual_regime;
 	uint32_t	last_evict_void_time;
+	uint32_t	roster_generation;
 } ssd_common_prefix;
 
 // Because we pad explicitly:

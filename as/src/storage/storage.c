@@ -483,6 +483,42 @@ as_storage_save_regime(as_namespace *ns)
 }
 
 //--------------------------------------
+// as_storage_load_roster_generation
+//
+
+typedef void (*as_storage_load_roster_generation_fn)(as_namespace *ns);
+static const as_storage_load_roster_generation_fn as_storage_load_roster_generation_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't store info
+	as_storage_load_roster_generation_ssd
+};
+
+void
+as_storage_load_roster_generation(as_namespace *ns)
+{
+	if (as_storage_load_roster_generation_table[ns->storage_type]) {
+		as_storage_load_roster_generation_table[ns->storage_type](ns);
+	}
+}
+
+//--------------------------------------
+// as_storage_save_roster_generation
+//
+
+typedef void (*as_storage_save_roster_generation_fn)(as_namespace *ns);
+static const as_storage_save_roster_generation_fn as_storage_save_roster_generation_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't store info
+	as_storage_save_roster_generation_ssd
+};
+
+void
+as_storage_save_roster_generation(as_namespace *ns)
+{
+	if (as_storage_save_roster_generation_table[ns->storage_type]) {
+		as_storage_save_roster_generation_table[ns->storage_type](ns);
+	}
+}
+
+//--------------------------------------
 // as_storage_load_pmeta
 //
 

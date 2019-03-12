@@ -4050,6 +4050,41 @@ as_storage_save_regime_ssd(as_namespace *ns)
 
 
 void
+as_storage_load_roster_generation_ssd(as_namespace *ns)
+{
+	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
+
+	ns->roster_generation = ssds->common->prefix.roster_generation;
+}
+
+
+void
+as_storage_save_roster_generation_ssd(as_namespace *ns)
+{
+	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
+
+	// Normal for this to not change, cleaner to check here versus outside.
+	if (ns->roster_generation == ssds->common->prefix.roster_generation) {
+		return;
+	}
+
+	cf_mutex_lock(&ssds->flush_lock);
+
+	ssds->common->prefix.roster_generation = ns->roster_generation;
+
+	for (int i = 0; i < ssds->n_ssds; i++) {
+		drv_ssd* ssd = &ssds->ssds[i];
+
+		ssd_write_header(ssd, (uint8_t*)ssds->common,
+				(uint8_t*)&ssds->common->prefix.roster_generation,
+				sizeof(ssds->common->prefix.roster_generation));
+	}
+
+	cf_mutex_unlock(&ssds->flush_lock);
+}
+
+
+void
 as_storage_load_pmeta_ssd(as_namespace *ns, as_partition *p)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;

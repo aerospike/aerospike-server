@@ -175,7 +175,9 @@ void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
 // Storage of generic data into device headers.
 void as_storage_load_regime(struct as_namespace_s *ns);
+void as_storage_load_roster_generation(struct as_namespace_s *ns);
 void as_storage_save_regime(struct as_namespace_s *ns);
+void as_storage_save_roster_generation(struct as_namespace_s *ns);
 void as_storage_load_pmeta(struct as_namespace_s *ns, struct as_partition_s *p);
 void as_storage_save_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
 void as_storage_cache_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
@@ -246,7 +248,9 @@ bool as_storage_has_space_ssd(struct as_namespace_s *ns);
 void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
 void as_storage_load_regime_ssd(struct as_namespace_s *ns);
+void as_storage_load_roster_generation_ssd(struct as_namespace_s *ns);
 void as_storage_save_regime_ssd(struct as_namespace_s *ns);
+void as_storage_save_roster_generation_ssd(struct as_namespace_s *ns);
 void as_storage_load_pmeta_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
 void as_storage_save_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
 void as_storage_cache_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);

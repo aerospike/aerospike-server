@@ -1502,8 +1502,6 @@ exchange_msg_data_payload_set(msg* msg)
 
 	memset(rebalance_flags, 0, sizeof(rebalance_flags));
 
-	pthread_mutex_lock(&g_exchanged_info_lock);
-
 	msg_set_uint32(msg, AS_EXCHANGE_MSG_COMPATIBILITY_ID,
 			AS_EXCHANGE_COMPATIBILITY_ID);
 
@@ -1599,8 +1597,6 @@ exchange_msg_data_payload_set(msg* msg)
 		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
 				rebalance_flags, ns_count);
 	}
-
-	pthread_mutex_unlock(&g_exchanged_info_lock);
 }
 
 /**
@@ -1759,10 +1755,8 @@ exchange_data_msg_send_pending_ack()
 		goto Exit;
 	}
 
-	if (! g_exchange.data_msg) {
-		g_exchange.data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
-		exchange_msg_data_payload_set(g_exchange.data_msg);
-	}
+	// FIXME - temporary assert, until we're sure.
+	cf_assert(g_exchange.data_msg != NULL, AS_EXCHANGE, "payload not built");
 
 	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
 			"sending exchange data to nodes:", unacked_nodes,
@@ -1910,15 +1904,28 @@ exchange_data_payload_prepare()
 	as_partition_balance_disallow_migrations();
 	as_partition_balance_synchronize_migrations();
 
+	// Ensure ns->smd_roster is synchronized exchanged partition versions.
+	pthread_mutex_lock(&g_exchanged_info_lock);
+
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		// May change flags on partition versions we're about to exchange.
+		as_partition_balance_protect_roster_set(ns);
+
 		// Append payload for each namespace.
 
 		// TODO - add API to reset dynbuf?
 		g_exchange.self_data_dyn_buf[ns_ix].used_sz = 0;
 
-		exchange_data_namespace_payload_add(g_config.namespaces[ns_ix],
+		exchange_data_namespace_payload_add(ns,
 				&g_exchange.self_data_dyn_buf[ns_ix]);
 	}
+
+	g_exchange.data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
+	exchange_msg_data_payload_set(g_exchange.data_msg);
+
+	pthread_mutex_unlock(&g_exchanged_info_lock);
 
 	EXCHANGE_UNLOCK();
 }

@@ -4034,63 +4034,6 @@ info_command_roster_set(char *name, char *params, cf_dyn_buf *db)
 
 // Format is:
 //
-//	protect-roster-set:{namespace=<ns-name>}
-//
-int
-info_command_protect_roster_set(char *name, char *params, cf_dyn_buf *db)
-{
-	if (as_info_error_enterprise_only()) {
-		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
-		return 0;
-	}
-
-	char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
-	int ns_name_len = (int)sizeof(ns_name);
-	int rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
-
-	if (rv == -2) {
-		cf_warning(AS_INFO, "protect-roster-set: namespace parameter value too long");
-		cf_dyn_buf_append_string(db, "ERROR::bad-namespace");
-		return 0;
-	}
-
-	if (rv == 0) {
-		as_namespace *ns = as_namespace_get_byname(ns_name);
-
-		if (! ns) {
-			cf_warning(AS_INFO, "protect-roster-set: unknown namespace %s", ns_name);
-			cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
-			return 0;
-		}
-
-		if (! as_partition_balance_protect_roster_set(ns)) {
-			cf_warning(AS_INFO, "protect-roster-set: failed - recluster in progress");
-			cf_dyn_buf_append_string(db, "ERROR::failed-revive");
-			return 0;
-		}
-
-		cf_info(AS_INFO, "protect-roster-set: complete");
-		cf_dyn_buf_append_string(db, "ok");
-		return 0;
-	}
-
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace *ns = g_config.namespaces[ns_ix];
-
-		if (! as_partition_balance_protect_roster_set(ns)) {
-			cf_warning(AS_INFO, "protect-roster-set: failed - recluster in progress");
-			cf_dyn_buf_append_string(db, "ERROR::failed-revive");
-			return 0;
-		}
-	}
-
-	cf_info(AS_INFO, "protect-roster-set: complete");
-	cf_dyn_buf_append_string(db, "ok");
-	return 0;
-}
-
-// Format is:
-//
 //	truncate-namespace:namespace=<ns-name>[;lut=<UTC-nanosec-string>]
 //
 //	... where no lut value means use this server's current time.
@@ -6376,7 +6319,7 @@ as_info_init()
 			"latency;log;log-set;log-message;logs;"
 			"mcast;mesh;"
 			"name;namespace;namespaces;node;"
-			"physical-devices;protect-roster-set;"
+			"physical-devices;"
 			"quiesce;quiesce-undo;"
 			"racks;recluster;revive;roster;roster-set;"
 			"service;services;services-alumni;services-alumni-reset;set-config;"
@@ -6465,7 +6408,6 @@ as_info_init()
 	as_info_set_command("peers-tls-alt", as_service_list_command, PERM_NONE);                 // The delta update version of "peers-tls-alt".
 	as_info_set_command("peers-tls-std", as_service_list_command, PERM_NONE);                 // The delta update version of "peers-tls-std".
 	as_info_set_command("physical-devices", info_command_physical_devices, PERM_NONE);        // Physical device information.
-	as_info_set_command("protect-roster-set", info_command_protect_roster_set, PERM_SERVICE_CTRL); // Mark empty partitions as "revived".
 	as_info_set_command("quiesce", info_command_quiesce, PERM_SERVICE_CTRL);                  // Quiesce this node.
 	as_info_set_command("quiesce-undo", info_command_quiesce_undo, PERM_SERVICE_CTRL);        // Un-quiesce this node.
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.

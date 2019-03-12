@@ -91,7 +91,7 @@ void as_partition_balance();
 
 uint64_t as_partition_balance_remaining_migrations();
 bool as_partition_balance_revive(struct as_namespace_s* ns);
-bool as_partition_balance_protect_roster_set(struct as_namespace_s* ns);
+void as_partition_balance_protect_roster_set(struct as_namespace_s* ns);
 void as_partition_balance_effective_rack_ids(cf_dyn_buf* db);
 
 

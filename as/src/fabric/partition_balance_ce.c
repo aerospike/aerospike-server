@@ -56,11 +56,9 @@ as_partition_balance_revive(as_namespace* ns)
 	return true;
 }
 
-bool
+void
 as_partition_balance_protect_roster_set(as_namespace* ns)
 {
-	cf_warning(AS_PARTITION, "protect-roster-set is an enterprise feature");
-	return true;
 }
 
 void
