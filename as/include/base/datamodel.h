@@ -65,13 +65,12 @@
 
 // [0-1] for partition-id
 // [1-4] for tree sprigs and locks
-// [2-3] for the olock - TODO - to be deprecated
 // [5-7] unused
 // [8-11] for SSD device hash
 #define DIGEST_STORAGE_BASE_BYTE	8
 // [12-15] for rw_request hash
 #define DIGEST_HASH_BASE_BYTE		12
-// [16-19] unused
+// [16-19] for pred-exp filter
 
 /* SYNOPSIS
  * Data model
