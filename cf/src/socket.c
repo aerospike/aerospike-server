@@ -1282,7 +1282,7 @@ do_try_send_all(cf_socket *sock, const void *buffp, size_t size, int32_t flags,
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
-				if (timeout > 0 && socket_wait(sock, POLLOUT, timeout)) {
+				if (timeout != 0 && socket_wait(sock, POLLOUT, timeout)) {
 					continue;
 				}
 
