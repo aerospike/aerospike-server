@@ -464,6 +464,11 @@ typedef struct as_exchange_s
 	uint32_t compatibility_ids[AS_CLUSTER_SZ];
 
 	/**
+	 * Used by exchange listeners during upgrades for compatibility purposes.
+	 */
+	uint32_t min_compatibility_id;
+
+	/**
 	 * Committed cluster generation.
 	 */
 	uint64_t committed_cluster_generation;
@@ -2537,6 +2542,10 @@ exchange_data_pre_commit_for_node(cf_node node, uint32_t ix)
 
 	g_exchange.compatibility_ids[ix] = node_state.data->compatibility_id;
 
+	if (node_state.data->compatibility_id < g_exchange.min_compatibility_id) {
+		g_exchange.min_compatibility_id = node_state.data->compatibility_id;
+	}
+
 	for (uint32_t i = 0; i < node_state.data->num_namespaces; i++) {
 		exchange_namespace_payload_pre_commit_for_node(node,
 				&node_state.data->namespace_data[i]);
@@ -2590,6 +2599,7 @@ exchange_exchanging_pre_commit()
 
 	memset(g_exchange.compatibility_ids, 0,
 			sizeof(g_exchange.compatibility_ids));
+	g_exchange.min_compatibility_id = UINT32_MAX;
 
 	// Reset exchange data for all namespaces.
 	for (int i = 0; i < g_config.n_namespaces; i++) {
@@ -3634,6 +3644,15 @@ uint32_t*
 as_exchange_compatibility_ids(void)
 {
 	return (uint32_t*)g_exchange.compatibility_ids;
+}
+
+/**
+ * Used by exchange listeners during upgrades for compatibility purposes.
+ */
+uint32_t
+as_exchange_min_compatibility_id(void)
+{
+	return g_exchange.min_compatibility_id;
 }
 
 /**
