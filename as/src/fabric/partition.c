@@ -43,6 +43,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/transaction.h"
 #include "fabric/partition_balance.h"
 
 
@@ -360,25 +361,27 @@ as_partition_reserve_write(as_namespace* ns, uint32_t pid,
 // -1 - not reserved - node parameter returns other "better" node
 // -2 - not reserved - node parameter not filled - partition is unavailable
 int
-as_partition_reserve_read(as_namespace* ns, uint32_t pid,
-		as_partition_reservation* rsv, bool would_dup_res, cf_node* node)
+as_partition_reserve_read_tr(as_namespace* ns, uint32_t pid, as_transaction* tr,
+		cf_node* node)
 {
 	as_partition* p = &ns->partitions[pid];
 
 	cf_mutex_lock(&p->lock);
 
-	// If this partition is unavailable, return.
+	// Handle unavailable partition.
 	if (p->n_replicas == 0) {
-		if (node) {
-			*node = (cf_node)0;
+		int result = partition_reserve_unavailable(ns, p, tr, node);
+
+		if (result == 0) {
+			partition_reserve_lockfree(p, ns, &tr->rsv);
 		}
 
 		cf_mutex_unlock(&p->lock);
-		return -2;
+		return result;
 	}
 
 	cf_node best_node = find_best_node(p,
-			! partition_reserve_promote(ns, p, would_dup_res));
+			! partition_reserve_promote(ns, p, tr));
 
 	if (node) {
 		*node = best_node;
@@ -390,7 +393,7 @@ as_partition_reserve_read(as_namespace* ns, uint32_t pid,
 		return -1;
 	}
 
-	partition_reserve_lockfree(p, ns, rsv);
+	partition_reserve_lockfree(p, ns, &tr->rsv);
 
 	cf_mutex_unlock(&p->lock);
 

@@ -232,8 +232,21 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO3_UPDATE_ONLY            (1 << 3) // update existing record only, do not create new record
 #define AS_MSG_INFO3_CREATE_OR_REPLACE      (1 << 4) // completely replace existing record, or create new record
 #define AS_MSG_INFO3_REPLACE_ONLY           (1 << 5) // completely replace existing record, do not create new record
-#define AS_MSG_INFO3_LINEARIZE_READ         (1 << 6) // (enterprise only)
-	// Bit 7 is unused.
+#define AS_MSG_INFO3_SC_READ_TYPE           (1 << 6) // (enterprise only)
+#define AS_MSG_INFO3_SC_READ_RELAX          (1 << 7) // (enterprise only)
+
+// Interpret SC_READ bits in info3.
+//
+// RELAX   TYPE
+//                strict
+//                ------
+//   0      0     sequential (default)
+//   0      1     linearize
+//
+//                relaxed
+//                -------
+//   1      0     allow prole
+//   1      1     allow unavailable
 
 //------------------------------------------------
 // as_msg_field.

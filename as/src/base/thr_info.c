@@ -6293,7 +6293,7 @@ as_info_init()
 			"float;"
 			"geo;"
 			"peers;pipelining;"
-			"replicas;replicas-all;replicas-master;"
+			"relaxed-sc;replicas;replicas-all;replicas-master;"
 			"truncate-namespace;"
 			"udf");
 	strcat(features, aerospike_build_features);

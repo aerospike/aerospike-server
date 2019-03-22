@@ -492,6 +492,11 @@ read_local(as_transaction* tr)
 	int result = repl_state_check(r, tr);
 
 	if (result != 0) {
+		if (result == -3) {
+			read_local_done(tr, &r_ref, NULL, AS_ERR_UNAVAILABLE);
+			return TRANS_DONE_ERROR;
+		}
+
 		// No response sent to origin.
 		as_record_done(&r_ref, ns);
 		return result == 1 ? TRANS_IN_PROGRESS : TRANS_WAITING;

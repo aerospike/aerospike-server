@@ -210,13 +210,16 @@ typedef struct as_transaction_s {
 #define AS_TRANSACTION_HEAD_SIZE (offsetof(as_transaction, rsv))
 
 // 'from_flags' bits - set before queuing transaction head:
-#define FROM_FLAG_BATCH_SUB		0x0001
-#define FROM_FLAG_RESTART		0x0002
+#define FROM_FLAG_BATCH_SUB			0x0001
+#define FROM_FLAG_RESTART			0x0002
+#define FROM_FLAG_RESTART_STRICT	0x0004 // enterprise-only
 
 // 'flags' bits - set in transaction body after queuing:
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x01
 #define AS_TRANSACTION_FLAG_IS_DELETE		0x02
 #define AS_TRANSACTION_FLAG_MUST_PING		0x04 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_PROLE		0x08 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE	0x10 // enterprise-only
 
 
 void as_transaction_init_head(as_transaction *tr, cf_digest *, cl_msg *);
@@ -242,6 +245,12 @@ static inline bool
 as_transaction_is_batch_sub(const as_transaction *tr)
 {
 	return (tr->from_flags & FROM_FLAG_BATCH_SUB) != 0;
+}
+
+static inline bool
+as_transaction_is_restart_strict(const as_transaction *tr)
+{
+	return (tr->from_flags & FROM_FLAG_RESTART_STRICT) != 0;
 }
 
 static inline bool
@@ -361,7 +370,21 @@ as_transaction_is_xdr(const as_transaction *tr)
 static inline bool
 as_transaction_is_linearized_read(const as_transaction *tr)
 {
-	return (tr->msgp->msg.info3 & AS_MSG_INFO3_LINEARIZE_READ) != 0;
+	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) == 0 &&
+			(tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_TYPE) != 0;
+}
+
+static inline bool
+as_transaction_is_allow_unavailable_read(const as_transaction *tr)
+{
+	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) != 0 &&
+			(tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_TYPE) != 0;
+}
+
+static inline bool
+as_transaction_is_strict_read(const as_transaction *tr)
+{
+	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) == 0;
 }
 
 void as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig, bool is_durable_delete);

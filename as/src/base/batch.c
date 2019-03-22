@@ -926,7 +926,8 @@ as_batch_queue_task(as_transaction* btr)
 			out->msg.header_sz = sizeof(as_msg);
 			out->msg.info1 = in->info1;
 			out->msg.info2 = 0;
-			out->msg.info3 = bmsg->info3 & AS_MSG_INFO3_LINEARIZE_READ;
+			out->msg.info3 = bmsg->info3 &
+					(AS_MSG_INFO3_SC_READ_RELAX | AS_MSG_INFO3_SC_READ_TYPE);
 			out->msg.unused = 0;
 			out->msg.result_code = 0;
 			out->msg.generation = 0;

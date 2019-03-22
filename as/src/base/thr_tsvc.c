@@ -99,12 +99,6 @@ should_security_check_data_op(const as_transaction *tr)
 	return tr->origin == FROM_CLIENT || tr->origin == FROM_BATCH;
 }
 
-static inline bool
-read_would_duplicate_resolve(const as_namespace* ns, const as_msg* m)
-{
-	return READ_CONSISTENCY_LEVEL(ns, *m) == AS_READ_CONSISTENCY_LEVEL_ALL;
-}
-
 static const char*
 write_type_tag(const as_transaction *tr)
 {
@@ -394,8 +388,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 			goto Cleanup;
 		}
 
-		rv = as_partition_reserve_read(ns, pid, &tr->rsv,
-				read_would_duplicate_resolve(ns, m), &dest);
+		rv = as_partition_reserve_read_tr(ns, pid, tr, &dest);
 	}
 	else {
 		cf_warning(AS_TSVC, "transaction is neither read nor write - unexpected");

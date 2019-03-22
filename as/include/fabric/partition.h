@@ -49,6 +49,7 @@
 
 struct as_index_tree_s;
 struct as_namespace_s;
+struct as_transaction_s;
 
 
 //==========================================================
@@ -200,7 +201,7 @@ void as_partition_get_replica_stats(struct as_namespace_s* ns, repl_stats* p_sta
 void as_partition_reserve(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_replica(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node);
-int as_partition_reserve_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, bool would_dup_res, cf_node* node);
+int as_partition_reserve_read_tr(struct as_namespace_s* ns, uint32_t pid, struct as_transaction_s* tr, cf_node* node);
 int as_partition_prereserve_query(struct as_namespace_s* ns, bool can_partition_query[], as_partition_reservation rsv[]);
 int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_xdr_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
@@ -305,4 +306,5 @@ bool client_replica_maps_is_partition_queryable(const struct as_namespace_s* ns,
 // Private API - for enterprise separation only.
 //
 
-bool partition_reserve_promote(const struct as_namespace_s* ns, const as_partition* p, bool would_dup_res);
+int partition_reserve_unavailable(const struct as_namespace_s* ns, const as_partition* p, struct as_transaction_s* tr, cf_node* node);
+bool partition_reserve_promote(const struct as_namespace_s* ns, const as_partition* p, struct as_transaction_s* tr);

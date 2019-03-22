@@ -32,6 +32,7 @@
 
 #include "base/datamodel.h"
 #include "base/proto.h"
+#include "base/transaction.h"
 
 
 //==========================================================
@@ -59,9 +60,18 @@ as_partition_check_source(const as_namespace* ns, as_partition* p, cf_node src,
 // Private API - for enterprise separation only.
 //
 
+int
+partition_reserve_unavailable(const as_namespace* ns, const as_partition* p,
+		as_transaction* tr, cf_node* node)
+{
+	*node = (cf_node)0;
+
+	return -2;
+}
+
 bool
 partition_reserve_promote(const as_namespace* ns, const as_partition* p,
-		bool would_dup_res)
+		as_transaction* tr)
 {
-	return p->n_dupl != 0 && would_dup_res;
+	return false;
 }
