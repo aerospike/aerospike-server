@@ -1233,7 +1233,7 @@ cf_socket_recv_msg(cf_socket *sock, struct msghdr *m, int32_t flags)
 	return res;
 }
 
-static bool
+static uint16_t
 socket_wait(const cf_socket *sock, uint16_t events, int32_t timeout)
 {
 	cf_detail(CF_SOCKET, "Waiting for events 0x%x on FD %d with timeout %d",
@@ -1246,6 +1246,7 @@ socket_wait(const cf_socket *sock, uint16_t events, int32_t timeout)
 
 		if (count < 0) {
 			if (errno == EINTR) {
+				cf_debug(CF_SOCKET, "Interrupted while polling FD %d", pfd.fd);
 				continue;
 			}
 
@@ -1259,11 +1260,11 @@ socket_wait(const cf_socket *sock, uint16_t events, int32_t timeout)
 
 		if (count == 0) {
 			cf_detail(CF_SOCKET, "Timeout while waiting on FD %d", sock->fd);
-			return false;
+			return 0;
 		}
 
 		cf_detail(CF_SOCKET, "Got events 0x%x on FD %d", pfd.revents, sock->fd);
-		return true;
+		return pfd.revents;
 	}
 }
 
@@ -1282,8 +1283,18 @@ do_try_send_all(cf_socket *sock, const void *buffp, size_t size, int32_t flags,
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
-				if (timeout != 0 && socket_wait(sock, POLLOUT, timeout)) {
-					continue;
+				if (timeout != 0) {
+					uint16_t events = socket_wait(sock, POLLOUT, timeout);
+
+					if (events == POLLOUT) {
+						cf_debug(CF_SOCKET, "FD %d can write", sock->fd);
+						continue;
+					}
+
+					if (events != 0) {
+						cf_warning(CF_SOCKET, "Unexpected events 0x%x on FD %d", events, sock->fd);
+						return off;
+					}
 				}
 
 				cf_debug(CF_SOCKET, "Timeout during blocking send on FD %d", sock->fd);
@@ -1366,8 +1377,18 @@ do_recv_all(cf_socket *sock, void *buffp, size_t size, int32_t flags,
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
-				if (socket_wait(sock, POLLIN, timeout)) {
-					continue;
+				if (timeout != 0) {
+					uint16_t events = socket_wait(sock, POLLIN, timeout);
+
+					if (events == POLLIN) {
+						cf_debug(CF_SOCKET, "FD %d can read", sock->fd);
+						continue;
+					}
+
+					if (events != 0) {
+						cf_warning(CF_SOCKET, "Unexpected events 0x%x on FD %d", events, sock->fd);
+						return off;
+					}
 				}
 
 				cf_debug(CF_SOCKET, "Timeout during blocking receive on FD %d", sock->fd);
