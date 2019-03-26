@@ -72,15 +72,6 @@
 #define DIGEST_HASH_BASE_BYTE		12
 // [16-19] for pred-exp filter
 
-/* SYNOPSIS
- * Data model
- *
- * Objects are stored in a hierarchy: namespace:record:bin:particle.
- * The records in a namespace are further partitioned for distribution
- * amongst the participating nodes in the cluster.
- */
-
-
 
 /* Forward declarations */
 typedef struct as_namespace_s as_namespace;
