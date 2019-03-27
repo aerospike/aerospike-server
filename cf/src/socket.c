@@ -1292,7 +1292,7 @@ do_try_send_all(cf_socket *sock, const void *buffp, size_t size, int32_t flags,
 					}
 
 					if (events != 0) {
-						cf_warning(CF_SOCKET, "Unexpected events 0x%x on FD %d", events, sock->fd);
+						cf_detail(CF_SOCKET, "Unexpected events 0x%x on FD %d", events, sock->fd);
 						return off;
 					}
 				}
