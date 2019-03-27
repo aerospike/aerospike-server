@@ -377,6 +377,17 @@ as_job_info(as_job* _job, as_mon_jobstat* stat)
 
 	strcpy(stat->client, _job->client);
 
+	// TODO - if we fix the monitor to not use colons as separators, remove:
+	char* escape = stat->client;
+
+	while (*escape != 0) {
+		if (*escape == ':') {
+			*escape = '+';
+		}
+
+		escape++;
+	}
+
 	char status[64];
 	sprintf(status, "%s(%s)", done ? "done" : "active",
 			job_result_str(_job->abandoned));
