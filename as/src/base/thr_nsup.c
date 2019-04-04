@@ -439,7 +439,7 @@ typedef struct garbage_collect_info_s {
 	as_namespace*	ns;
 	as_index_tree*	p_tree;
 	uint32_t		now;
-	uint32_t		num_deleted;
+	uint64_t*		num_deleted;
 } garbage_collect_info;
 
 static void
@@ -451,27 +451,19 @@ garbage_collect_reduce_cb(as_index_ref* r_ref, void* udata)
 	// If we're past void-time plus safety margin, delete the record.
 	if (void_time != 0 && p_info->now > void_time + g_config.prole_extra_ttl) {
 		as_index_delete(p_info->p_tree, &r_ref->r->keyd);
-		p_info->num_deleted++;
+		(*p_info->num_deleted)++;
 	}
 
 	as_record_done(r_ref, p_info->ns);
 }
 
-static int
-garbage_collect_next_prole_partition(as_namespace* ns, int pid)
+static void
+garbage_collect_non_masters(as_namespace* ns)
 {
+	uint64_t n_deleted = 0;
 	as_partition_reservation rsv;
 
-	// Look for the next non-master partition past pid, but loop only once over
-	// all partitions.
-	for (int n = 0; n < AS_PARTITIONS; n++) {
-		// Increment pid and wrap if necessary.
-		if (++pid == AS_PARTITIONS) {
-			pid = 0;
-		}
-
-		// Note - may want a new method to get these under a single partition
-		// lock, but for now just do the two separate reserve calls.
+	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		if (as_partition_reserve_write(ns, pid, &rsv, NULL) == 0) {
 			// This is a master partition - continue.
 			as_partition_release(&rsv);
@@ -479,30 +471,25 @@ garbage_collect_next_prole_partition(as_namespace* ns, int pid)
 		else {
 			as_partition_reserve(ns, pid, &rsv);
 
-			// This is a non-master partition - garbage collect and break.
+			// This is a non-master partition - garbage collect.
 			garbage_collect_info cb_info;
 
 			cb_info.ns = ns;
 			cb_info.p_tree = rsv.tree;
 			cb_info.now = as_record_void_time_get();
-			cb_info.num_deleted = 0;
+			cb_info.num_deleted = &n_deleted;
 
 			// Reduce the partition, deleting long-expired records.
 			as_index_reduce_live(rsv.tree, garbage_collect_reduce_cb, &cb_info);
 
-			if (cb_info.num_deleted != 0) {
-				cf_info(AS_NSUP, "namespace %s pid %d: %u expired non-masters",
-						ns->name, pid, cb_info.num_deleted);
-			}
-
 			as_partition_release(&rsv);
-
-			// Do only one partition per nsup loop.
-			break;
 		}
 	}
 
-	return pid;
+	if (n_deleted != 0) {
+		cf_info(AS_NSUP, "{%s} expired-non-masters %lu", ns->name, n_deleted);
+	}
+
 }
 
 //
@@ -863,13 +850,6 @@ update_stats(as_namespace* ns, uint64_t n_master, uint64_t n_0_void_time,
 void *
 run_nsup(void *arg)
 {
-	// Garbage-collect long-expired proles, one partition per loop.
-	int prole_pids[g_config.n_namespaces];
-
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		prole_pids[ns_ix] = -1;
-	}
-
 	uint64_t last_time = cf_get_seconds();
 
 	while (true) {
@@ -1030,9 +1010,9 @@ run_nsup(void *arg)
 					n_expired_records, n_evicted_records, evict_ttl,
 					n_general_waits, n_clear_waits, start_ms);
 
-			// Garbage-collect long-expired proles, one partition per loop.
+			// Garbage-collect long-expired proles.
 			if (g_config.prole_extra_ttl != 0) {
-				prole_pids[ns_ix] = garbage_collect_next_prole_partition(ns, prole_pids[ns_ix]);
+				garbage_collect_non_masters(ns);
 			}
 		}
 	}
