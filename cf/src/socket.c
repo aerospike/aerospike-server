@@ -1852,6 +1852,8 @@ typedef struct inter_entry_s {
 		struct inter_entry_s *entry;
 		uint32_t index;
 	} master;
+
+	struct inter_entry_s *phys;
 } inter_entry;
 
 typedef struct inter_info_s {
@@ -2213,6 +2215,7 @@ addr_fix_fn(cb_context *cont)
 			memcpy(&by_label->mac_addr, &by_index->mac_addr, sizeof(by_label->mac_addr));
 			by_label->mac_addr_len = by_index->mac_addr_len;
 			by_label->mtu = by_index->mtu;
+			by_label->phys = by_index;
 
 			memcpy(&by_label->name, cont->curr_label, sizeof(by_label->name));
 		}
@@ -2383,6 +2386,9 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 
 			cf_detail(CF_SOCKET, "Master = %s",
 					entry->master.entry != NULL ? entry->master.entry->name : "(none)");
+
+			cf_detail(CF_SOCKET, "Physical = %s",
+					entry->phys != NULL ? entry->phys->name : "(none)");
 		}
 	}
 }
@@ -2520,6 +2526,37 @@ cf_inter_addr_to_index_and_name(const cf_ip_addr *addr, int32_t *index, char **n
 	}
 
 	return -1;
+}
+
+int32_t
+cf_inter_get_physical(const char *if_name, char *phys_name,
+		uint32_t phys_name_sz)
+{
+	inter_info inter;
+	memset(&inter, 0, sizeof(inter));
+	enumerate_inter(&inter, true);
+
+	inter_entry *entry = NULL;
+
+	for (uint32_t i = 0; i < inter.n_inters; ++i) {
+		if (strcmp(inter.inters[i].name, if_name) == 0) {
+			entry = &inter.inters[i];
+			break;
+		}
+	}
+
+	if (entry == NULL) {
+		return -1;
+	}
+
+	const char *name = entry->phys != NULL ? entry->phys->name : entry->name;
+
+	if (strlen(name) >= phys_name_sz) {
+		cf_crash(CF_SOCKET, "Name buffer overflow");
+	}
+
+	strcpy(phys_name, name);
+	return 0;
 }
 
 void

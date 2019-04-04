@@ -1900,9 +1900,12 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 					if_name);
 		}
 
+		char phys_name[50];
+		CF_NEVER_FAILS(cf_inter_get_physical(if_name, phys_name, sizeof(phys_name)));
+
 		char *exp_names[100];
 		uint32_t n_exp = sizeof(exp_names) / sizeof(exp_names[0]);
-		cf_inter_expand_bond(if_name, exp_names, &n_exp);
+		cf_inter_expand_bond(phys_name, exp_names, &n_exp);
 
 		for (uint32_t k = 0; k < n_exp; ++k) {
 			optimize_interface(exp_names[k]);
