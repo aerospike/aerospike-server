@@ -340,12 +340,6 @@ typedef struct as_msg_op_s {
 #define AS_MSG_OP_PREPEND       10 // prepend to strings and blobs
 #define AS_MSG_OP_TOUCH         11 // will increment the generation
 
-// Memcache-compatible versions of various ops.
-#define AS_MSG_OP_MC_INCR       129
-#define AS_MSG_OP_MC_APPEND     130 // only strings for now
-#define AS_MSG_OP_MC_PREPEND    131 // only strings for now
-#define AS_MSG_OP_MC_TOUCH      132 // does not change generation
-
 //------------------------------------------------
 // UDF ops.
 //
@@ -680,12 +674,7 @@ as_msg_op_iterate(as_msg* msg, as_msg_op* current, int* n)
 #define OP_IS_MODIFY(op) ( \
 		(op) == AS_MSG_OP_INCR || \
 		(op) == AS_MSG_OP_APPEND || \
-		(op) == AS_MSG_OP_PREPEND || \
-		(op) == AS_MSG_OP_MC_INCR || \
-		(op) == AS_MSG_OP_MC_APPEND || \
-		(op) == AS_MSG_OP_MC_PREPEND \
+		(op) == AS_MSG_OP_PREPEND \
 	)
-
-#define OP_IS_TOUCH(op) ((op) == AS_MSG_OP_TOUCH || (op) == AS_MSG_OP_MC_TOUCH)
 
 #define IS_CDT_LIST_OP(op) ((op) < AS_CDT_OP_MAP_SET_TYPE)

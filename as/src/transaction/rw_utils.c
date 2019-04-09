@@ -213,8 +213,7 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 
 
 void
-update_metadata_in_index(as_transaction* tr, bool increment_generation,
-		as_record* r)
+update_metadata_in_index(as_transaction* tr, as_record* r)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -248,10 +247,7 @@ update_metadata_in_index(as_transaction* tr, bool increment_generation,
 	}
 
 	as_record_set_lut(r, tr->rsv.regime, now, ns);
-
-	if (increment_generation) {
-		as_record_increment_generation(r, ns);
-	}
+	as_record_increment_generation(r, ns);
 }
 
 

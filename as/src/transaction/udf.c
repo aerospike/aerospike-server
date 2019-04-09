@@ -922,7 +922,7 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 			m->record_ttl = TTL_NAMESPACE_DEFAULT;
 		}
 
-		update_metadata_in_index(tr, true, r);
+		update_metadata_in_index(tr, r);
 
 		// Pickle for replication.
 		pickle_all(rd, rw);

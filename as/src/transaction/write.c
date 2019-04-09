@@ -85,26 +85,23 @@ void write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 		int result_code);
 int write_master_preprocessing(as_transaction* tr);
 int write_master_policies(as_transaction* tr, bool* p_must_not_create,
-		bool* p_record_level_replace, bool* p_must_fetch_data,
-		bool* p_increment_generation);
+		bool* p_record_level_replace, bool* p_must_fetch_data);
 bool check_msg_set_name(as_transaction* tr, const char* set_name);
 
 int write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool increment_generation, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins);
+		rw_request* rw, bool* is_delete, xdr_dirty_bins* dirty_bins);
 int write_master_dim(as_transaction* tr, as_storage_rd* rd,
-		bool record_level_replace, bool increment_generation, rw_request* rw,
-		bool* is_delete, xdr_dirty_bins* dirty_bins);
-int write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool must_fetch_data, bool increment_generation, rw_request* rw,
-		bool* is_delete, xdr_dirty_bins* dirty_bins);
-int write_master_ssd(as_transaction* tr, as_storage_rd* rd,
-		bool must_fetch_data, bool record_level_replace,
-		bool increment_generation, rw_request* rw, bool* is_delete,
+		bool record_level_replace, rw_request* rw, bool* is_delete,
 		xdr_dirty_bins* dirty_bins);
+int write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
+		bool must_fetch_data, rw_request* rw, bool* is_delete,
+		xdr_dirty_bins* dirty_bins);
+int write_master_ssd(as_transaction* tr, as_storage_rd* rd,
+		bool must_fetch_data, bool record_level_replace, rw_request* rw,
+		bool* is_delete, xdr_dirty_bins* dirty_bins);
 
-void write_master_update_index_metadata(as_transaction* tr,
-		bool increment_generation, index_metadata* old, as_record* r);
+void write_master_update_index_metadata(as_transaction* tr, index_metadata* old,
+		as_record* r);
 int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
 		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins,
@@ -546,10 +543,9 @@ write_master(rw_request* rw, as_transaction* tr)
 	bool must_not_create;
 	bool record_level_replace;
 	bool must_fetch_data;
-	bool increment_generation;
 
 	int result = write_master_policies(tr, &must_not_create,
-			&record_level_replace, &must_fetch_data, &increment_generation);
+			&record_level_replace, &must_fetch_data);
 
 	if (result != 0) {
 		write_master_failed(tr, 0, false, 0, 0, result);
@@ -714,24 +710,23 @@ write_master(rw_request* rw, as_transaction* tr)
 	if (ns->storage_data_in_memory) {
 		if (ns->single_bin) {
 			result = write_master_dim_single_bin(tr, &rd,
-					increment_generation,
 					rw, &is_delete, &dirty_bins);
 		}
 		else {
 			result = write_master_dim(tr, &rd,
-					record_level_replace, increment_generation,
+					record_level_replace,
 					rw, &is_delete, &dirty_bins);
 		}
 	}
 	else {
 		if (ns->single_bin) {
 			result = write_master_ssd_single_bin(tr, &rd,
-					must_fetch_data, increment_generation,
+					must_fetch_data,
 					rw, &is_delete, &dirty_bins);
 		}
 		else {
 			result = write_master_ssd(tr, &rd,
-					must_fetch_data, record_level_replace, increment_generation,
+					must_fetch_data, record_level_replace,
 					rw, &is_delete, &dirty_bins);
 		}
 	}
@@ -877,8 +872,7 @@ write_master_preprocessing(as_transaction* tr)
 
 int
 write_master_policies(as_transaction* tr, bool* p_must_not_create,
-		bool* p_record_level_replace, bool* p_must_fetch_data,
-		bool* p_increment_generation)
+		bool* p_record_level_replace, bool* p_must_fetch_data)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -900,8 +894,6 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) != 0 ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
-	bool increment_generation = false;
-
 	bool single_bin_write_first = false;
 	bool has_read_all_op = false;
 	bool generates_response_bin = false;
@@ -911,11 +903,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	int i = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
-		if (op->op != AS_MSG_OP_MC_TOUCH) {
-			increment_generation = true;
-		}
-
-		if (OP_IS_TOUCH(op->op)) {
+		if (op->op == AS_MSG_OP_TOUCH) {
 			if (record_level_replace) {
 				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: touch op can't have record-level replace flag ", ns->name);
 				return AS_ERR_PARAMETER;
@@ -1005,7 +993,6 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	*p_must_not_create = must_not_create;
 	*p_record_level_replace = record_level_replace;
 	*p_must_fetch_data = must_fetch_data;
-	*p_increment_generation = increment_generation;
 
 	return 0;
 }
@@ -1053,8 +1040,7 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 
 int
 write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool increment_generation, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins)
+		rw_request* rw, bool* is_delete, xdr_dirty_bins* dirty_bins)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1096,7 +1082,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, increment_generation, &old_metadata, r);
+	write_master_update_index_metadata(tr, &old_metadata, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1161,8 +1147,8 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 int
 write_master_dim(as_transaction* tr, as_storage_rd* rd,
-		bool record_level_replace, bool increment_generation, rw_request* rw,
-		bool* is_delete, xdr_dirty_bins* dirty_bins)
+		bool record_level_replace, rw_request* rw, bool* is_delete,
+		xdr_dirty_bins* dirty_bins)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1219,7 +1205,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, increment_generation, &old_metadata, r);
+	write_master_update_index_metadata(tr, &old_metadata, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1337,8 +1323,8 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 
 int
 write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool must_fetch_data, bool increment_generation, rw_request* rw,
-		bool* is_delete, xdr_dirty_bins* dirty_bins)
+		bool must_fetch_data, rw_request* rw, bool* is_delete,
+		xdr_dirty_bins* dirty_bins)
 {
 	// Shortcut pointers.
 	as_namespace* ns = tr->rsv.ns;
@@ -1372,7 +1358,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, increment_generation, &old_metadata, r);
+	write_master_update_index_metadata(tr, &old_metadata, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1441,8 +1427,8 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 int
 write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
-		bool record_level_replace, bool increment_generation, rw_request* rw,
-		bool* is_delete, xdr_dirty_bins* dirty_bins)
+		bool record_level_replace, rw_request* rw, bool* is_delete,
+		xdr_dirty_bins* dirty_bins)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1510,7 +1496,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, increment_generation, &old_metadata, r);
+	write_master_update_index_metadata(tr, &old_metadata, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1593,14 +1579,14 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 //
 
 void
-write_master_update_index_metadata(as_transaction* tr,
-		bool increment_generation, index_metadata* old, as_record* r)
+write_master_update_index_metadata(as_transaction* tr, index_metadata* old,
+		as_record* r)
 {
 	old->void_time = r->void_time;
 	old->last_update_time = r->last_update_time;
 	old->generation = r->generation;
 
-	update_metadata_in_index(tr, increment_generation, r);
+	update_metadata_in_index(tr, r);
 }
 
 
@@ -1693,7 +1679,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	int i = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
-		if (OP_IS_TOUCH(op->op)) {
+		if (op->op == AS_MSG_OP_TOUCH) {
 			continue;
 		}
 
