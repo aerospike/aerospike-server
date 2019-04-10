@@ -1138,7 +1138,8 @@ populate_local(void)
 	as_service_endpoint endp;
 	enum_addrs(&endp.addrs);
 
-	if (g_local.serv == NULL) {
+	// Don't test g_local.serv, which is also NULL in IPv6-only setups.
+	if (g_local.clear_std == NULL) {
 		endp.port = g_access.service.port;
 		g_local.serv = print_list(&endp, 0, ';', true);
 	}
