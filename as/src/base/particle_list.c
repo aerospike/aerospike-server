@@ -217,13 +217,10 @@ typedef struct {
 	(offset_index *)(list_is_ordered(__list_p) ? &(__list_p)->offidx : &(__list_p)->full_offidx)
 
 #define vla_list_full_offidx_if_invalid(__name, __list_p) \
-	uint8_t __name ## __vlatemp[sizeof(offset_index *) + (offset_index_is_valid(list_full_offidx_p(__list_p)) ? 0 : offset_index_size(list_full_offidx_p(__list_p)))]; \
+	uint8_t __name ## __vlatemp[sizeof(offset_index *) + offset_index_vla_sz(list_full_offidx_p(__list_p))]; \
 	list_vla *__name = (list_vla *)__name ## __vlatemp; \
 	__name->offidx = list_full_offidx_p(__list_p); \
-	if (! offset_index_is_valid(__name->offidx)) { \
-		__name->offidx->_.ptr = __name->mem_temp; \
-		offset_index_set_filled(__name->offidx, 1); \
-	}
+	offset_index_alloc_temp(list_full_offidx_p(__list_p), __name->mem_temp)
 
 #define define_packed_list_particle(__name, __particle, __ret) \
 	packed_list __name; \

@@ -181,6 +181,8 @@ static const size_t cdt_op_table_size = sizeof(cdt_op_table) / sizeof(cdt_op_tab
 
 extern const as_particle_vtable *particle_vtable[];
 
+static __thread rollback_alloc *cdt_alloc_heap = NULL;
+
 typedef struct index_pack24_s {
 	uint32_t value:24;
 } __attribute__ ((__packed__)) index_pack24;
@@ -1218,6 +1220,9 @@ as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result,
 	};
 
 	bool success;
+	define_rollback_alloc(alloc_idx, NULL, 4, false); // for temp indexes
+
+	cdt_idx_set_alloc(alloc_idx);
 
 	if (IS_CDT_LIST_OP(state.type)) {
 		success = cdt_process_state_packed_list_modify_optype(&state, &udata);
@@ -1225,6 +1230,8 @@ as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result,
 	else {
 		success = cdt_process_state_packed_map_modify_optype(&state, &udata);
 	}
+
+	cdt_idx_clear();
 
 	if (! success) {
 		as_bin_set_empty(b);
@@ -1250,6 +1257,9 @@ as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result)
 	};
 
 	bool success;
+	define_rollback_alloc(alloc_idx, NULL, 4, false); // for temp indexes
+
+	cdt_idx_set_alloc(alloc_idx);
 
 	if (IS_CDT_LIST_OP(state.type)) {
 		success = cdt_process_state_packed_list_read_optype(&state, &udata);
@@ -1257,6 +1267,8 @@ as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result)
 	else {
 		success = cdt_process_state_packed_map_read_optype(&state, &udata);
 	}
+
+	cdt_idx_clear();
 
 	if (! success) {
 		as_bin_set_empty(result);
@@ -1763,6 +1775,35 @@ offset_index_get_filled(const offset_index *offidx)
 	return msgpacked_index_get((const msgpacked_index *)offidx, 0);
 }
 
+uint32_t
+offset_index_vla_sz(const offset_index *offidx)
+{
+	if (offset_index_is_valid(offidx)) {
+		return 0;
+	}
+
+	uint32_t sz = offset_index_size(offidx);
+
+	return cdt_vla_sz(sz);
+}
+
+void
+offset_index_alloc_temp(offset_index *offidx, uint8_t *mem_temp)
+{
+	if (! offset_index_is_valid(offidx)) {
+		uint32_t sz = offset_index_size(offidx);
+
+		if (sz > CDT_MAX_STACK_OBJ_SZ) {
+			offidx->_.ptr = cdt_idx_alloc(sz);
+		}
+		else {
+			offidx->_.ptr = mem_temp;
+		}
+
+		offset_index_set_filled(offidx, 1);
+	}
+}
+
 void
 offset_index_print(const offset_index *offidx, const char *name)
 {
@@ -1841,6 +1882,18 @@ order_index_init2(order_index *ordidx, uint8_t *ptr, uint32_t max_idx,
 	ordidx->_.ele_sz = order_index_ele_sz(max_idx);
 	ordidx->_.ptr = ptr;
 	ordidx->max_idx = max_idx;
+}
+
+void
+order_index_init2_temp(order_index *ordidx, uint8_t *mem_temp, uint32_t max_idx,
+		uint32_t ele_count)
+{
+	order_index_init2(ordidx, mem_temp, max_idx, ele_count);
+	uint32_t sz = order_index_size(ordidx);
+
+	if (sz > CDT_MAX_STACK_OBJ_SZ) {
+		order_index_set_ptr(ordidx, cdt_idx_alloc(sz));
+	}
 }
 
 void
@@ -2181,7 +2234,7 @@ order_index_print(const order_index *ordidx, const char *name)
 //
 
 bool
-order_heap_init_build_by_range(order_heap *heap, uint8_t *heap_mem,
+order_heap_init_build_by_range_temp(order_heap *heap, uint8_t *mem_temp,
 		uint32_t idx, uint32_t count, uint32_t ele_count,
 		order_heap_compare_fn cmp_fn, const void *udata)
 {
@@ -2198,7 +2251,7 @@ order_heap_init_build_by_range(order_heap *heap, uint8_t *heap_mem,
 		discard = tail_distance;
 	}
 
-	order_index_init(&heap->_, heap_mem, ele_count);
+	order_index_init2_temp(&heap->_, mem_temp, ele_count, ele_count);
 	heap->filled = 0;
 	heap->userdata = udata;
 	heap->cmp = cmp;
@@ -2651,6 +2704,34 @@ list_param_parse(const cdt_payload *items, as_unpacker *pk, uint32_t *count_r)
 	*count_r = (uint32_t)items_hdr;
 
 	return true;
+}
+
+
+//==========================================================
+// cdt_idx
+//
+
+void
+cdt_idx_set_alloc(rollback_alloc *alloc)
+{
+	cf_assert(cdt_alloc_heap == NULL, AS_PARTICLE, "cdt_alloc_heap not NULL");
+	cdt_alloc_heap = alloc;
+}
+
+void
+cdt_idx_clear()
+{
+	if (cdt_alloc_heap) {
+		rollback_alloc_rollback(cdt_alloc_heap);
+		cdt_alloc_heap = NULL;
+	}
+}
+
+uint8_t *
+cdt_idx_alloc(uint32_t sz)
+{
+	cf_assert(cdt_alloc_heap != NULL, AS_PARTICLE, "cdt_alloc_heap not set");
+	return rollback_alloc_reserve(cdt_alloc_heap, sz);
 }
 
 
