@@ -307,33 +307,17 @@ typedef struct {
 		}
 
 #define vla_map_offidx_if_invalid(__name, __map_p) \
-		uint8_t __name ## __vlatemp[sizeof(offset_index *) + (offset_index_is_valid(&(__map_p)->offidx) ? 0 : offset_index_size(&(__map_p)->offidx))]; \
+		uint8_t __name ## __vlatemp[sizeof(offset_index *) + offset_index_vla_sz(&(__map_p)->offidx)]; \
 		map_vla_off *__name = (map_vla_off *)__name ## __vlatemp; \
 		__name->offidx = (offset_index *)&(__map_p)->offidx; \
-		if (offset_index_is_null(__name->offidx)) { \
-			__name->offidx->_.ptr = __name->mem_temp; \
-			offset_index_set_filled(__name->offidx, 1); \
-		}
+		offset_index_alloc_temp(__name->offidx, __name->mem_temp);
 
 #define vla_map_allidx_if_invalid(__name, __map_p) \
-		uint8_t __name ## __vlatemp[sizeof(offset_index *) + sizeof(order_index *) + \
-									(offset_index_is_valid(&(__map_p)->offidx) ? 0 : offset_index_size(&(__map_p)->offidx)) + \
-									(order_index_is_valid(&(__map_p)->value_idx) ? 0 : order_index_size(&(__map_p)->value_idx))]; \
+		uint8_t __name ## __vlatemp[sizeof(offset_index *) + sizeof(order_index *) + map_allidx_vla_sz(__map_p)]; \
 		map_vla_offord *__name = (map_vla_offord *)__name ## __vlatemp; \
 		__name->offidx = (offset_index *)&(__map_p)->offidx; \
 		__name->ordidx = (order_index *)&(__map_p)->value_idx; \
-		if (offset_index_is_null(__name->offidx)) { \
-			__name->offidx->_.ptr = __name->mem_temp; \
-			offset_index_set_filled(__name->offidx, 1); \
-			if (order_index_is_null(__name->ordidx)) { \
-				__name->ordidx->_.ptr = __name->offidx->_.ptr + offset_index_size(__name->offidx); \
-				order_index_set(__name->ordidx, 0, (__map_p)->ele_count); \
-			} \
-		} \
-		else if (order_index_is_null(__name->ordidx)) { \
-			__name->ordidx->_.ptr = __name->mem_temp; \
-			order_index_set(__name->ordidx, 0, (__map_p)->ele_count); \
-		}
+		map_allidx_alloc_temp(__map_p, __name->mem_temp);
 
 #define define_map_unpacker(__name, __map_ptr) \
 		as_unpacker __name = { \
@@ -359,6 +343,9 @@ static inline bool is_k_ordered(uint8_t flags);
 static inline bool is_kv_ordered(uint8_t flags);
 static uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz);
 static uint8_t map_adjust_incoming_flags(uint8_t flags);
+
+static inline uint32_t map_allidx_vla_sz(const packed_map *map);
+static inline void map_allidx_alloc_temp(const packed_map *map, uint8_t *mem_temp);
 
 static inline uint32_t map_ext_content_sz(const packed_map *map);
 static inline bool map_is_k_ordered(const packed_map *map);
@@ -784,6 +771,9 @@ map_from_asval(const as_val *val, as_particle **pp)
 
 	mpk.write_ptr = p_map_mem->data;
 	map_packer_write_hdridx(&mpk);
+	define_rollback_alloc(alloc_idx, NULL, 2, false); // for temp indexes
+
+	cdt_idx_set_alloc(alloc_idx);
 
 	if (! packed_map_write_k_ordered(map, mpk.write_ptr, &mpk.offset_idx)) {
 		cf_crash(AS_PARTICLE, "map_from_asval() sort on key failed");
@@ -797,6 +787,7 @@ map_from_asval(const as_val *val, as_particle **pp)
 	}
 
 	cf_free(temp_mem);
+	cdt_idx_clear();
 
 #ifdef MAP_DEBUG_VERIFY
 	{
@@ -1069,6 +1060,58 @@ map_adjust_incoming_flags(uint8_t flags)
 	}
 
 	return flags & mask;
+}
+
+static inline uint32_t
+map_allidx_vla_sz(const packed_map *map)
+{
+	uint32_t sz = 0;
+
+	if (offset_index_is_null(&map->offidx)) {
+		sz = offset_index_size(&map->offidx) +
+				order_index_size(&map->value_idx);
+	}
+	else if (order_index_is_null(&map->value_idx)) {
+		sz = order_index_size(&map->value_idx);
+	}
+
+	return cdt_vla_sz(sz);
+}
+
+static inline void
+map_allidx_alloc_temp(const packed_map *map, uint8_t *mem_temp)
+{
+	offset_index *offidx = (offset_index *)&map->offidx;
+	order_index *ordidx = (order_index *)&map->value_idx;
+
+	if (offset_index_is_null(offidx)) {
+		uint32_t off_sz = offset_index_size(offidx);
+		uint32_t ord_sz = order_index_size(ordidx);
+
+		if (off_sz + ord_sz > CDT_MAX_STACK_OBJ_SZ) {
+			offidx->_.ptr = cdt_idx_alloc(off_sz);
+			ordidx->_.ptr = cdt_idx_alloc(ord_sz);
+		}
+		else {
+			offidx->_.ptr = mem_temp;
+			ordidx->_.ptr = mem_temp + offset_index_size(offidx);
+		}
+
+		offset_index_set_filled(offidx, 1);
+		order_index_set(ordidx, 0, map->ele_count);
+	}
+	else if (order_index_is_null(ordidx)) {
+		uint32_t ord_sz = order_index_size(ordidx);
+
+		if (ord_sz > CDT_MAX_STACK_OBJ_SZ) {
+			ordidx->_.ptr = cdt_idx_alloc(ord_sz);
+		}
+		else {
+			ordidx->_.ptr = mem_temp;
+		}
+
+		order_index_set(ordidx, 0, map->ele_count);
+	}
 }
 
 static inline uint32_t
@@ -2131,8 +2174,8 @@ map_remove_by_key_interval(as_bin *b, rollback_alloc *alloc_buf,
 }
 
 static int
-map_remove_by_index_range(as_bin *b, rollback_alloc *alloc_buf,
-		int64_t index, uint64_t count, cdt_result_data *result)
+map_remove_by_index_range(as_bin *b, rollback_alloc *alloc_buf, int64_t index,
+		uint64_t count, cdt_result_data *result)
 {
 	packed_map map;
 
@@ -7023,7 +7066,7 @@ map_print(const packed_map *map, const char *name)
 }
 
 static bool
-map_verify(const as_bin *b)
+map_verify_fn(const as_bin *b)
 {
 	packed_map map;
 
@@ -7194,6 +7237,21 @@ map_verify(const as_bin *b)
 	}
 
 	return true;
+}
+
+static bool
+map_verify(const as_bin *b)
+{
+	define_rollback_alloc(alloc_idx, NULL, 2, false); // for temp indexes
+
+	cdt_idx_clear();
+	cdt_idx_set_alloc(alloc_idx);
+
+	bool ret = map_verify_fn(b);
+
+	cdt_idx_clear();
+
+	return ret;
 }
 
 // Quash warnings for debug function.
