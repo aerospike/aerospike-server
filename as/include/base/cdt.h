@@ -185,29 +185,30 @@ typedef enum {
 	CDT_FIND_ITEMS_IDXS_FOR_MAP_VALUE
 } cdt_find_items_idxs_type;
 
+#define cdt_vla_sz(__in_sz) ((__in_sz) > CDT_MAX_STACK_OBJ_SZ ? 0 : (__in_sz))
+
 #define define_offset_index(__name, __contents, __content_sz, __ele_count) \
 		offset_index __name; \
 		offset_index_init(&__name, NULL, __ele_count, __contents, __content_sz); \
-		uint8_t __name ## __offset_index_mem__[offset_index_size(&__name)]; \
-		__name._.ptr = __name ## __offset_index_mem__; \
-		offset_index_set_filled(&__name, 1)
+		uint8_t __name ## __offset_index_mem__[offset_index_vla_sz(&__name)]; \
+		offset_index_alloc_temp(&__name, __name ## __offset_index_mem__)
 
 #define cond_vla_order_index2(__name, __max_idx, __alloc_count, __cond) \
 		union { \
 			order_index ordidx; \
-			uint8_t mem_temp[sizeof(order_index) + ((__cond) ? order_index_calc_size(__max_idx, __alloc_count) : 0)]; \
+			uint8_t mem_temp[sizeof(order_index) + ((__cond) ? cdt_vla_sz(order_index_calc_size(__max_idx, __alloc_count)) : 0)]; \
 		} __name; \
-		order_index_init2(&__name.ordidx, __name.mem_temp + sizeof(order_index), __max_idx, __alloc_count)
+		order_index_init2_temp(&__name.ordidx, __name.mem_temp + sizeof(order_index), __max_idx, __alloc_count)
 
 #define define_order_index(__name, __ele_count) \
 		order_index __name; \
-		uint8_t __name ## __order_index_mem__[order_index_calc_size(__ele_count, __ele_count)]; \
-		order_index_init(&__name, __name ## __order_index_mem__, __ele_count)
+		uint8_t __name ## __order_index_mem__[cdt_vla_sz(order_index_calc_size(__ele_count, __ele_count))]; \
+		order_index_init2_temp(&__name, __name ## __order_index_mem__, __ele_count, __ele_count)
 
 #define define_order_index2(__name, __max_idx, __alloc_count) \
 		order_index __name; \
-		uint8_t __name ## __order_index_mem__[order_index_calc_size(__max_idx, __alloc_count)]; \
-		order_index_init2(&__name, __name ## __order_index_mem__, __max_idx, __alloc_count)
+		uint8_t __name ## __order_index_mem__[cdt_vla_sz(order_index_calc_size(__max_idx, __alloc_count))]; \
+		order_index_init2_temp(&__name, __name ## __order_index_mem__, __max_idx, __alloc_count)
 
 #define define_int_list_builder(__name, __alloc, __count) \
 		cdt_container_builder __name; \
@@ -225,8 +226,8 @@ typedef enum {
 
 #define define_build_order_heap_by_range(__name, __idx, __count, __ele_count, __udata, __cmp_fn, __success) \
 		order_heap __name; \
-		uint8_t __name ## __order_heap_mem__[order_index_calc_size(__ele_count, __ele_count)]; \
-		bool __success = order_heap_init_build_by_range(&__name, __name ## __order_heap_mem__, __idx, __count, __ele_count, __cmp_fn, __udata)
+		uint8_t __name ## __order_heap_mem__[cdt_vla_sz(order_index_calc_size(__ele_count, __ele_count))]; \
+		bool __success = order_heap_init_build_by_range_temp(&__name, __name ## __order_heap_mem__, __idx, __count, __ele_count, __cmp_fn, __udata)
 
 #define VA_NARGS_SEQ 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 #define VA_NARGS_EXTRACT_N(_9, _8, _7, _6, _5, _4, _3, _2, _1, _0, N, ...) N
@@ -336,12 +337,16 @@ uint32_t offset_index_get_const(const offset_index *offidx, uint32_t idx);
 uint32_t offset_index_get_delta_const(const offset_index *offidx, uint32_t index);
 uint32_t offset_index_get_filled(const offset_index *offidx);
 
+uint32_t offset_index_vla_sz(const offset_index *offidx);
+void offset_index_alloc_temp(offset_index *offidx, uint8_t *mem_temp);
+
 void offset_index_print(const offset_index *offidx, const char *name);
 void offset_index_delta_print(const offset_index *offidx, const char *name);
 
 // order_index
 void order_index_init(order_index *ordidx, uint8_t *ptr, uint32_t ele_count);
 void order_index_init2(order_index *ordidx, uint8_t *ptr, uint32_t max_idx, uint32_t ele_count);
+void order_index_init2_temp(order_index *ordidx, uint8_t *mem_temp, uint32_t max_idx, uint32_t ele_count);
 void order_index_init_ref(order_index *dst, const order_index *src, uint32_t start, uint32_t count);
 void order_index_set(order_index *ordidx, uint32_t index, uint32_t value);
 void order_index_set_ptr(order_index *ordidx, uint8_t *ptr);
@@ -370,7 +375,7 @@ size_t order_index_calc_size(uint32_t max_idx, uint32_t ele_count);
 void order_index_print(const order_index *ordidx, const char *name);
 
 // order_heap
-bool order_heap_init_build_by_range(order_heap *heap, uint8_t *heap_mem, uint32_t idx, uint32_t count, uint32_t ele_count, order_heap_compare_fn cmp_fn, const void *udata);
+bool order_heap_init_build_by_range_temp(order_heap *heap, uint8_t *heap_mem, uint32_t idx, uint32_t count, uint32_t ele_count, order_heap_compare_fn cmp_fn, const void *udata);
 void order_heap_swap(order_heap *heap, uint32_t index1, uint32_t index2);
 bool order_heap_remove_top(order_heap *heap);
 bool order_heap_replace_top(order_heap *heap, uint32_t value);
@@ -405,6 +410,11 @@ bool list_full_offset_index_fill_all(offset_index *offidx, bool is_storage);
 bool list_order_index_sort(order_index *ordidx, const offset_index *full_offidx, as_cdt_sort_flags flags);
 
 bool list_param_parse(const cdt_payload *items, as_unpacker *pk, uint32_t *count_r);
+
+// cdt_idx
+void cdt_idx_set_alloc(rollback_alloc *alloc);
+void cdt_idx_clear();
+uint8_t *cdt_idx_alloc(uint32_t sz);
 
 // Debugging support
 void print_hex(const uint8_t *packed, uint32_t packed_sz, char *buf, uint32_t buf_sz);

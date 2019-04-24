@@ -204,6 +204,11 @@ typedef struct {
 	bool error;
 } list_order_index_sort_userdata;
 
+typedef struct {
+	offset_index *offidx;
+	uint8_t mem_temp[];
+} __attribute__ ((__packed__)) list_vla;
+
 #define define_packed_list_op(__name, __list_p) \
 	packed_list_op __name; \
 	packed_list_op_init(&__name, __list_p)
@@ -212,15 +217,10 @@ typedef struct {
 	(offset_index *)(list_is_ordered(__list_p) ? &(__list_p)->offidx : &(__list_p)->full_offidx)
 
 #define vla_list_full_offidx_if_invalid(__name, __list_p) \
-	union { \
-		offset_index *offidx; \
-		uint8_t mem_temp[sizeof(offset_index *) + (offset_index_is_valid(list_full_offidx_p(__list_p)) ? 0 : offset_index_size(list_full_offidx_p(__list_p)))]; \
-	} __name; \
-	__name.offidx = list_full_offidx_p(__list_p); \
-	if (! __name.offidx->_.ptr) { \
-		__name.offidx->_.ptr = __name.mem_temp + sizeof(offset_index *); \
-		offset_index_set_filled(__name.offidx, 1); \
-	}
+	uint8_t __name ## __vlatemp[sizeof(offset_index *) + offset_index_vla_sz(list_full_offidx_p(__list_p))]; \
+	list_vla *__name = (list_vla *)__name ## __vlatemp; \
+	__name->offidx = list_full_offidx_p(__list_p); \
+	offset_index_alloc_temp(list_full_offidx_p(__list_p), __name->mem_temp)
 
 #define define_packed_list_particle(__name, __particle, __ret) \
 	packed_list __name; \
@@ -1973,7 +1973,7 @@ packed_list_get_remove_by_value_interval(const packed_list *list, as_bin *b,
 			define_order_index2(rm_idx, list->ele_count, 1);
 
 			order_index_set(&rm_idx, 0, rm_mask[0]);
-			list_result_data_set_values_by_ordidx(result, &rm_idx, u.offidx,
+			list_result_data_set_values_by_ordidx(result, &rm_idx, u->offidx,
 					rm_count, rm_sz);
 		}
 		break;
@@ -2016,7 +2016,7 @@ packed_list_get_remove_by_rank_range(const packed_list *list, as_bin *b,
 
 	vla_list_full_offidx_if_invalid(full, list);
 
-	if (! list_full_offset_index_fill_all(full.offidx, false)) {
+	if (! list_full_offset_index_fill_all(full->offidx, false)) {
 		cf_warning(AS_PARTICLE, "packed_list_get_remove_by_rank_range() invalid packed list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -2276,7 +2276,7 @@ packed_list_get_remove_all_by_value_list(const packed_list *list, as_bin *b,
 	define_cdt_idx_mask(rm_mask, list->ele_count);
 	cond_vla_order_index2(rc, list->ele_count, items_count * 2, is_ret_rank);
 
-	if (! offset_index_find_items(full.offidx,
+	if (! offset_index_find_items(full->offidx,
 			CDT_FIND_ITEMS_IDXS_FOR_LIST_VALUE, &items_pk, &value_list_ordidx,
 			inverted, rm_mask, &rm_count, is_ret_rank ? &rc.ordidx : NULL)) {
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
@@ -2321,7 +2321,7 @@ packed_list_get_remove_all_by_value_list(const packed_list *list, as_bin *b,
 		as_bin_set_int(result->result, rm_count);
 		break;
 	case RESULT_TYPE_VALUE: {
-		list_result_data_set_values_by_mask(result, rm_mask, full.offidx,
+		list_result_data_set_values_by_mask(result, rm_mask, full->offidx,
 				rm_count, rm_sz);
 		break;
 	}
@@ -2710,7 +2710,7 @@ packed_list_add_items_ordered(const packed_list *list, as_bin *b,
 		}
 	}
 
-	if (! list_full_offset_index_fill_all(full.offidx, false)) {
+	if (! list_full_offset_index_fill_all(full->offidx, false)) {
 		cf_warning(AS_PARTICLE, "packed_list_add_items_ordered() invalid list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -2828,7 +2828,7 @@ packed_list_replace_ordered(const packed_list *list, as_bin *b,
 	uint8_t *ptr = list_setup_bin(b, alloc_buf, list->ext_flags,
 			op.new_content_sz, new_ele_count, (rank < index) ? rank : index,
 					&list->offidx, NULL);
-	uint32_t offset = offset_index_get_const(u.offidx, rank);
+	uint32_t offset = offset_index_get_const(u->offidx, rank);
 
 	if (rank <= index) {
 		uint32_t tail_sz = op.seg1_sz - offset;
@@ -3112,20 +3112,20 @@ list_set_flags(as_bin *b, rollback_alloc *alloc_buf, uint8_t set_flags,
 	else {
 		vla_list_full_offidx_if_invalid(full, &list);
 
-		if (! list_full_offset_index_fill_all(full.offidx, false)) {
+		if (! list_full_offset_index_fill_all(full->offidx, false)) {
 			cf_warning(AS_PARTICLE, "list_set_flags() invalid list");
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 
 		define_order_index(ordidx, list.ele_count);
 
-		if (! list_order_index_sort(&ordidx, full.offidx,
+		if (! list_order_index_sort(&ordidx, full->offidx,
 				AS_CDT_SORT_ASCENDING)) {
 			cf_warning(AS_PARTICLE, "list_set_flags() invalid list");
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 
-		list_order_index_pack(&ordidx, full.offidx, ptr, &new_offidx);
+		list_order_index_pack(&ordidx, full->offidx, ptr, &new_offidx);
 	}
 
 #ifdef LIST_DEBUG_VERIFY
@@ -3340,7 +3340,7 @@ list_sort(as_bin *b, rollback_alloc *alloc_buf, as_cdt_sort_flags sort_flags)
 
 	vla_list_full_offidx_if_invalid(full, &list);
 
-	if (! list_full_offset_index_fill_all(full.offidx, false)) {
+	if (! list_full_offset_index_fill_all(full->offidx, false)) {
 		cf_warning(AS_PARTICLE, "list_sort() invalid list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -3352,7 +3352,7 @@ list_sort(as_bin *b, rollback_alloc *alloc_buf, as_cdt_sort_flags sort_flags)
 			order_index_set(&ordidx, i, i);
 		}
 	}
-	else if (! list_order_index_sort(&ordidx, full.offidx, sort_flags)) {
+	else if (! list_order_index_sort(&ordidx, full->offidx, sort_flags)) {
 		cf_warning(AS_PARTICLE, "list_sort() invalid list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -3361,7 +3361,7 @@ list_sort(as_bin *b, rollback_alloc *alloc_buf, as_cdt_sort_flags sort_flags)
 	uint32_t rm_sz = 0;
 
 	if ((sort_flags & AS_CDT_SORT_DROP_DUPLICATES) != 0 &&
-			! order_index_sorted_mark_dup_eles(&ordidx, full.offidx,
+			! order_index_sorted_mark_dup_eles(&ordidx, full->offidx,
 					&rm_count, &rm_sz)) {
 		cf_warning(AS_PARTICLE, "list_sort() invalid list");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
@@ -3372,7 +3372,7 @@ list_sort(as_bin *b, rollback_alloc *alloc_buf, as_cdt_sort_flags sort_flags)
 			list.content_sz - rm_sz, list.ele_count - rm_count, 0, &list.offidx,
 			&new_offidx);
 
-	ptr = list_order_index_pack(&ordidx, full.offidx, ptr, &new_offidx);
+	ptr = list_order_index_pack(&ordidx, full->offidx, ptr, &new_offidx);
 	cf_assert(ptr == ((list_mem *)b->particle)->data + ((list_mem *)b->particle)->sz, AS_PARTICLE,
 			"list_sort() pack mismatch ptr %p data %p sz %u [%p]", ptr, ((list_mem *)b->particle)->data, ((list_mem *)b->particle)->sz, ((list_mem *)b->particle)->data + ((list_mem *)b->particle)->sz);
 
