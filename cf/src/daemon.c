@@ -53,9 +53,52 @@ static bool g_kept_caps = false;
 void
 cf_process_privsep(uid_t uid, gid_t gid)
 {
-	if (0 != getuid() || (uid == getuid() && gid == getgid())) {
+	uid_t curr_uid = geteuid();
+	gid_t curr_gid = getegid();
+
+	// In case people use the setuid/setgid bit on the asd executable.
+	CF_NEVER_FAILS(setuid(curr_uid));
+	CF_NEVER_FAILS(setgid(curr_gid));
+
+	// To see this log message, change NO_SINKS_LIMIT in fault.c.
+	cf_info(AS_AS, "user %d, group %d -> user %d, group %d", curr_uid, curr_gid,
+			uid, gid);
+
+	// Not started as root: may switch neither user nor group.
+
+	if (curr_uid != 0) {
+		if (uid != (uid_t)-1 && uid != curr_uid) {
+			cf_crash_nostack(CF_MISC,
+					"insufficient privileges to switch user to %d", uid);
+		}
+
+		if (gid != (gid_t)-1 && gid != curr_gid) {
+			cf_crash_nostack(CF_MISC,
+					"insufficient privileges to switch group to %d", gid);
+		}
+
 		return;
 	}
+
+	// Started as root and staying root: may switch group.
+
+	if (uid == (uid_t)-1 || uid == 0) {
+		if (gid == (gid_t)-1) {
+			return;
+		}
+
+		if (setgroups(0, (const gid_t *)0) < 0) {
+			cf_crash(CF_MISC, "setgroups: %s", cf_strerror(errno));
+		}
+
+		if (setgid(gid) < 0) {
+			cf_crash(CF_MISC, "setgid: %s", cf_strerror(errno));
+		}
+
+		return;
+	}
+
+	// Started as root and not staying root: switch user (group), keep caps.
 
 	uint32_t caps[2] = {
 		g_startup_caps[0] | g_runtime_caps[0],
@@ -65,24 +108,24 @@ cf_process_privsep(uid_t uid, gid_t gid)
 	// If required, make capabilities survive the UID/GID switch.
 
 	if (caps[0] != 0 || caps[1] != 0) {
-		if (0 > prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0)) {
+		if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) < 0) {
 			cf_crash(CF_MISC, "prctl: %s", cf_strerror(errno));
 		}
 
 		g_kept_caps = true;
 	}
 
-	// Drop all auxiliary groups.
-	if (0 > setgroups(0, (const gid_t *)0)) {
-		cf_crash(CF_MISC, "setgroups: %s", cf_strerror(errno));
+	if (gid != (gid_t)-1) {
+		if (setgroups(0, (const gid_t *)0) < 0) {
+			cf_crash(CF_MISC, "setgroups: %s", cf_strerror(errno));
+		}
+
+		if (setgid(gid) < 0) {
+			cf_crash(CF_MISC, "setgid: %s", cf_strerror(errno));
+		}
 	}
 
-	// Change privileges.
-	if (0 > setgid(gid)) {
-		cf_crash(CF_MISC, "setgid: %s", cf_strerror(errno));
-	}
-
-	if (0 > setuid(uid)) {
+	if (setuid(uid) < 0) {
 		cf_crash(CF_MISC, "setuid: %s", cf_strerror(errno));
 	}
 
@@ -101,7 +144,7 @@ cf_process_privsep(uid_t uid, gid_t gid)
 		{ .permitted = caps[1], .effective = caps[1] }
 	};
 
-	if (0 > capset(&cap_head, cap_data)) {
+	if (capset(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }
@@ -137,7 +180,7 @@ cf_process_drop_startup_caps(void)
 		{ .permitted = g_runtime_caps[1] }
 	};
 
-	if (0 > capset(&cap_head, cap_data)) {
+	if (capset(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }
@@ -152,7 +195,7 @@ cf_process_has_cap(int cap)
 
 	struct __user_cap_data_struct cap_data[2];
 
-	if (0 > capget(&cap_head, cap_data)) {
+	if (capget(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capget: %s", cf_strerror(errno));
 	}
 
@@ -175,13 +218,13 @@ cf_process_enable_cap(int cap)
 
 	struct __user_cap_data_struct cap_data[2];
 
-	if (0 > capget(&cap_head, cap_data)) {
+	if (capget(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capget: %s", cf_strerror(errno));
 	}
 
 	cap_data[cap >> 5].effective |= 1 << (cap & 0x1f);
 
-	if (0 > capset(&cap_head, cap_data)) {
+	if (capset(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }
@@ -200,13 +243,13 @@ cf_process_disable_cap(int cap)
 
 	struct __user_cap_data_struct cap_data[2];
 
-	if (0 > capget(&cap_head, cap_data)) {
+	if (capget(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capget: %s", cf_strerror(errno));
 	}
 
 	cap_data[cap >> 5].effective &= ~(1 << (cap & 0x1f));
 
-	if (0 > capset(&cap_head, cap_data)) {
+	if (capset(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }

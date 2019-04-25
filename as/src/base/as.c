@@ -273,16 +273,7 @@ main(int argc, char **argv)
 	// point must be set up so that they are accessible without root privileges.
 	// If not, the process will self-terminate with (hopefully!) a log message
 	// indicating which resource is not set up properly.
-	if (0 != c->uid && 0 == geteuid()) {
-		if (! new_style_daemon) {
-			// To see this log, change NO_SINKS_LIMIT in fault.c:
-			cf_info(AS_AS, "privsep to %d %d", c->uid, c->gid);
-			cf_process_privsep(c->uid, c->gid);
-		}
-		else {
-			cf_warning(AS_AS, "will not do privsep in new-style daemon mode");
-		}
-	}
+	cf_process_privsep(c->uid, c->gid);
 
 	//
 	// All resources such as files, devices, and shared memory must be created

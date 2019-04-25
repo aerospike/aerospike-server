@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <linux/capability.h>
 #include <sys/resource.h>
+#include <sys/types.h>
 
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/alloc.h"
@@ -143,6 +144,8 @@ cfg_set_defaults()
 	cfg_init_serv_spec(&c->tls_fabric);
 	cfg_init_serv_spec(&c->info);
 
+	c->uid = (uid_t)-1;
+	c->gid = (gid_t)-1;
 	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
 	c->n_proto_fd_max = 15000;
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
