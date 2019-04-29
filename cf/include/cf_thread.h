@@ -27,9 +27,12 @@
 //
 
 #include <pthread.h>
+#include <signal.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "dynbuf.h"
 
 
 //==========================================================
@@ -54,6 +57,8 @@ extern __thread pid_t g_sys_tid;
 void cf_thread_init(void);
 cf_tid cf_thread_create_detached(cf_thread_run_fn run, void* udata);
 cf_tid cf_thread_create_joinable(cf_thread_run_fn run, void* udata);
+int32_t cf_thread_traces(char* key, cf_dyn_buf* db);
+void cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx);
 
 static inline void
 cf_thread_join(cf_tid tid)

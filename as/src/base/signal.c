@@ -27,6 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "cf_thread.h"
 #include "fault.h"
 
 
@@ -230,6 +231,7 @@ as_signal_setup()
 	set_action(SIGSEGV, as_sig_handle_segv);
 	set_action(SIGTERM, as_sig_handle_term);
 	set_action(SIGUSR1, as_sig_handle_usr1);
+	set_action(SIGUSR2, cf_thread_traces_action);
 
 	// Block SIGPIPE signal when there is some error while writing to pipe. The
 	// write() call will return with a normal error which we can handle.

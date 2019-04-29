@@ -6371,6 +6371,7 @@ as_info_init()
 	as_info_set_dynamic("sets", info_get_sets, false);                                // Returns set statistics for all or a particular set.
 	as_info_set_dynamic("smd-info", info_get_smd_info, false);                        // Returns SMD state information.
 	as_info_set_dynamic("statistics", info_get_stats, true);                          // Returns system health and usage stats for this server.
+	as_info_set_dynamic("thread-traces", cf_thread_traces, false);                    // Returns backtraces for all threads.
 
 	// Tree-based names
 	as_info_set_tree("bins", info_get_tree_bins);           // Returns bin usage information and used bin names for all or a particular namespace.
