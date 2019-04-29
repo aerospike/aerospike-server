@@ -120,38 +120,18 @@ int compare_cb(void* buf, void* task);
 // as_priority_thread_pool public API.
 //
 
-bool
+void
 as_priority_thread_pool_init(as_priority_thread_pool* pool, uint32_t n_threads)
 {
-	cf_mutex_init(&pool->lock);
-
-	// Initialize queues.
 	pool->dispatch_queue = cf_queue_priority_create(sizeof(queue_task), true);
-	pool->complete_queue = cf_queue_create(sizeof(uint32_t), true);
-
-	// Start detached threads.
 	pool->n_threads = create_threads(pool, n_threads);
-
-	return pool->n_threads == n_threads;
 }
 
+// Callers handle thread safety - don't bother with pool lock.
 void
-as_priority_thread_pool_shutdown(as_priority_thread_pool* pool)
-{
-	shutdown_threads(pool, pool->n_threads);
-	cf_queue_priority_destroy(pool->dispatch_queue);
-	cf_queue_destroy(pool->complete_queue);
-	cf_mutex_destroy(&pool->lock);
-}
-
-bool
 as_priority_thread_pool_resize(as_priority_thread_pool* pool,
 		uint32_t n_threads)
 {
-	cf_mutex_lock(&pool->lock);
-
-	bool result = true;
-
 	if (n_threads != pool->n_threads) {
 		if (n_threads < pool->n_threads) {
 			// Shutdown excess threads.
@@ -162,23 +142,17 @@ as_priority_thread_pool_resize(as_priority_thread_pool* pool,
 			// Start new detached threads.
 			pool->n_threads += create_threads(pool,
 					n_threads - pool->n_threads);
-			result = pool->n_threads == n_threads;
 		}
 	}
-
-	cf_mutex_unlock(&pool->lock);
-
-	return result;
 }
 
-bool
+void
 as_priority_thread_pool_queue_task(as_priority_thread_pool* pool,
 		as_priority_thread_pool_task_fn task_fn, void* task, int priority)
 {
 	queue_task qtask = { task_fn, task };
 
-	return cf_queue_priority_push(pool->dispatch_queue, &qtask, priority) ==
-			CF_QUEUE_OK;
+	cf_queue_priority_push(pool->dispatch_queue, &qtask, priority);
 }
 
 bool
@@ -224,13 +198,6 @@ shutdown_threads(as_priority_thread_pool* pool, uint32_t count)
 		cf_queue_priority_push(pool->dispatch_queue, &task,
 				CF_QUEUE_PRIORITY_HIGH);
 	}
-
-	// Wait till threads finish.
-	uint32_t complete;
-
-	for (uint32_t i = 0; i < count; i++) {
-		cf_queue_pop(pool->complete_queue, &complete, CF_QUEUE_FOREVER);
-	}
 }
 
 void*
@@ -250,11 +217,6 @@ run_pool_thread(void* udata)
 		// Run task.
 		qtask.task_fn(qtask.task);
 	}
-
-	// Send thread completion event back to caller.
-	uint32_t complete = 1;
-
-	cf_queue_push(pool->complete_queue, &complete);
 
 	return NULL;
 }
@@ -491,9 +453,7 @@ as_job_manager_init(as_job_manager* mgr, uint32_t max_active, uint32_t max_done,
 	mgr->active_jobs = cf_queue_create(sizeof(as_job*), false);
 	mgr->finished_jobs = cf_queue_create(sizeof(as_job*), false);
 
-	if (! as_priority_thread_pool_init(&mgr->thread_pool, n_threads)) {
-		cf_crash(AS_JOB, "job manager failed thread pool init");
-	}
+	as_priority_thread_pool_init(&mgr->thread_pool, n_threads);
 }
 
 int

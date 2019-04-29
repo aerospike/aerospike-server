@@ -43,9 +43,7 @@ struct as_partition_reservation_s;
 //
 
 typedef struct as_priority_thread_pool_s {
-	cf_mutex			lock;
 	cf_queue_priority*	dispatch_queue;
-	cf_queue*			complete_queue;
 	uint32_t			n_threads;
 } as_priority_thread_pool;
 
@@ -56,10 +54,9 @@ typedef void (*as_priority_thread_pool_task_fn)(void* task);
 #define THREAD_POOL_PRIORITY_MEDIUM	CF_QUEUE_PRIORITY_MEDIUM
 #define THREAD_POOL_PRIORITY_HIGH	CF_QUEUE_PRIORITY_HIGH
 
-bool as_priority_thread_pool_init(as_priority_thread_pool* pool, uint32_t n_threads);
-void as_priority_thread_pool_shutdown(as_priority_thread_pool* pool);
-bool as_priority_thread_pool_resize(as_priority_thread_pool* pool, uint32_t n_threads);
-bool as_priority_thread_pool_queue_task(as_priority_thread_pool* pool, as_priority_thread_pool_task_fn task_fn, void* task, int priority);
+void as_priority_thread_pool_init(as_priority_thread_pool* pool, uint32_t n_threads);
+void as_priority_thread_pool_resize(as_priority_thread_pool* pool, uint32_t n_threads);
+void as_priority_thread_pool_queue_task(as_priority_thread_pool* pool, as_priority_thread_pool_task_fn task_fn, void* task, int priority);
 bool as_priority_thread_pool_remove_task(as_priority_thread_pool* pool, void* task);
 void as_priority_thread_pool_change_task_priority(as_priority_thread_pool* pool, void* task, int new_priority);
 
