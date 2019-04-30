@@ -83,6 +83,7 @@ char *cf_fault_context_strings[] = {
 		"drv_ssd",
 		"exchange",
 		"fabric",
+		"flat",
 		"geo",
 		"hb",
 		"health",

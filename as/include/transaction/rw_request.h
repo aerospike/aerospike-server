@@ -121,8 +121,8 @@ typedef struct rw_request_s {
 	bool				is_set_up; // TODO - redundant with timeout_cb
 
 	// Store pickled data, for use in replica write.
-	uint8_t*			pickled_buf;
-	size_t				pickled_sz;
+	uint8_t*			pickle;
+	size_t				pickle_sz;
 	const char*			set_name; // points directly into vmap - never free it
 	uint32_t			set_name_len;
 	uint8_t*			key;

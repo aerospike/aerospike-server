@@ -136,6 +136,11 @@ udf_storage_record_close(udf_record *urecord)
 		if (r_ref) {
 			if (urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) {
 				as_storage_record_write(rd);
+
+				// The urecord fields survive as_storage_record_close().
+				urecord->pickle = rd->pickle;
+				urecord->pickle_sz = rd->pickle_sz;
+
 				urecord->flag &= ~UDF_RECORD_FLAG_HAS_UPDATES; // TODO - necessary?
 			}
 
@@ -290,6 +295,9 @@ udf_record_init(udf_record *urecord, bool allow_updates)
 	for (uint32_t i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
 		urecord->updates[i].particle_buf = NULL;
 	}
+
+	urecord->pickle = NULL;
+	urecord->pickle_sz = 0;
 }
 
 /*

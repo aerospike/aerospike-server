@@ -47,6 +47,7 @@
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "base/xdr_serverside.h"
+#include "fabric/exchange.h" // TODO - old pickle - remove in "six months"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
@@ -697,6 +698,12 @@ write_master(rw_request* rw, as_transaction* tr)
 		m->record_ttl = TTL_NAMESPACE_DEFAULT;
 	}
 
+	// Will we need a pickle?
+	// TODO - old pickle - remove condition in "six months".
+	if (as_exchange_min_compatibility_id() >= 3) {
+		rd.keep_pickle = rw->n_dest_nodes != 0;
+	}
+
 	//------------------------------------------------------
 	// Split write_master() according to configuration to
 	// handle record bins.
@@ -1119,9 +1126,6 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		*is_delete = true;
 	}
 
-	// Pickle before writing - can't fail after. (Historic - now can't fail.)
-	pickle_all(rd, rw);
-
 	//------------------------------------------------------
 	// Write the record to storage.
 	//
@@ -1132,6 +1136,8 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
 		return -result;
 	}
+
+	pickle_all(rd, rw);
 
 	//------------------------------------------------------
 	// Cleanup - destroy relevant bins, can't unwind after.
@@ -1251,9 +1257,6 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 		*is_delete = true;
 	}
 
-	// Pickle before writing - can't fail after. (Historic - now can't fail.)
-	pickle_all(rd, rw);
-
 	//------------------------------------------------------
 	// Write the record to storage.
 	//
@@ -1269,6 +1272,8 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 		write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
 		return -result;
 	}
+
+	pickle_all(rd, rw);
 
 	//------------------------------------------------------
 	// Success - adjust sindex, looking at old and new bins.
@@ -1396,9 +1401,6 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		*is_delete = true;
 	}
 
-	// Pickle before writing - bins may disappear on as_storage_record_close().
-	pickle_all(rd, rw);
-
 	//------------------------------------------------------
 	// Write the record to storage.
 	//
@@ -1409,6 +1411,8 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		write_master_index_metadata_unwind(&old_metadata, r);
 		return -result;
 	}
+
+	pickle_all(rd, rw);
 
 	//------------------------------------------------------
 	// Final changes to record data in as_index.
@@ -1535,9 +1539,6 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 		*is_delete = true;
 	}
 
-	// Pickle before writing - bins may disappear on as_storage_record_close().
-	pickle_all(rd, rw);
-
 	//------------------------------------------------------
 	// Write the record to storage.
 	//
@@ -1548,6 +1549,8 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 		write_master_index_metadata_unwind(&old_metadata, r);
 		return -result;
 	}
+
+	pickle_all(rd, rw);
 
 	//------------------------------------------------------
 	// Success - adjust sindex, looking at old and new bins.

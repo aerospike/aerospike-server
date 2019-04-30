@@ -67,10 +67,10 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_NS_ID, M_FT_UINT32 },
 		{ RW_FIELD_GENERATION, M_FT_UINT32 },
 		{ RW_FIELD_DIGEST, M_FT_BUF },
-		{ RW_FIELD_UNUSED_6, M_FT_BUF },
+		{ RW_FIELD_RECORD, M_FT_BUF },
 		{ RW_FIELD_UNUSED_7, M_FT_BUF },
 		{ RW_FIELD_CLUSTER_KEY, M_FT_UINT64 },
-		{ RW_FIELD_RECORD, M_FT_BUF },
+		{ RW_FIELD_OLD_RECORD, M_FT_BUF },
 		{ RW_FIELD_TID, M_FT_UINT32 },
 		{ RW_FIELD_VOID_TIME, M_FT_UINT32 },
 		{ RW_FIELD_INFO, M_FT_UINT32 },
@@ -401,8 +401,11 @@ rw_msg_cb(cf_node id, msg* m, void* udata)
 	//--------------------------------------------
 	// Replica writes:
 	//
-	case RW_OP_WRITE:
+	case RW_OP_REPL_WRITE:
 		repl_write_handle_op(id, m);
+		break;
+	case RW_OP_WRITE:
+		repl_write_handle_old_op(id, m);
 		break;
 	case RW_OP_WRITE_ACK:
 		repl_write_handle_ack(id, m);

@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include "fault.h"
 #include "base/datamodel.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
 
 
@@ -93,7 +94,7 @@ ssd_cold_start_adjust_cenotaph(as_namespace* ns, bool block_has_bins,
 }
 
 void
-ssd_cold_start_transition_record(as_namespace* ns, const ssd_record* block,
+ssd_cold_start_transition_record(as_namespace* ns, const as_flat_record* flat,
 		as_record* r, bool is_create)
 {
 	// Nothing to do - relevant for enterprise version only.
@@ -160,61 +161,19 @@ as_storage_cfg_init_ssd(as_namespace* ns)
 }
 
 void
-ssd_encrypt(drv_ssd *ssd, uint64_t off, ssd_record *block)
+ssd_encrypt(drv_ssd *ssd, uint64_t off, as_flat_record *flat)
 {
 }
 
 void
-ssd_decrypt(drv_ssd *ssd, uint64_t off, ssd_record *block)
+ssd_decrypt(drv_ssd *ssd, uint64_t off, as_flat_record *flat)
 {
 }
 
 void
 ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks,
-		ssd_record *block)
+		as_flat_record *flat)
 {
-}
-
-uint8_t *
-ssd_flatten_compress(const as_storage_rd *rd, uint32_t *write_size)
-{
-	return NULL;
-}
-
-uint8_t *
-ssd_flatten_compression_meta(const ssd_comp_meta *cm, ssd_record *block,
-		uint8_t *buf)
-{
-	block->is_compressed = 0;
-
-	return buf;
-}
-
-bool
-ssd_decompress_startup(const ssd_comp_meta *cm, uint32_t max_orig_sz,
-		const uint8_t **read, const uint8_t **end)
-{
-	return true;
-}
-
-bool
-ssd_decompress_read(const ssd_comp_meta *cm, as_storage_rd *rd)
-{
-	return true;
-}
-
-const uint8_t *
-ssd_read_compression_meta(const ssd_record* block, const uint8_t *read,
-		const uint8_t* end, ssd_comp_meta *cm)
-{
-	if (block->is_compressed == 0) {
-		return read;
-	}
-
-	cf_warning_digest(AS_DRV_SSD, &block->keyd,
-			"community edition skipped compressed record ");
-
-	return NULL;
 }
 
 void

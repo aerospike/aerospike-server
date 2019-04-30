@@ -71,6 +71,11 @@ typedef struct udf_record_s {
 
 	// INTERNAL UTILITY
 	uint16_t			flag;
+
+	// PICKLE MADE BY STORAGE WRITE
+	// Note - must survive udf_record_close() to convey pickle to rw_request.
+	uint8_t				*pickle;
+	uint32_t			pickle_sz;
 } udf_record;
 
 #define UDF_RECORD_FLAG_ALLOW_UPDATES		0x0001   // Write/Updates Allowed

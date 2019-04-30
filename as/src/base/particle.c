@@ -541,6 +541,7 @@ as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_
 	return result;
 }
 
+// TODO - old pickle - remove in "six months".
 int
 as_bin_particle_alloc_from_pickled(as_bin *b, const uint8_t **p_pickled, const uint8_t *end)
 {
@@ -604,6 +605,7 @@ as_bin_particle_alloc_from_pickled(as_bin *b, const uint8_t **p_pickled, const u
 	return 0;
 }
 
+// TODO - old pickle - remove in "six months".
 int
 as_bin_particle_stack_from_pickled(as_bin *b, cf_ll_buf *particles_llb, const uint8_t **p_pickled, const uint8_t *end)
 {
@@ -662,30 +664,6 @@ as_bin_particle_stack_from_pickled(as_bin *b, cf_ll_buf *particles_llb, const ui
 	return 0;
 }
 
-int
-as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled)
-{
-	if (! as_bin_inuse(b)) {
-		// TODO - just crash?
-		cf_warning(AS_PARTICLE, "comparing to unused bin");
-		return -AS_ERR_UNKNOWN;
-	}
-
-	const uint8_t *pickled = (const uint8_t *)*p_pickled;
-	as_particle_type type = safe_particle_type(*pickled++);
-	const uint32_t *p32 = (const uint32_t *)pickled;
-	uint32_t value_size = cf_swap_from_be32(*p32++);
-	const uint8_t *value = (const uint8_t *)p32;
-
-	*p_pickled = (uint8_t *)value + value_size;
-
-	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_ERR_UNKNOWN;
-	}
-
-	return particle_vtable[as_bin_get_particle_type(b)]->compare_from_wire_fn(b->particle, type, value, value_size);
-}
-
 uint32_t
 as_bin_particle_client_value_size(const as_bin *b)
 {
@@ -721,6 +699,7 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 	return added_size;
 }
 
+// TODO - old pickle - remove in "six months".
 uint32_t
 as_bin_particle_pickled_size(const as_bin *b)
 {
@@ -730,6 +709,7 @@ as_bin_particle_pickled_size(const as_bin *b)
 	return 1 + 4 + particle_vtable[type]->wire_size_fn(b->particle);
 }
 
+// TODO - old pickle - remove in "six months".
 uint32_t
 as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled)
 {

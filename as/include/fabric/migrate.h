@@ -95,12 +95,12 @@ typedef enum {
 	MIG_FIELD_EMIG_ID,
 	MIG_FIELD_NAMESPACE,
 	MIG_FIELD_PARTITION,
-	MIG_FIELD_DIGEST,
-	MIG_FIELD_GENERATION,
+	MIG_FIELD_DIGEST, // TODO - old pickle - deprecate in "six months"
+	MIG_FIELD_GENERATION, // TODO - old pickle - deprecate in "six months"
 	MIG_FIELD_RECORD,
 	MIG_FIELD_CLUSTER_KEY,
 	MIG_FIELD_UNUSED_9,
-	MIG_FIELD_VOID_TIME,
+	MIG_FIELD_VOID_TIME, // TODO - old pickle - deprecate in "six months"
 	MIG_FIELD_UNUSED_11,
 	MIG_FIELD_UNUSED_12,
 	MIG_FIELD_INFO,
@@ -109,15 +109,15 @@ typedef enum {
 	MIG_FIELD_UNUSED_16,
 	MIG_FIELD_UNUSED_17,
 	MIG_FIELD_UNUSED_18,
-	MIG_FIELD_LAST_UPDATE_TIME,
+	MIG_FIELD_LAST_UPDATE_TIME, // TODO - old pickle - deprecate in "six months"
 	MIG_FIELD_FEATURES,
 	MIG_FIELD_UNUSED_21,
 	MIG_FIELD_META_RECORDS,
 	MIG_FIELD_META_SEQUENCE,
 	MIG_FIELD_META_SEQUENCE_FINAL,
 	MIG_FIELD_PARTITION_SIZE,
-	MIG_FIELD_SET_NAME,
-	MIG_FIELD_KEY,
+	MIG_FIELD_SET_NAME, // TODO - old pickle - deprecate in "six months"
+	MIG_FIELD_KEY, // TODO - old pickle - deprecate in "six months"
 	MIG_FIELD_UNUSED_28,
 	MIG_FIELD_EMIG_INSERT_ID,
 
@@ -125,13 +125,13 @@ typedef enum {
 } migrate_msg_fields;
 
 #define OPERATION_UNDEF 0
-#define OPERATION_INSERT 1
+#define OPERATION_OLD_INSERT 1 // TODO - old pickle - deprecate in "six months"
 #define OPERATION_INSERT_ACK 2
 #define OPERATION_START 3
 #define OPERATION_START_ACK_OK 4
 #define OPERATION_START_ACK_EAGAIN 5
 #define OPERATION_START_ACK_FAIL 6
-#define OPERATION_UNUSED_7 7 // deprecated
+#define OPERATION_INSERT 7
 #define OPERATION_DONE 8
 #define OPERATION_DONE_ACK 9
 #define OPERATION_UNUSED_10 10 // deprecated

@@ -59,6 +59,7 @@
 #include "base/udf_arglist.h"
 #include "base/udf_cask.h"
 #include "base/udf_record.h"
+#include "fabric/exchange.h" // TODO - old pickle - remove in "six months"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
@@ -924,8 +925,10 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 
 		update_metadata_in_index(tr, r);
 
-		// Pickle for replication.
-		pickle_all(rd, rw);
+		// TODO - old pickle - remove in "six months".
+		if (as_exchange_min_compatibility_id() < 3) {
+			pickle_all(rd, rw);
+		}
 
 		tr->generation = r->generation;
 		tr->void_time = r->void_time;
@@ -948,8 +951,21 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 		}
 	}
 
+	// Will we need a pickle?
+	// TODO - old pickle - remove condition in "six months".
+	if (as_exchange_min_compatibility_id() >= 3) {
+		rd->keep_pickle = rw->n_dest_nodes != 0;
+	}
+
 	// Close the record for all the cases.
 	udf_record_close(urecord);
+
+	// TODO - old pickle - remove condition in "six months".
+	if (as_exchange_min_compatibility_id() >= 3) {
+		// Yes, it's safe to use these urecord fields after udf_record_close().
+		rw->pickle = urecord->pickle;
+		rw->pickle_sz = urecord->pickle_sz;
+	}
 
 	// Write to XDR pipe.
 	if (urecord_op == UDF_OPTYPE_WRITE) {

@@ -225,6 +225,10 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->key = NULL;
 	rd->read_page_cache = false;
 	rd->is_durable_delete = false;
+	rd->keep_pickle = false;
+	rd->pickle_sz = 0;
+	rd->orig_pickle_sz = 0;
+	rd->pickle = NULL;
 
 	if (as_storage_record_create_table[ns->storage_type]) {
 		return as_storage_record_create_table[ns->storage_type](rd);
@@ -258,6 +262,10 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->key = NULL;
 	rd->read_page_cache = false;
 	rd->is_durable_delete = false;
+	rd->keep_pickle = false;
+	rd->pickle_sz = 0;
+	rd->orig_pickle_sz = 0;
+	rd->pickle = NULL;
 
 	if (as_storage_record_open_table[ns->storage_type]) {
 		return as_storage_record_open_table[ns->storage_type](rd);
@@ -784,6 +792,21 @@ as_storage_record_get_key(as_storage_rd *rd)
 	}
 
 	return false;
+}
+
+bool
+as_storage_record_get_pickle(as_storage_rd *rd)
+{
+	if (rd->ns->storage_data_in_memory) {
+		as_storage_record_get_set_name(rd);
+		as_storage_record_get_key(rd);
+		as_storage_rd_load_n_bins(rd);
+		as_storage_rd_load_bins(rd, NULL);
+		as_flat_pickle_record(rd);
+		return true;
+	}
+
+	return as_storage_record_get_pickle_ssd(rd);
 }
 
 void

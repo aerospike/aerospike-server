@@ -254,11 +254,19 @@ update_metadata_in_index(as_transaction* tr, as_record* r)
 void
 pickle_all(as_storage_rd* rd, rw_request* rw)
 {
+	if (rd->keep_pickle) {
+		rw->pickle = rd->pickle;
+		rw->pickle_sz = rd->pickle_sz;
+		return;
+	}
+	// else - new protocol with no destination node(s), or old protocol.
+
 	if (rw->n_dest_nodes == 0) {
 		return;
 	}
+	// else - old protocol with destination node(s).
 
-	rw->pickled_buf = as_record_pickle(rd, &rw->pickled_sz);
+	rw->pickle = as_record_pickle(rd, &rw->pickle_sz);
 
 	rw->set_name = rd->set_name;
 	rw->set_name_len = rd->set_name_len;

@@ -55,6 +55,7 @@
 #include "base/truncate.h"
 #include "fabric/hb.h"
 #include "fabric/partition.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
 
 
@@ -189,7 +190,6 @@ extern int as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op);
 extern int as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op);
 extern int as_bin_particle_alloc_from_pickled(as_bin *b, const uint8_t **p_pickled, const uint8_t *end);
 extern int as_bin_particle_stack_from_pickled(as_bin *b, cf_ll_buf *particles_llb, const uint8_t **p_pickled, const uint8_t *end);
-extern int as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled);
 extern uint32_t as_bin_particle_client_value_size(const as_bin *b);
 extern uint32_t as_bin_particle_to_client(const as_bin *b, as_msg_op *op);
 extern uint32_t as_bin_particle_pickled_size(const as_bin *b);
@@ -329,7 +329,7 @@ static inline bool
 as_bin_inuse_has(const as_storage_rd *rd)
 {
 	// In-use bins are at the beginning - only need to check the first bin.
-	return (rd->n_bins && as_bin_inuse(rd->bins));
+	return rd->n_bins != 0 && (rd->pickle != NULL || as_bin_inuse(rd->bins));
 }
 
 static inline uint16_t
@@ -497,8 +497,8 @@ typedef struct as_remote_record_s {
 	as_partition_reservation *rsv;
 	cf_digest *keyd;
 
-	uint8_t *record_buf;
-	size_t record_buf_sz;
+	uint8_t *pickle;
+	size_t pickle_sz;
 
 	uint32_t generation;
 	uint32_t void_time;
@@ -509,6 +509,12 @@ typedef struct as_remote_record_s {
 
 	const uint8_t *key;
 	size_t key_size;
+
+	bool is_old_pickle; // TODO - old pickle - remove in "six months"
+
+	uint16_t n_bins;
+	as_flat_comp_meta cm;
+	uint32_t meta_sz;
 
 	uint8_t repl_state; // relevant only for enterprise edition
 } as_remote_record;

@@ -168,6 +168,7 @@ typedef enum {
 	AS_DRV_SSD,
 	AS_EXCHANGE,
 	AS_FABRIC,
+	AS_FLAT,
 	AS_GEO,
 	AS_HB,
 	AS_HEALTH,

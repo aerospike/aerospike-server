@@ -46,6 +46,7 @@
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/xdr_serverside.h"
+#include "fabric/exchange.h" // TODO - old pickle - remove in "six months"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
@@ -495,11 +496,14 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		as_storage_record_close(&rd);
 	}
 
-	// Generate a binless pickle, but don't generate pickled rec-props - these
-	// are useless for a drop.
-	rw->pickled_sz = sizeof(uint16_t);
-	rw->pickled_buf = cf_malloc(rw->pickled_sz);
-	*(uint16_t*)rw->pickled_buf = 0;
+	// TODO - old pickle - remove in "six months".
+	if (as_exchange_min_compatibility_id() < 3 && rw->n_dest_nodes != 0) {
+		// Generate a binless pickle, but don't generate pickled rec-props -
+		// these are useless for a drop.
+		rw->pickle_sz = sizeof(uint16_t);
+		rw->pickle = cf_malloc(rw->pickle_sz);
+		*(uint16_t*)rw->pickle = 0;
+	}
 
 	// Save the set-ID for XDR.
 	uint16_t set_id = as_index_get_set_id(r);

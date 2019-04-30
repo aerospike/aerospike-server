@@ -42,8 +42,9 @@
  *
  * 1 - 4.5.1 - for SMD upgrade.
  * 2 - 4.5.2 - for AER-6035 (AP uniform-balance + quiesce bug).
+ * 3 - 4.?.? - for new pickle format
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 2
+#define AS_EXCHANGE_COMPATIBILITY_ID 3
 
 /**
  * Number of quantum intervals in orphan state after which client transactions

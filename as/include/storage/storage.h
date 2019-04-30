@@ -30,7 +30,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
@@ -40,11 +39,11 @@
 //
 
 struct as_bin_s;
+struct as_flat_record_s;
 struct as_index_s;
 struct as_namespace_s;
 struct as_partition_s;
 struct drv_ssd_s;
-struct ssd_record_s;
 
 
 //==========================================================
@@ -68,24 +67,6 @@ typedef enum {
 
 // Artificial limit on write-block-size, must be power of 2 and >= RBLOCK_SIZE.
 #define MIN_WRITE_BLOCK_SIZE (1024 * 1)
-
-typedef enum {
-	AS_COMPRESSION_NONE,
-	AS_COMPRESSION_LZ4,
-	AS_COMPRESSION_SNAPPY,
-	AS_COMPRESSION_ZSTD,
-
-	AS_COMPRESSION_LAST_PLUS_1
-} as_compression_method;
-
-#define NS_COMPRESSION() ({ \
-		as_compression_method meth = as_load_int32(&ns->storage_compression); \
-		(meth == AS_COMPRESSION_NONE ? "none" : \
-			(meth == AS_COMPRESSION_LZ4 ? "lz4" : \
-				(meth == AS_COMPRESSION_SNAPPY ? "snappy" : \
-					(meth == AS_COMPRESSION_ZSTD ? "zstd" : \
-						"illegal")))); \
-	})
 
 typedef enum {
 	AS_ENCRYPTION_AES_128,
@@ -115,13 +96,19 @@ typedef struct as_storage_rd_s {
 	bool					read_page_cache;
 	bool					is_durable_delete; // enterprise only
 
-	// Specific to storage type AS_STORAGE_ENGINE_SSD:
-	struct ssd_record_s		*block;
-	const uint8_t			*block_end;
-	const uint8_t			*block_bins;
-	uint16_t				block_n_bins;
-	uint8_t					*must_free_block;
+	// Only used by storage type AS_STORAGE_ENGINE_SSD:
+	struct as_flat_record_s	*flat;
+	const uint8_t			*flat_end;
+	const uint8_t			*flat_bins;
+	uint16_t				flat_n_bins;
+	uint8_t					*read_buf;
 	struct drv_ssd_s		*ssd;
+
+	// Flat storage format also used for pickled records sent via fabric:
+	bool					keep_pickle;
+	uint32_t				pickle_sz;
+	uint32_t				orig_pickle_sz;
+	uint8_t					*pickle;
 } as_storage_rd;
 
 typedef struct storage_device_stats_s {
@@ -202,6 +189,7 @@ void as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint64_t start_bytes)
 void as_storage_record_drop_from_mem_stats(as_storage_rd *rd);
 void as_storage_record_get_set_name(as_storage_rd *rd);
 bool as_storage_record_get_key(as_storage_rd *rd);
+bool as_storage_record_get_pickle(as_storage_rd *rd);
 
 // Called only at shutdown to flush all device write-queues.
 void as_storage_shutdown(uint32_t instance);
@@ -265,4 +253,5 @@ uint32_t as_storage_record_size_ssd(const struct as_index_s *r);
 
 // Called by "base class" functions but not via table.
 bool as_storage_record_get_key_ssd(as_storage_rd *rd);
+bool as_storage_record_get_pickle_ssd(as_storage_rd *rd);
 void as_storage_shutdown_ssd(struct as_namespace_s *ns);

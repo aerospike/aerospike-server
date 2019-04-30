@@ -101,8 +101,8 @@ rw_request_create(cf_digest* keyd)
 
 	rw->is_set_up = false;
 
-	rw->pickled_buf = NULL;
-	rw->pickled_sz = 0;
+	rw->pickle = NULL;
+	rw->pickle_sz = 0;
 	rw->set_name = NULL;
 	rw->set_name_len = 0;
 	rw->key = NULL;
@@ -154,8 +154,8 @@ rw_request_destroy(rw_request* rw)
 		cf_free(rw->msgp);
 	}
 
-	if (rw->pickled_buf) {
-		cf_free(rw->pickled_buf);
+	if (rw->pickle) {
+		cf_free(rw->pickle);
 	}
 
 	if (rw->key) {

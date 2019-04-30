@@ -77,7 +77,7 @@ typedef struct as_particle_vtable_s {
 	as_particle_incr_from_wire_fn			incr_from_wire_fn;
 	as_particle_size_from_wire_fn			size_from_wire_fn;
 	as_particle_from_wire_fn				from_wire_fn;
-	as_particle_compare_from_wire_fn		compare_from_wire_fn;
+	as_particle_compare_from_wire_fn		compare_from_wire_fn; // TODO - unused - keep this?
 	as_particle_wire_size_fn				wire_size_fn;
 	as_particle_to_wire_fn					to_wire_fn;
 

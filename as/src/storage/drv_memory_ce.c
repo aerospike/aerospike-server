@@ -22,6 +22,7 @@
 
 #include "base/datamodel.h"
 #include "fabric/partition.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
 
 
@@ -35,6 +36,11 @@ as_storage_start_tomb_raider_memory(as_namespace* ns)
 int
 as_storage_record_write_memory(as_storage_rd* rd)
 {
+	// Make a pickle if needed. (No pickle needed for drop.)
+	if (as_bin_inuse_has(rd) && rd->keep_pickle) {
+		as_flat_pickle_record(rd);
+	}
+
 	return 0;
 }
 
