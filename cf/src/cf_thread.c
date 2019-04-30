@@ -26,6 +26,7 @@
 
 #include "cf_thread.h"
 
+#include <errno.h>
 #include <execinfo.h>
 #include <pthread.h>
 #include <signal.h>
@@ -83,8 +84,6 @@ static void deregister_thread_info(void);
 static void* shim_fn(void* udata);
 static int32_t traces_cb(cf_ll_element* ele, void* udata);
 
-void* _start(void* udata); // to register main thread - provided by linker
-
 
 //==========================================================
 // Public API.
@@ -99,9 +98,6 @@ cf_thread_init(void)
 	pthread_attr_setdetachstate(&g_attr_detached, PTHREAD_CREATE_DETACHED);
 
 	cf_ll_init(&g_thread_list, NULL, true);
-
-	// For completeness, register main thread.
-	register_thread_info(make_thread_info(_start, NULL));
 }
 
 cf_tid
@@ -248,7 +244,12 @@ traces_cb(cf_ll_element* ele, void* udata)
 
 	thread_info* info = (thread_info*)ele;
 
-	syscall(SYS_tgkill, getpid(), info->sys_tid, SIGUSR2);
+	if (syscall(SYS_tgkill, getpid(), info->sys_tid, SIGUSR2) < 0) {
+		cf_warning(CF_MISC, "failed to signal thread %d: %d (%s)",
+				info->sys_tid, errno, cf_strerror(errno));
+		return 0;
+	}
+
 	g_traces_pending++;
 
 	return 0;
