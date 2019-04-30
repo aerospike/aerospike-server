@@ -147,7 +147,9 @@ cf_thread_traces(char* key, cf_dyn_buf* db)
 
 	cf_ll_reduce(&g_thread_list, true, traces_cb, NULL);
 
-	for (uint32_t i = 0; i < 100; i++) {
+	// Quit after 15 seconds - may not get all done if a thread exits after
+	// we signal it but before its action is handled.
+	for (uint32_t i = 0; i < 1500; i++) {
 		if (g_traces_done == g_traces_pending) {
 			break;
 		}
@@ -180,6 +182,8 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 	char** syms = backtrace_symbols(addrs, n_addrs);
 
 	if (syms == NULL) {
+		cf_dyn_buf_append_format(g_trace_db, "failed;");
+		g_traces_done++;
 		cf_mutex_unlock(&g_trace_lock);
 		return;
 	}
@@ -188,9 +192,9 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 		cf_dyn_buf_append_format(g_trace_db, "%s;", syms[i]);
 	}
 
-	cf_mutex_unlock(&g_trace_lock);
-
 	g_traces_done++;
+
+	cf_mutex_unlock(&g_trace_lock);
 }
 
 
