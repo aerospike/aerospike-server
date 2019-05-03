@@ -101,6 +101,7 @@ rw_request_create(cf_digest* keyd)
 
 	rw->is_set_up = false;
 
+	rw->is_old_pickle = false;
 	rw->pickle = NULL;
 	rw->pickle_sz = 0;
 	rw->set_name = NULL;

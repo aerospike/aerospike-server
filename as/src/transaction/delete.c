@@ -500,6 +500,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 	if (as_exchange_min_compatibility_id() < 3 && rw->n_dest_nodes != 0) {
 		// Generate a binless pickle, but don't generate pickled rec-props -
 		// these are useless for a drop.
+		rw->is_old_pickle = true;
 		rw->pickle_sz = sizeof(uint16_t);
 		rw->pickle = cf_malloc(rw->pickle_sz);
 		*(uint16_t*)rw->pickle = 0;

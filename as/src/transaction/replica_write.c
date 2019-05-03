@@ -84,7 +84,7 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	rw->dest_msg = as_fabric_msg_get(M_TYPE_RW);
 
 	// TODO - old pickle - remove in "six months".
-	if (as_exchange_min_compatibility_id() < 3) {
+	if (rw->is_old_pickle) {
 		old_make_message(rw, tr);
 		return;
 	}

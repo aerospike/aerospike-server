@@ -266,6 +266,9 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 	}
 	// else - old protocol with destination node(s).
 
+	// TODO - old pickle - remove in "six months".
+
+	rw->is_old_pickle = true;
 	rw->pickle = as_record_pickle(rd, &rw->pickle_sz);
 
 	rw->set_name = rd->set_name;
