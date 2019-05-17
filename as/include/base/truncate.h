@@ -30,8 +30,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h"
-
 #include "cf_mutex.h"
 #include "shash.h"
 
@@ -48,6 +46,8 @@ struct as_namespace_s;
 // Typedefs & constants.
 //
 
+#define MAX_TRUNCATE_THREADS 128
+
 typedef enum {
 	TRUNCATE_IDLE,
 	TRUNCATE_RUNNING,
@@ -59,9 +59,9 @@ typedef struct as_truncate_s {
 	cf_shash* startup_set_hash; // relevant only for enterprise edition
 	truncate_state state;
 	cf_mutex state_lock;
-	cf_atomic32 n_threads_running;
-	cf_atomic32 pid;
-	cf_atomic64 n_records_this_run;
+	uint32_t n_threads_running;
+	uint32_t pid;
+	uint64_t n_records_this_run;
 	uint64_t n_records;
 } as_truncate;
 

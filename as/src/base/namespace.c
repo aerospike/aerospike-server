@@ -164,6 +164,7 @@ as_namespace_create(char *name)
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
 	ns->transaction_pending_limit = 20;
+	ns->n_truncate_threads = 4;
 	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
 

@@ -35,7 +35,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "citrusleaf/cf_atomic.h"
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
@@ -58,8 +58,6 @@ typedef struct truncate_reduce_cb_info_s {
 	as_index_tree* tree;
 	int64_t n_deleted;
 } truncate_reduce_cb_info;
-
-static const uint32_t NUM_TRUNCATE_THREADS = 4;
 
 // Includes 1 for delimiter and 1 for null-terminator.
 #define TRUNCATE_KEY_SIZE (AS_ID_NAMESPACE_SZ + AS_SET_NAME_MAX_SIZE)
@@ -334,7 +332,6 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 
 	switch (ns->truncate.state) {
 	case TRUNCATE_IDLE:
-		cf_info(AS_TRUNCATE, "{%s} starting truncate", ns->name);
 		truncate_all(ns);
 		break;
 	case TRUNCATE_RUNNING:
@@ -384,13 +381,19 @@ truncate_all(as_namespace* ns)
 	// TODO - skipping sindex deletion shortcut - can't do that if we want to
 	// keep writing through set truncates. Is this ok?
 
+	uint32_t n_threads = as_load_uint32(&ns->n_truncate_threads);
+
+	cf_info(AS_TRUNCATE, "{%s} %s truncate on %u threads", ns->name,
+			ns->truncate.state == TRUNCATE_IDLE ? "starting" : "restarting",
+			n_threads);
+
 	ns->truncate.state = TRUNCATE_RUNNING;
-	cf_atomic32_set(&ns->truncate.n_threads_running, NUM_TRUNCATE_THREADS);
-	cf_atomic32_set(&ns->truncate.pid, -1);
+	as_store_uint32(&ns->truncate.n_threads_running, n_threads);
+	as_store_uint32(&ns->truncate.pid, 0);
 
-	cf_atomic64_set(&ns->truncate.n_records_this_run, 0);
+	as_store_uint64(&ns->truncate.n_records_this_run, 0);
 
-	for (uint32_t i = 0; i < NUM_TRUNCATE_THREADS; i++) {
+	for (uint32_t i = 0; i < n_threads; i++) {
 		cf_thread_create_detached(run_truncate, (void*)ns);
 	}
 }
@@ -401,8 +404,7 @@ run_truncate(void* arg)
 	as_namespace* ns = (as_namespace*)arg;
 	uint32_t pid;
 
-	while ((pid = (uint32_t)cf_atomic32_incr(&ns->truncate.pid)) <
-			AS_PARTITIONS) {
+	while ((pid = as_faa_uint32(&ns->truncate.pid, 1)) < AS_PARTITIONS) {
 		as_partition_reservation rsv;
 		as_partition_reserve(ns, pid, &rsv);
 
@@ -411,7 +413,7 @@ run_truncate(void* arg)
 		as_index_reduce(rsv.tree, truncate_reduce_cb, (void*)&cb_info);
 		as_partition_release(&rsv);
 
-		cf_atomic64_add(&ns->truncate.n_records_this_run, cb_info.n_deleted);
+		as_add_uint64(&ns->truncate.n_records_this_run, cb_info.n_deleted);
 	}
 
 	truncate_finish(ns);
@@ -422,7 +424,7 @@ run_truncate(void* arg)
 static void
 truncate_finish(as_namespace* ns)
 {
-	if (cf_atomic32_decr(&ns->truncate.n_threads_running) == 0) {
+	if (as_aaf_uint32(&ns->truncate.n_threads_running, -1) == 0) {
 		cf_mutex_lock(&ns->truncate.state_lock);
 
 		ns->truncate.n_records += ns->truncate.n_records_this_run;
@@ -436,7 +438,6 @@ truncate_finish(as_namespace* ns)
 			ns->truncate.state = TRUNCATE_IDLE;
 			break;
 		case TRUNCATE_RESTART:
-			cf_info(AS_TRUNCATE, "{%s} restarting truncate", ns->name);
 			truncate_all(ns);
 			break;
 		case TRUNCATE_IDLE:

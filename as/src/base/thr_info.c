@@ -1936,6 +1936,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "tomb-raider-eligible-age", ns->tomb_raider_eligible_age);
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
 	info_append_uint32(db, "transaction-pending-limit", ns->transaction_pending_limit);
+	info_append_uint32(db, "truncate-threads", ns->n_truncate_threads);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
 	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
@@ -2923,6 +2924,17 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of transaction-pending-limit of ns %s from %d to %d ", ns->name, ns->transaction_pending_limit, val);
 			ns->transaction_pending_limit = val;
+		}
+		else if (0 == as_info_parameter_get(params, "truncate-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			if (val > MAX_TRUNCATE_THREADS || val < 1) {
+				cf_warning(AS_INFO, "truncate-threads %d must be >= 1 and <= %u", val, MAX_TRUNCATE_THREADS);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of truncate-threads of ns %s from %u to %d ", ns->name, ns->n_truncate_threads, val);
+			ns->n_truncate_threads = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "rack-id", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {

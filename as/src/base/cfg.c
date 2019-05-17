@@ -70,6 +70,7 @@
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction_policy.h"
+#include "base/truncate.h"
 #include "base/xdr_config.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
@@ -572,6 +573,7 @@ typedef enum {
 	CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE,
 	CASE_NAMESPACE_TOMB_RAIDER_PERIOD,
 	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
+	CASE_NAMESPACE_TRUNCATE_THREADS,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
 	// Obsoleted:
 	CASE_NAMESPACE_DISABLE_NSUP,
@@ -1144,6 +1146,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "tomb-raider-eligible-age",		CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE },
 		{ "tomb-raider-period",				CASE_NAMESPACE_TOMB_RAIDER_PERIOD },
 		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
+		{ "truncate-threads",				CASE_NAMESPACE_TRUNCATE_THREADS },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
 		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
 		{ "allow-versions",					CASE_NAMESPACE_ALLOW_VERSIONS },
@@ -3259,6 +3262,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT:
 				ns->transaction_pending_limit = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_TRUNCATE_THREADS:
+				ns->n_truncate_threads = cfg_u32(&line, 1, MAX_TRUNCATE_THREADS);
 				break;
 			case CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_WRITE_COMMIT_OPTS, NUM_NAMESPACE_WRITE_COMMIT_OPTS)) {
