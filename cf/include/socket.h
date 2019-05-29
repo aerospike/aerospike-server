@@ -85,6 +85,20 @@ typedef struct cf_ip_addr_s {
 	};
 } cf_ip_addr;
 
+typedef struct cf_ip_net_s {
+	sa_family_t family;
+
+	union {
+		struct in_addr v4;
+		struct in6_addr v6;
+	} addr;
+
+	union {
+		struct in_addr v4;
+		struct in6_addr v6;
+	} mask;
+} cf_ip_net;
+
 typedef uint16_t cf_ip_port;
 
 typedef struct cf_addr_list_s {
@@ -203,6 +217,10 @@ CF_MUST_CHECK bool cf_ip_addr_is_local(const cf_ip_addr *addr);
 
 void cf_ip_addr_set_any(cf_ip_addr *addr);
 CF_MUST_CHECK bool cf_ip_addr_is_any(const cf_ip_addr *addr);
+
+CF_MUST_CHECK int32_t cf_ip_net_from_string(const char *string, cf_ip_net *net);
+CF_MUST_CHECK int32_t cf_ip_net_to_string(const cf_ip_net *net, char *string, size_t size);
+CF_MUST_CHECK bool cf_ip_net_contains(const cf_ip_net *net, const cf_ip_addr *addr);
 
 CF_MUST_CHECK int32_t cf_ip_port_from_string(const char *string, cf_ip_port *port);
 CF_MUST_CHECK int32_t cf_ip_port_to_string(cf_ip_port port, char *string, size_t size);

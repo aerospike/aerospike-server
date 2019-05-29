@@ -35,6 +35,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "bits.h"
 #include "dns.h"
 #include "fault.h"
 
@@ -191,6 +192,93 @@ bool
 cf_ip_addr_is_any(const cf_ip_addr *addr)
 {
 	return addr->v4.s_addr == 0;
+}
+
+int32_t
+cf_ip_net_from_string(const char *string, cf_ip_net *net)
+{
+	size_t len = strlen(string);
+	char net_string[len + 1];
+
+	strcpy(net_string, string);
+
+	char *slash = strchr(net_string, '/');
+
+	if (slash != NULL) {
+		*slash = 0;
+	}
+
+	if (inet_pton(AF_INET, net_string, &net->addr.v4) != 1) {
+		cf_warning(CF_SOCKET, "Invalid IP address %s", net_string);
+		return -1;
+	}
+
+	net->family = AF_INET;
+
+	uint32_t prefix_bits;
+
+	if (slash == NULL) {
+		prefix_bits = 32;
+	}
+	else {
+		char *end;
+		prefix_bits = strtoul(slash + 1, &end, 10);
+
+		if (*end != 0 || prefix_bits > 32) {
+			cf_warning(CF_SOCKET, "Invalid network address %s", string);
+			return -1;
+		}
+	}
+
+	uint8_t *mask = (uint8_t *)&net->mask;
+
+	memset(mask, 0, sizeof(cf_ip_addr));
+
+	while (prefix_bits >= 8) {
+		*mask++ = 0xff;
+		prefix_bits -= 8;
+	}
+
+	*mask = (uint8_t)(0xff << (8 - prefix_bits));
+
+	if ((net->addr.v4.s_addr & ~net->mask.v4.s_addr) != 0) {
+		cf_warning(CF_SOCKET, "Invalid network address %s", string);
+		return -1;
+	}
+
+	return 0;
+}
+
+int32_t
+cf_ip_net_to_string(const cf_ip_net *net, char *string, size_t size)
+{
+	if (inet_ntop(AF_INET, &net->addr.v4, string, size) == NULL) {
+		cf_warning(CF_SOCKET, "Output buffer overflow");
+		return -1;
+	}
+
+	size_t len = strlen(string);
+	uint32_t prefix_bits = cf_bit_count64(net->mask.v4.s_addr);
+
+	if (prefix_bits < 32) {
+		size_t room = size - len;
+		int added = snprintf(string + len, room, "/%u", prefix_bits);
+
+		if (added >= room) {
+			cf_warning(CF_SOCKET, "Output buffer overflow");
+			return -1;
+		}
+
+		len += added;
+	}
+
+	return (int32_t)len;
+}
+
+bool
+cf_ip_net_contains(const cf_ip_net *net, const cf_ip_addr *addr)
+{
+	return (addr->v4.s_addr & net->mask.v4.s_addr) == net->addr.v4.s_addr;
 }
 
 int32_t
