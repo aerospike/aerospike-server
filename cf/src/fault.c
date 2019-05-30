@@ -980,6 +980,10 @@ cf_fault_sink_logroll(void)
 	for (int i = 0; i < cf_fault_sinks_inuse; i++) {
 		cf_fault_sink *s = &cf_fault_sinks[i];
 		if ((0 != strncmp(s->path, "stderr", 6)) && (s->fd > 2)) {
+			static cf_mutex lock = CF_MUTEX_INIT;
+
+			cf_mutex_lock(&lock); // so concurrent SIGHUPs can't double-close
+
 			int old_fd = s->fd;
 
 			// Note - we use O_TRUNC, so we assume the file has been
@@ -988,6 +992,8 @@ cf_fault_sink_logroll(void)
 
 			usleep(1000); // threads may be interrupted while writing to old fd
 			close(old_fd);
+
+			cf_mutex_unlock(&lock);
 		}
 	}
 }
