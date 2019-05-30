@@ -790,6 +790,7 @@ struct as_namespace_s {
 	uint32_t		storage_defrag_sleep;
 	int				storage_defrag_startup_minimum;
 	bool			storage_direct_files;
+	bool			storage_disable_odsync;
 	bool			storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
 	as_encryption_method storage_encryption; // relevant only for enterprise edition
 	char*			storage_encryption_key_file; // relevant only for enterprise edition

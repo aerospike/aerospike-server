@@ -3429,7 +3429,10 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 		drv_ssd *ssd = &ssds->ssds[i];
 
 		ssd->name = ns->storage_devices[i];
-		ssd->open_flag = O_RDWR | O_DIRECT | O_DSYNC;
+
+		// Note - can't configure commit-to-device and disable-odsync.
+		ssd->open_flag = O_RDWR | O_DIRECT |
+				(ns->storage_disable_odsync ? 0 : O_DSYNC);
 
 		int fd = open(ssd->name, ssd->open_flag, S_IRUSR | S_IWUSR);
 
@@ -3551,9 +3554,13 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 			}
 		}
 
+		// Note - can't configure commit-to-device and disable-odsync.
+		uint32_t direct_flags =
+				O_DIRECT | (ns->storage_disable_odsync ? 0 : O_DSYNC);
+
 		ssd->open_flag = O_RDWR |
 				(ns->storage_commit_to_device || ns->storage_direct_files ?
-						O_DIRECT | O_DSYNC : 0);
+						direct_flags : 0);
 
 		// Validate that file can be opened, create it if it doesn't exist.
 		int fd = open(ssd->name, ssd->open_flag | O_CREAT, S_IRUSR | S_IWUSR);
