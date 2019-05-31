@@ -422,10 +422,10 @@ static void
 expire(as_namespace* ns)
 {
 	uint64_t start_ms = cf_getms();
-
-	cf_info(AS_NSUP, "{%s} nsup-start: expire", ns->name);
-
 	uint32_t n_threads = as_load_uint32(&ns->n_nsup_threads);
+
+	cf_info(AS_NSUP, "{%s} nsup-start: expire-threads %u", ns->name, n_threads);
+
 	cf_tid tids[n_threads];
 
 	expire_overall_info overall = {
@@ -511,14 +511,16 @@ evict(as_namespace* ns)
 
 	uint64_t start_ms = cf_getms();
 	uint32_t now = as_record_void_time_get();
+	uint32_t n_threads = as_load_uint32(&ns->n_nsup_threads);
 
 	// For stats, show eviction depth WRT local time. Note - unlikely to be
 	// negative, but theoretically possible - cutoff could have come from
 	// another node, and/or taken very long to calculate/transmit.
 	ns->evict_ttl = (int32_t)(smd_evict_void_time - now);
 
-	cf_info(AS_NSUP, "{%s} nsup-start: evict-ttl %d evict-void-time (%u,%u)",
-			ns->name, ns->evict_ttl, evict_void_time, smd_evict_void_time);
+	cf_info(AS_NSUP, "{%s} nsup-start: evict-threads %u evict-ttl %d evict-void-time (%u,%u)",
+			ns->name, n_threads, ns->evict_ttl, evict_void_time,
+			smd_evict_void_time);
 
 	evict_void_time = smd_evict_void_time;
 
@@ -532,7 +534,6 @@ evict(as_namespace* ns)
 	bool sets_not_evicting[AS_SET_MAX_COUNT + 1] = { false };
 	init_sets_not_evicting(ns, sets_not_evicting);
 
-	uint32_t n_threads = as_load_uint32(&ns->n_nsup_threads);
 	cf_tid tids[n_threads];
 
 	evict_overall_info overall = {
