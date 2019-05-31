@@ -3737,8 +3737,8 @@ as_sindex_sbin_from_sindex(as_sindex * si, const as_bin *b, as_sindex_bin * sbin
 				valsz = as_bin_particle_string_ptr(b, &bin_val);
 
 				if (valsz > AS_SINDEX_MAX_STRING_KSIZE) {
-					cf_warning( AS_SINDEX, "sindex key size out of bounds %d ", valsz);
-					cf_warning(AS_SINDEX, "Sindex on bin %s fails. Value length %u too long.", imd->bname, valsz);
+					cf_ticker_warning(AS_SINDEX, "failed sindex on bin %s - string longer than %u",
+							imd->bname, AS_SINDEX_MAX_STRING_KSIZE);
 				}
 				else {
 					cf_digest buf_dig;

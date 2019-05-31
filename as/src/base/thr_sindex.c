@@ -463,8 +463,6 @@ as_sindex__gc_fn(void *udata)
 		continue;
 	}
 
-	cf_debug(AS_SINDEX, "Secondary index gc thread started !!");
-
 	uint64_t last_time = cf_get_seconds();
 
 	while (true) {
@@ -487,7 +485,7 @@ as_sindex__gc_fn(void *udata)
 				continue;
 			}
 
-			cf_info(AS_NSUP, "{%s} sindex-gc start", ns->name);
+			cf_info(AS_SINDEX, "{%s} sindex-gc-start", ns->name);
 
 			uint64_t start_time_ms = cf_getms();
 
@@ -516,9 +514,9 @@ as_sindex__gc_fn(void *udata)
 				}
 			}
 
-			cf_info(AS_NSUP, "{%s} sindex-gc: Processed: %ld, found:%ld, deleted: %ld: Total time: %ld ms",
-					ns->name, ctx.stat.processed, ctx.stat.found, ctx.stat.deleted,
-					cf_getms() - start_time_ms);
+			cf_info(AS_SINDEX, "{%s} sindex-gc-done: processed %lu found %lu deleted %lu total-ms %lu",
+					ns->name, ctx.stat.processed, ctx.stat.found,
+					ctx.stat.deleted, cf_getms() - start_time_ms);
 
 			update_gc_stat(&ctx.stat);
 		}
