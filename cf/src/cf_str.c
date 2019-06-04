@@ -253,7 +253,8 @@ int cf_str_atoi_seconds(char *s, uint32_t *value)
 	return(0);
 }
 
-int cf_str_atoi_x64(const char *s, uint64_t *value)
+int
+cf_strtoul_x64(const char *s, uint64_t *value)
 {
 	if (! ((*s >= '0' && *s <= '9') ||
 			(*s >= 'a' && *s <= 'f') ||

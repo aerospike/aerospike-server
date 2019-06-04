@@ -1919,7 +1919,7 @@ cfg_x64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
 
 	uint64_t value;
 
-	if (0 != cf_str_atoi_x64(val_tok, &value)) {
+	if (0 != cf_strtoul_x64(val_tok, &value)) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be a 64-bit hex number, not %s",
 				p_line->num, p_line->name_tok, val_tok);
 	}
