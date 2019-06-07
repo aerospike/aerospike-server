@@ -26,7 +26,7 @@ build:
     environment:
       EEREPO:
     script:
-      - make
+      - make -j
       - make $PKG
       - make tar
       - make source
@@ -38,7 +38,7 @@ build:
     environment:
       EEREPO: /work/source/$EEREPO
     script:
-      - make +ee
+      - make -j +ee
       - make $PKG+ee
       - make source+ee
     artifact:
