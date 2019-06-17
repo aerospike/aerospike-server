@@ -70,6 +70,7 @@ void send_read_response(as_transaction* tr, as_msg_op** ops,
 void read_timeout_cb(rw_request* rw);
 
 transaction_status read_local(as_transaction* tr);
+bool check_set_name(const as_transaction* tr, const as_record* r);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code);
 
@@ -483,6 +484,12 @@ read_local(as_transaction* tr)
 
 	as_record* r = r_ref.r;
 
+	// Make sure the message set name (if it's there) is correct.
+	if (! check_set_name(tr, r)) {
+		read_local_done(tr, &r_ref, NULL, AS_ERR_PARAMETER);
+		return TRANS_DONE_ERROR;
+	}
+
 	// Check if it's an expired or truncated record.
 	if (as_record_is_doomed(r, ns)) {
 		read_local_done(tr, &r_ref, NULL, AS_ERR_NOT_FOUND);
@@ -656,6 +663,38 @@ read_local(as_transaction* tr)
 	}
 
 	return TRANS_DONE_SUCCESS;
+}
+
+
+bool
+check_set_name(const as_transaction* tr, const as_record* r)
+{
+	if (! as_transaction_has_set(tr)) {
+		return true; // allowed to not send set name in read message
+	}
+
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET);
+	uint32_t msg_set_name_len = as_msg_field_get_value_sz(f);
+
+	if (msg_set_name_len == 0) {
+		return true; // treat the same as no set name
+	}
+
+	as_namespace* ns = tr->rsv.ns;
+	const char* set_name = as_index_get_set_name(r, ns);
+
+	if (set_name == NULL ||
+			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
+			set_name[msg_set_name_len] != 0) {
+		CF_ZSTR_DEFINE(msg_set_name, AS_SET_NAME_MAX_SIZE + 4, f->data,
+				msg_set_name_len);
+
+		cf_warning(AS_RW, "{%s} read_local: set name mismatch %s %s", ns->name,
+				set_name == NULL ? "(null)" : set_name, msg_set_name);
+		return false;
+	}
+
+	return true;
 }
 
 
