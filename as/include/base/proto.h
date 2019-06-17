@@ -341,6 +341,8 @@ typedef struct as_msg_op_s {
 #define AS_MSG_OP_APPEND        9 // append to strings and blobs
 #define AS_MSG_OP_PREPEND       10 // prepend to strings and blobs
 #define AS_MSG_OP_TOUCH         11 // will increment the generation
+#define AS_MSG_OP_BITS_READ     12 // blob bits top-level op
+#define AS_MSG_OP_BITS_MODIFY   13 // blob bits top-level op
 
 //------------------------------------------------
 // UDF ops.
@@ -353,6 +355,60 @@ typedef enum {
 	AS_UDF_OP_BACKGROUND    = 2,
 	AS_UDF_OP_FOREGROUND    = 3 // not supported yet
 } as_udf_op;
+
+//------------------------------------------------
+// Blob bitwise ops.
+//
+
+typedef enum {
+	AS_BITS_MODIFY_OP_START = 0,
+
+	AS_BITS_OP_RESIZE       = AS_BITS_MODIFY_OP_START,
+	AS_BITS_OP_INSERT       = 1,
+	AS_BITS_OP_REMOVE       = 2,
+
+	AS_BITS_OP_SET          = 3,
+	AS_BITS_OP_OR           = 4,
+	AS_BITS_OP_XOR          = 5,
+	AS_BITS_OP_AND          = 6,
+	AS_BITS_OP_NOT          = 7,
+	AS_BITS_OP_LSHIFT       = 8,
+	AS_BITS_OP_RSHIFT       = 9,
+	AS_BITS_OP_ADD          = 10,
+	AS_BITS_OP_SUBTRACT     = 11,
+	AS_BITS_OP_SET_INT      = 12,
+
+	AS_BITS_MODIFY_OP_END,
+
+	AS_BITS_READ_OP_START   = 50,
+
+	AS_BITS_OP_GET          = AS_BITS_READ_OP_START,
+	AS_BITS_OP_COUNT        = 51,
+	AS_BITS_OP_LSCAN        = 52,
+	AS_BITS_OP_RSCAN        = 53,
+	AS_BITS_OP_GET_INT      = 54,
+
+	AS_BITS_READ_OP_END
+} as_bits_op_type;
+
+typedef enum {
+	AS_BITS_FLAG_CREATE_ONLY    = 1 << 0,
+	AS_BITS_FLAG_UPDATE_ONLY    = 1 << 1,
+	AS_BITS_FLAG_NO_FAIL        = 1 << 2,
+	AS_BITS_FLAG_PARTIAL        = 1 << 3
+} as_bits_flags;
+
+typedef enum {
+	AS_BITS_INT_SUBFLAG_SIGNED      = 1 << 0,
+	AS_BITS_INT_SUBFLAG_SATURATE    = 1 << 1,
+	AS_BITS_INT_SUBFLAG_WRAP        = 1 << 2
+} as_bits_int_flags;
+
+typedef enum {
+	AS_BITS_SUBFLAG_RESIZE_FROM_FRONT   = 1 << 0,
+	AS_BITS_SUBFLAG_RESIZE_GROW_ONLY    = 1 << 1,
+	AS_BITS_SUBFLAG_RESIZE_SHRINK_ONLY  = 1 << 2
+} as_bits_resize_subflags;
 
 //------------------------------------------------
 // CDT ops.

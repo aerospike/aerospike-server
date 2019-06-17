@@ -596,6 +596,35 @@ read_local(as_transaction* tr)
 					response_bins[n_bins++] = b;
 				}
 			}
+			else if (op->op == AS_MSG_OP_BITS_READ) {
+				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
+
+				if (b) {
+					as_bin* rb = &result_bins[n_result_bins];
+					as_bin_set_empty(rb);
+
+					if ((result = as_bin_bits_read_from_client(b, op, rb)) < 0) {
+						cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed as_bin_bits_read_from_client() ", ns->name);
+						destroy_stack_bins(result_bins, n_result_bins);
+						read_local_done(tr, &r_ref, &rd, -result);
+						return TRANS_DONE_ERROR;
+					}
+
+					if (as_bin_inuse(rb)) {
+						n_result_bins++;
+						ops[n_bins] = op;
+						response_bins[n_bins++] = rb;
+					}
+					else if (respond_all_ops) {
+						ops[n_bins] = op;
+						response_bins[n_bins++] = NULL;
+					}
+				}
+				else if (respond_all_ops) {
+					ops[n_bins] = op;
+					response_bins[n_bins++] = NULL;
+				}
+			}
 			else if (op->op == AS_MSG_OP_CDT_READ) {
 				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
 

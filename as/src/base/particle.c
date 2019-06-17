@@ -922,6 +922,33 @@ as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 
 
 //==========================================================
+// as_bin particle functions specific to blobs.
+//
+
+//------------------------------------------------
+// Handle "wire" format.
+//
+
+int
+as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
+{
+	return as_bin_bits_packed_read(b, op, result);
+}
+
+int
+as_bin_bits_alloc_modify_from_client(as_bin *b, as_msg_op *op)
+{
+	return as_bin_bits_packed_modify(b, op, NULL);
+}
+
+int
+as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op)
+{
+	return as_bin_bits_packed_modify(b, op, particles_llb);
+}
+
+
+//==========================================================
 // as_bin particle functions specific to CDTs.
 //
 
