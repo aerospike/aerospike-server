@@ -902,6 +902,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
 	bool single_bin_write_first = false;
+	bool has_read_op = false;
 	bool has_read_all_op = false;
 	bool generates_response_bin = false;
 
@@ -962,9 +963,11 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				return AS_ERR_PARAMETER;
 			}
 
+			has_read_op = true;
 			has_read_all_op = true;
 		}
 		else if (op->op == AS_MSG_OP_READ) {
+			has_read_op = true;
 			generates_response_bin = true;
 		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
@@ -976,8 +979,14 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			generates_response_bin = true; // CDT modify may generate a response bin
 		}
 		else if (op->op == AS_MSG_OP_CDT_READ) {
+			has_read_op = true;
 			generates_response_bin = true;
 		}
+	}
+
+	if (has_read_op && (m->info1 & AS_MSG_INFO1_READ) == 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: has read op but read flag not set ", ns->name);
+		return AS_ERR_PARAMETER;
 	}
 
 	if (has_read_all_op && generates_response_bin) {

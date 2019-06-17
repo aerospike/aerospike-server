@@ -374,7 +374,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	if (is_write) {
 		if (should_security_check_data_op(tr) &&
-				! as_security_check_data_op(tr, ns, PERM_WRITE)) {
+				! as_security_check_data_op(tr, ns,
+						PERM_WRITE | (is_read ? PERM_READ : 0))) {
 			as_transaction_error(tr, ns, tr->result_code);
 			goto Cleanup;
 		}
