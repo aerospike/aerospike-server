@@ -152,6 +152,7 @@ typedef struct bits_state_s {
 	uint32_t new_size;
 } bits_state;
 
+
 //==========================================================
 // Forward declarations.
 //
@@ -161,6 +162,7 @@ static bool bits_parse_op(bits_state* state, bits_op* op);
 static bool bits_parse_byte_offset(bits_state* state, bits_op* op);
 static bool bits_parse_offset(bits_state* state, bits_op* op);
 static bool bits_parse_byte_size(bits_state* state, bits_op* op);
+static bool bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op);
 static bool bits_parse_integer_size(bits_state* state, bits_op* op);
 static bool bits_parse_size(bits_state* state, bits_op* op);
 static bool bits_parse_boolean_value(bits_state* state, bits_op* op);
@@ -331,8 +333,8 @@ static const bits_op_def bits_modify_op_table[] = {
 				bits_prepare_resize_op,
 				(AS_BITS_FLAG_CREATE_ONLY | AS_BITS_FLAG_UPDATE_ONLY |
 						AS_BITS_FLAG_NO_FAIL),
-				1, 3, bits_parse_byte_size,
-				bits_parse_flags, bits_parse_resize_subflags),
+				1, 3, bits_parse_byte_size_allow_zero, bits_parse_flags,
+				bits_parse_resize_subflags),
 		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_INSERT, bits_modify_op_insert,
 				bits_prepare_insert_op,
 				(AS_BITS_FLAG_CREATE_ONLY | AS_BITS_FLAG_UPDATE_ONLY |
@@ -817,7 +819,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 
 			cf_detail(AS_PARTICLE, "as_bin_bits_packed_modify - operation (%s) on bin %.*s would update - not allowed",
 					state.def->name, (int)msg_op->name_sz, msg_op->name);
-			return -AS_ERR_ELEMENT_EXISTS;
+			return -AS_ERR_BIN_EXISTS;
 		}
 
 		if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
@@ -840,7 +842,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 
 			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - operation (%s) on bin %.*s would create - not allowed",
 					state.def->name, (int)msg_op->name_sz, msg_op->name);
-			return -AS_ERR_ELEMENT_NOT_FOUND;
+			return -AS_ERR_BIN_NOT_FOUND;
 		}
 
 		old_blob = NULL;
@@ -869,7 +871,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 		b->particle = old_blob;
 
 		return ((op.flags & AS_BITS_FLAG_NO_FAIL) != 0) ?
-				AS_OK : -AS_ERR_FORBIDDEN; // FIXME - what error?
+				AS_OK : -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	if (old_blob == NULL) {
@@ -1057,6 +1059,29 @@ bits_parse_byte_size(bits_state* state, bits_op* op)
 
 	if (size > PROTO_SIZE_MAX) {
 		cf_warning(AS_PARTICLE, "bits_parse_byte_size - size (%lu) larger than max (%d) for op %s",
+				size, PROTO_SIZE_MAX, state->def->name);
+		return false;
+	}
+
+	op->size = (uint32_t)size * 8; // normalize to bits
+
+	return true;
+}
+
+static bool
+bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op)
+{
+	uint64_t size;
+	int result = as_unpack_uint64(&state->pk, &size);
+
+	if (result != 0) {
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - unable to parse byte_size (error %d) for op %s",
+				result, state->def->name);
+		return false;
+	}
+
+	if (size > PROTO_SIZE_MAX) {
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - size (%lu) larger than max (%d) for op %s",
 				size, PROTO_SIZE_MAX, state->def->name);
 		return false;
 	}
@@ -1504,7 +1529,7 @@ bits_prepare_modify_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 		}
 
 		cf_warning(AS_PARTICLE, "bits_prepare_modify_op - operation may not expand blob");
-		return -AS_ERR_FORBIDDEN;
+		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	state->action = OP_ACTION_OVERWRITE;
@@ -1516,7 +1541,7 @@ bits_prepare_modify_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 			}
 
 			cf_warning(AS_PARTICLE, "bits_prepare_modify_op - operation too large - either use partial or increase size of blob");
-			return -AS_ERR_FORBIDDEN;
+			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
 		state->n_bytes_head = byte_offset;
@@ -1551,7 +1576,7 @@ bits_prepare_read_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 		}
 
 		cf_warning(AS_PARTICLE, "bits_prepare_read_op - operation would expand blob");
-		return -AS_ERR_FORBIDDEN;
+		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	if (byte_offset + op_size > state->old_size) {
@@ -1560,7 +1585,7 @@ bits_prepare_read_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 		}
 
 		cf_warning(AS_PARTICLE, "bits_prepare_read_op - operation too large for blob");
-		return -AS_ERR_FORBIDDEN;
+		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	state->n_bytes_head = byte_offset;

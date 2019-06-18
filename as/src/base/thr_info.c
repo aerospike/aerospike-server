@@ -6301,7 +6301,7 @@ as_info_init()
 	// Returns list of features supported by this server
 	static char features[1024];
 	strcat(features,
-			"batch-index;"
+			"batch-index;blob-bits;"
 			"cdt-list;cdt-map;cluster-stable;"
 			"float;"
 			"geo;"

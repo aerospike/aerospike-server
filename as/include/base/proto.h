@@ -68,7 +68,7 @@ struct as_transaction_s;
 #define AS_ERR_GENERATION               3
 #define AS_ERR_PARAMETER                4
 #define AS_ERR_RECORD_EXISTS            5
-	// 6 is unused. (Was AS_ERR_BIN_EXISTS.)
+#define AS_ERR_BIN_EXISTS               6
 #define AS_ERR_CLUSTER_KEY_MISMATCH     7
 #define AS_ERR_OUT_OF_SPACE             8
 #define AS_ERR_TIMEOUT                  9
@@ -79,7 +79,7 @@ struct as_transaction_s;
 #define AS_ERR_KEY_BUSY                 14
 #define AS_ERR_SCAN_ABORT               15
 #define AS_ERR_UNSUPPORTED_FEATURE      16
-	// 17 is unused. (Was AS_ERR_BIN_NOT_FOUND.)
+#define AS_ERR_BIN_NOT_FOUND            17
 #define AS_ERR_DEVICE_OVERLOAD          18
 #define AS_ERR_KEY_MISMATCH             19
 #define AS_ERR_NAMESPACE                20
@@ -88,6 +88,7 @@ struct as_transaction_s;
 #define AS_ERR_ELEMENT_NOT_FOUND        23
 #define AS_ERR_ELEMENT_EXISTS           24
 #define AS_ERR_ENTERPRISE_ONLY          25
+#define AS_ERR_OP_NOT_APPLICABLE        26
 
 // Security. (Defined here to ensure no overlap with other result codes.)
 #define AS_SEC_OK_LAST                  50 // the last message
@@ -110,11 +111,11 @@ struct as_transaction_s;
 #define AS_SEC_ERR_ROLE                 70 // no/unknown role(s)
 #define AS_SEC_ERR_ROLE_EXISTS          71 // role already exists
 #define AS_SEC_ERR_PRIVILEGE            72 // no/unknown privilege(s)
-#define AS_SEC_ERR_WHITELIST			73 // bad whitelist
+#define AS_SEC_ERR_WHITELIST            73 // bad whitelist
 	// Permission errors.
 #define AS_SEC_ERR_NOT_AUTHENTICATED    80 // socket not authenticated
 #define AS_SEC_ERR_ROLE_VIOLATION       81 // role (privilege) violation
-#define AS_SEC_ERR_NOT_WHITELISTED 		82 // client IP-addr not on whitelist
+#define AS_SEC_ERR_NOT_WHITELISTED      82 // client IP-addr not on whitelist
 	// LDAP-related errors.
 #define AS_SEC_ERR_LDAP_NOT_ENABLED     90 // LDAP features not enabled
 #define AS_SEC_ERR_LDAP_SETUP           91 // LDAP setup error
