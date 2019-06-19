@@ -40,6 +40,7 @@
 
 #include "base/cfg.h" // xdr_allows_write
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "base/proto.h" // xdr_allows_write
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -104,6 +105,38 @@ send_rw_messages_forget(rw_request* rw)
 			as_fabric_msg_put(rw->dest_msg);
 		}
 	}
+}
+
+
+bool
+set_name_check(const as_transaction* tr, const as_record* r)
+{
+	if (! as_transaction_has_set(tr)) {
+		return true; // allowed to not send set name in read or delete message
+	}
+
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET);
+	uint32_t msg_set_name_len = as_msg_field_get_value_sz(f);
+
+	if (msg_set_name_len == 0) {
+		return true; // treat the same as no set name
+	}
+
+	as_namespace* ns = tr->rsv.ns;
+	const char* set_name = as_index_get_set_name(r, ns);
+
+	if (set_name == NULL ||
+			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
+			set_name[msg_set_name_len] != 0) {
+		CF_ZSTR_DEFINE(msg_set_name, AS_SET_NAME_MAX_SIZE + 4, f->data,
+				msg_set_name_len);
+
+		cf_warning(AS_RW, "{%s} set name mismatch %s %s", ns->name,
+				set_name == NULL ? "(null)" : set_name, msg_set_name);
+		return false;
+	}
+
+	return true;
 }
 
 
