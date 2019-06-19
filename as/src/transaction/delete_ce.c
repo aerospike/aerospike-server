@@ -35,6 +35,7 @@
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "transaction/rw_request.h"
+#include "transaction/rw_utils.h"
 
 
 //==========================================================
@@ -47,7 +48,6 @@ delete_storage_overloaded(as_transaction* tr)
 	return false;
 }
 
-
 transaction_status
 delete_master(as_transaction* tr, rw_request* rw)
 {
@@ -59,8 +59,15 @@ delete_master(as_transaction* tr, rw_request* rw)
 
 	as_index_ref r_ref;
 
-	if (0 != as_record_get(tr->rsv.tree, &tr->keyd, &r_ref)) {
+	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) != 0) {
 		tr->result_code = AS_ERR_NOT_FOUND;
+		return TRANS_DONE_ERROR;
+	}
+
+	// Make sure the message set name (if it's there) is correct.
+	if (! set_name_check(tr, r_ref.r)) {
+		as_record_done(&r_ref, tr->rsv.ns);
+		tr->result_code = AS_ERR_PARAMETER;
 		return TRANS_DONE_ERROR;
 	}
 

@@ -93,6 +93,7 @@ void will_replicate(struct as_index_s* r, struct as_namespace_s* ns);
 bool insufficient_replica_destinations(const struct as_namespace_s* ns, uint32_t n_dests);
 void finished_replicated(struct as_transaction_s* tr);
 void finished_not_replicated(struct rw_request_s* rw);
+bool set_name_check(const struct as_transaction_s* tr, const struct as_index_s* r);
 bool generation_check(const struct as_index_s* r, const struct as_msg_s* m, const struct as_namespace_s* ns);
 int set_set_from_msg(struct as_index_s* r, struct as_namespace_s* ns, struct as_msg_s* m);
 int set_delete_durablility(const struct as_transaction_s* tr, struct as_storage_rd_s* rd);
