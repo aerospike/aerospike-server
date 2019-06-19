@@ -186,8 +186,8 @@ static int bits_prepare_modify_op(bits_state* state, bits_op* op, uint32_t byte_
 static int bits_prepare_integer_op(bits_state* state, bits_op* op, uint32_t byte_offset, uint32_t op_size);
 static int bits_prepare_read_op(bits_state* state, bits_op* op, uint32_t byte_offset, uint32_t op_size);
 
-static bool bits_execute_modify_op(const bits_state* state, const bits_op* op, as_particle* old_blob, as_particle* new_blob);
-static bool bits_execute_read_op(const bits_state* state, const bits_op* op, as_particle* blob, as_bin* rb);
+static bool bits_execute_modify_op(const bits_state* state, const bits_op* op, const as_particle* old_blob, as_particle* new_blob);
+static bool bits_execute_read_op(const bits_state* state, const bits_op* op, const as_particle* blob, as_bin* rb);
 
 static bool bits_modify_op_resize(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes);
 static bool bits_modify_op_insert(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes);
@@ -844,6 +844,8 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 					state.def->name, (int)msg_op->name_sz, msg_op->name);
 			return -AS_ERR_BIN_NOT_FOUND;
 		}
+
+		cf_assert(b->particle == NULL, AS_PARTICLE, "particle not null");
 
 		old_blob = NULL;
 	}
@@ -1602,13 +1604,13 @@ bits_prepare_read_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 
 static bool
 bits_execute_modify_op(const bits_state* state, const bits_op* op,
-		as_particle* old_blob, as_particle* new_blob)
+		const as_particle* old_blob, as_particle* new_blob)
 {
 	uint8_t* to = ((blob_mem*)new_blob)->data;
 	const uint8_t* end_to = to + state->new_size; // paranoia
 
 	if (old_blob != NULL) {
-		const uint8_t* from = ((blob_mem*)old_blob)->data;
+		const uint8_t* from = ((const blob_mem*)old_blob)->data;
 		const uint8_t* end_from = from + state->old_size; // paranoia
 
 		if (state->n_bytes_head != 0) {
@@ -1679,9 +1681,9 @@ bits_execute_modify_op(const bits_state* state, const bits_op* op,
 
 static bool
 bits_execute_read_op(const bits_state* state, const bits_op* op,
-		as_particle* blob, as_bin* rb)
+		const as_particle* blob, as_bin* rb)
 {
-	const uint8_t* from = ((blob_mem*)blob)->data + state->n_bytes_head;
+	const uint8_t* from = ((const blob_mem*)blob)->data + state->n_bytes_head;
 
 	return state->def->fn.read(op, from, rb, state->n_bytes_op);
 }
@@ -1696,9 +1698,11 @@ bits_modify_op_resize(const bits_op* op, uint8_t* to, const uint8_t* from,
 		uint32_t n_bytes)
 {
 	(void)op;
-	(void)to;
 	(void)from;
-	(void)n_bytes;
+
+	// Note - this function isn't called when sizing down.
+
+	memset(to, 0, n_bytes);
 
 	return true;
 }
@@ -2199,7 +2203,7 @@ rshift(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes)
 
 	if (r8 == 0) {
 		*to++ = first_byte;
-		memcpy(to, cur, n_bytes - n_shift_bytes);
+		memcpy(to, cur, n_bytes - n_shift_bytes - 1);
 
 		return;
 	}
