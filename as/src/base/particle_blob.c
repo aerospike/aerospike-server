@@ -1384,7 +1384,7 @@ static int32_t
 bits_normalize_offset(const bits_state* state, bits_op* op)
 {
 	if (op->offset < 0) {
-		if (abs(op->offset) > state->old_size * 8) {
+		if ((uint32_t)abs(op->offset) > state->old_size * 8) {
 			return -AS_ERR_PARAMETER;
 		}
 
