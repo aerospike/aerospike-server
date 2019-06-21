@@ -1934,9 +1934,12 @@ send_set_from_orig(uint32_t set_tid, smd_set_entry* entry)
 		item_vec_set(&op.items, 0,
 				smd_item_create_copy(item->key, item->value, 0, 0));
 
+		// Set this before calling op_set_to_pr() - call may destroy entry.
+		// (Also - call won't alter retry_next_ms since we are calling as pr.)
+		entry->retry_next_ms = 0;
+
 		op_set_to_pr(&op);
 		item_vec_destroy(&op.items);
-		entry->retry_next_ms = 0;
 
 		return;
 	}
