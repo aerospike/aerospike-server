@@ -48,7 +48,6 @@
 //---------------------------------------------------------
 
 #define BATCH_BLOCK_SIZE (1024 * 128) // 128K
-#define BATCH_MAX_TRANSACTION_SIZE (1024 * 1024 * 10) // 10MB
 #define BATCH_REPEAT_SIZE 25  // index(4),digest(20) and repeat(1)
 
 #define BATCH_ABANDON_LIMIT (30UL * 1000 * 1000 * 1000) // 30 seconds
@@ -1052,12 +1051,6 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 
 	as_batch_shared* shared = tr->from.batch_shared;
 
-	if (size > BATCH_MAX_TRANSACTION_SIZE) {
-		cf_warning(AS_BATCH, "Record size %zu exceeds max %d", size, BATCH_MAX_TRANSACTION_SIZE);
-		as_batch_add_error(shared, tr->from_data.batch_index, AS_ERR_RECORD_TOO_BIG);
-		return;
-	}
-
 	as_batch_buffer* buffer;
 	bool complete;
 	uint8_t* data = as_batch_reserve(shared, size, tr->result_code, &buffer, &complete);
@@ -1119,12 +1112,6 @@ as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* di
 {
 	as_msg* msg = &cmsg->msg;
 	size_t size = proxy_size + sizeof(as_msg_field) + sizeof(cf_digest) - sizeof(as_proto);
-
-	if (size > BATCH_MAX_TRANSACTION_SIZE) {
-		cf_warning(AS_BATCH, "Record size %zu exceeds max %d", size, BATCH_MAX_TRANSACTION_SIZE);
-		as_batch_add_error(shared, index, AS_ERR_RECORD_TOO_BIG);
-		return;
-	}
 
 	as_batch_buffer* buffer;
 	bool complete;
