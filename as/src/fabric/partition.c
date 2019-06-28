@@ -56,6 +56,7 @@ void accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects, uint
 void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
 char partition_descriptor(const as_partition* p);
 int partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid);
+bool should_working_master_own(const as_namespace* ns, uint32_t pid, uint32_t repl_ix);
 
 
 //==========================================================
@@ -636,7 +637,13 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
 
 		volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
-		bool owned = replica == repl_ix;
+
+		bool owned = replica == repl_ix ||
+				// Working master also owns all immigrating prole columns and
+				// prole columns it occupies.
+				(replica == 0 && // am working master
+						should_working_master_own(ns, pid, repl_ix));
+
 		bool is_set = (*mbyte & set_mask) != 0;
 		bool needs_update = (owned && ! is_set) || (! owned && is_set);
 
@@ -757,4 +764,13 @@ partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid)
 	}
 
 	return -1; // not a replica
+}
+
+bool
+should_working_master_own(const as_namespace* ns, uint32_t pid,
+		uint32_t repl_ix)
+{
+	const as_partition* p = &ns->partitions[pid];
+
+	return find_self_in_replicas(p) == (int)repl_ix || p->immigrators[repl_ix];
 }

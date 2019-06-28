@@ -632,7 +632,7 @@ emigrate_transfer(emigration *emig)
 
 	if (emigration_send_done(emig)) {
 		as_partition_emigrate_done(emig->rsv.ns, emig->rsv.p->id,
-				emig->cluster_key, emig->tx_flags);
+				emig->cluster_key, emig->dest, emig->tx_flags);
 	}
 
 	return false; // did not requeue

@@ -324,7 +324,7 @@ as_partition_pending_migrations(as_partition* p)
 
 void
 as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
-		uint64_t orig_cluster_key, uint32_t tx_flags)
+		uint64_t orig_cluster_key, cf_node dest_node, uint32_t tx_flags)
 {
 	as_partition* p = &ns->partitions[pid];
 
@@ -361,6 +361,12 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 
 	if (! is_self_final_master(p)) {
 		emigrate_done_advance_non_master_version(ns, p, tx_flags);
+	}
+
+	int dest_ix = index_of_node(p->replicas, p->n_replicas, dest_node);
+
+	if (dest_ix != -1) {
+		p->immigrators[dest_ix] = false;
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
