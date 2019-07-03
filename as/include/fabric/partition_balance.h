@@ -102,7 +102,7 @@ void as_partition_balance_effective_rack_ids(cf_dyn_buf* db);
 bool as_partition_pending_migrations(as_partition* p);
 
 bool as_partition_pre_emigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags);
-void as_partition_emigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags);
+void as_partition_emigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node dest_node, uint32_t tx_flags);
 as_migrate_result as_partition_immigrate_start(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
 as_migrate_result as_partition_immigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
 as_migrate_result as_partition_migrations_all_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key);
