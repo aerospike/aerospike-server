@@ -365,9 +365,9 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 
 	int dest_ix = index_of_node(p->replicas, p->n_replicas, dest_node);
 
-	if (dest_ix != -1) {
-		p->immigrators[dest_ix] = false;
-	}
+	cf_assert(dest_ix != -1, AS_PARTITION, "non-replica dest node");
+
+	p->immigrators[dest_ix] = false;
 
 	if (client_replica_maps_update(ns, pid)) {
 		cf_atomic32_incr(&g_partition_generation);
@@ -847,6 +847,8 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			p->pending_lead_emigrations = 0;
 			p->pending_immigrations = 0;
 
+			memset(p->immigrators, 0, p->n_replicas * sizeof(bool));
+
 			p->n_witnesses = 0;
 
 			uint32_t self_n = find_self(ns_node_seq, ns);
@@ -1170,8 +1172,6 @@ uint32_t
 fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		uint32_t working_master_n, uint32_t n_dupl)
 {
-	memset(p->immigrators, 0, ((sizeof(bool) * ns->cluster_size) + 31) & -32);
-
 	uint32_t n_immigrators = 0;
 
 	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {

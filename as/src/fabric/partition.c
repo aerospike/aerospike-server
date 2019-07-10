@@ -639,8 +639,9 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 		volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
 
 		bool owned = replica == repl_ix ||
-				// Working master also owns all immigrating prole columns and
-				// prole columns it occupies.
+				// Working master also owns all immigrating prole columns, and
+				// if it's an acting master in a prole column, that column (e.g.
+				// full, and migrating to newly added master).
 				(replica == 0 && // am working master
 						should_working_master_own(ns, pid, repl_ix));
 
