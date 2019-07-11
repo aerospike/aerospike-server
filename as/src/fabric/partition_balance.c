@@ -847,7 +847,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 			p->pending_lead_emigrations = 0;
 			p->pending_immigrations = 0;
 
-			memset(p->immigrators, 0, p->n_replicas * sizeof(bool));
+			memset(p->immigrators, 0, ns->replication_factor * sizeof(bool));
 
 			p->n_witnesses = 0;
 
