@@ -91,6 +91,12 @@ typedef enum {
 						"illegal")))); \
 	})
 
+#define NS_COMPRESSION_LEVEL() ({ \
+		uint32_t level = as_load_uint32(&ns->storage_compression_level); \
+		(ns->storage_compression == AS_COMPRESSION_ZSTD && level == 0 ? \
+				9 : level); \
+	})
+
 // Compression metadata - relevant for enterprise only.
 typedef struct ssd_comp_meta_s {
 	as_compression_method method;

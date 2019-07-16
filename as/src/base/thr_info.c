@@ -1973,7 +1973,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
 		info_append_uint32(db, "storage-engine.commit-min-size", ns->storage_commit_min_size);
 		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
-		info_append_uint32(db, "storage-engine.compression-level", ns->storage_compression_level);
+		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
 		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
 		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
 		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
