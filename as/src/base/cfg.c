@@ -5092,7 +5092,7 @@ cfg_create_tls_spec(as_config* cfg, char* name)
 
 	cf_tls_spec* tls_spec = cfg->tls_specs + ind;
 	tls_spec->name = cf_strdup(name);
-	tls_spec->protocols = "-all,+TLSv1.2";
+	tls_spec->protocols = "TLSv1.2";
 	return tls_spec;
 }
 
