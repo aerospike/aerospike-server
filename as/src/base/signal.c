@@ -114,8 +114,8 @@ as_sig_handle_abort(int sig_num, siginfo_t *info, void *ctx)
 void
 as_sig_handle_bus(int sig_num, siginfo_t *info, void *ctx)
 {
-	cf_warning(AS_AS, "SIGBUS received, aborting %s build %s",
-			aerospike_build_type, aerospike_build_id);
+	cf_warning(AS_AS, "SIGBUS received, aborting %s build %s os %s",
+			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
 	PRINT_SIGNAL_CONTEXT(ctx);
 	reraise_signal(sig_num);
@@ -152,11 +152,13 @@ as_sig_handle_ill(int sig_num, siginfo_t *info, void *ctx)
 	reraise_signal(sig_num);
 }
 
-// We get here on cf_crash_nostack(), cf_assert_nostack().
+// We get here on cf_crash_nostack(), cf_assert_nostack(), or Ctrl-C when
+// running in foreground.
 void
 as_sig_handle_int(int sig_num, siginfo_t *info, void *ctx)
 {
-	cf_warning(AS_AS, "SIGINT received, shutting down");
+	cf_warning(AS_AS, "SIGINT received, shutting down %s build %s os %s",
+			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -192,7 +194,8 @@ as_sig_handle_segv(int sig_num, siginfo_t *info, void *ctx)
 void
 as_sig_handle_term(int sig_num, siginfo_t *info, void *ctx)
 {
-	cf_info(AS_AS, "SIGTERM received, starting normal shutdown");
+	cf_info(AS_AS, "SIGTERM received, shutting down %s build %s os %s",
+			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");

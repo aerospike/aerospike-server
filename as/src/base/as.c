@@ -443,6 +443,8 @@ main(int argc, char **argv)
 	// Received a shutdown signal.
 	//
 
+	cf_info(AS_AS, "initiating clean shutdown ...");
+
 	as_storage_shutdown(instance);
 	as_xdr_shutdown();
 

@@ -812,9 +812,6 @@ as_storage_record_get_pickle(as_storage_rd *rd)
 void
 as_storage_shutdown(uint32_t instance)
 {
-	cf_info(AS_STORAGE, "initiating storage shutdown ...");
- 	cf_info(AS_STORAGE, "flushing data to storage ...");
-
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
@@ -826,11 +823,18 @@ as_storage_shutdown(uint32_t instance)
 				as_partition_shutdown(ns, pid);
 			}
 
+			cf_info(AS_STORAGE, "{%s} partitions shut down", ns->name);
+
 			// Now flush everything outstanding to storage devices.
 			as_storage_shutdown_ssd(ns);
+
+			cf_info(AS_STORAGE, "{%s} storage devices flushed", ns->name);
+
 			as_namespace_xmem_shutdown(ns, instance);
 		}
+		else {
+			cf_info(AS_STORAGE, "{%s} storage-engine memory - nothing to do",
+					ns->name);
+		}
 	}
-
-  	cf_info(AS_STORAGE, "completed flushing to storage");
 }
