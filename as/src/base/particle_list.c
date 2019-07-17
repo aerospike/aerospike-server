@@ -2083,7 +2083,7 @@ packed_list_get_remove_by_rank_range(const packed_list *list, as_bin *b,
 	case RESULT_TYPE_REVRANK:
 	case RESULT_TYPE_RANK_RANGE:
 	case RESULT_TYPE_REVRANK_RANGE:
-		return result_data_set_range(result, rank, count32, list->ele_count);
+		return result_data_set_range(result, urank, count32, list->ele_count);
 	case RESULT_TYPE_INDEX:
 	case RESULT_TYPE_REVINDEX:
 		result_data_set_int_list_by_mask(result, rm_mask, rm_count,
