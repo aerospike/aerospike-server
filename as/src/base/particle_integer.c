@@ -350,16 +350,29 @@ integer_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 }
 
 void
-integer_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
+integer_from_msgpack(const uint8_t *packed, uint32_t packed_size,
+		as_particle **pp)
 {
 	int64_t i;
-	as_unpacker pk = {
-			.buffer = packed,
-			.offset = 0,
-			.length = packed_size
-	};
 
-	as_unpack_int64(&pk, &i);
+	if (*packed == 0xc2) { // false
+		i = 0;
+	}
+	else if (*packed == 0xc3) { // true
+		i = 1;
+	}
+	else {
+		as_unpacker pk = {
+				.buffer = packed,
+				.offset = 0,
+				.length = packed_size
+		};
+
+ 		if (as_unpack_int64(&pk, &i) != 0) {
+			cf_fault_hex_dump("msgpack", pk.buffer, pk.length);
+			cf_crash(AS_PARTICLE, "invalid msgpack");
+		}
+	}
 
 	*pp = (as_particle *)i;
 }
