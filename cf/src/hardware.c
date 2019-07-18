@@ -44,6 +44,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
@@ -2721,6 +2722,26 @@ cf_storage_file_system_size(const char *path)
 
 	cf_detail(CF_HARDWARE, "file system size of %s is %ld", path, sz);
 	return sz;
+}
+
+bool
+cf_storage_is_root_fs(const char *path)
+{
+	struct statvfs vfs;
+
+	if (statvfs("/", &vfs) < 0) {
+		cf_crash(CF_HARDWARE, "cannot stat root directory");
+	}
+
+	uint64_t root_id = vfs.f_fsid;
+
+	if (statvfs(path, &vfs) < 0) {
+		cf_warning(CF_HARDWARE, "cannot stat %s: %d (%s)", path, errno,
+				cf_strerror(errno));
+		return false;
+	}
+
+	return vfs.f_fsid == root_id;
 }
 
 void
