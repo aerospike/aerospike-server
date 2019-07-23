@@ -1,7 +1,7 @@
 /*
- * drv_ssd_cold.c
+ * drv_ssd_ce.c
  *
- * Copyright (C) 2014 Aerospike, Inc.
+ * Copyright (C) 2014-2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -34,7 +34,7 @@ void
 ssd_resume_devices(drv_ssds* ssds)
 {
 	// Should not get here - for enterprise version only.
-	cf_crash(AS_DRV_SSD, "cold start called ssd_resume_devices()");
+	cf_crash(AS_DRV_SSD, "community edition called ssd_resume_devices()");
 }
 
 void*
