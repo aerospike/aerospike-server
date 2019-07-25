@@ -35,6 +35,7 @@
 #
 
 OS = $(shell build/os_version)
+UNAME=$(shell uname)
 
 # Common variable definitions:
 include make_in/Makefile.vars
@@ -46,9 +47,9 @@ ifeq ($(USE_LUAJIT),1)
 endif
 	$(MAKE) -C $(JEMALLOC)
 	$(MAKE) -C $(JANSSON)
-	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)"
+	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)" OS=$(UNAME)
 	$(MAKE) -C $(CF)
-	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1
+	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1 OS=$(UNAME)
 	$(MAKE) -C $(S2)
 	$(MAKE) -C ai
 	$(MAKE) -C as

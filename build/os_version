@@ -94,6 +94,21 @@ main() {
 	distro_id=${distro_id//[[:space:]]/}
 	distro_version=${distro_version//[[:space:]]/}
 
+	# Temporary second-chance for pre-release version(s.)
+	if [ -z "$distro_version" ]
+	then
+	    case "$distro_id" in
+	    'debian' )
+		debian_version=$(cat /etc/debian_version | tr '[:upper:]' '[:lower:]')
+		if [[ "$debian_version" = "buster"* ]]
+		then
+		    debian_version=10
+		fi
+		distro_version=${debian_version%%.*}
+		;;
+	    esac
+	fi
+
 	case "$distro_id" in
 	'centos' | 'redhat' )
 		distro_long="centos${distro_version}"
