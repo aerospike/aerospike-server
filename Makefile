@@ -60,7 +60,6 @@ targetdirs:
 	mkdir -p $(OBJECT_DIR)/base $(OBJECT_DIR)/fabric $(OBJECT_DIR)/storage $(OBJECT_DIR)/geospatial $(OBJECT_DIR)/transaction
 
 strip:	server
-	$(MAKE) -C xdr strip
 	$(MAKE) -C as strip
 
 .PHONY: init start stop
@@ -156,7 +155,7 @@ $(LUAJIT)/src/luaconf.h: $(LUAJIT)/src/luaconf.h.orig
 source: src
 
 tags etags:
-	etags `find ai as cf modules xdr $(EEREPO) -name "*.[ch]" -o -name "*.cc" | egrep -v '(target/Linux|m4)'` `find /usr/include -name "*.h"`
+	etags `find ai as cf modules $(EEREPO) -name "*.[ch]" -o -name "*.cc" | egrep -v '(target/Linux|m4)'` `find /usr/include -name "*.h"`
 
 # Common target definitions:
 ifneq ($(EEREPO),)
