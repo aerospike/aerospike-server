@@ -148,7 +148,7 @@ on multiple CPU cores. For example, to run four parallel jobs:
 
 	$ make cleangit -- Delete all files untracked by Git.  (Use with caution!)
 
-	$ make strip    -- Build "strip(1)"ed versions of the server executables.
+	$ make strip    -- Build a "strip(1)"ed version of the server executable.
 
 ### Overriding Default Build Options
 
