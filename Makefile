@@ -35,6 +35,7 @@
 #
 
 OS = $(shell build/os_version)
+UNAME=$(shell uname)
 
 # Common variable definitions:
 include make_in/Makefile.vars
@@ -46,9 +47,9 @@ ifeq ($(USE_LUAJIT),1)
 endif
 	$(MAKE) -C $(JEMALLOC)
 	$(MAKE) -C $(JANSSON)
-	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)"
+	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)" OS=$(UNAME)
 	$(MAKE) -C $(CF)
-	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1
+	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1 OS=$(UNAME)
 	$(MAKE) -C $(S2)
 	$(MAKE) -C ai
 	$(MAKE) -C as
@@ -59,7 +60,6 @@ targetdirs:
 	mkdir -p $(OBJECT_DIR)/base $(OBJECT_DIR)/fabric $(OBJECT_DIR)/storage $(OBJECT_DIR)/geospatial $(OBJECT_DIR)/transaction
 
 strip:	server
-	$(MAKE) -C xdr strip
 	$(MAKE) -C as strip
 
 .PHONY: init start stop
@@ -155,7 +155,7 @@ $(LUAJIT)/src/luaconf.h: $(LUAJIT)/src/luaconf.h.orig
 source: src
 
 tags etags:
-	etags `find ai as cf modules xdr $(EEREPO) -name "*.[ch]" -o -name "*.cc" | egrep -v '(target/Linux|m4)'` `find /usr/include -name "*.h"`
+	etags `find ai as cf modules $(EEREPO) -name "*.[ch]" -o -name "*.cc" | egrep -v '(target/Linux|m4)'` `find /usr/include -name "*.h"`
 
 # Common target definitions:
 ifneq ($(EEREPO),)

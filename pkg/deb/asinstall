@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Aerospike server and tools on Debian6/Debian7/Ubuntu12.  
+# Install Aerospike server and tools on Debian/Ubuntu.
 # This script must be run as root or sudo.
 
 #------------------

@@ -17,7 +17,7 @@ comma:= ,
 empty:=
 space:= $(empty) $(empty)
 
-ifeq ($(OS),$(filter $(OS),debian8 debian9 ubuntu16.04 ubuntu18.04))
+ifeq ($(OS),$(filter $(OS),debian8 debian9 debian10 ubuntu16.04 ubuntu18.04))
 	USE_SYSTEMD = 1
 	CONF_VERSION = _systemd
 	DEPS = 
@@ -63,8 +63,6 @@ endif
 ifeq ($(USE_SYSTEMD),1)
 	install -pm 755 $(DEPTH)/tools/bin/asd-coldstart $(BUILD_ROOT)/usr/bin/asd-coldstart
 endif
-	install -pm 755 $(DEPTH)/tools/citrus2aero/upgrade2to3 $(BUILD_ROOT)/usr/bin/asmigrate2to3
-	install -pm 755 $(DEPTH)/tools/fixownership/fixownership.py $(BUILD_ROOT)/usr/bin/asfixownership
 	install -pm 755 $(DEPTH)/as/etc/irqbalance-ban.sh $(BUILD_ROOT)/etc/aerospike/irqbalance-ban.sh
 	install -pm 644 $(DEPTH)/as/etc/aerospike$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
 	cat $(DEPTH)/as/etc/README.sample.conf.md > $(BUILD_ROOT)/etc/aerospike/sample/README.md

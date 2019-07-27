@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Aerospike server and tools on RHEL/Fedora/Centos 6.  
+# Install Aerospike server and tools on RHEL/Fedora/CentOS.
 # This script must be run as root or sudo.
 
 #------------------

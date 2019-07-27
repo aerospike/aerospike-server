@@ -22,7 +22,7 @@ information.  The full Telemetry data collection agent source code may be found 
 
 The Aerospike Database Server can be built and deployed on various
 current 64-bit GNU/Linux platform versions, such as the Red Hat family (e.g.,
-CentOS 6 or later), Debian 7 or later, and Ubuntu 14.04 or later.
+CentOS 6 or later), Debian 8 or later, and Ubuntu 14.04 or later.
 
 ### Dependencies
 
@@ -52,7 +52,7 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
 * The required CentOS 6/7 package to install is: `gcc-c++`.
 
-* The required Debian 7/8/9 and Ubuntu 14/16/18 package to install is: `g++`.
+* The required Debian 8/9/10 and Ubuntu 14/16/18 package to install is: `g++`.
 
 #### OpenSSL
 
@@ -62,7 +62,7 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 * The CentOS 6/7 OpenSSL packages to install are:  `openssl`,
 `openssl-devel`, `openssl-static`.
 
-* The Debian 7/8/9 and Ubuntu 14/16/18 OpenSSL packages to install are:
+* The Debian 8/9/10 and Ubuntu 14/16/18 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
 
 #### Lua 5.1
@@ -79,7 +79,7 @@ by the build environment.  In that case:
 	* The CentOS 6/7 Lua packages to install are:  `lua`,
 `lua-devel`, and `lua-static`.
 
-	* The Debian 7/8/9 and Ubuntu 14/16/18 Lua packages to install are:
+	* The Debian 8/9/10 and Ubuntu 14/16/18 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
@@ -148,7 +148,7 @@ on multiple CPU cores. For example, to run four parallel jobs:
 
 	$ make cleangit -- Delete all files untracked by Git.  (Use with caution!)
 
-	$ make strip    -- Build "strip(1)"ed versions of the server executables.
+	$ make strip    -- Build a "strip(1)"ed version of the server executable.
 
 ### Overriding Default Build Options
 
