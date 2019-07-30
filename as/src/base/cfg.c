@@ -4021,15 +4021,6 @@ as_config_init(const char* config_file)
 
 	fclose(FD);
 
-	//--------------------------------------------
-	// Checks that must wait until everything is parsed. Alternatively, such
-	// checks can be done in as_config_post_process() - doing them here means
-	// failure logs show in the console, doing them in as_config_post_process()
-	// means failure logs show in the log file.
-	//
-
-	as_security_config_check();
-
 	return &g_config;
 }
 
@@ -4077,6 +4068,8 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
+
+	as_security_config_check();
 
 	cf_alloc_set_debug(c->debug_allocations, c->indent_allocations);
 
