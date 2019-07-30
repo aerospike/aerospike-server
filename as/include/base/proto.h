@@ -423,7 +423,8 @@ typedef enum {
 	AS_CDT_PARAM_INDEX      = 1,
 	AS_CDT_PARAM_COUNT      = 2,
 	AS_CDT_PARAM_PAYLOAD    = 3,
-	AS_CDT_PARAM_FLAGS      = 4
+	AS_CDT_PARAM_FLAGS      = 4,
+	AS_CDT_PARAM_STORAGE    = 5
 } as_cdt_paramtype;
 
 typedef enum {
@@ -468,6 +469,18 @@ typedef enum {
 	AS_CDT_MAP_NO_FAIL          = 0x04,
 	AS_CDT_MAP_DO_PARTIAL       = 0x08
 } as_cdt_map_modify_flags;
+
+typedef enum {
+	AS_CDT_CTX_INDEX = 0,
+	AS_CDT_CTX_RANK  = 1,
+	AS_CDT_CTX_KEY   = 2,
+	AS_CDT_CTX_VALUE = 3,
+	AS_CDT_MAX_CTX
+} as_cdt_subcontext;
+
+#define AS_CDT_CTX_LIST 0x10
+#define AS_CDT_CTX_MAP 0x20
+#define AS_CDT_CTX_MASK 0x0f
 
 typedef enum {
 	// List operations.
@@ -562,7 +575,9 @@ typedef enum {
 	AS_CDT_OP_MAP_GET_BY_KEY_LIST                   = 107,
 	AS_CDT_OP_MAP_GET_BY_VALUE_LIST                 = 108,
 	AS_CDT_OP_MAP_GET_BY_KEY_REL_INDEX_RANGE        = 109,
-	AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE       = 110
+	AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE       = 110,
+
+	AS_CDT_OP_CONTEXT_EVAL                          = 0xFF
 } as_cdt_optype;
 
 //------------------------------------------------
