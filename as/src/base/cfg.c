@@ -330,6 +330,7 @@ typedef enum {
 	// For special debugging or bug-related repair:
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
 	CASE_SERVICE_FABRIC_DUMP_MSGS,
+	CASE_SERVICE_INDENT_ALLOCATIONS,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_NSUP_PERIOD,
@@ -902,6 +903,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "fabric-dump-msgs",				CASE_SERVICE_FABRIC_DUMP_MSGS },
+		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
@@ -2556,6 +2558,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_FABRIC_DUMP_MSGS:
 				c->fabric_dump_msgs = cfg_bool(&line);
 				break;
+			case CASE_SERVICE_INDENT_ALLOCATIONS:
+				c->indent_allocations = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully");
 				break;
@@ -4073,7 +4078,7 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
 
-	cf_alloc_set_debug(c->debug_allocations);
+	cf_alloc_set_debug(c->debug_allocations, c->indent_allocations);
 
 	// Check the configured file descriptor limit against the system limit.
 	struct rlimit fd_limit;

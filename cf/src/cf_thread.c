@@ -103,6 +103,8 @@ cf_thread_init(void)
 cf_tid
 cf_thread_create_detached(cf_thread_run_fn run, void* udata)
 {
+	cf_assert(g_alloc_started, CF_MISC, "started thread too early");
+
 	thread_info* info = make_thread_info(run, udata);
 	pthread_t tid;
 	int result = pthread_create(&tid, &g_attr_detached, shim_fn, info);
@@ -119,6 +121,8 @@ cf_thread_create_detached(cf_thread_run_fn run, void* udata)
 cf_tid
 cf_thread_create_joinable(cf_thread_run_fn run, void* udata)
 {
+	cf_assert(g_alloc_started, CF_MISC, "started thread too early");
+
 	thread_info* info = make_thread_info(run, udata);
 	pthread_t tid;
 	int result = pthread_create(&tid, NULL, shim_fn, info);

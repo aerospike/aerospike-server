@@ -1757,6 +1757,7 @@ info_service_config_get(cf_dyn_buf *db)
 
 	info_append_string(db, "debug-allocations", debug_allocations_string());
 	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
+	info_append_bool(db, "indent-allocations", g_config.indent_allocations);
 }
 
 static void

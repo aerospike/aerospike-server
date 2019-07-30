@@ -1,7 +1,7 @@
 /*
  * alloc.c
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -43,17 +43,20 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 
+#include "cf_thread.h"
 #include "fault.h"
 
+#include "aerospike/as_random.h"
 #include "aerospike/ck/ck_pr.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_clock.h"
 
 #include "warnings.h"
 
 #undef strdup
 #undef strndup
 
-#define N_ARENAS 150
+#define N_ARENAS 149 // used to be 150; now arena 149 is startup arena
 #define PAGE_SZ 4096
 
 #define MAX_SITES 4096
@@ -62,8 +65,13 @@
 #define MULT 3486784401u
 #define MULT_INV 3396732273u
 
+#define MULT_64 12157665459056928801ul
+#define MULT_INV_64 12381265223964269537ul
+
 #define STR_(x) #x
 #define STR(x) STR_(x)
+
+#define MAX_INDENT (32 * 8)
 
 typedef struct site_info_s {
 	uint32_t site_id;
@@ -95,9 +103,13 @@ static uint32_t g_n_site_infos = 1;
 
 static __thread uint32_t g_thread_site_infos[MAX_SITES];
 
-static __thread pid_t g_tid;
-// Start with *_ALL; see cf_alloc_set_debug() for details.
-static cf_alloc_debug g_debug = CF_ALLOC_DEBUG_ALL;
+bool g_alloc_started = false;
+static int32_t g_startup_arena = -1;
+
+static cf_alloc_debug g_debug;
+static bool g_indent;
+
+static __thread as_random g_rand = { .initialized = false };
 
 // All the hook_*() functions are invoked from hook functions that hook into
 // malloc() and friends for memory accounting purposes.
@@ -106,8 +118,18 @@ static cf_alloc_debug g_debug = CF_ALLOC_DEBUG_ALL;
 // they hold. Let's be careful when calling back into asd code.
 
 static int32_t
-hook_get_arena(const void *p)
+hook_get_arena(const void *p_indent)
 {
+	// Disregard indent by rounding down to page boundary. Works universally:
+	//
+	//   - Small / large: chunk's base aligned to 2 MiB && p >= base + 0x1000.
+	//   - Huge: p aligned to 2 MiB && MAX_INDENT < 0x1000.
+	//
+	// A huge allocations is thus rounded to its actual p (aligned to 2 MiB),
+	// but a small or large allocation is never rounded to the chunk's base.
+
+	const void *p = (const void *)((uint64_t)p_indent & ~0xffful);
+
 	int32_t **base = (int32_t **)((uint64_t)p & ~je_chunksize_mask);
 	int32_t *arena;
 
@@ -126,7 +148,7 @@ hook_get_arena(const void *p)
 static void
 hook_check_arena(const void *p, int32_t arena)
 {
-	if (g_debug == CF_ALLOC_DEBUG_NONE) {
+	if (!g_alloc_started || g_debug == CF_ALLOC_DEBUG_NONE) {
 		return;
 	}
 
@@ -144,16 +166,6 @@ hook_check_arena(const void *p, int32_t arena)
 
 	size_t jem_sz = jem_sallocx(p, 0);
 	cf_crash(CF_ALLOC, "arena change for %zu@%p: %d -> %d", jem_sz, p, arena_p, arena);
-}
-
-static pid_t
-hook_gettid(void)
-{
-	if (g_tid == 0) {
-		g_tid = (pid_t)syscall(SYS_gettid);
-	}
-
-	return g_tid;
 }
 
 // Map a 64-bit address to a 12-bit site ID.
@@ -227,7 +239,7 @@ hook_get_site_info_id(uint32_t site_id)
 	site_info *info = g_site_infos + info_id;
 
 	info->site_id = site_id;
-	info->thread_id = hook_gettid();
+	info->thread_id = cf_thread_sys_tid();
 	info->size_lo = 0;
 	info->size_hi = 0;
 
@@ -239,7 +251,7 @@ hook_get_site_info_id(uint32_t site_id)
 // with the given address.
 
 static void
-hook_handle_alloc(const void *ra, void *p, size_t sz)
+hook_handle_alloc(const void *ra, void *p, void *p_indent, size_t sz)
 {
 	if (p == NULL) {
 		return;
@@ -263,7 +275,7 @@ hook_handle_alloc(const void *ra, void *p, size_t sz)
 	uint8_t *data = (uint8_t *)p + jem_sz - sizeof(uint32_t);
 	uint32_t *data32 = (uint32_t *)data;
 
-	uint8_t *mark = (uint8_t *)p + sz;
+	uint8_t *mark = (uint8_t *)p_indent + sz;
 	size_t delta = (size_t)(data - mark);
 
 	// Keep 0xffff as a marker for double free detection.
@@ -344,6 +356,92 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 	}
 }
 
+static uint32_t
+indent_hops(void *p)
+{
+	if (!g_rand.initialized) {
+		g_rand.seed0 = (uint64_t)cf_thread_sys_tid();
+		g_rand.seed1 = cf_getns();
+		g_rand.initialized = true;
+	}
+
+	uint32_t n_hops;
+	void **p_indent;
+
+	// Indented pointer must not look like aligned allocation. See outdent().
+
+	do {
+		n_hops = 2 + (as_random_next_uint32(&g_rand) % ((MAX_INDENT / 8) - 1));
+		p_indent = (void **)p + n_hops;
+	}
+	while (((uint64_t)p_indent & 0xfff) == 0);
+
+	return n_hops;
+}
+
+static void *
+indent(void *p)
+{
+	if (p == NULL) {
+		return NULL;
+	}
+
+	uint32_t n_hops = indent_hops(p);
+	uint64_t *p_indent = (uint64_t *)p + n_hops;
+
+	p_indent[-1] = (uint64_t)p * MULT_64;
+	*(uint64_t *)p = (uint64_t)p_indent * MULT_64;
+
+	return (void *)p_indent;
+}
+
+static void *
+reindent(void *p2, size_t sz, void *p, void *p_indent)
+{
+	if (p2 == NULL) {
+		return NULL;
+	}
+
+	uint32_t n_hops = (uint32_t)(((uint8_t *)p_indent - (uint8_t *)p)) / 8;
+	void **from = (void **)p2 + n_hops;
+
+	uint32_t n_hops2 = indent_hops(p2);
+	uint64_t *p2_indent = (uint64_t *)p2 + n_hops2;
+
+	memmove(p2_indent, from, sz);
+
+	p2_indent[-1] = (uint64_t)p2 * MULT_64;
+	*(uint64_t *)p2 = (uint64_t)p2_indent * MULT_64;
+
+	return (void *)p2_indent;
+}
+
+static void *
+outdent(void *p_indent)
+{
+	// Aligned allocations aren't indented.
+
+	if (((uint64_t)p_indent & 0xfff) == 0) {
+		return p_indent;
+	}
+
+	uint64_t p = ((uint64_t *)p_indent)[-1] * MULT_INV_64;
+	int64_t diff = (int64_t)p_indent - (int64_t)p;
+
+	if (diff < 16 || diff > MAX_INDENT || diff % 8 != 0) {
+		cf_crash(CF_ALLOC, "bad free of %p via %p", (void *)p, p_indent);
+	}
+
+	uint64_t p_expect = *(uint64_t *)p * MULT_INV_64;
+
+	if ((uint64_t)p_indent != p_expect) {
+		cf_crash(CF_ALLOC, "bad free of %p via %p (vs. %p)", (void *)p,
+				p_indent, (void *)p_expect);
+	}
+
+	return (void *)p;
+}
+
 static void
 valgrind_check(void)
 {
@@ -363,22 +461,37 @@ valgrind_check(void)
 	// Sooner or later, we will thus end up passing a memory block allocated by
 	// JEMalloc to free(), which Valgrind has redirected to glibc's allocator.
 
-	void *p1 = malloc(1);
-	free(p1);
+	uint32_t tries;
 
-	void *p2 = jem_malloc(1);
-	jem_free(p2);
+	void *p1[2];
+	void *p2[2];
 
-	// If both of the above allocations are handled by JEMalloc, then they will
-	// be located in the same memory page. If, however, the first allocation is
-	// handled by glibc, then the memory blocks will come from two different
-	// memory pages.
+	for (tries = 0; tries < 2; ++tries) {
+		p1[tries] = malloc(1); // known API function, possibly redirected
+		p2[tries] = cf_alloc_try_malloc(1); // our own, never redirected
 
-	uint64_t page1 = (uint64_t)p1 >> 12;
-	uint64_t page2 = (uint64_t)p2 >> 12;
+		// If both of the above allocations are handled by JEMalloc, then their
+		// base addresses will be identical (cache enabled), contiguous (cache
+		// disabled), or unrelated (cache disabled, different runs). Trying
+		// twice prevents the latter.
+		//
+		// If the first allocation is handled by glibc, then the base addresses
+		// will always be unrelated.
 
-	if (page1 != page2) {
+		ptrdiff_t diff = (uint8_t *)p2[tries] - (uint8_t *)p1[tries];
+
+		if (diff > -1024 && diff < 1024) {
+			break;
+		}
+	}
+
+	if (tries == 2) {
 		cf_crash_nostack(CF_ALLOC, "Valgrind redirected malloc() to glibc; please run Valgrind with --soname-synonyms=somalloc=nouserintercepts");
+	}
+
+	for (uint32_t i = 0; i < tries; ++i) {
+		free(p1[tries]);
+		cf_free(p2[tries]);
 	}
 }
 
@@ -403,10 +516,10 @@ cf_alloc_init(void)
 	}
 
 	for (size_t sz = 1; sz <= 16 * 1024 * 1024; sz *= 2) {
-		void *p = cf_alloc_malloc_arena(sz, N_ARENAS / 2);
+		void *p = malloc(sz);
 		int32_t arena = hook_get_arena(p);
 
-		if (arena != N_ARENAS / 2) {
+		if (arena != N_ARENAS) {
 			cf_crash(CF_ALLOC, "arena mismatch: %d vs. %d", arena, N_ARENAS / 2);
 		}
 
@@ -414,24 +527,13 @@ cf_alloc_init(void)
 	}
 }
 
-// Restrict memory debugging.
-//
-// We always start out with memory debugging fully enabled (*_ALL). Then,
-// once we have parsed the configuration file, we restrict it to what the
-// configuration file says (e.g., *_TRANSIENT).
-//
-// The reason is that we can safely go from "on" to "off", but not vice
-// versa.
-//
-// When "off", we don't add accounting info to an allocation. Now, if we
-// deallocated such an allocation when "on", then we'd erroneously detect
-// a corruption, because we'd try to validate accounting info that isn't
-// there.
-
 void
-cf_alloc_set_debug(cf_alloc_debug debug)
+cf_alloc_set_debug(cf_alloc_debug debug, bool indent)
 {
 	g_debug = debug;
+	g_indent = indent;
+
+	g_alloc_started = true;
 }
 
 int32_t
@@ -615,6 +717,12 @@ is_transient(int32_t arena)
 static bool
 want_debug(int32_t arena)
 {
+	// No debugging during startup and for startup arena.
+
+	if (!g_alloc_started || arena == N_ARENAS) {
+		return false;
+	}
+
 	switch (g_debug) {
 	case CF_ALLOC_DEBUG_NONE:
 		return false;
@@ -636,6 +744,15 @@ want_debug(int32_t arena)
 static int32_t
 calc_free_flags(int32_t arena)
 {
+	cf_assert(g_alloc_started || arena == N_ARENAS, CF_ALLOC,
+			"bad arena %d during startup", arena);
+
+	// Bypass the thread-local cache for allocations in the startup arena.
+
+	if (arena == g_startup_arena) {
+		return MALLOCX_TCACHE_NONE;
+	}
+
 	// If it's a transient allocation, then simply use the default
 	// thread-local cache. No flags needed. Same, if we don't debug
 	// at all; then we can save ourselves the second cache.
@@ -652,35 +769,66 @@ calc_free_flags(int32_t arena)
 }
 
 static void
-do_free(void *p, const void *ra)
+do_free(void *p_indent, const void *ra)
 {
-	if (p == NULL) {
+	if (p_indent == NULL) {
 		return;
 	}
 
-	int32_t arena = hook_get_arena(p);
+	int32_t arena = hook_get_arena(p_indent);
 	int32_t flags = calc_free_flags(arena);
 
 	if (!want_debug(arena)) {
-		jem_dallocx(p, flags);
+		jem_dallocx(p_indent, flags); // not indented
 		return;
 	}
 
+	void *p = g_indent ? outdent(p_indent) : p_indent;
 	size_t jem_sz = jem_sallocx(p, 0);
+
 	hook_handle_free(ra, p, jem_sz);
 	jem_sdallocx(p, jem_sz, flags);
 }
 
 void
 __attribute__ ((noinline))
-free(void *p)
+free(void *p_indent)
 {
-	do_free(p, __builtin_return_address(0));
+	do_free(p_indent, __builtin_return_address(0));
 }
 
 static int32_t
 calc_alloc_flags(int32_t flags, int32_t arena)
 {
+	cf_assert(g_alloc_started || arena < 0, CF_ALLOC,
+			"bad arena %d during startup", arena);
+
+	// During startup, allocate from the startup arena and bypass the
+	// thread-local cache.
+
+	if (!g_alloc_started) {
+		// Create startup arena, if necessary.
+		if (g_startup_arena < 0) {
+			size_t len = sizeof(g_startup_arena);
+			int32_t err = jem_mallctl("arenas.extend", &g_startup_arena, &len,
+					NULL, 0);
+
+			if (err != 0) {
+				cf_crash(CF_ALLOC, "failed to create startup arena: %d (%s)",
+						err, cf_strerror(err));
+			}
+
+			// Expect arena 149.
+			cf_assert(g_startup_arena == N_ARENAS, CF_ALLOC,
+					"bad startup arena %d", g_startup_arena);
+		}
+
+		// Set startup arena, bypass thread-local cache.
+		flags |= MALLOCX_ARENA(g_startup_arena) | MALLOCX_TCACHE_NONE;
+
+		return flags;
+	}
+
 	// Default arena and default thread-local cache. No additional flags
 	// needed.
 
@@ -733,10 +881,16 @@ do_mallocx(size_t sz, int32_t arena, const void *ra)
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
-	void *p = jem_mallocx(ext_sz, flags);
-	hook_handle_alloc(ra, p, sz);
+	if (g_indent) {
+		ext_sz += MAX_INDENT;
+	}
 
-	return p;
+	void *p = jem_mallocx(ext_sz, flags);
+	void *p_indent = g_indent ? indent(p) : p;
+
+	hook_handle_alloc(ra, p, p_indent, sz);
+
+	return p_indent;
 }
 
 void *
@@ -749,18 +903,25 @@ cf_alloc_try_malloc(size_t sz)
 void *
 cf_alloc_malloc_arena(size_t sz, int32_t arena)
 {
-	void *p = do_mallocx(sz, arena, __builtin_return_address(0));
-	cf_assert(p, CF_ALLOC, "malloc_ns failed sz %zu arena %d", sz, arena);
-	return p;
+	cf_assert(g_alloc_started, CF_ALLOC, "arena allocation during startup");
+
+	void *p_indent = do_mallocx(sz, arena, __builtin_return_address(0));
+
+	cf_assert(p_indent != NULL, CF_ALLOC, "malloc_ns failed sz %zu arena %d",
+			sz, arena);
+
+	return p_indent;
 }
 
 void *
 __attribute__ ((noinline))
 malloc(size_t sz)
 {
-	void *p = do_mallocx(sz, -1, __builtin_return_address(0));
-	cf_assert(p, CF_ALLOC, "malloc failed sz %zu", sz);
-	return p;
+	void *p_indent = do_mallocx(sz, -1, __builtin_return_address(0));
+
+	cf_assert(p_indent != NULL, CF_ALLOC, "malloc failed sz %zu", sz);
+
+	return p_indent;
 }
 
 static void *
@@ -775,90 +936,136 @@ do_callocx(size_t n, size_t sz, int32_t arena, const void *ra)
 
 	size_t ext_sz = tot_sz + sizeof(uint32_t);
 
-	void *p = jem_mallocx(ext_sz, flags);
-	hook_handle_alloc(ra, p, tot_sz);
+	if (g_indent) {
+		ext_sz += MAX_INDENT;
+	}
 
-	return p;
+	void *p = jem_mallocx(ext_sz, flags);
+	void *p_indent = g_indent ? indent(p) : p;
+
+	hook_handle_alloc(ra, p, p_indent, tot_sz);
+
+	return p_indent;
 }
 
 void *
 cf_alloc_calloc_arena(size_t n, size_t sz, int32_t arena)
 {
-	void *p = do_callocx(n, sz, arena, __builtin_return_address(0));
-	cf_assert(p, CF_ALLOC, "calloc_ns failed n %zu sz %zu arena %d", n, sz, arena);
-	return p;
+	cf_assert(g_alloc_started, CF_ALLOC, "arena allocation during startup");
+
+	void *p_indent = do_callocx(n, sz, arena, __builtin_return_address(0));
+
+	cf_assert(p_indent != NULL, CF_ALLOC,
+			"calloc_ns failed n %zu sz %zu arena %d", n, sz, arena);
+
+	return p_indent;
 }
 
 void *
 calloc(size_t n, size_t sz)
 {
-	void *p = do_callocx(n, sz, -1, __builtin_return_address(0));
-	cf_assert(p, CF_ALLOC, "calloc failed n %zu sz %zu", n, sz);
-	return p;
+	void *p_indent = do_callocx(n, sz, -1, __builtin_return_address(0));
+
+	cf_assert(p_indent != NULL, CF_ALLOC, "calloc failed n %zu sz %zu", n, sz);
+
+	return p_indent;
 }
 
 static void *
-do_rallocx(void *p, size_t sz, int32_t arena, const void *ra)
+do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
 {
-	if (p == NULL) {
+	if (p_indent == NULL) {
 		return do_mallocx(sz, arena, ra);
 	}
 
-	hook_check_arena(p, arena);
-
 	if (sz == 0) {
-		do_free(p, ra);
+		do_free(p_indent, ra);
 		return NULL;
 	}
 
 	int32_t flags = calc_alloc_flags(0, arena);
 
 	if (!want_debug(arena)) {
-		return jem_rallocx(p, sz, flags);
+		hook_check_arena(p_indent, arena); // not indented
+		return jem_rallocx(p_indent, sz, flags); // not indented
 	}
 
+	void *p = g_indent ? outdent(p_indent) : p_indent;
 	size_t jem_sz = jem_sallocx(p, 0);
+
+	hook_check_arena(p, arena);
 	hook_handle_free(ra, p, jem_sz);
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
+	if (g_indent) {
+		ext_sz += MAX_INDENT;
+	}
+
 	void *p2 = jem_rallocx(p, ext_sz, flags);
-	hook_handle_alloc(ra, p2, sz);
+	void *p2_indent = g_indent ? reindent(p2, sz, p, p_indent) : p2;
 
-	return p2;
+	hook_handle_alloc(ra, p2, p2_indent, sz);
+
+	return p2_indent;
 }
 
 void *
-cf_alloc_realloc_arena(void *p, size_t sz, int32_t arena)
+cf_alloc_realloc_arena(void *p_indent, size_t sz, int32_t arena)
 {
-	void *p2 = do_rallocx(p, sz, arena, __builtin_return_address(0));
-	cf_assert(p2 || sz == 0, CF_ALLOC, "realloc_ns failed sz %zu arena %d", sz, arena);
-	return p2;
+	cf_assert(g_alloc_started, CF_ALLOC, "arena allocation during startup");
+
+	void *p2_indent = do_rallocx(p_indent, sz, arena,
+			__builtin_return_address(0));
+
+	cf_assert(p2_indent != NULL || sz == 0, CF_ALLOC,
+			"realloc_ns failed sz %zu arena %d", sz, arena);
+
+	return p2_indent;
 }
 
 void *
-realloc(void *p, size_t sz)
+realloc(void *p_indent, size_t sz)
 {
-	void *p2 = do_rallocx(p, sz, -1, __builtin_return_address(0));
-	cf_assert(p2 || sz == 0, CF_ALLOC, "realloc failed sz %zu", sz);
-	return p2;
+	void *p2_indent = do_rallocx(p_indent, sz, -1, __builtin_return_address(0));
+
+	cf_assert(p2_indent != NULL || sz == 0, CF_ALLOC, "realloc failed sz %zu",
+			sz);
+
+	return p2_indent;
 }
 
 static char *
 do_strdup(const char *s, size_t n, const void *ra)
 {
-	size_t sz = n + 1;
-	size_t ext_sz = want_debug(-1) ? sz + sizeof(uint32_t) : sz;
+	int32_t flags = calc_alloc_flags(0, -1);
 
-	char *s2 = jem_mallocx(ext_sz, 0);
-	cf_assert(s2, CF_ALLOC, "strdup failed len %zu", n);
+	size_t sz = n + 1;
+	size_t ext_sz = sz;
 
 	if (want_debug(-1)) {
-		hook_handle_alloc(ra, s2, sz);
+		ext_sz += sizeof(uint32_t);
+
+		if (g_indent) {
+			ext_sz += MAX_INDENT;
+		}
 	}
 
-	memcpy(s2, s, sz);
-	return s2;
+	char *s2 = jem_mallocx(ext_sz, flags);
+	char *s2_indent = s2;
+
+	if (want_debug(-1)) {
+		if (g_indent) {
+			s2_indent = indent(s2);
+		}
+
+		hook_handle_alloc(ra, s2, s2_indent, sz);
+	}
+
+	memcpy(s2_indent, s, n);
+	s2_indent[n] = 0;
+
+	return s2_indent;
 }
 
 char *
@@ -876,20 +1083,7 @@ strndup(const char *s, size_t n)
 		++n2;
 	}
 
-	size_t sz = n2 + 1;
-	size_t ext_sz = want_debug(-1) ? sz + sizeof(uint32_t) : sz;
-
-	char *s2 = jem_mallocx(ext_sz, 0);
-	cf_assert(s2, CF_ALLOC, "strndup failed limit %zu", n);
-
-	if (want_debug(-1)) {
-		hook_handle_alloc(__builtin_return_address(0), s2, sz);
-	}
-
-	memcpy(s2, s, n2);
-	s2[n2] = 0;
-
-	return s2;
+	return do_strdup(s, n2, __builtin_return_address(0));
 }
 
 static int32_t
@@ -935,8 +1129,15 @@ __asprintf_chk(char **res, int32_t flags, const char *form, ...)
 int32_t
 posix_memalign(void **p, size_t align, size_t sz)
 {
+	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
+	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
+
 	if (!want_debug(-1)) {
 		return jem_posix_memalign(p, align, sz == 0 ? 1 : sz);
+	}
+
+	if (g_indent) {
+		align = (align + 0xffful) & ~0xffful;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
@@ -946,21 +1147,28 @@ posix_memalign(void **p, size_t align, size_t sz)
 		return err;
 	}
 
-	hook_handle_alloc(__builtin_return_address(0), *p, sz);
+	hook_handle_alloc(__builtin_return_address(0), *p, *p, sz);
 	return 0;
 }
 
 void *
 aligned_alloc(size_t align, size_t sz)
 {
+	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
+	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
+
 	if (!want_debug(-1)) {
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
+	}
+
+	if (g_indent) {
+		align = (align + 0xffful) & ~0xffful;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
 	void *p = jem_aligned_alloc(align, ext_sz);
-	hook_handle_alloc(__builtin_return_address(0), p, sz);
+	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
 	return p;
 }
@@ -975,7 +1183,7 @@ do_valloc(size_t sz)
 	size_t ext_sz = sz + sizeof(uint32_t);
 
 	void *p = jem_aligned_alloc(PAGE_SZ, ext_sz);
-	hook_handle_alloc(__builtin_return_address(0), p, sz);
+	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
 	return p;
 }
@@ -983,6 +1191,8 @@ do_valloc(size_t sz)
 void *
 valloc(size_t sz)
 {
+	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
+
 	void *p = do_valloc(sz);
 	cf_assert(p, CF_ALLOC, "valloc failed sz %zu", sz);
 	return p;
@@ -991,14 +1201,21 @@ valloc(size_t sz)
 void *
 memalign(size_t align, size_t sz)
 {
+	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
+	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
+
 	if (!want_debug(-1)) {
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
+	}
+
+	if (g_indent) {
+		align = (align + 0xffful) & ~0xffful;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
 	void *p = jem_aligned_alloc(align, ext_sz);
-	hook_handle_alloc(__builtin_return_address(0), p, sz);
+	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
 	return p;
 }
@@ -1015,82 +1232,107 @@ pvalloc(size_t sz)
 void *
 cf_rc_alloc(size_t sz)
 {
-	size_t tot_sz = sizeof(cf_rc_header) + sz;
-	size_t ext_sz = want_debug(-1) ? tot_sz + sizeof(uint32_t) : tot_sz;
+	int32_t flags = calc_alloc_flags(0, -1);
 
-	cf_rc_header *head = jem_malloc(ext_sz);
-	cf_assert(head, CF_ALLOC, "rc_alloc failed sz %zu", sz);
+	size_t tot_sz = sizeof(cf_rc_header) + sz;
+	size_t ext_sz = tot_sz;
 
 	if (want_debug(-1)) {
-		hook_handle_alloc(__builtin_return_address(0), head, tot_sz);
+		ext_sz += sizeof(uint32_t);
+
+		if (g_indent) {
+			ext_sz += MAX_INDENT;
+		}
 	}
+
+	void *p = jem_mallocx(ext_sz, flags);
+	void *p_indent = p;
+
+	if (want_debug(-1)) {
+		if (g_indent) {
+			p_indent = indent(p);
+		}
+
+		hook_handle_alloc(__builtin_return_address(0), p, p_indent, tot_sz);
+	}
+
+	cf_rc_header *head = p_indent;
 
 	head->rc = 1;
 	head->sz = (uint32_t)sz;
 
-	return head + 1;
+	return head + 1; // body
 }
 
-void
-cf_rc_free(void *p)
+static void
+do_rc_free(void *body, void *ra)
 {
-	if (p == NULL) {
+	if (body == NULL) {
 		cf_crash(CF_ALLOC, "trying to cf_rc_free() null pointer");
 	}
 
-	cf_rc_header *head = (cf_rc_header *)p - 1;
+	cf_rc_header *head = (cf_rc_header *)body - 1;
 
-	if (!want_debug(-1)) {
-		jem_dallocx(head, 0);
+	int32_t arena = hook_get_arena(head);
+	int32_t flags = calc_free_flags(arena);
+
+	if (!want_debug(arena)) {
+		jem_dallocx(head, flags); // not indented
 		return;
 	}
 
-	size_t jem_sz = jem_sallocx(head, 0);
-	hook_handle_free(__builtin_return_address(0), head, jem_sz);
-	jem_sdallocx(head, jem_sz, 0);
+	void *p = g_indent ? outdent(head) : head;
+	size_t jem_sz = jem_sallocx(p, 0);
+
+	hook_handle_free(ra, p, jem_sz);
+	jem_sdallocx(p, jem_sz, flags);
+}
+
+void
+cf_rc_free(void *body)
+{
+	do_rc_free(body, __builtin_return_address(0));
 }
 
 int32_t
-cf_rc_reserve(void *p)
+cf_rc_reserve(void *body)
 {
-	cf_rc_header *head = (cf_rc_header *)p - 1;
+	cf_rc_header *head = (cf_rc_header *)body - 1;
 	return cf_atomic32_incr(&head->rc);
 }
 
 int32_t
-cf_rc_release(void *p)
+cf_rc_release(void *body)
 {
-	cf_rc_header *head = (cf_rc_header *)p - 1;
+	cf_rc_header *head = (cf_rc_header *)body - 1;
 	int32_t rc = cf_atomic32_decr(&head->rc);
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
+
+	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc,
+			rc);
+
 	return rc;
 }
 
 int32_t
-cf_rc_releaseandfree(void *p)
+cf_rc_releaseandfree(void *body)
 {
-	cf_rc_header *head = (cf_rc_header *)p - 1;
+	cf_rc_header *head = (cf_rc_header *)body - 1;
 	int32_t rc = cf_atomic32_decr(&head->rc);
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc, rc);
+
+	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc,
+			rc);
 
 	if (rc > 0) {
 		return rc;
 	}
 
-	if (!want_debug(-1)) {
-		jem_dallocx(head, 0);
-		return 0;
-	}
-
-	size_t jem_sz = jem_sallocx(head, 0);
-	hook_handle_free(__builtin_return_address(0), head, jem_sz);
-	jem_sdallocx(head, jem_sz, 0);
+	do_rc_free(body, __builtin_return_address(0));
 	return 0;
 }
 
 int32_t
-cf_rc_count(const void *p)
+cf_rc_count(const void *body)
 {
-	const cf_rc_header *head = (const cf_rc_header *)p - 1;
+	const cf_rc_header *head = (const cf_rc_header *)body - 1;
 	return (int32_t)head->rc;
 }

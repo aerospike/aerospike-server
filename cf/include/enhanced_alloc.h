@@ -27,6 +27,7 @@
 //
 
 #include <malloc.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -58,7 +59,7 @@ typedef enum {
 extern __thread int32_t g_ns_arena;
 
 void cf_alloc_init(void);
-void cf_alloc_set_debug(cf_alloc_debug debug);
+void cf_alloc_set_debug(cf_alloc_debug debug, bool indent);
 int32_t cf_alloc_create_arena(void);
 
 #define CF_ALLOC_SET_NS_ARENA(_ns) \
@@ -115,6 +116,8 @@ void *cf_alloc_realloc_arena(void *p, size_t sz, int32_t arena);
 })
 
 #define cf_free(_p)              free(_p)
+
+extern bool g_alloc_started;
 
 
 //==========================================================

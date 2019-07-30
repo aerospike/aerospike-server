@@ -150,6 +150,7 @@ typedef struct as_config_s {
 
 	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
 	bool		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
+	bool			indent_allocations; // pointer indentation for better double-free detection
 
 	//--------------------------------------------
 	// network::service context.
