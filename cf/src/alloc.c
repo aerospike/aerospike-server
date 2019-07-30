@@ -528,10 +528,10 @@ cf_alloc_init(void)
 }
 
 void
-cf_alloc_set_debug(cf_alloc_debug debug, bool indent)
+cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations)
 {
-	g_debug = debug;
-	g_indent = indent;
+	g_debug = debug_allocations;
+	g_indent = indent_allocations;
 
 	g_alloc_started = true;
 }

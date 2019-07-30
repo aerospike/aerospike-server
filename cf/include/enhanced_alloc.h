@@ -59,7 +59,7 @@ typedef enum {
 extern __thread int32_t g_ns_arena;
 
 void cf_alloc_init(void);
-void cf_alloc_set_debug(cf_alloc_debug debug, bool indent);
+void cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations);
 int32_t cf_alloc_create_arena(void);
 
 #define CF_ALLOC_SET_NS_ARENA(_ns) \
