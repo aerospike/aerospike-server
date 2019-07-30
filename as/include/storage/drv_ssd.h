@@ -129,6 +129,7 @@ typedef struct ssd_device_unique_s {
 	uint32_t	unused;
 	uint8_t		encrypted_key[64];
 	uint8_t		canary[16];
+	uint64_t	pristine_offset;
 } ssd_device_unique;
 
 #define ROUND_UP_COMMON \
@@ -196,24 +197,6 @@ typedef struct ssd_wblock_state_s {
 
 
 //------------------------------------------------
-// Per-device information about its wblocks.
-//
-typedef struct ssd_alloc_table_s {
-	uint32_t			n_wblocks;		// number allocated below
-	ssd_wblock_state	wblock_state[];
-} ssd_alloc_table;
-
-
-//------------------------------------------------
-// Where on free_wblock_q freed wblocks go.
-//
-typedef enum {
-	FREE_TO_HEAD,
-	FREE_TO_TAIL
-} e_free_to;
-
-
-//------------------------------------------------
 // Per-device information.
 //
 typedef struct drv_ssd_s {
@@ -262,7 +245,6 @@ typedef struct drv_ssd_s {
 	int				file_id;
 
 	uint32_t		open_flag;
-	bool			data_in_memory;
 
 	uint64_t		io_min_size;		// device IO operations are aligned and sized in multiples of this
 	uint64_t		shadow_io_min_size;	// shadow device IO operations are aligned and sized in multiples of this
@@ -273,6 +255,12 @@ typedef struct drv_ssd_s {
 	cf_atomic64		inuse_size;			// number of bytes in actual use on this device
 
 	uint32_t		write_block_size;	// number of bytes to write at a time
+	uint32_t		first_wblock_id;	// wblock-id of first non-header wblock
+
+	uint32_t		pristine_wblock_id;	// minimum wblock-id of "pristine" region
+
+	uint32_t			n_wblocks;		// number of wblocks on this device
+	ssd_wblock_state	*wblock_state;	// array of info per wblock on this device
 
 	uint32_t		sweep_wblock_id;				// wblocks read at startup
 	uint64_t		record_add_older_counter;		// records not inserted due to better existing one
@@ -280,8 +268,6 @@ typedef struct drv_ssd_s {
 	uint64_t		record_add_evicted_counter;		// records not inserted due to eviction
 	uint64_t		record_add_replace_counter;		// records reinserted
 	uint64_t		record_add_unique_counter;		// records inserted
-
-	ssd_alloc_table	*alloc_table;
 
 	cf_tid			write_tid;
 	cf_tid			shadow_tid;

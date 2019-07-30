@@ -113,7 +113,7 @@ typedef struct as_storage_rd_s {
 
 typedef struct storage_device_stats_s {
 	uint64_t used_sz;
-	uint32_t free_wblock_q_sz;
+	uint32_t n_free_wblocks;
 
 	uint32_t write_q_sz;
 	uint64_t n_writes;
