@@ -743,6 +743,8 @@ blob_to_flat(const as_particle* p, uint8_t* flat)
 int
 as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 {
+	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unused bin");
+
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
 		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - unexpected particle type %u for bin %.*s",
 				msg_op->particle_type, (int)msg_op->name_sz, msg_op->name);
@@ -759,12 +761,6 @@ as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 
 	if (! bits_parse_op(&state, &op)) {
 		return -AS_ERR_PARAMETER;
-	}
-
-	if (! as_bin_inuse(b)) {
-		cf_detail(AS_PARTICLE, "as_bin_bits_packed_read - cannot apply operation (%s) on bin (%.*s) on a non-existent bin",
-				state.def->name, (int)msg_op->name_sz, msg_op->name);
-		return -AS_ERR_BIN_NOT_FOUND;
 	}
 
 	if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
