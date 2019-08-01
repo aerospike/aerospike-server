@@ -764,7 +764,7 @@ as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 	if (! as_bin_inuse(b)) {
 		cf_detail(AS_PARTICLE, "as_bin_bits_packed_read - cannot apply operation (%s) on bin (%.*s) on a non-existent bin",
 				state.def->name, (int)msg_op->name_sz, msg_op->name);
-		return -AS_ERR_INCOMPATIBLE_TYPE;
+		return -AS_ERR_BIN_NOT_FOUND;
 	}
 
 	if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
