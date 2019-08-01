@@ -745,7 +745,7 @@ as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 {
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
 		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - unexpected particle type %u for bin %.*s",
-						msg_op->particle_type, (int)msg_op->name_sz, msg_op->name);
+				msg_op->particle_type, (int)msg_op->name_sz, msg_op->name);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
