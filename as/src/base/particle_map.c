@@ -1270,7 +1270,7 @@ cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 	};
 
 	order_index_find find = {
-			.target = 0,
+			.target = p->idx,
 			.count = map.ele_count
 	};
 
@@ -3955,7 +3955,7 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 			packed_map_build_index_result_by_mask(map, rm_mask, rm_count,
 					result);
 		}
-		else if (! as_bin_inuse(result->result)) {
+		else if (! order_index_is_null(ordidx)) {
 			packed_map_build_index_result_by_ele_idx(map, &ret_idxs, 0,
 					rm_count, result);
 		}
@@ -3970,7 +3970,7 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 				return -AS_ERR_PARAMETER;
 			}
 		}
-		else if (! as_bin_inuse(result->result) &&
+		else if (! order_index_is_null(ordidx) &&
 				! packed_map_build_ele_result_by_ele_idx(map, &ret_idxs, 0,
 						rm_count, rm_sz, result)) {
 			cf_warning(AS_PARTICLE, "packed_map_get_remove_by_rank_range() invalid packed map");
@@ -4064,6 +4064,7 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 {
 	cdt_result_data *result = &com->result;
 	define_order_index2(rm_ic, map->ele_count, 2 * items_count, com->alloc_idx);
+	uint32_t rc_count = 0;
 
 	for (uint32_t i = 0; i < items_count; i++) {
 		cdt_payload key = {
@@ -4087,6 +4088,7 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 
 		order_index_set(&rm_ic, 2 * i, find_key.idx);
 		order_index_set(&rm_ic, (2 * i) + 1, count);
+		rc_count += count;
 	}
 
 	bool inverted = result_data_is_inverted(result);
@@ -4118,7 +4120,7 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 					map->ele_count);
 		}
 		else {
-			result_data_set_by_irc(result, &rm_ic, NULL, items_count);
+			result_data_set_by_irc(result, &rm_ic, NULL, rc_count);
 		}
 		break;
 	case RESULT_TYPE_COUNT:

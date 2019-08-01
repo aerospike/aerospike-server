@@ -3220,8 +3220,7 @@ cdt_context_print(const cdt_context *ctx, const char *name)
 	cf_warning(AS_PARTICLE, "cdt_context: offset %u sz %u bin_type %d delta_off %d delta_sz %d", ctx->data_offset, ctx->data_sz, as_bin_get_particle_type(ctx->b), ctx->delta_off, ctx->delta_sz);
 
 	const cdt_mem *p = (const cdt_mem *)ctx->b->particle;
-	char buf[1024];
 
 	print_packed(p->data, p->sz, name);
-	cf_warning(AS_PARTICLE, "[%u] %s", p->sz, buf);
+	cf_warning(AS_PARTICLE, "cdt_mem: %p sz %u", p, p->sz);
 }
