@@ -247,6 +247,7 @@ char const *as_geojson_mem_jsonstr(const as_particle *p, size_t *p_jsonsz);
 struct cdt_payload_s;
 struct rollback_alloc_s;
 extern void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
+
 extern int as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result);
 extern int as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
 
