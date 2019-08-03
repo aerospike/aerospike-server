@@ -1283,12 +1283,12 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 		uint32_t new_content_sz = ctx->top_content_sz + ctx->delta_sz;
 		uint32_t hdr_sz = as_pack_list_header_get_size(ctx->top_ele_count + 1); // maps have the same hdr size as list, +1 for ext
 
-		as_unpacker pk = {
+		as_unpacker upk = {
 				.buffer = orig_data + hdr_sz,
 				.length = orig_sz - hdr_sz
 		};
 
-		int check = as_unpack_ext(&pk, &ext);
+		int check = as_unpack_ext(&upk, &ext);
 		cf_assert(check == 0, AS_PARTICLE, "as_unpack_ext failed");
 
 		offset_index_init(&topoff, (uint8_t *)ext.data, ctx->top_ele_count,
@@ -1299,7 +1299,7 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 		uint32_t new_ext_cont_sz = ext.size + // ext.size may include ordidx for maps
 				offset_index_size(&newoff) - offset_index_size(&topoff);
 		uint32_t new_ext_hdr_sz = as_pack_ext_header_get_size(new_ext_cont_sz);
-		int32_t delta_ext = new_ext_hdr_sz + new_ext_cont_sz - pk.offset;
+		int32_t delta_ext = new_ext_hdr_sz + new_ext_cont_sz - upk.offset;
 
 		ctx->delta_off = delta_ext;
 		new_sz += delta_ext;

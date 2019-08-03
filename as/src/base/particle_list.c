@@ -935,7 +935,11 @@ cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 	packed_list_init_from_ctx(&list, ctx);
 
 	if (! list_is_ordered(&list)) { // unordered, top level, dim case
-		offset_index_set_filled(&list.offidx, p->idx / PACKED_LIST_INDEX_STEP);
+		if (! offset_index_is_null(&list.offidx)) {
+			offset_index_set_filled(&list.offidx,
+					p->idx / PACKED_LIST_INDEX_STEP);
+		}
+
 		return;
 	}
 
@@ -962,7 +966,7 @@ cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 			&rank, &count, false);
 
 	if (rank == p->idx || rank == p->idx + 1) { // no change
-		if (is_toplvl) {
+		if (is_toplvl && ! offset_index_is_null(&list.offidx)) {
 			offset_index_move_ele(&list.offidx, &orig.offidx, p->idx, p->idx);
 		}
 
@@ -989,7 +993,7 @@ cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 				end_off - orig_off - orig_sz);
 	}
 
-	if (is_toplvl) {
+	if (is_toplvl && ! offset_index_is_null(&list.offidx)) {
 		offset_index_move_ele(&list.offidx, &orig.offidx, p->idx, rank);
 	}
 }
