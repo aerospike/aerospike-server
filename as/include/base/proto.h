@@ -344,6 +344,7 @@ typedef struct as_msg_op_s {
 #define AS_MSG_OP_TOUCH         11 // will increment the generation
 #define AS_MSG_OP_BITS_READ     12 // blob bits top-level op
 #define AS_MSG_OP_BITS_MODIFY   13 // blob bits top-level op
+#define AS_MSG_OP_DELETE_ALL    14 // used without bin name
 
 //------------------------------------------------
 // UDF ops.

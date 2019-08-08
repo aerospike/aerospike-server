@@ -952,6 +952,15 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				return AS_ERR_PARAMETER;
 			}
 		}
+		else if (op->op == AS_MSG_OP_DELETE_ALL) {
+			if (record_level_replace) {
+				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: delete-all op can't have record-level replace flag ", ns->name);
+				return AS_ERR_PARAMETER;
+			}
+
+			// Could forbid multiple delete-alls and delete-all being first op
+			// (should use replace), but these are nonsensical, not unworkable.
+		}
 		else if (op_is_read_all(op, m)) {
 			if (respond_all_ops) {
 				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: read-all op can't have respond-all-ops flag ", ns->name);
@@ -1786,6 +1795,32 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 
 			xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
+
+			if (respond_all_ops) {
+				ops[*p_n_response_bins] = op;
+				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
+			}
+		}
+		else if (op->op == AS_MSG_OP_DELETE_ALL) {
+			if (ns->storage_data_in_memory) {
+				for (uint16_t i = 0; i < rd->n_bins; i++) {
+					as_bin* b = &rd->bins[i];
+
+					if (! as_bin_inuse(b)) {
+						break;
+					}
+
+					// Double copy necessary for single-bin, but doing it
+					// generally for code simplicity.
+					as_bin cleanup_bin;
+					as_bin_copy(ns, &cleanup_bin, b);
+
+					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
+				}
+			}
+
+			as_bin_set_all_empty(rd);
+			xdr_fill_dirty_bins(dirty_bins);
 
 			if (respond_all_ops) {
 				ops[*p_n_response_bins] = op;
