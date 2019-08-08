@@ -145,29 +145,6 @@ hook_get_arena(const void *p_indent)
 	return arena[0];
 }
 
-static void
-hook_check_arena(const void *p, int32_t arena)
-{
-	if (!g_alloc_started || g_debug == CF_ALLOC_DEBUG_NONE) {
-		return;
-	}
-
-	int32_t arena_p = hook_get_arena(p);
-
-	if (arena < 0 && arena_p < N_ARENAS) {
-		return;
-	}
-
-	// The "arena" parameter is never < N_ARENAS.
-
-	if (arena >= N_ARENAS && arena_p >= N_ARENAS) {
-		return;
-	}
-
-	size_t jem_sz = jem_sallocx(p, 0);
-	cf_crash(CF_ALLOC, "arena change for %zu@%p: %d -> %d", jem_sz, p, arena_p, arena);
-}
-
 // Map a 64-bit address to a 12-bit site ID.
 
 static uint32_t
@@ -978,6 +955,18 @@ do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
 		return do_mallocx(sz, arena, ra);
 	}
 
+	int32_t arena_p = hook_get_arena(p_indent);
+
+	bool debug_p = want_debug(arena_p);
+	bool debug = want_debug(arena);
+
+	// Allow debug change for startup arena - handled below.
+
+	if (debug != debug_p && arena_p != N_ARENAS) {
+		cf_crash(CF_ALLOC, "debug change - p_indent %p arena_p %d arena %d",
+				p_indent, arena_p, arena);
+	}
+
 	if (sz == 0) {
 		do_free(p_indent, ra);
 		return NULL;
@@ -985,15 +974,35 @@ do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
 
 	int32_t flags = calc_alloc_flags(0, arena);
 
-	if (!want_debug(arena)) {
-		hook_check_arena(p_indent, arena); // not indented
+	// Going from startup or non-debug arena to non-debug arena.
+
+	if (!debug) {
 		return jem_rallocx(p_indent, sz, flags); // not indented
 	}
+
+	// Going from startup arena to debug arena.
+
+	if (arena_p == N_ARENAS) {
+		void *p = p_indent; // not indented
+		void *p_move = do_mallocx(sz, arena, ra);
+
+		size_t sz_move = jem_sallocx(p, 0);
+
+		if (sz < sz_move) {
+			sz_move = sz;
+		}
+
+		memcpy(p_move, p, sz_move);
+		cf_free(p);
+
+		return p_move;
+	}
+
+	// Going from debug arena to debug arena.
 
 	void *p = g_indent ? outdent(p_indent) : p_indent;
 	size_t jem_sz = jem_sallocx(p, 0);
 
-	hook_check_arena(p, arena);
 	hook_handle_free(ra, p, jem_sz);
 
 	size_t ext_sz = sz + sizeof(uint32_t);
