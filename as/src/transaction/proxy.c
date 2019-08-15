@@ -142,6 +142,7 @@ int proxy_timeout_reduce_fn(const void* key, void* data, void* udata);
 
 int proxy_msg_cb(cf_node src, msg* m, void* udata);
 
+cl_msg* new_msg_w_extra_field(const cl_msg* msgp, const as_msg_field* f);
 void proxyer_handle_response(msg* m, uint32_t tid);
 int proxyer_handle_client_response(msg* m, proxy_request* pr);
 int proxyer_handle_batch_response(msg* m, proxy_request* pr);
@@ -245,15 +246,29 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 
 	uint32_t tid = cf_atomic32_incr(&g_proxy_tid);
 
-	msg_set_type set_type = tr->origin == FROM_BATCH ?
-			MSG_SET_COPY : MSG_SET_HANDOFF_MALLOC;
-
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_REQUEST);
 	msg_set_uint32(m, PROXY_FIELD_TID, tid);
 	msg_set_buf(m, PROXY_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
-	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)tr->msgp,
-			sizeof(as_proto) + tr->msgp->proto.sz, set_type);
+
+	if (tr->origin == FROM_BATCH) {
+		as_msg_field* f = as_batch_get_predexp_mf(tr->from.batch_shared);
+
+		if (f == NULL) {
+			msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)tr->msgp,
+					sizeof(as_proto) + tr->msgp->proto.sz, MSG_SET_COPY);
+		}
+		else {
+			cl_msg* msgp = new_msg_w_extra_field(tr->msgp, f);
+
+			msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)msgp,
+					sizeof(as_proto) + msgp->proto.sz, MSG_SET_HANDOFF_MALLOC);
+		}
+	}
+	else {
+		msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)tr->msgp,
+				sizeof(as_proto) + tr->msgp->proto.sz, MSG_SET_HANDOFF_MALLOC);
+	}
 
 	// Set up a proxy_request and insert it in the hash.
 
@@ -363,6 +378,22 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
 //==========================================================
 // Local helpers - proxyer.
 //
+
+cl_msg*
+new_msg_w_extra_field(const cl_msg* msgp, const as_msg_field* f)
+{
+	size_t old_sz = sizeof(as_proto) + msgp->proto.sz;
+	size_t extra_sz = sizeof(f->field_sz) + f->field_sz;
+	cl_msg* new_msgp = cf_malloc(old_sz + extra_sz);
+
+	memcpy(new_msgp, msgp, old_sz);
+	memcpy((uint8_t*)new_msgp + old_sz, f, extra_sz);
+
+	new_msgp->proto.sz += extra_sz;
+	new_msgp->msg.n_fields++;
+
+	return new_msgp;
+}
 
 void
 proxyer_handle_response(msg* m, uint32_t tid)

@@ -697,9 +697,7 @@ basic_scan_job_destroy(as_job* _job)
 		cf_vector_destroy(job->bin_names);
 	}
 
-	if (job->predexp) {
-		predexp_destroy(job->predexp);
-	}
+	predexp_destroy(job->predexp);
 }
 
 void
@@ -742,10 +740,15 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
+	predexp_retval_t predrv = PREDEXP_TRUE;
 
-	if (job->predexp && ! predexp_matches_metadata(job->predexp, &predargs)) {
-		as_record_done(r_ref, ns);
-		return;
+	if (job->predexp != NULL) {
+		predrv = predexp_matches_metadata(job->predexp, &predargs);
+
+		if (predrv == PREDEXP_FALSE) {
+			as_record_done(r_ref, ns);
+			return;
+		}
 	}
 
 	as_storage_rd rd;
@@ -753,7 +756,21 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_storage_record_open(ns, r, &rd);
 
 	if (job->no_bin_data) {
-		// TODO - suppose the predexp needs bin values???
+		if (predrv == PREDEXP_UNKNOWN) {
+			as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
+
+			as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
+
+			as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
+
+			predargs.rd = &rd;
+
+			if (! predexp_matches_record(job->predexp, &predargs)) {
+				as_storage_record_close(&rd);
+				as_record_done(r_ref, ns);
+				return;
+			}
+		}
 
 		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL);
 	}
@@ -766,7 +783,8 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 		predargs.rd = &rd;
 
-		if (job->predexp && ! predexp_matches_record(job->predexp, &predargs)) {
+		if (predrv == PREDEXP_UNKNOWN &&
+				! predexp_matches_record(job->predexp, &predargs)) {
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
 			return;
@@ -1359,8 +1377,9 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
 
-	if (job->origin.predexp &&
-			! predexp_matches_metadata(job->origin.predexp, &predargs)) {
+	if (job->origin.predexp != NULL &&
+			predexp_matches_metadata(job->origin.predexp, &predargs) ==
+					PREDEXP_FALSE) {
 		as_record_done(r_ref, ns);
 		return;
 	}

@@ -85,9 +85,7 @@ iudf_origin_destroy(iudf_origin* origin)
 		as_list_destroy(origin->def.arglist);
 	}
 
-	if (origin->predexp) {
-		predexp_destroy(origin->predexp);
-	}
+	predexp_destroy(origin->predexp);
 }
 
 void as_udf_init();

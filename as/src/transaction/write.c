@@ -41,6 +41,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -130,6 +131,7 @@ client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_client_write_success);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_client_write_success);
@@ -156,6 +158,7 @@ from_proxy_write_update_stats(as_namespace* ns, uint8_t result_code,
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_write_success);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_success);
@@ -661,6 +664,16 @@ write_master(rw_request* rw, as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
+	// Apply predexp metadata filter if present.
+
+	predexp_eval_t* predexp = NULL;
+
+	if (! record_created && as_record_is_live(r) &&
+			(result = build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
+		write_master_failed(tr, &r_ref, record_created, tree, 0, result);
+		return TRANS_DONE_ERROR;
+	}
+
 	//------------------------------------------------------
 	// Open or create the as_storage_rd, and handle record
 	// metadata.
@@ -673,6 +686,17 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 	else {
 		as_storage_record_open(ns, r, &rd);
+	}
+
+	// Apply predexp record bins filter if present.
+	if (predexp != NULL) {
+		if ((result = predexp_read_and_filter_bins(&rd, predexp)) != 0) {
+			predexp_destroy(predexp);
+			write_master_failed(tr, &r_ref, false, tree, &rd, result);
+			return TRANS_DONE_ERROR;
+		}
+
+		predexp_destroy(predexp);
 	}
 
 	// Deal with delete durability (enterprise only).

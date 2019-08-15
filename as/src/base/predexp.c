@@ -40,13 +40,6 @@
 #include "geospatial/geospatial.h"
 #include "storage/storage.h"
 
-typedef enum {
-	PREDEXP_FALSE = 0,		// Matching nodes only
-	PREDEXP_TRUE = 1,		// Matching nodes only
-	PREDEXP_UNKNOWN = 2,	// Matching nodes only
-	PREDEXP_VALUE = 3,		// Value nodes only
-	PREDEXP_NOVALUE = 4		// Value nodes only
-} predexp_retval_t;
 
 typedef struct wrapped_as_bin_s {
 	as_bin	bin;
@@ -2119,20 +2112,30 @@ predexp_build(as_msg_field* pfp)
 	return NULL;
 }
 
-bool
+predexp_retval_t
 predexp_matches_metadata(predexp_eval_t* bp, predexp_args_t* argsp)
 {
-	if (! bp) {
-		return true;
+	if (bp == NULL) {
+		return PREDEXP_TRUE;
 	}
 
-	return ((*bp->eval_fn)(bp, argsp, NULL) != PREDEXP_FALSE);
+	predexp_retval_t result = (*bp->eval_fn)(bp, argsp, NULL);
+
+	switch (result) {
+	case PREDEXP_TRUE:
+	case PREDEXP_FALSE:
+	case PREDEXP_UNKNOWN:
+		return result;
+	default:
+		cf_crash(AS_PREDEXP, "predexp_matches_metadata returned other than true/false/unknown");
+		return result; // makes compiler happy
+	}
 }
 
 bool
 predexp_matches_record(predexp_eval_t* bp, predexp_args_t* argsp)
 {
-	if (! bp) {
+	if (bp == NULL) {
 		return true;
 	}
 
@@ -2142,8 +2145,7 @@ predexp_matches_record(predexp_eval_t* bp, predexp_args_t* argsp)
 	case PREDEXP_FALSE:
 		return false;
 	default:
-		cf_crash(AS_PREDEXP, "predexp eval returned other then true/false "
-				 "with record data present");
+		cf_crash(AS_PREDEXP, "predexp_matches_record returned other than true/false with record data present");
 		return false;	// makes compiler happy
 	}
 }
@@ -2151,5 +2153,9 @@ predexp_matches_record(predexp_eval_t* bp, predexp_args_t* argsp)
 void
 predexp_destroy(predexp_eval_t* bp)
 {
+	if (bp == NULL) {
+		return;
+	}
+
 	(*bp->dtor_fn)(bp);
 }

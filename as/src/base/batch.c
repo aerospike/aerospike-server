@@ -31,6 +31,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/stats.h"
@@ -98,6 +99,8 @@ struct as_batch_shared_s {
 	int result_code;
 	bool in_trailer;
 	bool bad_response_fd;
+	as_msg_field* predexp_mf;
+	predexp_eval_t* predexp;
 };
 
 typedef struct {
@@ -243,6 +246,7 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 	cf_mutex_destroy(&shared->lock);
 
 	// Release memory
+	predexp_destroy(shared->predexp);
 	cf_free(shared->msgp);
 	cf_free(shared);
 
@@ -664,7 +668,8 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 		as_batch_buffer_complete(shared, prev_buffer);
 	}
 
-	if (! (result_code == AS_OK || result_code == AS_ERR_NOT_FOUND)) {
+	if (! (result_code == AS_OK || result_code == AS_ERR_NOT_FOUND ||
+			result_code == AS_ERR_FILTERED_OUT)) {
 		// Result code can be set outside of lock because it doesn't matter which transaction's
 		// result code is used as long as it's an error.
 		shared->result_code = result_code;
@@ -796,6 +801,7 @@ as_batch_queue_task(as_transaction* btr)
 	as_msg_field* mf = (as_msg_field*)bmsg->data;
 	as_msg_field* end;
 	as_msg_field* bf = 0;
+	as_msg_field* predexp_mf = 0;
 
 	for (int i = 0; i < bmsg->n_fields; i++) {
 		if ((uint8_t*)mf >= limit) {
@@ -808,6 +814,10 @@ as_batch_queue_task(as_transaction* btr)
 		if (mf->type == AS_MSG_FIELD_TYPE_BATCH || mf->type == AS_MSG_FIELD_TYPE_BATCH_WITH_SET) {
 			bf = mf;
 		}
+		else if (mf->type == AS_MSG_FIELD_TYPE_PREDEXP) {
+			predexp_mf = mf;
+		}
+
 		mf = end;
 	}
 
@@ -865,6 +875,17 @@ as_batch_queue_task(as_transaction* btr)
 			return as_batch_send_error(btr, AS_ERR_BATCH_QUEUES_FULL);
 		}
 	}
+
+	if (predexp_mf != NULL) {
+		shared->predexp_mf = predexp_mf;
+
+		if ((shared->predexp = predexp_build(predexp_mf)) == NULL) {
+			cf_warning(AS_BATCH, "Failed to build batch predexp");
+			cf_free(shared);
+			return as_batch_send_error(btr, AS_ERR_PARAMETER);
+		}
+	}
+
 	// Increment batch queue transaction count.
 	cf_atomic32_incr(&batch_queue->tran_count);
 	shared->response_queue = batch_queue->response_queue;
@@ -1270,4 +1291,16 @@ as_file_handle*
 as_batch_get_fd_h(as_batch_shared* shared)
 {
 	return shared->fd_h;
+}
+
+as_msg_field*
+as_batch_get_predexp_mf(as_batch_shared* shared)
+{
+	return shared->predexp_mf;
+}
+
+predexp_eval_t*
+as_batch_get_predexp(as_batch_shared* shared)
+{
+	return shared->predexp;
 }

@@ -41,6 +41,7 @@
 #include "base/cfg.h" // xdr_allows_write
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/predexp.h"
 #include "base/proto.h" // xdr_allows_write
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -152,6 +153,72 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 
 	// Given the name, find/assign the set-ID and write it in the as_index.
 	return as_index_set_set_w_len(r, ns, (const char*)f->data, name_len, true);
+}
+
+
+int
+build_predexp_and_filter_meta(const as_transaction* tr, const as_record* r,
+		predexp_eval_t** predexp)
+{
+	if (! as_transaction_has_predexp(tr)) {
+		*predexp = NULL;
+		return AS_OK;
+	}
+
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
+			AS_MSG_FIELD_TYPE_PREDEXP);
+
+	if ((*predexp = predexp_build(f)) == NULL) {
+		return AS_ERR_PARAMETER;
+	}
+
+	// TODO - perhaps fields of predexp_args_t should be const?
+	predexp_args_t predargs = { .ns = tr->rsv.ns, .md = (as_record*)r };
+	predexp_retval_t predrv = predexp_matches_metadata(*predexp, &predargs);
+
+	if (predrv == PREDEXP_UNKNOWN) {
+		return AS_OK; // caller must later check bins using *predexp
+	}
+	// else - caller will not need to apply filter later.
+
+	predexp_destroy(*predexp);
+	*predexp = NULL;
+
+	return predrv == PREDEXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
+}
+
+
+int
+predexp_read_and_filter_bins(as_storage_rd* rd, predexp_eval_t* predexp)
+{
+	int result;
+
+	if ((result = as_storage_rd_load_n_bins(rd)) < 0) {
+		return -result;
+	}
+
+	as_namespace* ns = rd->ns;
+	as_record* r = rd->r;
+
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd->n_bins];
+
+	if ((result = as_storage_rd_load_bins(rd, stack_bins)) < 0) {
+		return -result;
+	}
+
+	if (! as_bin_inuse_has(rd)) {
+		cf_warning_digest(AS_RW, &r->keyd, "{%s} record with no bins ",
+				ns->name);
+		return AS_ERR_UNKNOWN;
+	}
+
+	predexp_args_t predargs = { .ns = ns, .md = r, .rd = rd };
+
+	if (! predexp_matches_record(predexp, &predargs)) {
+		return AS_ERR_FILTERED_OUT;
+	}
+
+	return AS_OK;
 }
 
 

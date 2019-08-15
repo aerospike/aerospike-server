@@ -31,9 +31,11 @@
 
 struct as_bin_s;
 struct as_file_handle_s;
+struct as_msg_field_s;
 struct as_msg_op_s;
 struct as_transaction_s;
 struct cl_msg_s;
+struct predexp_eval_base_s;
 
 typedef struct as_batch_shared_s as_batch_shared;
 
@@ -48,3 +50,5 @@ int as_batch_unused_buffers();
 void as_batch_destroy();
 
 struct as_file_handle_s* as_batch_get_fd_h(as_batch_shared* shared);
+struct as_msg_field_s* as_batch_get_predexp_mf(as_batch_shared* shared);
+struct predexp_eval_base_s* as_batch_get_predexp(as_batch_shared* shared);

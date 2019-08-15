@@ -41,6 +41,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -83,6 +84,7 @@ client_delete_update_stats(as_namespace* ns, uint8_t result_code,
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_client_delete_success);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_client_delete_success);
@@ -115,6 +117,7 @@ from_proxy_delete_update_stats(as_namespace* ns, uint8_t result_code,
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_delete_success);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_success);
@@ -473,11 +476,35 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		return TRANS_DONE_ERROR;
 	}
 
+	// Apply predexp metadata filter if present.
+
+	predexp_eval_t* predexp = NULL;
+	int result = build_predexp_and_filter_meta(tr, r, &predexp);
+
+	if (result != 0) {
+		as_record_done(r_ref, ns);
+		tr->result_code = result;
+		return TRANS_DONE_ERROR;
+	}
+
 	bool check_key = as_transaction_has_key(tr);
 
-	if (ns->storage_data_in_memory || check_key) {
+	if (ns->storage_data_in_memory || predexp != NULL || check_key) {
 		as_storage_rd rd;
 		as_storage_record_open(ns, r, &rd);
+
+		// Apply predexp record bins filter if present.
+		if (predexp != NULL) {
+			if ((result = predexp_read_and_filter_bins(&rd, predexp)) != 0) {
+				predexp_destroy(predexp);
+				as_storage_record_close(&rd);
+				as_record_done(r_ref, ns);
+				tr->result_code = result;
+				return TRANS_DONE_ERROR;
+			}
+
+			predexp_destroy(predexp);
+		}
 
 		// Check the key if required.
 		// Note - for data-not-in-memory a key check is expensive!

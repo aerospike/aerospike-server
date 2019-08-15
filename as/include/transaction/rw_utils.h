@@ -55,6 +55,7 @@ struct as_namespace_s;
 struct as_remote_record_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
+struct predexp_eval_base_s;
 struct rw_request_s;
 struct udf_record_s;
 
@@ -97,6 +98,8 @@ bool set_name_check(const struct as_transaction_s* tr, const struct as_index_s* 
 bool generation_check(const struct as_index_s* r, const struct as_msg_s* m, const struct as_namespace_s* ns);
 int set_set_from_msg(struct as_index_s* r, struct as_namespace_s* ns, struct as_msg_s* m);
 int set_delete_durablility(const struct as_transaction_s* tr, struct as_storage_rd_s* rd);
+int build_predexp_and_filter_meta(const struct as_transaction_s* tr, const struct as_index_s* r, struct predexp_eval_base_s** predexp);
+int predexp_read_and_filter_bins(struct as_storage_rd_s* rd, struct predexp_eval_base_s* predexp);
 bool check_msg_key(struct as_msg_s* m, struct as_storage_rd_s* rd);
 bool get_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);

@@ -792,7 +792,9 @@ query_teardown(as_query_transaction *qtr)
 	if (qtr->si)          AS_SINDEX_RELEASE(qtr->si);
 	if (qtr->binlist)     cf_vector_destroy(qtr->binlist);
 	if (qtr->setname)     cf_free(qtr->setname);
-	if (qtr->predexp_eval) predexp_destroy(qtr->predexp_eval);
+
+	predexp_destroy(qtr->predexp_eval);
+
 	if (qtr->job_type == QUERY_TYPE_AGGR && qtr->agg_call.def.arglist) {
 		as_list_destroy(qtr->agg_call.def.arglist);
 	}
@@ -1580,11 +1582,15 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		as_index *r = r_ref.r;
 
 		predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
+		predexp_retval_t predrv = PREDEXP_TRUE;
 
-		if (qtr->predexp_eval &&
-			! predexp_matches_metadata(qtr->predexp_eval, &predargs)) {
-			as_record_done(&r_ref, ns);
-			goto CLEANUP;
+		if (qtr->predexp_eval != NULL) {
+			predrv = predexp_matches_metadata(qtr->predexp_eval, &predargs);
+
+			if (predrv == PREDEXP_FALSE) {
+				as_record_done(&r_ref, ns);
+				goto CLEANUP;
+			}
 		}
 
 		// check to see this isn't a record waiting to die
@@ -1621,8 +1627,8 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		// Now we have a record.
 		predargs.rd = &rd;
 
-		if (qtr->predexp_eval &&
-			 ! predexp_matches_record(qtr->predexp_eval, &predargs)) {
+		if (predrv == PREDEXP_UNKNOWN &&
+				! predexp_matches_record(qtr->predexp_eval, &predargs)) {
 			as_storage_record_close(&rd);
 			as_record_done(&r_ref, ns);
 			goto CLEANUP;
@@ -1836,7 +1842,7 @@ query_udf_bg_tr_complete(void *udata, int retcode)
 int
 query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
-	if (qtr->origin.predexp) {
+	if (qtr->origin.predexp != NULL) {
 		as_partition_reservation rsv_stack;
 		as_partition_reservation *rsv = &rsv_stack;
 		uint32_t pid = as_partition_getid(keyd);
@@ -1856,8 +1862,8 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 				.ns = qtr->ns, .md = r_ref.r, .vl = NULL, .rd = NULL
 		};
 
-		if (qtr->origin.predexp &&
-				! predexp_matches_metadata(qtr->origin.predexp, &predargs)) {
+		if (predexp_matches_metadata(qtr->origin.predexp, &predargs) ==
+				PREDEXP_FALSE) {
 			as_record_done(&r_ref, qtr->ns);
 			query_release_partition(qtr, rsv);
 			return AS_QUERY_OK;
@@ -2897,7 +2903,9 @@ Cleanup:
 	// Pre Query Setup Failure
 	if (setname)     cf_free(setname);
 	if (si)          AS_SINDEX_RELEASE(si);
-	if (predexp_eval) predexp_destroy(predexp_eval);
+
+	predexp_destroy(predexp_eval);
+
 	if (srange)      as_sindex_range_free(&srange);
 	if (binlist)     cf_vector_destroy(binlist);
 	return rv;

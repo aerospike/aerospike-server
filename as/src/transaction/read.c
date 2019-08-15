@@ -42,6 +42,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
@@ -72,6 +73,8 @@ void read_timeout_cb(rw_request* rw);
 transaction_status read_local(as_transaction* tr);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code);
+int batch_predexp_filter_meta(const as_transaction* tr, const as_record* r,
+		predexp_eval_t** predexp);
 
 
 //==========================================================
@@ -96,6 +99,7 @@ client_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_client_read_success);
 		break;
 	case AS_ERR_TIMEOUT:
@@ -115,6 +119,7 @@ from_proxy_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_read_success);
 		break;
 	case AS_ERR_TIMEOUT:
@@ -134,6 +139,7 @@ batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_batch_sub_read_success);
 		break;
 	case AS_ERR_TIMEOUT:
@@ -153,6 +159,7 @@ from_proxy_batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_success);
 		break;
 	case AS_ERR_TIMEOUT:
@@ -514,12 +521,42 @@ read_local(as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
+	// Apply predexp metadata filter if present.
+
+	predexp_eval_t* predexp = NULL;
+	predexp_eval_t* batch_predexp = NULL;
+
+	if (tr->origin == FROM_BATCH) {
+		if ((result = batch_predexp_filter_meta(tr, r, &batch_predexp)) != 0) {
+			read_local_done(tr, &r_ref, NULL, result);
+			return TRANS_DONE_ERROR;
+		}
+	}
+	else {
+		if ((result = build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
+			read_local_done(tr, &r_ref, NULL, result);
+			return TRANS_DONE_ERROR;
+		}
+	}
+
 	as_storage_rd rd;
 
 	as_storage_record_open(ns, r, &rd);
 
 	// If configuration permits, allow reads to use page cache.
 	rd.read_page_cache = ns->storage_read_page_cache;
+
+	// Apply predexp record bins filter if present.
+	if (predexp != NULL || batch_predexp != NULL) {
+		if ((result = predexp_read_and_filter_bins(&rd,
+				tr->origin == FROM_BATCH ? batch_predexp : predexp)) != 0) {
+			predexp_destroy(predexp);
+			read_local_done(tr, &r_ref, &rd, result);
+			return TRANS_DONE_ERROR;
+		}
+
+		predexp_destroy(predexp);
+	}
 
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
@@ -714,4 +751,28 @@ read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	tr->result_code = (uint8_t)result_code;
 
 	send_read_response(tr, NULL, NULL, 0, NULL);
+}
+
+
+int
+batch_predexp_filter_meta(const as_transaction* tr, const as_record* r,
+		predexp_eval_t** predexp)
+{
+	*predexp = as_batch_get_predexp(tr->from.batch_shared);
+
+	if (*predexp == NULL) {
+		return AS_OK;
+	}
+
+	predexp_args_t predargs = { .ns = tr->rsv.ns, .md = (as_record*)r };
+	predexp_retval_t predrv = predexp_matches_metadata(*predexp, &predargs);
+
+	if (predrv == PREDEXP_UNKNOWN) {
+		return AS_OK; // caller must later check bins using *predexp
+	}
+	// else - caller will not need to apply filter later.
+
+	*predexp = NULL;
+
+	return predrv == PREDEXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
 }

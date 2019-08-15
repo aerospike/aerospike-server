@@ -51,6 +51,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -145,6 +146,7 @@ client_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_client_udf_complete);
 		break;
 	case AS_ERR_TIMEOUT:
@@ -161,6 +163,7 @@ from_proxy_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_udf_complete);
 		break;
 	case AS_ERR_TIMEOUT:
@@ -177,6 +180,7 @@ udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
+	case AS_ERR_FILTERED_OUT: // doesn't include those filtered out by metadata
 		cf_atomic64_incr(&ns->n_udf_sub_udf_complete);
 		break;
 	case AS_ERR_TIMEOUT:
@@ -726,6 +730,18 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		return UDF_OPTYPE_NONE;
 	}
 
+	// Apply predexp metadata filter if present & not internal UDF.
+
+	int rv;
+	predexp_eval_t* predexp = NULL;
+
+	if (tr->origin != FROM_IUDF && get_rv == 0 && as_record_is_live(r_ref.r) &&
+			(rv = build_predexp_and_filter_meta(tr, r_ref.r, &predexp)) != 0) {
+		tr->result_code = rv;
+		process_failure(call, NULL, &rw->response_db);
+		return UDF_OPTYPE_NONE;
+	}
+
 	// Open storage record.
 
 	as_storage_rd rd;
@@ -746,24 +762,26 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		urecord.flag |= (UDF_RECORD_FLAG_OPEN | UDF_RECORD_FLAG_PREEXISTS);
 
 		if (udf_storage_record_open(&urecord) != 0) {
+			predexp_destroy(predexp);
 			udf_record_close(&urecord);
 			tr->result_code = AS_ERR_BIN_NAME; // overloaded... add bin_count error?
 			process_failure(call, NULL, &rw->response_db);
 			return UDF_OPTYPE_NONE;
 		}
 
-		if (tr->origin == FROM_IUDF && tr->from.iudf_orig->predexp) {
-			predexp_args_t predargs = {
-					.ns = ns, .md = r_ref.r, .vl = NULL, .rd = &rd
-			};
+		if (predexp != NULL || tr->from.iudf_orig->predexp != NULL) {
+			predexp_args_t predargs = { .ns = ns, .md = r_ref.r, .rd = &rd };
 
-			if (! predexp_matches_record(tr->from.iudf_orig->predexp,
-					&predargs)) {
+			if (! predexp_matches_record(tr->origin == FROM_IUDF ?
+					tr->from.iudf_orig->predexp : predexp, &predargs)) {
+				predexp_destroy(predexp);
 				udf_record_close(&urecord);
-				tr->result_code = AS_ERR_NOT_FOUND; // not ideal
+				tr->result_code = AS_ERR_FILTERED_OUT;
 				process_failure(call, NULL, &rw->response_db);
 				return UDF_OPTYPE_NONE;
 			}
+
+			predexp_destroy(predexp);
 		}
 
 		as_msg* m = &tr->msgp->msg;

@@ -44,14 +44,22 @@ typedef struct predexp_args_s {
 	as_storage_rd*		rd;		// NULL during metadata phase
 } predexp_args_t;
 
-extern predexp_eval_t* predexp_build(as_msg_field* pfp);
+typedef enum {
+	PREDEXP_FALSE = 0,		// matching nodes only
+	PREDEXP_TRUE = 1,		// matching nodes only
+	PREDEXP_UNKNOWN = 2,	// matching nodes only
+
+	// Private - never returned by pulbic API.
+	PREDEXP_VALUE = 3,		// value nodes only
+	PREDEXP_NOVALUE = 4		// value nodes only
+} predexp_retval_t;
+
+predexp_eval_t* predexp_build(as_msg_field* pfp);
 
 // Called with NULL rd
-extern bool predexp_matches_metadata(predexp_eval_t* eval,
-									 predexp_args_t* argsp);
+predexp_retval_t predexp_matches_metadata(predexp_eval_t* eval, predexp_args_t* argsp);
 
 // Called with both ndx and rd.
-extern bool predexp_matches_record(predexp_eval_t* eval,
-								   predexp_args_t* argsp);
+bool predexp_matches_record(predexp_eval_t* eval, predexp_args_t* argsp);
 
-extern void predexp_destroy(predexp_eval_t* eval);
+void predexp_destroy(predexp_eval_t* eval);
