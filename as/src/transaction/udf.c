@@ -769,7 +769,8 @@ udf_master_apply(udf_call* call, rw_request* rw)
 			return UDF_OPTYPE_NONE;
 		}
 
-		if (predexp != NULL || tr->from.iudf_orig->predexp != NULL) {
+		if (predexp != NULL || (tr->origin == FROM_IUDF &&
+				tr->from.iudf_orig->predexp != NULL)) {
 			predexp_args_t predargs = { .ns = ns, .md = r_ref.r, .rd = &rd };
 
 			if (! predexp_matches_record(tr->origin == FROM_IUDF ?
