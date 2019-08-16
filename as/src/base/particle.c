@@ -63,7 +63,6 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_FLOAT]		= &float_vtable,
 		[AS_PARTICLE_TYPE_STRING]		= &string_vtable,
 		[AS_PARTICLE_TYPE_BLOB]			= &blob_vtable,
-		[AS_PARTICLE_TYPE_TIMESTAMP]	= &integer_vtable,
 		[AS_PARTICLE_TYPE_JAVA_BLOB]	= &blob_vtable,
 		[AS_PARTICLE_TYPE_CSHARP_BLOB]	= &blob_vtable,
 		[AS_PARTICLE_TYPE_PYTHON_BLOB]	= &blob_vtable,
@@ -89,7 +88,6 @@ safe_particle_type(uint8_t type)
 	case AS_PARTICLE_TYPE_FLOAT:
 	case AS_PARTICLE_TYPE_STRING:
 	case AS_PARTICLE_TYPE_BLOB:
-	case AS_PARTICLE_TYPE_TIMESTAMP:
 	case AS_PARTICLE_TYPE_JAVA_BLOB:
 	case AS_PARTICLE_TYPE_CSHARP_BLOB:
 	case AS_PARTICLE_TYPE_PYTHON_BLOB:

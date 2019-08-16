@@ -122,8 +122,6 @@ typedef enum {
 	AS_PARTICLE_TYPE_FLOAT = 2,
 	AS_PARTICLE_TYPE_STRING = 3,
 	AS_PARTICLE_TYPE_BLOB = 4,
-	AS_PARTICLE_TYPE_TIMESTAMP = 5,
-	AS_PARTICLE_TYPE_UNUSED_6 = 6,
 	AS_PARTICLE_TYPE_JAVA_BLOB = 7,
 	AS_PARTICLE_TYPE_CSHARP_BLOB = 8,
 	AS_PARTICLE_TYPE_PYTHON_BLOB = 9,
@@ -325,10 +323,6 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 		break;
 	case AS_PARTICLE_TYPE_FLOAT:
 		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_FLOAT;
-		break;
-	case AS_PARTICLE_TYPE_TIMESTAMP:
-		// TODO - unsupported
-		((as_particle_iparticle *)b)->state = AS_BIN_STATE_UNUSED;
 		break;
 	default:
 		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_OTHER;

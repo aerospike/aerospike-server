@@ -206,12 +206,6 @@ predexp_read_and_filter_bins(as_storage_rd* rd, predexp_eval_t* predexp)
 		return -result;
 	}
 
-	if (! as_bin_inuse_has(rd)) {
-		cf_warning_digest(AS_RW, &r->keyd, "{%s} record with no bins ",
-				ns->name);
-		return AS_ERR_UNKNOWN;
-	}
-
 	predexp_args_t predargs = { .ns = ns, .md = r, .rd = rd };
 
 	if (! predexp_matches_record(predexp, &predargs)) {

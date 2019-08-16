@@ -589,12 +589,6 @@ read_local(as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
-	if (! as_bin_inuse_has(&rd)) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: found record with no bins ", ns->name);
-		read_local_done(tr, &r_ref, &rd, AS_ERR_UNKNOWN);
-		return TRANS_DONE_ERROR;
-	}
-
 	uint32_t bin_count = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0 ?
 			rd.n_bins : m->n_ops;
 
