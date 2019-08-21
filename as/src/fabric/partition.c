@@ -431,9 +431,7 @@ as_partition_reserve_query(as_namespace* ns, uint32_t pid,
 	return as_partition_reserve_write(ns, pid, rsv, NULL);
 }
 
-// Obtain a partition reservation for XDR reads. Succeeds, if we are sync or
-// zombie for the partition.
-// TODO - what if partition is unavailable?
+// Succeeds if we are full working master or prole.
 int
 as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv)
@@ -444,7 +442,9 @@ as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 
 	int res = -1;
 
-	if (as_partition_version_has_data(&p->version)) {
+	if (p->pending_immigrations == 0 &&
+			(g_config.self_node == p->working_master ||
+					find_self_in_replicas(p) >= 0)) {
 		partition_reserve_lockfree(p, ns, rsv);
 		res = 0;
 	}
