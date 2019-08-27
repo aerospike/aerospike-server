@@ -502,18 +502,26 @@ msgpack_cmp_parse(parse_meta *meta)
 		meta->type = TYPE_INT;
 		return;
 
-	case 0xca: // float
+	case 0xca: { // float
 		CMP_PARSE_BUF_CHECK(meta, 4);
-		meta->d_num = (double)(float)cf_swap_from_be32(*(uint32_t *)meta->buf);
+
+		uint32_t i = cf_swap_from_be32(*(uint32_t *)meta->buf);
+
+		meta->d_num = (double)*(float *)&i;
 		meta->buf += 4;
 		meta->type = TYPE_DOUBLE;
 		break;
-	case 0xcb: // double
+	}
+	case 0xcb: { // double
 		CMP_PARSE_BUF_CHECK(meta, 8);
-		meta->d_num = (double)cf_swap_from_be64(*(uint64_t *)meta->buf);
+
+		uint64_t i = cf_swap_from_be64(*(uint64_t *)meta->buf);
+
+		meta->d_num = *(double *)&i;
 		meta->buf += 8;
 		meta->type = TYPE_DOUBLE;
 		return;
+	}
 
 	case 0xc4:
 	case 0xd9: // string/raw bytes with 8 bit header
