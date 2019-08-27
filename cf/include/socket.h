@@ -320,9 +320,15 @@ CF_MUST_CHECK int32_t cf_socket_mcast_set_ttl(cf_socket *sock, int32_t ttl);
 CF_MUST_CHECK int32_t cf_socket_mcast_join_group(cf_socket *sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr);
 
 void cf_poll_create(cf_poll *poll);
+
+static inline bool cf_poll_equal(const cf_poll poll1, const cf_poll poll2)
+{
+	return CEFD(poll1) == CEFD(poll2);
+}
+
 void cf_poll_add_fd(cf_poll poll, int32_t fd, uint32_t events, void *data);
 void cf_poll_add_socket(cf_poll poll, const cf_socket *sock, uint32_t events, void *data);
-CF_MUST_CHECK int32_t cf_poll_modify_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t events, void *data, uint32_t n_err_ok, int32_t *err_ok);
+CF_MUST_CHECK int32_t cf_poll_modify_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t events, void *data, uint32_t n_err_ok, const int32_t *err_ok);
 CF_MUST_CHECK int32_t cf_poll_delete_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t n_err_ok, int32_t *err_ok);
 void cf_poll_add_sockets(cf_poll poll, cf_sockets *socks, uint32_t events);
 void cf_poll_delete_sockets(cf_poll poll, cf_sockets *socks);

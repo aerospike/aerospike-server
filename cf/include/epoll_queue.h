@@ -1,7 +1,7 @@
 /*
- * thr_tsvc.h
+ * epoll_queue.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -23,14 +23,34 @@
 #pragma once
 
 //==========================================================
-// Forward declarations.
+// Includes.
 //
 
-struct as_transaction_s;
+#include <stdbool.h>
+#include <stdint.h>
+
+
+//==========================================================
+// Typedefs & constants.
+//
+
+typedef struct cf_epoll_queue_s {
+	int32_t event_fd;
+
+	uint32_t read_pos;
+	uint32_t write_pos;
+
+	uint32_t capacity;
+	uint32_t ele_sz;
+	uint8_t* eles;
+} cf_epoll_queue;
 
 
 //==========================================================
 // Public API.
 //
 
-void as_tsvc_process_transaction(struct as_transaction_s *tr);
+void cf_epoll_queue_init(cf_epoll_queue* q, uint32_t ele_sz, uint32_t capacity);
+void cf_epoll_queue_destroy(cf_epoll_queue* q);
+void cf_epoll_queue_push(cf_epoll_queue* q, const void* ele);
+bool cf_epoll_queue_pop(cf_epoll_queue* q, void* ele);

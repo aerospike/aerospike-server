@@ -27,6 +27,7 @@
 #include "base/service.h"
 
 #include <errno.h>
+#include <sched.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -43,6 +44,7 @@
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
+#include "epoll_queue.h"
 #include "fault.h"
 #include "hardware.h"
 #include "hist.h"
@@ -72,6 +74,13 @@
 #define XDR_WRITE_BUFFER_SIZE (5 * 1024 * 1024)
 #define XDR_READ_BUFFER_SIZE (15 * 1024 * 1024)
 
+typedef struct thread_ctx_s {
+	cf_topo_cpu_index i_cpu;
+	cf_mutex* lock;
+	cf_poll poll;
+	cf_epoll_queue trans_q;
+} thread_ctx;
+
 
 //==========================================================
 // Globals.
@@ -88,7 +97,9 @@ cf_serv_cfg g_service_bind = { .n_cfgs = 0 };
 cf_tls_info* g_service_tls;
 
 static cf_sockets g_sockets;
-static cf_poll g_polls[MAX_SERVICE_THREADS];
+
+static cf_mutex g_thread_locks[MAX_SERVICE_THREADS];
+static thread_ctx* g_thread_ctxs[MAX_SERVICE_THREADS];
 
 static cf_mutex g_reaper_lock = CF_MUTEX_INIT;
 static uint32_t g_n_slots;
@@ -101,28 +112,56 @@ static cf_queue g_free_slots;
 //
 
 // Setup.
+static void create_service_thread(uint32_t sid);
 static void add_localhost(cf_serv_cfg* serv_cfg, cf_sock_owner owner);
 
 // Accept client connections.
 static void* run_accept(void* udata);
 
+// Assign client connections to threads.
+static void assign_socket(as_file_handle* fd_h, uint32_t events);
+static uint32_t select_sid(void);
+static uint32_t select_sid_pinned(cf_topo_cpu_index i_cpu);
+static void schedule_redistribution(void);
+
 // Demarshal client requests.
 static void* run_service(void* udata);
+static void stop_service(thread_ctx* ctx);
 static void service_release_file_handle(as_file_handle* fd_h);
 static bool process_readable(as_file_handle* fd_h);
+static void rearm(as_file_handle* fd_h);
 static void start_transaction(as_file_handle* fd_h);
 static bool decompress_msg(as_comp_proto* cproto, uint8_t** out_buf, uint64_t* out_buf_sz);
 static void config_xdr_socket(cf_socket* sock);
-static bool peek_namespace_inline(const as_msg* m);
 
 // Reap idle and bad connections.
 static void start_reaper(void);
 static void* run_reaper(void* udata);
 
+// Transaction queue.
+static bool start_internal_transaction(thread_ctx* ctx);
+
 
 //==========================================================
 // Public API.
 //
+
+void
+as_service_init(void)
+{
+	// Create epoll instances and service threads.
+
+	cf_info(AS_SERVICE, "starting %u service threads",
+			g_config.n_service_threads);
+
+	for (uint32_t i = 0; i < MAX_SERVICE_THREADS; i++) {
+		cf_mutex_init(&g_thread_locks[i]);
+	}
+
+	for (uint32_t i = 0; i < g_config.n_service_threads; i++) {
+		create_service_thread(i);
+	}
+}
 
 void
 as_service_start(void)
@@ -142,16 +181,6 @@ as_service_start(void)
 
 	cf_socket_show_server(AS_SERVICE, "client", &g_sockets);
 
-	// Create epoll instances and service threads.
-
-	cf_info(AS_SERVICE, "starting %u service threads",
-			g_config.n_service_threads);
-
-	for (uint64_t i = 0; i < g_config.n_service_threads; i++) {
-		cf_poll_create(&g_polls[i]);
-		cf_thread_create_detached(run_service, (void*)i);
-	}
-
 	// Create accept thread.
 
 	cf_info(AS_SERVICE, "starting accept thread");
@@ -160,16 +189,97 @@ as_service_start(void)
 }
 
 void
-as_service_rearm(as_file_handle* fd_h)
+as_service_set_threads(uint32_t n_threads)
 {
-	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
-			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+	uint32_t old_n_threads = g_config.n_service_threads;
+
+	if (n_threads > old_n_threads) {
+		for (uint32_t sid = old_n_threads; sid < n_threads; sid++) {
+			create_service_thread(sid);
+		}
+
+		g_config.n_service_threads = n_threads;
+
+		schedule_redistribution();
+	}
+	else if (n_threads < old_n_threads) {
+		g_config.n_service_threads = n_threads;
+
+		for (uint32_t sid = n_threads; sid < old_n_threads; sid++) {
+			cf_mutex_lock(&g_thread_locks[sid]);
+
+			thread_ctx* ctx = g_thread_ctxs[sid];
+
+			cf_detail(AS_SERVICE, "sending terminator sid %u ctx %p", sid, ctx);
+
+			as_transaction tr = { .msgp = NULL };
+
+			cf_epoll_queue_push(&ctx->trans_q, &tr);
+			g_thread_ctxs[sid] = NULL;
+
+			cf_mutex_unlock(&g_thread_locks[sid]);
+		}
+	}
+}
+
+void
+as_service_rearm_forgiving(cf_poll poll, as_file_handle* fd_h)
+{
+	static const int32_t err_ok[] = { ENOENT };
+
+	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(poll, &fd_h->sock,
+			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h, 1, err_ok));
+}
+
+void
+as_service_enqueue_internal(as_transaction* tr)
+{
+	while (true) {
+		uint32_t sid = g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ?
+				select_sid() : select_sid_pinned(cf_topo_current_cpu());
+
+		cf_mutex_lock(&g_thread_locks[sid]);
+
+		thread_ctx* ctx = g_thread_ctxs[sid];
+
+		if (ctx != NULL) {
+			cf_epoll_queue_push(&ctx->trans_q, tr);
+			cf_mutex_unlock(&g_thread_locks[sid]);
+			break;
+		}
+
+		cf_mutex_unlock(&g_thread_locks[sid]);
+	}
 }
 
 
 //==========================================================
 // Local helpers - setup.
 //
+
+void
+create_service_thread(uint32_t sid)
+{
+	thread_ctx* ctx = cf_malloc(sizeof(thread_ctx));
+
+	cf_detail(AS_SERVICE, "starting sid %u ctx %p", sid, ctx);
+
+	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE) {
+		ctx->i_cpu = (cf_topo_cpu_index)(sid % cf_topo_count_cpus());
+	}
+
+	ctx->lock = &g_thread_locks[sid];
+	cf_poll_create(&ctx->poll);
+	cf_epoll_queue_init(&ctx->trans_q, AS_TRANSACTION_HEAD_SIZE, 64);
+
+	cf_thread_create_detached(run_service, ctx);
+
+	cf_mutex_lock(&g_thread_locks[sid]);
+
+	g_thread_ctxs[sid] = ctx;
+
+	cf_mutex_unlock(&g_thread_locks[sid]);
+}
 
 static void
 add_localhost(cf_serv_cfg* serv_cfg, cf_sock_owner owner)
@@ -221,8 +331,6 @@ run_accept(void* udata)
 	cf_poll_create(&poll);
 
 	cf_poll_add_sockets(poll, &g_sockets, EPOLLIN);
-
-	uint32_t rr_sid = 0;
 
 	while (true) {
 		cf_poll_event events[N_EVENTS];
@@ -276,8 +384,9 @@ run_accept(void* udata)
 			cf_socket_copy(&csock, &fd_h->sock);
 
 			fd_h->last_used = cf_getns();
+			fd_h->in_transaction = false;
+			fd_h->move_me = false;
 			fd_h->reap_me = false;
-			fd_h->do_not_reap = false;
 			fd_h->is_xdr = false;
 			fd_h->proto = NULL;
 			fd_h->proto_unread = sizeof(as_proto);
@@ -298,14 +407,7 @@ run_accept(void* udata)
 
 			cf_mutex_unlock(&g_reaper_lock);
 
-			uint32_t sid = g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ?
-					rr_sid++ % g_config.n_service_threads :
-					cf_topo_socket_cpu(&fd_h->sock);
-
-			fd_h->poll = g_polls[sid];
-
-			cf_poll_add_socket(fd_h->poll, &fd_h->sock,
-					EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+			assign_socket(fd_h, EPOLLIN); // needs to be armed (EPOLLIN)
 
 			cf_atomic64_incr(&g_stats.proto_connections_opened);
 		}
@@ -316,18 +418,95 @@ run_accept(void* udata)
 
 
 //==========================================================
+// Local helpers - assign client connections to threads.
+//
+
+static void
+assign_socket(as_file_handle* fd_h, uint32_t events)
+{
+	while (true) {
+		uint32_t sid = g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ?
+				select_sid() :
+				select_sid_pinned(cf_topo_socket_cpu(&fd_h->sock));
+
+		cf_mutex_lock(&g_thread_locks[sid]);
+
+		thread_ctx* ctx = g_thread_ctxs[sid];
+
+		if (ctx != NULL) {
+			fd_h->poll = ctx->poll;
+
+			cf_poll_add_socket(fd_h->poll, &fd_h->sock,
+					events | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+
+			cf_mutex_unlock(&g_thread_locks[sid]);
+			break;
+		}
+
+		cf_mutex_unlock(&g_thread_locks[sid]);
+	}
+}
+
+static uint32_t
+select_sid(void)
+{
+	static uint32_t rr = 0;
+
+	return rr++ % g_config.n_service_threads;
+}
+
+static uint32_t
+select_sid_pinned(cf_topo_cpu_index i_cpu)
+{
+	static uint32_t rr[CPU_SETSIZE] = { 0 };
+
+	uint16_t n_cpus = cf_topo_count_cpus();
+	uint32_t threads_per_cpu = g_config.n_service_threads / n_cpus;
+
+	uint32_t thread_ix = rr[i_cpu]++ % threads_per_cpu;
+
+	return (thread_ix * n_cpus) + i_cpu;
+}
+
+static void
+schedule_redistribution(void)
+{
+	cf_mutex_lock(&g_reaper_lock);
+
+	uint32_t n_remaining = g_n_slots - (uint32_t)cf_queue_sz(&g_free_slots);
+
+	for (uint32_t i = 0; n_remaining != 0; i++) {
+		as_file_handle* fd_h = g_file_handles[i];
+
+		if (fd_h != NULL) {
+			fd_h->move_me = true;
+			n_remaining--;
+		}
+	}
+
+	cf_mutex_unlock(&g_reaper_lock);
+}
+
+
+//==========================================================
 // Local helpers - demarshal client requests.
 //
 
 static void*
 run_service(void* udata)
 {
-	uint64_t sid = (uint64_t)udata;
-	cf_poll poll = g_polls[sid];
+	thread_ctx* ctx = (thread_ctx*)udata;
+
+	cf_detail(AS_SERVICE, "running ctx %p", ctx);
 
 	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE) {
-		cf_topo_pin_to_cpu((cf_topo_cpu_index)sid);
+		cf_topo_pin_to_cpu(ctx->i_cpu);
 	}
+
+	cf_poll poll = ctx->poll;
+	cf_epoll_queue* trans_q = &ctx->trans_q;
+
+	cf_poll_add_fd(poll, trans_q->event_fd, EPOLLIN, trans_q);
 
 	while (true) {
 		cf_poll_event events[N_EVENTS];
@@ -336,6 +515,19 @@ run_service(void* udata)
 		cf_assert(n_events >= 0, AS_SERVICE, "unexpected EINTR");
 
 		for (uint32_t i = 0; i < (uint32_t)n_events; i++) {
+			if (events[i].data == trans_q) {
+				cf_assert(events[i].events == EPOLLIN, AS_SERVICE,
+						"unexpected event: 0x%0x", events[i].events);
+
+				if (start_internal_transaction(ctx)) {
+					continue;
+				}
+
+				stop_service(ctx);
+
+				return NULL;
+			}
+
 			as_file_handle* fd_h = events[i].data;
 
 			if ((events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) != 0) {
@@ -374,8 +566,15 @@ run_service(void* udata)
 			tls_socket_must_not_have_data(&fd_h->sock, "full client read");
 
 			if (fd_h->proto_unread != 0) {
-				as_service_rearm(fd_h);
+				rearm(fd_h);
 				continue;
+			}
+
+			if (fd_h->move_me) {
+				cf_poll_delete_socket(fd_h->poll, &fd_h->sock);
+				assign_socket(fd_h, 0); // known to be unarmed (no EPOLLIN)
+
+				fd_h->move_me = false;
 			}
 
 			// Note that epoll cannot trigger again for this file handle during
@@ -385,6 +584,63 @@ run_service(void* udata)
 	}
 
 	return NULL;
+}
+
+static void
+stop_service(thread_ctx* ctx)
+{
+	cf_detail(AS_SERVICE, "stopping ctx %p", ctx);
+
+	while (true) {
+		bool any_in_transaction = false;
+
+		cf_mutex_lock(&g_reaper_lock);
+
+		uint32_t n_remaining = g_n_slots - (uint32_t)cf_queue_sz(&g_free_slots);
+
+		for (uint32_t i = 0; n_remaining != 0; i++) {
+			as_file_handle* fd_h = g_file_handles[i];
+
+			if (fd_h == NULL) {
+				continue;
+			}
+
+			n_remaining--;
+
+			if (! cf_poll_equal(fd_h->poll, ctx->poll)) {
+				continue;
+			}
+
+			// Don't transfer during TLS handshake - might need EPOLLOUT.
+			if (tls_socket_needs_handshake(&fd_h->sock)) {
+				service_release_file_handle(fd_h);
+				continue;
+			}
+
+			if (fd_h->in_transaction) {
+				any_in_transaction = true;
+				continue;
+			}
+
+			cf_poll_delete_socket(fd_h->poll, &fd_h->sock);
+			assign_socket(fd_h, EPOLLIN); // known to be armed (EPOLLIN)
+		}
+
+		cf_mutex_unlock(&g_reaper_lock);
+
+		if (! any_in_transaction) {
+			break;
+		}
+
+		sleep(1);
+	}
+
+	cf_poll_destroy(ctx->poll);
+	cf_epoll_queue_destroy(&ctx->trans_q);
+
+	cf_free(ctx);
+
+	cf_detail(AS_SERVICE, "stopped ctx %p", ctx);
 }
 
 static void
@@ -470,8 +726,17 @@ process_readable(as_file_handle* fd_h)
 }
 
 static void
+rearm(as_file_handle* fd_h)
+{
+	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
+			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+}
+
+static void
 start_transaction(as_file_handle* fd_h)
 {
+	fd_h->in_transaction = true;
+
 	uint64_t start_ns = fd_h->last_used;
 	as_proto* proto = fd_h->proto;
 
@@ -545,14 +810,7 @@ start_transaction(as_file_handle* fd_h)
 		return;
 	}
 
-	if (g_config.n_namespaces_inlined != 0 &&
-			(g_config.n_namespaces_not_inlined == 0 ||
-					peek_namespace_inline(&tr.msgp->msg))) {
-		as_tsvc_process_transaction(&tr);
-		return;
-	}
-
-	as_tsvc_enqueue(&tr);
+	as_tsvc_process_transaction(&tr);
 }
 
 static bool
@@ -605,21 +863,6 @@ config_xdr_socket(cf_socket* sock)
 	cf_socket_enable_nagle(sock);
 }
 
-static bool
-peek_namespace_inline(const as_msg* m)
-{
-	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
-
-	if (f == NULL) {
-		return false;
-	}
-
-	as_namespace* ns = as_namespace_get_bymsgfield(f);
-
-	return ns != NULL && ns->storage_data_in_memory &&
-			! ns->storage_commit_to_device;
-}
-
 
 //==========================================================
 // Local helpers - reap idle and bad connections.
@@ -665,7 +908,7 @@ run_reaper(void* udata)
 
 		uint32_t n_remaining = g_n_slots - (uint32_t)cf_queue_sz(&g_free_slots);
 
-		for (uint32_t i = 0; i < g_n_slots && n_remaining != 0; i++) {
+		for (uint32_t i = 0; n_remaining != 0; i++) {
 			as_file_handle* fd_h = g_file_handles[i];
 
 			if (fd_h == NULL) {
@@ -686,7 +929,7 @@ run_reaper(void* udata)
 				continue;
 			}
 
-			if (fd_h->do_not_reap) {
+			if (fd_h->in_transaction) {
 				continue;
 			}
 
@@ -705,4 +948,36 @@ run_reaper(void* udata)
 	}
 
 	return NULL;
+}
+
+
+//==========================================================
+// Local helpers - transaction queue.
+//
+
+static bool
+start_internal_transaction(thread_ctx* ctx)
+{
+	as_transaction tr;
+
+	cf_mutex_lock(ctx->lock);
+
+	if (! cf_epoll_queue_pop(&ctx->trans_q, &tr)) {
+		cf_crash(AS_SERVICE, "unable to pop from transaction queue");
+	}
+
+	cf_mutex_unlock(ctx->lock);
+
+	if (tr.msgp == NULL) {
+		return false;
+	}
+
+	if (g_config.svc_benchmarks_enabled &&
+			tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {
+		histogram_insert_data_point(g_stats.svc_queue_hist, tr.benchmark_time);
+	}
+
+	as_tsvc_process_transaction(&tr);
+
+	return true;
 }

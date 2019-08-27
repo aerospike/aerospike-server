@@ -26,6 +26,8 @@
 // Includes.
 //
 
+#include <stdint.h>
+
 #include "socket.h"
 #include "tls.h"
 
@@ -35,6 +37,7 @@
 //
 
 struct as_file_handle_s;
+struct as_transaction_s;
 
 
 //==========================================================
@@ -53,7 +56,7 @@ typedef struct as_service_access_s {
 	as_service_endpoint alt_tls_service;
 } as_service_access;
 
-#define MAX_SERVICE_THREADS 256
+#define MAX_SERVICE_THREADS 4096
 #define MIN_PROTO_FD_MAX 1024
 
 
@@ -70,5 +73,8 @@ extern cf_tls_info* g_service_tls;
 // Public API.
 //
 
+void as_service_init(void);
 void as_service_start(void);
-void as_service_rearm(struct as_file_handle_s* fd_h);
+void as_service_set_threads(uint32_t n_threads);
+void as_service_rearm_forgiving(cf_poll poll, struct as_file_handle_s* fd_h);
+void as_service_enqueue_internal(struct as_transaction_s* tr);

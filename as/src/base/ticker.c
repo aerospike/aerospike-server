@@ -273,8 +273,7 @@ log_line_system_memory()
 void
 log_line_in_progress()
 {
-	cf_info(AS_INFO, "   in-progress: tsvc-q %d info-q %d rw-hash %u proxy-hash %u tree-gc-q %d",
-			as_tsvc_queue_get_size(),
+	cf_info(AS_INFO, "   in-progress: info-q %d rw-hash %u proxy-hash %u tree-gc-q %d",
 			as_info_queue_get_size(),
 			rw_request_hash_count(),
 			as_proxy_hash_count(),

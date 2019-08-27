@@ -1731,7 +1731,7 @@ cf_poll_add_socket(cf_poll poll, const cf_socket *sock, uint32_t events, void *d
 
 int32_t
 cf_poll_modify_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t events, void *data,
-		uint32_t n_err_ok, int32_t *err_ok)
+		uint32_t n_err_ok, const int32_t *err_ok)
 {
 #if defined VERY_CHATTY
 	cf_detail(CF_SOCKET, "Modifying FD %d in epoll instance with FD %d, events = 0x%x",

@@ -107,8 +107,9 @@ typedef struct as_file_handle_s {
 	uint64_t	last_used;		// last nanoseconds we read or wrote
 	cf_socket	sock;			// our client socket
 	cf_poll		poll;			// our epoll instance
-	bool		reap_me;		// force reaping (overrides do_not_reap)
-	bool		do_not_reap;	// don't reap during mid-transaction idle
+	bool		in_transaction;	// don't reap or transfer during transaction
+	bool		move_me;		// redistribute to another service thread
+	bool		reap_me;		// force reaping (overrides in_transaction)
 	bool		is_xdr;			// XDR client connection
 	as_proto	proto_hdr;		// space for header when reading it from socket
 	as_proto	*proto;			// complete request message

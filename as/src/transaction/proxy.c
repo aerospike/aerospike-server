@@ -50,9 +50,9 @@
 #include "base/datamodel.h"
 #include "base/health.h"
 #include "base/proto.h"
-#include "base/thr_tsvc.h"
-#include "base/transaction.h"
+#include "base/service.h"
 #include "base/stats.h"
+#include "base/transaction.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
@@ -547,7 +547,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	tr.from_data.batch_index = pr->batch_index;
 	tr.start_time = pr->start_time;
 
-	as_tsvc_enqueue(&tr);
+	as_service_enqueue_internal(&tr);
 
 	as_fabric_msg_put(pr->fab_msg);
 
@@ -617,7 +617,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 		tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	}
 
-	as_tsvc_enqueue(&tr);
+	as_service_enqueue_internal(&tr);
 }
 
 

@@ -60,7 +60,6 @@
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
 #include "base/thr_sindex.h"
-#include "base/thr_tsvc.h"
 #include "base/ticker.h"
 #include "base/xdr_serverside.h"
 #include "fabric/clustering.h"
@@ -378,7 +377,7 @@ main(int argc, char **argv)
 	cf_dns_init();				// DNS resolver
 	as_netio_init();			// query responses
 	as_security_init();			// security features
-	as_tsvc_init();				// all transaction handling
+	as_service_init();			// server may process internal transactions
 	as_hb_init();				// inter-node heartbeat
 	as_skew_monitor_init();		// clock skew monitor
 	as_fabric_init();			// inter-node communications

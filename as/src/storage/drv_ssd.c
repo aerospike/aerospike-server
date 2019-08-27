@@ -249,15 +249,7 @@ available_size(drv_ssd *ssd)
 static inline uint32_t
 min_free_wblocks(const as_namespace *ns)
 {
-	// Data-in-memory namespaces process transactions in service threads.
-	uint32_t n_service_threads = ns->storage_data_in_memory ?
-			g_config.n_service_threads : 0;
-
-	uint32_t n_transaction_threads = g_config.n_transaction_queues *
-			g_config.n_transaction_threads_per_queue;
-
-	return	n_service_threads +			// client writes
-			n_transaction_threads +		// client writes
+	return	g_config.n_service_threads + // client writes
 			g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW] + // prole writes
 			g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK] + // migration writes
 			1 +							// always 1 defrag thread

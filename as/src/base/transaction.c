@@ -31,6 +31,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
@@ -436,7 +437,15 @@ as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 		cf_socket_shutdown(&proto_fd_h->sock);
 	}
 
-	as_service_rearm(proto_fd_h);
+	// Remember original poll.
+	cf_poll poll = { .fd = as_load_int32(&proto_fd_h->poll.fd) };
+
+	// No barrier needed - compiler cannot reorder as_load_int32().
+
+	proto_fd_h->in_transaction = false;
+
+	// Exiting service thread may have moved socket to another poll.
+	as_service_rearm_forgiving(poll, proto_fd_h);
 }
 
 void

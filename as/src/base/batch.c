@@ -34,6 +34,7 @@
 #include "base/predexp.h"
 #include "base/proto.h"
 #include "base/security.h"
+#include "base/service.h"
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
@@ -1022,7 +1023,7 @@ as_batch_queue_task(as_transaction* btr)
 		}
 		else {
 			// Queue transaction to be processed by a transaction thread.
-			as_tsvc_enqueue(&tr);
+			as_service_enqueue_internal(&tr);
 		}
 		tran_row++;
 	}

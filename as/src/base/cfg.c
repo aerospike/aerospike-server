@@ -68,7 +68,6 @@
 #include "base/thr_info_port.h"
 #include "base/thr_query.h"
 #include "base/thr_sindex.h"
-#include "base/thr_tsvc.h"
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "base/xdr_config.h"
@@ -168,7 +167,6 @@ cfg_set_defaults()
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
-	c->n_transaction_threads_per_queue = 4;
 	as_sindex_gconfig_default(c);
 	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
@@ -323,9 +321,7 @@ typedef enum {
 	CASE_SERVICE_SINDEX_GC_PERIOD,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
-	CASE_SERVICE_TRANSACTION_QUEUES,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
-	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE,
 	CASE_SERVICE_WORK_DIRECTORY,
 	// For special debugging or bug-related repair:
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
@@ -337,7 +333,9 @@ typedef enum {
 	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
+	CASE_SERVICE_TRANSACTION_QUEUES,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
+	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE,
 	// Deprecated:
 	CASE_SERVICE_AUTO_DUN,
 	CASE_SERVICE_AUTO_UNDUN,
@@ -897,9 +895,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
-		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
-		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "fabric-dump-msgs",				CASE_SERVICE_FABRIC_DUMP_MSGS },
@@ -909,7 +905,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
+		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
+		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
 		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
 		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
@@ -2523,14 +2521,8 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_TRANSACTION_MAX_MS:
 				c->transaction_max_ns = cfg_u64_no_checks(&line) * 1000000;
 				break;
-			case CASE_SERVICE_TRANSACTION_QUEUES:
-				c->n_transaction_queues = cfg_u32(&line, 1, MAX_TRANSACTION_QUEUES);
-				break;
 			case CASE_SERVICE_TRANSACTION_RETRY_MS:
 				c->transaction_retry_ms = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
-				c->n_transaction_threads_per_queue = cfg_u32(&line, 1, MAX_TRANSACTION_THREADS_PER_QUEUE);
 				break;
 			case CASE_SERVICE_WORK_DIRECTORY:
 				c->work_directory = cfg_strdup_no_checks(&line);
@@ -2576,8 +2568,14 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_TRANSACTION_PENDING_LIMIT:
 				cfg_obsolete(&line, "please use namespace-context 'transaction-pending-limit'");
 				break;
+			case CASE_SERVICE_TRANSACTION_QUEUES:
+				cfg_obsolete(&line, "please configure 'service-threads' carefully");
+				break;
 			case CASE_SERVICE_TRANSACTION_REPEATABLE_READ:
 				cfg_obsolete(&line, "please use namespace-context 'read-consistency-level-override' and/or read transaction policy");
+				break;
+			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
+				cfg_obsolete(&line, "please configure 'service-threads' carefully");
 				break;
 			case CASE_SERVICE_AUTO_DUN:
 			case CASE_SERVICE_AUTO_UNDUN:
@@ -4091,27 +4089,16 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Output NUMA topology information.
 	cf_topo_info();
 
-	if (c->auto_pin != CF_TOPO_AUTO_PIN_NONE) {
-		if (c->n_service_threads != 0) {
-			cf_crash_nostack(AS_CFG, "can't configure 'service-threads' and 'auto-pin' at the same time");
-		}
-
-		if (c->n_transaction_queues != 0) {
-			cf_crash_nostack(AS_CFG, "can't configure 'transaction-queues' and 'auto-pin' at the same time");
-		}
-	}
-
 	uint16_t n_cpus = cf_topo_count_cpus();
 
-	if (c->n_service_threads == 0) {
-		c->n_service_threads = n_cpus;
+	if (c->auto_pin != CF_TOPO_AUTO_PIN_NONE &&
+			c->n_service_threads % n_cpus != 0) {
+		cf_crash_nostack(AS_CFG, "with 'auto-pin', 'service-threads' must be a multiple of the number of CPUs (%hu)", n_cpus);
 	}
 
-	if (c->n_transaction_queues == 0) {
-		// If there's at least one SSD namespace, use CPU count. Otherwise, be
-		// modest - only proxies, internal retries, and background scans & queries
-		// will use these queues & threads.
-		c->n_transaction_queues = g_config.n_namespaces_not_inlined != 0 ? n_cpus : 4;
+	if (c->n_service_threads == 0) {
+		c->n_service_threads = c->n_namespaces_not_inlined != 0 ?
+				n_cpus * 5 : n_cpus;
 	}
 
 	// Setup performance metrics histograms.

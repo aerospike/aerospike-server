@@ -40,7 +40,7 @@
 
 #include "base/datamodel.h"
 #include "base/proto.h"
-#include "base/thr_tsvc.h"
+#include "base/service.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
@@ -186,7 +186,7 @@ rw_request_destroy(rw_request* rw)
 		as_transaction* tr = (as_transaction*)e->tr_head;
 
 		tr->from_flags |= FROM_FLAG_RESTART;
-		as_tsvc_enqueue(tr);
+		as_service_enqueue_internal(tr);
 
 		cf_free(e);
 		e = next;

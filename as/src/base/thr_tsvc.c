@@ -29,19 +29,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
-#include "citrusleaf/cf_queue.h"
 
-#include "cf_thread.h"
 #include "fault.h"
-#include "hardware.h"
 #include "node.h"
 
 #include "base/cfg.h"
@@ -54,7 +48,6 @@
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/xdr_serverside.h"
-#include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
 #include "storage/storage.h"
@@ -64,29 +57,6 @@
 #include "transaction/read.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
-
-
-//==========================================================
-// Globals.
-//
-
-static cf_queue* g_transaction_queues[MAX_TRANSACTION_QUEUES] = { NULL };
-
-// Track number of threads for each queue independently.
-static uint32_t g_queues_n_threads[MAX_TRANSACTION_QUEUES] = { 0 };
-
-// It's ok for this to not be atomic - might not round-robin perfectly, but will
-// be cache friendly.
-static uint32_t g_current_q = 0;
-
-
-//==========================================================
-// Forward declarations.
-//
-
-void tsvc_add_threads(uint32_t qid, uint32_t n_threads);
-void tsvc_remove_threads(uint32_t qid, uint32_t n_threads);
-void *run_tsvc(void *arg);
 
 
 //==========================================================
@@ -120,80 +90,6 @@ detail_unique_client_rw(const as_transaction *tr, bool is_write)
 //==========================================================
 // Public API.
 //
-
-void
-as_tsvc_init()
-{
-	cf_info(AS_TSVC, "%u transaction queues: starting %u threads per queue",
-			g_config.n_transaction_queues,
-			g_config.n_transaction_threads_per_queue);
-
-	// Create the transaction queues.
-	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
-		g_transaction_queues[qid] =
-				cf_queue_create(AS_TRANSACTION_HEAD_SIZE, true);
-	}
-
-	// Start all the transaction threads.
-	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
-		tsvc_add_threads(qid, g_config.n_transaction_threads_per_queue);
-	}
-}
-
-
-// Decide which queue to use, and enqueue transaction.
-void
-as_tsvc_enqueue(as_transaction *tr)
-{
-	uint32_t qid;
-
-	if (g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ||
-			g_config.n_namespaces_not_inlined == 0) {
-		cf_debug(AS_TSVC, "no CPU pinning - dispatching transaction round-robin");
-		// Transaction can go on any queue - distribute evenly.
-		qid = (g_current_q++) % g_config.n_transaction_queues;
-	}
-	else {
-		qid = cf_topo_current_cpu();
-		cf_debug(AS_TSVC, "transaction on CPU %u", qid);
-	}
-
-	cf_queue_push(g_transaction_queues[qid], tr);
-}
-
-
-// Triggered via dynamic configuration change.
-void
-as_tsvc_set_threads_per_queue(uint32_t target_n_threads)
-{
-	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
-		uint32_t current_n_threads = g_queues_n_threads[qid];
-
-		if (target_n_threads > current_n_threads) {
-			tsvc_add_threads(qid, target_n_threads - current_n_threads);
-		}
-		else {
-			tsvc_remove_threads(qid, current_n_threads - target_n_threads);
-		}
-	}
-
-	g_config.n_transaction_threads_per_queue = target_n_threads;
-}
-
-
-// Total transactions currently queued, for ticker and info statistics.
-int
-as_tsvc_queue_get_size()
-{
-	int current_total = 0;
-
-	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
-		current_total += cf_queue_sz(g_transaction_queues[qid]);
-	}
-
-	return current_total;
-}
-
 
 // Handle the transaction, including proxy to another node if necessary.
 void
@@ -478,7 +374,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.re_repl_orig_cb = NULL; // pattern, not needed
 			break;
 		default:
-			cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
+			cf_crash(AS_TSVC, "unexpected transaction origin %u", tr->origin);
 			break;
 		}
 	}
@@ -489,72 +385,3 @@ Cleanup:
 		cf_free(msgp);
 	}
 } // end process_transaction()
-
-
-//==========================================================
-// Local helpers.
-//
-
-void
-tsvc_add_threads(uint32_t qid, uint32_t n_threads)
-{
-	for (uint32_t n = 0; n < n_threads; n++) {
-		cf_thread_create_detached(run_tsvc, (void*)(uint64_t)qid);
-	}
-
-	g_queues_n_threads[qid] += n_threads;
-}
-
-
-void
-tsvc_remove_threads(uint32_t qid, uint32_t n_threads)
-{
-	as_transaction death_tr = { .msgp = NULL };
-
-	for (uint32_t n = 0; n < n_threads; n++) {
-		// Send terminator (transaction with NULL msgp).
-		cf_queue_push(g_transaction_queues[qid], &death_tr);
-	}
-
-	g_queues_n_threads[qid] -= n_threads;
-}
-
-
-// Service transactions - arg is the queue we're to service.
-void *
-run_tsvc(void *arg)
-{
-	uint32_t qid = (uint32_t)(uint64_t)arg;
-
-	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE &&
-			g_config.n_namespaces_not_inlined != 0) {
-		cf_detail(AS_TSVC, "pinning thread to CPU %u", qid);
-		cf_topo_pin_to_cpu((cf_topo_cpu_index)qid);
-	}
-
-	cf_queue *q = g_transaction_queues[qid];
-
-	while (true) {
-		as_transaction tr;
-
-		if (cf_queue_pop(q, &tr, CF_QUEUE_FOREVER) != CF_QUEUE_OK) {
-			cf_crash(AS_TSVC, "unable to pop from transaction queue");
-		}
-
-		if (! tr.msgp) {
-			break; // thread termination via configuration change
-		}
-
-		cf_debug(AS_TSVC, "running on CPU %hu", cf_topo_current_cpu());
-
-		if (g_config.svc_benchmarks_enabled &&
-				tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {
-			histogram_insert_data_point(g_stats.svc_queue_hist,
-					tr.benchmark_time);
-		}
-
-		as_tsvc_process_transaction(&tr);
-	}
-
-	return NULL;
-}

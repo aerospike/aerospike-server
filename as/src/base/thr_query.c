@@ -122,8 +122,8 @@
 #include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
+#include "base/service.h"
 #include "base/stats.h"
-#include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
@@ -808,7 +808,6 @@ static void
 query_release_fd(as_file_handle *fd_h, bool force_close)
 {
 	if (fd_h) {
-		fd_h->do_not_reap = false;
 		fd_h->last_used = cf_getns();
 		as_end_of_transaction(fd_h, force_close);
 	}
@@ -1880,7 +1879,7 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	cf_atomic32_incr(&qtr->n_udf_tr_queued);
 
-	as_tsvc_enqueue(&tr);
+	as_service_enqueue_internal(&tr);
 
 	return AS_QUERY_OK;
 }
@@ -2697,7 +2696,6 @@ query_setup_fd(as_query_transaction *qtr, as_transaction *tr)
 		case QUERY_TYPE_LOOKUP:
 		case QUERY_TYPE_AGGR:
 			qtr->fd_h                = tr->from.proto_fd_h;
-			qtr->fd_h->do_not_reap   = true;
 			break;
 		case QUERY_TYPE_UDF_BG:
 			qtr->fd_h  = NULL;

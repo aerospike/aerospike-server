@@ -41,7 +41,7 @@
 
 #include "base/datamodel.h"
 #include "base/proto.h"
-#include "base/thr_tsvc.h"
+#include "base/service.h"
 #include "base/transaction.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
@@ -340,7 +340,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 		rw->msgp = NULL;
 
 		tr.from_flags |= FROM_FLAG_RESTART;
-		as_tsvc_enqueue(&tr);
+		as_service_enqueue_internal(&tr);
 
 		rw->dup_res_complete = true;
 

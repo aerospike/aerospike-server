@@ -141,9 +141,7 @@ typedef struct as_config_s {
 	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
-	uint32_t		n_transaction_queues;
 	uint32_t		transaction_retry_ms;
-	uint32_t		n_transaction_threads_per_queue;
 	char*			work_directory;
 
 	// For special debugging or bug-related repair:

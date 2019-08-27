@@ -328,7 +328,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_get_aggregated_namespace_stats(db);
 
-	info_append_int(db, "tsvc_queue", as_tsvc_queue_get_size());
 	info_append_int(db, "info_queue", as_info_queue_get_size());
 	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
 	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
@@ -1750,9 +1749,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
 	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
-	info_append_uint32(db, "transaction-queues", g_config.n_transaction_queues);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
-	info_append_uint32(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
 	info_append_string_safe(db, "work-directory", g_config.work_directory);
 
 	info_append_string(db, "debug-allocations", debug_allocations_string());
@@ -2149,16 +2146,21 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "transaction-threads-per-queue", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "service-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
-			if (val < 1 || val > MAX_TRANSACTION_THREADS_PER_QUEUE) {
-				cf_warning(AS_INFO, "transaction-threads-per-queue must be between 1 and %u", MAX_TRANSACTION_THREADS_PER_QUEUE);
+			if (val < 1 || val > MAX_SERVICE_THREADS) {
+				cf_warning(AS_INFO, "service-threads must be between 1 and %u", MAX_SERVICE_THREADS);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of transaction-threads-per-queue from %u to %d ", g_config.n_transaction_threads_per_queue, val);
-			as_tsvc_set_threads_per_queue((uint32_t)val);
+			uint16_t n_cpus = cf_topo_count_cpus();
+			if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE && val % n_cpus != 0) {
+				cf_warning(AS_INFO, "with auto-pin, service-threads must be a multiple of the number of CPUs (%hu)", n_cpus);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of service-threads from %u to %d ", g_config.n_service_threads, val);
+			as_service_set_threads((uint32_t)val);
 		}
 		else if (0 == as_info_parameter_get(params, "transaction-retry-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))

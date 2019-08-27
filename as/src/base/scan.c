@@ -61,7 +61,7 @@
 #include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
-#include "base/thr_tsvc.h"
+#include "base/service.h"
 #include "base/transaction.h"
 #include "fabric/exchange.h"
 #include "fabric/partition.h"
@@ -432,7 +432,6 @@ conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h, uint32_t timeout)
 	cf_mutex_init(&job->fd_lock);
 
 	job->fd_h = fd_h;
-	job->fd_h->do_not_reap = true;
 	job->fd_timeout = timeout == 0 ? -1 : (int32_t)timeout;
 
 	job->net_io_bytes = 0;
@@ -442,8 +441,6 @@ void
 conn_scan_job_disown_fd(conn_scan_job* job)
 {
 	// Just undo conn_scan_job_own_fd(), nothing more.
-
-	job->fd_h->do_not_reap = false;
 
 	cf_mutex_destroy(&job->fd_lock);
 }
@@ -500,7 +497,6 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 void
 conn_scan_job_release_fd(conn_scan_job* job, bool force_close)
 {
-	job->fd_h->do_not_reap = false;
 	job->fd_h->last_used = cf_getns();
 	as_end_of_transaction(job->fd_h, force_close);
 	job->fd_h = NULL;
@@ -1403,7 +1399,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);
 
-	as_tsvc_enqueue(&tr);
+	as_service_enqueue_internal(&tr);
 }
 
 int
