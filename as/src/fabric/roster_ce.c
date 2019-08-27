@@ -1,7 +1,7 @@
 /*
  * roster_ce.c
  *
- * Copyright (C) 2017-2018 Aerospike, Inc.
+ * Copyright (C) 2017-2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -39,7 +39,6 @@ void
 as_roster_init_smd()
 {
 	// CE Code doesn't invoke roster SMD module.
-	// TODO - how to handle with future static SMD module initialization?
 }
 
 bool
