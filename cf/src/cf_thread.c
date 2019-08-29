@@ -236,6 +236,9 @@ shim_fn(void* udata)
 
 	void* rv = g_thread_info->run(g_thread_info->udata);
 
+	// Prevent crashes in glibc 2.24 for short-lived detached threads.
+	usleep(100 * 1000);
+
 	deregister_thread_info();
 
 	return rv;
