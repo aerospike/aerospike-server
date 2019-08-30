@@ -160,10 +160,8 @@ cfg_set_defaults()
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
-	c->scan_max_active = 100;
 	c->scan_max_done = 100;
-	c->scan_max_udf_transactions = 32;
-	c->scan_threads = 4;
+	c->n_scan_threads_limit = 128;
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
@@ -311,10 +309,8 @@ typedef enum {
 	CASE_SERVICE_QUERY_UNTRACKED_TIME_MS,
 	CASE_SERVICE_QUERY_WORKER_THREADS,
 	CASE_SERVICE_RUN_AS_DAEMON,
-	CASE_SERVICE_SCAN_MAX_ACTIVE,
 	CASE_SERVICE_SCAN_MAX_DONE,
-	CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS,
-	CASE_SERVICE_SCAN_THREADS,
+	CASE_SERVICE_SCAN_THREADS_LIMIT,
 	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_GC_MAX_RATE,
@@ -332,6 +328,8 @@ typedef enum {
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
+	CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS,
+	CASE_SERVICE_SCAN_THREADS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_QUEUES,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
@@ -380,6 +378,7 @@ typedef enum {
 	CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD,
 	CASE_SERVICE_PROLE_EXTRA_TTL,
 	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
+	CASE_SERVICE_SCAN_MAX_ACTIVE,
 	CASE_SERVICE_SCAN_MEMORY,
 	CASE_SERVICE_SCAN_PRIORITY,
 	CASE_SERVICE_SCAN_RETRANSMIT,
@@ -535,12 +534,14 @@ typedef enum {
 	CASE_NAMESPACE_ALLOW_NONXDR_WRITES,
 	CASE_NAMESPACE_ALLOW_XDR_WRITES,
 	// Normally hidden:
+	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_OPS_SUB,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_READ,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB,
@@ -566,6 +567,7 @@ typedef enum {
 	CASE_NAMESPACE_SINDEX_BEGIN,
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN,
 	CASE_NAMESPACE_SINGLE_BIN,
+	CASE_NAMESPACE_SINGLE_SCAN_THREADS,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
 	CASE_NAMESPACE_STRONG_CONSISTENCY,
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
@@ -885,10 +887,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "query-untracked-time-ms",		CASE_SERVICE_QUERY_UNTRACKED_TIME_MS },
 		{ "query-worker-threads",			CASE_SERVICE_QUERY_WORKER_THREADS },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
-		{ "scan-max-active",				CASE_SERVICE_SCAN_MAX_ACTIVE },
 		{ "scan-max-done",					CASE_SERVICE_SCAN_MAX_DONE },
-		{ "scan-max-udf-transactions",		CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS },
-		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
+		{ "scan-threads-limit",				CASE_SERVICE_SCAN_THREADS_LIMIT },
 		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-gc-max-rate",				CASE_SERVICE_SINDEX_GC_MAX_RATE },
@@ -904,6 +904,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
+		{ "scan-max-udf-transactions",		CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS },
+		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
@@ -951,6 +953,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "paxos-retransmit-period",		CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
+		{ "scan-max-active",				CASE_SERVICE_SCAN_MAX_ACTIVE },
 		{ "scan-memory",					CASE_SERVICE_SCAN_MEMORY },
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
 		{ "scan-retransmit",				CASE_SERVICE_SCAN_RETRANSMIT },
@@ -1110,12 +1113,14 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
 		{ "allow-nonxdr-writes",			CASE_NAMESPACE_ALLOW_NONXDR_WRITES },
 		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
+		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
+		{ "enable-benchmarks-ops-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_OPS_SUB },
 		{ "enable-benchmarks-read",			CASE_NAMESPACE_ENABLE_BENCHMARKS_READ },
 		{ "enable-benchmarks-udf",			CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF },
 		{ "enable-benchmarks-udf-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB },
@@ -1141,6 +1146,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
 		{ "geo2dsphere-within",				CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
+		{ "single-scan-threads",			CASE_NAMESPACE_SINGLE_SCAN_THREADS },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
 		{ "strong-consistency",				CASE_NAMESPACE_STRONG_CONSISTENCY },
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
@@ -2491,17 +2497,11 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_RUN_AS_DAEMON:
 				c->run_as_daemon = cfg_bool_no_value_is_true(&line);
 				break;
-			case CASE_SERVICE_SCAN_MAX_ACTIVE:
-				c->scan_max_active = cfg_u32(&line, 0, 200);
-				break;
 			case CASE_SERVICE_SCAN_MAX_DONE:
 				c->scan_max_done = cfg_u32(&line, 0, 1000);
 				break;
-			case CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS:
-				c->scan_max_udf_transactions = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_SCAN_THREADS:
-				c->scan_threads = cfg_u32(&line, 0, 128);
+			case CASE_SERVICE_SCAN_THREADS_LIMIT:
+				c->n_scan_threads_limit = cfg_u32(&line, 1, 1024);
 				break;
 			case CASE_SERVICE_SERVICE_THREADS:
 				c->n_service_threads = cfg_u32(&line, 1, MAX_SERVICE_THREADS);
@@ -2565,6 +2565,12 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION:
 				cfg_obsolete(&line, "please use namespace-context 'write-commit-level-override' and/or write transaction policy");
 				break;
+			case CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS:
+				cfg_obsolete(&line, "please use namespace-context 'background-scan-max-rps'");
+				break;
+			case CASE_SERVICE_SCAN_THREADS:
+				cfg_obsolete(&line, "please use 'scan-threads-limit' and namespace-context 'single-scan-threads'");
+				break;
 			case CASE_SERVICE_TRANSACTION_PENDING_LIMIT:
 				cfg_obsolete(&line, "please use namespace-context 'transaction-pending-limit'");
 				break;
@@ -2620,6 +2626,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD:
 			case CASE_SERVICE_PROLE_EXTRA_TTL:
 			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
+			case CASE_SERVICE_SCAN_MAX_ACTIVE:
 			case CASE_SERVICE_SCAN_MEMORY:
 			case CASE_SERVICE_SCAN_PRIORITY:
 			case CASE_SERVICE_SCAN_RETRANSMIT:
@@ -3107,6 +3114,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_ALLOW_XDR_WRITES:
 				ns->ns_allow_xdr_writes = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS:
+				ns->background_scan_max_rps = cfg_u32(&line, 1, 1000000);
+				break;
 			case CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_CONFLICT_RESOLUTION_OPTS, NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS)) {
 				case CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION:
@@ -3135,6 +3145,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB:
 				ns->batch_sub_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_OPS_SUB:
+				ns->ops_sub_benchmarks_enabled = true;
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_READ:
 				ns->read_benchmarks_enabled = true;
@@ -3245,6 +3258,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_SINGLE_BIN:
 				ns->single_bin = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_SINGLE_SCAN_THREADS:
+				ns->n_single_scan_threads = cfg_u32(&line, 1, 128);
 				break;
 			case CASE_NAMESPACE_STOP_WRITES_PCT:
 				ns->stop_writes_pct = cfg_u32(&line, 0, 100);
@@ -3503,7 +3519,7 @@ as_config_init(const char* config_file)
 				ns->storage_min_avail_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
-				ns->storage_post_write_queue = cfg_u32(&line, 0, 4 * 1024);
+				ns->storage_post_write_queue = cfg_u32(&line, 0, 8 * 1024);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE:
 				ns->storage_read_page_cache = cfg_bool(&line);
@@ -4415,6 +4431,19 @@ as_config_post_process(as_config* c, const char* config_file)
 		ns->udf_sub_repl_write_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s}-udf-sub-response", ns->name);
 		ns->udf_sub_response_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-ops-sub-start", ns->name);
+		ns->ops_sub_start_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-ops-sub-restart", ns->name);
+		ns->ops_sub_restart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-ops-sub-dup-res", ns->name);
+		ns->ops_sub_dup_res_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-ops-sub-master", ns->name);
+		ns->ops_sub_master_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-ops-sub-repl-write", ns->name);
+		ns->ops_sub_repl_write_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-ops-sub-response", ns->name);
+		ns->ops_sub_response_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 
 		// 'nsup' histograms.
 

@@ -127,14 +127,14 @@ as_msg_swap_op(as_msg_op *op)
 // Allocates cl_msg returned - caller must free it. Everything is host-ordered.
 // Will add more parameters (e.g. for set name) only as they become necessary.
 cl_msg *
-as_msg_create_internal(const char *ns_name, const cf_digest *keyd,
-		uint8_t info1, uint8_t info2, uint8_t info3)
+as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
+		uint8_t info3, uint16_t n_ops, uint8_t *ops, size_t ops_sz)
 {
 	size_t ns_name_len = strlen(ns_name);
 
 	size_t msg_sz = sizeof(cl_msg) +
 			sizeof(as_msg_field) + ns_name_len +
-			sizeof(as_msg_field) + sizeof(cf_digest);
+			ops_sz;
 
 	cl_msg *msgp = (cl_msg *)cf_malloc(msg_sz);
 
@@ -153,8 +153,8 @@ as_msg_create_internal(const char *ns_name, const cf_digest *keyd,
 	m->generation = 0;
 	m->record_ttl = 0;
 	m->transaction_ttl = 0;
-	m->n_fields = 2;
-	m->n_ops = 0;
+	m->n_fields = 1;
+	m->n_ops = n_ops;
 
 	as_msg_field *mf = (as_msg_field *)(m->data);
 
@@ -162,11 +162,11 @@ as_msg_create_internal(const char *ns_name, const cf_digest *keyd,
 	mf->field_sz = (uint32_t)ns_name_len + 1;
 	memcpy(mf->data, ns_name, ns_name_len);
 
-	mf = as_msg_field_get_next(mf);
+	if (ops != NULL) {
+		uint8_t *msg_ops = (uint8_t *)as_msg_field_get_next(mf);
 
-	mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
-	mf->field_sz = sizeof(cf_digest) + 1;
-	*(cf_digest *)mf->data = *keyd;
+		memcpy(msg_ops, ops, ops_sz);
+	}
 
 	return msgp;
 }

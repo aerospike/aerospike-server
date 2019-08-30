@@ -151,7 +151,7 @@ rw_request_destroy(rw_request* rw)
 				rw->origin);
 	}
 
-	if (rw->msgp && rw->origin != FROM_BATCH) {
+	if (rw->msgp != NULL && ! SHARED_MSGP(rw)) {
 		cf_free(rw->msgp);
 	}
 

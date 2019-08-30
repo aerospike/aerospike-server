@@ -31,6 +31,7 @@
 #include <stdint.h>
 
 #include "aerospike/as_aerospike.h"
+#include "aerospike/as_atomic.h"
 #include "aerospike/as_buffer.h"
 #include "aerospike/as_log.h"
 #include "aerospike/as_list.h"
@@ -146,14 +147,16 @@ client_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_client_udf_complete);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_udf_timeout);
 		break;
-	default:
-		cf_atomic64_incr(&ns->n_client_udf_error);
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_client_udf_filtered_out);
 		break;
 	}
 }
@@ -163,14 +166,16 @@ from_proxy_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_udf_complete);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_from_proxy_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_from_proxy_udf_timeout);
 		break;
-	default:
-		cf_atomic64_incr(&ns->n_from_proxy_udf_error);
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_from_proxy_udf_filtered_out);
 		break;
 	}
 }
@@ -180,14 +185,16 @@ udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT: // doesn't include those filtered out by metadata
 		cf_atomic64_incr(&ns->n_udf_sub_udf_complete);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_udf_sub_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
 		cf_atomic64_incr(&ns->n_udf_sub_udf_timeout);
 		break;
-	default:
-		cf_atomic64_incr(&ns->n_udf_sub_udf_error);
+	case AS_ERR_FILTERED_OUT: // doesn't include those filtered out by metadata
+		as_incr_uint64(&ns->n_udf_sub_udf_filtered_out);
 		break;
 	}
 }

@@ -273,6 +273,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_TRID              7
 #define AS_MSG_FIELD_TYPE_SCAN_OPTIONS      8
 #define AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT    9
+#define AS_MSG_FIELD_TYPE_RECS_PER_SEC      10
 
 // Secondary index.
 #define AS_MSG_FIELD_TYPE_INDEX_NAME        21
@@ -300,17 +301,18 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_TRID               (1 << 5)
 #define AS_MSG_FIELD_BIT_SCAN_OPTIONS       (1 << 6)
 #define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 7)
-#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 8)
-#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 9)
-#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 10)
-#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 11)
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 12)
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 13)
-#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 14)
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 15)
-#define AS_MSG_FIELD_BIT_BATCH              (1 << 16)
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 17)
-#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 18)
+#define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 8)
+#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 9)
+#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 10)
+#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 11)
+#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 12)
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 13)
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 14)
+#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 15)
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 16)
+#define AS_MSG_FIELD_BIT_BATCH              (1 << 17)
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 18)
+#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 19)
 
 // Special message field values.
 #define AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE    (0x08)
@@ -355,8 +357,7 @@ typedef struct as_msg_op_s {
 typedef enum {
 	AS_UDF_OP_KVS           = 0,
 	AS_UDF_OP_AGGREGATE     = 1,
-	AS_UDF_OP_BACKGROUND    = 2,
-	AS_UDF_OP_FOREGROUND    = 3 // not supported yet
+	AS_UDF_OP_BACKGROUND    = 2
 } as_udf_op;
 
 //------------------------------------------------
@@ -616,8 +617,9 @@ void as_msg_swap_header(as_msg* m);
 void as_msg_swap_field(as_msg_field* mf);
 void as_msg_swap_op(as_msg_op* op);
 
-cl_msg* as_msg_create_internal(const char* ns_name, const cf_digest* keyd,
-		uint8_t info1, uint8_t info2, uint8_t info3);
+cl_msg* as_msg_create_internal(const char* ns_name, uint8_t info1,
+		uint8_t info2, uint8_t info3, uint16_t n_ops, uint8_t* ops,
+		size_t ops_sz);
 
 cl_msg* as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint32_t void_time, as_msg_op** ops, struct as_bin_s** bins,
@@ -718,7 +720,7 @@ as_msg_op_skip(as_msg_op* op)
 }
 
 static inline as_msg_op*
-as_msg_op_iterate(as_msg* msg, as_msg_op* current, int* n)
+as_msg_op_iterate(const as_msg* msg, as_msg_op* current, int* n)
 {
 	// Skip over the fields the first time.
 	if (! current) {

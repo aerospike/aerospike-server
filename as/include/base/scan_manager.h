@@ -1,7 +1,7 @@
 /*
- * write.h
+ * scan_manager.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,44 +26,53 @@
 // Includes.
 //
 
-#include "citrusleaf/alloc.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-#include "base/predexp.h"
-#include "base/transaction.h"
+#include "citrusleaf/cf_queue.h"
+
+#include "cf_mutex.h"
 
 
 //==========================================================
 // Forward declarations.
 //
 
-struct as_transaction_s;
-struct cl_msg_s;
-struct predexp_eval_base_s;
+struct as_mon_jobstat_s;
+struct as_scan_job_s;
 
 
 //==========================================================
 // Typedefs & constants.
 //
 
-typedef void (*iops_cb)(void* udata, int result);
+typedef struct as_scan_manager_s {
+	cf_mutex lock;
+	cf_queue* active_jobs;
+	cf_queue* finished_jobs;
+} as_scan_manager;
 
-typedef struct iops_origin_s {
-	struct cl_msg_s* msgp;
-	struct predexp_eval_base_s* predexp;
-	iops_cb cb;
-	void* udata;
-} iops_origin;
+
+//==========================================================
+// Globals.
+//
+
+extern uint32_t g_n_threads;
 
 
 //==========================================================
 // Public API.
 //
 
-transaction_status as_write_start(struct as_transaction_s* tr);
-
-static inline void
-iops_origin_destroy(iops_origin* origin)
-{
-	predexp_destroy(origin->predexp);
-	cf_free(origin->msgp);
-}
+void as_scan_manager_init(void);
+int as_scan_manager_start_job(struct as_scan_job_s* _job);
+void as_scan_manager_add_job_thread(struct as_scan_job_s* _job);
+void as_scan_manager_add_max_job_threads(struct as_scan_job_s* _job);
+void as_scan_manager_finish_job(struct as_scan_job_s* _job);
+void as_scan_manager_abandon_job(struct as_scan_job_s* _job, int reason);
+bool as_scan_manager_abort_job(uint64_t trid);
+int as_scan_manager_abort_all_jobs(void);
+void as_scan_manager_limit_finished_jobs(void);
+struct as_mon_jobstat_s* as_scan_manager_get_job_info(uint64_t trid);
+struct as_mon_jobstat_s* as_scan_manager_get_info(int* size);
+int as_scan_manager_get_active_job_count(void);

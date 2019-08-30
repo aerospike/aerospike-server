@@ -37,6 +37,7 @@
 #define AS_QUERY_MAX_SHORT_QUEUE_SZ   500	// maximum 500 outstanding short running queries
 #define AS_QUERY_MAX_LONG_QUEUE_SZ    500	// maximum 500 outstanding long  running queries
 #define AS_QUERY_MAX_UDF_TRANSACTIONS 20	// Higher the value more aggressive it will be
+#define AS_QUERY_MAX_OPS_TRANSACTIONS 20	// Higher the value more aggressive it will be
 #define AS_QUERY_UNTRACKED_TIME       1000 // (millisecond) 1 sec
 #define AS_QUERY_WAIT_MAX_TRAN_US     1000
 // **************************************************************************************************

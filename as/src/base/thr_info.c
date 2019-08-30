@@ -37,6 +37,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_vector.h"
@@ -185,6 +186,100 @@ info_get_aggregated_namespace_stats(cf_dyn_buf *db)
 }
 
 // TODO: This function should move elsewhere.
+static inline uint64_t
+get_cpu_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+	return (ts.tv_sec * 1000 * 1000 * 1000) + ts.tv_nsec;
+}
+
+// TODO: This should move elsewhere.
+static uint32_t g_process_cpu_pct = 0;
+
+// TODO: This function should move elsewhere.
+// Called only from the ticker thread.
+uint32_t
+process_cpu(void)
+{
+	static uint64_t prev = 0;
+	static uint64_t prev_cpu = 0;
+
+	uint64_t now = cf_getns();
+	uint64_t now_cpu = get_cpu_ns();
+
+	if (prev != 0) {
+		uint64_t delta = now - prev;
+		uint64_t delta_cpu = now_cpu - prev_cpu;
+
+		g_process_cpu_pct = (uint32_t)(delta_cpu * 100 / delta);
+	}
+
+	prev = now;
+	prev_cpu = now_cpu;
+
+	return g_process_cpu_pct;
+}
+
+// TODO: This should move elsewhere.
+static uint32_t g_user_cpu_pct = 0;
+static uint32_t g_kernel_cpu_pct = 0;
+
+// TODO: This function should move elsewhere.
+// Called only from the ticker thread.
+void
+sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
+{
+	FILE* fh = fopen("/proc/stat", "r");
+
+	if (fh == NULL) {
+		cf_crash(AS_INFO, "failed to open /proc/stat: %d", errno);
+	}
+
+	uint64_t user;
+	uint64_t nice;
+	uint64_t kernel;
+	uint64_t idle;
+
+	if (fscanf(fh, "cpu %lu %lu %lu %lu", &user, &nice, &kernel, &idle) != 4) {
+		cf_crash(AS_INFO, "can't parse /proc/stat");
+	}
+
+	fclose(fh);
+
+	static uint64_t prev_user = 0;
+	static uint64_t prev_nice = 0;
+	static uint64_t prev_kernel = 0;
+	static uint64_t prev_idle = 0;
+
+	if (prev_user != 0) {
+		uint32_t delta_user = (uint32_t)(user - prev_user);
+		uint32_t delta_nice = (uint32_t)(nice - prev_nice);
+		uint32_t delta_kernel = (uint32_t)(kernel - prev_kernel);
+		uint32_t delta_idle = (uint32_t)(idle - prev_idle);
+
+		uint32_t total = delta_user + delta_nice + delta_kernel + delta_idle;
+		uint32_t n_cpus = cf_topo_count_cpus();
+
+		g_user_cpu_pct = (delta_user + delta_nice) * 100 * n_cpus / total;
+		g_kernel_cpu_pct = delta_kernel * 100 * n_cpus / total;
+	}
+
+	prev_user = user;
+	prev_nice = nice;
+	prev_kernel = kernel;
+	prev_idle = idle;
+
+	if (user_pct != NULL) {
+		*user_pct = g_user_cpu_pct;
+	}
+
+	if (kernel_pct != NULL) {
+		*kernel_pct = g_kernel_cpu_pct;
+	}
+}
+
+// TODO: This function should move elsewhere.
 void
 sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 {
@@ -308,9 +403,19 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint64(db, "uptime", now_sec - g_start_sec); // not in ticker
 
+	uint32_t user_pct = as_load_uint32(&g_user_cpu_pct);
+	uint32_t kernel_pct = as_load_uint32(&g_kernel_cpu_pct);
+
+	info_append_uint32(db, "system_total_cpu_pct", user_pct + kernel_pct);
+	info_append_uint32(db, "system_user_cpu_pct", user_pct);
+	info_append_uint32(db, "system_kernel_cpu_pct", kernel_pct);
+
 	uint32_t free_pct;
+
 	sys_mem_info(NULL, &free_pct);
 	info_append_int(db, "system_free_mem_pct", free_pct);
+
+	info_append_uint32(db, "process_cpu_pct", g_process_cpu_pct);
 
 	size_t allocated_kbytes;
 	size_t active_kbytes;
@@ -350,6 +455,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "early_tsvc_batch_sub_error", g_stats.n_tsvc_batch_sub_error);
 	info_append_uint64(db, "early_tsvc_from_proxy_batch_sub_error", g_stats.n_tsvc_from_proxy_batch_sub_error);
 	info_append_uint64(db, "early_tsvc_udf_sub_error", g_stats.n_tsvc_udf_sub_error);
+	info_append_uint64(db, "early_tsvc_ops_sub_error", g_stats.n_tsvc_ops_sub_error);
 
 	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
 
@@ -1739,10 +1845,8 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint64(db, "query-untracked-time-ms", g_config.query_untracked_time_ms);
 	info_append_uint32(db, "query-worker-threads", g_config.query_worker_threads);
 	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
-	info_append_uint32(db, "scan-max-active", g_config.scan_max_active);
 	info_append_uint32(db, "scan-max-done", g_config.scan_max_done);
-	info_append_uint32(db, "scan-max-udf-transactions", g_config.scan_max_udf_transactions);
-	info_append_uint32(db, "scan-threads", g_config.scan_threads);
+	info_append_uint32(db, "scan-threads-limit", g_config.n_scan_threads_limit);
 	info_append_uint32(db, "service-threads", g_config.n_service_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 	info_append_uint32(db, "sindex-gc-max-rate", g_config.sindex_gc_max_rate);
@@ -1884,6 +1988,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_hist_track_get_settings(ns->udf_hist, db);
 	cf_hist_track_get_settings(ns->write_hist, db);
 
+	info_append_uint32(db, "background-scan-max-rps", ns->background_scan_max_rps);
+
 	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
 		info_append_string(db, "conflict-resolution-policy", "generation");
 	}
@@ -1928,6 +2034,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "rack-id", ns->rack_id);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
+	info_append_uint32(db, "single-scan-threads", ns->n_single_scan_threads);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
 	info_append_bool(db, "strong-consistency", ns->cp);
 	info_append_bool(db, "strong-consistency-allow-expunge", ns->cp_allow_drops);
@@ -2182,16 +2289,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of ticker-interval from %d to %d ", g_config.ticker_interval, val);
 			g_config.ticker_interval = val;
 		}
-		else if (0 == as_info_parameter_get(params, "scan-max-active", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			if (val < 0 || val > 200) {
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of scan-max-active from %d to %d ", g_config.scan_max_active, val);
-			g_config.scan_max_active = val;
-			as_scan_limit_active_jobs(g_config.scan_max_active);
-		}
 		else if (0 == as_info_parameter_get(params, "scan-max-done", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
@@ -2200,23 +2297,14 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of scan-max-done from %d to %d ", g_config.scan_max_done, val);
 			g_config.scan_max_done = val;
-			as_scan_limit_finished_jobs(g_config.scan_max_done);
+			as_scan_limit_finished_jobs();
 		}
-		else if (0 == as_info_parameter_get(params, "scan-max-udf-transactions", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of scan-max-udf-transactions from %d to %d ", g_config.scan_max_udf_transactions, val);
-			g_config.scan_max_udf_transactions = val;
-		}
-		else if (0 == as_info_parameter_get(params, "scan-threads", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			if (val < 0 || val > 128) {
+		else if (0 == as_info_parameter_get(params, "scan-threads-limit", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 1024) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of scan-threads from %d to %d ", g_config.scan_threads, val);
-			g_config.scan_threads = val;
-			as_scan_resize_thread_pool(g_config.scan_threads);
+			cf_info(AS_INFO, "Changing value of scan-threads-limit from %u to %d ", g_config.n_scan_threads_limit, val);
+			g_config.n_scan_threads_limit = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "batch-index-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
@@ -2823,6 +2911,20 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of evict-hist-buckets of ns %s from %u to %d ", ns->name, ns->evict_hist_buckets, val);
 			ns->evict_hist_buckets = (uint32_t)val;
 		}
+		else if (0 == as_info_parameter_get(params, "background-scan-max-rps", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 1000000) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of background-scan-max-rps of ns %s from %u to %d ", ns->name, ns->background_scan_max_rps, val);
+			ns->background_scan_max_rps = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "single-scan-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 128) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of single-scan-threads of ns %s from %u to %d ", ns->name, ns->n_single_scan_threads, val);
+			ns->n_single_scan_threads = (uint32_t)val;
+		}
 		else if (0 == as_info_parameter_get(params, "stop-writes-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 0 || val > 100) {
 				goto Error;
@@ -3206,6 +3308,25 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-ops-sub", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-ops-sub of ns %s from %s to %s", ns->name, bool_val[ns->ops_sub_benchmarks_enabled], context);
+				ns->ops_sub_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-ops-sub of ns %s from %s to %s", ns->name, bool_val[ns->ops_sub_benchmarks_enabled], context);
+				ns->ops_sub_benchmarks_enabled = false;
+				histogram_clear(ns->ops_sub_start_hist);
+				histogram_clear(ns->ops_sub_restart_hist);
+				histogram_clear(ns->ops_sub_dup_res_hist);
+				histogram_clear(ns->ops_sub_master_hist);
+				histogram_clear(ns->ops_sub_repl_write_hist);
+				histogram_clear(ns->ops_sub_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-read", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-read of ns %s from %s to %s", ns->name, bool_val[ns->read_benchmarks_enabled], context);
@@ -3350,8 +3471,8 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_warning(AS_INFO, "ns %s, post-write-queue %s is not a number", ns->name, context);
 				goto Error;
 			}
-			if ((uint32_t)val > (4 * 1024)) {
-				cf_warning(AS_INFO, "ns %s, post-write-queue %u must be < 4K", ns->name, val);
+			if ((uint32_t)val > (8 * 1024)) {
+				cf_warning(AS_INFO, "ns %s, post-write-queue %u must be < 8K", ns->name, val);
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of post-write-queue of ns %s from %d to %d ", ns->name, ns->storage_post_write_queue, val);
@@ -5237,10 +5358,12 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_read_error", ns->n_client_read_error);
 	info_append_uint64(db, "client_read_timeout", ns->n_client_read_timeout);
 	info_append_uint64(db, "client_read_not_found", ns->n_client_read_not_found);
+	info_append_uint64(db, "client_read_filtered_out", ns->n_client_read_filtered_out);
 
 	info_append_uint64(db, "client_write_success", ns->n_client_write_success);
 	info_append_uint64(db, "client_write_error", ns->n_client_write_error);
 	info_append_uint64(db, "client_write_timeout", ns->n_client_write_timeout);
+	info_append_uint64(db, "client_write_filtered_out", ns->n_client_write_filtered_out);
 
 	// Subset of n_client_write_... above, respectively.
 	info_append_uint64(db, "xdr_client_write_success", ns->n_xdr_client_write_success);
@@ -5251,6 +5374,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_delete_error", ns->n_client_delete_error);
 	info_append_uint64(db, "client_delete_timeout", ns->n_client_delete_timeout);
 	info_append_uint64(db, "client_delete_not_found", ns->n_client_delete_not_found);
+	info_append_uint64(db, "client_delete_filtered_out", ns->n_client_delete_filtered_out);
 
 	// Subset of n_client_delete_... above, respectively.
 	info_append_uint64(db, "xdr_client_delete_success", ns->n_xdr_client_delete_success);
@@ -5261,6 +5385,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_udf_complete", ns->n_client_udf_complete);
 	info_append_uint64(db, "client_udf_error", ns->n_client_udf_error);
 	info_append_uint64(db, "client_udf_timeout", ns->n_client_udf_timeout);
+	info_append_uint64(db, "client_udf_filtered_out", ns->n_client_udf_filtered_out);
 
 	info_append_uint64(db, "client_lang_read_success", ns->n_client_lang_read_success);
 	info_append_uint64(db, "client_lang_write_success", ns->n_client_lang_write_success);
@@ -5276,10 +5401,12 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "from_proxy_read_error", ns->n_from_proxy_read_error);
 	info_append_uint64(db, "from_proxy_read_timeout", ns->n_from_proxy_read_timeout);
 	info_append_uint64(db, "from_proxy_read_not_found", ns->n_from_proxy_read_not_found);
+	info_append_uint64(db, "from_proxy_read_filtered_out", ns->n_from_proxy_read_filtered_out);
 
 	info_append_uint64(db, "from_proxy_write_success", ns->n_from_proxy_write_success);
 	info_append_uint64(db, "from_proxy_write_error", ns->n_from_proxy_write_error);
 	info_append_uint64(db, "from_proxy_write_timeout", ns->n_from_proxy_write_timeout);
+	info_append_uint64(db, "from_proxy_write_filtered_out", ns->n_from_proxy_write_filtered_out);
 
 	// Subset of n_from_proxy_write_... above, respectively.
 	info_append_uint64(db, "xdr_from_proxy_write_success", ns->n_xdr_from_proxy_write_success);
@@ -5290,6 +5417,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "from_proxy_delete_error", ns->n_from_proxy_delete_error);
 	info_append_uint64(db, "from_proxy_delete_timeout", ns->n_from_proxy_delete_timeout);
 	info_append_uint64(db, "from_proxy_delete_not_found", ns->n_from_proxy_delete_not_found);
+	info_append_uint64(db, "from_proxy_delete_filtered_out", ns->n_from_proxy_delete_filtered_out);
 
 	// Subset of n_from_proxy_delete_... above, respectively.
 	info_append_uint64(db, "xdr_from_proxy_delete_success", ns->n_xdr_from_proxy_delete_success);
@@ -5300,6 +5428,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "from_proxy_udf_complete", ns->n_from_proxy_udf_complete);
 	info_append_uint64(db, "from_proxy_udf_error", ns->n_from_proxy_udf_error);
 	info_append_uint64(db, "from_proxy_udf_timeout", ns->n_from_proxy_udf_timeout);
+	info_append_uint64(db, "from_proxy_udf_filtered_out", ns->n_from_proxy_udf_filtered_out);
 
 	info_append_uint64(db, "from_proxy_lang_read_success", ns->n_from_proxy_lang_read_success);
 	info_append_uint64(db, "from_proxy_lang_write_success", ns->n_from_proxy_lang_write_success);
@@ -5319,6 +5448,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "batch_sub_read_error", ns->n_batch_sub_read_error);
 	info_append_uint64(db, "batch_sub_read_timeout", ns->n_batch_sub_read_timeout);
 	info_append_uint64(db, "batch_sub_read_not_found", ns->n_batch_sub_read_not_found);
+	info_append_uint64(db, "batch_sub_read_filtered_out", ns->n_batch_sub_read_filtered_out);
 
 	// From-proxy batch sub-transaction stats.
 
@@ -5329,6 +5459,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "from_proxy_batch_sub_read_error", ns->n_from_proxy_batch_sub_read_error);
 	info_append_uint64(db, "from_proxy_batch_sub_read_timeout", ns->n_from_proxy_batch_sub_read_timeout);
 	info_append_uint64(db, "from_proxy_batch_sub_read_not_found", ns->n_from_proxy_batch_sub_read_not_found);
+	info_append_uint64(db, "from_proxy_batch_sub_read_filtered_out", ns->n_from_proxy_batch_sub_read_filtered_out);
 
 	// Internal-UDF sub-transaction stats.
 
@@ -5338,11 +5469,22 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "udf_sub_udf_complete", ns->n_udf_sub_udf_complete);
 	info_append_uint64(db, "udf_sub_udf_error", ns->n_udf_sub_udf_error);
 	info_append_uint64(db, "udf_sub_udf_timeout", ns->n_udf_sub_udf_timeout);
+	info_append_uint64(db, "udf_sub_udf_filtered_out", ns->n_udf_sub_udf_filtered_out);
 
 	info_append_uint64(db, "udf_sub_lang_read_success", ns->n_udf_sub_lang_read_success);
 	info_append_uint64(db, "udf_sub_lang_write_success", ns->n_udf_sub_lang_write_success);
 	info_append_uint64(db, "udf_sub_lang_delete_success", ns->n_udf_sub_lang_delete_success);
 	info_append_uint64(db, "udf_sub_lang_error", ns->n_udf_sub_lang_error);
+
+	// Internal-ops sub-transaction stats.
+
+	info_append_uint64(db, "ops_sub_tsvc_error", ns->n_ops_sub_tsvc_error);
+	info_append_uint64(db, "ops_sub_tsvc_timeout", ns->n_ops_sub_tsvc_timeout);
+
+	info_append_uint64(db, "ops_sub_write_success", ns->n_ops_sub_write_success);
+	info_append_uint64(db, "ops_sub_write_error", ns->n_ops_sub_write_error);
+	info_append_uint64(db, "ops_sub_write_timeout", ns->n_ops_sub_write_timeout);
+	info_append_uint64(db, "ops_sub_write_filtered_out", ns->n_ops_sub_write_filtered_out);
 
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
@@ -5362,6 +5504,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "retransmit_udf_sub_dup_res", ns->n_retransmit_udf_sub_dup_res);
 	info_append_uint64(db, "retransmit_udf_sub_repl_write", ns->n_retransmit_udf_sub_repl_write);
 
+	info_append_uint64(db, "retransmit_ops_sub_dup_res", ns->n_retransmit_ops_sub_dup_res);
+	info_append_uint64(db, "retransmit_ops_sub_repl_write", ns->n_retransmit_ops_sub_repl_write);
+
 	// Scan stats.
 
 	info_append_uint64(db, "scan_basic_complete", ns->n_scan_basic_complete);
@@ -5375,6 +5520,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "scan_udf_bg_complete", ns->n_scan_udf_bg_complete);
 	info_append_uint64(db, "scan_udf_bg_error", ns->n_scan_udf_bg_error);
 	info_append_uint64(db, "scan_udf_bg_abort", ns->n_scan_udf_bg_abort);
+
+	info_append_uint64(db, "scan_ops_bg_complete", ns->n_scan_ops_bg_complete);
+	info_append_uint64(db, "scan_ops_bg_error", ns->n_scan_ops_bg_error);
+	info_append_uint64(db, "scan_ops_bg_abort", ns->n_scan_ops_bg_abort);
 
 	// Query stats.
 
@@ -5412,6 +5561,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64(db, "query_udf_bg_success", ns->n_query_udf_bg_success);
 	info_append_uint64(db, "query_udf_bg_failure", ns->n_query_udf_bg_failure);
+
+	info_append_uint64(db, "query_ops_bg_success", ns->n_query_ops_bg_success);
+	info_append_uint64(db, "query_ops_bg_failure", ns->n_query_ops_bg_failure);
 
 	// Geospatial query stats:
 	info_append_uint64(db, "geo_region_query_reqs", ns->geo_region_query_count);

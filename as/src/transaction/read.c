@@ -99,17 +99,19 @@ client_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_client_read_success);
-		break;
-	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_client_read_timeout);
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_client_read_error);
 		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_client_read_timeout);
+		break;
 	case AS_ERR_NOT_FOUND:
 		cf_atomic64_incr(&ns->n_client_read_not_found);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_client_read_filtered_out);
 		break;
 	}
 }
@@ -119,17 +121,19 @@ from_proxy_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_read_success);
-		break;
-	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_read_timeout);
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_from_proxy_read_error);
 		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_from_proxy_read_timeout);
+		break;
 	case AS_ERR_NOT_FOUND:
 		cf_atomic64_incr(&ns->n_from_proxy_read_not_found);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_from_proxy_read_filtered_out);
 		break;
 	}
 }
@@ -139,17 +143,19 @@ batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_batch_sub_read_success);
-		break;
-	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_batch_sub_read_timeout);
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_batch_sub_read_error);
 		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_batch_sub_read_timeout);
+		break;
 	case AS_ERR_NOT_FOUND:
 		cf_atomic64_incr(&ns->n_batch_sub_read_not_found);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_batch_sub_read_filtered_out);
 		break;
 	}
 }
@@ -159,17 +165,19 @@ from_proxy_batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_success);
-		break;
-	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_timeout);
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_error);
 		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_timeout);
+		break;
 	case AS_ERR_NOT_FOUND:
 		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_not_found);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_filtered_out);
 		break;
 	}
 }
@@ -526,17 +534,11 @@ read_local(as_transaction* tr)
 	predexp_eval_t* predexp = NULL;
 	predexp_eval_t* batch_predexp = NULL;
 
-	if (tr->origin == FROM_BATCH) {
-		if ((result = batch_predexp_filter_meta(tr, r, &batch_predexp)) != 0) {
-			read_local_done(tr, &r_ref, NULL, result);
-			return TRANS_DONE_ERROR;
-		}
-	}
-	else {
-		if ((result = build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
-			read_local_done(tr, &r_ref, NULL, result);
-			return TRANS_DONE_ERROR;
-		}
+	if ((result = tr->origin == FROM_BATCH ?
+			batch_predexp_filter_meta(tr, r, &batch_predexp) :
+			build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
+		read_local_done(tr, &r_ref, NULL, result);
+		return TRANS_DONE_ERROR;
 	}
 
 	as_storage_rd rd;

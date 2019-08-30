@@ -30,6 +30,7 @@
 
 #include "aerospike/as_aerospike.h"
 #include "aerospike/as_list.h"
+#include "citrusleaf/alloc.h"
 
 #include "base/predexp.h"
 #include "base/transaction.h"
@@ -40,6 +41,7 @@
 //
 
 struct as_transaction_s;
+struct cl_msg_s;
 struct predexp_eval_base_s;
 
 
@@ -64,10 +66,11 @@ typedef struct udf_def_s {
 	uint8_t			type;
 } udf_def;
 
-typedef int (*iudf_cb)(void* udata, int retcode);
+typedef void (*iudf_cb)(void* udata, int result);
 
 typedef struct iudf_origin_s {
 	udf_def			def;
+	struct cl_msg_s* msgp;
 	struct predexp_eval_base_s*	predexp;
 	iudf_cb			cb;
 	void*			udata;
@@ -86,6 +89,7 @@ iudf_origin_destroy(iudf_origin* origin)
 	}
 
 	predexp_destroy(origin->predexp);
+	cf_free(origin->msgp);
 }
 
 void as_udf_init();

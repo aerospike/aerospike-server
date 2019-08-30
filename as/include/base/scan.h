@@ -44,15 +44,12 @@ struct as_transaction_s;
 // Public API.
 //
 
-void as_scan_init();
+void as_scan_init(void);
 int as_scan(struct as_transaction_s *tr, struct as_namespace_s *ns);
-void as_scan_limit_active_jobs(uint32_t max_active);
-void as_scan_limit_finished_jobs(uint32_t max_done);
-void as_scan_resize_thread_pool(uint32_t n_threads);
-int as_scan_get_active_job_count();
+void as_scan_limit_finished_jobs(void);
+int as_scan_get_active_job_count(void);
 int as_scan_list(char* name, cf_dyn_buf* db);
 struct as_mon_jobstat_s* as_scan_get_jobstat(uint64_t trid);
 struct as_mon_jobstat_s* as_scan_get_jobstat_all(int* size);
 int as_scan_abort(uint64_t trid);
-int as_scan_abort_all();
-int as_scan_change_job_priority(uint64_t trid, uint32_t priority);
+int as_scan_abort_all(void);

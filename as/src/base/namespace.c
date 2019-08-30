@@ -147,6 +147,7 @@ as_namespace_create(char *name)
 	ns->ns_allow_xdr_writes = true; // allow xdr writes by default
 	cf_vector_pointer_init(&ns->xdr_dclist_v, 3, 0);
 
+	ns->background_scan_max_rps = 10000; // internal write generation limit
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
@@ -161,6 +162,7 @@ as_namespace_create(char *name)
 	ns->n_nsup_threads = 1;
 	ns->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_PROTO;
 	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
+	ns->n_single_scan_threads = 4; // maximum number of threads a single scan may run
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
 	ns->transaction_pending_limit = 20;
@@ -195,6 +197,9 @@ as_namespace_create(char *name)
 	ns->geo2dsphere_within_max_cells = 12;
 	ns->geo2dsphere_within_level_mod = 1;
 	ns->geo2dsphere_within_earth_radius_meters = 6371000;  // Wikipedia, mean
+
+	// Special defaults that differ between CE and EE.
+	as_config_init_namespace(ns);
 
 	return ns;
 }

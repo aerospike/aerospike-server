@@ -35,12 +35,12 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "aerospike/as_list.h"
 #include "aerospike/as_module.h"
 #include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_ll.h"
@@ -56,16 +56,19 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "base/job_manager.h"
 #include "base/monitor.h"
 #include "base/predexp.h"
 #include "base/proto.h"
+#include "base/scan_job.h"
+#include "base/scan_manager.h"
 #include "base/secondary_index.h"
 #include "base/service.h"
 #include "base/transaction.h"
 #include "fabric/exchange.h"
 #include "fabric/partition.h"
+#include "transaction/rw_utils.h"
 #include "transaction/udf.h"
+#include "transaction/write.h"
 
 
 
@@ -81,6 +84,7 @@ typedef enum {
 	SCAN_TYPE_BASIC		= 0,
 	SCAN_TYPE_AGGR		= 1,
 	SCAN_TYPE_UDF_BG	= 2,
+	SCAN_TYPE_OPS_BG	= 3,
 
 	SCAN_TYPE_UNKNOWN	= -1
 } scan_type;
@@ -95,6 +99,8 @@ scan_type_str(scan_type type)
 		return "aggregation";
 	case SCAN_TYPE_UDF_BG:
 		return "background-udf";
+	case SCAN_TYPE_OPS_BG:
+		return "background-ops";
 	default:
 		return "?";
 	}
@@ -106,8 +112,8 @@ scan_type_str(scan_type type)
 
 int basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
 int aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
-int udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns,
-		uint16_t set_id);
+int udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
+int ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
 
 //----------------------------------------------------------
 // Non-class-specific utilities.
@@ -122,6 +128,9 @@ typedef struct scan_options_s {
 int get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id);
 scan_type get_scan_type(as_transaction* tr);
 bool get_scan_options(as_transaction* tr, scan_options* options);
+bool get_scan_rps(as_transaction* tr, uint32_t* rps);
+void convert_old_priority(int old_priority, uint32_t* rps);
+bool validate_background_scan_rps(const as_namespace* ns, uint32_t* rps);
 bool get_scan_socket_timeout(as_transaction* tr, uint32_t* timeout);
 bool get_scan_predexp(as_transaction* tr, predexp_eval_t** p_predexp);
 size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size, int32_t timeout);
@@ -133,16 +142,10 @@ static inline bool excluded_set(as_index* r, uint16_t set_id);
 // Constants.
 //
 
+#define LOW_PRIORITY_RPS 5000 // for compatibility with old clients
+
 const size_t INIT_BUF_BUILDER_SIZE = 1024 * 1024 * 2;
 const size_t SCAN_CHUNK_LIMIT = 1024 * 1024;
-
-
-
-//==============================================================================
-// Globals.
-//
-
-static as_job_manager g_scan_manager;
 
 
 
@@ -151,10 +154,9 @@ static as_job_manager g_scan_manager;
 //
 
 void
-as_scan_init()
+as_scan_init(void)
 {
-	as_job_manager_init(&g_scan_manager, g_config.scan_max_active,
-			g_config.scan_max_done, g_config.scan_threads);
+	as_scan_manager_init();
 }
 
 int
@@ -177,6 +179,9 @@ as_scan(as_transaction* tr, as_namespace* ns)
 	case SCAN_TYPE_UDF_BG:
 		result = udf_bg_scan_job_start(tr, ns, set_id);
 		break;
+	case SCAN_TYPE_OPS_BG:
+		result = ops_bg_scan_job_start(tr, ns, set_id);
+		break;
 	default:
 		cf_warning(AS_SCAN, "can't identify scan type");
 		result = AS_ERR_PARAMETER;
@@ -187,32 +192,22 @@ as_scan(as_transaction* tr, as_namespace* ns)
 }
 
 void
-as_scan_limit_active_jobs(uint32_t max_active)
+as_scan_limit_finished_jobs(void)
 {
-	as_job_manager_limit_active_jobs(&g_scan_manager, max_active);
-}
-
-void
-as_scan_limit_finished_jobs(uint32_t max_done)
-{
-	as_job_manager_limit_finished_jobs(&g_scan_manager, max_done);
-}
-
-void
-as_scan_resize_thread_pool(uint32_t n_threads)
-{
-	as_job_manager_resize_thread_pool(&g_scan_manager, n_threads);
+	as_scan_manager_limit_finished_jobs();
 }
 
 int
-as_scan_get_active_job_count()
+as_scan_get_active_job_count(void)
 {
-	return as_job_manager_get_active_job_count(&g_scan_manager);
+	return as_scan_manager_get_active_job_count();
 }
 
 int
 as_scan_list(char* name, cf_dyn_buf* db)
 {
+	(void)name;
+
 	as_mon_info_cmd(AS_MON_MODULES[SCAN_MOD], NULL, 0, 0, db);
 	return 0;
 }
@@ -220,32 +215,25 @@ as_scan_list(char* name, cf_dyn_buf* db)
 as_mon_jobstat*
 as_scan_get_jobstat(uint64_t trid)
 {
-	return as_job_manager_get_job_info(&g_scan_manager, trid);
+	return as_scan_manager_get_job_info(trid);
 }
 
 as_mon_jobstat*
 as_scan_get_jobstat_all(int* size)
 {
-	return as_job_manager_get_info(&g_scan_manager, size);
+	return as_scan_manager_get_info(size);
 }
 
 int
 as_scan_abort(uint64_t trid)
 {
-	return as_job_manager_abort_job(&g_scan_manager, trid) ? 0 : -1;
+	return as_scan_manager_abort_job(trid) ? 0 : -1;
 }
 
 int
-as_scan_abort_all()
+as_scan_abort_all(void)
 {
-	return as_job_manager_abort_all_jobs(&g_scan_manager);
-}
-
-int
-as_scan_change_job_priority(uint64_t trid, uint32_t priority)
-{
-	return as_job_manager_change_job_priority(&g_scan_manager, trid,
-			(int)priority) ? 0 : -1;
+	return as_scan_manager_abort_all_jobs();
 }
 
 
@@ -284,7 +272,8 @@ scan_type
 get_scan_type(as_transaction* tr)
 {
 	if (! as_transaction_is_udf(tr)) {
-		return SCAN_TYPE_BASIC;
+		return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ?
+				SCAN_TYPE_OPS_BG : SCAN_TYPE_BASIC;
 	}
 
 	as_msg_field* udf_op_f = as_msg_field_get(&tr->msgp->msg,
@@ -320,6 +309,59 @@ get_scan_options(as_transaction* tr, scan_options* options)
 	options->fail_on_cluster_change =
 			(AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE & f->data[0]) != 0;
 	options->sample_pct = f->data[1];
+
+	return true;
+}
+
+bool
+get_scan_rps(as_transaction* tr, uint32_t* rps)
+{
+	if (! as_transaction_has_recs_per_sec(tr)) {
+		return true;
+	}
+
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
+			AS_MSG_FIELD_TYPE_RECS_PER_SEC);
+
+	if (as_msg_field_get_value_sz(f) != 4) {
+		cf_warning(AS_SCAN, "scan recs-per-sec field size not 4");
+		return false;
+	}
+
+	*rps = cf_swap_from_be32(*(uint32_t*)f->data);
+
+	return true;
+}
+
+void
+convert_old_priority(int old_priority, uint32_t* rps)
+{
+	if (old_priority != 0 && *rps != 0) {
+		cf_warning(AS_SCAN, "unexpected - scan has rps %u and priority %d",
+				*rps, old_priority);
+		return;
+	}
+
+	if (old_priority == 1 && *rps == 0) {
+		cf_info(AS_SCAN, "low-priority scan from old client will use %u rps",
+				LOW_PRIORITY_RPS);
+
+		*rps = LOW_PRIORITY_RPS;
+	}
+}
+
+bool
+validate_background_scan_rps(const as_namespace* ns, uint32_t* rps)
+{
+	if (*rps > ns->background_scan_max_rps) {
+		cf_warning(AS_SCAN, "scan rps %u exceeds 'background-scan-max-rps' %u",
+				*rps, ns->background_scan_max_rps);
+		return false;
+	}
+
+	if (*rps == 0) {
+		*rps = ns->background_scan_max_rps;
+	}
 
 	return true;
 }
@@ -393,6 +435,16 @@ excluded_set(as_index* r, uint16_t set_id)
 	return set_id != INVALID_SET_ID && set_id != as_index_get_set_id(r);
 }
 
+static inline void
+throttle_sleep(as_scan_job* _job)
+{
+	uint32_t sleep_us = as_scan_job_throttle(_job);
+
+	if (sleep_us != 0) {
+		usleep(sleep_us);
+	}
+}
+
 
 
 //==============================================================================
@@ -405,7 +457,7 @@ excluded_set(as_index* r, uint16_t set_id)
 
 typedef struct conn_scan_job_s {
 	// Base object must be first:
-	as_job			_base;
+	as_scan_job		_base;
 
 	// Derived class data:
 	cf_mutex		fd_lock;
@@ -448,7 +500,7 @@ conn_scan_job_disown_fd(conn_scan_job* job)
 void
 conn_scan_job_finish(conn_scan_job* job)
 {
-	as_job* _job = (as_job*)job;
+	as_scan_job* _job = (as_scan_job*)job;
 
 	if (job->fd_h) {
 		// TODO - perhaps reflect in monitor if send fails?
@@ -465,7 +517,7 @@ conn_scan_job_finish(conn_scan_job* job)
 bool
 conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 {
-	as_job* _job = (as_job*)job;
+	as_scan_job* _job = (as_scan_job*)job;
 
 	cf_mutex_lock(&job->fd_lock);
 
@@ -480,11 +532,11 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 
 	if (size_sent == 0) {
 		int reason = errno == ETIMEDOUT ?
-				AS_JOB_FAIL_RESPONSE_TIMEOUT : AS_JOB_FAIL_RESPONSE_ERROR;
+				AS_SCAN_ERR_RESPONSE_TIMEOUT : AS_SCAN_ERR_RESPONSE_ERROR;
 
 		conn_scan_job_release_fd(job, true);
 		cf_mutex_unlock(&job->fd_lock);
-		as_job_manager_abandon_job(_job->mgr, _job, reason);
+		as_scan_manager_abandon_job(_job, reason);
 		return false;
 	}
 
@@ -532,12 +584,12 @@ typedef struct basic_scan_job_s {
 	cf_vector*		bin_names;
 } basic_scan_job;
 
-void basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv);
-void basic_scan_job_finish(as_job* _job);
-void basic_scan_job_destroy(as_job* _job);
-void basic_scan_job_info(as_job* _job, as_mon_jobstat* stat);
+void basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void basic_scan_job_finish(as_scan_job* _job);
+void basic_scan_job_destroy(as_scan_job* _job);
+void basic_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
 
-const as_job_vtable basic_scan_job_vtable = {
+const as_scan_vtable basic_scan_job_vtable = {
 		basic_scan_job_slice,
 		basic_scan_job_finish,
 		basic_scan_job_destroy,
@@ -550,6 +602,7 @@ typedef struct basic_scan_slice_s {
 } basic_scan_slice;
 
 void basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
+bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, predexp_eval_t** predexp);
 cf_vector* bin_names_from_op(as_msg* m, int* result);
 
 //----------------------------------------------------------
@@ -560,13 +613,14 @@ int
 basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 {
 	basic_scan_job* job = cf_malloc(sizeof(basic_scan_job));
-	as_job* _job = (as_job*)job;
+	as_scan_job* _job = (as_scan_job*)job;
 
 	scan_options options = { .sample_pct = 100 };
+	uint32_t rps = 0;
 	uint32_t timeout = CF_SOCKET_TIMEOUT;
 	predexp_eval_t* predexp = NULL;
 
-	if (! get_scan_options(tr, &options) ||
+	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps) ||
 			! get_scan_socket_timeout(tr, &timeout) ||
 			! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "basic scan job failed msg field processing");
@@ -574,9 +628,10 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return AS_ERR_PARAMETER;
 	}
 
-	as_job_init(_job, &basic_scan_job_vtable, &g_scan_manager, RSV_WRITE,
-			as_transaction_trid(tr), ns, set_id, options.priority,
-			tr->from.proto_fd_h->client);
+	convert_old_priority(options.priority, &rps);
+
+	as_scan_job_init(_job, &basic_scan_job_vtable, as_transaction_trid(tr), ns,
+			set_id, rps, tr->from.proto_fd_h->client);
 
 	job->cluster_key = as_exchange_cluster_key();
 	job->fail_on_cluster_change = options.fail_on_cluster_change;
@@ -589,34 +644,33 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->bin_names = bin_names_from_op(&tr->msgp->msg, &result);
 
 	if (! job->bin_names && result != AS_OK) {
-		as_job_destroy(_job);
+		as_scan_job_destroy(_job);
 		return result;
 	}
 
 	if (job->fail_on_cluster_change &&
-			(cf_atomic_int_get(ns->migrate_tx_partitions_remaining) != 0 ||
-			 cf_atomic_int_get(ns->migrate_rx_partitions_remaining) != 0)) {
-		// TODO - was AS_ERR_UNAVAILABLE - ok?
+			(ns->migrate_tx_partitions_remaining != 0 ||
+			 ns->migrate_rx_partitions_remaining != 0)) {
 		cf_warning(AS_SCAN, "basic scan job not started - migration");
-		as_job_destroy(_job);
+		as_scan_job_destroy(_job);
 		return AS_ERR_CLUSTER_KEY_MISMATCH;
 	}
 
 	// Take ownership of socket from transaction.
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout);
 
-	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} priority %u sample-pct %u%s%s socket-timeout %u from %s",
+	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} rps %u sample-pct %u%s%s socket-timeout %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->priority, job->sample_pct,
+			_job->rps, job->sample_pct,
 			job->no_bin_data ? ", metadata-only" : "",
 			job->fail_on_cluster_change ? ", fail-on-cluster-change" : "",
 			timeout, _job->client);
 
-	if ((result = as_job_manager_start_job(_job->mgr, _job)) != 0) {
+	if ((result = as_scan_manager_start_job(_job)) != 0) {
 		cf_warning(AS_SCAN, "basic scan job %lu failed to start (%d)",
 				_job->trid, result);
 		conn_scan_job_disown_fd((conn_scan_job*)job);
-		as_job_destroy(_job);
+		as_scan_job_destroy(_job);
 		return result;
 	}
 
@@ -628,7 +682,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 //
 
 void
-basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
+basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 {
 	basic_scan_job* job = (basic_scan_job*)_job;
 	as_index_tree* tree = rsv->tree;
@@ -651,7 +705,6 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 	}
 
-	// TODO - guts don't check buf_builder realloc failures rigorously.
 	cf_buf_builder_free(bb);
 
 	cf_detail(AS_SCAN, "%s:%u basic scan job %lu in thread %d took %lu ms",
@@ -660,23 +713,23 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 }
 
 void
-basic_scan_job_finish(as_job* _job)
+basic_scan_job_finish(as_scan_job* _job)
 {
 	conn_scan_job_finish((conn_scan_job*)_job);
 
 	switch (_job->abandoned) {
 	case 0:
-		cf_atomic_int_incr(&_job->ns->n_scan_basic_complete);
+		as_incr_uint64(&_job->ns->n_scan_basic_complete);
 		break;
-	case AS_JOB_FAIL_USER_ABORT:
-		cf_atomic_int_incr(&_job->ns->n_scan_basic_abort);
+	case AS_SCAN_ERR_USER_ABORT:
+		as_incr_uint64(&_job->ns->n_scan_basic_abort);
 		break;
-	case AS_JOB_FAIL_UNKNOWN:
-	case AS_JOB_FAIL_CLUSTER_KEY:
-	case AS_JOB_FAIL_RESPONSE_ERROR:
-	case AS_JOB_FAIL_RESPONSE_TIMEOUT:
+	case AS_SCAN_ERR_UNKNOWN:
+	case AS_SCAN_ERR_CLUSTER_KEY:
+	case AS_SCAN_ERR_RESPONSE_ERROR:
+	case AS_SCAN_ERR_RESPONSE_TIMEOUT:
 	default:
-		cf_atomic_int_incr(&_job->ns->n_scan_basic_error);
+		as_incr_uint64(&_job->ns->n_scan_basic_error);
 		break;
 	}
 
@@ -685,7 +738,7 @@ basic_scan_job_finish(as_job* _job)
 }
 
 void
-basic_scan_job_destroy(as_job* _job)
+basic_scan_job_destroy(as_scan_job* _job)
 {
 	basic_scan_job* job = (basic_scan_job*)_job;
 
@@ -697,7 +750,7 @@ basic_scan_job_destroy(as_job* _job)
 }
 
 void
-basic_scan_job_info(as_job* _job, as_mon_jobstat* stat)
+basic_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 {
 	strcpy(stat->job_type, scan_type_str(SCAN_TYPE_BASIC));
 	conn_scan_job_info((conn_scan_job*)_job, stat);
@@ -712,7 +765,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	basic_scan_slice* slice = (basic_scan_slice*)udata;
 	basic_scan_job* job = slice->job;
-	as_job* _job = (as_job*)job;
+	as_scan_job* _job = (as_scan_job*)job;
 	as_namespace* ns = _job->ns;
 
 	if (_job->abandoned != 0) {
@@ -723,8 +776,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (job->fail_on_cluster_change &&
 			job->cluster_key != as_exchange_cluster_key()) {
 		as_record_done(r_ref, ns);
-		as_job_manager_abandon_job(_job->mgr, _job,
-				AS_ERR_CLUSTER_KEY_MISMATCH);
+		as_scan_manager_abandon_job(_job, AS_ERR_CLUSTER_KEY_MISMATCH);
 		return;
 	}
 
@@ -735,54 +787,49 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
-	predexp_retval_t predrv = PREDEXP_TRUE;
+	predexp_eval_t* predexp = NULL;
 
-	if (job->predexp != NULL) {
-		predrv = predexp_matches_metadata(job->predexp, &predargs);
-
-		if (predrv == PREDEXP_FALSE) {
-			as_record_done(r_ref, ns);
-			return;
-		}
+	if (! basic_scan_predexp_filter_meta(job, r, &predexp)) {
+		as_record_done(r_ref, ns);
+		as_incr_uint64(&_job->n_filtered_meta);
+		return;
 	}
 
 	as_storage_rd rd;
 
 	as_storage_record_open(ns, r, &rd);
 
-	if (job->no_bin_data) {
-		if (predrv == PREDEXP_UNKNOWN) {
-			as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
+	if (predexp != NULL && predexp_read_and_filter_bins(&rd, predexp) != 0) {
+		as_storage_record_close(&rd);
+		as_record_done(r_ref, ns);
+		as_incr_uint64(&_job->n_filtered_bins);
 
-			as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
-
-			as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
-
-			predargs.rd = &rd;
-
-			if (! predexp_matches_record(job->predexp, &predargs)) {
-				as_storage_record_close(&rd);
-				as_record_done(r_ref, ns);
-				return;
-			}
+		if (! ns->storage_data_in_memory) {
+			throttle_sleep(_job);
 		}
 
+		return;
+	}
+
+	if (job->no_bin_data) {
 		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL);
 	}
 	else {
-		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
-
-		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
-
-		as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
-
-		predargs.rd = &rd;
-
-		if (predrv == PREDEXP_UNKNOWN &&
-				! predexp_matches_record(job->predexp, &predargs)) {
+		if (as_storage_rd_load_n_bins(&rd) < 0) {
+			cf_warning(AS_SCAN, "job %lu - record unreadable", _job->trid);
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
+			as_incr_uint64(&_job->n_failed);
+			return;
+		}
+
+		as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
+
+		if (as_storage_rd_load_bins(&rd, stack_bins)) {
+			cf_warning(AS_SCAN, "job %lu - record unreadable", _job->trid);
+			as_storage_record_close(&rd);
+			as_record_done(r_ref, ns);
+			as_incr_uint64(&_job->n_failed);
 			return;
 		}
 
@@ -792,8 +839,9 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
+	as_incr_uint64(&_job->n_succeeded);
 
-	cf_atomic64_incr(&_job->n_records_read);
+	throttle_sleep(_job);
 
 	cf_buf_builder* bb = *slice->bb_r;
 
@@ -807,6 +855,30 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 		cf_buf_builder_reset(bb);
 	}
+}
+
+bool
+basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r,
+		predexp_eval_t** predexp)
+{
+	*predexp = job->predexp;
+
+	if (*predexp == NULL) {
+		return true;
+	}
+
+	as_namespace* ns = ((as_scan_job*)job)->ns;
+	predexp_args_t predargs = { .ns = ns, .md = (as_record*)r };
+	predexp_retval_t predrv = predexp_matches_metadata(*predexp, &predargs);
+
+	if (predrv == PREDEXP_UNKNOWN) {
+		return true; // caller must later check bins using *predexp
+	}
+	// else - caller will not need to apply filter later.
+
+	*predexp = NULL;
+
+	return predrv == PREDEXP_TRUE;
 }
 
 cf_vector*
@@ -859,12 +931,12 @@ typedef struct aggr_scan_job_s {
 	as_aggr_call	aggr_call;
 } aggr_scan_job;
 
-void aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv);
-void aggr_scan_job_finish(as_job* _job);
-void aggr_scan_job_destroy(as_job* _job);
-void aggr_scan_job_info(as_job* _job, as_mon_jobstat* stat);
+void aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void aggr_scan_job_finish(as_scan_job* _job);
+void aggr_scan_job_destroy(as_scan_job* _job);
+void aggr_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
 
-const as_job_vtable aggr_scan_job_vtable = {
+const as_scan_vtable aggr_scan_job_vtable = {
 		aggr_scan_job_slice,
 		aggr_scan_job_finish,
 		aggr_scan_job_destroy,
@@ -904,12 +976,13 @@ int
 aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 {
 	aggr_scan_job* job = cf_malloc(sizeof(aggr_scan_job));
-	as_job* _job = (as_job*)job;
+	as_scan_job* _job = (as_scan_job*)job;
 
 	scan_options options = { .sample_pct = 100 };
+	uint32_t rps = 0;
 	uint32_t timeout = CF_SOCKET_TIMEOUT;
 
-	if (! get_scan_options(tr, &options) ||
+	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps) ||
 			! get_scan_socket_timeout(tr, &timeout)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed msg field processing");
 		cf_free(job);
@@ -922,30 +995,31 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
-	as_job_init(_job, &aggr_scan_job_vtable, &g_scan_manager, RSV_WRITE,
-			as_transaction_trid(tr), ns, set_id, options.priority,
-			tr->from.proto_fd_h->client);
+	convert_old_priority(options.priority, &rps);
+
+	as_scan_job_init(_job, &aggr_scan_job_vtable, as_transaction_trid(tr), ns,
+			set_id, rps, tr->from.proto_fd_h->client);
 
 	if (! aggr_scan_init(&job->aggr_call, tr)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
-		as_job_destroy(_job);
+		as_scan_job_destroy(_job);
 		return AS_ERR_PARAMETER;
 	}
 
 	// Take ownership of socket from transaction.
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout);
 
-	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} priority %u socket-timeout %u from %s",
+	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} rps %u socket-timeout %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->priority, timeout, _job->client);
+			_job->rps, timeout, _job->client);
 
-	int result = as_job_manager_start_job(_job->mgr, _job);
+	int result = as_scan_manager_start_job(_job);
 
 	if (result != 0) {
 		cf_warning(AS_SCAN, "aggregation scan job %lu failed to start (%d)",
 				_job->trid, result);
 		conn_scan_job_disown_fd((conn_scan_job*)job);
-		as_job_destroy(_job);
+		as_scan_job_destroy(_job);
 		return result;
 	}
 
@@ -957,7 +1031,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 //
 
 void
-aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
+aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 {
 	aggr_scan_job* job = (aggr_scan_job*)_job;
 	cf_ll ll;
@@ -996,7 +1070,7 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 			aggr_scan_add_val_response(&slice, v, false);
 			as_val_destroy(v);
 			cf_free(rs);
-			as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
+			as_scan_manager_abandon_job(_job, AS_ERR_UNKNOWN);
 		}
 
 		as_result_destroy(&result);
@@ -1008,12 +1082,11 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 	}
 
-	// TODO - guts don't check buf_builder realloc failures rigorously.
 	cf_buf_builder_free(bb);
 }
 
 void
-aggr_scan_job_finish(as_job* _job)
+aggr_scan_job_finish(as_scan_job* _job)
 {
 	aggr_scan_job* job = (aggr_scan_job*)_job;
 
@@ -1026,17 +1099,17 @@ aggr_scan_job_finish(as_job* _job)
 
 	switch (_job->abandoned) {
 	case 0:
-		cf_atomic_int_incr(&_job->ns->n_scan_aggr_complete);
+		as_incr_uint64(&_job->ns->n_scan_aggr_complete);
 		break;
-	case AS_JOB_FAIL_USER_ABORT:
-		cf_atomic_int_incr(&_job->ns->n_scan_aggr_abort);
+	case AS_SCAN_ERR_USER_ABORT:
+		as_incr_uint64(&_job->ns->n_scan_aggr_abort);
 		break;
-	case AS_JOB_FAIL_UNKNOWN:
-	case AS_JOB_FAIL_CLUSTER_KEY:
-	case AS_JOB_FAIL_RESPONSE_ERROR:
-	case AS_JOB_FAIL_RESPONSE_TIMEOUT:
+	case AS_SCAN_ERR_UNKNOWN:
+	case AS_SCAN_ERR_CLUSTER_KEY:
+	case AS_SCAN_ERR_RESPONSE_ERROR:
+	case AS_SCAN_ERR_RESPONSE_TIMEOUT:
 	default:
-		cf_atomic_int_incr(&_job->ns->n_scan_aggr_error);
+		as_incr_uint64(&_job->ns->n_scan_aggr_error);
 		break;
 	}
 
@@ -1045,7 +1118,7 @@ aggr_scan_job_finish(as_job* _job)
 }
 
 void
-aggr_scan_job_destroy(as_job* _job)
+aggr_scan_job_destroy(as_scan_job* _job)
 {
 	aggr_scan_job* job = (aggr_scan_job*)_job;
 
@@ -1055,7 +1128,7 @@ aggr_scan_job_destroy(as_job* _job)
 }
 
 void
-aggr_scan_job_info(as_job* _job, as_mon_jobstat* stat)
+aggr_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 {
 	strcpy(stat->job_type, scan_type_str(SCAN_TYPE_AGGR));
 	conn_scan_job_info((conn_scan_job*)_job, stat);
@@ -1082,7 +1155,7 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
 	aggr_scan_job* job = slice->job;
-	as_job* _job = (as_job*)job;
+	as_scan_job* _job = (as_scan_job*)job;
 	as_namespace* ns = _job->ns;
 
 	if (_job->abandoned != 0) {
@@ -1099,12 +1172,14 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (! aggr_scan_add_digest(slice->ll, &r->keyd)) {
 		as_record_done(r_ref, ns);
-		as_job_manager_abandon_job(_job->mgr, _job, AS_ERR_UNKNOWN);
+		as_scan_manager_abandon_job(_job, AS_ERR_UNKNOWN);
 		return;
 	}
 
-	cf_atomic64_incr(&_job->n_records_read);
 	as_record_done(r_ref, ns);
+	as_incr_uint64(&_job->n_succeeded);
+
+	throttle_sleep(_job);
 }
 
 bool
@@ -1194,23 +1269,19 @@ aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
 
 typedef struct udf_bg_scan_job_s {
 	// Base object must be first:
-	as_job			_base;
+	as_scan_job		_base;
 
 	// Derived class data:
 	iudf_origin		origin;
-	bool			is_durable_delete; // enterprise only
-	cf_atomic32		n_active_tr;
-
-	cf_atomic64		n_successful_tr;
-	cf_atomic64		n_failed_tr;
+	uint32_t		n_active_tr;
 } udf_bg_scan_job;
 
-void udf_bg_scan_job_slice(as_job* _job, as_partition_reservation* rsv);
-void udf_bg_scan_job_finish(as_job* _job);
-void udf_bg_scan_job_destroy(as_job* _job);
-void udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat);
+void udf_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void udf_bg_scan_job_finish(as_scan_job* _job);
+void udf_bg_scan_job_destroy(as_scan_job* _job);
+void udf_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
 
-const as_job_vtable udf_bg_scan_job_vtable = {
+const as_scan_vtable udf_bg_scan_job_vtable = {
 		udf_bg_scan_job_slice,
 		udf_bg_scan_job_finish,
 		udf_bg_scan_job_destroy,
@@ -1218,7 +1289,7 @@ const as_job_vtable udf_bg_scan_job_vtable = {
 };
 
 void udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
-int udf_bg_scan_tr_complete(void* udata, int retcode);
+void udf_bg_scan_tr_complete(void* udata, int result);
 
 //----------------------------------------------------------
 // udf_bg_scan_job public API.
@@ -1228,46 +1299,64 @@ int
 udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 {
 	udf_bg_scan_job* job = cf_malloc(sizeof(udf_bg_scan_job));
-	as_job* _job = (as_job*)job;
+	as_scan_job* _job = (as_scan_job*)job;
 
 	scan_options options = { .sample_pct = 100 };
-	predexp_eval_t* predexp = NULL;
+	uint32_t rps = 0;
 
-	if (! get_scan_options(tr, &options) || ! get_scan_predexp(tr, &predexp)) {
+	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed msg field processing");
 		cf_free(job);
 		return AS_ERR_PARAMETER;
 	}
 
-	as_job_init(_job, &udf_bg_scan_job_vtable, &g_scan_manager, RSV_WRITE,
-			as_transaction_trid(tr), ns, set_id, options.priority,
-			tr->from.proto_fd_h->client);
+	convert_old_priority(options.priority, &rps);
 
-	job->origin.predexp = predexp;
-	job->is_durable_delete = as_transaction_is_durable_delete(tr);
-	job->n_active_tr = 0;
-	job->n_successful_tr = 0;
-	job->n_failed_tr = 0;
-
-	if (! udf_def_init_from_msg(&job->origin.def, tr)) {
-		cf_warning(AS_SCAN, "udf-bg scan job failed def init");
-		as_job_destroy(_job);
+	if (! validate_background_scan_rps(ns, &rps)) {
+		cf_warning(AS_SCAN, "udf-bg scan job failed rps check");
+		cf_free(job);
 		return AS_ERR_PARAMETER;
 	}
 
+	predexp_eval_t* predexp = NULL;
+
+	if (! get_scan_predexp(tr, &predexp)) {
+		cf_warning(AS_SCAN, "udf-bg scan job failed predexp processing");
+		cf_free(job);
+		return AS_ERR_PARAMETER;
+	}
+
+	as_scan_job_init(_job, &udf_bg_scan_job_vtable, as_transaction_trid(tr), ns,
+			set_id, rps, tr->from.proto_fd_h->client);
+
+	job->n_active_tr = 0;
+
+	if (! udf_def_init_from_msg(&job->origin.def, tr)) {
+		cf_warning(AS_SCAN, "udf-bg scan job failed def init");
+		as_scan_job_destroy(_job);
+		return AS_ERR_PARAMETER;
+	}
+
+	uint8_t info2 = AS_MSG_INFO2_WRITE |
+			(tr->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE);
+
+	job->origin.msgp =
+			as_msg_create_internal(ns->name, 0, info2, 0, 0, NULL, 0);
+
+	job->origin.predexp = predexp;
 	job->origin.cb = udf_bg_scan_tr_complete;
 	job->origin.udata = (void*)job;
 
-	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} priority %u from %s",
+	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} rps %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->priority, _job->client);
+			_job->rps, _job->client);
 
-	int result = as_job_manager_start_job(_job->mgr, _job);
+	int result = as_scan_manager_start_job(_job);
 
 	if (result != 0) {
 		cf_warning(AS_SCAN, "udf-bg scan job %lu failed to start (%d)",
 				_job->trid, result);
-		as_job_destroy(_job);
+		as_scan_job_destroy(_job);
 		return result;
 	}
 
@@ -1291,31 +1380,31 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 //
 
 void
-udf_bg_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
+udf_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 {
 	as_index_reduce_live(rsv->tree, udf_bg_scan_job_reduce_cb, (void*)_job);
 }
 
 void
-udf_bg_scan_job_finish(as_job* _job)
+udf_bg_scan_job_finish(as_scan_job* _job)
 {
 	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 
-	while (cf_atomic32_get(job->n_active_tr) != 0) {
+	while (job->n_active_tr != 0) {
 		usleep(100);
 	}
 
 	switch (_job->abandoned) {
 	case 0:
-		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_complete);
+		as_incr_uint64(&_job->ns->n_scan_udf_bg_complete);
 		break;
-	case AS_JOB_FAIL_USER_ABORT:
-		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_abort);
+	case AS_SCAN_ERR_USER_ABORT:
+		as_incr_uint64(&_job->ns->n_scan_udf_bg_abort);
 		break;
-	case AS_JOB_FAIL_UNKNOWN:
-	case AS_JOB_FAIL_CLUSTER_KEY:
+	case AS_SCAN_ERR_UNKNOWN:
+	case AS_SCAN_ERR_CLUSTER_KEY:
 	default:
-		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_error);
+		as_incr_uint64(&_job->ns->n_scan_udf_bg_error);
 		break;
 	}
 
@@ -1324,7 +1413,7 @@ udf_bg_scan_job_finish(as_job* _job)
 }
 
 void
-udf_bg_scan_job_destroy(as_job* _job)
+udf_bg_scan_job_destroy(as_scan_job* _job)
 {
 	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 
@@ -1332,7 +1421,7 @@ udf_bg_scan_job_destroy(as_job* _job)
 }
 
 void
-udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
+udf_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 {
 	strcpy(stat->job_type, scan_type_str(SCAN_TYPE_UDF_BG));
 	stat->net_io_bytes = sizeof(cl_msg); // size of original synchronous fin
@@ -1341,11 +1430,9 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 	char* extra = stat->jdata + strlen(stat->jdata);
 
-	sprintf(extra, ":udf-filename=%s:udf-function=%s:udf-active=%u:udf-success=%lu:udf-failed=%lu",
+	sprintf(extra, ":udf-filename=%s:udf-function=%s:udf-active=%u",
 			job->origin.def.filename, job->origin.def.function,
-			cf_atomic32_get(job->n_active_tr),
-			cf_atomic64_get(job->n_successful_tr),
-			cf_atomic64_get(job->n_failed_tr));
+			job->n_active_tr);
 }
 
 //----------------------------------------------------------
@@ -1355,7 +1442,7 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 void
 udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
-	as_job* _job = (as_job*)udata;
+	as_scan_job* _job = (as_scan_job*)udata;
 	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 	as_namespace* ns = _job->ns;
 
@@ -1371,44 +1458,317 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
+	predexp_args_t predargs = { .ns = ns, .md = r };
 
 	if (job->origin.predexp != NULL &&
 			predexp_matches_metadata(job->origin.predexp, &predargs) ==
 					PREDEXP_FALSE) {
 		as_record_done(r_ref, ns);
+		as_incr_uint64(&_job->n_filtered_meta);
+		as_incr_uint64(&ns->n_udf_sub_udf_filtered_out);
 		return;
 	}
 
-	// Save this before releasing record.
-	cf_digest d = r->keyd;
+	as_transaction tr;
+	as_transaction_init_iudf(&tr, ns, &r->keyd, &job->origin);
 
 	// Release record lock before enqueuing transaction.
 	as_record_done(r_ref, ns);
 
-	// TODO - replace this mechanism with signal-based counter?
-	while (cf_atomic32_get(job->n_active_tr) >
-			g_config.scan_max_udf_transactions) {
-		usleep(50);
-	}
+	throttle_sleep(_job);
 
-	as_transaction tr;
-
-	as_transaction_init_iudf(&tr, ns, &d, &job->origin, job->is_durable_delete);
-
-	cf_atomic64_incr(&_job->n_records_read);
-	cf_atomic32_incr(&job->n_active_tr);
-
+	as_incr_uint32(&job->n_active_tr);
 	as_service_enqueue_internal(&tr);
 }
 
-int
-udf_bg_scan_tr_complete(void* udata, int retcode)
+void
+udf_bg_scan_tr_complete(void* udata, int result)
 {
-	udf_bg_scan_job* job = (udf_bg_scan_job*)udata;
+	as_scan_job* _job = (as_scan_job*)udata;
+	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 
-	cf_atomic32_decr(&job->n_active_tr);
-	cf_atomic64_incr(retcode == 0 ? &job->n_successful_tr : &job->n_failed_tr);
+	as_decr_uint32(&job->n_active_tr);
 
-	return 0;
+	switch (result) {
+	case AS_OK:
+		as_incr_uint64(&_job->n_succeeded);
+		break;
+	case AS_ERR_NOT_FOUND: // record deleted after generating tr
+		break;
+	case AS_ERR_FILTERED_OUT:
+		as_incr_uint64(&_job->n_filtered_bins);
+		break;
+	default:
+		as_incr_uint64(&_job->n_failed);
+		break;
+	}
+}
+
+
+
+//==============================================================================
+// ops_bg_scan_job derived class implementation.
+//
+
+//----------------------------------------------------------
+// ops_bg_scan_job typedefs and forward declarations.
+//
+
+typedef struct ops_bg_scan_job_s {
+	// Base object must be first:
+	as_scan_job		_base;
+
+	// Derived class data:
+	iops_origin		origin;
+	uint32_t		n_active_tr;
+} ops_bg_scan_job;
+
+void ops_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void ops_bg_scan_job_finish(as_scan_job* _job);
+void ops_bg_scan_job_destroy(as_scan_job* _job);
+void ops_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
+
+const as_scan_vtable ops_bg_scan_job_vtable = {
+		ops_bg_scan_job_slice,
+		ops_bg_scan_job_finish,
+		ops_bg_scan_job_destroy,
+		ops_bg_scan_job_info
+};
+
+uint8_t* ops_bg_validate_ops(const as_msg* m);
+void ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
+void ops_bg_scan_tr_complete(void* udata, int result);
+
+//----------------------------------------------------------
+// ops_bg_scan_job public API.
+//
+
+int
+ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
+{
+	ops_bg_scan_job* job = cf_malloc(sizeof(ops_bg_scan_job));
+	as_scan_job* _job = (as_scan_job*)job;
+
+	scan_options options = { .sample_pct = 100 };
+	uint32_t rps = 0;
+
+	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
+		cf_warning(AS_SCAN, "ops-bg scan job failed msg field processing");
+		cf_free(job);
+		return AS_ERR_PARAMETER;
+	}
+
+	if (! validate_background_scan_rps(ns, &rps)) {
+		cf_warning(AS_SCAN, "ops-bg scan job failed rps check");
+		cf_free(job);
+		return AS_ERR_PARAMETER;
+	}
+
+	as_msg* om = &tr->msgp->msg;
+	uint8_t* ops = ops_bg_validate_ops(om);
+
+	if (ops == NULL) {
+		cf_warning(AS_SCAN, "ops-bg scan job failed ops check");
+		cf_free(job);
+		return AS_ERR_PARAMETER;
+	}
+
+	predexp_eval_t* predexp = NULL;
+
+	if (! get_scan_predexp(tr, &predexp)) {
+		cf_warning(AS_SCAN, "ops-bg scan job failed predexp processing");
+		cf_free(job);
+		return AS_ERR_PARAMETER;
+	}
+
+	as_scan_job_init(_job, &ops_bg_scan_job_vtable, as_transaction_trid(tr), ns,
+			set_id, rps, tr->from.proto_fd_h->client);
+
+	job->n_active_tr = 0;
+
+	uint8_t info2 = AS_MSG_INFO2_WRITE |
+			(om->info2 & AS_MSG_INFO2_DURABLE_DELETE);
+	uint8_t info3 = AS_MSG_INFO3_UPDATE_ONLY |
+			(om->info3 & AS_MSG_INFO3_REPLACE_ONLY);
+
+	job->origin.msgp = as_msg_create_internal(ns->name, 0, info2, info3,
+			om->n_ops, ops, tr->msgp->proto.sz - (ops - (uint8_t*)om));
+
+	job->origin.predexp = predexp;
+	job->origin.cb = ops_bg_scan_tr_complete;
+	job->origin.udata = (void*)job;
+
+	cf_info(AS_SCAN, "starting ops-bg scan job %lu {%s:%s} rps %u from %s",
+			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
+			_job->rps, _job->client);
+
+	int result = as_scan_manager_start_job(_job);
+
+	if (result != 0) {
+		cf_warning(AS_SCAN, "ops-bg scan job %lu failed to start (%d)",
+				_job->trid, result);
+		as_scan_job_destroy(_job);
+		return result;
+	}
+
+	if (as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_OK)) {
+		tr->from.proto_fd_h->last_used = cf_getns();
+		as_end_of_transaction_ok(tr->from.proto_fd_h);
+	}
+	else {
+		cf_warning(AS_SCAN, "ops-bg scan job error sending fin");
+		as_end_of_transaction_force_close(tr->from.proto_fd_h);
+		// No point returning an error - it can't be reported on this socket.
+	}
+
+	tr->from.proto_fd_h = NULL;
+
+	return AS_OK;
+}
+
+//----------------------------------------------------------
+// ops_bg_scan_job mandatory scan_job interface.
+//
+
+void
+ops_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
+{
+	as_index_reduce_live(rsv->tree, ops_bg_scan_job_reduce_cb, (void*)_job);
+}
+
+void
+ops_bg_scan_job_finish(as_scan_job* _job)
+{
+	ops_bg_scan_job* job = (ops_bg_scan_job*)_job;
+
+	while (job->n_active_tr != 0) {
+		usleep(100);
+	}
+
+	switch (_job->abandoned) {
+	case 0:
+		as_incr_uint64(&_job->ns->n_scan_ops_bg_complete);
+		break;
+	case AS_SCAN_ERR_USER_ABORT:
+		as_incr_uint64(&_job->ns->n_scan_ops_bg_abort);
+		break;
+	case AS_SCAN_ERR_UNKNOWN:
+	case AS_SCAN_ERR_CLUSTER_KEY:
+	default:
+		as_incr_uint64(&_job->ns->n_scan_ops_bg_error);
+		break;
+	}
+
+	cf_info(AS_SCAN, "finished ops-bg scan job %lu (%d)", _job->trid,
+			_job->abandoned);
+}
+
+void
+ops_bg_scan_job_destroy(as_scan_job* _job)
+{
+	ops_bg_scan_job* job = (ops_bg_scan_job*)_job;
+
+	iops_origin_destroy(&job->origin);
+}
+
+void
+ops_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
+{
+	strcpy(stat->job_type, scan_type_str(SCAN_TYPE_OPS_BG));
+	stat->net_io_bytes = sizeof(cl_msg); // size of original synchronous fin
+	stat->socket_timeout = CF_SOCKET_TIMEOUT;
+
+	ops_bg_scan_job* job = (ops_bg_scan_job*)_job;
+	char* extra = stat->jdata + strlen(stat->jdata);
+
+	sprintf(extra, ":ops-active=%u", job->n_active_tr);
+}
+
+//----------------------------------------------------------
+// ops_bg_scan_job utilities.
+//
+
+uint8_t*
+ops_bg_validate_ops(const as_msg* m)
+{
+	if ((m->info1 & AS_MSG_INFO1_READ) != 0) {
+		cf_warning(AS_SCAN, "ops not write only");
+		return NULL;
+	}
+
+	if (m->n_ops == 0) {
+		cf_warning(AS_SCAN, "ops scan has no ops");
+		return NULL;
+	}
+
+	// TODO - should we at least de-fuzz the ops, so all the sub-transactions
+	// won't fail later?
+	int i = 0;
+
+	return (uint8_t*)as_msg_op_iterate(m, NULL, &i);
+}
+
+void
+ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
+{
+	as_scan_job* _job = (as_scan_job*)udata;
+	ops_bg_scan_job* job = (ops_bg_scan_job*)_job;
+	as_namespace* ns = _job->ns;
+
+	if (_job->abandoned != 0) {
+		as_record_done(r_ref, ns);
+		return;
+	}
+
+	as_index* r = r_ref->r;
+
+	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
+		as_record_done(r_ref, ns);
+		return;
+	}
+
+	predexp_args_t predargs = { .ns = ns, .md = r };
+
+	if (job->origin.predexp != NULL &&
+			predexp_matches_metadata(job->origin.predexp, &predargs) ==
+					PREDEXP_FALSE) {
+		as_record_done(r_ref, ns);
+		as_incr_uint64(&_job->n_filtered_meta);
+		as_incr_uint64(&ns->n_ops_sub_write_filtered_out);
+		return;
+	}
+
+	as_transaction tr;
+	as_transaction_init_iops(&tr, ns, &r->keyd, &job->origin);
+
+	// Release record lock before throttling and enqueuing transaction.
+	as_record_done(r_ref, ns);
+
+	throttle_sleep(_job);
+
+	as_incr_uint32(&job->n_active_tr);
+	as_service_enqueue_internal(&tr);
+}
+
+void
+ops_bg_scan_tr_complete(void* udata, int result)
+{
+	as_scan_job* _job = (as_scan_job*)udata;
+	ops_bg_scan_job* job = (ops_bg_scan_job*)_job;
+
+	as_decr_uint32(&job->n_active_tr);
+
+	switch (result) {
+	case AS_OK:
+		as_incr_uint64(&_job->n_succeeded);
+		break;
+	case AS_ERR_NOT_FOUND: // record deleted after generating tr
+		break;
+	case AS_ERR_FILTERED_OUT:
+		as_incr_uint64(&_job->n_filtered_bins);
+		break;
+	default:
+		as_incr_uint64(&_job->n_failed);
+		break;
+	}
 }

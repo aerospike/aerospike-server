@@ -60,11 +60,17 @@ typedef struct as_mon_jobstat_s {
 	char		ns[AS_ID_NAMESPACE_SZ];
 	char		set[AS_SET_NAME_MAX_SIZE];
 	uint32_t	priority;
+	uint32_t	rps;
+	uint32_t	active_threads;
 	char		status[64];
 	float		progress_pct;
 	uint64_t	run_time;
 	uint64_t	time_since_done;
-	uint64_t	recs_read;
+	uint64_t	recs_throttled;
+	uint64_t	recs_filtered_meta;
+	uint64_t	recs_filtered_bins;
+	uint64_t	recs_succeeded;
+	uint64_t	recs_failed;
 	uint64_t	net_io_bytes;
 	uint32_t	socket_timeout;
 	char		client[64];

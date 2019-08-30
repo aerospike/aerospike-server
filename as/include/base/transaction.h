@@ -42,6 +42,12 @@
 struct as_namespace_s;
 
 
+#define SHARED_MSGP(trw) ( \
+		trw->origin == FROM_BATCH || \
+		trw->origin == FROM_IUDF || \
+		trw->origin == FROM_IOPS)
+
+
 //==========================================================
 // Histogram macros.
 //
@@ -149,6 +155,7 @@ typedef enum {
 	// Internal, generated on local node:
 	FROM_BATCH,
 	FROM_IUDF,
+	FROM_IOPS,
 	FROM_RE_REPL, // enterprise-only
 
 	FROM_UNDEF	= 0
@@ -156,6 +163,7 @@ typedef enum {
 
 struct as_batch_shared_s;
 struct iudf_origin_s;
+struct iops_origin_s;
 
 typedef struct as_transaction_s {
 
@@ -177,6 +185,7 @@ typedef struct as_transaction_s {
 		cf_node						proxy_node;
 		struct as_batch_shared_s*	batch_shared;
 		struct iudf_origin_s*		iudf_orig;
+		struct iops_origin_s*		iops_orig;
 		void (*re_repl_orig_cb) (struct as_transaction_s* tr);
 	} from;
 
@@ -223,7 +232,7 @@ typedef struct as_transaction_s {
 #define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE	0x10 // enterprise-only
 
 
-void as_transaction_init_head(as_transaction *tr, cf_digest *, cl_msg *);
+void as_transaction_init_head(as_transaction *tr, const cf_digest *, cl_msg *);
 void as_transaction_init_body(as_transaction *tr);
 
 void as_transaction_copy_head(as_transaction *to, const as_transaction *from);
@@ -281,8 +290,8 @@ as_transaction_has_no_key_or_digest(const as_transaction *tr)
 static inline bool
 as_transaction_is_multi_record(const as_transaction *tr)
 {
-	return	(tr->msg_fields & (AS_MSG_FIELD_BIT_KEY | AS_MSG_FIELD_BIT_DIGEST_RIPE)) == 0 &&
-			(tr->from_flags & FROM_FLAG_BATCH_SUB) == 0;
+	return tr->origin == FROM_CLIENT &&
+			(tr->msg_fields & (AS_MSG_FIELD_BIT_KEY | AS_MSG_FIELD_BIT_DIGEST_RIPE)) == 0;
 }
 
 static inline bool
@@ -321,6 +330,12 @@ static inline bool
 as_transaction_has_socket_timeout(const as_transaction *tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_SOCKET_TIMEOUT) != 0;
+}
+
+static inline bool
+as_transaction_has_recs_per_sec(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_RECS_PER_SEC) != 0;
 }
 
 static inline bool
@@ -388,7 +403,8 @@ as_transaction_is_strict_read(const as_transaction *tr)
 	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) == 0;
 }
 
-void as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig, bool is_durable_delete);
+void as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig);
+void as_transaction_init_iops(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iops_origin_s* iops_orig);
 
 void as_transaction_demarshal_error(as_transaction *tr, uint32_t error_code);
 void as_transaction_error(as_transaction *tr, struct as_namespace_s *ns, uint32_t error_code);

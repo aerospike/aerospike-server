@@ -45,6 +45,11 @@ void post_process_namespace(as_namespace* ns);
 // Public API.
 //
 
+void
+as_config_init_namespace(as_namespace* ns)
+{
+}
+
 bool
 as_config_error_enterprise_only()
 {

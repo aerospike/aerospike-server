@@ -121,7 +121,7 @@ as_mon_register(const char *module)
 		cb->get_jobstat     = as_scan_get_jobstat;
 		cb->get_jobstat_all = as_scan_get_jobstat_all;
 
-		cb->set_priority    = as_scan_change_job_priority;
+		cb->set_priority    = NULL;
 		cb->kill            = as_scan_abort;
 		cb->suspend         = NULL;
 		cb->set_pendingmax  = NULL;
@@ -282,6 +282,12 @@ as_mon_populate_jobstat(as_mon_jobstat * job_stat, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ":priority=");
 	cf_dyn_buf_append_uint32(db, job_stat->priority);
 
+	cf_dyn_buf_append_string(db, ":rps=");
+	cf_dyn_buf_append_uint32(db, job_stat->rps);
+
+	cf_dyn_buf_append_string(db, ":active-threads=");
+	cf_dyn_buf_append_uint32(db, job_stat->active_threads);
+
 	if (job_stat->status[0]) {
 		cf_dyn_buf_append_string(db, ":status=");
 		cf_dyn_buf_append_string(db, job_stat->status);
@@ -299,8 +305,20 @@ as_mon_populate_jobstat(as_mon_jobstat * job_stat, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ":time-since-done=");
 	cf_dyn_buf_append_uint64(db, job_stat->time_since_done);
 
-	cf_dyn_buf_append_string(db, ":recs-read=");
-	cf_dyn_buf_append_uint64(db, job_stat->recs_read);
+	cf_dyn_buf_append_string(db, ":recs-throttled=");
+	cf_dyn_buf_append_uint64(db, job_stat->recs_throttled);
+
+	cf_dyn_buf_append_string(db, ":recs-filtered-meta=");
+	cf_dyn_buf_append_uint64(db, job_stat->recs_filtered_meta);
+
+	cf_dyn_buf_append_string(db, ":recs-filtered-bins=");
+	cf_dyn_buf_append_uint64(db, job_stat->recs_filtered_bins);
+
+	cf_dyn_buf_append_string(db, ":recs-succeeded=");
+	cf_dyn_buf_append_uint64(db, job_stat->recs_succeeded);
+
+	cf_dyn_buf_append_string(db, ":recs-failed=");
+	cf_dyn_buf_append_uint64(db, job_stat->recs_failed);
 
 	cf_dyn_buf_append_string(db, ":net-io-bytes=");
 	cf_dyn_buf_append_uint64(db, job_stat->net_io_bytes);

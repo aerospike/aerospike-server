@@ -738,6 +738,7 @@ struct as_namespace_s {
 	bool			ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
 	bool			ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
 
+	uint32_t		background_scan_max_rps;
 	conflict_resolution_pol conflict_resolution_policy;
 	bool			cp; // relevant only for enterprise edition
 	bool			cp_allow_drops; // relevant only for enterprise edition
@@ -746,6 +747,7 @@ struct as_namespace_s {
 	bool			write_dup_res_disabled;
 	bool			disallow_null_setname;
 	bool			batch_sub_benchmarks_enabled;
+	bool			ops_sub_benchmarks_enabled;
 	bool			read_benchmarks_enabled;
 	bool			udf_benchmarks_enabled;
 	bool			udf_sub_benchmarks_enabled;
@@ -767,6 +769,7 @@ struct as_namespace_s {
 	uint32_t		rack_id;
 	as_read_consistency_level read_consistency_level;
 	bool			single_bin; // restrict the namespace to objects with exactly one bin
+	uint32_t		n_single_scan_threads;
 	uint32_t		stop_writes_pct;
 	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
@@ -901,10 +904,12 @@ struct as_namespace_s {
 	cf_atomic64		n_client_read_error;
 	cf_atomic64		n_client_read_timeout;
 	cf_atomic64		n_client_read_not_found;
+	cf_atomic64		n_client_read_filtered_out;
 
 	cf_atomic64		n_client_write_success;
 	cf_atomic64		n_client_write_error;
 	cf_atomic64		n_client_write_timeout;
+	cf_atomic64		n_client_write_filtered_out;
 
 	// Subset of n_client_write_... above, respectively.
 	cf_atomic64		n_xdr_client_write_success;
@@ -915,6 +920,7 @@ struct as_namespace_s {
 	cf_atomic64		n_client_delete_error;
 	cf_atomic64		n_client_delete_timeout;
 	cf_atomic64		n_client_delete_not_found;
+	cf_atomic64		n_client_delete_filtered_out;
 
 	// Subset of n_client_delete_... above, respectively.
 	cf_atomic64		n_xdr_client_delete_success;
@@ -925,6 +931,7 @@ struct as_namespace_s {
 	cf_atomic64		n_client_udf_complete;
 	cf_atomic64		n_client_udf_error;
 	cf_atomic64		n_client_udf_timeout;
+	cf_atomic64		n_client_udf_filtered_out;
 
 	cf_atomic64		n_client_lang_read_success;
 	cf_atomic64		n_client_lang_write_success;
@@ -940,10 +947,12 @@ struct as_namespace_s {
 	cf_atomic64		n_from_proxy_read_error;
 	cf_atomic64		n_from_proxy_read_timeout;
 	cf_atomic64		n_from_proxy_read_not_found;
+	cf_atomic64		n_from_proxy_read_filtered_out;
 
 	cf_atomic64		n_from_proxy_write_success;
 	cf_atomic64		n_from_proxy_write_error;
 	cf_atomic64		n_from_proxy_write_timeout;
+	cf_atomic64		n_from_proxy_write_filtered_out;
 
 	// Subset of n_from_proxy_write_... above, respectively.
 	cf_atomic64		n_xdr_from_proxy_write_success;
@@ -954,6 +963,7 @@ struct as_namespace_s {
 	cf_atomic64		n_from_proxy_delete_error;
 	cf_atomic64		n_from_proxy_delete_timeout;
 	cf_atomic64		n_from_proxy_delete_not_found;
+	cf_atomic64		n_from_proxy_delete_filtered_out;
 
 	// Subset of n_from_proxy_delete_... above, respectively.
 	cf_atomic64		n_xdr_from_proxy_delete_success;
@@ -964,6 +974,7 @@ struct as_namespace_s {
 	cf_atomic64		n_from_proxy_udf_complete;
 	cf_atomic64		n_from_proxy_udf_error;
 	cf_atomic64		n_from_proxy_udf_timeout;
+	cf_atomic64		n_from_proxy_udf_filtered_out;
 
 	cf_atomic64		n_from_proxy_lang_read_success;
 	cf_atomic64		n_from_proxy_lang_write_success;
@@ -983,6 +994,7 @@ struct as_namespace_s {
 	cf_atomic64		n_batch_sub_read_error;
 	cf_atomic64		n_batch_sub_read_timeout;
 	cf_atomic64		n_batch_sub_read_not_found;
+	cf_atomic64		n_batch_sub_read_filtered_out;
 
 	// From-proxy batch sub-transaction stats.
 
@@ -993,6 +1005,7 @@ struct as_namespace_s {
 	cf_atomic64		n_from_proxy_batch_sub_read_error;
 	cf_atomic64		n_from_proxy_batch_sub_read_timeout;
 	cf_atomic64		n_from_proxy_batch_sub_read_not_found;
+	cf_atomic64		n_from_proxy_batch_sub_read_filtered_out;
 
 	// Internal-UDF sub-transaction stats.
 
@@ -1002,11 +1015,22 @@ struct as_namespace_s {
 	cf_atomic64		n_udf_sub_udf_complete;
 	cf_atomic64		n_udf_sub_udf_error;
 	cf_atomic64		n_udf_sub_udf_timeout;
+	uint64_t		n_udf_sub_udf_filtered_out;
 
 	cf_atomic64		n_udf_sub_lang_read_success;
 	cf_atomic64		n_udf_sub_lang_write_success;
 	cf_atomic64		n_udf_sub_lang_delete_success;
 	cf_atomic64		n_udf_sub_lang_error;
+
+	// Internal-ops sub-transaction stats.
+
+	cf_atomic64		n_ops_sub_tsvc_error;
+	cf_atomic64		n_ops_sub_tsvc_timeout;
+
+	cf_atomic64		n_ops_sub_write_success;
+	cf_atomic64		n_ops_sub_write_error;
+	cf_atomic64		n_ops_sub_write_timeout;
+	uint64_t		n_ops_sub_write_filtered_out;
 
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
@@ -1026,19 +1050,26 @@ struct as_namespace_s {
 	uint64_t		n_retransmit_udf_sub_dup_res;
 	uint64_t		n_retransmit_udf_sub_repl_write;
 
+	uint64_t		n_retransmit_ops_sub_dup_res;
+	uint64_t		n_retransmit_ops_sub_repl_write;
+
 	// Scan stats.
 
-	cf_atomic64		n_scan_basic_complete;
-	cf_atomic64		n_scan_basic_error;
-	cf_atomic64		n_scan_basic_abort;
+	uint64_t		n_scan_basic_complete;
+	uint64_t		n_scan_basic_error;
+	uint64_t		n_scan_basic_abort;
 
-	cf_atomic64		n_scan_aggr_complete;
-	cf_atomic64		n_scan_aggr_error;
-	cf_atomic64		n_scan_aggr_abort;
+	uint64_t		n_scan_aggr_complete;
+	uint64_t		n_scan_aggr_error;
+	uint64_t		n_scan_aggr_abort;
 
-	cf_atomic64		n_scan_udf_bg_complete;
-	cf_atomic64		n_scan_udf_bg_error;
-	cf_atomic64		n_scan_udf_bg_abort;
+	uint64_t		n_scan_udf_bg_complete;
+	uint64_t		n_scan_udf_bg_error;
+	uint64_t		n_scan_udf_bg_abort;
+
+	uint64_t		n_scan_ops_bg_complete;
+	uint64_t		n_scan_ops_bg_error;
+	uint64_t		n_scan_ops_bg_abort;
 
 	// Query stats.
 
@@ -1065,6 +1096,9 @@ struct as_namespace_s {
 
 	cf_atomic64		n_query_udf_bg_success;
 	cf_atomic64		n_query_udf_bg_failure;
+
+	cf_atomic64		n_query_ops_bg_success;
+	cf_atomic64		n_query_ops_bg_failure;
 
 	// Geospatial query stats:
 	cf_atomic64		geo_region_query_count;		// number of region queries
@@ -1143,6 +1177,13 @@ struct as_namespace_s {
 	histogram*		udf_sub_master_hist; // split this?
 	histogram*		udf_sub_repl_write_hist;
 	histogram*		udf_sub_response_hist;
+
+	histogram*		ops_sub_start_hist;
+	histogram*		ops_sub_restart_hist;
+	histogram*		ops_sub_dup_res_hist;
+	histogram*		ops_sub_master_hist; // split this?
+	histogram*		ops_sub_repl_write_hist;
+	histogram*		ops_sub_response_hist;
 
 	histogram*		device_read_size_hist;
 	histogram*		device_write_size_hist;

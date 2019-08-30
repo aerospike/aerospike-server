@@ -362,6 +362,14 @@ update_retransmit_stats(const rw_request* rw)
 			ns->n_retransmit_udf_sub_repl_write++;
 		}
 		break;
+	case FROM_IOPS:
+		if (is_dup_res) {
+			ns->n_retransmit_ops_sub_dup_res++;
+		}
+		else {
+			ns->n_retransmit_ops_sub_repl_write++;
+		}
+		break;
 	case FROM_RE_REPL:
 		// For now we don't report re-replication retransmit stats.
 		break;

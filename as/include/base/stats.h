@@ -67,6 +67,7 @@ typedef struct as_stats_s {
 	cf_atomic64		n_tsvc_batch_sub_error;
 	cf_atomic64		n_tsvc_from_proxy_batch_sub_error;
 	cf_atomic64		n_tsvc_udf_sub_error;
+	cf_atomic64		n_tsvc_ops_sub_error;
 
 	// Batch-index stats.
 	cf_atomic64		batch_index_initiate; // not in ticker - not just a statistic

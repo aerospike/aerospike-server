@@ -30,6 +30,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
@@ -89,6 +90,8 @@ int write_master_preprocessing(as_transaction* tr);
 int write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		bool* p_record_level_replace, bool* p_must_fetch_data);
 bool check_msg_set_name(as_transaction* tr, const char* set_name);
+int iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
+		predexp_eval_t** predexp);
 
 int write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		rw_request* rw, bool* is_delete, xdr_dirty_bins* dirty_bins);
@@ -131,10 +134,15 @@ client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_client_write_success);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_client_write_success);
+		}
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_write_error);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_client_write_error);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
@@ -143,11 +151,9 @@ client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 			cf_atomic64_incr(&ns->n_xdr_client_write_timeout);
 		}
 		break;
-	default:
-		cf_atomic64_incr(&ns->n_client_write_error);
-		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_write_error);
-		}
+	case AS_ERR_FILTERED_OUT:
+		// Can't be an XDR write.
+		cf_atomic64_incr(&ns->n_client_write_filtered_out);
 		break;
 	}
 }
@@ -158,10 +164,15 @@ from_proxy_write_update_stats(as_namespace* ns, uint8_t result_code,
 {
 	switch (result_code) {
 	case AS_OK:
-	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_write_success);
 		if (is_xdr_op) {
 			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_success);
+		}
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_from_proxy_write_error);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_error);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
@@ -170,11 +181,28 @@ from_proxy_write_update_stats(as_namespace* ns, uint8_t result_code,
 			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_timeout);
 		}
 		break;
+	case AS_ERR_FILTERED_OUT:
+		// Can't be an XDR write.
+		cf_atomic64_incr(&ns->n_from_proxy_write_filtered_out);
+		break;
+	}
+}
+
+static inline void
+ops_sub_write_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_ops_sub_write_success);
+		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_write_error);
-		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_error);
-		}
+		cf_atomic64_incr(&ns->n_ops_sub_write_error);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_ops_sub_write_timeout);
+		break;
+	case AS_ERR_FILTERED_OUT: // doesn't include those filtered out by metadata
+		as_incr_uint64(&ns->n_ops_sub_write_filtered_out);
 		break;
 	}
 }
@@ -196,6 +224,7 @@ transaction_status
 as_write_start(as_transaction* tr)
 {
 	BENCHMARK_START(tr, write, FROM_CLIENT);
+	BENCHMARK_START(tr, ops_sub, FROM_IOPS);
 
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
@@ -256,7 +285,8 @@ as_write_start(as_transaction* tr)
 
 	status = write_master(rw, tr);
 
-	BENCHMARK_NEXT_DATA_POINT(tr, write, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM(tr, write, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM(tr, ops_sub, FROM_IOPS, master);
 
 	// If error, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
@@ -341,7 +371,8 @@ start_write_repl_write_forget(rw_request* rw, as_transaction* tr)
 bool
 write_dup_res_cb(rw_request* rw)
 {
-	BENCHMARK_NEXT_DATA_POINT(rw, write, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, write, FROM_CLIENT, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, ops_sub, FROM_IOPS, dup_res);
 
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
@@ -363,7 +394,8 @@ write_dup_res_cb(rw_request* rw)
 
 	transaction_status status = write_master(rw, &tr);
 
-	BENCHMARK_NEXT_DATA_POINT((&tr), write, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), write, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), ops_sub, FROM_IOPS, master);
 
 	if (status == TRANS_WAITING) {
 		// Note - new tr now owns msgp, make sure rw destructor doesn't free it.
@@ -424,7 +456,8 @@ write_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr)
 void
 write_repl_write_cb(rw_request* rw)
 {
-	BENCHMARK_NEXT_DATA_POINT(rw, write, repl_write);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, write, FROM_CLIENT, repl_write);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, ops_sub, FROM_IOPS, repl_write);
 
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
@@ -482,6 +515,11 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		from_proxy_write_update_stats(tr->rsv.ns, tr->result_code,
 				as_transaction_is_xdr(tr));
 		break;
+	case FROM_IOPS:
+		tr->from.iops_orig->cb(tr->from.iops_orig->udata, tr->result_code);
+		BENCHMARK_NEXT_DATA_POINT(tr, ops_sub, response);
+		ops_sub_write_update_stats(tr->rsv.ns, tr->result_code);
+		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
 		break;
@@ -511,6 +549,11 @@ write_timeout_cb(rw_request* rw)
 	case FROM_PROXY:
 		from_proxy_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
 				as_msg_is_xdr(&rw->msgp->msg));
+		break;
+	case FROM_IOPS:
+		rw->from.iops_orig->cb(rw->from.iops_orig->udata, AS_ERR_TIMEOUT);
+		// Timeouts aren't included in histograms.
+		ops_sub_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
@@ -659,7 +702,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	const char* set_name = as_index_get_set_name(r, ns);
 
 	// If record existed, check that as_msg set name matches.
-	if (! record_created && ! check_msg_set_name(tr, set_name)) {
+	if (! record_created && tr->origin != FROM_IOPS &&
+			! check_msg_set_name(tr, set_name)) {
 		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_PARAMETER);
 		return TRANS_DONE_ERROR;
 	}
@@ -667,10 +711,13 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Apply predexp metadata filter if present.
 
 	predexp_eval_t* predexp = NULL;
+	predexp_eval_t* iops_predexp = NULL;
 
 	if (! record_created && as_record_is_live(r) &&
-			(result = build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
-		write_master_failed(tr, &r_ref, record_created, tree, 0, result);
+			(result = tr->origin == FROM_IOPS ?
+					iops_predexp_filter_meta(tr, r, &iops_predexp) :
+					build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
+		write_master_failed(tr, &r_ref, false, tree, 0, result);
 		return TRANS_DONE_ERROR;
 	}
 
@@ -689,8 +736,9 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 
 	// Apply predexp record bins filter if present.
-	if (predexp != NULL) {
-		if ((result = predexp_read_and_filter_bins(&rd, predexp)) != 0) {
+	if (predexp != NULL || iops_predexp != NULL) {
+		if ((result = predexp_read_and_filter_bins(&rd,
+				tr->origin == FROM_IOPS ? iops_predexp : predexp)) != 0) {
 			predexp_destroy(predexp);
 			write_master_failed(tr, &r_ref, false, tree, &rd, result);
 			return TRANS_DONE_ERROR;
@@ -1086,6 +1134,30 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 	}
 
 	return true;
+}
+
+
+int
+iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
+		predexp_eval_t** predexp)
+{
+	*predexp = tr->from.iops_orig->predexp;
+
+	if (*predexp == NULL) {
+		return AS_OK;
+	}
+
+	predexp_args_t predargs = { .ns = tr->rsv.ns, .md = (as_record*)r };
+	predexp_retval_t predrv = predexp_matches_metadata(*predexp, &predargs);
+
+	if (predrv == PREDEXP_UNKNOWN) {
+		return AS_OK; // caller must later check bins using *predexp
+	}
+	// else - caller will not need to apply filter later.
+
+	*predexp = NULL;
+
+	return predrv == PREDEXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
 }
 
 

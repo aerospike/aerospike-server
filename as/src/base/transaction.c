@@ -52,10 +52,12 @@
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
+#include "transaction/write.h"
 
 
 void
-as_transaction_init_head(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
+as_transaction_init_head(as_transaction *tr, const cf_digest *keyd,
+		cl_msg *msgp)
 {
 	tr->msgp				= msgp;
 	tr->msg_fields			= 0;
@@ -276,27 +278,39 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 	return true;
 }
 
-// Initialize an internal UDF transaction (for a UDF scan/query). Allocates a
-// message with namespace and digest - no set for now, since these transactions
-// won't get security checked, and they can't create a record.
+// Initialize an internal UDF transaction (for a UDF scan/query). Uses shared
+// message with namespace but no digest, and no set for now since these
+// transactions won't get security checked, and can't create a record.
 void
 as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
-		iudf_origin* iudf_orig, bool is_durable_delete)
+		iudf_origin* iudf_orig)
 {
-	uint8_t info2 = AS_MSG_INFO2_WRITE |
-			(is_durable_delete ? AS_MSG_INFO2_DURABLE_DELETE : 0);
-
-	cl_msg *msgp = as_msg_create_internal(ns->name, keyd, 0, info2, 0);
-
-	as_transaction_init_head(tr, NULL, msgp);
+	// Note - digest is on transaction head before it's enqueued.
+	as_transaction_init_head(tr, keyd, iudf_orig->msgp);
 
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_NAMESPACE);
-	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
 	tr->origin = FROM_IUDF;
 	tr->from.iudf_orig = iudf_orig;
 
-	// Do this last, to exclude the setup time in this function.
+	tr->start_time = cf_getns();
+}
+
+// Initialize an internal ops transaction (for an ops scan/query). Uses shared
+// message with namespace but no digest, and no set for now since these
+// transactions won't get security checked, and can't create a record.
+void
+as_transaction_init_iops(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
+		iops_origin* iops_orig)
+{
+	// Note - digest is on transaction head before it's enqueued.
+	as_transaction_init_head(tr, keyd, iops_orig->msgp);
+
+	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+
+	tr->origin = FROM_IOPS;
+	tr->from.iops_orig = iops_orig;
+
 	tr->start_time = cf_getns();
 }
 
@@ -368,6 +382,13 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 			tr->from.iudf_orig = NULL; // pattern, not needed
 		}
 		UPDATE_ERROR_STATS(udf_sub);
+		break;
+	case FROM_IOPS:
+		if (tr->from.iops_orig) {
+			tr->from.iops_orig->cb(tr->from.iops_orig->udata, error_code);
+			tr->from.iops_orig = NULL; // pattern, not needed
+		}
+		UPDATE_ERROR_STATS(ops_sub);
 		break;
 	case FROM_RE_REPL:
 		if (tr->from.re_repl_orig_cb) {

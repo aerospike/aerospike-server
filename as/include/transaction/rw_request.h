@@ -54,6 +54,7 @@ struct as_batch_shared_s;
 struct as_file_handle_s;
 struct as_transaction_s;
 struct cl_msg_s;
+struct iops_origin_s;
 struct iudf_origin_s;
 struct rw_request_s;
 struct rw_wait_ele_s;
@@ -85,6 +86,7 @@ typedef struct rw_request_s {
 		struct as_file_handle_s*	proto_fd_h;
 		cf_node						proxy_node;
 		struct iudf_origin_s*		iudf_orig;
+		struct iops_origin_s*		iops_orig;
 		struct as_batch_shared_s*	batch_shared;
 	} from;
 

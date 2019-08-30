@@ -69,7 +69,29 @@ should_security_check_data_op(const as_transaction *tr)
 	return tr->origin == FROM_CLIENT || tr->origin == FROM_BATCH;
 }
 
-static const char*
+static inline as_sec_perm
+scan_perm(const as_transaction *tr)
+{
+	if (as_transaction_is_udf(tr)) {
+		return PERM_UDF_SCAN;
+	}
+
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ?
+			PERM_OPS_SCAN : PERM_SCAN;
+}
+
+static inline as_sec_perm
+query_perm(const as_transaction *tr)
+{
+	if (as_transaction_is_udf(tr)) {
+		return PERM_UDF_QUERY;
+	}
+
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ?
+			PERM_OPS_QUERY : PERM_QUERY;
+}
+
+static inline const char*
 write_type_tag(const as_transaction *tr)
 {
 	return as_transaction_is_delete(tr) ? "delete" :
@@ -177,8 +199,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 			// Query.
 			cf_atomic64_incr(&ns->query_reqs);
 
-			if (! as_security_check_data_op(tr, ns,
-					as_transaction_is_udf(tr) ? PERM_UDF_QUERY : PERM_QUERY)) {
+			if (! as_security_check_data_op(tr, ns, query_perm(tr))) {
 				as_multi_rec_transaction_error(tr, tr->result_code);
 				goto Cleanup;
 			}
@@ -190,8 +211,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 		}
 		else {
 			// Scan.
-			if (! as_security_check_data_op(tr, ns,
-					as_transaction_is_udf(tr) ? PERM_UDF_SCAN : PERM_SCAN)) {
+			if (! as_security_check_data_op(tr, ns, scan_perm(tr))) {
 				as_multi_rec_transaction_error(tr, tr->result_code);
 				goto Cleanup;
 			}
@@ -243,7 +263,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 		tr->keyd = *(cf_digest *)df->data;
 	}
-	else if (! as_transaction_is_batch_sub(tr)) {
+	else if (as_transaction_has_key(tr)) {
 		// Old client - calculate digest from key & set, directly into tr.
 
 		as_msg_field *kf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
@@ -255,7 +275,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 		cf_digest_compute2(sf->data, set_sz, kf->data, key_sz, &tr->keyd);
 	}
-	// else - batch sub-transactions already (and only) have digest in tr.
+	// else - batch sub-transactions & all internal transactions have neither
+	// digest nor key in the message - digest is already in tr.
 
 	// Process the transaction.
 
@@ -369,6 +390,10 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, AS_ERR_UNKNOWN);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 			break;
+		case FROM_IOPS:
+			tr->from.iops_orig->cb(tr->from.iops_orig->udata, AS_ERR_UNKNOWN);
+			tr->from.iops_orig = NULL; // pattern, not needed
+			break;
 		case FROM_RE_REPL:
 			tr->from.re_repl_orig_cb(tr);
 			tr->from.re_repl_orig_cb = NULL; // pattern, not needed
@@ -381,7 +406,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 Cleanup:
 
-	if (free_msgp && tr->origin != FROM_BATCH) {
+	if (free_msgp && ! SHARED_MSGP(tr)) {
 		cf_free(msgp);
 	}
 } // end process_transaction()

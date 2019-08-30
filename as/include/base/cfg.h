@@ -131,10 +131,8 @@ typedef struct as_config_s {
 	uint64_t		query_untracked_time_ms;
 	uint32_t		query_worker_threads;
 	bool			run_as_daemon;
-	uint32_t		scan_max_active; // maximum number of active scans allowed
 	uint32_t		scan_max_done; // maximum number of finished scans kept for monitoring
-	uint32_t		scan_max_udf_transactions; // maximum number of active transactions per UDF background scan
-	uint32_t		scan_threads; // size of scan thread pool
+	uint32_t		n_scan_threads_limit;
 	uint32_t		n_service_threads;
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	uint32_t		sindex_gc_max_rate; // Max sindex entries processed per second for gc
@@ -246,6 +244,7 @@ void as_config_cluster_name_get(char* cluster_name);
 bool as_config_cluster_name_set(const char* cluster_name);
 bool as_config_cluster_name_matches(const char* cluster_name);
 
+void as_config_init_namespace(struct as_namespace_s* ns);
 bool as_config_error_enterprise_only();
 bool as_config_error_enterprise_feature_only(const char* name);
 bool as_info_error_enterprise_only(); // TODO - until we have an info split

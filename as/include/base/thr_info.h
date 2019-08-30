@@ -83,6 +83,8 @@ char *as_info_bind_to_string(const cf_serv_cfg *cfg, cf_sock_owner owner);
 
 int as_info_queue_get_size();
 void info_log_with_datestamp(void (*log_fn)(void));
+uint32_t process_cpu(void);
+void sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct);
 void sys_mem_info(uint64_t *free_mem, uint32_t *free_pct);
 
 extern bool g_mstats_enabled;
