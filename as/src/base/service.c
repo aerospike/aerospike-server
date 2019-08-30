@@ -607,6 +607,7 @@ stop_service(thread_ctx* ctx)
 
 			n_remaining--;
 
+			// Ignore, if another thread's or INVALID_POLL.
 			if (! cf_poll_equal(fd_h->poll, ctx->poll)) {
 				continue;
 			}
@@ -647,6 +648,7 @@ static void
 service_release_file_handle(as_file_handle* fd_h)
 {
 	cf_poll_delete_socket(fd_h->poll, &fd_h->sock);
+	fd_h->poll = INVALID_POLL;
 	fd_h->reap_me = true;
 	as_release_file_handle(fd_h);
 }

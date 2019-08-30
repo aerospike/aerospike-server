@@ -52,6 +52,8 @@ struct ssl_st;
 // Like CEFD(), but produces an lvalue, i.e., the epoll file descriptor can be modified.
 #define EFD(poll) ((poll).fd)
 
+#define INVALID_POLL ((cf_poll){ .fd = -1 })
+
 #define cf_ip_addr_print(_addr) ({ \
 	char *_tmp = alloca(250); \
 	cf_ip_addr_to_string_safe(_addr, _tmp, 250); \
