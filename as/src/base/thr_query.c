@@ -1251,6 +1251,15 @@ query_send_bg_udf_response(as_transaction *tr)
 	tr->from.proto_fd_h = NULL;
 }
 
+static void
+query_send_bg_ops_response(as_transaction *tr)
+{
+	cf_detail(AS_QUERY, "send fin for background ops");
+	bool force_close = ! as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_OK);
+	query_release_fd(tr->from.proto_fd_h, force_close);
+	tr->from.proto_fd_h = NULL;
+}
+
 static bool
 query_match_integer_fromval(as_query_transaction * qtr, as_val *v, as_sindex_key *skey)
 {
@@ -3152,6 +3161,9 @@ as_query(as_transaction *tr, as_namespace *ns)
 		if (qtr->job_type == QUERY_TYPE_UDF_BG) {
 			query_send_bg_udf_response(tr);
 		}
+		else if (qtr->job_type == QUERY_TYPE_OPS_BG) {
+			query_send_bg_ops_response(tr);
+		}
 		query_generator(qtr);
 	} else {
 		if (query_qtr_enqueue(qtr, false)) {
@@ -3166,6 +3178,9 @@ as_query(as_transaction *tr, as_namespace *ns)
 		// Respond after queuing is successfully.
 		if (qtr->job_type == QUERY_TYPE_UDF_BG) {
 			query_send_bg_udf_response(tr);
+		}
+		else if (qtr->job_type == QUERY_TYPE_OPS_BG) {
+			query_send_bg_ops_response(tr);
 		}
 	}
 
