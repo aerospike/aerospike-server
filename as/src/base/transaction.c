@@ -461,15 +461,11 @@ as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 		cf_socket_shutdown(&proto_fd_h->sock);
 	}
 
-	// Remember original poll.
-	cf_poll poll = { .fd = as_load_int32(&proto_fd_h->poll.fd) };
+	// Rearm first.
+	as_service_rearm(proto_fd_h);
 
-	// No barrier needed - compiler cannot reorder as_load_int32().
-
-	proto_fd_h->in_transaction = false;
-
-	// Exiting service thread may have moved socket to another poll.
-	as_service_rearm_forgiving(poll, proto_fd_h);
+	// Now allow service threads to exit and close the epoll instance.
+	as_decr_uint32(&proto_fd_h->in_transaction);
 }
 
 void

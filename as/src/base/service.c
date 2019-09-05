@@ -129,7 +129,6 @@ static void* run_service(void* udata);
 static void stop_service(thread_ctx* ctx);
 static void service_release_file_handle(as_file_handle* fd_h);
 static bool process_readable(as_file_handle* fd_h);
-static void rearm(as_file_handle* fd_h);
 static void start_transaction(as_file_handle* fd_h);
 static bool decompress_msg(as_comp_proto* cproto, uint8_t** out_buf, uint64_t* out_buf_sz);
 static void config_xdr_socket(cf_socket* sock);
@@ -223,12 +222,10 @@ as_service_set_threads(uint32_t n_threads)
 }
 
 void
-as_service_rearm_forgiving(cf_poll poll, as_file_handle* fd_h)
+as_service_rearm(as_file_handle* fd_h)
 {
-	static const int32_t err_ok[] = { ENOENT };
-
-	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(poll, &fd_h->sock,
-			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h, 1, err_ok));
+	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
+			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
 }
 
 void
@@ -384,7 +381,7 @@ run_accept(void* udata)
 			cf_socket_copy(&csock, &fd_h->sock);
 
 			fd_h->last_used = cf_getns();
-			fd_h->in_transaction = false;
+			fd_h->in_transaction = 0;
 			fd_h->move_me = false;
 			fd_h->reap_me = false;
 			fd_h->is_xdr = false;
@@ -566,7 +563,7 @@ run_service(void* udata)
 			tls_socket_must_not_have_data(&fd_h->sock, "full client read");
 
 			if (fd_h->proto_unread != 0) {
-				rearm(fd_h);
+				as_service_rearm(fd_h);
 				continue;
 			}
 
@@ -618,7 +615,7 @@ stop_service(thread_ctx* ctx)
 				continue;
 			}
 
-			if (fd_h->in_transaction) {
+			if (fd_h->in_transaction != 0) {
 				any_in_transaction = true;
 				continue;
 			}
@@ -728,16 +725,10 @@ process_readable(as_file_handle* fd_h)
 }
 
 static void
-rearm(as_file_handle* fd_h)
-{
-	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
-			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
-}
-
-static void
 start_transaction(as_file_handle* fd_h)
 {
-	fd_h->in_transaction = true;
+	// as_end_of_transaction() rearms then decrements, so this may be > 1.
+	as_incr_uint32(&fd_h->in_transaction);
 
 	uint64_t start_ns = fd_h->last_used;
 	as_proto* proto = fd_h->proto;
@@ -931,7 +922,7 @@ run_reaper(void* udata)
 				continue;
 			}
 
-			if (fd_h->in_transaction) {
+			if (fd_h->in_transaction != 0) {
 				continue;
 			}
 

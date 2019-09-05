@@ -113,7 +113,7 @@ typedef struct as_file_handle_s {
 	uint64_t	last_used;		// last nanoseconds we read or wrote
 	cf_socket	sock;			// our client socket
 	cf_poll		poll;			// our epoll instance
-	bool		in_transaction;	// don't reap or transfer during transaction
+	uint32_t	in_transaction;	// don't reap or transfer during transaction
 	bool		move_me;		// redistribute to another service thread
 	bool		reap_me;		// force reaping (overrides in_transaction)
 	bool		is_xdr;			// XDR client connection
