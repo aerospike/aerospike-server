@@ -81,7 +81,8 @@ static volatile uint32_t g_traces_done;
 static thread_info* make_thread_info(cf_thread_run_fn run, void* udata);
 static void register_thread_info(void* udata);
 static void deregister_thread_info(void);
-static void* shim_fn(void* udata);
+static void* detached_shim_fn(void* udata);
+static void* joinable_shim_fn(void* udata);
 static int32_t traces_cb(cf_ll_element* ele, void* udata);
 
 
@@ -107,7 +108,7 @@ cf_thread_create_detached(cf_thread_run_fn run, void* udata)
 
 	thread_info* info = make_thread_info(run, udata);
 	pthread_t tid;
-	int result = pthread_create(&tid, &g_attr_detached, shim_fn, info);
+	int result = pthread_create(&tid, &g_attr_detached, detached_shim_fn, info);
 
 	if (result != 0) {
 		// Non-zero return values are errno values.
@@ -125,7 +126,7 @@ cf_thread_create_joinable(cf_thread_run_fn run, void* udata)
 
 	thread_info* info = make_thread_info(run, udata);
 	pthread_t tid;
-	int result = pthread_create(&tid, NULL, shim_fn, info);
+	int result = pthread_create(&tid, NULL, joinable_shim_fn, info);
 
 	if (result != 0) {
 		// Non-zero return values are errno values.
@@ -230,7 +231,7 @@ deregister_thread_info(void)
 }
 
 static void*
-shim_fn(void* udata)
+detached_shim_fn(void* udata)
 {
 	register_thread_info(udata);
 
@@ -238,6 +239,18 @@ shim_fn(void* udata)
 
 	// Prevent crashes in glibc 2.24 for short-lived detached threads.
 	usleep(100 * 1000);
+
+	deregister_thread_info();
+
+	return rv;
+}
+
+static void*
+joinable_shim_fn(void* udata)
+{
+	register_thread_info(udata);
+
+	void* rv = g_thread_info->run(g_thread_info->udata);
 
 	deregister_thread_info();
 
