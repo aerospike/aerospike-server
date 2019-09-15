@@ -1469,13 +1469,16 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	as_transaction tr;
-	as_transaction_init_iudf(&tr, ns, &r->keyd, &job->origin);
+	// Save this before releasing record.
+	cf_digest keyd = r->keyd;
 
-	// Release record lock before enqueuing transaction.
+	// Release record lock before throttling and enqueuing transaction.
 	as_record_done(r_ref, ns);
 
 	throttle_sleep(_job);
+
+	as_transaction tr;
+	as_transaction_init_iudf(&tr, ns, &keyd, &job->origin);
 
 	as_incr_uint32(&job->n_active_tr);
 	as_service_enqueue_internal(&tr);
@@ -1738,13 +1741,16 @@ ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	as_transaction tr;
-	as_transaction_init_iops(&tr, ns, &r->keyd, &job->origin);
+	// Save this before releasing record.
+	cf_digest keyd = r->keyd;
 
 	// Release record lock before throttling and enqueuing transaction.
 	as_record_done(r_ref, ns);
 
 	throttle_sleep(_job);
+
+	as_transaction tr;
+	as_transaction_init_iops(&tr, ns, &keyd, &job->origin);
 
 	as_incr_uint32(&job->n_active_tr);
 	as_service_enqueue_internal(&tr);
