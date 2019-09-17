@@ -24,6 +24,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <link.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -156,6 +157,11 @@ typedef struct cf_fault_cache_hkey_s {
 bool g_use_local_time = false;
 
 static bool g_log_millis = false;
+
+#define MAX_BACKTRACE_DEPTH 50
+
+extern char __executable_start;
+extern char __etext;
 
 // Filter stderr logging at this level when there are no sinks:
 #define NO_SINKS_LIMIT CF_WARNING
@@ -1148,3 +1154,66 @@ cf_fault_hex_dump(const char *title, const void *data, size_t len)
 		cf_info(CF_MISC, "%s", line);
 	}
 }
+
+void
+cf_fault_print_signal_context(void *_ctx)
+{
+	ucontext_t *uc = _ctx;
+	mcontext_t *mc = &uc->uc_mcontext;
+	uint64_t *gregs = (uint64_t *)&mc->gregs[0];
+
+	char regs[1000];
+
+	snprintf(regs, sizeof(regs),
+		"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx "
+		"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx "
+		"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx",
+		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
+		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
+		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
+		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15],
+		gregs[REG_RIP]);
+
+	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__,
+			"stacktrace: registers: %s", regs);
+
+	void *bt[MAX_BACKTRACE_DEPTH];
+	char trace[MAX_BACKTRACE_DEPTH * 20];
+
+	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
+	int off = 0;
+
+	for (int i = 0; i < sz; i++) {
+		off += snprintf(trace + off, sizeof(trace) - off, " 0x%lx",
+				cf_fault_strip_aslr(bt[i]));
+	}
+
+	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__,
+			"stacktrace: found %d frames:%s offset 0x%lx", sz, trace,
+			_r_debug.r_map->l_addr);
+
+	char **syms = backtrace_symbols(bt, sz);
+
+	if (syms) {
+		for (int i = 0; i < sz; i++) {
+			cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__,
+					"stacktrace: frame %d: %s", i, syms[i]);
+		}
+	}
+	else {
+		cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__,
+				"stacktrace: found no symbols");
+	}
+}
+
+uint64_t
+cf_fault_strip_aslr(void *addr)
+{
+	void *start = &__executable_start;
+	void *end = &__etext;
+	uint64_t aslr_offset = _r_debug.r_map->l_addr;
+
+	return addr >= start && addr < end ?
+			(uint64_t)addr - aslr_offset : (uint64_t)addr;
+}
+

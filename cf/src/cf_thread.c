@@ -173,10 +173,8 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 
 	cf_mutex_lock(&g_trace_lock);
 
-	uint64_t run = (uint64_t)g_thread_info->run - (uint64_t)&__executable_start;
-
 	cf_dyn_buf_append_format(g_trace_db, "---------- %d (0x%lx) ----------;",
-			g_thread_info->sys_tid, run);
+			g_thread_info->sys_tid, cf_fault_strip_aslr(g_thread_info->run));
 
 	void* addrs[50];
 	int32_t n_addrs = backtrace(addrs, 50);

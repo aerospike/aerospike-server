@@ -284,6 +284,9 @@ extern bool cf_fault_is_logging_millis();
 // output format, instead of having this separate function.
 extern void cf_fault_hex_dump(const char *title, const void *data, size_t len);
 
+extern void cf_fault_print_signal_context(void *_ctx);
+extern uint64_t cf_fault_strip_aslr(void *addr);
+
 extern cf_fault_severity cf_fault_filter[];
 
 // Define the mechanism that we'll use to write into the Server Log.
@@ -328,60 +331,6 @@ extern void cf_fault_cache_event(cf_fault_context context,
 			cf_fault_event_nostack((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 #define cf_crash_nostack(context, __msg, ...) \
 		cf_fault_event_nostack((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__)
-
-#define MAX_BACKTRACE_DEPTH 50
-
-extern char __executable_start;
-
-#define PRINT_SIGNAL_CONTEXT(_ctx) \
-do { \
-	ucontext_t *uc = _ctx; \
-	mcontext_t *mc = &uc->uc_mcontext; \
-	uint64_t *gregs = (uint64_t *)&mc->gregs[0]; \
-	\
-	char regs[1000]; \
-	\
-	snprintf(regs, sizeof(regs), \
-		"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx " \
-		"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx " \
-		"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx", \
-		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX], \
-		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP], \
-		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11], \
-		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15], \
-		gregs[REG_RIP]); \
-	\
-	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
-			"stacktrace: registers: %s", regs); \
-	\
-	void *bt[MAX_BACKTRACE_DEPTH]; \
-	char trace[MAX_BACKTRACE_DEPTH * 20]; \
-	\
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
-	int off = 0; \
-	\
-	for (int i = 0; i < sz; i++) { \
-		off += snprintf(trace + off, sizeof(trace) - off, " 0x%lx", \
-				(uint64_t)bt[i]); \
-	} \
-	\
-	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
-			"stacktrace: found %d frames:%s offset 0x%lx", sz, trace, \
-			(uint64_t)&__executable_start); \
-	\
-	char **syms = backtrace_symbols(bt, sz); \
-	\
-	if (syms) { \
-		for (int i = 0; i < sz; i++) { \
-			cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
-					"stacktrace: frame %d: %s", i, syms[i]); \
-		} \
-	} \
-	else { \
-		cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, \
-				"stacktrace: found no symbols"); \
-	} \
-} while (0);
 
 // The "regular" versions.
 #define __SEVLOG(severity, context, __msg, ...) \
