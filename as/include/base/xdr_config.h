@@ -113,12 +113,19 @@ typedef struct xdr_security_config_s {
 	char		*password;
 } xdr_security_config;
 
+typedef enum {
+	XDR_AUTH_MODE_INTERNAL,
+	XDR_AUTH_MODE_EXTERNAL,
+	XDR_AUTH_MODE_EXTERNAL_INSECURE
+} xdr_dest_aero_auth_mode;
+
 typedef struct xdr_dest_aero_config_s {
 	cf_vector				dc_nodes;
 	cf_vector				dc_addr_map_v;
 	uint32_t				dc_connections;
 	uint32_t				dc_connections_idle_ms;
 	bool					dc_use_alternate_services;
+	xdr_dest_aero_auth_mode	auth_mode;
 } xdr_dest_aero_config;
 
 typedef struct xdr_dest_http_config_s {

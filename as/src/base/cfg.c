@@ -792,6 +792,7 @@ typedef enum {
 	// Normally visible, in canonical configuration file order:
 	CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT,
 	// Normally hidden:
+	CASE_XDR_DATACENTER_AUTH_MODE,
 	CASE_XDR_DATACENTER_DC_CONNECTIONS,
 	CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS,
 	CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP,
@@ -803,6 +804,11 @@ typedef enum {
 	CASE_XDR_DATACENTER_HTTP_VERSION,
 	CASE_XDR_DATACENTER_TLS_NAME,
 	CASE_XDR_DATACENTER_TLS_NODE,
+
+	// XDR datacenter authentication mode (value tokens):
+	CASE_XDR_DATACENTER_AUTH_MODE_INTERNAL,
+	CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL,
+	CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL_INSECURE,
 
 	// Used parsing separate file, but share this enum:
 
@@ -1397,6 +1403,7 @@ const cfg_opt XDR_OPTS[] = {
 
 const cfg_opt XDR_DATACENTER_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
+		{ "auth-mode",						CASE_XDR_DATACENTER_AUTH_MODE },
 		{ "dc-connections",					CASE_XDR_DATACENTER_DC_CONNECTIONS },
 		{ "dc-connections-idle-ms",			CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS },
 		{ "dc-int-ext-ipmap",				CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP },
@@ -1410,6 +1417,12 @@ const cfg_opt XDR_DATACENTER_OPTS[] = {
 		{ "tls-name",						CASE_XDR_DATACENTER_TLS_NAME },
 		{ "tls-node",						CASE_XDR_DATACENTER_TLS_NODE },
 		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt XDR_DATACENTER_AUTH_MODE_OPTS[] = {
+		{ "internal",						CASE_XDR_DATACENTER_AUTH_MODE_INTERNAL },
+		{ "external",						CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL },
+		{ "external-insecure",				CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL_INSECURE }
 };
 
 // Used parsing separate file, but share cfg_case_id enum.
@@ -1464,6 +1477,7 @@ const int NUM_SECURITY_LOG_OPTS						= sizeof(SECURITY_LOG_OPTS) / sizeof(cfg_op
 const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_OPTS								= sizeof(XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DATACENTER_OPTS					= sizeof(XDR_DATACENTER_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_DATACENTER_AUTH_MODE_OPTS			= sizeof(XDR_DATACENTER_AUTH_MODE_OPTS) / sizeof(cfg_opt);
 
 // Used parsing separate file, but share cfg_case_id enum.
 
@@ -3985,6 +3999,23 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT:
 				xdr_cfg_add_node_addr_port(cur_dest_cfg, cfg_strdup(&line, true), cfg_port_val2(&line));
+				break;
+			case CASE_XDR_DATACENTER_AUTH_MODE:
+				switch (cfg_find_tok(line.val_tok_1, XDR_DATACENTER_AUTH_MODE_OPTS, NUM_XDR_DATACENTER_AUTH_MODE_OPTS)) {
+				case CASE_XDR_DATACENTER_AUTH_MODE_INTERNAL:
+					cur_dest_cfg->aero.auth_mode = XDR_AUTH_MODE_INTERNAL;
+					break;
+				case CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL:
+					cur_dest_cfg->aero.auth_mode = XDR_AUTH_MODE_EXTERNAL;
+					break;
+				case CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL_INSECURE:
+					cur_dest_cfg->aero.auth_mode = XDR_AUTH_MODE_EXTERNAL_INSECURE;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
 				break;
 			case CASE_XDR_DATACENTER_DC_CONNECTIONS:
 				cur_dest_cfg->aero.dc_connections = cfg_u32_no_checks(&line);
