@@ -1782,6 +1782,9 @@ auto_pin_string(void)
 	case CF_TOPO_AUTO_PIN_NUMA:
 		return "numa";
 
+	case CF_TOPO_AUTO_PIN_ADQ:
+		return "adq";
+
 	default:
 		cf_crash(CF_ALLOC, "invalid CF_TOPO_AUTO_* value");
 		return NULL;
@@ -5252,7 +5255,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
 		// If numa-pinned, not all configured mounts are used.
-		if (g_config.auto_pin == CF_TOPO_AUTO_PIN_NUMA) {
+		if (as_config_is_numa_pinned()) {
 			for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
 				if (cf_mount_is_local(ns->xmem_mounts[i])) {
 					info_append_indexed_string(db, "local_mount", i, NULL,

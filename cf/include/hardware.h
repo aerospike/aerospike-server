@@ -31,7 +31,8 @@
 typedef enum {
 	CF_TOPO_AUTO_PIN_NONE,
 	CF_TOPO_AUTO_PIN_CPU,
-	CF_TOPO_AUTO_PIN_NUMA
+	CF_TOPO_AUTO_PIN_NUMA,
+	CF_TOPO_AUTO_PIN_ADQ
 } cf_topo_auto_pin;
 
 typedef uint16_t cf_topo_os_cpu_index;
@@ -39,6 +40,7 @@ typedef uint16_t cf_topo_os_cpu_index;
 typedef uint16_t cf_topo_numa_node_index;
 typedef uint16_t cf_topo_core_index;
 typedef uint16_t cf_topo_cpu_index;
+typedef uint32_t cf_topo_napi_id;
 
 #define CF_TOPO_INVALID_INDEX ((cf_topo_numa_node_index)-1)
 
@@ -53,6 +55,7 @@ uint16_t cf_topo_count_cpus(void);
 
 cf_topo_cpu_index cf_topo_current_cpu(void);
 cf_topo_cpu_index cf_topo_socket_cpu(const cf_socket *sock);
+cf_topo_napi_id cf_topo_socket_napi_id(const cf_socket *sock);
 
 void cf_topo_pin_to_core(cf_topo_core_index i_core);
 void cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu);

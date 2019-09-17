@@ -122,6 +122,7 @@ static void* run_accept(void* udata);
 static void assign_socket(as_file_handle* fd_h, uint32_t events);
 static uint32_t select_sid(void);
 static uint32_t select_sid_pinned(cf_topo_cpu_index i_cpu);
+static uint32_t select_sid_adq(cf_topo_napi_id id);
 static void schedule_redistribution(void);
 
 // Demarshal client requests.
@@ -232,8 +233,8 @@ void
 as_service_enqueue_internal(as_transaction* tr)
 {
 	while (true) {
-		uint32_t sid = g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ?
-				select_sid() : select_sid_pinned(cf_topo_current_cpu());
+		uint32_t sid = as_config_is_cpu_pinned() ?
+				select_sid_pinned(cf_topo_current_cpu()) : select_sid();
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -261,7 +262,7 @@ create_service_thread(uint32_t sid)
 
 	cf_detail(AS_SERVICE, "starting sid %u ctx %p", sid, ctx);
 
-	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE) {
+	if (as_config_is_cpu_pinned()) {
 		ctx->i_cpu = (cf_topo_cpu_index)(sid % cf_topo_count_cpus());
 	}
 
@@ -422,9 +423,23 @@ static void
 assign_socket(as_file_handle* fd_h, uint32_t events)
 {
 	while (true) {
-		uint32_t sid = g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ?
-				select_sid() :
-				select_sid_pinned(cf_topo_socket_cpu(&fd_h->sock));
+		uint32_t sid;
+
+		switch (g_config.auto_pin) {
+		case CF_TOPO_AUTO_PIN_NONE:
+			sid = select_sid();
+			break;
+		case CF_TOPO_AUTO_PIN_CPU:
+		case CF_TOPO_AUTO_PIN_NUMA:
+			sid = select_sid_pinned(cf_topo_socket_cpu(&fd_h->sock));
+			break;
+		case CF_TOPO_AUTO_PIN_ADQ:
+			sid = select_sid_adq(cf_topo_socket_napi_id(&fd_h->sock));
+			break;
+		default:
+			cf_crash(AS_SERVICE, "bad auto-pin %d", g_config.auto_pin);
+			return;
+		}
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -465,6 +480,12 @@ select_sid_pinned(cf_topo_cpu_index i_cpu)
 	return (thread_ix * n_cpus) + i_cpu;
 }
 
+static uint32_t
+select_sid_adq(cf_topo_napi_id id)
+{
+	return id == 0 ? select_sid() : id % g_config.n_service_threads;
+}
+
 static void
 schedule_redistribution(void)
 {
@@ -496,7 +517,7 @@ run_service(void* udata)
 
 	cf_detail(AS_SERVICE, "running ctx %p", ctx);
 
-	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE) {
+	if (as_config_is_cpu_pinned()) {
 		cf_topo_pin_to_cpu(ctx->i_cpu);
 	}
 

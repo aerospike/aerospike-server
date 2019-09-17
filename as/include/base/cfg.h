@@ -251,6 +251,20 @@ bool as_info_error_enterprise_only(); // TODO - until we have an info split
 
 extern as_config g_config;
 
+static inline bool
+as_config_is_cpu_pinned(void)
+{
+	return g_config.auto_pin == CF_TOPO_AUTO_PIN_CPU ||
+			g_config.auto_pin == CF_TOPO_AUTO_PIN_NUMA;
+}
+
+static inline bool
+as_config_is_numa_pinned(void)
+{
+	return g_config.auto_pin == CF_TOPO_AUTO_PIN_NUMA ||
+			g_config.auto_pin == CF_TOPO_AUTO_PIN_ADQ;
+}
+
 
 //==========================================================
 // Private API - for enterprise separation only.

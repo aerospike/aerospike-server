@@ -73,6 +73,12 @@
 #define SO_INCOMING_CPU 49
 #endif
 
+// Only available in Linux kernel version 4.12 and later; but we'd like to
+// allow compilation with older kernel headers.
+#if !defined SO_INCOMING_NAPI_ID
+#define SO_INCOMING_NAPI_ID 56
+#endif
+
 // The linux/nvme_ioctl.h kernel header came in Linux 4.4, but we'd like to
 // allow compilation with older kernel headers.
 //
@@ -948,7 +954,7 @@ cf_topo_socket_cpu(const cf_socket *sock)
 	socklen_t len = sizeof(os);
 
 	if (getsockopt(sock->fd, SOL_SOCKET, SO_INCOMING_CPU, &os, &len) < 0) {
-		cf_crash(CF_SOCKET, "error while determining incoming OS CPU index: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while determining incoming OS CPU index: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
@@ -1000,6 +1006,21 @@ cf_topo_socket_cpu(const cf_socket *sock)
 			pick_random((uint32_t)g_n_cpus - (uint32_t)g_n_irq_cpus));
 	cf_detail(CF_HARDWARE, "redirecting to CPU index %hu", i_cpu);
 	return i_cpu;
+}
+
+cf_topo_napi_id
+cf_topo_socket_napi_id(const cf_socket *sock)
+{
+	cf_topo_napi_id id;
+	socklen_t len = sizeof(id);
+
+	if (getsockopt(sock->fd, SOL_SOCKET, SO_INCOMING_NAPI_ID, &id, &len) < 0) {
+		cf_crash(CF_HARDWARE, "SO_INCOMING_NAPI_ID failed: %d (%s)", errno,
+				cf_strerror(errno));
+	}
+
+	cf_detail(CF_HARDWARE, "incoming connection with NAPI-id %d", id);
+	return id;
 }
 
 static void
@@ -1822,73 +1843,36 @@ optimize_interface(const char *if_name)
 	}
 }
 
+// Make sure that we are running on appropriate kernel.
 static void
-check_socket_cpu(void)
+check_socket_option(int optname, const char *tag)
 {
 	int32_t fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
 	if (fd < 0) {
-		cf_crash(CF_SOCKET, "error while creating UDP test socket: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while creating UDP test socket: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
-	int32_t val = -1;
+	int32_t val;
+	socklen_t val_len = sizeof(val);
 
-	if (setsockopt(fd, SOL_SOCKET, SO_INCOMING_CPU, &val, sizeof(val)) < 0) {
+	if (getsockopt(fd, SOL_SOCKET, optname, &val, &val_len) < 0) {
 		if (errno == ENOPROTOOPT) {
-			cf_crash_nostack(CF_SOCKET, "CPU pinning requires Linux kernel 3.19 or later");
+			cf_crash_nostack(CF_HARDWARE, "auto-pin requires %s or later", tag);
 		}
 
-		cf_crash(CF_SOCKET, "error while testing for SO_INCOMING_CPU: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while testing for socket option: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
 	CF_NEVER_FAILS(close(fd));
 }
 
-void
-cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
-		const cf_addr_list *addrs)
+// Reconfigure NIC queues and interrupts.
+static void
+optimize_interfaces(const cf_addr_list *addrs)
 {
-	// Detect the NUMA topology.
-
-	switch (auto_pin) {
-	case CF_TOPO_AUTO_PIN_NONE:
-	case CF_TOPO_AUTO_PIN_CPU:
-		detect(INVALID_INDEX);
-		break;
-
-	case CF_TOPO_AUTO_PIN_NUMA:
-		detect(a_numa_node);
-
-		// Clamp the given NUMA node index to the valid range. We can only do this
-		// after we know what g_n_numa_nodes is, which is initialized by the above
-		// call to detect().
-
-		if (a_numa_node >= g_n_numa_nodes) {
-			cf_topo_numa_node_index orig = a_numa_node;
-			a_numa_node = (cf_topo_numa_node_index)(a_numa_node % g_n_numa_nodes);
-			cf_detail(CF_HARDWARE, "invalid NUMA node index: %hu, clamping to %hu", orig, a_numa_node);
-			detect(a_numa_node);
-		}
-
-		break;
-	}
-
-	// If we don't do any pinning, then we're done after NUMA topology detection.
-
-	if (auto_pin == CF_TOPO_AUTO_PIN_NONE) {
-		return;
-	}
-
-	// Make sure that we are running on Linux 3.19 or later.
-
-	check_socket_cpu();
-
-	// Reconfigure the client-facing network interface(s).
-
-	check_irqbalance();
-
 	if (addrs->n_addrs == 0) {
 		cf_crash_nostack(CF_HARDWARE, "auto-pinning requires binding the service to one or more network interfaces");
 	}
@@ -1913,17 +1897,67 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 			cf_free(exp_names[k]);
 		}
 	}
+}
 
-	// If we don't do NUMA pinning, then we're done after setting up the
-	// client-facing network interface(s).
+void
+cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
+		const cf_addr_list *addrs)
+{
+	// Detect the NUMA topology.
 
-	if (auto_pin == CF_TOPO_AUTO_PIN_CPU) {
+	switch (auto_pin) {
+	case CF_TOPO_AUTO_PIN_NONE:
+	case CF_TOPO_AUTO_PIN_CPU:
+		detect(INVALID_INDEX);
+		break;
+
+	case CF_TOPO_AUTO_PIN_NUMA:
+	case CF_TOPO_AUTO_PIN_ADQ:
+		detect(a_numa_node);
+
+		// Clamp the given NUMA node index to the valid range. We can only do this
+		// after we know what g_n_numa_nodes is, which is initialized by the above
+		// call to detect().
+
+		if (a_numa_node >= g_n_numa_nodes) {
+			cf_topo_numa_node_index orig = a_numa_node;
+			a_numa_node = (cf_topo_numa_node_index)(a_numa_node % g_n_numa_nodes);
+			cf_detail(CF_HARDWARE, "invalid NUMA node index: %hu, clamping to %hu", orig, a_numa_node);
+			detect(a_numa_node);
+		}
+
+		break;
+
+	default:
+		cf_crash(CF_HARDWARE, "bad auto-pin value %d", auto_pin);
+		break;
+	}
+
+	// If we don't do any pinning, then we're done after NUMA topology detection.
+	if (auto_pin == CF_TOPO_AUTO_PIN_NONE) {
 		return;
 	}
 
-	// NUMA pinning.
+	check_irqbalance(); // ensure irqbalance is disabled
 
-	pin_to_numa_node(a_numa_node);
+	switch (auto_pin) {
+	case CF_TOPO_AUTO_PIN_CPU:
+		check_socket_option(SO_INCOMING_CPU, "Linux kernel 3.19");
+		optimize_interfaces(addrs);
+		break;
+	case CF_TOPO_AUTO_PIN_NUMA:
+		check_socket_option(SO_INCOMING_CPU, "Linux kernel 3.19");
+		optimize_interfaces(addrs);
+		pin_to_numa_node(a_numa_node);
+		break;
+	case CF_TOPO_AUTO_PIN_ADQ:
+		check_socket_option(SO_INCOMING_NAPI_ID, "Linux kernel 4.12");
+		pin_to_numa_node(a_numa_node);
+		break;
+	default:
+		cf_crash(CF_HARDWARE, "bad auto-pin value %d", auto_pin);
+		break;
+	}
 }
 
 void

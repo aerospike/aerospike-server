@@ -395,6 +395,7 @@ typedef enum {
 	CASE_SERVICE_AUTO_PIN_NONE,
 	CASE_SERVICE_AUTO_PIN_CPU,
 	CASE_SERVICE_AUTO_PIN_NUMA,
+	CASE_SERVICE_AUTO_PIN_ADQ,
 
 	// Service debug-allocations options (value tokens):
 	CASE_SERVICE_DEBUG_ALLOCATIONS_NONE,
@@ -971,7 +972,8 @@ const cfg_opt SERVICE_OPTS[] = {
 const cfg_opt SERVICE_AUTO_PIN_OPTS[] = {
 		{ "none",							CASE_SERVICE_AUTO_PIN_NONE },
 		{ "cpu",							CASE_SERVICE_AUTO_PIN_CPU },
-		{ "numa",							CASE_SERVICE_AUTO_PIN_NUMA }
+		{ "numa",							CASE_SERVICE_AUTO_PIN_NUMA },
+		{ "adq",							CASE_SERVICE_AUTO_PIN_ADQ }
 };
 
 const cfg_opt SERVICE_DEBUG_ALLOCATIONS_OPTS[] = {
@@ -2368,6 +2370,9 @@ as_config_init(const char* config_file)
 					break;
 				case CASE_SERVICE_AUTO_PIN_NUMA:
 					c->auto_pin = CF_TOPO_AUTO_PIN_NUMA;
+					break;
+				case CASE_SERVICE_AUTO_PIN_ADQ:
+					c->auto_pin = CF_TOPO_AUTO_PIN_ADQ;
 					break;
 				case CASE_NOT_FOUND:
 				default:
