@@ -147,6 +147,8 @@ static inline bool excluded_set(as_index* r, uint16_t set_id);
 const size_t INIT_BUF_BUILDER_SIZE = 1024 * 1024 * 2;
 const size_t SCAN_CHUNK_LIMIT = 1024 * 1024;
 
+#define MAX_ACTIVE_TRANSACTIONS 200
+
 
 
 //==============================================================================
@@ -1475,6 +1477,11 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	// Release record lock before throttling and enqueuing transaction.
 	as_record_done(r_ref, ns);
 
+	// Prefer not reaching target RPS to queue buildup and transaction timeouts.
+	while (as_load_uint32(&job->n_active_tr) > MAX_ACTIVE_TRANSACTIONS) {
+		usleep(1000);
+	}
+
 	throttle_sleep(_job);
 
 	as_transaction tr;
@@ -1746,6 +1753,11 @@ ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	// Release record lock before throttling and enqueuing transaction.
 	as_record_done(r_ref, ns);
+
+	// Prefer not reaching target RPS to queue buildup and transaction timeouts.
+	while (as_load_uint32(&job->n_active_tr) > MAX_ACTIVE_TRANSACTIONS) {
+		usleep(1000);
+	}
 
 	throttle_sleep(_job);
 
