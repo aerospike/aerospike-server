@@ -848,7 +848,7 @@ log_line_udf_sub(as_namespace* ns)
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} udf-sub: tsvc (%lu,%lu) udf (%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu,%lu)",
+	cf_info(AS_INFO, "{%s} udf-sub: tsvc (%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
 			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
