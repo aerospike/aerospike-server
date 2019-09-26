@@ -1595,6 +1595,12 @@ static void
 destroy_iter(predexp_eval_t* bp)
 {
 	predexp_eval_iter_t* dp = (predexp_eval_iter_t *) bp;
+	if (dp->lchild) {
+		(*dp->lchild->dtor_fn)(dp->lchild);
+	}
+	if (dp->rchild) {
+		(*dp->rchild->dtor_fn)(dp->rchild);
+	}
 	cf_free(dp);
 }
 
