@@ -4516,6 +4516,12 @@ packed_map_get_remove_all(const packed_map *map, cdt_op_mem *com)
 		// no break
 	case RESULT_TYPE_INDEX:
 	case RESULT_TYPE_RANK: {
+		if (! result->is_multi) {
+			cf_assert(map->ele_count == 1, AS_PARTICLE, "single result op with multiple results %u", map->ele_count);
+			as_bin_set_int(result->result, 0);
+			break;
+		}
+
 		define_int_list_builder(builder, result->alloc, map->ele_count);
 
 		cdt_container_builder_add_int_range(&builder, 0, map->ele_count,
