@@ -186,7 +186,7 @@ as_namespace_create(char *name)
 	ns->storage_flush_max_us = 1000 * 1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
 	ns->storage_max_write_cache = 1024 * 1024 * 64;
 	ns->storage_min_avail_pct = 5; // stop writes when < 5% disk is writable
-	ns->storage_post_write_queue = 256; // number of wblocks per device used as post-write cache
+	ns->storage_post_write_queue = DEFAULT_POST_WRITE_QUEUE; // number of wblocks per device used as post-write cache
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 
 	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_INDEX;

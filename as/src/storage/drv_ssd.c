@@ -328,7 +328,7 @@ swb_destroy(ssd_write_buf *swb)
 static inline void
 swb_reset(ssd_write_buf *swb)
 {
-	swb->skip_post_write_q = false;
+	swb->use_post_write_q = false;
 	swb->wblock_id = STORAGE_INVALID_WBLOCK;
 	swb->pos = 0;
 }
@@ -404,7 +404,7 @@ swb_get(drv_ssd *ssd)
 		swb->rc = 0;
 		swb->n_writers = 0;
 		swb->dirty = false;
-		swb->skip_post_write_q = false;
+		swb->use_post_write_q = false;
 		swb->ssd = ssd;
 		swb->wblock_id = STORAGE_INVALID_WBLOCK;
 		swb->pos = 0;
@@ -444,11 +444,12 @@ swb_get(drv_ssd *ssd)
 }
 
 bool
-write_skips_post_write_q(as_storage_rd *rd)
+write_uses_post_write_q(as_storage_rd *rd)
 {
-	return rd->which_current_swb == SWB_UNCACHED ||
-			(rd->which_current_swb == SWB_PROLE &&
-					! rd->ns->storage_cache_replica_writes);
+	return ! rd->ns->storage_data_in_memory &&
+			(rd->which_current_swb == SWB_MASTER ||
+					(rd->which_current_swb == SWB_PROLE &&
+							rd->ns->storage_cache_replica_writes));
 }
 
 bool
@@ -595,7 +596,6 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 		}
 
 		// Enqueue the buffer, to be flushed to device.
-		swb->skip_post_write_q = true;
 		cf_queue_push(ssd->swb_write_q, &swb);
 		cf_atomic64_incr(&ssd->n_defrag_wblock_writes);
 
@@ -1393,13 +1393,13 @@ ssd_write_sanity_checks(drv_ssd *ssd, ssd_write_buf *swb)
 void
 ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 {
-	if (cf_atomic32_get(ssd->ns->storage_post_write_queue) == 0 ||
-			swb->skip_post_write_q) {
-		swb_dereference_and_release(ssd, swb->wblock_id, swb);
-	}
-	else {
+	if (swb->use_post_write_q &&
+			cf_atomic32_get(ssd->ns->storage_post_write_queue) != 0) {
 		// Transfer swb to post-write queue.
 		cf_queue_push(ssd->post_write_q, &swb);
+	}
+	else {
+		swb_dereference_and_release(ssd, swb->wblock_id, swb);
 	}
 
 	if (ssd->post_write_q) {
@@ -1558,7 +1558,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
-		swb->skip_post_write_q = write_skips_post_write_q(rd);
+		swb->use_post_write_q = write_uses_post_write_q(rd);
 	}
 
 	// Check if there's enough space in current buffer - if not, free and zero
@@ -1584,7 +1584,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
-		swb->skip_post_write_q = write_skips_post_write_q(rd);
+		swb->use_post_write_q = write_uses_post_write_q(rd);
 	}
 
 	uint32_t n_rblocks = ROUNDED_SIZE_TO_N_RBLOCKS(write_sz);

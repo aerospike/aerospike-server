@@ -166,7 +166,7 @@ typedef struct {
 	cf_atomic32			rc;
 	cf_atomic32			n_writers;	// number of concurrent writers
 	bool				dirty;		// written to since last flushed
-	bool				skip_post_write_q;
+	bool				use_post_write_q;
 	uint32_t			n_vacated;
 	uint32_t			vacated_capacity;
 	vacated_wblock		*vacated_wblocks;
@@ -365,7 +365,7 @@ void ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb);
 int ssd_write_bins(struct as_storage_rd_s *rd);
 int ssd_buffer_bins(struct as_storage_rd_s *rd);
 ssd_write_buf *swb_get(drv_ssd *ssd);
-bool write_skips_post_write_q(struct as_storage_rd_s *rd);
+bool write_uses_post_write_q(struct as_storage_rd_s *rd);
 
 // Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);

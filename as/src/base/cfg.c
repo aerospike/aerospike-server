@@ -3543,7 +3543,7 @@ as_config_init(const char* config_file)
 				ns->storage_min_avail_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
-				ns->storage_post_write_queue = cfg_u32(&line, 0, 8 * 1024);
+				ns->storage_post_write_queue = cfg_u32(&line, 0, MAX_POST_WRITE_QUEUE);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE:
 				ns->storage_read_page_cache = cfg_bool(&line);
@@ -3579,6 +3579,12 @@ as_config_init(const char* config_file)
 				}
 				if (ns->n_storage_files != 0 && ns->storage_filesize == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
+				}
+				if (ns->storage_data_in_memory && ns->storage_post_write_queue != 0 && ns->storage_post_write_queue != DEFAULT_POST_WRITE_QUEUE) {
+					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'post-write-queue' and 'data-in-memory'", ns->name);
+				}
+				if (ns->storage_cache_replica_writes && ns->storage_data_in_memory) {
+					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'cache-replica-writes' and 'data-in-memory'", ns->name);
 				}
 				if (ns->storage_commit_to_device && ns->storage_disable_odsync) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);

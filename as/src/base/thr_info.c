@@ -3146,6 +3146,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->storage_compression_level = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "cache-replica-writes", context, &context_len)) {
+			if (ns->storage_data_in_memory) {
+				cf_warning(AS_INFO, "ns %s, can't set cache-replica-writes if data-in-memory", ns->name);
+				goto Error;
+			}
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of cache-replica-writes of ns %s to %s", ns->name, context);
 				ns->storage_cache_replica_writes = true;
@@ -3488,8 +3492,8 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_warning(AS_INFO, "ns %s, post-write-queue %s is not a number", ns->name, context);
 				goto Error;
 			}
-			if ((uint32_t)val > (8 * 1024)) {
-				cf_warning(AS_INFO, "ns %s, post-write-queue %u must be < 8K", ns->name, val);
+			if ((uint32_t)val > MAX_POST_WRITE_QUEUE) {
+				cf_warning(AS_INFO, "ns %s, post-write-queue %u must be < %u", ns->name, val, MAX_POST_WRITE_QUEUE);
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of post-write-queue of ns %s from %d to %d ", ns->name, ns->storage_post_write_queue, val);

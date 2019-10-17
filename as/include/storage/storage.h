@@ -82,6 +82,9 @@ typedef enum {
 
 #define N_CURRENT_SWBS	3
 
+#define DEFAULT_POST_WRITE_QUEUE 256
+#define MAX_POST_WRITE_QUEUE (8 * 1024)
+
 typedef struct as_storage_rd_s {
 	struct as_index_s		*r;
 	struct as_namespace_s	*ns;
