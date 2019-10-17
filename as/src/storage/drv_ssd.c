@@ -444,6 +444,14 @@ swb_get(drv_ssd *ssd)
 }
 
 bool
+write_skips_post_write_q(as_storage_rd *rd)
+{
+	return rd->which_current_swb == SWB_UNCACHED ||
+			(rd->which_current_swb == SWB_PROLE &&
+					! rd->ns->storage_cache_replica_writes);
+}
+
+bool
 swb_add_unique_vacated_wblock(ssd_write_buf* swb, uint32_t src_file_id,
 		uint32_t src_wblock_id)
 {
@@ -1533,19 +1541,24 @@ ssd_buffer_bins(as_storage_rd *rd)
 	uint32_t write_sz = SIZE_UP_TO_RBLOCK_SIZE(flat_sz);
 
 	// Reserve the portion of the current swb where this record will be written.
-	cf_mutex_lock(&ssd->write_lock);
 
-	ssd_write_buf *swb = ssd->current_swb;
+	current_swb *cur_swb = &ssd->current_swbs[rd->which_current_swb];
+
+	cf_mutex_lock(&cur_swb->lock);
+
+	ssd_write_buf *swb = cur_swb->swb;
 
 	if (! swb) {
 		swb = swb_get(ssd);
-		ssd->current_swb = swb;
+		cur_swb->swb = swb;
 
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
-			cf_mutex_unlock(&ssd->write_lock);
+			cf_mutex_unlock(&cur_swb->lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
+
+		swb->skip_post_write_q = write_skips_post_write_q(rd);
 	}
 
 	// Check if there's enough space in current buffer - if not, free and zero
@@ -1559,17 +1572,19 @@ ssd_buffer_bins(as_storage_rd *rd)
 
 		// Enqueue the buffer, to be flushed to device.
 		cf_queue_push(ssd->swb_write_q, &swb);
-		cf_atomic64_incr(&ssd->n_wblock_writes);
+		cur_swb->n_wblocks_written++;
 
 		// Get the new buffer.
 		swb = swb_get(ssd);
-		ssd->current_swb = swb;
+		cur_swb->swb = swb;
 
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
-			cf_mutex_unlock(&ssd->write_lock);
+			cf_mutex_unlock(&cur_swb->lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
+
+		swb->skip_post_write_q = write_skips_post_write_q(rd);
 	}
 
 	uint32_t n_rblocks = ROUNDED_SIZE_TO_N_RBLOCKS(write_sz);
@@ -1595,7 +1610,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 	cf_atomic32_incr(&swb->n_writers);
 	swb->dirty = true;
 
-	cf_mutex_unlock(&ssd->write_lock);
+	cf_mutex_unlock(&cur_swb->lock);
 	// May now write this record concurrently with others in this swb.
 
 	// Flatten data into the block.
@@ -1852,8 +1867,12 @@ ssd_log_stats(drv_ssd *ssd, uint64_t *p_prev_n_total_writes,
 {
 	uint64_t n_defrag_reads = cf_atomic64_get(ssd->n_defrag_wblock_reads);
 	uint64_t n_defrag_writes = cf_atomic64_get(ssd->n_defrag_wblock_writes);
-	uint64_t n_total_writes = cf_atomic64_get(ssd->n_wblock_writes) +
-			n_defrag_writes;
+
+	uint64_t n_total_writes = n_defrag_writes;
+
+	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+		n_total_writes += ssd->current_swbs[c].n_wblocks_written;
+	}
 
 	uint64_t n_defrag_io_skips = cf_atomic64_get(ssd->n_wblock_defrag_io_skips);
 	uint64_t n_direct_frees = cf_atomic64_get(ssd->n_wblock_direct_frees);
@@ -1947,9 +1966,10 @@ ssd_free_swbs(drv_ssd *ssd)
 
 
 void
-ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes)
+ssd_flush_current_swb(drv_ssd *ssd, uint8_t which, uint64_t *p_prev_n_writes)
 {
-	uint64_t n_writes = cf_atomic64_get(ssd->n_wblock_writes);
+	current_swb *cur_swb = &ssd->current_swbs[which];
+	uint64_t n_writes = as_load_uint64(&cur_swb->n_wblocks_written);
 
 	// If there's an active write load, we don't need to flush.
 	if (n_writes != *p_prev_n_writes) {
@@ -1957,14 +1977,14 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes)
 		return;
 	}
 
-	cf_mutex_lock(&ssd->write_lock);
+	cf_mutex_lock(&cur_swb->lock);
 
-	n_writes = cf_atomic64_get(ssd->n_wblock_writes);
+	n_writes = as_load_uint64(&cur_swb->n_wblocks_written);
 
 	// Must check under the lock, could be racing a current swb just queued.
 	if (n_writes != *p_prev_n_writes) {
 
-		cf_mutex_unlock(&ssd->write_lock);
+		cf_mutex_unlock(&cur_swb->lock);
 
 		*p_prev_n_writes = n_writes;
 		return;
@@ -1973,7 +1993,7 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes)
 	// Flush the current swb if it isn't empty, and has been written to since
 	// last flushed.
 
-	ssd_write_buf *swb = ssd->current_swb;
+	ssd_write_buf *swb = cur_swb->swb;
 
 	if (swb && swb->dirty) {
 		swb->dirty = false;
@@ -1991,7 +2011,7 @@ ssd_flush_current_swb(drv_ssd *ssd, uint64_t *p_prev_n_writes)
 		}
 	}
 
-	cf_mutex_unlock(&ssd->write_lock);
+	cf_mutex_unlock(&cur_swb->lock);
 }
 
 
@@ -2105,7 +2125,7 @@ run_ssd_maintenance(void *udata)
 	uint64_t prev_n_direct_frees = 0;
 	uint64_t prev_n_tomb_raider_reads = 0;
 
-	uint64_t prev_n_writes_flush = 0;
+	uint64_t prev_n_writes_flush[N_CURRENT_SWBS] = { 0 };
 
 	uint64_t prev_n_defrag_writes_flush = 0;
 
@@ -2114,8 +2134,12 @@ run_ssd_maintenance(void *udata)
 
 	uint64_t prev_log_stats = now;
 	uint64_t prev_free_swbs = now;
-	uint64_t prev_flush = now;
+	uint64_t prev_flush[N_CURRENT_SWBS];
 	uint64_t prev_defrag_flush = now;
+
+	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+		prev_flush[c] = now;
+	}
 
 	// If any job's (initial) interval is less than MAX_INTERVAL and we want it
 	// done on its interval the first time through, add a next_time() call for
@@ -2145,10 +2169,12 @@ run_ssd_maintenance(void *udata)
 
 		uint64_t flush_max_us = ssd_flush_max_us(ns);
 
-		if (flush_max_us != 0 && now >= prev_flush + flush_max_us) {
-			ssd_flush_current_swb(ssd, &prev_n_writes_flush);
-			prev_flush = now;
-			next = next_time(now, flush_max_us, next);
+		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+			if (flush_max_us != 0 && now >= prev_flush[c] + flush_max_us) {
+				ssd_flush_current_swb(ssd, c, &prev_n_writes_flush[c]);
+				prev_flush[c] = now;
+				next = next_time(now, flush_max_us, next);
+			}
 		}
 
 		static const uint64_t DEFRAG_FLUSH_MAX_US = 3UL * 1000 * 1000; // 3 sec
@@ -3503,7 +3529,10 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 		ssd->ns = ns;
 		ssd->file_id = i;
 
-		cf_mutex_init(&ssd->write_lock);
+		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+			cf_mutex_init(&ssd->current_swbs[c].lock);
+		}
+
 		cf_mutex_init(&ssd->defrag_lock);
 
 		ssd->running = true;
@@ -4002,7 +4031,11 @@ as_storage_device_stats_ssd(struct as_namespace_s *ns, uint32_t device_ix,
 	stats->n_free_wblocks = num_free_wblocks(ssd);
 
 	stats->write_q_sz = cf_queue_sz(ssd->swb_write_q);
-	stats->n_writes = ssd->n_wblock_writes;
+	stats->n_writes = 0;
+
+	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+		stats->n_writes += ssd->current_swbs[c].n_wblocks_written;
+	}
 
 	stats->defrag_q_sz = cf_queue_sz(ssd->defrag_wblock_q);
 	stats->n_defrag_reads = ssd->n_defrag_wblock_reads;
@@ -4081,21 +4114,29 @@ as_storage_shutdown_ssd(as_namespace *ns)
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		// Stop the maintenance thread from (also) flushing the swbs.
-		cf_mutex_lock(&ssd->write_lock);
-		cf_mutex_lock(&ssd->defrag_lock);
+		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+			current_swb* cur_swb = &ssd->current_swbs[c];
 
-		// Flush current swb by pushing it to write-q.
-		if (ssd->current_swb) {
-			// Clean the end of the buffer before pushing to write-q.
-			if (ssd->write_block_size > ssd->current_swb->pos) {
-				memset(&ssd->current_swb->buf[ssd->current_swb->pos], 0,
-						ssd->write_block_size - ssd->current_swb->pos);
+			// Stop the maintenance thread from (also) flushing the swbs.
+			cf_mutex_lock(&cur_swb->lock);
+
+			ssd_write_buf* swb = cur_swb->swb;
+
+			// Flush current swb by pushing it to write-q.
+			if (swb != NULL) {
+				// Clean the end of the buffer before pushing to write-q.
+				if (ssd->write_block_size > swb->pos) {
+					memset(&swb->buf[swb->pos], 0,
+							ssd->write_block_size - swb->pos);
+				}
+
+				cf_queue_push(ssd->swb_write_q, &swb);
+				cur_swb->swb = NULL;
 			}
-
-			cf_queue_push(ssd->swb_write_q, &ssd->current_swb);
-			ssd->current_swb = NULL;
 		}
+
+		// Stop the maintenance thread from (also) flushing the defrag swb.
+		cf_mutex_lock(&ssd->defrag_lock);
 
 		// Flush defrag swb by pushing it to write-q.
 		if (ssd->defrag_swb) {

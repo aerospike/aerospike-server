@@ -380,8 +380,8 @@ as_record_pickle(as_storage_rd *rd, size_t *len_r)
 
 // If remote record is better than local record, replace local with remote.
 int
-as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
-		bool skip_sindex, bool do_xdr_write)
+as_record_replace_if_better(as_remote_record *rr, bool skip_sindex,
+		bool do_xdr_write)
 {
 	as_namespace *ns = rr->rsv->ns;
 
@@ -408,7 +408,7 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 
 	conflict_resolution_pol policy = ns->conflict_resolution_policy;
 
-	if (is_repl_write) {
+	if (rr->via == VIA_REPLICATION) {
 		bool from_replica;
 
 		if ((result = as_partition_check_source(ns, rr->rsv->p, rr->src,
@@ -479,6 +479,14 @@ as_record_replace_if_better(as_remote_record *rr, bool is_repl_write,
 
 	// Split according to configuration to replace local record.
 	bool is_delete = false;
+
+	if (rr->via == VIA_REPLICATION) {
+		rd.which_current_swb = SWB_PROLE;
+	}
+	else if (rr->via == VIA_MIGRATION) {
+		rd.which_current_swb = SWB_UNCACHED;
+	}
+	// else - dup-res goes in SWB_MASTER.
 
 	if (ns->storage_data_in_memory) {
 		if (ns->single_bin) {

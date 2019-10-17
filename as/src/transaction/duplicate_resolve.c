@@ -600,6 +600,7 @@ apply_winner(rw_request* rw)
 	msg* m = rw->best_dup_msg;
 
 	as_remote_record rr = {
+			.via = VIA_DUPLICATE_RESOLUTION,
 			// Skipping .src for now.
 			.rsv = &rw->rsv,
 			.keyd = &rw->keyd
@@ -625,8 +626,7 @@ apply_winner(rw_request* rw)
 
 	dup_res_init_repl_state(&rr, info);
 
-	rw->result_code = (uint8_t)as_record_replace_if_better(&rr, false, false,
-			false);
+	rw->result_code = (uint8_t)as_record_replace_if_better(&rr, false, false);
 
 	// Duplicate resolution just treats these errors as successful no-ops:
 	if (rw->result_code == AS_ERR_RECORD_EXISTS ||

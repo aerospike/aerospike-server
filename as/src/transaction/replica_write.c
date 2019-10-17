@@ -242,7 +242,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	}
 	// else - flat record, including tombstone.
 
-	as_remote_record rr = { .src = node };
+	as_remote_record rr = { .via = VIA_REPLICATION, .src = node };
 
 	if (msg_get_buf(m, RW_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
 			MSG_GET_DIRECT) != 0) {
@@ -275,7 +275,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	// If source didn't touch sindex, may not need to touch it locally.
 	bool skip_sindex = (info & RW_INFO_SINDEX_TOUCHED) == 0;
 
-	result = (uint32_t)as_record_replace_if_better(&rr, true, skip_sindex,
+	result = (uint32_t)as_record_replace_if_better(&rr, skip_sindex,
 			do_xdr_write);
 
 	as_partition_release(&rsv);
@@ -324,6 +324,7 @@ repl_write_handle_old_op(cf_node node, msg* m)
 	}
 
 	as_remote_record rr = {
+			.via = VIA_REPLICATION,
 			.src = node,
 			.rsv = &rsv,
 			.keyd = keyd,
@@ -382,7 +383,7 @@ repl_write_handle_old_op(cf_node node, msg* m)
 	// If source didn't touch sindex, may not need to touch it locally.
 	bool skip_sindex = (info & RW_INFO_SINDEX_TOUCHED) == 0;
 
-	result = (uint32_t)as_record_replace_if_better(&rr, true, skip_sindex,
+	result = (uint32_t)as_record_replace_if_better(&rr, skip_sindex,
 			do_xdr_write);
 
 	as_partition_release(&rsv);

@@ -2077,6 +2077,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_string_safe(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode);
 		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
 		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
+		info_append_bool(db, "storage-engine.cache-replica-writes", ns->storage_cache_replica_writes);
 		info_append_bool(db, "storage-engine.cold-start-empty", ns->storage_cold_start_empty);
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
 		info_append_uint32(db, "storage-engine.commit-min-size", ns->storage_commit_min_size);
@@ -3143,6 +3144,19 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of compression-level of ns %s from %u to %d", ns->name, ns->storage_compression_level, val);
 			ns->storage_compression_level = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "cache-replica-writes", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of cache-replica-writes of ns %s to %s", ns->name, context);
+				ns->storage_cache_replica_writes = true;
+			}
+			else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
+				cf_info(AS_INFO, "Changing value of cache-replica-writes of ns %s to %s", ns->name, context);
+				ns->storage_cache_replica_writes = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {

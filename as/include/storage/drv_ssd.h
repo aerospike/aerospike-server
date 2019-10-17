@@ -197,6 +197,16 @@ typedef struct ssd_wblock_state_s {
 
 
 //------------------------------------------------
+// Per current write buffer information.
+//
+typedef struct current_swb_s {
+	cf_mutex		lock;				// lock protects writes to swb
+	ssd_write_buf	*swb;				// swb currently being filled by writes
+	uint64_t		n_wblocks_written;	// total number of swbs added to the swb_write_q by writes
+} current_swb;
+
+
+//------------------------------------------------
 // Per-device information.
 //
 typedef struct drv_ssd_s {
@@ -207,8 +217,7 @@ typedef struct drv_ssd_s {
 
 	uint32_t		running;
 
-	cf_mutex		write_lock;			// lock protects writes to current swb
-	ssd_write_buf	*current_swb;		// swb currently being filled by writes
+	current_swb		current_swbs[N_CURRENT_SWBS];
 
 	int				commit_fd;			// relevant for enterprise edition only
 	int				shadow_commit_fd;	// relevant for enterprise edition only
@@ -232,7 +241,6 @@ typedef struct drv_ssd_s {
 
 	cf_atomic64		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
 	cf_atomic64		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
-	cf_atomic64		n_wblock_writes;		// total number of swbs added to the swb_write_q by writes
 
 	cf_atomic64		n_wblock_defrag_io_skips;	// total number of wblocks empty on defrag_wblock_q pop
 	cf_atomic64		n_wblock_direct_frees;		// total number of wblocks freed by other than defrag
@@ -357,6 +365,7 @@ void ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb);
 int ssd_write_bins(struct as_storage_rd_s *rd);
 int ssd_buffer_bins(struct as_storage_rd_s *rd);
 ssd_write_buf *swb_get(drv_ssd *ssd);
+bool write_skips_post_write_q(struct as_storage_rd_s *rd);
 
 // Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);

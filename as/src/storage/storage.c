@@ -223,6 +223,7 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->set_name = NULL;
 	rd->key_size = 0;
 	rd->key = NULL;
+	rd->which_current_swb = SWB_MASTER;
 	rd->read_page_cache = false;
 	rd->is_durable_delete = false;
 	rd->keep_pickle = false;
@@ -260,6 +261,7 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->set_name = NULL;
 	rd->key_size = 0;
 	rd->key = NULL;
+	rd->which_current_swb = SWB_MASTER;
 	rd->read_page_cache = false;
 	rd->is_durable_delete = false;
 	rd->keep_pickle = false;

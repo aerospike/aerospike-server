@@ -635,6 +635,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_MEMORY_ALL, // renamed
 	CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY,
 	// Normally hidden:
+	CASE_NAMESPACE_STORAGE_DEVICE_CACHE_REPLICA_WRITES,
 	CASE_NAMESPACE_STORAGE_DEVICE_COLD_START_EMPTY,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_TO_DEVICE,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_MIN_SIZE,
@@ -1228,6 +1229,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "write-block-size",				CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE },
 		{ "memory-all",						CASE_NAMESPACE_STORAGE_DEVICE_MEMORY_ALL },
 		{ "data-in-memory",					CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY },
+		{ "cache-replica-writes",			CASE_NAMESPACE_STORAGE_DEVICE_CACHE_REPLICA_WRITES },
 		{ "cold-start-empty",				CASE_NAMESPACE_STORAGE_DEVICE_COLD_START_EMPTY },
 		{ "commit-to-device",				CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_TO_DEVICE },
 		{ "commit-min-size",				CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_MIN_SIZE },
@@ -3451,6 +3453,9 @@ as_config_init(const char* config_file)
 				// No break.
 			case CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY:
 				ns->storage_data_in_memory = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_CACHE_REPLICA_WRITES:
+				ns->storage_cache_replica_writes = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_COLD_START_EMPTY:
 				ns->storage_cold_start_empty = cfg_bool(&line);

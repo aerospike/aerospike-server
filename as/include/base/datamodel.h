@@ -497,7 +497,14 @@ resolve_last_update_time(uint64_t left, uint64_t right)
 	return left == right ? 0 : (right > left ? 1 : -1);
 }
 
+typedef enum {
+	VIA_REPLICATION,
+	VIA_MIGRATION,
+	VIA_DUPLICATE_RESOLUTION
+} record_via;
+
 typedef struct as_remote_record_s {
+	record_via via;
 	cf_node src;
 	as_partition_reservation *rsv;
 	cf_digest *keyd;
@@ -524,7 +531,7 @@ typedef struct as_remote_record_s {
 	uint8_t repl_state; // relevant only for enterprise edition
 } as_remote_record;
 
-int as_record_replace_if_better(as_remote_record *rr, bool is_repl_write, bool skip_sindex, bool do_xdr_write);
+int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex, bool do_xdr_write);
 
 // a simpler call that gives seconds in the right epoch
 #define as_record_void_time_get() cf_clepoch_seconds()
@@ -795,6 +802,7 @@ struct as_namespace_s {
 	uint32_t		storage_write_block_size;
 	bool			storage_data_in_memory;
 
+	bool			storage_cache_replica_writes;
 	bool			storage_cold_start_empty;
 	bool			storage_commit_to_device; // relevant only for enterprise edition
 	uint32_t		storage_commit_min_size; // relevant only for enterprise edition

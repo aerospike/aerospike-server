@@ -75,6 +75,13 @@ typedef enum {
 	AS_ENCRYPTION_LAST_PLUS_1
 } as_encryption_method;
 
+// Which current write buffer to use.
+#define SWB_MASTER		0
+#define SWB_PROLE		1
+#define SWB_UNCACHED	2
+
+#define N_CURRENT_SWBS	3
+
 typedef struct as_storage_rd_s {
 	struct as_index_s		*r;
 	struct as_namespace_s	*ns;
@@ -93,6 +100,7 @@ typedef struct as_storage_rd_s {
 	uint32_t				key_size;
 	const uint8_t			*key;
 
+	uint8_t					which_current_swb;
 	bool					read_page_cache;
 	bool					is_durable_delete; // enterprise only
 

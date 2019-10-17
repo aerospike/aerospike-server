@@ -1377,7 +1377,11 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		return;
 	}
 
-	as_remote_record rr = { .src = src, .rsv = &immig->rsv };
+	as_remote_record rr = {
+			.via = VIA_MIGRATION,
+			.src = src,
+			.rsv = &immig->rsv
+	};
 
 	if (msg_get_buf(m, MIG_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
 			MSG_GET_DIRECT) != 0) {
@@ -1400,7 +1404,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 
 	immigration_init_repl_state(&rr, info);
 
-	int rv = as_record_replace_if_better(&rr, false, false, false);
+	int rv = as_record_replace_if_better(&rr, false, false);
 
 	// If replace failed, don't ack - it will be retransmitted.
 	if (! (rv == AS_OK ||
@@ -1467,8 +1471,12 @@ immigration_handle_old_insert_request(cf_node src, msg *m)
 		return;
 	}
 
-	as_remote_record rr =
-			{ .src = src, .rsv = &immig->rsv, .is_old_pickle = true };
+	as_remote_record rr = {
+			.via = VIA_MIGRATION,
+			.src = src,
+			.rsv = &immig->rsv,
+			.is_old_pickle = true
+	};
 
 	if (msg_get_buf(m, MIG_FIELD_DIGEST, (uint8_t **)&rr.keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
@@ -1519,7 +1527,7 @@ immigration_handle_old_insert_request(cf_node src, msg *m)
 	else {
 		immigration_init_repl_state(&rr, info);
 
-		int rv = as_record_replace_if_better(&rr, false, false, false);
+		int rv = as_record_replace_if_better(&rr, false, false);
 
 		// If replace failed, don't ack - it will be retransmitted.
 		if (! (rv == AS_OK ||
