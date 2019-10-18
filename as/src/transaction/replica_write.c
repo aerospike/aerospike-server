@@ -564,7 +564,8 @@ pack_info_bits(as_transaction* tr)
 {
 	uint32_t info = 0;
 
-	if (as_transaction_is_xdr(tr)) {
+	// TODO - old pickle - remove in "six months".
+	if (as_exchange_min_compatibility_id() < 3 && as_transaction_is_xdr(tr)) {
 		info |= RW_INFO_XDR;
 	}
 
