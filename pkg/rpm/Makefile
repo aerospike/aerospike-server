@@ -149,5 +149,4 @@ endif
 
 ifeq ($(USE_EE),1)
   include $(AS_EE)/make_in/Makefile.rpm.in
-  include $(XDR)/make_in/Makefile.rpm.in
 endif
