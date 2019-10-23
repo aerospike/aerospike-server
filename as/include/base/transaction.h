@@ -359,6 +359,12 @@ as_transaction_trid(const as_transaction *tr)
 }
 
 static inline bool
+as_transaction_compress_response(const as_transaction *tr)
+{
+	return (tr->msgp->msg.info1 & AS_MSG_INFO1_COMPRESS_RESPONSE) != 0;
+}
+
+static inline bool
 as_transaction_is_delete(const as_transaction *tr)
 {
 	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0;

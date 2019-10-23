@@ -350,7 +350,8 @@ as_proxy_send_response(cf_node dst, uint32_t proxy_tid, uint32_t result_code,
 
 // Proxyee - transaction completed here, send response to proxyer.
 void
-as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
+as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db,
+		bool compress, as_proto_comp_stat* comp_stat)
 {
 	msg* m = as_fabric_msg_get(M_TYPE_PROXY);
 
@@ -360,12 +361,22 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
 	uint8_t* msgp = db->buf;
 	size_t msg_sz = db->used_sz;
 
+	if (compress) {
+		msgp = as_proto_compress_alloc(msgp, 0, 0, &msg_sz, comp_stat);
+	}
+
 	if (db->is_stack) {
-		msg_set_buf(m, PROXY_FIELD_AS_PROTO, msgp, msg_sz, MSG_SET_COPY);
+		msg_set_buf(m, PROXY_FIELD_AS_PROTO, msgp, msg_sz,
+				msgp == db->buf ? MSG_SET_COPY : MSG_SET_HANDOFF_MALLOC);
 	}
 	else {
 		msg_set_buf(m, PROXY_FIELD_AS_PROTO, msgp, msg_sz,
 				MSG_SET_HANDOFF_MALLOC);
+
+		if (msgp != db->buf) {
+			cf_free(db->buf);
+		}
+
 		db->buf = NULL; // the fabric owns the buffer now
 	}
 

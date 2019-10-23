@@ -874,6 +874,12 @@ struct as_namespace_s {
 	double			comp_avg_comp_sz; // relevant only for enterprise edition
 	float			cache_read_pct;
 
+	// Proto-compression stats.
+
+	as_proto_comp_stat record_comp_stat; // relevant only for enterprise edition
+	as_proto_comp_stat scan_comp_stat; // relevant only for enterprise edition
+	as_proto_comp_stat query_comp_stat; // relevant only for enterprise edition
+
 	// Migration stats.
 
 	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only

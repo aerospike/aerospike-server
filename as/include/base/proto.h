@@ -48,7 +48,6 @@ struct as_file_handle_s;
 struct as_index_s;
 struct as_namespace_s;
 struct as_storage_rd_s;
-struct as_transaction_s;
 
 
 //==========================================================
@@ -184,6 +183,13 @@ typedef struct as_comp_proto_s {
 	uint8_t data[0]; // compressed message (includes its own header)
 }  as_comp_proto;
 
+// Container for proto compression stats.
+typedef struct as_proto_comp_stat_s {
+	double comp_pct;    // percent of attempts yielding compressed result
+	double avg_orig_sz; // average original size (compressed results only)
+	double avg_comp_sz; // average final size (compressed results only)
+} as_proto_comp_stat;
+
 //------------------------------------------------
 // as_msg.
 //
@@ -217,7 +223,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO1_XDR                    (1 << 4) // operation is via XDR
 #define AS_MSG_INFO1_GET_NO_BINS            (1 << 5) // get record metadata only - no bin metadata or data
 #define AS_MSG_INFO1_CONSISTENCY_LEVEL_ALL  (1 << 6) // duplicate resolve reads
-	// Bit 7 is unused.
+#define AS_MSG_INFO1_COMPRESS_RESPONSE      (1 << 7) // (enterprise only)
 
 // Bits in info2.
 #define AS_MSG_INFO2_WRITE                  (1 << 0) // contains a write semantic
@@ -599,6 +605,8 @@ typedef struct as_netio_s {
 	uint32_t offset;
 	uint32_t seq;
 	bool slow;
+	bool compress_response;
+	as_proto_comp_stat* comp_stat;
 	uint64_t start_time;
 } as_netio;
 
@@ -616,6 +624,12 @@ void as_proto_swap(as_proto* proto);
 void as_msg_swap_header(as_msg* m);
 void as_msg_swap_field(as_msg_field* mf);
 void as_msg_swap_op(as_msg_op* op);
+
+const uint8_t* as_proto_compress(const uint8_t* original, size_t* sz,
+		as_proto_comp_stat* comp_stat);
+uint8_t* as_proto_compress_alloc(const uint8_t* original, size_t alloc_sz,
+		size_t indent, size_t* sz, as_proto_comp_stat* comp_stat);
+uint32_t as_proto_decompress(const as_comp_proto* cproto, as_proto** p_proto);
 
 cl_msg* as_msg_create_internal(const char* ns_name, uint8_t info1,
 		uint8_t info2, uint8_t info3, uint16_t n_ops, uint8_t* ops,
@@ -637,7 +651,8 @@ int as_msg_send_reply(struct as_file_handle_s* fd_h, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_msg_op** ops,
 		struct as_bin_s** bins, uint16_t bin_count, struct as_namespace_s* ns,
 		uint64_t trid);
-int as_msg_send_ops_reply(struct as_file_handle_s* fd_h, cf_dyn_buf* db);
+int as_msg_send_ops_reply(struct as_file_handle_s* fd_h, const cf_dyn_buf* db,
+		bool compress, as_proto_comp_stat* comp_stat);
 bool as_msg_send_fin(cf_socket* sock, uint32_t result_code);
 size_t as_msg_send_fin_timeout(cf_socket* sock, uint32_t result_code,
 		int32_t timeout);

@@ -131,7 +131,6 @@ static void stop_service(thread_ctx* ctx);
 static void service_release_file_handle(as_file_handle* fd_h);
 static bool process_readable(as_file_handle* fd_h);
 static void start_transaction(as_file_handle* fd_h);
-static bool decompress_msg(as_comp_proto* cproto, uint8_t** out_buf, uint64_t* out_buf_sz);
 static void config_xdr_socket(cf_socket* sock);
 
 // Reap idle and bad connections.
@@ -781,27 +780,15 @@ start_transaction(as_file_handle* fd_h)
 	}
 
 	if (proto->type == PROTO_TYPE_AS_MSG_COMPRESSED) {
-		uint8_t* buf = NULL;
-		uint64_t buf_sz = 0;
+		uint32_t result = as_proto_decompress((as_comp_proto*)proto,
+				(as_proto**)&tr.msgp);
 
-		if (! decompress_msg((as_comp_proto*)proto, &buf, &buf_sz)) {
-			as_transaction_demarshal_error(&tr, AS_ERR_UNKNOWN);
+		if (result != AS_OK) {
+			as_transaction_demarshal_error(&tr, result);
 			return;
 		}
 
 		cf_free(proto);
-
-		proto = (as_proto*)buf;
-		tr.msgp = (cl_msg*)proto;
-
-		as_proto_swap(proto);
-
-		if (! as_proto_wrapped_is_valid(proto, buf_sz)) {
-			cf_warning(AS_SERVICE, "decompressed proto: (%d,%d,%lu,%lu)",
-					proto->version, proto->type, (uint64_t)proto->sz, buf_sz);
-			as_transaction_demarshal_error(&tr, AS_ERR_UNKNOWN);
-			return;
-		}
 	}
 
 	if (as_transaction_is_xdr(&tr) && ! fd_h->is_xdr) {
@@ -825,47 +812,6 @@ start_transaction(as_file_handle* fd_h)
 	}
 
 	as_tsvc_process_transaction(&tr);
-}
-
-static bool
-decompress_msg(as_comp_proto* cproto, uint8_t** out_buf, uint64_t* out_buf_sz)
-{
-	uint64_t orig_sz = cproto->orig_sz;
-
-	// Hack to handle both little and big endian formats. Some clients wrongly
-	// send the size in little-endian format. If we interpret a legal big-endian
-	// size as little-endian, it will be > PROTO_SIZE_MAX. Use it as a clue.
-	if (orig_sz > PROTO_SIZE_MAX) {
-		orig_sz = cf_swap_from_be64(cproto->orig_sz);
-
-		if (orig_sz > PROTO_SIZE_MAX) {
-			cf_warning(AS_SERVICE, "bad compressed packet size %lu", orig_sz);
-			return false;
-		}
-	}
-
-	uint8_t* decomp_buf = cf_malloc(orig_sz);
-	uint64_t decomp_buf_sz = orig_sz;
-	uint64_t comp_buf_sz = cproto->proto.sz - sizeof(cproto->orig_sz);
-	int rv = uncompress(decomp_buf, &decomp_buf_sz, cproto->data, comp_buf_sz);
-
-	if (rv != Z_OK) {
-		cf_warning(AS_SERVICE, "zlib decompression failed with error %d", rv);
-		cf_free(decomp_buf);
-		return false;
-	}
-
-	if (orig_sz != decomp_buf_sz) {
-		cf_warning(AS_SERVICE, "decompressed size %lu is not expected size %lu",
-				decomp_buf_sz, orig_sz);
-		cf_free(decomp_buf);
-		return false;
-	}
-
-	*out_buf = decomp_buf;
-	*out_buf_sz = decomp_buf_sz;
-
-	return true;
 }
 
 static void

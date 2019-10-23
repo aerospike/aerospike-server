@@ -46,6 +46,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += features_ce.c
   BASE_SOURCES += index_ce.c
   BASE_SOURCES += namespace_ce.c
+  BASE_SOURCES += proto_ce.c
   BASE_SOURCES += record_ce.c
   BASE_SOURCES += security_ce.c
   BASE_SOURCES += truncate_ce.c

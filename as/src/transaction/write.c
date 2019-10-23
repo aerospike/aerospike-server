@@ -490,7 +490,9 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (db && db->used_sz != 0) {
-			as_msg_send_ops_reply(tr->from.proto_fd_h, db);
+			as_msg_send_ops_reply(tr->from.proto_fd_h, db,
+					as_transaction_compress_response(tr),
+					&tr->rsv.ns->record_comp_stat);
 		}
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
@@ -505,7 +507,9 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
 			as_proxy_send_ops_response(tr->from.proxy_node,
-					tr->from_data.proxy_tid, db);
+					tr->from_data.proxy_tid, db,
+					as_transaction_compress_response(tr),
+					&tr->rsv.ns->record_comp_stat);
 		}
 		else {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,

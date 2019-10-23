@@ -100,6 +100,7 @@ struct as_batch_shared_s {
 	int result_code;
 	bool in_trailer;
 	bool bad_response_fd;
+	bool compress_response;
 	as_msg_field* predexp_mf;
 	predexp_eval_t* predexp;
 };
@@ -358,8 +359,10 @@ as_batch_send_delayed(as_batch_queue* queue, as_batch_shared* shared, as_batch_b
 }
 
 static bool
-as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer** p_buffer)
 {
+	as_batch_buffer* buffer = *p_buffer;
+
 	cf_assert(buffer->capacity != 0, AS_BATCH, "buffer capacity 0");
 
 	// Don't send buffer if an error has already occurred.
@@ -374,6 +377,23 @@ as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_
 	buffer->proto.type = PROTO_TYPE_AS_MSG;
 	buffer->proto.sz = buffer->size;
 	as_proto_swap(&buffer->proto);
+
+	if (shared->compress_response) {
+		size_t proto_sz = sizeof(as_proto) + buffer->size;
+		uint8_t* buf = as_proto_compress_alloc((const uint8_t*)buffer,
+				batch_buffer_pool.header_size + buffer->capacity,
+				offsetof(as_batch_buffer, proto), &proto_sz,
+				&g_stats.batch_comp_stat);
+
+		if (buf != (uint8_t*)buffer) {
+			cf_free(buffer);
+
+			buffer = (as_batch_buffer*)buf;
+			buffer->size = proto_sz - sizeof(as_proto);
+
+			*p_buffer = buffer;
+		}
+	}
 
 	int status = as_batch_send_buffer(shared, buffer, MSG_NOSIGNAL | MSG_MORE);
 
@@ -413,12 +433,12 @@ as_batch_worker(void* udata)
 			break;
 		}
 
-		buffer = response.buffer;
-
 		if (! shared->delayed_buffer) {
-			if (as_batch_send_response(batch_queue, shared, buffer)) {
+			if (as_batch_send_response(batch_queue, shared, &response.buffer)) {
 				continue;
 			}
+
+			buffer = response.buffer;
 
 			if (as_batch_abandon(batch_queue, shared, buffer)) {
 				continue;
@@ -430,6 +450,8 @@ as_batch_worker(void* udata)
 			as_batch_delay_buffer(batch_queue);
 		}
 		else {
+			buffer = response.buffer;
+
 			// Batch is delayed - try only original delayed buffer.
 			if (shared->delayed_buffer == buffer) {
 				shared->delayed_buffer = NULL;
@@ -858,6 +880,7 @@ as_batch_queue_task(as_transaction* btr)
 	shared->start = btr->start_time;
 	shared->fd_h = btr->from.proto_fd_h;
 	shared->msgp = btr->msgp;
+	shared->compress_response = as_transaction_compress_response(btr);
 	shared->tran_max = tran_count;
 
 	// Find batch queue to send transaction responses.
@@ -945,7 +968,8 @@ as_batch_queue_task(as_transaction* btr)
 			}
 
 			out->msg.header_sz = sizeof(as_msg);
-			out->msg.info1 = in->info1;
+			out->msg.info1 = in->info1 &
+					(~AS_MSG_INFO1_COMPRESS_RESPONSE); // sub-tr not compressed
 			out->msg.info2 = 0;
 			out->msg.info3 = bmsg->info3 &
 					(AS_MSG_INFO3_SC_READ_RELAX | AS_MSG_INFO3_SC_READ_TYPE);

@@ -32,6 +32,7 @@
 
 #include "hist.h"
 
+#include "base/proto.h"
 #include "fabric/fabric.h"
 
 
@@ -76,10 +77,13 @@ typedef struct as_stats_s {
 	cf_atomic64		batch_index_timeout;
 	cf_atomic64		batch_index_delay; // not in ticker
 
-	// Batch-index stats.
+	// Batch-index buffer stats.
 	cf_atomic64		batch_index_huge_buffers; // not in ticker
 	cf_atomic64		batch_index_created_buffers; // not in ticker
 	cf_atomic64		batch_index_destroyed_buffers; // not in ticker
+
+	// Batch-index proto compression stats.
+	as_proto_comp_stat batch_comp_stat; // relevant only for enterprise edition
 
 	// Query & secondary index stats.
 	cf_atomic64		query_false_positives;

@@ -76,9 +76,9 @@ static cf_queue g_netio_slow_queue;
 // Forward declarations.
 //
 
-static int send_reply_buf(as_file_handle *fd_h, uint8_t *msgp, size_t msg_sz);
+static int send_reply_buf(as_file_handle *fd_h, const uint8_t *msgp, size_t msg_sz);
 static void *run_netio(void *q_to_wait_on);
-static int netio_send_packet(as_file_handle *fd_h, cf_buf_builder *bb_r, uint32_t *offset, bool blocking);
+static int netio_send_packet(as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset, bool blocking, bool compress, as_proto_comp_stat *comp_stat);
 
 
 //==========================================================
@@ -645,9 +645,17 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code,
 
 // Send a pre-made response saved in a dyn-buf.
 int
-as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
+as_msg_send_ops_reply(as_file_handle *fd_h, const cf_dyn_buf *db, bool compress,
+		as_proto_comp_stat *comp_stat)
 {
-	return send_reply_buf(fd_h, db->buf, db->used_sz);
+	if (! compress) {
+		return send_reply_buf(fd_h, db->buf, db->used_sz);
+	}
+
+	size_t msg_sz = db->used_sz;
+	const uint8_t *msgp = as_proto_compress(db->buf, &msg_sz, comp_stat);
+
+	return send_reply_buf(fd_h, msgp, msg_sz);
 }
 
 // Send a blocking "fin" message with default timeout.
@@ -738,8 +746,8 @@ as_netio_send(as_netio *io, bool slow, bool blocking)
 	int ret = io->start_cb(io, io->seq);
 
 	if (ret == AS_NETIO_OK) {
-		ret = io->finish_cb(io, netio_send_packet(io->fd_h, io->bb_r,
-				&io->offset, blocking));
+		ret = io->finish_cb(io, netio_send_packet(io->fd_h, &io->bb_r,
+				&io->offset, blocking, io->compress_response, io->comp_stat));
 	} 
 	else {
 		ret = io->finish_cb(io, ret);
@@ -770,7 +778,7 @@ as_netio_send(as_netio *io, bool slow, bool blocking)
 //
 
 static int
-send_reply_buf(as_file_handle *fd_h, uint8_t *msgp, size_t msg_sz)
+send_reply_buf(as_file_handle *fd_h, const uint8_t *msgp, size_t msg_sz)
 {
 	cf_assert(cf_socket_exists(&fd_h->sock), AS_PROTO, "fd is invalid");
 
@@ -811,26 +819,44 @@ run_netio(void *q_to_wait_on)
 }
 
 static int
-netio_send_packet(as_file_handle *fd_h, cf_buf_builder *bb_r, uint32_t *offset,
-		bool blocking)
+netio_send_packet(as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset,
+		bool blocking, bool compress, as_proto_comp_stat *comp_stat)
 {
 #if defined(USE_SYSTEMTAP)
 	uint64_t nodeid = g_config.self_node;
 #endif
 
-	uint32_t len = bb_r->used_sz;
-	uint8_t *buf = bb_r->buf;
-
-	as_proto proto;
-
-	proto.version = PROTO_VERSION;
-	proto.type = PROTO_TYPE_AS_MSG;
-	proto.sz = len - 8;
-	as_proto_swap(&proto);
-
-	memcpy(bb_r->buf, &proto, 8);
+	cf_buf_builder *bb = *bb_r;
 
 	uint32_t pos = *offset;
+
+	if (pos == 0) {
+		as_proto *proto = (as_proto *)bb->buf;
+
+		proto->version = PROTO_VERSION;
+		proto->type = PROTO_TYPE_AS_MSG;
+		proto->sz = bb->used_sz - sizeof(as_proto);
+		as_proto_swap(proto);
+
+		if (compress) {
+			size_t proto_sz = bb->used_sz;
+			uint8_t* buf = as_proto_compress_alloc((const uint8_t*)bb,
+					sizeof(cf_buf_builder) + bb->alloc_sz,
+					sizeof(cf_buf_builder), &proto_sz, comp_stat);
+
+			if (buf != (uint8_t*)bb) {
+				cf_free(bb);
+
+				bb = (cf_buf_builder *)buf;
+				bb->used_sz = proto_sz;
+
+				*bb_r = bb;
+			}
+		}
+	}
+
+	uint32_t len = bb->used_sz;
+	uint8_t *buf = bb->buf;
 
 	ASD_QUERY_SENDPACKET_STARTING(nodeid, pos, len);
 
@@ -842,7 +868,13 @@ netio_send_packet(as_file_handle *fd_h, cf_buf_builder *bb_r, uint32_t *offset,
 		int rv = cf_socket_send(&fd_h->sock, buf + pos, len - pos,
 				MSG_NOSIGNAL);
 
-		if (rv <= 0) {
+		if (rv == 0) {
+			cf_warning(AS_PROTO, "packet send response returned 0 fd %d",
+					CSFD(&fd_h->sock));
+			return AS_NETIO_IO_ERR;
+		}
+
+		if (rv < 0) {
 			if (errno != EAGAIN) {
 				cf_debug(AS_PROTO, "packet send response error returned %d errno %d fd %d",
 						rv, errno, CSFD(&fd_h->sock));

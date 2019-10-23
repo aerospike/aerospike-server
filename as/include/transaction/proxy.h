@@ -39,6 +39,7 @@
 struct as_bin_s;
 struct as_msg_op_s;
 struct as_namespace_s;
+struct as_proto_comp_stat_s;
 struct as_transaction_s;
 
 
@@ -57,4 +58,4 @@ void as_proxy_send_response(cf_node dst, uint32_t proxy_tid,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		struct as_msg_op_s** ops, struct as_bin_s** bins, uint16_t bin_count,
 		struct as_namespace_s* ns, uint64_t trid);
-void as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db);
+void as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db, bool compress, struct as_proto_comp_stat_s* comp_stat);

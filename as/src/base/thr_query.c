@@ -223,6 +223,7 @@ typedef struct as_query_transaction_s {
 
 	/********************** IO Buf Builder ***********************************/
 	cf_mutex                 buf_mutex;
+	bool                     compress_response;
 	cf_buf_builder         * bb_r;
 	/****************** Query State and Result Code **************************/
 	cf_mutex                 slock;
@@ -985,6 +986,8 @@ query_netio(as_query_transaction *qtr)
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	io.data        = qtr;
 
+	io.compress_response = qtr->compress_response;
+	io.comp_stat   = &qtr->ns->query_comp_stat;
 	io.bb_r        = qtr->bb_r;
 	qtr->bb_r      = NULL;
 
@@ -3075,8 +3078,12 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	query_setup_fd(qtr, tr);
 
 	if (qtr->job_type == QUERY_TYPE_LOOKUP) {
+		qtr->compress_response = as_transaction_compress_response(tr);
 		qtr->predexp_eval = predexp_eval;
 		qtr->no_bin_data = (m->info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
+	}
+	else if (qtr->job_type == QUERY_TYPE_AGGR) {
+		qtr->compress_response = as_transaction_compress_response(tr);
 	}
 	else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
 		qtr->iudf_orig.predexp = predexp_eval;

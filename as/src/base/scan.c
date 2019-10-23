@@ -133,7 +133,7 @@ void convert_old_priority(int old_priority, uint32_t* rps);
 bool validate_background_scan_rps(const as_namespace* ns, uint32_t* rps);
 bool get_scan_socket_timeout(as_transaction* tr, uint32_t* timeout);
 bool get_scan_predexp(as_transaction* tr, predexp_eval_t** p_predexp);
-size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size, int32_t timeout);
+size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size, int32_t timeout, bool compress, as_proto_comp_stat* comp_stat);
 static inline bool excluded_set(as_index* r, uint16_t set_id);
 
 
@@ -405,24 +405,23 @@ get_scan_predexp(as_transaction* tr, predexp_eval_t** p_predexp)
 
 size_t
 send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size,
-		int32_t timeout)
+		int32_t timeout, bool compress, as_proto_comp_stat* comp_stat)
 {
 	cf_socket* sock = &fd_h->sock;
-	as_proto proto;
+	as_proto* proto = (as_proto*)buf;
 
-	proto.version = PROTO_VERSION;
-	proto.type = PROTO_TYPE_AS_MSG;
-	proto.sz = size;
-	as_proto_swap(&proto);
+	proto->version = PROTO_VERSION;
+	proto->type = PROTO_TYPE_AS_MSG;
+	proto->sz = size - sizeof(as_proto);
+	as_proto_swap(proto);
 
-	if (cf_socket_send_all(sock, (uint8_t*)&proto, sizeof(as_proto),
-			MSG_NOSIGNAL | MSG_MORE, timeout) < 0) {
-		cf_warning(AS_SCAN, "error sending to %s - fd %d %s", fd_h->client,
-				CSFD(sock), cf_strerror(errno));
-		return 0;
+	const uint8_t* msgp = (const uint8_t*)buf;
+
+	if (compress) {
+		msgp = as_proto_compress(msgp, &size, comp_stat);
 	}
 
-	if (cf_socket_send_all(sock, buf, size, MSG_NOSIGNAL, timeout) < 0) {
+	if (cf_socket_send_all(sock, msgp, size, MSG_NOSIGNAL, timeout) < 0) {
 		cf_warning(AS_SCAN, "error sending to %s - fd %d sz %lu %s",
 				fd_h->client, CSFD(sock), size, cf_strerror(errno));
 		return 0;
@@ -466,10 +465,11 @@ typedef struct conn_scan_job_s {
 	as_file_handle*	fd_h;
 	int32_t			fd_timeout;
 
+	bool			compress_response;
 	uint64_t		net_io_bytes;
 } conn_scan_job;
 
-void conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h, uint32_t timeout);
+void conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h, uint32_t timeout, bool compress);
 void conn_scan_job_disown_fd(conn_scan_job* job);
 void conn_scan_job_finish(conn_scan_job* job);
 bool conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size);
@@ -481,13 +481,15 @@ void conn_scan_job_info(conn_scan_job* job, as_mon_jobstat* stat);
 //
 
 void
-conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h, uint32_t timeout)
+conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h, uint32_t timeout,
+		bool compress)
 {
 	cf_mutex_init(&job->fd_lock);
 
 	job->fd_h = fd_h;
 	job->fd_timeout = timeout == 0 ? -1 : (int32_t)timeout;
 
+	job->compress_response = compress;
 	job->net_io_bytes = 0;
 }
 
@@ -530,7 +532,7 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 	}
 
 	size_t size_sent = send_blocking_response_chunk(job->fd_h, buf, size,
-			job->fd_timeout);
+			job->fd_timeout, job->compress_response, &_job->ns->scan_comp_stat);
 
 	if (size_sent == 0) {
 		int reason = errno == ETIMEDOUT ?
@@ -659,7 +661,8 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	// Take ownership of socket from transaction.
-	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout);
+	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout,
+			as_transaction_compress_response(tr));
 
 	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} rps %u sample-pct %u%s%s socket-timeout %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
@@ -689,6 +692,9 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 	basic_scan_job* job = (basic_scan_job*)_job;
 	as_index_tree* tree = rsv->tree;
 	cf_buf_builder* bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+
+	cf_buf_builder_reserve(&bb, (int)sizeof(as_proto), NULL);
+
 	uint64_t slice_start = cf_getms();
 	basic_scan_slice slice = { job, &bb };
 
@@ -703,7 +709,7 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 				basic_scan_job_reduce_cb, (void*)&slice);
 	}
 
-	if (bb->used_sz != 0) {
+	if (bb->used_sz > sizeof(as_proto)) {
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 	}
 
@@ -856,6 +862,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		}
 
 		cf_buf_builder_reset(bb);
+		cf_buf_builder_reserve(slice->bb_r, (int)sizeof(as_proto), NULL);
 	}
 }
 
@@ -1009,7 +1016,8 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	// Take ownership of socket from transaction.
-	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout);
+	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout,
+			as_transaction_compress_response(tr));
 
 	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} rps %u socket-timeout %u from %s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
@@ -1041,6 +1049,9 @@ aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 	cf_ll_init(&ll, as_index_keys_ll_destroy_fn, false);
 
 	cf_buf_builder* bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+
+	cf_buf_builder_reserve(&bb, (int)sizeof(as_proto), NULL);
+
 	aggr_scan_slice slice = { job, &ll, &bb, rsv };
 
 	as_index_reduce_live(rsv->tree, aggr_scan_job_reduce_cb, (void*)&slice);
@@ -1080,7 +1091,7 @@ aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 
 	cf_ll_reduce(&ll, true, as_index_keys_ll_reduce_fn, NULL);
 
-	if (bb->used_sz != 0) {
+	if (bb->used_sz > sizeof(as_proto)) {
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 	}
 
@@ -1256,6 +1267,7 @@ aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
 		}
 
 		cf_buf_builder_reset(bb);
+		cf_buf_builder_reserve(slice->bb_r, (int)sizeof(as_proto), NULL);
 	}
 }
 
