@@ -460,7 +460,7 @@ old_fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 		return result;
 	}
 
-	if (! as_storage_record_get_key(rd)) {
+	if (! as_storage_rd_load_key(rd)) {
 		return -AS_ERR_UNKNOWN;
 	}
 

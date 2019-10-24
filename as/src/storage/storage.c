@@ -131,7 +131,7 @@ as_storage_load()
 		void *_t;
 
 		while (cf_queue_pop(&complete_q, &_t, TICKER_INTERVAL) != CF_QUEUE_OK) {
-			as_storage_loading_records_ticker_ssd();
+			as_storage_load_ticker_ssd();
 		}
 	}
 
@@ -334,6 +334,26 @@ as_storage_record_load_bins(as_storage_rd *rd)
 	}
 
 	return 0;
+}
+
+//--------------------------------------
+// as_storage_record_load_key
+//
+
+typedef bool (*as_storage_record_load_key_fn)(as_storage_rd *rd);
+static const as_storage_record_load_key_fn as_storage_record_load_key_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record load key
+	as_storage_record_load_key_ssd
+};
+
+bool
+as_storage_record_load_key(as_storage_rd *rd)
+{
+	if (as_storage_record_load_key_table[rd->ns->storage_type]) {
+		return as_storage_record_load_key_table[rd->ns->storage_type](rd);
+	}
+
+	return false;
 }
 
 //--------------------------------------
@@ -777,7 +797,7 @@ as_storage_record_get_set_name(as_storage_rd *rd)
 }
 
 bool
-as_storage_record_get_key(as_storage_rd *rd)
+as_storage_rd_load_key(as_storage_rd *rd)
 {
 	if (rd->r->key_stored == 0) {
 		return false;
@@ -790,7 +810,7 @@ as_storage_record_get_key(as_storage_rd *rd)
 	}
 
 	if (rd->record_on_device && ! rd->ignore_record_on_device) {
-		return as_storage_record_get_key_ssd(rd);
+		return as_storage_record_load_key(rd);
 	}
 
 	return false;
@@ -801,7 +821,7 @@ as_storage_record_get_pickle(as_storage_rd *rd)
 {
 	if (rd->ns->storage_data_in_memory) {
 		as_storage_record_get_set_name(rd);
-		as_storage_record_get_key(rd);
+		as_storage_rd_load_key(rd);
 		as_storage_rd_load_n_bins(rd);
 		as_storage_rd_load_bins(rd, NULL);
 		as_flat_pickle_record(rd);

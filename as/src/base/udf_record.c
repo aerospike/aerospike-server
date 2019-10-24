@@ -100,7 +100,7 @@ udf_storage_record_open(udf_record *urecord)
 	urecord->starting_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
 	as_storage_record_get_set_name(rd);
-	as_storage_record_get_key(rd);
+	as_storage_rd_load_key(rd);
 
 	urecord->flag   |= UDF_RECORD_FLAG_STORAGE_OPEN;
 

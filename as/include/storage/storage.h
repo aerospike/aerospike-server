@@ -162,6 +162,7 @@ int as_storage_record_close(as_storage_rd *rd);
 // Called within as_storage_rd usage cycle.
 int as_storage_record_load_n_bins(as_storage_rd *rd);
 int as_storage_record_load_bins(as_storage_rd *rd);
+bool as_storage_record_load_key(as_storage_rd *rd);
 bool as_storage_record_size_and_check(as_storage_rd *rd);
 int as_storage_record_write(as_storage_rd *rd);
 
@@ -199,7 +200,7 @@ uint64_t as_storage_record_get_n_bytes_memory(as_storage_rd *rd);
 void as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint64_t start_bytes);
 void as_storage_record_drop_from_mem_stats(as_storage_rd *rd);
 void as_storage_record_get_set_name(as_storage_rd *rd);
-bool as_storage_record_get_key(as_storage_rd *rd);
+bool as_storage_rd_load_key(as_storage_rd *rd);
 bool as_storage_record_get_pickle(as_storage_rd *rd);
 
 // Called only at shutdown to flush all device write-queues.
@@ -225,9 +226,9 @@ int as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct, uint6
 
 void as_storage_cfg_init_ssd(struct as_namespace_s *ns);
 void as_storage_namespace_init_ssd(struct as_namespace_s *ns);
-void as_storage_namespace_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q);
+void as_storage_namespace_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q); // table used directly in as_storage_init()
 void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
-void as_storage_loading_records_ticker_ssd(); // called directly by as_storage_init()
+void as_storage_load_ticker_ssd(void); // called directly by as_storage_init()
 int as_storage_namespace_destroy_ssd(struct as_namespace_s *ns);
 
 int as_storage_record_destroy_ssd(struct as_namespace_s *ns, struct as_index_s *r);
@@ -238,6 +239,7 @@ int as_storage_record_close_ssd(as_storage_rd *rd);
 
 int as_storage_record_load_n_bins_ssd(as_storage_rd *rd);
 int as_storage_record_load_bins_ssd(as_storage_rd *rd);
+bool as_storage_record_load_key_ssd(as_storage_rd *rd);
 bool as_storage_record_size_and_check_ssd(as_storage_rd *rd);
 int as_storage_record_write_ssd(as_storage_rd *rd);
 
@@ -263,6 +265,5 @@ int as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
 uint32_t as_storage_record_size_ssd(const struct as_index_s *r);
 
 // Called by "base class" functions but not via table.
-bool as_storage_record_get_key_ssd(as_storage_rd *rd);
 bool as_storage_record_get_pickle_ssd(as_storage_rd *rd);
 void as_storage_shutdown_ssd(struct as_namespace_s *ns);

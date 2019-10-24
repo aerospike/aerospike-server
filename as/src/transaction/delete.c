@@ -514,7 +514,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 		// Check the key if required.
 		// Note - for data-not-in-memory a key check is expensive!
-		if (check_key && as_storage_record_get_key(&rd) &&
+		if (check_key && as_storage_rd_load_key(&rd) &&
 				! check_msg_key(m, &rd)) {
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);

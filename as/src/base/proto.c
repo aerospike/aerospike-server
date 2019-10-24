@@ -298,7 +298,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	uint32_t key_size = 0;
 
 	if (r->key_stored == 1) {
-		if (! as_storage_record_get_key(rd)) {
+		if (! as_storage_rd_load_key(rd)) {
 			cf_warning(AS_PROTO, "can't get key - skipping record");
 			return -1;
 		}

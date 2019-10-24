@@ -960,7 +960,7 @@ old_emigrate_fill_msg(as_storage_rd *rd, msg *m)
 
 	as_storage_rd_load_bins(rd, stack_bins); // TODO - handle error returned
 
-	as_storage_record_get_key(rd); // TODO - handle error returned
+	as_storage_rd_load_key(rd); // TODO - handle error returned
 
 	const char *set_name = as_index_get_set_name(r, ns);
 	uint32_t key_size = rd->key_size;

@@ -1294,7 +1294,7 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 
 
 bool
-as_storage_record_get_key_ssd(as_storage_rd *rd)
+as_storage_record_load_key_ssd(as_storage_rd *rd)
 {
 	// If record hasn't been read, read it - sets rd->key_size and rd->key.
 	if (! rd->flat && ssd_read_record(rd, false) != 0) {
@@ -3619,12 +3619,12 @@ as_storage_namespace_load_ssd(as_namespace *ns, cf_queue *complete_q)
 
 
 void
-as_storage_loading_records_ticker_ssd()
+as_storage_load_ticker_ssd(void)
 {
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		if (ns->loading_records) {
+		if (ns->loading_records && ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 			char buf[2048];
 			int pos = 0;
 			drv_ssds *ssds = (drv_ssds*)ns->storage_private;

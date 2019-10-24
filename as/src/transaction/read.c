@@ -567,7 +567,7 @@ read_local(as_transaction* tr)
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
 	if (as_transaction_has_key(tr) &&
-			as_storage_record_get_key(&rd) && ! check_msg_key(m, &rd)) {
+			as_storage_rd_load_key(&rd) && ! check_msg_key(m, &rd)) {
 		read_local_done(tr, &r_ref, &rd, AS_ERR_KEY_MISMATCH);
 		return TRANS_DONE_ERROR;
 	}

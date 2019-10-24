@@ -279,7 +279,7 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 		// must_fetch_data is false! Since there's no advantage to using the
 		// loaded block after this if must_fetch_data is false, leave the
 		// subsequent code as-is.
-		if (! as_storage_record_get_key(rd)) {
+		if (! as_storage_rd_load_key(rd)) {
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} can't get stored key ",
 					ns->name);
 			return AS_ERR_UNKNOWN;
