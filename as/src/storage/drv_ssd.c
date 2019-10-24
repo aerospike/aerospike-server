@@ -586,15 +586,9 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 		}
 	}
 
-	// Check if there's enough space in defrag buffer - if not, free and zero
-	// any remaining unused space, enqueue it to be flushed to device, and grab
-	// a new buffer.
+	// Check if there's enough space in defrag buffer - if not, enqueue it to be
+	// flushed to device, and grab a new buffer.
 	if (write_size > ssd->write_block_size - swb->pos) {
-		if (ssd->write_block_size != swb->pos) {
-			// Clean the end of the buffer before pushing to write queue.
-			memset(swb->buf + swb->pos, 0, ssd->write_block_size - swb->pos);
-		}
-
 		// Enqueue the buffer, to be flushed to device.
 		cf_queue_push(ssd->swb_write_q, &swb);
 		cf_atomic64_incr(&ssd->n_defrag_wblock_writes);
@@ -1331,6 +1325,11 @@ as_storage_record_get_pickle_ssd(as_storage_rd *rd)
 void
 ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 {
+	// Clean the end of the buffer before flushing.
+	if (swb->pos < ssd->write_block_size) {
+		memset(&swb->buf[swb->pos], 0, ssd->write_block_size - swb->pos);
+	}
+
 	// Wait for all writers to finish.
 	while (cf_atomic32_get(swb->n_writers) != 0) {
 		;
@@ -1561,15 +1560,9 @@ ssd_buffer_bins(as_storage_rd *rd)
 		swb->use_post_write_q = write_uses_post_write_q(rd);
 	}
 
-	// Check if there's enough space in current buffer - if not, free and zero
-	// any remaining unused space, enqueue it to be flushed to device, and grab
-	// a new buffer.
+	// Check if there's enough space in current buffer - if not, enqueue it to
+	// be flushed to device, and grab a new buffer.
 	if (write_sz > ssd->write_block_size - swb->pos) {
-		if (ssd->write_block_size != swb->pos) {
-			// Clean the end of the buffer before pushing to write queue.
-			memset(&swb->buf[swb->pos], 0, ssd->write_block_size - swb->pos);
-		}
-
 		// Enqueue the buffer, to be flushed to device.
 		cf_queue_push(ssd->swb_write_q, &swb);
 		cur_swb->n_wblocks_written++;
@@ -1998,11 +1991,6 @@ ssd_flush_current_swb(drv_ssd *ssd, uint8_t which, uint64_t *p_prev_n_writes)
 	if (swb && swb->dirty) {
 		swb->dirty = false;
 
-		// Clean the end of the buffer before flushing.
-		if (ssd->write_block_size != swb->pos) {
-			memset(&swb->buf[swb->pos], 0, ssd->write_block_size - swb->pos);
-		}
-
 		// Flush it.
 		ssd_flush_swb(ssd, swb);
 
@@ -2045,11 +2033,6 @@ ssd_flush_defrag_swb(drv_ssd *ssd, uint64_t *p_prev_n_defrag_writes)
 	ssd_write_buf *swb = ssd->defrag_swb;
 
 	if (swb && swb->n_vacated != 0) {
-		// Clean the end of the buffer before flushing.
-		if (ssd->write_block_size != swb->pos) {
-			memset(&swb->buf[swb->pos], 0, ssd->write_block_size - swb->pos);
-		}
-
 		// Flush it.
 		ssd_flush_swb(ssd, swb);
 
@@ -4116,12 +4099,6 @@ as_storage_shutdown_ssd(as_namespace *ns)
 
 			// Flush current swb by pushing it to write-q.
 			if (swb != NULL) {
-				// Clean the end of the buffer before pushing to write-q.
-				if (ssd->write_block_size > swb->pos) {
-					memset(&swb->buf[swb->pos], 0,
-							ssd->write_block_size - swb->pos);
-				}
-
 				cf_queue_push(ssd->swb_write_q, &swb);
 				cur_swb->swb = NULL;
 			}
@@ -4132,12 +4109,6 @@ as_storage_shutdown_ssd(as_namespace *ns)
 
 		// Flush defrag swb by pushing it to write-q.
 		if (ssd->defrag_swb) {
-			// Clean the end of the buffer before pushing to write-q.
-			if (ssd->write_block_size > ssd->defrag_swb->pos) {
-				memset(&ssd->defrag_swb->buf[ssd->defrag_swb->pos], 0,
-						ssd->write_block_size - ssd->defrag_swb->pos);
-			}
-
 			cf_queue_push(ssd->swb_write_q, &ssd->defrag_swb);
 			ssd->defrag_swb = NULL;
 		}
