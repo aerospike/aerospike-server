@@ -3651,14 +3651,6 @@ as_storage_load_ticker_ssd(void)
 }
 
 
-int
-as_storage_namespace_destroy_ssd(as_namespace *ns)
-{
-	// This is not called - for now we don't bother unwinding.
-	return 0;
-}
-
-
 // Note that this is *NOT* the counterpart to as_storage_record_create_ssd()!
 // That would be as_storage_record_close_ssd(). This is what gets called when a
 // record is destroyed, to dereference storage.

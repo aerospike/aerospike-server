@@ -161,26 +161,6 @@ as_storage_start_tomb_raider()
 }
 
 //--------------------------------------
-// as_storage_namespace_destroy
-//
-
-typedef int (*as_storage_namespace_destroy_fn)(as_namespace *ns);
-static const as_storage_namespace_destroy_fn as_storage_namespace_destroy_table[AS_NUM_STORAGE_ENGINES] = {
-	NULL, // memory has no destroy
-	as_storage_namespace_destroy_ssd
-};
-
-int
-as_storage_namespace_destroy(as_namespace *ns)
-{
-	if (as_storage_namespace_destroy_table[ns->storage_type]) {
-		return as_storage_namespace_destroy_table[ns->storage_type](ns);
-	}
-
-	return 0;
-}
-
-//--------------------------------------
 // as_storage_record_destroy
 //
 

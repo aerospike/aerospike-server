@@ -43,12 +43,6 @@ as_storage_namespace_init_memory(as_namespace *ns)
 }
 
 int
-as_storage_namespace_destroy_memory(as_namespace *ns)
-{
-	return 0;
-}
-
-int
 as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes)
 {
 	if (available_pct) {

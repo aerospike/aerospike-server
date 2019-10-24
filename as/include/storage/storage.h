@@ -150,7 +150,6 @@ void as_storage_cfg_init(struct as_namespace_s *ns);
 void as_storage_init();
 void as_storage_load();
 void as_storage_start_tomb_raider();
-int as_storage_namespace_destroy(struct as_namespace_s *ns);
 
 int as_storage_record_destroy(struct as_namespace_s *ns, struct as_index_s *r); // not the counterpart of as_storage_record_create()
 
@@ -212,7 +211,6 @@ void as_storage_shutdown(uint32_t instance);
 
 void as_storage_namespace_init_memory(struct as_namespace_s *ns);
 void as_storage_start_tomb_raider_memory(struct as_namespace_s *ns);
-int as_storage_namespace_destroy_memory(struct as_namespace_s *ns);
 
 int as_storage_record_write_memory(as_storage_rd *rd);
 
@@ -229,7 +227,6 @@ void as_storage_namespace_init_ssd(struct as_namespace_s *ns);
 void as_storage_namespace_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q); // table used directly in as_storage_init()
 void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
 void as_storage_load_ticker_ssd(void); // called directly by as_storage_init()
-int as_storage_namespace_destroy_ssd(struct as_namespace_s *ns);
 
 int as_storage_record_destroy_ssd(struct as_namespace_s *ns, struct as_index_s *r);
 
