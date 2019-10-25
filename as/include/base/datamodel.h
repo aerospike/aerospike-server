@@ -1178,6 +1178,7 @@ struct as_namespace_s {
 	histogram*		udf_repl_write_hist;
 	histogram*		udf_response_hist;
 
+	histogram*		batch_sub_prestart_hist;
 	histogram*		batch_sub_start_hist;
 	histogram*		batch_sub_restart_hist;
 	histogram*		batch_sub_dup_res_hist;

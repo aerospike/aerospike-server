@@ -47,7 +47,6 @@
 #include "epoll_queue.h"
 #include "fault.h"
 #include "hardware.h"
-#include "hist.h"
 #include "socket.h"
 #include "tls.h"
 
@@ -796,11 +795,6 @@ start_transaction(as_file_handle* fd_h)
 		fd_h->is_xdr = true;
 	}
 
-	if (g_config.svc_benchmarks_enabled) {
-		tr.benchmark_time = histogram_insert_data_point(
-				g_stats.svc_demarshal_hist, start_ns);
-	}
-
 	if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
 		as_batch_queue_task(&tr);
 		return;
@@ -930,11 +924,6 @@ start_internal_transaction(thread_ctx* ctx)
 
 	if (tr.msgp == NULL) {
 		return false;
-	}
-
-	if (g_config.svc_benchmarks_enabled &&
-			tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {
-		histogram_insert_data_point(g_stats.svc_queue_hist, tr.benchmark_time);
 	}
 
 	as_tsvc_process_transaction(&tr);

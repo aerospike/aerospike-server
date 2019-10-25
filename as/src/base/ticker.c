@@ -965,11 +965,6 @@ dump_global_histograms()
 		histogram_dump(g_stats.info_hist);
 	}
 
-	if (g_config.svc_benchmarks_enabled) {
-		histogram_dump(g_stats.svc_demarshal_hist);
-		histogram_dump(g_stats.svc_queue_hist);
-	}
-
 	if (g_config.fabric_benchmarks_enabled) {
 		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
 		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
@@ -1047,6 +1042,7 @@ dump_namespace_histograms(as_namespace* ns)
 	}
 
 	if (ns->batch_sub_benchmarks_enabled) {
+		histogram_dump(ns->batch_sub_prestart_hist);
 		histogram_dump(ns->batch_sub_start_hist);
 		histogram_dump(ns->batch_sub_restart_hist);
 		histogram_dump(ns->batch_sub_dup_res_hist);

@@ -930,9 +930,7 @@ as_batch_queue_task(as_transaction* btr)
 	uint32_t tran_row = 0;
 	uint8_t info = *data++;  // allow transaction inline.
 
-	bool allow_inline = (g_config.n_namespaces_inlined != 0 && info);
-	bool check_inline = (allow_inline && g_config.n_namespaces_not_inlined != 0);
-	bool should_inline = (allow_inline && g_config.n_namespaces_not_inlined == 0);
+	as_namespace* ns = NULL; // namespace of current sub-transaction
 
 	// Split batch rows into separate single record read transactions.
 	// The read transactions are located in the same memory block as
@@ -945,7 +943,6 @@ as_batch_queue_task(as_transaction* btr)
 		tr.from.batch_shared = shared; // is set NULL after sub-transaction
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
 		tr.keyd = in->keyd;
-		tr.benchmark_time = btr->benchmark_time; // must reset for each usage
 
 		if (in->repeat) {
 			if (! prev_msgp) {
@@ -993,10 +990,13 @@ as_batch_queue_task(as_transaction* btr)
 			data += sizeof(cl_msg);
 			mf = (as_msg_field*)data;
 			as_msg_swap_field(mf);
-			if (check_inline) {
-				as_namespace* ns = as_namespace_get_bymsgfield(mf);
-				should_inline = ns && ns->storage_data_in_memory;
+
+			// Set "current" namespace.
+			if ((ns = as_namespace_get_bymsgfield(mf)) == NULL) {
+				cf_warning(AS_BATCH, "batch request has unknown namespace");
+				break;
 			}
+
 			mf = as_msg_field_get_next(mf);
 			data = (uint8_t*)mf;
 
@@ -1041,8 +1041,16 @@ as_batch_queue_task(as_transaction* btr)
 			break;
 		}
 
+		if (ns->batch_sub_benchmarks_enabled) {
+			tr.benchmark_time = histogram_insert_data_point(
+					ns->batch_sub_prestart_hist, tr.start_time);
+		}
+		else {
+			tr.benchmark_time = 0;
+		}
+
 		// Submit transaction.
-		if (should_inline) {
+		if (info != 0 && ns->storage_data_in_memory) {
 			as_tsvc_process_transaction(&tr);
 		}
 		else {

@@ -101,7 +101,7 @@ write_type_tag(const as_transaction *tr)
 static inline void
 detail_unique_client_rw(const as_transaction *tr, bool is_write)
 {
-	if (tr->origin == FROM_CLIENT) {
+	if (! as_transaction_is_restart(tr) && tr->origin == FROM_CLIENT) {
 		cf_detail_digest(AS_RW_CLIENT, &tr->keyd, "{%s} client %s %s ",
 				tr->rsv.ns->name, tr->from.proto_fd_h->client,
 				is_write ? write_type_tag(tr) : "read");
@@ -327,10 +327,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 	if (rv == 0) {
 		// <><><><><><>  Reservation Succeeded  <><><><><><>
 
-		if (! as_transaction_is_restart(tr)) {
-			tr->benchmark_time = 0;
-			detail_unique_client_rw(tr, is_write);
-		}
+		detail_unique_client_rw(tr, is_write);
 
 		transaction_status status;
 

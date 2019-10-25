@@ -113,9 +113,6 @@ typedef struct as_stats_s {
 
 	histogram*		info_hist;
 
-	histogram*		svc_demarshal_hist;
-	histogram*		svc_queue_hist;
-
 	histogram*		fabric_send_init_hists[AS_FABRIC_N_CHANNELS];
 	histogram*		fabric_send_fragment_hists[AS_FABRIC_N_CHANNELS];
 	histogram*		fabric_recv_fragment_hists[AS_FABRIC_N_CHANNELS];

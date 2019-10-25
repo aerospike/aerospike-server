@@ -275,7 +275,6 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
 	CASE_SERVICE_CLUSTER_NAME,
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
-	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_ENABLE_HEALTH_CHECK,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FEATURE_KEY_FILE,
@@ -346,6 +345,7 @@ typedef enum {
 	CASE_SERVICE_DEFRAG_QUEUE_LWM,
 	CASE_SERVICE_DEFRAG_QUEUE_PRIORITY,
 	CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE,
+	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_FABRIC_WORKERS,
 	CASE_SERVICE_FB_HEALTH_BAD_PCT,
 	CASE_SERVICE_FB_HEALTH_GOOD_PCT,
@@ -861,7 +861,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
-		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "feature-key-file",				CASE_SERVICE_FEATURE_KEY_FILE },
@@ -929,6 +928,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "defrag-queue-lwm",				CASE_SERVICE_DEFRAG_QUEUE_LWM },
 		{ "defrag-queue-priority",			CASE_SERVICE_DEFRAG_QUEUE_PRIORITY },
 		{ "dump-message-above-size",		CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE },
+		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "fb-health-bad-pct",				CASE_SERVICE_FB_HEALTH_BAD_PCT },
 		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
@@ -2414,9 +2414,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC:
 				c->fabric_benchmarks_enabled = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
-				c->svc_benchmarks_enabled = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_ENABLE_HEALTH_CHECK:
 				c->health_check_enabled = cfg_bool(&line);
 				break;
@@ -2615,6 +2612,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_DEFRAG_QUEUE_LWM:
 			case CASE_SERVICE_DEFRAG_QUEUE_PRIORITY:
 			case CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE:
+			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
 			case CASE_SERVICE_FABRIC_WORKERS:
 			case CASE_SERVICE_FB_HEALTH_BAD_PCT:
 			case CASE_SERVICE_FB_HEALTH_GOOD_PCT:
@@ -4453,6 +4451,8 @@ as_config_post_process(as_config* c, const char* config_file)
 		sprintf(hist_name, "{%s}-udf-response", ns->name);
 		ns->udf_response_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 
+		sprintf(hist_name, "{%s}-batch-sub-prestart", ns->name);
+		ns->batch_sub_prestart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s}-batch-sub-start", ns->name);
 		ns->batch_sub_start_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s}-batch-sub-restart", ns->name);
@@ -5111,8 +5111,6 @@ cfg_create_all_histograms()
 {
 	g_stats.batch_index_hist = histogram_create("batch-index", HIST_MILLISECONDS);
 	g_stats.info_hist = histogram_create("info", HIST_MILLISECONDS);
-	g_stats.svc_demarshal_hist = histogram_create("svc-demarshal", HIST_MILLISECONDS);
-	g_stats.svc_queue_hist = histogram_create("svc-queue", HIST_MILLISECONDS);
 
 	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-send-init", HIST_MILLISECONDS);
 	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-send-fragment", HIST_MILLISECONDS);

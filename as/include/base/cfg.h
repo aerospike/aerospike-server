@@ -97,7 +97,6 @@ typedef struct as_config_s {
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
 	bool			fabric_benchmarks_enabled;
-	bool			svc_benchmarks_enabled;
 	bool			health_check_enabled;
 	bool			info_hist_enabled;
 	const char*		feature_key_file;
