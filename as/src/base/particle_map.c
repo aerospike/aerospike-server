@@ -1253,6 +1253,12 @@ cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 		return;
 	}
 
+	if (! order_index_is_filled(&orig.ordidx)) { // no prior order index
+		order_index_set_sorted(&map.ordidx, &map.offidx, map.contents,
+				map.content_sz, SORT_BY_VALUE);
+		return;
+	}
+
 	uint32_t off = offset_index_get_const(&map.offidx, p->idx);
 
 	msgpack_in mp = {
