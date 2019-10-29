@@ -44,8 +44,9 @@
  * 2 - 4.5.2 - for AER-6035 (AP uniform-balance + quiesce bug).
  * 3 - 4.5.3 - for new pickle format.
  * 4 - 4.7.0 - for AER-6128 (AP uniform-balance empty master selection bug).
+ * 5 - 4.7.0.3 - for AER-6143 (SC quiesce with non-roster nodes bug).
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 4
+#define AS_EXCHANGE_COMPATIBILITY_ID 5
 
 /**
  * Number of quantum intervals in orphan state after which client transactions
