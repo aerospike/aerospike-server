@@ -150,18 +150,20 @@ void as_storage_cfg_init(struct as_namespace_s *ns);
 void as_storage_init();
 void as_storage_load();
 void as_storage_start_tomb_raider();
+void as_storage_shutdown(uint32_t instance);
 
-int as_storage_record_destroy(struct as_namespace_s *ns, struct as_index_s *r); // not the counterpart of as_storage_record_create()
+void as_storage_destroy_record(struct as_namespace_s *ns, struct as_index_s *r); // not the counterpart of as_storage_record_create()
 
 // Start and finish an as_storage_rd usage cycle.
-int as_storage_record_create(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd);
-int as_storage_record_open(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd);
-int as_storage_record_close(as_storage_rd *rd);
+void as_storage_record_create(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd);
+void as_storage_record_open(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd);
+void as_storage_record_close(as_storage_rd *rd);
 
 // Called within as_storage_rd usage cycle.
 int as_storage_record_load_n_bins(as_storage_rd *rd);
 int as_storage_record_load_bins(as_storage_rd *rd);
 bool as_storage_record_load_key(as_storage_rd *rd);
+bool as_storage_record_load_pickle(as_storage_rd *rd);
 bool as_storage_record_size_and_check(as_storage_rd *rd);
 int as_storage_record_write(as_storage_rd *rd);
 
@@ -173,8 +175,8 @@ void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
 // Storage of generic data into device headers.
 void as_storage_load_regime(struct as_namespace_s *ns);
-void as_storage_load_roster_generation(struct as_namespace_s *ns);
 void as_storage_save_regime(struct as_namespace_s *ns);
+void as_storage_load_roster_generation(struct as_namespace_s *ns);
 void as_storage_save_roster_generation(struct as_namespace_s *ns);
 void as_storage_load_pmeta(struct as_namespace_s *ns, struct as_partition_s *p);
 void as_storage_save_pmeta(struct as_namespace_s *ns, const struct as_partition_s *p);
@@ -182,10 +184,11 @@ void as_storage_cache_pmeta(struct as_namespace_s *ns, const struct as_partition
 void as_storage_flush_pmeta(struct as_namespace_s *ns, uint32_t start_pid, uint32_t n_partitions);
 
 // Statistics.
-int as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
+void as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *used_bytes); // available percent is that of worst device
 void as_storage_device_stats(struct as_namespace_s *ns, uint32_t device_ix, storage_device_stats *stats);
-int as_storage_ticker_stats(struct as_namespace_s *ns); // prints SSD histograms to the info ticker
-int as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD histograms
+void as_storage_ticker_stats(struct as_namespace_s *ns); // prints SSD histograms to the info ticker
+void as_storage_dump_wb_summary(const struct as_namespace_s *ns);
+void as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD histograms
 
 // Get record storage metadata.
 uint32_t as_storage_record_size(const struct as_namespace_s *ns, const struct as_index_s *r);
@@ -200,43 +203,42 @@ void as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint64_t start_bytes)
 void as_storage_record_drop_from_mem_stats(as_storage_rd *rd);
 void as_storage_record_get_set_name(as_storage_rd *rd);
 bool as_storage_rd_load_key(as_storage_rd *rd);
-bool as_storage_record_get_pickle(as_storage_rd *rd);
-
-// Called only at shutdown to flush all device write-queues.
-void as_storage_shutdown(uint32_t instance);
+bool as_storage_rd_load_pickle(as_storage_rd *rd);
 
 //------------------------------------------------
 // AS_STORAGE_ENGINE_MEMORY functions.
 //
 
-void as_storage_namespace_init_memory(struct as_namespace_s *ns);
+void as_storage_init_memory(struct as_namespace_s *ns);
 void as_storage_start_tomb_raider_memory(struct as_namespace_s *ns);
 
 int as_storage_record_write_memory(as_storage_rd *rd);
 
 void as_storage_load_pmeta_memory(struct as_namespace_s *ns, struct as_partition_s *p);
 
-int as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
+void as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct, uint64_t *used_bytes);
 
 //------------------------------------------------
 // AS_STORAGE_ENGINE_SSD functions.
 //
 
 void as_storage_cfg_init_ssd(struct as_namespace_s *ns);
-void as_storage_namespace_init_ssd(struct as_namespace_s *ns);
-void as_storage_namespace_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q); // table used directly in as_storage_init()
+void as_storage_init_ssd(struct as_namespace_s *ns);
+void as_storage_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q); // table used directly in as_storage_init()
+void as_storage_load_ticker_ssd(const struct as_namespace_s *ns); // table used directly in as_storage_init()
 void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
-void as_storage_load_ticker_ssd(void); // called directly by as_storage_init()
+void as_storage_shutdown_ssd(struct as_namespace_s *ns);
 
-int as_storage_record_destroy_ssd(struct as_namespace_s *ns, struct as_index_s *r);
+void as_storage_destroy_record_ssd(struct as_namespace_s *ns, struct as_index_s *r);
 
-int as_storage_record_create_ssd(as_storage_rd *rd);
-int as_storage_record_open_ssd(as_storage_rd *rd);
-int as_storage_record_close_ssd(as_storage_rd *rd);
+void as_storage_record_create_ssd(as_storage_rd *rd);
+void as_storage_record_open_ssd(as_storage_rd *rd);
+void as_storage_record_close_ssd(as_storage_rd *rd);
 
 int as_storage_record_load_n_bins_ssd(as_storage_rd *rd);
 int as_storage_record_load_bins_ssd(as_storage_rd *rd);
 bool as_storage_record_load_key_ssd(as_storage_rd *rd);
+bool as_storage_record_load_pickle_ssd(as_storage_rd *rd);
 bool as_storage_record_size_and_check_ssd(as_storage_rd *rd);
 int as_storage_record_write_ssd(as_storage_rd *rd);
 
@@ -246,21 +248,18 @@ bool as_storage_has_space_ssd(struct as_namespace_s *ns);
 void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
 void as_storage_load_regime_ssd(struct as_namespace_s *ns);
-void as_storage_load_roster_generation_ssd(struct as_namespace_s *ns);
 void as_storage_save_regime_ssd(struct as_namespace_s *ns);
+void as_storage_load_roster_generation_ssd(struct as_namespace_s *ns);
 void as_storage_save_roster_generation_ssd(struct as_namespace_s *ns);
 void as_storage_load_pmeta_ssd(struct as_namespace_s *ns, struct as_partition_s *p);
 void as_storage_save_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
 void as_storage_cache_pmeta_ssd(struct as_namespace_s *ns, const struct as_partition_s *p);
 void as_storage_flush_pmeta_ssd(struct as_namespace_s *ns, uint32_t start_pid, uint32_t n_partitions);
 
-int as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
+void as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_bytes);
 void as_storage_device_stats_ssd(struct as_namespace_s *ns, uint32_t device_ix, storage_device_stats *stats);
-int as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
-int as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
+void as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
+void as_storage_dump_wb_summary_ssd(const struct as_namespace_s *ns);
+void as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
 
 uint32_t as_storage_record_size_ssd(const struct as_index_s *r);
-
-// Called by "base class" functions but not via table.
-bool as_storage_record_get_pickle_ssd(as_storage_rd *rd);
-void as_storage_shutdown_ssd(struct as_namespace_s *ns);

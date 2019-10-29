@@ -4494,7 +4494,7 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		// 'nsup' histograms.
 
-		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+		if (ns->storage_type != AS_STORAGE_ENGINE_MEMORY) {
 			sprintf(hist_name, "{%s}-object-size-log2", ns->name);
 			ns->obj_size_log_hist = histogram_create(hist_name, HIST_SIZE);
 			sprintf(hist_name, "{%s}-object-size-linear", ns->name);

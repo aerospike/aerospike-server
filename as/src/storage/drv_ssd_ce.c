@@ -76,16 +76,6 @@ ssd_flush_final_cfg(as_namespace* ns)
 {
 }
 
-bool
-ssd_cold_start_is_valid_n_bins(uint32_t n_bins)
-{
-	// FIXME - what should we do here?
-	cf_assert(n_bins != 0, AS_DRV_SSD,
-			"community edition found tombstone - erase drive and restart");
-
-	return n_bins <= BIN_NAMES_QUOTA;
-}
-
 void
 ssd_cold_start_adjust_cenotaph(as_namespace* ns, bool block_has_bins,
 		uint32_t block_void_time, as_record* r)

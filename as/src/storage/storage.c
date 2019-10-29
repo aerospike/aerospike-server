@@ -71,10 +71,10 @@ as_storage_cfg_init(as_namespace *ns)
 // as_storage_init
 //
 
-typedef void (*as_storage_namespace_init_fn)(as_namespace *ns);
-static const as_storage_namespace_init_fn as_storage_namespace_init_table[AS_NUM_STORAGE_ENGINES] = {
-	as_storage_namespace_init_memory,
-	as_storage_namespace_init_ssd
+typedef void (*as_storage_init_fn)(as_namespace *ns);
+static const as_storage_init_fn as_storage_init_table[AS_NUM_STORAGE_ENGINES] = {
+	as_storage_init_memory,
+	as_storage_init_ssd
 };
 
 void
@@ -82,11 +82,11 @@ as_storage_init()
 {
 	// Includes resuming indexes for warm and cool restarts.
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace *ns = g_config.namespaces[ns_ix];
 
-		if (as_storage_namespace_init_table[ns->storage_type]) {
-			as_storage_namespace_init_table[ns->storage_type](ns);
+		if (as_storage_init_table[ns->storage_type]) {
+			as_storage_init_table[ns->storage_type](ns);
 		}
 	}
 }
@@ -95,10 +95,16 @@ as_storage_init()
 // as_storage_load
 //
 
-typedef void (*as_storage_namespace_load_fn)(as_namespace *ns, cf_queue *complete_q);
-static const as_storage_namespace_load_fn as_storage_namespace_load_table[AS_NUM_STORAGE_ENGINES] = {
+typedef void (*as_storage_load_fn)(as_namespace *ns, cf_queue *complete_q);
+static const as_storage_load_fn as_storage_load_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no load phase
-	as_storage_namespace_load_ssd
+	as_storage_load_ssd
+};
+
+typedef void (*as_storage_load_ticker_fn)(const as_namespace *ns);
+static const as_storage_load_ticker_fn as_storage_load_ticker_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no load phase - unreachable (ns->loading_records)
+	as_storage_load_ticker_ssd
 };
 
 #define TICKER_INTERVAL (5 * 1000) // 5 seconds
@@ -112,11 +118,11 @@ as_storage_load()
 
 	cf_queue_init(&complete_q, sizeof(void*), g_config.n_namespaces, true);
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace *ns = g_config.namespaces[ns_ix];
 
-		if (as_storage_namespace_load_table[ns->storage_type]) {
-			as_storage_namespace_load_table[ns->storage_type](ns, &complete_q);
+		if (as_storage_load_table[ns->storage_type]) {
+			as_storage_load_table[ns->storage_type](ns, &complete_q);
 		}
 		else {
 			void *_t = NULL;
@@ -127,11 +133,17 @@ as_storage_load()
 
 	// Wait for completion - cold starts or cool restarts may take a while.
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t n_done = 0; n_done < g_config.n_namespaces; n_done++) {
 		void *_t;
 
 		while (cf_queue_pop(&complete_q, &_t, TICKER_INTERVAL) != CF_QUEUE_OK) {
-			as_storage_load_ticker_ssd();
+			for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+				as_namespace *ns = g_config.namespaces[ns_ix];
+
+				if (ns->loading_records) {
+					as_storage_load_ticker_table[ns->storage_type](ns);
+				}
+			}
 		}
 	}
 
@@ -151,8 +163,8 @@ static const as_storage_start_tomb_raider_fn as_storage_start_tomb_raider_table[
 void
 as_storage_start_tomb_raider()
 {
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace *ns = g_config.namespaces[ns_ix];
 
 		if (as_storage_start_tomb_raider_table[ns->storage_type]) {
 			as_storage_start_tomb_raider_table[ns->storage_type](ns);
@@ -161,36 +173,74 @@ as_storage_start_tomb_raider()
 }
 
 //--------------------------------------
-// as_storage_record_destroy
+// as_storage_shutdown
 //
 
-typedef int (*as_storage_record_destroy_fn)(as_namespace *ns, as_record *r);
-static const as_storage_record_destroy_fn as_storage_record_destroy_table[AS_NUM_STORAGE_ENGINES] = {
-	NULL, // memory has no record destroy
-	as_storage_record_destroy_ssd
+typedef void (*as_storage_shutdown_fn)(as_namespace *ns);
+static const as_storage_shutdown_fn as_storage_shutdown_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no shutdown phase - unreachable
+	as_storage_shutdown_ssd
 };
 
-int
-as_storage_record_destroy(as_namespace *ns, as_record *r)
+void
+as_storage_shutdown(uint32_t instance)
 {
-	if (as_storage_record_destroy_table[ns->storage_type]) {
-		return as_storage_record_destroy_table[ns->storage_type](ns, r);
-	}
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace *ns = g_config.namespaces[ns_ix];
 
-	return 0;
+		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+			cf_info(AS_STORAGE, "{%s} storage-engine memory - nothing to do",
+					ns->name);
+			continue;
+		}
+
+		// Lock all record locks - stops everything writing to current wblocks
+		// such that each write's record lock scope is either completed or
+		// never entered.
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition_shutdown(ns, pid);
+		}
+
+		cf_info(AS_STORAGE, "{%s} partitions shut down", ns->name);
+
+		// Now flush everything outstanding to storage devices.
+		as_storage_shutdown_table[ns->storage_type](ns);
+
+		cf_info(AS_STORAGE, "{%s} storage flushed", ns->name);
+
+		as_namespace_xmem_shutdown(ns, instance);
+	}
+}
+
+//--------------------------------------
+// as_storage_destroy_record
+//
+
+typedef void (*as_storage_destroy_record_fn)(as_namespace *ns, as_record *r);
+static const as_storage_destroy_record_fn as_storage_destroy_record_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no destroy record
+	as_storage_destroy_record_ssd
+};
+
+void
+as_storage_destroy_record(as_namespace *ns, as_record *r)
+{
+	if (as_storage_destroy_record_table[ns->storage_type]) {
+		as_storage_destroy_record_table[ns->storage_type](ns, r);
+	}
 }
 
 //--------------------------------------
 // as_storage_record_create
 //
 
-typedef int (*as_storage_record_create_fn)(as_storage_rd *rd);
+typedef void (*as_storage_record_create_fn)(as_storage_rd *rd);
 static const as_storage_record_create_fn as_storage_record_create_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record create
 	as_storage_record_create_ssd
 };
 
-int
+void
 as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->r = r;
@@ -212,23 +262,21 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->pickle = NULL;
 
 	if (as_storage_record_create_table[ns->storage_type]) {
-		return as_storage_record_create_table[ns->storage_type](rd);
+		as_storage_record_create_table[ns->storage_type](rd);
 	}
-
-	return 0;
 }
 
 //--------------------------------------
 // as_storage_record_open
 //
 
-typedef int (*as_storage_record_open_fn)(as_storage_rd *rd);
+typedef void (*as_storage_record_open_fn)(as_storage_rd *rd);
 static const as_storage_record_open_fn as_storage_record_open_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record open
 	as_storage_record_open_ssd
 };
 
-int
+void
 as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->r = r;
@@ -250,30 +298,26 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->pickle = NULL;
 
 	if (as_storage_record_open_table[ns->storage_type]) {
-		return as_storage_record_open_table[ns->storage_type](rd);
+		as_storage_record_open_table[ns->storage_type](rd);
 	}
-
-	return 0;
 }
 
 //--------------------------------------
 // as_storage_record_close
 //
 
-typedef int (*as_storage_record_close_fn)(as_storage_rd *rd);
+typedef void (*as_storage_record_close_fn)(as_storage_rd *rd);
 static const as_storage_record_close_fn as_storage_record_close_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record close
 	as_storage_record_close_ssd
 };
 
-int
+void
 as_storage_record_close(as_storage_rd *rd)
 {
 	if (as_storage_record_close_table[rd->ns->storage_type]) {
-		return as_storage_record_close_table[rd->ns->storage_type](rd);
+		as_storage_record_close_table[rd->ns->storage_type](rd);
 	}
-
-	return 0;
 }
 
 //--------------------------------------
@@ -337,6 +381,26 @@ as_storage_record_load_key(as_storage_rd *rd)
 }
 
 //--------------------------------------
+// as_storage_record_load_pickle
+//
+
+typedef bool (*as_storage_record_load_pickle_fn)(as_storage_rd *rd);
+static const as_storage_record_load_pickle_fn as_storage_record_load_pickle_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record load pickle
+	as_storage_record_load_pickle_ssd
+};
+
+bool
+as_storage_record_load_pickle(as_storage_rd *rd)
+{
+	if (as_storage_record_load_pickle_table[rd->ns->storage_type]) {
+		return as_storage_record_load_pickle_table[rd->ns->storage_type](rd);
+	}
+
+	return false;
+}
+
+//--------------------------------------
 // as_storage_record_size_and_check
 //
 
@@ -389,8 +453,8 @@ static const as_storage_wait_for_defrag_fn as_storage_wait_for_defrag_table[AS_N
 void
 as_storage_wait_for_defrag()
 {
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace *ns = g_config.namespaces[ns_ix];
 
 		if (as_storage_wait_for_defrag_table[ns->storage_type]) {
 			as_storage_wait_for_defrag_table[ns->storage_type](ns);
@@ -604,20 +668,18 @@ as_storage_flush_pmeta(as_namespace *ns, uint32_t start_pid, uint32_t n_partitio
 // as_storage_stats
 //
 
-typedef int (*as_storage_stats_fn)(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);
+typedef void (*as_storage_stats_fn)(as_namespace *ns, int *available_pct, uint64_t *used_bytes);
 static const as_storage_stats_fn as_storage_stats_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_stats_memory,
 	as_storage_stats_ssd
 };
 
-int
-as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes)
+void
+as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *used_bytes)
 {
 	if (as_storage_stats_table[ns->storage_type]) {
-		return as_storage_stats_table[ns->storage_type](ns, available_pct, used_disk_bytes);
+		as_storage_stats_table[ns->storage_type](ns, available_pct, used_bytes);
 	}
-
-	return 0;
 }
 
 //--------------------------------------
@@ -645,40 +707,54 @@ as_storage_device_stats(as_namespace *ns, uint32_t device_ix, storage_device_sta
 // as_storage_ticker_stats
 //
 
-typedef int (*as_storage_ticker_stats_fn)(as_namespace *ns);
+typedef void (*as_storage_ticker_stats_fn)(as_namespace *ns);
 static const as_storage_ticker_stats_fn as_storage_ticker_stats_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support per-disk histograms... for now.
 	as_storage_ticker_stats_ssd
 };
 
-int
+void
 as_storage_ticker_stats(as_namespace *ns)
 {
 	if (as_storage_ticker_stats_table[ns->storage_type]) {
-		return as_storage_ticker_stats_table[ns->storage_type](ns);
+		as_storage_ticker_stats_table[ns->storage_type](ns);
 	}
+}
 
-	return 0;
+//--------------------------------------
+// as_storage_dump_wb_summary
+//
+
+typedef void (*as_storage_dump_wb_summary_fn)(const as_namespace *ns);
+static const as_storage_dump_wb_summary_fn as_storage_dump_wb_summary_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL,
+	as_storage_dump_wb_summary_ssd
+};
+
+void
+as_storage_dump_wb_summary(const as_namespace *ns)
+{
+	if (as_storage_dump_wb_summary_table[ns->storage_type]) {
+		as_storage_dump_wb_summary_table[ns->storage_type](ns);
+	}
 }
 
 //--------------------------------------
 // as_storage_histogram_clear_all
 //
 
-typedef int (*as_storage_histogram_clear_fn)(as_namespace *ns);
+typedef void (*as_storage_histogram_clear_fn)(as_namespace *ns);
 static const as_storage_histogram_clear_fn as_storage_histogram_clear_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support per-disk histograms... for now.
 	as_storage_histogram_clear_ssd
 };
 
-int
+void
 as_storage_histogram_clear_all(as_namespace *ns)
 {
 	if (as_storage_histogram_clear_table[ns->storage_type]) {
-		return as_storage_histogram_clear_table[ns->storage_type](ns);
+		as_storage_histogram_clear_table[ns->storage_type](ns);
 	}
-
-	return 0;
 }
 
 //--------------------------------------
@@ -797,7 +873,7 @@ as_storage_rd_load_key(as_storage_rd *rd)
 }
 
 bool
-as_storage_record_get_pickle(as_storage_rd *rd)
+as_storage_rd_load_pickle(as_storage_rd *rd)
 {
 	if (rd->ns->storage_data_in_memory) {
 		as_storage_record_get_set_name(rd);
@@ -808,35 +884,5 @@ as_storage_record_get_pickle(as_storage_rd *rd)
 		return true;
 	}
 
-	return as_storage_record_get_pickle_ssd(rd);
-}
-
-void
-as_storage_shutdown(uint32_t instance)
-{
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-
-		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-			// Lock all record locks - stops everything writing to current swbs
-			// such that each write's record lock scope is either completed or
-			// never entered.
-			for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-				as_partition_shutdown(ns, pid);
-			}
-
-			cf_info(AS_STORAGE, "{%s} partitions shut down", ns->name);
-
-			// Now flush everything outstanding to storage devices.
-			as_storage_shutdown_ssd(ns);
-
-			cf_info(AS_STORAGE, "{%s} storage devices flushed", ns->name);
-
-			as_namespace_xmem_shutdown(ns, instance);
-		}
-		else {
-			cf_info(AS_STORAGE, "{%s} storage-engine memory - nothing to do",
-					ns->name);
-		}
-	}
+	return as_storage_record_load_pickle(rd);
 }

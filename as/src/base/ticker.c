@@ -535,18 +535,18 @@ log_line_persistent_index_usage(as_namespace* ns, size_t used_size)
 void
 log_line_device_usage(as_namespace* ns)
 {
-	if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
+	if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
 		return;
 	}
 
 	int available_pct;
-	uint64_t inuse_disk_bytes;
-	as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
+	uint64_t used_bytes;
+	as_storage_stats(ns, &available_pct, &used_bytes);
 
 	if (ns->storage_data_in_memory) {
 		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d",
 				ns->name,
-				inuse_disk_bytes,
+				used_bytes,
 				available_pct
 				);
 	}
@@ -563,7 +563,7 @@ log_line_device_usage(as_namespace* ns)
 
 		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d cache-read-pct %.2f",
 				ns->name,
-				inuse_disk_bytes,
+				used_bytes,
 				available_pct,
 				ns->cache_read_pct
 				);

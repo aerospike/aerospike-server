@@ -37,21 +37,19 @@
 //
 
 void
-as_storage_namespace_init_memory(as_namespace *ns)
+as_storage_init_memory(as_namespace *ns)
 {
 	as_truncate_done_startup(ns);
 }
 
-int
-as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes)
+void
+as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_t *used_bytes)
 {
 	if (available_pct) {
 		*available_pct = 100;
 	}
 
-	if (used_disk_bytes) {
-		*used_disk_bytes = 0;
+	if (used_bytes) {
+		*used_bytes = 0;
 	}
-
-	return 0;
 }

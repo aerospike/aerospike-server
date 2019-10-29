@@ -1301,7 +1301,7 @@ as_storage_record_load_key_ssd(as_storage_rd *rd)
 
 
 bool
-as_storage_record_get_pickle_ssd(as_storage_rd *rd)
+as_storage_record_load_pickle_ssd(as_storage_rd *rd)
 {
 	if (ssd_read_record(rd, true) != 0) {
 		return false;
@@ -1692,80 +1692,8 @@ ssd_write(as_storage_rd *rd)
 //
 
 void
-as_storage_show_wblock_stats(as_namespace *ns)
+as_storage_dump_wb_summary_ssd(const as_namespace *ns)
 {
-	if (AS_STORAGE_ENGINE_SSD != ns->storage_type) {
-		cf_info(AS_DRV_SSD, "Storage engine type must be SSD (%d), not %d.",
-				AS_STORAGE_ENGINE_SSD, ns->storage_type);
-		return;
-	}
-
-	if (ns->storage_private) {
-		drv_ssds *ssds = ns->storage_private;
-
-		for (int d = 0; d < ssds->n_ssds; d++) {
-			int num_free_blocks = 0;
-			int num_full_blocks = 0;
-			int num_full_swb = 0;
-			int num_above_wm = 0;
-			int num_defraggable = 0;
-
-			drv_ssd *ssd = &ssds->ssds[d];
-			uint32_t lwm_size = ns->defrag_lwm_size;
-
-			for (uint32_t i = 0; i < ssd->n_wblocks; i++) {
-				ssd_wblock_state *wblock_state = &ssd->wblock_state[i];
-				uint32_t inuse_sz = cf_atomic32_get(wblock_state->inuse_sz);
-
-				if (inuse_sz == 0) {
-					num_free_blocks++;
-				}
-				else if (inuse_sz == ssd->write_block_size) {
-					if (wblock_state->swb != NULL) {
-						num_full_swb++;
-					}
-					else {
-						num_full_blocks++;
-					}
-				}
-				else {
-					if (inuse_sz > ssd->write_block_size || inuse_sz < lwm_size) {
-						cf_info(AS_DRV_SSD, "dev %d, wblock %u, inuse_sz %u, %s swb",
-								d, i, inuse_sz, wblock_state->swb ? "has" : "no");
-
-						num_defraggable++;
-					}
-					else {
-						num_above_wm++;
-					}
-				}
-			}
-
-			cf_info(AS_DRV_SSD, "device %s free %d full %d fullswb %d pfull %d defrag %d freeq %d",
-				ssd->name, num_free_blocks, num_full_blocks, num_full_swb,
-				num_above_wm, num_defraggable, cf_queue_sz(ssd->free_wblock_q));
-		}
-	}
-	else {
-		cf_info(AS_DRV_SSD, "no devices");
-	}
-}
-
-
-void
-as_storage_summarize_wblock_stats(as_namespace *ns)
-{
-	if (AS_STORAGE_ENGINE_SSD != ns->storage_type) {
-		cf_info(AS_DRV_SSD, "Storage engine type must be SSD (%d), not %d.",
-				AS_STORAGE_ENGINE_SSD, ns->storage_type);
-		return;
-	}
-
-	if (! ns->storage_private) {
-		cf_info(AS_DRV_SSD, "no devices");
-		return;
-	}
-
 	drv_ssds *ssds = ns->storage_private;
 	uint32_t total_num_defraggable = 0;
 	uint32_t total_num_above_wm = 0;
@@ -3465,7 +3393,7 @@ ssd_set_trusted(drv_ssds *ssds)
 //
 
 void
-as_storage_namespace_init_ssd(as_namespace *ns)
+as_storage_init_ssd(as_namespace *ns)
 {
 	drv_ssds *ssds;
 
@@ -3575,7 +3503,7 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 
 
 void
-as_storage_namespace_load_ssd(as_namespace *ns, cf_queue *complete_q)
+as_storage_load_ssd(as_namespace *ns, cf_queue *complete_q)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 
@@ -3602,34 +3530,28 @@ as_storage_namespace_load_ssd(as_namespace *ns, cf_queue *complete_q)
 
 
 void
-as_storage_load_ticker_ssd(void)
+as_storage_load_ticker_ssd(const as_namespace *ns)
 {
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
+	char buf[2048];
+	int pos = 0;
+	const drv_ssds *ssds = (const drv_ssds*)ns->storage_private;
 
-		if (ns->loading_records && ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-			char buf[2048];
-			int pos = 0;
-			drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+	for (int i = 0; i < ssds->n_ssds; i++) {
+		const drv_ssd *ssd = &ssds->ssds[i];
+		uint32_t pct = (uint32_t)((ssd->sweep_wblock_id * 100UL) /
+				(ssd->file_size / ssd->write_block_size));
 
-			for (int j = 0; j < ssds->n_ssds; j++) {
-				drv_ssd *ssd = &ssds->ssds[j];
-				uint32_t pct = (uint32_t)((ssd->sweep_wblock_id * 100UL) /
-						(ssd->file_size / ssd->write_block_size));
+		pos += sprintf(buf + pos, ", %s %u%%", ssd->name, pct);
+	}
 
-				pos += sprintf(buf + pos, ", %s %u%%", ssd->name, pct);
-			}
-
-			// TODO - conform with new log standard?
-			if (ns->n_tombstones == 0) {
-				cf_info(AS_DRV_SSD, "{%s} loaded %lu objects%s", ns->name,
-						ns->n_objects, buf);
-			}
-			else {
-				cf_info(AS_DRV_SSD, "{%s} loaded %lu objects, %lu tombstones%s",
-						ns->name, ns->n_objects, ns->n_tombstones, buf);
-			}
-		}
+	// TODO - conform with new log standard?
+	if (ns->n_tombstones == 0) {
+		cf_info(AS_DRV_SSD, "{%s} loaded %lu objects%s", ns->name,
+				ns->n_objects, buf);
+	}
+	else {
+		cf_info(AS_DRV_SSD, "{%s} loaded %lu objects, %lu tombstones%s",
+				ns->name, ns->n_objects, ns->n_tombstones, buf);
 	}
 }
 
@@ -3637,8 +3559,8 @@ as_storage_load_ticker_ssd(void)
 // Note that this is *NOT* the counterpart to as_storage_record_create_ssd()!
 // That would be as_storage_record_close_ssd(). This is what gets called when a
 // record is destroyed, to dereference storage.
-int
-as_storage_record_destroy_ssd(as_namespace *ns, as_record *r)
+void
+as_storage_destroy_record_ssd(as_namespace *ns, as_record *r)
 {
 	if (STORAGE_RBLOCK_IS_VALID(r->rblock_id) && r->n_rblocks != 0) {
 		drv_ssds *ssds = (drv_ssds*)ns->storage_private;
@@ -3649,8 +3571,6 @@ as_storage_record_destroy_ssd(as_namespace *ns, as_record *r)
 		r->rblock_id = 0;
 		r->n_rblocks = 0;
 	}
-
-	return 0;
 }
 
 
@@ -3658,7 +3578,7 @@ as_storage_record_destroy_ssd(as_namespace *ns, as_record *r)
 // Storage API implementation: as_storage_rd cycle.
 //
 
-int
+void
 as_storage_record_create_ssd(as_storage_rd *rd)
 {
 	rd->flat = NULL;
@@ -3669,12 +3589,10 @@ as_storage_record_create_ssd(as_storage_rd *rd)
 	rd->ssd = NULL;
 
 	cf_assert(rd->r->rblock_id == 0, AS_DRV_SSD, "unexpected - uninitialized rblock-id");
-
-	return 0;
 }
 
 
-int
+void
 as_storage_record_open_ssd(as_storage_rd *rd)
 {
 	drv_ssds *ssds = (drv_ssds*)rd->ns->storage_private;
@@ -3685,12 +3603,10 @@ as_storage_record_open_ssd(as_storage_rd *rd)
 	rd->flat_n_bins = 0;
 	rd->read_buf = NULL;
 	rd->ssd = &ssds->ssds[rd->r->file_id];
-
-	return 0;
 }
 
 
-int
+void
 as_storage_record_close_ssd(as_storage_rd *rd)
 {
 	if (rd->read_buf) {
@@ -3703,8 +3619,6 @@ as_storage_record_close_ssd(as_storage_rd *rd)
 	rd->flat_bins = NULL;
 	rd->flat_n_bins = 0;
 	rd->ssd = NULL;
-
-	return 0;
 }
 
 
@@ -3733,10 +3647,7 @@ as_storage_wait_for_defrag_ssd(as_namespace *ns)
 		while (true) {
 			int avail_pct;
 
-			if (0 != as_storage_stats_ssd(ns, &avail_pct, 0)) {
-				cf_crash(AS_DRV_SSD, "namespace %s storage stats failed",
-						ns->name);
-			}
+			as_storage_stats_ssd(ns, &avail_pct, NULL);
 
 			if (avail_pct >= ns->storage_defrag_startup_minimum) {
 				break;
@@ -3957,9 +3868,8 @@ as_storage_flush_pmeta_ssd(as_namespace *ns, uint32_t start_pid,
 // Storage API implementation: statistics.
 //
 
-int
-as_storage_stats_ssd(as_namespace *ns, int *available_pct,
-		uint64_t *used_disk_bytes)
+void
+as_storage_stats_ssd(as_namespace *ns, int *available_pct, uint64_t *used_bytes)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 
@@ -3981,17 +3891,15 @@ as_storage_stats_ssd(as_namespace *ns, int *available_pct,
 		ns->storage_last_avail_pct = *available_pct;
 	}
 
-	if (used_disk_bytes) {
+	if (used_bytes) {
 		uint64_t sz = 0;
 
 		for (int i = 0; i < ssds->n_ssds; i++) {
 			sz += ssds->ssds[i].inuse_size;
 		}
 
-		*used_disk_bytes = sz;
+		*used_bytes = sz;
 	}
-
-	return 0;
 }
 
 
@@ -4021,7 +3929,7 @@ as_storage_device_stats_ssd(struct as_namespace_s *ns, uint32_t device_ix,
 }
 
 
-int
+void
 as_storage_ticker_stats_ssd(as_namespace *ns)
 {
 	histogram_dump(ns->device_read_size_hist);
@@ -4040,12 +3948,10 @@ as_storage_ticker_stats_ssd(as_namespace *ns)
 			histogram_dump(ssd->hist_shadow_write);
 		}
 	}
-
-	return 0;
 }
 
 
-int
+void
 as_storage_histogram_clear_ssd(as_namespace *ns)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
@@ -4061,8 +3967,6 @@ as_storage_histogram_clear_ssd(as_namespace *ns)
 			histogram_clear(ssd->hist_shadow_write);
 		}
 	}
-
-	return 0;
 }
 
 

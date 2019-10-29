@@ -649,19 +649,19 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 			linear_hist_get_info(ns->ttl_hist, db);
 		}
 		else if (strcmp(hist_name, "object-size") == 0) {
-			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-				histogram_get_info(ns->obj_size_log_hist, db);
+			if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+				cf_dyn_buf_append_string(db, "hist-not-applicable");
 			}
 			else {
-				cf_dyn_buf_append_string(db, "hist-not-applicable");
+				histogram_get_info(ns->obj_size_log_hist, db);
 			}
 		}
 		else if (strcmp(hist_name, "object-size-linear") == 0) {
-			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-				linear_hist_get_info(ns->obj_size_lin_hist, db);
+			if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+				cf_dyn_buf_append_string(db, "hist-not-applicable");
 			}
 			else {
-				cf_dyn_buf_append_string(db, "hist-not-applicable");
+				linear_hist_get_info(ns->obj_size_lin_hist, db);
 			}
 		}
 		else {
@@ -687,7 +687,10 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 		}
 	}
 	else if (strcmp(hist_name, "object-size") == 0) {
-		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+			cf_dyn_buf_append_string(db, "hist-not-applicable");
+		}
+		else {
 			if (ns->set_obj_size_log_hists[set_id]) {
 				histogram_get_info(ns->set_obj_size_log_hists[set_id], db);
 			}
@@ -695,21 +698,18 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 				cf_dyn_buf_append_string(db, "hist-unavailable");
 			}
 		}
-		else {
-			cf_dyn_buf_append_string(db, "hist-not-applicable");
-		}
 	}
 	else if (strcmp(hist_name, "object-size-linear") == 0) {
-		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+			cf_dyn_buf_append_string(db, "hist-not-applicable");
+		}
+		else {
 			if (ns->set_obj_size_lin_hists[set_id]) {
 				linear_hist_get_info(ns->set_obj_size_lin_hists[set_id], db);
 			}
 			else {
 				cf_dyn_buf_append_string(db, "hist-unavailable");
 			}
-		}
-		else {
-			cf_dyn_buf_append_string(db, "hist-not-applicable");
 		}
 	}
 	else {

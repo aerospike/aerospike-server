@@ -938,7 +938,7 @@ emigrate_fill_msg(as_storage_rd *rd, msg *m)
 {
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT);
 
-	as_storage_record_get_pickle(rd); // FIXME - handle error returned
+	as_storage_rd_load_pickle(rd); // FIXME - handle error returned
 
 	msg_set_buf(m, MIG_FIELD_RECORD, rd->pickle, rd->pickle_sz,
 			MSG_SET_HANDOFF_MALLOC);

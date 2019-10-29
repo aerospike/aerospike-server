@@ -111,8 +111,6 @@ int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_statistics(char *name, char *subtree, cf_dyn_buf *db);
-void as_storage_show_wblock_stats(as_namespace *ns);
-void as_storage_summarize_wblock_stats(as_namespace *ns);
 
 
 as_stats g_stats = { 0 }; // separate .c file not worth it
@@ -1021,31 +1019,6 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 }
 
 int
-info_command_show_devices(char *name, char *params, cf_dyn_buf *db)
-{
-	char ns_str[512];
-	int  ns_len = sizeof(ns_str);
-
-	if (0 != as_info_parameter_get(params, "namespace", ns_str, &ns_len)) {
-		cf_info(AS_INFO, "show-devices requires namespace parameter");
-		cf_dyn_buf_append_string(db, "error");
-		return(0);
-	}
-
-	as_namespace *ns = as_namespace_get_byname(ns_str);
-	if (!ns) {
-		cf_info(AS_INFO, "show-devices: namespace %s not found", ns_str);
-		cf_dyn_buf_append_string(db, "error");
-		return(0);
-	}
-	as_storage_show_wblock_stats(ns);
-
-	cf_dyn_buf_append_string(db, "ok");
-
-	return(0);
-}
-
-int
 info_command_dump_cluster(char *name, char *params, cf_dyn_buf *db)
 {
 	bool verbose = false;
@@ -1253,7 +1226,7 @@ info_command_dump_wb_summary(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	as_storage_summarize_wblock_stats(ns);
+	as_storage_dump_wb_summary(ns);
 
 	cf_dyn_buf_append_string(db, "ok");
 
@@ -5291,14 +5264,14 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		int available_pct = 0;
-		uint64_t inuse_disk_bytes = 0;
-		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
+		uint64_t used_bytes = 0;
+		as_storage_stats(ns, &available_pct, &used_bytes);
 
 		info_append_uint64(db, "device_total_bytes", ns->ssd_size);
-		info_append_uint64(db, "device_used_bytes", inuse_disk_bytes);
+		info_append_uint64(db, "device_used_bytes", used_bytes);
 
-		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
-				((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size : 0;
+		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > used_bytes)) ?
+				((ns->ssd_size - used_bytes) * 100L) / ns->ssd_size : 0;
 
 		info_append_uint64(db, "device_free_pct", free_pct);
 		info_append_int(db, "device_available_pct", available_pct);
@@ -6618,7 +6591,6 @@ as_info_init()
 	as_info_set_command("roster-set", info_command_roster_set, PERM_SERVICE_CTRL);            // Set the entire roster.
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
-	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
 	as_info_set_command("throughput", info_command_hist_track, PERM_NONE);                    // Returns throughput info.
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.

@@ -234,7 +234,7 @@ as_record_destroy(as_record *r, as_namespace *ns)
 	as_record_drop_stats(r, ns);
 
 	// Dereference record's storage used-size.
-	as_storage_record_destroy(ns, r);
+	as_storage_destroy_record(ns, r);
 
 	return;
 }
