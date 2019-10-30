@@ -185,7 +185,7 @@ typedef struct as_comp_proto_s {
 
 // Container for proto compression stats.
 typedef struct as_proto_comp_stat_s {
-	double comp_pct;    // percent of attempts yielding compressed result
+	double uncomp_pct;  // percent of attempts that don't compress result
 	double avg_orig_sz; // average original size (compressed results only)
 	double avg_comp_sz; // average final size (compressed results only)
 } as_proto_comp_stat;

@@ -476,7 +476,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	double batch_orig_sz = as_load_double(&g_stats.batch_comp_stat.avg_orig_sz);
 	double batch_ratio = batch_orig_sz > 0.0 ? g_stats.batch_comp_stat.avg_comp_sz / batch_orig_sz : 1.0;
 
-	info_append_format(db, "batch_index_proto_compressed_pct", "%.3f", g_stats.batch_comp_stat.comp_pct);
+	info_append_format(db, "batch_index_proto_uncompressed_pct", "%.3f", g_stats.batch_comp_stat.uncomp_pct);
 	info_append_format(db, "batch_index_proto_compression_ratio", "%.3f", batch_ratio);
 
 	info_append_int(db, "scans_active", as_scan_get_active_job_count());
@@ -5295,19 +5295,19 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	double record_orig_sz = as_load_double(&ns->record_comp_stat.avg_orig_sz);
 	double record_ratio = record_orig_sz > 0.0 ? ns->record_comp_stat.avg_comp_sz / record_orig_sz : 1.0;
 
-	info_append_format(db, "record_proto_compressed_pct", "%.3f", ns->record_comp_stat.comp_pct);
+	info_append_format(db, "record_proto_uncompressed_pct", "%.3f", ns->record_comp_stat.uncomp_pct);
 	info_append_format(db, "record_proto_compression_ratio", "%.3f", record_ratio);
 
 	double scan_orig_sz = as_load_double(&ns->scan_comp_stat.avg_orig_sz);
 	double scan_ratio = scan_orig_sz > 0.0 ? ns->scan_comp_stat.avg_comp_sz / scan_orig_sz : 1.0;
 
-	info_append_format(db, "scan_proto_compressed_pct", "%.3f", ns->scan_comp_stat.comp_pct);
+	info_append_format(db, "scan_proto_uncompressed_pct", "%.3f", ns->scan_comp_stat.uncomp_pct);
 	info_append_format(db, "scan_proto_compression_ratio", "%.3f", scan_ratio);
 
 	double query_orig_sz = as_load_double(&ns->query_comp_stat.avg_orig_sz);
 	double query_ratio = query_orig_sz > 0.0 ? ns->query_comp_stat.avg_comp_sz / query_orig_sz : 1.0;
 
-	info_append_format(db, "query_proto_compressed_pct", "%.3f", ns->query_comp_stat.comp_pct);
+	info_append_format(db, "query_proto_uncompressed_pct", "%.3f", ns->query_comp_stat.uncomp_pct);
 	info_append_format(db, "query_proto_compression_ratio", "%.3f", query_ratio);
 
 	// Partition balance state.
