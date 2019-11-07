@@ -46,10 +46,33 @@
 // Public API.
 //
 
-bool
+int
 validate_delete_durability(as_transaction* tr)
 {
-	return true;
+	if (as_transaction_is_durable_delete(tr)) {
+		cf_warning(AS_RW, "durable delete is an enterprise feature");
+		return AS_ERR_ENTERPRISE_ONLY;
+	}
+
+	return AS_OK;
+}
+
+
+void
+stash_index_metadata(const as_record* r, index_metadata* old)
+{
+	old->void_time = r->void_time;
+	old->last_update_time = r->last_update_time;
+	old->generation = r->generation;
+}
+
+
+void
+unwind_index_metadata(const index_metadata* old, as_record* r)
+{
+	r->void_time = old->void_time;
+	r->last_update_time = old->last_update_time;
+	r->generation = old->generation;
 }
 
 
@@ -97,18 +120,6 @@ generation_check(const as_record* r, const as_msg* m, const as_namespace* ns)
 	}
 
 	return true; // no generation requirement
-}
-
-
-int
-set_delete_durablility(const as_transaction* tr, as_storage_rd* rd)
-{
-	if (as_transaction_is_durable_delete(tr)) {
-		cf_warning(AS_RW, "durable delete is an enterprise feature");
-		return AS_ERR_ENTERPRISE_ONLY;
-	}
-
-	return 0;
 }
 
 

@@ -75,14 +75,6 @@ udf_storage_record_open(udf_record *urecord)
 	as_transaction *tr    = urecord->tr;
 
 	as_storage_record_open(tr->rsv.ns, r, rd);
-
-	// Deal with delete durability (enterprise only).
-	if ((urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES) != 0 &&
-			set_delete_durablility(tr, rd) != 0) {
-		as_storage_record_close(rd);
-		return -1;
-	}
-
 	as_storage_rd_load_n_bins(rd); // TODO - handle error returned
 
 	if (rd->n_bins > UDF_RECORD_BIN_ULIMIT) {

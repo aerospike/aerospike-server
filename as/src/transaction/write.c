@@ -105,8 +105,7 @@ int write_master_ssd(as_transaction* tr, as_storage_rd* rd,
 		bool must_fetch_data, bool record_level_replace, rw_request* rw,
 		bool* is_delete, xdr_dirty_bins* dirty_bins);
 
-void write_master_update_index_metadata(as_transaction* tr, index_metadata* old,
-		as_record* r);
+void write_master_update_index_metadata(as_transaction* tr, as_record* r);
 int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
 		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins,
@@ -117,7 +116,6 @@ int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
 		uint32_t* p_n_cleanup_bins, xdr_dirty_bins* dirty_bins);
 
-void write_master_index_metadata_unwind(index_metadata* old, as_record* r);
 void write_master_dim_single_bin_unwind(as_bin* old_bin, as_bin* new_bin,
 		as_bin* cleanup_bins, uint32_t n_cleanup_bins);
 void write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins,
@@ -751,12 +749,6 @@ write_master(rw_request* rw, as_transaction* tr)
 		predexp_destroy(predexp);
 	}
 
-	// Deal with delete durability (enterprise only).
-	if ((result = set_delete_durablility(tr, &rd)) != 0) {
-		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
-		return TRANS_DONE_ERROR;
-	}
-
 	// Shortcut for set name storage.
 	if (set_name) {
 		rd.set_name = set_name;
@@ -1217,7 +1209,8 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	write_master_update_index_metadata(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1229,7 +1222,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 			&n_cleanup_bins, &rw->response_db, &n_new_bins, dirty_bins);
 
 	if (result != 0) {
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
 		return result;
 	}
@@ -1240,18 +1233,23 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	if (n_new_bins == 0) {
 		if (n_old_bins == 0) {
-			write_master_index_metadata_unwind(&old_metadata, r);
+			unwind_index_metadata(&old_metadata, r);
 			write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
 			return AS_ERR_NOT_FOUND;
 		}
 
-		if (! validate_delete_durability(tr)) {
-			write_master_index_metadata_unwind(&old_metadata, r);
+		if ((result = validate_delete_durability(tr)) != AS_OK) {
+			unwind_index_metadata(&old_metadata, r);
 			write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
-			return AS_ERR_FORBIDDEN;
+			return result;
 		}
 
 		*is_delete = true;
+
+		// FIXME - hide?
+		if (as_transaction_is_durable_delete(tr)) {
+			r->tombstone = 1;
+		}
 	}
 
 	//------------------------------------------------------
@@ -1260,11 +1258,12 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
@@ -1339,7 +1338,8 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	write_master_update_index_metadata(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1350,7 +1350,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 			&n_cleanup_bins, &rw->response_db, &n_new_bins, dirty_bins);
 
 	if (result != 0) {
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
 		return result;
 	}
@@ -1371,18 +1371,23 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	}
 	else {
 		if (n_old_bins == 0) {
-			write_master_index_metadata_unwind(&old_metadata, r);
+			unwind_index_metadata(&old_metadata, r);
 			write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
 			return AS_ERR_NOT_FOUND;
 		}
 
-		if (! validate_delete_durability(tr)) {
-			write_master_index_metadata_unwind(&old_metadata, r);
+		if ((result = validate_delete_durability(tr)) != AS_OK) {
+			unwind_index_metadata(&old_metadata, r);
 			write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
-			return AS_ERR_FORBIDDEN;
+			return result;
 		}
 
 		*is_delete = true;
+
+		// FIXME - hide?
+		if (as_transaction_is_durable_delete(tr)) {
+			r->tombstone = 1;
+		}
 	}
 
 	//------------------------------------------------------
@@ -1396,11 +1401,12 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 			cf_free(new_bin_space);
 		}
 
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
@@ -1491,7 +1497,8 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	write_master_update_index_metadata(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1505,7 +1512,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
 			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
 		cf_ll_buf_free(&particles_llb);
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		return result;
 	}
 
@@ -1516,17 +1523,22 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	if (n_new_bins == 0) {
 		if (n_old_bins == 0) {
 			cf_ll_buf_free(&particles_llb);
-			write_master_index_metadata_unwind(&old_metadata, r);
+			unwind_index_metadata(&old_metadata, r);
 			return AS_ERR_NOT_FOUND;
 		}
 
-		if (! validate_delete_durability(tr)) {
+		if ((result = validate_delete_durability(tr)) != AS_OK) {
 			cf_ll_buf_free(&particles_llb);
-			write_master_index_metadata_unwind(&old_metadata, r);
-			return AS_ERR_FORBIDDEN;
+			unwind_index_metadata(&old_metadata, r);
+			return result;
 		}
 
 		*is_delete = true;
+
+		// FIXME - hide?
+		if (as_transaction_is_durable_delete(tr)) {
+			r->tombstone = 1;
+		}
 	}
 
 	//------------------------------------------------------
@@ -1536,10 +1548,11 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
 		cf_ll_buf_free(&particles_llb);
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
@@ -1628,7 +1641,8 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 
 	index_metadata old_metadata;
 
-	write_master_update_index_metadata(tr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	write_master_update_index_metadata(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1640,7 +1654,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
 			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
 		cf_ll_buf_free(&particles_llb);
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		return result;
 	}
 
@@ -1654,17 +1668,22 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	if (n_new_bins == 0) {
 		if (n_old_bins == 0) {
 			cf_ll_buf_free(&particles_llb);
-			write_master_index_metadata_unwind(&old_metadata, r);
+			unwind_index_metadata(&old_metadata, r);
 			return AS_ERR_NOT_FOUND;
 		}
 
-		if (! validate_delete_durability(tr)) {
+		if ((result = validate_delete_durability(tr)) != AS_OK) {
 			cf_ll_buf_free(&particles_llb);
-			write_master_index_metadata_unwind(&old_metadata, r);
-			return AS_ERR_FORBIDDEN;
+			unwind_index_metadata(&old_metadata, r);
+			return result;
 		}
 
 		*is_delete = true;
+
+		// FIXME - hide?
+		if (as_transaction_is_durable_delete(tr)) {
+			r->tombstone = 1;
+		}
 	}
 
 	//------------------------------------------------------
@@ -1674,10 +1693,11 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
 		cf_ll_buf_free(&particles_llb);
-		write_master_index_metadata_unwind(&old_metadata, r);
+		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
@@ -1710,14 +1730,13 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 //
 
 void
-write_master_update_index_metadata(as_transaction* tr, index_metadata* old,
-		as_record* r)
+write_master_update_index_metadata(as_transaction* tr, as_record* r)
 {
-	old->void_time = r->void_time;
-	old->last_update_time = r->last_update_time;
-	old->generation = r->generation;
-
 	update_metadata_in_index(tr, r);
+
+	// Note - can't update tombstone yet - don't know.
+	// FIXME - hide?
+	r->cenotaph = 0;
 }
 
 
@@ -2093,15 +2112,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 //==========================================================
 // write_master() - unwind on failure or cleanup.
 //
-
-void
-write_master_index_metadata_unwind(index_metadata* old, as_record* r)
-{
-	r->void_time = old->void_time;
-	r->last_update_time = old->last_update_time;
-	r->generation = old->generation;
-}
-
 
 void
 write_master_dim_single_bin_unwind(as_bin* old_bin, as_bin* new_bin,

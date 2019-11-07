@@ -74,8 +74,7 @@ int old_record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sind
 int old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd, bool *is_delete);
 int old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex, bool *is_delete);
 
-void update_index_metadata(as_remote_record *rr, index_metadata *old, as_record *r);
-void unwind_index_metadata(const index_metadata *old, as_record *r);
+void update_index_metadata(const as_remote_record *rr, as_record *r);
 void unwind_dim_single_bin(as_bin* old_bin, as_bin* new_bin);
 
 int unpickle_bins(as_remote_record *rr, as_storage_rd *rd, cf_ll_buf *particles_llb);
@@ -642,15 +641,18 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	update_index_metadata(rr, r);
 
 	// Write the record to storage.
-	if ((result = as_record_write_from_pickle(rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		unwind_dim_single_bin(&old_bin, rd->bins);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Cleanup - destroy old bin, can't unwind after.
 	as_bin_particle_destroy(&old_bin, true);
@@ -710,15 +712,18 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	update_index_metadata(rr, r);
 
 	// Write the record to storage.
-	if ((result = as_record_write_from_pickle(rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		destroy_stack_bins(new_bins, n_new_bins);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
 	if (! (skip_sindex &&
@@ -786,16 +791,19 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	update_index_metadata(rr, r);
 
 	// Write the record to storage.
-	int result = as_record_write_from_pickle(rd);
+	int result = as_storage_record_write(rd);
 
 	if (result < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Now ok to store or drop key, as determined by message.
 	as_record_finalize_key(r, ns, rr->key, rr->key_size);
@@ -865,14 +873,17 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+	update_index_metadata(rr, r);
 
 	// Write the record to storage.
-	if ((result = as_record_write_from_pickle(rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
 	if (has_sindex) {
@@ -936,15 +947,20 @@ old_record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+
+	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
+	update_index_metadata(rr, r);
 
 	// Write the record to storage.
-	if ((result = as_record_write_from_pickle(rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		unwind_dim_single_bin(&old_bin, rd->bins);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Cleanup - destroy old bin, can't unwind after.
 	as_bin_particle_destroy(&old_bin, true);
@@ -996,19 +1012,24 @@ old_record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+
+	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
+	update_index_metadata(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
 	rd->key_size = rr->key_size;
 
 	// Write the record to storage.
-	if ((result = as_record_write_from_pickle(rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		destroy_stack_bins(new_bins, n_new_bins);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
 	if (! (skip_sindex &&
@@ -1086,19 +1107,24 @@ old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+
+	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
+	update_index_metadata(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
 	rd->key_size = rr->key_size;
 
 	// Write the record to storage.
-	if ((result = as_record_write_from_pickle(rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		cf_ll_buf_free(&particles_llb);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Now ok to store or drop key, as determined by message.
 	as_record_finalize_key(r, ns, rd->key, rd->key_size);
@@ -1165,19 +1191,24 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
 
-	update_index_metadata(rr, &old_metadata, r);
+	stash_index_metadata(r, &old_metadata);
+
+	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
+	update_index_metadata(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
 	rd->key_size = rr->key_size;
 
 	// Write the record to storage.
-	if ((result = as_record_write_from_pickle(rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
 		unwind_index_metadata(&old_metadata, r);
 		cf_ll_buf_free(&particles_llb);
 		return -result;
 	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
 	if (has_sindex) {
@@ -1197,24 +1228,15 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 
 void
-update_index_metadata(as_remote_record *rr, index_metadata *old, as_record *r)
+update_index_metadata(const as_remote_record *rr, as_record *r)
 {
-	old->void_time = r->void_time;
-	old->last_update_time = r->last_update_time;
-	old->generation = r->generation;
-
 	r->generation = (uint16_t)rr->generation;
 	r->void_time = trim_void_time(rr->void_time);
 	r->last_update_time = rr->last_update_time;
-}
 
-
-void
-unwind_index_metadata(const index_metadata *old, as_record *r)
-{
-	r->void_time = old->void_time;
-	r->last_update_time = old->last_update_time;
-	r->generation = old->generation;
+	// FIXME - hide?
+	r->tombstone = rr->n_bins == 0 ? 1 : 0;
+	r->cenotaph = 0;
 }
 
 

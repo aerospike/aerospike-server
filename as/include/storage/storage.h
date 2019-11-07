@@ -105,7 +105,6 @@ typedef struct as_storage_rd_s {
 
 	uint8_t					which_current_swb;
 	bool					read_page_cache;
-	bool					is_durable_delete; // enterprise only
 
 	// Only used by storage type AS_STORAGE_ENGINE_SSD:
 	struct as_flat_record_s	*flat;

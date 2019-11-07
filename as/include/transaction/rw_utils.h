@@ -68,6 +68,9 @@ typedef struct index_metadata_s {
 	uint32_t void_time;
 	uint64_t last_update_time;
 	uint16_t generation;
+
+	bool tombstone;
+	bool cenotaph;
 } index_metadata;
 
 typedef struct now_times_s {
@@ -85,8 +88,10 @@ typedef struct now_times_s {
 // Public API.
 //
 
-bool validate_delete_durability(struct as_transaction_s* tr);
+int validate_delete_durability(struct as_transaction_s* tr);
 bool xdr_allows_write(struct as_transaction_s* tr);
+void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
+void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
 void send_rw_messages(struct rw_request_s* rw);
 void send_rw_messages_forget(struct rw_request_s* rw);
 int repl_state_check(struct as_index_s* r, struct as_transaction_s* tr);
@@ -97,7 +102,6 @@ void finished_not_replicated(struct rw_request_s* rw);
 bool set_name_check(const struct as_transaction_s* tr, const struct as_index_s* r);
 bool generation_check(const struct as_index_s* r, const struct as_msg_s* m, const struct as_namespace_s* ns);
 int set_set_from_msg(struct as_index_s* r, struct as_namespace_s* ns, struct as_msg_s* m);
-int set_delete_durablility(const struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int build_predexp_and_filter_meta(const struct as_transaction_s* tr, const struct as_index_s* r, struct predexp_eval_base_s** predexp);
 int predexp_read_and_filter_bins(struct as_storage_rd_s* rd, struct predexp_eval_base_s* predexp);
 bool check_msg_key(struct as_msg_s* m, struct as_storage_rd_s* rd);

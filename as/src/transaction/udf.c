@@ -953,7 +953,19 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 			m->record_ttl = TTL_NAMESPACE_DEFAULT;
 		}
 
+		index_metadata old_metadata = {
+				// Note - other members irrelevant.
+				.tombstone = r->tombstone == 1
+		};
+
 		update_metadata_in_index(tr, r);
+
+		// FIXME - hide?
+		r->tombstone = urecord_op == UDF_OPTYPE_DELETE &&
+				as_transaction_is_durable_delete(tr) ? 1 : 0;
+		r->cenotaph = 0;
+
+		as_record_transition_stats(r, ns, &old_metadata);
 
 		// TODO - old pickle - remove in "six months".
 		if (as_exchange_min_compatibility_id() < 3) {

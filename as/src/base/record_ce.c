@@ -35,6 +35,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "storage/storage.h"
+#include "transaction/rw_utils.h"
 
 
 //==========================================================
@@ -106,12 +107,9 @@ as_record_drop_stats(as_record* r, as_namespace* ns)
 	cf_atomic64_decr(&ns->n_objects);
 }
 
-int
-as_record_write_from_pickle(as_storage_rd* rd)
+void
+as_record_transition_stats(as_record* r, as_namespace* ns, index_metadata* old)
 {
-	cf_assert(as_bin_inuse_has(rd), AS_RECORD, "unexpected binless pickle");
-
-	return as_storage_record_write(rd);
 }
 
 

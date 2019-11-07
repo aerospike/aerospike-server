@@ -141,7 +141,7 @@ as_storage_start_tomb_raider_ssd(as_namespace* ns)
 int
 as_storage_record_write_ssd(as_storage_rd* rd)
 {
-	// All record writes except defrag come through here!
+	// No-op for drops, caller will drop record.
 	return as_bin_inuse_has(rd) ? ssd_write(rd) : 0;
 }
 

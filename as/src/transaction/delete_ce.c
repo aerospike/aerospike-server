@@ -28,9 +28,6 @@
 
 #include <stdbool.h>
 
-#include "fault.h"
-
-#include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/transaction.h"
@@ -51,12 +48,6 @@ delete_storage_overloaded(as_transaction* tr)
 transaction_status
 delete_master(as_transaction* tr, rw_request* rw)
 {
-	if (as_transaction_is_durable_delete(tr)) {
-		cf_warning(AS_RW, "durable delete is an enterprise feature");
-		tr->result_code = AS_ERR_ENTERPRISE_ONLY;
-		return TRANS_DONE_ERROR;
-	}
-
 	as_index_ref r_ref;
 
 	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) != 0) {

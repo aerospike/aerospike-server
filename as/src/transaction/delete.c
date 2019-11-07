@@ -165,8 +165,10 @@ as_delete_start(as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
-	if (! validate_delete_durability(tr)) {
-		tr->result_code = AS_ERR_FORBIDDEN;
+	int result = validate_delete_durability(tr);
+
+	if (result != AS_OK) {
+		tr->result_code = result;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
 	}
