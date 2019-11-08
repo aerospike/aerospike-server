@@ -57,7 +57,7 @@
 #define PAGE_SZ 4096
 
 #define MAX_SITES 4096
-#define MAX_THREADS 256
+#define MAX_THREADS 1024
 
 #define MULT 3486784401u
 #define MULT_INV 3396732273u
@@ -91,7 +91,7 @@ static uint32_t g_n_site_ras;
 
 static site_info g_site_infos[MAX_SITES * MAX_THREADS];
 // Start at 1, then we can use site ID 0 to mean "no site ID".
-static uint32_t g_n_site_infos = 1;
+static uint64_t g_n_site_infos = 1;
 
 static __thread uint32_t g_thread_site_infos[MAX_SITES];
 
@@ -195,13 +195,17 @@ hook_get_site_id(const void *ra)
 static uint32_t
 hook_new_site_info_id(void)
 {
-	uint32_t info_id = ck_pr_faa_32(&g_n_site_infos, 1);
+	uint64_t info_id = ck_pr_faa_64(&g_n_site_infos, 1);
 
-	if (info_id >= g_n_site_infos) {
-		cf_crash(CF_ALLOC, "site info pool exhausted");
+	if (info_id < MAX_SITES * MAX_THREADS) {
+		return (uint32_t)info_id;
 	}
 
-	return info_id;
+	if (info_id == MAX_SITES * MAX_THREADS) {
+		cf_warning(CF_ALLOC, "site info pool exhausted");
+	}
+
+	return 0;
 }
 
 // Get the info ID of the site_info record for the given site ID and the current
@@ -223,7 +227,10 @@ hook_get_site_info_id(uint32_t site_id)
 	// This is the first time that this thread encounters this allocation
 	// site. We need to allocate a site_info record.
 
-	info_id = hook_new_site_info_id();
+	if ((info_id = hook_new_site_info_id()) == 0) {
+		return 0;
+	}
+
 	site_info *info = g_site_infos + info_id;
 
 	info->site_id = site_id;
@@ -249,15 +256,18 @@ hook_handle_alloc(const void *ra, void *p, size_t sz)
 
 	uint32_t site_id = hook_get_site_id(ra);
 	uint32_t info_id = hook_get_site_info_id(site_id);
-	site_info *info = g_site_infos + info_id;
 
-	size_t size_lo = info->size_lo;
-	info->size_lo += jem_sz;
+	if (info_id != 0) {
+		site_info *info = g_site_infos + info_id;
 
-	// Carry?
+		size_t size_lo = info->size_lo;
+		info->size_lo += jem_sz;
 
-	if (info->size_lo < size_lo) {
-		++info->size_hi;
+		// Carry?
+
+		if (info->size_lo < size_lo) {
+			++info->size_hi;
+		}
 	}
 
 	uint8_t *data = (uint8_t *)p + jem_sz - sizeof(uint32_t);
@@ -318,15 +328,18 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 	}
 
 	uint32_t info_id = hook_get_site_info_id(site_id);
-	site_info *info = g_site_infos + info_id;
 
-	size_t size_lo = info->size_lo;
-	info->size_lo -= jem_sz;
+	if (info_id != 0) {
+		site_info *info = g_site_infos + info_id;
 
-	// Borrow?
+		size_t size_lo = info->size_lo;
+		info->size_lo -= jem_sz;
 
-	if (info->size_lo > size_lo) {
-		--info->size_hi;
+		// Borrow?
+
+		if (info->size_lo > size_lo) {
+			--info->size_hi;
+		}
 	}
 
 	// Replace the allocation site with the deallocation site to facilitate
@@ -591,9 +604,13 @@ cf_alloc_log_site_infos(const char *file)
 	}
 
 	time_to_file(fh);
-	uint32_t n_site_infos = ck_pr_load_32(&g_n_site_infos);
+	uint64_t n_site_infos = ck_pr_load_64(&g_n_site_infos);
 
-	for (uint32_t i = 1; i < n_site_infos; ++i) {
+	if (n_site_infos > MAX_SITES * MAX_THREADS) {
+		n_site_infos = MAX_SITES * MAX_THREADS;
+	}
+
+	for (uint64_t i = 1; i < n_site_infos; ++i) {
 		site_info *info = g_site_infos + i;
 		const void *ra = ck_pr_load_ptr(g_site_ras + info->site_id);
 		fprintf(fh, "0x%016" PRIx64 " %9d 0x%016zx 0x%016zx\n", (uint64_t)ra, info->thread_id,
