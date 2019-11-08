@@ -4070,12 +4070,12 @@ as_config_post_process(as_config* c, const char* config_file)
 		cf_crash_nostack(AS_CFG, "must configure at least one namespace");
 	}
 
+	cf_alloc_set_debug(c->debug_allocations, c->indent_allocations);
+
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
 
 	as_security_config_check();
-
-	cf_alloc_set_debug(c->debug_allocations, c->indent_allocations);
 
 	// Check the configured file descriptor limit against the system limit.
 	struct rlimit fd_limit;
