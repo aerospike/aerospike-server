@@ -39,6 +39,7 @@
 #include <linux/fs.h> // for BLKGETSIZE64
 #include <sys/ioctl.h>
 #include <sys/param.h> // for MAX()
+#include <sys/eventfd.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
@@ -68,6 +69,13 @@
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
+#undef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+#undef MIN
+#define MIN(a, b) (((a) < (b)) ? (a) : (b));
+
+#define MAX_POLL_EVENTS 1024
 
 //==========================================================
 // Constants.
@@ -541,6 +549,22 @@ ssd_block_free(drv_ssd *ssd, uint64_t rblock_id, uint32_t n_rblocks, char *msg)
 	cf_mutex_unlock(&p_wblock_state->LOCK);
 }
 
+static void
+ssd_push_write_buf(drv_ssd *ssd, cf_queue* queue, int eventfd, ssd_write_buf **swbpp)
+{
+	struct async_io *aio = &ssd->async_io;
+
+	cf_queue_push(queue, swbpp);
+	cf_atomic32_incr(&aio->writes_pending);
+
+	uint64_t d = 1;
+	int rc = eventfd_write(eventfd, d);
+	if (rc < 0) {
+		fprintf(stderr, "%s: write failed: errno %d", ssd->name, errno);
+		cf_crash(AS_DRV_SSD, "%s: write failed: errno %d (%s)",
+			ssd->name, errno, cf_strerror(errno));
+	}
+}
 
 // FIXME - what really to do if n_rblocks on drive doesn't match index?
 void
@@ -588,7 +612,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 
 		// Enqueue the buffer, to be flushed to device.
 		swb->skip_post_write_q = true;
-		cf_queue_push(ssd->swb_write_q, &swb);
+		ssd_push_write_buf(ssd, ssd->swb_write_q, ssd->swb_write_q_eventfd, &swb);
 		cf_atomic64_incr(&ssd->n_defrag_wblock_writes);
 
 		// Get the new buffer.
@@ -1320,6 +1344,81 @@ as_storage_record_get_pickle_ssd(as_storage_rd *rd)
 // Record writing utilities.
 //
 
+struct async_io_data;
+typedef void (*aio_complete_cb_t) (drv_ssd* ssd, struct async_io_data* data, ssize_t wrote);
+
+struct async_io_data {
+	drv_ssd           *ssd;
+	ssd_write_buf     *swb;
+	struct iocb       iocb;
+	int               fd;
+
+	aio_complete_cb_t complete_cb;
+	uint64_t          start_ns;
+};
+
+static struct async_io_data*
+ssd_write_prepare(drv_ssd* ssd, struct async_io *aio, int fd, ssd_write_buf *swb)
+{
+	const off_t offset = (off_t)WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id);
+	const size_t size = ssd->write_block_size;
+
+	struct async_io_data *data;
+	data = cf_malloc(sizeof(*data));
+	data->ssd = ssd;
+	data->swb = swb;
+	data->fd = fd;
+
+	io_prep_pwrite(&data->iocb, fd, swb->buf, size, offset);
+	io_set_eventfd(&data->iocb, aio->eventfd);
+	data->iocb.data = data;
+	return data;
+}
+
+void
+ssd_flush_write_complete(drv_ssd *ssd, struct async_io_data* data, ssize_t wrote)
+{
+	if (wrote != ssd->write_block_size) {
+		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
+			ssd->name, errno, cf_strerror(errno));
+	}
+
+	ssd_write_buf *swb = data->swb;
+
+	if (data->start_ns != 0) {
+		histogram_insert_data_point(ssd->hist_write, data->start_ns);
+	}
+
+	ssd_fd_put(ssd, data->fd);
+	cf_free(data);
+
+	if (ssd->shadow_name) {
+		// Queue for shadow device write.
+		ssd_push_write_buf(ssd, ssd->swb_shadow_q, ssd->swb_shadow_q_eventfd, &swb);
+		return;
+	}
+
+	// If this swb was a defrag destination, release the sources.
+	swb_release_all_vacated_wblocks(swb);
+
+	// Transfer to post-write queue, or release swb, as appropriate.
+	ssd_post_write(ssd, swb);
+}
+
+struct async_io_data*
+ssd_flush_write_prepare(drv_ssd* ssd, ssd_write_buf *swb)
+{
+	while (cf_atomic32_get(swb->n_writers) != 0) {
+		;
+	}
+
+	int fd = ssd_fd_get(ssd);
+	struct async_io_data *data = ssd_write_prepare(ssd, &ssd->async_io, fd, swb);
+	data->start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
+	data->complete_cb = ssd_flush_write_complete;
+	return data;
+}
+
 void
 ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 {
@@ -1345,6 +1444,39 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	ssd_fd_put(ssd, fd);
 }
 
+static void
+ssd_shadow_write_complete(drv_ssd *ssd, struct async_io_data* data, ssize_t wrote)
+{
+	if (wrote != ssd->write_block_size) {
+		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
+			ssd->name, errno, cf_strerror(errno));
+	}
+
+	ssd_write_buf *swb = data->swb;
+
+	if (data->start_ns != 0) {
+		histogram_insert_data_point(ssd->hist_write, data->start_ns);
+	}
+
+	ssd_shadow_fd_put(ssd, data->fd);
+	cf_free(data);
+
+	// If this swb was a defrag destination, release the sources.
+	swb_release_all_vacated_wblocks(swb);
+
+	// Transfer to post-write queue, or release swb, as appropriate.
+	ssd_post_write(ssd, swb);
+}
+
+static struct async_io_data*
+ssd_shadow_write_prepare(drv_ssd* ssd, ssd_write_buf *swb)
+{
+	int fd = ssd_shadow_fd_get(ssd);
+	struct async_io_data *data = ssd_write_prepare(ssd, &ssd->async_io, fd, swb);
+	data->start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
+	data->complete_cb = ssd_shadow_write_complete;
+	return data;
+}
 
 void
 ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
@@ -1414,72 +1546,145 @@ ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 	}
 }
 
+void
+handle_io_complete(drv_ssd *ssd, const uint32_t nios)
+{
+	struct async_io *aio = &ssd->async_io;
+	struct io_event *e = aio->events;
+	const struct io_event *end = aio->events + nios;
+
+	for (; e < end; ++e) {
+		struct async_io_data *data = (struct async_io_data*) e->data;
+		ssize_t result = ((ssize_t)(((uint64_t)e->res2 << 32) | e->res));
+		data->complete_cb(ssd, data, result);
+	}
+
+	cf_atomic32_sub(&aio->writes_aio_submitted, nios);
+	cf_atomic32_sub(&aio->writes_pending, nios);
+}
+
+void
+ssd_reap_complete_ios(drv_ssd *ssd)
+{
+	struct async_io *aio = &ssd->async_io;
+
+	while (1) {
+		eventfd_t nevents;
+		int rc = eventfd_read(aio->eventfd, &nevents);
+		if (rc < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			}
+			cf_assert(false, AS_SERVICE, "unexpected error");
+			break;
+		}
+
+		while (nevents > 0) {
+			const uint32_t to_reap = MIN(ARRAY_SIZE(aio->events), nevents);
+			rc = io_getevents(aio->ctxt, to_reap, to_reap, aio->events, NULL);
+			cf_assert(rc == to_reap, AS_SERVICE, "unexpected events read");
+			handle_io_complete(ssd, to_reap);
+			nevents -= to_reap;
+		}
+	}
+}
+
+static void
+submit_aios(struct async_io *aio, int niocbs)
+{
+	int submitted = 0;
+	while (submitted < niocbs) {
+		int rc = io_submit(aio->ctxt, niocbs - submitted, &aio->iocbs[submitted]);
+		if (rc < 0) {
+			if (errno == EAGAIN) {
+				continue;
+			}
+			cf_assert(errno == EAGAIN, AS_SERVICE, "unexpected error");
+			break;
+		}
+		submitted += rc;
+	}
+	cf_atomic32_add(&aio->writes_aio_submitted, submitted);
+}
+
+void
+ssd_submit_flush_writes(drv_ssd *ssd)
+{
+	/* cleanup events if any */
+	eventfd_t events;
+	(void) eventfd_read(ssd->swb_write_q_eventfd, &events);
+
+	struct async_io *aio = &ssd->async_io;
+	uint32_t submitted = cf_atomic32_get(aio->writes_aio_submitted);
+	if (submitted >= aio->writes_max_aio_pending) {
+		return;
+	}
+
+	const int to_submit = MIN(ARRAY_SIZE(aio->iocbs),
+		aio->writes_max_aio_pending - submitted);
+	int filled = 0;
+
+	ssd_write_buf *swb;
+	while (cf_queue_pop(ssd->swb_write_q, &swb, CF_QUEUE_NOWAIT) ==  CF_QUEUE_OK && filled < to_submit) {
+		// Sanity checks (optional).
+		ssd_write_sanity_checks(ssd, swb);
+
+		struct async_io_data *data = ssd_flush_write_prepare(ssd, swb);
+		aio->iocbs[filled++] = &data->iocb;
+	}
+	submit_aios(aio, filled);
+}
+
+static void
+ssd_submit_shadow_writes(drv_ssd *ssd)
+{
+	if (ssd->shadow_name == NULL) {
+		return;
+	}
+
+	/* cleanup events if any */
+	eventfd_t events;
+	(void) eventfd_read(ssd->swb_shadow_q_eventfd, &events);
+
+	struct async_io *aio = &ssd->async_io;
+	uint32_t submitted = cf_atomic32_get(aio->writes_aio_submitted);
+	if (submitted >= aio->writes_max_aio_pending) {
+		return;
+	}
+
+	const int to_submit = MIN(ARRAY_SIZE(aio->iocbs),
+		aio->writes_max_aio_pending - submitted);
+	int filled = 0;
+
+	ssd_write_buf *swb;
+	while (cf_queue_pop(ssd->swb_shadow_q, &swb, CF_QUEUE_NOWAIT) && filled < to_submit) {
+		// Sanity checks (optional).
+		ssd_write_sanity_checks(ssd, swb);
+
+		struct async_io_data *data = ssd_shadow_write_prepare(ssd, swb);
+		aio->iocbs[filled++] = &data->iocb;
+	}
+	submit_aios(aio, filled);
+}
 
 // Thread "run" function that flushes write buffers to device.
 void *
 run_write(void *arg)
 {
 	drv_ssd *ssd = (drv_ssd*)arg;
+	struct async_io *aio = &ssd->async_io;
 
-	while (ssd->running) {
-		ssd_write_buf *swb;
+	while (ssd->running || cf_atomic32_get(aio->writes_pending) != 0) {
+		cf_poll_event events[MAX_POLL_EVENTS];
+		int32_t nevents = cf_poll_wait(aio->poll, events, MAX_POLL_EVENTS, -1);
+		cf_assert(nevents >= 0, AS_SERVICE, "unexpected EINTR");
 
-		if (CF_QUEUE_OK != cf_queue_pop(ssd->swb_write_q, &swb, 100)) {
-			continue;
-		}
-
-		// Sanity checks (optional).
-		ssd_write_sanity_checks(ssd, swb);
-
-		// Flush to the device.
-		ssd_flush_swb(ssd, swb);
-
-		if (ssd->shadow_name) {
-			// Queue for shadow device write.
-			cf_queue_push(ssd->swb_shadow_q, &swb);
-		}
-		else {
-			// If this swb was a defrag destination, release the sources.
-			swb_release_all_vacated_wblocks(swb);
-
-			// Transfer to post-write queue, or release swb, as appropriate.
-			ssd_post_write(ssd, swb);
-		}
-	} // infinite event loop waiting for block to write
-
-	return NULL;
-}
-
-
-// Thread "run" function that flushes write buffers to shadow device.
-void *
-run_shadow(void *arg)
-{
-	drv_ssd *ssd = (drv_ssd*)arg;
-
-	while (ssd->running) {
-		ssd_write_buf *swb;
-
-		if (CF_QUEUE_OK != cf_queue_pop(ssd->swb_shadow_q, &swb, 100)) {
-			continue;
-		}
-
-		// Sanity checks (optional).
-		ssd_write_sanity_checks(ssd, swb);
-
-		// Flush to the shadow device.
-		ssd_shadow_flush_swb(ssd, swb);
-
-		// If this swb was a defrag destination, release the sources.
-		swb_release_all_vacated_wblocks(swb);
-
-		// Transfer to post-write queue, or release swb, as appropriate.
-		ssd_post_write(ssd, swb);
+		ssd_reap_complete_ios(ssd);
+		ssd_submit_flush_writes(ssd);
+		ssd_submit_shadow_writes(ssd);
 	}
-
 	return NULL;
 }
-
 
 void
 ssd_start_write_threads(drv_ssds *ssds)
@@ -1490,10 +1695,6 @@ ssd_start_write_threads(drv_ssds *ssds)
 		drv_ssd *ssd = &ssds->ssds[i];
 
 		ssd->write_tid = cf_thread_create_joinable(run_write, (void*)ssd);
-
-		if (ssd->shadow_name) {
-			ssd->shadow_tid = cf_thread_create_joinable(run_shadow, (void*)ssd);
-		}
 	}
 }
 
@@ -1558,7 +1759,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		}
 
 		// Enqueue the buffer, to be flushed to device.
-		cf_queue_push(ssd->swb_write_q, &swb);
+		ssd_push_write_buf(ssd, ssd->swb_write_q, ssd->swb_write_q_eventfd, &swb);
 		cf_atomic64_incr(&ssd->n_wblock_writes);
 
 		// Get the new buffer.
@@ -3517,8 +3718,14 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 
 		ssd_wblock_init(ssd);
 
-		// Note: free_wblock_q, defrag_wblock_q created after loading devices.
+		struct async_io *aio = &ssd->async_io;
+		io_setup(AIO_CAPACITY, &aio->ctxt);
+		aio->writes_max_aio_pending = AIO_MAX_WRITES;
+		aio->eventfd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+		cf_poll_create(&aio->poll);
+		cf_poll_add_fd(aio->poll, aio->eventfd, EPOLLIN, ssd);
 
+		// Note: free_wblock_q, defrag_wblock_q created after loading devices.
 		ssd->fd_q = cf_queue_create(sizeof(int), true);
 		ssd->fd_cache_q = cf_queue_create(sizeof(int), true);
 
@@ -3527,9 +3734,13 @@ as_storage_namespace_init_ssd(as_namespace *ns)
 		}
 
 		ssd->swb_write_q = cf_queue_create(sizeof(void*), true);
+		ssd->swb_write_q_eventfd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+		cf_poll_add_fd(aio->poll, ssd->swb_write_q_eventfd, EPOLLIN, ssd);
 
 		if (ssd->shadow_name) {
 			ssd->swb_shadow_q = cf_queue_create(sizeof(void*), true);
+			ssd->swb_shadow_q_eventfd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+			cf_poll_add_fd(aio->poll, ssd->swb_shadow_q_eventfd, EPOLLIN, ssd);
 		}
 
 		ssd->swb_free_q = cf_queue_create(sizeof(void*), true);
@@ -4093,7 +4304,7 @@ as_storage_shutdown_ssd(as_namespace *ns)
 						ssd->write_block_size - ssd->current_swb->pos);
 			}
 
-			cf_queue_push(ssd->swb_write_q, &ssd->current_swb);
+			ssd_push_write_buf(ssd, ssd->swb_write_q, ssd->swb_write_q_eventfd, &ssd->current_swb);
 			ssd->current_swb = NULL;
 		}
 
@@ -4105,35 +4316,27 @@ as_storage_shutdown_ssd(as_namespace *ns)
 						ssd->write_block_size - ssd->defrag_swb->pos);
 			}
 
-			cf_queue_push(ssd->swb_write_q, &ssd->defrag_swb);
+			ssd_push_write_buf(ssd, ssd->swb_write_q, ssd->swb_write_q_eventfd, &ssd->defrag_swb);
 			ssd->defrag_swb = NULL;
 		}
 	}
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
-
-		while (cf_queue_sz(ssd->swb_write_q)) {
+		while (cf_queue_sz(ssd->swb_write_q) != 0 ||
+				cf_queue_sz(ssd->swb_shadow_q) != 0 ||
+				cf_atomic32_get(ssd->async_io.writes_pending) != 0) {
 			usleep(1000);
 		}
 
-		if (ssd->shadow_name) {
-			while (cf_queue_sz(ssd->swb_shadow_q)) {
-				usleep(1000);
-			}
-		}
-
 		ssd->running = false;
+		(void) eventfd_write(ssd->async_io.eventfd, 1);
 	}
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
 		cf_thread_join(ssd->write_tid);
-
-		if (ssd->shadow_name) {
-			cf_thread_join(ssd->shadow_tid);
-		}
 	}
 
 	ssd_set_pristine_offset(ssds);

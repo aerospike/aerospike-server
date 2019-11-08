@@ -163,7 +163,8 @@ else
 endif
 
 LIBRARIES += -L$(S2) -ls2 -ls2cellid -lgoogle-strings -lgoogle-base \
-			-lgoogle-util-coding -lgoogle-util-math -lstdc++
+			-lgoogle-util-coding -lgoogle-util-math -lstdc++ \
+			-laio
 
 LIBRARIES := $(AS_LIBRARIES) $(LIBRARIES)
 
