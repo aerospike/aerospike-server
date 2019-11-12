@@ -152,7 +152,7 @@ typedef struct as_config_s {
 	// For special debugging or bug-related repair:
 
 	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
-	bool		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
+	bool			fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
 	uint32_t		prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
 
 	//--------------------------------------------
