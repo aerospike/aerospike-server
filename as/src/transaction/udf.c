@@ -959,12 +959,7 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 		};
 
 		update_metadata_in_index(tr, r);
-
-		// FIXME - hide?
-		r->tombstone = urecord_op == UDF_OPTYPE_DELETE &&
-				as_transaction_is_durable_delete(tr) ? 1 : 0;
-		r->cenotaph = 0;
-
+		udpate_delete_metadata(tr, r, urecord_op == UDF_OPTYPE_DELETE);
 		as_record_transition_stats(r, ns, &old_metadata);
 
 		// TODO - old pickle - remove in "six months".

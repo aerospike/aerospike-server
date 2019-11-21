@@ -488,9 +488,6 @@ as_record_pickle_is_binless(const uint8_t *buf)
 	return *(uint16_t *)buf == 0;
 }
 
-// For enterprise split only.
-int record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
-
 static inline int
 resolve_last_update_time(uint64_t left, uint64_t right)
 {
@@ -533,6 +530,10 @@ typedef struct as_remote_record_s {
 
 int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex, bool do_xdr_write);
 
+// For enterprise split only.
+int record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
+void update_index_metadata_rr(const as_remote_record *rr, as_record *r);
+
 // a simpler call that gives seconds in the right epoch
 #define as_record_void_time_get() cf_clepoch_seconds()
 bool as_record_is_expired(const as_record *r); // TODO - eventually inline
@@ -542,6 +543,16 @@ as_record_is_doomed(const as_record *r, struct as_namespace_s *ns)
 {
 	return as_record_is_expired(r) || as_truncate_record_is_truncated(r, ns);
 }
+
+// Quietly trim void-time. (Clock on remote node different?) TODO - best way?
+static inline uint32_t
+trim_void_time(uint32_t void_time)
+{
+	uint32_t max_void_time = as_record_void_time_get() + MAX_ALLOWED_TTL;
+
+	return void_time > max_void_time ? max_void_time : void_time;
+}
+
 
 #define AS_SINDEX_MAX		256
 

@@ -108,6 +108,7 @@ bool check_msg_key(struct as_msg_s* m, struct as_storage_rd_s* rd);
 bool get_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 void update_metadata_in_index(struct as_transaction_s* tr, struct as_index_s* r);
+void udpate_delete_metadata(const struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void record_delete_adjust_sindex(struct as_index_s* r, struct as_namespace_s* ns);

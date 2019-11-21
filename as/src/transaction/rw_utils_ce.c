@@ -123,6 +123,12 @@ generation_check(const as_record* r, const as_msg* m, const as_namespace* ns)
 }
 
 
+void
+udpate_delete_metadata(const as_transaction* tr, as_record* r, bool is_delete)
+{
+}
+
+
 //==========================================================
 // Private API - for enterprise separation only.
 //

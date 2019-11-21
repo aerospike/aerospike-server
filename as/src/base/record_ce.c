@@ -125,3 +125,11 @@ record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut,
 
 	return 0;
 }
+
+void
+update_index_metadata_rr(const as_remote_record *rr, as_record *r)
+{
+	r->generation = (uint16_t)rr->generation;
+	r->void_time = trim_void_time(rr->void_time);
+	r->last_update_time = rr->last_update_time;
+}

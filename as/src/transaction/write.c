@@ -105,7 +105,6 @@ int write_master_ssd(as_transaction* tr, as_storage_rd* rd,
 		bool must_fetch_data, bool record_level_replace, rw_request* rw,
 		bool* is_delete, xdr_dirty_bins* dirty_bins);
 
-void write_master_update_index_metadata(as_transaction* tr, as_record* r);
 int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
 		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins,
@@ -1210,7 +1209,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	write_master_update_index_metadata(tr, r);
+	update_metadata_in_index(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1245,12 +1244,9 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		}
 
 		*is_delete = true;
-
-		// FIXME - hide?
-		if (as_transaction_is_durable_delete(tr)) {
-			r->tombstone = 1;
-		}
 	}
+
+	udpate_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1339,7 +1335,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	write_master_update_index_metadata(tr, r);
+	update_metadata_in_index(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1383,12 +1379,9 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 		}
 
 		*is_delete = true;
-
-		// FIXME - hide?
-		if (as_transaction_is_durable_delete(tr)) {
-			r->tombstone = 1;
-		}
 	}
+
+	udpate_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1498,7 +1491,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	write_master_update_index_metadata(tr, r);
+	update_metadata_in_index(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1532,14 +1525,9 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 			unwind_index_metadata(&old_metadata, r);
 			return result;
 		}
-
-		*is_delete = true;
-
-		// FIXME - hide?
-		if (as_transaction_is_durable_delete(tr)) {
-			r->tombstone = 1;
-		}
 	}
+
+	udpate_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1642,7 +1630,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	write_master_update_index_metadata(tr, r);
+	update_metadata_in_index(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1677,14 +1665,9 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 			unwind_index_metadata(&old_metadata, r);
 			return result;
 		}
-
-		*is_delete = true;
-
-		// FIXME - hide?
-		if (as_transaction_is_durable_delete(tr)) {
-			r->tombstone = 1;
-		}
 	}
+
+	udpate_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1728,17 +1711,6 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 //==========================================================
 // write_master() - apply record updates.
 //
-
-void
-write_master_update_index_metadata(as_transaction* tr, as_record* r)
-{
-	update_metadata_in_index(tr, r);
-
-	// Note - can't update tombstone yet - don't know.
-	// FIXME - hide?
-	r->cenotaph = 0;
-}
-
 
 int
 write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,

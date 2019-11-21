@@ -74,7 +74,6 @@ int old_record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sind
 int old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd, bool *is_delete);
 int old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex, bool *is_delete);
 
-void update_index_metadata(const as_remote_record *rr, as_record *r);
 void unwind_dim_single_bin(as_bin* old_bin, as_bin* new_bin);
 
 int unpickle_bins(as_remote_record *rr, as_storage_rd *rd, cf_ll_buf *particles_llb);
@@ -106,15 +105,6 @@ next_generation(uint16_t local, uint16_t remote, as_namespace* ns)
 	remote = plain_generation(remote, ns);
 
 	return local == 0xFFFF ? remote == 1 : remote - local == 1;
-}
-
-// Quietly trim void-time. (Clock on remote node different?) TODO - best way?
-static inline uint32_t
-trim_void_time(uint32_t void_time)
-{
-	uint32_t max_void_time = as_record_void_time_get() + MAX_ALLOWED_TTL;
-
-	return void_time > max_void_time ? max_void_time : void_time;
 }
 
 
@@ -642,7 +632,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -713,7 +703,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -792,7 +782,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Write the record to storage.
 	int result = as_storage_record_write(rd);
@@ -874,7 +864,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -950,7 +940,7 @@ old_record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -1015,7 +1005,7 @@ old_record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
@@ -1110,7 +1100,7 @@ old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
@@ -1194,7 +1184,7 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata(rr, r);
+	update_index_metadata_rr(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
@@ -1224,19 +1214,6 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	cf_ll_buf_free(&particles_llb);
 
 	return AS_OK;
-}
-
-
-void
-update_index_metadata(const as_remote_record *rr, as_record *r)
-{
-	r->generation = (uint16_t)rr->generation;
-	r->void_time = trim_void_time(rr->void_time);
-	r->last_update_time = rr->last_update_time;
-
-	// FIXME - hide?
-	r->tombstone = rr->n_bins == 0 ? 1 : 0;
-	r->cenotaph = 0;
 }
 
 
