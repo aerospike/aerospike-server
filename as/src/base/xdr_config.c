@@ -87,7 +87,7 @@ xdr_config_dest_defaults(xdr_dest_config *dest_cfg)
 	// HTTP destination
 	xdr_dest_http_config *http_conf = &dest_cfg->http;
 	http_conf->verbose = false;
-	http_conf->version_str = cf_strdup(XDR_CFG_HTTP_VERSION_2);
+	http_conf->version_str = cf_strdup(XDR_CFG_HTTP_VERSION_1);
 	cf_vector_init(&http_conf->urls, sizeof(void *), 10, 0); // pointer vector
 }
 
