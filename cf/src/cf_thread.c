@@ -49,11 +49,15 @@
 // Typedefs & constants.
 //
 
+#define MAX_N_ADDRS 50
+
 typedef struct thread_info_s {
 	cf_ll_element link; // base object must be first
 	cf_thread_run_fn run;
 	void* udata;
 	pid_t sys_tid;
+	uint32_t n_addrs;
+	void* addrs[MAX_N_ADDRS];
 } thread_info;
 
 
@@ -68,8 +72,6 @@ static pthread_attr_t g_attr_detached;
 static cf_ll g_thread_list;
 static __thread thread_info* g_thread_info;
 
-static cf_mutex g_trace_lock = CF_MUTEX_INIT;
-static cf_dyn_buf* g_trace_db;
 static volatile uint32_t g_traces_pending;
 static volatile uint32_t g_traces_done;
 
@@ -83,7 +85,8 @@ static void register_thread_info(void* udata);
 static void deregister_thread_info(void);
 static void* detached_shim_fn(void* udata);
 static void* joinable_shim_fn(void* udata);
-static int32_t traces_cb(cf_ll_element* ele, void* udata);
+static int32_t collect_traces_cb(cf_ll_element* ele, void* udata);
+static int32_t print_traces_cb(cf_ll_element* ele, void* udata);
 
 
 //==========================================================
@@ -142,11 +145,10 @@ cf_thread_traces(char* key, cf_dyn_buf* db)
 {
 	(void)key;
 
-	g_trace_db = db;
 	g_traces_pending = 0;
 	g_traces_done = 0;
 
-	cf_ll_reduce(&g_thread_list, true, traces_cb, NULL);
+	cf_ll_reduce(&g_thread_list, true, collect_traces_cb, NULL);
 
 	// Quit after 15 seconds - may not get all done if a thread exits after
 	// we signal it but before its action is handled.
@@ -158,8 +160,8 @@ cf_thread_traces(char* key, cf_dyn_buf* db)
 		usleep(10 * 1000);
 	}
 
+	cf_ll_reduce(&g_thread_list, true, print_traces_cb, db);
 	cf_dyn_buf_chomp(db);
-	g_trace_db = NULL;
 
 	return 0;
 }
@@ -171,29 +173,9 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 	(void)info;
 	(void)ctx;
 
-	cf_mutex_lock(&g_trace_lock);
-
-	cf_dyn_buf_append_format(g_trace_db, "---------- %d (0x%lx) ----------;",
-			g_thread_info->sys_tid, cf_fault_strip_aslr(g_thread_info->run));
-
-	void* addrs[50];
-	int32_t n_addrs = backtrace(addrs, 50);
-	char** syms = backtrace_symbols(addrs, n_addrs);
-
-	if (syms == NULL) {
-		cf_dyn_buf_append_format(g_trace_db, "failed;");
-		g_traces_done++;
-		cf_mutex_unlock(&g_trace_lock);
-		return;
-	}
-
-	for (int32_t i = 0; i < n_addrs; i++) {
-		cf_dyn_buf_append_format(g_trace_db, "%s;", syms[i]);
-	}
-
+	g_thread_info->n_addrs = (uint32_t)backtrace(g_thread_info->addrs,
+			MAX_N_ADDRS);
 	g_traces_done++;
-
-	cf_mutex_unlock(&g_trace_lock);
 }
 
 
@@ -256,7 +238,7 @@ joinable_shim_fn(void* udata)
 }
 
 static int32_t
-traces_cb(cf_ll_element* ele, void* udata)
+collect_traces_cb(cf_ll_element* ele, void* udata)
 {
 	(void)udata;
 
@@ -269,6 +251,37 @@ traces_cb(cf_ll_element* ele, void* udata)
 	}
 
 	g_traces_pending++;
+
+	return 0;
+}
+
+static int32_t
+print_traces_cb(cf_ll_element* ele, void* udata)
+{
+	thread_info* info = (thread_info*)ele;
+	cf_dyn_buf* db = (cf_dyn_buf*)udata;
+
+	cf_dyn_buf_append_format(db, "---------- %d (0x%lx) ----------;",
+			info->sys_tid, cf_fault_strip_aslr(info->run));
+
+	if (info->n_addrs == 0) { // race: thread created after we sent SIGUSR2
+		return 0;
+	}
+
+	char** syms = backtrace_symbols(info->addrs, (int32_t)info->n_addrs);
+
+	if (syms == NULL) {
+		cf_dyn_buf_append_format(db, "failed;");
+	}
+	else {
+		for (uint32_t i = 0; i < info->n_addrs; i++) {
+			cf_dyn_buf_append_format(db, "%s;", syms[i]);
+		}
+
+		free(syms);
+	}
+
+	info->n_addrs = 0;
 
 	return 0;
 }
