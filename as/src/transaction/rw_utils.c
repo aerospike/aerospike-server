@@ -307,11 +307,11 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 
 
 void
-update_metadata_in_index(as_transaction* tr, as_record* r)
+advance_record_version(const as_transaction* tr, as_record* r)
 {
 	// Shortcut pointers.
-	as_msg* m = &tr->msgp->msg;
-	as_namespace* ns = tr->rsv.ns;
+	const as_msg* m = &tr->msgp->msg;
+	const as_namespace* ns = tr->rsv.ns;
 
 	uint64_t now = cf_clepoch_milliseconds();
 

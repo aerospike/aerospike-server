@@ -958,8 +958,8 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 				.tombstone = r->tombstone == 1
 		};
 
-		update_metadata_in_index(tr, r);
-		udpate_delete_metadata(tr, r, urecord_op == UDF_OPTYPE_DELETE);
+		advance_record_version(tr, r);
+		transition_delete_metadata(tr, r, urecord_op == UDF_OPTYPE_DELETE);
 		as_record_transition_stats(r, ns, &old_metadata);
 
 		// TODO - old pickle - remove in "six months".

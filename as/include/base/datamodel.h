@@ -532,7 +532,7 @@ int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex, bool do_
 
 // For enterprise split only.
 int record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
-void update_index_metadata_rr(const as_remote_record *rr, as_record *r);
+void replace_index_metadata(const as_remote_record *rr, as_record *r);
 
 // a simpler call that gives seconds in the right epoch
 #define as_record_void_time_get() cf_clepoch_seconds()

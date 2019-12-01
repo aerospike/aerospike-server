@@ -632,7 +632,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -703,7 +703,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -782,7 +782,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Write the record to storage.
 	int result = as_storage_record_write(rd);
@@ -864,7 +864,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -940,7 +940,7 @@ old_record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
@@ -1005,7 +1005,7 @@ old_record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
@@ -1100,7 +1100,7 @@ old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;
@@ -1184,7 +1184,7 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	stash_index_metadata(r, &old_metadata);
 
 	rr->n_bins = n_new_bins; // rr->n_bins not set in old pickle path
-	update_index_metadata_rr(rr, r);
+	replace_index_metadata(rr, r);
 
 	// Prepare to store or drop key, as determined by message.
 	rd->key = rr->key;

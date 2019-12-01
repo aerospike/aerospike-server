@@ -58,24 +58,6 @@ validate_delete_durability(as_transaction* tr)
 }
 
 
-void
-stash_index_metadata(const as_record* r, index_metadata* old)
-{
-	old->void_time = r->void_time;
-	old->last_update_time = r->last_update_time;
-	old->generation = r->generation;
-}
-
-
-void
-unwind_index_metadata(const index_metadata* old, as_record* r)
-{
-	r->void_time = old->void_time;
-	r->last_update_time = old->last_update_time;
-	r->generation = old->generation;
-}
-
-
 int
 repl_state_check(as_record* r, as_transaction* tr)
 {
@@ -124,7 +106,25 @@ generation_check(const as_record* r, const as_msg* m, const as_namespace* ns)
 
 
 void
-udpate_delete_metadata(const as_transaction* tr, as_record* r, bool is_delete)
+stash_index_metadata(const as_record* r, index_metadata* old)
+{
+	old->void_time = r->void_time;
+	old->last_update_time = r->last_update_time;
+	old->generation = r->generation;
+}
+
+
+void
+unwind_index_metadata(const index_metadata* old, as_record* r)
+{
+	r->void_time = old->void_time;
+	r->last_update_time = old->last_update_time;
+	r->generation = old->generation;
+}
+
+
+void
+transition_delete_metadata(const as_transaction* tr, as_record* r, bool is_delete)
 {
 }
 

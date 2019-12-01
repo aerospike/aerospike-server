@@ -90,8 +90,6 @@ typedef struct now_times_s {
 
 int validate_delete_durability(struct as_transaction_s* tr);
 bool xdr_allows_write(struct as_transaction_s* tr);
-void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
-void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
 void send_rw_messages(struct rw_request_s* rw);
 void send_rw_messages_forget(struct rw_request_s* rw);
 int repl_state_check(struct as_index_s* r, struct as_transaction_s* tr);
@@ -107,8 +105,10 @@ int predexp_read_and_filter_bins(struct as_storage_rd_s* rd, struct predexp_eval
 bool check_msg_key(struct as_msg_s* m, struct as_storage_rd_s* rd);
 bool get_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
-void update_metadata_in_index(struct as_transaction_s* tr, struct as_index_s* r);
-void udpate_delete_metadata(const struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
+void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
+void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
+void advance_record_version(const struct as_transaction_s* tr, struct as_index_s* r);
+void transition_delete_metadata(const struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void record_delete_adjust_sindex(struct as_index_s* r, struct as_namespace_s* ns);

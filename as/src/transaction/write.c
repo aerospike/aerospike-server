@@ -1209,7 +1209,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_metadata_in_index(tr, r);
+	advance_record_version(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1246,7 +1246,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		*is_delete = true;
 	}
 
-	udpate_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1335,7 +1335,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_metadata_in_index(tr, r);
+	advance_record_version(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1381,7 +1381,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 		*is_delete = true;
 	}
 
-	udpate_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1491,7 +1491,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_metadata_in_index(tr, r);
+	advance_record_version(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1527,7 +1527,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		}
 	}
 
-	udpate_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1630,7 +1630,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	index_metadata old_metadata;
 
 	stash_index_metadata(r, &old_metadata);
-	update_metadata_in_index(tr, r);
+	advance_record_version(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1667,7 +1667,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 		}
 	}
 
-	udpate_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
