@@ -51,8 +51,6 @@
 #define XDR_CFG_DEST_HTTP			"http"
 
 #define XDR_CFG_HTTP_VERSION_1 "v1"
-#define XDR_CFG_HTTP_VERSION_2 "v2"
-#define XDR_CFG_HTTP_VERSION_2_PRIOR_KNOWLEDGE "v2-prior-knowledge"
 
 typedef struct xdr_node_lst_s {
 	cf_node		node;
