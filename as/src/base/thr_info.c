@@ -6186,6 +6186,28 @@ ERR:
 }
 
 int
+info_command_sindex_exists(char *name, char *params, cf_dyn_buf *db)
+{
+	as_sindex_metadata imd;
+	memset((void *)&imd, 0, sizeof(imd));
+
+	bool is_smd_op = false;
+
+	if (as_info_parse_params_to_sindex_imd(params, &imd, db, false,
+			&is_smd_op, "SINDEX EXISTS") != 0) {
+		as_sindex_imd_free(&imd);
+		return 0;
+	}
+
+	as_namespace* ns = as_namespace_get_byname(imd.ns_name);
+
+	cf_dyn_buf_append_string(db, as_sindex_exists(ns, &imd) ? "true" : "false");
+
+	as_sindex_imd_free(&imd);
+	return 0;
+}
+
+int
 as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_buf* db, char * sindex_cmd)
 {
 	char ns_str[AS_ID_NAMESPACE_SZ];
@@ -6465,6 +6487,7 @@ as_info_init()
 			"cdt-list;cdt-map;cluster-stable;"
 			"float;"
 			"geo;"
+			"sindex-exists;"
 			"peers;pipelining;"
 			"relaxed-sc;replicas;replicas-all;replicas-master;"
 			"truncate-namespace;"
@@ -6605,6 +6628,7 @@ as_info_init()
 	as_info_set_tree("sindex", info_get_tree_sindexes);
 	as_info_set_command("sindex-create", info_command_sindex_create, PERM_INDEX_MANAGE);  // Create a secondary index.
 	as_info_set_command("sindex-delete", info_command_sindex_delete, PERM_INDEX_MANAGE);  // Delete a secondary index.
+	as_info_set_command("sindex-exists", info_command_sindex_exists, PERM_INDEX_MANAGE);  // Does secondary index exist.
 
 	// UDF
 	as_info_set_dynamic("udf-list", udf_cask_info_list, false);

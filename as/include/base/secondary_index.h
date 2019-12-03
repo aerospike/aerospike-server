@@ -460,6 +460,7 @@ extern int  as_sindex_boot_populateall();
 extern int  as_sindex_create(as_namespace *ns, as_sindex_metadata *imd);
 extern int  as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd);
 extern int  as_sindex_recreate(as_sindex_metadata *imd);
+extern bool as_sindex_exists(as_namespace* ns, as_sindex_metadata* imd);
 extern void as_sindex_destroy_pmetadata(as_sindex *si);
 // **************************************************************************************************
 
