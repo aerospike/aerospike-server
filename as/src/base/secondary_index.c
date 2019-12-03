@@ -1669,6 +1669,17 @@ as_sindex_recreate(as_sindex_metadata* imd)
 // ************************************************************************************************
 //                                         SINDEX DELETE
 
+bool
+as_sindex_exists(as_namespace* ns, as_sindex_metadata* imd)
+{
+	SINDEX_GRLOCK();
+
+	int simatch = as_sindex__simatch_by_iname(ns, imd->iname);
+
+	SINDEX_GRUNLOCK();
+	return simatch != -1;
+}
+
 void
 as_sindex_destroy_pmetadata(as_sindex *si)
 {
