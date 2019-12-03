@@ -53,6 +53,10 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
 
+#ifndef TCP_USER_TIMEOUT
+#define TCP_USER_TIMEOUT 18
+#endif
+
 typedef struct dns_resolve_udata_s {
 	cf_ip_addr_from_string_cb cb;
 	void *udata;
@@ -711,6 +715,21 @@ cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t co
 
 	if (count > 0) {
 		safe_setsockopt(sock->fd, SOL_TCP, TCP_KEEPCNT, &count, sizeof(count));
+	}
+
+	// If a connection has unacknowledged outgoing data, the TCP stack detects
+	// its death after tcp_retries2 (sysctl) retransmissions; the keep-alive
+	// setting is ineffective in this case. Approximate (Linux -4.18) or emulate
+	// (Linux 4.18+) keep-alive via TCP_USER_TIMEOUT.
+
+	int32_t user_timeout = (idle + interval * count) * 1000;
+
+	if (user_timeout > 0) {
+		if (setsockopt(sock->fd, SOL_TCP, TCP_USER_TIMEOUT, &user_timeout,
+				sizeof(user_timeout)) < 0 && errno != ENOPROTOOPT) {
+			cf_crash(CF_SOCKET, "setsockopt(%d) failed on FD %d: %d (%s)",
+					TCP_USER_TIMEOUT, sock->fd, errno, cf_strerror(errno));
+		}
 	}
 }
 

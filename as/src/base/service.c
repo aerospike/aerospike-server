@@ -368,6 +368,8 @@ run_accept(void* udata)
 				continue;
 			}
 
+			cf_socket_keep_alive(&csock, 60, 60, 2);
+
 			if (cfg->owner == CF_SOCK_OWNER_SERVICE_TLS) {
 				tls_socket_prepare_server(g_service_tls, &csock);
 			}
