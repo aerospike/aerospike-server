@@ -953,11 +953,9 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 			m->record_ttl = TTL_NAMESPACE_DEFAULT;
 		}
 
-		index_metadata old_metadata = {
-				// Note - other members irrelevant.
-				.tombstone = r->tombstone == 1
-		};
+		index_metadata old_metadata;
 
+		stash_index_metadata(r, &old_metadata);
 		advance_record_version(tr, r);
 		transition_delete_metadata(tr, r, urecord_op == UDF_OPTYPE_DELETE);
 		as_record_transition_stats(r, ns, &old_metadata);

@@ -1525,6 +1525,8 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 			unwind_index_metadata(&old_metadata, r);
 			return result;
 		}
+
+		*is_delete = true;
 	}
 
 	transition_delete_metadata(tr, r, *is_delete);
@@ -1665,6 +1667,8 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 			unwind_index_metadata(&old_metadata, r);
 			return result;
 		}
+
+		*is_delete = true;
 	}
 
 	transition_delete_metadata(tr, r, *is_delete);
