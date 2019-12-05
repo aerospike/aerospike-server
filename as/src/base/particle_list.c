@@ -334,7 +334,6 @@ static void list_offset_index_rm_mask_cpy(offset_index *dst, const offset_index 
 
 // list_full_offset_index
 static inline void list_full_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz);
-static bool list_full_offset_index_fill_to(offset_index *offidx, uint32_t index, bool check_storage);
 
 // list_order_index
 static int list_order_index_sort_cmp_fn(const void *x, const void *y, void *p);
@@ -4603,7 +4602,7 @@ list_full_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr,
 	offset_index_init(offidx, idx_mem_ptr, ele_count, contents, content_sz);
 }
 
-static bool
+bool
 list_full_offset_index_fill_to(offset_index *offidx, uint32_t index,
 		bool check_storage)
 {
