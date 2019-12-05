@@ -5604,6 +5604,10 @@ static void
 mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname,
 		const cf_ip_addr *addrs, uint32_t n_addrs, void *udata)
 {
+	if (n_addrs == 0) {
+		return;
+	}
+
 	MESH_LOCK();
 	cf_vector* seeds = &g_hb.mode_state.mesh_state.seeds;
 	int element_count = cf_vector_size(seeds);
