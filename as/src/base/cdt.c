@@ -1942,8 +1942,9 @@ offset_index_find_items(offset_index *full_offidx,
 		return false; // dummy return to quash warning
 	}
 
-	if (! list_full_offset_index_fill_all(&items_offidx)) {
-		cf_warning(AS_PARTICLE, "offset_index_find_items() invalid parameter key list");
+	if (! list_full_offset_index_fill_to(&items_offidx,
+			items_offidx._.ele_count, false)) {
+		cf_warning(AS_PARTICLE, "offset_index_find_items() invalid parameter list");
 		return false;
 	}
 
