@@ -877,7 +877,7 @@ run_reaper(void* udata)
 				as_security_refresh(fd_h);
 			}
 
-			// reap_me overrides do_not_reap.
+			// reap_me overrides in_transaction.
 			if (fd_h->reap_me) {
 				g_file_handles[i] = NULL;
 				cf_queue_push_head(&g_free_slots, &i);

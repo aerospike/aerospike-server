@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include "fault.h"
 #include "base/datamodel.h"
+#include "storage/drv_common.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
 
@@ -47,19 +48,18 @@ run_ssd_cool_start(void* udata)
 }
 
 void
-ssd_header_init_cfg(const as_namespace* ns, drv_ssd* ssd,
-		ssd_device_header* header)
+ssd_header_init_cfg(const as_namespace* ns, drv_ssd* ssd, drv_header* header)
 {
 	if (ns->single_bin) {
-		header->common.prefix.flags |= SSD_HEADER_FLAG_SINGLE_BIN;
+		header->generic.prefix.flags |= DRV_HEADER_FLAG_SINGLE_BIN;
 	}
 }
 
 void
 ssd_header_validate_cfg(const as_namespace* ns, drv_ssd* ssd,
-		const ssd_device_header* header)
+		const drv_header* header)
 {
-	if ((header->common.prefix.flags & SSD_HEADER_FLAG_SINGLE_BIN) != 0) {
+	if ((header->generic.prefix.flags & DRV_HEADER_FLAG_SINGLE_BIN) != 0) {
 		if (! ns->single_bin) {
 			cf_crash(AS_DRV_SSD, "device has 'single-bin' data but 'single-bin' is not configured");
 		}
@@ -97,13 +97,13 @@ ssd_cold_start_drop_cenotaphs(as_namespace* ns)
 }
 
 void
-ssd_adjust_versions(as_namespace* ns, ssd_common_pmeta* pmeta)
+ssd_adjust_versions(as_namespace* ns, drv_pmeta* pmeta)
 {
 	// Nothing to do - relevant for enterprise version only.
 }
 
 conflict_resolution_pol
-ssd_cold_start_policy(as_namespace *ns)
+ssd_cold_start_policy(const as_namespace *ns)
 {
 	return AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
 }

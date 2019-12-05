@@ -2036,9 +2036,47 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	info_append_string(db, "storage-engine",
 			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY ? "memory" :
-				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal")));
+				(ns->storage_type == AS_STORAGE_ENGINE_PMEM ? "pmem" :
+					(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal"))));
 
-	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+	if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
+		uint32_t n = as_namespace_device_count(ns);
+
+		for (uint32_t i = 0; i < n; i++) {
+			info_append_indexed_string(db, "storage-engine.file", i, NULL, ns->storage_devices[i]);
+
+			if (ns->n_storage_shadows != 0) {
+				info_append_indexed_string(db, "storage-engine.file", i, "shadow", ns->storage_shadows[i]);
+			}
+		}
+
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
+		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
+		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
+		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
+		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
+		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
+		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
+		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
+		info_append_bool(db, "storage-engine.direct-files", ns->storage_direct_files);
+		info_append_bool(db, "storage-engine.disable-odsync", ns->storage_disable_odsync);
+		info_append_bool(db, "storage-engine.enable-benchmarks-storage", ns->storage_benchmarks_enabled);
+
+		if (ns->storage_encryption_key_file != NULL) {
+			info_append_string(db, "storage-engine.encryption",
+				ns->storage_encryption == AS_ENCRYPTION_AES_128 ? "aes-128" :
+					(ns->storage_encryption == AS_ENCRYPTION_AES_256 ? "aes-256" :
+						"illegal"));
+		}
+
+		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
+		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
+		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
+		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
+		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
+	}
+	else if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		uint32_t n = as_namespace_device_count(ns);
 		const char* tag = ns->n_storage_devices != 0 ?
 				"storage-engine.device" : "storage-engine.file";
@@ -5262,16 +5300,39 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Persistent storage stats.
 
-	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+	if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
 		int available_pct = 0;
 		uint64_t used_bytes = 0;
 		as_storage_stats(ns, &available_pct, &used_bytes);
 
-		info_append_uint64(db, "device_total_bytes", ns->ssd_size);
+		info_append_uint64(db, "pmem_total_bytes", ns->drive_size);
+		info_append_uint64(db, "pmem_used_bytes", used_bytes);
+
+		free_pct = (ns->drive_size != 0 && (ns->drive_size > used_bytes)) ?
+				((ns->drive_size - used_bytes) * 100L) / ns->drive_size : 0;
+
+		info_append_uint64(db, "pmem_free_pct", free_pct);
+		info_append_int(db, "pmem_available_pct", available_pct);
+
+		if (ns->storage_compression != AS_COMPRESSION_NONE) {
+			double orig_sz = as_load_double(&ns->comp_avg_orig_sz);
+			double ratio = orig_sz > 0.0 ? ns->comp_avg_comp_sz / orig_sz : 1.0;
+
+			info_append_format(db, "pmem_compression_ratio", "%.3f", ratio);
+		}
+
+		add_data_device_stats(ns, db);
+	}
+	else if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+		int available_pct = 0;
+		uint64_t used_bytes = 0;
+		as_storage_stats(ns, &available_pct, &used_bytes);
+
+		info_append_uint64(db, "device_total_bytes", ns->drive_size);
 		info_append_uint64(db, "device_used_bytes", used_bytes);
 
-		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > used_bytes)) ?
-				((ns->ssd_size - used_bytes) * 100L) / ns->ssd_size : 0;
+		free_pct = (ns->drive_size != 0 && (ns->drive_size > used_bytes)) ?
+				((ns->drive_size - used_bytes) * 100L) / ns->drive_size : 0;
 
 		info_append_uint64(db, "device_free_pct", free_pct);
 		info_append_int(db, "device_available_pct", available_pct);

@@ -81,6 +81,7 @@ char *cf_fault_context_strings[] = {
 		"bin",
 		"config",
 		"clustering",
+		"drv_pmem",
 		"drv_ssd",
 		"exchange",
 		"fabric",

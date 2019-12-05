@@ -26,12 +26,10 @@
 // Includes.
 //
 
-#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
-#include <unistd.h>
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
@@ -43,6 +41,7 @@
 
 #include "base/datamodel.h"
 #include "fabric/partition.h"
+#include "storage/drv_common.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
 
@@ -62,92 +61,6 @@ struct drv_ssd_s;
 //==========================================================
 // Typedefs & constants.
 //
-
-#define SSD_HEADER_OLD_MAGIC	(0x4349747275730707L)
-#define SSD_HEADER_MAGIC		(0x4349747275730322L)
-#define SSD_VERSION				3
-// SSD_VERSION history:
-// 1 - original
-// 2 - minimum storage increment (RBLOCK_SIZE) from 512 to 128 bytes
-// 3 - total overhaul including changed magic and moved version
-
-// Device header flags.
-#define SSD_HEADER_FLAG_TRUSTED				0x01
-#define SSD_HEADER_FLAG_SINGLE_BIN			0x02
-#define SSD_HEADER_FLAG_ENCRYPTED			0x04
-#define SSD_HEADER_FLAG_CP					0x08
-#define SSD_HEADER_FLAG_COMMIT_TO_DEVICE	0x10
-
-// Used when determining a device's io_min_size.
-#define LO_IO_MIN_SIZE 512
-#define HI_IO_MIN_SIZE 4096
-
-// SSD_HEADER_SIZE must be a power of 2 and >= MAX_WRITE_BLOCK_SIZE.
-// Do NOT change SSD_HEADER_SIZE!
-#define SSD_HEADER_SIZE (8 * 1024 * 1024)
-
-
-//------------------------------------------------
-// Device header.
-//
-
-// TODO - were we going to change 'prefix' to 'base'?
-typedef struct ssd_common_prefix_s {
-	uint64_t	magic;
-	uint32_t	version;
-	char		namespace[32];
-	uint32_t	n_devices;
-	uint64_t	random; // identify matching set of devices
-	uint32_t	flags;
-	uint32_t	write_block_size;
-	uint32_t	eventual_regime;
-	uint32_t	last_evict_void_time;
-	uint32_t	roster_generation;
-} ssd_common_prefix;
-
-// Because we pad explicitly:
-COMPILER_ASSERT(sizeof(ssd_common_prefix) <= HI_IO_MIN_SIZE);
-
-// TODO - deal with the name and the name of as_storage_info_set/get!
-typedef struct ssd_common_pmeta_s {
-	as_partition_version version;
-	uint8_t		tree_id;
-	uint8_t		unused[7];
-} ssd_common_pmeta;
-
-// Make sure a ssd_common_pmeta never unnecessarily crosses an IO size boundary.
-COMPILER_ASSERT((sizeof(ssd_common_pmeta) & (sizeof(ssd_common_pmeta) - 1)) == 0);
-
-typedef struct ssd_device_common_s {
-	ssd_common_prefix	prefix;
-	uint8_t				pad_prefix[HI_IO_MIN_SIZE - sizeof(ssd_common_prefix)];
-	ssd_common_pmeta	pmeta[AS_PARTITIONS];
-} ssd_device_common;
-
-typedef struct ssd_device_unique_s {
-	uint32_t	device_id;
-	uint32_t	unused;
-	uint8_t		encrypted_key[64];
-	uint8_t		canary[16];
-	uint64_t	pristine_offset;
-} ssd_device_unique;
-
-#define ROUND_UP_COMMON \
-	((sizeof(ssd_device_common) + (HI_IO_MIN_SIZE - 1)) & -HI_IO_MIN_SIZE)
-
-typedef struct ssd_device_header_s {
-	ssd_device_common	common;
-	uint8_t				pad_common[ROUND_UP_COMMON - sizeof(ssd_device_common)];
-	ssd_device_unique	unique;
-} ssd_device_header;
-
-COMPILER_ASSERT(sizeof(ssd_device_header) <= SSD_HEADER_SIZE);
-
-COMPILER_ASSERT(offsetof(ssd_device_header, common) == 0);
-COMPILER_ASSERT(offsetof(ssd_device_header, common.prefix) == 0);
-
-#define SSD_OFFSET_UNIQUE (offsetof(ssd_device_header, unique))
-
 
 //------------------------------------------------
 // A defragged wblock waiting to be freed.
@@ -187,13 +100,6 @@ typedef struct ssd_wblock_state_s {
 	uint32_t			state;		// for now just a defrag flag
 	cf_atomic32			n_vac_dests; // number of wblocks into which this wblock defragged
 } ssd_wblock_state;
-
-// wblock state
-//
-// Ultimately this may become a full-blown state, but for now it's effectively
-// just a defrag flag.
-#define WBLOCK_STATE_NONE		0
-#define WBLOCK_STATE_DEFRAG		1
 
 
 //------------------------------------------------
@@ -292,7 +198,7 @@ typedef struct drv_ssd_s {
 //
 typedef struct drv_ssds_s {
 	struct as_namespace_s	*ns;
-	ssd_device_common		*common;
+	drv_generic				*generic;
 
 	// Not a great place for this - used only at startup to determine whether to
 	// load a record.
@@ -343,16 +249,16 @@ void ssd_decrypt(drv_ssd *ssd, uint64_t off, struct as_flat_record_s *flat);
 void ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks, struct as_flat_record_s *flat);
 
 // CP.
-void ssd_adjust_versions(struct as_namespace_s *ns, ssd_common_pmeta* pmeta);
-conflict_resolution_pol ssd_cold_start_policy(struct as_namespace_s *ns);
+void ssd_adjust_versions(struct as_namespace_s *ns, drv_pmeta* pmeta);
+conflict_resolution_pol ssd_cold_start_policy(const struct as_namespace_s *ns);
 void ssd_cold_start_init_repl_state(struct as_namespace_s *ns, struct as_index_s* r);
 
 // Miscellaneous.
 int ssd_fd_get(drv_ssd *ssd);
 int ssd_shadow_fd_get(drv_ssd *ssd);
 void ssd_fd_put(drv_ssd *ssd, int fd);
-void ssd_header_init_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, ssd_device_header *header);
-void ssd_header_validate_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, const ssd_device_header *header);
+void ssd_header_init_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, drv_header *header);
+void ssd_header_validate_cfg(const struct as_namespace_s *ns, drv_ssd* ssd, const drv_header *header);
 void ssd_flush_final_cfg(struct as_namespace_s *ns);
 void ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size);
 void ssd_prefetch_wblock(drv_ssd *ssd, uint64_t file_offset, uint8_t *read_buf);
@@ -371,30 +277,8 @@ int ssd_write(struct as_storage_rd_s *rd);
 
 
 //
-// Conversions between offsets and rblocks.
-//
-
-// TODO - make checks stricter (exclude drive header, consider drive size) ???
-#define STORAGE_RBLOCK_IS_VALID(__x)	((__x) != 0)
-#define STORAGE_RBLOCK_IS_INVALID(__x)	((__x) == 0)
-
-// Convert byte offset to rblock_id, as long as offset is already a multiple of
-// rblock size.
-static inline uint64_t OFFSET_TO_RBLOCK_ID(uint64_t offset) {
-	return offset >> LOG_2_RBLOCK_SIZE;
-}
-
-// Convert rblock_id to byte offset.
-static inline uint64_t RBLOCK_ID_TO_OFFSET(uint64_t rblocks) {
-	return rblocks << LOG_2_RBLOCK_SIZE;
-}
-
-
-//
 // Conversions between bytes/rblocks and wblocks.
 //
-
-#define STORAGE_INVALID_WBLOCK 0xFFFFffff
 
 // Convert byte offset to wblock_id.
 static inline uint32_t OFFSET_TO_WBLOCK_ID(drv_ssd *ssd, uint64_t offset) {
@@ -410,14 +294,6 @@ static inline uint64_t WBLOCK_ID_TO_OFFSET(drv_ssd *ssd, uint32_t wblock_id) {
 static inline uint32_t RBLOCK_ID_TO_WBLOCK_ID(drv_ssd *ssd, uint64_t rblock_id) {
 	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) / ssd->write_block_size);
 }
-
-
-//
-// Size rounding needed for sanity checking.
-//
-
-#define SSD_RECORD_MIN_SIZE \
-	(((uint32_t)sizeof(as_flat_record) + (RBLOCK_SIZE - 1)) & -RBLOCK_SIZE)
 
 
 //
@@ -444,55 +320,4 @@ BYTES_DOWN_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 static inline uint64_t
 BYTES_UP_TO_SHADOW_IO_MIN(drv_ssd *ssd, uint64_t bytes) {
 	return (bytes + (ssd->shadow_io_min_size - 1)) & -ssd->shadow_io_min_size;
-}
-
-
-//
-// Device IO.
-//
-
-static inline bool
-pread_all(int fd, void* buf, size_t size, off_t offset)
-{
-	ssize_t result;
-
-	while ((result = pread(fd, buf, size, offset)) != (ssize_t)size) {
-		if (result < 0) {
-			return false; // let the caller log errors
-		}
-
-		if (result == 0) { // should only happen if caller passed 0 size
-			errno = EINVAL;
-			return false;
-		}
-
-		buf += result;
-		offset += result;
-		size -= result;
-	}
-
-	return true;
-}
-
-static inline bool
-pwrite_all(int fd, void* buf, size_t size, off_t offset)
-{
-	ssize_t result;
-
-	while ((result = pwrite(fd, buf, size, offset)) != (ssize_t)size) {
-		if (result < 0) {
-			return false; // let the caller log errors
-		}
-
-		if (result == 0) { // should only happen if caller passed 0 size
-			errno = EINVAL;
-			return false;
-		}
-
-		buf += result;
-		offset += result;
-		size -= result;
-	}
-
-	return true;
 }

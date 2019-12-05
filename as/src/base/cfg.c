@@ -215,8 +215,8 @@ cfg_set_defaults()
 	}
 
 	// Mod-lua defaults.
-	c->mod_lua.server_mode      = true;
-	c->mod_lua.cache_enabled    = true;
+	c->mod_lua.server_mode = true;
+	c->mod_lua.cache_enabled = true;
 	strcpy(c->mod_lua.user_path, "/opt/aerospike/usr/udf/lua");
 
 	// TODO - security set default config API?
@@ -612,6 +612,7 @@ typedef enum {
 
 	// Namespace storage-engine options (value tokens):
 	CASE_NAMESPACE_STORAGE_MEMORY,
+	CASE_NAMESPACE_STORAGE_PMEM,
 	CASE_NAMESPACE_STORAGE_SSD,
 	CASE_NAMESPACE_STORAGE_DEVICE,
 
@@ -624,6 +625,29 @@ typedef enum {
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT,
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT,
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT,
+
+	// Namespace storage-engine pmem options:
+	// Normally visible, in canonical configuration file order:
+	CASE_NAMESPACE_STORAGE_PMEM_FILE,
+	CASE_NAMESPACE_STORAGE_PMEM_FILESIZE,
+	// Normally hidden:
+	CASE_NAMESPACE_STORAGE_PMEM_COMMIT_TO_DEVICE,
+	CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION,
+	CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_LEVEL,
+	CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_LWM_PCT,
+	CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_QUEUE_MIN,
+	CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_SLEEP,
+	CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_STARTUP_MINIMUM,
+	CASE_NAMESPACE_STORAGE_PMEM_DIRECT_FILES,
+	CASE_NAMESPACE_STORAGE_PMEM_DISABLE_ODSYNC,
+	CASE_NAMESPACE_STORAGE_PMEM_ENABLE_BENCHMARKS_STORAGE,
+	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION,
+	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS,
+	CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE,
+	CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT,
+	CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER,
+	CASE_NAMESPACE_STORAGE_PMEM_TOMB_RAIDER_SLEEP,
 
 	// Namespace storage-engine device options:
 	// Normally visible, in canonical configuration file order:
@@ -671,15 +695,15 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS,
 
-	// Namespace storage device compression options (value tokens):
-	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_NONE,
-	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LZ4,
-	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_SNAPPY,
-	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ZSTD,
+	// Namespace storage compression options (value tokens):
+	CASE_NAMESPACE_STORAGE_COMPRESSION_NONE,
+	CASE_NAMESPACE_STORAGE_COMPRESSION_LZ4,
+	CASE_NAMESPACE_STORAGE_COMPRESSION_SNAPPY,
+	CASE_NAMESPACE_STORAGE_COMPRESSION_ZSTD,
 
-	// Namespace storage device encryption options (value tokens):
-	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_AES_128,
-	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_AES_256,
+	// Namespace storage encryption options (value tokens):
+	CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_128,
+	CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_256,
 
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
@@ -1203,6 +1227,7 @@ const cfg_opt NAMESPACE_INDEX_TYPE_OPTS[] = {
 
 const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
 		{ "memory",							CASE_NAMESPACE_STORAGE_MEMORY },
+		{ "pmem",							CASE_NAMESPACE_STORAGE_PMEM },
 		{ "ssd",							CASE_NAMESPACE_STORAGE_SSD },
 		{ "device",							CASE_NAMESPACE_STORAGE_DEVICE }
 };
@@ -1218,6 +1243,29 @@ const cfg_opt NAMESPACE_INDEX_TYPE_FLASH_OPTS[] = {
 		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT },
 		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT },
 		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT },
+		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt NAMESPACE_STORAGE_PMEM_OPTS[] = {
+		{ "file",							CASE_NAMESPACE_STORAGE_PMEM_FILE },
+		{ "filesize",						CASE_NAMESPACE_STORAGE_PMEM_FILESIZE },
+		{ "commit-to-device",				CASE_NAMESPACE_STORAGE_PMEM_COMMIT_TO_DEVICE },
+		{ "compression",					CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION },
+		{ "compression-level",				CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_LEVEL },
+		{ "defrag-lwm-pct",					CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_LWM_PCT },
+		{ "defrag-queue-min",				CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_QUEUE_MIN },
+		{ "defrag-sleep",					CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_SLEEP },
+		{ "defrag-startup-minimum",			CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_STARTUP_MINIMUM },
+		{ "direct-files",					CASE_NAMESPACE_STORAGE_PMEM_DIRECT_FILES },
+		{ "disable-odsync",					CASE_NAMESPACE_STORAGE_PMEM_DISABLE_ODSYNC },
+		{ "enable-benchmarks-storage",		CASE_NAMESPACE_STORAGE_PMEM_ENABLE_BENCHMARKS_STORAGE },
+		{ "encryption",						CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION },
+		{ "encryption-key-file",			CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE },
+		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS },
+		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE },
+		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT },
+		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER },
+		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_PMEM_TOMB_RAIDER_SLEEP },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1265,16 +1313,16 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS[] = {
-		{ "none",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_NONE },
-		{ "lz4",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LZ4 },
-		{ "snappy",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_SNAPPY },
-		{ "zstd",							CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ZSTD }
+const cfg_opt NAMESPACE_STORAGE_COMPRESSION_OPTS[] = {
+		{ "none",							CASE_NAMESPACE_STORAGE_COMPRESSION_NONE },
+		{ "lz4",							CASE_NAMESPACE_STORAGE_COMPRESSION_LZ4 },
+		{ "snappy",							CASE_NAMESPACE_STORAGE_COMPRESSION_SNAPPY },
+		{ "zstd",							CASE_NAMESPACE_STORAGE_COMPRESSION_ZSTD }
 };
 
-const cfg_opt NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OPTS[] = {
-		{ "aes-128",						CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_AES_128 },
-		{ "aes-256",						CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_AES_256 }
+const cfg_opt NAMESPACE_STORAGE_ENCRYPTION_OPTS[] = {
+		{ "aes-128",						CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_128 },
+		{ "aes-256",						CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_256 }
 };
 
 const cfg_opt NAMESPACE_SET_OPTS[] = {
@@ -1463,9 +1511,10 @@ const int NUM_NAMESPACE_INDEX_TYPE_OPTS				= sizeof(NAMESPACE_INDEX_TYPE_OPTS) /
 const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_FLASH_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_STORAGE_PMEM_OPTS			= sizeof(NAMESPACE_STORAGE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
-const int NUM_NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS = sizeof(NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS) / sizeof(cfg_opt);
-const int NUM_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OPTS = sizeof(NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS	= sizeof(NAMESPACE_STORAGE_COMPRESSION_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS		= sizeof(NAMESPACE_STORAGE_ENCRYPTION_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_ENABLE_XDR_OPTS			= sizeof(NAMESPACE_SET_ENABLE_XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SI_OPTS						= sizeof(NAMESPACE_SI_OPTS) / sizeof(cfg_opt);
@@ -1536,7 +1585,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_FILE, LOGGING_CONSOLE,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
-	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
+	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DATACENTER,
@@ -1552,7 +1601,7 @@ const char* CFG_PARSER_STATES[] = {
 		"SERVICE",
 		"LOGGING", "LOGGING_FILE", "LOGGING_CONSOLE",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO", "NETWORK_TLS",
-		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
+		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
 		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG", "SECURITY_SYSLOG",
 		"XDR", "XDR_DATACENTER",
@@ -3098,6 +3147,12 @@ as_config_init(const char* config_file)
 					ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 					ns->storage_data_in_memory = true;
 					break;
+				case CASE_NAMESPACE_STORAGE_PMEM:
+					cfg_enterprise_only(&line);
+					ns->storage_type = AS_STORAGE_ENGINE_PMEM;
+					ns->storage_data_in_memory = false;
+					cfg_begin_context(&state, NAMESPACE_STORAGE_PMEM);
+					break;
 				case CASE_NAMESPACE_STORAGE_SSD:
 					cfg_renamed_val_tok_1(&line, "device");
 					// No break.
@@ -3348,6 +3403,9 @@ as_config_init(const char* config_file)
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
 					cf_crash_nostack(AS_CFG, "ns %s data-in-index can't be true unless storage-engine is device and both single-bin and data-in-memory are true", ns->name);
 				}
+				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+					cf_crash_nostack(AS_CFG, "{%s} 'storage-engine pmem' can't be used with 'index-type flash'", ns->name);
+				}
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
 				}
@@ -3425,6 +3483,119 @@ as_config_init(const char* config_file)
 			break;
 
 		//----------------------------------------
+		// Parse namespace::storage-engine pmem context items.
+		//
+		case NAMESPACE_STORAGE_PMEM:
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_PMEM_OPTS, NUM_NAMESPACE_STORAGE_PMEM_OPTS)) {
+			case CASE_NAMESPACE_STORAGE_PMEM_FILE:
+				cfg_add_storage_file(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_FILESIZE:
+				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_COMMIT_TO_DEVICE:
+				ns->storage_commit_to_device = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION:
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_COMPRESSION_OPTS, NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS)) {
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_NONE:
+					ns->storage_compression = AS_COMPRESSION_NONE;
+					break;
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_LZ4:
+					ns->storage_compression = AS_COMPRESSION_LZ4;
+					break;
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_SNAPPY:
+					ns->storage_compression = AS_COMPRESSION_SNAPPY;
+					break;
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_ZSTD:
+					ns->storage_compression = AS_COMPRESSION_ZSTD;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_LEVEL:
+				ns->storage_compression_level = cfg_u32(&line, 1, 9);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_LWM_PCT:
+				ns->storage_defrag_lwm_pct = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_QUEUE_MIN:
+				ns->storage_defrag_queue_min = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_SLEEP:
+				ns->storage_defrag_sleep = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_STARTUP_MINIMUM:
+				ns->storage_defrag_startup_minimum = cfg_int(&line, 1, 99);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_DIRECT_FILES:
+				ns->storage_direct_files = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_DISABLE_ODSYNC:
+				ns->storage_disable_odsync = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_ENABLE_BENCHMARKS_STORAGE:
+				ns->storage_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION:
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_ENCRYPTION_OPTS, NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS))
+				{
+				case CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_128:
+					ns->storage_encryption = AS_ENCRYPTION_AES_128;
+					break;
+				case CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_256:
+					ns->storage_encryption = AS_ENCRYPTION_AES_256;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE:
+				ns->storage_encryption_key_file = cfg_strdup(&line, true);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS:
+				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE:
+				ns->storage_max_write_cache = cfg_u64_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT:
+				ns->storage_min_avail_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER:
+				ns->storage_serialize_tomb_raider = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_TOMB_RAIDER_SLEEP:
+				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
+				break;
+			case CASE_CONTEXT_END:
+				if (ns->n_storage_files == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} has no files", ns->name);
+				}
+				if (ns->storage_filesize == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
+				}
+				if (ns->storage_commit_to_device && ns->storage_disable_odsync)	{
+					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);
+				}
+				if (ns->storage_compression_level != 0 && ns->storage_compression != AS_COMPRESSION_ZSTD) {
+					cf_crash_nostack(AS_CFG, "{%s} 'compression-level' is only relevant for 'compression zstd'", ns->name);
+				}
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
 		// Parse namespace::storage-engine device context items.
 		//
 		case NAMESPACE_STORAGE_DEVICE:
@@ -3466,17 +3637,17 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION:
 				cfg_enterprise_only(&line);
-				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS, NUM_NAMESPACE_STORAGE_DEVICE_COMPRESSION_OPTS)) {
-				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_NONE:
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_COMPRESSION_OPTS, NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS)) {
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_NONE:
 					ns->storage_compression = AS_COMPRESSION_NONE;
 					break;
-				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LZ4:
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_LZ4:
 					ns->storage_compression = AS_COMPRESSION_LZ4;
 					break;
-				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_SNAPPY:
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_SNAPPY:
 					ns->storage_compression = AS_COMPRESSION_SNAPPY;
 					break;
-				case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ZSTD:
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_ZSTD:
 					ns->storage_compression = AS_COMPRESSION_ZSTD;
 					break;
 				case CASE_NOT_FOUND:
@@ -3512,11 +3683,11 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION:
 				cfg_enterprise_only(&line);
-				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OPTS, NUM_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OPTS)) {
-				case CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_AES_128:
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_ENCRYPTION_OPTS, NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS)) {
+				case CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_128:
 					ns->storage_encryption = AS_ENCRYPTION_AES_128;
 					break;
-				case CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_AES_256:
+				case CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_256:
 					ns->storage_encryption = AS_ENCRYPTION_AES_256;
 					break;
 				case CASE_NOT_FOUND:

@@ -56,6 +56,7 @@
 typedef void (*as_storage_cfg_init_fn)(as_namespace *ns);
 static const as_storage_cfg_init_fn as_storage_cfg_init_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't need this
+	as_storage_cfg_init_pmem,
 	as_storage_cfg_init_ssd
 };
 
@@ -74,6 +75,7 @@ as_storage_cfg_init(as_namespace *ns)
 typedef void (*as_storage_init_fn)(as_namespace *ns);
 static const as_storage_init_fn as_storage_init_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_init_memory,
+	as_storage_init_pmem,
 	as_storage_init_ssd
 };
 
@@ -98,12 +100,14 @@ as_storage_init()
 typedef void (*as_storage_load_fn)(as_namespace *ns, cf_queue *complete_q);
 static const as_storage_load_fn as_storage_load_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no load phase
+	as_storage_load_pmem,
 	as_storage_load_ssd
 };
 
 typedef void (*as_storage_load_ticker_fn)(const as_namespace *ns);
 static const as_storage_load_ticker_fn as_storage_load_ticker_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no load phase - unreachable (ns->loading_records)
+	as_storage_load_ticker_pmem,
 	as_storage_load_ticker_ssd
 };
 
@@ -157,6 +161,7 @@ as_storage_load()
 typedef void (*as_storage_start_tomb_raider_fn)(as_namespace *ns);
 static const as_storage_start_tomb_raider_fn as_storage_start_tomb_raider_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_start_tomb_raider_memory,
+	as_storage_start_tomb_raider_pmem,
 	as_storage_start_tomb_raider_ssd
 };
 
@@ -179,6 +184,7 @@ as_storage_start_tomb_raider()
 typedef void (*as_storage_shutdown_fn)(as_namespace *ns);
 static const as_storage_shutdown_fn as_storage_shutdown_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no shutdown phase - unreachable
+	as_storage_shutdown_pmem,
 	as_storage_shutdown_ssd
 };
 
@@ -219,6 +225,7 @@ as_storage_shutdown(uint32_t instance)
 typedef void (*as_storage_destroy_record_fn)(as_namespace *ns, as_record *r);
 static const as_storage_destroy_record_fn as_storage_destroy_record_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no destroy record
+	as_storage_destroy_record_pmem,
 	as_storage_destroy_record_ssd
 };
 
@@ -237,6 +244,7 @@ as_storage_destroy_record(as_namespace *ns, as_record *r)
 typedef void (*as_storage_record_create_fn)(as_storage_rd *rd);
 static const as_storage_record_create_fn as_storage_record_create_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record create
+	as_storage_record_create_pmem,
 	as_storage_record_create_ssd
 };
 
@@ -273,6 +281,7 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 typedef void (*as_storage_record_open_fn)(as_storage_rd *rd);
 static const as_storage_record_open_fn as_storage_record_open_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record open
+	as_storage_record_open_pmem,
 	as_storage_record_open_ssd
 };
 
@@ -309,6 +318,7 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 typedef void (*as_storage_record_close_fn)(as_storage_rd *rd);
 static const as_storage_record_close_fn as_storage_record_close_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record close
+	as_storage_record_close_pmem,
 	as_storage_record_close_ssd
 };
 
@@ -327,6 +337,7 @@ as_storage_record_close(as_storage_rd *rd)
 typedef int (*as_storage_record_load_n_bins_fn)(as_storage_rd *rd);
 static const as_storage_record_load_n_bins_fn as_storage_record_load_n_bins_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record load n bins
+	as_storage_record_load_n_bins_pmem,
 	as_storage_record_load_n_bins_ssd
 };
 
@@ -347,6 +358,7 @@ as_storage_record_load_n_bins(as_storage_rd *rd)
 typedef int (*as_storage_record_load_bins_fn)(as_storage_rd *rd);
 static const as_storage_record_load_bins_fn as_storage_record_load_bins_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record load bins
+	as_storage_record_load_bins_pmem,
 	as_storage_record_load_bins_ssd
 };
 
@@ -367,6 +379,7 @@ as_storage_record_load_bins(as_storage_rd *rd)
 typedef bool (*as_storage_record_load_key_fn)(as_storage_rd *rd);
 static const as_storage_record_load_key_fn as_storage_record_load_key_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record load key
+	as_storage_record_load_key_pmem,
 	as_storage_record_load_key_ssd
 };
 
@@ -387,6 +400,7 @@ as_storage_record_load_key(as_storage_rd *rd)
 typedef bool (*as_storage_record_load_pickle_fn)(as_storage_rd *rd);
 static const as_storage_record_load_pickle_fn as_storage_record_load_pickle_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no record load pickle
+	as_storage_record_load_pickle_pmem,
 	as_storage_record_load_pickle_ssd
 };
 
@@ -404,14 +418,15 @@ as_storage_record_load_pickle(as_storage_rd *rd)
 // as_storage_record_size_and_check
 //
 
-typedef bool (*as_storage_record_size_and_check_fn)(as_storage_rd *rd);
+typedef bool (*as_storage_record_size_and_check_fn)(const as_storage_rd *rd);
 static const as_storage_record_size_and_check_fn as_storage_record_size_and_check_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // no limit if no persistent storage - flat size is irrelevant
+	as_storage_record_size_and_check_pmem,
 	as_storage_record_size_and_check_ssd
 };
 
 bool
-as_storage_record_size_and_check(as_storage_rd *rd)
+as_storage_record_size_and_check(const as_storage_rd *rd)
 {
 	if (as_storage_record_size_and_check_table[rd->ns->storage_type]) {
 		return as_storage_record_size_and_check_table[rd->ns->storage_type](rd);
@@ -427,6 +442,7 @@ as_storage_record_size_and_check(as_storage_rd *rd)
 typedef int (*as_storage_record_write_fn)(as_storage_rd *rd);
 static const as_storage_record_write_fn as_storage_record_write_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_record_write_memory,
+	as_storage_record_write_pmem,
 	as_storage_record_write_ssd
 };
 
@@ -447,6 +463,7 @@ as_storage_record_write(as_storage_rd *rd)
 typedef void (*as_storage_wait_for_defrag_fn)(as_namespace *ns);
 static const as_storage_wait_for_defrag_fn as_storage_wait_for_defrag_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't do defrag
+	as_storage_wait_for_defrag_pmem,
 	as_storage_wait_for_defrag_ssd
 };
 
@@ -466,14 +483,15 @@ as_storage_wait_for_defrag()
 // as_storage_overloaded
 //
 
-typedef bool (*as_storage_overloaded_fn)(as_namespace *ns);
+typedef bool (*as_storage_overloaded_fn)(const as_namespace *ns);
 static const as_storage_overloaded_fn as_storage_overloaded_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no overload check
+	as_storage_overloaded_pmem,
 	as_storage_overloaded_ssd
 };
 
 bool
-as_storage_overloaded(as_namespace *ns)
+as_storage_overloaded(const as_namespace *ns)
 {
 	if (as_storage_overloaded_table[ns->storage_type]) {
 		return as_storage_overloaded_table[ns->storage_type](ns);
@@ -486,14 +504,15 @@ as_storage_overloaded(as_namespace *ns)
 // as_storage_has_space
 //
 
-typedef bool (*as_storage_has_space_fn)(as_namespace *ns);
+typedef bool (*as_storage_has_space_fn)(const as_namespace *ns);
 static const as_storage_has_space_fn as_storage_has_space_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no space check
+	as_storage_has_space_pmem,
 	as_storage_has_space_ssd
 };
 
 bool
-as_storage_has_space(as_namespace *ns)
+as_storage_has_space(const as_namespace *ns)
 {
 	if (as_storage_has_space_table[ns->storage_type]) {
 		return as_storage_has_space_table[ns->storage_type](ns);
@@ -509,6 +528,7 @@ as_storage_has_space(as_namespace *ns)
 typedef void (*as_storage_defrag_sweep_fn)(as_namespace *ns);
 static const as_storage_defrag_sweep_fn as_storage_defrag_sweep_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't do defrag
+	as_storage_defrag_sweep_pmem,
 	as_storage_defrag_sweep_ssd
 };
 
@@ -527,6 +547,7 @@ as_storage_defrag_sweep(as_namespace *ns)
 typedef void (*as_storage_load_regime_fn)(as_namespace *ns);
 static const as_storage_load_regime_fn as_storage_load_regime_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't store info
+	as_storage_load_regime_pmem,
 	as_storage_load_regime_ssd
 };
 
@@ -545,6 +566,7 @@ as_storage_load_regime(as_namespace *ns)
 typedef void (*as_storage_save_regime_fn)(as_namespace *ns);
 static const as_storage_save_regime_fn as_storage_save_regime_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't store info
+	as_storage_save_regime_pmem,
 	as_storage_save_regime_ssd
 };
 
@@ -563,6 +585,7 @@ as_storage_save_regime(as_namespace *ns)
 typedef void (*as_storage_load_roster_generation_fn)(as_namespace *ns);
 static const as_storage_load_roster_generation_fn as_storage_load_roster_generation_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't store info
+	as_storage_load_roster_generation_pmem,
 	as_storage_load_roster_generation_ssd
 };
 
@@ -581,6 +604,7 @@ as_storage_load_roster_generation(as_namespace *ns)
 typedef void (*as_storage_save_roster_generation_fn)(as_namespace *ns);
 static const as_storage_save_roster_generation_fn as_storage_save_roster_generation_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't store info
+	as_storage_save_roster_generation_pmem,
 	as_storage_save_roster_generation_ssd
 };
 
@@ -599,6 +623,7 @@ as_storage_save_roster_generation(as_namespace *ns)
 typedef void (*as_storage_load_pmeta_fn)(as_namespace *ns, as_partition *p);
 static const as_storage_load_pmeta_fn as_storage_load_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_load_pmeta_memory,
+	as_storage_load_pmeta_pmem,
 	as_storage_load_pmeta_ssd
 };
 
@@ -617,6 +642,7 @@ as_storage_load_pmeta(as_namespace *ns, as_partition *p)
 typedef void (*as_storage_save_pmeta_fn)(as_namespace *ns, const as_partition *p);
 static const as_storage_save_pmeta_fn as_storage_save_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support info
+	as_storage_save_pmeta_pmem,
 	as_storage_save_pmeta_ssd
 };
 
@@ -635,6 +661,7 @@ as_storage_save_pmeta(as_namespace *ns, const as_partition *p)
 typedef void (*as_storage_cache_pmeta_fn)(as_namespace *ns, const as_partition *p);
 static const as_storage_cache_pmeta_fn as_storage_cache_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support info
+	as_storage_cache_pmeta_pmem,
 	as_storage_cache_pmeta_ssd
 };
 
@@ -653,6 +680,7 @@ as_storage_cache_pmeta(as_namespace *ns, const as_partition *p)
 typedef void (*as_storage_flush_pmeta_fn)(as_namespace *ns, uint32_t start_pid, uint32_t n_partitions);
 static const as_storage_flush_pmeta_fn as_storage_flush_pmeta_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support info
+	as_storage_flush_pmeta_pmem,
 	as_storage_flush_pmeta_ssd
 };
 
@@ -671,6 +699,7 @@ as_storage_flush_pmeta(as_namespace *ns, uint32_t start_pid, uint32_t n_partitio
 typedef void (*as_storage_stats_fn)(as_namespace *ns, int *available_pct, uint64_t *used_bytes);
 static const as_storage_stats_fn as_storage_stats_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_stats_memory,
+	as_storage_stats_pmem,
 	as_storage_stats_ssd
 };
 
@@ -686,14 +715,15 @@ as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *used_bytes)
 // as_storage_device_stats
 //
 
-typedef void (*as_storage_device_stats_fn)(as_namespace *ns, uint32_t device_ix, storage_device_stats *stats);
+typedef void (*as_storage_device_stats_fn)(const as_namespace *ns, uint32_t device_ix, storage_device_stats *stats);
 static const as_storage_device_stats_fn as_storage_device_stats_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL,
+	as_storage_device_stats_pmem,
 	as_storage_device_stats_ssd
 };
 
 void
-as_storage_device_stats(as_namespace *ns, uint32_t device_ix, storage_device_stats *stats)
+as_storage_device_stats(const as_namespace *ns, uint32_t device_ix, storage_device_stats *stats)
 {
 	if (as_storage_device_stats_table[ns->storage_type]) {
 		as_storage_device_stats_table[ns->storage_type](ns, device_ix, stats);
@@ -710,6 +740,7 @@ as_storage_device_stats(as_namespace *ns, uint32_t device_ix, storage_device_sta
 typedef void (*as_storage_ticker_stats_fn)(as_namespace *ns);
 static const as_storage_ticker_stats_fn as_storage_ticker_stats_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support per-disk histograms... for now.
+	as_storage_ticker_stats_pmem,
 	as_storage_ticker_stats_ssd
 };
 
@@ -728,6 +759,7 @@ as_storage_ticker_stats(as_namespace *ns)
 typedef void (*as_storage_dump_wb_summary_fn)(const as_namespace *ns);
 static const as_storage_dump_wb_summary_fn as_storage_dump_wb_summary_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL,
+	as_storage_dump_wb_summary_pmem,
 	as_storage_dump_wb_summary_ssd
 };
 
@@ -746,6 +778,7 @@ as_storage_dump_wb_summary(const as_namespace *ns)
 typedef void (*as_storage_histogram_clear_fn)(as_namespace *ns);
 static const as_storage_histogram_clear_fn as_storage_histogram_clear_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support per-disk histograms... for now.
+	as_storage_histogram_clear_pmem,
 	as_storage_histogram_clear_ssd
 };
 
@@ -764,6 +797,7 @@ as_storage_histogram_clear_all(as_namespace *ns)
 typedef uint32_t (*as_storage_record_size_fn)(const as_record *r);
 static const as_storage_record_size_fn as_storage_record_size_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support record stored size.
+	as_storage_record_size_pmem,
 	as_storage_record_size_ssd
 };
 

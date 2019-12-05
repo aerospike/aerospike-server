@@ -71,10 +71,12 @@ endif
 GEOSPATIAL_HEADERS += geospatial.h
 GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
 
-STORAGE_HEADERS += drv_ssd.h flat.h storage.h
-STORAGE_SOURCES += drv_memory.c drv_ssd.c flat.c storage.c
+STORAGE_HEADERS += drv_common.h drv_ssd.h flat.h storage.h
+STORAGE_SOURCES += drv_common.c drv_memory.c drv_ssd.c flat.c
+STORAGE_SOURCES += storage.c
 ifneq ($(USE_EE),1)
   STORAGE_SOURCES += drv_memory_ce.c
+  STORAGE_SOURCES += drv_pmem_ce.c
   STORAGE_SOURCES += drv_ssd_ce.c
   STORAGE_SOURCES += flat_ce.c
 endif

@@ -72,13 +72,13 @@ as_flat_pickle_record(as_storage_rd* rd)
 
 	// Note - will no-op for storage-engine memory, which doesn't compress.
 	as_flat_record* flat = as_flat_compress_bins_and_pack_record(rd,
-			rd->ns->storage_write_block_size, &rd->pickle_sz);
+			rd->ns->storage_write_block_size, false, &rd->pickle_sz);
 
 	rd->pickle = cf_malloc(rd->pickle_sz);
 
 	if (flat == NULL) {
 		// Note - storage-engine memory may truncate n_rblocks at 19 bits.
-		as_flat_pack_record(rd, SIZE_TO_N_RBLOCKS(rd->pickle_sz),
+		as_flat_pack_record(rd, SIZE_TO_N_RBLOCKS(rd->pickle_sz), false,
 				(as_flat_record*)rd->pickle);
 	}
 	else {
@@ -121,9 +121,9 @@ as_flat_record_size(const as_storage_rd* rd)
 
 void
 as_flat_pack_record(const as_storage_rd* rd, uint32_t n_rblocks,
-		as_flat_record* flat)
+		bool dirty, as_flat_record* flat)
 {
-	uint8_t* buf = flatten_record_meta(rd, n_rblocks, NULL, flat);
+	uint8_t* buf = flatten_record_meta(rd, n_rblocks, dirty, NULL, flat);
 
 	flatten_bins(rd, buf, NULL);
 }
@@ -371,13 +371,13 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 //
 
 uint8_t*
-flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks,
+flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 		const as_flat_comp_meta* cm, as_flat_record* flat)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
-	flat->magic = AS_FLAT_MAGIC;
+	flat->magic = dirty ? AS_FLAT_MAGIC_DIRTY : AS_FLAT_MAGIC;
 	flat->n_rblocks = n_rblocks;
 	// Flags are filled in below.
 	flat->unused = 0;
