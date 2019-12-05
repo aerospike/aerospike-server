@@ -439,6 +439,7 @@ uint32_t cdt_idx_mask_get_content_sz(const uint64_t *mask, uint32_t count, const
 void cdt_idx_mask_print(const uint64_t *mask, uint32_t ele_count, const char *name);
 
 // list
+bool list_full_offset_index_fill_to(offset_index *offidx, uint32_t index, bool check_storage);
 bool list_full_offset_index_fill_all(offset_index *offidx);
 bool list_order_index_sort(order_index *ordidx, const offset_index *full_offidx, as_cdt_sort_flags flags);
 
