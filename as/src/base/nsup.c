@@ -650,7 +650,7 @@ eval_hwm_breached(as_namespace* ns)
 
 	as_storage_stats(ns, NULL, &used_disk_sz);
 
-	uint64_t ssd_hwm = (ns->ssd_size * ns->hwm_disk_pct) / 100;
+	uint64_t ssd_hwm = (ns->drive_size * ns->hwm_disk_pct) / 100;
 
 	static const char* reasons[] = {
 			NULL,								// 0x0

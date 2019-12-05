@@ -27,6 +27,7 @@
 //
 
 #include <stdint.h>
+#include <string.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
@@ -46,7 +47,9 @@ struct as_storage_rd_s;
 // Typedefs & constants.
 //
 
-#define AS_FLAT_MAGIC 0x037AF201 // changed for storage version 3
+#define AS_FLAT_MAGIC 0x037AF201  // changed for storage version 3
+// If commit-to-device: this record dirty, otherwise the tail of SWB dirty.
+#define AS_FLAT_MAGIC_DIRTY 0x037AF202
 
 // Per-record mandatory metadata on device.
 typedef struct as_flat_record_s {
@@ -125,9 +128,9 @@ typedef struct as_flat_opt_meta_s {
 
 void as_flat_pickle_record(struct as_storage_rd_s* rd);
 uint32_t as_flat_record_size(const struct as_storage_rd_s* rd);
-void as_flat_pack_record(const struct as_storage_rd_s* rd, uint32_t n_rblocks, as_flat_record* flat);
+void as_flat_pack_record(const struct as_storage_rd_s* rd, uint32_t n_rblocks, bool dirty, as_flat_record* flat);
 
-as_flat_record* as_flat_compress_bins_and_pack_record(const struct as_storage_rd_s* rd, uint32_t max_orig_sz, uint32_t* flat_sz);
+as_flat_record* as_flat_compress_bins_and_pack_record(const struct as_storage_rd_s* rd, uint32_t max_orig_sz, bool dirty, uint32_t* flat_sz);
 
 bool as_flat_unpack_remote_record_meta(struct as_namespace_s* ns, struct as_remote_record_s* rr);
 const uint8_t* as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end, struct as_flat_opt_meta_s* opt_meta, bool single_bin);
@@ -168,7 +171,7 @@ N_RBLOCKS_TO_SIZE(uint32_t n_rblocks) {
 // Private API - for enterprise separation only.
 //
 
-uint8_t* flatten_record_meta(const struct as_storage_rd_s* rd, uint32_t n_rblocks, const as_flat_comp_meta* cm, as_flat_record* flat);
+uint8_t* flatten_record_meta(const struct as_storage_rd_s* rd, uint32_t n_rblocks, bool dirty, const as_flat_comp_meta* cm, as_flat_record* flat);
 uint16_t flatten_bins(const struct as_storage_rd_s* rd, uint8_t* buf, uint32_t* sz);
 
 uint8_t* flatten_compression_meta(const as_flat_comp_meta* cm, as_flat_record* flat, uint8_t* buf);

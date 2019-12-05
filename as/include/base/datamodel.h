@@ -476,7 +476,7 @@ extern void as_record_done(as_index_ref *r_ref, as_namespace *ns);
 void as_record_drop_stats(as_record* r, as_namespace* ns);
 void as_record_transition_stats(as_record* r, as_namespace* ns, struct index_metadata_s* old);
 
-extern void as_record_finalize_key(as_record* r, as_namespace* ns, const uint8_t* key, uint32_t key_size);
+extern void as_record_finalize_key(as_record* r, const as_namespace* ns, const uint8_t* key, uint32_t key_size);
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
 extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
 extern uint8_t *as_record_pickle(as_storage_rd *rd, size_t *len_r);
@@ -704,7 +704,7 @@ struct as_namespace_s {
 	// This is typecast to (drv_ssds*) in storage code.
 	void*			storage_private;
 
-	uint64_t		ssd_size; // discovered (and rounded) size of drive
+	uint64_t		drive_size; // discovered (and rounded) size of drive
 	int				storage_last_avail_pct; // most recently calculated available percent
 	int				storage_max_write_q; // storage_max_write_cache is converted to this
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done

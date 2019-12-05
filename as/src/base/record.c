@@ -270,7 +270,7 @@ as_record_destroy_bins_from(as_storage_rd *rd, uint16_t from)
 // Note - this is not called on the master write (or durable delete) path, where
 // keys are stored but never dropped. Only a UDF will drop a key on master.
 void
-as_record_finalize_key(as_record *r, as_namespace *ns, const uint8_t *key,
+as_record_finalize_key(as_record *r, const as_namespace *ns, const uint8_t *key,
 		uint32_t key_size)
 {
 	// If a key wasn't stored, and we got one, accommodate it.

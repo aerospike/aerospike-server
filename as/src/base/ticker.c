@@ -543,7 +543,14 @@ log_line_device_usage(as_namespace* ns)
 	uint64_t used_bytes;
 	as_storage_stats(ns, &available_pct, &used_bytes);
 
-	if (ns->storage_data_in_memory) {
+	if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
+		cf_info(AS_INFO, "{%s} pmem-usage: used-bytes %lu avail-pct %d",
+				ns->name,
+				used_bytes,
+				available_pct
+				);
+	}
+	else if (ns->storage_data_in_memory) {
 		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d",
 				ns->name,
 				used_bytes,
