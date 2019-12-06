@@ -28,6 +28,8 @@
 
 #include <socket.h>
 
+#include "arenax.h"
+
 typedef enum {
 	CF_TOPO_AUTO_PIN_NONE,
 	CF_TOPO_AUTO_PIN_CPU,
@@ -78,6 +80,12 @@ void cf_storage_set_scheduler(const char *path, const char *sched);
 int64_t cf_storage_file_system_size(const char *path);
 bool cf_storage_is_root_fs(const char *path);
 
+typedef struct cf_page_cache_stats_s {
+	size_t resident;
+	size_t dirty;
+} cf_page_cache_stats;
+
 void cf_page_cache_dirty_limits(void);
+bool cf_page_cache_get_stats(cf_arenax *arena, cf_page_cache_stats *stats);
 
 bool cf_mount_is_local(const char *path);

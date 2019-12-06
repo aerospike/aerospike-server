@@ -2788,6 +2788,56 @@ cf_page_cache_dirty_limits(void)
 }
 
 bool
+cf_page_cache_get_stats(cf_arenax *arena, cf_page_cache_stats *stats)
+{
+	char smaps_path[32];
+
+	sprintf(smaps_path, "/proc/%d/smaps", getpid());
+
+	FILE *f = fopen(smaps_path, "r");
+
+	if (f == NULL) {
+		cf_warning(CF_HARDWARE, "cannot open %s: %d (%s)", smaps_path, errno,
+				cf_strerror(errno));
+		return false;
+	}
+
+	char line[1000];
+	bool is_stage = false;
+
+	stats->resident = 0;
+	stats->dirty = 0;
+
+	while (fgets(line, sizeof(line), f) != NULL) {
+		uint64_t start;
+
+		if (sscanf(line, "%lx-", &start) == 1) {
+			is_stage = cf_arenax_is_stage_address(arena, (void *)start);
+			continue;
+		}
+
+		if (!is_stage) {
+			continue;
+		}
+
+		size_t val;
+
+		if (sscanf(line, "Rss: %lu kB", &val) == 1) {
+			stats->resident += val * 1024;
+			continue;
+		}
+
+		if (sscanf(line, "Private_Dirty: %lu kB", &val) == 1) {
+			stats->dirty += val * 1024;
+			continue;
+		}
+	}
+
+	fclose(f);
+	return true;
+}
+
+bool
 cf_mount_is_local(const char *path)
 {
 	if (g_i_numa_node == INVALID_INDEX) {

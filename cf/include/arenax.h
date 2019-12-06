@@ -149,6 +149,7 @@ cf_arenax_handle cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle);
 void cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle);
 
 void* cf_arenax_resolve(cf_arenax* arena, cf_arenax_handle h);
+bool cf_arenax_is_stage_address(cf_arenax* arena, const void* address);
 
 bool cf_arenax_want_prefetch(cf_arenax* arena);
 void cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles, uint32_t n_puddles);
