@@ -937,9 +937,9 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 			// TEMPORARY debugging.
 			if (pid < 20) {
-				cf_debug(AS_PARTITION, "ck%012lX %02u (%hu %hu) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
-						as_exchange_cluster_key(), pid, p->pending_emigrations,
-						p->pending_immigrations,
+				cf_debug(AS_PARTITION, "{%s} ck%012lX %02u (%hu %hu) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
+						ns->name, as_exchange_cluster_key(), pid,
+						p->pending_emigrations, p->pending_immigrations,
 						VERSION_AS_STRING(&orig_version),
 						VERSION_AS_STRING(&p->version), self_n,
 						working_master_n, p->n_replicas, n_dupl,

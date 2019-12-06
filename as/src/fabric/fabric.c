@@ -259,6 +259,8 @@ static void send_entry_insert(send_entry **se_pp, send_entry *se);
 static void fabric_published_serv_cfg_fill(const cf_serv_cfg *bind_cfg, cf_serv_cfg *published_cfg, bool ipv4_only);
 static bool fabric_published_endpoints_refresh(void);
 
+static int fabric_dump_fc_reduce_fn(const void *key, void *data, void *udata);
+
 // fabric_node
 static fabric_node *fabric_node_create(cf_node node_id);
 static fabric_node *fabric_node_get(cf_node node_id);
@@ -629,31 +631,39 @@ as_fabric_dump(bool verbose)
 	node_list nl;
 	fabric_get_node_list(&nl);
 
-	cf_info(AS_FABRIC, " Fabric Dump: nodes known %d", nl.count);
+	cf_info(AS_FABRIC, "fabric dump: nodes known %d", nl.count);
 
 	for (uint32_t i = 0; i < nl.count; i++) {
 		if (nl.nodes[i] == g_config.self_node) {
-			cf_info(AS_FABRIC, "\tnode %lx is self", nl.nodes[i]);
+			cf_info(AS_FABRIC, "   node %lx is self", nl.nodes[i]);
 			continue;
 		}
 
 		fabric_node *node = fabric_node_get(nl.nodes[i]);
 
 		if (! node) {
-			cf_info(AS_FABRIC, "\tnode %lx not found in hash although reported available", nl.nodes[i]);
+			cf_info(AS_FABRIC, "   node %lx not found in hash although reported available", nl.nodes[i]);
 			continue;
 		}
 
 		cf_mutex_lock(&node->fc_hash_lock);
-		cf_info(AS_FABRIC, "\tnode %lx fds {via_connect={h=%d m=%d l=%d} all=%d} live %d q {h=%d m=%d l=%d}",
+		cf_info(AS_FABRIC, "   node %lx fds {via_connect={rw=%d ctrl=%d bulk=%d meta=%d} all=%d} live %d q {rw=%d ctrl=%d bulk=%d meta=%d}",
 				node->node_id,
-				node->connect_count[AS_FABRIC_CHANNEL_CTRL],
 				node->connect_count[AS_FABRIC_CHANNEL_RW],
+				node->connect_count[AS_FABRIC_CHANNEL_CTRL],
 				node->connect_count[AS_FABRIC_CHANNEL_BULK],
+				node->connect_count[AS_FABRIC_CHANNEL_META],
 				cf_shash_get_size(node->fc_hash), node->live,
-				cf_queue_sz(&node->send_queue[AS_FABRIC_CHANNEL_CTRL]),
 				cf_queue_sz(&node->send_queue[AS_FABRIC_CHANNEL_RW]),
-				cf_queue_sz(&node->send_queue[AS_FABRIC_CHANNEL_BULK]));
+				cf_queue_sz(&node->send_queue[AS_FABRIC_CHANNEL_CTRL]),
+				cf_queue_sz(&node->send_queue[AS_FABRIC_CHANNEL_BULK]),
+				cf_queue_sz(&node->send_queue[AS_FABRIC_CHANNEL_META]));
+
+		if (verbose) {
+			uint32_t index = 0;
+			cf_shash_reduce(node->fc_hash, fabric_dump_fc_reduce_fn, &index);
+		}
+
 		cf_mutex_unlock(&node->fc_hash_lock);
 
 		fabric_node_release(node); // node_get
@@ -767,6 +777,40 @@ fabric_published_endpoints_refresh()
 	cf_info(AS_FABRIC, "updated fabric published address list to {%s}", endpoint_list_str);
 
 	return true;
+}
+
+static int
+fabric_dump_fc_reduce_fn(const void *key, void *data, void *udata)
+{
+	fabric_connection *fc = *(fabric_connection **)key;
+	uint32_t* index = (uint32_t*)udata;
+
+	(*index)++;
+
+	if (! fc->pool) {
+		cf_info(AS_FABRIC, "      %u - pool not initialized", *index);
+		return 0;
+	}
+
+	uint32_t pool_id = fc->pool->pool_id;
+	uint64_t r_bytes = fc->r_bytes;
+	uint64_t s_bytes = fc->s_bytes;
+
+	const char* pool_name;
+
+	pool_name = (pool_id >= 0 && pool_id < AS_FABRIC_N_CHANNELS) ?
+		CHANNEL_NAMES[pool_id] : "INVALID";
+
+	size_t max_len = 45 + 2 + 1 + 5 + 1;
+	char sock_addr[max_len];
+
+	cf_sock_addr_to_string_safe(&fc->peer, sock_addr, max_len);
+
+	cf_info(AS_FABRIC, "      %-2u - pool %u(%-4s) fd %-5u node %lx %-21s traffic (%lu,%lu)",
+			*index, pool_id, pool_name, fc->sock.fd, fc->node->node_id,
+			(char*)sock_addr, s_bytes, r_bytes);
+
+	return 0;
 }
 
 
