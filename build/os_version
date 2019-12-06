@@ -102,7 +102,7 @@ main() {
 		debian_version=$(cat /etc/debian_version | tr '[:upper:]' '[:lower:]')
 		if [[ "$debian_version" = "buster"* ]]
 		then
-		    debian_version=10
+			debian_version=10
 		fi
 		distro_version=${debian_version%%.*}
 		;;
@@ -119,8 +119,12 @@ main() {
 		distro_short="fc${distro_version}"
 		;;
 	'amzn' )
-		distro_long="ami"
-		distro_short="ami"
+		if [[ "${NAME}" = "Amazon Linux AMI" ]]
+		then
+			distro_version="1"
+		fi
+		distro_long="${distro_id}${distro_version}"
+		distro_short="${distro_id}${distro_version}"
 		;;
 	'ol' )
 		distro_version="${distro_version%%.*}"
