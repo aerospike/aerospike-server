@@ -32,6 +32,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <libaio.h>
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
@@ -195,6 +196,20 @@ typedef struct ssd_wblock_state_s {
 #define WBLOCK_STATE_NONE		0
 #define WBLOCK_STATE_DEFRAG		1
 
+#define AIO_CAPACITY 1024
+#define AIO_MAX_WRITES 128
+struct async_io {
+	io_context_t ctxt;
+	cf_poll poll;
+	int eventfd;
+
+	uint32_t writes_max_aio_pending;
+	cf_atomic32 writes_aio_submitted;
+	cf_atomic32 writes_pending;
+
+	struct iocb *iocbs[AIO_MAX_WRITES];
+	struct io_event events[AIO_MAX_WRITES];
+};
 
 //------------------------------------------------
 // Per-device information.
@@ -227,6 +242,9 @@ typedef struct drv_ssd_s {
 	cf_queue		*swb_shadow_q;		// pointers to swbs ready to write to shadow, if any
 	cf_queue		*swb_free_q;		// pointers to swbs free and waiting
 	cf_queue		*post_write_q;		// pointers to swbs that have been written but are cached
+
+	int				swb_write_q_eventfd;
+	int				swb_shadow_q_eventfd;
 
 	uint8_t			encryption_key[64];		// relevant for enterprise edition only
 
@@ -270,7 +288,7 @@ typedef struct drv_ssd_s {
 	uint64_t		record_add_unique_counter;		// records inserted
 
 	cf_tid			write_tid;
-	cf_tid			shadow_tid;
+	struct async_io async_io;
 
 	histogram		*hist_read;
 	histogram		*hist_large_block_read;
