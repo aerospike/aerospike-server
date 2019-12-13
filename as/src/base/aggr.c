@@ -1,7 +1,7 @@
 /*
  * aggr.c
  *
- * Copyright (C) 2014-2015 Aerospike, Inc.
+ * Copyright (C) 2014-2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
