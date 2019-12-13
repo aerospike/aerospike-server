@@ -740,7 +740,8 @@ emigration_send_start(emigration *emig)
 				as_fabric_msg_put(m);
 				return EMIG_START_RESULT_EAGAIN;
 			case OPERATION_START_ACK_FAIL:
-				cf_warning(AS_MIGRATE, "imbalance: dest refused migrate with ACK_FAIL");
+				cf_warning(AS_MIGRATE, "imbalance: %lx refused migrate with ACK_FAIL",
+						emig->dest);
 				cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 				as_fabric_msg_put(m);
 				return EMIG_START_RESULT_ERROR;

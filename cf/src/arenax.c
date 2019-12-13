@@ -221,3 +221,26 @@ cf_arenax_resolve(cf_arenax* arena, cf_arenax_handle h)
 	return arena->stages[h >> ELEMENT_ID_NUM_BITS] +
 			((h & ELEMENT_ID_MASK) * arena->element_size);
 }
+
+bool
+cf_arenax_is_stage_address(cf_arenax* arena, const void* address)
+{
+	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
+		cf_mutex_lock(&arena->lock);
+	}
+
+	bool found = false;
+
+	for (uint32_t i = 0; i < arena->stage_count; i++) {
+		if (arena->stages[i] == address) {
+			found = true;
+			break;
+		}
+	}
+
+	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
+		cf_mutex_unlock(&arena->lock);
+	}
+
+	return found;
+}

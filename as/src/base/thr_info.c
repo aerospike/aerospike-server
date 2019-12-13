@@ -5085,6 +5085,29 @@ info_get_health_stats(char *name, cf_dyn_buf *db)
 }
 
 int
+info_get_index_pressure(char *name, cf_dyn_buf *db)
+{
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+		cf_page_cache_stats stats;
+
+		if (!cf_page_cache_get_stats(ns->arena, &stats)) {
+			continue;
+		}
+
+		cf_dyn_buf_append_string(db, ns->name);
+		cf_dyn_buf_append_char(db, ':');
+		cf_dyn_buf_append_uint64(db, stats.resident);
+		cf_dyn_buf_append_char(db, ':');
+		cf_dyn_buf_append_uint64(db, stats.dirty);
+		cf_dyn_buf_append_char(db, ';');
+	}
+
+	cf_dyn_buf_chomp(db);
+	return 0;
+}
+
+int
 info_get_logs(char *name, cf_dyn_buf *db)
 {
 	cf_fault_sink_strlist(db);
@@ -6597,6 +6620,7 @@ as_info_init()
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
 	as_info_set_dynamic("health-outliers", info_get_health_outliers, false);          // Returns a list of outliers.
 	as_info_set_dynamic("health-stats", info_get_health_stats, false);                // Returns health stats.
+	as_info_set_dynamic("index-pressure", info_get_index_pressure, false);            // Number of resident and dirty AF index pages.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.
 	as_info_set_dynamic("objects", info_get_objects, false);                          // Returns the number of objects stored on this server.

@@ -50,7 +50,7 @@ the build environment, including:
 The C++ compiler is required for the Aerospike geospatial indexing
 feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
-* The required CentOS 6/7 package to install is: `gcc-c++`.
+* The required CentOS 6/7/8 package to install is: `gcc-c++`.
 
 * The required Debian 8/9/10 and Ubuntu 14/16/18 package to install is: `g++`.
 
@@ -59,8 +59,8 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
 (RIPEMD-160 & SHA-1) and pseudo-random number generation.
 
-* The CentOS 6/7 OpenSSL packages to install are:  `openssl`,
-`openssl-devel`, `openssl-static`.
+* The CentOS 6/7/8 OpenSSL packages to install are:  `openssl` and
+`openssl-devel`, and also `openssl-static` on CentOS 6/7.
 
 * The Debian 8/9/10 and Ubuntu 14/16/18 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
@@ -76,8 +76,8 @@ Function (UDF) support.
 * Alternatively, it is possible to build with standard Lua 5.1 provided
 by the build environment.  In that case:
 
-	* The CentOS 6/7 Lua packages to install are:  `lua`,
-`lua-devel`, and `lua-static`.
+	* The CentOS 6/7/8 Lua package to install is:  `lua`, and also
+`lua-devel` and `lua-static` on CentOS 6/7.
 
 	* The Debian 8/9/10 and Ubuntu 14/16/18 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
@@ -88,10 +88,14 @@ by the build environment.  In that case:
 
 Building on Ubuntu 18 also requires installing `libz-dev`.
 
-#### Python 2
+#### Python 3 or 2
 
-Running the Telemetry Agent requires Python 2.6+, which is available by default on most
-platforms, and can be installed on Ubuntu 16+ as the package `python`.
+Running the Telemetry Agent requires either Python 3+ or Python 2.6+,
+at least one of which is generally available by default on most
+platforms. On some distros, such as Ubuntu 16+, it may be necessary to
+install the package `python`, while on other distros, such as CentOS 8,
+the package name includes the major (and/or minor) version number, e.g.,
+`python3` or `python2`.
 
 ### Submodules
 
@@ -225,4 +229,3 @@ Please refer to the full documentation on the Aerospike web site,
 detailed information about configuring and running the Aerospike
 Database Server, as well as about the Aerospike client API packages
 for popular programming languages.
-
