@@ -1324,7 +1324,8 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	rd->bins = new_bins;
 
 	// Collect bins (old or intermediate versions) to destroy on cleanup.
-	as_bin cleanup_bins[m->n_ops];
+	// Note - one delete-all op may destroy many bins. Size is max possible + 1.
+	as_bin cleanup_bins[n_old_bins + m->n_ops];
 	uint32_t n_cleanup_bins = 0;
 
 	//------------------------------------------------------
