@@ -228,7 +228,8 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 
 	// For now the model is timeouts don't appear in histograms.
 	if (shared->result_code != AS_ERR_TIMEOUT) {
-		G_HIST_ACTIVATE_INSERT_DATA_POINT(batch_index_hist, shared->start);
+		G_HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(batch_index_hist,
+				shared->start);
 	}
 
 	// Check return code in order to update statistics.

@@ -5278,7 +5278,8 @@ create_and_check_hist_track(cf_hist_track** h, const char* name,
 void
 cfg_create_all_histograms()
 {
-	g_stats.batch_index_hist = histogram_create("batch-index", HIST_MILLISECONDS);
+	create_and_check_hist_track(&g_stats.batch_index_hist, "batch-index", HIST_MILLISECONDS);
+
 	g_stats.info_hist = histogram_create("info", HIST_MILLISECONDS);
 
 	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-send-init", HIST_MILLISECONDS);

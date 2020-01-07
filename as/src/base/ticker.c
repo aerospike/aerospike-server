@@ -965,7 +965,7 @@ void
 dump_global_histograms()
 {
 	if (g_stats.batch_index_hist_active) {
-		histogram_dump(g_stats.batch_index_hist);
+		cf_hist_track_dump(g_stats.batch_index_hist);
 	}
 
 	if (g_config.info_hist_enabled) {

@@ -1785,6 +1785,9 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
 
+	// Not true config, but act as config overrides:
+	cf_hist_track_get_settings(g_stats.batch_index_hist, db);
+
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	info_get_printable_cluster_name(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
@@ -3788,7 +3791,10 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_debug(AS_INFO, "hist track %s command: no histogram specified - doing all", name);
 	}
 	else {
-		if (*value_str == '{') {
+		if (0 == strcmp(value_str, "batch-index")) {
+			hist_p = g_stats.batch_index_hist;
+		}
+		else if (*value_str == '{') {
 			char* ns_name = value_str + 1;
 			char* ns_name_end = strchr(ns_name, '}');
 			as_namespace* ns = as_namespace_get_bybuf((uint8_t*)ns_name, ns_name_end - ns_name);
@@ -3837,6 +3843,8 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			cf_hist_track_stop(hist_p);
 		}
 		else {
+			cf_hist_track_stop(g_stats.batch_index_hist);
+
 			for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 				as_namespace* ns = g_config.namespaces[i];
 
@@ -3902,6 +3910,11 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else {
+			if (! cf_hist_track_start(g_stats.batch_index_hist, back_sec, slice_sec, thresholds)) {
+				cf_dyn_buf_append_string(db, "error-bad-start-params");
+				return 0;
+			}
+
 			for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 				as_namespace* ns = g_config.namespaces[i];
 
@@ -3945,6 +3958,8 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_hist_track_get_info(hist_p, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 	}
 	else {
+		cf_hist_track_get_info(g_stats.batch_index_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
+
 		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace* ns = g_config.namespaces[i];
 

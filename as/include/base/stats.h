@@ -31,6 +31,7 @@
 #include "citrusleaf/cf_atomic.h"
 
 #include "hist.h"
+#include "hist_track.h"
 
 #include "base/proto.h"
 #include "fabric/fabric.h"
@@ -108,7 +109,7 @@ typedef struct as_stats_s {
 	// Histograms.
 	//
 
-	histogram*		batch_index_hist;
+	cf_hist_track*	batch_index_hist;
 	bool			batch_index_hist_active; // automatically activated
 
 	histogram*		info_hist;
