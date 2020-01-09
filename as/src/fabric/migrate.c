@@ -1073,7 +1073,7 @@ immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object,
 	immigration *immig = (immigration *)object;
 
 	if (immig->start_recv_ms == 0) {
-		// If the start time isn't set, immigration is still being processed.
+		// Still in immigration start.
 		return CF_RCHASH_OK;
 	}
 
@@ -1296,6 +1296,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 		return;
 	case AS_MIGRATE_AGAIN:
 		// Remove from hash so that the immig can be tried again.
+		// Note - no real need to specify object, but paranoia costs nothing.
 		cf_rchash_delete_object(g_immigration_hash, (void *)&hkey, sizeof(hkey),
 				(void *)immig);
 		immigration_release(immig);
