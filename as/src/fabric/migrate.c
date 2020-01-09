@@ -1295,7 +1295,8 @@ immigration_handle_start_request(cf_node src, msg *m)
 		return;
 	case AS_MIGRATE_AGAIN:
 		// Remove from hash so that the immig can be tried again.
-		cf_rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
+		cf_rchash_delete_object(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+				(void *)immig);
 		immigration_release(immig);
 		immigration_ack_start_request(src, m, OPERATION_START_ACK_EAGAIN);
 		return;
