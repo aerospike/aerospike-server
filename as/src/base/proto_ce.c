@@ -49,7 +49,7 @@ as_proto_compress_alloc(const uint8_t* original, size_t alloc_sz, size_t indent,
 }
 
 uint32_t
-as_proto_decompress(const as_comp_proto* cproto, as_proto** p_proto)
+as_proto_uncompress(const as_comp_proto* cproto, as_proto** p_proto)
 {
 	return AS_ERR_ENTERPRISE_ONLY;
 }

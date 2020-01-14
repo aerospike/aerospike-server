@@ -629,7 +629,7 @@ const uint8_t* as_proto_compress(const uint8_t* original, size_t* sz,
 		as_proto_comp_stat* comp_stat);
 uint8_t* as_proto_compress_alloc(const uint8_t* original, size_t alloc_sz,
 		size_t indent, size_t* sz, as_proto_comp_stat* comp_stat);
-uint32_t as_proto_decompress(const as_comp_proto* cproto, as_proto** p_proto);
+uint32_t as_proto_uncompress(const as_comp_proto* cproto, as_proto** p_proto);
 
 cl_msg* as_msg_create_internal(const char* ns_name, uint8_t info1,
 		uint8_t info2, uint8_t info3, uint16_t n_ops, uint8_t* ops,

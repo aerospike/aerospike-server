@@ -781,7 +781,7 @@ start_transaction(as_file_handle* fd_h)
 	}
 
 	if (proto->type == PROTO_TYPE_AS_MSG_COMPRESSED) {
-		uint32_t result = as_proto_decompress((as_comp_proto*)proto,
+		uint32_t result = as_proto_uncompress((as_comp_proto*)proto,
 				(as_proto**)&tr.msgp);
 
 		if (result != AS_OK) {
