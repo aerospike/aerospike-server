@@ -3058,6 +3058,11 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_warning(AS_INFO, "{%s} feature key does not allow compression", ns->name);
 				goto Error;
 			}
+			if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+				// Note - harmful to configure compression for memory-only!
+				cf_warning(AS_INFO, "{%s} compression is not available for storage-engine memory", ns->name);
+				goto Error;
+			}
 			const char* orig = NS_COMPRESSION();
 			if (strcmp(context, "none") == 0) {
 				ns->storage_compression = AS_COMPRESSION_NONE;
