@@ -482,6 +482,25 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	return (int32_t)msg_sz;
 }
 
+void
+as_msg_pid_done_bufbuilder(cf_buf_builder **bb_r, uint32_t pid, int result)
+{
+	uint8_t *buf;
+
+	cf_buf_builder_reserve(bb_r, (int)sizeof(as_msg), &buf);
+
+	as_msg *m = (as_msg *)buf;
+
+	*m = (as_msg){
+			.info3 = AS_MSG_INFO3_PARTITION_DONE,
+			.header_sz = sizeof(as_msg),
+			.result_code = result,
+			.generation = pid // HACK - more efficient than separate field
+	};
+
+	as_msg_swap_header(m);
+}
+
 cl_msg *
 as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, uint64_t trid,

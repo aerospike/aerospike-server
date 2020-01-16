@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "base/datamodel.h"
 #include "base/proto.h"
 
 
@@ -70,6 +71,12 @@ typedef struct as_scan_vtable_s {
 	as_scan_info_fn info_mon_fn;
 } as_scan_vtable;
 
+typedef struct as_scan_pid_s {
+	bool requested;
+	bool has_digest;
+	cf_digest keyd;
+} as_scan_pid;
+
 typedef struct as_scan_job_s {
 	// Mandatory interface for derived classes:
 	as_scan_vtable vtable;
@@ -79,7 +86,11 @@ typedef struct as_scan_job_s {
 
 	// Job scope:
 	struct as_namespace_s* ns;
+	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
+
+	// Partition scope.
+	as_scan_pid* pids;
 
 	// Handle active phase:
 	uint32_t n_threads;
@@ -96,6 +107,7 @@ typedef struct as_scan_job_s {
 
 	// For tracking:
 	char client[64];
+	uint16_t n_pids_requested;
 	uint64_t start_us;
 	uint64_t finish_us;
 	uint64_t n_throttled;
@@ -110,7 +122,7 @@ typedef struct as_scan_job_s {
 // Public API.
 //
 
-void as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid, struct as_namespace_s* ns, uint16_t set_id, uint32_t rps, const char* client);
+void as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid, struct as_namespace_s* ns, const char* set_name, uint16_t set_id, as_scan_pid* pids, uint32_t rps, const char* client);
 void as_scan_job_add_thread(as_scan_job* _job);
 uint32_t as_scan_job_throttle(as_scan_job* _job);
 void as_scan_job_destroy(as_scan_job* _job);

@@ -91,8 +91,8 @@ static cf_queue g_gc_queue;
 void *run_index_tree_gc(void *unused);
 void as_index_tree_destroy(as_index_tree *tree);
 
-uint64_t as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
-void as_index_sprig_traverse(as_index_sprig *isprig, cf_arenax_handle r_h, as_index_ph_array *v_a);
+uint64_t as_index_sprig_reduce_partial(as_index_sprig *isprig, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+void as_index_sprig_traverse(as_index_sprig *isprig, const cf_digest* keyd, cf_arenax_handle r_h, as_index_ph_array *v_a);
 void as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h);
 
 int as_index_sprig_try_exists(as_index_sprig *isprig, const cf_digest *keyd);
@@ -260,6 +260,24 @@ void
 as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count,
 		as_index_reduce_fn cb, void *udata)
 {
+	as_index_reduce_from_partial(tree, NULL, sample_count, cb, udata);
+}
+
+
+// Like as_index_reduce(), but from specfied "boundary" digest.
+void
+as_index_reduce_from(as_index_tree *tree, const cf_digest *keyd,
+		as_index_reduce_fn cb, void *udata)
+{
+	as_index_reduce_from_partial(tree, keyd, AS_REDUCE_ALL, cb, udata);
+}
+
+
+// Like as_index_reduce_partial(), but from specfied "boundary" digest.
+void
+as_index_reduce_from_partial(as_index_tree *tree, const cf_digest *keyd,
+		uint64_t sample_count, as_index_reduce_fn cb, void *udata)
+{
 	if (! tree) {
 		return;
 	}
@@ -267,18 +285,24 @@ as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count,
 	// Reduce sprigs from largest to smallest digests to preserve this order for
 	// the whole tree. (Rapid rebalance requires exact order.)
 
-	for (int i = (int)tree->shared->n_sprigs - 1; i >= 0; i--) {
+	uint32_t start_sprig_i = keyd == NULL ?
+			tree->shared->n_sprigs - 1 :
+			as_index_sprig_i_from_keyd(tree, keyd);
+
+	for (int i = (int)start_sprig_i; i >= 0; i--) {
 		as_index_sprig isprig;
 		as_index_sprig_from_i(tree, &isprig, (uint32_t)i);
 
 		if (tree_puddles(tree) != NULL) {
-			sample_count -= as_index_sprig_keyd_reduce_partial(&isprig,
+			sample_count -= as_index_sprig_keyd_reduce_partial(&isprig, keyd,
 					sample_count, cb, udata);
 		}
 		else {
-			sample_count -= as_index_sprig_reduce_partial(&isprig,
+			sample_count -= as_index_sprig_reduce_partial(&isprig, keyd,
 					sample_count, cb, udata);
 		}
+
+		keyd = NULL; // only need boundary digest for first sprig
 
 		if (sample_count == 0) {
 			break;
@@ -462,8 +486,8 @@ as_index_tree_destroy(as_index_tree *tree)
 // Make a callback for a specified number of elements in the tree, from outside
 // the tree lock.
 uint64_t
-as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
-		as_index_reduce_fn cb, void *udata)
+as_index_sprig_reduce_partial(as_index_sprig *isprig, const cf_digest *keyd,
+		uint64_t sample_count, as_index_reduce_fn cb, void *udata)
 {
 	bool reduce_all = sample_count == AS_REDUCE_ALL;
 
@@ -493,7 +517,7 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 
 	// Recursively, fetch all the value pointers into this array, so we can make
 	// all the callbacks outside the big lock.
-	as_index_sprig_traverse(isprig, isprig->sprig->root_h, v_a);
+	as_index_sprig_traverse(isprig, keyd, isprig->sprig->root_h, v_a);
 
 	cf_detail(AS_INDEX, "sprig reduce took %lu ms", cf_getms() - start_ms);
 
@@ -542,28 +566,37 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 
 
 void
-as_index_sprig_traverse(as_index_sprig *isprig, cf_arenax_handle r_h,
-		as_index_ph_array *v_a)
+as_index_sprig_traverse(as_index_sprig *isprig, const cf_digest* keyd,
+		cf_arenax_handle r_h, as_index_ph_array *v_a)
 {
 	if (r_h == SENTINEL_H) {
 		return;
 	}
 
 	as_index *r = RESOLVE_H(r_h);
+	int cmp = 0; // initialized to satisfy compiler
 
-	as_index_sprig_traverse(isprig, r->left_h, v_a);
+	if (keyd == NULL || (cmp = cf_digest_compare(&r->keyd, keyd)) < 0) {
+		as_index_sprig_traverse(isprig, keyd, r->left_h, v_a);
+	}
 
 	if (v_a->pos >= v_a->alloc_sz) {
 		return;
 	}
 
-	as_index_reserve(r);
+	// We do not collect the element with the boundary digest.
 
-	v_a->indexes[v_a->pos].r = r;
-	v_a->indexes[v_a->pos].r_h = r_h;
-	v_a->pos++;
+	if (keyd == NULL || cmp < 0) {
+		as_index_reserve(r);
 
-	as_index_sprig_traverse(isprig, r->right_h, v_a);
+		v_a->indexes[v_a->pos].r = r;
+		v_a->indexes[v_a->pos].r_h = r_h;
+		v_a->pos++;
+
+		keyd = NULL;
+	}
+
+	as_index_sprig_traverse(isprig, keyd, r->right_h, v_a);
 }
 
 

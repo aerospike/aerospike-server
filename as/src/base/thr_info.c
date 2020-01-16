@@ -6592,7 +6592,7 @@ as_info_init()
 			"float;"
 			"geo;"
 			"sindex-exists;"
-			"peers;pipelining;"
+			"peers;pipelining;pscans;"
 			"relaxed-sc;replicas;replicas-all;replicas-master;"
 			"truncate-namespace;"
 			"udf");

@@ -238,7 +238,7 @@ typedef struct cl_msg_s {
 // Bits in info3.
 #define AS_MSG_INFO3_LAST                   (1 << 0) // this is the last of a multi-part message
 #define AS_MSG_INFO3_COMMIT_LEVEL_MASTER    (1 << 1) // "fire and forget" replica writes
-	// Bit 2 is unused.
+#define AS_MSG_INFO3_PARTITION_DONE         (1 << 2) // in scan/query response, partition is done
 #define AS_MSG_INFO3_UPDATE_ONLY            (1 << 3) // update existing record only, do not create new record
 #define AS_MSG_INFO3_CREATE_OR_REPLACE      (1 << 4) // completely replace existing record, or create new record
 #define AS_MSG_INFO3_REPLACE_ONLY           (1 << 5) // completely replace existing record, do not create new record
@@ -280,6 +280,8 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_SCAN_OPTIONS      8
 #define AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT    9
 #define AS_MSG_FIELD_TYPE_RECS_PER_SEC      10
+#define AS_MSG_FIELD_TYPE_PID_ARRAY         11
+#define AS_MSG_FIELD_TYPE_DIGEST_ARRAY      12
 
 // Secondary index.
 #define AS_MSG_FIELD_TYPE_INDEX_NAME        21
@@ -308,17 +310,19 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_SCAN_OPTIONS       (1 << 6)
 #define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 7)
 #define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 8)
-#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 9)
-#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 10)
-#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 11)
-#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 12)
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 13)
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 14)
-#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 15)
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 16)
-#define AS_MSG_FIELD_BIT_BATCH              (1 << 17)
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 18)
-#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 19)
+#define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 9)
+#define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 10)
+#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 11)
+#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 12)
+#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 13)
+#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 14)
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 15)
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 16)
+#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 17)
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 18)
+#define AS_MSG_FIELD_BIT_BATCH              (1 << 19)
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 20)
+#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 21)
 
 // Special message field values.
 #define AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE    (0x08)
@@ -641,6 +645,8 @@ cl_msg* as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		size_t* msg_sz_in, uint64_t trid);
 int32_t as_msg_make_response_bufbuilder(cf_buf_builder** bb_r,
 		struct as_storage_rd_s* rd, bool no_bin_data, cf_vector* select_bins);
+void as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid,
+		int result);
 cl_msg* as_msg_make_val_response(bool success, const as_val* val,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		uint64_t trid, size_t* p_msg_sz);

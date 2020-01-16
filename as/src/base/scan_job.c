@@ -74,6 +74,18 @@ static uint32_t throttle_sleep(as_scan_job* _job, uint64_t count, uint64_t now);
 // Inlines & macros.
 //
 
+static inline void
+count_pids_requested(as_scan_job* _job)
+{
+	if (_job->pids != NULL) {
+		for (uint32_t i = 0; i < AS_PARTITIONS; i++) {
+			if (_job->pids[i].requested) {
+				_job->n_pids_requested++;
+			}
+		}
+	}
+}
+
 static inline uint64_t
 scan_job_trid(uint64_t trid)
 {
@@ -90,14 +102,6 @@ progress_pct(as_scan_job* _job)
 	}
 
 	return ((float)(pid * 100)) / (float)AS_PARTITIONS;
-}
-
-static inline const char*
-safe_set_name(as_scan_job* _job)
-{
-	const char* set_name = as_namespace_get_set_name(_job->ns, _job->set_id);
-
-	return set_name != NULL ? set_name : "";
 }
 
 static inline const char*
@@ -128,17 +132,21 @@ result_str(int result)
 
 void
 as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid,
-		as_namespace* ns, uint16_t set_id, uint32_t rps, const char* client)
+		as_namespace* ns, const char* set_name, uint16_t set_id,
+		as_scan_pid* pids, uint32_t rps, const char* client)
 {
-	memset(_job, 0, sizeof(as_scan_job));
+	*_job = (as_scan_job){
+			.vtable = *vtable,
+			.trid = scan_job_trid(trid),
+			.ns = ns,
+			.set_id = set_id,
+			.pids = pids,
+			.rps = rps
+	};
 
-	_job->vtable = *vtable;
-	_job->trid = scan_job_trid(trid);
-	_job->ns = ns;
-	_job->set_id = set_id;
-	_job->rps = rps;
-
+	strcpy(_job->set_name, set_name);
 	strcpy(_job->client, client);
+	count_pids_requested(_job);
 }
 
 void
@@ -202,6 +210,11 @@ void
 as_scan_job_destroy(as_scan_job* _job)
 {
 	_job->vtable.destroy_fn(_job);
+
+	if (_job->pids) {
+		cf_free(_job->pids);
+	}
+
 	cf_free(_job);
 }
 
@@ -216,6 +229,7 @@ as_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 			_job->finish_us - _job->start_us : since_start_us;
 
 	stat->trid = _job->trid;
+	stat->n_pids_requested = _job->n_pids_requested;
 	stat->rps = _job->rps;
 	stat->active_threads = _job->n_threads;
 	stat->progress_pct = progress_pct(_job);
@@ -229,7 +243,7 @@ as_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 	stat->recs_failed = _job->n_failed;
 
 	strcpy(stat->ns, _job->ns->name);
-	strcpy(stat->set, safe_set_name(_job));
+	strcpy(stat->set, _job->set_name);
 
 	strcpy(stat->client, _job->client);
 
@@ -276,8 +290,26 @@ run_scan_job(void* arg)
 	while ((pid = as_faa_uint32(&_job->pid, 1)) < AS_PARTITIONS) {
 		as_partition_reservation rsv;
 
-		if (as_partition_reserve_write(_job->ns, pid, &rsv, NULL) != 0) {
-			continue;
+		if (_job->pids == NULL) {
+			if (as_partition_reserve_write(_job->ns, pid, &rsv, NULL) != 0) {
+				continue;
+			}
+		}
+		else {
+			if (! _job->pids[pid].requested) {
+				continue;
+			}
+
+			if (as_partition_reserve_full(_job->ns, pid, &rsv) != 0) {
+				// Null tree causes slice_fn to send partition-done error.
+				rsv = (as_partition_reservation){
+						.ns = _job->ns,
+						.p = &_job->ns->partitions[pid]
+				};
+
+				_job->vtable.slice_fn(_job, &rsv);
+				continue;
+			}
 		}
 
 		_job->vtable.slice_fn(_job, &rsv);

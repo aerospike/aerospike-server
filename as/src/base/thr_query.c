@@ -3297,6 +3297,7 @@ as_query_fill_jobstat(as_query_transaction *qtr, as_mon_jobstat *stat)
 	stat->socket_timeout  = 0;
 
 	// Not implemented:
+	stat->n_pids_requested = 0;
 	stat->rps             = 0;
 	stat->client[0]       = '\0';
 	stat->progress_pct    = 0;

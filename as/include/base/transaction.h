@@ -302,6 +302,18 @@ as_transaction_is_batch_direct(const as_transaction *tr)
 }
 
 static inline bool
+as_transaction_has_pids(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_PID_ARRAY) != 0;
+}
+
+static inline bool
+as_transaction_has_digests(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_DIGEST_ARRAY) != 0;
+}
+
+static inline bool
 as_transaction_is_query(const as_transaction *tr)
 {
 	// Assumes we're already multi-record.

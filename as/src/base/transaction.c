@@ -170,6 +170,12 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_RECS_PER_SEC:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_RECS_PER_SEC;
 		break;
+	case AS_MSG_FIELD_TYPE_PID_ARRAY:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_PID_ARRAY;
+		break;
+	case AS_MSG_FIELD_TYPE_DIGEST_ARRAY:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_DIGEST_ARRAY;
+		break;
 	case AS_MSG_FIELD_TYPE_INDEX_NAME:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_INDEX_NAME;
 		break;

@@ -401,6 +401,26 @@ as_partition_reserve_read_tr(as_namespace* ns, uint32_t pid, as_transaction* tr,
 	return 0;
 }
 
+int
+as_partition_reserve_full(as_namespace* ns, uint32_t pid,
+		as_partition_reservation* rsv)
+{
+	as_partition* p = &ns->partitions[pid];
+
+	cf_mutex_lock(&p->lock);
+
+	if (! as_partition_version_is_full(&p->version)) {
+		cf_mutex_unlock(&p->lock);
+		return -1;
+	}
+
+	partition_reserve_lockfree(p, ns, rsv);
+
+	cf_mutex_unlock(&p->lock);
+
+	return 0;
+}
+
 // Reserves all query-able partitions.
 // Returns the number of partitions reserved.
 int

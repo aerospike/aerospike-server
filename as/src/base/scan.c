@@ -41,6 +41,7 @@
 #include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_ll.h"
@@ -110,10 +111,10 @@ scan_type_str(scan_type type)
 // scan_job - derived classes' public methods.
 //
 
-int basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
-int aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
-int udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
-int ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
+int basic_scan_job_start(as_transaction* tr, as_namespace* ns);
+int aggr_scan_job_start(as_transaction* tr, as_namespace* ns);
+int udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns);
+int ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns);
 
 //----------------------------------------------------------
 // Non-class-specific utilities.
@@ -125,9 +126,10 @@ typedef struct scan_options_s {
 	uint32_t	sample_pct;
 } scan_options;
 
-int get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id);
 scan_type get_scan_type(as_transaction* tr);
+bool get_scan_set(as_transaction* tr, as_namespace* ns, char* set_name, uint16_t* set_id);
 bool get_scan_options(as_transaction* tr, scan_options* options);
+bool get_scan_pids(as_transaction* tr, as_scan_pid** p_pids);
 bool get_scan_rps(as_transaction* tr, uint32_t* rps);
 void convert_old_priority(int old_priority, uint32_t* rps);
 bool validate_background_scan_rps(const as_namespace* ns, uint32_t* rps);
@@ -165,24 +167,19 @@ int
 as_scan(as_transaction* tr, as_namespace* ns)
 {
 	int result;
-	uint16_t set_id = INVALID_SET_ID;
-
-	if ((result = get_scan_set_id(tr, ns, &set_id)) != AS_OK) {
-		return result;
-	}
 
 	switch (get_scan_type(tr)) {
 	case SCAN_TYPE_BASIC:
-		result = basic_scan_job_start(tr, ns, set_id);
+		result = basic_scan_job_start(tr, ns);
 		break;
 	case SCAN_TYPE_AGGR:
-		result = aggr_scan_job_start(tr, ns, set_id);
+		result = aggr_scan_job_start(tr, ns);
 		break;
 	case SCAN_TYPE_UDF_BG:
-		result = udf_bg_scan_job_start(tr, ns, set_id);
+		result = udf_bg_scan_job_start(tr, ns);
 		break;
 	case SCAN_TYPE_OPS_BG:
-		result = ops_bg_scan_job_start(tr, ns, set_id);
+		result = ops_bg_scan_job_start(tr, ns);
 		break;
 	default:
 		cf_warning(AS_SCAN, "can't identify scan type");
@@ -243,33 +240,6 @@ as_scan_abort_all(void)
 // Non-class-specific utilities.
 //
 
-int
-get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id)
-{
-	uint16_t set_id = INVALID_SET_ID;
-	as_msg_field* f = as_transaction_has_set(tr) ?
-			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
-
-	if (f && as_msg_field_get_value_sz(f) != 0) {
-		uint32_t set_name_len = as_msg_field_get_value_sz(f);
-		char set_name[set_name_len + 1];
-
-		memcpy(set_name, f->data, set_name_len);
-		set_name[set_name_len] = '\0';
-		set_id = as_namespace_get_set_id(ns, set_name);
-
-		if (set_id == INVALID_SET_ID) {
-			cf_warning(AS_SCAN, "scan msg from %s has unrecognized set %s",
-					tr->from.proto_fd_h->client, set_name);
-			return AS_ERR_NOT_FOUND;
-		}
-	}
-
-	*p_set_id = set_id;
-
-	return AS_OK;
-}
-
 scan_type
 get_scan_type(as_transaction* tr)
 {
@@ -293,6 +263,42 @@ get_scan_type(as_transaction* tr)
 }
 
 bool
+get_scan_set(as_transaction* tr, as_namespace* ns, char* set_name,
+		uint16_t* set_id)
+{
+	if (! as_transaction_has_set(tr)) {
+		set_name[0] = '\0';
+		*set_id = INVALID_SET_ID;
+		return true; // will scan whole namespace
+	}
+
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET);
+	uint32_t len = as_msg_field_get_value_sz(f);
+
+	if (len == 0) {
+		set_name[0] = '\0';
+		*set_id = INVALID_SET_ID;
+		return true; // as if no set name sent - will scan whole namespace
+	}
+
+	if (len >= AS_SET_NAME_MAX_SIZE) {
+		cf_warning(AS_SCAN, "scan msg set name too long %u", len);
+		return false;
+	}
+
+	memcpy(set_name, f->data, len);
+	set_name[len] = '\0';
+
+	if ((*set_id = as_namespace_get_set_id(ns, set_name)) == INVALID_SET_ID) {
+		cf_warning(AS_SCAN, "scan msg from %s has unrecognized set %s",
+				tr->from.proto_fd_h->client, set_name);
+		// Continue anyway - need to send per-partition results.
+	}
+
+	return true;
+}
+
+bool
 get_scan_options(as_transaction* tr, scan_options* options)
 {
 	if (! as_transaction_has_scan_options(tr)) {
@@ -311,6 +317,79 @@ get_scan_options(as_transaction* tr, scan_options* options)
 	options->fail_on_cluster_change =
 			(AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE & f->data[0]) != 0;
 	options->sample_pct = f->data[1];
+
+	return true;
+}
+
+bool
+get_scan_pids(as_transaction* tr, as_scan_pid** p_pids)
+{
+	if (! as_transaction_has_pids(tr) && ! as_transaction_has_digests(tr)) {
+		return true;
+	}
+
+	as_scan_pid* pids = cf_calloc(AS_PARTITIONS, sizeof(as_scan_pid));
+
+	if (as_transaction_has_pids(tr)) {
+		as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
+				AS_MSG_FIELD_TYPE_PID_ARRAY);
+
+		uint32_t n_pids = as_msg_field_get_value_sz(f) / sizeof(uint16_t);
+
+		if (n_pids > AS_PARTITIONS) {
+			cf_warning(AS_SCAN, "pid array too big");
+			cf_free(pids);
+			return false;
+		}
+
+		uint16_t* data = (uint16_t*)f->data;
+
+		for (uint32_t i = 0; i < n_pids; i++) {
+			uint16_t pid = cf_swap_from_le16(data[i]);
+
+			if (pid >= AS_PARTITIONS || pids[pid].requested) {
+				cf_warning(AS_SCAN, "bad or duplicate pid %hu", pid);
+				cf_free(pids);
+				return false;
+			}
+
+			pids[pid].requested = true;
+		}
+	}
+
+	if (as_transaction_has_digests(tr)) {
+		as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
+				AS_MSG_FIELD_TYPE_DIGEST_ARRAY);
+
+		uint32_t n_digests = as_msg_field_get_value_sz(f) / sizeof(cf_digest);
+
+		if (n_digests > AS_PARTITIONS) {
+			cf_warning(AS_SCAN, "digest array too big");
+			cf_free(pids);
+			return false;
+		}
+
+		cf_digest* data = (cf_digest*)f->data;
+
+		for (uint32_t i = 0; i < n_digests; i++) {
+			cf_digest* keyd = &data[i];
+			uint32_t pid = as_partition_getid(keyd);
+
+			if (pid >= AS_PARTITIONS || pids[pid].requested) {
+				cf_warning(AS_SCAN, "bad or duplicate digest pid %hu", pid);
+				cf_free(pids);
+				return false;
+			}
+
+			pids[pid] = (as_scan_pid){
+					.requested = true,
+					.has_digest = true,
+					.keyd = *keyd
+			};
+		}
+	}
+
+	*p_pids = pids;
 
 	return true;
 }
@@ -433,6 +512,7 @@ send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size,
 static inline bool
 excluded_set(as_index* r, uint16_t set_id)
 {
+	// Note - INVALID_SET_ID at this point must mean scan whole namespace.
 	return set_id != INVALID_SET_ID && set_id != as_index_get_set_id(r);
 }
 
@@ -614,28 +694,36 @@ cf_vector* bin_names_from_op(as_msg* m, int* result);
 //
 
 int
-basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
+basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
-	basic_scan_job* job = cf_malloc(sizeof(basic_scan_job));
-	as_scan_job* _job = (as_scan_job*)job;
-
+	char set_name[AS_SET_NAME_MAX_SIZE];
+	uint16_t set_id;
 	scan_options options = { .sample_pct = 100 };
 	uint32_t rps = 0;
 	uint32_t timeout = CF_SOCKET_TIMEOUT;
 	predexp_eval_t* predexp = NULL;
+	as_scan_pid* pids = NULL;
 
-	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps) ||
+	if (! get_scan_set(tr, ns, set_name, &set_id) ||
+			! get_scan_options(tr, &options) || ! get_scan_pids(tr, &pids) ||
+			! get_scan_rps(tr, &rps) ||
 			! get_scan_socket_timeout(tr, &timeout) ||
 			! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "basic scan job failed msg field processing");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
+	}
+
+	if (pids == NULL && set_id == INVALID_SET_ID && set_name[0] != '\0') {
+		return AS_ERR_NOT_FOUND; // only for legacy scans
 	}
 
 	convert_old_priority(options.priority, &rps);
 
+	basic_scan_job* job = cf_malloc(sizeof(basic_scan_job));
+	as_scan_job* _job = (as_scan_job*)job;
+
 	as_scan_job_init(_job, &basic_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_id, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, pids, rps, tr->from.proto_fd_h->client);
 
 	job->cluster_key = as_exchange_cluster_key();
 	job->fail_on_cluster_change = options.fail_on_cluster_change;
@@ -664,11 +752,10 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout,
 			as_transaction_compress_response(tr));
 
-	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} rps %u sample-pct %u%s%s socket-timeout %u from %s",
-			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->rps, job->sample_pct,
-			job->no_bin_data ? ", metadata-only" : "",
-			job->fail_on_cluster_change ? ", fail-on-cluster-change" : "",
+	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} n-pids-requested %hu rps %u sample-pct %u%s%s socket-timeout %u from %s",
+			_job->trid, ns->name, set_name, _job->n_pids_requested, _job->rps,
+			job->sample_pct, job->no_bin_data ? " metadata-only" : "",
+			job->fail_on_cluster_change ? " fail-on-cluster-change" : "",
 			timeout, _job->client);
 
 	if ((result = as_scan_manager_start_job(_job)) != 0) {
@@ -695,18 +782,44 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 
 	cf_buf_builder_reserve(&bb, (int)sizeof(as_proto), NULL);
 
+	if (tree == NULL) { // also means _job->pids != NULL - not a legacy scan
+		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_ERR_UNAVAILABLE);
+		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
+		cf_buf_builder_free(bb);
+		return;
+	}
+
+	if (_job->set_id == INVALID_SET_ID && _job->set_name[0] != '\0') {
+		// Legacy scan can't get here - already returned 'not found'.
+		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
+		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
+		cf_buf_builder_free(bb);
+		return;
+	}
+
 	uint64_t slice_start = cf_getms();
 	basic_scan_slice slice = { job, &bb };
 
+	cf_digest* keyd = NULL;
+
+	if (_job->pids != NULL && _job->pids[rsv->p->id].has_digest) {
+		keyd = &_job->pids[rsv->p->id].keyd;
+	}
+
 	if (job->sample_pct == 100) {
-		as_index_reduce_live(tree, basic_scan_job_reduce_cb, (void*)&slice);
+		as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
+				(void*)&slice);
 	}
 	else {
 		uint64_t sample_count =
 				((as_index_tree_size(tree) * job->sample_pct) / 100);
 
-		as_index_reduce_partial_live(tree, sample_count,
+		as_index_reduce_from_partial_live(tree, keyd, sample_count,
 				basic_scan_job_reduce_cb, (void*)&slice);
+	}
+
+	if (_job->pids != NULL) {
+		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
 	}
 
 	if (bb->used_sz > sizeof(as_proto)) {
@@ -982,32 +1095,37 @@ void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
 //
 
 int
-aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
+aggr_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
-	aggr_scan_job* job = cf_malloc(sizeof(aggr_scan_job));
-	as_scan_job* _job = (as_scan_job*)job;
-
+	char set_name[AS_SET_NAME_MAX_SIZE];
+	uint16_t set_id;
 	scan_options options = { .sample_pct = 100 };
 	uint32_t rps = 0;
 	uint32_t timeout = CF_SOCKET_TIMEOUT;
 
-	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps) ||
+	if (! get_scan_set(tr, ns, set_name, &set_id) ||
+			! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps) ||
 			! get_scan_socket_timeout(tr, &timeout)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed msg field processing");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
+	}
+
+	if (set_id == INVALID_SET_ID && set_name[0] != '\0') {
+		return AS_ERR_NOT_FOUND;
 	}
 
 	if (as_transaction_has_predexp(tr)) {
 		cf_warning(AS_SCAN, "aggregation scans do not support predexp filters");
-		cf_free(job);
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
 	convert_old_priority(options.priority, &rps);
 
+	aggr_scan_job* job = cf_malloc(sizeof(aggr_scan_job));
+	as_scan_job* _job = (as_scan_job*)job;
+
 	as_scan_job_init(_job, &aggr_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_id, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, NULL, rps, tr->from.proto_fd_h->client);
 
 	if (! aggr_scan_init(&job->aggr_call, tr)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
@@ -1020,8 +1138,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 			as_transaction_compress_response(tr));
 
 	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} rps %u socket-timeout %u from %s",
-			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->rps, timeout, _job->client);
+			_job->trid, ns->name, set_name, _job->rps, timeout, _job->client);
 
 	int result = as_scan_manager_start_job(_job);
 
@@ -1310,25 +1427,27 @@ void udf_bg_scan_tr_complete(void* udata, int result);
 //
 
 int
-udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
+udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
-	udf_bg_scan_job* job = cf_malloc(sizeof(udf_bg_scan_job));
-	as_scan_job* _job = (as_scan_job*)job;
-
+	char set_name[AS_SET_NAME_MAX_SIZE];
+	uint16_t set_id;
 	scan_options options = { .sample_pct = 100 };
 	uint32_t rps = 0;
 
-	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
+	if (! get_scan_set(tr, ns, set_name, &set_id) ||
+			! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed msg field processing");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
+	}
+
+	if (set_id == INVALID_SET_ID && set_name[0] != '\0') {
+		return AS_ERR_NOT_FOUND;
 	}
 
 	convert_old_priority(options.priority, &rps);
 
 	if (! validate_background_scan_rps(ns, &rps)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed rps check");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1336,12 +1455,14 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	if (! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed predexp processing");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
 	}
 
+	udf_bg_scan_job* job = cf_malloc(sizeof(udf_bg_scan_job));
+	as_scan_job* _job = (as_scan_job*)job;
+
 	as_scan_job_init(_job, &udf_bg_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_id, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, NULL, rps, tr->from.proto_fd_h->client);
 
 	job->n_active_tr = 0;
 
@@ -1362,8 +1483,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->origin.udata = (void*)job;
 
 	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} rps %u from %s",
-			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->rps, _job->client);
+			_job->trid, ns->name, set_name, _job->rps, _job->client);
 
 	int result = as_scan_manager_start_job(_job);
 
@@ -1566,23 +1686,25 @@ void ops_bg_scan_tr_complete(void* udata, int result);
 //
 
 int
-ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
+ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
-	ops_bg_scan_job* job = cf_malloc(sizeof(ops_bg_scan_job));
-	as_scan_job* _job = (as_scan_job*)job;
-
+	char set_name[AS_SET_NAME_MAX_SIZE];
+	uint16_t set_id;
 	scan_options options = { .sample_pct = 100 };
 	uint32_t rps = 0;
 
-	if (! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
+	if (! get_scan_set(tr, ns, set_name, &set_id) ||
+			! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed msg field processing");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
+	}
+
+	if (set_id == INVALID_SET_ID && set_name[0] != '\0') {
+		return AS_ERR_NOT_FOUND;
 	}
 
 	if (! validate_background_scan_rps(ns, &rps)) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed rps check");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1591,7 +1713,6 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	if (ops == NULL) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed ops check");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1599,12 +1720,14 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	if (! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed predexp processing");
-		cf_free(job);
 		return AS_ERR_PARAMETER;
 	}
 
+	ops_bg_scan_job* job = cf_malloc(sizeof(ops_bg_scan_job));
+	as_scan_job* _job = (as_scan_job*)job;
+
 	as_scan_job_init(_job, &ops_bg_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_id, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, NULL, rps, tr->from.proto_fd_h->client);
 
 	job->n_active_tr = 0;
 
@@ -1621,8 +1744,7 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->origin.udata = (void*)job;
 
 	cf_info(AS_SCAN, "starting ops-bg scan job %lu {%s:%s} rps %u from %s",
-			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
-			_job->rps, _job->client);
+			_job->trid, ns->name, set_name, _job->rps, _job->client);
 
 	int result = as_scan_manager_start_job(_job);
 

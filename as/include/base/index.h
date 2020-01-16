@@ -344,6 +344,12 @@ void as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count, as_inde
 void as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
 void as_index_reduce_partial_live(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 
+void as_index_reduce_from(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_from_partial(as_index_tree *tree, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+
+void as_index_reduce_from_live(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_from_partial_live(as_index_tree *tree, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+
 int as_index_try_exists(as_index_tree *tree, const cf_digest *keyd);
 int as_index_try_get_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
 int as_index_get_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
@@ -367,10 +373,24 @@ typedef struct as_index_sprig_s {
 	cf_arenax_puddle *puddle;
 } as_index_sprig;
 
-uint64_t as_index_sprig_keyd_reduce_partial(as_index_sprig *isprig, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+uint64_t as_index_sprig_keyd_reduce_partial(as_index_sprig *isprig, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 
 int as_index_sprig_get_vlock(as_index_sprig *isprig, const cf_digest *keyd, as_index_ref *index_ref);
 int as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd);
+
+static inline uint32_t
+as_index_sprig_i_from_keyd(as_index_tree *tree, const cf_digest *keyd)
+{
+	// Get the 28 most significant non-pid bits in the digest. Note - this is
+	// hardwired around the way we currently extract the (12 bit) partition-ID
+	// from the digest.
+	uint32_t bits = (((uint32_t)keyd->digest[1] & 0xF0) << 20) |
+			((uint32_t)keyd->digest[2] << 16) |
+			((uint32_t)keyd->digest[3] << 8) |
+			(uint32_t)keyd->digest[4];
+
+	return bits >> tree->shared->sprigs_shift;
+}
 
 static inline void
 as_index_sprig_from_keyd(as_index_tree *tree, as_index_sprig *isprig,

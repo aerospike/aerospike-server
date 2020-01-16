@@ -60,6 +60,7 @@ typedef struct as_mon_jobstat_s {
 	char		ns[AS_ID_NAMESPACE_SZ];
 	char		set[AS_SET_NAME_MAX_SIZE];
 	uint32_t	priority;
+	uint32_t	n_pids_requested;
 	uint32_t	rps;
 	uint32_t	active_threads;
 	char		status[64];

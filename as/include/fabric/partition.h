@@ -202,6 +202,7 @@ void as_partition_reserve(struct as_namespace_s* ns, uint32_t pid, as_partition_
 int as_partition_reserve_replica(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node);
 int as_partition_reserve_read_tr(struct as_namespace_s* ns, uint32_t pid, struct as_transaction_s* tr, cf_node* node);
+int as_partition_reserve_full(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_prereserve_query(struct as_namespace_s* ns, bool can_partition_query[], as_partition_reservation rsv[]);
 int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_xdr_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
@@ -248,6 +249,12 @@ static inline bool
 as_partition_version_has_data(const as_partition_version* version)
 {
 	return version->ckey != 0;
+}
+
+static inline bool
+as_partition_version_is_full(const as_partition_version* version)
+{
+	return version->ckey != 0 && version->subset == 0;
 }
 
 static inline bool
