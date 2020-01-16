@@ -1277,7 +1277,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 
 			if (immig0->cluster_key != cluster_key) {
 				immigration_release(immig0);
-				return; // other node reused an immig_id, allow reaper to reap
+				return; // other node reused an emig_id, allow reaper to reap
 			}
 
 			immig = immig0; // ...  and use original
