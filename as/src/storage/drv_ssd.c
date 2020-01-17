@@ -3012,6 +3012,7 @@ ssd_init_synchronous(drv_ssds *ssds)
 	if (prefix_first->last_evict_void_time != 0) {
 		if (ns->smd_evict_void_time == 0) {
 			ns->smd_evict_void_time = prefix_first->last_evict_void_time;
+			ns->evict_void_time = ns->smd_evict_void_time;
 			// Leave header threshold in case we don't commit SMD threshold.
 		}
 		else {
