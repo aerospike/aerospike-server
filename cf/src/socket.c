@@ -1494,44 +1494,6 @@ cf_socket_close(cf_socket *sock)
 }
 
 void
-cf_socket_drain_close(cf_socket *sock)
-{
-	cf_debug(CF_SOCKET, "Draining and closing FD %d", sock->fd);
-	int32_t efd = epoll_create(1);
-
-	if (efd < 0) {
-		cf_crash(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
-	}
-
-	struct epoll_event event = { .data.fd = sock->fd, .events = EPOLLRDHUP };
-
-	if (epoll_ctl(efd, EPOLL_CTL_ADD, sock->fd, &event) < 0) {
-		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
-				sock->fd, errno, cf_strerror(errno));
-	}
-
-	cf_socket_shutdown(sock);
-	int32_t count = safe_wait(efd, &event, 1, 5000);
-
-	if (count == 0) {
-		cf_warning(CF_SOCKET, "Timeout while waiting for FD %d to drain", sock->fd);
-		goto cleanup1;
-	}
-
-	cf_debug(CF_SOCKET, "FD %d drained", sock->fd);
-
-cleanup1:
-	if (epoll_ctl(efd, EPOLL_CTL_DEL, sock->fd, NULL) < 0) {
-		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
-				sock->fd, errno, cf_strerror(errno));
-	}
-
-	safe_close(efd);
-	cf_socket_close(sock);
-	cf_socket_term(sock);
-}
-
-void
 cf_socket_term(cf_socket *sock)
 {
 	tls_socket_term(sock);

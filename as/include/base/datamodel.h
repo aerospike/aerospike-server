@@ -1328,7 +1328,6 @@ extern void as_namespaces_setup(bool cold_start_cmd, uint32_t instance);
 extern void as_namespace_finish_setup(as_namespace *ns, uint32_t instance);
 extern bool as_namespace_configure_sets(as_namespace *ns);
 extern as_namespace *as_namespace_get_byname(char *name);
-extern as_namespace *as_namespace_get_byid(uint32_t id);
 extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);

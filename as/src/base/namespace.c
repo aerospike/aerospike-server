@@ -283,21 +283,6 @@ as_namespace_get_byname(char *name)
 
 
 as_namespace *
-as_namespace_get_byid(uint32_t id)
-{
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace *ns = g_config.namespaces[ns_ix];
-
-		if (id == ns->id) {
-			return ns;
-		}
-	}
-
-	return NULL;
-}
-
-
-as_namespace *
 as_namespace_get_bybuf(uint8_t *buf, size_t len)
 {
 	if (len >= AS_ID_NAMESPACE_SZ) {

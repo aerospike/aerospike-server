@@ -305,7 +305,6 @@ CF_MUST_CHECK int32_t cf_socket_try_send_all(cf_socket *sock, const void *buff, 
 void cf_socket_write_shutdown(cf_socket *sock);
 void cf_socket_shutdown(cf_socket *sock);
 void cf_socket_close(cf_socket *sock);
-void cf_socket_drain_close(cf_socket *sock);
 void cf_socket_term(cf_socket *sock);
 
 void cf_msock_cfg_init(cf_msock_cfg *cfg, cf_sock_owner owner);
