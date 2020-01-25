@@ -29,7 +29,6 @@
 #include <string.h>
 
 #include "aerospike/as_buffer.h"
-#include "aerospike/as_msgpack.h"
 #include "aerospike/as_serializer.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
@@ -37,6 +36,7 @@
 
 #include "dynbuf.h"
 #include "fault.h"
+#include "msgpack_in.h"
 
 #include "base/datamodel.h"
 #include "base/proto.h"
@@ -145,31 +145,30 @@ as_particle_type_from_asval(const as_val *val)
 as_particle_type
 as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 {
-	as_val_t vtype = as_unpack_buf_peek_type(packed, packed_size);
+	msgpack_type vtype = msgpack_buf_peek_type(packed, packed_size);
 
 	switch (vtype) {
 	case AS_NIL:
 		return AS_PARTICLE_TYPE_NULL;
-	case AS_BOOLEAN:
-	case AS_INTEGER:
+	case MSGPACK_TYPE_FALSE:
+	case MSGPACK_TYPE_TRUE:
+	case MSGPACK_TYPE_NEGINT:
+	case MSGPACK_TYPE_INT:
 		return AS_PARTICLE_TYPE_INTEGER;
-	case AS_DOUBLE:
+	case MSGPACK_TYPE_DOUBLE:
 		return AS_PARTICLE_TYPE_FLOAT;
-	case AS_STRING:
+	case MSGPACK_TYPE_STRING:
 		return AS_PARTICLE_TYPE_STRING;
-	case AS_BYTES:
+	case MSGPACK_TYPE_BYTES:
 		return AS_PARTICLE_TYPE_BLOB;
-	case AS_GEOJSON:
+	case MSGPACK_TYPE_GEOJSON:
 		return AS_PARTICLE_TYPE_GEOJSON;
-	case AS_LIST:
+	case MSGPACK_TYPE_LIST:
 		return AS_PARTICLE_TYPE_LIST;
-	case AS_MAP:
+	case MSGPACK_TYPE_MAP:
 		return AS_PARTICLE_TYPE_MAP;
-	case AS_UNDEF:
-	case AS_REC:
-	case AS_PAIR:
 	default:
-		cf_warning(AS_PARTICLE, "encountered bad as_val_t %d", vtype);
+		cf_warning(AS_PARTICLE, "encountered bad msgpack_type %d", vtype);
 		return AS_PARTICLE_TYPE_BAD;
 	}
 }

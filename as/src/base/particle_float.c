@@ -25,11 +25,11 @@
 #include <stdint.h>
 
 #include "aerospike/as_double.h"
-#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
+#include "msgpack_in.h"
 
 #include "base/datamodel.h"
 #include "base/particle.h"
@@ -204,13 +204,14 @@ void
 float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
 	double x;
-	as_unpacker pk = {
-			.buffer = packed,
-			.offset = 0,
-			.length = packed_size
+	msgpack_in mp = {
+			.buf = packed,
+			.buf_sz = packed_size
 	};
 
-	as_unpack_double(&pk, &x);
+	if (! msgpack_get_double(&mp, &x)) {
+		cf_crash(AS_PARTICLE, "invalid float");
+	}
 
 	*(double *)pp = x;
 }

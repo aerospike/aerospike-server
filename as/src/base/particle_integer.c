@@ -28,11 +28,11 @@
 
 #include "aerospike/as_boolean.h"
 #include "aerospike/as_integer.h"
-#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
+#include "msgpack_in.h"
 
 #include "base/datamodel.h"
 #include "base/particle.h"
@@ -362,14 +362,13 @@ integer_from_msgpack(const uint8_t *packed, uint32_t packed_size,
 		i = 1;
 	}
 	else {
-		as_unpacker pk = {
-				.buffer = packed,
-				.offset = 0,
-				.length = packed_size
+		msgpack_in mp = {
+				.buf = packed,
+				.buf_sz = packed_size
 		};
 
-		if (as_unpack_int64(&pk, &i) != 0) {
-			cf_fault_hex_dump("msgpack", pk.buffer, pk.length);
+		if (! msgpack_get_int64(&mp, &i)) {
+			cf_fault_hex_dump("msgpack", mp.buf, mp.buf_sz);
 			cf_crash(AS_PARTICLE, "invalid msgpack");
 		}
 	}

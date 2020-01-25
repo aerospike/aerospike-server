@@ -28,13 +28,13 @@
 #include <string.h>
 
 #include "aerospike/as_bytes.h"
-#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "bits.h"
 #include "fault.h"
+#include "msgpack_in.h"
 
 #include "base/datamodel.h"
 #include "base/particle.h"
@@ -138,7 +138,7 @@ typedef enum {
 
 typedef struct bits_state_s {
 	as_bits_op_type op_type;
-	as_unpacker pk;
+	msgpack_in pk;
 	uint32_t ele_count;
 	bits_op_def* def;
 
@@ -629,14 +629,15 @@ blob_size_from_msgpack(const uint8_t* packed, uint32_t packed_size)
 void
 blob_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp)
 {
-	as_unpacker pk = {
-			.buffer = packed,
-			.offset = 0,
-			.length = packed_size
+	msgpack_in mp = {
+			.buf = packed,
+			.buf_sz = packed_size
 	};
 
-	int64_t size = as_unpack_blob_size(&pk); // FIXME - what if error?
-	const uint8_t* ptr = pk.buffer + pk.offset;
+	uint32_t size;
+	const uint8_t* ptr = msgpack_get_bin(&mp, &size);//pk.buffer + pk.offset;
+
+	cf_assert(ptr != NULL, AS_PARTICLE, "invalid msgpack");
 
 	uint8_t type = *ptr;
 
@@ -648,7 +649,7 @@ blob_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp)
 
 	p_blob_mem->type = (uint8_t)blob_bytes_type_to_particle_type(
 			(as_bytes_type)type);
-	p_blob_mem->sz = (uint32_t)size;
+	p_blob_mem->sz = size;
 	memcpy(p_blob_mem->data, ptr, p_blob_mem->sz);
 }
 
@@ -891,26 +892,26 @@ bits_state_init(bits_state* state, const as_msg_op* msg_op, bool is_read)
 	const uint8_t* data = msg_op->name + msg_op->name_sz;
 	uint32_t sz = msg_op->op_sz - (uint32_t)OP_FIXED_SZ - msg_op->name_sz;
 
-	state->pk.buffer = data;
-	state->pk.length = sz;
+	state->pk.buf = data;
+	state->pk.buf_sz = sz;
 	state->pk.offset = 0;
 
-	int64_t ele_count = as_unpack_list_header_element_count(&state->pk);
+	uint32_t ele_count;
 
-	if (ele_count < 1) {
-		cf_warning(AS_PARTICLE, "bits_state_init - not enough args or unable to parse args for bin %.*s err %ld",
+	if (! msgpack_get_list_ele_count(&state->pk, &ele_count) ||
+			ele_count == 0) {
+		cf_warning(AS_PARTICLE, "bits_state_init - not enough args or unable to parse args for bin %.*s err %u",
 				(int)msg_op->name_sz, msg_op->name, ele_count);
 		return false;
 	}
 
-	state->ele_count = (uint32_t)ele_count - 1; // ignore the 'op' arg.
+	state->ele_count = ele_count - 1; // ignore the 'op' arg.
 
 	uint64_t type64;
-	int result = as_unpack_uint64(&state->pk, &type64);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_state_init - unable to parse op (error %d) for bin %.*s",
-				result, (int)msg_op->name_sz, msg_op->name);
+	if (! msgpack_get_uint64(&state->pk, &type64)) {
+		cf_warning(AS_PARTICLE, "bits_state_init - unable to parse op for bin %.*s",
+				(int)msg_op->name_sz, msg_op->name);
 		return false;
 	}
 
@@ -966,11 +967,10 @@ static bool
 bits_parse_byte_offset(bits_state* state, bits_op* op)
 {
 	int64_t offset;
-	int result = as_unpack_int64(&state->pk, &offset);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_offset - unable to parse offset (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_int64(&state->pk, &offset)) {
+		cf_warning(AS_PARTICLE, "bits_parse_byte_offset - unable to parse offset for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -989,11 +989,10 @@ static bool
 bits_parse_offset(bits_state* state, bits_op* op)
 {
 	int64_t offset;
-	int result = as_unpack_int64(&state->pk, &offset);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_offset - unable to parse offset (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_int64(&state->pk, &offset)) {
+		cf_warning(AS_PARTICLE, "bits_parse_offset - unable to parse offset for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1012,11 +1011,10 @@ static bool
 bits_parse_integer_size(bits_state* state, bits_op* op)
 {
 	uint64_t size;
-	int result = as_unpack_uint64(&state->pk, &size);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_integer_size - unable to parse byte_size (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_uint64(&state->pk, &size)) {
+		cf_warning(AS_PARTICLE, "bits_parse_integer_size - unable to parse byte_size for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1041,11 +1039,10 @@ static bool
 bits_parse_byte_size(bits_state* state, bits_op* op)
 {
 	uint64_t size;
-	int result = as_unpack_uint64(&state->pk, &size);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_size - unable to parse byte_size (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_uint64(&state->pk, &size)) {
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size - unable to parse byte_size for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1070,11 +1067,10 @@ static bool
 bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op)
 {
 	uint64_t size;
-	int result = as_unpack_uint64(&state->pk, &size);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - unable to parse byte_size (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_uint64(&state->pk, &size)) {
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - unable to parse byte_size for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1093,11 +1089,10 @@ static bool
 bits_parse_size(bits_state* state, bits_op* op)
 {
 	uint64_t size;
-	int result = as_unpack_uint64(&state->pk, &size);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_size - unable to parse size (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_uint64(&state->pk, &size)) {
+		cf_warning(AS_PARTICLE, "bits_parse_size - unable to parse size for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1122,11 +1117,10 @@ static bool
 bits_parse_boolean_value(bits_state* state, bits_op* op)
 {
 	bool value;
-	int result = as_unpack_boolean(&state->pk, &value);
 
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_boolean_value - unable to parse boolean (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_bool(&state->pk, &value)) {
+		cf_warning(AS_PARTICLE, "bits_parse_boolean_value - unable to parse boolean for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1154,11 +1148,9 @@ bits_parse_n_bits_value(bits_state* state, bits_op* op)
 static bool
 bits_parse_integer_value(bits_state* state, bits_op* op)
 {
-	int result = as_unpack_uint64(&state->pk, &op->value);
-
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_integer_value - unable to parse number (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_uint64(&state->pk, &op->value)) {
+		cf_warning(AS_PARTICLE, "bits_parse_integer_value - unable to parse number for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1170,7 +1162,7 @@ bits_parse_buf(bits_state* state, bits_op* op)
 {
 	uint32_t size;
 
-	op->buf = as_unpack_bin(&state->pk, &size);
+	op->buf = msgpack_get_bin(&state->pk, &size);
 
 	// AS msgpack has a one byte blob type field which we ignore here.
 	if (op->buf == NULL || size == 1) {
@@ -1199,11 +1191,9 @@ bits_parse_buf(bits_state* state, bits_op* op)
 static bool
 bits_parse_flags(bits_state* state, bits_op* op)
 {
-	int result = as_unpack_uint64(&state->pk, &op->flags);
-
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_flags - unable to parse subflags (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_uint64(&state->pk, &op->flags)) {
+		cf_warning(AS_PARTICLE, "bits_parse_flags - unable to parse subflags for op %s",
+				state->def->name);
 		return false;
 	}
 
@@ -1297,11 +1287,9 @@ bits_parse_get_integer_subflags(bits_state* state, bits_op* op)
 static bool
 bits_parse_subflags(bits_state* state, bits_op* op)
 {
-	int result = as_unpack_uint64(&state->pk, &op->subflags);
-
-	if (result != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_subflags - unable to parse subflags (error %d) for op %s",
-				result, state->def->name);
+	if (! msgpack_get_uint64(&state->pk, &op->subflags)) {
+		cf_warning(AS_PARTICLE, "bits_parse_subflags - unable to parse subflags for op %s",
+				state->def->name);
 		return false;
 	}
 

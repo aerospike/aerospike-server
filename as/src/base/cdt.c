@@ -1,7 +1,7 @@
 /*
  * cdt.c
  *
- * Copyright (C) 2015-2018 Aerospike, Inc.
+ * Copyright (C) 2015-2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -33,9 +33,9 @@
 #include "bits.h"
 #include "dynbuf.h"
 #include "fault.h"
+#include "msgpack_in.h"
 
 #include "base/cfg.h"
-#include "base/msgpack_in.h"
 #include "base/particle.h"
 
 
@@ -197,15 +197,13 @@ typedef struct {
 // Forward declares.
 //
 
-static bool unpack_list_value(msgpack_in *pk, cdt_payload *payload_r);
-static bool unpack_map_key(msgpack_in *pk, cdt_payload *payload_r);
-static bool unpack_map_value(msgpack_in *pk, cdt_payload *payload_r);
-
-inline static void cdt_payload_pack_val(cdt_payload *value, const as_val *val);
+static bool unpack_list_value(msgpack_in *mp, cdt_payload *payload_r);
+static bool unpack_map_key(msgpack_in *mp, cdt_payload *payload_r);
+static bool unpack_map_value(msgpack_in *mp, cdt_payload *payload_r);
 
 static inline uint32_t order_index_ele_sz(uint32_t max_idx);
 
-static void cdt_context_fill_unpacker(cdt_context *ctx, as_unpacker *upk);
+static void cdt_context_fill_unpacker(cdt_context *ctx, msgpack_in *mp);
 
 static void cdt_context_unwind(cdt_context *ctx);
 
@@ -303,11 +301,11 @@ calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index,
 }
 
 static bool
-unpack_list_value(msgpack_in *pk, cdt_payload *payload_r)
+unpack_list_value(msgpack_in *mp, cdt_payload *payload_r)
 {
-	payload_r->ptr = pk->buf + pk->offset;
+	payload_r->ptr = mp->buf + mp->offset;
 
-	uint32_t sz = msgpack_sz(pk);
+	uint32_t sz = msgpack_sz(mp);
 
 	if (sz == 0) {
 		cf_warning(AS_PARTICLE, "unpack_list_value() invalid msgpack");
@@ -320,11 +318,11 @@ unpack_list_value(msgpack_in *pk, cdt_payload *payload_r)
 }
 
 static bool
-unpack_map_key(msgpack_in *pk, cdt_payload *payload_r)
+unpack_map_key(msgpack_in *mp, cdt_payload *payload_r)
 {
-	payload_r->ptr = pk->buf + pk->offset;
+	payload_r->ptr = mp->buf + mp->offset;
 
-	uint32_t sz = msgpack_sz(pk);
+	uint32_t sz = msgpack_sz(mp);
 
 	if (sz == 0) {
 		cf_warning(AS_PARTICLE, "unpack_map_key() invalid msgpack");
@@ -333,7 +331,7 @@ unpack_map_key(msgpack_in *pk, cdt_payload *payload_r)
 
 	payload_r->sz = sz;
 
-	if (msgpack_sz(pk) == 0) { // skip value
+	if (msgpack_sz(mp) == 0) { // skip value
 		cf_warning(AS_PARTICLE, "unpack_map_key() invalid msgpack");
 		return false;
 	}
@@ -342,16 +340,16 @@ unpack_map_key(msgpack_in *pk, cdt_payload *payload_r)
 }
 
 static bool
-unpack_map_value(msgpack_in *pk, cdt_payload *payload_r)
+unpack_map_value(msgpack_in *mp, cdt_payload *payload_r)
 {
-	if (msgpack_sz(pk) == 0) { // skip key
+	if (msgpack_sz(mp) == 0) { // skip key
 		cf_warning(AS_PARTICLE, "unpack_map_value() invalid msgpack");
 		return false;
 	}
 
-	payload_r->ptr = pk->buf + pk->offset;
+	payload_r->ptr = mp->buf + mp->offset;
 
-	uint32_t sz = msgpack_sz(pk);
+	uint32_t sz = msgpack_sz(mp);
 
 	if (sz == 0) {
 		cf_warning(AS_PARTICLE, "unpack_map_value() invalid msgpack");
@@ -370,13 +368,13 @@ cdt_check_storage_list_contents(const uint8_t *buf, uint32_t sz, uint32_t count)
 		return true;
 	}
 
-	msgpack_in pk = {
+	msgpack_in mp = {
 			.buf = buf,
 			.buf_sz = sz
 	};
 
-	if (msgpack_sz_rep(&pk, count) != pk.buf_sz || pk.has_nonstorage) {
-		cf_warning(AS_PARTICLE, "cdt_check_storage_list_content() invalid msgpack: count %u offset %u buf_sz %u", count, pk.offset, pk.buf_sz);
+	if (msgpack_sz_rep(&mp, count) != mp.buf_sz || mp.has_nonstorage) {
+		cf_warning(AS_PARTICLE, "cdt_check_storage_list_content() invalid msgpack: count %u offset %u buf_sz %u", count, mp.offset, mp.buf_sz);
 		return false;
 	}
 
@@ -696,27 +694,27 @@ cdt_calc_delta_init(cdt_calc_delta *cdv, const cdt_payload *delta_value,
 	cdv->incr_double = 1;
 
 	if (delta_value && delta_value->ptr) {
-		as_unpacker pk_delta_value = {
-				.buffer = delta_value->ptr,
-				.length = delta_value->sz
+		msgpack_in mp_delta_value = {
+				.buf = delta_value->ptr,
+				.buf_sz = delta_value->sz
 		};
 
-		cdv->type = as_unpack_peek_type(&pk_delta_value);
+		cdv->type = msgpack_peek_type(&mp_delta_value);
 
-		if (cdv->type == AS_INTEGER) {
-			if (as_unpack_int64(&pk_delta_value, &cdv->incr_int) != 0) {
+		if (msgpack_type_is_int(cdv->type)) {
+			if (! msgpack_get_int64(&mp_delta_value, &cdv->incr_int)) {
 				cf_warning(AS_PARTICLE, "cdt_delta_value_init() invalid packed delta value");
 				return false;
 			}
 		}
-		else if (cdv->type == AS_DOUBLE) {
-			if (as_unpack_double(&pk_delta_value, &cdv->incr_double) != 0) {
+		else if (cdv->type == MSGPACK_TYPE_DOUBLE) {
+			if (! msgpack_get_double(&mp_delta_value, &cdv->incr_double)) {
 				cf_warning(AS_PARTICLE, "cdt_delta_value_init() invalid packed delta value");
 				return false;
 			}
 		}
-		else if (cdv->type == AS_NIL) {
-			cdv->type = AS_UNDEF;
+		else if (cdv->type == MSGPACK_TYPE_NIL) {
+			cdv->type = MSGPACK_TYPE_NIL;
 		}
 		else {
 			cf_warning(AS_PARTICLE, "cdt_delta_value_init() delta is not int/double");
@@ -724,7 +722,7 @@ cdt_calc_delta_init(cdt_calc_delta *cdv, const cdt_payload *delta_value,
 		}
 	}
 	else {
-		cdv->type = AS_UNDEF;
+		cdv->type = MSGPACK_TYPE_NIL;
 	}
 
 	if (is_decrement) {
@@ -739,31 +737,31 @@ cdt_calc_delta_init(cdt_calc_delta *cdv, const cdt_payload *delta_value,
 }
 
 bool
-cdt_calc_delta_add(cdt_calc_delta *cdv, as_unpacker *pk_value)
+cdt_calc_delta_add(cdt_calc_delta *cdv, msgpack_in *mp_value)
 {
-	if (pk_value) {
-		as_val_t packed_value_type = as_unpack_peek_type(pk_value);
+	if (mp_value) {
+		msgpack_type packed_value_type = msgpack_peek_type(mp_value);
 
-		if (packed_value_type == AS_INTEGER) {
-			if (as_unpack_int64(pk_value, &cdv->value_int) != 0) {
+		if (msgpack_type_is_int(packed_value_type)) {
+			if (! msgpack_get_int64(mp_value, &cdv->value_int)) {
 				cf_warning(AS_PARTICLE, "cdt_delta_value_add() invalid packed int");
 				return false;
 			}
 
-			if (cdv->type == AS_DOUBLE) {
+			if (cdv->type == MSGPACK_TYPE_DOUBLE) {
 				cdv->value_int += (int64_t)cdv->incr_double;
 			}
 			else {
 				cdv->value_int += cdv->incr_int;
 			}
 		}
-		else if (packed_value_type == AS_DOUBLE) {
-			if (as_unpack_double(pk_value, &cdv->value_double) != 0) {
+		else if (packed_value_type == MSGPACK_TYPE_DOUBLE) {
+			if (! msgpack_get_double(mp_value, &cdv->value_double)) {
 				cf_warning(AS_PARTICLE, "cdt_delta_value_add() invalid packed double");
 				return false;
 			}
 
-			if (cdv->type == AS_DOUBLE) {
+			if (cdv->type == MSGPACK_TYPE_DOUBLE) {
 				cdv->value_double += cdv->incr_double;
 			}
 			else {
@@ -777,11 +775,11 @@ cdt_calc_delta_add(cdt_calc_delta *cdv, as_unpacker *pk_value)
 
 		cdv->type = packed_value_type;
 	}
-	else if (cdv->type == AS_DOUBLE) {
+	else if (cdv->type == MSGPACK_TYPE_DOUBLE) {
 		cdv->value_double += cdv->incr_double;
 	}
 	else {
-		cdv->type = AS_INTEGER; // default to AS_INTEGER if UNDEF
+		cdv->type = MSGPACK_TYPE_INT; // default to integer
 		cdv->value_int += cdv->incr_int;
 	}
 
@@ -792,7 +790,7 @@ void
 cdt_calc_delta_pack_and_result(cdt_calc_delta *cdv, cdt_payload *value,
 		as_bin *result)
 {
-	if (cdv->type == AS_DOUBLE) {
+	if (cdv->type == MSGPACK_TYPE_DOUBLE) {
 		cdt_payload_pack_double(value, cdv->value_double);
 		as_bin_set_double(result, cdv->value_double);
 	}
@@ -807,55 +805,28 @@ cdt_calc_delta_pack_and_result(cdt_calc_delta *cdv, cdt_payload *value,
 // cdt_payload functions.
 //
 
-bool
-cdt_payload_is_int(const cdt_payload *payload)
-{
-	return as_unpack_buf_peek_type(payload->ptr, payload->sz) == AS_INTEGER;
-}
-
-int64_t
-cdt_payload_get_int64(const cdt_payload *payload)
-{
-	int64_t ret = 0;
-	as_unpacker pk = {
-			.buffer = payload->ptr,
-			.offset = 0,
-			.length = payload->sz
-	};
-
-	as_unpack_int64(&pk, &ret);
-
-	return ret;
-}
-
-inline static void
-cdt_payload_pack_val(cdt_payload *value, const as_val *val)
-{
-	as_serializer ser;
-	as_msgpack_init(&ser);
-
-	value->sz = as_serializer_serialize_presized(&ser, val,
-			(uint8_t *)value->ptr);
-
-	as_serializer_destroy(&ser);
-}
-
 void
 cdt_payload_pack_int(cdt_payload *packed, int64_t value)
 {
-	as_integer val;
-	as_integer_init(&val, value);
+	as_packer pk = {
+			.buffer = (uint8_t *)packed->ptr,
+			.capacity = packed->sz
+	};
 
-	cdt_payload_pack_val(packed, (as_val *)&val);
+	as_pack_int64(&pk, value);
+	packed->sz = pk.offset;
 }
 
 void
 cdt_payload_pack_double(cdt_payload *packed, double value)
 {
-	as_double val;
-	as_double_init(&val, value);
+	as_packer pk = {
+			.buffer = (uint8_t *)packed->ptr,
+			.capacity = packed->sz
+	};
 
-	return cdt_payload_pack_val(packed, (as_val *)&val);
+	as_pack_double(&pk, value);
+	packed->sz = pk.offset;
 }
 
 
@@ -889,15 +860,12 @@ cdt_container_builder_add_n(cdt_container_builder *builder, const uint8_t *buf,
 void
 cdt_container_builder_add_int64(cdt_container_builder *builder, int64_t value)
 {
-	as_integer val64;
-
 	as_packer pk = {
 			.buffer = builder->write_ptr,
 			.capacity = INT_MAX
 	};
 
-	as_integer_init(&val64, value);
-	as_pack_val(&pk, (const as_val *)&val64);
+	as_pack_int64(&pk, value);
 	builder->write_ptr += pk.offset;
 	*builder->sz += (uint32_t)pk.offset;
 	builder->ele_count++;
@@ -944,37 +912,36 @@ cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 		const uint16_t *type_ptr = (const uint16_t *)data;
 
 		cdt_state->type = cf_swap_from_be16(*type_ptr);
-		cdt_state->pk.buffer = data + sizeof(uint16_t);
-		cdt_state->pk.length = sz - sizeof(uint16_t);
-		cdt_state->pk.offset = 0;
+		cdt_state->mp.buf = data + sizeof(uint16_t);
+		cdt_state->mp.buf_sz = sz - sizeof(uint16_t);
+		cdt_state->mp.offset = 0;
+		cdt_state->ele_count = 0;
 
-		int64_t ele_count = (cdt_state->pk.length == 0) ?
-				0 : as_unpack_list_header_element_count(&cdt_state->pk);
-
-		if (ele_count < 0) {
-			cf_warning(AS_PARTICLE, "cdt_parse_state_init() unpack list header failed: size=%u type=%u ele_count=%ld", sz, cdt_state->type, ele_count);
+		if (cdt_state->mp.buf_sz != 0 &&
+				! msgpack_get_list_ele_count(&cdt_state->mp,
+						&cdt_state->ele_count)) {
+			cf_warning(AS_PARTICLE, "cdt_parse_state_init() unpack list header failed: size=%u type=%u ele_count=%u", sz, cdt_state->type, cdt_state->ele_count);
 			return false;
 		}
-
-		cdt_state->ele_count = (uint32_t)ele_count;
 
 		return true;
 	}
 
-	cdt_state->pk.buffer = data;
-	cdt_state->pk.length = sz;
-	cdt_state->pk.offset = 0;
+	cdt_state->mp.buf = data;
+	cdt_state->mp.buf_sz = sz;
+	cdt_state->mp.offset = 0;
 
-	int64_t ele_count = as_unpack_list_header_element_count(&cdt_state->pk);
-	uint64_t type64;
+	uint32_t ele_count = 0;
+	uint64_t t64;
 
-	if (ele_count < 1 || as_unpack_uint64(&cdt_state->pk, &type64) != 0) {
-		cf_warning(AS_PARTICLE, "cdt_parse_state_init() unpack parameters failed: size=%u ele_count=%ld", sz, ele_count);
+	if (! msgpack_get_list_ele_count(&cdt_state->mp, &ele_count) ||
+			ele_count == 0 || ! msgpack_get_uint64(&cdt_state->mp, &t64)) {
+		cf_warning(AS_PARTICLE, "cdt_parse_state_init() unpack parameters failed: size=%u ele_count=%u", sz, ele_count);
 		return false;
 	}
 
-	cdt_state->type = (as_cdt_optype)type64;
-	cdt_state->ele_count = (uint32_t)ele_count - 1;
+	cdt_state->type = (as_cdt_optype)t64;
+	cdt_state->ele_count = ele_count - 1; // does not include op type
 
 	return true;
 }
@@ -1016,22 +983,22 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 		case AS_CDT_PARAM_STORAGE: {
 			cdt_payload *arg = va_arg(vl, cdt_payload *);
 
-			arg->ptr = state->pk.buffer + state->pk.offset;
+			arg->ptr = state->mp.buf + state->mp.offset;
 
-			msgpack_in upk = {
+			msgpack_in mp = {
 					.buf = arg->ptr,
-					.buf_sz = state->pk.length - state->pk.offset
+					.buf_sz = state->mp.buf_sz - state->mp.offset
 			};
 
-			uint32_t sz = msgpack_sz(&upk);
+			uint32_t sz = msgpack_sz(&mp);
 
 			if (sz == 0 || (entry->args[i] == AS_CDT_PARAM_STORAGE &&
-							upk.has_nonstorage)) {
+							mp.has_nonstorage)) {
 				va_end(vl);
 				return false;
 			}
 
-			state->pk.offset += sz;
+			state->mp.offset += sz;
 			arg->sz = sz;
 
 			break;
@@ -1040,7 +1007,7 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 		case AS_CDT_PARAM_COUNT: {
 			uint64_t *arg = va_arg(vl, uint64_t *);
 
-			if (as_unpack_uint64(&state->pk, arg) != 0) {
+			if (! msgpack_get_uint64(&state->mp, arg)) {
 				va_end(vl);
 				return false;
 			}
@@ -1050,7 +1017,7 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 		case AS_CDT_PARAM_INDEX: {
 			int64_t *arg = va_arg(vl, int64_t *);
 
-			if (as_unpack_int64(&state->pk, arg) != 0) {
+			if (! msgpack_get_int64(&state->mp, arg)) {
 				va_end(vl);
 				return false;
 			}
@@ -1118,20 +1085,21 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 		return false;
 	}
 
-	int64_t ctx_param_count = as_unpack_list_header_element_count(&state->pk);
+	uint32_t ctx_param_count = 0;
 
-	if (ctx_param_count <= 0 || (ctx_param_count & 1) == 1) {
-		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bad context param count %ld", ctx_param_count);
+	if (! msgpack_get_list_ele_count(&state->mp, &ctx_param_count) ||
+			ctx_param_count == 0 || (ctx_param_count & 1) == 1) {
+		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bad context param count %u", ctx_param_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
 
-	for (int64_t i = 0; i < ctx_param_count; i += 2) {
+	for (uint32_t i = 0; i < ctx_param_count; i += 2) {
 		uint64_t ctx_type;
 		bool ret;
 
-		if (as_unpack_uint64(&state->pk, &ctx_type) != 0) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() param %ld expected int", i);
+		if (! msgpack_get_uint64(&state->mp, &ctx_type)) {
+			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() param %u expected int", i);
 			com->ret_code = -AS_ERR_PARAMETER;
 			return false;
 		}
@@ -1144,26 +1112,26 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			return false;
 		}
 
-		as_unpacker upk;
+		msgpack_in mp;
 
-		cdt_context_fill_unpacker(&com->ctx, &upk);
+		cdt_context_fill_unpacker(&com->ctx, &mp);
 
-		as_val_t type = as_unpack_peek_type(&upk);
+		msgpack_type type = msgpack_peek_type(&mp);
 
-		if (type != AS_MAP && type != AS_LIST) {
+		if (type != MSGPACK_TYPE_MAP && type != MSGPACK_TYPE_LIST) {
 			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() type %d is not list or map", type);
 			com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 			return false;
 		}
 
-		if (type == AS_LIST) {
+		if (type == MSGPACK_TYPE_LIST) {
 			if (ctx_type & AS_CDT_CTX_MAP) {
 				cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context type 0x%lx for list element", ctx_type);
 				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 				return false;
 			}
 
-			ret = list_table[table_i](&com->ctx, &state->pk);
+			ret = list_table[table_i](&com->ctx, &state->mp);
 		}
 		else { // map
 			if (ctx_type & AS_CDT_CTX_LIST) {
@@ -1172,27 +1140,28 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 				return false;
 			}
 
-			ret = map_table[table_i](&com->ctx, &state->pk);
+			ret = map_table[table_i](&com->ctx, &state->mp);
 		}
 
 		if (! ret) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context at param %ld", i);
+			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context at param %u", i);
 			com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 			return false;
 		}
 	}
 
-	int64_t ele_count = as_unpack_list_header_element_count(&state->pk);
+	uint32_t ele_count;
 	uint64_t type64;
 
-	if (ele_count < 1 || as_unpack_uint64(&state->pk, &type64) != 0) {
-		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() unpack parameters failed: size=%u ele_count=%ld", state->pk.length, ele_count);
+	if (! msgpack_get_list_ele_count(&state->mp, &ele_count) ||
+			ele_count == 0 || ! msgpack_get_uint64(&state->mp, &type64)) {
+		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() unpack parameters failed: size=%u ele_count=%u", state->mp.buf_sz, ele_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
 
 	state->type = (as_cdt_optype)type64;
-	state->ele_count = (uint32_t)ele_count - 1;
+	state->ele_count = ele_count - 1;
 
 	if (cdt_op_is_modify(com)) {
 		bool ret;
@@ -1212,7 +1181,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			com->ctx.data_sz = 0;
 			if (! cdt_verify(&com->ctx)) {
 				cdt_context_print(&com->ctx, "ctx");
-				cf_crash(AS_PARTICLE, "cdt_process_state_context_eval: param_count %ld", ctx_param_count);
+				cf_crash(AS_PARTICLE, "cdt_process_state_context_eval: param_count %u", ctx_param_count);
 			}
 #endif
 		}
@@ -1237,18 +1206,18 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 //
 
 static void
-cdt_context_fill_unpacker(cdt_context *ctx, as_unpacker *upk)
+cdt_context_fill_unpacker(cdt_context *ctx, msgpack_in *mp)
 {
-	upk->offset = 0;
+	mp->offset = 0;
 
 	if (ctx->data_sz == 0) {
-		upk->buffer = ((cdt_mem *)ctx->b->particle)->data;
-		upk->length = ((cdt_mem *)ctx->b->particle)->sz;
+		mp->buf = ((cdt_mem *)ctx->b->particle)->data;
+		mp->buf_sz = ((cdt_mem *)ctx->b->particle)->sz;
 		return;
 	}
 
-	upk->buffer = ((cdt_mem *)ctx->b->particle)->data + ctx->data_offset;
-	upk->length = ctx->data_sz;
+	mp->buf = ((cdt_mem *)ctx->b->particle)->data + ctx->data_offset;
+	mp->buf_sz = ctx->data_sz;
 }
 
 uint32_t
@@ -1277,19 +1246,19 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 	uint8_t *to_ptr;
 
 	if (ctx->top_content_off != 0) {
-		as_msgpack_ext ext;
+		msgpack_ext ext;
 		offset_index topoff;
 		offset_index newoff;
 		uint32_t new_content_sz = ctx->top_content_sz + ctx->delta_sz;
 		uint32_t hdr_sz = as_pack_list_header_get_size(ctx->top_ele_count + 1); // maps have the same hdr size as list, +1 for ext
 
-		as_unpacker upk = {
-				.buffer = orig_data + hdr_sz,
-				.length = orig_sz - hdr_sz
+		msgpack_in mp = {
+				.buf = orig_data + hdr_sz,
+				.buf_sz = orig_sz - hdr_sz
 		};
 
-		int check = as_unpack_ext(&upk, &ext);
-		cf_assert(check == 0, AS_PARTICLE, "as_unpack_ext failed");
+		bool check = msgpack_get_ext(&mp, &ext);
+		cf_assert(check, AS_PARTICLE, "as_unpack_ext failed");
 
 		offset_index_init(&topoff, (uint8_t *)ext.data, ctx->top_ele_count,
 				NULL, ctx->top_content_sz);
@@ -1299,7 +1268,7 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 		uint32_t new_ext_cont_sz = ext.size + // ext.size may include ordidx for maps
 				offset_index_size(&newoff) - offset_index_size(&topoff);
 		uint32_t new_ext_hdr_sz = as_pack_ext_header_get_size(new_ext_cont_sz);
-		int32_t delta_ext = new_ext_hdr_sz + new_ext_cont_sz - upk.offset;
+		int32_t delta_ext = new_ext_hdr_sz + new_ext_cont_sz - mp.offset;
 
 		ctx->delta_off = delta_ext;
 		new_sz += delta_ext;
@@ -1918,14 +1887,14 @@ offset_index_append_size(offset_index *offidx, uint32_t delta)
 
 bool
 offset_index_find_items(offset_index *full_offidx,
-		cdt_find_items_idxs_type find_type, as_unpacker *items_pk,
+		cdt_find_items_idxs_type find_type, msgpack_in *mp_items,
 		order_index *items_ordidx_r, bool inverted, uint64_t *rm_mask,
 		uint32_t *rm_count_r, order_index *rm_ranks_r, rollback_alloc *alloc)
 {
-	bool (*unpack_fn)(msgpack_in *pk, cdt_payload *payload_r);
+	bool (*unpack_fn)(msgpack_in *mp, cdt_payload *payload_r);
 	uint32_t items_count = items_ordidx_r->_.ele_count;
-	define_offset_index(items_offidx, items_pk->buffer + items_pk->offset,
-			items_pk->length - items_pk->offset, items_count, alloc);
+	define_offset_index(items_offidx, mp_items->buf + mp_items->offset,
+			mp_items->buf_sz - mp_items->offset, items_count, alloc);
 
 	switch (find_type) {
 	case CDT_FIND_ITEMS_IDXS_FOR_LIST_VALUE:
@@ -1955,7 +1924,7 @@ offset_index_find_items(offset_index *full_offidx,
 
 	uint32_t rm_count = 0;
 
-	msgpack_in pk = {
+	msgpack_in mp = {
 			.buf = full_offidx->contents,
 			.buf_sz = full_offidx->content_sz
 	};
@@ -1967,13 +1936,13 @@ offset_index_find_items(offset_index *full_offidx,
 	for (uint32_t i = 0; i < full_offidx->_.ele_count; i++) {
 		cdt_payload value;
 
-		if (! unpack_fn(&pk, &value)) {
+		if (! unpack_fn(&mp, &value)) {
 			cf_warning(AS_PARTICLE, "offset_index_find_items() invalid msgpack in unpack_fn()");
 			return false;
 		}
 
-		if (! offset_index_set_next(full_offidx, i + 1, pk.offset)) {
-			cf_warning(AS_PARTICLE, "offset_index_find_items() invalid msgpack in offset_index_set_next() i %u offset %u", i, pk.offset);
+		if (! offset_index_set_next(full_offidx, i + 1, mp.offset)) {
+			cf_warning(AS_PARTICLE, "offset_index_find_items() invalid msgpack in offset_index_set_next() i %u offset %u", i, mp.offset);
 			return false;
 		}
 
@@ -2125,44 +2094,44 @@ offset_index_check_order_and_fill(offset_index *offidx, bool is_map)
 		return true;
 	}
 
-	msgpack_in upk = {
+	msgpack_in mp = {
 			.buf = offidx->contents,
 			.buf_sz = offidx->content_sz
 	};
 
-	if (msgpack_sz_rep(&upk, is_map ? 2 : 1) == 0 || upk.has_nonstorage) {
+	if (msgpack_sz_rep(&mp, is_map ? 2 : 1) == 0 || mp.has_nonstorage) {
 		return false;
 	}
 
-	offset_index_set(offidx, 1, upk.offset);
+	offset_index_set(offidx, 1, mp.offset);
 
 	if (ele_count == 1) {
 		return true;
 	}
 
-	msgpack_in upk_prev = {
+	msgpack_in mp_prev = {
 			.buf = offidx->contents,
 			.buf_sz = offidx->content_sz
 	};
 
 	for (uint32_t i = 1; i < ele_count; i++) {
-		msgpack_compare_t cmp = msgpack_cmp(&upk_prev, &upk);
+		msgpack_cmp_type cmp = msgpack_cmp(&mp_prev, &mp);
 
 		if (is_map) {
-			if (cmp != MSGPACK_COMPARE_LESS) { // check key
+			if (cmp != MSGPACK_CMP_LESS) { // check key
 				return false;
 			}
 
-			if (msgpack_sz(&upk_prev) == 0 || msgpack_sz(&upk) == 0 ||
-					upk.has_nonstorage) { // check value
+			if (msgpack_sz(&mp_prev) == 0 || msgpack_sz(&mp) == 0 ||
+					mp.has_nonstorage) { // check value
 				return false;
 			}
 		}
-		else if (cmp != MSGPACK_COMPARE_LESS && cmp != MSGPACK_COMPARE_EQUAL) {
+		else if (cmp != MSGPACK_CMP_LESS && cmp != MSGPACK_CMP_EQUAL) {
 			return false;
 		}
 
-		offset_index_set(offidx, i + 1, upk.offset);
+		offset_index_set(offidx, i + 1, mp.offset);
 	}
 
 	offset_index_set_filled(offidx, ele_count);
@@ -2329,12 +2298,12 @@ order_index_sorted_mark_dup_eles(order_index *ordidx,
 	cf_assert(count_r, AS_PARTICLE, "count_r NULL");
 	cf_assert(sz_r, AS_PARTICLE, "sz_r NULL");
 
-	msgpack_in pk = {
+	msgpack_in mp = {
 			.buf = full_offidx->contents,
 			.buf_sz = full_offidx->content_sz
 	};
 
-	msgpack_in prev = pk;
+	msgpack_in prev = mp;
 	uint32_t prev_idx = order_index_get(ordidx, 0);
 	uint32_t ele_count = full_offidx->_.ele_count;
 
@@ -2346,16 +2315,16 @@ order_index_sorted_mark_dup_eles(order_index *ordidx,
 		uint32_t idx = order_index_get(ordidx, i);
 		uint32_t off = offset_index_get_const(full_offidx, idx);
 
-		pk.offset = off;
+		mp.offset = off;
 
-		msgpack_compare_t cmp = msgpack_cmp(&prev, &pk);
+		msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
 
-		if (cmp == MSGPACK_COMPARE_EQUAL) {
+		if (cmp == MSGPACK_CMP_EQUAL) {
 			(*sz_r) += offset_index_get_delta_const(full_offidx, idx);
 			(*count_r)++;
 			order_index_set(ordidx, i, ele_count);
 		}
-		else if (cmp == MSGPACK_COMPARE_LESS) {
+		else if (cmp == MSGPACK_CMP_LESS) {
 			// no-op
 		}
 		else {
@@ -2451,12 +2420,12 @@ order_index_find_rank_by_value(const order_index *ordidx,
 	uint32_t upper = find->start + find->count;
 	uint32_t rank = find->start + find->count / 2;
 
-	msgpack_in pk_value = {
+	msgpack_in mp_value = {
 			.buf = value->ptr,
 			.buf_sz = value->sz
 	};
 
-	msgpack_in pk_buf = {
+	msgpack_in mp_buf = {
 			.buf = full_offidx->contents,
 			.buf_sz = full_offidx->content_sz
 	};
@@ -2464,15 +2433,15 @@ order_index_find_rank_by_value(const order_index *ordidx,
 	while (true) {
 		uint32_t idx = ordidx ? order_index_get(ordidx, rank) : rank;
 
-		pk_buf.offset = offset_index_get_const(full_offidx, idx);
+		mp_buf.offset = offset_index_get_const(full_offidx, idx);
 
-		if (skip_key && msgpack_sz(&pk_buf) == 0) { // skip key
+		if (skip_key && msgpack_sz(&mp_buf) == 0) { // skip key
 			cf_crash(AS_PARTICLE, "invalid packed map");
 		}
 
-		msgpack_compare_t cmp = msgpack_cmp_peek(&pk_value, &pk_buf);
+		msgpack_cmp_type cmp = msgpack_cmp_peek(&mp_value, &mp_buf);
 
-		if (cmp == MSGPACK_COMPARE_EQUAL) {
+		if (cmp == MSGPACK_CMP_EQUAL) {
 			find->found = true;
 
 			if (find->target > ele_count) { // means don't check
@@ -2480,7 +2449,7 @@ order_index_find_rank_by_value(const order_index *ordidx,
 			}
 
 			if (find->target < idx) {
-				cmp = MSGPACK_COMPARE_LESS;
+				cmp = MSGPACK_CMP_LESS;
 			}
 			else if (find->target > idx) {
 				if (rank == upper - 1) {
@@ -2488,14 +2457,14 @@ order_index_find_rank_by_value(const order_index *ordidx,
 					break;
 				}
 
-				cmp = MSGPACK_COMPARE_GREATER;
+				cmp = MSGPACK_CMP_GREATER;
 			}
 			else {
 				break;
 			}
 		}
 
-		if (cmp == MSGPACK_COMPARE_GREATER) {
+		if (cmp == MSGPACK_CMP_GREATER) {
 			if (rank >= upper - 1) {
 				rank++;
 				break;
@@ -2505,7 +2474,7 @@ order_index_find_rank_by_value(const order_index *ordidx,
 			rank += upper;
 			rank /= 2;
 		}
-		else if (cmp == MSGPACK_COMPARE_LESS) {
+		else if (cmp == MSGPACK_CMP_LESS) {
 			if (rank == lower) {
 				break;
 			}
@@ -2515,9 +2484,9 @@ order_index_find_rank_by_value(const order_index *ordidx,
 			rank /= 2;
 		}
 		else {
-			print_packed(pk_value.buf, pk_value.buf_sz, "pk_value");
-			print_packed(pk_buf.buf, pk_buf.buf_sz, "pk_buf");
-			cf_crash(AS_PARTICLE, "invalid element offset %u idx %u rank %u start %u count %u ele_count %u", pk_buf.offset, idx, rank, find->start, find->count, ele_count);
+			print_packed(mp_value.buf, mp_value.buf_sz, "mp_value");
+			print_packed(mp_buf.buf, mp_buf.buf_sz, "mp_buf");
+			cf_crash(AS_PARTICLE, "invalid element offset %u idx %u rank %u start %u count %u ele_count %u", mp_buf.offset, idx, rank, find->start, find->count, ele_count);
 		}
 	}
 
@@ -2654,14 +2623,14 @@ order_heap_init_build_by_range_temp(order_heap *heap, uint8_t *heap_mem,
 {
 	uint32_t tail_distance = ele_count - idx - count;
 	uint32_t discard;
-	msgpack_compare_t cmp;
+	msgpack_cmp_type cmp;
 
 	if (idx <= tail_distance) {
-		cmp = MSGPACK_COMPARE_LESS; // min k
+		cmp = MSGPACK_CMP_LESS; // min k
 		discard = idx;
 	}
 	else {
-		cmp = MSGPACK_COMPARE_GREATER; // max k
+		cmp = MSGPACK_CMP_GREATER; // max k
 		discard = tail_distance;
 	}
 
@@ -2723,15 +2692,15 @@ order_heap_heapify(order_heap *heap, uint32_t index)
 			child = child1;
 		}
 		else {
-			msgpack_compare_t cmp = heap->cmp_fn(heap->userdata,
+			msgpack_cmp_type cmp = heap->cmp_fn(heap->userdata,
 					order_heap_get(heap, child1),
 					order_heap_get(heap, child2));
 
-			if (cmp == MSGPACK_COMPARE_ERROR) {
+			if (cmp == MSGPACK_CMP_ERROR) {
 				return false;
 			}
 
-			if (cmp == heap->cmp || cmp == MSGPACK_COMPARE_EQUAL) {
+			if (cmp == heap->cmp || cmp == MSGPACK_CMP_EQUAL) {
 				child = child1;
 			}
 			else {
@@ -2739,11 +2708,11 @@ order_heap_heapify(order_heap *heap, uint32_t index)
 			}
 		}
 
-		msgpack_compare_t cmp = heap->cmp_fn(heap->userdata,
+		msgpack_cmp_type cmp = heap->cmp_fn(heap->userdata,
 				order_heap_get(heap, child),
 				order_heap_get(heap, index));
 
-		if (cmp == MSGPACK_COMPARE_ERROR) {
+		if (cmp == MSGPACK_CMP_ERROR) {
 			return false;
 		}
 
@@ -3110,20 +3079,17 @@ cdt_idx_mask_print(const uint64_t *mask, uint32_t ele_count, const char *name)
 //
 
 bool
-list_param_parse(const cdt_payload *items, as_unpacker *pk, uint32_t *count_r)
+list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r)
 {
-	pk->buffer = items->ptr;
-	pk->offset = 0;
-	pk->length = items->sz;
+	mp->buf = items->ptr;
+	mp->offset = 0;
+	mp->buf_sz = items->sz;
 
-	int64_t items_hdr = as_unpack_list_header_element_count(pk);
-
-	if (items_hdr < 0 || items_hdr > CDT_MAX_PARAM_LIST_COUNT) {
-		cf_warning(AS_PARTICLE, "list_param_parse() invalid param items_hdr %ld", items_hdr);
+	if (! msgpack_get_list_ele_count(mp, count_r) ||
+			*count_r > CDT_MAX_PARAM_LIST_COUNT) {
+		cf_warning(AS_PARTICLE, "list_param_parse() invalid param items hdr count %u", *count_r);
 		return false;
 	}
-
-	*count_r = (uint32_t)items_hdr;
 
 	return true;
 }

@@ -26,12 +26,12 @@
 #include <string.h>
 
 #include "aerospike/as_geojson.h"
-#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
+#include "msgpack_in.h"
 
 #include "base/datamodel.h"
 #include "base/particle.h"
@@ -340,15 +340,15 @@ geojson_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **
 {
 	geojson_mem *p_geojson_mem = (geojson_mem *)*pp;
 
-	as_unpacker pk = {
-			.buffer = packed,
-			.offset = 0,
-			.length = packed_size
+	msgpack_in mp = {
+			.buf = packed,
+			.buf_sz = packed_size
 	};
 
-	int64_t blob_size = as_unpack_blob_size(&pk);
-	const uint8_t *ptr = pk.buffer + pk.offset;
+	uint32_t blob_size;
+	const uint8_t *ptr = msgpack_get_bin(&mp, &blob_size);
 
+	cf_assert(ptr != NULL, AS_PARTICLE, "invalid msgpack");
 	// *ptr should be AS_BYTES_GEOJSON at this point.
 
 	// Adjust for type (1 byte).

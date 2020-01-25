@@ -3334,40 +3334,37 @@ as_sindex_bin_add_skey(as_sindex_bin *sbin, const void *skey, as_val_t type)
 }
 
 static void
-packed_val_init_unpacker(const cdt_payload *val, as_unpacker *pk)
+packed_val_init_unpacker(const cdt_payload *val, msgpack_in *pk)
 {
-	pk->buffer = val->ptr;
-	pk->length = val->sz;
+	pk->buf = val->ptr;
+	pk->buf_sz = val->sz;
 	pk->offset = 0;
 }
 
 static bool
 packed_val_make_skey(const cdt_payload *val, as_val_t type, void *skey)
 {
-	as_unpacker pk;
-	packed_val_init_unpacker(val, &pk);
+	msgpack_in mp;
+	packed_val_init_unpacker(val, &mp);
 
-	as_val_t packed_type = as_unpack_peek_type(&pk);
+	msgpack_type packed_type = msgpack_peek_type(&mp);
 
-	if (packed_type != type) {
-		return false;
-	}
+	if (type == AS_STRING && packed_type == MSGPACK_TYPE_STRING) {
+		uint32_t size;
+		const uint8_t *ptr = msgpack_get_bin(&mp, &size);
 
-	if (type == AS_STRING) {
-		int32_t size = as_unpack_blob_size(&pk);
-
-		if (size < 0) {
+		if (ptr == NULL) {
 			return false;
 		}
 
-		if (pk.buffer[pk.offset++] != AS_BYTES_STRING) {
+		if (*ptr++ != AS_BYTES_STRING) {
 			return false;
 		}
 
-		cf_digest_compute(pk.buffer + pk.offset, pk.length - pk.offset, (cf_digest *)skey);
+		cf_digest_compute(ptr, size - 1, (cf_digest *)skey);
 	}
-	else if (type == AS_INTEGER) {
-		if (as_unpack_int64(&pk, (int64_t *)skey) < 0) {
+	else if (type == AS_INTEGER && msgpack_type_is_int(packed_type)) {
+		if (! msgpack_get_int64(&mp, (int64_t *)skey)) {
 			return false;
 		}
 	}
@@ -3478,30 +3475,31 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 	as_bin_particle_list_get_packed_val(b_old, &old_val);
 	as_bin_particle_list_get_packed_val(b_new, &new_val);
 
-	as_unpacker pk_old;
-	as_unpacker pk_new;
+	msgpack_in pk_old;
+	msgpack_in pk_new;
 
 	packed_val_init_unpacker(&old_val, &pk_old);
 	packed_val_init_unpacker(&new_val, &pk_new);
 
-	int64_t old_list_count = as_unpack_list_header_element_count(&pk_old);
-	int64_t new_list_count = as_unpack_list_header_element_count(&pk_new);
+	uint32_t old_list_count = 0;
+	uint32_t new_list_count = 0;
 
-	if (old_list_count < 0 || new_list_count < 0) {
+	if (! msgpack_get_list_ele_count(&pk_old, &old_list_count) ||
+			! msgpack_get_list_ele_count(&pk_new, &new_list_count)) {
 		return -1;
 	}
 
 	// Skip msgpack ext if it exist as the first element.
-	if (old_list_count != 0 && as_unpack_peek_is_ext(&pk_old)) {
-		if (as_unpack_size(&pk_old) < 0) {
+	if (old_list_count != 0 && msgpack_peek_is_ext(&pk_old)) {
+		if (msgpack_sz(&pk_old) == 0) {
 			return -1;
 		}
 
 		old_list_count--;
 	}
 
-	if (new_list_count != 0 && as_unpack_peek_is_ext(&pk_new)) {
-		if (as_unpack_size(&pk_new) < 0) {
+	if (new_list_count != 0 && msgpack_peek_is_ext(&pk_new)) {
+		if (msgpack_sz(&pk_new) == 0) {
 			return -1;
 		}
 
@@ -3512,8 +3510,8 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 
 	uint32_t short_list_count;
 	uint32_t long_list_count;
-	as_unpacker *pk_short;
-	as_unpacker *pk_long;
+	msgpack_in *pk_short;
+	msgpack_in *pk_long;
 
 	if (old_list_is_short) {
 		short_list_count	= (uint32_t)old_list_count;
@@ -3538,8 +3536,8 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 		for (uint32_t i = 0; i < long_list_count; i++) {
 			cdt_payload ele;
 
-			ele.ptr = pk_long->buffer + pk_long->offset;
-			ele.sz = as_unpack_size(pk_long);
+			ele.ptr = pk_long->buf + pk_long->offset;
+			ele.sz = msgpack_sz(pk_long);
 
 			// sizeof(cf_digest) is big enough for all key types we support so far.
 			uint8_t skey[sizeof(cf_digest)];
@@ -3564,12 +3562,12 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 	// Add elements of shorter list into hash with value = false.
 	for (uint32_t i = 0; i < short_list_count; i++) {
 		cdt_payload ele = {
-				.ptr = pk_short->buffer + pk_short->offset
+				.ptr = pk_short->buf + pk_short->offset
 		};
 
-		int size = as_unpack_size(pk_short);
+		uint32_t size = msgpack_sz(pk_short);
 
-		if (size < 0) {
+		if (size == 0) {
 			cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() list unpack failed");
 			cf_shash_destroy(hash);
 			return -1;
@@ -3584,8 +3582,8 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 	for (uint32_t i = 0; i < long_list_count; i++) {
 		cdt_payload ele;
 
-		ele.ptr = pk_long->buffer + pk_long->offset;
-		ele.sz = as_unpack_size(pk_long);
+		ele.ptr = pk_long->buf + pk_long->offset;
+		ele.sz = msgpack_sz(pk_long);
 
 		if (! packed_val_add_sbin_or_update_shash(&ele, sbins, hash, expected_type)) {
 			cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() hash update failed");

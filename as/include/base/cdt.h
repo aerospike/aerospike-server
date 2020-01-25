@@ -1,7 +1,7 @@
 /*
  * cdt.h
  *
- * Copyright (C) 2015-2018 Aerospike, Inc.
+ * Copyright (C) 2015-2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,12 +26,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "aerospike/as_msgpack.h"
-
 #include "base/datamodel.h"
 #include "base/proto.h"
 
 #include "dynbuf.h"
+#include "msgpack_in.h"
 
 
 //==========================================================
@@ -62,7 +61,7 @@ typedef struct rollback_alloc_s {
 
 typedef struct cdt_process_state_s {
 	as_cdt_optype type;
-	as_unpacker pk;
+	msgpack_in mp;
 	uint32_t ele_count;
 } cdt_process_state;
 
@@ -113,7 +112,7 @@ typedef struct cdt_context_s {
 	int32_t delta_sz;
 } cdt_context;
 
-typedef bool (*cdt_subcontext_fn)(cdt_context *ctx, as_unpacker *val);
+typedef bool (*cdt_subcontext_fn)(cdt_context *ctx, msgpack_in *val);
 
 typedef struct cdt_op_mem_s {
 	cdt_context ctx;
@@ -140,7 +139,7 @@ typedef struct cdt_calc_delta_s {
 	int64_t incr_int;
 	double incr_double;
 
-	as_val_t type;
+	msgpack_type type;
 
 	int64_t value_int;
 	double value_double;
@@ -174,14 +173,14 @@ typedef struct order_index_find_s {
 	bool found;
 } order_index_find;
 
-typedef msgpack_compare_t (*order_heap_compare_fn)(const void *ptr, uint32_t index0, uint32_t index1);
+typedef msgpack_cmp_type (*order_heap_compare_fn)(const void *ptr, uint32_t index0, uint32_t index1);
 
 // Value order heap.
 typedef struct order_heap_s {
 	order_index _;
 	const void *userdata;
 	order_heap_compare_fn cmp_fn;
-	msgpack_compare_t cmp;
+	msgpack_cmp_type cmp;
 	uint32_t filled;
 } order_heap;
 
@@ -298,12 +297,10 @@ void as_bin_set_empty_packed_map(as_bin *b, rollback_alloc *alloc_buf, uint8_t f
 
 // cdt_delta_value
 bool cdt_calc_delta_init(cdt_calc_delta *cdv, const cdt_payload *delta_value, bool is_decrement);
-bool cdt_calc_delta_add(cdt_calc_delta *cdv, as_unpacker *pk_value);
+bool cdt_calc_delta_add(cdt_calc_delta *cdv, msgpack_in *mp_value);
 void cdt_calc_delta_pack_and_result(cdt_calc_delta *cdv, cdt_payload *value, as_bin *result);
 
 // cdt_payload
-bool cdt_payload_is_int(const cdt_payload *payload);
-int64_t cdt_payload_get_int64(const cdt_payload *payload);
 void cdt_payload_pack_int(cdt_payload *packed, int64_t value);
 void cdt_payload_pack_double(cdt_payload *packed, double value);
 
@@ -358,7 +355,7 @@ void offset_index_copy(offset_index *dest, const offset_index *src, uint32_t d_s
 void offset_index_move_ele(offset_index *dest, const offset_index *src, uint32_t ele_idx, uint32_t to_idx);
 void offset_index_append_size(offset_index *offidx, uint32_t delta);
 
-bool offset_index_find_items(offset_index *full_offidx, cdt_find_items_idxs_type find_type, as_unpacker *items_pk, order_index *items_ordidx_r, bool inverted, uint64_t *rm_mask, uint32_t *rm_count_r, order_index *rm_ranks_r, rollback_alloc *alloc);
+bool offset_index_find_items(offset_index *full_offidx, cdt_find_items_idxs_type find_type, msgpack_in *mp_items, order_index *items_ordidx_r, bool inverted, uint64_t *rm_mask, uint32_t *rm_count_r, order_index *rm_ranks_r, rollback_alloc *alloc);
 
 void *offset_index_get_mem(const offset_index *offidx, uint32_t index);
 uint32_t offset_index_size(const offset_index *offidx);
@@ -443,20 +440,20 @@ bool list_full_offset_index_fill_to(offset_index *offidx, uint32_t index, bool c
 bool list_full_offset_index_fill_all(offset_index *offidx);
 bool list_order_index_sort(order_index *ordidx, const offset_index *full_offidx, as_cdt_sort_flags flags);
 
-bool list_param_parse(const cdt_payload *items, as_unpacker *pk, uint32_t *count_r);
+bool list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r);
 
-bool list_subcontext_by_index(cdt_context *ctx, as_unpacker *val);
-bool list_subcontext_by_rank(cdt_context *ctx, as_unpacker *val);
-bool list_subcontext_by_key(cdt_context *ctx, as_unpacker *val);
-bool list_subcontext_by_value(cdt_context *ctx, as_unpacker *val);
+bool list_subcontext_by_index(cdt_context *ctx, msgpack_in *val);
+bool list_subcontext_by_rank(cdt_context *ctx, msgpack_in *val);
+bool list_subcontext_by_key(cdt_context *ctx, msgpack_in *val);
+bool list_subcontext_by_value(cdt_context *ctx, msgpack_in *val);
 
 void cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 
 // map
-bool map_subcontext_by_index(cdt_context *ctx, as_unpacker *val);
-bool map_subcontext_by_rank(cdt_context *ctx, as_unpacker *val);
-bool map_subcontext_by_key(cdt_context *ctx, as_unpacker *val);
-bool map_subcontext_by_value(cdt_context *ctx, as_unpacker *val);
+bool map_subcontext_by_index(cdt_context *ctx, msgpack_in *val);
+bool map_subcontext_by_rank(cdt_context *ctx, msgpack_in *val);
+bool map_subcontext_by_key(cdt_context *ctx, msgpack_in *val);
+bool map_subcontext_by_value(cdt_context *ctx, msgpack_in *val);
 
 void cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 

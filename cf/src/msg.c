@@ -1,7 +1,7 @@
 /*
  * msg.c
  *
- * Copyright (C) 2008-2018 Aerospike, Inc.
+ * Copyright (C) 2008-2019 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -42,6 +42,7 @@
 
 #include "dynbuf.h"
 #include "fault.h"
+#include "msgpack_in.h"
 
 
 //==========================================================
@@ -85,7 +86,7 @@ static uint32_t msg_get_field_wire_size(msg_field_type type, uint32_t field_sz);
 static uint32_t msg_field_write_hdr(const msg_field *mf, msg_field_type type, uint8_t *buf);
 static uint32_t msg_field_write_buf(const msg_field *mf, msg_field_type type, uint8_t *buf);
 static void msg_field_save(msg *m, msg_field *mf);
-static bool msgpack_list_unpack_hdr(as_unpacker *pk, const msg *m, int field_id, uint32_t *count_r);
+static bool msgpack_list_unpack_hdr(msgpack_in *mp, const msg *m, int field_id, uint32_t *count_r);
 
 
 //==========================================================
@@ -1000,9 +1001,9 @@ msg_get_uint64_array(const msg *m, int field_id, uint32_t index,
 bool
 msg_msgpack_list_get_count(const msg *m, int field_id, uint32_t *count_r)
 {
-	as_unpacker pk;
+	msgpack_in mp;
 
-	return msgpack_list_unpack_hdr(&pk, m, field_id, count_r);
+	return msgpack_list_unpack_hdr(&mp, m, field_id, count_r);
 }
 
 bool
@@ -1011,10 +1012,10 @@ msg_msgpack_list_get_uint32_array(const msg *m, int field_id, uint32_t *buf_r,
 {
 	cf_assert(buf_r, CF_MSG, "buf_r is null");
 
-	as_unpacker pk;
+	msgpack_in mp;
 	uint32_t count;
 
-	if (! msgpack_list_unpack_hdr(&pk, m, field_id, &count)) {
+	if (! msgpack_list_unpack_hdr(&mp, m, field_id, &count)) {
 		return false;
 	}
 
@@ -1025,10 +1026,11 @@ msg_msgpack_list_get_uint32_array(const msg *m, int field_id, uint32_t *buf_r,
 
 	for (uint32_t i = 0; i < count; i++) {
 		uint64_t val;
-		int ret = as_unpack_uint64(&pk, &val);
 
-		if (ret != 0 || (val & (0xFFFFffffUL << 32)) != 0) {
-			cf_warning(CF_MSG, "i %u/%u invalid packed uint32 ret %d val 0x%lx", i, count, ret, val);
+
+		if (! msgpack_get_uint64(&mp, &val)
+				|| (val & (0xFFFFffffUL << 32)) != 0) {
+			cf_warning(CF_MSG, "i %u/%u invalid packed uint32 val 0x%lx", i, count, val);
 			return false;
 		}
 
@@ -1046,10 +1048,10 @@ msg_msgpack_list_get_uint64_array(const msg *m, int field_id, uint64_t *buf_r,
 {
 	cf_assert(buf_r, CF_MSG, "buf_r is null");
 
-	as_unpacker pk;
+	msgpack_in mp;
 	uint32_t count;
 
-	if (! msgpack_list_unpack_hdr(&pk, m, field_id, &count)) {
+	if (! msgpack_list_unpack_hdr(&mp, m, field_id, &count)) {
 		return false;
 	}
 
@@ -1060,10 +1062,9 @@ msg_msgpack_list_get_uint64_array(const msg *m, int field_id, uint64_t *buf_r,
 
 	for (uint32_t i = 0; i < count; i++) {
 		uint64_t val;
-		int ret = as_unpack_uint64(&pk, &val);
 
-		if (ret != 0) {
-			cf_warning(CF_MSG, "i %u/%u invalid packed uint64 ret %d val 0x%lx", i, count, ret, val);
+		if (! msgpack_get_uint64(&mp, &val)) {
+			cf_warning(CF_MSG, "i %u/%u invalid packed uint64 val 0x%lx", i, count, val);
 			return false;
 		}
 
@@ -1079,10 +1080,10 @@ bool
 msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r,
 		bool init_vec)
 {
-	as_unpacker pk;
+	msgpack_in mp;
 	uint32_t count;
 
-	if (! msgpack_list_unpack_hdr(&pk, m, field_id, &count)) {
+	if (! msgpack_list_unpack_hdr(&mp, m, field_id, &count)) {
 		return false;
 	}
 
@@ -1099,15 +1100,15 @@ msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r,
 
 	for (uint32_t i = 0; i < count; i++) {
 		msg_buf_ele ele;
-		int saved_offset = pk.offset;
+		int saved_offset = mp.offset;
 
-		ele.ptr = (uint8_t *)as_unpack_str(&pk, &ele.sz);
+		ele.ptr = (uint8_t *)msgpack_get_bin(&mp, &ele.sz);
 
 		if (! ele.ptr) {
-			pk.offset = saved_offset;
+			mp.offset = saved_offset;
 			ele.sz = 0;
 
-			if (as_unpack_size(&pk) <= 0) {
+			if (msgpack_sz(&mp) == 0) {
 				if (init_vec) {
 					cf_vector_destroy(v_r);
 				}
@@ -1313,7 +1314,7 @@ msg_field_save(msg *m, msg_field *mf)
 }
 
 static bool
-msgpack_list_unpack_hdr(as_unpacker *pk, const msg *m, int field_id,
+msgpack_list_unpack_hdr(msgpack_in *mp, const msg *m, int field_id,
 		uint32_t *count_r)
 {
 	const msg_field *mf = &m->f[field_id];
@@ -1322,18 +1323,18 @@ msgpack_list_unpack_hdr(as_unpacker *pk, const msg *m, int field_id,
 		return false;
 	}
 
-	pk->buffer = (const uint8_t *)mf->u.any_buf;
-	pk->offset = 0;
-	pk->length = (int)mf->field_sz;
+	mp->buf = (const uint8_t *)mf->u.any_buf;
+	mp->offset = 0;
+	mp->buf_sz = mf->field_sz;
 
-	int64_t count = as_unpack_list_header_element_count(pk);
+	uint32_t count;
 
-	if (count < 0) {
+	if (! msgpack_get_list_ele_count(mp, &count)) {
 		cf_ticker_warning(CF_MSG, "invalid packed list");
 		return false;
 	}
 
-	*count_r = (uint32_t)count;
+	*count_r = count;
 
 	return true;
 }
