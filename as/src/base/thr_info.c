@@ -1986,6 +1986,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-ops-sub", ns->ops_sub_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-read", ns->read_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-udf", ns->udf_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-udf-sub", ns->udf_sub_benchmarks_enabled);
