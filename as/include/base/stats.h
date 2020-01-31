@@ -76,7 +76,7 @@ typedef struct as_stats_s {
 	cf_atomic64		batch_index_complete;
 	cf_atomic64		batch_index_errors;
 	cf_atomic64		batch_index_timeout;
-	cf_atomic64		batch_index_delay; // not in ticker
+	cf_atomic64		batch_index_delay;
 
 	// Batch-index buffer stats.
 	cf_atomic64		batch_index_huge_buffers; // not in ticker

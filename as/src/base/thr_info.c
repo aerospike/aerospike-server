@@ -464,7 +464,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "batch_index_complete", g_stats.batch_index_complete);
 	info_append_uint64(db, "batch_index_error", g_stats.batch_index_errors);
 	info_append_uint64(db, "batch_index_timeout", g_stats.batch_index_timeout);
-	info_append_uint64(db, "batch_index_delay", g_stats.batch_index_delay); // not in ticker
+	info_append_uint64(db, "batch_index_delay", g_stats.batch_index_delay);
 
 	// Everything below is not in ticker...
 

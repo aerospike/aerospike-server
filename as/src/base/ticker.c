@@ -400,13 +400,15 @@ log_line_batch_index()
 	uint64_t n_complete = g_stats.batch_index_complete;
 	uint64_t n_error = g_stats.batch_index_errors;
 	uint64_t n_timeout = g_stats.batch_index_timeout;
+	uint64_t n_delay = g_stats.batch_index_delay;
 
-	if ((n_complete | n_error | n_timeout) == 0) {
+	if ((n_complete | n_error | n_timeout | n_delay) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "   batch-index: batches (%lu,%lu,%lu)",
-			n_complete, n_error, n_timeout
+	cf_info(AS_INFO, "   batch-index: batches (%lu,%lu,%lu) delays %lu",
+			n_complete, n_error, n_timeout,
+			n_delay
 			);
 }
 
