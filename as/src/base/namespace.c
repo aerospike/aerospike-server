@@ -152,7 +152,7 @@ as_namespace_create(char *name)
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
 	ns->hwm_disk_pct = 50; // evict when device usage exceeds 50%
-	ns->hwm_memory_pct = 60; // evict when memory usage exceeds 50% of namespace memory-size
+	ns->hwm_memory_pct = 60; // evict when memory usage exceeds 60% of namespace memory-size
 	ns->index_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->migrate_order = 5;
 	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds

@@ -665,15 +665,15 @@ eval_hwm_breached(as_namespace* ns)
 
 	uint32_t how_breached = 0x0;
 
-	if (memory_sz > mem_hwm) {
+	if (mem_hwm != 0 && memory_sz > mem_hwm) {
 		how_breached |= 0x1;
 	}
 
-	if (index_dev_sz > pix_hwm) {
+	if (pix_hwm != 0 && index_dev_sz > pix_hwm) {
 		how_breached |= 0x2;
 	}
 
-	if (used_disk_sz > ssd_hwm) {
+	if (ssd_hwm != 0 && used_disk_sz > ssd_hwm) {
 		how_breached |= 0x4;
 	}
 
