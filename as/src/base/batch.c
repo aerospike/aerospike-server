@@ -1081,9 +1081,12 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 
 	// Calculate size.
 	size_t size = sizeof(as_msg);
-	size += sizeof(as_msg_field) + sizeof(cf_digest);
+	uint16_t n_fields = 0;
 
-	uint16_t n_fields = 1;
+	if (! g_config.batch_without_digests) {
+		size += sizeof(as_msg_field) + sizeof(cf_digest);
+		n_fields++;
+	}
 
 	for (uint16_t i = 0; i < n_bins; i++) {
 		as_bin* bin = bins[i];
@@ -1131,12 +1134,14 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 		as_msg_swap_header(m);
 		p += sizeof(as_msg);
 
-		as_msg_field* field = (as_msg_field*)p;
-		field->field_sz = sizeof(cf_digest) + 1;
-		field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
-		memcpy(field->data, &tr->keyd, sizeof(cf_digest));
-		as_msg_swap_field(field);
-		p += sizeof(as_msg_field) + sizeof(cf_digest);
+		if (! g_config.batch_without_digests) {
+			as_msg_field* field = (as_msg_field*)p;
+			field->field_sz = sizeof(cf_digest) + 1;
+			field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
+			memcpy(field->data, &tr->keyd, sizeof(cf_digest));
+			as_msg_swap_field(field);
+			p += sizeof(as_msg_field) + sizeof(cf_digest);
+		}
 
 		for (uint16_t i = 0; i < n_bins; i++) {
 			as_bin* bin = bins[i];
@@ -1166,7 +1171,11 @@ void
 as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* digest, cl_msg* cmsg, size_t proxy_size)
 {
 	as_msg* msg = &cmsg->msg;
-	size_t size = proxy_size + sizeof(as_msg_field) + sizeof(cf_digest) - sizeof(as_proto);
+	size_t size = proxy_size - sizeof(as_proto);
+
+	if (! g_config.batch_without_digests) {
+		size += sizeof(as_msg_field) + sizeof(cf_digest);
+	}
 
 	as_batch_buffer* buffer;
 	bool complete;
@@ -1176,19 +1185,22 @@ as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* di
 		// Overload transaction_ttl to store batch index.
 		msg->transaction_ttl = htonl(index);
 
-		// Write header
-		uint16_t n_fields = ntohs(msg->n_fields);
-		msg->n_fields = htons(n_fields + 1);
+		if (! g_config.batch_without_digests) {
+			uint16_t n_fields = ntohs(msg->n_fields);
+			msg->n_fields = htons(n_fields + 1);
+		}
+
 		memcpy(data, msg, sizeof(as_msg));
 		uint8_t* trg = data + sizeof(as_msg);
 
-		// Write digest field
-		as_msg_field* field = (as_msg_field*)trg;
-		field->field_sz = sizeof(cf_digest) + 1;
-		field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
-		memcpy(field->data, digest, sizeof(cf_digest));
-		as_msg_swap_field(field);
-		trg += sizeof(as_msg_field) + sizeof(cf_digest);
+		if (! g_config.batch_without_digests) {
+			as_msg_field* field = (as_msg_field*)trg;
+			field->field_sz = sizeof(cf_digest) + 1;
+			field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
+			memcpy(field->data, digest, sizeof(cf_digest));
+			as_msg_swap_field(field);
+			trg += sizeof(as_msg_field) + sizeof(cf_digest);
+		}
 
 		// Copy others fields and ops.
 		size = ((uint8_t*)cmsg + proxy_size) - msg->data;

@@ -273,6 +273,7 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
+	CASE_SERVICE_BATCH_WITHOUT_DIGESTS,
 	CASE_SERVICE_CLUSTER_NAME,
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_HEALTH_CHECK,
@@ -883,6 +884,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
+		{ "batch-without-digests",			CASE_SERVICE_BATCH_WITHOUT_DIGESTS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
@@ -2454,6 +2456,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS:
 				c->batch_max_unused_buffers = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_BATCH_WITHOUT_DIGESTS:
+				c->batch_without_digests = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_CLUSTER_NAME:
 				cfg_set_cluster_name(line.val_tok_1);

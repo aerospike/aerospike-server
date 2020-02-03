@@ -1784,6 +1784,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
+	info_append_bool(db, "batch-without-digests", g_config.batch_without_digests);
 
 	// Not true config, but act as config overrides:
 	cf_hist_track_get_settings(g_stats.batch_index_hist, db);
@@ -2353,6 +2354,19 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of batch-max-unused-buffers from %d to %d ", g_config.batch_max_unused_buffers, val);
 			g_config.batch_max_unused_buffers = val;
+		}
+		else if (0 == as_info_parameter_get(params, "batch-without-digests", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of batch-without-digests to %s", context);
+				g_config.batch_without_digests = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of batch-without-digests to %s", context);
+				g_config.batch_without_digests = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-max", context, &context_len)) {
 			if (cf_str_atoi(context, &val) != 0 || val < MIN_PROTO_FD_MAX) {

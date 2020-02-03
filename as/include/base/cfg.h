@@ -94,6 +94,7 @@ typedef struct as_config_s {
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
 	uint32_t		batch_max_requests; // maximum count of database requests in a single batch
 	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
+	bool			batch_without_digests; // leave digests out of batch responses
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
 	bool			fabric_benchmarks_enabled;
