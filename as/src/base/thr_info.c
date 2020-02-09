@@ -2222,7 +2222,7 @@ info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 int
 info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 {
-	cf_debug(AS_INFO, "config-get command received: params %s", params);
+	cf_debug(AS_INFO, "config-get command received: params %s", (params == NULL) ? "(null)" : params);
 
 	if (params && *params != 0) {
 		info_command_config_get_with_params(name, params, db);
