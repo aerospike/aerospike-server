@@ -151,14 +151,11 @@ as_namespace_create(char *name)
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
-	ns->hwm_disk_pct = 50; // evict when device usage exceeds 50%
-	ns->hwm_memory_pct = 60; // evict when memory usage exceeds 60% of namespace memory-size
 	ns->index_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->migrate_order = 5;
 	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds
 	ns->migrate_sleep = 1;
 	ns->nsup_hist_period = 60 * 60; // 1 hour
-	ns->nsup_period = 2 * 60; // 2 minutes
 	ns->n_nsup_threads = 1;
 	ns->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_PROTO;
 	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
@@ -169,8 +166,6 @@ as_namespace_create(char *name)
 	ns->n_truncate_threads = 4;
 	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
-
-	ns->mounts_hwm_pct = 80; // evict when persisted index usage exceeds 80%
 
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 	ns->storage_data_in_memory = true;
