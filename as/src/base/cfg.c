@@ -536,6 +536,7 @@ typedef enum {
 	CASE_NAMESPACE_ALLOW_NONXDR_WRITES,
 	CASE_NAMESPACE_ALLOW_XDR_WRITES,
 	// Normally hidden:
+	CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP,
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
@@ -1148,6 +1149,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
 		{ "allow-nonxdr-writes",			CASE_NAMESPACE_ALLOW_NONXDR_WRITES },
 		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
+		{ "allow-ttl-without-nsup",			CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP },
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
@@ -3191,6 +3193,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_ALLOW_XDR_WRITES:
 				ns->ns_allow_xdr_writes = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP:
+				ns->allow_ttl_without_nsup = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS:
 				ns->background_scan_max_rps = cfg_u32(&line, 1, 1000000);
 				break;
@@ -3286,10 +3291,10 @@ as_config_init(const char* config_file)
 				ns->migrate_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_NSUP_HIST_PERIOD:
-				ns->nsup_hist_period = cfg_u32_no_checks(&line);
+				ns->nsup_hist_period = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_NSUP_PERIOD:
-				ns->nsup_period = cfg_u32_no_checks(&line);
+				ns->nsup_period = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_NSUP_THREADS:
 				ns->n_nsup_threads = cfg_u32(&line, 1, 128);

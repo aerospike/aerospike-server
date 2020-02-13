@@ -928,6 +928,12 @@ write_master_preprocessing(as_transaction* tr)
 		return false;
 	}
 
+	if (is_ttl_disallowed(m->record_ttl, ns)) {
+		cf_warning(AS_RW, "write_master: disallowed ttl with nsup-period 0");
+		write_master_failed(tr, 0, false, 0, 0, AS_ERR_FORBIDDEN);
+		return false;
+	}
+
 	// Fail if disallow_null_setname is true and set name is absent or empty.
 	if (ns->disallow_null_setname) {
 		as_msg_field* f = as_transaction_has_set(tr) ?

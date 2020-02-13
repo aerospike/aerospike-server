@@ -168,6 +168,16 @@ is_valid_ttl(uint32_t ttl)
 }
 
 
+static inline bool
+is_ttl_disallowed(uint32_t ttl, const as_namespace* ns)
+{
+	// Note: Excludes TTL_NEVER_EXPIRE and TTL_DONT_UPDATE.
+	return ((int32_t)ttl > 0 ||
+			(ttl == TTL_NAMESPACE_DEFAULT && ns->default_ttl != 0)) &&
+					ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup;
+}
+
+
 static inline void
 clear_delete_response_metadata(as_transaction* tr)
 {

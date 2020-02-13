@@ -756,6 +756,7 @@ struct as_namespace_s {
 	bool			ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
 	bool			ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
 
+	bool			allow_ttl_without_nsup;
 	uint32_t		background_scan_max_rps;
 	conflict_resolution_pol conflict_resolution_policy;
 	bool			cp; // relevant only for enterprise edition
