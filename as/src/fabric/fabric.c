@@ -338,38 +338,6 @@ static void fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *
 //
 
 //------------------------------------------------
-// msg
-//
-
-// Log information about existing "msg" objects and queues.
-void
-as_fabric_msg_queue_dump()
-{
-	cf_info(AS_FABRIC, "All currently-existing msg types:");
-
-	int total_q_sz = 0;
-	int total_alloced_msgs = 0;
-
-	for (int i = 0; i < M_TYPE_MAX; i++) {
-		int num_of_type = cf_atomic_int_get(g_num_msgs_by_type[i]);
-
-		total_alloced_msgs += num_of_type;
-
-		if (num_of_type) {
-			cf_info(AS_FABRIC, "alloc'd = %d", num_of_type);
-		}
-	}
-
-	int num_msgs = cf_atomic_int_get(g_num_msgs);
-
-	if (abs(num_msgs - total_alloced_msgs) > 2) {
-		cf_warning(AS_FABRIC, "num msgs (%d) != total alloc'd msgs (%d)", num_msgs, total_alloced_msgs);
-	}
-
-	cf_info(AS_FABRIC, "Total num. msgs = %d ; Total num. queued = %d ; Delta = %d", num_msgs, total_q_sz, num_msgs - total_q_sz);
-}
-
-//------------------------------------------------
 // as_fabric
 //
 

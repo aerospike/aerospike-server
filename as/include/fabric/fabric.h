@@ -93,8 +93,6 @@ extern cf_tls_info *g_fabric_tls;
 // msg
 //
 
-void as_fabric_msg_queue_dump(void);
-
 static inline msg *
 as_fabric_msg_get(msg_type type)
 {

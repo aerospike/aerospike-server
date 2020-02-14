@@ -169,7 +169,6 @@ cfg_set_defaults()
 	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
 	c->debug_allocations = CF_ALLOC_DEBUG_NONE;
-	c->fabric_dump_msgs = false;
 
 	// Network heartbeat defaults.
 	c->hb_config.mode = AS_HB_MODE_UNDEF;
@@ -321,7 +320,6 @@ typedef enum {
 	CASE_SERVICE_WORK_DIRECTORY,
 	// For special debugging or bug-related repair:
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
-	CASE_SERVICE_FABRIC_DUMP_MSGS,
 	CASE_SERVICE_INDENT_ALLOCATIONS,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
@@ -932,7 +930,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
-		{ "fabric-dump-msgs",				CASE_SERVICE_FABRIC_DUMP_MSGS },
 		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
@@ -2619,9 +2616,6 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
-			case CASE_SERVICE_FABRIC_DUMP_MSGS:
-				c->fabric_dump_msgs = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_INDENT_ALLOCATIONS:
 				c->indent_allocations = cfg_bool(&line);
 				break;
@@ -3939,7 +3933,7 @@ as_config_init(const char* config_file)
 				c->sec_cfg.n_ldap_login_threads = cfg_u32(&line, 1, 64);
 				break;
 			case CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD:
-				c->sec_cfg.privilege_refresh_period = cfg_u32(&line, PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
+				c->sec_cfg.privilege_refresh_period = cfg_seconds(&line, PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
 				break;
 			case CASE_SECURITY_LDAP_BEGIN:
 				cfg_begin_context(&state, SECURITY_LDAP);
@@ -3969,7 +3963,7 @@ as_config_init(const char* config_file)
 				c->sec_cfg.ldap_tls_disabled = cfg_bool(&line);
 				break;
 			case CASE_SECURITY_LDAP_POLLING_PERIOD:
-				c->sec_cfg.ldap_polling_period = cfg_u32(&line, LDAP_POLLING_PERIOD_MIN, LDAP_POLLING_PERIOD_MAX);
+				c->sec_cfg.ldap_polling_period = cfg_seconds(&line, LDAP_POLLING_PERIOD_MIN, LDAP_POLLING_PERIOD_MAX);
 				break;
 			case CASE_SECURITY_LDAP_QUERY_BASE_DN:
 				c->sec_cfg.ldap_query_base_dn = cfg_strdup(&line, true);
@@ -3993,7 +3987,7 @@ as_config_init(const char* config_file)
 				c->sec_cfg.ldap_server = cfg_strdup(&line, true);
 				break;
 			case CASE_SECURITY_LDAP_SESSION_TTL:
-				c->sec_cfg.ldap_session_ttl = cfg_u32(&line, LDAP_SESSION_TTL_MIN, LDAP_SESSION_TTL_MAX);
+				c->sec_cfg.ldap_session_ttl = cfg_seconds(&line, LDAP_SESSION_TTL_MIN, LDAP_SESSION_TTL_MAX);
 				break;
 			case CASE_SECURITY_LDAP_TLS_CA_FILE:
 				c->sec_cfg.ldap_tls_ca_file = cfg_strdup(&line, true);

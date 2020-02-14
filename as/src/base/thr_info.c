@@ -1166,42 +1166,6 @@ info_command_dump_migrates(char *name, char *params, cf_dyn_buf *db)
 }
 
 int
-info_command_dump_msgs(char *name, char *params, cf_dyn_buf *db)
-{
-	bool once = true;
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	/*
-	 *  Command Format:  "dump-msgs:{mode=<mode>}" [the "mode" argument is optional]
-	 *
-	 *   where <mode> is one of:  {"on" | "off" | "once"} and defaults to "once".
-	 */
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "mode", param_str, &param_str_len)) {
-		if (!strncmp(param_str, "on", 3)) {
-			g_config.fabric_dump_msgs = true;
-		} else if (!strncmp(param_str, "off", 4)) {
-			g_config.fabric_dump_msgs = false;
-			once = false;
-		} else if (!strncmp(param_str, "once", 5)) {
-			once = true;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"mode\" value must be one of {\"on\", \"off\", \"once\"}, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	if (once) {
-		as_fabric_msg_queue_dump();
-	}
-
-	cf_dyn_buf_append_string(db, "ok");
-	return(0);
-}
-
-int
 info_command_dump_wb_summary(char *name, char *params, cf_dyn_buf *db)
 {
 	as_namespace *ns;
@@ -1842,7 +1806,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "work-directory", g_config.work_directory);
 
 	info_append_string(db, "debug-allocations", debug_allocations_string());
-	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
 	info_append_bool(db, "indent-allocations", g_config.indent_allocations);
 }
 
@@ -3652,31 +3615,34 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 	else if (strcmp(context, "security") == 0) {
 		context_len = sizeof(context);
 		if (0 == as_info_parameter_get(params, "privilege-refresh-period", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || val < PRIVILEGE_REFRESH_PERIOD_MIN || val > PRIVILEGE_REFRESH_PERIOD_MAX) {
+			uint32_t val;
+			if (cf_str_atoi_seconds(context, &val) != 0 || val < PRIVILEGE_REFRESH_PERIOD_MIN || val > PRIVILEGE_REFRESH_PERIOD_MAX) {
 				cf_warning(AS_INFO, "privilege-refresh-period must be an unsigned integer between %u and %u",
 						PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of privilege-refresh-period from %u to %d", g_config.sec_cfg.privilege_refresh_period, val);
-			g_config.sec_cfg.privilege_refresh_period = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of privilege-refresh-period from %u to %u", g_config.sec_cfg.privilege_refresh_period, val);
+			g_config.sec_cfg.privilege_refresh_period = val;
 		}
 		else if (0 == as_info_parameter_get(params, "ldap.polling-period", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || val < LDAP_POLLING_PERIOD_MIN || val > LDAP_POLLING_PERIOD_MAX) {
+			uint32_t val;
+			if (cf_str_atoi_seconds(context, &val) != 0 || val < LDAP_POLLING_PERIOD_MIN || val > LDAP_POLLING_PERIOD_MAX) {
 				cf_warning(AS_INFO, "ldap.polling-period must be an unsigned integer between %u and %u",
 						LDAP_POLLING_PERIOD_MIN, LDAP_POLLING_PERIOD_MAX);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of ldap.pollling-period from %u to %d", g_config.sec_cfg.ldap_polling_period, val);
-			g_config.sec_cfg.ldap_polling_period = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of ldap.pollling-period from %u to %u", g_config.sec_cfg.ldap_polling_period, val);
+			g_config.sec_cfg.ldap_polling_period = val;
 		}
 		else if (0 == as_info_parameter_get(params, "ldap.session-ttl", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || val < LDAP_SESSION_TTL_MIN || val > LDAP_SESSION_TTL_MAX) {
+			uint32_t val;
+			if (cf_str_atoi_seconds(context, &val) != 0 || val < LDAP_SESSION_TTL_MIN || val > LDAP_SESSION_TTL_MAX) {
 				cf_warning(AS_INFO, "ldap.session-ttl must be an unsigned integer between %u and %u",
 						LDAP_SESSION_TTL_MIN, LDAP_SESSION_TTL_MAX);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of ldap.session-ttl from %u to %d", g_config.sec_cfg.ldap_session_ttl, val);
-			g_config.sec_cfg.ldap_session_ttl = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of ldap.session-ttl from %u to %u", g_config.sec_cfg.ldap_session_ttl, val);
+			g_config.sec_cfg.ldap_session_ttl = val;
 		}
 		else {
 			goto Error;
@@ -6721,7 +6687,6 @@ as_info_init()
 	as_info_set_command("dump-hb", info_command_dump_hb, PERM_LOGGING_CTRL);                  // Print debug information about heartbeat state to the log file.
 	as_info_set_command("dump-hlc", info_command_dump_hlc, PERM_LOGGING_CTRL);                // Print debug information about Hybrid Logical Clock to the log file.
 	as_info_set_command("dump-migrates", info_command_dump_migrates, PERM_LOGGING_CTRL);      // Print debug information about migration.
-	as_info_set_command("dump-msgs", info_command_dump_msgs, PERM_LOGGING_CTRL);              // Print debug information about existing 'msg' objects and queues to the log file.
 	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
 	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-skew", info_command_dump_skew, PERM_LOGGING_CTRL);              // Print information about clock skew

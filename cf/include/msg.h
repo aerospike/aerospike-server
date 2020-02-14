@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <sys/socket.h>
 
+#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_vector.h"
 
@@ -136,14 +137,6 @@ typedef struct msg_buf_ele_s {
 
 
 //==========================================================
-// Globals.
-//
-
-extern cf_atomic_int g_num_msgs;
-extern cf_atomic_int g_num_msgs_by_type[M_TYPE_MAX];
-
-
-//==========================================================
 // Public API.
 //
 
@@ -151,9 +144,12 @@ extern cf_atomic_int g_num_msgs_by_type[M_TYPE_MAX];
 // Object accounting.
 //
 
-// Free up a "msg" object. Call this function instead of freeing the msg
-// directly in order to keep track of all msgs.
-void msg_put(msg *m);
+// Free up a "msg" object.
+static inline void
+msg_put(msg *m)
+{
+	cf_rc_free(m);
+}
 
 //------------------------------------------------
 // Lifecycle.
@@ -163,7 +159,12 @@ void msg_type_register(msg_type type, const msg_template *mt, size_t mt_sz, size
 bool msg_type_is_valid(msg_type type);
 msg *msg_create(msg_type type);
 void msg_destroy(msg *m);
-void msg_incr_ref(msg *m);
+
+static inline void
+msg_incr_ref(msg *m)
+{
+	cf_rc_reserve(m);
+}
 
 //------------------------------------------------
 // Pack messages into flattened data.

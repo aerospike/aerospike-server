@@ -69,12 +69,6 @@ typedef struct msg_field_hdr_s {
 // Globals.
 //
 
-// Total number of "msg" objects allocated:
-cf_atomic_int g_num_msgs = 0;
-
-// Total number of "msg" objects allocated per type:
-cf_atomic_int g_num_msgs_by_type[M_TYPE_MAX] = { 0 };
-
 static msg_type_entry g_mte[M_TYPE_MAX];
 
 
@@ -116,20 +110,6 @@ mf_destroy(msg_field *mf)
 
 		mf->is_set = false;
 	}
-}
-
-
-//==========================================================
-// Public API - object accounting.
-//
-
-// Call this instead of freeing msg directly, to keep track of all msgs.
-void
-msg_put(msg *m)
-{
-	cf_atomic_int_decr(&g_num_msgs);
-	cf_atomic_int_decr(&g_num_msgs_by_type[m->type]);
-	cf_rc_free(m);
 }
 
 
@@ -205,10 +185,6 @@ msg_create(msg_type type)
 		mf->is_free = false;
 	}
 
-	// Keep track of allocated msgs.
-	cf_atomic_int_incr(&g_num_msgs);
-	cf_atomic_int_incr(&g_num_msgs_by_type[type]);
-
 	return m;
 }
 
@@ -227,12 +203,6 @@ msg_destroy(msg *m)
 	else {
 		cf_assert(cnt > 0, CF_MSG, "msg_destroy(%p) extra call", m);
 	}
-}
-
-void
-msg_incr_ref(msg *m)
-{
-	cf_rc_reserve(m);
 }
 
 
