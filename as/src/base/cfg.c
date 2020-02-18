@@ -3404,6 +3404,9 @@ as_config_init(const char* config_file)
 				if (ns->memory_size == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'memory-size'", ns->name);
 				}
+				if (ns->default_ttl != 0 && ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'nsup-period' or 'allow-ttl-without-nsup' true if 'default-ttl' is non-zero", ns->name);
+				}
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
 					cf_crash_nostack(AS_CFG, "ns %s data-in-index can't be true unless storage-engine is device and both single-bin and data-in-memory are true", ns->name);
 				}
