@@ -225,15 +225,15 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 	// Special log detail.
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		cf_detail_digest(AS_PROXY_DIVERT, &tr->keyd,
-				"{%s} diverting from client %s to node %lx ",
-				ns->name, tr->from.proto_fd_h->client, dst);
+		cf_detail(AS_PROXY_DIVERT,
+				"{%s} diverting %pD from client %s to node %lx ",
+				ns->name, &tr->keyd, tr->from.proto_fd_h->client, dst);
 		break;
 	case FROM_BATCH:
-		cf_detail_digest(AS_PROXY_DIVERT, &tr->keyd,
-				"{%s} diverting batch-sub from client %s to node %lx ",
-				ns->name, as_batch_get_fd_h(tr->from.batch_shared)->client,
-				dst);
+		cf_detail(AS_PROXY_DIVERT,
+				"{%s} diverting batch-sub %pD from client %s to node %lx ",
+				ns->name, &tr->keyd,
+				as_batch_get_fd_h(tr->from.batch_shared)->client, dst);
 		break;
 	default:
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);

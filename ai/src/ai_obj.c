@@ -82,11 +82,14 @@ static void dump_ai_obj_internal(FILE *fp, ai_obj *a, bool as_digest)
 	} else if (C_IS_DG(a->type)) {
 		fprintf(fp, "\tU160 ai_obj:");
 		if (as_digest) {
-			const int len = 20;
-			char digest_str[2 + (len * 2) + 1];
-			digest_str[0] = '\0';
-			generate_packed_hex_string((uint8_t *) &(a->y), len, digest_str);
-			fprintf(fp, "%s\n", digest_str);
+			uint8_t *d = (uint8_t *)&(a->y);
+			fprintf(fp, "0x"
+					"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+					"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+					d[0],  d[1],  d[2],  d[3],  d[4],
+					d[5],  d[6],  d[7],  d[8],  d[9],
+					d[10], d[11], d[12], d[13], d[14],
+					d[15], d[16], d[17], d[18], d[19]);
 		} else {
 			DEBUG_U160(fp, a->y);
 			fprintf(fp, "\n");

@@ -129,11 +129,9 @@ set_name_check(const as_transaction* tr, const as_record* r)
 	if (set_name == NULL ||
 			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
 			set_name[msg_set_name_len] != 0) {
-		CF_ZSTR_DEFINE(msg_set_name, AS_SET_NAME_MAX_SIZE + 4, f->data,
-				msg_set_name_len);
-
-		cf_warning(AS_RW, "{%s} set name mismatch %s %s", ns->name,
-				set_name == NULL ? "(null)" : set_name, msg_set_name);
+		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u)", ns->name,
+				set_name == NULL ? "(null)" : set_name, msg_set_name_len,
+						f->data, msg_set_name_len);
 		return false;
 	}
 
@@ -272,6 +270,8 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 
+	(void)ns; // FIXME - remove when the warning macros are implemented.
+
 	if (rd->r->key_stored == 1) {
 		// Key stored for this record - be sure it gets rewritten.
 
@@ -280,14 +280,14 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 		// loaded block after this if must_fetch_data is false, leave the
 		// subsequent code as-is.
 		if (! as_storage_rd_load_key(rd)) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} can't get stored key ",
-					ns->name);
+			cf_warning(AS_RW, "{%s} can't get stored key %pD", ns->name,
+					&tr->keyd);
 			return AS_ERR_UNKNOWN;
 		}
 
 		// Check the client-sent key, if any, against the stored key.
 		if (as_transaction_has_key(tr) && ! check_msg_key(m, rd)) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} key mismatch ", ns->name);
+			cf_warning(AS_RW, "{%s} key mismatch %pD", ns->name, &tr->keyd);
 			return AS_ERR_KEY_MISMATCH;
 		}
 	}

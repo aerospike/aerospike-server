@@ -643,7 +643,7 @@ write_master(rw_request* rw, as_transaction* tr)
 		int rv = as_record_get_create(tree, &tr->keyd, &r_ref, ns);
 
 		if (rv < 0) {
-			cf_detail_digest(AS_RW, &tr->keyd, "{%s} write_master: fail as_record_get_create() ", ns->name);
+			cf_detail(AS_RW, "{%s} write_master: fail as_record_get_create() %pD", ns->name, &tr->keyd);
 			write_master_failed(tr, 0, record_created, tree, 0, AS_ERR_UNKNOWN);
 			return TRANS_DONE_ERROR;
 		}
@@ -683,7 +683,7 @@ write_master(rw_request* rw, as_transaction* tr)
 				set_set_from_msg(r, ns, m) : 0;
 
 		if (rv_set == -1) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: set can't be added ", ns->name);
+			cf_warning(AS_RW, "{%s} write_master: set can't be added %pD", ns->name, &tr->keyd);
 			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_PARAMETER);
 			return TRANS_DONE_ERROR;
 		}
@@ -886,7 +886,7 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 		cf_atomic64_incr(&ns->n_fail_generation);
 		break;
 	case AS_ERR_RECORD_TOO_BIG:
-		cf_detail_digest(AS_RW, &tr->keyd, "{%s} write_master: record too big ", ns->name);
+		cf_detail(AS_RW, "{%s} write_master: record too big %pD", ns->name, &tr->keyd);
 		cf_atomic64_incr(&ns->n_fail_record_too_big);
 		break;
 	default:
@@ -959,7 +959,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	as_namespace* ns = tr->rsv.ns;
 
 	if (m->n_ops == 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: bin op(s) expected, none present ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: bin op(s) expected, none present %pD", ns->name, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -986,7 +986,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
 		if (op->op == AS_MSG_OP_TOUCH) {
 			if (record_level_replace) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: touch op can't have record-level replace flag ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: touch op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 
@@ -999,19 +999,19 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				// Allow AS_PARTICLE_TYPE_NULL, although bin-delete operations
 				// are not likely in single-bin configuration.
 				op->particle_type != AS_PARTICLE_TYPE_NULL) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't write data type %u in data-in-index configuration ", ns->name, op->particle_type);
+			cf_warning(AS_RW, "{%s} write_master: can't write data type %u in data-in-index configuration %pD", ns->name, op->particle_type, &tr->keyd);
 			return AS_ERR_INCOMPATIBLE_TYPE;
 		}
 
 		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: bin name too long (%d) ", ns->name, op->name_sz);
+			cf_warning(AS_RW, "{%s} write_master: bin name too long (%d) %pD", ns->name, op->name_sz, &tr->keyd);
 			return AS_ERR_BIN_NAME;
 		}
 
 		if (op->op == AS_MSG_OP_WRITE) {
 			if (op->particle_type == AS_PARTICLE_TYPE_NULL &&
 					record_level_replace) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: bin delete can't have record-level replace flag ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: bin delete can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1021,13 +1021,13 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		}
 		else if (OP_IS_MODIFY(op->op)) {
 			if (record_level_replace) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: modify op can't have record-level replace flag ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 		}
 		else if (op->op == AS_MSG_OP_DELETE_ALL) {
 			if (record_level_replace) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: delete-all op can't have record-level replace flag ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: delete-all op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1036,12 +1036,12 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		}
 		else if (op_is_read_all(op, m)) {
 			if (respond_all_ops) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: read-all op can't have respond-all-ops flag ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: read-all op can't have respond-all-ops flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 
 			if (has_read_all_op) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't have more than one read-all op ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: can't have more than one read-all op %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1054,7 +1054,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		}
 		else if (op->op == AS_MSG_OP_BITS_MODIFY) {
 			if (record_level_replace) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: bits modify op can't have record-level replace flag ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: bits modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 		}
@@ -1064,7 +1064,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
 			if (record_level_replace) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: cdt modify op can't have record-level replace flag ", ns->name);
+				cf_warning(AS_RW, "{%s} write_master: cdt modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 
@@ -1077,17 +1077,17 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	}
 
 	if (has_read_op && (m->info1 & AS_MSG_INFO1_READ) == 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: has read op but read flag not set ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: has read op but read flag not set %pD", ns->name, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
 
 	if (has_read_all_op && generates_response_bin) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: read-all op can't mix with ops that generate response bins ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: read-all op can't mix with ops that generate response bins %pD", ns->name, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
 
 	if (info1_get_all && ! has_read_all_op) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: get-all flag set with no read-all op ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: get-all flag set with no read-all op %pD", ns->name, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1114,23 +1114,21 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		if (set_name) {
-			cf_warning_digest(AS_RW, &tr->keyd, "overwriting record in set '%s' but msg has no set name ",
-					set_name);
+			cf_warning(AS_RW, "overwriting record in set '%s' but msg has no set name %pD",
+					set_name, &tr->keyd);
 		}
 
 		return true;
 	}
 
-	size_t msg_set_name_len = as_msg_field_get_value_sz(f);
+	uint32_t msg_set_name_len = as_msg_field_get_value_sz(f);
 
 	if (! set_name ||
 			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
 			set_name[msg_set_name_len] != 0) {
-		CF_ZSTR_DEFINE(msg_set_name, AS_SET_NAME_MAX_SIZE + 4, f->data,
-				msg_set_name_len);
-
-		cf_warning_digest(AS_RW, &tr->keyd, "overwriting record in set '%s' but msg has different set name '%s' ",
-				set_name ? set_name : "(null)", msg_set_name);
+		cf_warning(AS_RW, "overwriting record in set '%s' but msg has different set name '%.*s' (%u) %pD",
+				set_name ? set_name : "(null)", msg_set_name_len,
+						(const char*)f->data, msg_set_name_len, &tr->keyd);
 		return false;
 	}
 
@@ -1259,7 +1257,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
 		return -result;
@@ -1395,7 +1393,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 
 		if (new_bin_space) {
 			cf_free(new_bin_space);
@@ -1484,7 +1482,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	int result = as_storage_rd_load_bins(rd, &stack_bin);
 
 	if (result < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_rd_load_bins()", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
 		return -result;
 	}
 
@@ -1543,7 +1541,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
@@ -1592,7 +1590,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	int result = as_storage_rd_load_n_bins(rd);
 
 	if (result < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_rd_load_n_bins()", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: failed as_storage_rd_load_n_bins() %pD", ns->name, &tr->keyd);
 		return -result;
 	}
 
@@ -1613,7 +1611,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	// - otherwise - sets rd->bins to new_bins, reads existing record off device
 	//		and populates bins (including particle pointers into block buffer)
 	if ((result = as_storage_rd_load_bins(rd, new_bins)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_rd_load_bins()", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
 		return -result;
 	}
 
@@ -1685,7 +1683,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
+		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
@@ -1849,7 +1847,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					as_bin_copy(ns, &cleanup_bin, b);
 
 					if ((result = as_bin_particle_alloc_from_client(b, op)) < 0) {
-						cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_particle_alloc_from_client() ", ns->name);
+						cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_alloc_from_client() %pD", ns->name, &tr->keyd);
 						return -result;
 					}
 
@@ -1857,7 +1855,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				}
 				else {
 					if ((result = as_bin_particle_stack_from_client(b, particles_llb, op)) < 0) {
-						cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_particle_stack_from_client() ", ns->name);
+						cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_from_client() %pD", ns->name, &tr->keyd);
 						return -result;
 					}
 				}
@@ -1883,7 +1881,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_particle_alloc_modify_from_client(b, op)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_particle_alloc_modify_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -1891,7 +1889,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			else {
 				if ((result = as_bin_particle_stack_modify_from_client(b, particles_llb, op)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_particle_stack_modify_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 			}
@@ -1965,7 +1963,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_bits_alloc_modify_from_client(b, op)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_bits_alloc_modify_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_bits_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -1977,7 +1975,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			else {
 				if ((result = as_bin_bits_stack_modify_from_client(b, particles_llb, op)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_bits_stack_modify_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_bits_stack_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 			}
@@ -1997,7 +1995,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_set_empty(&result_bin);
 
 				if ((result = as_bin_bits_read_from_client(b, op, &result_bin)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_bits_read_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -2025,7 +2023,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_cdt_alloc_modify_from_client(b, op, &result_bin)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_cdt_alloc_modify_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_cdt_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -2037,7 +2035,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			else {
 				if ((result = as_bin_cdt_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_cdt_stack_modify_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_cdt_stack_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 			}
@@ -2069,7 +2067,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_set_empty(&result_bin);
 
 				if ((result = as_bin_cdt_read_from_client(b, op, &result_bin)) < 0) {
-					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_cdt_read_from_client() ", ns->name);
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -2083,7 +2081,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: unknown bin op %u ", ns->name, op->op);
+			cf_warning(AS_RW, "{%s} write_master: unknown bin op %u %pD", ns->name, op->op, &tr->keyd);
 			return AS_ERR_PARAMETER;
 		}
 	}

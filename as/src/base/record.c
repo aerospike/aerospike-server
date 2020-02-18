@@ -602,7 +602,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	uint16_t n_new_bins = rr->n_bins;
 
 	if (n_new_bins > 1) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: single-bin got %u bins ", ns->name, n_new_bins);
+		cf_warning(AS_RECORD, "{%s} record replace: single-bin got %u bins %pD", ns->name, n_new_bins, rr->keyd);
 		return AS_ERR_UNKNOWN;
 	}
 
@@ -619,7 +619,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	// Fill the new bins and particles.
 	if (n_new_bins == 1 &&
 			(result = as_flat_unpack_remote_bins(rr, rd->bins)) != 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed unpickle bin ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bin %pD", ns->name, rr->keyd);
 		unwind_dim_single_bin(&old_bin, rd->bins);
 		return -result;
 	}
@@ -636,7 +636,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		unwind_dim_single_bin(&old_bin, rd->bins);
 		return -result;
@@ -689,7 +689,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 		// Fill the new bins and particles.
 		if ((result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-			cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed unpickle bins ", ns->name);
+			cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
 			destroy_stack_bins(new_bins, n_new_bins);
 			return -result;
 		}
@@ -707,7 +707,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		destroy_stack_bins(new_bins, n_new_bins);
 		return -result;
@@ -771,7 +771,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	uint16_t n_new_bins = rr->n_bins;
 
 	if (n_new_bins > 1) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: single-bin got %u bins ", ns->name, n_new_bins);
+		cf_warning(AS_RECORD, "{%s} record replace: single-bin got %u bins %pD", ns->name, n_new_bins, rr->keyd);
 		return AS_ERR_UNKNOWN;
 	}
 
@@ -788,7 +788,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	int result = as_storage_record_write(rd);
 
 	if (result < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
@@ -831,7 +831,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	if (has_sindex) {
 		// TODO - separate function?
 		if ((result = as_storage_rd_load_n_bins(rd)) < 0) {
-			cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed load n-bins ", ns->name);
+			cf_warning(AS_RECORD, "{%s} record replace: failed load n-bins %pD", ns->name, rr->keyd);
 			return -result;
 		}
 
@@ -839,7 +839,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 		old_bins = alloca(n_old_bins * sizeof(as_bin));
 
 		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
-			cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed load bins ", ns->name);
+			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
 			return -result;
 		}
 
@@ -851,7 +851,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 			memset(new_bins, 0, n_new_bins * sizeof(as_bin));
 
 			if ((result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-				cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed unpickle bins ", ns->name);
+				cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
 				return -result;
 			}
 		}
@@ -868,7 +868,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
@@ -914,7 +914,7 @@ old_record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	uint16_t n_new_bins = cf_swap_from_be16(*(uint16_t *)rr->pickle);
 
 	if (n_new_bins > 1) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: single-bin got %u bins ", ns->name, n_new_bins);
+		cf_warning(AS_RECORD, "{%s} record replace: single-bin got %u bins %pD", ns->name, n_new_bins, rr->keyd);
 		return AS_ERR_UNKNOWN;
 	}
 
@@ -929,7 +929,7 @@ old_record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	// Fill the new bins and particles.
 	if (n_new_bins == 1 &&
 			(result = unpickle_bins(rr, rd, NULL)) != 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed unpickle bin ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bin %pD", ns->name, rr->keyd);
 		unwind_dim_single_bin(&old_bin, rd->bins);
 		return result;
 	}
@@ -944,7 +944,7 @@ old_record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		unwind_dim_single_bin(&old_bin, rd->bins);
 		return -result;
@@ -994,7 +994,7 @@ old_record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	int result = unpickle_bins(rr, rd, NULL);
 
 	if (result != 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed unpickle bins ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
 		destroy_stack_bins(new_bins, n_new_bins);
 		return result;
 	}
@@ -1013,7 +1013,7 @@ old_record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		destroy_stack_bins(new_bins, n_new_bins);
 		return -result;
@@ -1073,7 +1073,7 @@ old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	uint16_t n_new_bins = cf_swap_from_be16(*(uint16_t *)rr->pickle);
 
 	if (n_new_bins > 1) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: single-bin got %u bins ", ns->name, n_new_bins);
+		cf_warning(AS_RECORD, "{%s} record replace: single-bin got %u bins %pD", ns->name, n_new_bins, rr->keyd);
 		return AS_ERR_UNKNOWN;
 	}
 
@@ -1089,7 +1089,7 @@ old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	if (n_new_bins == 1 &&
 			(result = unpickle_bins(rr, rd, &particles_llb)) != 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed unpickle bin ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bin %pD", ns->name, rr->keyd);
 		cf_ll_buf_free(&particles_llb);
 		return result;
 	}
@@ -1108,7 +1108,7 @@ old_record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		cf_ll_buf_free(&particles_llb);
 		return -result;
@@ -1144,7 +1144,7 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	if (has_sindex) {
 		// Set rd->n_bins!
 		if ((result = as_storage_rd_load_n_bins(rd)) < 0) {
-			cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed load n-bins ", ns->name);
+			cf_warning(AS_RECORD, "{%s} record replace: failed load n-bins %pD", ns->name, rr->keyd);
 			return -result;
 		}
 
@@ -1156,7 +1156,7 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	if (has_sindex) {
 		// Set rd->bins!
 		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
-			cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed load bins ", ns->name);
+			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
 			return -result;
 		}
 	}
@@ -1173,7 +1173,7 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
 	if ((result = unpickle_bins(rr, rd, &particles_llb)) != 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed unpickle bins ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
 		cf_ll_buf_free(&particles_llb);
 		return result;
 	}
@@ -1192,7 +1192,7 @@ old_record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	// Write the record to storage.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning_digest(AS_RECORD, rr->keyd, "{%s} record replace: failed write ", ns->name);
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		cf_ll_buf_free(&particles_llb);
 		return -result;

@@ -119,8 +119,8 @@ as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len,
 			len, &idx);
 
 	if (! (result == CF_VMAPX_OK || result == CF_VMAPX_ERR_NAME_EXISTS)) {
-		CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
-		cf_warning(AS_BIN, "adding bin name %s, vmap err %d", zname, result);
+		cf_warning(AS_BIN, "{%s} vmap err %d - can't add new bin-name %.*s",
+				ns->name, result, (uint32_t)len, name);
 		return false;
 	}
 
@@ -393,10 +393,8 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
 	// else - bin name is new.
 
 	if (cf_vmapx_count(ns->p_bin_name_vmap) >= BIN_NAMES_QUOTA) {
-		CF_ZSTR_DEFINE(zname, AS_BIN_NAME_MAX_SZ, name, len);
-
-		cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %s",
-				ns->name, zname);
+		cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %.*s",
+				ns->name, (uint32_t)len, name);
 
 		if (result) {
 			*result = AS_ERR_BIN_NAME;

@@ -76,7 +76,7 @@
 // Typedefs & constants.
 //
 
-static const cf_fault_severity as_log_level_map[5] = {
+static const cf_log_level as_log_level_map[5] = {
 	[AS_LOG_LEVEL_ERROR] = CF_WARNING,
 	[AS_LOG_LEVEL_WARN]	= CF_WARNING,
 	[AS_LOG_LEVEL_INFO]	= CF_INFO,
@@ -411,9 +411,9 @@ bool
 log_callback(as_log_level level, const char* func, const char* file,
 		uint32_t line, const char* fmt, ...)
 {
-	cf_fault_severity severity = as_log_level_map[level];
+	cf_log_level severity = as_log_level_map[level];
 
-	if (severity > cf_fault_filter[AS_UDF]) {
+	if (! cf_log_check_level(AS_UDF, severity)) {
 		return true;
 	}
 
@@ -424,7 +424,7 @@ log_callback(as_log_level level, const char* func, const char* file,
 	vsnprintf(message, 1024, fmt, ap);
 	va_end(ap);
 
-	cf_fault_event(AS_UDF, severity, file, line, "%s", message);
+	cf_log_write(AS_UDF, severity, file, line, "%s", message);
 
 	return true;
 }

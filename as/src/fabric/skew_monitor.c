@@ -241,7 +241,7 @@ skew_monitor_outlier_detection_threshold()
  */
 static void
 ring_buffer_log_event(as_skew_ring_buffer* ring_buffer, char* prefix,
-		cf_fault_severity severity, cf_fault_context context, char* file_name,
+		cf_log_level severity, cf_log_context context, char* file_name,
 		int line)
 {
 	int max_per_line = 25;
@@ -266,8 +266,7 @@ ring_buffer_log_event(as_skew_ring_buffer* ring_buffer, char* prefix,
 		// is atleast one node output
 		if (buffer != value_buffer_start) {
 			*(buffer - 1) = 0;
-			cf_fault_event(context, severity, file_name, line, "%s",
-					log_buffer);
+			cf_log_write(context, severity, file_name, line, "%s", log_buffer);
 		}
 	}
 }
@@ -714,7 +713,7 @@ skew_monitor_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	// Update the ring buffer with the new delta.
 	ring_buffer_insert(&skew_plugin_data->ring_buffer, delta);
 
-	if (cf_context_at_severity(AS_SKEW, CF_DETAIL)) {
+	if (cf_log_check_level(AS_SKEW, CF_DETAIL)) {
 		// Temporary debugging.
 		char message[100];
 		sprintf(message, "Insert for node: %lx - ", source);

@@ -1009,16 +1009,16 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 				 (int64_t) dp->bin.particle);
 		break;
 	case AS_PREDEXP_STRING_VALUE: {
-		cf_debug(AS_PREDEXP, "%p: predexp_string_value(\"%s\")", stackpp,
-				 CF_ZSTR1K(valptr, vallen));
+		cf_debug(AS_PREDEXP, "%p: predexp_string_value(\"%.*s\")", stackpp,
+				vallen < 1024 ? (int)vallen : 1024, (char*)valptr);
 		break;
 	}
 	case AS_PREDEXP_GEOJSON_VALUE: {
 		size_t jsonsz;
 		char const * jsonptr =
 			as_geojson_mem_jsonstr(dp->bin.particle, &jsonsz);
-		cf_debug(AS_PREDEXP, "%p: predexp_geojson_value(%s)", stackpp,
-				CF_ZSTR1K(jsonptr, jsonsz));
+		cf_debug(AS_PREDEXP, "%p: predexp_geojson_value(%.*s)", stackpp,
+				jsonsz < 1024 ? (int)jsonsz : 1024, jsonptr);
 		break;
 	}
 	default:

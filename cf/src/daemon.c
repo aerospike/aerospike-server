@@ -256,59 +256,61 @@ cf_process_disable_cap(int cap)
 
 
 // Daemonize the server - fork a new child process and exit the parent process.
-// Close all the file descriptors opened except the ones specified in the
-// fd_ignore_list. Redirect console messages to a file.
+// Redirect console messages to a file.
 void
-cf_process_daemonize(int *fd_ignore_list, int list_size)
+cf_process_daemonize(void)
 {
-	int FD, j;
-	char cfile[128];
-	pid_t p;
+	pid_t child = fork();
 
-	// Fork ourselves, then let the parent expire.
-	if (-1 == (p = fork())) {
-		cf_crash(CF_MISC, "couldn't fork: %s", cf_strerror(errno));
+	if (child < 0) {
+		cf_crash(CF_MISC, "failed fork: %d (%s)", errno, cf_strerror(errno));
 	}
 
-	if (0 != p) {
-		// Prefer _exit() over exit(), as we don't want the parent to
-		// do any cleanups.
+	if (child != 0) {
+		// Prefer _exit() over exit() - prevent cleanups by parent.
 		_exit(0);
 	}
+	// else - in child.
 
 	// Get a new session.
-	if (-1 == setsid()) {
-		cf_crash(CF_MISC, "couldn't set session: %s", cf_strerror(errno));
+	if (setsid() < 0) {
+		cf_crash(CF_MISC, "failed setsid: %d (%s)", errno, cf_strerror(errno));
 	}
 
-	// Drop all the file descriptors except the ones in fd_ignore_list.
-	for (int i = getdtablesize(); i > 2; i--) {
-		for (j = 0; j < list_size; j++) {
-			if (fd_ignore_list[j] == i) {
-				break;
-			}
-		}
+	char path[64];
 
-		if (j ==  list_size) {
-			close(i);
-		}
+	sprintf(path, "/tmp/aerospike-console.%d", getpid());
+
+	int fd = open(path, CF_LOG_OPEN_FLAGS, CF_LOG_OPEN_MODE);
+
+	if (fd < 0) {
+		cf_crash(CF_MISC, "failed to open %s: %d (%s)", path, errno,
+				cf_strerror(errno));
 	}
 
-	// Open a temporary file for console message redirection.
-	snprintf(cfile, 128, "/tmp/aerospike-console.%d", getpid());
-
-	if (-1 == (FD = open(cfile, O_WRONLY|O_CREAT|O_APPEND, S_IRUSR|S_IWUSR))) {
-		cf_crash(CF_MISC, "couldn't open console redirection file %s: %s", cfile, cf_strerror(errno));
+	if (dup2(fd, STDOUT_FILENO) < 0) {
+		cf_crash(CF_MISC, "failed to redirect stdout: %d (%s)", errno,
+				cf_strerror(errno));
 	}
 
-	if (-1 == chmod(cfile, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) {
-		cf_crash(CF_MISC, "couldn't set mode on console redirection file %s: %s", cfile, cf_strerror(errno));
+	if (dup2(fd, STDERR_FILENO) < 0) {
+		cf_crash(CF_MISC, "failed to redirect stderr: %d (%s)", errno,
+				cf_strerror(errno));
 	}
 
-	// Redirect stdout, stderr, and stdin to the console file.
-	for (int i = 0; i < 3; i++) {
-		if (-1 == dup2(FD, i)) {
-			cf_crash(CF_MISC, "couldn't duplicate FD: %s", cf_strerror(errno));
-		}
+	close(fd);
+
+	fd = open("/dev/null", O_RDONLY);
+
+	if (fd < 0) {
+		cf_crash(CF_MISC, "failed to open /dev/null: %d (%s)", errno,
+				cf_strerror(errno));
 	}
+
+	if (dup2(fd, STDIN_FILENO) < 0) {
+		cf_crash(CF_MISC, "failed to redirect stdin: %d (%s)", errno,
+				cf_strerror(errno));
+	}
+
+	close(fd);
 }

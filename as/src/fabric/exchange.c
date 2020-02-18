@@ -2150,7 +2150,7 @@ exchange_self_is_principal()
  * Dump exchange state.
  */
 static void
-exchange_dump(cf_fault_severity severity, bool verbose)
+exchange_dump(cf_log_level severity, bool verbose)
 {
 	EXCHANGE_LOCK();
 	cf_vector* node_vector = cf_vector_stack_create(cf_node);

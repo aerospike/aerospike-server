@@ -102,8 +102,8 @@ static inline void
 detail_unique_client_rw(const as_transaction *tr, bool is_write)
 {
 	if (! as_transaction_is_restart(tr) && tr->origin == FROM_CLIENT) {
-		cf_detail_digest(AS_RW_CLIENT, &tr->keyd, "{%s} client %s %s ",
-				tr->rsv.ns->name, tr->from.proto_fd_h->client,
+		cf_detail(AS_RW_CLIENT, "{%s} digest %pD client %s %s",
+				tr->rsv.ns->name, &tr->keyd, tr->from.proto_fd_h->client,
 				is_write ? write_type_tag(tr) : "read");
 	}
 }
@@ -153,10 +153,9 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	if (! ns) {
 		uint32_t ns_sz = as_msg_field_get_value_sz(nf);
-		CF_ZSTR_DEFINE(ns_name, AS_ID_NAMESPACE_SZ, nf->data, ns_sz);
 
-		cf_warning(AS_TSVC, "unknown namespace %s (%u) in protocol request - check configuration file",
-				ns_name, ns_sz);
+		cf_warning(AS_TSVC, "unknown namespace %.*s (%u) in protocol request - check configuration file",
+				ns_sz, nf->data, ns_sz);
 
 		as_transaction_error(tr, NULL, AS_ERR_NAMESPACE);
 		goto Cleanup;

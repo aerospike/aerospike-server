@@ -25,7 +25,7 @@
 #include <stdbool.h>
 #include <sys/types.h>
 
-void cf_process_daemonize(int *fd_ignore_list, int list_size);
+void cf_process_daemonize(void);
 void cf_process_privsep(uid_t uid, gid_t gid);
 void cf_process_add_startup_cap(int cap);
 void cf_process_add_runtime_cap(int cap);

@@ -67,11 +67,16 @@ static void bt_dump_array(FILE *fp, ai_arr *arr, bool verbose)
 	fprintf(fp, "Array:  capacity: %d used: %d\n", arr->capacity, arr->used);
 	if (verbose) {
 		for (int i = 0; i < arr->used; i++) {
-			const int len = 20;
-			char digest_str[2 + (len * 2) + 1];
-			digest_str[0] = '\0';
-			generate_packed_hex_string((uint8_t *) &arr->data[i * CF_DIGEST_KEY_SZ], len, digest_str);
-			fprintf(fp, "\tData[%d]: %s\n", i, digest_str);
+			uint8_t *d = (uint8_t *)&arr->data[i * CF_DIGEST_KEY_SZ];
+			fprintf(fp, "\tData[%d]: 0x"
+					"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+					"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+					i,
+					d[0],  d[1],  d[2],  d[3],  d[4],
+					d[5],  d[6],  d[7],  d[8],  d[9],
+					d[10], d[11], d[12], d[13], d[14],
+					d[15], d[16], d[17], d[18], d[19]);
+
 		}
 	}
 }

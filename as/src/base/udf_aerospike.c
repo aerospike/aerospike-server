@@ -728,7 +728,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 
 	// make sure we got the record as a create
 	int rv = as_record_get_create(tree, &tr->keyd, r_ref, tr->rsv.ns);
-	cf_detail_digest(AS_UDF, &tr->keyd, "Creating Record ");
+	cf_detail(AS_UDF, "Creating Record %pD", &tr->keyd);
 
 	// rv 0 means record exists, 1 means create, < 0 means fail
 	// TODO: Verify correct result codes.
@@ -745,7 +745,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 			return 1;
 		}
 	} else if (rv < 0) {
-		cf_detail_digest(AS_UDF, &tr->keyd, "udf_aerospike_rec_create: Record Open Failed with rv=%d ", rv);
+		cf_detail(AS_UDF, "udf_aerospike_rec_create: Record Open Failed with rv=%d %pD", rv, &tr->keyd);
 		return rv;
 	}
 
@@ -858,7 +858,7 @@ udf_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 		cf_warning(AS_UDF, "Record not found to be open while updating urecord flag=%d", urecord ? urecord->flag : -1);
 		return -2;
 	}
-	cf_detail_digest(AS_UDF, &urecord->rd->r->keyd, "Executing Updates");
+	cf_detail(AS_UDF, "Executing Updates %pD", &urecord->rd->r->keyd);
 	ret = udf_aerospike__execute_updates(urecord);
 
 	if (ret < 0) {
@@ -952,7 +952,7 @@ static int
 udf_aerospike_log(const as_aerospike * a, const char * file, const int line, const int lvl, const char * msg)
 {
 	(void)a;
-	cf_fault_event(AS_UDF, lvl, file, line, "%s", (char *) msg);
+	cf_log_write(AS_UDF, lvl, file, line, "%s", (char *) msg);
 	return 0;
 }
 

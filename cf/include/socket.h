@@ -283,7 +283,7 @@ static inline void cf_socket_copy(const cf_socket *from, cf_socket *to)
 }
 
 CF_MUST_CHECK int32_t cf_socket_init_server(cf_serv_cfg *cfg, cf_sockets *socks);
-void cf_socket_show_server(cf_fault_context cont, const char *tag, const cf_sockets *socks);
+void cf_socket_show_server(cf_log_context cont, const char *tag, const cf_sockets *socks);
 CF_MUST_CHECK int32_t cf_socket_init_client(cf_sock_cfg *cfg, int32_t timeout, cf_socket *sock);
 
 CF_MUST_CHECK int32_t cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr);
@@ -315,7 +315,7 @@ CF_MUST_CHECK int32_t cf_mserv_cfg_add_msock_cfg(cf_mserv_cfg *serv_cfg, const c
 CF_MUST_CHECK int32_t cf_mserv_cfg_add_combo(cf_mserv_cfg *serv_cfg, cf_sock_owner owner, cf_ip_port port, cf_ip_addr *addr, cf_ip_addr *if_addr, uint8_t ttl);
 
 CF_MUST_CHECK int32_t cf_socket_mcast_init(cf_mserv_cfg *cfg, cf_sockets *socks);
-void cf_socket_mcast_show(cf_fault_context cont, const char *tag, const cf_sockets *socks);
+void cf_socket_mcast_show(cf_log_context cont, const char *tag, const cf_sockets *socks);
 CF_MUST_CHECK int32_t cf_socket_mcast_set_inter(cf_socket *sock, const cf_ip_addr *iaddr);
 CF_MUST_CHECK int32_t cf_socket_mcast_set_ttl(cf_socket *sock, int32_t ttl);
 CF_MUST_CHECK int32_t cf_socket_mcast_join_group(cf_socket *sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr);

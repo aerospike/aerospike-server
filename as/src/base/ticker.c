@@ -224,7 +224,7 @@ log_ticker_frame(uint64_t delta_time)
 		dump_namespace_histograms(ns);
 	}
 
-	cf_dump_ticker_cache();
+	cf_log_dump_cache();
 }
 
 void

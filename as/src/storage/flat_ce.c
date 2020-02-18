@@ -88,8 +88,8 @@ unflatten_compression_meta(const as_flat_record* flat, const uint8_t* at,
 		return at;
 	}
 
-	cf_warning_digest(AS_FLAT, &flat->keyd,
-			"community edition skipped compressed record ");
+	cf_warning(AS_FLAT, "community edition skipped compressed record %pD",
+			&flat->keyd);
 
 	return NULL;
 }

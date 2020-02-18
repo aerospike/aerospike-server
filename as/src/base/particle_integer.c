@@ -368,8 +368,7 @@ integer_from_msgpack(const uint8_t *packed, uint32_t packed_size,
 		};
 
 		if (! msgpack_get_int64(&mp, &i)) {
-			cf_fault_hex_dump("msgpack", mp.buf, mp.buf_sz);
-			cf_crash(AS_PARTICLE, "invalid msgpack");
+			cf_crash(AS_PARTICLE, "invalid msgpack\n%*pH", mp.buf_sz, mp.buf);
 		}
 	}
 

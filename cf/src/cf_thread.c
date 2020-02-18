@@ -262,7 +262,7 @@ print_traces_cb(cf_ll_element* ele, void* udata)
 	cf_dyn_buf* db = (cf_dyn_buf*)udata;
 
 	cf_dyn_buf_append_format(db, "---------- %d (0x%lx) ----------;",
-			info->sys_tid, cf_fault_strip_aslr(info->run));
+			info->sys_tid, cf_log_strip_aslr(info->run));
 
 	if (info->n_addrs == 0) { // race: thread created after we sent SIGUSR2
 		return 0;

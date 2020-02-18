@@ -211,8 +211,8 @@ as_clustering_quantum_interval();
  * @param nodes the vector of nodes.
  */
 void
-as_clustering_cf_node_vector_event(cf_fault_severity severity,
-		cf_fault_context context, char* file_name, int line, char* message,
+as_clustering_cf_node_vector_event(cf_log_level severity,
+		cf_log_context context, char* file_name, int line, char* message,
 		cf_vector* nodes);
 
 /**
@@ -230,8 +230,8 @@ as_clustering_cf_node_vector_event(cf_fault_severity severity,
  * @param node_count the count of nodes in the array.
  */
 void
-as_clustering_cf_node_array_event(cf_fault_severity severity,
-		cf_fault_context context, char* file_name, int line, char* message,
+as_clustering_cf_node_array_event(cf_log_level severity,
+		cf_log_context context, char* file_name, int line, char* message,
 		cf_node* nodes, int node_count);
 
 /**

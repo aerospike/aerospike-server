@@ -89,6 +89,7 @@ static const struct option CMD_OPTS[] = {
 		{ "config-file", required_argument, NULL, 'f' },
 		{ "foreground", no_argument, NULL, 'd' },
 		{ "fgdaemon", no_argument, NULL, 'F' },
+		{ "early-verbose", no_argument, NULL, 'e' },
 		{ "cold-start", no_argument, NULL, 'c' },
 		{ "instance", required_argument, NULL, 'n' },
 		{ NULL, 0, NULL, 0 }
@@ -128,6 +129,10 @@ static const char HELP[] =
 		"Specify that Aerospike is to be run as a \"new-style\" (foreground) daemon. This\n"
 		"is useful for running Aerospike under systemd or Docker.\n"
 		"\n"
+		"--early-verbose"
+		"\n"
+		"Show verbose logging before config parsing.\n"
+		"\n"
 		"--cold-start"
 		"\n"
 		"(Enterprise edition only.) At startup, force the Aerospike server to read all\n"
@@ -150,6 +155,7 @@ static const char USAGE[] =
 		"[--config-file <file>] "
 		"[--foreground] "
 		"[--fgdaemon] "
+		"[--early-verbose] "
 		"[--cold-start] "
 		"[--instance <0-15>]\n"
 		;
@@ -191,26 +197,12 @@ main(int argc, char **argv)
 {
 	g_start_sec = cf_get_seconds();
 
-	// Initialize cf_thread wrapper.
-	cf_thread_init();
-
-	// Initialize memory allocation.
-	cf_alloc_init();
-
-	// Initialize fault management framework.
-	cf_fault_init();
-
-	// Setup signal handlers.
-	as_signal_setup();
-
-	// Initialize TLS library.
-	tls_check_init();
-
 	int opt;
 	int opt_i;
 	const char *config_file = DEFAULT_CONFIG_FILE;
 	bool run_in_foreground = false;
 	bool new_style_daemon = false;
+	bool early_verbose = false;
 	bool cold_start_cmd = false;
 	uint32_t instance = 0;
 
@@ -218,11 +210,11 @@ main(int argc, char **argv)
 	while ((opt = getopt_long(argc, argv, "", CMD_OPTS, &opt_i)) != -1) {
 		switch (opt) {
 		case 'h':
-			// printf() since we want stdout and don't want cf_fault's prefix.
+			// printf() since we want stdout and don't want cf_log's prefix.
 			printf("%s\n", HELP);
 			return 0;
 		case 'v':
-			// printf() since we want stdout and don't want cf_fault's prefix.
+			// printf() since we want stdout and don't want cf_log's prefix.
 			printf("%s build %s\n", aerospike_build_type, aerospike_build_id);
 			return 0;
 		case 'f':
@@ -245,6 +237,9 @@ main(int argc, char **argv)
 		case 'd':
 			run_in_foreground = true;
 			break;
+		case 'e':
+			early_verbose = true;
+			break;
 		case 'c':
 			cold_start_cmd = true;
 			break;
@@ -252,11 +247,18 @@ main(int argc, char **argv)
 			instance = (uint32_t)strtol(optarg, NULL, 0);
 			break;
 		default:
-			// fprintf() since we don't want cf_fault's prefix.
+			// fprintf() since we don't want cf_log's prefix.
 			fprintf(stderr, "%s\n", USAGE);
 			return 1;
 		}
 	}
+
+	// Initializations before config parsing.
+	cf_log_init(early_verbose);
+	cf_alloc_init();
+	cf_thread_init();
+	as_signal_setup();
+	tls_check_init();
 
 	// Set all fields in the global runtime configuration instance. This parses
 	// the configuration file, and creates as_namespace objects. (Return value
@@ -280,35 +282,19 @@ main(int argc, char **argv)
 	// that must be opened above, in order to parse the user & group.)
 	//==========================================================================
 
-	// A "new-style" daemon expects console logging to be configured. (If not,
-	// log messages won't be seen via the standard path.)
-	if (new_style_daemon) {
-		if (! cf_fault_console_is_held()) {
-			cf_warning(AS_AS, "in new-style daemon mode, console logging is not configured");
-		}
-	}
-
 	// Activate log sinks. Up to this point, 'cf_' log output goes to stderr,
-	// filtered according to NO_SINKS_LIMIT in fault.c. After this point, 'cf_'
-	// log output will appear in all log file sinks specified in configuration,
-	// with specified filtering. If console sink is specified in configuration,
-	// 'cf_' log output will continue going to stderr, but filtering will switch
-	// from NO_SINKS_LIMIT to that specified in console sink configuration.
-	if (0 != cf_fault_sink_activate_all_held()) {
-		// Specifics of failure are logged in cf_fault_sink_activate_all_held().
-		cf_crash_nostack(AS_AS, "can't open log sink(s)");
-	}
+	// filtered according to early_verbose. After this point, 'cf_' log output
+	// will appear in all log file sinks specified in configuration, with
+	// specified filtering. If console sink is specified in configuration, 'cf_'
+	// log output will continue going to stderr, but filtering will switch to
+	// that specified in console sink configuration.
+	cf_log_activate_sinks();
 
 	// Daemonize asd if specified. After daemonization, output to stderr will no
 	// longer appear in terminal. Instead, check /tmp/aerospike-console.<pid>
 	// for console output.
 	if (! run_in_foreground && c->run_as_daemon) {
-		// Don't close any open files when daemonizing. At this point only log
-		// sink files are open - instruct cf_process_daemonize() to ignore them.
-		int open_fds[CF_FAULT_SINKS_MAX];
-		int num_open_fds = cf_fault_sink_get_fd_list(open_fds);
-
-		cf_process_daemonize(open_fds, num_open_fds);
+		cf_process_daemonize();
 	}
 
 	// Log which build this is - should be the first line in the log file.

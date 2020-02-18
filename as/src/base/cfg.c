@@ -408,13 +408,9 @@ typedef enum {
 	// Normally hidden:
 	CASE_LOG_CONSOLE_BEGIN,
 
-	// Logging file options:
+	// Logging context options:
 	// Normally visible:
-	CASE_LOG_FILE_CONTEXT,
-
-	// Logging console options:
-	// Normally visible:
-	CASE_LOG_CONSOLE_CONTEXT,
+	CASE_LOG_CONTEXT_CONTEXT,
 
 	// Network options:
 	// Normally visible, in canonical configuration file order:
@@ -1020,13 +1016,8 @@ const cfg_opt LOGGING_OPTS[] = {
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt LOGGING_FILE_OPTS[] = {
-		{ "context",						CASE_LOG_FILE_CONTEXT },
-		{ "}",								CASE_CONTEXT_END }
-};
-
-const cfg_opt LOGGING_CONSOLE_OPTS[] = {
-		{ "context",						CASE_LOG_CONSOLE_CONTEXT },
+const cfg_opt LOGGING_CONTEXT_OPTS[] = {
+		{ "context",						CASE_LOG_CONTEXT_CONTEXT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1494,8 +1485,7 @@ const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_DEBUG_ALLOCATIONS_OPTS		= sizeof(SERVICE_DEBUG_ALLOCATIONS_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
-const int NUM_LOGGING_FILE_OPTS						= sizeof(LOGGING_FILE_OPTS) / sizeof(cfg_opt);
-const int NUM_LOGGING_CONSOLE_OPTS					= sizeof(LOGGING_CONSOLE_OPTS) / sizeof(cfg_opt);
+const int NUM_LOGGING_CONTEXT_OPTS					= sizeof(LOGGING_CONTEXT_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_OPTS							= sizeof(NETWORK_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_SERVICE_OPTS					= sizeof(NETWORK_SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_HEARTBEAT_OPTS				= sizeof(NETWORK_HEARTBEAT_OPTS) / sizeof(cfg_opt);
@@ -1584,7 +1574,7 @@ const int NUM_XDR_HTTP_VERSION_TYPES = sizeof(XDR_HTTP_VERSION_TYPES) / sizeof(c
 typedef enum {
 	GLOBAL,
 	SERVICE,
-	LOGGING, LOGGING_FILE, LOGGING_CONSOLE,
+	LOGGING, LOGGING_CONTEXT,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
 	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
@@ -1600,7 +1590,7 @@ typedef enum {
 const char* CFG_PARSER_STATES[] = {
 		"GLOBAL",
 		"SERVICE",
-		"LOGGING", "LOGGING_FILE", "LOGGING_CONSOLE",
+		"LOGGING", "LOGGING_CONTEXT",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO", "NETWORK_TLS",
 		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
@@ -2288,7 +2278,7 @@ as_config_init(const char* config_file)
 	as_namespace* ns = NULL;
 	xdr_dest_config *cur_dest_cfg = NULL;
 	cf_tls_spec* tls_spec = NULL;
-	cf_fault_sink* sink = NULL;
+	cf_log_sink* sink = NULL;
 	as_set* p_set = NULL; // local variable used for set initialization
 
 	// Open the configuration file for reading.
@@ -2491,10 +2481,10 @@ as_config_init(const char* config_file)
 				cfg_keep_cap(cfg_bool(&line), &c->keep_caps_ssd_health, CAP_SYS_ADMIN);
 				break;
 			case CASE_SERVICE_LOG_LOCAL_TIME:
-				cf_fault_use_local_time(cfg_bool(&line));
+				cf_log_use_local_time(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_LOG_MILLIS:
-				cf_fault_log_millis(cfg_bool(&line));
+				cf_log_use_millis(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_MIGRATE_FILL_DELAY:
 				cfg_enterprise_only(&line);
@@ -2723,16 +2713,12 @@ as_config_init(const char* config_file)
 		case LOGGING:
 			switch (cfg_find_tok(line.name_tok, LOGGING_OPTS, NUM_LOGGING_OPTS)) {
 			case CASE_LOG_FILE_BEGIN:
-				if ((sink = cf_fault_sink_hold(line.val_tok_1)) == NULL) {
-					cf_crash_nostack(AS_CFG, "line %d :: can't add file %s as log sink", line_num, line.val_tok_1);
-				}
-				cfg_begin_context(&state, LOGGING_FILE);
+				sink = cf_log_init_sink(line.val_tok_1);
+				cfg_begin_context(&state, LOGGING_CONTEXT);
 				break;
 			case CASE_LOG_CONSOLE_BEGIN:
-				if ((sink = cf_fault_sink_hold("stderr")) == NULL) {
-					cf_crash_nostack(AS_CFG, "line %d :: can't add stderr as log sink", line_num);
-				}
-				cfg_begin_context(&state, LOGGING_CONSOLE);
+				sink = cf_log_init_sink(NULL);
+				cfg_begin_context(&state, LOGGING_CONTEXT);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -2745,34 +2731,13 @@ as_config_init(const char* config_file)
 			break;
 
 		//----------------------------------------
-		// Parse logging::file context items.
+		// Parse logging::file and logging::console context items.
 		//
-		case LOGGING_FILE:
-			switch (cfg_find_tok(line.name_tok, LOGGING_FILE_OPTS, NUM_LOGGING_FILE_OPTS)) {
-			case CASE_LOG_FILE_CONTEXT:
-				if (0 != cf_fault_sink_addcontext(sink, line.val_tok_1, line.val_tok_2)) {
-					cf_crash_nostack(AS_CFG, "line %d :: can't add logging file context %s %s", line_num, line.val_tok_1, line.val_tok_2);
-				}
-				break;
-			case CASE_CONTEXT_END:
-				sink = NULL;
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//----------------------------------------
-		// Parse logging::console context items.
-		//
-		case LOGGING_CONSOLE:
-			switch (cfg_find_tok(line.name_tok, LOGGING_CONSOLE_OPTS, NUM_LOGGING_CONSOLE_OPTS)) {
-			case CASE_LOG_CONSOLE_CONTEXT:
-				if (0 != cf_fault_sink_addcontext(sink, line.val_tok_1, line.val_tok_2)) {
-					cf_crash_nostack(AS_CFG, "line %d :: can't add logging console context %s %s", line_num, line.val_tok_1, line.val_tok_2);
+		case LOGGING_CONTEXT:
+			switch (cfg_find_tok(line.name_tok, LOGGING_CONTEXT_OPTS, NUM_LOGGING_CONTEXT_OPTS)) {
+			case CASE_LOG_CONTEXT_CONTEXT:
+				if (! cf_log_init_level(sink, line.val_tok_1, line.val_tok_2)) {
+					cf_crash_nostack(AS_CFG, "line %d :: can't add logging context %s %s", line_num, line.val_tok_1, line.val_tok_2);
 				}
 				break;
 			case CASE_CONTEXT_END:

@@ -619,7 +619,7 @@ apply_winner(rw_request* rw)
 		}
 	}
 	else if (! as_flat_unpack_remote_record_meta(rr.rsv->ns, &rr)) {
-		cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: bad record ");
+		cf_warning(AS_RW, "dup-res ack: bad record %pD", &rw->keyd);
 		rw->result_code = AS_ERR_UNKNOWN;
 		return;
 	}
@@ -648,12 +648,12 @@ old_parse_winner(rw_request* rw, uint32_t info, as_remote_record* rr)
 
 	if (msg_get_buf(m, RW_FIELD_OLD_RECORD, &rr->pickle, &rr->pickle_sz,
 			MSG_GET_DIRECT) != 0 || rr->pickle_sz < 2) {
-		cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: no or bad record ");
+		cf_warning(AS_RW, "dup-res ack: no or bad record %pD", &rw->keyd);
 		return false;
 	}
 
 	if (dup_res_ignore_pickle(rr->pickle, info)) {
-		cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: binless pickle ");
+		cf_warning(AS_RW, "dup-res ack: binless pickle %pD", &rw->keyd);
 		return false;
 	}
 

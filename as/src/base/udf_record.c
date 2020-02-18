@@ -69,7 +69,7 @@
 int
 udf_storage_record_open(udf_record *urecord)
 {
-	cf_debug_digest(AS_UDF, &urecord->tr->keyd, "[ENTER] Opening record key:");
+	cf_debug(AS_UDF, "[ENTER] Opening record %pD", &urecord->tr->keyd);
 	as_storage_rd  *rd    = urecord->rd;
 	as_index       *r	  = urecord->r_ref->r;
 	as_transaction *tr    = urecord->tr;
@@ -96,7 +96,7 @@ udf_storage_record_open(udf_record *urecord)
 
 	urecord->flag   |= UDF_RECORD_FLAG_STORAGE_OPEN;
 
-	cf_detail_digest(AS_UDF, &tr->keyd, "Storage Open: Rec(%p) flag(%x) Digest:", urecord, urecord->flag);
+	cf_detail(AS_UDF, "Storage Open: Rec(%p) flag(%x) Digest:%pD", urecord, urecord->flag, &tr->keyd);
 	return 0;
 }
 
@@ -147,8 +147,8 @@ udf_storage_record_close(udf_record *urecord)
 		}
 
 		urecord->flag &= ~UDF_RECORD_FLAG_STORAGE_OPEN;
-		cf_detail_digest(AS_UDF, &urecord->tr->keyd, "Storage Close:: Rec(%p) Flag(%x) Digest:",
-				urecord, urecord->flag );
+		cf_detail(AS_UDF, "Storage Close:: Rec(%p) Flag(%x) Digest:%pD",
+				urecord, urecord->flag, &urecord->tr->keyd);
 		return 0;
 	} else {
 		return 1;
@@ -174,7 +174,7 @@ udf_storage_record_close(udf_record *urecord)
 int
 udf_record_open(udf_record * urecord)
 {
-	cf_debug_digest(AS_UDF, &urecord->tr->keyd, "[ENTER] Opening record key:");
+	cf_debug(AS_UDF, "[ENTER] Opening record %pD", &urecord->tr->keyd);
 	if (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) {
 		cf_info(AS_UDF, "Record already open");
 		return 0;
@@ -199,12 +199,13 @@ udf_record_open(udf_record * urecord)
 		} else {
 			urecord->flag   |= UDF_RECORD_FLAG_OPEN;
 			urecord->flag   |= UDF_RECORD_FLAG_PREEXISTS;
-			cf_detail_digest(AS_UDF, &tr->keyd, "Open %p %x Digest:", urecord, urecord->flag);
+			cf_detail(AS_UDF, "Open %p %x Digest:%pD", urecord, urecord->flag,
+					&tr->keyd);
 			rec_rv = udf_storage_record_open(urecord);
 		}
 	} else {
-		cf_detail_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: rec_get returned with %d ",
-				rec_rv);
+		cf_detail(AS_UDF, "udf_record_open: rec_get returned with %d Digest:%pD",
+				rec_rv, &tr->keyd);
 	}
 	return rec_rv;
 }
@@ -229,7 +230,7 @@ void
 udf_record_close(udf_record *urecord)
 {
 	as_transaction *tr    = urecord->tr;
-	cf_debug_digest(AS_UDF, &tr->keyd, "[ENTER] Closing record key:");
+	cf_debug(AS_UDF, "[ENTER] Closing record %pD", &tr->keyd);
 
 	if (urecord->flag & UDF_RECORD_FLAG_OPEN) {
 		as_index_ref   *r_ref = urecord->r_ref;
@@ -237,8 +238,8 @@ udf_record_close(udf_record *urecord)
 		udf_storage_record_close(urecord);
 		as_record_done(r_ref, tr->rsv.ns);
 		urecord->flag &= ~UDF_RECORD_FLAG_OPEN;
-		cf_detail_digest(AS_UDF, &urecord->tr->keyd,
-			"Storage Close:: Rec(%p) Flag(%x) Digest:", urecord, urecord->flag );
+		cf_detail(AS_UDF, "Storage Close:: Rec(%p) Flag(%x) Digest:%pD",
+				urecord, urecord->flag, &tr->keyd);
 	}
 
 	// Replication happens when the main record replicates

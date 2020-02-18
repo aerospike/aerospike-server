@@ -283,7 +283,7 @@ cf_strtoul_x64(const char *s, uint64_t *value)
 }
 
 int
-cf_strtoul_u32(char *s, uint32_t *value)
+cf_strtoul_u32(const char *s, uint32_t *value)
 {
 	if (! (*s >= '0' && *s <= '9')) {
 		return -1;
@@ -310,7 +310,7 @@ cf_strtoul_u32(char *s, uint32_t *value)
 }
 
 int
-cf_strtoul_u64(char *s, uint64_t *value)
+cf_strtoul_u64(const char *s, uint64_t *value)
 {
 	if (! (*s >= '0' && *s <= '9')) {
 		return -1;

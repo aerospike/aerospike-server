@@ -1125,10 +1125,9 @@ msg_dump(const msg *m, const char *info)
 						mf->field_sz, mf->is_free ? 't' : 'f', mf->u.str);
 				break;
 			case M_FT_BUF:
-				cf_info_binary(CF_MSG, mf->u.buf, mf->field_sz,
-						CF_DISPLAY_HEX_COLUMNS,
-						"   type BUF sz %u free %c value ",
-						mf->field_sz, mf->is_free ? 't' : 'f');
+				cf_info(CF_MSG, "   type BUF sz %u free %c value\n%*pH",
+						mf->field_sz, mf->is_free ? 't' : 'f', mf->field_sz,
+								mf->u.buf);
 				break;
 			case M_FT_ARRAY_UINT32:
 				cf_info(CF_MSG, "   type ARRAY_UINT32: count %u n-uint32 %u free %c",

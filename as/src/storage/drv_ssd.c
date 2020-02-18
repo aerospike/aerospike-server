@@ -636,13 +636,15 @@ ssd_record_defrag(drv_ssd *ssd, uint32_t wblock_id, as_flat_record *flat,
 
 		if (r->file_id == ssd->file_id && r->rblock_id == rblock_id) {
 			if (r->generation != flat->generation) {
-				cf_warning_digest(AS_DRV_SSD, &r->keyd, "device %s defrag: rblock_id %lu generation mismatch (%u:%u) ",
-						ssd->name, rblock_id, r->generation, flat->generation);
+				cf_warning(AS_DRV_SSD, "device %s defrag: rblock_id %lu generation mismatch (%u:%u) %pD",
+						ssd->name, rblock_id, r->generation, flat->generation,
+						&r->keyd);
 			}
 
 			if (r->n_rblocks != flat->n_rblocks) {
-				cf_warning_digest(AS_DRV_SSD, &r->keyd, "device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u) ",
-						ssd->name, rblock_id, r->n_rblocks, flat->n_rblocks);
+				cf_warning(AS_DRV_SSD, "device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u) %pD",
+						ssd->name, rblock_id, r->n_rblocks, flat->n_rblocks,
+						&r->keyd);
 			}
 
 			defrag_move_record(ssd, wblock_id, flat, r);
@@ -1072,8 +1074,8 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	drv_ssd *ssd = rd->ssd;
 
 	if (STORAGE_RBLOCK_IS_INVALID(r->rblock_id)) {
-		cf_warning_digest(AS_DRV_SSD, &r->keyd, "{%s} read_ssd: invalid rblock_id ",
-				ns->name);
+		cf_warning(AS_DRV_SSD, "{%s} read_ssd: invalid rblock_id digest %pD",
+				ns->name, &r->keyd);
 		return -1;
 	}
 
@@ -1084,20 +1086,20 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	uint32_t wblock_id = OFFSET_TO_WBLOCK_ID(ssd, record_offset);
 
 	if (wblock_id >= ssd->n_wblocks) {
-		cf_warning_digest(AS_DRV_SSD, &r->keyd, "{%s} read_ssd: bad offset %lu ",
-				ns->name, record_offset);
+		cf_warning(AS_DRV_SSD, "{%s} read_ssd: bad offset %lu digest %pD",
+				ns->name, record_offset, &r->keyd);
 		return -1;
 	}
 
 	if (record_size < DRV_RECORD_MIN_SIZE) {
-		cf_warning_digest(AS_DRV_SSD, &r->keyd, "{%s} read_ssd: bad record size %u ",
-				ns->name, record_size);
+		cf_warning(AS_DRV_SSD, "{%s} read_ssd: bad record size %u digest %pD",
+				ns->name, record_size, &r->keyd);
 		return -1;
 	}
 
 	if (record_end_offset > WBLOCK_ID_TO_OFFSET(ssd, wblock_id + 1)) {
-		cf_warning_digest(AS_DRV_SSD, &r->keyd, "{%s} read_ssd: record size %u crosses wblock boundary ",
-				ns->name, record_size);
+		cf_warning(AS_DRV_SSD, "{%s} read_ssd: record size %u crosses wblock boundary digest %pD",
+				ns->name, record_size, &r->keyd);
 		return -1;
 	}
 
@@ -1209,9 +1211,8 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	}
 
 	if (! as_flat_decompress_bins(&opt_meta.cm, rd)) {
-		cf_warning_digest(AS_DRV_SSD, &r->keyd,
-				"{%s} read: bad compressed data (%s:%lu) ",
-				ns->name, ssd->name, record_offset);
+		cf_warning(AS_DRV_SSD, "{%s} read: bad compressed data (%s:%lu) digest %pD",
+				ns->name, ssd->name, record_offset, &r->keyd);
 		return -1;
 	}
 
@@ -1499,8 +1500,8 @@ ssd_buffer_bins(as_storage_rd *rd)
 			as_flat_record_size(rd) : rd->orig_pickle_sz;
 
 	if (flat_sz > ssd->write_block_size) {
-		cf_detail_digest(AS_DRV_SSD, &r->keyd, "write: size %u - rejecting ",
-				flat_sz);
+		cf_detail(AS_DRV_SSD, "write: size %u - rejecting %pD", flat_sz,
+				&r->keyd);
 		return -AS_ERR_RECORD_TOO_BIG;
 	}
 
@@ -2328,24 +2329,24 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 			ns->single_bin);
 
 	if (! p_read) {
-		cf_warning_digest(AS_DRV_SSD, &flat->keyd, "bad metadata for record ");
+		cf_warning(AS_DRV_SSD, "bad metadata for %pD", &flat->keyd);
 		return;
 	}
 
 	if (opt_meta.void_time > ns->startup_max_void_time) {
-		cf_warning_digest(AS_DRV_SSD, &flat->keyd, "bad flat record void-time ");
+		cf_warning(AS_DRV_SSD, "bad void-time for %pD", &flat->keyd);
 		return;
 	}
 
 	if (! as_flat_decompress_buffer(&opt_meta.cm, ns->storage_write_block_size,
 			&p_read, &end)) {
-		cf_warning_digest(AS_DRV_SSD, &flat->keyd, "bad compressed data for record ");
+		cf_warning(AS_DRV_SSD, "bad compressed data for %pD", &flat->keyd);
 		return;
 	}
 
 	if (! as_flat_check_packed_bins(p_read, end, opt_meta.n_bins,
 			ns->single_bin)) {
-		cf_warning_digest(AS_DRV_SSD, &flat->keyd, "bad flat record ");
+		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
 		return;
 	}
 
@@ -2372,8 +2373,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	int rv = as_record_get_create(p_partition->tree, &flat->keyd, &r_ref, ns);
 
 	if (rv < 0) {
-		cf_detail_digest(AS_DRV_SSD, &flat->keyd, "record-add as_record_get_create() failed ");
-		return;
+		cf_crash(AS_DRV_SSD, "{%s} can't add record to index", ns->name);
 	}
 
 	bool is_create = rv == 1;

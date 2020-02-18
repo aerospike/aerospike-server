@@ -1766,8 +1766,8 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
-	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
-	info_append_bool(db, "log-millis", cf_fault_is_logging_millis());
+	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
+	info_append_bool(db, "log-millis", cf_log_is_using_millis());
 	info_append_uint32(db, "migrate-fill-delay", g_config.migrate_fill_delay);
 	info_append_uint32(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
 	info_append_uint32(db, "migrate-threads", g_config.n_migrate_threads);
@@ -3680,67 +3680,56 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	return result;
 }
 
-//
-// log-set:log=id;context=foo;level=bar
-// ie:
-//   log-set:log=0;context=rw;level=debug
-
-
+// log-set:id=<id>;<context>=<level>
+// e.g., log-set:id=0;service=detail
 int
 info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 {
-	cf_debug(AS_INFO, "log-set command received: params %s", params);
+	cf_debug(AS_INFO, "received log-set:%s", params);
 
-	char id_str[50];
-	int  id_str_len = sizeof(id_str);
-	int  id = -1;
-	bool found_id = true;
-	cf_fault_sink *s = 0;
+	char* save_ptr = NULL;
+	const char* tok = strtok_r(params, "=", &save_ptr);
 
-	if (0 != as_info_parameter_get(params, "id", id_str, &id_str_len)) {
-		if (0 != as_info_parameter_get(params, "log", id_str, &id_str_len)) {
-			cf_debug(AS_INFO, "log set command: no log id to be set - doing all");
-			found_id = false;
-		}
-	}
-	if (found_id == true) {
-		if (0 != cf_str_atoi(id_str, &id) ) {
-			cf_info(AS_INFO, "log set command: id must be an integer, is: %s", id_str);
-			cf_dyn_buf_append_string(db, "error-id-not-integer");
-			return(0);
-		}
-		s = cf_fault_sink_get_id(id);
-		if (!s) {
-			cf_info(AS_INFO, "log set command: sink id %d invalid", id);
-			cf_dyn_buf_append_string(db, "error-bad-id");
-			return(0);
-		}
+	if (tok == NULL || strcmp(tok, "id") != 0) {
+		cf_warning(AS_INFO, "log-set: missing id");
+		cf_dyn_buf_append_string(db, "ERROR::missing-id");
+		return 0;
 	}
 
-	// now, loop through all context strings. If we find a known context string,
-	// do the set
-	for (int c_id = 0; c_id < CF_FAULT_CONTEXT_UNDEF; c_id++) {
+	const char* id_str = strtok_r(params, ";", &save_ptr);
+	uint32_t id;
 
-		char level_str[50];
-		int  level_str_len = sizeof(level_str);
-		char *context = cf_fault_context_strings[c_id];
-		if (0 != as_info_parameter_get(params, context, level_str, &level_str_len)) {
-			continue;
-		}
-		for (uint32_t i = 0; level_str[i]; i++) level_str[i] = toupper(level_str[i]);
-
-		if (0 != cf_fault_sink_addcontext(s, context, level_str)) {
-			cf_info(AS_INFO, "log set command: addcontext failed: context %s level %s", context, level_str);
-			cf_dyn_buf_append_string(db, "error-invalid-context-or-level");
-			return(0);
-		}
+	if (id_str == NULL || cf_strtoul_u32(id_str, &id) != 0) {
+		cf_warning(AS_INFO, "log-set: bad id");
+		cf_dyn_buf_append_string(db, "ERROR::bad-id");
+		return 0;
 	}
 
-	cf_info(AS_INFO, "log-set command executed: params %s", params);
+	const char* context_str = strtok_r(params, "=", &save_ptr);
 
+	if (context_str == NULL) {
+		cf_warning(AS_INFO, "log-set: missing context");
+		cf_dyn_buf_append_string(db, "ERROR::missing-context");
+		return 0;
+	}
+
+	const char* level_str = strtok_r(params, ";", &save_ptr);
+
+	if (level_str == NULL) {
+		cf_warning(AS_INFO, "log-set: bad level");
+		cf_dyn_buf_append_string(db, "ERROR::bad-level");
+		return 0;
+	}
+
+	if (! cf_log_set_level(id, context_str, level_str)) {
+		cf_dyn_buf_append_string(db, "ERROR::bad-parameter");
+		return 0;
+	}
+
+	cf_info(AS_INFO, "log-set:id=%s:%s=%s", id_str, context_str, level_str);
 	cf_dyn_buf_append_string(db, "ok");
 
-	return(0);
+	return 0;
 }
 
 
@@ -5127,7 +5116,7 @@ info_get_index_pressure(char *name, cf_dyn_buf *db)
 int
 info_get_logs(char *name, cf_dyn_buf *db)
 {
-	cf_fault_sink_strlist(db);
+	cf_log_get_sinks(db);
 	return(0);
 }
 
@@ -5863,12 +5852,12 @@ info_get_tree_log(char *name, char *subtree, cf_dyn_buf *db)
 
 		if (0 != cf_str_atoi(subtree, &sink_id)) return(-1);
 
-		cf_fault_sink_context_strlist(sink_id, context, db);
+		cf_log_get_level(sink_id, context, db);
 	}
 	else { // this means just: log/id , so get all contexts
 		if (0 != cf_str_atoi(subtree, &sink_id)) return(-1);
 
-		cf_fault_sink_context_all_strlist(sink_id, db);
+		cf_log_get_all_levels(sink_id, db);
 	}
 
 	return(0);

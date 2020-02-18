@@ -857,7 +857,7 @@ cleanup0:
 }
 
 void
-cf_socket_show_server(cf_fault_context cont, const char *tag, const cf_sockets *socks)
+cf_socket_show_server(cf_log_context cont, const char *tag, const cf_sockets *socks)
 {
 	for (uint32_t i = 0; i < socks->n_socks; ++i) {
 		cf_sock_cfg *cfg = socks->socks[i].cfg;
@@ -1663,7 +1663,7 @@ cleanup0:
 }
 
 void
-cf_socket_mcast_show(cf_fault_context cont, const char *tag, const cf_sockets *socks)
+cf_socket_mcast_show(cf_log_context cont, const char *tag, const cf_sockets *socks)
 {
 	for (uint32_t i = 0; i < socks->n_socks; ++i) {
 		cf_msock_cfg *cfg = socks->socks[i].cfg;
@@ -2347,7 +2347,7 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 		entry->master.entry = master;
 	}
 
-	if (cf_fault_filter[CF_SOCKET] >= CF_DETAIL) {
+	if (cf_log_check_level(CF_SOCKET, CF_DETAIL)) {
 		cf_detail(CF_SOCKET, "%u interface(s)", inter->n_inters);
 
 		for (uint32_t i = 0; i < inter->n_inters; ++i) {

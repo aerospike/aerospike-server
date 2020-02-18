@@ -107,7 +107,7 @@ as_sig_handle_abort(int sig_num, siginfo_t *info, void *ctx)
 	cf_warning(AS_AS, "SIGABRT received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_fault_print_signal_context(ctx);
+	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -117,7 +117,7 @@ as_sig_handle_bus(int sig_num, siginfo_t *info, void *ctx)
 	cf_warning(AS_AS, "SIGBUS received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_fault_print_signal_context(ctx);
+	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -128,7 +128,7 @@ as_sig_handle_fpe(int sig_num, siginfo_t *info, void *ctx)
 	cf_warning(AS_AS, "SIGFPE received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_fault_print_signal_context(ctx);
+	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -138,7 +138,7 @@ as_sig_handle_hup(int sig_num, siginfo_t *info, void *ctx)
 {
 	cf_info(AS_AS, "SIGHUP received, rolling log");
 
-	cf_fault_sink_logroll();
+	cf_log_rotate();
 }
 
 // We get here on some crashes.
@@ -148,7 +148,7 @@ as_sig_handle_ill(int sig_num, siginfo_t *info, void *ctx)
 	cf_warning(AS_AS, "SIGILL received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_fault_print_signal_context(ctx);
+	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -175,7 +175,7 @@ as_sig_handle_quit(int sig_num, siginfo_t *info, void *ctx)
 	cf_warning(AS_AS, "SIGQUIT received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_fault_print_signal_context(ctx);
+	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -186,7 +186,7 @@ as_sig_handle_segv(int sig_num, siginfo_t *info, void *ctx)
 	cf_warning(AS_AS, "SIGSEGV received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_fault_print_signal_context(ctx);
+	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -212,7 +212,7 @@ as_sig_handle_usr1(int sig_num, siginfo_t *info, void *ctx)
 	cf_warning(AS_AS, "SIGUSR1 received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_fault_print_signal_context(ctx);
+	cf_log_stack_trace(ctx);
 	reraise_signal(SIGABRT);
 }
 

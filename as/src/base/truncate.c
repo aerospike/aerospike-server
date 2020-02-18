@@ -150,7 +150,7 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 		time_t utc_time = utc_nanosec / 1000000000;
 		struct tm utc_tm;
 
-		if (cf_fault_is_using_local_time()) {
+		if (cf_log_is_using_local_time()) {
 			localtime_r(&utc_time, &utc_tm);
 			strftime(utc_sec, sizeof(utc_sec), "%b %d %Y %T GMT%z", &utc_tm);
 		}

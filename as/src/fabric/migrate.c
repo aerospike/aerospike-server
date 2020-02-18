@@ -1525,7 +1525,7 @@ immigration_handle_old_insert_request(cf_node src, msg *m)
 	msg_get_uint32(m, MIG_FIELD_INFO, &info);
 
 	if (immigration_ignore_pickle(rr.pickle, info)) {
-		cf_warning_digest(AS_MIGRATE, rr.keyd, "handle insert: binless pickle ");
+		cf_warning(AS_MIGRATE, "handle insert: binless pickle %pD", rr.keyd);
 	}
 	else {
 		immigration_init_repl_state(&rr, info);

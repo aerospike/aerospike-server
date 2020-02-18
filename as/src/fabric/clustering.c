@@ -8066,8 +8066,8 @@ as_clustering_cluster_size_min_set(uint32_t new_cluster_size_min)
  * @param nodes the vector of nodes.
  */
 void
-as_clustering_cf_node_vector_event(cf_fault_severity severity,
-		cf_fault_context context, char* file_name, int line, char* message,
+as_clustering_cf_node_vector_event(cf_log_level severity,
+		cf_log_context context, char* file_name, int line, char* message,
 		cf_vector* nodes)
 {
 	as_clustering_cf_node_array_event(severity, context, file_name, line,
@@ -8089,11 +8089,11 @@ as_clustering_cf_node_vector_event(cf_fault_severity severity,
  * @param node_count the count of nodes in the array.
  */
 void
-as_clustering_cf_node_array_event(cf_fault_severity severity,
-		cf_fault_context context, char* file_name, int line, char* message,
+as_clustering_cf_node_array_event(cf_log_level severity,
+		cf_log_context context, char* file_name, int line, char* message,
 		cf_node* nodes, int node_count)
 {
-	if (!cf_context_at_severity(context, severity) && severity != CF_DETAIL) {
+	if (! cf_log_check_level(context, severity) && severity != CF_DETAIL) {
 		return;
 	}
 
@@ -8141,14 +8141,13 @@ as_clustering_cf_node_array_event(cf_fault_severity severity,
 		// is atleast one node output
 		if (buffer != node_buffer_start) {
 			*(buffer - 1) = 0;
-			cf_fault_event(context, severity, file_name, line, "%s",
-					log_buffer);
+			cf_log_write(context, severity, file_name, line, "%s", log_buffer);
 		}
 	}
 
 	// Handle the empty vector case.
 	if (output_node_count == 0) {
 		sprintf(node_buffer_start, "(empty)");
-		cf_fault_event(context, severity, file_name, line, "%s", log_buffer);
+		cf_log_write(context, severity, file_name, line, "%s", log_buffer);
 	}
 }
