@@ -323,7 +323,7 @@ as_udf_start(as_transaction* tr)
 	}
 
 	// Create rw_request and add to hash.
-	rw_request_hkey hkey = { tr->rsv.ns->id, tr->keyd };
+	rw_request_hkey hkey = { tr->rsv.ns->ix, tr->keyd };
 	rw_request* rw = rw_request_create(&tr->keyd);
 	transaction_status status = rw_request_hash_insert(&hkey, rw, tr);
 

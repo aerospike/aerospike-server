@@ -213,7 +213,7 @@ as_read_start(as_transaction* tr)
 	// we're required to ping replicas.
 
 	// Create rw_request and add to hash.
-	rw_request_hkey hkey = { tr->rsv.ns->id, tr->keyd };
+	rw_request_hkey hkey = { tr->rsv.ns->ix, tr->keyd };
 	rw_request* rw = rw_request_create(&tr->keyd);
 
 	// If rw_request isn't inserted in hash, transaction is finished.

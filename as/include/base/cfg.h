@@ -64,6 +64,8 @@ struct as_namespace_s;
 #define AS_NAMESPACE_SZ 2
 #endif
 
+#define NO_NS_IX AS_NAMESPACE_SZ
+
 #define AS_CLUSTER_NAME_SZ 65
 
 #define MAX_BATCH_THREADS 256

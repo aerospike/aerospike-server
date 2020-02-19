@@ -76,9 +76,9 @@ void as_health_get_stats(cf_dyn_buf* db);
 void as_health_start();
 
 // Not called directly - called by inline wrappers below.
-void health_add_device_latency(uint32_t ns_id, uint32_t d_id, uint64_t start_us);
+void health_add_device_latency(uint32_t ns_ix, uint32_t d_id, uint64_t start_us);
 void health_add_node_counter(cf_node node, as_health_node_stat_type stat_type);
-void health_add_ns_latency(cf_node node, uint32_t ns_id, as_health_ns_stat_type stat_type, uint64_t start_us);
+void health_add_ns_latency(cf_node node, uint32_t ns_ix, as_health_ns_stat_type stat_type, uint64_t start_us);
 
 static inline bool
 as_health_sample_device_read()
@@ -95,10 +95,10 @@ as_health_sample_replica_write()
 }
 
 static inline void
-as_health_add_device_latency(uint32_t ns_id, uint32_t d_id, uint64_t start_us)
+as_health_add_device_latency(uint32_t ns_ix, uint32_t d_id, uint64_t start_us)
 {
 	if (g_health_enabled && start_us != 0) {
-		health_add_device_latency(ns_id, d_id, start_us);
+		health_add_device_latency(ns_ix, d_id, start_us);
 	}
 }
 
@@ -111,10 +111,10 @@ as_health_add_node_counter(cf_node node, as_health_node_stat_type type)
 }
 
 static inline void
-as_health_add_ns_latency(cf_node node, uint32_t ns_id,
+as_health_add_ns_latency(cf_node node, uint32_t ns_ix,
 		as_health_ns_stat_type type, uint64_t start_us)
 {
 	if (g_health_enabled && start_us != 0) {
-		health_add_ns_latency(node, ns_id, type, start_us);
+		health_add_ns_latency(node, ns_ix, type, start_us);
 	}
 }

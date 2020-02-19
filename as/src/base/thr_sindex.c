@@ -247,7 +247,7 @@ typedef struct gc_stat_s {
 } gc_stat;
 
 typedef struct gc_ctx_s {
-	uint32_t      ns_id;
+	uint32_t      ns_ix;
 	as_sindex    *si;
 	uint16_t      pimd_idx;
 
@@ -289,7 +289,7 @@ static bool
 gc_getnext_si(gc_ctx *ctx)
 {
 	int16_t si_idx;
-	as_namespace *ns = g_config.namespaces[ctx->ns_id];
+	as_namespace *ns = g_config.namespaces[ctx->ns_ix];
 
 	// From previous si_idx or 0
 	if (ctx->si) {
@@ -326,7 +326,7 @@ gc_getnext_si(gc_ctx *ctx)
 static void
 gc_print_ctx(gc_ctx *ctx)
 {
-	cf_detail(AS_SINDEX, "%s %s[%d]", g_config.namespaces[ctx->ns_id]->name,
+	cf_detail(AS_SINDEX, "%s %s[%d]", g_config.namespaces[ctx->ns_ix]->name,
 			ctx->si ? ctx->si->imd->iname : "NULL", ctx->pimd_idx);
 }
 
@@ -491,7 +491,7 @@ as_sindex__gc_fn(void *udata)
 
 			// gc_max_rate change at the namespace boundary
 			gc_ctx ctx = {
-				.ns_id = i,
+				.ns_ix = i,
 				.si = NULL,
 				.stat = { 0 },
 				.start_time = cf_get_seconds(),

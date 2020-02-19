@@ -118,13 +118,13 @@ as_namespace_create(char *name)
 
 	as_namespace *ns = cf_malloc(sizeof(as_namespace));
 
-	g_config.namespaces[g_config.n_namespaces++] = ns;
+	g_config.namespaces[g_config.n_namespaces] = ns;
 
 	// Set all members 0/NULL/false to start with.
 	memset(ns, 0, sizeof(as_namespace));
 
 	strcpy(ns->name, name);
-	ns->id = g_config.n_namespaces; // note that id is 1-based
+	ns->ix = g_config.n_namespaces++;
 	ns->namehash = namehash;
 
 	ns->jem_arena = cf_alloc_create_arena();

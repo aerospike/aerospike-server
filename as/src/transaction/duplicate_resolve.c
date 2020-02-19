@@ -83,7 +83,7 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP);
 	msg_set_buf(m, RW_FIELD_NAMESPACE, (uint8_t*)ns->name, strlen(ns->name),
 			MSG_SET_COPY);
-	msg_set_uint32(m, RW_FIELD_NS_ID, ns->id);
+	msg_set_uint32(m, RW_FIELD_NS_IX, ns->ix);
 	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
@@ -242,10 +242,10 @@ dup_res_handle_request(cf_node node, msg* m)
 void
 dup_res_handle_ack(cf_node node, msg* m)
 {
-	uint32_t ns_id;
+	uint32_t ns_ix;
 
-	if (msg_get_uint32(m, RW_FIELD_NS_ID, &ns_id) != 0) {
-		cf_warning(AS_RW, "dup-res ack: no ns-id");
+	if (msg_get_uint32(m, RW_FIELD_NS_IX, &ns_ix) != 0) {
+		cf_warning(AS_RW, "dup-res ack: no ns-ix");
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -276,7 +276,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	rw_request_hkey hkey = { ns_id, *keyd };
+	rw_request_hkey hkey = { ns_ix, *keyd };
 	rw_request* rw = rw_request_hash_get(&hkey);
 
 	if (! rw) {
@@ -430,7 +430,7 @@ fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	msg_preserve_fields(m, 2, RW_FIELD_NS_ID, RW_FIELD_TID);
+	msg_preserve_fields(m, 2, RW_FIELD_NS_IX, RW_FIELD_TID);
 
 	// Can't fail from here on - ok to add message fields.
 
@@ -464,7 +464,7 @@ old_fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
+	msg_preserve_fields(m, 3, RW_FIELD_NS_IX, RW_FIELD_DIGEST, RW_FIELD_TID);
 
 	// Can't fail from here on - ok to add message fields.
 
@@ -516,7 +516,7 @@ done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref,
 void
 send_dup_res_ack(cf_node node, msg* m, uint32_t result, uint32_t info)
 {
-	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
+	msg_preserve_fields(m, 3, RW_FIELD_NS_IX, RW_FIELD_DIGEST, RW_FIELD_TID);
 
 	send_dup_res_ack_preserved(node, m, result, info);
 }

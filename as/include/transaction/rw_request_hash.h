@@ -50,7 +50,7 @@ typedef enum {
 	RW_FIELD_OP,
 	RW_FIELD_RESULT,
 	RW_FIELD_NAMESPACE,
-	RW_FIELD_NS_ID,
+	RW_FIELD_NS_IX,
 	RW_FIELD_GENERATION,
 	RW_FIELD_DIGEST,
 	RW_FIELD_RECORD,
@@ -93,7 +93,7 @@ typedef enum {
 #define RW_INFO_TOMBSTONE		0x0400 // enterprise only
 
 typedef struct rw_request_hkey_s {
-	uint32_t	ns_id;
+	uint32_t	ns_ix;
 	cf_digest	keyd;
 } __attribute__((__packed__)) rw_request_hkey;
 

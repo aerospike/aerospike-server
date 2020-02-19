@@ -95,7 +95,7 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_REPL_WRITE);
 	msg_set_buf(m, RW_FIELD_NAMESPACE, (uint8_t*)ns->name, strlen(ns->name),
 			MSG_SET_COPY);
-	msg_set_uint32(m, RW_FIELD_NS_ID, ns->id);
+	msg_set_uint32(m, RW_FIELD_NS_IX, ns->ix);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
 	if (rw->pickle != NULL) {
@@ -394,10 +394,10 @@ repl_write_handle_old_op(cf_node node, msg* m)
 void
 repl_write_handle_ack(cf_node node, msg* m)
 {
-	uint32_t ns_id;
+	uint32_t ns_ix;
 
-	if (msg_get_uint32(m, RW_FIELD_NS_ID, &ns_id) != 0) {
-		cf_warning(AS_RW, "repl-write ack: no ns-id");
+	if (msg_get_uint32(m, RW_FIELD_NS_IX, &ns_ix) != 0) {
+		cf_warning(AS_RW, "repl-write ack: no ns-ix");
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -419,7 +419,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	rw_request_hkey hkey = { ns_id, *keyd };
+	rw_request_hkey hkey = { ns_ix, *keyd };
 	rw_request* rw = rw_request_hash_get(&hkey);
 
 	if (! rw) {
@@ -479,7 +479,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	rw->dest_complete[i] = true;
 
-	as_health_add_ns_latency(node, ns_id, AS_HEALTH_NS_REPL_LAT,
+	as_health_add_ns_latency(node, ns_ix, AS_HEALTH_NS_REPL_LAT,
 			rw->repl_start_us);
 
 	for (uint32_t j = 0; j < rw->n_dest_nodes; j++) {
@@ -522,7 +522,7 @@ old_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE);
 	msg_set_buf(m, RW_FIELD_NAMESPACE, (uint8_t*)ns->name, strlen(ns->name),
 			MSG_SET_COPY);
-	msg_set_uint32(m, RW_FIELD_NS_ID, ns->id);
+	msg_set_uint32(m, RW_FIELD_NS_IX, ns->ix);
 	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
@@ -592,7 +592,7 @@ send_repl_write_ack(cf_node node, msg* m, uint32_t result)
 		return;
 	}
 
-	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
+	msg_preserve_fields(m, 3, RW_FIELD_NS_IX, RW_FIELD_DIGEST, RW_FIELD_TID);
 
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
@@ -616,7 +616,7 @@ send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result,
 		return;
 	}
 
-	msg_preserve_fields(m, 2, RW_FIELD_NS_ID, RW_FIELD_TID);
+	msg_preserve_fields(m, 2, RW_FIELD_NS_IX, RW_FIELD_TID);
 
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
