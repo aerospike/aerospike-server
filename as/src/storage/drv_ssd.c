@@ -1151,7 +1151,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 			histogram_insert_data_point(ssd->hist_read, start_ns);
 		}
 
-		as_health_add_device_latency(ns->id, r->file_id, start_us);
+		as_health_add_device_latency(ns->ix, r->file_id, start_us);
 
 		if (rd->read_page_cache) {
 			ssd_fd_cache_put(ssd, fd);

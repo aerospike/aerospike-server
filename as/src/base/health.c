@@ -106,7 +106,7 @@ typedef struct local_all_mov_avg_s {
 typedef struct outlier_s {
 	uint32_t confidence_pct;
 	char* id;
-	uint32_t ns_id;
+	uint32_t ns_ix;
 	const char* reason;
 } outlier;
 
@@ -150,7 +150,7 @@ static void create_local_stats();
 static peer_stats* create_node(cf_node node);
 static void find_outliers_from_local_stats(local_all_mov_avg* lma);
 static void find_outliers_from_stats(cluster_all_mov_avg* cs);
-static void find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold, const char* reason, uint32_t ns_id);
+static void find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold, const char* reason, uint32_t ns_ix);
 static int32_t mark_cl_membership_reduce_fn(const void* key, void* data, void* udata);
 static void print_local_stats(cf_dyn_buf* db);
 static void print_node_stats(peer_stats* ps, cf_dyn_buf* db, cf_node node);
@@ -272,10 +272,9 @@ as_health_get_outliers(cf_dyn_buf* db)
 		cf_dyn_buf_append_string(db, cur.id);
 		cf_dyn_buf_append_char(db, ':');
 
-		if (cur.ns_id != 0) {
+		if (cur.ns_ix != NO_NS_IX) {
 			cf_dyn_buf_append_string(db, "namespace=");
-			cf_dyn_buf_append_string(db,
-					g_config.namespaces[cur.ns_id - 1]->name);
+			cf_dyn_buf_append_string(db, g_config.namespaces[cur.ns_ix]->name);
 			cf_dyn_buf_append_char(db, ':');
 		}
 
@@ -322,10 +321,10 @@ as_health_start()
 }
 
 void
-health_add_device_latency(uint32_t ns_id, uint32_t d_id, uint64_t start_us)
+health_add_device_latency(uint32_t ns_ix, uint32_t d_id, uint64_t start_us)
 {
 	uint64_t delta_us = cf_getus() - start_us;
-	health_stat* hs = &g_local_stats.device_read_lat[ns_id - 1][d_id];
+	health_stat* hs = &g_local_stats.device_read_lat[ns_ix][d_id];
 
 	add_latency_sample(hs, delta_us);
 }
@@ -343,7 +342,7 @@ health_add_node_counter(cf_node node, as_health_node_stat_type type)
 }
 
 void
-health_add_ns_latency(cf_node node, uint32_t ns_id,
+health_add_ns_latency(cf_node node, uint32_t ns_ix,
 		as_health_ns_stat_type type, uint64_t start_us)
 {
 	uint64_t delta_us = cf_getus() - start_us;
@@ -353,7 +352,7 @@ health_add_ns_latency(cf_node node, uint32_t ns_id,
 		ps = create_node(node);
 	}
 
-	add_latency_sample(&ps->ns_stats[ns_id - 1][type], delta_us);
+	add_latency_sample(&ps->ns_stats[ns_ix][type], delta_us);
 }
 
 
@@ -494,8 +493,8 @@ compute_ns_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs, cf_node node)
 					spec->is_counter);
 			cs->cl_ns_stats[ns_ix][type].n_nodes++;
 
-			cf_detail(AS_HEALTH, "moving average/sum: node %lx ns-id %u type %u value %lf current-bucket %lu",
-					node, ns_ix + 1, type, nma->value,
+			cf_detail(AS_HEALTH, "moving average/sum: node %lx ns-ix %u type %u value %lf current-bucket %lu",
+					node, ns_ix, type, nma->value,
 					hs->buckets[hs->cur_bucket].sample_sum);
 		}
 	}
@@ -578,7 +577,7 @@ find_outliers_from_local_stats(local_all_mov_avg* lma)
 				&local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
 
 		find_outlier_per_stat(dma, n_devices, spec->threshold, spec->stat_str,
-				ns_ix + 1);
+				ns_ix);
 	}
 }
 
@@ -591,7 +590,7 @@ find_outliers_from_stats(cluster_all_mov_avg* cs)
 		const stat_spec* spec = &node_stat_spec[type];
 
 		find_outlier_per_stat(cma->nma_array, cma->n_nodes, spec->threshold,
-				spec->stat_str, 0);
+				spec->stat_str, NO_NS_IX);
 	}
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
@@ -600,14 +599,14 @@ find_outliers_from_stats(cluster_all_mov_avg* cs)
 			const stat_spec* spec = &ns_stat_spec[type];
 
 			find_outlier_per_stat(cma->nma_array, cma->n_nodes, spec->threshold,
-					spec->stat_str, ns_ix + 1);
+					spec->stat_str, ns_ix);
 		}
 	}
 }
 
 static void
 find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold,
-		const char* reason, uint32_t ns_id)
+		const char* reason, uint32_t ns_ix)
 {
 	// Nobody can be declared as outliers with 1 or 2 entries.
 	if (n_entries <= 2) {
@@ -636,7 +635,7 @@ find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold,
 			outlier outlier = {
 					.confidence_pct = confidence_pct,
 					.id = ma[i].id,
-					.ns_id = ns_id,
+					.ns_ix = ns_ix,
 					.reason = reason
 			};
 
@@ -850,13 +849,13 @@ run_health()
 			outlier cur;
 			cf_vector_get(g_outliers, i, &cur);
 
-			if (cur.ns_id == 0) {
+			if (cur.ns_ix == NO_NS_IX) {
 				cf_warning(AS_HEALTH, "outlier %s: confidence-pct %u reason %s",
 						cur.id, cur.confidence_pct, cur.reason);
 			}
 			else {
 				cf_warning(AS_HEALTH, "outlier %s: namespace %s confidence-pct %u reason %s",
-						cur.id, g_config.namespaces[cur.ns_id - 1]->name,
+						cur.id, g_config.namespaces[cur.ns_ix]->name,
 						cur.confidence_pct, cur.reason);
 			}
 		}

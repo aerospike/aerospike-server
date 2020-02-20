@@ -627,7 +627,7 @@ struct as_namespace_s {
 	//
 
 	char name[AS_ID_NAMESPACE_SZ];
-	uint32_t id; // this is 1-based
+	uint32_t ix; // this is 0-based
 	uint32_t namehash;
 
 	//--------------------------------------------

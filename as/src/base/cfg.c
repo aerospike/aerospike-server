@@ -119,7 +119,7 @@ char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char*
 void cfg_keep_cap(bool keep, bool* what, int32_t cap);
 
 xdr_dest_config* xdr_cfg_add_datacenter(char* name);
-void xdr_cfg_associate_datacenter(char* dc, uint32_t nsid);
+void xdr_cfg_associate_datacenter(char* dc, uint32_t ns_ix);
 void xdr_cfg_add_http_url(xdr_dest_config* dest_cfg, char* url);
 void xdr_cfg_add_node_addr_port(xdr_dest_config* dest_cfg, char* addr, int port);
 void xdr_cfg_add_tls_node(xdr_dest_config* dest_cfg, char* addr, char* tls_name, int port);
@@ -3144,7 +3144,7 @@ as_config_init(const char* config_file)
 				ns->ns_forward_xdr_writes = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
-				xdr_cfg_associate_datacenter(cfg_strdup(&line, true), ns->id);
+				xdr_cfg_associate_datacenter(cfg_strdup(&line, true), ns->ix);
 				break;
 			case CASE_NAMESPACE_ALLOW_NONXDR_WRITES:
 				ns->ns_allow_nonxdr_writes = cfg_bool(&line);
@@ -5392,15 +5392,15 @@ xdr_cfg_add_datacenter(char* name)
 }
 
 void
-xdr_cfg_associate_datacenter(char* dc, uint32_t nsid)
+xdr_cfg_associate_datacenter(char* dc, uint32_t ns_ix)
 {
-	cf_vector* v = &g_config.namespaces[nsid-1]->xdr_dclist_v;
+	cf_vector* v = &g_config.namespaces[ns_ix]->xdr_dclist_v;
 
 	// Crash if datacenter with same name already exists.
 	for (uint32_t index = 0; index < cf_vector_size(v); index++) {
 		if (strcmp((char *)cf_vector_pointer_get(v, index), dc) == 0) {
 			cf_crash_nostack(AS_XDR, "datacenter %s already exists for namespace %s - please remove duplicate entries from config file",
-					dc, g_config.namespaces[nsid-1]->name);
+					dc, g_config.namespaces[ns_ix]->name);
 		}
 	}
 

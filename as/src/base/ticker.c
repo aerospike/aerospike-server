@@ -181,8 +181,8 @@ log_ticker_frame(uint64_t delta_time)
 
 	size_t total_ns_memory_inuse = 0;
 
-	for (int i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		uint64_t n_objects = ns->n_objects;
 		uint64_t n_tombstones = ns->n_tombstones;
