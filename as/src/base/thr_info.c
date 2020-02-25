@@ -3696,7 +3696,7 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	const char* id_str = strtok_r(params, ";", &save_ptr);
+	const char* id_str = strtok_r(NULL, ";", &save_ptr);
 	uint32_t id;
 
 	if (id_str == NULL || cf_strtoul_u32(id_str, &id) != 0) {
@@ -3705,7 +3705,7 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	const char* context_str = strtok_r(params, "=", &save_ptr);
+	const char* context_str = strtok_r(NULL, "=", &save_ptr);
 
 	if (context_str == NULL) {
 		cf_warning(AS_INFO, "log-set: missing context");
@@ -3713,7 +3713,7 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	const char* level_str = strtok_r(params, ";", &save_ptr);
+	const char* level_str = strtok_r(NULL, ";", &save_ptr);
 
 	if (level_str == NULL) {
 		cf_warning(AS_INFO, "log-set: bad level");
