@@ -614,7 +614,7 @@ as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h)
 
 	// There should be no references during a tree purge (reduce should have
 	// reserved the tree).
-	cf_assert(r->rc == 0, AS_INDEX, "purge found referenced record");
+	cf_assert(r->rc == 0, AS_INDEX, "purge found non-0 record rc 0x%hx", r->rc);
 
 	if (isprig->destructor) {
 		isprig->destructor(r, isprig->destructor_udata);
