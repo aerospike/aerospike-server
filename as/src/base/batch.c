@@ -20,6 +20,7 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 #include "base/batch.h"
+#include "aerospike/as_atomic.h"
 #include "aerospike/as_buffer_pool.h"
 #include "aerospike/as_thread_pool.h"
 #include "citrusleaf/alloc.h"
@@ -1083,7 +1084,10 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 	size_t size = sizeof(as_msg);
 	uint16_t n_fields = 0;
 
-	if (! g_config.batch_without_digests) {
+	bool no_digests = (bool)
+			as_load_uint8((const uint8_t*)&g_config.batch_without_digests);
+
+	if (! no_digests) {
 		size += sizeof(as_msg_field) + sizeof(cf_digest);
 		n_fields++;
 	}
@@ -1134,7 +1138,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 		as_msg_swap_header(m);
 		p += sizeof(as_msg);
 
-		if (! g_config.batch_without_digests) {
+		if (! no_digests) {
 			as_msg_field* field = (as_msg_field*)p;
 			field->field_sz = sizeof(cf_digest) + 1;
 			field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
@@ -1173,7 +1177,10 @@ as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* di
 	as_msg* msg = &cmsg->msg;
 	size_t size = proxy_size - sizeof(as_proto);
 
-	if (! g_config.batch_without_digests) {
+	bool no_digests = (bool)
+			as_load_uint8((const uint8_t*)&g_config.batch_without_digests);
+
+	if (! no_digests) {
 		size += sizeof(as_msg_field) + sizeof(cf_digest);
 	}
 
@@ -1185,7 +1192,7 @@ as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* di
 		// Overload transaction_ttl to store batch index.
 		msg->transaction_ttl = htonl(index);
 
-		if (! g_config.batch_without_digests) {
+		if (! no_digests) {
 			uint16_t n_fields = ntohs(msg->n_fields);
 			msg->n_fields = htons(n_fields + 1);
 		}
@@ -1193,7 +1200,7 @@ as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* di
 		memcpy(data, msg, sizeof(as_msg));
 		uint8_t* trg = data + sizeof(as_msg);
 
-		if (! g_config.batch_without_digests) {
+		if (! no_digests) {
 			as_msg_field* field = (as_msg_field*)trg;
 			field->field_sz = sizeof(cf_digest) + 1;
 			field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
