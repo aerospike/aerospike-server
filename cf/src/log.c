@@ -692,7 +692,7 @@ update_most_verbose_level(cf_log_context context)
 {
 	cf_log_level level = CF_CRITICAL;
 
-	for (int i = 0; i < g_n_sinks; i++) {
+	for (uint32_t i = 0; i < g_n_sinks; i++) {
 		if (g_sinks[i].levels[context] > level) {
 			level = g_sinks[i].levels[context];
 		}
@@ -776,6 +776,8 @@ sprintf_now(char* buf)
 static int
 cache_reduce_fn(const void* key, void* data, void* udata)
 {
+	(void)udata;
+
 	uint32_t* count = (uint32_t*)data;
 
 	if (*count == 0) {
@@ -807,6 +809,8 @@ register_custom_conversions(void)
 static int
 digest_fn(FILE* stream, const struct printf_info* info, const void* const* args)
 {
+	(void)info;
+
 	const cf_digest* d = *(const cf_digest**)args[0];
 
 	return fprintf(stream,
@@ -823,6 +827,8 @@ static int
 digest_arginfo_fn(const struct printf_info* info, size_t n, int* argtypes,
 		int* size)
 {
+	(void)info;
+
 	if (n != 0) {
 		argtypes[0] = PA_POINTER;
 		size[0] = sizeof(const cf_digest*);
@@ -841,10 +847,10 @@ hex_fn(FILE* stream, const struct printf_info* info, const void* const* args)
 	const uint8_t* p = *(const uint8_t**)args[0];
 	int len = 0;
 
-	for (uint32_t i = 0; i < info->width; i += 16) {
+	for (int i = 0; i < info->width; i += 16) {
 		len += fprintf(stream, "%06x:", i);
 
-		uint32_t k;
+		int k;
 
 		for (k = 0; k < 16 && i + k < info->width; k++) {
 			len += fprintf(stream, " %02x", p[i + k]);
@@ -877,6 +883,8 @@ static int
 hex_arginfo_fn(const struct printf_info* info, size_t n, int* argtypes,
 		int* size)
 {
+	(void)info;
+
 	if (n != 0) {
 		argtypes[0] = PA_POINTER;
 		size[0] = sizeof(const uint8_t*);
