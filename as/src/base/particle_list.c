@@ -552,6 +552,50 @@ list_from_asval(const as_val *val, as_particle **pp)
 
 		cf_assert(pk.offset == ele_start, AS_PARTICLE, "size mismatch pk.offset(%d) != ele_start(%u)", pk.offset, ele_start);
 		p_list_mem->sz = ele_start + content_sz;
+
+		if (is_ordered && ele_count > 1) {
+			packed_list new_list;
+			bool check = packed_list_init(&new_list, p_list_mem->data,
+					p_list_mem->sz);
+
+			cf_assert(check, AS_PARTICLE, "invalid list");
+
+			if (! packed_list_check_order_and_fill_offidx(&new_list)) {
+				uint8_t *temp_mem = NULL;
+				uint8_t buf[sizeof(packed_list) +
+							(p_list_mem->sz < CDT_MAX_STACK_OBJ_SZ ?
+									p_list_mem->sz : 0)];
+				uint8_t *ptr;
+
+				if (p_list_mem->sz < CDT_MAX_STACK_OBJ_SZ) {
+					ptr = buf;
+				}
+				else {
+					temp_mem = cf_malloc(p_list_mem->sz);
+					ptr = temp_mem;
+				}
+
+				memcpy(ptr, p_list_mem->data, p_list_mem->sz);
+
+				define_rollback_alloc(alloc_idx, NULL, 1, false); // for temp indexes
+				define_order_index(ordidx, new_list.ele_count, alloc_idx);
+				packed_list not_ordered_list;
+
+				packed_list_init(&not_ordered_list, ptr, p_list_mem->sz);
+				list_full_offset_index_fill_all(&not_ordered_list.offidx);
+
+				if (! list_order_index_sort(&ordidx, &not_ordered_list.offidx,
+						AS_CDT_SORT_ASCENDING)) {
+					cf_crash(AS_PARTICLE, "list_sort() invalid list");
+				}
+
+				list_order_index_pack(&ordidx, &not_ordered_list.offidx,
+						(uint8_t *)new_list.contents, &new_list.offidx);
+
+				rollback_alloc_rollback(alloc_idx);
+				cf_free(temp_mem);
+			}
+		}
 	}
 	else {
 		p_list_mem->sz = (uint32_t)sz;
