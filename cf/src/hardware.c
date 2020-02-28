@@ -2291,7 +2291,8 @@ get_mounted_device(const char *fs_path)
 	char *best_real = realpath(best_path, NULL);
 
 	if (best_real == NULL) {
-		cf_warning(CF_HARDWARE,
+		// Don't warn; e.g. AER-6191 - normal in some container environments.
+		cf_detail(CF_HARDWARE,
 				"failed to resolve mounted device %s: %d (%s)", best_path,
 				errno, cf_strerror(errno));
 		return NULL;
@@ -2846,6 +2847,11 @@ cf_mount_is_local(const char *path)
 	}
 
 	cf_storage_device_info *info = cf_storage_get_device_info(path);
+
+	if (info == NULL) {
+		cf_crash(CF_HARDWARE, "couldn't get device info for %s", path);
+	}
+
 	cf_topo_numa_node_index numa_node = info->phys[0].numa_node;
 
 	for (uint32_t i = 1; i < info->n_phys; i++) {
