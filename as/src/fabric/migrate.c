@@ -105,7 +105,7 @@ COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 #define EMIGRATION_SLOW_Q_WAIT_MS 1000 // 1 second
 #define MIGRATE_RETRANSMIT_STARTDONE_MS 1000 // for now, not configurable
 #define MIGRATE_RETRANSMIT_SIGNAL_MS 1000 // for now, not configurable
-#define MAX_BYTES_EMIGRATING (16 * 1024 * 1024)
+#define MAX_BYTES_EMIGRATING (32 * 1024 * 1024)
 
 #define IMMIGRATION_DEBOUNCE_MS (60 * 1000) // 1 minute
 
