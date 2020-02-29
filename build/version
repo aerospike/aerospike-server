@@ -5,6 +5,6 @@ subbuild=`echo $rev | awk -F'-' '{print $2}'`
 
 if [ "$subbuild" != "" ]
 then
-  rev=`echo $rev | awk -F'-' '{printf("%s-%s\n",$1,$2)}'`
+  rev=`echo $rev | awk -F'-' '{sb = $2; for (f = 3; f <= NF - 1; f++) {sb = sb"-"$f}; printf("%s-%s\n", $1, sb)}'`
 fi
 echo $rev
