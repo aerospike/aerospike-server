@@ -130,6 +130,7 @@ scan_type get_scan_type(as_transaction* tr);
 bool get_scan_set(as_transaction* tr, as_namespace* ns, char* set_name, uint16_t* set_id);
 bool get_scan_options(as_transaction* tr, scan_options* options);
 bool get_scan_pids(as_transaction* tr, as_scan_pid** p_pids);
+bool get_scan_sample_max(as_transaction* tr, uint64_t* sample_max);
 bool get_scan_rps(as_transaction* tr, uint32_t* rps);
 void convert_old_priority(int old_priority, uint32_t* rps);
 bool validate_background_scan_rps(const as_namespace* ns, uint32_t* rps);
@@ -150,6 +151,8 @@ const size_t INIT_BUF_BUILDER_SIZE = 1024 * 1024 * 2;
 const size_t SCAN_CHUNK_LIMIT = 1024 * 1024;
 
 #define MAX_ACTIVE_TRANSACTIONS 200
+
+#define SAMPLE_MARGIN 4
 
 
 
@@ -390,6 +393,26 @@ get_scan_pids(as_transaction* tr, as_scan_pid** p_pids)
 	}
 
 	*p_pids = pids;
+
+	return true;
+}
+
+bool
+get_scan_sample_max(as_transaction* tr, uint64_t* sample_max)
+{
+	if (! as_transaction_has_sample_max(tr)) {
+		return true;
+	}
+
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
+			AS_MSG_FIELD_TYPE_SAMPLE_MAX);
+
+	if (as_msg_field_get_value_sz(f) != 8) {
+		cf_warning(AS_SCAN, "scan sample-max field size not 8");
+		return false;
+	}
+
+	*sample_max = cf_swap_from_be64(*(uint64_t*)f->data);
 
 	return true;
 }
@@ -664,6 +687,8 @@ typedef struct basic_scan_job_s {
 	bool			fail_on_cluster_change;
 	bool			no_bin_data;
 	uint32_t		sample_pct;
+	int64_t			count_remaining;
+	uint64_t		count_per_partition;
 	predexp_eval_t*	predexp;
 	cf_vector*		bin_names;
 } basic_scan_job;
@@ -688,6 +713,8 @@ typedef struct basic_scan_slice_s {
 void basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, predexp_eval_t** predexp);
 cf_vector* bin_names_from_op(as_msg* m, int* result);
+void sample_max_init(basic_scan_job* job, uint64_t sample_max);
+uint64_t slice_sample_count(basic_scan_job* job, uint64_t tree_size);
 
 //----------------------------------------------------------
 // basic_scan_job public API.
@@ -699,22 +726,29 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
 	scan_options options = { .sample_pct = 100 };
+	as_scan_pid* pids = NULL;
+	uint64_t sample_max = 0;
 	uint32_t rps = 0;
 	uint32_t timeout = CF_SOCKET_TIMEOUT;
-	predexp_eval_t* predexp = NULL;
-	as_scan_pid* pids = NULL;
 
 	if (! get_scan_set(tr, ns, set_name, &set_id) ||
 			! get_scan_options(tr, &options) || ! get_scan_pids(tr, &pids) ||
+			! get_scan_sample_max(tr, &sample_max) ||
 			! get_scan_rps(tr, &rps) ||
-			! get_scan_socket_timeout(tr, &timeout) ||
-			! get_scan_predexp(tr, &predexp)) {
+			! get_scan_socket_timeout(tr, &timeout)) {
 		cf_warning(AS_SCAN, "basic scan job failed msg field processing");
 		return AS_ERR_PARAMETER;
 	}
 
 	if (pids == NULL && set_id == INVALID_SET_ID && set_name[0] != '\0') {
 		return AS_ERR_NOT_FOUND; // only for legacy scans
+	}
+
+	predexp_eval_t* predexp = NULL;
+
+	if (! get_scan_predexp(tr, &predexp)) {
+		cf_warning(AS_SCAN, "basic scan job failed predexp processing");
+		return AS_ERR_PARAMETER;
 	}
 
 	convert_old_priority(options.priority, &rps);
@@ -730,6 +764,8 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
 	job->sample_pct = options.sample_pct;
 	job->predexp = predexp;
+
+	sample_max_init(job, sample_max);
 
 	int result;
 
@@ -752,9 +788,11 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout,
 			as_transaction_compress_response(tr));
 
-	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} n-pids-requested %hu rps %u sample-pct %u%s%s socket-timeout %u from %s",
+	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} n-pids-requested %hu rps %u sample-%s %lu%s%s socket-timeout %u from %s",
 			_job->trid, ns->name, set_name, _job->n_pids_requested, _job->rps,
-			job->sample_pct, job->no_bin_data ? " metadata-only" : "",
+			sample_max == 0 ? "pct" : "max",
+			sample_max == 0 ? (uint64_t)job->sample_pct : sample_max,
+			job->no_bin_data ? " metadata-only" : "",
 			job->fail_on_cluster_change ? " fail-on-cluster-change" : "",
 			timeout, _job->client);
 
@@ -806,7 +844,14 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 		keyd = &_job->pids[rsv->p->id].keyd;
 	}
 
-	if (job->sample_pct == 100) {
+	if (job->count_per_partition != 0) {
+		uint64_t sample_count =
+				slice_sample_count(job, as_index_tree_size(tree));
+
+		as_index_reduce_from_partial_live(tree, keyd, sample_count,
+				basic_scan_job_reduce_cb, (void*)&slice);
+	}
+	else if (job->sample_pct == 100) {
 		as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
 				(void*)&slice);
 	}
@@ -1033,6 +1078,63 @@ bin_names_from_op(as_msg* m, int* result)
 	}
 
 	return v;
+}
+
+void
+sample_max_init(basic_scan_job* job, uint64_t sample_max)
+{
+	if (sample_max == 0) {
+		job->count_remaining = 0;
+		job->count_per_partition = 0; // will use sample_pct
+		return;
+	}
+
+	if (job->sample_pct != 100) {
+		cf_warning(AS_SCAN, "unexpected - scan has sample-max %lu and pct %u",
+				sample_max, job->sample_pct);
+	}
+
+	job->count_remaining = (int64_t)sample_max;
+
+	uint64_t n_pids = ((as_scan_job*)job)->n_pids_requested;
+
+	if (n_pids == 0) {
+		// Strange combination - client specified sample-max but no partition or
+		// digest lists - will we support this? Estimate number of masters.
+		n_pids = AS_PARTITIONS / as_exchange_cluster_size();
+		// TODO - provide safe ns->cluster_size?
+	}
+
+	uint64_t n_per_partition = (sample_max + n_pids - 1) / n_pids;
+
+	// Add margin so when target is near actual population, partition size
+	// spread won't stop us from reaching the target.
+	n_per_partition += SAMPLE_MARGIN;
+
+	// Make sure margin doesn't cause us to exceed target.
+	if (n_per_partition > sample_max) {
+		n_per_partition = sample_max;
+	}
+
+	job->count_per_partition = n_per_partition;
+}
+
+uint64_t
+slice_sample_count(basic_scan_job* job, uint64_t tree_size)
+{
+	uint64_t n_try = tree_size > job->count_per_partition ?
+			job->count_per_partition : tree_size;
+
+	int64_t n_remaining = as_aaf_int64(&job->count_remaining, -(int64_t)n_try);
+
+	if (n_remaining >= 0) {
+		return n_try;
+	}
+	// else - overshoot - this slice is last to sample, or beyond last.
+
+	int64_t n_last = n_remaining + (int64_t)n_try;
+
+	return (uint64_t)(n_last > 0 ? n_last : 0);
 }
 
 

@@ -351,6 +351,12 @@ as_transaction_has_recs_per_sec(const as_transaction *tr)
 }
 
 static inline bool
+as_transaction_has_sample_max(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_SAMPLE_MAX) != 0;
+}
+
+static inline bool
 as_transaction_has_predexp(const as_transaction *tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_PREDEXP) != 0;

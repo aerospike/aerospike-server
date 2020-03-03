@@ -282,6 +282,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_RECS_PER_SEC      10
 #define AS_MSG_FIELD_TYPE_PID_ARRAY         11
 #define AS_MSG_FIELD_TYPE_DIGEST_ARRAY      12
+#define AS_MSG_FIELD_TYPE_SAMPLE_MAX        13
 
 // Secondary index.
 #define AS_MSG_FIELD_TYPE_INDEX_NAME        21
@@ -312,17 +313,18 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 8)
 #define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 9)
 #define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 10)
-#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 11)
-#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 12)
-#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 13)
-#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 14)
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 15)
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 16)
-#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 17)
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 18)
-#define AS_MSG_FIELD_BIT_BATCH              (1 << 19)
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 20)
-#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 21)
+#define AS_MSG_FIELD_BIT_SAMPLE_MAX         (1 << 11)
+#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 12)
+#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 13)
+#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 14)
+#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 15)
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 16)
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 17)
+#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 18)
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 19)
+#define AS_MSG_FIELD_BIT_BATCH              (1 << 20)
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 21)
+#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 22)
 
 // Special message field values.
 #define AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE    (0x08)
