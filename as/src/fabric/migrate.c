@@ -123,13 +123,6 @@ typedef enum {
 	EMIG_START_RESULT_EAGAIN
 } emigration_start_result;
 
-typedef enum {
-	// Order matters - we use an atomic set-max that relies on it.
-	EMIG_STATE_ACTIVE,
-	EMIG_STATE_FINISHED,
-	EMIG_STATE_ABORTED
-} emigration_state;
-
 typedef struct emigration_pop_info_s {
 	uint32_t order;
 	uint64_t dest_score;
