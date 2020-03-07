@@ -527,7 +527,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		}
 
 		if (is_ttl_disallowed(urecord->tr->msgp->msg.record_ttl, ns)) {
-			cf_warning(AS_UDF, "disallowed ttl with nsup-period 0");
+			cf_ticker_warning(AS_UDF, "disallowed ttl with nsup-period 0");
 			failmax = (int)urecord->nupdates;
 			goto Rollback;
 		}

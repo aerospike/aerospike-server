@@ -929,7 +929,7 @@ write_master_preprocessing(as_transaction* tr)
 	}
 
 	if (is_ttl_disallowed(m->record_ttl, ns)) {
-		cf_warning(AS_RW, "write_master: disallowed ttl with nsup-period 0");
+		cf_ticker_warning(AS_RW, "write_master: disallowed ttl with nsup-period 0");
 		write_master_failed(tr, 0, false, 0, 0, AS_ERR_FORBIDDEN);
 		return false;
 	}
