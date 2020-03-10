@@ -188,7 +188,6 @@ typedef struct fabric_connection_s {
 
 	uint8_t			*r_bigbuf;
 	uint8_t			r_buf[FABRIC_BUFFER_MEM_SZ + sizeof(msg_hdr)];
-	uint32_t		r_rearm_count;
 	msg_type		r_type;
 	uint32_t		r_sz;
 	uint32_t		r_buf_sz;
@@ -306,7 +305,7 @@ static bool fabric_connection_process_writable(fabric_connection *fc);
 static bool fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m);
 static bool fabric_connection_read_fabric_msg(fabric_connection *fc);
 
-static bool fabric_connection_process_msg(fabric_connection *fc, bool do_rearm);
+static void fabric_connection_process_msg(fabric_connection *fc, bool do_rearm);
 static bool fabric_connection_process_readable(fabric_connection *fc);
 
 // fabric_recv_thread_pool
@@ -1466,7 +1465,6 @@ fabric_connection_send_unassign(fabric_connection *fc)
 inline static void
 fabric_connection_recv_rearm(fabric_connection *fc)
 {
-	fc->r_rearm_count++;
 	cf_poll_modify_socket(fc->pool->poll, &fc->sock,
 			EPOLLIN | DEFAULT_EVENTS, fc);
 }
@@ -1832,7 +1830,7 @@ fabric_connection_read_fabric_msg(fabric_connection *fc)
 
 // Return true on success.
 // Must have re-armed on success if do_rearm == true.
-static bool
+static void
 fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 {
 	cf_assert(fc->node, AS_FABRIC, "process_msg: no node assigned");
@@ -1892,32 +1890,26 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 	}
 
 	while (true) {
-		if (! msg_type_is_valid(type)) {
-			cf_warning(AS_FABRIC, "failed to create message for type %u (max %u)", type, M_TYPE_MAX);
-			cf_free(p_bigbuf);
-			return false;
-		}
+		if (msg_type_is_valid(type) && g_fabric.msg_cb[type] != NULL) {
+			msg *m = as_fabric_msg_get(type);
 
-		msg *m = as_fabric_msg_get(type);
+			if (msg_parse_fields(m, buf_ptr, msg_sz)) {
+				(g_fabric.msg_cb[m->type])(node, m,
+						g_fabric.msg_udata[m->type]);
 
-		if (! msg_parse_fields(m, buf_ptr, msg_sz)) {
-			cf_warning(AS_FABRIC, "msg_parse_fields failed for fc %p", fc);
-			as_fabric_msg_put(m);
-			cf_free(p_bigbuf);
-			return false;
-		}
-
-		if (g_fabric.msg_cb[m->type]) {
-			(g_fabric.msg_cb[m->type])(node, m, g_fabric.msg_udata[m->type]);
-
-			if (bt != 0) {
-				histogram_insert_data_point(g_stats.fabric_recv_cb_hists[ch],
-						bt);
+				if (bt != 0) {
+					histogram_insert_data_point(
+							g_stats.fabric_recv_cb_hists[ch], bt);
+				}
+			}
+			else {
+				cf_warning(AS_FABRIC, "msg_parse_fields failed for fc %p", fc);
+				as_fabric_msg_put(m);
 			}
 		}
 		else {
-			cf_warning(AS_FABRIC, "process_msg: could not deliver message type %d", m->type);
-			as_fabric_msg_put(m);
+			cf_warning(AS_FABRIC, "failed to create message for type %u (max %u) fc %p rearm %d fd %d failed %d ref %d",
+					type, M_TYPE_MAX, fc, do_rearm, fc->sock.fd, fc->failed, cf_rc_count(fc));
 		}
 
 		if (p_bigbuf) {
@@ -1938,8 +1930,6 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 		buf_ptr += sizeof(msg_hdr);
 		mem_sz -= sizeof(msg_hdr) + msg_sz;
 	}
-
-	return true;
 }
 
 // Return true on success.
@@ -2029,9 +2019,7 @@ fabric_connection_process_readable(fabric_connection *fc)
 				recv_all > (size_t)g_config.fabric_recv_rearm_threshold ||
 				fc->r_buf_sz > g_config.fabric_recv_rearm_threshold;
 
-		if (! fabric_connection_process_msg(fc, do_rearm)) {
-			return false;
-		}
+		fabric_connection_process_msg(fc, do_rearm);
 
 		if (do_rearm) {
 			// Already rearmed.
@@ -2167,7 +2155,7 @@ run_fabric_recv(void *arg)
 		for (int32_t i = 0; i < n; i++) {
 			fabric_connection *fc = events[i].data;
 
-			if (fc->node && ! fc->node->live) {
+			if ((fc->node && ! fc->node->live) || fc->failed) {
 				fabric_connection_disconnect(fc);
 				fabric_connection_release(fc);
 				continue;
@@ -2191,15 +2179,10 @@ run_fabric_recv(void *arg)
 			}
 
 			cf_assert(events[i].events == EPOLLIN, AS_FABRIC, "epoll not setup correctly for %p", fc);
-			uint32_t rearm_count = fc->r_rearm_count;
 
 			if (! fabric_connection_process_readable(fc)) {
 				fabric_connection_disconnect(fc);
-
-				if (rearm_count == fc->r_rearm_count) {
-					fabric_connection_release(fc);
-				}
-
+				fabric_connection_release(fc);
 				continue;
 			}
 		}
