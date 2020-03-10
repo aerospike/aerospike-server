@@ -283,7 +283,7 @@ as_mon_populate_jobstat(as_mon_jobstat * job_stat, cf_dyn_buf *db)
 	cf_dyn_buf_append_uint32(db, job_stat->priority);
 
 	if (job_stat->n_pids_requested != 0) {
-		cf_dyn_buf_append_string(db, ":n-pids-requsted=");
+		cf_dyn_buf_append_string(db, ":n-pids-requested=");
 		cf_dyn_buf_append_uint32(db, job_stat->n_pids_requested);
 	}
 

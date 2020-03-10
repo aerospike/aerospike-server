@@ -687,8 +687,9 @@ typedef struct basic_scan_job_s {
 	bool			fail_on_cluster_change;
 	bool			no_bin_data;
 	uint32_t		sample_pct;
-	int64_t			count_remaining;
-	uint64_t		count_per_partition;
+	uint64_t		sample_max;
+	uint64_t		sample_count;
+	uint64_t		max_per_partition;
 	predexp_eval_t*	predexp;
 	cf_vector*		bin_names;
 } basic_scan_job;
@@ -708,13 +709,14 @@ const as_scan_vtable basic_scan_job_vtable = {
 typedef struct basic_scan_slice_s {
 	basic_scan_job*		job;
 	cf_buf_builder**	bb_r;
+	uint64_t			limit;
+	uint64_t			count;
 } basic_scan_slice;
 
-void basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
+bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, predexp_eval_t** predexp);
 cf_vector* bin_names_from_op(as_msg* m, int* result);
 void sample_max_init(basic_scan_job* job, uint64_t sample_max);
-uint64_t slice_sample_count(basic_scan_job* job, uint64_t tree_size);
 
 //----------------------------------------------------------
 // basic_scan_job public API.
@@ -844,23 +846,23 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 		keyd = &_job->pids[rsv->p->id].keyd;
 	}
 
-	if (job->count_per_partition != 0) {
-		uint64_t sample_count =
-				slice_sample_count(job, as_index_tree_size(tree));
-
-		as_index_reduce_from_partial_live(tree, keyd, sample_count,
-				basic_scan_job_reduce_cb, (void*)&slice);
+	if (job->max_per_partition != 0) {
+		if (job->sample_count < job->sample_max) {
+			as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
+					(void*)&slice);
+		}
 	}
-	else if (job->sample_pct == 100) {
+	else if (job->sample_pct != 100) {
+		slice.limit = ((as_index_tree_size(tree) * job->sample_pct) / 100);
+
+		if (slice.limit != 0) {
+			as_index_reduce_from(tree, keyd, basic_scan_job_reduce_cb,
+					(void*)&slice);
+		}
+	}
+	else { // 100% - limit 0 is ignored.
 		as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
 				(void*)&slice);
-	}
-	else {
-		uint64_t sample_count =
-				((as_index_tree_size(tree) * job->sample_pct) / 100);
-
-		as_index_reduce_from_partial_live(tree, keyd, sample_count,
-				basic_scan_job_reduce_cb, (void*)&slice);
 	}
 
 	if (_job->pids != NULL) {
@@ -926,7 +928,7 @@ basic_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 // basic_scan_job utilities.
 //
 
-void
+bool
 basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	basic_scan_slice* slice = (basic_scan_slice*)udata;
@@ -936,21 +938,34 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (_job->abandoned != 0) {
 		as_record_done(r_ref, ns);
-		return;
+		return false;
 	}
 
 	if (job->fail_on_cluster_change &&
 			job->cluster_key != as_exchange_cluster_key()) {
 		as_record_done(r_ref, ns);
 		as_scan_manager_abandon_job(_job, AS_ERR_CLUSTER_KEY_MISMATCH);
-		return;
+		return false;
 	}
 
 	as_index* r = r_ref->r;
 
+	if (slice->limit != 0) { // sample-pct checks pre-filters
+		if (slice->count++ == slice->limit) {
+			as_record_done(r_ref, ns);
+			return false;
+		}
+
+		// Custom filter tombstones here since we must increment slice->count.
+		if (! as_record_is_live(r)) {
+			as_record_done(r_ref, ns);
+			return true;
+		}
+	}
+
 	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
-		return;
+		return true;
 	}
 
 	predexp_eval_t* predexp = NULL;
@@ -958,7 +973,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (! basic_scan_predexp_filter_meta(job, r, &predexp)) {
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
-		return;
+		return true;
 	}
 
 	as_storage_rd rd;
@@ -974,7 +989,23 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 			throttle_sleep(_job);
 		}
 
-		return;
+		return true;
+	}
+
+	bool last_sample = false;
+
+	if (job->max_per_partition != 0) { // sample-max checks post-filters
+		uint64_t count = as_aaf_uint64(&job->sample_count, 1);
+
+		if (count > job->sample_max) {
+			as_storage_record_close(&rd);
+			as_record_done(r_ref, ns);
+			return false;
+		}
+
+		if (count == job->sample_max) {
+			last_sample = true;
+		}
 	}
 
 	if (job->no_bin_data) {
@@ -986,7 +1017,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
 			as_incr_uint64(&_job->n_failed);
-			return;
+			return true;
 		}
 
 		as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
@@ -996,7 +1027,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
 			as_incr_uint64(&_job->n_failed);
-			return;
+			return true;
 		}
 
 		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false,
@@ -1007,6 +1038,10 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_record_done(r_ref, ns);
 	as_incr_uint64(&_job->n_succeeded);
 
+	if (last_sample) {
+		return false;
+	}
+
 	throttle_sleep(_job);
 
 	cf_buf_builder* bb = *slice->bb_r;
@@ -1016,12 +1051,14 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (bb->used_sz > SCAN_CHUNK_LIMIT) {
 		if (! conn_scan_job_send_response((conn_scan_job*)job, bb->buf,
 				bb->used_sz)) {
-			return;
+			return true;
 		}
 
 		cf_buf_builder_reset(bb);
 		cf_buf_builder_reserve(slice->bb_r, (int)sizeof(as_proto), NULL);
 	}
+
+	return true;
 }
 
 bool
@@ -1084,8 +1121,9 @@ void
 sample_max_init(basic_scan_job* job, uint64_t sample_max)
 {
 	if (sample_max == 0) {
-		job->count_remaining = 0;
-		job->count_per_partition = 0; // will use sample_pct
+		job->sample_max = 0;
+		job->sample_count = 0;
+		job->max_per_partition = 0; // will use sample_pct
 		return;
 	}
 
@@ -1094,47 +1132,26 @@ sample_max_init(basic_scan_job* job, uint64_t sample_max)
 				sample_max, job->sample_pct);
 	}
 
-	job->count_remaining = (int64_t)sample_max;
+	job->sample_max = sample_max;
+	job->sample_count = 0;
 
 	uint64_t n_pids = ((as_scan_job*)job)->n_pids_requested;
 
 	if (n_pids == 0) {
-		// Strange combination - client specified sample-max but no partition or
-		// digest lists - will we support this? Estimate number of masters.
+		cf_warning(AS_SCAN, "unexpected - scan has sample-max %lu but no pids",
+				sample_max);
+
+		// Proceed - estimate number of masters (no safe ns->cluster_size).
 		n_pids = AS_PARTITIONS / as_exchange_cluster_size();
-		// TODO - provide safe ns->cluster_size?
 	}
 
-	uint64_t n_per_partition = (sample_max + n_pids - 1) / n_pids;
+	uint64_t max_per_partition = (sample_max + n_pids - 1) / n_pids;
 
 	// Add margin so when target is near actual population, partition size
 	// spread won't stop us from reaching the target.
-	n_per_partition += SAMPLE_MARGIN;
+	max_per_partition += SAMPLE_MARGIN;
 
-	// Make sure margin doesn't cause us to exceed target.
-	if (n_per_partition > sample_max) {
-		n_per_partition = sample_max;
-	}
-
-	job->count_per_partition = n_per_partition;
-}
-
-uint64_t
-slice_sample_count(basic_scan_job* job, uint64_t tree_size)
-{
-	uint64_t n_try = tree_size > job->count_per_partition ?
-			job->count_per_partition : tree_size;
-
-	int64_t n_remaining = as_aaf_int64(&job->count_remaining, -(int64_t)n_try);
-
-	if (n_remaining >= 0) {
-		return n_try;
-	}
-	// else - overshoot - this slice is last to sample, or beyond last.
-
-	int64_t n_last = n_remaining + (int64_t)n_try;
-
-	return (uint64_t)(n_last > 0 ? n_last : 0);
+	job->max_per_partition = max_per_partition;
 }
 
 
@@ -1175,7 +1192,7 @@ typedef struct aggr_scan_slice_s {
 } aggr_scan_slice;
 
 bool aggr_scan_init(as_aggr_call* call, const as_transaction* tr);
-void aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
+bool aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
 as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns,
 		uint32_t pid, as_partition_reservation* rsv);
@@ -1382,7 +1399,7 @@ aggr_scan_init(as_aggr_call* call, const as_transaction* tr)
 	return true;
 }
 
-void
+bool
 aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
@@ -1392,26 +1409,28 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (_job->abandoned != 0) {
 		as_record_done(r_ref, ns);
-		return;
+		return false;
 	}
 
 	as_index* r = r_ref->r;
 
 	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
-		return;
+		return true;
 	}
 
 	if (! aggr_scan_add_digest(slice->ll, &r->keyd)) {
 		as_record_done(r_ref, ns);
 		as_scan_manager_abandon_job(_job, AS_ERR_UNKNOWN);
-		return;
+		return false;
 	}
 
 	as_record_done(r_ref, ns);
 	as_incr_uint64(&_job->n_succeeded);
 
 	throttle_sleep(_job);
+
+	return true;
 }
 
 bool
@@ -1521,7 +1540,7 @@ const as_scan_vtable udf_bg_scan_job_vtable = {
 		udf_bg_scan_job_info
 };
 
-void udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
+bool udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 void udf_bg_scan_tr_complete(void* udata, int result);
 
 //----------------------------------------------------------
@@ -1675,7 +1694,7 @@ udf_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 // udf_bg_scan_job utilities.
 //
 
-void
+bool
 udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_scan_job* _job = (as_scan_job*)udata;
@@ -1684,14 +1703,14 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (_job->abandoned != 0) {
 		as_record_done(r_ref, ns);
-		return;
+		return false;
 	}
 
 	as_index* r = r_ref->r;
 
 	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
-		return;
+		return true;
 	}
 
 	predexp_args_t predargs = { .ns = ns, .md = r };
@@ -1702,7 +1721,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
 		as_incr_uint64(&ns->n_udf_sub_udf_filtered_out);
-		return;
+		return true;
 	}
 
 	// Save this before releasing record.
@@ -1723,6 +1742,8 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_incr_uint32(&job->n_active_tr);
 	as_service_enqueue_internal(&tr);
+
+	return true;
 }
 
 void
@@ -1780,7 +1801,7 @@ const as_scan_vtable ops_bg_scan_job_vtable = {
 };
 
 uint8_t* ops_bg_validate_ops(const as_msg* m);
-void ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
+bool ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 void ops_bg_scan_tr_complete(void* udata, int result);
 
 //----------------------------------------------------------
@@ -1954,7 +1975,7 @@ ops_bg_validate_ops(const as_msg* m)
 	return (uint8_t*)as_msg_op_iterate(m, NULL, &i);
 }
 
-void
+bool
 ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_scan_job* _job = (as_scan_job*)udata;
@@ -1963,14 +1984,14 @@ ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (_job->abandoned != 0) {
 		as_record_done(r_ref, ns);
-		return;
+		return false;
 	}
 
 	as_index* r = r_ref->r;
 
 	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
-		return;
+		return true;
 	}
 
 	predexp_args_t predargs = { .ns = ns, .md = r };
@@ -1981,7 +2002,7 @@ ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
 		as_incr_uint64(&ns->n_ops_sub_write_filtered_out);
-		return;
+		return true;
 	}
 
 	// Save this before releasing record.
@@ -2002,6 +2023,8 @@ ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_incr_uint32(&job->n_active_tr);
 	as_service_enqueue_internal(&tr);
+
+	return true;
 }
 
 void

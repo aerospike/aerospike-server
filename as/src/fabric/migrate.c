@@ -115,6 +115,13 @@ typedef enum {
 	EMIG_START_RESULT_EAGAIN
 } emigration_start_result;
 
+typedef enum {
+	// Order matters - we use an atomic set-max that relies on it.
+	EMIG_STATE_ACTIVE,
+	EMIG_STATE_FINISHED,
+	EMIG_STATE_ABORTED
+} emigration_state;
+
 typedef struct emigration_pop_info_s {
 	uint32_t order;
 	uint64_t dest_score;
@@ -167,7 +174,7 @@ emigration_start_result emigration_send_start(emigration *emig);
 bool emigrate_tree(emigration *emig);
 bool emigration_send_done(emigration *emig);
 void *run_emigration_reinserter(void *arg);
-void emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
+bool emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
 void emigrate_fill_msg(as_storage_rd *rd, msg *m);
 void old_emigrate_fill_msg(as_storage_rd *rd, msg *m);
 int emigration_reinsert_reduce_fn(const void *key, void *data, void *udata);
@@ -240,7 +247,6 @@ as_migrate_emigrate(const pb_task *task)
 	emig->type = task->type;
 	emig->tx_flags = task->tx_flags;
 	emig->state = EMIG_STATE_ACTIVE;
-	emig->aborted = false;
 
 	// Create these later only when we need them - we'll get lots at once.
 	emig->bytes_emigrating = 0;
@@ -764,10 +770,13 @@ emigrate_tree(emigration *emig)
 	cf_tid tid = cf_thread_create_joinable(run_emigration_reinserter,
 			(void*)emig);
 
-	as_index_reduce(emig->rsv.tree, emigrate_tree_reduce_fn, emig);
-
-	// Sets EMIG_STATE_FINISHED only if not already EMIG_STATE_ABORTED.
-	cf_atomic32_setmax(&emig->state, EMIG_STATE_FINISHED);
+	if (as_index_reduce(emig->rsv.tree, emigrate_tree_reduce_fn, emig)) {
+		// Sets EMIG_STATE_FINISHED only if not already EMIG_STATE_ABORTED.
+		cf_atomic32_setmax(&emig->state, EMIG_STATE_FINISHED);
+	}
+	else {
+		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+	}
 
 	cf_thread_join(tid);
 
@@ -855,28 +864,16 @@ run_emigration_reinserter(void *arg)
 }
 
 
-void
+bool
 emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 {
 	emigration *emig = (emigration *)udata;
 	as_namespace *ns = emig->rsv.ns;
 	as_record *r = r_ref->r;
 
-	if (emig->aborted) {
-		as_record_done(r_ref, ns);
-		return; // no point continuing to reduce this tree
-	}
-
-	if (emig->cluster_key != as_exchange_cluster_key()) {
-		as_record_done(r_ref, ns);
-		emig->aborted = true;
-		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
-		return; // no point continuing to reduce this tree
-	}
-
 	if (! should_emigrate_record(emig, r_ref)) {
 		as_record_done(r_ref, ns);
-		return;
+		return emig->cluster_key == as_exchange_cluster_key();
 	}
 
 	msg *m = as_fabric_msg_get(M_TYPE_MIGRATE);
@@ -924,6 +921,8 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 			cf_warning(AS_MIGRATE, "missing acks from node %lx", emig->dest);
 		}
 	}
+
+	return emig->cluster_key == as_exchange_cluster_key();
 }
 
 

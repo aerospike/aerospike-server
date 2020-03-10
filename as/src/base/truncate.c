@@ -81,7 +81,7 @@ static void truncate_action_undo(as_namespace* ns, const char* set_name);
 static void truncate_all(as_namespace* ns);
 static void* run_truncate(void* arg);
 static void truncate_finish(as_namespace* ns);
-static void truncate_reduce_cb(as_index_ref* r_ref, void* udata);
+static bool truncate_reduce_cb(as_index_ref* r_ref, void* udata);
 
 
 //==========================================================
@@ -450,7 +450,7 @@ truncate_finish(as_namespace* ns)
 	}
 }
 
-static void
+static bool
 truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_record* r = r_ref->r;
@@ -462,7 +462,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 		record_delete_adjust_sindex(r, ns);
 		as_index_delete(cb_info->tree, &r->keyd);
 		as_record_done(r_ref, ns);
-		return;
+		return true;
 	}
 
 	as_set* p_set = as_namespace_get_record_set(ns, r);
@@ -475,4 +475,6 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_record_done(r_ref, ns);
+
+	return true;
 }

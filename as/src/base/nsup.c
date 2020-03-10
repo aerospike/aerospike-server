@@ -130,16 +130,16 @@ static void* run_expire_or_evict(void* udata);
 
 static void expire(as_namespace* ns);
 static void* run_expire(void* udata);
-static void expire_reduce_cb(as_index_ref* r_ref, void* udata);
+static bool expire_reduce_cb(as_index_ref* r_ref, void* udata);
 
 static bool evict(as_namespace* ns);
 static void* run_evict(void* udata);
-static void evict_reduce_cb(as_index_ref* r_ref, void* udata);
+static bool evict_reduce_cb(as_index_ref* r_ref, void* udata);
 
 static bool eval_hwm_breached(as_namespace* ns);
 static uint32_t find_evict_void_time(as_namespace* ns, uint32_t now);
 static void* run_prep_evict(void* udata);
-static void prep_evict_reduce_cb(as_index_ref* r_ref, void* udata);
+static bool prep_evict_reduce_cb(as_index_ref* r_ref, void* udata);
 
 static void update_stats(as_namespace* ns, uint64_t n_0_void_time, uint64_t n_expired_objects, uint64_t n_evicted_objects, uint64_t start_ms);
 
@@ -148,13 +148,13 @@ static bool eval_stop_writes(as_namespace* ns);
 
 static void* run_nsup_histograms(void* udata);
 static void collect_nsup_histograms(as_namespace* ns);
-static void nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata);
+static bool nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata);
 
 static bool cold_start_evict(as_namespace* ns);
 static void* run_prep_cold_start_evict(void* udata);
 static uint64_t set_cold_start_threshold(as_namespace* ns, linear_hist* hist);
 static void* run_cold_start_evict(void* udata);
-static void cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata);
+static bool cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata);
 
 static bool sets_protected(as_namespace* ns);
 static void init_sets_not_evicting(as_namespace* ns, bool sets_not_evicting[]);
@@ -474,7 +474,7 @@ run_expire(void* udata)
 	return NULL;
 }
 
-static void
+static bool
 expire_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_index* r = r_ref->r;
@@ -492,6 +492,8 @@ expire_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_record_done(r_ref, ns);
+
+	return true;
 }
 
 
@@ -592,7 +594,7 @@ run_evict(void* udata)
 	return NULL;
 }
 
-static void
+static bool
 evict_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_index* r = r_ref->r;
@@ -617,6 +619,8 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_record_done(r_ref, ns);
+
+	return true;
 }
 
 
@@ -787,7 +791,7 @@ run_prep_evict(void* udata)
 	return NULL;
 }
 
-static void
+static bool
 prep_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_index* r = r_ref->r;
@@ -800,6 +804,8 @@ prep_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_record_done(r_ref, per_thread->ns);
+
+	return true;
 }
 
 
@@ -1039,7 +1045,7 @@ collect_nsup_histograms(as_namespace* ns)
 	cf_info(AS_NSUP, "{%s} ... done collecting %s info", ns->name, tag);
 }
 
-static void
+static bool
 nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_index* r = r_ref->r;
@@ -1056,7 +1062,7 @@ nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (ns->obj_size_log_hist == NULL) {
 		as_record_done(r_ref, ns);
-		return;
+		return true;
 	}
 
 	uint32_t size = as_storage_record_size(ns, r);
@@ -1073,6 +1079,8 @@ nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_record_done(r_ref, ns);
+
+	return true;
 }
 
 
@@ -1265,7 +1273,7 @@ run_cold_start_evict(void* udata)
 	return NULL;
 }
 
-static void
+static bool
 cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_index* r = r_ref->r;
@@ -1283,6 +1291,8 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_record_done(r_ref, ns);
+
+	return true;
 }
 
 

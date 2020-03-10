@@ -702,7 +702,7 @@ const as_job_vtable sbld_job_vtable = {
 		sbld_job_info
 };
 
-void sbld_job_reduce_cb(as_index_ref* r_ref, void* udata);
+bool sbld_job_reduce_cb(as_index_ref* r_ref, void* udata);
 
 //
 // sbld_job creation.
@@ -781,7 +781,7 @@ sbld_job_info(as_job* _job, as_mon_jobstat* stat)
 // sbld_job utilities.
 //
 
-void
+bool
 sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_job* _job = (as_job*)udata;
@@ -790,7 +790,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (_job->abandoned != 0) {
 		as_record_done(r_ref, ns);
-		return;
+		return false;
 	}
 
 	if (job->si) {
@@ -804,7 +804,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	if ((_job->set_id != INVALID_SET_ID && _job->set_id != as_index_get_set_id(r)) ||
 			as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
-		return;
+		return true;
 	}
 
 	as_storage_rd rd;
@@ -817,7 +817,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		if (as_sindex_put_rd(job->si, &rd)) {
 			as_record_done(r_ref, ns);
 			as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
-			return;
+			return false;
 		}
 	}
 	else {
@@ -828,4 +828,6 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_record_done(r_ref, ns);
 
 	cf_atomic64_incr(&_job->n_records_read);
+
+	return true;
 }

@@ -336,19 +336,13 @@ void as_index_tree_reserve(as_index_tree *tree);
 int as_index_tree_release(as_index_tree *tree);
 uint64_t as_index_tree_size(as_index_tree *tree);
 
-typedef void (*as_index_reduce_fn) (as_index_ref *value, void *udata);
+typedef bool (*as_index_reduce_fn) (as_index_ref *value, void *udata);
 
-void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+bool as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
+bool as_index_reduce_from(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
 
-void as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_partial_live(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
-
-void as_index_reduce_from(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_from_partial(as_index_tree *tree, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
-
-void as_index_reduce_from_live(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_from_partial_live(as_index_tree *tree, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+bool as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
+bool as_index_reduce_from_live(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
 
 int as_index_try_exists(as_index_tree *tree, const cf_digest *keyd);
 int as_index_try_get_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
@@ -373,7 +367,7 @@ typedef struct as_index_sprig_s {
 	cf_arenax_puddle *puddle;
 } as_index_sprig;
 
-uint64_t as_index_sprig_keyd_reduce_partial(as_index_sprig *isprig, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+bool as_index_sprig_reduce_no_rc(as_index_sprig *isprig, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
 
 int as_index_sprig_get_vlock(as_index_sprig *isprig, const cf_digest *keyd, as_index_ref *index_ref);
 int as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd);

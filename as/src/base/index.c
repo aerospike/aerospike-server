@@ -91,7 +91,7 @@ static cf_queue g_gc_queue;
 void *run_index_tree_gc(void *unused);
 void as_index_tree_destroy(as_index_tree *tree);
 
-uint64_t as_index_sprig_reduce_partial(as_index_sprig *isprig, const cf_digest *keyd, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
+bool as_index_sprig_reduce(as_index_sprig *isprig, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
 void as_index_sprig_traverse(as_index_sprig *isprig, const cf_digest* keyd, cf_arenax_handle r_h, as_index_ph_array *v_a);
 void as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h);
 
@@ -247,39 +247,20 @@ as_index_tree_size(as_index_tree *tree)
 //
 
 // Make a callback for every element in the tree, from outside the tree lock.
-void
+bool
 as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata)
 {
-	as_index_reduce_partial(tree, AS_REDUCE_ALL, cb, udata);
-}
-
-
-// Make a callback for a specified number of elements in the tree, from outside
-// the tree lock.
-void
-as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count,
-		as_index_reduce_fn cb, void *udata)
-{
-	as_index_reduce_from_partial(tree, NULL, sample_count, cb, udata);
+	return as_index_reduce_from(tree, NULL, cb, udata);
 }
 
 
 // Like as_index_reduce(), but from specfied "boundary" digest.
-void
+bool
 as_index_reduce_from(as_index_tree *tree, const cf_digest *keyd,
 		as_index_reduce_fn cb, void *udata)
 {
-	as_index_reduce_from_partial(tree, keyd, AS_REDUCE_ALL, cb, udata);
-}
-
-
-// Like as_index_reduce_partial(), but from specfied "boundary" digest.
-void
-as_index_reduce_from_partial(as_index_tree *tree, const cf_digest *keyd,
-		uint64_t sample_count, as_index_reduce_fn cb, void *udata)
-{
 	if (! tree) {
-		return;
+		return true;
 	}
 
 	// Reduce sprigs from largest to smallest digests to preserve this order for
@@ -293,21 +274,21 @@ as_index_reduce_from_partial(as_index_tree *tree, const cf_digest *keyd,
 		as_index_sprig isprig;
 		as_index_sprig_from_i(tree, &isprig, (uint32_t)i);
 
-		if (tree_puddles(tree) != NULL) {
-			sample_count -= as_index_sprig_keyd_reduce_partial(&isprig, keyd,
-					sample_count, cb, udata);
+		if (tree_puddles(tree) == NULL) {
+			if (! as_index_sprig_reduce(&isprig, keyd, cb, udata)) {
+				return false;
+			}
 		}
 		else {
-			sample_count -= as_index_sprig_reduce_partial(&isprig, keyd,
-					sample_count, cb, udata);
+			if (! as_index_sprig_reduce_no_rc(&isprig, keyd, cb, udata)) {
+				return false;
+			}
 		}
 
 		keyd = NULL; // only need boundary digest for first sprig
-
-		if (sample_count == 0) {
-			break;
-		}
 	}
+
+	return true;
 }
 
 
@@ -485,47 +466,41 @@ as_index_tree_destroy(as_index_tree *tree)
 
 // Make a callback for a specified number of elements in the tree, from outside
 // the tree lock.
-uint64_t
-as_index_sprig_reduce_partial(as_index_sprig *isprig, const cf_digest *keyd,
-		uint64_t sample_count, as_index_reduce_fn cb, void *udata)
+bool
+as_index_sprig_reduce(as_index_sprig *isprig, const cf_digest *keyd,
+		as_index_reduce_fn cb, void *udata)
 {
-	bool reduce_all = sample_count == AS_REDUCE_ALL;
-
 	cf_mutex_lock(&isprig->pair->reduce_lock);
 
-	if (reduce_all || sample_count > isprig->sprig->n_elements) {
-		sample_count = isprig->sprig->n_elements;
-	}
+	uint32_t n_elements = (uint32_t)isprig->sprig->n_elements;
 
 	// Common to encounter empty sprigs.
-	if (sample_count == 0) {
+	if (n_elements == 0) {
 		cf_mutex_unlock(&isprig->pair->reduce_lock);
-		return 0;
+		return true;
 	}
 
-	size_t sz = sizeof(as_index_ph_array) +
-			(sizeof(as_index_ph) * sample_count);
-	as_index_ph_array *v_a;
+	size_t sz = sizeof(as_index_ph_array) + (sizeof(as_index_ph) * n_elements);
 	uint8_t buf[MAX_STACK_ARRAY_BYTES];
 
-	v_a = sz > MAX_STACK_ARRAY_BYTES ? cf_malloc(sz) : (as_index_ph_array*)buf;
+	as_index_ph_array *v_a = sz > MAX_STACK_ARRAY_BYTES ?
+			cf_malloc(sz) : (as_index_ph_array*)buf;
 
-	v_a->alloc_sz = (uint32_t)sample_count;
+	v_a->alloc_sz = n_elements;
 	v_a->pos = 0;
 
 	uint64_t start_ms = cf_getms();
 
-	// Recursively, fetch all the value pointers into this array, so we can make
-	// all the callbacks outside the big lock.
+	// Traverse just fills array, then we make callbacks outside reduce lock.
 	as_index_sprig_traverse(isprig, keyd, isprig->sprig->root_h, v_a);
 
 	cf_detail(AS_INDEX, "sprig reduce took %lu ms", cf_getms() - start_ms);
 
 	cf_mutex_unlock(&isprig->pair->reduce_lock);
 
-	uint64_t i;
+	bool do_more = true;
 
-	for (i = 0; i < v_a->pos; i++) {
+	for (uint32_t i = 0; i < v_a->pos; i++) {
 		as_index_ref r_ref;
 
 		r_ref.r = v_a->indexes[i].r;
@@ -551,17 +526,20 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, const cf_digest *keyd,
 			continue;
 		}
 
-		// Callback MUST call as_record_done() to unlock and release record.
-		cb(&r_ref, udata);
+		if (do_more) {
+			// Callback MUST call as_record_done() to unlock record.
+			do_more = cb(&r_ref, udata);
+		}
+		else {
+			cf_mutex_unlock(r_ref.olock);
+		}
 	}
 
 	if (v_a != (as_index_ph_array*)buf) {
 		cf_free(v_a);
 	}
 
-	// In reduce-all mode, return 0 so outside loop continues to pass
-	// sample_count = AS_REDUCE_ALL.
-	return reduce_all ? 0 : i;
+	return do_more;
 }
 
 

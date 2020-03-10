@@ -26,9 +26,11 @@
 
 #include "base/index.h"
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "citrusleaf/cf_digest.h"
 
-#include "arenax.h"
 #include "fault.h"
 
 #include "base/datamodel.h"
@@ -46,36 +48,17 @@ as_index_tree_resume(as_index_tree_shared* shared, as_treex* xmem_trees,
 	return NULL;
 }
 
-
-void
+bool
 as_index_reduce_live(as_index_tree* tree, as_index_reduce_fn cb, void* udata)
 {
-	as_index_reduce(tree, cb, udata);
+	return as_index_reduce(tree, cb, udata);
 }
 
-
-void
-as_index_reduce_partial_live(as_index_tree* tree, uint64_t sample_count,
-		as_index_reduce_fn cb, void* udata)
-{
-	as_index_reduce_partial(tree, sample_count, cb, udata);
-}
-
-
-void
+bool
 as_index_reduce_from_live(as_index_tree* tree, const cf_digest* keyd,
 		as_index_reduce_fn cb, void* udata)
 {
-	as_index_reduce_from(tree, keyd, cb, udata);
-}
-
-
-void
-as_index_reduce_from_partial_live(as_index_tree* tree, const cf_digest* keyd,
-		uint64_t sample_count,
-		as_index_reduce_fn cb, void* udata)
-{
-	as_index_reduce_from_partial(tree, keyd, sample_count, cb, udata);
+	return as_index_reduce_from(tree, keyd, cb, udata);
 }
 
 
@@ -83,11 +66,10 @@ as_index_reduce_from_partial_live(as_index_tree* tree, const cf_digest* keyd,
 // Private API - for enterprise separation only.
 //
 
-uint64_t
-as_index_sprig_keyd_reduce_partial(as_index_sprig* isprig,
-		const cf_digest* keyd, uint64_t sample_count, as_index_reduce_fn cb,
-		void* udata)
+bool
+as_index_sprig_reduce_no_rc(as_index_sprig* isprig, const cf_digest* keyd,
+		as_index_reduce_fn cb, void* udata)
 {
-	cf_crash(AS_INDEX, "CE code called as_index_sprig_keyd_reduce_partial()");
+	cf_crash(AS_INDEX, "CE code called as_index_sprig_reduce_no_rc()");
 	return 0;
 }

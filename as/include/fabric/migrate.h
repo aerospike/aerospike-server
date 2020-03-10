@@ -149,13 +149,6 @@ typedef enum {
 #define MIG_FEATURES_SEEN 0x80000000U // needed for backward compatibility
 extern const uint32_t MY_MIG_FEATURES;
 
-typedef enum {
-	// Order matters - we use an atomic set-max that relies on it.
-	EMIG_STATE_ACTIVE,
-	EMIG_STATE_FINISHED,
-	EMIG_STATE_ABORTED
-} emigration_state;
-
 typedef struct emigration_s {
 	cf_node     dest;
 	uint64_t    cluster_key;
@@ -163,7 +156,6 @@ typedef struct emigration_s {
 	pb_task_type type;
 	uint32_t    tx_flags;
 	cf_atomic32 state;
-	bool        aborted;
 	bool        from_replica;
 	uint64_t    wait_until_ms;
 
