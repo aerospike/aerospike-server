@@ -617,6 +617,15 @@ safe_setsockopt(int32_t fd, int32_t level, int32_t name, const void *val, sockle
 }
 
 static void
+forgive_setsockopt(int32_t fd, int32_t level, int32_t name, const void *val, socklen_t len)
+{
+	if (setsockopt(fd, level, name, val, len) < 0) {
+		cf_warning(CF_SOCKET, "setsockopt(%d¸ %d) failed on FD %d: %d (%s)",
+				level, name, fd, errno, cf_strerror(errno));
+	}
+}
+
+static void
 safe_getsockopt(int32_t fd, int32_t level, int32_t name, void *val, socklen_t *len)
 {
 	if (getsockopt(fd, level, name, val, len) < 0) {
@@ -679,57 +688,57 @@ void
 cf_socket_disable_nagle(cf_socket *sock)
 {
 	static const int32_t flag = 1;
-	safe_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	forgive_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }
 
 void
 cf_socket_enable_nagle(cf_socket *sock)
 {
 	static const int32_t flag = 0;
-	safe_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	forgive_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }
 
 void
 cf_socket_set_cork(cf_socket *sock, int cork)
 {
-	setsockopt(sock->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(int));
+	forgive_setsockopt(sock->fd, IPPROTO_TCP, TCP_CORK, &cork, sizeof(int));
 }
 
 void
 cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count)
 {
 	static const int32_t flag = 1;
-	safe_setsockopt(sock->fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
+	forgive_setsockopt(sock->fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
 
 	if (idle > 0) {
-		safe_setsockopt(sock->fd, SOL_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+		forgive_setsockopt(sock->fd, SOL_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
 	}
 
 	if (interval > 0) {
-		safe_setsockopt(sock->fd, SOL_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+		forgive_setsockopt(sock->fd, SOL_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
 	}
 
 	if (count > 0) {
-		safe_setsockopt(sock->fd, SOL_TCP, TCP_KEEPCNT, &count, sizeof(count));
+		forgive_setsockopt(sock->fd, SOL_TCP, TCP_KEEPCNT, &count, sizeof(count));
 	}
 }
 
 void
 cf_socket_set_send_buffer(cf_socket *sock, int32_t size)
 {
-	safe_setsockopt(sock->fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
+	forgive_setsockopt(sock->fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
 }
 
 void
 cf_socket_set_receive_buffer(cf_socket *sock, int32_t size)
 {
-	safe_setsockopt(sock->fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
+	forgive_setsockopt(sock->fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 }
 
 void
 cf_socket_set_window(cf_socket *sock, int32_t size)
 {
-	safe_setsockopt(sock->fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof(size));
+	forgive_setsockopt(sock->fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof(size));
 }
 
 void
