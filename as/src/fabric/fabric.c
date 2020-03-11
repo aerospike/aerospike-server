@@ -1903,13 +1903,12 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 				}
 			}
 			else {
-				cf_warning(AS_FABRIC, "msg_parse_fields failed for fc %p", fc);
+				cf_warning(AS_FABRIC, "msg_parse_fields failed remote 0x%lx", node);
 				as_fabric_msg_put(m);
 			}
 		}
 		else {
-			cf_warning(AS_FABRIC, "failed to create message for type %u (max %u) fc %p rearm %d fd %d failed %d ref %d",
-					type, M_TYPE_MAX, fc, do_rearm, fc->sock.fd, fc->failed, cf_rc_count(fc));
+			cf_warning(AS_FABRIC, "unexpected msg_type %u remote 0x%lx", type, node);
 		}
 
 		if (p_bigbuf) {
