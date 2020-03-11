@@ -173,6 +173,12 @@ msg_type_register(msg_type type, const msg_template *mt, size_t mt_sz,
 	mte->scratch_sz = (uint32_t)scratch_sz;
 }
 
+bool
+msg_type_is_valid(msg_type type)
+{
+	return type < M_TYPE_MAX && g_mte[type].mt != NULL;
+}
+
 msg *
 msg_create(msg_type type)
 {
