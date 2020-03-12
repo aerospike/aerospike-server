@@ -721,24 +721,6 @@ cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t co
 	if (count > 0) {
 		forgive_setsockopt(sock->fd, SOL_TCP, TCP_KEEPCNT, &count, sizeof(count));
 	}
-<<<<<<< HEAD
-=======
-
-	// If a connection has unacknowledged outgoing data, the TCP stack detects
-	// its death after tcp_retries2 (sysctl) retransmissions; the keep-alive
-	// setting is ineffective in this case. Approximate (Linux -4.18) or emulate
-	// (Linux 4.18+) keep-alive via TCP_USER_TIMEOUT.
-
-	int32_t user_timeout = (idle + interval * count) * 1000;
-
-	if (user_timeout > 0) {
-		if (setsockopt(sock->fd, SOL_TCP, TCP_USER_TIMEOUT, &user_timeout,
-				sizeof(user_timeout)) < 0 && errno != ENOPROTOOPT) {
-			cf_warning(CF_SOCKET, "setsockopt(%d) failed on FD %d: %d (%s)",
-					TCP_USER_TIMEOUT, sock->fd, errno, cf_strerror(errno));
-		}
-	}
->>>>>>> 2f84504... AER-6198 - warn instead of crash when setting socket options in various scenarios, e.g. keep-alive.
 }
 
 void
