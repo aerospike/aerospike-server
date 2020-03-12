@@ -753,7 +753,6 @@ smd_msg_recv_cb(cf_node node_id, msg* m, void* udata)
 	op->src = node_id;
 
 	if (! smd_msg_parse(m, op)) {
-		cf_warning(AS_SMD, "failed to parse msg op_type %d", op->type);
 		smd_op_destroy(op);
 		as_fabric_msg_put(m);
 		return -1;
