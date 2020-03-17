@@ -107,6 +107,21 @@ safe_particle_type(uint8_t type)
 	}
 }
 
+static inline void
+trim_particle(as_bin *b, as_particle_type type, uint32_t orig_size)
+{
+	if (type != AS_PARTICLE_TYPE_GEOJSON) {
+		return;
+	}
+	// else - GEOJSON particles over-allocate up to 2K - recover memory.
+
+	uint32_t final_size = particle_vtable[type]->size_fn(b->particle);
+
+	if (final_size < orig_size) {
+		b->particle = cf_realloc(b->particle, final_size);
+	}
+}
+
 
 //==========================================================
 // Particle "class static" functions.
@@ -323,6 +338,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 
 		// Set the bin's iparticle metadata.
 		if (result == 0) {
+			trim_particle(b, op_type, (uint32_t)mem_size);
 			as_bin_state_set_from_type(b, op_type);
 		}
 		else {
@@ -544,6 +560,7 @@ as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op)
 
 	// Set the bin's iparticle metadata.
 	if (result == 0) {
+		trim_particle(b, type, (uint32_t)mem_size);
 		as_bin_state_set_from_type(b, type);
 	}
 	else {
@@ -653,6 +670,8 @@ as_bin_particle_alloc_from_pickled(as_bin *b, const uint8_t **p_pickled, const u
 		b->particle = old_particle;
 		return result;
 	}
+
+	trim_particle(b, type, (uint32_t)mem_size);
 
 	// Set the bin's iparticle metadata.
 	as_bin_state_set_from_type(b, type);
