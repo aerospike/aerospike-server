@@ -392,6 +392,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	uint64_t now_sec = cf_get_seconds();
 
 	as_exchange_cluster_info(db);
+	info_append_uint32(db, "min_compatibility_id", as_exchange_min_compatibility_id()); // not in ticker
 	info_append_bool(db, "cluster_integrity", as_clustering_has_integrity()); // not in ticker
 	info_append_bool(db, "cluster_is_member", ! as_clustering_is_orphan()); // not in ticker
 	as_hb_info_duplicates_get(db); // not in ticker
