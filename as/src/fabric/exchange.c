@@ -2647,7 +2647,7 @@ exchange_exchanging_pre_commit()
 		return false;
 	}
 
-	INFO("exchange-compatibility-id: self %u min %u -> %u",
+	INFO("exchange-compatibility-id: self %u cluster-min %u -> %u",
 			AS_EXCHANGE_COMPATIBILITY_ID,
 			g_exchange.min_compatibility_id, min_compatibility_id);
 
