@@ -464,9 +464,14 @@ typedef struct as_exchange_s
 	uint32_t compatibility_ids[AS_CLUSTER_SZ];
 
 	/**
-	 * Used by exchange listeners during upgrades for compatibility purposes.
+	 * Used during upgrades for compatibility purposes.
 	 */
 	uint32_t min_compatibility_id;
+
+	/**
+	 * Used during upgrades for compatibility purposes.
+	 */
+	uint32_t max_compatibility_id;
 
 	/**
 	 * Committed cluster generation.
@@ -2535,7 +2540,7 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
  */
 static void
 exchange_data_pre_commit_for_node(cf_node node, uint32_t ix,
-		uint32_t* min_compatibility_id)
+		uint32_t* min_compatibility_id, uint32_t* max_compatibility_id)
 {
 	EXCHANGE_LOCK();
 	as_exchange_node_state node_state;
@@ -2545,6 +2550,10 @@ exchange_data_pre_commit_for_node(cf_node node, uint32_t ix,
 
 	if (node_state.data->compatibility_id < *min_compatibility_id) {
 		*min_compatibility_id = node_state.data->compatibility_id;
+	}
+
+	if (node_state.data->compatibility_id > *max_compatibility_id) {
+		*max_compatibility_id = node_state.data->compatibility_id;
 	}
 
 	for (uint32_t i = 0; i < node_state.data->num_namespaces; i++) {
@@ -2602,6 +2611,7 @@ exchange_exchanging_pre_commit()
 			sizeof(g_exchange.compatibility_ids));
 
 	uint32_t min_compatibility_id = UINT32_MAX;
+	uint32_t max_compatibility_id = 0;
 
 	// Reset exchange data for all namespaces.
 	for (int i = 0; i < g_config.n_namespaces; i++) {
@@ -2636,7 +2646,8 @@ exchange_exchanging_pre_commit()
 	for (int i = 0; i < num_nodes; i++) {
 		cf_node node;
 		cf_vector_get(&g_exchange.succession_list, i, &node);
-		exchange_data_pre_commit_for_node(node, i, &min_compatibility_id);
+		exchange_data_pre_commit_for_node(node, i, &min_compatibility_id,
+				&max_compatibility_id);
 	}
 
 	// Collected all exchanged data - do final configuration consistency checks.
@@ -2647,11 +2658,13 @@ exchange_exchanging_pre_commit()
 		return false;
 	}
 
-	INFO("exchange-compatibility-id: self %u min %u -> %u",
+	INFO("exchange-compatibility-id: self %u cluster-min %u -> %u cluster-max %u -> %u",
 			AS_EXCHANGE_COMPATIBILITY_ID,
-			g_exchange.min_compatibility_id, min_compatibility_id);
+			g_exchange.min_compatibility_id, min_compatibility_id,
+			g_exchange.max_compatibility_id, max_compatibility_id);
 
 	g_exchange.min_compatibility_id = min_compatibility_id;
+	g_exchange.max_compatibility_id = max_compatibility_id;
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
@@ -3655,13 +3668,23 @@ as_exchange_compatibility_ids(void)
 }
 
 /**
- * Used by exchange listeners during upgrades for compatibility purposes.
+ * Used during upgrades for compatibility purposes.
  * Note - may be used outside exchange thread with care.
  */
 uint32_t
 as_exchange_min_compatibility_id(void)
 {
 	return g_exchange.min_compatibility_id;
+}
+
+/**
+ * Used during upgrades for compatibility purposes.
+ * Note - may be used outside exchange thread with care.
+ */
+uint32_t
+as_exchange_max_compatibility_id(void)
+{
+	return g_exchange.max_compatibility_id;
 }
 
 /**

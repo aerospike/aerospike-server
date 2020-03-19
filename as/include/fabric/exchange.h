@@ -163,10 +163,16 @@ uint32_t*
 as_exchange_compatibility_ids(void);
 
 /**
- * Used by exchange listeners during upgrades for compatibility purposes.
+ * Used during upgrades for compatibility purposes.
  */
 uint32_t
 as_exchange_min_compatibility_id(void);
+
+/**
+ * Used during upgrades for compatibility purposes.
+ */
+uint32_t
+as_exchange_max_compatibility_id(void);
 
 /**
  * Output exchange cluster state for info.
