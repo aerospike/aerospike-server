@@ -26,6 +26,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_msgpack.h"
+
 #include "base/datamodel.h"
 #include "base/proto.h"
 
@@ -42,6 +44,12 @@
 #define CDT_MAX_PACKED_INT_SZ (sizeof(uint64_t) + 1)
 #define CDT_MAX_STACK_OBJ_SZ  (1024 * 1024)
 #define CDT_MAX_PARAM_LIST_COUNT (1024 * 1024)
+
+#define AS_PACKED_LIST_FLAG_NONE     0x00
+#define AS_PACKED_LIST_FLAG_ORDERED  0x01
+
+#define AS_PACKED_LIST_FLAG_OFF_IDX     0x10
+#define AS_PACKED_LIST_FLAG_FULLOFF_IDX 0x20
 
 typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
@@ -110,6 +118,18 @@ typedef struct cdt_context_s {
 
 	int32_t delta_off;
 	int32_t delta_sz;
+
+	bool create_flag_on;
+	bool create_triggered;
+	uint32_t create_sz;
+	const uint8_t *create_ctx_start;
+	uint64_t create_ctx_type;
+	uint32_t create_ctx_count;
+	uint8_t create_flags;
+
+	uint32_t list_nil_pad;
+
+	const uint8_t *create_hdr_ptr;
 } cdt_context;
 
 typedef bool (*cdt_subcontext_fn)(cdt_context *ctx, msgpack_in *val);
@@ -352,6 +372,7 @@ bool offset_index_set_next(offset_index *offidx, uint32_t index, uint32_t value)
 void offset_index_set_filled(offset_index *offidx, uint32_t ele_filled);
 void offset_index_set_ptr(offset_index *offidx, uint8_t *idx_mem, const uint8_t *packed_mem);
 void offset_index_copy(offset_index *dest, const offset_index *src, uint32_t d_start, uint32_t s_start, uint32_t count, int delta);
+void offset_index_add_ele(offset_index *dest, const offset_index *src, uint32_t dest_idx);
 void offset_index_move_ele(offset_index *dest, const offset_index *src, uint32_t ele_idx, uint32_t to_idx);
 void offset_index_append_size(offset_index *offidx, uint32_t delta);
 
@@ -436,6 +457,8 @@ uint32_t cdt_idx_mask_get_content_sz(const uint64_t *mask, uint32_t count, const
 void cdt_idx_mask_print(const uint64_t *mask, uint32_t ele_count, const char *name);
 
 // list
+void list_partial_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz);
+
 bool list_full_offset_index_fill_to(offset_index *offidx, uint32_t index, bool check_storage);
 bool list_full_offset_index_fill_all(offset_index *offidx);
 bool list_order_index_sort(order_index *ordidx, const offset_index *full_offidx, as_cdt_sort_flags flags);
@@ -449,6 +472,8 @@ bool list_subcontext_by_value(cdt_context *ctx, msgpack_in *val);
 
 void cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 
+uint8_t list_get_ctx_flags(bool is_ordered, bool is_toplvl);
+
 // map
 bool map_subcontext_by_index(cdt_context *ctx, msgpack_in *val);
 bool map_subcontext_by_rank(cdt_context *ctx, msgpack_in *val);
@@ -457,17 +482,19 @@ bool map_subcontext_by_value(cdt_context *ctx, msgpack_in *val);
 
 void cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 
+uint8_t map_get_ctx_flags(uint8_t ctx_type, bool is_toplvl);
+
 // cdt_context
 uint32_t cdt_context_get_sz(cdt_context *ctx);
 const uint8_t *cdt_context_get_data(cdt_context *ctx);
 uint8_t *cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz);
 
-cdt_ctx_list_stack_entry *cdt_context_push(cdt_context *ctx, uint32_t idx, uint8_t *idx_mem);
+void cdt_context_push(cdt_context *ctx, uint32_t idx, uint8_t *idx_mem, uint8_t type);
 
 static inline bool
 cdt_context_is_toplvl(const cdt_context *ctx)
 {
-	return ctx->data_sz == 0;
+	return ctx->data_offset == 0 && ctx->data_sz == 0;
 }
 
 // Debugging support
@@ -560,6 +587,12 @@ calc_index(int64_t index, uint32_t max_index)
 }
 
 static inline bool
+cdt_context_inuse(const cdt_context *ctx)
+{
+	return ctx->create_triggered ? false : as_bin_inuse(ctx->b);
+}
+
+static inline bool
 cdt_context_is_modify(const cdt_context *ctx)
 {
 	return ctx->alloc_buf != NULL;
@@ -599,4 +632,11 @@ cdt_idx_vla_mask_count(uint32_t ele_count)
 
 	return (count == 0 || count * sizeof(uint64_t) > CDT_MAX_STACK_OBJ_SZ) ?
 			1 : count;
+}
+
+static inline int32_t
+cdt_hdr_delta_sz(uint32_t ele_count, int32_t delta_count)
+{
+	return as_pack_list_header_get_size(ele_count + delta_count) -
+			as_pack_list_header_get_size(ele_count);
 }

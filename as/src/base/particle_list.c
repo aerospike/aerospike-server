@@ -125,12 +125,6 @@ const as_particle_vtable list_vtable = {
 
 #define PACKED_LIST_INDEX_STEP 128
 
-#define AS_PACKED_LIST_FLAG_NONE     0x00
-#define AS_PACKED_LIST_FLAG_ORDERED  0x01
-
-#define PACKED_LIST_FLAG_OFF_IDX     0x10
-#define PACKED_LIST_FLAG_FULLOFF_IDX 0x20
-
 typedef struct packed_list_s {
 	const uint8_t *packed;
 	uint32_t packed_sz;
@@ -259,12 +253,14 @@ static inline void cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uin
 
 static inline bool cdt_context_list_need_idx_mem(const cdt_context *ctx, const packed_list *list, bool is_dim);
 static inline void cdt_context_list_push(cdt_context *ctx, const packed_list *list, uint32_t idx, rollback_alloc *alloc_idx, bool is_dim, bool need_idx_mem);
+static inline void cdt_context_list_handle_possible_noop(cdt_context *ctx);
 
 // packed_list
 static bool packed_list_init(packed_list *list, const uint8_t *buf, uint32_t sz);
 static inline bool packed_list_init_from_particle(packed_list *list, const as_particle *p);
 static bool packed_list_init_from_bin(packed_list *list, const as_bin *b);
 static bool packed_list_init_from_ctx(packed_list *list, const cdt_context *ctx);
+static inline bool packed_list_init_from_com(packed_list *list, cdt_op_mem *com);
 static bool packed_list_init_from_ctx_orig(packed_list *list, const cdt_context *ctx);
 static bool packed_list_unpack_hdridx(packed_list *list);
 static void packed_list_partial_offidx_update(const packed_list *list);
@@ -329,11 +325,7 @@ static uint8_t *list_setup_bin_ctx(cdt_context *ctx, uint8_t flags, uint32_t con
 
 // list_offset_index
 static inline uint32_t list_offset_partial_index_count(uint32_t ele_count);
-static inline void list_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz);
 static void list_offset_index_rm_mask_cpy(offset_index *dst, const offset_index *full_src, const uint64_t *rm_mask, uint32_t rm_count);
-
-// list_full_offset_index
-static inline void list_full_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz);
 
 // list_order_index
 static int list_order_index_sort_cmp_fn(const void *x, const void *y, void *p);
@@ -786,8 +778,49 @@ list_subcontext_by_index(cdt_context *ctx, msgpack_in *val)
 
 	if (! calc_index_count(index, 1, list.ele_count, &uindex, &count32,
 			false)) {
-		cf_warning(AS_PARTICLE, "list_subcontext_by_index() index %ld out of bounds for ele_count %u", index, list.ele_count);
-		return false;
+		if (ctx->create_flag_on) {
+			if (list.ele_count == 0 && index == -1) {
+				uindex = 0;
+			}
+			else if (index == (int64_t)list.ele_count) {
+				uindex = list.ele_count;
+			}
+			else { // index > list.ele_count
+				if (list_is_ordered(&list)) {
+					uindex = list.ele_count;
+				}
+				else if ((ctx->create_ctx_type & AS_CDT_CTX_CREATE_MASK) ==
+						AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND) {
+					ctx->list_nil_pad = (uint32_t)index - list.ele_count;
+					uindex = list.ele_count;
+				}
+				else {
+					cf_warning(AS_PARTICLE, "list_subcontext_by_index() index %ld out of bounds for ele_count %u", index, list.ele_count);
+					return false;
+				}
+			}
+
+			// Assume not top level.
+			uint32_t delta_hdr_sz = cdt_hdr_delta_sz(list.ele_count +
+					(list_is_ordered(&list) ? 1 : 0), ctx->list_nil_pad + 1);
+
+			ctx->create_sz += delta_hdr_sz + ctx->list_nil_pad;
+			ctx->create_triggered = true;
+			ctx->create_hdr_ptr = list.packed;
+
+			bool is_dim = ! offset_index_is_null(&list.offidx);
+			define_rollback_alloc(alloc_idx, NULL, 1, false);
+
+			cdt_context_list_push(ctx, &list, uindex, alloc_idx, is_dim, false);
+			ctx->data_offset += list.packed_sz;
+			ctx->data_sz = 0;
+
+			return true;
+		}
+		else {
+			cf_warning(AS_PARTICLE, "list_subcontext_by_index() index %ld out of bounds for ele_count %u", index, list.ele_count);
+			return false;
+		}
 	}
 
 	bool is_dim = ! offset_index_is_null(&list.offidx);
@@ -970,14 +1003,27 @@ list_subcontext_by_value(cdt_context *ctx, msgpack_in *val)
 void
 cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 {
+	if (ctx->b->particle == ctx->orig) { // no-op happened
+		return;
+	}
+
 	packed_list list;
 
 	packed_list_init_from_ctx(&list, ctx);
 
 	if (! list_is_ordered(&list)) { // unordered, top level, dim case
 		if (! offset_index_is_null(&list.offidx)) {
-			offset_index_set_filled(&list.offidx,
-					p->idx / PACKED_LIST_INDEX_STEP);
+			uint32_t fill = offset_index_get_filled(&list.offidx);
+
+			if (fill > p->idx / PACKED_LIST_INDEX_STEP) {
+				fill = p->idx / PACKED_LIST_INDEX_STEP;
+
+				if (fill == 0) {
+					fill = 1;
+				}
+			}
+
+			offset_index_set_filled(&list.offidx, fill);
 		}
 
 		return;
@@ -991,52 +1037,91 @@ cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 		offset_index_set_ptr(&orig.offidx, p->idx_mem, orig.contents);
 	}
 
+	define_rollback_alloc(alloc_idx, NULL, 1, false); // for temp indexes
+	setup_list_must_have_full_offidx(full, &orig, alloc_idx);
+
+	if (! list_full_offset_index_fill_to(full->offidx, orig.ele_count, true)) {
+		cf_crash(AS_PARTICLE, "cdt_context_unwind_list() invalid packed list");
+	}
+
 	uint32_t orig_off = offset_index_get_const(&orig.offidx, p->idx);
 	uint32_t rank;
 	uint32_t count;
-	int32_t delta_sz = ctx->delta_sz;
 	bool is_toplvl = cdt_context_is_toplvl(ctx);
+	uint32_t orig_sz = (p->idx == orig.ele_count) ?
+			0 : offset_index_get_delta_const(&orig.offidx, p->idx);
+	uint32_t add_sz = orig_sz + list.content_sz - orig.content_sz;
 
 	cdt_payload value = {
 			.ptr = list.contents + orig_off,
-			.sz = offset_index_get_delta_const(&orig.offidx, p->idx) + delta_sz
+			.sz = add_sz
 	};
 
 	packed_list_find_rank_range_by_value_interval_ordered(&orig, &value, &value,
 			&rank, &count, false);
 
-	if (rank == p->idx || rank == p->idx + 1) { // no change
-		if (is_toplvl && ! offset_index_is_null(&list.offidx)) {
+	if (rank == p->idx || rank == p->idx + 1) { // no rank change
+		if (! is_toplvl || offset_index_is_null(&list.offidx)) {
+			rollback_alloc_rollback(alloc_idx);
+			return;
+		}
+
+		if (orig.ele_count + 1 == list.ele_count) {
+			offset_index_add_ele(&list.offidx, &orig.offidx, p->idx);
+		}
+		else {
 			offset_index_move_ele(&list.offidx, &orig.offidx, p->idx, p->idx);
 		}
 
+		rollback_alloc_rollback(alloc_idx);
 		return;
 	}
 
-	uint32_t orig_sz = offset_index_get_delta_const(&orig.offidx, p->idx);
-	uint32_t new_sz = orig_sz + delta_sz;
 	uint8_t *dest_contents = (uint8_t *)list.contents;
 
 	if (rank < p->idx) {
 		uint32_t begin_off = offset_index_get_const(&orig.offidx, rank);
 
-		memmove(dest_contents + begin_off, list.contents + orig_off, new_sz);
-		memcpy(dest_contents + begin_off + new_sz, orig.contents + begin_off,
+		memmove(dest_contents + begin_off, list.contents + orig_off, add_sz);
+		memcpy(dest_contents + begin_off + add_sz, orig.contents + begin_off,
 				orig_off - begin_off);
 	}
 	else {
 		uint32_t end_off = offset_index_get_const(&orig.offidx, rank);
 		uint32_t dest_off = end_off - orig_sz;
 
-		memmove(dest_contents + dest_off, list.contents + orig_off, new_sz);
+		memmove(dest_contents + dest_off, list.contents + orig_off, add_sz);
 		memcpy(dest_contents + orig_off, orig.contents + orig_off + orig_sz,
 				end_off - orig_off - orig_sz);
 	}
 
-	if (is_toplvl && ! offset_index_is_null(&list.offidx)) {
+	if (! is_toplvl || offset_index_is_null(&list.offidx)) {
+		rollback_alloc_rollback(alloc_idx);
+		return;
+	}
+
+	if (orig.ele_count + 1 == list.ele_count) {
+		offset_index_add_ele(&list.offidx, &orig.offidx, rank);
+	}
+	else {
 		offset_index_move_ele(&list.offidx, &orig.offidx, p->idx, rank);
 	}
+
+	rollback_alloc_rollback(alloc_idx);
 }
+
+uint8_t
+list_get_ctx_flags(bool is_ordered, bool is_toplvl)
+{
+	if (is_toplvl) {
+		return is_ordered ?
+				AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_LIST_FLAG_FULLOFF_IDX :
+				AS_PACKED_LIST_FLAG_NONE | AS_PACKED_LIST_FLAG_OFF_IDX;
+	}
+
+	return is_ordered ? AS_PACKED_LIST_FLAG_ORDERED : AS_PACKED_LIST_FLAG_NONE;
+}
+
 
 //==========================================================
 // Local helpers.
@@ -1105,24 +1190,25 @@ static inline uint8_t
 get_ext_flags(bool ordered)
 {
 	return ordered ?
-			(AS_PACKED_LIST_FLAG_ORDERED | PACKED_LIST_FLAG_FULLOFF_IDX) :
-			PACKED_LIST_FLAG_OFF_IDX;
+			(AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_LIST_FLAG_FULLOFF_IDX) :
+			AS_PACKED_LIST_FLAG_OFF_IDX;
 }
 
 static uint32_t
 list_calc_ext_content_sz(uint32_t ele_count, uint32_t content_sz, bool ordered)
 {
+	if (ele_count <= 1) {
+		return 0;
+	}
+
 	offset_index offidx;
 
 	if (! ordered) {
-		list_offset_index_init(&offidx, NULL, ele_count, NULL, content_sz);
+		list_partial_offset_index_init(&offidx, NULL, ele_count, NULL,
+				content_sz);
 	}
 	else {
-		list_full_offset_index_init(&offidx, NULL, ele_count, NULL, content_sz);
-	}
-
-	if (ele_count <= 1) {
-		return 0;
+		offset_index_init(&offidx, NULL, ele_count, NULL, content_sz);
 	}
 
 	return offset_index_size(&offidx);
@@ -1150,12 +1236,12 @@ list_pack_empty_index(as_packer *pk, uint32_t ele_count,
 	offset_index offidx;
 
 	if (is_ordered) {
-		list_full_offset_index_init(&offidx, pk->buffer + pk->offset, ele_count,
-				contents, content_sz);
+		offset_index_init(&offidx, pk->buffer + pk->offset, ele_count, contents,
+				content_sz);
 	}
 	else {
-		list_offset_index_init(&offidx, pk->buffer + pk->offset, ele_count,
-				contents, content_sz);
+		list_partial_offset_index_init(&offidx, pk->buffer + pk->offset,
+				ele_count, contents, content_sz);
 	}
 
 	offset_index_set_filled(&offidx, 1);
@@ -1188,7 +1274,7 @@ as_bin_set_ordered_empty_list(as_bin *b, rollback_alloc *alloc_buf)
 static inline void
 cdt_context_set_empty_list(cdt_context *ctx, bool is_ordered)
 {
-	if (ctx->data_sz == 0) {
+	if (cdt_context_is_toplvl(ctx) && ! ctx->create_triggered) {
 		if (is_ordered) {
 			as_bin_set_ordered_empty_list(ctx->b, ctx->alloc_buf);
 		}
@@ -1206,9 +1292,14 @@ cdt_context_set_empty_list(cdt_context *ctx, bool is_ordered)
 static inline void
 cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uint64_t create_flags)
 {
+	if (ctx->create_triggered) {
+		ctx->create_flags = create_flags;
+		return;
+	}
+
 	if (! as_bin_inuse(ctx->b)) {
 		cf_assert(ctx->data_sz == 0, AS_PARTICLE, "invalid state");
-		ctx->b->particle = (create_flags & AS_PACKED_LIST_FLAG_ORDERED) != 0 ?
+		ctx->b->particle = flags_is_ordered(create_flags) ?
 				(as_particle *)&list_ordered_empty :
 				(as_particle *)&list_mem_empty;
 		as_bin_state_set_from_type(ctx->b, AS_PARTICLE_TYPE_LIST);
@@ -1227,26 +1318,54 @@ static inline void
 cdt_context_list_push(cdt_context *ctx, const packed_list *list, uint32_t idx,
 		rollback_alloc *alloc_idx, bool is_dim, bool need_idx_mem)
 {
-	if (cdt_context_is_modify(ctx) &&
-			((cdt_context_is_toplvl(ctx) && is_dim) || list_is_ordered(list)) &&
-			list->ele_count > 1) {
-		if (need_idx_mem) {
-			cdt_context_push(ctx, idx, list_full_offidx_p(list)->_.ptr)->type =
-					AS_LIST;
-		}
-		else {
-			cdt_context_push(ctx, idx, NULL)->type = AS_LIST;
-			rollback_alloc_rollback(alloc_idx);
+	if (cdt_context_is_modify(ctx)) {
+		if (list_is_ordered(list)) {
+			if (list->ele_count > 1 ||
+					(list->ele_count == 1 && ctx->create_triggered)) {
+				if (need_idx_mem) {
+					cdt_context_push(ctx, idx, list_full_offidx_p(list)->_.ptr,
+							AS_LIST);
 
-			if (cdt_context_is_toplvl(ctx)) {
-				ctx->top_content_sz = list->content_sz;
-				ctx->top_content_off = list->contents - list->packed;
-				ctx->top_ele_count = list->ele_count;
+					return;
+				}
+				else {
+					cdt_context_push(ctx, idx, NULL, AS_LIST);
+
+					if (cdt_context_is_toplvl(ctx)) {
+						ctx->top_content_sz = list->content_sz;
+						ctx->top_content_off = list->contents - list->packed;
+						ctx->top_ele_count = list->ele_count;
+					}
+				}
+			}
+		}
+		else if (cdt_context_is_toplvl(ctx)) {
+			if (is_dim) {
+				cdt_context_push(ctx, idx, NULL, AS_LIST);
+			}
+			else if (ctx->create_triggered) {
+				uint32_t count = list_offset_partial_index_count(
+						list->ele_count);
+				uint32_t new_count = list_offset_partial_index_count(
+						list->ele_count + ctx->list_nil_pad + 1);
+
+				if (count == 0 && new_count != 0) {
+					ctx->top_content_sz = list->content_sz;
+					ctx->top_content_off = list->contents - list->packed;
+					ctx->top_ele_count = list->ele_count;
+				}
 			}
 		}
 	}
-	else {
-		rollback_alloc_rollback(alloc_idx);
+
+	rollback_alloc_rollback(alloc_idx);
+}
+
+static inline void
+cdt_context_list_handle_possible_noop(cdt_context *ctx)
+{
+	if (ctx->create_triggered) {
+		list_setup_bin_ctx(ctx, ctx->create_flags, 0, 0, 0, NULL, NULL);
 	}
 }
 
@@ -1285,7 +1404,7 @@ packed_list_init_from_bin(packed_list *list, const as_bin *b)
 static bool
 packed_list_init_from_ctx(packed_list *list, const cdt_context *ctx)
 {
-	if (ctx->data_sz == 0) {
+	if (cdt_context_is_toplvl(ctx)) {
 		return packed_list_init_from_bin(list, ctx->b);
 	}
 
@@ -1294,6 +1413,30 @@ packed_list_init_from_ctx(packed_list *list, const cdt_context *ctx)
 	return packed_list_init(list,
 			p_cdt_mem->data + ctx->data_offset + ctx->delta_off,
 			ctx->data_sz + ctx->delta_sz);
+}
+
+static inline bool
+packed_list_init_from_com(packed_list *list, cdt_op_mem *com)
+{
+	const cdt_context *ctx = &com->ctx;
+
+	if (ctx->create_triggered) {
+		list->ele_count = 0;
+		list->contents = NULL;
+
+		if (flags_is_ordered(ctx->create_flags)) {
+			list->packed = list_ordered_empty.data;
+			list->packed_sz = list_ordered_empty.sz;
+		}
+		else {
+			list->packed = list_mem_empty.data;
+			list->packed_sz = list_mem_empty.sz;
+		}
+
+		return packed_list_unpack_hdridx(list);
+	}
+
+	return packed_list_init_from_ctx(list, &com->ctx);
 }
 
 static bool
@@ -1339,15 +1482,15 @@ packed_list_unpack_hdridx(packed_list *list)
 		list->content_sz = list->packed_sz - mp.offset;
 
 		if (list_is_ordered(list)) {
-			list_full_offset_index_init(&list->offidx, NULL, list->ele_count,
+			offset_index_init(&list->offidx, NULL, list->ele_count,
 					list->contents, list->content_sz);
 		}
 		else {
-			list_offset_index_init(&list->offidx, NULL, list->ele_count,
+			list_partial_offset_index_init(&list->offidx, NULL, list->ele_count,
 					list->contents, list->content_sz);
 		}
 
-		list_full_offset_index_init(&list->full_offidx, NULL, list->ele_count,
+		offset_index_init(&list->full_offidx, NULL, list->ele_count,
 				list->contents, list->content_sz);
 
 		if (ext.size >= offset_index_size(&list->offidx)) {
@@ -1360,9 +1503,9 @@ packed_list_unpack_hdridx(packed_list *list)
 		list->content_sz = list->packed_sz - mp.offset;
 		list->ext_flags = 0;
 
-		list_offset_index_init(&list->offidx, NULL, list->ele_count,
+		list_partial_offset_index_init(&list->offidx, NULL, list->ele_count,
 				list->contents, list->content_sz);
-		list_full_offset_index_init(&list->full_offidx, NULL, list->ele_count,
+		offset_index_init(&list->full_offidx, NULL, list->ele_count,
 				list->contents, list->content_sz);
 	}
 
@@ -2702,7 +2845,8 @@ packed_list_insert(const packed_list *list, cdt_op_mem *com, int64_t index,
 
 		if (param_count == 0) {
 			result_data_set_int(result, list->ele_count);
-			return AS_OK;
+			cdt_context_list_handle_possible_noop(&com->ctx);
+			return AS_OK; // no-op
 		}
 
 		payload_hdr_sz = as_pack_list_header_get_size(param_count);
@@ -2932,6 +3076,7 @@ packed_list_add_items_ordered(const packed_list *list, cdt_op_mem *com,
 
 	if (val_count == 0) {
 		result_data_set_int(result, list->ele_count);
+		cdt_context_list_handle_possible_noop(&com->ctx);
 		return AS_OK; // no-op
 	}
 
@@ -3453,7 +3598,7 @@ list_set_flags(cdt_op_mem *com, uint8_t set_flags)
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_set_flags() invalid packed list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3472,6 +3617,7 @@ list_set_flags(cdt_op_mem *com, uint8_t set_flags)
 	}
 	else {
 		if (! was_ordered) {
+			cdt_context_list_handle_possible_noop(&com->ctx);
 			return AS_OK; // no-op
 		}
 	}
@@ -3523,7 +3669,7 @@ list_append(cdt_op_mem *com, const cdt_payload *payload, bool payload_is_list,
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_append() invalid packed list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3546,7 +3692,7 @@ list_insert(cdt_op_mem *com, int64_t index, const cdt_payload *payload,
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_insert() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3566,7 +3712,7 @@ list_set(cdt_op_mem *com, int64_t index, const cdt_payload *value,
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_set() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3647,7 +3793,7 @@ list_increment(cdt_op_mem *com, int64_t index, cdt_payload *delta_value,
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_increment() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3707,7 +3853,7 @@ list_sort(cdt_op_mem *com, as_cdt_sort_flags sort_flags)
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_sort() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3768,7 +3914,7 @@ list_remove_by_index_range(cdt_op_mem *com, int64_t index, uint64_t count)
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_remove_by_index_range() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3782,7 +3928,7 @@ list_remove_by_value_interval(cdt_op_mem *com, const cdt_payload *value_start,
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_remove_by_value_interval() invalid packed list, ele_count=%d", list.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
@@ -3796,7 +3942,7 @@ list_remove_by_rank_range(cdt_op_mem *com, int64_t rank, uint64_t count)
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_remove_by_rank_range() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3809,7 +3955,7 @@ list_remove_all_by_value_list(cdt_op_mem *com, const cdt_payload *value_list)
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_remove_all_by_value_list() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3823,7 +3969,7 @@ list_remove_by_rel_rank_range(cdt_op_mem *com, const cdt_payload *value,
 {
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, &com->ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "list_remove_by_rel_rank_range() invalid list");
 		return -AS_ERR_PARAMETER;
 	}
@@ -3858,7 +4004,7 @@ list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags,
 		as_pack_list_header(&pk, ele_count);
 
 		if (new_offidx) {
-			list_offset_index_init(new_offidx, NULL, ele_count, NULL,
+			list_partial_offset_index_init(new_offidx, NULL, ele_count, NULL,
 					content_sz);
 		}
 
@@ -3877,13 +4023,12 @@ list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags,
 	}
 
 	if (! set_ordered) {
-		list_offset_index_init(new_offidx, ptr, ele_count, contents,
+		list_partial_offset_index_init(new_offidx, ptr, ele_count, contents,
 				content_sz);
 		idx_trunc /= PACKED_LIST_INDEX_STEP;
 	}
 	else {
-		list_full_offset_index_init(new_offidx, ptr, ele_count, contents,
-				content_sz);
+		offset_index_init(new_offidx, ptr, ele_count, contents, content_sz);
 	}
 
 	if (idx_trunc == 0 || ! old_offidx || offset_index_is_null(old_offidx)) {
@@ -3903,7 +4048,7 @@ list_setup_bin_ctx(cdt_context *ctx, uint8_t flags, uint32_t content_sz,
 		uint32_t ele_count, uint32_t idx_trunc, const offset_index *old_offidx,
 		offset_index *new_offidx)
 {
-	if (ctx->data_sz == 0) {
+	if (ctx->data_sz == 0 && ! ctx->create_triggered) {
 		return list_setup_bin(ctx->b, ctx->alloc_buf, flags, content_sz,
 				ele_count, idx_trunc, old_offidx, new_offidx);
 	}
@@ -3968,7 +4113,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	cdt_context *ctx = &com->ctx;
 	as_cdt_optype optype = state->type;
 
-	if (ctx->data_sz == 0 && as_bin_inuse(ctx->b) &&
+	if (ctx->data_sz == 0 && cdt_context_inuse(ctx) &&
 			! is_list_type(as_bin_get_particle_type(ctx->b))) {
 		cf_warning(AS_PARTICLE, "cdt_process_state_packed_list_modify_optype() invalid type %d", as_bin_get_particle_type(ctx->b));
 		com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
@@ -4063,7 +4208,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 	case AS_CDT_OP_LIST_REMOVE:
 	case AS_CDT_OP_LIST_POP: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4081,7 +4226,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 	case AS_CDT_OP_LIST_REMOVE_RANGE:
 	case AS_CDT_OP_LIST_POP_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4099,7 +4244,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_TRIM: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4118,13 +4263,13 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_CLEAR: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
 		packed_list list;
 
-		if (! packed_list_init_from_ctx(&list, ctx)) {
+		if (! packed_list_init_from_com(&list, com)) {
 			cf_warning(AS_PARTICLE, "LIST_CLEAR: invalid list");
 			com->ret_code = -AS_ERR_PARAMETER;
 			return false;
@@ -4166,7 +4311,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_INDEX: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4184,7 +4329,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 	case AS_CDT_OP_LIST_REMOVE_ALL_BY_VALUE:
 	case AS_CDT_OP_LIST_REMOVE_BY_VALUE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4202,7 +4347,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_RANK: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4219,7 +4364,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_ALL_BY_VALUE_LIST: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4236,7 +4381,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_INDEX_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4254,7 +4399,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_VALUE_INTERVAL: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4273,7 +4418,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_RANK_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4291,7 +4436,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_VALUE_REL_RANK_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4347,7 +4492,7 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state,
 
 	packed_list list;
 
-	if (! packed_list_init_from_ctx(&list, ctx)) {
+	if (! packed_list_init_from_com(&list, com)) {
 		cf_warning(AS_PARTICLE, "%s: invalid list", cdt_process_state_get_op_name(state));
 		com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 		return false;
@@ -4538,8 +4683,8 @@ list_offset_partial_index_count(uint32_t ele_count)
 	return ele_count;
 }
 
-static inline void
-list_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr,
+void
+list_partial_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr,
 		uint32_t ele_count, const uint8_t *contents, uint32_t content_sz)
 {
 	ele_count = list_offset_partial_index_count(ele_count);
@@ -4625,13 +4770,6 @@ list_offset_index_rm_mask_cpy(offset_index *dst, const offset_index *full_src,
 //==========================================================
 // list_full_offset_index
 //
-
-static inline void
-list_full_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr,
-		uint32_t ele_count, const uint8_t *contents, uint32_t content_sz)
-{
-	offset_index_init(offidx, idx_mem_ptr, ele_count, contents, content_sz);
-}
 
 bool
 list_full_offset_index_fill_to(offset_index *offidx, uint32_t index,
@@ -4954,6 +5092,10 @@ list_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 		return true;
 	}
 
+	if (ctx->create_triggered) {
+		return true; // check after unwind
+	}
+
 	packed_list list;
 	uint8_t type = as_bin_get_particle_type(ctx->b);
 
@@ -5027,7 +5169,7 @@ list_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 		offset = mp.offset;
 
 		if (msgpack_sz(&mp) == 0) {
-			cf_warning(AS_PARTICLE, "list_verify() i=%u offset=%u mp.offset=%u invalid key", i, offset, mp.offset);
+			cf_warning(AS_PARTICLE, "list_verify() i=%u offset=%u mp.offset=%u invalid element", i, offset, mp.offset);
 			return false;
 		}
 	}

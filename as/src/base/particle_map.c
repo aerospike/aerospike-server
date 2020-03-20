@@ -325,8 +325,10 @@ static inline bool map_has_offidx(const packed_map *map);
 static inline void cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags);
 static inline void cdt_context_set_empty_packed_map(cdt_context *ctx, uint8_t flags);
 static inline void cdt_context_set_by_map_idx(cdt_context *ctx, const packed_map *map, uint32_t idx);
+static inline void cdt_context_set_by_map_create(cdt_context *ctx, const packed_map *map, uint32_t idx);
 
 static inline void cdt_context_map_push(cdt_context *ctx, const packed_map *map, uint32_t idx);
+static inline void cdt_context_map_handle_possible_noop(cdt_context *ctx);
 
 // map_packer
 static as_particle *map_packer_create_particle(map_packer *mpk, rollback_alloc *alloc_buf);
@@ -598,6 +600,26 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 
 		p_map_mem->sz = value_size;
 		memcpy(p_map_mem->data, wire_value, value_size);
+
+#ifdef MAP_DEBUG_VERIFY
+		{
+			as_bin b;
+			b.particle = *pp;
+			as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_MAP);
+
+			const cdt_context ctx = {
+					.b = &b,
+					.orig = b.particle,
+			};
+
+			if (! map_verify(&ctx)) {
+				offset_index_print(&map.offidx, "verify");
+				map_print(&map, "original");
+				cf_crash(AS_PARTICLE, "map_from_wire: pp=%p wire_value=%p", pp, wire_value);
+			}
+		}
+#endif
+
 		return AS_OK;
 	}
 
@@ -1102,6 +1124,7 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in *val)
 	cdt_payload key;
 	packed_map map;
 
+	val->has_nonstorage = false;
 	key.ptr = val->buf + val->offset;
 	key.sz = msgpack_sz(val);
 
@@ -1132,8 +1155,27 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in *val)
 				&count);
 
 		if (count == 0) {
-			cf_warning(AS_PARTICLE, "map_subcontext_by_key() key not found");
+			if (ctx->create_flag_on && ! val->has_nonstorage) {
+				ctx->create_triggered = true;
+				ctx->create_hdr_ptr = map.packed;
+				ctx->create_sz += key.sz;
+				ctx->create_sz += cdt_hdr_delta_sz(map.ele_count + 1, 1); // +1 to include ext element pair
+
+				cdt_context_map_push(ctx, &map, index);
+				cdt_context_set_by_map_create(ctx, &map, index);
+
+				return true;
+			}
+
+			if (ctx->create_flag_on && val->has_nonstorage) {
+				cf_warning(AS_PARTICLE, "map_subcontext_by_key() cannot create key with non-storage element(s)");
+			}
+			else {
+				cf_warning(AS_PARTICLE, "map_subcontext_by_key() key not found");
+			}
+
 			rollback_alloc_rollback(alloc_idx);
+
 			return false;
 		}
 
@@ -1147,6 +1189,17 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in *val)
 		packed_map_find_key(&map, &find_key, &key);
 
 		if (! find_key.found_key) {
+			if (ctx->create_flag_on && ! val->has_nonstorage) {
+				ctx->create_triggered = true;
+				ctx->create_hdr_ptr = map.packed;
+				ctx->create_sz += key.sz;
+				ctx->create_sz += cdt_hdr_delta_sz(map.ele_count, 1);
+
+				cdt_context_set_by_map_create(ctx, &map, 0);
+
+				return true;
+			}
+
 			cf_warning(AS_PARTICLE, "map_subcontext_by_key() key not found");
 			rollback_alloc_rollback(alloc_idx);
 			return false;
@@ -1229,21 +1282,37 @@ map_subcontext_by_value(cdt_context *ctx, msgpack_in *val)
 void
 cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 {
+	if (ctx->b->particle == ctx->orig) { // no-op happened
+		return;
+	}
+
 	packed_map map;
 	packed_map orig;
 
 	packed_map_init_from_ctx(&map, ctx, false);
 	packed_map_init_from_particle(&orig, ctx->orig, false);
 
-	offset_index_move_ele(&map.offidx, &orig.offidx, p->idx, p->idx);
+	bool make_new_indexes = (orig.ele_count <= 1 && map.ele_count > 1);
+
+	if (make_new_indexes) {
+		packed_map_check_and_fill_offidx(&map);
+	}
+	else if (orig.ele_count == map.ele_count) {
+		offset_index_move_ele(&map.offidx, &orig.offidx, p->idx, p->idx);
+	}
+	else if (orig.ele_count + 1 == map.ele_count) {
+		offset_index_add_ele(&map.offidx, &orig.offidx, p->idx);
+	}
+	else {
+		cf_crash(AS_PARTICLE, "unwind doesn't support ele_count %u -> %u", orig.ele_count, map.ele_count);
+	}
 
 	if (! is_kv_ordered(orig.flags)) {
 		return;
 	}
 
-	if (! order_index_is_filled(&orig.ordidx)) { // no prior order index
-		order_index_set_sorted(&map.ordidx, &map.offidx, map.contents,
-				map.content_sz, SORT_BY_VALUE);
+	if (make_new_indexes || ! order_index_is_filled(&orig.ordidx)) {
+		packed_map_ensure_ordidx_filled(&map);
 		return;
 	}
 
@@ -1265,7 +1334,7 @@ cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 
 	order_index_find find = {
 			.target = p->idx,
-			.count = map.ele_count
+			.count = orig.ele_count
 	};
 
 	order_index_find_rank_by_value(&orig.ordidx, &v, &orig.offidx, &find, true);
@@ -1274,11 +1343,42 @@ cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 	uint32_t rm_rank = order_index_find_idx(&orig.ordidx, p->idx, 0,
 			orig.ele_count);
 
+	if (orig.ele_count + 1 == map.ele_count) {
+		order_index_op_add(&map.ordidx, &orig.ordidx, p->idx, add_rank);
+		return;
+	}
+
 	if (add_rank == rm_rank || add_rank == rm_rank + 1) {
 		return;
 	}
 
 	order_index_op_replace1(&map.ordidx, &orig.ordidx, add_rank, rm_rank);
+}
+
+uint8_t
+map_get_ctx_flags(uint8_t ctx_type, bool is_toplvl)
+{
+	ctx_type &= AS_CDT_CTX_CREATE_MASK;
+
+	if (ctx_type == AS_CDT_CTX_CREATE_MAP_UNORDERED) {
+		return 0;
+	}
+
+	if ((ctx_type & AS_CDT_CTX_CREATE_MAP_K_ORDERED) != 0) {
+		uint8_t flags = is_toplvl ?
+				(AS_PACKED_MAP_FLAG_K_ORDERED | AS_PACKED_MAP_FLAG_OFF_IDX):
+				AS_PACKED_MAP_FLAG_K_ORDERED;
+
+		if (ctx_type == AS_CDT_CTX_CREATE_MAP_KV_ORDERED) {
+			flags |= is_toplvl ? (AS_PACKED_MAP_FLAG_V_ORDERED |
+					AS_PACKED_MAP_FLAG_ORD_IDX) : AS_PACKED_MAP_FLAG_V_ORDERED;
+		}
+
+		return flags;
+	}
+
+	cf_crash(AS_PARTICLE, "unexpected");
+	return 0;
 }
 
 
@@ -1431,7 +1531,12 @@ map_has_offidx(const packed_map *map)
 static inline void
 cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags)
 {
-	if (! as_bin_inuse(ctx->b)) {
+	if (ctx->create_triggered) {
+		ctx->create_flags = flags;
+		return;
+	}
+
+	if (! ctx->create_triggered && ! as_bin_inuse(ctx->b)) {
 		if (is_kv_ordered(flags)) {
 			ctx->b->particle = (as_particle *)&map_mem_empty_kv;
 		}
@@ -1449,7 +1554,7 @@ cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags)
 static inline void
 cdt_context_set_empty_packed_map(cdt_context *ctx, uint8_t flags)
 {
-	if (ctx->data_sz == 0) {
+	if (cdt_context_is_toplvl(ctx) && ! ctx->create_triggered) {
 		as_bin_set_empty_packed_map(ctx->b, ctx->alloc_buf, flags);
 		return;
 	}
@@ -1478,16 +1583,34 @@ cdt_context_set_by_map_idx(cdt_context *ctx, const packed_map *map,
 }
 
 static inline void
+cdt_context_set_by_map_create(cdt_context *ctx, const packed_map *map,
+		uint32_t idx)
+{
+	ctx->data_offset += map->packed_sz - map->content_sz +
+			offset_index_get_const(&map->offidx, idx);
+	ctx->data_sz = 0;
+}
+
+static inline void
 cdt_context_map_push(cdt_context *ctx, const packed_map *map, uint32_t idx)
 {
 	if (cdt_context_is_modify(ctx) && cdt_context_is_toplvl(ctx) &&
-			map->ele_count > 1 &&
-			(map->flags & AS_PACKED_MAP_FLAG_OFF_IDX) != 0) {
-		cdt_context_push(ctx, idx, NULL)->type = AS_MAP;
+			(map->flags & AS_PACKED_MAP_FLAG_OFF_IDX) != 0 &&
+			(map->ele_count > 1 ||
+					(map->ele_count == 1 && ctx->create_triggered))) {
+		cdt_context_push(ctx, idx, NULL, AS_MAP);
 
 		ctx->top_content_sz = map->content_sz;
 		ctx->top_content_off = map->contents - map->packed;
 		ctx->top_ele_count = map->ele_count;
+	}
+}
+
+static inline void
+cdt_context_map_handle_possible_noop(cdt_context *ctx)
+{
+	if (ctx->create_triggered) {
+		cdt_context_set_empty_packed_map(ctx, ctx->create_flags);
 	}
 }
 
@@ -1513,7 +1636,7 @@ map_packer_create_particle(map_packer *mpk, rollback_alloc *alloc_buf)
 static void
 map_packer_create_particle_ctx(map_packer *mpk, cdt_context *ctx)
 {
-	if (ctx->data_sz == 0) {
+	if (ctx->data_sz == 0 && ! ctx->create_triggered) {
 		ctx->b->particle = map_packer_create_particle(mpk, ctx->alloc_buf);
 		return;
 	}
@@ -2458,6 +2581,7 @@ map_add_items(cdt_op_mem *com, const cdt_payload *items,
 
 	if (val_count == 0) {
 		result_data_set_int(&com->result, map.ele_count);
+		cdt_context_map_handle_possible_noop(&com->ctx);
 		return AS_OK; // no-op
 	}
 
@@ -2645,7 +2769,7 @@ static bool
 packed_map_init_from_ctx(packed_map *map, const cdt_context *ctx,
 		bool fill_idxs)
 {
-	if (ctx->data_sz == 0) {
+	if (cdt_context_is_toplvl(ctx)) {
 		return packed_map_init_from_bin(map, ctx->b, fill_idxs);
 	}
 
@@ -2661,6 +2785,32 @@ packed_map_init_from_ctx(packed_map *map, const cdt_context *ctx,
 static inline bool
 packed_map_init_from_com(packed_map *map, cdt_op_mem *com, bool fill_idxs)
 {
+	const cdt_context *ctx = &com->ctx;
+
+	if (ctx->create_triggered) {
+		if (is_kv_ordered(ctx->create_flags)) {
+			map->packed = map_mem_empty_kv.data;
+			map->packed_sz = map_mem_empty_kv.sz;
+		}
+		else if (is_k_ordered(ctx->create_flags)) {
+			map->packed = map_mem_empty_k.data;
+			map->packed_sz = map_mem_empty_k.sz;
+		}
+		else {
+			map->packed = map_mem_empty.data;
+			map->packed_sz = map_mem_empty.sz;
+		}
+
+		if (! packed_map_unpack_hdridx(map, false)) {
+			cf_crash(AS_PARTICLE, "unexpected");
+		}
+
+		map->flags &=
+				~(AS_PACKED_MAP_FLAG_OFF_IDX | AS_PACKED_MAP_FLAG_ORD_IDX); // strip index flags since created context is never top level
+
+		return true;
+	}
+
 	return packed_map_init_from_ctx(map, &com->ctx, fill_idxs);
 }
 
@@ -5638,35 +5788,15 @@ packed_map_op_write_new_offidx(const packed_map_op *op,
 	cf_assert(offset_index_is_full(offidx), AS_PARTICLE, "offidx not full");
 	cf_assert(op->new_ele_count >= op->map->ele_count, AS_PARTICLE, "op->new_ele_count %u < op->map->ele_count %u", op->new_ele_count, op->map->ele_count);
 
-	uint32_t ele_count = op->map->ele_count;
-
 	if (op->new_ele_count - op->map->ele_count != 0) { // add 1
-		// Insert at end.
-		if (remove_info->idx == ele_count) {
-			offset_index_copy(new_offidx, offidx, 0, 0, ele_count, 0);
-			offset_index_set(new_offidx, ele_count, op->seg1_sz + op->seg2_sz);
-		}
-		// Insert at offset.
-		else {
-			offset_index_copy(new_offidx, offidx, 0, 0,
-					remove_info->idx + 1, 0);
-			offset_index_copy(new_offidx, offidx, remove_info->idx + 1,
-					remove_info->idx, (ele_count - remove_info->idx), kv_sz);
-		}
+		offset_index_add_ele(new_offidx, offidx, add_info->idx);
 	}
 	else { // replace 1
 		cf_assert(remove_info->idx == add_info->idx, AS_PARTICLE, "remove_info->idx %u != add_info->idx %u", remove_info->idx, add_info->idx);
 
-		offset_index_copy(new_offidx, offidx, 0, 0, remove_info->idx, 0);
-		offset_index_set(new_offidx, remove_info->idx, remove_info->key_offset);
-
-		int delta = (int)kv_sz - (int)remove_info->sz;
-
-		offset_index_copy(new_offidx, offidx, remove_info->idx + 1,
-				remove_info->idx + 1, ele_count - remove_info->idx - 1, delta);
+		offset_index_move_ele(new_offidx, offidx, remove_info->idx,
+				add_info->idx);
 	}
-
-	offset_index_set_filled(new_offidx, op->new_ele_count);
 }
 
 static void
@@ -6204,7 +6334,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 	cdt_context *ctx = &com->ctx;
 	as_cdt_optype optype = state->type;
 
-	if (ctx->data_sz == 0 && as_bin_inuse(ctx->b) &&
+	if (ctx->data_sz == 0 && cdt_context_inuse(ctx) &&
 			! is_map_type(as_bin_get_particle_type(ctx->b))) {
 		cf_warning(AS_PARTICLE, "cdt_process_state_packed_map_modify_optype() invalid type %d", as_bin_get_particle_type(ctx->b));
 		com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
@@ -6325,7 +6455,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REPLACE_ITEMS: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			com->ret_code = -AS_ERR_ELEMENT_NOT_FOUND;
 			return false;
 		}
@@ -6362,7 +6492,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_KEY: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6379,7 +6509,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_INDEX: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6396,7 +6526,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_VALUE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6413,7 +6543,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_RANK: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6430,7 +6560,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_KEY_LIST: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6447,7 +6577,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_ALL_BY_VALUE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6464,7 +6594,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_VALUE_LIST: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6481,7 +6611,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_KEY_INTERVAL: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6500,7 +6630,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_INDEX_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6518,7 +6648,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_VALUE_INTERVAL: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6537,7 +6667,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_RANK_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6555,7 +6685,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_KEY_REL_INDEX_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6575,7 +6705,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_REMOVE_BY_VALUE_REL_RANK_RANGE: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6595,7 +6725,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_MAP_CLEAR: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! cdt_context_inuse(ctx)) {
 			return true; // no-op
 		}
 
@@ -6643,7 +6773,7 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state,
 
 	packed_map map;
 
-	if (! packed_map_init_from_ctx(&map, ctx, false)) {
+	if (! packed_map_init_from_com(&map, com, false)) {
 		cf_warning(AS_PARTICLE, "%s: invalid map", cdt_process_state_get_op_name(state));
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
@@ -6877,6 +7007,10 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 		return true;
 	}
 
+	if (ctx->create_triggered) {
+		return true; // check after unwind
+	}
+
 	packed_map map;
 	uint8_t type = as_bin_get_particle_type(ctx->b);
 
@@ -6948,7 +7082,10 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 		}
 	}
 
-	if (check_offidx && filled < map.ele_count) {
+	if (! check_offidx) {
+		offset_index_set_filled(u->offidx, map.ele_count);
+	}
+	else if (filled < map.ele_count) {
 		u->offidx->_.ptr = temp_offidx._.ptr;
 	}
 
@@ -6961,6 +7098,10 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 	// Check key orders.
 	if (map_is_k_ordered(&map) && map.ele_count > 0) {
 		mp.offset = 0;
+
+		if (msgpack_sz_rep(&mp, 2) == 0) {
+			cf_warning(AS_PARTICLE, "map_verify() i=0 pk.offset=%u invalid pair", mp.offset);
+		}
 
 		define_map_msgpack_in(mp_key, &map);
 
@@ -6984,6 +7125,27 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 				cf_warning(AS_PARTICLE, "map_verify() i=%u offset=%u mp.offset=%u invalid value", i, offset, mp.offset);
 				return false;
 			}
+		}
+	}
+	else if (map.ele_count > 0) { // check unordered key uniqueness
+		define_rollback_alloc(alloc_idx, NULL, 2, false); // for temp indexes
+		define_order_index(key_ordidx, map.ele_count, alloc_idx);
+
+		order_index_set_sorted_with_offsets(&key_ordidx, u->offidx,
+				SORT_BY_KEY);
+
+		uint32_t dup_count;
+		uint32_t dup_sz;
+
+		if (! order_index_sorted_mark_dup_eles(&key_ordidx, u->offidx,
+				&dup_count, &dup_sz)) {
+			cf_warning(AS_PARTICLE, "map_verify() mark dup failed");
+			return false;
+		}
+
+		if (dup_count != 0) {
+			cf_warning(AS_PARTICLE, "map_verify() dup key");
+			return false;
 		}
 	}
 

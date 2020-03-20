@@ -197,19 +197,33 @@ typedef struct {
 // Forward declares.
 //
 
+static uint32_t calc_count(uint32_t index, uint64_t in_count, uint32_t max_index);
+static void calc_index_count_multi(int64_t in_index, uint64_t in_count, uint32_t ele_count, uint32_t *out_index, uint32_t *out_count);
+
 static bool unpack_list_value(msgpack_in *mp, cdt_payload *payload_r);
 static bool unpack_map_key(msgpack_in *mp, cdt_payload *payload_r);
 static bool unpack_map_value(msgpack_in *mp, cdt_payload *payload_r);
 
+static inline uint8_t *buf_pack_nil_rep(uint8_t *buf, uint32_t rep);
+static inline void pack_nil_rep(as_packer *pk, uint32_t rep);
+
+// order_index
 static inline uint32_t order_index_ele_sz(uint32_t max_idx);
 
+// cdt_context
+static bool cdt_context_ctx_type_create_sz(msgpack_in *mp, uint32_t *sz, uint64_t ctx_type);
+static bool cdt_context_count_create_sz(msgpack_in *mp, uint32_t *sz, uint32_t param_count);
+static uint8_t cdt_context_get_toplvl_type_int(const cdt_context *ctx, int64_t *index_r);
+static uint8_t *cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr, bool write_tophdr);
+static uint8_t *cdt_context_create_new_particle_crnew(cdt_context *ctx, uint32_t subctx_sz);
+static uint8_t *cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz);
 static void cdt_context_fill_unpacker(cdt_context *ctx, msgpack_in *mp);
 
 static void cdt_context_unwind(cdt_context *ctx);
 
 
 //==========================================================
-// CDT helpers.
+// Local helpers.
 //
 
 // Calculate count given index and max_index.
@@ -253,51 +267,6 @@ calc_index_count_multi(int64_t in_index, uint64_t in_count, uint32_t ele_count,
 		*out_index = (uint32_t)in_index;
 		*out_count = calc_count((uint32_t)in_index, in_count, ele_count);
 	}
-}
-
-// Transform to absolute (uint32_t) index/count bounded by ele_count.
-bool
-calc_index_count(int64_t in_index, uint64_t in_count, uint32_t ele_count,
-		uint32_t *out_index, uint32_t *out_count, bool is_multi)
-{
-	if (is_multi) {
-		calc_index_count_multi(in_index, in_count, ele_count, out_index,
-				out_count);
-		return true;
-	}
-
-	if (in_index >= (int64_t)ele_count ||
-			(in_index = calc_index(in_index, ele_count)) < 0) {
-		return false;
-	}
-
-	*out_index = (uint32_t)in_index;
-	*out_count = calc_count((uint32_t)in_index, in_count, ele_count);
-
-	return true;
-}
-
-void
-calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index,
-		int64_t *out_index, uint64_t *out_count)
-{
-	in_index += rel_index;
-
-	if (in_index < 0) {
-		in_index *= -1;
-
-		if (in_count > in_index) {
-			in_count -= in_index;
-		}
-		else {
-			in_count = 0;
-		}
-
-		in_index = 0;
-	}
-
-	*out_index = in_index;
-	*out_count = in_count;
 }
 
 static bool
@@ -359,6 +328,70 @@ unpack_map_value(msgpack_in *mp, cdt_payload *payload_r)
 	payload_r->sz = sz;
 
 	return true;
+}
+
+static inline uint8_t *
+buf_pack_nil_rep(uint8_t *buf, uint32_t rep)
+{
+	memset(buf, 0xc0, rep);
+	return buf + rep;
+}
+
+static inline void
+pack_nil_rep(as_packer *pk, uint32_t rep)
+{
+	memset(pk->buffer + pk->offset, 0xc0, rep);
+	pk->offset += rep;
+}
+
+
+//==========================================================
+// Global helpers.
+//
+
+// Transform to absolute (uint32_t) index/count bounded by ele_count.
+bool
+calc_index_count(int64_t in_index, uint64_t in_count, uint32_t ele_count,
+		uint32_t *out_index, uint32_t *out_count, bool is_multi)
+{
+	if (is_multi) {
+		calc_index_count_multi(in_index, in_count, ele_count, out_index,
+				out_count);
+		return true;
+	}
+
+	if (in_index >= (int64_t)ele_count ||
+			(in_index = calc_index(in_index, ele_count)) < 0) {
+		return false;
+	}
+
+	*out_index = (uint32_t)in_index;
+	*out_count = calc_count((uint32_t)in_index, in_count, ele_count);
+
+	return true;
+}
+
+void
+calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index,
+		int64_t *out_index, uint64_t *out_count)
+{
+	in_index += rel_index;
+
+	if (in_index < 0) {
+		in_index *= -1;
+
+		if (in_count > in_index) {
+			in_count -= in_index;
+		}
+		else {
+			in_count = 0;
+		}
+
+		in_index = 0;
+	}
+
+	*out_index = in_index;
+	*out_count = in_count;
 }
 
 bool
@@ -1078,8 +1111,13 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 	}
 
 	uint8_t bin_type = as_bin_get_particle_type(com->ctx.b);
+	bool bin_was_empty = false;
 
-	if (bin_type != AS_PARTICLE_TYPE_LIST && bin_type != AS_PARTICLE_TYPE_MAP) {
+	if (bin_type == AS_PARTICLE_TYPE_NULL && cdt_op_is_modify(com)) {
+		bin_was_empty = true;
+	}
+	else if (bin_type != AS_PARTICLE_TYPE_LIST &&
+			bin_type != AS_PARTICLE_TYPE_MAP) {
 		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bin type %u is not list or map", bin_type);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
@@ -1097,6 +1135,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 	for (uint32_t i = 0; i < ctx_param_count; i += 2) {
 		uint64_t ctx_type;
 		bool ret;
+		uint32_t start_off = state->mp.offset;
 
 		if (! msgpack_get_uint64(&state->mp, &ctx_type)) {
 			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() param %u expected int", i);
@@ -1104,7 +1143,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			return false;
 		}
 
-		uint8_t table_i = (uint8_t)ctx_type & AS_CDT_CTX_MASK;
+		uint8_t table_i = (uint8_t)ctx_type & AS_CDT_CTX_BASE_MASK;
 
 		if (table_i >= AS_CDT_MAX_CTX) {
 			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context type 0x%lx", ctx_type);
@@ -1112,9 +1151,40 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			return false;
 		}
 
+		com->ctx.create_ctx_type = ctx_type;
+		com->ctx.create_flag_on = (ctx_type & AS_CDT_CTX_CREATE_MASK) != 0;
+
+		if (bin_was_empty) {
+			if (! com->ctx.create_flag_on) {
+				cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bin is empty and op has no create flag(s)");
+				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
+				return false;
+			}
+
+			com->ctx.create_triggered = true;
+			com->ctx.create_ctx_start = state->mp.buf + start_off;
+			com->ctx.create_ctx_count = (ctx_param_count - i) / 2;
+
+			if (! cdt_context_ctx_type_create_sz(&state->mp,
+					&com->ctx.create_sz, ctx_type)) {
+				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
+				return false;
+			}
+
+			if (! cdt_context_count_create_sz(&state->mp,
+					&com->ctx.create_sz,
+					com->ctx.create_ctx_count - 1)) {
+				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
+				return false;
+			}
+
+			break;
+		}
+
 		msgpack_in mp;
 
 		cdt_context_fill_unpacker(&com->ctx, &mp);
+		cf_assert(mp.buf_sz != 0, AS_PARTICLE, "invalid mp.buf_sz due to cdt_context_fill_unpacker being called in not-yet-existent context");
 
 		msgpack_type type = msgpack_peek_type(&mp);
 
@@ -1125,7 +1195,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 		}
 
 		if (type == MSGPACK_TYPE_LIST) {
-			if (ctx_type & AS_CDT_CTX_MAP) {
+			if ((ctx_type & AS_CDT_CTX_MAP) != 0) {
 				cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context type 0x%lx for list element", ctx_type);
 				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 				return false;
@@ -1134,7 +1204,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			ret = list_table[table_i](&com->ctx, &state->mp);
 		}
 		else { // map
-			if (ctx_type & AS_CDT_CTX_LIST) {
+			if ((ctx_type & AS_CDT_CTX_LIST) != 0) {
 				cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context type 0x%lx for map element", ctx_type);
 				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 				return false;
@@ -1147,6 +1217,21 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context at param %u", i);
 			com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 			return false;
+		}
+
+		if (com->ctx.create_triggered) {
+			com->ctx.create_ctx_start = state->mp.buf + start_off;
+			com->ctx.create_ctx_count = (ctx_param_count - i) / 2;
+
+			if (! cdt_op_is_modify(com) ||
+					! cdt_context_count_create_sz(&state->mp,
+							&com->ctx.create_sz,
+							com->ctx.create_ctx_count - 1)) {
+				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
+				return false;
+			}
+
+			break;
 		}
 	}
 
@@ -1177,6 +1262,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			cdt_context_unwind(&com->ctx);
 
 #if defined(CDT_DEBUG_VERIFY)
+			com->ctx.create_triggered = false;
 			com->ctx.data_offset = 0;
 			com->ctx.data_sz = 0;
 			if (! cdt_verify(&com->ctx)) {
@@ -1205,12 +1291,562 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 // cdt_context
 //
 
+static bool
+cdt_context_ctx_type_create_sz(msgpack_in *mp, uint32_t *sz, uint64_t ctx_type)
+{
+	uint8_t masked_type = (uint8_t)(ctx_type & AS_CDT_CTX_TYPE_MASK);
+
+	if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
+		mp->has_nonstorage = false;
+
+		uint32_t key_sz = msgpack_sz(mp);
+
+		if (key_sz == 0 || mp->has_nonstorage) {
+			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context key");
+			return false;
+		}
+
+		*sz += key_sz;
+
+		if ((ctx_type & AS_CDT_CTX_CREATE_MAP_K_ORDERED) != 0) {
+			*sz += 3 + 1; // ext element pair size
+		}
+	}
+	else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
+		int64_t idx;
+		uint8_t cr_type = ctx_type & AS_CDT_CTX_CREATE_MASK;
+
+		if (! msgpack_get_int64(mp, &idx) || idx < -1) {
+			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context index");
+			return false;
+		}
+
+		if (cr_type == 0) {
+			if (idx > 0) {
+				cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context index %ld", idx);
+				return false;
+			}
+		}
+		else {
+			if (cr_type == AS_CDT_CTX_CREATE_LIST_ORDERED) {
+				*sz += 3; // ext element size
+			}
+			else if (cr_type == AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND) {
+				*sz += as_pack_list_header_get_size(idx + 1) - 1; // minus 1 to be added again before return
+				*sz += idx; // size of nil elements
+			}
+			else if (idx > 0) {
+				cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context index %ld", idx);
+				return false;
+			}
+		}
+	}
+	else {
+		cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid create context 0x%lx", ctx_type);
+		return false;
+	}
+
+	*sz += 1; // map or list hdr size to add
+
+	return true;
+}
+
+static bool
+cdt_context_count_create_sz(msgpack_in *mp, uint32_t *sz, uint32_t param_count)
+{
+	for (uint32_t i = 0; i < param_count; i++) {
+		uint64_t ctx_type;
+
+		if (! msgpack_get_uint64(mp, &ctx_type)) {
+			cf_warning(AS_PARTICLE, "cdt_context_count_create_sz() param %u expected int", i);
+			return false;
+		}
+
+		if (! cdt_context_ctx_type_create_sz(mp, sz, ctx_type)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static uint8_t
+cdt_context_get_toplvl_type_int(const cdt_context *ctx, int64_t *index_r)
+{
+	msgpack_in mp = {
+			.buf = ctx->create_ctx_start,
+			.buf_sz = ~(0U)
+	};
+
+	uint64_t ctx_type;
+
+	if (! msgpack_get_uint64(&mp, &ctx_type)) {
+		cf_crash(AS_PARTICLE, "cdt_context_get_toplvl_type() param pair 0 expected int");
+	}
+
+	if (index_r) {
+		msgpack_get_int64(&mp, index_r);
+	}
+
+	return (uint8_t)ctx_type;
+}
+
+static uint8_t *
+cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
+		bool write_tophdr)
+{
+	msgpack_in mp = {
+			.buf = ctx->create_ctx_start,
+			.buf_sz = ~(0U)
+	};
+
+	uint64_t ctx_type;
+
+	if (! msgpack_get_uint64(&mp, &ctx_type)) {
+		cf_crash(AS_PARTICLE, "cdt_context_fill_create() param pair 0 expected int");
+	}
+
+	uint8_t masked_type = (uint8_t)(ctx_type & AS_CDT_CTX_TYPE_MASK);
+	uint8_t cr_type = (uint8_t)(ctx_type & AS_CDT_CTX_CREATE_MASK);
+
+	if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
+		if (write_tophdr) {
+			as_packer pk = {
+					.buffer = to_ptr,
+					.capacity = ~(0U)
+			};
+
+			if ((cr_type & AS_CDT_CTX_CREATE_MAP_K_ORDERED) != 0) {
+				as_pack_map_header(&pk, 2);
+				as_pack_ext_header(&pk, 0, map_get_ctx_flags(cr_type, true));
+				as_pack_nil(&pk);
+			}
+			else {
+				as_pack_map_header(&pk, 1);
+			}
+
+			to_ptr += pk.offset;
+		}
+
+		const uint8_t *key_ptr = mp.buf + mp.offset;
+		uint32_t key_sz = msgpack_sz(&mp);
+
+		if (key_sz == 0 || mp.has_nonstorage) {
+			cf_crash(AS_PARTICLE, "cdt_context_fill_create() invalid context key");
+		}
+
+		memcpy(to_ptr, key_ptr, key_sz);
+		to_ptr += key_sz;
+	}
+	else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
+		int64_t idx;
+
+		if (! msgpack_get_int64(&mp, &idx) || idx < -1) {
+			cf_crash(AS_PARTICLE, "cdt_context_fill_create() invalid context index");
+		}
+
+		if (write_tophdr) {
+			as_packer pk = {
+					.buffer = to_ptr,
+					.capacity = ~(0U)
+			};
+
+			if (idx == -1) {
+				idx = 0;
+			}
+
+			if (cr_type == AS_CDT_CTX_CREATE_LIST_ORDERED) {
+				as_pack_list_header(&pk, 2);
+				as_pack_ext_header(&pk, 0, list_get_ctx_flags(true, true));
+				idx = 0;
+			}
+			else if (cr_type == AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND) {
+				as_pack_list_header(&pk, idx + 1);
+				memset(pk.buffer + pk.offset, 0xc0, idx);
+				pk.offset += idx;
+			}
+			else {
+				cf_assert(idx == 0, AS_PARTICLE, "cdt_context_fill_create() invalid context index %ld", idx);
+				as_pack_list_header(&pk, 1);
+			}
+
+			to_ptr += pk.offset;
+		}
+	}
+	else if (write_tophdr) {
+		cf_warning(AS_PARTICLE, "cdt_context_fill_create() invalid ctx_type %lx", ctx_type);
+		return false;
+	}
+
+	for (uint32_t i = 1; i < ctx->create_ctx_count; i++) {
+		if (! msgpack_get_uint64(&mp, &ctx_type)) {
+			cf_warning(AS_PARTICLE, "cdt_context_fill_create() param pair %u expected int", i);
+			return false;
+		}
+
+		masked_type = ctx_type & AS_CDT_CTX_TYPE_MASK;
+		cr_type = (uint8_t)(ctx_type & AS_CDT_CTX_CREATE_MASK);
+
+		if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
+			as_packer pk = {
+					.buffer = to_ptr,
+					.capacity = ~(0U)
+			};
+
+			if ((cr_type & AS_CDT_CTX_CREATE_MAP_K_ORDERED) != 0) {
+				as_pack_map_header(&pk, 2);
+				as_pack_ext_header(&pk, 0, map_get_ctx_flags(ctx_type, false));
+				as_pack_nil(&pk);
+			}
+			else {
+				as_pack_map_header(&pk, 1);
+			}
+
+			const uint8_t *key_ptr = mp.buf + mp.offset;
+			uint32_t key_sz = msgpack_sz(&mp);
+
+			if (key_sz == 0 || mp.has_nonstorage) {
+				cf_crash(AS_PARTICLE, "cdt_context_fill_create() invalid context key");
+			}
+
+			to_ptr += pk.offset;
+			memcpy(to_ptr, key_ptr, key_sz);
+			to_ptr += key_sz;
+		}
+		else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
+			int64_t idx;
+
+			if (! msgpack_get_int64(&mp, &idx) || idx < -1) {
+				cf_crash(AS_PARTICLE, "cdt_context_fill_create() invalid context index");
+			}
+
+			if (idx == -1) {
+				idx = 0;
+			}
+
+			as_packer pk = {
+					.buffer = to_ptr,
+					.capacity = ~(0U)
+			};
+
+			if (cr_type == AS_CDT_CTX_CREATE_LIST_ORDERED) {
+				as_pack_list_header(&pk, 2);
+				as_pack_ext_header(&pk, 0, list_get_ctx_flags(true, false));
+			}
+			else if (cr_type == AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND) {
+				as_pack_list_header(&pk, idx + 1);
+				pack_nil_rep(&pk, idx);
+			}
+			else {
+				cf_assert(idx == 0, AS_PARTICLE, "cdt_context_fill_create() invalid context index %ld", idx);
+				as_pack_list_header(&pk, 1);
+			}
+
+			to_ptr += pk.offset;
+		}
+		else {
+			cf_crash(AS_PARTICLE, "cdt_context_fill_create() invalid create context 0x%lx", ctx_type);
+		}
+	}
+
+	return to_ptr;
+}
+
+static uint8_t *
+cdt_context_create_new_particle_crnew(cdt_context *ctx, uint32_t subctx_sz)
+{
+	uint32_t new_sz = ctx->create_sz + subctx_sz;
+	int64_t idx = 0;
+	uint8_t ctx_type = cdt_context_get_toplvl_type_int(ctx, &idx);
+	bool need_ext = (ctx_type & AS_CDT_CTX_LIST) != 0 &&
+			(ctx_type & AS_CDT_CTX_CREATE_MASK) ==
+					AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND;
+	uint32_t ele_count = idx + 1;
+	uint32_t ext_content_sz = 0;
+	uint32_t content_sz = 0;
+
+	if (need_ext) {
+		uint32_t hdr_sz = as_pack_list_header_get_size(ele_count);
+		offset_index off;
+
+		content_sz = new_sz - hdr_sz;
+		list_partial_offset_index_init(&off, NULL, ele_count, NULL, content_sz);
+		ext_content_sz = offset_index_size(&off);
+
+		if (ext_content_sz == 0) {
+			need_ext = 0;
+		}
+		else {
+			uint32_t new_hdr_sz = as_pack_list_header_get_size(ele_count + 1);
+
+			new_sz += new_hdr_sz - hdr_sz;
+			new_sz += as_pack_ext_header_get_size(ext_content_sz);
+			new_sz += ext_content_sz;
+		}
+	}
+
+	cdt_mem *p_cdt_mem = (cdt_mem *)rollback_alloc_reserve(ctx->alloc_buf,
+			sizeof(cdt_mem) + new_sz);
+	uint8_t *to_ptr = p_cdt_mem->data;
+
+	if (need_ext) {
+		as_packer pk = {
+				.buffer = to_ptr,
+				.capacity = ~(0U)
+		};
+
+		offset_index off;
+
+		as_pack_list_header(&pk, ele_count + 1);
+		as_pack_ext_header(&pk, ext_content_sz, AS_PACKED_LIST_FLAG_OFF_IDX);
+
+		list_partial_offset_index_init(&off, pk.buffer + pk.offset, ele_count,
+				NULL, content_sz);
+		offset_index_set_filled(&off, 1);
+		pk.offset += offset_index_size(&off);
+
+		pack_nil_rep(&pk, ele_count - 1);
+		to_ptr = cdt_context_fill_create(ctx, pk.buffer + pk.offset, false);
+	}
+	else {
+		to_ptr = cdt_context_fill_create(ctx, to_ptr, true);
+	}
+
+	p_cdt_mem->sz = new_sz;
+	ctx->b->particle = (as_particle *)p_cdt_mem;
+
+	if (msgpack_buf_peek_type(p_cdt_mem->data, 5) == MSGPACK_TYPE_LIST) {
+		p_cdt_mem->type = AS_PARTICLE_TYPE_LIST;
+		as_bin_state_set_from_type(ctx->b, AS_PARTICLE_TYPE_LIST);
+	}
+	else { // must be map
+		p_cdt_mem->type = AS_PARTICLE_TYPE_MAP;
+		as_bin_state_set_from_type(ctx->b, AS_PARTICLE_TYPE_MAP);
+	}
+
+	return to_ptr;
+}
+
+static uint8_t *
+cdt_context_copy_head(cdt_context *ctx, uint8_t *to_ptr,
+		const uint8_t *from_ptr, uint32_t sz)
+{
+	if (ctx->create_hdr_ptr == NULL) {
+		memcpy(to_ptr, from_ptr, sz);
+		return to_ptr + sz;
+	}
+
+	uint32_t head_sz = (uint32_t)(ctx->create_hdr_ptr - from_ptr);
+
+	msgpack_in mp = {
+			.buf = ctx->create_hdr_ptr,
+			.buf_sz = sz - head_sz
+	};
+
+	msgpack_type orig_type = msgpack_peek_type(&mp);
+	uint32_t ele_count;
+
+	memcpy(to_ptr, from_ptr, head_sz);
+	to_ptr += head_sz;
+
+	as_packer pk = {
+			.buffer = to_ptr,
+			.capacity = 8 + ctx->list_nil_pad
+	};
+
+	if (orig_type == MSGPACK_TYPE_LIST) {
+		msgpack_get_list_ele_count(&mp, &ele_count);
+		as_pack_list_header(&pk, ele_count + 1 + ctx->list_nil_pad);
+	}
+	else if (orig_type == MSGPACK_TYPE_MAP) {
+		msgpack_get_map_ele_count(&mp, &ele_count);
+		as_pack_map_header(&pk, ele_count + 1);
+	}
+	else {
+		cf_crash(AS_PARTICLE, "unexpected type %d", (int)orig_type);
+	}
+
+	uint32_t tail_sz = mp.buf_sz - mp.offset;
+
+	memcpy(pk.buffer + pk.offset, mp.buf + mp.offset, tail_sz);
+	pk.offset += tail_sz;
+	pack_nil_rep(&pk, ctx->list_nil_pad);
+
+	return pk.buffer + pk.offset;
+}
+
+static uint8_t *
+cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz)
+{
+	const uint8_t *orig_data = cdt_context_get_data(ctx);
+	uint32_t orig_sz = cdt_context_get_sz(ctx);
+	uint32_t new_sz = orig_sz + ctx->delta_sz;
+	msgpack_ext ext;
+	offset_index newoff;
+	uint32_t new_content_sz = ctx->top_content_sz + ctx->delta_sz;
+
+	msgpack_in mp = {
+			.buf = orig_data,
+			.buf_sz = orig_sz
+	};
+
+	msgpack_type orig_type = msgpack_peek_type(&mp);
+	uint32_t new_ext_cont_sz = 0;
+	uint32_t orig_hdr_count = 0;
+
+	if (orig_type == MSGPACK_TYPE_LIST) {
+		bool check = msgpack_get_list_ele_count(&mp, &orig_hdr_count);
+		uint32_t hdr_sz = mp.offset;
+		cf_assert(check, AS_PARTICLE, "msgpack_get_list_ele_count failed");
+
+		if (msgpack_peek_is_ext(&mp) && msgpack_get_ext(&mp, &ext) &&
+				(ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
+			offset_index_init(&newoff, NULL, ctx->top_ele_count + 1, NULL,
+					new_content_sz);
+			new_ext_cont_sz = offset_index_size(&newoff);
+			new_sz += as_pack_ext_header_get_size(new_ext_cont_sz) +
+					new_ext_cont_sz - mp.offset + hdr_sz;
+		}
+		else {
+			ext.type = 0;
+			list_partial_offset_index_init(&newoff, NULL, ctx->top_ele_count +
+					ctx->list_nil_pad + 1, NULL, new_content_sz);
+			new_ext_cont_sz = offset_index_size(&newoff);
+
+			if (new_ext_cont_sz != 0) {
+				new_sz += as_pack_list_header_get_size(ctx->top_ele_count +
+						ctx->list_nil_pad + 1 + 1);
+				new_sz += as_pack_ext_header_get_size(new_ext_cont_sz);
+				new_sz += new_ext_cont_sz;
+				new_sz -= mp.offset;
+
+				// Undo delta hdr calculation from list_subcontext_by_index()
+				// because non-top-level was assumed.
+				new_sz += as_pack_list_header_get_size(ctx->top_ele_count);
+				new_sz -= as_pack_list_header_get_size(ctx->top_ele_count + ctx->list_nil_pad + 1);
+			}
+			// else -- already taken care of by list_subcontext_by_index().
+		}
+	}
+	else if (orig_type == MSGPACK_TYPE_MAP) {
+		bool check = msgpack_get_map_ele_count(&mp, &orig_hdr_count);
+		uint32_t hdr_sz = mp.offset;
+		cf_assert(check, AS_PARTICLE, "msgpack_get_map_ele_count failed");
+
+		if (msgpack_peek_is_ext(&mp) && (check = msgpack_get_ext(&mp, &ext)) &&
+				(ext.type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
+			offset_index_init(&newoff, NULL, ctx->top_ele_count + 1, NULL,
+					new_content_sz);
+			new_ext_cont_sz = offset_index_size(&newoff);
+
+			if ((ext.type & AS_PACKED_MAP_FLAG_V_ORDERED) != 0) {
+				order_index neword;
+
+				order_index_init(&neword, NULL, ctx->top_ele_count + 1);
+				new_ext_cont_sz += order_index_size(&neword);
+			}
+
+			new_sz += as_pack_ext_header_get_size(new_ext_cont_sz) +
+					new_ext_cont_sz - mp.offset + hdr_sz;
+		}
+		else {
+			cf_assert(check, AS_PARTICLE, "as_unpack_ext failed");
+			ext.type = 0;
+		}
+	}
+	else {
+		cf_crash(AS_PARTICLE, "unexpected type %d", orig_type);
+	}
+
+	cdt_mem *p_cdt_mem = (cdt_mem *)rollback_alloc_reserve(ctx->alloc_buf,
+			sizeof(cdt_mem) + new_sz);
+	uint8_t *to_ptr = p_cdt_mem->data;
+
+	as_packer pk = {
+			.buffer = to_ptr,
+			.capacity = new_sz
+	};
+
+	if (orig_type == MSGPACK_TYPE_LIST) {
+		if ((ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
+			as_pack_list_header(&pk, ctx->top_ele_count + 1 + 1); // 1 for ext, 1 for created element
+			as_pack_ext_header(&pk, new_ext_cont_sz, ext.type);
+			offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
+			offset_index_set_filled(&newoff, 1); // TODO - patch newoff
+			pk.offset += offset_index_size(&newoff);
+		}
+		else if (new_ext_cont_sz != 0) {
+			as_pack_list_header(&pk, ctx->top_ele_count + ctx->list_nil_pad +
+					1 + 1);
+			as_pack_ext_header(&pk, new_ext_cont_sz, ext.type);
+			offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
+			offset_index_set_filled(&newoff, 1); // TODO - patch newoff
+			pk.offset += offset_index_size(&newoff);
+		}
+		else {
+			as_pack_list_header(&pk, ctx->top_ele_count + ctx->list_nil_pad +
+					1);
+		}
+
+		to_ptr += pk.offset;
+	}
+	else if (orig_type == MSGPACK_TYPE_MAP) {
+		if ((ext.type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
+			as_pack_map_header(&pk, ctx->top_ele_count + 1 + 1); // 1 for ext, 1 for created element
+			as_pack_ext_header(&pk, new_ext_cont_sz, ext.type);
+			offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
+			offset_index_set_filled(&newoff, 1); // TODO - patch newoff
+			pk.offset += offset_index_size(&newoff);
+
+			if ((ext.type & AS_PACKED_MAP_FLAG_V_ORDERED) != 0) {
+				order_index neword;
+
+				order_index_init(&neword, pk.buffer + pk.offset,
+						ctx->top_ele_count + 1); // 1 for created element
+				order_index_set(&neword, 0, ctx->top_ele_count + 1);
+				pk.offset += order_index_size(&neword);
+			}
+		}
+		else {
+			as_pack_map_header(&pk, ctx->top_ele_count + 1); // +1 for created element
+		}
+
+		to_ptr += pk.offset;
+	}
+	else {
+		cf_crash(AS_PARTICLE, "unexpected type %d", (int)orig_type);
+	}
+
+	const uint8_t *from_ptr = mp.buf + mp.offset;
+	uint32_t from_sz = orig_data + ctx->data_offset - from_ptr;
+
+	memcpy(to_ptr, from_ptr, from_sz);
+	to_ptr += from_sz;
+
+	if (ctx->list_nil_pad != 0) {
+		to_ptr = buf_pack_nil_rep(to_ptr, ctx->list_nil_pad);
+	}
+
+	to_ptr = cdt_context_fill_create(ctx, to_ptr, false);
+
+	memcpy(to_ptr + subctx_sz,
+			orig_data + ctx->data_offset + ctx->data_sz,
+			orig_sz - ctx->data_sz - ctx->data_offset);
+
+	p_cdt_mem->sz = new_sz;
+	p_cdt_mem->type = ((cdt_mem *)ctx->b->particle)->type;
+
+	ctx->b->particle = (as_particle *)p_cdt_mem;
+
+	return to_ptr;
+}
+
 static void
 cdt_context_fill_unpacker(cdt_context *ctx, msgpack_in *mp)
 {
 	mp->offset = 0;
 
-	if (ctx->data_sz == 0) {
+	if (cdt_context_is_toplvl(ctx)) {
 		mp->buf = ((cdt_mem *)ctx->b->particle)->data;
 		mp->buf_sz = ((cdt_mem *)ctx->b->particle)->sz;
 		return;
@@ -1237,7 +1873,11 @@ cdt_context_get_data(cdt_context *ctx)
 uint8_t *
 cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 {
-	ctx->delta_sz = subctx_sz - ctx->data_sz;
+	ctx->delta_sz = subctx_sz - ctx->data_sz + ctx->create_sz;
+
+	if (! as_bin_inuse(ctx->b)) { // bin did not exist
+		return cdt_context_create_new_particle_crnew(ctx, subctx_sz);
+	}
 
 	const uint8_t *orig_data = cdt_context_get_data(ctx);
 	uint32_t orig_sz = cdt_context_get_sz(ctx);
@@ -1245,39 +1885,102 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 	cdt_mem *p_cdt_mem;
 	uint8_t *to_ptr;
 
-	if (ctx->top_content_off != 0) {
+	if (ctx->top_content_off != 0) { // has top level indexes
 		msgpack_ext ext;
 		offset_index topoff;
 		offset_index newoff;
+
+		if (orig_data == ctx->create_hdr_ptr) { // has create at this level (top)
+			return cdt_context_create_new_particle_crtop(ctx, subctx_sz);
+		}
+
 		uint32_t new_content_sz = ctx->top_content_sz + ctx->delta_sz;
-		uint32_t hdr_sz = as_pack_list_header_get_size(ctx->top_ele_count + 1); // maps have the same hdr size as list, +1 for ext
 
 		msgpack_in mp = {
-				.buf = orig_data + hdr_sz,
-				.buf_sz = orig_sz - hdr_sz
+				.buf = orig_data,
+				.buf_sz = orig_sz
 		};
 
-		bool check = msgpack_get_ext(&mp, &ext);
-		cf_assert(check, AS_PARTICLE, "as_unpack_ext failed");
+		msgpack_type orig_type = msgpack_peek_type(&mp);
+		uint32_t ele_count;
 
-		offset_index_init(&topoff, (uint8_t *)ext.data, ctx->top_ele_count,
-				NULL, ctx->top_content_sz);
-		offset_index_init(&newoff, NULL, ctx->top_ele_count, NULL,
-				new_content_sz);
+		if (orig_type == MSGPACK_TYPE_LIST) {
+			msgpack_get_list_ele_count(&mp, &ele_count);
+		}
+		else if (orig_type == MSGPACK_TYPE_MAP) {
+			msgpack_get_map_ele_count(&mp, &ele_count);
+		}
+		else {
+			cf_crash(AS_PARTICLE, "unexpected type %d", (int)orig_type);
+		}
 
-		uint32_t new_ext_cont_sz = ext.size + // ext.size may include ordidx for maps
-				offset_index_size(&newoff) - offset_index_size(&topoff);
-		uint32_t new_ext_hdr_sz = as_pack_ext_header_get_size(new_ext_cont_sz);
-		int32_t delta_ext = new_ext_hdr_sz + new_ext_cont_sz - mp.offset;
+		uint32_t hdr_sz = mp.offset;
+		uint32_t new_ext_cont_sz = 0;
 
-		ctx->delta_off = delta_ext;
-		new_sz += delta_ext;
+		if (orig_type == MSGPACK_TYPE_LIST) {
+			bool is_ordered = false;
 
+			if (msgpack_peek_is_ext(&mp)) {
+				bool check = msgpack_get_ext(&mp, &ext);
+				cf_assert(check, AS_PARTICLE, "as_unpack_ext failed");
+				is_ordered = (ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0;
+			}
+
+			if (is_ordered) {
+				offset_index_init(&topoff, (uint8_t *)ext.data,
+						ctx->top_ele_count, NULL, new_content_sz);
+				offset_index_init(&newoff, NULL, ctx->top_ele_count, NULL,
+						new_content_sz);
+			}
+			else {
+				list_partial_offset_index_init(&topoff, (uint8_t *)ext.data,
+						ctx->top_ele_count, NULL, new_content_sz);
+				list_partial_offset_index_init(&newoff, NULL,
+						ctx->top_ele_count, NULL, new_content_sz);
+			}
+
+			new_ext_cont_sz = offset_index_size(&newoff);
+
+			uint32_t new_ext_hdr_sz = 0;
+
+			if (new_ext_cont_sz != 0) {
+				new_ext_hdr_sz = as_pack_ext_header_get_size(new_ext_cont_sz);
+			}
+			else if (is_ordered) {
+				new_ext_hdr_sz = as_pack_ext_header_get_size(0);
+			}
+
+			ctx->delta_off = new_ext_hdr_sz + new_ext_cont_sz -
+					mp.offset + hdr_sz;
+		}
+		else if (orig_type == MSGPACK_TYPE_MAP) {
+			bool check = msgpack_get_ext(&mp, &ext);
+			cf_assert(check, AS_PARTICLE, "as_unpack_ext failed");
+
+			offset_index_init(&topoff, (uint8_t *)ext.data, ctx->top_ele_count,
+					NULL, ctx->top_content_sz);
+			offset_index_init(&newoff, NULL, ctx->top_ele_count, NULL,
+					new_content_sz);
+
+			new_ext_cont_sz = ext.size + // ext.size may include ordidx for maps
+					offset_index_size(&newoff) - offset_index_size(&topoff);
+
+			uint32_t new_ext_hdr_sz =
+					as_pack_ext_header_get_size(new_ext_cont_sz);
+
+			ctx->delta_off = new_ext_hdr_sz + new_ext_cont_sz - mp.offset +
+					hdr_sz;
+		}
+		else {
+			cf_crash(AS_PARTICLE, "unexpected type %d", (int)orig_type);
+		}
+
+		new_sz += ctx->delta_off;
 		p_cdt_mem = (cdt_mem *)rollback_alloc_reserve(ctx->alloc_buf,
 				sizeof(cdt_mem) + new_sz);
 		to_ptr = p_cdt_mem->data;
 
-		if (delta_ext != 0) {
+		if (ctx->delta_off != 0) {
 			memcpy(to_ptr, orig_data, hdr_sz);
 			to_ptr += hdr_sz;
 
@@ -1289,25 +1992,28 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 			as_pack_ext_header(&pk, new_ext_cont_sz, ext.type);
 			offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
 			offset_index_set_filled(&newoff, 1);
-			to_ptr = pk.buffer + pk.offset + offset_index_size(&newoff);
+			to_ptr += pk.offset + offset_index_size(&newoff);
 
 			const uint8_t *from_ptr = ext.data + offset_index_size(&topoff);
-			uint32_t from_sz = orig_data + ctx->data_offset - from_ptr;
+			uint32_t from_sz =
+					(uint32_t)(orig_data + ctx->data_offset - from_ptr);
 
-			memcpy(to_ptr, from_ptr, from_sz);
-			to_ptr += from_sz;
+			to_ptr = cdt_context_copy_head(ctx, to_ptr, from_ptr, from_sz);
 		}
 		else {
-			memcpy(to_ptr, orig_data, ctx->data_offset);
-			to_ptr += ctx->data_offset;
+			to_ptr = cdt_context_copy_head(ctx, to_ptr, orig_data,
+					ctx->data_offset);
 		}
 	}
 	else {
 		p_cdt_mem = (cdt_mem *)rollback_alloc_reserve(ctx->alloc_buf,
 				sizeof(cdt_mem) + new_sz);
-		to_ptr = p_cdt_mem->data;
-		memcpy(to_ptr, orig_data, ctx->data_offset);
-		to_ptr += ctx->data_offset;
+		to_ptr = cdt_context_copy_head(ctx, p_cdt_mem->data, orig_data,
+				ctx->data_offset);
+	}
+
+	if (ctx->create_triggered) {
+		to_ptr = cdt_context_fill_create(ctx, to_ptr, false);
 	}
 
 	memcpy(to_ptr + subctx_sz,
@@ -1340,18 +2046,17 @@ cdt_context_get_stack(cdt_context *ctx)
 	return &ctx->pstack[stack_i];
 }
 
-cdt_ctx_list_stack_entry *
-cdt_context_push(cdt_context *ctx, uint32_t idx, uint8_t *idx_mem)
+void
+cdt_context_push(cdt_context *ctx, uint32_t idx, uint8_t *idx_mem, uint8_t type)
 {
 	cdt_ctx_list_stack_entry *p = cdt_context_get_stack(ctx);
 
 	p->data_offset = ctx->data_offset;
 	p->data_sz = ctx->data_sz;
 	p->idx = idx;
+	p->type = type;
 	p->idx_mem = idx_mem;
 	ctx->stack_idx++;
-
-	return p;
 }
 
 static inline void
@@ -1815,6 +2520,30 @@ offset_index_copy(offset_index *dest, const offset_index *src, uint32_t d_start,
 			offset_index_set(dest, d_start + i, value);
 		}
 	}
+}
+
+void
+offset_index_add_ele(offset_index *dest, const offset_index *src,
+		uint32_t dest_idx)
+{
+	cf_assert(dest->content_sz >= src->content_sz, AS_PARTICLE, "delta < 0 dest->content_sz %u src->content_sz %u", dest->content_sz, src->content_sz);
+
+	uint32_t add_sz = dest->content_sz - src->content_sz;
+	uint32_t src_ele_count = src->_.ele_count;
+
+	// Insert at end.
+	if (dest_idx == src_ele_count) {
+		offset_index_copy(dest, src, 0, 0, src_ele_count, 0);
+		offset_index_set(dest, src_ele_count, src->content_sz);
+	}
+	// Insert at offset.
+	else {
+		offset_index_copy(dest, src, 0, 0, dest_idx + 1, 0);
+		offset_index_copy(dest, src, dest_idx + 1, dest_idx,
+				src_ele_count - dest_idx, add_sz);
+	}
+
+	offset_index_set_filled(dest, dest->_.ele_count);
 }
 
 void
@@ -3102,7 +3831,9 @@ list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r)
 bool
 cdt_verify(cdt_context *ctx)
 {
-	if (ctx == NULL) {
+	cf_assert(ctx != NULL, AS_PARTICLE, "ctx NULL");
+
+	if (! as_bin_inuse(ctx->b)) {
 		return true;
 	}
 
