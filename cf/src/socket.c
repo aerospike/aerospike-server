@@ -1825,7 +1825,7 @@ cf_poll_destroy(cf_poll poll)
 
 #define RESP_SIZE (2 * 1024 * 1024)
 #define MAX_INTERS 500
-#define MAX_ADDRS 20
+#define MAX_ADDRS 100
 
 typedef struct inter_entry_s {
 	uint32_t index;
