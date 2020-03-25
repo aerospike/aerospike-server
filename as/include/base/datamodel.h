@@ -526,6 +526,10 @@ typedef struct as_remote_record_s {
 	uint32_t meta_sz;
 
 	uint8_t repl_state; // relevant only for enterprise edition
+
+	// For 5.0 compatibility.
+	bool xdr_write; // relevant only for enterprise edition
+	bool xdr_tombstone; // relevant only for enterprise edition
 } as_remote_record;
 
 int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex, bool do_xdr_write);

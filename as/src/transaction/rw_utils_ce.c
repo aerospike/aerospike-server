@@ -124,6 +124,12 @@ unwind_index_metadata(const index_metadata* old, as_record* r)
 
 
 void
+set_xdr_write(const as_transaction* tr, as_record* r)
+{
+}
+
+
+void
 transition_delete_metadata(const as_transaction* tr, as_record* r, bool is_delete)
 {
 }

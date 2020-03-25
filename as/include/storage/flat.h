@@ -32,12 +32,15 @@
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "fault.h"
+
 
 //==========================================================
 // Forward declarations.
 //
 
 struct as_bin_s;
+struct as_index_s;
 struct as_namespace_s;
 struct as_remote_record_s;
 struct as_storage_rd_s;
@@ -62,7 +65,8 @@ typedef struct as_flat_record_s {
 	uint32_t has_key: 1;
 	uint32_t has_bins: 1; // i.e. is live
 	uint32_t is_compressed: 1;
-	uint32_t unused: 2;
+	uint32_t xdr_write: 1;
+	uint32_t has_extra_flags : 1; // more of these metadata flags
 	uint32_t tree_id: 6; // for local storage only
 
 	// offset: 8
@@ -75,6 +79,15 @@ typedef struct as_flat_record_s {
 	// final size: 35
 	uint8_t data[];
 } __attribute__ ((__packed__)) as_flat_record;
+
+// For 5.0 compatibility.
+typedef struct as_flat_extra_flags_s {
+	uint8_t xdr_tombstone: 1;
+	uint8_t xdr_nsup_tombstone: 1;
+	uint8_t unused: 6;
+} __attribute__ ((__packed__)) as_flat_extra_flags;
+
+COMPILER_ASSERT(sizeof(as_flat_extra_flags) == sizeof(uint8_t));
 
 typedef enum {
 	AS_COMPRESSION_NONE,
@@ -109,6 +122,7 @@ typedef struct ssd_comp_meta_s {
 
 // Per-record optional metadata container.
 typedef struct as_flat_opt_meta_s {
+	as_flat_extra_flags extra_flags;
 	uint32_t void_time;
 	uint32_t set_name_len;
 	const char* set_name;
@@ -168,6 +182,15 @@ N_RBLOCKS_TO_SIZE(uint32_t n_rblocks) {
 
 
 //==========================================================
+// Public API - for downgrading from 4.9 to 4.8-.
+//
+
+#include <stdlib.h>
+
+void as_flat_strip_xdr_pickle(uint8_t* pickle);
+
+
+//==========================================================
 // Private API - for enterprise separation only.
 //
 
@@ -176,3 +199,6 @@ uint16_t flatten_bins(const struct as_storage_rd_s* rd, uint8_t* buf, uint32_t* 
 
 uint8_t* flatten_compression_meta(const as_flat_comp_meta* cm, as_flat_record* flat, uint8_t* buf);
 const uint8_t* unflatten_compression_meta(const as_flat_record* flat, const uint8_t* at, const uint8_t* end, as_flat_comp_meta* cm);
+
+void set_remote_record_xdr_flags(const as_flat_record* flat, const as_flat_extra_flags* extra_flags, struct as_remote_record_s* rr);
+void set_flat_xdr_state(const struct as_index_s* r, as_flat_record* flat);

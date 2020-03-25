@@ -933,6 +933,7 @@ emigrate_fill_msg(as_storage_rd *rd, msg *m)
 
 	as_storage_rd_load_pickle(rd); // FIXME - handle error returned
 
+	as_flat_strip_xdr_pickle(rd->pickle);
 	msg_set_buf(m, MIG_FIELD_RECORD, rd->pickle, rd->pickle_sz,
 			MSG_SET_HANDOFF_MALLOC);
 }
@@ -1390,6 +1391,19 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		cf_warning(AS_MIGRATE, "handle insert: got bad record");
 		immigration_release(immig);
 		as_fabric_msg_put(m);
+		return;
+	}
+
+	// If we get an XDR-tombstone from 5.0, do nothing, but ack the sender.
+	if (rr.xdr_tombstone) {
+		immigration_release(immig);
+		msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
+		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
+
+		if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
+			as_fabric_msg_put(m);
+		}
+
 		return;
 	}
 

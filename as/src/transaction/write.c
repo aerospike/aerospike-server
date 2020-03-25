@@ -1214,6 +1214,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
+	set_xdr_write(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1341,6 +1342,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 
 	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
+	set_xdr_write(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1497,6 +1499,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
+	set_xdr_write(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating
@@ -1638,6 +1641,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 
 	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
+	set_xdr_write(tr, r);
 
 	//------------------------------------------------------
 	// Loop over bin ops to affect new bin space, creating

@@ -1194,7 +1194,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	rd->flat = flat;
 	rd->read_buf = read_buf; // no need to free read_buf on error now
 
-	as_flat_opt_meta opt_meta = { 0 };
+	as_flat_opt_meta opt_meta = { { 0 } };
 
 	rd->flat_end = (const uint8_t*)flat + record_size;
 	rd->flat_bins = as_flat_unpack_record_meta(flat, rd->flat_end, &opt_meta,
@@ -2323,13 +2323,18 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	as_partition* p_partition = &ns->partitions[pid];
 
 	const uint8_t* end = (const uint8_t*)flat + record_size;
-	as_flat_opt_meta opt_meta = { 0 };
+	as_flat_opt_meta opt_meta = { { 0 } };
 
 	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta,
 			ns->single_bin);
 
 	if (! p_read) {
 		cf_warning(AS_DRV_SSD, "bad metadata for %pD", &flat->keyd);
+		return;
+	}
+
+	// If we find XDR-tombstones downgrading from 5.0, ignore them.
+	if (opt_meta.extra_flags.xdr_tombstone == 1) {
 		return;
 	}
 
@@ -2417,6 +2422,9 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	r->last_update_time = flat->last_update_time;
 	r->generation = flat->generation;
 	r->void_time = opt_meta.void_time;
+
+	// Set/reset the records's XDR-write status.
+	ssd_cold_start_init_xdr_state(flat, r);
 
 	// Update maximum void-time.
 	cf_atomic32_setmax(&p_partition->max_void_time, (int32_t)r->void_time);

@@ -115,6 +115,12 @@ ssd_cold_start_init_repl_state(as_namespace* ns, as_record* r)
 }
 
 void
+ssd_cold_start_init_xdr_state(const as_flat_record* flat, as_record* r)
+{
+	// Nothing to do - relevant for enterprise version only.
+}
+
+void
 ssd_init_commit(drv_ssd *ssd)
 {
 	// Nothing to do - relevant for enterprise version only.

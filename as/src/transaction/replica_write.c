@@ -47,9 +47,9 @@
 #include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
-#include "fabric/exchange.h" // TODO - old pickle - remove in "six months"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
+#include "storage/flat.h"
 #include "transaction/delete.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
@@ -99,6 +99,7 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
 	if (rw->pickle != NULL) {
+		as_flat_strip_xdr_pickle(rw->pickle);
 		msg_set_buf(m, RW_FIELD_RECORD, rw->pickle, rw->pickle_sz,
 				MSG_SET_HANDOFF_MALLOC);
 		rw->pickle = NULL; // make sure destructor doesn't free this
@@ -266,10 +267,18 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 
+	// If we get an XDR-tombstone from 5.0, convert to drop replica.
+	if (rr.xdr_tombstone) {
+		drop_replica(&rsv, rr.keyd, rr.xdr_write, node);
+		as_partition_release(&rsv);
+		send_repl_write_ack_w_digest(node, m, AS_OK, rr.keyd);
+		return;
+	}
+
 	rr.rsv = &rsv;
 
 	// Do XDR write if the write is a non-XDR write or forwarding is enabled.
-	bool do_xdr_write = (info & RW_INFO_XDR) == 0 ||
+	bool do_xdr_write = (info & RW_INFO_XDR) == 0 || rr.xdr_write ||
 			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes;
 
 	// If source didn't touch sindex, may not need to touch it locally.

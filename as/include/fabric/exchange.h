@@ -45,8 +45,9 @@
  * 3 - 4.5.3 - for new pickle format.
  * 4 - 4.7.0 - for AER-6128 (AP uniform-balance empty master selection bug).
  * 5 - 4.7.0.3 - for AER-6143 (SC quiesce with non-roster nodes bug).
+ * 6 - 4.9.0 - for XDR compatibility with 5.0.0+.
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 5
+#define AS_EXCHANGE_COMPATIBILITY_ID 6
 
 /**
  * Number of quantum intervals in orphan state after which client transactions

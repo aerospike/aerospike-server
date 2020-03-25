@@ -68,6 +68,16 @@ as_flat_decompress_buffer(const as_flat_comp_meta* cm, uint32_t max_orig_sz,
 
 
 //==========================================================
+// Public API - for downgrading from 4.9 to 4.8-.
+//
+
+void
+as_flat_strip_xdr_pickle(uint8_t* pickle)
+{
+}
+
+
+//==========================================================
 // Private API - for enterprise separation only.
 //
 
@@ -92,4 +102,15 @@ unflatten_compression_meta(const as_flat_record* flat, const uint8_t* at,
 			&flat->keyd);
 
 	return NULL;
+}
+
+void
+set_remote_record_xdr_flags(const as_flat_record* flat,
+		const as_flat_extra_flags* extra_flags, as_remote_record* rr)
+{
+}
+
+void
+set_flat_xdr_state(const as_record* r, as_flat_record* flat)
+{
 }

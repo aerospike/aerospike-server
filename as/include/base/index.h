@@ -65,10 +65,12 @@ typedef struct as_index_s {
 
 	// offset: 34
 	uint16_t set_id_bits: 10;
-	uint16_t : 6;
+	uint16_t : 5;
+	uint16_t xdr_write : 1; // for 5.0 compatibility
 
 	// offset: 36
-	uint32_t : 2;
+	uint32_t xdr_tombstone : 1; // for 5.0 compatibility
+	uint32_t : 1;
 	uint32_t void_time: 30;
 
 	// offset: 40

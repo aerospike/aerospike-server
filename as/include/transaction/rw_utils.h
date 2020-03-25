@@ -69,8 +69,10 @@ typedef struct index_metadata_s {
 	uint64_t last_update_time;
 	uint16_t generation;
 
-	bool tombstone;
-	bool cenotaph;
+	bool xdr_write; // relevant only for enterprise edition
+
+	bool tombstone; // relevant only for enterprise edition
+	bool cenotaph; // relevant only for enterprise edition
 } index_metadata;
 
 typedef struct now_times_s {
@@ -108,6 +110,7 @@ int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
 void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
 void advance_record_version(const struct as_transaction_s* tr, struct as_index_s* r);
+void set_xdr_write(const struct as_transaction_s* tr, struct as_index_s* r);
 void transition_delete_metadata(const struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);

@@ -253,6 +253,9 @@ void ssd_adjust_versions(struct as_namespace_s *ns, drv_pmeta* pmeta);
 conflict_resolution_pol ssd_cold_start_policy(const struct as_namespace_s *ns);
 void ssd_cold_start_init_repl_state(struct as_namespace_s *ns, struct as_index_s* r);
 
+// XDR.
+void ssd_cold_start_init_xdr_state(const struct as_flat_record_s* flat, struct as_index_s* r);
+
 // Miscellaneous.
 int ssd_fd_get(drv_ssd *ssd);
 int ssd_shadow_fd_get(drv_ssd *ssd);

@@ -434,6 +434,7 @@ fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 
 	// Can't fail from here on - ok to add message fields.
 
+	as_flat_strip_xdr_pickle(rd->pickle);
 	msg_set_buf(m, RW_FIELD_RECORD, rd->pickle, rd->pickle_sz,
 			MSG_SET_HANDOFF_MALLOC);
 
@@ -561,14 +562,23 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 		return old_parse_conflict_meta(m, p_generation, p_last_update_time);
 	}
 
-	*p_generation = ((as_flat_record*)pickle)->generation;
+	as_flat_record* flat = (as_flat_record*)pickle;
+
+	// If we get an XDR-tombstone from 5.0, pretend it was not found.
+	// Note - not bothering to check that the extra byte is within pickle_sz.
+	if (flat->has_extra_flags == 1 &&
+			((as_flat_extra_flags*)flat->data)->xdr_tombstone == 1) {
+		return AS_ERR_NOT_FOUND;
+	}
+
+	*p_generation = flat->generation;
 
 	if (*p_generation == 0) {
 		cf_warning(AS_RW, "dup-res ack: generation 0");
 		return AS_ERR_UNKNOWN;
 	}
 
-	*p_last_update_time = ((as_flat_record*)pickle)->last_update_time;
+	*p_last_update_time = flat->last_update_time;
 
 	return AS_OK;
 }

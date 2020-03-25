@@ -153,7 +153,7 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 	rr->generation = flat->generation;
 	rr->last_update_time = flat->last_update_time;
 
-	as_flat_opt_meta opt_meta = { 0 };
+	as_flat_opt_meta opt_meta = { { 0 } };
 
 	const uint8_t* flat_bins = as_flat_unpack_record_meta(flat,
 				rr->pickle + rr->pickle_sz, &opt_meta, ns->single_bin);
@@ -161,6 +161,8 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 	if (flat_bins == NULL) {
 		return false;
 	}
+
+	set_remote_record_xdr_flags(flat, &opt_meta.extra_flags, rr);
 
 	rr->void_time = opt_meta.void_time;
 	rr->set_name = opt_meta.set_name;
@@ -179,17 +181,28 @@ const uint8_t*
 as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,
 		as_flat_opt_meta* opt_meta, bool single_bin)
 {
-	if (flat->unused != 0) {
-		cf_warning(AS_FLAT, "unsupported storage fields");
-		return NULL;
-	}
-
 	if (flat->generation == 0) {
 		cf_warning(AS_FLAT, "generation 0");
 		return NULL;
 	}
 
 	const uint8_t* at = flat->data;
+
+	if (flat->has_extra_flags == 1) {
+		if (at + sizeof(opt_meta->extra_flags) > end) {
+			cf_warning(AS_FLAT, "incomplete extra flags");
+			return NULL;
+		}
+
+		opt_meta->extra_flags = *(as_flat_extra_flags*)at;
+
+		if (opt_meta->extra_flags.unused != 0) {
+			cf_warning(AS_FLAT, "unsupported extra storage fields");
+			return NULL;
+		}
+
+		at += sizeof(opt_meta->extra_flags);
+	}
 
 	if (flat->has_void_time == 1) {
 		if (at + sizeof(opt_meta->void_time) > end) {
@@ -379,12 +392,15 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 
 	flat->magic = dirty ? AS_FLAT_MAGIC_DIRTY : AS_FLAT_MAGIC;
 	flat->n_rblocks = n_rblocks;
-	// Flags are filled in below.
-	flat->unused = 0;
+
+	flat->has_extra_flags = 0;
+	// Other flags are filled in below.
 	flat->tree_id = r->tree_id;
 	flat->keyd = r->keyd;
 	flat->last_update_time = r->last_update_time;
 	flat->generation = r->generation;
+
+	set_flat_xdr_state(r, flat);
 
 	uint8_t* at = flat->data;
 
