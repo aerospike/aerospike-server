@@ -103,6 +103,13 @@ const as_particle_vtable hll_vtable = {
 // Typedefs & constants.
 //
 
+// Same as related BLOB struct. TODO - just expose BLOB structs?
+typedef struct hll_mem_s {
+	uint8_t type;
+	uint32_t sz;
+	uint8_t data[];
+} __attribute__ ((__packed__)) hll_mem;
+
 typedef struct hll_s {
 	uint8_t flags;
 	uint8_t n_index_bits; // n_registers = 1 << index_bits (range 4 to 16)
@@ -470,7 +477,7 @@ as_bin_hll_modify(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb,
 	}
 
 	uint32_t new_size = hmh_required_sz(op.n_index_bits, op.n_minhash_bits);
-	size_t alloc_size = sizeof(blob_mem) + new_size;
+	size_t alloc_size = sizeof(hll_mem) + new_size;
 
 	if (particles_llb == NULL) {
 		b->particle = cf_malloc_ns(alloc_size);
@@ -515,7 +522,7 @@ hll_verify_bin(const as_bin* b)
 		return true;
 	}
 
-	const blob_mem* bmem = (const blob_mem*)b->particle;
+	const hll_mem* bmem = (const hll_mem*)b->particle;
 	const hll_t* hll = (const hll_t*)bmem->data;
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -824,7 +831,7 @@ hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p)
 		return AS_OK;
 	}
 
-	hll_t* old_hll = (hll_t*)((blob_mem*)old_p)->data;
+	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
 
 	if (op->n_index_bits == 0xFF) {
 		op->n_index_bits = old_hll->n_index_bits;
@@ -860,7 +867,7 @@ hll_modify_prepare_add_op(hll_op* op, const as_particle* old_p)
 		return AS_OK;
 	}
 
-	hll_t* old_hll = (hll_t*)((blob_mem*)old_p)->data;
+	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
 
 	op->n_index_bits = old_hll->n_index_bits;
 	op->n_minhash_bits = old_hll->n_minhash_bits;
@@ -898,7 +905,7 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 		return AS_OK;
 	}
 
-	hll_t* old_hll = (hll_t*)((blob_mem*)old_p)->data;
+	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
 
 	if ((op->flags & AS_HLL_FLAG_ALLOW_FOLD) == 0) {
 		if (old_hll->n_index_bits > min_n_index_bits) {
@@ -936,7 +943,7 @@ hll_modify_prepare_count_op(hll_op* op, const as_particle* old_p)
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
 
-	hll_t* old_hll = (hll_t*)((blob_mem*)old_p)->data;
+	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
 
 	op->n_index_bits = old_hll->n_index_bits;
 	op->n_minhash_bits = old_hll->n_minhash_bits;
@@ -953,7 +960,7 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
 
-	hll_t* old_hll = (hll_t*)((blob_mem*)old_p)->data;
+	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
 
 	if (old_hll->n_minhash_bits > 0) {
 		cf_warning(AS_PARTICLE, "hll_modify_prepare_fold_op - error %u cannot fold an HLL containing minhash bits",
@@ -983,13 +990,13 @@ hll_modify_execute_op(const hll_state* state, const hll_op* op,
 		const as_particle* old_p, as_particle* new_p, uint32_t new_size,
 		as_bin* rb)
 {
-	hll_t* new_hll = (hll_t*)((blob_mem*)new_p)->data;
+	hll_t* new_hll = (hll_t*)((hll_mem*)new_p)->data;
 
 	state->def->fn.modify(op, new_hll,
-			old_p == NULL ? NULL : (hll_t*)((blob_mem*)old_p)->data, rb);
+			old_p == NULL ? NULL : (hll_t*)((hll_mem*)old_p)->data, rb);
 
-	((blob_mem*)new_p)->sz = new_size;
-	((blob_mem*)new_p)->type = AS_PARTICLE_TYPE_HLL;
+	((hll_mem*)new_p)->sz = new_size;
+	((hll_mem*)new_p)->type = AS_PARTICLE_TYPE_HLL;
 
 	cf_assert(verify_hll_sz(new_hll, new_size), AS_PARTICLE, "result corrupt - op-type %u desc (%u,%u) expected-desc (%u,%u) sz %u expected-sz %u",
 			state->op_type,
@@ -1003,7 +1010,7 @@ static void
 hll_read_execute_op(const hll_state* state, const hll_op* op,
 		const as_particle* p, as_bin* rb)
 {
-	state->def->fn.read(op, (const hll_t*)((const blob_mem*)p)->data, rb);
+	state->def->fn.read(op, (const hll_t*)((const hll_mem*)p)->data, rb);
 }
 
 
@@ -1135,7 +1142,7 @@ hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb)
 
 	uint32_t answer_sz = hmh_required_sz(template.n_index_bits,
 			template.n_minhash_bits);
-	blob_mem* answer = cf_malloc(sizeof(blob_mem) + answer_sz);
+	hll_mem* answer = cf_malloc(sizeof(hll_mem) + answer_sz);
 	hll_t* union_hmh = (hll_t*)answer->data;
 
 	hmh_init(union_hmh, template.n_index_bits, template.n_minhash_bits);

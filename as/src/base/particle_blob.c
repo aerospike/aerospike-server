@@ -86,6 +86,18 @@ const as_particle_vtable blob_vtable = {
 // Typedefs & constants.
 //
 
+typedef struct blob_mem_s {
+	uint8_t type;
+	uint32_t sz;
+	uint8_t data[];
+} __attribute__ ((__packed__)) blob_mem;
+
+typedef struct blob_flat_s {
+	uint8_t type;
+	uint32_t size; // host order on device
+	uint8_t data[];
+} __attribute__ ((__packed__)) blob_flat;
+
 typedef struct bits_op_s {
 	int32_t offset;
 	uint32_t size;
@@ -804,7 +816,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 				return AS_OK;
 			}
 
-			cf_detail(AS_PARTICLE, "as_bin_bits_packed_modify - operation (%s) on bin %.*s would update - not allowed",
+			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - operation (%s) on bin %.*s would update - not allowed",
 					state.def->name, (int)msg_op->name_sz, msg_op->name);
 			return -AS_ERR_BIN_EXISTS;
 		}

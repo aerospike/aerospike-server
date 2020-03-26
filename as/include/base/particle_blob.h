@@ -29,18 +29,6 @@
 // The BLOB particle interface function declarations are in this header file
 // since BLOB functions are used by other particles derived from BLOB.
 
-typedef struct blob_mem_s {
-	uint8_t type;
-	uint32_t sz;
-	uint8_t data[];
-} __attribute__ ((__packed__)) blob_mem;
-
-typedef struct blob_flat_s {
-	uint8_t type;
-	uint32_t size; // host order on device
-	uint8_t data[];
-} __attribute__ ((__packed__)) blob_flat;
-
 // Destructor, etc.
 void blob_destruct(as_particle* p);
 uint32_t blob_size(const as_particle* p);

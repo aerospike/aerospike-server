@@ -200,8 +200,8 @@ extern int as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *
 extern int as_bin_bits_alloc_modify_from_client(as_bin *b, as_msg_op *op);
 extern int as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op);
 
-// Different for HLL operations - we don't use the normal APIs and
-// particle table functions.
+// Different for HLL operations - we don't use the normal APIs and particle
+// table functions.
 extern int as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb);
 extern int as_bin_hll_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *rb);
 extern int as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb);

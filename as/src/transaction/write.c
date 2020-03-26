@@ -1068,7 +1068,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				return AS_ERR_PARAMETER;
 			}
 
-			// FIXME - need response bins?
+			generates_response_bin = true; // HLL modify may generate a response bin
 		}
 		else if (op->op == AS_MSG_OP_HLL_READ) {
 			has_read_op = true;

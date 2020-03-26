@@ -128,8 +128,6 @@ trim_particle(as_bin *b, as_particle_type type, uint32_t orig_size)
 // Particle "class static" functions.
 //
 
-#define AS_HLL AS_VAL_T_MAX
-
 as_particle_type
 as_particle_type_from_asval(const as_val *val)
 {
@@ -148,8 +146,6 @@ as_particle_type_from_asval(const as_val *val)
 		return AS_PARTICLE_TYPE_STRING;
 	case AS_BYTES:
 		return AS_PARTICLE_TYPE_BLOB;
-	case AS_HLL:  // FIXME - create AS_HLL in common
-		return AS_PARTICLE_TYPE_HLL;
 	case AS_GEOJSON:
 		return AS_PARTICLE_TYPE_GEOJSON;
 	case AS_LIST:
