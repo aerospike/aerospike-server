@@ -306,6 +306,21 @@ msgpack_peek_is_ext(const msgpack_in *mp)
 	return false;
 }
 
+const uint8_t *
+msgpack_skip(msgpack_in *mp, uint32_t *sz_r)
+{
+	const uint8_t *buf = mp->buf + mp->offset;
+	uint32_t sz = msgpack_sz(mp);
+
+	if (sz == 0) {
+		return NULL;
+	}
+
+	*sz_r = sz;
+
+	return buf;
+}
+
 bool
 msgpack_get_bool(msgpack_in *mp, bool *value)
 {

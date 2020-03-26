@@ -86,18 +86,6 @@ const as_particle_vtable blob_vtable = {
 // Typedefs & constants.
 //
 
-typedef struct blob_mem_s {
-	uint8_t type;
-	uint32_t sz;
-	uint8_t data[];
-} __attribute__ ((__packed__)) blob_mem;
-
-typedef struct blob_flat_s {
-	uint8_t type;
-	uint32_t size; // host order on device
-	uint8_t data[];
-} __attribute__ ((__packed__)) blob_flat;
-
 typedef struct bits_op_s {
 	int32_t offset;
 	uint32_t size;
@@ -243,6 +231,8 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 		return AS_PARTICLE_TYPE_PHP_BLOB;
 	case AS_BYTES_ERLANG:
 		return AS_PARTICLE_TYPE_ERLANG_BLOB;
+	case AS_BYTES_HLL:
+		return AS_PARTICLE_TYPE_HLL;
 	case AS_BYTES_GEOJSON:
 		return AS_PARTICLE_TYPE_GEOJSON;
 	case AS_BYTES_INTEGER:

@@ -52,6 +52,7 @@ extern const as_particle_vtable integer_vtable;
 extern const as_particle_vtable float_vtable;
 extern const as_particle_vtable string_vtable;
 extern const as_particle_vtable blob_vtable;
+extern const as_particle_vtable hll_vtable;
 extern const as_particle_vtable map_vtable;
 extern const as_particle_vtable list_vtable;
 extern const as_particle_vtable geojson_vtable;
@@ -69,6 +70,7 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_RUBY_BLOB]	= &blob_vtable,
 		[AS_PARTICLE_TYPE_PHP_BLOB]		= &blob_vtable,
 		[AS_PARTICLE_TYPE_ERLANG_BLOB]	= &blob_vtable,
+		[AS_PARTICLE_TYPE_HLL]			= &hll_vtable,
 		[AS_PARTICLE_TYPE_MAP]			= &map_vtable,
 		[AS_PARTICLE_TYPE_LIST]			= &list_vtable,
 		[AS_PARTICLE_TYPE_GEOJSON]		= &geojson_vtable
@@ -94,6 +96,7 @@ safe_particle_type(uint8_t type)
 	case AS_PARTICLE_TYPE_RUBY_BLOB:
 	case AS_PARTICLE_TYPE_PHP_BLOB:
 	case AS_PARTICLE_TYPE_ERLANG_BLOB:
+	case AS_PARTICLE_TYPE_HLL:
 	case AS_PARTICLE_TYPE_MAP:
 	case AS_PARTICLE_TYPE_LIST:
 	case AS_PARTICLE_TYPE_GEOJSON:
@@ -125,6 +128,8 @@ trim_particle(as_bin *b, as_particle_type type, uint32_t orig_size)
 // Particle "class static" functions.
 //
 
+#define AS_HLL AS_VAL_T_MAX
+
 as_particle_type
 as_particle_type_from_asval(const as_val *val)
 {
@@ -143,6 +148,8 @@ as_particle_type_from_asval(const as_val *val)
 		return AS_PARTICLE_TYPE_STRING;
 	case AS_BYTES:
 		return AS_PARTICLE_TYPE_BLOB;
+	case AS_HLL:  // FIXME - create AS_HLL in common
+		return AS_PARTICLE_TYPE_HLL;
 	case AS_GEOJSON:
 		return AS_PARTICLE_TYPE_GEOJSON;
 	case AS_LIST:
@@ -176,6 +183,7 @@ as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 		return AS_PARTICLE_TYPE_STRING;
 	case MSGPACK_TYPE_BYTES:
 		return AS_PARTICLE_TYPE_BLOB;
+	// FIXME - for now HLL cannot be in CDT.
 	case MSGPACK_TYPE_GEOJSON:
 		return AS_PARTICLE_TYPE_GEOJSON;
 	case MSGPACK_TYPE_LIST:
@@ -961,6 +969,33 @@ int
 as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op)
 {
 	return as_bin_bits_packed_modify(b, op, particles_llb);
+}
+
+
+//==========================================================
+// as_bin particle functions specific to HLL.
+//
+
+//------------------------------------------------
+// Handle "wire" format.
+//
+
+int
+as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb)
+{
+	return as_bin_hll_read(b, op, rb);
+}
+
+int
+as_bin_hll_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *rb)
+{
+	return as_bin_hll_modify(b, op, NULL, rb);
+}
+
+int
+as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb)
+{
+	return as_bin_hll_modify(b, op, particles_llb, rb);
 }
 
 

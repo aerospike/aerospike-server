@@ -1062,6 +1062,18 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			has_read_op = true;
 			generates_response_bin = true;
 		}
+		else if (op->op == AS_MSG_OP_HLL_MODIFY) {
+			if (record_level_replace) {
+				cf_warning(AS_RW, "{%s} write_master: hll modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
+				return AS_ERR_PARAMETER;
+			}
+
+			// FIXME - need response bins?
+		}
+		else if (op->op == AS_MSG_OP_HLL_READ) {
+			has_read_op = true;
+			generates_response_bin = true;
+		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
 			if (record_level_replace) {
 				cf_warning(AS_RW, "{%s} write_master: cdt modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
@@ -2000,6 +2012,78 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				if ((result = as_bin_bits_read_from_client(b, op, &result_bin)) < 0) {
 					cf_warning(AS_RW, "{%s} write_master: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
+					return -result;
+				}
+
+				ops[*p_n_response_bins] = op;
+				response_bins[(*p_n_response_bins)++] = result_bin;
+				append_bin_to_destroy(&result_bin, result_bins, p_n_result_bins);
+			}
+			else if (respond_all_ops) {
+				ops[*p_n_response_bins] = op;
+				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
+			}
+		}
+		else if (op->op == AS_MSG_OP_HLL_MODIFY) {
+			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, &result);
+
+			if (! b) {
+				return result;
+			}
+
+			as_bin result_bin;
+			as_bin_set_empty(&result_bin);
+
+			if (ns->storage_data_in_memory) {
+				as_bin cleanup_bin;
+				as_bin_copy(ns, &cleanup_bin, b);
+
+				if ((result = as_bin_hll_alloc_modify_from_client(b, op, &result_bin)) < 0) {
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_hll_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
+					return -result;
+				}
+
+				// Account for noop bits operations. Modifying non-mutable
+				// particle contents in-place is still disallowed.
+				if (cleanup_bin.particle != b->particle) {
+					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
+				}
+			}
+			else {
+				if ((result = as_bin_hll_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_hll_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+					return -result;
+				}
+			}
+
+			if (respond_all_ops || as_bin_inuse(&result_bin)) {
+				ops[*p_n_response_bins] = op;
+				response_bins[(*p_n_response_bins)++] = result_bin;
+				append_bin_to_destroy(&result_bin, result_bins, p_n_result_bins);
+			}
+
+			if (! as_bin_inuse(b)) {
+				// TODO - could do better than finding index from name.
+				int32_t index = as_bin_get_index_from_buf(rd, op->name, op->name_sz);
+
+				if (index >= 0) {
+					as_bin_set_empty_shift(rd, (uint32_t)index);
+					xdr_fill_dirty_bins(dirty_bins);
+				}
+			}
+			else {
+				xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
+			}
+		}
+		else if (op->op == AS_MSG_OP_HLL_READ) {
+			as_bin* b = as_bin_get_from_buf(rd, op->name, op->name_sz);
+
+			if (b) {
+				as_bin result_bin;
+				as_bin_set_empty(&result_bin);
+
+				if ((result = as_bin_hll_read_from_client(b, op, &result_bin)) < 0) {
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 

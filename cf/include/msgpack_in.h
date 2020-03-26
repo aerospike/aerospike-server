@@ -106,6 +106,7 @@ msgpack_buf_peek_type(const uint8_t *buf, uint32_t buf_sz)
 }
 bool msgpack_peek_is_ext(const msgpack_in *mp);
 
+const uint8_t *msgpack_skip(msgpack_in *mp, uint32_t *sz_r);
 bool msgpack_get_bool(msgpack_in *mp, bool *value);
 
 bool msgpack_get_uint64(msgpack_in *mp, uint64_t *i);

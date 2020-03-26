@@ -360,6 +360,8 @@ typedef struct as_msg_op_s {
 #define AS_MSG_OP_BITS_READ     12 // blob bits top-level op
 #define AS_MSG_OP_BITS_MODIFY   13 // blob bits top-level op
 #define AS_MSG_OP_DELETE_ALL    14 // used without bin name
+#define AS_MSG_OP_HLL_READ      15 // HLL top-level op
+#define AS_MSG_OP_HLL_MODIFY    16 // HLL top-level op
 
 //------------------------------------------------
 // UDF ops.
@@ -425,6 +427,40 @@ typedef enum {
 	AS_BITS_SUBFLAG_RESIZE_GROW_ONLY    = 1 << 1,
 	AS_BITS_SUBFLAG_RESIZE_SHRINK_ONLY  = 1 << 2
 } as_bits_resize_subflags;
+
+//------------------------------------------------
+// HLL ops.
+//
+
+typedef enum {
+	AS_HLL_MODIFY_OP_START      = 0,
+
+	AS_HLL_OP_INIT              = AS_HLL_MODIFY_OP_START,
+	AS_HLL_OP_ADD               = 1,
+	AS_HLL_OP_UNION             = 2,
+	AS_HLL_OP_UPDATE_COUNT      = 3,
+	AS_HLL_OP_FOLD              = 4,
+
+	AS_HLL_MODIFY_OP_END,
+
+	AS_HLL_READ_OP_START        = 50,
+
+	AS_HLL_OP_COUNT             = AS_HLL_READ_OP_START,
+	AS_HLL_OP_GET_UNION         = 51,
+	AS_HLL_OP_UNION_COUNT       = 52,
+	AS_HLL_OP_INTERSECT_COUNT   = 53,
+	AS_HLL_OP_SIMILARITY        = 54,
+	AS_HLL_OP_DESCRIBE          = 55,
+
+	AS_HLL_READ_OP_END
+} as_hll_op_type;
+
+typedef enum {
+	AS_HLL_FLAG_CREATE_ONLY = 1 << 0,
+	AS_HLL_FLAG_UPDATE_ONLY = 1 << 1,
+	AS_HLL_FLAG_NO_FAIL     = 1 << 2,
+	AS_HLL_FLAG_ALLOW_FOLD  = 1 << 3
+} as_hll_flags;
 
 //------------------------------------------------
 // CDT ops.

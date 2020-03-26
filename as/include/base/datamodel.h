@@ -128,6 +128,7 @@ typedef enum {
 	AS_PARTICLE_TYPE_RUBY_BLOB = 10,
 	AS_PARTICLE_TYPE_PHP_BLOB = 11,
 	AS_PARTICLE_TYPE_ERLANG_BLOB = 12,
+	AS_PARTICLE_TYPE_HLL = 18,
 	AS_PARTICLE_TYPE_MAP = 19,
 	AS_PARTICLE_TYPE_LIST = 20,
 	AS_PARTICLE_TYPE_GEOJSON = 23,
@@ -199,6 +200,12 @@ extern int as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *
 extern int as_bin_bits_alloc_modify_from_client(as_bin *b, as_msg_op *op);
 extern int as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op);
 
+// Different for HLL operations - we don't use the normal APIs and
+// particle table functions.
+extern int as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb);
+extern int as_bin_hll_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *rb);
+extern int as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb);
+
 // Different for CDTs - the operations may return results, so we don't use the
 // normal APIs and particle table functions.
 extern int as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
@@ -231,6 +238,10 @@ extern uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
 // blob:
 extern int as_bin_bits_packed_read(const as_bin *b, const as_msg_op *msg_op, as_bin *result);
 extern int as_bin_bits_packed_modify(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb);
+
+// HLL:
+extern int as_bin_hll_read(const as_bin *b, const as_msg_op *msg_op, as_bin *rb);
+extern int as_bin_hll_modify(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb, as_bin* rb);
 
 // geojson:
 typedef void * geo_region_t;
