@@ -2215,7 +2215,9 @@ addr_fix_fn(cb_context *cont)
 	uint32_t i = entry->n_addrs;
 
 	if (i >= MAX_ADDRS) {
-		cf_crash(CF_SOCKET, "Too many addresses for interface %s", entry->name);
+		cf_warning(CF_SOCKET, "too many addresses for interface %s - truncating %s",
+				entry->name, cf_ip_addr_print(&cont->curr_address));
+		return;
 	}
 
 	cf_ip_addr *addr = &entry->addrs[i];
