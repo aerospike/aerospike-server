@@ -377,13 +377,6 @@ as_bin_hll_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
-	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_hll_read - error %u unexpected particle type %u for bin %.*s",
-				AS_ERR_PARAMETER, msg_op->particle_type, (int)msg_op->name_sz,
-				msg_op->name);
-		return -AS_ERR_PARAMETER;
-	}
-
 	hll_state state = { 0 };
 
 	if (! hll_state_init(&state, msg_op, true)) {
@@ -409,13 +402,6 @@ as_bin_hll_modify(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb,
 {
 	if (! hll_verify_bin(b)) {
 		return -AS_ERR_INCOMPATIBLE_TYPE;
-	}
-
-	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_hll_modify - error %u unexpected particle type %u for bin %.*s",
-				AS_ERR_PARAMETER, msg_op->particle_type, (int)msg_op->name_sz,
-				msg_op->name);
-		return -AS_ERR_PARAMETER;
 	}
 
 	hll_state state = { 0 };
