@@ -278,7 +278,6 @@ cf_log_init(bool early_verbose)
 	register_custom_conversions();
 }
 
-
 cf_log_sink*
 cf_log_init_sink(const char* path)
 {
@@ -292,7 +291,7 @@ cf_log_init_sink(const char* path)
 
 	// Set default for all contexts.
 	for (int i = 0; i < CF_LOG_N_CONTEXTS; i++) {
-		sink->levels[i] = CF_INFO;
+		sink->levels[i] = CF_CRITICAL;
 	}
 
 	g_n_sinks++;
