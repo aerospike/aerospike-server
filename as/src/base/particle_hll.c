@@ -29,7 +29,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <sys/param.h> // for MIN()
 
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
@@ -174,7 +173,7 @@ typedef struct hll_state_s {
 
 void hll_op_destroy(hll_op* op);
 
-static bool hll_verify_bin(const as_bin* b);
+static int32_t hll_verify_bin(const as_bin* b);
 static bool hll_state_init(hll_state* state, const as_msg_op* msg_op, bool is_read);
 static bool hll_parse_op(hll_state* state, hll_op* op);
 static bool hll_parse_n_index_bits(hll_state* state, hll_op* op);
@@ -373,8 +372,10 @@ as_bin_hll_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 {
 	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unused bin");
 
-	if (! hll_verify_bin(b)) {
-		return -AS_ERR_INCOMPATIBLE_TYPE;
+	int32_t verify_result = hll_verify_bin(b);
+
+	if (verify_result != AS_OK) {
+		return verify_result;
 	}
 
 	hll_state state = { 0 };
@@ -400,8 +401,10 @@ int
 as_bin_hll_modify(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb,
 		as_bin* rb)
 {
-	if (! hll_verify_bin(b)) {
-		return -AS_ERR_INCOMPATIBLE_TYPE;
+	int32_t verify_result = hll_verify_bin(b);
+
+	if (verify_result != AS_OK) {
+		return verify_result;
 	}
 
 	hll_state state = { 0 };
@@ -455,7 +458,7 @@ as_bin_hll_modify(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb,
 		old_p = NULL;
 	}
 
-	int prepare_result = state.def->prepare(&op, old_p);
+	int32_t prepare_result = state.def->prepare(&op, old_p);
 
 	if (prepare_result != AS_OK) {
 		hll_op_destroy(&op);
@@ -501,11 +504,11 @@ hll_op_destroy(hll_op* op)
 // Local helpers - hll parsing.
 //
 
-static bool
+static int32_t
 hll_verify_bin(const as_bin* b)
 {
 	if (! as_bin_inuse(b)) {
-		return true;
+		return AS_OK;
 	}
 
 	const hll_mem* bmem = (const hll_mem*)b->particle;
@@ -515,18 +518,18 @@ hll_verify_bin(const as_bin* b)
 	if (type != AS_PARTICLE_TYPE_HLL) {
 		cf_warning(AS_PARTICLE, "hll_verify_bin - error %u bin is not hll (%u) found %u",
 				AS_ERR_INCOMPATIBLE_TYPE, AS_PARTICLE_TYPE_HLL, type);
-		return false;
+		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
 	if (! (hll->flags == 0 && validate_n_combined_bits(hll->n_index_bits,
 			hll->n_minhash_bits) && verify_hll_sz(hll, bmem->sz))) {
 		cf_warning(AS_PARTICLE, "hll_verify_bin - error %u found invalid hll flags %x n_index_bits %u n_minhash_bits %u sz %u",
-				AS_ERR_INCOMPATIBLE_TYPE, hll->flags, hll->n_index_bits,
+				AS_ERR_UNKNOWN, hll->flags, hll->n_index_bits,
 				hll->n_minhash_bits, bmem->sz);
-		return false;
+		return -AS_ERR_UNKNOWN;
 	}
 
-	return true;
+	return AS_OK;
 }
 
 static bool
@@ -1114,17 +1117,18 @@ hll_read_op_count(const hll_op* op, const hll_t* from, as_bin* rb)
 static void
 hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb)
 {
-	(void)from;
-
-	const hll_t* hmhs[op->n_elements];
+	uint32_t n_hmhs = op->n_elements + 1;
+	const hll_t* hmhs[n_hmhs];
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
 	}
 
+	hmhs[op->n_elements] = from;
+
 	hll_t template;
 
-	hmh_compatible_template(op->n_elements, hmhs, &template);
+	hmh_compatible_template(n_hmhs, hmhs, &template);
 
 	uint32_t answer_sz = hmh_required_sz(template.n_index_bits,
 			template.n_minhash_bits);
@@ -1133,7 +1137,7 @@ hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb)
 
 	hmh_init(union_hmh, template.n_index_bits, template.n_minhash_bits);
 
-	for (uint32_t i = 0; i < op->n_elements; i++) {
+	for (uint32_t i = 0; i < n_hmhs; i++) {
 		hmh_union(union_hmh, hmhs[i]);
 	}
 
@@ -1146,15 +1150,16 @@ hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb)
 static void
 hll_read_op_union_count(const hll_op* op, const hll_t* from, as_bin* rb)
 {
-	(void)from;
-
-	const hll_t* hmhs[op->n_elements];
+	uint32_t n_hmhs = op->n_elements + 1;
+	const hll_t* hmhs[n_hmhs];
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
 	}
 
-	uint64_t count = hmh_estimate_union_cardinality(op->n_elements, hmhs);
+	hmhs[op->n_elements] = from;
+
+	uint64_t count = hmh_estimate_union_cardinality(n_hmhs, hmhs);
 
 	rb->particle = (as_particle*)count;
 	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
@@ -1163,15 +1168,16 @@ hll_read_op_union_count(const hll_op* op, const hll_t* from, as_bin* rb)
 static void
 hll_read_op_intersect_count(const hll_op* op, const hll_t* from, as_bin* rb)
 {
-	(void)from;
-
-	const hll_t* hmhs[op->n_elements];
+	uint32_t n_hmhs = op->n_elements + 1;
+	const hll_t* hmhs[n_hmhs];
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
 	}
 
-	uint64_t count = hmh_estimate_intersect_cardinality(op->n_elements, hmhs);
+	hmhs[op->n_elements] = from;
+
+	uint64_t count = hmh_estimate_intersect_cardinality(n_hmhs, hmhs);
 
 	rb->particle = (as_particle*)count;
 	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
@@ -1180,15 +1186,16 @@ hll_read_op_intersect_count(const hll_op* op, const hll_t* from, as_bin* rb)
 static void
 hll_read_op_similarity(const hll_op* op, const hll_t* from, as_bin* rb)
 {
-	(void)from;
-
-	const hll_t* hmhs[op->n_elements];
+	uint32_t n_hmhs = op->n_elements + 1;
+	const hll_t* hmhs[n_hmhs];
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
 	}
 
-	double similarity = hmh_estimate_similarity(op->n_elements, hmhs);
+	hmhs[op->n_elements] = from;
+
+	double similarity = hmh_estimate_similarity(n_hmhs, hmhs);
 
 	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_FLOAT);
 	*((double *)(&rb->particle)) = similarity;
