@@ -57,11 +57,11 @@
 // functions. Here are the differences...
 
 // Handle "wire" format.
-int32_t hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-
+static int32_t hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
+static int hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
+static int hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
+static int hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
+static int hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
 
 //==========================================================
 // HLL particle interface - vtable.
@@ -76,7 +76,7 @@ const as_particle_vtable hll_vtable = {
 		hll_prepend_from_wire,
 		hll_incr_from_wire,
 		blob_size_from_wire,
-		blob_from_wire,
+		hll_from_wire,
 		blob_compare_from_wire,
 		blob_wire_size,
 		blob_to_wire,
@@ -310,7 +310,7 @@ static const hll_op_def hll_read_op_table[] = {
 // Handle "wire" format.
 //
 
-int32_t
+static int32_t
 hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 		uint32_t value_size, as_particle **pp)
 {
@@ -320,10 +320,10 @@ hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -1;
+	return -AS_ERR_UNKNOWN;
 }
 
-int32_t
+static int
 hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 		uint32_t value_size, as_particle **pp)
 {
@@ -333,10 +333,10 @@ hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -1;
+	return -AS_ERR_UNKNOWN;
 }
 
-int32_t
+static int
 hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 		uint32_t value_size, as_particle **pp)
 {
@@ -346,10 +346,10 @@ hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -1;
+	return -AS_ERR_UNKNOWN;
 }
 
-int32_t
+static int
 hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 		uint32_t value_size, as_particle **pp)
 {
@@ -359,7 +359,29 @@ hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -1;
+	return -AS_ERR_UNKNOWN;
+}
+
+static int
+hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
+{
+	const hll_t* hll = (const hll_t*)wire_value;
+
+	if (! (hll->flags == 0 && validate_n_combined_bits(hll->n_index_bits,
+			hll->n_minhash_bits) && verify_hll_sz(hll, value_size))) {
+		cf_warning(AS_PARTICLE, "bad hll - flags %x n_index_bits %u n_minhash_bits %u sz %u",
+				hll->flags, hll->n_index_bits, hll->n_minhash_bits, value_size);
+		return -AS_ERR_UNKNOWN;
+	}
+
+	hll_mem* p_hll_mem = (hll_mem*)*pp;
+
+	p_hll_mem->type = wire_type;
+	p_hll_mem->sz = value_size;
+	memcpy(p_hll_mem->data, wire_value, p_hll_mem->sz);
+
+	return AS_OK;
 }
 
 
