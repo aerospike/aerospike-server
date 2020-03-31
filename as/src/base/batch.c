@@ -1084,8 +1084,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 	size_t size = sizeof(as_msg);
 	uint16_t n_fields = 0;
 
-	bool no_digests = (bool)
-			as_load_uint8((const uint8_t*)&g_config.batch_without_digests);
+	bool no_digests = as_load_bool(&g_config.batch_without_digests);
 
 	if (! no_digests) {
 		size += sizeof(as_msg_field) + sizeof(cf_digest);
@@ -1177,8 +1176,7 @@ as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* di
 	as_msg* msg = &cmsg->msg;
 	size_t size = proxy_size - sizeof(as_proto);
 
-	bool no_digests = (bool)
-			as_load_uint8((const uint8_t*)&g_config.batch_without_digests);
+	bool no_digests = as_load_bool(&g_config.batch_without_digests);
 
 	if (! no_digests) {
 		size += sizeof(as_msg_field) + sizeof(cf_digest);
