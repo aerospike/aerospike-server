@@ -43,18 +43,6 @@
 
 addrinfo g_cf_ip_addr_dns_hints = { .ai_flags = 0, .ai_family = AF_INET };
 
-static char *
-safe_strndup(const char *string, size_t length)
-{
-	char *res = cf_strndup(string, length);
-
-	if (res == NULL) {
-		cf_crash(CF_SOCKET, "Out of memory");
-	}
-
-	return res;
-}
-
 void
 cf_socket_set_advertise_ipv6(bool advertise)
 {
@@ -150,12 +138,6 @@ cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 
 	memcpy(binary, &addr->v4, 4);
 	return 4;
-}
-
-void
-cf_ip_addr_to_rack_aware_id(const cf_ip_addr *addr, uint32_t *id)
-{
-	*id = ntohl(addr->v4.s_addr);
 }
 
 int32_t
@@ -309,38 +291,6 @@ cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 
 	total += count;
 	return total;
-}
-
-int32_t
-cf_sock_addr_from_string(const char *string, cf_sock_addr *addr)
-{
-	int32_t res = -1;
-	const char *colon = strchr(string, ':');
-
-	if (colon == NULL) {
-		cf_warning(CF_SOCKET, "Missing ':' in socket address '%s'", string);
-		goto cleanup0;
-	}
-
-	const char *host = safe_strndup(string, colon - string);
-
-	if (cf_ip_addr_from_string(host, &addr->addr) < 0) {
-		cf_warning(CF_SOCKET, "Invalid host address '%s' in socket address '%s'", host, string);
-		goto cleanup1;
-	}
-
-	if (cf_ip_port_from_string(colon + 1, &addr->port) < 0) {
-		cf_warning(CF_SOCKET, "Invalid port '%s' in socket address '%s'", colon + 1, string);
-		goto cleanup1;
-	}
-
-	res = 0;
-
-cleanup1:
-	cf_free((void *)host);
-
-cleanup0:
-	return res;
 }
 
 void

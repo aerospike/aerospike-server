@@ -60,21 +60,9 @@ struct ssl_st;
 	_tmp; \
 })
 
-#define cf_ip_addr_print_multi(_addrs, _n_addrs) ({ \
-	char *_tmp = alloca(2500); \
-	cf_ip_addr_to_string_multi_safe(_addrs, _n_addrs, _tmp, 2500); \
-	_tmp; \
-})
-
 #define cf_ip_port_print(_port) ({ \
 	char *_tmp = alloca(25); \
 	cf_ip_port_to_string_safe(_port, _tmp, 25); \
-	_tmp; \
-})
-
-#define cf_ip_addr_port_print(_addr, _port) ({ \
-	char *_tmp = alloca(250); \
-	cf_ip_addr_port_to_string_safe(_addr, _port, _tmp, 250); \
 	_tmp; \
 })
 
@@ -211,10 +199,8 @@ void cf_ip_addr_from_string_multi_a(const char *string, cf_ip_addr_from_string_c
 CF_MUST_CHECK int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 void cf_ip_addr_to_string_safe(const cf_ip_addr *addr, char *string, size_t size);
 CF_MUST_CHECK int32_t cf_ip_addr_to_string_multi(const cf_ip_addr *addrs, uint32_t n_addrs, char *string, size_t size);
-void cf_ip_addr_to_string_multi_safe(const cf_ip_addr *addrs, uint32_t n_addrs, char *string, size_t size);
 CF_MUST_CHECK int32_t cf_ip_addr_from_binary(const uint8_t *binary, size_t size, cf_ip_addr *addr);
 CF_MUST_CHECK int32_t cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size);
-void cf_ip_addr_to_rack_aware_id(const cf_ip_addr *addr, uint32_t *id);
 
 CF_MUST_CHECK int32_t cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr *rhs);
 void cf_ip_addr_copy(const cf_ip_addr *from, cf_ip_addr *to);
@@ -240,16 +226,12 @@ CF_MUST_CHECK int32_t cf_ip_port_to_string(cf_ip_port port, char *string, size_t
 void cf_ip_port_to_string_safe(cf_ip_port port, char *string, size_t size);
 CF_MUST_CHECK int32_t cf_ip_port_from_binary(const uint8_t *binary, size_t size, cf_ip_port *port);
 CF_MUST_CHECK int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size);
-void cf_ip_port_from_node_id(cf_node id, cf_ip_port *port);
 
 CF_MUST_CHECK int32_t cf_ip_addr_port_to_string(const cf_ip_addr *addr, cf_ip_port port, char *string, size_t size);
 void cf_ip_addr_port_to_string_safe(const cf_ip_addr *addr, cf_ip_port port, char *string, size_t size);
 
-CF_MUST_CHECK int32_t cf_sock_addr_from_string(const char *string, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size);
 void cf_sock_addr_to_string_safe(const cf_sock_addr *addr, char *string, size_t size);
-CF_MUST_CHECK int32_t cf_sock_addr_from_binary(const uint8_t *binary, size_t size, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size);
 
 CF_MUST_CHECK int32_t cf_sock_addr_from_host_port(const char *host, cf_ip_port port, cf_sock_addr *addr);
 void cf_sock_addr_from_addr_port(const cf_ip_addr *ip_addr, cf_ip_port port, cf_sock_addr *addr);
@@ -260,7 +242,6 @@ void cf_sock_addr_copy(const cf_sock_addr *from, cf_sock_addr *to);
 void cf_sock_addr_from_native(const struct sockaddr *native, cf_sock_addr *addr);
 void cf_sock_addr_to_native(const cf_sock_addr *addr, struct sockaddr *native);
 
-void cf_sock_addr_set_any(cf_sock_addr *addr);
 CF_MUST_CHECK bool cf_sock_addr_is_any(const cf_sock_addr *addr);
 
 void cf_sock_cfg_init(cf_sock_cfg *cfg, cf_sock_owner owner);
@@ -269,14 +250,12 @@ void cf_sock_cfg_copy(const cf_sock_cfg *from, cf_sock_cfg *to);
 void cf_serv_cfg_init(cf_serv_cfg *cfg);
 CF_MUST_CHECK int32_t cf_serv_cfg_add_sock_cfg(cf_serv_cfg *serv_cfg, const cf_sock_cfg *sock_cfg);
 
-void cf_sockets_init(cf_sockets *socks);
 CF_MUST_CHECK bool cf_sockets_has_socket(const cf_sockets *socks, const cf_socket *sock);
 void cf_sockets_close(cf_sockets *socks);
 
 void cf_fd_disable_blocking(int32_t fd);
 
 void cf_socket_disable_blocking(cf_socket *sock);
-void cf_socket_enable_blocking(cf_socket *sock);
 void cf_socket_disable_nagle(cf_socket *sock);
 void cf_socket_enable_nagle(cf_socket *sock);
 void cf_socket_set_cork(cf_socket *sock, int cork);
@@ -316,7 +295,6 @@ CF_MUST_CHECK int32_t cf_socket_recv_all(cf_socket *sock, void *buff, size_t siz
 CF_MUST_CHECK int32_t cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags, int32_t timeout);
 CF_MUST_CHECK int32_t cf_socket_try_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags);
 
-void cf_socket_write_shutdown(cf_socket *sock);
 void cf_socket_shutdown(cf_socket *sock);
 void cf_socket_close(cf_socket *sock);
 void cf_socket_term(cf_socket *sock);
@@ -371,18 +349,12 @@ static inline void cf_poll_delete_socket(cf_poll poll, const cf_socket *sock)
 }
 
 CF_MUST_CHECK int32_t cf_inter_get_addr_all(cf_ip_addr *addrs, uint32_t *n_addrs);
-CF_MUST_CHECK int32_t cf_inter_get_addr_all_legacy(cf_ip_addr *addrs, uint32_t *n_addrs);
-CF_MUST_CHECK int32_t cf_inter_get_addr_def(cf_ip_addr *addrs, uint32_t *n_addrs);
-CF_MUST_CHECK int32_t cf_inter_get_addr_def_legacy(cf_ip_addr *addrs, uint32_t *n_addrs);
-CF_MUST_CHECK int32_t cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name);
 bool cf_inter_is_inter_name(const char *if_name);
 CF_MUST_CHECK int32_t cf_inter_addr_to_index_and_name(const cf_ip_addr *addr, int32_t *index, char **name);
 CF_MUST_CHECK int32_t cf_inter_get_physical(const char *if_name, char *phys_name, uint32_t phys_name_sz);
 void cf_inter_expand_bond(const char *if_name, char **out_names, uint32_t *n_out);
 CF_MUST_CHECK int32_t cf_inter_mtu(const cf_ip_addr *inter_addr);
 CF_MUST_CHECK int32_t cf_inter_min_mtu(void);
-bool cf_inter_detect_changes(cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit);
-bool cf_inter_detect_changes_legacy(cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit);
 
 CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id);
 
