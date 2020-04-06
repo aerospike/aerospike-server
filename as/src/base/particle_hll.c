@@ -320,7 +320,7 @@ hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -AS_ERR_UNKNOWN;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 static int
@@ -333,7 +333,7 @@ hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -AS_ERR_UNKNOWN;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 static int
@@ -346,7 +346,7 @@ hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -AS_ERR_UNKNOWN;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 static int
@@ -359,7 +359,7 @@ hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)pp;
 
 	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
-	return -AS_ERR_UNKNOWN;
+	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 static int
@@ -372,7 +372,7 @@ hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 			hll->n_minhash_bits) && verify_hll_sz(hll, value_size))) {
 		cf_warning(AS_PARTICLE, "bad hll - flags %x n_index_bits %u n_minhash_bits %u sz %u",
 				hll->flags, hll->n_index_bits, hll->n_minhash_bits, value_size);
-		return -AS_ERR_UNKNOWN;
+		return -AS_ERR_PARAMETER;
 	}
 
 	hll_mem* p_hll_mem = (hll_mem*)*pp;

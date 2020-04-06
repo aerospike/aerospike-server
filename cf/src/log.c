@@ -397,9 +397,11 @@ void
 cf_log_get_sinks(cf_dyn_buf* db)
 {
 	for (uint32_t i = 0; i < g_n_sinks; i++) {
+		const char* path = g_sinks[i].path;
+
 		cf_dyn_buf_append_uint32(db, i);
 		cf_dyn_buf_append_char(db, ':');
-		cf_dyn_buf_append_string(db, g_sinks[i].path);
+		cf_dyn_buf_append_string(db, path != NULL ? path : "stderr");
 		cf_dyn_buf_append_char(db, ';');
 	}
 
