@@ -222,6 +222,12 @@ as_service_set_threads(uint32_t n_threads)
 	}
 }
 
+uint32_t
+as_service_max_fds(void)
+{
+	return g_n_slots;
+}
+
 void
 as_service_rearm(as_file_handle* fd_h)
 {
