@@ -2239,7 +2239,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			g_config.batch_max_unused_buffers = val;
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-max", context, &context_len)) {
-			if (cf_str_atoi(context, &val) != 0 || val < MIN_PROTO_FD_MAX) {
+			if (cf_str_atoi(context, &val) != 0 || val < MIN_PROTO_FD_MAX || val > as_service_max_fds()) {
 				cf_warning(AS_INFO, "invalid proto-fd-max %d", val);
 				goto Error;
 			}
