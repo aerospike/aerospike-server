@@ -76,5 +76,6 @@ extern cf_tls_info* g_service_tls;
 void as_service_init(void);
 void as_service_start(void);
 void as_service_set_threads(uint32_t n_threads);
+uint32_t as_service_max_fds(void);
 void as_service_rearm(struct as_file_handle_s* fd_h);
 void as_service_enqueue_internal(struct as_transaction_s* tr);
