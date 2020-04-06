@@ -71,4 +71,5 @@ extern cf_tls_info* g_service_tls;
 //
 
 void as_service_start(void);
+uint32_t as_service_max_fds(void);
 void as_service_rearm(struct as_file_handle_s* fd_h);
