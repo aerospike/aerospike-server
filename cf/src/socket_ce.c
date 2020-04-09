@@ -232,7 +232,7 @@ cf_ip_net_from_string(const char *string, cf_ip_net *net)
 
 	uint8_t *mask = (uint8_t *)&net->mask;
 
-	memset(mask, 0, sizeof(cf_ip_addr));
+	memset(mask, 0, sizeof(net->mask));
 
 	while (prefix_bits >= 8) {
 		*mask++ = 0xff;
