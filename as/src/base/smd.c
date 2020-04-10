@@ -402,7 +402,7 @@ static void module_append_item(smd_module* module, as_smd_item* item);
 static void module_fill_msg(smd_module* module, msg* m);
 static void module_merge_list(smd_module* module, cf_vector* list);
 static void module_set_npr(smd_module* module, as_smd_item* item);
-static bool module_set_pr(smd_module* module, char* key, char* value);
+static const as_smd_item* module_set_pr(smd_module* module, char* key, char* value);
 static void module_restore_from_disk(smd_module* module);
 static void module_commit_to_disk(smd_module* module);
 static void module_set_default_items(smd_module* module, const cf_vector* default_items);
@@ -1364,9 +1364,14 @@ op_set_to_pr(smd_op* op)
 		return;
 	}
 
-	as_smd_item* item = item_vec_get(&op->items, 0);
+	as_smd_item* op_item = item_vec_get(&op->items, 0);
+	const as_smd_item* item =
+			module_set_pr(module, op_item->key, op_item->value);
 
-	if (module_set_pr(module, item->key, item->value)) { // malloc handoff
+	op_item->key = NULL;
+	op_item->value = NULL;
+
+	if (item != NULL) {
 		smd_state next_state = g_smd.node_count == 1 ? STATE_PR : STATE_SET;
 
 		OP_DETAIL("new-key %s move to state %s", item->key,
@@ -1381,9 +1386,6 @@ op_set_to_pr(smd_op* op)
 	else {
 		send_set_reply(module, true);
 	}
-
-	item->key = NULL;
-	item->value = NULL;
 }
 
 static void
@@ -2237,8 +2239,8 @@ module_set_npr(smd_module* module, as_smd_item* item)
 	smd_item_destroy(item);
 }
 
-// key and value are malloc handoffs
-static bool
+// key and value are malloc handoffs.
+static const as_smd_item*
 module_set_pr(smd_module* module, char* key, char* value)
 {
 	uint32_t ix;
@@ -2251,7 +2253,7 @@ module_set_pr(smd_module* module, char* key, char* value)
 		send_set_from_pr(module, item);
 		module_commit_to_disk(module);
 		module_accept_item(module, item);
-		return true;
+		return item;
 	}
 	// else - existing key.
 
@@ -2267,7 +2269,7 @@ module_set_pr(smd_module* module, char* key, char* value)
 						key);
 				cf_free(key);
 				smd_item_value_destroy(value);
-				return false;
+				return NULL;
 			}
 		}
 
@@ -2276,7 +2278,7 @@ module_set_pr(smd_module* module, char* key, char* value)
 					item->key);
 			cf_free(key);
 			smd_item_value_destroy(value);
-			return false;
+			return NULL;
 		}
 	}
 	else if (item->value == value) { // i.e. both are NULL
@@ -2284,7 +2286,7 @@ module_set_pr(smd_module* module, char* key, char* value)
 				item->key);
 		cf_free(key);
 		smd_item_value_destroy(value);
-		return false;
+		return NULL;
 	}
 
 	cf_free(key);
@@ -2298,7 +2300,7 @@ module_set_pr(smd_module* module, char* key, char* value)
 	module_commit_to_disk(module);
 	module_accept_item(module, item);
 
-	return true;
+	return item;
 }
 
 static void
