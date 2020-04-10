@@ -119,7 +119,7 @@ static void add_localhost(cf_serv_cfg* serv_cfg, cf_sock_owner owner);
 static void* run_accept(void* udata);
 
 // Assign client connections to threads.
-static void assign_socket(as_file_handle* fd_h, uint32_t events);
+static void assign_socket(as_file_handle* fd_h);
 static uint32_t select_sid(void);
 static uint32_t select_sid_pinned(cf_topo_cpu_index i_cpu);
 static uint32_t select_sid_adq(cf_topo_napi_id id);
@@ -140,6 +140,18 @@ static void* run_reaper(void* udata);
 
 // Transaction queue.
 static bool start_internal_transaction(thread_ctx* ctx);
+
+
+//==========================================================
+// Inlines & macros.
+//
+
+static inline void
+rearm(as_file_handle* fd_h, uint32_t events)
+{
+	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
+			events | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+}
 
 
 //==========================================================
@@ -231,8 +243,15 @@ as_service_max_fds(void)
 void
 as_service_rearm(as_file_handle* fd_h)
 {
-	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
-			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+	if (fd_h->move_me) {
+		cf_poll_delete_socket(fd_h->poll, &fd_h->sock);
+		assign_socket(fd_h); // rearms (EPOLLIN)
+
+		fd_h->move_me = false;
+		return;
+	}
+
+	rearm(fd_h, EPOLLIN);
 }
 
 void
@@ -411,7 +430,7 @@ run_accept(void* udata)
 
 			cf_mutex_unlock(&g_reaper_lock);
 
-			assign_socket(fd_h, EPOLLIN); // needs to be armed (EPOLLIN)
+			assign_socket(fd_h); // arms (EPOLLIN)
 
 			cf_atomic64_incr(&g_stats.proto_connections_opened);
 		}
@@ -426,7 +445,7 @@ run_accept(void* udata)
 //
 
 static void
-assign_socket(as_file_handle* fd_h, uint32_t events)
+assign_socket(as_file_handle* fd_h)
 {
 	while (true) {
 		uint32_t sid;
@@ -455,7 +474,7 @@ assign_socket(as_file_handle* fd_h, uint32_t events)
 			fd_h->poll = ctx->poll;
 
 			cf_poll_add_socket(fd_h->poll, &fd_h->sock,
-					events | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+					EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
 
 			cf_mutex_unlock(&g_thread_locks[sid]);
 			break;
@@ -573,8 +592,7 @@ run_service(void* udata)
 					tls_ev = EPOLLIN;
 				}
 
-				cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
-						(uint32_t)tls_ev | EPOLLONESHOT | EPOLLRDHUP, fd_h);
+				rearm(fd_h, (uint32_t)tls_ev);
 				continue;
 			}
 
@@ -590,15 +608,8 @@ run_service(void* udata)
 			tls_socket_must_not_have_data(&fd_h->sock, "full client read");
 
 			if (fd_h->proto_unread != 0) {
-				as_service_rearm(fd_h);
+				rearm(fd_h, EPOLLIN);
 				continue;
-			}
-
-			if (fd_h->move_me) {
-				cf_poll_delete_socket(fd_h->poll, &fd_h->sock);
-				assign_socket(fd_h, 0); // known to be unarmed (no EPOLLIN)
-
-				fd_h->move_me = false;
 			}
 
 			// Note that epoll cannot trigger again for this file handle during
@@ -648,7 +659,7 @@ stop_service(thread_ctx* ctx)
 			}
 
 			cf_poll_delete_socket(fd_h->poll, &fd_h->sock);
-			assign_socket(fd_h, EPOLLIN); // known to be armed (EPOLLIN)
+			assign_socket(fd_h); // keeps armed (EPOLLIN)
 		}
 
 		cf_mutex_unlock(&g_reaper_lock);
