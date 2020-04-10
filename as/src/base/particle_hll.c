@@ -1440,9 +1440,13 @@ hmh_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 		return hll_estimate_intersect_cardinality(n_hmhs, hmhs);
 	}
 
-	uint64_t cu = hmh_estimate_union_cardinality(n_hmhs, hmhs);
-
 	double j = hmh_estimate_similarity(n_hmhs, hmhs);
+
+	if (isnan(j)) {
+		return 0;
+	}
+
+	uint64_t cu = hmh_estimate_union_cardinality(n_hmhs, hmhs);
 
 	return (uint64_t)llround((double)cu * j);
 }
@@ -1471,7 +1475,7 @@ hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs)
 	}
 
 	if (one_is_empty) {
-		return one_has_data ? 0.0 : 1.0;
+		return one_has_data ? 0.0 : NAN;
 	}
 
 	uint32_t sz = hmh_required_sz(template.n_index_bits,
