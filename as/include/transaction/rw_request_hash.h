@@ -55,23 +55,23 @@ typedef enum {
 	RW_FIELD_DIGEST,
 	RW_FIELD_RECORD,
 	RW_FIELD_UNUSED_7,
-	RW_FIELD_CLUSTER_KEY,
-	RW_FIELD_OLD_RECORD, // TODO - old pickle - deprecate in "six months"
+	RW_FIELD_UNUSED_8,
+	RW_FIELD_UNUSED_9,
 	RW_FIELD_TID,
-	RW_FIELD_VOID_TIME, // TODO - old pickle - deprecate in "six months"
+	RW_FIELD_UNUSED_11,
 	RW_FIELD_INFO,
 	RW_FIELD_UNUSED_13,
 	RW_FIELD_UNUSED_14,
 	RW_FIELD_UNUSED_15,
 	RW_FIELD_LAST_UPDATE_TIME,
-	RW_FIELD_SET_NAME, // TODO - old pickle - deprecate in "six months"
-	RW_FIELD_KEY, // TODO - old pickle - deprecate in "six months"
+	RW_FIELD_UNUSED_17,
+	RW_FIELD_UNUSED_18,
 	RW_FIELD_REGIME,
 
 	NUM_RW_FIELDS
 } rw_msg_field;
 
-#define RW_OP_WRITE 1 // TODO - old pickle - deprecate in "six months"
+#define RW_OP_UNUSED_1 1
 #define RW_OP_WRITE_ACK 2
 #define RW_OP_DUP 3
 #define RW_OP_DUP_ACK 4
@@ -82,15 +82,14 @@ typedef enum {
 
 #define RW_INFO_XDR				0x0001
 #define RW_INFO_NO_REPL_ACK		0x0002
-#define RW_INFO_UNUSED_4		0x0004 // was nsup delete
-#define RW_INFO_UNUSED_8		0x0008 // was LDT dummy (no data)
-#define RW_INFO_UNUSED_10		0x0010 // was LDT parent record
-#define RW_INFO_UNUSED_20		0x0020 // was LDT subrecord
-#define RW_INFO_UNUSED_40		0x0040 // was LDT ESR
-#define RW_INFO_SINDEX_TOUCHED	0x0080 // sindex was touched
-#define RW_INFO_UNUSED_100		0x0100 // was LDT multi-op message
+#define RW_INFO_UNUSED_4		0x0004
+#define RW_INFO_UNUSED_8		0x0008
+#define RW_INFO_UNUSED_10		0x0010
+#define RW_INFO_UNUSED_20		0x0020
+#define RW_INFO_UNUSED_40		0x0040
+#define RW_INFO_SINDEX_TOUCHED	0x0080
+#define RW_INFO_UNUSED_100		0x0100
 #define RW_INFO_UNREPLICATED	0x0200 // enterprise only
-#define RW_INFO_TOMBSTONE		0x0400 // enterprise only
 
 typedef struct rw_request_hkey_s {
 	uint32_t	ns_ix;

@@ -80,7 +80,6 @@ typedef struct as_flat_record_s {
 	uint8_t data[];
 } __attribute__ ((__packed__)) as_flat_record;
 
-// For 5.0 compatibility.
 typedef struct as_flat_extra_flags_s {
 	uint8_t xdr_tombstone: 1;
 	uint8_t xdr_nsup_tombstone: 1;
@@ -182,15 +181,6 @@ N_RBLOCKS_TO_SIZE(uint32_t n_rblocks) {
 
 
 //==========================================================
-// Public API - for downgrading from 4.9 to 4.8-.
-//
-
-#include <stdlib.h>
-
-void as_flat_strip_xdr_pickle(uint8_t* pickle);
-
-
-//==========================================================
 // Private API - for enterprise separation only.
 //
 
@@ -202,3 +192,11 @@ const uint8_t* unflatten_compression_meta(const as_flat_record* flat, const uint
 
 void set_remote_record_xdr_flags(const as_flat_record* flat, const as_flat_extra_flags* extra_flags, struct as_remote_record_s* rr);
 void set_flat_xdr_state(const struct as_index_s* r, as_flat_record* flat);
+as_flat_extra_flags get_flat_extra_flags(const struct as_index_s* r);
+
+static inline bool
+flat_extra_flags_used(const as_flat_extra_flags* extra_flags)
+{
+	// Shortcut - as_flat_extra_flags is just a uint8_t with assigned bits.
+	return *(uint8_t*)extra_flags != 0;
+}

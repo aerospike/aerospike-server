@@ -48,9 +48,9 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/smd.h"
-#include "base/xdr_serverside.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
+#include "transaction/delete.h"
 
 #include "warnings.h"
 
@@ -69,8 +69,7 @@ typedef struct expire_overall_info_s {
 
 typedef struct expire_per_thread_info_s {
 	as_namespace* ns;
-	as_index_tree* tree;
-	cf_node master; // for XDR reporting
+	as_partition_reservation* rsv;
 	uint32_t now;
 	uint64_t n_0_void_time;
 	uint64_t n_expired;
@@ -90,8 +89,7 @@ typedef struct evict_overall_info_s {
 
 typedef struct evict_per_thread_info_s {
 	as_namespace* ns;
-	as_index_tree* tree;
-	cf_node master; // for XDR reporting
+	as_partition_reservation* rsv;
 	uint32_t now;
 	uint32_t evict_void_time;
 	const bool* sets_not_evicting;
@@ -169,29 +167,6 @@ static inline uint32_t
 evict_void_time_from_smd(const as_smd_item* item)
 {
 	return (uint32_t)strtoul(item->value, NULL, 10); // TODO - sanity check?
-}
-
-static inline cf_node
-find_xdr_delete_master(as_namespace* ns, uint32_t pid)
-{
-	if (is_xdr_delete_shipping_enabled() && is_xdr_nsup_deletes_enabled()) {
-		cf_node master = as_partition_writable_node(ns, pid);
-
-		// If master is 0, e.g. unavailable in SC, just log it locally.
-		return master != (cf_node)0 ? master : g_config.self_node;
-	}
-
-	return (cf_node)0;
-}
-
-static inline void
-report_to_xdr(as_namespace* ns, as_record* r, cf_node master)
-{
-	if (master != (cf_node)0) {
-		xdr_write(ns, &r->keyd, 0,
-				master == g_config.self_node ? (cf_node)0 : master,
-				XDR_OP_TYPE_DROP, as_index_get_set_id(r), NULL);
-	}
 }
 
 
@@ -461,8 +436,7 @@ run_expire(void* udata)
 		as_partition_reservation rsv;
 		as_partition_reserve(ns, pid, &rsv);
 
-		per_thread.tree = rsv.tree;
-		per_thread.master = find_xdr_delete_master(ns, pid);
+		per_thread.rsv = &rsv;
 
 		as_index_reduce_live(rsv.tree, expire_reduce_cb, (void*)&per_thread);
 		as_partition_release(&rsv);
@@ -477,18 +451,19 @@ run_expire(void* udata)
 static bool
 expire_reduce_cb(as_index_ref* r_ref, void* udata)
 {
-	as_index* r = r_ref->r;
 	expire_per_thread_info* per_thread = (expire_per_thread_info*)udata;
 	as_namespace* ns = per_thread->ns;
-	uint32_t void_time = r->void_time;
+	uint32_t void_time = r_ref->r->void_time;
 
 	if (void_time == 0) {
 		per_thread->n_0_void_time++;
 	}
 	else if (per_thread->now > void_time) {
-		report_to_xdr(ns, r, per_thread->master);
-		as_index_delete(per_thread->tree, &r->keyd);
-		per_thread->n_expired++;
+		if (drop_local(ns, per_thread->rsv, r_ref)) {
+			per_thread->n_expired++;
+		}
+
+		return true; // drop_local() calls as_record_done()
 	}
 
 	as_record_done(r_ref, ns);
@@ -580,8 +555,7 @@ run_evict(void* udata)
 		as_partition_reservation rsv;
 		as_partition_reserve(ns, pid, &rsv);
 
-		per_thread.tree = rsv.tree;
-		per_thread.master = find_xdr_delete_master(ns, pid);
+		per_thread.rsv = &rsv;
 
 		as_index_reduce_live(rsv.tree, evict_reduce_cb, (void*)&per_thread);
 		as_partition_release(&rsv);
@@ -607,15 +581,19 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 	else if (per_thread->sets_not_evicting[as_index_get_set_id(r)]) {
 		if (per_thread->now > void_time) {
-			report_to_xdr(ns, r, per_thread->master);
-			as_index_delete(per_thread->tree, &r->keyd);
-			per_thread->n_expired++;
+			if (drop_local(ns, per_thread->rsv, r_ref)) {
+				per_thread->n_expired++;
+			}
+
+			return true; // drop_local() calls as_record_done()
 		}
 	}
 	else if (per_thread->evict_void_time > void_time) {
-		report_to_xdr(ns, r, per_thread->master);
-		as_index_delete(per_thread->tree, &r->keyd);
-		per_thread->n_evicted++;
+		if (drop_local(ns, per_thread->rsv, r_ref)) {
+			per_thread->n_evicted++;
+		}
+
+		return true; // drop_local() calls as_record_done()
 	}
 
 	as_record_done(r_ref, ns);
@@ -877,11 +855,7 @@ eval_stop_writes(as_namespace* ns)
 			NULL,									// 0x0
 			"(memory)",								// 0x1
 			"(device-avail-pct)",					// 0x2
-			"(memory & device-avail-pct)",			// 0x3 (0x1 | 0x2)
-			"(xdr-log)",							// 0x4
-			"(memory & xdr-log)",					// 0x5 (0x1 | 0x4)
-			"(device-avail-pct & xdr-log)",			// 0x6 (0x2 | 0x4)
-			"(memory & device-avail-pct & xdr-log)"	// 0x7 (0x1 | 0x2 | 0x4)
+			"(memory & device-avail-pct)"			// 0x3 (0x1 | 0x2)
 	};
 
 	uint32_t why_stopped = 0x0;
@@ -892,10 +866,6 @@ eval_stop_writes(as_namespace* ns)
 
 	if (device_avail_pct < (int)ns->storage_min_avail_pct) {
 		why_stopped |= 0x2;
-	}
-
-	if (is_xdr_digestlog_low(ns)) {
-		why_stopped |= 0x4;
 	}
 
 	if (why_stopped != 0) {
@@ -1260,11 +1230,11 @@ run_cold_start_evict(void* udata)
 	uint32_t pid;
 
 	while ((pid = as_faa_uint32(&overall->pid, 1)) < AS_PARTITIONS) {
-		// Don't bother with partition reservations - it's startup.
-		per_thread.tree = ns->partitions[pid].tree;
+		// Don't bother with real partition reservations - it's startup.
+		as_partition_reservation rsv = { .tree = ns->partitions[pid].tree };
+		per_thread.rsv = &rsv;
 
-		as_index_reduce_live(per_thread.tree, cold_start_evict_reduce_cb,
-				&per_thread);
+		as_index_reduce_live(rsv.tree, cold_start_evict_reduce_cb, &per_thread);
 	}
 
 	as_add_uint64(&overall->n_0_void_time, (int64_t)per_thread.n_0_void_time);
@@ -1286,7 +1256,7 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 	else if (! per_thread->sets_not_evicting[as_index_get_set_id(r)] &&
 			ns->evict_void_time > void_time) {
-		as_index_delete(per_thread->tree, &r->keyd);
+		as_index_delete(per_thread->rsv->tree, &r->keyd);
 		per_thread->n_evicted++;
 	}
 

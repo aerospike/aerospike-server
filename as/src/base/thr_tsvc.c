@@ -47,7 +47,7 @@
 #include "base/stats.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "base/xdr_serverside.h"
+#include "base/xdr.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
 #include "storage/storage.h"
@@ -118,7 +118,7 @@ void
 as_tsvc_process_transaction(as_transaction *tr)
 {
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
-		as_xdr_read_txn(tr);
+		as_xdr_read(tr);
 		return;
 	}
 

@@ -123,7 +123,6 @@ typedef struct rw_request_s {
 	bool				is_set_up; // TODO - redundant with timeout_cb
 
 	// Store pickled data, for use in replica write.
-	bool				is_old_pickle; // TODO - old pickle - remove in "six months"
 	uint8_t*			pickle;
 	size_t				pickle_sz;
 	const char*			set_name; // points directly into vmap - never free it

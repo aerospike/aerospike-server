@@ -61,7 +61,7 @@
 #include "base/udf_arglist.h"
 #include "base/udf_cask.h"
 #include "base/udf_record.h"
-#include "fabric/exchange.h" // TODO - old pickle - remove in "six months"
+#include "base/xdr.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
@@ -760,13 +760,9 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	udf_record urecord;
 	udf_record_init(&urecord, true);
 
-	xdr_dirty_bins dirty_bins;
-	xdr_clear_dirty_bins(&dirty_bins);
-
 	urecord.r_ref	= &r_ref;
 	urecord.tr		= tr;
 	urecord.rd		= &rd;
-	urecord.dirty	= &dirty_bins;
 	urecord.keyd	= tr->keyd;
 
 	if (get_rv == 0) {
@@ -940,9 +936,8 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
-	uint16_t generation = 0;
-	uint16_t set_id = 0;
-	xdr_dirty_bins dirty_bins;
+	as_xdr_submit_info submit_info;
+	bool submit = false;
 
 	if (urecord_op == UDF_OPTYPE_WRITE || urecord_op == UDF_OPTYPE_DELETE) {
 		as_msg* m = &tr->msgp->msg;
@@ -957,14 +952,9 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 
 		stash_index_metadata(r, &old_metadata);
 		advance_record_version(tr, r);
+		set_xdr_write(tr, r);
 		transition_delete_metadata(tr, r, urecord_op == UDF_OPTYPE_DELETE);
 		as_record_transition_stats(r, ns, &old_metadata);
-
-		// TODO - old pickle - remove in "six months".
-		if (as_exchange_min_compatibility_id() < 3) {
-			rw->is_old_pickle = true;
-			pickle_all(rd, rw);
-		}
 
 		tr->generation = r->generation;
 		tr->void_time = r->void_time;
@@ -977,42 +967,23 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 
 		will_replicate(r, ns);
 
-		// Collect information for XDR before closing the record.
-		generation = plain_generation(r->generation, ns);
-		set_id = as_index_get_set_id(r);
-
-		if (urecord->dirty && urecord_op == UDF_OPTYPE_WRITE) {
-			xdr_clear_dirty_bins(&dirty_bins);
-			xdr_copy_dirty_bins(urecord->dirty, &dirty_bins);
-		}
+		// Save for XDR submit outside record lock.
+		as_xdr_get_submit_info(r, old_metadata.last_update_time, &submit_info);
+		submit = true;
 	}
 
 	// Will we need a pickle?
-	// TODO - old pickle - remove condition in "six months".
-	if (! rw->is_old_pickle) {
-		rd->keep_pickle = rw->n_dest_nodes != 0;
-	}
+	rd->keep_pickle = rw->n_dest_nodes != 0;
 
 	// Close the record for all the cases.
 	udf_record_close(urecord);
 
-	// TODO - old pickle - remove condition in "six months".
-	if (! rw->is_old_pickle) {
-		// Yes, it's safe to use these urecord fields after udf_record_close().
-		rw->pickle = urecord->pickle;
-		rw->pickle_sz = urecord->pickle_sz;
-	}
+	// Yes, it's safe to use these urecord fields after udf_record_close().
+	rw->pickle = urecord->pickle;
+	rw->pickle_sz = urecord->pickle_sz;
 
-	// Write to XDR pipe.
-	if (urecord_op == UDF_OPTYPE_WRITE) {
-		xdr_write(tr->rsv.ns, &tr->keyd, generation, 0, XDR_OP_TYPE_WRITE,
-				set_id, &dirty_bins);
-	}
-	else if (urecord_op == UDF_OPTYPE_DELETE) {
-		xdr_write(tr->rsv.ns, &tr->keyd, 0, 0,
-				as_transaction_is_durable_delete(tr) ?
-						XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP,
-				set_id, NULL);
+	if (submit && ! write_is_full_drop(tr)) {
+		as_xdr_submit(ns, &submit_info);
 	}
 }
 

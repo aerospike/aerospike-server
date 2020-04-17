@@ -205,7 +205,6 @@ int as_partition_reserve_read_tr(struct as_namespace_s* ns, uint32_t pid, struct
 int as_partition_reserve_full(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_prereserve_query(struct as_namespace_s* ns, bool can_partition_query[], as_partition_reservation rsv[]);
 int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
-int as_partition_reserve_xdr_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_reservation* src);
 
 void as_partition_release(as_partition_reservation* rsv);

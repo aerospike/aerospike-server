@@ -77,28 +77,35 @@ char *tls_read_password(const char *path)
 	return NULL;
 }
 
-cf_tls_info *
+struct cf_tls_info_s *
 tls_config_server_context(cf_tls_spec *tspec, bool auth_client, uint32_t n_peer_names, char **peer_names)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return NULL;
 }
 
-cf_tls_info *
+struct cf_tls_info_s *
 tls_config_intra_context(cf_tls_spec *tspec, const char *which)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return NULL;
 }
 
+struct cf_tls_info_s *
+tls_config_xdr_client_context(cf_tls_spec *tspec)
+{
+	cf_crash(CF_TLS, "unexpected TLS state");
+	return NULL;
+}
+
 void
-tls_socket_prepare_server(cf_tls_info *info, cf_socket *sock)
+tls_socket_prepare_server(struct cf_tls_info_s *info, struct cf_tls_peer_names_s *peer_names, cf_socket *sock)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 }
 
 void
-tls_socket_prepare_client(cf_tls_info *info, cf_socket *sock)
+tls_socket_prepare_client(struct cf_tls_info_s *info, struct cf_tls_peer_names_s *peer_names, cf_socket *sock)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 }
@@ -128,14 +135,14 @@ tls_socket_connect(cf_socket *sock)
 }
 
 int
-tls_socket_accept_block(cf_socket *sock)
+tls_socket_accept_block(cf_socket *sock, uint32_t timeout)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return 1;
 }
 
 int
-tls_socket_connect_block(cf_socket *sock)
+tls_socket_connect_block(cf_socket *sock, uint32_t timeout)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return 1;

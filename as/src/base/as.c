@@ -61,7 +61,7 @@
 #include "base/thr_info_port.h"
 #include "base/thr_sindex.h"
 #include "base/ticker.h"
-#include "base/xdr_serverside.h"
+#include "base/xdr.h"
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
@@ -304,8 +304,6 @@ main(int argc, char **argv)
 	// Includes echoing the configuration file to log.
 	as_config_post_process(c, config_file);
 
-	xdr_config_post_process();
-
 	// If we allocated a non-default config file name, free it.
 	if (config_file != DEFAULT_CONFIG_FILE) {
 		cf_free((void*)config_file);
@@ -360,6 +358,7 @@ main(int argc, char **argv)
 
 	cf_info(AS_AS, "initializing services...");
 
+	as_xdr_init();				// load persisted last-ship-time(s)
 	cf_dns_init();				// DNS resolver
 	as_netio_init();			// query responses
 	as_security_init();			// security features
@@ -377,7 +376,6 @@ main(int argc, char **argv)
 	as_udf_init();				// user-defined functions
 	as_scan_init();				// scan a namespace or set
 	as_batch_init();			// batch transaction handling
-	as_xdr_init();				// cross data-center replication
 	as_mon_init();				// monitor
 
 	// Wait for enough available storage. We've been defragging all along, but
@@ -431,7 +429,6 @@ main(int argc, char **argv)
 	cf_info(AS_AS, "initiating clean shutdown ...");
 
 	as_storage_shutdown(instance);
-	as_xdr_shutdown();
 
 	cf_info(AS_AS, "finished clean shutdown - exiting");
 

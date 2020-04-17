@@ -413,6 +413,22 @@ cf_ip_port_from_node_id(cf_node id, cf_ip_port *port)
 	memcpy(port, buff + 6, 2);
 }
 
+int32_t
+cf_ip_addr_port_to_string(const cf_ip_addr *addr, cf_ip_port port, char *string, size_t size)
+{
+	cf_sock_addr sock_addr = { .addr = *addr, .port = port };
+
+	return cf_sock_addr_to_string(&sock_addr, string, size);
+}
+
+void
+cf_ip_addr_port_to_string_safe(const cf_ip_addr *addr, cf_ip_port port, char *string, size_t size)
+{
+	if (cf_ip_addr_port_to_string(addr, port, string, size) < 0) {
+		cf_crash(CF_SOCKET, "String buffer overflow");
+	}
+}
+
 void
 cf_sock_addr_to_string_safe(const cf_sock_addr *addr, char *string, size_t size)
 {
@@ -1745,12 +1761,12 @@ cf_poll_modify_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t ev
 }
 
 int32_t
-cf_poll_delete_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t n_err_ok,
+cf_poll_delete_fd_forgiving(cf_poll poll, int32_t fd, uint32_t n_err_ok,
 		int32_t *err_ok)
 {
-	cf_detail(CF_SOCKET, "Deleting FD %d from epoll instance with FD %d", sock->fd, poll.fd);
+	cf_detail(CF_SOCKET, "Deleting FD %d from epoll instance with FD %d", fd, poll.fd);
 
-	if (epoll_ctl(poll.fd, EPOLL_CTL_DEL, sock->fd, NULL) < 0) {
+	if (epoll_ctl(poll.fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
 		for (uint32_t i = 0; i < n_err_ok; ++i) {
 			if (errno == err_ok[i]) {
 				return errno;
@@ -1758,7 +1774,7 @@ cf_poll_delete_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t n_
 		}
 
 		cf_crash(CF_SOCKET, "Error while deleting FD %d from epoll instance %d: %d (%s)",
-				sock->fd, poll.fd, errno, cf_strerror(errno));
+				fd, poll.fd, errno, cf_strerror(errno));
 	}
 
 	return 0;

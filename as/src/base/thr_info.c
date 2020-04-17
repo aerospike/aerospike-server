@@ -75,8 +75,7 @@
 #include "base/stats.h"
 #include "base/truncate.h"
 #include "base/udf_cask.h"
-#include "base/xdr_config.h"
-#include "base/xdr_serverside.h"
+#include "base/xdr.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
@@ -110,7 +109,6 @@ int info_get_objects(char *name, cf_dyn_buf *db);
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
-int info_get_tree_statistics(char *name, char *subtree, cf_dyn_buf *db);
 
 
 as_stats g_stats = { 0 }; // separate .c file not worth it
@@ -511,8 +509,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "fabric_meta_recv_rate", g_stats.fabric_meta_r_rate);
 	info_append_uint64(db, "fabric_rw_send_rate", g_stats.fabric_rw_s_rate);
 	info_append_uint64(db, "fabric_rw_recv_rate", g_stats.fabric_rw_r_rate);
-
-	as_xdr_get_stats(db);
 
 	cf_dyn_buf_chomp(db);
 
@@ -1918,19 +1914,13 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	as_namespace *ns = as_namespace_get_byname(context);
 
 	if (! ns) {
-		cf_dyn_buf_append_string(db, "namespace not found;"); // TODO - start with "error"?
+		cf_dyn_buf_append_string(db, "ERROR::namespace not found");
 		return;
 	}
 
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint32(db, "default-ttl", ns->default_ttl);
-
-	info_append_bool(db, "enable-xdr", ns->enable_xdr);
-	info_append_bool(db, "sets-enable-xdr", ns->sets_enable_xdr);
-	info_append_bool(db, "ns-forward-xdr-writes", ns->ns_forward_xdr_writes);
-	info_append_bool(db, "allow-nonxdr-writes", ns->ns_allow_nonxdr_writes);
-	info_append_bool(db, "allow-xdr-writes", ns->ns_allow_xdr_writes);
 
 	// Not true config, but act as config overrides:
 	cf_hist_track_get_settings(ns->read_hist, db);
@@ -1985,6 +1975,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "prefer-uniform-balance", ns->cfg_prefer_uniform_balance);
 	info_append_uint32(db, "rack-id", ns->rack_id);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
+	info_append_bool(db, "reject-non-xdr-writes", ns->reject_non_xdr_writes);
+	info_append_bool(db, "reject-xdr-writes", ns->reject_xdr_writes);
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_uint32(db, "single-scan-threads", ns->n_single_scan_threads);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
@@ -1995,6 +1987,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "transaction-pending-limit", ns->transaction_pending_limit);
 	info_append_uint32(db, "truncate-threads", ns->n_truncate_threads);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
+	info_append_uint32(db, "xdr-tomb-raider-period", ns->xdr_tomb_raider_period);
+	info_append_uint32(db, "xdr-tomb-raider-threads", ns->n_xdr_tomb_raider_threads);
 
 	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
 		info_append_indexed_string(db, "index-type.mount", i, NULL, ns->xmem_mounts[i]);
@@ -2158,7 +2152,7 @@ info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 	int context_len = sizeof(context);
 
 	if (as_info_parameter_get(params, "context", context, &context_len) != 0) {
-		cf_dyn_buf_append_string(db, "Error: Invalid get-config parameter;");
+		cf_dyn_buf_append_string(db, "Error::invalid get-config parameter");
 		return;
 	}
 
@@ -2172,7 +2166,7 @@ info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 		context_len = sizeof(context);
 
 		if (as_info_parameter_get(params, "id", context, &context_len) != 0) {
-			cf_dyn_buf_append_string(db, "Error:invalid id;");
+			cf_dyn_buf_append_string(db, "Error::invalid id");
 			return;
 		}
 
@@ -2182,10 +2176,10 @@ info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 		info_security_config_get(db);
 	}
 	else if (strcmp(context, "xdr") == 0) {
-		as_xdr_get_config(db);
+		as_xdr_get_config(params, db);
 	}
 	else {
-		cf_dyn_buf_append_string(db, "Error:Invalid context;");
+		cf_dyn_buf_append_string(db, "Error::invalid context");
 	}
 }
 
@@ -2197,7 +2191,8 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 
 	if (params && *params != 0) {
 		info_command_config_get_with_params(name, params, db);
-		cf_dyn_buf_chomp(db);
+		// Response may be an error string (without a semicolon).
+		cf_dyn_buf_chomp_char(db, ';');
 		return 0;
 	}
 
@@ -2206,13 +2201,32 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	info_service_config_get(db);
 	info_network_config_get(db);
 	info_security_config_get(db);
-	as_xdr_get_config(db);
 
 	cf_dyn_buf_chomp(db);
 
 	return 0;
 }
 
+int
+info_command_get_stats(char *name, char *params, cf_dyn_buf *db)
+{
+	char context[1024];
+	int context_len = sizeof(context);
+
+	if (as_info_parameter_get(params, "context", context, &context_len) != 0) {
+		cf_dyn_buf_append_string(db, "ERROR::missing-context");
+		return 0;
+	}
+
+	if (strcmp(context, "xdr") == 0) {
+		as_xdr_get_stats(params, db);
+	}
+	else {
+		cf_dyn_buf_append_string(db, "ERROR::unknown-context");
+	}
+
+	return 0;
+}
 
 //
 // config-set:context=service;variable=value;
@@ -2820,25 +2834,8 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 
 			context_len = sizeof(context);
-			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len)) {
-				// TODO - make sure context is null-terminated.
-				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
-					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
-					cf_atomic32_set(&p_set->enable_xdr, AS_SET_ENABLE_XDR_TRUE);
-				}
-				else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
-					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
-					cf_atomic32_set(&p_set->enable_xdr, AS_SET_ENABLE_XDR_FALSE);
-				}
-				else if (strncmp(context, "use-default", 11) == 0) {
-					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
-					cf_atomic32_set(&p_set->enable_xdr, AS_SET_ENABLE_XDR_DEFAULT);
-				}
-				else {
-					goto Error;
-				}
-			}
-			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len)) {
+
+			if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
 					DISABLE_SET_EVICTION(p_set, true);
@@ -2977,6 +2974,20 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of nsup-threads of ns %s from %u to %d", ns->name, ns->n_nsup_threads, val);
 			ns->n_nsup_threads = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "xdr-tomb-raider-period", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of xdr-tomb-raider-period of ns %s from %u to %d", ns->name, ns->xdr_tomb_raider_period, val);
+			ns->xdr_tomb_raider_period = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "xdr-tomb-raider-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 128) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of xdr-tomb-raider-threads of ns %s from %u to %d", ns->name, ns->n_xdr_tomb_raider_threads, val);
+			ns->n_xdr_tomb_raider_threads = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "tomb-raider-eligible-age", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
@@ -3190,66 +3201,27 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of flush-max-ms of ns %s from %lu to %d", ns->name, ns->storage_flush_max_us / 1000, val);
 			ns->storage_flush_max_us = (uint64_t)val * 1000;
 		}
-		else if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "reject-non-xdr-writes", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->enable_xdr], context);
-				ns->enable_xdr = true;
+				cf_info(AS_INFO, "Changing value of reject-non-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->reject_non_xdr_writes], context);
+				ns->reject_non_xdr_writes = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->enable_xdr], context);
-				ns->enable_xdr = false;
+				cf_info(AS_INFO, "Changing value of reject-non-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->reject_non_xdr_writes], context);
+				ns->reject_non_xdr_writes = false;
 			}
 			else {
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "sets-enable-xdr", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "reject-xdr-writes", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of sets-enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->sets_enable_xdr], context);
-				ns->sets_enable_xdr = true;
+				cf_info(AS_INFO, "Changing value of reject-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->reject_xdr_writes], context);
+				ns->reject_xdr_writes = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of sets-enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->sets_enable_xdr], context);
-				ns->sets_enable_xdr = false;
-			}
-			else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "ns-forward-xdr-writes", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of ns-forward-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->ns_forward_xdr_writes], context);
-				ns->ns_forward_xdr_writes = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of ns-forward-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->ns_forward_xdr_writes], context);
-				ns->ns_forward_xdr_writes = false;
-			}
-			else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "allow-nonxdr-writes", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-nonxdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->ns_allow_nonxdr_writes], context);
-				ns->ns_allow_nonxdr_writes = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-nonxdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->ns_allow_nonxdr_writes], context);
-				ns->ns_allow_nonxdr_writes = false;
-			}
-			else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "allow-xdr-writes", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->ns_allow_xdr_writes], context);
-				ns->ns_allow_xdr_writes = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->ns_allow_xdr_writes], context);
-				ns->ns_allow_xdr_writes = false;
+				cf_info(AS_INFO, "Changing value of reject-xdr-writes of ns %s from %s to %s", ns->name, bool_val[ns->reject_xdr_writes], context);
+				ns->reject_xdr_writes = false;
 			}
 			else {
 				goto Error;
@@ -3609,9 +3581,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else {
-			if (as_xdr_set_config_ns(ns->name, params) == false) {
-				goto Error;
-			}
+			goto Error;
 		}
 	} // end of namespace stanza
 	else if (strcmp(context, "security") == 0) {
@@ -3651,7 +3621,12 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		}
 	}
 	else if (strcmp(context, "xdr") == 0) {
-		if (as_xdr_set_config(params) == false) {
+		if (as_config_error_enterprise_only()) {
+			cf_warning(AS_INFO, "XDR is enterprise-only");
+			goto Error;
+		}
+
+		if (! as_xdr_set_config(params)) {
 			goto Error;
 		}
 	}
@@ -5239,6 +5214,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64(db, "objects", ns->n_objects);
 	info_append_uint64(db, "tombstones", ns->n_tombstones);
+	info_append_uint64(db, "xdr_tombstones", ns->n_xdr_tombstones);
 
 	repl_stats mp;
 	as_partition_get_replica_stats(ns, &mp);
@@ -5750,19 +5726,6 @@ info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db)
 		as_namespace_get_set_info(ns, set_name, db);
 	}
 	return(0);
-}
-
-int
-info_get_tree_statistics(char *name, char *subtree, cf_dyn_buf *db)
-{
-	if (strcmp(subtree, "xdr") == 0) {
-		as_xdr_get_stats(db);
-		cf_dyn_buf_chomp(db);
-		return 0;
-	}
-
-	cf_dyn_buf_append_string(db, "error");
-	return -1;
 }
 
 int
@@ -6667,7 +6630,6 @@ as_info_init()
 	as_info_set_tree("log", info_get_tree_log);             //
 	as_info_set_tree("namespace", info_get_tree_namespace); // Returns health and usage stats for a particular namespace.
 	as_info_set_tree("sets", info_get_tree_sets);           // Returns set statistics for all or a particular set.
-	as_info_set_tree("statistics", info_get_tree_statistics);
 
 	// Define commands
 	as_info_set_command("cluster-stable", info_command_cluster_stable, PERM_NONE);            // Returns cluster key if cluster is stable.
@@ -6685,6 +6647,7 @@ as_info_init()
 	as_info_set_command("eviction-reset", info_command_eviction_reset, PERM_TRUNCATE);        // Delete or manually set SMD evict-void-time.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
+	as_info_set_command("get-stats", info_command_get_stats, PERM_NONE);                      // Returns statistics for a particular context.
 	as_info_set_command("hist-track-start", info_command_hist_track, PERM_SERVICE_CTRL);      // Start or Restart histogram tracking.
 	as_info_set_command("hist-track-stop", info_command_hist_track, PERM_SERVICE_CTRL);       // Stop histogram tracking.
 	as_info_set_command("histogram", info_command_histogram, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
@@ -6713,7 +6676,6 @@ as_info_init()
 	as_info_set_command("truncate-namespace", info_command_truncate_namespace, PERM_TRUNCATE); // Truncate a namespace.
 	as_info_set_command("truncate-namespace-undo", info_command_truncate_namespace_undo, PERM_TRUNCATE); // Undo a truncate-namespace command.
 	as_info_set_command("truncate-undo", info_command_truncate_undo, PERM_TRUNCATE);          // Undo a truncate (set) command.
-	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);               // Command to XDR module.
 
 	// SINDEX
 	as_info_set_dynamic("sindex", info_get_sindexes, false);
@@ -6744,7 +6706,9 @@ as_info_init()
 	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);
 	as_info_set_dynamic("sindex-builder-list", as_sbld_list, false);                         // List info for all secondary index builder jobs.
 
-	as_xdr_info_init();
+	// XDR
+	as_info_set_command("xdr-dc-state", as_xdr_dc_state, PERM_NONE);
+
 	as_service_list_init();
 
 	for (uint32_t i = 0; i < g_config.n_info_threads; i++) {

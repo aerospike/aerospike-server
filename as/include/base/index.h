@@ -66,11 +66,11 @@ typedef struct as_index_s {
 	// offset: 34
 	uint16_t set_id_bits: 10;
 	uint16_t : 5;
-	uint16_t xdr_write : 1; // for 5.0 compatibility
+	uint16_t xdr_write : 1;
 
 	// offset: 36
-	uint32_t xdr_tombstone : 1; // for 5.0 compatibility
-	uint32_t : 1;
+	uint32_t xdr_tombstone : 1;
+	uint32_t xdr_nsup_tombstone : 1;
 	uint32_t void_time: 30;
 
 	// offset: 40
@@ -139,8 +139,7 @@ COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
 static inline
 void as_index_clear_record_info(as_index *index)
 {
-	index->set_id_bits = 0;
-
+	*(uint16_t*)((uint8_t*)index + 34) = 0;
 	*(uint32_t*)((uint8_t*)index + 36) = 0;
 
 	uint64_t *p_clear = (uint64_t*)((uint8_t*)index + 40);

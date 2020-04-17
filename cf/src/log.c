@@ -122,8 +122,7 @@ static const char* context_strings[] = {
 		"tsvc",
 		"udf",
 		"xdr",
-		"xdr-client",
-		"xdr-http"
+		"xdr-client"
 };
 
 ARRAY_ASSERT(context_strings, CF_LOG_N_CONTEXTS);

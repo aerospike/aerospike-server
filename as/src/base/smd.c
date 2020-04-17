@@ -329,7 +329,8 @@ static smd_module g_module_table[] = {
 		[AS_SMD_MODULE_SECURITY] = { .name = "security" },
 		[AS_SMD_MODULE_SINDEX] = { .name = "sindex" },
 		[AS_SMD_MODULE_TRUNCATE] = { .name = "truncate" },
-		[AS_SMD_MODULE_UDF] = { .name = "UDF" }
+		[AS_SMD_MODULE_UDF] = { .name = "UDF" },
+		[AS_SMD_MODULE_XDR] = { .name = "XDR" }
 };
 
 COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) ==
@@ -770,25 +771,16 @@ smd_cluster_changed_cb(const as_exchange_cluster_changed_event* ex_event,
 {
 	(void)udata;
 
-	size_t a_sz = ex_event->cluster_size * sizeof(cf_node);
-	cf_node* succession = cf_malloc(a_sz);
-
-	uint32_t* compatibility_ids = as_exchange_compatibility_ids();
-	uint32_t n_compatible = 0;
-
-	for (uint32_t n = 0; n < ex_event->cluster_size; n++) {
-		if (compatibility_ids[n] >= 1) {
-			succession[n_compatible++] = ex_event->succession[n];
-		}
-	}
-
 	smd_op* op = smd_op_create();
 
 	op->type = SMD_OP_CLUSTER_CHANGED;
 	op->cl_key = ex_event->cluster_key;
 
-	op->node_count = n_compatible;
-	op->succession = succession;
+	size_t a_sz = ex_event->cluster_size * sizeof(cf_node);
+
+	op->node_count = ex_event->cluster_size;
+	op->succession = cf_malloc(a_sz);
+	memcpy(op->succession, ex_event->succession, a_sz);
 
 	cf_queue_push(&g_smd.event_q, &op);
 }

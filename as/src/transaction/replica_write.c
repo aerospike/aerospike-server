@@ -46,10 +46,8 @@
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
-#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
-#include "storage/flat.h"
 #include "transaction/delete.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
@@ -60,14 +58,12 @@
 // Forward declarations.
 //
 
-void old_make_message(rw_request* rw, as_transaction* tr);
 uint32_t pack_info_bits(as_transaction* tr);
 void send_repl_write_ack(cf_node node, msg* m, uint32_t result);
 void send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result,
 		const cf_digest* keyd);
 uint32_t parse_result_code(msg* m);
-void drop_replica(as_partition_reservation* rsv, cf_digest* keyd,
-		bool is_xdr_op, cf_node master);
+void drop_replica(as_partition_reservation* rsv, cf_digest* keyd);
 
 
 //==========================================================
@@ -83,12 +79,6 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 
 	rw->dest_msg = as_fabric_msg_get(M_TYPE_RW);
 
-	// TODO - old pickle - remove in "six months".
-	if (rw->is_old_pickle) {
-		old_make_message(rw, tr);
-		return;
-	}
-
 	as_namespace* ns = tr->rsv.ns;
 	msg* m = rw->dest_msg;
 
@@ -99,7 +89,6 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
 	if (rw->pickle != NULL) {
-		as_flat_strip_xdr_pickle(rw->pickle);
 		msg_set_buf(m, RW_FIELD_RECORD, rw->pickle, rw->pickle_sz,
 				MSG_SET_HANDOFF_MALLOC);
 		rw->pickle = NULL; // make sure destructor doesn't free this
@@ -212,10 +201,6 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 
-	uint32_t info = 0;
-
-	msg_get_uint32(m, RW_FIELD_INFO, &info);
-
 	cf_digest* keyd;
 	size_t keyd_size;
 
@@ -233,7 +218,7 @@ repl_write_handle_op(cf_node node, msg* m)
 				as_partition_getid(keyd), &rsv);
 
 		if (result == AS_OK) {
-			drop_replica(&rsv, keyd, (info & RW_INFO_XDR) != 0, node);
+			drop_replica(&rsv, keyd);
 			as_partition_release(&rsv);
 		}
 
@@ -267,136 +252,24 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 
-	// If we get an XDR-tombstone from 5.0, convert to drop replica.
-	if (rr.xdr_tombstone) {
-		drop_replica(&rsv, rr.keyd, rr.xdr_write, node);
-		as_partition_release(&rsv);
-		send_repl_write_ack_w_digest(node, m, AS_OK, rr.keyd);
-		return;
-	}
-
 	rr.rsv = &rsv;
-
-	// Do XDR write if the write is a non-XDR write or forwarding is enabled.
-	bool do_xdr_write = (info & RW_INFO_XDR) == 0 || rr.xdr_write ||
-			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes;
-
-	// If source didn't touch sindex, may not need to touch it locally.
-	bool skip_sindex = (info & RW_INFO_SINDEX_TOUCHED) == 0;
-
-	result = (uint32_t)as_record_replace_if_better(&rr, skip_sindex,
-			do_xdr_write);
-
-	as_partition_release(&rsv);
-	send_repl_write_ack_w_digest(node, m, result, rr.keyd);
-}
-
-
-// TODO - old pickle - remove in "six months".
-void
-repl_write_handle_old_op(cf_node node, msg* m)
-{
-	uint8_t* ns_name;
-	size_t ns_name_len;
-
-	if (msg_get_buf(m, RW_FIELD_NAMESPACE, &ns_name, &ns_name_len,
-			MSG_GET_DIRECT) != 0) {
-		cf_warning(AS_RW, "repl_write_handle_op: no namespace");
-		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
-		return;
-	}
-
-	as_namespace* ns = as_namespace_get_bybuf(ns_name, ns_name_len);
-
-	if (! ns) {
-		cf_warning(AS_RW, "repl_write_handle_op: invalid namespace");
-		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
-		return;
-	}
-
-	cf_digest* keyd;
-
-	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
-		cf_warning(AS_RW, "repl_write_handle_op: no digest");
-		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
-		return;
-	}
-
-	as_partition_reservation rsv;
-	uint32_t result = as_partition_reserve_replica(ns, as_partition_getid(keyd),
-			&rsv);
-
-	if (result != AS_OK) {
-		send_repl_write_ack(node, m, result);
-		return;
-	}
-
-	as_remote_record rr = {
-			.via = VIA_REPLICATION,
-			.src = node,
-			.rsv = &rsv,
-			.keyd = keyd,
-			.is_old_pickle = true
-	};
-
-	if (msg_get_buf(m, RW_FIELD_OLD_RECORD, &rr.pickle, &rr.pickle_sz,
-			MSG_GET_DIRECT) != 0 || rr.pickle_sz < 2) {
-		cf_warning(AS_RW, "repl_write_handle_op: no or bad record");
-		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
-		return;
-	}
 
 	uint32_t info = 0;
 
 	msg_get_uint32(m, RW_FIELD_INFO, &info);
 
-	if (repl_write_pickle_is_drop(rr.pickle, info)) {
-		drop_replica(&rsv, keyd, (info & RW_INFO_XDR) != 0, node);
-
-		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_OK);
-
-		return;
-	}
-
-	if (msg_get_uint32(m, RW_FIELD_GENERATION, &rr.generation) != 0 ||
-			rr.generation == 0) {
-		cf_warning(AS_RW, "repl_write_handle_op: no or bad generation");
-		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
-		return;
-	}
-
-	if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
-			&rr.last_update_time) != 0) {
-		cf_warning(AS_RW, "repl_write_handle_op: no last-update-time");
-		as_partition_release(&rsv);
-		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
-		return;
-	}
-
-	msg_get_uint32(m, RW_FIELD_VOID_TIME, &rr.void_time);
-
-	msg_get_buf(m, RW_FIELD_SET_NAME, (uint8_t **)&rr.set_name,
-			&rr.set_name_len, MSG_GET_DIRECT);
-
-	msg_get_buf(m, RW_FIELD_KEY, (uint8_t **)&rr.key, &rr.key_size,
-			MSG_GET_DIRECT);
-
-	// Do XDR write if the write is a non-XDR write or forwarding is enabled.
-	bool do_xdr_write = (info & RW_INFO_XDR) == 0 ||
-			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes;
+	// TODO - add compatibility version check @ 4.9 or 5.0. (If 4.9, we'd need
+	// to add the xdr-write bit to the flat format etc. but we'd get to remove
+	// all the checks and older code in 5.0.)
+	rr.xdr_write = (info & RW_INFO_XDR) != 0;
 
 	// If source didn't touch sindex, may not need to touch it locally.
 	bool skip_sindex = (info & RW_INFO_SINDEX_TOUCHED) == 0;
 
-	result = (uint32_t)as_record_replace_if_better(&rr, skip_sindex,
-			do_xdr_write);
+	result = (uint32_t)as_record_replace_if_better(&rr, skip_sindex);
 
 	as_partition_release(&rsv);
-	send_repl_write_ack(node, m, result);
+	send_repl_write_ack_w_digest(node, m, result, rr.keyd);
 }
 
 
@@ -518,61 +391,14 @@ repl_write_handle_ack(cf_node node, msg* m)
 // Local helpers.
 //
 
-// TODO - old pickle - remove in "six months".
-void
-old_make_message(rw_request* rw, as_transaction* tr)
-{
-	// TODO - remove this when we're comfortable:
-	cf_assert(rw->pickle, AS_RW, "making repl-write msg with null pickle");
-
-	as_namespace* ns = tr->rsv.ns;
-	msg* m = rw->dest_msg;
-
-	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE);
-	msg_set_buf(m, RW_FIELD_NAMESPACE, (uint8_t*)ns->name, strlen(ns->name),
-			MSG_SET_COPY);
-	msg_set_uint32(m, RW_FIELD_NS_IX, ns->ix);
-	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
-			MSG_SET_COPY);
-	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
-	msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
-	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
-
-	if (tr->void_time != 0) {
-		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
-	}
-
-	uint32_t info = pack_info_bits(tr);
-
-	repl_write_flag_pickle(tr, rw->pickle, &info);
-
-	msg_set_buf(m, RW_FIELD_OLD_RECORD, rw->pickle, rw->pickle_sz,
-			MSG_SET_HANDOFF_MALLOC);
-	rw->pickle = NULL; // make sure destructor doesn't free this
-
-	if (rw->set_name) {
-		msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t*)rw->set_name,
-				rw->set_name_len, MSG_SET_COPY);
-		// rw->set_name points directly into vmap - never free it.
-	}
-
-	if (rw->key) {
-		msg_set_buf(m, RW_FIELD_KEY, rw->key, rw->key_size,
-				MSG_SET_HANDOFF_MALLOC);
-		rw->key = NULL; // make sure destructor doesn't free this
-	}
-
-	if (info != 0) {
-		msg_set_uint32(m, RW_FIELD_INFO, info);
-	}
-}
-
-
 uint32_t
 pack_info_bits(as_transaction* tr)
 {
 	uint32_t info = 0;
 
+	// TODO - add compatibility version check @ 4.9 or 5.0. (If 4.9, we'd need
+	// to add the xdr-write bit to the flat format etc. but we'd get to remove
+	// all the checks and older code in 5.0.)
 	if (as_transaction_is_xdr(tr)) {
 		info |= RW_INFO_XDR;
 	}
@@ -653,8 +479,7 @@ parse_result_code(msg* m)
 
 
 void
-drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_xdr_op,
-		cf_node master)
+drop_replica(as_partition_reservation* rsv, cf_digest* keyd)
 {
 	// Shortcut pointers & flags.
 	as_namespace* ns = rsv->ns;
@@ -672,13 +497,6 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_xdr_op,
 		record_delete_adjust_sindex(r, ns);
 	}
 
-	// Save the set-ID for XDR.
-	uint16_t set_id = as_index_get_set_id(r);
-
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
-
-	if (xdr_must_ship_delete(ns, is_xdr_op)) {
-		xdr_write(ns, keyd, 0, master, XDR_OP_TYPE_DROP, set_id, NULL);
-	}
 }

@@ -35,6 +35,8 @@
 //
 
 typedef struct cf_epoll_queue_s {
+	uint8_t poll_data_type; // one of CF_POLL_DATA_* - must be first
+
 	int32_t event_fd;
 
 	uint32_t read_pos;

@@ -19,7 +19,6 @@ endif
 
 ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
-  include $(EEREPO)/xdr/make_in/Makefile.vars
 endif
 
 BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h features.h health.h
@@ -29,7 +28,7 @@ BASE_HEADERS += scan_job.h scan_manager.h secondary_index.h security.h
 BASE_HEADERS += security_config.h service.h smd.h stats.h thr_info.h thr_query.h
 BASE_HEADERS += thr_sindex.h thr_tsvc.h ticker.h transaction.h
 BASE_HEADERS += transaction_policy.h truncate.h udf_aerospike.h udf_arglist.h
-BASE_HEADERS += udf_cask.h udf_record.h xdr_serverside.h xdr_config.h
+BASE_HEADERS += udf_cask.h udf_record.h xdr.h
 
 BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c health.c index.c
 BASE_SOURCES += job_manager.c json_init.c monitor.c namespace.c nsup.c
@@ -39,7 +38,8 @@ BASE_SOURCES += particle_string.c predexp.c proto.c record.c scan.c scan_job.c
 BASE_SOURCES += scan_manager.c signal.c secondary_index.c service.c smd.c
 BASE_SOURCES += thr_info.c thr_info_port.c thr_query.c thr_sindex.c thr_tsvc.c
 BASE_SOURCES += ticker.c transaction.c truncate.c udf_aerospike.c udf_arglist.c
-BASE_SOURCES += udf_cask.c udf_record.c xdr_config.c
+BASE_SOURCES += udf_cask.c udf_record.c
+
 ifneq ($(USE_EE),1)
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += features_ce.c
@@ -49,7 +49,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += record_ce.c
   BASE_SOURCES += security_ce.c
   BASE_SOURCES += truncate_ce.c
-  BASE_SOURCES += xdr_serverside_stubs.c
+  BASE_SOURCES += xdr_ce.c
 endif
 
 FABRIC_HEADERS += clustering.h endpoint.h exchange.h fabric.h hb.h hlc.h
@@ -99,12 +99,14 @@ HEADERS += $(FABRIC_HEADERS:%=fabric/%)
 HEADERS += $(STORAGE_HEADERS:%=storage/%)
 HEADERS += $(GEOSPATIAL_HEADERS:%=geospatial/%)
 HEADERS += $(TRANSACTION_HEADERS:%=transaction/%)
+HEADERS += $(XDR_HEADERS:%=xdr/%)
 
 SOURCES = $(BASE_SOURCES:%=base/%)
 SOURCES += $(FABRIC_SOURCES:%=fabric/%)
 SOURCES += $(STORAGE_SOURCES:%=storage/%)
 SOURCES += $(GEOSPATIAL_SOURCES:%=geospatial/%)
 SOURCES += $(TRANSACTION_SOURCES:%=transaction/%)
+SOURCES += $(XDR_SOURCES:%=xdr/%)
 
 SERVER = $(BIN_DIR)/asd
 
@@ -174,7 +176,6 @@ AS_LIB_DEPS = $(AS_LIBRARIES)
 OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(SYSTEMTAP_PROBES_O)
 OBJECTS = $(OBJECTS.c:%.cc=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
-DEPENDENCIES += $(XDR_DEPENDENCIES)
 
 .PHONY: all
 all: $(SYSTEMTAP_PROBES_H) $(SERVER)
@@ -189,12 +190,8 @@ clean:
 check-syntax:
 	$(CC) -Wall -Wextra -pedantic -fsyntax-only $(CHK_SOURCES)
 
-$(SERVER): $(OBJECTS) $(AS_LIB_DEPS) $(XDR_LIBRARY) $(XDR_ALL_OBJECTS)
-	$(LINK.c) -o $(SERVER) $(OBJECTS) $(XDR_ALL_OBJECTS) $(LIBRARIES)
-
-ifeq ($(USE_EE),1)
-  include $(XDR)/make_in/Makefile.targets
-endif
+$(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
+	$(LINK.c) -o $(SERVER) $(OBJECTS) $(LIBRARIES)
 
 include $(DEPTH)/make_in/Makefile.targets
 

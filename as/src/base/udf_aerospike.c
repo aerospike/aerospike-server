@@ -47,7 +47,6 @@
 #include "base/transaction.h"
 #include "base/truncate.h"
 #include "base/udf_record.h"
-#include "base/xdr_serverside.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
@@ -467,10 +466,6 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 					// Only case delete fails if bin is not found that is 
 					// as good as delete. Ignore return code !!
 					udf_aerospike_delbin(urecord, k);
-
-					if (urecord->dirty != NULL) {
-						xdr_fill_dirty_bins(urecord->dirty);
-					}
 				}
 				else {
 					// otherwise, it is a set
@@ -484,10 +479,6 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 						} 
 						failmax = i;
 						goto Rollback;
-					}
-
-					if (urecord->dirty != NULL) {
-						xdr_add_dirty_bin(ns, urecord->dirty, k, strlen(k));
 					}
 				}
 			}
@@ -581,10 +572,6 @@ Rollback:
 				cf_debug(AS_UDF, "ROLLBACK as_val_destroy()");
 			}
 		}
-	}
-
-	if (is_record_dirty && urecord->dirty != NULL) {
-		xdr_clear_dirty_bins(urecord->dirty);
 	}
 
 	if (has_sindex) {

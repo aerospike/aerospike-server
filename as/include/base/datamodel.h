@@ -36,6 +36,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_vector.h"
 
 #include "arenax.h"
 #include "cf_mutex.h"
@@ -187,12 +188,8 @@ extern int as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *
 extern int as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op);
 extern int as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op);
 extern int as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op);
-extern int as_bin_particle_alloc_from_pickled(as_bin *b, const uint8_t **p_pickled, const uint8_t *end);
-extern int as_bin_particle_stack_from_pickled(as_bin *b, cf_ll_buf *particles_llb, const uint8_t **p_pickled, const uint8_t *end);
 extern uint32_t as_bin_particle_client_value_size(const as_bin *b);
 extern uint32_t as_bin_particle_to_client(const as_bin *b, as_msg_op *op);
-extern uint32_t as_bin_particle_pickled_size(const as_bin *b);
-extern uint32_t as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled);
 
 // Different for blob bitwise operations - we don't use the normal APIs and
 // particle table functions.
@@ -490,14 +487,7 @@ void as_record_transition_stats(as_record* r, as_namespace* ns, struct index_met
 extern void as_record_finalize_key(as_record* r, const as_namespace* ns, const uint8_t* key, uint32_t key_size);
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
 extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
-extern uint8_t *as_record_pickle(as_storage_rd *rd, size_t *len_r);
 extern int as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m);
-
-static inline bool
-as_record_pickle_is_binless(const uint8_t *buf)
-{
-	return *(uint16_t *)buf == 0;
-}
 
 static inline int
 resolve_last_update_time(uint64_t left, uint64_t right)
@@ -530,20 +520,17 @@ typedef struct as_remote_record_s {
 	const uint8_t *key;
 	size_t key_size;
 
-	bool is_old_pickle; // TODO - old pickle - remove in "six months"
-
 	uint16_t n_bins;
 	as_flat_comp_meta cm;
 	uint32_t meta_sz;
 
 	uint8_t repl_state; // relevant only for enterprise edition
-
-	// For 5.0 compatibility.
 	bool xdr_write; // relevant only for enterprise edition
 	bool xdr_tombstone; // relevant only for enterprise edition
+	bool xdr_nsup_tombstone; // relevant only for enterprise edition
 } as_remote_record;
 
-int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex, bool do_xdr_write);
+int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex);
 
 // For enterprise split only.
 int record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
@@ -643,7 +630,6 @@ struct as_namespace_s {
 
 	char name[AS_ID_NAMESPACE_SZ];
 	uint32_t ix; // this is 0-based
-	uint32_t namehash;
 
 	//--------------------------------------------
 	// Persistent memory.
@@ -757,6 +743,14 @@ struct as_namespace_s {
 	uint32_t		binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
 
 	//--------------------------------------------
+	// XDR.
+	//
+
+	cf_vector*		xdr_dc_names; // allocated for use at startup only
+	bool			xdr_ships_drops; // at least one DC ships drops
+	bool			xdr_ships_nsup_drops; // at least one DC ships nsup drops
+
+	//--------------------------------------------
 	// Configuration.
 	//
 
@@ -764,12 +758,6 @@ struct as_namespace_s {
 	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
 	uint64_t		memory_size;
 	uint32_t		default_ttl;
-
-	bool			enable_xdr;
-	bool			sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping
-	bool			ns_forward_xdr_writes; // namespace-level flag to enable forwarding of xdr writes
-	bool			ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
-	bool			ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
 
 	bool			allow_ttl_without_nsup;
 	uint32_t		background_scan_max_rps;
@@ -802,6 +790,8 @@ struct as_namespace_s {
 	bool			prefer_uniform_balance; // indirect config - can become disabled if any other node reports disabled
 	uint32_t		rack_id;
 	as_read_consistency_level read_consistency_level;
+	bool			reject_non_xdr_writes;
+	bool			reject_xdr_writes;
 	bool			single_bin; // restrict the namespace to objects with exactly one bin
 	uint32_t		n_single_scan_threads;
 	uint32_t		stop_writes_pct;
@@ -810,6 +800,8 @@ struct as_namespace_s {
 	uint32_t		transaction_pending_limit; // 0 means no limit
 	uint32_t		n_truncate_threads;
 	as_write_commit_level write_commit_level;
+	uint32_t		xdr_tomb_raider_period;
+	uint32_t		n_xdr_tomb_raider_threads;
 	cf_vector		xdr_dclist_v;
 
 	const char*		xmem_mounts[CF_XMEM_MAX_MOUNTS];
@@ -869,6 +861,8 @@ struct as_namespace_s {
 
 	cf_atomic64		n_objects;
 	cf_atomic64		n_tombstones; // relevant only for enterprise edition
+	uint64_t		n_xdr_tombstones; // subset of n_tombstones
+	uint64_t		n_regular_tombstones; // subset of n_tombstones
 
 	// Consistency info.
 
@@ -1248,6 +1242,7 @@ struct as_namespace_s {
 
 	uint32_t cluster_size;
 	cf_node succession[AS_CLUSTER_SZ];
+	cf_node hub; // relevant only for XDR
 	as_partition_version cluster_versions[AS_CLUSTER_SZ][AS_PARTITIONS];
 	uint32_t rack_ids[AS_CLUSTER_SZ]; // is observed-rack-ids in CP mode
 
@@ -1284,12 +1279,6 @@ struct as_namespace_s {
 #define IS_SET_EVICTION_DISABLED(p_set)		(cf_atomic32_get(p_set->disable_eviction) == 1)
 #define DISABLE_SET_EVICTION(p_set, on_off)	(cf_atomic32_set(&p_set->disable_eviction, on_off ? 1 : 0))
 
-typedef enum {
-	AS_SET_ENABLE_XDR_DEFAULT = 0,
-	AS_SET_ENABLE_XDR_TRUE = 1,
-	AS_SET_ENABLE_XDR_FALSE = 2
-} as_set_enable_xdr_flag;
-
 // Caution - changing this struct could break warm or cool restart.
 struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
@@ -1299,7 +1288,7 @@ struct as_set_s {
 	cf_atomic64		stop_writes_count;	// restrict number of records in a set
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
-	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
+	uint32_t		unused;				// FIXME - was set-level XDR config
 	uint32_t		n_sindexes;
 	uint8_t padding[12];
 };

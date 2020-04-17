@@ -1,0 +1,172 @@
+/*
+ * xdr.h
+ *
+ * Copyright (C) 2020 Aerospike, Inc.
+ *
+ * Portions may be licensed to Aerospike, Inc. under one or more contributor
+ * license agreements.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option) any
+ * later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/
+ */
+
+#pragma once
+
+//==========================================================
+// Includes.
+//
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_vector.h"
+
+#include "cf_mutex.h"
+#include "dynbuf.h"
+#include "socket.h"
+#include "tls.h"
+
+
+//==========================================================
+// Forward declarations.
+//
+
+struct as_index_s;
+struct as_namespace_s;
+struct as_transaction_s;
+
+
+//==========================================================
+// Typedefs & constants.
+//
+
+#define AS_XDR_MAX_DCS 64
+
+#define AS_XDR_MAX_HOT_KEY_MS 5000
+
+#define AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT 1024
+#define AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT (1024 * 1024)
+
+typedef enum {
+	XDR_AUTH_INTERNAL,
+	XDR_AUTH_EXTERNAL,
+	XDR_AUTH_EXTERNAL_INSECURE,
+	XDR_AUTH_KERBEROS_LOCAL, // TODO - not yet implemented
+	XDR_AUTH_KERBEROS_LDAP // TODO - not yet implemented
+} as_xdr_auth_mode;
+
+typedef struct as_xdr_security_cfg_s {
+	char* file;
+	char* user;
+	char* pw_clear;
+	char* pw_hash; // not actual config - derived from pw_clear
+} as_xdr_security_cfg;
+
+typedef struct as_xdr_dc_ns_cfg_s {
+	char* ns_name;
+
+	uint32_t delay_ms;
+	bool compression_enabled;
+	bool forward;
+	uint32_t hot_key_ms;
+	bool ignore_expunges;
+	uint32_t max_throughput;
+	bool ship_nsup_deletes;
+	bool ship_only_specified_bins;
+	bool ship_only_specified_sets;
+	uint32_t transaction_queue_limit;
+
+	cf_vector* ignored_sets; // startup only
+	cf_vector* shipped_sets; // startup only
+	uint8_t sets[1024]; // AS_SET_MAX_COUNT + 1
+
+	cf_vector* ignored_bins; // startup only
+	cf_vector* shipped_bins; // startup only
+	uint8_t bins[32 * 1024]; // BIN_NAMES_QUOTA
+} as_xdr_dc_ns_cfg;
+
+typedef struct as_xdr_dc_cfg_s {
+	char* name;
+
+	cf_mutex seed_lock;
+	cf_vector seed_nodes; // from 'node-address-port'
+
+	as_xdr_auth_mode auth_mode;
+
+	bool non_aerospike;
+
+	as_xdr_security_cfg security_cfg; // Aerospike destinations only
+
+	char* tls_our_name;
+	cf_tls_spec* tls_spec; // from 'tls-name'
+
+	bool use_alternate_access_address; // Aerospike destinations only
+
+	cf_vector* ns_cfg_v; // startup only
+	as_xdr_dc_ns_cfg* ns_cfgs[32]; // AS_NAMESPACE_SZ - TODO - fix include loop
+
+	// For testing only.
+	uint32_t period_us; // dynamic only
+} as_xdr_dc_cfg;
+
+typedef struct as_xdr_config_s {
+	bool xdr_configured; // not actual config - indicates 'xdr' context present
+	bool change_notification_enabled;
+
+	// For debugging.
+	uint32_t trace_sample; // dynamic only
+} as_xdr_config;
+
+typedef struct as_xdr_submit_info_s {
+	cf_digest keyd;
+	uint64_t lut;
+
+	uint64_t prev_lut; // "hot key" handling
+
+	// Filter info.
+	uint16_t set_id;
+	bool xdr_write;
+	bool xdr_tombstone;
+	bool xdr_nsup_tombstone;
+} as_xdr_submit_info;
+
+
+//==========================================================
+// Public API.
+//
+
+void as_xdr_init(void);
+void as_xdr_start(void);
+
+as_xdr_dc_cfg* as_xdr_startup_create_dc(const char* name);
+void as_xdr_link_tls(void);
+void as_xdr_get_submit_info(const struct as_index_s* r, uint64_t prev_lut, as_xdr_submit_info* info);
+void as_xdr_submit(struct as_namespace_s* ns, const as_xdr_submit_info* info);
+void as_xdr_ticker(uint64_t delta_time);
+void as_xdr_cleanup_tl_stats(void);
+
+void as_xdr_dc_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port, char* tls_name);
+as_xdr_dc_ns_cfg* as_xdr_startup_create_dc_ns_cfg(const char* ns_name);
+
+void as_xdr_read(struct as_transaction_s* tr);
+
+void as_xdr_init_poll(cf_poll poll);
+void as_xdr_shutdown_poll(void);
+void as_xdr_io_event(uint32_t mask, void* data);
+void as_xdr_timer_event(cf_poll_event* events, int32_t n_events, uint32_t e_ix);
+
+void as_xdr_get_config(char* cmd, cf_dyn_buf* db);
+bool as_xdr_set_config(char* cmd);
+void as_xdr_get_stats(char* cmd, cf_dyn_buf* db);
+int as_xdr_dc_state(char* name, char* cmd, cf_dyn_buf* db);

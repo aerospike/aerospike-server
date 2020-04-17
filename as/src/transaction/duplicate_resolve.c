@@ -43,7 +43,6 @@
 #include "base/proto.h"
 #include "base/service.h"
 #include "base/transaction.h"
-#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "storage/flat.h"
@@ -58,14 +57,11 @@
 //
 
 int fill_ack_w_pickle(as_storage_rd* rd, msg* m);
-int old_fill_ack_w_pickle(as_storage_rd* rd, msg* m);
 void done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref, as_storage_rd* rd);
 void send_dup_res_ack(cf_node node, msg* m, uint32_t result, uint32_t info);
 void send_dup_res_ack_preserved(cf_node node, msg* m, uint32_t result, uint32_t info);
 uint32_t parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time);
-uint32_t old_parse_conflict_meta(msg* m, uint32_t* generation, uint64_t* lut);
 void apply_winner(rw_request* rw);
-bool old_parse_winner(rw_request* rw, uint32_t info, as_remote_record* rr);
 
 
 //==========================================================
@@ -87,9 +83,6 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
-
-	// TODO - JUMP - send this only because versions up to 3.14.x require it.
-	msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, as_exchange_cluster_key());
 
 	as_index_ref r_ref;
 
@@ -206,12 +199,12 @@ dup_res_handle_request(cf_node node, msg* m)
 		return;
 	}
 
+	uint32_t info = dup_res_pack_repl_state_info(r, ns);
+
 	if (local_conflict_check &&
 			(result = as_record_resolve_conflict(ns->conflict_resolution_policy,
 					generation, last_update_time, r->generation,
 					r->last_update_time)) <= 0) {
-		uint32_t info = dup_res_pack_repl_state_info(r, ns);
-
 		done_handle_request(&rsv, &r_ref, NULL);
 		send_dup_res_ack(node, m,
 				result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION, info);
@@ -222,17 +215,11 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	as_storage_record_open(ns, r, &rd);
 
-	// TODO - old pickle - remove old method in "six months".
-	result = as_exchange_min_compatibility_id() >= 3 ?
-			fill_ack_w_pickle(&rd, m) : old_fill_ack_w_pickle(&rd, m);
-
-	if (result < 0) {
+	if ((result = fill_ack_w_pickle(&rd, m)) < 0) {
 		done_handle_request(&rsv, &r_ref, &rd);
 		send_dup_res_ack(node, m, (uint32_t)-result, 0);
 		return;
 	}
-
-	uint32_t info = dup_res_pack_info(r, ns);
 
 	done_handle_request(&rsv, &r_ref, &rd);
 	send_dup_res_ack_preserved(node, m, AS_OK, info);
@@ -434,63 +421,8 @@ fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 
 	// Can't fail from here on - ok to add message fields.
 
-	as_flat_strip_xdr_pickle(rd->pickle);
 	msg_set_buf(m, RW_FIELD_RECORD, rd->pickle, rd->pickle_sz,
 			MSG_SET_HANDOFF_MALLOC);
-
-	return AS_OK;
-}
-
-
-// TODO - old pickle - remove in "six months".
-int
-old_fill_ack_w_pickle(as_storage_rd* rd, msg* m)
-{
-	as_namespace* ns = rd->ns;
-	as_record* r = rd->r;
-
-	int result = as_storage_rd_load_n_bins(rd);
-
-	if (result < 0) {
-		return result;
-	}
-
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd->n_bins];
-
-	if ((result = as_storage_rd_load_bins(rd, stack_bins)) < 0) {
-		return result;
-	}
-
-	if (! as_storage_rd_load_key(rd)) {
-		return -AS_ERR_UNKNOWN;
-	}
-
-	msg_preserve_fields(m, 3, RW_FIELD_NS_IX, RW_FIELD_DIGEST, RW_FIELD_TID);
-
-	// Can't fail from here on - ok to add message fields.
-
-	msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
-
-	if (r->void_time != 0) {
-		msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
-	}
-
-	const char* set_name = as_index_get_set_name(r, ns);
-
-	if (set_name) {
-		msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t*)set_name,
-				strlen(set_name), MSG_SET_COPY);
-	}
-
-	if (rd->key) {
-		msg_set_buf(m, RW_FIELD_KEY, rd->key, rd->key_size, MSG_SET_COPY);
-	}
-
-	size_t buf_len;
-	uint8_t* buf = as_record_pickle(rd, &buf_len);
-
-	msg_set_buf(m, RW_FIELD_OLD_RECORD, buf, buf_len, MSG_SET_HANDOFF_MALLOC);
 
 	return AS_OK;
 }
@@ -558,47 +490,18 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 
 	if (msg_get_buf(m, RW_FIELD_RECORD, &pickle, &pickle_sz,
 			MSG_GET_DIRECT) != 0) {
-		// TODO - old pickle - remove in "six months".
-		return old_parse_conflict_meta(m, p_generation, p_last_update_time);
+		cf_warning(AS_RW, "dup-res ack: no record");
+		return AS_ERR_UNKNOWN;
 	}
 
-	as_flat_record* flat = (as_flat_record*)pickle;
-
-	// If we get an XDR-tombstone from 5.0, pretend it was not found.
-	// Note - not bothering to check that the extra byte is within pickle_sz.
-	if (flat->has_extra_flags == 1 &&
-			((as_flat_extra_flags*)flat->data)->xdr_tombstone == 1) {
-		return AS_ERR_NOT_FOUND;
-	}
-
-	*p_generation = flat->generation;
+	*p_generation = ((as_flat_record*)pickle)->generation;
 
 	if (*p_generation == 0) {
 		cf_warning(AS_RW, "dup-res ack: generation 0");
 		return AS_ERR_UNKNOWN;
 	}
 
-	*p_last_update_time = flat->last_update_time;
-
-	return AS_OK;
-}
-
-
-// TODO - old pickle - remove in "six months".
-uint32_t
-old_parse_conflict_meta(msg* m, uint32_t* generation, uint64_t* lut)
-{
-	// TODO - old pickle - remove in "six months".
-	if (msg_get_uint32(m, RW_FIELD_GENERATION, generation) != 0 ||
-			*generation == 0) {
-		cf_warning(AS_RW, "dup-res ack: no or bad generation");
-		return AS_ERR_UNKNOWN;
-	}
-
-	if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, lut) != 0) {
-		cf_warning(AS_RW, "dup-res ack: no last-update-time");
-		return AS_ERR_UNKNOWN;
-	}
+	*p_last_update_time = ((as_flat_record*)pickle)->last_update_time;
 
 	return AS_OK;
 }
@@ -622,13 +525,10 @@ apply_winner(rw_request* rw)
 
 	if (msg_get_buf(m, RW_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
 			MSG_GET_DIRECT) != 0) {
-		// TODO - old pickle - remove in "six months".
-		if (! old_parse_winner(rw, info, &rr)) {
-			rw->result_code = AS_ERR_UNKNOWN;
-			return;
-		}
+		cf_crash(AS_RW, "dup-res ack: no record"); // already parsed ok
 	}
-	else if (! as_flat_unpack_remote_record_meta(rr.rsv->ns, &rr)) {
+
+	if (! as_flat_unpack_remote_record_meta(rr.rsv->ns, &rr)) {
 		cf_warning(AS_RW, "dup-res ack: bad record %pD", &rw->keyd);
 		rw->result_code = AS_ERR_UNKNOWN;
 		return;
@@ -636,44 +536,11 @@ apply_winner(rw_request* rw)
 
 	dup_res_init_repl_state(&rr, info);
 
-	rw->result_code = (uint8_t)as_record_replace_if_better(&rr, false, false);
+	rw->result_code = (uint8_t)as_record_replace_if_better(&rr, false);
 
 	// Duplicate resolution just treats these errors as successful no-ops:
 	if (rw->result_code == AS_ERR_RECORD_EXISTS ||
 			rw->result_code == AS_ERR_GENERATION) {
 		rw->result_code = AS_OK;
 	}
-}
-
-
-// TODO - old pickle - remove in "six months".
-bool
-old_parse_winner(rw_request* rw, uint32_t info, as_remote_record* rr)
-{
-	rr->generation = rw->best_dup_gen;
-	rr->last_update_time = rw->best_dup_lut;
-	rr->is_old_pickle = true;
-
-	msg* m = rw->best_dup_msg;
-
-	if (msg_get_buf(m, RW_FIELD_OLD_RECORD, &rr->pickle, &rr->pickle_sz,
-			MSG_GET_DIRECT) != 0 || rr->pickle_sz < 2) {
-		cf_warning(AS_RW, "dup-res ack: no or bad record %pD", &rw->keyd);
-		return false;
-	}
-
-	if (dup_res_ignore_pickle(rr->pickle, info)) {
-		cf_warning(AS_RW, "dup-res ack: binless pickle %pD", &rw->keyd);
-		return false;
-	}
-
-	msg_get_uint32(m, RW_FIELD_VOID_TIME, &rr->void_time);
-
-	msg_get_buf(m, RW_FIELD_SET_NAME, (uint8_t **)&rr->set_name,
-			&rr->set_name_len, MSG_GET_DIRECT);
-
-	msg_get_buf(m, RW_FIELD_KEY, (uint8_t **)&rr->key, &rr->key_size,
-			MSG_GET_DIRECT);
-
-	return true;
 }

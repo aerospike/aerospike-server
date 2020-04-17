@@ -48,8 +48,7 @@
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
-#include "base/xdr_serverside.h"
-#include "fabric/exchange.h" // TODO - old pickle - remove in "six months"
+#include "base/xdr.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
@@ -94,26 +93,23 @@ int iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
 		predexp_eval_t** predexp);
 
 int write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
-		rw_request* rw, bool* is_delete, xdr_dirty_bins* dirty_bins);
+		rw_request* rw, bool* is_delete);
 int write_master_dim(as_transaction* tr, as_storage_rd* rd,
-		bool record_level_replace, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins);
+		bool record_level_replace, rw_request* rw, bool* is_delete);
 int write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool must_fetch_data, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins);
+		bool must_fetch_data, rw_request* rw, bool* is_delete);
 int write_master_ssd(as_transaction* tr, as_storage_rd* rd,
 		bool must_fetch_data, bool record_level_replace, rw_request* rw,
-		bool* is_delete, xdr_dirty_bins* dirty_bins);
+		bool* is_delete);
 
 int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins,
-		xdr_dirty_bins* dirty_bins);
+		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins);
 int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins,
 		as_bin* result_bins, uint32_t* p_n_result_bins,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, xdr_dirty_bins* dirty_bins);
+		uint32_t* p_n_cleanup_bins);
 
 void write_master_dim_single_bin_unwind(as_bin* old_bin, as_bin* new_bin,
 		as_bin* cleanup_bins, uint32_t n_cleanup_bins);
@@ -766,42 +762,39 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 
 	// Will we need a pickle?
-	// TODO - old pickle - remove condition in "six months".
-	if (as_exchange_min_compatibility_id() >= 3) {
-		rd.keep_pickle = rw->n_dest_nodes != 0;
-	}
+	rd.keep_pickle = rw->n_dest_nodes != 0;
+
+	// Save for XDR submit.
+	uint64_t prev_lut = r->last_update_time;
 
 	//------------------------------------------------------
 	// Split write_master() according to configuration to
 	// handle record bins.
 	//
 
-	xdr_dirty_bins dirty_bins;
-	xdr_clear_dirty_bins(&dirty_bins);
-
 	bool is_delete = false;
 
 	if (ns->storage_data_in_memory) {
 		if (ns->single_bin) {
 			result = write_master_dim_single_bin(tr, &rd,
-					rw, &is_delete, &dirty_bins);
+					rw, &is_delete);
 		}
 		else {
 			result = write_master_dim(tr, &rd,
 					record_level_replace,
-					rw, &is_delete, &dirty_bins);
+					rw, &is_delete);
 		}
 	}
 	else {
 		if (ns->single_bin) {
 			result = write_master_ssd_single_bin(tr, &rd,
 					must_fetch_data,
-					rw, &is_delete, &dirty_bins);
+					rw, &is_delete);
 		}
 		else {
 			result = write_master_ssd(tr, &rd,
 					must_fetch_data, record_level_replace,
-					rw, &is_delete, &dirty_bins);
+					rw, &is_delete);
 		}
 	}
 
@@ -819,22 +812,11 @@ write_master(rw_request* rw, as_transaction* tr)
 	tr->void_time = r->void_time;
 	tr->last_update_time = r->last_update_time;
 
-	// Get set-id before releasing.
-	uint16_t set_id = as_index_get_set_id(r_ref.r);
-
-	// Collect more info for XDR.
-	uint16_t generation = plain_generation(r->generation, ns);
-	xdr_op_type op_type = XDR_OP_TYPE_WRITE;
-
 	// Handle deletion if appropriate.
 	if (is_delete) {
 		write_delete_record(r_ref.r, tree);
 		cf_atomic64_incr(&ns->n_deleted_last_bin);
 		tr->flags |= AS_TRANSACTION_FLAG_IS_DELETE;
-
-		generation = 0;
-		op_type = as_transaction_is_durable_delete(tr) ?
-				XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP;
 	}
 	// Or (normally) adjust max void-time.
 	else if (r->void_time != 0) {
@@ -843,19 +825,16 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	will_replicate(r, ns);
 
+	// Save for XDR submit outside record lock.
+	as_xdr_submit_info submit_info;
+
+	as_xdr_get_submit_info(r, prev_lut, &submit_info);
+
 	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
 
-	// Don't send an XDR delete if it's disallowed.
-	if (is_delete && ! is_xdr_delete_shipping_enabled()) {
-		return TRANS_IN_PROGRESS;
-	}
-
-	// Do an XDR write if the write is a non-XDR write or is an XDR write with
-	// forwarding enabled.
-	if (! as_msg_is_xdr(m) || is_xdr_forwarding_enabled() ||
-			ns->ns_forward_xdr_writes) {
-		xdr_write(ns, &tr->keyd, generation, 0, op_type, set_id, &dirty_bins);
+	if (! write_is_full_drop(tr)) {
+		as_xdr_submit(ns, &submit_info);
 	}
 
 	return TRANS_IN_PROGRESS;
@@ -1182,7 +1161,7 @@ iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
 
 int
 write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
-		rw_request* rw, bool* is_delete, xdr_dirty_bins* dirty_bins)
+		rw_request* rw, bool* is_delete)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1235,7 +1214,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	uint32_t n_new_bins = 0;
 	int result = write_master_bin_ops(tr, rd, NULL, cleanup_bins,
-			&n_cleanup_bins, &rw->response_db, &n_new_bins, dirty_bins);
+			&n_cleanup_bins, &rw->response_db, &n_new_bins);
 
 	if (result != 0) {
 		unwind_index_metadata(&old_metadata, r);
@@ -1293,8 +1272,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 int
 write_master_dim(as_transaction* tr, as_storage_rd* rd,
-		bool record_level_replace, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins)
+		bool record_level_replace, rw_request* rw, bool* is_delete)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1362,7 +1340,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	int result = write_master_bin_ops(tr, rd, NULL, cleanup_bins,
-			&n_cleanup_bins, &rw->response_db, &n_new_bins, dirty_bins);
+			&n_cleanup_bins, &rw->response_db, &n_new_bins);
 
 	if (result != 0) {
 		unwind_index_metadata(&old_metadata, r);
@@ -1474,8 +1452,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 
 int
 write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool must_fetch_data, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins)
+		bool must_fetch_data, rw_request* rw, bool* is_delete)
 {
 	// Shortcut pointers.
 	as_namespace* ns = tr->rsv.ns;
@@ -1523,7 +1500,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	uint32_t n_new_bins = 0;
 
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
-			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
+			&rw->response_db, &n_new_bins)) != 0) {
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_metadata, r);
 		return result;
@@ -1582,8 +1559,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 int
 write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
-		bool record_level_replace, rw_request* rw, bool* is_delete,
-		xdr_dirty_bins* dirty_bins)
+		bool record_level_replace, rw_request* rw, bool* is_delete)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1663,7 +1639,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
-			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
+			&rw->response_db, &n_new_bins)) != 0) {
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_metadata, r);
 		return result;
@@ -1740,8 +1716,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 int
 write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins,
-		xdr_dirty_bins* dirty_bins)
+		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1758,7 +1733,7 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 
 	int result = write_master_bin_ops_loop(tr, rd, ops, response_bins,
 			&n_response_bins, result_bins, &n_result_bins, particles_llb,
-			cleanup_bins, p_n_cleanup_bins, dirty_bins);
+			cleanup_bins, p_n_cleanup_bins);
 
 	if (result != 0) {
 		destroy_stack_bins(result_bins, n_result_bins);
@@ -1813,7 +1788,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins,
 		as_bin* result_bins, uint32_t* p_n_result_bins,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, xdr_dirty_bins* dirty_bins)
+		uint32_t* p_n_cleanup_bins)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1847,7 +1822,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					}
 
 					as_bin_set_empty_shift(rd, j);
-					xdr_fill_dirty_bins(dirty_bins);
 				}
 			}
 			// It's a regular bin write.
@@ -1875,8 +1849,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 						return -result;
 					}
 				}
-
-				xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
 			}
 
 			if (respond_all_ops) {
@@ -1910,8 +1882,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				}
 			}
 
-			xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
-
 			if (respond_all_ops) {
 				ops[*p_n_response_bins] = op;
 				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
@@ -1936,7 +1906,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 
 			as_bin_set_all_empty(rd);
-			xdr_fill_dirty_bins(dirty_bins);
 
 			if (respond_all_ops) {
 				ops[*p_n_response_bins] = op;
@@ -1995,8 +1964,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					return -result;
 				}
 			}
-
-			xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
 
 			if (respond_all_ops) {
 				ops[*p_n_response_bins] = op;
@@ -2068,11 +2035,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				if (index >= 0) {
 					as_bin_set_empty_shift(rd, (uint32_t)index);
-					xdr_fill_dirty_bins(dirty_bins);
 				}
-			}
-			else {
-				xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
 			}
 		}
 		else if (op->op == AS_MSG_OP_HLL_READ) {
@@ -2140,11 +2103,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				if (index >= 0) {
 					as_bin_set_empty_shift(rd, (uint32_t)index);
-					xdr_fill_dirty_bins(dirty_bins);
 				}
-			}
-			else {
-				xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
 			}
 		}
 		else if (op->op == AS_MSG_OP_CDT_READ) {

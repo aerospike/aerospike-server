@@ -31,21 +31,19 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h" // xdr_allows_write
+#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "fault.h"
 #include "msg.h"
 
-#include "base/cfg.h" // xdr_allows_write
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/predexp.h"
-#include "base/proto.h" // xdr_allows_write
+#include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
-#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
@@ -60,12 +58,12 @@ bool
 xdr_allows_write(as_transaction* tr)
 {
 	if (as_transaction_is_xdr(tr)) {
-		if (tr->rsv.ns->ns_allow_xdr_writes) {
+		if (! tr->rsv.ns->reject_xdr_writes) {
 			return true;
 		}
 	}
 	else {
-		if (tr->rsv.ns->ns_allow_nonxdr_writes) {
+		if (! tr->rsv.ns->reject_non_xdr_writes) {
 			return true;
 		}
 	}
@@ -351,28 +349,8 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 	if (rd->keep_pickle) {
 		rw->pickle = rd->pickle;
 		rw->pickle_sz = rd->pickle_sz;
-		return;
 	}
-	// else - new protocol with no destination node(s), or old protocol.
-
-	if (rw->n_dest_nodes == 0) {
-		return;
-	}
-	// else - old protocol with destination node(s).
-
-	// TODO - old pickle - remove in "six months".
-
-	rw->is_old_pickle = true;
-	rw->pickle = as_record_pickle(rd, &rw->pickle_sz);
-
-	rw->set_name = rd->set_name;
-	rw->set_name_len = rd->set_name_len;
-
-	if (rd->key) {
-		rw->key = cf_malloc(rd->key_size);
-		rw->key_size = rd->key_size;
-		memcpy(rw->key, rd->key, rd->key_size);
-	}
+	// else - no destination node(s).
 }
 
 
@@ -558,18 +536,4 @@ remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 	}
 
 	as_sindex_release_arr(si_arr, si_arr_index);
-}
-
-
-bool
-xdr_must_ship_delete(as_namespace* ns, bool is_xdr_op)
-{
-	if (! is_xdr_delete_shipping_enabled()) {
-		return false;
-	}
-
-	return ! is_xdr_op ||
-			// If this delete is a result of XDR shipping, don't ship it unless
-			// configured to do so.
-			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes;
 }

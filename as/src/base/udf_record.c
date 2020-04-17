@@ -270,7 +270,6 @@ udf_record_init(udf_record *urecord, bool allow_updates)
 	urecord->tr                 = NULL;
 	urecord->r_ref              = NULL;
 	urecord->rd                 = NULL;
-	urecord->dirty              = NULL;
 	urecord->nupdates           = 0;
 	urecord->particle_data      = NULL;
 	urecord->cur_particle_data  = NULL;

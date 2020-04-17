@@ -2650,6 +2650,14 @@ exchange_exchanging_pre_commit()
 				&max_compatibility_id);
 	}
 
+	// Don't finish clustering if any nodes are pre-4.9.
+	if (min_compatibility_id < 6) {
+		WARNING("abandoned exchange - 5.0+ - can't cluster with pre-4.9 nodes");
+		pthread_mutex_unlock(&g_exchanged_info_lock);
+		EXCHANGE_UNLOCK();
+		return false;
+	}
+
 	// Collected all exchanged data - do final configuration consistency checks.
 	if (!exchange_data_pre_commit_ap_cp_check()) {
 		WARNING("abandoned exchange - fix configuration conflict");

@@ -35,6 +35,7 @@
 #include "citrusleaf/alloc.h"
 
 #include "fault.h"
+#include "socket.h"
 
 
 //==========================================================
@@ -61,6 +62,8 @@ static void unwrap_queue(cf_epoll_queue* q);
 void
 cf_epoll_queue_init(cf_epoll_queue* q, uint32_t ele_sz, uint32_t capacity)
 {
+	q->poll_data_type = CF_POLL_DATA_EPOLL_QUEUE;
+
 	q->event_fd = eventfd(0, EFD_NONBLOCK);
 
 	if (q->event_fd < 0) {

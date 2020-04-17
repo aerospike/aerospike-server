@@ -2333,11 +2333,6 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		return;
 	}
 
-	// If we find XDR-tombstones downgrading from 5.0, ignore them.
-	if (opt_meta.extra_flags.xdr_tombstone == 1) {
-		return;
-	}
-
 	if (opt_meta.void_time > ns->startup_max_void_time) {
 		cf_warning(AS_DRV_SSD, "bad void-time for %pD", &flat->keyd);
 		return;
@@ -2560,7 +2555,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		cf_warning(AS_DRV_SSD, "replacing record with invalid rblock-id");
 	}
 
-	ssd_cold_start_transition_record(ns, flat, r, is_create);
+	ssd_cold_start_transition_record(ns, flat, &opt_meta, r, is_create);
 
 	uint32_t wblock_id = RBLOCK_ID_TO_WBLOCK_ID(ssd, rblock_id);
 

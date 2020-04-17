@@ -47,6 +47,10 @@ struct as_namespace_s;
 		trw->origin == FROM_IUDF || \
 		trw->origin == FROM_IOPS)
 
+#define IS_DROP(trw) \
+		((trw->flags & AS_TRANSACTION_FLAG_IS_DELETE) != 0 && \
+				(trw->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE) == 0)
+
 
 //==========================================================
 // Histogram macros.
@@ -109,7 +113,9 @@ struct as_namespace_s;
 //
 
 typedef struct as_file_handle_s {
-	char		client[64];		// client identifier (currently ip-addr:port)
+	uint8_t		poll_data_type;	// one of CF_POLL_DATA_* - must be first
+
+	char		client[63];		// client identifier (currently ip-addr:port)
 	uint64_t	last_used;		// last nanoseconds we read or wrote
 	cf_socket	sock;			// our client socket
 	cf_poll		poll;			// our epoll instance
@@ -227,9 +233,10 @@ typedef struct as_transaction_s {
 // 'flags' bits - set in transaction body after queuing:
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x01
 #define AS_TRANSACTION_FLAG_IS_DELETE		0x02
-#define AS_TRANSACTION_FLAG_MUST_PING		0x04 // enterprise-only
-#define AS_TRANSACTION_FLAG_RSV_PROLE		0x08 // enterprise-only
-#define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE	0x10 // enterprise-only
+#define AS_TRANSACTION_FLAG_XDR_TOMBSTONE	0x04 // enterprise-only
+#define AS_TRANSACTION_FLAG_MUST_PING		0x08 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_PROLE		0x10 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE	0x20 // enterprise-only
 
 
 void as_transaction_init_head(as_transaction *tr, const cf_digest *, cl_msg *);

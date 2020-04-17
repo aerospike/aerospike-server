@@ -71,12 +71,12 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_EMIG_ID, M_FT_UINT32 },
 		{ MIG_FIELD_NAMESPACE, M_FT_BUF },
 		{ MIG_FIELD_PARTITION, M_FT_UINT32 },
-		{ MIG_FIELD_DIGEST, M_FT_BUF },
-		{ MIG_FIELD_GENERATION, M_FT_UINT32 },
+		{ MIG_FIELD_UNUSED_5, M_FT_BUF },
+		{ MIG_FIELD_UNUSED_6, M_FT_UINT32 },
 		{ MIG_FIELD_RECORD, M_FT_BUF },
 		{ MIG_FIELD_CLUSTER_KEY, M_FT_UINT64 },
 		{ MIG_FIELD_UNUSED_9, M_FT_BUF },
-		{ MIG_FIELD_VOID_TIME, M_FT_UINT32 },
+		{ MIG_FIELD_UNUSED_10, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_11, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_12, M_FT_BUF },
 		{ MIG_FIELD_INFO, M_FT_UINT32 },
@@ -85,15 +85,15 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_UNUSED_16, M_FT_BUF },
 		{ MIG_FIELD_UNUSED_17, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_18, M_FT_UINT32 },
-		{ MIG_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
+		{ MIG_FIELD_UNUSED_19, M_FT_UINT64 },
 		{ MIG_FIELD_FEATURES, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_21, M_FT_UINT32 },
 		{ MIG_FIELD_META_RECORDS, M_FT_BUF },
 		{ MIG_FIELD_META_SEQUENCE, M_FT_UINT32 },
 		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 },
 		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT64 },
-		{ MIG_FIELD_SET_NAME, M_FT_BUF },
-		{ MIG_FIELD_KEY, M_FT_BUF },
+		{ MIG_FIELD_UNUSED_26, M_FT_BUF },
+		{ MIG_FIELD_UNUSED_27, M_FT_BUF },
 		{ MIG_FIELD_UNUSED_28, M_FT_UINT32 },
 		{ MIG_FIELD_EMIG_INSERT_ID, M_FT_UINT64 }
 };
@@ -176,7 +176,6 @@ bool emigration_send_done(emigration *emig);
 void *run_emigration_reinserter(void *arg);
 bool emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
 void emigrate_fill_msg(as_storage_rd *rd, msg *m);
-void old_emigrate_fill_msg(as_storage_rd *rd, msg *m);
 int emigration_reinsert_reduce_fn(const void *key, void *data, void *udata);
 void emigrate_record(emigration *emig, msg *m);
 
@@ -190,7 +189,6 @@ int migrate_receive_msg_cb(cf_node src, msg *m, void *udata);
 void immigration_handle_start_request(cf_node src, msg *m);
 void immigration_ack_start_request(cf_node src, msg *m, uint32_t op);
 void immigration_handle_insert_request(cf_node src, msg *m);
-void immigration_handle_old_insert_request(cf_node src, msg *m);
 void immigration_handle_done_request(cf_node src, msg *m);
 void immigration_handle_all_done_request(cf_node src, msg *m);
 void emigration_handle_insert_ack(cf_node src, msg *m);
@@ -890,13 +888,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	as_storage_record_open(ns, r, &rd);
 
-	// TODO - old pickle - remove old method in "six months".
-	if (as_exchange_min_compatibility_id() >= 3) {
-		emigrate_fill_msg(&rd, m);
-	}
-	else {
-		old_emigrate_fill_msg(&rd, m);
-	}
+	emigrate_fill_msg(&rd, m);
 
 	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
@@ -933,59 +925,8 @@ emigrate_fill_msg(as_storage_rd *rd, msg *m)
 
 	as_storage_rd_load_pickle(rd); // FIXME - handle error returned
 
-	as_flat_strip_xdr_pickle(rd->pickle);
 	msg_set_buf(m, MIG_FIELD_RECORD, rd->pickle, rd->pickle_sz,
 			MSG_SET_HANDOFF_MALLOC);
-}
-
-
-// TODO - old pickle - remove in "six months".
-void
-old_emigrate_fill_msg(as_storage_rd *rd, msg *m)
-{
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_OLD_INSERT);
-
-	as_namespace *ns = rd->ns;
-	as_record *r = rd->r;
-
-	as_storage_rd_load_n_bins(rd); // TODO - handle error returned
-
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd->n_bins];
-
-	as_storage_rd_load_bins(rd, stack_bins); // TODO - handle error returned
-
-	as_storage_rd_load_key(rd); // TODO - handle error returned
-
-	const char *set_name = as_index_get_set_name(r, ns);
-	uint32_t key_size = rd->key_size;
-	uint8_t key[key_size];
-
-	if (key_size != 0) {
-		memcpy(key, rd->key, key_size);
-	}
-
-	msg_set_buf(m, MIG_FIELD_DIGEST, (const uint8_t *)&r->keyd,
-			sizeof(cf_digest), MSG_SET_COPY);
-	msg_set_uint32(m, MIG_FIELD_GENERATION, r->generation);
-	msg_set_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, r->last_update_time);
-
-	if (r->void_time != 0) {
-		msg_set_uint32(m, MIG_FIELD_VOID_TIME, r->void_time);
-	}
-
-	if (set_name) {
-		msg_set_buf(m, MIG_FIELD_SET_NAME, (const uint8_t *)set_name,
-				strlen(set_name), MSG_SET_COPY);
-	}
-
-	if (key_size != 0) {
-		msg_set_buf(m, MIG_FIELD_KEY, key, key_size, MSG_SET_COPY);
-	}
-
-	size_t buf_len;
-	uint8_t* buf = as_record_pickle(rd, &buf_len);
-
-	msg_set_buf(m, MIG_FIELD_RECORD, buf, buf_len, MSG_SET_HANDOFF_MALLOC);
 }
 
 
@@ -1123,9 +1064,6 @@ migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 		break;
 	case OPERATION_INSERT:
 		immigration_handle_insert_request(src, m);
-		break;
-	case OPERATION_OLD_INSERT:
-		immigration_handle_old_insert_request(src, m);
 		break;
 	case OPERATION_DONE:
 		immigration_handle_done_request(src, m);
@@ -1394,26 +1332,13 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		return;
 	}
 
-	// If we get an XDR-tombstone from 5.0, do nothing, but ack the sender.
-	if (rr.xdr_tombstone) {
-		immigration_release(immig);
-		msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
-
-		if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-
-		return;
-	}
-
 	uint32_t info = 0;
 
 	msg_get_uint32(m, MIG_FIELD_INFO, &info);
 
 	immigration_init_repl_state(&rr, info);
 
-	int rv = as_record_replace_if_better(&rr, false, false);
+	int rv = as_record_replace_if_better(&rr, false);
 
 	// If replace failed, don't ack - it will be retransmitted.
 	if (! (rv == AS_OK ||
@@ -1422,130 +1347,6 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		immigration_release(immig);
 		as_fabric_msg_put(m);
 		return;
-	}
-
-	immigration_release(immig);
-
-	msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
-
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
-
-	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
-		as_fabric_msg_put(m);
-	}
-}
-
-
-// TODO - old pickle - remove in "six months".
-void
-immigration_handle_old_insert_request(cf_node src, msg *m)
-{
-	uint32_t emig_id;
-
-	if (msg_get_uint32(m, MIG_FIELD_EMIG_ID, &emig_id) != 0) {
-		cf_warning(AS_MIGRATE, "handle insert: msg get for emig id failed");
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	immigration_hkey hkey;
-
-	hkey.src = src;
-	hkey.emig_id = emig_id;
-
-	immigration *immig;
-
-	if (cf_rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-			(void **)&immig) != CF_RCHASH_OK) {
-		// The immig no longer exists, likely the cluster key advanced and this
-		// record immigration is from prior round. Do not ack this request.
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	if (immig->start_result != AS_MIGRATE_OK || immig->start_recv_ms == 0) {
-		// If this immigration didn't start and reserve a partition, it's
-		// likely in the hash on a retransmit and this insert is for the
-		// original - ignore, and let this immigration proceed.
-		immigration_release(immig);
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	cf_atomic_int_incr(&immig->rsv.ns->migrate_record_receives);
-
-	if (immig->cluster_key != as_exchange_cluster_key()) {
-		immigration_release(immig);
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	as_remote_record rr = {
-			.via = VIA_MIGRATION,
-			.src = src,
-			.rsv = &immig->rsv,
-			.is_old_pickle = true
-	};
-
-	if (msg_get_buf(m, MIG_FIELD_DIGEST, (uint8_t **)&rr.keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
-		cf_warning(AS_MIGRATE, "handle insert: got no digest");
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	if (msg_get_buf(m, MIG_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
-			MSG_GET_DIRECT) != 0 || rr.pickle_sz < 2) {
-		cf_warning(AS_MIGRATE, "handle insert: got no or bad record");
-		immigration_release(immig);
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	if (msg_get_uint32(m, MIG_FIELD_GENERATION, &rr.generation) != 0 ||
-			rr.generation == 0) {
-		cf_warning(AS_MIGRATE, "handle insert: got no or bad generation");
-		immigration_release(immig);
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	if (msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME,
-			&rr.last_update_time) != 0) {
-		cf_warning(AS_MIGRATE, "handle insert: got no last-update-time");
-		immigration_release(immig);
-		as_fabric_msg_put(m);
-		return;
-	}
-
-	msg_get_uint32(m, MIG_FIELD_VOID_TIME, &rr.void_time);
-
-	msg_get_buf(m, MIG_FIELD_SET_NAME, (uint8_t **)&rr.set_name,
-			&rr.set_name_len, MSG_GET_DIRECT);
-
-	msg_get_buf(m, MIG_FIELD_KEY, (uint8_t **)&rr.key, &rr.key_size,
-			MSG_GET_DIRECT);
-
-	uint32_t info = 0;
-
-	msg_get_uint32(m, MIG_FIELD_INFO, &info);
-
-	if (immigration_ignore_pickle(rr.pickle, info)) {
-		cf_warning(AS_MIGRATE, "handle insert: binless pickle %pD", rr.keyd);
-	}
-	else {
-		immigration_init_repl_state(&rr, info);
-
-		int rv = as_record_replace_if_better(&rr, false, false);
-
-		// If replace failed, don't ack - it will be retransmitted.
-		if (! (rv == AS_OK ||
-				// Migrations just treat these errors as successful no-ops:
-				rv == AS_ERR_RECORD_EXISTS || rv == AS_ERR_GENERATION)) {
-			immigration_release(immig);
-			as_fabric_msg_put(m);
-			return;
-		}
 	}
 
 	immigration_release(immig);

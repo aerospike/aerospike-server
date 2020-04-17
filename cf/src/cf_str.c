@@ -336,6 +336,33 @@ cf_strtoul_u64(const char *s, uint64_t *value)
 	return 0;
 }
 
+int
+cf_strtol_i32(const char *s, int32_t *value)
+{
+	if (! ((*s >= '0' && *s <= '9') || *s == '-')) {
+		return -1;
+	}
+
+	errno = 0;
+
+	char* tail = NULL;
+	int64_t i = strtol(s, &tail, 10);
+
+	// Check for overflow.
+	if (errno == ERANGE || i < INT32_MIN || i > INT32_MAX) {
+		return -1;
+	}
+
+	// Don't allow trailing non-hex characters.
+	if (tail && *tail != 0) {
+		return -1;
+	}
+
+	*value = (int32_t)i;
+
+	return 0;
+}
+
 unsigned int
 cf_str_itoa(int _value, char *_s, int _radix)
 {

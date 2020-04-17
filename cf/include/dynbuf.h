@@ -57,6 +57,7 @@ extern void cf_dyn_buf_append_uint32(cf_dyn_buf *db, uint32_t i);
 extern void cf_dyn_buf_append_format_va(cf_dyn_buf *db, const char *form, va_list va);
 extern void cf_dyn_buf_append_format(cf_dyn_buf *db, const char *form, ...);
 extern void cf_dyn_buf_chomp(cf_dyn_buf *db);
+extern void cf_dyn_buf_chomp_char(cf_dyn_buf *db, char c);
 extern char *cf_dyn_buf_strdup(cf_dyn_buf *db);
 extern void cf_dyn_buf_free(cf_dyn_buf *db);
 

@@ -393,8 +393,7 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 	flat->magic = dirty ? AS_FLAT_MAGIC_DIRTY : AS_FLAT_MAGIC;
 	flat->n_rblocks = n_rblocks;
 
-	flat->has_extra_flags = 0;
-	// Other flags are filled in below.
+	// Flags are filled in below.
 	flat->tree_id = r->tree_id;
 	flat->keyd = r->keyd;
 	flat->last_update_time = r->last_update_time;
@@ -403,6 +402,18 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 	set_flat_xdr_state(r, flat);
 
 	uint8_t* at = flat->data;
+
+	as_flat_extra_flags extra_flags = get_flat_extra_flags(r);
+
+	if (flat_extra_flags_used(&extra_flags)) {
+		flat->has_extra_flags = 1;
+
+		*(as_flat_extra_flags*)at = extra_flags;
+		at += sizeof(as_flat_extra_flags);
+	}
+	else {
+		flat->has_extra_flags = 0;
+	}
 
 	if (r->void_time != 0) {
 		*(uint32_t*)at = r->void_time;
@@ -499,6 +510,12 @@ flat_record_overhead_size(const as_storage_rd* rd)
 
 	// Start with size of record header struct.
 	size_t size = sizeof(as_flat_record);
+
+	as_flat_extra_flags extra_flags = get_flat_extra_flags(r);
+
+	if (flat_extra_flags_used(&extra_flags)) {
+		size += sizeof(as_flat_extra_flags);
+	}
 
 	if (r->void_time != 0) {
 		size += sizeof(uint32_t);

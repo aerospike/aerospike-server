@@ -72,6 +72,12 @@ struct ssl_st;
 	_tmp; \
 })
 
+#define cf_ip_addr_port_print(_addr, _port) ({ \
+	char *_tmp = alloca(250); \
+	cf_ip_addr_port_to_string_safe(_addr, _port, _tmp, 250); \
+	_tmp; \
+})
+
 #define cf_sock_addr_print(_addr) ({ \
 	char *_tmp = alloca(250); \
 	cf_sock_addr_to_string_safe(_addr, _tmp, 250); \
@@ -151,7 +157,7 @@ typedef enum {
 	CF_SOCK_OWNER_FABRIC,
 	CF_SOCK_OWNER_FABRIC_TLS,
 	CF_SOCK_OWNER_INFO,
-	CF_SOCK_OWNER_XDR,
+	CF_SOCK_OWNER_XDR_CLIENT,
 	CF_SOCK_OWNER_INVALID
 } cf_sock_owner;
 
@@ -169,6 +175,11 @@ typedef struct cf_serv_cfg_s {
 typedef struct cf_poll_s {
 	int32_t fd;
 } __attribute__((packed)) cf_poll;
+
+#define CF_POLL_DATA_CLIENT_IO 0
+#define CF_POLL_DATA_EPOLL_QUEUE 1
+#define CF_POLL_DATA_XDR_IO 2
+#define CF_POLL_DATA_XDR_TIMER 3
 
 // This precisely matches the epoll_event struct.
 typedef struct cf_poll_event_s {
@@ -230,6 +241,9 @@ void cf_ip_port_to_string_safe(cf_ip_port port, char *string, size_t size);
 CF_MUST_CHECK int32_t cf_ip_port_from_binary(const uint8_t *binary, size_t size, cf_ip_port *port);
 CF_MUST_CHECK int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size);
 void cf_ip_port_from_node_id(cf_node id, cf_ip_port *port);
+
+CF_MUST_CHECK int32_t cf_ip_addr_port_to_string(const cf_ip_addr *addr, cf_ip_port port, char *string, size_t size);
+void cf_ip_addr_port_to_string_safe(const cf_ip_addr *addr, cf_ip_port port, char *string, size_t size);
 
 CF_MUST_CHECK int32_t cf_sock_addr_from_string(const char *string, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size);
@@ -330,7 +344,7 @@ static inline bool cf_poll_equal(const cf_poll poll1, const cf_poll poll2)
 void cf_poll_add_fd(cf_poll poll, int32_t fd, uint32_t events, void *data);
 void cf_poll_add_socket(cf_poll poll, const cf_socket *sock, uint32_t events, void *data);
 CF_MUST_CHECK int32_t cf_poll_modify_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t events, void *data, uint32_t n_err_ok, const int32_t *err_ok);
-CF_MUST_CHECK int32_t cf_poll_delete_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t n_err_ok, int32_t *err_ok);
+CF_MUST_CHECK int32_t cf_poll_delete_fd_forgiving(cf_poll poll, int32_t fd, uint32_t n_err_ok, int32_t *err_ok);
 void cf_poll_add_sockets(cf_poll poll, cf_sockets *socks, uint32_t events);
 void cf_poll_delete_sockets(cf_poll poll, cf_sockets *socks);
 CF_MUST_CHECK int32_t cf_poll_wait(cf_poll poll, cf_poll_event *events, int32_t limit, int32_t timeout);
@@ -341,9 +355,19 @@ static inline void cf_poll_modify_socket(cf_poll poll, const cf_socket *sock, ui
 	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(poll, sock, events, data, 0, NULL));
 }
 
+static inline CF_MUST_CHECK int32_t cf_poll_delete_socket_forgiving(cf_poll poll, const cf_socket *sock, uint32_t n_err_ok, int32_t *err_ok)
+{
+	return cf_poll_delete_fd_forgiving(poll, sock->fd, n_err_ok, err_ok);
+}
+
+static inline void cf_poll_delete_fd(cf_poll poll, int32_t fd)
+{
+	CF_IGNORE_ERROR(cf_poll_delete_fd_forgiving(poll, fd, 0, NULL));
+}
+
 static inline void cf_poll_delete_socket(cf_poll poll, const cf_socket *sock)
 {
-	CF_IGNORE_ERROR(cf_poll_delete_socket_forgiving(poll, sock, 0, NULL));
+	cf_poll_delete_fd(poll, sock->fd);
 }
 
 CF_MUST_CHECK int32_t cf_inter_get_addr_all(cf_ip_addr *addrs, uint32_t *n_addrs);

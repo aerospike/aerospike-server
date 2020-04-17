@@ -69,17 +69,17 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_DIGEST, M_FT_BUF },
 		{ RW_FIELD_RECORD, M_FT_BUF },
 		{ RW_FIELD_UNUSED_7, M_FT_BUF },
-		{ RW_FIELD_CLUSTER_KEY, M_FT_UINT64 },
-		{ RW_FIELD_OLD_RECORD, M_FT_BUF },
+		{ RW_FIELD_UNUSED_8, M_FT_UINT64 },
+		{ RW_FIELD_UNUSED_9, M_FT_BUF },
 		{ RW_FIELD_TID, M_FT_UINT32 },
-		{ RW_FIELD_VOID_TIME, M_FT_UINT32 },
+		{ RW_FIELD_UNUSED_11, M_FT_UINT32 },
 		{ RW_FIELD_INFO, M_FT_UINT32 },
 		{ RW_FIELD_UNUSED_13, M_FT_BUF },
 		{ RW_FIELD_UNUSED_14, M_FT_BUF },
 		{ RW_FIELD_UNUSED_15, M_FT_UINT64 },
 		{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
-		{ RW_FIELD_SET_NAME, M_FT_BUF },
-		{ RW_FIELD_KEY, M_FT_BUF },
+		{ RW_FIELD_UNUSED_17, M_FT_BUF },
+		{ RW_FIELD_UNUSED_18, M_FT_BUF },
 		{ RW_FIELD_REGIME, M_FT_UINT32 }
 };
 
@@ -411,9 +411,6 @@ rw_msg_cb(cf_node id, msg* m, void* udata)
 	//
 	case RW_OP_REPL_WRITE:
 		repl_write_handle_op(id, m);
-		break;
-	case RW_OP_WRITE:
-		repl_write_handle_old_op(id, m);
 		break;
 	case RW_OP_WRITE_ACK:
 		repl_write_handle_ack(id, m);

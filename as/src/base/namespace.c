@@ -31,7 +31,6 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
-#include "citrusleaf/cf_hash_math.h"
 
 #include "dynbuf.h"
 #include "fault.h"
@@ -69,24 +68,6 @@ static void append_set_props(as_set *p_set, cf_dyn_buf *db);
 
 
 //==========================================================
-// Inlines & macros.
-//
-
-static inline uint32_t
-ns_name_hash(char *name)
-{
-	uint32_t hv = cf_hash_fnv32((const uint8_t *)name, strlen(name));
-
-	// Don't collide with a ns-id.
-	if (hv <= AS_NAMESPACE_SZ) {
-		hv += AS_NAMESPACE_SZ;
-	}
-
-	return hv;
-}
-
-
-//==========================================================
 // Public API.
 //
 
@@ -100,19 +81,11 @@ as_namespace_create(char *name)
 	cf_assert_nostack(g_config.n_namespaces < AS_NAMESPACE_SZ,
 			AS_NAMESPACE, "too many namespaces (max is %u)", AS_NAMESPACE_SZ);
 
-	uint32_t namehash = ns_name_hash(name);
-
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace *ns = g_config.namespaces[ns_ix];
 
 		if (strcmp(ns->name, name) == 0) {
 			cf_crash_nostack(AS_NAMESPACE, "{%s} duplicate namespace", name);
-		}
-
-		// Check for CE also, in case deployment later becomes EE with XDR.
-		if (ns->namehash == namehash) {
-			cf_crash_nostack(AS_XDR, "{%s} {%s} namespace name hashes collide",
-					ns->name, name);
 		}
 	}
 
@@ -125,7 +98,6 @@ as_namespace_create(char *name)
 
 	strcpy(ns->name, name);
 	ns->ix = g_config.n_namespaces++;
-	ns->namehash = namehash;
 
 	ns->jem_arena = cf_alloc_create_arena();
 	cf_info(AS_NAMESPACE, "{%s} uses JEMalloc arena %d", name, ns->jem_arena);
@@ -142,9 +114,6 @@ as_namespace_create(char *name)
 	ns->cfg_replication_factor = 2;
 	ns->replication_factor = 0; // gets set on rebalance
 
-	ns->sets_enable_xdr = true; // ship all the sets by default
-	ns->ns_allow_nonxdr_writes = true; // allow nonxdr writes by default
-	ns->ns_allow_xdr_writes = true; // allow xdr writes by default
 	cf_vector_pointer_init(&ns->xdr_dclist_v, 3, 0);
 
 	ns->background_scan_max_rps = 10000; // internal write generation limit
@@ -166,6 +135,8 @@ as_namespace_create(char *name)
 	ns->n_truncate_threads = 4;
 	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
+	ns->xdr_tomb_raider_period = 2 * 60; // 2 minutes
+	ns->n_xdr_tomb_raider_threads = 1;
 
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 	ns->storage_data_in_memory = true;
@@ -249,7 +220,6 @@ as_namespace_configure_sets(as_namespace *ns)
 			// Transfer configurable metadata.
 			p_set->stop_writes_count = ns->sets_cfg_array[i].stop_writes_count;
 			p_set->disable_eviction = ns->sets_cfg_array[i].disable_eviction;
-			p_set->enable_xdr = ns->sets_cfg_array[i].enable_xdr;
 		}
 		else {
 			// Maybe exceeded max sets allowed, but try failing gracefully.
@@ -330,7 +300,7 @@ as_namespace_get_set_id(as_namespace *ns, const char *set_name)
 }
 
 
-// At the moment this is only used by the enterprise build security feature.
+// At the moment this is only used by the enterprise security & xdr features.
 uint16_t
 as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 {
@@ -727,23 +697,6 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, "stop-writes-count=");
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->stop_writes_count));
-	cf_dyn_buf_append_char(db, ':');
-
-	cf_dyn_buf_append_string(db, "set-enable-xdr=");
-
-	if (cf_atomic32_get(p_set->enable_xdr) == AS_SET_ENABLE_XDR_TRUE) {
-		cf_dyn_buf_append_string(db, "true");
-	}
-	else if (cf_atomic32_get(p_set->enable_xdr) == AS_SET_ENABLE_XDR_FALSE) {
-		cf_dyn_buf_append_string(db, "false");
-	}
-	else if (cf_atomic32_get(p_set->enable_xdr) == AS_SET_ENABLE_XDR_DEFAULT) {
-		cf_dyn_buf_append_string(db, "use-default");
-	}
-	else {
-		cf_dyn_buf_append_uint32(db, cf_atomic32_get(p_set->enable_xdr));
-	}
-
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "disable-eviction=");

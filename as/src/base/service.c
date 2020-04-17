@@ -59,7 +59,6 @@
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/xdr_serverside.h"
 
 #include "warnings.h"
 
@@ -93,7 +92,7 @@ as_service_access g_access = {
 };
 
 cf_serv_cfg g_service_bind = { .n_cfgs = 0 };
-cf_tls_info* g_service_tls;
+struct cf_tls_info_s* g_service_tls;
 
 static cf_sockets g_sockets;
 
@@ -182,8 +181,6 @@ as_service_start(void)
 
 	add_localhost(&g_service_bind, CF_SOCK_OWNER_SERVICE);
 	add_localhost(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
-
-	as_xdr_info_port(&g_service_bind);
 
 	if (cf_socket_init_server(&g_service_bind, &g_sockets) < 0) {
 		cf_crash(AS_SERVICE, "couldn't initialize service socket");
@@ -381,9 +378,7 @@ run_accept(void* udata)
 			uint64_t n_opened = g_stats.proto_connections_opened;
 			uint64_t n_open = n_opened - n_closed;
 
-			// TODO - XDR exemption to become a special feature.
-			if (n_open >= g_config.n_proto_fd_max &&
-					cfg->owner != CF_SOCK_OWNER_XDR) {
+			if (n_open >= g_config.n_proto_fd_max) {
 				cf_ticker_warning(AS_SERVICE,
 						"refusing client connection - proto-fd-max %u",
 						g_config.n_proto_fd_max);
@@ -396,11 +391,13 @@ run_accept(void* udata)
 			cf_socket_keep_alive(&csock, 60, 60, 2);
 
 			if (cfg->owner == CF_SOCK_OWNER_SERVICE_TLS) {
-				tls_socket_prepare_server(g_service_tls, &csock);
+				tls_socket_prepare_server(g_service_tls, NULL, &csock);
 			}
 
 			as_file_handle* fd_h = cf_rc_alloc(sizeof(as_file_handle));
 			// Ref for epoll instance.
+
+			fd_h->poll_data_type = CF_POLL_DATA_CLIENT_IO;
 
 			cf_sock_addr_to_string_safe(&caddr, fd_h->client,
 					sizeof(fd_h->client));
@@ -550,6 +547,7 @@ run_service(void* udata)
 	cf_epoll_queue* trans_q = &ctx->trans_q;
 
 	cf_poll_add_fd(poll, trans_q->event_fd, EPOLLIN, trans_q);
+	as_xdr_init_poll(poll);
 
 	while (true) {
 		cf_poll_event events[N_EVENTS];
@@ -558,9 +556,14 @@ run_service(void* udata)
 		cf_assert(n_events >= 0, AS_SERVICE, "unexpected EINTR");
 
 		for (uint32_t i = 0; i < (uint32_t)n_events; i++) {
-			if (events[i].data == trans_q) {
-				cf_assert(events[i].events == EPOLLIN, AS_SERVICE,
-						"unexpected event: 0x%0x", events[i].events);
+			uint32_t mask = events[i].events;
+			void* data = events[i].data;
+
+			uint8_t type = *(uint8_t*)data;
+
+			if (type == CF_POLL_DATA_EPOLL_QUEUE) {
+				cf_assert(mask == EPOLLIN, AS_SERVICE,
+						"unexpected event: 0x%0x", mask);
 
 				if (start_internal_transaction(ctx)) {
 					continue;
@@ -571,9 +574,20 @@ run_service(void* udata)
 				return NULL;
 			}
 
-			as_file_handle* fd_h = events[i].data;
+			if (type == CF_POLL_DATA_XDR_IO) {
+				as_xdr_io_event(mask, data);
+				continue;
+			}
 
-			if ((events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) != 0) {
+			if (type == CF_POLL_DATA_XDR_TIMER) {
+				as_xdr_timer_event(events, n_events, i);
+				continue;
+			}
+			// else - type == CF_POLL_DATA_CLIENT_IO
+
+			as_file_handle* fd_h = data;
+
+			if ((mask & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) != 0) {
 				service_release_file_handle(fd_h);
 				continue;
 			}
@@ -625,6 +639,9 @@ static void
 stop_service(thread_ctx* ctx)
 {
 	cf_detail(AS_SERVICE, "stopping ctx %p", ctx);
+
+	as_xdr_shutdown_poll();
+	as_xdr_cleanup_tl_stats();
 
 	while (true) {
 		bool any_in_transaction = false;

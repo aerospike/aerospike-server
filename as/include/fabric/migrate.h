@@ -95,12 +95,12 @@ typedef enum {
 	MIG_FIELD_EMIG_ID,
 	MIG_FIELD_NAMESPACE,
 	MIG_FIELD_PARTITION,
-	MIG_FIELD_DIGEST, // TODO - old pickle - deprecate in "six months"
-	MIG_FIELD_GENERATION, // TODO - old pickle - deprecate in "six months"
+	MIG_FIELD_UNUSED_5,
+	MIG_FIELD_UNUSED_6,
 	MIG_FIELD_RECORD,
 	MIG_FIELD_CLUSTER_KEY,
 	MIG_FIELD_UNUSED_9,
-	MIG_FIELD_VOID_TIME, // TODO - old pickle - deprecate in "six months"
+	MIG_FIELD_UNUSED_10,
 	MIG_FIELD_UNUSED_11,
 	MIG_FIELD_UNUSED_12,
 	MIG_FIELD_INFO,
@@ -109,15 +109,15 @@ typedef enum {
 	MIG_FIELD_UNUSED_16,
 	MIG_FIELD_UNUSED_17,
 	MIG_FIELD_UNUSED_18,
-	MIG_FIELD_LAST_UPDATE_TIME, // TODO - old pickle - deprecate in "six months"
+	MIG_FIELD_UNUSED_19,
 	MIG_FIELD_FEATURES,
 	MIG_FIELD_UNUSED_21,
 	MIG_FIELD_META_RECORDS,
 	MIG_FIELD_META_SEQUENCE,
 	MIG_FIELD_META_SEQUENCE_FINAL,
 	MIG_FIELD_PARTITION_SIZE,
-	MIG_FIELD_SET_NAME, // TODO - old pickle - deprecate in "six months"
-	MIG_FIELD_KEY, // TODO - old pickle - deprecate in "six months"
+	MIG_FIELD_UNUSED_26,
+	MIG_FIELD_UNUSED_27,
 	MIG_FIELD_UNUSED_28,
 	MIG_FIELD_EMIG_INSERT_ID,
 
@@ -125,7 +125,7 @@ typedef enum {
 } migrate_msg_fields;
 
 #define OPERATION_UNDEF 0
-#define OPERATION_OLD_INSERT 1 // TODO - old pickle - deprecate in "six months"
+#define OPERATION_UNUSED_1 1
 #define OPERATION_INSERT_ACK 2
 #define OPERATION_START 3
 #define OPERATION_START_ACK_OK 4
@@ -134,7 +134,7 @@ typedef enum {
 #define OPERATION_INSERT 7
 #define OPERATION_DONE 8
 #define OPERATION_DONE_ACK 9
-#define OPERATION_UNUSED_10 10 // deprecated
+#define OPERATION_UNUSED_10 10
 #define OPERATION_MERGE_META 11
 #define OPERATION_MERGE_META_ACK 12
 #define OPERATION_ALL_DONE 13
@@ -143,7 +143,6 @@ typedef enum {
 #define MIG_INFO_UNUSED_1       0x0001
 #define MIG_INFO_UNUSED_2       0x0002
 #define MIG_INFO_UNREPLICATED   0x0004 // enterprise only
-#define MIG_INFO_TOMBSTONE      0x0008 // enterprise only
 
 #define MIG_FEATURE_MERGE 0x00000001U
 #define MIG_FEATURES_SEEN 0x80000000U // needed for backward compatibility
@@ -211,7 +210,6 @@ uint32_t emigration_pack_info(const emigration *emig, const struct as_index_s *r
 
 // Migrate fabric message handling.
 void emigration_handle_meta_batch_request(cf_node src, msg *m);
-bool immigration_ignore_pickle(const uint8_t *buf, uint32_t info);
 void immigration_init_repl_state(struct as_remote_record_s* rr, uint32_t info);
 void immigration_handle_meta_batch_ack(cf_node src, msg *m);
 

@@ -28,9 +28,11 @@
 
 #include <stdbool.h>
 
+#include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/transaction.h"
+#include "fabric/partition.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
 
@@ -63,4 +65,13 @@ delete_master(as_transaction* tr, rw_request* rw)
 	}
 
 	return drop_master(tr, &r_ref, rw);
+}
+
+bool
+drop_local(as_namespace* ns, as_partition_reservation* rsv, as_index_ref* r_ref)
+{
+	as_index_delete(rsv->tree, &r_ref->r->keyd);
+	as_record_done(r_ref, ns);
+
+	return true;
 }

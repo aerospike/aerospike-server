@@ -72,6 +72,13 @@ will_replicate(as_record* r, as_namespace* ns)
 
 
 bool
+write_is_full_drop(const as_transaction* tr)
+{
+	return IS_DROP(tr);
+}
+
+
+bool
 insufficient_replica_destinations(const as_namespace* ns, uint32_t n_dests)
 {
 	return false;
@@ -130,7 +137,7 @@ set_xdr_write(const as_transaction* tr, as_record* r)
 
 
 void
-transition_delete_metadata(const as_transaction* tr, as_record* r, bool is_delete)
+transition_delete_metadata(as_transaction* tr, as_record* r, bool is_delete)
 {
 }
 
@@ -163,14 +170,7 @@ udf_finish_delete(udf_record* urecord)
 
 
 uint32_t
-dup_res_pack_repl_state_info(const as_record* r, as_namespace* ns)
-{
-	return 0;
-}
-
-
-uint32_t
-dup_res_pack_info(const as_record* r, as_namespace* ns)
+dup_res_pack_repl_state_info(const as_record* r, const as_namespace* ns)
 {
 	return 0;
 }
@@ -179,8 +179,7 @@ dup_res_pack_info(const as_record* r, as_namespace* ns)
 bool
 dup_res_should_retry_transaction(rw_request* rw, uint32_t result_code)
 {
-	// TODO - JUMP - can get this from 3.14.x nodes or older - retry if so.
-	return result_code == AS_ERR_CLUSTER_KEY_MISMATCH;
+	return false;
 }
 
 
@@ -203,31 +202,9 @@ dup_res_translate_result_code(rw_request* rw)
 }
 
 
-bool
-dup_res_ignore_pickle(const uint8_t* buf, uint32_t info)
-{
-	return as_record_pickle_is_binless(buf);
-}
-
-
 void
 dup_res_init_repl_state(as_remote_record* rr, uint32_t info)
 {
-}
-
-
-void
-repl_write_flag_pickle(const as_transaction* tr, const uint8_t* buf,
-		uint32_t* info)
-{
-	// Do nothing.
-}
-
-
-bool
-repl_write_pickle_is_drop(const uint8_t* buf, uint32_t info)
-{
-	return as_record_pickle_is_binless(buf);
 }
 
 

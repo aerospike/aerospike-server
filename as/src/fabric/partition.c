@@ -451,29 +451,6 @@ as_partition_reserve_query(as_namespace* ns, uint32_t pid,
 	return as_partition_reserve_write(ns, pid, rsv, NULL);
 }
 
-// Succeeds if we are full working master or prole.
-int
-as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
-		as_partition_reservation* rsv)
-{
-	as_partition* p = &ns->partitions[pid];
-
-	cf_mutex_lock(&p->lock);
-
-	int res = -1;
-
-	if (p->pending_immigrations == 0 &&
-			(g_config.self_node == p->working_master ||
-					find_self_in_replicas(p) >= 0)) {
-		partition_reserve_lockfree(p, ns, rsv);
-		res = 0;
-	}
-
-	cf_mutex_unlock(&p->lock);
-
-	return res;
-}
-
 void
 as_partition_reservation_copy(as_partition_reservation* dst,
 		as_partition_reservation* src)

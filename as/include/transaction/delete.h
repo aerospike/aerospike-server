@@ -36,7 +36,9 @@
 //
 
 struct as_index_ref_s;
+struct as_partition_reservation_s;
 struct as_transaction_s;
+struct as_namespace_s;
 struct rw_request_s;
 
 
@@ -54,3 +56,4 @@ transaction_status as_delete_start(struct as_transaction_s* tr);
 bool delete_storage_overloaded(struct as_transaction_s* tr);
 transaction_status delete_master(struct as_transaction_s* tr, struct rw_request_s* rw);
 transaction_status drop_master(struct as_transaction_s* tr, struct as_index_ref_s* r_ref, struct rw_request_s* rw);
+bool drop_local(struct as_namespace_s* ns, struct as_partition_reservation_s* rsv, struct as_index_ref_s* r_ref);

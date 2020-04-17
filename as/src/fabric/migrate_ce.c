@@ -81,12 +81,6 @@ emigration_handle_meta_batch_request(cf_node src, msg *m)
 	as_fabric_msg_put(m);
 }
 
-bool
-immigration_ignore_pickle(const uint8_t *buf, uint32_t info)
-{
-	return as_record_pickle_is_binless(buf);
-}
-
 void
 immigration_init_repl_state(as_remote_record* rr, uint32_t info)
 {

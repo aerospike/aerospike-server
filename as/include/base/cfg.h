@@ -31,8 +31,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "xdr_config.h"
-
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
 
@@ -43,6 +41,7 @@
 #include "tls.h"
 
 #include "base/security_config.h"
+#include "base/xdr.h"
 #include "fabric/clustering.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
@@ -205,6 +204,7 @@ typedef struct as_config_s {
 
 	mod_lua_config	mod_lua;
 	as_sec_config	sec_cfg;
+	as_xdr_config	xdr_cfg; // TODO - Forcing cfg.h to include xdr.h. Consider *.
 
 	uint32_t		n_tls_specs;
 	cf_tls_spec		tls_specs[MAX_TLS_SPECS];
@@ -217,11 +217,6 @@ typedef struct as_config_s {
 
 	// Global variable that just shouldn't be here.
 	cf_node			self_node;
-
-	// Global variables that just shouldn't be here.
-	cf_node			xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
-	xdr_node_lst	xdr_peers_lst[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
-	uint64_t		xdr_self_lastshiptime[DC_MAX_NUM]; // last XDR shipping by this node
 
 	// Namespaces.
 	struct as_namespace_s* namespaces[AS_NAMESPACE_SZ];

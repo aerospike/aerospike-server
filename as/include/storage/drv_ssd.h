@@ -240,7 +240,7 @@ void apply_opt_meta(struct as_index_s *r, struct as_namespace_s *ns, const struc
 
 // Tomb raider.
 void ssd_cold_start_adjust_cenotaph(struct as_namespace_s *ns, bool block_has_bins, uint32_t block_void_time, struct as_index_s *r);
-void ssd_cold_start_transition_record(struct as_namespace_s *ns, const struct as_flat_record_s *flat, struct as_index_s *r, bool is_create);
+void ssd_cold_start_transition_record(struct as_namespace_s *ns, const struct as_flat_record_s *flat, const as_flat_opt_meta* opt_meta, struct as_index_s *r, bool is_create);
 void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 
 // Record encryption.

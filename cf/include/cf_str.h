@@ -41,6 +41,7 @@ int cf_str_atoi_seconds(char *s, uint32_t *value);
 int cf_strtoul_x64(const char *s, uint64_t *value);
 int cf_strtoul_u32(const char *s, uint32_t *value);
 int cf_strtoul_u64(const char *s, uint64_t *value);
+int cf_strtol_i32(const char *s, int32_t *value);
 
 // Split the string 'str' based on input breaks in 'fmt'.
 // - The splitting is destructive.

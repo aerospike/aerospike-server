@@ -1067,18 +1067,9 @@ find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		}
 		// else - keep going but remember the best so far.
 
-		int score;
-
-		if (as_exchange_min_compatibility_id() >= 4) {
-			// V = 3 > Vs = 2 > Ve > 1 > Vse = 0.
-			score = 3 - ((version->subset == 1 ? 1 : 0) +
-					(version->evade == 1 ? 2 : 0));
-		}
-		else {
-			// V = 3 > Ve = 2 > Vs = 1 > Vse = 0.
-			score = (version->evade == 1 ? 0 : 1) +
-					(version->subset == 1 ? 0 : 2);
-		}
+		// V = 3 > Vs = 2 > Ve > 1 > Vse = 0.
+		int score = 3 - ((version->subset == 1 ? 1 : 0) +
+				(version->evade == 1 ? 2 : 0));
 
 		if (score > best_score) {
 			best_score = score;

@@ -73,6 +73,8 @@ typedef struct index_metadata_s {
 
 	bool tombstone; // relevant only for enterprise edition
 	bool cenotaph; // relevant only for enterprise edition
+	bool xdr_tombstone; // relevant only for enterprise edition
+	bool xdr_nsup_tombstone; // relevant only for enterprise edition
 } index_metadata;
 
 typedef struct now_times_s {
@@ -96,6 +98,7 @@ void send_rw_messages(struct rw_request_s* rw);
 void send_rw_messages_forget(struct rw_request_s* rw);
 int repl_state_check(struct as_index_s* r, struct as_transaction_s* tr);
 void will_replicate(struct as_index_s* r, struct as_namespace_s* ns);
+bool write_is_full_drop(const struct as_transaction_s* tr);
 bool insufficient_replica_destinations(const struct as_namespace_s* ns, uint32_t n_dests);
 void finished_replicated(struct as_transaction_s* tr);
 void finished_not_replicated(struct rw_request_s* rw);
@@ -111,13 +114,12 @@ void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
 void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
 void advance_record_version(const struct as_transaction_s* tr, struct as_index_s* r);
 void set_xdr_write(const struct as_transaction_s* tr, struct as_index_s* r);
-void transition_delete_metadata(const struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
+void transition_delete_metadata(struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void record_delete_adjust_sindex(struct as_index_s* r, struct as_namespace_s* ns);
 void delete_adjust_sindex(struct as_storage_rd_s* rd);
 void remove_from_sindex(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* bins, uint32_t n_bins);
-bool xdr_must_ship_delete(struct as_namespace_s* ns, bool is_xdr_op);
 
 
 // TODO - rename as as_record_... and move to record.c?
@@ -202,17 +204,13 @@ void write_delete_record(struct as_index_s* r, struct as_index_tree_s* tree);
 
 udf_optype udf_finish_delete(struct udf_record_s* urecord);
 
-uint32_t dup_res_pack_repl_state_info(const struct as_index_s* r, struct as_namespace_s* ns);
-uint32_t dup_res_pack_info(const struct as_index_s* r, struct as_namespace_s* ns);
+uint32_t dup_res_pack_repl_state_info(const struct as_index_s* r, const struct as_namespace_s* ns);
 bool dup_res_should_retry_transaction(struct rw_request_s* rw, uint32_t result_code);
 void dup_res_handle_tie(struct rw_request_s* rw, const msg* m, uint32_t result_code);
 void apply_if_tie(struct rw_request_s* rw);
 void dup_res_translate_result_code(struct rw_request_s* rw);
-bool dup_res_ignore_pickle(const uint8_t* buf, uint32_t info);
 void dup_res_init_repl_state(struct as_remote_record_s* rr, uint32_t info);
 
-void repl_write_flag_pickle(const struct as_transaction_s* tr, const uint8_t* buf, uint32_t* info);
-bool repl_write_pickle_is_drop(const uint8_t* buf, uint32_t info);
 void repl_write_init_repl_state(struct as_remote_record_s* rr, bool from_replica);
 conflict_resolution_pol repl_write_conflict_resolution_policy(const struct as_namespace_s* ns);
 bool repl_write_should_retransmit_replicas(struct rw_request_s* rw, uint32_t result_code);

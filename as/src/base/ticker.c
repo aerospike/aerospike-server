@@ -224,6 +224,8 @@ log_ticker_frame(uint64_t delta_time)
 		dump_namespace_histograms(ns);
 	}
 
+	as_xdr_ticker(delta_time);
+
 	cf_log_dump_cache();
 }
 
@@ -425,15 +427,17 @@ void
 log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 {
 	if ((n_tombstones |
+			ns->n_xdr_tombstones |
 			mp->n_master_tombstones |
 			mp->n_prole_tombstones |
 			mp->n_non_replica_tombstones) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} tombstones: all %lu master %lu prole %lu non-replica %lu",
+	cf_info(AS_INFO, "{%s} tombstones: all %lu xdr %lu master %lu prole %lu non-replica %lu",
 			ns->name,
 			n_tombstones,
+			ns->n_xdr_tombstones,
 			mp->n_master_tombstones,
 			mp->n_prole_tombstones,
 			mp->n_non_replica_tombstones

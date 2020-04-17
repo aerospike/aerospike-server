@@ -35,6 +35,7 @@
 #include <sys/resource.h>
 #include <sys/types.h>
 
+#include "aerospike/as_password.h"
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -70,8 +71,7 @@
 #include "base/thr_sindex.h"
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
-#include "base/xdr_config.h"
-#include "base/xdr_serverside.h"
+#include "base/xdr.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
@@ -118,11 +118,7 @@ cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
 char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
 void cfg_keep_cap(bool keep, bool* what, int32_t cap);
 
-xdr_dest_config* xdr_cfg_add_datacenter(char* name);
-void xdr_cfg_associate_datacenter(char* dc, uint32_t ns_ix);
-void xdr_cfg_add_http_url(xdr_dest_config* dest_cfg, char* url);
-void xdr_cfg_add_node_addr_port(xdr_dest_config* dest_cfg, char* addr, int port);
-void xdr_cfg_add_tls_node(xdr_dest_config* dest_cfg, char* addr, char* tls_name, int port);
+bool xdr_read_security_configfile(as_xdr_security_cfg* sec_cfg);
 
 
 //==========================================================
@@ -197,21 +193,6 @@ cfg_set_defaults()
 	// Clustering defaults.
 	c->clustering_config.cluster_size_min = 1;
 	c->clustering_config.clique_based_eviction_enabled = true;
-
-	// XDR defaults.
-	for (int i = 0; i < AS_CLUSTER_SZ ; i++) {
-		c->xdr_peers_lst[i].node = 0;
-
-		for (int j = 0; j < DC_MAX_NUM; j++) {
-			c->xdr_peers_lst[i].time[j] = 0;
-		}
-
-		c->xdr_clmap[i] = 0;
-	}
-
-	for (int j = 0; j < DC_MAX_NUM; j++) {
-		c->xdr_self_lastshiptime[j] = 0;
-	}
 
 	// Mod-lua defaults.
 	c->mod_lua.server_mode = true;
@@ -522,13 +503,6 @@ typedef enum {
 	CASE_NAMESPACE_MEMORY_SIZE,
 	CASE_NAMESPACE_DEFAULT_TTL,
 	CASE_NAMESPACE_STORAGE_ENGINE_BEGIN,
-	// For XDR only:
-	CASE_NAMESPACE_ENABLE_XDR,
-	CASE_NAMESPACE_SETS_ENABLE_XDR,
-	CASE_NAMESPACE_XDR_REMOTE_DATACENTER,
-	CASE_NAMESPACE_FORWARD_XDR_WRITES,
-	CASE_NAMESPACE_ALLOW_NONXDR_WRITES,
-	CASE_NAMESPACE_ALLOW_XDR_WRITES,
 	// Normally hidden:
 	CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP,
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
@@ -560,6 +534,8 @@ typedef enum {
 	CASE_NAMESPACE_PREFER_UNIFORM_BALANCE,
 	CASE_NAMESPACE_RACK_ID,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
+	CASE_NAMESPACE_REJECT_NON_XDR_WRITES,
+	CASE_NAMESPACE_REJECT_XDR_WRITES,
 	CASE_NAMESPACE_SET_BEGIN,
 	CASE_NAMESPACE_SINDEX_BEGIN,
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN,
@@ -573,6 +549,8 @@ typedef enum {
 	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
 	CASE_NAMESPACE_TRUNCATE_THREADS,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
+	CASE_NAMESPACE_XDR_TOMB_RAIDER_PERIOD,
+	CASE_NAMESPACE_XDR_TOMB_RAIDER_THREADS,
 	// Obsoleted:
 	CASE_NAMESPACE_DISABLE_NSUP,
 	// Deprecated:
@@ -703,18 +681,12 @@ typedef enum {
 
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
-	CASE_NAMESPACE_SET_ENABLE_XDR,
 	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
 	// Deprecated:
 	CASE_NAMESPACE_SET_EVICT_HWM_COUNT,
 	CASE_NAMESPACE_SET_EVICT_HWM_PCT,
 	CASE_NAMESPACE_SET_STOP_WRITE_COUNT,
 	CASE_NAMESPACE_SET_STOP_WRITE_PCT,
-
-	// Namespace set set-enable-xdr options (value tokens):
-	CASE_NAMESPACE_SET_ENABLE_XDR_USE_DEFAULT,
-	CASE_NAMESPACE_SET_ENABLE_XDR_FALSE,
-	CASE_NAMESPACE_SET_ENABLE_XDR_TRUE,
 
 	// Namespace secondary-index options:
 	// Deprecated:
@@ -786,50 +758,41 @@ typedef enum {
 
 	// XDR options:
 	// Normally visible, in canonical configuration file order:
-	CASE_XDR_ENABLE_XDR,
+	CASE_XDR_DC_BEGIN,
+	// Normally hidden:
 	CASE_XDR_ENABLE_CHANGE_NOTIFICATION,
-	CASE_XDR_DIGESTLOG_PATH,
-	CASE_XDR_DATACENTER_BEGIN,
-	// Normally hidden:
-	CASE_XDR_CLIENT_THREADS,
-	CASE_XDR_COMPRESSION_THRESHOLD,
-	CASE_XDR_DELETE_SHIPPING_ENABLED,
-	CASE_XDR_DIGESTLOG_IOWAIT_MS,
-	CASE_XDR_FORWARD_XDR_WRITES,
-	CASE_XDR_HOTKEY_TIME_MS,
-	CASE_XDR_INFO_PORT,
-	CASE_XDR_INFO_TIMEOUT,
-	CASE_XDR_MAX_SHIP_BANDWIDTH,
-	CASE_XDR_MAX_SHIP_THROUGHPUT,
-	CASE_XDR_MIN_DIGESTLOG_FREE_PCT,
-	CASE_XDR_NSUP_DELETES_ENABLED,
-	CASE_XDR_READ_THREADS,
-	CASE_XDR_SHIP_BINS,
-	CASE_XDR_SHIP_DELAY,
-	CASE_XDR_SHIPPING_ENABLED,
-	CASE_XDR_WRITE_TIMEOUT,
 
-	// XDR (remote) datacenter options:
+	// XDR (remote) DC options:
 	// Normally visible, in canonical configuration file order:
-	CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT,
+	CASE_XDR_DC_NODE_ADDRESS_PORT,
+	CASE_XDR_DC_NAMESPACE,
 	// Normally hidden:
-	CASE_XDR_DATACENTER_AUTH_MODE,
-	CASE_XDR_DATACENTER_DC_CONNECTIONS,
-	CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS,
-	CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP,
-	CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE,
-	CASE_XDR_DATACENTER_DC_SHIP_BINS,
-	CASE_XDR_DATACENTER_DC_TYPE,
-	CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES,
-	CASE_XDR_DATACENTER_HTTP_URL,
-	CASE_XDR_DATACENTER_HTTP_VERSION,
-	CASE_XDR_DATACENTER_TLS_NAME,
-	CASE_XDR_DATACENTER_TLS_NODE,
+	CASE_XDR_DC_AUTH_MODE,
+	CASE_XDR_DC_NON_AEROSPIKE,
+	CASE_XDR_DC_SECURITY_CONFIG_FILE,
+	CASE_XDR_DC_TLS_NAME,
+	CASE_XDR_DC_USE_ALTERNATE_ADDRESS,
 
-	// XDR datacenter authentication mode (value tokens):
-	CASE_XDR_DATACENTER_AUTH_MODE_INTERNAL,
-	CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL,
-	CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL_INSECURE,
+	// XDR DC authentication mode (value tokens):
+	CASE_XDR_DC_AUTH_MODE_INTERNAL,
+	CASE_XDR_DC_AUTH_MODE_EXTERNAL,
+	CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE,
+
+	// XDR DC namespace options:
+	CASE_XDR_DC_NAMESPACE_DELAY_MS,
+	CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION,
+	CASE_XDR_DC_NAMESPACE_FORWARD,
+	CASE_XDR_DC_NAMESPACE_HOT_KEY_MS,
+	CASE_XDR_DC_NAMESPACE_IGNORE_BIN,
+	CASE_XDR_DC_NAMESPACE_IGNORE_EXPUNGES,
+	CASE_XDR_DC_NAMESPACE_IGNORE_SET,
+	CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT,
+	CASE_XDR_DC_NAMESPACE_SHIP_BIN,
+	CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES,
+	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS,
+	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS,
+	CASE_XDR_DC_NAMESPACE_SHIP_SET,
+	CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT,
 
 	// Used parsing separate file, but share this enum:
 
@@ -1131,12 +1094,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "memory-size",					CASE_NAMESPACE_MEMORY_SIZE },
 		{ "default-ttl",					CASE_NAMESPACE_DEFAULT_TTL },
 		{ "storage-engine",					CASE_NAMESPACE_STORAGE_ENGINE_BEGIN },
-		{ "enable-xdr",						CASE_NAMESPACE_ENABLE_XDR },
-		{ "sets-enable-xdr",				CASE_NAMESPACE_SETS_ENABLE_XDR },
-		{ "xdr-remote-datacenter",			CASE_NAMESPACE_XDR_REMOTE_DATACENTER },
-		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
-		{ "allow-nonxdr-writes",			CASE_NAMESPACE_ALLOW_NONXDR_WRITES },
-		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
 		{ "allow-ttl-without-nsup",			CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP },
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
@@ -1167,6 +1124,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "prefer-uniform-balance",			CASE_NAMESPACE_PREFER_UNIFORM_BALANCE },
 		{ "rack-id",						CASE_NAMESPACE_RACK_ID },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
+		{ "reject-non-xdr-writes",			CASE_NAMESPACE_REJECT_NON_XDR_WRITES },
+		{ "reject-xdr-writes",				CASE_NAMESPACE_REJECT_XDR_WRITES },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
 		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
 		{ "geo2dsphere-within",				CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN },
@@ -1180,6 +1139,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
 		{ "truncate-threads",				CASE_NAMESPACE_TRUNCATE_THREADS },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
+		{ "xdr-tomb-raider-period",			CASE_NAMESPACE_XDR_TOMB_RAIDER_PERIOD },
+		{ "xdr-tomb-raider-threads",		CASE_NAMESPACE_XDR_TOMB_RAIDER_THREADS },
 		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
 		{ "allow-versions",					CASE_NAMESPACE_ALLOW_VERSIONS },
 		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
@@ -1319,19 +1280,12 @@ const cfg_opt NAMESPACE_STORAGE_ENCRYPTION_OPTS[] = {
 
 const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "set-disable-eviction",			CASE_NAMESPACE_SET_DISABLE_EVICTION },
-		{ "set-enable-xdr",					CASE_NAMESPACE_SET_ENABLE_XDR },
 		{ "set-stop-writes-count",			CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
 		{ "set-evict-hwm-count",			CASE_NAMESPACE_SET_EVICT_HWM_COUNT },
 		{ "set-evict-hwm-pct",				CASE_NAMESPACE_SET_EVICT_HWM_PCT },
 		{ "set-stop-write-count",			CASE_NAMESPACE_SET_STOP_WRITE_COUNT },
 		{ "set-stop-write-pct",				CASE_NAMESPACE_SET_STOP_WRITE_PCT },
 		{ "}",								CASE_CONTEXT_END }
-};
-
-const cfg_opt NAMESPACE_SET_ENABLE_XDR_OPTS[] = {
-		{ "use-default",					CASE_NAMESPACE_SET_ENABLE_XDR_USE_DEFAULT },
-		{ "false",							CASE_NAMESPACE_SET_ENABLE_XDR_FALSE },
-		{ "true",							CASE_NAMESPACE_SET_ENABLE_XDR_TRUE }
 };
 
 const cfg_opt NAMESPACE_SI_OPTS[] = {
@@ -1418,53 +1372,44 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 };
 
 const cfg_opt XDR_OPTS[] = {
-		{ "{",								CASE_CONTEXT_BEGIN },
-		{ "enable-xdr",						CASE_XDR_ENABLE_XDR },
-		{ "enable-change-notification",		CASE_XDR_ENABLE_CHANGE_NOTIFICATION },
-		{ "xdr-digestlog-path",				CASE_XDR_DIGESTLOG_PATH },
-		{ "datacenter",						CASE_XDR_DATACENTER_BEGIN },
-		{ "xdr-client-threads",				CASE_XDR_CLIENT_THREADS },
-		{ "xdr-compression-threshold",		CASE_XDR_COMPRESSION_THRESHOLD },
-		{ "xdr-delete-shipping-enabled",	CASE_XDR_DELETE_SHIPPING_ENABLED },
-		{ "xdr-digestlog-iowait-ms",		CASE_XDR_DIGESTLOG_IOWAIT_MS },
-		{ "forward-xdr-writes",				CASE_XDR_FORWARD_XDR_WRITES },
-		{ "xdr-hotkey-time-ms",				CASE_XDR_HOTKEY_TIME_MS },
-		{ "xdr-info-port",					CASE_XDR_INFO_PORT },
-		{ "xdr-info-timeout",				CASE_XDR_INFO_TIMEOUT },
-		{ "xdr-max-ship-bandwidth",			CASE_XDR_MAX_SHIP_BANDWIDTH },
-		{ "xdr-max-ship-throughput",		CASE_XDR_MAX_SHIP_THROUGHPUT },
-		{ "xdr-min-digestlog-free-pct",		CASE_XDR_MIN_DIGESTLOG_FREE_PCT },
-		{ "xdr-nsup-deletes-enabled",		CASE_XDR_NSUP_DELETES_ENABLED },
-		{ "xdr-read-threads",				CASE_XDR_READ_THREADS},
-		{ "xdr-ship-bins",					CASE_XDR_SHIP_BINS },
-		{ "xdr-ship-delay",					CASE_XDR_SHIP_DELAY }, // hidden
-		{ "xdr-shipping-enabled",			CASE_XDR_SHIPPING_ENABLED },
-		{ "xdr-write-timeout",				CASE_XDR_WRITE_TIMEOUT },
+		{ "dc",								CASE_XDR_DC_BEGIN },
+		{ "enable-change-notification",		CASE_XDR_ENABLE_CHANGE_NOTIFICATION},
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt XDR_DATACENTER_OPTS[] = {
-		{ "{",								CASE_CONTEXT_BEGIN },
-		{ "auth-mode",						CASE_XDR_DATACENTER_AUTH_MODE },
-		{ "dc-connections",					CASE_XDR_DATACENTER_DC_CONNECTIONS },
-		{ "dc-connections-idle-ms",			CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS },
-		{ "dc-int-ext-ipmap",				CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP },
-		{ "dc-node-address-port",			CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT },
-		{ "dc-security-config-file",		CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE },
-		{ "dc-ship-bins",					CASE_XDR_DATACENTER_DC_SHIP_BINS },
-		{ "dc-type",						CASE_XDR_DATACENTER_DC_TYPE },
-		{ "dc-use-alternate-services",		CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES },
-		{ "http-url",						CASE_XDR_DATACENTER_HTTP_URL },
-		{ "http-version",					CASE_XDR_DATACENTER_HTTP_VERSION },
-		{ "tls-name",						CASE_XDR_DATACENTER_TLS_NAME },
-		{ "tls-node",						CASE_XDR_DATACENTER_TLS_NODE },
+const cfg_opt XDR_DC_OPTS[] = {
+		{ "node-address-port",				CASE_XDR_DC_NODE_ADDRESS_PORT },
+		{ "namespace",						CASE_XDR_DC_NAMESPACE },
+		{ "auth-mode",						CASE_XDR_DC_AUTH_MODE },
+		{ "non-aerospike",					CASE_XDR_DC_NON_AEROSPIKE},
+		{ "security-config-file",			CASE_XDR_DC_SECURITY_CONFIG_FILE },
+		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
+		{ "use-alternate-access-address",	CASE_XDR_DC_USE_ALTERNATE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt XDR_DATACENTER_AUTH_MODE_OPTS[] = {
-		{ "internal",						CASE_XDR_DATACENTER_AUTH_MODE_INTERNAL },
-		{ "external",						CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL },
-		{ "external-insecure",				CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL_INSECURE }
+const cfg_opt XDR_DC_AUTH_MODE_OPTS[] = {
+		{ "internal",						CASE_XDR_DC_AUTH_MODE_INTERNAL },
+		{ "external",						CASE_XDR_DC_AUTH_MODE_EXTERNAL },
+		{ "external-insecure",				CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE }
+};
+
+const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
+		{ "delay-ms",						CASE_XDR_DC_NAMESPACE_DELAY_MS },
+		{ "enable-compression",				CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION },
+		{ "forward",						CASE_XDR_DC_NAMESPACE_FORWARD },
+		{ "hot-key-ms",						CASE_XDR_DC_NAMESPACE_HOT_KEY_MS },
+		{ "ignore-bin",						CASE_XDR_DC_NAMESPACE_IGNORE_BIN },
+		{ "ignore-expunges", 				CASE_XDR_DC_NAMESPACE_IGNORE_EXPUNGES },
+		{ "ignore-set",						CASE_XDR_DC_NAMESPACE_IGNORE_SET },
+		{ "max-throughput", 				CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT },
+		{ "ship-bin",						CASE_XDR_DC_NAMESPACE_SHIP_BIN },
+		{ "ship-nsup-deletes",				CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES },
+		{ "ship-only-specified-bins",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS },
+		{ "ship-only-specified-sets",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS },
+		{ "ship-set",						CASE_XDR_DC_NAMESPACE_SHIP_SET },
+		{ "transaction-queue-limit",		CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT },
+		{ "}",								CASE_CONTEXT_END }
 };
 
 // Used parsing separate file, but share cfg_case_id enum.
@@ -1474,7 +1419,6 @@ const cfg_opt XDR_SEC_GLOBAL_OPTS[] = {
 };
 
 const cfg_opt XDR_SEC_CREDENTIALS_OPTS[] = {
-		{ "{",								CASE_CONTEXT_BEGIN },
 		{ "username",						XDR_SEC_CASE_CREDENTIALS_USERNAME },
 		{ "password",						XDR_SEC_CASE_CREDENTIALS_PASSWORD },
 		{ "}",								CASE_CONTEXT_END }
@@ -1507,7 +1451,6 @@ const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_
 const int NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS	= sizeof(NAMESPACE_STORAGE_COMPRESSION_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS		= sizeof(NAMESPACE_STORAGE_ENCRYPTION_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_opt);
-const int NUM_NAMESPACE_SET_ENABLE_XDR_OPTS			= sizeof(NAMESPACE_SET_ENABLE_XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SI_OPTS						= sizeof(NAMESPACE_SI_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SINDEX_OPTS					= sizeof(NAMESPACE_SINDEX_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS		= sizeof(NAMESPACE_GEO2DSPHERE_WITHIN_OPTS) / sizeof(cfg_opt);
@@ -1518,8 +1461,9 @@ const int NUM_SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS	= sizeof(SECURITY_LDAP_TOKEN_
 const int NUM_SECURITY_LOG_OPTS						= sizeof(SECURITY_LOG_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_OPTS								= sizeof(XDR_OPTS) / sizeof(cfg_opt);
-const int NUM_XDR_DATACENTER_OPTS					= sizeof(XDR_DATACENTER_OPTS) / sizeof(cfg_opt);
-const int NUM_XDR_DATACENTER_AUTH_MODE_OPTS			= sizeof(XDR_DATACENTER_AUTH_MODE_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_DC_OPTS							= sizeof(XDR_DC_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_DC_NAMESPACE_OPTS					= sizeof(XDR_DC_NAMESPACE_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_DC_AUTH_MODE_OPTS					= sizeof(XDR_DC_AUTH_MODE_OPTS) / sizeof(cfg_opt);
 
 // Used parsing separate file, but share cfg_case_id enum.
 
@@ -1539,19 +1483,6 @@ const char* DEVICE_SCHEDULER_MODES[] = {
 };
 
 const int NUM_DEVICE_SCHEDULER_MODES = sizeof(DEVICE_SCHEDULER_MODES) / sizeof(const char*);
-
-const char* XDR_DESTINATION_TYPES[] = {
-		XDR_CFG_DEST_AEROSPIKE,		// remote Aerospike cluster
-		XDR_CFG_DEST_HTTP			// HTTP server
-};
-
-const int NUM_XDR_DESTINATION_TYPES = sizeof(XDR_DESTINATION_TYPES) / sizeof(const char*);
-
-const char* XDR_HTTP_VERSION_TYPES[] = {
-		XDR_CFG_HTTP_VERSION_1
-};
-
-const int NUM_XDR_HTTP_VERSION_TYPES = sizeof(XDR_HTTP_VERSION_TYPES) / sizeof(const char*);
 
 
 //==========================================================
@@ -1579,7 +1510,7 @@ typedef enum {
 	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
-	XDR, XDR_DATACENTER,
+	XDR, XDR_DC, XDR_DC_NAMESPACE,
 	// Used parsing separate file, but shares this enum:
 	XDR_SEC_CREDENTIALS,
 	// Must be last, use for sanity-checking:
@@ -1595,7 +1526,7 @@ const char* CFG_PARSER_STATES[] = {
 		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
 		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG", "SECURITY_SYSLOG",
-		"XDR", "XDR_DATACENTER",
+		"XDR", "XDR_DC", "XDR_DC_NAMESPACE",
 		// Used parsing separate file, but shares corresponding enum:
 		"XDR_SEC_CREDENTIALS"
 };
@@ -1677,6 +1608,9 @@ cfg_find_tok(const char* tok, const cfg_opt opts[], int num_opts)
 // Value parsing and sanity-checking utilities.
 //
 
+// We won't parse lines longer than this.
+#define MAX_LINE_SIZE 1024
+
 void
 cfg_renamed_name_tok(const cfg_line* p_line, const char* new_tok)
 {
@@ -1728,19 +1662,8 @@ cfg_obsolete(const cfg_line* p_line, const char* message)
 }
 
 char*
-cfg_strdup_no_checks(const cfg_line* p_line)
-{
-	return cf_strdup(p_line->val_tok_1);
-}
-
-char*
-cfg_strdup_val2_no_checks(const cfg_line* p_line)
-{
-	return cf_strdup(p_line->val_tok_2);
-}
-
-char*
-cfg_strdup_anyval(const cfg_line* p_line, const char* val_tok, bool is_required)
+cfg_strdup_anyval(const cfg_line* p_line, const char* val_tok, size_t max_size,
+		bool is_required)
 {
 	if (val_tok[0] == 0) {
 		if (is_required) {
@@ -1752,19 +1675,38 @@ cfg_strdup_anyval(const cfg_line* p_line, const char* val_tok, bool is_required)
 		return NULL;
 	}
 
+	if (max_size < MAX_LINE_SIZE && strlen(val_tok) >= max_size) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be < %lu characters long, not %s",
+				p_line->num, p_line->name_tok, max_size, val_tok);
+	}
+
 	return cf_strdup(val_tok);
 }
 
 char*
-cfg_strdup(const cfg_line* p_line, bool is_required)
+cfg_strdup(const cfg_line* p_line, size_t max_size)
 {
-	return cfg_strdup_anyval(p_line, p_line->val_tok_1, is_required);
+	return cfg_strdup_anyval(p_line, p_line->val_tok_1, max_size, true);
 }
 
 char*
-cfg_strdup_val2(const cfg_line* p_line, bool is_required)
+cfg_strdup_no_checks(const cfg_line* p_line)
 {
-	return cfg_strdup_anyval(p_line, p_line->val_tok_2, is_required);
+	return cfg_strdup_anyval(p_line, p_line->val_tok_1, MAX_LINE_SIZE, true);
+}
+
+char*
+cfg_strdup_val2_no_checks(const cfg_line* p_line, bool is_required)
+{
+	return cfg_strdup_anyval(p_line, p_line->val_tok_2, MAX_LINE_SIZE,
+			is_required);
+}
+
+char*
+cfg_strdup_val3_no_checks(const cfg_line* p_line, bool is_required)
+{
+	return cfg_strdup_anyval(p_line, p_line->val_tok_3, MAX_LINE_SIZE,
+			is_required);
 }
 
 char*
@@ -1772,7 +1714,7 @@ cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
 {
 	for (int i = 0; i < num_toks; i++) {
 		if (strcmp(p_line->val_tok_1, toks[i]) == 0) {
-			return cfg_strdup_no_checks(p_line);
+			return cf_strdup(p_line->val_tok_1);
 		}
 	}
 
@@ -2123,6 +2065,21 @@ cfg_u32_power_of_2(const cfg_line* p_line, uint32_t min, uint32_t max)
 	return value;
 }
 
+uint32_t
+cfg_u32_multiple_of(const cfg_line* p_line, uint32_t factor)
+{
+	cf_assert(factor != 0, AS_CFG, "can't ask for multiple of 0");
+
+	uint32_t value = cfg_u32_no_checks(p_line);
+
+	if (value % factor != 0) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be an exact multiple of %u, not %u",
+				p_line->num, p_line->name_tok, factor, value);
+	}
+
+	return value;
+}
+
 uint16_t
 cfg_u16_no_checks(const cfg_line* p_line)
 {
@@ -2240,12 +2197,6 @@ cfg_port_val2(const cfg_line* p_line)
 	return (cf_ip_port)cfg_int_val2(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
 }
 
-cf_ip_port
-cfg_port_val3(const cfg_line* p_line)
-{
-	return (cf_ip_port)cfg_int_val3(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
-}
-
 //------------------------------------------------
 // Constants used in parsing.
 //
@@ -2266,17 +2217,17 @@ as_config_init(const char* config_file)
 	// Set the service context defaults. Values parsed from the config file will
 	// override the defaults.
 	cfg_set_defaults();
-	xdr_config_defaults();
 
 	FILE* FD;
-	char iobuf[256];
+	char iobuf[MAX_LINE_SIZE];
 	int line_num = 0;
 	cfg_parser_state state;
 
 	cfg_parser_state_init(&state);
 
 	as_namespace* ns = NULL;
-	xdr_dest_config *cur_dest_cfg = NULL;
+	as_xdr_dc_cfg* dc_cfg = NULL;
+	as_xdr_dc_ns_cfg* dc_ns_cfg = NULL;
 	cf_tls_spec* tls_spec = NULL;
 	cf_log_sink* sink = NULL;
 	as_set* p_set = NULL; // local variable used for set initialization
@@ -2363,8 +2314,8 @@ as_config_init(const char* config_file)
 				cfg_begin_context(&state, SECURITY);
 				break;
 			case CASE_XDR_BEGIN:
-				g_xcfg.xdr_section_configured = true;
 				cfg_enterprise_only(&line);
+				c->xdr_cfg.xdr_configured = true;
 				cfg_begin_context(&state, XDR);
 				break;
 			case CASE_NOT_FOUND:
@@ -2462,7 +2413,7 @@ as_config_init(const char* config_file)
 				c->info_hist_enabled = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_FEATURE_KEY_FILE:
-				c->feature_key_file = cfg_strdup(&line, true);
+				c->feature_key_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_HIST_TRACK_BACK:
 				c->hist_track_back = cfg_u32_no_checks(&line);
@@ -2472,7 +2423,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_HIST_TRACK_THRESHOLDS:
 				c->hist_track_thresholds = cfg_strdup_no_checks(&line);
-				// TODO - if config key present but no value (not even space) failure mode is bad...
 				break;
 			case CASE_SERVICE_INFO_THREADS:
 				c->n_info_threads = cfg_u32(&line, 1, MAX_INFO_THREADS);
@@ -3133,25 +3083,6 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
-			case CASE_NAMESPACE_ENABLE_XDR:
-				cfg_enterprise_only(&line);
-				ns->enable_xdr = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_SETS_ENABLE_XDR:
-				ns->sets_enable_xdr = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_FORWARD_XDR_WRITES:
-				ns->ns_forward_xdr_writes = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
-				xdr_cfg_associate_datacenter(cfg_strdup(&line, true), ns->ix);
-				break;
-			case CASE_NAMESPACE_ALLOW_NONXDR_WRITES:
-				ns->ns_allow_nonxdr_writes = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_ALLOW_XDR_WRITES:
-				ns->ns_allow_xdr_writes = cfg_bool(&line);
-				break;
 			case CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP:
 				ns->allow_ttl_without_nsup = cfg_bool(&line);
 				break;
@@ -3286,6 +3217,12 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_REJECT_NON_XDR_WRITES:
+				ns->reject_non_xdr_writes = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_REJECT_XDR_WRITES:
+				ns->reject_xdr_writes = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_SET_BEGIN:
 				p_set = cfg_add_set(ns);
 				cfg_strcpy(&line, p_set->name, AS_SET_NAME_MAX_SIZE);
@@ -3344,6 +3281,12 @@ as_config_init(const char* config_file)
 					cfg_unknown_val_tok_1(&line);
 					break;
 				}
+				break;
+			case CASE_NAMESPACE_XDR_TOMB_RAIDER_PERIOD:
+				ns->xdr_tomb_raider_period = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_XDR_TOMB_RAIDER_THREADS:
+				ns->n_xdr_tomb_raider_threads = cfg_u32(&line, 1, 128);
 				break;
 			case CASE_NAMESPACE_DISABLE_NSUP:
 				cfg_obsolete(&line, "please set namespace-context 'nsup-period' to 0 to disable nsup");
@@ -3404,7 +3347,7 @@ as_config_init(const char* config_file)
 		case NAMESPACE_INDEX_TYPE_PMEM:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_PMEM_OPTS, NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS)) {
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT:
-				cfg_add_xmem_mount(ns, cfg_strdup(&line, true));
+				cfg_add_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT:
 				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
@@ -3431,7 +3374,7 @@ as_config_init(const char* config_file)
 		case NAMESPACE_INDEX_TYPE_FLASH:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_FLASH_OPTS, NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS)) {
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT:
-				cfg_add_xmem_mount(ns, cfg_strdup(&line, true));
+				cfg_add_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT:
 				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
@@ -3460,7 +3403,7 @@ as_config_init(const char* config_file)
 		case NAMESPACE_STORAGE_PMEM:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_PMEM_OPTS, NUM_NAMESPACE_STORAGE_PMEM_OPTS)) {
 			case CASE_NAMESPACE_STORAGE_PMEM_FILE:
-				cfg_add_storage_file(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
+				cfg_add_storage_file(ns, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_FILESIZE:
 				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
@@ -3528,7 +3471,7 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE:
-				ns->storage_encryption_key_file = cfg_strdup(&line, true);
+				ns->storage_encryption_key_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
@@ -3573,10 +3516,10 @@ as_config_init(const char* config_file)
 		case NAMESPACE_STORAGE_DEVICE:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_DEVICE_OPTS, NUM_NAMESPACE_STORAGE_DEVICE_OPTS)) {
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEVICE:
-				cfg_add_storage_device(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
+				cfg_add_storage_device(ns, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILE:
-				cfg_add_storage_file(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
+				cfg_add_storage_file(ns, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE:
 				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
@@ -3670,7 +3613,7 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE:
 				cfg_enterprise_only(&line);
-				ns->storage_encryption_key_file = cfg_strdup(&line, true);
+				ns->storage_encryption_key_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
@@ -3747,23 +3690,6 @@ as_config_init(const char* config_file)
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SET_OPTS, NUM_NAMESPACE_SET_OPTS)) {
 			case CASE_NAMESPACE_SET_DISABLE_EVICTION:
 				DISABLE_SET_EVICTION(p_set, cfg_bool(&line));
-				break;
-			case CASE_NAMESPACE_SET_ENABLE_XDR:
-				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_SET_ENABLE_XDR_OPTS, NUM_NAMESPACE_SET_ENABLE_XDR_OPTS)) {
-				case CASE_NAMESPACE_SET_ENABLE_XDR_USE_DEFAULT:
-					p_set->enable_xdr = AS_SET_ENABLE_XDR_DEFAULT;
-					break;
-				case CASE_NAMESPACE_SET_ENABLE_XDR_FALSE:
-					p_set->enable_xdr = AS_SET_ENABLE_XDR_FALSE;
-					break;
-				case CASE_NAMESPACE_SET_ENABLE_XDR_TRUE:
-					p_set->enable_xdr = AS_SET_ENABLE_XDR_TRUE;
-					break;
-				case CASE_NOT_FOUND:
-				default:
-					cfg_unknown_val_tok_1(&line);
-					break;
-				}
 				break;
 			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
 				p_set->stop_writes_count = cfg_u64_no_checks(&line);
@@ -3934,31 +3860,31 @@ as_config_init(const char* config_file)
 				c->sec_cfg.ldap_polling_period = cfg_seconds(&line, LDAP_POLLING_PERIOD_MIN, LDAP_POLLING_PERIOD_MAX);
 				break;
 			case CASE_SECURITY_LDAP_QUERY_BASE_DN:
-				c->sec_cfg.ldap_query_base_dn = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_query_base_dn = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SECURITY_LDAP_QUERY_USER_DN:
-				c->sec_cfg.ldap_query_user_dn = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_query_user_dn = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SECURITY_LDAP_QUERY_USER_PASSWORD_FILE:
-				c->sec_cfg.ldap_query_user_password_file = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_query_user_password_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SECURITY_LDAP_ROLE_QUERY_BASE_DN:
-				c->sec_cfg.ldap_role_query_base_dn = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_role_query_base_dn = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SECURITY_LDAP_ROLE_QUERY_PATTERN:
-				cfg_add_ldap_role_query_pattern(cfg_strdup(&line, true));
+				cfg_add_ldap_role_query_pattern(cfg_strdup_no_checks(&line));
 				break;
 			case CASE_SECURITY_LDAP_ROLE_QUERY_SEARCH_OU:
 				c->sec_cfg.ldap_role_query_search_ou = cfg_bool(&line);
 				break;
 			case CASE_SECURITY_LDAP_SERVER:
-				c->sec_cfg.ldap_server = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_server = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SECURITY_LDAP_SESSION_TTL:
 				c->sec_cfg.ldap_session_ttl = cfg_seconds(&line, LDAP_SESSION_TTL_MIN, LDAP_SESSION_TTL_MAX);
 				break;
 			case CASE_SECURITY_LDAP_TLS_CA_FILE:
-				c->sec_cfg.ldap_tls_ca_file = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_tls_ca_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SECURITY_LDAP_TOKEN_HASH_METHOD:
 				switch (cfg_find_tok(line.val_tok_1, SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS, NUM_SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS)) {
@@ -3975,10 +3901,10 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_SECURITY_LDAP_USER_DN_PATTERN:
-				c->sec_cfg.ldap_user_dn_pattern = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_user_dn_pattern = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SECURITY_LDAP_USER_QUERY_PATTERN:
-				c->sec_cfg.ldap_user_query_pattern = cfg_strdup(&line, true);
+				c->sec_cfg.ldap_user_query_pattern = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -4058,73 +3984,12 @@ as_config_init(const char* config_file)
 		//
 		case XDR:
 			switch (cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
-			case CASE_CONTEXT_BEGIN:
-				// Allow open brace on its own line to begin this context.
-				break;
-			case CASE_XDR_ENABLE_XDR:
-				g_xcfg.xdr_global_enabled = cfg_bool(&line);
+			case CASE_XDR_DC_BEGIN:
+				dc_cfg = as_xdr_startup_create_dc(line.val_tok_1);
+				cfg_begin_context(&state, XDR_DC);
 				break;
 			case CASE_XDR_ENABLE_CHANGE_NOTIFICATION:
-				g_xcfg.xdr_enable_change_notification = cfg_bool(&line);
-				break;
-			case CASE_XDR_DIGESTLOG_PATH:
-				g_xcfg.xdr_digestlog_path = cfg_strdup(&line, true);
-				g_xcfg.xdr_digestlog_file_size = cfg_u64_val2_no_checks(&line);
-				break;
-			case CASE_XDR_DATACENTER_BEGIN:
-				cur_dest_cfg = xdr_cfg_add_datacenter(cfg_strdup(&line, true));
-				cfg_begin_context(&state, XDR_DATACENTER);
-				break;
-			case CASE_XDR_CLIENT_THREADS:
-				g_xcfg.xdr_client_threads = cfg_u32(&line, 1, XDR_MAX_CLIENT_THREADS);
-				break;
-			case CASE_XDR_COMPRESSION_THRESHOLD:
-				g_xcfg.xdr_compression_threshold = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_DELETE_SHIPPING_ENABLED:
-				g_xcfg.xdr_delete_shipping_enabled = cfg_bool(&line);
-				break;
-			case CASE_XDR_DIGESTLOG_IOWAIT_MS:
-				g_xcfg.xdr_digestlog_iowait_ms = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_FORWARD_XDR_WRITES:
-				g_xcfg.xdr_forward_xdrwrites = cfg_bool(&line);
-				break;
-			case CASE_XDR_HOTKEY_TIME_MS:
-				g_xcfg.xdr_hotkey_time_ms = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_INFO_PORT:
-				g_xcfg.xdr_info_port = cfg_port(&line);
-				break;
-			case CASE_XDR_INFO_TIMEOUT:
-				g_xcfg.xdr_info_request_timeout_ms = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_MAX_SHIP_BANDWIDTH:
-				g_xcfg.xdr_max_ship_bandwidth = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_MAX_SHIP_THROUGHPUT:
-				g_xcfg.xdr_max_ship_throughput = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_MIN_DIGESTLOG_FREE_PCT:
-				g_xcfg.xdr_min_dlog_free_pct = cfg_u32(&line, 0, 100);
-				break;
-			case CASE_XDR_NSUP_DELETES_ENABLED:
-				g_xcfg.xdr_nsup_deletes_enabled = cfg_bool(&line);
-				break;
-			case CASE_XDR_READ_THREADS:
-				g_xcfg.xdr_read_threads = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_SHIP_BINS:
-				g_xcfg.xdr_ship_bins = cfg_bool(&line);
-				break;
-			case CASE_XDR_SHIP_DELAY:
-				g_xcfg.xdr_internal_shipping_delay = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_SHIPPING_ENABLED:
-				g_xcfg.xdr_shipping_enabled = cfg_bool(&line);
-				break;
-			case CASE_XDR_WRITE_TIMEOUT:
-				g_xcfg.xdr_write_timeout = cfg_u32_no_checks(&line);
+				c->xdr_cfg.change_notification_enabled = cfg_bool(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -4137,29 +4002,28 @@ as_config_init(const char* config_file)
 			break;
 
 		//----------------------------------------
-		// Parse xdr::datacenter context items.
+		// Parse xdr::dc context items.
 		//
-		case XDR_DATACENTER:
-			switch (cfg_find_tok(line.name_tok, XDR_DATACENTER_OPTS, NUM_XDR_DATACENTER_OPTS)) {
-			case CASE_CONTEXT_BEGIN:
-				// Allow open brace on its own line to begin this context.
+		case XDR_DC:
+			switch (cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
+			case CASE_XDR_DC_NODE_ADDRESS_PORT:
+				as_xdr_dc_add_seed(dc_cfg, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, true), cfg_strdup_val3_no_checks(&line, false));
 				break;
-			case CASE_XDR_DATACENTER_DC_TYPE:
-				cur_dest_cfg->dc_type = cfg_strdup_one_of(&line, XDR_DESTINATION_TYPES, NUM_XDR_DESTINATION_TYPES);
+			case CASE_XDR_DC_NAMESPACE:
+				dc_ns_cfg = as_xdr_startup_create_dc_ns_cfg(line.val_tok_1);
+				cf_vector_append_ptr(dc_cfg->ns_cfg_v, dc_ns_cfg);
+				cfg_begin_context(&state, XDR_DC_NAMESPACE);
 				break;
-			case CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT:
-				xdr_cfg_add_node_addr_port(cur_dest_cfg, cfg_strdup(&line, true), cfg_port_val2(&line));
-				break;
-			case CASE_XDR_DATACENTER_AUTH_MODE:
-				switch (cfg_find_tok(line.val_tok_1, XDR_DATACENTER_AUTH_MODE_OPTS, NUM_XDR_DATACENTER_AUTH_MODE_OPTS)) {
-				case CASE_XDR_DATACENTER_AUTH_MODE_INTERNAL:
-					cur_dest_cfg->aero.auth_mode = XDR_AUTH_MODE_INTERNAL;
+			case CASE_XDR_DC_AUTH_MODE:
+				switch (cfg_find_tok(line.val_tok_1, XDR_DC_AUTH_MODE_OPTS, NUM_XDR_DC_AUTH_MODE_OPTS)) {
+				case CASE_XDR_DC_AUTH_MODE_INTERNAL:
+					dc_cfg->auth_mode = XDR_AUTH_INTERNAL;
 					break;
-				case CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL:
-					cur_dest_cfg->aero.auth_mode = XDR_AUTH_MODE_EXTERNAL;
+				case CASE_XDR_DC_AUTH_MODE_EXTERNAL:
+					dc_cfg->auth_mode = XDR_AUTH_EXTERNAL;
 					break;
-				case CASE_XDR_DATACENTER_AUTH_MODE_EXTERNAL_INSECURE:
-					cur_dest_cfg->aero.auth_mode = XDR_AUTH_MODE_EXTERNAL_INSECURE;
+				case CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE:
+					dc_cfg->auth_mode = XDR_AUTH_EXTERNAL_INSECURE;
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -4167,38 +4031,77 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
-			case CASE_XDR_DATACENTER_DC_CONNECTIONS:
-				cur_dest_cfg->aero.dc_connections = cfg_u32_no_checks(&line);
+			case CASE_XDR_DC_NON_AEROSPIKE:
+				dc_cfg->non_aerospike = cfg_bool(&line);
 				break;
-			case CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS:
-				cur_dest_cfg->aero.dc_connections_idle_ms = cfg_u32_no_checks(&line);
+			case CASE_XDR_DC_SECURITY_CONFIG_FILE:
+				dc_cfg->security_cfg.file = cfg_strdup_no_checks(&line);
+				xdr_read_security_configfile(&dc_cfg->security_cfg);
 				break;
-			case CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP:
-				xdr_cfg_add_int_ext_mapping(&cur_dest_cfg->aero, cfg_strdup(&line, true), cfg_strdup_val2(&line, true));
+			case CASE_XDR_DC_TLS_NAME:
+				dc_cfg->tls_our_name = cfg_strdup_no_checks(&line);
 				break;
-			case CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE:
-				cur_dest_cfg->dc_security_cfg.sec_config_file = cfg_strdup(&line, true);
-				break;
-			case CASE_XDR_DATACENTER_DC_SHIP_BINS:
-				cur_dest_cfg->dc_ship_bins = cfg_bool(&line);
-				break;
-			case CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES:
-				cur_dest_cfg->aero.dc_use_alternate_services = cfg_bool(&line);
-				break;
-			case CASE_XDR_DATACENTER_HTTP_URL:
-				xdr_cfg_add_http_url(cur_dest_cfg, cfg_strdup(&line, true));
-				break;
-			case CASE_XDR_DATACENTER_HTTP_VERSION:
-				cur_dest_cfg->http.version_str = cfg_strdup_one_of(&line, XDR_HTTP_VERSION_TYPES, NUM_XDR_HTTP_VERSION_TYPES);
-				break;
-			case CASE_XDR_DATACENTER_TLS_NAME:
-				cur_dest_cfg->dc_tls_spec_name = cfg_strdup_no_checks(&line);
-				break;
-			case CASE_XDR_DATACENTER_TLS_NODE:
-				xdr_cfg_add_tls_node(cur_dest_cfg, cfg_strdup(&line, true), cfg_strdup_val2(&line, true), cfg_port_val3(&line));
+			case CASE_XDR_DC_USE_ALTERNATE_ADDRESS:
+				dc_cfg->use_alternate_access_address = cfg_bool(&line);
 				break;
 			case CASE_CONTEXT_END:
-				g_dc_count++;
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse xdr::dc::namespace context items.
+		//
+		case XDR_DC_NAMESPACE:
+			switch (cfg_find_tok(line.name_tok, XDR_DC_NAMESPACE_OPTS, NUM_XDR_DC_NAMESPACE_OPTS)) {
+			case CASE_XDR_DC_NAMESPACE_DELAY_MS:
+				dc_ns_cfg->delay_ms = cfg_u32(&line, 0, AS_XDR_MAX_HOT_KEY_MS);
+				break;
+			case CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION:
+				dc_ns_cfg->compression_enabled = cfg_bool(&line);
+				break;
+			case CASE_XDR_DC_NAMESPACE_FORWARD:
+				dc_ns_cfg->forward = cfg_bool(&line);
+				break;
+			case CASE_XDR_DC_NAMESPACE_HOT_KEY_MS:
+				dc_ns_cfg->hot_key_ms = cfg_u32(&line, 0, AS_XDR_MAX_HOT_KEY_MS);
+				break;
+			case CASE_XDR_DC_NAMESPACE_IGNORE_BIN:
+				cf_vector_append_ptr(dc_ns_cfg->ignored_bins, cfg_strdup(&line, AS_BIN_NAME_MAX_SZ));
+				break;
+			case CASE_XDR_DC_NAMESPACE_IGNORE_EXPUNGES:
+				dc_ns_cfg->ignore_expunges = cfg_bool(&line);
+				break;
+			case CASE_XDR_DC_NAMESPACE_IGNORE_SET:
+				cf_vector_append_ptr(dc_ns_cfg->ignored_sets, cfg_strdup(&line, AS_SET_NAME_MAX_SIZE));
+				break;
+			case CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT:
+				dc_ns_cfg->max_throughput = cfg_u32_multiple_of(&line, 100);
+				break;
+			case CASE_XDR_DC_NAMESPACE_SHIP_BIN:
+				cf_vector_append_ptr(dc_ns_cfg->shipped_bins, cfg_strdup(&line, AS_BIN_NAME_MAX_SZ));
+				break;
+			case CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES:
+				dc_ns_cfg->ship_nsup_deletes = cfg_bool(&line);
+				break;
+			case CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS:
+				dc_ns_cfg->ship_only_specified_bins = cfg_bool(&line);
+				break;
+			case CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS:
+				dc_ns_cfg->ship_only_specified_sets = cfg_bool(&line);
+				break;
+			case CASE_XDR_DC_NAMESPACE_SHIP_SET:
+				cf_vector_append_ptr(dc_ns_cfg->shipped_sets, cfg_strdup(&line, AS_SET_NAME_MAX_SIZE));
+				break;
+			case CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT:
+				dc_ns_cfg->transaction_queue_limit = cfg_u32_power_of_2(&line, AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT, AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT);
+				break;
+			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -4275,8 +4178,6 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
 
-	as_security_config_check();
-
 	// Check the configured file descriptor limit against the system limit.
 	struct rlimit fd_limit;
 
@@ -4325,12 +4226,17 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	for (uint32_t i = 0; i < g_config.n_tls_specs; ++i) {
 		cf_tls_spec *tspec = &g_config.tls_specs[i];
+		char *old_name = tspec->name;
 
-		if (tspec->name == NULL) {
+		if (old_name == NULL) {
 			cf_crash_nostack(AS_CFG, "nameless TLS configuration section");
 		}
 
-		tspec->name = cfg_resolve_tls_name(tspec->name, g_config.cluster_name, NULL);
+		tspec->name = cfg_resolve_tls_name(old_name, g_config.cluster_name, NULL);
+
+		if (tspec->name == NULL) {
+			cf_crash_nostack(AS_CFG, "failed to resolve tls-name %s", old_name);
+		}
 
 		if (tspec->key_file_password == NULL) {
 			continue;
@@ -4392,6 +4298,10 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		cf_tls_spec* tls_spec = cfg_link_tls("service", &g_config.tls_service.tls_our_name);
 
+		if (tls_spec == NULL) {
+			cf_crash_nostack(AS_CFG, "failed to resolve service tls-name");
+		}
+
 		uint32_t n_peer_names = g_config.tls_service.n_tls_peer_names;
 		char **peer_names = g_config.tls_service.tls_peer_names;
 
@@ -4424,6 +4334,10 @@ as_config_post_process(as_config* c, const char* config_file)
 		}
 
 		g_service_tls = tls_config_server_context(tls_spec, auth_client, n_peer_names, peer_names);
+
+		if (g_service_tls == NULL) {
+			cf_crash_nostack(AS_CFG, "failed to set up service tls");
+		}
 	}
 
 	if (g_service_bind.n_cfgs == 0) {
@@ -4450,7 +4364,16 @@ as_config_post_process(as_config* c, const char* config_file)
 				CF_SOCK_OWNER_HEARTBEAT_TLS);
 
 		cf_tls_spec* tls_spec = cfg_link_tls("heartbeat", &c->hb_tls_serv_spec.tls_our_name);
+
+		if (tls_spec == NULL) {
+			cf_crash_nostack(AS_CFG, "failed to resolve heartbeat tls-name");
+		}
+
 		c->hb_config.tls = tls_config_intra_context(tls_spec, "heartbeat");
+
+		if (c->hb_config.tls == NULL) {
+			cf_crash_nostack(AS_CFG, "failed to set up heartbeat tls");
+		}
 	}
 
 	if (g_config.hb_config.bind_cfg.n_cfgs == 0) {
@@ -4481,7 +4404,16 @@ as_config_post_process(as_config* c, const char* config_file)
 				CF_SOCK_OWNER_FABRIC_TLS);
 
 		cf_tls_spec* tls_spec = cfg_link_tls("fabric", &g_config.tls_fabric.tls_our_name);
+
+		if (tls_spec == NULL) {
+			cf_crash_nostack(AS_CFG, "failed to resolve fabric tls-name");
+		}
+
 		g_fabric_tls = tls_config_intra_context(tls_spec, "fabric");
+
+		if (g_fabric_tls == NULL) {
+			cf_crash_nostack(AS_CFG, "failed to set up fabric tls");
+		}
 	}
 
 	if (g_fabric_bind.n_cfgs == 0) {
@@ -4496,6 +4428,10 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	cf_serv_cfg_init(&g_info_bind);
 	cfg_serv_spec_to_bind(&g_config.info, NULL, &g_info_bind, CF_SOCK_OWNER_INFO);
+
+	// XDR TLS setup.
+
+	as_xdr_link_tls();
 
 	// Validate heartbeat configuration.
 	as_hb_config_validate();
@@ -4708,8 +4644,10 @@ as_config_cluster_name_matches(const char* cluster_name)
 // Public API - XDR.
 //
 
+// TODO - Will become public API to handle dynamic change of security file
+// TODO - Free old values when this function is reused for dynamic stuff.
 bool
-xdr_read_security_configfile(xdr_security_config* sc)
+xdr_read_security_configfile(as_xdr_security_cfg* sec_cfg)
 {
 	FILE* FD;
 	char iobuf[256];
@@ -4719,15 +4657,15 @@ xdr_read_security_configfile(xdr_security_config* sc)
 	cfg_parser_state_init(&state);
 
 	// Initialize the XDR config values to the defaults.
-	sc->username = NULL;
-	sc->password = NULL;
+	sec_cfg->user = NULL;
+	sec_cfg->pw_clear = NULL;
 	iobuf[0] = 0;
 
 	// Open the configuration file for reading. Dont crash if it fails as this
 	// function can be called during runtime (when credentials file change)
-	if (NULL == (FD = fopen(sc->sec_config_file, "r"))) {
+	if (NULL == (FD = fopen(sec_cfg->file, "r"))) {
 		cf_warning(AS_XDR, "Couldn't open configuration file %s: %s",
-				sc->sec_config_file, cf_strerror(errno));
+				sec_cfg->file, cf_strerror(errno));
 		return false;
 	}
 
@@ -4798,14 +4736,11 @@ xdr_read_security_configfile(xdr_security_config* sc)
 		// Parse xdr context items.
 		case XDR_SEC_CREDENTIALS:
 			switch (cfg_find_tok(line.name_tok, XDR_SEC_CREDENTIALS_OPTS, NUM_XDR_SEC_CREDENTIALS_OPTS)) {
-			case CASE_CONTEXT_BEGIN:
-				// Allow open brace on its own line to begin this context.
-				break;
 			case XDR_SEC_CASE_CREDENTIALS_USERNAME:
-				sc->username = cfg_strdup(&line, true);
+				sec_cfg->user = cfg_strdup_no_checks(&line);
 				break;
 			case XDR_SEC_CASE_CREDENTIALS_PASSWORD:
-				sc->password = cfg_strdup(&line, true);
+				sec_cfg->pw_clear = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -4824,6 +4759,11 @@ xdr_read_security_configfile(xdr_security_config* sc)
 			break;
 		}
 	}
+
+	sec_cfg->pw_hash = cf_malloc(AS_PASSWORD_HASH_SIZE);
+	// TODO - decide. This allows hashed passwords in config file.
+	as_password_get_constant_hash(sec_cfg->pw_clear, sec_cfg->pw_hash);
+	// TODO - what checks ??
 
 	// Close the file.
 	fclose(FD);
@@ -5310,8 +5250,9 @@ cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which
 		char hostname[1024];
 		int rv = gethostname(hostname, sizeof(hostname));
 		if (rv != 0) {
-			cf_crash_nostack(AS_CFG,
-				"trouble resolving hostname for tls-name: %s", cf_strerror(errno));
+			cf_warning(AS_CFG, "trouble resolving hostname for tls-name: %s",
+					cf_strerror(errno));
+			return NULL;
 		}
 		hostname[sizeof(hostname)-1] = '\0'; // POSIX.1-2001
 		cf_free(tls_name);
@@ -5320,8 +5261,8 @@ cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which
 	}
 	else if (strcmp(tls_name, "<cluster-name>") == 0) {
 		if (strlen(cluster_name) == 0) {
-			cf_crash_nostack
-				(AS_CFG, "can't resolve tls-name to non-existent cluster-name");
+			cf_warning(AS_CFG, "can't resolve tls-name to non-existent cluster-name");
+			return NULL;
 		}
 		cf_free(tls_name);
 		tls_name = cf_strdup(cluster_name);
@@ -5339,10 +5280,16 @@ cf_tls_spec*
 cfg_link_tls(const char* which, char** our_name)
 {
 	if (*our_name == NULL) {
-		cf_crash_nostack(AS_CFG, "%s TLS configuration requires tls-name", which);
+		cf_warning(AS_CFG, "%s TLS configuration requires tls-name", which);
+		return NULL;
 	}
 
 	*our_name = cfg_resolve_tls_name(*our_name, g_config.cluster_name, which);
+
+	if (*our_name == NULL) {
+		return NULL;
+	}
+
 	cf_tls_spec* tls_spec = NULL;
 
 	for (uint32_t i = 0; i < g_config.n_tls_specs; ++i) {
@@ -5353,8 +5300,8 @@ cfg_link_tls(const char* which, char** our_name)
 	}
 
 	if (tls_spec == NULL) {
-		cf_crash_nostack(AS_CFG, "invalid tls-name in TLS configuration: %s",
-				*our_name);
+		cf_warning(AS_CFG, "invalid tls-name in TLS configuration: %s", *our_name);
+		return NULL;
 	}
 
 	return tls_spec;
@@ -5368,68 +5315,4 @@ cfg_keep_cap(bool keep, bool* what, int32_t cap)
 	if (keep) {
 		cf_process_add_runtime_cap(cap);
 	}
-}
-
-
-//==========================================================
-// XDR utilities.
-//
-
-xdr_dest_config*
-xdr_cfg_add_datacenter(char* name)
-{
-	if (g_dc_count == DC_MAX_NUM) {
-		cf_crash_nostack(AS_CFG, "Cannot have more than %d datacenters", DC_MAX_NUM);
-	}
-
-	xdr_dest_config* dest_cfg = &g_dest_xcfg_opt[g_dc_count];
-
-	dest_cfg->name = name;
-	dest_cfg->id = g_dc_count;
-	xdr_config_dest_defaults(dest_cfg);
-
-	return dest_cfg;
-}
-
-void
-xdr_cfg_associate_datacenter(char* dc, uint32_t ns_ix)
-{
-	cf_vector* v = &g_config.namespaces[ns_ix]->xdr_dclist_v;
-
-	// Crash if datacenter with same name already exists.
-	for (uint32_t index = 0; index < cf_vector_size(v); index++) {
-		if (strcmp((char *)cf_vector_pointer_get(v, index), dc) == 0) {
-			cf_crash_nostack(AS_XDR, "datacenter %s already exists for namespace %s - please remove duplicate entries from config file",
-					dc, g_config.namespaces[ns_ix]->name);
-		}
-	}
-
-	// Add the string pointer (of the datacenter name) to the vector.
-	cf_vector_pointer_append(v, dc);
-}
-
-void
-xdr_cfg_add_http_url(xdr_dest_config* dest_cfg, char* url)
-{
-	// Remember that we are only putting pointer in the vector
-	cf_vector_append(&dest_cfg->http.urls, &url);
-}
-
-void
-xdr_cfg_add_node_addr_port(xdr_dest_config* dest_cfg, char* addr, int port)
-{
-	xdr_cfg_add_tls_node(dest_cfg, addr, NULL, port);
-}
-
-void
-xdr_cfg_add_tls_node(xdr_dest_config* dest_cfg, char* addr, char* tls_name, int port)
-{
-	// Add the element to the vector.
-	node_addr_port* nap = (node_addr_port*)cf_malloc(sizeof(node_addr_port));
-
-	nap->addr = addr;
-	nap->tls_name = tls_name;
-	nap->port = port;
-
-	cf_vector_pointer_append(&dest_cfg->aero.dc_nodes, nap);
 }

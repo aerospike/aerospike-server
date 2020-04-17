@@ -85,7 +85,7 @@ ssd_cold_start_adjust_cenotaph(as_namespace* ns, bool block_has_bins,
 
 void
 ssd_cold_start_transition_record(as_namespace* ns, const as_flat_record* flat,
-		as_record* r, bool is_create)
+		const as_flat_opt_meta* opt_meta, as_record* r, bool is_create)
 {
 	// Nothing to do - relevant for enterprise version only.
 }

@@ -214,6 +214,14 @@ cf_dyn_buf_chomp(cf_dyn_buf *db)
 	}
 }
 
+void
+cf_dyn_buf_chomp_char(cf_dyn_buf *db, char c)
+{
+	if (db->used_sz > 0 && db->buf[db->used_sz - 1] == (uint8_t)c) {
+		db->used_sz--;
+	}
+}
+
 char *
 cf_dyn_buf_strdup(cf_dyn_buf *db)
 {
