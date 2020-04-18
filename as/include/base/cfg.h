@@ -56,7 +56,7 @@ struct as_namespace_s;
 
 
 //==========================================================
-// Typedefs and constants.
+// Typedefs & constants.
 //
 
 #ifndef AS_NAMESPACE_SZ
