@@ -319,7 +319,8 @@ hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)value_size;
 	(void)pp;
 
-	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
+	cf_warning(AS_PARTICLE, "error %u invalid operation on hll particle",
+			AS_ERR_INCOMPATIBLE_TYPE);
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -332,7 +333,8 @@ hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)value_size;
 	(void)pp;
 
-	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
+	cf_warning(AS_PARTICLE, "error %u invalid operation on hll particle",
+			AS_ERR_INCOMPATIBLE_TYPE);
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -345,7 +347,8 @@ hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)value_size;
 	(void)pp;
 
-	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
+	cf_warning(AS_PARTICLE, "error %u invalid operation on hll particle",
+			AS_ERR_INCOMPATIBLE_TYPE);
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -358,7 +361,8 @@ hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	(void)value_size;
 	(void)pp;
 
-	cf_warning(AS_PARTICLE, "invalid operation on hll particle");
+	cf_warning(AS_PARTICLE, "error %u invalid operation on hll particle",
+			AS_ERR_INCOMPATIBLE_TYPE);
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -370,8 +374,9 @@ hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 
 	if (! (hll->flags == 0 && validate_n_combined_bits(hll->n_index_bits,
 			hll->n_minhash_bits) && verify_hll_sz(hll, value_size))) {
-		cf_warning(AS_PARTICLE, "bad hll - flags %x n_index_bits %u n_minhash_bits %u sz %u",
-				hll->flags, hll->n_index_bits, hll->n_minhash_bits, value_size);
+		cf_warning(AS_PARTICLE, "bad hll - error %u flags %x n_index_bits %u n_minhash_bits %u sz %u",
+				hll->flags, AS_ERR_PARAMETER, hll->n_index_bits,
+				hll->n_minhash_bits, value_size);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -638,9 +643,8 @@ hll_parse_n_index_bits(hll_state* state, hll_op* op)
 	int64_t n_index_bits;
 
 	if (! msgpack_get_int64(&state->pk, &n_index_bits)) {
-		cf_warning(AS_PARTICLE, "hll_parse_n_index_bits - error %u op %s (%u) unable to parse n_index_bits for op %s",
-				AS_ERR_PARAMETER, state->def->name, state->op_type,
-				state->def->name);
+		cf_warning(AS_PARTICLE, "hll_parse_n_index_bits - error %u op %s (%u) unable to parse n_index_bits",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
@@ -1451,6 +1455,14 @@ hmh_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 	return (uint64_t)llround((double)cu * j);
 }
 
+//@misc{yu2017hyperminhash,
+//    title={HyperMinHash: MinHash in LogLog space},
+//    author={Yun William Yu and Griffin M. Weber},
+//    year={2017},
+//    eprint={1710.08436},
+//    archivePrefix={arXiv},
+//    primaryClass={cs.DS}
+//}
 static double
 hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs)
 {

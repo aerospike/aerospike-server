@@ -139,7 +139,7 @@ typedef enum {
 typedef struct bits_state_s {
 	as_bits_op_type op_type;
 	msgpack_in pk;
-	uint32_t ele_count;
+	uint32_t n_args;
 	bits_op_def* def;
 
 	uint32_t n_bytes_head;
@@ -457,8 +457,8 @@ blob_concat_size_from_wire(as_particle_type wire_type,
 	blob_mem* p_blob_mem = (blob_mem*)*pp;
 
 	if (wire_type != p_blob_mem->type) {
-		cf_warning(AS_PARTICLE, "type mismatch concat sizing blob/string, %d:%d",
-				p_blob_mem->type, wire_type);
+		cf_warning(AS_PARTICLE, "error %u type mismatch concat sizing blob/string, %d:%d",
+				AS_ERR_INCOMPATIBLE_TYPE, p_blob_mem->type, wire_type);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -472,8 +472,8 @@ blob_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	blob_mem* p_blob_mem = (blob_mem*)*pp;
 
 	if (wire_type != p_blob_mem->type) {
-		cf_warning(AS_PARTICLE, "type mismatch appending to blob/string, %d:%d",
-				p_blob_mem->type, wire_type);
+		cf_warning(AS_PARTICLE, "error %u type mismatch appending to blob/string, %d:%d",
+				AS_ERR_INCOMPATIBLE_TYPE, p_blob_mem->type, wire_type);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -490,8 +490,8 @@ blob_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	blob_mem* p_blob_mem = (blob_mem*)*pp;
 
 	if (wire_type != p_blob_mem->type) {
-		cf_warning(AS_PARTICLE, "type mismatch prepending to blob/string, %d:%d",
-				p_blob_mem->type, wire_type);
+		cf_warning(AS_PARTICLE, "error %u type mismatch prepending to blob/string, %d:%d",
+				AS_ERR_INCOMPATIBLE_TYPE, p_blob_mem->type, wire_type);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -510,7 +510,8 @@ blob_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	(void)wire_value;
 	(void)value_size;
 	(void)pp;
-	cf_warning(AS_PARTICLE, "unexpected increment of blob/string");
+	cf_warning(AS_PARTICLE, "error %u unexpected increment of blob/string",
+			AS_ERR_INCOMPATIBLE_TYPE);
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -749,8 +750,9 @@ as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unused bin");
 
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - unexpected particle type %u for bin %.*s",
-				msg_op->particle_type, (int)msg_op->name_sz, msg_op->name);
+		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - error %u unexpected particle type %u for bin %.*s",
+				AS_ERR_INCOMPATIBLE_TYPE, msg_op->particle_type,
+				(int)msg_op->name_sz, msg_op->name);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -767,9 +769,9 @@ as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 	}
 
 	if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - operation (%s) on bin %.*s bin type must be blob found %u",
-				state.def->name, (int)msg_op->name_sz, msg_op->name,
-				as_bin_get_particle_type(b));
+		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - error %u operation (%s) on bin %.*s bin type must be blob found %u",
+				AS_ERR_INCOMPATIBLE_TYPE, state.def->name, (int)msg_op->name_sz,
+				msg_op->name, as_bin_get_particle_type(b));
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -791,8 +793,9 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 		cf_ll_buf* particles_llb)
 {
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - unexpected particle type %u for bin %.*s",
-				msg_op->particle_type, (int)msg_op->name_sz, msg_op->name);
+		cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u unexpected particle type %u for bin %.*s",
+				AS_ERR_INCOMPATIBLE_TYPE, msg_op->particle_type,
+				(int)msg_op->name_sz, msg_op->name);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
@@ -816,14 +819,16 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - operation (%s) on bin %.*s would update - not allowed",
-					state.def->name, (int)msg_op->name_sz, msg_op->name);
+			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would update - not allowed",
+					AS_ERR_BIN_EXISTS, state.def->name, (int)msg_op->name_sz,
+					msg_op->name);
 			return -AS_ERR_BIN_EXISTS;
 		}
 
 		if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
-			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - operation (%s) on bin %.*s must be on a blob - found %u",
-					state.def->name, (int)msg_op->name_sz, msg_op->name,
+			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s must be on a blob - found %u",
+					AS_ERR_INCOMPATIBLE_TYPE, state.def->name,
+					(int)msg_op->name_sz, msg_op->name,
 					as_bin_get_particle_type(b));
 			return -AS_ERR_INCOMPATIBLE_TYPE;
 		}
@@ -839,8 +844,9 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - operation (%s) on bin %.*s would create - not allowed",
-					state.def->name, (int)msg_op->name_sz, msg_op->name);
+			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would create - not allowed",
+					AS_ERR_BIN_NOT_FOUND, state.def->name, (int)msg_op->name_sz,
+					msg_op->name);
 			return -AS_ERR_BIN_NOT_FOUND;
 		}
 
@@ -871,8 +877,13 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 
 		b->particle = old_blob;
 
-		return ((op.flags & AS_BITS_FLAG_NO_FAIL) != 0) ?
-				AS_OK : -AS_ERR_OP_NOT_APPLICABLE;
+		if ((op.flags & AS_BITS_FLAG_NO_FAIL) == 0) {
+			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) unable to apply operation",
+					AS_ERR_OP_NOT_APPLICABLE, state.def->name);
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
+		return AS_OK;
 	}
 
 	if (old_blob == NULL) {
@@ -898,22 +909,21 @@ bits_state_init(bits_state* state, const as_msg_op* msg_op, bool is_read)
 	state->pk.buf_sz = sz;
 	state->pk.offset = 0;
 
-	uint32_t ele_count;
+	uint32_t n_args;
 
-	if (! msgpack_get_list_ele_count(&state->pk, &ele_count) ||
-			ele_count == 0) {
-		cf_warning(AS_PARTICLE, "bits_state_init - not enough args or unable to parse args for bin %.*s err %u",
-				(int)msg_op->name_sz, msg_op->name, ele_count);
+	if (! msgpack_get_list_ele_count(&state->pk, &n_args) || n_args == 0) {
+		cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s insufficient args (%u) or unable to parse args",
+				AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name, n_args);
 		return false;
 	}
 
-	state->ele_count = ele_count - 1; // ignore the 'op' arg.
+	state->n_args = n_args - 1; // ignore the 'op' arg.
 
 	uint64_t type64;
 
 	if (! msgpack_get_uint64(&state->pk, &type64)) {
-		cf_warning(AS_PARTICLE, "bits_state_init - unable to parse op for bin %.*s",
-				(int)msg_op->name_sz, msg_op->name);
+		cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s unable to parse op",
+				AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name);
 		return false;
 	}
 
@@ -922,9 +932,9 @@ bits_state_init(bits_state* state, const as_msg_op* msg_op, bool is_read)
 	if (is_read) {
 		if (! (state->op_type >= AS_BITS_READ_OP_START &&
 				state->op_type < AS_BITS_READ_OP_END)) {
-			cf_warning(AS_PARTICLE, "bits_state_init - expected read op but got %u n_args %u for bin %.*s",
-					state->op_type, state->ele_count, (int)msg_op->name_sz,
-					msg_op->name);
+			cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s op %u expected read op",
+					AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name,
+					state->op_type);
 			return false;
 		}
 
@@ -933,9 +943,9 @@ bits_state_init(bits_state* state, const as_msg_op* msg_op, bool is_read)
 	else {
 		if (! (state->op_type >= AS_BITS_MODIFY_OP_START &&
 				state->op_type < AS_BITS_MODIFY_OP_END)) {
-			cf_warning(AS_PARTICLE, "bits_state_init - expected modify op but got %u n_args %u for bin %.*s",
-					state->op_type, state->ele_count, (int)msg_op->name_sz,
-					msg_op->name);
+			cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s op %u expected modify op",
+					AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name,
+					state->op_type);
 			return false;
 		}
 
@@ -950,13 +960,14 @@ bits_parse_op(bits_state* state, bits_op* op)
 {
 	bits_op_def* def = state->def;
 
-	if (state->ele_count < def->min_args || state->ele_count > def->max_args) {
-		cf_warning(AS_PARTICLE, "bits_parse_op - unexpected number of args %u for op %s",
-				state->ele_count, state->def->name);
+	if (state->n_args < def->min_args || state->n_args > def->max_args) {
+		cf_warning(AS_PARTICLE, "bits_parse_op - error %u op %s (%u) unexpected number of args %u for op %s",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				state->n_args, state->def->name);
 		return false;
 	}
 
-	for (uint32_t i = 0; i < state->ele_count; i++) {
+	for (uint32_t i = 0; i < state->n_args; i++) {
 		if (! def->args[i](state, op)) {
 			return false;
 		}
@@ -971,14 +982,15 @@ bits_parse_byte_offset(bits_state* state, bits_op* op)
 	int64_t offset;
 
 	if (! msgpack_get_int64(&state->pk, &offset)) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_offset - unable to parse offset for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_byte_offset - error %u op %s (%u) unable to parse offset",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (labs(offset) > PROTO_SIZE_MAX) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_offset - offset (%ld) larger than max (%d) for op %s",
-				offset, PROTO_SIZE_MAX, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_byte_offset - error %u op %s (%u) offset (%ld) larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, offset,
+				PROTO_SIZE_MAX);
 		return false;
 	}
 
@@ -993,14 +1005,15 @@ bits_parse_offset(bits_state* state, bits_op* op)
 	int64_t offset;
 
 	if (! msgpack_get_int64(&state->pk, &offset)) {
-		cf_warning(AS_PARTICLE, "bits_parse_offset - unable to parse offset for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_offset - error %u op %s (%u) unable to parse offset",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (labs(offset) > PROTO_SIZE_MAX * 8) {
-		cf_warning(AS_PARTICLE, "bits_parse_offset - offset (%ld) is larger than max (%d) for op %s",
-				offset, PROTO_SIZE_MAX * 8, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_offset - error %u op %s (%u) offset (%ld) is larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, offset,
+				PROTO_SIZE_MAX * 8);
 		return false;
 	}
 
@@ -1015,20 +1028,20 @@ bits_parse_integer_size(bits_state* state, bits_op* op)
 	uint64_t size;
 
 	if (! msgpack_get_uint64(&state->pk, &size)) {
-		cf_warning(AS_PARTICLE, "bits_parse_integer_size - unable to parse byte_size for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_integer_size - error %u op %s (%u) unable to parse byte_size",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (size == 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_integer_size - size may not be 0 for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_integer_size - error %u op %s (%u) size may not be 0",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (size > 64) {
-		cf_warning(AS_PARTICLE, "bits_parse_integer_size - size (%lu) larger than max (64) for op %s",
-				size, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_integer_size - error %u op %s (%u) size (%lu) larger than max (64)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, size);
 		return false;
 	}
 
@@ -1043,20 +1056,21 @@ bits_parse_byte_size(bits_state* state, bits_op* op)
 	uint64_t size;
 
 	if (! msgpack_get_uint64(&state->pk, &size)) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_size - unable to parse byte_size for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size - error %u op %s (%u) unable to parse byte_size",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (size == 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_size - size may not be 0 for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size - error %u op %s (%u) size may not be 0",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (size > PROTO_SIZE_MAX) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_size - size (%lu) larger than max (%d) for op %s",
-				size, PROTO_SIZE_MAX, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size - error %u op %s (%u) size (%lu) larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
+				PROTO_SIZE_MAX);
 		return false;
 	}
 
@@ -1071,14 +1085,15 @@ bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op)
 	uint64_t size;
 
 	if (! msgpack_get_uint64(&state->pk, &size)) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - unable to parse byte_size for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - error %u op %s (%u) unable to parse byte_size",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (size > PROTO_SIZE_MAX) {
-		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - size (%lu) larger than max (%d) for op %s",
-				size, PROTO_SIZE_MAX, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - error %u op %s (%u) size (%lu) larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
+				PROTO_SIZE_MAX);
 		return false;
 	}
 
@@ -1093,20 +1108,21 @@ bits_parse_size(bits_state* state, bits_op* op)
 	uint64_t size;
 
 	if (! msgpack_get_uint64(&state->pk, &size)) {
-		cf_warning(AS_PARTICLE, "bits_parse_size - unable to parse size for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_size - error %u op %s (%u) unable to parse size",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (size == 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_size - size may not be 0 for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_size - error %u op %s (%u) size may not be 0",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (size > PROTO_SIZE_MAX * 8) {
-		cf_warning(AS_PARTICLE, "bits_parse_size - size (%lu) is larger than max (%d) for op %s",
-				size, PROTO_SIZE_MAX * 8, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_size - error %u op %s (%u) size (%lu) is larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, size,
+				PROTO_SIZE_MAX * 8);
 		return false;
 	}
 
@@ -1121,8 +1137,8 @@ bits_parse_boolean_value(bits_state* state, bits_op* op)
 	bool value;
 
 	if (! msgpack_get_bool(&state->pk, &value)) {
-		cf_warning(AS_PARTICLE, "bits_parse_boolean_value - unable to parse boolean for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_boolean_value - error %u op %s (%u) unable to parse boolean",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
@@ -1139,8 +1155,9 @@ bits_parse_n_bits_value(bits_state* state, bits_op* op)
 	}
 
 	if (op->value > PROTO_SIZE_MAX * 8) {
-		cf_warning(AS_PARTICLE, "bits_parse_n_bits_value - n_bits value (%lu) is larger than max (%d) for op %s",
-				op->value, PROTO_SIZE_MAX * 8, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_n_bits_value - error %u op %s (%u) n_bits value (%lu) is larger than max (%d)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, op->value,
+				PROTO_SIZE_MAX * 8);
 		return false;
 	}
 
@@ -1151,8 +1168,8 @@ static bool
 bits_parse_integer_value(bits_state* state, bits_op* op)
 {
 	if (! msgpack_get_uint64(&state->pk, &op->value)) {
-		cf_warning(AS_PARTICLE, "bits_parse_integer_value - unable to parse number for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_integer_value - error %u op %s (%u) unable to parse number",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
@@ -1168,8 +1185,8 @@ bits_parse_buf(bits_state* state, bits_op* op)
 
 	// AS msgpack has a one byte blob type field which we ignore here.
 	if (op->buf == NULL || size == 1) {
-		cf_warning(AS_PARTICLE, "bits_parse_buf - parsed invalid buffer with size %u for op %s",
-				size, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_buf - error %u op %s (%u) parsed invalid buffer with size %u",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, size);
 		return false;
 	}
 
@@ -1178,8 +1195,9 @@ bits_parse_buf(bits_state* state, bits_op* op)
 
 	if (op->size != 0) {
 		if (size < op->size) {
-			cf_warning(AS_PARTICLE, "bits_parse_buf - parsed buffer size less than size buf_sz %u sz %u for op %s",
-					size, op->size, state->def->name);
+			cf_warning(AS_PARTICLE, "bits_parse_buf - error %u op %s (%u) parsed buffer size less than size buf_sz %u sz %u",
+					AS_ERR_PARAMETER, state->def->name, state->op_type, size,
+					op->size);
 			return false;
 		}
 	}
@@ -1194,21 +1212,21 @@ static bool
 bits_parse_flags(bits_state* state, bits_op* op)
 {
 	if (! msgpack_get_uint64(&state->pk, &op->flags)) {
-		cf_warning(AS_PARTICLE, "bits_parse_flags - unable to parse subflags for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_flags - error %u op %s (%u) unable to parse subflags",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if ((op->flags & state->def->bad_flags) != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_flags - invalid flags (0x%lx) for op %s",
-				op->flags, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_flags - error %u op %s (%u) invalid flags (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags);
 		return false;
 	}
 
 	if ((op->flags & AS_BITS_FLAG_CREATE_ONLY) != 0 &&
 			(op->flags & AS_BITS_FLAG_UPDATE_ONLY) != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_flags - invalid flags combination (0x%lx) for op %s",
-				op->flags, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_flags - error %u op %s (%u) invalid flags combination (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags);
 		return false;
 	}
 
@@ -1227,15 +1245,17 @@ bits_parse_resize_subflags(bits_state* state, bits_op* op)
 			AS_BITS_SUBFLAG_RESIZE_SHRINK_ONLY);
 
 	if ((op->subflags & bad_flags) != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_resize_subflags - invalid subflags (0x%lx) for op %s",
-				op->subflags, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_resize_subflags - error %u op %s (%u) invalid subflags (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				op->subflags);
 		return false;
 	}
 
 	if ((op->subflags & AS_BITS_SUBFLAG_RESIZE_GROW_ONLY) != 0 &&
 			(op->subflags & AS_BITS_SUBFLAG_RESIZE_SHRINK_ONLY) != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_resize_subflags - invalid subflags combination (0x%lx) for op %s",
-				op->subflags, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_resize_subflags - error %u op %s (%u) invalid subflags combination (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				op->subflags);
 		return false;
 	}
 
@@ -1253,15 +1273,17 @@ bits_parse_arithmetic_subflags(bits_state* state, bits_op* op)
 			AS_BITS_INT_SUBFLAG_SATURATE | AS_BITS_INT_SUBFLAG_WRAP);
 
 	if ((op->subflags & bad_flags) != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_arithmetic_subflags - invalid subflags (0x%lx) for op %s",
-				op->subflags, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_arithmetic_subflags - error %u op %s (%u) invalid subflags (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				op->subflags);
 		return false;
 	}
 
 	if ((op->subflags & AS_BITS_INT_SUBFLAG_SATURATE) != 0 &&
 			(op->subflags & AS_BITS_INT_SUBFLAG_WRAP) != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_arithmetic_subflags - invalid subflags combination (0x%lx) for op %s",
-				op->subflags, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_arithmetic_subflags - error %u op %s (%u) invalid subflags combination (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				op->subflags);
 		return false;
 	}
 
@@ -1278,8 +1300,9 @@ bits_parse_get_integer_subflags(bits_state* state, bits_op* op)
 	uint64_t bad_flags = (uint64_t)~(AS_BITS_INT_SUBFLAG_SIGNED);
 
 	if ((op->subflags & bad_flags) != 0) {
-		cf_warning(AS_PARTICLE, "bits_parse_get_integer_subflags - invalid subflags (0x%lx) for op %s",
-				op->subflags, state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_get_integer_subflags - error %u op %s (%u) invalid subflags (0x%lx)",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				op->subflags);
 		return false;
 	}
 
@@ -1290,8 +1313,8 @@ static bool
 bits_parse_subflags(bits_state* state, bits_op* op)
 {
 	if (! msgpack_get_uint64(&state->pk, &op->subflags)) {
-		cf_warning(AS_PARTICLE, "bits_parse_subflags - unable to parse subflags for op %s",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_parse_subflags - error %u op %s (%u) unable to parse subflags",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
@@ -1333,8 +1356,9 @@ bits_prepare_modify(bits_state* state, bits_op* op, const as_bin* b)
 			op_type, state->old_size, state->new_size);
 
 	if (state->new_size >= PROTO_SIZE_MAX) {
-		cf_warning(AS_PARTICLE, "bits_prepare_op - operation %s result blob size %u is larger than max %u",
-				state->def->name, state->new_size, PROTO_SIZE_MAX);
+		cf_warning(AS_PARTICLE, "bits_prepare_op - error %u op %s (%u) result blob size %u is larger than max %u",
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				state->new_size, PROTO_SIZE_MAX);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -1350,8 +1374,8 @@ bits_prepare_op(bits_state* state, bits_op* op, const as_bin* b)
 		state->old_size = ((blob_mem*)b->particle)->sz;
 	}
 	else if (op->offset < 0) {
-		cf_warning(AS_PARTICLE, "bits_prepare_op - operation %s cannot use negative offset on non-existent bin",
-				state->def->name);
+		cf_warning(AS_PARTICLE, "bits_prepare_op - error %u op %s (%u) cannot use negative offset on non-existent bin",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -1400,7 +1424,8 @@ bits_prepare_resize_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "bits_prepare_resize_op - cannot shrink with grow_only set");
+			cf_warning(AS_PARTICLE, "bits_prepare_resize_op - error %u op %s (%u) cannot shrink with grow_only set",
+					AS_ERR_PARAMETER, state->def->name, state->op_type);
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -1423,7 +1448,8 @@ bits_prepare_resize_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "bits_prepare_resize_op - cannot grow with shrink_only set");
+			cf_warning(AS_PARTICLE, "bits_prepare_resize_op - error %u op %s (%u) cannot grow with shrink_only set",
+					AS_ERR_PARAMETER, state->def->name, state->op_type);
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -1478,7 +1504,8 @@ bits_prepare_remove_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 			return AS_OK;
 		}
 
-		cf_warning(AS_PARTICLE, "bits_prepare_remove_op - tried to remove past the end of blob");
+		cf_warning(AS_PARTICLE, "bits_prepare_remove_op - error %u op %s (%u) tried to remove past the end of blob",
+				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -1490,7 +1517,8 @@ bits_prepare_remove_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "bits_prepare_remove_op - remove size extended past end of blob without the partial policy");
+			cf_warning(AS_PARTICLE, "bits_prepare_remove_op - error %u op %s (%u) remove size extended past end of blob without the partial policy",
+					AS_ERR_PARAMETER, state->def->name, state->op_type);
 			return -AS_ERR_PARAMETER;
 		}
 
@@ -1516,7 +1544,8 @@ bits_prepare_modify_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 			return AS_OK;
 		}
 
-		cf_warning(AS_PARTICLE, "bits_prepare_modify_op - operation may not expand blob");
+		cf_warning(AS_PARTICLE, "bits_prepare_modify_op - error %u op %s (%u) operation may not expand blob",
+				AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1528,7 +1557,8 @@ bits_prepare_modify_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "bits_prepare_modify_op - operation too large - either use partial or increase size of blob");
+			cf_warning(AS_PARTICLE, "bits_prepare_modify_op - error %u op %s (%u) operation too large - either use partial or increase size of blob",
+					AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -1563,7 +1593,8 @@ bits_prepare_read_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 			return AS_OK;
 		}
 
-		cf_warning(AS_PARTICLE, "bits_prepare_read_op - operation would expand blob");
+		cf_warning(AS_PARTICLE, "bits_prepare_read_op - error %u op %s (%u) operation would expand blob",
+				AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
@@ -1572,7 +1603,8 @@ bits_prepare_read_op(bits_state* state, bits_op* op, uint32_t byte_offset,
 			return AS_OK;
 		}
 
-		cf_warning(AS_PARTICLE, "bits_prepare_read_op - operation too large for blob");
+		cf_warning(AS_PARTICLE, "bits_prepare_read_op - error %u op %s (%u) operation too large for blob",
+				AS_ERR_OP_NOT_APPLICABLE, state->def->name, state->op_type);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
