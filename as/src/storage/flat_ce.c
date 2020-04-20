@@ -113,4 +113,6 @@ set_remote_record_xdr_flags(const as_flat_record* flat,
 void
 set_flat_xdr_state(const as_record* r, as_flat_record* flat)
 {
+	// For mixture of 4.9 and 4.8- ... this is checked as 'unused' in 4.8-.
+	flat->xdr_write = 0;
 }
