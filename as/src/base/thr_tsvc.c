@@ -246,11 +246,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
-	// All single-record transactions must have a digest, or a key from which
-	// to calculate it.
+	// Copy digest if not already in tr.
 	if (as_transaction_has_digest(tr)) {
-		// Modern client - just copy digest into tr.
-
 		as_msg_field *df = as_msg_field_get(m, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 		uint32_t digest_sz = as_msg_field_get_value_sz(df);
 
@@ -263,16 +260,10 @@ as_tsvc_process_transaction(as_transaction *tr)
 		tr->keyd = *(cf_digest *)df->data;
 	}
 	else if (as_transaction_has_key(tr)) {
-		// Old client - calculate digest from key & set, directly into tr.
-
-		as_msg_field *kf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
-		uint32_t key_sz = as_msg_field_get_value_sz(kf);
-
-		as_msg_field *sf = as_transaction_has_set(tr) ?
-				as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET) : NULL;
-		uint32_t set_sz = sf ? as_msg_field_get_value_sz(sf) : 0;
-
-		cf_digest_compute2(sf->data, set_sz, kf->data, key_sz, &tr->keyd);
+		// Old client - deprecated.
+		cf_warning(AS_TSVC, "msg has key but no digest");
+		as_transaction_error(tr, ns, AS_ERR_UNSUPPORTED_FEATURE);
+		goto Cleanup;
 	}
 	// else - batch sub-transactions & all internal transactions have neither
 	// digest nor key in the message - digest is already in tr.

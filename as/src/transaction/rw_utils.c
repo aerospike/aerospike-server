@@ -268,8 +268,6 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 
-	(void)ns; // FIXME - remove when the warning macros are implemented.
-
 	if (rd->r->key_stored == 1) {
 		// Key stored for this record - be sure it gets rewritten.
 
@@ -289,9 +287,7 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 			return AS_ERR_KEY_MISMATCH;
 		}
 	}
-	// If we got a key without a digest, it's an old client, not a cue to store
-	// the key. (Remove this check when we're sure all old C clients are gone.)
-	else if (as_transaction_has_digest(tr)) {
+	else {
 		// Key not stored for this record - store one if sent from client. For
 		// data-in-memory, don't allocate the key until we reach the point of no
 		// return. Also don't set AS_INDEX_FLAG_KEY_STORED flag until then.

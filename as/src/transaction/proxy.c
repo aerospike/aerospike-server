@@ -548,8 +548,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	// Put the as_msg on the normal queue for processing.
 	as_transaction tr;
 	as_transaction_init_head(&tr, keyd, msgp);
-	// msgp might not have digest - batch sub-transactions, old clients.
-	// For old clients, will compute it again from msgp key and set.
+	// msgp might not have digest - batch sub-transactions.
 
 	tr.msg_fields = pr->msg_fields;
 	tr.origin = pr->origin;
@@ -606,8 +605,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	// Put the as_msg on the normal queue for processing.
 	as_transaction tr;
 	as_transaction_init_head(&tr, keyd, msgp);
-	// msgp might not have digest - batch sub-transactions, old clients.
-	// For old clients, will compute it again from msgp key and set.
+	// msgp might not have digest - batch sub-transactions.
 
 	tr.start_time = cf_getns();
 
