@@ -3487,7 +3487,7 @@ as_storage_load_ssd(as_namespace *ns, cf_queue *complete_q)
 void
 as_storage_load_ticker_ssd(const as_namespace *ns)
 {
-	char buf[2048];
+	char buf[1024];
 	int pos = 0;
 	const drv_ssds *ssds = (const drv_ssds*)ns->storage_private;
 
@@ -3496,16 +3496,19 @@ as_storage_load_ticker_ssd(const as_namespace *ns)
 		uint32_t pct = (uint32_t)((ssd->sweep_wblock_id * 100UL) /
 				(ssd->file_size / ssd->write_block_size));
 
-		pos += sprintf(buf + pos, ", %s %u%%", ssd->name, pct);
+		pos += sprintf(buf + pos, "%u,", pct);
 	}
 
-	// TODO - conform with new log standard?
+	if (pos != 0) {
+		buf[pos - 1] = '\0'; // chomp last comma
+	}
+
 	if (ns->n_tombstones == 0) {
-		cf_info(AS_DRV_SSD, "{%s} loaded %lu objects%s", ns->name,
-				ns->n_objects, buf);
+		cf_info(AS_DRV_SSD, "{%s} loaded: objects %lu device-pcts (%s)",
+				ns->name, ns->n_objects, buf);
 	}
 	else {
-		cf_info(AS_DRV_SSD, "{%s} loaded %lu objects, %lu tombstones%s",
+		cf_info(AS_DRV_SSD, "{%s} loaded: objects %lu tombstones %lu device-pcts (%s)",
 				ns->name, ns->n_objects, ns->n_tombstones, buf);
 	}
 }
