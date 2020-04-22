@@ -229,10 +229,45 @@ as_service_set_threads(uint32_t n_threads)
 	}
 }
 
-uint32_t
-as_service_max_fds(void)
+bool
+as_service_set_proto_fd_max(uint32_t val)
 {
-	return g_n_slots;
+	struct rlimit rl;
+
+	if (getrlimit(RLIMIT_NOFILE, &rl) < 0) {
+		cf_crash(AS_SERVICE, "getrlimit() failed: %s", cf_strerror(errno));
+	}
+
+	if (val > (uint32_t)rl.rlim_cur) {
+		cf_warning(AS_SERVICE, "can't set proto-fd-max %u > system limit %lu",
+				val, rl.rlim_cur);
+		return false;
+	}
+
+	if (val <= g_n_slots) {
+		g_config.n_proto_fd_max = val;
+		return true; // never shrink slots
+	}
+
+	size_t old_sz = g_n_slots * sizeof(as_file_handle*);
+	size_t new_sz = val * sizeof(as_file_handle*);
+
+	cf_mutex_lock(&g_reaper_lock);
+
+	g_file_handles = cf_realloc(g_file_handles, new_sz);
+	memset((uint8_t*)g_file_handles + old_sz, 0, new_sz - old_sz);
+
+	for (uint32_t i = g_n_slots; i < val; i++) {
+		cf_queue_push(&g_free_slots, &i);
+	}
+
+	g_n_slots = val;
+
+	cf_mutex_unlock(&g_reaper_lock);
+
+	g_config.n_proto_fd_max = val; // set *after* expanding slots
+
+	return true;
 }
 
 void
@@ -861,13 +896,7 @@ config_xdr_socket(cf_socket* sock)
 static void
 start_reaper(void)
 {
-	struct rlimit rl;
-
-	if (getrlimit(RLIMIT_NOFILE, &rl) < 0) {
-		cf_crash(AS_SERVICE, "getrlimit() failed: %s", cf_strerror(errno));
-	}
-
-	g_n_slots = (uint32_t)rl.rlim_cur;
+	g_n_slots = g_config.n_proto_fd_max;
 	g_file_handles = cf_calloc(g_n_slots, sizeof(as_file_handle*));
 
 	cf_queue_init(&g_free_slots, sizeof(uint32_t), g_n_slots, false);

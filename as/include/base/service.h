@@ -26,6 +26,7 @@
 // Includes.
 //
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "socket.h"
@@ -58,6 +59,7 @@ typedef struct as_service_access_s {
 
 #define MAX_SERVICE_THREADS 4096
 #define MIN_PROTO_FD_MAX 1024
+#define MAX_PROTO_FD_MAX (2 * 1024 * 1024)
 
 
 //==========================================================
@@ -76,6 +78,6 @@ extern struct cf_tls_info_s* g_service_tls;
 void as_service_init(void);
 void as_service_start(void);
 void as_service_set_threads(uint32_t n_threads);
-uint32_t as_service_max_fds(void);
+bool as_service_set_proto_fd_max(uint32_t val);
 void as_service_rearm(struct as_file_handle_s* fd_h);
 void as_service_enqueue_internal(struct as_transaction_s* tr);

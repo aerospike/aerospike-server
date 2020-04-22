@@ -2349,12 +2349,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-max", context, &context_len)) {
-			if (cf_str_atoi(context, &val) != 0 || val < MIN_PROTO_FD_MAX || val > as_service_max_fds()) {
+			if (cf_str_atoi(context, &val) != 0 || val < MIN_PROTO_FD_MAX || val > MAX_PROTO_FD_MAX) {
 				cf_warning(AS_INFO, "invalid proto-fd-max %d", val);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of proto-fd-max from %u to %d ", g_config.n_proto_fd_max, val);
-			g_config.n_proto_fd_max = (uint32_t)val;
+			uint32_t prev_val = g_config.n_proto_fd_max;
+			if (! as_service_set_proto_fd_max((uint32_t)val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of proto-fd-max from %u to %d ", prev_val, val);
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-idle-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))

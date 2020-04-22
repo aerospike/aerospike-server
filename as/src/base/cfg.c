@@ -2360,7 +2360,7 @@ as_config_init(const char* config_file)
 				cfg_renamed_name_tok(&line, "proto-fd-max");
 				// No break.
 			case CASE_SERVICE_PROTO_FD_MAX:
-				c->n_proto_fd_max = cfg_u32(&line, MIN_PROTO_FD_MAX, UINT32_MAX);
+				c->n_proto_fd_max = cfg_u32(&line, MIN_PROTO_FD_MAX, MAX_PROTO_FD_MAX);
 				break;
 			case CASE_SERVICE_ADVERTISE_IPV6:
 				cf_socket_set_advertise_ipv6(cfg_bool(&line));
