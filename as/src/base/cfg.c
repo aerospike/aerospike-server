@@ -35,7 +35,6 @@
 #include <sys/resource.h>
 #include <sys/types.h>
 
-#include "aerospike/as_password.h"
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -117,8 +116,6 @@ static void cfg_init_serv_spec(cf_serv_spec* spec_p);
 static cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
 static char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
 static void cfg_keep_cap(bool keep, bool* what, int32_t cap);
-
-static bool xdr_read_security_configfile(as_xdr_security_cfg* sec_cfg);
 
 
 //==========================================================
@@ -669,8 +666,9 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE,
 	// Normally hidden:
 	CASE_XDR_DC_AUTH_MODE,
+	CASE_XDR_DC_AUTH_PASSWORD_FILE,
+	CASE_XDR_DC_AUTH_USER,
 	CASE_XDR_DC_NON_AEROSPIKE,
-	CASE_XDR_DC_SECURITY_CONFIG_FILE,
 	CASE_XDR_DC_TLS_NAME,
 	CASE_XDR_DC_USE_ALTERNATE_ADDRESS,
 
@@ -693,17 +691,7 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS,
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS,
 	CASE_XDR_DC_NAMESPACE_SHIP_SET,
-	CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT,
-
-	// Used parsing separate file, but share this enum:
-
-	// XDR security top-level options:
-	XDR_SEC_CASE_CREDENTIALS_BEGIN,
-
-	// XDR security credentials options:
-	// Normally visible, in canonical configuration file order:
-	XDR_SEC_CASE_CREDENTIALS_USERNAME,
-	XDR_SEC_CASE_CREDENTIALS_PASSWORD
+	CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT
 
 } cfg_case_id;
 
@@ -1189,8 +1177,9 @@ const cfg_opt XDR_DC_OPTS[] = {
 		{ "node-address-port",				CASE_XDR_DC_NODE_ADDRESS_PORT },
 		{ "namespace",						CASE_XDR_DC_NAMESPACE },
 		{ "auth-mode",						CASE_XDR_DC_AUTH_MODE },
+		{ "auth-password-file",				CASE_XDR_DC_AUTH_PASSWORD_FILE },
+		{ "auth-user",						CASE_XDR_DC_AUTH_USER },
 		{ "non-aerospike",					CASE_XDR_DC_NON_AEROSPIKE},
-		{ "security-config-file",			CASE_XDR_DC_SECURITY_CONFIG_FILE },
 		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
 		{ "use-alternate-access-address",	CASE_XDR_DC_USE_ALTERNATE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
@@ -1217,18 +1206,6 @@ const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "ship-only-specified-sets",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS },
 		{ "ship-set",						CASE_XDR_DC_NAMESPACE_SHIP_SET },
 		{ "transaction-queue-limit",		CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT },
-		{ "}",								CASE_CONTEXT_END }
-};
-
-// Used parsing separate file, but share cfg_case_id enum.
-
-const cfg_opt XDR_SEC_GLOBAL_OPTS[] = {
-		{ "credentials",					XDR_SEC_CASE_CREDENTIALS_BEGIN }
-};
-
-const cfg_opt XDR_SEC_CREDENTIALS_OPTS[] = {
-		{ "username",						XDR_SEC_CASE_CREDENTIALS_USERNAME },
-		{ "password",						XDR_SEC_CASE_CREDENTIALS_PASSWORD },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1272,11 +1249,6 @@ const int NUM_XDR_DC_OPTS							= sizeof(XDR_DC_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_NAMESPACE_OPTS					= sizeof(XDR_DC_NAMESPACE_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_AUTH_MODE_OPTS					= sizeof(XDR_DC_AUTH_MODE_OPTS) / sizeof(cfg_opt);
 
-// Used parsing separate file, but share cfg_case_id enum.
-
-const int NUM_XDR_SEC_GLOBAL_OPTS					= sizeof(XDR_SEC_GLOBAL_OPTS) / sizeof(cfg_opt);
-const int NUM_XDR_SEC_CREDENTIALS_OPTS				= sizeof(XDR_SEC_CREDENTIALS_OPTS) / sizeof(cfg_opt);
-
 
 //==========================================================
 // Configuration value constants not for switch cases.
@@ -1318,8 +1290,6 @@ typedef enum {
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DC, XDR_DC_NAMESPACE,
-	// Used parsing separate file, but shares this enum:
-	XDR_SEC_CREDENTIALS,
 	// Must be last, use for sanity-checking:
 	PARSER_STATE_MAX_PLUS_1
 } as_config_parser_state;
@@ -1333,9 +1303,7 @@ const char* CFG_PARSER_STATES[] = {
 		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
 		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG", "SECURITY_SYSLOG",
-		"XDR", "XDR_DC", "XDR_DC_NAMESPACE",
-		// Used parsing separate file, but shares corresponding enum:
-		"XDR_SEC_CREDENTIALS"
+		"XDR", "XDR_DC", "XDR_DC_NAMESPACE"
 };
 
 #define MAX_STACK_DEPTH 8
@@ -3673,12 +3641,14 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
+			case CASE_XDR_DC_AUTH_PASSWORD_FILE:
+				dc_cfg->auth_password_file = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_XDR_DC_AUTH_USER:
+				dc_cfg->auth_user = cfg_strdup(&line, 64);
+				break;
 			case CASE_XDR_DC_NON_AEROSPIKE:
 				dc_cfg->non_aerospike = cfg_bool(&line);
-				break;
-			case CASE_XDR_DC_SECURITY_CONFIG_FILE:
-				dc_cfg->security_cfg.file = cfg_strdup_no_checks(&line);
-				xdr_read_security_configfile(&dc_cfg->security_cfg);
 				break;
 			case CASE_XDR_DC_TLS_NAME:
 				dc_cfg->tls_our_name = cfg_strdup_no_checks(&line);
@@ -4279,137 +4249,6 @@ as_config_cluster_name_matches(const char* cluster_name)
 	bool matches = strcmp(cluster_name, g_config.cluster_name) == 0;
 	cf_mutex_unlock(&g_config_lock);
 	return matches;
-}
-
-
-//==========================================================
-// Public API - XDR.
-//
-
-// TODO - Will become public API to handle dynamic change of security file
-// TODO - Free old values when this function is reused for dynamic stuff.
-bool
-xdr_read_security_configfile(as_xdr_security_cfg* sec_cfg)
-{
-	FILE* FD;
-	char iobuf[256];
-	int line_num = 0;
-	cfg_parser_state state;
-
-	cfg_parser_state_init(&state);
-
-	// Initialize the XDR config values to the defaults.
-	sec_cfg->user = NULL;
-	sec_cfg->pw_clear = NULL;
-	iobuf[0] = 0;
-
-	// Open the configuration file for reading. Dont crash if it fails as this
-	// function can be called during runtime (when credentials file change)
-	if (NULL == (FD = fopen(sec_cfg->file, "r"))) {
-		cf_warning(AS_XDR, "Couldn't open configuration file %s: %s",
-				sec_cfg->file, cf_strerror(errno));
-		return false;
-	}
-
-	// Parse the configuration file, line by line.
-	while (fgets(iobuf, sizeof(iobuf), FD)) {
-		line_num++;
-
-		// First chop the comment off, if there is one.
-
-		char* p_comment = strchr(iobuf, '#');
-
-		if (p_comment) {
-			*p_comment = '\0';
-		}
-
-		// Find (and null-terminate) up to three whitespace-delimited tokens in
-		// the line, a 'name' token and up to two 'value' tokens.
-
-		cfg_line line = { line_num, NULL, NULL, NULL, NULL };
-
-		line.name_tok = strtok(iobuf, CFG_WHITESPACE);
-
-		// If there are no tokens, ignore this line, get the next line.
-		if (! line.name_tok) {
-			continue;
-		}
-
-		line.val_tok_1 = strtok(NULL, CFG_WHITESPACE);
-
-		if (! line.val_tok_1) {
-			line.val_tok_1 = ""; // in case it's used where NULL can't be used
-		}
-		else {
-			line.val_tok_2 = strtok(NULL, CFG_WHITESPACE);
-		}
-
-		if (! line.val_tok_2) {
-			line.val_tok_2 = ""; // in case it's used where NULL can't be used
-		}
-		else {
-			line.val_tok_3 = strtok(NULL, CFG_WHITESPACE);
-		}
-
-		if (! line.val_tok_3) {
-			line.val_tok_3 = ""; // in case it's used where NULL can't be used
-		}
-
-		// Note that we can't see this output until a logging sink is specified.
-		cf_detail(AS_CFG, "line %d :: %s %s %s %s", line_num, line.name_tok,
-				line.val_tok_1, line.val_tok_2, line.val_tok_3);
-
-		// Parse the directive.
-		switch (state.current) {
-
-		// Parse top-level items.
-		case GLOBAL:
-			switch (cfg_find_tok(line.name_tok, XDR_SEC_GLOBAL_OPTS, NUM_XDR_SEC_GLOBAL_OPTS)) {
-			case XDR_SEC_CASE_CREDENTIALS_BEGIN:
-				cfg_begin_context(&state, XDR_SEC_CREDENTIALS);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		// Parse xdr context items.
-		case XDR_SEC_CREDENTIALS:
-			switch (cfg_find_tok(line.name_tok, XDR_SEC_CREDENTIALS_OPTS, NUM_XDR_SEC_CREDENTIALS_OPTS)) {
-			case XDR_SEC_CASE_CREDENTIALS_USERNAME:
-				sec_cfg->user = cfg_strdup_no_checks(&line);
-				break;
-			case XDR_SEC_CASE_CREDENTIALS_PASSWORD:
-				sec_cfg->pw_clear = cfg_strdup_no_checks(&line);
-				break;
-			case CASE_CONTEXT_END:
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		// Parser state is corrupt.
-		default:
-			cf_warning(AS_XDR, "line %d :: invalid parser top-level state %d",
-					line_num, state.current);
-			break;
-		}
-	}
-
-	sec_cfg->pw_hash = cf_malloc(AS_PASSWORD_HASH_SIZE);
-	// TODO - decide. This allows hashed passwords in config file.
-	as_password_get_constant_hash(sec_cfg->pw_clear, sec_cfg->pw_hash);
-	// TODO - what checks ??
-
-	// Close the file.
-	fclose(FD);
-	return true;
 }
 
 

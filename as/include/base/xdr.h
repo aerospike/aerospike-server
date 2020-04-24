@@ -66,13 +66,6 @@ typedef enum {
 	XDR_AUTH_KERBEROS_LDAP // TODO - not yet implemented
 } as_xdr_auth_mode;
 
-typedef struct as_xdr_security_cfg_s {
-	char* file;
-	char* user;
-	char* pw_clear;
-	char* pw_hash; // not actual config - derived from pw_clear
-} as_xdr_security_cfg;
-
 typedef struct as_xdr_dc_ns_cfg_s {
 	char* ns_name;
 
@@ -102,11 +95,12 @@ typedef struct as_xdr_dc_cfg_s {
 	cf_mutex seed_lock;
 	cf_vector seed_nodes; // from 'node-address-port'
 
-	as_xdr_auth_mode auth_mode;
+	as_xdr_auth_mode auth_mode; // Aerospike destinations only
+	char* auth_password_file; // Aerospike destinations only
+	char* auth_pw_hash; // not actual config - derived from password
+	char* auth_user; // Aerospike destinations only
 
 	bool non_aerospike;
-
-	as_xdr_security_cfg security_cfg; // Aerospike destinations only
 
 	char* tls_our_name;
 	cf_tls_spec* tls_spec; // from 'tls-name'
