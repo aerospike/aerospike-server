@@ -181,12 +181,16 @@ static bool hll_parse_n_minhash_bits(hll_state* state, hll_op* op);
 static bool hll_parse_flags(hll_state* state, hll_op* op);
 static bool hll_parse_elements(hll_state* state, hll_op* op);
 static bool hll_parse_hlls(hll_state* state, hll_op* op);
+static bool hll_parse_hlls_intersect(hll_state* state, hll_op* op);
 
 static int32_t hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p);
 static int32_t hll_modify_prepare_add_op(hll_op* op, const as_particle* old_p);
 static int32_t hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p);
 static int32_t hll_modify_prepare_count_op(hll_op* op, const as_particle* old_p);
 static int32_t hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p);
+
+static int32_t hll_read_prepare_noop(hll_op* op, const as_particle* old_p);
+static int32_t hll_read_prepare_intersect(hll_op* op, const as_particle* old_p);
 
 static void hll_modify_execute_op(const hll_state* state, const hll_op* op, const as_particle* old_p, as_particle* new_p, uint32_t new_size, as_bin* rb);
 static void hll_read_execute_op(const hll_state* state, const hll_op* op, const as_particle* p, as_bin* rb);
@@ -246,8 +250,8 @@ static double hll_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs);
 	[_op].name = # _op, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn, \
 	[_op].bad_flags = ~((uint64_t)(_flags)), [_op].min_args = _min_args, \
 	[_op].max_args = _max_args, [_op].args = (hll_parse_fn[]){__VA_ARGS__}
-#define HLL_READ_OP_ENTRY(_op, _op_fn, _n_args, ...) \
-	[_op].name = # _op, [_op].prepare = NULL, \
+#define HLL_READ_OP_ENTRY(_op, _op_fn, _prep_fn, _n_args, ...) \
+	[_op].name = # _op, [_op].prepare = _prep_fn, \
 	[_op].fn.read = _op_fn, [_op].bad_flags = ~((uint64_t)(0)), \
 	[_op].min_args = _n_args, [_op].max_args = _n_args, \
 	[_op].args = (hll_parse_fn[]){__VA_ARGS__}
@@ -281,21 +285,23 @@ static const hll_op_def hll_modify_op_table[] = {
 		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_FOLD, hll_modify_op_fold,
 				hll_modify_prepare_fold_op,
 				(0),
-				1, 1, hll_parse_n_index_bits),
+				1, 1, hll_parse_n_index_bits)
 };
 
 static const hll_op_def hll_read_op_table[] = {
-		HLL_READ_OP_ENTRY(AS_HLL_OP_COUNT, hll_read_op_count, 0),
+		HLL_READ_OP_ENTRY(AS_HLL_OP_COUNT, hll_read_op_count,
+				hll_read_prepare_noop, 0),
 		HLL_READ_OP_ENTRY(AS_HLL_OP_GET_UNION, hll_read_op_union,
-				1, hll_parse_hlls),
+				hll_read_prepare_noop, 1, hll_parse_hlls),
 		HLL_READ_OP_ENTRY(AS_HLL_OP_UNION_COUNT, hll_read_op_union_count,
-				1, hll_parse_hlls),
+				hll_read_prepare_noop, 1, hll_parse_hlls),
 		HLL_READ_OP_ENTRY(AS_HLL_OP_INTERSECT_COUNT,
-				hll_read_op_intersect_count,
-				1, hll_parse_hlls),
+				hll_read_op_intersect_count, hll_read_prepare_intersect,
+				1, hll_parse_hlls_intersect),
 		HLL_READ_OP_ENTRY(AS_HLL_OP_SIMILARITY, hll_read_op_similarity,
-				1, hll_parse_hlls),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, hll_read_op_describe, 0),
+				hll_read_prepare_intersect, 1, hll_parse_hlls_intersect),
+		HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, hll_read_op_describe,
+				hll_read_prepare_noop, 0)
 };
 
 
@@ -411,6 +417,13 @@ as_bin_hll_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 	if (! hll_parse_op(&state, &op)) {
 		hll_op_destroy(&op);
 		return -AS_ERR_PARAMETER;
+	}
+
+	int32_t prepare_result = state.def->prepare(&op, b->particle);
+
+	if (prepare_result != AS_OK) {
+		hll_op_destroy(&op);
+		return prepare_result;
 	}
 
 	hll_read_execute_op(&state, &op, b->particle, rb);
@@ -820,6 +833,41 @@ hll_parse_hlls(hll_state* state, hll_op* op) {
 	return true;
 }
 
+static bool
+hll_parse_hlls_intersect(hll_state* state, hll_op* op)
+{
+	if (! hll_parse_hlls(state, op)) {
+		return false;
+	}
+
+	if (op->n_elements <= 2) {
+		return true;
+	}
+
+	element_buf* e0 = &op->elements[0];
+	hll_t* hll0 = (hll_t*)e0->buf;
+	uint32_t n_minhash_bits = hll0->n_minhash_bits;
+
+	for (uint32_t i = 1; i < op->n_elements; i++) {
+		element_buf* e = &op->elements[i];
+		hll_t* hll = (hll_t*)e->buf;
+
+		if (hll->n_minhash_bits != n_minhash_bits) {
+			cf_warning(AS_PARTICLE, "hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits are mismatched",
+					AS_ERR_PARAMETER, state->def->name, state->op_type, op->n_elements);
+			return false;
+		}
+	}
+
+	if (n_minhash_bits == 0) {
+		cf_warning(AS_PARTICLE, "hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits = 0",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, op->n_elements);
+		return false;
+	}
+
+	return true;
+}
+
 
 //==========================================================
 // Local helpers - prepare modify ops.
@@ -987,6 +1035,39 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 	}
 
 	op->n_minhash_bits = 0;
+
+	return AS_OK;
+}
+
+
+//==========================================================
+// Local helpers - prepare read ops.
+//
+
+static int32_t
+hll_read_prepare_noop(hll_op* op, const as_particle* old_p)
+{
+	(void)op;
+	(void)old_p;
+
+	return AS_OK;
+}
+
+static int32_t
+hll_read_prepare_intersect(hll_op* op, const as_particle* old_p)
+{
+	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
+	element_buf* e0 = &op->elements[0];
+	hll_t* hll0 = (hll_t*)e0->buf;
+	uint32_t n_minhash_bits = hll0->n_minhash_bits;
+
+	// Parse verified if more than 2 HLLs, all have the same n_minhash_bits.
+	if (op->n_elements > 2 && (old_hll->n_minhash_bits == 0 ||
+			old_hll->n_minhash_bits != n_minhash_bits)) {
+		cf_warning(AS_PARTICLE, "hll_read_prepare - error %u received %u HLLs - cannot intersect > 2 HLLs with the local HLL when n_minhash_bits do not match",
+				AS_ERR_OP_NOT_APPLICABLE, op->n_elements);
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
 
 	return AS_OK;
 }
@@ -1707,7 +1788,19 @@ hll_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 		sum_hmhs += c;
 	}
 
-	return sum_hmhs > cu ? sum_hmhs - cu : 0;
+	if (n_hmhs == 2) {
+		return sum_hmhs > cu ? sum_hmhs - cu : 0;
+	}
+	// else - n_hmhs == 3.
+
+	const hll_t* thmhs[2] = { hmhs[0], hmhs[2] };
+	uint64_t sum_intersect = hmh_estimate_intersect_cardinality(2, hmhs) +
+			hmh_estimate_intersect_cardinality(2, hmhs + 1) +
+			hmh_estimate_intersect_cardinality(2, thmhs);
+
+	int64_t result = (int64_t)cu - ((int64_t)sum_hmhs - (int64_t)sum_intersect);
+
+	return result < 0 ? 0 : (uint64_t)result;
 }
 
 static bool
