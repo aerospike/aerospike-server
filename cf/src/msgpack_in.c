@@ -392,7 +392,6 @@ msgpack_get_uint64(msgpack_in *mp, uint64_t *i)
 
 		if ((*buf & 0x80) != 0) {
 			*i = extract_neg_int64(buf, b);
-			mp->offset += 1 + b;
 			return true;
 		}
 
