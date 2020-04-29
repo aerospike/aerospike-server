@@ -62,6 +62,8 @@ typedef struct dns_resolve_udata_s {
 	void *udata;
 } dns_resolve_udata;
 
+CF_MUST_CHECK static int32_t cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name);
+
 void
 cf_ip_addr_to_string_safe(const cf_ip_addr *addr, char *string, size_t size)
 {
@@ -102,15 +104,6 @@ cf_ip_addr_to_string_multi(const cf_ip_addr *addrs, uint32_t n_addrs, char *stri
 
 	string[off] = 0;
 	return off;
-}
-
-void
-cf_ip_addr_to_string_multi_safe(const cf_ip_addr *addrs, uint32_t n_addrs, char *string,
-		size_t size)
-{
-	if (cf_ip_addr_to_string_multi(addrs, n_addrs, string, size) < 0) {
-		cf_crash(CF_SOCKET, "String buffer overflow");
-	}
 }
 
 static void
@@ -406,13 +399,6 @@ cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size)
 	return 2;
 }
 
-void
-cf_ip_port_from_node_id(cf_node id, cf_ip_port *port)
-{
-	uint8_t *buff = (uint8_t *)&id;
-	memcpy(port, buff + 6, 2);
-}
-
 int32_t
 cf_ip_addr_port_to_string(const cf_ip_addr *addr, cf_ip_port port, char *string, size_t size)
 {
@@ -435,48 +421,6 @@ cf_sock_addr_to_string_safe(const cf_sock_addr *addr, char *string, size_t size)
 	if (cf_sock_addr_to_string(addr, string, size) < 0) {
 		cf_crash(CF_SOCKET, "String buffer overflow");
 	}
-}
-
-int32_t
-cf_sock_addr_from_binary(const uint8_t *binary, size_t size, cf_sock_addr *addr)
-{
-	int32_t total = 0;
-	int32_t count = cf_ip_addr_from_binary(binary, size, &addr->addr);
-
-	if (count < 0) {
-		return -1;
-	}
-
-	total += count;
-	count = cf_ip_port_from_binary(binary + total, size - total, &addr->port);
-
-	if (count < 0) {
-		return -1;
-	}
-
-	total += count;
-	return total;
-}
-
-int32_t
-cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size)
-{
-	int32_t total = 0;
-	int32_t count = cf_ip_addr_to_binary(&addr->addr, binary, size);
-
-	if (count < 0) {
-		return -1;
-	}
-
-	total += count;
-	count = cf_ip_port_to_binary(addr->port, binary + total, size - total);
-
-	if (count < 0) {
-		return -1;
-	}
-
-	total += count;
-	return total;
 }
 
 int32_t
@@ -519,13 +463,6 @@ cf_sock_addr_copy(const cf_sock_addr *from, cf_sock_addr *to)
 {
 	cf_ip_addr_copy(&from->addr, &to->addr);
 	to->port = from->port;
-}
-
-void
-cf_sock_addr_set_any(cf_sock_addr *addr)
-{
-	cf_ip_addr_set_any(&addr->addr);
-	addr->port = 0;
 }
 
 bool
@@ -578,12 +515,6 @@ cf_serv_cfg_add_sock_cfg(cf_serv_cfg *serv_cfg, const cf_sock_cfg *sock_cfg)
 	cf_sock_cfg_copy(sock_cfg, &serv_cfg->cfgs[n]);
 	serv_cfg->n_cfgs = ++n;
 	return 0;
-}
-
-void
-cf_sockets_init(cf_sockets *socks)
-{
-	socks->n_socks = 0;
 }
 
 bool
@@ -695,13 +626,6 @@ void
 cf_socket_disable_blocking(cf_socket *sock)
 {
 	cf_fd_disable_blocking(sock->fd);
-}
-
-void
-cf_socket_enable_blocking(cf_socket *sock)
-{
-	int32_t flags = safe_fcntl(sock->fd, F_GETFL, 0);
-	safe_fcntl(sock->fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 
 void
@@ -1493,13 +1417,6 @@ x_shutdown(cf_socket *sock, int32_t how)
 					sock->fd, errno, cf_strerror(errno));
 		}
 	}
-}
-
-void
-cf_socket_write_shutdown(cf_socket *sock)
-{
-	cf_debug(CF_SOCKET, "Shutting down write channel of FD %d", sock->fd);
-	x_shutdown(sock, SHUT_WR);
 }
 
 void
@@ -2452,37 +2369,7 @@ cf_inter_get_addr_all(cf_ip_addr *addrs, uint32_t *n_addrs)
 	return inter_get_addr(addrs, n_addrs, &filter);
 }
 
-int32_t
-cf_inter_get_addr_all_legacy(cf_ip_addr *addrs, uint32_t *n_addrs)
-{
-	static inter_filter filter = {
-		.allow_v6 = false, .def_route = false, .up = true, .if_name = NULL
-	};
-
-	return inter_get_addr(addrs, n_addrs, &filter);
-}
-
-int32_t
-cf_inter_get_addr_def(cf_ip_addr *addrs, uint32_t *n_addrs)
-{
-	static inter_filter filter = {
-		.allow_v6 = true, .def_route = true, .up = true, .if_name = NULL
-	};
-
-	return inter_get_addr(addrs, n_addrs, &filter);
-}
-
-int32_t
-cf_inter_get_addr_def_legacy(cf_ip_addr *addrs, uint32_t *n_addrs)
-{
-	static inter_filter filter = {
-		.allow_v6 = false, .def_route = true, .up = true, .if_name = NULL
-	};
-
-	return inter_get_addr(addrs, n_addrs, &filter);
-}
-
-int32_t
+static int32_t
 cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name)
 {
 	inter_filter filter = {
@@ -2638,81 +2525,6 @@ cf_inter_min_mtu(void)
 	}
 
 	return (int32_t)min;
-}
-
-static bool
-detect_changes(bool legacy, cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit)
-{
-	cf_ip_addr curr[CF_SOCK_CFG_MAX];
-	uint32_t n_curr = CF_SOCK_CFG_MAX;
-	int32_t res;
-
-	if (legacy) {
-		res = cf_inter_get_addr_all_legacy(curr, &n_curr);
-	}
-	else {
-		res = cf_inter_get_addr_all(curr, &n_curr);
-	}
-
-	if (res < 0) {
-		cf_crash(AS_INFO, "Error while getting interface addresses");
-	}
-
-	if (n_curr > limit) {
-		cf_crash(AS_INFO, "Too many network interface addresses: %d", n_curr);
-	}
-
-	cf_ip_addr_sort(curr, n_curr);
-	uint32_t n_filter = 0;
-
-	for (uint32_t i = 0; i < n_curr; ++i) {
-		if (cf_ip_addr_is_local(&curr[i])) {
-			continue;
-		}
-
-		if (i > n_filter) {
-			cf_ip_addr_copy(&curr[i], &curr[n_filter]);
-		}
-
-		++n_filter;
-	}
-
-	n_curr = n_filter;
-	bool change = false;
-
-	if (n_curr != *n_addrs) {
-		change = true;
-	}
-	else {
-		for (uint32_t i = 0; i < n_curr; ++i) {
-			if (cf_ip_addr_compare(&addrs[i], &curr[i]) != 0) {
-				change = true;
-				break;
-			}
-		}
-	}
-
-	if (change) {
-		for (uint32_t i = 0; i < n_curr; ++i) {
-			cf_ip_addr_copy(&curr[i], &addrs[i]);
-		}
-
-		*n_addrs = n_curr;
-	}
-
-	return change;
-}
-
-bool
-cf_inter_detect_changes(cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit)
-{
-	return detect_changes(false, addrs, n_addrs, limit);
-}
-
-bool
-cf_inter_detect_changes_legacy(cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit)
-{
-	return detect_changes(true, addrs, n_addrs, limit);
 }
 
 static const char *if_in_order[] = {
