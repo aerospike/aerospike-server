@@ -45,13 +45,13 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_ll.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "socket.h"
+#include "vector.h"
 
 #include "base/aggr.h"
 #include "base/cfg.h"

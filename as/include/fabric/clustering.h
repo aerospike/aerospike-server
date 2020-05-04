@@ -30,9 +30,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_vector.h"
-
 #include "fault.h"
+#include "vector.h"
 
 #include "fabric/hlc.h"
 

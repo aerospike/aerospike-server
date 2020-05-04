@@ -36,7 +36,6 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "arenax.h"
 #include "cf_mutex.h"
@@ -47,6 +46,7 @@
 #include "msg.h"
 #include "node.h"
 #include "shash.h"
+#include "vector.h"
 #include "vmapx.h"
 #include "xmem.h"
 

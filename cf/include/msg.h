@@ -30,9 +30,9 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "dynbuf.h"
+#include "vector.h"
 
 
 //==========================================================

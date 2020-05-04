@@ -40,7 +40,6 @@
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
 #include "cf_str.h"
@@ -50,6 +49,7 @@
 #include "fault.h"
 #include "shash.h"
 #include "socket.h"
+#include "vector.h"
 #include "xmem.h"
 
 #include "ai_obj.h"

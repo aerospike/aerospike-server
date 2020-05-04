@@ -38,12 +38,12 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "cf_thread.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "socket.h"
+#include "vector.h"
 
 #include "base/as_stap.h"
 #include "base/datamodel.h"

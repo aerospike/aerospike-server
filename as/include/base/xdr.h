@@ -30,12 +30,12 @@
 #include <stdint.h>
 
 #include "citrusleaf/cf_digest.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
 #include "socket.h"
 #include "tls.h"
+#include "vector.h"
 
 
 //==========================================================

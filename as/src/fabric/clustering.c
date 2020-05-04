@@ -1602,7 +1602,7 @@ vector_subtract(cf_vector* target, cf_vector* to_remove)
 static cf_node*
 vector_to_array(cf_vector* vector)
 {
-	return (cf_node*)vector->vector;
+	return (cf_node*)vector->eles;
 }
 
 /**

@@ -33,10 +33,10 @@
 
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_digest.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "dynbuf.h"
 #include "socket.h"
+#include "vector.h"
 
 
 //==========================================================

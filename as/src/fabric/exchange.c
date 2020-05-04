@@ -918,7 +918,7 @@ static pthread_mutex_t g_external_event_publisher_lock =
 static cf_node*
 vector_to_array(cf_vector* vector)
 {
-	return (cf_node*)vector->vector;
+	return (cf_node*)vector->eles;
 }
 
 /**

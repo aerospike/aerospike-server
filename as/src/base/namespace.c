@@ -114,7 +114,7 @@ as_namespace_create(char *name)
 	ns->cfg_replication_factor = 2;
 	ns->replication_factor = 0; // gets set on rebalance
 
-	cf_vector_pointer_init(&ns->xdr_dclist_v, 3, 0);
+	cf_vector_init(&ns->xdr_dclist_v, sizeof(void*), 3, 0);
 
 	ns->background_scan_max_rps = 10000; // internal write generation limit
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;

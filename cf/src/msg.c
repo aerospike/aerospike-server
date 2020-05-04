@@ -38,11 +38,11 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "dynbuf.h"
 #include "fault.h"
 #include "msgpack_in.h"
+#include "vector.h"
 
 
 //==========================================================

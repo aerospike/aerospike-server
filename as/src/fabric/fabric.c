@@ -63,7 +63,6 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
@@ -74,6 +73,7 @@
 #include "shash.h"
 #include "socket.h"
 #include "tls.h"
+#include "vector.h"
 
 #include "base/cfg.h"
 #include "base/health.h"

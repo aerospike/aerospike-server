@@ -35,13 +35,13 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "cf_thread.h"
 #include "fault.h"
 #include "hardware.h"
 #include "linear_hist.h"
 #include "node.h"
+#include "vector.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"

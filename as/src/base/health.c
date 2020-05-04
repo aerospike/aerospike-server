@@ -34,7 +34,6 @@
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
@@ -42,6 +41,7 @@
 #include "fault.h"
 #include "node.h"
 #include "shash.h"
+#include "vector.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

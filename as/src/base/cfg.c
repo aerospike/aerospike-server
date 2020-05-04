@@ -43,7 +43,6 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "arenax.h"
 #include "bits.h"
@@ -59,6 +58,7 @@
 #include "node.h"
 #include "socket.h"
 #include "tls.h"
+#include "vector.h"
 #include "xmem.h"
 
 #include "base/datamodel.h"

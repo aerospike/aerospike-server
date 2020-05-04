@@ -26,11 +26,11 @@
 #include <stdint.h>
 
 #include "citrusleaf/cf_atomic.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "msg.h"
 #include "socket.h"
 #include "tls.h"
+#include "vector.h"
 
 #include "fabric/hlc.h"
 

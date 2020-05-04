@@ -38,7 +38,6 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "bits.h"
 #include "cf_mutex.h"
@@ -48,6 +47,7 @@
 #include "msg.h"
 #include "node.h"
 #include "shash.h"
+#include "vector.h"
 
 #include "base/cfg.h"
 #include "fabric/exchange.h"

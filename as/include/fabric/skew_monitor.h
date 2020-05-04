@@ -25,9 +25,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_vector.h"
-
 #include "dynbuf.h"
+#include "vector.h"
 
 /**
  * Initialize skew monitor.

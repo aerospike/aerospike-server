@@ -26,10 +26,10 @@
 #include <stdint.h>
 
 #include "citrusleaf/cf_atomic.h"
-#include "citrusleaf/cf_vector.h"
 
 #include "dynbuf.h"
 #include "node.h"
+#include "vector.h"
 
 /*
  * ----------------------------------------------------------------------------
