@@ -68,7 +68,7 @@ typedef struct as_service_access_s {
 
 extern as_service_access g_access;
 extern cf_serv_cfg g_service_bind;
-extern struct cf_tls_info_s* g_service_tls;
+extern cf_tls_info* g_service_tls;
 
 
 //==========================================================

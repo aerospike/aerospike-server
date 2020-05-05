@@ -4995,12 +4995,13 @@ as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool de
 //
 
 int
-as_info_parameter_get(char *param_str, char *param, char *value, int *value_len)
+as_info_parameter_get(const char *param_str, const char *param, char *value,
+		int *value_len)
 {
 	cf_detail(AS_INFO, "parameter get: paramstr %s seeking param %s", param_str, param);
 
-	char *c = param_str;
-	char *tok = param_str;
+	const char *c = param_str;
+	const char *tok = param_str;
 	int param_len = strlen(param);
 
 	while (*c) {
@@ -5276,9 +5277,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// Persistent memory block keys' namespace ID (enterprise only).
 	info_append_uint32(db, "xmem_id", ns->xmem_id);
 
-	// Remaining bin-name slots (yes, this can be negative).
+	// Remaining bin-name slots.
 	if (! ns->single_bin) {
-		info_append_int(db, "available_bin_names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
+		info_append_uint32(db, "available_bin_names", MAX_BIN_NAMES - cf_vmapx_count(ns->p_bin_name_vmap));
 	}
 
 	// Persistent index stats.

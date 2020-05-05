@@ -39,6 +39,8 @@
 void
 as_storage_init_memory(as_namespace *ns)
 {
+	g_unique_data_size += ns->memory_size / ns->cfg_replication_factor;
+
 	as_truncate_done_startup(ns);
 }
 

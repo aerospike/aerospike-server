@@ -26,7 +26,6 @@
 // Includes.
 //
 
-#include <alloca.h>
 #include <malloc.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -117,12 +116,6 @@ void *cf_alloc_realloc_arena(void *p, size_t sz, int32_t arena);
 })
 
 #define cf_free(_p)              free(_p)
-
-#define cf_strdup_alloca(_str) ({ \
-	char* _tmp = alloca(strlen(_str) + 1); \
-	strcpy(_tmp, _str); \
-	_tmp; \
-})
 
 extern bool g_alloc_started;
 

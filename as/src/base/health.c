@@ -137,6 +137,21 @@ static const stat_spec ns_stat_spec[] = {
 
 
 //==========================================================
+// Globals.
+//
+
+bool g_health_enabled = false;
+
+__thread uint64_t g_device_read_counter = 0;
+__thread uint64_t g_replica_write_counter = 0;
+
+static local_stats g_local_stats;
+static cf_mutex g_outlier_lock = CF_MUTEX_INIT;
+static cf_vector* g_outliers;
+static cf_shash* g_stats;
+
+
+//==========================================================
 // Forward declarations.
 //
 
@@ -165,22 +180,7 @@ static int32_t update_mov_avg_reduce_fn(const void* key, void* data, void* udata
 
 
 //==========================================================
-// Globals.
-//
-
-bool g_health_enabled = false;
-
-__thread uint64_t g_device_read_counter = 0;
-__thread uint64_t g_replica_write_counter = 0;
-
-static local_stats g_local_stats;
-static cf_mutex g_outlier_lock = CF_MUTEX_INIT;
-static cf_vector* g_outliers;
-static cf_shash* g_stats;
-
-
-//==========================================================
-// Inlines and macros.
+// Inlines & macros.
 //
 
 static inline void
@@ -516,7 +516,7 @@ create_local_stats()
 			hs->buckets = cf_malloc(buckets_sz);
 			memset(hs->buckets, 0, buckets_sz);
 			hs->cur_bucket = 0;
-			strncpy(hs->id, ns->storage_devices[d_id], MAX_ID_SZ);
+			snprintf(hs->id, MAX_ID_SZ, "%s", ns->storage_devices[d_id]);
 		}
 	}
 }

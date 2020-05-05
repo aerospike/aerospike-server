@@ -114,8 +114,6 @@ as_namespace_create(char *name)
 	ns->cfg_replication_factor = 2;
 	ns->replication_factor = 0; // gets set on rebalance
 
-	cf_vector_init(&ns->xdr_dclist_v, sizeof(void*), 3, 0);
-
 	ns->background_scan_max_rps = 10000; // internal write generation limit
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
@@ -233,7 +231,7 @@ as_namespace_configure_sets(as_namespace *ns)
 
 
 as_namespace *
-as_namespace_get_byname(char *name)
+as_namespace_get_byname(const char *name)
 {
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace *ns = g_config.namespaces[ns_ix];
@@ -248,7 +246,7 @@ as_namespace_get_byname(char *name)
 
 
 as_namespace *
-as_namespace_get_bybuf(uint8_t *buf, size_t len)
+as_namespace_get_bybuf(const uint8_t *buf, size_t len)
 {
 	if (len >= AS_ID_NAMESPACE_SZ) {
 		return NULL;
@@ -274,7 +272,7 @@ as_namespace_get_bymsgfield(as_msg_field *fp)
 
 
 const char *
-as_namespace_get_set_name(as_namespace *ns, uint16_t set_id)
+as_namespace_get_set_name(const as_namespace *ns, uint16_t set_id)
 {
 	// Note that set_id is 1-based, but cf_vmap index is 0-based.
 	// (This is because 0 in the index structure means 'no set'.)
@@ -568,7 +566,7 @@ as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns)
 		cf_dyn_buf_append_string(db, "bin_names=");
 		cf_dyn_buf_append_uint32(db, bin_count);
 		cf_dyn_buf_append_string(db, ",bin_names_quota=");
-		cf_dyn_buf_append_uint32(db, BIN_NAMES_QUOTA);
+		cf_dyn_buf_append_uint32(db, MAX_BIN_NAMES);
 
 		for (uint16_t i = 0; i < (uint16_t)bin_count; i++) {
 			cf_dyn_buf_append_char(db, ',');

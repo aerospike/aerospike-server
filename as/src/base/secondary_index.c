@@ -1433,7 +1433,7 @@ as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
 	if (simatch != -1) {
 		ret = AS_SINDEX_ERR_FOUND;
 	} else {
-		int16_t binid = as_bin_get_id(ns, imd->bname);
+		int32_t binid = as_bin_get_id(ns, imd->bname);
 		if (binid != -1)
 		{
 			int simatch = as_sindex__simatch_by_set_binid(ns, imd->set, binid, imd->sktype, imd->itype, imd->path_str);
@@ -1579,7 +1579,7 @@ as_sindex_smd_create(as_namespace *ns, as_sindex_metadata *imd)
 	bool found_iname = false;      // ns:iname
 
 	int simatch_defn = -1;
-	int16_t binid = as_bin_get_id(ns, imd->bname);
+	int32_t binid = as_bin_get_id(ns, imd->bname);
 	if (binid != -1) {
 		simatch_defn = as_sindex__simatch_by_set_binid(ns, imd->set, binid,
 				imd->sktype, imd->itype, imd->path_str);
@@ -1720,7 +1720,7 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 				AS_SINDEX_LOOKUP_FLAG_NORESERVE | AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
 	}
 	else {
-		int16_t bin_id = as_bin_get_id(ns, imd->bname);
+		int32_t bin_id = as_bin_get_id(ns, imd->bname);
 
 		if (bin_id == -1) {
 			SINDEX_GWUNLOCK();
@@ -2458,7 +2458,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 
 		char binname[AS_BIN_NAME_MAX_SZ];
 		if (as_sindex_extract_bin_from_path(srange->bin_path, binname) == AS_SINDEX_OK) {
-			int16_t id = as_bin_get_id(ns, binname);
+			int32_t id = as_bin_get_id(ns, binname);
 			if (id != -1) {
 				start->id   = id;
 				end->id     = id;

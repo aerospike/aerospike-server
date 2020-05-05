@@ -45,6 +45,13 @@
 
 
 //==========================================================
+// Globals.
+//
+
+uint64_t g_unique_data_size = 0;
+
+
+//==========================================================
 // Generic "base class" functions that call through
 // storage-engine "v-tables".
 //
@@ -90,6 +97,10 @@ as_storage_init()
 		if (as_storage_init_table[ns->storage_type]) {
 			as_storage_init_table[ns->storage_type](ns);
 		}
+	}
+
+	if (AS_NODE_STORAGE_SZ != 0 && g_unique_data_size > AS_NODE_STORAGE_SZ) {
+		cf_crash_nostack(AS_STORAGE, "Community Edition limit exceeded");
 	}
 }
 

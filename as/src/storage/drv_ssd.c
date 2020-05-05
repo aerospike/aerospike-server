@@ -3361,6 +3361,8 @@ as_storage_init_ssd(as_namespace *ns)
 		ssd_init_shadow_files(ns, ssds);
 	}
 
+	g_unique_data_size += ns->drive_size / (2 * ns->cfg_replication_factor);
+
 	cf_mutex_init(&ssds->flush_lock);
 
 	// Allow defrag to go full speed during startup - restore the configured

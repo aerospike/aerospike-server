@@ -672,7 +672,7 @@ typedef enum {
 	CASE_XDR_DC_AUTH_MODE,
 	CASE_XDR_DC_AUTH_PASSWORD_FILE,
 	CASE_XDR_DC_AUTH_USER,
-	CASE_XDR_DC_NON_AEROSPIKE,
+	CASE_XDR_DC_CONNECTOR,
 	CASE_XDR_DC_TLS_NAME,
 	CASE_XDR_DC_USE_ALTERNATE_ADDRESS,
 
@@ -1183,7 +1183,7 @@ const cfg_opt XDR_DC_OPTS[] = {
 		{ "auth-mode",						CASE_XDR_DC_AUTH_MODE },
 		{ "auth-password-file",				CASE_XDR_DC_AUTH_PASSWORD_FILE },
 		{ "auth-user",						CASE_XDR_DC_AUTH_USER },
-		{ "non-aerospike",					CASE_XDR_DC_NON_AEROSPIKE},
+		{ "connector",						CASE_XDR_DC_CONNECTOR},
 		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
 		{ "use-alternate-access-address",	CASE_XDR_DC_USE_ALTERNATE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
@@ -3621,7 +3621,7 @@ as_config_init(const char* config_file)
 		case XDR_DC:
 			switch (cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
 			case CASE_XDR_DC_NODE_ADDRESS_PORT:
-				as_xdr_dc_add_seed(dc_cfg, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, true), cfg_strdup_val3_no_checks(&line, false));
+				as_xdr_startup_add_seed(dc_cfg, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, true), cfg_strdup_val3_no_checks(&line, false));
 				break;
 			case CASE_XDR_DC_NAMESPACE:
 				dc_ns_cfg = as_xdr_startup_create_dc_ns_cfg(line.val_tok_1);
@@ -3651,8 +3651,8 @@ as_config_init(const char* config_file)
 			case CASE_XDR_DC_AUTH_USER:
 				dc_cfg->auth_user = cfg_strdup(&line, 64);
 				break;
-			case CASE_XDR_DC_NON_AEROSPIKE:
-				dc_cfg->non_aerospike = cfg_bool(&line);
+			case CASE_XDR_DC_CONNECTOR:
+				dc_cfg->connector = cfg_bool(&line);
 				break;
 			case CASE_XDR_DC_TLS_NAME:
 				dc_cfg->tls_our_name = cfg_strdup_no_checks(&line);
@@ -4233,7 +4233,7 @@ as_config_cluster_name_set(const char* cluster_name)
 
 	cf_mutex_lock(&g_config_lock);
 
-	if (strcmp(cluster_name,"null") == 0){
+	if (strcmp(cluster_name, "null") == 0) {
 		// 'null' is a special value representing an unset cluster-name.
 		strcpy(g_config.cluster_name, "");
 	}

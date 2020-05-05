@@ -90,8 +90,8 @@ struct index_metadata_s;
 #define AS_ID_INAME_SZ 256
 
 #define AS_BIN_NAME_MAX_SZ 16 // changing this breaks warm restart
-#define MAX_BIN_NAMES 0x10000 // no need for more - numeric ID is 16 bits
-#define BIN_NAMES_QUOTA (MAX_BIN_NAMES / 2) // don't add more names than this via client transactions
+#define MAX_BIN_NAMES 0xFFFF // changing this breaks warm restart
+#define RECORD_MAX_BINS 0X7FFF
 
 /*
  * Compare two 16-bit generation counts, allowing wrap-arounds.
@@ -433,9 +433,9 @@ as_bin_get_particle_type(const as_bin *b) {
 
 
 /* Bin function declarations */
-extern int16_t as_bin_get_id(as_namespace *ns, const char *name);
+extern int32_t as_bin_get_id(as_namespace *ns, const char *name);
 extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len, uint16_t *id);
-extern const char* as_bin_get_name_from_id(as_namespace *ns, uint16_t id);
+extern const char* as_bin_get_name_from_id(const as_namespace *ns, uint16_t id);
 extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
 extern void as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from);
 extern int as_storage_rd_load_n_bins(as_storage_rd *rd);
@@ -580,7 +580,7 @@ struct as_sindex_s;
 struct as_sindex_config_s;
 
 #define AS_SET_MAX_COUNT 0x3FF	// ID's 10 bits worth minus 1 (ID 0 means no set)
-#define AS_BINID_HAS_SINDEX_SIZE  MAX_BIN_NAMES / ( sizeof(uint32_t) * CHAR_BIT )
+#define AS_BINID_HAS_SINDEX_SIZE ((MAX_BIN_NAMES + 1) / (sizeof(uint32_t) * CHAR_BIT)) // round numerator to multiple of 32
 
 
 // TODO - would be nice to put this in as_index.h:
@@ -802,7 +802,6 @@ struct as_namespace_s {
 	as_write_commit_level write_commit_level;
 	uint32_t		xdr_tomb_raider_period;
 	uint32_t		n_xdr_tomb_raider_threads;
-	cf_vector		xdr_dclist_v;
 
 	const char*		xmem_mounts[CF_XMEM_MAX_MOUNTS];
 	uint32_t		n_xmem_mounts; // indirect config
@@ -1332,10 +1331,10 @@ extern void as_namespaces_init(bool cold_start_cmd, uint32_t instance);
 extern void as_namespaces_setup(bool cold_start_cmd, uint32_t instance);
 extern void as_namespace_finish_setup(as_namespace *ns, uint32_t instance);
 extern bool as_namespace_configure_sets(as_namespace *ns);
-extern as_namespace *as_namespace_get_byname(char *name);
-extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
+extern as_namespace *as_namespace_get_byname(const char *name);
+extern as_namespace *as_namespace_get_bybuf(const uint8_t *name, size_t len);
 extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
-extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
+extern const char *as_namespace_get_set_name(const as_namespace *ns, uint16_t set_id);
 extern uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);
 extern uint16_t as_namespace_get_create_set_id(as_namespace *ns, const char *set_name);
 extern int as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions);

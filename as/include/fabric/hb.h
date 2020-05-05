@@ -214,7 +214,7 @@ typedef struct as_hb_config_s
 	 * Global TLS configuration.
 	 */
 
-	struct cf_tls_info_s *tls;
+	cf_tls_info* tls;
 
 	/**
 	 * Multicast mode only config for multicast groups.

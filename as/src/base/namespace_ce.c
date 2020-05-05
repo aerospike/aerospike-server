@@ -106,7 +106,7 @@ setup_namespace(as_namespace* ns)
 	if (! ns->single_bin) {
 		ns->p_bin_name_vmap = (cf_vmapx*)cf_malloc(cf_vmapx_sizeof(AS_BIN_NAME_MAX_SZ, MAX_BIN_NAMES));
 
-		cf_vmapx_init(ns->p_bin_name_vmap, AS_BIN_NAME_MAX_SZ, MAX_BIN_NAMES, 4096, AS_BIN_NAME_MAX_SZ);
+		cf_vmapx_init(ns->p_bin_name_vmap, AS_BIN_NAME_MAX_SZ, MAX_BIN_NAMES, 64 * 1024, AS_BIN_NAME_MAX_SZ);
 	}
 
 	//--------------------------------------------

@@ -56,7 +56,7 @@ extern int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
 // For commands - you will be called with the parameters.
 extern int as_info_set_command(const char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
-int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
+int as_info_parameter_get(const char *param_str, const char *param, char *value, int *value_len);
 
 typedef struct as_info_transaction_s {
 	as_file_handle *fd_h;

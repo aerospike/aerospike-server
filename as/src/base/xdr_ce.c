@@ -55,6 +55,7 @@ as_xdr_start(void)
 as_xdr_dc_cfg*
 as_xdr_startup_create_dc(const char* dc_name)
 {
+	cf_crash(AS_XDR, "unreachable function for CE");
 	return NULL;
 }
 
@@ -70,7 +71,7 @@ as_xdr_get_submit_info(const as_record* r, uint64_t prev_lut,
 }
 
 void
-as_xdr_submit(as_namespace* ns, const as_xdr_submit_info* info)
+as_xdr_submit(const as_namespace* ns, const as_xdr_submit_info* info)
 {
 }
 
@@ -85,13 +86,15 @@ as_xdr_cleanup_tl_stats(void)
 }
 
 void
-as_xdr_dc_add_seed(as_xdr_dc_cfg* cfg, char* host, char* tls_name, char* port)
+as_xdr_startup_add_seed(as_xdr_dc_cfg* cfg, char* host, char* tls_name, char* port)
 {
+	cf_crash(AS_XDR, "unreachable function for CE");
 }
 
 as_xdr_dc_ns_cfg*
 as_xdr_startup_create_dc_ns_cfg(const char* ns_name)
 {
+	cf_crash(AS_XDR, "unreachable function for CE");
 	return NULL;
 }
 
@@ -121,20 +124,20 @@ as_xdr_timer_event(cf_poll_event* events, int32_t n_events, uint32_t e_ix)
 }
 
 void
-as_xdr_get_config(char* cmd, cf_dyn_buf* db)
-{
-}
-
-void
-as_xdr_get_stats(char* cmd, cf_dyn_buf* db)
+as_xdr_get_config(const char* cmd, cf_dyn_buf* db)
 {
 }
 
 bool
-as_xdr_set_config(char* cmd)
+as_xdr_set_config(const char* cmd)
 {
-	cf_crash(AS_XDR, "CE code called as_xdr_set_config()");
+	cf_crash(AS_XDR, "unreachable function for CE");
 	return false;
+}
+
+void
+as_xdr_get_stats(const char* cmd, cf_dyn_buf* db)
+{
 }
 
 int

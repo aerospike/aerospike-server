@@ -92,7 +92,7 @@ as_service_access g_access = {
 };
 
 cf_serv_cfg g_service_bind = { .n_cfgs = 0 };
-struct cf_tls_info_s* g_service_tls;
+cf_tls_info* g_service_tls;
 
 static cf_sockets g_sockets;
 
@@ -426,7 +426,7 @@ run_accept(void* udata)
 			cf_socket_keep_alive(&csock, 60, 60, 2);
 
 			if (cfg->owner == CF_SOCK_OWNER_SERVICE_TLS) {
-				tls_socket_prepare_server(g_service_tls, NULL, &csock);
+				tls_socket_prepare_server(g_service_tls, &csock);
 			}
 
 			as_file_handle* fd_h = cf_rc_alloc(sizeof(as_file_handle));

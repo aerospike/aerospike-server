@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "aerospike/as_password.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "cf_mutex.h"
@@ -86,7 +87,7 @@ typedef struct as_xdr_dc_ns_cfg_s {
 
 	cf_vector* ignored_bins; // startup only
 	cf_vector* shipped_bins; // startup only
-	uint8_t bins[32 * 1024]; // BIN_NAMES_QUOTA
+	uint8_t bins[(64 * 1024) - 1]; // MAX_BIN_NAMES
 } as_xdr_dc_ns_cfg;
 
 typedef struct as_xdr_dc_cfg_s {
@@ -97,10 +98,10 @@ typedef struct as_xdr_dc_cfg_s {
 
 	as_xdr_auth_mode auth_mode; // Aerospike destinations only
 	char* auth_password_file; // Aerospike destinations only
-	char* auth_pw_hash; // not actual config - derived from password
+	char auth_pw_hash[AS_PASSWORD_HASH_SIZE]; // not actual config - derived
 	char* auth_user; // Aerospike destinations only
 
-	bool non_aerospike;
+	bool connector;
 
 	char* tls_our_name;
 	cf_tls_spec* tls_spec; // from 'tls-name'
@@ -140,27 +141,31 @@ typedef struct as_xdr_submit_info_s {
 // Public API.
 //
 
+// Generic.
 void as_xdr_init(void);
 void as_xdr_start(void);
 
+// Manager.
 as_xdr_dc_cfg* as_xdr_startup_create_dc(const char* name);
+as_xdr_dc_ns_cfg* as_xdr_startup_create_dc_ns_cfg(const char* ns_name);
+void as_xdr_startup_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port, char* tls_name);
 void as_xdr_link_tls(void);
 void as_xdr_get_submit_info(const struct as_index_s* r, uint64_t prev_lut, as_xdr_submit_info* info);
-void as_xdr_submit(struct as_namespace_s* ns, const as_xdr_submit_info* info);
+void as_xdr_submit(const struct as_namespace_s* ns, const as_xdr_submit_info* info);
 void as_xdr_ticker(uint64_t delta_time);
 void as_xdr_cleanup_tl_stats(void);
 
-void as_xdr_dc_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port, char* tls_name);
-as_xdr_dc_ns_cfg* as_xdr_startup_create_dc_ns_cfg(const char* ns_name);
-
+// Reader.
 void as_xdr_read(struct as_transaction_s* tr);
 
+// Ship.
 void as_xdr_init_poll(cf_poll poll);
 void as_xdr_shutdown_poll(void);
 void as_xdr_io_event(uint32_t mask, void* data);
 void as_xdr_timer_event(cf_poll_event* events, int32_t n_events, uint32_t e_ix);
 
-void as_xdr_get_config(char* cmd, cf_dyn_buf* db);
-bool as_xdr_set_config(char* cmd);
-void as_xdr_get_stats(char* cmd, cf_dyn_buf* db);
+// Info.
+void as_xdr_get_config(const char* cmd, cf_dyn_buf* db);
+bool as_xdr_set_config(const char* cmd);
+void as_xdr_get_stats(const char* cmd, cf_dyn_buf* db);
 int as_xdr_dc_state(char* name, char* cmd, cf_dyn_buf* db);

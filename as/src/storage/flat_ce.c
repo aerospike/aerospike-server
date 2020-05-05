@@ -103,6 +103,8 @@ set_remote_record_xdr_flags(const as_flat_record* flat,
 void
 set_flat_xdr_state(const as_record* r, as_flat_record* flat)
 {
+	// Don't store junk bit - may upgrade to EE, or downgrade -> 4.9 -> 4.8-.
+	flat->xdr_write = 0;
 }
 
 as_flat_extra_flags

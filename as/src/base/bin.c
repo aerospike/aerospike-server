@@ -81,7 +81,7 @@ safe_bins(const as_record *r)
 //
 
 // Caller-beware, name cannot be null, must be null-terminated.
-int16_t
+int32_t
 as_bin_get_id(as_namespace *ns, const char *name)
 {
 	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
@@ -89,7 +89,7 @@ as_bin_get_id(as_namespace *ns, const char *name)
 	uint32_t idx;
 
 	if (cf_vmapx_get_index(ns->p_bin_name_vmap, name, &idx) == CF_VMAPX_OK) {
-		return (uint16_t)idx;
+		return (int32_t)idx;
 	}
 
 	return -1;
@@ -118,6 +118,12 @@ as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len,
 	cf_vmapx_err result = cf_vmapx_put_unique_w_len(ns->p_bin_name_vmap, name,
 			len, &idx);
 
+	if (result == CF_VMAPX_ERR_FULL) {
+		cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %.*s",
+				ns->name, (uint32_t)len, name);
+		return false;
+	}
+
 	if (! (result == CF_VMAPX_OK || result == CF_VMAPX_ERR_NAME_EXISTS)) {
 		cf_warning(AS_BIN, "{%s} vmap err %d - can't add new bin-name %.*s",
 				ns->name, result, (uint32_t)len, name);
@@ -131,7 +137,7 @@ as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len,
 
 
 const char *
-as_bin_get_name_from_id(as_namespace *ns, uint16_t id)
+as_bin_get_name_from_id(const as_namespace *ns, uint16_t id)
 {
 	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
 
@@ -151,8 +157,7 @@ bool
 as_bin_name_within_quota(as_namespace *ns, const char *name)
 {
 	// Won't exceed quota if single-bin or currently below quota.
-	if (ns->single_bin ||
-			cf_vmapx_count(ns->p_bin_name_vmap) < BIN_NAMES_QUOTA) {
+	if (ns->single_bin || cf_vmapx_count(ns->p_bin_name_vmap) < MAX_BIN_NAMES) {
 		return true;
 	}
 
@@ -391,17 +396,6 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
 		cf_crash(AS_BIN, "ran out of allocated bins in rd");
 	}
 	// else - bin name is new.
-
-	if (cf_vmapx_count(ns->p_bin_name_vmap) >= BIN_NAMES_QUOTA) {
-		cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %.*s",
-				ns->name, (uint32_t)len, name);
-
-		if (result) {
-			*result = AS_ERR_BIN_NAME;
-		}
-
-		return NULL;
-	}
 
 	uint16_t i = as_bin_inuse_count(rd);
 

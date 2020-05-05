@@ -251,7 +251,7 @@ as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,
 		else {
 			opt_meta->n_bins = uintvar_parse(&at, end);
 
-			if (opt_meta->n_bins == 0 || opt_meta->n_bins > BIN_NAMES_QUOTA) {
+			if (opt_meta->n_bins == 0 || opt_meta->n_bins > RECORD_MAX_BINS) {
 				cf_warning(AS_FLAT, "bad n-bins %u", opt_meta->n_bins);
 				return NULL;
 			}

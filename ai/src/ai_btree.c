@@ -915,7 +915,7 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, a
 
 	as_namespace *ns = imd->si->ns;
 	if (!ns) {
-		ns = as_namespace_get_byname((char *)imd->ns_name);
+		ns = as_namespace_get_byname(imd->ns_name);
 	}
 
 	if (!pimd || !pimd->ibtr || !pimd->ibtr->numkeys) {

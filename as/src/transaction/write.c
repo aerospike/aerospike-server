@@ -63,6 +63,10 @@
 // Typedefs & constants.
 //
 
+#define MAX_N_OPS (32 * 1024)
+
+COMPILER_ASSERT(RECORD_MAX_BINS + MAX_N_OPS < 64 * 1024);
+
 #define STACK_PARTICLES_SIZE (1024 * 1024)
 
 
@@ -221,7 +225,7 @@ as_write_start(as_transaction* tr)
 
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
-		tr->result_code = AS_ERR_ALWAYS_FORBIDDEN;
+		tr->result_code = AS_ERR_FORBIDDEN;
 		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;
 	}
@@ -939,6 +943,11 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 
 	if (m->n_ops == 0) {
 		cf_warning(AS_RW, "{%s} write_master: bin op(s) expected, none present %pD", ns->name, &tr->keyd);
+		return AS_ERR_PARAMETER;
+	}
+
+	if (m->n_ops > MAX_N_OPS) {
+		cf_warning(AS_RW, "{%s} write_master: can't exceed %u bin ops %pD", ns->name, MAX_N_OPS, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1741,6 +1750,11 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 	}
 
 	*p_n_final_bins = as_bin_inuse_count(rd);
+
+	if (*p_n_final_bins > RECORD_MAX_BINS) {
+		destroy_stack_bins(result_bins, n_result_bins);
+		return AS_ERR_PARAMETER;
+	}
 
 	if (n_response_bins == 0) {
 		// If 'ordered-ops' flag was not set, and there were no read ops or CDT

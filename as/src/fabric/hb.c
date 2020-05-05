@@ -3894,7 +3894,7 @@ channel_accept_connection(cf_socket* lsock)
 	cf_sock_cfg *cfg = lsock->cfg;
 
 	if (cfg->owner == CF_SOCK_OWNER_HEARTBEAT_TLS) {
-		tls_socket_prepare_server(g_config.hb_config.tls, NULL, &csock);
+		tls_socket_prepare_server(g_config.hb_config.tls, &csock);
 
 		if (tls_socket_accept_block(&csock, 300) != 1) {
 			WARNING("heartbeat TLS server handshake with %s failed", caddr_str);
@@ -4863,7 +4863,7 @@ channel_mesh_channel_establish(as_endpoint_list** endpoint_lists,
 
 			if (as_endpoint_capability_is_supported(connected_endpoint,
 					AS_ENDPOINT_TLS_MASK)) {
-				tls_socket_prepare_client(g_config.hb_config.tls, NULL, sock);
+				tls_socket_prepare_client(g_config.hb_config.tls, sock);
 
 				if (tls_socket_connect_block(sock, 1000) != 1) {
 					WARNING("heartbeat TLS client handshake with {%s} failed",

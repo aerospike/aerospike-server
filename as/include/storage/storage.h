@@ -51,6 +51,10 @@ struct drv_ssd_s;
 // Typedefs & constants.
 //
 
+#ifndef AS_NODE_STORAGE_SZ
+#define AS_NODE_STORAGE_SZ (5L * 1024 * 1024 * 1024 * 1024 / 8)
+#endif
+
 typedef enum {
 	AS_STORAGE_ENGINE_MEMORY	= 0,
 	AS_STORAGE_ENGINE_PMEM		= 1,
@@ -147,6 +151,8 @@ typedef struct storage_device_stats_s {
 //==========================================================
 // Public API.
 //
+
+extern uint64_t g_unique_data_size;
 
 //------------------------------------------------
 // Generic "base class" functions that call

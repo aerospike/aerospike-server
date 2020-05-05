@@ -71,7 +71,7 @@ struct as_storage_rd_s;
 #define AS_ERR_CLUSTER_KEY_MISMATCH     7
 #define AS_ERR_OUT_OF_SPACE             8
 #define AS_ERR_TIMEOUT                  9
-#define AS_ERR_ALWAYS_FORBIDDEN         10
+#define AS_ERR_UNUSED_10                10 // recycle as XDR 'permanent' error
 #define AS_ERR_UNAVAILABLE              11
 #define AS_ERR_INCOMPATIBLE_TYPE        12
 #define AS_ERR_RECORD_TOO_BIG           13
