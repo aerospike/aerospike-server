@@ -59,15 +59,15 @@ typedef struct cf_vector_s {
 //
 
 cf_vector* cf_vector_create(uint32_t ele_sz, uint32_t capacity, uint32_t flags);
-int cf_vector_init(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint32_t flags);
+void cf_vector_init(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint32_t flags);
 void cf_vector_init_with_buf(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint8_t* buf, uint32_t flags);
 void cf_vector_destroy(cf_vector* v);
 
 // Deprecated - use cf_vector_init_with_buf().
 void cf_vector_init_smalloc(cf_vector* v, uint32_t ele_sz, uint8_t* sbuf, uint32_t sbuf_sz, uint32_t flags);
 
-int cf_vector_append(cf_vector* v, const void* ele);
-int cf_vector_append_unique(cf_vector* v, const void* ele);
+void cf_vector_append(cf_vector* v, const void* ele);
+void cf_vector_append_unique(cf_vector* v, const void* ele);
 int cf_vector_set(cf_vector* v, uint32_t ix, const void* ele);
 
 int cf_vector_get(const cf_vector* v, uint32_t ix, void* ele);
@@ -123,8 +123,8 @@ cf_vector_get_ptr(const cf_vector* v, uint32_t ix)
 	return p;
 }
 
-static inline int
+static inline void
 cf_vector_append_ptr(cf_vector* v, const void* ptr)
 {
-	return cf_vector_append(v, &ptr);
+	cf_vector_append(v, &ptr);
 }

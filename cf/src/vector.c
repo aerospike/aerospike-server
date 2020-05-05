@@ -51,8 +51,8 @@
 // Forward declarations.
 //
 
-static int append_lockfree(cf_vector* v, const void* ele);
-static bool increase_capacity(cf_vector* v, uint32_t new_capacity);
+static void append_lockfree(cf_vector* v, const void* ele);
+static void increase_capacity(cf_vector* v, uint32_t new_capacity);
 
 
 //==========================================================
@@ -85,37 +85,18 @@ cf_vector_create(uint32_t ele_sz, uint32_t capacity, uint32_t flags)
 {
 	cf_vector* v = cf_malloc(sizeof(cf_vector));
 
-	if (v == NULL) {
-		return NULL;
-	}
-
-	if (cf_vector_init(v, ele_sz, capacity,
-			flags | VECTOR_FLAG_FREE_SELF) != 0) {
-		cf_free(v);
-		return NULL;
-	}
+	cf_vector_init(v, ele_sz, capacity, flags | VECTOR_FLAG_FREE_SELF);
 
 	return v;
 }
 
-int
+void
 cf_vector_init(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint32_t flags)
 {
-	uint8_t* buf;
-
-	if (capacity != 0) {
-		if ((buf = cf_malloc(capacity * ele_sz)) == NULL) {
-			return -1;
-		}
-	}
-	else {
-		buf = NULL;
-	}
+	uint8_t* buf = capacity != 0 ? cf_malloc(capacity * ele_sz) : NULL;
 
 	cf_vector_init_with_buf(v, ele_sz, capacity, buf,
 			flags | VECTOR_FLAG_FREE_VECTOR);
-
-	return 0;
 }
 
 void
@@ -161,19 +142,17 @@ cf_vector_init_smalloc(cf_vector* v, uint32_t ele_sz, uint8_t* sbuf,
 	cf_vector_init_with_buf(v, ele_sz, sbuf_sz / ele_sz, sbuf, flags);
 }
 
-int
+void
 cf_vector_append(cf_vector* v, const void* ele)
 {
 	vector_lock(v);
 
-	int ret = append_lockfree(v, ele);
+	append_lockfree(v, ele);
 
 	vector_unlock(v);
-
-	return ret;
 }
 
-int
+void
 cf_vector_append_unique(cf_vector* v, const void* ele)
 {
 	vector_lock(v);
@@ -184,17 +163,15 @@ cf_vector_append_unique(cf_vector* v, const void* ele)
 	for (uint32_t i = 0; i < v->count; i++) {
 		if (memcmp(ele, p, ele_sz) == 0) {
 			vector_unlock(v);
-			return 0;
+			return; // found - for now not distinguished from insert
 		}
 
 		p += ele_sz;
 	}
 
-	int rv = append_lockfree(v, ele);
+	append_lockfree(v, ele);
 
 	vector_unlock(v);
-
-	return rv;
 }
 
 int
@@ -341,20 +318,18 @@ cf_vector_clear(cf_vector* v)
 // Local helpers.
 //
 
-static int
+static void
 append_lockfree(cf_vector* v, const void* ele)
 {
-	if (v->count >= v->capacity && ! increase_capacity(v, v->count * 2)) {
-		return -1;
+	if (v->count >= v->capacity) {
+		increase_capacity(v, v->count * 2);
 	}
 
 	memcpy(v->eles + (v->count * v->ele_sz), ele, v->ele_sz);
 	v->count++;
-
-	return 0;
 }
 
-static bool
+static void
 increase_capacity(cf_vector* v, uint32_t new_capacity)
 {
 	if (new_capacity == 0) {
@@ -364,17 +339,15 @@ increase_capacity(cf_vector* v, uint32_t new_capacity)
 	uint8_t* p;
 
 	if (v->eles == NULL || (v->flags & VECTOR_FLAG_FREE_VECTOR) == 0) {
-		if ((p = cf_malloc(new_capacity * v->ele_sz)) == NULL) {
-			return false;
-		}
+		p = cf_malloc(new_capacity * v->ele_sz);
 
 		if (v->eles != NULL) {
 			memcpy(p, v->eles, v->capacity * v->ele_sz);
 			v->flags |= VECTOR_FLAG_FREE_VECTOR;
 		}
 	}
-	else if ((p = cf_realloc(v->eles, new_capacity * v->ele_sz)) == NULL) {
-		return false;
+	else {
+		p = cf_realloc(v->eles, new_capacity * v->ele_sz);
 	}
 
 	v->eles = p;
@@ -385,6 +358,4 @@ increase_capacity(cf_vector* v, uint32_t new_capacity)
 	}
 
 	v->capacity = new_capacity;
-
-	return true;
 }
