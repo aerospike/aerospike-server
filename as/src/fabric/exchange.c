@@ -898,9 +898,9 @@ static pthread_mutex_t g_external_event_publisher_lock =
 			sizeof(cf_vector));														\
 	size_t buffer_size = AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT							\
 			* sizeof(value_type);													\
-	void* STACK_VAR(buff, __LINE__) = alloca(buffer_size); cf_vector_init_smalloc(	\
+	void* STACK_VAR(buff, __LINE__) = alloca(buffer_size); cf_vector_init_with_buf(	\
 			STACK_VAR(vector, __LINE__), sizeof(value_type),						\
-			(uint8_t*)STACK_VAR(buff, __LINE__), buffer_size,						\
+			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, (uint8_t*)STACK_VAR(buff, __LINE__),	\
 			VECTOR_FLAG_INITZERO);													\
 	STACK_VAR(vector, __LINE__);													\
 })
@@ -913,12 +913,11 @@ static pthread_mutex_t g_external_event_publisher_lock =
 
 /**
  * Convert a vector to an array.
- * FIXME: return pointer to the internal vector storage.
  */
 static cf_node*
 vector_to_array(cf_vector* vector)
 {
-	return (cf_node*)vector->eles;
+	return (cf_node*)cf_vector_as_array(vector);
 }
 
 /**
@@ -941,7 +940,7 @@ static int
 vector_find(cf_vector* vector, const void* element)
 {
 	int element_count = cf_vector_size(vector);
-	size_t value_len = VECTOR_ELEM_SZ(vector);
+	size_t value_len = cf_vector_element_size(vector);
 	for (int i = 0; i < element_count; i++) {
 		// No null check required since we are iterating under a lock and within
 		// vector bounds.

@@ -1060,9 +1060,8 @@ msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r,
 	if (init_vec) {
 		cf_vector_init(v_r, sizeof(msg_buf_ele), count, 0);
 	}
-	else if (count > v_r->capacity) { // TODO - wrap to avoid access of private members?
-		cf_warning(CF_MSG, "count %u > vector cap %u", count, v_r->capacity);
-		return false;
+	else {
+		cf_assert(count <= cf_vector_capacity(v_r), CF_MSG, "count %u > vector cap %u", count, cf_vector_capacity(v_r));
 	}
 
 	for (uint32_t i = 0; i < count; i++) {

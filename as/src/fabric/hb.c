@@ -5091,9 +5091,10 @@ channel_stop()
 	CHANNEL_LOCK();
 
 	cf_vector sockets;
-	cf_socket buff[cf_shash_get_size(g_hb.channel_state.socket_to_channel)];
-	cf_vector_init_smalloc(&sockets, sizeof(cf_socket*), (uint8_t*)buff,
-			sizeof(buff), VECTOR_FLAG_INITZERO);
+	uint32_t capacity = cf_shash_get_size(g_hb.channel_state.socket_to_channel);
+	cf_socket* buff[capacity];
+	cf_vector_init_with_buf(&sockets, sizeof(cf_socket*), capacity,
+			(uint8_t*)buff, VECTOR_FLAG_INITZERO);
 
 	cf_shash_reduce(g_hb.channel_state.socket_to_channel,
 			channel_sockets_get_reduce, &sockets);

@@ -43,8 +43,8 @@
 //
 
 // Private flags.
-#define VECTOR_FLAG_FREE_SELF   0x10
-#define VECTOR_FLAG_FREE_VECTOR 0x20
+#define VECTOR_FLAG_FREE_SELF 0x10
+#define VECTOR_FLAG_FREE_ELES 0x20
 
 
 //==========================================================
@@ -96,7 +96,7 @@ cf_vector_init(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint32_t flags)
 	uint8_t* buf = capacity != 0 ? cf_malloc(capacity * ele_sz) : NULL;
 
 	cf_vector_init_with_buf(v, ele_sz, capacity, buf,
-			flags | VECTOR_FLAG_FREE_VECTOR);
+			flags | VECTOR_FLAG_FREE_ELES);
 }
 
 void
@@ -125,21 +125,13 @@ cf_vector_destroy(cf_vector* v)
 		cf_mutex_destroy(&v->lock);
 	}
 
-	if (v->eles && (v->flags & VECTOR_FLAG_FREE_VECTOR) != 0) {
+	if (v->eles != NULL && (v->flags & VECTOR_FLAG_FREE_ELES) != 0) {
 		cf_free(v->eles);
 	}
 
 	if ((v->flags & VECTOR_FLAG_FREE_SELF) != 0) {
 		cf_free(v);
 	}
-}
-
-// Deprecated - use cf_vector_init_with_buf().
-void
-cf_vector_init_smalloc(cf_vector* v, uint32_t ele_sz, uint8_t* sbuf,
-		uint32_t sbuf_sz, uint32_t flags)
-{
-	cf_vector_init_with_buf(v, ele_sz, sbuf_sz / ele_sz, sbuf, flags);
 }
 
 void
@@ -338,13 +330,14 @@ increase_capacity(cf_vector* v, uint32_t new_capacity)
 
 	uint8_t* p;
 
-	if (v->eles == NULL || (v->flags & VECTOR_FLAG_FREE_VECTOR) == 0) {
+	if (v->eles == NULL || (v->flags & VECTOR_FLAG_FREE_ELES) == 0) {
 		p = cf_malloc(new_capacity * v->ele_sz);
 
 		if (v->eles != NULL) {
 			memcpy(p, v->eles, v->capacity * v->ele_sz);
-			v->flags |= VECTOR_FLAG_FREE_VECTOR;
 		}
+
+		v->flags |= VECTOR_FLAG_FREE_ELES;
 	}
 	else {
 		p = cf_realloc(v->eles, new_capacity * v->ele_sz);

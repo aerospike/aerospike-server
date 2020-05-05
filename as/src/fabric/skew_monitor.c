@@ -406,7 +406,7 @@ skew_monitor_compute_skew()
 	uint8_t buffer[AS_CLUSTER_SZ * sizeof(cf_node)];
 	cf_vector succession = { 0 };
 
-	cf_vector_init_smalloc(&succession, sizeof(cf_node), buffer, sizeof(buffer),
+	cf_vector_init_with_buf(&succession, sizeof(cf_node), AS_CLUSTER_SZ, buffer,
 			VECTOR_FLAG_INITZERO);
 	as_exchange_succession(&succession);
 
@@ -579,7 +579,7 @@ skew_monitor_outliers(cf_vector* outliers)
 
 	uint8_t buffer[AS_CLUSTER_SZ * sizeof(cf_node)];
 	cf_vector succession;
-	cf_vector_init_smalloc(&succession, sizeof(cf_node), buffer, sizeof(buffer),
+	cf_vector_init_with_buf(&succession, sizeof(cf_node), AS_CLUSTER_SZ, buffer,
 			VECTOR_FLAG_INITZERO);
 	as_exchange_succession(&succession);
 
@@ -794,7 +794,7 @@ as_skew_monitor_outliers_append(cf_dyn_buf* db)
 {
 	uint8_t buffer[AS_CLUSTER_SZ * sizeof(cf_node)];
 	cf_vector outliers;
-	cf_vector_init_smalloc(&outliers, sizeof(cf_node), buffer, sizeof(buffer),
+	cf_vector_init_with_buf(&outliers, sizeof(cf_node), AS_CLUSTER_SZ, buffer,
 			VECTOR_FLAG_INITZERO);
 	uint32_t num_outliers = skew_monitor_outliers(&outliers);
 
@@ -836,8 +836,8 @@ as_skew_monitor_dump()
 {
 	uint8_t buffer[AS_CLUSTER_SZ * sizeof(cf_node)];
 	cf_vector node_vector;
-	cf_vector_init_smalloc(&node_vector, sizeof(cf_node), buffer,
-			sizeof(buffer), VECTOR_FLAG_INITZERO);
+	cf_vector_init_with_buf(&node_vector, sizeof(cf_node), AS_CLUSTER_SZ,
+			buffer, VECTOR_FLAG_INITZERO);
 	as_exchange_succession(&node_vector);
 
 	INFO("CSM: cluster-clock-skew:%ld", as_skew_monitor_skew());

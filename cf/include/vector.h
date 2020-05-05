@@ -63,9 +63,6 @@ void cf_vector_init(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint32_t f
 void cf_vector_init_with_buf(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint8_t* buf, uint32_t flags);
 void cf_vector_destroy(cf_vector* v);
 
-// Deprecated - use cf_vector_init_with_buf().
-void cf_vector_init_smalloc(cf_vector* v, uint32_t ele_sz, uint8_t* sbuf, uint32_t sbuf_sz, uint32_t flags);
-
 void cf_vector_append(cf_vector* v, const void* ele);
 void cf_vector_append_unique(cf_vector* v, const void* ele);
 int cf_vector_set(cf_vector* v, uint32_t ix, const void* ele);
@@ -79,10 +76,16 @@ int cf_vector_delete(cf_vector* v, uint32_t ele);
 int cf_vector_delete_range(cf_vector* v, uint32_t start, uint32_t end);
 void cf_vector_clear(cf_vector* v);
 
-static inline uint32_t
-cf_vector_size(const cf_vector* v)
+
+//==========================================================
+// Public API - access members.
+//
+
+// Expose v->eles as a read-only array - vector still owns memory!
+static inline const uint8_t*
+cf_vector_as_array(const cf_vector* v)
 {
-	return v->count;
+	return v->eles;
 }
 
 static inline uint32_t
@@ -91,21 +94,28 @@ cf_vector_element_size(const cf_vector* v)
 	return v->ele_sz;
 }
 
-#define cf_vector_inita(_v, _ele_sz, _ele_cnt, _flags) \
-		cf_vector_init_with_buf(_v, _ele_sz, _ele_cnt, alloca((_ele_sz) * (_ele_cnt)), _flags);
+static inline uint32_t
+cf_vector_capacity(const cf_vector* v)
+{
+	return v->capacity;
+}
 
-#define cf_vector_define(_v, _ele_sz, _ele_cnt, _flags) \
-		cf_vector _v; \
-		uint8_t _v ## __mem[(_ele_sz) * (_ele_cnt)]; \
-		cf_vector_init_with_buf(&_v, _ele_sz, _ele_cnt, _v ## __mem, _flags);
-
-// Deprecated - use cf_vector_element_size().
-#define VECTOR_ELEM_SZ(_v) ( _v->ele_sz )
+static inline uint32_t
+cf_vector_size(const cf_vector* v)
+{
+	return v->count;
+}
 
 
 //==========================================================
-// Public API - wrapper for vector of pointers.
+// Public API - wrappers for vector of pointers.
 //
+
+static inline void
+cf_vector_append_ptr(cf_vector* v, const void* ptr)
+{
+	cf_vector_append(v, &ptr);
+}
 
 static inline int
 cf_vector_set_ptr(cf_vector* v, uint32_t ix, const void* ptr)
@@ -123,8 +133,12 @@ cf_vector_get_ptr(const cf_vector* v, uint32_t ix)
 	return p;
 }
 
-static inline void
-cf_vector_append_ptr(cf_vector* v, const void* ptr)
-{
-	cf_vector_append(v, &ptr);
-}
+
+//==========================================================
+// Public API - stack vector initialization.
+//
+
+#define cf_vector_define(_v, _ele_sz, _ele_cnt, _flags) \
+		cf_vector _v; \
+		uint8_t _v ## __mem[(_ele_sz) * (_ele_cnt)]; \
+		cf_vector_init_with_buf(&_v, _ele_sz, _ele_cnt, _v ## __mem, _flags);

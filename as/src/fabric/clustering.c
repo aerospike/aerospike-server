@@ -1388,10 +1388,10 @@ vector_clear(cf_vector* vector)
 			sizeof(cf_vector));														\
 	size_t buffer_size = AS_CLUSTERING_CLUSTER_MAX_SIZE_SOFT						\
 			* sizeof(value_type);													\
-	void* STACK_VAR(buff, __LINE__) = alloca(buffer_size); cf_vector_init_smalloc(	\
+	void* STACK_VAR(buff, __LINE__) = alloca(buffer_size); cf_vector_init_with_buf(	\
 			STACK_VAR(vector, __LINE__), sizeof(value_type),						\
-			(uint8_t*)STACK_VAR(buff, __LINE__), buffer_size,						\
-			VECTOR_FLAG_INITZERO);													\
+			AS_CLUSTERING_CLUSTER_MAX_SIZE_SOFT,									\
+			(uint8_t*)STACK_VAR(buff, __LINE__), VECTOR_FLAG_INITZERO);				\
 	STACK_VAR(vector, __LINE__);													\
 })
 
@@ -1410,8 +1410,8 @@ vector_equals(cf_vector* v1, cf_vector* v2)
 {
 	int v1_count = cf_vector_size(v1);
 	int v2_count = cf_vector_size(v2);
-	int v1_elem_sz = VECTOR_ELEM_SZ(v1);
-	int v2_elem_sz = VECTOR_ELEM_SZ(v2);
+	int v1_elem_sz = cf_vector_element_size(v1);
+	int v2_elem_sz = cf_vector_element_size(v2);
 
 	if (v1_count != v2_count || v1_elem_sz != v2_elem_sz) {
 		return false;
@@ -1452,7 +1452,7 @@ static int
 vector_find(cf_vector* vector, void* element)
 {
 	int element_count = cf_vector_size(vector);
-	size_t value_len = VECTOR_ELEM_SZ(vector);
+	size_t value_len = cf_vector_element_size(vector);
 	for (int i = 0; i < element_count; i++) {
 		// No null check required since we are iterating under a lock and within
 		// vector bounds.
@@ -1534,7 +1534,7 @@ vector_sort_unique(cf_vector* src, int
 (*comparator)(const void*, const void*))
 {
 	int element_count = cf_vector_size(src);
-	size_t value_len = VECTOR_ELEM_SZ(src);
+	size_t value_len = cf_vector_element_size(src);
 	size_t array_size = element_count * value_len;
 	void* element_array = BUFFER_ALLOC_OR_DIE(array_size);
 
@@ -1597,12 +1597,11 @@ vector_subtract(cf_vector* target, cf_vector* to_remove)
 
 /**
  * Convert a vector to an array.
- * FIXME: return pointer to the internal vector storage.
  */
 static cf_node*
 vector_to_array(cf_vector* vector)
 {
-	return (cf_node*)vector->eles;
+	return (cf_node*)cf_vector_as_array(vector);
 }
 
 /**
@@ -1616,7 +1615,7 @@ static void
 vector_array_cpy(void* array, cf_vector* src, int element_count)
 {
 	uint8_t* element_ptr = array;
-	int element_size = VECTOR_ELEM_SZ(src);
+	int element_size = cf_vector_element_size(src);
 	for (int i = 0; i < element_count; i++) {
 		cf_vector_get(src, i, element_ptr);
 		element_ptr += element_size;
