@@ -1,7 +1,7 @@
 /*
  * udf_aerospike.c
  *
- * Copyright (C) 2012-2016 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -39,7 +39,7 @@
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_clock.h"
 
-#include "fault.h"
+#include "log.h"
 
 #include "base/datamodel.h"
 #include "base/index.h"

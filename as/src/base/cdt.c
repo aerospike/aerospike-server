@@ -1,7 +1,7 @@
 /*
  * cdt.c
  *
- * Copyright (C) 2015-2019 Aerospike, Inc.
+ * Copyright (C) 2015-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -32,7 +32,7 @@
 
 #include "bits.h"
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 #include "msgpack_in.h"
 
 #include "base/cfg.h"

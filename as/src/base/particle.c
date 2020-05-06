@@ -1,7 +1,7 @@
 /*
  * particle.c
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -35,7 +35,7 @@
 #include "citrusleaf/cf_byte_order.h"
 
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 #include "msgpack_in.h"
 
 #include "base/datamodel.h"

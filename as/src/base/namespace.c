@@ -1,7 +1,7 @@
 /*
  * namespace.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -33,9 +33,9 @@
 #include "citrusleaf/cf_atomic.h"
 
 #include "dynbuf.h"
-#include "fault.h"
 #include "hist.h"
 #include "linear_hist.h"
+#include "log.h"
 #include "vmapx.h"
 #include "xmem.h"
 

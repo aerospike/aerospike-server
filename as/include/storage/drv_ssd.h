@@ -1,7 +1,7 @@
 /*
  * drv_ssd.h
  *
- * Copyright (C) 2014 Aerospike, Inc.
+ * Copyright (C) 2014-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -36,8 +36,8 @@
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
-#include "fault.h"
 #include "hist.h"
+#include "log.h"
 
 #include "base/datamodel.h"
 #include "fabric/partition.h"

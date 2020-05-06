@@ -1,7 +1,7 @@
 /*
  * vmapx.c
  *
- * Copyright (C) 2012-2016 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -31,11 +31,11 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "cf_mutex.h"
-#include "fault.h"
-
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
+
+#include "cf_mutex.h"
+#include "log.h"
 
 
 //==========================================================

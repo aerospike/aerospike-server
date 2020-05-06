@@ -1,7 +1,7 @@
 /*
  * hb.c
  *
- * Copyright (C) 2012-2017 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -39,7 +39,7 @@
 
 #include "cf_thread.h"
 #include "dns.h"
-#include "fault.h"
+#include "log.h"
 #include "node.h"
 #include "shash.h"
 #include "socket.h"

@@ -1,7 +1,7 @@
 /*
  * drv_ssd_ce.c
  *
- * Copyright (C) 2014-2019 Aerospike, Inc.
+ * Copyright (C) 2014-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -21,10 +21,13 @@
  */
 
 #include "storage/drv_ssd.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "fault.h"
+
+#include "log.h"
+
 #include "base/datamodel.h"
 #include "storage/drv_common.h"
 #include "storage/flat.h"

@@ -37,7 +37,7 @@
 
 #include "bits.h"
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 #include "msgpack_in.h"
 
 #include "base/cdt.h"

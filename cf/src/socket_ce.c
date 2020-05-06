@@ -1,7 +1,7 @@
 /*
  * socket_ce.c
  *
- * Copyright (C) 2016-2018 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -35,11 +35,11 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "citrusleaf/alloc.h"
+
 #include "bits.h"
 #include "dns.h"
-#include "fault.h"
-
-#include "citrusleaf/alloc.h"
+#include "log.h"
 
 addrinfo g_cf_ip_addr_dns_hints = { .ai_flags = 0, .ai_family = AF_INET };
 

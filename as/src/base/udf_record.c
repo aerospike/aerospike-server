@@ -1,7 +1,7 @@
 /*
  * udf_record.c
  *
- * Copyright (C) 2012-2016 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -34,7 +34,7 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 
-#include "fault.h"
+#include "log.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

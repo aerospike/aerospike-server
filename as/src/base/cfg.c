@@ -1,7 +1,7 @@
 /*
  * cfg.c
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -50,10 +50,10 @@
 #include "cf_str.h"
 #include "daemon.h"
 #include "dynbuf.h"
-#include "fault.h"
 #include "hardware.h"
 #include "hist.h"
 #include "hist_track.h"
+#include "log.h"
 #include "msg.h"
 #include "node.h"
 #include "socket.h"

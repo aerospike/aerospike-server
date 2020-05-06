@@ -1,7 +1,7 @@
 /*
  * dns.c
  *
- * Copyright (C) 2018 Aerospike, Inc.
+ * Copyright (C) 2018-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -27,7 +27,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_thread.h"
-#include "fault.h"
+#include "log.h"
 
 /*
  * ----------------------------------------------------------------------------

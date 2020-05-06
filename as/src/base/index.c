@@ -1,7 +1,7 @@
 /*
  * index.c
  *
- * Copyright (C) 2012-2016 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -41,7 +41,7 @@
 #include "arenax.h"
 #include "cf_mutex.h"
 #include "cf_thread.h"
-#include "fault.h"
+#include "log.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

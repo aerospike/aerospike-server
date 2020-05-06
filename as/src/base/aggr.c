@@ -1,7 +1,7 @@
 /*
  * aggr.c
  *
- * Copyright (C) 2014-2019 Aerospike, Inc.
+ * Copyright (C) 2014-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -32,7 +32,7 @@
 #include "aerospike/mod_lua.h"
 #include "citrusleaf/cf_ll.h"
 
-#include "fault.h"
+#include "log.h"
 
 #include "base/datamodel.h"
 #include "base/proto.h"

@@ -1,7 +1,7 @@
 /*
  * rw_request_hash.c
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -38,7 +38,7 @@
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
-#include "fault.h"
+#include "log.h"
 #include "msg.h"
 #include "node.h"
 #include "rchash.h"

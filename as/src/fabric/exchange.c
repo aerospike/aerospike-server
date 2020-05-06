@@ -1,7 +1,7 @@
 /*
  * exchange.c
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -34,7 +34,7 @@
 
 #include "cf_thread.h"
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 #include "shash.h"
 #include "socket.h"
 

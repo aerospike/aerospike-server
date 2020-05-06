@@ -1,7 +1,7 @@
 /*
  * cf_mutex.c
  *
- * Copyright (C) 2017 Aerospike, Inc.
+ * Copyright (C) 2017-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -27,15 +27,14 @@
 
 #include <cf_mutex.h>
 
+#include <linux/futex.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
-#include <linux/futex.h>
-#include <sys/syscall.h>
-
-#include "fault.h"
+#include "log.h"
 
 
 //==========================================================

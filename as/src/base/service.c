@@ -1,7 +1,7 @@
 /*
  * service.c
  *
- * Copyright (C) 2018 Aerospike, Inc.
+ * Copyright (C) 2018-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -45,8 +45,8 @@
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "epoll_queue.h"
-#include "fault.h"
 #include "hardware.h"
+#include "log.h"
 #include "socket.h"
 #include "tls.h"
 

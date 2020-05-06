@@ -1,7 +1,7 @@
 /*
  * hist_track.c
  *
- * Copyright (C) 2012-2016 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -43,8 +43,8 @@
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
-#include "fault.h"
 #include "hist.h"
+#include "log.h"
 
 
 //==========================================================

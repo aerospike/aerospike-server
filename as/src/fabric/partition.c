@@ -1,7 +1,7 @@
 /*
  * partition.c
  *
- * Copyright (C) 2008-2018 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -36,7 +36,7 @@
 #include "citrusleaf/cf_b64.h"
 
 #include "cf_mutex.h"
-#include "fault.h"
+#include "log.h"
 #include "node.h"
 
 #include "base/cfg.h"

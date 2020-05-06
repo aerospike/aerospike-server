@@ -1,7 +1,7 @@
 /*
- * arenax_cold.c
+ * arenax_ce.c
  *
- * Copyright (C) 2014 Aerospike, Inc.
+ * Copyright (C) 2014-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -28,8 +28,10 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+
 #include "citrusleaf/alloc.h"
-#include "fault.h"
+
+#include "log.h"
 
 
 //==========================================================

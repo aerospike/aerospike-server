@@ -1,7 +1,7 @@
 /*
  * flat.h
  *
- * Copyright (C) 2019 Aerospike, Inc.
+ * Copyright (C) 2019-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -32,7 +32,7 @@
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
-#include "fault.h"
+#include "log.h"
 
 
 //==========================================================

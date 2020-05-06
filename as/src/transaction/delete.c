@@ -1,7 +1,7 @@
 /*
  * delete.c
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -36,7 +36,7 @@
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

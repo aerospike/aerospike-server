@@ -1,7 +1,7 @@
 /*
  * monitor.c
  *
- * Copyright (C) 2013-2016 Aerospike, Inc.
+ * Copyright (C) 2013-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -33,6 +33,8 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+
+#include "log.h"
 
 #include "base/secondary_index.h"
 #include "base/monitor.h"

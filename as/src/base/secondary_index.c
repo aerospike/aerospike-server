@@ -1,7 +1,7 @@
 /*
  * secondary_index.c
  *
- * Copyright (C) 2012-2016 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -101,7 +101,7 @@
 #include "ai_btree.h"
 #include "bt_iterator.h"
 #include "cf_str.h"
-#include "fault.h"
+#include "log.h"
 #include "shash.h"
 
 #include "base/cdt.h"

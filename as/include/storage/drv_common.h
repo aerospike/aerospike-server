@@ -1,7 +1,7 @@
 /*
  * drv_common.h
  *
- * Copyright (C) 2008-2019 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include "fault.h"
+#include "log.h"
 
 #include "fabric/partition.h"
 #include "storage/flat.h"

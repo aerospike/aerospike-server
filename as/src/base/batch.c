@@ -1,7 +1,7 @@
 /*
  * batch.c
  *
- * Copyright (C) 2012-2015 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -41,6 +41,7 @@
 #include "base/transaction.h"
 #include "cf_mutex.h"
 #include "hardware.h"
+#include "log.h"
 #include "socket.h"
 #include <errno.h>
 #include <pthread.h>

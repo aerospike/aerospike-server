@@ -1,7 +1,7 @@
 /*
  * msgpack_in.c
  *
- * Copyright (C) 2019 Aerospike, Inc.
+ * Copyright (C) 2019-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,6 +20,10 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+//==========================================================
+// Includes.
+//
+
 #include "msgpack_in.h"
 
 #include <stdbool.h>
@@ -29,7 +33,7 @@
 #include "aerospike/as_bytes.h"
 #include "citrusleaf/cf_byte_order.h"
 
-#include "fault.h"
+#include "log.h"
 
 
 //==========================================================
@@ -74,7 +78,7 @@ static inline msgpack_cmp_type msgpack_cmp_internal(parse_meta *meta0, parse_met
 
 
 //==========================================================
-// Macros.
+// Inlines & macros.
 //
 
 #define MSGPACK_CMP_RETURN(__p0, __p1) \

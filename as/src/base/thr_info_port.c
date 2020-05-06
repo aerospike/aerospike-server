@@ -1,7 +1,7 @@
 /*
  * thr_info_port.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -36,7 +36,7 @@
 #include "cf_str.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 #include "socket.h"
 
 #include "base/cfg.h"

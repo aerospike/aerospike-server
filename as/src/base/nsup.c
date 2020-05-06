@@ -1,7 +1,7 @@
 /*
  * nsup.c
  *
- * Copyright (C) 2019 Aerospike, Inc.
+ * Copyright (C) 2019-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -37,9 +37,9 @@
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_thread.h"
-#include "fault.h"
 #include "hardware.h"
 #include "linear_hist.h"
+#include "log.h"
 #include "node.h"
 #include "vector.h"
 #include "vmapx.h"

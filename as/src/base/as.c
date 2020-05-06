@@ -1,7 +1,7 @@
 /*
  * as.c
  *
- * Copyright (C) 2008-2017 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -43,8 +43,8 @@
 #include "cf_thread.h"
 #include "daemon.h"
 #include "dns.h"
-#include "fault.h"
 #include "hardware.h"
+#include "log.h"
 #include "tls.h"
 
 #include "base/batch.h"

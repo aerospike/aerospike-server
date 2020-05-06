@@ -1,7 +1,7 @@
 /*
- * geospatial.cpp
+ * geospatial.cc
  *
- * Copyright (C) 2015 Aerospike, Inc.
+ * Copyright (C) 2015-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -29,7 +29,7 @@
 #include <s2regioncoverer.h>
 
 extern "C" {
-#include "fault.h"
+#include "log.h"
 #include "base/datamodel.h"
 } // end extern "C"
 
@@ -88,7 +88,7 @@ geo_parse(as_namespace * ns,
 		return false;
 	}
 }
-	
+
 bool
 geo_region_cover(as_namespace * ns,
 				 geo_region_t region,
@@ -126,7 +126,7 @@ geo_region_cover(as_namespace * ns,
 		if (covering.size() > max(size_t(6), size_t(coverer.max_cells()))) {
 			return false;
 		}
-	
+
 		for (size_t ii = 0; ii < covering.size(); ++ii)
 		{
 			if (ii == (size_t) maxnumcells)
@@ -179,7 +179,7 @@ geo_point_centers(as_namespace * ns,
 		S2CellId incellid(cellidval);
 
 		*numcentersp = 0;
-	
+
 		for (S2CellId cellid = incellid;
 			 cellid.level() > 0;
 			 cellid = cellid.parent())

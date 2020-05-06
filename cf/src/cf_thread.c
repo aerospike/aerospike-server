@@ -1,7 +1,7 @@
 /*
  * cf_thread.c
  *
- * Copyright (C) 2018 Aerospike, Inc.
+ * Copyright (C) 2018-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -37,7 +37,7 @@
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_ll.h"

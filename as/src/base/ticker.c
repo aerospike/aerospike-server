@@ -1,7 +1,7 @@
 /*
  * ticker.c
  *
- * Copyright (C) 2016-2019 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -41,9 +41,9 @@
 
 #include "cf_thread.h"
 #include "dynbuf.h"
-#include "fault.h"
 #include "hist.h"
 #include "hist_track.h"
+#include "log.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

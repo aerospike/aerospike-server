@@ -1,7 +1,7 @@
 /*
  * socket.c
  *
- * Copyright (C) 2008-2018 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -46,12 +46,12 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include "dns.h"
-#include "fault.h"
-#include "tls.h"
-
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
+
+#include "dns.h"
+#include "log.h"
+#include "tls.h"
 
 #ifndef TCP_USER_TIMEOUT
 #define TCP_USER_TIMEOUT 18

@@ -1,7 +1,7 @@
 /*
- * udf_cast.c
+ * udf_cask.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -41,7 +41,7 @@
 #include "citrusleaf/cf_crypto.h"
 
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 
 #include "base/cfg.h"
 #include "base/smd.h"

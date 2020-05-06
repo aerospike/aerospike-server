@@ -1,7 +1,7 @@
 /*
  * transaction.c
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -37,7 +37,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
-#include "fault.h"
+#include "log.h"
 #include "socket.h"
 
 #include "base/batch.h"

@@ -1,7 +1,7 @@
 /*
  * re_replicate_ce.c
  *
- * Copyright (C) 2017-2019 Aerospike, Inc.
+ * Copyright (C) 2017-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,7 +26,7 @@
 
 #include "transaction/re_replicate.h"
 
-#include "fault.h"
+#include "log.h"
 
 #include "base/transaction.h"
 

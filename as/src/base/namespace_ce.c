@@ -1,7 +1,7 @@
 /*
  * namespace_ce.c
  *
- * Copyright (C) 2014-2018 Aerospike, Inc.
+ * Copyright (C) 2014-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -30,7 +30,7 @@
 #include "citrusleaf/alloc.h"
 
 #include "arenax.h"
-#include "fault.h"
+#include "log.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"

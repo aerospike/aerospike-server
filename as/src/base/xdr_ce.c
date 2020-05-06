@@ -31,7 +31,7 @@
 #include <stdint.h>
 
 #include "dynbuf.h"
-#include "fault.h"
+#include "log.h"
 #include "socket.h"
 
 #include "base/datamodel.h"

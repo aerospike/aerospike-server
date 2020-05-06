@@ -1,7 +1,7 @@
 /*
  * particle_string.c
  *
- * Copyright (C) 2015 Aerospike, Inc.
+ * Copyright (C) 2015-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -27,7 +27,7 @@
 #include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
 
-#include "fault.h"
+#include "log.h"
 
 #include "base/datamodel.h"
 #include "base/particle.h"

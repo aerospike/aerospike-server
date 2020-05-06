@@ -1,7 +1,7 @@
 /*
  * predexp.c
  *
- * Copyright (C) 2016-2017 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -34,7 +34,7 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 
-#include "fault.h"
+#include "log.h"
 
 #include "base/particle.h"
 #include "geospatial/geospatial.h"

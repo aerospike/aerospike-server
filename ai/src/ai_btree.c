@@ -40,7 +40,7 @@
 #include <citrusleaf/cf_digest.h>
 #include <citrusleaf/cf_ll.h>
 
-#include "fault.h"
+#include "log.h"
 
 #define AI_ARR_MAX_USED 32
 

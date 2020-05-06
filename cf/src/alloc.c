@@ -1,7 +1,7 @@
 /*
  * alloc.c
  *
- * Copyright (C) 2008-2019 Aerospike, Inc.
+ * Copyright (C) 2008-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -44,7 +44,7 @@
 #include <sys/types.h>
 
 #include "cf_thread.h"
-#include "fault.h"
+#include "log.h"
 
 #include "aerospike/as_random.h"
 #include "aerospike/ck/ck_pr.h"
