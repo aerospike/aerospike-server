@@ -713,7 +713,7 @@ info_get_replicas_master(char *name, cf_dyn_buf *db)
 int
 info_get_replicas_all(char *name, cf_dyn_buf *db)
 {
-	as_partition_get_replicas_all_str(db, false);
+	as_partition_get_replicas_all_str(db, false, 0);
 
 	return(0);
 }
@@ -721,7 +721,7 @@ info_get_replicas_all(char *name, cf_dyn_buf *db)
 int
 info_get_replicas(char *name, cf_dyn_buf *db)
 {
-	as_partition_get_replicas_all_str(db, true);
+	as_partition_get_replicas_all_str(db, true, 0);
 
 	return(0);
 }
@@ -729,6 +729,32 @@ info_get_replicas(char *name, cf_dyn_buf *db)
 //
 // COMMANDS
 //
+
+int
+info_command_replicas(char *name, char *params, cf_dyn_buf *db)
+{
+	char max_str[4] = { 0 };
+	int len = (int)sizeof(max_str);
+	int rv = as_info_parameter_get(params, "max", max_str, &len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "max parameter value too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-max");
+		return 0;
+	}
+
+	uint32_t max_repls = 0;
+
+	if (rv == 0 && cf_str_atoi_u32(max_str, &max_repls) != 0) {
+		cf_warning(AS_INFO, "non-integer max parameter");
+		cf_dyn_buf_append_string(db, "ERROR::bad-max");
+		return 0;
+	}
+
+	as_partition_get_replicas_all_str(db, true, max_repls);
+
+	return 0;
+}
 
 int
 info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
@@ -743,7 +769,7 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
-	char size_str[4] = { 0 }; // max cluster size is 128
+	char size_str[4] = { 0 }; // max cluster size is 256
 	int size_str_len = (int)sizeof(size_str);
 	int rv = as_info_parameter_get(params, "size", size_str, &size_str_len);
 
@@ -6548,7 +6574,7 @@ as_info_init()
 			"geo;"
 			"sindex-exists;"
 			"peers;pipelining;pscans;"
-			"relaxed-sc;replicas;replicas-all;replicas-master;"
+			"relaxed-sc;replicas;replicas-all;replicas-master;replicas-max;"
 			"truncate-namespace;"
 			"udf");
 	strcat(features, aerospike_build_features);
@@ -6668,6 +6694,7 @@ as_info_init()
 	as_info_set_command("quiesce-undo", info_command_quiesce_undo, PERM_SERVICE_CTRL);        // Un-quiesce this node.
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
 	as_info_set_command("recluster", info_command_recluster, PERM_SERVICE_CTRL);              // Force cluster to re-form.
+	as_info_set_command("replicas-max", info_command_replicas, PERM_NONE);                    // Same as replicas, but includes limit.
 	as_info_set_command("revive", info_command_revive, PERM_SERVICE_CTRL);                    // Mark "untrusted" partitions as "revived".
 	as_info_set_command("roster", info_command_roster, PERM_NONE);                            // Roster information.
 	as_info_set_command("roster-set", info_command_roster_set, PERM_SERVICE_CTRL);            // Set the entire roster.

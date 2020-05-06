@@ -213,7 +213,8 @@ as_partition_get_replicas_master_str(cf_dyn_buf* db)
 }
 
 void
-as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime)
+as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime,
+		uint32_t max_repls)
 {
 	size_t db_sz = db->used_sz;
 
@@ -233,6 +234,10 @@ as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime)
 		// If we haven't rebalanced yet, report 1 column with no ownership.
 		if (repl_factor == 0) {
 			repl_factor = 1;
+		}
+
+		if (max_repls != 0 && repl_factor > max_repls) {
+			repl_factor = max_repls;
 		}
 
 		cf_dyn_buf_append_uint32(db, repl_factor);

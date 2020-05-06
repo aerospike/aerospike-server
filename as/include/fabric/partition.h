@@ -194,7 +194,7 @@ cf_node as_partition_writable_node(struct as_namespace_s* ns, uint32_t pid);
 cf_node as_partition_proxyee_redirect(struct as_namespace_s* ns, uint32_t pid);
 
 void as_partition_get_replicas_master_str(cf_dyn_buf* db);
-void as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime);
+void as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime, uint32_t max_repls);
 
 void as_partition_get_replica_stats(struct as_namespace_s* ns, repl_stats* p_stats);
 
