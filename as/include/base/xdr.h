@@ -117,7 +117,6 @@ typedef struct as_xdr_dc_cfg_s {
 
 typedef struct as_xdr_config_s {
 	bool xdr_configured; // not actual config - indicates 'xdr' context present
-	bool change_notification_enabled;
 
 	// For debugging.
 	uint32_t trace_sample; // dynamic only

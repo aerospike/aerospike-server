@@ -661,8 +661,6 @@ typedef enum {
 	// XDR options:
 	// Normally visible, in canonical configuration file order:
 	CASE_XDR_DC_BEGIN,
-	// Normally hidden:
-	CASE_XDR_ENABLE_CHANGE_NOTIFICATION,
 
 	// XDR (remote) DC options:
 	// Normally visible, in canonical configuration file order:
@@ -1173,7 +1171,6 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 
 const cfg_opt XDR_OPTS[] = {
 		{ "dc",								CASE_XDR_DC_BEGIN },
-		{ "enable-change-notification",		CASE_XDR_ENABLE_CHANGE_NOTIFICATION},
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -3601,9 +3598,6 @@ as_config_init(const char* config_file)
 			case CASE_XDR_DC_BEGIN:
 				dc_cfg = as_xdr_startup_create_dc(line.val_tok_1);
 				cfg_begin_context(&state, XDR_DC);
-				break;
-			case CASE_XDR_ENABLE_CHANGE_NOTIFICATION:
-				c->xdr_cfg.change_notification_enabled = cfg_bool(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
