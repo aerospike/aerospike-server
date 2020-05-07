@@ -28,10 +28,10 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include "log.h"
+
 #define DNS_NAME_MAX_LEN 255
 #define DNS_NAME_MAX_SIZE (DNS_NAME_MAX_LEN + 1)
-
-#define CF_MUST_CHECK __attribute__((warn_unused_result))
 
 typedef struct addrinfo addrinfo;
 

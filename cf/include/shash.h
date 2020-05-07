@@ -51,9 +51,6 @@
 // User must provide the hash function at create time.
 typedef uint32_t (*cf_shash_hash_fn)(const void *key);
 
-// FIXME - explain or replace.
-typedef void (*cf_shash_update_fn)(const void *key, void *value_old, void *value_new, void *udata);
-
 // The "reduce" function called for every element. Returned value governs
 // behavior during reduce as follows:
 // - CF_SHASH_OK - continue iterating
@@ -98,14 +95,13 @@ uint32_t cf_shash_get_size(cf_shash *h);
 void cf_shash_put(cf_shash *h, const void *key, const void *value);
 int cf_shash_put_unique(cf_shash *h, const void *key, const void *value);
 
-void cf_shash_update(cf_shash *h, const void *key, void *value_old, void *value_new, cf_shash_update_fn update_fn, void *udata);
-
 int cf_shash_get(cf_shash *h, const void *key, void *value);
 int cf_shash_get_vlock(cf_shash *h, const void *key, void **value_r, cf_mutex **vlock_r);
 
+int cf_shash_pop(cf_shash *h, const void *key, void *value);
+
 int cf_shash_delete(cf_shash *h, const void *key);
 int cf_shash_delete_lockfree(cf_shash *h, const void *key);
-int cf_shash_get_and_delete(cf_shash *h, const void *key, void *value);
 void cf_shash_delete_all(cf_shash *h);
 
 int cf_shash_reduce(cf_shash *h, cf_shash_reduce_fn reduce_fn, void *udata);

@@ -258,57 +258,6 @@ cf_shash_put_unique(cf_shash *h, const void *key, const void *value)
 	return CF_SHASH_OK;
 }
 
-// FIXME - replace with cf_shash_put_unique_or_get_vlock()?
-void
-cf_shash_update(cf_shash *h, const void *key, void *value_old, void *value_new,
-		cf_shash_update_fn update_fn, void *udata)
-{
-	cf_assert(h && key && update_fn, CF_MISC, "bad param");
-
-	uint32_t hash = cf_shash_calculate_hash(h, key);
-	cf_mutex *l = cf_shash_lock(h, hash);
-	cf_shash_ele *e = cf_shash_get_bucket(h, hash);
-
-	// Insert new value into empty bucket.
-	if (! e->in_use) {
-		(update_fn)(key, NULL, value_new, udata);
-		cf_shash_fill_element(e, h, key, value_new);
-		cf_shash_unlock(l);
-		return;
-	}
-
-	cf_shash_ele *e_head = e;
-
-	while (e) {
-		if (memcmp(ELE_KEY(h, e), key, h->key_size) == 0) {
-			if (value_old) {
-				memcpy(value_old, ELE_VALUE(h, e), h->value_size);
-			}
-
-			(update_fn)(key, value_old, value_new, udata);
-
-			memcpy(ELE_VALUE(h, e), value_new, h->value_size);
-			cf_shash_unlock(l);
-
-			return;
-		}
-
-		e = e->next;
-	}
-
-	(update_fn)(key, NULL, value_new, udata);
-
-	e = (cf_shash_ele *)cf_malloc(h->ele_size);
-
-	cf_shash_fill_element(e, h, key, value_new);
-
-	// Insert just after head.
-	e->next = e_head->next;
-	e_head->next = e;
-
-	cf_shash_unlock(l);
-}
-
 int
 cf_shash_get(cf_shash *h, const void *key, void *value)
 {
@@ -362,6 +311,14 @@ cf_shash_get_vlock(cf_shash *h, const void *key, void **value_r,
 }
 
 int
+cf_shash_pop(cf_shash *h, const void *key, void *value)
+{
+	cf_assert(value, CF_MISC, "bad param");
+
+	return cf_shash_delete_or_pop(h, key, value);
+}
+
+int
 cf_shash_delete(cf_shash *h, const void *key)
 {
 	return cf_shash_delete_or_pop(h, key, NULL);
@@ -409,15 +366,6 @@ cf_shash_delete_lockfree(cf_shash *h, const void *key)
 	}
 
 	return CF_SHASH_ERR_NOT_FOUND;
-}
-
-// TODO - Rename to cf_shash_pop()?
-int
-cf_shash_get_and_delete(cf_shash *h, const void *key, void *value)
-{
-	cf_assert(value, CF_MISC, "bad param");
-
-	return cf_shash_delete_or_pop(h, key, value);
 }
 
 void

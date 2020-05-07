@@ -411,7 +411,7 @@ proxyer_handle_response(msg* m, uint32_t tid)
 {
 	proxy_request pr;
 
-	if (cf_shash_get_and_delete(g_proxy_hash, &tid, &pr) != CF_SHASH_OK) {
+	if (cf_shash_pop(g_proxy_hash, &tid, &pr) != CF_SHASH_OK) {
 		// Some other response (or timeout) has already finished this pr.
 		return;
 	}

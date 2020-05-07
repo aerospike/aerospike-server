@@ -1208,7 +1208,7 @@ set_info_val(const char *key, const char *val)
 	// Remove existing value.
 
 	char *val_old;
-	int32_t res = cf_shash_get_and_delete(g_info, hash_str, &val_old);
+	int32_t res = cf_shash_pop(g_info, hash_str, &val_old);
 
 	switch (res) {
 	case CF_SHASH_OK:
