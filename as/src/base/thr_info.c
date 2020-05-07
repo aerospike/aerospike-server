@@ -6694,7 +6694,7 @@ as_info_init()
 	as_info_set_command("quiesce-undo", info_command_quiesce_undo, PERM_SERVICE_CTRL);        // Un-quiesce this node.
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
 	as_info_set_command("recluster", info_command_recluster, PERM_SERVICE_CTRL);              // Force cluster to re-form.
-	as_info_set_command("replicas-max", info_command_replicas, PERM_NONE);                    // Same as replicas, but includes limit.
+	as_info_set_command("replicas", info_command_replicas, PERM_NONE);                        // Same as 'dynamic' replicas, but with 'max' param.
 	as_info_set_command("revive", info_command_revive, PERM_SERVICE_CTRL);                    // Mark "untrusted" partitions as "revived".
 	as_info_set_command("roster", info_command_roster, PERM_NONE);                            // Roster information.
 	as_info_set_command("roster-set", info_command_roster_set, PERM_SERVICE_CTRL);            // Set the entire roster.
