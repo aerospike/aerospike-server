@@ -304,7 +304,6 @@ typedef enum {
 	CASE_SERVICE_INDENT_ALLOCATIONS,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
-	CASE_SERVICE_CLIENT_FD_MAX,
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
@@ -781,7 +780,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
-		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
@@ -2306,9 +2304,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully");
-				break;
-			case CASE_SERVICE_CLIENT_FD_MAX:
-				cfg_obsolete(&line, "please use 'proto-fd-max'");
 				break;
 			case CASE_SERVICE_NSUP_PERIOD:
 				cfg_obsolete(&line, "please use namespace-context 'nsup-period'");
