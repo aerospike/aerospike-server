@@ -39,7 +39,7 @@
 #include "base/proto.h"
 #include "storage/storage.h"
 
-#include "warnings.h"
+//#include "warnings.h" // generates warnings we're living with for now
 
 
 //==========================================================

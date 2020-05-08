@@ -46,7 +46,7 @@
 #include "base/particle_blob.h"
 #include "base/proto.h"
 
-#include "warnings.h"
+//#include "warnings.h" // generates warnings we're living with for now
 
 
 //==========================================================
