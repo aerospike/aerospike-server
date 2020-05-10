@@ -1,7 +1,7 @@
 /*
  * roster.h
  *
- * Copyright (C) 2017 Aerospike, Inc.
+ * Copyright (C) 2017-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -42,7 +42,7 @@ bool as_roster_set_nodes_cmd(const char* ns_name, const char* nodes);
 
 
 //==========================================================
-// Inlines and macros.
+// Inlines & macros.
 //
 
 // Format is: <node-id-hex-str>:<rack-id-decimal-str>,
