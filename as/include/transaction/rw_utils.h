@@ -96,7 +96,7 @@ void send_rw_messages(struct rw_request_s* rw);
 void send_rw_messages_forget(struct rw_request_s* rw);
 int repl_state_check(struct as_index_s* r, struct as_transaction_s* tr);
 void will_replicate(struct as_index_s* r, struct as_namespace_s* ns);
-bool insufficient_replica_destinations(const struct as_namespace_s* ns, uint32_t n_dests);
+bool set_replica_destinations(struct as_transaction_s* tr, struct rw_request_s* rw);
 void finished_replicated(struct as_transaction_s* tr);
 void finished_not_replicated(struct rw_request_s* rw);
 bool set_name_check(const struct as_transaction_s* tr, const struct as_index_s* r);
