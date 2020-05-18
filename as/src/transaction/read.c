@@ -237,10 +237,7 @@ as_read_start(as_transaction* tr)
 
 	if (must_ping) {
 		// Set up the nodes to which we'll ping.
-		rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
-				rw->dest_nodes);
-
-		if (insufficient_replica_destinations(tr->rsv.ns, rw->n_dest_nodes)) {
+		if (! set_replica_destinations(tr, rw)) {
 			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_ERR_UNAVAILABLE;
 			send_read_response(tr, NULL, NULL, 0, NULL);
@@ -314,10 +311,7 @@ read_dup_res_cb(rw_request* rw)
 
 	if (read_must_ping(&tr)) {
 		// Set up the nodes to which we'll ping.
-		rw->n_dest_nodes = as_partition_get_other_replicas(tr.rsv.p,
-				rw->dest_nodes);
-
-		if (insufficient_replica_destinations(tr.rsv.ns, rw->n_dest_nodes)) {
+		if (! set_replica_destinations(&tr, rw)) {
 			tr.result_code = AS_ERR_UNAVAILABLE;
 			send_read_response(&tr, NULL, NULL, 0, NULL);
 			return true;
