@@ -355,10 +355,7 @@ as_udf_start(as_transaction* tr)
 	// else - no duplicate resolution phase, apply operation to master.
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
-			rw->dest_nodes);
-
-	if (insufficient_replica_destinations(tr->rsv.ns, rw->n_dest_nodes)) {
+	if (! set_replica_destinations(tr, rw)) {
 		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_ERR_UNAVAILABLE;
 		send_udf_response(tr, NULL);
@@ -491,10 +488,7 @@ udf_dup_res_cb(rw_request* rw)
 	}
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_get_other_replicas(tr.rsv.p,
-			rw->dest_nodes);
-
-	if (insufficient_replica_destinations(tr.rsv.ns, rw->n_dest_nodes)) {
+	if (! set_replica_destinations(&tr, rw)) {
 		tr.result_code = AS_ERR_UNAVAILABLE;
 		send_udf_response(&tr, NULL);
 		return true;

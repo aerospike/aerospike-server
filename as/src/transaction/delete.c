@@ -210,17 +210,6 @@ as_delete_start(as_transaction* tr)
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
-	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
-			rw->dest_nodes);
-
-	if (insufficient_replica_destinations(tr->rsv.ns, rw->n_dest_nodes)) {
-		rw_request_hash_delete(&hkey, rw);
-		tr->result_code = AS_ERR_UNAVAILABLE;
-		send_delete_response(tr);
-		return TRANS_DONE_ERROR;
-	}
-
 	// If error, transaction is finished.
 	if ((status = delete_master(tr, rw)) != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey, rw);
@@ -308,16 +297,6 @@ delete_dup_res_cb(rw_request* rw)
 	as_transaction_init_from_rw(&tr, rw);
 
 	if (tr.result_code != AS_OK) {
-		send_delete_response(&tr);
-		return true;
-	}
-
-	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_get_other_replicas(tr.rsv.p,
-			rw->dest_nodes);
-
-	if (insufficient_replica_destinations(tr.rsv.ns, rw->n_dest_nodes)) {
-		tr.result_code = AS_ERR_UNAVAILABLE;
 		send_delete_response(&tr);
 		return true;
 	}
@@ -490,6 +469,13 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 	if (result != 0) {
 		as_record_done(r_ref, ns);
 		tr->result_code = result;
+		return TRANS_DONE_ERROR;
+	}
+
+	// Set up the nodes to which we'll write replicas.
+	if (! set_replica_destinations(tr, rw)) {
+		as_record_done(r_ref, ns);
+		tr->result_code = AS_ERR_UNAVAILABLE;
 		return TRANS_DONE_ERROR;
 	}
 
