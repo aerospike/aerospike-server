@@ -272,17 +272,6 @@ as_write_start(as_transaction* tr)
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
-	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
-			rw->dest_nodes);
-
-	if (insufficient_replica_destinations(tr->rsv.ns, rw->n_dest_nodes)) {
-		rw_request_hash_delete(&hkey, rw);
-		tr->result_code = AS_ERR_UNAVAILABLE;
-		send_write_response(tr, NULL);
-		return TRANS_DONE_ERROR;
-	}
-
 	status = write_master(rw, tr);
 
 	BENCHMARK_NEXT_DATA_POINT_FROM(tr, write, FROM_CLIENT, master);
@@ -378,16 +367,6 @@ write_dup_res_cb(rw_request* rw)
 	as_transaction_init_from_rw(&tr, rw);
 
 	if (tr.result_code != AS_OK) {
-		send_write_response(&tr, NULL);
-		return true;
-	}
-
-	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_get_other_replicas(tr.rsv.p,
-			rw->dest_nodes);
-
-	if (insufficient_replica_destinations(tr.rsv.ns, rw->n_dest_nodes)) {
-		tr.result_code = AS_ERR_UNAVAILABLE;
 		send_write_response(&tr, NULL);
 		return true;
 	}
@@ -772,6 +751,12 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Convert message TTL special value if appropriate.
 	if (record_created && m->record_ttl == TTL_DONT_UPDATE) {
 		m->record_ttl = TTL_NAMESPACE_DEFAULT;
+	}
+
+	// Set up the nodes to which we'll write replicas.
+	if (! set_replica_destinations(tr, rw)) {
+		write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_UNAVAILABLE);
+		return TRANS_DONE_ERROR;
 	}
 
 	// Will we need a pickle?
