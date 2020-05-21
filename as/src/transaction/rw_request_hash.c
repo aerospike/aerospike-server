@@ -286,6 +286,10 @@ retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata)
 			rw->xmit_ms = now->now_ms + rw->retry_interval_ms;
 			rw->retry_interval_ms *= 2;
 
+			if (rw->repl_write_cb != NULL) {
+				repl_write_reset_replicas(rw);
+			}
+
 			send_rw_messages(rw);
 			update_retransmit_stats(rw);
 		}

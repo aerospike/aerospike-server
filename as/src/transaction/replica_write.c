@@ -181,6 +181,49 @@ repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
 
 
 void
+repl_write_reset_replicas(rw_request* rw)
+{
+	cf_node nodes[AS_CLUSTER_SZ];
+	uint32_t n_nodes = as_partition_get_other_replicas(rw->rsv.p, nodes);
+
+	if (n_nodes == rw->n_dest_nodes &&
+			memcmp(nodes, rw->dest_nodes, n_nodes * sizeof(cf_node)) == 0) {
+		return; // almost always - replica destinations unchanged
+	}
+
+	if (! sufficient_replica_destinations(rw->rsv.ns, n_nodes)) {
+		return; // don't change destinations - time out if not enough replicas
+	}
+	// else - use new replica destinations. Note - could be same nodes just
+	// reordered, but not worth detecting this.
+
+	// Initialize or preserve completion status.
+
+	bool complete[n_nodes];
+
+	for (uint32_t n = 0; n < n_nodes; n++) {
+		complete[n] = false;
+
+		for (uint32_t old_n = 0; old_n < rw->n_dest_nodes; old_n++) {
+			if (nodes[n] == rw->dest_nodes[old_n]) {
+				complete[n] = rw->dest_complete[old_n];
+				break;
+			}
+		}
+	}
+
+	// Install the new list of replica destinations.
+
+	rw->n_dest_nodes = n_nodes;
+
+	for (uint32_t n = 0; n < n_nodes; n++) {
+		rw->dest_nodes[n] = nodes[n];
+		rw->dest_complete[n] = complete[n];
+	}
+}
+
+
+void
 repl_write_handle_op(cf_node node, msg* m)
 {
 	uint8_t* ns_name;
@@ -333,7 +376,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 	int i = index_of_node(rw->dest_nodes, rw->n_dest_nodes, node);
 
 	if (i == -1) {
-		cf_warning(AS_RW, "repl-write ack: from non-dest node %lx", node);
+		cf_detail(AS_RW, "repl-write ack: from non-dest node %lx", node);
 		cf_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
