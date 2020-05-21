@@ -79,9 +79,12 @@ write_is_full_drop(const as_transaction* tr)
 
 
 bool
-insufficient_replica_destinations(const as_namespace* ns, uint32_t n_dests)
+set_replica_destinations(as_transaction* tr, rw_request* rw)
 {
-	return false;
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
+			rw->dest_nodes);
+
+	return true;
 }
 
 
