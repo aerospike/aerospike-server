@@ -80,7 +80,7 @@ typedef enum {
 #define RW_OP_REPL_PING_ACK 7
 #define RW_OP_REPL_WRITE 8
 
-#define RW_INFO_XDR				0x0001
+#define RW_INFO_UNUSED_1		0x0001 // was XDR (used in 4.9 & 5.0.0.3)
 #define RW_INFO_NO_REPL_ACK		0x0002
 #define RW_INFO_UNUSED_4		0x0004
 #define RW_INFO_UNUSED_8		0x0008
