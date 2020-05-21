@@ -301,11 +301,6 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	msg_get_uint32(m, RW_FIELD_INFO, &info);
 
-	// TODO - add compatibility version check @ 4.9 or 5.0. (If 4.9, we'd need
-	// to add the xdr-write bit to the flat format etc. but we'd get to remove
-	// all the checks and older code in 5.0.)
-	rr.xdr_write = (info & RW_INFO_XDR) != 0;
-
 	// If source didn't touch sindex, may not need to touch it locally.
 	bool skip_sindex = (info & RW_INFO_SINDEX_TOUCHED) == 0;
 
@@ -438,13 +433,6 @@ uint32_t
 pack_info_bits(as_transaction* tr)
 {
 	uint32_t info = 0;
-
-	// TODO - add compatibility version check @ 4.9 or 5.0. (If 4.9, we'd need
-	// to add the xdr-write bit to the flat format etc. but we'd get to remove
-	// all the checks and older code in 5.0.)
-	if (as_transaction_is_xdr(tr)) {
-		info |= RW_INFO_XDR;
-	}
 
 	if ((tr->flags & AS_TRANSACTION_FLAG_SINDEX_TOUCHED) != 0) {
 		info |= RW_INFO_SINDEX_TOUCHED;
