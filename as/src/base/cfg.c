@@ -692,7 +692,13 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS,
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS,
 	CASE_XDR_DC_NAMESPACE_SHIP_SET,
-	CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT
+	CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT,
+	CASE_XDR_DC_NAMESPACE_WRITE_POLICY,
+
+	// XDR DC namespace write policy (value tokens):
+	CASE_XDR_DC_NAMESPACE_WRITE_POLICY_AUTO,
+	CASE_XDR_DC_NAMESPACE_WRITE_POLICY_UPDATE,
+	CASE_XDR_DC_NAMESPACE_WRITE_POLICY_REPLACE
 
 } cfg_case_id;
 
@@ -1205,7 +1211,14 @@ const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "ship-only-specified-sets",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS },
 		{ "ship-set",						CASE_XDR_DC_NAMESPACE_SHIP_SET },
 		{ "transaction-queue-limit",		CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT },
+		{ "write-policy",					CASE_XDR_DC_NAMESPACE_WRITE_POLICY },
 		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt XDR_DC_NAMESPACE_WRITE_POLICY_OPTS[] = {
+		{ "auto",							CASE_XDR_DC_NAMESPACE_WRITE_POLICY_AUTO },
+		{ "update",							CASE_XDR_DC_NAMESPACE_WRITE_POLICY_UPDATE },
+		{ "replace",						CASE_XDR_DC_NAMESPACE_WRITE_POLICY_REPLACE }
 };
 
 const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
@@ -1247,6 +1260,7 @@ const int NUM_XDR_OPTS								= sizeof(XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_OPTS							= sizeof(XDR_DC_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_NAMESPACE_OPTS					= sizeof(XDR_DC_NAMESPACE_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_AUTH_MODE_OPTS					= sizeof(XDR_DC_AUTH_MODE_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_DC_NAMESPACE_WRITE_POLICY_OPTS	= sizeof(XDR_DC_NAMESPACE_WRITE_POLICY_OPTS) / sizeof(cfg_opt);
 
 
 //==========================================================
@@ -3705,6 +3719,23 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT:
 				dc_ns_cfg->transaction_queue_limit = cfg_u32_power_of_2(&line, AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT, AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT);
+				break;
+			case CASE_XDR_DC_NAMESPACE_WRITE_POLICY:
+				switch (cfg_find_tok(line.val_tok_1, XDR_DC_NAMESPACE_WRITE_POLICY_OPTS, NUM_XDR_DC_NAMESPACE_WRITE_POLICY_OPTS)) {
+				case CASE_XDR_DC_NAMESPACE_WRITE_POLICY_AUTO:
+					dc_ns_cfg->write_policy = XDR_WRITE_POLICY_AUTO;
+					break;
+				case CASE_XDR_DC_NAMESPACE_WRITE_POLICY_UPDATE:
+					dc_ns_cfg->write_policy = XDR_WRITE_POLICY_UPDATE;
+					break;
+				case CASE_XDR_DC_NAMESPACE_WRITE_POLICY_REPLACE:
+					dc_ns_cfg->write_policy = XDR_WRITE_POLICY_REPLACE;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);

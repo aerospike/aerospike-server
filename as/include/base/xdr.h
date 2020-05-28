@@ -67,6 +67,12 @@ typedef enum {
 	XDR_AUTH_KERBEROS_LDAP // TODO - not yet implemented
 } as_xdr_auth_mode;
 
+typedef enum {
+	XDR_WRITE_POLICY_AUTO,
+	XDR_WRITE_POLICY_UPDATE,
+	XDR_WRITE_POLICY_REPLACE
+} as_xdr_write_policy;
+
 typedef struct as_xdr_dc_ns_cfg_s {
 	char* ns_name;
 
@@ -80,6 +86,7 @@ typedef struct as_xdr_dc_ns_cfg_s {
 	bool ship_only_specified_bins;
 	bool ship_only_specified_sets;
 	uint32_t transaction_queue_limit;
+	as_xdr_write_policy write_policy;
 
 	cf_vector* ignored_sets; // startup only
 	cf_vector* shipped_sets; // startup only
