@@ -78,7 +78,6 @@
 /* Forward declarations */
 typedef struct as_namespace_s as_namespace;
 typedef struct as_index_s as_record;
-typedef struct as_bin_s as_bin;
 typedef struct as_index_ref_s as_index_ref;
 typedef struct as_set_s as_set;
 
@@ -137,28 +136,45 @@ typedef enum {
 	AS_PARTICLE_TYPE_BAD = AS_PARTICLE_TYPE_MAX
 } as_particle_type;
 
-/* as_particle
- * The common part of a particle
- * this is poor man's subclassing - IE, how to do a subclassed interface in C
- * Go look in particle.c to see all the subclass implementation and structure */
 typedef struct as_particle_s {
-	uint8_t		metadata;		// used by the iparticle for is_integer and inuse, as well as version in multi bin mode only
-								// used by *particle for type
-	uint8_t		data[0];
+	uint8_t type; // type for non-embedded particles
+	uint8_t data[0];
 } __attribute__ ((__packed__)) as_particle;
 
-// Bit Flag constants used for the particle state value (4 bits, 16 values)
+// Constants used for the as_bin state value (4 bits, 16 values).
 #define AS_BIN_STATE_UNUSED			0
 #define AS_BIN_STATE_INUSE_INTEGER	1
 #define AS_BIN_STATE_RECYCLE_ME		2 // was - hidden bin
 #define AS_BIN_STATE_INUSE_OTHER	3
 #define AS_BIN_STATE_INUSE_FLOAT	4
 
-typedef struct as_particle_iparticle_s {
-	uint8_t		version: 4;		// now unused - and can't be used in single-bin config
-	uint8_t		state: 4;		// see AS_BIN_STATE_...
-	uint8_t		data[0];
-} __attribute__ ((__packed__)) as_particle_iparticle;
+typedef struct as_bin_s {
+	uint8_t do_not_use: 4;	// can't use due to single-bin embedding in index
+	uint8_t state: 4;		// see AS_BIN_STATE_...
+	as_particle* particle;	// for embedded particle this is value, not pointer
+
+	// Never read or write these bytes in single-bin configuration:
+	uint16_t id;			// ID of bin name
+	uint8_t unused;			// legacy - reserved for more bins?
+} __attribute__ ((__packed__)) as_bin;
+
+// For data-in-memory namespaces in multi-bin mode, we keep an array of as_bin
+// structs in memory, accessed via this struct.
+typedef struct as_bin_space_s {
+	uint16_t n_bins;
+	as_bin bins[0];
+} __attribute__ ((__packed__)) as_bin_space;
+
+// For data-in-memory namespaces in multi-bin mode, if we're storing extra
+// record metadata, we access it via this struct. In this case the index points
+// here instead of directly to an as_bin_space.
+typedef struct as_rec_space_s {
+	as_bin_space* bin_space;
+
+	// So far the key is the only extra record metadata we store in memory.
+	uint32_t key_size;
+	uint8_t key[0];
+} __attribute__ ((__packed__)) as_rec_space;
 
 /* Particle function declarations */
 
@@ -257,66 +273,31 @@ extern void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payl
 extern int as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result);
 extern int as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
 
-
-/* as_bin
- * A bin container - null name means unused */
-struct as_bin_s {
-	as_particle	iparticle;	// 1 byte
-	as_particle	*particle;	// for embedded particle this is value, not pointer
-
-	// Never read or write these bytes in single-bin configuration:
-	uint16_t	id;			// ID of bin name
-	uint8_t		unused;		// pad to 12 bytes (multiple of 4) - legacy
-} __attribute__ ((__packed__)) ;
-
-// For data-in-memory namespaces in multi-bin mode, we keep an array of as_bin
-// structs in memory, accessed via this struct.
-typedef struct as_bin_space_s {
-	uint16_t	n_bins;
-	as_bin		bins[0];
-} __attribute__ ((__packed__)) as_bin_space;
-
-// TODO - Do we really need to pad as_bin to 12 bytes for thread safety?
-// Do we ever write & read adjacent as_bin structures in a bins array from
-// different threads when not under the record lock? And if we're worried about
-// 4-byte alignment for that or any other reason, wouldn't we also have to pad
-// after n_bins in as_bin_space?
-
-// For data-in-memory namespaces in multi-bin mode, if we're storing extra
-// record metadata, we access it via this struct. In this case the index points
-// here instead of directly to an as_bin_space.
-typedef struct as_rec_space_s {
-	as_bin_space*	bin_space;
-
-	// So far the key is the only extra record metadata we store in memory.
-	uint32_t		key_size;
-	uint8_t			key[0];
-} __attribute__ ((__packed__)) as_rec_space;
-
 // For copying as_bin structs without the last 3 bytes.
 static inline void
 as_single_bin_copy(as_bin *to, const as_bin *from)
 {
-	to->iparticle = from->iparticle;
+	to->do_not_use = from->do_not_use;
+	to->state = from->state;
 	to->particle = from->particle;
 }
 
 static inline bool
 as_bin_inuse(const as_bin *b)
 {
-	return (((as_particle_iparticle *)b)->state);
+	return b->state != AS_BIN_STATE_UNUSED;
 }
 
 static inline uint8_t
 as_bin_state(const as_bin *b)
 {
-	return ((as_particle_iparticle *)b)->state;
+	return b->state;
 }
 
 static inline void
 as_bin_state_set(as_bin *b, uint8_t val)
 {
-	((as_particle_iparticle *)b)->state = val;
+	b->state = val;
 }
 
 static inline void
@@ -324,16 +305,16 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 {
 	switch (type) {
 	case AS_PARTICLE_TYPE_NULL:
-		((as_particle_iparticle *)b)->state = AS_BIN_STATE_UNUSED;
+		b->state = AS_BIN_STATE_UNUSED;
 		break;
 	case AS_PARTICLE_TYPE_INTEGER:
-		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_INTEGER;
+		b->state = AS_BIN_STATE_INUSE_INTEGER;
 		break;
 	case AS_PARTICLE_TYPE_FLOAT:
-		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_FLOAT;
+		b->state = AS_BIN_STATE_INUSE_FLOAT;
 		break;
 	default:
-		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_OTHER;
+		b->state = AS_BIN_STATE_INUSE_OTHER;
 		break;
 	}
 }
@@ -401,31 +382,31 @@ as_bin_set_all_empty(as_storage_rd *rd) {
 
 static inline bool
 as_bin_is_embedded_particle(const as_bin *b) {
-	return ((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_INTEGER ||
-			((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_FLOAT;
+	return b->state == AS_BIN_STATE_INUSE_INTEGER ||
+			b->state == AS_BIN_STATE_INUSE_FLOAT;
 }
 
 static inline bool
 as_bin_is_external_particle(const as_bin *b) {
-	return ((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_OTHER;
+	return b->state == AS_BIN_STATE_INUSE_OTHER;
 }
 
 static inline as_particle *
 as_bin_get_particle(as_bin *b) {
-	return as_bin_is_embedded_particle(b) ? &b->iparticle : b->particle;
+	return as_bin_is_embedded_particle(b) ? (as_particle *)&b : b->particle;
 }
 
 // "Embedded" types like integer are stored directly, but other bin types
 // ("other") must follow an indirection to get the actual type.
 static inline uint8_t
 as_bin_get_particle_type(const as_bin *b) {
-	switch (((as_particle_iparticle *)b)->state) {
+	switch (b->state) {
 		case AS_BIN_STATE_INUSE_INTEGER:
 			return AS_PARTICLE_TYPE_INTEGER;
 		case AS_BIN_STATE_INUSE_FLOAT:
 			return AS_PARTICLE_TYPE_FLOAT;
 		case AS_BIN_STATE_INUSE_OTHER:
-			return b->particle->metadata;
+			return b->particle->type;
 		default:
 			return AS_PARTICLE_TYPE_NULL;
 	}
