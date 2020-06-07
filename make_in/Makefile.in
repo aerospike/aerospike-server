@@ -12,7 +12,7 @@ include $(DEPTH)/make_in/Makefile.vars
 CF_INCLUDE_DIR = $(DEPTH)/common/src/include
 CF_LIB_DIR     = $(DEPTH)/common/target/$(PLATFORM)/lib
 
-AS_CFLAGS += -D_FILE_OFFSET_BITS=64 -std=gnu99 -D_REENTRANT -D_GNU_SOURCE
+AS_CFLAGS += -D_FILE_OFFSET_BITS=64 -std=gnu99 -D_REENTRANT -D_GNU_SOURCE  -Wno-address-of-packed-member
 
 # Use the enhanced memory allocator (rather than the default version in the Common module.)
 AS_CFLAGS += -DENHANCED_ALLOC
