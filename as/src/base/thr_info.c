@@ -2213,9 +2213,9 @@ info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 int
 info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 {
-	cf_debug(AS_INFO, "config-get command received: params %s", params);
 
 	if (params && *params != 0) {
+		cf_debug(AS_INFO, "config-get command received: params %s", params);
 		info_command_config_get_with_params(name, params, db);
 		// Response may be an error string (without a semicolon).
 		cf_dyn_buf_chomp_char(db, ';');
