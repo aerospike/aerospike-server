@@ -340,8 +340,21 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 	if (! is_create && (result = as_record_resolve_conflict(policy,
 			r->generation, r->last_update_time, (uint16_t)rr->generation,
 			rr->last_update_time)) <= 0) {
+		if (rr->via != VIA_REPLICATION || result < 0) {
+			record_replace_failed(rr, &r_ref, NULL, is_create);
+			return result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION;
+		}
+		// else - replica write, result == 0 - submit to XDR in case migration
+		// (which does not submit to XDR) had passed the replica write.
+
+		// Save for XDR submit outside record lock.
+		as_xdr_submit_info submit_info;
+
+		as_xdr_get_submit_info(r, r->last_update_time, &submit_info);
 		record_replace_failed(rr, &r_ref, NULL, is_create);
-		return result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION;
+		as_xdr_submit(ns, &submit_info);
+
+		return AS_ERR_RECORD_EXISTS;
 	}
 	// else - remote winner - apply it.
 
@@ -420,7 +433,9 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 	// Save for XDR submit outside record lock.
 	as_xdr_submit_info submit_info;
 
-	as_xdr_get_submit_info(r, prev_lut, &submit_info);
+	if (rr->via == VIA_REPLICATION) {
+		as_xdr_get_submit_info(r, prev_lut, &submit_info);
+	}
 
 	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
