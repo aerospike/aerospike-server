@@ -1043,11 +1043,9 @@ void
 update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 		int apply_rv, const as_result* result)
 {
-	bool is_success = result->is_success;
-
 	switch (origin) {
 	case FROM_CLIENT:
-		if (apply_rv == 0 && is_success) {
+		if (result->is_success) { // apply_rv will be 0
 			if (op == UDF_OPTYPE_READ) {
 				cf_atomic64_incr(&ns->n_client_lang_read_success);
 			}
@@ -1064,7 +1062,7 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 		}
 		break;
 	case FROM_PROXY:
-		if (apply_rv == 0 && is_success) {
+		if (result->is_success) { // apply_rv will be 0
 			if (op == UDF_OPTYPE_READ) {
 				cf_atomic64_incr(&ns->n_from_proxy_lang_read_success);
 			}
@@ -1081,7 +1079,7 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 		}
 		break;
 	case FROM_IUDF:
-		if (apply_rv == 0 && is_success) {
+		if (result->is_success) { // apply_rv will be 0
 			if (op == UDF_OPTYPE_READ) {
 				// Note - this would be weird, since there's nowhere for a
 				// response to go in our current UDF scans & queries.
@@ -1110,13 +1108,13 @@ lua_failure_warning(int apply_rv, const as_result* result)
 {
 	char* val_str = NULL;
 
-	if (! result->is_success && as_val_type(result->value) == AS_STRING) {
+	if (as_val_type(result->value) == AS_STRING) {
 		val_str = as_val_tostring(result->value);
 	}
 
 	cf_warning(AS_UDF, "lua-error: rv %d result %s", apply_rv,
 			val_str != NULL ? val_str :
-					(result->is_success ? "<success>" : "<unprintable>"));
+					(result->value == NULL ? "<null>" : "<unprintable>"));
 
 	if (val_str != NULL) {
 		cf_free(val_str);
