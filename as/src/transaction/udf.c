@@ -129,7 +129,8 @@ bool udf_timer_timedout(const as_timer* timer);
 uint64_t udf_timer_timeslice(const as_timer* timer);
 
 void update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
-		int ret, bool is_success);
+		int apply_rv, const as_result* result);
+void lua_failure_warning(int apply_rv, const as_result* result);
 
 void process_failure_str(udf_call* call, const char* err_str, size_t len,
 		cf_dyn_buf* db);
@@ -845,8 +846,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		cf_free(rs);
 	}
 
-	update_lua_complete_stats(tr->origin, ns, optype, apply_rv,
-			result.is_success);
+	update_lua_complete_stats(tr->origin, ns, optype, apply_rv, &result);
 
 	as_result_destroy(&result);
 	udf_record_destroy(urec);
@@ -1032,11 +1032,13 @@ udf_timer_timeslice(const as_timer* timer)
 
 void
 update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
-		int ret, bool is_success)
+		int apply_rv, const as_result* result)
 {
+	bool is_success = result->is_success;
+
 	switch (origin) {
 	case FROM_CLIENT:
-		if (ret == 0 && is_success) {
+		if (apply_rv == 0 && is_success) {
 			if (op == UDF_OPTYPE_READ) {
 				cf_atomic64_incr(&ns->n_client_lang_read_success);
 			}
@@ -1048,12 +1050,12 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 			}
 		}
 		else {
-			cf_info(AS_UDF, "lua error, ret:%d", ret);
+			lua_failure_warning(apply_rv, result);
 			cf_atomic64_incr(&ns->n_client_lang_error);
 		}
 		break;
 	case FROM_PROXY:
-		if (ret == 0 && is_success) {
+		if (apply_rv == 0 && is_success) {
 			if (op == UDF_OPTYPE_READ) {
 				cf_atomic64_incr(&ns->n_from_proxy_lang_read_success);
 			}
@@ -1065,12 +1067,12 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 			}
 		}
 		else {
-			cf_info(AS_UDF, "lua error, ret:%d", ret);
+			lua_failure_warning(apply_rv, result);
 			cf_atomic64_incr(&ns->n_from_proxy_lang_error);
 		}
 		break;
 	case FROM_IUDF:
-		if (ret == 0 && is_success) {
+		if (apply_rv == 0 && is_success) {
 			if (op == UDF_OPTYPE_READ) {
 				// Note - this would be weird, since there's nowhere for a
 				// response to go in our current UDF scans & queries.
@@ -1084,13 +1086,30 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 			}
 		}
 		else {
-			cf_info(AS_UDF, "lua error, ret:%d", ret);
+			lua_failure_warning(apply_rv, result);
 			cf_atomic64_incr(&ns->n_udf_sub_lang_error);
 		}
 		break;
 	default:
 		cf_crash(AS_UDF, "unexpected transaction origin %u", origin);
 		break;
+	}
+}
+
+void
+lua_failure_warning(int apply_rv, const as_result* result)
+{
+	char* val_str = NULL;
+
+	if (! result->is_success && as_val_type(result->value) == AS_STRING) {
+		val_str = as_val_tostring(result->value);
+	}
+
+	cf_warning(AS_UDF, "lua-error: rv %d result %s", apply_rv,
+			val_str != NULL ? val_str : "<unprintable>");
+
+	if (val_str != NULL) {
+		cf_free(val_str);
 	}
 }
 
