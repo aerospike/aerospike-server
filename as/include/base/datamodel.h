@@ -688,7 +688,8 @@ struct as_namespace_s {
 
 	uint64_t		drive_size; // discovered (and rounded) size of drive
 	int				storage_last_avail_pct; // most recently calculated available percent
-	int				storage_max_write_q; // storage_max_write_cache is converted to this
+	uint32_t		storage_max_write_q; // storage_max_write_cache is converted to this
+	cf_atomic32		n_wblocks_to_flush; // on write queues or shadow queues
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
 	uint32_t		defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
 

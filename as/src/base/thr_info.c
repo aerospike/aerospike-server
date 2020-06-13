@@ -3484,7 +3484,8 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of max-write-cache of ns %s from %lu to %lu ", ns->name, ns->storage_max_write_cache, val_u64);
 			ns->storage_max_write_cache = val_u64;
-			ns->storage_max_write_q = (int)(ns->storage_max_write_cache / ns->storage_write_block_size);
+			ns->storage_max_write_q = (uint32_t)(as_namespace_device_count(ns) *
+					ns->storage_max_write_cache / ns->storage_write_block_size);
 		}
 		else if (0 == as_info_parameter_get(params, "min-avail-pct", context, &context_len)) {
 			ns->storage_min_avail_pct = atoi(context);

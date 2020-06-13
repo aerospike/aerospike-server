@@ -170,6 +170,15 @@ ssd_get_file_id(drv_ssds *ssds, cf_digest *keyd)
 }
 
 
+// Put a wblock on the write queue, to be flushed.
+static inline void
+push_wblock_to_write_q(drv_ssd* ssd, const ssd_write_buf* swb)
+{
+	cf_atomic32_incr(&ssd->ns->n_wblocks_to_flush);
+	cf_queue_push(ssd->swb_write_q, &swb);
+}
+
+
 // Put a wblock on the free queue for reuse.
 static inline void
 push_wblock_to_free_q(drv_ssd *ssd, uint32_t wblock_id)
@@ -573,7 +582,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 	// flushed to device, and grab a new buffer.
 	if (write_size > ssd->write_block_size - swb->pos) {
 		// Enqueue the buffer, to be flushed to device.
-		cf_queue_push(ssd->swb_write_q, &swb);
+		push_wblock_to_write_q(ssd, swb);
 		cf_atomic64_incr(&ssd->n_defrag_wblock_writes);
 
 		// Get the new buffer.
@@ -819,47 +828,38 @@ void*
 run_defrag(void *pv_data)
 {
 	drv_ssd *ssd = (drv_ssd*)pv_data;
+	as_namespace *ns = ssd->ns;
 	uint32_t wblock_id;
 	uint8_t *read_buf = cf_valloc(ssd->write_block_size);
 
 	while (true) {
-		uint32_t q_min = ssd->ns->storage_defrag_queue_min;
+		uint32_t q_min = ns->storage_defrag_queue_min;
 
-		if (q_min != 0) {
-			if (cf_queue_sz(ssd->defrag_wblock_q) > q_min) {
-				if (CF_QUEUE_OK !=
-						cf_queue_pop(ssd->defrag_wblock_q, &wblock_id,
-								CF_QUEUE_NOWAIT)) {
-					// Should never get here!
-					break;
-				}
-			}
-			else {
+		if (q_min == 0) {
+			cf_queue_pop(ssd->defrag_wblock_q, &wblock_id, CF_QUEUE_FOREVER);
+		}
+		else {
+			if (cf_queue_sz(ssd->defrag_wblock_q) <= q_min) {
 				usleep(1000 * 50);
 				continue;
 			}
-		}
-		else {
-			if (CF_QUEUE_OK !=
-					cf_queue_pop(ssd->defrag_wblock_q, &wblock_id,
-							CF_QUEUE_FOREVER)) {
-				// Should never get here!
-				break;
-			}
+
+			cf_queue_pop(ssd->defrag_wblock_q, &wblock_id, CF_QUEUE_NOWAIT);
 		}
 
 		ssd_defrag_wblock(ssd, wblock_id, read_buf);
 
-		uint32_t sleep_us = ssd->ns->storage_defrag_sleep;
+		uint32_t sleep_us = ns->storage_defrag_sleep;
 
 		if (sleep_us != 0) {
 			usleep(sleep_us);
 		}
-	}
 
-	// Although we ever expect to get here...
-	cf_free(read_buf);
-	cf_warning(AS_DRV_SSD, "device %s: quit defrag - queue error", ssd->name);
+		while (ns->n_wblocks_to_flush >
+				as_load_uint32(&ns->storage_max_write_q) + 100) {
+			usleep(1000);
+		}
+	}
 
 	return NULL;
 }
@@ -1435,6 +1435,8 @@ run_write(void *arg)
 
 			// Transfer to post-write queue, or release swb, as appropriate.
 			ssd_post_write(ssd, swb);
+
+			cf_atomic32_decr(&ssd->ns->n_wblocks_to_flush);
 		}
 	} // infinite event loop waiting for block to write
 
@@ -1466,6 +1468,8 @@ run_shadow(void *arg)
 
 		// Transfer to post-write queue, or release swb, as appropriate.
 		ssd_post_write(ssd, swb);
+
+		cf_atomic32_decr(&ssd->ns->n_wblocks_to_flush);
 	}
 
 	return NULL;
@@ -1548,7 +1552,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 	// be flushed to device, and grab a new buffer.
 	if (write_sz > ssd->write_block_size - swb->pos) {
 		// Enqueue the buffer, to be flushed to device.
-		cf_queue_push(ssd->swb_write_q, &swb);
+		push_wblock_to_write_q(ssd, swb);
 		cur_swb->n_wblocks_written++;
 
 		// Get the new buffer.
@@ -3371,8 +3375,9 @@ as_storage_init_ssd(as_namespace *ns)
 	ns->storage_defrag_sleep = 0;
 
 	// The queue limit is more efficient to work with.
-	ns->storage_max_write_q = (int)
-			(ns->storage_max_write_cache / ns->storage_write_block_size);
+	ns->storage_max_write_q = (uint32_t)
+			(ssds->n_ssds * ns->storage_max_write_cache) /
+			ns->storage_write_block_size;
 
 	// Minimize how often we recalculate this.
 	ns->defrag_lwm_size =
@@ -3628,29 +3633,12 @@ as_storage_wait_for_defrag_ssd(as_namespace *ns)
 bool
 as_storage_overloaded_ssd(const as_namespace *ns)
 {
-	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-	int max_write_q = ns->storage_max_write_q;
+	uint32_t max_write_q = as_load_uint32(&ns->storage_max_write_q);
 
-	// TODO - would be nice to not do this loop every single write transaction!
-	for (int i = 0; i < ssds->n_ssds; i++) {
-		drv_ssd *ssd = &ssds->ssds[i];
-		int qsz = cf_queue_sz(ssd->swb_write_q);
-
-		if (qsz > max_write_q) {
-			cf_ticker_warning(AS_DRV_SSD, "{%s} write fail: queue too deep: exceeds max %d",
-					ns->name, max_write_q);
-			return true;
-		}
-
-		if (ssd->shadow_name) {
-			qsz = cf_queue_sz(ssd->swb_shadow_q);
-
-			if (qsz > max_write_q) {
-				cf_ticker_warning(AS_DRV_SSD, "{%s} write fail: shadow queue too deep: exceeds max %d",
-						ns->name, max_write_q);
-				return true;
-			}
-		}
+	if (ns->n_wblocks_to_flush > max_write_q) {
+		cf_ticker_warning(AS_DRV_SSD, "{%s} write fail: queue too deep: exceeds max %d",
+				ns->name, max_write_q);
+		return true;
 	}
 
 	return false;
@@ -3963,7 +3951,7 @@ as_storage_shutdown_ssd(as_namespace *ns)
 
 			// Flush current swb by pushing it to write-q.
 			if (swb != NULL) {
-				cf_queue_push(ssd->swb_write_q, &swb);
+				push_wblock_to_write_q(ssd, swb);
 				cur_swb->swb = NULL;
 			}
 		}
@@ -3973,7 +3961,7 @@ as_storage_shutdown_ssd(as_namespace *ns)
 
 		// Flush defrag swb by pushing it to write-q.
 		if (ssd->defrag_swb) {
-			cf_queue_push(ssd->swb_write_q, &ssd->defrag_swb);
+			push_wblock_to_write_q(ssd, ssd->defrag_swb);
 			ssd->defrag_swb = NULL;
 		}
 	}
