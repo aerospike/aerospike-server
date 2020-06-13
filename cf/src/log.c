@@ -181,8 +181,8 @@ static cf_log_sink g_sinks[MAX_SINKS];
 
 static void set_most_verbose_level(cf_log_context context, cf_log_level level);
 static uint32_t cache_hash_fn(const void *key);
-static cf_log_context get_context(const char* context_str);
-static cf_log_level get_level(const char* level_str);
+static bool get_context(const char* context_str, cf_log_context* context);
+static bool get_level(const char* level_str, cf_log_level* level);
 static void update_most_verbose_level(cf_log_context context);
 static void log_write(cf_log_context context, cf_log_level level, const char* file_name, int line, const char* format, va_list argp);
 static int sprintf_now(char* buf);
@@ -268,8 +268,8 @@ cf_log_init(bool early_verbose)
 {
 	cf_log_level level = early_verbose ? CF_DETAIL : CF_WARNING;
 
-	for (int i = 0; i < CF_LOG_N_CONTEXTS; i++) {
-		set_most_verbose_level(i, level);
+	for (cf_log_context context = 0; context < CF_LOG_N_CONTEXTS; context++) {
+		set_most_verbose_level(context, level);
 	}
 
 	g_ticker_hash = cf_shash_create(cache_hash_fn, sizeof(cf_log_cache_hkey),
@@ -290,8 +290,8 @@ cf_log_init_sink(const char* path)
 	sink->path = path != NULL ? cf_strdup(path) : NULL;
 
 	// Set default for all contexts.
-	for (int i = 0; i < CF_LOG_N_CONTEXTS; i++) {
-		sink->levels[i] = CF_CRITICAL;
+	for (cf_log_context context = 0; context < CF_LOG_N_CONTEXTS; context++) {
+		sink->levels[context] = CF_CRITICAL;
 	}
 
 	g_n_sinks++;
@@ -303,9 +303,9 @@ bool
 cf_log_init_level(cf_log_sink* sink, const char* context_str,
 		const char* level_str)
 {
-	cf_log_level level = get_level(level_str);
+	cf_log_level level;
 
-	if (level < 0) {
+	if (! get_level(level_str, &level)) {
 		return false;
 	}
 
@@ -317,9 +317,9 @@ cf_log_init_level(cf_log_sink* sink, const char* context_str,
 		return true;
 	}
 
-	cf_log_context context = get_context(context_str);
+	cf_log_context context;
 
-	if (context < 0) {
+	if (! get_context(context_str, &context)) {
 		return false;
 	}
 
@@ -347,8 +347,8 @@ cf_log_activate_sinks(void)
 		}
 	}
 
-	for (int i = 0; i < CF_LOG_N_CONTEXTS; i++) {
-		update_most_verbose_level(i);
+	for (cf_log_context context = 0; context < CF_LOG_N_CONTEXTS; context++) {
+		update_most_verbose_level(context);
 	}
 
 	g_sinks_activated = true;
@@ -362,9 +362,9 @@ cf_log_set_level(uint32_t id, const char* context_str, const char* level_str)
 		return false;
 	}
 
-	cf_log_level level = get_level(level_str);
+	cf_log_level level;
 
-	if (level < 0) {
+	if (! get_level(level_str, &level)) {
 		cf_warning(CF_MISC, "invalid log level %s", level_str);
 		return false;
 	}
@@ -380,9 +380,9 @@ cf_log_set_level(uint32_t id, const char* context_str, const char* level_str)
 		return true;
 	}
 
-	cf_log_context context = get_context(context_str);
+	cf_log_context context;
 
-	if (context < 0) {
+	if (! get_context(context_str, &context)) {
 		cf_warning(CF_MISC, "invalid log context %s", context_str);
 		return false;
 	}
@@ -417,9 +417,9 @@ cf_log_get_level(uint32_t id, const char* context_str, cf_dyn_buf* db)
 		return;
 	}
 
-	cf_log_context context = get_context(context_str);
+	cf_log_context context;
 
-	if (context < 0) {
+	if (! get_context(context_str, &context)) {
 		cf_warning(CF_MISC, "bad context %s", context_str);
 		cf_dyn_buf_append_string(db, "ERROR::bad-context");
 		return;
@@ -664,28 +664,30 @@ cache_hash_fn(const void *key)
 			*(uint32_t*)((const cf_log_cache_hkey*)key)->msg;
 }
 
-static cf_log_context
-get_context(const char* context_str)
+static bool
+get_context(const char* context_str, cf_log_context* context)
 {
-	for (int i = 0; i < CF_LOG_N_CONTEXTS; i++) {
+	for (cf_log_context i = 0; i < CF_LOG_N_CONTEXTS; i++) {
 		if (strcasecmp(context_strings[i], context_str) == 0) {
-			return i;
+			*context = i;
+			return true;
 		}
 	}
 
-	return -1;
+	return false;
 }
 
-static cf_log_level
-get_level(const char* level_str)
+static bool
+get_level(const char* level_str, cf_log_level* level)
 {
-	for (int i = 0; i < CF_LOG_N_LEVELS; i++) {
+	for (cf_log_level i = 0; i < CF_LOG_N_LEVELS; i++) {
 		if (strcasecmp(level_strings[i], level_str) == 0) {
-			return i;
+			*level = i;
+			return true;
 		}
 	}
 
-	return -1;
+	return false;
 }
 
 static void
