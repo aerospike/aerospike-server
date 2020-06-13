@@ -1080,7 +1080,8 @@ lua_failure_warning(int apply_rv, const as_result* result)
 	}
 
 	cf_warning(AS_UDF, "lua-error: rv %d result %s", apply_rv,
-			val_str != NULL ? val_str : "<unprintable>");
+			val_str != NULL ? val_str :
+					(result->is_success ? "<success>" : "<unprintable>"));
 
 	if (val_str != NULL) {
 		cf_free(val_str);
