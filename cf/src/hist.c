@@ -354,18 +354,8 @@ histogram_dump(histogram* h)
 		strftime(start, sizeof(start), "%T", &start_tm);
 		strftime(end, sizeof(end), "%T", &end_tm);
 
-		const char* thresholds = NULL;
-
-		switch (h->scale) {
-		case HIST_MILLISECONDS:
-			thresholds = ">1ms,>8ms,>64ms";
-			break;
-		case HIST_MICROSECONDS:
-			thresholds = ">1us,>8us,>64us";
-			break;
-		default:
-			break;
-		}
+		const char* thresholds = h->scale == HIST_MILLISECONDS ?
+				">1ms,>8ms,>64ms" : ">1us,>8us,>64us";
 
 		legacy_out += sprintf(legacy_out, "%s-GMT,ops/sec,%s;%s,%.1f", start,
 				thresholds, end, tps);
