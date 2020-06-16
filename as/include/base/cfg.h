@@ -99,6 +99,7 @@ typedef struct as_config_s {
 	bool			batch_without_digests; // leave digests out of batch responses
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
+	bool			udf_execution_disabled;
 	bool			fabric_benchmarks_enabled;
 	bool			health_check_enabled;
 	bool			info_hist_enabled;

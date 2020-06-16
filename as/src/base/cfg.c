@@ -274,6 +274,7 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
 	CASE_SERVICE_BATCH_WITHOUT_DIGESTS,
 	CASE_SERVICE_CLUSTER_NAME,
+	CASE_SERVICE_DISABLE_UDF_EXECUTION,
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_HEALTH_CHECK,
 	CASE_SERVICE_ENABLE_HIST_INFO,
@@ -881,6 +882,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
 		{ "batch-without-digests",			CASE_SERVICE_BATCH_WITHOUT_DIGESTS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
+		{ "disable-udf-execution",			CASE_SERVICE_DISABLE_UDF_EXECUTION },
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
@@ -2451,6 +2453,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_CLUSTER_NAME:
 				cfg_set_cluster_name(line.val_tok_1);
+				break;
+			case CASE_SERVICE_DISABLE_UDF_EXECUTION:
+				c->udf_execution_disabled = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC:
 				c->fabric_benchmarks_enabled = cfg_bool(&line);
