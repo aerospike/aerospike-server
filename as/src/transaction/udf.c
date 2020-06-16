@@ -309,6 +309,13 @@ as_udf_start(as_transaction* tr)
 	BENCHMARK_START(tr, udf, FROM_CLIENT);
 	BENCHMARK_START(tr, udf_sub, FROM_IUDF);
 
+	// Temporary security vulnerability protection.
+	if (g_config.udf_execution_disabled) {
+		tr->result_code = AS_ERR_FORBIDDEN;
+		send_udf_response(tr, NULL);
+		return TRANS_DONE_ERROR;
+	}
+
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_ERR_ALWAYS_FORBIDDEN;
