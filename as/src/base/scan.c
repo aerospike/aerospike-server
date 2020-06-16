@@ -1216,6 +1216,12 @@ void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
 int
 aggr_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
+	// Temporary security vulnerability protection.
+	if (g_config.udf_execution_disabled) {
+		cf_warning(AS_SCAN, "aggregation scan job forbidden");
+		return AS_ERR_FORBIDDEN;
+	}
+
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
 	scan_options options = { .sample_pct = 100 };
@@ -1550,6 +1556,12 @@ void udf_bg_scan_tr_complete(void* udata, int result);
 int
 udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
+	// Temporary security vulnerability protection.
+	if (g_config.udf_execution_disabled) {
+		cf_warning(AS_SCAN, "udf-bg scan job forbidden");
+		return AS_ERR_FORBIDDEN;
+	}
+
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
 	scan_options options = { .sample_pct = 100 };
