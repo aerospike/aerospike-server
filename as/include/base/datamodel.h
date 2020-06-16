@@ -41,7 +41,6 @@
 #include "cf_mutex.h"
 #include "dynbuf.h"
 #include "hist.h"
-#include "hist_track.h"
 #include "linear_hist.h"
 #include "msg.h"
 #include "node.h"
@@ -1141,11 +1140,11 @@ struct as_namespace_s {
 
 	// One-way automatically activated histograms.
 
-	cf_hist_track*	read_hist;
-	cf_hist_track*	write_hist;
-	cf_hist_track*	udf_hist;
-	cf_hist_track*	query_hist;
-	histogram*		query_rec_count_hist;
+	histogram*		read_hist;
+	histogram*		write_hist;
+	histogram*		udf_hist;
+	histogram*		query_hist;
+	histogram*		query_rec_count_hist; // not tracked
 	histogram*		re_repl_hist; // relevant only for enterprise edition
 
 	bool			read_hist_active;
@@ -1202,13 +1201,13 @@ struct as_namespace_s {
 	histogram*		ops_sub_repl_write_hist;
 	histogram*		ops_sub_response_hist;
 
-	histogram*		device_read_size_hist;
-	histogram*		device_write_size_hist;
+	histogram*		device_read_size_hist; // not tracked
+	histogram*		device_write_size_hist; // not tracked
 
 	// Histograms of object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)
-	histogram*		obj_size_log_hist;
-	histogram*		set_obj_size_log_hists[AS_SET_MAX_COUNT + 1];
+	histogram*		obj_size_log_hist; // not tracked
+	histogram*		set_obj_size_log_hists[AS_SET_MAX_COUNT + 1]; // not tracked
 	linear_hist*	obj_size_lin_hist;
 	linear_hist*	set_obj_size_lin_hists[AS_SET_MAX_COUNT + 1];
 

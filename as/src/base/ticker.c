@@ -42,7 +42,6 @@
 #include "cf_thread.h"
 #include "dynbuf.h"
 #include "hist.h"
-#include "hist_track.h"
 #include "log.h"
 
 #include "base/cfg.h"
@@ -967,7 +966,7 @@ void
 dump_global_histograms()
 {
 	if (g_stats.batch_index_hist_active) {
-		cf_hist_track_dump(g_stats.batch_index_hist);
+		histogram_dump(g_stats.batch_index_hist);
 	}
 
 	if (g_config.info_hist_enabled) {
@@ -1000,7 +999,7 @@ void
 dump_namespace_histograms(as_namespace* ns)
 {
 	if (ns->read_hist_active) {
-		cf_hist_track_dump(ns->read_hist);
+		histogram_dump(ns->read_hist);
 	}
 
 	if (ns->read_benchmarks_enabled) {
@@ -1013,7 +1012,7 @@ dump_namespace_histograms(as_namespace* ns)
 	}
 
 	if (ns->write_hist_active) {
-		cf_hist_track_dump(ns->write_hist);
+		histogram_dump(ns->write_hist);
 	}
 
 	if (ns->write_benchmarks_enabled) {
@@ -1026,7 +1025,7 @@ dump_namespace_histograms(as_namespace* ns)
 	}
 
 	if (ns->udf_hist_active) {
-		cf_hist_track_dump(ns->udf_hist);
+		histogram_dump(ns->udf_hist);
 	}
 
 	if (ns->udf_benchmarks_enabled) {
@@ -1039,7 +1038,7 @@ dump_namespace_histograms(as_namespace* ns)
 	}
 
 	if (ns->query_hist_active) {
-		cf_hist_track_dump(ns->query_hist);
+		histogram_dump(ns->query_hist);
 	}
 
 	if (ns->query_rec_count_hist_active) {

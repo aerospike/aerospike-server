@@ -476,7 +476,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					as_transaction_trid(tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, write, response);
-		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
+		HIST_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
 		client_write_update_stats(tr->rsv.ns, tr->result_code,
 				as_transaction_is_xdr(tr));
 		break;

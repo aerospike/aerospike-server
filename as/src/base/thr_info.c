@@ -1774,9 +1774,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
 	info_append_bool(db, "batch-without-digests", g_config.batch_without_digests);
 
-	// Not true config, but act as config overrides:
-	cf_hist_track_get_settings(g_stats.batch_index_hist, db);
-
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	info_get_printable_cluster_name(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
@@ -1785,9 +1782,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
 	info_append_string(db, "feature-key-file", g_config.feature_key_file);
-	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
-	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
-	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
@@ -1947,12 +1941,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint32(db, "default-ttl", ns->default_ttl);
-
-	// Not true config, but act as config overrides:
-	cf_hist_track_get_settings(ns->read_hist, db);
-	cf_hist_track_get_settings(ns->query_hist, db);
-	cf_hist_track_get_settings(ns->udf_hist, db);
-	cf_hist_track_get_settings(ns->write_hist, db);
 
 	info_append_bool(db, "allow-ttl-without-nsup", ns->allow_ttl_without_nsup);
 	info_append_uint32(db, "background-scan-max-rps", ns->background_scan_max_rps);
@@ -2253,6 +2241,100 @@ info_command_get_stats(char *name, char *params, cf_dyn_buf *db)
 
 	return 0;
 }
+
+
+//
+// Dynamic enable/disable histogram helpers.
+//
+
+static void
+fabric_histogram_clear_all(void)
+{
+	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
+	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK]);
+	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL]);
+	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL]);
+	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META]);
+	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META]);
+	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META]);
+	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META]);
+	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW]);
+	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
+}
+
+static void
+read_benchmarks_histogram_clear_all(as_namespace* ns)
+{
+	histogram_clear(ns->read_start_hist);
+	histogram_clear(ns->read_restart_hist);
+	histogram_clear(ns->read_dup_res_hist);
+	histogram_clear(ns->read_repl_ping_hist);
+	histogram_clear(ns->read_local_hist);
+	histogram_clear(ns->read_response_hist);
+}
+
+static void
+write_benchmarks_histogram_clear_all(as_namespace* ns)
+{
+	histogram_clear(ns->write_start_hist);
+	histogram_clear(ns->write_restart_hist);
+	histogram_clear(ns->write_dup_res_hist);
+	histogram_clear(ns->write_master_hist);
+	histogram_clear(ns->write_repl_write_hist);
+	histogram_clear(ns->write_response_hist);
+}
+
+static void
+udf_benchmarks_histogram_clear_all(as_namespace* ns)
+{
+	histogram_clear(ns->udf_start_hist);
+	histogram_clear(ns->udf_restart_hist);
+	histogram_clear(ns->udf_dup_res_hist);
+	histogram_clear(ns->udf_master_hist);
+	histogram_clear(ns->udf_repl_write_hist);
+	histogram_clear(ns->udf_response_hist);
+}
+
+static void
+batch_sub_benchmarks_histogram_clear_all(as_namespace* ns)
+{
+	histogram_clear(ns->batch_sub_prestart_hist);
+	histogram_clear(ns->batch_sub_start_hist);
+	histogram_clear(ns->batch_sub_restart_hist);
+	histogram_clear(ns->batch_sub_dup_res_hist);
+	histogram_clear(ns->batch_sub_repl_ping_hist);
+	histogram_clear(ns->batch_sub_read_local_hist);
+	histogram_clear(ns->batch_sub_response_hist);
+}
+
+static void
+udf_sub_benchmarks_histogram_clear_all(as_namespace* ns)
+{
+	histogram_clear(ns->udf_sub_start_hist);
+	histogram_clear(ns->udf_sub_restart_hist);
+	histogram_clear(ns->udf_sub_dup_res_hist);
+	histogram_clear(ns->udf_sub_master_hist);
+	histogram_clear(ns->udf_sub_repl_write_hist);
+	histogram_clear(ns->udf_sub_response_hist);
+}
+
+static void
+ops_sub_benchmarks_histogram_clear_all(as_namespace* ns)
+{
+	histogram_clear(ns->ops_sub_start_hist);
+	histogram_clear(ns->ops_sub_restart_hist);
+	histogram_clear(ns->ops_sub_dup_res_hist);
+	histogram_clear(ns->ops_sub_master_hist);
+	histogram_clear(ns->ops_sub_repl_write_hist);
+	histogram_clear(ns->ops_sub_response_hist);
+}
+
 
 //
 // config-set:context=service;variable=value;
@@ -2641,27 +2723,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-fabric", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s", context);
+				if (! g_config.fabric_benchmarks_enabled) {
+					fabric_histogram_clear_all();
+				}
 				g_config.fabric_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s", context);
 				g_config.fabric_benchmarks_enabled = false;
-				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
-				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
-				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
-				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK]);
-				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL]);
-				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
-				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
-				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL]);
-				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META]);
-				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META]);
-				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META]);
-				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META]);
-				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW]);
-				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW]);
-				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
-				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
+				fabric_histogram_clear_all();
 			}
 			else {
 				goto Error;
@@ -2683,6 +2753,9 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-hist-info", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-hist-info to %s", context);
+				if (! g_config.info_hist_enabled) {
+					histogram_clear(g_stats.info_hist);
+				}
 				g_config.info_hist_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
@@ -3319,18 +3392,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-batch-sub", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-batch-sub of ns %s from %s to %s", ns->name, bool_val[ns->batch_sub_benchmarks_enabled], context);
+				if (! ns->batch_sub_benchmarks_enabled) {
+					batch_sub_benchmarks_histogram_clear_all(ns);
+				}
 				ns->batch_sub_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-batch-sub of ns %s from %s to %s", ns->name, bool_val[ns->batch_sub_benchmarks_enabled], context);
 				ns->batch_sub_benchmarks_enabled = false;
-				histogram_clear(ns->batch_sub_prestart_hist);
-				histogram_clear(ns->batch_sub_start_hist);
-				histogram_clear(ns->batch_sub_restart_hist);
-				histogram_clear(ns->batch_sub_dup_res_hist);
-				histogram_clear(ns->batch_sub_repl_ping_hist);
-				histogram_clear(ns->batch_sub_read_local_hist);
-				histogram_clear(ns->batch_sub_response_hist);
+				batch_sub_benchmarks_histogram_clear_all(ns);
 			}
 			else {
 				goto Error;
@@ -3339,17 +3409,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-ops-sub", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-ops-sub of ns %s from %s to %s", ns->name, bool_val[ns->ops_sub_benchmarks_enabled], context);
+				if (! ns->ops_sub_benchmarks_enabled) {
+					ops_sub_benchmarks_histogram_clear_all(ns);
+				}
 				ns->ops_sub_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-ops-sub of ns %s from %s to %s", ns->name, bool_val[ns->ops_sub_benchmarks_enabled], context);
 				ns->ops_sub_benchmarks_enabled = false;
-				histogram_clear(ns->ops_sub_start_hist);
-				histogram_clear(ns->ops_sub_restart_hist);
-				histogram_clear(ns->ops_sub_dup_res_hist);
-				histogram_clear(ns->ops_sub_master_hist);
-				histogram_clear(ns->ops_sub_repl_write_hist);
-				histogram_clear(ns->ops_sub_response_hist);
+				ops_sub_benchmarks_histogram_clear_all(ns);
 			}
 			else {
 				goto Error;
@@ -3358,17 +3426,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-read", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-read of ns %s from %s to %s", ns->name, bool_val[ns->read_benchmarks_enabled], context);
+				if (! ns->read_benchmarks_enabled) {
+					read_benchmarks_histogram_clear_all(ns);
+				}
 				ns->read_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-read of ns %s from %s to %s", ns->name, bool_val[ns->read_benchmarks_enabled], context);
 				ns->read_benchmarks_enabled = false;
-				histogram_clear(ns->read_start_hist);
-				histogram_clear(ns->read_restart_hist);
-				histogram_clear(ns->read_dup_res_hist);
-				histogram_clear(ns->read_repl_ping_hist);
-				histogram_clear(ns->read_local_hist);
-				histogram_clear(ns->read_response_hist);
+				read_benchmarks_histogram_clear_all(ns);
 			}
 			else {
 				goto Error;
@@ -3377,6 +3443,9 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-storage", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-storage of ns %s from %s to %s", ns->name, bool_val[ns->storage_benchmarks_enabled], context);
+				if (! ns->storage_benchmarks_enabled) {
+					as_storage_histogram_clear_all(ns);
+				}
 				ns->storage_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
@@ -3391,17 +3460,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-udf", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf of ns %s from %s to %s", ns->name, bool_val[ns->udf_benchmarks_enabled], context);
+				if (! ns->udf_benchmarks_enabled) {
+					udf_benchmarks_histogram_clear_all(ns);
+				}
 				ns->udf_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf of ns %s from %s to %s", ns->name, bool_val[ns->udf_benchmarks_enabled], context);
 				ns->udf_benchmarks_enabled = false;
-				histogram_clear(ns->udf_start_hist);
-				histogram_clear(ns->udf_restart_hist);
-				histogram_clear(ns->udf_dup_res_hist);
-				histogram_clear(ns->udf_master_hist);
-				histogram_clear(ns->udf_repl_write_hist);
-				histogram_clear(ns->udf_response_hist);
+				udf_benchmarks_histogram_clear_all(ns);
 			}
 			else {
 				goto Error;
@@ -3410,17 +3477,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-udf-sub", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf-sub of ns %s from %s to %s", ns->name, bool_val[ns->udf_sub_benchmarks_enabled], context);
+				if (! ns->udf_sub_benchmarks_enabled) {
+					udf_sub_benchmarks_histogram_clear_all(ns);
+				}
 				ns->udf_sub_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf-sub of ns %s from %s to %s", ns->name, bool_val[ns->udf_sub_benchmarks_enabled], context);
 				ns->udf_sub_benchmarks_enabled = false;
-				histogram_clear(ns->udf_sub_start_hist);
-				histogram_clear(ns->udf_sub_restart_hist);
-				histogram_clear(ns->udf_sub_dup_res_hist);
-				histogram_clear(ns->udf_sub_master_hist);
-				histogram_clear(ns->udf_sub_repl_write_hist);
-				histogram_clear(ns->udf_sub_response_hist);
+				udf_sub_benchmarks_histogram_clear_all(ns);
 			}
 			else {
 				goto Error;
@@ -3429,17 +3494,15 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-write", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-write of ns %s from %s to %s", ns->name, bool_val[ns->write_benchmarks_enabled], context);
+				if (! ns->write_benchmarks_enabled) {
+					write_benchmarks_histogram_clear_all(ns);
+				}
 				ns->write_benchmarks_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-write of ns %s from %s to %s", ns->name, bool_val[ns->write_benchmarks_enabled], context);
 				ns->write_benchmarks_enabled = false;
-				histogram_clear(ns->write_start_hist);
-				histogram_clear(ns->write_restart_hist);
-				histogram_clear(ns->write_dup_res_hist);
-				histogram_clear(ns->write_master_hist);
-				histogram_clear(ns->write_repl_write_hist);
-				histogram_clear(ns->write_response_hist);
+				write_benchmarks_histogram_clear_all(ns);
 			}
 			else {
 				goto Error;
@@ -3448,6 +3511,9 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "enable-hist-proxy", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-hist-proxy of ns %s from %s to %s", ns->name, bool_val[ns->proxy_hist_enabled], context);
+				if (! ns->proxy_hist_enabled) {
+					histogram_clear(ns->proxy_hist);
+				}
 				ns->proxy_hist_enabled = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
@@ -3740,65 +3806,65 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 }
 
 
-// latency:hist=reads;back=180;duration=60;slice=10;
-// throughput:hist=reads;back=180;duration=60;slice=10;
-// hist-track-start:hist=reads;back=43200;slice=30;thresholds=1,4,16,64;
-// hist-track-stop:hist=reads;
-//
-// hist     - optional histogram name - if none, command applies to all cf_hist_track objects
-//
-// for start command:
-// back     - total time span in seconds over which to cache data
-// slice    - period in seconds at which to cache histogram data
-// thresholds - comma-separated bucket (ms) values to track, must be powers of 2. e.g:
-//				1,4,16,64
-// defaults are:
-// - config value for back - mandatory, serves as flag for tracking
-// - config value if it exists for slice, otherwise 10 seconds
-// - config value if it exists for thresholds, otherwise internal defaults (1,8,64)
-//
-// for query commands:
-// back     - start search this many seconds before now, default: minimum to get last slice
-//			  using back=0 will get cached data from oldest cached data
-// duration - seconds (forward) from start to search, default 0: everything to present
-// slice    - intervals (in seconds) to analyze, default 0: everything as one slice
-//
-// e.g. query:
-// latency:hist=reads;back=180;duration=60;slice=10;
-// output (CF_HIST_TRACK_FMT_PACKED format) is:
-// requested value  latency:hist=reads;back=180;duration=60;slice=10
-// value is  reads:23:26:24-GMT,ops/sec,>1ms,>8ms,>64ms;23:26:34,30618.2,0.05,0.00,0.00;
-// 23:26:44,31942.1,0.02,0.00,0.00;23:26:54,30966.9,0.01,0.00,0.00;23:27:04,30380.4,0.01,0.00,0.00;
-// 23:27:14,37833.6,0.01,0.00,0.00;23:27:24,38502.7,0.01,0.00,0.00;23:27:34,39191.4,0.02,0.00,0.00;
-//
-// explanation:
-// 23:26:24-GMT - timestamp of histogram starting first slice
-// ops/sec,>1ms,>8ms,>64ms - labels for the columns: throughput, and which thresholds
-// 23:26:34,30618.2,0.05,0.00,0.00; - timestamp of histogram ending slice, throughput, latencies
-
-int
-info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
+// Helper for info_command_latencies() and info_command_latency().
+static int
+command_latencies(char* name, char* params, bool legacy, cf_dyn_buf* db)
 {
-	cf_debug(AS_INFO, "hist track %s command received: params %s", name, params);
+	cf_debug(AS_INFO, "%s command received: params %s", name, params);
 
-	char value_str[50];
+	char value_str[100];
 	int  value_str_len = sizeof(value_str);
-	cf_hist_track* hist_p = NULL;
 
-	if (0 != as_info_parameter_get(params, "hist", value_str, &value_str_len)) {
-		cf_debug(AS_INFO, "hist track %s command: no histogram specified - doing all", name);
+	if (as_info_parameter_get(params, "hist", value_str, &value_str_len) != 0) {
+		// Canonical histograms.
+
+		histogram_get_latencies(g_stats.batch_index_hist, legacy, db);
+
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace* ns = g_config.namespaces[i];
+
+			histogram_get_latencies(ns->read_hist, legacy, db);
+			histogram_get_latencies(ns->write_hist, legacy, db);
+			histogram_get_latencies(ns->udf_hist, legacy, db);
+			histogram_get_latencies(ns->query_hist, legacy, db);
+		}
 	}
 	else {
-		if (0 == strcmp(value_str, "batch-index")) {
-			hist_p = g_stats.batch_index_hist;
+		// Named histograms.
+
+		if (strcmp(value_str, "batch-index") == 0) {
+			histogram_get_latencies(g_stats.batch_index_hist, legacy, db);
+		}
+		else if (strcmp(value_str, "info") == 0) {
+			histogram_get_latencies(g_stats.info_hist, legacy, db);
+		}
+		else if (strcmp(value_str, "benchmarks-fabric") == 0) {
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
 		}
 		else if (*value_str == '{') {
+			// Named namespace-scoped histogram - parse '{namespace}-' prefix.
+
 			char* ns_name = value_str + 1;
 			char* ns_name_end = strchr(ns_name, '}');
 			as_namespace* ns = as_namespace_get_bybuf((uint8_t*)ns_name, ns_name_end - ns_name);
 
-			if (! ns) {
-				cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
+			if (ns == NULL) {
+				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
 				cf_dyn_buf_append_string(db, "error-bad-hist-name");
 				return 0;
 			}
@@ -3806,165 +3872,80 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			char* hist_name = ns_name_end + 1;
 
 			if (*hist_name++ != '-') {
-				cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
+				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
 				cf_dyn_buf_append_string(db, "error-bad-hist-name");
 				return 0;
 			}
 
-			if (0 == strcmp(hist_name, "read")) {
-				hist_p = ns->read_hist;
+			if (strcmp(hist_name, "read") == 0) {
+				histogram_get_latencies(ns->read_hist, legacy, db);
 			}
-			else if (0 == strcmp(hist_name, "write")) {
-				hist_p = ns->write_hist;
+			else if (strcmp(hist_name, "write") == 0) {
+				histogram_get_latencies(ns->write_hist, legacy, db);
 			}
-			else if (0 == strcmp(hist_name, "udf")) {
-				hist_p = ns->udf_hist;
+			else if (strcmp(hist_name, "udf") == 0) {
+				histogram_get_latencies(ns->udf_hist, legacy, db);
 			}
-			else if (0 == strcmp(hist_name, "query")) {
-				hist_p = ns->query_hist;
+			else if (strcmp(hist_name, "query") == 0) {
+				histogram_get_latencies(ns->query_hist, legacy, db);
+			}
+			else if (strcmp(hist_name, "re-repl") == 0) {
+				histogram_get_latencies(ns->re_repl_hist, legacy, db);
+			}
+			else if (strcmp(hist_name, "proxy") == 0) {
+				histogram_get_latencies(ns->proxy_hist, legacy, db);
+			}
+			else if (strcmp(hist_name, "benchmarks-read") == 0) {
+				histogram_get_latencies(ns->read_start_hist, legacy, db);
+				histogram_get_latencies(ns->read_restart_hist, legacy, db);
+				histogram_get_latencies(ns->read_dup_res_hist, legacy, db);
+				histogram_get_latencies(ns->read_repl_ping_hist, legacy, db);
+				histogram_get_latencies(ns->read_local_hist, legacy, db);
+				histogram_get_latencies(ns->read_response_hist, legacy, db);
+			}
+			else if (strcmp(hist_name, "benchmarks-write") == 0) {
+				histogram_get_latencies(ns->write_start_hist, legacy, db);
+				histogram_get_latencies(ns->write_restart_hist, legacy, db);
+				histogram_get_latencies(ns->write_dup_res_hist, legacy, db);
+				histogram_get_latencies(ns->write_master_hist, legacy, db);
+				histogram_get_latencies(ns->write_repl_write_hist, legacy, db);
+				histogram_get_latencies(ns->write_response_hist, legacy, db);
+			}
+			else if (strcmp(hist_name, "benchmarks-batch-sub") == 0) {
+				histogram_get_latencies(ns->batch_sub_prestart_hist, legacy, db);
+				histogram_get_latencies(ns->batch_sub_start_hist, legacy, db);
+				histogram_get_latencies(ns->batch_sub_restart_hist, legacy, db);
+				histogram_get_latencies(ns->batch_sub_dup_res_hist, legacy, db);
+				histogram_get_latencies(ns->batch_sub_repl_ping_hist, legacy, db);
+				histogram_get_latencies(ns->batch_sub_read_local_hist, legacy, db);
+				histogram_get_latencies(ns->batch_sub_response_hist, legacy, db);
+			}
+			else if (strcmp(hist_name, "benchmarks-udf-sub") == 0) {
+				histogram_get_latencies(ns->udf_sub_start_hist, legacy, db);
+				histogram_get_latencies(ns->udf_sub_restart_hist, legacy, db);
+				histogram_get_latencies(ns->udf_sub_dup_res_hist, legacy, db);
+				histogram_get_latencies(ns->udf_sub_master_hist, legacy, db);
+				histogram_get_latencies(ns->udf_sub_repl_write_hist, legacy, db);
+				histogram_get_latencies(ns->udf_sub_response_hist, legacy, db);
+			}
+			else if (strcmp(hist_name, "benchmarks-ops-sub") == 0) {
+				histogram_get_latencies(ns->ops_sub_start_hist, legacy, db);
+				histogram_get_latencies(ns->ops_sub_restart_hist, legacy, db);
+				histogram_get_latencies(ns->ops_sub_dup_res_hist, legacy, db);
+				histogram_get_latencies(ns->ops_sub_master_hist, legacy, db);
+				histogram_get_latencies(ns->ops_sub_repl_write_hist, legacy, db);
+				histogram_get_latencies(ns->ops_sub_response_hist, legacy, db);
 			}
 			else {
-				cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
+				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
 				cf_dyn_buf_append_string(db, "error-bad-hist-name");
 				return 0;
 			}
 		}
 		else {
-			cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
+			cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
 			cf_dyn_buf_append_string(db, "error-bad-hist-name");
 			return 0;
-		}
-	}
-
-	if (0 == strcmp(name, "hist-track-stop")) {
-		if (hist_p) {
-			cf_hist_track_stop(hist_p);
-		}
-		else {
-			cf_hist_track_stop(g_stats.batch_index_hist);
-
-			for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-				as_namespace* ns = g_config.namespaces[i];
-
-				cf_hist_track_stop(ns->read_hist);
-				cf_hist_track_stop(ns->write_hist);
-				cf_hist_track_stop(ns->udf_hist);
-				cf_hist_track_stop(ns->query_hist);
-			}
-		}
-
-		cf_dyn_buf_append_string(db, "ok");
-
-		return 0;
-	}
-
-	bool start_cmd = 0 == strcmp(name, "hist-track-start");
-
-	// Note - default query params will get the most recent saved slice.
-	uint32_t back_sec = start_cmd ? g_config.hist_track_back : (g_config.hist_track_slice * 2) - 1;
-	uint32_t slice_sec = start_cmd ? g_config.hist_track_slice : 0;
-	int i;
-
-	value_str_len = sizeof(value_str);
-
-	if (0 == as_info_parameter_get(params, "back", value_str, &value_str_len)) {
-		if (0 == cf_str_atoi(value_str, &i)) {
-			back_sec = i >= 0 ? (uint32_t)i : (uint32_t)-i;
-		}
-		else {
-			cf_info(AS_INFO, "hist track %s command: back is not a number, using default", name);
-		}
-	}
-
-	value_str_len = sizeof(value_str);
-
-	if (0 == as_info_parameter_get(params, "slice", value_str, &value_str_len)) {
-		if (0 == cf_str_atoi(value_str, &i)) {
-			slice_sec = i >= 0 ? (uint32_t)i : (uint32_t)-i;
-		}
-		else {
-			cf_info(AS_INFO, "hist track %s command: slice is not a number, using default", name);
-		}
-	}
-
-	if (start_cmd) {
-		char* thresholds = g_config.hist_track_thresholds;
-
-		value_str_len = sizeof(value_str);
-
-		if (0 == as_info_parameter_get(params, "thresholds", value_str, &value_str_len)) {
-			thresholds = value_str;
-		}
-
-		cf_debug(AS_INFO, "hist track start command: back %u, slice %u, thresholds %s",
-				back_sec, slice_sec, thresholds ? thresholds : "null");
-
-		if (hist_p) {
-			if (cf_hist_track_start(hist_p, back_sec, slice_sec, thresholds)) {
-				cf_dyn_buf_append_string(db, "ok");
-			}
-			else {
-				cf_dyn_buf_append_string(db, "error-bad-start-params");
-			}
-		}
-		else {
-			if (! cf_hist_track_start(g_stats.batch_index_hist, back_sec, slice_sec, thresholds)) {
-				cf_dyn_buf_append_string(db, "error-bad-start-params");
-				return 0;
-			}
-
-			for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-				as_namespace* ns = g_config.namespaces[i];
-
-				if ( ! (cf_hist_track_start(ns->read_hist, back_sec, slice_sec, thresholds) &&
-						cf_hist_track_start(ns->write_hist, back_sec, slice_sec, thresholds) &&
-						cf_hist_track_start(ns->udf_hist, back_sec, slice_sec, thresholds) &&
-						cf_hist_track_start(ns->query_hist, back_sec, slice_sec, thresholds))) {
-
-					cf_dyn_buf_append_string(db, "error-bad-start-params");
-					return 0;
-				}
-			}
-
-			cf_dyn_buf_append_string(db, "ok");
-		}
-
-		return 0;
-	}
-
-	// From here on it's latency or throughput...
-
-	uint32_t duration_sec = 0;
-
-	value_str_len = sizeof(value_str);
-
-	if (0 == as_info_parameter_get(params, "duration", value_str, &value_str_len)) {
-		if (0 == cf_str_atoi(value_str, &i)) {
-			duration_sec = i >= 0 ? (uint32_t)i : (uint32_t)-i;
-		}
-		else {
-			cf_info(AS_INFO, "hist track %s command: duration is not a number, using default", name);
-		}
-	}
-
-	bool throughput_only = 0 == strcmp(name, "throughput");
-
-	cf_debug(AS_INFO, "hist track %s command: back %u, duration %u, slice %u",
-			name, back_sec, duration_sec, slice_sec);
-
-	if (hist_p) {
-		cf_hist_track_get_info(hist_p, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-	}
-	else {
-		cf_hist_track_get_info(g_stats.batch_index_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-
-		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-			as_namespace* ns = g_config.namespaces[i];
-
-			cf_hist_track_get_info(ns->read_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-			cf_hist_track_get_info(ns->write_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-			cf_hist_track_get_info(ns->udf_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-			cf_hist_track_get_info(ns->query_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 		}
 	}
 
@@ -3972,6 +3953,46 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 
 	return 0;
 }
+
+// latencies:[hist=<name>]
+//
+// If no hist param, command applies to ?
+//
+// e.g.:
+// latencies:hist={test}-reads
+// output:
+// {test}-reads:msec,30618.2,0.05,0.01,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00
+//
+// explanation:
+// <name>,units,TPS, ...
+// Values following the TPS are percentages exceeding logarithmic thresholds.
+
+int
+info_command_latencies(char* name, char* params, cf_dyn_buf* db)
+{
+	return command_latencies(name, params, false, db);
+}
+
+// latency:[hist=<name>]
+//
+// If no hist param, command applies to ?
+//
+// e.g.:
+// latencies:hist={test}-reads
+// output:
+// {test}-reads:23:26:24-GMT,ops/sec,>1ms,>8ms,>64ms;23:26:34,30618.2,0.05,0.00,0.00
+//
+// explanation:
+// 23:26:24-GMT - timestamp of histogram starting first slice
+// ops/sec,>1ms,>8ms,>64ms - labels for the columns: throughput, and which thresholds
+// 23:26:34,30618.2,0.05,0.00,0.00; - timestamp of histogram ending slice, throughput, latencies
+
+int
+info_command_latency(char* name, char* params, cf_dyn_buf* db)
+{
+	return command_latencies(name, params, true, db);
+}
+
 
 // TODO - separate all these CP-related info commands.
 
@@ -6595,10 +6616,9 @@ as_info_init()
 			"eviction-reset;"
 			"feature-key;"
 			"get-config;get-sl;"
-			"health-outliers;health-stats;hist-track-start;hist-track-stop;"
-			"histogram;"
+			"health-outliers;health-stats;histogram;"
 			"jem-stats;jobs;"
-			"latency;log;log-set;log-message;logs;"
+			"latencies;log;log-set;log-message;logs;"
 			"mcast;mesh;"
 			"name;namespace;namespaces;node;"
 			"physical-devices;"
@@ -6679,11 +6699,10 @@ as_info_init()
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
 	as_info_set_command("get-stats", info_command_get_stats, PERM_NONE);                      // Returns statistics for a particular context.
-	as_info_set_command("hist-track-start", info_command_hist_track, PERM_SERVICE_CTRL);      // Start or Restart histogram tracking.
-	as_info_set_command("hist-track-stop", info_command_hist_track, PERM_SERVICE_CTRL);       // Stop histogram tracking.
 	as_info_set_command("histogram", info_command_histogram, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
 	as_info_set_command("jem-stats", info_command_jem_stats, PERM_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.
-	as_info_set_command("latency", info_command_hist_track, PERM_NONE);                       // Returns latency and throughput information.
+	as_info_set_command("latencies", info_command_latencies, PERM_NONE);                      // Returns latency and throughput information.
+	as_info_set_command("latency", info_command_latency, PERM_NONE);                          // Returns legacy latency and throughput information.
 	as_info_set_command("log-message", info_command_log_message, PERM_LOGGING_CTRL);          // Log a message.
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("peers-clear-alt", as_service_list_command, PERM_NONE);               // The delta update version of "peers-clear-alt".
@@ -6701,7 +6720,6 @@ as_info_init()
 	as_info_set_command("roster-set", info_command_roster_set, PERM_SERVICE_CTRL);            // Set the entire roster.
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
-	as_info_set_command("throughput", info_command_hist_track, PERM_NONE);                    // Returns throughput info.
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("truncate", info_command_truncate, PERM_TRUNCATE);                    // Truncate a set.

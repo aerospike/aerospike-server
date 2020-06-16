@@ -737,7 +737,7 @@ query_update_stats(as_query_transaction *qtr)
 
 	// Can't use macro that tr and rw use.
 	qtr->ns->query_hist_active = true;
-	cf_hist_track_insert_data_point(qtr->ns->query_hist, qtr->start_time);
+	histogram_insert_data_point(qtr->ns->query_hist, qtr->start_time);
 
 	SINDEX_HIST_INSERT_DATA_POINT(qtr->si, query_hist, qtr->start_time);
 

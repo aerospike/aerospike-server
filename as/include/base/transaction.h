@@ -63,16 +63,10 @@ struct as_namespace_s;
 	} \
 }
 
-#define G_HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(name, start_time) \
+#define G_HIST_ACTIVATE_INSERT_DATA_POINT(name, start_time) \
 { \
 	g_stats.name##_active = true; \
-	cf_hist_track_insert_data_point(g_stats.name, start_time); \
-}
-
-#define HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(trw, name) \
-{ \
-	trw->rsv.ns->name##_active = true; \
-	cf_hist_track_insert_data_point(trw->rsv.ns->name, trw->start_time); \
+	histogram_insert_data_point(g_stats.name, start_time); \
 }
 
 #define HIST_ACTIVATE_INSERT_DATA_POINT(trw, name) \

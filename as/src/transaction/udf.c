@@ -603,7 +603,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					as_transaction_trid(tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, udf, response);
-		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
+		HIST_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
 		client_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:

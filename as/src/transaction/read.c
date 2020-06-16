@@ -403,7 +403,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 					tr->rsv.ns, as_transaction_trid(tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, read, response);
-		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, read_hist);
+		HIST_ACTIVATE_INSERT_DATA_POINT(tr, read_hist);
 		client_read_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:

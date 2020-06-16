@@ -9,14 +9,13 @@ ifeq ($(USE_EE),1)
 endif
 
 HEADERS += arenax.h bits.h cf_mutex.h cf_str.h cf_thread.h compare.h daemon.h
-HEADERS += dns.h dynbuf.h enhanced_alloc.h epoll_queue.h hist.h hist_track.h
-HEADERS += linear_hist.h log.h msg.h msgpack_in.h node.h rchash.h shash.h
-HEADERS += socket.h tls.h vector.h vmapx.h xmem.h
+HEADERS += dns.h dynbuf.h enhanced_alloc.h epoll_queue.h hist.h linear_hist.h
+HEADERS += log.h msg.h msgpack_in.h node.h rchash.h shash.h socket.h tls.h
+HEADERS += vector.h vmapx.h xmem.h
 
 SOURCES += alloc.c arenax.c cf_mutex.c cf_str.c cf_thread.c daemon.c dns.c
-SOURCES += dynbuf.c epoll_queue.c hardware.c hist.c hist_track.c linear_hist.c
-SOURCES += log.c msg.c msgpack_in.c node.c rchash.c shash.c socket.c vector.c
-SOURCES += vmapx.c
+SOURCES += dynbuf.c epoll_queue.c hardware.c hist.c linear_hist.c log.c msg.c
+SOURCES += msgpack_in.c node.c rchash.c shash.c socket.c vector.c vmapx.c
 
 ifneq ($(USE_EE),1)
   SOURCES += arenax_ce.c socket_ce.c tls_ce.c

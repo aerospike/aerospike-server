@@ -52,7 +52,6 @@
 #include "dynbuf.h"
 #include "hardware.h"
 #include "hist.h"
-#include "hist_track.h"
 #include "log.h"
 #include "msg.h"
 #include "node.h"
@@ -114,7 +113,6 @@ static void cfg_add_storage_file(as_namespace* ns, const char* file_name, const 
 static void cfg_add_storage_device(as_namespace* ns, const char* device_name, const char* shadow_name);
 static void cfg_set_cluster_name(char* cluster_name);
 static void cfg_add_ldap_role_query_pattern(char* pattern);
-static void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
 static void cfg_create_all_histograms();
 static void cfg_init_serv_spec(cf_serv_spec* spec_p);
 static cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
@@ -149,8 +147,6 @@ cfg_set_defaults()
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
 	c->feature_key_file = "/etc/aerospike/features.conf";
-	c->hist_track_back = 300;
-	c->hist_track_slice = 10;
 	c->n_info_threads = 16;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
 	c->n_migrate_threads = 1;
@@ -259,9 +255,6 @@ typedef enum {
 	CASE_SERVICE_ENABLE_HEALTH_CHECK,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FEATURE_KEY_FILE,
-	CASE_SERVICE_HIST_TRACK_BACK,
-	CASE_SERVICE_HIST_TRACK_SLICE,
-	CASE_SERVICE_HIST_TRACK_THRESHOLDS,
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
 	CASE_SERVICE_LOG_LOCAL_TIME,
@@ -743,9 +736,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "feature-key-file",				CASE_SERVICE_FEATURE_KEY_FILE },
-		{ "hist-track-back",				CASE_SERVICE_HIST_TRACK_BACK },
-		{ "hist-track-slice",				CASE_SERVICE_HIST_TRACK_SLICE },
-		{ "hist-track-thresholds",			CASE_SERVICE_HIST_TRACK_THRESHOLDS },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
@@ -2171,15 +2161,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_FEATURE_KEY_FILE:
 				c->feature_key_file = cfg_strdup_no_checks(&line);
-				break;
-			case CASE_SERVICE_HIST_TRACK_BACK:
-				c->hist_track_back = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_HIST_TRACK_SLICE:
-				c->hist_track_slice = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_HIST_TRACK_THRESHOLDS:
-				c->hist_track_thresholds = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_INFO_THREADS:
 				c->n_info_threads = cfg_u32(&line, 1, MAX_INFO_THREADS);
@@ -4100,19 +4081,19 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
-		// One-way activated histograms (may be tracked histograms).
+		// One-way activated histograms.
 
 		sprintf(hist_name, "{%s}-read", ns->name);
-		create_and_check_hist_track(&ns->read_hist, hist_name, HIST_MILLISECONDS);
+		ns->read_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 
 		sprintf(hist_name, "{%s}-write", ns->name);
-		create_and_check_hist_track(&ns->write_hist, hist_name, HIST_MILLISECONDS);
+		ns->write_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 
 		sprintf(hist_name, "{%s}-udf", ns->name);
-		create_and_check_hist_track(&ns->udf_hist, hist_name, HIST_MILLISECONDS);
+		ns->udf_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 
 		sprintf(hist_name, "{%s}-query", ns->name);
-		create_and_check_hist_track(&ns->query_hist, hist_name, HIST_MILLISECONDS);
+		ns->query_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 
 		sprintf(hist_name, "{%s}-query-rec-count", ns->name);
 		ns->query_rec_count_hist = histogram_create(hist_name, HIST_COUNT);
@@ -4120,7 +4101,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		sprintf(hist_name, "{%s}-re-repl", ns->name);
 		ns->re_repl_hist = histogram_create(hist_name, HIST_MILLISECONDS);
 
-		// Activate-by-config histograms (can't be tracked histograms).
+		// Activate-by-config histograms.
 
 		sprintf(hist_name, "{%s}-proxy", ns->name);
 		ns->proxy_hist = histogram_create(hist_name, HIST_MILLISECONDS);
@@ -4678,25 +4659,11 @@ cfg_add_ldap_role_query_pattern(char* pattern)
 // Other (non-item-specific) utilities.
 //
 
-static void
-create_and_check_hist_track(cf_hist_track** h, const char* name,
-		histogram_scale scale)
-{
-	*h = cf_hist_track_create(name, scale);
-
-	as_config* c = &g_config;
-
-	if (c->hist_track_back != 0 &&
-			! cf_hist_track_start(*h, c->hist_track_back, c->hist_track_slice, c->hist_track_thresholds)) {
-		cf_crash_nostack(AS_AS, "couldn't enable histogram tracking: %s", name);
-	}
-}
-
 // TODO - not really a config method any more, reorg needed.
 static void
 cfg_create_all_histograms()
 {
-	create_and_check_hist_track(&g_stats.batch_index_hist, "batch-index", HIST_MILLISECONDS);
+	g_stats.batch_index_hist = histogram_create("batch-index", HIST_MILLISECONDS);
 
 	g_stats.info_hist = histogram_create("info", HIST_MILLISECONDS);
 
