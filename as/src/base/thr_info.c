@@ -1810,6 +1810,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_get_printable_cluster_name(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
 
+	info_append_bool(db, "disable-udf-execution", g_config.udf_execution_disabled);
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
 	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
