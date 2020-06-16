@@ -2831,6 +2831,15 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		goto Cleanup;
 	}
 
+	// Temporary security vulnerability protection.
+	if (g_config.udf_execution_disabled &&
+			(qtype == QUERY_TYPE_AGGR || qtype == QUERY_TYPE_UDF_BG)) {
+		cf_warning(AS_QUERY, "queries with UDFs are forbidden");
+		tr->result_code = AS_ERR_FORBIDDEN;
+		rv              = AS_QUERY_ERR;
+		goto Cleanup;
+	}
+
 	if (qtype == QUERY_TYPE_AGGR && as_transaction_has_predexp(tr)) {
 		cf_warning(AS_QUERY, "aggregation queries do not support predexp filters");
 		tr->result_code = AS_ERR_UNSUPPORTED_FEATURE;
