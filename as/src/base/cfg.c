@@ -259,6 +259,7 @@ typedef enum {
 	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
 	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_LOG_MILLIS,
+	CASE_SERVICE_MICROSECOND_HISTOGRAMS,
 	CASE_SERVICE_MIGRATE_FILL_DELAY,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_THREADS,
@@ -740,6 +741,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "log-millis",						CASE_SERVICE_LOG_MILLIS},
+		{ "microsecond-histograms",			CASE_SERVICE_MICROSECOND_HISTOGRAMS },
 		{ "migrate-fill-delay",				CASE_SERVICE_MIGRATE_FILL_DELAY },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
@@ -2173,6 +2175,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_LOG_MILLIS:
 				cf_log_use_millis(cfg_bool(&line));
+				break;
+			case CASE_SERVICE_MICROSECOND_HISTOGRAMS:
+				c->microsecond_histograms = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_MIGRATE_FILL_DELAY:
 				cfg_enterprise_only(&line);
@@ -4079,112 +4084,115 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		as_storage_cfg_init(ns);
 
+		histogram_scale scale = g_config.microsecond_histograms ?
+				HIST_MICROSECONDS : HIST_MILLISECONDS;
+
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
 		// One-way activated histograms.
 
 		sprintf(hist_name, "{%s}-read", ns->name);
-		ns->read_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->read_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-write", ns->name);
-		ns->write_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->write_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-udf", ns->name);
-		ns->udf_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-query", ns->name);
-		ns->query_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->query_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-query-rec-count", ns->name);
 		ns->query_rec_count_hist = histogram_create(hist_name, HIST_COUNT);
 
 		sprintf(hist_name, "{%s}-re-repl", ns->name);
-		ns->re_repl_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->re_repl_hist = histogram_create(hist_name, scale);
 
 		// Activate-by-config histograms.
 
 		sprintf(hist_name, "{%s}-proxy", ns->name);
-		ns->proxy_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->proxy_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-read-start", ns->name);
-		ns->read_start_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->read_start_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-read-restart", ns->name);
-		ns->read_restart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->read_restart_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-read-dup-res", ns->name);
-		ns->read_dup_res_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->read_dup_res_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-read-repl-ping", ns->name);
-		ns->read_repl_ping_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->read_repl_ping_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-read-local", ns->name);
-		ns->read_local_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->read_local_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-read-response", ns->name);
-		ns->read_response_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->read_response_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-write-start", ns->name);
-		ns->write_start_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->write_start_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-write-restart", ns->name);
-		ns->write_restart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->write_restart_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-write-dup-res", ns->name);
-		ns->write_dup_res_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->write_dup_res_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-write-master", ns->name);
-		ns->write_master_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->write_master_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-write-repl-write", ns->name);
-		ns->write_repl_write_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->write_repl_write_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-write-response", ns->name);
-		ns->write_response_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->write_response_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-udf-start", ns->name);
-		ns->udf_start_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_start_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-restart", ns->name);
-		ns->udf_restart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_restart_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-dup-res", ns->name);
-		ns->udf_dup_res_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_dup_res_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-master", ns->name);
-		ns->udf_master_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_master_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-repl-write", ns->name);
-		ns->udf_repl_write_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_repl_write_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-response", ns->name);
-		ns->udf_response_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_response_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-batch-sub-prestart", ns->name);
-		ns->batch_sub_prestart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->batch_sub_prestart_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-start", ns->name);
-		ns->batch_sub_start_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->batch_sub_start_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-restart", ns->name);
-		ns->batch_sub_restart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->batch_sub_restart_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-dup-res", ns->name);
-		ns->batch_sub_dup_res_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->batch_sub_dup_res_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-repl-ping", ns->name);
-		ns->batch_sub_repl_ping_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->batch_sub_repl_ping_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-read-local", ns->name);
-		ns->batch_sub_read_local_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->batch_sub_read_local_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-response", ns->name);
-		ns->batch_sub_response_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->batch_sub_response_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-udf-sub-start", ns->name);
-		ns->udf_sub_start_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_sub_start_hist =  histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-sub-restart", ns->name);
-		ns->udf_sub_restart_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_sub_restart_hist =  histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-sub-dup-res", ns->name);
-		ns->udf_sub_dup_res_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_sub_dup_res_hist =  histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-sub-master", ns->name);
-		ns->udf_sub_master_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_sub_master_hist =  histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-sub-repl-write", ns->name);
-		ns->udf_sub_repl_write_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_sub_repl_write_hist =  histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-udf-sub-response", ns->name);
-		ns->udf_sub_response_hist =  histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->udf_sub_response_hist =  histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-ops-sub-start", ns->name);
-		ns->ops_sub_start_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->ops_sub_start_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-ops-sub-restart", ns->name);
-		ns->ops_sub_restart_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->ops_sub_restart_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-ops-sub-dup-res", ns->name);
-		ns->ops_sub_dup_res_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->ops_sub_dup_res_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-ops-sub-master", ns->name);
-		ns->ops_sub_master_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->ops_sub_master_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-ops-sub-repl-write", ns->name);
-		ns->ops_sub_repl_write_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->ops_sub_repl_write_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-ops-sub-response", ns->name);
-		ns->ops_sub_response_hist = histogram_create(hist_name, HIST_MILLISECONDS);
+		ns->ops_sub_response_hist = histogram_create(hist_name, scale);
 
 		// 'nsup' histograms.
 
@@ -4663,26 +4671,29 @@ cfg_add_ldap_role_query_pattern(char* pattern)
 static void
 cfg_create_all_histograms()
 {
-	g_stats.batch_index_hist = histogram_create("batch-index", HIST_MILLISECONDS);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
 
-	g_stats.info_hist = histogram_create("info", HIST_MILLISECONDS);
+	g_stats.batch_index_hist = histogram_create("batch-index", scale);
 
-	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-send-init", HIST_MILLISECONDS);
-	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-send-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-recv-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-recv-cb", HIST_MILLISECONDS);
-	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-send-init", HIST_MILLISECONDS);
-	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-send-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-recv-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-recv-cb", HIST_MILLISECONDS);
-	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-send-init", HIST_MILLISECONDS);
-	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-send-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-recv-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-recv-cb", HIST_MILLISECONDS);
-	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-send-init", HIST_MILLISECONDS);
-	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-send-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-recv-fragment", HIST_MILLISECONDS);
-	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-recv-cb", HIST_MILLISECONDS);
+	g_stats.info_hist = histogram_create("info", scale);
+
+	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-send-init", scale);
+	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-send-fragment", scale);
+	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-recv-fragment", scale);
+	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK] = histogram_create("fabric-bulk-recv-cb", scale);
+	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-send-init", scale);
+	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-send-fragment", scale);
+	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-recv-fragment", scale);
+	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL] = histogram_create("fabric-ctrl-recv-cb", scale);
+	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-send-init", scale);
+	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-send-fragment", scale);
+	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-recv-fragment", scale);
+	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META] = histogram_create("fabric-meta-recv-cb", scale);
+	g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-send-init", scale);
+	g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-send-fragment", scale);
+	g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-recv-fragment", scale);
+	g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW] = histogram_create("fabric-rw-recv-cb", scale);
 }
 
 static void

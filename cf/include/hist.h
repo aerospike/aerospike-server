@@ -55,6 +55,7 @@ typedef struct histogram_s histogram;
 
 histogram* histogram_create(const char* name, histogram_scale scale);
 void histogram_clear(histogram* h);
+void histogram_rescale(histogram* h, histogram_scale scale);
 void histogram_dump(histogram* h );
 
 uint64_t histogram_insert_data_point(histogram* h, uint64_t start_ns);

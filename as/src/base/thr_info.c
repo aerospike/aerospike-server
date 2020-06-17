@@ -1786,6 +1786,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
 	info_append_bool(db, "log-millis", cf_log_is_using_millis());
+	info_append_bool(db, "microsecond-histograms", g_config.microsecond_histograms);
 	info_append_uint32(db, "migrate-fill-delay", g_config.migrate_fill_delay);
 	info_append_uint32(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
 	info_append_uint32(db, "migrate-threads", g_config.n_migrate_threads);
@@ -2250,89 +2251,129 @@ info_command_get_stats(char *name, char *params, cf_dyn_buf *db)
 static void
 fabric_histogram_clear_all(void)
 {
-	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
-	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
-	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
-	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK]);
-	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL]);
-	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
-	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
-	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL]);
-	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META]);
-	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META]);
-	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META]);
-	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META]);
-	histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW]);
-	histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW]);
-	histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
-	histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+
+	histogram_rescale(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], scale);
+	histogram_rescale(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK], scale);
+	histogram_rescale(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK], scale);
+	histogram_rescale(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK], scale);
+	histogram_rescale(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL], scale);
+	histogram_rescale(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL], scale);
+	histogram_rescale(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL], scale);
+	histogram_rescale(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL], scale);
+	histogram_rescale(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META], scale);
+	histogram_rescale(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META], scale);
+	histogram_rescale(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META], scale);
+	histogram_rescale(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META], scale);
+	histogram_rescale(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW], scale);
+	histogram_rescale(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW], scale);
+	histogram_rescale(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW], scale);
+	histogram_rescale(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW], scale);
 }
 
 static void
 read_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_clear(ns->read_start_hist);
-	histogram_clear(ns->read_restart_hist);
-	histogram_clear(ns->read_dup_res_hist);
-	histogram_clear(ns->read_repl_ping_hist);
-	histogram_clear(ns->read_local_hist);
-	histogram_clear(ns->read_response_hist);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+
+	histogram_rescale(ns->read_start_hist, scale);
+	histogram_rescale(ns->read_restart_hist, scale);
+	histogram_rescale(ns->read_dup_res_hist, scale);
+	histogram_rescale(ns->read_repl_ping_hist, scale);
+	histogram_rescale(ns->read_local_hist, scale);
+	histogram_rescale(ns->read_response_hist, scale);
 }
 
 static void
 write_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_clear(ns->write_start_hist);
-	histogram_clear(ns->write_restart_hist);
-	histogram_clear(ns->write_dup_res_hist);
-	histogram_clear(ns->write_master_hist);
-	histogram_clear(ns->write_repl_write_hist);
-	histogram_clear(ns->write_response_hist);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+
+	histogram_rescale(ns->write_start_hist, scale);
+	histogram_rescale(ns->write_restart_hist, scale);
+	histogram_rescale(ns->write_dup_res_hist, scale);
+	histogram_rescale(ns->write_master_hist, scale);
+	histogram_rescale(ns->write_repl_write_hist, scale);
+	histogram_rescale(ns->write_response_hist, scale);
 }
 
 static void
 udf_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_clear(ns->udf_start_hist);
-	histogram_clear(ns->udf_restart_hist);
-	histogram_clear(ns->udf_dup_res_hist);
-	histogram_clear(ns->udf_master_hist);
-	histogram_clear(ns->udf_repl_write_hist);
-	histogram_clear(ns->udf_response_hist);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+
+	histogram_rescale(ns->udf_start_hist, scale);
+	histogram_rescale(ns->udf_restart_hist, scale);
+	histogram_rescale(ns->udf_dup_res_hist, scale);
+	histogram_rescale(ns->udf_master_hist, scale);
+	histogram_rescale(ns->udf_repl_write_hist, scale);
+	histogram_rescale(ns->udf_response_hist, scale);
 }
 
 static void
 batch_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_clear(ns->batch_sub_prestart_hist);
-	histogram_clear(ns->batch_sub_start_hist);
-	histogram_clear(ns->batch_sub_restart_hist);
-	histogram_clear(ns->batch_sub_dup_res_hist);
-	histogram_clear(ns->batch_sub_repl_ping_hist);
-	histogram_clear(ns->batch_sub_read_local_hist);
-	histogram_clear(ns->batch_sub_response_hist);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+
+	histogram_rescale(ns->batch_sub_prestart_hist, scale);
+	histogram_rescale(ns->batch_sub_start_hist, scale);
+	histogram_rescale(ns->batch_sub_restart_hist, scale);
+	histogram_rescale(ns->batch_sub_dup_res_hist, scale);
+	histogram_rescale(ns->batch_sub_repl_ping_hist, scale);
+	histogram_rescale(ns->batch_sub_read_local_hist, scale);
+	histogram_rescale(ns->batch_sub_response_hist, scale);
 }
 
 static void
 udf_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_clear(ns->udf_sub_start_hist);
-	histogram_clear(ns->udf_sub_restart_hist);
-	histogram_clear(ns->udf_sub_dup_res_hist);
-	histogram_clear(ns->udf_sub_master_hist);
-	histogram_clear(ns->udf_sub_repl_write_hist);
-	histogram_clear(ns->udf_sub_response_hist);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+
+	histogram_rescale(ns->udf_sub_start_hist, scale);
+	histogram_rescale(ns->udf_sub_restart_hist, scale);
+	histogram_rescale(ns->udf_sub_dup_res_hist, scale);
+	histogram_rescale(ns->udf_sub_master_hist, scale);
+	histogram_rescale(ns->udf_sub_repl_write_hist, scale);
+	histogram_rescale(ns->udf_sub_response_hist, scale);
 }
 
 static void
 ops_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_clear(ns->ops_sub_start_hist);
-	histogram_clear(ns->ops_sub_restart_hist);
-	histogram_clear(ns->ops_sub_dup_res_hist);
-	histogram_clear(ns->ops_sub_master_hist);
-	histogram_clear(ns->ops_sub_repl_write_hist);
-	histogram_clear(ns->ops_sub_response_hist);
+	histogram_scale scale = g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+
+	histogram_rescale(ns->ops_sub_start_hist, scale);
+	histogram_rescale(ns->ops_sub_restart_hist, scale);
+	histogram_rescale(ns->ops_sub_dup_res_hist, scale);
+	histogram_rescale(ns->ops_sub_master_hist, scale);
+	histogram_rescale(ns->ops_sub_repl_write_hist, scale);
+	histogram_rescale(ns->ops_sub_response_hist, scale);
+}
+
+static bool
+any_benchmarks_enabled(void)
+{
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		if (ns->read_benchmarks_enabled ||
+				ns->write_benchmarks_enabled ||
+				ns->udf_benchmarks_enabled ||
+				ns->batch_sub_benchmarks_enabled ||
+				ns->udf_sub_benchmarks_enabled ||
+				ns->ops_sub_benchmarks_enabled) {
+			return true;
+		}
+	}
+
+	return g_config.fabric_benchmarks_enabled;
 }
 
 
@@ -2719,6 +2760,23 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %"PRIu64, g_config.query_long_q_max_size, val);
 			g_config.query_long_q_max_size = val;
+		}
+		else if (0 == as_info_parameter_get(params, "microsecond-histograms", context, &context_len)) {
+			if (any_benchmarks_enabled()) {
+				cf_warning(AS_INFO, "microsecond-histograms can only be changed if all microbenchmark histograms are disabled");
+				goto Error;
+			}
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of microsecond-histograms to %s", context);
+				g_config.microsecond_histograms = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of microsecond-histograms to %s", context);
+				g_config.microsecond_histograms = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-fabric", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {

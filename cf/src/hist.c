@@ -167,6 +167,16 @@ msb(uint64_t n)
 	return -1;
 }
 
+//------------------------------------------------
+// Add a final semicolon and null-terminate.
+//
+static inline void
+append_semicolon(char* out)
+{
+	*out++ = ';';
+	*out = '\0';
+}
+
 
 //==========================================================
 // Public API.
@@ -224,12 +234,12 @@ histogram_create(const char* name, histogram_scale scale)
 	h->total = 0;
 	memset((void*)h->overs, 0, sizeof(h->overs));
 	h->read_a = true;
-	h->out_a[0] = '\0';
-	h->out_b[0] = '\0';
+	append_semicolon(h->out_a);
+	append_semicolon(h->out_b);
 
 	// TODO - legacy, remove after 5.1.
-	h->legacy_out_a[0] = '\0';
-	h->legacy_out_b[0] = '\0';
+	append_semicolon(h->legacy_out_a);
+	append_semicolon(h->legacy_out_b);
 
 	return h;
 }
@@ -246,12 +256,37 @@ histogram_clear(histogram* h)
 	h->total = 0;
 	memset((void*)h->overs, 0, sizeof(h->overs));
 	h->read_a = true;
-	h->out_a[0] = '\0';
-	h->out_b[0] = '\0';
+	append_semicolon(h->out_a);
+	append_semicolon(h->out_b);
 
 	// TODO - legacy, remove after 5.1.
-	h->legacy_out_a[0] = '\0';
-	h->legacy_out_b[0] = '\0';
+	append_semicolon(h->legacy_out_a);
+	append_semicolon(h->legacy_out_b);
+}
+
+//------------------------------------------------
+// Clear a latency histogram and set a new scale.
+//
+void
+histogram_rescale(histogram* h, histogram_scale scale)
+{
+	histogram_clear(h);
+
+	h->scale = scale;
+
+	switch (scale) {
+	case HIST_MILLISECONDS:
+		h->scale_tag = HIST_TAG_MILLISECONDS;
+		h->time_div = 1000 * 1000;
+		break;
+	case HIST_MICROSECONDS:
+		h->scale_tag = HIST_TAG_MICROSECONDS;
+		h->time_div = 1000;
+		break;
+	default:
+		cf_crash(AS_INFO, "%s: not a latency histogram", h->name);
+		break;
+	}
 }
 
 //------------------------------------------------
@@ -382,12 +417,10 @@ histogram_dump(histogram* h)
 		h->overs[b] = over;
 	}
 
-	*out++ = ';';
-	*out = '\0';
+	append_semicolon(out);
 
 	// TODO - legacy, remove after 5.1.
-	*legacy_out++ = ';';
-	*legacy_out = '\0';
+	append_semicolon(legacy_out);
 
 	// Store for next time.
 	h->timestamp = now;
