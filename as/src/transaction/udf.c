@@ -964,10 +964,10 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 		// Save for XDR submit outside record lock.
 		as_xdr_get_submit_info(r, old_metadata.last_update_time, &submit_info);
 		submit = true;
-	}
 
-	// Will we need a pickle?
-	rd->keep_pickle = rw->n_dest_nodes != 0;
+		// Will we need a pickle?
+		rd->keep_pickle = rw->n_dest_nodes != 0;
+	}
 
 	// Close the record for all the cases.
 	udf_record_close(urecord);
