@@ -833,7 +833,7 @@ run_defrag(void *pv_data)
 	uint8_t *read_buf = cf_valloc(ssd->write_block_size);
 
 	while (true) {
-		uint32_t q_min = ns->storage_defrag_queue_min;
+		uint32_t q_min = as_load_uint32(&ns->storage_defrag_queue_min);
 
 		if (q_min == 0) {
 			cf_queue_pop(ssd->defrag_wblock_q, &wblock_id, CF_QUEUE_FOREVER);
@@ -855,8 +855,7 @@ run_defrag(void *pv_data)
 			usleep(sleep_us);
 		}
 
-		while (ns->n_wblocks_to_flush >
-				as_load_uint32(&ns->storage_max_write_q) + 100) {
+		while (ns->n_wblocks_to_flush > ns->storage_max_write_q + 100) {
 			usleep(1000);
 		}
 	}
