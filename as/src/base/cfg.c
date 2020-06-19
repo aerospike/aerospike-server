@@ -663,6 +663,7 @@ typedef enum {
 	CASE_XDR_DC_AUTH_PASSWORD_FILE,
 	CASE_XDR_DC_AUTH_USER,
 	CASE_XDR_DC_CONNECTOR,
+	CASE_XDR_DC_PERIOD_MS,
 	CASE_XDR_DC_TLS_NAME,
 	CASE_XDR_DC_USE_ALTERNATE_ADDRESS,
 
@@ -680,6 +681,7 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE_IGNORE_EXPUNGES,
 	CASE_XDR_DC_NAMESPACE_IGNORE_SET,
 	CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT,
+	CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS,
 	CASE_XDR_DC_NAMESPACE_SHIP_BIN,
 	CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES,
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS,
@@ -1176,6 +1178,7 @@ const cfg_opt XDR_DC_OPTS[] = {
 		{ "auth-password-file",				CASE_XDR_DC_AUTH_PASSWORD_FILE },
 		{ "auth-user",						CASE_XDR_DC_AUTH_USER },
 		{ "connector",						CASE_XDR_DC_CONNECTOR},
+		{ "period-ms",						CASE_XDR_DC_PERIOD_MS },
 		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
 		{ "use-alternate-access-address",	CASE_XDR_DC_USE_ALTERNATE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
@@ -1196,6 +1199,7 @@ const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "ignore-expunges", 				CASE_XDR_DC_NAMESPACE_IGNORE_EXPUNGES },
 		{ "ignore-set",						CASE_XDR_DC_NAMESPACE_IGNORE_SET },
 		{ "max-throughput", 				CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT },
+		{ "sc-replication-wait-ms",			CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS },
 		{ "ship-bin",						CASE_XDR_DC_NAMESPACE_SHIP_BIN },
 		{ "ship-nsup-deletes",				CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES },
 		{ "ship-only-specified-bins",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS },
@@ -3642,6 +3646,9 @@ as_config_init(const char* config_file)
 			case CASE_XDR_DC_CONNECTOR:
 				dc_cfg->connector = cfg_bool(&line);
 				break;
+			case CASE_XDR_DC_PERIOD_MS:
+				dc_cfg->period_us = 1000 * cfg_u32(&line, AS_XDR_MIN_PERIOD_MS, AS_XDR_MAX_PERIOD_MS);
+				break;
 			case CASE_XDR_DC_TLS_NAME:
 				dc_cfg->tls_our_name = cfg_strdup_no_checks(&line);
 				break;
@@ -3686,6 +3693,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT:
 				dc_ns_cfg->max_throughput = cfg_u32_multiple_of(&line, 100);
+				break;
+			case CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS:
+				dc_ns_cfg->sc_replication_wait_ms = cfg_u32(&line, AS_XDR_MIN_SC_REPLICATION_WAIT_MS, AS_XDR_MAX_SC_REPLICATION_WAIT_MS);
 				break;
 			case CASE_XDR_DC_NAMESPACE_SHIP_BIN:
 				cf_vector_append_ptr(dc_ns_cfg->shipped_bins, cfg_strdup(&line, AS_BIN_NAME_MAX_SZ));

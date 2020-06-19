@@ -54,7 +54,13 @@ struct as_transaction_s;
 
 #define AS_XDR_MAX_DCS 64
 
+#define AS_XDR_MIN_PERIOD_MS 10
+#define AS_XDR_MAX_PERIOD_MS 1000
+
 #define AS_XDR_MAX_HOT_KEY_MS 5000
+
+#define AS_XDR_MIN_SC_REPLICATION_WAIT_MS 5
+#define AS_XDR_MAX_SC_REPLICATION_WAIT_MS 1000
 
 #define AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT 1024
 #define AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT (1024 * 1024)
@@ -82,6 +88,7 @@ typedef struct as_xdr_dc_ns_cfg_s {
 	uint32_t hot_key_ms;
 	bool ignore_expunges;
 	uint32_t max_throughput;
+	uint32_t sc_replication_wait_ms;
 	bool ship_nsup_deletes;
 	bool ship_only_specified_bins;
 	bool ship_only_specified_sets;
@@ -109,6 +116,7 @@ typedef struct as_xdr_dc_cfg_s {
 	char* auth_user; // Aerospike destinations only
 
 	bool connector;
+	uint32_t period_us;
 
 	char* tls_our_name;
 	cf_tls_spec* tls_spec; // from 'tls-name'
@@ -117,9 +125,6 @@ typedef struct as_xdr_dc_cfg_s {
 
 	cf_vector* ns_cfg_v; // startup only
 	as_xdr_dc_ns_cfg* ns_cfgs[32]; // AS_NAMESPACE_SZ - TODO - fix include loop
-
-	// For testing only.
-	uint32_t period_us; // dynamic only
 } as_xdr_dc_cfg;
 
 typedef struct as_xdr_config_s {
