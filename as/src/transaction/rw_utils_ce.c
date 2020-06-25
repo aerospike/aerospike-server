@@ -36,10 +36,8 @@
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/transaction.h"
-#include "base/udf_record.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
-#include "transaction/udf.h"
 
 
 //==========================================================
@@ -168,14 +166,6 @@ void
 write_delete_record(as_record* r, as_index_tree* tree)
 {
 	as_index_delete(tree, &r->keyd);
-}
-
-
-udf_optype
-udf_finish_delete(udf_record* urecord)
-{
-	return (urecord->flag & UDF_RECORD_FLAG_PREEXISTS) != 0 ?
-			UDF_OPTYPE_DELETE : UDF_OPTYPE_NONE;
 }
 
 

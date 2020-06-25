@@ -151,7 +151,7 @@ int
 as_storage_record_write_ssd(as_storage_rd* rd)
 {
 	// No-op for drops, caller will drop record.
-	return as_bin_inuse_has(rd) ? ssd_write(rd) : 0;
+	return rd->pickle != NULL || rd->n_bins != 0 ? ssd_write(rd) : 0;
 }
 
 void

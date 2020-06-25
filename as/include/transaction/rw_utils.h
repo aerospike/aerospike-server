@@ -40,7 +40,6 @@
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "transaction/rw_request.h"
-#include "transaction/udf.h"
 
 
 //==========================================================
@@ -57,7 +56,6 @@ struct as_storage_rd_s;
 struct as_transaction_s;
 struct predexp_eval_base_s;
 struct rw_request_s;
-struct udf_record_s;
 
 
 //==========================================================
@@ -121,6 +119,7 @@ bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_dig
 void record_delete_adjust_sindex(struct as_index_s* r, struct as_namespace_s* ns);
 void delete_adjust_sindex(struct as_storage_rd_s* rd);
 void remove_from_sindex(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* bins, uint32_t n_bins);
+void write_dim_unwind(struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins, struct as_bin_s* cleanup_bins, uint32_t n_cleanup_bins);
 
 
 // TODO - rename as as_record_... and move to record.c?
@@ -145,11 +144,12 @@ respond_on_master_complete(as_transaction* tr)
 }
 
 
+// FIXME - switch p_n_bins to uint16_t*.
 static inline void
-destroy_stack_bins(as_bin* stack_bins, uint32_t n_bins)
+append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 {
-	for (uint32_t i = 0; i < n_bins; i++) {
-		as_bin_particle_destroy(&stack_bins[i], true);
+	if (as_bin_is_external_particle(b)) {
+		bins[(*p_n_bins)++] = *b;
 	}
 }
 
@@ -202,8 +202,6 @@ clear_delete_response_metadata(as_transaction* tr)
 
 bool create_only_check(const struct as_index_s* r, const struct as_msg_s* m);
 void write_delete_record(struct as_index_s* r, struct as_index_tree_s* tree);
-
-udf_optype udf_finish_delete(struct udf_record_s* urecord);
 
 uint32_t dup_res_pack_repl_state_info(const struct as_index_s* r, const struct as_namespace_s* ns);
 bool dup_res_should_retry_transaction(struct rw_request_s* rw, uint32_t result_code);

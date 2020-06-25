@@ -914,7 +914,7 @@ static void
 destroy_value(predexp_eval_t* bp)
 {
 	predexp_eval_value_t* dp = (predexp_eval_value_t *) bp;
-	as_bin_particle_destroy(&dp->bin, true);
+	as_bin_particle_destroy(&dp->bin);
 	cf_free(dp);
 }
 
@@ -1703,7 +1703,7 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 	}
 
  Done:
-	as_bin_particle_destroy(&var.bin, true);
+	as_bin_particle_destroy(&var.bin);
 	as_bin_set_empty(&var.bin);
 	var.bin.particle = NULL;
 
@@ -1841,7 +1841,7 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 	}
 
  Done:
-	as_bin_particle_destroy(&var.bin, true);
+	as_bin_particle_destroy(&var.bin);
 	as_bin_set_empty(&var.bin);
 	var.bin.particle = NULL;
 

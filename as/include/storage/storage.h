@@ -102,7 +102,7 @@ typedef struct as_storage_rd_s {
 	bool					ignore_record_on_device;
 
 	// Shortcuts for handling set name storage:
-	uint32_t				set_name_len;
+	uint32_t				set_name_len; // could make it a uint8_t
 	const char				*set_name;
 
 	// Parameters used when handling key storage:
@@ -173,7 +173,6 @@ void as_storage_record_open(struct as_namespace_s *ns, struct as_index_s *r, as_
 void as_storage_record_close(as_storage_rd *rd);
 
 // Called within as_storage_rd usage cycle.
-int as_storage_record_load_n_bins(as_storage_rd *rd);
 int as_storage_record_load_bins(as_storage_rd *rd);
 bool as_storage_record_load_key(as_storage_rd *rd);
 bool as_storage_record_load_pickle(as_storage_rd *rd);
@@ -248,7 +247,6 @@ void as_storage_record_create_ssd(as_storage_rd *rd);
 void as_storage_record_open_ssd(as_storage_rd *rd);
 void as_storage_record_close_ssd(as_storage_rd *rd);
 
-int as_storage_record_load_n_bins_ssd(as_storage_rd *rd);
 int as_storage_record_load_bins_ssd(as_storage_rd *rd);
 bool as_storage_record_load_key_ssd(as_storage_rd *rd);
 bool as_storage_record_load_pickle_ssd(as_storage_rd *rd);
@@ -294,7 +292,6 @@ void as_storage_record_create_pmem(as_storage_rd *rd);
 void as_storage_record_open_pmem(as_storage_rd *rd);
 void as_storage_record_close_pmem(as_storage_rd *rd);
 
-int as_storage_record_load_n_bins_pmem(as_storage_rd *rd);
 int as_storage_record_load_bins_pmem(as_storage_rd *rd);
 bool as_storage_record_load_key_pmem(as_storage_rd *rd);
 bool as_storage_record_load_pickle_pmem(as_storage_rd* rd);

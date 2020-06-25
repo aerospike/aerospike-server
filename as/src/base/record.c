@@ -53,14 +53,12 @@
 // Forward declarations.
 //
 
-void record_replace_failed(as_remote_record *rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
+static void record_replace_failed(as_remote_record *rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
 
-int record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd, bool *is_delete);
-int record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex, bool *is_delete);
-int record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd, bool *is_delete);
-int record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex, bool *is_delete);
-
-void unwind_dim_single_bin(as_bin* old_bin, as_bin* new_bin);
+static int record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd);
+static int record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex);
+static int record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd);
+static int record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex);
 
 
 //==========================================================
@@ -181,12 +179,11 @@ as_record_destroy(as_record *r, as_namespace *ns)
 
 		rd.r = r;
 		rd.ns = ns;
-		as_storage_rd_load_n_bins(&rd);
 		as_storage_rd_load_bins(&rd, NULL);
 
 		as_storage_record_drop_from_mem_stats(&rd);
 
-		as_record_destroy_bins(&rd);
+		as_bin_destroy_all(rd.bins, rd.n_bins);
 
 		if (! ns->single_bin) {
 			as_record_free_bin_space(r);
@@ -214,29 +211,6 @@ as_record_free_bin_space(as_record *r)
 	if (bin_space) {
 		cf_free((void*)bin_space);
 		as_index_set_bin_space(r, NULL);
-	}
-}
-
-// Destroy all particles in all bins.
-void
-as_record_destroy_bins(as_storage_rd *rd)
-{
-	as_record_destroy_bins_from(rd, 0);
-}
-
-// Destroy particles in specified bins.
-void
-as_record_destroy_bins_from(as_storage_rd *rd, uint16_t from)
-{
-	for (uint16_t i = from; i < rd->n_bins; i++) {
-		as_bin *b = &rd->bins[i];
-
-		if (! as_bin_inuse(b)) {
-			return; // no more used bins - there are never unused bin gaps
-		}
-
-		as_bin_particle_destroy(b, rd->ns->storage_data_in_memory);
-		as_bin_set_empty(b);
 	}
 }
 
@@ -395,9 +369,6 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 	// Save for XDR submit.
 	uint64_t prev_lut = r->last_update_time;
 
-	// Split according to configuration to replace local record.
-	bool is_delete = false;
-
 	if (rr->via == VIA_REPLICATION) {
 		rd.which_current_swb = SWB_PROLE;
 	}
@@ -408,18 +379,18 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 
 	if (ns->storage_data_in_memory) {
 		if (ns->single_bin) {
-			result = record_apply_dim_single_bin(rr, &rd, &is_delete);
+			result = record_apply_dim_single_bin(rr, &rd);
 		}
 		else {
-			result = record_apply_dim(rr, &rd, skip_sindex, &is_delete);
+			result = record_apply_dim(rr, &rd, skip_sindex);
 		}
 	}
 	else {
 		if (ns->single_bin) {
-			result = record_apply_ssd_single_bin(rr, &rd, &is_delete);
+			result = record_apply_ssd_single_bin(rr, &rd);
 		}
 		else {
-			result = record_apply_ssd(rr, &rd, skip_sindex, &is_delete);
+			result = record_apply_ssd(rr, &rd, skip_sindex);
 		}
 	}
 
@@ -492,7 +463,7 @@ as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen,
 // Local helpers.
 //
 
-void
+static void
 record_replace_failed(as_remote_record *rr, as_index_ref* r_ref,
 		as_storage_rd* rd, bool is_create)
 {
@@ -507,91 +478,12 @@ record_replace_failed(as_remote_record *rr, as_index_ref* r_ref,
 	as_record_done(r_ref, rr->rsv->ns);
 }
 
-int
-record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd,
-		bool *is_delete)
+static int
+record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
 {
 	as_namespace* ns = rr->rsv->ns;
 	as_record* r = rd->r;
 
-	rd->n_bins = 1;
-
-	// Set rd->bins!
-	as_storage_rd_load_bins(rd, NULL);
-
-	// For memory accounting, note current usage.
-	uint64_t memory_bytes = 0;
-
-	// TODO - as_storage_record_get_n_bytes_memory() could check bins in use.
-	if (as_bin_inuse(rd->bins)) {
-		memory_bytes = as_storage_record_get_n_bytes_memory(rd);
-	}
-
-	uint16_t n_new_bins = rr->n_bins;
-
-	if (n_new_bins > 1) {
-		cf_warning(AS_RECORD, "{%s} record replace: single-bin got %u bins %pD", ns->name, n_new_bins, rr->keyd);
-		return AS_ERR_UNKNOWN;
-	}
-
-	// Keep old bin for unwinding.
-	as_bin old_bin;
-
-	as_single_bin_copy(&old_bin, rd->bins);
-
-	// No stack new bin - simpler to operate directly on bin embedded in index.
-	as_bin_set_empty(rd->bins);
-
-	int result;
-
-	// Fill the new bins and particles.
-	if (n_new_bins == 1 &&
-			(result = as_flat_unpack_remote_bins(rr, rd->bins)) != 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bin %pD", ns->name, rr->keyd);
-		unwind_dim_single_bin(&old_bin, rd->bins);
-		return -result;
-	}
-
-	// Won't use to flatten, but needed to know if bins are in use. Amazingly,
-	// rd->n_bins 0 ok adjusting memory stats. Also, rd->bins already filled.
-	rd->n_bins = n_new_bins;
-
-	// Apply changes to metadata in as_index needed for and writing.
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	replace_index_metadata(rr, r);
-
-	// Write the record to storage.
-	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
-		unwind_index_metadata(&old_metadata, r);
-		unwind_dim_single_bin(&old_bin, rd->bins);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-
-	// Cleanup - destroy old bin, can't unwind after.
-	as_bin_particle_destroy(&old_bin, true);
-
-	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-	*is_delete = n_new_bins == 0;
-
-	return AS_OK;
-}
-
-int
-record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
-		bool *is_delete)
-{
-	as_namespace* ns = rr->rsv->ns;
-	as_record* r = rd->r;
-
-	// Set rd->n_bins!
-	as_storage_rd_load_n_bins(rd);
-
-	// Set rd->bins!
 	as_storage_rd_load_bins(rd, NULL);
 
 	// For memory accounting, note current usage.
@@ -599,27 +491,15 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	int result;
 
-	// Keep old bins intact for sindex adjustment and unwinding.
-	uint16_t n_old_bins = rd->n_bins;
-	as_bin* old_bins = rd->bins;
-
 	uint16_t n_new_bins = rr->n_bins;
-	as_bin new_bins[n_new_bins];
+	as_bin new_bin;
 
-	if (n_new_bins != 0) {
-		memset(new_bins, 0, sizeof(new_bins));
-
-		// Fill the new bins and particles.
-		if ((result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-			cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
-			destroy_stack_bins(new_bins, n_new_bins);
-			return -result;
-		}
+	// Fill the new bins and particles.
+	if (n_new_bins == 1 &&
+			(result = as_flat_unpack_remote_bins(rr, &new_bin)) != 0) {
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bin %pD", ns->name, rr->keyd);
+		return -result;
 	}
-
-	// Won't use to flatten, but needed for memory stats, bins in use, etc.
-	rd->n_bins = n_new_bins;
-	rd->bins = new_bins;
 
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
@@ -627,11 +507,67 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	stash_index_metadata(r, &old_metadata);
 	replace_index_metadata(rr, r);
 
-	// Write the record to storage.
+	// Write the record to storage. Note - here the pickle is directly stored -
+	// we will not use rd->bins and rd->n_bins at all to write.
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
-		destroy_stack_bins(new_bins, n_new_bins);
+		as_bin_destroy_all(&new_bin, n_new_bins);
+		return -result;
+	}
+
+	as_record_transition_stats(r, ns, &old_metadata);
+
+	// Cleanup - destroy original bin, can't unwind after.
+	as_bin_destroy_all(rd->bins, rd->n_bins);
+
+	// Move the new bin into the index.
+	as_single_bin_copy(rd->bins, &new_bin);
+
+	// Needed for memory stats.
+	rd->n_bins = n_new_bins;
+	rd->bins = &new_bin;
+
+	as_storage_record_adjust_mem_stats(rd, memory_bytes);
+
+	return AS_OK;
+}
+
+static int
+record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
+{
+	as_namespace* ns = rd->ns;
+	as_record* r = rd->r;
+
+	as_storage_rd_load_bins(rd, NULL);
+
+	// For memory accounting, note current usage.
+	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);
+
+	int result;
+
+	uint16_t n_new_bins = rr->n_bins;
+	as_bin new_bins[n_new_bins];
+
+	// Fill the new bins and particles.
+	if (n_new_bins != 0 &&
+			(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
+		return -result;
+	}
+
+	// Apply changes to metadata in as_index needed for and writing.
+	index_metadata old_metadata;
+
+	stash_index_metadata(r, &old_metadata);
+	replace_index_metadata(rr, r);
+
+	// Write the record to storage. Note - here the pickle is directly stored -
+	// we will not use rd->bins and rd->n_bins at all to write.
+	if ((result = as_storage_record_write(rd)) < 0) {
+		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
+		unwind_index_metadata(&old_metadata, r);
+		as_bin_destroy_all(new_bins, n_new_bins);
 		return -result;
 	}
 
@@ -642,11 +578,11 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 			next_generation(r->generation, (uint16_t)rr->generation, ns)) &&
 					record_has_sindex(r, ns)) {
 		write_sindex_update(ns, as_index_get_set_name(r, ns), rr->keyd,
-				old_bins, n_old_bins, new_bins, n_new_bins);
+				rd->bins, rd->n_bins, new_bins, n_new_bins);
 	}
 
-	// Cleanup - destroy relevant bins, can't unwind after.
-	destroy_stack_bins(old_bins, n_old_bins);
+	// Cleanup - destroy original bins, can't unwind after.
+	as_bin_destroy_all(rd->bins, rd->n_bins);
 
 	// Fill out new_bin_space.
 	as_bin_space* new_bin_space = NULL;
@@ -662,7 +598,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	// Swizzle the index element's as_bin_space pointer.
 	as_bin_space* old_bin_space = as_index_get_bin_space(r);
 
-	if (old_bin_space) {
+	if (old_bin_space != NULL) {
 		cf_free(old_bin_space);
 	}
 
@@ -671,28 +607,20 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	// Now ok to store or drop key, as determined by message.
 	as_record_finalize_key(r, ns, rr->key, rr->key_size);
 
+	// Needed for memory stats.
+	rd->n_bins = n_new_bins;
+	rd->bins = new_bins;
+
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-	*is_delete = n_new_bins == 0;
 
 	return AS_OK;
 }
 
-int
-record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
-		bool *is_delete)
+static int
+record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd)
 {
-	as_namespace* ns = rr->rsv->ns;
+	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
-
-	uint16_t n_new_bins = rr->n_bins;
-
-	if (n_new_bins > 1) {
-		cf_warning(AS_RECORD, "{%s} record replace: single-bin got %u bins %pD", ns->name, n_new_bins, rr->keyd);
-		return AS_ERR_UNKNOWN;
-	}
-
-	// Won't use to flatten, but needed to know if bins are in use.
-	rd->n_bins = n_new_bins;
 
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
@@ -700,7 +628,8 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	stash_index_metadata(r, &old_metadata);
 	replace_index_metadata(rr, r);
 
-	// Write the record to storage.
+	// Write the record to storage. Note - here the pickle is directly stored -
+	// we will not use rd->bins and rd->n_bins at all to write.
 	int result = as_storage_record_write(rd);
 
 	if (result < 0) {
@@ -714,16 +643,13 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd,
 	// Now ok to store or drop key, as determined by message.
 	as_record_finalize_key(r, ns, rr->key, rr->key_size);
 
-	*is_delete = n_new_bins == 0;
-
 	return AS_OK;
 }
 
-int
-record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
-		bool *is_delete)
+static int
+record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 {
-	as_namespace* ns = rr->rsv->ns;
+	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
 	bool has_sindex = ! (skip_sindex &&
@@ -732,43 +658,23 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 
 	int result;
 
-	uint16_t n_old_bins = 0;
-	as_bin *old_bins = NULL;
+	as_bin old_bins[has_sindex ? RECORD_MAX_BINS : 0];
 
 	uint16_t n_new_bins = rr->n_bins;
-	as_bin *new_bins = NULL;
+	as_bin new_bins[has_sindex ? n_new_bins : 0];
 
 	if (has_sindex) {
-		// TODO - separate function?
-		if ((result = as_storage_rd_load_n_bins(rd)) < 0) {
-			cf_warning(AS_RECORD, "{%s} record replace: failed load n-bins %pD", ns->name, rr->keyd);
-			return -result;
-		}
-
-		n_old_bins = rd->n_bins;
-		old_bins = alloca(n_old_bins * sizeof(as_bin));
-
 		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
 			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
 			return -result;
 		}
 
-		// Won't use to flatten.
-		rd->bins = NULL;
-
-		if (n_new_bins != 0) {
-			new_bins = alloca(n_new_bins * sizeof(as_bin));
-			memset(new_bins, 0, n_new_bins * sizeof(as_bin));
-
-			if ((result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-				cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
-				return -result;
-			}
+		if (n_new_bins != 0 &&
+				(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
+			cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
+			return -result;
 		}
 	}
-
-	// Won't use to flatten, but needed to know if bins are in use.
-	rd->n_bins = n_new_bins;
 
 	// Apply changes to metadata in as_index needed for and writing.
 	index_metadata old_metadata;
@@ -776,7 +682,8 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	stash_index_metadata(r, &old_metadata);
 	replace_index_metadata(rr, r);
 
-	// Write the record to storage.
+	// Write the record to storage. Note - here the pickle is directly stored -
+	// we will not use rd->bins and rd->n_bins at all to write.
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
@@ -788,23 +695,11 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex,
 	// Success - adjust sindex, looking at old and new bins.
 	if (has_sindex) {
 		write_sindex_update(ns, as_index_get_set_name(r, ns), rr->keyd,
-				old_bins, n_old_bins, new_bins, n_new_bins);
+				rd->bins, rd->n_bins, new_bins, n_new_bins);
 	}
 
 	// Now ok to store or drop key, as determined by message.
 	as_record_finalize_key(r, ns, rr->key, rr->key_size);
 
-	*is_delete = n_new_bins == 0;
-
 	return AS_OK;
-}
-
-void
-unwind_dim_single_bin(as_bin* old_bin, as_bin* new_bin)
-{
-	if (as_bin_inuse(new_bin)) {
-		as_bin_particle_destroy(new_bin, true);
-	}
-
-	as_single_bin_copy(new_bin, old_bin);
 }

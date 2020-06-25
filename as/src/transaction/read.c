@@ -575,13 +575,7 @@ read_local(as_transaction* tr)
 		return TRANS_DONE_SUCCESS;
 	}
 
-	if ((result = as_storage_rd_load_n_bins(&rd)) < 0) {
-		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_n_bins() %pD", ns->name, &tr->keyd);
-		read_local_done(tr, &r_ref, &rd, -result);
-		return TRANS_DONE_ERROR;
-	}
-
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
 
 	if ((result = as_storage_rd_load_bins(&rd, stack_bins)) < 0) {
 		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
@@ -619,7 +613,7 @@ read_local(as_transaction* tr)
 
 		while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
 			if (op->op == AS_MSG_OP_READ) {
-				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
 
 				if (b || respond_all_ops) {
 					ops[n_bins] = op;
@@ -627,7 +621,7 @@ read_local(as_transaction* tr)
 				}
 			}
 			else if (op->op == AS_MSG_OP_BITS_READ) {
-				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
 
 				if (b) {
 					as_bin* rb = &result_bins[n_result_bins];
@@ -635,7 +629,7 @@ read_local(as_transaction* tr)
 
 					if ((result = as_bin_bits_read_from_client(b, op, rb)) < 0) {
 						cf_warning(AS_RW, "{%s} read_local: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
-						destroy_stack_bins(result_bins, n_result_bins);
+						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
 					}
@@ -656,7 +650,7 @@ read_local(as_transaction* tr)
 				}
 			}
 			else if (op->op == AS_MSG_OP_HLL_READ) {
-				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
 
 				if (b) {
 					as_bin* rb = &result_bins[n_result_bins];
@@ -664,7 +658,7 @@ read_local(as_transaction* tr)
 
 					if ((result = as_bin_hll_read_from_client(b, op, rb)) < 0) {
 						cf_warning(AS_RW, "{%s} read_local: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
-						destroy_stack_bins(result_bins, n_result_bins);
+						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
 					}
@@ -685,7 +679,7 @@ read_local(as_transaction* tr)
 				}
 			}
 			else if (op->op == AS_MSG_OP_CDT_READ) {
-				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
 
 				if (b) {
 					as_bin* rb = &result_bins[n_result_bins];
@@ -693,7 +687,7 @@ read_local(as_transaction* tr)
 
 					if ((result = as_bin_cdt_read_from_client(b, op, rb)) < 0) {
 						cf_warning(AS_RW, "{%s} read_local: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
-						destroy_stack_bins(result_bins, n_result_bins);
+						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
 					}
@@ -715,7 +709,7 @@ read_local(as_transaction* tr)
 			}
 			else {
 				cf_warning(AS_RW, "{%s} read_local: unexpected bin op %u %pD", ns->name, op->op, &tr->keyd);
-				destroy_stack_bins(result_bins, n_result_bins);
+				as_bin_destroy_all(result_bins, n_result_bins);
 				read_local_done(tr, &r_ref, &rd, AS_ERR_PARAMETER);
 				return TRANS_DONE_ERROR;
 			}
@@ -743,7 +737,7 @@ read_local(as_transaction* tr)
 		send_read_response(tr, p_ops, response_bins, n_bins, NULL);
 	}
 
-	destroy_stack_bins(result_bins, n_result_bins);
+	as_bin_destroy_all(result_bins, n_result_bins);
 	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
 

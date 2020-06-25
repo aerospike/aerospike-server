@@ -1639,19 +1639,14 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		// to check via query_record_matches() below. If sindex evolves to not
 		// have to do that, optimize this case and bypass reading bins.
 
-		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
+		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
 
-		// Note: This array must stay in scope until the response
-		//       for this record has been built, since in the get
-		//       data w/ record on device case, it's copied by
-		//       reference directly into the record descriptor!
-		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
+		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
+			as_storage_record_close(&rd);
+			as_record_done(&r_ref, ns);
+			goto CLEANUP;
+		}
 
-		// Figure out which bins you want - for now, all
-		as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
-		rd.n_bins = as_bin_inuse_count(&rd);
-
-		// Now we have a record.
 		predargs.rd = &rd;
 
 		if (predrv == PREDEXP_UNKNOWN &&

@@ -324,7 +324,6 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 
 	uint32_t n_select_bins = 0;
 	uint16_t n_bins_matched = 0;
-	uint16_t n_record_bins = 0;
 
 	if (! no_bin_data) {
 		if (select_bins) {
@@ -354,11 +353,9 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			}
 		}
 		else {
-			n_record_bins = as_bin_inuse_count(rd);
+			msg_sz += sizeof(as_msg_op) * rd->n_bins;
 
-			msg_sz += sizeof(as_msg_op) * n_record_bins;
-
-			for (uint16_t i = 0; i < n_record_bins; i++) {
+			for (uint16_t i = 0; i < rd->n_bins; i++) {
 				as_bin *b = &rd->bins[i];
 
 				msg_sz += ns->single_bin ?
@@ -394,7 +391,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 		m->n_ops = 0;
 	}
 	else {
-		m->n_ops = select_bins ? n_bins_matched : n_record_bins;
+		m->n_ops = select_bins ? n_bins_matched : rd->n_bins;
 	}
 
 	as_msg_swap_header(m);
@@ -464,7 +461,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 		}
 	}
 	else {
-		for (uint16_t i = 0; i < n_record_bins; i++) {
+		for (uint16_t i = 0; i < rd->n_bins; i++) {
 			as_msg_op *op = (as_msg_op *)buf;
 
 			op->op = AS_MSG_OP_READ;

@@ -340,27 +340,6 @@ as_storage_record_close(as_storage_rd *rd)
 }
 
 //--------------------------------------
-// as_storage_record_load_n_bins
-//
-
-typedef int (*as_storage_record_load_n_bins_fn)(as_storage_rd *rd);
-static const as_storage_record_load_n_bins_fn as_storage_record_load_n_bins_table[AS_NUM_STORAGE_ENGINES] = {
-	NULL, // memory has no record load n bins
-	as_storage_record_load_n_bins_pmem,
-	as_storage_record_load_n_bins_ssd
-};
-
-int
-as_storage_record_load_n_bins(as_storage_rd *rd)
-{
-	if (as_storage_record_load_n_bins_table[rd->ns->storage_type]) {
-		return as_storage_record_load_n_bins_table[rd->ns->storage_type](rd);
-	}
-
-	return 0;
-}
-
-//--------------------------------------
 // as_storage_record_load_bins
 //
 
@@ -921,7 +900,6 @@ as_storage_rd_load_pickle(as_storage_rd *rd)
 	if (rd->ns->storage_data_in_memory) {
 		as_storage_record_get_set_name(rd);
 		as_storage_rd_load_key(rd);
-		as_storage_rd_load_n_bins(rd);
 		as_storage_rd_load_bins(rd, NULL);
 		as_flat_pickle_record(rd);
 		return true;

@@ -266,12 +266,14 @@ as_particle_skip_flat(const uint8_t *flat, const uint8_t *end)
 //
 
 void
-as_bin_particle_destroy(as_bin *b, bool free_particle)
+as_bin_particle_destroy(as_bin *b)
 {
-	if (free_particle && as_bin_is_external_particle(b) && b->particle) {
+	if (as_bin_is_external_particle(b) && b->particle != NULL) {
 		particle_vtable[as_bin_get_particle_type(b)]->destructor_fn(b->particle);
 	}
 
+	// Probably unnecessary, but...
+	b->state = AS_BIN_STATE_UNUSED;
 	b->particle = NULL;
 }
 
@@ -598,6 +600,7 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 // Handle as_val translation.
 //
 
+// FIXME - customize for predexp, so it doesn't need to switch jemalloc arenas.
 int
 as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
 {
@@ -629,6 +632,33 @@ as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
 
 	// Set the bin's iparticle metadata.
 	as_bin_state_set_from_type(b, new_type);
+
+	return 0;
+}
+
+int
+as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val)
+{
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just skips unmanageable as_val types.
+		return 0;
+	}
+
+	uint32_t mem_size = particle_vtable[type]->size_from_asval_fn(val);
+	// TODO - could this ever fail?
+
+	if (mem_size != 0) {
+		b->particle = cf_malloc_ns(mem_size);
+	}
+
+	// Load the new particle into the bin.
+	particle_vtable[type]->from_asval_fn(val, &b->particle);
+	// TODO - could this ever fail?
+
+	// Set the bin's iparticle metadata.
+	as_bin_state_set_from_type(b, type);
 
 	return 0;
 }
@@ -711,8 +741,6 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 const uint8_t *
 as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
 {
-	cf_assert(! as_bin_inuse(b), AS_PARTICLE, "cast from flat into used bin");
-
 	if (flat >= end) {
 		cf_warning(AS_PARTICLE, "incomplete flat particle");
 		return NULL;
@@ -731,33 +759,28 @@ as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *en
 	if (flat) {
 		as_bin_state_set_from_type(b, type);
 	}
-	// else - bin remains empty.
+	// else - bin remains unpopulated.
 
 	return flat;
 }
 
-// TODO - re-do to leave original intact on failure.
 const uint8_t *
-as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
+as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
 {
-	uint8_t old_type = as_bin_get_particle_type(b);
-	as_particle_type new_type = safe_particle_type(*flat);
+	// We assume the bin is empty.
 
-	if (new_type == AS_PARTICLE_TYPE_BAD) {
+	as_particle_type type = safe_particle_type(*flat);
+
+	if (type == AS_PARTICLE_TYPE_BAD) {
 		return NULL;
 	}
 
-	// Just destroy the old particle, if any - we're replacing it.
-	if (as_bin_inuse(b)) {
-		particle_vtable[old_type]->destructor_fn(b->particle);
-	}
-
 	// Load the new particle into the bin.
-	flat = particle_vtable[new_type]->from_flat_fn(flat, end, &b->particle);
+	flat = particle_vtable[type]->from_flat_fn(flat, end, &b->particle);
 
 	// Set the bin's iparticle metadata.
 	if (flat) {
-		as_bin_state_set_from_type(b, new_type);
+		as_bin_state_set_from_type(b, type);
 	}
 	else {
 		as_bin_set_empty(b);

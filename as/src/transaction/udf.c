@@ -204,7 +204,7 @@ static inline bool
 udf_zero_bins_left(udf_record* urecord)
 {
 	return (urecord->flag & UDF_RECORD_FLAG_OPEN) != 0 &&
-			! as_bin_inuse_has(urecord->rd);
+			urecord->rd->n_bins == 0;
 }
 
 static inline void
@@ -798,7 +798,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 				return UDF_OPTYPE_NONE;
 			}
 		}
-		else {
+		else if (as_transaction_has_key(tr)) {
 			// If the message has a key, apply it to the record.
 			if (! get_msg_key(tr, &rd)) {
 				udf_record_close(&urecord);
@@ -806,8 +806,6 @@ udf_master_apply(udf_call* call, rw_request* rw)
 				process_failure(call, NULL, &rw->response_db);
 				return UDF_OPTYPE_NONE;
 			}
-
-			urecord.flag |= UDF_RECORD_FLAG_METADATA_UPDATED;
 		}
 	}
 	else {
@@ -905,20 +903,24 @@ udf_optype
 udf_finish_op(udf_record* urecord)
 {
 	if (udf_zero_bins_left(urecord)) {
-		// Amazingly, with respect to stored key, memory statistics work out
-		// correctly regardless of what this returns.
-		return udf_finish_delete(urecord);
-	}
+		// If originally a live record, proceed with successful delete - either
+		// drop, or write tombstone with new metadata - and replicate.
 
-	if ((urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) != 0) {
-		if ((urecord->flag & UDF_RECORD_FLAG_OPEN) == 0) {
-			cf_crash(AS_UDF, "updated record not open");
+		if ((urecord->flag & UDF_RECORD_FLAG_PREEXISTS) != 0 &&
+				as_record_is_live(urecord->r_ref->r)) {
+			return UDF_OPTYPE_DELETE;
 		}
+		// else - originally no record, or a tombstone.
 
-		return UDF_OPTYPE_WRITE;
+		// Bypass storage write, preserving original state ...
+		urecord->flag &= ~UDF_RECORD_FLAG_HAS_UPDATES;
+
+		// ... and don't apply metadata changes or replicate.
+		return UDF_OPTYPE_NONE;
 	}
 
-	return UDF_OPTYPE_READ;
+	return (urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) != 0 ?
+			UDF_OPTYPE_WRITE : UDF_OPTYPE_READ;
 }
 
 
@@ -956,8 +958,6 @@ udf_post_processing(udf_record* urecord, rw_request* rw, udf_optype urecord_op)
 
 		// Store or drop the key as appropriate.
 		as_record_finalize_key(r, ns, rd->key, rd->key_size);
-
-		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
 
 		will_replicate(r, ns);
 

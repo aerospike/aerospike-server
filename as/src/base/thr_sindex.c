@@ -808,13 +808,21 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_storage_rd rd;
+
 	as_storage_record_open(ns, r, &rd);
-	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
-	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
-	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
+
+	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
+
+	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
+		as_storage_record_close(&rd);
+		as_record_done(r_ref, ns);
+		as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
+		return false;
+	}
 
 	if (job->si) {
 		if (as_sindex_put_rd(job->si, &rd)) {
+			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
 			as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
 			return false;

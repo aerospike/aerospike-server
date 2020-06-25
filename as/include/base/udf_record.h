@@ -43,7 +43,6 @@ typedef struct udf_record_bin_s {
 	char				name[AS_BIN_NAME_MAX_SZ];
 	as_val *			value;
 	bool				dirty;
-	void                *particle_buf;
 } udf_record_bin;
 
 typedef struct udf_record_s {
@@ -53,7 +52,18 @@ typedef struct udf_record_s {
 	as_transaction 		*tr;
 	as_storage_rd 		*rd;
 	cf_digest			keyd;
-	as_bin				stack_bins[UDF_RECORD_BIN_ULIMIT]; // TODO increase bin limit?
+
+	as_bin				new_bins[UDF_RECORD_BIN_ULIMIT]; // also working bins for read-only UDFs
+
+	uint32_t			n_old_bins;
+	uint32_t			n_cleanup_bins;
+
+	as_bin				*old_dim_bins; // pointer to original DIM record's bins
+
+	union {
+		as_bin			old_ssd_bins[UDF_RECORD_BIN_ULIMIT]; // non-DIM, for sindex purposes only
+		as_bin			cleanup_bins[UDF_RECORD_BIN_ULIMIT]; // for DIM only
+	};
 
 	// UDF CHANGE CACHE
 	udf_record_bin		updates[UDF_RECORD_BIN_ULIMIT]; // stores cache bin value
@@ -61,9 +71,9 @@ typedef struct udf_record_s {
 	uint32_t			nupdates; // reset after every cache free, incremented in every cache set
 
 	// RUNTIME ACCOUNTING
-	uint8_t				*particle_data; // non-null for data-on-ssd, and lazy allocated on first bin write
-	uint8_t				*cur_particle_data; // where the pointer is
-	uint8_t				*end_particle_data;
+	uint8_t				*particle_buf; // non-null for data-on-ssd, and lazy allocated on first bin write
+	size_t				buf_size;
+	size_t				buf_offset;
 	uint32_t			starting_memory_bytes;
 	cf_atomic_int		udf_runtime_memory_used;
 
@@ -84,7 +94,6 @@ typedef struct udf_record_s {
 #define UDF_RECORD_FLAG_HAS_UPDATES			0x0020   // Write/Update done
 #define UDF_RECORD_FLAG_PREEXISTS			0x0040   // Record preexisted not created
 #define UDF_RECORD_FLAG_ISVALID				0x0080   // Udf is setup and in use
-#define UDF_RECORD_FLAG_METADATA_UPDATED	0x0100   // Write/Update metadata done
 
 extern const as_rec_hooks udf_record_hooks;
 
@@ -92,6 +101,7 @@ extern const as_rec_hooks udf_record_hooks;
 // Utility functions for all the wrapper as_record implementation
 // which use udf_record under the hood
 extern void     udf_record_cache_free   (udf_record *);
+extern void     udf_record_cache_set    (udf_record *, const char *, as_val *, bool);
 extern int      udf_record_open         (udf_record *);
 extern int      udf_storage_record_open (udf_record *);
 extern void     udf_record_close        (udf_record *);

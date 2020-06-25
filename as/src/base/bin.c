@@ -186,48 +186,34 @@ as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from)
 
 
 // - Seems like an as_storage_record method, but leaving it here for now.
-// - sets rd->n_bins!
+// - sets rd->bins and rd->n_bins!
 int
-as_storage_rd_load_n_bins(as_storage_rd *rd)
+as_storage_rd_load_bins(as_storage_rd* rd, as_bin* stack_bins)
 {
-	if (rd->ns->single_bin) {
-		rd->n_bins = 1;
-		return 0;
-	}
+	as_namespace* ns = rd->ns;
 
-	if (rd->ns->storage_data_in_memory) {
-		rd->n_bins = safe_n_bins(rd->r);
-		return 0;
-	}
+	if (ns->storage_data_in_memory) {
+		as_record* r = rd->r;
 
-	rd->n_bins = 0;
+		if (ns->single_bin) {
+			rd->bins = as_index_get_single_bin(r);
+			rd->n_bins = as_bin_inuse(rd->bins) ? 1 : 0;
+		}
+		else {
+			rd->bins = safe_bins(r);
+			rd->n_bins = safe_n_bins(r);
+		}
 
-	if (rd->record_on_device && ! rd->ignore_record_on_device) {
-		return as_storage_record_load_n_bins(rd); // sets rd->n_bins
-	}
-
-	return 0;
-}
-
-
-// - Seems like an as_storage_record method, but leaving it here for now.
-// - sets rd->bins!
-int
-as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins)
-{
-	if (rd->ns->storage_data_in_memory) {
-		rd->bins = rd->ns->single_bin ? as_index_get_single_bin(rd->r) :
-				safe_bins(rd->r);
 		return 0;
 	}
 
 	// Data NOT in-memory.
 
 	rd->bins = stack_bins;
-	as_bin_set_all_empty(rd);
+	rd->n_bins = 0;
 
 	if (rd->record_on_device && ! rd->ignore_record_on_device) {
-		return as_storage_record_load_bins(rd);
+		return as_storage_record_load_bins(rd); // sets rd->n_bins
 	}
 
 	return 0;
@@ -249,10 +235,6 @@ as_bin_get_by_id(as_storage_rd *rd, uint32_t id)
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
 		as_bin *b = &rd->bins[i];
 
-		if (! as_bin_inuse(b)) {
-			break;
-		}
-
 		if ((uint32_t)b->id == id) {
 			return b;
 		}
@@ -265,15 +247,15 @@ as_bin_get_by_id(as_storage_rd *rd, uint32_t id)
 as_bin *
 as_bin_get(as_storage_rd *rd, const char *name)
 {
-	return as_bin_get_from_buf(rd, (const uint8_t *)name, strlen(name));
+	return as_bin_get_w_len(rd, (const uint8_t *)name, strlen(name));
 }
 
 
 as_bin *
-as_bin_get_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len)
+as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len)
 {
 	if (rd->ns->single_bin) {
-		return as_bin_inuse_has(rd) ? rd->bins : NULL;
+		return rd->n_bins == 0 ? NULL : rd->bins;
 	}
 
 	uint32_t id;
@@ -286,10 +268,6 @@ as_bin_get_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len)
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
 		as_bin *b = &rd->bins[i];
 
-		if (! as_bin_inuse(b)) {
-			break;
-		}
-
 		if ((uint32_t)b->id == id) {
 			return b;
 		}
@@ -300,17 +278,16 @@ as_bin_get_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len)
 
 
 as_bin *
-as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
+as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
 		int *result)
 {
 	as_namespace *ns = rd->ns;
 
 	if (ns->single_bin) {
-		if (as_bin_inuse(rd->bins)) {
-			cf_crash(AS_BIN, "single bin create found bin in use");
-		}
+		cf_assert(rd->n_bins == 0, AS_BIN, "single-bin create found used bin");
 
 		as_bin_init_nameless(rd->bins);
+		rd->n_bins = 1;
 
 		return rd->bins;
 	}
@@ -319,33 +296,26 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 	if (len >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_BIN, "bin name too long (%lu)", len);
 
-		if (result) {
+		if (result != NULL) {
 			*result = AS_ERR_BIN_NAME;
 		}
 
 		return NULL;
 	}
 
-	as_bin *b = NULL;
-
-	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		if (! as_bin_inuse(&rd->bins[i])) {
-			b = &rd->bins[i];
-			break;
-		}
-	}
-
-	cf_assert(b, AS_BIN, "ran out of allocated bins in rd");
+	as_bin *b = &rd->bins[rd->n_bins];
 
 	as_bin_init_nameless(b);
 
 	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
-		if (result) {
+		if (result != NULL) {
 			*result = AS_ERR_BIN_NAME;
 		}
 
 		return NULL;
 	}
+
+	rd->n_bins++;
 
 	return b;
 }
@@ -354,22 +324,23 @@ as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len,
 as_bin *
 as_bin_get_or_create(as_storage_rd *rd, const char *name)
 {
-	return as_bin_get_or_create_from_buf(rd, (const uint8_t *)name,
-			strlen(name), NULL);
+	return as_bin_get_or_create_w_len(rd, (const uint8_t *)name, strlen(name),
+			NULL);
 }
 
 
 // Does not check bin name length.
 // Checks bin name quota - use appropriately.
 as_bin *
-as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
-		size_t len, int *result)
+as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
+		int *result)
 {
 	as_namespace *ns = rd->ns;
 
 	if (ns->single_bin) {
-		if (! as_bin_inuse_has(rd)) {
+		if (rd->n_bins == 0) {
 			as_bin_init_nameless(rd->bins);
+			rd->n_bins = 1;
 		}
 
 		return rd->bins;
@@ -382,134 +353,85 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name,
 		for (uint16_t i = 0; i < rd->n_bins; i++) {
 			as_bin *b = &rd->bins[i];
 
-			if (! as_bin_inuse(b)) {
-				as_bin_init_nameless(b);
-				b->id = (uint16_t)id;
-				return b;
-			}
-
 			if ((uint32_t)b->id == id) {
 				return b;
 			}
 		}
 
-		cf_crash(AS_BIN, "ran out of allocated bins in rd");
+		as_bin *b = &rd->bins[rd->n_bins];
+
+		as_bin_init_nameless(b);
+		b->id = (uint16_t)id;
+
+		rd->n_bins++;
+
+		return b;
 	}
 	// else - bin name is new.
 
-	uint16_t i = as_bin_inuse_count(rd);
-
-	cf_assert(i < rd->n_bins, AS_BIN, "ran out of allocated bins in rd");
-
-	as_bin *b = &rd->bins[i];
+	as_bin *b = &rd->bins[rd->n_bins];
 
 	as_bin_init_nameless(b);
 
 	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
-		if (result) {
+		if (result != NULL) {
 			*result = AS_ERR_BIN_NAME;
 		}
 
 		return NULL;
 	}
 
+	rd->n_bins++;
+
 	return b;
 }
 
 
-int32_t
-as_bin_get_index(as_storage_rd *rd, const char *name)
+bool
+as_bin_pop(as_storage_rd *rd, const char *name, as_bin* bin)
 {
-	return as_bin_get_index_from_buf(rd, (const uint8_t *)name, strlen(name));
+	return as_bin_pop_w_len(rd, (const uint8_t *)name, strlen(name), bin);
 }
 
 
-int32_t
-as_bin_get_index_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len)
+bool
+as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
+		as_bin* bin)
 {
 	if (rd->ns->single_bin) {
-		return as_bin_inuse_has(rd) ? 0 : -1;
+		if (rd->n_bins == 0) {
+			return false;
+		}
+
+		as_single_bin_copy(bin, rd->bins);
+		as_bin_set_empty_shift(rd, 0);
+
+		// Note - for single-bin DIM as_storage_rd_load_bins() derives
+		// rd->n_bins from bin (used) state - must clear deleted bin.
+		if (rd->ns->storage_data_in_memory) {
+			as_bin_set_empty(rd->bins);
+		}
+
+		return true;
 	}
 
 	uint32_t id;
 
 	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char *)name,
 			len, &id) != CF_VMAPX_OK) {
-		return -1;
+		return false;
 	}
 
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
 		as_bin *b = &rd->bins[i];
 
-		if (! as_bin_inuse(b)) {
-			break;
-		}
-
 		if ((uint32_t)b->id == id) {
-			return (int32_t)i;
+			*bin = *b;
+			as_bin_set_empty_shift(rd, i);
+
+			return true;
 		}
 	}
 
-	return -1;
-}
-
-
-void
-as_bin_destroy(as_storage_rd *rd, uint16_t i)
-{
-	as_bin_particle_destroy(&rd->bins[i], rd->ns->storage_data_in_memory);
-	as_bin_set_empty_shift(rd, i);
-}
-
-
-void
-as_bin_allocate_bin_space(as_storage_rd *rd, int32_t delta)
-{
-	as_record *r = rd->r;
-
-	if (rd->n_bins == 0) {
-		rd->n_bins = (uint16_t)delta;
-
-		size_t size = sizeof(as_bin_space) + (rd->n_bins * sizeof(as_bin));
-		as_bin_space* bin_space = (as_bin_space*)cf_malloc_ns(size);
-
-		rd->bins = bin_space->bins;
-		as_bin_set_all_empty(rd);
-
-		bin_space->n_bins = rd->n_bins;
-		as_index_set_bin_space(r, bin_space);
-
-		return;
-	}
-	// else - there were bins before.
-
-	uint16_t new_n_bins = (uint16_t)((int32_t)rd->n_bins + delta);
-
-	if (delta < 0) {
-		as_record_destroy_bins_from(rd, new_n_bins);
-	}
-
-	uint16_t old_n_bins = rd->n_bins;
-
-	rd->n_bins = new_n_bins;
-
-	if (new_n_bins != 0) {
-		size_t size = sizeof(as_bin_space) + (rd->n_bins * sizeof(as_bin));
-		as_bin_space* bin_space = (as_bin_space*)
-				cf_realloc_ns((void*)as_index_get_bin_space(r), size);
-
-		rd->bins = bin_space->bins;
-
-		if (delta > 0) {
-			as_bin_set_empty_from(rd, old_n_bins);
-		}
-
-		bin_space->n_bins = rd->n_bins;
-		as_index_set_bin_space(r, bin_space);
-	}
-	else {
-		cf_free((void*)as_index_get_bin_space(r));
-		as_index_set_bin_space(r, NULL);
-		rd->bins = NULL;
-	}
+	return false;
 }

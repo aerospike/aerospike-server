@@ -75,21 +75,17 @@ udf_storage_record_open(udf_record *urecord)
 	as_transaction *tr    = urecord->tr;
 
 	as_storage_record_open(tr->rsv.ns, r, rd);
-	as_storage_rd_load_n_bins(rd); // TODO - handle error returned
+
+	if (as_storage_rd_load_bins(rd, urecord->new_bins) < 0) {
+		as_storage_record_close(rd);
+		return -1;
+	}
 
 	if (rd->n_bins > UDF_RECORD_BIN_ULIMIT) {
 		cf_warning(AS_UDF, "record has too many bins (%d) for UDF processing", rd->n_bins);
 		as_storage_record_close(rd);
 		return -1;
 	}
-
-	// if multibin storage, we will use urecord->stack_bins, so set the size appropriately
-	if ( ! tr->rsv.ns->storage_data_in_memory && ! tr->rsv.ns->single_bin ) {
-		rd->n_bins = sizeof(urecord->stack_bins) / sizeof(as_bin);
-	}
-
-	as_storage_rd_load_bins(rd, urecord->stack_bins); // TODO - handle error returned
-	urecord->starting_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
 	as_storage_record_get_set_name(rd);
 	as_storage_rd_load_key(rd);
@@ -119,40 +115,94 @@ udf_storage_record_open(udf_record *urecord)
 int
 udf_storage_record_close(udf_record *urecord)
 {
-	if (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) {
-		as_index_ref   *r_ref = urecord->r_ref;
-		as_storage_rd  *rd    = urecord->rd;
-
-		bool has_bins = as_bin_inuse_has(rd);
-
-		if (r_ref) {
-			if (urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) {
-				as_storage_record_write(rd);
-
-				// The urecord fields survive as_storage_record_close().
-				urecord->pickle = rd->pickle;
-				urecord->pickle_sz = rd->pickle_sz;
-
-				urecord->flag &= ~UDF_RECORD_FLAG_HAS_UPDATES; // TODO - necessary?
-			}
-
-			as_storage_record_close(rd);
-
-			if (! has_bins) {
-				write_delete_record(r_ref->r, urecord->tr->rsv.tree);
-			}
-		} else {
-			// Should never happen.
-			cf_warning(AS_UDF, "Unexpected Internal Error (null r_ref)");
-		}
-
-		urecord->flag &= ~UDF_RECORD_FLAG_STORAGE_OPEN;
-		cf_detail(AS_UDF, "Storage Close:: Rec(%p) Flag(%x) Digest:%pD",
-				urecord, urecord->flag, &urecord->tr->keyd);
-		return 0;
-	} else {
+	if ((urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) == 0) {
 		return 1;
 	}
+
+	as_index_ref   *r_ref = urecord->r_ref;
+	as_storage_rd  *rd    = urecord->rd;
+	as_namespace   *ns    = rd->ns;
+	as_record      *r     = r_ref->r;
+
+	if ((urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) != 0) {
+		int result = as_storage_record_write(rd);
+
+		if (result < 0) {
+			if (ns->storage_data_in_memory) {
+				write_dim_unwind(urecord->old_dim_bins, urecord->n_old_bins,
+						rd->bins, rd->n_bins, urecord->cleanup_bins,
+						urecord->n_cleanup_bins);
+			}
+
+			return -result;
+		}
+
+		if (ns->storage_data_in_memory) {
+			if (ns->single_bin) {
+				as_bin_destroy_all(urecord->cleanup_bins,
+						urecord->n_cleanup_bins);
+				as_single_bin_copy(as_index_get_single_bin(rd->r), rd->bins);
+			}
+			else {
+				if (record_has_sindex(r, ns)) {
+					// Adjust sindex, looking at old and new bins.
+					write_sindex_update(ns, as_index_get_set_name(r, ns),
+							&r->keyd, urecord->old_dim_bins,
+							urecord->n_old_bins, rd->bins, rd->n_bins);
+				}
+
+				as_bin_destroy_all(urecord->cleanup_bins,
+						urecord->n_cleanup_bins);
+
+				// Fill out new_bin_space.
+				as_bin_space* new_bin_space = NULL;
+				size_t bins_size = rd->n_bins * sizeof(as_bin);
+
+				if (rd->n_bins != 0) {
+					new_bin_space = (as_bin_space*)
+							cf_malloc_ns(sizeof(as_bin_space) + bins_size);
+
+					new_bin_space->n_bins = rd->n_bins;
+					memcpy((void*)new_bin_space->bins, rd->bins, bins_size);
+				}
+
+				// Swizzle the index element's as_bin_space pointer.
+				as_bin_space* old_bin_space = as_index_get_bin_space(r);
+
+				if (old_bin_space != NULL) {
+					cf_free(old_bin_space);
+				}
+
+				as_index_set_bin_space(r, new_bin_space);
+			}
+
+			as_storage_record_adjust_mem_stats(rd,
+					urecord->starting_memory_bytes);
+		}
+		else if (! ns->single_bin && record_has_sindex(r, ns)) {
+			// Adjust sindex, looking at old and new bins.
+			write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
+					urecord->old_ssd_bins, urecord->n_old_bins, rd->bins,
+					rd->n_bins);
+		}
+
+		// The urecord fields survive as_storage_record_close().
+		urecord->pickle = rd->pickle;
+		urecord->pickle_sz = rd->pickle_sz;
+	}
+
+	// Do this even if no updates - could have inserted an empty as_index.
+	if (rd->n_bins == 0) {
+		write_delete_record(r, urecord->tr->rsv.tree);
+	}
+
+	as_storage_record_close(rd);
+
+	urecord->flag &= ~UDF_RECORD_FLAG_STORAGE_OPEN;
+	cf_detail(AS_UDF, "Storage Close:: Rec(%p) Flag(%x) Digest:%pD",
+			urecord, urecord->flag, &urecord->tr->keyd);
+
+	return 0;
 }
 
 /*
@@ -243,9 +293,9 @@ udf_record_close(udf_record *urecord)
 	}
 
 	// Replication happens when the main record replicates
-	if (urecord->particle_data) {
-		cf_free(urecord->particle_data);
-		urecord->particle_data = 0;
+	if (urecord->particle_buf != NULL) {
+		cf_free(urecord->particle_buf);
+		urecord->particle_buf = NULL;
 	}
 	udf_record_cache_free(urecord);
 }
@@ -270,13 +320,14 @@ udf_record_init(udf_record *urecord, bool allow_updates)
 	urecord->tr                 = NULL;
 	urecord->r_ref              = NULL;
 	urecord->rd                 = NULL;
+	urecord->n_old_bins         = 0;
+	urecord->n_cleanup_bins     = 0;
 	urecord->nupdates           = 0;
-	urecord->particle_data      = NULL;
-	urecord->cur_particle_data  = NULL;
-	urecord->end_particle_data  = NULL;
+	urecord->particle_buf      = NULL;
+	urecord->buf_size           = 0;
+	urecord->buf_offset         = 0;
 	urecord->starting_memory_bytes = 0;
 
-	// Init flag
 	urecord->flag               = UDF_RECORD_FLAG_ISVALID;
 
 	if (allow_updates) {
@@ -284,9 +335,6 @@ udf_record_init(udf_record *urecord, bool allow_updates)
 	}
 
 	urecord->keyd               = cf_digest_zero;
-	for (uint32_t i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
-		urecord->updates[i].particle_buf = NULL;
-	}
 
 	urecord->pickle = NULL;
 	urecord->pickle_sz = 0;
@@ -370,12 +418,6 @@ udf_record_cache_free(udf_record * urecord)
 		}
 	}
 
-	for (uint32_t i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
-		if (urecord->updates[i].particle_buf) {
-			cf_free(urecord->updates[i].particle_buf);
-			urecord->updates[i].particle_buf = NULL;
-		}
-	}
 	urecord->nupdates = 0;
 	urecord->flag &= ~UDF_RECORD_FLAG_TOO_MANY_BINS;
 }
@@ -383,14 +425,12 @@ udf_record_cache_free(udf_record * urecord)
 /**
  * Set the cache value for a bin, including flags.
  */
-static void
+void
 udf_record_cache_set(udf_record * urecord, const char * name, as_val * value,
 					 bool dirty)
 {
 	cf_debug(AS_UDF, "[ENTER] urecord(%p) name(%p)[%s] dirty(%d)",
 			  urecord, name, name, dirty);
-
-	bool modified = false;
 
 	for ( uint32_t i = 0; i < urecord->nupdates; i++ ) {
 		udf_record_bin * bin = &(urecord->updates[i]);
@@ -410,27 +450,24 @@ udf_record_cache_set(udf_record * urecord, const char * name, as_val * value,
 			cf_detail(AS_UDF, "udf_record_set: %s set for %p:%p", name,
 					urecord, bin->value);
 
-			modified = true;
-			break;
+			return;
 		}
 	}
 
 	// If not modified, then we will add the bin to the cache
-	if ( ! modified ) {
-		if ( urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
-			udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
-			strncpy(bin->name, name, AS_BIN_NAME_MAX_SZ);
-			bin->value = (as_val *) value;
-			bin->dirty = dirty;
-			urecord->nupdates++;
-			cf_detail(AS_UDF, "udf_record_set: %s not modified, add for %p:%p",
-					name, urecord, bin->value);
-		}
-		else {
-			cf_warning(AS_UDF, "UDF bin limit (%d) exceeded (bin %s)",
-					UDF_RECORD_BIN_ULIMIT, name);
-			urecord->flag |= UDF_RECORD_FLAG_TOO_MANY_BINS;
-		}
+	if ( urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
+		udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
+		strncpy(bin->name, name, AS_BIN_NAME_MAX_SZ);
+		bin->value = (as_val *) value;
+		bin->dirty = dirty;
+		urecord->nupdates++;
+		cf_detail(AS_UDF, "udf_record_set: %s not modified, add for %p:%p",
+				name, urecord, bin->value);
+	}
+	else {
+		cf_warning(AS_UDF, "UDF bin limit (%d) exceeded (bin %s)",
+				UDF_RECORD_BIN_ULIMIT, name);
+		urecord->flag |= UDF_RECORD_FLAG_TOO_MANY_BINS;
 	}
 }
 
@@ -543,11 +580,6 @@ udf_record_param_check_w_bin(const as_rec *rec, const char *bname, char *fname, 
 		return UDF_ERR_PARAMETER;
 	}
 
-	if (! as_bin_name_within_quota(ns, bname)) {
-		cf_warning(AS_UDF, "{%s} exceeded bin name quota", ns->name);
-		return UDF_ERR_PARAMETER;
-	}
-
 	return 0;
 }
 
@@ -583,12 +615,6 @@ udf_record_get(const as_rec * rec, const char * name)
 		if (udf_record_open(urecord)) { // lazy read the record from storage
 			return NULL;
 		}
-	}
-
-	// Check if storage is available
-	if ( !urecord->rd->ns ) {
-		cf_detail(AS_UDF, "udf_record_get: storage unavailable");
-		return NULL;
 	}
 
 	value = udf_record_storage_get(urecord, name);
@@ -636,7 +662,6 @@ udf_record_set_ttl(const as_rec * rec,  uint32_t  ttl)
 	}
 
 	urecord->tr->msgp->msg.record_ttl = ttl;
-	urecord->flag |= UDF_RECORD_FLAG_METADATA_UPDATED;
 
 	return 0;
 }
@@ -660,15 +685,13 @@ udf_record_drop_key(const as_rec * rec)
 		urecord->rd->key_size = 0;
 	}
 
-	urecord->flag |= UDF_RECORD_FLAG_METADATA_UPDATED;
-
 	return 0;
 }
 
 static int
 udf_record_remove(const as_rec * rec, const char * name)
 {
-	int ret = udf_record_param_check(rec, __FILE__, __LINE__);
+	int ret = udf_record_param_check_w_bin(rec, name, __FILE__, __LINE__);
 	if (ret) {
 		return ret;
 	}

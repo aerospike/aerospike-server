@@ -43,13 +43,6 @@
 
 
 //==========================================================
-// Forward declarations.
-//
-
-static uint32_t flat_record_overhead_size(const as_storage_rd* rd);
-
-
-//==========================================================
 // Inlines & macros.
 //
 
@@ -94,26 +87,14 @@ as_flat_record_size(const as_storage_rd* rd)
 	// Start with the record storage overhead.
 	uint32_t write_sz = flat_record_overhead_size(rd);
 
-	// TODO - temporary, until we sort out the whole rd->n_bins mess.
-	uint16_t n_used_bins;
-
 	// Add the bins' sizes, including bin overhead.
-	for (n_used_bins = 0; n_used_bins < rd->n_bins; n_used_bins++) {
-		as_bin* bin = &rd->bins[n_used_bins];
-
-		if (! as_bin_inuse(bin)) {
-			break;
-		}
+	for (uint16_t b = 0; b < rd->n_bins; b++) {
+		as_bin* bin = &rd->bins[b];
 
 		uint32_t name_sz = ns->single_bin ?
 				0 : 1 + (uint32_t)strlen(as_bin_get_name_from_id(ns, bin->id));
 
 		write_sz += name_sz + as_bin_particle_flat_size(bin);
-	}
-
-	// TODO - temporary, until we sort out the whole rd->n_bins mess.
-	if (! ns->single_bin && n_used_bins != 0) {
-		write_sz += uintvar_size(n_used_bins);
 	}
 
 	return write_sz;
@@ -288,10 +269,12 @@ int
 as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 		uint16_t n_bins, as_bin* bins)
 {
-	for (uint16_t i = 0; i < n_bins; i++) {
+	uint16_t i;
+
+	for (i = 0; i < n_bins; i++) {
 		if (at >= end) {
 			cf_warning(AS_FLAT, "incomplete flat bin");
-			return -AS_ERR_UNKNOWN;
+			break;
 		}
 
 		if (! ns->single_bin) {
@@ -299,40 +282,46 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 
 			if (name_len >= AS_BIN_NAME_MAX_SZ) {
 				cf_warning(AS_FLAT, "bad flat bin name");
-				return -AS_ERR_UNKNOWN;
+				break;
 			}
 
 			if (at + name_len > end) {
 				cf_warning(AS_FLAT, "incomplete flat bin");
-				return -AS_ERR_UNKNOWN;
+				break;
 			}
 
 			if (! as_bin_set_id_from_name_w_len(ns, &bins[i], at, name_len)) {
 				cf_warning(AS_FLAT, "flat bin name failed to assign id");
-				return -AS_ERR_UNKNOWN;
+				break;
 			}
 
 			at += name_len;
 		}
 
 		at = ns->storage_data_in_memory ?
-				// FIXME - use an alloc instead of replace.
-				as_bin_particle_replace_from_flat(&bins[i], at, end) :
+				as_bin_particle_alloc_from_flat(&bins[i], at, end) :
 				as_bin_particle_cast_from_flat(&bins[i], at, end);
 
 		if (at == NULL) {
-			return -AS_ERR_UNKNOWN;
+			break;
 		}
+	}
+
+	if (i < n_bins) {
+		as_bin_destroy_all(bins, i);
+		return -AS_ERR_UNKNOWN;
 	}
 
 	if (at > end) {
 		cf_warning(AS_FLAT, "incomplete flat bin");
+		as_bin_destroy_all(bins, n_bins);
 		return -AS_ERR_UNKNOWN;
 	}
 
 	// Some (but not all) callers pass end as an rblock-rounded value.
 	if (at + RBLOCK_SIZE <= end) {
 		cf_warning(AS_FLAT, "extra rblocks follow flat bin");
+		as_bin_destroy_all(bins, n_bins);
 		return -AS_ERR_UNKNOWN;
 	}
 
@@ -382,6 +371,39 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 //==========================================================
 // Private API - for enterprise separation only.
 //
+
+uint32_t
+flat_record_overhead_size(const as_storage_rd* rd)
+{
+	as_record* r = rd->r;
+
+	// Start with size of record header struct.
+	size_t size = sizeof(as_flat_record);
+
+	as_flat_extra_flags extra_flags = get_flat_extra_flags(r);
+
+	if (flat_extra_flags_used(&extra_flags)) {
+		size += sizeof(as_flat_extra_flags);
+	}
+
+	if (r->void_time != 0) {
+		size += sizeof(uint32_t);
+	}
+
+	if (rd->set_name) {
+		size += 1 + rd->set_name_len;
+	}
+
+	if (rd->key) {
+		size += uintvar_size(rd->key_size) + rd->key_size;
+	}
+
+	if (! rd->ns->single_bin && rd->n_bins != 0) {
+		size += uintvar_size(rd->n_bins);
+	}
+
+	return (uint32_t)size;
+}
 
 uint8_t*
 flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
@@ -447,12 +469,9 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 		flat->has_key = 0;
 	}
 
-	// TODO - temporary, until we sort out the whole rd->n_bins mess.
-	uint16_t n_used_bins = as_bin_inuse_count(rd);
-
-	if (n_used_bins != 0) {
+	if (rd->n_bins != 0) {
 		if (! ns->single_bin) {
-			at = uintvar_pack(at, n_used_bins);
+			at = uintvar_pack(at, rd->n_bins);
 		}
 
 		flat->has_bins = 1;
@@ -464,20 +483,15 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 	return flatten_compression_meta(cm, flat, at);
 }
 
-uint16_t
+void
 flatten_bins(const as_storage_rd* rd, uint8_t* buf, uint32_t* sz)
 {
 	as_namespace* ns = rd->ns;
 
 	uint8_t* start = buf;
-	uint16_t n_bins;
 
-	for (n_bins = 0; n_bins < rd->n_bins; n_bins++) {
-		as_bin* bin = &rd->bins[n_bins];
-
-		if (! as_bin_inuse(bin)) {
-			break;
-		}
+	for (uint16_t b = 0; b < rd->n_bins; b++) {
+		as_bin* bin = &rd->bins[b];
 
 		if (! ns->single_bin) {
 			const char* bin_name = as_bin_get_name_from_id(ns, bin->id);
@@ -494,45 +508,4 @@ flatten_bins(const as_storage_rd* rd, uint8_t* buf, uint32_t* sz)
 	if (sz != NULL) {
 		*sz = (uint32_t)(buf - start);
 	}
-
-	return n_bins;
-}
-
-
-//==========================================================
-// Local helpers.
-//
-
-static uint32_t
-flat_record_overhead_size(const as_storage_rd* rd)
-{
-	as_record* r = rd->r;
-
-	// Start with size of record header struct.
-	size_t size = sizeof(as_flat_record);
-
-	as_flat_extra_flags extra_flags = get_flat_extra_flags(r);
-
-	if (flat_extra_flags_used(&extra_flags)) {
-		size += sizeof(as_flat_extra_flags);
-	}
-
-	if (r->void_time != 0) {
-		size += sizeof(uint32_t);
-	}
-
-	if (rd->set_name) {
-		size += 1 + rd->set_name_len;
-	}
-
-	if (rd->key) {
-		size += uintvar_size(rd->key_size) + rd->key_size;
-	}
-
-	// TODO - size n_bins here when we sort out the whole rd->n_bins mess.
-//	if (rd->n_bins != 0) {
-//		size += uintvar_size(rd->n_bins);
-//	}
-
-	return (uint32_t)size;
 }

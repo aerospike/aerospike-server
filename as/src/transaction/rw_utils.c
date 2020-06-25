@@ -187,22 +187,17 @@ build_predexp_and_filter_meta(const as_transaction* tr, const as_record* r,
 int
 predexp_read_and_filter_bins(as_storage_rd* rd, predexp_eval_t* predexp)
 {
-	int result;
-
-	if ((result = as_storage_rd_load_n_bins(rd)) < 0) {
-		return -result;
-	}
-
 	as_namespace* ns = rd->ns;
-	as_record* r = rd->r;
 
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd->n_bins];
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
 
-	if ((result = as_storage_rd_load_bins(rd, stack_bins)) < 0) {
+	int result = as_storage_rd_load_bins(rd, stack_bins);
+
+	if (result < 0) {
 		return -result;
 	}
 
-	predexp_args_t predargs = { .ns = ns, .md = r, .rd = rd };
+	predexp_args_t predargs = { .ns = ns, .md = rd->r, .rd = rd };
 
 	if (! predexp_matches_record(predexp, &predargs)) {
 		return AS_ERR_FILTERED_OUT;
@@ -465,10 +460,10 @@ record_delete_adjust_sindex(as_record* r, as_namespace* ns)
 	as_storage_rd rd;
 
 	as_storage_record_open(ns, r, &rd);
-	as_storage_rd_load_n_bins(&rd);
 
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
 
+	// FIXME - should we handle failure?
 	as_storage_rd_load_bins(&rd, stack_bins);
 
 	remove_from_sindex(ns, as_index_get_set_name(r, ns), &r->keyd, rd.bins,
@@ -491,7 +486,6 @@ delete_adjust_sindex(as_storage_rd* rd)
 		return;
 	}
 
-	as_storage_rd_load_n_bins(rd);
 	as_storage_rd_load_bins(rd, NULL);
 
 	remove_from_sindex(ns, as_index_get_set_name(rd->r, ns), &rd->r->keyd,
@@ -532,4 +526,67 @@ remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 	}
 
 	as_sindex_release_arr(si_arr, si_arr_index);
+}
+
+
+void
+write_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
+		uint32_t n_new_bins, as_bin* cleanup_bins, uint32_t n_cleanup_bins)
+{
+	for (uint32_t i_new = 0; i_new < n_new_bins; i_new++) {
+		as_bin* b_new = &new_bins[i_new];
+
+		// Should be last, but not a sentinel - failed to set particle.
+		if (! as_bin_inuse(b_new)) {
+			continue;
+		}
+
+		// Embedded particles have no-op destructors - skip loop over old bins.
+		if (as_bin_is_embedded_particle(b_new)) {
+			continue;
+		}
+
+		as_particle* p_new = b_new->particle;
+		uint32_t i_old;
+
+		for (i_old = 0; i_old < n_old_bins; i_old++) {
+			as_bin* b_old = &old_bins[i_old];
+
+			if (b_new->id == b_old->id) {
+				if (p_new != as_bin_get_particle(b_old)) {
+					as_bin_particle_destroy(b_new);
+				}
+
+				break;
+			}
+		}
+
+		if (i_old == n_old_bins) {
+			as_bin_particle_destroy(b_new);
+		}
+	}
+
+	for (uint32_t i_cleanup = 0; i_cleanup < n_cleanup_bins; i_cleanup++) {
+		as_bin* b_cleanup = &cleanup_bins[i_cleanup];
+		as_particle* p_cleanup = b_cleanup->particle;
+		uint32_t i_old;
+
+		for (i_old = 0; i_old < n_old_bins; i_old++) {
+			as_bin* b_old = &old_bins[i_old];
+
+			if (b_cleanup->id == b_old->id) {
+				if (p_cleanup != as_bin_get_particle(b_old)) {
+					as_bin_particle_destroy(b_cleanup);
+				}
+
+				break;
+			}
+		}
+
+		if (i_old == n_old_bins) {
+			as_bin_particle_destroy(b_cleanup);
+		}
+	}
+
+	// The index element's as_bin_space pointer still points at old bins.
 }

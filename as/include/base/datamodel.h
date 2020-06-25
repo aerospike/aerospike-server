@@ -141,7 +141,7 @@ typedef struct as_particle_s {
 } __attribute__ ((__packed__)) as_particle;
 
 // Constants used for the as_bin state value (4 bits, 16 values).
-#define AS_BIN_STATE_UNUSED			0
+#define AS_BIN_STATE_UNUSED			0 // must be 0 for single-bin initialization
 #define AS_BIN_STATE_INUSE_INTEGER	1
 #define AS_BIN_STATE_RECYCLE_ME		2 // was - hidden bin
 #define AS_BIN_STATE_INUSE_OTHER	3
@@ -195,7 +195,7 @@ extern const uint8_t *as_particle_skip_flat(const uint8_t *flat, const uint8_t *
 
 // as_bin particle function declarations
 
-extern void as_bin_particle_destroy(as_bin *b, bool free_particle);
+extern void as_bin_particle_destroy(as_bin *b);
 extern uint32_t as_bin_particle_size(as_bin *b);
 
 // wire:
@@ -226,6 +226,7 @@ extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_l
 
 // as_val:
 extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
+extern int as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val);
 extern void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 extern as_val *as_bin_particle_to_asval(const as_bin *b);
 
@@ -234,7 +235,7 @@ extern int as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, 
 
 // flat:
 extern const uint8_t *as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
-extern const uint8_t *as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
+extern const uint8_t *as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
 extern uint32_t as_bin_particle_flat_size(as_bin *b);
 extern uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
 
@@ -276,9 +277,10 @@ extern int as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *resu
 static inline void
 as_single_bin_copy(as_bin *to, const as_bin *from)
 {
-	to->do_not_use = from->do_not_use;
+	// Do not copy do_not_use since it may overlap other as_index bits.
 	to->state = from->state;
 	to->particle = from->particle;
+	// Do not copy id or unused since they are off the end of the as_index.
 }
 
 static inline bool
@@ -318,25 +320,6 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 	}
 }
 
-static inline bool
-as_bin_inuse_has(const as_storage_rd *rd)
-{
-	// In-use bins are at the beginning - only need to check the first bin.
-	return rd->n_bins != 0 && (rd->pickle != NULL || as_bin_inuse(rd->bins));
-}
-
-static inline uint16_t
-as_bin_inuse_count(const as_storage_rd *rd)
-{
-	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		if (! as_bin_inuse(&rd->bins[i])) {
-			return i;
-		}
-	}
-
-	return rd->n_bins;
-}
-
 static inline void
 as_bin_set_empty(as_bin *b)
 {
@@ -346,37 +329,12 @@ as_bin_set_empty(as_bin *b)
 static inline void
 as_bin_set_empty_shift(as_storage_rd *rd, uint32_t i)
 {
-	// Shift the bins over, so there's no space between used bins.
-	// This can overwrite the "emptied" bin, and that's fine.
+	rd->n_bins--;
 
-	uint16_t j;
-
-	for (j = i + 1; j < rd->n_bins; j++) {
-		if (! as_bin_inuse(&rd->bins[j])) {
-			break;
-		}
+	if (i < rd->n_bins) {
+		// Note - can't get here for single bin, so plain copy is safe.
+		rd->bins[i] = rd->bins[rd->n_bins];
 	}
-
-	uint16_t n = j - (i + 1);
-
-	if (n) {
-		memmove(&rd->bins[i], &rd->bins[i + 1], n * sizeof(as_bin));
-	}
-
-	// Mark the last bin that was *formerly* in use as null.
-	as_bin_set_empty(&rd->bins[j - 1]);
-}
-
-static inline void
-as_bin_set_empty_from(as_storage_rd *rd, uint16_t from) {
-	for (uint16_t i = from; i < rd->n_bins; i++) {
-		as_bin_set_empty(&rd->bins[i]);
-	}
-}
-
-static inline void
-as_bin_set_all_empty(as_storage_rd *rd) {
-	as_bin_set_empty_from(rd, 0);
 }
 
 static inline bool
@@ -411,6 +369,14 @@ as_bin_get_particle_type(const as_bin *b) {
 	}
 }
 
+static inline void
+as_bin_destroy_all(as_bin* bins, uint32_t n_bins)
+{
+	for (uint32_t i = 0; i < n_bins; i++) {
+		as_bin_particle_destroy(&bins[i]);
+	}
+}
+
 
 /* Bin function declarations */
 extern int32_t as_bin_get_id(as_namespace *ns, const char *name);
@@ -418,19 +384,16 @@ extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, si
 extern const char* as_bin_get_name_from_id(const as_namespace *ns, uint16_t id);
 extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
 extern void as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from);
-extern int as_storage_rd_load_n_bins(as_storage_rd *rd);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
 extern void as_bin_get_all_p(as_storage_rd *rd, as_bin **bin_ptrs);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
-extern as_bin *as_bin_get_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len);
-extern as_bin *as_bin_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
+extern as_bin *as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len);
+extern as_bin *as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
 extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name);
-extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
-extern int32_t as_bin_get_index(as_storage_rd *rd, const char *name);
-extern int32_t as_bin_get_index_from_buf(as_storage_rd *rd, const uint8_t *name, size_t len);
-extern void as_bin_destroy(as_storage_rd *rd, uint16_t i);
-extern void as_bin_allocate_bin_space(as_storage_rd *rd, int32_t delta);
+extern as_bin *as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
+extern bool as_bin_pop(as_storage_rd* rd, const char* name, as_bin* bin);
+extern bool as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin* bin);
 
 
 typedef enum {
@@ -454,8 +417,6 @@ extern int as_record_exists(struct as_index_tree_s *tree, const cf_digest *keyd)
 extern int as_record_exists_live(struct as_index_tree_s *tree, const cf_digest *keyd, as_namespace *ns);
 extern void as_record_rescue(as_index_ref *r_ref, as_namespace *ns);
 
-extern void as_record_destroy_bins_from(as_storage_rd *rd, uint16_t from);
-extern void as_record_destroy_bins(as_storage_rd *rd);
 extern void as_record_free_bin_space(as_record *r);
 
 extern void as_record_destroy(as_record *r, as_namespace *ns);

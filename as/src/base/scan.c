@@ -1012,17 +1012,9 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL);
 	}
 	else {
-		if (as_storage_rd_load_n_bins(&rd) < 0) {
-			cf_warning(AS_SCAN, "job %lu - record unreadable", _job->trid);
-			as_storage_record_close(&rd);
-			as_record_done(r_ref, ns);
-			as_incr_uint64(&_job->n_failed);
-			return true;
-		}
+		as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
 
-		as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
-
-		if (as_storage_rd_load_bins(&rd, stack_bins)) {
+		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 			cf_warning(AS_SCAN, "job %lu - record unreadable", _job->trid);
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);

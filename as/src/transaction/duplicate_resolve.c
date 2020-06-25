@@ -40,6 +40,7 @@
 #include "node.h"
 
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "base/proto.h"
 #include "base/service.h"
 #include "base/transaction.h"

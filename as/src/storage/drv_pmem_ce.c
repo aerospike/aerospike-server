@@ -116,12 +116,6 @@ as_storage_record_close_pmem(as_storage_rd* rd)
 }
 
 int
-as_storage_record_load_n_bins_pmem(as_storage_rd* rd)
-{
-	pmem_crash_ce();
-}
-
-int
 as_storage_record_load_bins_pmem(as_storage_rd* rd)
 {
 	pmem_crash_ce();

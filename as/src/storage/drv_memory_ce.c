@@ -32,12 +32,11 @@ as_storage_start_tomb_raider_memory(as_namespace* ns)
 	// Tomb raider is for enterprise version only.
 }
 
-
 int
 as_storage_record_write_memory(as_storage_rd* rd)
 {
 	// Make a pickle if needed. (No pickle needed for drop.)
-	if (as_bin_inuse_has(rd) && rd->keep_pickle) {
+	if ((rd->pickle != NULL || rd->n_bins != 0) && rd->keep_pickle) {
 		as_flat_pickle_record(rd);
 	}
 

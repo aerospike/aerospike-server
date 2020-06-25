@@ -1232,29 +1232,10 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 //
 
 int
-as_storage_record_load_n_bins_ssd(as_storage_rd *rd)
-{
-	if (! as_record_is_live(rd->r)) {
-		rd->n_bins = 0;
-		return 0; // no need to read device
-	}
-
-	// If record hasn't been read, read it - sets rd->block_n_bins.
-	if (! rd->flat && ssd_read_record(rd, false) != 0) {
-		cf_warning(AS_DRV_SSD, "load_n_bins: failed ssd_read_record()");
-		return -AS_ERR_UNKNOWN;
-	}
-
-	rd->n_bins = rd->flat_n_bins;
-
-	return 0;
-}
-
-
-int
 as_storage_record_load_bins_ssd(as_storage_rd *rd)
 {
 	if (! as_record_is_live(rd->r)) {
+		rd->n_bins = 0;
 		return 0; // no need to read device
 	}
 
@@ -1265,8 +1246,14 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	return as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end,
+	int result = as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end,
 			rd->flat_n_bins, rd->bins);
+
+	if (result == AS_OK) {
+		rd->n_bins = rd->flat_n_bins;
+	}
+
+	return result;
 }
 
 
@@ -2438,104 +2425,70 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 			as_storage_record_open(ns, r, &rd);
 		}
 
-		as_storage_rd_load_n_bins(&rd);
 		as_storage_rd_load_bins(&rd, NULL);
 
 		uint64_t bytes_memory = as_storage_record_get_n_bytes_memory(&rd);
 
-		// Do this early since set-id is needed for the secondary index update.
-		drv_apply_opt_meta(r, ns, &opt_meta);
+		uint16_t n_old_bins = rd.n_bins;
+		as_bin* old_bins = rd.bins;
 
-		uint16_t old_n_bins = rd.n_bins;
+		uint16_t n_new_bins = (uint16_t)opt_meta.n_bins;
+		as_bin new_bins[n_new_bins];
 
-		bool has_sindex = record_has_sindex(r, ns);
-		int sbins_populated = 0;
+		rd.n_bins = 0;
+		rd.bins = new_bins;
 
-		if (has_sindex) {
-			SINDEX_GRLOCK();
-		}
-
-		SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
-		as_sindex* si_arr[2 * ns->sindex_cnt];
-		int si_arr_index = 0;
-		const char* set_name = as_index_get_set_name(r, ns);
-
-		if (has_sindex) {
-			for (uint16_t i = 0; i < old_n_bins; i++) {
-				si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns,
-						set_name, rd.bins[i].id, &si_arr[si_arr_index]);
-			}
-		}
-
-		int32_t delta_bins = (int32_t)opt_meta.n_bins - (int32_t)old_n_bins;
-
-		if (ns->single_bin) {
-			if (delta_bins < 0) {
-				as_record_destroy_bins(&rd);
-			}
-		}
-		else if (delta_bins != 0) {
-			if (has_sindex && delta_bins < 0) {
-				sbins_populated += as_sindex_sbins_from_rd(&rd,
-						(uint16_t)opt_meta.n_bins, old_n_bins, sbins,
-						AS_SINDEX_OP_DELETE);
-			}
-
-			as_bin_allocate_bin_space(&rd, delta_bins);
-		}
-
-		for (uint16_t i = 0; i < (uint16_t)opt_meta.n_bins; i++) {
-			as_bin* b;
+		for (uint16_t i = 0; i < n_new_bins; i++) {
 			size_t name_len = ns->single_bin ? 0 : *p_read++;
+			as_bin* b = as_bin_create_w_len(&rd, p_read, name_len, NULL);
 
-			if (i < old_n_bins) {
-				b = &rd.bins[i];
-
-				if (has_sindex) {
-					sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b,
-							&sbins[sbins_populated], AS_SINDEX_OP_DELETE);
-				}
-
-				if (! as_bin_set_id_from_name_w_len(ns, b, p_read, name_len)) {
-					// TODO - should maybe fail gracefully?
-					cf_crash(AS_DRV_SSD, "bin id assignment failed");
-				}
-			}
-			else {
-				b = as_bin_create_from_buf(&rd, p_read, name_len, NULL);
-
-				if (! b) {
-					// TODO - should maybe fail gracefully?
-					cf_crash(AS_DRV_SSD, "bin create failed");
-				}
+			if (b == NULL) {
+				cf_crash(AS_DRV_SSD, "bin create failed");
 			}
 
 			p_read += name_len;
+			p_read = as_bin_particle_alloc_from_flat(b, p_read, end);
 
-			if (! (p_read =
-					as_bin_particle_replace_from_flat(b, p_read, end))) {
-				// TODO - should maybe fail gracefully?
-				cf_crash(AS_DRV_SSD, "particle replace failed");
-			}
-
-			if (has_sindex) {
-				si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns,
-						set_name, b->id, &si_arr[si_arr_index]);
-				sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b,
-						&sbins[sbins_populated], AS_SINDEX_OP_INSERT);
+			if (p_read == NULL) {
+				cf_crash(AS_DRV_SSD, "particle alloc failed");
 			}
 		}
 
-		if (has_sindex) {
-			SINDEX_GRUNLOCK();
+		// Do this early since set-id is needed for the secondary index update.
+		drv_apply_opt_meta(r, ns, &opt_meta);
 
-			if (sbins_populated > 0) {
-				as_sindex_update_by_sbin(ns, as_index_get_set_name(r, ns),
-						sbins, sbins_populated, &r->keyd);
-				as_sindex_sbin_freeall(sbins, sbins_populated);
+		if (ns->single_bin) {
+			as_bin_destroy_all(old_bins, n_old_bins);
+			as_single_bin_copy(as_index_get_single_bin(r), new_bins);
+		}
+		else {
+			// Success - adjust sindex, looking at old and new bins.
+			if (record_has_sindex(r, ns)) {
+				write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
+						old_bins, n_old_bins, new_bins, n_new_bins);
 			}
 
-			as_sindex_release_arr(si_arr, si_arr_index);
+			as_bin_destroy_all(old_bins, n_old_bins);
+
+			// Fill out new_bin_space.
+			as_bin_space* new_bin_space = NULL;
+
+			if (n_new_bins != 0) {
+				new_bin_space = (as_bin_space*)
+						cf_malloc_ns(sizeof(as_bin_space) + sizeof(new_bins));
+
+				new_bin_space->n_bins = n_new_bins;
+				memcpy((void*)new_bin_space->bins, new_bins, sizeof(new_bins));
+			}
+
+			// Swizzle the index element's as_bin_space pointer.
+			as_bin_space* old_bin_space = as_index_get_bin_space(r);
+
+			if (old_bin_space != NULL) {
+				cf_free(old_bin_space);
+			}
+
+			as_index_set_bin_space(r, new_bin_space);
 		}
 
 		as_storage_record_adjust_mem_stats(&rd, bytes_memory);

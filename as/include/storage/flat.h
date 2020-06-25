@@ -184,8 +184,9 @@ N_RBLOCKS_TO_SIZE(uint32_t n_rblocks) {
 // Private API - for enterprise separation only.
 //
 
+uint32_t flat_record_overhead_size(const struct as_storage_rd_s* rd);
 uint8_t* flatten_record_meta(const struct as_storage_rd_s* rd, uint32_t n_rblocks, bool dirty, const as_flat_comp_meta* cm, as_flat_record* flat);
-uint16_t flatten_bins(const struct as_storage_rd_s* rd, uint8_t* buf, uint32_t* sz);
+void flatten_bins(const struct as_storage_rd_s* rd, uint8_t* buf, uint32_t* sz);
 
 uint8_t* flatten_compression_meta(const as_flat_comp_meta* cm, as_flat_record* flat, uint8_t* buf);
 const uint8_t* unflatten_compression_meta(const as_flat_record* flat, const uint8_t* at, const uint8_t* end, as_flat_comp_meta* cm);
