@@ -163,7 +163,21 @@ execute_failed(udf_record* urecord)
 	if (ns->storage_data_in_memory) {
 		write_dim_unwind(urecord->old_dim_bins, urecord->n_old_bins, rd->bins,
 				rd->n_bins, urecord->cleanup_bins, urecord->n_cleanup_bins);
+
+		rd->bins = urecord->old_dim_bins;
 	}
+	else {
+		rd->bins = urecord->old_ssd_bins;
+	}
+
+	rd->n_bins = urecord->n_old_bins;
+
+	if (urecord->particle_buf != NULL) {
+		cf_free(urecord->particle_buf);
+		urecord->particle_buf = NULL;
+	}
+
+	udf_record_cache_free(urecord);
 }
 
 static void
