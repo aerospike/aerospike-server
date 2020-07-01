@@ -751,6 +751,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 	if (tr->origin != FROM_IUDF && get_rv == 0 && as_record_is_live(r_ref.r) &&
 			(rv = build_predexp_and_filter_meta(tr, r_ref.r, &predexp)) != 0) {
+		as_record_done(&r_ref, ns);
 		tr->result_code = rv;
 		process_failure(call, NULL, &rw->response_db);
 		return UDF_OPTYPE_NONE;
