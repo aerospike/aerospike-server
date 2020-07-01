@@ -734,6 +734,11 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	if (tr->origin == FROM_IUDF &&
 			(get_rv == -1 || ! as_record_is_live(r_ref.r))) {
 		// Internal UDFs must not create records.
+
+		if (get_rv == 0) {
+			as_record_done(&r_ref, ns);
+		}
+
 		tr->result_code = AS_ERR_NOT_FOUND;
 		process_failure(call, NULL, &rw->response_db);
 		return UDF_OPTYPE_NONE;
