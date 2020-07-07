@@ -2983,8 +2983,7 @@ as_config_init(const char* config_file)
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
 				}
-				if (ns->storage_data_in_memory &&
-						! ns->storage_commit_to_device) {
+				if ((ns->storage_data_in_memory && ! ns->storage_commit_to_device) || ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
 					c->n_namespaces_inlined++;
 				}
 				else {
