@@ -114,7 +114,6 @@ aopen(aggr_state *astate, const cf_digest *digest)
 	as_transaction * tr     = urecord->tr;
 
 	int pid                = as_partition_getid(digest);
-	urecord->keyd = *digest;
 
 	astate->rsv        = ptn_reserve(astate, pid, &tr->rsv);
 	if (!astate->rsv) {
@@ -127,7 +126,7 @@ aopen(aggr_state *astate, const cf_digest *digest)
 	tr->rsv.ns          = astate->rsv->ns;
 	tr->rsv.p           = astate->rsv->p;
 	tr->rsv.tree        = astate->rsv->tree;
-	tr->keyd            = urecord->keyd;
+	tr->keyd            = *digest;
 
 	if (udf_record_open(urecord) == 0) {
 		astate->rec_open   = true;
@@ -290,7 +289,7 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 	urecord.tr      = &tr;
 	urecord.r_ref   = &r_ref;
 	urecord.rd      = &rd;
-	as_rec   * urec = as_rec_new(&urecord, &udf_record_hooks);
+	as_rec   * urec = as_rec_new(&urecord, &as_aggr_record_hooks);
 
 	aggr_state astate = {
 		.iter            = cf_ll_getIterator(ap_recl, true /*forward*/),

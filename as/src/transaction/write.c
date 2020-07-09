@@ -870,12 +870,6 @@ write_master_preprocessing(as_transaction* tr)
 		return false;
 	}
 
-	if (! as_storage_has_space(ns)) {
-		cf_warning(AS_RW, "{%s}: write_master: drives full", ns->name);
-		write_master_failed(tr, 0, false, 0, 0, AS_ERR_OUT_OF_SPACE);
-		return false;
-	}
-
 	if (! is_valid_ttl(m->record_ttl)) {
 		cf_warning(AS_RW, "write_master: invalid ttl %u", m->record_ttl);
 		write_master_failed(tr, 0, false, 0, 0, AS_ERR_PARAMETER);

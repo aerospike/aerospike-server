@@ -3546,13 +3546,6 @@ as_storage_record_close_ssd(as_storage_rd *rd)
 //		as_storage_particle_read_and_size_all_ssd()
 
 
-bool
-as_storage_record_size_and_check_ssd(const as_storage_rd *rd)
-{
-	return rd->ns->storage_write_block_size >= as_flat_record_size(rd);
-}
-
-
 //==========================================================
 // Storage API implementation: storage capacity monitoring.
 //
@@ -3594,27 +3587,6 @@ as_storage_overloaded_ssd(const as_namespace *ns)
 	}
 
 	return false;
-}
-
-
-bool
-as_storage_has_space_ssd(const as_namespace *ns)
-{
-	// Shortcut - assume we can't go from 5% to 0% in 1 ticker interval.
-	if (ns->storage_last_avail_pct > 5) {
-		return true;
-	}
-	// else - running low on available percent, check rigorously...
-
-	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
-
-	for (int i = 0; i < ssds->n_ssds; i++) {
-		if (num_free_wblocks(&ssds->ssds[i]) < drv_min_free_wblocks()) {
-			return false;
-		}
-	}
-
-	return true;
 }
 
 
@@ -3785,10 +3757,6 @@ as_storage_stats_ssd(as_namespace *ns, int *available_pct, uint64_t *used_bytes)
 				*available_pct = pct;
 			}
 		}
-
-		// Used for shortcut in as_storage_has_space_ssd(), which is done on a
-		// per-transaction basis:
-		ns->storage_last_avail_pct = *available_pct;
 	}
 
 	if (used_bytes) {

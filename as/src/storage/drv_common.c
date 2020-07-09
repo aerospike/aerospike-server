@@ -29,33 +29,16 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <sys/types.h>
 #include <unistd.h>
 
-#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "fabric/fabric.h"
 #include "storage/flat.h"
 
 
 //==========================================================
 // Public API - shared code between storage engines.
 //
-
-// Since UDF writes can't yet unwind on failure, we ensure that they'll succeed
-// by checking before writing on all threads that there's at least one wblock
-// per thread. TODO - deprecate this methodology when everything can unwind.
-uint32_t
-drv_min_free_wblocks(void)
-{
-	return g_config.n_service_threads + 	// client writes
-			g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW] + // prole writes
-			g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK] + // migration writes
-			1 +								// always 1 defrag thread
-			DRV_DEFRAG_RUNTIME_RESERVE +	// reserve for defrag at runtime
-			DRV_DEFRAG_STARTUP_RESERVE;		// reserve for defrag at startup
-}
 
 bool
 drv_is_set_evictable(const as_namespace* ns, const as_flat_opt_meta* opt_meta)

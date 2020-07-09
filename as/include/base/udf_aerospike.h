@@ -1,7 +1,7 @@
 /*
  * udf_aerospike.h
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -21,7 +21,16 @@
  */
 
 #pragma once
- 
+
+//==========================================================
+// Includes.
+//
+
 #include "aerospike/as_aerospike.h"
 
-extern const   as_aerospike_hooks udf_aerospike_hooks;
+
+//==========================================================
+// Public API - aerospike: hooks.
+//
+
+extern const as_aerospike_hooks udf_aerospike_hooks;

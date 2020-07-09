@@ -403,27 +403,6 @@ as_storage_record_load_pickle(as_storage_rd *rd)
 }
 
 //--------------------------------------
-// as_storage_record_size_and_check
-//
-
-typedef bool (*as_storage_record_size_and_check_fn)(const as_storage_rd *rd);
-static const as_storage_record_size_and_check_fn as_storage_record_size_and_check_table[AS_NUM_STORAGE_ENGINES] = {
-	NULL, // no limit if no persistent storage - flat size is irrelevant
-	as_storage_record_size_and_check_pmem,
-	as_storage_record_size_and_check_ssd
-};
-
-bool
-as_storage_record_size_and_check(const as_storage_rd *rd)
-{
-	if (as_storage_record_size_and_check_table[rd->ns->storage_type]) {
-		return as_storage_record_size_and_check_table[rd->ns->storage_type](rd);
-	}
-
-	return true;
-}
-
-//--------------------------------------
 // as_storage_record_write
 //
 
@@ -486,27 +465,6 @@ as_storage_overloaded(const as_namespace *ns)
 	}
 
 	return false;
-}
-
-//--------------------------------------
-// as_storage_has_space
-//
-
-typedef bool (*as_storage_has_space_fn)(const as_namespace *ns);
-static const as_storage_has_space_fn as_storage_has_space_table[AS_NUM_STORAGE_ENGINES] = {
-	NULL, // memory has no space check
-	as_storage_has_space_pmem,
-	as_storage_has_space_ssd
-};
-
-bool
-as_storage_has_space(const as_namespace *ns)
-{
-	if (as_storage_has_space_table[ns->storage_type]) {
-		return as_storage_has_space_table[ns->storage_type](ns);
-	}
-
-	return true;
 }
 
 //--------------------------------------

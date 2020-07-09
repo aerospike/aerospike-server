@@ -322,10 +322,10 @@ as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
 
 
 as_bin *
-as_bin_get_or_create(as_storage_rd *rd, const char *name)
+as_bin_get_or_create(as_storage_rd *rd, const char *name, int *result)
 {
 	return as_bin_get_or_create_w_len(rd, (const uint8_t *)name, strlen(name),
-			NULL);
+			result);
 }
 
 

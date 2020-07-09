@@ -26,6 +26,7 @@
 // Includes.
 //
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "aerospike/as_aerospike.h"
@@ -49,31 +50,23 @@ struct predexp_eval_base_s;
 // Typedefs & constants.
 //
 
-typedef enum {
-	UDF_OPTYPE_NONE,
-	UDF_OPTYPE_WAITING,
-	UDF_OPTYPE_READ,
-	UDF_OPTYPE_WRITE,
-	UDF_OPTYPE_DELETE
-} udf_optype;
-
 #define UDF_MAX_STRING_SZ 128
 
 typedef struct udf_def_s {
-	char			filename[UDF_MAX_STRING_SZ];
-	char			function[UDF_MAX_STRING_SZ];
-	as_list*		arglist;
-	uint8_t			type;
+	char filename[UDF_MAX_STRING_SZ];
+	char function[UDF_MAX_STRING_SZ];
+	as_list* arglist;
+	uint8_t type;
 } udf_def;
 
 typedef void (*iudf_cb)(void* udata, int result);
 
 typedef struct iudf_origin_s {
-	udf_def			def;
+	udf_def def;
 	struct cl_msg_s* msgp;
-	struct predexp_eval_base_s*	predexp;
-	iudf_cb			cb;
-	void*			udata;
+	struct predexp_eval_base_s* predexp;
+	iudf_cb cb;
+	void* udata;
 } iudf_origin;
 
 
@@ -93,8 +86,6 @@ iudf_origin_destroy(iudf_origin* origin)
 }
 
 void as_udf_init();
-udf_def* udf_def_init_from_msg(udf_def* def, const struct as_transaction_s* tr);
+bool udf_def_init_from_msg(udf_def* def, const struct as_transaction_s* tr);
 
 transaction_status as_udf_start(struct as_transaction_s* tr);
-
-extern as_aerospike g_as_aerospike;

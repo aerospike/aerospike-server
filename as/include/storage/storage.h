@@ -176,13 +176,11 @@ void as_storage_record_close(as_storage_rd *rd);
 int as_storage_record_load_bins(as_storage_rd *rd);
 bool as_storage_record_load_key(as_storage_rd *rd);
 bool as_storage_record_load_pickle(as_storage_rd *rd);
-bool as_storage_record_size_and_check(const as_storage_rd *rd);
 int as_storage_record_write(as_storage_rd *rd);
 
 // Storage capacity monitoring.
 void as_storage_wait_for_defrag();
 bool as_storage_overloaded(const struct as_namespace_s *ns); // returns true if write queue is too backed up
-bool as_storage_has_space(const struct as_namespace_s *ns);
 void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
 // Storage of generic data into device headers.
@@ -250,12 +248,10 @@ void as_storage_record_close_ssd(as_storage_rd *rd);
 int as_storage_record_load_bins_ssd(as_storage_rd *rd);
 bool as_storage_record_load_key_ssd(as_storage_rd *rd);
 bool as_storage_record_load_pickle_ssd(as_storage_rd *rd);
-bool as_storage_record_size_and_check_ssd(const as_storage_rd *rd);
 int as_storage_record_write_ssd(as_storage_rd *rd);
 
 void as_storage_wait_for_defrag_ssd(struct as_namespace_s *ns);
 bool as_storage_overloaded_ssd(const struct as_namespace_s *ns);
-bool as_storage_has_space_ssd(const struct as_namespace_s *ns);
 void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
 void as_storage_load_regime_ssd(struct as_namespace_s *ns);
@@ -295,12 +291,10 @@ void as_storage_record_close_pmem(as_storage_rd *rd);
 int as_storage_record_load_bins_pmem(as_storage_rd *rd);
 bool as_storage_record_load_key_pmem(as_storage_rd *rd);
 bool as_storage_record_load_pickle_pmem(as_storage_rd* rd);
-bool as_storage_record_size_and_check_pmem(const as_storage_rd* rd);
 int as_storage_record_write_pmem(as_storage_rd *rd);
 
 void as_storage_wait_for_defrag_pmem(struct as_namespace_s *ns);
 bool as_storage_overloaded_pmem(const struct as_namespace_s *ns);
-bool as_storage_has_space_pmem(const struct as_namespace_s *ns);
 void as_storage_defrag_sweep_pmem(struct as_namespace_s *ns);
 
 void as_storage_load_regime_pmem(struct as_namespace_s *ns);

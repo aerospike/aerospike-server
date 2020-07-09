@@ -390,7 +390,7 @@ extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len);
 extern as_bin *as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
-extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name);
+extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name, int *result);
 extern as_bin *as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
 extern bool as_bin_pop(as_storage_rd* rd, const char* name, as_bin* bin);
 extern bool as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin* bin);
@@ -647,7 +647,6 @@ struct as_namespace_s {
 	void*			storage_private;
 
 	uint64_t		drive_size; // discovered (and rounded) size of drive
-	int				storage_last_avail_pct; // most recently calculated available percent
 	uint32_t		storage_max_write_q; // storage_max_write_cache is converted to this
 	cf_atomic32		n_wblocks_to_flush; // on write queues or shadow queues
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done

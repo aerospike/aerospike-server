@@ -1,7 +1,7 @@
 /*
  * udf_record.h
  *
- * Copyright (C) 2013-2015 Aerospike, Inc.
+ * Copyright (C) 2013-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,6 +22,10 @@
 
 #pragma once
 
+//==========================================================
+// Includes.
+//
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -36,86 +40,69 @@
 #include "storage/storage.h"
 
 
+//==========================================================
+// Typedefs & constants.
+//
+
 // Maximum number of bins that can be updated in a single UDF.
 #define UDF_RECORD_BIN_ULIMIT 512
 
 typedef struct udf_record_bin_s {
-	char				name[AS_BIN_NAME_MAX_SZ];
-	as_val *			value;
-	bool				dirty;
+	char name[AS_BIN_NAME_MAX_SZ];
+	as_val* value;
+	bool dirty;
 } udf_record_bin;
 
 typedef struct udf_record_s {
+	as_transaction* tr;
+	as_index_ref* r_ref;
+	as_storage_rd* rd;
 
-	// STORAGE
-	as_index_ref 		*r_ref;
-	as_transaction 		*tr;
-	as_storage_rd 		*rd;
-	cf_digest			keyd;
+	bool is_open;
+	bool too_many_bins;
+	bool has_updates;
 
-	as_bin				new_bins[UDF_RECORD_BIN_ULIMIT]; // also working bins for read-only UDFs
+	uint8_t result_code; // only set when we fail execute_updates()
+	uint64_t old_memory_bytes; // DIM only
 
-	uint32_t			n_old_bins;
-	uint32_t			n_cleanup_bins;
+	// Non-DIM only.
+	uint8_t* particle_buf;
+	size_t buf_size;
+	size_t buf_offset;
 
-	as_bin				*old_dim_bins; // pointer to original DIM record's bins
+	as_bin stack_bins[UDF_RECORD_BIN_ULIMIT]; // new bins if writing
+
+	uint32_t n_old_bins;
+	uint32_t n_cleanup_bins; // DIM only
+
+	as_bin* old_dim_bins; // pointer to original DIM bins
 
 	union {
-		as_bin			old_ssd_bins[UDF_RECORD_BIN_ULIMIT]; // non-DIM, for sindex purposes only
-		as_bin			cleanup_bins[UDF_RECORD_BIN_ULIMIT]; // for DIM only
+		as_bin old_ssd_bins[UDF_RECORD_BIN_ULIMIT]; // non-DIM sindex only
+		as_bin cleanup_bins[UDF_RECORD_BIN_ULIMIT]; // DIM only
 	};
 
-	// UDF CHANGE CACHE
-	udf_record_bin		updates[UDF_RECORD_BIN_ULIMIT]; // stores cache bin value
-                                                        // if dirty flag is set the bin is being modified
-	uint32_t			nupdates; // reset after every cache free, incremented in every cache set
-
-	// RUNTIME ACCOUNTING
-	uint8_t				*particle_buf; // non-null for data-on-ssd, and lazy allocated on first bin write
-	size_t				buf_size;
-	size_t				buf_offset;
-	uint32_t			starting_memory_bytes;
-	cf_atomic_int		udf_runtime_memory_used;
-
-	// INTERNAL UTILITY
-	uint16_t			flag;
-
-	// PICKLE MADE BY STORAGE WRITE
-	// Note - must survive udf_record_close() to convey pickle to rw_request.
-	uint8_t				*pickle;
-	uint32_t			pickle_sz;
+	uint32_t n_updates;
+	udf_record_bin updates[UDF_RECORD_BIN_ULIMIT]; // cached bin as_val values
 } udf_record;
 
-#define UDF_RECORD_FLAG_ALLOW_UPDATES		0x0001   // Write/Updates Allowed
-#define UDF_RECORD_FLAG_TOO_MANY_BINS		0x0002   // UDF exceeds the bin limit
-#define UDF_RECORD_FLAG_UNUSED_4			0x0004   // was - sub-record
-#define UDF_RECORD_FLAG_OPEN				0x0008   // as_record_open done
-#define UDF_RECORD_FLAG_STORAGE_OPEN		0x0010   // as_storage_record_open done
-#define UDF_RECORD_FLAG_HAS_UPDATES			0x0020   // Write/Update done
-#define UDF_RECORD_FLAG_PREEXISTS			0x0040   // Record preexisted not created
-#define UDF_RECORD_FLAG_ISVALID				0x0080   // Udf is setup and in use
+
+//==========================================================
+// Public API.
+//
+
+void udf_record_init(udf_record* urecord, bool allow_updates);
+
+void udf_record_cache_free(udf_record* urecord);
+void udf_record_cache_set(udf_record* urecord, const char* name, as_val* value, bool dirty);
+
+int udf_record_open(udf_record* urecord);
+void udf_record_close(udf_record* urecord);
+
+
+//==========================================================
+// Public API - rec hooks.
+//
 
 extern const as_rec_hooks udf_record_hooks;
-
-//------------------------------------------------
-// Utility functions for all the wrapper as_record implementation
-// which use udf_record under the hood
-extern void     udf_record_cache_free   (udf_record *);
-extern void     udf_record_cache_set    (udf_record *, const char *, as_val *, bool);
-extern int      udf_record_open         (udf_record *);
-extern int      udf_storage_record_open (udf_record *);
-extern void     udf_record_close        (udf_record *);
-extern int      udf_storage_record_close(udf_record *);
-extern void     udf_record_init         (udf_record *, bool);
-extern as_val * udf_record_storage_get  (const udf_record *, const char *);
-
-#define UDF_ERR_INTERNAL_PARAMETER   2
-#define UDF_ERR_RECORD_NOT_VALID     3
-#define UDF_ERR_PARAMETER            4
-extern int      udf_record_param_check(const as_rec *rec, char *fname, int lineno);
-extern bool     udf_record_destroy(as_rec *rec);
-
-//------------------------------------------------
-// Note that the main interface routines do NOT get declared here.
-// extern int      udf_record_set_flags(const as_rec *, const char *, uint8_t);
-// extern int      udf_record_set_type(const as_rec *,  int8_t);
+extern const as_rec_hooks as_aggr_record_hooks;

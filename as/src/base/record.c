@@ -269,11 +269,6 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 {
 	as_namespace *ns = rr->rsv->ns;
 
-	if (! as_storage_has_space(ns)) {
-		cf_warning(AS_RECORD, "{%s} record replace: drives full", ns->name);
-		return AS_ERR_OUT_OF_SPACE;
-	}
-
 	CF_ALLOC_SET_NS_ARENA(ns);
 
 	as_index_tree *tree = rr->rsv->tree;

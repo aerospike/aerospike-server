@@ -133,12 +133,6 @@ as_storage_record_load_pickle_pmem(as_storage_rd* rd)
 	pmem_crash_ce();
 }
 
-bool
-as_storage_record_size_and_check_pmem(const as_storage_rd* rd)
-{
-	pmem_crash_ce();
-}
-
 int
 as_storage_record_write_pmem(as_storage_rd* rd)
 {
@@ -153,12 +147,6 @@ as_storage_wait_for_defrag_pmem(as_namespace* ns)
 
 bool
 as_storage_overloaded_pmem(const as_namespace* ns)
-{
-	pmem_crash_ce();
-}
-
-bool
-as_storage_has_space_pmem(const as_namespace* ns)
 {
 	pmem_crash_ce();
 }
