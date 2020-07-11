@@ -847,7 +847,7 @@ open_existing_record(udf_record* urecord)
 		return AS_ERR_UNKNOWN;
 	}
 
-	if (rd->n_bins > UDF_RECORD_BIN_ULIMIT) {
+	if (rd->n_bins > UDF_BIN_LIMIT) {
 		cf_warning(AS_UDF, "too many bins (%d) for UDF", rd->n_bins);
 		predexp_destroy(predexp);
 		return AS_ERR_BIN_NAME;

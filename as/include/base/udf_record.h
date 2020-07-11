@@ -44,8 +44,11 @@
 // Typedefs & constants.
 //
 
-// Maximum number of bins that can be updated in a single UDF.
-#define UDF_RECORD_BIN_ULIMIT 512
+// UDFs cannot be applied to records with more than this many bins.
+#define UDF_BIN_LIMIT 512
+
+// Maximum number of updates that can be cached.
+#define UDF_UPDATE_LIMIT (UDF_BIN_LIMIT * 2)
 
 typedef struct udf_record_bin_s {
 	char name[AS_BIN_NAME_MAX_SZ];
@@ -70,7 +73,7 @@ typedef struct udf_record_s {
 	size_t buf_size;
 	size_t buf_offset;
 
-	as_bin stack_bins[UDF_RECORD_BIN_ULIMIT]; // new bins if writing
+	as_bin stack_bins[UDF_BIN_LIMIT]; // new bins if writing
 
 	uint32_t n_old_bins;
 	uint32_t n_cleanup_bins; // DIM only
@@ -78,12 +81,13 @@ typedef struct udf_record_s {
 	as_bin* old_dim_bins; // pointer to original DIM bins
 
 	union {
-		as_bin old_ssd_bins[UDF_RECORD_BIN_ULIMIT]; // non-DIM sindex only
-		as_bin cleanup_bins[UDF_RECORD_BIN_ULIMIT]; // DIM only
+		as_bin old_ssd_bins[UDF_BIN_LIMIT]; // non-DIM sindex only
+		as_bin cleanup_bins[UDF_BIN_LIMIT]; // DIM only
 	};
 
+	uint32_t n_inserts; // updates that are not deletes
 	uint32_t n_updates;
-	udf_record_bin updates[UDF_RECORD_BIN_ULIMIT]; // cached bin as_val values
+	udf_record_bin updates[UDF_UPDATE_LIMIT]; // cached bin (as_val) values
 } udf_record;
 
 
@@ -95,6 +99,7 @@ void udf_record_init(udf_record* urecord, bool allow_updates);
 
 void udf_record_cache_free(udf_record* urecord);
 void udf_record_cache_set(udf_record* urecord, const char* name, as_val* value, bool dirty);
+void udf_record_cache_reclaim(udf_record* urecord, uint32_t i);
 
 int udf_record_open(udf_record* urecord);
 void udf_record_close(udf_record* urecord);
