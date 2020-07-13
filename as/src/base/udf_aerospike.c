@@ -337,6 +337,7 @@ execute_updates(udf_record* urecord)
 
 			if (val == NULL || val->type == AS_NIL) {
 				execute_delete_bin(urecord, name);
+				udf_record_cache_reclaim(urecord, i--); // decrements n_updates
 			}
 			else {
 				int rv = execute_set_bin(urecord, i, name, val);
@@ -445,8 +446,8 @@ execute_set_bin(udf_record* urecord, uint32_t ix, const char* name,
 		return AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
-	if (rd->n_bins == UDF_RECORD_BIN_ULIMIT && as_bin_get(rd, name) == NULL) {
-		cf_warning(AS_UDF, "exceeded UDF max bins %d", UDF_RECORD_BIN_ULIMIT);
+	if (rd->n_bins == UDF_BIN_LIMIT && as_bin_get(rd, name) == NULL) {
+		cf_warning(AS_UDF, "exceeded UDF max bins %d", UDF_BIN_LIMIT);
 		return AS_ERR_BIN_NAME;
 	}
 

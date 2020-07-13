@@ -143,6 +143,7 @@ udf_record_init(udf_record* urecord, bool allow_updates)
 
 	urecord->n_old_bins = 0;
 	urecord->n_cleanup_bins = 0;
+	urecord->n_inserts = 0;
 	urecord->n_updates = 0;
 }
 
@@ -158,6 +159,7 @@ udf_record_cache_free(udf_record* urecord)
 		}
 	}
 
+	urecord->n_inserts = 0;
 	urecord->n_updates = 0;
 	urecord->too_many_bins = false;
 }
@@ -166,18 +168,39 @@ void
 udf_record_cache_set(udf_record* urecord, const char* name, as_val* value,
 		bool dirty)
 {
+	if (urecord->too_many_bins) {
+		return;
+	}
+
+	bool is_insert = value != NULL && value->type != AS_NIL;
+
 	for (uint32_t i = 0; i < urecord->n_updates; i++) {
 		udf_record_bin* bin = &urecord->updates[i];
 
 		if (strcmp(name, bin->name) == 0) {
-			as_val_destroy(bin->value);
+			if (bin->value != NULL && bin->value->type != AS_NIL) {
+				urecord->n_inserts--;
+			}
+
+			as_val_destroy(bin->value); // handles NULL and nil
 			bin->value = (as_val*)value;
 			bin->dirty = dirty;
+
+			if (is_insert) {
+				urecord->n_inserts++;
+			}
+
 			return;
 		}
 	}
 
-	if (urecord->n_updates >= UDF_RECORD_BIN_ULIMIT) {
+	if (urecord->n_updates >= UDF_UPDATE_LIMIT) {
+		cf_warning(AS_UDF, "too many bin updates for UDF");
+		urecord->too_many_bins = true;
+		return;
+	}
+
+	if (is_insert && urecord->n_inserts >= UDF_BIN_LIMIT) {
 		cf_warning(AS_UDF, "too many bins for UDF");
 		urecord->too_many_bins = true;
 		return;
@@ -190,6 +213,22 @@ udf_record_cache_set(udf_record* urecord, const char* name, as_val* value,
 	bin->dirty = dirty;
 
 	urecord->n_updates++;
+
+	if (is_insert) {
+		urecord->n_inserts++;
+	}
+}
+
+void
+udf_record_cache_reclaim(udf_record* urecord, uint32_t i)
+{
+	// Note - value removed is NULL/nil so does not need to be destroyed.
+
+	urecord->n_updates--;
+
+	if (i < urecord->n_updates) {
+		urecord->updates[i] = urecord->updates[urecord->n_updates];
+	}
 }
 
 int
@@ -224,7 +263,7 @@ udf_record_open(udf_record* urecord)
 		return -1;
 	}
 
-	if (rd->n_bins > UDF_RECORD_BIN_ULIMIT) {
+	if (rd->n_bins > UDF_BIN_LIMIT) {
 		cf_warning(AS_UDF, "too many bins (%d) for UDF", rd->n_bins);
 		as_storage_record_close(rd);
 		as_record_done(r_ref, ns);
