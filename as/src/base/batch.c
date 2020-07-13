@@ -810,7 +810,7 @@ as_batch_queue_task(as_transaction* btr)
 	}
 
 	// Check that the socket is authenticated.
-	uint8_t result = as_security_check(btr->from.proto_fd_h, PERM_NONE);
+	uint8_t result = as_security_check_auth(btr->from.proto_fd_h);
 
 	if (result != AS_OK) {
 		as_security_log(btr->from.proto_fd_h, result, PERM_NONE, NULL, NULL);

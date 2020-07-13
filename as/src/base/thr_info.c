@@ -4594,7 +4594,7 @@ info_command	*command_head = 0;
 int
 info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 {
-	uint8_t auth_result = as_security_check(fd_h, PERM_NONE);
+	uint8_t auth_result = as_security_check_auth(fd_h);
 
 	if (auth_result != AS_OK) {
 		as_security_log(fd_h, auth_result, PERM_NONE, "info-all request", NULL);
@@ -4636,7 +4636,7 @@ info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 int
 info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 {
-	uint8_t auth_result = as_security_check(fd_h, PERM_NONE);
+	uint8_t auth_result = as_security_check_auth(fd_h);
 
 	if (auth_result != AS_OK) {
 		// TODO - log null-terminated buf as detail?
@@ -4743,7 +4743,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 					cf_dyn_buf_append_string( db, param);
 					cf_dyn_buf_append_char( db, SEP );
 
-					uint8_t result = as_security_check(fd_h, cmd->required_perm);
+					uint8_t result = as_security_check_info_cmd(fd_h, name, param, cmd->required_perm);
 
 					as_security_log(fd_h, result, cmd->required_perm, name, param);
 
@@ -6753,7 +6753,7 @@ as_info_init()
 	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-skew", info_command_dump_skew, PERM_LOGGING_CTRL);              // Print information about clock skew
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
-	as_info_set_command("eviction-reset", info_command_eviction_reset, PERM_TRUNCATE);        // Delete or manually set SMD evict-void-time.
+	as_info_set_command("eviction-reset", info_command_eviction_reset, PERM_EVICT_MANAGE);    // Delete or manually set SMD evict-void-time.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
 	as_info_set_command("get-stats", info_command_get_stats, PERM_NONE);                      // Returns statistics for a particular context.

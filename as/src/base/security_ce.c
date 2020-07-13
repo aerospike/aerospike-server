@@ -54,9 +54,17 @@ as_security_init(void)
 {
 }
 
-// Security is an enterprise feature - here, allow all operations.
+// Security is an enterprise feature - here, authenticate all.
 uint8_t
-as_security_check(const as_file_handle* fd_h, as_sec_perm perm)
+as_security_check_auth(const as_file_handle* fd_h)
+{
+	return AS_OK;
+}
+
+// Security is an enterprise feature - here, allow all commands.
+uint8_t
+as_security_check_info_cmd(const as_file_handle* fd_h, const char* cmd,
+		const char* params, as_sec_perm perm)
 {
 	return AS_OK;
 }

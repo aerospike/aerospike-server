@@ -67,7 +67,8 @@ typedef enum {
 	PERM_QUERY_MANAGE	= 0x00080000,
 	PERM_JOB_MONITOR	= 0x00100000,
 	PERM_TRUNCATE		= 0x00200000,
-	// ... 2 unused bits ...
+	PERM_EVICT_MANAGE	= 0x00400000,
+	// ... 1 unused bit ...
 
 	// Deployment operations management.
 	PERM_SET_CONFIG		= 0x01000000,
@@ -99,7 +100,8 @@ typedef struct as_sec_msg_s {
 //
 
 void as_security_init(void);
-uint8_t as_security_check(const struct as_file_handle_s* fd_h, as_sec_perm perm);
+uint8_t as_security_check_auth(const struct as_file_handle_s* fd_h);
+uint8_t as_security_check_info_cmd(const struct as_file_handle_s* fd_h, const char* cmd, const char* params, as_sec_perm perm);
 bool as_security_check_data_op(struct as_transaction_s* tr, struct as_namespace_s* ns, as_sec_perm perm);
 void* as_security_filter_create(void);
 void as_security_filter_destroy(void* pv_filter);

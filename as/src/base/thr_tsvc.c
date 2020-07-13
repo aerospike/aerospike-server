@@ -131,7 +131,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	// Check that the socket is authenticated.
 	if (tr->origin == FROM_CLIENT) {
-		uint8_t result = as_security_check(tr->from.proto_fd_h, PERM_NONE);
+		uint8_t result = as_security_check_auth(tr->from.proto_fd_h);
 
 		if (result != AS_OK) {
 			as_security_log(tr->from.proto_fd_h, result, PERM_NONE, NULL, NULL);
