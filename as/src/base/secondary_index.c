@@ -476,11 +476,6 @@ as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 		return AS_SINDEX_ERR;
 	}
 
-	if(!as_bin_name_within_quota(ns, imd->bname)) {
-		cf_warning(AS_SINDEX, "Bin %s not added. Quota is full", imd->bname);
-		return AS_SINDEX_ERR;
-	}
-
 	uint16_t id;
 
 	if (! as_bin_get_or_assign_id_w_len(ns, imd->bname, len, &id)) {

@@ -597,7 +597,10 @@ read_local(as_transaction* tr)
 	if ((m->info1 & AS_MSG_INFO1_GET_ALL) != 0) {
 		p_ops = NULL;
 		n_bins = rd.n_bins;
-		as_bin_get_all_p(&rd, response_bins);
+
+		for (uint16_t i = 0; i < rd.n_bins; i++) {
+			response_bins[i] = &rd.bins[i];
+		}
 	}
 	else {
 		if (m->n_ops == 0) {

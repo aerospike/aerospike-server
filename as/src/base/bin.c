@@ -45,7 +45,7 @@
 //
 
 static inline void
-as_bin_init_nameless(as_bin *b)
+as_bin_init_nameless(as_bin* b)
 {
 	as_bin_state_set(b, AS_BIN_STATE_UNUSED);
 	b->particle = NULL;
@@ -53,22 +53,22 @@ as_bin_init_nameless(as_bin *b)
 	// as_index if single-bin, data-in-memory.
 }
 
-static inline as_bin_space *
-safe_bin_space(const as_record *r)
+static inline as_bin_space*
+safe_bin_space(const as_record* r)
 {
 	return r->dim ? as_index_get_bin_space(r) : NULL;
 }
 
 static inline uint16_t
-safe_n_bins(const as_record *r)
+safe_n_bins(const as_record* r)
 {
 	as_bin_space* bin_space = safe_bin_space(r);
 
 	return bin_space ? bin_space->n_bins : 0;
 }
 
-static inline as_bin *
-safe_bins(const as_record *r)
+static inline as_bin*
+safe_bins(const as_record* r)
 {
 	as_bin_space* bin_space = safe_bin_space(r);
 
@@ -80,9 +80,20 @@ safe_bins(const as_record *r)
 // Public API.
 //
 
-// Caller-beware, name cannot be null, must be null-terminated.
+// Can't inline - compiler warns of as_bin members we don't want to initialize.
+void
+as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from)
+{
+	if (ns->single_bin) {
+		as_single_bin_copy(to, from);
+	}
+	else {
+		*to = *from;
+	}
+}
+
 int32_t
-as_bin_get_id(as_namespace *ns, const char *name)
+as_bin_get_id(const as_namespace* ns, const char* name)
 {
 	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
 
@@ -95,10 +106,9 @@ as_bin_get_id(as_namespace *ns, const char *name)
 	return -1;
 }
 
-
 bool
-as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len,
-		uint16_t *id)
+as_bin_get_or_assign_id_w_len(as_namespace* ns, const char* name, size_t len,
+		uint16_t* id)
 {
 	// May later replace with assert if we never call with single-bin.
 	if (ns->single_bin) {
@@ -119,14 +129,14 @@ as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len,
 			len, &idx);
 
 	if (result == CF_VMAPX_ERR_FULL) {
-		cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %.*s",
+		cf_warning(AS_BIN, "{%s} bin name quota full - can't add %.*s",
 				ns->name, (uint32_t)len, name);
 		return false;
 	}
 
 	if (! (result == CF_VMAPX_OK || result == CF_VMAPX_ERR_NAME_EXISTS)) {
-		cf_warning(AS_BIN, "{%s} vmap err %d - can't add new bin-name %.*s",
-				ns->name, result, (uint32_t)len, name);
+		cf_warning(AS_BIN, "vmap err %d - can't add new bin name '%.*s'",
+				result, (uint32_t)len, name);
 		return false;
 	}
 
@@ -135,9 +145,8 @@ as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len,
 	return true;
 }
 
-
-const char *
-as_bin_get_name_from_id(const as_namespace *ns, uint16_t id)
+const char*
+as_bin_get_name_from_id(const as_namespace* ns, uint16_t id)
 {
 	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
 
@@ -151,39 +160,6 @@ as_bin_get_name_from_id(const as_namespace *ns, uint16_t id)
 
 	return name;
 }
-
-
-bool
-as_bin_name_within_quota(as_namespace *ns, const char *name)
-{
-	// Won't exceed quota if single-bin or currently below quota.
-	if (ns->single_bin || cf_vmapx_count(ns->p_bin_name_vmap) < MAX_BIN_NAMES) {
-		return true;
-	}
-
-	// Won't exceed quota if name is found (and so would NOT be added to vmap).
-	if (cf_vmapx_get_index(ns->p_bin_name_vmap, name, NULL) == CF_VMAPX_OK) {
-		return true;
-	}
-
-	cf_warning(AS_BIN, "{%s} bin-name quota full - can't add new bin-name %s",
-			ns->name, name);
-
-	return false;
-}
-
-
-void
-as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from)
-{
-	if (ns->single_bin) {
-		as_single_bin_copy(to, from);
-	}
-	else {
-		*to = *from;
-	}
-}
-
 
 // - Seems like an as_storage_record method, but leaving it here for now.
 // - sets rd->bins and rd->n_bins!
@@ -219,21 +195,11 @@ as_storage_rd_load_bins(as_storage_rd* rd, as_bin* stack_bins)
 	return 0;
 }
 
-
-void
-as_bin_get_all_p(as_storage_rd *rd, as_bin **bin_ptrs)
+as_bin*
+as_bin_get_by_id(as_storage_rd* rd, uint32_t id)
 {
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		bin_ptrs[i] = &rd->bins[i];
-	}
-}
-
-
-as_bin *
-as_bin_get_by_id(as_storage_rd *rd, uint32_t id)
-{
-	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		as_bin *b = &rd->bins[i];
+		as_bin* b = &rd->bins[i];
 
 		if ((uint32_t)b->id == id) {
 			return b;
@@ -243,16 +209,14 @@ as_bin_get_by_id(as_storage_rd *rd, uint32_t id)
 	return NULL;
 }
 
-
-as_bin *
-as_bin_get(as_storage_rd *rd, const char *name)
+as_bin*
+as_bin_get(as_storage_rd* rd, const char* name)
 {
-	return as_bin_get_w_len(rd, (const uint8_t *)name, strlen(name));
+	return as_bin_get_w_len(rd, (const uint8_t*)name, strlen(name));
 }
 
-
-as_bin *
-as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len)
+as_bin*
+as_bin_get_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
 {
 	if (rd->ns->single_bin) {
 		return rd->n_bins == 0 ? NULL : rd->bins;
@@ -260,13 +224,13 @@ as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len)
 
 	uint32_t id;
 
-	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char *)name,
+	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char*)name,
 			len, &id) != CF_VMAPX_OK) {
 		return NULL;
 	}
 
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		as_bin *b = &rd->bins[i];
+		as_bin* b = &rd->bins[i];
 
 		if ((uint32_t)b->id == id) {
 			return b;
@@ -276,12 +240,11 @@ as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len)
 	return NULL;
 }
 
-
-as_bin *
-as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
-		int *result)
+as_bin*
+as_bin_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
+		int* result)
 {
-	as_namespace *ns = rd->ns;
+	as_namespace* ns = rd->ns;
 
 	if (ns->single_bin) {
 		cf_assert(rd->n_bins == 0, AS_BIN, "single-bin create found used bin");
@@ -292,22 +255,11 @@ as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
 		return rd->bins;
 	}
 
-	// TODO - already handled (with generic warning) by vmap - remove check?
-	if (len >= AS_BIN_NAME_MAX_SZ) {
-		cf_warning(AS_BIN, "bin name too long (%lu)", len);
-
-		if (result != NULL) {
-			*result = AS_ERR_BIN_NAME;
-		}
-
-		return NULL;
-	}
-
-	as_bin *b = &rd->bins[rd->n_bins];
+	as_bin* b = &rd->bins[rd->n_bins];
 
 	as_bin_init_nameless(b);
 
-	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
+	if (! as_bin_get_or_assign_id_w_len(ns, (const char*)name, len, &b->id)) {
 		if (result != NULL) {
 			*result = AS_ERR_BIN_NAME;
 		}
@@ -320,22 +272,20 @@ as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
 	return b;
 }
 
-
-as_bin *
-as_bin_get_or_create(as_storage_rd *rd, const char *name, int *result)
+as_bin*
+as_bin_get_or_create(as_storage_rd* rd, const char* name, int* result)
 {
-	return as_bin_get_or_create_w_len(rd, (const uint8_t *)name, strlen(name),
+	return as_bin_get_or_create_w_len(rd, (const uint8_t*)name, strlen(name),
 			result);
 }
 
-
 // Does not check bin name length.
 // Checks bin name quota - use appropriately.
-as_bin *
-as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
-		int *result)
+as_bin*
+as_bin_get_or_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
+		int* result)
 {
-	as_namespace *ns = rd->ns;
+	as_namespace* ns = rd->ns;
 
 	if (ns->single_bin) {
 		if (rd->n_bins == 0) {
@@ -348,17 +298,17 @@ as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
 
 	uint32_t id;
 
-	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, (const char *)name, len,
+	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, (const char*)name, len,
 			&id) == CF_VMAPX_OK) {
 		for (uint16_t i = 0; i < rd->n_bins; i++) {
-			as_bin *b = &rd->bins[i];
+			as_bin* b = &rd->bins[i];
 
 			if ((uint32_t)b->id == id) {
 				return b;
 			}
 		}
 
-		as_bin *b = &rd->bins[rd->n_bins];
+		as_bin* b = &rd->bins[rd->n_bins];
 
 		as_bin_init_nameless(b);
 		b->id = (uint16_t)id;
@@ -369,11 +319,11 @@ as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
 	}
 	// else - bin name is new.
 
-	as_bin *b = &rd->bins[rd->n_bins];
+	as_bin* b = &rd->bins[rd->n_bins];
 
 	as_bin_init_nameless(b);
 
-	if (! as_bin_get_or_assign_id_w_len(ns, (const char *)name, len, &b->id)) {
+	if (! as_bin_get_or_assign_id_w_len(ns, (const char*)name, len, &b->id)) {
 		if (result != NULL) {
 			*result = AS_ERR_BIN_NAME;
 		}
@@ -386,13 +336,11 @@ as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len,
 	return b;
 }
 
-
 bool
-as_bin_pop(as_storage_rd *rd, const char *name, as_bin* bin)
+as_bin_pop(as_storage_rd* rd, const char* name, as_bin* bin)
 {
-	return as_bin_pop_w_len(rd, (const uint8_t *)name, strlen(name), bin);
+	return as_bin_pop_w_len(rd, (const uint8_t*)name, strlen(name), bin);
 }
-
 
 bool
 as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
@@ -417,13 +365,13 @@ as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 
 	uint32_t id;
 
-	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char *)name,
+	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char*)name,
 			len, &id) != CF_VMAPX_OK) {
 		return false;
 	}
 
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		as_bin *b = &rd->bins[i];
+		as_bin* b = &rd->bins[i];
 
 		if ((uint32_t)b->id == id) {
 			*bin = *b;

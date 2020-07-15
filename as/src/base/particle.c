@@ -328,7 +328,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		// Load the new particle into the bin.
 		int result = particle_vtable[op_type]->from_wire_fn(op_type, op_value, op_value_size, &b->particle);
 
-		// Set the bin's iparticle metadata.
+		// Set the bin's state member.
 		if (result == 0) {
 			trim_particle(b, op_type, (uint32_t)mem_size);
 			as_bin_state_set_from_type(b, op_type);
@@ -422,7 +422,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 		// Load the new particle into the bin.
 		int result = particle_vtable[op_type]->from_wire_fn(op_type, op_value, op_value_size, &b->particle);
 
-		// Set the bin's iparticle metadata.
+		// Set the bin's state member.
 		if (result == 0) {
 			as_bin_state_set_from_type(b, op_type);
 		}
@@ -505,7 +505,7 @@ as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op)
 	// Load the new particle into the bin.
 	int result = particle_vtable[type]->from_wire_fn(type, value, value_size, &b->particle);
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	if (result == 0) {
 		trim_particle(b, type, (uint32_t)mem_size);
 		as_bin_state_set_from_type(b, type);
@@ -550,7 +550,7 @@ as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_
 	// Load the new particle into the bin.
 	int result = particle_vtable[type]->from_wire_fn(type, value, value_size, &b->particle);
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	if (result == 0) {
 		as_bin_state_set_from_type(b, type);
 	}
@@ -630,7 +630,7 @@ as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
 		particle_vtable[old_type]->destructor_fn(old_particle);
 	}
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	as_bin_state_set_from_type(b, new_type);
 
 	return 0;
@@ -657,7 +657,7 @@ as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val)
 	particle_vtable[type]->from_asval_fn(val, &b->particle);
 	// TODO - could this ever fail?
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	as_bin_state_set_from_type(b, type);
 
 	return 0;
@@ -684,7 +684,7 @@ as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val)
 	particle_vtable[type]->from_asval_fn(val, &b->particle);
 	// TODO - could this ever fail?
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	as_bin_state_set_from_type(b, type);
 
 	// TODO - we don't bother returning size written, since nothing yet needs
@@ -728,7 +728,7 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 
 	particle_vtable[type]->from_msgpack_fn(packed, packed_size, &b->particle);
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	as_bin_state_set_from_type(b, type);
 
 	return AS_OK;
@@ -755,7 +755,7 @@ as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *en
 	// Cast the new particle into the bin.
 	flat = particle_vtable[type]->cast_from_flat_fn(flat, end, &b->particle);
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	if (flat) {
 		as_bin_state_set_from_type(b, type);
 	}
@@ -778,7 +778,7 @@ as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *e
 	// Load the new particle into the bin.
 	flat = particle_vtable[type]->from_flat_fn(flat, end, &b->particle);
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	if (flat) {
 		as_bin_state_set_from_type(b, type);
 	}

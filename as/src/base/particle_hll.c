@@ -519,7 +519,7 @@ as_bin_hll_modify(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb,
 	hll_op_destroy(&op);
 
 	if (old_p == NULL) {
-		// Set the bin's iparticle metadata.
+		// Set the bin's state member.
 		as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_HLL);
 	}
 

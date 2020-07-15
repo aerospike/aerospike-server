@@ -86,8 +86,8 @@ typedef struct as_index_s {
 
 	// offset: 55
 	// In single-bin mode for data-in-memory namespaces, this offset is cast to
-	// an as_bin, but only 4 bits get used (for the iparticle state). The other
-	// 4 bits are used for replication state and index flags.
+	// an as_bin, but only 4 bits get used (for the as_bin state). The other 4
+	// bits are used for replication state and index flags.
 	uint8_t repl_state: 2;
 	uint8_t tombstone: 1;
 	uint8_t cenotaph: 1;

@@ -379,13 +379,11 @@ as_bin_destroy_all(as_bin* bins, uint32_t n_bins)
 
 
 /* Bin function declarations */
-extern int32_t as_bin_get_id(as_namespace *ns, const char *name);
+extern void as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from);
+extern int32_t as_bin_get_id(const as_namespace *ns, const char *name);
 extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len, uint16_t *id);
 extern const char* as_bin_get_name_from_id(const as_namespace *ns, uint16_t id);
-extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
-extern void as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
-extern void as_bin_get_all_p(as_storage_rd *rd, as_bin **bin_ptrs);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len);
@@ -1250,17 +1248,20 @@ as_bin_set_id_from_name_w_len(as_namespace *ns, as_bin *b, const uint8_t *buf,
 }
 
 static inline size_t
-as_bin_memcpy_name(as_namespace *ns, uint8_t *buf, as_bin *b) {
-	size_t len = 0;
-
-	if (! ns->single_bin) {
-		const char *name = as_bin_get_name_from_id(ns, b->id);
-
-		len = strlen(name);
-		memcpy(buf, name, len);
+as_bin_memcpy_name(const as_namespace* ns, uint8_t* buf, as_bin* b)
+{
+	if (ns->single_bin) {
+		return 0;
 	}
 
-	return len;
+	const char* name = as_bin_get_name_from_id(ns, b->id);
+	char* to = (char*)buf;
+
+	while (*name != '\0') {
+		*to++ = *name++;
+	}
+
+	return (uint8_t*)to - buf;
 }
 
 // forward ref

@@ -2173,7 +2173,7 @@ rollback_alloc_from_msgpack(rollback_alloc *alloc_buf, as_bin *b,
 
 	particle_vtable[type]->from_msgpack_fn(seg->ptr, seg->sz, &b->particle);
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	as_bin_state_set_from_type(b, type);
 
 	return true;

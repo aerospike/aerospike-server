@@ -984,7 +984,7 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 													 vallen,
 													 &dp->bin.particle);
 
-	// Set the bin's iparticle metadata.
+	// Set the bin's state member.
 	if (result == 0) {
 		as_bin_state_set_from_type(&dp->bin, type);
 	}

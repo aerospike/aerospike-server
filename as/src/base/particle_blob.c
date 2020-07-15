@@ -887,7 +887,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 	}
 
 	if (old_blob == NULL) {
-		// Set the bin's iparticle metadata.
+		// Set the bin's state member.
 		as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_BLOB);
 	}
 
