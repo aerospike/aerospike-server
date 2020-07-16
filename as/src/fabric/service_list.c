@@ -1202,8 +1202,8 @@ set_info_val(const char *key, const char *val)
 {
 	cf_detail(AS_SERVICE_LIST, "info val %s <- %s", key, val);
 
-	char hash_str[HASH_STR_SZ];
-	strncpy(hash_str, key, HASH_STR_SZ); // pads with \0
+	char hash_str[HASH_STR_SZ] = { 0 };
+	strcpy(hash_str, key);
 
 	// Remove existing value.
 
@@ -1235,8 +1235,8 @@ print_info_val(const char *key, cf_dyn_buf *db)
 {
 	pthread_rwlock_rdlock(&g_info_lock);
 
-	char hash_str[HASH_STR_SZ];
-	strncpy(hash_str, key, HASH_STR_SZ); // pads with \0
+	char hash_str[HASH_STR_SZ] = { 0 };
+	strcpy(hash_str, key);
 
 	char *val;
 	int32_t res = cf_shash_get(g_info, hash_str, &val);
