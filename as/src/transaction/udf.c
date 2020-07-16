@@ -386,6 +386,8 @@ static bool
 log_callback(as_log_level level, const char* func, const char* file,
 		uint32_t line, const char* fmt, ...)
 {
+	(void)func;
+
 	cf_log_level severity = as_log_level_map[level];
 
 	if (! cf_log_check_level(AS_UDF, severity)) {
@@ -703,7 +705,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	}
 
 	udf_record urecord;
-	udf_record_init(&urecord, true);
+	udf_record_init(&urecord);
 
 	urecord.tr = tr;
 
@@ -915,6 +917,8 @@ udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 static bool
 udf_timer_timedout(const as_timer* timer)
 {
+	(void)timer;
+
 	uint64_t now = cf_getns();
 
 	if (now < g_end_ns) {
@@ -929,6 +933,8 @@ udf_timer_timedout(const as_timer* timer)
 static uint64_t
 udf_timer_timeslice(const as_timer* timer)
 {
+	(void)timer;
+
 	uint64_t now = cf_getns();
 
 	return g_end_ns > now ? (g_end_ns - now) / 1000000 : 1;

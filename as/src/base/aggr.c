@@ -285,7 +285,7 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 
 
 	udf_record urecord;
-	udf_record_init(&urecord, false);
+	udf_record_init(&urecord);
 	urecord.tr      = &tr;
 	urecord.r_ref   = &r_ref;
 	urecord.rd      = &rd;

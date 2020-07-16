@@ -74,8 +74,8 @@ static int execute_updates(udf_record* urecord);
 static void prepare_for_write(udf_record* urecord);
 static void execute_failed(udf_record* urecord, int result_code);
 static void execute_delete_bin(udf_record* urecord, const char* name);
-static int execute_set_bin(udf_record* urecord, uint32_t ix, const char* name, const as_val* val);
-static uint8_t* get_particle_buf(udf_record* urecord, udf_record_bin* ubin, uint32_t size);
+static int execute_set_bin(udf_record* urecord, const char* name, const as_val* val);
+static uint8_t* get_particle_buf(udf_record* urecord, uint32_t size);
 
 
 //==========================================================
@@ -340,7 +340,7 @@ execute_updates(udf_record* urecord)
 				udf_record_cache_reclaim(urecord, i--); // decrements n_updates
 			}
 			else {
-				int rv = execute_set_bin(urecord, i, name, val);
+				int rv = execute_set_bin(urecord, name, val);
 
 				if (rv != AS_OK) {
 					execute_failed(urecord, rv);
@@ -435,8 +435,7 @@ execute_delete_bin(udf_record* urecord, const char* name)
 }
 
 static int
-execute_set_bin(udf_record* urecord, uint32_t ix, const char* name,
-		const as_val* val)
+execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 {
 	as_storage_rd* rd = urecord->rd;
 	as_namespace* ns = rd->ns;
@@ -473,7 +472,7 @@ execute_set_bin(udf_record* urecord, uint32_t ix, const char* name,
 	}
 	else {
 		uint32_t size = as_particle_size_from_asval(val);
-		uint8_t* buf = get_particle_buf(urecord, &urecord->updates[ix], size);
+		uint8_t* buf = get_particle_buf(urecord, size);
 
 		as_bin_particle_stack_from_asval(b, buf, val);
 	}
@@ -482,7 +481,7 @@ execute_set_bin(udf_record* urecord, uint32_t ix, const char* name,
 }
 
 static uint8_t*
-get_particle_buf(udf_record* urecord, udf_record_bin* ubin, uint32_t size)
+get_particle_buf(udf_record* urecord, uint32_t size)
 {
 	as_namespace* ns = urecord->rd->ns;
 

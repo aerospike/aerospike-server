@@ -124,7 +124,7 @@ const as_rec_hooks as_aggr_record_hooks = {
 //
 
 void
-udf_record_init(udf_record* urecord, bool allow_updates)
+udf_record_init(udf_record* urecord)
 {
 	urecord->tr = NULL;
 	urecord->r_ref = NULL;

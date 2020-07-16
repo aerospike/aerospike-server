@@ -95,7 +95,7 @@ typedef struct udf_record_s {
 // Public API.
 //
 
-void udf_record_init(udf_record* urecord, bool allow_updates);
+void udf_record_init(udf_record* urecord);
 
 void udf_record_cache_free(udf_record* urecord);
 void udf_record_cache_set(udf_record* urecord, const char* name, as_val* value, bool dirty);
