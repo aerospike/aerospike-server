@@ -57,6 +57,7 @@
 #include "node.h"
 #include "socket.h"
 #include "tls.h"
+#include "vault.h"
 #include "vector.h"
 #include "xmem.h"
 
@@ -291,6 +292,10 @@ typedef enum {
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
+	CASE_SERVICE_VAULT_CA,
+	CASE_SERVICE_VAULT_PATH,
+	CASE_SERVICE_VAULT_TOKEN_FILE,
+	CASE_SERVICE_VAULT_URL,
 	CASE_SERVICE_WORK_DIRECTORY,
 	// For special debugging or bug-related repair:
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
@@ -775,6 +780,10 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
+		{ "vault-ca",						CASE_SERVICE_VAULT_CA },
+		{ "vault-path",						CASE_SERVICE_VAULT_PATH },
+		{ "vault-token-file",				CASE_SERVICE_VAULT_TOKEN_FILE },
+		{ "vault-url",						CASE_SERVICE_VAULT_URL },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
@@ -2278,6 +2287,22 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_TRANSACTION_RETRY_MS:
 				c->transaction_retry_ms = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_VAULT_CA:
+				cfg_enterprise_only(&line);
+				g_vault_cfg.ca = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_SERVICE_VAULT_PATH:
+				cfg_enterprise_only(&line);
+				g_vault_cfg.path = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_SERVICE_VAULT_TOKEN_FILE:
+				cfg_enterprise_only(&line);
+				g_vault_cfg.token_file = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_SERVICE_VAULT_URL:
+				cfg_enterprise_only(&line);
+				g_vault_cfg.url = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_WORK_DIRECTORY:
 				c->work_directory = cfg_strdup_no_checks(&line);

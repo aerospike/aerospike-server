@@ -71,6 +71,7 @@ static const char* context_strings[] = {
 		"rbuffer",
 		"socket",
 		"tls",
+		"vault",
 		"vmapx",
 		"xmem",
 

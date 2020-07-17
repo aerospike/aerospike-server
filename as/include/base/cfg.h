@@ -139,6 +139,7 @@ typedef struct as_config_s {
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
 	uint32_t		transaction_retry_ms;
+	// Note - vault config is a cf global, so can't be here.
 	char*			work_directory;
 
 	// For special debugging or bug-related repair:

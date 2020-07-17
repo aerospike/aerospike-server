@@ -29,7 +29,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "aerospike/as_password.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "cf_mutex.h"
@@ -112,7 +111,6 @@ typedef struct as_xdr_dc_cfg_s {
 
 	as_xdr_auth_mode auth_mode; // Aerospike destinations only
 	char* auth_password_file; // Aerospike destinations only
-	char auth_pw_hash[AS_PASSWORD_HASH_SIZE]; // not actual config - derived
 	char* auth_user; // Aerospike destinations only
 
 	bool connector;

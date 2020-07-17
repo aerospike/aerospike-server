@@ -49,6 +49,7 @@ typedef enum {
 	CF_RBUFFER,
 	CF_SOCKET,
 	CF_TLS,
+	CF_VAULT,
 	CF_VMAPX,
 	CF_XMEM,
 

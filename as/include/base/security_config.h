@@ -95,9 +95,6 @@ typedef struct as_sec_config_s {
 	as_sec_ldap_evp_md	ldap_token_hash_method;
 	char*				ldap_user_dn_pattern;
 	char*				ldap_user_query_pattern;
-
-	// Derived from config.
-	char*				ldap_query_user_password;
 } as_sec_config;
 
 #define PRIVILEGE_REFRESH_PERIOD_MIN	10
