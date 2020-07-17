@@ -23,7 +23,9 @@ endif
 
 LIBRARY = $(LIBRARY_DIR)/libcf.a
 
-INCLUDES += $(INCLUDE_DIR:%=-I%) -I$(COMMON)/src/include
+INCLUDES += $(INCLUDE_DIR:%=-I%)
+INCLUDES += -I$(COMMON)/src/include
+INCLUDES += -I$(JEMALLOC)/include
 
 OBJECTS = $(SOURCES:%.c=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)

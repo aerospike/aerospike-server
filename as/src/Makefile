@@ -40,6 +40,10 @@ BASE_SOURCES += thr_info.c thr_info_port.c thr_query.c thr_sindex.c thr_tsvc.c
 BASE_SOURCES += ticker.c transaction.c truncate.c udf_aerospike.c udf_arglist.c
 BASE_SOURCES += udf_cask.c udf_record.c
 
+ifneq ($(STATIC_LIB),1)
+  BASE_SOURCES += main.c
+endif
+
 ifneq ($(USE_EE),1)
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += features_ce.c
@@ -114,8 +118,8 @@ INCLUDES += $(INCLUDE_DIR:%=-I%)
 INCLUDES += -I$(CF)/include
 INCLUDES += -I$(AI)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
-INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
+INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(S2)
 
 ifeq ($(USE_LUAJIT),1)
@@ -130,8 +134,9 @@ endif
 
 AS_LIBRARIES += $(LIBRARY_DIR)/libcf.a
 AS_LIBRARIES += $(LIBRARY_DIR)/libai.a
-AS_LIBRARIES += $(MOD_LUA)/target/$(PLATFORM)/lib/libmod_lua.a
 AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
+AS_LIBRARIES += $(JEMALLOC)/lib/libjemalloc.a
+AS_LIBRARIES += $(MOD_LUA)/target/$(PLATFORM)/lib/libmod_lua.a
 
 ifeq ($(DOPROFILE),1)
   LIBRARIES += -pg -fprofile-arcs -lgcov
@@ -188,6 +193,10 @@ clean:
 .PHONY: check-syntax
 check-syntax:
 	$(CC) -Wall -Wextra -pedantic -fsyntax-only $(CHK_SOURCES)
+
+.PHONY: lib
+lib: $(OBJECTS) $(AS_LIBRARIES)
+	ar rcsT $(LIBRARY_DIR)/libaerospike.a $(OBJECTS) $(AS_LIBRARIES)
 
 $(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
 	$(LINK.c) -o $(SERVER) $(OBJECTS) $(LIBRARIES)

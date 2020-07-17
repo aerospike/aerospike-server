@@ -25,9 +25,6 @@ LIBRARIES += -lpthread -lrt -ldl -lz -lm
 #   "" (the default) means "src".  Automatically set to "../m4/" during non-zero macro expansion build phases.
 SRCDIR =
 
-INCLUDES += -I$(JEMALLOC)/include
-LIBRARIES := $(JEMALLOC)/lib/libjemalloc.a $(LIBRARIES)
-
 # Popular values:
 #   x86_64 for 64-bit Intel
 #   i686 for 32-bit Intel

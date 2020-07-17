@@ -41,7 +41,15 @@ UNAME=$(shell uname)
 include make_in/Makefile.vars
 
 .PHONY: all server
-all server:	targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LUAJIT)/src/luaconf.h
+all server: aslibs
+	$(MAKE) -C as
+
+.PHONY: lib
+lib: aslibs
+	$(MAKE) -C as $@ STATIC_LIB=1
+
+.PHONY: aslibs
+aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LUAJIT)/src/luaconf.h
 ifeq ($(USE_LUAJIT),1)
 	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so CCDEBUG=-g
 endif
@@ -52,7 +60,6 @@ endif
 	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1 OS=$(UNAME)
 	$(MAKE) -C $(S2)
 	$(MAKE) -C ai
-	$(MAKE) -C as
 
 .PHONY: targetdirs
 targetdirs:

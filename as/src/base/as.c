@@ -193,11 +193,11 @@ static void validate_smd_directory();
 
 
 //==========================================================
-// Aerospike server entry point.
+// Public API - Aerospike server entry point.
 //
 
 int
-main(int argc, char **argv)
+as_run(int argc, char **argv)
 {
 	g_start_sec = cf_get_seconds();
 
