@@ -1,4 +1,11 @@
-#!/usr/bin/python
+#!/bin/sh
+""":"
+for interp in python3 python python2 ; do
+   command -v > /dev/null "$interp" && exec "$interp" "$0" "$@"
+done
+echo >&2 "No Python interpreter found!"
+exit 1
+":"""
 
 #
 # VersionCheck.py:
