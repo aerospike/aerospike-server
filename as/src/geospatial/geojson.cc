@@ -84,7 +84,7 @@ traverse_point(json_t * coord)
 
 	// cout << setprecision(15) << latval << ", " << lngval << endl;
 
-	S2LatLng latlng = S2LatLng::FromDegrees(latval, lngval).Normalized();
+	S2LatLng latlng = S2LatLng::FromDegrees(latval, lngval);
 	if (! latlng.is_valid()) {
 		throwstream(runtime_error, "invalid latitude-longitude");
 	}
