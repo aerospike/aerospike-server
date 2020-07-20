@@ -34,5 +34,5 @@ extern int as_run(int argc, char** argv);
 int
 main(int argc, char** argv)
 {
-    as_run(argc, argv);
+	as_run(argc, argv);
 }

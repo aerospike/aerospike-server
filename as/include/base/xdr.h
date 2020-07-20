@@ -53,7 +53,7 @@ struct as_transaction_s;
 
 #define AS_XDR_MAX_DCS 64
 
-#define AS_XDR_MIN_PERIOD_MS 10
+#define AS_XDR_MIN_PERIOD_MS 5
 #define AS_XDR_MAX_PERIOD_MS 1000
 
 #define AS_XDR_MAX_HOT_KEY_MS 5000
