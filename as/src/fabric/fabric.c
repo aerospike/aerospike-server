@@ -139,7 +139,7 @@ typedef struct fabric_state_s {
 	as_fabric_msg_fn	msg_cb[M_TYPE_MAX];
 	void 				*msg_udata[M_TYPE_MAX];
 
-	fabric_recv_thread_pool recv_pool[AS_FABRIC_N_CHANNELS];
+	fabric_recv_thread_pool recv_pool[AS_FABRIC_N_CHANNELS][MAX_CHANNEL_POOLS];
 
 	cf_mutex			send_lock;
 	send_entry			*sends;
@@ -247,6 +247,9 @@ static bool g_published_endpoint_list_ipv4_only;
 // Max connections formed via connect. Others are formed via accept.
 static uint32_t g_fabric_connect_limit[AS_FABRIC_N_CHANNELS];
 
+// Receive thread connects per channel.
+static cf_atomic32 g_n_channel_connects[AS_FABRIC_N_CHANNELS];
+
 
 //==========================================================
 // Forward declarations.
@@ -346,8 +349,14 @@ as_fabric_init()
 	for (uint32_t i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
 		g_fabric_connect_limit[i] = g_config.n_fabric_channel_fds[i];
 
-		fabric_recv_thread_pool_init(&g_fabric.recv_pool[i],
-				g_config.n_fabric_channel_recv_threads[i], i);
+		uint32_t n_recv_pools = g_config.n_fabric_channel_recv_pools[i];
+		uint32_t n_recv_threads_per_pool =
+				g_config.n_fabric_channel_recv_threads[i] / n_recv_pools;
+
+		for (uint32_t j = 0; j < n_recv_pools; j++) {
+			fabric_recv_thread_pool_init(&g_fabric.recv_pool[i][j],
+					n_recv_threads_per_pool, i);
+		}
 	}
 
 	cf_mutex_init(&g_fabric.send_lock);
@@ -406,8 +415,14 @@ as_fabric_start()
 	for (uint32_t i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
 		cf_info(AS_FABRIC, "starting %u fabric %s channel recv threads", g_config.n_fabric_channel_recv_threads[i], CHANNEL_NAMES[i]);
 
-		fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[i],
-				g_config.n_fabric_channel_recv_threads[i]);
+		uint32_t n_recv_pools = g_config.n_fabric_channel_recv_pools[i];
+		uint32_t n_recv_threads_per_pool =
+				g_config.n_fabric_channel_recv_threads[i] / n_recv_pools;
+
+		for (uint32_t j = 0; j < n_recv_pools; j++) {
+			fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[i][j],
+					n_recv_threads_per_pool);
+		}
 	}
 
 	cf_info(AS_FABRIC, "starting fabric accept thread");
@@ -420,7 +435,13 @@ as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count)
 {
 	g_config.n_fabric_channel_recv_threads[channel] = count;
 
-	fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[channel], count);
+	uint32_t n_recv_pools = g_config.n_fabric_channel_recv_pools[channel];
+	uint32_t n_recv_threads_per_pool = count / n_recv_pools;
+
+	for (uint32_t j = 0; j < n_recv_pools; j++) {
+		fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[channel][j],
+				n_recv_threads_per_pool);
+	}
 }
 
 int
@@ -1023,7 +1044,11 @@ fabric_node_connect(fabric_node *node, uint32_t ch)
 
 	fc->s_msg_in_progress = m;
 	fc->started_via_connect = true;
-	fc->pool = &g_fabric.recv_pool[ch];
+
+	uint32_t ix = (cf_atomic32_incr(&g_n_channel_connects[ch]) - 1) %
+			g_config.n_fabric_channel_recv_pools[ch];
+
+	fc->pool = &g_fabric.recv_pool[ch][ix];
 
 	if (! fabric_node_add_connection(node, fc)) {
 		fabric_connection_release(fc);
@@ -1110,7 +1135,7 @@ fabric_node_connect_all(fabric_node *node)
 			// TLS connections are one-way. Outgoing connections are for
 			// outgoing data.
 			if (fc->sock.state == CF_SOCKET_STATE_NON_TLS) {
-				fabric_recv_thread_pool_add_fc(&g_fabric.recv_pool[ch], fc);
+				fabric_recv_thread_pool_add_fc(NULL, fc);
 				cf_detail(AS_FABRIC, "{%16lX, %u} activated", fabric_connection_get_id(fc), fc->sock.fd);
 
 				if (channel_nagle[ch]) {
@@ -1719,8 +1744,11 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	fc->r_sz = 0;
 	fc->r_buf_sz = 0;
 
+	uint32_t ix = (cf_atomic32_incr(&g_n_channel_connects[pool_id]) - 1) %
+			g_config.n_fabric_channel_recv_pools[pool_id];
+
 	// fc->pool needs to be set before placing into send_idle_fc_queue.
-	fabric_recv_thread_pool_add_fc(&g_fabric.recv_pool[pool_id], fc);
+	fabric_recv_thread_pool_add_fc(&g_fabric.recv_pool[pool_id][ix], fc);
 
 	// TLS connections are one-way. Incoming connections are for
 	// incoming data.
@@ -2069,11 +2097,14 @@ fabric_recv_thread_pool_add_fc(fabric_recv_thread_pool *pool,
 		fabric_connection *fc)
 {
 	fabric_connection_reserve(fc); // extra ref for poll
-	fc->pool = pool;
+
+	if (pool != NULL) {
+		fc->pool = pool;
+	}
 
 	uint32_t recv_events = EPOLLIN | DEFAULT_EVENTS;
 
-	cf_poll_add_socket(pool->poll, &fc->sock, recv_events, fc);
+	cf_poll_add_socket(fc->pool->poll, &fc->sock, recv_events, fc);
 }
 
 

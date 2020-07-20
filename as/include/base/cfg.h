@@ -180,6 +180,7 @@ typedef struct as_config_s {
 	// Normally hidden:
 
 	uint32_t		n_fabric_channel_fds[AS_FABRIC_N_CHANNELS];
+	uint32_t		n_fabric_channel_recv_pools[AS_FABRIC_N_CHANNELS];
 	uint32_t		n_fabric_channel_recv_threads[AS_FABRIC_N_CHANNELS];
 	bool			fabric_keepalive_enabled;
 	int				fabric_keepalive_intvl;

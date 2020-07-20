@@ -172,12 +172,16 @@ cfg_set_defaults()
 
 	// Fabric defaults.
 	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_BULK] = 2;
+	c->n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_BULK] = 1;
 	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK] = 4;
 	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_CTRL] = 1;
+	c->n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_CTRL] = 1;
 	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_CTRL] = 4;
 	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_META] = 1;
+	c->n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_META] = 1;
 	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_META] = 4;
 	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_RW] = 8;
+	c->n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_RW] = 1;
 	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW] = 16;
 	c->fabric_keepalive_enabled = true;
 	c->fabric_keepalive_intvl = 1; // seconds
@@ -406,6 +410,7 @@ typedef enum {
 	CASE_NETWORK_FABRIC_CHANNEL_META_FDS,
 	CASE_NETWORK_FABRIC_CHANNEL_META_RECV_THREADS,
 	CASE_NETWORK_FABRIC_CHANNEL_RW_FDS,
+	CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_POOLS,
 	CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_THREADS,
 	CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED,
 	CASE_NETWORK_FABRIC_KEEPALIVE_INTVL,
@@ -895,6 +900,7 @@ const cfg_opt NETWORK_FABRIC_OPTS[] = {
 		{ "channel-meta-fds",				CASE_NETWORK_FABRIC_CHANNEL_META_FDS },
 		{ "channel-meta-recv-threads",		CASE_NETWORK_FABRIC_CHANNEL_META_RECV_THREADS },
 		{ "channel-rw-fds",					CASE_NETWORK_FABRIC_CHANNEL_RW_FDS },
+		{ "channel-rw-recv-pools",			CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_POOLS },
 		{ "channel-rw-recv-threads",		CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_THREADS },
 		{ "keepalive-enabled",				CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED },
 		{ "keepalive-intvl",				CASE_NETWORK_FABRIC_KEEPALIVE_INTVL },
@@ -2640,6 +2646,9 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_FABRIC_CHANNEL_RW_FDS:
 				c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_RW] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
 				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_POOLS:
+				c->n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_RW] = cfg_u32(&line, 1, MAX_CHANNEL_POOLS);
+				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_THREADS:
 				c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
 				break;
@@ -2677,6 +2686,9 @@ as_config_init(const char* config_file)
 				c->tls_fabric.bind_port = cfg_port(&line);
 				break;
 			case CASE_CONTEXT_END:
+				if (c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW] % c->n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_RW] != 0) {
+					cf_crash_nostack(AS_CFG, "'channel-rw-recv-threads' must be a multiple of 'channel-rw-recv-pools'");
+				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:

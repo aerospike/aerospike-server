@@ -1878,14 +1878,15 @@ info_network_config_get(cf_dyn_buf *db)
 	append_addrs(db, "fabric.tls-address", &g_config.tls_fabric.bind);
 	info_append_int(db, "fabric.tls-port", g_config.tls_fabric.bind_port);
 	info_append_string_safe(db, "fabric.tls-name", g_config.tls_fabric.tls_our_name);
-	info_append_int(db, "fabric.channel-bulk-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_BULK]);
-	info_append_int(db, "fabric.channel-bulk-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK]);
-	info_append_int(db, "fabric.channel-ctrl-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_CTRL]);
-	info_append_int(db, "fabric.channel-ctrl-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_CTRL]);
-	info_append_int(db, "fabric.channel-meta-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_META]);
-	info_append_int(db, "fabric.channel-meta-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_META]);
-	info_append_int(db, "fabric.channel-rw-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_RW]);
-	info_append_int(db, "fabric.channel-rw-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW]);
+	info_append_uint32(db, "fabric.channel-bulk-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_BULK]);
+	info_append_uint32(db, "fabric.channel-bulk-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK]);
+	info_append_uint32(db, "fabric.channel-ctrl-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_CTRL]);
+	info_append_uint32(db, "fabric.channel-ctrl-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_CTRL]);
+	info_append_uint32(db, "fabric.channel-meta-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_META]);
+	info_append_uint32(db, "fabric.channel-meta-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_META]);
+	info_append_uint32(db, "fabric.channel-rw-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_RW]);
+	info_append_uint32(db, "fabric.channel-rw-recv-pools", g_config.n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_RW]);
+	info_append_uint32(db, "fabric.channel-rw-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW]);
 	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
 	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
 	info_append_int(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
@@ -2936,6 +2937,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			if (val < 1 || val > MAX_FABRIC_CHANNEL_THREADS) {
 				cf_warning(AS_INFO, "fabric.channel-rw-recv-threads must be between 1 and %u", MAX_FABRIC_CHANNEL_THREADS);
+				goto Error;
+			}
+			if (val % g_config.n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_RW] != 0) {
+				cf_warning(AS_INFO, "'fabric.channel-rw-recv-threads' must be a multiple of 'fabric.channel-rw-recv-pools'");
 				goto Error;
 			}
 			cf_info(AS_FABRIC, "changing fabric.channel-rw-recv-threads from %u to %d", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW], val);

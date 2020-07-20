@@ -67,6 +67,8 @@ typedef enum {
 #define MAX_FABRIC_CHANNEL_THREADS 128
 #define MAX_FABRIC_CHANNEL_SOCKETS 128
 
+#define MAX_CHANNEL_POOLS 16
+
 typedef struct fabric_rate_s {
 	uint64_t s_bytes[AS_FABRIC_N_CHANNELS];
 	uint64_t r_bytes[AS_FABRIC_N_CHANNELS];
