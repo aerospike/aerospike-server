@@ -581,7 +581,7 @@ struct as_namespace_s {
 	// Persistent memory "base" block ID for this namespace.
 	uint32_t		xmem_id;
 
-	// Pointer to the persistent memory "base" block.
+	// RAM copy of the persistent memory "base" block.
 	uint8_t*		xmem_base;
 
 	// Pointer to partition tree info in persistent memory "treex" block.
