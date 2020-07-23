@@ -45,7 +45,7 @@
 
 #define CONFIGURED_FILE_MAX_SIZE (10 * 1024 * 1024)
 
-static const char TRAILING_WHITESPACE[] = " \t\n\r\f\v";
+static const char TRAILING_NEWLINE[] = "\n\r";
 
 
 //==========================================================
@@ -78,26 +78,32 @@ cf_fetch_bytes(const char* path, size_t* size_r)
 char*
 cf_fetch_string(const char* path)
 {
-	size_t buf_sz;
-	uint8_t* buf = cf_fetch_bytes(path, &buf_sz);
+	size_t len;
+	uint8_t* buf = cf_fetch_bytes(path, &len);
 
 	if (buf == NULL) {
 		return NULL;
 	}
 
-	buf[buf_sz] = '\0';
+	// Strip newlines from the end. It's common for inadvertent newlines to be
+	// appended when editing files to insert content - try to forgive this.
+	while (strchr(TRAILING_NEWLINE, buf[len - 1]) != NULL) {
+		len--;
 
-	// Strip whitespace and beyond, if any.
-	char* end_of_text = strpbrk((char*)buf, TRAILING_WHITESPACE);
-
-	if (end_of_text != NULL) {
-		if (end_of_text == (char*)buf) {
-			cf_warning(CF_MISC, "no text in file %s", path);
+		if (len == 0) {
+			cf_warning(CF_MISC, "empty string");
 			cf_free(buf);
 			return NULL;
 		}
+	}
 
-		*end_of_text = '\0';
+	buf[len] = '\0';
+
+	// Make sure there are no inadvertent null bytes in the string.
+	if (strlen((char*)buf) != len) {
+		cf_warning(CF_MISC, "string contains null byte");
+		cf_free(buf);
+		return NULL;
 	}
 
 	return (char*)buf;
