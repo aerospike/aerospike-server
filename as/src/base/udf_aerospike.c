@@ -386,8 +386,14 @@ prepare_for_write(udf_record* urecord)
 		urecord->old_dim_bins = rd->bins;
 		rd->bins = urecord->stack_bins;
 	}
-	else if (rd->n_bins != 0 && ! ns->single_bin && record_has_sindex(r, ns)) {
-		memcpy(urecord->old_ssd_bins, rd->bins, rd->n_bins * sizeof(as_bin));
+	else if (rd->n_bins != 0) {
+		if (ns->single_bin) {
+			as_single_bin_copy(urecord->old_ssd_bins, rd->bins);
+		}
+		else {
+			memcpy(urecord->old_ssd_bins, rd->bins,
+					rd->n_bins * sizeof(as_bin));
+		}
 	}
 }
 
@@ -406,8 +412,14 @@ execute_failed(udf_record* urecord, int result_code)
 
 		rd->bins = urecord->old_dim_bins;
 	}
-	else {
-		rd->bins = urecord->old_ssd_bins;
+	else if (urecord->n_old_bins != 0) {
+		if (ns->single_bin) {
+			as_single_bin_copy(rd->bins, urecord->old_ssd_bins);
+		}
+		else {
+			memcpy(rd->bins, urecord->old_ssd_bins,
+					urecord->n_old_bins * sizeof(as_bin));
+		}
 	}
 
 	rd->n_bins = (uint16_t)urecord->n_old_bins;

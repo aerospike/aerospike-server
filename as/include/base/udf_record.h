@@ -81,7 +81,7 @@ typedef struct udf_record_s {
 	as_bin* old_dim_bins; // pointer to original DIM bins
 
 	union {
-		as_bin old_ssd_bins[UDF_BIN_LIMIT]; // non-DIM sindex only
+		as_bin old_ssd_bins[UDF_BIN_LIMIT]; // non-DIM only
 		as_bin cleanup_bins[UDF_BIN_LIMIT]; // DIM only
 	};
 
