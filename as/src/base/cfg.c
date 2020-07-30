@@ -683,6 +683,7 @@ typedef enum {
 	CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE,
 
 	// XDR DC namespace options:
+	CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL,
 	CASE_XDR_DC_NAMESPACE_DELAY_MS,
 	CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION,
 	CASE_XDR_DC_NAMESPACE_FORWARD,
@@ -1206,6 +1207,7 @@ const cfg_opt XDR_DC_AUTH_MODE_OPTS[] = {
 };
 
 const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
+		{ "compression-level",				CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL },
 		{ "delay-ms",						CASE_XDR_DC_NAMESPACE_DELAY_MS },
 		{ "enable-compression",				CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION },
 		{ "forward",						CASE_XDR_DC_NAMESPACE_FORWARD },
@@ -2340,28 +2342,28 @@ as_config_init(const char* config_file)
 				cfg_obsolete(&line, "please configure 'service-threads' carefully");
 				break;
 			case CASE_SERVICE_NSUP_PERIOD:
-				cfg_obsolete(&line, "please use namespace-context 'nsup-period'");
+				cfg_obsolete(&line, "please use namespace context 'nsup-period'");
 				break;
 			case CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD:
-				cfg_obsolete(&line, "please use namespace-context 'nsup-hist-period'");
+				cfg_obsolete(&line, "please use namespace context 'nsup-hist-period'");
 				break;
 			case CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION:
-				cfg_obsolete(&line, "please use namespace-context 'write-commit-level-override' and/or write transaction policy");
+				cfg_obsolete(&line, "please use namespace context 'write-commit-level-override' and/or write transaction policy");
 				break;
 			case CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS:
-				cfg_obsolete(&line, "please use namespace-context 'background-scan-max-rps'");
+				cfg_obsolete(&line, "please use namespace context 'background-scan-max-rps'");
 				break;
 			case CASE_SERVICE_SCAN_THREADS:
-				cfg_obsolete(&line, "please use 'scan-threads-limit' and namespace-context 'single-scan-threads'");
+				cfg_obsolete(&line, "please use 'scan-threads-limit' and namespace context 'single-scan-threads'");
 				break;
 			case CASE_SERVICE_TRANSACTION_PENDING_LIMIT:
-				cfg_obsolete(&line, "please use namespace-context 'transaction-pending-limit'");
+				cfg_obsolete(&line, "please use namespace context 'transaction-pending-limit'");
 				break;
 			case CASE_SERVICE_TRANSACTION_QUEUES:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully");
 				break;
 			case CASE_SERVICE_TRANSACTION_REPEATABLE_READ:
-				cfg_obsolete(&line, "please use namespace-context 'read-consistency-level-override' and/or read transaction policy");
+				cfg_obsolete(&line, "please use namespace context 'read-consistency-level-override' and/or read transaction policy");
 				break;
 			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully");
@@ -3002,7 +3004,7 @@ as_config_init(const char* config_file)
 				ns->n_xdr_tomb_raider_threads = cfg_u32(&line, 1, 128);
 				break;
 			case CASE_NAMESPACE_DISABLE_NSUP:
-				cfg_obsolete(&line, "please set namespace-context 'nsup-period' to 0 to disable nsup");
+				cfg_obsolete(&line, "please set 'nsup-period' to 0 to disable nsup");
 				break;
 			case CASE_CONTEXT_END:
 				if (ns->memory_size == 0) {
@@ -3012,7 +3014,7 @@ as_config_init(const char* config_file)
 					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'nsup-period' or 'allow-ttl-without-nsup' true if 'default-ttl' is non-zero", ns->name);
 				}
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
-					cf_crash_nostack(AS_CFG, "ns %s data-in-index can't be true unless storage-engine is device and both single-bin and data-in-memory are true", ns->name);
+					cf_crash_nostack(AS_CFG, "{%s} 'data-in-index' can't be true unless 'storage-engine device' and both 'single-bin' and 'data-in-memory' are true", ns->name);
 				}
 				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 					cf_crash_nostack(AS_CFG, "{%s} 'storage-engine pmem' can't be used with 'index-type flash'", ns->name);
@@ -3706,6 +3708,9 @@ as_config_init(const char* config_file)
 		//
 		case XDR_DC_NAMESPACE:
 			switch (cfg_find_tok(line.name_tok, XDR_DC_NAMESPACE_OPTS, NUM_XDR_DC_NAMESPACE_OPTS)) {
+			case CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL:
+				dc_ns_cfg->compression_level = cfg_u32(&line, 1, 9);
+				break;
 			case CASE_XDR_DC_NAMESPACE_DELAY_MS:
 				dc_ns_cfg->delay_ms = cfg_u32(&line, 0, AS_XDR_MAX_HOT_KEY_MS);
 				break;

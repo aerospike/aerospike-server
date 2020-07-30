@@ -4002,6 +4002,14 @@ command_latencies(char* name, char* params, bool legacy, cf_dyn_buf* db)
 				histogram_get_latencies(ns->write_repl_write_hist, legacy, db);
 				histogram_get_latencies(ns->write_response_hist, legacy, db);
 			}
+			else if (strcmp(hist_name, "benchmarks-udf") == 0) {
+				histogram_get_latencies(ns->udf_start_hist, legacy, db);
+				histogram_get_latencies(ns->udf_restart_hist, legacy, db);
+				histogram_get_latencies(ns->udf_dup_res_hist, legacy, db);
+				histogram_get_latencies(ns->udf_master_hist, legacy, db);
+				histogram_get_latencies(ns->udf_repl_write_hist, legacy, db);
+				histogram_get_latencies(ns->udf_response_hist, legacy, db);
+			}
 			else if (strcmp(hist_name, "benchmarks-batch-sub") == 0) {
 				histogram_get_latencies(ns->batch_sub_prestart_hist, legacy, db);
 				histogram_get_latencies(ns->batch_sub_start_hist, legacy, db);

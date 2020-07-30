@@ -81,6 +81,7 @@ typedef enum {
 typedef struct as_xdr_dc_ns_cfg_s {
 	char* ns_name;
 
+	uint32_t compression_level;
 	uint32_t delay_ms;
 	bool compression_enabled;
 	bool forward;
