@@ -63,6 +63,8 @@ static uint8_t* fetch_bytes_from_file(const char* file_path, size_t* size_r);
 uint8_t*
 cf_fetch_bytes(const char* path, size_t* size_r)
 {
+	cf_assert(path != NULL, CF_MISC, "fetch with null path");
+
 	if (cf_vault_is_vault_path(path)) {
 		if (! cf_vault_is_configured()) {
 			return NULL;
@@ -118,11 +120,6 @@ cf_fetch_string(const char* path)
 static uint8_t*
 fetch_bytes_from_file(const char* file_path, size_t* size_r)
 {
-	if (file_path == NULL) {
-		cf_warning(CF_MISC, "no configured file to read");
-		return NULL;
-	}
-
 	int fd = open(file_path, O_RDONLY);
 
 	if (fd == -1) {

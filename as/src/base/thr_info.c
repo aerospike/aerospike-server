@@ -3773,26 +3773,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of ldap.pollling-period from %u to %u", g_config.sec_cfg.ldap_polling_period, val);
 			g_config.sec_cfg.ldap_polling_period = val;
 		}
-		else if (0 == as_info_parameter_get(params, "ldap.query-user-password-file", context, &context_len)) {
-			if (context_len == 0) {
-				cf_warning(AS_INFO, "missing ldap.query-user-password-file value");
-				goto Error;
-			}
-			if (g_config.sec_cfg.ldap_query_user_dn == NULL) {
-				cf_warning(AS_INFO, "ldap query-user-dn not configured");
-				goto Error;
-			}
-			if (! cf_fetch_validate_string(context)) {
-				cf_warning(AS_INFO, "can't read ldap query-user-password-file");
-				goto Error;
-			}
-			char* old_file = g_config.sec_cfg.ldap_query_user_password_file;
-			g_config.sec_cfg.ldap_query_user_password_file = cf_strdup(context);
-			cf_info(AS_INFO, "Changing value of ldap.query-user-password-file from %s to %s", old_file != NULL ? old_file : "null", context);
-			if (old_file != NULL) {
-				cf_free(old_file);
-			}
-		}
 		else if (0 == as_info_parameter_get(params, "ldap.session-ttl", context, &context_len)) {
 			uint32_t val;
 			if (cf_str_atoi_seconds(context, &val) != 0 || val < LDAP_SESSION_TTL_MIN || val > LDAP_SESSION_TTL_MAX) {
