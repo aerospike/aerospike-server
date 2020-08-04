@@ -177,6 +177,8 @@ fetch_bytes_from_file(const char* file_path, size_t* size_r)
 		bytes_left -= rv;
 	}
 
+	close(fd);
+
 	*size_r = (size_t)size;
 	return buf;
 }
