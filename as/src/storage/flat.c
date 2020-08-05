@@ -272,12 +272,14 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 	uint16_t i;
 
 	for (i = 0; i < n_bins; i++) {
-		if (at >= end) {
-			cf_warning(AS_FLAT, "incomplete flat bin");
-			break;
-		}
+		as_bin* b = &bins[i];
 
 		if (! ns->single_bin) {
+			if (at >= end) {
+				cf_warning(AS_FLAT, "incomplete flat bin");
+				break;
+			}
+
 			size_t name_len = *at++;
 
 			if (name_len >= AS_BIN_NAME_MAX_SZ) {
@@ -290,7 +292,7 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 				break;
 			}
 
-			if (! as_bin_set_id_from_name_w_len(ns, &bins[i], at, name_len)) {
+			if (! as_bin_set_id_from_name_w_len(ns, b, at, name_len)) {
 				cf_warning(AS_FLAT, "flat bin name failed to assign id");
 				break;
 			}
@@ -299,8 +301,8 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 		}
 
 		at = ns->storage_data_in_memory ?
-				as_bin_particle_alloc_from_flat(&bins[i], at, end) :
-				as_bin_particle_cast_from_flat(&bins[i], at, end);
+				as_bin_particle_alloc_from_flat(b, at, end) :
+				as_bin_particle_cast_from_flat(b, at, end);
 
 		if (at == NULL) {
 			break;

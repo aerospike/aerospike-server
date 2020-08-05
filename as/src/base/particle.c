@@ -273,18 +273,14 @@ as_bin_particle_destroy(as_bin *b)
 	}
 
 	// Probably unnecessary, but...
-	b->state = AS_BIN_STATE_UNUSED;
+	as_bin_set_empty(b);
 	b->particle = NULL;
 }
 
 uint32_t
 as_bin_particle_size(as_bin *b)
 {
-	if (! as_bin_inuse(b)) {
-		// Single-bin will get here.
-		// TODO - clean up code paths so this doesn't happen?
-		return 0;
-	}
+	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unexpected unused bin");
 
 	return particle_vtable[as_bin_get_particle_type(b)]->size_fn(b->particle);
 }
@@ -319,7 +315,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 			return (int)mem_size;
 		}
 
-		as_particle *old_particle = b->particle;
+		as_particle *old_particle = b->particle; // FIXME - not needed
 
 		if (mem_size != 0) {
 			b->particle = cf_malloc_ns((size_t)mem_size);
@@ -338,7 +334,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 				cf_free(b->particle);
 			}
 
-			b->particle = old_particle;
+			b->particle = old_particle; // FIXME - just set NULL
 		}
 
 		return result;
@@ -413,7 +409,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 			return (int)mem_size;
 		}
 
-		as_particle *old_particle = b->particle;
+		as_particle *old_particle = b->particle; // FIXME - not needed
 
 		// Instead of allocating, we use the stack buffer provided. (Note that
 		// embedded types like integer will overwrite this with the value.)
@@ -427,7 +423,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 			as_bin_state_set_from_type(b, op_type);
 		}
 		else {
-			b->particle = old_particle;
+			b->particle = old_particle; // FIXME - just set NULL
 		}
 
 		return result;
@@ -564,10 +560,7 @@ as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_
 uint32_t
 as_bin_particle_client_value_size(const as_bin *b)
 {
-	if (! as_bin_inuse(b)) {
-		// UDF result bin (bin name "SUCCESS" or "FAILURE") will get here.
-		return 0;
-	}
+	cf_assert(b != NULL && as_bin_inuse(b), AS_PARTICLE, "unused response bin");
 
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -577,12 +570,13 @@ as_bin_particle_client_value_size(const as_bin *b)
 uint32_t
 as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 {
-	if (! (b && as_bin_inuse(b))) {
-		// UDF result bin (bin name "SUCCESS" or "FAILURE") will get here.
+	if (b == NULL) {
 		// Ordered ops that find no bin will get here.
 		op->particle_type = AS_PARTICLE_TYPE_NULL;
 		return 0;
 	}
+
+	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unused response bin");
 
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -741,6 +735,8 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 const uint8_t *
 as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
 {
+	// We assume the bin is empty.
+
 	if (flat >= end) {
 		cf_warning(AS_PARTICLE, "incomplete flat particle");
 		return NULL;
@@ -768,6 +764,11 @@ const uint8_t *
 as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
 {
 	// We assume the bin is empty.
+
+	if (flat >= end) {
+		cf_warning(AS_PARTICLE, "incomplete flat particle");
+		return NULL;
+	}
 
 	as_particle_type type = safe_particle_type(*flat);
 

@@ -2469,26 +2469,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 			}
 
 			as_bin_destroy_all(old_bins, n_old_bins);
-
-			// Fill out new_bin_space.
-			as_bin_space* new_bin_space = NULL;
-
-			if (n_new_bins != 0) {
-				new_bin_space = (as_bin_space*)
-						cf_malloc_ns(sizeof(as_bin_space) + sizeof(new_bins));
-
-				new_bin_space->n_bins = n_new_bins;
-				memcpy((void*)new_bin_space->bins, new_bins, sizeof(new_bins));
-			}
-
-			// Swizzle the index element's as_bin_space pointer.
-			as_bin_space* old_bin_space = as_index_get_bin_space(r);
-
-			if (old_bin_space != NULL) {
-				cf_free(old_bin_space);
-			}
-
-			as_index_set_bin_space(r, new_bin_space);
+			as_storage_rd_update_bin_space(&rd);
 		}
 
 		as_storage_record_adjust_mem_stats(&rd, bytes_memory);

@@ -1023,27 +1023,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 			}
 
 			as_bin_destroy_all(urecord->cleanup_bins, urecord->n_cleanup_bins);
-
-			// Fill out new_bin_space.
-			as_bin_space* new_bin_space = NULL;
-			size_t bins_size = rd->n_bins * sizeof(as_bin);
-
-			if (rd->n_bins != 0) {
-				new_bin_space = (as_bin_space*)
-						cf_malloc_ns(sizeof(as_bin_space) + bins_size);
-
-				new_bin_space->n_bins = rd->n_bins;
-				memcpy((void*)new_bin_space->bins, rd->bins, bins_size);
-			}
-
-			// Swizzle the index element's as_bin_space pointer.
-			as_bin_space* old_bin_space = as_index_get_bin_space(r);
-
-			if (old_bin_space != NULL) {
-				cf_free(old_bin_space);
-			}
-
-			as_index_set_bin_space(r, new_bin_space);
+			as_storage_rd_update_bin_space(rd);
 		}
 
 		as_storage_record_adjust_mem_stats(rd, urecord->old_memory_bytes);

@@ -519,7 +519,6 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
 	// Move the new bin into the index.
 	as_single_bin_copy(rd->bins, &new_bin);
 
-	// Needed for memory stats.
 	rd->n_bins = n_new_bins;
 	rd->bins = &new_bin;
 
@@ -579,32 +578,13 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 	// Cleanup - destroy original bins, can't unwind after.
 	as_bin_destroy_all(rd->bins, rd->n_bins);
 
-	// Fill out new_bin_space.
-	as_bin_space* new_bin_space = NULL;
+	rd->n_bins = n_new_bins;
+	rd->bins = new_bins;
 
-	if (n_new_bins != 0) {
-		new_bin_space = (as_bin_space*)
-				cf_malloc_ns(sizeof(as_bin_space) + sizeof(new_bins));
-
-		new_bin_space->n_bins = n_new_bins;
-		memcpy((void*)new_bin_space->bins, new_bins, sizeof(new_bins));
-	}
-
-	// Swizzle the index element's as_bin_space pointer.
-	as_bin_space* old_bin_space = as_index_get_bin_space(r);
-
-	if (old_bin_space != NULL) {
-		cf_free(old_bin_space);
-	}
-
-	as_index_set_bin_space(r, new_bin_space);
+	as_storage_rd_update_bin_space(rd);
 
 	// Now ok to store or drop key, as determined by message.
 	as_record_finalize_key(r, ns, rr->key, rr->key_size);
-
-	// Needed for memory stats.
-	rd->n_bins = n_new_bins;
-	rd->bins = new_bins;
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
 

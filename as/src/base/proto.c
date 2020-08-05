@@ -462,15 +462,16 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	}
 	else {
 		for (uint16_t i = 0; i < rd->n_bins; i++) {
+			as_bin *b = &rd->bins[i];
 			as_msg_op *op = (as_msg_op *)buf;
 
 			op->op = AS_MSG_OP_READ;
 			op->version = 0;
-			op->name_sz = as_bin_memcpy_name(ns, op->name, &rd->bins[i]);
+			op->name_sz = as_bin_memcpy_name(ns, op->name, b);
 			op->op_sz = OP_FIXED_SZ + op->name_sz;
 
 			buf += sizeof(as_msg_op) + op->name_sz;
-			buf += as_bin_particle_to_client(&rd->bins[i], op);
+			buf += as_bin_particle_to_client(b, op);
 
 			as_msg_swap_op(op);
 		}

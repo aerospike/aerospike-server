@@ -47,7 +47,7 @@
 static inline void
 as_bin_init_nameless(as_bin* b)
 {
-	as_bin_state_set(b, AS_BIN_STATE_UNUSED);
+	as_bin_set_empty(b);
 	b->particle = NULL;
 	// Don't touch b->unused - like b->id, it's past the end of its enclosing
 	// as_index if single-bin, data-in-memory.
@@ -193,6 +193,34 @@ as_storage_rd_load_bins(as_storage_rd* rd, as_bin* stack_bins)
 	}
 
 	return 0;
+}
+
+// Where should this be?
+// Called only for multi-bin data-in-memory.
+void
+as_storage_rd_update_bin_space(as_storage_rd* rd)
+{
+	as_record* r = rd->r;
+
+	as_bin_space* old_bin_space = as_index_get_bin_space(r);
+
+	if (old_bin_space != NULL) {
+		cf_free(old_bin_space);
+	}
+
+	if (rd->n_bins == 0) {
+		as_index_set_bin_space(r, NULL);
+		return;
+	}
+
+	size_t bins_size = rd->n_bins * sizeof(as_bin);
+	as_bin_space* new_bin_space = (as_bin_space*)
+			cf_malloc_ns(sizeof(as_bin_space) + bins_size);
+
+	new_bin_space->n_bins = rd->n_bins;
+	memcpy((void*)new_bin_space->bins, (const void*)rd->bins, bins_size);
+
+	as_index_set_bin_space(r, new_bin_space);
 }
 
 as_bin*

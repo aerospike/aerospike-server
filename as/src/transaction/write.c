@@ -1317,15 +1317,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	// Created the new bins to write.
 	//
 
-	as_bin_space* new_bin_space = NULL;
-	size_t new_bins_size = 0;
-
-	if (rd->n_bins != 0) {
-		new_bins_size = rd->n_bins * sizeof(as_bin);
-		new_bin_space = (as_bin_space*)
-				cf_malloc_ns(sizeof(as_bin_space) + new_bins_size);
-	}
-	else {
+	if (rd->n_bins == 0) {
 		if (n_old_bins == 0) {
 			unwind_index_metadata(&old_metadata, r);
 			write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
@@ -1349,11 +1341,6 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
-
-		if (new_bin_space != NULL) {
-			cf_free(new_bin_space);
-		}
-
 		unwind_index_metadata(&old_metadata, r);
 		write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 		return -result;
@@ -1386,20 +1373,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	// Final changes to record data in as_index.
 	//
 
-	// Fill out new_bin_space.
-	if (rd->n_bins != 0) {
-		new_bin_space->n_bins = rd->n_bins;
-		memcpy((void*)new_bin_space->bins, rd->bins, new_bins_size);
-	}
-
-	// Swizzle the index element's as_bin_space pointer.
-	as_bin_space* old_bin_space = as_index_get_bin_space(r);
-
-	if (old_bin_space != NULL) {
-		cf_free(old_bin_space);
-	}
-
-	as_index_set_bin_space(r, new_bin_space);
+	as_storage_rd_update_bin_space(rd);
 
 	// Accommodate a new stored key - wasn't needed for pickling and writing.
 	if (r->key_stored == 0 && rd->key) {

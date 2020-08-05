@@ -264,7 +264,7 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->r = r;
 	rd->ns = ns;
-	rd->bins = 0;
+	rd->bins = NULL;
 	rd->n_bins = 0;
 	rd->record_on_device = false;
 	rd->ignore_record_on_device = false;
@@ -300,7 +300,7 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->r = r;
 	rd->ns = ns;
-	rd->bins = 0;
+	rd->bins = NULL;
 	rd->n_bins = 0;
 	rd->record_on_device = true;
 	rd->ignore_record_on_device = false;

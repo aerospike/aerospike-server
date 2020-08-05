@@ -289,24 +289,12 @@ as_bin_inuse(const as_bin *b)
 	return b->state != AS_BIN_STATE_UNUSED;
 }
 
-static inline uint8_t
-as_bin_state(const as_bin *b)
-{
-	return b->state;
-}
-
-static inline void
-as_bin_state_set(as_bin *b, uint8_t val)
-{
-	b->state = val;
-}
-
 static inline void
 as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 {
 	switch (type) {
 	case AS_PARTICLE_TYPE_NULL:
-		b->state = AS_BIN_STATE_UNUSED;
+		b->state = AS_BIN_STATE_UNUSED; // should never happen
 		break;
 	case AS_PARTICLE_TYPE_INTEGER:
 		b->state = AS_BIN_STATE_INUSE_INTEGER;
@@ -323,7 +311,7 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 static inline void
 as_bin_set_empty(as_bin *b)
 {
-	as_bin_state_set(b, AS_BIN_STATE_UNUSED);
+	b->state = AS_BIN_STATE_UNUSED;
 }
 
 static inline void
@@ -358,14 +346,15 @@ as_bin_get_particle(as_bin *b) {
 static inline uint8_t
 as_bin_get_particle_type(const as_bin *b) {
 	switch (b->state) {
-		case AS_BIN_STATE_INUSE_INTEGER:
-			return AS_PARTICLE_TYPE_INTEGER;
-		case AS_BIN_STATE_INUSE_FLOAT:
-			return AS_PARTICLE_TYPE_FLOAT;
-		case AS_BIN_STATE_INUSE_OTHER:
-			return b->particle->type;
-		default:
-			return AS_PARTICLE_TYPE_NULL;
+	case AS_BIN_STATE_INUSE_INTEGER:
+		return AS_PARTICLE_TYPE_INTEGER;
+	case AS_BIN_STATE_INUSE_FLOAT:
+		return AS_PARTICLE_TYPE_FLOAT;
+	case AS_BIN_STATE_INUSE_OTHER:
+		return b->particle->type;
+	case AS_BIN_STATE_UNUSED:
+	default:
+		return AS_PARTICLE_TYPE_NULL;
 	}
 }
 
@@ -384,6 +373,7 @@ extern int32_t as_bin_get_id(const as_namespace *ns, const char *name);
 extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len, uint16_t *id);
 extern const char* as_bin_get_name_from_id(const as_namespace *ns, uint16_t id);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
+extern void as_storage_rd_update_bin_space(as_storage_rd* rd);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len);
