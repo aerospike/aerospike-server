@@ -708,6 +708,7 @@ struct as_namespace_s {
 	uint32_t		evict_tenths_pct;
 	uint32_t		hwm_disk_pct;
 	uint32_t		hwm_memory_pct;
+	bool			ignore_migrate_fill_delay;
 	uint64_t		index_stage_size;
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;

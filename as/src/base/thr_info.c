@@ -1978,6 +1978,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
 	info_append_uint32(db, "high-water-disk-pct", ns->hwm_disk_pct);
 	info_append_uint32(db, "high-water-memory-pct", ns->hwm_memory_pct);
+	info_append_bool(db, "ignore-migrate-fill-delay", ns->ignore_migrate_fill_delay);
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
 
 	info_append_string(db, "index-type",
@@ -3408,6 +3409,23 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of allow-ttl-without-nsup of ns %s from %s to %s", ns->name, bool_val[ns->allow_ttl_without_nsup], context);
 				ns->allow_ttl_without_nsup = false;
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "ignore-migrate-fill-delay", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "ignore-migrate-fill-delay is enterprise-only");
+				goto Error;
+			}
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of ignore-migrate-fill-delay of ns %s to %s", ns->name, context);
+				ns->ignore_migrate_fill_delay = true;
+			}
+			else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
+				cf_info(AS_INFO, "Changing value of ignore-migrate-fill-delay of ns %s to %s", ns->name, context);
+				ns->ignore_migrate_fill_delay = false;
 			}
 			else {
 				goto Error;

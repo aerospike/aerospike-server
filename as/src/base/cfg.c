@@ -463,6 +463,7 @@ typedef enum {
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
+	CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
 	CASE_NAMESPACE_INDEX_TYPE_BEGIN,
 	CASE_NAMESPACE_MIGRATE_ORDER,
@@ -958,6 +959,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
+		{ "ignore-migrate-fill-delay",		CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
 		{ "index-type",						CASE_NAMESPACE_INDEX_TYPE_BEGIN },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
@@ -2864,6 +2866,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
 				ns->hwm_memory_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY:
+				cfg_enterprise_only(&line);
+				ns->ignore_migrate_fill_delay = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_INDEX_STAGE_SIZE:
 				ns->index_stage_size = cfg_u64_power_of_2(&line, CF_ARENAX_MIN_STAGE_SIZE, CF_ARENAX_MAX_STAGE_SIZE);
