@@ -692,6 +692,7 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE_IGNORE_EXPUNGES,
 	CASE_XDR_DC_NAMESPACE_IGNORE_SET,
 	CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT,
+	CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE,
 	CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS,
 	CASE_XDR_DC_NAMESPACE_SHIP_BIN,
 	CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES,
@@ -1216,6 +1217,7 @@ const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "ignore-expunges", 				CASE_XDR_DC_NAMESPACE_IGNORE_EXPUNGES },
 		{ "ignore-set",						CASE_XDR_DC_NAMESPACE_IGNORE_SET },
 		{ "max-throughput", 				CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT },
+		{ "remote-namespace", 				CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE },
 		{ "sc-replication-wait-ms",			CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS },
 		{ "ship-bin",						CASE_XDR_DC_NAMESPACE_SHIP_BIN },
 		{ "ship-nsup-deletes",				CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES },
@@ -3734,6 +3736,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT:
 				dc_ns_cfg->max_throughput = cfg_u32_multiple_of(&line, 100);
+				break;
+			case CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE:
+				dc_ns_cfg->remote_namespace = cfg_strdup(&line, AS_ID_NAMESPACE_SZ);
 				break;
 			case CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS:
 				dc_ns_cfg->sc_replication_wait_ms = cfg_u32(&line, AS_XDR_MIN_SC_REPLICATION_WAIT_MS, AS_XDR_MAX_SC_REPLICATION_WAIT_MS);
