@@ -269,38 +269,6 @@ as_bin_get_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
 }
 
 as_bin*
-as_bin_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
-		int* result)
-{
-	as_namespace* ns = rd->ns;
-
-	if (ns->single_bin) {
-		cf_assert(rd->n_bins == 0, AS_BIN, "single-bin create found used bin");
-
-		as_bin_init_nameless(rd->bins);
-		rd->n_bins = 1;
-
-		return rd->bins;
-	}
-
-	as_bin* b = &rd->bins[rd->n_bins];
-
-	as_bin_init_nameless(b);
-
-	if (! as_bin_get_or_assign_id_w_len(ns, (const char*)name, len, &b->id)) {
-		if (result != NULL) {
-			*result = AS_ERR_BIN_NAME;
-		}
-
-		return NULL;
-	}
-
-	rd->n_bins++;
-
-	return b;
-}
-
-as_bin*
 as_bin_get_or_create(as_storage_rd* rd, const char* name, int* result)
 {
 	return as_bin_get_or_create_w_len(rd, (const uint8_t*)name, strlen(name),

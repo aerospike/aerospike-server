@@ -377,7 +377,6 @@ extern void as_storage_rd_update_bin_space(as_storage_rd* rd);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len);
-extern as_bin *as_bin_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
 extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name, int *result);
 extern as_bin *as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
 extern bool as_bin_pop(as_storage_rd* rd, const char* name, as_bin* bin);

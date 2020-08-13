@@ -2435,23 +2435,11 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		uint16_t n_new_bins = (uint16_t)opt_meta.n_bins;
 		as_bin new_bins[n_new_bins];
 
-		rd.n_bins = 0;
+		rd.n_bins = n_new_bins;
 		rd.bins = new_bins;
 
-		for (uint16_t i = 0; i < n_new_bins; i++) {
-			size_t name_len = ns->single_bin ? 0 : *p_read++;
-			as_bin* b = as_bin_create_w_len(&rd, p_read, name_len, NULL);
-
-			if (b == NULL) {
-				cf_crash(AS_DRV_SSD, "bin create failed");
-			}
-
-			p_read += name_len;
-			p_read = as_bin_particle_alloc_from_flat(b, p_read, end);
-
-			if (p_read == NULL) {
-				cf_crash(AS_DRV_SSD, "particle alloc failed");
-			}
+		if (as_flat_unpack_bins(ns, p_read, end, rd.n_bins, rd.bins) < 0) {
+			cf_crash(AS_DRV_SSD, "unpack bins failed");
 		}
 
 		// Do this early since set-id is needed for the secondary index update.
@@ -2459,13 +2447,13 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 		if (ns->single_bin) {
 			as_bin_destroy_all(old_bins, n_old_bins);
-			as_single_bin_copy(as_index_get_single_bin(r), new_bins);
+			as_single_bin_copy(as_index_get_single_bin(r), rd.bins);
 		}
 		else {
 			// Success - adjust sindex, looking at old and new bins.
 			if (record_has_sindex(r, ns)) {
 				write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
-						old_bins, n_old_bins, new_bins, n_new_bins);
+						old_bins, n_old_bins, rd.bins, rd.n_bins);
 			}
 
 			as_bin_destroy_all(old_bins, n_old_bins);
