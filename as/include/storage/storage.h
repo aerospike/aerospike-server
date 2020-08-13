@@ -74,6 +74,8 @@ typedef enum {
 // Artificial limit on write-block-size, must be power of 2 and >= RBLOCK_SIZE.
 #define MIN_WRITE_BLOCK_SIZE (1024 * 1)
 
+#define DEFAULT_MAX_WRITE_CACHE (64UL * 1024 * 1024)
+
 typedef enum {
 	AS_ENCRYPTION_AES_128,
 	AS_ENCRYPTION_AES_256,

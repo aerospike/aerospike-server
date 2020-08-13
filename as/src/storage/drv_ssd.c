@@ -3328,8 +3328,8 @@ as_storage_init_ssd(as_namespace *ns)
 
 	// The queue limit is more efficient to work with.
 	ns->storage_max_write_q = (uint32_t)
-			(ssds->n_ssds * ns->storage_max_write_cache) /
-			ns->storage_write_block_size;
+			(ssds->n_ssds * ns->storage_max_write_cache /
+					ns->storage_write_block_size);
 
 	// Minimize how often we recalculate this.
 	ns->defrag_lwm_size =
