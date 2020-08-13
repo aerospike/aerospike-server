@@ -3633,8 +3633,8 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			if (0 != cf_str_atoi_u64(context, &val_u64)) {
 				goto Error;
 			}
-			if (val_u64 < (1024 * 1024 * 4)) { // TODO - why enforce this? And here, but not cfg.c?
-				cf_warning(AS_INFO, "can't set max-write-cache less than 4M");
+			if (val_u64 < DEFAULT_MAX_WRITE_CACHE) {
+				cf_warning(AS_INFO, "can't set max-write-cache < %luM", DEFAULT_MAX_WRITE_CACHE / (1024 * 1024));
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of max-write-cache of ns %s from %lu to %lu ", ns->name, ns->storage_max_write_cache, val_u64);

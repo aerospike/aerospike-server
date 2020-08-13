@@ -3182,7 +3182,7 @@ as_config_init(const char* config_file)
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE:
-				ns->storage_max_write_cache = cfg_u64_no_checks(&line);
+				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT:
 				ns->storage_min_avail_pct = cfg_u32(&line, 0, 100);
@@ -3321,7 +3321,7 @@ as_config_init(const char* config_file)
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE:
-				ns->storage_max_write_cache = cfg_u64_no_checks(&line);
+				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT:
 				ns->storage_min_avail_pct = cfg_u32(&line, 0, 100);
