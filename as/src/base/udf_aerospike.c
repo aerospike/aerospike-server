@@ -123,6 +123,11 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 	as_storage_rd* rd = urecord->rd;
 
 	if (urecord->is_open) {
+		if (udf_record_load(urecord) != 0) {
+			cf_warning(AS_UDF, "record failed load");
+			return 1;
+		}
+
 		if (rd->n_bins != 0) {
 			cf_warning(AS_UDF, "record already exists");
 			return 1;
@@ -202,6 +207,7 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 	}
 
 	urecord->is_open = true;
+	urecord->is_loaded = true;
 
 	return 0;
 }
@@ -218,6 +224,11 @@ udf_aerospike_rec_update(const as_aerospike* as, const as_rec* rec)
 
 	if (! urecord->is_open) {
 		cf_warning(AS_UDF, "update found urecord not open");
+		return -2;
+	}
+
+	if (udf_record_load(urecord) != 0) {
+		cf_warning(AS_UDF, "record failed load");
 		return -2;
 	}
 
@@ -249,6 +260,11 @@ udf_aerospike_rec_remove(const as_aerospike* as, const as_rec* rec)
 
 	if (! urecord->is_open) {
 		cf_warning(AS_UDF, "remove found urecord not open");
+		return 1;
+	}
+
+	if (udf_record_load(urecord) != 0) {
+		cf_warning(AS_UDF, "record failed load");
 		return 1;
 	}
 

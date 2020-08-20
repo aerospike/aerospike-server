@@ -62,6 +62,7 @@ typedef struct udf_record_s {
 	as_storage_rd* rd;
 
 	bool is_open;
+	bool is_loaded;
 	bool too_many_bins;
 	bool has_updates;
 
@@ -103,6 +104,7 @@ void udf_record_cache_reclaim(udf_record* urecord, uint32_t i);
 
 int udf_record_open(udf_record* urecord);
 void udf_record_close(udf_record* urecord);
+int udf_record_load(udf_record* urecord);
 
 
 //==========================================================
