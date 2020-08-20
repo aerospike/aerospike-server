@@ -383,7 +383,8 @@ udf_record_get(const as_rec* rec, const char* name)
 		return value;
 	}
 
-	if (udf_record_open(urecord) != 0) { // lazily read the existing record
+	if (! urecord->is_open) {
+		cf_warning(AS_UDF, "record not open");
 		return NULL;
 	}
 
