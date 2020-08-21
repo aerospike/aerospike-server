@@ -1816,6 +1816,13 @@ agg_set_error(void * udata, int err)
 static bool
 agg_record_matches(void *udata, udf_record *urecord, void *key_data)
 {
+	// Load (read from device) here instead of when opening record, so that
+	// other UDFs like scan aggregations or record read UDFs can avoid loading
+	// if possible (i.e. UDF requires record metadata only).
+	if (udf_record_load(urecord) != 0) {
+		return false;
+	}
+
 	as_query_transaction * qtr = (as_query_transaction*)udata;
 	as_sindex_key *skey        = (void *)key_data;
 	qtr->n_read_success++;
