@@ -74,7 +74,7 @@ typedef struct udf_record_s {
 	size_t buf_size;
 	size_t buf_offset;
 
-	as_bin stack_bins[UDF_BIN_LIMIT]; // new bins if writing
+	as_bin stack_bins[RECORD_MAX_BINS]; // new bins if writing
 
 	uint32_t n_old_bins;
 	uint32_t n_cleanup_bins; // DIM only
