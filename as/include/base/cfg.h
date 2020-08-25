@@ -107,7 +107,7 @@ typedef struct as_config_s {
 	bool			keep_caps_ssd_health;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
 	bool			microsecond_histograms;
-	uint32_t		migrate_fill_delay;
+	uint32_t		migrate_fill_delay; // enterprise-only
 	uint32_t		migrate_max_num_incoming;
 	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
@@ -137,6 +137,7 @@ typedef struct as_config_s {
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	uint32_t		sindex_gc_max_rate; // Max sindex entries processed per second for gc
 	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc
+	bool			stay_quiesced; // enterprise-only
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
 	uint32_t		transaction_retry_ms;

@@ -294,6 +294,7 @@ typedef enum {
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_GC_MAX_RATE,
 	CASE_SERVICE_SINDEX_GC_PERIOD,
+	CASE_SERVICE_STAY_QUIESCED,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
@@ -787,6 +788,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-gc-max-rate",				CASE_SERVICE_SINDEX_GC_MAX_RATE },
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
+		{ "stay-quiesced",					CASE_SERVICE_STAY_QUIESCED },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
@@ -2295,6 +2297,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_SINDEX_GC_PERIOD:
 				c->sindex_gc_period = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_STAY_QUIESCED:
+				cfg_enterprise_only(&line);
+				c->stay_quiesced = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);

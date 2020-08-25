@@ -1289,6 +1289,11 @@ info_command_quiesce(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
+	if (g_config.stay_quiesced) {
+		cf_dyn_buf_append_string(db, "ERROR::permanently-quiesced");
+		return 0;
+	}
+
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		g_config.namespaces[ns_ix]->pending_quiesce = true;
 	}
@@ -1307,6 +1312,11 @@ info_command_quiesce_undo(char *name, char *params, cf_dyn_buf *db)
 
 	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+		return 0;
+	}
+
+	if (g_config.stay_quiesced) {
+		cf_dyn_buf_append_string(db, "ignored-permanently-quiesced");
 		return 0;
 	}
 
@@ -1822,6 +1832,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 	info_append_uint32(db, "sindex-gc-max-rate", g_config.sindex_gc_max_rate);
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
+	info_append_bool(db, "stay-quiesced", g_config.stay_quiesced);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
 	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
