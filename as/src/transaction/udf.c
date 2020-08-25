@@ -832,7 +832,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 static uint8_t
 open_existing_record(udf_record* urecord)
 {
-	urecord->is_open = true; // TODO - where?
+	urecord->is_open = true;
 
 	as_transaction* tr = urecord->tr;
 	as_namespace* ns = tr->rsv.ns;
