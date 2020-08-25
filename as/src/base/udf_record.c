@@ -38,6 +38,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_digest.h"
 
 #include "log.h"
 
@@ -134,6 +135,7 @@ udf_record_init(udf_record* urecord)
 	urecord->rd = NULL;
 
 	urecord->is_open = false;
+	urecord->is_loaded = false;
 	urecord->too_many_bins = false;
 	urecord->has_updates = false;
 
@@ -256,26 +258,6 @@ udf_record_open(udf_record* urecord)
 		return -1;
 	}
 
-	as_storage_rd* rd = urecord->rd;
-
-	as_storage_record_open(ns, r, rd);
-
-	if (as_storage_rd_load_bins(rd, urecord->stack_bins) < 0) {
-		as_storage_record_close(rd);
-		as_record_done(r_ref, ns);
-		return -1;
-	}
-
-	if (rd->n_bins > UDF_BIN_LIMIT) {
-		cf_warning(AS_UDF, "too many bins (%d) for UDF", rd->n_bins);
-		as_storage_record_close(rd);
-		as_record_done(r_ref, ns);
-		return -1;
-	}
-
-	as_storage_record_get_set_name(rd);
-	as_storage_rd_load_key(rd);
-
 	urecord->is_open = true;
 
 	return 0;
@@ -291,13 +273,51 @@ udf_record_close(udf_record* urecord)
 		cf_assert(urecord->particle_buf == NULL, AS_UDF,
 				"unexpected - has particle buf");
 
-		as_storage_record_close(urecord->rd);
-		as_record_done(urecord->r_ref, urecord->tr->rsv.ns);
+		if (urecord->is_loaded) {
+			as_storage_record_close(urecord->rd);
+			urecord->is_loaded = false;
+		}
 
+		as_record_done(urecord->r_ref, urecord->tr->rsv.ns);
 		urecord->is_open = false;
 	}
 
 	udf_record_cache_free(urecord);
+}
+
+int
+udf_record_load(udf_record* urecord)
+{
+	cf_assert(urecord->is_open, AS_UDF, "loading unopened record");
+
+	if (urecord->is_loaded) {
+		return 0;
+	}
+
+	as_index_ref* r_ref = urecord->r_ref;
+	as_namespace* ns = urecord->tr->rsv.ns;
+
+	as_storage_rd* rd = urecord->rd;
+
+	as_storage_record_open(ns, r_ref->r, rd);
+
+	if (as_storage_rd_load_bins(rd, urecord->stack_bins) < 0) {
+		as_storage_record_close(rd);
+		return AS_ERR_UNKNOWN;
+	}
+
+	if (rd->n_bins > UDF_BIN_LIMIT) {
+		cf_warning(AS_UDF, "too many bins (%d) for UDF", rd->n_bins);
+		as_storage_record_close(rd);
+		return AS_ERR_BIN_NAME;
+	}
+
+	as_storage_record_get_set_name(rd);
+	as_storage_rd_load_key(rd);
+
+	urecord->is_loaded = true;
+
+	return 0;
 }
 
 
@@ -357,6 +377,11 @@ udf_record_drop_key(const as_rec* rec)
 		return -1;
 	}
 
+	if (udf_record_load(urecord) != 0) {
+		cf_warning(AS_UDF, "record failed load");
+		return -1;
+	}
+
 	// Flag the key to be dropped.
 	urecord->rd->key = NULL;
 	urecord->rd->key_size = 0;
@@ -385,6 +410,11 @@ udf_record_get(const as_rec* rec, const char* name)
 
 	if (! urecord->is_open) {
 		cf_warning(AS_UDF, "record not open");
+		return NULL;
+	}
+
+	if (udf_record_load(urecord) != 0) {
+		cf_warning(AS_UDF, "record failed load");
 		return NULL;
 	}
 
@@ -420,7 +450,7 @@ udf_record_setname(const as_rec* rec)
 		return NULL;
 	}
 
-	return as_index_get_set_name(urecord->r_ref->r, urecord->rd->ns);
+	return as_index_get_set_name(urecord->r_ref->r, urecord->tr->rsv.ns);
 }
 
 //------------------------------------------------
@@ -435,6 +465,11 @@ udf_record_key(const as_rec* rec)
 
 	if (! urecord->is_open) {
 		cf_warning(AS_UDF, "record not open");
+		return NULL;
+	}
+
+	if (udf_record_load(urecord) != 0) {
+		cf_warning(AS_UDF, "record failed load");
 		return NULL;
 	}
 
@@ -496,7 +531,7 @@ udf_record_gen(const as_rec* rec)
 		return 0;
 	}
 
-	return plain_generation(urecord->r_ref->r->generation, urecord->rd->ns);
+	return plain_generation(urecord->r_ref->r->generation, urecord->tr->rsv.ns);
 }
 
 //------------------------------------------------
@@ -553,6 +588,11 @@ udf_record_numbins(const as_rec* rec)
 		return 0;
 	}
 
+	if (udf_record_load(urecord) != 0) {
+		cf_warning(AS_UDF, "record failed load");
+		return 0;
+	}
+
 	return urecord->rd->n_bins;
 }
 
@@ -573,6 +613,11 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 
 	if (! urecord->is_open) {
 		cf_warning(AS_UDF, "record not open");
+		return -1;
+	}
+
+	if (udf_record_load(urecord) != 0) {
+		cf_warning(AS_UDF, "record failed load");
 		return -1;
 	}
 

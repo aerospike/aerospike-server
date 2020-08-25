@@ -832,6 +832,8 @@ udf_master_apply(udf_call* call, rw_request* rw)
 static uint8_t
 open_existing_record(udf_record* urecord)
 {
+	urecord->is_open = true;
+
 	as_transaction* tr = urecord->tr;
 	as_namespace* ns = tr->rsv.ns;
 	as_record* r = urecord->r_ref->r;
@@ -845,30 +847,15 @@ open_existing_record(udf_record* urecord)
 		return (uint8_t)rv;
 	}
 
-	as_storage_rd* rd = urecord->rd;
-
-	as_storage_record_open(ns, r, rd);
-
-	urecord->is_open = true;
-
-	if (as_storage_rd_load_bins(rd, urecord->stack_bins) < 0) {
-		predexp_destroy(predexp);
-		return AS_ERR_UNKNOWN;
-	}
-
-	if (rd->n_bins > UDF_BIN_LIMIT) {
-		cf_warning(AS_UDF, "too many bins (%d) for UDF", rd->n_bins);
-		predexp_destroy(predexp);
-		return AS_ERR_BIN_NAME;
-	}
-
-	as_storage_record_get_set_name(rd);
-	as_storage_rd_load_key(rd);
-
 	// Apply predexp record bins filter if present.
 	if (predexp != NULL || (tr->origin == FROM_IUDF &&
 			tr->from.iudf_orig->predexp != NULL)) {
-		predexp_args_t predargs = { .ns = ns, .md = r, .rd = rd };
+		if ((rv = udf_record_load(urecord)) != 0) {
+			cf_warning(AS_UDF, "record failed load");
+			return (uint8_t)rv;
+		}
+
+		predexp_args_t predargs = { .ns = ns, .md = r, .rd = urecord->rd };
 
 		if (! predexp_matches_record(tr->origin == FROM_IUDF ?
 				tr->from.iudf_orig->predexp : predexp, &predargs)) {
@@ -879,16 +866,25 @@ open_existing_record(udf_record* urecord)
 		predexp_destroy(predexp);
 	}
 
-	if (rd->key != NULL) {
-		// If both the record and the message have keys, check them.
-		if (as_transaction_has_key(tr) && ! check_msg_key(&tr->msgp->msg, rd)) {
-			return AS_ERR_KEY_MISMATCH;
+	if (as_transaction_has_key(tr)) {
+		if ((rv = udf_record_load(urecord)) != 0) {
+			cf_warning(AS_UDF, "record failed load");
+			return (uint8_t)rv;
 		}
-	}
-	else {
-		// If the message has a key, it will now be stored with the record.
-		if (! get_msg_key(tr, rd)) {
-			return AS_ERR_UNSUPPORTED_FEATURE;
+
+		as_storage_rd* rd = urecord->rd;
+
+		if (rd->key != NULL) {
+			// If both the record and the message have keys, check them.
+			if (! check_msg_key(&tr->msgp->msg, rd)) {
+				return AS_ERR_KEY_MISMATCH;
+			}
+		}
+		else {
+			// If the message has a key, it will now be stored with the record.
+			if (! get_msg_key(tr, rd)) {
+				return AS_ERR_UNSUPPORTED_FEATURE;
+			}
 		}
 	}
 
@@ -1075,20 +1071,24 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 
 	if (urecord->is_open) {
 		as_index_ref* r_ref = urecord->r_ref;
-		as_storage_rd* rd = urecord->rd;
 
-		if (urecord->has_updates && ns->storage_data_in_memory) {
-			write_dim_unwind(urecord->old_dim_bins, urecord->n_old_bins,
-					rd->bins, rd->n_bins, urecord->cleanup_bins,
-					urecord->n_cleanup_bins);
+		if (urecord->is_loaded) {
+			as_storage_rd* rd = urecord->rd;
+
+			if (urecord->has_updates && ns->storage_data_in_memory) {
+				write_dim_unwind(urecord->old_dim_bins, urecord->n_old_bins,
+						rd->bins, rd->n_bins, urecord->cleanup_bins,
+						urecord->n_cleanup_bins);
+			}
+
+			if ((urecord->result_code != AS_OK || urecord->has_updates) &&
+					urecord->n_old_bins == 0) {
+				write_delete_record(rd->r, tr->rsv.tree);
+			}
+
+			as_storage_record_close(rd);
 		}
 
-		if ((urecord->result_code != AS_OK || urecord->has_updates) &&
-				urecord->n_old_bins == 0) {
-			write_delete_record(rd->r, tr->rsv.tree);
-		}
-
-		as_storage_record_close(rd);
 		as_record_done(r_ref, ns);
 	}
 
@@ -1129,7 +1129,10 @@ udf_master_done(udf_record* urecord, as_rec* urec, as_result* result,
 	as_namespace* ns = tr->rsv.ns;
 
 	if (urecord->is_open) {
-		as_storage_record_close(urecord->rd);
+		if (urecord->is_loaded) {
+			as_storage_record_close(urecord->rd);
+		}
+
 		as_record_done(urecord->r_ref, ns);
 	}
 
