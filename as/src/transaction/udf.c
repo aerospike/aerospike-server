@@ -976,8 +976,19 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 		return AS_ERR_FORBIDDEN;
 	}
 
-	if (rd->n_bins == 0 && urecord->n_old_bins == 0) {
-		return AS_ERR_NOT_FOUND;
+	int result;
+	bool is_delete = false;
+
+	if (rd->n_bins == 0) {
+		if (urecord->n_old_bins == 0) {
+			return AS_ERR_NOT_FOUND;
+		}
+
+		if ((result = validate_delete_durability(tr)) != AS_OK) {
+			return (uint8_t)result;
+		}
+
+		is_delete = true;
 	}
 
 	//------------------------------------------------------
@@ -989,17 +1000,15 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
 	set_xdr_write(tr, r);
-	transition_delete_metadata(tr, r, rd->n_bins == 0);
+	transition_delete_metadata(tr, r, is_delete);
 
 	//------------------------------------------------------
 	// Write the record to storage.
 	//
 
-	int rv = as_storage_record_write(rd);
-
-	if (rv < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		unwind_index_metadata(&old_metadata, r);
-		return (uint8_t)(-rv);
+		return (uint8_t)(-result);
 	}
 
 	as_record_transition_stats(r, ns, &old_metadata);
@@ -1043,7 +1052,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	tr->last_update_time = r->last_update_time;
 
 	// Handle deletion if appropriate.
-	if (rd->n_bins == 0) {
+	if (is_delete) {
 		write_delete_record(r, tr->rsv.tree);
 		tr->flags |= AS_TRANSACTION_FLAG_IS_DELETE;
 	}
