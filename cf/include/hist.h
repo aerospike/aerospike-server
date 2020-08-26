@@ -26,7 +26,6 @@
 // Includes.
 //
 
-#include <stdbool.h>
 #include <stdint.h>
 
 #include "dynbuf.h"
@@ -65,4 +64,4 @@ void histogram_insert_raw_unsafe(histogram* h, uint64_t value);
 void histogram_save_info(histogram* h);
 void histogram_get_info(histogram* h, cf_dyn_buf* db);
 
-void histogram_get_latencies(histogram* h, bool legacy, cf_dyn_buf* db);
+void histogram_get_latencies(histogram* h, cf_dyn_buf* db);

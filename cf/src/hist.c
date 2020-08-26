@@ -66,13 +66,8 @@ struct histogram_s {
 	time_t timestamp;
 	uint64_t total;
 	uint64_t overs[N_LATENCY_COLS];
-	bool read_a;
-	char out_a[150];
-	char out_b[150];
-
-	// TODO - legacy, remove after 5.1.
-	char legacy_out_a[80];
-	char legacy_out_b[80];
+	cf_mutex dump_lock;
+	char dump_output[150];
 };
 
 #define HIST_TAG_MILLISECONDS	"msec"
@@ -233,13 +228,8 @@ histogram_create(const char* name, histogram_scale scale)
 	h->timestamp = 0;
 	h->total = 0;
 	memset((void*)h->overs, 0, sizeof(h->overs));
-	h->read_a = true;
-	append_semicolon(h->out_a);
-	append_semicolon(h->out_b);
-
-	// TODO - legacy, remove after 5.1.
-	append_semicolon(h->legacy_out_a);
-	append_semicolon(h->legacy_out_b);
+	cf_mutex_init(&h->dump_lock);
+	append_semicolon(h->dump_output);
 
 	return h;
 }
@@ -252,16 +242,17 @@ histogram_clear(histogram* h)
 {
 	memset((void*)h->counts, 0, sizeof(h->counts));
 
+	// We don't want/need to do anything with a saved snapshot.
+
 	h->timestamp = 0;
 	h->total = 0;
 	memset((void*)h->overs, 0, sizeof(h->overs));
-	h->read_a = true;
-	append_semicolon(h->out_a);
-	append_semicolon(h->out_b);
 
-	// TODO - legacy, remove after 5.1.
-	append_semicolon(h->legacy_out_a);
-	append_semicolon(h->legacy_out_b);
+	cf_mutex_lock(&h->dump_lock);
+
+	append_semicolon(h->dump_output);
+
+	cf_mutex_unlock(&h->dump_lock);
 }
 
 //------------------------------------------------
@@ -363,37 +354,18 @@ histogram_dump(histogram* h)
 		break;
 	}
 
-	char* out = h->read_a ? h->out_b : h->out_a;
-	char* legacy_out = h->read_a ? h->legacy_out_b : h->legacy_out_a;
-
 	time_t now = time(NULL);
 	time_t slice = now - h->timestamp;
 
 	uint64_t diff_total = total - h->total;
 	double tps = (double)diff_total / (double)slice;
 
+	char* out = h->dump_output;
+
+	cf_mutex_lock(&h->dump_lock);
+
 	if (h->timestamp != 0) {
 		out += sprintf(out, "%s,%.1f", h->scale_tag, tps);
-
-		// TODO - legacy, remove after 5.1.
-
-		struct tm start_tm;
-		struct tm end_tm;
-
-		gmtime_r(&h->timestamp, &start_tm);
-		gmtime_r(&now, &end_tm);
-
-		char start[32];
-		char end[32];
-
-		strftime(start, sizeof(start), "%T", &start_tm);
-		strftime(end, sizeof(end), "%T", &end_tm);
-
-		const char* thresholds = h->scale == HIST_MILLISECONDS ?
-				">1ms,>8ms,>64ms" : ">1us,>8us,>64us";
-
-		legacy_out += sprintf(legacy_out, "%s-GMT,ops/sec,%s;%s,%.1f", start,
-				thresholds, end, tps);
 	}
 
 	// b's "over" is total minus sum of values in all buckets 0 thru b.
@@ -406,11 +378,6 @@ histogram_dump(histogram* h)
 
 		if (h->timestamp != 0) {
 			out += sprintf(out, ",%.2f", pct_over_b);
-
-			// TODO - legacy, remove after 5.1.
-			if (b == 0 || b == 3 || b == 6) {
-				legacy_out += sprintf(legacy_out, ",%.2f", pct_over_b);
-			}
 		}
 
 		// Store for next time.
@@ -419,14 +386,11 @@ histogram_dump(histogram* h)
 
 	append_semicolon(out);
 
-	// TODO - legacy, remove after 5.1.
-	append_semicolon(legacy_out);
+	cf_mutex_unlock(&h->dump_lock);
 
 	// Store for next time.
 	h->timestamp = now;
 	h->total = total;
-
-	h->read_a = ! h->read_a;
 }
 
 //------------------------------------------------
@@ -557,17 +521,14 @@ histogram_get_info(histogram* h, cf_dyn_buf* db)
 // Retrieve threshold info for one time-slice.
 //
 void
-histogram_get_latencies(histogram* h, bool legacy, cf_dyn_buf* db)
+histogram_get_latencies(histogram* h, cf_dyn_buf* db)
 {
 	cf_dyn_buf_append_string(db, h->name);
 	cf_dyn_buf_append_char(db, ':');
 
-	if (legacy) {
-		// TODO - legacy, remove after 5.1.
-		cf_dyn_buf_append_string(db,
-				h->read_a ? h->legacy_out_a : h->legacy_out_b);
-	}
-	else {
-		cf_dyn_buf_append_string(db, h->read_a ? h->out_a : h->out_b);
-	}
+	cf_mutex_lock(&h->dump_lock);
+
+	cf_dyn_buf_append_string(db, h->dump_output);
+
+	cf_mutex_unlock(&h->dump_lock);
 }

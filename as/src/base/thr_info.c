@@ -3907,9 +3907,21 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 }
 
 
-// Helper for info_command_latencies() and info_command_latency().
-static int
-command_latencies(char* name, char* params, bool legacy, cf_dyn_buf* db)
+// latencies:[hist=<name>]
+//
+// If no hist param, command applies to ?
+//
+// e.g.:
+// latencies:hist={test}-reads
+// output:
+// {test}-reads:msec,30618.2,0.05,0.01,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00
+//
+// explanation:
+// <name>,units,TPS, ...
+// Values following the TPS are percentages exceeding logarithmic thresholds.
+//
+int
+info_command_latencies(char* name, char* params, cf_dyn_buf* db)
 {
 	cf_debug(AS_INFO, "%s command received: params %s", name, params);
 
@@ -3919,43 +3931,43 @@ command_latencies(char* name, char* params, bool legacy, cf_dyn_buf* db)
 	if (as_info_parameter_get(params, "hist", value_str, &value_str_len) != 0) {
 		// Canonical histograms.
 
-		histogram_get_latencies(g_stats.batch_index_hist, legacy, db);
+		histogram_get_latencies(g_stats.batch_index_hist, db);
 
 		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace* ns = g_config.namespaces[i];
 
-			histogram_get_latencies(ns->read_hist, legacy, db);
-			histogram_get_latencies(ns->write_hist, legacy, db);
-			histogram_get_latencies(ns->udf_hist, legacy, db);
-			histogram_get_latencies(ns->query_hist, legacy, db);
+			histogram_get_latencies(ns->read_hist, db);
+			histogram_get_latencies(ns->write_hist, db);
+			histogram_get_latencies(ns->udf_hist, db);
+			histogram_get_latencies(ns->query_hist, db);
 		}
 	}
 	else {
 		// Named histograms.
 
 		if (strcmp(value_str, "batch-index") == 0) {
-			histogram_get_latencies(g_stats.batch_index_hist, legacy, db);
+			histogram_get_latencies(g_stats.batch_index_hist, db);
 		}
 		else if (strcmp(value_str, "info") == 0) {
-			histogram_get_latencies(g_stats.info_hist, legacy, db);
+			histogram_get_latencies(g_stats.info_hist, db);
 		}
 		else if (strcmp(value_str, "benchmarks-fabric") == 0) {
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK], legacy, db);
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL], legacy, db);
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META], legacy, db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META], legacy, db);
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW], legacy, db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK], db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK], db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK], db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL], db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL], db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL], db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL], db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META], db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META], db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META], db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META], db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW], db);
+			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW], db);
+			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW], db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW], db);
 		}
 		else if (*value_str == '{') {
 			// Named namespace-scoped histogram - parse '{namespace}-' prefix.
@@ -3979,71 +3991,71 @@ command_latencies(char* name, char* params, bool legacy, cf_dyn_buf* db)
 			}
 
 			if (strcmp(hist_name, "read") == 0) {
-				histogram_get_latencies(ns->read_hist, legacy, db);
+				histogram_get_latencies(ns->read_hist, db);
 			}
 			else if (strcmp(hist_name, "write") == 0) {
-				histogram_get_latencies(ns->write_hist, legacy, db);
+				histogram_get_latencies(ns->write_hist, db);
 			}
 			else if (strcmp(hist_name, "udf") == 0) {
-				histogram_get_latencies(ns->udf_hist, legacy, db);
+				histogram_get_latencies(ns->udf_hist, db);
 			}
 			else if (strcmp(hist_name, "query") == 0) {
-				histogram_get_latencies(ns->query_hist, legacy, db);
+				histogram_get_latencies(ns->query_hist, db);
 			}
 			else if (strcmp(hist_name, "re-repl") == 0) {
-				histogram_get_latencies(ns->re_repl_hist, legacy, db);
+				histogram_get_latencies(ns->re_repl_hist, db);
 			}
 			else if (strcmp(hist_name, "proxy") == 0) {
-				histogram_get_latencies(ns->proxy_hist, legacy, db);
+				histogram_get_latencies(ns->proxy_hist, db);
 			}
 			else if (strcmp(hist_name, "benchmarks-read") == 0) {
-				histogram_get_latencies(ns->read_start_hist, legacy, db);
-				histogram_get_latencies(ns->read_restart_hist, legacy, db);
-				histogram_get_latencies(ns->read_dup_res_hist, legacy, db);
-				histogram_get_latencies(ns->read_repl_ping_hist, legacy, db);
-				histogram_get_latencies(ns->read_local_hist, legacy, db);
-				histogram_get_latencies(ns->read_response_hist, legacy, db);
+				histogram_get_latencies(ns->read_start_hist, db);
+				histogram_get_latencies(ns->read_restart_hist, db);
+				histogram_get_latencies(ns->read_dup_res_hist, db);
+				histogram_get_latencies(ns->read_repl_ping_hist, db);
+				histogram_get_latencies(ns->read_local_hist, db);
+				histogram_get_latencies(ns->read_response_hist, db);
 			}
 			else if (strcmp(hist_name, "benchmarks-write") == 0) {
-				histogram_get_latencies(ns->write_start_hist, legacy, db);
-				histogram_get_latencies(ns->write_restart_hist, legacy, db);
-				histogram_get_latencies(ns->write_dup_res_hist, legacy, db);
-				histogram_get_latencies(ns->write_master_hist, legacy, db);
-				histogram_get_latencies(ns->write_repl_write_hist, legacy, db);
-				histogram_get_latencies(ns->write_response_hist, legacy, db);
+				histogram_get_latencies(ns->write_start_hist, db);
+				histogram_get_latencies(ns->write_restart_hist, db);
+				histogram_get_latencies(ns->write_dup_res_hist, db);
+				histogram_get_latencies(ns->write_master_hist, db);
+				histogram_get_latencies(ns->write_repl_write_hist, db);
+				histogram_get_latencies(ns->write_response_hist, db);
 			}
 			else if (strcmp(hist_name, "benchmarks-udf") == 0) {
-				histogram_get_latencies(ns->udf_start_hist, legacy, db);
-				histogram_get_latencies(ns->udf_restart_hist, legacy, db);
-				histogram_get_latencies(ns->udf_dup_res_hist, legacy, db);
-				histogram_get_latencies(ns->udf_master_hist, legacy, db);
-				histogram_get_latencies(ns->udf_repl_write_hist, legacy, db);
-				histogram_get_latencies(ns->udf_response_hist, legacy, db);
+				histogram_get_latencies(ns->udf_start_hist, db);
+				histogram_get_latencies(ns->udf_restart_hist, db);
+				histogram_get_latencies(ns->udf_dup_res_hist, db);
+				histogram_get_latencies(ns->udf_master_hist, db);
+				histogram_get_latencies(ns->udf_repl_write_hist, db);
+				histogram_get_latencies(ns->udf_response_hist, db);
 			}
 			else if (strcmp(hist_name, "benchmarks-batch-sub") == 0) {
-				histogram_get_latencies(ns->batch_sub_prestart_hist, legacy, db);
-				histogram_get_latencies(ns->batch_sub_start_hist, legacy, db);
-				histogram_get_latencies(ns->batch_sub_restart_hist, legacy, db);
-				histogram_get_latencies(ns->batch_sub_dup_res_hist, legacy, db);
-				histogram_get_latencies(ns->batch_sub_repl_ping_hist, legacy, db);
-				histogram_get_latencies(ns->batch_sub_read_local_hist, legacy, db);
-				histogram_get_latencies(ns->batch_sub_response_hist, legacy, db);
+				histogram_get_latencies(ns->batch_sub_prestart_hist, db);
+				histogram_get_latencies(ns->batch_sub_start_hist, db);
+				histogram_get_latencies(ns->batch_sub_restart_hist, db);
+				histogram_get_latencies(ns->batch_sub_dup_res_hist, db);
+				histogram_get_latencies(ns->batch_sub_repl_ping_hist, db);
+				histogram_get_latencies(ns->batch_sub_read_local_hist, db);
+				histogram_get_latencies(ns->batch_sub_response_hist, db);
 			}
 			else if (strcmp(hist_name, "benchmarks-udf-sub") == 0) {
-				histogram_get_latencies(ns->udf_sub_start_hist, legacy, db);
-				histogram_get_latencies(ns->udf_sub_restart_hist, legacy, db);
-				histogram_get_latencies(ns->udf_sub_dup_res_hist, legacy, db);
-				histogram_get_latencies(ns->udf_sub_master_hist, legacy, db);
-				histogram_get_latencies(ns->udf_sub_repl_write_hist, legacy, db);
-				histogram_get_latencies(ns->udf_sub_response_hist, legacy, db);
+				histogram_get_latencies(ns->udf_sub_start_hist, db);
+				histogram_get_latencies(ns->udf_sub_restart_hist, db);
+				histogram_get_latencies(ns->udf_sub_dup_res_hist, db);
+				histogram_get_latencies(ns->udf_sub_master_hist, db);
+				histogram_get_latencies(ns->udf_sub_repl_write_hist, db);
+				histogram_get_latencies(ns->udf_sub_response_hist, db);
 			}
 			else if (strcmp(hist_name, "benchmarks-ops-sub") == 0) {
-				histogram_get_latencies(ns->ops_sub_start_hist, legacy, db);
-				histogram_get_latencies(ns->ops_sub_restart_hist, legacy, db);
-				histogram_get_latencies(ns->ops_sub_dup_res_hist, legacy, db);
-				histogram_get_latencies(ns->ops_sub_master_hist, legacy, db);
-				histogram_get_latencies(ns->ops_sub_repl_write_hist, legacy, db);
-				histogram_get_latencies(ns->ops_sub_response_hist, legacy, db);
+				histogram_get_latencies(ns->ops_sub_start_hist, db);
+				histogram_get_latencies(ns->ops_sub_restart_hist, db);
+				histogram_get_latencies(ns->ops_sub_dup_res_hist, db);
+				histogram_get_latencies(ns->ops_sub_master_hist, db);
+				histogram_get_latencies(ns->ops_sub_repl_write_hist, db);
+				histogram_get_latencies(ns->ops_sub_response_hist, db);
 			}
 			else {
 				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
@@ -4061,45 +4073,6 @@ command_latencies(char* name, char* params, bool legacy, cf_dyn_buf* db)
 	cf_dyn_buf_chomp(db);
 
 	return 0;
-}
-
-// latencies:[hist=<name>]
-//
-// If no hist param, command applies to ?
-//
-// e.g.:
-// latencies:hist={test}-reads
-// output:
-// {test}-reads:msec,30618.2,0.05,0.01,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00
-//
-// explanation:
-// <name>,units,TPS, ...
-// Values following the TPS are percentages exceeding logarithmic thresholds.
-
-int
-info_command_latencies(char* name, char* params, cf_dyn_buf* db)
-{
-	return command_latencies(name, params, false, db);
-}
-
-// latency:[hist=<name>]
-//
-// If no hist param, command applies to ?
-//
-// e.g.:
-// latencies:hist={test}-reads
-// output:
-// {test}-reads:23:26:24-GMT,ops/sec,>1ms,>8ms,>64ms;23:26:34,30618.2,0.05,0.00,0.00
-//
-// explanation:
-// 23:26:24-GMT - timestamp of histogram starting first slice
-// ops/sec,>1ms,>8ms,>64ms - labels for the columns: throughput, and which thresholds
-// 23:26:34,30618.2,0.05,0.00,0.00; - timestamp of histogram ending slice, throughput, latencies
-
-int
-info_command_latency(char* name, char* params, cf_dyn_buf* db)
-{
-	return command_latencies(name, params, true, db);
 }
 
 
@@ -6811,7 +6784,6 @@ as_info_init()
 	as_info_set_command("histogram", info_command_histogram, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
 	as_info_set_command("jem-stats", info_command_jem_stats, PERM_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.
 	as_info_set_command("latencies", info_command_latencies, PERM_NONE);                      // Returns latency and throughput information.
-	as_info_set_command("latency", info_command_latency, PERM_NONE);                          // Returns legacy latency and throughput information.
 	as_info_set_command("log-message", info_command_log_message, PERM_LOGGING_CTRL);          // Log a message.
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("peers-clear-alt", as_service_list_command, PERM_NONE);               // The delta update version of "peers-clear-alt".
