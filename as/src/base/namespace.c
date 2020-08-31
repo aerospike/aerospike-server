@@ -530,6 +530,28 @@ as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id,
 
 
 void
+as_namespace_adjust_set_device_bytes(as_namespace *ns, uint16_t set_id,
+		int64_t delta_bytes)
+{
+	if (set_id == INVALID_SET_ID) {
+		return;
+	}
+
+	as_set *p_set;
+
+	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) !=
+			CF_VMAPX_OK) {
+		cf_warning(AS_NAMESPACE, "set-id %u - failed vmap get", set_id);
+		return;
+	}
+
+	if (cf_atomic64_add(&p_set->n_bytes_device, delta_bytes) < 0) {
+		cf_warning(AS_NAMESPACE, "set-id %u - negative device bytes!", set_id);
+	}
+}
+
+
+void
 as_namespace_release_set_id(as_namespace *ns, uint16_t set_id)
 {
 	if (set_id == INVALID_SET_ID) {
@@ -685,6 +707,10 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, "memory_data_bytes=");
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_bytes_memory));
+	cf_dyn_buf_append_char(db, ':');
+
+	cf_dyn_buf_append_string(db, "device_data_bytes=");
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_bytes_device));
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "truncate_lut=");

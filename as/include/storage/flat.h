@@ -179,6 +179,15 @@ N_RBLOCKS_TO_SIZE(uint32_t n_rblocks) {
 	return (n_rblocks + 1) << LOG_2_RBLOCK_SIZE;
 }
 
+// Convert a difference in n_rblocks to size in bytes.
+static inline int64_t
+DELTA_N_RBLOCKS_TO_SIZE(uint32_t n_new, uint32_t n_old) {
+	return n_old == 0 ?
+			(int64_t)N_RBLOCKS_TO_SIZE(n_new):
+			// Quicker to subtract without first adding 1 to both.
+			((int64_t)n_new - (int64_t)n_old) << LOG_2_RBLOCK_SIZE;
+}
+
 
 //==========================================================
 // Private API - for enterprise separation only.

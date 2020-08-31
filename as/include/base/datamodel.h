@@ -1213,12 +1213,13 @@ struct as_set_s {
 	cf_atomic64		n_objects;
 	cf_atomic64		n_tombstones;		// relevant only for enterprise edition
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
+	cf_atomic64		n_bytes_device;		// sets's total on-device record data size
 	cf_atomic64		stop_writes_count;	// restrict number of records in a set
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	uint32_t		unused;				// FIXME - was set-level XDR config
 	uint32_t		n_sindexes;
-	uint8_t padding[12];
+	uint8_t padding[4];
 };
 
 static inline bool
@@ -1276,6 +1277,7 @@ extern as_set* as_namespace_get_set_by_id(as_namespace* ns, uint16_t set_id);
 extern as_set* as_namespace_get_record_set(as_namespace *ns, const as_record *r);
 extern void as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf_dyn_buf *db);
 extern void as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id, int64_t delta_bytes);
+extern void as_namespace_adjust_set_device_bytes(as_namespace *ns, uint16_t set_id, int64_t delta_bytes);
 extern void as_namespace_release_set_id(as_namespace *ns, uint16_t set_id);
 extern void as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns);
 extern void as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name, cf_dyn_buf *db);

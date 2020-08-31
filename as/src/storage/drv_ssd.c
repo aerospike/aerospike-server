@@ -1605,6 +1605,10 @@ ssd_buffer_bins(as_storage_rd *rd)
 	if (rv != WRITE_IN_PLACE) {
 		r->file_id = ssd->file_id;
 		r->rblock_id = OFFSET_TO_RBLOCK_ID(write_offset);
+
+		as_namespace_adjust_set_device_bytes(ns, as_index_get_set_id(r),
+				DELTA_N_RBLOCKS_TO_SIZE(n_rblocks, r->n_rblocks));
+
 		r->n_rblocks = n_rblocks;
 
 		cf_atomic64_add(&ssd->inuse_size, (int64_t)write_sz);
