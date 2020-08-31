@@ -165,7 +165,7 @@ void as_storage_cfg_init(struct as_namespace_s *ns);
 void as_storage_init();
 void as_storage_load();
 void as_storage_start_tomb_raider();
-void as_storage_shutdown(uint32_t instance);
+bool as_storage_shutdown(uint32_t instance);
 
 void as_storage_destroy_record(struct as_namespace_s *ns, struct as_index_s *r); // not the counterpart of as_storage_record_create()
 

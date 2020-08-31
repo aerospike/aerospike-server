@@ -49,10 +49,11 @@ static void setup_namespace(as_namespace* ns);
 // Public API.
 //
 
-void
+bool
 as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance)
 {
 	// For enterprise version only.
+	return true;
 }
 
 

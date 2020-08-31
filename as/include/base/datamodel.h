@@ -1309,4 +1309,4 @@ as_namespace_index_persisted(const as_namespace *ns)
 }
 
 // Persistent Memory Management
-void as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance);
+bool as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance);

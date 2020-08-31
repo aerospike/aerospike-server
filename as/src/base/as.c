@@ -432,7 +432,10 @@ as_run(int argc, char **argv)
 
 	cf_info(AS_AS, "initiating clean shutdown ...");
 
-	as_storage_shutdown(instance);
+	if (! as_storage_shutdown(instance)) {
+		cf_warning(AS_AS, "failed clean shutdown - exiting");
+		_exit(1);
+	}
 
 	cf_info(AS_AS, "finished clean shutdown - exiting");
 

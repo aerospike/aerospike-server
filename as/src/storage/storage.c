@@ -199,9 +199,11 @@ static const as_storage_shutdown_fn as_storage_shutdown_table[AS_NUM_STORAGE_ENG
 	as_storage_shutdown_ssd
 };
 
-void
+bool
 as_storage_shutdown(uint32_t instance)
 {
+	bool all_ok = true;
+
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace *ns = g_config.namespaces[ns_ix];
 
@@ -225,8 +227,12 @@ as_storage_shutdown(uint32_t instance)
 
 		cf_info(AS_STORAGE, "{%s} storage flushed", ns->name);
 
-		as_namespace_xmem_shutdown(ns, instance);
+		if (! as_namespace_xmem_shutdown(ns, instance)) {
+			all_ok = false; // but continue - next namespace may be ok
+		}
 	}
+
+	return all_ok;
 }
 
 //--------------------------------------
