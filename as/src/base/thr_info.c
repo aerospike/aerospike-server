@@ -3102,7 +3102,11 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_warning(AS_INFO, "default-ttl must be <= %u seconds", MAX_ALLOWED_TTL);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of default-ttl memory of ns %s from %u to %u", ns->name, ns->default_ttl, val);
+			if (val != 0 && ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup) {
+				cf_warning(AS_INFO, "must configure non-zero nsup-period or allow-ttl-without-nsup true to set non-zero default-ttl");
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of default-ttl of ns %s from %u to %u", ns->name, ns->default_ttl, val);
 			ns->default_ttl = val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-order", context, &context_len)) {
