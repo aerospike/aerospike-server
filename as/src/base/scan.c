@@ -715,7 +715,7 @@ typedef struct basic_scan_slice_s {
 
 bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, predexp_eval_t** predexp);
-cf_vector* bin_names_from_op(as_msg* m, int* result);
+cf_vector* bin_names_from_op(as_msg* m, bool single_bin, int* result);
 void sample_max_init(basic_scan_job* job, uint64_t sample_max);
 
 //----------------------------------------------------------
@@ -771,9 +771,9 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	int result;
 
-	job->bin_names = bin_names_from_op(&tr->msgp->msg, &result);
+	job->bin_names = bin_names_from_op(&tr->msgp->msg, ns->single_bin, &result);
 
-	if (! job->bin_names && result != AS_OK) {
+	if (result != AS_OK) {
 		as_scan_job_destroy(_job);
 		return result;
 	}
@@ -1078,11 +1078,16 @@ basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r,
 }
 
 cf_vector*
-bin_names_from_op(as_msg* m, int* result)
+bin_names_from_op(as_msg* m, bool single_bin, int* result)
 {
-	*result = AS_OK;
-
 	if (m->n_ops == 0) {
+		*result = AS_OK;
+		return NULL;
+	}
+
+	if (single_bin) {
+		cf_warning(AS_SCAN, "can't select bins - single-bin namespace");
+		*result = AS_ERR_BIN_NAME;
 		return NULL;
 	}
 
@@ -1106,6 +1111,7 @@ bin_names_from_op(as_msg* m, int* result)
 		cf_vector_append_unique(v, (void*)bin_name);
 	}
 
+	*result = AS_OK;
 	return v;
 }
 
