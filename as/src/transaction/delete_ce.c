@@ -70,7 +70,13 @@ delete_master(as_transaction* tr, rw_request* rw)
 bool
 drop_local(as_namespace* ns, as_partition_reservation* rsv, as_index_ref* r_ref)
 {
-	as_index_delete(rsv->tree, &r_ref->r->keyd);
+	as_record* r = r_ref->r;
+
+	if (ns->storage_data_in_memory) {
+		record_delete_adjust_sindex(r, ns);
+	}
+
+	as_index_delete(rsv->tree, &r->keyd);
 	as_record_done(r_ref, ns);
 
 	return true;
