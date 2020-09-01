@@ -329,15 +329,6 @@ static cf_atomic32     g_query_worker_threadcnt = 0;
 // **************************************************************************************************
 
 /*
- * Extern Functions
- */
-// **************************************************************************************************
-
-extern cf_vector * as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp, int * numbins);
-
-// **************************************************************************************************
-
-/*
  * Forward Declaration
  */
 // **************************************************************************************************
@@ -2776,6 +2767,42 @@ query_th(void* q_to_wait_on)
 	return AS_QUERY_OK;
 }
 
+static cf_vector *
+binlist_from_msg(as_namespace *ns, as_msg *msgp, uint32_t *num_bins)
+{
+	as_msg_field *bfp = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_QUERY_BINLIST);
+
+	if (bfp == NULL) {
+		return NULL;
+	}
+
+	const uint8_t *data = bfp->data;
+	uint32_t n_bins = *data++; // TODO - only <= 255 bins (scans can do more)
+
+	*num_bins = n_bins;
+
+	cf_vector *id_vec  = cf_vector_create(sizeof(uint16_t), n_bins, 0);
+
+	for (uint32_t i = 0; i < n_bins; i++) {
+		uint32_t name_len = *data++;
+		int32_t id = as_bin_get_id_w_len(ns, (const char*)data, name_len);
+
+		if (id < 0) {
+			cf_warning(AS_SINDEX, "bin name '%.*s' (%u) in bin list of sindex query not found",
+					name_len, (char*)data, name_len);
+			cf_vector_destroy(id_vec);
+			return NULL;
+		}
+
+		uint16_t bin_id = (uint16_t)id;
+
+		cf_vector_append_unique(id_vec, (void *)&bin_id);
+		data += name_len;
+	}
+
+	return id_vec;
+}
+
 /*
  * Parse the UDF OP type to find what type of UDF this is or otherwise not even
  * UDF
@@ -3008,13 +3035,13 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		}
 	}
 
-	int numbins = 0;
+	uint32_t numbins = 0;
 	// Populate binlist to be Projected by the Query
-	binlist = as_sindex_binlist_from_msg(ns, m, &numbins);
+	binlist = binlist_from_msg(ns, m, &numbins);
 
 	// If anyone of the bin in the bin is bad, fail the query
 	if (numbins != 0 && !binlist) {
-		tr->result_code = AS_ERR_SINDEX_GENERIC;
+		tr->result_code = AS_ERR_BIN_NAME;
 		goto Cleanup;
 	}
 

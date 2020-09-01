@@ -691,7 +691,7 @@ typedef struct basic_scan_job_s {
 	uint64_t		sample_count;
 	uint64_t		max_per_partition;
 	predexp_eval_t*	predexp;
-	cf_vector*		bin_names;
+	cf_vector*		bin_ids;
 } basic_scan_job;
 
 void basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
@@ -715,7 +715,7 @@ typedef struct basic_scan_slice_s {
 
 bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, predexp_eval_t** predexp);
-cf_vector* bin_names_from_op(as_msg* m, bool single_bin, int* result);
+cf_vector* bin_ids_from_op(as_msg* m, const as_namespace* ns, int* result);
 void sample_max_init(basic_scan_job* job, uint64_t sample_max);
 
 //----------------------------------------------------------
@@ -771,7 +771,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	int result;
 
-	job->bin_names = bin_names_from_op(&tr->msgp->msg, ns->single_bin, &result);
+	job->bin_ids = bin_ids_from_op(&tr->msgp->msg, ns, &result);
 
 	if (result != AS_OK) {
 		as_scan_job_destroy(_job);
@@ -910,8 +910,8 @@ basic_scan_job_destroy(as_scan_job* _job)
 {
 	basic_scan_job* job = (basic_scan_job*)_job;
 
-	if (job->bin_names) {
-		cf_vector_destroy(job->bin_names);
+	if (job->bin_ids != NULL) {
+		cf_vector_destroy(job->bin_ids);
 	}
 
 	predexp_destroy(job->predexp);
@@ -1022,8 +1022,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 			return true;
 		}
 
-		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false,
-				job->bin_names);
+		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false, job->bin_ids);
 	}
 
 	as_storage_record_close(&rd);
@@ -1078,41 +1077,43 @@ basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r,
 }
 
 cf_vector*
-bin_names_from_op(as_msg* m, bool single_bin, int* result)
+bin_ids_from_op(as_msg* m, const as_namespace* ns, int* result)
 {
 	if (m->n_ops == 0) {
 		*result = AS_OK;
 		return NULL;
 	}
 
-	if (single_bin) {
+	if (ns->single_bin) {
 		cf_warning(AS_SCAN, "can't select bins - single-bin namespace");
 		*result = AS_ERR_BIN_NAME;
 		return NULL;
 	}
 
-	cf_vector* v  = cf_vector_create(AS_BIN_NAME_MAX_SZ, m->n_ops, 0);
+	cf_vector* id_vec  = cf_vector_create(sizeof(uint16_t), m->n_ops, 0);
 
 	as_msg_op* op = NULL;
 	int n = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
-		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
-			cf_warning(AS_SCAN, "basic scan job bin name too long");
-			cf_vector_destroy(v);
+		int32_t id = as_bin_get_id_w_len(ns, (char*)op->name, op->name_sz);
+
+		if (id < 0) {
+			cf_warning(AS_SCAN, "basic scan job bin '%.*s' (%u) not found",
+					(uint32_t)op->name_sz, (char*)op->name,
+					(uint32_t)op->name_sz);
+			cf_vector_destroy(id_vec);
 			*result = AS_ERR_BIN_NAME;
 			return NULL;
 		}
 
-		char bin_name[AS_BIN_NAME_MAX_SZ];
+		uint16_t bin_id = (uint16_t)id;
 
-		memcpy(bin_name, op->name, op->name_sz);
-		bin_name[op->name_sz] = 0;
-		cf_vector_append_unique(v, (void*)bin_name);
+		cf_vector_append_unique(id_vec, (void*)&bin_id);
 	}
 
 	*result = AS_OK;
-	return v;
+	return id_vec;
 }
 
 void

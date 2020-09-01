@@ -330,18 +330,18 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			n_select_bins = cf_vector_size(select_bins);
 
 			for (uint32_t i = 0; i < n_select_bins; i++) {
-				char bin_name[AS_BIN_NAME_MAX_SZ];
+				uint16_t bin_id;
 
-				cf_vector_get(select_bins, i, (void*)&bin_name);
+				cf_vector_get(select_bins, i, (void*)&bin_id);
 
-				as_bin *b = as_bin_get(rd, bin_name);
+				as_bin *b = as_bin_get_by_id(rd, bin_id);
 
 				if (! b) {
 					continue;
 				}
 
 				msg_sz += sizeof(as_msg_op);
-				msg_sz += strlen(bin_name); // note - can't be single-bin
+				msg_sz += strlen(as_bin_get_name_from_id(ns, bin_id));
 				msg_sz += as_bin_particle_client_value_size(b);
 
 				n_bins_matched++;
@@ -437,11 +437,11 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 
 	if (select_bins) {
 		for (uint32_t i = 0; i < n_select_bins; i++) {
-			char bin_name[AS_BIN_NAME_MAX_SZ];
+			uint16_t bin_id;
 
-			cf_vector_get(select_bins, i, (void*)&bin_name);
+			cf_vector_get(select_bins, i, (void*)&bin_id);
 
-			as_bin *b = as_bin_get(rd, bin_name);
+			as_bin *b = as_bin_get_by_id(rd, bin_id);
 
 			if (! b) {
 				continue;
