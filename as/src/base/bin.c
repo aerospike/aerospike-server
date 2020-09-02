@@ -95,18 +95,11 @@ as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from)
 int32_t
 as_bin_get_id(const as_namespace* ns, const char* name)
 {
-	return as_bin_get_id_w_len(ns, name, strlen(name));
-}
-
-int32_t
-as_bin_get_id_w_len(const as_namespace* ns, const char* name, size_t len)
-{
 	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
 
 	uint32_t idx;
 
-	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, name, len, &idx) ==
-			CF_VMAPX_OK) {
+	if (cf_vmapx_get_index(ns->p_bin_name_vmap, name, &idx) == CF_VMAPX_OK) {
 		return (int32_t)idx;
 	}
 

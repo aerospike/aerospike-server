@@ -370,7 +370,6 @@ as_bin_destroy_all(as_bin* bins, uint32_t n_bins)
 /* Bin function declarations */
 extern void as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from);
 extern int32_t as_bin_get_id(const as_namespace *ns, const char *name);
-extern int32_t as_bin_get_id_w_len(const as_namespace *ns, const char *name, size_t len);
 extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len, uint16_t *id);
 extern const char* as_bin_get_name_from_id(const as_namespace *ns, uint16_t id);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);

@@ -2785,18 +2785,16 @@ binlist_from_msg(as_namespace *ns, as_msg *msgp, uint32_t *num_bins)
 
 	for (uint32_t i = 0; i < n_bins; i++) {
 		uint32_t name_len = *data++;
-		int32_t id = as_bin_get_id_w_len(ns, (const char*)data, name_len);
+		uint16_t id;
 
-		if (id < 0) {
-			cf_warning(AS_SINDEX, "bin name '%.*s' (%u) in bin list of sindex query not found",
-					name_len, (char*)data, name_len);
+		if (! as_bin_get_or_assign_id_w_len(ns, (const char*)data, name_len,
+				&id)) {
+			cf_warning(AS_SINDEX, "query job bin not added");
 			cf_vector_destroy(id_vec);
 			return NULL;
 		}
 
-		uint16_t bin_id = (uint16_t)id;
-
-		cf_vector_append_unique(id_vec, (void *)&bin_id);
+		cf_vector_append_unique(id_vec, (void *)&id);
 		data += name_len;
 	}
 

@@ -715,7 +715,7 @@ typedef struct basic_scan_slice_s {
 
 bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, predexp_eval_t** predexp);
-cf_vector* bin_ids_from_op(as_msg* m, const as_namespace* ns, int* result);
+cf_vector* bin_ids_from_op(as_msg* m, as_namespace* ns, int* result);
 void sample_max_init(basic_scan_job* job, uint64_t sample_max);
 
 //----------------------------------------------------------
@@ -1077,7 +1077,7 @@ basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r,
 }
 
 cf_vector*
-bin_ids_from_op(as_msg* m, const as_namespace* ns, int* result)
+bin_ids_from_op(as_msg* m, as_namespace* ns, int* result)
 {
 	if (m->n_ops == 0) {
 		*result = AS_OK;
@@ -1096,20 +1096,17 @@ bin_ids_from_op(as_msg* m, const as_namespace* ns, int* result)
 	int n = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
-		int32_t id = as_bin_get_id_w_len(ns, (char*)op->name, op->name_sz);
+		uint16_t id;
 
-		if (id < 0) {
-			cf_warning(AS_SCAN, "basic scan job bin '%.*s' (%u) not found",
-					(uint32_t)op->name_sz, (char*)op->name,
-					(uint32_t)op->name_sz);
+		if (! as_bin_get_or_assign_id_w_len(ns, (const char*)op->name,
+				op->name_sz, &id)) {
+			cf_warning(AS_SCAN, "basic scan job bin not added");
 			cf_vector_destroy(id_vec);
 			*result = AS_ERR_BIN_NAME;
 			return NULL;
 		}
 
-		uint16_t bin_id = (uint16_t)id;
-
-		cf_vector_append_unique(id_vec, (void*)&bin_id);
+		cf_vector_append_unique(id_vec, (void*)&id);
 	}
 
 	*result = AS_OK;
