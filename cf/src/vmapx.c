@@ -336,7 +336,7 @@ vhash_destroy(vhash* h)
 		if (e_table->next) {
 			vhash_ele* e = e_table->next;
 
-			while (e) {
+			while (e != NULL) {
 				vhash_ele* t = e->next;
 
 				cf_free(e);
@@ -358,26 +358,19 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)zkey, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 
-	vhash_ele* e = (vhash_ele*)(h->table + (h->ele_size * row_i));
+	vhash_ele* e_head = (vhash_ele*)(h->table + (h->ele_size * row_i));
 
 	if (! h->row_usage[row_i]) {
-		vhash_set_ele_key(VHASH_ELE_KEY_PTR(e), h->key_size, zkey, key_len + 1);
-		*VHASH_ELE_VALUE_PTR(h, e) = value;
+		vhash_set_ele_key(VHASH_ELE_KEY_PTR(e_head), h->key_size, zkey,
+				key_len + 1);
+		*VHASH_ELE_VALUE_PTR(h, e_head) = value;
 		// TODO - need barrier?
 		h->row_usage[row_i] = true;
 
 		return;
 	}
 
-	vhash_ele* e_head = e;
-
-	// This function is always called under write lock, after get, so we'll
-	// never encounter the key - don't bother checking it.
-	while (e) {
-		e = e->next;
-	}
-
-	e = (vhash_ele*)cf_malloc(h->ele_size);
+	vhash_ele* e = (vhash_ele*)cf_malloc(h->ele_size);
 
 	vhash_set_ele_key(VHASH_ELE_KEY_PTR(e), h->key_size, zkey, key_len + 1);
 	*VHASH_ELE_VALUE_PTR(h, e) = value;
@@ -401,10 +394,10 @@ vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value)
 	// TODO - need barrier?
 	vhash_ele* e = (vhash_ele*)(h->table + (h->ele_size * row_i));
 
-	while (e) {
+	while (e != NULL) {
 		if (VHASH_ELE_KEY_PTR(e)[key_len] == 0 &&
 				memcmp(VHASH_ELE_KEY_PTR(e), key, key_len) == 0) {
-			if (p_value) {
+			if (p_value != NULL) {
 				*p_value = *VHASH_ELE_VALUE_PTR(h, e);
 			}
 
