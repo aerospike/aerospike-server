@@ -2494,6 +2494,10 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	// Set/reset the record's storage information.
 	r->file_id = ssd->file_id;
 	r->rblock_id = rblock_id;
+
+	as_namespace_adjust_set_device_bytes(ns, as_index_get_set_id(r),
+			DELTA_N_RBLOCKS_TO_SIZE(flat->n_rblocks, r->n_rblocks));
+
 	r->n_rblocks = flat->n_rblocks;
 
 	as_record_done(&r_ref, ns);
@@ -3457,6 +3461,9 @@ as_storage_destroy_record_ssd(as_namespace *ns, as_record *r)
 		drv_ssd *ssd = &ssds->ssds[r->file_id];
 
 		ssd_block_free(ssd, r->rblock_id, r->n_rblocks, "destroy");
+
+		as_namespace_adjust_set_device_bytes(ns, as_index_get_set_id(r),
+				-N_RBLOCKS_TO_SIZE(r->n_rblocks));
 
 		r->rblock_id = 0;
 		r->n_rblocks = 0;
