@@ -119,14 +119,6 @@ set_delete_durablility(const as_transaction* tr, as_storage_rd* rd)
 // Private API - for enterprise separation only.
 //
 
-bool
-create_only_check(const as_record* r, const as_msg* m)
-{
-	// Ok (return true) if no requirement.
-	return (m->info2 & AS_MSG_INFO2_CREATE_ONLY) == 0;
-}
-
-
 void
 write_delete_record(as_record* r, as_index_tree* tree)
 {
