@@ -176,7 +176,6 @@ clear_delete_response_metadata(as_transaction* tr)
 // Private API - for enterprise separation only.
 //
 
-bool create_only_check(const struct as_index_s* r, const struct as_msg_s* m);
 void write_delete_record(struct as_index_s* r, struct as_index_tree_s* tree);
 
 udf_optype udf_finish_delete(struct udf_record_s* urecord);

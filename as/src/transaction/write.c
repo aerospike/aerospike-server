@@ -598,7 +598,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 
 	// Enforce record-level create-only existence policy.
-	if (! record_created && ! create_only_check(r, m)) {
+	if ((m->info2 & AS_MSG_INFO2_CREATE_ONLY) != 0 &&
+			! record_created && as_record_is_live(r)) {
 		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_RECORD_EXISTS);
 		return TRANS_DONE_ERROR;
 	}
@@ -673,7 +674,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 
 	// Convert message TTL special value if appropriate.
-	if (record_created && m->record_ttl == TTL_DONT_UPDATE) {
+	if (m->record_ttl == TTL_DONT_UPDATE &&
+			(record_created || ! as_record_is_live(r))) {
 		m->record_ttl = TTL_NAMESPACE_DEFAULT;
 	}
 
