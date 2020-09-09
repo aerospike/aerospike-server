@@ -88,7 +88,7 @@ typedef struct as_xdr_dc_ns_cfg_s {
 	uint32_t hot_key_ms;
 	bool ignore_expunges;
 	uint32_t max_throughput;
-	char *remote_namespace;
+	char* remote_namespace;
 	uint32_t sc_replication_wait_ms;
 	bool ship_nsup_deletes;
 	bool ship_only_specified_bins;
