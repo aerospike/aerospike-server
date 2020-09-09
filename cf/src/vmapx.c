@@ -313,7 +313,9 @@ vhash_create(uint32_t key_size, uint32_t n_rows)
 	vhash* h = (vhash*)cf_malloc(sizeof(vhash) + row_usage_size);
 
 	h->key_size = key_size;
-	h->ele_size = sizeof(vhash_ele) + key_size + sizeof(uint32_t);
+	// Round up to multiple of 8 so vhash_ele next pointer is 8-byte aligned.
+	// (It must not cross a cache-line boundary for atomic stores & loads.)
+	h->ele_size = (sizeof(vhash_ele) + key_size + sizeof(uint32_t) + 7) & -8;
 	h->n_rows = n_rows;
 
 	size_t table_size = n_rows * h->ele_size;
