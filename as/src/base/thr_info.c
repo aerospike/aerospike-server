@@ -3010,6 +3010,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->n_nsup_threads = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "xdr-tomb-raider-period", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "xdr-tomb-raider-period is enterprise-only");
+				goto Error;
+			}
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
@@ -3017,6 +3021,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->xdr_tomb_raider_period = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "xdr-tomb-raider-threads", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "xdr-tomb-raider-threads is enterprise-only");
+				goto Error;
+			}
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 128) {
 				goto Error;
 			}
