@@ -1264,6 +1264,14 @@ as_bin_memcpy_name(const as_namespace* ns, uint8_t* buf, as_bin* b)
 	return (uint8_t*)to - buf;
 }
 
+static inline void
+as_bin_destroy_all_dim(const as_namespace* ns, as_bin* bins, uint32_t n_bins)
+{
+	if (ns->storage_data_in_memory) {
+		as_bin_destroy_all(bins, n_bins);
+	}
+}
+
 // forward ref
 struct as_msg_field_s;
 
