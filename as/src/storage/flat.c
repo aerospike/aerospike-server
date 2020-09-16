@@ -310,20 +310,20 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 	}
 
 	if (i < n_bins) {
-		as_bin_destroy_all(bins, i);
+		as_bin_destroy_all_dim(ns, bins, i);
 		return -AS_ERR_UNKNOWN;
 	}
 
 	if (at > end) {
 		cf_warning(AS_FLAT, "incomplete flat bin");
-		as_bin_destroy_all(bins, n_bins);
+		as_bin_destroy_all_dim(ns, bins, n_bins);
 		return -AS_ERR_UNKNOWN;
 	}
 
 	// Some (but not all) callers pass end as an rblock-rounded value.
 	if (at + RBLOCK_SIZE <= end) {
 		cf_warning(AS_FLAT, "extra rblocks follow flat bin");
-		as_bin_destroy_all(bins, n_bins);
+		as_bin_destroy_all_dim(ns, bins, n_bins);
 		return -AS_ERR_UNKNOWN;
 	}
 
