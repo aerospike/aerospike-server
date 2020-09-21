@@ -330,7 +330,6 @@ execute_updates(udf_record* urecord)
 
 		// Special fast failure case - for this, it's worth it.
 		if (ns->stop_writes) {
-			cf_warning(AS_UDF, "UDF failed by stop-writes");
 			urecord->result_code = AS_ERR_OUT_OF_SPACE;
 			return -1;
 		}
