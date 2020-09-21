@@ -1490,8 +1490,8 @@ ssd_buffer_bins(as_storage_rd *rd)
 			as_flat_record_size(rd) : rd->orig_pickle_sz;
 
 	if (flat_sz > ssd->write_block_size) {
-		cf_detail(AS_DRV_SSD, "write: size %u - rejecting %pD", flat_sz,
-				&r->keyd);
+		cf_detail(AS_DRV_SSD, "{%s} write: size %u - rejecting %pD", ns->name,
+				flat_sz, &r->keyd);
 		return -AS_ERR_RECORD_TOO_BIG;
 	}
 
@@ -1526,7 +1526,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		cur_swb->swb = swb;
 
 		if (! swb) {
-			cf_ticker_warning(AS_DRV_SSD, "out of storage space");
+			cf_ticker_warning(AS_DRV_SSD, "{%s} out of space", ns->name);
 			cf_mutex_unlock(&cur_swb->lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
@@ -1546,7 +1546,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		cur_swb->swb = swb;
 
 		if (! swb) {
-			cf_ticker_warning(AS_DRV_SSD, "out of storage space");
+			cf_ticker_warning(AS_DRV_SSD, "{%s} out of space", ns->name);
 			cf_mutex_unlock(&cur_swb->lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
