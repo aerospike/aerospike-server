@@ -1007,6 +1007,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
+		cf_detail(AS_UDF, "{%s} failed write %pD", ns->name, &tr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		return (uint8_t)(-result);
 	}

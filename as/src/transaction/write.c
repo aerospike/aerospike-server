@@ -1224,7 +1224,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
+		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		write_dim_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 		return -result;
@@ -1342,7 +1342,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
+		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 		return -result;
@@ -1462,7 +1462,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
+		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
@@ -1581,7 +1581,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	//
 
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
+		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;

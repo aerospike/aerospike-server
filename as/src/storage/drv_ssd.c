@@ -1526,7 +1526,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		cur_swb->swb = swb;
 
 		if (! swb) {
-			cf_ticker_warning(AS_DRV_SSD, "write bins: couldn't get swb");
+			cf_ticker_warning(AS_DRV_SSD, "out of storage space");
 			cf_mutex_unlock(&cur_swb->lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}
@@ -1546,7 +1546,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		cur_swb->swb = swb;
 
 		if (! swb) {
-			cf_ticker_warning(AS_DRV_SSD, "write bins: couldn't get swb");
+			cf_ticker_warning(AS_DRV_SSD, "out of storage space");
 			cf_mutex_unlock(&cur_swb->lock);
 			return -AS_ERR_OUT_OF_SPACE;
 		}

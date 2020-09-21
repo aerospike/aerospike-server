@@ -505,7 +505,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
 	// Write the record to storage. Note - here the pickle is directly stored -
 	// we will not use rd->bins and rd->n_bins at all to write.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
+		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		as_bin_destroy_all(&new_bin, n_new_bins);
 		return -result;
@@ -559,7 +559,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 	// Write the record to storage. Note - here the pickle is directly stored -
 	// we will not use rd->bins and rd->n_bins at all to write.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
+		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		as_bin_destroy_all(new_bins, n_new_bins);
 		return -result;
@@ -608,7 +608,7 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd)
 	int result = as_storage_record_write(rd);
 
 	if (result < 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
+		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
@@ -660,7 +660,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 	// Write the record to storage. Note - here the pickle is directly stored -
 	// we will not use rd->bins and rd->n_bins at all to write.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
+		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
 		unwind_index_metadata(&old_metadata, r);
 		return -result;
 	}
