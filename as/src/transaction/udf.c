@@ -206,6 +206,19 @@ udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 	}
 }
 
+static inline bool
+has_forbidden_policy(const as_msg* m)
+{
+	return	(m->info2 & (
+					AS_MSG_INFO2_GENERATION |
+					AS_MSG_INFO2_GENERATION_GT |
+					AS_MSG_INFO2_CREATE_ONLY)) != 0 ||
+			(m->info3 & (
+					AS_MSG_INFO3_UPDATE_ONLY |
+					AS_MSG_INFO3_CREATE_OR_REPLACE |
+					AS_MSG_INFO3_REPLACE_ONLY)) != 0;
+}
+
 
 //==========================================================
 // Public API.
@@ -684,6 +697,12 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	as_transaction* tr = call->tr;
 	as_namespace* ns = tr->rsv.ns;
 	cf_dyn_buf* db = &rw->response_db;
+
+	if (has_forbidden_policy(&tr->msgp->msg)) {
+		cf_warning(AS_UDF, "udf applied with forbidden policy");
+		tr->result_code = AS_ERR_PARAMETER;
+		return UDF_OPTYPE_NONE;
+	}
 
 	as_index_ref r_ref;
 	int get_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref);
