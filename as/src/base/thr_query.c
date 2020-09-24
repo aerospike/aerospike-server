@@ -1399,7 +1399,7 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 	as_sindex_bin_data *end   = &qtr->srange->end;
 
 	//TODO: Make it more general to support sindex over multiple bins	
-	as_bin * b = as_bin_get_by_id(rd, qtr->si->imd->binid);
+	as_bin * b = as_bin_get_by_id_live(rd, qtr->si->imd->binid);
 
 	if (!b) {
 		cf_debug(AS_QUERY , "as_query_record_validation: "
@@ -1630,7 +1630,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		// to check via query_record_matches() below. If sindex evolves to not
 		// have to do that, optimize this case and bypass reading bins.
 
-		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
+		as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
 
 		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 			as_storage_record_close(&rd);

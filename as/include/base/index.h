@@ -65,7 +65,8 @@ typedef struct as_index_s {
 
 	// offset: 34
 	uint16_t set_id_bits: 10;
-	uint16_t : 5;
+	uint16_t : 4;
+	uint16_t has_bin_meta: 1; // for data-in-memory only
 	uint16_t xdr_write : 1;
 
 	// offset: 36

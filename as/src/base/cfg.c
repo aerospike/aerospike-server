@@ -493,6 +493,7 @@ typedef enum {
 	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
 	CASE_NAMESPACE_TRUNCATE_THREADS,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
+	CASE_NAMESPACE_XDR_BIN_TOMBSTONE_TTL,
 	CASE_NAMESPACE_XDR_TOMB_RAIDER_PERIOD,
 	CASE_NAMESPACE_XDR_TOMB_RAIDER_THREADS,
 	// Obsoleted:
@@ -686,6 +687,7 @@ typedef enum {
 	CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE,
 
 	// XDR DC namespace options:
+	CASE_XDR_DC_NAMESPACE_BIN_POLICY,
 	CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL,
 	CASE_XDR_DC_NAMESPACE_DELAY_MS,
 	CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION,
@@ -699,11 +701,17 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS,
 	CASE_XDR_DC_NAMESPACE_SHIP_BIN,
 	CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES,
-	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS,
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS,
 	CASE_XDR_DC_NAMESPACE_SHIP_SET,
 	CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT,
 	CASE_XDR_DC_NAMESPACE_WRITE_POLICY,
+
+	// XDR DC namespace bin policy (value tokens):
+	CASE_XDR_DC_NAMESPACE_BIN_POLICY_ALL,
+	CASE_XDR_DC_NAMESPACE_BIN_POLICY_ONLY_CHANGED,
+	CASE_XDR_DC_NAMESPACE_BIN_POLICY_ONLY_SPECIFIED,
+	CASE_XDR_DC_NAMESPACE_BIN_POLICY_CHANGED_AND_SPECIFIED,
+	CASE_XDR_DC_NAMESPACE_BIN_POLICY_CHANGED_OR_SPECIFIED,
 
 	// XDR DC namespace write policy (value tokens):
 	CASE_XDR_DC_NAMESPACE_WRITE_POLICY_AUTO,
@@ -991,6 +999,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
 		{ "truncate-threads",				CASE_NAMESPACE_TRUNCATE_THREADS },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
+		{ "xdr-bin-tombstone-ttl",			CASE_NAMESPACE_XDR_BIN_TOMBSTONE_TTL },
 		{ "xdr-tomb-raider-period",			CASE_NAMESPACE_XDR_TOMB_RAIDER_PERIOD },
 		{ "xdr-tomb-raider-threads",		CASE_NAMESPACE_XDR_TOMB_RAIDER_THREADS },
 		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
@@ -1214,6 +1223,7 @@ const cfg_opt XDR_DC_AUTH_MODE_OPTS[] = {
 };
 
 const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
+		{ "bin-policy",						CASE_XDR_DC_NAMESPACE_BIN_POLICY },
 		{ "compression-level",				CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL },
 		{ "delay-ms",						CASE_XDR_DC_NAMESPACE_DELAY_MS },
 		{ "enable-compression",				CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION },
@@ -1227,12 +1237,19 @@ const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "sc-replication-wait-ms",			CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS },
 		{ "ship-bin",						CASE_XDR_DC_NAMESPACE_SHIP_BIN },
 		{ "ship-nsup-deletes",				CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES },
-		{ "ship-only-specified-bins",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS },
 		{ "ship-only-specified-sets",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS },
 		{ "ship-set",						CASE_XDR_DC_NAMESPACE_SHIP_SET },
 		{ "transaction-queue-limit",		CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT },
 		{ "write-policy",					CASE_XDR_DC_NAMESPACE_WRITE_POLICY },
 		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt XDR_DC_NAMESPACE_BIN_POLICY_OPTS[] = {
+		{ "all",							CASE_XDR_DC_NAMESPACE_BIN_POLICY_ALL },
+		{ "only-changed",					CASE_XDR_DC_NAMESPACE_BIN_POLICY_ONLY_CHANGED },
+		{ "only-specified",					CASE_XDR_DC_NAMESPACE_BIN_POLICY_ONLY_SPECIFIED },
+		{ "changed-and-specified",			CASE_XDR_DC_NAMESPACE_BIN_POLICY_CHANGED_AND_SPECIFIED },
+		{ "changed-or-specified",			CASE_XDR_DC_NAMESPACE_BIN_POLICY_CHANGED_OR_SPECIFIED }
 };
 
 const cfg_opt XDR_DC_NAMESPACE_WRITE_POLICY_OPTS[] = {
@@ -1280,6 +1297,7 @@ const int NUM_XDR_OPTS								= sizeof(XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_OPTS							= sizeof(XDR_DC_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_NAMESPACE_OPTS					= sizeof(XDR_DC_NAMESPACE_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_AUTH_MODE_OPTS					= sizeof(XDR_DC_AUTH_MODE_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_DC_NAMESPACE_BIN_POLICY_OPTS		= sizeof(XDR_DC_NAMESPACE_BIN_POLICY_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_NAMESPACE_WRITE_POLICY_OPTS	= sizeof(XDR_DC_NAMESPACE_WRITE_POLICY_OPTS) / sizeof(cfg_opt);
 
 
@@ -3016,6 +3034,10 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_XDR_BIN_TOMBSTONE_TTL:
+				cfg_enterprise_only(&line);
+				ns->xdr_bin_tombstone_ttl_ms = cfg_seconds(&line, 0, MAX_ALLOWED_TTL) * 1000UL;
+				break;
 			case CASE_NAMESPACE_XDR_TOMB_RAIDER_PERIOD:
 				cfg_enterprise_only(&line);
 				ns->xdr_tomb_raider_period = cfg_u32_no_checks(&line);
@@ -3729,6 +3751,29 @@ as_config_init(const char* config_file)
 		//
 		case XDR_DC_NAMESPACE:
 			switch (cfg_find_tok(line.name_tok, XDR_DC_NAMESPACE_OPTS, NUM_XDR_DC_NAMESPACE_OPTS)) {
+			case CASE_XDR_DC_NAMESPACE_BIN_POLICY:
+				switch (cfg_find_tok(line.val_tok_1, XDR_DC_NAMESPACE_BIN_POLICY_OPTS, NUM_XDR_DC_NAMESPACE_BIN_POLICY_OPTS)) {
+				case CASE_XDR_DC_NAMESPACE_BIN_POLICY_ALL:
+					dc_ns_cfg->bin_policy = XDR_BIN_POLICY_ALL;
+					break;
+				case CASE_XDR_DC_NAMESPACE_BIN_POLICY_ONLY_CHANGED:
+					dc_ns_cfg->bin_policy = XDR_BIN_POLICY_ONLY_CHANGED;
+					break;
+				case CASE_XDR_DC_NAMESPACE_BIN_POLICY_ONLY_SPECIFIED:
+					dc_ns_cfg->bin_policy = XDR_BIN_POLICY_ONLY_SPECIFIED;
+					break;
+				case CASE_XDR_DC_NAMESPACE_BIN_POLICY_CHANGED_AND_SPECIFIED:
+					dc_ns_cfg->bin_policy = XDR_BIN_POLICY_CHANGED_AND_SPECIFIED;
+					break;
+				case CASE_XDR_DC_NAMESPACE_BIN_POLICY_CHANGED_OR_SPECIFIED:
+					dc_ns_cfg->bin_policy = XDR_BIN_POLICY_CHANGED_OR_SPECIFIED;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
 			case CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL:
 				dc_ns_cfg->compression_level = cfg_u32(&line, 1, 9);
 				break;
@@ -3767,9 +3812,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES:
 				dc_ns_cfg->ship_nsup_deletes = cfg_bool(&line);
-				break;
-			case CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_BINS:
-				dc_ns_cfg->ship_only_specified_bins = cfg_bool(&line);
 				break;
 			case CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS:
 				dc_ns_cfg->ship_only_specified_sets = cfg_bool(&line);

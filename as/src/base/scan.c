@@ -1012,7 +1012,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL);
 	}
 	else {
-		as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
+		as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
 
 		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 			cf_warning(AS_SCAN, "job %lu - record unreadable", _job->trid);

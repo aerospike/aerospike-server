@@ -747,7 +747,7 @@ blob_to_flat(const as_particle* p, uint8_t* flat)
 int
 as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 {
-	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unused bin");
+	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
 
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
 		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - error %u unexpected particle type %u for bin %.*s",
@@ -813,7 +813,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 
 	as_particle* old_blob;
 
-	if (as_bin_inuse(b)) {
+	if (as_bin_is_live(b)) {
 		if ((op.flags & AS_BITS_FLAG_CREATE_ONLY) != 0) {
 			if ((op.flags & AS_BITS_FLAG_NO_FAIL) != 0) {
 				return AS_OK;
@@ -1370,7 +1370,7 @@ bits_prepare_op(bits_state* state, bits_op* op, const as_bin* b)
 {
 	bits_op_def* def = state->def;
 
-	if (as_bin_inuse(b)) {
+	if (as_bin_is_live(b)) {
 		state->old_size = ((blob_mem*)b->particle)->sz;
 	}
 	else if (op->offset < 0) {

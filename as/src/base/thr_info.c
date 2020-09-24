@@ -2022,6 +2022,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "transaction-pending-limit", ns->transaction_pending_limit);
 	info_append_uint32(db, "truncate-threads", ns->n_truncate_threads);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
+	info_append_uint64(db, "xdr-bin-tombstone-ttl", ns->xdr_bin_tombstone_ttl_ms / 1000);
 	info_append_uint32(db, "xdr-tomb-raider-period", ns->xdr_tomb_raider_period);
 	info_append_uint32(db, "xdr-tomb-raider-threads", ns->n_xdr_tomb_raider_threads);
 
@@ -3164,6 +3165,23 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of nsup-threads of ns %s from %u to %d", ns->name, ns->n_nsup_threads, val);
 			ns->n_nsup_threads = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "xdr-bin-tombstone-ttl", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "xdr-bin-tombstone-ttl is enterprise-only");
+				goto Error;
+			}
+			uint32_t val;
+			if (cf_str_atoi_seconds(context, &val) != 0) {
+				cf_warning(AS_INFO, "xdr-bin-tombstone-ttl must be an unsigned number with time unit (s, m, h, or d)");
+				goto Error;
+			}
+			if (val > MAX_ALLOWED_TTL) {
+				cf_warning(AS_INFO, "xdr-bin-tombstone-ttl must be <= %u seconds", MAX_ALLOWED_TTL);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of xdr-bin-tombstone-ttl of ns %s from %lu to %u", ns->name, ns->xdr_bin_tombstone_ttl_ms / 1000, val);
+			ns->xdr_bin_tombstone_ttl_ms = val * 1000UL;
 		}
 		else if (0 == as_info_parameter_get(params, "xdr-tomb-raider-period", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {

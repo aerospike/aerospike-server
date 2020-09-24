@@ -131,6 +131,19 @@ typedef struct as_flat_opt_meta_s {
 	as_flat_comp_meta cm;
 } as_flat_opt_meta;
 
+// Can't use a struct with bit fields since has-meta flag must be MSB.
+#define BIN_HAS_META			0x80
+
+// Remaining bits union with particle type:
+#define BIN_HAS_EXTRA_FLAGS		0x40 // not supported yet
+#define BIN_XDR_WRITE			0x20 // relevant only for enterprise edition
+#define BIN_UNKNOWN_FLAGS		(0x10 | 0x08 | 0x04 | 0x02)
+#define BIN_HAS_LUT				0x01
+
+typedef struct flat_bin_lut_s {
+	uint64_t lut: 40;
+} __attribute__ ((__packed__)) flat_bin_lut;
+
 #define RBLOCK_SIZE			16	// 2^4
 #define LOG_2_RBLOCK_SIZE	4	// must be in sync with RBLOCK_SIZE
 
@@ -203,6 +216,9 @@ const uint8_t* unflatten_compression_meta(const as_flat_record* flat, const uint
 void set_remote_record_xdr_flags(const as_flat_record* flat, const as_flat_extra_flags* extra_flags, struct as_remote_record_s* rr);
 void set_flat_xdr_state(const struct as_index_s* r, as_flat_record* flat);
 as_flat_extra_flags get_flat_extra_flags(const struct as_index_s* r);
+
+void unpack_bin_xdr_write(uint8_t flags, struct as_bin_s* b);
+void flatten_bin_xdr_write(const struct as_bin_s* b, uint8_t* flags);
 
 static inline bool
 flat_extra_flags_used(const as_flat_extra_flags* extra_flags)

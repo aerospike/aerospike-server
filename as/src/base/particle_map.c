@@ -1536,7 +1536,7 @@ cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags)
 		return;
 	}
 
-	if (! ctx->create_triggered && ! as_bin_inuse(ctx->b)) {
+	if (! ctx->create_triggered && ! as_bin_is_live(ctx->b)) {
 		if (is_kv_ordered(flags)) {
 			ctx->b->particle = (as_particle *)&map_mem_empty_kv;
 		}

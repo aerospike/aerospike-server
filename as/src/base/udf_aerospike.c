@@ -375,6 +375,9 @@ execute_updates(udf_record* urecord)
 			urecord->updates[i].dirty = false;
 		}
 	}
+	else { // treat this as a touch
+		touch_bin_metadata(rd);
+	}
 
 	return 0;
 }
@@ -384,31 +387,26 @@ prepare_for_write(udf_record* urecord)
 {
 	as_storage_rd* rd = urecord->rd;
 	as_namespace* ns = rd->ns;
-	as_record* r = rd->r;
 
 	urecord->old_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
 	urecord->n_old_bins = rd->n_bins;
 
-	if (ns->storage_data_in_memory) {
-		if (ns->single_bin) {
-			as_single_bin_copy(urecord->stack_bins, as_index_get_single_bin(r));
-		}
-		else if (rd->n_bins != 0) {
-			memcpy(urecord->stack_bins, rd->bins, rd->n_bins * sizeof(as_bin));
+	if (rd->n_bins == 0) {
+		return;
+	}
+
+	if (ns->single_bin) {
+		if (ns->storage_data_in_memory) {
+			// Note - single-bin load doesn't copy to stack bins.
+			as_single_bin_copy(urecord->stack_bins, rd->bins);
 		}
 
-		urecord->old_dim_bins = rd->bins;
-		rd->bins = urecord->stack_bins;
+		as_single_bin_copy(urecord->old_bins, rd->bins);
 	}
-	else if (rd->n_bins != 0) {
-		if (ns->single_bin) {
-			as_single_bin_copy(urecord->old_ssd_bins, rd->bins);
-		}
-		else {
-			memcpy(urecord->old_ssd_bins, rd->bins,
-					rd->n_bins * sizeof(as_bin));
-		}
+	else {
+		memcpy(urecord->old_bins, rd->bins, rd->n_bins * sizeof(as_bin));
+		prepare_bin_metadata(rd);
 	}
 }
 
@@ -422,17 +420,16 @@ execute_failed(udf_record* urecord, int result_code)
 	as_namespace* ns = rd->ns;
 
 	if (ns->storage_data_in_memory) {
-		write_dim_unwind(urecord->old_dim_bins, urecord->n_old_bins, rd->bins,
+		write_dim_unwind(urecord->old_bins, urecord->n_old_bins, rd->bins,
 				rd->n_bins, urecord->cleanup_bins, urecord->n_cleanup_bins);
-
-		rd->bins = urecord->old_dim_bins;
 	}
-	else if (urecord->n_old_bins != 0) {
+
+	if (urecord->n_old_bins != 0) {
 		if (ns->single_bin) {
-			as_single_bin_copy(rd->bins, urecord->old_ssd_bins);
+			as_single_bin_copy(rd->bins, urecord->old_bins);
 		}
 		else {
-			memcpy(rd->bins, urecord->old_ssd_bins,
+			memcpy(rd->bins, urecord->old_bins,
 					urecord->n_old_bins * sizeof(as_bin));
 		}
 	}
@@ -450,15 +447,8 @@ execute_failed(udf_record* urecord, int result_code)
 static void
 execute_delete_bin(udf_record* urecord, const char* name)
 {
-	as_storage_rd* rd = urecord->rd;
-	as_namespace* ns = rd->ns;
-
-	as_bin cleanup_bin;
-
-	if (as_bin_pop(rd, name, &cleanup_bin) && ns->storage_data_in_memory) {
-		append_bin_to_destroy(&cleanup_bin, urecord->cleanup_bins,
-				&urecord->n_cleanup_bins);
-	}
+	delete_bin(urecord->rd, (const uint8_t*)name, strlen(name),
+			urecord->cleanup_bins, &urecord->n_cleanup_bins);
 }
 
 static int

@@ -73,7 +73,15 @@ typedef enum {
 } as_xdr_auth_mode;
 
 typedef enum {
-	XDR_WRITE_POLICY_AUTO,
+	XDR_BIN_POLICY_ALL,
+	XDR_BIN_POLICY_ONLY_CHANGED,
+	XDR_BIN_POLICY_ONLY_SPECIFIED,
+	XDR_BIN_POLICY_CHANGED_AND_SPECIFIED,
+	XDR_BIN_POLICY_CHANGED_OR_SPECIFIED
+} as_xdr_bin_policy;
+
+typedef enum {
+	XDR_WRITE_POLICY_AUTO, // TODO - is this mode worth the complication?
 	XDR_WRITE_POLICY_UPDATE,
 	XDR_WRITE_POLICY_REPLACE
 } as_xdr_write_policy;
@@ -81,6 +89,7 @@ typedef enum {
 typedef struct as_xdr_dc_ns_cfg_s {
 	char* ns_name;
 
+	as_xdr_bin_policy bin_policy;
 	uint32_t compression_level;
 	uint32_t delay_ms;
 	bool compression_enabled;
@@ -91,7 +100,6 @@ typedef struct as_xdr_dc_ns_cfg_s {
 	char* remote_namespace;
 	uint32_t sc_replication_wait_ms;
 	bool ship_nsup_deletes;
-	bool ship_only_specified_bins;
 	bool ship_only_specified_sets;
 	uint32_t transaction_queue_limit;
 	as_xdr_write_policy write_policy;

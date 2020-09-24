@@ -575,7 +575,7 @@ read_local(as_transaction* tr)
 		return TRANS_DONE_SUCCESS;
 	}
 
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
+	as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
 
 	if ((result = as_storage_rd_load_bins(&rd, stack_bins)) < 0) {
 		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
@@ -596,10 +596,13 @@ read_local(as_transaction* tr)
 
 	if ((m->info1 & AS_MSG_INFO1_GET_ALL) != 0) {
 		p_ops = NULL;
-		n_bins = rd.n_bins;
 
 		for (uint16_t i = 0; i < rd.n_bins; i++) {
-			response_bins[i] = &rd.bins[i];
+			as_bin* b = &rd.bins[i];
+
+			if (! as_bin_is_tombstone(b)) {
+				response_bins[n_bins++] = b;
+			}
 		}
 	}
 	else {
@@ -616,7 +619,7 @@ read_local(as_transaction* tr)
 
 		while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
 			if (op->op == AS_MSG_OP_READ) {
-				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_live_w_len(&rd, op->name, op->name_sz);
 
 				if (b || respond_all_ops) {
 					ops[n_bins] = op;
@@ -624,7 +627,7 @@ read_local(as_transaction* tr)
 				}
 			}
 			else if (op->op == AS_MSG_OP_BITS_READ) {
-				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_live_w_len(&rd, op->name, op->name_sz);
 
 				if (b) {
 					as_bin* rb = &result_bins[n_result_bins];
@@ -637,7 +640,7 @@ read_local(as_transaction* tr)
 						return TRANS_DONE_ERROR;
 					}
 
-					if (as_bin_inuse(rb)) {
+					if (as_bin_is_used(rb)) {
 						n_result_bins++;
 						ops[n_bins] = op;
 						response_bins[n_bins++] = rb;
@@ -653,7 +656,7 @@ read_local(as_transaction* tr)
 				}
 			}
 			else if (op->op == AS_MSG_OP_HLL_READ) {
-				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_live_w_len(&rd, op->name, op->name_sz);
 
 				if (b) {
 					as_bin* rb = &result_bins[n_result_bins];
@@ -666,7 +669,7 @@ read_local(as_transaction* tr)
 						return TRANS_DONE_ERROR;
 					}
 
-					if (as_bin_inuse(rb)) {
+					if (as_bin_is_used(rb)) {
 						n_result_bins++;
 						ops[n_bins] = op;
 						response_bins[n_bins++] = rb;
@@ -682,7 +685,7 @@ read_local(as_transaction* tr)
 				}
 			}
 			else if (op->op == AS_MSG_OP_CDT_READ) {
-				as_bin* b = as_bin_get_w_len(&rd, op->name, op->name_sz);
+				as_bin* b = as_bin_get_live_w_len(&rd, op->name, op->name_sz);
 
 				if (b) {
 					as_bin* rb = &result_bins[n_result_bins];
@@ -695,7 +698,7 @@ read_local(as_transaction* tr)
 						return TRANS_DONE_ERROR;
 					}
 
-					if (as_bin_inuse(rb)) {
+					if (as_bin_is_used(rb)) {
 						n_result_bins++;
 						ops[n_bins] = op;
 						response_bins[n_bins++] = rb;

@@ -67,6 +67,8 @@ typedef struct index_metadata_s {
 	uint64_t last_update_time;
 	uint16_t generation;
 
+	bool has_bin_meta; // relevant only for data-in-memory
+
 	bool xdr_write; // relevant only for enterprise edition
 
 	bool tombstone; // relevant only for enterprise edition
@@ -109,11 +111,15 @@ int predexp_read_and_filter_bins(struct as_storage_rd_s* rd, struct predexp_eval
 bool check_msg_key(struct as_msg_s* m, struct as_storage_rd_s* rd);
 bool get_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
+void prepare_bin_metadata(struct as_storage_rd_s* rd);
 void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
 void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
 void advance_record_version(const struct as_transaction_s* tr, struct as_index_s* r);
 void set_xdr_write(const struct as_transaction_s* tr, struct as_index_s* r);
+void touch_bin_metadata(struct as_storage_rd_s* rd);
 void transition_delete_metadata(struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
+void delete_bin(struct as_storage_rd_s* rd, const uint8_t* name, size_t name_len, struct as_bin_s* cleanup_bins, uint32_t* p_n_cleanup_bins);
+void delete_all_bins(struct as_storage_rd_s* rd);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void record_delete_adjust_sindex(struct as_index_s* r, struct as_namespace_s* ns);

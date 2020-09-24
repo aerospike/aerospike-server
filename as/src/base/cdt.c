@@ -1875,7 +1875,7 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 {
 	ctx->delta_sz = subctx_sz - ctx->data_sz + ctx->create_sz;
 
-	if (! as_bin_inuse(ctx->b)) { // bin did not exist
+	if (! as_bin_is_live(ctx->b)) { // bin did not exist
 		return cdt_context_create_new_particle_crnew(ctx, subctx_sz);
 	}
 
@@ -3833,7 +3833,7 @@ cdt_verify(cdt_context *ctx)
 {
 	cf_assert(ctx != NULL, AS_PARTICLE, "ctx NULL");
 
-	if (! as_bin_inuse(ctx->b)) {
+	if (! as_bin_is_live(ctx->b)) {
 		return true;
 	}
 

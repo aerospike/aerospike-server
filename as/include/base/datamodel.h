@@ -42,6 +42,7 @@
 #include "dynbuf.h"
 #include "hist.h"
 #include "linear_hist.h"
+#include "log.h" // TODO - for development only?
 #include "msg.h"
 #include "node.h"
 #include "shash.h"
@@ -143,7 +144,7 @@ typedef struct as_particle_s {
 // Constants used for the as_bin state value (4 bits, 16 values).
 #define AS_BIN_STATE_UNUSED			0 // must be 0 for single-bin initialization
 #define AS_BIN_STATE_INUSE_INTEGER	1
-#define AS_BIN_STATE_RECYCLE_ME		2 // was - hidden bin
+#define AS_BIN_STATE_TOMBSTONE		2 // enterprise only
 #define AS_BIN_STATE_INUSE_OTHER	3
 #define AS_BIN_STATE_INUSE_FLOAT	4
 
@@ -153,15 +154,27 @@ typedef struct as_bin_s {
 	as_particle* particle;	// for embedded particle this is value, not pointer
 
 	// Never read or write these bytes in single-bin configuration:
+
 	uint16_t id;			// ID of bin name
 	uint8_t unused;			// legacy - reserved for more bins?
+
+	uint8_t xdr_write: 1;	// enterprise only
+	uint8_t unused_flags: 7;
+	uint64_t lut: 40;
 } __attribute__ ((__packed__)) as_bin;
+
+typedef struct as_bin_no_meta_s {
+	uint64_t dummy64;
+	uint32_t dummy32;
+} __attribute__ ((__packed__)) as_bin_no_meta;
+
+COMPILER_ASSERT(sizeof(as_bin_no_meta) == offsetof(as_bin, unused) + 1);
 
 // For data-in-memory namespaces in multi-bin mode, we keep an array of as_bin
 // structs in memory, accessed via this struct.
 typedef struct as_bin_space_s {
 	uint16_t n_bins;
-	as_bin bins[0];
+	as_bin bins[0]; // may be array of as_bin or as_min_bin
 } __attribute__ ((__packed__)) as_bin_space;
 
 // For data-in-memory namespaces in multi-bin mode, if we're storing extra
@@ -284,9 +297,24 @@ as_single_bin_copy(as_bin *to, const as_bin *from)
 }
 
 static inline bool
-as_bin_inuse(const as_bin *b)
+as_bin_has_meta(const as_bin *b)
 {
+	return b->lut != 0; // cheating - we happen to know this is true for now
+}
+
+static inline bool
+as_bin_is_used(const as_bin *b)
+{
+	// TODO - for development only?
+	cf_assert(b->state != AS_BIN_STATE_TOMBSTONE, AS_BIN, "unexpected tombstone");
+
 	return b->state != AS_BIN_STATE_UNUSED;
+}
+
+static inline bool
+as_bin_is_unused(const as_bin *b)
+{
+	return b->state == AS_BIN_STATE_UNUSED; // note - tombstones are used bins
 }
 
 static inline void
@@ -315,7 +343,7 @@ as_bin_set_empty(as_bin *b)
 }
 
 static inline void
-as_bin_set_empty_shift(as_storage_rd *rd, uint32_t i)
+as_bin_remove(as_storage_rd *rd, uint32_t i)
 {
 	rd->n_bins--;
 
@@ -341,23 +369,6 @@ as_bin_get_particle(as_bin *b) {
 	return as_bin_is_embedded_particle(b) ? (as_particle *)&b : b->particle;
 }
 
-// "Embedded" types like integer are stored directly, but other bin types
-// ("other") must follow an indirection to get the actual type.
-static inline uint8_t
-as_bin_get_particle_type(const as_bin *b) {
-	switch (b->state) {
-	case AS_BIN_STATE_INUSE_INTEGER:
-		return AS_PARTICLE_TYPE_INTEGER;
-	case AS_BIN_STATE_INUSE_FLOAT:
-		return AS_PARTICLE_TYPE_FLOAT;
-	case AS_BIN_STATE_INUSE_OTHER:
-		return b->particle->type;
-	case AS_BIN_STATE_UNUSED:
-	default:
-		return AS_PARTICLE_TYPE_NULL;
-	}
-}
-
 static inline void
 as_bin_destroy_all(as_bin* bins, uint32_t n_bins)
 {
@@ -368,15 +379,24 @@ as_bin_destroy_all(as_bin* bins, uint32_t n_bins)
 
 
 /* Bin function declarations */
+extern uint8_t as_bin_get_particle_type(const as_bin* b);
+extern bool as_bin_particle_is_tombstone(as_particle_type type);
+extern bool as_bin_is_tombstone(const as_bin* b);
+extern bool as_bin_is_live(const as_bin* b);
+extern void as_bin_set_tombstone(as_bin* b);
+extern void as_bin_empty_if_all_tombstones(as_storage_rd* rd);
+extern void as_bin_clear_meta(as_bin* b);
 extern void as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from);
 extern int32_t as_bin_get_id(const as_namespace *ns, const char *name);
 extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len, uint16_t *id);
 extern const char* as_bin_get_name_from_id(const as_namespace *ns, uint16_t id);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
 extern void as_storage_rd_update_bin_space(as_storage_rd* rd);
-extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
+extern as_bin *as_bin_get_by_id_live(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_w_len(as_storage_rd *rd, const uint8_t *name, size_t len);
+extern as_bin *as_bin_get_live(as_storage_rd *rd, const char *name);
+extern as_bin *as_bin_get_live_w_len(as_storage_rd *rd, const uint8_t *name, size_t len);
 extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name, int *result);
 extern as_bin *as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name, size_t len, int *result);
 extern bool as_bin_pop(as_storage_rd* rd, const char* name, as_bin* bin);
@@ -677,6 +697,7 @@ struct as_namespace_s {
 	cf_vector*		xdr_dc_names; // allocated for use at startup only
 	bool			xdr_ships_drops; // at least one DC ships drops
 	bool			xdr_ships_nsup_drops; // at least one DC ships nsup drops
+	bool			xdr_ships_changed_bins; // at least one DC ships changed bins (invokes bin xdr_write flag and tombstones)
 
 	//--------------------------------------------
 	// Configuration.
@@ -729,6 +750,7 @@ struct as_namespace_s {
 	uint32_t		transaction_pending_limit; // 0 means no limit
 	uint32_t		n_truncate_threads;
 	as_write_commit_level write_commit_level;
+	uint64_t		xdr_bin_tombstone_ttl_ms;
 	uint32_t		xdr_tomb_raider_period;
 	uint32_t		n_xdr_tomb_raider_threads;
 

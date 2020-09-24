@@ -280,6 +280,8 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->key = NULL;
 	rd->which_current_swb = SWB_MASTER;
 	rd->read_page_cache = false;
+	rd->xdr_bin_writes = ns->xdr_ships_changed_bins;
+	rd->bin_luts = ns->xdr_ships_changed_bins;
 	rd->keep_pickle = false;
 	rd->pickle_sz = 0;
 	rd->orig_pickle_sz = 0;
@@ -316,6 +318,8 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->key = NULL;
 	rd->which_current_swb = SWB_MASTER;
 	rd->read_page_cache = false;
+	rd->xdr_bin_writes = ns->xdr_ships_changed_bins;
+	rd->bin_luts = ns->xdr_ships_changed_bins;
 	rd->keep_pickle = false;
 	rd->pickle_sz = 0;
 	rd->orig_pickle_sz = 0;
@@ -789,8 +793,10 @@ as_storage_record_get_n_bytes_memory(as_storage_rd *rd)
 		}
 
 		if (as_index_get_bin_space(rd->r)) {
-			n_bytes_memory += sizeof(as_bin_space) +
-					(sizeof(as_bin) * rd->n_bins);
+			size_t bin_sz = rd->r->has_bin_meta == 0 ?
+					sizeof(as_bin_no_meta) : sizeof(as_bin);
+
+			n_bytes_memory += sizeof(as_bin_space) + (bin_sz * rd->n_bins);
 		}
 	}
 
@@ -864,7 +870,10 @@ as_storage_rd_load_pickle(as_storage_rd *rd)
 	if (rd->ns->storage_data_in_memory) {
 		as_storage_record_get_set_name(rd);
 		as_storage_rd_load_key(rd);
-		as_storage_rd_load_bins(rd, NULL);
+
+		as_bin stack_bins[rd->ns->single_bin ? 0 : RECORD_MAX_BINS];
+
+		as_storage_rd_load_bins(rd, stack_bins);
 		as_flat_pickle_record(rd);
 		return true;
 	}

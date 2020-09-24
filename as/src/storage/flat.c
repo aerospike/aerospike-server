@@ -91,10 +91,23 @@ as_flat_record_size(const as_storage_rd* rd)
 	for (uint16_t b = 0; b < rd->n_bins; b++) {
 		as_bin* bin = &rd->bins[b];
 
-		uint32_t name_sz = ns->single_bin ?
-				0 : 1 + (uint32_t)strlen(as_bin_get_name_from_id(ns, bin->id));
+		uint32_t name_sz = 0;
+		uint32_t meta_sz = 0;
 
-		write_sz += name_sz + as_bin_particle_flat_size(bin);
+		if (! ns->single_bin) {
+			name_sz = 1 +
+					(uint32_t)strlen(as_bin_get_name_from_id(ns, bin->id));
+
+			if (as_bin_has_meta(bin)) {
+				meta_sz = 1;
+
+				if (bin->lut != 0) {
+					meta_sz += sizeof(flat_bin_lut);
+				}
+			}
+		}
+
+		write_sz += name_sz + meta_sz + as_bin_particle_flat_size(bin);
 	}
 
 	return write_sz;
@@ -298,6 +311,34 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 			}
 
 			at += name_len;
+
+			as_bin_clear_meta(b);
+
+			if (at >= end) {
+				cf_warning(AS_FLAT, "incomplete flat bin");
+				break;
+			}
+
+			if ((*at & BIN_HAS_META) != 0) {
+				uint8_t flags = *at++;
+
+				if ((flags & BIN_UNKNOWN_FLAGS) != 0) {
+					cf_warning(AS_FLAT, "unknown bin flags");
+					break;
+				}
+
+				unpack_bin_xdr_write(flags, b);
+
+				if ((flags & BIN_HAS_LUT) != 0) {
+					if (at + sizeof(flat_bin_lut) > end) {
+						cf_warning(AS_FLAT, "incomplete flat bin");
+						break;
+					}
+
+					b->lut = ((flat_bin_lut*)at)->lut;
+					at += sizeof(flat_bin_lut);
+				}
+			}
 		}
 
 		at = ns->storage_data_in_memory ?
@@ -349,6 +390,14 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 			}
 
 			at += name_len;
+
+			if ((*at & BIN_HAS_META) != 0) {
+				uint8_t flags = *at++;
+
+				if ((flags & BIN_HAS_LUT) != 0) {
+					at += sizeof(flat_bin_lut);
+				}
+			}
 		}
 
 		if (! (at = as_particle_skip_flat(at, end))) {
@@ -502,6 +551,20 @@ flatten_bins(const as_storage_rd* rd, uint8_t* buf, uint32_t* sz)
 			*buf++ = (uint8_t)name_len;
 			memcpy(buf, bin_name, name_len);
 			buf += name_len;
+
+			if (as_bin_has_meta(bin)) {
+				uint8_t* flags = buf++;
+
+				*flags = BIN_HAS_META;
+
+				flatten_bin_xdr_write(bin, flags);
+
+				if (bin->lut != 0) {
+					*flags |= BIN_HAS_LUT;
+					((flat_bin_lut*)buf)->lut = bin->lut;
+					buf += sizeof(flat_bin_lut);
+				}
+			}
 		}
 
 		buf += as_bin_particle_to_flat(bin, buf);

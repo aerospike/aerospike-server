@@ -113,3 +113,13 @@ get_flat_extra_flags(const as_record* r)
 	// So far all extra flags are enterprise-only.
 	return (as_flat_extra_flags){ 0 };
 }
+
+void
+unpack_bin_xdr_write(uint8_t flags, as_bin* b)
+{
+}
+
+void
+flatten_bin_xdr_write(const as_bin* b, uint8_t* flags)
+{
+}

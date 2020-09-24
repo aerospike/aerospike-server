@@ -1297,7 +1297,7 @@ cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uint64_t create_flags)
 		return;
 	}
 
-	if (! as_bin_inuse(ctx->b)) {
+	if (! as_bin_is_live(ctx->b)) {
 		cf_assert(ctx->data_sz == 0, AS_PARTICLE, "invalid state");
 		ctx->b->particle = flags_is_ordered(create_flags) ?
 				(as_particle *)&list_ordered_empty :
@@ -4208,7 +4208,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 	case AS_CDT_OP_LIST_REMOVE:
 	case AS_CDT_OP_LIST_POP: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4226,7 +4226,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 	case AS_CDT_OP_LIST_REMOVE_RANGE:
 	case AS_CDT_OP_LIST_POP_RANGE: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4244,7 +4244,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_TRIM: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4263,7 +4263,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_CLEAR: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4295,7 +4295,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_SORT: {
-		if (! as_bin_inuse(ctx->b)) {
+		if (! as_bin_is_live(ctx->b)) {
 			com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 			return false;
 		}
@@ -4311,7 +4311,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_INDEX: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4329,7 +4329,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 	case AS_CDT_OP_LIST_REMOVE_ALL_BY_VALUE:
 	case AS_CDT_OP_LIST_REMOVE_BY_VALUE: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4347,7 +4347,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_RANK: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4364,7 +4364,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_ALL_BY_VALUE_LIST: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4381,7 +4381,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_INDEX_RANGE: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4399,7 +4399,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_VALUE_INTERVAL: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4418,7 +4418,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_RANK_RANGE: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 
@@ -4436,7 +4436,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 		break;
 	}
 	case AS_CDT_OP_LIST_REMOVE_BY_VALUE_REL_RANK_RANGE: {
-		if (ctx->create_triggered || ! as_bin_inuse(ctx->b)) {
+		if (ctx->create_triggered || ! as_bin_is_live(ctx->b)) {
 			return true; // no-op
 		}
 

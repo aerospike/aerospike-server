@@ -403,7 +403,7 @@ hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 int
 as_bin_hll_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 {
-	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unused bin");
+	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
 
 	int32_t verify_result = hll_verify_bin(b);
 
@@ -462,7 +462,7 @@ as_bin_hll_modify(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb,
 
 	as_particle* old_p;
 
-	if (as_bin_inuse(b)) {
+	if (as_bin_is_live(b)) {
 		if ((op.flags & AS_HLL_FLAG_CREATE_ONLY) != 0) {
 			if ((op.flags & AS_HLL_FLAG_NO_FAIL) != 0) {
 				hll_op_destroy(&op);
@@ -547,7 +547,7 @@ hll_op_destroy(hll_op* op)
 static int32_t
 hll_verify_bin(const as_bin* b)
 {
-	if (! as_bin_inuse(b)) {
+	if (! as_bin_is_live(b)) {
 		return AS_OK;
 	}
 

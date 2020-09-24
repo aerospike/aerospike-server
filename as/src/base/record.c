@@ -179,7 +179,10 @@ as_record_destroy(as_record *r, as_namespace *ns)
 
 		rd.r = r;
 		rd.ns = ns;
-		as_storage_rd_load_bins(&rd, NULL);
+
+		as_bin stack_bins[ns->single_bin ? 0 : RECORD_MAX_BINS];
+
+		as_storage_rd_load_bins(&rd, stack_bins);
 
 		as_storage_record_drop_from_mem_stats(&rd);
 
@@ -533,7 +536,9 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
-	as_storage_rd_load_bins(rd, NULL);
+	as_bin stack_bins[RECORD_MAX_BINS];
+
+	as_storage_rd_load_bins(rd, stack_bins);
 
 	// For memory accounting, note current usage.
 	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);

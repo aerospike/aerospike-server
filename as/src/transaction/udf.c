@@ -998,6 +998,8 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	int result;
 	bool is_delete = false;
 
+	as_bin_empty_if_all_tombstones(rd);
+
 	if (rd->n_bins == 0) {
 		if (urecord->n_old_bins == 0) {
 			return AS_ERR_NOT_FOUND;
@@ -1050,7 +1052,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 			if (record_has_sindex(r, ns)) {
 				// Adjust sindex, looking at old and new bins.
 				write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
-						urecord->old_dim_bins, urecord->n_old_bins, rd->bins,
+						urecord->old_bins, urecord->n_old_bins, rd->bins,
 						rd->n_bins);
 			}
 
@@ -1063,8 +1065,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	else if (! ns->single_bin && record_has_sindex(r, ns)) {
 		// Adjust sindex, looking at old and new bins.
 		write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
-				urecord->old_ssd_bins, urecord->n_old_bins, rd->bins,
-				rd->n_bins);
+				urecord->old_bins, urecord->n_old_bins, rd->bins, rd->n_bins);
 	}
 
 	tr->generation = r->generation;
@@ -1105,7 +1106,7 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 			as_storage_rd* rd = urecord->rd;
 
 			if (urecord->has_updates && ns->storage_data_in_memory) {
-				write_dim_unwind(urecord->old_dim_bins, urecord->n_old_bins,
+				write_dim_unwind(urecord->old_bins, urecord->n_old_bins,
 						rd->bins, rd->n_bins, urecord->cleanup_bins,
 						urecord->n_cleanup_bins);
 			}

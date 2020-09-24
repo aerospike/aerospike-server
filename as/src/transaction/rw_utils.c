@@ -189,7 +189,7 @@ predexp_read_and_filter_bins(as_storage_rd* rd, predexp_eval_t* predexp)
 {
 	as_namespace* ns = rd->ns;
 
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
+	as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
 
 	int result = as_storage_rd_load_bins(rd, stack_bins);
 
@@ -461,7 +461,7 @@ record_delete_adjust_sindex(as_record* r, as_namespace* ns)
 
 	as_storage_record_open(ns, r, &rd);
 
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : RECORD_MAX_BINS];
+	as_bin stack_bins[RECORD_MAX_BINS];
 
 	// FIXME - should we handle failure?
 	as_storage_rd_load_bins(&rd, stack_bins);
@@ -486,7 +486,9 @@ delete_adjust_sindex(as_storage_rd* rd)
 		return;
 	}
 
-	as_storage_rd_load_bins(rd, NULL);
+	as_bin stack_bins[RECORD_MAX_BINS];
+
+	as_storage_rd_load_bins(rd, stack_bins);
 
 	remove_from_sindex(ns, as_index_get_set_name(rd->r, ns), &rd->r->keyd,
 			rd->bins, rd->n_bins);
@@ -536,8 +538,7 @@ write_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 	for (uint32_t i_new = 0; i_new < n_new_bins; i_new++) {
 		as_bin* b_new = &new_bins[i_new];
 
-		// Should be last, but not a sentinel - failed to set particle.
-		if (! as_bin_inuse(b_new)) {
+		if (! as_bin_is_live(b_new)) {
 			continue;
 		}
 

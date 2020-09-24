@@ -45,6 +45,7 @@ ifneq ($(STATIC_LIB),1)
 endif
 
 ifneq ($(USE_EE),1)
+  BASE_SOURCES += bin_ce.c
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += features_ce.c
   BASE_SOURCES += index_ce.c

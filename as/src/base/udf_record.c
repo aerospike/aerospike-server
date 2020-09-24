@@ -418,7 +418,7 @@ udf_record_get(const as_rec* rec, const char* name)
 		return NULL;
 	}
 
-	as_bin* b = as_bin_get(urecord->rd, name);
+	as_bin* b = as_bin_get_live(urecord->rd, name);
 
 	if (b == NULL) {
 		return NULL;

@@ -113,6 +113,8 @@ typedef struct as_storage_rd_s {
 
 	uint8_t					which_current_swb;
 	bool					read_page_cache;
+	bool					xdr_bin_writes; // relevant only for enterprise edition
+	bool					bin_luts;
 
 	// Used by storage types AS_STORAGE_ENGINE_PMEM and AS_STORAGE_ENGINE_SSD:
 	const struct as_flat_record_s *flat;

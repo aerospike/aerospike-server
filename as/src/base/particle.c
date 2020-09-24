@@ -246,6 +246,10 @@ as_particle_skip_flat(const uint8_t *flat, const uint8_t *end)
 		return NULL;
 	}
 
+	if (as_bin_particle_is_tombstone((as_particle_type)*flat)) {
+		return flat + 1;
+	}
+
 	as_particle_type type = safe_particle_type(*flat);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
@@ -280,7 +284,9 @@ as_bin_particle_destroy(as_bin *b)
 uint32_t
 as_bin_particle_size(as_bin *b)
 {
-	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unexpected unused bin");
+	if (as_bin_is_tombstone(b)) {
+		return 0;
+	}
 
 	return particle_vtable[as_bin_get_particle_type(b)]->size_fn(b->particle);
 }
@@ -308,7 +314,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 	uint8_t *op_value = as_msg_op_get_value_p((as_msg_op *)op);
 
 	// Currently all operations become creates if there's no existing particle.
-	if (! as_bin_inuse(b)) {
+	if (! as_bin_is_live(b)) {
 		int32_t mem_size = particle_vtable[op_type]->size_from_wire_fn(op_value, op_value_size);
 
 		if (mem_size < 0) {
@@ -402,7 +408,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 	uint8_t *op_value = as_msg_op_get_value_p((as_msg_op *)op);
 
 	// Currently all operations become creates if there's no existing particle.
-	if (! as_bin_inuse(b)) {
+	if (! as_bin_is_live(b)) {
 		int32_t mem_size = particle_vtable[op_type]->size_from_wire_fn(op_value, op_value_size);
 
 		if (mem_size < 0) {
@@ -560,7 +566,11 @@ as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_
 uint32_t
 as_bin_particle_client_value_size(const as_bin *b)
 {
-	cf_assert(b != NULL && as_bin_inuse(b), AS_PARTICLE, "unused response bin");
+	cf_assert(b != NULL, AS_PARTICLE, "null response bin");
+
+	if (as_bin_is_tombstone(b)) {
+		return 0; // XDR will ship bin tombstones
+	}
 
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -570,13 +580,12 @@ as_bin_particle_client_value_size(const as_bin *b)
 uint32_t
 as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 {
-	if (b == NULL) {
-		// Ordered ops that find no bin will get here.
+	if (b == NULL || as_bin_is_tombstone(b)) {
+		// Ordered ops that find no bin will get here with b == NULL.
+		// XDR will ship bin tombstones.
 		op->particle_type = AS_PARTICLE_TYPE_NULL;
 		return 0;
 	}
-
-	cf_assert(as_bin_inuse(b), AS_PARTICLE, "unused response bin");
 
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -619,7 +628,7 @@ as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
 	particle_vtable[new_type]->from_asval_fn(val, &b->particle);
 	// TODO - could this ever fail?
 
-	if (as_bin_inuse(b)) {
+	if (as_bin_is_used(b)) {
 		// Destroy the old particle.
 		particle_vtable[old_type]->destructor_fn(old_particle);
 	}
@@ -742,6 +751,11 @@ as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *en
 		return NULL;
 	}
 
+	if (as_bin_particle_is_tombstone((as_particle_type)*flat)) {
+		as_bin_set_tombstone(b);
+		return flat + 1;
+	}
+
 	as_particle_type type = safe_particle_type(*flat);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
@@ -770,6 +784,11 @@ as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *e
 		return NULL;
 	}
 
+	if (as_bin_particle_is_tombstone((as_particle_type)*flat)) {
+		as_bin_set_tombstone(b);
+		return flat + 1;
+	}
+
 	as_particle_type type = safe_particle_type(*flat);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
@@ -793,7 +812,9 @@ as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *e
 uint32_t
 as_bin_particle_flat_size(as_bin *b)
 {
-	cf_assert(as_bin_inuse(b), AS_PARTICLE, "flat sizing unused bin");
+	if (as_bin_is_tombstone(b)) {
+		return 1; // particle type only (AS_PARTICLE_TYPE_NULL)
+	}
 
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -803,7 +824,10 @@ as_bin_particle_flat_size(as_bin *b)
 uint32_t
 as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 {
-	cf_assert(as_bin_inuse(b), AS_PARTICLE, "flattening unused bin");
+	if (as_bin_is_tombstone(b)) {
+		*flat = AS_PARTICLE_TYPE_NULL;
+		return 1;
+	}
 
 	uint8_t type = as_bin_get_particle_type(b);
 

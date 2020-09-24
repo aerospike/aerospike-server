@@ -1064,7 +1064,7 @@ eval_bin(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
 		return PREDEXP_NOVALUE;
 	}
 
-	as_bin* bb = as_bin_get(argsp->rd, dp->bname);
+	as_bin* bb = as_bin_get_live(argsp->rd, dp->bname);
 	if (! bb) {
 		return PREDEXP_NOVALUE;
 	}

@@ -67,14 +67,6 @@ safe_n_bins(const as_record* r)
 	return bin_space ? bin_space->n_bins : 0;
 }
 
-static inline as_bin*
-safe_bins(const as_record* r)
-{
-	as_bin_space* bin_space = safe_bin_space(r);
-
-	return bin_space ? bin_space->bins : NULL;
-}
-
 
 //==========================================================
 // Public API.
@@ -173,11 +165,32 @@ as_storage_rd_load_bins(as_storage_rd* rd, as_bin* stack_bins)
 
 		if (ns->single_bin) {
 			rd->bins = as_index_get_single_bin(r);
-			rd->n_bins = as_bin_inuse(rd->bins) ? 1 : 0;
+			rd->n_bins = as_bin_is_used(rd->bins) ? 1 : 0;
 		}
 		else {
-			rd->bins = safe_bins(r);
+			rd->bins = stack_bins;
 			rd->n_bins = safe_n_bins(r);
+
+			if (rd->n_bins == 0) {
+				return 0;
+			}
+
+			as_bin_space* bin_space = as_index_get_bin_space(r);
+
+			if (r->has_bin_meta == 0) {
+				as_bin_no_meta* stored_bins = (as_bin_no_meta*)bin_space->bins;
+
+				for (uint16_t i = 0; i < rd->n_bins; i++) {
+					as_bin* b = &rd->bins[i];
+
+					*(as_bin_no_meta*)b = stored_bins[i];
+					as_bin_clear_meta(b);
+				}
+			}
+			else {
+				memcpy((void*)rd->bins, (const void*)bin_space->bins,
+						rd->n_bins * sizeof(as_bin));
+			}
 		}
 
 		return 0;
@@ -208,29 +221,50 @@ as_storage_rd_update_bin_space(as_storage_rd* rd)
 		cf_free(old_bin_space);
 	}
 
+	r->has_bin_meta = 0;
+
 	if (rd->n_bins == 0) {
 		as_index_set_bin_space(r, NULL);
 		return;
 	}
 
-	size_t bins_size = rd->n_bins * sizeof(as_bin);
+	size_t bins_size = rd->n_bins * sizeof(as_bin_no_meta);
+
+	for (uint16_t i = 0; i < rd->n_bins; i++) {
+		if (as_bin_has_meta(&rd->bins[i])) {
+			r->has_bin_meta = 1;
+			bins_size = rd->n_bins * sizeof(as_bin);
+			break;
+		}
+	}
+
 	as_bin_space* new_bin_space = (as_bin_space*)
 			cf_malloc_ns(sizeof(as_bin_space) + bins_size);
 
 	new_bin_space->n_bins = rd->n_bins;
-	memcpy((void*)new_bin_space->bins, (const void*)rd->bins, bins_size);
+
+	if (r->has_bin_meta == 0) {
+		as_bin_no_meta* stored_bins = (as_bin_no_meta*)new_bin_space->bins;
+
+		for (uint16_t i = 0; i < rd->n_bins; i++) {
+			stored_bins[i] = *(as_bin_no_meta*)&rd->bins[i];
+		}
+	}
+	else {
+		memcpy((void*)new_bin_space->bins, (const void*)rd->bins, bins_size);
+	}
 
 	as_index_set_bin_space(r, new_bin_space);
 }
 
 as_bin*
-as_bin_get_by_id(as_storage_rd* rd, uint32_t id)
+as_bin_get_by_id_live(as_storage_rd* rd, uint32_t id)
 {
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
 		as_bin* b = &rd->bins[i];
 
 		if ((uint32_t)b->id == id) {
-			return b;
+			return as_bin_is_tombstone(b) ? NULL : b;
 		}
 	}
 
@@ -269,6 +303,37 @@ as_bin_get_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
 }
 
 as_bin*
+as_bin_get_live(as_storage_rd* rd, const char* name)
+{
+	return as_bin_get_live_w_len(rd, (const uint8_t*)name, strlen(name));
+}
+
+as_bin*
+as_bin_get_live_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
+{
+	if (rd->ns->single_bin) {
+		return rd->n_bins == 0 ? NULL : rd->bins;
+	}
+
+	uint32_t id;
+
+	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char*)name,
+			len, &id) != CF_VMAPX_OK) {
+		return NULL;
+	}
+
+	for (uint16_t i = 0; i < rd->n_bins; i++) {
+		as_bin* b = &rd->bins[i];
+
+		if ((uint32_t)b->id == id) {
+			return as_bin_is_tombstone(b) ? NULL : b;
+		}
+	}
+
+	return NULL;
+}
+
+as_bin*
 as_bin_get_or_create(as_storage_rd* rd, const char* name, int* result)
 {
 	return as_bin_get_or_create_w_len(rd, (const uint8_t*)name, strlen(name),
@@ -300,6 +365,7 @@ as_bin_get_or_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 			as_bin* b = &rd->bins[i];
 
 			if ((uint32_t)b->id == id) {
+				as_bin_clear_meta(b);
 				return b;
 			}
 		}
@@ -308,6 +374,7 @@ as_bin_get_or_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 
 		as_bin_init_nameless(b);
 		b->id = (uint16_t)id;
+		as_bin_clear_meta(b);
 
 		rd->n_bins++;
 
@@ -326,6 +393,8 @@ as_bin_get_or_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 
 		return NULL;
 	}
+
+	as_bin_clear_meta(b);
 
 	rd->n_bins++;
 
@@ -348,7 +417,7 @@ as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 		}
 
 		as_single_bin_copy(bin, rd->bins);
-		as_bin_set_empty_shift(rd, 0);
+		as_bin_remove(rd, 0);
 
 		// Note - for single-bin DIM as_storage_rd_load_bins() derives
 		// rd->n_bins from bin (used) state - must clear deleted bin.
@@ -371,7 +440,7 @@ as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 
 		if ((uint32_t)b->id == id) {
 			*bin = *b;
-			as_bin_set_empty_shift(rd, i);
+			as_bin_remove(rd, i);
 
 			return true;
 		}

@@ -27,6 +27,7 @@
 #include "transaction/rw_utils.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "log.h"
@@ -121,11 +122,41 @@ generation_check(const as_record* r, const as_msg* m, const as_namespace* ns)
 
 
 void
+prepare_bin_metadata(as_storage_rd* rd)
+{
+	as_namespace* ns = rd->ns;
+	as_record* r = rd->r;
+
+	if (rd->bin_luts) { // no usage with independent LUTs yet
+		for (uint32_t i = 0; i < rd->n_bins; i++) {
+			as_bin* b = &rd->bins[i];
+
+			// Preserve LUT shared with record in case bin is not written.
+			if (b->lut == 0) {
+				b->lut = r->last_update_time;
+			}
+		}
+
+		return;
+	}
+
+	if (! ns->storage_data_in_memory || r->has_bin_meta) {
+		// Remove all metadata.
+		for (uint32_t i = 0; i < rd->n_bins; i++) {
+			rd->bins[i].lut = 0;
+		}
+	}
+}
+
+
+void
 stash_index_metadata(const as_record* r, index_metadata* old)
 {
 	old->void_time = r->void_time;
 	old->last_update_time = r->last_update_time;
 	old->generation = r->generation;
+
+	old->has_bin_meta = r->has_bin_meta == 1;
 }
 
 
@@ -135,6 +166,8 @@ unwind_index_metadata(const index_metadata* old, as_record* r)
 	r->void_time = old->void_time;
 	r->last_update_time = old->last_update_time;
 	r->generation = old->generation;
+
+	r->has_bin_meta = old->has_bin_meta ? 1 : 0;
 }
 
 
@@ -145,8 +178,40 @@ set_xdr_write(const as_transaction* tr, as_record* r)
 
 
 void
+touch_bin_metadata(as_storage_rd* rd)
+{
+	if (rd->bin_luts) { // no usage with independent LUTs yet
+		for (uint32_t i = 0; i < rd->n_bins; i++) {
+			rd->bins[i].lut = 0;
+		}
+	}
+}
+
+
+void
 transition_delete_metadata(as_transaction* tr, as_record* r, bool is_delete)
 {
+}
+
+
+void
+delete_bin(as_storage_rd* rd, const uint8_t* name, size_t name_len,
+		as_bin* cleanup_bins, uint32_t* p_n_cleanup_bins)
+{
+	as_bin cleanup_bin;
+
+	if (as_bin_pop_w_len(rd, name, name_len, &cleanup_bin) &&
+			rd->ns->storage_data_in_memory) {
+		append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
+	}
+}
+
+
+// Caller has already handled destroying all bins' particles.
+void
+delete_all_bins(as_storage_rd* rd)
+{
+	rd->n_bins = 0;
 }
 
 

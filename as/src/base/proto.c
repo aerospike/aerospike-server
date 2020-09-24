@@ -323,7 +323,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	}
 
 	uint32_t n_select_bins = 0;
-	uint16_t n_bins_matched = 0;
+	uint16_t n_bins_returned = 0;
 
 	if (! no_bin_data) {
 		if (select_bins) {
@@ -334,7 +334,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 
 				cf_vector_get(select_bins, i, (void*)&bin_id);
 
-				as_bin *b = as_bin_get_by_id(rd, bin_id);
+				as_bin *b = as_bin_get_by_id_live(rd, bin_id);
 
 				if (! b) {
 					continue;
@@ -344,23 +344,28 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 				msg_sz += strlen(as_bin_get_name_from_id(ns, bin_id));
 				msg_sz += as_bin_particle_client_value_size(b);
 
-				n_bins_matched++;
+				n_bins_returned++;
 			}
 
 			// Don't return an empty record.
-			if (n_bins_matched == 0) {
+			if (n_bins_returned == 0) {
 				return 0;
 			}
 		}
 		else {
-			msg_sz += sizeof(as_msg_op) * rd->n_bins;
-
 			for (uint16_t i = 0; i < rd->n_bins; i++) {
 				as_bin *b = &rd->bins[i];
 
+				if (as_bin_is_tombstone(b)) {
+					continue;
+				}
+
+				msg_sz += sizeof(as_msg_op);
 				msg_sz += ns->single_bin ?
 						0 : strlen(as_bin_get_name_from_id(ns, b->id));
 				msg_sz += (int)as_bin_particle_client_value_size(b);
+
+				n_bins_returned++;
 			}
 		}
 	}
@@ -391,7 +396,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 		m->n_ops = 0;
 	}
 	else {
-		m->n_ops = select_bins ? n_bins_matched : rd->n_bins;
+		m->n_ops = n_bins_returned;
 	}
 
 	as_msg_swap_header(m);
@@ -441,7 +446,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 
 			cf_vector_get(select_bins, i, (void*)&bin_id);
 
-			as_bin *b = as_bin_get_by_id(rd, bin_id);
+			as_bin *b = as_bin_get_by_id_live(rd, bin_id);
 
 			if (! b) {
 				continue;
@@ -463,6 +468,11 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	else {
 		for (uint16_t i = 0; i < rd->n_bins; i++) {
 			as_bin *b = &rd->bins[i];
+
+			if (as_bin_is_tombstone(b)) {
+				continue;
+			}
+
 			as_msg_op *op = (as_msg_op *)buf;
 
 			op->op = AS_MSG_OP_READ;

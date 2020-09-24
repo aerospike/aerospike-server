@@ -79,12 +79,8 @@ typedef struct udf_record_s {
 	uint32_t n_old_bins;
 	uint32_t n_cleanup_bins; // DIM only
 
-	as_bin* old_dim_bins; // pointer to original DIM bins
-
-	union {
-		as_bin old_ssd_bins[UDF_BIN_LIMIT]; // non-DIM only
-		as_bin cleanup_bins[UDF_BIN_LIMIT]; // DIM only
-	};
+	as_bin old_bins[UDF_BIN_LIMIT];
+	as_bin cleanup_bins[UDF_BIN_LIMIT]; // DIM only
 
 	uint32_t n_inserts; // updates that are not deletes
 	uint32_t n_updates;

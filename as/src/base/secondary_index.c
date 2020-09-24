@@ -3790,7 +3790,7 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, const as_bin *b,
 		cf_warning(AS_SINDEX, "NULL Namespace Passed");
 		return sindex_found;
 	}
-	if (!as_bin_inuse(b)) {
+	if (as_bin_is_tombstone(b)) {
 		return sindex_found;
 	}
 
@@ -3939,7 +3939,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	int sbins_populated = 0;
 	as_val * cdt_val = NULL;
 
-	as_bin *b = as_bin_get(rd, imd->bname);
+	as_bin *b = as_bin_get_live(rd, imd->bname);
 
 	if (!b) {
 		SINDEX_GRUNLOCK();

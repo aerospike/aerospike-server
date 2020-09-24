@@ -589,7 +589,7 @@ calc_index(int64_t index, uint32_t max_index)
 static inline bool
 cdt_context_inuse(const cdt_context *ctx)
 {
-	return ctx->create_triggered ? false : as_bin_inuse(ctx->b);
+	return ctx->create_triggered ? false : as_bin_is_live(ctx->b);
 }
 
 static inline bool

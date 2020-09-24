@@ -2429,7 +2429,9 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 			as_storage_record_open(ns, r, &rd);
 		}
 
-		as_storage_rd_load_bins(&rd, NULL);
+		as_bin stack_bins[ns->single_bin ? 0 : RECORD_MAX_BINS];
+
+		as_storage_rd_load_bins(&rd, stack_bins);
 
 		uint64_t bytes_memory = as_storage_record_get_n_bytes_memory(&rd);
 
