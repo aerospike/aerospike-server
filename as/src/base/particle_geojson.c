@@ -133,7 +133,6 @@ typedef struct geojson_flat_s {
 // Forward declarations.
 //
 
-static bool geojson_match(bool particle_is_region, uint64_t particle_cellid, geo_region_t particle_region, uint64_t query_cellid, geo_region_t query_region, bool is_strict);
 static inline uint32_t geojson_mem_sz(uint32_t ncells, size_t jlen);
 static inline uint32_t geojson_particle_sz(uint32_t ncells, size_t jlen);
 static inline bool geojson_parse(const char *json, uint32_t jlen, uint64_t *cellid, geo_region_t *region);
@@ -415,7 +414,7 @@ as_particle_geojson_match(as_particle *particle, uint64_t query_cellid,
 		}
 	}
 
-	bool ismatch = geojson_match(candidate_is_region, candidate_cellid,
+	bool ismatch = as_geojson_match(candidate_is_region, candidate_cellid,
 			candidate_region, query_cellid, query_region, is_strict);
 
 	geo_region_destroy(candidate_region);
@@ -440,7 +439,7 @@ as_particle_geojson_match_asval(const as_val *val, uint64_t query_cellid,
 		return false;
 	}
 
-	bool ismatch = geojson_match(candidate_cellid == 0, candidate_cellid,
+	bool ismatch = as_geojson_match(candidate_cellid == 0, candidate_cellid,
 			candidate_region, query_cellid, query_region, is_strict);
 
 	geo_region_destroy(candidate_region);
@@ -459,13 +458,8 @@ as_geojson_mem_jsonstr(const as_particle *particle, size_t *p_jlen)
 	return (const char *)p_geojson_mem->data + cellsz;
 }
 
-
-//==========================================================
-// Local helpers.
-//
-
-static bool
-geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t candidate_region, uint64_t query_cellid, geo_region_t query_region, bool is_strict)
+bool
+as_geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t candidate_region, uint64_t query_cellid, geo_region_t query_region, bool is_strict)
 {
 	// Determine whether the candidate geometry is a match for the
 	// query geometry.
@@ -524,6 +518,20 @@ geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t 
 
 	return false;
 }
+
+const uint8_t *
+as_geojson_msgpack_jsonstr(struct msgpack_in_s *mp, uint32_t *jsonsz_r)
+{
+	const uint8_t *ptr = msgpack_get_bin(mp, jsonsz_r);
+	// *ptr should be AS_BYTES_GEOJSON at this point.
+	(*jsonsz_r)--;
+	return ptr + 1;
+}
+
+
+//==========================================================
+// Local helpers.
+//
 
 static inline uint32_t
 geojson_mem_sz(uint32_t ncells, size_t jlen)

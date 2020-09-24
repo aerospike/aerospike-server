@@ -34,12 +34,25 @@
 // Typedefs & constants.
 //
 
-typedef struct {
+typedef struct msgpack_in_s {
 	const uint8_t *buf;
 	uint32_t buf_sz;
 	uint32_t offset;
 	bool has_nonstorage;
 } msgpack_in;
+
+typedef struct msgpack_vec_s {
+	const uint8_t* buf;
+	uint32_t buf_sz;
+	uint32_t offset;
+} msgpack_vec;
+
+typedef struct msgpack_in_vec_s {
+	uint32_t n_vecs;
+	uint32_t idx;
+	bool has_nonstorage;
+	msgpack_vec *vecs;
+} msgpack_in_vec;
 
 typedef struct msgpack_ext_s {
 	const uint8_t *data;	// pointer to ext contents
@@ -106,7 +119,7 @@ msgpack_buf_peek_type(const uint8_t *buf, uint32_t buf_sz)
 }
 bool msgpack_peek_is_ext(const msgpack_in *mp);
 
-const uint8_t *msgpack_skip(msgpack_in *mp, uint32_t *sz_r);
+const uint8_t *msgpack_get_ele(msgpack_in *mp, uint32_t *sz_r);
 bool msgpack_get_bool(msgpack_in *mp, bool *value);
 
 bool msgpack_get_uint64(msgpack_in *mp, uint64_t *i);
@@ -140,3 +153,31 @@ msgpack_buf_get_list_ele_count(const uint8_t *buf, uint32_t buf_sz,
 	return msgpack_get_list_ele_count(&mp, count_r);
 }
 bool msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r);
+static inline bool
+msgpack_buf_get_map_ele_count(const uint8_t *buf, uint32_t buf_sz,
+		uint32_t *count_r)
+{
+	msgpack_in mp = {
+			.buf = buf,
+			.buf_sz = buf_sz
+	};
+
+	return msgpack_get_map_ele_count(&mp, count_r);
+}
+
+uint32_t msgpack_sz_vec(msgpack_in_vec *mv);
+bool msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value);
+bool msgpack_get_uint64_vec(msgpack_in_vec *mv, uint64_t *i);
+
+static inline bool
+msgpack_get_int64_vec(msgpack_in_vec *mv, int64_t *i)
+{
+	return msgpack_get_uint64_vec(mv, (uint64_t *)i);
+}
+
+bool msgpack_get_list_ele_count_vec(msgpack_in_vec *mv, uint32_t *count_r);
+msgpack_type msgpack_peek_type_vec(const msgpack_in_vec *mv);
+const uint8_t *msgpack_get_ele_vec(msgpack_in_vec *mv, uint32_t *sz_r);
+const uint8_t *msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r);
+
+void msgpack_print_vec(msgpack_in_vec *mv, const char *name);

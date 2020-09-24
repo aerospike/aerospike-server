@@ -31,8 +31,8 @@
 #include "citrusleaf/cf_queue.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/exp.h"
 #include "base/index.h"
-#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/service.h"
@@ -104,7 +104,7 @@ struct as_batch_shared_s {
 	bool bad_response_fd;
 	bool compress_response;
 	as_msg_field* predexp_mf;
-	predexp_eval_t* predexp;
+	as_exp* predexp;
 };
 
 typedef struct {
@@ -250,7 +250,7 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 	cf_mutex_destroy(&shared->lock);
 
 	// Release memory
-	predexp_destroy(shared->predexp);
+	as_exp_destroy(shared->predexp);
 	cf_free(shared->msgp);
 	cf_free(shared);
 
@@ -905,7 +905,7 @@ as_batch_queue_task(as_transaction* btr)
 	if (predexp_mf != NULL) {
 		shared->predexp_mf = predexp_mf;
 
-		if ((shared->predexp = predexp_build(predexp_mf)) == NULL) {
+		if ((shared->predexp = as_exp_build(predexp_mf, true)) == NULL) {
 			cf_warning(AS_BATCH, "Failed to build batch predexp");
 			cf_free(shared);
 			return as_batch_send_error(btr, AS_ERR_PARAMETER);
@@ -1350,7 +1350,7 @@ as_batch_get_predexp_mf(as_batch_shared* shared)
 	return shared->predexp_mf;
 }
 
-predexp_eval_t*
+as_exp*
 as_batch_get_predexp(as_batch_shared* shared)
 {
 	return shared->predexp;

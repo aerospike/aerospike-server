@@ -1,7 +1,7 @@
 /*
- * udf.h
+ * exp.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -29,63 +29,46 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "aerospike/as_aerospike.h"
-#include "aerospike/as_list.h"
-#include "citrusleaf/alloc.h"
-
-#include "base/exp.h"
-#include "base/transaction.h"
-
-
-//==========================================================
-// Forward declarations.
-//
-
-struct as_exp_s;
-struct as_transaction_s;
-struct cl_msg_s;
+#include "base/datamodel.h"
+#include "base/index.h"
 
 
 //==========================================================
 // Typedefs & constants.
 //
 
-#define UDF_MAX_STRING_SZ 128
+typedef struct as_exp_s {
+	uint8_t version;
+	void** cleanup_stack;
+	uint32_t cleanup_stack_ix;
+	uint8_t* buf_cleanup;
+	uint8_t mem[];
+} as_exp;
 
-typedef struct udf_def_s {
-	char filename[UDF_MAX_STRING_SZ];
-	char function[UDF_MAX_STRING_SZ];
-	as_list* arglist;
-	uint8_t type;
-} udf_def;
+typedef struct exp_ctx_s {
+	as_namespace* ns;
+	as_record* r;
+	as_storage_rd* rd; // NULL during metadata phase
+} as_exp_ctx;
 
-typedef void (*iudf_cb)(void* udata, int result);
-
-typedef struct iudf_origin_s {
-	udf_def def;
-	struct cl_msg_s* msgp;
-	struct as_exp_s* predexp;
-	iudf_cb cb;
-	void* udata;
-} iudf_origin;
+typedef enum {
+	AS_EXP_FALSE = 0,
+	AS_EXP_TRUE = 1,
+	AS_EXP_UNK = 2
+} as_exp_trilean;
 
 
 //==========================================================
 // Public API.
 //
 
-static inline void
-iudf_origin_destroy(iudf_origin* origin)
-{
-	if (origin->def.arglist) {
-		as_list_destroy(origin->def.arglist);
-	}
+as_exp* exp_build_base64(const char* buf64, uint32_t buf64_sz);
+as_exp* as_exp_build(const as_msg_field* msg, bool cpy_instr);
+as_exp_trilean as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx);
+bool as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx);
+void as_exp_destroy(as_exp* exp);
 
-	as_exp_destroy(origin->predexp);
-	cf_free(origin->msgp);
-}
-
-void as_udf_init();
-bool udf_def_init_from_msg(udf_def* def, const struct as_transaction_s* tr);
-
-transaction_status as_udf_start(struct as_transaction_s* tr);
+as_exp* predexp_build_old(const as_msg_field* pfp);
+as_exp_trilean predexp_matches_metadata_old(const as_exp* predexp, const as_exp_ctx* ctx);
+bool predexp_matches_record_old(const as_exp* predexp, const as_exp_ctx* ctx);
+void predexp_destroy_old(as_exp* predexp);

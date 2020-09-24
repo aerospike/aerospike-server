@@ -160,8 +160,11 @@ typedef struct hll_op_def_s {
 } hll_op_def;
 
 typedef struct hll_state_s {
+	const uint8_t* bin_name;
+	uint8_t bin_name_sz;
+
 	as_hll_op_type op_type;
-	msgpack_in pk;
+	msgpack_in_vec* mv;
 	uint32_t n_args;
 	hll_op_def* def;
 } hll_state;
@@ -173,8 +176,10 @@ typedef struct hll_state_s {
 
 void hll_op_destroy(hll_op* op);
 
+static bool hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read);
+static int hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb);
+static int hll_read(hll_state* state, const as_bin* b, as_bin* rb);
 static int32_t hll_verify_bin(const as_bin* b);
-static bool hll_state_init(hll_state* state, const as_msg_op* msg_op, bool is_read);
 static bool hll_parse_op(hll_state* state, hll_op* op);
 static bool hll_parse_n_index_bits(hll_state* state, hll_op* op);
 static bool hll_parse_n_minhash_bits(hll_state* state, hll_op* op);
@@ -207,6 +212,7 @@ static void hll_read_op_union_count(const hll_op* op, const hll_t* from, as_bin*
 static void hll_read_op_intersect_count(const hll_op* op, const hll_t* from, as_bin* rb);
 static void hll_read_op_similarity(const hll_op* op, const hll_t* from, as_bin* rb);
 static void hll_read_op_describe(const hll_op* op, const hll_t* from, as_bin* rb);
+static void hll_read_op_may_contain(const hll_op* op, const hll_t* from, as_bin* rb);
 
 static bool validate_n_combined_bits(uint64_t n_index_bits, uint64_t n_minhash_bits);
 static bool validate_n_index_bits(uint64_t n_index_bits);
@@ -223,6 +229,7 @@ static void hmh_compatible_template(uint32_t n_hmhs, const hll_t** hmhs, hll_t* 
 static void hmh_union(hll_t* hmhunion, const hll_t* hmh);
 static uint64_t hmh_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs);
 static double hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs);
+static bool hmh_may_contain(const hll_t* hmh, size_t buf_sz, const uint8_t* buf);
 
 static uint32_t registers_sz(uint8_t n_index_bits, uint8_t n_minhash_bits);
 static void hmh_hash(const hll_t* hmh, const uint8_t* element, size_t value_sz, uint16_t* register_ix, uint64_t* value);
@@ -245,11 +252,25 @@ static double hll_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs);
 // Inlines & macros.
 //
 
+#define INIT_MV_FROM_MSG(_msg_op) \
+	uint32_t data_sz = _msg_op->op_sz - (uint32_t)OP_FIXED_SZ - \
+		_msg_op->name_sz; \
+	const uint8_t* data = _msg_op->name + _msg_op->name_sz; \
+	msgpack_vec vecs = { \
+			.buf = data, \
+			.buf_sz = data_sz \
+	}; \
+	msgpack_in_vec mv = { \
+			.n_vecs = 1, \
+			.vecs = &vecs \
+	}
+
 #define HLL_MODIFY_OP_ENTRY(_op, _op_fn, _prep_fn, _flags, _min_args, \
 		_max_args, ...) \
 	[_op].name = # _op, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn, \
 	[_op].bad_flags = ~((uint64_t)(_flags)), [_op].min_args = _min_args, \
 	[_op].max_args = _max_args, [_op].args = (hll_parse_fn[]){__VA_ARGS__}
+
 #define HLL_READ_OP_ENTRY(_op, _op_fn, _prep_fn, _n_args, ...) \
 	[_op].name = # _op, [_op].prepare = _prep_fn, \
 	[_op].fn.read = _op_fn, [_op].bad_flags = ~((uint64_t)(0)), \
@@ -301,7 +322,9 @@ static const hll_op_def hll_read_op_table[] = {
 		HLL_READ_OP_ENTRY(AS_HLL_OP_SIMILARITY, hll_read_op_similarity,
 				hll_read_prepare_intersect, 1, hll_parse_hlls_intersect),
 		HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, hll_read_op_describe,
-				hll_read_prepare_noop, 0)
+				hll_read_prepare_noop, 0),
+		HLL_READ_OP_ENTRY(AS_HLL_OP_MAY_CONTAIN, hll_read_op_may_contain,
+				hll_read_prepare_noop, 1, hll_parse_elements)
 };
 
 
@@ -401,129 +424,56 @@ hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 //
 
 int
-as_bin_hll_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
+as_bin_hll_modify_tr(as_bin* b, const as_msg_op* msg_op,
+		cf_ll_buf* particles_llb, as_bin* rb)
 {
-	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
-
-	int32_t verify_result = hll_verify_bin(b);
-
-	if (verify_result != AS_OK) {
-		return verify_result;
-	}
-
+	INIT_MV_FROM_MSG(msg_op);
 	hll_state state = { 0 };
 
-	if (! hll_state_init(&state, msg_op, true)) {
+	if (! hll_state_init(&state, msg_op->name, msg_op->name_sz, &mv, false)) {
 		return -AS_ERR_PARAMETER;
 	}
 
-	hll_op op = { 0 };
-
-	if (! hll_parse_op(&state, &op)) {
-		hll_op_destroy(&op);
-		return -AS_ERR_PARAMETER;
-	}
-
-	int32_t prepare_result = state.def->prepare(&op, b->particle);
-
-	if (prepare_result != AS_OK) {
-		hll_op_destroy(&op);
-		return prepare_result;
-	}
-
-	hll_read_execute_op(&state, &op, b->particle, rb);
-	hll_op_destroy(&op);
-
-	return AS_OK;
+	return hll_modify(&state, b, particles_llb, rb);
 }
 
 int
-as_bin_hll_modify(as_bin* b, const as_msg_op* msg_op, cf_ll_buf* particles_llb,
-		as_bin* rb)
+as_bin_hll_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 {
-	int32_t verify_result = hll_verify_bin(b);
-
-	if (verify_result != AS_OK) {
-		return verify_result;
-	}
-
+	INIT_MV_FROM_MSG(msg_op);
 	hll_state state = { 0 };
 
-	if (! hll_state_init(&state, msg_op, false)) {
+	if (! hll_state_init(&state, msg_op->name, msg_op->name_sz, &mv, true)) {
 		return -AS_ERR_PARAMETER;
 	}
 
-	hll_op op = { .n_index_bits = 0xFF, .n_minhash_bits = 0xFF };
+	return hll_read(&state, b, rb);
+}
 
-	if (! hll_parse_op(&state, &op)) {
-		hll_op_destroy(&op);
+int
+as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
+{
+	hll_state state = { 0 };
+
+	if (! hll_state_init(&state, (const uint8_t*)"::write-exp::", 13,
+			mv, false)) {
 		return -AS_ERR_PARAMETER;
 	}
 
-	as_particle* old_p;
+	return hll_modify(&state, b, NULL, rb);
+}
 
-	if (as_bin_is_live(b)) {
-		if ((op.flags & AS_HLL_FLAG_CREATE_ONLY) != 0) {
-			if ((op.flags & AS_HLL_FLAG_NO_FAIL) != 0) {
-				hll_op_destroy(&op);
-				return AS_OK;
-			}
+int
+as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
+{
+	hll_state state = { 0 };
 
-			cf_warning(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would update",
-					AS_ERR_BIN_EXISTS, state.def->name, state.op_type,
-					(int)msg_op->name_sz, msg_op->name);
-			hll_op_destroy(&op);
-			return -AS_ERR_BIN_EXISTS;
-		}
-		// else - there is an existing hll particle, which we will modify.
-
-		old_p = b->particle;
-	}
-	else {
-		if ((op.flags & AS_HLL_FLAG_UPDATE_ONLY) != 0) {
-			if ((op.flags & AS_HLL_FLAG_NO_FAIL) != 0) {
-				hll_op_destroy(&op);
-				return AS_OK;
-			}
-
-			cf_warning(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would create",
-					AS_ERR_BIN_NOT_FOUND, state.def->name, state.op_type,
-					(int)msg_op->name_sz, msg_op->name);
-			hll_op_destroy(&op);
-			return -AS_ERR_BIN_NOT_FOUND;
-		}
-
-		cf_assert(b->particle == NULL, AS_PARTICLE, "particle not null");
-
-		old_p = NULL;
+	if (! hll_state_init(&state, (const uint8_t*)"::read-exp::", 12,
+			mv, true)) {
+		return -AS_ERR_PARAMETER;
 	}
 
-	int32_t prepare_result = state.def->prepare(&op, old_p);
-
-	if (prepare_result != AS_OK) {
-		hll_op_destroy(&op);
-		return prepare_result;
-	}
-
-	uint32_t new_size = hmh_required_sz(op.n_index_bits, op.n_minhash_bits);
-	size_t alloc_size = sizeof(hll_mem) + new_size;
-
-	if (particles_llb == NULL) {
-		b->particle = cf_malloc_ns(alloc_size);
-	}
-	else {
-		cf_ll_buf_reserve(particles_llb, alloc_size, (uint8_t**)&b->particle);
-	}
-
-	hll_modify_execute_op(&state, &op, old_p, b->particle, new_size, rb);
-	hll_op_destroy(&op);
-
-	if (old_p == NULL) {
-		// Set the bin's state member.
-		as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_HLL);
-	}
-
-	return AS_OK;
+	return hll_read(&state, b, rb);
 }
 
 
@@ -543,6 +493,175 @@ hll_op_destroy(hll_op* op)
 //==========================================================
 // Local helpers - hll parsing.
 //
+
+static bool
+hll_state_init(hll_state* state, const uint8_t* bin_name,
+		uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read)
+{
+	state->mv = mv;
+
+	uint32_t ele_count;
+
+	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
+			ele_count == 0) {
+		cf_warning(AS_PARTICLE, "hll_state_init_trans - error %u bin %.*s insufficient args (%u) or unable to parse args",
+				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, ele_count);
+		return false;
+	}
+
+	state->n_args = ele_count - 1; // removed op argument
+
+	uint64_t type64;
+
+	if (! msgpack_get_uint64_vec(state->mv, &type64)) {
+		cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s unable to parse op",
+				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
+		return false;
+	}
+
+	state->op_type = (as_hll_op_type)type64;
+
+	if (is_read) {
+		if (! (state->op_type >= AS_HLL_READ_OP_START &&
+				state->op_type < AS_HLL_READ_OP_END)) {
+			cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s op %u expected read op",
+					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
+					state->op_type);
+			return false;
+		}
+
+		state->def = (hll_op_def*)&hll_read_op_table[state->op_type];
+	}
+	else {
+		if (! (state->op_type >= AS_HLL_MODIFY_OP_START &&
+				state->op_type < AS_HLL_MODIFY_OP_END)) {
+			cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s op %u expected modify op",
+					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
+					state->op_type);
+			return false;
+		}
+
+		state->def = (hll_op_def*)&hll_modify_op_table[state->op_type];
+	}
+
+	state->bin_name_sz = bin_name_sz;
+	state->bin_name = bin_name;
+
+	return true;
+}
+
+static int
+hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
+{
+	int32_t verify_result = hll_verify_bin(b);
+
+	if (verify_result != AS_OK) {
+		return verify_result;
+	}
+
+	hll_op op = { .n_index_bits = 0xFF, .n_minhash_bits = 0xFF };
+
+	if (! hll_parse_op(state, &op)) {
+		hll_op_destroy(&op);
+		return -AS_ERR_PARAMETER;
+	}
+
+	as_particle* old_p;
+
+	if (as_bin_is_live(b)) {
+		if ((op.flags & AS_HLL_FLAG_CREATE_ONLY) != 0) {
+			if ((op.flags & AS_HLL_FLAG_NO_FAIL) != 0) {
+				hll_op_destroy(&op);
+				return AS_OK;
+			}
+
+			cf_warning(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would update",
+					AS_ERR_BIN_EXISTS, state->def->name, state->op_type,
+					(int)state->bin_name_sz, state->bin_name);
+			hll_op_destroy(&op);
+			return -AS_ERR_BIN_EXISTS;
+		}
+		// else - there is an existing hll particle, which we will modify.
+
+		old_p = b->particle;
+	}
+	else {
+		if ((op.flags & AS_HLL_FLAG_UPDATE_ONLY) != 0) {
+			if ((op.flags & AS_HLL_FLAG_NO_FAIL) != 0) {
+				hll_op_destroy(&op);
+				return AS_OK;
+			}
+
+			cf_warning(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would create",
+					AS_ERR_BIN_NOT_FOUND, state->def->name, state->op_type,
+					(int)state->bin_name_sz, state->bin_name);
+			hll_op_destroy(&op);
+			return -AS_ERR_BIN_NOT_FOUND;
+		}
+
+		cf_assert(b->particle == NULL, AS_PARTICLE, "particle not null");
+
+		old_p = NULL;
+	}
+
+	int32_t prepare_result = state->def->prepare(&op, old_p);
+
+	if (prepare_result != AS_OK) {
+		hll_op_destroy(&op);
+		return prepare_result;
+	}
+
+	uint32_t new_size = hmh_required_sz(op.n_index_bits, op.n_minhash_bits);
+	size_t alloc_size = sizeof(hll_mem) + new_size;
+
+	if (particles_llb == NULL) {
+		b->particle = cf_malloc_ns(alloc_size);
+	}
+	else {
+		cf_ll_buf_reserve(particles_llb, alloc_size, (uint8_t**)&b->particle);
+	}
+
+	hll_modify_execute_op(state, &op, old_p, b->particle, new_size, rb);
+	hll_op_destroy(&op);
+
+	if (old_p == NULL) {
+		// Set the bin's state member.
+		as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_HLL);
+	}
+
+	return AS_OK;
+}
+
+static int
+hll_read(hll_state* state, const as_bin* b, as_bin* rb)
+{
+	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
+
+	int32_t verify_result = hll_verify_bin(b);
+
+	if (verify_result != AS_OK) {
+		return verify_result;
+	}
+
+	hll_op op = { 0 };
+
+	if (! hll_parse_op(state, &op)) {
+		hll_op_destroy(&op);
+		return -AS_ERR_PARAMETER;
+	}
+
+	int32_t prepare_result = state->def->prepare(&op, b->particle);
+
+	if (prepare_result != AS_OK) {
+		hll_op_destroy(&op);
+		return prepare_result;
+	}
+
+	hll_read_execute_op(state, &op, b->particle, rb);
+	hll_op_destroy(&op);
+
+	return AS_OK;
+}
 
 static int32_t
 hll_verify_bin(const as_bin* b)
@@ -573,63 +692,6 @@ hll_verify_bin(const as_bin* b)
 }
 
 static bool
-hll_state_init(hll_state* state, const as_msg_op* msg_op, bool is_read)
-{
-	const uint8_t* data = msg_op->name + msg_op->name_sz;
-	uint32_t sz = msg_op->op_sz - (uint32_t)OP_FIXED_SZ - msg_op->name_sz;
-
-	state->pk.buf = data;
-	state->pk.buf_sz = sz;
-	state->pk.offset = 0;
-
-	uint32_t ele_count = UINT32_MAX;
-
-	if (! msgpack_get_list_ele_count(&state->pk, &ele_count) ||
-			ele_count == 0) {
-		cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s insufficient args (%u) or unable to parse args",
-				AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name,
-				ele_count);
-		return false;
-	}
-
-	uint64_t type64;
-
-	if (! msgpack_get_uint64(&state->pk, &type64)) {
-		cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s unable to parse op",
-				AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name);
-		return false;
-	}
-
-	state->op_type = (as_hll_op_type)type64;
-	state->n_args = ele_count - 1; // removed op argument
-
-	if (is_read) {
-		if (! (state->op_type >= AS_HLL_READ_OP_START &&
-				state->op_type < AS_HLL_READ_OP_END)) {
-			cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s op %u expected read op",
-					AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name,
-					state->op_type);
-			return false;
-		}
-
-		state->def = (hll_op_def*)&hll_read_op_table[state->op_type];
-	}
-	else {
-		if (! (state->op_type >= AS_HLL_MODIFY_OP_START &&
-				state->op_type < AS_HLL_MODIFY_OP_END)) {
-			cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s op %u expected modify op",
-					AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name,
-					state->op_type);
-			return false;
-		}
-
-		state->def = (hll_op_def*)&hll_modify_op_table[state->op_type];
-	}
-
-	return true;
-}
-
-static bool
 hll_parse_op(hll_state* state, hll_op* op)
 {
 	hll_op_def* def = state->def;
@@ -655,7 +717,7 @@ hll_parse_n_index_bits(hll_state* state, hll_op* op)
 {
 	int64_t n_index_bits;
 
-	if (! msgpack_get_int64(&state->pk, &n_index_bits)) {
+	if (! msgpack_get_int64_vec(state->mv, &n_index_bits)) {
 		cf_warning(AS_PARTICLE, "hll_parse_n_index_bits - error %u op %s (%u) unable to parse n_index_bits",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -678,7 +740,7 @@ hll_parse_n_minhash_bits(hll_state* state, hll_op* op)
 {
 	int64_t n_minhash_bits;
 
-	if (! msgpack_get_int64(&state->pk, &n_minhash_bits)) {
+	if (! msgpack_get_int64_vec(state->mv, &n_minhash_bits)) {
 		cf_warning(AS_PARTICLE, "hll_parse_n_minhash_bits - error %u op %s (%u) unable to parse n_minhash_bits for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->def->name);
@@ -714,7 +776,7 @@ hll_parse_n_minhash_bits(hll_state* state, hll_op* op)
 static bool
 hll_parse_flags(hll_state* state, hll_op* op)
 {
-	if (! msgpack_get_uint64(&state->pk, &op->flags)) {
+	if (! msgpack_get_uint64_vec(state->mv, &op->flags)) {
 		cf_warning(AS_PARTICLE, "hll_parse_flags - error %u op %s (%u) unable to parse flags for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->def->name);
@@ -740,8 +802,9 @@ hll_parse_flags(hll_state* state, hll_op* op)
 }
 
 static bool
-hll_parse_elements(hll_state* state, hll_op* op) {
-	if (! msgpack_get_list_ele_count(&state->pk, &op->n_elements) ||
+hll_parse_elements(hll_state* state, hll_op* op)
+{
+	if (! msgpack_get_list_ele_count_vec(state->mv, &op->n_elements) ||
 			op->n_elements == 0) {
 		cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) not enough elements or unable to parse elements",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
@@ -751,8 +814,8 @@ hll_parse_elements(hll_state* state, hll_op* op) {
 	op->elements = cf_malloc(sizeof(element_buf) * op->n_elements);
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
-		element_buf* e = &op->elements[i];
-		msgpack_type t = msgpack_peek_type(&state->pk);
+		element_buf* e = &op->elements[i]; // TODO - make array of 2 vectors for vectorized input
+		msgpack_type t = msgpack_peek_type_vec(state->mv);
 
 		switch (t) {
 		case MSGPACK_TYPE_LIST:
@@ -761,7 +824,7 @@ hll_parse_elements(hll_state* state, hll_op* op) {
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i, t);
 			return false;
 		default:
-			e->buf = msgpack_skip(&state->pk, &e->sz);
+			e->buf = msgpack_get_ele_vec(state->mv, &e->sz);
 
 			if (e->buf == NULL) {
 				cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) unable to parse element (%u)",
@@ -774,12 +837,20 @@ hll_parse_elements(hll_state* state, hll_op* op) {
 }
 
 static bool
-hll_parse_hlls(hll_state* state, hll_op* op) {
-	if (! msgpack_get_list_ele_count(&state->pk, &op->n_elements) ||
-			op->n_elements == 0) {
-		cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) not enough elements or unable to parse elements",
-				AS_ERR_PARAMETER, state->def->name, state->op_type);
-		return false;
+hll_parse_hlls(hll_state* state, hll_op* op)
+{
+	msgpack_type t = msgpack_peek_type_vec(state->mv);
+
+	if (t == MSGPACK_TYPE_LIST) {
+		if (! msgpack_get_list_ele_count_vec(state->mv, &op->n_elements) ||
+				op->n_elements == 0) {
+			cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) not enough elements or unable to parse elements",
+					AS_ERR_PARAMETER, state->def->name, state->op_type);
+			return false;
+		}
+	}
+	else {
+		op->n_elements = 1; // if no list then expect one HLL
 	}
 
 	op->elements = cf_malloc(sizeof(element_buf) * op->n_elements);
@@ -787,7 +858,7 @@ hll_parse_hlls(hll_state* state, hll_op* op) {
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		element_buf* e = &op->elements[i];
 
-		e->buf = msgpack_get_bin(&state->pk, &e->sz);
+		e->buf = msgpack_get_bin_vec(state->mv, &e->sz);
 
 		// AS msgpack has a one byte blob type field which we ignore here.
 		if (e->buf == NULL || e->sz < sizeof(hll_t) + 1) {
@@ -1319,6 +1390,26 @@ hll_read_op_describe(const hll_op* op, const hll_t* from, as_bin* rb)
 	result_data_set_list_int2x(&rd, from->n_index_bits, from->n_minhash_bits);
 }
 
+static void
+hll_read_op_may_contain(const hll_op* op, const hll_t* from, as_bin* rb)
+{
+	(void)op;
+
+	uint64_t contains_any = 0;
+
+	for (uint32_t i = 0; i < op->n_elements; i++) {
+		element_buf* e = &op->elements[i];
+
+		if (hmh_may_contain(from, e->sz, e->buf)) {
+			contains_any = 1;
+			break;
+		}
+	}
+
+	rb->particle = (as_particle*)contains_any;
+	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
+}
+
 
 //==========================================================
 // Local helpers - hll validation.
@@ -1610,6 +1701,19 @@ hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs)
 	}
 
 	return result;
+}
+
+static bool
+hmh_may_contain(const hll_t* hmh, size_t buf_sz, const uint8_t* buf)
+{
+	uint16_t register_ix;
+	uint64_t check_value;
+
+	hmh_hash(hmh, buf, buf_sz, &register_ix, &check_value);
+
+	uint64_t cur_value = get_register(hmh, register_ix);
+
+	return check_value <= cur_value;
 }
 
 

@@ -137,8 +137,11 @@ typedef enum {
 } op_action;
 
 typedef struct bits_state_s {
+	uint8_t bin_name_sz;
+	const uint8_t* bin_name;
+
 	as_bits_op_type op_type;
-	msgpack_in pk;
+	msgpack_in_vec* mv;
 	uint32_t n_args;
 	bits_op_def* def;
 
@@ -157,7 +160,9 @@ typedef struct bits_state_s {
 // Forward declarations.
 //
 
-static bool bits_state_init(bits_state* state, const as_msg_op* msg_op, bool is_read);
+static bool bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read);
+static int bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb);
+static int bits_read(bits_state* state, const as_bin* b, as_bin* rb);
 static bool bits_parse_op(bits_state* state, bits_op* op);
 static bool bits_parse_byte_offset(bits_state* state, bits_op* op);
 static bool bits_parse_offset(bits_state* state, bits_op* op);
@@ -175,8 +180,8 @@ static bool bits_parse_arithmetic_subflags(bits_state* state, bits_op* op);
 static bool bits_parse_get_integer_subflags(bits_state* state, bits_op* op);
 static bool bits_parse_subflags(bits_state* state, bits_op* op);
 
-static int bits_prepare_read(bits_state* state, bits_op* op, const as_bin* b);
 static int bits_prepare_modify(bits_state* state, bits_op* op, const as_bin* b);
+static int bits_prepare_read(bits_state* state, bits_op* op, const as_bin* b);
 static int bits_prepare_op(bits_state* state, bits_op* op, const as_bin* b);
 static int32_t bits_normalize_offset(const bits_state* state, bits_op* op);
 static int bits_prepare_resize_op(bits_state* state, bits_op* op, uint32_t byte_offset, uint32_t op_size);
@@ -259,6 +264,19 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 	// Invalid blob types remain as blobs.
 	return AS_PARTICLE_TYPE_BLOB;
 }
+
+#define INIT_MV_FROM_MSG(_msg_op) \
+	uint32_t data_sz = _msg_op->op_sz - (uint32_t)OP_FIXED_SZ - \
+		_msg_op->name_sz; \
+	const uint8_t* data = _msg_op->name + _msg_op->name_sz; \
+	msgpack_vec vecs = { \
+			.buf = data, \
+			.buf_sz = data_sz \
+	}; \
+	msgpack_in_vec mv = { \
+			.n_vecs = 1, \
+			.vecs = &vecs \
+	}
 
 #define RSHIFT_WITH_OP(_bop) \
 { \
@@ -745,69 +763,140 @@ blob_to_flat(const as_particle* p, uint8_t* flat)
 //
 
 int
-as_bin_bits_packed_read(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
-{
-	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
-
-	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - error %u unexpected particle type %u for bin %.*s",
-				AS_ERR_INCOMPATIBLE_TYPE, msg_op->particle_type,
-				(int)msg_op->name_sz, msg_op->name);
-		return -AS_ERR_INCOMPATIBLE_TYPE;
-	}
-
-	bits_state state = { 0 };
-
-	if (! bits_state_init(&state, msg_op, true)) {
-		return -AS_ERR_PARAMETER;
-	}
-
-	bits_op op = { 0 };
-
-	if (! bits_parse_op(&state, &op)) {
-		return -AS_ERR_PARAMETER;
-	}
-
-	if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - error %u operation (%s) on bin %.*s bin type must be blob found %u",
-				AS_ERR_INCOMPATIBLE_TYPE, state.def->name, (int)msg_op->name_sz,
-				msg_op->name, as_bin_get_particle_type(b));
-		return -AS_ERR_INCOMPATIBLE_TYPE;
-	}
-
-	int result = bits_prepare_read(&state, &op, b);
-
-	if (result < 1) {
-		return result;
-	}
-
-	if (! bits_execute_read_op(&state, &op, b->particle, rb)) {
-		as_bin_set_empty(rb);
-	}
-
-	return AS_OK;
-}
-
-int
-as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
+as_bin_bits_modify_tr(as_bin* b, const as_msg_op* msg_op,
 		cf_ll_buf* particles_llb)
 {
 	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u unexpected particle type %u for bin %.*s",
+		cf_warning(AS_PARTICLE, "as_bin_bits_trans_modify - error %u unexpected particle type %u for bin %.*s",
 				AS_ERR_INCOMPATIBLE_TYPE, msg_op->particle_type,
 				(int)msg_op->name_sz, msg_op->name);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
+	INIT_MV_FROM_MSG(msg_op);
 	bits_state state = { 0 };
 
-	if (! bits_state_init(&state, msg_op, false)) {
+	if (! bits_state_init(&state, msg_op->name, msg_op->name_sz, &mv, false)) {
 		return -AS_ERR_PARAMETER;
 	}
 
+	return bits_modify(&state, b, particles_llb);
+}
+
+int
+as_bin_bits_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
+{
+	if ((as_particle_type)msg_op->particle_type != AS_PARTICLE_TYPE_BLOB) {
+		cf_warning(AS_PARTICLE, "as_bin_bits_trans_read - error %u unexpected particle type %u for bin %.*s",
+				AS_ERR_INCOMPATIBLE_TYPE, msg_op->particle_type,
+				(int)msg_op->name_sz, msg_op->name);
+		return -AS_ERR_INCOMPATIBLE_TYPE;
+	}
+
+	INIT_MV_FROM_MSG(msg_op);
+	bits_state state = { 0 };
+
+	if (! bits_state_init(&state, msg_op->name, msg_op->name_sz, &mv, true)) {
+		return -AS_ERR_PARAMETER;
+	}
+
+	return bits_read(&state, b, rb);
+}
+
+int
+as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv)
+{
+	bits_state state = { 0 };
+
+	if (! bits_state_init(&state, (const uint8_t*)"::write-exp::", 13, mv,
+			false)) {
+		return -AS_ERR_PARAMETER;
+	}
+
+	return bits_modify(&state, b, NULL);
+}
+
+int
+as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb)
+{
+	bits_state state = { 0 };
+
+	if (! bits_state_init(&state, (const uint8_t*)"::read-exp::", 12, mv,
+			true)) {
+		return -AS_ERR_PARAMETER;
+	}
+
+	return bits_read(&state, b, rb);
+}
+
+
+//==========================================================
+// Local helpers - bits parsing.
+//
+
+static bool
+bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
+		msgpack_in_vec* mv, bool is_read)
+{
+	state->mv = mv;
+
+	uint32_t ele_count;
+
+	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
+			ele_count == 0) {
+		cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s insufficient args (%u) or unable to parse args",
+				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
+				ele_count);
+		return false;
+	}
+
+	state->n_args = ele_count - 1; // removed op argument
+
+	uint64_t type64;
+
+	if (! msgpack_get_uint64_vec(state->mv, &type64)) {
+		cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s unable to parse op",
+				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
+		return false;
+	}
+
+	state->op_type = (as_bits_op_type)type64;
+
+	if (is_read) {
+		if (! (state->op_type >= AS_BITS_READ_OP_START &&
+				state->op_type < AS_BITS_READ_OP_END)) {
+			cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s op %u expected read op",
+					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
+					state->op_type);
+			return false;
+		}
+
+		state->def = (bits_op_def*)&bits_read_op_table[state->op_type];
+	}
+	else {
+		if (! (state->op_type >= AS_BITS_MODIFY_OP_START &&
+				state->op_type < AS_BITS_MODIFY_OP_END)) {
+			cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s op %u expected modify op",
+					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
+					state->op_type);
+			return false;
+		}
+
+		state->def = (bits_op_def*)&bits_modify_op_table[state->op_type];
+	}
+
+	state->bin_name_sz = bin_name_sz;
+	state->bin_name = bin_name;
+
+	return true;
+}
+
+static int
+bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
+{
 	bits_op op = { 0 };
 
-	if (! bits_parse_op(&state, &op)) {
+	if (! bits_parse_op(state, &op)) {
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -820,15 +909,15 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 			}
 
 			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would update - not allowed",
-					AS_ERR_BIN_EXISTS, state.def->name, (int)msg_op->name_sz,
-					msg_op->name);
+					AS_ERR_BIN_EXISTS, state->def->name,
+					(int)state->bin_name_sz, state->bin_name);
 			return -AS_ERR_BIN_EXISTS;
 		}
 
 		if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
 			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s must be on a blob - found %u",
-					AS_ERR_INCOMPATIBLE_TYPE, state.def->name,
-					(int)msg_op->name_sz, msg_op->name,
+					AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
+					(int)state->bin_name_sz, state->bin_name,
 					as_bin_get_particle_type(b));
 			return -AS_ERR_INCOMPATIBLE_TYPE;
 		}
@@ -837,16 +926,16 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 		old_blob = b->particle;
 	}
 	else {
-		if ((state.op_type != AS_BITS_OP_INSERT &&
-				state.op_type != AS_BITS_OP_RESIZE) ||
+		if ((state->op_type != AS_BITS_OP_INSERT &&
+				state->op_type != AS_BITS_OP_RESIZE) ||
 				(op.flags & AS_BITS_FLAG_UPDATE_ONLY) != 0) {
 			if ((op.flags & AS_BITS_FLAG_NO_FAIL) != 0) {
 				return AS_OK;
 			}
 
 			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would create - not allowed",
-					AS_ERR_BIN_NOT_FOUND, state.def->name, (int)msg_op->name_sz,
-					msg_op->name);
+					AS_ERR_BIN_NOT_FOUND, state->def->name,
+					(int)state->bin_name_sz, state->bin_name);
 			return -AS_ERR_BIN_NOT_FOUND;
 		}
 
@@ -855,13 +944,13 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 		old_blob = NULL;
 	}
 
-	int result = bits_prepare_modify(&state, &op, b);
+	int result = bits_prepare_modify(state, &op, b);
 
 	if (result < 1) {
 		return result;
 	}
 
-	size_t alloc_size = sizeof(blob_mem) + (size_t)state.new_size;
+	size_t alloc_size = sizeof(blob_mem) + (size_t)state->new_size;
 
 	if (particles_llb == NULL) {
 		b->particle = cf_malloc_ns(alloc_size);
@@ -870,7 +959,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 		cf_ll_buf_reserve(particles_llb, alloc_size, (uint8_t**)&b->particle);
 	}
 
-	if (! bits_execute_modify_op(&state, &op, old_blob, b->particle)) {
+	if (! bits_execute_modify_op(state, &op, old_blob, b->particle)) {
 		if (particles_llb == NULL) {
 			cf_free(b->particle);
 		}
@@ -879,7 +968,7 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 
 		if ((op.flags & AS_BITS_FLAG_NO_FAIL) == 0) {
 			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) unable to apply operation",
-					AS_ERR_OP_NOT_APPLICABLE, state.def->name);
+					AS_ERR_OP_NOT_APPLICABLE, state->def->name);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
@@ -894,65 +983,36 @@ as_bin_bits_packed_modify(as_bin* b, const as_msg_op* msg_op,
 	return AS_OK;
 }
 
-
-//==========================================================
-// Local helpers - bits parsing.
-//
-
-static bool
-bits_state_init(bits_state* state, const as_msg_op* msg_op, bool is_read)
+static int
+bits_read(bits_state* state, const as_bin* b, as_bin* rb)
 {
-	const uint8_t* data = msg_op->name + msg_op->name_sz;
-	uint32_t sz = msg_op->op_sz - (uint32_t)OP_FIXED_SZ - msg_op->name_sz;
+	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
 
-	state->pk.buf = data;
-	state->pk.buf_sz = sz;
-	state->pk.offset = 0;
+	bits_op op = { 0 };
 
-	uint32_t n_args;
-
-	if (! msgpack_get_list_ele_count(&state->pk, &n_args) || n_args == 0) {
-		cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s insufficient args (%u) or unable to parse args",
-				AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name, n_args);
-		return false;
+	if (! bits_parse_op(state, &op)) {
+		return -AS_ERR_PARAMETER;
 	}
 
-	state->n_args = n_args - 1; // ignore the 'op' arg.
-
-	uint64_t type64;
-
-	if (! msgpack_get_uint64(&state->pk, &type64)) {
-		cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s unable to parse op",
-				AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name);
-		return false;
+	if (as_bin_get_particle_type(b) != AS_PARTICLE_TYPE_BLOB) {
+		cf_warning(AS_PARTICLE, "as_bin_bits_packed_read - error %u operation (%s) on bin %.*s bin type must be blob found %u",
+				AS_ERR_INCOMPATIBLE_TYPE, state->def->name,
+				(int)state->bin_name_sz, state->bin_name,
+				as_bin_get_particle_type(b));
+		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
-	state->op_type = (as_bits_op_type)type64;
+	int result = bits_prepare_read(state, &op, b);
 
-	if (is_read) {
-		if (! (state->op_type >= AS_BITS_READ_OP_START &&
-				state->op_type < AS_BITS_READ_OP_END)) {
-			cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s op %u expected read op",
-					AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name,
-					state->op_type);
-			return false;
-		}
-
-		state->def = (bits_op_def*)&bits_read_op_table[state->op_type];
-	}
-	else {
-		if (! (state->op_type >= AS_BITS_MODIFY_OP_START &&
-				state->op_type < AS_BITS_MODIFY_OP_END)) {
-			cf_warning(AS_PARTICLE, "bits_state_init - error %u bin %.*s op %u expected modify op",
-					AS_ERR_PARAMETER, (int)msg_op->name_sz, msg_op->name,
-					state->op_type);
-			return false;
-		}
-
-		state->def = (bits_op_def*)&bits_modify_op_table[state->op_type];
+	if (result < 1) {
+		return result;
 	}
 
-	return true;
+	if (! bits_execute_read_op(state, &op, b->particle, rb)) {
+		as_bin_set_empty(rb);
+	}
+
+	return AS_OK;
 }
 
 static bool
@@ -981,7 +1041,7 @@ bits_parse_byte_offset(bits_state* state, bits_op* op)
 {
 	int64_t offset;
 
-	if (! msgpack_get_int64(&state->pk, &offset)) {
+	if (! msgpack_get_int64_vec(state->mv, &offset)) {
 		cf_warning(AS_PARTICLE, "bits_parse_byte_offset - error %u op %s (%u) unable to parse offset",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1004,7 +1064,7 @@ bits_parse_offset(bits_state* state, bits_op* op)
 {
 	int64_t offset;
 
-	if (! msgpack_get_int64(&state->pk, &offset)) {
+	if (! msgpack_get_int64_vec(state->mv, &offset)) {
 		cf_warning(AS_PARTICLE, "bits_parse_offset - error %u op %s (%u) unable to parse offset",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1027,7 +1087,7 @@ bits_parse_integer_size(bits_state* state, bits_op* op)
 {
 	uint64_t size;
 
-	if (! msgpack_get_uint64(&state->pk, &size)) {
+	if (! msgpack_get_uint64_vec(state->mv, &size)) {
 		cf_warning(AS_PARTICLE, "bits_parse_integer_size - error %u op %s (%u) unable to parse byte_size",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1055,7 +1115,7 @@ bits_parse_byte_size(bits_state* state, bits_op* op)
 {
 	uint64_t size;
 
-	if (! msgpack_get_uint64(&state->pk, &size)) {
+	if (! msgpack_get_uint64_vec(state->mv, &size)) {
 		cf_warning(AS_PARTICLE, "bits_parse_byte_size - error %u op %s (%u) unable to parse byte_size",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1084,7 +1144,7 @@ bits_parse_byte_size_allow_zero(bits_state* state, bits_op* op)
 {
 	uint64_t size;
 
-	if (! msgpack_get_uint64(&state->pk, &size)) {
+	if (! msgpack_get_uint64_vec(state->mv, &size)) {
 		cf_warning(AS_PARTICLE, "bits_parse_byte_size_allow_zero - error %u op %s (%u) unable to parse byte_size",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1107,7 +1167,7 @@ bits_parse_size(bits_state* state, bits_op* op)
 {
 	uint64_t size;
 
-	if (! msgpack_get_uint64(&state->pk, &size)) {
+	if (! msgpack_get_uint64_vec(state->mv, &size)) {
 		cf_warning(AS_PARTICLE, "bits_parse_size - error %u op %s (%u) unable to parse size",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1136,7 +1196,7 @@ bits_parse_boolean_value(bits_state* state, bits_op* op)
 {
 	bool value;
 
-	if (! msgpack_get_bool(&state->pk, &value)) {
+	if (! msgpack_get_bool_vec(state->mv, &value)) {
 		cf_warning(AS_PARTICLE, "bits_parse_boolean_value - error %u op %s (%u) unable to parse boolean",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1167,7 +1227,7 @@ bits_parse_n_bits_value(bits_state* state, bits_op* op)
 static bool
 bits_parse_integer_value(bits_state* state, bits_op* op)
 {
-	if (! msgpack_get_uint64(&state->pk, &op->value)) {
+	if (! msgpack_get_uint64_vec(state->mv, &op->value)) {
 		cf_warning(AS_PARTICLE, "bits_parse_integer_value - error %u op %s (%u) unable to parse number",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1181,7 +1241,7 @@ bits_parse_buf(bits_state* state, bits_op* op)
 {
 	uint32_t size;
 
-	op->buf = msgpack_get_bin(&state->pk, &size);
+	op->buf = msgpack_get_bin_vec(state->mv, &size);
 
 	// AS msgpack has a one byte blob type field which we ignore here.
 	if (op->buf == NULL || size == 1) {
@@ -1211,7 +1271,7 @@ bits_parse_buf(bits_state* state, bits_op* op)
 static bool
 bits_parse_flags(bits_state* state, bits_op* op)
 {
-	if (! msgpack_get_uint64(&state->pk, &op->flags)) {
+	if (! msgpack_get_uint64_vec(state->mv, &op->flags)) {
 		cf_warning(AS_PARTICLE, "bits_parse_flags - error %u op %s (%u) unable to parse subflags",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1312,7 +1372,7 @@ bits_parse_get_integer_subflags(bits_state* state, bits_op* op)
 static bool
 bits_parse_subflags(bits_state* state, bits_op* op)
 {
-	if (! msgpack_get_uint64(&state->pk, &op->subflags)) {
+	if (! msgpack_get_uint64_vec(state->mv, &op->subflags)) {
 		cf_warning(AS_PARTICLE, "bits_parse_subflags - error %u op %s (%u) unable to parse subflags",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
@@ -1325,12 +1385,6 @@ bits_parse_subflags(bits_state* state, bits_op* op)
 //==========================================================
 // Local helpers - prepare ops.
 //
-
-static int
-bits_prepare_read(bits_state* state, bits_op* op, const as_bin* b)
-{
-	return bits_prepare_op(state, op, b);
-}
 
 static int
 bits_prepare_modify(bits_state* state, bits_op* op, const as_bin* b)
@@ -1363,6 +1417,12 @@ bits_prepare_modify(bits_state* state, bits_op* op, const as_bin* b)
 	}
 
 	return 1; // success
+}
+
+static int
+bits_prepare_read(bits_state* state, bits_op* op, const as_bin* b)
+{
+	return bits_prepare_op(state, op, b);
 }
 
 static int

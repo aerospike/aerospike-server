@@ -106,6 +106,235 @@ static inline msgpack_cmp_type msgpack_cmp_internal(parse_meta *meta0, parse_met
 //
 
 uint32_t
+msgpack_sz_vec(msgpack_in_vec *mv)
+{
+	if (mv->idx >= mv->n_vecs) {
+		return 0;
+	}
+
+	uint32_t i = mv->idx;
+	const uint8_t * const start = mv->vecs[i].buf + mv->vecs[i].offset;
+	const uint8_t * const end = mv->vecs[i].buf + mv->vecs[i].buf_sz;
+	const uint8_t * const buf = msgpack_sz_internal(start, end, 1,
+			&mv->has_nonstorage);
+
+	if (buf == NULL) {
+		return 0;
+	}
+
+	if (buf == end) {
+		mv->vecs[i].offset = mv->vecs[i].buf_sz;
+		mv->idx++;
+		return (uint32_t)(end - start);
+	}
+
+	if (buf > end) {
+		mv->vecs[i].offset = mv->vecs[i].buf_sz;
+		i++;
+		mv->vecs[i].offset += (uint32_t)(buf - end);
+
+		if (mv->vecs[i].offset > mv->vecs[i].buf_sz) {
+			return 0;
+		}
+
+		mv->idx++;
+
+		if (mv->vecs[i].offset == mv->vecs[i].buf_sz) {
+			mv->idx++;
+		}
+
+		return (uint32_t)(buf - start);
+	}
+
+	mv->vecs[i].offset += (uint32_t)(buf - start);
+
+	return (uint32_t)(buf - start);
+}
+
+bool
+msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value)
+{
+	if (mv->idx >= mv->n_vecs) {
+		return false;
+	}
+
+	msgpack_in mp = {
+			.buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
+			.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset
+	};
+
+	if (! msgpack_get_bool(&mp, value)) {
+		return false;
+	}
+
+	mv->vecs[mv->idx].offset += mp.offset;
+
+	if (mv->vecs[mv->idx].offset == mv->vecs[mv->idx].buf_sz) {
+		mv->idx++;
+	}
+
+	return true;
+}
+
+bool
+msgpack_get_uint64_vec(msgpack_in_vec *mv, uint64_t *i)
+{
+	if (mv->idx >= mv->n_vecs) {
+		return false;
+	}
+
+	msgpack_in mp = {
+			.buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
+			.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset
+	};
+
+	if (! msgpack_get_uint64(&mp, i)) {
+		return false;
+	}
+
+	mv->vecs[mv->idx].offset += mp.offset;
+
+	if (mv->vecs[mv->idx].offset == mv->vecs[mv->idx].buf_sz) {
+		mv->idx++;
+	}
+
+	return true;
+}
+
+bool
+msgpack_get_list_ele_count_vec(msgpack_in_vec *mv, uint32_t *count_r)
+{
+	if (mv->idx >= mv->n_vecs) {
+		return false;
+	}
+
+	msgpack_in mp = {
+			.buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
+			.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset
+	};
+
+	if (! msgpack_get_list_ele_count(&mp, count_r)) {
+		return false;
+	}
+
+	mv->vecs[mv->idx].offset += mp.offset;
+
+	if (mv->vecs[mv->idx].offset == mv->vecs[mv->idx].buf_sz) {
+		mv->idx++;
+	}
+
+	return true;
+}
+
+msgpack_type
+msgpack_peek_type_vec(const msgpack_in_vec *mv)
+{
+	if (mv->idx >= mv->n_vecs) {
+		return MSGPACK_TYPE_ERROR;
+	}
+
+	msgpack_in mp = {
+			.buf = mv->vecs[mv->idx].buf,
+			.buf_sz = mv->vecs[mv->idx].buf_sz,
+			.offset = mv->vecs[mv->idx].offset
+	};
+
+	return msgpack_peek_type(&mp);
+}
+
+const uint8_t *
+msgpack_get_ele_vec(msgpack_in_vec *mv, uint32_t *sz_r)
+{
+	if (mv->idx >= mv->n_vecs) {
+		return NULL;
+	}
+
+	const uint8_t* buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset;
+
+	if ((*sz_r = msgpack_sz_vec(mv)) == 0) {
+		return NULL;
+	}
+
+	return buf;
+}
+
+const uint8_t *
+msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r)
+{
+	if (mv->idx >= mv->n_vecs) {
+		return false;
+	}
+
+	const uint8_t *buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset;
+	uint8_t b = *buf++;
+
+	switch (b) {
+	case 0xc4:
+	case 0xd9: // str/bin with 8 bit header
+		mv->vecs[mv->idx].offset += 2;
+
+		if (mv->vecs[mv->idx].offset > mv->vecs[mv->idx].buf_sz) {
+			return NULL;
+		}
+
+		*sz_r = (uint32_t)*buf;
+		break;
+	case 0xc5:
+	case 0xda: // str/bin with 16 bit header
+		mv->vecs[mv->idx].offset += 3;
+
+		if (mv->vecs[mv->idx].offset > mv->vecs[mv->idx].buf_sz) {
+			return NULL;
+		}
+
+		*sz_r = (uint32_t)cf_swap_from_be16(*(uint16_t *)buf);
+		break;
+	case 0xc6:
+	case 0xdb: // str/bin with 32 bit header
+		mv->vecs[mv->idx].offset += 5;
+
+		if (mv->vecs[mv->idx].offset > mv->vecs[mv->idx].buf_sz) {
+			return NULL;
+		}
+
+		*sz_r = cf_swap_from_be32(*(uint32_t *)buf);
+		break;
+	default:
+		if ((b & 0xe0) == 0xa0) { // str bytes with 8 bit combined header
+			mv->vecs[mv->idx].offset++;
+			*sz_r = (uint32_t)(b & 0x1f);
+			break;
+		}
+
+		return NULL;
+	}
+
+	buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset;
+	mv->vecs[mv->idx].offset += *sz_r;
+
+	if (mv->vecs[mv->idx].offset > mv->vecs[mv->idx].buf_sz) {
+		return NULL;
+	}
+
+	if (mv->vecs[mv->idx].offset == mv->vecs[mv->idx].buf_sz) {
+		mv->idx++;
+	}
+
+	return buf;
+}
+
+void
+msgpack_print_vec(msgpack_in_vec *mv, const char *name)
+{
+	cf_warning(CF_MISC, "msgpack_print_vec{%s idx %u n_vecs %u}", name, mv->idx, mv->n_vecs);
+
+	for (uint32_t i = 0; i < mv->n_vecs; i++) {
+		cf_warning(CF_MISC, "[%u] sz %u off %u\n%*pH", i, mv->vecs[i].buf_sz,
+				mv->vecs[i].offset, mv->vecs[i].buf_sz, mv->vecs[i].buf);
+	}
+}
+
+uint32_t
 msgpack_sz_rep(msgpack_in *mp, uint32_t rep_count)
 {
 	const uint8_t * const start = mp->buf + mp->offset;
@@ -311,7 +540,7 @@ msgpack_peek_is_ext(const msgpack_in *mp)
 }
 
 const uint8_t *
-msgpack_skip(msgpack_in *mp, uint32_t *sz_r)
+msgpack_get_ele(msgpack_in *mp, uint32_t *sz_r)
 {
 	const uint8_t *buf = mp->buf + mp->offset;
 	uint32_t sz = msgpack_sz(mp);

@@ -21,16 +21,16 @@ ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
 endif
 
-BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h features.h health.h
+BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h exp.h features.h health.h
 BASE_HEADERS += index.h job_manager.h json_init.h monitor.h nsup.h particle.h
-BASE_HEADERS += particle_blob.h particle_integer.h predexp.h proto.h scan.h
-BASE_HEADERS += scan_job.h scan_manager.h secondary_index.h security.h
-BASE_HEADERS += security_config.h service.h smd.h stats.h thr_info.h thr_query.h
-BASE_HEADERS += thr_sindex.h thr_tsvc.h ticker.h transaction.h
-BASE_HEADERS += transaction_policy.h truncate.h udf_aerospike.h udf_arglist.h
-BASE_HEADERS += udf_cask.h udf_record.h xdr.h
+BASE_HEADERS += particle_blob.h particle_integer.h proto.h scan.h scan_job.h
+BASE_HEADERS += scan_manager.h secondary_index.h security.h security_config.h
+BASE_HEADERS += service.h smd.h stats.h thr_info.h thr_query.h thr_sindex.h
+BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h
+BASE_HEADERS += truncate.h udf_aerospike.h udf_arglist.h udf_cask.h udf_record.h
+BASE_HEADERS += xdr.h
 
-BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c health.c index.c
+BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c exp.c health.c index.c
 BASE_SOURCES += job_manager.c json_init.c monitor.c namespace.c nsup.c
 BASE_SOURCES += particle.c particle_blob.c particle_float.c particle_geojson.c
 BASE_SOURCES += particle_hll.c particle_integer.c particle_list.c particle_map.c

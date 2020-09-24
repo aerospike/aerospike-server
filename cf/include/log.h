@@ -63,6 +63,7 @@ typedef enum {
 	AS_DRV_PMEM,
 	AS_DRV_SSD,
 	AS_EXCHANGE,
+	AS_EXP,
 	AS_FABRIC,
 	AS_FLAT,
 	AS_GEO,
@@ -80,7 +81,6 @@ typedef enum {
 	AS_PARTICLE,
 	AS_PARTITION,
 	AS_PAXOS,
-	AS_PREDEXP,
 	AS_PROTO,
 	AS_PROXY,
 	AS_PROXY_DIVERT, // special detail context

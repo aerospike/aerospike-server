@@ -262,3 +262,15 @@ float_to_flat(const as_particle *p, uint8_t *flat)
 
 	return float_flat_size(p);
 }
+
+
+//==========================================================
+// as_bin particle functions specific to FLOAT.
+//
+
+double
+as_bin_particle_float_value(const as_bin *b)
+{
+	// Caller must ensure this is called only for FLOAT particles.
+	return *(double*)&b->particle;
+}

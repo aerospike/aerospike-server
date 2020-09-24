@@ -120,7 +120,7 @@
 #include "base/aggr.h"
 #include "base/as_stap.h"
 #include "base/datamodel.h"
-#include "base/predexp.h"
+#include "base/exp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/service.h"
@@ -179,7 +179,7 @@ typedef struct as_query_transaction_s {
 	as_sindex_range        * srange;
 	query_type               job_type;  // Job type [LOOKUP/AGG/UDF]
 	bool                     no_bin_data;
-	predexp_eval_t         * predexp_eval;
+	as_exp                 * predexp_eval;
 	cf_vector              * binlist;
 	as_file_handle         * fd_h;      // ref counted nonetheless
 	/************************** Run Time Data *********************************/
@@ -797,7 +797,7 @@ query_teardown(as_query_transaction *qtr)
 	if (qtr->binlist)     cf_vector_destroy(qtr->binlist);
 	if (qtr->setname)     cf_free(qtr->setname);
 
-	predexp_destroy(qtr->predexp_eval);
+	as_exp_destroy(qtr->predexp_eval);
 
 	if (qtr->job_type == QUERY_TYPE_AGGR && qtr->agg_call.def.arglist) {
 		as_list_destroy(qtr->agg_call.def.arglist);
@@ -1599,13 +1599,13 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 	if (rec_rv == 0) {
 		as_index *r = r_ref.r;
 
-		predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
-		predexp_retval_t predrv = PREDEXP_TRUE;
+		as_exp_ctx predargs = { .ns = ns, .r = r };
+		as_exp_trilean predrv = AS_EXP_TRUE;
 
 		if (qtr->predexp_eval != NULL) {
-			predrv = predexp_matches_metadata(qtr->predexp_eval, &predargs);
+			predrv = as_exp_matches_metadata(qtr->predexp_eval, &predargs);
 
-			if (predrv == PREDEXP_FALSE) {
+			if (predrv == AS_EXP_FALSE) {
 				as_record_done(&r_ref, ns);
 				goto CLEANUP;
 			}
@@ -1640,8 +1640,8 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 
 		predargs.rd = &rd;
 
-		if (predrv == PREDEXP_UNKNOWN &&
-				! predexp_matches_record(qtr->predexp_eval, &predargs)) {
+		if (predrv == AS_EXP_UNK &&
+				! as_exp_matches_record(qtr->predexp_eval, &predargs)) {
 			as_storage_record_close(&rd);
 			as_record_done(&r_ref, ns);
 			goto CLEANUP;
@@ -1875,12 +1875,10 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 			return AS_QUERY_OK;
 		}
 
-		predexp_args_t predargs = {
-				.ns = qtr->ns, .md = r_ref.r, .vl = NULL, .rd = NULL
-		};
+		as_exp_ctx predargs = { .ns = qtr->ns, .r = r_ref.r };
 
-		if (predexp_matches_metadata(qtr->iudf_orig.predexp, &predargs) ==
-				PREDEXP_FALSE) {
+		if (as_exp_matches_metadata(qtr->iudf_orig.predexp, &predargs) ==
+				AS_EXP_FALSE) {
 			as_record_done(&r_ref, qtr->ns);
 			query_release_partition(qtr, rsv);
 			as_incr_uint64(&qtr->ns->n_udf_sub_udf_filtered_out);
@@ -1998,12 +1996,10 @@ query_ops_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 			return AS_QUERY_OK;
 		}
 
-		predexp_args_t predargs = {
-				.ns = qtr->ns, .md = r_ref.r, .vl = NULL, .rd = NULL
-		};
+		as_exp_ctx predargs = { .ns = qtr->ns, .r = r_ref.r };
 
-		if (predexp_matches_metadata(qtr->iops_orig.predexp, &predargs) ==
-				PREDEXP_FALSE) {
+		if (as_exp_matches_metadata(qtr->iops_orig.predexp, &predargs) ==
+				AS_EXP_FALSE) {
 			as_record_done(&r_ref, qtr->ns);
 			query_release_partition(qtr, rsv);
 			as_incr_uint64(&qtr->ns->n_ops_sub_write_filtered_out);
@@ -2964,7 +2960,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	as_sindex *si           = NULL;
 	cf_vector *binlist      = 0;
 	as_sindex_range *srange = 0;
-	predexp_eval_t *predexp_eval = NULL;
+	as_exp *predexp_eval    = NULL;
 	char *setname           = NULL;
 	as_query_transaction *qtr = NULL;
 
@@ -3025,7 +3021,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	if (as_transaction_has_predexp(tr)) {
 		as_msg_field * pfp = as_msg_field_get(m, AS_MSG_FIELD_TYPE_PREDEXP);
-		predexp_eval = predexp_build(pfp);
+		predexp_eval = as_exp_build(pfp, true);
 		if (! predexp_eval) {
 			cf_warning(AS_QUERY, "Failed to build predicate expression");
 			tr->result_code = AS_ERR_PARAMETER;
@@ -3157,7 +3153,7 @@ Cleanup:
 	if (setname)     cf_free(setname);
 	if (si)          AS_SINDEX_RELEASE(si);
 
-	predexp_destroy(predexp_eval);
+	as_exp_destroy(predexp_eval);
 
 	if (srange)      as_sindex_range_free(&srange);
 	if (binlist)     cf_vector_destroy(binlist);

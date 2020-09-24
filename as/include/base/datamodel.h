@@ -221,21 +221,21 @@ extern uint32_t as_bin_particle_to_client(const as_bin *b, as_msg_op *op);
 
 // Different for blob bitwise operations - we don't use the normal APIs and
 // particle table functions.
-extern int as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
 extern int as_bin_bits_alloc_modify_from_client(as_bin *b, as_msg_op *op);
 extern int as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op);
+extern int as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
 
 // Different for HLL operations - we don't use the normal APIs and particle
 // table functions.
-extern int as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb);
 extern int as_bin_hll_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *rb);
 extern int as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb);
+extern int as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb);
 
 // Different for CDTs - the operations may return results, so we don't use the
 // normal APIs and particle table functions.
-extern int as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
 extern int as_bin_cdt_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *result);
 extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *result);
+extern int as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
 
 // as_val:
 extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
@@ -258,16 +258,26 @@ extern uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
 extern int64_t as_bin_particle_integer_value(const as_bin *b);
 extern void as_bin_particle_integer_set(as_bin *b, int64_t i);
 
+// float:
+extern double as_bin_particle_float_value(const as_bin *b);
+
 // string:
 extern uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
 
+struct msgpack_in_s;
+struct msgpack_in_vec_s;
+
 // blob:
-extern int as_bin_bits_packed_read(const as_bin *b, const as_msg_op *msg_op, as_bin *result);
-extern int as_bin_bits_packed_modify(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb);
+extern int as_bin_bits_modify_tr(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb);
+extern int as_bin_bits_read_tr(const as_bin *b, const as_msg_op *msg_op, as_bin *result);
+extern int as_bin_bits_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv);
+extern int as_bin_bits_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
 
 // HLL:
-extern int as_bin_hll_read(const as_bin *b, const as_msg_op *msg_op, as_bin *rb);
-extern int as_bin_hll_modify(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb, as_bin* rb);
+extern int as_bin_hll_modify_tr(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb, as_bin* rb);
+extern int as_bin_hll_read_tr(const as_bin *b, const as_msg_op *msg_op, as_bin *rb);
+extern int as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
+extern int as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
 
 // geojson:
 typedef void * geo_region_t;
@@ -277,14 +287,18 @@ extern size_t as_bin_particle_geojson_cellids(const as_bin *b, uint64_t **pp_cel
 extern bool as_particle_geojson_match(as_particle *p, uint64_t cellid, geo_region_t region, bool is_strict);
 extern bool as_particle_geojson_match_asval(const as_val *val, uint64_t cellid, geo_region_t region, bool is_strict);
 char const *as_geojson_mem_jsonstr(const as_particle *p, size_t *p_jsonsz);
+bool as_geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t candidate_region, uint64_t query_cellid, geo_region_t query_region, bool is_strict);
+const uint8_t *as_geojson_msgpack_jsonstr(struct msgpack_in_s *mp, uint32_t *jsonsz_r);
 
 // list:
 struct cdt_payload_s;
 struct rollback_alloc_s;
 extern void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
 
-extern int as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result);
-extern int as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
+extern int as_bin_cdt_modify_tr(as_bin *b, const as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
+extern int as_bin_cdt_read_tr(const as_bin *b, const as_msg_op *op, as_bin *result);
+extern int as_bin_cdt_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *result);
+extern int as_bin_cdt_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *result);
 
 // For copying as_bin structs without the last 3 bytes.
 static inline void

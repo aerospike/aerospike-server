@@ -41,8 +41,8 @@
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/exp.h"
 #include "base/index.h"
-#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
@@ -74,7 +74,7 @@ transaction_status read_local(as_transaction* tr);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code);
 int batch_predexp_filter_meta(const as_transaction* tr, const as_record* r,
-		predexp_eval_t** predexp);
+		as_exp** predexp);
 
 
 //==========================================================
@@ -529,8 +529,8 @@ read_local(as_transaction* tr)
 
 	// Apply predexp metadata filter if present.
 
-	predexp_eval_t* predexp = NULL;
-	predexp_eval_t* batch_predexp = NULL;
+	as_exp* predexp = NULL;
+	as_exp* batch_predexp = NULL;
 
 	if ((result = tr->origin == FROM_BATCH ?
 			batch_predexp_filter_meta(tr, r, &batch_predexp) :
@@ -550,12 +550,12 @@ read_local(as_transaction* tr)
 	if (predexp != NULL || batch_predexp != NULL) {
 		if ((result = predexp_read_and_filter_bins(&rd,
 				tr->origin == FROM_BATCH ? batch_predexp : predexp)) != 0) {
-			predexp_destroy(predexp);
+			as_exp_destroy(predexp);
 			read_local_done(tr, &r_ref, &rd, result);
 			return TRANS_DONE_ERROR;
 		}
 
-		predexp_destroy(predexp);
+		as_exp_destroy(predexp);
 	}
 
 	// Check the key if required.
@@ -779,7 +779,7 @@ read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 
 int
 batch_predexp_filter_meta(const as_transaction* tr, const as_record* r,
-		predexp_eval_t** predexp)
+		as_exp** predexp)
 {
 	*predexp = as_batch_get_predexp(tr->from.batch_shared);
 
@@ -787,15 +787,15 @@ batch_predexp_filter_meta(const as_transaction* tr, const as_record* r,
 		return AS_OK;
 	}
 
-	predexp_args_t predargs = { .ns = tr->rsv.ns, .md = (as_record*)r };
-	predexp_retval_t predrv = predexp_matches_metadata(*predexp, &predargs);
+	as_exp_ctx predargs = { .ns = tr->rsv.ns, .r = (as_record*)r };
+	as_exp_trilean predrv = as_exp_matches_metadata(*predexp, &predargs);
 
-	if (predrv == PREDEXP_UNKNOWN) {
+	if (predrv == AS_EXP_UNK) {
 		return AS_OK; // caller must later check bins using *predexp
 	}
 	// else - caller will not need to apply filter later.
 
 	*predexp = NULL;
 
-	return predrv == PREDEXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
+	return predrv == AS_EXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
 }

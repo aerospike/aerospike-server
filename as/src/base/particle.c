@@ -846,21 +846,21 @@ as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 //
 
 int
-as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
-{
-	return as_bin_bits_packed_read(b, op, result);
-}
-
-int
 as_bin_bits_alloc_modify_from_client(as_bin *b, as_msg_op *op)
 {
-	return as_bin_bits_packed_modify(b, op, NULL);
+	return as_bin_bits_modify_tr(b, op, NULL);
 }
 
 int
 as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op)
 {
-	return as_bin_bits_packed_modify(b, op, particles_llb);
+	return as_bin_bits_modify_tr(b, op, particles_llb);
+}
+
+int
+as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
+{
+	return as_bin_bits_read_tr(b, op, result);
 }
 
 
@@ -873,21 +873,21 @@ as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg
 //
 
 int
-as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb)
-{
-	return as_bin_hll_read(b, op, rb);
-}
-
-int
 as_bin_hll_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *rb)
 {
-	return as_bin_hll_modify(b, op, NULL, rb);
+	return as_bin_hll_modify_tr(b, op, NULL, rb);
 }
 
 int
 as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb)
 {
-	return as_bin_hll_modify(b, op, particles_llb, rb);
+	return as_bin_hll_modify_tr(b, op, particles_llb, rb);
+}
+
+int
+as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb)
+{
+	return as_bin_hll_read_tr(b, op, rb);
 }
 
 
@@ -900,19 +900,19 @@ as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_
 //
 
 int
-as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
-{
-	return as_bin_cdt_packed_read(b, op, result);
-}
-
-int
 as_bin_cdt_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *result)
 {
-	return as_bin_cdt_packed_modify(b, op, result, NULL);
+	return as_bin_cdt_modify_tr(b, op, result, NULL);
 }
 
 int
 as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *result)
 {
-	return as_bin_cdt_packed_modify(b, op, result, particles_llb);
+	return as_bin_cdt_modify_tr(b, op, result, particles_llb);
+}
+
+int
+as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
+{
+	return as_bin_cdt_read_tr(b, op, result);
 }

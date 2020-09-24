@@ -69,7 +69,7 @@ typedef struct rollback_alloc_s {
 
 typedef struct cdt_process_state_s {
 	as_cdt_optype type;
-	msgpack_in mp;
+	msgpack_in_vec *mv;
 	uint32_t ele_count;
 } cdt_process_state;
 
@@ -132,7 +132,7 @@ typedef struct cdt_context_s {
 	const uint8_t *create_hdr_ptr;
 } cdt_context;
 
-typedef bool (*cdt_subcontext_fn)(cdt_context *ctx, msgpack_in *val);
+typedef bool (*cdt_subcontext_fn)(cdt_context *ctx, msgpack_in_vec *val);
 
 typedef struct cdt_op_mem_s {
 	cdt_context ctx;
@@ -325,7 +325,6 @@ void cdt_payload_pack_int(cdt_payload *packed, int64_t value);
 void cdt_payload_pack_double(cdt_payload *packed, double value);
 
 // cdt_process_state
-bool cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op);
 bool cdt_process_state_get_params(cdt_process_state *state, size_t n, ...);
 const char *cdt_process_state_get_op_name(const cdt_process_state *state);
 
@@ -465,20 +464,20 @@ bool list_order_index_sort(order_index *ordidx, const offset_index *full_offidx,
 
 bool list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r);
 
-bool list_subcontext_by_index(cdt_context *ctx, msgpack_in *val);
-bool list_subcontext_by_rank(cdt_context *ctx, msgpack_in *val);
-bool list_subcontext_by_key(cdt_context *ctx, msgpack_in *val);
-bool list_subcontext_by_value(cdt_context *ctx, msgpack_in *val);
+bool list_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val);
+bool list_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val);
+bool list_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val);
+bool list_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val);
 
 void cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 
 uint8_t list_get_ctx_flags(bool is_ordered, bool is_toplvl);
 
 // map
-bool map_subcontext_by_index(cdt_context *ctx, msgpack_in *val);
-bool map_subcontext_by_rank(cdt_context *ctx, msgpack_in *val);
-bool map_subcontext_by_key(cdt_context *ctx, msgpack_in *val);
-bool map_subcontext_by_value(cdt_context *ctx, msgpack_in *val);
+bool map_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val);
+bool map_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val);
+bool map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val);
+bool map_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val);
 
 void cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 

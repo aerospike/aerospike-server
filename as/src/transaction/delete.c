@@ -40,8 +40,8 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/exp.h"
 #include "base/index.h"
-#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -463,7 +463,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 	// Apply predexp metadata filter if present.
 
-	predexp_eval_t* predexp = NULL;
+	as_exp* predexp = NULL;
 	int result = build_predexp_and_filter_meta(tr, r, &predexp);
 
 	if (result != 0) {
@@ -488,14 +488,14 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		// Apply predexp record bins filter if present.
 		if (predexp != NULL) {
 			if ((result = predexp_read_and_filter_bins(&rd, predexp)) != 0) {
-				predexp_destroy(predexp);
+				as_exp_destroy(predexp);
 				as_storage_record_close(&rd);
 				as_record_done(r_ref, ns);
 				tr->result_code = result;
 				return TRANS_DONE_ERROR;
 			}
 
-			predexp_destroy(predexp);
+			as_exp_destroy(predexp);
 		}
 
 		// Check the key if required.

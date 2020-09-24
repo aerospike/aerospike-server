@@ -207,12 +207,16 @@ static bool unpack_map_value(msgpack_in *mp, cdt_payload *payload_r);
 static inline uint8_t *buf_pack_nil_rep(uint8_t *buf, uint32_t rep);
 static inline void pack_nil_rep(as_packer *pk, uint32_t rep);
 
+// cdt_process_state
+bool cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op);
+static bool cdt_process_state_init_from_vec(cdt_process_state *cdt_state, msgpack_in_vec* mv);
+
 // order_index
 static inline uint32_t order_index_ele_sz(uint32_t max_idx);
 
 // cdt_context
-static bool cdt_context_ctx_type_create_sz(msgpack_in *mp, uint32_t *sz, uint64_t ctx_type);
-static bool cdt_context_count_create_sz(msgpack_in *mp, uint32_t *sz, uint32_t param_count);
+static bool cdt_context_ctx_type_create_sz(msgpack_in_vec *mv, uint32_t *sz, uint64_t ctx_type);
+static bool cdt_context_count_create_sz(msgpack_in_vec *mv, uint32_t *sz, uint32_t param_count);
 static uint8_t cdt_context_get_toplvl_type_int(const cdt_context *ctx, int64_t *index_r);
 static uint8_t *cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr, bool write_tophdr);
 static uint8_t *cdt_context_create_new_particle_crnew(cdt_context *ctx, uint32_t subctx_sz);
@@ -931,10 +935,33 @@ cdt_container_builder_set_result(cdt_container_builder *builder,
 //
 
 bool
-cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
+cdt_process_state_init(cdt_process_state *cdt_state,
+		const as_msg_op *op)
 {
 	const uint8_t *data = op->name + op->name_sz;
 	uint32_t sz = op->op_sz - OP_FIXED_SZ - op->name_sz;
+
+	msgpack_vec vecs = {
+			.buf = data,
+			.buf_sz = sz
+	};
+
+	msgpack_in_vec mv = {
+			.n_vecs = 1,
+			.vecs = &vecs
+	};
+
+	return cdt_process_state_init_from_vec(cdt_state, &mv);
+}
+
+static bool
+cdt_process_state_init_from_vec(cdt_process_state *cdt_state,
+		msgpack_in_vec* mv)
+{
+	const uint8_t* data = mv->vecs[0].buf;
+	uint32_t sz = mv->vecs[0].buf_sz;
+
+	cdt_state->mv = mv;
 
 	if (data[0] == 0) { // TODO - deprecate this in "6 months"
 		if (sz < sizeof(uint16_t)) {
@@ -945,13 +972,11 @@ cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 		const uint16_t *type_ptr = (const uint16_t *)data;
 
 		cdt_state->type = cf_swap_from_be16(*type_ptr);
-		cdt_state->mp.buf = data + sizeof(uint16_t);
-		cdt_state->mp.buf_sz = sz - sizeof(uint16_t);
-		cdt_state->mp.offset = 0;
+		cdt_state->mv->vecs[0].offset += sizeof(uint16_t);
 		cdt_state->ele_count = 0;
 
-		if (cdt_state->mp.buf_sz != 0 &&
-				! msgpack_get_list_ele_count(&cdt_state->mp,
+		if (sz - sizeof(uint16_t) != 0 &&
+				! msgpack_get_list_ele_count_vec(cdt_state->mv,
 						&cdt_state->ele_count)) {
 			cf_warning(AS_PARTICLE, "cdt_parse_state_init() unpack list header failed: size=%u type=%u ele_count=%u", sz, cdt_state->type, cdt_state->ele_count);
 			return false;
@@ -960,15 +985,11 @@ cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 		return true;
 	}
 
-	cdt_state->mp.buf = data;
-	cdt_state->mp.buf_sz = sz;
-	cdt_state->mp.offset = 0;
-
 	uint32_t ele_count = 0;
 	uint64_t t64;
 
-	if (! msgpack_get_list_ele_count(&cdt_state->mp, &ele_count) ||
-			ele_count == 0 || ! msgpack_get_uint64(&cdt_state->mp, &t64)) {
+	if (! msgpack_get_list_ele_count_vec(cdt_state->mv, &ele_count) ||
+			ele_count == 0 || ! msgpack_get_uint64_vec(cdt_state->mv, &t64)) {
 		cf_warning(AS_PARTICLE, "cdt_parse_state_init() unpack parameters failed: size=%u ele_count=%u", sz, ele_count);
 		return false;
 	}
@@ -1016,23 +1037,13 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 		case AS_CDT_PARAM_STORAGE: {
 			cdt_payload *arg = va_arg(vl, cdt_payload *);
 
-			arg->ptr = state->mp.buf + state->mp.offset;
+			arg->ptr = msgpack_get_ele_vec(state->mv, &arg->sz);
 
-			msgpack_in mp = {
-					.buf = arg->ptr,
-					.buf_sz = state->mp.buf_sz - state->mp.offset
-			};
-
-			uint32_t sz = msgpack_sz(&mp);
-
-			if (sz == 0 || (entry->args[i] == AS_CDT_PARAM_STORAGE &&
-							mp.has_nonstorage)) {
+			if (arg->ptr == NULL || (entry->args[i] == AS_CDT_PARAM_STORAGE &&
+					state->mv->has_nonstorage)) {
 				va_end(vl);
 				return false;
 			}
-
-			state->mp.offset += sz;
-			arg->sz = sz;
 
 			break;
 		}
@@ -1040,7 +1051,7 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 		case AS_CDT_PARAM_COUNT: {
 			uint64_t *arg = va_arg(vl, uint64_t *);
 
-			if (! msgpack_get_uint64(&state->mp, arg)) {
+			if (! msgpack_get_uint64_vec(state->mv, arg)) {
 				va_end(vl);
 				return false;
 			}
@@ -1050,7 +1061,7 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 		case AS_CDT_PARAM_INDEX: {
 			int64_t *arg = va_arg(vl, int64_t *);
 
-			if (! msgpack_get_int64(&state->mp, arg)) {
+			if (! msgpack_get_int64_vec(state->mv, arg)) {
 				va_end(vl);
 				return false;
 			}
@@ -1125,7 +1136,9 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 
 	uint32_t ctx_param_count = 0;
 
-	if (! msgpack_get_list_ele_count(&state->mp, &ctx_param_count) ||
+	msgpack_vec* vec = &state->mv->vecs[state->mv->idx];
+
+	if (! msgpack_get_list_ele_count_vec(state->mv, &ctx_param_count) ||
 			ctx_param_count == 0 || (ctx_param_count & 1) == 1) {
 		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bad context param count %u", ctx_param_count);
 		com->ret_code = -AS_ERR_PARAMETER;
@@ -1135,9 +1148,9 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 	for (uint32_t i = 0; i < ctx_param_count; i += 2) {
 		uint64_t ctx_type;
 		bool ret;
-		uint32_t start_off = state->mp.offset;
+		uint32_t start_off = vec->offset;
 
-		if (! msgpack_get_uint64(&state->mp, &ctx_type)) {
+		if (! msgpack_get_uint64_vec(state->mv, &ctx_type)) {
 			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() param %u expected int", i);
 			com->ret_code = -AS_ERR_PARAMETER;
 			return false;
@@ -1162,17 +1175,16 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			}
 
 			com->ctx.create_triggered = true;
-			com->ctx.create_ctx_start = state->mp.buf + start_off;
+			com->ctx.create_ctx_start = vec->buf + start_off;
 			com->ctx.create_ctx_count = (ctx_param_count - i) / 2;
 
-			if (! cdt_context_ctx_type_create_sz(&state->mp,
+			if (! cdt_context_ctx_type_create_sz(state->mv,
 					&com->ctx.create_sz, ctx_type)) {
 				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 				return false;
 			}
 
-			if (! cdt_context_count_create_sz(&state->mp,
-					&com->ctx.create_sz,
+			if (! cdt_context_count_create_sz(state->mv, &com->ctx.create_sz,
 					com->ctx.create_ctx_count - 1)) {
 				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
 				return false;
@@ -1201,7 +1213,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 				return false;
 			}
 
-			ret = list_table[table_i](&com->ctx, &state->mp);
+			ret = list_table[table_i](&com->ctx, state->mv);
 		}
 		else { // map
 			if ((ctx_type & AS_CDT_CTX_LIST) != 0) {
@@ -1210,7 +1222,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 				return false;
 			}
 
-			ret = map_table[table_i](&com->ctx, &state->mp);
+			ret = map_table[table_i](&com->ctx, state->mv);
 		}
 
 		if (! ret) {
@@ -1220,11 +1232,11 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 		}
 
 		if (com->ctx.create_triggered) {
-			com->ctx.create_ctx_start = state->mp.buf + start_off;
+			com->ctx.create_ctx_start = vec->buf + start_off;
 			com->ctx.create_ctx_count = (ctx_param_count - i) / 2;
 
 			if (! cdt_op_is_modify(com) ||
-					! cdt_context_count_create_sz(&state->mp,
+					! cdt_context_count_create_sz(state->mv,
 							&com->ctx.create_sz,
 							com->ctx.create_ctx_count - 1)) {
 				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
@@ -1238,9 +1250,10 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 	uint32_t ele_count;
 	uint64_t type64;
 
-	if (! msgpack_get_list_ele_count(&state->mp, &ele_count) ||
-			ele_count == 0 || ! msgpack_get_uint64(&state->mp, &type64)) {
-		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() unpack parameters failed: size=%u ele_count=%u", state->mp.buf_sz, ele_count);
+	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
+			ele_count == 0 || ! msgpack_get_uint64_vec(state->mv, &type64)) {
+		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() unpack parameters failed: size=%u ele_count=%u",
+				state->mv->vecs[state->mv->idx].buf_sz, ele_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
@@ -1292,16 +1305,17 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 //
 
 static bool
-cdt_context_ctx_type_create_sz(msgpack_in *mp, uint32_t *sz, uint64_t ctx_type)
+cdt_context_ctx_type_create_sz(msgpack_in_vec *mv, uint32_t *sz,
+		uint64_t ctx_type)
 {
 	uint8_t masked_type = (uint8_t)(ctx_type & AS_CDT_CTX_TYPE_MASK);
 
 	if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
-		mp->has_nonstorage = false;
+		mv->has_nonstorage = false;
 
-		uint32_t key_sz = msgpack_sz(mp);
+		uint32_t key_sz = msgpack_sz_vec(mv);
 
-		if (key_sz == 0 || mp->has_nonstorage) {
+		if (key_sz == 0 || mv->has_nonstorage) {
 			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context key");
 			return false;
 		}
@@ -1316,7 +1330,7 @@ cdt_context_ctx_type_create_sz(msgpack_in *mp, uint32_t *sz, uint64_t ctx_type)
 		int64_t idx;
 		uint8_t cr_type = ctx_type & AS_CDT_CTX_CREATE_MASK;
 
-		if (! msgpack_get_int64(mp, &idx) || idx < -1) {
+		if (! msgpack_get_int64_vec(mv, &idx) || idx < -1) {
 			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context index");
 			return false;
 		}
@@ -1352,17 +1366,18 @@ cdt_context_ctx_type_create_sz(msgpack_in *mp, uint32_t *sz, uint64_t ctx_type)
 }
 
 static bool
-cdt_context_count_create_sz(msgpack_in *mp, uint32_t *sz, uint32_t param_count)
+cdt_context_count_create_sz(msgpack_in_vec *mv, uint32_t *sz,
+		uint32_t param_count)
 {
 	for (uint32_t i = 0; i < param_count; i++) {
 		uint64_t ctx_type;
 
-		if (! msgpack_get_uint64(mp, &ctx_type)) {
+		if (! msgpack_get_uint64_vec(mv, &ctx_type)) {
 			cf_warning(AS_PARTICLE, "cdt_context_count_create_sz() param %u expected int", i);
 			return false;
 		}
 
-		if (! cdt_context_ctx_type_create_sz(mp, sz, ctx_type)) {
+		if (! cdt_context_ctx_type_create_sz(mv, sz, ctx_type)) {
 			return false;
 		}
 	}
@@ -2184,16 +2199,10 @@ rollback_alloc_from_msgpack(rollback_alloc *alloc_buf, as_bin *b,
 // as_bin_cdt_packed functions.
 //
 
-int
-as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result,
+static int
+cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 		cf_ll_buf *particles_llb)
 {
-	cdt_process_state state;
-
-	if (! cdt_process_state_init(&state, op)) {
-		return -AS_ERR_PARAMETER;
-	}
-
 	define_rollback_alloc(alloc_buf, particles_llb, 1, true);
 	define_rollback_alloc(alloc_result, NULL, 1, false); // results always on the heap
 	define_rollback_alloc(alloc_idx, NULL, 8, false); // for temp indexes
@@ -2214,14 +2223,14 @@ as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result,
 
 	bool success;
 
-	if (state.type == AS_CDT_OP_CONTEXT_EVAL) {
-		success = cdt_process_state_context_eval(&state, &com);
+	if (state->type == AS_CDT_OP_CONTEXT_EVAL) {
+		success = cdt_process_state_context_eval(state, &com);
 	}
-	else if (IS_CDT_LIST_OP(state.type)) {
-		success = cdt_process_state_packed_list_modify_optype(&state, &com);
+	else if (IS_CDT_LIST_OP(state->type)) {
+		success = cdt_process_state_packed_list_modify_optype(state, &com);
 	}
 	else {
-		success = cdt_process_state_packed_map_modify_optype(&state, &com);
+		success = cdt_process_state_packed_map_modify_optype(state, &com);
 	}
 
 	rollback_alloc_rollback(alloc_idx);
@@ -2237,15 +2246,9 @@ as_bin_cdt_packed_modify(as_bin *b, const as_msg_op *op, as_bin *result,
 	return com.ret_code;
 }
 
-int
-as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result)
+static int
+cdt_packed_read(cdt_process_state *state, const as_bin *b, as_bin *result)
 {
-	cdt_process_state state;
-
-	if (! cdt_process_state_init(&state, op)) {
-		return -AS_ERR_PARAMETER;
-	}
-
 	define_rollback_alloc(alloc_result, NULL, 1, false); // results always on the heap
 	define_rollback_alloc(alloc_idx, NULL, 8, false); // for temp indexes
 
@@ -2264,14 +2267,14 @@ as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result)
 
 	bool success;
 
-	if (state.type == AS_CDT_OP_CONTEXT_EVAL) {
-		success = cdt_process_state_context_eval(&state, &com);
+	if (state->type == AS_CDT_OP_CONTEXT_EVAL) {
+		success = cdt_process_state_context_eval(state, &com);
 	}
-	else if (IS_CDT_LIST_OP(state.type)) {
-		success = cdt_process_state_packed_list_read_optype(&state, &com);
+	else if (IS_CDT_LIST_OP(state->type)) {
+		success = cdt_process_state_packed_list_read_optype(state, &com);
 	}
 	else {
-		success = cdt_process_state_packed_map_read_optype(&state, &com);
+		success = cdt_process_state_packed_map_read_optype(state, &com);
 	}
 
 	rollback_alloc_rollback(alloc_idx);
@@ -2282,6 +2285,55 @@ as_bin_cdt_packed_read(const as_bin *b, const as_msg_op *op, as_bin *result)
 	}
 
 	return com.ret_code;
+}
+
+int
+as_bin_cdt_modify_tr(as_bin *b, const as_msg_op *op, as_bin *result,
+		cf_ll_buf *particles_llb)
+{
+	cdt_process_state state;
+
+	if (! cdt_process_state_init(&state, op)) {
+		return -AS_ERR_PARAMETER;
+	}
+
+	return cdt_packed_modify(&state, b, result, particles_llb);
+}
+
+int
+as_bin_cdt_read_tr(const as_bin *b, const as_msg_op *op, as_bin *result)
+{
+	cdt_process_state state;
+
+	if (! cdt_process_state_init(&state, op)) {
+		return -AS_ERR_PARAMETER;
+	}
+
+	return cdt_packed_read(&state, b, result);
+}
+
+int
+as_bin_cdt_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *result)
+{
+	cdt_process_state state;
+
+	if (! cdt_process_state_init_from_vec(&state, mv)) {
+		return -AS_ERR_PARAMETER;
+	}
+
+	return cdt_packed_modify(&state, b, result, NULL);
+}
+
+int
+as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result)
+{
+	cdt_process_state state;
+
+	if (! cdt_process_state_init_from_vec(&state, mv)) {
+		return -AS_ERR_PARAMETER;
+	}
+
+	return cdt_packed_read(&state, b, result);
 }
 
 

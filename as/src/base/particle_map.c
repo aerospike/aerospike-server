@@ -1003,14 +1003,14 @@ as_bin_set_empty_packed_map(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags)
 }
 
 bool
-map_subcontext_by_index(cdt_context *ctx, msgpack_in *val)
+map_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 {
 	int64_t index;
 	packed_map map;
 	uint32_t uindex;
 	uint32_t count32;
 
-	if (! msgpack_get_int64(val, &index)) {
+	if (! msgpack_get_int64_vec(val, &index)) {
 		cf_warning(AS_PARTICLE, "map_subcontext_by_index() invalid subcontext");
 		return false;
 	}
@@ -1060,14 +1060,14 @@ map_subcontext_by_index(cdt_context *ctx, msgpack_in *val)
 }
 
 bool
-map_subcontext_by_rank(cdt_context *ctx, msgpack_in *val)
+map_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val)
 {
 	int64_t rank;
 	packed_map map;
 	uint32_t urank;
 	uint32_t count32;
 
-	if (! msgpack_get_int64(val, &rank)) {
+	if (! msgpack_get_int64_vec(val, &rank)) {
 		cf_warning(AS_PARTICLE, "map_subcontext_by_rank() invalid subcontext");
 		return false;
 	}
@@ -1119,16 +1119,15 @@ map_subcontext_by_rank(cdt_context *ctx, msgpack_in *val)
 }
 
 bool
-map_subcontext_by_key(cdt_context *ctx, msgpack_in *val)
+map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 {
 	cdt_payload key;
 	packed_map map;
 
 	val->has_nonstorage = false;
-	key.ptr = val->buf + val->offset;
-	key.sz = msgpack_sz(val);
+	key.ptr = msgpack_get_ele_vec(val, &key.sz);
 
-	if (key.sz == 0) {
+	if (key.ptr == NULL) {
 		cf_warning(AS_PARTICLE, "map_subcontext_by_key() invalid subcontext");
 		return false;
 	}
@@ -1216,15 +1215,14 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in *val)
 }
 
 bool
-map_subcontext_by_value(cdt_context *ctx, msgpack_in *val)
+map_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val)
 {
 	cdt_payload value;
 	packed_map map;
 
-	value.ptr = val->buf + val->offset;
-	value.sz = msgpack_sz(val);
+	value.ptr = msgpack_get_ele_vec(val, &value.sz);
 
-	if (value.sz == 0) {
+	if (value.ptr == NULL) {
 		cf_warning(AS_PARTICLE, "map_subcontext_by_value() invalid subcontext");
 		return false;
 	}

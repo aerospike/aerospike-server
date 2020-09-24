@@ -451,6 +451,7 @@ typedef enum {
 	AS_HLL_OP_INTERSECT_COUNT   = 53,
 	AS_HLL_OP_SIMILARITY        = 54,
 	AS_HLL_OP_DESCRIBE          = 55,
+	AS_HLL_OP_MAY_CONTAIN       = 56,
 
 	AS_HLL_READ_OP_END
 } as_hll_op_type;
@@ -732,7 +733,7 @@ as_proto_wrapped_is_valid(const as_proto* proto, size_t size)
 }
 
 static inline uint32_t
-as_msg_field_get_value_sz(as_msg_field* f)
+as_msg_field_get_value_sz(const as_msg_field* f)
 {
 	return f->field_sz - 1;
 }

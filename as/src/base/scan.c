@@ -56,9 +56,9 @@
 #include "base/aggr.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/exp.h"
 #include "base/index.h"
 #include "base/monitor.h"
-#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/scan_job.h"
 #include "base/scan_manager.h"
@@ -135,7 +135,7 @@ bool get_scan_rps(as_transaction* tr, uint32_t* rps);
 void convert_old_priority(int old_priority, uint32_t* rps);
 bool validate_background_scan_rps(const as_namespace* ns, uint32_t* rps);
 bool get_scan_socket_timeout(as_transaction* tr, uint32_t* timeout);
-bool get_scan_predexp(as_transaction* tr, predexp_eval_t** p_predexp);
+bool get_scan_predexp(as_transaction* tr, as_exp** p_predexp);
 size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size, int32_t timeout, bool compress, as_proto_comp_stat* comp_stat);
 static inline bool excluded_set(as_index* r, uint16_t set_id);
 
@@ -491,7 +491,7 @@ get_scan_socket_timeout(as_transaction* tr, uint32_t* timeout)
 }
 
 bool
-get_scan_predexp(as_transaction* tr, predexp_eval_t** p_predexp)
+get_scan_predexp(as_transaction* tr, as_exp** p_predexp)
 {
 	if (! as_transaction_has_predexp(tr)) {
 		return true;
@@ -500,7 +500,7 @@ get_scan_predexp(as_transaction* tr, predexp_eval_t** p_predexp)
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_PREDEXP);
 
-	*p_predexp = predexp_build(f);
+	*p_predexp = as_exp_build(f, true);
 
 	return *p_predexp != NULL;
 }
@@ -690,7 +690,7 @@ typedef struct basic_scan_job_s {
 	uint64_t		sample_max;
 	uint64_t		sample_count;
 	uint64_t		max_per_partition;
-	predexp_eval_t*	predexp;
+	as_exp*			predexp;
 	cf_vector*		bin_ids;
 } basic_scan_job;
 
@@ -714,7 +714,7 @@ typedef struct basic_scan_slice_s {
 } basic_scan_slice;
 
 bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
-bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, predexp_eval_t** predexp);
+bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, as_exp** predexp);
 cf_vector* bin_ids_from_op(as_msg* m, as_namespace* ns, int* result);
 void sample_max_init(basic_scan_job* job, uint64_t sample_max);
 
@@ -746,7 +746,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_NOT_FOUND; // only for legacy scans
 	}
 
-	predexp_eval_t* predexp = NULL;
+	as_exp* predexp = NULL;
 
 	if (! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "basic scan job failed predexp processing");
@@ -914,7 +914,7 @@ basic_scan_job_destroy(as_scan_job* _job)
 		cf_vector_destroy(job->bin_ids);
 	}
 
-	predexp_destroy(job->predexp);
+	as_exp_destroy(job->predexp);
 }
 
 void
@@ -968,7 +968,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	predexp_eval_t* predexp = NULL;
+	as_exp* predexp = NULL;
 
 	if (! basic_scan_predexp_filter_meta(job, r, &predexp)) {
 		as_record_done(r_ref, ns);
@@ -1054,7 +1054,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 bool
 basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r,
-		predexp_eval_t** predexp)
+		as_exp** predexp)
 {
 	*predexp = job->predexp;
 
@@ -1063,17 +1063,17 @@ basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r,
 	}
 
 	as_namespace* ns = ((as_scan_job*)job)->ns;
-	predexp_args_t predargs = { .ns = ns, .md = (as_record*)r };
-	predexp_retval_t predrv = predexp_matches_metadata(*predexp, &predargs);
+	as_exp_ctx predargs = { .ns = ns, .r = (as_record*)r };
+	as_exp_trilean predrv = as_exp_matches_metadata(*predexp, &predargs);
 
-	if (predrv == PREDEXP_UNKNOWN) {
+	if (predrv == AS_EXP_UNK) {
 		return true; // caller must later check bins using *predexp
 	}
 	// else - caller will not need to apply filter later.
 
 	*predexp = NULL;
 
-	return predrv == PREDEXP_TRUE;
+	return predrv == AS_EXP_TRUE;
 }
 
 cf_vector*
@@ -1580,7 +1580,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	predexp_eval_t* predexp = NULL;
+	as_exp* predexp = NULL;
 
 	if (! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed predexp processing");
@@ -1721,11 +1721,11 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	predexp_args_t predargs = { .ns = ns, .md = r };
+	as_exp_ctx predargs = { .ns = ns, .r = r };
 
 	if (job->origin.predexp != NULL &&
-			predexp_matches_metadata(job->origin.predexp, &predargs) ==
-					PREDEXP_FALSE) {
+			as_exp_matches_metadata(job->origin.predexp, &predargs) ==
+					AS_EXP_FALSE) {
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
 		as_incr_uint64(&ns->n_udf_sub_udf_filtered_out);
@@ -1847,7 +1847,7 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	predexp_eval_t* predexp = NULL;
+	as_exp* predexp = NULL;
 
 	if (! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed predexp processing");
@@ -2002,11 +2002,11 @@ ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	predexp_args_t predargs = { .ns = ns, .md = r };
+	as_exp_ctx predargs = { .ns = ns, .r = r };
 
 	if (job->origin.predexp != NULL &&
-			predexp_matches_metadata(job->origin.predexp, &predargs) ==
-					PREDEXP_FALSE) {
+			as_exp_matches_metadata(job->origin.predexp, &predargs) ==
+					AS_EXP_FALSE) {
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
 		as_incr_uint64(&ns->n_ops_sub_write_filtered_out);

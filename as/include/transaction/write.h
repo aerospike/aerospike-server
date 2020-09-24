@@ -28,7 +28,7 @@
 
 #include "citrusleaf/alloc.h"
 
-#include "base/predexp.h"
+#include "base/exp.h"
 #include "base/transaction.h"
 
 
@@ -36,9 +36,9 @@
 // Forward declarations.
 //
 
+struct as_exp_s;
 struct as_transaction_s;
 struct cl_msg_s;
-struct predexp_eval_base_s;
 
 
 //==========================================================
@@ -49,7 +49,7 @@ typedef void (*iops_cb)(void* udata, int result);
 
 typedef struct iops_origin_s {
 	struct cl_msg_s* msgp;
-	struct predexp_eval_base_s* predexp;
+	struct as_exp_s* predexp;
 	iops_cb cb;
 	void* udata;
 } iops_origin;
@@ -64,6 +64,6 @@ transaction_status as_write_start(struct as_transaction_s* tr);
 static inline void
 iops_origin_destroy(iops_origin* origin)
 {
-	predexp_destroy(origin->predexp);
+	as_exp_destroy(origin->predexp);
 	cf_free(origin->msgp);
 }

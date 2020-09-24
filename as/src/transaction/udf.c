@@ -52,7 +52,8 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/predexp.h"
+#include "base/exp.h"
+#include "base/index.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -858,7 +859,7 @@ open_existing_record(udf_record* urecord)
 	as_record* r = urecord->r_ref->r;
 
 	int rv;
-	predexp_eval_t* predexp = NULL;
+	as_exp* predexp = NULL;
 
 	// Apply predexp metadata filter if present.
 	if (tr->origin != FROM_IUDF && as_record_is_live(r) &&
@@ -874,15 +875,15 @@ open_existing_record(udf_record* urecord)
 			return (uint8_t)rv;
 		}
 
-		predexp_args_t predargs = { .ns = ns, .md = r, .rd = urecord->rd };
+		as_exp_ctx predargs = { .ns = ns, .r = r, .rd = urecord->rd };
 
-		if (! predexp_matches_record(tr->origin == FROM_IUDF ?
+		if (! as_exp_matches_record(tr->origin == FROM_IUDF ?
 				tr->from.iudf_orig->predexp : predexp, &predargs)) {
-			predexp_destroy(predexp);
+			as_exp_destroy(predexp);
 			return AS_ERR_FILTERED_OUT;
 		}
 
-		predexp_destroy(predexp);
+		as_exp_destroy(predexp);
 	}
 
 	if (as_transaction_has_key(tr)) {

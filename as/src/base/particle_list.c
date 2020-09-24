@@ -759,14 +759,14 @@ as_bin_particle_list_get_packed_val(const as_bin *b, cdt_payload *packed)
 }
 
 bool
-list_subcontext_by_index(cdt_context *ctx, msgpack_in *val)
+list_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 {
 	int64_t index;
 	packed_list list;
 	uint32_t uindex;
 	uint32_t count32;
 
-	if (! msgpack_get_int64(val, &index)) {
+	if (! msgpack_get_int64_vec(val, &index)) {
 		cf_warning(AS_PARTICLE, "list_subcontext_by_index() invalid subcontext");
 		return false;
 	}
@@ -859,7 +859,7 @@ list_subcontext_by_index(cdt_context *ctx, msgpack_in *val)
 }
 
 bool
-list_subcontext_by_rank(cdt_context *ctx, msgpack_in *val)
+list_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val)
 {
 	packed_list list;
 
@@ -877,7 +877,7 @@ list_subcontext_by_rank(cdt_context *ctx, msgpack_in *val)
 	uint32_t urank;
 	uint32_t count32;
 
-	if (! msgpack_get_int64(val, &rank)) {
+	if (! msgpack_get_int64_vec(val, &rank)) {
 		cf_warning(AS_PARTICLE, "list_subcontext_by_rank() invalid subcontext");
 		return false;
 	}
@@ -921,22 +921,21 @@ list_subcontext_by_rank(cdt_context *ctx, msgpack_in *val)
 }
 
 bool
-list_subcontext_by_key(cdt_context *ctx, msgpack_in *val)
+list_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 {
 	cf_warning(AS_PARTICLE, "list_subcontext_by_key() Not supported");
 	return false;
 }
 
 bool
-list_subcontext_by_value(cdt_context *ctx, msgpack_in *val)
+list_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val)
 {
 	cdt_payload value;
 	packed_list list;
 
-	value.ptr = val->buf + val->offset;
-	value.sz = msgpack_sz(val);
+	value.ptr = msgpack_get_ele_vec(val, &value.sz);
 
-	if (value.sz == 0) {
+	if (value.ptr == NULL) {
 		cf_warning(AS_PARTICLE, "list_subcontext_by_value() invalid subcontext");
 		return false;
 	}

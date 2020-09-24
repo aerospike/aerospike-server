@@ -39,8 +39,8 @@
 #include "msg.h"
 
 #include "base/datamodel.h"
+#include "base/exp.h"
 #include "base/index.h"
-#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
@@ -154,7 +154,7 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 
 int
 build_predexp_and_filter_meta(const as_transaction* tr, const as_record* r,
-		predexp_eval_t** predexp)
+		as_exp** predexp)
 {
 	if (! as_transaction_has_predexp(tr)) {
 		*predexp = NULL;
@@ -164,28 +164,28 @@ build_predexp_and_filter_meta(const as_transaction* tr, const as_record* r,
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_PREDEXP);
 
-	if ((*predexp = predexp_build(f)) == NULL) {
+	if ((*predexp = as_exp_build(f, false)) == NULL) {
 		return AS_ERR_PARAMETER;
 	}
 
-	// TODO - perhaps fields of predexp_args_t should be const?
-	predexp_args_t predargs = { .ns = tr->rsv.ns, .md = (as_record*)r };
-	predexp_retval_t predrv = predexp_matches_metadata(*predexp, &predargs);
+	// TODO - perhaps fields of as_predexp_context should be const?
+	as_exp_ctx predargs = { .ns = tr->rsv.ns, .r = (as_record*)r };
+	as_exp_trilean predrv = as_exp_matches_metadata(*predexp, &predargs);
 
-	if (predrv == PREDEXP_UNKNOWN) {
+	if (predrv == AS_EXP_UNK) {
 		return AS_OK; // caller must later check bins using *predexp
 	}
 	// else - caller will not need to apply filter later.
 
-	predexp_destroy(*predexp);
+	as_exp_destroy(*predexp);
 	*predexp = NULL;
 
-	return predrv == PREDEXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
+	return predrv == AS_EXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
 }
 
 
 int
-predexp_read_and_filter_bins(as_storage_rd* rd, predexp_eval_t* predexp)
+predexp_read_and_filter_bins(as_storage_rd* rd, as_exp* predexp)
 {
 	as_namespace* ns = rd->ns;
 
@@ -197,9 +197,9 @@ predexp_read_and_filter_bins(as_storage_rd* rd, predexp_eval_t* predexp)
 		return -result;
 	}
 
-	predexp_args_t predargs = { .ns = ns, .md = rd->r, .rd = rd };
+	as_exp_ctx predargs = { .ns = ns, .r = rd->r, .rd = rd };
 
-	if (! predexp_matches_record(predexp, &predargs)) {
+	if (! as_exp_matches_record(predexp, &predargs)) {
 		return AS_ERR_FILTERED_OUT;
 	}
 
