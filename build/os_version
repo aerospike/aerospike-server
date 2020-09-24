@@ -129,7 +129,7 @@ main() {
 	'ol' )
 		distro_version="${distro_version%%.*}"
 		distro_long="oraclelinux${distro_version}"
-		distro_short="ol${distro_version}"
+		distro_short="el${distro_version}"
 		;;
 	* )
 		distro_long="${distro_id}${distro_version}"
