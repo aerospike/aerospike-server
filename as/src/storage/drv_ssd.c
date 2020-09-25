@@ -3465,7 +3465,7 @@ as_storage_destroy_record_ssd(as_namespace *ns, as_record *r)
 		ssd_block_free(ssd, r->rblock_id, r->n_rblocks, "destroy");
 
 		as_namespace_adjust_set_device_bytes(ns, as_index_get_set_id(r),
-				-N_RBLOCKS_TO_SIZE(r->n_rblocks));
+				-(int64_t)N_RBLOCKS_TO_SIZE(r->n_rblocks));
 
 		r->rblock_id = 0;
 		r->n_rblocks = 0;
