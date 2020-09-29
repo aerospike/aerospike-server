@@ -380,7 +380,8 @@ as_bin_is_external_particle(const as_bin *b) {
 
 static inline as_particle *
 as_bin_get_particle(as_bin *b) {
-	return as_bin_is_embedded_particle(b) ? (as_particle *)&b : b->particle;
+	return as_bin_is_embedded_particle(b) ?
+			(as_particle *)&b->particle : b->particle;
 }
 
 static inline void
