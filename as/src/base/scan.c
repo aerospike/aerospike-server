@@ -1591,6 +1591,8 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	job->n_active_tr = 0;
 
+	job->origin.predexp = predexp; // first, so it's destroyed on failures
+
 	if (! udf_def_init_from_msg(&job->origin.def, tr)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed def init");
 		as_scan_job_destroy(_job);
@@ -1603,7 +1605,6 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 	job->origin.msgp =
 			as_msg_create_internal(ns->name, 0, info2, 0, 0, NULL, 0);
 
-	job->origin.predexp = predexp;
 	job->origin.cb = udf_bg_scan_tr_complete;
 	job->origin.udata = (void*)job;
 
