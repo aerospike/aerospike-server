@@ -872,6 +872,7 @@ open_existing_record(udf_record* urecord)
 			tr->from.iudf_orig->predexp != NULL)) {
 		if ((rv = udf_record_load(urecord)) != 0) {
 			cf_warning(AS_UDF, "record failed load");
+			as_exp_destroy(predexp);
 			return (uint8_t)rv;
 		}
 

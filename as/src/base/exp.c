@@ -527,6 +527,7 @@ exp_build_base64(const char* buf64, uint32_t buf64_sz)
 	uint32_t buf_sz_out;
 
 	if (! cf_b64_validate_and_decode(buf64, buf64_sz, buf, &buf_sz_out)) {
+		cf_free(buf);
 		return NULL;
 	}
 
@@ -1852,7 +1853,7 @@ static void
 eval_meta_since_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	uint64_t now = cf_clepoch_milliseconds();
-	uint64_t lut = cf_utc_ns_from_clepoch_ms(rt->ctx->r->last_update_time);
+	uint64_t lut = rt->ctx->r->last_update_time;
 
 	ret_val->type = RT_INT;
 	ret_val->r_int = (int64_t)(now > lut ? now - lut : 0);
@@ -1870,8 +1871,8 @@ static void
 eval_meta_ttl(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	ret_val->type = RT_INT;
-	ret_val->r_int = (int64_t)(int32_t)cf_server_void_time_to_ttl(
-		rt->ctx->r->void_time);
+	ret_val->r_int = (int64_t)(int32_t)
+			cf_server_void_time_to_ttl(rt->ctx->r->void_time);
 }
 
 static void
