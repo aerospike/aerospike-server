@@ -3004,7 +3004,7 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_XDR_TOMB_RAIDER_PERIOD:
 				cfg_enterprise_only(&line);
-				ns->xdr_tomb_raider_period = cfg_u32_no_checks(&line);
+				ns->xdr_tomb_raider_period = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_XDR_TOMB_RAIDER_THREADS:
 				cfg_enterprise_only(&line);
