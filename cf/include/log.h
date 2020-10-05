@@ -289,4 +289,4 @@ void cf_log_dump_cache(void);
 //
 
 void cf_log_stack_trace(void* ctx);
-uint64_t cf_log_strip_aslr(void* addr);
+uint64_t cf_log_strip_aslr(const void* addr);
