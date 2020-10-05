@@ -692,8 +692,10 @@ cf_alloc_log_site_infos(const char *file)
 	for (uint64_t i = 1; i < n_site_infos; ++i) {
 		site_info *info = g_site_infos + i;
 		const void *ra = ck_pr_load_ptr(g_site_ras + info->site_id);
-		fprintf(fh, "0x%016" PRIx64 " %9d 0x%016zx 0x%016zx\n", (uint64_t)ra, info->thread_id,
-				info->size_hi, info->size_lo);
+
+		fprintf(fh, "0x%016" PRIx64 " %9d 0x%016zx 0x%016zx\n",
+				cf_log_strip_aslr(ra), info->thread_id, info->size_hi,
+				info->size_lo);
 	}
 
 	fclose(fh);
