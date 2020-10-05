@@ -629,7 +629,7 @@ cf_log_stack_trace(void* ctx)
 }
 
 uint64_t
-cf_log_strip_aslr(void* addr)
+cf_log_strip_aslr(const void* addr)
 {
 	void* start = &__executable_start;
 	void* end = &__etext;
