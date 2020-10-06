@@ -233,6 +233,11 @@ typedef struct as_hb_config_s
 	uint32_t max_intervals_missed;
 
 	/**
+	 * Connect timeout.
+	 */
+	uint32_t connect_timeout_ms;
+
+	/**
 	 * The ttl for multicast packets. Set to zero for default TTL.
 	 */
 	uint8_t multicast_ttl;
@@ -424,6 +429,8 @@ uint32_t as_hb_max_intervals_missed_get();
 int as_hb_max_intervals_missed_set(uint32_t new_max);
 
 uint32_t as_hb_node_timeout_get();
+
+int as_hb_connect_timeout_set(uint32_t timeout_ms);
 
 bool as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size);
 

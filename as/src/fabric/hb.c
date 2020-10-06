@@ -23,9 +23,11 @@
 #include "fabric/hb.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/param.h>
 #include <sys/types.h>
@@ -249,7 +251,7 @@
 /**
  * Mesh timeout for pending nodes.
  */
-#define MESH_PENDING_TIMEOUT (CONNECT_TIMEOUT())
+#define MESH_PENDING_TIMEOUT (config_connect_timeout_get())
 
 /**
  * Mesh inactive timeout after which a mesh node will be forgotten.
@@ -430,11 +432,6 @@
 #ifndef ASC
 #define ASC (2 << 2)
 #endif
-
-/**
- * Connection initiation timeout, Capped at 100 ms.
- */
-#define CONNECT_TIMEOUT() (MIN(100, config_tx_interval_get()))
 
 /**
  * Allocate a buffer for heart beat messages. Larger buffers are heap allocated
@@ -1598,6 +1595,8 @@ static const cf_serv_cfg* config_bind_cfg_get();
 static const cf_mserv_cfg* config_multicast_group_cfg_get();
 static uint32_t config_tx_interval_get();
 static void config_tx_interval_set(uint32_t new_interval);
+static uint32_t config_connect_timeout_get();
+static void config_connect_timeout_set(uint32_t timeout_ms);
 static uint32_t config_override_mtu_get();
 static void config_override_mtu_set(uint32_t mtu);
 static uint32_t config_max_intervals_missed_get();
@@ -2040,6 +2039,14 @@ as_hb_tx_interval_set(uint32_t new_interval)
 				new_interval);
 		return (-1);
 	}
+
+	if (config_connect_timeout_get() >
+			new_interval * config_max_intervals_missed_get() / 3) {
+		WARNING("heartbeat connect-timeout-ms must be <= interval * timeout / 3 - ignoring interval %u",
+				new_interval);
+		return (-1);
+	}
+
 	config_tx_interval_set(new_interval);
 	return (0);
 }
@@ -2066,6 +2073,13 @@ as_hb_max_intervals_missed_set(uint32_t new_max)
 				AS_HB_MAX_INTERVALS_MISSED_MIN, new_max);
 		return (-1);
 	}
+
+	if (config_connect_timeout_get() > config_tx_interval_get() * new_max / 3) {
+		WARNING("heartbeat connect-timeout-ms must be <= interval * timeout / 3 - ignoring timeout %u",
+				new_max);
+		return (-1);
+	}
+
 	config_max_intervals_missed_set(new_max);
 	return (0);
 }
@@ -2078,6 +2092,24 @@ uint32_t
 as_hb_node_timeout_get()
 {
 	return HB_NODE_TIMEOUT();
+}
+
+/**
+ * Dynamically configure connect timeout.
+ */
+int
+as_hb_connect_timeout_set(uint32_t timeout_ms)
+{
+	uint32_t max = HB_NODE_TIMEOUT() / 3;
+
+	if (timeout_ms < AS_HB_TX_INTERVAL_MS_MIN || timeout_ms > max) {
+		WARNING("heartbeat connect-timeout-ms must be >= %u and <= %u - ignoring %u",
+				AS_HB_TX_INTERVAL_MS_MIN, max, timeout_ms);
+		return (-1);
+	}
+
+	config_connect_timeout_set(timeout_ms);
+	return (0);
 }
 
 /**
@@ -2111,6 +2143,9 @@ as_hb_info_config_get(cf_dyn_buf* db)
 	info_append_uint32(db, "heartbeat.interval", config_tx_interval_get());
 	info_append_uint32(db, "heartbeat.timeout",
 			config_max_intervals_missed_get());
+
+	info_append_uint32(db, "heartbeat.connect-timeout-ms",
+			config_connect_timeout_get());
 
 	info_append_int(db, "heartbeat.mtu", hb_mtu());
 
@@ -2577,6 +2612,7 @@ as_hb_dump(bool verbose)
 
 	INFO("HB Interval: %d", config_tx_interval_get());
 	INFO("HB Timeout: %d", config_max_intervals_missed_get());
+	INFO("HB Connect Timeout: %u", config_connect_timeout_get());
 	char protocol_s[HB_PROTOCOL_STR_MAX_LEN];
 	as_hb_protocol_get_s(config_protocol_get(), protocol_s);
 	INFO("HB Protocol: %s (%d)", protocol_s, config_protocol_get());
@@ -3202,6 +3238,31 @@ config_tx_interval_set(uint32_t new_interval)
 	INFO("changing value of interval from %d to %d ",
 			g_config.hb_config.tx_interval, new_interval);
 	g_config.hb_config.tx_interval = new_interval;
+	HB_CONFIG_UNLOCK();
+}
+
+/**
+ * Get the heartbeat connect timeout.
+ */
+static uint32_t
+config_connect_timeout_get()
+{
+	HB_CONFIG_LOCK();
+	uint32_t timeout_ms = g_config.hb_config.connect_timeout_ms;
+	HB_CONFIG_UNLOCK();
+	return timeout_ms;
+}
+
+/**
+ * Set the heartbeat connect timeout.
+ */
+static void
+config_connect_timeout_set(uint32_t timeout_ms)
+{
+	HB_CONFIG_LOCK();
+	INFO("changing value of connect-timeout-ms from %u to %u ",
+			g_config.hb_config.connect_timeout_ms, timeout_ms);
+	g_config.hb_config.connect_timeout_ms = timeout_ms;
 	HB_CONFIG_UNLOCK();
 }
 
@@ -3896,7 +3957,8 @@ channel_accept_connection(cf_socket* lsock)
 	if (cfg->owner == CF_SOCK_OWNER_HEARTBEAT_TLS) {
 		tls_socket_prepare_server(g_config.hb_config.tls, &csock);
 
-		if (tls_socket_accept_block(&csock, 300) != 1) {
+		if (tls_socket_accept_block(&csock,
+				config_connect_timeout_get()) != 1) {
 			WARNING("heartbeat TLS server handshake with %s failed", caddr_str);
 			cf_socket_close(&csock);
 			cf_socket_term(&csock);
@@ -4842,7 +4904,7 @@ channel_mesh_channel_establish(as_endpoint_list** endpoint_lists,
 
 		const as_endpoint* connected_endpoint = as_endpoint_connect_any(
 				endpoint_lists[i], channel_mesh_endpoint_filter, NULL,
-				CONNECT_TIMEOUT(), sock);
+				config_connect_timeout_get(), sock);
 
 		if (connected_endpoint) {
 			cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
@@ -4865,7 +4927,8 @@ channel_mesh_channel_establish(as_endpoint_list** endpoint_lists,
 					AS_ENDPOINT_TLS_MASK)) {
 				tls_socket_prepare_client(g_config.hb_config.tls, sock);
 
-				if (tls_socket_connect_block(sock, 1000) != 1) {
+				if (tls_socket_connect_block(sock,
+						config_connect_timeout_get()) != 1) {
 					WARNING("heartbeat TLS client handshake with {%s} failed",
 							endpoint_list_str);
 					channel_socket_destroy(sock);
@@ -6001,7 +6064,7 @@ mesh_tend_reduce(const void* key, void* data, void* udata)
 		mesh_node_status_change(mesh_node, AS_HB_MESH_NODE_ENDPOINT_UNKNOWN);
 	}
 
-	if (mesh_node->inactive_since + MESH_INACTIVE_TIMEOUT <= now) {
+	if (now >= mesh_node->inactive_since + MESH_INACTIVE_TIMEOUT) {
 		DEBUG("mesh forgetting node %" PRIx64" because it could not be connected since %" PRIx64,
 				nodeid, mesh_node->inactive_since);
 		rv = CF_SHASH_REDUCE_DELETE;
@@ -6009,8 +6072,8 @@ mesh_tend_reduce(const void* key, void* data, void* udata)
 	}
 
 	if (mesh_node->status == AS_HB_MESH_NODE_ENDPOINT_UNKNOWN) {
-		if (mesh_node->last_status_updated + MESH_ENDPOINT_UNKNOWN_TIMEOUT
-				> now) {
+		if (now >= mesh_node->last_status_updated +
+				MESH_ENDPOINT_UNKNOWN_TIMEOUT) {
 			DEBUG("mesh forgetting node %"PRIx64" ip address/port undiscovered since %"PRIu64,
 					nodeid, mesh_node->last_status_updated);
 
@@ -6021,13 +6084,13 @@ mesh_tend_reduce(const void* key, void* data, void* udata)
 	}
 
 	if (mesh_node->status == AS_HB_MESH_NODE_CHANNEL_PENDING) {
-		// The mesh node is being connected. Skip.
-		if (mesh_node->last_status_updated + MESH_PENDING_TIMEOUT > now) {
+		if (now >= mesh_node->last_status_updated + MESH_PENDING_TIMEOUT) {
+			mesh_node_status_change(mesh_node,
+					AS_HB_MESH_NODE_CHANNEL_INACTIVE);
+		}
+		else {
 			goto Exit;
 		}
-
-		// Flip to inactive if we have been in pending state for a long time.
-		mesh_node_status_change(mesh_node, AS_HB_MESH_NODE_CHANNEL_INACTIVE);
 	}
 
 	// Channel for this node is inactive. Prompt the channel sub module to

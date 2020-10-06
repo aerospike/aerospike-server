@@ -167,6 +167,7 @@ cfg_set_defaults()
 	c->hb_config.mode = AS_HB_MODE_UNDEF;
 	c->hb_config.tx_interval = 150;
 	c->hb_config.max_intervals_missed = 10;
+	c->hb_config.connect_timeout_ms = 500;
 	c->hb_config.protocol = AS_HB_PROTOCOL_V3;
 	c->hb_config.override_mtu = 0;
 
@@ -381,6 +382,7 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_INTERVAL,
 	CASE_NETWORK_HEARTBEAT_TIMEOUT,
 	// Normally hidden:
+	CASE_NETWORK_HEARTBEAT_CONNECT_TIMEOUT_MS,
 	CASE_NETWORK_HEARTBEAT_MTU,
 	CASE_NETWORK_HEARTBEAT_MULTICAST_TTL,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL,
@@ -883,6 +885,7 @@ const cfg_opt NETWORK_HEARTBEAT_OPTS[] = {
 		{ "mesh-seed-address-port",			CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT },
 		{ "interval",						CASE_NETWORK_HEARTBEAT_INTERVAL },
 		{ "timeout",						CASE_NETWORK_HEARTBEAT_TIMEOUT },
+		{ "connect-timeout-ms",				CASE_NETWORK_HEARTBEAT_CONNECT_TIMEOUT_MS },
 		{ "mtu",							CASE_NETWORK_HEARTBEAT_MTU },
 		{ "multicast-ttl",					CASE_NETWORK_HEARTBEAT_MULTICAST_TTL },
 		{ "protocol",						CASE_NETWORK_HEARTBEAT_PROTOCOL },
@@ -2598,6 +2601,9 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
 				c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT32_MAX);
 				break;
+			case CASE_NETWORK_HEARTBEAT_CONNECT_TIMEOUT_MS:
+				c->hb_config.connect_timeout_ms = cfg_u32(&line, AS_HB_TX_INTERVAL_MS_MIN, UINT32_MAX);
+				break;
 			case CASE_NETWORK_HEARTBEAT_MTU:
 				c->hb_config.override_mtu = cfg_u32_no_checks(&line);
 				break;
@@ -2640,6 +2646,9 @@ as_config_init(const char* config_file)
 				cfg_obsolete(&line, "please use 'multicast-ttl'");
 				break;
 			case CASE_CONTEXT_END:
+				if (c->hb_config.connect_timeout_ms > c->hb_config.tx_interval * c->hb_config.max_intervals_missed / 3) {
+					cf_crash_nostack(AS_CFG, "'connect-timeout-ms' must be <= 'interval' * 'timeout' / 3");
+				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:

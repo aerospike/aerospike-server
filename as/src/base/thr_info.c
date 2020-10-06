@@ -2894,6 +2894,13 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
+		else if (0 == as_info_parameter_get(params, "heartbeat.connect-timeout-ms", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			if (as_hb_connect_timeout_set(val) != 0){
+				goto Error;
+			}
+		}
 		else if (0 == as_info_parameter_get(params, "heartbeat.mtu", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
