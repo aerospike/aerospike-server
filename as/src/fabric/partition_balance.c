@@ -918,7 +918,8 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 				else {
 					// No migrations required - drop superfluous non-replica
 					// partitions immediately.
-					if (! drop_superfluous_version(p, ns)) {
+					if (! as_partition_version_is_null(&p->version) &&
+							! drop_superfluous_version(p, ns)) {
 						// Quiesced nodes become subset of final version.
 						adjust_superfluous_version(p, ns);
 					}
