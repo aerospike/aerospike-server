@@ -938,12 +938,9 @@ bool
 cdt_process_state_init(cdt_process_state *cdt_state,
 		const as_msg_op *op)
 {
-	const uint8_t *data = op->name + op->name_sz;
-	uint32_t sz = op->op_sz - OP_FIXED_SZ - op->name_sz;
-
 	msgpack_vec vecs = {
-			.buf = data,
-			.buf_sz = sz
+			.buf = as_msg_op_get_value_p(op),
+			.buf_sz = as_msg_op_get_value_sz(op)
 	};
 
 	msgpack_in_vec mv = {

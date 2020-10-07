@@ -230,7 +230,7 @@ as_particle_asval_to_client(const as_val *val, as_msg_op *op)
 		return 0;
 	}
 
-	uint8_t *value = (uint8_t *)op + sizeof(as_msg_op) + op->name_sz;
+	uint8_t *value = (uint8_t *)as_msg_op_get_value_p(op);
 	uint32_t added_size = particle_vtable[type]->asval_to_wire_fn(val, value);
 
 	op->op_sz += added_size;
@@ -311,7 +311,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 	}
 
 	uint32_t op_value_size = as_msg_op_get_value_sz(op);
-	uint8_t *op_value = as_msg_op_get_value_p((as_msg_op *)op);
+	const uint8_t *op_value = as_msg_op_get_value_p(op);
 
 	// Currently all operations become creates if there's no existing particle.
 	if (! as_bin_is_live(b)) {
@@ -405,7 +405,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 	}
 
 	uint32_t op_value_size = as_msg_op_get_value_sz(op);
-	uint8_t *op_value = as_msg_op_get_value_p((as_msg_op *)op);
+	const uint8_t *op_value = as_msg_op_get_value_p(op);
 
 	// Currently all operations become creates if there's no existing particle.
 	if (! as_bin_is_live(b)) {
@@ -491,7 +491,7 @@ as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op)
 	}
 
 	uint32_t value_size = as_msg_op_get_value_sz(op);
-	uint8_t *value = as_msg_op_get_value_p((as_msg_op *)op);
+	const uint8_t *value = as_msg_op_get_value_p(op);
 	int32_t mem_size = particle_vtable[type]->size_from_wire_fn(value, value_size);
 
 	if (mem_size < 0) {
@@ -536,7 +536,7 @@ as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_
 	}
 
 	uint32_t value_size = as_msg_op_get_value_sz(op);
-	uint8_t *value = as_msg_op_get_value_p((as_msg_op *)op);
+	const uint8_t *value = as_msg_op_get_value_p(op);
 	int32_t mem_size = particle_vtable[type]->size_from_wire_fn(value, value_size);
 
 	if (mem_size < 0) {
@@ -591,7 +591,7 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 
 	op->particle_type = type;
 
-	uint8_t *value = (uint8_t *)op + sizeof(as_msg_op) + op->name_sz;
+	uint8_t *value = (uint8_t *)as_msg_op_get_value_p(op);
 	uint32_t added_size = particle_vtable[type]->to_wire_fn(b->particle, value);
 
 	op->op_sz += added_size;

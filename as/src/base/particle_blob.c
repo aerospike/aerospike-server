@@ -266,12 +266,9 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 }
 
 #define INIT_MV_FROM_MSG(_msg_op) \
-	uint32_t data_sz = _msg_op->op_sz - (uint32_t)OP_FIXED_SZ - \
-		_msg_op->name_sz; \
-	const uint8_t* data = _msg_op->name + _msg_op->name_sz; \
 	msgpack_vec vecs = { \
-			.buf = data, \
-			.buf_sz = data_sz \
+			.buf = as_msg_op_get_value_p(_msg_op), \
+			.buf_sz = as_msg_op_get_value_sz(_msg_op) \
 	}; \
 	msgpack_in_vec mv = { \
 			.n_vecs = 1, \

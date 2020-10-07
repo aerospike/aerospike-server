@@ -766,10 +766,10 @@ as_msg_field_get(const as_msg* msg, uint8_t type)
 	return NULL;
 }
 
-static inline uint8_t*
-as_msg_op_get_value_p(as_msg_op* op)
+static inline const uint8_t*
+as_msg_op_get_value_p(const as_msg_op* op)
 {
-	return (uint8_t*)op + sizeof(as_msg_op) + op->name_sz;
+	return op->name + op->name_sz;
 }
 
 static inline uint32_t
