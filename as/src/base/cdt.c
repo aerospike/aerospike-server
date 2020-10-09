@@ -225,6 +225,11 @@ static void cdt_context_fill_unpacker(cdt_context *ctx, msgpack_in *mp);
 
 static void cdt_context_unwind(cdt_context *ctx);
 
+// cdt_check
+static bool cdt_check_list(msgpack_in *mp);
+static bool cdt_check_map(msgpack_in *mp);
+static bool cdt_check_internal(msgpack_in *mp);
+
 
 //==========================================================
 // Local helpers.
@@ -2917,6 +2922,64 @@ offset_index_check_order_and_fill(offset_index *offidx, bool is_map)
 	return true;
 }
 
+bool
+offset_index_deep_check_order_and_fill(offset_index *offidx, bool is_map)
+{
+	uint32_t ele_count = offidx->_.ele_count;
+
+	if (ele_count == 0) {
+		return true;
+	}
+
+	msgpack_in mp = {
+			.buf = offidx->contents,
+			.buf_sz = offidx->content_sz
+	};
+
+	msgpack_in mp_prev = mp;
+
+	if (! cdt_check_rep(&mp, is_map ? 2 : 1)) {
+		return false;
+	}
+
+	for (uint32_t i = 1; i < ele_count; i++) {
+		msgpack_cmp_type cmp = msgpack_cmp_peek(&mp_prev, &mp);
+
+		offset_index_set(offidx, i, mp.offset);
+		mp_prev.offset = mp.offset;
+
+		if (is_map) {
+			if (cmp != MSGPACK_CMP_LESS) {
+				if (cmp == MSGPACK_CMP_EQUAL) {
+					cf_warning(AS_PARTICLE, "offset_index_deep_check_order_and_fill() duplicate element detected");
+				}
+				else {
+					cf_warning(AS_PARTICLE, "offset_index_deep_check_order_and_fill() k-ordered map not ordered");
+				}
+
+				return false;
+			}
+		}
+		else if (cmp != MSGPACK_CMP_LESS && cmp != MSGPACK_CMP_EQUAL) {
+			cf_warning(AS_PARTICLE, "offset_index_deep_check_order_and_fill() ordered list not ordered");
+			return false;
+		}
+
+		if (! cdt_check_rep(&mp, is_map ? 2 : 1)) {
+			return false;
+		}
+	}
+
+	if (mp.offset != mp.buf_sz) {
+		cf_warning(AS_PARTICLE, "offset_index_deep_check_order_and_fill() padding not allowed, size %u", mp.buf_sz - mp.offset);
+		return false;
+	}
+
+	offset_index_set_filled(offidx, ele_count);
+
+	return true;
+}
+
 uint32_t
 offset_index_vla_sz(const offset_index *offidx)
 {
@@ -3870,6 +3933,257 @@ list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r)
 	}
 
 	return true;
+}
+
+
+//==========================================================
+// CDT Check -- TODO - move into msgpack_in
+//
+
+static bool
+cdt_check_list(msgpack_in *mp)
+{
+	uint32_t ele_count;
+
+	if (! msgpack_get_list_ele_count(mp, &ele_count)) {
+		cf_warning(AS_PARTICLE, "cdt_list_check() invalid header");
+		return false;
+	}
+
+	msgpack_type type = msgpack_peek_type(mp);
+
+	if (type == MSGPACK_TYPE_EXT) {
+		msgpack_ext ext;
+
+		if (! msgpack_get_ext(mp, &ext)) {
+			cf_warning(AS_PARTICLE, "cdt_check_list() invalid metadata");
+			return false;
+		}
+
+		ele_count--;
+
+		if ((ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
+			if (ele_count == 0) {
+				return true;
+			}
+		}
+
+		msgpack_in mp0 = *mp;
+
+		if (! cdt_check_internal(mp)) {
+			return false;
+		}
+
+		for (uint32_t i = 1; i < ele_count; i++) {
+			msgpack_cmp_type cmp = msgpack_cmp_peek(&mp0, mp);
+
+			if (cmp != MSGPACK_CMP_LESS && cmp != MSGPACK_CMP_EQUAL) {
+				cf_warning(AS_PARTICLE, "cdt_check_list() element out of order at idx %u", i + 1);
+				return false;
+			}
+
+			mp0.offset = mp->offset;
+
+			if (! cdt_check_internal(mp)) {
+				return false;
+			}
+		}
+
+		return ! mp->has_nonstorage;
+	}
+
+	for (uint32_t i = 0; i < ele_count; i++) {
+		if (! cdt_check_internal(mp)) {
+			return false;
+		}
+	}
+
+	return ! mp->has_nonstorage;
+}
+
+static bool
+cdt_check_map(msgpack_in *mp)
+{
+	uint32_t ele_count;
+
+	if (! msgpack_get_map_ele_count(mp, &ele_count)) {
+		cf_warning(AS_PARTICLE, "cdt_map_check() invalid header");
+		return false;
+	}
+
+	msgpack_type type = msgpack_peek_type(mp);
+
+	if (type == MSGPACK_TYPE_EXT) {
+		msgpack_ext ext;
+
+		if (! msgpack_get_ext(mp, &ext) || msgpack_sz(mp) == 0) {
+			cf_warning(AS_PARTICLE, "cdt_map_check() invalid metadata");
+			return false;
+		}
+
+		ele_count--;
+
+		if ((ext.type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
+			if (ele_count == 0) {
+				return true;
+			}
+
+			msgpack_in mp0 = *mp;
+
+			if (! cdt_check_internal(mp)) {
+				return false;
+			}
+
+			if (! cdt_check_internal(mp)) {
+				return false;
+			}
+
+			for (uint32_t i = 1; i < ele_count; i++) {
+				if (msgpack_cmp_peek(&mp0, mp) != MSGPACK_CMP_LESS) {
+					cf_warning(AS_PARTICLE, "cdt_map_check() element out of order at idx %u", i + 1);
+					return false;
+				}
+
+				mp0.offset = mp->offset;
+
+				if (! cdt_check_internal(mp)) {
+					return false;
+				}
+
+				if (! cdt_check_internal(mp)) {
+					return false;
+				}
+			}
+
+			return ! mp->has_nonstorage;
+		}
+	}
+
+	offset_index offidx;
+
+	offset_index_init(&offidx, NULL, ele_count, NULL, mp->buf_sz - mp->offset);
+
+	uint8_t *offmem = cf_malloc(offset_index_size(&offidx));
+	uint32_t offset_start = mp->offset;
+
+	offset_index_set_ptr(&offidx, offmem, mp->buf + mp->offset);
+	offset_index_set_filled(&offidx, ele_count);
+
+	for (uint32_t i = 0; i < ele_count; i++) {
+		offset_index_set(&offidx, i, mp->offset - offset_start);
+
+		if (! cdt_check_internal(mp)) {
+			cf_free(offmem);
+			return false;
+		}
+
+		if (! cdt_check_internal(mp)) {
+			cf_free(offmem);
+			return false;
+		}
+	}
+
+	order_index ordidx;
+	uint8_t *ordmem = cf_malloc(order_index_calc_size(ele_count, ele_count));
+
+	order_index_init(&ordidx, ordmem, ele_count);
+	order_index_map_sort(&ordidx, &offidx);
+
+	uint32_t idx = order_index_get(&ordidx, 0);
+
+	msgpack_in mp0 = {
+			.buf = offidx.contents,
+			.buf_sz = offidx.content_sz,
+			.offset = offset_index_get_const(&offidx, idx)
+	};
+
+	msgpack_in mp1 = mp0;
+
+	for (uint32_t i = 1; i < ele_count; i++) {
+		idx = order_index_get(&ordidx, i);
+		mp1.offset = offset_index_get_const(&offidx, idx);
+
+		msgpack_cmp_type cmp = msgpack_cmp_peek(&mp0, &mp1);
+
+		if (cmp != MSGPACK_CMP_LESS) {
+			cf_warning(AS_PARTICLE, "cdt_map_check() duplicate element detected at rank %u idx %u cmp %d", i, idx, cmp);
+			cf_free(offmem);
+			cf_free(ordmem);
+			return false;
+		}
+
+		mp0.offset = mp1.offset;
+	}
+
+	cf_free(offmem);
+	cf_free(ordmem);
+
+	return ! mp->has_nonstorage;
+}
+
+static bool
+cdt_check_internal(msgpack_in *mp)
+{
+	msgpack_type type = msgpack_peek_type(mp);
+
+	if (type == MSGPACK_TYPE_MAP) {
+		return cdt_check_map(mp);
+	}
+	else if (type == MSGPACK_TYPE_LIST) {
+		return cdt_check_list(mp);
+	}
+	else if (type == MSGPACK_TYPE_ERROR) {
+		cf_warning(AS_PARTICLE, "cdt_check_internal() type error at offset %u", mp->offset);
+		return false;
+	}
+
+	return msgpack_sz(mp) != 0;
+}
+
+bool
+cdt_check(msgpack_in *mp, bool check_end)
+{
+	if (! cdt_check_internal(mp)) {
+		if (mp->has_nonstorage) {
+			cf_warning(AS_PARTICLE, "cdt_check() non-storage element detected at offset %u", mp->offset);
+		}
+
+		return false;
+	}
+
+	if (check_end && mp->offset != mp->buf_sz) {
+		cf_warning(AS_PARTICLE, "cdt_check_buf() buffer has %u bytes padding", mp->buf_sz - mp->offset);
+		return false;
+	}
+
+	return true;
+}
+
+bool
+cdt_check_rep(msgpack_in *mp, uint32_t rep)
+{
+	for (uint32_t i = 0; i < rep; i++) {
+		if (! cdt_check_internal(mp)) {
+			if (mp->has_nonstorage) {
+				cf_warning(AS_PARTICLE, "cdt_check() non-storage element detected at offset %u", mp->offset);
+			}
+
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool
+cdt_check_buf(const uint8_t *buf, uint32_t buf_sz)
+{
+	msgpack_in mp = {
+			.buf = buf,
+			.buf_sz = buf_sz
+	};
+
+	return cdt_check(&mp, true);
 }
 
 

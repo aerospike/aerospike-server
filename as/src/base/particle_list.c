@@ -291,6 +291,7 @@ static int packed_list_add_items_ordered(const packed_list *list, cdt_op_mem *co
 static int packed_list_replace_ordered(const packed_list *list, cdt_op_mem *com, uint32_t index, const cdt_payload *value, uint64_t mod_flags);
 
 static bool packed_list_check_order_and_fill_offidx(const packed_list *list);
+static bool packed_list_deep_check_order_and_fill_offidx(const packed_list *list);
 
 // packed_list_op
 static void packed_list_op_init(packed_list_op *op, const packed_list *list);
@@ -436,7 +437,7 @@ list_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 
 	cf_assert(check, AS_PARTICLE, "list_from_wire() invalid list");
 
-	if (! packed_list_check_order_and_fill_offidx(&new_list)) {
+	if (! packed_list_deep_check_order_and_fill_offidx(&new_list)) {
 		cf_warning(AS_PARTICLE, "list_from_wire() invalid packed list");
 		return -AS_ERR_UNKNOWN;
 	}
@@ -3376,6 +3377,59 @@ packed_list_check_order_and_fill_offidx(const packed_list *list)
 		if (msgpack_sz_rep(&mp, list->ele_count) == 0 || mp.has_nonstorage) {
 			return false;
 		}
+	}
+
+	return true;
+}
+
+static bool
+packed_list_deep_check_order_and_fill_offidx(const packed_list *list)
+{
+	if (list->ele_count == 0) {
+		return true;
+	}
+
+	offset_index *offidx = (offset_index *)&list->offidx;
+
+	if (list_is_ordered(list)) {
+		if (! offset_index_deep_check_order_and_fill(offidx, false)) {
+			return false;
+		}
+
+		return true;
+	}
+
+	msgpack_in mp = {
+			.buf = list->contents,
+			.buf_sz = list->content_sz
+	};
+
+	if (! offset_index_is_null(offidx)) {
+		uint32_t blocks = list_offset_partial_index_count(list->ele_count);
+
+		for (uint32_t j = 1; j < blocks; j++) {
+			if (! cdt_check_rep(&mp, PACKED_LIST_INDEX_STEP)) {
+				return false;
+			}
+
+			offset_index_set(offidx, j, mp.offset);
+		}
+
+		offset_index_set_filled(offidx, blocks);
+
+		uint32_t mod_count = list->ele_count % PACKED_LIST_INDEX_STEP;
+
+		if (mod_count != 0 && ! cdt_check_rep(&mp, mod_count)) {
+			return false;
+		}
+	}
+	else if (! cdt_check_rep(&mp, list->ele_count)) {
+		return false;
+	}
+
+	if (mp.offset != mp.buf_sz) {
+		cf_warning(AS_PARTICLE, "packed_list_deep_check_order_and_fill_offidx() padding not allowed, size %u", mp.buf_sz - mp.offset);
+		return false;
 	}
 
 	return true;

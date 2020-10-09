@@ -387,6 +387,7 @@ uint32_t offset_index_get_delta_const(const offset_index *offidx, uint32_t index
 uint32_t offset_index_get_filled(const offset_index *offidx);
 
 bool offset_index_check_order_and_fill(offset_index *offidx, bool pairs);
+bool offset_index_deep_check_order_and_fill(offset_index *offidx, bool is_map);
 
 uint32_t offset_index_vla_sz(const offset_index *offidx);
 void offset_index_alloc_temp(offset_index *offidx, uint8_t *mem_temp, rollback_alloc *alloc);
@@ -424,6 +425,8 @@ void order_index_copy(order_index *dest, const order_index *src, uint32_t d_star
 size_t order_index_calc_size(uint32_t max_idx, uint32_t ele_count);
 
 void order_index_print(const order_index *ordidx, const char *name);
+
+void order_index_map_sort(order_index *ordidx, const offset_index *offidx);
 
 // order_heap
 bool order_heap_init_build_by_range_temp(order_heap *heap, uint8_t *heap_mem, rollback_alloc *alloc_idx, uint32_t idx, uint32_t count, uint32_t ele_count, order_heap_compare_fn cmp_fn, const void *udata);
@@ -495,6 +498,11 @@ cdt_context_is_toplvl(const cdt_context *ctx)
 {
 	return ctx->data_offset == 0 && ctx->data_sz == 0;
 }
+
+// cdt_check
+bool cdt_check(msgpack_in *mp, bool check_end);
+bool cdt_check_rep(msgpack_in *mp, uint32_t rep);
+bool cdt_check_buf(const uint8_t *ptr, uint32_t sz);
 
 // Debugging support
 bool cdt_verify(cdt_context *ctx);
