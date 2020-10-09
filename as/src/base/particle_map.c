@@ -592,8 +592,7 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	p_map_mem->type = wire_type;
 
 	if (map.flags == 0) {
-		if (! cdt_check_storage_list_contents(map.contents, map.content_sz,
-				2 * map.ele_count)) {
+		if (! cdt_check_buf(map.packed, map.packed_sz)) {
 			cf_warning(AS_PARTICLE, "map_from_wire() invalid packed map");
 			return -AS_ERR_PARAMETER;
 		}
@@ -646,7 +645,7 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 	memcpy(pk.buffer + pk.offset, map.contents, map.content_sz);
 	p_map_mem->sz = map.content_sz + hdr_sz;
 
-	if (! offset_index_check_order_and_fill(&offidx, true)) {
+	if (! offset_index_deep_check_order_and_fill(&offidx, true)) {
 		cf_warning(AS_PARTICLE, "map_from_wire() invalid packed map");
 		return -AS_ERR_PARAMETER;
 	}
@@ -6059,6 +6058,17 @@ map_offset_index_copy_rm_range(offset_index *dest, const offset_index *src,
 
 //------------------------------------------------
 // order_index
+
+void
+order_index_map_sort(order_index *ordidx, const offset_index *offidx)
+{
+	for (uint32_t i = 0; i < ordidx->_.ele_count; i++) {
+		order_index_set(ordidx, i, i);
+	}
+
+	order_index_sort(ordidx, offidx, offidx->contents, offidx->content_sz,
+			SORT_BY_KEY);
+}
 
 static void
 order_index_sort(order_index *ordidx, const offset_index *offsets,
