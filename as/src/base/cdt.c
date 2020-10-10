@@ -3955,7 +3955,7 @@ cdt_check_list(msgpack_in *mp)
 	if (type == MSGPACK_TYPE_EXT) {
 		msgpack_ext ext;
 
-		if (! msgpack_get_ext(mp, &ext)) {
+		if (! msgpack_get_ext(mp, &ext) || ele_count == 0) {
 			cf_warning(AS_PARTICLE, "cdt_check_list() invalid metadata");
 			return false;
 		}
@@ -3966,30 +3966,30 @@ cdt_check_list(msgpack_in *mp)
 			if (ele_count == 0) {
 				return true;
 			}
-		}
 
-		msgpack_in mp0 = *mp;
-
-		if (! cdt_check_internal(mp)) {
-			return false;
-		}
-
-		for (uint32_t i = 1; i < ele_count; i++) {
-			msgpack_cmp_type cmp = msgpack_cmp_peek(&mp0, mp);
-
-			if (cmp != MSGPACK_CMP_LESS && cmp != MSGPACK_CMP_EQUAL) {
-				cf_warning(AS_PARTICLE, "cdt_check_list() element out of order at idx %u", i + 1);
-				return false;
-			}
-
-			mp0.offset = mp->offset;
+			msgpack_in mp0 = *mp;
 
 			if (! cdt_check_internal(mp)) {
 				return false;
 			}
-		}
 
-		return ! mp->has_nonstorage;
+			for (uint32_t i = 1; i < ele_count; i++) {
+				msgpack_cmp_type cmp = msgpack_cmp_peek(&mp0, mp);
+
+				if (cmp != MSGPACK_CMP_LESS && cmp != MSGPACK_CMP_EQUAL) {
+					cf_warning(AS_PARTICLE, "cdt_check_list() element out of order at idx %u", i + 1);
+					return false;
+				}
+
+				mp0.offset = mp->offset;
+
+				if (! cdt_check_internal(mp)) {
+					return false;
+				}
+			}
+
+			return ! mp->has_nonstorage;
+		}
 	}
 
 	for (uint32_t i = 0; i < ele_count; i++) {
@@ -4016,7 +4016,8 @@ cdt_check_map(msgpack_in *mp)
 	if (type == MSGPACK_TYPE_EXT) {
 		msgpack_ext ext;
 
-		if (! msgpack_get_ext(mp, &ext) || msgpack_sz(mp) == 0) {
+		if (! msgpack_get_ext(mp, &ext) || msgpack_sz(mp) == 0 ||
+				ele_count == 0) {
 			cf_warning(AS_PARTICLE, "cdt_map_check() invalid metadata");
 			return false;
 		}
@@ -4057,6 +4058,15 @@ cdt_check_map(msgpack_in *mp)
 
 			return ! mp->has_nonstorage;
 		}
+	}
+
+	if (ele_count == 0) {
+		return true;
+	}
+
+	if (ele_count == 1) {
+		return cdt_check_internal(mp) && cdt_check_internal(mp) &&
+				! mp->has_nonstorage;
 	}
 
 	offset_index offidx;
