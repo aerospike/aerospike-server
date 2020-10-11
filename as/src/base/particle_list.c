@@ -3417,7 +3417,11 @@ packed_list_deep_check_order_and_fill_offidx(const packed_list *list)
 
 		offset_index_set_filled(offidx, blocks);
 
-		uint32_t mod_count = list->ele_count % PACKED_LIST_INDEX_STEP;
+		if (blocks != 0) {
+			blocks--;
+		}
+
+		uint32_t mod_count = list->ele_count - blocks * PACKED_LIST_INDEX_STEP;
 
 		if (mod_count != 0 && ! cdt_check_rep(&mp, mod_count)) {
 			return false;
