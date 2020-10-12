@@ -379,6 +379,7 @@ static bool build_bin(build_args* args);
 static bool build_bin_type(build_args* args);
 static bool build_quote(build_args* args);
 static bool build_call(build_args* args);
+static bool build_value_nil(build_args* args);
 static bool build_value_int(build_args* args);
 static bool build_value_float(build_args* args);
 static bool build_value_blob(build_args* args);
@@ -419,6 +420,7 @@ static void rt_skip(runtime* rt, uint32_t instr_count);
 static void rt_value_cmp_translate(rt_value* to, const rt_value* from);
 static void rt_value_destroy(rt_value* val);
 static void rt_value_get_geo(rt_value* val, geo_data* result);
+static as_bin* get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len);
 
 // Runtime compare utilities.
 static as_exp_trilean cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1);
@@ -501,7 +503,7 @@ static const op_table_entry op_table[] = {
 		OP_TABLE_ENTRY(EXP_QUOTE, op_value_blob, build_quote, eval_value, 1, 0, TYPE_LIST),
 		OP_TABLE_ENTRY(EXP_CALL, op_call, build_call, eval_call, 2, 2, TYPE_END),
 
-		OP_TABLE_ENTRY(VOP_VALUE_NIL, op_base_mem, NULL, eval_value, 0, 0, TYPE_NIL),
+		OP_TABLE_ENTRY(VOP_VALUE_NIL, op_base_mem, build_value_nil, eval_value, 0, 0, TYPE_NIL),
 		OP_TABLE_ENTRY(VOP_VALUE_INT, op_value_int, build_value_int, eval_value, 0, 0, TYPE_INT),
 		OP_TABLE_ENTRY(VOP_VALUE_FLOAT, op_value_float, build_value_float, eval_value, 0, 0, TYPE_FLOAT),
 		OP_TABLE_ENTRY(VOP_VALUE_STR, op_value_blob, build_value_blob, eval_value, 0, 0, TYPE_STR),
@@ -709,7 +711,15 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 				counter += 2 * count;
 			}
 
-			if (msgpack_sz(&mp) == 0) {
+			if (type == MSGPACK_TYPE_BYTES) {
+				uint32_t temp_sz;
+
+				if (msgpack_get_bin(&mp, &temp_sz) == NULL || temp_sz == 0) {
+					cf_warning(AS_EXP, "invalid blob at offset %u", mp.offset);
+					return NULL;
+				}
+			}
+			else if (msgpack_sz(&mp) == 0) {
 				cf_warning(AS_EXP, "invalid instruction at offset %u",
 						mp.offset);
 				return NULL;
@@ -894,8 +904,8 @@ build_next(build_args* args)
 			op_code = VOP_VALUE_GEO;
 			break;
 		default:
-			cf_crash(AS_EXP, "invalid instruction at offset %u type %d",
-					args->mp.offset, type);
+			op_code = VOP_VALUE_MSGPACK;
+			break;
 		}
 	}
 	else {
@@ -912,7 +922,7 @@ build_next(build_args* args)
 	args->ele_count = ele_count;
 	args->instr_ix++;
 
-	cf_debug(AS_EXP, "buil_next op %s ele_count %u ix %u", args->entry->name,
+	cf_debug(AS_EXP, "build_next op %s ele_count %u ix %u", args->entry->name,
 			ele_count, args->instr_ix);
 
 	return op_table[op_code].build_cb(args);
@@ -1379,6 +1389,22 @@ build_call(build_args* args)
 	}
 
 	op->instr_end_ix = args->instr_ix;
+
+	return true;
+}
+
+static bool
+build_value_nil(build_args* args)
+{
+	if (! build_args_setup(args, "build_value_nil")) {
+		return false;
+	}
+
+	if (msgpack_sz(&args->mp) == 0) {
+		cf_warning(AS_EXP, "build_value_nil - error %u invalid msgpack",
+				AS_ERR_PARAMETER);
+		return false;
+	}
 
 	return true;
 }
@@ -1973,9 +1999,11 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	op_bin* op = (op_bin*)ob;
-	as_bin* bin = as_bin_get_live_w_len(rt->ctx->rd, op->name, op->name_sz);
+	as_bin* bin = get_live_bin(rt->ctx->rd, op->name, op->name_sz);
 
 	if (bin == NULL) {
+		cf_debug(AS_EXP, "eval_bin - bin (%.*s) not found",
+				op->name_sz, op->name);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -1984,6 +2012,8 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	as_particle_type bin_type = as_bin_get_particle_type(bin);
 
 	if (! bin_is_type(bin, op->type)) {
+		cf_debug(AS_EXP, "eval_bin - bin (%.*s) type mismatch %u does not map to %u",
+				op->name_sz, op->name, bin_type, op->type);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -1997,7 +2027,6 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	case AS_PARTICLE_TYPE_FLOAT:
 		ret_val->type = RT_FLOAT;
 		ret_val->r_float = as_bin_particle_float_value(bin);
-		cf_debug(AS_EXP, "eval_bin - type float value %lf", ret_val->r_float);
 		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
 	case AS_PARTICLE_TYPE_STRING:
@@ -2016,16 +2045,17 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	ret_val->type = RT_TRILEAN;
+	op_bin_type* op = (op_bin_type*)ob;
 
 	if (rt->ctx->rd == NULL) {
+		cf_debug(AS_EXP, "eval_bin - bin (%.*s) not found",
+				op->name_sz, op->name);
+		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
 	}
 
-	op_bin_type* op = (op_bin_type*)ob;
-
-	as_bin* b = as_bin_get_live_w_len(rt->ctx->rd, op->name, op->name_sz);
+	as_bin* b = get_live_bin(rt->ctx->rd, op->name, op->name_sz);
 
 	ret_val->type = RT_INT;
 	ret_val->r_int = (b == NULL) ?
@@ -2539,6 +2569,21 @@ rt_value_get_geo(rt_value* val, geo_data* result)
 	}
 }
 
+static as_bin*
+get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len)
+{
+	if (rd->ns->single_bin) {
+		if (len != 0) {
+			return NULL;
+		}
+	}
+	else if (len == 0) {
+		return NULL;
+	}
+
+	return as_bin_get_live_w_len(rd, name, len);
+}
+
 
 //==========================================================
 // Local helpers - runtime compare utilities.
@@ -2547,6 +2592,9 @@ rt_value_get_geo(rt_value* val, geo_data* result)
 static as_exp_trilean
 cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1)
 {
+	cf_debug(AS_EXP, "cmp_trilean - lv %u rv %u",
+			e0->r_trilean, e1->r_trilean);
+
 	switch (code) {
 	case EXP_CMP_EQ:
 		return (e0->r_trilean == e1->r_trilean) ? AS_EXP_TRUE : AS_EXP_FALSE;
@@ -2570,7 +2618,7 @@ cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1)
 static as_exp_trilean
 cmp_int(exp_op_code code, const rt_value* e0, const rt_value* e1)
 {
-	cf_debug(AS_EXP, "cmp_int lv %ld rv %ld", e0->r_int, e1->r_int);
+	cf_debug(AS_EXP, "cmp_int - lv %ld rv %ld", e0->r_int, e1->r_int);
 
 	switch (code) {
 	case EXP_CMP_EQ:
