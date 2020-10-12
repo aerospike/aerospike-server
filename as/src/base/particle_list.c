@@ -5015,6 +5015,8 @@ list_result_data_set_values_by_idxcount(cdt_result_data *rd,
 		uint32_t idx = order_index_get(idxcnt, 2 * i);
 		uint32_t count = order_index_get(idxcnt, (2 * i) + 1);
 
+		ret_count += count;
+
 		for (uint32_t j = 0; j < count; j++) {
 			sz += offset_index_get_delta_const(full_offidx, idx + j);
 		}
