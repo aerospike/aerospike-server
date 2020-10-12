@@ -510,7 +510,7 @@ msgpack_cmp_parse(parse_meta *meta)
 		meta->d_num = (double)*(float *)&i;
 		meta->buf += 4;
 		meta->type = TYPE_DOUBLE;
-		break;
+		return;
 	}
 	case 0xcb: { // double
 		CMP_PARSE_BUF_CHECK(meta, 8);
