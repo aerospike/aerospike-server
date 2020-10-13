@@ -286,7 +286,7 @@ typedef struct as_msg_field_s {
 
 // Secondary index.
 #define AS_MSG_FIELD_TYPE_INDEX_NAME        21
-#define	AS_MSG_FIELD_TYPE_INDEX_RANGE       22
+#define AS_MSG_FIELD_TYPE_INDEX_RANGE       22
 #define AS_MSG_FIELD_TYPE_INDEX_TYPE        26
 
 // UDF.
@@ -315,7 +315,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 10)
 #define AS_MSG_FIELD_BIT_SAMPLE_MAX         (1 << 11)
 #define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 12)
-#define	AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 13)
+#define AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 13)
 #define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 14)
 #define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 15)
 #define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 16)
