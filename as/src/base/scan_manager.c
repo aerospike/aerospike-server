@@ -128,7 +128,9 @@ as_scan_manager_start_job(as_scan_job* _job)
 void
 as_scan_manager_add_job_thread(as_scan_job* _job)
 {
-	if (_job->n_threads >= _job->ns->n_single_scan_threads) {
+	if ((_job->n_pids_requested != 0 &&
+			_job->n_threads >= (uint32_t)_job->n_pids_requested) ||
+			_job->n_threads >= _job->ns->n_single_scan_threads) {
 		return;
 	}
 
