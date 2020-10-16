@@ -39,6 +39,7 @@
 #include "base/cfg.h"
 #include "base/monitor.h"
 #include "base/scan_job.h"
+#include "fabric/partition.h"
 
 #include "warnings.h"
 
@@ -143,17 +144,31 @@ as_scan_manager_add_job_thread(as_scan_job* _job)
 void
 as_scan_manager_add_max_job_threads(as_scan_job* _job)
 {
+	uint32_t n_pids = _job->n_pids_requested == 0 ?
+			AS_PARTITIONS : (uint32_t)_job->n_pids_requested;
+
+	if (_job->n_threads >= n_pids) {
+		return;
+	}
+
 	uint32_t single_max = as_load_uint32(&_job->ns->n_single_scan_threads);
 
 	if (_job->n_threads >= single_max) {
 		return;
 	}
 
+	// Don't need more threads than there are partitions to scan.
+	uint32_t n_extra = n_pids - _job->n_threads;
+
 	uint32_t single_extra = single_max - _job->n_threads;
 
-	cf_mutex_lock(&g_mgr.lock);
+	if (single_extra < n_extra) {
+		n_extra = single_extra;
+	}
 
 	uint32_t all_max = as_load_uint32(&g_config.n_scan_threads_limit);
+
+	cf_mutex_lock(&g_mgr.lock);
 
 	if (g_n_threads >= all_max) {
 		cf_mutex_unlock(&g_mgr.lock);
@@ -161,7 +176,10 @@ as_scan_manager_add_max_job_threads(as_scan_job* _job)
 	}
 
 	uint32_t all_extra = all_max - g_n_threads;
-	uint32_t n_extra = all_extra > single_extra ? single_extra : all_extra;
+
+	if (all_extra < n_extra) {
+		n_extra = all_extra;
+	}
 
 	for (uint32_t n = 0; n < n_extra; n++) {
 		as_scan_job_add_thread(_job);
