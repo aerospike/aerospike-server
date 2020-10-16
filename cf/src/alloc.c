@@ -191,7 +191,7 @@ hook_new_site_info_id(void)
 	}
 
 	if (info_id == MAX_SITES * MAX_THREADS) {
-		cf_warning(CF_ALLOC, "site info pool exhausted");
+		cf_ticker_warning(CF_ALLOC, "site info pool exhausted");
 	}
 
 	return 0;
