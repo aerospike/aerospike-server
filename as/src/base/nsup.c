@@ -988,8 +988,8 @@ collect_nsup_histograms(as_namespace* ns)
 
 			sprintf(hist_name, "{%s}-%s-ttl", ns->name, set_name);
 			ns->set_ttl_hists[set_id] =
-					linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0,
-							TTL_HIST_NUM_BUCKETS);
+					linear_hist_create(hist_name, LINEAR_HIST_SECONDS, now,
+							ttl_range, TTL_HIST_NUM_BUCKETS);
 		}
 
 		if (ns->set_obj_size_log_hists[set_id] != NULL) {
