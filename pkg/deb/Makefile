@@ -25,10 +25,6 @@ else
 	DEPS = logrotate
 endif
 
-ifeq ($(EDITION),community)
-  DEPS += python
-endif
-
 DEB = $(PKG)/packages/aerospike-server-$(EDITION)-$(REV).$(OS).x86_64.deb
 
 ifeq ($(USE_EE),1)
