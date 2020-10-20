@@ -713,9 +713,15 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 
 			if (type == MSGPACK_TYPE_BYTES) {
 				uint32_t temp_sz;
+				const uint8_t* buf = msgpack_get_bin(&mp, &temp_sz);
 
-				if (msgpack_get_bin(&mp, &temp_sz) == NULL || temp_sz == 0) {
+				if (buf == NULL || temp_sz == 0) {
 					cf_warning(AS_EXP, "invalid blob at offset %u", mp.offset);
+					return NULL;
+				}
+
+				if (*buf != AS_BYTES_BLOB) {
+					cf_warning(AS_EXP, "invalid blob type %d at offset %u", *buf, mp.offset);
 					return NULL;
 				}
 			}
