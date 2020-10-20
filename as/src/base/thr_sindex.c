@@ -806,13 +806,13 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		// This comparison also works building index on records not in a set.
 		if (_job->set_id != as_index_get_set_id(r)) {
 			as_record_done(r_ref, ns);
-			return true;
+			return;
 		}
 	}
 	// _job->set_id is INVALID & irrelevant building all indexes at startup.
 	else if (! record_has_sindex(r, ns)) {
 		as_record_done(r_ref, ns);
-		return true;
+		return;
 	}
 
 	if (as_record_is_doomed(r, ns)) {
