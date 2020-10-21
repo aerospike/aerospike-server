@@ -387,10 +387,7 @@ as_bin_get_or_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 	as_bin_init_nameless(b);
 
 	if (! as_bin_get_or_assign_id_w_len(ns, (const char*)name, len, &b->id)) {
-		if (result != NULL) {
-			*result = AS_ERR_BIN_NAME;
-		}
-
+		*result = AS_ERR_BIN_NAME;
 		return NULL;
 	}
 
