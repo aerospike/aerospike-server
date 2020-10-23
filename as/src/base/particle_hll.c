@@ -212,7 +212,7 @@ static void hll_read_op_union_count(const hll_op* op, const hll_t* from, as_bin*
 static void hll_read_op_intersect_count(const hll_op* op, const hll_t* from, as_bin* rb);
 static void hll_read_op_similarity(const hll_op* op, const hll_t* from, as_bin* rb);
 static void hll_read_op_describe(const hll_op* op, const hll_t* from, as_bin* rb);
-static void hll_read_op_may_contain(const hll_op* op, const hll_t* from, as_bin* rb);
+static void hll_read_op_may_contain_all(const hll_op* op, const hll_t* from, as_bin* rb);
 
 static bool validate_n_combined_bits(uint64_t n_index_bits, uint64_t n_minhash_bits);
 static bool validate_n_index_bits(uint64_t n_index_bits);
@@ -323,7 +323,7 @@ static const hll_op_def hll_read_op_table[] = {
 				hll_read_prepare_intersect, 1, hll_parse_hlls_intersect),
 		HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, hll_read_op_describe,
 				hll_read_prepare_noop, 0),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_MAY_CONTAIN, hll_read_op_may_contain,
+		HLL_READ_OP_ENTRY(AS_HLL_OP_MAY_CONTAIN, hll_read_op_may_contain_all,
 				hll_read_prepare_noop, 1, hll_parse_elements)
 };
 
@@ -1391,22 +1391,22 @@ hll_read_op_describe(const hll_op* op, const hll_t* from, as_bin* rb)
 }
 
 static void
-hll_read_op_may_contain(const hll_op* op, const hll_t* from, as_bin* rb)
+hll_read_op_may_contain_all(const hll_op* op, const hll_t* from, as_bin* rb)
 {
 	(void)op;
 
-	uint64_t contains_any = 0;
+	uint64_t contains_all = 1;
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		element_buf* e = &op->elements[i];
 
-		if (hmh_may_contain(from, e->sz, e->buf)) {
-			contains_any = 1;
+		if (! hmh_may_contain(from, e->sz, e->buf)) {
+			contains_all = 0;
 			break;
 		}
 	}
 
-	rb->particle = (as_particle*)contains_any;
+	rb->particle = (as_particle*)contains_all;
 	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
 }
 
