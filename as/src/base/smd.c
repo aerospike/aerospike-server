@@ -247,6 +247,9 @@ typedef struct smd_module_s {
 	cf_node set_src;
 	uint64_t set_key;
 	uint64_t set_tid;
+
+	uint64_t next_save_time_sec;
+	uint32_t save_throttle_sec;
 } smd_module;
 
 typedef struct smd_op_s {
@@ -330,7 +333,7 @@ static smd_module g_module_table[] = {
 		[AS_SMD_MODULE_SINDEX] = { .name = "sindex" },
 		[AS_SMD_MODULE_TRUNCATE] = { .name = "truncate" },
 		[AS_SMD_MODULE_UDF] = { .name = "UDF" },
-		[AS_SMD_MODULE_XDR] = { .name = "XDR" }
+		[AS_SMD_MODULE_XDR] = { .name = "XDR", .save_throttle_sec = 30 }
 };
 
 COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) ==
@@ -2401,6 +2404,19 @@ module_restore_from_disk(smd_module* module)
 static void
 module_commit_to_disk(smd_module* module)
 {
+	if (module->save_throttle_sec != 0) {
+		cf_clock now = cf_get_seconds();
+
+		if (module->next_save_time_sec > now) {
+			return;
+		}
+
+		module->next_save_time_sec = now + module->save_throttle_sec;
+
+		cf_detail(AS_SMD, "{%s} commit-to-disk - next_save_time_sec %lu",
+				MODULE_AS_STRING(module), module->next_save_time_sec);
+	}
+
 	json_t* j_file = json_array();
 	cf_assert(j_file, AS_SMD, "failed to create json array");
 
