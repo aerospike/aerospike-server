@@ -133,6 +133,7 @@ as_namespace_create(char *name)
 	ns->n_truncate_threads = 4;
 	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
+	ns->xdr_bin_tombstone_ttl_ms = 60 * 60 * 24 * 1000UL; // 1 day
 	ns->xdr_tomb_raider_period = 2 * 60; // 2 minutes
 	ns->n_xdr_tomb_raider_threads = 1;
 
