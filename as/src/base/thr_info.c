@@ -6877,6 +6877,8 @@ as_info_init()
 
 	// XDR
 	as_info_set_command("xdr-dc-state", as_xdr_dc_state, PERM_NONE);
+	as_info_set_command("xdr-get-filter", as_xdr_get_filter, PERM_NONE);
+	as_info_set_command("xdr-set-filter", as_xdr_set_filter, PERM_XDR_SET_FILTER);
 
 	as_service_list_init();
 

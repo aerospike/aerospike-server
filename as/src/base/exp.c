@@ -525,7 +525,7 @@ static const op_table_entry op_table[] = {
 //
 
 as_exp*
-exp_build_base64(const char* buf64, uint32_t buf64_sz)
+as_exp_build_base64(const char* buf64, uint32_t buf64_sz)
 {
 	uint32_t buf_sz = cf_b64_decoded_buf_size(buf64_sz);
 	uint8_t* buf = cf_malloc(buf_sz);
@@ -536,10 +536,10 @@ exp_build_base64(const char* buf64, uint32_t buf64_sz)
 		return NULL;
 	}
 
-	cf_assert(buf_sz_out == buf_sz, AS_EXP, "buf_sz_out %u buf_sz %u",
+	cf_assert(buf_sz_out <= buf_sz, AS_EXP, "buf_sz_out %u buf_sz %u",
 			buf_sz_out, buf_sz);
 
-	as_exp* p = build_internal(buf, buf_sz, false);
+	as_exp* p = build_internal(buf, buf_sz_out, false);
 
 	if (p != NULL) {
 		p->buf_cleanup = buf;

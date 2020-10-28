@@ -62,7 +62,7 @@ typedef enum {
 // Public API.
 //
 
-as_exp* exp_build_base64(const char* buf64, uint32_t buf64_sz);
+as_exp* as_exp_build_base64(const char* buf64, uint32_t buf64_sz);
 as_exp* as_exp_build(const as_msg_field* msg, bool cpy_instr);
 as_exp_trilean as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx);
 bool as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx);

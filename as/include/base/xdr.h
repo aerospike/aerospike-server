@@ -187,3 +187,5 @@ void as_xdr_get_config(const char* cmd, cf_dyn_buf* db);
 bool as_xdr_set_config(const char* cmd);
 void as_xdr_get_stats(const char* cmd, cf_dyn_buf* db);
 int as_xdr_dc_state(char* name, char* cmd, cf_dyn_buf* db);
+int as_xdr_get_filter(char* name, char* cmd, cf_dyn_buf* db);
+int as_xdr_set_filter(char* name, char* cmd, cf_dyn_buf* db);

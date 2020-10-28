@@ -145,3 +145,15 @@ as_xdr_dc_state(char* name, char* cmd, cf_dyn_buf* db)
 {
 	return 0;
 }
+
+int
+as_xdr_get_filter(char* name, char* cmd, cf_dyn_buf* db)
+{
+	return 0;
+}
+
+int
+as_xdr_set_filter(char* name, char* cmd, cf_dyn_buf* db)
+{
+	return 0;
+}

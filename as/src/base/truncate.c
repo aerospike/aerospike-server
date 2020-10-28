@@ -62,9 +62,6 @@ typedef struct truncate_reduce_cb_info_s {
 // Includes 1 for delimiter and 1 for null-terminator.
 #define TRUNCATE_KEY_SIZE (AS_ID_NAMESPACE_SZ + AS_SET_NAME_MAX_SIZE)
 
-// System metadata key format token.
-#define TOK_DELIMITER ('|')
-
 // Detect excessive clock skew for warning purposes only.
 static const uint64_t WARN_CLOCK_SKEW_MS = 1000UL * 5;
 

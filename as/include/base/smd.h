@@ -68,6 +68,9 @@ typedef bool (*as_smd_conflict_fn)(const as_smd_item* item0, const as_smd_item* 
 typedef void (*as_smd_get_all_fn)(const cf_vector* items, void* udata);
 typedef void (*as_smd_set_fn)(bool result, void* udata);
 
+// Used by many SMD modules to format keys.
+#define TOK_DELIMITER ('|')
+
 
 //==========================================================
 // Public API.
