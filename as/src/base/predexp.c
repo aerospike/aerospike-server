@@ -1623,7 +1623,7 @@ eval_rec_device_size(predexp_eval_t* bp, predexp_args_t* argsp,
 	cf_assert(wbinp != NULL, AS_EXP, "eval_rec_device_size called outside value context");
 
 	int64_t rec_device_size =
-			(int64_t)as_storage_record_size(argsp->ns, argsp->md);
+			(int64_t)as_storage_record_device_size(argsp->ns, argsp->md);
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
 	as_bin_particle_integer_set(&wbinp->bin, rec_device_size);

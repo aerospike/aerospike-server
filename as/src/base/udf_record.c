@@ -68,6 +68,7 @@ static as_bytes* udf_record_digest(const as_rec* rec);
 static uint64_t udf_record_last_update_time(const as_rec* rec);
 static uint16_t udf_record_gen(const as_rec* rec);
 static uint32_t udf_record_ttl(const as_rec* rec);
+static uint32_t udf_record_memory_size(const as_rec* rec);
 static uint32_t udf_record_device_size(const as_rec* rec);
 static uint16_t udf_record_numbins(const as_rec* rec);
 static int udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb, void* udata);
@@ -104,6 +105,7 @@ const as_rec_hooks udf_record_hooks = {
 		.last_update_time   = udf_record_last_update_time,
 		.gen                = udf_record_gen,
 		.ttl                = udf_record_ttl,
+		.memory_size        = udf_record_memory_size,
 		.device_size        = udf_record_device_size,
 		.numbins            = udf_record_numbins,
 		.bin_names          = udf_record_bin_names
@@ -117,6 +119,7 @@ const as_rec_hooks as_aggr_record_hooks = {
 		.last_update_time   = udf_record_last_update_time,
 		.gen                = udf_record_gen,
 		.ttl                = udf_record_ttl,
+		.memory_size        = udf_record_memory_size,
 		.device_size        = udf_record_device_size,
 		.numbins            = udf_record_numbins,
 		.bin_names          = udf_record_bin_names
@@ -556,6 +559,24 @@ udf_record_ttl(const as_rec* rec)
 }
 
 //------------------------------------------------
+// sz = record.memory_size(rec)
+//
+static uint32_t
+udf_record_memory_size(const as_rec* rec)
+{
+	param_check(rec);
+
+	udf_record* urecord = (udf_record*)as_rec_source(rec);
+
+	if (! urecord->is_open) {
+		cf_warning(AS_UDF, "record not open");
+		return 0;
+	}
+
+	return as_storage_record_mem_size(urecord->tr->rsv.ns, urecord->r_ref->r);
+}
+
+//------------------------------------------------
 // sz = record.device_size(rec)
 //
 static uint32_t
@@ -570,7 +591,8 @@ udf_record_device_size(const as_rec* rec)
 		return 0;
 	}
 
-	return as_storage_record_size(urecord->tr->rsv.ns, urecord->r_ref->r);
+	return as_storage_record_device_size(urecord->tr->rsv.ns,
+			urecord->r_ref->r);
 }
 
 //------------------------------------------------

@@ -205,15 +205,15 @@ void as_storage_dump_wb_summary(const struct as_namespace_s *ns);
 void as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD histograms
 
 // Get record storage metadata.
-uint32_t as_storage_record_size(const struct as_namespace_s *ns, const struct as_index_s *r);
+uint32_t as_storage_record_device_size(const struct as_namespace_s *ns, const struct as_index_s *r);
 
 //------------------------------------------------
 // Generic functions that don't use "v-tables".
 //
 
 // Called within as_storage_rd usage cycle.
-uint64_t as_storage_record_get_n_bytes_memory(as_storage_rd *rd);
-void as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint64_t start_bytes);
+uint32_t as_storage_record_mem_size(const struct as_namespace_s *ns, const struct as_index_s *r);
+void as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint32_t start_bytes);
 void as_storage_record_drop_from_mem_stats(as_storage_rd *rd);
 void as_storage_record_get_set_name(as_storage_rd *rd);
 bool as_storage_rd_load_key(as_storage_rd *rd);
@@ -273,7 +273,7 @@ void as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
 void as_storage_dump_wb_summary_ssd(const struct as_namespace_s *ns);
 void as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
 
-uint32_t as_storage_record_size_ssd(const struct as_index_s *r);
+uint32_t as_storage_record_device_size_ssd(const struct as_index_s *r);
 
 //------------------------------------------------
 // AS_STORAGE_ENGINE_PMEM functions.
@@ -316,4 +316,4 @@ void as_storage_ticker_stats_pmem(struct as_namespace_s *ns);
 void as_storage_dump_wb_summary_pmem(const struct as_namespace_s *ns);
 void as_storage_histogram_clear_pmem(struct as_namespace_s *ns);
 
-uint32_t as_storage_record_size_pmem(const struct as_index_s *r);
+uint32_t as_storage_record_device_size_pmem(const struct as_index_s *r);

@@ -67,7 +67,7 @@ typedef struct udf_record_s {
 	bool has_updates;
 
 	uint8_t result_code; // only set when we fail execute_updates()
-	uint64_t old_memory_bytes; // DIM only
+	uint32_t old_memory_bytes; // DIM only
 
 	// Non-DIM only.
 	uint8_t* particle_buf;

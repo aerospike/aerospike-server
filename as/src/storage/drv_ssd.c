@@ -2433,7 +2433,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 		as_storage_rd_load_bins(&rd, stack_bins);
 
-		uint64_t bytes_memory = as_storage_record_get_n_bytes_memory(&rd);
+		uint32_t bytes_memory = as_storage_record_mem_size(ns, r);
 
 		uint16_t n_old_bins = rd.n_bins;
 		as_bin* old_bins = rd.bins;
@@ -3825,7 +3825,7 @@ as_storage_histogram_clear_ssd(as_namespace *ns)
 //
 
 uint32_t
-as_storage_record_size_ssd(const as_record *r)
+as_storage_record_device_size_ssd(const as_record *r)
 {
 	return N_RBLOCKS_TO_SIZE(r->n_rblocks);
 }

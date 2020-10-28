@@ -619,20 +619,10 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 			linear_hist_get_info(ns->ttl_hist, db);
 		}
 		else if (strcmp(hist_name, "object-size") == 0) {
-			if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
-				cf_dyn_buf_append_string(db, "hist-not-applicable");
-			}
-			else {
-				histogram_get_info(ns->obj_size_log_hist, db);
-			}
+			histogram_get_info(ns->obj_size_log_hist, db);
 		}
 		else if (strcmp(hist_name, "object-size-linear") == 0) {
-			if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
-				cf_dyn_buf_append_string(db, "hist-not-applicable");
-			}
-			else {
-				linear_hist_get_info(ns->obj_size_lin_hist, db);
-			}
+			linear_hist_get_info(ns->obj_size_lin_hist, db);
 		}
 		else {
 			cf_dyn_buf_append_string(db, "error-unknown-hist-name");
@@ -657,29 +647,19 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 		}
 	}
 	else if (strcmp(hist_name, "object-size") == 0) {
-		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
-			cf_dyn_buf_append_string(db, "hist-not-applicable");
+		if (ns->set_obj_size_log_hists[set_id] != NULL) {
+			histogram_get_info(ns->set_obj_size_log_hists[set_id], db);
 		}
 		else {
-			if (ns->set_obj_size_log_hists[set_id]) {
-				histogram_get_info(ns->set_obj_size_log_hists[set_id], db);
-			}
-			else {
-				cf_dyn_buf_append_string(db, "hist-unavailable");
-			}
+			cf_dyn_buf_append_string(db, "hist-unavailable");
 		}
 	}
 	else if (strcmp(hist_name, "object-size-linear") == 0) {
-		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
-			cf_dyn_buf_append_string(db, "hist-not-applicable");
+		if (ns->set_obj_size_lin_hists[set_id] != NULL) {
+			linear_hist_get_info(ns->set_obj_size_lin_hists[set_id], db);
 		}
 		else {
-			if (ns->set_obj_size_lin_hists[set_id]) {
-				linear_hist_get_info(ns->set_obj_size_lin_hists[set_id], db);
-			}
-			else {
-				cf_dyn_buf_append_string(db, "hist-unavailable");
-			}
+			cf_dyn_buf_append_string(db, "hist-unavailable");
 		}
 	}
 	else {

@@ -239,7 +239,7 @@ as_storage_histogram_clear_pmem(as_namespace* ns)
 }
 
 uint32_t
-as_storage_record_size_pmem(const as_record* r)
+as_storage_record_device_size_pmem(const as_record* r)
 {
 	pmem_crash_ce();
 }

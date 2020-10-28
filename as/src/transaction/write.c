@@ -1149,10 +1149,10 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	as_storage_rd_load_bins(rd, NULL);
 
 	// For memory accounting, note current usage.
-	uint64_t memory_bytes = 0;
+	uint32_t memory_bytes = 0;
 
 	if (rd->n_bins != 0) {
-		memory_bytes = as_storage_record_get_n_bytes_memory(rd);
+		memory_bytes = as_storage_record_mem_size(ns, r);
 	}
 
 	//------------------------------------------------------
@@ -1265,7 +1265,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	as_storage_rd_load_bins(rd, old_bins);
 
 	// For memory accounting, note current usage.
-	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);
+	uint32_t memory_bytes = as_storage_record_mem_size(ns, r);
 
 	//------------------------------------------------------
 	// Copy existing bins to new space, and keep old bins

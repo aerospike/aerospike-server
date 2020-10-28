@@ -388,7 +388,7 @@ prepare_for_write(udf_record* urecord)
 	as_storage_rd* rd = urecord->rd;
 	as_namespace* ns = rd->ns;
 
-	urecord->old_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
+	urecord->old_memory_bytes = as_storage_record_mem_size(ns, rd->r);
 
 	urecord->n_old_bins = rd->n_bins;
 

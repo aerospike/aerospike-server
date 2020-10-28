@@ -485,7 +485,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
 	as_storage_rd_load_bins(rd, NULL);
 
 	// For memory accounting, note current usage.
-	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);
+	uint32_t memory_bytes = as_storage_record_mem_size(ns, r);
 
 	int result;
 
@@ -541,7 +541,7 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 	as_storage_rd_load_bins(rd, stack_bins);
 
 	// For memory accounting, note current usage.
-	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);
+	uint32_t memory_bytes = as_storage_record_mem_size(ns, r);
 
 	int result;
 

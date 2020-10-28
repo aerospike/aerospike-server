@@ -87,6 +87,7 @@ typedef enum {
 	EXP_META_SET_NAME = 70,
 	EXP_META_KEY_EXISTS = 71,
 	EXP_META_IS_TOMBSTONE = 72,
+	EXP_META_MEMORY_SIZE = 73,
 
 	EXP_REC_KEY = 80,
 	EXP_BIN = 81,
@@ -406,6 +407,7 @@ static void eval_meta_ttl(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void eval_meta_set_name(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_meta_key_exists(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
@@ -486,15 +488,16 @@ static const op_table_entry op_table[] = {
 		OP_TABLE_ENTRY(EXP_OR, op_logical, build_logical, eval_or, 0, 0, TYPE_TRILEAN),
 		OP_TABLE_ENTRY(EXP_NOT, op_base_mem, build_logical_not, eval_not, 0, 1, TYPE_TRILEAN),
 
+		OP_TABLE_ENTRY(EXP_META_DIGEST_MOD, op_meta_digest_modulo, build_meta_digest_mod, eval_meta_digest_mod, 1, 0, TYPE_INT),
 		OP_TABLE_ENTRY(EXP_META_DEVICE_SIZE, op_base_mem, build_default, eval_meta_device_size, 0, 0, TYPE_INT),
 		OP_TABLE_ENTRY(EXP_META_LAST_UPDATE, op_base_mem, build_default, eval_meta_last_update, 0, 0, TYPE_INT),
 		OP_TABLE_ENTRY(EXP_META_SINCE_UPDATE, op_base_mem, build_default, eval_meta_since_update, 0, 0, TYPE_INT),
 		OP_TABLE_ENTRY(EXP_META_VOID_TIME, op_base_mem, build_default, eval_meta_void_time, 0, 0, TYPE_INT),
 		OP_TABLE_ENTRY(EXP_META_TTL, op_base_mem, build_default, eval_meta_ttl, 0, 0, TYPE_INT),
-		OP_TABLE_ENTRY(EXP_META_DIGEST_MOD, op_meta_digest_modulo, build_meta_digest_mod, eval_meta_digest_mod, 1, 0, TYPE_INT),
 		OP_TABLE_ENTRY(EXP_META_SET_NAME, op_base_mem, build_default, eval_meta_set_name, 0, 0, TYPE_STR),
 		OP_TABLE_ENTRY(EXP_META_KEY_EXISTS, op_base_mem, build_default, eval_meta_key_exists, 0, 0, TYPE_TRILEAN),
 		OP_TABLE_ENTRY(EXP_META_IS_TOMBSTONE, op_base_mem, build_default, eval_meta_is_tombstone, 0, 0, TYPE_TRILEAN),
+		OP_TABLE_ENTRY(EXP_META_MEMORY_SIZE, op_base_mem, build_default, eval_meta_memory_size, 0, 0, TYPE_INT),
 
 		OP_TABLE_ENTRY(EXP_REC_KEY, op_rec_key, build_rec_key, eval_rec_key, 1, 0, TYPE_END),
 		OP_TABLE_ENTRY(EXP_BIN, op_bin, build_bin, eval_bin, 2, 0, TYPE_END),
@@ -1870,7 +1873,8 @@ static void
 eval_meta_device_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	ret_val->type = RT_INT;
-	ret_val->r_int = (int64_t)as_storage_record_size(rt->ctx->ns, rt->ctx->r);
+	ret_val->r_int =
+			(int64_t)as_storage_record_device_size(rt->ctx->ns, rt->ctx->r);
 }
 
 static void
@@ -1940,6 +1944,14 @@ eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	ret_val->type = RT_TRILEAN;
 	ret_val->r_trilean = (as_record_is_live(rt->ctx->r) ?
 			AS_EXP_FALSE : AS_EXP_TRUE);
+}
+
+static void
+eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	ret_val->type = RT_INT;
+	ret_val->r_int =
+			(int64_t)as_storage_record_mem_size(rt->ctx->ns, rt->ctx->r);
 }
 
 static void

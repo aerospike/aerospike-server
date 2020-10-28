@@ -750,18 +750,18 @@ as_storage_histogram_clear_all(as_namespace *ns)
 // as_storage_record_size
 //
 
-typedef uint32_t (*as_storage_record_size_fn)(const as_record *r);
-static const as_storage_record_size_fn as_storage_record_size_table[AS_NUM_STORAGE_ENGINES] = {
+typedef uint32_t (*as_storage_record_device_size_fn)(const as_record *r);
+static const as_storage_record_device_size_fn as_storage_record_device_size_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory doesn't support record stored size.
-	as_storage_record_size_pmem,
-	as_storage_record_size_ssd
+	as_storage_record_device_size_pmem,
+	as_storage_record_device_size_ssd
 };
 
 uint32_t
-as_storage_record_size(const as_namespace *ns, const as_record *r)
+as_storage_record_device_size(const as_namespace *ns, const as_record *r)
 {
-	if (as_storage_record_size_table[ns->storage_type]) {
-		return as_storage_record_size_table[ns->storage_type](r);
+	if (as_storage_record_device_size_table[ns->storage_type]) {
+		return as_storage_record_device_size_table[ns->storage_type](r);
 	}
 
 	return 0;
@@ -773,64 +773,88 @@ as_storage_record_size(const as_namespace *ns, const as_record *r)
 //
 
 // Get size of record's in-memory data - everything except index bytes.
-uint64_t
-as_storage_record_get_n_bytes_memory(as_storage_rd *rd)
+uint32_t
+as_storage_record_mem_size(const as_namespace *ns, const as_record *r)
 {
-	if (! rd->ns->storage_data_in_memory) {
+	if (! ns->storage_data_in_memory) {
 		return 0;
 	}
 
-	uint64_t n_bytes_memory = 0;
+	if (ns->single_bin) {
+		as_bin *b = as_index_get_single_bin(r);
 
-	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		n_bytes_memory += as_bin_particle_size(&rd->bins[i]);
+		return as_bin_is_used(b) ? as_bin_particle_size(b) : 0;
 	}
 
-	if (! rd->ns->single_bin) {
-		if (rd->r->key_stored == 1) {
-			n_bytes_memory += sizeof(as_rec_space) +
-					((as_rec_space*)rd->r->dim)->key_size;
+	uint64_t sz = 0;
+
+	if (r->key_stored == 1) {
+		sz += sizeof(as_rec_space) + ((as_rec_space*)r->dim)->key_size;
+	}
+
+	as_bin_space *bin_space = as_index_get_bin_space(r);
+
+	if (bin_space == NULL) {
+		return (uint32_t)sz;
+	}
+
+	uint16_t n_bins = bin_space->n_bins;
+
+	if (r->has_bin_meta == 0) {
+		sz += sizeof(as_bin_space) + (sizeof(as_bin_no_meta) * n_bins);
+
+		as_bin_no_meta *bins = (as_bin_no_meta *)bin_space->bins;
+
+		for (uint16_t i = 0; i < n_bins; i++) {
+			sz += as_bin_particle_size((as_bin *)&bins[i]);
 		}
+	}
+	else {
+		sz += sizeof(as_bin_space) + (sizeof(as_bin) * n_bins);
 
-		if (as_index_get_bin_space(rd->r)) {
-			size_t bin_sz = rd->r->has_bin_meta == 0 ?
-					sizeof(as_bin_no_meta) : sizeof(as_bin);
-
-			n_bytes_memory += sizeof(as_bin_space) + (bin_sz * rd->n_bins);
+		for (uint16_t i = 0; i < n_bins; i++) {
+			sz += as_bin_particle_size(&bin_space->bins[i]);
 		}
 	}
 
-	return n_bytes_memory;
+	return (uint32_t)sz;
 }
 
 void
-as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint64_t start_bytes)
+as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint32_t start_bytes)
 {
-	if (! rd->ns->storage_data_in_memory) {
+	as_namespace *ns = rd->ns;
+
+	if (! ns->storage_data_in_memory) {
 		return;
 	}
 
-	uint64_t end_bytes = as_storage_record_get_n_bytes_memory(rd);
+	as_record *r = rd->r;
+
+	uint64_t end_bytes = as_storage_record_mem_size(ns, r);
 	int64_t delta_bytes = (int64_t)end_bytes - (int64_t)start_bytes;
 
 	if (delta_bytes != 0) {
-		cf_atomic_int_add(&rd->ns->n_bytes_memory, delta_bytes);
-		as_namespace_adjust_set_memory(rd->ns, as_index_get_set_id(rd->r),
-				delta_bytes);
+		cf_atomic_int_add(&ns->n_bytes_memory, delta_bytes);
+		as_namespace_adjust_set_memory(ns, as_index_get_set_id(r), delta_bytes);
 	}
 }
 
 void
 as_storage_record_drop_from_mem_stats(as_storage_rd *rd)
 {
-	if (! rd->ns->storage_data_in_memory) {
+	as_namespace *ns = rd->ns;
+
+	if (! ns->storage_data_in_memory) {
 		return;
 	}
 
-	uint64_t drop_bytes = as_storage_record_get_n_bytes_memory(rd);
+	as_record *r = rd->r;
 
-	cf_atomic_int_sub(&rd->ns->n_bytes_memory, drop_bytes);
-	as_namespace_adjust_set_memory(rd->ns, as_index_get_set_id(rd->r),
+	uint64_t drop_bytes = as_storage_record_mem_size(ns, r);
+
+	cf_atomic_int_sub(&ns->n_bytes_memory, drop_bytes);
+	as_namespace_adjust_set_memory(ns, as_index_get_set_id(r),
 			-(int64_t)drop_bytes);
 }
 

@@ -927,21 +927,15 @@ collect_nsup_histograms(as_namespace* ns)
 		return;
 	}
 
-	const char* tag = ns->obj_size_log_hist != NULL ?
-			"ttl & object size" : "ttl";
-
-	cf_info(AS_NSUP, "{%s} collecting %s info ...", ns->name, tag);
+	cf_info(AS_NSUP, "{%s} collecting ttl & object size info ...", ns->name);
 
 	uint32_t now = as_record_void_time_get();
 	uint32_t ttl_range = get_ttl_range(ns, now);
 
 	linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
-	if (ns->obj_size_log_hist != NULL) {
-		histogram_clear(ns->obj_size_log_hist);
-		linear_hist_clear(ns->obj_size_lin_hist, 0,
-				ns->storage_write_block_size);
-	}
+	histogram_clear(ns->obj_size_log_hist);
+	linear_hist_clear(ns->obj_size_lin_hist, 0, ns->storage_write_block_size);
 
 	uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
 
@@ -967,7 +961,7 @@ collect_nsup_histograms(as_namespace* ns)
 			linear_hist_clear(ns->set_obj_size_lin_hists[set_id], 0,
 					ns->storage_write_block_size);
 		}
-		else if (ns->obj_size_log_hist != NULL) {
+		else {
 			char hist_name[HISTOGRAM_NAME_SIZE];
 			const char* set_name =
 					as_namespace_get_set_name(ns, (uint16_t)set_id);
@@ -995,10 +989,8 @@ collect_nsup_histograms(as_namespace* ns)
 	linear_hist_dump(ns->ttl_hist);
 	linear_hist_save_info(ns->ttl_hist);
 
-	if (ns->obj_size_log_hist != NULL) {
-		histogram_save_info(ns->obj_size_log_hist);
-		linear_hist_save_info(ns->obj_size_lin_hist);
-	}
+	histogram_save_info(ns->obj_size_log_hist);
+	linear_hist_save_info(ns->obj_size_lin_hist);
 
 	for (uint32_t j = 0; j < num_sets; j++) {
 		uint32_t set_id = j + 1;
@@ -1006,13 +998,12 @@ collect_nsup_histograms(as_namespace* ns)
 		linear_hist_dump(ns->set_ttl_hists[set_id]);
 		linear_hist_save_info(ns->set_ttl_hists[set_id]);
 
-		if (ns->obj_size_log_hist != NULL) {
-			histogram_save_info(ns->set_obj_size_log_hists[set_id]);
-			linear_hist_save_info(ns->set_obj_size_lin_hists[set_id]);
-		}
+		histogram_save_info(ns->set_obj_size_log_hists[set_id]);
+		linear_hist_save_info(ns->set_obj_size_lin_hists[set_id]);
 	}
 
-	cf_info(AS_NSUP, "{%s} ... done collecting %s info", ns->name, tag);
+	cf_info(AS_NSUP, "{%s} ... done collecting ttl & object size info",
+			ns->name);
 }
 
 static bool
@@ -1030,12 +1021,9 @@ nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 		linear_hist_insert_data_point(set_ttl_hist, void_time);
 	}
 
-	if (ns->obj_size_log_hist == NULL) {
-		as_record_done(r_ref, ns);
-		return true;
-	}
-
-	uint32_t size = as_storage_record_size(ns, r);
+	uint32_t size = ns->storage_type == AS_STORAGE_ENGINE_MEMORY ?
+			as_storage_record_mem_size(ns, r) :
+			as_storage_record_device_size(ns, r);
 
 	histogram_insert_raw_unsafe(ns->obj_size_log_hist, size);
 	linear_hist_insert_data_point(ns->obj_size_lin_hist, size);
