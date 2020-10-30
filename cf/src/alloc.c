@@ -295,24 +295,25 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA %p, invalid site ID", jem_sz, p, ra);
 	}
 
-	uint64_t data_ra = cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id));
-
 	if (delta == 0xffff) {
-		cf_crash(CF_ALLOC, "corruption %zu@%p RA %p, potential double free, possibly freed before with RA 0x%lx",
-				jem_sz, p, ra, data_ra);
+		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, potential double free, possibly freed before with RA 0x%lx",
+				jem_sz, p, cf_log_strip_aslr(ra),
+				cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id)));
 	}
 
 	if (delta > jem_sz - sizeof(uint32_t)) {
-		cf_crash(CF_ALLOC, "corruption %zu@%p RA %p, invalid delta length, possibly allocated with RA 0x%lx",
-				jem_sz, p, ra, data_ra);
+		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid delta length, possibly allocated with RA 0x%lx",
+				jem_sz, p, cf_log_strip_aslr(ra),
+				cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id)));
 	}
 
 	uint8_t *mark = data - delta;
 
 	for (uint32_t i = 0; i < 4 && i < delta; ++i) {
 		if (mark[i] != data[i]) {
-			cf_crash(CF_ALLOC, "corruption %zu@%p RA %p, invalid mark, possibly allocated with RA 0x%lx",
-					jem_sz, p, ra, data_ra);
+			cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid mark, possibly allocated with RA 0x%lx",
+					jem_sz, p, cf_log_strip_aslr(ra),
+					cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id)));
 		}
 	}
 
