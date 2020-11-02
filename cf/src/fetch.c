@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -44,6 +45,8 @@
 //
 
 #define CONFIGURED_FILE_MAX_SIZE (10 * 1024 * 1024)
+
+#define ENV_PATH_PREFIX "env:"
 
 static const char TRAILING_NEWLINE[] = "\n\r";
 
@@ -80,6 +83,17 @@ cf_fetch_bytes(const char* path, size_t* size_r)
 char*
 cf_fetch_string(const char* path)
 {
+	if (strncmp(path, ENV_PATH_PREFIX, sizeof(ENV_PATH_PREFIX) - 1) == 0) {
+		char* val = getenv(path + sizeof(ENV_PATH_PREFIX) - 1);
+
+		if (val == NULL || *val == '\0') {
+			cf_warning(CF_MISC, "missing or empty variable for %s", path);
+			return NULL;
+		}
+
+		return cf_strdup(val);
+	}
+
 	size_t len;
 	uint8_t* buf = cf_fetch_bytes(path, &len);
 
