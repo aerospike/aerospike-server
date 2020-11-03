@@ -28,6 +28,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -35,6 +36,7 @@
 #include <unistd.h>
 
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_b64.h"
 
 #include "log.h"
 #include "vault.h"
@@ -47,6 +49,10 @@
 #define CONFIGURED_FILE_MAX_SIZE (10 * 1024 * 1024)
 
 #define ENV_PATH_PREFIX "env:"
+#define ENV_PATH_PREFIX_LEN (sizeof(ENV_PATH_PREFIX) - 1)
+
+#define ENV_B64_PATH_PREFIX "env-b64:"
+#define ENV_B64_PATH_PREFIX_LEN (sizeof(ENV_B64_PATH_PREFIX) - 1)
 
 static const char TRAILING_NEWLINE[] = "\n\r";
 
@@ -55,7 +61,26 @@ static const char TRAILING_NEWLINE[] = "\n\r";
 // Forward declarations.
 //
 
+static uint8_t* fetch_env_bytes(const char* path, size_t* size_r);
+static uint8_t* fetch_env_b64_bytes(const char* path, size_t* size_r);
 static uint8_t* fetch_bytes_from_file(const char* file_path, size_t* size_r);
+
+
+//==========================================================
+// Inlines & macros.
+//
+
+static inline bool
+is_env_path(const char* path)
+{
+	return strncmp(path, ENV_PATH_PREFIX, ENV_PATH_PREFIX_LEN) == 0;
+}
+
+static inline bool
+is_env_b64_path(const char* path)
+{
+	return strncmp(path, ENV_B64_PATH_PREFIX, ENV_B64_PATH_PREFIX_LEN) == 0;
+}
 
 
 //==========================================================
@@ -67,6 +92,14 @@ uint8_t*
 cf_fetch_bytes(const char* path, size_t* size_r)
 {
 	cf_assert(path != NULL, CF_MISC, "fetch with null path");
+
+	if (is_env_path(path)) {
+		return fetch_env_bytes(path, size_r);
+	}
+
+	if (is_env_b64_path(path)) {
+		return fetch_env_b64_bytes(path, size_r);
+	}
 
 	if (cf_vault_is_vault_path(path)) {
 		if (! cf_vault_is_configured()) {
@@ -83,17 +116,6 @@ cf_fetch_bytes(const char* path, size_t* size_r)
 char*
 cf_fetch_string(const char* path)
 {
-	if (strncmp(path, ENV_PATH_PREFIX, sizeof(ENV_PATH_PREFIX) - 1) == 0) {
-		char* val = getenv(path + sizeof(ENV_PATH_PREFIX) - 1);
-
-		if (val == NULL || *val == '\0') {
-			cf_warning(CF_MISC, "missing or empty variable for %s", path);
-			return NULL;
-		}
-
-		return cf_strdup(val);
-	}
-
 	size_t len;
 	uint8_t* buf = cf_fetch_bytes(path, &len);
 
@@ -129,6 +151,48 @@ cf_fetch_string(const char* path)
 //==========================================================
 // Local helpers.
 //
+
+// Caller must cf_free return value when done.
+static uint8_t*
+fetch_env_bytes(const char* path, size_t* size_r)
+{
+	char* val = getenv(path + ENV_PATH_PREFIX_LEN);
+
+	if (val == NULL || *val == '\0') {
+		cf_warning(CF_MISC, "missing or empty variable for %s", path);
+		return NULL;
+	}
+
+	*size_r = strlen(val);
+
+	return (uint8_t*)cf_strdup(val);
+}
+
+// Caller must cf_free return value when done.
+static uint8_t*
+fetch_env_b64_bytes(const char* path, size_t* size_r)
+{
+	char* val = getenv(path + ENV_B64_PATH_PREFIX_LEN);
+
+	if (val == NULL || *val == '\0') {
+		cf_warning(CF_MISC, "missing or empty variable for %s", path);
+		return NULL;
+	}
+
+	uint32_t len = (uint32_t)strlen(val);
+	uint32_t size = cf_b64_decoded_buf_size(len);
+	uint8_t* buf = cf_malloc(size + 1); // +1 for null terminator
+
+	if (! cf_b64_validate_and_decode(val, len, buf, &size)) {
+		cf_warning(CF_MISC, "invalid b64 variable for %s", path);
+		cf_free(buf);
+		return NULL;
+	}
+
+	*size_r = size;
+
+	return buf;
+}
 
 // Caller must cf_free return value when done.
 static uint8_t*
