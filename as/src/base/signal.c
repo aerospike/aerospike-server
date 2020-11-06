@@ -91,6 +91,11 @@ set_handler(int sig_num, sighandler_t hand)
 static inline void
 reraise_signal(int sig_num)
 {
+	if (getpid() == 1) {
+		cf_warning(AS_AS, "pid 1 received signal %d - exiting", sig_num);
+		_exit(1);
+	}
+
 	set_handler(sig_num, SIG_DFL);
 	raise(sig_num);
 }
