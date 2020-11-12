@@ -221,6 +221,11 @@ as_partition_balance_revert_to_orphan()
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
+		ns->replication_factor = 0;
+		ns->cluster_size = 0;
+		ns->active_size = 0;
+		ns->is_quiesced = false;
+
 		client_replica_maps_clear(ns);
 
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
