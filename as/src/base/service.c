@@ -37,9 +37,11 @@
 #include <unistd.h>
 #include <zlib.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
@@ -116,14 +118,15 @@ static void add_localhost(cf_serv_cfg* serv_cfg, cf_sock_owner owner);
 // Accept client connections.
 static void* run_accept(void* udata);
 
-// Assign client connections to threads.
+// Assign connections to threads.
 static void assign_socket(as_file_handle* fd_h);
 static uint32_t select_sid(void);
 static uint32_t select_sid_pinned(cf_topo_cpu_index i_cpu);
 static uint32_t select_sid_adq(cf_topo_napi_id id);
+static uint32_t select_sid_specified(const cf_digest* d, uint32_t max_threads);
 static void schedule_redistribution(void);
 
-// Demarshal client requests.
+// Demarshal requests.
 static void* run_service(void* udata);
 static void stop_service(thread_ctx* ctx);
 static void service_release_file_handle(as_file_handle* fd_h);
@@ -284,12 +287,16 @@ as_service_rearm(as_file_handle* fd_h)
 	rearm(fd_h, EPOLLIN);
 }
 
+// Note - for now ignore_pin is not completely independent of the other
+// parameters - if ignore_pin is false we ignore d and max_threads.
 void
-as_service_enqueue_internal(as_transaction* tr)
+as_service_enqueue_internal_raw(as_transaction* tr, const cf_digest* d,
+		uint32_t max_threads, bool ignore_pin)
 {
 	while (true) {
-		uint32_t sid = as_config_is_cpu_pinned() ?
-				select_sid_pinned(cf_topo_current_cpu()) : select_sid();
+		uint32_t sid = ignore_pin || ! as_config_is_cpu_pinned() ?
+				select_sid_specified(d, max_threads) :
+				select_sid_pinned(cf_topo_current_cpu());
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -541,6 +548,24 @@ static uint32_t
 select_sid_adq(cf_topo_napi_id id)
 {
 	return id == 0 ? select_sid() : id % g_config.n_service_threads;
+}
+
+static uint32_t
+select_sid_specified(const cf_digest* d, uint32_t max_threads)
+{
+	uint32_t n_service_threads = as_load_uint32(&g_config.n_service_threads);
+
+	if (max_threads == 0 || max_threads > n_service_threads) {
+		max_threads = n_service_threads;
+	}
+
+	if (d != NULL) {
+		return *(uint32_t*)&d->digest[DIGEST_RAND_BASE_BYTE] % max_threads;
+	}
+
+	static uint32_t rr = 0;
+
+	return rr++ % max_threads;
 }
 
 static void

@@ -679,6 +679,7 @@ typedef enum {
 	CASE_XDR_DC_AUTH_PASSWORD_FILE,
 	CASE_XDR_DC_AUTH_USER,
 	CASE_XDR_DC_CONNECTOR,
+	CASE_XDR_DC_MAX_USED_SERVICE_THREADS,
 	CASE_XDR_DC_PERIOD_MS,
 	CASE_XDR_DC_TLS_NAME,
 	CASE_XDR_DC_USE_ALTERNATE_ADDRESS,
@@ -1212,6 +1213,7 @@ const cfg_opt XDR_DC_OPTS[] = {
 		{ "auth-password-file",				CASE_XDR_DC_AUTH_PASSWORD_FILE },
 		{ "auth-user",						CASE_XDR_DC_AUTH_USER },
 		{ "connector",						CASE_XDR_DC_CONNECTOR},
+		{ "max-used-service-threads",		CASE_XDR_DC_MAX_USED_SERVICE_THREADS },
 		{ "period-ms",						CASE_XDR_DC_PERIOD_MS },
 		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
 		{ "use-alternate-access-address",	CASE_XDR_DC_USE_ALTERNATE_ADDRESS },
@@ -3733,6 +3735,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_CONNECTOR:
 				dc_cfg->connector = cfg_bool(&line);
+				break;
+			case CASE_XDR_DC_MAX_USED_SERVICE_THREADS:
+				dc_cfg->max_used_service_threads = cfg_u32(&line, 0, MAX_SERVICE_THREADS);
 				break;
 			case CASE_XDR_DC_PERIOD_MS:
 				dc_cfg->period_us = 1000 * cfg_u32(&line, AS_XDR_MIN_PERIOD_MS, AS_XDR_MAX_PERIOD_MS);
