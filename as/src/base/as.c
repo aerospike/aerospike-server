@@ -432,6 +432,10 @@ as_run(int argc, char **argv)
 
 	cf_info(AS_AS, "initiating clean shutdown ...");
 
+	// If this node was not quiesced and storage shutdown takes very long (e.g.
+	// flushing pmem index), best to get kicked out of the cluster quickly.
+	as_hb_shutdown();
+
 	if (! as_storage_shutdown(instance)) {
 		cf_warning(AS_AS, "failed clean shutdown - exiting");
 		_exit(1);
