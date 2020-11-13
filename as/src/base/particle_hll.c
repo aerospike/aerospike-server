@@ -1227,7 +1227,7 @@ hll_modify_op_union(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb)
 	(void)rb;
 
 	uint32_t n_hmhs = op->n_elements;
-	const hll_t* hmhs[n_hmhs];
+	const hll_t* hmhs[n_hmhs + 1];
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
 		hmhs[i] = (hll_t*)op->elements[i].buf;
