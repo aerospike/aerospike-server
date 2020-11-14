@@ -701,19 +701,6 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 
 			cf_debug(AS_EXP, "op_code %lu", op_code);
 
-			if (type == MSGPACK_TYPE_MAP) {
-				uint32_t count;
-
-				if (! msgpack_buf_get_map_ele_count(mp.buf + mp.offset,
-						mp.buf_sz - mp.offset, &count)) {
-					cf_warning(AS_EXP, "invalid instruction at offset %u",
-							mp.offset);
-					return NULL;
-				}
-
-				counter += 2 * count;
-			}
-
 			if (type == MSGPACK_TYPE_BYTES) {
 				uint32_t temp_sz;
 				const uint8_t* buf = msgpack_get_bin(&mp, &temp_sz);
@@ -2393,6 +2380,7 @@ eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		ret_val->r_bytes.sz = ((op_value_blob*)ob)->value_sz;
 		break;
 	case VOP_VALUE_LIST:
+	case VOP_VALUE_MSGPACK:
 		ret_val->type = RT_MSGPACK;
 		ret_val->r_bytes.contents = ((op_value_blob*)ob)->value;
 		ret_val->r_bytes.sz = ((op_value_blob*)ob)->value_sz;
