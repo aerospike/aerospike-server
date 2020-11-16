@@ -278,7 +278,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	rr.rsv = &rsv;
 
 	// Do XDR write if the write is a non-XDR write or forwarding is enabled.
-	bool do_xdr_write = (info & RW_INFO_XDR) == 0 || rr.xdr_write ||
+	bool do_xdr_write = (info & RW_INFO_XDR) == 0 || ! rr.xdr_write ||
 			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes;
 
 	// If source didn't touch sindex, may not need to touch it locally.
