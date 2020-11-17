@@ -206,7 +206,7 @@ static void udf_cask_get_metadata_cb(const cf_vector *items, void *udata)
 
 	unsigned char   hash[SHA_DIGEST_LENGTH];
 	// hex string to be returned to the client
-	unsigned char   sha1_hex_buff[CF_SHA_HEX_BUFF_LEN];
+	unsigned char   sha1_hex_buff[CF_SHA_HEX_BUFF_LEN + 1];
 	// Currently just return directly for LUA
 	uint8_t udf_type = AS_UDF_TYPE_LUA;
 
