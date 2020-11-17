@@ -386,8 +386,11 @@ new_msg_w_extra_field(const cl_msg* msgp, const as_msg_field* f)
 	size_t extra_sz = sizeof(f->field_sz) + f->field_sz;
 	cl_msg* new_msgp = cf_malloc(old_sz + extra_sz);
 
-	memcpy(new_msgp, msgp, old_sz);
-	memcpy((uint8_t*)new_msgp + old_sz, f, extra_sz);
+	// Insert as first field, in case there are bin-ops.
+	memcpy(new_msgp, msgp, sizeof(cl_msg));
+	memcpy(new_msgp + sizeof(cl_msg), f, extra_sz);
+	memcpy(new_msgp + sizeof(cl_msg) + extra_sz, msgp + sizeof(cl_msg),
+			old_sz - sizeof(cl_msg));
 
 	new_msgp->proto.sz += extra_sz;
 	new_msgp->msg.n_fields++;
