@@ -682,7 +682,7 @@ typedef enum {
 	CASE_XDR_DC_MAX_USED_SERVICE_THREADS,
 	CASE_XDR_DC_PERIOD_MS,
 	CASE_XDR_DC_TLS_NAME,
-	CASE_XDR_DC_USE_ALTERNATE_ADDRESS,
+	CASE_XDR_DC_USE_ALTERNATE_ACCESS_ADDRESS,
 
 	// XDR DC authentication mode (value tokens):
 	CASE_XDR_DC_AUTH_MODE_INTERNAL,
@@ -1216,7 +1216,7 @@ const cfg_opt XDR_DC_OPTS[] = {
 		{ "max-used-service-threads",		CASE_XDR_DC_MAX_USED_SERVICE_THREADS },
 		{ "period-ms",						CASE_XDR_DC_PERIOD_MS },
 		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
-		{ "use-alternate-access-address",	CASE_XDR_DC_USE_ALTERNATE_ADDRESS },
+		{ "use-alternate-access-address",	CASE_XDR_DC_USE_ALTERNATE_ACCESS_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -3745,7 +3745,7 @@ as_config_init(const char* config_file)
 			case CASE_XDR_DC_TLS_NAME:
 				dc_cfg->tls_our_name = cfg_strdup_no_checks(&line);
 				break;
-			case CASE_XDR_DC_USE_ALTERNATE_ADDRESS:
+			case CASE_XDR_DC_USE_ALTERNATE_ACCESS_ADDRESS:
 				dc_cfg->use_alternate_access_address = cfg_bool(&line);
 				break;
 			case CASE_CONTEXT_END:
