@@ -673,7 +673,7 @@ typedef enum {
 	// XDR (remote) DC options:
 	// Normally visible, in canonical configuration file order:
 	CASE_XDR_DC_NODE_ADDRESS_PORT,
-	CASE_XDR_DC_NAMESPACE,
+	CASE_XDR_DC_NAMESPACE_BEGIN,
 	// Normally hidden:
 	CASE_XDR_DC_AUTH_MODE,
 	CASE_XDR_DC_AUTH_PASSWORD_FILE,
@@ -1208,7 +1208,7 @@ const cfg_opt XDR_OPTS[] = {
 
 const cfg_opt XDR_DC_OPTS[] = {
 		{ "node-address-port",				CASE_XDR_DC_NODE_ADDRESS_PORT },
-		{ "namespace",						CASE_XDR_DC_NAMESPACE },
+		{ "namespace",						CASE_XDR_DC_NAMESPACE_BEGIN },
 		{ "auth-mode",						CASE_XDR_DC_AUTH_MODE },
 		{ "auth-password-file",				CASE_XDR_DC_AUTH_PASSWORD_FILE },
 		{ "auth-user",						CASE_XDR_DC_AUTH_USER },
@@ -3705,7 +3705,7 @@ as_config_init(const char* config_file)
 			case CASE_XDR_DC_NODE_ADDRESS_PORT:
 				as_xdr_startup_add_seed(dc_cfg, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, true), cfg_strdup_val3_no_checks(&line, false));
 				break;
-			case CASE_XDR_DC_NAMESPACE:
+			case CASE_XDR_DC_NAMESPACE_BEGIN:
 				dc_ns_cfg = as_xdr_startup_create_dc_ns_cfg(line.val_tok_1);
 				cf_vector_append_ptr(dc_cfg->ns_cfg_v, dc_ns_cfg);
 				cfg_begin_context(&state, XDR_DC_NAMESPACE);
