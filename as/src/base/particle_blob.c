@@ -210,9 +210,9 @@ static bool bits_read_op_get_integer(const bits_op* op, const uint8_t* from, as_
 
 static void lshift(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes);
 static void rshift(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes);
-static void rshift_with_or(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes);
-static void rshift_with_xor(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes);
-static void rshift_with_and(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes);
+static void rshift_with_or(const bits_op* op, uint8_t* to, const uint8_t* from);
+static void rshift_with_xor(const bits_op* op, uint8_t* to, const uint8_t* from);
+static void rshift_with_and(const bits_op* op, uint8_t* to, const uint8_t* from);
 static uint64_t load_int(const bits_op* op, const uint8_t* from, uint32_t n_bytes);
 static bool handle_signed_overflow(uint32_t n_bits, bool is_saturate, uint64_t load, uint64_t value, uint64_t* result);
 static void store_int(const bits_op* op, uint8_t* to, uint64_t value, uint32_t n_bytes);
@@ -264,7 +264,7 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 { \
 	uint32_t n_shift = (uint32_t)op->value; \
 	const uint8_t* buf = &op->buf[0]; \
-	const uint8_t* end = &op->buf[n_bytes]; \
+	const uint8_t* end = &op->buf[(op->size + 7) / 8]; \
 	uint32_t r8 = n_shift % 8; \
 	uint32_t l8 = 8 - r8; \
 	uint32_t l64 = 64 - r8; \
@@ -312,6 +312,8 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 		*to++ = (uint8_t)((((*(buf - 1) << l8) | (*buf >> r8))) _bop *from++); \
 		buf++; \
 	} \
+	\
+	*to = (uint8_t)((*(buf - 1) << l8) _bop *from); \
 }
 
 #define BITS_MODIFY_OP_ENTRY(_op, _op_fn, _prep_fn, _flags, _min_args, \
@@ -1761,7 +1763,7 @@ bits_modify_op_or(const bits_op* op, uint8_t* to, const uint8_t* from,
 		.buf = op->buf
 	};
 
-	rshift_with_or(&cmd, to, from, n_bytes);
+	rshift_with_or(&cmd, to, from);
 	restore_ends(op, to, from, n_bytes);
 
 	return true;
@@ -1777,7 +1779,7 @@ bits_modify_op_xor(const bits_op* op, uint8_t* to, const uint8_t* from,
 		.buf = op->buf
 	};
 
-	rshift_with_xor(&cmd, to, from, n_bytes);
+	rshift_with_xor(&cmd, to, from);
 	restore_ends(op, to, from, n_bytes);
 
 	return true;
@@ -1793,7 +1795,7 @@ bits_modify_op_and(const bits_op* op, uint8_t* to, const uint8_t* from,
 		.buf = op->buf
 	};
 
-	rshift_with_and(&cmd, to, from, n_bytes);
+	rshift_with_and(&cmd, to, from);
 	restore_ends(op, to, from, n_bytes);
 
 	return true;
@@ -2268,22 +2270,19 @@ rshift(const bits_op* op, uint8_t* to, const uint8_t* from, uint32_t n_bytes)
 }
 
 static void
-rshift_with_or(const bits_op* op, uint8_t* to, const uint8_t* from,
-		uint32_t n_bytes)
+rshift_with_or(const bits_op* op, uint8_t* to, const uint8_t* from)
 {
 	RSHIFT_WITH_OP(|)
 }
 
 static void
-rshift_with_xor(const bits_op* op, uint8_t* to, const uint8_t* from,
-		uint32_t n_bytes)
+rshift_with_xor(const bits_op* op, uint8_t* to, const uint8_t* from)
 {
 	RSHIFT_WITH_OP(^)
 }
 
 static void
-rshift_with_and(const bits_op* op, uint8_t* to, const uint8_t* from,
-		uint32_t n_bytes)
+rshift_with_and(const bits_op* op, uint8_t* to, const uint8_t* from)
 {
 	RSHIFT_WITH_OP(&)
 }
