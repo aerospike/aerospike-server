@@ -331,7 +331,9 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 		buf++; \
 	} \
 	\
-	*to = (uint8_t)((*(buf - 1) << l8) _bop *from); \
+	if (op->size + n_shift > 8) { \
+		*to = (uint8_t)((*(buf - 1) << l8) _bop *from); \
+	} \
 }
 
 #define BITS_MODIFY_OP_ENTRY(_op, _op_fn, _prep_fn, _flags, _min_args, \
