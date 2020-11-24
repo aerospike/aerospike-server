@@ -311,7 +311,7 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 		buf++; \
 	} \
 	\
-	if (op->size + n_shift > 8) { \
+	if ((op->size % 8) + n_shift > 8) { \
 		*to = (uint8_t)((*(buf - 1) << l8) _bop *from); \
 	} \
 }
