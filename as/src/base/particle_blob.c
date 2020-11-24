@@ -277,10 +277,10 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 
 #define RSHIFT_WITH_OP(_bop) \
 { \
-	uint32_t n_shift = (uint32_t)op->value; \
+	uint32_t n_op_bytes = (op->size + 7) / 8; \
 	const uint8_t* buf = &op->buf[0]; \
-	const uint8_t* end = &op->buf[(op->size + 7) / 8]; \
-	uint32_t r8 = n_shift % 8; \
+	const uint8_t* end = &op->buf[n_op_bytes]; \
+	uint32_t r8 = (uint32_t)op->value; \
 	uint32_t l8 = 8 - r8; \
 	uint32_t l64 = 64 - r8; \
 	\
@@ -328,7 +328,7 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 		buf++; \
 	} \
 	\
-	if ((op->size % 8) + n_shift > 8) { \
+	if ((r8 + op->size + 7) / 8 > n_op_bytes) { \
 		*to = (uint8_t)((*(buf - 1) << l8) _bop *from); \
 	} \
 }
