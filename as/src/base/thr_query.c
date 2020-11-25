@@ -2760,7 +2760,7 @@ query_th(void* q_to_wait_on)
 
 		query_generator(qtr);
 	}
-	return AS_QUERY_OK;
+	return NULL;
 }
 
 static cf_vector *
@@ -3401,7 +3401,7 @@ as_mon_jobstat *
 as_query_get_jobstat_all(int * size)
 {
 	*size = cf_rchash_get_size(g_query_job_hash);
-	if(*size == 0) return AS_QUERY_OK;
+	if(*size == 0) return NULL;
 
 	as_mon_jobstat     * job_stats;
 	query_jobstat     job_pool;

@@ -525,7 +525,6 @@ extern void as_sindex_gconfig_default(struct as_config_s *c);
 extern int  as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
 			bool is_create, bool *is_smd_op, char * cmd);
 void        as_sindex__config_default(as_sindex *si);
-void        as_sindex_ticker_start(as_namespace * ns, as_sindex * si);
 void        as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint64_t start_time);
 void        as_sindex_ticker_done(as_namespace * ns, as_sindex * si, uint64_t start_time);
 // **************************************************************************************************

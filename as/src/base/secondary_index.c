@@ -2429,7 +2429,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		// TODO - Refactor these into generic conversion from
 		// buffer to as_sindex_bin_data functions. Can be used
 		// by write code path as well.
-		if ((type == AS_PARTICLE_TYPE_INTEGER)) {
+		if (type == AS_PARTICLE_TYPE_INTEGER) {
 			// get start point
 			uint32_t startl  = ntohl(*((uint32_t *)data));
 			data            += sizeof(uint32_t);
@@ -4319,14 +4319,6 @@ as_sindex_smd_accept_cb(const cf_vector *items, as_smd_accept_type accept_type)
 // ************************************************************************************************
 // ************************************************************************************************
 //                                         SINDEX TICKER
-// Sindex ticker start
-void
-as_sindex_ticker_start(as_namespace * ns, as_sindex * si)
-{
-	cf_info(AS_SINDEX, "Sindex-ticker start: ns=%s si=%s job=%s", ns->name ? ns->name : "<all>",
-			si ? si->imd->iname : "<all>", si ? "SINDEX_POPULATE" : "SINDEX_POPULATEALL");
-
-}
 // Sindex ticker
 void
 as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint64_t start_time)

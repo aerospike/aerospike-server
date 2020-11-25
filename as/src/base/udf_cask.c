@@ -629,11 +629,6 @@ udf_cask_init()
 {
 	// Have to delete the existing files in the user path on startup
 	struct dirent   * entry         = NULL;
-	// opendir(NULL) seg-faults
-	if (!g_config.mod_lua.user_path)
-	{
-		cf_crash(AS_UDF, "cask init: null mod-lua user-path");
-	}
 
 	DIR *dir = opendir(g_config.mod_lua.user_path);
 	if ( dir == 0 ) {
