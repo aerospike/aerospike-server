@@ -473,11 +473,11 @@ msgpack_peek_type(const msgpack_in *mp)
 		if (*buf++ == 1) {
 			if (*buf++ == CMP_EXT_TYPE) {
 				if (*buf == CMP_WILDCARD) {
-					return AS_CMP_WILDCARD;
+					return MSGPACK_TYPE_CMP_WILDCARD;
 				}
 
 				if (*buf == CMP_INF) {
-					return AS_CMP_INF;
+					return MSGPACK_TYPE_CMP_INF;
 				}
 			}
 		}
