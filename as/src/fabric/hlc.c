@@ -358,8 +358,8 @@ as_hlc_send_timestamp_order(as_hlc_timestamp local_ts,
 		return AS_HLC_HAPPENS_AFTER;
 	}
 
-	// Compute the unceratinty window around the local receive timestamp.
-	uint64_t offset = abs(msg_ts->send_ts - msg_ts->recv_ts);
+	// Compute the uncertainty window around the local receive timestamp.
+	uint64_t offset = labs((int64_t)(msg_ts->send_ts - msg_ts->recv_ts));
 
 	if (local_ts > (msg_ts->recv_ts - offset)) {
 		// Local timestamp is in the uncertainty window. We cannot tell the
