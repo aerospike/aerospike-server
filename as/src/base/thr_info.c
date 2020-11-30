@@ -974,58 +974,51 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 
 	if (as_info_parameter_get(params, "host-port-list", host_port_list,
 				  &host_port_list_len) == 0) {
-		if (0 != strcmp(host_port_list, "all")) {
-			char* save_ptr = NULL;
-			int port = -1;
-			char* host_port =
-			  strtok_r(host_port_list, ",", &save_ptr);
+		char* save_ptr = NULL;
+		int port = -1;
+		char* host_port = strtok_r(host_port_list, ",", &save_ptr);
 
-			while (host_port != NULL) {
-				char* host_port_delim = ":";
-				if (*host_port == '[') {
-					// Parse IPv6 address differently.
-					host_port++;
-					host_port_delim = "]";
-				}
-
-				char* host_port_save_ptr = NULL;
-				char* host =
-				  strtok_r(host_port, host_port_delim, &host_port_save_ptr);
-
-				if (host == NULL) {
-					cf_warning(AS_INFO, "tip clear command: invalid host:port string: %s", host_port);
-					success = false;
-					break;
-				}
-
-				char* port_str =
-				  strtok_r(NULL, host_port_delim, &host_port_save_ptr);
-
-				if (port_str != NULL && *port_str == ':') {
-					// IPv6 case
-					port_str++;
-				}
-				if (port_str == NULL ||
-					0 != cf_str_atoi(port_str, &port)) {
-					cf_warning(AS_INFO, "tip clear command: port must be an integer in: %s", port_str);
-					success = false;
-					break;
-				}
-
-				if (as_hb_mesh_tip_clear(host, port) == -1) {
-					success = false;
-					not_found++;
-					cf_warning(AS_INFO, "seed node %s:%d does not exist", host, port);
-				} else {
-					cleared++;
-				}
-
-				host_port = strtok_r(NULL, ",", &save_ptr);
+		while (host_port != NULL) {
+			char* host_port_delim = ":";
+			if (*host_port == '[') {
+				// Parse IPv6 address differently.
+				host_port++;
+				host_port_delim = "]";
 			}
-		} else {
-			if (as_hb_mesh_tip_clear_all(&cleared)) {
+
+			char* host_port_save_ptr = NULL;
+			char* host =
+					strtok_r(host_port, host_port_delim, &host_port_save_ptr);
+
+			if (host == NULL) {
+				cf_warning(AS_INFO, "tip clear command: invalid host:port string: %s", host_port);
 				success = false;
+				break;
 			}
+
+			char* port_str =
+					strtok_r(NULL, host_port_delim, &host_port_save_ptr);
+
+			if (port_str != NULL && *port_str == ':') {
+				// IPv6 case
+				port_str++;
+			}
+			if (port_str == NULL ||
+					0 != cf_str_atoi(port_str, &port)) {
+				cf_warning(AS_INFO, "tip clear command: port must be an integer in: %s", port_str);
+				success = false;
+				break;
+			}
+
+			if (as_hb_mesh_tip_clear(host, port) == -1) {
+				success = false;
+				not_found++;
+				cf_warning(AS_INFO, "seed node %s:%d does not exist", host, port);
+			} else {
+				cleared++;
+			}
+
+			host_port = strtok_r(NULL, ",", &save_ptr);
 		}
 	} else {
 		success = false;

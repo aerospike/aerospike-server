@@ -480,6 +480,4 @@ int as_hb_mesh_tip(char* host, int port, bool tls);
 
 int as_hb_mesh_tip_clear(char* host, int port);
 
-int as_hb_mesh_tip_clear_all(uint32_t* cleared);
-
 void as_hb_config_validate();
