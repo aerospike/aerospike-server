@@ -449,7 +449,7 @@ udf_record_cache_set(udf_record * urecord, const char * name, as_val * value,
  * Description:
  * 		Expectation is the record is already open. No checks are
  * 		performed in this function. Caller needs to make sure the
- * 		record is good to read e.g binname etc.
+ * 		record is good to read e.g bin name etc.
  *
  * 		NB: as_val which is returned is allocated one. It is callers
  * 		    responsibility to free else in case it is passed on to
