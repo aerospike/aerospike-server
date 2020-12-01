@@ -687,7 +687,7 @@ param_check_w_bin(const as_rec* rec, const char* name)
 			return false;
 		}
 
-		return 0;
+		return true;
 	}
 
 	if (*name == 0) {
