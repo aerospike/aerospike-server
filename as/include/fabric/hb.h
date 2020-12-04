@@ -432,7 +432,7 @@ uint32_t as_hb_node_timeout_get();
 
 int as_hb_connect_timeout_set(uint32_t timeout_ms);
 
-bool as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size);
+void as_hb_cluster_nodes_limit_set(uint32_t limit);
 
 /*
  * -----------------------------------------------------------------

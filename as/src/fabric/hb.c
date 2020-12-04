@@ -1507,6 +1507,11 @@ typedef struct as_hb_seed_host_list_udata_s
 static as_hb g_hb;
 
 /**
+ * Global feature-key determined cluster nodes limit.
+ */
+static uint32_t g_hb_cluster_nodes_limit = 0;
+
+/**
  * Global heartbeat events listener instance.
  */
 static as_hb_external_events g_hb_event_listeners;
@@ -2328,6 +2333,15 @@ Exit:
 	cf_dyn_buf_append_char(db, ';');
 }
 
+/**
+ * Sets the cluster nodes limit based on feature key.
+ */
+void
+as_hb_cluster_nodes_limit_set(uint32_t limit)
+{
+	g_hb_cluster_nodes_limit = limit;
+}
+
 /*
  * -----------------------------------------------------------------
  * Mesh mode public API
@@ -3126,6 +3140,11 @@ config_mcsize()
 
 	// Ensure we are always upper bounded by the absolute max cluster size.
 	int supported_cluster_size = MIN(ASC, mode_cluster_size);
+
+	if (g_hb_cluster_nodes_limit != 0 &&
+			supported_cluster_size > (int)g_hb_cluster_nodes_limit) {
+		supported_cluster_size = (int)g_hb_cluster_nodes_limit;
+	}
 
 	DETAIL("supported cluster size %d", supported_cluster_size);
 	return supported_cluster_size;
