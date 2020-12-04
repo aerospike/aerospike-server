@@ -80,6 +80,12 @@ as_storage_load_ticker_pmem(const as_namespace* ns)
 }
 
 void
+as_storage_activate_pmem(as_namespace* ns)
+{
+	pmem_crash_ce();
+}
+
+void
 as_storage_start_tomb_raider_pmem(as_namespace* ns)
 {
 	pmem_crash_ce();

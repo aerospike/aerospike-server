@@ -166,6 +166,29 @@ as_storage_load()
 }
 
 //--------------------------------------
+// as_storage_activate
+//
+
+typedef void (*as_storage_activate_fn)(as_namespace *ns);
+static const as_storage_activate_fn as_storage_activate_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL,
+	as_storage_activate_pmem,
+	as_storage_activate_ssd
+};
+
+void
+as_storage_activate()
+{
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace *ns = g_config.namespaces[ns_ix];
+
+		if (as_storage_activate_table[ns->storage_type]) {
+			as_storage_activate_table[ns->storage_type](ns);
+		}
+	}
+}
+
+//--------------------------------------
 // as_storage_start_tomb_raider
 //
 

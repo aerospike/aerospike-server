@@ -588,6 +588,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
 	CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER,
+	CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN,
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
 	// Obsoleted:
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
@@ -1103,6 +1104,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
 		{ "read-page-cache",				CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE },
 		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
+		{ "sindex-startup-device-scan",		CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
 		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
@@ -3380,6 +3382,9 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->storage_serialize_tomb_raider = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN:
+				ns->storage_sindex_startup_device_scan = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP:
 				cfg_enterprise_only(&line);
 				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
@@ -3402,6 +3407,9 @@ as_config_init(const char* config_file)
 				}
 				if (ns->storage_cache_replica_writes && ns->storage_data_in_memory) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'cache-replica-writes' and 'data-in-memory'", ns->name);
+				}
+				if (ns->storage_sindex_startup_device_scan && ns->storage_data_in_memory) {
+					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'sindex-startup-device-scan' and 'data-in-memory'", ns->name);
 				}
 				if (ns->storage_commit_to_device && ns->storage_disable_odsync) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);

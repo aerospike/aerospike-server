@@ -354,12 +354,14 @@ as_run(int argc, char **argv)
 	cf_process_drop_startup_caps();
 
 	// Activate the storage system. For cold starts and cool restarts, this
-	// includes full drive scans - this may take several hours. The defrag
-	// subsystem starts operating at the end of this call.
+	// includes full drive scans - this may take several hours.
 	as_storage_load();
 
 	// Populate all secondary indexes. This may block for a long time.
 	as_sindex_boot_populateall();
+
+	// The defrag subsystem starts operating here.
+	as_storage_activate();
 
 	cf_info(AS_AS, "initializing services...");
 

@@ -808,6 +808,7 @@ struct as_namespace_s {
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
 	bool			storage_read_page_cache;
 	bool			storage_serialize_tomb_raider; // relevant only for enterprise edition
+	bool			storage_sindex_startup_device_scan;
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 
 	uint32_t		sindex_num_partitions;

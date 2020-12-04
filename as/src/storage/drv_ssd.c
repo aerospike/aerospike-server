@@ -2651,16 +2651,11 @@ run_ssd_cold_start(void *udata)
 
 		ns->loading_records = false;
 		ssd_cold_start_drop_cenotaphs(ns);
-		ssd_load_wblock_queues(ssds);
 
 		cf_mutex_destroy(&ns->cold_start_evict_lock);
 
 		as_truncate_list_cenotaphs(ns);
 		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
-
-		ssd_start_maintenance_threads(ssds);
-		ssd_start_write_threads(ssds);
-		ssd_start_defrag_threads(ssds);
 
 		void *_t = NULL;
 
@@ -2698,6 +2693,221 @@ start_loading_records(drv_ssds *ssds, cf_queue *complete_q)
 				ns->cold_start ? run_ssd_cold_start : run_ssd_cool_start,
 						(void*)lri);
 	}
+}
+
+
+//==========================================================
+// Sindex startup utilities.
+//
+
+static void* run_si_startup(void* udata);
+static void si_startup_sweep(drv_ssds* ssds, drv_ssd* ssd);
+static void si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd,
+		as_flat_record* flat, uint64_t rblock_id, uint32_t record_size);
+
+static void*
+run_si_startup(void* udata)
+{
+	drv_ssd* ssd = (drv_ssd*)udata;
+	drv_ssds* ssds = (drv_ssds*)ssd->ns->storage_private;
+
+	// Reuse counter - may expire more records while building sindex.
+	ssd->record_add_expired_counter = 0;
+
+	ssds->si_start_ms = cf_getms();
+
+	si_startup_sweep(ssds, ssd);
+
+	cf_info(AS_DRV_SSD, "device %s: sindex sweep complete: expired %lu",
+			ssd->name, ssd->record_add_expired_counter);
+
+	if (as_aaf_uint32(&ssds->si_n_ssds_remaining, -1) == 0) {
+		as_sindex_ticker_done(ssd->ns, NULL, ssds->si_start_ms);
+		as_sindex_boot_populateall_done(ssd->ns);
+	}
+
+	return NULL;
+}
+
+static void
+si_startup_sweep(drv_ssds* ssds, drv_ssd* ssd)
+{
+	size_t wblock_size = ssd->write_block_size;
+
+	uint8_t* buf = cf_valloc(wblock_size);
+	int fd = ssd_fd_get(ssd);
+	uint64_t file_offset = DRV_HEADER_SIZE;
+
+	bool prefetch = cf_arenax_want_prefetch(ssd->ns->arena);
+
+	// Loop over all wblocks (excluding header) in device.
+	for (ssd->sweep_wblock_id = ssd->first_wblock_id;
+			ssd->sweep_wblock_id < ssd->n_wblocks;
+			ssd->sweep_wblock_id++, file_offset += wblock_size) {
+
+		// Don't read unused wblocks.
+		if (ssd->wblock_state[ssd->sweep_wblock_id].inuse_sz == 0) {
+			continue;
+		}
+
+		if (! pread_all(fd, buf, wblock_size, (off_t)file_offset)) {
+			cf_crash(AS_DRV_SSD, "%s: read failed: errno %d (%s)", ssd->name,
+					errno, cf_strerror(errno));
+		}
+
+		if (prefetch) {
+			ssd_prefetch_wblock(ssd, file_offset, buf);
+		}
+
+		size_t indent = 0; // current offset within the wblock, in bytes
+
+		while (indent < wblock_size) {
+			as_flat_record* flat = (as_flat_record*)&buf[indent];
+
+			if (! prefetch) {
+				ssd_decrypt(ssd, file_offset + indent, flat);
+			}
+
+			// Look for record magic.
+			if (flat->magic != AS_FLAT_MAGIC) {
+				// Should always find a record at beginning of used wblock.
+				cf_assert(indent != 0, AS_DRV_SSD, "%s: no magic at beginning of used wblock %u",
+						ssd->name, ssd->sweep_wblock_id);
+
+				// Nothing more in this wblock, but keep looking for magic -
+				// necessary if we want to be able to increase write-block-size
+				// across restarts.
+				indent += RBLOCK_SIZE;
+				continue; // try next rblock
+			}
+
+			uint32_t record_size = N_RBLOCKS_TO_SIZE(flat->n_rblocks);
+
+			if (record_size < DRV_RECORD_MIN_SIZE) {
+				cf_warning(AS_DRV_SSD, "%s: record too small: size %u",
+						ssd->name, record_size);
+				indent += RBLOCK_SIZE;
+				continue; // try next rblock
+			}
+
+			size_t next_indent = indent + record_size;
+
+			// Sanity-check for wblock overruns.
+			if (next_indent > wblock_size) {
+				cf_warning(AS_DRV_SSD, "%s: record crosses wblock boundary: size %u",
+						ssd->name, record_size);
+				break; // skip this record, try next wblock
+			}
+
+			// Found a record - verify it's in the index, and process it.
+			si_startup_do_record(ssds, ssd, flat,
+					OFFSET_TO_RBLOCK_ID(file_offset + indent), record_size);
+
+			indent = next_indent;
+		}
+	}
+
+	ssd_fd_put(ssd, fd);
+	cf_free(buf);
+}
+
+static void
+si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
+		uint64_t rblock_id, uint32_t record_size)
+{
+	uint32_t pid = as_partition_getid(&flat->keyd);
+
+	// Ignore records in trees that we don't own.
+	if (! ssds->get_state_from_storage[pid]) {
+		return;
+	}
+
+	as_namespace* ns = ssds->ns;
+
+	const uint8_t* end = (const uint8_t*)flat + record_size;
+	as_flat_opt_meta opt_meta = { { 0 } };
+
+	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta,
+			ns->single_bin);
+
+	if (! p_read) {
+		cf_warning(AS_DRV_SSD, "bad metadata for %pD", &flat->keyd);
+		return;
+	}
+
+	if (! as_flat_decompress_buffer(&opt_meta.cm, ns->storage_write_block_size,
+			&p_read, &end)) {
+		cf_warning(AS_DRV_SSD, "bad compressed data for %pD", &flat->keyd);
+		return;
+	}
+
+	if (! ns->cold_start &&
+			! as_flat_check_packed_bins(p_read, end, opt_meta.n_bins,
+					ns->single_bin)) {
+		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
+		return;
+	}
+
+	as_partition* p = &ns->partitions[pid];
+
+	as_index_ref r_ref;
+
+	if (as_record_get(p->tree, &flat->keyd, &r_ref) != 0) {
+		return; // record not in index, move along
+	}
+
+	as_index* r = r_ref.r;
+
+	if (r->file_id != ssd->file_id || r->rblock_id != rblock_id) {
+		as_record_done(&r_ref, ns);
+		return; // not the current version of this record
+	}
+	// else - found the current version, load it into memory.
+
+	// Sanity check current version metadata.
+	if (r->n_rblocks != flat->n_rblocks ||
+			r->last_update_time != flat->last_update_time ||
+			r->generation != flat->generation ||
+			r->xdr_write != flat->xdr_write ||
+			r->xdr_tombstone != opt_meta.extra_flags.xdr_tombstone ||
+			r->xdr_nsup_tombstone != opt_meta.extra_flags.xdr_nsup_tombstone ||
+			r->void_time != opt_meta.void_time) {
+		cf_warning(AS_DRV_SSD, "metadata mismatch - removing %pD", &flat->keyd);
+		as_index_delete(p->tree, &flat->keyd);
+		as_record_done(&r_ref, ns);
+		return;
+	}
+
+	// TODO - rethink - count things we don't look at bins for?
+	as_sindex_ticker(ns, NULL, as_aaf_uint64(&ssds->si_n_recs_read, 1),
+			ssds->si_start_ms);
+
+	// Skip records that have expired since resuming the index.
+	if (as_record_is_expired(r)) {
+		as_index_delete(p->tree, &flat->keyd);
+		as_record_done(&r_ref, ns);
+		ssd->record_add_expired_counter++;
+		return;
+	}
+
+	if (! record_has_sindex(r, ns)) {
+		as_record_done(&r_ref, ns);
+		return; // not in a sindex
+	}
+
+	// Load bins and particles, load sindex. We are NOT data-in-memory!
+
+	uint16_t n_bins = (uint16_t)opt_meta.n_bins;
+	as_bin bins[n_bins];
+
+	if (as_flat_unpack_bins(ns, p_read, end, n_bins, bins) < 0) {
+		cf_crash(AS_DRV_SSD, "unpack bins failed");
+	}
+
+	write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd, NULL, 0,
+			bins, n_bins);
+
+	as_record_done(&r_ref, ns);
 }
 
 
@@ -3410,12 +3620,6 @@ as_storage_load_ssd(as_namespace *ns, cf_queue *complete_q)
 	}
 	// else - fresh devices or warm restart, this namespace is ready to roll.
 
-	ssd_load_wblock_queues(ssds);
-
-	ssd_start_maintenance_threads(ssds);
-	ssd_start_write_threads(ssds);
-	ssd_start_defrag_threads(ssds);
-
 	void *_t = NULL;
 
 	cf_queue_push(complete_q, &_t);
@@ -3449,6 +3653,33 @@ as_storage_load_ticker_ssd(const as_namespace *ns)
 		cf_info(AS_DRV_SSD, "{%s} loaded: objects %lu tombstones %lu device-pcts (%s)",
 				ns->name, ns->n_objects, ns->n_tombstones, buf);
 	}
+}
+
+
+void
+as_storage_sindex_build_all_ssd(as_namespace* ns)
+{
+	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
+
+	ssds->si_n_ssds_remaining = ssds->n_ssds;
+	ssds->si_n_recs_read = 0;
+
+	for (int i = 0; i < ssds->n_ssds; i++) {
+		cf_thread_create_detached(run_si_startup, &ssds->ssds[i]);
+	}
+}
+
+
+void
+as_storage_activate_ssd(as_namespace *ns)
+{
+	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+
+	ssd_load_wblock_queues(ssds);
+
+	ssd_start_maintenance_threads(ssds);
+	ssd_start_write_threads(ssds);
+	ssd_start_defrag_threads(ssds);
 }
 
 

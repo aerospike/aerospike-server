@@ -1833,7 +1833,6 @@ as_sindex_boot_populateall()
 			// sindex, build it now.
 			as_sindex_populator_reserve_all(ns);
 			as_sbld_build_all(ns);
-			cf_info(AS_SINDEX, "Queuing namespace %s for sindex population ", ns->name);
 		} else {
 			// Data-in-memory (cold or cool restart) - already built sindex.
 			as_sindex_boot_populateall_done(ns);
@@ -1884,8 +1883,8 @@ as_sindex_boot_populateall_done(as_namespace *ns)
 		si->flag |= AS_SINDEX_FLAG_RACTIVE;
 	}
 	SINDEX_GWUNLOCK();
-	cf_queue_push(g_sindex_populateall_done_q, &ret);
 	cf_info(AS_SINDEX, "Namespace %s sindex population done", ns->name);
+	cf_queue_push(g_sindex_populateall_done_q, &ret);
 	return ret;
 }
 

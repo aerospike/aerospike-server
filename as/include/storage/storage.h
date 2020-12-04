@@ -166,6 +166,7 @@ extern uint64_t g_unique_data_size;
 void as_storage_cfg_init(struct as_namespace_s *ns);
 void as_storage_init();
 void as_storage_load();
+void as_storage_activate();
 void as_storage_start_tomb_raider();
 bool as_storage_shutdown(uint32_t instance);
 
@@ -240,6 +241,8 @@ void as_storage_cfg_init_ssd(struct as_namespace_s *ns);
 void as_storage_init_ssd(struct as_namespace_s *ns);
 void as_storage_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q); // table used directly in as_storage_init()
 void as_storage_load_ticker_ssd(const struct as_namespace_s *ns); // table used directly in as_storage_init()
+void as_storage_sindex_build_all_ssd(struct as_namespace_s *ns); // called directly without any table - TODO - add table?
+void as_storage_activate_ssd(struct as_namespace_s *ns);
 void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
 void as_storage_shutdown_ssd(struct as_namespace_s *ns);
 
@@ -283,6 +286,7 @@ void as_storage_cfg_init_pmem(struct as_namespace_s *ns);
 void as_storage_init_pmem(struct as_namespace_s *ns);
 void as_storage_load_pmem(struct as_namespace_s *ns, cf_queue *complete_q); // table used directly in as_storage_init()
 void as_storage_load_ticker_pmem(const struct as_namespace_s *ns); // table used directly in as_storage_init()
+void as_storage_activate_pmem(struct as_namespace_s* ns);
 void as_storage_start_tomb_raider_pmem(struct as_namespace_s* ns);
 void as_storage_shutdown_pmem(struct as_namespace_s* ns);
 

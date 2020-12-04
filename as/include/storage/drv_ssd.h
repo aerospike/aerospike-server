@@ -211,6 +211,11 @@ typedef struct drv_ssds_s {
 	// Used only at startup, set true if all devices are fresh.
 	bool all_fresh;
 
+	// Used only at startup if building sindexes via device scan.
+	uint64_t si_start_ms;
+	uint32_t si_n_ssds_remaining;
+	uint64_t si_n_recs_read;
+
 	cf_mutex			flush_lock;
 
 	int					n_ssds;

@@ -64,6 +64,7 @@
 #include "base/secondary_index.h"
 #include "base/stats.h"
 #include "fabric/partition.h"
+#include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
 
@@ -649,6 +650,18 @@ as_sbld_build(as_sindex* si)
 void
 as_sbld_build_all(as_namespace* ns)
 {
+	if (ns->storage_sindex_startup_device_scan) {
+		cf_info(AS_SINDEX, "Queuing namespace %s for sindex population by device scan",
+				ns->name);
+
+		// For now, no function table.
+		as_storage_sindex_build_all_ssd(ns);
+		return;
+	}
+
+	cf_info(AS_SINDEX, "Queuing namespace %s for sindex population by index scan",
+			ns->name);
+
 	sbld_job* job = sbld_job_create(ns, INVALID_SET_ID, NULL);
 
 	// Can't fail for this kind of job.
