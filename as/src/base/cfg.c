@@ -1214,7 +1214,7 @@ const cfg_opt XDR_DC_OPTS[] = {
 		{ "auth-mode",						CASE_XDR_DC_AUTH_MODE },
 		{ "auth-password-file",				CASE_XDR_DC_AUTH_PASSWORD_FILE },
 		{ "auth-user",						CASE_XDR_DC_AUTH_USER },
-		{ "connector",						CASE_XDR_DC_CONNECTOR},
+		{ "connector",						CASE_XDR_DC_CONNECTOR },
 		{ "max-used-service-threads",		CASE_XDR_DC_MAX_USED_SERVICE_THREADS },
 		{ "period-ms",						CASE_XDR_DC_PERIOD_MS },
 		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
