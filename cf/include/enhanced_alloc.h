@@ -1,7 +1,7 @@
 /*
  * enhanced_alloc.h
  *
- * Copyright (C) 2013-2017 Aerospike, Inc.
+ * Copyright (C) 2013-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
