@@ -2874,11 +2874,12 @@ query_setup_shared_msgp(as_query_transaction *qtr, as_transaction *tr)
 		case QUERY_TYPE_AGGR:
 			break;
 		case QUERY_TYPE_UDF_BG: {
+				as_msg* om = &tr->msgp->msg;
 				uint8_t info2 = AS_MSG_INFO2_WRITE |
-						(tr->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE);
+						(om->info2 & AS_MSG_INFO2_DURABLE_DELETE);
 
 				qtr->iudf_orig.msgp = as_msg_create_internal(qtr->ns->name, 0,
-						info2, 0, 0, NULL, 0);
+						info2, 0, om->record_ttl, 0, NULL, 0);
 			}
 			break;
 		case QUERY_TYPE_OPS_BG: {
@@ -2903,7 +2904,7 @@ query_setup_shared_msgp(as_query_transaction *qtr, as_transaction *tr)
 				uint8_t* ops = (uint8_t*)as_msg_op_iterate(om, NULL, &i);
 
 				qtr->iops_orig.msgp = as_msg_create_internal(qtr->ns->name, 0,
-						info2, info3, om->n_ops, ops,
+						info2, info3, om->record_ttl, om->n_ops, ops,
 						tr->msgp->proto.sz - (ops - (uint8_t*)om));
 			}
 			break;
