@@ -1607,11 +1607,12 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
+	as_msg* om = &tr->msgp->msg;
 	uint8_t info2 = AS_MSG_INFO2_WRITE |
-			(tr->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE);
+			(om->info2 & AS_MSG_INFO2_DURABLE_DELETE);
 
-	job->origin.msgp =
-			as_msg_create_internal(ns->name, 0, info2, 0, 0, NULL, 0);
+	job->origin.msgp = as_msg_create_internal(ns->name, 0, info2, 0,
+			om->record_ttl, 0, NULL, 0);
 
 	job->origin.cb = udf_bg_scan_tr_complete;
 	job->origin.udata = (void*)job;
@@ -1873,7 +1874,8 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 			(om->info3 & AS_MSG_INFO3_REPLACE_ONLY);
 
 	job->origin.msgp = as_msg_create_internal(ns->name, 0, info2, info3,
-			om->n_ops, ops, tr->msgp->proto.sz - (ops - (uint8_t*)om));
+			om->record_ttl, om->n_ops, ops,
+			tr->msgp->proto.sz - (ops - (uint8_t*)om));
 
 	job->origin.predexp = predexp;
 	job->origin.cb = ops_bg_scan_tr_complete;

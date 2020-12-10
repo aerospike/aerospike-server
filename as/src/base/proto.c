@@ -128,7 +128,8 @@ as_msg_swap_op(as_msg_op *op)
 // Will add more parameters (e.g. for set name) only as they become necessary.
 cl_msg *
 as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
-		uint8_t info3, uint16_t n_ops, uint8_t *ops, size_t ops_sz)
+		uint8_t info3, uint32_t record_ttl, uint16_t n_ops, uint8_t *ops,
+		size_t ops_sz)
 {
 	size_t ns_name_len = strlen(ns_name);
 
@@ -151,7 +152,7 @@ as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
 	m->unused = 0;
 	m->result_code = 0;
 	m->generation = 0;
-	m->record_ttl = 0;
+	m->record_ttl = record_ttl;
 	m->transaction_ttl = 0;
 	m->n_fields = 1;
 	m->n_ops = n_ops;
