@@ -687,8 +687,8 @@ uint8_t* as_proto_compress_alloc_xdr(const uint8_t* original, size_t* sz,
 uint32_t as_proto_uncompress(const as_comp_proto* cproto, as_proto** p_proto);
 
 cl_msg* as_msg_create_internal(const char* ns_name, uint8_t info1,
-		uint8_t info2, uint8_t info3, uint16_t n_ops, uint8_t* ops,
-		size_t ops_sz);
+		uint8_t info2, uint8_t info3, uint32_t record_ttl, uint16_t n_ops,
+		uint8_t* ops, size_t ops_sz);
 
 cl_msg* as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint32_t void_time, as_msg_op** ops, struct as_bin_s** bins,
