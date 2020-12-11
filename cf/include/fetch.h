@@ -37,6 +37,7 @@
 // Public API.
 //
 
+bool cf_fetch_is_env_path(const char* path);
 uint8_t* cf_fetch_bytes(const char* path, size_t* buf_sz_r);
 char* cf_fetch_string(const char* path);
 

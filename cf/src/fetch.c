@@ -87,6 +87,12 @@ is_env_b64_path(const char* path)
 // Public API.
 //
 
+bool
+cf_fetch_is_env_path(const char* path)
+{
+	return is_env_path(path) || is_env_b64_path(path);
+}
+
 // Caller must cf_free return value when done.
 uint8_t*
 cf_fetch_bytes(const char* path, size_t* size_r)
