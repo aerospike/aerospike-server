@@ -73,7 +73,7 @@ extern int as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp)
 // The info unit uses the fabric to communicate with the other members of the
 // cluster so it needs to register for different messages and create listener
 // threads, etc.
-extern int as_info_init();
+extern void as_info_init();
 
 // Needed by heartbeat:
 

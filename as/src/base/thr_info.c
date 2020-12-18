@@ -6670,7 +6670,7 @@ extern const char aerospike_build_type[];
 extern const char aerospike_build_os[];
 extern const char aerospike_build_features[];
 
-int
+void
 as_info_init()
 {
 	// create worker threads
@@ -6879,6 +6879,4 @@ as_info_init()
 	for (uint32_t i = 0; i < g_config.n_info_threads; i++) {
 		cf_thread_create_detached(thr_info_fn, NULL);
 	}
-
-	return(0);
 }
