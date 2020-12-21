@@ -843,7 +843,8 @@ connect_socket(const cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 	int32_t efd = epoll_create(1);
 
 	if (efd < 0) {
-		cf_crash(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
+		cf_ticker_warning(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
+		goto cleanup0;
 	}
 
 	struct epoll_event event = { .data.fd = sock->fd, .events = EPOLLOUT };
