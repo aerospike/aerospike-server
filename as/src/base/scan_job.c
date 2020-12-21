@@ -35,6 +35,7 @@
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_thread.h"
+#include "dynbuf.h"
 #include "log.h"
 
 #include "base/cfg.h"
@@ -162,6 +163,7 @@ as_scan_job_run(as_scan_job* _job)
 		}
 	}
 
+	cf_buf_builder* bb = NULL;
 	uint32_t pid;
 
 	while ((pid = as_faa_uint32(&_job->pid, 1)) < AS_PARTITIONS) {
@@ -184,12 +186,12 @@ as_scan_job_run(as_scan_job* _job)
 						.p = &_job->ns->partitions[pid]
 				};
 
-				_job->vtable.slice_fn(_job, &rsv);
+				_job->vtable.slice_fn(_job, &rsv, &bb);
 				continue;
 			}
 		}
 
-		_job->vtable.slice_fn(_job, &rsv);
+		_job->vtable.slice_fn(_job, &rsv, &bb);
 		as_partition_release(&rsv);
 
 		if (cf_thread_sys_tid() != _job->base_sys_tid &&
@@ -200,6 +202,10 @@ as_scan_job_run(as_scan_job* _job)
 	}
 
 	cf_detail(AS_SCAN, "finished thread for trid %lu", _job->trid);
+
+	if (bb != NULL) {
+		cf_buf_builder_free(bb);
+	}
 
 	as_decr_uint32(&g_n_threads);
 

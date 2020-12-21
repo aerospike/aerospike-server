@@ -700,7 +700,7 @@ typedef struct basic_scan_job_s {
 	cf_vector*		bin_ids;
 } basic_scan_job;
 
-void basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 void basic_scan_job_finish(as_scan_job* _job);
 void basic_scan_job_destroy(as_scan_job* _job);
 void basic_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
@@ -820,18 +820,26 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 //
 
 void
-basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
+basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
+		cf_buf_builder** bb_r)
 {
 	basic_scan_job* job = (basic_scan_job*)_job;
 	as_index_tree* tree = rsv->tree;
-	cf_buf_builder* bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+	cf_buf_builder* bb = *bb_r;
+
+	if (bb == NULL) {
+		bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+	}
+	else {
+		cf_buf_builder_reset(bb);
+	}
 
 	cf_buf_builder_reserve(&bb, (int)sizeof(as_proto), NULL);
 
 	if (tree == NULL) { // also means _job->pids != NULL - not a legacy scan
 		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_ERR_UNAVAILABLE);
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
-		cf_buf_builder_free(bb);
+		*bb_r = bb;
 		return;
 	}
 
@@ -839,7 +847,7 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 		// Legacy scan can't get here - already returned 'not found'.
 		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
-		cf_buf_builder_free(bb);
+		*bb_r = bb;
 		return;
 	}
 
@@ -879,7 +887,7 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 	}
 
-	cf_buf_builder_free(bb);
+	*bb_r = bb;
 
 	cf_detail(AS_SCAN, "%s:%u basic scan job %lu in thread %d took %lu ms",
 			rsv->ns->name, rsv->p->id, _job->trid, cf_thread_sys_tid(),
@@ -1174,7 +1182,7 @@ typedef struct aggr_scan_job_s {
 	as_aggr_call	aggr_call;
 } aggr_scan_job;
 
-void aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 void aggr_scan_job_finish(as_scan_job* _job);
 void aggr_scan_job_destroy(as_scan_job* _job);
 void aggr_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
@@ -1285,14 +1293,22 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns)
 //
 
 void
-aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
+aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
+		cf_buf_builder** bb_r)
 {
 	aggr_scan_job* job = (aggr_scan_job*)_job;
 	cf_ll ll;
 
 	cf_ll_init(&ll, as_index_keys_ll_destroy_fn, false);
 
-	cf_buf_builder* bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+	cf_buf_builder* bb = *bb_r;
+
+	if (bb == NULL) {
+		bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+	}
+	else {
+		cf_buf_builder_reset(bb);
+	}
 
 	cf_buf_builder_reserve(&bb, (int)sizeof(as_proto), NULL);
 
@@ -1339,7 +1355,7 @@ aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 	}
 
-	cf_buf_builder_free(bb);
+	*bb_r = bb;
 }
 
 void
@@ -1536,7 +1552,7 @@ typedef struct udf_bg_scan_job_s {
 	uint32_t		n_active_tr;
 } udf_bg_scan_job;
 
-void udf_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void udf_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 void udf_bg_scan_job_finish(as_scan_job* _job);
 void udf_bg_scan_job_destroy(as_scan_job* _job);
 void udf_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
@@ -1651,8 +1667,11 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 //
 
 void
-udf_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
+udf_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
+		cf_buf_builder** bb_r)
 {
+	(void)bb_r;
+
 	as_index_reduce_live(rsv->tree, udf_bg_scan_job_reduce_cb, (void*)_job);
 }
 
@@ -1804,7 +1823,7 @@ typedef struct ops_bg_scan_job_s {
 	uint32_t		n_active_tr;
 } ops_bg_scan_job;
 
-void ops_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv);
+void ops_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 void ops_bg_scan_job_finish(as_scan_job* _job);
 void ops_bg_scan_job_destroy(as_scan_job* _job);
 void ops_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat);
@@ -1915,8 +1934,11 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 //
 
 void
-ops_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv)
+ops_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
+		cf_buf_builder** bb_r)
 {
+	(void)bb_r;
+
 	as_index_reduce_live(rsv->tree, ops_bg_scan_job_reduce_cb, (void*)_job);
 }
 

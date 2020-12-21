@@ -30,6 +30,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "dynbuf.h"
+
 #include "base/datamodel.h"
 #include "base/proto.h"
 
@@ -59,7 +61,7 @@ struct as_scan_job_s;
 #define AS_SCAN_ERR_RESPONSE_ERROR      (-1)
 #define AS_SCAN_ERR_RESPONSE_TIMEOUT    (-2)
 
-typedef void (*as_scan_slice_fn)(struct as_scan_job_s* _job, struct as_partition_reservation_s* rsv);
+typedef void (*as_scan_slice_fn)(struct as_scan_job_s* _job, struct as_partition_reservation_s* rsv, cf_buf_builder** bb_r);
 typedef void (*as_scan_finish_fn)(struct as_scan_job_s* _job);
 typedef void (*as_scan_destroy_fn)(struct as_scan_job_s* _job);
 typedef void (*as_scan_info_fn)(struct as_scan_job_s* _job, struct as_mon_jobstat_s* stat);
