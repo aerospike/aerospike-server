@@ -228,10 +228,19 @@ static uint32_t g_kernel_cpu_pct = 0;
 void
 sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 {
+	if (user_pct != NULL) {
+		*user_pct = g_user_cpu_pct;
+	}
+
+	if (kernel_pct != NULL) {
+		*kernel_pct = g_kernel_cpu_pct;
+	}
+
 	FILE* fh = fopen("/proc/stat", "r");
 
 	if (fh == NULL) {
-		cf_crash(AS_INFO, "failed to open /proc/stat: %d", errno);
+		cf_warning(AS_INFO, "failed to open /proc/stat: %d", errno);
+		return;
 	}
 
 	uint64_t user;
@@ -240,7 +249,9 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 	uint64_t idle;
 
 	if (fscanf(fh, "cpu %lu %lu %lu %lu", &user, &nice, &kernel, &idle) != 4) {
-		cf_crash(AS_INFO, "can't parse /proc/stat");
+		cf_warning(AS_INFO, "can't parse /proc/stat");
+		fclose(fh);
+		return;
 	}
 
 	fclose(fh);
