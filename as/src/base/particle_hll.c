@@ -572,7 +572,7 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would update",
+			cf_detail(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would update",
 					AS_ERR_BIN_EXISTS, state->def->name, state->op_type,
 					(int)state->bin_name_sz, state->bin_name);
 			hll_op_destroy(&op);
@@ -589,7 +589,7 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would create",
+			cf_detail(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would create",
 					AS_ERR_BIN_NOT_FOUND, state->def->name, state->op_type,
 					(int)state->bin_name_sz, state->bin_name);
 			hll_op_destroy(&op);

@@ -634,7 +634,7 @@ read_local(as_transaction* tr)
 					as_bin_set_empty(rb);
 
 					if ((result = as_bin_bits_read_from_client(b, op, rb)) < 0) {
-						cf_warning(AS_RW, "{%s} read_local: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
+						cf_detail(AS_RW, "{%s} read_local: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
@@ -663,7 +663,7 @@ read_local(as_transaction* tr)
 					as_bin_set_empty(rb);
 
 					if ((result = as_bin_hll_read_from_client(b, op, rb)) < 0) {
-						cf_warning(AS_RW, "{%s} read_local: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
+						cf_detail(AS_RW, "{%s} read_local: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
@@ -692,7 +692,7 @@ read_local(as_transaction* tr)
 					as_bin_set_empty(rb);
 
 					if ((result = as_bin_cdt_read_from_client(b, op, rb)) < 0) {
-						cf_warning(AS_RW, "{%s} read_local: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
+						cf_detail(AS_RW, "{%s} read_local: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;

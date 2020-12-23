@@ -909,7 +909,7 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would update - not allowed",
+			cf_detail(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would update - not allowed",
 					AS_ERR_BIN_EXISTS, state->def->name,
 					(int)state->bin_name_sz, state->bin_name);
 			return -AS_ERR_BIN_EXISTS;
@@ -934,7 +934,7 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 				return AS_OK;
 			}
 
-			cf_warning(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would create - not allowed",
+			cf_detail(AS_PARTICLE, "as_bin_bits_packed_modify - error %u operation (%s) on bin %.*s would create - not allowed",
 					AS_ERR_BIN_NOT_FOUND, state->def->name,
 					(int)state->bin_name_sz, state->bin_name);
 			return -AS_ERR_BIN_NOT_FOUND;

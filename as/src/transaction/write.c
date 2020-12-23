@@ -1848,7 +1848,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_bits_alloc_modify_from_client(b, op)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_bits_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -1860,7 +1860,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			else {
 				if ((result = as_bin_bits_stack_modify_from_client(b, particles_llb, op)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_bits_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_stack_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 			}
@@ -1884,7 +1884,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_set_empty(&result_bin);
 
 				if ((result = as_bin_bits_read_from_client(b, op, &result_bin)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -1912,7 +1912,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_hll_alloc_modify_from_client(b, op, &result_bin)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_hll_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -1924,7 +1924,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			else {
 				if ((result = as_bin_hll_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_hll_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_stack_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 			}
@@ -1949,7 +1949,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_set_empty(&result_bin);
 
 				if ((result = as_bin_hll_read_from_client(b, op, &result_bin)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -1977,7 +1977,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_cdt_alloc_modify_from_client(b, op, &result_bin)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_cdt_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
@@ -1989,7 +1989,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			else {
 				if ((result = as_bin_cdt_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_cdt_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_stack_modify_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 			}
@@ -2014,7 +2014,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_set_empty(&result_bin);
 
 				if ((result = as_bin_cdt_read_from_client(b, op, &result_bin)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 
