@@ -530,6 +530,41 @@ remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 
 
 void
+write_dim_single_bin_unwind(as_bin* old_bin, uint32_t n_old_bins,
+		as_bin* new_bin, uint32_t n_new_bins, as_bin* cleanup_bins,
+		uint32_t n_cleanup_bins)
+{
+	if (n_new_bins == 1 && as_bin_is_live(new_bin) &&
+			! as_bin_is_embedded_particle(new_bin)) {
+		if (n_old_bins == 1) {
+			if (new_bin->particle != as_bin_get_particle(old_bin)) {
+				as_bin_particle_destroy(new_bin);
+			}
+		}
+		else {
+			as_bin_particle_destroy(new_bin);
+		}
+	}
+
+	for (uint32_t i_cleanup = 0; i_cleanup < n_cleanup_bins; i_cleanup++) {
+		as_bin* b_cleanup = &cleanup_bins[i_cleanup];
+		as_particle* p_cleanup = b_cleanup->particle;
+
+		if (n_old_bins == 1) {
+			if (p_cleanup != as_bin_get_particle(old_bin)) {
+				as_bin_particle_destroy(b_cleanup);
+			}
+		}
+		else {
+			as_bin_particle_destroy(b_cleanup);
+		}
+	}
+
+	// The index element's embedded bin is still old_bins.
+}
+
+
+void
 write_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 		uint32_t n_new_bins, as_bin* cleanup_bins, uint32_t n_cleanup_bins)
 {
