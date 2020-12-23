@@ -534,7 +534,7 @@ write_dim_single_bin_unwind(as_bin* old_bin, uint32_t n_old_bins,
 		as_bin* new_bin, uint32_t n_new_bins, as_bin* cleanup_bins,
 		uint32_t n_cleanup_bins)
 {
-	if (n_new_bins == 1 && as_bin_is_live(new_bin) &&
+	if (n_new_bins == 1 && as_bin_inuse(new_bin) &&
 			! as_bin_is_embedded_particle(new_bin)) {
 		if (n_old_bins == 1) {
 			if (new_bin->particle != as_bin_get_particle(old_bin)) {
