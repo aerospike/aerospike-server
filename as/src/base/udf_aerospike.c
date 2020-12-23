@@ -420,8 +420,15 @@ execute_failed(udf_record* urecord, int result_code)
 	as_namespace* ns = rd->ns;
 
 	if (ns->storage_data_in_memory) {
-		write_dim_unwind(urecord->old_bins, urecord->n_old_bins, rd->bins,
-				rd->n_bins, urecord->cleanup_bins, urecord->n_cleanup_bins);
+		if (ns->single_bin) {
+			write_dim_single_bin_unwind(urecord->old_bins, urecord->n_old_bins,
+					rd->bins, rd->n_bins, urecord->cleanup_bins,
+					urecord->n_cleanup_bins);
+		}
+		else {
+			write_dim_unwind(urecord->old_bins, urecord->n_old_bins, rd->bins,
+					rd->n_bins, urecord->cleanup_bins, urecord->n_cleanup_bins);
+		}
 	}
 
 	if (urecord->n_old_bins != 0) {
