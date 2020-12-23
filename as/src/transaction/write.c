@@ -1193,7 +1193,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	if (result != 0) {
 		unwind_index_metadata(&old_metadata, r);
-		write_dim_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
+		write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 		return result;
 	}
 
@@ -1204,13 +1204,13 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	if (rd->n_bins == 0) {
 		if (n_old_bins == 0) {
 			unwind_index_metadata(&old_metadata, r);
-			write_dim_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
+			write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 			return AS_ERR_NOT_FOUND;
 		}
 
 		if ((result = validate_delete_durability(tr)) != AS_OK) {
 			unwind_index_metadata(&old_metadata, r);
-			write_dim_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
+			write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 			return result;
 		}
 
@@ -1226,7 +1226,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		unwind_index_metadata(&old_metadata, r);
-		write_dim_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
+		write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 		return -result;
 	}
 
