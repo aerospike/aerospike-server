@@ -181,7 +181,7 @@ void as_xdr_read(struct as_transaction_s* tr);
 void as_xdr_init_poll(cf_poll poll);
 void as_xdr_shutdown_poll(void);
 void as_xdr_io_event(uint32_t mask, void* data);
-void as_xdr_timer_event(cf_poll_event* events, int32_t n_events, uint32_t e_ix);
+void as_xdr_timer_event(uint32_t sid, cf_poll_event* events, int32_t n_events, uint32_t e_ix);
 
 // Info.
 void as_xdr_get_config(const char* cmd, cf_dyn_buf* db);
