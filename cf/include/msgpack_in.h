@@ -165,6 +165,8 @@ msgpack_buf_get_map_ele_count(const uint8_t *buf, uint32_t buf_sz,
 	return msgpack_get_map_ele_count(&mp, count_r);
 }
 
+uint32_t msgpack_compactify(uint8_t *buf, uint32_t buf_sz);
+
 uint32_t msgpack_sz_vec(msgpack_in_vec *mv);
 bool msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value);
 bool msgpack_get_uint64_vec(msgpack_in_vec *mv, uint64_t *i);

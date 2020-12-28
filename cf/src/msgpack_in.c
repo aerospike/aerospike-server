@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "aerospike/as_bytes.h"
+#include "aerospike/as_msgpack.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "log.h"
@@ -75,6 +76,9 @@ static inline uint64_t extract_uint64(const uint8_t *ptr, uint8_t sz);
 static inline uint64_t extract_neg_int64(const uint8_t *ptr, uint8_t sz);
 static inline void cmp_parse_container(parse_meta *meta, uint32_t count);
 static inline msgpack_cmp_type msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1);
+
+static inline uint32_t msgpack_compactify_element(uint8_t *dest, const uint8_t *src);
+static inline uint8_t *msgpack_compact_table(uint8_t *buf, const uint8_t * const end, uint32_t *count, bool *has_nonstorage, bool *not_compact);
 
 
 //==========================================================
@@ -903,6 +907,53 @@ msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r)
 	return true;
 }
 
+uint32_t
+msgpack_compactify(uint8_t *buf, uint32_t buf_sz)
+{
+	uint32_t count = 1;
+	const uint8_t * const start = buf;
+	const uint8_t * const end = buf + buf_sz;
+	bool has_nonstorage = false;
+	uint8_t *dst_start = buf;
+	uint8_t *src_start = buf;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint8_t * const ele_start = buf;
+		bool not_compact = false;
+
+		buf = msgpack_compact_table(buf, end, &count, &has_nonstorage,
+				&not_compact);
+
+		if (buf > end || buf == NULL) {
+			cf_warning(AS_PARTICLE, "msgpack_sz_internal: invalid at i %u count %u", i, count);
+			return 0;
+		}
+
+		if (not_compact) {
+			if (dst_start != src_start) {
+				size_t sz = ele_start - src_start;
+
+				memmove(dst_start, src_start, sz);
+				dst_start += sz;
+			}
+			else {
+				dst_start = ele_start;
+			}
+
+			dst_start += msgpack_compactify_element(dst_start, ele_start);
+			src_start = buf;
+		}
+	}
+
+	if (dst_start != src_start) {
+		memmove(dst_start, src_start, buf - src_start);
+
+		return dst_start - start + buf - src_start;
+	}
+
+	return buf - start;
+}
+
 
 //==========================================================
 // Local helpers.
@@ -1558,4 +1609,314 @@ msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1)
 	}
 
 	return end_result;
+}
+
+static inline uint32_t
+msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
+{
+	msgpack_in mp = {
+			.buf = src,
+			.buf_sz = UINT32_MAX
+	};
+
+	as_packer pk = {
+			.buffer = dest,
+			.capacity = UINT32_MAX
+	};
+
+	switch (*src) {
+	case 0xcc: // unsigned 8 bit integer
+	case 0xcd: // unsigned 16 bit integer
+	case 0xce: // unsigned 32 bit integer
+	case 0xcf: { // unsigned 64 bit integer
+		uint64_t val;
+		bool ret = msgpack_get_uint64(&mp, &val);
+
+		cf_assert(ret, AS_PARTICLE, "unexpected");
+		as_pack_uint64(&pk, val);
+		break;
+	}
+
+	case 0xd0: // signed 8 bit integer
+	case 0xd1: // signed 16 bit integer
+	case 0xd2: // signed 32 bit integer
+	case 0xd3: { // signed 64 bit integer
+		int64_t val;
+		bool ret = msgpack_get_int64(&mp, &val);
+
+		cf_assert(ret, AS_PARTICLE, "unexpected");
+		as_pack_int64(&pk, val);
+		break;
+	}
+
+	case 0xc4: // bin 8
+	case 0xc5: // bin 16
+	case 0xc6: // bin 32
+	case 0xd9: // str 8
+	case 0xda: // str 16
+	case 0xdb: { // str 32
+		uint32_t buf_sz = 0; // init for Centos6
+		const uint8_t *buf = msgpack_get_bin(&mp, &buf_sz);
+
+		as_pack_str(&pk, NULL, buf_sz);
+		memmove(pk.buffer + pk.offset, buf, buf_sz);
+
+		return pk.offset + buf_sz;
+	}
+
+	case 0xdc: // list with 16 bit header
+	case 0xdd: { // list with 32 bit header
+		uint32_t ele_count = 0; // init for Centos6
+
+		msgpack_get_list_ele_count(&mp, &ele_count);
+		as_pack_list_header(&pk, ele_count);
+		break;
+	}
+
+	case 0xde: // map with 16 bit header
+	case 0xdf: { // map with 32 bit header
+		uint32_t ele_count = 0; // init for Centos6
+
+		msgpack_get_map_ele_count(&mp, &ele_count);
+		as_pack_map_header(&pk, ele_count);
+		break;
+	}
+
+	case 0xc7: // ext 8
+	case 0xc8: // ext 16
+	case 0xc9: { // ext 32
+		msgpack_ext ext = { NULL }; // init for Centos6
+
+		msgpack_get_ext(&mp, &ext);
+		as_pack_ext_header(&pk, ext.size, ext.type);
+		memmove(pk.buffer + pk.offset, ext.data, ext.size);
+
+		return pk.offset + ext.size;
+	}
+
+	case 0xc0: // nil
+	case 0xc1: // reserved
+	case 0xc2: // boolean false
+	case 0xc3: // boolean true
+	case 0xca: // float
+	case 0xcb: // double
+	case 0xd4: // fixext 1
+	case 0xd5: // fixext 2
+	case 0xd6: // fixext 4
+	case 0xd7: // fixext 8
+	case 0xd8: // fixext 16
+	default:
+		cf_crash(AS_PARTICLE, "unexpected %x", *src);
+	}
+
+	return pk.offset;
+}
+
+static inline uint8_t *
+msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
+		uint32_t *count, bool *has_nonstorage, bool *not_compact)
+{
+	SZ_PARSE_BUF_CHECK(buf, end, 1);
+
+	uint8_t b = *buf++;
+
+	switch (b) {
+	case 0xc0: // nil
+	case 0xc2: // boolean false
+	case 0xc3: // boolean true
+		return buf;
+	case 0xc1: // reserved
+		return NULL;
+
+	case 0xcc: // unsigned 8 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 1);
+		*not_compact = *buf <= 0x7f;
+		return buf + 1;
+	case 0xcd: // unsigned 16 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 2);
+		*not_compact = cf_swap_from_be16(*(uint16_t *)buf) <= 0xff;
+		return buf + 2;
+	case 0xce: // unsigned 32 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 4);
+		*not_compact = cf_swap_from_be32(*(uint32_t *)buf) <= 0xffff;
+		return buf + 4;
+	case 0xcf: // unsigned 64 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 8);
+		*not_compact = cf_swap_from_be64(*(uint64_t *)buf) <= 0xffffffffULL;
+		return buf + 8;
+
+	case 0xd0: // signed 8 bit integer
+		*not_compact = (*buf & 0x80) == 0 || *buf >= 0xe0;
+		return buf + 1;
+	case 0xd1: // signed 16 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 2);
+		*not_compact = (*buf & 0x80) == 0 ||
+				cf_swap_from_be16(*(uint16_t *)buf) >= 0xff00;
+		return buf + 2;
+	case 0xd2: // signed 32 bit integer
+		*not_compact = (*buf & 0x80) == 0 ||
+				cf_swap_from_be32(*(uint32_t *)buf) >= 0xffff0000;
+		return buf + 4;
+	case 0xd3: // signed 64 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 8);
+		*not_compact = (*buf & 0x80) == 0 ||
+				cf_swap_from_be64(*(uint64_t *)buf) >= 0xffffffff00000000ULL;
+		return buf + 8;
+
+	case 0xca: // float
+		return buf + 4;
+	case 0xcb: // double
+		return buf + 8;
+
+	case 0xc4: // bin 8
+		*not_compact = true;
+		// no break
+	case 0xd9: // str 8
+		SZ_PARSE_BUF_CHECK(buf, end, 1);
+		*not_compact |= *buf <= 0x1f;
+		return buf + 1 + *buf;
+
+	case 0xc5: // bin 16
+		*not_compact = true;
+		// no break
+	case 0xda: { // str 16
+		SZ_PARSE_BUF_CHECK(buf, end, 2);
+
+		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
+
+		*not_compact |= len <= 0xff;
+		return buf + 2 + len;
+	}
+	case 0xc6: // bin 32
+		*not_compact = true;
+		// no break
+	case 0xdb: { // str 32
+		SZ_PARSE_BUF_CHECK(buf, end, 4);
+
+		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+
+		*not_compact |= len <= 0xffff;
+		return buf + 4 + len;
+	}
+
+	case 0xdc: { // list with 16 bit header
+		SZ_PARSE_BUF_CHECK(buf, end, 2);
+
+		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
+
+		*not_compact = len <= 0x0f;
+		*count += len;
+		return buf + 2;
+	}
+	case 0xdd: { // list with 32 bit header
+		SZ_PARSE_BUF_CHECK(buf, end, 4);
+
+		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+
+		*not_compact = len <= 0xffff;
+		*count += len;
+		return buf + 4;
+	}
+
+	case 0xde: { // map with 16 bit header
+		SZ_PARSE_BUF_CHECK(buf, end, 2);
+
+		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
+
+		*not_compact = len <= 0x0f;
+		*count += 2 * len;
+		return buf + 2;
+	}
+	case 0xdf: // map with 32 bit header
+		SZ_PARSE_BUF_CHECK(buf, end, 4);
+
+		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+
+		*not_compact = len <= 0xffff;
+		*count += 2 * len;
+		return buf + 4;
+
+	case 0xd4: // fixext 1
+		SZ_PARSE_BUF_CHECK(buf, end, 1);
+
+		if (*buf == CMP_EXT_TYPE) {
+			*has_nonstorage = true;
+		}
+
+		return buf + 1 + 1;
+	case 0xd5: // fixext 2
+		SZ_PARSE_BUF_CHECK(buf, end, 1);
+
+		if (*buf == CMP_EXT_TYPE) {
+			*has_nonstorage = true;
+		}
+
+		return buf + 1 + 2;
+	case 0xd6: // fixext 4
+		return buf + 1 + 4;
+	case 0xd7: // fixext 8
+		return buf + 1 + 8;
+	case 0xd8: // fixext 16
+		return buf + 1 + 16;
+	case 0xc7: // ext 8
+		SZ_PARSE_BUF_CHECK(buf, end, 2);
+
+		if (*buf != 0) {
+			if (*(buf + 1) == CMP_EXT_TYPE && *buf < 4) {
+				*has_nonstorage = true;
+			}
+
+			*not_compact = (*buf & 0xe0) == 0 && (*buf & (*buf - 1)) == 0; // *buf is 1, 2, 4, 8, or 16
+		}
+
+		return buf + 1 + 1 + *buf;
+	case 0xc8: { // ext 16
+		SZ_PARSE_BUF_CHECK(buf, end, 3);
+
+		uint32_t len = cf_swap_from_be16(*(uint16_t *)buf);
+
+		if (*(buf + 2) == CMP_EXT_TYPE && len < 4 && len != 0) {
+			*has_nonstorage = true;
+		}
+
+		*not_compact = len <= 0xff;
+
+		return buf + 2 + 1 + len;
+	}
+	case 0xc9: { // ext 32
+		SZ_PARSE_BUF_CHECK(buf, end, 5);
+
+		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+
+		if (*(buf + 4) == CMP_EXT_TYPE && len < 4 && len != 0) {
+			*has_nonstorage = true;
+		}
+
+		*not_compact = len <= 0xffff;
+
+		return buf + 4 + 1 + len;
+	}
+	default:
+		break;
+	}
+
+	if (b < 0x80 || b >= 0xe0) { // 8 bit combined integer
+		return buf;
+	}
+
+	if ((b & 0xe0) == 0xa0) { // raw bytes with 8 bit combined header
+		return buf + (b & 0x1f);
+	}
+
+	if ((b & 0xf0) == 0x80) { // map with 8 bit combined header
+		*count += 2 * (b & 0x0f);
+		return buf;
+	}
+
+	if ((b & 0xf0) == 0x90) { // list with 8 bit combined header
+		*count += b & 0x0f;
+		return buf;
+	}
+
+	return NULL;
 }
