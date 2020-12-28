@@ -75,6 +75,7 @@
 #define XDR_READ_BUFFER_SIZE (15 * 1024 * 1024)
 
 typedef struct thread_ctx_s {
+	uint32_t sid;
 	cf_topo_cpu_index i_cpu;
 	cf_mutex* lock;
 	cf_poll poll;
@@ -323,6 +324,8 @@ create_service_thread(uint32_t sid)
 	thread_ctx* ctx = cf_malloc(sizeof(thread_ctx));
 
 	cf_detail(AS_SERVICE, "starting sid %u ctx %p", sid, ctx);
+
+	ctx->sid = sid;
 
 	if (as_config_is_cpu_pinned()) {
 		ctx->i_cpu = (cf_topo_cpu_index)(sid % cf_topo_count_cpus());
@@ -640,7 +643,7 @@ run_service(void* udata)
 			}
 
 			if (type == CF_POLL_DATA_XDR_TIMER) {
-				as_xdr_timer_event(events, n_events, i);
+				as_xdr_timer_event(ctx->sid, events, n_events, i);
 				continue;
 			}
 			// else - type == CF_POLL_DATA_CLIENT_IO
