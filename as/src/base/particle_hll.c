@@ -823,6 +823,9 @@ hll_parse_elements(hll_state* state, hll_op* op)
 		default:
 			e->buf = msgpack_get_ele_vec(state->mv, &e->sz);
 
+			// Un-const e->buf to compactify.
+			e->sz = msgpack_compactify((uint8_t*)e->buf, e->sz);
+
 			if (e->buf == NULL) {
 				cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) unable to parse element (%u)",
 						AS_ERR_PARAMETER, state->def->name, state->op_type, i);
