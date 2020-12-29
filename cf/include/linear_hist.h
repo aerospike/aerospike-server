@@ -1,7 +1,7 @@
 /*
  * linear_hist.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2020 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
