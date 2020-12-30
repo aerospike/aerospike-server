@@ -333,13 +333,13 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 	} \
 }
 
-#define BITS_MODIFY_OP_ENTRY(_op, _op_fn, _prep_fn, _flags, _min_args, \
+#define BITS_MODIFY_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _flags, _min_args, \
 		_max_args, ...) \
-	[_op].name = # _op, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn, \
+	[_op].name = _name, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn, \
 	[_op].bad_flags = ~((uint64_t)(_flags)), [_op].min_args = _min_args, \
 	[_op].max_args = _max_args, [_op].args = (bits_parse_fn[]){__VA_ARGS__}
-#define BITS_READ_OP_ENTRY(_op, _op_fn, _min_args, _max_args, ...) \
-	[_op].name = # _op, [_op].prepare = bits_prepare_read_op, \
+#define BITS_READ_OP_ENTRY(_op, _name, _op_fn, _min_args, _max_args, ...) \
+	[_op].name = _name, [_op].prepare = bits_prepare_read_op, \
 	[_op].fn.read = _op_fn, [_op].bad_flags = ~((uint64_t)(0)), \
 	[_op].min_args = _min_args, [_op].max_args = _max_args, \
 	[_op].args = (bits_parse_fn[]){__VA_ARGS__}
@@ -350,95 +350,96 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 //
 
 static const bits_op_def bits_modify_op_table[] = {
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_RESIZE, bits_modify_op_resize,
-				bits_prepare_resize_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_RESIZE, "bit_resize",
+				bits_modify_op_resize, bits_prepare_resize_op,
 				(AS_BITS_FLAG_CREATE_ONLY | AS_BITS_FLAG_UPDATE_ONLY |
 						AS_BITS_FLAG_NO_FAIL),
 				1, 3, bits_parse_byte_size_allow_zero, bits_parse_flags,
 				bits_parse_resize_subflags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_INSERT, bits_modify_op_insert,
-				bits_prepare_insert_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_INSERT, "bit_insert",
+				bits_modify_op_insert, bits_prepare_insert_op,
 				(AS_BITS_FLAG_CREATE_ONLY | AS_BITS_FLAG_UPDATE_ONLY |
 						AS_BITS_FLAG_NO_FAIL),
 				2, 3, bits_parse_byte_offset, bits_parse_buf, bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_REMOVE, NULL,
-				bits_prepare_remove_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_REMOVE, "bit_remove",
+				NULL, bits_prepare_remove_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				2, 3, bits_parse_byte_offset, bits_parse_byte_size,
 				bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_SET, bits_modify_op_set,
-				bits_prepare_modify_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_SET, "bit_set",
+				bits_modify_op_set, bits_prepare_modify_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				3, 4, bits_parse_offset, bits_parse_size, bits_parse_buf,
 				bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_OR, bits_modify_op_or,
-				bits_prepare_modify_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_OR, "bit_or",
+				bits_modify_op_or, bits_prepare_modify_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				3, 4, bits_parse_offset, bits_parse_size, bits_parse_buf,
 				bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_XOR, bits_modify_op_xor,
-				bits_prepare_modify_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_XOR, "bit_xor",
+				bits_modify_op_xor, bits_prepare_modify_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				3, 4, bits_parse_offset, bits_parse_size, bits_parse_buf,
 				bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_AND, bits_modify_op_and,
-				bits_prepare_modify_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_AND, "bit_and",
+				bits_modify_op_and, bits_prepare_modify_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				3, 4, bits_parse_offset, bits_parse_size, bits_parse_buf,
 				bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_NOT, bits_modify_op_not,
-				bits_prepare_modify_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_NOT, "bit_not",
+				bits_modify_op_not, bits_prepare_modify_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				2, 3, bits_parse_offset, bits_parse_size, bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_LSHIFT, bits_modify_op_lshift,
-				bits_prepare_modify_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_LSHIFT, "bit_lshift",
+				bits_modify_op_lshift, bits_prepare_modify_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				3, 4, bits_parse_offset, bits_parse_size,
 				bits_parse_n_bits_value, bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_RSHIFT, bits_modify_op_rshift,
-				bits_prepare_modify_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_RSHIFT, "bit_rshift",
+				bits_modify_op_rshift, bits_prepare_modify_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL |
 						AS_BITS_FLAG_PARTIAL),
 				3, 4, bits_parse_offset, bits_parse_size,
 				bits_parse_n_bits_value, bits_parse_flags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_ADD, bits_modify_op_add,
-				bits_prepare_integer_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_ADD, "bit_add",
+				bits_modify_op_add, bits_prepare_integer_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL),
 				3, 5, bits_parse_offset, bits_parse_integer_size,
 				bits_parse_integer_value, bits_parse_flags,
 				bits_parse_arithmetic_subflags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_SUBTRACT, bits_modify_op_subtract,
-				bits_prepare_integer_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_SUBTRACT, "bit_subtract",
+				bits_modify_op_subtract, bits_prepare_integer_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL),
 				3, 5, bits_parse_offset, bits_parse_integer_size,
 				bits_parse_integer_value, bits_parse_flags,
 				bits_parse_arithmetic_subflags),
-		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_SET_INT, bits_modify_op_set_int,
-				bits_prepare_integer_op,
+		BITS_MODIFY_OP_ENTRY(AS_BITS_OP_SET_INT, "bit_set_int",
+				bits_modify_op_set_int, bits_prepare_integer_op,
 				(AS_BITS_FLAG_UPDATE_ONLY | AS_BITS_FLAG_NO_FAIL),
 				3, 4, bits_parse_offset, bits_parse_integer_size,
 				bits_parse_integer_value, bits_parse_flags),
 };
 
 static const bits_op_def bits_read_op_table[] = {
-		BITS_READ_OP_ENTRY(AS_BITS_OP_GET, bits_read_op_get,
+		BITS_READ_OP_ENTRY(AS_BITS_OP_GET, "bit_get", bits_read_op_get,
 				2, 2, bits_parse_offset, bits_parse_size),
-		BITS_READ_OP_ENTRY(AS_BITS_OP_COUNT, bits_read_op_count,
+		BITS_READ_OP_ENTRY(AS_BITS_OP_COUNT, "bit_count", bits_read_op_count,
 				2, 2, bits_parse_offset, bits_parse_size),
-		BITS_READ_OP_ENTRY(AS_BITS_OP_LSCAN, bits_read_op_lscan,
+		BITS_READ_OP_ENTRY(AS_BITS_OP_LSCAN, "bit_lscan", bits_read_op_lscan,
 				3, 3, bits_parse_offset, bits_parse_size,
 				bits_parse_boolean_value),
-		BITS_READ_OP_ENTRY(AS_BITS_OP_RSCAN, bits_read_op_rscan,
+		BITS_READ_OP_ENTRY(AS_BITS_OP_RSCAN, "bit_rscan", bits_read_op_rscan,
 				3, 3, bits_parse_offset, bits_parse_size,
 				bits_parse_boolean_value),
-		BITS_READ_OP_ENTRY(AS_BITS_OP_GET_INT, bits_read_op_get_integer,
+		BITS_READ_OP_ENTRY(AS_BITS_OP_GET_INT, "bit_get_int",
+				bits_read_op_get_integer,
 				2, 3, bits_parse_offset, bits_parse_integer_size,
 				bits_parse_get_integer_subflags),
 };
@@ -828,6 +829,25 @@ as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb)
 	}
 
 	return bits_read(&state, b, rb);
+}
+
+const char*
+as_bits_op_name(uint32_t op_code, bool is_modify)
+{
+	const char* name = NULL;
+
+	if (is_modify) {
+		if (op_code >= AS_BITS_MODIFY_OP_START &&
+				op_code < AS_BITS_MODIFY_OP_END) {
+			name = bits_modify_op_table[op_code].name;
+		}
+	}
+	else if (op_code >= AS_BITS_READ_OP_START &&
+			op_code < AS_BITS_READ_OP_END) {
+		name = bits_read_op_table[op_code].name;
+	}
+
+	return name != NULL ? name : "INVALID_BITS_OP";
 }
 
 

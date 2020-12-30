@@ -273,12 +273,14 @@ extern int as_bin_bits_modify_tr(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *
 extern int as_bin_bits_read_tr(const as_bin *b, const as_msg_op *msg_op, as_bin *result);
 extern int as_bin_bits_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv);
 extern int as_bin_bits_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
+extern const char* as_bits_op_name(uint32_t op_code, bool is_modify);
 
 // HLL:
 extern int as_bin_hll_modify_tr(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb, as_bin* rb);
 extern int as_bin_hll_read_tr(const as_bin *b, const as_msg_op *msg_op, as_bin *rb);
 extern int as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
 extern int as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
+extern const char* as_hll_op_name(uint32_t op_code, bool is_modify);
 
 // geojson:
 typedef void * geo_region_t;

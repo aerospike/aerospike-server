@@ -29,6 +29,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "dynbuf.h"
+
 #include "base/datamodel.h"
 #include "base/index.h"
 
@@ -66,6 +68,7 @@ as_exp* as_exp_build_base64(const char* buf64, uint32_t buf64_sz);
 as_exp* as_exp_build(const as_msg_field* msg, bool cpy_instr);
 as_exp_trilean as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx);
 bool as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx);
+bool as_exp_display(const as_exp* exp, cf_dyn_buf* db);
 void as_exp_destroy(as_exp* exp);
 
 as_exp* predexp_build_old(const as_msg_field* pfp);

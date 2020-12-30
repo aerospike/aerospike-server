@@ -192,6 +192,68 @@ typedef struct {
 	bool error;
 } index_sort_userdata;
 
+static const char* cdt_exp_display_names[] = {
+		[AS_CDT_OP_LIST_APPEND] = "list_append",
+		[AS_CDT_OP_LIST_APPEND_ITEMS] = "list_append_items",
+		[AS_CDT_OP_LIST_CLEAR] = "list_clear",
+		[AS_CDT_OP_LIST_INCREMENT] = "list_increment",
+		[AS_CDT_OP_LIST_INSERT] = "list_insert",
+		[AS_CDT_OP_LIST_INSERT_ITEMS] = "list_insert_items",
+		[AS_CDT_OP_LIST_REMOVE_BY_INDEX] = "list_remove_by_index",
+		[AS_CDT_OP_LIST_REMOVE_BY_INDEX_RANGE] = "list_remove_by_index_range",
+		[AS_CDT_OP_LIST_REMOVE_BY_RANK] = "list_remove_by_rank",
+		[AS_CDT_OP_LIST_REMOVE_BY_RANK_RANGE] = "list_remove_by_rank_range",
+		[AS_CDT_OP_LIST_REMOVE_BY_VALUE_REL_RANK_RANGE] = "list_remove_by_rel_rank_range",
+		[AS_CDT_OP_LIST_REMOVE_ALL_BY_VALUE] = "list_remove_by_value",
+		[AS_CDT_OP_LIST_REMOVE_ALL_BY_VALUE_LIST] = "list_remove_by_value_list",
+		[AS_CDT_OP_LIST_REMOVE_BY_VALUE_INTERVAL] = "list_remove_by_value_range",
+		[AS_CDT_OP_LIST_SET] = "list_set",
+		[AS_CDT_OP_LIST_SORT] = "list_sort",
+
+		[AS_CDT_OP_LIST_GET_BY_INDEX] = "list_get_by_index",
+		[AS_CDT_OP_LIST_GET_BY_INDEX_RANGE] = "list_get_by_index_range",
+		[AS_CDT_OP_LIST_GET_BY_RANK] = "list_get_by_rank",
+		[AS_CDT_OP_LIST_GET_BY_RANK_RANGE] = "list_get_by_rank_range",
+		[AS_CDT_OP_LIST_GET_BY_VALUE_REL_RANK_RANGE] = "list_get_by_rel_rank_range",
+		[AS_CDT_OP_LIST_GET_BY_VALUE] = "list_get_by_value",
+		[AS_CDT_OP_LIST_GET_ALL_BY_VALUE_LIST] = "list_get_by_value_list",
+		[AS_CDT_OP_LIST_GET_BY_VALUE_INTERVAL] = "list_get_by_value_range",
+		[AS_CDT_OP_LIST_SIZE] = "list_size",
+
+		[AS_CDT_OP_MAP_CLEAR] = "map_clear",
+		[AS_CDT_OP_MAP_INCREMENT] = "map_increment",
+		[AS_CDT_OP_MAP_PUT] = "map_put",
+		[AS_CDT_OP_MAP_PUT_ITEMS] = "map_put_items",
+		[AS_CDT_OP_MAP_REMOVE_BY_INDEX] = "map_remove_by_index",
+		[AS_CDT_OP_MAP_REMOVE_BY_INDEX_RANGE] = "map_remove_by_index_range",
+		[AS_CDT_OP_MAP_REMOVE_BY_KEY] = "map_remove_by_key",
+		[AS_CDT_OP_MAP_REMOVE_BY_KEY_LIST] = "map_remove_by_key_list",
+		[AS_CDT_OP_MAP_REMOVE_BY_KEY_INTERVAL] = "map_remove_by_key_range",
+		[AS_CDT_OP_MAP_REMOVE_BY_KEY_REL_INDEX_RANGE] = "map_remove_by_rel_index_range",
+		[AS_CDT_OP_MAP_REMOVE_BY_RANK] = "map_remove_by_rank",
+		[AS_CDT_OP_MAP_REMOVE_BY_RANK_RANGE] = "map_remove_by_rank_range",
+		[AS_CDT_OP_MAP_REMOVE_BY_VALUE] = "map_remove_by_value",
+		[AS_CDT_OP_MAP_REMOVE_BY_VALUE_LIST] = "map_remove_by_value_list",
+		[AS_CDT_OP_MAP_REMOVE_BY_VALUE_INTERVAL] = "map_remove_by_value_range",
+		[AS_CDT_OP_MAP_REMOVE_BY_VALUE_REL_RANK_RANGE] = "map_remove_by_rel_rank_range",
+
+		[AS_CDT_OP_MAP_GET_BY_INDEX] = "map_get_by_index",
+		[AS_CDT_OP_MAP_GET_BY_INDEX_RANGE] = "map_get_by_index_range",
+		[AS_CDT_OP_MAP_GET_BY_KEY] = "map_get_by_key",
+		[AS_CDT_OP_MAP_GET_BY_KEY_LIST] = "map_get_by_key_list",
+		[AS_CDT_OP_MAP_GET_BY_KEY_INTERVAL] = "map_get_by_key_range",
+		[AS_CDT_OP_MAP_GET_BY_RANK] = "map_get_by_rank",
+		[AS_CDT_OP_MAP_GET_BY_RANK_RANGE] = "map_get_by_rank_range",
+		[AS_CDT_OP_MAP_GET_BY_KEY_REL_INDEX_RANGE] = "map_get_by_rel_index_range",
+		[AS_CDT_OP_MAP_GET_ALL_BY_VALUE] = "map_get_by_value",
+		[AS_CDT_OP_MAP_GET_BY_VALUE_LIST] = "map_get_by_value_list",
+		[AS_CDT_OP_MAP_GET_BY_VALUE_INTERVAL] = "map_get_by_value_range",
+		[AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE] = "map_get_by_rel_rank_range",
+		[AS_CDT_OP_MAP_SIZE] = "map_size",
+};
+
+static const size_t n_cdt_exp_display_names = sizeof(cdt_exp_display_names) / sizeof(char*);
+
 
 //==========================================================
 // Forward declares.
@@ -4198,6 +4260,23 @@ cdt_check_buf(const uint8_t *buf, uint32_t buf_sz)
 	};
 
 	return cdt_check(&mp, true);
+}
+
+
+//==========================================================
+// exp
+//
+
+const char *
+cdt_exp_display_name(as_cdt_optype op)
+{
+	const char* name = NULL;
+
+	if (op < n_cdt_exp_display_names) {
+		name = cdt_exp_display_names[op];
+	}
+
+	return name != NULL ? name : "INVALID_CDT_OP";
 }
 
 

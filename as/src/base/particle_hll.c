@@ -262,14 +262,14 @@ static double hll_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs);
 			.vecs = &vecs \
 	}
 
-#define HLL_MODIFY_OP_ENTRY(_op, _op_fn, _prep_fn, _flags, _min_args, \
+#define HLL_MODIFY_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _flags, _min_args, \
 		_max_args, ...) \
-	[_op].name = # _op, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn, \
+	[_op].name = _name, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn, \
 	[_op].bad_flags = ~((uint64_t)(_flags)), [_op].min_args = _min_args, \
 	[_op].max_args = _max_args, [_op].args = (hll_parse_fn[]){__VA_ARGS__}
 
-#define HLL_READ_OP_ENTRY(_op, _op_fn, _prep_fn, _n_args, ...) \
-	[_op].name = # _op, [_op].prepare = _prep_fn, \
+#define HLL_READ_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _n_args, ...) \
+	[_op].name = _name, [_op].prepare = _prep_fn, \
 	[_op].fn.read = _op_fn, [_op].bad_flags = ~((uint64_t)(0)), \
 	[_op].min_args = _n_args, [_op].max_args = _n_args, \
 	[_op].args = (hll_parse_fn[]){__VA_ARGS__}
@@ -280,48 +280,49 @@ static double hll_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs);
 //
 
 static const hll_op_def hll_modify_op_table[] = {
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_INIT, hll_modify_op_init,
+		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_INIT, "hll_init", hll_modify_op_init,
 				hll_modify_prepare_init_op,
 				(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_UPDATE_ONLY |
 						AS_HLL_FLAG_NO_FAIL),
 				0, 3, hll_parse_n_index_bits, hll_parse_n_minhash_bits,
 				hll_parse_flags),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_ADD, hll_modify_op_add,
+		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_ADD, "hll_add", hll_modify_op_add,
 				hll_modify_prepare_add_op,
 				(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_NO_FAIL),
 				1, 4, hll_parse_elements, hll_parse_n_index_bits,
 				hll_parse_n_minhash_bits, hll_parse_flags),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UNION, hll_modify_op_union,
-				hll_modify_prepare_union_op,
+		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UNION, "hll_set_union",
+				hll_modify_op_union, hll_modify_prepare_union_op,
 				(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_UPDATE_ONLY |
 						AS_HLL_FLAG_ALLOW_FOLD | AS_HLL_FLAG_NO_FAIL),
 				1, 2, hll_parse_hlls, hll_parse_flags),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UPDATE_COUNT, hll_modify_op_count,
-				hll_modify_prepare_count_op,
-				(0),
-				0, 0),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_FOLD, hll_modify_op_fold,
+		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UPDATE_COUNT, "hll_refresh_count",
+				hll_modify_op_count, hll_modify_prepare_count_op,
+				(0), 0, 0),
+		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_FOLD, "hll_fold", hll_modify_op_fold,
 				hll_modify_prepare_fold_op,
-				(0),
-				1, 1, hll_parse_n_index_bits)
+				(0), 1, 1, hll_parse_n_index_bits)
 };
 
 static const hll_op_def hll_read_op_table[] = {
-		HLL_READ_OP_ENTRY(AS_HLL_OP_COUNT, hll_read_op_count,
+		HLL_READ_OP_ENTRY(AS_HLL_OP_COUNT, "hll_get_count", hll_read_op_count,
 				hll_read_prepare_noop, 0),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_GET_UNION, hll_read_op_union,
+		HLL_READ_OP_ENTRY(AS_HLL_OP_GET_UNION, "hll_get_union", hll_read_op_union,
 				hll_read_prepare_noop, 1, hll_parse_hlls),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_UNION_COUNT, hll_read_op_union_count,
-				hll_read_prepare_noop, 1, hll_parse_hlls),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_INTERSECT_COUNT,
+		HLL_READ_OP_ENTRY(AS_HLL_OP_UNION_COUNT, "hll_get_union_count",
+				hll_read_op_union_count, hll_read_prepare_noop, 1,
+				hll_parse_hlls),
+		HLL_READ_OP_ENTRY(AS_HLL_OP_INTERSECT_COUNT, "hll_get_intersect_count",
 				hll_read_op_intersect_count, hll_read_prepare_intersect,
 				1, hll_parse_hlls_intersect),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_SIMILARITY, hll_read_op_similarity,
-				hll_read_prepare_intersect, 1, hll_parse_hlls_intersect),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, hll_read_op_describe,
-				hll_read_prepare_noop, 0),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_MAY_CONTAIN, hll_read_op_may_contain_all,
-				hll_read_prepare_noop, 1, hll_parse_elements)
+		HLL_READ_OP_ENTRY(AS_HLL_OP_SIMILARITY, "hll_get_similarity",
+				hll_read_op_similarity, hll_read_prepare_intersect, 1,
+				hll_parse_hlls_intersect),
+		HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, "hll_describe",
+				hll_read_op_describe, hll_read_prepare_noop, 0),
+		HLL_READ_OP_ENTRY(AS_HLL_OP_MAY_CONTAIN, "hll_may_contain",
+				hll_read_op_may_contain_all, hll_read_prepare_noop, 1,
+				hll_parse_elements)
 };
 
 
@@ -471,6 +472,24 @@ as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
 	}
 
 	return hll_read(&state, b, rb);
+}
+
+const char*
+as_hll_op_name(uint32_t op_code, bool is_modify)
+{
+	const char* name = NULL;
+
+	if (is_modify) {
+		if (op_code >= AS_HLL_MODIFY_OP_START &&
+				op_code < AS_HLL_MODIFY_OP_END) {
+			name = hll_modify_op_table[op_code].name;
+		}
+	}
+	else if (op_code >= AS_HLL_READ_OP_START && op_code < AS_HLL_READ_OP_END) {
+		name = hll_read_op_table[op_code].name;
+	}
+
+	return name != NULL ? name : "INVALID_HLL_OP";
 }
 
 

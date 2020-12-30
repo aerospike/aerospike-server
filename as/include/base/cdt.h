@@ -504,6 +504,9 @@ bool cdt_check(msgpack_in *mp, bool check_end);
 bool cdt_check_rep(msgpack_in *mp, uint32_t rep);
 bool cdt_check_buf(const uint8_t *ptr, uint32_t sz);
 
+// exp
+const char *cdt_exp_display_name(as_cdt_optype op);
+
 // Debugging support
 bool cdt_verify(cdt_context *ctx);
 bool list_verify(const cdt_context *ctx);
