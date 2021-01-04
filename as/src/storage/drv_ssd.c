@@ -2445,7 +2445,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		rd.bins = new_bins;
 
 		if (as_flat_unpack_bins(ns, p_read, end, rd.n_bins, rd.bins) < 0) {
-			cf_crash(AS_DRV_SSD, "unpack bins failed");
+			cf_crash(AS_DRV_SSD, "%pD - unpack bins failed", &r->keyd);
 		}
 
 		// Do this early since set-id is needed for the secondary index update.
