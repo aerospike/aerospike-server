@@ -477,7 +477,7 @@ as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
 const char*
 as_hll_op_name(uint32_t op_code, bool is_modify)
 {
-	const char* name = NULL;
+	const char* name = "INVALID_BITS_OP";
 
 	if (is_modify) {
 		if (op_code >= AS_HLL_MODIFY_OP_START &&
@@ -489,7 +489,7 @@ as_hll_op_name(uint32_t op_code, bool is_modify)
 		name = hll_read_op_table[op_code].name;
 	}
 
-	return name != NULL ? name : "INVALID_HLL_OP";
+	return name;
 }
 
 

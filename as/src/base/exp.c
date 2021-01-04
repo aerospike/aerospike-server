@@ -177,7 +177,6 @@ typedef struct op_cmp_regex_s {
 	op_base_mem base;
 	regex_t regex;
 	uint32_t regex_str_sz;
-	const uint8_t* regex_str;
 	uint32_t flags;
 } op_cmp_regex;
 
@@ -1109,7 +1108,6 @@ build_cmp_regex(build_args* args)
 	}
 
 	op->regex_str_sz = regex_str_sz;
-	op->regex_str = regex_str;
 	op->flags = regex_options;
 
 	args->exp->cleanup_stack[args->exp->cleanup_stack_ix++] = op;

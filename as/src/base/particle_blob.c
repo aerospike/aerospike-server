@@ -834,7 +834,7 @@ as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb)
 const char*
 as_bits_op_name(uint32_t op_code, bool is_modify)
 {
-	const char* name = NULL;
+	const char* name = "INVALID_BITS_OP";
 
 	if (is_modify) {
 		if (op_code >= AS_BITS_MODIFY_OP_START &&
@@ -847,7 +847,7 @@ as_bits_op_name(uint32_t op_code, bool is_modify)
 		name = bits_read_op_table[op_code].name;
 	}
 
-	return name != NULL ? name : "INVALID_BITS_OP";
+	return name;
 }
 
 
