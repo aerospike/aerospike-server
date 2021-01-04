@@ -147,7 +147,7 @@ static inline bool excluded_set(as_index* r, uint16_t set_id);
 
 #define LOW_PRIORITY_RPS 5000 // for compatibility with old clients
 
-const size_t INIT_BUF_BUILDER_SIZE = 1024 * 1024 * 2;
+const size_t INIT_BUF_BUILDER_SIZE = 1024 * 1024 * 7 / 4; // 1.75M
 const size_t SCAN_CHUNK_LIMIT = 1024 * 1024;
 
 #define MAX_ACTIVE_TRANSACTIONS 200
