@@ -796,7 +796,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout,
 			as_transaction_compress_response(tr));
 
-	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} n-pids-requested %hu rps %u sample-%s %lu%s%s socket-timeout %u from %s",
+	cf_debug(AS_SCAN, "starting basic scan job %lu {%s:%s} n-pids-requested %hu rps %u sample-%s %lu%s%s socket-timeout %u from %s",
 			_job->trid, ns->name, set_name, _job->n_pids_requested, _job->rps,
 			sample_max == 0 ? "pct" : "max",
 			sample_max == 0 ? (uint64_t)job->sample_pct : sample_max,
@@ -915,7 +915,7 @@ basic_scan_job_finish(as_scan_job* _job)
 		break;
 	}
 
-	cf_info(AS_SCAN, "finished basic scan job %lu (%d)", _job->trid,
+	cf_debug(AS_SCAN, "finished basic scan job %lu (%d)", _job->trid,
 			_job->abandoned);
 }
 
