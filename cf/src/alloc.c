@@ -292,7 +292,8 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 	uint32_t delta = val & 0xffff;
 
 	if (site_id >= MAX_SITES) {
-		cf_crash(CF_ALLOC, "corruption %zu@%p RA %p, invalid site ID", jem_sz, p, ra);
+		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid site ID",
+				jem_sz, p, cf_log_strip_aslr(ra));
 	}
 
 	if (delta == 0xffff) {
