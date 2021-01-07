@@ -113,6 +113,7 @@ typedef struct as_storage_rd_s {
 
 	uint8_t					which_current_swb;
 	bool					read_page_cache;
+	bool					resolve_writes; // relevant only for enterprise edition
 	bool					xdr_bin_writes; // relevant only for enterprise edition
 	bool					bin_luts;
 

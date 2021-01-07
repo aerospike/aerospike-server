@@ -1979,6 +1979,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_string(db, "conflict-resolution-policy", "undefined");
 	}
 
+	info_append_bool(db, "conflict-resolve-writes", ns->conflict_resolve_writes);
 	info_append_bool(db, "data-in-index", ns->data_in_index);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
@@ -3177,6 +3178,27 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of nsup-threads of ns %s from %u to %d", ns->name, ns->n_nsup_threads, val);
 			ns->n_nsup_threads = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "conflict-resolve-writes", context, &context_len)) {
+			if (as_config_error_enterprise_only()) {
+				cf_warning(AS_INFO, "conflict-resolve-writes is enterprise-only");
+				goto Error;
+			}
+			if (ns->single_bin) {
+				cf_warning(AS_INFO, "conflict-resolve-writes can't be set for single-bin namespace");
+				goto Error;
+			}
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of conflict-resolve-writes of ns %s to %s", ns->name, context);
+				ns->conflict_resolve_writes = true;
+			}
+			else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
+				cf_info(AS_INFO, "Changing value of conflict-resolve-writes of ns %s to %s", ns->name, context);
+				ns->conflict_resolve_writes = false;
+			}
+			else {
+				goto Error;
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "xdr-bin-tombstone-ttl", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {

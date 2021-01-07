@@ -89,6 +89,7 @@ struct as_storage_rd_s;
 #define AS_ERR_ENTERPRISE_ONLY          25
 #define AS_ERR_OP_NOT_APPLICABLE        26
 #define AS_ERR_FILTERED_OUT             27
+#define AS_ERR_LOST_CONFLICT            28
 
 // Security. (Defined here to ensure no overlap with other result codes.)
 #define AS_SEC_OK_LAST                  50 // the last message
@@ -283,6 +284,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_PID_ARRAY         11
 #define AS_MSG_FIELD_TYPE_DIGEST_ARRAY      12
 #define AS_MSG_FIELD_TYPE_SAMPLE_MAX        13
+#define AS_MSG_FIELD_TYPE_LUT               14 // for XDR writes only
 
 // Secondary index.
 #define AS_MSG_FIELD_TYPE_INDEX_NAME        21
@@ -314,17 +316,18 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 9)
 #define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 10)
 #define AS_MSG_FIELD_BIT_SAMPLE_MAX         (1 << 11)
-#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 12)
-#define AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 13)
-#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 14)
-#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 15)
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 16)
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 17)
-#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 18)
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 19)
-#define AS_MSG_FIELD_BIT_BATCH              (1 << 20)
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 21)
-#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 22)
+#define AS_MSG_FIELD_BIT_LUT                (1 << 12) // for XDR writes only
+#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 13)
+#define AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 14)
+#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 15)
+#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 16)
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 17)
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 18)
+#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 19)
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 20)
+#define AS_MSG_FIELD_BIT_BATCH              (1 << 21)
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 22)
+#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 23)
 
 // Special message field values.
 #define AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE    (0x08)
@@ -338,10 +341,11 @@ typedef struct as_msg_op_s {
 	uint32_t op_sz; // includes everything past this
 	uint8_t op;
 	uint8_t particle_type;
-	uint8_t version; // now unused
+	uint8_t has_lut: 1;
+	uint8_t unused_flags: 7;
 	uint8_t name_sz;
 	uint8_t name[0];
-	// Note - op value follows name.
+	// Note - optional metadata (lut) and op value follows name.
 } __attribute__((__packed__)) as_msg_op;
 
 #define OP_FIXED_SZ (offsetof(as_msg_op, name) - offsetof(as_msg_op, op))
@@ -766,16 +770,28 @@ as_msg_field_get(const as_msg* msg, uint8_t type)
 	return NULL;
 }
 
+static inline uint32_t
+as_msg_op_meta_sz(const as_msg_op* op)
+{
+	return op->has_lut == 1 ? sizeof(uint64_t) : 0;
+}
+
+static inline uint64_t
+as_msg_op_get_lut(const as_msg_op* op)
+{
+	return op->has_lut == 1 ? *(uint64_t*)(op->name + op->name_sz) : 0;
+}
+
 static inline const uint8_t*
 as_msg_op_get_value_p(const as_msg_op* op)
 {
-	return op->name + op->name_sz;
+	return op->name + op->name_sz + as_msg_op_meta_sz(op);
 }
 
 static inline uint32_t
 as_msg_op_get_value_sz(const as_msg_op* op)
 {
-	return op->op_sz - (OP_FIXED_SZ + op->name_sz);
+	return op->op_sz - (OP_FIXED_SZ + op->name_sz + as_msg_op_meta_sz(op));
 }
 
 static inline as_msg_op*
@@ -788,7 +804,7 @@ static inline uint8_t*
 as_msg_op_skip(as_msg_op* op)
 {
 	// At least 4 bytes always follow op_sz.
-	return OP_FIXED_SZ + (uint32_t)op->name_sz > op->op_sz ?
+	return OP_FIXED_SZ + op->name_sz + as_msg_op_meta_sz(op) > op->op_sz ?
 			NULL : (uint8_t*)as_msg_op_get_next(op);
 }
 

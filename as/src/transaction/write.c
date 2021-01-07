@@ -929,6 +929,11 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) != 0 ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
+	if (record_level_replace && forbid_replace(ns)) {
+		cf_warning(AS_RW, "{%s} write_master: can't replace record %pD if conflict resolving", ns->name, &tr->keyd);
+		return AS_ERR_PARAMETER;
+	}
+
 	bool single_bin_write_first = false;
 	bool has_read_op = false;
 	bool has_read_all_op = false;
@@ -1296,7 +1301,7 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	// response, pickling, and writing.
 	//
 
-	prepare_bin_metadata(rd);
+	prepare_bin_metadata(tr, rd);
 
 	index_metadata old_metadata;
 
@@ -1539,7 +1544,7 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	// response, pickling, and writing.
 	//
 
-	prepare_bin_metadata(rd);
+	prepare_bin_metadata(tr, rd);
 
 	index_metadata old_metadata;
 
@@ -1713,12 +1718,28 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	as_namespace* ns = tr->rsv.ns;
 	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 
+	uint64_t msg_lut = as_transaction_xdr_lut(tr);
+
+	if (forbid_resolve(tr, rd, msg_lut)) {
+		return AS_ERR_FORBIDDEN;
+	}
+
+	uint16_t n_won = m->n_ops;
+
 	int result;
 
 	as_msg_op* op = NULL;
 	int i = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
+		if (! resolve_bin(rd, op, msg_lut, &n_won, &result)) {
+			if (result != AS_OK) {
+				return result;
+			}
+
+			continue;
+		}
+
 		if (op->op == AS_MSG_OP_TOUCH) {
 			touch_bin_metadata(rd);
 			continue;
@@ -1728,7 +1749,9 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			// AS_PARTICLE_TYPE_NULL means delete the bin.
 			// TODO - should this even be allowed for single-bin?
 			if (op->particle_type == AS_PARTICLE_TYPE_NULL) {
-				delete_bin(rd, op->name, op->name_sz, cleanup_bins, p_n_cleanup_bins);
+				if (! delete_bin(rd, op, msg_lut, cleanup_bins, p_n_cleanup_bins, &result)) {
+					return result;
+				}
 			}
 			// It's a regular bin write.
 			else {
@@ -1737,6 +1760,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				if (! b) {
 					return result;
 				}
+
+				write_resolved_bin(rd, op, msg_lut, b);
 
 				if (ns->storage_data_in_memory) {
 					as_bin cleanup_bin;

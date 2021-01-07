@@ -117,6 +117,12 @@ void
 as_msg_swap_op(as_msg_op *op)
 {
 	op->op_sz = cf_swap_from_be32(op->op_sz);
+
+	if (op->has_lut == 1) {
+		uint64_t *lut = (uint64_t *)(op->name + op->name_sz);
+
+		*lut = cf_swap_from_be64(*lut);
+	}
 }
 
 
@@ -260,7 +266,8 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 	for (uint16_t i = 0; i < bin_count; i++) {
 		as_msg_op *op = (as_msg_op *)buf;
 
-		op->version = 0;
+		op->has_lut = 0;
+		op->unused_flags = 0;
 
 		if (ops) {
 			op->op = ops[i]->op;
@@ -456,7 +463,8 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			as_msg_op *op = (as_msg_op *)buf;
 
 			op->op = AS_MSG_OP_READ;
-			op->version = 0;
+			op->has_lut = 0;
+			op->unused_flags = 0;
 			op->name_sz = as_bin_memcpy_name(ns, op->name, b);
 			op->op_sz = OP_FIXED_SZ + op->name_sz;
 
@@ -477,7 +485,8 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			as_msg_op *op = (as_msg_op *)buf;
 
 			op->op = AS_MSG_OP_READ;
-			op->version = 0;
+			op->has_lut = 0;
+			op->unused_flags = 0;
 			op->name_sz = as_bin_memcpy_name(ns, op->name, b);
 			op->op_sz = OP_FIXED_SZ + op->name_sz;
 
@@ -581,7 +590,8 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 	op->name_sz = (uint8_t)bin_name_len;
 	memcpy(op->name, bin_name, op->name_sz);
 	op->op_sz = OP_FIXED_SZ + op->name_sz;
-	op->version = 0;
+	op->has_lut = 0;
+	op->unused_flags = 0;
 
 	as_particle_asval_to_client(val, op);
 
@@ -638,7 +648,8 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 	op->name_sz = (uint8_t)bin_name_len;
 	memcpy(op->name, bin_name, op->name_sz);
 	op->op_sz = OP_FIXED_SZ + op->name_sz;
-	op->version = 0;
+	op->has_lut = 0;
+	op->unused_flags = 0;
 
 	as_particle_asval_to_client(val, op);
 

@@ -121,13 +121,22 @@ generation_check(const as_record* r, const as_msg* m, const as_namespace* ns)
 }
 
 
+bool
+forbid_replace(const as_namespace* ns)
+{
+	return false;
+}
+
+
 void
-prepare_bin_metadata(as_storage_rd* rd)
+prepare_bin_metadata(const as_transaction* tr, as_storage_rd* rd)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
-	if (rd->bin_luts) { // no usage with independent LUTs yet
+	rd->bin_luts = false; // no usage with independent LUTs yet
+
+	if (rd->bin_luts) {
 		for (uint32_t i = 0; i < rd->n_bins; i++) {
 			as_bin* b = &rd->bins[i];
 
@@ -194,16 +203,62 @@ transition_delete_metadata(as_transaction* tr, as_record* r, bool is_delete)
 }
 
 
-void
-delete_bin(as_storage_rd* rd, const uint8_t* name, size_t name_len,
-		as_bin* cleanup_bins, uint32_t* p_n_cleanup_bins)
+bool
+forbid_resolve(const as_transaction* tr, const as_storage_rd* rd,
+		uint64_t msg_lut)
+{
+	return false;
+}
+
+
+bool
+resolve_bin(as_storage_rd* rd, const as_msg_op* op, uint64_t msg_lut,
+		uint16_t* n_won, int* result)
+{
+	return true;
+}
+
+
+bool
+udf_resolve_bin(as_storage_rd* rd, const char* name)
+{
+	return true;
+}
+
+
+bool
+delete_bin(as_storage_rd* rd, const as_msg_op* op, uint64_t msg_lut,
+		as_bin* cleanup_bins, uint32_t* p_n_cleanup_bins, int* result)
 {
 	as_bin cleanup_bin;
 
-	if (as_bin_pop_w_len(rd, name, name_len, &cleanup_bin) &&
+	if (as_bin_pop_w_len(rd, op->name, op->name_sz, &cleanup_bin) &&
 			rd->ns->storage_data_in_memory) {
 		append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 	}
+
+	return true;
+}
+
+
+bool
+udf_delete_bin(as_storage_rd* rd, const char* name, as_bin* cleanup_bins,
+		uint32_t* p_n_cleanup_bins, int* result)
+{
+	as_bin cleanup_bin;
+
+	if (as_bin_pop(rd, name, &cleanup_bin) && rd->ns->storage_data_in_memory) {
+		append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
+	}
+
+	return true;
+}
+
+
+void
+write_resolved_bin(as_storage_rd* rd, const as_msg_op* op, uint64_t msg_lut,
+		as_bin* b)
+{
 }
 
 

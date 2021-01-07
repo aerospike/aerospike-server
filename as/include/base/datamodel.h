@@ -157,19 +157,19 @@ typedef struct as_bin_s {
 	// Never read or write these bytes in single-bin configuration:
 
 	uint16_t id;			// ID of bin name
-	uint8_t unused;			// legacy - reserved for more bins?
 
 	uint8_t xdr_write: 1;	// enterprise only
 	uint8_t unused_flags: 7;
 	uint64_t lut: 40;
+	uint8_t src_id;
 } __attribute__ ((__packed__)) as_bin;
 
 typedef struct as_bin_no_meta_s {
 	uint64_t dummy64;
-	uint32_t dummy32;
+	uint32_t dummy24: 24;
 } __attribute__ ((__packed__)) as_bin_no_meta;
 
-COMPILER_ASSERT(sizeof(as_bin_no_meta) == offsetof(as_bin, unused) + 1);
+COMPILER_ASSERT(sizeof(as_bin_no_meta) == offsetof(as_bin, id) + 2);
 
 // For data-in-memory namespaces in multi-bin mode, we keep an array of as_bin
 // structs in memory, accessed via this struct.
@@ -729,6 +729,7 @@ struct as_namespace_s {
 	bool			allow_ttl_without_nsup;
 	uint32_t		background_scan_max_rps;
 	conflict_resolution_pol conflict_resolution_policy;
+	bool			conflict_resolve_writes;
 	bool			cp; // relevant only for enterprise edition
 	bool			cp_allow_drops; // relevant only for enterprise edition
 	bool			data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)

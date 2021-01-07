@@ -119,7 +119,32 @@ unpack_bin_xdr_write(uint8_t flags, as_bin* b)
 {
 }
 
+const uint8_t*
+unpack_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* end,
+		as_bin* b)
+{
+	return at;
+}
+
+const uint8_t*
+skip_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* end)
+{
+	return at;
+}
+
 void
 flatten_bin_xdr_write(const as_bin* b, uint8_t* flags)
 {
+}
+
+uint32_t
+bin_src_id_flat_size(const as_bin* b)
+{
+	return 0;
+}
+
+uint32_t
+flatten_bin_src_id(const as_bin* b, uint8_t* flags, uint8_t* at)
+{
+	return 0;
 }

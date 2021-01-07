@@ -303,8 +303,9 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->key = NULL;
 	rd->which_current_swb = SWB_MASTER;
 	rd->read_page_cache = false;
-	rd->xdr_bin_writes = ns->xdr_ships_changed_bins;
-	rd->bin_luts = rd->xdr_bin_writes;
+	rd->resolve_writes = false;
+	rd->xdr_bin_writes = false;
+	rd->bin_luts = false;
 	rd->keep_pickle = false;
 	rd->pickle_sz = 0;
 	rd->orig_pickle_sz = 0;
@@ -341,8 +342,9 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 	rd->key = NULL;
 	rd->which_current_swb = SWB_MASTER;
 	rd->read_page_cache = false;
-	rd->xdr_bin_writes = ns->xdr_ships_changed_bins;
-	rd->bin_luts = rd->xdr_bin_writes;
+	rd->resolve_writes = false;
+	rd->xdr_bin_writes = false;
+	rd->bin_luts = false;
 	rd->keep_pickle = false;
 	rd->pickle_sz = 0;
 	rd->orig_pickle_sz = 0;

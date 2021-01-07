@@ -104,6 +104,8 @@ as_flat_record_size(const as_storage_rd* rd)
 				if (bin->lut != 0) {
 					meta_sz += sizeof(flat_bin_lut);
 				}
+
+				meta_sz += bin_src_id_flat_size(bin);
 			}
 		}
 
@@ -338,6 +340,10 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 					b->lut = ((flat_bin_lut*)at)->lut;
 					at += sizeof(flat_bin_lut);
 				}
+
+				if ((at = unpack_bin_src_id(flags, at, end, b)) == NULL) {
+					break;
+				}
 			}
 		}
 
@@ -396,6 +402,10 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 
 				if ((flags & BIN_HAS_LUT) != 0) {
 					at += sizeof(flat_bin_lut);
+				}
+
+				if ((at = skip_bin_src_id(flags, at, end)) == NULL) {
+					return false;
 				}
 			}
 		}
@@ -564,6 +574,8 @@ flatten_bins(const as_storage_rd* rd, uint8_t* buf, uint32_t* sz)
 					((flat_bin_lut*)buf)->lut = bin->lut;
 					buf += sizeof(flat_bin_lut);
 				}
+
+				buf += flatten_bin_src_id(bin, flags, buf);
 			}
 		}
 

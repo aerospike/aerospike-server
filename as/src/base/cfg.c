@@ -452,6 +452,7 @@ typedef enum {
 	CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP,
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
+	CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
@@ -670,6 +671,7 @@ typedef enum {
 	// XDR options:
 	// Normally visible, in canonical configuration file order:
 	CASE_XDR_DC_BEGIN,
+	CASE_XDR_SRC_ID,
 
 	// XDR (remote) DC options:
 	// Normally visible, in canonical configuration file order:
@@ -704,6 +706,7 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE,
 	CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS,
 	CASE_XDR_DC_NAMESPACE_SHIP_BIN,
+	CASE_XDR_DC_NAMESPACE_SHIP_BIN_LUTS,
 	CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES,
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS,
 	CASE_XDR_DC_NAMESPACE_SHIP_SET,
@@ -960,6 +963,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "allow-ttl-without-nsup",			CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP },
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
+		{ "conflict-resolve-writes",		CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
@@ -1205,6 +1209,7 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 
 const cfg_opt XDR_OPTS[] = {
 		{ "dc",								CASE_XDR_DC_BEGIN },
+		{ "src-id",							CASE_XDR_SRC_ID },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1242,6 +1247,7 @@ const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "remote-namespace", 				CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE },
 		{ "sc-replication-wait-ms",			CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS },
 		{ "ship-bin",						CASE_XDR_DC_NAMESPACE_SHIP_BIN },
+		{ "ship-bin-luts",					CASE_XDR_DC_NAMESPACE_SHIP_BIN_LUTS },
 		{ "ship-nsup-deletes",				CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES },
 		{ "ship-only-specified-sets",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS },
 		{ "ship-set",						CASE_XDR_DC_NAMESPACE_SHIP_SET },
@@ -2862,6 +2868,10 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES:
+				cfg_enterprise_only(&line);
+				ns->conflict_resolve_writes = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_DATA_IN_INDEX:
 				ns->data_in_index = cfg_bool(&line);
 				break;
@@ -3072,6 +3082,9 @@ as_config_init(const char* config_file)
 				}
 				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 					cf_crash_nostack(AS_CFG, "{%s} 'storage-engine pmem' can't be used with 'index-type flash'", ns->name);
+				}
+				if (ns->conflict_resolve_writes && ns->single_bin) {
+					cf_crash_nostack(AS_CFG, "{%s} 'conflict-resolve-writes' can't be true if 'single-bin' is true", ns->name);
 				}
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
@@ -3695,6 +3708,9 @@ as_config_init(const char* config_file)
 				dc_cfg = as_xdr_startup_create_dc(line.val_tok_1);
 				cfg_begin_context(&state, XDR_DC);
 				break;
+			case CASE_XDR_SRC_ID:
+				c->xdr_cfg.src_id = cfg_u8(&line, 1, UINT8_MAX);
+				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
 				break;
@@ -3826,6 +3842,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_NAMESPACE_SHIP_BIN:
 				cf_vector_append_ptr(dc_ns_cfg->shipped_bins, cfg_strdup(&line, AS_BIN_NAME_MAX_SZ));
+				break;
+			case CASE_XDR_DC_NAMESPACE_SHIP_BIN_LUTS:
+				dc_ns_cfg->ship_bin_luts = cfg_bool(&line);
 				break;
 			case CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES:
 				dc_ns_cfg->ship_nsup_deletes = cfg_bool(&line);

@@ -377,6 +377,19 @@ as_transaction_trid(const as_transaction *tr)
 	return cf_swap_from_be64(*(uint64_t*)f->data);
 }
 
+static inline uint64_t
+as_transaction_xdr_lut(const as_transaction *tr)
+{
+	if ((tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) == 0 ||
+			(tr->msg_fields & AS_MSG_FIELD_BIT_LUT) == 0) {
+		return 0;
+	}
+
+	as_msg_field *f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_LUT);
+
+	return cf_swap_from_be64(*(uint64_t*)f->data);
+}
+
 static inline bool
 as_transaction_compress_response(const as_transaction *tr)
 {

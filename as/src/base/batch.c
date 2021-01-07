@@ -1150,7 +1150,8 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 			as_bin* bin = bins[i];
 			as_msg_op* op = (as_msg_op*)p;
 			op->op = AS_MSG_OP_READ;
-			op->version = 0;
+			op->has_lut = 0;
+			op->unused_flags = 0;
 
 			if (ops) {
 				as_msg_op* src = ops[i];

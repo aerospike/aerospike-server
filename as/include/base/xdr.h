@@ -98,6 +98,7 @@ typedef struct as_xdr_dc_ns_cfg_s {
 	uint32_t max_throughput;
 	char* remote_namespace;
 	uint32_t sc_replication_wait_ms;
+	bool ship_bin_luts;
 	bool ship_nsup_deletes;
 	bool ship_only_specified_sets;
 	uint32_t transaction_queue_limit;
@@ -137,6 +138,8 @@ typedef struct as_xdr_dc_cfg_s {
 
 typedef struct as_xdr_config_s {
 	bool xdr_configured; // not actual config - indicates 'xdr' context present
+
+	uint8_t src_id;
 
 	// For debugging.
 	uint32_t trace_sample; // dynamic only

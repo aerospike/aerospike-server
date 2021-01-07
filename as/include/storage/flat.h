@@ -137,7 +137,8 @@ typedef struct as_flat_opt_meta_s {
 // Remaining bits union with particle type:
 #define BIN_HAS_EXTRA_FLAGS		0x40 // not supported yet
 #define BIN_XDR_WRITE			0x20 // relevant only for enterprise edition
-#define BIN_UNKNOWN_FLAGS		(0x10 | 0x08 | 0x04 | 0x02)
+#define BIN_UNKNOWN_FLAGS		(0x10 | 0x08 | 0x04)
+#define BIN_HAS_SRC_ID			0x02
 #define BIN_HAS_LUT				0x01
 
 typedef struct flat_bin_lut_s {
@@ -218,7 +219,12 @@ void set_flat_xdr_state(const struct as_index_s* r, as_flat_record* flat);
 as_flat_extra_flags get_flat_extra_flags(const struct as_index_s* r);
 
 void unpack_bin_xdr_write(uint8_t flags, struct as_bin_s* b);
+const uint8_t* unpack_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* end, struct as_bin_s* b);
+const uint8_t* skip_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* end);
+
 void flatten_bin_xdr_write(const struct as_bin_s* b, uint8_t* flags);
+uint32_t bin_src_id_flat_size(const struct as_bin_s* b);
+uint32_t flatten_bin_src_id(const struct as_bin_s* b, uint8_t* flags, uint8_t* at);
 
 static inline bool
 flat_extra_flags_used(const as_flat_extra_flags* extra_flags)

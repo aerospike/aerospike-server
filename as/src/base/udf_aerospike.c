@@ -73,7 +73,7 @@ static cf_clock udf_aerospike_get_current_time(const as_aerospike* as);
 static int execute_updates(udf_record* urecord);
 static void prepare_for_write(udf_record* urecord);
 static void execute_failed(udf_record* urecord, int result_code);
-static void execute_delete_bin(udf_record* urecord, const char* name);
+static int execute_delete_bin(udf_record* urecord, const char* name);
 static int execute_set_bin(udf_record* urecord, const char* name, const as_val* val);
 static uint8_t* get_particle_buf(udf_record* urecord, uint32_t size);
 
@@ -350,8 +350,19 @@ execute_updates(udf_record* urecord)
 			char* name = urecord->updates[i].name;
 			as_val* val = urecord->updates[i].value;
 
+			if (! udf_resolve_bin(rd, name)) {
+				execute_failed(urecord, AS_ERR_LOST_CONFLICT);
+				return -1;
+			}
+
 			if (val == NULL || val->type == AS_NIL) {
-				execute_delete_bin(urecord, name);
+				int rv = execute_delete_bin(urecord, name);
+
+				if (rv != AS_OK) {
+					execute_failed(urecord, rv);
+					return -1;
+				}
+
 				udf_record_cache_reclaim(urecord, i--); // decrements n_updates
 			}
 			else {
@@ -406,7 +417,7 @@ prepare_for_write(udf_record* urecord)
 	}
 	else {
 		memcpy(urecord->old_bins, rd->bins, rd->n_bins * sizeof(as_bin));
-		prepare_bin_metadata(rd);
+		prepare_bin_metadata(urecord->tr, rd);
 	}
 }
 
@@ -451,11 +462,17 @@ execute_failed(udf_record* urecord, int result_code)
 	udf_record_cache_free(urecord);
 }
 
-static void
+static int
 execute_delete_bin(udf_record* urecord, const char* name)
 {
-	delete_bin(urecord->rd, (const uint8_t*)name, strlen(name),
-			urecord->cleanup_bins, &urecord->n_cleanup_bins);
+	int result;
+
+	if (! udf_delete_bin(urecord->rd, name,
+			urecord->cleanup_bins, &urecord->n_cleanup_bins, &result)) {
+		return result;
+	}
+
+	return AS_OK;
 }
 
 static int
