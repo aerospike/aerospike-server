@@ -23,6 +23,7 @@
 #include "fabric/skew_monitor.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -678,7 +679,7 @@ skew_monitor_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	as_skew_plugin_data* skew_plugin_data =
 			(as_skew_plugin_data*)plugin_data->data;
 
-	int64_t hlc_diff_ms = abs(as_hlc_timestamp_diff_ms(send_hlc_ts, hlc_now));
+	int64_t hlc_diff_ms = labs(as_hlc_timestamp_diff_ms(send_hlc_ts, hlc_now));
 
 	if (hlc_diff_ms > HLC_DEVIATION_MAX_MS) {
 		if (skew_plugin_data->bad_hlc_streak < BAD_HLC_STREAK_MAX) {
