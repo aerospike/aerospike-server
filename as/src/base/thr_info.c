@@ -1795,6 +1795,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string(db, "cluster-name", cluster_name);
 
 	info_append_bool(db, "disable-udf-execution", g_config.udf_execution_disabled);
+	info_append_bool(db, "downgrading", g_config.downgrading);
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
@@ -2874,6 +2875,19 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of query-pre-reserve-partitions to %s", context);
 				g_config.partitions_pre_reserved = false;
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "downgrading", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of downgrading to %s", context);
+				g_config.downgrading = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of downgrading to %s", context);
+				g_config.downgrading = false;
 			}
 			else {
 				goto Error;

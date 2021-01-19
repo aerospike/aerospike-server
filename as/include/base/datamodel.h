@@ -418,6 +418,9 @@ extern as_bin *as_bin_get_or_create_w_len(as_storage_rd *rd, const uint8_t *name
 extern bool as_bin_pop(as_storage_rd* rd, const char* name, as_bin* bin);
 extern bool as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin* bin);
 
+// Special API for downgrades.
+int as_bin_downgrade_pickle(as_storage_rd* rd);
+
 
 typedef enum {
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF = 0,
