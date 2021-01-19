@@ -99,6 +99,7 @@ typedef struct as_config_s {
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
 	bool			udf_execution_disabled;
+	bool			downgrading;
 	bool			fabric_benchmarks_enabled;
 	bool			health_check_enabled;
 	bool			info_hist_enabled;

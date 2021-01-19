@@ -867,6 +867,14 @@ as_storage_rd_load_key(as_storage_rd *rd)
 bool
 as_storage_rd_load_pickle(as_storage_rd *rd)
 {
+	if (g_config.downgrading) {
+		int rv = as_bin_downgrade_pickle(rd);
+
+		if (rv != 0) {
+			return rv == 1;
+		}
+	}
+
 	if (rd->ns->storage_data_in_memory) {
 		as_storage_record_get_set_name(rd);
 		as_storage_rd_load_key(rd);
