@@ -47,8 +47,10 @@
  * 5 - 4.7.0.3 - for AER-6143 (SC quiesce with non-roster nodes bug).
  * 6 - 4.9.0 - for XDR compatibility with 5.0.0+.
  * 7 - 5.0.0 - for XDR compatibility with 4.9.0.
+ * 8 - 5.2.0.17 & 5.3.0.8 - for (stripping) bin metadata and tombstones.
+ * 9 - 5.4.0.3 - for (stripping) bin src-id or bin metadata and tombstones.
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 7
+#define AS_EXCHANGE_COMPATIBILITY_ID 9
 
 /**
  * Number of quantum intervals in orphan state after which client transactions
