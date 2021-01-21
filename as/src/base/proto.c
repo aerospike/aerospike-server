@@ -795,13 +795,8 @@ as_netio_send(as_netio *io, bool slow, bool blocking)
 	// If needs requeue then requeue it.
 	switch (ret) {
 	case AS_NETIO_CONTINUE:
-		if (slow) {
-			io->slow = true;
-			cf_queue_push(&g_netio_slow_queue, io);
-		}
-		else {
-			cf_queue_push(&g_netio_queue, io);
-		}
+		io->slow = slow;
+		cf_queue_push(slow ? &g_netio_slow_queue : &g_netio_queue, io);
 		break;
 	default:
 		ret = AS_NETIO_OK;
