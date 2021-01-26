@@ -191,7 +191,7 @@ transaction_status
 as_read_start(as_transaction* tr)
 {
 	BENCHMARK_START(tr, read, FROM_CLIENT);
-	BENCHMARK_NEXT_DATA_POINT_FROM(tr, batch_sub, FROM_BATCH, start);
+	BENCHMARK_START_FROM_BATCH(tr);
 
 	if (! repl_ping_check(tr)) {
 		send_read_response(tr, NULL, NULL, 0, NULL);
