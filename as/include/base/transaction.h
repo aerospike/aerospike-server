@@ -84,11 +84,25 @@ struct as_namespace_s;
 #define BENCHMARK_START(tr, name, orig) \
 { \
 	if (tr->rsv.ns->name##_benchmarks_enabled && tr->origin == orig) { \
-		if (tr->benchmark_time == 0) { \
-			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_start_hist, tr->start_time); \
+		if ((tr->from_flags & FROM_FLAG_RESTART) != 0) { \
+			if (tr->benchmark_time != 0) { \
+				tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_restart_hist, tr->benchmark_time); \
+			} \
 		} \
 		else { \
-			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_restart_hist, tr->benchmark_time); \
+			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_start_hist, tr->start_time); \
+		} \
+	} \
+}
+
+#define BENCHMARK_START_FROM_BATCH(tr) \
+{ \
+	if (tr->rsv.ns->batch_sub_benchmarks_enabled && tr->origin == FROM_BATCH && tr->benchmark_time != 0) { \
+		if ((tr->from_flags & FROM_FLAG_RESTART) != 0) { \
+			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->batch_sub_restart_hist, tr->benchmark_time); \
+		} \
+		else { \
+			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->batch_sub_start_hist, tr->benchmark_time); \
 		} \
 	} \
 }
