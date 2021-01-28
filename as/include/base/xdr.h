@@ -124,6 +124,7 @@ typedef struct as_xdr_dc_cfg_s {
 	char* auth_user; // Aerospike destinations only
 
 	bool connector;
+	uint32_t max_recoveries_interleaved;
 	uint32_t max_used_service_threads;
 	uint32_t period_us;
 
