@@ -103,6 +103,7 @@ void log_line_scan(as_namespace* ns);
 void log_line_query(as_namespace* ns);
 void log_line_udf_sub(as_namespace* ns);
 void log_line_ops_sub(as_namespace* ns);
+void log_line_dup_res(as_namespace* ns);
 void log_line_retransmits(as_namespace* ns);
 void log_line_re_repl(as_namespace* ns);
 void log_line_special_errors(as_namespace* ns);
@@ -216,6 +217,7 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_query(ns);
 		log_line_udf_sub(ns);
 		log_line_ops_sub(ns);
+		log_line_dup_res(ns);
 		log_line_retransmits(ns);
 		log_line_re_repl(ns);
 		log_line_special_errors(ns);
@@ -883,6 +885,25 @@ log_line_ops_sub(as_namespace* ns)
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
 			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out
+			);
+}
+
+void
+log_line_dup_res(as_namespace* ns)
+{
+	uint64_t n_ask = ns->n_dup_res_ask;
+	uint64_t n_respond_read = ns->n_dup_res_respond_read;
+	uint64_t n_respond_no_read = ns->n_dup_res_respond_no_read;
+
+	if ((n_ask |
+			n_respond_read | n_respond_no_read) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} dup-res: ask %lu respond (%lu,%lu)",
+			ns->name,
+			n_ask,
+			n_respond_read, n_respond_no_read
 			);
 }
 

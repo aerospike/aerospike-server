@@ -5776,6 +5776,13 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "ops_sub_write_timeout", ns->n_ops_sub_write_timeout);
 	info_append_uint64(db, "ops_sub_write_filtered_out", ns->n_ops_sub_write_filtered_out);
 
+	// Duplicate resolution stats.
+
+	info_append_uint64(db, "dup_res_ask", ns->n_dup_res_ask);
+
+	info_append_uint64(db, "dup_res_respond_read", ns->n_dup_res_respond_read);
+	info_append_uint64(db, "dup_res_respond_no_read", ns->n_dup_res_respond_no_read);
+
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
 	info_append_uint64(db, "retransmit_all_read_dup_res", ns->n_retransmit_all_read_dup_res);

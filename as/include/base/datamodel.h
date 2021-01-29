@@ -1040,6 +1040,13 @@ struct as_namespace_s {
 	cf_atomic64		n_ops_sub_write_timeout;
 	uint64_t		n_ops_sub_write_filtered_out;
 
+	// Duplicate resolution stats.
+
+	cf_atomic64		n_dup_res_ask;
+
+	cf_atomic64		n_dup_res_respond_read;
+	cf_atomic64		n_dup_res_respond_no_read;
+
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
 	uint64_t		n_retransmit_all_read_dup_res;

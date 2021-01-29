@@ -399,6 +399,8 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	cf_mutex_unlock(&rw->lock);
 
+	cf_atomic64_add(&rw->rsv.ns->n_dup_res_ask, rw->n_dest_nodes);
+
 	if (delete_from_hash) {
 		rw_request_hash_delete(&hkey, rw);
 	}
@@ -433,17 +435,21 @@ void
 done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref,
 		as_storage_rd* rd)
 {
+	as_namespace* ns = rsv->ns;
+
 	if (rd) {
 		as_storage_record_close(rd);
+		cf_atomic64_incr(&ns->n_dup_res_respond_read);
+	}
+	else {
+		cf_atomic64_incr(&ns->n_dup_res_respond_no_read);
 	}
 
 	if (r_ref) {
-		as_record_done(r_ref, rsv->ns);
+		as_record_done(r_ref, ns);
 	}
 
-	if (rsv) {
-		as_partition_release(rsv);
-	}
+	as_partition_release(rsv);
 }
 
 
