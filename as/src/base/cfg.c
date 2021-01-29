@@ -94,6 +94,7 @@ as_config g_config;
 // Forward declarations.
 //
 
+static void cfg_add_feature_key_file(const char* path);
 static void init_addr_list(cf_addr_list* addrs);
 static void add_addr(const char* name, cf_addr_list* addrs);
 static void add_tls_peer_name(const char* name, cf_serv_spec* spec);
@@ -147,7 +148,7 @@ cfg_set_defaults()
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
-	c->feature_key_file = "/etc/aerospike/features.conf";
+	c->feature_key_files[0] = "/etc/aerospike/features.conf";
 	c->n_info_threads = 16;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
 	c->n_migrate_threads = 1;
@@ -2224,7 +2225,8 @@ as_config_init(const char* config_file)
 				c->info_hist_enabled = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_FEATURE_KEY_FILE:
-				c->feature_key_file = cfg_strdup_no_checks(&line);
+				cfg_enterprise_only(&line);
+				cfg_add_feature_key_file(cfg_strdup_no_checks(&line));
 				break;
 			case CASE_SERVICE_INFO_THREADS:
 				c->n_info_threads = cfg_u32(&line, 1, MAX_INFO_THREADS);
@@ -4424,6 +4426,23 @@ as_config_cluster_name_matches(const char* cluster_name)
 // Item-specific parsing utilities.
 //
 
+// TODO - should be split function or move to EE?
+static void
+cfg_add_feature_key_file(const char* path)
+{
+	if (g_config.n_feature_key_files == MAX_FEATURE_KEY_FILES) {
+		cf_crash_nostack(AS_CFG, "too many feature keys");
+	}
+
+	for (uint32_t i = 0; i < g_config.n_feature_key_files; i++) {
+		if (strcmp(path, g_config.feature_key_files[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "duplicate feature key %s", path);
+		}
+	}
+
+	g_config.feature_key_files[g_config.n_feature_key_files++] = path;
+}
+
 static void
 init_addr_list(cf_addr_list* addrs)
 {
@@ -4707,6 +4726,7 @@ cfg_add_set(as_namespace* ns)
 	return &ns->sets_cfg_array[ns->sets_cfg_count++];
 }
 
+// TODO - should be split function or move to EE?
 static void
 cfg_add_xmem_mount(as_namespace* ns, const char* mount)
 {
@@ -4800,6 +4820,7 @@ cfg_set_cluster_name(char* cluster_name){
 	}
 }
 
+// TODO - should be split function or move to EE?
 static void
 cfg_add_ldap_role_query_pattern(char* pattern)
 {

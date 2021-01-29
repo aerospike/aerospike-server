@@ -67,6 +67,8 @@ struct as_namespace_s;
 
 #define AS_CLUSTER_NAME_SZ 65
 
+#define MAX_FEATURE_KEY_FILES 32
+
 #define MAX_BATCH_THREADS 256
 #define MAX_TLS_SPECS 10
 
@@ -103,7 +105,8 @@ typedef struct as_config_s {
 	bool			fabric_benchmarks_enabled;
 	bool			health_check_enabled;
 	bool			info_hist_enabled;
-	const char*		feature_key_file;
+	const char*		feature_key_files[MAX_FEATURE_KEY_FILES];
+	uint32_t		n_feature_key_files; // indirect config
 	uint32_t		n_info_threads;
 	bool			keep_caps_ssd_health;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.

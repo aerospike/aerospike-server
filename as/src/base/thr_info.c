@@ -1799,7 +1799,11 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
-	info_append_string(db, "feature-key-file", g_config.feature_key_file);
+
+	for (uint32_t i = 0; i < g_config.n_feature_key_files; i++) {
+		info_append_indexed_string(db, "feature-key-file", i, NULL, g_config.feature_key_files[i]);
+	}
+
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
