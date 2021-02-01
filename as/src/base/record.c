@@ -644,6 +644,7 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 	as_bin new_bins[has_sindex ? n_new_bins : 0];
 
 	if (has_sindex) {
+		// TODO - don't need to load a bin cemetery for sindex - optimize?
 		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
 			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
 			return -result;

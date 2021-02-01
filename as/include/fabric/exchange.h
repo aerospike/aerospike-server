@@ -40,17 +40,18 @@
 /**
  * Used by exchange listeners during upgrades for compatibility purposes.
  *
- * 1 - 4.5.1 - for SMD upgrade.
- * 2 - 4.5.2 - for AER-6035 (AP uniform-balance + quiesce bug).
- * 3 - 4.5.3 - for new pickle format.
- * 4 - 4.7.0 - for AER-6128 (AP uniform-balance empty master selection bug).
- * 5 - 4.7.0.3 - for AER-6143 (SC quiesce with non-roster nodes bug).
- * 6 - 4.9.0 - for XDR compatibility with 5.0.0+.
- * 7 - 5.0.0 - for XDR compatibility with 4.9.0.
- * 8 - 5.2.0.17 & 5.3.0.8 - for (stripping) bin metadata and tombstones.
- * 9 - 5.4.0.3 - for (stripping) bin src-id or bin metadata and tombstones.
+ *  1 - 4.5.1 - for SMD upgrade.
+ *  2 - 4.5.2 - for AER-6035 (AP uniform-balance + quiesce bug).
+ *  3 - 4.5.3 - for new pickle format.
+ *  4 - 4.7.0 - for AER-6128 (AP uniform-balance empty master selection bug).
+ *  5 - 4.7.0.3 - for AER-6143 (SC quiesce with non-roster nodes bug).
+ *  6 - 4.9.0 - for XDR compatibility with 5.0.0+.
+ *  7 - 5.0.0 - for XDR compatibility with 4.9.0.
+ *  8 - 5.2.0.17 & 5.3.0.8 - for (stripping) bin metadata and tombstones.
+ *  9 - 5.4.0.3 - for (stripping) bin src-id or bin metadata and tombstones.
+ * 10 - 5.5.0 - for converting bin cemeteries to regular tombstones.
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 9
+#define AS_EXCHANGE_COMPATIBILITY_ID 10
 
 /**
  * Number of quantum intervals in orphan state after which client transactions

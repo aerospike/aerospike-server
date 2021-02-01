@@ -56,6 +56,7 @@ struct as_namespace_s;
 struct as_remote_record_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
+struct cl_msg_s;
 struct rw_request_s;
 
 
@@ -76,6 +77,7 @@ typedef struct index_metadata_s {
 	bool cenotaph; // relevant only for enterprise edition
 	bool xdr_tombstone; // relevant only for enterprise edition
 	bool xdr_nsup_tombstone; // relevant only for enterprise edition
+	bool xdr_bin_cemetery; // relevant only for enterprise edition
 } index_metadata;
 
 typedef struct now_times_s {
@@ -93,6 +95,7 @@ typedef struct now_times_s {
 // Public API.
 //
 
+bool convert_to_write(struct as_transaction_s* tr, struct cl_msg_s** p_msgp);
 int validate_delete_durability(struct as_transaction_s* tr);
 bool xdr_allows_write(struct as_transaction_s* tr);
 void send_rw_messages(struct rw_request_s* rw);
@@ -119,7 +122,7 @@ void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
 void advance_record_version(const struct as_transaction_s* tr, struct as_index_s* r);
 void set_xdr_write(const struct as_transaction_s* tr, struct as_index_s* r);
 void touch_bin_metadata(struct as_storage_rd_s* rd);
-void transition_delete_metadata(struct as_transaction_s* tr, struct as_index_s* r, bool is_delete);
+void transition_delete_metadata(struct as_transaction_s* tr, struct as_index_s* r, bool is_delete, bool is_bin_cemetery);
 bool forbid_resolve(const struct as_transaction_s* tr, const struct as_storage_rd_s* rd, uint64_t msg_lut);
 bool resolve_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, uint16_t* n_won, int* result);
 bool udf_resolve_bin(struct as_storage_rd_s* rd, const char* name);

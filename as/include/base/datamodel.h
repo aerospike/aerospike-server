@@ -402,7 +402,7 @@ extern bool as_bin_particle_is_tombstone(as_particle_type type);
 extern bool as_bin_is_tombstone(const as_bin* b);
 extern bool as_bin_is_live(const as_bin* b);
 extern void as_bin_set_tombstone(as_bin* b);
-extern void as_bin_empty_if_all_tombstones(as_storage_rd* rd);
+extern bool as_bin_empty_if_all_tombstones(as_storage_rd* rd, bool is_dd);
 extern void as_bin_clear_meta(as_bin* b);
 extern void as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from);
 extern int32_t as_bin_get_id(const as_namespace *ns, const char *name);
@@ -437,6 +437,7 @@ extern bool as_record_handle_clock_skew(as_namespace* ns, uint64_t skew_ms);
 extern uint16_t plain_generation(uint16_t regime_generation, const as_namespace* ns);
 extern void as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms, const as_namespace* ns);
 extern void as_record_increment_generation(as_record *r, const as_namespace* ns);
+extern bool as_record_is_binless(const as_record *r);
 extern bool as_record_is_live(const as_record *r);
 extern int as_record_get_create(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
 extern int as_record_get(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref);
@@ -497,6 +498,7 @@ typedef struct as_remote_record_s {
 	bool xdr_write; // relevant only for enterprise edition
 	bool xdr_tombstone; // relevant only for enterprise edition
 	bool xdr_nsup_tombstone; // relevant only for enterprise edition
+	bool xdr_bin_cemetery; // relevant only for enterprise edition
 } as_remote_record;
 
 int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex);
@@ -719,6 +721,7 @@ struct as_namespace_s {
 	bool			xdr_ships_drops; // at least one DC ships drops
 	bool			xdr_ships_nsup_drops; // at least one DC ships nsup drops
 	bool			xdr_ships_changed_bins; // at least one DC ships changed bins (invokes bin xdr_write flag and tombstones)
+	bool			xdr_ships_bin_luts; // at least one DC ships changed bin LUTs (changed bins plus src-id)
 
 	//--------------------------------------------
 	// Configuration.
@@ -835,7 +838,8 @@ struct as_namespace_s {
 	cf_atomic64		n_objects;
 	cf_atomic64		n_tombstones; // relevant only for enterprise edition
 	uint64_t		n_xdr_tombstones; // subset of n_tombstones
-	uint64_t		n_regular_tombstones; // subset of n_tombstones
+	uint64_t		n_durable_tombstones; // subset of n_tombstones
+	uint64_t		n_xdr_bin_cemeteries; // subset of n_tombstones
 
 	// Consistency info.
 

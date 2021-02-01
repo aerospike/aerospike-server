@@ -45,6 +45,13 @@
 // Public API.
 //
 
+bool
+convert_to_write(as_transaction* tr, cl_msg** p_msgp)
+{
+	return false;
+}
+
+
 int
 validate_delete_durability(as_transaction* tr)
 {
@@ -198,7 +205,8 @@ touch_bin_metadata(as_storage_rd* rd)
 
 
 void
-transition_delete_metadata(as_transaction* tr, as_record* r, bool is_delete)
+transition_delete_metadata(as_transaction* tr, as_record* r, bool is_delete,
+		bool is_bin_cemetery)
 {
 }
 

@@ -80,6 +80,12 @@ as_record_increment_generation(as_record *r, const as_namespace* ns)
 }
 
 bool
+as_record_is_binless(const as_record* r)
+{
+	return false;
+}
+
+bool
 as_record_is_live(const as_record* r)
 {
 	return true;

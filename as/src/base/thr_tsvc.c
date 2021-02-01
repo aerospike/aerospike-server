@@ -55,6 +55,7 @@
 #include "transaction/proxy.h"
 #include "transaction/re_replicate.h"
 #include "transaction/read.h"
+#include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
 
@@ -323,7 +324,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 		if (is_write) {
 			if (as_transaction_is_delete(tr)) {
-				status = as_delete_start(tr);
+				status = convert_to_write(tr, &msgp) ?
+						as_write_start(tr) : as_delete_start(tr);
 			}
 			else if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
 				status = as_udf_start(tr);

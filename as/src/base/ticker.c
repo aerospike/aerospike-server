@@ -429,16 +429,18 @@ log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 {
 	if ((n_tombstones |
 			ns->n_xdr_tombstones |
+			ns->n_xdr_bin_cemeteries |
 			mp->n_master_tombstones |
 			mp->n_prole_tombstones |
 			mp->n_non_replica_tombstones) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} tombstones: all %lu xdr %lu master %lu prole %lu non-replica %lu",
+	cf_info(AS_INFO, "{%s} tombstones: all %lu xdr (%lu,%lu) master %lu prole %lu non-replica %lu",
 			ns->name,
 			n_tombstones,
 			ns->n_xdr_tombstones,
+			ns->n_xdr_bin_cemeteries,
 			mp->n_master_tombstones,
 			mp->n_prole_tombstones,
 			mp->n_non_replica_tombstones

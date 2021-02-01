@@ -1234,7 +1234,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 int
 as_storage_record_load_bins_ssd(as_storage_rd *rd)
 {
-	if (! as_record_is_live(rd->r)) {
+	if (as_record_is_binless(rd->r)) {
 		rd->n_bins = 0;
 		return 0; // no need to read device
 	}
@@ -2871,6 +2871,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 			r->xdr_write != flat->xdr_write ||
 			r->xdr_tombstone != opt_meta.extra_flags.xdr_tombstone ||
 			r->xdr_nsup_tombstone != opt_meta.extra_flags.xdr_nsup_tombstone ||
+			r->xdr_bin_cemetery != opt_meta.extra_flags.xdr_bin_cemetery ||
 			r->void_time != opt_meta.void_time) {
 		cf_warning(AS_DRV_SSD, "metadata mismatch - removing %pD", &flat->keyd);
 		as_index_delete(p->tree, &flat->keyd);

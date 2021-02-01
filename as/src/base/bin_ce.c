@@ -80,9 +80,10 @@ as_bin_set_tombstone(as_bin* b)
 	cf_crash(AS_BIN, "unreachable function for CE");
 }
 
-void
-as_bin_empty_if_all_tombstones(as_storage_rd* rd)
+bool
+as_bin_empty_if_all_tombstones(as_storage_rd* rd, bool is_dd)
 {
+	return rd->n_bins == 0;
 }
 
 void

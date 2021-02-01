@@ -998,20 +998,18 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	}
 
 	int result;
-	bool is_delete = false;
+	bool is_delete = as_bin_empty_if_all_tombstones(rd,
+			as_transaction_is_durable_delete(tr));
 
-	as_bin_empty_if_all_tombstones(rd);
-
-	if (rd->n_bins == 0) {
-		if (urecord->n_old_bins == 0) {
+	if (is_delete) {
+		if (urecord->n_old_bins == 0 || ! as_record_is_live(r)) {
+			// Didn't exist or was bin cemetery (tombstone bit not yet updated).
 			return AS_ERR_NOT_FOUND;
 		}
 
 		if ((result = validate_delete_durability(tr)) != AS_OK) {
 			return (uint8_t)result;
 		}
-
-		is_delete = true;
 	}
 
 	//------------------------------------------------------
@@ -1023,7 +1021,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
 	set_xdr_write(tr, r);
-	transition_delete_metadata(tr, r, is_delete);
+	transition_delete_metadata(tr, r, is_delete, is_delete && rd->n_bins != 0);
 
 	//------------------------------------------------------
 	// Write the record to storage.

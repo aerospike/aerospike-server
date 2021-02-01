@@ -5432,6 +5432,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "objects", ns->n_objects);
 	info_append_uint64(db, "tombstones", ns->n_tombstones);
 	info_append_uint64(db, "xdr_tombstones", ns->n_xdr_tombstones);
+	info_append_uint64(db, "xdr_bin_cemeteries", ns->n_xdr_bin_cemeteries);
 
 	repl_stats mp;
 	as_partition_get_replica_stats(ns, &mp);

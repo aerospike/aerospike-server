@@ -83,7 +83,8 @@ typedef struct as_flat_record_s {
 typedef struct as_flat_extra_flags_s {
 	uint8_t xdr_tombstone: 1;
 	uint8_t xdr_nsup_tombstone: 1;
-	uint8_t unused: 6;
+	uint8_t xdr_bin_cemetery: 1;
+	uint8_t unused: 5;
 } __attribute__ ((__packed__)) as_flat_extra_flags;
 
 COMPILER_ASSERT(sizeof(as_flat_extra_flags) == sizeof(uint8_t));

@@ -1222,7 +1222,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		*is_delete = true;
 	}
 
-	transition_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete, false);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1327,10 +1327,13 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 	// Created the new bins to write.
 	//
 
-	as_bin_empty_if_all_tombstones(rd);
+	*is_delete = as_bin_empty_if_all_tombstones(rd,
+			as_transaction_is_durable_delete(tr));
 
-	if (rd->n_bins == 0) {
-		if (n_old_bins == 0) {
+	if (*is_delete) {
+		if (! as_transaction_is_xdr(tr) &&
+				(n_old_bins == 0 || ! as_record_is_live(r))) {
+			// Didn't exist or was bin cemetery (tombstone bit not yet updated).
 			unwind_index_metadata(&old_metadata, r);
 			write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 			return AS_ERR_NOT_FOUND;
@@ -1341,11 +1344,10 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 			write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
 			return result;
 		}
-
-		*is_delete = true;
 	}
 
-	transition_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete,
+			*is_delete && rd->n_bins != 0);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1465,7 +1467,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		*is_delete = true;
 	}
 
-	transition_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete, false);
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1570,10 +1572,13 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 	// Created the new bins to write.
 	//
 
-	as_bin_empty_if_all_tombstones(rd);
+	*is_delete = as_bin_empty_if_all_tombstones(rd,
+			as_transaction_is_durable_delete(tr));
 
-	if (rd->n_bins == 0) {
-		if (n_old_bins == 0) {
+	if (*is_delete) {
+		if (! as_transaction_is_xdr(tr) &&
+				(n_old_bins == 0 || ! as_record_is_live(r))) {
+			// Didn't exist or was bin cemetery (tombstone bit not yet updated).
 			cf_ll_buf_free(&particles_llb);
 			unwind_index_metadata(&old_metadata, r);
 			return AS_ERR_NOT_FOUND;
@@ -1584,11 +1589,10 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 			unwind_index_metadata(&old_metadata, r);
 			return result;
 		}
-
-		*is_delete = true;
 	}
 
-	transition_delete_metadata(tr, r, *is_delete);
+	transition_delete_metadata(tr, r, *is_delete,
+			*is_delete && rd->n_bins != 0);
 
 	//------------------------------------------------------
 	// Write the record to storage.
