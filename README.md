@@ -22,7 +22,7 @@ information.  The full Telemetry data collection agent source code may be found 
 
 The Aerospike Database Server can be built and deployed on various
 current 64-bit GNU/Linux platform versions, such as the Red Hat family (e.g.,
-CentOS 6 or later), Debian 8 or later, and Ubuntu 16.04 or later.
+CentOS 7 or later), Debian 8 or later, and Ubuntu 16.04 or later.
 
 ### Dependencies
 
@@ -50,7 +50,7 @@ the build environment, including:
 The C++ compiler is required for the Aerospike geospatial indexing
 feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
-* The required CentOS 6/7/8 package to install is: `gcc-c++`.
+* The required CentOS 7/8 package to install is: `gcc-c++`.
 
 * The required Debian 8/9/10 and Ubuntu 16/18/20 package to install is: `g++`.
 
@@ -59,8 +59,8 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
 (RIPEMD-160 & SHA-1) and pseudo-random number generation.
 
-* The CentOS 6/7/8 OpenSSL packages to install are:  `openssl` and
-`openssl-devel`, and also `openssl-static` on CentOS 6/7.
+* The CentOS 7/8 OpenSSL packages to install are:  `openssl` and
+`openssl-devel`, and also `openssl-static` on CentOS 7.
 
 * The Debian 8/9/10 and Ubuntu 16/18/20 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
@@ -76,8 +76,8 @@ Function (UDF) support.
 * Alternatively, it is possible to build with standard Lua 5.1 provided
 by the build environment.  In that case:
 
-	* The CentOS 6/7/8 Lua package to install is:  `lua`, and also
-`lua-devel` and `lua-static` on CentOS 6/7.
+	* The CentOS 7/8 Lua package to install is:  `lua`, and also
+`lua-devel` and `lua-static` on CentOS 7.
 
 	* The Debian 8/9/10 and Ubuntu 16/18/20 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
