@@ -80,7 +80,7 @@ ssd_flush_final_cfg(as_namespace* ns)
 }
 
 void
-ssd_cold_start_adjust_cenotaph(as_namespace* ns, bool block_has_bins,
+ssd_cold_start_adjust_cenotaph(as_namespace* ns, const as_flat_record* flat,
 		uint32_t block_void_time, as_record* r)
 {
 	// Nothing to do - relevant for enterprise version only.

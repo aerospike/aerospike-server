@@ -63,7 +63,7 @@ typedef struct as_flat_record_s {
 	uint32_t has_void_time: 1;
 	uint32_t has_set: 1;
 	uint32_t has_key: 1;
-	uint32_t has_bins: 1; // i.e. is live
+	uint32_t has_bins: 1; // i.e. is live or bin-cemetery
 	uint32_t is_compressed: 1;
 	uint32_t xdr_write: 1;
 	uint32_t has_extra_flags : 1; // more of these metadata flags

@@ -2377,8 +2377,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	if (! is_create) {
 		// Record already existed. Ignore this one if existing record is newer.
 		if (prefer_existing_record(ns, flat, opt_meta.void_time, r)) {
-			ssd_cold_start_adjust_cenotaph(ns, flat->has_bins == 1,
-					opt_meta.void_time, r);
+			ssd_cold_start_adjust_cenotaph(ns, flat, opt_meta.void_time, r);
 			as_record_done(&r_ref, ns);
 			ssd->record_add_older_counter++;
 			return;
