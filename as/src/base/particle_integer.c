@@ -26,7 +26,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "aerospike/as_boolean.h"
 #include "aerospike/as_integer.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
@@ -128,21 +127,21 @@ integer_size(const as_particle *p)
 int32_t
 integer_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
 {
-	cf_warning(AS_PARTICLE, "concat size for integer/float");
+	cf_warning(AS_PARTICLE, "concat size for integer/float/bool");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
 integer_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
 {
-	cf_warning(AS_PARTICLE, "append to integer/float");
+	cf_warning(AS_PARTICLE, "append to integer/float/bool");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
 integer_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
 {
-	cf_warning(AS_PARTICLE, "prepend to integer/float");
+	cf_warning(AS_PARTICLE, "prepend to integer/float/bool");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
@@ -279,25 +278,7 @@ integer_size_from_asval(const as_val *val)
 void
 integer_from_asval(const as_val *val, as_particle **pp)
 {
-	// Unfortunately AS_BOOLEANs (as well as AS_INTEGERs) become INTEGER
-	// particles, so we have to check the as_val type here.
-
-	as_val_t vtype = as_val_type(val);
-	int64_t i;
-
-	switch (vtype) {
-	case AS_INTEGER:
-		i = as_integer_get(as_integer_fromval(val));
-		break;
-	case AS_BOOLEAN:
-		i = as_boolean_get(as_boolean_fromval(val)) ? 1 : 0;
-		break;
-	default:
-		cf_crash(AS_PARTICLE, "unexpected as_val_t %d", vtype);
-		return;
-	}
-
-	*pp = (as_particle *)i;
+	*pp = (as_particle *)as_integer_get(as_integer_fromval(val));
 }
 
 as_val *
@@ -315,23 +296,7 @@ integer_asval_wire_size(const as_val *val)
 uint32_t
 integer_asval_to_wire(const as_val *val, uint8_t *wire)
 {
-	// Unfortunately AS_BOOLEANs (as well as AS_INTEGERs) become INTEGER
-	// particles, so we have to check the as_val type here.
-
-	as_val_t vtype = as_val_type(val);
-	int64_t i;
-
-	switch (vtype) {
-	case AS_INTEGER:
-		i = as_integer_get(as_integer_fromval(val));
-		break;
-	case AS_BOOLEAN:
-		i = as_boolean_get(as_boolean_fromval(val)) ? 1 : 0;
-		break;
-	default:
-		cf_crash(AS_PARTICLE, "unexpected as_val_t %d", vtype);
-		return 0;
-	}
+	int64_t i = as_integer_get(as_integer_fromval(val));
 
 	*(uint64_t *)wire = cf_swap_to_be64((uint64_t)i);
 
@@ -354,22 +319,13 @@ integer_from_msgpack(const uint8_t *packed, uint32_t packed_size,
 		as_particle **pp)
 {
 	int64_t i;
+	msgpack_in mp = {
+			.buf = packed,
+			.buf_sz = packed_size
+	};
 
-	if (*packed == 0xc2) { // false
-		i = 0;
-	}
-	else if (*packed == 0xc3) { // true
-		i = 1;
-	}
-	else {
-		msgpack_in mp = {
-				.buf = packed,
-				.buf_sz = packed_size
-		};
-
-		if (! msgpack_get_int64(&mp, &i)) {
-			cf_crash(AS_PARTICLE, "invalid msgpack\n%*pH", mp.buf_sz, mp.buf);
-		}
+	if (! msgpack_get_int64(&mp, &i)) {
+		cf_crash(AS_PARTICLE, "invalid msgpack\n%*pH", mp.buf_sz, mp.buf);
 	}
 
 	*pp = (as_particle *)i;

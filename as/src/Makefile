@@ -32,13 +32,13 @@ BASE_HEADERS += xdr.h
 
 BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c exp.c health.c index.c
 BASE_SOURCES += job_manager.c json_init.c monitor.c namespace.c nsup.c
-BASE_SOURCES += particle.c particle_blob.c particle_float.c particle_geojson.c
-BASE_SOURCES += particle_hll.c particle_integer.c particle_list.c particle_map.c
-BASE_SOURCES += particle_string.c predexp.c proto.c record.c scan.c scan_job.c
-BASE_SOURCES += scan_manager.c signal.c secondary_index.c service.c smd.c
-BASE_SOURCES += thr_info.c thr_info_port.c thr_query.c thr_sindex.c thr_tsvc.c
-BASE_SOURCES += ticker.c transaction.c truncate.c udf_aerospike.c udf_arglist.c
-BASE_SOURCES += udf_cask.c udf_record.c
+BASE_SOURCES += particle.c particle_blob.c particle_bool.c particle_float.c
+BASE_SOURCES += particle_geojson.c particle_hll.c particle_integer.c
+BASE_SOURCES += particle_list.c particle_map.c particle_string.c predexp.c
+BASE_SOURCES += proto.c record.c scan.c scan_job.c scan_manager.c signal.c
+BASE_SOURCES += secondary_index.c service.c smd.c thr_info.c thr_info_port.c
+BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
+BASE_SOURCES += truncate.c udf_aerospike.c udf_arglist.c udf_cask.c udf_record.c
 
 ifneq ($(STATIC_LIB),1)
   BASE_SOURCES += main.c

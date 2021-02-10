@@ -129,6 +129,7 @@ typedef enum {
 	AS_PARTICLE_TYPE_RUBY_BLOB = 10,
 	AS_PARTICLE_TYPE_PHP_BLOB = 11,
 	AS_PARTICLE_TYPE_ERLANG_BLOB = 12,
+	AS_PARTICLE_TYPE_BOOL = 17,
 	AS_PARTICLE_TYPE_HLL = 18,
 	AS_PARTICLE_TYPE_MAP = 19,
 	AS_PARTICLE_TYPE_LIST = 20,
@@ -148,6 +149,7 @@ typedef struct as_particle_s {
 #define AS_BIN_STATE_TOMBSTONE		2 // enterprise only
 #define AS_BIN_STATE_INUSE_OTHER	3
 #define AS_BIN_STATE_INUSE_FLOAT	4
+#define AS_BIN_STATE_INUSE_BOOL		5
 
 typedef struct as_bin_s {
 	uint8_t do_not_use: 4;	// can't use due to single-bin embedding in index
@@ -194,7 +196,8 @@ typedef struct as_rec_space_s {
 static inline bool
 is_embedded_particle_type(as_particle_type type)
 {
-	return type == AS_PARTICLE_TYPE_INTEGER || type == AS_PARTICLE_TYPE_FLOAT;
+	return type == AS_PARTICLE_TYPE_INTEGER || type == AS_PARTICLE_TYPE_FLOAT ||
+			type == AS_PARTICLE_TYPE_BOOL;
 }
 
 extern as_particle_type as_particle_type_from_asval(const as_val *val);
@@ -261,6 +264,9 @@ extern void as_bin_particle_integer_set(as_bin *b, int64_t i);
 
 // float:
 extern double as_bin_particle_float_value(const as_bin *b);
+
+// bool:
+extern bool as_bin_particle_bool_value(const as_bin *b);
 
 // string:
 extern uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
@@ -347,6 +353,9 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 	case AS_PARTICLE_TYPE_FLOAT:
 		b->state = AS_BIN_STATE_INUSE_FLOAT;
 		break;
+	case AS_PARTICLE_TYPE_BOOL:
+		b->state = AS_BIN_STATE_INUSE_BOOL;
+		break;
 	default:
 		b->state = AS_BIN_STATE_INUSE_OTHER;
 		break;
@@ -373,7 +382,8 @@ as_bin_remove(as_storage_rd *rd, uint32_t i)
 static inline bool
 as_bin_is_embedded_particle(const as_bin *b) {
 	return b->state == AS_BIN_STATE_INUSE_INTEGER ||
-			b->state == AS_BIN_STATE_INUSE_FLOAT;
+			b->state == AS_BIN_STATE_INUSE_FLOAT ||
+			b->state == AS_BIN_STATE_INUSE_BOOL;
 }
 
 static inline bool

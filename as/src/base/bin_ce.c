@@ -45,6 +45,8 @@ as_bin_get_particle_type(const as_bin* b)
 		return AS_PARTICLE_TYPE_INTEGER;
 	case AS_BIN_STATE_INUSE_FLOAT:
 		return AS_PARTICLE_TYPE_FLOAT;
+	case AS_BIN_STATE_INUSE_BOOL:
+		return AS_PARTICLE_TYPE_BOOL;
 	case AS_BIN_STATE_INUSE_OTHER:
 		return b->particle->type;
 	case AS_BIN_STATE_UNUSED:

@@ -52,6 +52,7 @@ extern const as_particle_vtable integer_vtable;
 extern const as_particle_vtable float_vtable;
 extern const as_particle_vtable string_vtable;
 extern const as_particle_vtable blob_vtable;
+extern const as_particle_vtable bool_vtable;
 extern const as_particle_vtable hll_vtable;
 extern const as_particle_vtable map_vtable;
 extern const as_particle_vtable list_vtable;
@@ -70,6 +71,7 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_RUBY_BLOB]	= &blob_vtable,
 		[AS_PARTICLE_TYPE_PHP_BLOB]		= &blob_vtable,
 		[AS_PARTICLE_TYPE_ERLANG_BLOB]	= &blob_vtable,
+		[AS_PARTICLE_TYPE_BOOL]			= &bool_vtable,
 		[AS_PARTICLE_TYPE_HLL]			= &hll_vtable,
 		[AS_PARTICLE_TYPE_MAP]			= &map_vtable,
 		[AS_PARTICLE_TYPE_LIST]			= &list_vtable,
@@ -96,6 +98,7 @@ safe_particle_type(uint8_t type)
 	case AS_PARTICLE_TYPE_RUBY_BLOB:
 	case AS_PARTICLE_TYPE_PHP_BLOB:
 	case AS_PARTICLE_TYPE_ERLANG_BLOB:
+	case AS_PARTICLE_TYPE_BOOL:
 	case AS_PARTICLE_TYPE_HLL:
 	case AS_PARTICLE_TYPE_MAP:
 	case AS_PARTICLE_TYPE_LIST:
@@ -138,6 +141,7 @@ as_particle_type_from_asval(const as_val *val)
 	case AS_NIL:
 		return AS_PARTICLE_TYPE_NULL;
 	case AS_BOOLEAN:
+		return AS_PARTICLE_TYPE_BOOL;
 	case AS_INTEGER:
 		return AS_PARTICLE_TYPE_INTEGER;
 	case AS_DOUBLE:
@@ -170,6 +174,7 @@ as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 		return AS_PARTICLE_TYPE_NULL;
 	case MSGPACK_TYPE_FALSE:
 	case MSGPACK_TYPE_TRUE:
+		return AS_PARTICLE_TYPE_BOOL;
 	case MSGPACK_TYPE_NEGINT:
 	case MSGPACK_TYPE_INT:
 		return AS_PARTICLE_TYPE_INTEGER;
