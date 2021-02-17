@@ -12,7 +12,7 @@ container:
       - docker.qe.aerospike.com/build/aerospike-server:amazonlinux-1
       - docker.qe.aerospike.com/build/aerospike-server:amazonlinux-2
       - docker.qe.aerospike.com/build/aerospike-server:centos-7
-      - docker.qe.aerospike.com/build/aerospike-server:centos-8
+      - docker.qe.aerospike.com/build/aerospike-server:rhel-8
       - docker.qe.aerospike.com/build/aerospike-server:debian-8
       - docker.qe.aerospike.com/build/aerospike-server:debian-9
       - docker.qe.aerospike.com/build/aerospike-server:debian-10
