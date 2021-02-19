@@ -123,7 +123,7 @@ typedef struct as_scan_job_s {
 //
 
 void as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid, struct as_namespace_s* ns, const char* set_name, uint16_t set_id, as_scan_pid* pids, uint32_t rps, const char* client);
-void as_scan_job_add_thread(as_scan_job* _job);
+void as_scan_job_run(as_scan_job* _job);
 uint32_t as_scan_job_throttle(as_scan_job* _job);
 void as_scan_job_destroy(as_scan_job* _job);
 void as_scan_job_info(as_scan_job* _job, struct as_mon_jobstat_s* stat);
