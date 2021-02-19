@@ -2347,7 +2347,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of scan-threads-limit from %u to %d ", g_config.n_scan_threads_limit, val);
-			g_config.n_scan_threads_limit = (uint32_t)val;
+			as_scan_set_max_threads((uint32_t)val);
 		}
 		else if (0 == as_info_parameter_get(params, "batch-index-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
