@@ -66,7 +66,6 @@ static uint32_t g_scan_job_trid = 0;
 // Forward declarations.
 //
 
-static void* run_scan_job(void* arg);
 static uint32_t throttle_sleep(as_scan_job* _job, uint64_t count, uint64_t now);
 
 
@@ -150,12 +149,68 @@ as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid,
 }
 
 void
-as_scan_job_add_thread(as_scan_job* _job)
+as_scan_job_run(as_scan_job* _job)
 {
-	as_incr_uint32(&g_n_threads);
-	as_incr_uint32(&_job->n_threads);
+	cf_detail(AS_SCAN, "running thread for trid %lu", _job->trid);
 
-	cf_thread_create_detached(run_scan_job, _job);
+	if (! _job->started) {
+		_job->base_sys_tid = cf_thread_sys_tid();
+		_job->started = true;
+
+		if (_job->rps == 0) {
+			as_scan_manager_add_max_job_threads(_job);
+		}
+	}
+
+	uint32_t pid;
+
+	while ((pid = as_faa_uint32(&_job->pid, 1)) < AS_PARTITIONS) {
+		as_partition_reservation rsv;
+
+		if (_job->pids == NULL) {
+			if (as_partition_reserve_write(_job->ns, pid, &rsv, NULL) != 0) {
+				continue;
+			}
+		}
+		else {
+			if (! _job->pids[pid].requested) {
+				continue;
+			}
+
+			if (as_partition_reserve_full(_job->ns, pid, &rsv) != 0) {
+				// Null tree causes slice_fn to send partition-done error.
+				rsv = (as_partition_reservation){
+						.ns = _job->ns,
+						.p = &_job->ns->partitions[pid]
+				};
+
+				_job->vtable.slice_fn(_job, &rsv);
+				continue;
+			}
+		}
+
+		_job->vtable.slice_fn(_job, &rsv);
+		as_partition_release(&rsv);
+
+		if (cf_thread_sys_tid() != _job->base_sys_tid &&
+				(_job->n_threads > _job->ns->n_single_scan_threads ||
+						g_n_threads > g_config.n_scan_threads_limit)) {
+			break;
+		}
+	}
+
+	cf_detail(AS_SCAN, "finished thread for trid %lu", _job->trid);
+
+	as_decr_uint32(&g_n_threads);
+
+	int32_t n = (int32_t)as_aaf_uint32(&_job->n_threads, -1);
+
+	cf_assert(n >= 0, AS_SCAN, "scan job thread underflow %d", n);
+
+	if (n == 0) {
+		_job->vtable.finish_fn(_job);
+		as_scan_manager_finish_job(_job);
+	}
 }
 
 uint32_t
@@ -268,75 +323,6 @@ as_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 //==========================================================
 // Local helpers.
 //
-
-static void*
-run_scan_job(void* arg)
-{
-	as_scan_job* _job = (as_scan_job*)arg;
-
-	cf_detail(AS_SCAN, "running thread for trid %lu", _job->trid);
-
-	if (! _job->started) {
-		_job->base_sys_tid = cf_thread_sys_tid();
-		_job->started = true;
-
-		if (_job->rps == 0) {
-			as_scan_manager_add_max_job_threads(_job);
-		}
-	}
-
-	uint32_t pid;
-
-	while ((pid = as_faa_uint32(&_job->pid, 1)) < AS_PARTITIONS) {
-		as_partition_reservation rsv;
-
-		if (_job->pids == NULL) {
-			if (as_partition_reserve_write(_job->ns, pid, &rsv, NULL) != 0) {
-				continue;
-			}
-		}
-		else {
-			if (! _job->pids[pid].requested) {
-				continue;
-			}
-
-			if (as_partition_reserve_full(_job->ns, pid, &rsv) != 0) {
-				// Null tree causes slice_fn to send partition-done error.
-				rsv = (as_partition_reservation){
-						.ns = _job->ns,
-						.p = &_job->ns->partitions[pid]
-				};
-
-				_job->vtable.slice_fn(_job, &rsv);
-				continue;
-			}
-		}
-
-		_job->vtable.slice_fn(_job, &rsv);
-		as_partition_release(&rsv);
-
-		if (cf_thread_sys_tid() != _job->base_sys_tid &&
-				(_job->n_threads > _job->ns->n_single_scan_threads ||
-						g_n_threads > g_config.n_scan_threads_limit)) {
-			break;
-		}
-	}
-
-	cf_detail(AS_SCAN, "finished thread for trid %lu", _job->trid);
-
-	as_decr_uint32(&g_n_threads);
-
-	int32_t n = (int32_t)as_aaf_uint32(&_job->n_threads, -1);
-
-	cf_assert(n >= 0, AS_SCAN, "scan job thread underflow %d", n);
-
-	if (n == 0) {
-		_job->vtable.finish_fn(_job);
-		as_scan_manager_finish_job(_job);
-	}
-
-	return NULL;
-}
 
 static uint32_t
 throttle_sleep(as_scan_job* _job, uint64_t count, uint64_t now)
