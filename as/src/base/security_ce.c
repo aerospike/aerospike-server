@@ -36,6 +36,7 @@
 
 #include "citrusleaf/alloc.h"
 
+#include "dynbuf.h"
 #include "log.h"
 #include "socket.h"
 
@@ -166,9 +167,38 @@ as_security_transact(as_transaction* tr)
 // Public API - security configuration.
 //
 
-// Security is an enterprise feature - here, do nothing.
 void
 as_security_config_log_scope(uint32_t sink, const char* ns_name,
 		const char* set_name)
 {
+	cf_crash(AS_SECURITY, "CE called as_security_config_log_scope()");
+}
+
+void
+as_security_config_log_role(uint32_t sink, const char* role)
+{
+	cf_crash(AS_SECURITY, "CE called as_security_config_log_role()");
+}
+
+void
+as_security_config_log_user(uint32_t sink, const char* user)
+{
+	cf_crash(AS_SECURITY, "CE called as_security_config_log_user()");
+}
+
+
+//==========================================================
+// Public API - security info commands.
+//
+
+void
+as_security_get_config(cf_dyn_buf* db)
+{
+}
+
+bool
+as_security_set_config(const char* cmd)
+{
+	cf_crash(AS_SECURITY, "CE called as_security_set_config()");
+	return false;
 }

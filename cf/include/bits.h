@@ -26,7 +26,10 @@
 // Includes.
 //
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 
 //==========================================================
@@ -77,6 +80,14 @@ cf_bit_count64(uint64_t x)
 	x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0f;
 
 	return (uint32_t)((x * 0x0101010101010101) >> 56);
+}
+
+static inline bool
+cf_memeq(const void* block, uint8_t c, size_t size)
+{
+	const uint8_t* p = (const uint8_t*)block;
+
+	return *p == c && memcmp(p, p + 1, size - 1) == 0;
 }
 
 // Number of bytes occupied by val converted to a "uintvar".

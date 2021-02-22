@@ -29,6 +29,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "dynbuf.h"
+
 
 //==========================================================
 // Forward declarations.
@@ -110,3 +112,7 @@ void as_security_log(const struct as_file_handle_s* fd_h, uint8_t result, as_sec
 bool as_security_should_refresh(void);
 void as_security_refresh(struct as_file_handle_s* fd_h);
 void as_security_transact(struct as_transaction_s* tr);
+
+// Info.
+void as_security_get_config(cf_dyn_buf* db);
+bool as_security_set_config(const char* cmd);

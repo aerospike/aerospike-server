@@ -657,6 +657,8 @@ typedef enum {
 	// Security (Aerospike) log options:
 	CASE_SECURITY_LOG_REPORT_AUTHENTICATION,
 	CASE_SECURITY_LOG_REPORT_DATA_OP,
+	CASE_SECURITY_LOG_REPORT_DATA_OP_ROLE,
+	CASE_SECURITY_LOG_REPORT_DATA_OP_USER,
 	CASE_SECURITY_LOG_REPORT_SYS_ADMIN,
 	CASE_SECURITY_LOG_REPORT_USER_ADMIN,
 	CASE_SECURITY_LOG_REPORT_VIOLATION,
@@ -665,6 +667,8 @@ typedef enum {
 	CASE_SECURITY_SYSLOG_LOCAL,
 	CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION,
 	CASE_SECURITY_SYSLOG_REPORT_DATA_OP,
+	CASE_SECURITY_SYSLOG_REPORT_DATA_OP_ROLE,
+	CASE_SECURITY_SYSLOG_REPORT_DATA_OP_USER,
 	CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN,
 	CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN,
 	CASE_SECURITY_SYSLOG_REPORT_VIOLATION,
@@ -1193,6 +1197,8 @@ const cfg_opt SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS[] = {
 const cfg_opt SECURITY_LOG_OPTS[] = {
 		{ "report-authentication",			CASE_SECURITY_LOG_REPORT_AUTHENTICATION },
 		{ "report-data-op",					CASE_SECURITY_LOG_REPORT_DATA_OP },
+		{ "report-data-op-role",			CASE_SECURITY_LOG_REPORT_DATA_OP_ROLE },
+		{ "report-data-op-user",			CASE_SECURITY_LOG_REPORT_DATA_OP_USER },
 		{ "report-sys-admin",				CASE_SECURITY_LOG_REPORT_SYS_ADMIN },
 		{ "report-user-admin",				CASE_SECURITY_LOG_REPORT_USER_ADMIN },
 		{ "report-violation",				CASE_SECURITY_LOG_REPORT_VIOLATION },
@@ -1203,6 +1209,8 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 		{ "local",							CASE_SECURITY_SYSLOG_LOCAL },
 		{ "report-authentication",			CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION },
 		{ "report-data-op",					CASE_SECURITY_SYSLOG_REPORT_DATA_OP },
+		{ "report-data-op-role",			CASE_SECURITY_SYSLOG_REPORT_DATA_OP_ROLE },
+		{ "report-data-op-user",			CASE_SECURITY_SYSLOG_REPORT_DATA_OP_USER },
 		{ "report-sys-admin",				CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN },
 		{ "report-user-admin",				CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN },
 		{ "report-violation",				CASE_SECURITY_SYSLOG_REPORT_VIOLATION },
@@ -3651,6 +3659,12 @@ as_config_init(const char* config_file)
 			case CASE_SECURITY_LOG_REPORT_DATA_OP:
 				as_security_config_log_scope(AS_SEC_SINK_LOG, line.val_tok_1, line.val_tok_2);
 				break;
+			case CASE_SECURITY_LOG_REPORT_DATA_OP_ROLE:
+				as_security_config_log_role(AS_SEC_SINK_LOG, line.val_tok_1);
+				break;
+			case CASE_SECURITY_LOG_REPORT_DATA_OP_USER:
+				as_security_config_log_user(AS_SEC_SINK_LOG, line.val_tok_1);
+				break;
 			case CASE_SECURITY_LOG_REPORT_SYS_ADMIN:
 				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
 				break;
@@ -3683,6 +3697,12 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SECURITY_SYSLOG_REPORT_DATA_OP:
 				as_security_config_log_scope(AS_SEC_SINK_SYSLOG, line.val_tok_1, line.val_tok_2);
+				break;
+			case CASE_SECURITY_SYSLOG_REPORT_DATA_OP_ROLE:
+				as_security_config_log_role(AS_SEC_SINK_SYSLOG, line.val_tok_1);
+				break;
+			case CASE_SECURITY_SYSLOG_REPORT_DATA_OP_USER:
+				as_security_config_log_user(AS_SEC_SINK_SYSLOG, line.val_tok_1);
 				break;
 			case CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN:
 				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;

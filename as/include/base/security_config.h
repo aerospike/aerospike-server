@@ -111,3 +111,5 @@ typedef struct as_sec_config_s {
 
 void as_security_config_log_scope(uint32_t sink, const char* ns_name,
 		const char* set_name);
+void as_security_config_log_role(uint32_t sink, const char* role);
+void as_security_config_log_user(uint32_t sink, const char* user);
