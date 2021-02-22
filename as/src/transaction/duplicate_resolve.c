@@ -393,13 +393,13 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	dup_res_translate_result_code(rw);
 
+	cf_atomic64_add(&rw->rsv.ns->n_dup_res_ask, rw->n_dest_nodes);
+
 	bool delete_from_hash = rw->dup_res_cb(rw);
 
 	rw->dup_res_complete = true;
 
 	cf_mutex_unlock(&rw->lock);
-
-	cf_atomic64_add(&rw->rsv.ns->n_dup_res_ask, rw->n_dest_nodes);
 
 	if (delete_from_hash) {
 		rw_request_hash_delete(&hkey, rw);
