@@ -145,7 +145,6 @@ typedef struct fabric_state_s {
 	send_entry			*sends;
 	send_entry			*send_head;
 
-	cf_mutex			node_hash_lock;
 	cf_rchash			*node_hash; // key is cf_node, value is (fabric_node *)
 } fabric_state;
 
@@ -364,10 +363,8 @@ as_fabric_init()
 	as_fabric_register_msg_fn(M_TYPE_FABRIC, fabric_mt, sizeof(fabric_mt),
 			FS_MSG_SCRATCH_SIZE, NULL, NULL);
 
-	cf_mutex_init(&g_fabric.node_hash_lock);
-
 	g_fabric.node_hash = cf_rchash_create(cf_nodeid_rchash_fn,
-			fabric_node_destructor, sizeof(cf_node), 128, 0);
+			fabric_node_destructor, sizeof(cf_node), 128, CF_RCHASH_MANY_LOCK);
 
 	g_published_endpoint_list = NULL;
 	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
@@ -608,9 +605,7 @@ as_fabric_hb_plugin_get_endpoint_list(as_hb_plugin_node_data *plugin_data)
 void
 as_fabric_rate_capture(fabric_rate *rate)
 {
-	cf_mutex_lock(&g_fabric.node_hash_lock);
 	cf_rchash_reduce(g_fabric.node_hash, fabric_rate_node_reduce_fn, rate);
-	cf_mutex_unlock(&g_fabric.node_hash_lock);
 }
 
 void
@@ -844,10 +839,8 @@ fabric_node_get(cf_node node_id)
 {
 	fabric_node *node;
 
-	cf_mutex_lock(&g_fabric.node_hash_lock);
 	int rv = cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
 			(void **)&node);
-	cf_mutex_unlock(&g_fabric.node_hash_lock);
 
 	if (rv != CF_RCHASH_OK) {
 		return NULL;
@@ -859,33 +852,24 @@ fabric_node_get(cf_node node_id)
 static fabric_node *
 fabric_node_get_or_create(cf_node node_id)
 {
-	fabric_node *node;
+	fabric_node *new_node = fabric_node_create(node_id);
 
-	cf_mutex_lock(&g_fabric.node_hash_lock);
+	while (cf_rchash_put_unique(g_fabric.node_hash, &node_id, sizeof(cf_node),
+			new_node) != CF_RCHASH_OK) {
+		fabric_node *node;
 
-	if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			(void **)&node) == CF_RCHASH_OK) {
-		cf_mutex_unlock(&g_fabric.node_hash_lock);
-
-		fabric_node_connect_all(node);
-
-		return node;
+		if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
+				(void **)&node) == CF_RCHASH_OK) {
+			fabric_node_release(new_node);
+			fabric_node_connect_all(node);
+			return node;
+		}
 	}
 
-	node = fabric_node_create(node_id);
+	fabric_node_reserve(new_node); // for return
+	fabric_node_connect_all(new_node);
 
-	if (cf_rchash_put_unique(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			node) != CF_RCHASH_OK) {
-		cf_crash(AS_FABRIC, "fabric_node_get_or_create(%lx)", node_id);
-	}
-
-	fabric_node_reserve(node); // for return
-
-	cf_mutex_unlock(&g_fabric.node_hash_lock);
-
-	fabric_node_connect_all(node);
-
-	return node;
+	return new_node;
 }
 
 static fabric_node *
@@ -893,17 +877,11 @@ fabric_node_pop(cf_node node_id)
 {
 	fabric_node *node = NULL;
 
-	cf_mutex_lock(&g_fabric.node_hash_lock);
-
 	if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
 			(void **)&node) == CF_RCHASH_OK) {
-		if (cf_rchash_delete(g_fabric.node_hash, &node_id, sizeof(node_id)) !=
-				CF_RCHASH_OK) {
-			cf_crash(AS_FABRIC, "fabric_node_pop(%lx)", node_id);
-		}
+		cf_rchash_delete_object(g_fabric.node_hash, &node_id, sizeof(node_id),
+				node);
 	}
-
-	cf_mutex_unlock(&g_fabric.node_hash_lock);
 
 	return node;
 }
@@ -1278,9 +1256,7 @@ fabric_get_node_list(node_list *nl)
 	nl->count = 1;
 	nl->nodes[0] = g_config.self_node;
 
-	cf_mutex_lock(&g_fabric.node_hash_lock);
 	cf_rchash_reduce(g_fabric.node_hash, fabric_get_node_list_fn, nl);
-	cf_mutex_unlock(&g_fabric.node_hash_lock);
 
 	return nl->count;
 }
