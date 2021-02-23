@@ -1350,8 +1350,11 @@ find_family(const as_partition_version* self_version, uint32_t n_families,
 		const as_partition_version family_versions[])
 {
 	for (uint32_t n = 0; n < n_families; n++) {
-		if (is_family_same(self_version, &family_versions[n])) {
-			return n;
+		const as_partition_version* version_n = &family_versions[n];
+
+		if (is_family_same(self_version, version_n)) {
+			// Identical subsets with no full parent can't share family.
+			return version_n->subset == 0 ? n : VERSION_FAMILY_UNIQUE;
 		}
 	}
 
