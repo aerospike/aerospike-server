@@ -1241,6 +1241,10 @@ map_subcontext_by_value(cdt_context *ctx, as_unpacker *val)
 void
 cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 {
+	if (ctx->b->particle == ctx->orig) { // no-op happened
+		return;
+	}
+
 	packed_map map;
 	packed_map orig;
 
