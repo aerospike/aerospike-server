@@ -3619,7 +3619,6 @@ as_sindex_sbins_list_diff_populate(as_sindex_bin *sbins, as_namespace *ns, const
 		as_sindex *si = &ns->sindex[simatch];
 
 		if (! as_sindex_isactive(si)) {
-			ele = ele->next;
 			continue;
 		}
 
