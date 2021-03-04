@@ -42,9 +42,9 @@
 #include "base/exp.h"
 #include "base/index.h"
 #include "base/proto.h"
-#include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
+#include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
 

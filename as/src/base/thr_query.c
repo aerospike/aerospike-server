@@ -122,7 +122,6 @@
 #include "base/datamodel.h"
 #include "base/exp.h"
 #include "base/proto.h"
-#include "base/secondary_index.h"
 #include "base/service.h"
 #include "base/stats.h"
 #include "base/transaction.h"
@@ -130,6 +129,7 @@
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "geospatial/geospatial.h"
+#include "sindex/secondary_index.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
 

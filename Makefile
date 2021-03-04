@@ -64,7 +64,7 @@ endif
 .PHONY: targetdirs
 targetdirs:
 	mkdir -p $(GEN_DIR) $(LIBRARY_DIR) $(BIN_DIR)
-	mkdir -p $(OBJECT_DIR)/base $(OBJECT_DIR)/fabric $(OBJECT_DIR)/storage $(OBJECT_DIR)/geospatial $(OBJECT_DIR)/transaction $(OBJECT_DIR)/xdr
+	mkdir -p $(OBJECT_DIR)/base $(OBJECT_DIR)/fabric $(OBJECT_DIR)/geospatial $(OBJECT_DIR)/sindex $(OBJECT_DIR)/storage $(OBJECT_DIR)/transaction $(OBJECT_DIR)/xdr
 
 strip:	server
 	$(MAKE) -C as strip

@@ -64,14 +64,12 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
-#include "base/secondary_index.h"
 #include "base/security_config.h"
 #include "base/service.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
 #include "base/thr_query.h"
-#include "base/thr_sindex.h"
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
@@ -79,6 +77,8 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/partition_balance.h"
+#include "sindex/secondary_index.h"
+#include "sindex/thr_sindex.h"
 #include "storage/storage.h"
 
 

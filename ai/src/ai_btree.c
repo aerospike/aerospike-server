@@ -31,9 +31,9 @@
 #include "bt_iterator.h"
 #include "bt_output.h"
 #include "stream.h"
-#include "base/thr_sindex.h"
 #include "base/cfg.h"
 #include "fabric/partition.h"
+#include "sindex/thr_sindex.h"
 
 #include <citrusleaf/alloc.h>
 #include <citrusleaf/cf_clock.h>

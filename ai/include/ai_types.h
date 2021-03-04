@@ -34,7 +34,7 @@
 #include <sys/types.h>
 
 #include <citrusleaf/cf_ll.h>
-#include <base/secondary_index.h>
+#include "sindex/secondary_index.h"
 
 #define uchar    unsigned char
 #define ushort16 unsigned short

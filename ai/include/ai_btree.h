@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "base/secondary_index.h"
+#include "sindex/secondary_index.h"
 
 #include "ai_obj.h"
 #include "btreepriv.h"

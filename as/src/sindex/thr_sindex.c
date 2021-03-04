@@ -33,7 +33,7 @@
  *
  */
 
-#include "base/thr_sindex.h"
+#include "sindex/thr_sindex.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -59,11 +59,11 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "base/job_manager.h"
 #include "base/monitor.h"
-#include "base/secondary_index.h"
 #include "base/stats.h"
 #include "fabric/partition.h"
+#include "sindex/job_manager.h"
+#include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 

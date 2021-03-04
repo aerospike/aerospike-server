@@ -36,10 +36,10 @@
 
 #include "log.h"
 
-#include "base/secondary_index.h"
 #include "base/monitor.h"
 #include "base/scan.h"
-#include "base/thr_sindex.h"
+#include "sindex/secondary_index.h"
+#include "sindex/thr_sindex.h"
 
 
 #define AS_MON_MAX_MODULE 10

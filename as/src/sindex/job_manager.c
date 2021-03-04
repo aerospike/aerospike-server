@@ -24,7 +24,7 @@
 // Includes.
 //
 
-#include "base/job_manager.h"
+#include "sindex/job_manager.h"
 
 #include <stdbool.h>
 #include <stddef.h>

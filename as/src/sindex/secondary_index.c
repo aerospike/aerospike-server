@@ -76,7 +76,7 @@
  *
  */
 
-#include "base/secondary_index.h"
+#include "sindex/secondary_index.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -111,10 +111,10 @@
 #include "base/proto.h"
 #include "base/smd.h"
 #include "base/stats.h"
-#include "base/thr_sindex.h"
 #include "base/thr_info.h"
 #include "fabric/partition.h"
 #include "geospatial/geospatial.h"
+#include "sindex/thr_sindex.h"
 #include "transaction/udf.h"
 
 

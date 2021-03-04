@@ -36,9 +36,9 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "sindex/secondary_index.h"
 #include "transaction/rw_request.h"
 
 

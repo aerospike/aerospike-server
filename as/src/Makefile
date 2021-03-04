@@ -22,22 +22,22 @@ ifeq ($(USE_EE),1)
 endif
 
 BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h exp.h features.h health.h
-BASE_HEADERS += index.h job_manager.h json_init.h monitor.h nsup.h particle.h
+BASE_HEADERS += index.h json_init.h monitor.h nsup.h particle.h
 BASE_HEADERS += particle_blob.h particle_integer.h proto.h scan.h scan_job.h
-BASE_HEADERS += scan_manager.h secondary_index.h security.h security_config.h
-BASE_HEADERS += service.h smd.h stats.h thr_info.h thr_query.h thr_sindex.h
+BASE_HEADERS += scan_manager.h security.h security_config.h
+BASE_HEADERS += service.h smd.h stats.h thr_info.h thr_query.h
 BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h
 BASE_HEADERS += truncate.h udf_aerospike.h udf_arglist.h udf_cask.h udf_record.h
 BASE_HEADERS += xdr.h
 
 BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c exp.c health.c index.c
-BASE_SOURCES += job_manager.c json_init.c monitor.c namespace.c nsup.c
+BASE_SOURCES += json_init.c monitor.c namespace.c nsup.c
 BASE_SOURCES += particle.c particle_blob.c particle_bool.c particle_float.c
 BASE_SOURCES += particle_geojson.c particle_hll.c particle_integer.c
 BASE_SOURCES += particle_list.c particle_map.c particle_string.c predexp.c
 BASE_SOURCES += proto.c record.c scan.c scan_job.c scan_manager.c signal.c
-BASE_SOURCES += secondary_index.c service.c smd.c thr_info.c thr_info_port.c
-BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
+BASE_SOURCES += service.c smd.c thr_info.c thr_info_port.c
+BASE_SOURCES += thr_query.c thr_tsvc.c ticker.c transaction.c
 BASE_SOURCES += truncate.c udf_aerospike.c udf_arglist.c udf_cask.c udf_record.c
 
 ifneq ($(STATIC_LIB),1)
@@ -75,6 +75,14 @@ endif
 GEOSPATIAL_HEADERS += geospatial.h
 GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
 
+SINDEX_HEADERS += job_manager.h
+SINDEX_HEADERS += secondary_index.h
+SINDEX_HEADERS += thr_sindex.h
+
+SINDEX_SOURCES += job_manager.c
+SINDEX_SOURCES += secondary_index.c
+SINDEX_SOURCES += thr_sindex.c
+
 STORAGE_HEADERS += drv_common.h drv_ssd.h flat.h storage.h
 STORAGE_SOURCES += drv_common.c drv_memory.c drv_ssd.c flat.c
 STORAGE_SOURCES += storage.c
@@ -101,15 +109,17 @@ endif
 
 HEADERS = $(BASE_HEADERS:%=base/%)
 HEADERS += $(FABRIC_HEADERS:%=fabric/%)
-HEADERS += $(STORAGE_HEADERS:%=storage/%)
 HEADERS += $(GEOSPATIAL_HEADERS:%=geospatial/%)
+HEADERS += $(SINDEX_HEADERS:%=sindex/%)
+HEADERS += $(STORAGE_HEADERS:%=storage/%)
 HEADERS += $(TRANSACTION_HEADERS:%=transaction/%)
 HEADERS += $(XDR_HEADERS:%=xdr/%)
 
 SOURCES = $(BASE_SOURCES:%=base/%)
 SOURCES += $(FABRIC_SOURCES:%=fabric/%)
-SOURCES += $(STORAGE_SOURCES:%=storage/%)
 SOURCES += $(GEOSPATIAL_SOURCES:%=geospatial/%)
+SOURCES += $(SINDEX_SOURCES:%=sindex/%)
+SOURCES += $(STORAGE_SOURCES:%=storage/%)
 SOURCES += $(TRANSACTION_SOURCES:%=transaction/%)
 SOURCES += $(XDR_SOURCES:%=xdr/%)
 
