@@ -276,6 +276,12 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 		as_msg_op* op = (as_msg_op*)p_read;
 
 		if (swap) {
+			// Swap can touch metadata bytes beyond as_msg_op struct.
+			if (as_msg_op_get_value_p(op) > p_end) {
+				cf_warning(AS_PROTO, "bad as_msg_op");
+				return false;
+			}
+
 			as_msg_swap_op(op);
 		}
 

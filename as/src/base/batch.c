@@ -1024,7 +1024,14 @@ as_batch_queue_task(as_transaction* btr)
 					if (data + sizeof(as_msg_op) > limit) {
 						goto TranEnd;
 					}
+
 					op = (as_msg_op*)data;
+
+					// Swap can touch metadata bytes beyond as_msg_op struct.
+					if (as_msg_op_get_value_p(op) > limit) {
+						goto TranEnd;
+					}
+
 					as_msg_swap_op(op);
 					op = as_msg_op_get_next(op);
 					data = (uint8_t*)op;
