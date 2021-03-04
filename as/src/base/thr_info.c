@@ -6054,7 +6054,7 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
  */
 int
 as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
-		bool is_create, bool *is_smd_op, char * OP)
+		bool is_create, char * OP)
 {
 	if (! imd) {
 		cf_warning(AS_INFO, "%s : Failed. internal error.", OP);
@@ -6133,17 +6133,14 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	char cluster_op[6];
-	int cluster_op_len = sizeof(cluster_op);
-	if (as_info_parameter_get(params, "cluster_op", cluster_op, &cluster_op_len)
-			!= 0) {
-		*is_smd_op = true;
-	}
-	else if (strcmp(cluster_op, "true") == 0) {
-		*is_smd_op = true;
-	}
-	else if (strcmp(cluster_op, "false") == 0) {
-		*is_smd_op = false;
+	char cl_op[6];
+	int cl_op_len = sizeof(cl_op);
+	if (as_info_parameter_get(params, "cluster_op", cl_op, &cl_op_len) == 0 &&
+			strcmp(cl_op, "false") == 0) {
+		cf_warning(AS_INFO, "%s : Failed. cluster_op not supported.", cmd);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER,
+				"cluster_op not supported");
+		return AS_SINDEX_ERR_PARAM;
 	}
 
 	// Delete only need parsing till here
@@ -6271,10 +6268,9 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 {
 	as_sindex_metadata imd;
 	memset((void *)&imd, 0, sizeof(imd));
-	bool is_smd_op = true;
 
 	// Check info-command params for correctness.
-	int res = as_info_parse_params_to_sindex_imd(params, &imd, db, true, &is_smd_op, "SINDEX CREATE");
+	int res = as_info_parse_params_to_sindex_imd(params, &imd, db, true, "SINDEX CREATE");
 
 	if (res != 0) {
 		goto ERR;
@@ -6298,31 +6294,18 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 		goto ERR;
 	}
 
-	if (is_smd_op == true)
-	{
-		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
+	cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
 
-		char smd_key[SINDEX_SMD_KEY_SIZE];
+	char smd_key[SINDEX_SMD_KEY_SIZE];
 
-		as_sindex_imd_to_smd_key(&imd, smd_key);
+	as_sindex_imd_to_smd_key(&imd, smd_key);
 
-		if (! as_smd_set_blocking(AS_SMD_MODULE_SINDEX, smd_key, imd.iname, 0)) {
-			cf_dyn_buf_append_string(db, "ERROR::timeout");
+	if (! as_smd_set_blocking(AS_SMD_MODULE_SINDEX, smd_key, imd.iname, 0)) {
+		cf_dyn_buf_append_string(db, "ERROR::timeout");
 
-			goto ERR;
-		}
+		goto ERR;
 	}
-	else if (is_smd_op == false) {
-		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via info", imd.ns_name, imd.iname);
-		res = as_sindex_create(ns, &imd);
-		if (0 != res) {
-			cf_warning(AS_INFO, "SINDEX CREATE : Failed with error %s for index %s",
-					as_sindex_err_str(res), imd.iname);
-			INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(res, __FILE__, __LINE__),
-					as_sindex_err_str(res));
-			goto ERR;
-		}
-	}
+
 	cf_dyn_buf_append_string(db, "OK");
 ERR:
 	as_sindex_imd_free(&imd);
@@ -6333,8 +6316,7 @@ ERR:
 int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 	as_sindex_metadata imd;
 	memset((void *)&imd, 0, sizeof(imd));
-	bool is_smd_op = true;
-	int res = as_info_parse_params_to_sindex_imd(params, &imd, db, false, &is_smd_op, "SINDEX DROP");
+	int res = as_info_parse_params_to_sindex_imd(params, &imd, db, false, "SINDEX DROP");
 
 	if (res != 0) {
 		goto ERR;
@@ -6351,41 +6333,26 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 		goto ERR;
 	}
 
-	if (is_smd_op == true)
-	{
-		cf_info(AS_INFO, "SINDEX DROP : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
+	cf_info(AS_INFO, "SINDEX DROP : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
 
-		char smd_key[SINDEX_SMD_KEY_SIZE];
+	char smd_key[SINDEX_SMD_KEY_SIZE];
 
-		if (as_sindex_delete_imd_to_smd_key(ns, &imd, smd_key)) {
-			if (! as_smd_delete_blocking(AS_SMD_MODULE_SINDEX, smd_key, 0)) {
-				cf_dyn_buf_append_string(db, "ERROR::timeout");
+	if (as_sindex_delete_imd_to_smd_key(ns, &imd, smd_key)) {
+		if (! as_smd_delete_blocking(AS_SMD_MODULE_SINDEX, smd_key, 0)) {
+			cf_dyn_buf_append_string(db, "ERROR::timeout");
 
-				goto ERR;
-			}
-		}
-		else {
-			res = AS_SINDEX_ERR_NOTFOUND;
-		}
-
-		if (0 != res) {
-			cf_warning(AS_INFO, "SINDEX DROP : Queuing the index %s metadata to SMD failed with error %s",
-					imd.iname, as_sindex_err_str(res));
-			INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, as_sindex_err_str(res));
 			goto ERR;
 		}
 	}
-	else if(is_smd_op == false)
-	{
-		cf_info(AS_INFO, "SINDEX DROP : Request received for %s:%s via info", imd.ns_name, imd.iname);
-		res = as_sindex_destroy(ns, &imd);
-		if (0 != res) {
-			cf_warning(AS_INFO, "SINDEX DROP : Failed with error %s for index %s",
-					as_sindex_err_str(res), imd.iname);
-			INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(res, __FILE__, __LINE__),
-					as_sindex_err_str(res));
-			goto ERR;
-		}
+	else {
+		res = AS_SINDEX_ERR_NOTFOUND;
+	}
+
+	if (0 != res) {
+		cf_warning(AS_INFO, "SINDEX DROP : Queuing the index %s metadata to SMD failed with error %s",
+				imd.iname, as_sindex_err_str(res));
+		INFO_COMMAND_SINDEX_FAILCODE(AS_ERR_PARAMETER, as_sindex_err_str(res));
+		goto ERR;
 	}
 
 	cf_dyn_buf_append_string(db, "OK");
@@ -6400,10 +6367,8 @@ info_command_sindex_exists(char *name, char *params, cf_dyn_buf *db)
 	as_sindex_metadata imd;
 	memset((void *)&imd, 0, sizeof(imd));
 
-	bool is_smd_op = false;
-
 	if (as_info_parse_params_to_sindex_imd(params, &imd, db, false,
-			&is_smd_op, "SINDEX EXISTS") != 0) {
+			"SINDEX EXISTS") != 0) {
 		as_sindex_imd_free(&imd);
 		return 0;
 	}
