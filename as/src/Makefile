@@ -21,29 +21,89 @@ ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
 endif
 
-BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h exp.h features.h health.h
-BASE_HEADERS += index.h json_init.h monitor.h nsup.h particle.h
-BASE_HEADERS += particle_blob.h particle_integer.h proto.h scan.h scan_job.h
-BASE_HEADERS += scan_manager.h security.h security_config.h
-BASE_HEADERS += service.h smd.h stats.h thr_info.h thr_query.h
-BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h
-BASE_HEADERS += truncate.h udf_aerospike.h udf_arglist.h udf_cask.h udf_record.h
+BASE_HEADERS += aggr.h
+BASE_HEADERS += batch.h
+BASE_HEADERS += cdt.h
+BASE_HEADERS += cfg.h
+BASE_HEADERS += datamodel.h
+BASE_HEADERS += exp.h
+BASE_HEADERS += features.h
+BASE_HEADERS += health.h
+BASE_HEADERS += index.h
+BASE_HEADERS += json_init.h
+BASE_HEADERS += monitor.h
+BASE_HEADERS += nsup.h
+BASE_HEADERS += particle.h
+BASE_HEADERS += particle_blob.h
+BASE_HEADERS += particle_integer.h
+BASE_HEADERS += proto.h
+BASE_HEADERS += scan.h
+BASE_HEADERS += scan_job.h
+BASE_HEADERS += scan_manager.h
+BASE_HEADERS += security.h
+BASE_HEADERS += security_config.h
+BASE_HEADERS += service.h
+BASE_HEADERS += smd.h
+BASE_HEADERS += stats.h
+BASE_HEADERS += thr_info.h
+BASE_HEADERS += thr_query.h
+BASE_HEADERS += thr_tsvc.h
+BASE_HEADERS += ticker.h
+BASE_HEADERS += transaction.h
+BASE_HEADERS += transaction_policy.h
+BASE_HEADERS += truncate.h
+BASE_HEADERS += udf_aerospike.h
+BASE_HEADERS += udf_arglist.h
+BASE_HEADERS += udf_cask.h
+BASE_HEADERS += udf_record.h
 BASE_HEADERS += xdr.h
 
-BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c exp.c health.c index.c
-BASE_SOURCES += json_init.c monitor.c namespace.c nsup.c
-BASE_SOURCES += particle.c particle_blob.c particle_bool.c particle_float.c
-BASE_SOURCES += particle_geojson.c particle_hll.c particle_integer.c
-BASE_SOURCES += particle_list.c particle_map.c particle_string.c predexp.c
-BASE_SOURCES += proto.c record.c scan.c scan_job.c scan_manager.c signal.c
-BASE_SOURCES += service.c smd.c thr_info.c thr_info_port.c
-BASE_SOURCES += thr_query.c thr_tsvc.c ticker.c transaction.c
-BASE_SOURCES += truncate.c udf_aerospike.c udf_arglist.c udf_cask.c udf_record.c
-
+BASE_SOURCES += aggr.c
+BASE_SOURCES += as.c
+BASE_SOURCES += batch.c
+BASE_SOURCES += bin.c
+BASE_SOURCES += cdt.c
+BASE_SOURCES += cfg.c
+BASE_SOURCES += exp.c
+BASE_SOURCES += health.c
+BASE_SOURCES += index.c
+BASE_SOURCES += json_init.c
+BASE_SOURCES += monitor.c
+BASE_SOURCES += namespace.c
+BASE_SOURCES += nsup.c
+BASE_SOURCES += particle.c
+BASE_SOURCES += particle_blob.c
+BASE_SOURCES += particle_bool.c
+BASE_SOURCES += particle_float.c
+BASE_SOURCES += particle_geojson.c
+BASE_SOURCES += particle_hll.c
+BASE_SOURCES += particle_integer.c
+BASE_SOURCES += particle_list.c
+BASE_SOURCES += particle_map.c
+BASE_SOURCES += particle_string.c
+BASE_SOURCES += predexp.c
+BASE_SOURCES += proto.c
+BASE_SOURCES += record.c
+BASE_SOURCES += scan.c
+BASE_SOURCES += scan_job.c
+BASE_SOURCES += scan_manager.c
+BASE_SOURCES += service.c
+BASE_SOURCES += signal.c
+BASE_SOURCES += smd.c
+BASE_SOURCES += thr_info.c
+BASE_SOURCES += thr_info_port.c
+BASE_SOURCES += thr_query.c
+BASE_SOURCES += thr_tsvc.c
+BASE_SOURCES += ticker.c
+BASE_SOURCES += transaction.c
+BASE_SOURCES += truncate.c
+BASE_SOURCES += udf_aerospike.c
+BASE_SOURCES += udf_arglist.c
+BASE_SOURCES += udf_cask.c
+BASE_SOURCES += udf_record.c
 ifneq ($(STATIC_LIB),1)
   BASE_SOURCES += main.c
 endif
-
 ifneq ($(USE_EE),1)
   BASE_SOURCES += bin_ce.c
   BASE_SOURCES += cfg_ce.c
@@ -57,12 +117,30 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += xdr_ce.c
 endif
 
-FABRIC_HEADERS += clustering.h endpoint.h exchange.h fabric.h hb.h hlc.h
-FABRIC_HEADERS += meta_batch.h migrate.h partition.h partition_balance.h
-FABRIC_HEADERS += roster.h service_list.h skew_monitor.h
+FABRIC_HEADERS += clustering.h
+FABRIC_HEADERS += endpoint.h
+FABRIC_HEADERS += exchange.h
+FABRIC_HEADERS += fabric.h
+FABRIC_HEADERS += hb.h
+FABRIC_HEADERS += hlc.h
+FABRIC_HEADERS += meta_batch.h
+FABRIC_HEADERS += migrate.h
+FABRIC_HEADERS += partition.h
+FABRIC_HEADERS += partition_balance.h
+FABRIC_HEADERS += roster.h
+FABRIC_HEADERS += service_list.h
+FABRIC_HEADERS += skew_monitor.h
 
-FABRIC_SOURCES += clustering.c endpoint.c exchange.c fabric.c hb.c hlc.c
-FABRIC_SOURCES += migrate.c partition.c partition_balance.c service_list.c
+FABRIC_SOURCES += clustering.c
+FABRIC_SOURCES += endpoint.c
+FABRIC_SOURCES += exchange.c
+FABRIC_SOURCES += fabric.c
+FABRIC_SOURCES += hb.c
+FABRIC_SOURCES += hlc.c
+FABRIC_SOURCES += migrate.c
+FABRIC_SOURCES += partition.c
+FABRIC_SOURCES += partition_balance.c
+FABRIC_SOURCES += service_list.c
 FABRIC_SOURCES += skew_monitor.c
 ifneq ($(USE_EE),1)
   FABRIC_SOURCES += meta_batch_ce.c
@@ -73,7 +151,9 @@ ifneq ($(USE_EE),1)
 endif
 
 GEOSPATIAL_HEADERS += geospatial.h
-GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
+
+GEOSPATIAL_SOURCES += geojson.cc
+GEOSPATIAL_SOURCES += geospatial.cc
 
 SINDEX_HEADERS += job_manager.h
 SINDEX_HEADERS += secondary_index.h
@@ -83,8 +163,15 @@ SINDEX_SOURCES += job_manager.c
 SINDEX_SOURCES += secondary_index.c
 SINDEX_SOURCES += thr_sindex.c
 
-STORAGE_HEADERS += drv_common.h drv_ssd.h flat.h storage.h
-STORAGE_SOURCES += drv_common.c drv_memory.c drv_ssd.c flat.c
+STORAGE_HEADERS += drv_common.h
+STORAGE_HEADERS += drv_ssd.h
+STORAGE_HEADERS += flat.h
+STORAGE_HEADERS += storage.h
+
+STORAGE_SOURCES += drv_memory.c
+STORAGE_SOURCES += drv_ssd.c
+STORAGE_SOURCES += flat.c
+STORAGE_SOURCES += drv_common.c
 STORAGE_SOURCES += storage.c
 ifneq ($(USE_EE),1)
   STORAGE_SOURCES += drv_memory_ce.c
@@ -93,13 +180,29 @@ ifneq ($(USE_EE),1)
   STORAGE_SOURCES += flat_ce.c
 endif
 
-TRANSACTION_HEADERS += delete.h duplicate_resolve.h proxy.h re_replicate.h
-TRANSACTION_HEADERS += read.h replica_ping.h replica_write.h rw_request_hash.h
-TRANSACTION_HEADERS += rw_request.h rw_utils.h udf.h write.h
+TRANSACTION_HEADERS += delete.h
+TRANSACTION_HEADERS += duplicate_resolve.h
+TRANSACTION_HEADERS += proxy.h
+TRANSACTION_HEADERS += re_replicate.h
+TRANSACTION_HEADERS += read.h
+TRANSACTION_HEADERS += replica_ping.h
+TRANSACTION_HEADERS += replica_write.h
+TRANSACTION_HEADERS += rw_request.h
+TRANSACTION_HEADERS += rw_request_hash.h
+TRANSACTION_HEADERS += rw_utils.h
+TRANSACTION_HEADERS += udf.h
+TRANSACTION_HEADERS += write.h
 
-TRANSACTION_SOURCES += delete.c duplicate_resolve.c proxy.c read.c
-TRANSACTION_SOURCES += replica_write.c rw_request_hash.c rw_request.c rw_utils.c
-TRANSACTION_SOURCES += udf.c write.c
+TRANSACTION_SOURCES += delete.c
+TRANSACTION_SOURCES += duplicate_resolve.c
+TRANSACTION_SOURCES += proxy.c
+TRANSACTION_SOURCES += read.c
+TRANSACTION_SOURCES += replica_write.c
+TRANSACTION_SOURCES += rw_request.c
+TRANSACTION_SOURCES += rw_request_hash.c
+TRANSACTION_SOURCES += rw_utils.c
+TRANSACTION_SOURCES += udf.c
+TRANSACTION_SOURCES += write.c
 ifneq ($(USE_EE),1)
   TRANSACTION_SOURCES += delete_ce.c
   TRANSACTION_SOURCES += re_replicate_ce.c
