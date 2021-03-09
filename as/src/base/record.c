@@ -520,7 +520,12 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
 	as_bin_destroy_all(rd->bins, rd->n_bins);
 
 	// Move the new bin into the index.
-	as_single_bin_copy(rd->bins, &new_bin);
+	if (n_new_bins == 1) {
+		as_single_bin_copy(rd->bins, &new_bin);
+	}
+	else {
+		as_bin_set_empty(rd->bins);
+	}
 
 	rd->n_bins = n_new_bins;
 	rd->bins = &new_bin;

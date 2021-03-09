@@ -2452,7 +2452,13 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 		if (ns->single_bin) {
 			as_bin_destroy_all(old_bins, n_old_bins);
-			as_single_bin_copy(as_index_get_single_bin(r), rd.bins);
+
+			if (rd.n_bins == 1) {
+				as_single_bin_copy(as_index_get_single_bin(r), rd.bins);
+			}
+			else {
+				as_bin_set_empty(as_index_get_single_bin(r));
+			}
 		}
 		else {
 			// Success - adjust sindex, looking at old and new bins.
