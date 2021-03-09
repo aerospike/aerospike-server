@@ -670,6 +670,12 @@ map_wire_size(const as_particle *p)
 	packed_map map;
 
 	if (! packed_map_init_from_particle(&map, p, false)) {
+		as_bin b = {
+				.particle = (as_particle *)p
+		};
+
+		as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_MAP);
+		cdt_bin_print(&b, "map");
 		cf_crash(AS_PARTICLE, "map_wire_size() invalid packed map");
 	}
 
@@ -943,10 +949,11 @@ map_flat_size(const as_particle *p)
 	packed_map map;
 
 	if (! packed_map_init_from_particle(&map, p, false)) {
-		const as_bin b = {
+		as_bin b = {
 				.particle = (as_particle *)p
 		};
 
+		as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_MAP);
 		cdt_bin_print(&b, "map");
 		cf_crash(AS_PARTICLE, "map_flat_size() invalid packed map");
 	}
