@@ -64,9 +64,6 @@ as_bin_particle_is_tombstone(as_particle_type type)
 bool
 as_bin_is_tombstone(const as_bin* b)
 {
-	// TODO - for development only?
-	cf_assert(b->state != AS_BIN_STATE_UNUSED, AS_BIN, "unexpected empty bin");
-
 	return false;
 }
 
