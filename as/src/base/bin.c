@@ -264,7 +264,7 @@ as_bin_get_by_id_live(as_storage_rd* rd, uint32_t id)
 		as_bin* b = &rd->bins[i];
 
 		if ((uint32_t)b->id == id) {
-			return as_bin_is_tombstone(b) ? NULL : b;
+			return as_bin_is_live(b) ? b : NULL;
 		}
 	}
 
@@ -326,7 +326,7 @@ as_bin_get_live_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
 		as_bin* b = &rd->bins[i];
 
 		if ((uint32_t)b->id == id) {
-			return as_bin_is_tombstone(b) ? NULL : b;
+			return as_bin_is_live(b) ? b : NULL;
 		}
 	}
 
