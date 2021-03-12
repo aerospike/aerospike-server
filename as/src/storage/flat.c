@@ -410,7 +410,7 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 			}
 		}
 
-		if (! (at = as_particle_skip_flat(at, end))) {
+		if ((at = as_particle_skip_flat(at, end)) == NULL) {
 			return false;
 		}
 	}
