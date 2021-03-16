@@ -1736,7 +1736,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	int i = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
-		if (! resolve_bin(rd, op, msg_lut, &n_won, &result)) {
+		if (! resolve_bin(rd, op, msg_lut, m->n_ops, &n_won, &result)) {
 			if (result != AS_OK) {
 				return result;
 			}

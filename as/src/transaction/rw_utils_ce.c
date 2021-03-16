@@ -221,7 +221,7 @@ forbid_resolve(const as_transaction* tr, const as_storage_rd* rd,
 
 bool
 resolve_bin(as_storage_rd* rd, const as_msg_op* op, uint64_t msg_lut,
-		uint16_t* n_won, int* result)
+		uint16_t n_ops, uint16_t* n_won, int* result)
 {
 	return true;
 }

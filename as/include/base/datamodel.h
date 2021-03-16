@@ -1147,6 +1147,8 @@ struct as_namespace_s {
 	cf_atomic64		n_fail_key_busy;
 	cf_atomic64		n_fail_generation;
 	cf_atomic64		n_fail_record_too_big;
+	cf_atomic64		n_fail_client_lost_conflict;
+	cf_atomic64		n_fail_xdr_lost_conflict;
 
 	// Special non-error counters:
 
