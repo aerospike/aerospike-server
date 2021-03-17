@@ -1888,6 +1888,8 @@ info_network_config_get(cf_dyn_buf *db)
 				g_config.tls_service.tls_peer_names[i]);
 	}
 
+	info_append_bool(db, "service.disable-localhost", g_config.service_localhost_disabled);
+
 	// Heartbeat:
 
 	as_hb_info_config_get(db);

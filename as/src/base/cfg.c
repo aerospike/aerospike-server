@@ -360,6 +360,7 @@ typedef enum {
 	CASE_NETWORK_SERVICE_ACCESS_PORT,
 	CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_PORT,
+	CASE_NETWORK_SERVICE_DISABLE_LOCALHOST,
 	CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS,
 	CASE_NETWORK_SERVICE_TLS_ACCESS_PORT,
 	CASE_NETWORK_SERVICE_TLS_ADDRESS,
@@ -873,6 +874,7 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "access-port",					CASE_NETWORK_SERVICE_ACCESS_PORT },
 		{ "alternate-access-address",		CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS },
 		{ "alternate-access-port",			CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_PORT },
+		{ "disable-localhost",				CASE_NETWORK_SERVICE_DISABLE_LOCALHOST },
 		{ "tls-access-address",				CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS },
 		{ "tls-access-port",				CASE_NETWORK_SERVICE_TLS_ACCESS_PORT },
 		{ "tls-address",					CASE_NETWORK_SERVICE_TLS_ADDRESS },
@@ -2532,6 +2534,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_PORT:
 				c->service.alt_port = cfg_port(&line);
+				break;
+			case CASE_NETWORK_SERVICE_DISABLE_LOCALHOST:
+				c->service_localhost_disabled = cfg_bool(&line);
 				break;
 			case CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS:
 				cfg_enterprise_only(&line);

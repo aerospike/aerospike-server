@@ -163,6 +163,7 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
+	bool			service_localhost_disabled;
 	cf_serv_spec	tls_service; // TLS client service
 
 	//--------------------------------------------

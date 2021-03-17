@@ -183,8 +183,10 @@ as_service_start(void)
 
 	// Create listening sockets.
 
-	add_localhost(&g_service_bind, CF_SOCK_OWNER_SERVICE);
-	add_localhost(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
+	if (! g_config.service_localhost_disabled) {
+		add_localhost(&g_service_bind, CF_SOCK_OWNER_SERVICE);
+		add_localhost(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
+	}
 
 	if (cf_socket_init_server(&g_service_bind, &g_sockets) < 0) {
 		cf_crash(AS_SERVICE, "couldn't initialize service socket");
