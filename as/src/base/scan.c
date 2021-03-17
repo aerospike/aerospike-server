@@ -64,7 +64,6 @@
 #include "base/scan_manager.h"
 #include "base/service.h"
 #include "base/transaction.h"
-#include "fabric/exchange.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
 #include "transaction/rw_utils.h"
@@ -128,11 +127,9 @@ typedef struct scan_options_s {
 
 scan_type get_scan_type(as_transaction* tr);
 bool get_scan_set(as_transaction* tr, as_namespace* ns, char* set_name, uint16_t* set_id);
-bool get_scan_options(as_transaction* tr, scan_options* options);
 bool get_scan_pids(as_transaction* tr, as_scan_pid** p_pids);
 bool get_scan_sample_max(as_transaction* tr, uint64_t* sample_max);
 bool get_scan_rps(as_transaction* tr, uint32_t* rps);
-void convert_old_priority(int old_priority, uint32_t* rps);
 bool validate_background_scan_rps(const as_namespace* ns, uint32_t* rps);
 bool get_scan_socket_timeout(as_transaction* tr, uint32_t* timeout);
 bool get_scan_predexp(as_transaction* tr, as_exp** p_predexp);
@@ -308,33 +305,10 @@ get_scan_set(as_transaction* tr, as_namespace* ns, char* set_name,
 }
 
 bool
-get_scan_options(as_transaction* tr, scan_options* options)
-{
-	if (! as_transaction_has_scan_options(tr)) {
-		return true;
-	}
-
-	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_SCAN_OPTIONS);
-
-	if (as_msg_field_get_value_sz(f) != 2) {
-		cf_warning(AS_SCAN, "scan msg options field size not 2");
-		return false;
-	}
-
-	options->priority = AS_MSG_FIELD_SCAN_PRIORITY(f->data[0]);
-	options->fail_on_cluster_change =
-			(AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE & f->data[0]) != 0;
-	options->sample_pct = f->data[1];
-
-	return true;
-}
-
-bool
 get_scan_pids(as_transaction* tr, as_scan_pid** p_pids)
 {
 	if (! as_transaction_has_pids(tr) && ! as_transaction_has_digests(tr)) {
-		return true;
+		return true; // unsupported - but let caller return special error code
 	}
 
 	as_scan_pid* pids = cf_calloc(AS_PARTITIONS, sizeof(as_scan_pid));
@@ -345,8 +319,8 @@ get_scan_pids(as_transaction* tr, as_scan_pid** p_pids)
 
 		uint32_t n_pids = as_msg_field_get_value_sz(f) / sizeof(uint16_t);
 
-		if (n_pids > AS_PARTITIONS) {
-			cf_warning(AS_SCAN, "pid array too big");
+		if (n_pids == 0 || n_pids > AS_PARTITIONS) {
+			cf_warning(AS_SCAN, "pid array empty or too big");
 			cf_free(pids);
 			return false;
 		}
@@ -372,8 +346,8 @@ get_scan_pids(as_transaction* tr, as_scan_pid** p_pids)
 
 		uint32_t n_digests = as_msg_field_get_value_sz(f) / sizeof(cf_digest);
 
-		if (n_digests > AS_PARTITIONS) {
-			cf_warning(AS_SCAN, "digest array too big");
+		if (n_digests == 0 || n_digests > AS_PARTITIONS) {
+			cf_warning(AS_SCAN, "digest array empty or too big");
 			cf_free(pids);
 			return false;
 		}
@@ -441,23 +415,6 @@ get_scan_rps(as_transaction* tr, uint32_t* rps)
 	*rps = cf_swap_from_be32(*(uint32_t*)f->data);
 
 	return true;
-}
-
-void
-convert_old_priority(int old_priority, uint32_t* rps)
-{
-	if (old_priority != 0 && *rps != 0) {
-		cf_warning(AS_SCAN, "unexpected - scan has rps %u and priority %d",
-				*rps, old_priority);
-		return;
-	}
-
-	if (old_priority == 1 && *rps == 0) {
-		cf_info(AS_SCAN, "low-priority scan from old client will use %u rps",
-				LOW_PRIORITY_RPS);
-
-		*rps = LOW_PRIORITY_RPS;
-	}
 }
 
 bool
@@ -689,10 +646,7 @@ typedef struct basic_scan_job_s {
 	conn_scan_job	_base;
 
 	// Derived class data:
-	uint64_t		cluster_key;
-	bool			fail_on_cluster_change;
 	bool			no_bin_data;
-	uint32_t		sample_pct;
 	uint64_t		sample_max;
 	uint64_t		sample_count;
 	uint64_t		max_per_partition;
@@ -715,7 +669,6 @@ const as_scan_vtable basic_scan_job_vtable = {
 typedef struct basic_scan_slice_s {
 	basic_scan_job*		job;
 	cf_buf_builder**	bb_r;
-	uint64_t			limit;
 	uint64_t			count;
 } basic_scan_slice;
 
@@ -731,16 +684,20 @@ void sample_max_init(basic_scan_job* job, uint64_t sample_max);
 int
 basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
+	if (as_transaction_has_scan_options(tr)) {
+		cf_warning(AS_SCAN, "basic scan got unsupported old scan options");
+		return AS_ERR_UNSUPPORTED_FEATURE;
+	}
+
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
-	scan_options options = { .sample_pct = 100 };
 	as_scan_pid* pids = NULL;
 	uint64_t sample_max = 0;
 	uint32_t rps = 0;
 	uint32_t timeout = CF_SOCKET_TIMEOUT;
 
 	if (! get_scan_set(tr, ns, set_name, &set_id) ||
-			! get_scan_options(tr, &options) || ! get_scan_pids(tr, &pids) ||
+			! get_scan_pids(tr, &pids) ||
 			! get_scan_sample_max(tr, &sample_max) ||
 			! get_scan_rps(tr, &rps) ||
 			! get_scan_socket_timeout(tr, &timeout)) {
@@ -748,8 +705,9 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	if (pids == NULL && set_id == INVALID_SET_ID && set_name[0] != '\0') {
-		return AS_ERR_NOT_FOUND; // only for legacy scans
+	if (pids == NULL) {
+		cf_warning(AS_SCAN, "basic scan missing pids and digests fields");
+		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
 	as_exp* predexp = NULL;
@@ -759,18 +717,15 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	convert_old_priority(options.priority, &rps);
-
 	basic_scan_job* job = cf_malloc(sizeof(basic_scan_job));
 	as_scan_job* _job = (as_scan_job*)job;
 
 	as_scan_job_init(_job, &basic_scan_job_vtable, as_transaction_trid(tr), ns,
 			set_name, set_id, pids, rps, tr->from.proto_fd_h->client);
 
-	job->cluster_key = as_exchange_cluster_key();
-	job->fail_on_cluster_change = options.fail_on_cluster_change;
+	cf_assert(_job->n_pids_requested != 0, AS_SCAN, "0 pids requested");
+
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
-	job->sample_pct = options.sample_pct;
 	job->predexp = predexp;
 
 	sample_max_init(job, sample_max);
@@ -784,25 +739,14 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return result;
 	}
 
-	if (job->fail_on_cluster_change &&
-			(ns->migrate_tx_partitions_remaining != 0 ||
-			 ns->migrate_rx_partitions_remaining != 0)) {
-		cf_warning(AS_SCAN, "basic scan job not started - migration");
-		as_scan_job_destroy(_job);
-		return AS_ERR_CLUSTER_KEY_MISMATCH;
-	}
-
 	// Take ownership of socket from transaction.
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h, timeout,
 			as_transaction_compress_response(tr));
 
-	cf_debug(AS_SCAN, "starting basic scan job %lu {%s:%s} n-pids-requested %hu rps %u sample-%s %lu%s%s socket-timeout %u from %s",
+	cf_debug(AS_SCAN, "starting basic scan job %lu {%s:%s} n-pids-requested %hu rps %u sample-max %lu%s socket-timeout %u from %s",
 			_job->trid, ns->name, set_name, _job->n_pids_requested, _job->rps,
-			sample_max == 0 ? "pct" : "max",
-			sample_max == 0 ? (uint64_t)job->sample_pct : sample_max,
-			job->no_bin_data ? " metadata-only" : "",
-			job->fail_on_cluster_change ? " fail-on-cluster-change" : "",
-			timeout, _job->client);
+			sample_max, job->no_bin_data ? " metadata-only" : "", timeout,
+			_job->client);
 
 	if ((result = as_scan_manager_start_job(_job)) != 0) {
 		cf_warning(AS_SCAN, "basic scan job %lu failed to start (%d)",
@@ -836,7 +780,7 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 
 	cf_buf_builder_reserve(&bb, (int)sizeof(as_proto), NULL);
 
-	if (tree == NULL) { // also means _job->pids != NULL - not a legacy scan
+	if (tree == NULL) {
 		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_ERR_UNAVAILABLE);
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 		*bb_r = bb;
@@ -844,7 +788,6 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 	}
 
 	if (_job->set_id == INVALID_SET_ID && _job->set_name[0] != '\0') {
-		// Legacy scan can't get here - already returned 'not found'.
 		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
 		*bb_r = bb;
@@ -854,34 +797,15 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 	uint64_t slice_start = cf_getms();
 	basic_scan_slice slice = { job, &bb };
 
-	cf_digest* keyd = NULL;
+	if (job->max_per_partition == 0 || job->sample_count < job->sample_max) {
+		cf_digest* keyd = _job->pids[rsv->p->id].has_digest ?
+				&_job->pids[rsv->p->id].keyd : NULL;
 
-	if (_job->pids != NULL && _job->pids[rsv->p->id].has_digest) {
-		keyd = &_job->pids[rsv->p->id].keyd;
-	}
-
-	if (job->max_per_partition != 0) {
-		if (job->sample_count < job->sample_max) {
-			as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
-					(void*)&slice);
-		}
-	}
-	else if (job->sample_pct != 100) {
-		slice.limit = ((as_index_tree_size(tree) * job->sample_pct) / 100);
-
-		if (slice.limit != 0) {
-			as_index_reduce_from(tree, keyd, basic_scan_job_reduce_cb,
-					(void*)&slice);
-		}
-	}
-	else { // 100% - limit 0 is ignored.
 		as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
 				(void*)&slice);
 	}
 
-	if (_job->pids != NULL) {
-		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
-	}
+	as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
 
 	if (bb->used_sz > sizeof(as_proto)) {
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
@@ -907,7 +831,6 @@ basic_scan_job_finish(as_scan_job* _job)
 		as_incr_uint64(&_job->ns->n_scan_basic_abort);
 		break;
 	case AS_SCAN_ERR_UNKNOWN:
-	case AS_SCAN_ERR_CLUSTER_KEY:
 	case AS_SCAN_ERR_RESPONSE_ERROR:
 	case AS_SCAN_ERR_RESPONSE_TIMEOUT:
 	default:
@@ -955,27 +878,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return false;
 	}
 
-	if (job->fail_on_cluster_change &&
-			job->cluster_key != as_exchange_cluster_key()) {
-		as_record_done(r_ref, ns);
-		as_scan_manager_abandon_job(_job, AS_ERR_CLUSTER_KEY_MISMATCH);
-		return false;
-	}
-
 	as_index* r = r_ref->r;
-
-	if (slice->limit != 0) { // sample-pct checks pre-filters
-		if (slice->count++ == slice->limit) {
-			as_record_done(r_ref, ns);
-			return false;
-		}
-
-		// Custom filter tombstones here since we must increment slice->count.
-		if (! as_record_is_live(r)) {
-			as_record_done(r_ref, ns);
-			return true;
-		}
-	}
 
 	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
@@ -1133,28 +1036,14 @@ sample_max_init(basic_scan_job* job, uint64_t sample_max)
 	if (sample_max == 0) {
 		job->sample_max = 0;
 		job->sample_count = 0;
-		job->max_per_partition = 0; // will use sample_pct
+		job->max_per_partition = 0;
 		return;
-	}
-
-	if (job->sample_pct != 100) {
-		cf_warning(AS_SCAN, "unexpected - scan has sample-max %lu and pct %u",
-				sample_max, job->sample_pct);
 	}
 
 	job->sample_max = sample_max;
 	job->sample_count = 0;
 
-	uint64_t n_pids = ((as_scan_job*)job)->n_pids_requested;
-
-	if (n_pids == 0) {
-		cf_warning(AS_SCAN, "unexpected - scan has sample-max %lu but no pids",
-				sample_max);
-
-		// Proceed - estimate number of masters (no safe ns->cluster_size).
-		n_pids = AS_PARTITIONS / as_exchange_cluster_size();
-	}
-
+	uint64_t n_pids = ((as_scan_job*)job)->n_pids_requested; // can't be 0
 	uint64_t max_per_partition = (sample_max + n_pids - 1) / n_pids;
 
 	// Add margin so when target is near actual population, partition size
@@ -1234,12 +1123,10 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
-	scan_options options = { .sample_pct = 100 };
 	uint32_t rps = 0;
 	uint32_t timeout = CF_SOCKET_TIMEOUT;
 
-	if (! get_scan_set(tr, ns, set_name, &set_id) ||
-			! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps) ||
+	if (! get_scan_set(tr, ns, set_name, &set_id) || ! get_scan_rps(tr, &rps) ||
 			! get_scan_socket_timeout(tr, &timeout)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed msg field processing");
 		return AS_ERR_PARAMETER;
@@ -1253,8 +1140,6 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns)
 		cf_warning(AS_SCAN, "aggregation scans do not support predexp filters");
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
-
-	convert_old_priority(options.priority, &rps);
 
 	aggr_scan_job* job = cf_malloc(sizeof(aggr_scan_job));
 	as_scan_job* _job = (as_scan_job*)job;
@@ -1378,7 +1263,6 @@ aggr_scan_job_finish(as_scan_job* _job)
 		as_incr_uint64(&_job->ns->n_scan_aggr_abort);
 		break;
 	case AS_SCAN_ERR_UNKNOWN:
-	case AS_SCAN_ERR_CLUSTER_KEY:
 	case AS_SCAN_ERR_RESPONSE_ERROR:
 	case AS_SCAN_ERR_RESPONSE_TIMEOUT:
 	default:
@@ -1582,11 +1466,9 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
-	scan_options options = { .sample_pct = 100 };
 	uint32_t rps = 0;
 
-	if (! get_scan_set(tr, ns, set_name, &set_id) ||
-			! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
+	if (! get_scan_set(tr, ns, set_name, &set_id) || ! get_scan_rps(tr, &rps)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed msg field processing");
 		return AS_ERR_PARAMETER;
 	}
@@ -1594,8 +1476,6 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 	if (set_id == INVALID_SET_ID && set_name[0] != '\0') {
 		return AS_ERR_NOT_FOUND;
 	}
-
-	convert_old_priority(options.priority, &rps);
 
 	if (! validate_background_scan_rps(ns, &rps)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed rps check");
@@ -1692,7 +1572,6 @@ udf_bg_scan_job_finish(as_scan_job* _job)
 		as_incr_uint64(&_job->ns->n_scan_udf_bg_abort);
 		break;
 	case AS_SCAN_ERR_UNKNOWN:
-	case AS_SCAN_ERR_CLUSTER_KEY:
 	default:
 		as_incr_uint64(&_job->ns->n_scan_udf_bg_error);
 		break;
@@ -1848,11 +1727,9 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 {
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
-	scan_options options = { .sample_pct = 100 };
 	uint32_t rps = 0;
 
-	if (! get_scan_set(tr, ns, set_name, &set_id) ||
-			! get_scan_options(tr, &options) || ! get_scan_rps(tr, &rps)) {
+	if (! get_scan_set(tr, ns, set_name, &set_id) || ! get_scan_rps(tr, &rps)) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed msg field processing");
 		return AS_ERR_PARAMETER;
 	}
@@ -1959,7 +1836,6 @@ ops_bg_scan_job_finish(as_scan_job* _job)
 		as_incr_uint64(&_job->ns->n_scan_ops_bg_abort);
 		break;
 	case AS_SCAN_ERR_UNKNOWN:
-	case AS_SCAN_ERR_CLUSTER_KEY:
 	default:
 		as_incr_uint64(&_job->ns->n_scan_ops_bg_error);
 		break;

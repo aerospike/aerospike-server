@@ -112,8 +112,6 @@ result_str(int result)
 		return "ok";
 	case AS_SCAN_ERR_UNKNOWN:
 		return "abandoned-unknown";
-	case AS_SCAN_ERR_CLUSTER_KEY:
-		return "abandoned-cluster-key";
 	case AS_SCAN_ERR_USER_ABORT:
 		return "user-aborted";
 	case AS_SCAN_ERR_RESPONSE_ERROR:

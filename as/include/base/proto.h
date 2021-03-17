@@ -276,9 +276,9 @@ typedef struct as_msg_field_s {
 	// 3 is unused.
 #define AS_MSG_FIELD_TYPE_DIGEST_RIPE       4
 	// 5 is unused.
-#define AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY 6 // old batch - deprecated
+#define AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY 6 // old batch - unsupported
 #define AS_MSG_FIELD_TYPE_TRID              7
-#define AS_MSG_FIELD_TYPE_SCAN_OPTIONS      8
+#define AS_MSG_FIELD_TYPE_SCAN_OPTIONS      8 // old scan - unsupported
 #define AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT    9
 #define AS_MSG_FIELD_TYPE_RECS_PER_SEC      10
 #define AS_MSG_FIELD_TYPE_PID_ARRAY         11
@@ -308,9 +308,9 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_SET                (1 << 1)
 #define AS_MSG_FIELD_BIT_KEY                (1 << 2)
 #define AS_MSG_FIELD_BIT_DIGEST_RIPE        (1 << 3)
-#define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY  (1 << 4) // old batch - deprecated
+#define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY  (1 << 4) // old batch - unsupported
 #define AS_MSG_FIELD_BIT_TRID               (1 << 5)
-#define AS_MSG_FIELD_BIT_SCAN_OPTIONS       (1 << 6)
+#define AS_MSG_FIELD_BIT_SCAN_OPTIONS       (1 << 6) // old scan - unsupported
 #define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 7)
 #define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 8)
 #define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 9)
@@ -328,10 +328,6 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_BATCH              (1 << 21)
 #define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 22)
 #define AS_MSG_FIELD_BIT_PREDEXP            (1 << 23)
-
-// Special message field values.
-#define AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE    (0x08)
-#define AS_MSG_FIELD_SCAN_PRIORITY(v)               ((v & 0xF0) >> 4)
 
 //------------------------------------------------
 // as_msg_op.

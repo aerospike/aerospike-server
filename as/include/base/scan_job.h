@@ -53,7 +53,6 @@ struct as_scan_job_s;
 // Same as proto result codes so connected scans don't have to convert:
 #define AS_SCAN_ERR_UNKNOWN     AS_ERR_UNKNOWN
 #define AS_SCAN_ERR_PARAMETER   AS_ERR_PARAMETER
-#define AS_SCAN_ERR_CLUSTER_KEY AS_ERR_CLUSTER_KEY_MISMATCH
 #define AS_SCAN_ERR_USER_ABORT  AS_ERR_SCAN_ABORT
 #define AS_SCAN_ERR_FORBIDDEN   AS_ERR_FORBIDDEN
 

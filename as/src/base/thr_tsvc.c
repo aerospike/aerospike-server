@@ -192,7 +192,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 		}
 
 		if (as_transaction_is_batch_direct(tr)) {
-			// Old batch - deprecated.
+			// Old batch - unsupported.
 			as_multi_rec_transaction_error(tr, AS_ERR_UNSUPPORTED_FEATURE);
 		}
 		else if (as_transaction_is_query(tr)) {
