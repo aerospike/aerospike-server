@@ -393,6 +393,18 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 	case FROM_CLIENT:
 		BENCHMARK_NEXT_DATA_POINT(tr, read, local);
 		if (db && db->used_sz != 0) {
+			// FIXME - TEMPORARY bug hunt ----------------------------
+			as_msg* m = &((cl_msg*)db->buf)->msg;
+			uint32_t g = cf_swap_from_be32(m->generation);
+			uint16_t b = cf_swap_from_be16(m->n_ops);
+			cf_assert(b != 0, AS_RW, "no bins");
+			if (tr->rsv.ns->cp) {
+				cf_assert(g > 0 && g < 1024, AS_RW, "bad SC gen %u", g);
+			}
+			else {
+				cf_assert(g > 0 && g < 64 * 1024, AS_RW, "bad AP gen %u", g);
+			}
+			// FIXME - END TEMPORARY bug hunt ------------------------
 			as_msg_send_ops_reply(tr->from.proto_fd_h, db,
 					as_transaction_compress_response(tr),
 					&tr->rsv.ns->record_comp_stat);
@@ -408,6 +420,18 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		break;
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
+			// FIXME - TEMPORARY bug hunt ----------------------------
+			as_msg* m = &((cl_msg*)db->buf)->msg;
+			uint32_t g = cf_swap_from_be32(m->generation);
+			uint16_t b = cf_swap_from_be16(m->n_ops);
+			cf_assert(b != 0, AS_RW, "no bins");
+			if (tr->rsv.ns->cp) {
+				cf_assert(g > 0 && g < 1024, AS_RW, "bad SC gen %u", g);
+			}
+			else {
+				cf_assert(g > 0 && g < 64 * 1024, AS_RW, "bad AP gen %u", g);
+			}
+			// FIXME - END TEMPORARY bug hunt ------------------------
 			as_proxy_send_ops_response(tr->from.proxy_node,
 					tr->from_data.proxy_tid, db,
 					as_transaction_compress_response(tr),
