@@ -371,7 +371,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 				msg_sz += sizeof(as_msg_op);
 				msg_sz += ns->single_bin ?
 						0 : strlen(as_bin_get_name_from_id(ns, b->id));
-				msg_sz += (int)as_bin_particle_client_value_size(b);
+				msg_sz += as_bin_particle_client_value_size(b);
 
 				n_bins_returned++;
 			}
