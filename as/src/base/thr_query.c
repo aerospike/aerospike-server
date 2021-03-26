@@ -3073,13 +3073,13 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	if (! query_setup_udf_call(qtr, tr)) {
 		rv = AS_QUERY_ERR;
-		cf_free(qtr);
+		qtr_free(qtr);
 		goto Cleanup;
 	}
 
 	if (! query_setup_shared_msgp(qtr, tr)) {
 		rv = AS_QUERY_ERR;
-		cf_free(qtr);
+		qtr_free(qtr);
 		goto Cleanup;
 		// Nothing to clean from udf setup - query types that allocate there
 		// can't fail here.
