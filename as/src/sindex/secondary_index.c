@@ -2396,10 +2396,6 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		as_sindex_bin_data *end   = &(srange->end);
 		// Populate Bin id
 		uint8_t bin_path_len         = *data++;
-		if (bin_path_len >= AS_SINDEX_MAX_PATH_LENGTH) {
-			cf_warning(AS_SINDEX, "Index position size %d exceeds the max length %d", bin_path_len, AS_SINDEX_MAX_PATH_LENGTH);
-			return AS_SINDEX_ERR_PARAM;
-		}
 
 		strncpy(srange->bin_path, (char *)data, bin_path_len);
 		srange->bin_path[bin_path_len] = '\0';

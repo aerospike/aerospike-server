@@ -369,18 +369,17 @@ cf_log_set_level(uint32_t id, const char* context_str, const char* level_str)
 		return false;
 	}
 
+	cf_log_context context;
 	cf_log_sink* sink = &g_sinks[id];
 
 	if (strcmp(context_str, "any") == 0) {
-		for (int i = 0; i < CF_LOG_N_CONTEXTS; i++) {
-			sink->levels[i] = level;
-			update_most_verbose_level(i);
+		for (context = 0; context < CF_LOG_N_CONTEXTS; context++) {
+			sink->levels[context] = level;
+			update_most_verbose_level(context);
 		}
 
 		return true;
 	}
-
-	cf_log_context context;
 
 	if (! get_context(context_str, &context)) {
 		cf_warning(CF_MISC, "invalid log context %s", context_str);

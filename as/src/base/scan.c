@@ -359,7 +359,7 @@ get_scan_pids(as_transaction* tr, as_scan_pid** p_pids)
 			uint32_t pid = as_partition_getid(keyd);
 
 			if (pid >= AS_PARTITIONS || pids[pid].requested) {
-				cf_warning(AS_SCAN, "bad or duplicate digest pid %hu", pid);
+				cf_warning(AS_SCAN, "bad or duplicate digest pid %u", pid);
 				cf_free(pids);
 				return false;
 			}

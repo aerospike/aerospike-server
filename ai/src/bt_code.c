@@ -286,7 +286,6 @@ typedef struct btn_pos {
 typedef struct two_bp_gens {
     bp_t p; /* parent */ bp_t c; /* child */
 } tbg_t;
-static inline void free_bp(void *v) { cf_free(v); }
 
 typedef struct ll_ai_bp_element_s {
     cf_ll_element   ele;

@@ -294,7 +294,7 @@ udf_aerospike_log(const as_aerospike* as, const char* file, const int line,
 {
 	(void)as;
 
-	cf_log_write(AS_UDF, level, file, line, "%s", (char*)message);
+	cf_log_write(AS_UDF, (cf_log_level)level, file, line, "%s", (char*)message);
 
 	return 0;
 }
