@@ -781,8 +781,8 @@ fabric_dump_fc_reduce_fn(const void *key, void *data, void *udata)
 
 	const char* pool_name;
 
-	pool_name = (pool_id >= 0 && pool_id < AS_FABRIC_N_CHANNELS) ?
-		CHANNEL_NAMES[pool_id] : "INVALID";
+	pool_name = pool_id < AS_FABRIC_N_CHANNELS ?
+			CHANNEL_NAMES[pool_id] : "INVALID";
 
 	size_t max_len = 45 + 2 + 1 + 5 + 1;
 	char sock_addr[max_len];
