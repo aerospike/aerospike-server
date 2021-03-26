@@ -1,7 +1,7 @@
 /*
  * rchash.h
  *
- * Copyright (C) 2018 Aerospike, Inc.
+ * Copyright (C) 2018-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
