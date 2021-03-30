@@ -418,7 +418,7 @@ predexp_matches_metadata_old(const as_exp* predexp,
 			.rd = ctx->rd
 	};
 
-	if (predexp == NULL || bp == NULL) {
+	if (bp == NULL) {
 		return (as_exp_trilean)PREDEXP_TRUE;
 	}
 
@@ -447,7 +447,7 @@ predexp_matches_record_old(const as_exp* predexp,
 			.rd = ctx->rd
 	};
 
-	if (predexp == NULL || bp == NULL) {
+	if (bp == NULL) {
 		return true;
 	}
 
