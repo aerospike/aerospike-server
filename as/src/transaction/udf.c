@@ -1049,11 +1049,12 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 			as_single_bin_copy(as_index_get_single_bin(r), rd->bins);
 		}
 		else {
-			if (record_has_sindex(r, ns)) {
-				// Adjust sindex, looking at old and new bins.
-				write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
-						urecord->old_bins, urecord->n_old_bins, rd->bins,
-						rd->n_bins);
+			if (record_has_sindex(r, ns) &&
+					// Adjust sindex, looking at old and new bins.
+					write_sindex_update(ns, as_index_get_set_name(r, ns),
+							&r->keyd, urecord->old_bins, urecord->n_old_bins,
+							rd->bins, rd->n_bins)) {
+				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 			}
 
 			as_bin_destroy_all(urecord->cleanup_bins, urecord->n_cleanup_bins);
@@ -1062,10 +1063,12 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 
 		as_storage_record_adjust_mem_stats(rd, urecord->old_memory_bytes);
 	}
-	else if (! ns->single_bin && record_has_sindex(r, ns)) {
-		// Adjust sindex, looking at old and new bins.
-		write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
-				urecord->old_bins, urecord->n_old_bins, rd->bins, rd->n_bins);
+	else if (! ns->single_bin && record_has_sindex(r, ns) &&
+			// Adjust sindex, looking at old and new bins.
+			write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
+					urecord->old_bins, urecord->n_old_bins, rd->bins,
+					rd->n_bins)) {
+		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 	}
 
 	tr->generation = r->generation;
