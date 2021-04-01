@@ -1136,8 +1136,8 @@ const cfg_opt NAMESPACE_STORAGE_ENCRYPTION_OPTS[] = {
 };
 
 const cfg_opt NAMESPACE_SET_OPTS[] = {
-		{ "set-disable-eviction",			CASE_NAMESPACE_SET_DISABLE_EVICTION },
-		{ "set-stop-writes-count",			CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
+		{ "disable-eviction",				CASE_NAMESPACE_SET_DISABLE_EVICTION },
+		{ "stop-writes-count",				CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
