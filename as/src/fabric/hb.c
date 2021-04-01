@@ -2105,6 +2105,8 @@ as_hb_info_config_get(cf_dyn_buf* db)
 				&g_config.hb_multicast_groups);
 		info_append_uint32(db, "heartbeat.port",
 				(uint32_t)g_config.hb_serv_spec.bind_port);
+		info_append_uint32(db, "heartbeat.multicast-ttl",
+				(uint32_t)g_config.hb_config.multicast_ttl);
 	}
 
 	info_append_uint32(db, "heartbeat.interval", config_tx_interval_get());
