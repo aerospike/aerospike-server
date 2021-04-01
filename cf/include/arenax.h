@@ -112,6 +112,7 @@ typedef struct cf_arenax_s {
 	// Flash index related members at end to avoid full warm restart converter.
 
 	uint32_t			chunk_count; // is 1 for non-flash indexes
+	uint64_t			alloc_sz; // stats only - size of all allocated chunks
 
 	// Arena pool (free chunked allocations).
 	size_t				pool_len;
@@ -119,7 +120,7 @@ typedef struct cf_arenax_s {
 	size_t				pool_i;
 } cf_arenax;
 
-COMPILER_ASSERT(sizeof(cf_arenax) == 144 + (8 * CF_ARENAX_MAX_STAGES));
+COMPILER_ASSERT(sizeof(cf_arenax) == 152 + (8 * CF_ARENAX_MAX_STAGES));
 
 typedef struct free_element_s {
 	uint32_t			magic;

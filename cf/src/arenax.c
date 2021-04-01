@@ -116,6 +116,7 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	}
 
 	arena->pool_i = 0;
+	arena->alloc_sz = 0; // for flash index stats only
 
 	// Skip 0:0 so null handle is never used.
 	arena->at_stage_id = 0;

@@ -5451,6 +5451,12 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		info_append_uint64(db, "index_flash_used_bytes", index_used);
 		info_append_uint64(db, "index_flash_used_pct", used_pct);
 
+		uint64_t alloc_sz = as_load_uint64(&ns->arena->alloc_sz);
+
+		info_append_uint64(db, "index_flash_alloc_bytes", alloc_sz);
+		info_append_uint64(db, "index_flash_alloc_pct",
+				alloc_sz * 100 / ns->mounts_size_limit);
+
 		add_index_device_stats(ns, db);
 	}
 
