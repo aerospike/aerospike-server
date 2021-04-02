@@ -37,6 +37,7 @@
 #include "node.h"
 
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "fabric/fabric.h"
 
 
