@@ -82,8 +82,7 @@ cf_arenax_errstr(cf_arenax_err err)
 void
 cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
-		uint32_t chunk_count, uint32_t stage_capacity, uint32_t max_stages,
-		uint32_t flags)
+		uint32_t chunk_count, uint32_t stage_capacity, uint32_t max_stages)
 {
 	if (max_stages == 0) {
 		max_stages = CF_ARENAX_MAX_STAGES;
@@ -99,7 +98,7 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	arena->chunk_count = chunk_count;
 	arena->stage_capacity = stage_capacity;
 	arena->max_stages = max_stages;
-	arena->flags = flags;
+	arena->unused = 0;
 
 	arena->stage_size = (size_t)stage_capacity * element_size;
 
@@ -122,9 +121,7 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	arena->at_stage_id = 0;
 	arena->at_element_id = arena->chunk_count;
 
-	if ((flags & CF_ARENAX_BIGLOCK) != 0) {
-		cf_mutex_init(&arena->lock);
-	}
+	cf_mutex_init(&arena->lock);
 
 	arena->stage_count = 0;
 	memset(arena->stages, 0, sizeof(arena->stages));
@@ -146,9 +143,7 @@ cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 		return cf_arenax_alloc_chunked(arena, puddle);
 	}
 
-	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		cf_mutex_lock(&arena->lock);
-	}
+	cf_mutex_lock(&arena->lock);
 
 	cf_arenax_handle h;
 
@@ -164,10 +159,7 @@ cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 	else {
 		if (arena->at_element_id >= arena->stage_capacity) {
 			if (cf_arenax_add_stage(arena) != CF_ARENAX_OK) {
-				if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-					cf_mutex_unlock(&arena->lock);
-				}
-
+				cf_mutex_unlock(&arena->lock);
 				return 0;
 			}
 
@@ -180,13 +172,7 @@ cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 		arena->at_element_id++;
 	}
 
-	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		cf_mutex_unlock(&arena->lock);
-	}
-
-	if ((arena->flags & CF_ARENAX_CALLOC) != 0) {
-		memset(cf_arenax_resolve(arena, h), 0, arena->element_size);
-	}
+	cf_mutex_unlock(&arena->lock);
 
 	return h;
 }
@@ -202,17 +188,13 @@ cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle)
 
 	free_element* p_free_element = cf_arenax_resolve(arena, h);
 
-	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		cf_mutex_lock(&arena->lock);
-	}
+	cf_mutex_lock(&arena->lock);
 
 	p_free_element->magic = FREE_MAGIC;
 	p_free_element->next_h = arena->free_h;
 	arena->free_h = h;
 
-	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		cf_mutex_unlock(&arena->lock);
-	}
+	cf_mutex_unlock(&arena->lock);
 }
 
 // Convert cf_arenax_handle to memory address.
@@ -226,11 +208,9 @@ cf_arenax_resolve(cf_arenax* arena, cf_arenax_handle h)
 bool
 cf_arenax_is_stage_address(cf_arenax* arena, const void* address)
 {
-	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		cf_mutex_lock(&arena->lock);
-	}
-
 	bool found = false;
+
+	cf_mutex_lock(&arena->lock);
 
 	for (uint32_t i = 0; i < arena->stage_count; i++) {
 		if (arena->stages[i] == address) {
@@ -239,9 +219,7 @@ cf_arenax_is_stage_address(cf_arenax* arena, const void* address)
 		}
 	}
 
-	if ((arena->flags & CF_ARENAX_BIGLOCK) != 0) {
-		cf_mutex_unlock(&arena->lock);
-	}
+	cf_mutex_unlock(&arena->lock);
 
 	return found;
 }

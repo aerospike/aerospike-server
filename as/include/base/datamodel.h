@@ -79,9 +79,9 @@
 /* Forward declarations */
 typedef struct as_namespace_s as_namespace;
 typedef struct as_index_s as_record;
-typedef struct as_index_ref_s as_index_ref;
 typedef struct as_set_s as_set;
 
+struct as_index_ref_s;
 struct as_index_tree_s;
 struct index_metadata_s;
 
@@ -449,17 +449,17 @@ extern void as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms, co
 extern void as_record_increment_generation(as_record *r, const as_namespace* ns);
 extern bool as_record_is_binless(const as_record *r);
 extern bool as_record_is_live(const as_record *r);
-extern int as_record_get_create(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
-extern int as_record_get(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref);
-extern int as_record_get_live(struct as_index_tree_s *tree, const cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_get_create(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref, as_namespace *ns);
+extern int as_record_get(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref);
+extern int as_record_get_live(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref, as_namespace *ns);
 extern int as_record_exists(struct as_index_tree_s *tree, const cf_digest *keyd);
 extern int as_record_exists_live(struct as_index_tree_s *tree, const cf_digest *keyd, as_namespace *ns);
-extern void as_record_rescue(as_index_ref *r_ref, as_namespace *ns);
+extern void as_record_rescue(struct as_index_ref_s *r_ref, as_namespace *ns);
 
 extern void as_record_free_bin_space(as_record *r);
 
 extern void as_record_destroy(as_record *r, as_namespace *ns);
-extern void as_record_done(as_index_ref *r_ref, as_namespace *ns);
+extern void as_record_done(struct as_index_ref_s *r_ref, as_namespace *ns);
 
 void as_record_drop_stats(as_record* r, as_namespace* ns);
 void as_record_transition_stats(as_record* r, as_namespace* ns, struct index_metadata_s* old);

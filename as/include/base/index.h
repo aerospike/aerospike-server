@@ -27,7 +27,6 @@
 #include <stdint.h>
 
 #include "aerospike/as_atomic.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "arenax.h"
@@ -138,8 +137,8 @@ COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
 // Fast way to clear the record portion of as_index.
 // Note - relies on current layout and size of as_index!
 // FIXME - won't be able to "rescue" with future sindex method - will go away.
-static inline
-void as_index_clear_record_info(as_index *index)
+static inline void
+as_index_clear_record_info(as_index* index)
 {
 	*(uint16_t*)((uint8_t*)index + 34) = 0;
 	*(uint32_t*)((uint8_t*)index + 36) = 0;
@@ -153,13 +152,15 @@ void as_index_clear_record_info(as_index *index)
 
 // Generation 0 is never written, and generation plays no role in record
 // destruction, so it works to flag deleted records.
-static inline
-void as_index_invalidate_record(as_index *index) {
+static inline void
+as_index_invalidate_record(as_index* index)
+{
 	index->generation = 0;
 }
 
-static inline
-bool as_index_is_valid_record(as_index *index) {
+static inline bool
+as_index_is_valid_record(as_index* index)
+{
 	return index->generation != 0;
 }
 
@@ -168,20 +169,23 @@ bool as_index_is_valid_record(as_index *index) {
 // Single bin, as_bin_space & as_rec_space.
 //
 
-static inline
-as_bin *as_index_get_single_bin(const as_index *index) {
+static inline as_bin*
+as_index_get_single_bin(const as_index* index)
+{
 	// We only use 4 bits of the first byte for the bin state.
-	return (as_bin*)((uint8_t *)index + AS_INDEX_SINGLE_BIN_OFFSET);
+	return (as_bin*)((uint8_t*)index + AS_INDEX_SINGLE_BIN_OFFSET);
 }
 
-static inline
-as_bin_space* as_index_get_bin_space(const as_index *index) {
+static inline as_bin_space*
+as_index_get_bin_space(const as_index* index)
+{
 	return index->key_stored == 1 ?
-		   ((as_rec_space*)index->dim)->bin_space : (as_bin_space*)index->dim;
+			((as_rec_space*)index->dim)->bin_space : (as_bin_space*)index->dim;
 }
 
-static inline
-void as_index_set_bin_space(as_index* index, as_bin_space* bin_space) {
+static inline void
+as_index_set_bin_space(as_index* index, as_bin_space* bin_space)
+{
 	if (index->key_stored == 1) {
 		((as_rec_space*)index->dim)->bin_space = bin_space;
 	}
@@ -195,14 +199,15 @@ void as_index_set_bin_space(as_index* index, as_bin_space* bin_space) {
 // Set-ID bits.
 //
 
-static inline
-uint16_t as_index_get_set_id(const as_index *index) {
+static inline uint16_t
+as_index_get_set_id(const as_index* index)
+{
 	return index->set_id_bits;
 }
 
-static inline
-void as_index_set_set_id(as_index *index, uint16_t set_id) {
-	// TODO - check that it fits in the 10 bits ???
+static inline void
+as_index_set_set_id(as_index* index, uint16_t set_id)
+{
 	index->set_id_bits = set_id;
 }
 
@@ -211,9 +216,10 @@ void as_index_set_set_id(as_index *index, uint16_t set_id) {
 // Set-ID helpers.
 //
 
-static inline
-int as_index_set_set_w_len(as_index *index, as_namespace *ns,
-		const char *set_name, size_t len, bool apply_restrictions) {
+static inline int
+as_index_set_set_w_len(as_index* index, as_namespace* ns,
+		const char* set_name, size_t len, bool apply_restrictions)
+{
 	uint16_t set_id;
 	int rv = as_namespace_set_set_w_len(ns, set_name, len, &set_id,
 			apply_restrictions);
@@ -226,8 +232,9 @@ int as_index_set_set_w_len(as_index *index, as_namespace *ns,
 	return 0;
 }
 
-static inline
-const char *as_index_get_set_name(const as_index *index, as_namespace *ns) {
+static inline const char*
+as_index_get_set_name(const as_index* index, as_namespace* ns)
+{
 	return as_namespace_get_set_name(ns, as_index_get_set_id(index));
 }
 
@@ -237,32 +244,32 @@ const char *as_index_get_set_name(const as_index *index, as_namespace *ns) {
 //
 
 // Container for as_index pointer with lock and location.
-struct as_index_ref_s {
-	as_index			*r;
-	cf_arenax_handle	r_h;
-	cf_arenax_puddle	*puddle;
-	cf_mutex			*olock;
-};
+typedef struct as_index_ref_s {
+	as_index* r;
+	cf_arenax_handle r_h;
+	cf_arenax_puddle* puddle;
+	cf_mutex* olock;
+} as_index_ref;
 
 
 //==========================================================
 // Index tree.
 //
 
-typedef void (*as_index_tree_done_fn) (uint8_t id, void *udata);
+typedef void (*as_index_tree_done_fn) (uint8_t id, void* udata);
 
 typedef struct as_index_tree_s {
-	uint8_t					id;
-	as_index_tree_done_fn	done_cb;
-	void					*udata;
+	uint8_t id;
+	as_index_tree_done_fn done_cb;
+	void* udata;
 
 	// Data common to all trees in a namespace.
-	as_index_tree_shared	*shared;
+	as_index_tree_shared* shared;
 
-	cf_atomic64				n_elements;
+	uint64_t n_elements;
 
 	// Variable length data, dependent on configuration.
-	uint8_t					data[];
+	uint8_t data[];
 } as_index_tree;
 
 
@@ -285,41 +292,42 @@ typedef struct as_sprig_s {
 	uint64_t root_h: 40;
 } as_sprig;
 
-static inline as_lock_pair *
-tree_locks(as_index_tree *tree)
+static inline as_lock_pair*
+tree_locks(as_index_tree* tree)
 {
 	return (as_lock_pair*)tree->data;
 }
 
-static inline as_sprig *
-tree_sprigs(as_index_tree *tree)
+static inline as_sprig*
+tree_sprigs(as_index_tree* tree)
 {
 	return (as_sprig*)(tree->data + tree->shared->sprigs_offset);
 }
 
-static inline cf_arenax_puddle *
-tree_puddle_for_sprig(as_index_tree *tree, int sprig_i)
+static inline cf_arenax_puddle*
+tree_puddle_for_sprig(as_index_tree* tree, int sprig_i)
 {
 	uint32_t puddles_offset = tree->shared->puddles_offset;
+
 	return puddles_offset == 0 ?
 			NULL : (cf_arenax_puddle*)(tree->data + puddles_offset) + sprig_i;
 }
 
-static inline cf_arenax_puddle *
-tree_puddles(as_index_tree *tree)
+static inline cf_arenax_puddle*
+tree_puddles(as_index_tree* tree)
 {
 	return tree_puddle_for_sprig(tree, 0);
 }
 
 static inline size_t
-tree_puddles_size(as_index_tree_shared *shared)
+tree_puddles_size(as_index_tree_shared* shared)
 {
 	return shared->puddles_offset == 0 ?
 			0 : sizeof(cf_arenax_puddle) * shared->n_sprigs;
 }
 
 static inline uint32_t
-tree_puddles_count(as_index_tree_shared *shared)
+tree_puddles_count(as_index_tree_shared* shared)
 {
 	return shared->puddles_offset == 0 ? 0 : shared->n_sprigs;
 }
@@ -332,26 +340,26 @@ tree_puddles_count(as_index_tree_shared *shared)
 void as_index_tree_gc_init();
 int as_index_tree_gc_queue_size();
 
-as_index_tree *as_index_tree_create(as_index_tree_shared *shared, uint8_t id, as_index_tree_done_fn cb, void *udata);
-as_index_tree *as_index_tree_resume(as_index_tree_shared *shared, as_treex* xmem_trees, uint32_t pid, as_index_tree_done_fn cb, void *udata);
-void as_index_tree_block(as_index_tree *tree);
-void as_index_tree_reserve(as_index_tree *tree);
-int as_index_tree_release(as_index_tree *tree);
-uint64_t as_index_tree_size(as_index_tree *tree);
+as_index_tree* as_index_tree_create(as_index_tree_shared* shared, uint8_t id, as_index_tree_done_fn cb, void* udata);
+as_index_tree* as_index_tree_resume(as_index_tree_shared* shared, as_treex* xmem_trees, uint32_t pid, as_index_tree_done_fn cb, void* udata);
+void as_index_tree_block(as_index_tree* tree);
+void as_index_tree_reserve(as_index_tree* tree);
+void as_index_tree_release(as_index_tree* tree);
+uint64_t as_index_tree_size(as_index_tree* tree);
 
-typedef bool (*as_index_reduce_fn) (as_index_ref *value, void *udata);
+typedef bool (*as_index_reduce_fn) (as_index_ref* value, void* udata);
 
-bool as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-bool as_index_reduce_from(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
+bool as_index_reduce(as_index_tree* tree, as_index_reduce_fn cb, void* udata);
+bool as_index_reduce_from(as_index_tree* tree, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
 
-bool as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-bool as_index_reduce_from_live(as_index_tree *tree, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
+bool as_index_reduce_live(as_index_tree* tree, as_index_reduce_fn cb, void* udata);
+bool as_index_reduce_from_live(as_index_tree* tree, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
 
-int as_index_try_exists(as_index_tree *tree, const cf_digest *keyd);
-int as_index_try_get_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
-int as_index_get_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
-int as_index_get_insert_vlock(as_index_tree *tree, const cf_digest *keyd, as_index_ref *index_ref);
-int as_index_delete(as_index_tree *tree, const cf_digest *keyd);
+int as_index_try_exists(as_index_tree* tree, const cf_digest* keyd);
+int as_index_try_get_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
+int as_index_get_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
+int as_index_get_insert_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
+void as_index_delete(as_index_tree* tree, const cf_digest* keyd);
 
 
 //------------------------------------------------
@@ -361,22 +369,22 @@ int as_index_delete(as_index_tree *tree, const cf_digest *keyd);
 // Container for sprig-level function parameters.
 typedef struct as_index_sprig_s {
 	as_index_value_destructor destructor;
-	void *destructor_udata;
+	void* destructor_udata;
 
-	cf_arenax *arena;
+	cf_arenax* arena;
 
-	as_lock_pair *pair;
-	as_sprig *sprig;
-	cf_arenax_puddle *puddle;
+	as_lock_pair* pair;
+	as_sprig* sprig;
+	cf_arenax_puddle* puddle;
 } as_index_sprig;
 
-bool as_index_sprig_reduce_no_rc(as_index_sprig *isprig, const cf_digest *keyd, as_index_reduce_fn cb, void *udata);
+bool as_index_sprig_reduce_no_rc(as_index_sprig* isprig, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
 
-int as_index_sprig_get_vlock(as_index_sprig *isprig, const cf_digest *keyd, as_index_ref *index_ref);
-int as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd);
+int as_index_sprig_get_vlock(as_index_sprig* isprig, const cf_digest* keyd, as_index_ref* index_ref);
+int as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd);
 
 static inline uint32_t
-as_index_sprig_i_from_keyd(as_index_tree *tree, const cf_digest *keyd)
+as_index_sprig_i_from_keyd(as_index_tree* tree, const cf_digest* keyd)
 {
 	// Get the 28 most significant non-pid bits in the digest. Note - this is
 	// hardwired around the way we currently extract the (12 bit) partition-ID
@@ -390,8 +398,8 @@ as_index_sprig_i_from_keyd(as_index_tree *tree, const cf_digest *keyd)
 }
 
 static inline void
-as_index_sprig_from_keyd(as_index_tree *tree, as_index_sprig *isprig,
-		const cf_digest *keyd)
+as_index_sprig_from_keyd(as_index_tree* tree, as_index_sprig* isprig,
+		const cf_digest* keyd)
 {
 	// Get the 28 most significant non-pid bits in the digest. Note - this is
 	// hardwired around the way we currently extract the (12 bit) partition-ID

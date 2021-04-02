@@ -36,8 +36,15 @@
 #include "citrusleaf/cf_atomic.h"
 
 #include "base/datamodel.h"
-#include "base/transaction.h"
-#include "storage/storage.h"
+
+
+//==========================================================
+// Forward declarations.
+//
+
+struct as_index_ref_s;
+struct as_storage_rd_s;
+struct as_transaction_s;
 
 
 //==========================================================
@@ -57,9 +64,9 @@ typedef struct udf_record_bin_s {
 } udf_record_bin;
 
 typedef struct udf_record_s {
-	as_transaction* tr;
-	as_index_ref* r_ref;
-	as_storage_rd* rd;
+	struct as_transaction_s* tr;
+	struct as_index_ref_s* r_ref;
+	struct as_storage_rd_s* rd;
 
 	bool is_open;
 	bool is_loaded;
