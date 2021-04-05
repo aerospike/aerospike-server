@@ -625,6 +625,11 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		// If it's an expired or truncated record, pretend it's a fresh create.
 		if (! record_created && is_doomed) {
+			if (record_has_sindex(r, ns)) {
+				// Pessimistic, but not (yet) worth the full check.
+				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+			}
+
 			as_record_rescue(&r_ref, ns);
 			record_created = true;
 		}
