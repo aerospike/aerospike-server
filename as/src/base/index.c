@@ -473,9 +473,10 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 	bool do_more = true;
 
 	for (uint32_t i = 0; i < v_a->pos; i++) {
+		as_index_ph* ph = &v_a->indexes[i];
 		as_index_ref r_ref = {
-				.r = v_a->indexes[i].r,
-				.r_h = v_a->indexes[i].r_h,
+				.r = ph->r,
+				.r_h = ph->r_h,
 				.olock = &isprig->pair->lock
 		};
 
