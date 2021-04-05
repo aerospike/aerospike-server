@@ -154,6 +154,11 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 	if (create_rv == 0) {
 		// If it's an expired or truncated record, pretend it's a fresh create.
 		if (as_record_is_doomed(r, ns)) {
+			if (record_has_sindex(r, ns)) {
+				// Pessimistic, but not (yet) worth the full check.
+				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+			}
+
 			as_record_rescue(r_ref, ns);
 		}
 		else {
