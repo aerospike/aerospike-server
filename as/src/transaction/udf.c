@@ -749,8 +749,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		uint8_t open_rv = open_existing_record(&urecord);
 
 		if (open_rv != AS_OK) {
-			as_record_done(&r_ref, ns);
-			tr->result_code = open_rv;
+			udf_master_failed(&urecord, NULL, NULL, open_rv, NULL);
 			return UDF_OPTYPE_NONE;
 		}
 	}
@@ -1144,9 +1143,9 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 	}
 
 	tr->result_code = result_code; // must set before process_failure()
-	process_failure(tr, result, db);
 
 	if (result != NULL) {
+		process_failure(tr, result, db);
 		as_result_destroy(result);
 	}
 
@@ -1279,11 +1278,6 @@ update_lua_success_stats(uint8_t origin, as_namespace* ns, udf_optype op)
 static void
 process_failure(as_transaction* tr, const as_result* result, cf_dyn_buf* db)
 {
-	if (result == NULL) {
-		process_response(tr, false, NULL, db);
-		return;
-	}
-
 	if (result->is_success) { // yes - this can happen
 		static const char IGNORED[] = "result value ignored";
 		as_string stack_s;
