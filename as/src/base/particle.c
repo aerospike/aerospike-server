@@ -39,9 +39,12 @@
 #include "msgpack_in.h"
 
 #include "base/datamodel.h"
+#include "base/exp.h"
+#include "base/expop.h"
 #include "base/proto.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
+#include "transaction/write.h"
 
 
 //==========================================================
@@ -920,4 +923,31 @@ int
 as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
 {
 	return as_bin_cdt_read_tr(b, op, result);
+}
+
+
+//==========================================================
+// as_bin particle functions specific to expressions.
+//
+
+//------------------------------------------------
+// Handle "wire" format.
+//
+
+int
+as_bin_exp_alloc_modify_from_client(const as_exp_ctx* ctx, as_bin *b, as_msg_op *op, const iops_expop* expop)
+{
+	return as_exp_modify_tr(ctx, b, op, NULL, expop);
+}
+
+int
+as_bin_exp_stack_modify_from_client(const as_exp_ctx* ctx, as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, const iops_expop* expop)
+{
+	return as_exp_modify_tr(ctx, b, op, particles_llb, expop);
+}
+
+int
+as_bin_exp_read_from_client(const as_exp_ctx* ctx, as_msg_op *op, as_bin *rb)
+{
+	return as_exp_read_tr(ctx, op, rb);
 }

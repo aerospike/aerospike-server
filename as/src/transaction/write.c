@@ -42,6 +42,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
+#include "base/expop.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/transaction.h"
@@ -959,13 +960,28 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			continue;
 		}
 
-		if (ns->data_in_index &&
-				! is_embedded_particle_type(op->particle_type) &&
-				// Allow AS_PARTICLE_TYPE_NULL, although bin-delete operations
-				// are not likely in single-bin configuration.
-				op->particle_type != AS_PARTICLE_TYPE_NULL) {
-			cf_warning(AS_RW, "{%s} write_master: can't write data type %u in data-in-index configuration %pD", ns->name, op->particle_type, &tr->keyd);
-			return AS_ERR_INCOMPATIBLE_TYPE;
+		if (ns->data_in_index && ! OP_IS_READ(op->op)) {
+			uint32_t particle_type = op->particle_type;
+
+			if (op->op == AS_MSG_OP_EXP_MODIFY) {
+				as_exp* exp;
+				uint64_t flags;
+
+				if (! as_exp_op_parse(op, &exp, &flags, true, false)) {
+					return AS_ERR_PARAMETER;
+				}
+
+				particle_type = exp->expected_type;
+				as_exp_destroy(exp);
+			}
+
+			if (! is_embedded_particle_type(particle_type) &&
+					// Allow AS_PARTICLE_TYPE_NULL, although bin-delete
+					// operations are not likely in single-bin configuration.
+					particle_type != AS_PARTICLE_TYPE_NULL) {
+				cf_warning(AS_RW, "{%s} write_master: %u can't write data type %u in data-in-index configuration %pD", ns->name, op->op, particle_type, &tr->keyd);
+				return AS_ERR_INCOMPATIBLE_TYPE;
+			}
 		}
 
 		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
@@ -1050,6 +1066,10 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			generates_response_bin = true; // CDT modify may generate a response bin
 		}
 		else if (op->op == AS_MSG_OP_CDT_READ) {
+			has_read_op = true;
+			generates_response_bin = true;
+		}
+		else if (op->op == AS_MSG_OP_EXP_READ) {
 			has_read_op = true;
 			generates_response_bin = true;
 		}
@@ -1950,7 +1970,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					return -result;
 				}
 
-				// Account for noop bits operations. Modifying non-mutable
+				// Account for noop HLL operations. Modifying non-mutable
 				// particle contents in-place is still disallowed.
 				if (cleanup_bin.particle != b->particle) {
 					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
@@ -2060,6 +2080,65 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				ops[*p_n_response_bins] = op;
 				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
 			}
+		}
+		else if (op->op == AS_MSG_OP_EXP_MODIFY) {
+			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz, &result);
+
+			if (! b) {
+				return result;
+			}
+
+			const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
+			const iops_expop* expop = tr->origin == FROM_IOPS ?
+					&tr->from.iops_orig->expops[i] : NULL;
+
+			if (ns->storage_data_in_memory) {
+				as_bin cleanup_bin;
+				as_bin_copy(ns, &cleanup_bin, b);
+
+				if ((result = as_bin_exp_alloc_modify_from_client(&exp_ctx, b, op, expop)) < 0) {
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
+					return -result;
+				}
+
+				// Account for noop EXP operations. Modifying non-mutable
+				// particle contents in-place is still disallowed.
+				if (cleanup_bin.particle != b->particle) {
+					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
+				}
+			}
+			else {
+				if ((result = as_bin_exp_stack_modify_from_client(&exp_ctx, b, particles_llb, op, expop)) < 0) {
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+					return -result;
+				}
+			}
+
+			if (respond_all_ops) {
+				ops[*p_n_response_bins] = op;
+				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
+			}
+
+			// The op will not empty a bin, but may leave a freshly created bin
+			// empty. In this case it must be last in rd->bins - remove it.
+			if (as_bin_is_unused(b)) {
+				rd->n_bins--;
+			}
+		}
+		else if (op->op == AS_MSG_OP_EXP_READ) {
+			const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
+
+			as_bin result_bin;
+			as_bin_set_empty(&result_bin);
+
+			if ((result = as_bin_exp_read_from_client(&exp_ctx, op, &result_bin)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_read_from_client() %pD", ns->name, &tr->keyd);
+				return -result;
+			}
+
+			ops[*p_n_response_bins] = op;
+			response_bins[(*p_n_response_bins)++] = result_bin;
+			append_bin_to_destroy(&result_bin, result_bins, p_n_result_bins);
 		}
 		else {
 			cf_warning(AS_RW, "{%s} write_master: unknown bin op %u %pD", ns->name, op->op, &tr->keyd);

@@ -270,7 +270,7 @@ static inline uint8_t *buf_pack_nil_rep(uint8_t *buf, uint32_t rep);
 static inline void pack_nil_rep(as_packer *pk, uint32_t rep);
 
 // cdt_process_state
-bool cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op);
+static bool cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op);
 static bool cdt_process_state_init_from_vec(cdt_process_state *cdt_state, msgpack_in_vec* mv);
 
 // order_index
@@ -286,6 +286,10 @@ static uint8_t *cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t
 static void cdt_context_fill_unpacker(cdt_context *ctx, msgpack_in *mp);
 
 static void cdt_context_unwind(cdt_context *ctx);
+
+// as_bin_cdt_packed functions
+static int cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result, cf_ll_buf *particles_llb, bool alloc_ns);
+static int cdt_packed_read(cdt_process_state *state, const as_bin *b, as_bin *result, bool alloc_ns);
 
 // cdt_check
 static bool cdt_check_list(msgpack_in *mp);
@@ -1001,7 +1005,7 @@ cdt_container_builder_set_result(cdt_container_builder *builder,
 // cdt_process_state functions.
 //
 
-bool
+static bool
 cdt_process_state_init(cdt_process_state *cdt_state,
 		const as_msg_op *op)
 {
@@ -2265,9 +2269,9 @@ rollback_alloc_from_msgpack(rollback_alloc *alloc_buf, as_bin *b,
 
 static int
 cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
-		cf_ll_buf *particles_llb)
+		cf_ll_buf *particles_llb, bool alloc_ns)
 {
-	define_rollback_alloc(alloc_buf, particles_llb, 1, true);
+	define_rollback_alloc(alloc_buf, particles_llb, 1, alloc_ns);
 	define_rollback_alloc(alloc_result, NULL, 1, false); // results always on the heap
 	define_rollback_alloc(alloc_idx, NULL, 8, false); // for temp indexes
 
@@ -2311,9 +2315,10 @@ cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 }
 
 static int
-cdt_packed_read(cdt_process_state *state, const as_bin *b, as_bin *result)
+cdt_packed_read(cdt_process_state *state, const as_bin *b, as_bin *result,
+		bool alloc_ns)
 {
-	define_rollback_alloc(alloc_result, NULL, 1, false); // results always on the heap
+	define_rollback_alloc(alloc_result, NULL, 1, alloc_ns); // results always on the heap
 	define_rollback_alloc(alloc_idx, NULL, 8, false); // for temp indexes
 
 	cdt_op_mem com = {
@@ -2361,7 +2366,7 @@ as_bin_cdt_modify_tr(as_bin *b, const as_msg_op *op, as_bin *result,
 		return -AS_ERR_PARAMETER;
 	}
 
-	return cdt_packed_modify(&state, b, result, particles_llb);
+	return cdt_packed_modify(&state, b, result, particles_llb, true);
 }
 
 int
@@ -2373,11 +2378,12 @@ as_bin_cdt_read_tr(const as_bin *b, const as_msg_op *op, as_bin *result)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return cdt_packed_read(&state, b, result);
+	return cdt_packed_read(&state, b, result, false);
 }
 
 int
-as_bin_cdt_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *result)
+as_bin_cdt_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *result,
+		bool alloc_ns)
 {
 	cdt_process_state state;
 
@@ -2385,11 +2391,12 @@ as_bin_cdt_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *result)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return cdt_packed_modify(&state, b, result, NULL);
+	return cdt_packed_modify(&state, b, result, NULL, alloc_ns);
 }
 
 int
-as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result)
+as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result,
+		bool alloc_ns)
 {
 	cdt_process_state state;
 
@@ -2397,7 +2404,7 @@ as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return cdt_packed_read(&state, b, result);
+	return cdt_packed_read(&state, b, result, alloc_ns);
 }
 
 

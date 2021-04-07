@@ -905,7 +905,7 @@ as_batch_queue_task(as_transaction* btr)
 	if (predexp_mf != NULL) {
 		shared->predexp_mf = predexp_mf;
 
-		if ((shared->predexp = as_exp_build(predexp_mf, true)) == NULL) {
+		if ((shared->predexp = as_exp_filter_build(predexp_mf, true)) == NULL) {
 			cf_warning(AS_BATCH, "Failed to build batch predexp");
 			cf_free(shared);
 			return as_batch_send_error(btr, AS_ERR_PARAMETER);

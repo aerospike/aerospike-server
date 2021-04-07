@@ -164,7 +164,7 @@ build_predexp_and_filter_meta(const as_transaction* tr, const as_record* r,
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_PREDEXP);
 
-	if ((*predexp = as_exp_build(f, false)) == NULL) {
+	if ((*predexp = as_exp_filter_build(f, false)) == NULL) {
 		return AS_ERR_PARAMETER;
 	}
 

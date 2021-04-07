@@ -41,13 +41,15 @@
 
 typedef struct as_exp_s {
 	uint8_t version;
+	uint32_t expected_type;
 	void** cleanup_stack;
 	uint32_t cleanup_stack_ix;
 	uint8_t* buf_cleanup;
+	uint32_t max_var_count;
 	uint8_t mem[];
 } as_exp;
 
-typedef struct exp_ctx_s {
+typedef struct as_exp_ctx_s {
 	as_namespace* ns;
 	as_record* r;
 	as_storage_rd* rd; // NULL during metadata phase
@@ -64,8 +66,10 @@ typedef enum {
 // Public API.
 //
 
-as_exp* as_exp_build_base64(const char* buf64, uint32_t buf64_sz);
-as_exp* as_exp_build(const as_msg_field* msg, bool cpy_instr);
+as_exp* as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz);
+as_exp* as_exp_filter_build(const as_msg_field* msg, bool cpy_instr);
+as_exp* as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire);
+bool as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb, cf_ll_buf* particles_llb, bool is_modify);
 as_exp_trilean as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx);
 bool as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx);
 bool as_exp_display(const as_exp* exp, cf_dyn_buf* db);

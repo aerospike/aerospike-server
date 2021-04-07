@@ -121,6 +121,7 @@
 #include "base/as_stap.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
+#include "base/expop.h"
 #include "base/proto.h"
 #include "base/service.h"
 #include "base/stats.h"
@@ -2895,17 +2896,58 @@ query_setup_shared_msgp(as_query_transaction *qtr, as_transaction *tr)
 					return false;
 				}
 
+				as_msg_op* op = NULL;
+				uint8_t* first = NULL;
+				int i = 0;
+				bool has_expop = false;
+
+				while ((op = as_msg_op_iterate(om, op, &i)) != NULL) {
+					if (OP_IS_READ(op->op)) {
+						cf_warning(AS_SCAN, "ops query has read op");
+						return false;
+					}
+
+					if (first == NULL) {
+						first = (uint8_t*)op;
+					}
+
+					if (op->op == AS_MSG_OP_EXP_MODIFY) {
+						has_expop = true;
+					}
+				}
+
+				iops_expop* expops = NULL;
+
+				if (has_expop) {
+					expops = cf_malloc(sizeof(iops_expop) * om->n_ops);
+					op = NULL;
+					i = 0;
+
+					while ((op = as_msg_op_iterate(om, op, &i)) != NULL) {
+						if (op->op == AS_MSG_OP_EXP_MODIFY) {
+							if (! as_exp_op_parse(op, &expops[i].exp,
+									&expops[i].flags, true, true)) {
+								cf_warning(AS_SCAN, "ops query failed exp parse");
+								iops_expops_destroy(expops, i);
+								return false;
+							}
+						}
+						else {
+							expops[i].exp = NULL;
+						}
+					}
+				}
+
+				qtr->iops_orig.expops = expops;
+
 				uint8_t info2 = AS_MSG_INFO2_WRITE |
 						(om->info2 & AS_MSG_INFO2_DURABLE_DELETE);
 				uint8_t info3 = AS_MSG_INFO3_UPDATE_ONLY |
 						(om->info3 & AS_MSG_INFO3_REPLACE_ONLY);
 
-				int i = 0;
-				uint8_t* ops = (uint8_t*)as_msg_op_iterate(om, NULL, &i);
-
 				qtr->iops_orig.msgp = as_msg_create_internal(qtr->ns->name, 0,
-						info2, info3, om->record_ttl, om->n_ops, ops,
-						tr->msgp->proto.sz - (ops - (uint8_t*)om));
+						info2, info3, om->record_ttl, om->n_ops, first,
+						tr->msgp->proto.sz - (first - (uint8_t*)om));
 			}
 			break;
 		default:
@@ -3022,9 +3064,10 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	if (as_transaction_has_predexp(tr)) {
 		as_msg_field * pfp = as_msg_field_get(m, AS_MSG_FIELD_TYPE_PREDEXP);
-		predexp_eval = as_exp_build(pfp, true);
-		if (! predexp_eval) {
-			cf_warning(AS_QUERY, "Failed to build predicate expression");
+		predexp_eval = as_exp_filter_build(pfp, true);
+
+		if (predexp_eval == NULL) {
+			cf_warning(AS_QUERY, "Failed to build filter-expression");
 			tr->result_code = AS_ERR_PARAMETER;
 			goto Cleanup;
 		}

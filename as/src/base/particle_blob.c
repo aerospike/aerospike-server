@@ -105,6 +105,8 @@ typedef struct bits_op_s {
 	const uint8_t* buf;
 	uint64_t subflags;
 	uint64_t flags;
+
+	bool alloc_ns;
 } bits_op;
 
 struct bits_state_s;
@@ -161,8 +163,8 @@ typedef struct bits_state_s {
 //
 
 static bool bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read);
-static int bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb);
-static int bits_read(bits_state* state, const as_bin* b, as_bin* rb);
+static int bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb, bool alloc_ns);
+static int bits_read(bits_state* state, const as_bin* b, as_bin* rb, bool alloc_ns);
 static bool bits_parse_op(bits_state* state, bits_op* op);
 static bool bits_parse_byte_offset(bits_state* state, bits_op* op);
 static bool bits_parse_offset(bits_state* state, bits_op* op);
@@ -782,7 +784,7 @@ as_bin_bits_modify_tr(as_bin* b, const as_msg_op* msg_op,
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_modify(&state, b, particles_llb);
+	return bits_modify(&state, b, particles_llb, true);
 }
 
 int
@@ -802,11 +804,11 @@ as_bin_bits_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_read(&state, b, rb);
+	return bits_read(&state, b, rb, false);
 }
 
 int
-as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv)
+as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv, bool alloc_ns)
 {
 	bits_state state = { 0 };
 
@@ -815,11 +817,12 @@ as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_modify(&state, b, NULL);
+	return bits_modify(&state, b, NULL, alloc_ns);
 }
 
 int
-as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb)
+as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb,
+		bool alloc_ns)
 {
 	bits_state state = { 0 };
 
@@ -828,7 +831,7 @@ as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_read(&state, b, rb);
+	return bits_read(&state, b, rb, alloc_ns);
 }
 
 const char*
@@ -913,7 +916,7 @@ bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 }
 
 static int
-bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
+bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb, bool alloc_ns)
 {
 	bits_op op = { 0 };
 
@@ -974,7 +977,8 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 	size_t alloc_size = sizeof(blob_mem) + (size_t)state->new_size;
 
 	if (particles_llb == NULL) {
-		b->particle = cf_malloc_ns(alloc_size);
+		b->particle = alloc_ns ?
+				cf_malloc_ns(alloc_size) : cf_malloc(alloc_size);
 	}
 	else {
 		cf_ll_buf_reserve(particles_llb, alloc_size, (uint8_t**)&b->particle);
@@ -1005,11 +1009,11 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 }
 
 static int
-bits_read(bits_state* state, const as_bin* b, as_bin* rb)
+bits_read(bits_state* state, const as_bin* b, as_bin* rb, bool alloc_ns)
 {
 	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
 
-	bits_op op = { 0 };
+	bits_op op = { .alloc_ns = alloc_ns };
 
 	if (! bits_parse_op(state, &op)) {
 		return -AS_ERR_PARAMETER;
@@ -2023,7 +2027,9 @@ bits_read_op_get(const bits_op* op, const uint8_t* from, as_bin* rb,
 		.value = (uint64_t)op->offset
 	};
 
-	blob_mem* answer = cf_malloc(sizeof(blob_mem) + n_bytes);
+	size_t alloc_size = sizeof(blob_mem) + n_bytes;
+	blob_mem* answer = op->alloc_ns ?
+			cf_malloc_ns(alloc_size) : cf_malloc(alloc_size);
 
 	lshift(&cmd, answer->data, from, n_bytes);
 

@@ -741,6 +741,29 @@ read_local(as_transaction* tr)
 					response_bins[n_bins++] = NULL;
 				}
 			}
+			else if (op->op == AS_MSG_OP_EXP_READ) {
+				const as_exp_ctx exp_ctx = { .ns = ns, .rd = &rd, .r = rd.r };
+
+				as_bin* rb = &result_bins[n_result_bins];
+				as_bin_set_empty(rb);
+
+				if ((result = as_bin_exp_read_from_client(&exp_ctx, op, rb)) < 0) {
+					cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_read_from_client() %pD", ns->name, &tr->keyd);
+					as_bin_destroy_all(result_bins, n_result_bins);
+					read_local_done(tr, &r_ref, &rd, -result);
+					return TRANS_DONE_ERROR;
+				}
+
+				if (as_bin_is_used(rb)) {
+					n_result_bins++;
+					ops[n_bins] = op;
+					response_bins[n_bins++] = rb;
+				}
+				else if (respond_all_ops) {
+					ops[n_bins] = op;
+					response_bins[n_bins++] = NULL;
+				}
+			}
 			else {
 				cf_warning(AS_RW, "{%s} read_local: unexpected bin op %u %pD", ns->name, op->op, &tr->keyd);
 				as_bin_destroy_all(result_bins, n_result_bins);

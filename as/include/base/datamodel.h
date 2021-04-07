@@ -81,9 +81,11 @@ typedef struct as_namespace_s as_namespace;
 typedef struct as_index_s as_record;
 typedef struct as_set_s as_set;
 
+struct as_exp_ctx_s;
 struct as_index_ref_s;
 struct as_index_tree_s;
 struct index_metadata_s;
+struct iops_expop_s;
 
 #define AS_ID_NAMESPACE_SZ 32
 
@@ -247,6 +249,12 @@ extern int as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val);
 extern void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 extern as_val *as_bin_particle_to_asval(const as_bin *b);
 
+// Different for expression operations - we don't use the normal APIs and
+// particle table functions.
+extern int as_bin_exp_alloc_modify_from_client(const struct as_exp_ctx_s* ctx, as_bin *b, as_msg_op *op, const struct iops_expop_s* expop);
+extern int as_bin_exp_stack_modify_from_client(const struct as_exp_ctx_s* ctx, as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, const struct iops_expop_s* expop);
+extern int as_bin_exp_read_from_client(const struct as_exp_ctx_s* ctx, as_msg_op *op, as_bin *rb);
+
 // msgpack:
 extern int as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size);
 
@@ -277,15 +285,15 @@ struct msgpack_in_vec_s;
 // blob:
 extern int as_bin_bits_modify_tr(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb);
 extern int as_bin_bits_read_tr(const as_bin *b, const as_msg_op *msg_op, as_bin *result);
-extern int as_bin_bits_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv);
-extern int as_bin_bits_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
+extern int as_bin_bits_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, bool alloc_ns);
+extern int as_bin_bits_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb, bool alloc_ns);
 extern const char* as_bits_op_name(uint32_t op_code, bool is_modify);
 
 // HLL:
 extern int as_bin_hll_modify_tr(as_bin *b, const as_msg_op *msg_op, cf_ll_buf *particles_llb, as_bin* rb);
 extern int as_bin_hll_read_tr(const as_bin *b, const as_msg_op *msg_op, as_bin *rb);
-extern int as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
-extern int as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb);
+extern int as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb, bool alloc_ns);
+extern int as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb, bool alloc_ns);
 extern const char* as_hll_op_name(uint32_t op_code, bool is_modify);
 
 // geojson:
@@ -298,6 +306,8 @@ extern bool as_particle_geojson_match_asval(const as_val *val, uint64_t cellid, 
 char const *as_geojson_mem_jsonstr(const as_particle *p, size_t *p_jsonsz);
 bool as_geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t candidate_region, uint64_t query_cellid, geo_region_t query_region, bool is_strict);
 const uint8_t *as_geojson_msgpack_jsonstr(struct msgpack_in_s *mp, uint32_t *jsonsz_r);
+uint32_t as_geojson_particle_sz(uint32_t ncells, size_t jlen);
+bool as_geojson_to_particle(const char *json, uint32_t jlen, as_particle **pp);
 
 // list:
 struct cdt_payload_s;
@@ -306,8 +316,8 @@ extern void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payl
 
 extern int as_bin_cdt_modify_tr(as_bin *b, const as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
 extern int as_bin_cdt_read_tr(const as_bin *b, const as_msg_op *op, as_bin *result);
-extern int as_bin_cdt_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *result);
-extern int as_bin_cdt_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *result);
+extern int as_bin_cdt_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *result, bool alloc_ns);
+extern int as_bin_cdt_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *result, bool alloc_ns);
 
 // For copying as_bin structs without the last 3 bytes.
 static inline void

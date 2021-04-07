@@ -26,8 +26,12 @@
 
 #include "base/exp.h"
 
+#include <ctype.h>
+#include <float.h>
 #include <inttypes.h>
+#include <math.h>
 #include <regex.h>
+#include <stdint.h>
 
 #include <aerospike/as_arraylist.h>
 #include <aerospike/as_arraylist_iterator.h>
@@ -39,6 +43,7 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "bits.h"
 #include "dynbuf.h"
 #include "log.h"
 #include "msgpack_in.h"
@@ -50,6 +55,8 @@
 #include "base/particle_blob.h"
 #include "geospatial/geospatial.h"
 #include "storage/storage.h"
+
+// #include "warnings.h"
 
 
 //==========================================================
@@ -65,6 +72,8 @@ typedef enum {
 } geo_type;
 
 typedef enum {
+	EXP_UNK = 0,
+
 	EXP_CMP_EQ = 1,
 	EXP_CMP_NE = 2,
 	EXP_CMP_GT = 3,
@@ -78,6 +87,35 @@ typedef enum {
 	EXP_AND = 16,
 	EXP_OR = 17,
 	EXP_NOT = 18,
+	EXP_EXCLUSIVE = 19,
+
+	EXP_ADD = 20,
+	EXP_SUB = 21,
+	EXP_MUL = 22,
+	EXP_DIV = 23,
+	EXP_POW = 24,
+	EXP_LOG = 25,
+	EXP_MOD = 26,
+	EXP_ABS = 27,
+	EXP_FLOOR = 28,
+	EXP_CEIL = 29,
+
+	EXP_TO_INT = 30,
+	EXP_TO_FLOAT = 31,
+
+	EXP_INT_AND = 32,
+	EXP_INT_OR = 33,
+	EXP_INT_XOR = 34,
+	EXP_INT_NOT = 35,
+	EXP_INT_LSHIFT = 36,
+	EXP_INT_RSHIFT = 37,
+	EXP_INT_ARSHIFT = 38,
+	EXP_INT_COUNT = 39,
+	EXP_INT_LSCAN = 40,
+	EXP_INT_RSCAN = 41,
+
+	EXP_MIN = 50,
+	EXP_MAX = 51,
 
 	EXP_META_DIGEST_MOD = 64,
 	EXP_META_DEVICE_SIZE = 65,
@@ -94,13 +132,18 @@ typedef enum {
 	EXP_BIN = 81,
 	EXP_BIN_TYPE = 82,
 
+	EXP_COND = 123,
+	EXP_VAR = 124,
+	EXP_LET = 125,
 	EXP_QUOTE = 126,
 	EXP_CALL = 127,
 
-	EXP_OP_CODE_END,
+	EXP_OP_CODE_END, // for wire size, resist this becoming > 128
 
-	// Begin virtual ops.
+	// Begin virtual ops - values not on the wire.
 	VOP_VALUE_NIL,
+	VOP_VALUE_BOOL,
+	VOP_VALUE_TRILEAN,
 	VOP_VALUE_INT,
 	VOP_VALUE_FLOAT,
 	VOP_VALUE_STR,
@@ -109,7 +152,9 @@ typedef enum {
 	VOP_VALUE_HLL,
 	VOP_VALUE_MAP,
 	VOP_VALUE_LIST,
-	VOP_VALUE_MSGPACK
+	VOP_VALUE_MSGPACK,
+
+	VOP_COND_CASE
 } exp_op_code;
 
 typedef enum {
@@ -170,20 +215,16 @@ static const char* result_type_str[] = {
 ARRAY_ASSERT(result_type_str, TYPE_END);
 
 typedef struct op_base_mem_s {
-	exp_op_code code:16;
-} __attribute__ ((__packed__)) op_base_mem;
+	uint32_t instr_end_ix;
+	exp_op_code code;
+} op_base_mem;
 
 typedef struct op_cmp_regex_s {
 	op_base_mem base;
 	regex_t regex;
 	uint32_t regex_str_sz;
-	uint32_t flags;
+	int32_t flags;
 } op_cmp_regex;
-
-typedef struct op_logical_s { // and, or
-	op_base_mem base;
-	uint32_t instr_end_ix;
-} op_logical;
 
 typedef struct op_bin_name_s {
 	op_base_mem base;
@@ -208,6 +249,24 @@ typedef struct op_bin_s {
 	result_type type;
 } op_bin;
 
+typedef struct op_cond_s {
+	op_base_mem base;
+	uint32_t case_count;
+} op_cond;
+
+typedef struct op_var_s {
+	op_base_mem base;
+	uint32_t idx;
+	result_type type;
+} op_var;
+
+typedef struct op_let_s {
+	op_base_mem base;
+	uint32_t var_idx;
+	uint32_t n_vars;
+	result_type type;
+} op_let;
+
 #define OP_CALL_MAX_VEC_IDX 18
 
 typedef struct op_vec_s {
@@ -217,7 +276,6 @@ typedef struct op_vec_s {
 
 typedef struct op_call_s {
 	op_base_mem base;
-	uint32_t instr_end_ix;
 	op_vec vecs[OP_CALL_MAX_VEC_IDX + 2];
 	uint32_t n_vecs;
 	uint32_t eval_count;
@@ -247,6 +305,11 @@ typedef struct geo_data_s {
 	geo_region_t region;
 } geo_data;
 
+typedef struct op_value_bool_s {
+	op_base_mem base;
+	bool value;
+} op_value_bool;
+
 typedef struct op_value_bytes_s {
 	op_base_mem base;
 	const uint8_t* value;
@@ -263,18 +326,6 @@ typedef struct op_value_float_s {
 	double value;
 } op_value_float;
 
-typedef struct op_table_entry_s op_table_entry;
-
-typedef struct build_args_s {
-	as_exp* exp;
-	uint8_t* mem;
-	msgpack_in mp;
-
-	const op_table_entry* entry;
-	uint32_t ele_count;
-	uint32_t instr_ix;
-} build_args;
-
 typedef struct geo_entry_s {
 	geo_compiled compiled;
 	const uint8_t* contents;
@@ -283,7 +334,7 @@ typedef struct geo_entry_s {
 
 typedef struct rt_value_s {
 	uint8_t type;
-	uint8_t pad0;
+	uint8_t do_not_destroy;
 	uint16_t pad1;
 
 	union {
@@ -320,11 +371,44 @@ typedef struct rt_stack_s {
 	uint32_t stack_ix;
 } rt_stack;
 
+typedef struct var_entry_s {
+	const uint8_t* name;
+	uint32_t name_sz;
+	uint32_t idx;
+	result_type r_type;
+} var_entry;
+
+typedef struct var_scope_s {
+	struct var_scope_s* parent;
+	uint32_t n_entries;
+	var_entry* entries;
+} var_scope;
+
 typedef struct runtime_s {
 	const as_exp_ctx* ctx;
 	const uint8_t* instr_ptr;
+	rt_value* vars;
 	uint32_t op_ix;
+
+	cf_ll_buf* ll_buf;
+	bool alloc_ns;
 } runtime;
+
+typedef struct op_table_entry_s op_table_entry;
+
+typedef struct build_args_s {
+	as_exp* exp;
+	uint8_t* mem;
+	msgpack_in mp;
+
+	const op_table_entry* entry;
+	uint32_t ele_count;
+	uint32_t instr_ix;
+
+	uint32_t var_idx;
+	uint32_t max_var_idx;
+	var_scope* current;
+} build_args;
 
 typedef bool (*op_table_build_cb)(build_args* args);
 typedef void (*op_table_eval_cb)(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
@@ -346,9 +430,10 @@ struct op_table_entry_s {
 	uint32_t eval_param_count;
 	result_type r_type;
 	const char* name;
+	bool alloc_ns;
 };
 
-#define OP_TABLE_ENTRY(__code, __name, __size_name, __build_name, __eval_name, __display_name, __static_param_count, __eval_param_count, __r_type) \
+#define OP_TABLE_ENTRY(__code, __name, __size_name, __build_name, __eval_name, __display_name, __static_param_count, __eval_param_count, __r_type, __alloc_ns) \
 		[__code].code = __code, \
 		[__code].name = __name, \
 		[__code].size = (uint32_t)sizeof(__size_name), \
@@ -357,7 +442,11 @@ struct op_table_entry_s {
 		[__code].display_cb = __display_name, \
 		[__code].static_param_count = __static_param_count, \
 		[__code].eval_param_count = __eval_param_count, \
-		[__code].r_type = __r_type
+		[__code].r_type = __r_type, \
+		[__code].alloc_ns = __alloc_ns,
+
+#define result_type_to_str(__type) (__type > 0 && __type < TYPE_END ? \
+		result_type_str[__type] : "invalid")
 
 static const char* trilean_names[] = {
 		"FALSE", "TRUE", "UNKNOWN"
@@ -375,19 +464,36 @@ static const uint8_t call_eval_token[1] = "";
 static as_exp* build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire);
 static bool build_next(build_args* args);
 static const op_table_entry* build_get_entry(result_type type);
+static bool build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count, uint32_t* counter_r);
+static var_entry* build_find_var_entry(build_args* args, const uint8_t* name, uint32_t name_sz);
 static bool build_default(build_args* args);
 static bool build_compare(build_args* args);
 static bool build_cmp_regex(build_args* args);
 static bool build_cmp_geo(build_args* args);
-static bool build_logical(build_args* args);
+static bool build_logical_vargs(build_args* args);
 static bool build_logical_not(build_args* args);
+static bool build_math_vargs(build_args* args);
+static bool build_number_op(build_args* args);
+static bool build_float_op(build_args* args);
+static bool build_int_op(build_args* args);
+static bool build_math_pow(build_args* args);
+static bool build_math_log(build_args* args);
+static bool build_math_mod(build_args* args);
+static bool build_int_vargs(build_args* args);
+static bool build_int_one(build_args* args);
+static bool build_int_shift(build_args* args);
+static bool build_int_scan(build_args* args);
 static bool build_meta_digest_mod(build_args* args);
 static bool build_rec_key(build_args* args);
 static bool build_bin(build_args* args);
 static bool build_bin_type(build_args* args);
+static bool build_cond(build_args* args);
+static bool build_var(build_args* args);
+static bool build_let(build_args* args);
 static bool build_quote(build_args* args);
 static bool build_call(build_args* args);
 static bool build_value_nil(build_args* args);
+static bool build_value_bool(build_args* args);
 static bool build_value_int(build_args* args);
 static bool build_value_float(build_args* args);
 static bool build_value_blob(build_args* args);
@@ -396,15 +502,44 @@ static bool build_value_msgpack(build_args* args);
 
 // Build utilities.
 static bool parse_op_call(op_call* op, build_args* args);
+static void build_set_expected_particle_type(build_args* args);
+static bool is_old_predexp(const uint8_t* buf);
+static as_exp* check_filter_exp(as_exp* exp);
 
 // Runtime.
 static as_exp_trilean match_internal(const as_exp* predexp, const as_exp_ctx* ctx);
-static void rt_eval(runtime* rt, rt_value* ret_val);
+static bool rt_eval(runtime* rt, rt_value* ret_val);
+static void eval_unknown(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_exclusive(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_add(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_sub(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_mul(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_div(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_pow(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_log(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_floor(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_abs(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_ceil(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_to_int(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_to_float(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_xor(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_lshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_rshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_arshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_count(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_lscan(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_rscan(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_min(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_max(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_meta_digest_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_meta_device_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_meta_last_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
@@ -418,32 +553,22 @@ static void eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* 
 static void eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_cond(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_var(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_let(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 
-static void rt_display(runtime* rt, cf_dyn_buf* db);
-static void display_compare(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_cmp_regex(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_logical(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_not(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_meta_digest_mod(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_no_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_bin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_bin_type(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-
-static void display_msgpack(msgpack_in* mp, cf_dyn_buf* db);
-
 // Runtime utilities.
-static void json_to_rt_geo(const uint8_t* json, uint32_t jsonsz, rt_value* val);
+static void rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from);
+static void json_to_rt_geo(const uint8_t* json, size_t jsonsz, rt_value* val);
 static void particle_to_rt_geo(const as_particle* p, rt_value* val);
 static bool bin_is_type(const as_bin* b, result_type type);
 static void rt_skip(runtime* rt, uint32_t instr_count);
-static void rt_value_cmp_translate(rt_value* to, const rt_value* from);
-static void rt_value_destroy(rt_value* val);
+static void rt_value_translate(rt_value* to, const rt_value* from);
+static void rt_value_destroy(rt_value* val, runtime* rt);
 static void rt_value_get_geo(rt_value* val, geo_data* result);
-static as_bin* get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len);
+static bool get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin);
 
 // Runtime compare utilities.
 static as_exp_trilean cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1);
@@ -457,6 +582,35 @@ static as_exp_trilean cmp_msgpack(exp_op_code code, const rt_value* v0, const rt
 static void call_cleanup(void** blob, uint32_t blob_ix, as_bin** bin, uint32_t bin_ix);
 static void pack_typed_str(as_packer* pk, const uint8_t* buf, uint32_t sz, uint8_t type);
 static bool rt_value_bin_translate(rt_value* to, const rt_value* from);
+static void* rt_alloc_mem(runtime* rt, size_t sz);
+static void rt_free_mem(runtime*rt, void* ptr);
+static bool msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from);
+
+// Runtime runtime display.
+static void rt_display(runtime* rt, cf_dyn_buf* db);
+static void display_0_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_1_arg(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_2_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_cmp_regex(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_logical_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_math_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_int_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_meta_digest_mod(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_bin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_bin_type(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_cond(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_var(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_let(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_case(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+
+static void display_msgpack(msgpack_in* mp, cf_dyn_buf* db);
+
+// Debug utilities.
+static void debug_exp_check(const as_exp* exp);
+
+
 
 //==========================================================
 // Inlines & macros.
@@ -475,9 +629,10 @@ build_args_setup(build_args* args, const char* name)
 
 	if (args->ele_count != entry->eval_param_count +
 			entry->static_param_count) {
-		cf_warning(AS_EXP, "%s - error %u terms %u != %u", name,
-				AS_ERR_PARAMETER, args->ele_count,
-				entry->eval_param_count + entry->static_param_count);
+		cf_warning(AS_EXP, "%s - error %u expected %u args found %u", name,
+				AS_ERR_PARAMETER,
+				entry->eval_param_count + entry->static_param_count,
+				args->ele_count);
 		return false;
 	}
 
@@ -495,49 +650,86 @@ build_args_setup(build_args* args, const char* name)
 //
 
 static const op_table_entry op_table[] = {
-		OP_TABLE_ENTRY(EXP_CMP_EQ, "eq", op_base_mem, build_compare, eval_compare, display_compare, 0, 2, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_CMP_NE, "ne", op_base_mem, build_compare, eval_compare, display_compare, 0, 2, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_CMP_GT, "gt", op_base_mem, build_compare, eval_compare, display_compare, 0, 2, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_CMP_GE, "ge", op_base_mem, build_compare, eval_compare, display_compare, 0, 2, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_CMP_LT, "lt", op_base_mem, build_compare, eval_compare, display_compare, 0, 2, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_CMP_LE, "le", op_base_mem, build_compare, eval_compare, display_compare, 0, 2, TYPE_TRILEAN),
+		OP_TABLE_ENTRY(EXP_UNK, "unknown", op_base_mem, build_default, eval_unknown, display_0_args, 0, 0, TYPE_TRILEAN, false)
 
-		OP_TABLE_ENTRY(EXP_CMP_REGEX, "cmp_regex", op_cmp_regex, build_cmp_regex, eval_cmp_regex, display_cmp_regex, 2, 1, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_CMP_GEO, "cmp_geo", op_base_mem, build_cmp_geo, eval_compare, display_compare, 0, 2, TYPE_TRILEAN),
+		OP_TABLE_ENTRY(EXP_CMP_EQ, "eq", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_NE, "ne", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_GT, "gt", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_GE, "ge", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_LT, "lt", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_LE, "le", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
 
-		OP_TABLE_ENTRY(EXP_AND, "and", op_logical, build_logical, eval_and, display_logical, 0, 0, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_OR, "or", op_logical, build_logical, eval_or, display_logical, 0, 0, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_NOT, "not", op_base_mem, build_logical_not, eval_not, display_not, 0, 1, TYPE_TRILEAN),
+		OP_TABLE_ENTRY(EXP_CMP_REGEX, "cmp_regex", op_cmp_regex, build_cmp_regex, eval_cmp_regex, display_cmp_regex, 2, 1, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_GEO, "cmp_geo", op_base_mem, build_cmp_geo, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
 
-		OP_TABLE_ENTRY(EXP_META_DIGEST_MOD, "digest_modulo", op_meta_digest_modulo, build_meta_digest_mod, eval_meta_digest_mod, display_meta_digest_mod, 1, 0, TYPE_INT),
-		OP_TABLE_ENTRY(EXP_META_DEVICE_SIZE, "device_size", op_base_mem, build_default, eval_meta_device_size, display_no_args, 0, 0, TYPE_INT),
-		OP_TABLE_ENTRY(EXP_META_LAST_UPDATE, "last_update", op_base_mem, build_default, eval_meta_last_update, display_no_args, 0, 0, TYPE_INT),
-		OP_TABLE_ENTRY(EXP_META_SINCE_UPDATE, "since_update", op_base_mem, build_default, eval_meta_since_update, display_no_args, 0, 0, TYPE_INT),
-		OP_TABLE_ENTRY(EXP_META_VOID_TIME, "void_time", op_base_mem, build_default, eval_meta_void_time, display_no_args, 0, 0, TYPE_INT),
-		OP_TABLE_ENTRY(EXP_META_TTL, "ttl", op_base_mem, build_default, eval_meta_ttl, display_no_args, 0, 0, TYPE_INT),
-		OP_TABLE_ENTRY(EXP_META_SET_NAME, "set_name", op_base_mem, build_default, eval_meta_set_name, display_no_args, 0, 0, TYPE_STR),
-		OP_TABLE_ENTRY(EXP_META_KEY_EXISTS, "key_exists", op_base_mem, build_default, eval_meta_key_exists, display_no_args, 0, 0, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_META_IS_TOMBSTONE, "is_tombstone", op_base_mem, build_default, eval_meta_is_tombstone, display_no_args, 0, 0, TYPE_TRILEAN),
-		OP_TABLE_ENTRY(EXP_META_MEMORY_SIZE, "memory_size", op_base_mem, build_default, eval_meta_memory_size, display_no_args, 0, 0, TYPE_INT),
+		OP_TABLE_ENTRY(EXP_AND, "and", op_base_mem, build_logical_vargs, eval_and, display_logical_vargs, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_OR, "or", op_base_mem, build_logical_vargs, eval_or, display_logical_vargs, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_NOT, "not", op_base_mem, build_logical_not, eval_not, display_1_arg, 0, 1, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_EXCLUSIVE, "exclusive", op_base_mem, build_logical_vargs, eval_exclusive, display_logical_vargs, 0, 0, TYPE_TRILEAN, false)
 
-		OP_TABLE_ENTRY(EXP_REC_KEY, "key", op_rec_key, build_rec_key, eval_rec_key, display_no_args, 1, 0, TYPE_END),
-		OP_TABLE_ENTRY(EXP_BIN, "bin", op_bin, build_bin, eval_bin, display_bin, 2, 0, TYPE_END),
-		OP_TABLE_ENTRY(EXP_BIN_TYPE, "bin_type", op_bin_type, build_bin_type, eval_bin_type, display_bin_type, 1, 0, TYPE_INT),
+		OP_TABLE_ENTRY(EXP_ADD, "add", op_base_mem, build_math_vargs, eval_add, display_math_vargs, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_SUB, "sub", op_base_mem, build_math_vargs, eval_sub, display_math_vargs, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_MUL, "mul", op_base_mem, build_math_vargs, eval_mul, display_math_vargs, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_DIV, "div", op_base_mem, build_math_vargs, eval_div, display_math_vargs, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_POW, "pow", op_base_mem, build_math_pow, eval_pow, display_2_args, 0, 2, TYPE_FLOAT, false)
+		OP_TABLE_ENTRY(EXP_LOG, "log", op_base_mem, build_math_log, eval_log, display_2_args, 0, 2, TYPE_FLOAT, false)
+		OP_TABLE_ENTRY(EXP_MOD, "mod", op_base_mem, build_math_mod, eval_mod, display_2_args, 0, 2, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_ABS, "abs", op_base_mem, build_number_op, eval_abs, display_1_arg, 0, 1, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_FLOOR, "floor", op_base_mem, build_float_op, eval_floor, display_1_arg, 0, 1, TYPE_FLOAT, false)
+		OP_TABLE_ENTRY(EXP_CEIL, "ceil", op_base_mem, build_float_op, eval_ceil, display_1_arg, 0, 1, TYPE_FLOAT, false)
+		OP_TABLE_ENTRY(EXP_TO_INT, "to_int", op_base_mem, build_float_op, eval_to_int, display_1_arg, 0, 1, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_TO_FLOAT, "to_float", op_base_mem, build_int_op, eval_to_float, display_1_arg, 0, 1, TYPE_FLOAT, false)
 
-		OP_TABLE_ENTRY(EXP_QUOTE, "quote", op_value_blob, build_quote, eval_value, display_value, 1, 0, TYPE_LIST),
-		OP_TABLE_ENTRY(EXP_CALL, "call", op_call, build_call, eval_call, display_call, 2, 2, TYPE_END),
+		OP_TABLE_ENTRY(EXP_INT_AND, "int_and", op_base_mem, build_int_vargs, eval_int_and, display_int_vargs, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_OR, "int_or", op_base_mem, build_int_vargs, eval_int_or, display_int_vargs, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_XOR, "int_xor", op_base_mem, build_int_vargs, eval_int_xor, display_int_vargs, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_NOT, "int_not", op_base_mem, build_int_one, eval_int_not, display_1_arg, 0, 1, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_LSHIFT, "int_lshift", op_base_mem, build_int_shift, eval_int_lshift, display_2_args, 0, 2, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_RSHIFT, "int_rshift", op_base_mem, build_int_shift, eval_int_rshift, display_2_args, 0, 2, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_ARSHIFT, "int_arshift", op_base_mem, build_int_shift, eval_int_arshift, display_2_args, 0, 2, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_COUNT, "int_count", op_base_mem, build_int_one, eval_int_count, display_1_arg, 0, 1, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_LSCAN, "int_lscan", op_base_mem, build_int_scan, eval_int_lscan, display_2_args, 0, 2, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_RSCAN, "int_rscan", op_base_mem, build_int_scan, eval_int_rscan, display_2_args, 0, 2, TYPE_INT, false)
 
-		OP_TABLE_ENTRY(VOP_VALUE_NIL, "nil", op_base_mem, build_value_nil, eval_value, display_value, 0, 0, TYPE_NIL),
-		OP_TABLE_ENTRY(VOP_VALUE_INT, "int", op_value_int, build_value_int, eval_value, display_value, 0, 0, TYPE_INT),
-		OP_TABLE_ENTRY(VOP_VALUE_FLOAT, "float", op_value_float, build_value_float, eval_value, display_value, 0, 0, TYPE_FLOAT),
-		OP_TABLE_ENTRY(VOP_VALUE_STR, "str", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_STR),
-		OP_TABLE_ENTRY(VOP_VALUE_BLOB, "blob", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_BLOB),
-		OP_TABLE_ENTRY(VOP_VALUE_GEO, "geo", op_value_geo, build_value_geo, eval_value, display_value, 0, 0, TYPE_GEOJSON),
-		OP_TABLE_ENTRY(VOP_VALUE_MSGPACK, "msgpack", op_value_blob, build_value_msgpack, eval_value, display_value, 0, 0, TYPE_END),
+		OP_TABLE_ENTRY(EXP_MIN, "min", op_base_mem, build_math_vargs, eval_min, display_math_vargs, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_MAX, "max", op_base_mem, build_math_vargs, eval_max, display_math_vargs, 0, 0, TYPE_END, false)
 
-		OP_TABLE_ENTRY(VOP_VALUE_HLL, "hll", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_HLL),
-		OP_TABLE_ENTRY(VOP_VALUE_MAP, "map", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_MAP),
-		OP_TABLE_ENTRY(VOP_VALUE_LIST, "list", op_value_blob, NULL, eval_value, display_value, 0, 0, TYPE_LIST)
+		OP_TABLE_ENTRY(EXP_META_DIGEST_MOD, "digest_modulo", op_meta_digest_modulo, build_meta_digest_mod, eval_meta_digest_mod, display_meta_digest_mod, 1, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_META_DEVICE_SIZE, "device_size", op_base_mem, build_default, eval_meta_device_size, display_0_args, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_META_LAST_UPDATE, "last_update", op_base_mem, build_default, eval_meta_last_update, display_0_args, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_META_SINCE_UPDATE, "since_update", op_base_mem, build_default, eval_meta_since_update, display_0_args, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_META_VOID_TIME, "void_time", op_base_mem, build_default, eval_meta_void_time, display_0_args, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_META_TTL, "ttl", op_base_mem, build_default, eval_meta_ttl, display_0_args, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_META_SET_NAME, "set_name", op_base_mem, build_default, eval_meta_set_name, display_0_args, 0, 0, TYPE_STR, false)
+		OP_TABLE_ENTRY(EXP_META_KEY_EXISTS, "key_exists", op_base_mem, build_default, eval_meta_key_exists, display_0_args, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_META_IS_TOMBSTONE, "is_tombstone", op_base_mem, build_default, eval_meta_is_tombstone, display_0_args, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_META_MEMORY_SIZE, "memory_size", op_base_mem, build_default, eval_meta_memory_size, display_0_args, 0, 0, TYPE_INT, false)
+
+		OP_TABLE_ENTRY(EXP_REC_KEY, "key", op_rec_key, build_rec_key, eval_rec_key, display_0_args, 1, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_BIN, "bin", op_bin, build_bin, eval_bin, display_bin, 2, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_BIN_TYPE, "bin_type", op_bin_type, build_bin_type, eval_bin_type, display_bin_type, 1, 0, TYPE_INT, false)
+
+		OP_TABLE_ENTRY(EXP_COND, "cond", op_cond, build_cond, eval_cond, display_cond, 0, 0, TYPE_END, true)
+		OP_TABLE_ENTRY(EXP_VAR, "var", op_var, build_var, eval_var, display_var, 1, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_LET, "let", op_let, build_let, eval_let, display_let, 0, 0, TYPE_END, true)
+		OP_TABLE_ENTRY(EXP_QUOTE, "quote", op_value_blob, build_quote, eval_value, display_value, 1, 0, TYPE_LIST, false)
+		OP_TABLE_ENTRY(EXP_CALL, "call", op_call, build_call, eval_call, display_call, 2, 2, TYPE_END, true)
+
+		OP_TABLE_ENTRY(VOP_VALUE_NIL, "nil", op_base_mem, build_value_nil, eval_value, display_value, 0, 0, TYPE_NIL, false)
+		OP_TABLE_ENTRY(VOP_VALUE_BOOL, "bool", op_value_bool, build_value_bool, eval_value, display_value, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(VOP_VALUE_TRILEAN, "trilean", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(VOP_VALUE_INT, "int", op_value_int, build_value_int, eval_value, display_value, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(VOP_VALUE_FLOAT, "float", op_value_float, build_value_float, eval_value, display_value, 0, 0, TYPE_FLOAT, false)
+		OP_TABLE_ENTRY(VOP_VALUE_STR, "str", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_STR, false)
+		OP_TABLE_ENTRY(VOP_VALUE_BLOB, "blob", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_BLOB, false)
+		OP_TABLE_ENTRY(VOP_VALUE_GEO, "geo", op_value_geo, build_value_geo, eval_value, display_value, 0, 0, TYPE_GEOJSON, false)
+		OP_TABLE_ENTRY(VOP_VALUE_MSGPACK, "msgpack", op_value_blob, build_value_msgpack, eval_value, display_value, 0, 0, TYPE_END, false)
+
+		OP_TABLE_ENTRY(VOP_VALUE_HLL, "hll", op_value_blob, NULL, eval_value, display_value, 0, 0, TYPE_HLL, false)
+		OP_TABLE_ENTRY(VOP_VALUE_MAP, "map", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_MAP, false)
+		OP_TABLE_ENTRY(VOP_VALUE_LIST, "list", op_value_blob, NULL, eval_value, display_value, 0, 0, TYPE_LIST, false)
+
+		OP_TABLE_ENTRY(VOP_COND_CASE, "case", op_base_mem, NULL, NULL, display_case, 0, 0, TYPE_END, false)
 };
 
 
@@ -546,7 +738,7 @@ static const op_table_entry op_table[] = {
 //
 
 as_exp*
-as_exp_build_base64(const char* buf64, uint32_t buf64_sz)
+as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 {
 	uint32_t buf_sz = cf_b64_decoded_buf_size(buf64_sz);
 	uint8_t* buf = cf_malloc(buf_sz);
@@ -560,28 +752,163 @@ as_exp_build_base64(const char* buf64, uint32_t buf64_sz)
 	cf_assert(buf_sz_out <= buf_sz, AS_EXP, "buf_sz_out %u buf_sz %u",
 			buf_sz_out, buf_sz);
 
-	as_exp* p = build_internal(buf, buf_sz_out, false);
+	cf_debug(AS_EXP, "as_exp_filter_build_base64 - buf_sz %u msg-dump:\n%*pH",
+			buf_sz_out, buf_sz_out, buf);
 
-	if (p != NULL) {
-		p->buf_cleanup = buf;
+	if (is_old_predexp(buf)) {
+		cf_warning(AS_EXP, "as_exp_filter_build_base64 - operation requires expressions found predexp");
+		return NULL;
 	}
 
-	return p;
+	as_exp* exp = build_internal(buf, buf_sz_out, false);
+
+	if (exp == NULL) {
+		return NULL;
+	}
+
+	exp->buf_cleanup = buf;
+
+	return check_filter_exp(exp);
 }
 
 as_exp*
-as_exp_build(const as_msg_field* msg, bool cpy_wire)
+as_exp_filter_build(const as_msg_field* m, bool cpy_wire)
 {
-	cf_debug(AS_EXP, "as_exp_build - msg_sz %u msg", msg->field_sz);
-	cf_debug(AS_EXP, "as_exp_build - msg-dump:\n%*pH",
-			as_msg_field_get_value_sz(msg), msg->data);
+	cf_debug(AS_EXP, "as_exp_filter_build - msg_field_sz %u msg-dump\n%*pH",
+			m->field_sz, as_msg_field_get_value_sz(m), m->data);
 
-	// TODO - Remove in "six months".
-	if (msg->data[0] == 0) {
-		return predexp_build_old(msg);
+	if (is_old_predexp(m->data)) {
+		return predexp_build_old(m);
 	}
 
-	return build_internal(msg->data, as_msg_field_get_value_sz(msg), cpy_wire);
+	as_exp* exp = build_internal(m->data, as_msg_field_get_value_sz(m),
+			cpy_wire);
+
+	if (exp == NULL) {
+		return NULL;
+	}
+
+	return check_filter_exp(exp);
+}
+
+as_exp*
+as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
+{
+	cf_debug(AS_EXP, "as_exp_build_buf - buf_sz %u buf-dump:\n%*pH",
+			buf_sz, buf_sz, buf);
+
+	if (is_old_predexp(buf)) {
+		cf_warning(AS_EXP, "as_exp_build_buf - operation requires expressions found predexp");
+		return NULL;
+	}
+
+	return build_internal(buf, buf_sz, cpy_wire);
+}
+
+bool
+as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
+		cf_ll_buf* particles_llb, bool is_modify)
+{
+	rt_value vars[exp->max_var_count];
+	rt_value ret_val;
+
+	runtime rt = {
+			.ctx = ctx,
+			.instr_ptr = exp->mem,
+			.vars = vars,
+			.ll_buf = particles_llb,
+			.alloc_ns = is_modify
+	};
+
+	rt_eval(&rt, &ret_val);
+
+	if (ret_val.type == RT_BIN_PTR) {
+		rt_value_bin_ptr_to_bin(&rt, rb, &ret_val);
+		return true;
+	}
+
+	switch (ret_val.type) {
+	case RT_NIL:
+		as_bin_set_empty(rb);
+		break;
+	case RT_INT:
+		rb->particle = (as_particle*)ret_val.r_int;
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
+		break;
+	case RT_FLOAT:
+		*((double *)(&rb->particle)) = ret_val.r_float;
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_FLOAT);
+		break;
+	case RT_TRILEAN:
+		if (ret_val.r_trilean == AS_EXP_UNK) {
+			cf_debug(AS_EXP, "as_exp_eval - unknown result");
+			return false;
+		}
+
+		rb->particle = (as_particle*)(uint64_t)
+				(ret_val.r_trilean == AS_EXP_TRUE ? 1 : 0);
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
+		break;
+	case RT_GEO_CONST:
+		rb->particle = rt_alloc_mem(&rt, as_geojson_particle_sz(
+				MAX_REGION_CELLS, ret_val.r_geo_const.op->content_sz));
+		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_GEOJSON);
+		((cdt_mem*)rb->particle)->type = AS_PARTICLE_TYPE_GEOJSON;
+
+		msgpack_in mp = {
+				.buf = ret_val.r_geo_const.op->contents,
+				.buf_sz = ret_val.r_geo_const.op->content_sz
+		};
+
+		uint32_t jlen = 0;
+		const char* json = (const char*)msgpack_get_bin(&mp, &jlen);
+
+		json++;
+		jlen--;
+
+		// TODO - already checked in eval_bin?
+		if (! as_geojson_to_particle(json, jlen, &rb->particle)) {
+			cf_warning(AS_EXP, "as_exp_evel - invalid geojson");
+			return false;
+		}
+
+		break;
+	case RT_STR:
+	case RT_BLOB:
+	case RT_HLL: {
+		as_particle_type particle_type = ret_val.type == RT_STR ?
+			AS_PARTICLE_TYPE_STRING : (ret_val.type == RT_BLOB ?
+				AS_PARTICLE_TYPE_BLOB : AS_PARTICLE_TYPE_HLL);
+
+		rb->particle = rt_alloc_mem(&rt, sizeof(cdt_mem) + ret_val.r_bytes.sz);
+
+		((cdt_mem*)rb->particle)->sz = ret_val.r_bytes.sz;
+		((cdt_mem*)rb->particle)->type = (uint8_t)particle_type;
+		memcpy(((cdt_mem*)rb->particle)->data, ret_val.r_bytes.contents,
+				ret_val.r_bytes.sz);
+		as_bin_state_set_from_type(rb, particle_type);
+		break;
+	}
+	case RT_BIN:
+		rb->state = ret_val.r_bin.state;
+		rb->particle = ret_val.r_bin.particle;
+		break; // do not destroy ret_val
+	case RT_MSGPACK:
+		if (! msgpack_to_bin(&rt, rb, &ret_val)) {
+			cf_warning(AS_EXP, "as_exp_eval - invalid msgpack");
+			rt_value_destroy(&ret_val, NULL);
+			return false;
+		}
+
+		break;
+	default:
+		cf_warning(AS_EXP, "as_exp_eval - unexpected result type (%u)",
+				ret_val.type);
+		rt_value_destroy(&ret_val, NULL);
+		return false;
+	}
+
+	return true;
 }
 
 as_exp_trilean
@@ -686,9 +1013,9 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 	};
 	uint32_t top_count;
 
-	if (! msgpack_buf_get_list_ele_count(mp.buf, mp.buf_sz, &top_count) ||
+	if (msgpack_buf_get_list_ele_count(mp.buf, mp.buf_sz, &top_count) &&
 			top_count == 0) {
-		cf_warning(AS_EXP, "must begin with non empty list");
+		cf_warning(AS_EXP, "build_internal - expressions started with an empty list");
 		return NULL;
 	}
 
@@ -696,181 +1023,30 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 	uint32_t cleanup_count = 0;
 	uint32_t counter = 1;
 
-	while (mp.offset < mp.buf_sz) {
-		msgpack_type type = msgpack_peek_type(&mp);
+	if (! build_count_sz(&mp, &total_sz, &cleanup_count, &counter)) {
+		return NULL;
+	}
 
-		if (type == MSGPACK_TYPE_ERROR) {
-			cf_warning(AS_EXP, "invalid instruction at offset %u",
-					mp.offset);
-			return NULL;
-		}
-
-		counter--;
-
-		uint64_t op_code;
-
-		if (type != MSGPACK_TYPE_LIST) {
-			switch (type) {
-			case MSGPACK_TYPE_NIL:
-				op_code = VOP_VALUE_NIL;
-				break;
-			case MSGPACK_TYPE_NEGINT:
-			case MSGPACK_TYPE_INT:
-				op_code = VOP_VALUE_INT;
-				break;
-			case MSGPACK_TYPE_DOUBLE:
-				op_code = VOP_VALUE_FLOAT;
-				break;
-			case MSGPACK_TYPE_STRING:
-				op_code = VOP_VALUE_STR;
-				break;
-			case MSGPACK_TYPE_BYTES:
-				op_code = VOP_VALUE_BLOB;
-				break;
-			case MSGPACK_TYPE_GEOJSON:
-				op_code = VOP_VALUE_GEO;
-				break;
-			default:
-				op_code = VOP_VALUE_MSGPACK;
-				break;
-			}
-
-			cf_debug(AS_EXP, "op_code %lu", op_code);
-
-			if (type == MSGPACK_TYPE_BYTES) {
-				uint32_t temp_sz;
-				const uint8_t* buf = msgpack_get_bin(&mp, &temp_sz);
-
-				if (buf == NULL || temp_sz == 0) {
-					cf_warning(AS_EXP, "invalid blob at offset %u", mp.offset);
-					return NULL;
-				}
-
-				if (*buf != AS_BYTES_BLOB) {
-					cf_warning(AS_EXP, "invalid blob type %d at offset %u", *buf, mp.offset);
-					return NULL;
-				}
-			}
-			else if (msgpack_sz(&mp) == 0) {
-				cf_warning(AS_EXP, "invalid instruction at offset %u",
-						mp.offset);
-				return NULL;
-			}
-		}
-		else {
-			uint32_t ele_count;
-
-			if (! msgpack_get_list_ele_count(&mp, &ele_count) ||
-					ele_count == 0) {
-				cf_warning(AS_EXP, "invalid instruction at offset %u",
-						mp.offset);
-				return NULL;
-			}
-
-			counter += ele_count - 1;
-
-			if (! msgpack_get_uint64(&mp, &op_code)) {
-				cf_warning(AS_EXP, "invalid instruction at offset %u",
-						mp.offset);
-				return NULL;
-			}
-
-			if (op_code >= EXP_OP_CODE_END) {
-				cf_warning(AS_EXP, "invalid op_code %lu", op_code);
-				return NULL;
-			}
-
-			cf_debug(AS_EXP, "ele_count %u op_code %lu", ele_count, op_code);
-		}
-
-		const op_table_entry* entry = &op_table[op_code];
-
-		if (entry->size == 0) {
-			cf_warning(AS_EXP, "invalid op_code %lu size %u",
-				op_code, entry->size);
-			return NULL;
-		}
-
-		if (entry->static_param_count != 0 &&
-				msgpack_sz_rep(&mp, entry->static_param_count) == 0) {
-			cf_warning(AS_EXP, "invalid instruction at offset %u",
-					mp.offset);
-			return NULL;
-		}
-
-		counter -= entry->static_param_count;
-
-		if (op_code == EXP_CALL) {
-			uint32_t ele_count;
-			int64_t op_code;
-
-			counter -= 1;
-
-			if (! msgpack_get_list_ele_count(&mp, &ele_count) ||
-					ele_count == 0 || ! msgpack_get_int64(&mp, &op_code)) {
-				cf_warning(AS_EXP, "invalid instruction at offset %u",
-						mp.offset);
-				return NULL;
-			}
-
-			if (op_code == AS_CDT_OP_CONTEXT_EVAL && (ele_count != 3 ||
-					msgpack_sz(&mp) == 0 || // skip context
-					! msgpack_get_list_ele_count(&mp, &ele_count) ||
-					! msgpack_get_int64(&mp, &op_code))) {
-				cf_warning(AS_EXP, "invalid instruction at offset %u",
-						mp.offset);
-				return NULL;
-			}
-
-			for (uint32_t i = 1; i < ele_count; i++) {
-				// TODO - Skip allocating space until we reach the first list.
-				// Non lists after the first list will result in over-allocation
-				// of op space. May want to improve accounting in the future.
-				if (msgpack_peek_type(&mp) == MSGPACK_TYPE_LIST) {
-					counter += ele_count - i;
-					break;
-				}
-
-				if (msgpack_sz(&mp) == 0) {
-					cf_warning(AS_EXP, "invalid instruction at offset %u",
-							mp.offset);
-					return NULL;
-				}
-			}
-		}
-
-		total_sz += entry->size;
-
-		switch (op_code) {
-		case EXP_CMP_REGEX:
-		case VOP_VALUE_GEO:
-			cleanup_count++;
-			break;
-		default:
-			break;
-		}
+	if (counter != 0) {
+		cf_warning(AS_EXP, "build_internal - incomplete expression field expected %u more elements",
+				counter);
+		return false;
 	}
 
 	if (total_sz >= EXP_MAX_SIZE) {
-		cf_warning(AS_EXP, "expression size exceeds limit of %u bytes",
+		cf_warning(AS_EXP, "build_internal - expression size exceeds limit of %u bytes",
 				EXP_MAX_SIZE);
 		return NULL;
 	}
 
 	if (mp.offset != mp.buf_sz) {
-		cf_warning(AS_EXP, "malformed expression field");
-		return NULL;
-	}
-
-	if (counter != 0) {
-		cf_warning(AS_EXP, "incomplete expression field expected %u more elements",
-				counter);
+		cf_warning(AS_EXP, "build_internal - malformed expression field");
 		return NULL;
 	}
 
 	uint32_t cleanup_offset = total_sz;
 
-	total_sz += cleanup_count * sizeof(void*);
+	total_sz += cleanup_count * (uint32_t)sizeof(void*);
 
 	if (cpy_wire) {
 		total_sz += mp.buf_sz;
@@ -896,10 +1072,20 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 
 	args.mp.buf_sz = mp.buf_sz;
 
+	debug_exp_check(args.exp);
+
 	if (! build_next(&args)) {
 		as_exp_destroy(args.exp);
 		return NULL;
 	}
+
+	cf_assert(args.mem <= (uint8_t*)args.exp->cleanup_stack, AS_EXP, "read past cleanup_stack %p > %p",
+			args.mem, args.exp->cleanup_stack);
+	cf_assert(args.exp->cleanup_stack_ix <= cleanup_count, AS_EXP, "cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
+			args.exp->cleanup_stack_ix, cleanup_count);
+
+	args.exp->max_var_count = args.max_var_idx;
+	build_set_expected_particle_type(&args);
 
 	if (cf_log_check_level(AS_EXP, CF_DETAIL)) {
 		cf_dyn_buf_define_size(db, 10240);
@@ -929,6 +1115,10 @@ build_next(build_args* args)
 		switch (type) {
 		case MSGPACK_TYPE_NIL:
 			op_code = VOP_VALUE_NIL;
+			break;
+		case MSGPACK_TYPE_FALSE:
+		case MSGPACK_TYPE_TRUE:
+			op_code = VOP_VALUE_BOOL;
 			break;
 		case MSGPACK_TYPE_NEGINT:
 		case MSGPACK_TYPE_INT:
@@ -968,13 +1158,24 @@ build_next(build_args* args)
 	cf_debug(AS_EXP, "build_next op %s ele_count %u ix %u", args->entry->name,
 			ele_count, args->instr_ix);
 
-	return op_table[op_code].build_cb(args);
+	op_base_mem* op = (op_base_mem*)args->mem;
+	bool rv = op_table[op_code].build_cb(args);
+
+	op->instr_end_ix = args->instr_ix;
+
+	debug_exp_check(args->exp);
+
+	return rv;
 }
 
 static const op_table_entry*
 build_get_entry(result_type type)
 {
 	switch (type) {
+	case TYPE_NIL:
+		return &op_table[VOP_VALUE_NIL];
+	case TYPE_TRILEAN:
+		return &op_table[VOP_VALUE_TRILEAN];
 	case TYPE_INT:
 		return &op_table[VOP_VALUE_INT];
 	case TYPE_FLOAT:
@@ -993,6 +1194,228 @@ build_get_entry(result_type type)
 		return &op_table[VOP_VALUE_LIST];
 	default:
 		break;
+	}
+
+	return NULL;
+}
+
+static bool
+build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
+		uint32_t* counter_r)
+{
+	while (mp->offset < mp->buf_sz) {
+		msgpack_type type = msgpack_peek_type(mp);
+
+		if (type == MSGPACK_TYPE_ERROR) {
+			cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+					mp->offset);
+			return false;
+		}
+
+		(*counter_r)--;
+
+		uint64_t op_code;
+		uint32_t ele_count = 0;
+
+		if (type != MSGPACK_TYPE_LIST) {
+			switch (type) {
+			case MSGPACK_TYPE_NIL:
+				op_code = VOP_VALUE_NIL;
+				break;
+			case MSGPACK_TYPE_NEGINT:
+			case MSGPACK_TYPE_INT:
+				op_code = VOP_VALUE_INT;
+				break;
+			case MSGPACK_TYPE_DOUBLE:
+				op_code = VOP_VALUE_FLOAT;
+				break;
+			case MSGPACK_TYPE_STRING:
+				op_code = VOP_VALUE_STR;
+				break;
+			case MSGPACK_TYPE_BYTES:
+				op_code = VOP_VALUE_BLOB;
+				break;
+			case MSGPACK_TYPE_GEOJSON:
+				op_code = VOP_VALUE_GEO;
+				break;
+			default:
+				op_code = VOP_VALUE_MSGPACK;
+				break;
+			}
+
+			cf_debug(AS_EXP, "build_count_sz - op_code %lu", op_code);
+
+			if (type == MSGPACK_TYPE_BYTES) {
+				uint32_t temp_sz;
+				const uint8_t* buf = msgpack_get_bin(mp, &temp_sz);
+
+				if (buf == NULL || temp_sz == 0) {
+					cf_warning(AS_EXP, "build_count_sz - invalid blob at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				if (*buf != AS_BYTES_BLOB && *buf != AS_BYTES_HLL) {
+					cf_warning(AS_EXP, "build_count_sz - invalid blob type %d at offset %u",
+							*buf, mp->offset);
+					return false;
+				}
+			}
+			else if (msgpack_sz(mp) == 0) {
+				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+		}
+		else {
+			if (! msgpack_get_list_ele_count(mp, &ele_count) ||
+					ele_count == 0) {
+				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			*counter_r += ele_count - 1;
+
+			if (! msgpack_get_uint64(mp, &op_code)) {
+				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			if (op_code >= EXP_OP_CODE_END) {
+				cf_warning(AS_EXP, "build_count_sz - invalid op_code %lu", op_code);
+				return false;
+			}
+
+			cf_debug(AS_EXP, "ele_count %u op_code %lu", ele_count, op_code);
+		}
+
+		const op_table_entry* entry = &op_table[op_code];
+
+		if (entry->size == 0) {
+			cf_warning(AS_EXP, "build_count_sz - invalid op_code %lu size %u",
+				op_code, entry->size);
+			return false;
+		}
+
+		if (entry->static_param_count != 0 &&
+				msgpack_sz_rep(mp, entry->static_param_count) == 0) {
+			cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+					mp->offset);
+			return false;
+		}
+
+		*counter_r -= entry->static_param_count;
+		*total_sz += entry->size;
+
+		if (op_code == EXP_CALL) {
+			uint32_t param_count;
+			int64_t call_op_code;
+
+			(*counter_r)--;
+
+			if (! msgpack_get_list_ele_count(mp, &param_count) ||
+					param_count == 0 || ! msgpack_get_int64(mp, &call_op_code)) {
+				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			if (call_op_code == AS_CDT_OP_CONTEXT_EVAL && (param_count != 3 ||
+					msgpack_sz(mp) == 0 || // skip context
+					! msgpack_get_list_ele_count(mp, &param_count) ||
+					! msgpack_get_int64(mp, &call_op_code))) {
+				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+						mp->offset);
+				return false;
+			}
+
+			for (uint32_t i = 1; i < param_count; i++) {
+				// TODO - Skip allocating space until we reach the first list.
+				// Non lists after the first list will result in over-allocation
+				// of op space. May want to improve accounting in the future.
+				if (msgpack_peek_type(mp) == MSGPACK_TYPE_LIST) {
+					*counter_r += param_count - i;
+					break;
+				}
+
+				if (msgpack_sz(mp) == 0) {
+					cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+							mp->offset);
+					return false;
+				}
+			}
+		}
+		else if (op_code == EXP_COND) {
+			*total_sz += (ele_count / 2) * op_table[VOP_COND_CASE].size;
+		}
+		else if (op_code == EXP_LET) {
+			if (ele_count % 2 == 1) {
+				cf_warning(AS_EXP, "build_count_sz - invalid 'let' op at offset %u ele_count %u",
+						mp->offset, ele_count);
+				return false;
+			}
+
+			for (uint32_t i = 0; i < (ele_count - 1) / 2; i++) {
+				uint32_t sz;
+
+				(*counter_r)--;
+
+				if (msgpack_get_bin(mp, &sz) == NULL) {
+					cf_warning(AS_EXP, "build_count_sz - invalid 'let' var at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				const uint8_t* start = mp->buf + mp->offset;
+
+				msgpack_in mp_var = {
+						.buf = start,
+						.buf_sz = msgpack_sz(mp)
+				};
+
+				if (mp_var.buf_sz == 0) {
+					cf_warning(AS_EXP, "build_count_sz - invalid msgpack at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				if (! build_count_sz(&mp_var, total_sz, cleanup_count,
+						counter_r)) {
+					cf_warning(AS_EXP, "build_count_sz - invalid 'let' value at offset %u",
+							mp->offset);
+					return false;
+				}
+			}
+		}
+
+		switch (op_code) {
+		case EXP_CMP_REGEX:
+		case VOP_VALUE_GEO:
+			(*cleanup_count)++;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return true;
+}
+
+static var_entry*
+build_find_var_entry(build_args* args, const uint8_t* name, uint32_t name_sz)
+{
+	for (var_scope* cur = args->current; cur != NULL; cur = cur->parent) {
+		for (uint32_t i = 0; i < cur->n_entries; i++) {
+			if (cur->entries[i].name_sz != name_sz) {
+				continue;
+			}
+
+			if (memcmp(cur->entries[i].name, name, name_sz) == 0) {
+				return &cur->entries[i];
+			}
+		}
 	}
 
 	return NULL;
@@ -1026,8 +1449,9 @@ build_compare(build_args* args)
 	result_type rtype = args->entry->r_type;
 
 	if (ltype != rtype) {
-		cf_warning(AS_EXP, "build_compare - error %u mismatched types ltype %u rtype %u",
-				AS_ERR_PARAMETER, ltype, rtype);
+		cf_warning(AS_EXP, "build_compare - error %u mismatched arg types ltype %u (%s) rtype %u (%s)",
+				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype),
+				rtype, result_type_to_str(rtype));
 		return false;
 	}
 
@@ -1035,8 +1459,8 @@ build_compare(build_args* args)
 	case TYPE_MAP:
 	case TYPE_GEOJSON:
 	case TYPE_HLL:
-		cf_warning(AS_EXP, "build_compare - error %u cannot compare type %u",
-				AS_ERR_PARAMETER, ltype);
+		cf_warning(AS_EXP, "build_compare - error %u cannot compare arg type %u (%s)",
+				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype));
 		return false;
 	default:
 		break;
@@ -1057,9 +1481,9 @@ build_cmp_regex(build_args* args)
 		return false;
 	}
 
-	uint64_t regex_options;
+	int64_t regex_options;
 
-	if (! msgpack_get_uint64(&args->mp, &regex_options)) {
+	if (! msgpack_get_int64(&args->mp, &regex_options)) {
 		cf_warning(AS_EXP, "build_cmp_regex - error %u invalid regex options",
 				AS_ERR_PARAMETER);
 		return false;
@@ -1081,8 +1505,9 @@ build_cmp_regex(build_args* args)
 	}
 
 	if (args->entry->r_type != TYPE_STR) {
-		cf_warning(AS_EXP, "build_cmp_regex - error %u invalid parameter type %u != STRING",
-				AS_ERR_PARAMETER, args->entry->r_type);
+		cf_warning(AS_EXP, "build_cmp_regex - error %u invalid arg type %u (%s) != %u (%s)",
+				AS_ERR_PARAMETER, args->entry->r_type, result_type_to_str(args->entry->r_type),
+				TYPE_STR, result_type_str[TYPE_STR]);
 		return false;
 	}
 
@@ -1091,10 +1516,10 @@ build_cmp_regex(build_args* args)
 
 		memcpy(temp, regex_str, regex_str_sz);
 		temp[regex_str_sz] = '\0';
-		rv = regcomp(&op->regex, temp, regex_options);
+		rv = regcomp(&op->regex, temp, (int)regex_options);
 	}
 	else {
-		rv = regcomp(&op->regex, (const char*)regex_str, regex_options);
+		rv = regcomp(&op->regex, (const char*)regex_str, (int)regex_options);
 	}
 
 	if (rv != 0) {
@@ -1108,7 +1533,7 @@ build_cmp_regex(build_args* args)
 	}
 
 	op->regex_str_sz = regex_str_sz;
-	op->flags = regex_options;
+	op->flags = (int32_t)regex_options;
 
 	args->exp->cleanup_stack[args->exp->cleanup_stack_ix++] = op;
 	args->entry = entry;
@@ -1132,8 +1557,9 @@ build_cmp_geo(build_args* args)
 	result_type ltype = args->entry->r_type;
 
 	if (ltype != TYPE_GEOJSON) {
-		cf_warning(AS_EXP, "build_cmp_geo - error %u mismatched types ltype %u != %u",
-				AS_ERR_PARAMETER, ltype, TYPE_GEOJSON);
+		cf_warning(AS_EXP, "build_cmp_geo - error %u mismatched arg types ltype %u (%s) != %u (%s)",
+				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype),
+				TYPE_GEOJSON, result_type_str[TYPE_GEOJSON]);
 		return false;
 	}
 
@@ -1144,8 +1570,9 @@ build_cmp_geo(build_args* args)
 	result_type rtype = args->entry->r_type;
 
 	if (ltype != rtype) {
-		cf_warning(AS_EXP, "build_cmp_geo - error %u mismatched types ltype %u rtype %u",
-				AS_ERR_PARAMETER, ltype, rtype);
+		cf_warning(AS_EXP, "build_cmp_geo - error %u mismatched arg types ltype %u (%s) rtype %u (%s)",
+				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype), rtype,
+				result_type_to_str(rtype));
 		return false;
 	}
 
@@ -1155,16 +1582,16 @@ build_cmp_geo(build_args* args)
 }
 
 static bool
-build_logical(build_args* args)
+build_logical_vargs(build_args* args)
 {
 	const op_table_entry* entry = args->entry;
-	op_logical* op = (op_logical*)args->mem;
+	op_base_mem* op = (op_base_mem*)args->mem;
 
-	op->base.code = entry->code;
+	op->code = entry->code;
 	args->mem += entry->size;
 
 	if (args->ele_count < 2) {
-		cf_warning(AS_EXP, "build_logical - error %u too few arguments %u",
+		cf_warning(AS_EXP, "build_logical - error %u too few args %u",
 				AS_ERR_PARAMETER, args->ele_count);
 		return false;
 	}
@@ -1177,13 +1604,12 @@ build_logical(build_args* args)
 		}
 
 		if (args->entry->r_type != TYPE_TRILEAN) {
-			cf_warning(AS_EXP, "build_logical - error %u invalid type at parameter %u",
+			cf_warning(AS_EXP, "build_logical - error %u invalid type at arg %u",
 					AS_ERR_PARAMETER, i + 1);
 			return false;
 		}
 	}
 
-	op->instr_end_ix = args->instr_ix;
 	args->entry = entry;
 
 	return true;
@@ -1203,8 +1629,378 @@ build_logical_not(build_args* args)
 	}
 
 	if (args->entry->r_type != TYPE_TRILEAN) {
-		cf_warning(AS_EXP, "build_logical_not - error %u invalid parameter type %u",
-				AS_ERR_PARAMETER, args->entry->r_type);
+		cf_warning(AS_EXP, "build_logical_not - error %u invalid arg type %u (%s)",
+				AS_ERR_PARAMETER, args->entry->r_type,
+				result_type_to_str(args->entry->r_type));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_math_vargs(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+	op_base_mem* op = (op_base_mem*)args->mem;
+
+	op->code = entry->code;
+	args->mem += entry->size;
+
+	if (args->ele_count < 1) {
+		cf_warning(AS_EXP, "build_math - error %u too few args %u",
+				AS_ERR_PARAMETER, args->ele_count);
+		return false;
+	}
+
+	uint32_t ele_count = args->ele_count;
+	result_type expected_type = TYPE_END;
+
+	for (uint32_t i = 0; i < ele_count; i++) {
+		if (! build_next(args)) {
+			return false;
+		}
+
+		switch (args->entry->r_type) {
+		case TYPE_INT:
+		case TYPE_FLOAT:
+			if (expected_type == TYPE_END) {
+				expected_type = args->entry->r_type;
+				break;
+			}
+			else if (expected_type == args->entry->r_type) {
+				break;
+			}
+
+			cf_warning(AS_EXP, "build_math - error %u mixed types at arg %u",
+					AS_ERR_PARAMETER, i + 1);
+
+			return false;
+		default:
+			cf_warning(AS_EXP, "build_math - error %u invalid type %u (%s) at arg %u",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type), i + 1);
+			return false;
+		}
+	}
+
+	args->entry = &op_table[expected_type == TYPE_FLOAT ?
+			VOP_VALUE_FLOAT : VOP_VALUE_INT];
+
+	return true;
+}
+
+static bool
+build_math_pow(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_math_pow")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg0 = args->entry->r_type;
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg1 = args->entry->r_type;
+
+	if (! (arg0 == TYPE_FLOAT && arg1 == TYPE_FLOAT)) {
+		cf_warning(AS_EXP, "build_math_pow - error %u args are not numeric or different types - base %u (%s) exponent %u (%s)",
+				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1,
+				result_type_to_str(arg1));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_math_log(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_math_log")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg0 = args->entry->r_type;
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg1 = args->entry->r_type;
+
+	if (! (arg0 == TYPE_FLOAT && arg1 == TYPE_FLOAT)) {
+		cf_warning(AS_EXP, "build_math_log - error %u args are not numeric or different types - num %u (%s) base %u (%s)",
+				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1, result_type_to_str(arg1));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_math_mod(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_math_mod")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg0 = args->entry->r_type;
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg1 = args->entry->r_type;
+
+	if (! (arg0 == TYPE_INT && arg1 == TYPE_INT)) {
+		cf_warning(AS_EXP, "build_math_mod - error %u args are not integers - numerator %u (%s) denominator %u (%s)",
+				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1, result_type_to_str(arg1));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_number_op(build_args* args)
+{
+	if (! build_args_setup(args, "build_number_op")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type rtype = args->entry->r_type;
+
+	switch (rtype) {
+	case TYPE_FLOAT:
+		args->entry = &op_table[VOP_VALUE_FLOAT];
+		break;
+	case TYPE_INT:
+		args->entry = &op_table[VOP_VALUE_INT];
+		break;
+	default:
+		cf_warning(AS_EXP, "build_number_op - error %u invalid arg type %u (%s)",
+				AS_ERR_PARAMETER, args->entry->r_type,
+				result_type_to_str(args->entry->r_type));
+		return false;
+	}
+
+	return true;
+}
+
+
+static bool
+build_float_op(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_float_op")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type rtype = args->entry->r_type;
+
+	if (rtype != TYPE_FLOAT) {
+		cf_warning(AS_EXP, "build_float_op - error %u invalid arg type %u (%s)",
+				AS_ERR_PARAMETER, args->entry->r_type,
+				result_type_to_str(args->entry->r_type));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_int_op(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_int_op")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type rtype = args->entry->r_type;
+
+	if (rtype != TYPE_INT) {
+		cf_warning(AS_EXP, "build_int_op - error %u invalid arg type %u (%s)",
+				AS_ERR_PARAMETER, args->entry->r_type,
+				result_type_to_str(args->entry->r_type));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_int_vargs(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+	op_base_mem* op = (op_base_mem*)args->mem;
+
+	op->code = entry->code;
+	args->mem += entry->size;
+
+	if (args->ele_count < 1) {
+		cf_warning(AS_EXP, "build_int_vargs - error %u too few args %u",
+				AS_ERR_PARAMETER, args->ele_count);
+		return false;
+	}
+
+	uint32_t ele_count = args->ele_count;
+
+	for (uint32_t i = 0; i < ele_count; i++) {
+		if (! build_next(args)) {
+			return false;
+		}
+
+		if (args->entry->r_type != TYPE_INT) {
+			cf_warning(AS_EXP, "build_int_vargs - error %u invalid type %u (%s) at arg %u",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type), i + 1);
+			return false;
+		}
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_int_one(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_int_one")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg0 = args->entry->r_type;
+
+	if (arg0 != TYPE_INT) {
+		cf_warning(AS_EXP, "build_int_one - error %u arg type %u (%s) is not %u (%s)",
+				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), TYPE_INT,
+				result_type_str[TYPE_INT]);
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_int_shift(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_int_shift")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg0 = args->entry->r_type;
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg1 = args->entry->r_type;
+
+	if (arg0 != TYPE_INT && arg1 != TYPE_INT) {
+		cf_warning(AS_EXP, "build_int_shift - error %u all args are type %u (%s) - arg0 %u (%s) arg1 %u (%s)",
+				AS_ERR_PARAMETER, TYPE_INT, result_type_str[TYPE_INT],
+				arg0, result_type_to_str(arg0), arg1, result_type_to_str(arg1));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_int_scan(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_int_scan")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg0 = args->entry->r_type;
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type arg1 = args->entry->r_type;
+
+	if (arg0 != TYPE_INT) {
+		cf_warning(AS_EXP, "build_int_scan - error %u arg0 type %u (%s) is not %u (%s)",
+				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), TYPE_INT,
+				result_type_str[TYPE_INT]);
+		return false;
+	}
+
+	if (arg1 != TYPE_TRILEAN) {
+		cf_warning(AS_EXP, "build_int_scan - error %u arg1 type %u (%s) is not %u (%s)",
+				AS_ERR_PARAMETER, arg1, result_type_to_str(arg1), TYPE_TRILEAN,
+				result_type_str[TYPE_TRILEAN]);
 		return false;
 	}
 
@@ -1225,7 +2021,7 @@ build_meta_digest_mod(build_args* args)
 	int64_t mod64;
 
 	if (! msgpack_get_int64(&args->mp, &mod64)) {
-		cf_warning(AS_EXP, "build_rec_digest_modulo - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_rec_digest_modulo - error %u failed to parse an integer",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -1253,7 +2049,7 @@ build_rec_key(build_args* args)
 	int64_t type64;
 
 	if (! msgpack_get_int64(&args->mp, &type64)) {
-		cf_warning(AS_EXP, "build_rec_key - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_rec_key - error %u failed to parse an integer",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -1269,8 +2065,8 @@ build_rec_key(build_args* args)
 		op->type = RT_BLOB;
 		break;
 	default:
-		cf_warning(AS_EXP, "build_rec_key - error %u invalid result_type %ld",
-				AS_ERR_PARAMETER, type64);
+		cf_warning(AS_EXP, "build_rec_key - error %u invalid result_type %ld (%s)",
+				AS_ERR_PARAMETER, type64, result_type_to_str(type64));
 		return false;
 	}
 
@@ -1292,7 +2088,7 @@ build_bin(build_args* args)
 	int64_t type64;
 
 	if (! msgpack_get_int64(&args->mp, &type64)) {
-		cf_warning(AS_EXP, "build_bin - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_bin - error %u failed to parse an integer",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -1301,14 +2097,14 @@ build_bin(build_args* args)
 	op->name = msgpack_get_bin(&args->mp, &op->name_sz);
 
 	if (op->name == NULL) {
-		cf_warning(AS_EXP, "build_bin - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_bin - error %u failed to parse a string",
 				AS_ERR_PARAMETER);
 		return false;
 	}
 
 	if ((args->entry = build_get_entry(op->type)) == NULL) {
-		cf_warning(AS_EXP, "build_bin - error %u invalid result_type %d",
-				AS_ERR_PARAMETER, op->type);
+		cf_warning(AS_EXP, "build_bin - error %u invalid result_type %d (%s)",
+				AS_ERR_PARAMETER, op->type, result_type_to_str(op->type));
 		return false;
 	}
 
@@ -1327,10 +2123,244 @@ build_bin_type(build_args* args)
 	op->name = msgpack_get_bin(&args->mp, &op->name_sz);
 
 	if (op->name == NULL) {
-		cf_warning(AS_EXP, "build_bin_name - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_bin_name - error %u failed to parse a string",
 				AS_ERR_PARAMETER);
 		return false;
 	}
+
+	return true;
+}
+
+static bool
+build_cond(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+	op_cond* op = (op_cond*)args->mem;
+
+	op->base.code = entry->code;
+	args->mem += entry->size;
+
+	if (args->ele_count < 3) {
+		cf_warning(AS_EXP, "build_cond - error %u too few args %u",
+				AS_ERR_PARAMETER, args->ele_count);
+		return false;
+	}
+
+	if (args->ele_count % 2 == 0) {
+		cf_warning(AS_EXP, "build_cond - error %u requires default case",
+				AS_ERR_PARAMETER);
+		return false;
+	}
+
+	uint32_t ele_count = args->ele_count;
+	result_type type = TYPE_END;
+
+	op->case_count = ele_count / 2;
+
+	for (uint32_t i = 0; i < op->case_count; i++) {
+		if (! build_next(args)) {
+			return false;
+		}
+
+		if (args->entry->r_type != TYPE_TRILEAN) {
+			cf_warning(AS_EXP, "build_cond - error %u invalid type %u (%s) at condition %u",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type), i + 1);
+			return false;
+		}
+
+		op_base_mem* op_case = (op_base_mem*)args->mem;
+
+		op_case->code = VOP_COND_CASE;
+		args->instr_ix++;
+		args->mem += op_table[VOP_COND_CASE].size;
+
+		if (! build_next(args)) {
+			return false;
+		}
+
+		// Allow returning AS_EXP_UNK and any other return type.
+		if (args->entry->code != EXP_UNK) {
+			if (type == TYPE_END) {
+				type = args->entry->r_type;
+			}
+
+			if (args->entry->r_type != type) {
+				cf_warning(AS_EXP, "build_cond - error %u mismatched arg type %d (%s) expected type %d (%s) at condition %u",
+						AS_ERR_PARAMETER, args->entry->r_type,
+						result_type_to_str(args->entry->r_type), type,
+						result_type_to_str(type), i + 1);
+				return false;
+			}
+		}
+
+		op_case->instr_end_ix = args->instr_ix;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	if (type == TYPE_END) {
+		type = args->entry->r_type;
+	}
+	else if (args->entry->code != EXP_UNK && args->entry->r_type != type) {
+		cf_warning(AS_EXP, "build_cond - error %u mismatched type %d (%s) expected type %d (%s) at default condition",
+				AS_ERR_PARAMETER, args->entry->r_type,
+				result_type_to_str(args->entry->r_type), type,
+				result_type_to_str(type));
+		return false;
+	}
+
+	return true;
+}
+
+static bool
+build_var(build_args* args)
+{
+	op_var* op = (op_var*)args->mem;
+
+	if (! build_args_setup(args, "build_var")) {
+		return false;
+	}
+
+	uint32_t name_sz;
+	const uint8_t* name = msgpack_get_bin(&args->mp, &name_sz);
+
+	if (name == NULL) {
+		cf_warning(AS_EXP, "build_var - error %u failed to parse a string at offset %u",
+				AS_ERR_PARAMETER, args->mp.offset);
+		return false;
+	}
+
+	var_entry* entry = build_find_var_entry(args, name, name_sz);
+
+	if (entry == NULL) {
+		cf_warning(AS_EXP, "build_var - error %u undefined var name %.*s at offset %u",
+				AS_ERR_PARAMETER, name_sz, name, args->mp.offset);
+		return false;
+	}
+
+	op->idx = entry->idx;
+	op->type = entry->r_type;
+
+	switch (op->type) {
+	case TYPE_END:
+		cf_warning(AS_EXP, "build_var - error %u using var name %.*s while defining it at offset %u",
+				AS_ERR_PARAMETER, name_sz, name, args->mp.offset);
+		return false;
+	case TYPE_NIL:
+		args->entry = &op_table[VOP_VALUE_NIL];
+		break;
+	case TYPE_TRILEAN:
+		args->entry = &op_table[VOP_VALUE_TRILEAN];
+		break;
+	default:
+		if ((args->entry = build_get_entry(op->type)) == NULL) {
+			cf_warning(AS_EXP, "build_var - error %u var name %.*s unknown entry type %d (%s)",
+					AS_ERR_PARAMETER, name_sz, name, op->type,
+					result_type_to_str(op->type));
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool
+build_let(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+	op_let* op = (op_let*)args->mem;
+
+	op->base.code = entry->code;
+	args->mem += entry->size;
+
+	if (args->ele_count < 3) {
+		cf_warning(AS_EXP, "build_let - error %u too few args %u",
+				AS_ERR_PARAMETER, args->ele_count);
+		return false;
+	}
+
+	if (args->ele_count % 2 == 0) {
+		cf_warning(AS_EXP, "build_let - error %u invalid arg count %u",
+				AS_ERR_PARAMETER, args->ele_count);
+		return false;
+	}
+
+	uint32_t n_vars = args->ele_count / 2;
+	var_entry entries[n_vars];
+	var_scope scope = {
+			.parent = args->current,
+			.n_entries = 0,
+			.entries = entries
+	};
+
+	args->current = &scope;
+	op->var_idx = args->var_idx;
+	op->n_vars = n_vars;
+
+	for (uint32_t i = 0; i < n_vars; i++) {
+		uint32_t name_sz;
+		const uint8_t* name = msgpack_get_bin(&args->mp, &name_sz);
+
+		if (name == NULL) {
+			cf_warning(AS_EXP, "build_let - error %u failed to parse blob - var at %u",
+					AS_ERR_PARAMETER, i);
+			return false;
+		}
+
+		if (name_sz == 0) {
+			cf_warning(AS_EXP, "build_let - error %u variable name length is 0.",
+					AS_ERR_PARAMETER);
+			return false;
+		}
+
+		if (name[0] != '_' && isalpha(name[0]) == 0) {
+			cf_warning(AS_EXP, "build_let - error %u illegal variable name '%.*s' at %u - must begin with an alpha or underscore",
+					AS_ERR_PARAMETER, name_sz, name, i);
+			return false;
+		}
+
+		for (uint32_t j = 1; j < name_sz; j++) {
+			if (name[j] != '_' && isalnum(name[j]) == 0) {
+				cf_warning(AS_EXP, "build_let - error %u illegal variable name '%.*s' at %u - must contain only alpha, digits or underscore",
+						AS_ERR_PARAMETER, name_sz, name, i);
+				return false;
+			}
+		}
+
+		if (build_find_var_entry(args, name, name_sz) != NULL) {
+			cf_warning(AS_EXP, "build_let - error %u duplicate var name '%.*s' at %u",
+					AS_ERR_PARAMETER, name_sz, name, i);
+			return false;
+		}
+
+		scope.entries[i].name = name;
+		scope.entries[i].name_sz = name_sz;
+		scope.entries[i].idx = args->var_idx++;
+		scope.n_entries++;
+		scope.entries[i].r_type = TYPE_END;
+
+		if (! build_next(args)) {
+			return false;
+		}
+
+		scope.entries[i].r_type = args->entry->r_type;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	op->type = args->entry->r_type;
+
+	if (args->max_var_idx < args->var_idx) {
+		args->max_var_idx = args->var_idx;
+	}
+
+	args->current = scope.parent;
+	args->var_idx -= scope.n_entries;
 
 	return true;
 }
@@ -1400,25 +2430,33 @@ build_call(build_args* args)
 		return false;
 	}
 
-	switch (op->system_type & ~CALL_FLAG_MODIFY_LOCAL) {
+	if (args->entry->r_type == TYPE_NIL) {
+		return true;
+	}
+
+	switch (op->system_type & (uint32_t)~CALL_FLAG_MODIFY_LOCAL) {
 	case CALL_CDT:
-		if (args->entry->r_type != TYPE_LIST && args->entry->r_type != TYPE_MAP) {
-			cf_warning(AS_EXP, "build_call - error %u operand is not list or map",
-					AS_ERR_PARAMETER);
+		if (args->entry->r_type != TYPE_LIST &&
+				args->entry->r_type != TYPE_MAP) {
+			cf_warning(AS_EXP, "build_call - error %u arg %u (%s) is not list or map",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type));
 			return false;
 		}
 		break;
 	case CALL_HLL:
 		if (args->entry->r_type != TYPE_HLL) {
-			cf_warning(AS_EXP, "build_call - error %u operand is not hll",
-					AS_ERR_PARAMETER);
+			cf_warning(AS_EXP, "build_call - error %u arg %u (%s) is not hll",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type));
 			return false;
 		}
 		break;
 	case CALL_BITS:
 		if (args->entry->r_type != TYPE_BLOB) {
-			cf_warning(AS_EXP, "build_call - error %u operand is not blob",
-					AS_ERR_PARAMETER);
+			cf_warning(AS_EXP, "build_call - error %u arg %u (%s) is not blob",
+					AS_ERR_PARAMETER, args->entry->r_type,
+					result_type_to_str(args->entry->r_type));
 			return false;
 		}
 		break;
@@ -1429,12 +2467,10 @@ build_call(build_args* args)
 	}
 
 	if ((args->entry = build_get_entry(op->type)) == NULL) {
-		cf_warning(AS_EXP, "build_call - error %u invalid result_type %d",
-				AS_ERR_PARAMETER, op->type);
+		cf_warning(AS_EXP, "build_call - error %u invalid result_type %d (%s)",
+				AS_ERR_PARAMETER, op->type, result_type_to_str(op->type));
 		return false;
 	}
-
-	op->instr_end_ix = args->instr_ix;
 
 	return true;
 }
@@ -1447,13 +2483,32 @@ build_value_nil(build_args* args)
 	}
 
 	if (msgpack_sz(&args->mp) == 0) {
-		cf_warning(AS_EXP, "build_value_nil - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_value_nil - error %u failed to parse nil",
 				AS_ERR_PARAMETER);
 		return false;
 	}
 
 	return true;
 }
+
+static bool
+build_value_bool(build_args* args)
+{
+	op_value_bool* op = (op_value_bool*)args->mem;
+
+	if (! build_args_setup(args, "build_value_bool")) {
+		return false;
+	}
+
+	if (! msgpack_get_bool(&args->mp, &op->value)) {
+		cf_warning(AS_EXP, "build_value_bool - error %u failed to parse bool",
+				AS_ERR_PARAMETER);
+		return false;
+	}
+
+	return true;
+}
+
 
 static bool
 build_value_int(build_args* args)
@@ -1465,7 +2520,7 @@ build_value_int(build_args* args)
 	}
 
 	if (! msgpack_get_int64(&args->mp, &op->value)) {
-		cf_warning(AS_EXP, "build_value_int - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_value_int - error %u failed to parse integer",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -1483,7 +2538,7 @@ build_value_float(build_args* args)
 	}
 
 	if (! msgpack_get_double(&args->mp, &op->value)) {
-		cf_warning(AS_EXP, "build_value_float - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_value_float - error %u failed to parse float",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -1496,22 +2551,38 @@ build_value_blob(build_args* args)
 {
 	op_value_blob* op = (op_value_blob*)args->mem;
 
-	if (! build_args_setup(args, "build_value_str")) {
+	if (! build_args_setup(args, "build_value_blob")) {
 		return false;
 	}
 
 	op->value = msgpack_get_bin(&args->mp, &op->value_sz);
 
 	if (op->value == NULL) {
-		cf_warning(AS_EXP, "build_value_str - error %u invalid msgpack string",
+		cf_warning(AS_EXP, "build_value_blob - error %u failed to parse bin",
 				AS_ERR_PARAMETER);
 		return false;
 	}
 
 	cf_assert(op->value_sz != 0, AS_EXP, "unexpected");
 
-	op->value++;
+	as_bytes_type type = *op->value++;
 	op->value_sz--;
+
+	switch (type) {
+	case AS_BYTES_BLOB:
+		return true; // already set
+	case AS_BYTES_STRING:
+		op->base.code = VOP_VALUE_STR;
+		break;
+	case AS_BYTES_HLL:
+		op->base.code = VOP_VALUE_HLL;
+		break;
+	default:
+		cf_warning(AS_EXP, "unexpected blob type %u", type);
+		return false;
+	}
+
+	args->entry = &op_table[op->base.code];
 
 	return true;
 }
@@ -1534,7 +2605,7 @@ build_value_geo(build_args* args)
 	op->content_sz = (uint32_t)(args->mp.buf + args->mp.offset - op->contents);
 
 	if (json == NULL) {
-		cf_warning(AS_EXP, "build_value_geo - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_value_geo - error %u failed to parse string",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -1575,10 +2646,21 @@ build_value_msgpack(build_args* args)
 		return false;
 	}
 
+	msgpack_type type = msgpack_peek_type(&args->mp);
+
 	op->value = msgpack_get_ele(&args->mp, &op->value_sz);
 
 	if (op->value == NULL) {
-		cf_warning(AS_EXP, "build_value_msgpack - error %u invalid msgpack",
+		cf_warning(AS_EXP, "build_value_msgpack - error %u failed to parse element from type %u",
+				AS_ERR_PARAMETER, type);
+		return false;
+	}
+
+	if (type == MSGPACK_TYPE_MAP) {
+		args->entry = &op_table[VOP_VALUE_MAP];
+	}
+	else if (type == MSGPACK_TYPE_BYTES) {
+		cf_warning(AS_EXP, "build_value_msgpack - error %u unexpected msgpack blob",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -1685,6 +2767,67 @@ parse_op_call(op_call* op, build_args* args)
 	return true;
 }
 
+void
+build_set_expected_particle_type(build_args* args)
+{
+	switch (args->entry->r_type) {
+	case TYPE_NIL:
+		args->exp->expected_type = AS_PARTICLE_TYPE_NULL;
+		return;
+	case TYPE_TRILEAN:
+		args->exp->expected_type = AS_PARTICLE_TYPE_BOOL;
+		return;
+	case TYPE_INT:
+		args->exp->expected_type = AS_PARTICLE_TYPE_INTEGER;
+		return;
+	case TYPE_STR:
+		args->exp->expected_type = AS_PARTICLE_TYPE_STRING;
+		return;
+	case TYPE_LIST:
+		args->exp->expected_type = AS_PARTICLE_TYPE_LIST;
+		return;
+	case TYPE_MAP:
+		args->exp->expected_type = AS_PARTICLE_TYPE_MAP;
+		return;
+	case TYPE_BLOB:
+		args->exp->expected_type = AS_PARTICLE_TYPE_BLOB;
+		return;
+	case TYPE_FLOAT:
+		args->exp->expected_type = AS_PARTICLE_TYPE_FLOAT;
+		return;
+	case TYPE_GEOJSON:
+		args->exp->expected_type = AS_PARTICLE_TYPE_GEOJSON;
+		return;
+	case TYPE_HLL:
+		args->exp->expected_type = AS_PARTICLE_TYPE_HLL;
+		return;
+	case TYPE_END:
+	default:
+		cf_crash(AS_EXP, "build_set_expected_particle_type - unexpected result_type %u",
+				args->entry->r_type);
+	}
+}
+
+static bool
+is_old_predexp(const uint8_t* buf)
+{
+	// TODO - Remove in "six months".
+	return buf[0] == 0;
+}
+
+static as_exp*
+check_filter_exp(as_exp* exp)
+{
+	if ((as_particle_type)exp->expected_type != AS_PARTICLE_TYPE_BOOL) {
+		cf_warning(AS_EXP, "check_filter_exp - filters must return type %u (bool) found %u",
+				AS_PARTICLE_TYPE_BOOL, exp->expected_type);
+		as_exp_destroy(exp);
+		return NULL;
+	}
+
+	return exp;;
+}
+
 
 //==========================================================
 // Local helpers - runtime.
@@ -1693,13 +2836,19 @@ parse_op_call(op_call* op, build_args* args)
 static as_exp_trilean
 match_internal(const as_exp* predexp, const as_exp_ctx* ctx)
 {
-	runtime rt = { .ctx = ctx, .instr_ptr = predexp->mem };
+	rt_value vars[predexp->max_var_count];
 	rt_value ret_val;
+
+	runtime rt = {
+			.ctx = ctx,
+			.instr_ptr = predexp->mem,
+			.vars = vars
+	};
 
 	rt_eval(&rt, &ret_val);
 
 	if (ret_val.type != RT_TRILEAN) {
-		rt_value_destroy(&ret_val);
+		rt_value_destroy(&ret_val, NULL);
 		return AS_EXP_FALSE;
 	}
 
@@ -1710,7 +2859,7 @@ match_internal(const as_exp* predexp, const as_exp_ctx* ctx)
 	return ret_val.r_trilean;
 }
 
-static void
+static bool
 rt_eval(runtime* rt, rt_value* ret_val)
 {
 	op_base_mem* ob = (op_base_mem*)rt->instr_ptr;
@@ -1718,11 +2867,31 @@ rt_eval(runtime* rt, rt_value* ret_val)
 
 	cf_debug(AS_EXP, "eval %s", entry->name);
 
+	bool alloc_ns = rt->alloc_ns;
+
+	rt->alloc_ns = rt->alloc_ns && entry->alloc_ns;
 	rt->op_ix++;
 	rt->instr_ptr += entry->size;
+	*ret_val = (rt_value){ 0 };
 	entry->eval_cb(rt, ob, ret_val);
 
 	cf_debug(AS_EXP, "eval %s result_type %u", entry->name, ret_val->type);
+
+	bool ret = rt_value_is_unknown(ret_val);
+
+	rt->alloc_ns = alloc_ns;
+
+	return ret;
+}
+
+static void
+eval_unknown(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)rt;
+	(void)ob;
+
+	ret_val->type = RT_TRILEAN;
+	ret_val->r_trilean = AS_EXP_UNK;
 }
 
 static void
@@ -1731,28 +2900,27 @@ eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	rt_value arg0;
 	rt_value arg1;
 
-	rt_eval(rt, &arg0);
-	rt_eval(rt, &arg1);
+	if (rt_eval(rt, &arg0)) {
+		*ret_val = arg0;
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	if (rt_eval(rt, &arg1)) {
+		rt_value_destroy(&arg0, NULL);
+		*ret_val = arg1;
+		return;
+	}
 
 	rt_value v0;
 	rt_value v1;
 
-	rt_value_cmp_translate(&v0, &arg0);
-	rt_value_cmp_translate(&v1, &arg1);
+	rt_value_translate(&v0, &arg0);
+	rt_value_translate(&v1, &arg1);
 
 	cf_debug(AS_EXP, "cmp type %u to %u", v0.type, v1.type);
 
-	if (rt_value_is_unknown(&v0) || rt_value_is_unknown(&v1)) {
-		rt_value_destroy(&arg0);
-		rt_value_destroy(&arg1);
-		rt_value_destroy(&v0);
-		rt_value_destroy(&v1);
-		ret_val->type = RT_TRILEAN;
-		ret_val->r_trilean = AS_EXP_UNK;
-		return;
-	}
-
-	cf_assert(v0.type == v1.type, AS_EXP, "unexpected");
+	cf_assert(v0.type == v1.type, AS_EXP, "unexpected %u %u", v0.type, v1.type);
 	ret_val->type = RT_TRILEAN;
 
 	switch (v0.type) {
@@ -1791,18 +2959,16 @@ eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		cf_crash(AS_EXP, "unexpected type %u", v0.type);
 	}
 
-	rt_value_destroy(&arg0);
-	rt_value_destroy(&arg1);
-	rt_value_destroy(&v0);
-	rt_value_destroy(&v1);
+	rt_value_destroy(&arg0, NULL);
+	rt_value_destroy(&arg1, NULL);
+	rt_value_destroy(&v0, NULL);
+	rt_value_destroy(&v1, NULL);
 }
 
 static void
 eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	rt_eval(rt, ret_val);
-
-	if (rt_value_is_unknown(ret_val)) {
+	if (rt_eval(rt, ret_val)) {
 		return;
 	}
 
@@ -1810,7 +2976,7 @@ eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	const uint8_t* str = rt_value_get_str(ret_val, &str_sz);
 
 	if (str == NULL) {
-		rt_value_destroy(ret_val);
+		rt_value_destroy(ret_val, NULL);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -1822,7 +2988,7 @@ eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	cf_free(tmp);
 
-	rt_value_destroy(ret_val);
+	rt_value_destroy(ret_val, NULL);
 	ret_val->type = RT_TRILEAN;
 	ret_val->r_trilean = (rv == 0) ? AS_EXP_TRUE : AS_EXP_FALSE;
 }
@@ -1830,22 +2996,20 @@ eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	op_logical* op = (op_logical*)ob;
 	as_exp_trilean ret = AS_EXP_TRUE;
 
-	while (rt->op_ix < op->instr_end_ix) {
-		rt_eval(rt, ret_val);
-
-		cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
-
-		if (rt_value_is_unknown(ret_val)) {
+	while (rt->op_ix < ob->instr_end_ix) {
+		if (rt_eval(rt, ret_val)) {
 			ret = AS_EXP_UNK;
 			continue;
 		}
 
+		cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected - type %u",
+				ret_val->type);
+
 		if (ret_val->r_trilean == AS_EXP_FALSE) {
 			ret = AS_EXP_FALSE;
-			rt_skip(rt, op->instr_end_ix);
+			rt_skip(rt, ob->instr_end_ix);
 			break;
 		}
 	}
@@ -1857,22 +3021,19 @@ eval_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	op_logical* op = (op_logical*)ob;
 	as_exp_trilean ret = AS_EXP_FALSE;
 
-	while (rt->op_ix < op->instr_end_ix) {
-		rt_eval(rt, ret_val);
-
-		cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
-
-		if (rt_value_is_unknown(ret_val)) {
+	while (rt->op_ix < ob->instr_end_ix) {
+		if (rt_eval(rt, ret_val)) {
 			ret = AS_EXP_UNK;
 			continue;
 		}
 
+		cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
+
 		if (ret_val->r_trilean == AS_EXP_TRUE) {
 			ret = AS_EXP_TRUE;
-			rt_skip(rt, op->instr_end_ix);
+			rt_skip(rt, ob->instr_end_ix);
 			break;
 		}
 	}
@@ -1884,16 +3045,575 @@ eval_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
-	rt_eval(rt, ret_val);
+	(void)ob;
 
-	cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
-
-	if (rt_value_is_unknown(ret_val)) {
+	if (rt_eval(rt, ret_val)) {
 		return;
 	}
 
+	cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
+
 	ret_val->r_trilean = (ret_val->r_trilean == AS_EXP_TRUE) ?
 			AS_EXP_FALSE : AS_EXP_TRUE;
+}
+
+static void
+eval_exclusive(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	// Logical xor is implemented to mean that exactly one arg is true.
+	as_exp_trilean ret = AS_EXP_FALSE;
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		if (rt_eval(rt, ret_val)) {
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
+
+		if (ret_val->r_trilean == AS_EXP_TRUE) {
+			if (ret == AS_EXP_TRUE) {
+				ret_val->r_trilean = AS_EXP_FALSE;
+				rt_skip(rt, ob->instr_end_ix);
+				return;
+			}
+
+			ret = AS_EXP_TRUE;
+			continue;
+		}
+	}
+
+	ret_val->r_trilean = ret;
+}
+
+static void
+eval_add(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	bool is_float = ret_val->type == RT_FLOAT;
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		if (is_float) {
+			ret_val->r_float += arg.r_float;
+		}
+		else {
+			ret_val->r_int += arg.r_int;
+		}
+	}
+}
+
+static void
+eval_sub(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	bool is_float = ret_val->type == RT_FLOAT;
+
+	if (rt->op_ix == ob->instr_end_ix) {
+		if (is_float) {
+			ret_val->r_float = 0.0 - ret_val->r_float;
+		}
+		else {
+			ret_val->r_int = 0 - ret_val->r_int;
+		}
+
+		return;
+	}
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		if (is_float) {
+			ret_val->r_float -= arg.r_float;
+		}
+		else {
+			ret_val->r_int -= arg.r_int ;
+		}
+	}
+}
+
+static void
+eval_mul(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	bool is_float = ret_val->type == RT_FLOAT;
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		if (is_float) {
+			ret_val->r_float *= arg.r_float;
+		}
+		else {
+			ret_val->r_int *= arg.r_int;
+		}
+	}
+}
+
+static void
+eval_div(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	bool is_float = ret_val->type == RT_FLOAT;
+
+	uint32_t n_args = 1;
+	double dproduct = 1.0;
+	int64_t iproduct = 1;
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		n_args++;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		if (is_float) {
+			dproduct *= arg.r_float;
+		}
+		else {
+			iproduct *= arg.r_int;
+		}
+	}
+
+	if (is_float) {
+		if (n_args == 1) {
+			dproduct = ret_val->r_float;
+			ret_val->r_float = 1.0;
+		}
+
+		ret_val->r_float /= dproduct;
+	}
+	else {
+		if (n_args == 1) {
+			iproduct = ret_val->r_int;
+			ret_val->r_int = 1;
+		}
+
+		if (iproduct == 0) {
+			cf_warning(AS_EXP, "eval_div - integer division by zero");
+			ret_val->type = RT_TRILEAN;
+			ret_val->r_trilean = AS_EXP_UNK;
+			return;
+		}
+
+		ret_val->r_int /= iproduct;
+	}
+}
+
+static void
+eval_pow(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value arg1;
+
+	if (rt_eval(rt, &arg1)) {
+		*ret_val = arg1;
+		return;
+	}
+
+	ret_val->r_float = pow(ret_val->r_float, arg1.r_float);
+}
+
+static void
+eval_log(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value arg1;
+
+	if (rt_eval(rt, &arg1)) {
+		*ret_val = arg1;
+		return;
+	}
+
+	ret_val->r_float = log(ret_val->r_float) / log(arg1.r_float);
+}
+
+static void
+eval_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value arg1;
+
+	if (rt_eval(rt, &arg1) || arg1.r_int == 0) {
+		*ret_val = arg1;
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = AS_EXP_UNK;
+		return;
+	}
+
+	ret_val->type = RT_INT;
+	ret_val->r_int = ret_val->r_int % arg1.r_int;
+}
+
+static void
+eval_floor(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	if (rt_eval(rt, ret_val)) {
+		return;
+	}
+
+	ret_val->r_float = floor(ret_val->r_float);
+}
+
+static void
+eval_abs(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	if (rt_eval(rt, ret_val)) {
+		return;
+	}
+
+	if (ret_val->type == RT_FLOAT) {
+		ret_val->r_float = fabs(ret_val->r_float);
+	}
+	else {
+		ret_val->r_int = labs(ret_val->r_int);
+	}
+}
+
+static void
+eval_ceil(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	if (rt_eval(rt, ret_val)) {
+		return;
+	}
+
+	ret_val->r_float = ceil(ret_val->r_float);
+}
+
+static void
+eval_to_int(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	if (rt_eval(rt, ret_val)) {
+		return;
+	}
+
+	ret_val->r_int = (int64_t)ret_val->r_float;
+	ret_val->type = RT_INT;
+}
+
+static void
+eval_to_float(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	if (rt_eval(rt, ret_val)) {
+		return;
+	}
+
+	ret_val->r_float = (double)ret_val->r_int;
+	ret_val->type = RT_FLOAT;
+}
+
+static void
+eval_int_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		ret_val->r_int &= arg.r_int;
+	}
+}
+
+static void
+eval_int_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		ret_val->r_int |= arg.r_int;
+	}
+}
+
+static void
+eval_int_xor(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		ret_val->r_int ^= arg.r_int;
+	}
+}
+
+static void
+eval_int_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	if (rt_eval(rt, ret_val)) {
+		return;
+	}
+
+	ret_val->r_int = ~ret_val->r_int;
+}
+
+static void
+eval_int_lshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value shift;
+
+	if (rt_eval(rt, &shift)) {
+		*ret_val = shift;
+		return;
+	}
+
+	ret_val->r_int <<= shift.r_int;
+}
+
+static void
+eval_int_rshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value shift;
+
+	if (rt_eval(rt, &shift)) {
+		*ret_val = shift;
+		return;
+	}
+
+	ret_val->r_int = (int64_t)(((uint64_t)ret_val->r_int) >> shift.r_int);
+}
+
+static void
+eval_int_arshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value shift;
+
+	if (rt_eval(rt, &shift)) {
+		*ret_val = shift;
+		return;
+	}
+
+	ret_val->r_int >>= shift.r_int;
+}
+
+static void
+eval_int_count(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	if (rt_eval(rt, ret_val)) {
+		return;
+	}
+
+	ret_val->r_int = (int64_t)cf_bit_count64((uint64_t)(ret_val->r_int));
+}
+
+static void
+eval_int_lscan(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value is_set_val;
+
+	if (rt_eval(rt, &is_set_val)) {
+		*ret_val = is_set_val;
+		return;
+	}
+
+	if (is_set_val.r_trilean == AS_EXP_FALSE) {
+		ret_val->r_int = ~ret_val->r_int;
+	}
+
+	ret_val->r_int = (int64_t)cf_msb64((uint64_t)(ret_val->r_int));
+
+	if (ret_val->r_int == 64) {
+		ret_val->r_int = -1;
+	}
+}
+
+static void
+eval_int_rscan(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	rt_value is_set_val;
+
+	if (rt_eval(rt, &is_set_val)) {
+		*ret_val = is_set_val;
+		return;
+	}
+
+	if (is_set_val.r_trilean == AS_EXP_FALSE) {
+		ret_val->r_int = ~ret_val->r_int;
+	}
+
+	ret_val->r_int = 63 - (int64_t)cf_lsb64((uint64_t)(ret_val->r_int));
+}
+
+void
+eval_min(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	bool is_float = ret_val->type == RT_FLOAT;
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		if (is_float) {
+			if (ret_val->r_float > arg.r_float) {
+				ret_val->r_float = arg.r_float;
+			}
+		}
+		else {
+			if (ret_val->r_int > arg.r_int) {
+				ret_val->r_int = arg.r_int;
+			}
+		}
+	}
+}
+
+static void
+eval_max(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	if (rt_eval(rt, ret_val)) {
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	bool is_float = ret_val->type == RT_FLOAT;
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		rt_value arg;
+
+		if (rt_eval(rt, &arg)) {
+			*ret_val = arg;
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		if (is_float) {
+			if (ret_val->r_float < arg.r_float) {
+				ret_val->r_float = arg.r_float;
+			}
+		}
+		else {
+			if (ret_val->r_int < arg.r_int) {
+				ret_val->r_int = arg.r_int;
+			}
+		}
+	}
 }
 
 static void
@@ -1903,12 +3623,14 @@ eval_meta_digest_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	uint32_t val = *(uint32_t*)&rt->ctx->r->keyd.digest[16];
 
 	ret_val->type = RT_INT;
-	ret_val->r_int = val % op->mod;
+	ret_val->r_int = (int64_t)val % op->mod;
 }
 
 static void
 eval_meta_device_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	ret_val->type = RT_INT;
 	ret_val->r_int =
 			(int64_t)as_storage_record_device_size(rt->ctx->ns, rt->ctx->r);
@@ -1917,6 +3639,7 @@ eval_meta_device_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_meta_last_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
 	ret_val->type = RT_INT;
 	ret_val->r_int =
 			(int64_t)cf_utc_ns_from_clepoch_ms(rt->ctx->r->last_update_time);
@@ -1925,6 +3648,8 @@ eval_meta_last_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_meta_since_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	uint64_t now = cf_clepoch_milliseconds();
 	uint64_t lut = rt->ctx->r->last_update_time;
 
@@ -1935,6 +3660,8 @@ eval_meta_since_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_meta_void_time(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	ret_val->type = RT_INT;
 	ret_val->r_int = (rt->ctx->r->void_time == 0) ?
 			-1 : (int64_t)cf_utc_ns_from_clepoch_sec(rt->ctx->r->void_time);
@@ -1943,6 +3670,8 @@ eval_meta_void_time(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_meta_ttl(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	ret_val->type = RT_INT;
 	ret_val->r_int = (int64_t)(int32_t)
 			cf_server_void_time_to_ttl(rt->ctx->r->void_time);
@@ -1951,6 +3680,8 @@ eval_meta_ttl(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_meta_set_name(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	uint16_t set_id = as_index_get_set_id(rt->ctx->r);
 
 	if (set_id == 0) {
@@ -1964,12 +3695,14 @@ eval_meta_set_name(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	ret_val->type = RT_STR;
 	ret_val->r_bytes.contents = (const uint8_t*)set->name;
-	ret_val->r_bytes.sz = strlen(set->name);
+	ret_val->r_bytes.sz = (uint32_t)strlen(set->name);
 }
 
 static void
 eval_meta_key_exists(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	ret_val->type = RT_TRILEAN;
 	ret_val->r_trilean = (rt->ctx->r->key_stored == 0 ?
 			AS_EXP_FALSE : AS_EXP_TRUE);
@@ -1978,6 +3711,8 @@ eval_meta_key_exists(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	ret_val->type = RT_TRILEAN;
 	ret_val->r_trilean = (as_record_is_live(rt->ctx->r) ?
 			AS_EXP_FALSE : AS_EXP_TRUE);
@@ -1986,6 +3721,8 @@ eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)ob;
+
 	ret_val->type = RT_INT;
 	ret_val->r_int =
 			(int64_t)as_storage_record_mem_size(rt->ctx->ns, rt->ctx->r);
@@ -2054,7 +3791,13 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	op_bin* op = (op_bin*)ob;
-	as_bin* bin = get_live_bin(rt->ctx->rd, op->name, op->name_sz);
+	as_bin* bin;
+
+	if (! get_live_bin(rt->ctx->rd, op->name, op->name_sz, &bin)) {
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = AS_EXP_UNK;
+		return;
+	}
 
 	if (bin == NULL) {
 		cf_debug(AS_EXP, "eval_bin - bin (%.*s) not found",
@@ -2083,12 +3826,16 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		ret_val->type = RT_FLOAT;
 		ret_val->r_float = as_bin_particle_float_value(bin);
 		break;
-	case AS_PARTICLE_TYPE_GEOJSON:
+	case AS_PARTICLE_TYPE_BOOL:
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = as_bin_particle_bool_value(bin);
+		break;
 	case AS_PARTICLE_TYPE_STRING:
 	case AS_PARTICLE_TYPE_BLOB:
 	case AS_PARTICLE_TYPE_HLL:
 	case AS_PARTICLE_TYPE_MAP:
 	case AS_PARTICLE_TYPE_LIST:
+	case AS_PARTICLE_TYPE_GEOJSON:
 		ret_val->type = RT_BIN_PTR;
 		ret_val->r_bin_p = bin;
 		break;
@@ -2110,11 +3857,73 @@ eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		return;
 	}
 
-	as_bin* b = get_live_bin(rt->ctx->rd, op->name, op->name_sz);
+	as_bin* b;
+
+	if (! get_live_bin(rt->ctx->rd, op->name, op->name_sz, &b)) {
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = AS_EXP_UNK;
+		return;
+	}
 
 	ret_val->type = RT_INT;
 	ret_val->r_int = (b == NULL) ?
 			AS_PARTICLE_TYPE_NULL : (uint64_t)as_bin_get_particle_type(b);
+}
+
+static void
+eval_cond(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	op_cond* op = (op_cond*)ob;
+
+	for (uint32_t i = 0; i < op->case_count; i++) {
+		if (rt_eval(rt, ret_val)) {
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected type %d",
+				ret_val->type);
+
+		op_base_mem* op_case = (op_base_mem*)rt->instr_ptr;
+
+		cf_assert(op_case->code == VOP_COND_CASE, AS_EXP, "unexpected");
+
+		if (ret_val->r_trilean == AS_EXP_TRUE) {
+			rt_skip(rt, rt->op_ix + 1);
+			rt_eval(rt, ret_val);
+			rt_skip(rt, ob->instr_end_ix);
+			return;
+		}
+
+		rt_skip(rt, op_case->instr_end_ix);
+	}
+
+	rt_eval(rt, ret_val);
+}
+
+static void
+eval_var(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	op_var* op = (op_var*)ob;
+
+	*ret_val = rt->vars[op->idx];
+	ret_val->do_not_destroy = 1;
+}
+
+static void
+eval_let(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	op_let* op = (op_let*)ob;
+
+	for (uint32_t i = 0; i < op->n_vars; i++) {
+		rt_eval(rt, &rt->vars[op->var_idx + i]);
+	}
+
+	rt_eval(rt, ret_val);
+
+	for (uint32_t i = 0; i < op->n_vars; i++) {
+		rt_value_destroy(&rt->vars[op->var_idx + i], rt);
+	}
 }
 
 static void
@@ -2169,10 +3978,9 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 			if (rt_value_is_unknown(from) ||
 					! rt_value_bin_translate(&to, from)) {
-				cf_debug(AS_EXP, "CALL UNK");
 				ret_val->type = RT_TRILEAN;
 				ret_val->r_trilean = AS_EXP_UNK;
-				rt_skip(rt, op->instr_end_ix);
+				rt_skip(rt, ob->instr_end_ix);
 				call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
 						bin_cleanup_ix);
 				return;
@@ -2195,7 +4003,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 						(uint32_t)(pk.buffer + pk.offset - vecs[vec_ix].buf);
 				break;
 			case RT_FLOAT:
-				as_pack_int64(&pk, to.r_float);
+				as_pack_double(&pk, to.r_float);
 				vecs[vec_ix].buf_sz =
 						(uint32_t)(pk.buffer + pk.offset - vecs[vec_ix].buf);
 				break;
@@ -2257,12 +4065,58 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			b = bin_arg.r_bin_p;
 		}
 		break;
+	case RT_NIL:
+		cf_debug(AS_EXP, "NIL: create empty bin");
+		as_bin_set_empty(&bin_arg.r_bin);
+		b = &bin_arg.r_bin;
+		old = *b;
+		break;
 	case RT_BIN: // from call
 		cf_debug(AS_EXP, "RT_BIN: %p(%p)", &bin_arg.r_bin,
 				bin_arg.r_bin.particle);
 		b = &bin_arg.r_bin;
 		old = *b;
 		break;
+	case RT_BLOB:
+	case RT_HLL: { // from client
+		rt_value temp = bin_arg;
+
+		b = &bin_arg.r_bin;
+		bin_arg.type = RT_BIN;
+		bin_arg.r_bin.particle = rt_alloc_mem(rt, (size_t)temp.r_bytes.sz +
+				sizeof(cdt_mem));
+
+		cdt_mem* p_cdt_mem = (cdt_mem*)bin_arg.r_bin.particle;
+
+		p_cdt_mem->type = temp.type == RT_BLOB ?
+				AS_PARTICLE_TYPE_BLOB : AS_PARTICLE_TYPE_HLL;
+		as_bin_state_set_from_type(&bin_arg.r_bin, p_cdt_mem->type);
+		p_cdt_mem->sz = temp.r_bytes.sz;
+		memcpy(p_cdt_mem->data, temp.r_bytes.contents, p_cdt_mem->sz);
+
+		old = *b;
+		rt_value_destroy(&temp, NULL);
+		break;
+	}
+	case RT_MSGPACK: {
+		rt_value temp = bin_arg;
+
+		b = &bin_arg.r_bin;
+		bin_arg.type = RT_BIN;
+
+		if (! msgpack_to_bin(rt, &bin_arg.r_bin, &temp)) {
+			ret_val->type = RT_TRILEAN;
+			ret_val->r_trilean = AS_EXP_UNK;
+			call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
+					bin_cleanup_ix);
+			return;
+		}
+
+		old = *b;
+		rt_value_destroy(&temp, NULL);
+
+		break;
+	}
 	default:
 		cf_debug(AS_EXP, "CALL UNK");
 		ret_val->type = RT_TRILEAN;
@@ -2275,13 +4129,13 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	as_bin rb = { 0 };
 	int ret = AS_OK;
 
-	switch (op->system_type & ~CALL_FLAG_MODIFY_LOCAL) {
+	switch (op->system_type & (uint32_t)~CALL_FLAG_MODIFY_LOCAL) {
 	case CALL_CDT:
 		if (is_modify_local) {
 			as_particle* saved = b->particle; // for detail only
 			cf_debug(AS_EXP, "call_cdt_modify(b=%p(%p) rb=%p(%p))",
 					b, b->particle, &rb, rb.particle);
-			ret = as_bin_cdt_modify_exp(b, &mv, &rb);
+			ret = as_bin_cdt_modify_exp(b, &mv, &rb, rt->alloc_ns);
 			cf_debug(AS_EXP, " -> %s(b=%p(%p) new rb=%p(%p))",
 					b->particle == saved ? "no-op" : "new",
 							b, b->particle, &rb, rb.particle);
@@ -2290,25 +4144,25 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			cf_debug(AS_EXP, "as_bin_call_cdt_read(b=%p(%p) rb=%p(%p) type %d",
 					b, b->particle, &rb, rb.particle,
 					as_bin_get_particle_type(&rb));
-			ret = as_bin_cdt_read_exp(b, &mv, &rb);
+			ret = as_bin_cdt_read_exp(b, &mv, &rb, rt->alloc_ns);
 			cf_debug(AS_EXP, " -> new rb=%p(%p) type %d", &rb, rb.particle,
 					as_bin_get_particle_type(&rb));
 		}
 		break;
 	case CALL_BITS:
 		if (is_modify_local) {
-			ret = as_bin_bits_modify_exp(b, &mv);
+			ret = as_bin_bits_modify_exp(b, &mv, rt->alloc_ns);
 		}
 		else {
-			ret = as_bin_bits_read_exp(b, &mv, &rb);
+			ret = as_bin_bits_read_exp(b, &mv, &rb, rt->alloc_ns);
 		}
 		break;
 	case CALL_HLL:
 		if (is_modify_local) {
-			ret = as_bin_hll_modify_exp(b, &mv, &rb);
+			ret = as_bin_hll_modify_exp(b, &mv, &rb, rt->alloc_ns);
 		}
 		else {
-			ret = as_bin_hll_read_exp(b, &mv, &rb);
+			ret = as_bin_hll_read_exp(b, &mv, &rb, rt->alloc_ns);
 		}
 		break;
 	default:
@@ -2318,7 +4172,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup, bin_cleanup_ix);
 
 	if (ret != AS_OK) {
-		rt_value_destroy(&bin_arg);
+		rt_value_destroy(&bin_arg, rt);
 		cf_debug(AS_EXP, "CALL UNK ret %d", ret);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
@@ -2337,7 +4191,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		as_bin_particle_destroy(&rb);
 	}
 	else {
-		rt_value_destroy(&bin_arg);
+		rt_value_destroy(&bin_arg, rt);
 		b = &rb;
 	}
 
@@ -2386,6 +4240,12 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		cf_debug(AS_EXP, "bin destroy5 %p(%p)", b, b->particle);
 		as_bin_particle_destroy(b);
 		break;
+	case AS_PARTICLE_TYPE_BOOL:
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = as_bin_particle_bool_value(b);
+		cf_debug(AS_EXP, "bin destroy6 %p(%p)", b, b->particle);
+		as_bin_particle_destroy(b);
+		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
 	case AS_PARTICLE_TYPE_STRING:
 	case AS_PARTICLE_TYPE_BLOB:
@@ -2403,9 +4263,16 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 static void
 eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
+	(void)rt;
+
 	switch (ob->code) {
 	case VOP_VALUE_NIL:
 		ret_val->type = RT_NIL;
+		break;
+	case VOP_VALUE_BOOL:
+		ret_val->type = RT_TRILEAN;
+		ret_val->r_trilean = ((op_value_bool*)ob)->value ?
+				AS_EXP_TRUE : AS_EXP_FALSE;
 		break;
 	case VOP_VALUE_INT:
 		ret_val->type = RT_INT;
@@ -2429,6 +4296,11 @@ eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		ret_val->r_bytes.contents = ((op_value_blob*)ob)->value;
 		ret_val->r_bytes.sz = ((op_value_blob*)ob)->value_sz;
 		break;
+	case VOP_VALUE_HLL:
+		ret_val->type = RT_HLL;
+		ret_val->r_bytes.contents = ((op_value_blob*)ob)->value;
+		ret_val->r_bytes.sz = ((op_value_blob*)ob)->value_sz;
+		break;
 	case VOP_VALUE_LIST:
 	case VOP_VALUE_MSGPACK:
 		ret_val->type = RT_MSGPACK;
@@ -2446,10 +4318,41 @@ eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 //
 
 static void
-json_to_rt_geo(const uint8_t* json, uint32_t jsonsz, rt_value* val)
+rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from)
+{
+	as_bin b = *from->r_bin_p;
+	uint8_t type = as_bin_get_particle_type(&b);
+
+	switch (type) {
+	case AS_PARTICLE_TYPE_INTEGER:
+	case AS_PARTICLE_TYPE_FLOAT:
+		*rb = b;
+		break;
+	case AS_PARTICLE_TYPE_STRING:
+	case AS_PARTICLE_TYPE_BLOB:
+	case AS_PARTICLE_TYPE_HLL:
+	case AS_PARTICLE_TYPE_MAP:
+	case AS_PARTICLE_TYPE_LIST:
+	case AS_PARTICLE_TYPE_GEOJSON:
+		*rb = b;
+
+		uint32_t sz = ((cdt_mem*)b.particle)->sz;
+
+		rb->particle = rt_alloc_mem(rt, sz);
+		memcpy(rb->particle, b.particle, sz);
+		break;
+	default:
+		cf_crash(AS_EXP, "unexpected type %u", type);
+	}
+}
+
+static void
+json_to_rt_geo(const uint8_t* json, size_t jsonsz, rt_value* val)
 {
 	uint64_t cellid;
 	geo_region_t region;
+
+	*val = (rt_value){ 0 };
 
 	if (! geo_parse(NULL, (const char*)json, jsonsz, &cellid, &region)) {
 		val->type = RT_TRILEAN;
@@ -2486,6 +4389,9 @@ bin_is_type(const as_bin* b, result_type type)
 	switch (type) {
 	case TYPE_NIL:
 		expected = AS_PARTICLE_TYPE_NULL;
+		break;
+	case TYPE_TRILEAN:
+		expected = AS_PARTICLE_TYPE_BOOL;
 		break;
 	case TYPE_INT:
 		expected = AS_PARTICLE_TYPE_INTEGER;
@@ -2531,11 +4437,13 @@ rt_skip(runtime* rt, uint32_t instr_end_ix)
 }
 
 static void
-rt_value_cmp_translate(rt_value* to, const rt_value* from)
+rt_value_translate(rt_value* to, const rt_value* from)
 {
 	cf_debug(AS_EXP, "cmp_translate %u", from->type);
 
 	const as_bin* bin;
+
+	*to = (rt_value){ 0 };
 
 	switch (from->type) {
 	case RT_BIN:
@@ -2568,7 +4476,6 @@ rt_value_cmp_translate(rt_value* to, const rt_value* from)
 	case AS_PARTICLE_TYPE_STRING: {
 		char* ptr;
 
-		memset(&to->r_bytes, 0, sizeof(to->r_bytes)); // for GCC warning
 		to->type = (type == AS_PARTICLE_TYPE_BLOB ? RT_BLOB : RT_STR);
 		to->r_bytes.sz = as_bin_particle_string_ptr(bin, &ptr);
 		to->r_bytes.contents = (uint8_t*)ptr;
@@ -2597,15 +4504,29 @@ rt_value_cmp_translate(rt_value* to, const rt_value* from)
 }
 
 static void
-rt_value_destroy(rt_value* val)
+rt_value_destroy(rt_value* val, runtime* rt)
 {
+	if (val == NULL) {
+		return;
+	}
+
+	if (val->do_not_destroy != 0) {
+		return;
+	}
+
 	if (val->type == RT_GEO_COMPILED && val->r_geo.type == GEO_REGION_NEED_FREE) {
 		geo_region_destroy(val->r_geo.region);
 	}
-	else if (val->type == RT_BIN) {
+	else if (val->type == RT_BIN && ! as_bin_is_unused(&val->r_bin)) {
 		cf_debug(AS_EXP, "bin destroyRT %p(%p)", &val->r_bin,
 				val->r_bin.particle);
-		as_bin_particle_destroy(&val->r_bin);
+
+		if (rt) {
+			rt_free_mem(rt, val->r_bin.particle);
+		}
+		else {
+			as_bin_particle_destroy(&val->r_bin);
+		}
 	}
 }
 
@@ -2625,19 +4546,24 @@ rt_value_get_geo(rt_value* val, geo_data* result)
 	}
 }
 
-static as_bin*
-get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len)
+static bool
+get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
 {
 	if (rd->ns->single_bin) {
 		if (len != 0) {
-			return NULL;
+			cf_warning(AS_EXP, "get_live_bin - illegal bin name (%.*s) for single-bin",
+					(int)len, name);
+			return false;
 		}
 	}
 	else if (len == 0) {
-		return NULL;
+		cf_warning(AS_EXP, "get_live_bin - illegal zero lenght bin name for multi-bin");
+		return false;
 	}
 
-	return as_bin_get_live_w_len(rd, name, len);
+	*p_bin = as_bin_get_live_w_len(rd, name, len);
+
+	return true;
 }
 
 
@@ -2861,7 +4787,7 @@ pack_typed_str(as_packer* pk, const uint8_t* buf, uint32_t sz, uint8_t type)
 	else if (sz < (1 << 16)) {
 		pk->offset += 3;
 		*ptr++ = 0xda;
-		*(uint16_t*)ptr = cf_swap_to_be16(sz);
+		*(uint16_t*)ptr = cf_swap_to_be16((uint16_t)sz);
 	}
 	else {
 		pk->offset += 5;
@@ -2892,6 +4818,8 @@ rt_value_bin_translate(rt_value* to, const rt_value* from)
 
 	uint8_t type = as_bin_get_particle_type(&b);
 
+	*to = (rt_value){ 0 };
+
 	switch (type) {
 	case AS_PARTICLE_TYPE_INTEGER:
 		to->type = RT_INT;
@@ -2905,7 +4833,7 @@ rt_value_bin_translate(rt_value* to, const rt_value* from)
 	case AS_PARTICLE_TYPE_BLOB:
 	case AS_PARTICLE_TYPE_HLL:
 	case AS_PARTICLE_TYPE_GEOJSON:
-		to->type = type;
+		to->type = type; // runtime_type matches particle type for these types
 		to->r_bytes.sz = as_bin_particle_string_ptr(&b,
 				(char**)&to->r_bytes.contents);
 		break;
@@ -2927,6 +4855,63 @@ rt_value_bin_translate(rt_value* to, const rt_value* from)
 	return true;
 }
 
+static void*
+rt_alloc_mem(runtime* rt, size_t sz)
+{
+	if (rt->ll_buf != NULL) {
+		uint8_t *ptr;
+
+		cf_ll_buf_reserve(rt->ll_buf, sz, &ptr);
+
+		return ptr;
+	}
+
+	return rt->alloc_ns ? cf_malloc_ns(sz) : cf_malloc(sz);
+}
+
+static void
+rt_free_mem(runtime*rt, void* ptr)
+{
+	if (rt->ll_buf) {
+		return;
+	}
+
+	cf_free(ptr);
+}
+
+static bool
+msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from)
+{
+	msgpack_type type = msgpack_buf_peek_type(from->r_bytes.contents,
+			from->r_bytes.sz);
+
+	to->particle = rt_alloc_mem(rt, from->r_bytes.sz + sizeof(cdt_mem));
+
+	cf_debug(AS_EXP, "RT_MSGPACK/RT_BLOB: %p(%p)", to, to->particle);
+
+	cdt_mem* p_cdt_mem = (cdt_mem*)to->particle;
+
+	switch (type) {
+	case MSGPACK_TYPE_LIST:
+		p_cdt_mem->type = AS_PARTICLE_TYPE_LIST;
+		break;
+	case MSGPACK_TYPE_MAP:
+		p_cdt_mem->type = AS_PARTICLE_TYPE_MAP;
+		break;
+	case MSGPACK_TYPE_BYTES:
+		p_cdt_mem->type = AS_PARTICLE_TYPE_BLOB;
+		break;
+	default:
+		return false;
+	}
+
+	as_bin_state_set_from_type(to, p_cdt_mem->type);
+	p_cdt_mem->sz = from->r_bytes.sz;
+	memcpy(p_cdt_mem->data, from->r_bytes.contents, p_cdt_mem->sz);
+
+	return true;
+}
+
 
 //==========================================================
 // Local helpers - runtime display.
@@ -2938,7 +4923,7 @@ rt_display(runtime* rt, cf_dyn_buf* db)
 	op_base_mem* ob = (op_base_mem*)rt->instr_ptr;
 	const op_table_entry* entry = &op_table[ob->code];
 
-	cf_debug(AS_EXP, "display %s", entry->name);
+	cf_detail(AS_EXP, "display %s", entry->name);
 
 	rt->op_ix++;
 	rt->instr_ptr += entry->size;
@@ -2946,7 +4931,26 @@ rt_display(runtime* rt, cf_dyn_buf* db)
 }
 
 static void
-display_compare(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+display_0_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+{
+	(void)rt;
+
+	cf_dyn_buf_append_format(db, "%s()", op_table[ob->code].name);
+}
+
+static void
+display_1_arg(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+{
+	cf_dyn_buf_append_string(db, op_table[ob->code].name);
+	cf_dyn_buf_append_char(db, '(');
+
+	rt_display(rt, db);
+
+	cf_dyn_buf_append_char(db, ')');
+}
+
+static void
+display_2_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
 	cf_dyn_buf_append_string(db, op_table[ob->code].name);
 	cf_dyn_buf_append_char(db, '(');
@@ -2971,16 +4975,14 @@ display_cmp_regex(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 }
 
 static void
-display_logical(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+display_logical_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
-	op_logical* op = (op_logical*)ob;
-
 	cf_dyn_buf_append_string(db, op_table[ob->code].name);
 	cf_dyn_buf_append_char(db, '(');
 
 	rt_display(rt, db);
 
-	while (rt->op_ix < op->instr_end_ix) {
+	while (rt->op_ix < ob->instr_end_ix) {
 		cf_dyn_buf_append_string(db, ", ");
 		rt_display(rt, db);
 	}
@@ -2989,12 +4991,33 @@ display_logical(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 }
 
 static void
-display_not(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+display_math_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
 	cf_dyn_buf_append_string(db, op_table[ob->code].name);
 	cf_dyn_buf_append_char(db, '(');
 
 	rt_display(rt, db);
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		cf_dyn_buf_append_string(db, ", ");
+		rt_display(rt, db);
+	}
+
+	cf_dyn_buf_append_char(db, ')');
+}
+
+static void
+display_int_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+{
+	cf_dyn_buf_append_string(db, op_table[ob->code].name);
+	cf_dyn_buf_append_char(db, '(');
+
+	rt_display(rt, db);
+
+	while (rt->op_ix < ob->instr_end_ix) {
+		cf_dyn_buf_append_string(db, ", ");
+		rt_display(rt, db);
+	}
 
 	cf_dyn_buf_append_char(db, ')');
 }
@@ -3002,20 +5025,18 @@ display_not(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 static void
 display_meta_digest_mod(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
+	(void)rt;
+
 	op_meta_digest_modulo* op = (op_meta_digest_modulo*)ob;
 
 	cf_dyn_buf_append_format(db, "%s(%u)", op_table[ob->code].name, op->mod);
 }
 
 static void
-display_no_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
-{
-	cf_dyn_buf_append_format(db, "%s()", op_table[ob->code].name);
-}
-
-static void
 display_bin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
+	(void)rt;
+
 	op_bin* op = (op_bin*)ob;
 
 	cf_dyn_buf_append_format(db, "%s_%s(\"%.*s\")",
@@ -3026,6 +5047,8 @@ display_bin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 static void
 display_bin_type(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
+	(void)rt;
+
 	op_bin* op = (op_bin*)ob;
 
 	cf_dyn_buf_append_format(db, "%s(\"%.*s\")",
@@ -3033,11 +5056,62 @@ display_bin_type(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 }
 
 static void
+display_cond(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+{
+	op_cond* op = (op_cond*)ob;
+
+	cf_dyn_buf_append_string(db, op_table[ob->code].name);
+	cf_dyn_buf_append_char(db, '(');
+
+	for (uint32_t i = 0; i < op->case_count; i++) {
+		rt_display(rt, db);
+		cf_dyn_buf_append_string(db, ", ");
+		rt_display(rt, db);
+		rt_display(rt, db);
+		cf_dyn_buf_append_string(db, ", ");
+	}
+
+	rt_display(rt, db);
+
+	cf_dyn_buf_append_char(db, ')');
+}
+
+static void
+display_var(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+{
+	(void)rt;
+
+	op_var* op = (op_var*)ob;
+
+	cf_dyn_buf_append_format(db, "%s(\"var_%u\")",
+			op_table[ob->code].name, op->idx);
+}
+
+static void
+display_let(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+{
+	op_let* op = (op_let*)ob;
+
+	cf_dyn_buf_append_string(db, op_table[ob->code].name);
+	cf_dyn_buf_append_char(db, '(');
+
+	for (uint32_t i = 0; i < op->n_vars; i++) {
+		cf_dyn_buf_append_format(db, "def(var_%u, ", op->var_idx + i);
+		rt_display(rt, db);
+		cf_dyn_buf_append_string(db, "), ");
+	}
+
+	rt_display(rt, db);
+	cf_dyn_buf_append_char(db, ')');
+}
+
+static void
 display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
 	op_call* op = (op_call*)ob;
 
-	call_system_type system_type = op->system_type & ~CALL_FLAG_MODIFY_LOCAL;
+	call_system_type system_type = op->system_type &
+			(uint32_t)~CALL_FLAG_MODIFY_LOCAL;
 	bool is_modify = op->system_type != system_type;
 	msgpack_in mp = {
 			.buf = op->vecs[0].buf,
@@ -3101,10 +5175,11 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 		break;
 	case CALL_BITS:
 		cf_dyn_buf_append_format(db, "%s(",
-				as_bits_op_name(op_code, is_modify));
+				as_bits_op_name((uint32_t)op_code, is_modify));
 		break;
 	case CALL_HLL:
-		cf_dyn_buf_append_format(db, "%s(", as_hll_op_name(op_code, is_modify));
+		cf_dyn_buf_append_format(db, "%s(", as_hll_op_name((uint32_t)op_code,
+				is_modify));
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected");
@@ -3141,12 +5216,17 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 static void
 display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
+	(void)rt;
+
 	switch (ob->code) {
 	case VOP_VALUE_NIL:
 	case VOP_VALUE_GEO:
 	case VOP_VALUE_LIST:
 	case VOP_VALUE_MSGPACK:
 		cf_dyn_buf_append_string(db, op_table[ob->code].name);
+		break;
+	case VOP_VALUE_BOOL:
+		cf_dyn_buf_append_bool(db, ((op_value_bool*)ob)->value);
 		break;
 	case VOP_VALUE_INT:
 		cf_dyn_buf_append_format(db, "%ld", ((op_value_int*)ob)->value);
@@ -3162,9 +5242,21 @@ display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 		cf_dyn_buf_append_format(db, "<blob#%u>",
 				((op_value_blob*)ob)->value_sz);
 		break;
+	case VOP_VALUE_HLL:
+		cf_dyn_buf_append_format(db, "<hll#%u>",
+				((op_value_blob*)ob)->value_sz);
+		break;
 	default:
 		cf_crash(AS_EXP, "unexpected code %u", ob->code);
 	}
+}
+
+static void
+display_case(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
+{
+	(void)rt;
+	(void)ob;
+	(void)db;
 }
 
 static void
@@ -3175,7 +5267,7 @@ display_msgpack(msgpack_in* mp, cf_dyn_buf* db)
 	switch (type) {
 	case MSGPACK_TYPE_NIL:
 		msgpack_sz(mp);
-		cf_dyn_buf_append_string(db, "nil"); // TODO - fix name
+		cf_dyn_buf_append_string(db, "nil");
 		break;
 	case MSGPACK_TYPE_FALSE:
 		msgpack_sz(mp);
@@ -3228,4 +5320,26 @@ display_msgpack(msgpack_in* mp, cf_dyn_buf* db)
 		cf_dyn_buf_append_format(db, "<msgpack/%u>", type);
 		break;
 	}
+}
+
+
+//==========================================================
+// Local helpers - debug utilites.
+//
+
+static void
+debug_exp_check(const as_exp* exp)
+{
+#ifndef exp_check
+	(void)exp;
+#else
+	cf_assert(exp != NULL, AS_EXP, "exp was null");
+
+	if (exp->version != 2) {
+		return;
+	}
+
+	cf_alloc_check(exp->buf_cleanup);
+	cf_alloc_check(exp);
+#endif
 }

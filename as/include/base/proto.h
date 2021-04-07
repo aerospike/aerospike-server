@@ -352,8 +352,8 @@ typedef struct as_msg_op_s {
 #define AS_MSG_OP_CDT_MODIFY    4 // CDT top-level op
 #define AS_MSG_OP_INCR          5 // arithmetic add - only for integers
 	// 6 is unused.
-	// 7 is unused.
-	// 8 is unused.
+#define AS_MSG_OP_EXP_READ      7
+#define AS_MSG_OP_EXP_MODIFY    8
 #define AS_MSG_OP_APPEND        9 // append to strings and blobs
 #define AS_MSG_OP_PREPEND       10 // prepend to strings and blobs
 #define AS_MSG_OP_TOUCH         11 // will increment the generation
@@ -644,6 +644,18 @@ typedef enum {
 } as_cdt_optype;
 
 //------------------------------------------------
+// Expression ops.
+//
+
+typedef enum {
+	AS_EXP_FLAG_CREATE_ONLY     = 1 << 0,
+	AS_EXP_FLAG_UPDATE_ONLY     = 1 << 1,
+	AS_EXP_FLAG_ALLOW_DELETE    = 1 << 2,
+	AS_EXP_FLAG_POLICY_NO_FAIL  = 1 << 3,
+	AS_EXP_FLAG_EVAL_NO_FAIL    = 1 << 4
+} as_exp_flags;
+
+//------------------------------------------------
 // Query responses.
 //
 
@@ -833,6 +845,14 @@ as_msg_op_iterate(const as_msg* msg, as_msg_op* current, int* n)
 
 	return as_msg_op_get_next(current);
 }
+
+#define OP_IS_READ(op) ( \
+		(op) == AS_MSG_OP_READ || \
+		(op) == AS_MSG_OP_CDT_READ || \
+		(op) == AS_MSG_OP_BITS_READ || \
+		(op) == AS_MSG_OP_HLL_READ || \
+		(op) == AS_MSG_OP_EXP_READ \
+	)
 
 #define OP_IS_MODIFY(op) ( \
 		(op) == AS_MSG_OP_INCR || \

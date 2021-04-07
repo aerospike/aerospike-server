@@ -278,11 +278,8 @@ hook_handle_alloc(const void *ra, void *p, void *p_indent, size_t sz)
 	}
 }
 
-// Account for a deallocation by the current thread for the allocation
-// site with the given address.
-
 static void
-hook_handle_free(const void *ra, void *p, size_t jem_sz)
+hook_handle_alloc_check(const void* ra, const void* p, size_t jem_sz)
 {
 	uint8_t *data = (uint8_t *)p + jem_sz - sizeof(uint32_t);
 	uint32_t *data32 = (uint32_t *)data;
@@ -317,6 +314,22 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 					cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id)));
 		}
 	}
+}
+
+// Account for a deallocation by the current thread for the allocation
+// site with the given address.
+
+static void
+hook_handle_free(const void *ra, void *p, size_t jem_sz)
+{
+	hook_handle_alloc_check(ra, p, jem_sz);
+
+	uint8_t *data = (uint8_t *)p + jem_sz - sizeof(uint32_t);
+	uint32_t *data32 = (uint32_t *)data;
+
+	uint32_t val = (*data32 - 1) * MULT_INV;
+	uint32_t site_id = val >> 16;
+	uint32_t delta = val & 0xffff;
 
 	uint32_t info_id = hook_get_site_info_id(site_id);
 
@@ -340,6 +353,8 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 
 	// Also invalidate the delta length, so that we are more likely to detect
 	// double frees.
+
+	uint8_t *mark = data - delta;
 
 	*data32 = ((site_id << 16) | 0xffff) * MULT + 1;
 
@@ -1257,6 +1272,31 @@ pvalloc(size_t sz)
 	cf_crash(CF_ALLOC, "obsolete pvalloc() called");
 	// Not reached.
 	return NULL;
+}
+
+static void
+do_alloc_check(const void* p_indent, const void* ra)
+{
+	if (p_indent == NULL) {
+		return;
+	}
+
+	int32_t arena = hook_get_arena(p_indent);
+
+	if (! want_debug(arena)) {
+		return;
+	}
+
+	const void *p = g_indent ? outdent((void*)p_indent) : p_indent;
+	size_t jem_sz = jem_sallocx(p, 0);
+
+	hook_handle_alloc_check(ra, p, jem_sz);
+}
+
+void
+cf_alloc_check(const void* p_indent)
+{
+	do_alloc_check(p_indent, __builtin_return_address(0));
 }
 
 void *

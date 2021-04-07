@@ -1,7 +1,7 @@
 /*
- * write.h
+ * expop.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,63 +26,27 @@
 // Includes.
 //
 
-#include "citrusleaf/alloc.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-#include "base/exp.h"
-#include "base/transaction.h"
+#include "dynbuf.h"
 
 
 //==========================================================
 // Forward declarations.
 //
 
+struct as_bin_s;
 struct as_exp_s;
-struct as_transaction_s;
-struct cl_msg_s;
-
-
-//==========================================================
-// Typedefs & constants.
-//
-
-typedef struct iops_expop_s {
-	struct as_exp_s* exp;
-	uint64_t flags;
-} iops_expop;
-
-typedef void (*iops_cb)(void* udata, int result);
-
-typedef struct iops_origin_s {
-	struct cl_msg_s* msgp;
-	struct as_exp_s* predexp;
-	iops_expop* expops;
-	iops_cb cb;
-	void* udata;
-} iops_origin;
+struct as_exp_ctx_s;
+struct as_msg_op_s;
+struct iops_expop_s;
 
 
 //==========================================================
 // Public API.
 //
 
-transaction_status as_write_start(struct as_transaction_s* tr);
-
-static inline void
-iops_expops_destroy(iops_expop* expops, uint16_t count)
-{
-	if (expops != NULL) {
-		for (uint16_t i = 0; i < count; i++) {
-			as_exp_destroy(expops[i].exp);
-		}
-
-		cf_free(expops);
-	}
-}
-
-static inline void
-iops_origin_destroy(iops_origin* origin)
-{
-	as_exp_destroy(origin->predexp);
-	iops_expops_destroy(origin->expops, origin->msgp->msg.n_ops);
-	cf_free(origin->msgp);
-}
+bool as_exp_op_parse(const struct as_msg_op_s* msg_op, struct as_exp_s** exp, uint64_t* flags, bool is_modify, bool cpy_wire);
+int as_exp_modify_tr(const struct as_exp_ctx_s* ctx, struct as_bin_s* b, const struct as_msg_op_s* msg_op, cf_ll_buf* particles_llb, const struct iops_expop_s* expop);
+int as_exp_read_tr(const struct as_exp_ctx_s* ctx, const struct as_msg_op_s* msg_op, struct as_bin_s* rb);

@@ -57,6 +57,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
+#include "base/expop.h"
 #include "base/index.h"
 #include "base/monitor.h"
 #include "base/proto.h"
@@ -463,7 +464,7 @@ get_scan_predexp(as_transaction* tr, as_exp** p_predexp)
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_PREDEXP);
 
-	*p_predexp = as_exp_build(f, true);
+	*p_predexp = as_exp_filter_build(f, true);
 
 	return *p_predexp != NULL;
 }
@@ -1714,7 +1715,7 @@ const as_scan_vtable ops_bg_scan_job_vtable = {
 		ops_bg_scan_job_info
 };
 
-uint8_t* ops_bg_validate_ops(const as_msg* m);
+uint8_t* ops_bg_scan_get_ops(const as_msg* m, iops_expop** expops);
 bool ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 void ops_bg_scan_tr_complete(void* udata, int result);
 
@@ -1743,18 +1744,20 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	as_msg* om = &tr->msgp->msg;
-	uint8_t* ops = ops_bg_validate_ops(om);
-
-	if (ops == NULL) {
-		cf_warning(AS_SCAN, "ops-bg scan job failed ops check");
-		return AS_ERR_PARAMETER;
-	}
-
 	as_exp* predexp = NULL;
 
 	if (! get_scan_predexp(tr, &predexp)) {
-		cf_warning(AS_SCAN, "ops-bg scan job failed predexp processing");
+		cf_warning(AS_SCAN, "ops-bg scan job failed get predexp");
+		return AS_ERR_PARAMETER;
+	}
+
+	as_msg* om = &tr->msgp->msg;
+	iops_expop* expops = NULL;
+	uint8_t* ops = ops_bg_scan_get_ops(om, &expops);
+
+	if (ops == NULL) {
+		cf_warning(AS_SCAN, "ops-bg scan job failed get ops");
+		as_exp_destroy(predexp);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1776,6 +1779,8 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 			tr->msgp->proto.sz - (ops - (uint8_t*)om));
 
 	job->origin.predexp = predexp;
+	job->origin.expops = expops;
+
 	job->origin.cb = ops_bg_scan_tr_complete;
 	job->origin.udata = (void*)job;
 
@@ -1871,7 +1876,7 @@ ops_bg_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 //
 
 uint8_t*
-ops_bg_validate_ops(const as_msg* m)
+ops_bg_scan_get_ops(const as_msg* m, iops_expop** p_expops)
 {
 	if ((m->info1 & AS_MSG_INFO1_READ) != 0) {
 		cf_warning(AS_SCAN, "ops not write only");
@@ -1883,11 +1888,49 @@ ops_bg_validate_ops(const as_msg* m)
 		return NULL;
 	}
 
-	// TODO - should we at least de-fuzz the ops, so all the sub-transactions
-	// won't fail later?
+	as_msg_op* op = NULL;
+	uint8_t* first = NULL;
 	int i = 0;
+	bool has_expop = false;
 
-	return (uint8_t*)as_msg_op_iterate(m, NULL, &i);
+	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
+		if (OP_IS_READ(op->op)) {
+			cf_warning(AS_SCAN, "ops scan has read op");
+			return NULL;
+		}
+
+		if (first == NULL) {
+			first = (uint8_t*)op;
+		}
+
+		if (op->op == AS_MSG_OP_EXP_MODIFY) {
+			has_expop = true;
+		}
+	}
+
+	if (has_expop) {
+		iops_expop* expops = cf_malloc(sizeof(iops_expop) * m->n_ops);
+		op = NULL;
+		i = 0;
+
+		while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
+			if (op->op == AS_MSG_OP_EXP_MODIFY) {
+				if (! as_exp_op_parse(op, &expops[i].exp, &expops[i].flags,
+						true, true)) {
+					cf_warning(AS_SCAN, "ops scan failed exp parse");
+					iops_expops_destroy(expops, i);
+					return NULL;
+				}
+			}
+			else {
+				expops[i].exp = NULL;
+			}
+		}
+
+		*p_expops = expops;
+	}
+
+	return first;
 }
 
 bool
