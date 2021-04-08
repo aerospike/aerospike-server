@@ -1973,14 +1973,14 @@ fabric_connection_process_readable(fabric_connection *fc)
 
 		if (recv_sz < 0) {
 			if (errno != EAGAIN && errno != EWOULDBLOCK) {
-				cf_warning(AS_FABRIC, "fabric_connection_process_readable() recv_sz %d msg_sz %u errno %d %s", recv_sz, fc->r_buf_sz, errno, cf_strerror(errno));
+				cf_warning(AS_FABRIC, "fabric_connection_process_readable() recv_sz %d msg_sz %u remote 0x%lx errno %d %s", recv_sz, fc->r_buf_sz, fabric_connection_get_id(fc), errno, cf_strerror(errno));
 				return false;
 			}
 
 			break;
 		}
 		else if (recv_sz == 0) {
-			cf_detail(AS_FABRIC, "fabric_connection_process_readable(%p) recv_sz 0 msg_sz %u", fc, fc->r_buf_sz);
+			cf_detail(AS_FABRIC, "fabric_connection_process_readable(%p) recv_sz 0 msg_sz %u remote 0x%lx", fc, fc->r_buf_sz, fabric_connection_get_id(fc));
 			return false;
 		}
 
@@ -2001,7 +2001,7 @@ fabric_connection_process_readable(fabric_connection *fc)
 
 			if (fc->r_buf_sz > sizeof(fc->r_buf)) {
 				if (fc->r_buf_sz > FABRIC_BUFFER_MAX_SZ) {
-					cf_warning(AS_FABRIC, "fabric_connection_process_readable(%p) invalid msg_size %u remote 0x%lx", fc, fc->r_buf_sz, fabric_connection_get_id(fc));
+					cf_warning(AS_FABRIC, "fabric_connection_process_readable(%p) invalid msg_sz %u remote 0x%lx", fc, fc->r_buf_sz, fabric_connection_get_id(fc));
 					return false;
 				}
 
