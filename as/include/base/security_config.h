@@ -74,11 +74,11 @@ typedef enum {
 // Security configuration.
 typedef struct as_sec_config_s {
 	bool				ldap_enabled;
+	bool				quotas_enabled;
 	bool				security_enabled;
 	uint32_t			n_ldap_login_threads;
 	uint32_t			privilege_refresh_period;	// (seconds)
-	as_sec_report		report;						// reporting sinks
-	as_sec_syslog_local	syslog_local;				// syslog local facility
+	uint32_t			tps_weight;
 
 	// LDAP scope configuration.
 	bool 				ldap_tls_disabled;
@@ -95,10 +95,17 @@ typedef struct as_sec_config_s {
 	as_sec_ldap_evp_md	ldap_token_hash_method;
 	char*				ldap_user_dn_pattern;
 	char*				ldap_user_query_pattern;
+
+	// log & syslog scope configuration.
+	as_sec_report		report;						// reporting sinks
+	as_sec_syslog_local	syslog_local;				// syslog local facility
 } as_sec_config;
 
 #define PRIVILEGE_REFRESH_PERIOD_MIN	10
 #define PRIVILEGE_REFRESH_PERIOD_MAX	(60 * 60 * 24)
+#define TPS_WEIGHT_MIN					2
+#define TPS_WEIGHT_MAX					20
+
 #define LDAP_POLLING_PERIOD_MIN			0 // zero means don't poll
 #define LDAP_POLLING_PERIOD_MAX			(60 * 60 * 24)
 #define LDAP_SESSION_TTL_MIN			120

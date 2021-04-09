@@ -42,6 +42,7 @@
 #include "base/datamodel.h"
 #include "base/monitor.h"
 #include "base/scan_manager.h"
+#include "base/security.h"
 #include "fabric/partition.h"
 
 #include "warnings.h"
@@ -67,6 +68,7 @@ static uint32_t g_scan_job_trid = 0;
 // Forward declarations.
 //
 
+static void as_scan_job_finish(as_scan_job* _job);
 static uint32_t throttle_sleep(as_scan_job* _job, uint64_t count, uint64_t now);
 
 
@@ -131,7 +133,7 @@ result_str(int result)
 void
 as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid,
 		as_namespace* ns, const char* set_name, uint16_t set_id,
-		as_scan_pid* pids, uint32_t rps, const char* client)
+		as_scan_pid* pids, uint32_t rps, void* rps_udata, const char* client)
 {
 	*_job = (as_scan_job){
 			.vtable = *vtable,
@@ -139,7 +141,8 @@ as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid,
 			.ns = ns,
 			.set_id = set_id,
 			.pids = pids,
-			.rps = rps
+			.rps = rps,
+			.rps_udata = rps_udata
 	};
 
 	strcpy(_job->set_name, set_name);
@@ -212,7 +215,7 @@ as_scan_job_run(as_scan_job* _job)
 	cf_assert(n >= 0, AS_SCAN, "scan job thread underflow %d", n);
 
 	if (n == 0) {
-		_job->vtable.finish_fn(_job);
+		as_scan_job_finish(_job);
 		as_scan_manager_finish_job(_job);
 	}
 }
@@ -269,6 +272,10 @@ void
 as_scan_job_destroy(as_scan_job* _job)
 {
 	_job->vtable.destroy_fn(_job);
+
+	if (_job->rps_udata != NULL) {
+		as_security_done_rps(_job->rps_udata, _job->rps, true);
+	}
 
 	if (_job->pids) {
 		cf_free(_job->pids);
@@ -327,6 +334,17 @@ as_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 //==========================================================
 // Local helpers.
 //
+
+static void
+as_scan_job_finish(as_scan_job* _job)
+{
+	_job->vtable.finish_fn(_job);
+
+	if (_job->rps_udata != NULL) {
+		as_security_done_rps(_job->rps_udata, _job->rps, false);
+		_job->rps_udata = NULL;
+	}
+}
 
 static uint32_t
 throttle_sleep(as_scan_job* _job, uint64_t count, uint64_t now)

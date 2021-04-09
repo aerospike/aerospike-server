@@ -63,6 +63,7 @@
 #include "base/proto.h"
 #include "base/scan_job.h"
 #include "base/scan_manager.h"
+#include "base/security.h"
 #include "base/service.h"
 #include "base/transaction.h"
 #include "fabric/partition.h"
@@ -718,11 +719,22 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
+	void* rps_udata = NULL;
+	int result = as_security_check_rps(tr->from.proto_fd_h, rps, PERM_SCAN,
+			false, &rps_udata);
+
+	if (result != AS_OK) {
+		cf_warning(AS_SCAN, "basic scan job failed quota %d", result);
+		as_exp_destroy(predexp);
+		return result;
+	}
+
 	basic_scan_job* job = cf_malloc(sizeof(basic_scan_job));
 	as_scan_job* _job = (as_scan_job*)job;
 
 	as_scan_job_init(_job, &basic_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_name, set_id, pids, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, pids, rps, rps_udata,
+			tr->from.proto_fd_h->client);
 
 	cf_assert(_job->n_pids_requested != 0, AS_SCAN, "0 pids requested");
 
@@ -730,8 +742,6 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	job->predexp = predexp;
 
 	sample_max_init(job, sample_max);
-
-	int result;
 
 	job->bin_ids = bin_ids_from_op(&tr->msgp->msg, ns, &result);
 
@@ -749,7 +759,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 			sample_max, job->no_bin_data ? " metadata-only" : "", timeout,
 			_job->client);
 
-	if ((result = as_scan_manager_start_job(_job)) != 0) {
+	if ((result = as_scan_manager_start_job(_job)) != AS_OK) {
 		cf_warning(AS_SCAN, "basic scan job %lu failed to start (%d)",
 				_job->trid, result);
 		conn_scan_job_disown_fd((conn_scan_job*)job);
@@ -1142,11 +1152,21 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
+	void* rps_udata = NULL;
+	int result = as_security_check_rps(tr->from.proto_fd_h, rps, PERM_UDF_SCAN,
+			false, &rps_udata);
+
+	if (result != AS_OK) {
+		cf_warning(AS_SCAN, "aggregation scan job failed quota %d", result);
+		return result;
+	}
+
 	aggr_scan_job* job = cf_malloc(sizeof(aggr_scan_job));
 	as_scan_job* _job = (as_scan_job*)job;
 
 	as_scan_job_init(_job, &aggr_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_name, set_id, NULL, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, NULL, rps, rps_udata,
+			tr->from.proto_fd_h->client);
 
 	if (! aggr_scan_init(&job->aggr_call, tr)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
@@ -1161,9 +1181,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns)
 	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} rps %u socket-timeout %u from %s",
 			_job->trid, ns->name, set_name, _job->rps, timeout, _job->client);
 
-	int result = as_scan_manager_start_job(_job);
-
-	if (result != 0) {
+	if ((result = as_scan_manager_start_job(_job)) != AS_OK) {
 		cf_warning(AS_SCAN, "aggregation scan job %lu failed to start (%d)",
 				_job->trid, result);
 		conn_scan_job_disown_fd((conn_scan_job*)job);
@@ -1490,11 +1508,22 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
+	void* rps_udata = NULL;
+	int result = as_security_check_rps(tr->from.proto_fd_h, rps, PERM_UDF_SCAN,
+			true, &rps_udata);
+
+	if (result != AS_OK) {
+		cf_warning(AS_SCAN, "udf-bg scan job failed quota %d", result);
+		as_exp_destroy(predexp);
+		return result;
+	}
+
 	udf_bg_scan_job* job = cf_malloc(sizeof(udf_bg_scan_job));
 	as_scan_job* _job = (as_scan_job*)job;
 
 	as_scan_job_init(_job, &udf_bg_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_name, set_id, NULL, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, NULL, rps, rps_udata,
+			tr->from.proto_fd_h->client);
 
 	job->n_active_tr = 0;
 
@@ -1519,9 +1548,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} rps %u from %s",
 			_job->trid, ns->name, set_name, _job->rps, _job->client);
 
-	int result = as_scan_manager_start_job(_job);
-
-	if (result != 0) {
+	if ((result = as_scan_manager_start_job(_job)) != AS_OK) {
 		cf_warning(AS_SCAN, "udf-bg scan job %lu failed to start (%d)",
 				_job->trid, result);
 		as_scan_job_destroy(_job);
@@ -1761,11 +1788,23 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
+	void* rps_udata = NULL;
+	int result = as_security_check_rps(tr->from.proto_fd_h, rps, PERM_OPS_SCAN,
+			true, &rps_udata);
+
+	if (result != AS_OK) {
+		cf_warning(AS_SCAN, "ops-bg scan job failed quota %d", result);
+		iops_expops_destroy(expops, om->n_ops);
+		as_exp_destroy(predexp);
+		return result;
+	}
+
 	ops_bg_scan_job* job = cf_malloc(sizeof(ops_bg_scan_job));
 	as_scan_job* _job = (as_scan_job*)job;
 
 	as_scan_job_init(_job, &ops_bg_scan_job_vtable, as_transaction_trid(tr), ns,
-			set_name, set_id, NULL, rps, tr->from.proto_fd_h->client);
+			set_name, set_id, NULL, rps, rps_udata,
+			tr->from.proto_fd_h->client);
 
 	job->n_active_tr = 0;
 
@@ -1787,9 +1826,7 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 	cf_info(AS_SCAN, "starting ops-bg scan job %lu {%s:%s} rps %u from %s",
 			_job->trid, ns->name, set_name, _job->rps, _job->client);
 
-	int result = as_scan_manager_start_job(_job);
-
-	if (result != 0) {
+	if ((result = as_scan_manager_start_job(_job)) != AS_OK) {
 		cf_warning(AS_SCAN, "ops-bg scan job %lu failed to start (%d)",
 				_job->trid, result);
 		as_scan_job_destroy(_job);

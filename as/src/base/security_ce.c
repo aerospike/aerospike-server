@@ -78,6 +78,21 @@ as_security_check_data_op(as_transaction* tr, as_namespace* ns,
 	return true;
 }
 
+// Security is an enterprise feature - here, allow all operations.
+int
+as_security_check_rps(as_file_handle* fd_h, uint32_t rps, as_sec_perm perm,
+		bool is_write, void** udata)
+{
+	return AS_OK;
+}
+
+// Security is an enterprise feature - here, allow all operations.
+void
+as_security_done_rps(void* udata, uint32_t rps, bool is_write)
+{
+	cf_crash(AS_SECURITY, "CE build called as_security_done_rps()");
+}
+
 // Security is an enterprise feature - here, there's no filter.
 void*
 as_security_filter_create(void)

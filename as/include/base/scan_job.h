@@ -106,6 +106,9 @@ typedef struct as_scan_job_s {
 	uint64_t base_count;
 	uint64_t streak_us;
 
+	// For rate limits:
+	void* rps_udata;
+
 	// For tracking:
 	char client[64];
 	uint16_t n_pids_requested;
@@ -123,7 +126,7 @@ typedef struct as_scan_job_s {
 // Public API.
 //
 
-void as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid, struct as_namespace_s* ns, const char* set_name, uint16_t set_id, as_scan_pid* pids, uint32_t rps, const char* client);
+void as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid, struct as_namespace_s* ns, const char* set_name, uint16_t set_id, as_scan_pid* pids, uint32_t rps, void* rps_udata, const char* client);
 void as_scan_job_run(as_scan_job* _job);
 uint32_t as_scan_job_throttle(as_scan_job* _job);
 void as_scan_job_destroy(as_scan_job* _job);

@@ -206,6 +206,7 @@ cfg_set_defaults()
 	// Security defaults.
 	c->sec_cfg.n_ldap_login_threads = 8;
 	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
+	c->sec_cfg.tps_weight = TPS_WEIGHT_MIN;
 	// Security LDAP defaults.
 	c->sec_cfg.ldap_polling_period = 60 * 5;
 	c->sec_cfg.ldap_session_ttl = 60 * 60 * 24;
@@ -628,9 +629,11 @@ typedef enum {
 
 	// Security options:
 	CASE_SECURITY_ENABLE_LDAP,
+	CASE_SECURITY_ENABLE_QUOTAS,
 	CASE_SECURITY_ENABLE_SECURITY,
 	CASE_SECURITY_LDAP_LOGIN_THREADS,
 	CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD,
+	CASE_SECURITY_TPS_WEIGHT,
 	CASE_SECURITY_LDAP_BEGIN,
 	CASE_SECURITY_LOG_BEGIN,
 	CASE_SECURITY_SYSLOG_BEGIN,
@@ -1164,9 +1167,11 @@ const cfg_opt MOD_LUA_OPTS[] = {
 
 const cfg_opt SECURITY_OPTS[] = {
 		{ "enable-ldap",					CASE_SECURITY_ENABLE_LDAP },
+		{ "enable-quotas",					CASE_SECURITY_ENABLE_QUOTAS },
 		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
 		{ "ldap-login-threads",				CASE_SECURITY_LDAP_LOGIN_THREADS },
 		{ "privilege-refresh-period",		CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD },
+		{ "tps-weight",						CASE_SECURITY_TPS_WEIGHT },
 		{ "ldap",							CASE_SECURITY_LDAP_BEGIN },
 		{ "log",							CASE_SECURITY_LOG_BEGIN },
 		{ "syslog",							CASE_SECURITY_SYSLOG_BEGIN },
@@ -3557,6 +3562,9 @@ as_config_init(const char* config_file)
 			case CASE_SECURITY_ENABLE_LDAP:
 				c->sec_cfg.ldap_enabled = cfg_bool(&line);
 				break;
+			case CASE_SECURITY_ENABLE_QUOTAS:
+				c->sec_cfg.quotas_enabled = cfg_bool(&line);
+				break;
 			case CASE_SECURITY_ENABLE_SECURITY:
 				c->sec_cfg.security_enabled = cfg_bool(&line);
 				break;
@@ -3565,6 +3573,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD:
 				c->sec_cfg.privilege_refresh_period = cfg_seconds(&line, PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
+				break;
+			case CASE_SECURITY_TPS_WEIGHT:
+				c->sec_cfg.tps_weight = cfg_u32(&line, TPS_WEIGHT_MIN, TPS_WEIGHT_MAX);
 				break;
 			case CASE_SECURITY_LDAP_BEGIN:
 				cfg_begin_context(&state, SECURITY_LDAP);
