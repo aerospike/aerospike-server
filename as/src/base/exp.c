@@ -448,10 +448,6 @@ struct op_table_entry_s {
 #define result_type_to_str(__type) (__type > 0 && __type < TYPE_END ? \
 		result_type_str[__type] : "invalid")
 
-static const char* trilean_names[] = {
-		"FALSE", "TRUE", "UNKNOWN"
-};
-
 static const uint8_t* EMPTY_STRING = (uint8_t*)"";
 static const uint8_t call_eval_token[1] = "";
 
@@ -841,7 +837,6 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		break;
 	case RT_TRILEAN:
 		if (ret_val.r_trilean == AS_EXP_UNK) {
-			cf_debug(AS_EXP, "as_exp_eval - unknown result");
 			return false;
 		}
 
@@ -918,15 +913,10 @@ as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx)
 
 	// TODO - Remove in "six months".
 	if (predexp->version != 2) {
-		cf_debug(AS_EXP, "as_exp_matches_metadata - v1");
 		return predexp_matches_metadata_old(predexp, ctx);
 	}
 
-	cf_debug(AS_EXP, "as_exp_matches_metadata - v2 start");
-
 	as_exp_trilean ret = match_internal(predexp, ctx);
-
-	cf_debug(AS_EXP, "as_exp_matches_metadata - result %s", trilean_names[ret]);
 
 	return ret;
 }
@@ -938,15 +928,10 @@ as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx)
 
 	// TODO - Remove in "six months".
 	if (predexp->version != 2) {
-		cf_debug(AS_EXP, "as_exp_matches_record - v1");
 		return predexp_matches_record_old(predexp, ctx);
 	}
 
-	cf_debug(AS_EXP, "as_exp_matches_record - v2 start");
-
 	as_exp_trilean ret = match_internal(predexp, ctx);
-
-	cf_debug(AS_EXP, "as_exp_matches_record - result %s", trilean_names[ret]);
 
 	return ret == AS_EXP_TRUE;
 }
@@ -1155,9 +1140,6 @@ build_next(build_args* args)
 	args->ele_count = ele_count;
 	args->instr_ix++;
 
-	cf_debug(AS_EXP, "build_next op %s ele_count %u ix %u", args->entry->name,
-			ele_count, args->instr_ix);
-
 	op_base_mem* op = (op_base_mem*)args->mem;
 	bool rv = op_table[op_code].build_cb(args);
 
@@ -1243,8 +1225,6 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				break;
 			}
 
-			cf_debug(AS_EXP, "build_count_sz - op_code %lu", op_code);
-
 			if (type == MSGPACK_TYPE_BYTES) {
 				uint32_t temp_sz;
 				const uint8_t* buf = msgpack_get_bin(mp, &temp_sz);
@@ -1287,8 +1267,6 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				cf_warning(AS_EXP, "build_count_sz - invalid op_code %lu", op_code);
 				return false;
 			}
-
-			cf_debug(AS_EXP, "ele_count %u op_code %lu", ele_count, op_code);
 		}
 
 		const op_table_entry* entry = &op_table[op_code];
@@ -2865,8 +2843,6 @@ rt_eval(runtime* rt, rt_value* ret_val)
 	op_base_mem* ob = (op_base_mem*)rt->instr_ptr;
 	const op_table_entry* entry = &op_table[ob->code];
 
-	cf_debug(AS_EXP, "eval %s", entry->name);
-
 	bool alloc_ns = rt->alloc_ns;
 
 	rt->alloc_ns = rt->alloc_ns && entry->alloc_ns;
@@ -2874,8 +2850,6 @@ rt_eval(runtime* rt, rt_value* ret_val)
 	rt->instr_ptr += entry->size;
 	*ret_val = (rt_value){ 0 };
 	entry->eval_cb(rt, ob, ret_val);
-
-	cf_debug(AS_EXP, "eval %s result_type %u", entry->name, ret_val->type);
 
 	bool ret = rt_value_is_unknown(ret_val);
 
@@ -2917,8 +2891,6 @@ eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	rt_value_translate(&v0, &arg0);
 	rt_value_translate(&v1, &arg1);
-
-	cf_debug(AS_EXP, "cmp type %u to %u", v0.type, v1.type);
 
 	cf_assert(v0.type == v1.type, AS_EXP, "unexpected %u %u", v0.type, v1.type);
 	ret_val->type = RT_TRILEAN;
@@ -3800,8 +3772,6 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	if (bin == NULL) {
-		cf_debug(AS_EXP, "eval_bin - bin (%.*s) not found",
-				op->name_sz, op->name);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -3810,7 +3780,7 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	as_particle_type bin_type = as_bin_get_particle_type(bin);
 
 	if (! bin_is_type(bin, op->type)) {
-		cf_debug(AS_EXP, "eval_bin - bin (%.*s) type mismatch %u does not map to %u",
+		cf_detail(AS_EXP, "eval_bin - bin (%.*s) type mismatch %u does not map to %u",
 				op->name_sz, op->name, bin_type, op->type);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
@@ -3850,8 +3820,6 @@ eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	op_bin_type* op = (op_bin_type*)ob;
 
 	if (rt->ctx->rd == NULL) {
-		cf_debug(AS_EXP, "eval_bin - bin (%.*s) not found",
-				op->name_sz, op->name);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -3936,8 +3904,6 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			.vecs = vecs
 	};
 
-	cf_debug(AS_EXP, "eval_call sys %u n_vecs %u", op->system_type, mv.n_vecs);
-
 	vecs[0].buf = op->vecs[0].buf;
 	vecs[0].buf_sz = op->vecs[0].buf_sz;
 	vecs[0].offset = 0;
@@ -3968,11 +3934,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			vecs[vec_ix].buf = pk.buffer + pk.offset;
 			vecs[vec_ix].offset = 0;
 
-			cf_debug(AS_EXP, "rt_eval -> type %d (29=RT_BIN)", from->type);
-
 			if (from->type == RT_BIN) {
-				cf_debug(AS_EXP, "RT_BIN -> cleanup %p(%p)", &from->r_bin,
-						from->r_bin.particle);
 				bin_cleanup[bin_cleanup_ix++] = &from->r_bin;
 			}
 
@@ -4055,8 +4017,6 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	switch (bin_arg.type) {
 	case RT_BIN_PTR: // from bin
-		cf_debug(AS_EXP, "RT_BIN_PTR: %p(%p)", bin_arg.r_bin_p,
-				bin_arg.r_bin_p->particle);
 		if (is_modify_local) {
 			old = *bin_arg.r_bin_p;
 			b = &old; // must not modify bin_arg.r_bin_p
@@ -4066,14 +4026,11 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		}
 		break;
 	case RT_NIL:
-		cf_debug(AS_EXP, "NIL: create empty bin");
 		as_bin_set_empty(&bin_arg.r_bin);
 		b = &bin_arg.r_bin;
 		old = *b;
 		break;
 	case RT_BIN: // from call
-		cf_debug(AS_EXP, "RT_BIN: %p(%p)", &bin_arg.r_bin,
-				bin_arg.r_bin.particle);
 		b = &bin_arg.r_bin;
 		old = *b;
 		break;
@@ -4118,7 +4075,6 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		break;
 	}
 	default:
-		cf_debug(AS_EXP, "CALL UNK");
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
@@ -4132,21 +4088,10 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	switch (op->system_type & (uint32_t)~CALL_FLAG_MODIFY_LOCAL) {
 	case CALL_CDT:
 		if (is_modify_local) {
-			as_particle* saved = b->particle; // for detail only
-			cf_debug(AS_EXP, "call_cdt_modify(b=%p(%p) rb=%p(%p))",
-					b, b->particle, &rb, rb.particle);
 			ret = as_bin_cdt_modify_exp(b, &mv, &rb, rt->alloc_ns);
-			cf_debug(AS_EXP, " -> %s(b=%p(%p) new rb=%p(%p))",
-					b->particle == saved ? "no-op" : "new",
-							b, b->particle, &rb, rb.particle);
 		}
 		else {
-			cf_debug(AS_EXP, "as_bin_call_cdt_read(b=%p(%p) rb=%p(%p) type %d",
-					b, b->particle, &rb, rb.particle,
-					as_bin_get_particle_type(&rb));
 			ret = as_bin_cdt_read_exp(b, &mv, &rb, rt->alloc_ns);
-			cf_debug(AS_EXP, " -> new rb=%p(%p) type %d", &rb, rb.particle,
-					as_bin_get_particle_type(&rb));
 		}
 		break;
 	case CALL_BITS:
@@ -4173,7 +4118,6 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	if (ret != AS_OK) {
 		rt_value_destroy(&bin_arg, rt);
-		cf_debug(AS_EXP, "CALL UNK ret %d", ret);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -4181,13 +4125,9 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	if (is_modify_local) {
 		if (old.particle != b->particle && bin_arg.type == RT_BIN) {
-			cf_debug(AS_EXP, "bin destroy1 %p(%p) -- RT_BIN case", &old,
-					old.particle);
 			as_bin_particle_destroy(&old);
 		}
 
-		cf_debug(AS_EXP, "rbin destroy2 %p(%p) type %d", &rb, rb.particle,
-				as_bin_get_particle_type(&rb));
 		as_bin_particle_destroy(&rb);
 	}
 	else {
@@ -4198,12 +4138,9 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	if (! bin_is_type(b, op->type)) {
 		if (! is_modify_local || bin_arg.type == RT_BIN ||
 				old.particle != b->particle) {
-			cf_debug(AS_EXP, "bin destroy3 %p(%p)", b, b->particle);
 			as_bin_particle_destroy(b);
 		}
 
-		cf_debug(AS_EXP, "CALL UNK type %d - %d", as_bin_get_particle_type(b),
-				op->type);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -4231,19 +4168,16 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	case AS_PARTICLE_TYPE_INTEGER:
 		ret_val->type = RT_INT;
 		ret_val->r_int = as_bin_particle_integer_value(b);
-		cf_debug(AS_EXP, "bin destroy4 %p(%p)", b, b->particle);
 		as_bin_particle_destroy(b);
 		break;
 	case AS_PARTICLE_TYPE_FLOAT:
 		ret_val->type = RT_FLOAT;
 		ret_val->r_float = as_bin_particle_float_value(b);
-		cf_debug(AS_EXP, "bin destroy5 %p(%p)", b, b->particle);
 		as_bin_particle_destroy(b);
 		break;
 	case AS_PARTICLE_TYPE_BOOL:
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = as_bin_particle_bool_value(b);
-		cf_debug(AS_EXP, "bin destroy6 %p(%p)", b, b->particle);
 		as_bin_particle_destroy(b);
 		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
@@ -4323,10 +4257,12 @@ rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from)
 	as_bin b = *from->r_bin_p;
 	uint8_t type = as_bin_get_particle_type(&b);
 
+	rb->state = b.state;
+
 	switch (type) {
 	case AS_PARTICLE_TYPE_INTEGER:
 	case AS_PARTICLE_TYPE_FLOAT:
-		*rb = b;
+		rb->particle = b.particle;
 		break;
 	case AS_PARTICLE_TYPE_STRING:
 	case AS_PARTICLE_TYPE_BLOB:
@@ -4334,9 +4270,8 @@ rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from)
 	case AS_PARTICLE_TYPE_MAP:
 	case AS_PARTICLE_TYPE_LIST:
 	case AS_PARTICLE_TYPE_GEOJSON:
-		*rb = b;
-
-		uint32_t sz = ((cdt_mem*)b.particle)->sz;
+		;
+		uint32_t sz = sizeof(cdt_mem) + ((cdt_mem*)b.particle)->sz;
 
 		rb->particle = rt_alloc_mem(rt, sz);
 		memcpy(rb->particle, b.particle, sz);
@@ -4439,8 +4374,6 @@ rt_skip(runtime* rt, uint32_t instr_end_ix)
 static void
 rt_value_translate(rt_value* to, const rt_value* from)
 {
-	cf_debug(AS_EXP, "cmp_translate %u", from->type);
-
 	const as_bin* bin;
 
 	*to = (rt_value){ 0 };
@@ -4468,8 +4401,6 @@ rt_value_translate(rt_value* to, const rt_value* from)
 	}
 
 	uint8_t type = as_bin_get_particle_type(bin);
-
-	cf_debug(AS_EXP, "cmp_translate %u bin_type %u", from->type, type);
 
 	switch (type) {
 	case AS_PARTICLE_TYPE_BLOB:
@@ -4518,9 +4449,6 @@ rt_value_destroy(rt_value* val, runtime* rt)
 		geo_region_destroy(val->r_geo.region);
 	}
 	else if (val->type == RT_BIN && ! as_bin_is_unused(&val->r_bin)) {
-		cf_debug(AS_EXP, "bin destroyRT %p(%p)", &val->r_bin,
-				val->r_bin.particle);
-
 		if (rt) {
 			rt_free_mem(rt, val->r_bin.particle);
 		}
@@ -4533,7 +4461,6 @@ rt_value_destroy(rt_value* val, runtime* rt)
 static void
 rt_value_get_geo(rt_value* val, geo_data* result)
 {
-	cf_debug(AS_EXP, "get_geo type %u", val->type);
 	cf_assert(val->type == RT_GEO_COMPILED, AS_EXP, "unexpected");
 
 	if (val->r_geo.type == GEO_CELL) {
@@ -4574,9 +4501,6 @@ get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
 static as_exp_trilean
 cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1)
 {
-	cf_debug(AS_EXP, "cmp_trilean - lv %u rv %u",
-			e0->r_trilean, e1->r_trilean);
-
 	switch (code) {
 	case EXP_CMP_EQ:
 		return (e0->r_trilean == e1->r_trilean) ? AS_EXP_TRUE : AS_EXP_FALSE;
@@ -4600,8 +4524,6 @@ cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1)
 static as_exp_trilean
 cmp_int(exp_op_code code, const rt_value* e0, const rt_value* e1)
 {
-	cf_debug(AS_EXP, "cmp_int - lv %ld rv %ld", e0->r_int, e1->r_int);
-
 	switch (code) {
 	case EXP_CMP_EQ:
 		return (e0->r_int == e1->r_int) ? AS_EXP_TRUE : AS_EXP_FALSE;
@@ -4625,8 +4547,6 @@ cmp_int(exp_op_code code, const rt_value* e0, const rt_value* e1)
 static as_exp_trilean
 cmp_float(exp_op_code code, const rt_value* e0, const rt_value* e1)
 {
-	cf_debug(AS_EXP, "cmp_float - e0 %lf e1 %lf", e0->r_float, e1->r_float);
-
 	switch (code) {
 	case EXP_CMP_EQ:
 		return (e0->r_float == e1->r_float) ? AS_EXP_TRUE : AS_EXP_FALSE;
@@ -4721,9 +4641,6 @@ cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
 
 	msgpack_cmp_type cmp = msgpack_cmp(&mp0, &mp1);
 
-	cf_debug(AS_EXP, "cmp_msgpack %d\nlv %*pH\nrv %*pH", cmp, mp0.buf_sz,
-			mp0.buf, mp1.buf_sz, mp1.buf);
-
 	if (cmp == MSGPACK_CMP_ERROR) {
 		return AS_EXP_UNK;
 	}
@@ -4763,7 +4680,6 @@ call_cleanup(void** blob, uint32_t blob_ix, as_bin** bin, uint32_t bin_ix)
 	}
 
 	for (uint32_t i = 0; i < bin_ix; i++) {
-		cf_debug(AS_EXP, "bin destroyC %p(%p)", bin[i], bin[i]->particle);
 		as_bin_particle_destroy(bin[i]);
 	}
 }
@@ -4887,8 +4803,6 @@ msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from)
 
 	to->particle = rt_alloc_mem(rt, from->r_bytes.sz + sizeof(cdt_mem));
 
-	cf_debug(AS_EXP, "RT_MSGPACK/RT_BLOB: %p(%p)", to, to->particle);
-
 	cdt_mem* p_cdt_mem = (cdt_mem*)to->particle;
 
 	switch (type) {
@@ -4922,8 +4836,6 @@ rt_display(runtime* rt, cf_dyn_buf* db)
 {
 	op_base_mem* ob = (op_base_mem*)rt->instr_ptr;
 	const op_table_entry* entry = &op_table[ob->code];
-
-	cf_detail(AS_EXP, "display %s", entry->name);
 
 	rt->op_ix++;
 	rt->instr_ptr += entry->size;
