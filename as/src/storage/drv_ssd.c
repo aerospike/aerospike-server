@@ -89,7 +89,7 @@ ssd_fd_get(drv_ssd *ssd)
 	int rv = cf_queue_pop(ssd->fd_q, (void*)&fd, CF_QUEUE_NOWAIT);
 
 	if (rv != CF_QUEUE_OK) {
-		fd = open(ssd->name, ssd->open_flag, S_IRUSR | S_IWUSR);
+		fd = open(ssd->name, ssd->open_flag, cf_os_base_perms());
 
 		if (-1 == fd) {
 			cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED open: errno %d (%s)",
@@ -109,7 +109,7 @@ ssd_fd_cache_get(drv_ssd *ssd)
 
 	if (rv != CF_QUEUE_OK) {
 		fd = open(ssd->name, ssd->open_flag & ~(O_DIRECT | O_DSYNC),
-				S_IRUSR | S_IWUSR);
+				cf_os_base_perms());
 
 		if (-1 == fd) {
 			cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED open: errno %d (%s)",
@@ -128,7 +128,7 @@ ssd_shadow_fd_get(drv_ssd *ssd)
 	int rv = cf_queue_pop(ssd->shadow_fd_q, (void*)&fd, CF_QUEUE_NOWAIT);
 
 	if (rv != CF_QUEUE_OK) {
-		fd = open(ssd->shadow_name, ssd->open_flag, S_IRUSR | S_IWUSR);
+		fd = open(ssd->shadow_name, ssd->open_flag, cf_os_base_perms());
 
 		if (-1 == fd) {
 			cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED open: errno %d (%s)",
@@ -3222,7 +3222,7 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 		ssd->open_flag = O_RDWR | O_DIRECT |
 				(ns->storage_disable_odsync ? 0 : O_DSYNC);
 
-		int fd = open(ssd->name, ssd->open_flag, S_IRUSR | S_IWUSR);
+		int fd = open(ssd->name, ssd->open_flag);
 
 		if (fd == -1) {
 			cf_crash(AS_DRV_SSD, "unable to open device %s: %s", ssd->name,
@@ -3274,7 +3274,7 @@ ssd_init_shadow_devices(as_namespace *ns, drv_ssds *ssds)
 
 		ssd->shadow_name = ns->storage_shadows[i];
 
-		int fd = open(ssd->shadow_name, ssd->open_flag, S_IRUSR | S_IWUSR);
+		int fd = open(ssd->shadow_name, ssd->open_flag);
 
 		if (fd == -1) {
 			cf_crash(AS_DRV_SSD, "unable to open shadow device %s: %s",
@@ -3351,7 +3351,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 						direct_flags : 0);
 
 		// Validate that file can be opened, create it if it doesn't exist.
-		int fd = open(ssd->name, ssd->open_flag | O_CREAT, S_IRUSR | S_IWUSR);
+		int fd = open(ssd->name, ssd->open_flag | O_CREAT, cf_os_base_perms());
 
 		if (fd == -1) {
 			cf_crash(AS_DRV_SSD, "unable to open file %s: %s", ssd->name,
@@ -3408,7 +3408,7 @@ ssd_init_shadow_files(as_namespace *ns, drv_ssds *ssds)
 
 		// Validate that file can be opened, create it if it doesn't exist.
 		int fd = open(ssd->shadow_name, ssd->open_flag | O_CREAT,
-				S_IRUSR | S_IWUSR);
+				cf_os_base_perms());
 
 		if (fd == -1) {
 			cf_crash(AS_DRV_SSD, "unable to open shadow file %s: %s",

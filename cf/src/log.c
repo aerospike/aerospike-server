@@ -35,6 +35,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -166,6 +167,9 @@ extern char __etext;
 
 cf_log_level g_most_verbose_levels[CF_LOG_N_CONTEXTS];
 
+// OS related utility. TODO - should be in its own file?
+static bool g_use_group_perms = false;
+
 static bool g_use_local_time = false;
 static bool g_use_millis = false;
 
@@ -227,6 +231,28 @@ write_all(int fd, const char* buf, size_t sz)
 		buf += sz_wr;
 		sz -= (size_t)sz_wr;
 	}
+}
+
+
+//==========================================================
+// Public API - OS related utilities.
+// TODO - should be in their own file?
+//
+
+void
+cf_os_use_group_perms(bool use)
+{
+	g_use_group_perms = use;
+
+	if (use) {
+		umask((mode_t)S_IWOTH);
+	}
+}
+
+bool
+cf_os_is_using_group_perms(void)
+{
+	return g_use_group_perms;
 }
 
 
@@ -339,7 +365,7 @@ cf_log_activate_sinks(void)
 			continue;
 		}
 
-		sink->fd = open(sink->path, CF_LOG_OPEN_FLAGS, CF_LOG_OPEN_MODE);
+		sink->fd = open(sink->path, CF_LOG_OPEN_FLAGS, cf_os_log_perms());
 
 		if (sink->fd < 0) {
 			cf_crash_nostack(CF_MISC, "can't open %s: %d (%s)", sink->path,
@@ -476,7 +502,7 @@ cf_log_rotate(void)
 
 		// Note - we use O_TRUNC, so we assume the file has been moved/copied
 		// elsewhere, or we're ok losing it.
-		sink->fd = open(sink->path, CF_LOG_REOPEN_FLAGS, CF_LOG_OPEN_MODE);
+		sink->fd = open(sink->path, CF_LOG_REOPEN_FLAGS, cf_os_log_perms());
 
 		usleep(1000); // threads may be interrupted while writing to old fd
 		close(old_fd);

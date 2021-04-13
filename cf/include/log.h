@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "dynbuf.h"
 
@@ -121,7 +122,10 @@ typedef struct cf_log_sink_s cf_log_sink;
 
 #define CF_LOG_OPEN_FLAGS (O_WRONLY | O_CREAT | O_APPEND)
 #define CF_LOG_REOPEN_FLAGS (O_WRONLY | O_CREAT | O_TRUNC)
-#define CF_LOG_OPEN_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+
+// OS related utilities. TODO - should be in their own file?
+#define CF_OS_OPEN_MODE_USR (S_IRUSR | S_IWUSR)
+#define CF_OS_OPEN_MODE_GRP (CF_OS_OPEN_MODE_USR | S_IRGRP | S_IWGRP)
 
 
 //==========================================================
@@ -170,6 +174,28 @@ do { \
 		cf_crash(CF_MISC, "this cannot happen..."); \
 	} \
 } while (false)
+
+
+//==========================================================
+// Public API - OS related utilities.
+// TODO - should be in their own file?
+//
+
+void cf_os_use_group_perms(bool use);
+bool cf_os_is_using_group_perms(void);
+
+static inline uint16_t
+cf_os_base_perms(void)
+{
+	return cf_os_is_using_group_perms() ?
+			CF_OS_OPEN_MODE_GRP : CF_OS_OPEN_MODE_USR;
+}
+
+static inline uint16_t
+cf_os_log_perms(void)
+{
+	return cf_os_base_perms() | S_IRGRP | S_IROTH;
+}
 
 
 //==========================================================

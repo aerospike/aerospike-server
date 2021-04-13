@@ -473,8 +473,7 @@ write_pidfile(char *pidfile)
 
 	remove(pidfile);
 
-	int pid_fd = open(pidfile, O_CREAT | O_RDWR,
-			S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+	int pid_fd = open(pidfile, O_CREAT | O_RDWR, cf_os_log_perms());
 
 	if (pid_fd < 0) {
 		cf_crash_nostack(AS_AS, "failed to open pid file %s: %s", pidfile,

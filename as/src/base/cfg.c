@@ -274,6 +274,7 @@ typedef enum {
 	CASE_SERVICE_MIN_CLUSTER_SIZE,
 	CASE_SERVICE_NODE_ID,
 	CASE_SERVICE_NODE_ID_INTERFACE,
+	CASE_SERVICE_OS_GROUP_PERMS,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
 	CASE_SERVICE_QUERY_BUFPOOL_SIZE,
@@ -789,6 +790,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "min-cluster-size",				CASE_SERVICE_MIN_CLUSTER_SIZE },
 		{ "node-id",						CASE_SERVICE_NODE_ID },
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
+		{ "os-group-perms",					CASE_SERVICE_OS_GROUP_PERMS },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
 		{ "query-bufpool-size",				CASE_SERVICE_QUERY_BUFPOOL_SIZE },
@@ -2276,6 +2278,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_NODE_ID_INTERFACE:
 				c->node_id_interface = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_SERVICE_OS_GROUP_PERMS:
+				cf_os_use_group_perms(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_PROTO_FD_IDLE_MS:
 				c->proto_fd_idle_ms = cfg_int_no_checks(&line);

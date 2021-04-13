@@ -300,7 +300,7 @@ sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 		*free_pct = 0;
 	}
 
-	int32_t fd = open("/proc/meminfo", O_RDONLY, 0);
+	int32_t fd = open("/proc/meminfo", O_RDONLY);
 
 	if (fd < 0) {
 		cf_warning(AS_INFO, "failed to open /proc/meminfo: %d", errno);
@@ -1815,6 +1815,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "min-cluster-size", g_config.clustering_config.cluster_size_min);
 	info_append_uint64_x(db, "node-id", g_config.self_node); // may be configured or auto-generated
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
+	info_append_bool(db, "os-group-perms", cf_os_is_using_group_perms());
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
 	info_append_uint32(db, "query-batch-size", g_config.query_bsize);

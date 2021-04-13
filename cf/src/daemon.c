@@ -281,7 +281,7 @@ cf_process_daemonize(void)
 
 	sprintf(path, "/tmp/aerospike-console.%d", getpid());
 
-	int fd = open(path, CF_LOG_OPEN_FLAGS, CF_LOG_OPEN_MODE);
+	int fd = open(path, CF_LOG_OPEN_FLAGS, cf_os_log_perms());
 
 	if (fd < 0) {
 		cf_crash(CF_MISC, "failed to open %s: %d (%s)", path, errno,

@@ -242,7 +242,7 @@ static file_res
 write_file(const char *path, const void *buff, size_t limit)
 {
 	cf_detail(CF_HARDWARE, "writing file %s with buffer size %zu", path, limit);
-	int32_t fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	int32_t fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, cf_os_base_perms());
 
 	if (fd < 0) {
 		if (errno == ENOENT) {
