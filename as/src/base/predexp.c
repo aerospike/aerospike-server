@@ -405,6 +405,8 @@ as_exp_trilean
 predexp_matches_metadata_old(const as_exp* predexp,
 		const as_exp_ctx* ctx)
 {
+	cf_ticker_warning(AS_EXP, "predexp deprecated - use new expressions API");
+
 	predexp_eval_t* bp = ((as_predexp_eval_old*)predexp)->root;
 
 	predexp_args_t argsp = {
