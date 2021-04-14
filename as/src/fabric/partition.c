@@ -48,6 +48,17 @@
 
 
 //==========================================================
+// Typedefs & constants.
+//
+
+#define TREE_ID_NUM_BITS 6
+#define MAX_NUM_TREE_IDS (1 << TREE_ID_NUM_BITS) // 64
+#define TREE_ID_MASK (MAX_NUM_TREE_IDS - 1) // 0x3F
+
+COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
+
+
+//==========================================================
 // Forward declarations.
 //
 
