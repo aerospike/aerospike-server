@@ -128,12 +128,6 @@ COMPILER_ASSERT(sizeof(as_index) == 64);
 	rc; \
 })
 
-#define TREE_ID_NUM_BITS	6
-#define MAX_NUM_TREE_IDS	(1 << TREE_ID_NUM_BITS) // 64
-#define TREE_ID_MASK		(MAX_NUM_TREE_IDS - 1) // 0x3F
-
-COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
-
 // Fast way to clear the record portion of as_index.
 // Note - relies on current layout and size of as_index!
 // FIXME - won't be able to "rescue" with future sindex method - will go away.
