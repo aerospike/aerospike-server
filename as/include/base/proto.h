@@ -113,12 +113,13 @@ struct as_storage_rd_s;
 #define AS_SEC_ERR_ROLE_EXISTS          71 // role already exists
 #define AS_SEC_ERR_PRIVILEGE            72 // no/unknown privilege(s)
 #define AS_SEC_ERR_WHITELIST            73 // bad whitelist
-#define AS_SEC_ERR_QUOTA				74 // bad quota value
+#define AS_SEC_ERR_QUOTAS_NOT_ENABLED   74 // quotas not enabled
+#define AS_SEC_ERR_QUOTA                75 // bad quota value
 	// Permission errors.
 #define AS_SEC_ERR_NOT_AUTHENTICATED    80 // socket not authenticated
 #define AS_SEC_ERR_ROLE_VIOLATION       81 // role (privilege) violation
 #define AS_SEC_ERR_NOT_WHITELISTED      82 // client IP-addr not on whitelist
-#define AS_SEC_ERR_QUOTA_EXCEEDED 		83 // quota currently exceeded
+#define AS_SEC_ERR_QUOTA_EXCEEDED       83 // quota currently exceeded
 	// LDAP-related errors.
 #define AS_SEC_ERR_LDAP_NOT_ENABLED     90 // LDAP features not enabled
 #define AS_SEC_ERR_LDAP_SETUP           91 // LDAP setup error
