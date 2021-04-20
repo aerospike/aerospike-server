@@ -152,8 +152,6 @@ const size_t SCAN_CHUNK_LIMIT = 1024 * 1024;
 
 #define MAX_ACTIVE_TRANSACTIONS 200
 
-#define SAMPLE_MARGIN 4
-
 
 
 //==============================================================================
@@ -652,7 +650,6 @@ typedef struct basic_scan_job_s {
 	bool			no_bin_data;
 	uint64_t		sample_max;
 	uint64_t		sample_count;
-	uint64_t		max_per_partition;
 	as_exp*			predexp;
 	cf_vector*		bin_ids;
 } basic_scan_job;
@@ -678,7 +675,6 @@ typedef struct basic_scan_slice_s {
 bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, as_exp** predexp);
 cf_vector* bin_ids_from_op(as_msg* m, as_namespace* ns, int* result);
-void sample_max_init(basic_scan_job* job, uint64_t sample_max);
 
 //----------------------------------------------------------
 // basic_scan_job public API.
@@ -740,10 +736,9 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	cf_assert(_job->n_pids_requested != 0, AS_SCAN, "0 pids requested");
 
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
+	job->sample_max = sample_max;
+	job->sample_count = 0;
 	job->predexp = predexp;
-
-	sample_max_init(job, sample_max);
-
 	job->bin_ids = bin_ids_from_op(&tr->msgp->msg, ns, &result);
 
 	if (result != AS_OK) {
@@ -810,7 +805,7 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 	uint64_t slice_start = cf_getus();
 	basic_scan_slice slice = { job, &bb };
 
-	if (job->max_per_partition == 0 || job->sample_count < job->sample_max) {
+	if (job->sample_max == 0 || job->sample_count < job->sample_max) {
 		cf_digest* keyd = _job->pids[rsv->p->id].has_digest ?
 				&_job->pids[rsv->p->id].keyd : NULL;
 
@@ -929,7 +924,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	bool last_sample = false;
 
-	if (job->max_per_partition != 0) { // sample-max checks post-filters
+	if (job->sample_max != 0) { // sample-max checks post-filters
 		uint64_t count = as_aaf_uint64(&job->sample_count, 1);
 
 		if (count > job->sample_max) {
@@ -1046,29 +1041,6 @@ bin_ids_from_op(as_msg* m, as_namespace* ns, int* result)
 
 	*result = AS_OK;
 	return id_vec;
-}
-
-void
-sample_max_init(basic_scan_job* job, uint64_t sample_max)
-{
-	if (sample_max == 0) {
-		job->sample_max = 0;
-		job->sample_count = 0;
-		job->max_per_partition = 0;
-		return;
-	}
-
-	job->sample_max = sample_max;
-	job->sample_count = 0;
-
-	uint64_t n_pids = ((as_scan_job*)job)->n_pids_requested; // can't be 0
-	uint64_t max_per_partition = (sample_max + n_pids - 1) / n_pids;
-
-	// Add margin so when target is near actual population, partition size
-	// spread won't stop us from reaching the target.
-	max_per_partition += SAMPLE_MARGIN;
-
-	job->max_per_partition = max_per_partition;
 }
 
 
