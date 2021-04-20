@@ -43,6 +43,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/set_index.h"
 #include "base/transaction.h"
 #include "fabric/partition_balance.h"
 
@@ -92,6 +93,10 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 
 	p->tree = as_index_tree_resume(&ns->tree_shared, ns->xmem_trees, pid,
 			as_partition_tree_done, (void*)p);
+
+	if (p->tree != NULL) {
+		as_set_index_create_all(ns, p->tree);
+	}
 }
 
 void
@@ -121,6 +126,34 @@ as_partition_shutdown(as_namespace* ns, uint32_t pid)
 		// Bad luck - blocked a tree that just got switched, block the new one.
 		cf_mutex_unlock(&p->lock);
 	}
+}
+
+void
+as_partition_create_set_index(as_namespace* ns, uint32_t pid, uint16_t set_id)
+{
+	as_partition* p = &ns->partitions[pid];
+
+	cf_mutex_lock(&p->lock);
+
+	if (p->tree != NULL) {
+		as_set_index_tree_create(p->tree, set_id);
+	}
+
+	cf_mutex_unlock(&p->lock);
+}
+
+void
+as_partition_destroy_set_index(as_namespace* ns, uint32_t pid, uint16_t set_id)
+{
+	as_partition* p = &ns->partitions[pid];
+
+	cf_mutex_lock(&p->lock);
+
+	if (p->tree != NULL) {
+		as_set_index_tree_destroy(p->tree, set_id);
+	}
+
+	cf_mutex_unlock(&p->lock);
 }
 
 void

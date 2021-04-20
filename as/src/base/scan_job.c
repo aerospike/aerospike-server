@@ -153,8 +153,6 @@ as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid,
 void
 as_scan_job_run(as_scan_job* _job)
 {
-	cf_detail(AS_SCAN, "running thread for trid %lu", _job->trid);
-
 	if (! _job->started) {
 		_job->base_sys_tid = cf_thread_sys_tid();
 		_job->started = true;
@@ -201,8 +199,6 @@ as_scan_job_run(as_scan_job* _job)
 			break;
 		}
 	}
-
-	cf_detail(AS_SCAN, "finished thread for trid %lu", _job->trid);
 
 	if (bb != NULL) {
 		cf_buf_builder_free(bb);

@@ -31,6 +31,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/set_index.h"
 #include "base/transaction.h"
 #include "fabric/partition.h"
 #include "transaction/rw_request.h"
@@ -76,6 +77,7 @@ drop_local(as_namespace* ns, as_partition_reservation* rsv, as_index_ref* r_ref)
 		record_delete_adjust_sindex(r, ns);
 	}
 
+	as_set_index_delete(ns, rsv->tree, as_index_get_set_id(r), r_ref->r_h);
 	as_index_delete(rsv->tree, &r->keyd);
 	as_record_done(r_ref, ns);
 

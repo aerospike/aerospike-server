@@ -1032,6 +1032,8 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 		return (uint8_t)(-result);
 	}
 
+	as_record_transition_set_index(tr->rsv.tree, urecord->r_ref, ns, rd->n_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 

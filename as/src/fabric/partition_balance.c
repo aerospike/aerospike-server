@@ -44,6 +44,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/set_index.h"
 #include "fabric/exchange.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
@@ -273,9 +274,13 @@ as_partition_balance()
 	cf_queue_init(&mq, sizeof(pb_task), g_config.n_namespaces * AS_PARTITIONS,
 			false);
 
+	as_set_index_balance_lock();
+
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		balance_namespace(g_config.namespaces[ns_ix], &mq);
 	}
+
+	as_set_index_balance_unlock();
 
 	prepare_for_appeals();
 
@@ -639,6 +644,8 @@ create_trees(as_partition* p, as_namespace* ns)
 
 	p->tree = as_index_tree_create(&ns->tree_shared, p->tree_id,
 			as_partition_tree_done, (void*)p);
+
+	as_set_index_create_all(ns, p->tree);
 }
 
 void

@@ -29,9 +29,11 @@
 #include "log.h"
 
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "storage/drv_common.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
+#include "transaction/rw_utils.h"
 
 
 void
@@ -88,9 +90,16 @@ ssd_cold_start_adjust_cenotaph(as_namespace* ns, const as_flat_record* flat,
 
 void
 ssd_cold_start_transition_record(as_namespace* ns, const as_flat_record* flat,
-		const as_flat_opt_meta* opt_meta, as_record* r, bool is_create)
+		const as_flat_opt_meta* opt_meta, as_index_tree* tree,
+		as_index_ref* r_ref, bool is_create)
 {
-	// Nothing to do - relevant for enterprise version only.
+	index_metadata old_metadata = {
+			// Note - other members irrelevant.
+			.generation = is_create ? 0 : 1, // fake to transition set-index
+	};
+
+	as_record_transition_set_index(tree, r_ref, ns, opt_meta->n_bins,
+			&old_metadata);
 }
 
 void

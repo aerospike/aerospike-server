@@ -44,6 +44,7 @@ BASE_HEADERS += scan_manager.h
 BASE_HEADERS += security.h
 BASE_HEADERS += security_config.h
 BASE_HEADERS += service.h
+BASE_HEADERS += set_index.h
 BASE_HEADERS += smd.h
 BASE_HEADERS += stats.h
 BASE_HEADERS += thr_info.h
@@ -90,6 +91,7 @@ BASE_SOURCES += scan.c
 BASE_SOURCES += scan_job.c
 BASE_SOURCES += scan_manager.c
 BASE_SOURCES += service.c
+BASE_SOURCES += set_index.c
 BASE_SOURCES += signal.c
 BASE_SOURCES += smd.c
 BASE_SOURCES += thr_info.c
@@ -115,6 +117,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += proto_ce.c
   BASE_SOURCES += record_ce.c
   BASE_SOURCES += security_ce.c
+  BASE_SOURCES += set_index_ce.c
   BASE_SOURCES += truncate_ce.c
   BASE_SOURCES += xdr_ce.c
 endif

@@ -61,6 +61,7 @@
 #include "base/index.h"
 #include "base/nsup.h"
 #include "base/proto.h"
+#include "base/set_index.h"
 #include "base/truncate.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
@@ -2387,6 +2388,10 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 	// Skip records that have expired.
 	if (opt_meta.void_time != 0 && ns->cold_start_now > opt_meta.void_time) {
+		if (! is_create) {
+			as_set_index_delete_live(ns, p_partition->tree, r, r_ref.r_h);
+		}
+
 		as_index_delete(p_partition->tree, &flat->keyd);
 		as_record_done(&r_ref, ns);
 		ssd->record_add_expired_counter++;
@@ -2396,6 +2401,10 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	// Skip records that were evicted.
 	if (opt_meta.void_time != 0 && ns->evict_void_time > opt_meta.void_time &&
 			drv_is_set_evictable(ns, &opt_meta)) {
+		if (! is_create) {
+			as_set_index_delete_live(ns, p_partition->tree, r, r_ref.r_h);
+		}
+
 		as_index_delete(p_partition->tree, &flat->keyd);
 		as_record_done(&r_ref, ns);
 		ssd->record_add_evicted_counter++;
@@ -2491,7 +2500,8 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		cf_warning(AS_DRV_SSD, "replacing record with invalid rblock-id");
 	}
 
-	ssd_cold_start_transition_record(ns, flat, &opt_meta, r, is_create);
+	ssd_cold_start_transition_record(ns, flat, &opt_meta, p_partition->tree,
+			&r_ref, is_create);
 
 	uint32_t wblock_id = RBLOCK_ID_TO_WBLOCK_ID(ssd, rblock_id);
 
@@ -2879,6 +2889,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 			r->xdr_bin_cemetery != opt_meta.extra_flags.xdr_bin_cemetery ||
 			r->void_time != opt_meta.void_time) {
 		cf_warning(AS_DRV_SSD, "metadata mismatch - removing %pD", &flat->keyd);
+		as_set_index_delete_live(ns, p->tree, r, r_ref.r_h);
 		as_index_delete(p->tree, &flat->keyd);
 		as_record_done(&r_ref, ns);
 		return;
@@ -2890,6 +2901,8 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 
 	// Skip records that have expired since resuming the index.
 	if (as_record_is_expired(r)) {
+		// AER-6363 - use live for "six months" in case of tombstone with TTL.
+		as_set_index_delete_live(ns, p->tree, r, r_ref.r_h);
 		as_index_delete(p->tree, &flat->keyd);
 		as_record_done(&r_ref, ns);
 		ssd->record_add_expired_counter++;
@@ -3139,6 +3152,8 @@ ssd_init_synchronous(drv_ssds *ssds)
 
 			p->tree = as_index_tree_create(&ns->tree_shared, p->tree_id,
 					as_partition_tree_done, (void*)p);
+
+			as_set_index_create_all(ns, p->tree);
 		}
 	}
 

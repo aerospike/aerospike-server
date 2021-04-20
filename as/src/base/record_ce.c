@@ -34,6 +34,7 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/set_index.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
@@ -106,6 +107,23 @@ as_record_exists_live(as_index_tree* tree, const cf_digest* keyd,
 }
 
 void
+as_record_transition_set_index(as_index_tree* tree, as_index_ref* r_ref,
+		as_namespace* ns, uint16_t n_bins, const index_metadata* old)
+{
+	as_record* r = r_ref->r;
+
+	bool is_delete = n_bins == 0;
+	bool inserted = old->generation == 0;
+
+	if (is_delete) {
+		as_set_index_delete(ns, tree, as_index_get_set_id(r), r_ref->r_h);
+	}
+	else if (inserted) {
+		as_set_index_insert(ns, tree, as_index_get_set_id(r), r_ref->r_h);
+	}
+}
+
+void
 as_record_drop_stats(as_record* r, as_namespace* ns)
 {
 	as_namespace_release_set_id(ns, as_index_get_set_id(r));
@@ -114,7 +132,8 @@ as_record_drop_stats(as_record* r, as_namespace* ns)
 }
 
 void
-as_record_transition_stats(as_record* r, as_namespace* ns, index_metadata* old)
+as_record_transition_stats(as_record* r, as_namespace* ns,
+		const index_metadata* old)
 {
 }
 

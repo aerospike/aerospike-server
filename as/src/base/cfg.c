@@ -611,6 +611,7 @@ typedef enum {
 
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
+	CASE_NAMESPACE_SET_ENABLE_INDEX,
 	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
 
 	// Namespace sindex options:
@@ -1142,6 +1143,7 @@ const cfg_opt NAMESPACE_STORAGE_ENCRYPTION_OPTS[] = {
 
 const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "disable-eviction",				CASE_NAMESPACE_SET_DISABLE_EVICTION },
+		{ "enable-index",					CASE_NAMESPACE_SET_ENABLE_INDEX },
 		{ "stop-writes-count",				CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -3472,7 +3474,10 @@ as_config_init(const char* config_file)
 		case NAMESPACE_SET:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SET_OPTS, NUM_NAMESPACE_SET_OPTS)) {
 			case CASE_NAMESPACE_SET_DISABLE_EVICTION:
-				DISABLE_SET_EVICTION(p_set, cfg_bool(&line));
+				p_set->eviction_disabled = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_SET_ENABLE_INDEX:
+				p_set->index_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
 				p_set->stop_writes_count = cfg_u64_no_checks(&line);

@@ -471,8 +471,10 @@ extern void as_record_free_bin_space(as_record *r);
 extern void as_record_destroy(as_record *r, as_namespace *ns);
 extern void as_record_done(struct as_index_ref_s *r_ref, as_namespace *ns);
 
+void as_record_transition_set_index(struct as_index_tree_s* tree, struct as_index_ref_s* r_ref, as_namespace* ns, uint16_t n_bins, const struct index_metadata_s* old);
+
 void as_record_drop_stats(as_record* r, as_namespace* ns);
-void as_record_transition_stats(as_record* r, as_namespace* ns, struct index_metadata_s* old);
+void as_record_transition_stats(as_record* r, as_namespace* ns, const struct index_metadata_s* old);
 
 extern void as_record_finalize_key(as_record* r, const as_namespace* ns, const uint8_t* key, uint32_t key_size);
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
@@ -1282,23 +1284,25 @@ struct as_namespace_s {
 
 #define INVALID_SET_ID 0
 
-#define IS_SET_EVICTION_DISABLED(p_set)		(cf_atomic32_get(p_set->disable_eviction) == 1)
-#define DISABLE_SET_EVICTION(p_set, on_off)	(cf_atomic32_set(&p_set->disable_eviction, on_off ? 1 : 0))
-
-// Caution - changing this struct could break warm or cool restart.
+// Caution - changing the size of this struct will break warm/cool restart.
 struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
+
+	// Only name survives warm/cool restart - these are all reset.
 	cf_atomic64		n_objects;
 	cf_atomic64		n_tombstones;		// relevant only for enterprise edition
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
 	cf_atomic64		n_bytes_device;		// sets's total on-device record data size
 	cf_atomic64		stop_writes_count;	// restrict number of records in a set
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
-	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
-	uint32_t		unused;				// FIXME - was set-level XDR config
 	uint32_t		n_sindexes;
-	uint8_t padding[4];
+	bool			eviction_disabled;	// don't evict anything in this set (note - expiration still works)
+	bool			index_enabled;
+	bool			index_populating;
+	uint8_t			pad[9];
 };
+
+COMPILER_ASSERT(sizeof(as_set) == 128);
 
 static inline bool
 as_set_stop_writes(as_set *p_set) {

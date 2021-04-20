@@ -54,7 +54,7 @@ drv_is_set_evictable(const as_namespace* ns, const as_flat_opt_meta* opt_meta)
 		return true;
 	}
 
-	return ! IS_SET_EVICTION_DISABLED(p_set);
+	return ! p_set->eviction_disabled;
 }
 
 void

@@ -55,10 +55,10 @@
 
 static void record_replace_failed(as_remote_record *rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
 
-static int record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd);
-static int record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex);
-static int record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd);
-static int record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex);
+static int record_apply_dim_single_bin(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
+static int record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd, bool skip_sindex);
+static int record_apply_ssd_single_bin(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
+static int record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd, bool skip_sindex);
 
 
 //==========================================================
@@ -377,18 +377,18 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 
 	if (ns->storage_data_in_memory) {
 		if (ns->single_bin) {
-			result = record_apply_dim_single_bin(rr, &rd);
+			result = record_apply_dim_single_bin(rr, &r_ref, &rd);
 		}
 		else {
-			result = record_apply_dim(rr, &rd, skip_sindex);
+			result = record_apply_dim(rr, &r_ref, &rd, skip_sindex);
 		}
 	}
 	else {
 		if (ns->single_bin) {
-			result = record_apply_ssd_single_bin(rr, &rd);
+			result = record_apply_ssd_single_bin(rr, &r_ref, &rd);
 		}
 		else {
-			result = record_apply_ssd(rr, &rd, skip_sindex);
+			result = record_apply_ssd(rr, &r_ref, &rd, skip_sindex);
 		}
 	}
 
@@ -477,7 +477,8 @@ record_replace_failed(as_remote_record *rr, as_index_ref* r_ref,
 }
 
 static int
-record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
+record_apply_dim_single_bin(as_remote_record *rr, as_index_ref *r_ref,
+		as_storage_rd *rd)
 {
 	as_namespace* ns = rr->rsv->ns;
 	as_record* r = rd->r;
@@ -514,6 +515,8 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
 		return -result;
 	}
 
+	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Cleanup - destroy original bin, can't unwind after.
@@ -536,7 +539,8 @@ record_apply_dim_single_bin(as_remote_record *rr, as_storage_rd *rd)
 }
 
 static int
-record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
+record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
+		bool skip_sindex)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
@@ -575,6 +579,8 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 		return -result;
 	}
 
+	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
@@ -602,7 +608,8 @@ record_apply_dim(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 }
 
 static int
-record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd)
+record_apply_ssd_single_bin(as_remote_record *rr, as_index_ref *r_ref,
+		as_storage_rd *rd)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
@@ -623,6 +630,8 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd)
 		return -result;
 	}
 
+	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, rr->n_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Now ok to store or drop key, as determined by message.
@@ -632,7 +641,8 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_storage_rd *rd)
 }
 
 static int
-record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
+record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
+		bool skip_sindex)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
@@ -676,6 +686,8 @@ record_apply_ssd(as_remote_record *rr, as_storage_rd *rd, bool skip_sindex)
 		return -result;
 	}
 
+	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.

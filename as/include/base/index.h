@@ -250,6 +250,8 @@ typedef struct as_index_ref_s {
 // Index tree.
 //
 
+struct as_set_index_tree_s;
+
 typedef void (*as_index_tree_done_fn) (uint8_t id, void* udata);
 
 typedef struct as_index_tree_s {
@@ -261,6 +263,9 @@ typedef struct as_index_tree_s {
 	as_index_tree_shared* shared;
 
 	uint64_t n_elements;
+
+	cf_mutex set_trees_lock;
+	struct as_set_index_tree_s* set_trees[1 + AS_SET_MAX_COUNT]; // 32M/cluster
 
 	// Variable length data, dependent on configuration.
 	uint8_t data[];
@@ -355,6 +360,29 @@ int as_index_get_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref*
 int as_index_get_insert_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
 void as_index_delete(as_index_tree* tree, const cf_digest* keyd);
 
+// Used by as_index and set_index.
+
+typedef enum {
+	BLACK = 0,
+	RED = 1
+} rb_tree_color;
+
+#define SENTINEL_H 0
+
+typedef struct as_index_ph_s {
+	as_index* r;
+	cf_arenax_handle r_h;
+} as_index_ph;
+
+typedef struct as_index_ph_array_s {
+	bool is_stack;
+	uint32_t capacity;
+	uint32_t n_used;
+	as_index_ph* phs;
+} as_index_ph_array;
+
+#define MAX_STACK_PHS (8 * 1024) // TODO - go bigger?
+
 
 //------------------------------------------------
 // Private API - for enterprise separation only.
@@ -414,9 +442,4 @@ as_index_sprig_from_keyd(as_index_tree* tree, as_index_sprig* isprig,
 	isprig->puddle = tree_puddle_for_sprig(tree, sprig_i);
 }
 
-#define SENTINEL_H 0
-
-#define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(isprig->arena, __h))
-
-// Flag to indicate full index reduce.
-#define AS_REDUCE_ALL (-1L)
+#define RESOLVE(__h) ((as_index*)cf_arenax_resolve(isprig->arena, __h))

@@ -45,6 +45,7 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/set_index.h"
 #include "base/smd.h"
 #include "transaction/rw_utils.h"
 
@@ -453,11 +454,13 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_record* r = r_ref->r;
 	truncate_reduce_cb_info* cb_info = (truncate_reduce_cb_info*)udata;
 	as_namespace* ns = cb_info->ns;
+	as_index_tree* tree = cb_info->tree;
 
 	if (r->last_update_time < ns->truncate.lut) {
 		cb_info->n_deleted++;
 		record_delete_adjust_sindex(r, ns);
-		as_index_delete(cb_info->tree, &r->keyd);
+		as_set_index_delete_live(ns, tree, r, r_ref->r_h);
+		as_index_delete(tree, &r->keyd);
 		as_record_done(r_ref, ns);
 		return true;
 	}
@@ -468,7 +471,8 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (p_set != NULL && r->last_update_time < p_set->truncate_lut) {
 		cb_info->n_deleted++;
 		record_delete_adjust_sindex(r, ns);
-		as_index_delete(cb_info->tree, &r->keyd);
+		as_set_index_delete_live(ns, tree, r, r_ref->r_h);
+		as_index_delete(tree, &r->keyd);
 	}
 
 	as_record_done(r_ref, ns);

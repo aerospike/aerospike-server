@@ -218,7 +218,8 @@ as_namespace_configure_sets(as_namespace *ns)
 
 			// Transfer configurable metadata.
 			p_set->stop_writes_count = ns->sets_cfg_array[i].stop_writes_count;
-			p_set->disable_eviction = ns->sets_cfg_array[i].disable_eviction;
+			p_set->eviction_disabled = ns->sets_cfg_array[i].eviction_disabled;
+			p_set->index_enabled = ns->sets_cfg_array[i].index_enabled;
 		}
 		else {
 			// Maybe exceeded max sets allowed, but try failing gracefully.
@@ -698,13 +699,25 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, p_set->truncate_lut);
 	cf_dyn_buf_append_char(db, ':');
 
+	cf_dyn_buf_append_string(db, "sindexes=");
+	cf_dyn_buf_append_uint32(db, p_set->n_sindexes);
+	cf_dyn_buf_append_char(db, ':');
+
+	cf_dyn_buf_append_string(db, "index_populating=");
+	cf_dyn_buf_append_bool(db, p_set->index_populating);
+	cf_dyn_buf_append_char(db, ':');
+
 	// Configuration:
+
+	cf_dyn_buf_append_string(db, "disable-eviction=");
+	cf_dyn_buf_append_bool(db, p_set->eviction_disabled);
+	cf_dyn_buf_append_char(db, ':');
+
+	cf_dyn_buf_append_string(db, "enable-index=");
+	cf_dyn_buf_append_bool(db, p_set->index_enabled);
+	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "stop-writes-count=");
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->stop_writes_count));
-	cf_dyn_buf_append_char(db, ':');
-
-	cf_dyn_buf_append_string(db, "disable-eviction=");
-	cf_dyn_buf_append_bool(db, IS_SET_EVICTION_DISABLED(p_set));
 	cf_dyn_buf_append_char(db, ';');
 }

@@ -184,6 +184,9 @@ typedef enum {
 void as_partition_init(struct as_namespace_s* ns, uint32_t pid);
 void as_partition_shutdown(struct as_namespace_s* ns, uint32_t pid);
 
+void as_partition_create_set_index(struct as_namespace_s* ns, uint32_t pid, uint16_t set_id);
+void as_partition_destroy_set_index(struct as_namespace_s* ns, uint32_t pid, uint16_t set_id);
+
 void as_partition_isolate_version(const struct as_namespace_s* ns, as_partition* p);
 int as_partition_check_source(const struct as_namespace_s* ns, as_partition* p, cf_node src, bool* from_replica);
 void as_partition_freeze(as_partition* p);

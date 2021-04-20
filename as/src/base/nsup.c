@@ -47,6 +47,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/set_index.h"
 #include "base/smd.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
@@ -623,9 +624,10 @@ eval_hwm_breached(as_namespace* ns)
 		index_mem_sz = index_sz;
 	}
 
+	uint64_t set_index_sz = as_set_index_used_bytes(ns);
 	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
-	uint64_t data_in_memory_sz = ns->n_bytes_memory;
-	uint64_t memory_sz = index_mem_sz + sindex_sz + data_in_memory_sz;
+	uint64_t dim_sz = ns->n_bytes_memory;
+	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
 	uint64_t mem_hwm = (ns->memory_size * ns->hwm_memory_pct) / 100;
 
 	uint64_t used_disk_sz = 0;
@@ -647,7 +649,7 @@ eval_hwm_breached(as_namespace* ns)
 
 	uint32_t how_breached = 0x0;
 
-	if (mem_hwm != 0 && memory_sz > mem_hwm) {
+	if (mem_hwm != 0 && mem_sz > mem_hwm) {
 		how_breached |= 0x1;
 	}
 
@@ -660,9 +662,9 @@ eval_hwm_breached(as_namespace* ns)
 	}
 
 	if (how_breached != 0) {
-		cf_warning(AS_NSUP, "{%s} breached eviction hwm %s, memory sz:%lu (%lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
+		cf_warning(AS_NSUP, "{%s} breached eviction hwm %s, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
 				ns->name, reasons[how_breached],
-				memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_hwm,
+				mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz, mem_hwm,
 				index_dev_sz, pix_hwm,
 				used_disk_sz, ssd_hwm);
 
@@ -670,9 +672,9 @@ eval_hwm_breached(as_namespace* ns)
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} no eviction hwm breached, memory sz:%lu (%lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
+	cf_debug(AS_NSUP, "{%s} no eviction hwm breached, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
 			ns->name,
-			memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz, mem_hwm,
+			mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz, mem_hwm,
 			index_dev_sz, pix_hwm,
 			used_disk_sz, ssd_hwm);
 
@@ -847,9 +849,10 @@ eval_stop_writes(as_namespace* ns)
 	// Note that persisted index is not counted against stop-writes.
 	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
 			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
+	uint64_t set_index_sz = as_set_index_used_bytes(ns);
 	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
-	uint64_t data_in_memory_sz = ns->n_bytes_memory;
-	uint64_t memory_sz = index_mem_sz + sindex_sz + data_in_memory_sz;
+	uint64_t dim_sz = ns->n_bytes_memory;
+	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
 
 	static const char* reasons[] = {
 			NULL,									// 0x0
@@ -860,7 +863,7 @@ eval_stop_writes(as_namespace* ns)
 
 	uint32_t why_stopped = 0x0;
 
-	if (memory_sz > mem_stop_writes) {
+	if (mem_sz > mem_stop_writes) {
 		why_stopped |= 0x1;
 	}
 
@@ -869,18 +872,18 @@ eval_stop_writes(as_namespace* ns)
 	}
 
 	if (why_stopped != 0) {
-		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
+		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
 				ns->name, reasons[why_stopped],
-				memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz,
+				mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz,
 				mem_stop_writes, device_avail_pct);
 
 		ns->stop_writes = true;
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
+	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
 			ns->name,
-			memory_sz, index_mem_sz, sindex_sz, data_in_memory_sz,
+			mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz,
 			mem_stop_writes, device_avail_pct);
 
 	ns->stop_writes = false;
@@ -1244,7 +1247,11 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 	else if (! per_thread->sets_not_evicting[as_index_get_set_id(r)] &&
 			ns->evict_void_time > void_time) {
-		as_index_delete(per_thread->rsv->tree, &r->keyd);
+		as_index_tree* tree = per_thread->rsv->tree;
+
+		// Note - can't be a tombstone.
+		as_set_index_delete(ns, tree, as_index_get_set_id(r), r_ref->r_h);
+		as_index_delete(tree, &r->keyd);
 		per_thread->n_evicted++;
 	}
 
@@ -1271,7 +1278,7 @@ sets_protected(as_namespace* ns)
 			cf_crash(AS_NSUP, "failed to get set index %u from vmap", j);
 		}
 
-		if (IS_SET_EVICTION_DISABLED(p_set)) {
+		if (p_set->eviction_disabled) {
 			return true;
 		}
 	}
@@ -1292,7 +1299,7 @@ init_sets_not_evicting(as_namespace* ns, bool sets_not_evicting[])
 			cf_crash(AS_NSUP, "failed to get set index %u from vmap", j);
 		}
 
-		if (IS_SET_EVICTION_DISABLED(p_set)) {
+		if (p_set->eviction_disabled) {
 			sets_not_evicting[j + 1] = true;
 		}
 	}

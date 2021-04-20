@@ -44,6 +44,7 @@
 #include "base/health.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/set_index.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
@@ -528,6 +529,8 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd)
 		record_delete_adjust_sindex(r, ns);
 	}
 
+	// Note - may find a tombstone here if replica missed a generation.
+	as_set_index_delete_live(ns, tree, r, r_ref.r_h);
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 }

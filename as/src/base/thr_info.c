@@ -66,13 +66,14 @@
 #include "base/monitor.h"
 #include "base/nsup.h"
 #include "base/scan.h"
+#include "base/security.h"
 #include "base/service.h"
+#include "base/set_index.h"
+#include "base/smd.h"
+#include "base/stats.h"
 #include "base/thr_info_port.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/security.h"
-#include "base/smd.h"
-#include "base/stats.h"
 #include "base/truncate.h"
 #include "base/udf_cask.h"
 #include "base/xdr.h"
@@ -2985,27 +2986,14 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 
 			strcpy(set_name, context);
 
-			// Ideally, set operations should not be part of configs. But,
-			// set-delete is exception for historical reasons. Do an early check
-			// and bail out if set doesn't exist.
-			uint16_t set_id = as_namespace_get_set_id(ns, set_name);
-			if (set_id == INVALID_SET_ID) {
-				context_len = sizeof(context);
-				if (0 == as_info_parameter_get(params, "set-delete", context,
-						&context_len)) {
-					cf_warning(AS_INFO, "set-delete failed because set %s doesn't exist in ns %s",
-							set_name, ns->name);
-					goto Error;
-				}
-			}
-
 			// configurations should create set if it doesn't exist.
 			// checks if there is a vmap set with the same name and if so returns
 			// a ptr to it. if not, it creates an set structure, initializes it
 			// and returns a ptr to it.
 			as_set *p_set = NULL;
+			uint16_t set_id;
 			if (as_namespace_get_create_set_w_len(ns, set_name, set_name_len,
-					&p_set, NULL) != 0) {
+					&p_set, &set_id) != 0) {
 				goto Error;
 			}
 
@@ -3014,11 +3002,30 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			if (0 == as_info_parameter_get(params, "disable-eviction", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
-					DISABLE_SET_EVICTION(p_set, true);
+					p_set->eviction_disabled = true;
 				}
 				else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
 					cf_info(AS_INFO, "Changing value of disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
-					DISABLE_SET_EVICTION(p_set, false);
+					p_set->eviction_disabled = false;
+				}
+				else {
+					goto Error;
+				}
+			}
+			else if (0 == as_info_parameter_get(params, "enable-index", context, &context_len)) {
+				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
+					cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s", ns->name, p_set->name, context);
+
+					if (! as_set_index_enable(ns, p_set, set_id)) {
+						goto Error;
+					}
+				}
+				else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
+					cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s", ns->name, p_set->name, context);
+
+					if (! as_set_index_disable(ns, p_set, set_id)) {
+						goto Error;
+					}
 				}
 				else {
 					goto Error;
@@ -5413,6 +5420,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "memory_used_bytes", used_memory);
 	info_append_uint64(db, "memory_used_data_bytes", data_memory);
 	info_append_uint64(db, "memory_used_index_bytes", index_memory);
+	info_append_uint64(db, "memory_used_set_index_bytes", as_set_index_used_bytes(ns));
 	info_append_uint64(db, "memory_used_sindex_bytes", sindex_memory);
 
 	uint64_t free_pct = ns->memory_size > used_memory ?

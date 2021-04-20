@@ -65,6 +65,7 @@
 #include "base/scan_manager.h"
 #include "base/security.h"
 #include "base/service.h"
+#include "base/set_index.h"
 #include "base/transaction.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
@@ -805,15 +806,21 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 		return;
 	}
 
-	uint64_t slice_start = cf_getms();
+	bool used_set_index = false;
+	uint64_t slice_start = cf_getus();
 	basic_scan_slice slice = { job, &bb };
 
 	if (job->max_per_partition == 0 || job->sample_count < job->sample_max) {
 		cf_digest* keyd = _job->pids[rsv->p->id].has_digest ?
 				&_job->pids[rsv->p->id].keyd : NULL;
 
-		as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
-				(void*)&slice);
+		used_set_index = as_set_index_reduce(_job->ns, tree, _job->set_id, keyd,
+				basic_scan_job_reduce_cb, (void*)&slice);
+
+		if (! used_set_index) {
+			as_index_reduce_from_live(tree, keyd, basic_scan_job_reduce_cb,
+					(void*)&slice);
+		}
 	}
 
 	as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
@@ -824,9 +831,9 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 
 	*bb_r = bb;
 
-	cf_detail(AS_SCAN, "%s:%u basic scan job %lu in thread %d took %lu ms",
-			rsv->ns->name, rsv->p->id, _job->trid, cf_thread_sys_tid(),
-			cf_getms() - slice_start);
+	cf_detail(AS_SCAN, "%s:%u basic scan job %lu %stook %lu us",
+			rsv->ns->name, rsv->p->id, _job->trid,
+			used_set_index ? "via set-index " : "", cf_getus() - slice_start);
 }
 
 void
@@ -1218,7 +1225,10 @@ aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 
 	aggr_scan_slice slice = { job, &ll, &bb, rsv };
 
-	as_index_reduce_live(rsv->tree, aggr_scan_job_reduce_cb, (void*)&slice);
+	if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
+			aggr_scan_job_reduce_cb, (void*)&slice)) {
+		as_index_reduce_live(rsv->tree, aggr_scan_job_reduce_cb, (void*)&slice);
+	}
 
 	if (cf_ll_size(&ll) != 0) {
 		as_result result;
@@ -1580,7 +1590,10 @@ udf_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 {
 	(void)bb_r;
 
-	as_index_reduce_live(rsv->tree, udf_bg_scan_job_reduce_cb, (void*)_job);
+	if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
+			udf_bg_scan_job_reduce_cb, (void*)_job)) {
+		as_index_reduce_live(rsv->tree, udf_bg_scan_job_reduce_cb, (void*)_job);
+	}
 }
 
 void
@@ -1858,7 +1871,10 @@ ops_bg_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 {
 	(void)bb_r;
 
-	as_index_reduce_live(rsv->tree, ops_bg_scan_job_reduce_cb, (void*)_job);
+	if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
+			ops_bg_scan_job_reduce_cb, (void*)_job)) {
+		as_index_reduce_live(rsv->tree, ops_bg_scan_job_reduce_cb, (void*)_job);
+	}
 }
 
 void

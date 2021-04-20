@@ -52,7 +52,9 @@
 
 struct as_flat_opt_meta_s;
 struct as_flat_record_s;
+struct as_index_ref_s;
 struct as_index_s;
+struct as_index_tree_s;
 struct as_namespace_s;
 struct as_storage_rd_s;
 struct drv_ssd_s;
@@ -245,7 +247,7 @@ void apply_opt_meta(struct as_index_s *r, struct as_namespace_s *ns, const struc
 
 // Tomb raider.
 void ssd_cold_start_adjust_cenotaph(struct as_namespace_s *ns, const struct as_flat_record_s *flat, uint32_t block_void_time, struct as_index_s *r);
-void ssd_cold_start_transition_record(struct as_namespace_s *ns, const struct as_flat_record_s *flat, const as_flat_opt_meta* opt_meta, struct as_index_s *r, bool is_create);
+void ssd_cold_start_transition_record(struct as_namespace_s *ns, const struct as_flat_record_s *flat, const as_flat_opt_meta* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s *r_ref, bool is_create);
 void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 
 // Record encryption.

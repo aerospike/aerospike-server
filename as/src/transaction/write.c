@@ -45,6 +45,7 @@
 #include "base/expop.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/set_index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
@@ -97,13 +98,14 @@ bool check_msg_set_name(as_transaction* tr, const char* set_name);
 int iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
 		as_exp** predexp);
 
-int write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
-		rw_request* rw, bool* is_delete);
-int write_master_dim(as_transaction* tr, as_storage_rd* rd,
+int write_master_dim_single_bin(as_transaction* tr, as_index_ref* r_ref,
+		as_storage_rd* rd, rw_request* rw, bool* is_delete);
+int write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		bool record_level_replace, rw_request* rw, bool* is_delete);
-int write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool must_fetch_data, rw_request* rw, bool* is_delete);
-int write_master_ssd(as_transaction* tr, as_storage_rd* rd,
+int write_master_ssd_single_bin(as_transaction* tr, as_index_ref* r_ref,
+		as_storage_rd* rd, bool must_fetch_data, rw_request* rw,
+		bool* is_delete);
+int write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		bool must_fetch_data, bool record_level_replace, rw_request* rw,
 		bool* is_delete);
 
@@ -626,6 +628,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		// If it's an expired or truncated record, pretend it's a fresh create.
 		if (! record_created && is_doomed) {
+			as_set_index_delete_live(ns, tree, r, r_ref.r_h);
+
 			if (record_has_sindex(r, ns)) {
 				// Pessimistic, but not (yet) worth the full check.
 				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
@@ -759,23 +763,23 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	if (ns->storage_data_in_memory) {
 		if (ns->single_bin) {
-			result = write_master_dim_single_bin(tr, &rd,
+			result = write_master_dim_single_bin(tr, &r_ref, &rd,
 					rw, &is_delete);
 		}
 		else {
-			result = write_master_dim(tr, &rd,
+			result = write_master_dim(tr, &r_ref, &rd,
 					record_level_replace,
 					rw, &is_delete);
 		}
 	}
 	else {
 		if (ns->single_bin) {
-			result = write_master_ssd_single_bin(tr, &rd,
+			result = write_master_ssd_single_bin(tr, &r_ref, &rd,
 					must_fetch_data,
 					rw, &is_delete);
 		}
 		else {
-			result = write_master_ssd(tr, &rd,
+			result = write_master_ssd(tr, &r_ref, &rd,
 					must_fetch_data, record_level_replace,
 					rw, &is_delete);
 		}
@@ -1168,8 +1172,8 @@ iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
 //
 
 int
-write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
-		rw_request* rw, bool* is_delete)
+write_master_dim_single_bin(as_transaction* tr, as_index_ref* r_ref,
+		as_storage_rd* rd, rw_request* rw, bool* is_delete)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1260,6 +1264,8 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		return -result;
 	}
 
+	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
@@ -1282,7 +1288,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 
 int
-write_master_dim(as_transaction* tr, as_storage_rd* rd,
+write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		bool record_level_replace, rw_request* rw, bool* is_delete)
 {
 	// Shortcut pointers.
@@ -1385,6 +1391,8 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 		return -result;
 	}
 
+	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
@@ -1427,8 +1435,9 @@ write_master_dim(as_transaction* tr, as_storage_rd* rd,
 
 
 int
-write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
-		bool must_fetch_data, rw_request* rw, bool* is_delete)
+write_master_ssd_single_bin(as_transaction* tr, as_index_ref* r_ref,
+		as_storage_rd* rd, bool must_fetch_data, rw_request* rw,
+		bool* is_delete)
 {
 	// Shortcut pointers.
 	as_namespace* ns = tr->rsv.ns;
@@ -1505,6 +1514,8 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		return -result;
 	}
 
+	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
@@ -1524,8 +1535,9 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 
 int
-write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
-		bool record_level_replace, rw_request* rw, bool* is_delete)
+write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
+		bool must_fetch_data, bool record_level_replace, rw_request* rw,
+		bool* is_delete)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1630,6 +1642,8 @@ write_master_ssd(as_transaction* tr, as_storage_rd* rd, bool must_fetch_data,
 		return -result;
 	}
 
+	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
+			&old_metadata);
 	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 

@@ -44,6 +44,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/set_index.h"
 #include "base/stats.h"
 
 
@@ -51,29 +52,11 @@
 // Typedefs & constants.
 //
 
-typedef enum {
-	AS_BLACK = 0,
-	AS_RED = 1
-} as_index_color;
-
-typedef struct as_index_ph_s {
-	as_index* r;
-	cf_arenax_handle r_h;
-} as_index_ph;
-
-typedef struct as_index_ph_array_s {
-	uint32_t alloc_sz;
-	uint32_t pos;
-	as_index_ph indexes[];
-} as_index_ph_array;
-
 typedef struct as_index_ele_s {
 	struct as_index_ele_s* parent;
 	cf_arenax_handle me_h;
 	as_index* me;
 } as_index_ele;
-
-static const size_t MAX_STACK_ARRAY_BYTES = 128 * 1024;
 
 
 //==========================================================
@@ -91,7 +74,7 @@ void* run_index_tree_gc(void* unused);
 void as_index_tree_destroy(as_index_tree* tree);
 
 bool as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
-void as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd, cf_arenax_handle r_h, as_index_ph_array* v_a);
+void as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd, cf_arenax_handle r_h, as_index_ph_array* ph_a);
 void as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h);
 
 int as_index_sprig_try_exists(as_index_sprig* isprig, const cf_digest* keyd);
@@ -163,6 +146,9 @@ as_index_tree_create(as_index_tree_shared* shared, uint8_t id,
 	tree->shared = shared;
 	tree->n_elements = 0;
 
+	cf_mutex_init(&tree->set_trees_lock);
+	memset(tree->set_trees, 0, sizeof(tree->set_trees));
+
 	as_lock_pair* pair = tree_locks(tree);
 	as_lock_pair* pair_end = pair + NUM_LOCK_PAIRS;
 
@@ -218,7 +204,7 @@ as_index_tree_release(as_index_tree* tree)
 		return;
 	}
 
-	cf_assert(rc == 0, AS_INDEX, "tree ref-count %d", rc);
+	as_set_index_destroy_all(tree);
 
 	// TODO - call as_index_tree_destroy() directly if tree is empty?
 
@@ -456,24 +442,27 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 		return true;
 	}
 
-	size_t sz = sizeof(as_index_ph_array) + (sizeof(as_index_ph) * n_elements);
-	uint8_t buf[MAX_STACK_ARRAY_BYTES];
+	as_index_ph stack_phs[MAX_STACK_PHS];
+	as_index_ph_array ph_a = {
+			.is_stack = true,
+			.capacity = n_elements, // unused for now
+			.phs = stack_phs
+	};
 
-	as_index_ph_array* v_a = sz > MAX_STACK_ARRAY_BYTES ?
-			cf_malloc(sz) : (as_index_ph_array*)buf;
-
-	v_a->alloc_sz = n_elements;
-	v_a->pos = 0;
+	if (n_elements > MAX_STACK_PHS) {
+		ph_a.is_stack = false;
+		ph_a.phs = cf_malloc(sizeof(as_index_ph) * n_elements);
+	}
 
 	// Traverse just fills array, then we make callbacks outside reduce lock.
-	as_index_sprig_traverse(isprig, keyd, isprig->sprig->root_h, v_a);
+	as_index_sprig_traverse(isprig, keyd, isprig->sprig->root_h, &ph_a);
 
 	cf_mutex_unlock(&isprig->pair->reduce_lock);
 
 	bool do_more = true;
 
-	for (uint32_t i = 0; i < v_a->pos; i++) {
-		as_index_ph* ph = &v_a->indexes[i];
+	for (uint32_t i = 0; i < ph_a.n_used; i++) {
+		as_index_ph* ph = &ph_a.phs[i];
 		as_index_ref r_ref = {
 				.r = ph->r,
 				.r_h = ph->r_h,
@@ -507,8 +496,8 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 		}
 	}
 
-	if (v_a != (as_index_ph_array*)buf) {
-		cf_free(v_a);
+	if (! ph_a.is_stack) {
+		cf_free(ph_a.phs);
 	}
 
 	return do_more;
@@ -516,17 +505,17 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 
 void
 as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd,
-		cf_arenax_handle r_h, as_index_ph_array* v_a)
+		cf_arenax_handle r_h, as_index_ph_array* ph_a)
 {
 	if (r_h == SENTINEL_H) {
 		return;
 	}
 
-	as_index* r = RESOLVE_H(r_h);
+	as_index* r = RESOLVE(r_h);
 	int cmp = 0; // initialized to satisfy compiler
 
 	if (keyd == NULL || (cmp = cf_digest_compare(&r->keyd, keyd)) < 0) {
-		as_index_sprig_traverse(isprig, keyd, r->left_h, v_a);
+		as_index_sprig_traverse(isprig, keyd, r->left_h, ph_a);
 	}
 
 	// We do not collect the element with the boundary digest.
@@ -534,14 +523,15 @@ as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd,
 	if (keyd == NULL || cmp < 0) {
 		as_index_reserve(r);
 
-		v_a->indexes[v_a->pos].r = r;
-		v_a->indexes[v_a->pos].r_h = r_h;
-		v_a->pos++;
+		as_index_ph* ph = &ph_a->phs[ph_a->n_used++];
+
+		ph->r = r;
+		ph->r_h = r_h;
 
 		keyd = NULL;
 	}
 
-	as_index_sprig_traverse(isprig, keyd, r->right_h, v_a);
+	as_index_sprig_traverse(isprig, keyd, r->right_h, ph_a);
 }
 
 void
@@ -551,7 +541,7 @@ as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h)
 		return;
 	}
 
-	as_index* r = RESOLVE_H(r_h);
+	as_index* r = RESOLVE(r_h);
 
 	as_index_sprig_traverse_purge(isprig, r->left_h);
 	as_index_sprig_traverse_purge(isprig, r->right_h);
@@ -649,7 +639,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id,
 		// Search for the specified element, or a parent to insert it under.
 
 		root_parent.left_h = isprig->sprig->root_h;
-		root_parent.color = AS_BLACK;
+		root_parent.color = BLACK;
 
 		ele->parent = NULL; // we'll never look this far up
 		ele->me_h = 0; // root parent has no handle, never used
@@ -658,7 +648,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id,
 		cf_arenax_handle t_h = isprig->sprig->root_h;
 
 		while (t_h != SENTINEL_H) {
-			as_index* t = RESOLVE_H(t_h);
+			as_index* t = RESOLVE(t_h);
 
 			ele++;
 			ele->parent = ele - 1;
@@ -714,14 +704,14 @@ as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id,
 		return -1;
 	}
 
-	as_index* n = RESOLVE_H(n_h);
+	as_index* n = RESOLVE(n_h);
 
 	*n = (as_index){
 		.tree_id = tree_id,
 		.keyd = *keyd,
 		.left_h = SENTINEL_H,
 		.right_h = SENTINEL_H,
-		.color = AS_RED
+		.color = RED
 	};
 
 	// Insert the new element n under parent ele.
@@ -776,7 +766,7 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 	as_index_ele* ele = eles;
 
 	root_parent.left_h = isprig->sprig->root_h;
-	root_parent.color = AS_BLACK;
+	root_parent.color = BLACK;
 
 	ele->parent = NULL; // we'll never look this far up
 	ele->me_h = 0; // root parent has no handle, never used
@@ -785,7 +775,7 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 	r_h = isprig->sprig->root_h;
 
 	while (r_h != SENTINEL_H) {
-		r = RESOLVE_H(r_h);
+		r = RESOLVE(r_h);
 
 		ele++;
 		ele->parent = ele - 1;
@@ -826,13 +816,13 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 		ele++;
 		ele->parent = ele - 1;
 		ele->me_h = r->right_h;
-		ele->me = RESOLVE_H(ele->me_h);
+		ele->me = RESOLVE(ele->me_h);
 
 		while (ele->me->left_h != SENTINEL_H) {
 			ele++;
 			ele->parent = ele - 1;
 			ele->me_h = ele->parent->me->left_h;
-			ele->me = RESOLVE_H(ele->me_h);
+			ele->me = RESOLVE(ele->me_h);
 		}
 	}
 	// else ele is left at r, i.e. s == r
@@ -846,7 +836,7 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 	ele++;
 
 	ele->me_h = s->left_h == SENTINEL_H ? s->right_h : s->left_h;
-	ele->me = RESOLVE_H(ele->me_h);
+	ele->me = RESOLVE(ele->me_h);
 
 	// Cut s (remember, it could be r) out of the tree.
 	ele->parent = s_e->parent;
@@ -860,7 +850,7 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 
 	// Rebalance at ele if necessary. (Note - if r != s, r is in the tree, and
 	// its parent may change during rebalancing.)
-	if (s->color == AS_BLACK) {
+	if (s->color == BLACK) {
 		as_index_sprig_delete_rebalance(isprig, &root_parent, ele);
 	}
 
@@ -907,7 +897,7 @@ as_index_sprig_search_lockless(as_index_sprig* isprig, const cf_digest* keyd,
 	cf_arenax_handle r_h = isprig->sprig->root_h;
 
 	while (r_h != SENTINEL_H) {
-		as_index* r = RESOLVE_H(r_h);
+		as_index* r = RESOLVE(r_h);
 
 		_mm_prefetch(r, _MM_HINT_NTA);
 
@@ -941,18 +931,18 @@ as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent,
 	as_index_ele* r_e = ele;
 	as_index_ele* parent_e = r_e->parent;
 
-	while (parent_e->me->color == AS_RED) {
+	while (parent_e->me->color == RED) {
 		as_index_ele* grandparent_e = parent_e->parent;
 
 		if (r_e->parent->me_h == grandparent_e->me->left_h) {
 			// Element u is r's 'uncle'.
 			cf_arenax_handle u_h = grandparent_e->me->right_h;
-			as_index* u = RESOLVE_H(u_h);
+			as_index* u = RESOLVE(u_h);
 
-			if (u->color == AS_RED) {
-				u->color = AS_BLACK;
-				parent_e->me->color = AS_BLACK;
-				grandparent_e->me->color = AS_RED;
+			if (u->color == RED) {
+				u->color = BLACK;
+				parent_e->me->color = BLACK;
+				grandparent_e->me->color = RED;
 
 				// Move up two layers - r becomes old r's grandparent.
 				r_e = parent_e->parent;
@@ -973,8 +963,8 @@ as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent,
 					// Note - grandparent_e is unchanged.
 				}
 
-				parent_e->me->color = AS_BLACK;
-				grandparent_e->me->color = AS_RED;
+				parent_e->me->color = BLACK;
+				grandparent_e->me->color = RED;
 
 				// r and parent move up a layer as grandparent rotates down.
 				as_index_rotate_right(grandparent_e, parent_e);
@@ -983,12 +973,12 @@ as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent,
 		else {
 			// Element u is r's 'uncle'.
 			cf_arenax_handle u_h = grandparent_e->me->left_h;
-			as_index* u = RESOLVE_H(u_h);
+			as_index* u = RESOLVE(u_h);
 
-			if (u->color == AS_RED) {
-				u->color = AS_BLACK;
-				parent_e->me->color = AS_BLACK;
-				grandparent_e->me->color = AS_RED;
+			if (u->color == RED) {
+				u->color = BLACK;
+				parent_e->me->color = BLACK;
+				grandparent_e->me->color = RED;
 
 				// Move up two layers - r becomes old r's grandparent.
 				r_e = parent_e->parent;
@@ -1009,8 +999,8 @@ as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent,
 					// Note - grandparent_e is unchanged.
 				}
 
-				parent_e->me->color = AS_BLACK;
-				grandparent_e->me->color = AS_RED;
+				parent_e->me->color = BLACK;
+				grandparent_e->me->color = RED;
 
 				// r and parent move up a layer as grandparent rotates down.
 				as_index_rotate_left(grandparent_e, parent_e);
@@ -1018,7 +1008,7 @@ as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent,
 		}
 	}
 
-	RESOLVE_H(root_parent->left_h)->color = AS_BLACK;
+	RESOLVE(root_parent->left_h)->color = BLACK;
 }
 
 void
@@ -1030,16 +1020,16 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 	// ele keeps building the stack down while r_e goes up.
 	as_index_ele* r_e = ele;
 
-	while (r_e->me->color == AS_BLACK && r_e->me_h != root_parent->left_h) {
+	while (r_e->me->color == BLACK && r_e->me_h != root_parent->left_h) {
 		as_index* r_parent = r_e->parent->me;
 
 		if (r_e->me_h == r_parent->left_h) {
 			cf_arenax_handle s_h = r_parent->right_h;
-			as_index* s = RESOLVE_H(s_h);
+			as_index* s = RESOLVE(s_h);
 
-			if (s->color == AS_RED) {
-				s->color = AS_BLACK;
-				r_parent->color = AS_RED;
+			if (s->color == RED) {
+				s->color = BLACK;
+				r_parent->color = RED;
 
 				ele++;
 				// ele->parent will be set by rotation.
@@ -1049,21 +1039,21 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 				as_index_rotate_left(r_e->parent, ele);
 
 				s_h = r_parent->right_h;
-				s = RESOLVE_H(s_h);
+				s = RESOLVE(s_h);
 			}
 
-			as_index* s_left = RESOLVE_H(s->left_h);
-			as_index* s_right = RESOLVE_H(s->right_h);
+			as_index* s_left = RESOLVE(s->left_h);
+			as_index* s_right = RESOLVE(s->right_h);
 
-			if (s_left->color == AS_BLACK && s_right->color == AS_BLACK) {
-				s->color = AS_RED;
+			if (s_left->color == BLACK && s_right->color == BLACK) {
+				s->color = RED;
 
 				r_e = r_e->parent;
 			}
 			else {
-				if (s_right->color == AS_BLACK) {
-					s_left->color = AS_BLACK;
-					s->color = AS_RED;
+				if (s_right->color == BLACK) {
+					s_left->color = BLACK;
+					s->color = RED;
 
 					ele++;
 					ele->parent = r_e->parent;
@@ -1084,8 +1074,8 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 				}
 
 				s->color = r_parent->color;
-				r_parent->color = AS_BLACK;
-				RESOLVE_H(s->right_h)->color = AS_BLACK;
+				r_parent->color = BLACK;
+				RESOLVE(s->right_h)->color = BLACK;
 
 				ele++;
 				// ele->parent will be set by rotation.
@@ -1094,18 +1084,18 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 
 				as_index_rotate_left(r_e->parent, ele);
 
-				RESOLVE_H(root_parent->left_h)->color = AS_BLACK;
+				RESOLVE(root_parent->left_h)->color = BLACK;
 
 				return;
 			}
 		}
 		else {
 			cf_arenax_handle s_h = r_parent->left_h;
-			as_index* s = RESOLVE_H(s_h);
+			as_index* s = RESOLVE(s_h);
 
-			if (s->color == AS_RED) {
-				s->color = AS_BLACK;
-				r_parent->color = AS_RED;
+			if (s->color == RED) {
+				s->color = BLACK;
+				r_parent->color = RED;
 
 				ele++;
 				// ele->parent will be set by rotation.
@@ -1115,21 +1105,21 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 				as_index_rotate_right(r_e->parent, ele);
 
 				s_h = r_parent->left_h;
-				s = RESOLVE_H(s_h);
+				s = RESOLVE(s_h);
 			}
 
-			as_index* s_left = RESOLVE_H(s->left_h);
-			as_index* s_right = RESOLVE_H(s->right_h);
+			as_index* s_left = RESOLVE(s->left_h);
+			as_index* s_right = RESOLVE(s->right_h);
 
-			if (s_left->color == AS_BLACK && s_right->color == AS_BLACK) {
-				s->color = AS_RED;
+			if (s_left->color == BLACK && s_right->color == BLACK) {
+				s->color = RED;
 
 				r_e = r_e->parent;
 			}
 			else {
-				if (s_left->color == AS_BLACK) {
-					s_right->color = AS_BLACK;
-					s->color = AS_RED;
+				if (s_left->color == BLACK) {
+					s_right->color = BLACK;
+					s->color = RED;
 
 					ele++;
 					ele->parent = r_e->parent;
@@ -1150,8 +1140,8 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 				}
 
 				s->color = r_parent->color;
-				r_parent->color = AS_BLACK;
-				RESOLVE_H(s->left_h)->color = AS_BLACK;
+				r_parent->color = BLACK;
+				RESOLVE(s->left_h)->color = BLACK;
 
 				ele++;
 				// ele->parent will be set by rotation.
@@ -1160,14 +1150,14 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 
 				as_index_rotate_right(r_e->parent, ele);
 
-				RESOLVE_H(root_parent->left_h)->color = AS_BLACK;
+				RESOLVE(root_parent->left_h)->color = BLACK;
 
 				return;
 			}
 		}
 	}
 
-	r_e->me->color = AS_BLACK;
+	r_e->me->color = BLACK;
 }
 
 void

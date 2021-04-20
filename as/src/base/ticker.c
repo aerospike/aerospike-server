@@ -47,6 +47,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/set_index.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
@@ -494,20 +495,22 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 	double mem_used_pct = (double)(total_mem * 100) / (double)ns->memory_size;
 
 	if (ns->storage_data_in_memory) {
-		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu sindex-bytes %lu data-bytes %lu used-pct %.2lf",
+		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu set-index-bytes %lu sindex-bytes %lu data-bytes %lu used-pct %.2lf",
 				ns->name,
 				total_mem,
 				index_mem,
+				as_set_index_used_bytes(ns),
 				sindex_mem,
 				data_mem,
 				mem_used_pct
 				);
 	}
 	else {
-		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu sindex-bytes %lu used-pct %.2lf",
+		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu set-index-bytes %lu sindex-bytes %lu used-pct %.2lf",
 				ns->name,
 				total_mem,
 				index_mem,
+				as_set_index_used_bytes(ns),
 				sindex_mem,
 				mem_used_pct
 				);
