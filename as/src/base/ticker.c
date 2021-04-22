@@ -306,12 +306,14 @@ log_line_in_progress()
 void
 log_line_fds()
 {
-	uint64_t n_proto_fds_opened = g_stats.proto_connections_opened;
+	// Read closed before opened.
 	uint64_t n_proto_fds_closed = g_stats.proto_connections_closed;
-	uint64_t n_hb_fds_opened = g_stats.heartbeat_connections_opened;
 	uint64_t n_hb_fds_closed = g_stats.heartbeat_connections_closed;
-	uint64_t n_fabric_fds_opened = g_stats.fabric_connections_opened;
 	uint64_t n_fabric_fds_closed = g_stats.fabric_connections_closed;
+	// TODO - non-86 memory barrier.
+	uint64_t n_proto_fds_opened = g_stats.proto_connections_opened;
+	uint64_t n_hb_fds_opened = g_stats.heartbeat_connections_opened;
+	uint64_t n_fabric_fds_opened = g_stats.fabric_connections_opened;
 
 	uint64_t n_proto_fds_open = n_proto_fds_opened - n_proto_fds_closed;
 	uint64_t n_hb_fds_open = n_hb_fds_opened - n_hb_fds_closed;

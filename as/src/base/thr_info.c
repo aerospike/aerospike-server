@@ -450,9 +450,28 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
 	info_append_int(db, "tree_gc_queue", as_index_tree_gc_queue_size());
 
-	info_append_uint64(db, "client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed);
-	info_append_uint64(db, "heartbeat_connections", g_stats.heartbeat_connections_opened - g_stats.heartbeat_connections_closed);
-	info_append_uint64(db, "fabric_connections", g_stats.fabric_connections_opened - g_stats.fabric_connections_closed);
+	// Read closed before opened.
+	uint64_t n_proto_fds_closed = g_stats.proto_connections_closed;
+	uint64_t n_hb_fds_closed = g_stats.heartbeat_connections_closed;
+	uint64_t n_fabric_fds_closed = g_stats.fabric_connections_closed;
+	// TODO - non-86 memory barrier.
+	uint64_t n_proto_fds_opened = g_stats.proto_connections_opened;
+	uint64_t n_hb_fds_opened = g_stats.heartbeat_connections_opened;
+	uint64_t n_fabric_fds_opened = g_stats.fabric_connections_opened;
+
+	uint64_t n_proto_fds_open = n_proto_fds_opened - n_proto_fds_closed;
+	uint64_t n_hb_fds_open = n_hb_fds_opened - n_hb_fds_closed;
+	uint64_t n_fabric_fds_open = n_fabric_fds_opened - n_fabric_fds_closed;
+
+	info_append_uint64(db, "client_connections", n_proto_fds_open);
+	info_append_uint64(db, "client_connections_opened", n_proto_fds_opened);
+	info_append_uint64(db, "client_connections_closed", n_proto_fds_closed);
+	info_append_uint64(db, "heartbeat_connections", n_hb_fds_open);
+	info_append_uint64(db, "heartbeat_connections_opened", n_hb_fds_opened);
+	info_append_uint64(db, "heartbeat_connections_closed", n_hb_fds_closed);
+	info_append_uint64(db, "fabric_connections", n_fabric_fds_open);
+	info_append_uint64(db, "fabric_connections_opened", n_fabric_fds_opened);
+	info_append_uint64(db, "fabric_connections_closed", n_fabric_fds_closed);
 
 	info_append_uint64(db, "heartbeat_received_self", g_stats.heartbeat_received_self);
 	info_append_uint64(db, "heartbeat_received_foreign", g_stats.heartbeat_received_foreign);
