@@ -356,8 +356,9 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 		as_partition_create_set_index(ns, pid, set_id);
 	}
 
-	p_set->index_enabled = true;
 	p_set->index_populating = true;
+	// TODO - non-x86 would need memory barrier here.
+	p_set->index_enabled = true;
 
 	cf_mutex_unlock(&g_balance_lock);
 
@@ -816,8 +817,7 @@ ssprig_delete(ssprig_info* ssi)
 	}
 
 	if (r_h == SENTINEL_H) {
-		cf_crash(AS_INDEX, "delete found no element - unexpected");
-		return;
+		return; // element not found - can happen while populating
 	}
 
 	// We found the tree element - delete the element.
