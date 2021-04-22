@@ -498,7 +498,7 @@ static bool build_value_msgpack(build_args* args);
 
 // Build utilities.
 static bool parse_op_call(op_call* op, build_args* args);
-static void build_set_expected_particle_type(build_args* args);
+static bool build_set_expected_particle_type(build_args* args);
 static bool is_old_predexp(const uint8_t* buf);
 static as_exp* check_filter_exp(as_exp* exp);
 
@@ -1070,7 +1070,11 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 			args.exp->cleanup_stack_ix, cleanup_count);
 
 	args.exp->max_var_count = args.max_var_idx;
-	build_set_expected_particle_type(&args);
+
+	if (! build_set_expected_particle_type(&args)) {
+		as_exp_destroy(args.exp);
+		return NULL;
+	}
 
 	if (cf_log_check_level(AS_EXP, CF_DETAIL)) {
 		cf_dyn_buf_define_size(db, 10240);
@@ -1935,7 +1939,7 @@ build_int_shift(build_args* args)
 
 	result_type arg1 = args->entry->r_type;
 
-	if (arg0 != TYPE_INT && arg1 != TYPE_INT) {
+	if (! (arg0 == TYPE_INT && arg1 == TYPE_INT)) {
 		cf_warning(AS_EXP, "build_int_shift - error %u all args are type %u (%s) - arg0 %u (%s) arg1 %u (%s)",
 				AS_ERR_PARAMETER, TYPE_INT, result_type_str[TYPE_INT],
 				arg0, result_type_to_str(arg0), arg1, result_type_to_str(arg1));
@@ -2745,45 +2749,48 @@ parse_op_call(op_call* op, build_args* args)
 	return true;
 }
 
-void
+bool
 build_set_expected_particle_type(build_args* args)
 {
 	switch (args->entry->r_type) {
 	case TYPE_NIL:
 		args->exp->expected_type = AS_PARTICLE_TYPE_NULL;
-		return;
+		break;
 	case TYPE_TRILEAN:
 		args->exp->expected_type = AS_PARTICLE_TYPE_BOOL;
-		return;
+		break;
 	case TYPE_INT:
 		args->exp->expected_type = AS_PARTICLE_TYPE_INTEGER;
-		return;
+		break;
 	case TYPE_STR:
 		args->exp->expected_type = AS_PARTICLE_TYPE_STRING;
-		return;
+		break;
 	case TYPE_LIST:
 		args->exp->expected_type = AS_PARTICLE_TYPE_LIST;
-		return;
+		break;
 	case TYPE_MAP:
 		args->exp->expected_type = AS_PARTICLE_TYPE_MAP;
-		return;
+		break;
 	case TYPE_BLOB:
 		args->exp->expected_type = AS_PARTICLE_TYPE_BLOB;
-		return;
+		break;
 	case TYPE_FLOAT:
 		args->exp->expected_type = AS_PARTICLE_TYPE_FLOAT;
-		return;
+		break;
 	case TYPE_GEOJSON:
 		args->exp->expected_type = AS_PARTICLE_TYPE_GEOJSON;
-		return;
+		break;
 	case TYPE_HLL:
 		args->exp->expected_type = AS_PARTICLE_TYPE_HLL;
-		return;
+		break;
 	case TYPE_END:
 	default:
-		cf_crash(AS_EXP, "build_set_expected_particle_type - unexpected result_type %u",
+		cf_warning(AS_EXP, "build_set_expected_particle_type - unexpected result_type %u",
 				args->entry->r_type);
+		return false;
 	}
+
+	return true;
 }
 
 static bool
