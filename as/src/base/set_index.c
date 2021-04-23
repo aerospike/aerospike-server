@@ -248,7 +248,7 @@ as_set_index_insert(as_namespace* ns, as_index_tree* tree, uint16_t set_id,
 	ssi_from_keyd(tree, stree, &r->keyd, &ssi);
 
 	if (! ssprig_insert(&ssi, r_h)) {
-		cf_crash(AS_INDEX, "insert found existing element - unexpected");
+		cf_warning(AS_INDEX, "insert found existing element - unexpected");
 	}
 
 	stree_release(stree);
