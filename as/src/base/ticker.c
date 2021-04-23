@@ -277,6 +277,10 @@ log_line_system()
 void
 log_line_process()
 {
+	cf_thread_stats ts;
+
+	cf_thread_get_stats(&ts);
+
 	size_t allocated_kbytes;
 	size_t active_kbytes;
 	size_t mapped_kbytes;
@@ -285,8 +289,9 @@ log_line_process()
 	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
 			&efficiency_pct, NULL);
 
-	cf_info(AS_INFO, "   process: cpu-pct %u heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
+	cf_info(AS_INFO, "   process: cpu-pct %u threads (%u,%u,%u,%u) heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
 			process_cpu(),
+			ts.n_joinable, ts.n_detached, ts.n_pool_total, ts.n_pool_active,
 			allocated_kbytes, active_kbytes, mapped_kbytes,
 			efficiency_pct
 			);

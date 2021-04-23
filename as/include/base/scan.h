@@ -46,7 +46,6 @@ struct as_transaction_s;
 
 void as_scan_init(void);
 int as_scan(struct as_transaction_s *tr, struct as_namespace_s *ns);
-void as_scan_set_max_threads(uint32_t n_threads);
 void as_scan_limit_finished_jobs(void);
 int as_scan_get_active_job_count(void);
 int as_scan_list(char* name, cf_dyn_buf* db);

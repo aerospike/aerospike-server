@@ -3534,15 +3534,15 @@ as_query_init()
 	g_query_work_queue = cf_queue_create(sizeof(query_work *), true);
 
 	for (uint32_t i = 0; i < g_config.query_worker_threads; i++) {
-		cf_thread_create_detached(qwork_th, (void*)g_query_work_queue);
+		cf_thread_create_transient(qwork_th, (void*)g_query_work_queue);
 	}
 
 	g_query_short_queue = cf_queue_create(sizeof(as_query_transaction *), true);
 	g_query_long_queue = cf_queue_create(sizeof(as_query_transaction *), true);
 
 	for (uint32_t i = 0; i < g_config.query_threads; i += 2) {
-		cf_thread_create_detached(query_th, (void*)g_query_short_queue);
-		cf_thread_create_detached(query_th, (void*)g_query_long_queue);
+		cf_thread_create_transient(query_th, (void*)g_query_short_queue);
+		cf_thread_create_transient(query_th, (void*)g_query_long_queue);
 	}
 
 	char hist_name[64];
@@ -3600,7 +3600,7 @@ as_query_worker_reinit(int set_size, int *actual_size)
 	if (set_size > g_query_worker_threadcnt) {
 		for (; i < set_size; i++) {
 			cf_detail(AS_QUERY, "Creating thread %d", i);
-			cf_thread_create_detached(qwork_th, (void*)g_query_work_queue);
+			cf_thread_create_transient(qwork_th, (void*)g_query_work_queue);
 		}
 		g_config.query_worker_threads = i;
 	}
@@ -3647,8 +3647,8 @@ as_query_reinit(int set_size, int *actual_size)
 	if (set_size > g_query_threadcnt) {
 		for (; i < set_size; i += 2) {
 			cf_detail(AS_QUERY, "Creating thread %d", i);
-			cf_thread_create_detached(query_th, (void*)g_query_short_queue);
-			cf_thread_create_detached(query_th, (void*)g_query_long_queue);
+			cf_thread_create_transient(query_th, (void*)g_query_short_queue);
+			cf_thread_create_transient(query_th, (void*)g_query_long_queue);
 		}
 		g_config.query_threads = i;
 	}

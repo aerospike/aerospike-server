@@ -220,7 +220,7 @@ as_migrate_init()
 
 	// Looks like an as_priority_thread_pool, but the reduce-pop is different.
 	for (uint32_t i = 0; i < g_config.n_migrate_threads; i++) {
-		cf_thread_create_detached(run_emigration, NULL);
+		cf_thread_create_transient(run_emigration, NULL);
 	}
 
 	cf_thread_create_detached(run_emigration_slow, NULL);
@@ -280,7 +280,7 @@ as_migrate_set_num_xmit_threads(uint32_t n_threads)
 	else {
 		// Increase the number of migrate transmit threads to n_threads.
 		while (g_config.n_migrate_threads < n_threads) {
-			cf_thread_create_detached(run_emigration, NULL);
+			cf_thread_create_transient(run_emigration, NULL);
 			g_config.n_migrate_threads++;
 		}
 	}

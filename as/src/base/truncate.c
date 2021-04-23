@@ -392,7 +392,7 @@ truncate_all(as_namespace* ns)
 	as_store_uint64(&ns->truncate.n_records_this_run, 0);
 
 	for (uint32_t i = 0; i < n_threads; i++) {
-		cf_thread_create_detached(run_truncate, (void*)ns);
+		cf_thread_create_transient(run_truncate, (void*)ns);
 	}
 }
 

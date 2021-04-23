@@ -182,7 +182,7 @@ uint32_t
 create_threads(as_priority_thread_pool* pool, uint32_t count)
 {
 	for (uint32_t i = 0; i < count; i++) {
-		cf_thread_create_detached(run_pool_thread, (void*)pool);
+		cf_thread_create_transient(run_pool_thread, (void*)pool);
 	}
 
 	return count;

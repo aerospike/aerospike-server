@@ -429,6 +429,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint32(db, "process_cpu_pct", g_process_cpu_pct);
 
+	cf_thread_stats ts;
+
+	cf_thread_get_stats(&ts);
+	info_append_uint32(db, "threads_joinable", ts.n_joinable);
+	info_append_uint32(db, "threads_detached", ts.n_detached);
+	info_append_uint32(db, "threads_pool_total", ts.n_pool_total);
+	info_append_uint32(db, "threads_pool_active", ts.n_pool_active);
+
 	size_t allocated_kbytes;
 	size_t active_kbytes;
 	size_t mapped_kbytes;
@@ -2470,7 +2478,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of scan-threads-limit from %u to %d ", g_config.n_scan_threads_limit, val);
-			as_scan_set_max_threads((uint32_t)val);
+			g_config.n_scan_threads_limit = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "batch-index-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
@@ -4957,7 +4965,7 @@ info_set_num_info_threads(uint32_t n_threads)
 	else {
 		// Increase the number of info threads to n_threads.
 		while (g_config.n_info_threads < n_threads) {
-			cf_thread_create_detached(thr_info_fn, NULL);
+			cf_thread_create_transient(thr_info_fn, NULL);
 			g_config.n_info_threads++;
 		}
 	}
@@ -6868,6 +6876,6 @@ as_info_init()
 	as_service_list_init();
 
 	for (uint32_t i = 0; i < g_config.n_info_threads; i++) {
-		cf_thread_create_detached(thr_info_fn, NULL);
+		cf_thread_create_transient(thr_info_fn, NULL);
 	}
 }

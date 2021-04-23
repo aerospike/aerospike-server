@@ -192,12 +192,6 @@ as_scan(as_transaction* tr, as_namespace* ns)
 }
 
 void
-as_scan_set_max_threads(uint32_t n_threads)
-{
-	as_scan_manager_set_max_threads(n_threads);
-}
-
-void
 as_scan_limit_finished_jobs(void)
 {
 	as_scan_manager_limit_finished_jobs();

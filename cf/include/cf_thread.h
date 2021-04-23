@@ -1,7 +1,7 @@
 /*
  * cf_thread.h
  *
- * Copyright (C) 2018-2020 Aerospike, Inc.
+ * Copyright (C) 2018-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -41,6 +41,14 @@
 
 typedef pthread_t cf_tid;
 typedef void* (*cf_thread_run_fn) (void* udata);
+typedef void (*cf_thread_exit_fn) (void* udata);
+
+typedef struct cf_thread_stats_s {
+	uint32_t n_joinable;
+	uint32_t n_detached;
+	uint32_t n_pool_total;
+	uint32_t n_pool_active;
+} cf_thread_stats;
 
 
 //==========================================================
@@ -55,10 +63,15 @@ extern __thread pid_t g_sys_tid;
 //
 
 void cf_thread_init(void);
+void cf_thread_create_transient(cf_thread_run_fn run, void* udata);
 cf_tid cf_thread_create_detached(cf_thread_run_fn run, void* udata);
 cf_tid cf_thread_create_joinable(cf_thread_run_fn run, void* udata);
+void cf_thread_get_stats(cf_thread_stats* stats);
 int32_t cf_thread_traces(char* key, cf_dyn_buf* db);
 void cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx);
+void cf_thread_realloc(void** pp, size_t* psz);
+void cf_thread_add_exit(cf_thread_exit_fn cb, void* udata);
+void cf_thread_remove_exit(cf_thread_exit_fn cb);
 
 static inline void
 cf_thread_join(cf_tid tid)

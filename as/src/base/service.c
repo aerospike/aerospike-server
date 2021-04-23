@@ -337,7 +337,7 @@ create_service_thread(uint32_t sid)
 	cf_poll_create(&ctx->poll);
 	cf_epoll_queue_init(&ctx->trans_q, AS_TRANSACTION_HEAD_SIZE, 64);
 
-	cf_thread_create_detached(run_service, ctx);
+	cf_thread_create_transient(run_service, ctx);
 
 	cf_mutex_lock(&g_thread_locks[sid]);
 

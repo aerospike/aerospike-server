@@ -366,7 +366,7 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 
 	*popi = (populate_info){ .ns = ns, .p_set = p_set, .set_id = set_id };
 
-	cf_thread_create_detached(run_populate_set_index, popi);
+	cf_thread_create_transient(run_populate_set_index, popi);
 
 	return true;
 }

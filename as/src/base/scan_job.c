@@ -150,9 +150,11 @@ as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid,
 	count_pids_requested(_job);
 }
 
-void
-as_scan_job_run(as_scan_job* _job)
+void*
+as_scan_job_run(void* pv_job)
 {
+	as_scan_job* _job = (as_scan_job*)pv_job;
+
 	if (! _job->started) {
 		_job->base_sys_tid = cf_thread_sys_tid();
 		_job->started = true;
@@ -214,6 +216,8 @@ as_scan_job_run(as_scan_job* _job)
 		as_scan_job_finish(_job);
 		as_scan_manager_finish_job(_job);
 	}
+
+	return NULL;
 }
 
 uint32_t

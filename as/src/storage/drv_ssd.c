@@ -2704,7 +2704,7 @@ start_loading_records(drv_ssds *ssds, cf_queue *complete_q)
 		lri->complete_q = complete_q;
 		lri->complete_rc = p;
 
-		cf_thread_create_detached(
+		cf_thread_create_transient(
 				ns->cold_start ? run_ssd_cold_start : run_ssd_cool_start,
 						(void*)lri);
 	}
@@ -3686,7 +3686,7 @@ as_storage_sindex_build_all_ssd(as_namespace* ns)
 	ssds->si_n_recs_read = 0;
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
-		cf_thread_create_detached(run_si_startup, &ssds->ssds[i]);
+		cf_thread_create_transient(run_si_startup, &ssds->ssds[i]);
 	}
 }
 

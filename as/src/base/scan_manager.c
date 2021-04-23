@@ -73,7 +73,6 @@ static as_scan_manager g_mgr;
 // Forward declarations.
 //
 
-static void* run_scan_job(void* udata);
 static void add_scan_job_thread(as_scan_job* _job);
 static void evict_finished_jobs(void);
 static int abort_cb(void* buf, void* udata);
@@ -96,35 +95,6 @@ as_scan_manager_init(void)
 
 	g_mgr.active_jobs = cf_queue_create(sizeof(as_scan_job*), false);
 	g_mgr.finished_jobs = cf_queue_create(sizeof(as_scan_job*), false);
-
-	g_mgr.thread_reqs = cf_queue_create(sizeof(as_scan_job*), true);
-
-	for (uint32_t i = 0; i < g_config.n_scan_threads_limit; i++) {
-		cf_thread_create_detached(run_scan_job, NULL);
-	}
-}
-
-void
-as_scan_manager_set_max_threads(uint32_t n_threads)
-{
-	uint32_t old_n_threads = as_load_uint32(&g_config.n_scan_threads_limit);
-
-	if (n_threads > old_n_threads) {
-		for (uint32_t i = old_n_threads; i < n_threads; i++) {
-			cf_thread_create_detached(run_scan_job, NULL);
-		}
-
-		g_config.n_scan_threads_limit = n_threads;
-	}
-	else if (n_threads < old_n_threads) {
-		g_config.n_scan_threads_limit = n_threads;
-
-		for (uint32_t i = n_threads; i < old_n_threads; i++) {
-			as_scan_job* null_job = NULL;
-
-			cf_queue_push(g_mgr.thread_reqs, &null_job);
-		}
-	}
 }
 
 int
@@ -362,33 +332,13 @@ as_scan_manager_get_active_job_count(void)
 // Local helpers.
 //
 
-static void*
-run_scan_job(void* udata)
-{
-	(void)udata;
-
-	while (true) {
-		as_scan_job* _job;
-
-		cf_queue_pop(g_mgr.thread_reqs, &_job, CF_QUEUE_FOREVER);
-
-		if (_job == NULL) {
-			break;
-		}
-
-		as_scan_job_run(_job);
-	}
-
-	return NULL;
-}
-
 static void
 add_scan_job_thread(as_scan_job* _job)
 {
 	as_incr_uint32(&g_n_threads);
 	as_incr_uint32(&_job->n_threads);
 
-	cf_queue_push(g_mgr.thread_reqs, &_job);
+	cf_thread_create_transient(as_scan_job_run, _job);
 }
 
 static void

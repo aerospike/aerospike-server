@@ -50,7 +50,6 @@ typedef struct as_scan_manager_s {
 	cf_mutex lock;
 	cf_queue* active_jobs;
 	cf_queue* finished_jobs;
-	cf_queue* thread_reqs;
 } as_scan_manager;
 
 
@@ -66,7 +65,6 @@ extern uint32_t g_n_threads;
 //
 
 void as_scan_manager_init(void);
-void as_scan_manager_set_max_threads(uint32_t n_threads);
 int as_scan_manager_start_job(struct as_scan_job_s* _job);
 void as_scan_manager_add_job_thread(struct as_scan_job_s* _job);
 void as_scan_manager_add_max_job_threads(struct as_scan_job_s* _job);
