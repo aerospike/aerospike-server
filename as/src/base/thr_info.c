@@ -3042,17 +3042,11 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			else if (0 == as_info_parameter_get(params, "enable-index", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s", ns->name, p_set->name, context);
-
-					if (! as_set_index_enable(ns, p_set, set_id)) {
-						goto Error;
-					}
+					as_set_index_enable(ns, p_set, set_id);
 				}
 				else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
 					cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s", ns->name, p_set->name, context);
-
-					if (! as_set_index_disable(ns, p_set, set_id)) {
-						goto Error;
-					}
+					as_set_index_disable(ns, p_set, set_id);
 				}
 				else {
 					goto Error;
@@ -5441,13 +5435,14 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	uint64_t data_memory = ns->n_bytes_memory;
 	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;
+	uint64_t set_index_memory = as_set_index_used_bytes(ns);
 	uint64_t sindex_memory = ns->n_bytes_sindex_memory;
-	uint64_t used_memory = data_memory + index_memory + sindex_memory;
+	uint64_t used_memory = data_memory + index_memory + set_index_memory + sindex_memory;
 
 	info_append_uint64(db, "memory_used_bytes", used_memory);
 	info_append_uint64(db, "memory_used_data_bytes", data_memory);
 	info_append_uint64(db, "memory_used_index_bytes", index_memory);
-	info_append_uint64(db, "memory_used_set_index_bytes", as_set_index_used_bytes(ns));
+	info_append_uint64(db, "memory_used_set_index_bytes", set_index_memory);
 	info_append_uint64(db, "memory_used_sindex_bytes", sindex_memory);
 
 	uint64_t free_pct = ns->memory_size > used_memory ?

@@ -70,6 +70,8 @@ typedef struct populate_info_s {
 	as_set* p_set;
 	uint16_t set_id;
 	uint32_t pid;
+	uint32_t n_threads;
+	uint64_t start_ms;
 } populate_info;
 
 typedef struct populate_cb_info_s {
@@ -105,7 +107,6 @@ cf_mutex g_balance_lock = CF_MUTEX_INIT;
 static inline bool is_set_indexed(const as_namespace* ns, uint16_t set_id);
 static inline bool is_set_populated(const as_namespace* ns, uint16_t set_id);
 
-static void* run_populate_set_index(void* udata);
 static void* run_populate(void* udata);
 static bool populate_reduce_cb(as_index_ref* r_ref, void* udata);
 
@@ -343,11 +344,11 @@ as_set_index_reduce(as_namespace* ns, as_index_tree* tree, uint16_t set_id,
 // Public API - info & stats.
 //
 
-bool
+void
 as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 {
 	if (p_set->index_enabled) {
-		return true;
+		return;
 	}
 
 	cf_mutex_lock(&g_balance_lock);
@@ -362,20 +363,35 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 
 	cf_mutex_unlock(&g_balance_lock);
 
+	if (p_set->n_objects == 0) {
+		p_set->index_populating = false;
+
+		cf_info(AS_INDEX, "{%s|%s} done populating set-index (0 ms)", ns->name,
+				p_set->name);
+
+		return;
+	}
+
 	populate_info* popi = cf_malloc(sizeof(populate_info));
 
-	*popi = (populate_info){ .ns = ns, .p_set = p_set, .set_id = set_id };
+	*popi = (populate_info){
+			.ns = ns,
+			.p_set = p_set,
+			.set_id = set_id,
+			.n_threads = N_POPULATE_THREADS,
+			.start_ms = cf_getms()
+	};
 
-	cf_thread_create_transient(run_populate_set_index, popi);
-
-	return true;
+	for (uint32_t n = 0; n < N_POPULATE_THREADS; n++) {
+		cf_thread_create_transient(run_populate, popi);
+	}
 }
 
-bool
+void
 as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 {
 	if (! p_set->index_enabled) {
-		return true;
+		return;
 	}
 
 	p_set->index_enabled = false;
@@ -388,8 +404,6 @@ as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 	while (p_set->index_populating) {
 		usleep(100);
 	}
-
-	return true;
 }
 
 uint64_t
@@ -461,33 +475,6 @@ is_set_populated(const as_namespace* ns, uint16_t set_id)
 //
 
 static void*
-run_populate_set_index(void* udata)
-{
-	uint64_t start_ms = cf_getms();
-
-	cf_tid tids[N_POPULATE_THREADS];
-
-	for (uint32_t n = 0; n < N_POPULATE_THREADS; n++) {
-		tids[n] = cf_thread_create_joinable(run_populate, udata);
-	}
-
-	for (uint32_t n = 0; n < N_POPULATE_THREADS; n++) {
-		cf_thread_join(tids[n]);
-	}
-
-	populate_info* popi = (populate_info*)udata;
-
-	popi->p_set->index_populating = false;
-
-	cf_info(AS_INDEX, "{%s|%s} done populating set-index (%lu ms)",
-			popi->ns->name, popi->p_set->name, cf_getms() - start_ms);
-
-	cf_free(udata);
-
-	return NULL;
-}
-
-static void*
 run_populate(void* udata)
 {
 	populate_info* popi = (populate_info*)udata;
@@ -527,6 +514,15 @@ run_populate(void* udata)
 
 		stree_release(stree);
 		as_partition_release(&rsv);
+	}
+
+	if (as_aaf_uint32(&popi->n_threads, -1) == 0) {
+		popi->p_set->index_populating = false;
+
+		cf_info(AS_INDEX, "{%s|%s} done populating set-index (%lu ms)",
+				popi->ns->name, popi->p_set->name, cf_getms() - popi->start_ms);
+
+		cf_free(popi);
 	}
 
 	return NULL;

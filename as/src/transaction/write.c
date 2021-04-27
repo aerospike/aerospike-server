@@ -1264,9 +1264,9 @@ write_master_dim_single_bin(as_transaction* tr, as_index_ref* r_ref,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
@@ -1391,9 +1391,9 @@ write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
@@ -1514,9 +1514,9 @@ write_master_ssd_single_bin(as_transaction* tr, as_index_ref* r_ref,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
@@ -1642,9 +1642,9 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------

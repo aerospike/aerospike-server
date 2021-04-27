@@ -471,10 +471,10 @@ extern void as_record_free_bin_space(as_record *r);
 extern void as_record_destroy(as_record *r, as_namespace *ns);
 extern void as_record_done(struct as_index_ref_s *r_ref, as_namespace *ns);
 
-void as_record_transition_set_index(struct as_index_tree_s* tree, struct as_index_ref_s* r_ref, as_namespace* ns, uint16_t n_bins, const struct index_metadata_s* old);
-
 void as_record_drop_stats(as_record* r, as_namespace* ns);
 void as_record_transition_stats(as_record* r, as_namespace* ns, const struct index_metadata_s* old);
+
+void as_record_transition_set_index(struct as_index_tree_s* tree, struct as_index_ref_s* r_ref, as_namespace* ns, uint16_t n_bins, const struct index_metadata_s* old);
 
 extern void as_record_finalize_key(as_record* r, const as_namespace* ns, const uint8_t* key, uint32_t key_size);
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);

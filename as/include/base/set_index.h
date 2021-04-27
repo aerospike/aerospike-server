@@ -123,8 +123,8 @@ void as_set_index_delete_live(struct as_namespace_s* ns, struct as_index_tree_s*
 bool as_set_index_reduce(struct as_namespace_s* ns, struct as_index_tree_s* tree, uint16_t set_id, cf_digest* keyd, as_index_reduce_fn cb, void* udata);
 
 // Info & stats.
-bool as_set_index_enable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
-bool as_set_index_disable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
+void as_set_index_enable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
+void as_set_index_disable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
 uint64_t as_set_index_used_bytes(const struct as_namespace_s* ns);
 
 

@@ -107,6 +107,20 @@ as_record_exists_live(as_index_tree* tree, const cf_digest* keyd,
 }
 
 void
+as_record_drop_stats(as_record* r, as_namespace* ns)
+{
+	as_namespace_release_set_id(ns, as_index_get_set_id(r));
+
+	cf_atomic64_decr(&ns->n_objects);
+}
+
+void
+as_record_transition_stats(as_record* r, as_namespace* ns,
+		const index_metadata* old)
+{
+}
+
+void
 as_record_transition_set_index(as_index_tree* tree, as_index_ref* r_ref,
 		as_namespace* ns, uint16_t n_bins, const index_metadata* old)
 {
@@ -121,20 +135,6 @@ as_record_transition_set_index(as_index_tree* tree, as_index_ref* r_ref,
 	else if (inserted) {
 		as_set_index_insert(ns, tree, as_index_get_set_id(r), r_ref->r_h);
 	}
-}
-
-void
-as_record_drop_stats(as_record* r, as_namespace* ns)
-{
-	as_namespace_release_set_id(ns, as_index_get_set_id(r));
-
-	cf_atomic64_decr(&ns->n_objects);
-}
-
-void
-as_record_transition_stats(as_record* r, as_namespace* ns,
-		const index_metadata* old)
-{
 }
 
 

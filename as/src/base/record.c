@@ -515,9 +515,9 @@ record_apply_dim_single_bin(as_remote_record *rr, as_index_ref *r_ref,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Cleanup - destroy original bin, can't unwind after.
 	as_bin_destroy_all(rd->bins, rd->n_bins);
@@ -579,9 +579,9 @@ record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
 	if (! (skip_sindex &&
@@ -630,9 +630,9 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_index_ref *r_ref,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, rr->n_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Now ok to store or drop key, as determined by message.
 	as_record_finalize_key(r, ns, rr->key, rr->key_size);
@@ -686,9 +686,9 @@ record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
 		return -result;
 	}
 
+	as_record_transition_stats(r, ns, &old_metadata);
 	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
 			&old_metadata);
-	as_record_transition_stats(r, ns, &old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
 	if (has_sindex) {
