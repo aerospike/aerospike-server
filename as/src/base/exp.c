@@ -541,9 +541,12 @@ as_exp_build_base64(const char* buf64, uint32_t buf64_sz)
 
 	as_exp* p = build_internal(buf, buf_sz_out, false);
 
-	if (p != NULL) {
-		p->buf_cleanup = buf;
+	if (p == NULL) {
+		cf_free(buf);
+		return NULL;
 	}
+
+	p->buf_cleanup = buf;
 
 	return p;
 }
