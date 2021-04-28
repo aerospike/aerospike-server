@@ -707,6 +707,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	if (! get_scan_predexp(tr, &predexp)) {
 		cf_warning(AS_SCAN, "basic scan job failed predexp processing");
+		cf_free(pids);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -717,6 +718,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	if (result != AS_OK) {
 		cf_warning(AS_SCAN, "basic scan job failed quota %d", result);
 		as_exp_destroy(predexp);
+		cf_free(pids);
 		return result;
 	}
 

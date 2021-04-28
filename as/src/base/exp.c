@@ -753,12 +753,14 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 
 	if (is_old_predexp(buf)) {
 		cf_warning(AS_EXP, "as_exp_filter_build_base64 - operation requires expressions found predexp");
+		cf_free(buf);
 		return NULL;
 	}
 
 	as_exp* exp = build_internal(buf, buf_sz_out, false);
 
 	if (exp == NULL) {
+		cf_free(buf);
 		return NULL;
 	}
 
@@ -3325,7 +3327,10 @@ eval_to_int(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		return;
 	}
 
-	ret_val->r_int = (int64_t)ret_val->r_float;
+	// Intermediate variable to satisfy Coverity...
+	int64_t int_val = (int64_t)ret_val->r_float;
+
+	ret_val->r_int = int_val;
 	ret_val->type = RT_INT;
 }
 
@@ -3338,7 +3343,10 @@ eval_to_float(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		return;
 	}
 
-	ret_val->r_float = (double)ret_val->r_int;
+	// Intermediate variable to satisfy Coverity...
+	double float_val = (double)ret_val->r_int;
+
+	ret_val->r_float = float_val;
 	ret_val->type = RT_FLOAT;
 }
 
