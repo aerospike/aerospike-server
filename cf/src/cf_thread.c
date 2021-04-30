@@ -265,7 +265,11 @@ cf_thread_realloc(void** pp, size_t* psz)
 
 			*pp = cf_realloc(*pp, *psz);
 
-			if (*pp == NULL) {
+			if (*pp != NULL) {
+				*talloc->pp = *pp;
+				// Don't bother save size - only needs to be zeroed on cleanup.
+			}
+			else {
 				uint32_t last_i = g_n_allocs - 1;
 
 				if (i != last_i) {
@@ -273,12 +277,9 @@ cf_thread_realloc(void** pp, size_t* psz)
 				}
 
 				g_n_allocs--;
-
-				return;
 			}
 
-			*talloc->pp = *pp;
-			// Don't bother saving size - only needs to be zeroed on cleanup.
+			return;
 		}
 	}
 
