@@ -351,6 +351,7 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 		return;
 	}
 
+	// Ensure either rebalance or this call creates the strees.
 	cf_mutex_lock(&g_balance_lock);
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
@@ -394,11 +395,16 @@ as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 		return;
 	}
 
+	// Ensure rebalance won't set NULL strees - destroy assumes they're not.
+	cf_mutex_lock(&g_balance_lock);
+
 	p_set->index_enabled = false;
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition_destroy_set_index(ns, pid, set_id);
 	}
+
+	cf_mutex_unlock(&g_balance_lock);
 
 	// If we cancelled, ensure cancellation is done (in case we repopulate).
 	while (p_set->index_populating) {
