@@ -71,5 +71,5 @@ as_index_sprig_reduce_no_rc(as_index_sprig* isprig, const cf_digest* keyd,
 		as_index_reduce_fn cb, void* udata)
 {
 	cf_crash(AS_INDEX, "CE code called as_index_sprig_reduce_no_rc()");
-	return 0;
+	return false;
 }
