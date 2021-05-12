@@ -817,6 +817,11 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, result);
 	}
 
+	// TODO - remove in "six months".
+	if (! g_config.batch_without_digests) {
+		cf_ticker_warning(AS_BATCH, "'batch-without-digests' deprecated - digests will not be returned in the future");
+	}
+
 	// Parse header
 	as_msg* bmsg = &btr->msgp->msg;
 	as_msg_swap_header(bmsg);
