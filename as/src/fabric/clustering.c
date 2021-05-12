@@ -41,6 +41,7 @@
 #include "base/cfg.h"
 #include "fabric/fabric.h"
 #include "fabric/hlc.h"
+#include "fabric/partition_balance.h"
 
 /*
  * Overview
@@ -7682,13 +7683,17 @@ clustering_cluster_reform()
 	log_cf_node_vector("recluster: pending join requests - ", new_nodes,
 			cf_vector_size(new_nodes) > 0 ? CF_INFO : CF_DEBUG);
 
+	bool redundant = ! as_partition_balance_are_migrations_allowed();
+
 	if (!clustering_is_running() || !clustering_is_principal()
+			|| redundant
 			|| cf_vector_size(dead_nodes) > 0
 			|| cf_vector_size(faulty_nodes) > 0
 			|| cf_vector_size(new_nodes) > 0) {
 		INFO(
-				"recluster: skipped - principal %s dead_nodes %d faulty_nodes %d new_nodes %d",
+				"recluster: skipped - principal %s redundant %s dead_nodes %d faulty_nodes %d new_nodes %d",
 				clustering_is_principal() ? "true" : "false",
+				redundant ? "true" : "false",
 				cf_vector_size(dead_nodes), cf_vector_size(faulty_nodes),
 				cf_vector_size(new_nodes));
 
