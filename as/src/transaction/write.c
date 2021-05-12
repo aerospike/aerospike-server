@@ -220,7 +220,7 @@ as_write_start(as_transaction* tr)
 	}
 
 	// Check that we aren't backed up.
-	if (as_storage_overloaded(tr->rsv.ns)) {
+	if (as_storage_overloaded(tr->rsv.ns, 0, "write")) {
 		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;

@@ -152,7 +152,8 @@ as_storage_wait_for_defrag_pmem(as_namespace* ns)
 }
 
 bool
-as_storage_overloaded_pmem(const as_namespace* ns)
+as_storage_overloaded_pmem(const as_namespace* ns, uint32_t margin,
+		const char* tag)
 {
 	pmem_crash_ce();
 }

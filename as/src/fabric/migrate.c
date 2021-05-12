@@ -1311,6 +1311,12 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		return;
 	}
 
+	if (as_storage_overloaded(immig->rsv.ns, 64, "immigrate")) {
+		immigration_release(immig);
+		as_fabric_msg_put(m);
+		return;
+	}
+
 	as_remote_record rr = {
 			.via = VIA_MIGRATION,
 			.src = src,

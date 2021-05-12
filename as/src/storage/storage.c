@@ -485,7 +485,7 @@ as_storage_wait_for_defrag()
 // as_storage_overloaded
 //
 
-typedef bool (*as_storage_overloaded_fn)(const as_namespace *ns);
+typedef bool (*as_storage_overloaded_fn)(const as_namespace *ns, uint32_t margin, const char* tag);
 static const as_storage_overloaded_fn as_storage_overloaded_table[AS_NUM_STORAGE_ENGINES] = {
 	NULL, // memory has no overload check
 	as_storage_overloaded_pmem,
@@ -493,10 +493,10 @@ static const as_storage_overloaded_fn as_storage_overloaded_table[AS_NUM_STORAGE
 };
 
 bool
-as_storage_overloaded(const as_namespace *ns)
+as_storage_overloaded(const as_namespace *ns, uint32_t margin, const char* tag)
 {
 	if (as_storage_overloaded_table[ns->storage_type]) {
-		return as_storage_overloaded_table[ns->storage_type](ns);
+		return as_storage_overloaded_table[ns->storage_type](ns, margin, tag);
 	}
 
 	return false;

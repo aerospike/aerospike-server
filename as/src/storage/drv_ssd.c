@@ -856,7 +856,7 @@ run_defrag(void *pv_data)
 			usleep(sleep_us);
 		}
 
-		while (ns->n_wblocks_to_flush > ns->storage_max_write_q + 100) {
+		while (ns->n_wblocks_to_flush > ns->storage_max_write_q + 128) {
 			usleep(1000);
 		}
 	}
@@ -3810,13 +3810,14 @@ as_storage_wait_for_defrag_ssd(as_namespace *ns)
 
 
 bool
-as_storage_overloaded_ssd(const as_namespace *ns)
+as_storage_overloaded_ssd(const as_namespace *ns, uint32_t margin,
+		const char* tag)
 {
-	uint32_t max_write_q = as_load_uint32(&ns->storage_max_write_q);
+	uint32_t limit = ns->storage_max_write_q + margin;
 
-	if (ns->n_wblocks_to_flush > max_write_q) {
-		cf_ticker_warning(AS_DRV_SSD, "{%s} write fail: queue too deep: exceeds max %d",
-				ns->name, max_write_q);
+	if (ns->n_wblocks_to_flush > limit) {
+		cf_ticker_warning(AS_DRV_SSD, "{%s} %s fail: queue too deep: exceeds %u",
+				ns->name, tag, limit);
 		return true;
 	}
 

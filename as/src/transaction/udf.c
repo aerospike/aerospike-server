@@ -323,7 +323,7 @@ as_udf_start(as_transaction* tr)
 	}
 
 	// Don't know if UDF is read or delete - check that we aren't backed up.
-	if (as_storage_overloaded(tr->rsv.ns)) {
+	if (as_storage_overloaded(tr->rsv.ns, 0, "udf")) {
 		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_udf_response(tr, NULL);
 		return TRANS_DONE_ERROR;
