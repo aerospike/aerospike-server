@@ -47,7 +47,6 @@ void as_batch_add_error(as_batch_shared* shared, uint32_t index, int result_code
 int as_batch_threads_resize(uint32_t threads);
 void as_batch_queues_info(cf_dyn_buf* db);
 int as_batch_unused_buffers();
-void as_batch_destroy();
 
 struct as_file_handle_s* as_batch_get_fd_h(as_batch_shared* shared);
 struct as_msg_field_s* as_batch_get_predexp_mf(as_batch_shared* shared);

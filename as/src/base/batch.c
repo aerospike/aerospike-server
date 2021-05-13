@@ -22,7 +22,6 @@
 #include "base/batch.h"
 #include "aerospike/as_atomic.h"
 #include "aerospike/as_buffer_pool.h"
-#include "aerospike/as_thread_pool.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
@@ -40,6 +39,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "cf_mutex.h"
+#include "cf_thread.h"
 #include "hardware.h"
 #include "log.h"
 #include "socket.h"
@@ -125,11 +125,34 @@ typedef struct {
 	bool complete;
 } as_batch_work;
 
+//--------------------------------------
+// thread_pool class.
+//
+
+typedef void (*task_fn)(void* user_data);
+
+typedef struct thread_pool_s {
+	cf_queue* dispatch_q;
+	cf_queue* complete_q;
+	task_fn do_task;
+	uint32_t task_size;
+	uint32_t task_complete_offset;
+	uint32_t n_threads;
+} thread_pool;
+
+static void thread_pool_init(thread_pool* pool, uint32_t n_threads, task_fn fn, uint32_t task_size, uint32_t task_complete_offset);
+static void thread_pool_resize(thread_pool* pool, uint32_t n_threads);
+static bool thread_pool_queue_task(thread_pool* pool, void* task);
+
+static uint32_t thread_pool_create_threads(thread_pool* pool, uint32_t n_threads);
+static void thread_pool_shutdown_threads(thread_pool* pool, uint32_t n_threads);
+static void* run_pool_worker(void* data);
+
 //---------------------------------------------------------
 // STATIC DATA
 //---------------------------------------------------------
 
-static as_thread_pool batch_thread_pool;
+static thread_pool batch_thread_pool;
 static as_buffer_pool batch_buffer_pool;
 
 static as_batch_queue batch_queues[MAX_BATCH_THREADS];
@@ -500,11 +523,9 @@ as_batch_create_thread_queues(uint32_t begin, uint32_t end)
 		work.batch_queue->delay_count = 0;
 		work.batch_queue->active = true;
 
-		int rc = as_thread_pool_queue_task_fixed(&batch_thread_pool, &work);
-
-		if (rc) {
-			cf_warning(AS_BATCH, "Failed to create batch thread %u: %d", i, rc);
-			status = rc;
+		if (! thread_pool_queue_task(&batch_thread_pool, &work)) {
+			cf_warning(AS_BATCH, "No batch threads running: %u", i);
+			status = -1;
 		}
 	}
 	return status;
@@ -759,15 +780,10 @@ as_batch_init()
 
 	cf_info(AS_BATCH, "starting %u batch-index-threads", g_config.n_batch_index_threads);
 
-	int rc = as_thread_pool_init_fixed(&batch_thread_pool, g_config.n_batch_index_threads, as_batch_worker,
+	thread_pool_init(&batch_thread_pool, g_config.n_batch_index_threads, as_batch_worker,
 			sizeof(as_batch_work), offsetof(as_batch_work,complete));
 
-	if (rc) {
-		cf_warning(AS_BATCH, "Failed to initialize batch-index-threads to %u: %d", g_config.n_batch_index_threads, rc);
-		return rc;
-	}
-
-	rc = as_buffer_pool_init(&batch_buffer_pool, sizeof(as_batch_buffer), BATCH_BLOCK_SIZE);
+	int rc = as_buffer_pool_init(&batch_buffer_pool, sizeof(as_batch_buffer), BATCH_BLOCK_SIZE);
 
 	if (rc) {
 		cf_warning(AS_BATCH, "Failed to initialize batch buffer pool: %d", rc);
@@ -787,7 +803,7 @@ int
 as_batch_queue_task(as_transaction* btr)
 {
 	uint64_t counter = cf_atomic64_incr(&g_stats.batch_index_initiate);
-	uint32_t thread_size = batch_thread_pool.thread_size;
+	uint32_t thread_size = batch_thread_pool.n_threads;
 
 	if (thread_size == 0 || thread_size > MAX_BATCH_THREADS) {
 		cf_warning(AS_BATCH, "batch-index-threads has been disabled: %d", thread_size);
@@ -1265,32 +1281,18 @@ as_batch_threads_resize(uint32_t threads)
 	cf_mutex_lock(&batch_resize_lock);
 
 	// Resize thread pool.  The threads will wait for graceful shutdown on downwards resize.
-	uint32_t threads_orig = batch_thread_pool.thread_size;
+	uint32_t threads_orig = batch_thread_pool.n_threads;
 	cf_info(AS_BATCH, "Resize batch-index-threads from %u to %u", threads_orig, threads);
 	int status = 0;
 
 	if (threads != threads_orig) {
 		if (threads > threads_orig) {
 			// Increase threads before initializing queues.
-			status = as_thread_pool_resize(&batch_thread_pool, threads);
+			thread_pool_resize(&batch_thread_pool, threads);
 
-			if (status == 0) {
-				g_config.n_batch_index_threads = threads;
-				// Adjust queues to match new thread size.
-				status = as_batch_create_thread_queues(threads_orig, threads);
-			}
-			else {
-				// Show warning, but keep going as some threads may have been successfully added/removed.
-				cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%u",
-						status, g_config.n_batch_index_threads);
-				threads = batch_thread_pool.thread_size;
-
-				if (threads > threads_orig) {
-					g_config.n_batch_index_threads = threads;
-					// Adjust queues to match new thread size.
-					status = as_batch_create_thread_queues(threads_orig, threads);
-				}
-			}
+			g_config.n_batch_index_threads = threads;
+			// Adjust queues to match new thread size.
+			status = as_batch_create_thread_queues(threads_orig, threads);
 		}
 		else {
 			// Shutdown queues before shutting down threads.
@@ -1298,13 +1300,9 @@ as_batch_threads_resize(uint32_t threads)
 
 			if (status == 0) {
 				// Adjust threads to match new queue size.
-				status = as_thread_pool_resize(&batch_thread_pool, threads);
-				g_config.n_batch_index_threads = batch_thread_pool.thread_size;
+				thread_pool_resize(&batch_thread_pool, threads);
 
-				if (status) {
-					cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%u",
-							status, g_config.n_batch_index_threads);
-				}
+				g_config.n_batch_index_threads = batch_thread_pool.n_threads;
 			}
 		}
 	}
@@ -1317,7 +1315,7 @@ as_batch_queues_info(cf_dyn_buf* db)
 {
 	cf_mutex_lock(&batch_resize_lock);
 
-	uint32_t max = batch_thread_pool.thread_size;
+	uint32_t max = batch_thread_pool.n_threads;
 
 	for (uint32_t i = 0; i < max; i++) {
 		if (i > 0) {
@@ -1337,20 +1335,6 @@ as_batch_unused_buffers()
 	return cf_queue_sz(batch_buffer_pool.queue);
 }
 
-// Not currently called.  Put in this place holder in case server decides to
-// implement clean shutdowns in the future.
-void
-as_batch_destroy()
-{
-	as_thread_pool_destroy(&batch_thread_pool);
-	as_buffer_pool_destroy(&batch_buffer_pool);
-
-	cf_mutex_lock(&batch_resize_lock);
-	as_batch_shutdown_thread_queues(0, batch_thread_pool.thread_size);
-	cf_mutex_unlock(&batch_resize_lock);
-	cf_mutex_destroy(&batch_resize_lock);
-}
-
 as_file_handle*
 as_batch_get_fd_h(as_batch_shared* shared)
 {
@@ -1367,4 +1351,127 @@ as_exp*
 as_batch_get_predexp(as_batch_shared* shared)
 {
 	return shared->predexp;
+}
+
+
+//==========================================================
+// thread_pool class.
+//
+
+static void
+thread_pool_init(thread_pool* pool, uint32_t n_threads, task_fn fn,
+		uint32_t task_size, uint32_t task_complete_offset)
+{
+	// Initialize queues.
+	pool->dispatch_q = cf_queue_create(task_size, true);
+	pool->complete_q = cf_queue_create(sizeof(uint32_t), true);
+	pool->do_task = fn;
+	pool->task_size = task_size;
+	pool->task_complete_offset = task_complete_offset;
+
+	// Start detached threads.
+	pool->n_threads = thread_pool_create_threads(pool, n_threads);
+}
+
+// Called only via 'set-config' command, which is already synchronized.
+static void
+thread_pool_resize(thread_pool* pool, uint32_t n_threads)
+{
+	if (n_threads == pool->n_threads) {
+		return;
+	}
+
+	if (n_threads < pool->n_threads) {
+		// Shutdown excess threads.
+		uint32_t threads_to_shutdown = pool->n_threads - n_threads;
+
+		// Set pool n_threads before shutting down threads because we want to
+		// disallow new tasks onto thread pool when n_threads is set to zero.
+		// Therefore, set n_threads as early as possible.
+		//
+		// Note: There still is a slight possibility that new tasks can still be
+		// queued after disabling thread pool because the n_threads check is not
+		// done under lock. These tasks will either timeout or be suspended
+		// until thread pool is resized to > 0 threads.
+		pool->n_threads = n_threads;
+
+		thread_pool_shutdown_threads(pool, threads_to_shutdown);
+	}
+	else {
+		// Start new threads.
+		pool->n_threads += thread_pool_create_threads(pool,
+				n_threads - pool->n_threads);
+	}
+}
+
+static bool
+thread_pool_queue_task(thread_pool* pool, void* task)
+{
+	if (pool->n_threads == 0) {
+		// No threads are running to process task.
+		return false;
+	}
+
+	cf_queue_push(pool->dispatch_q, task);
+
+	return true;
+}
+
+static uint32_t
+thread_pool_create_threads(thread_pool* pool, uint32_t n_threads)
+{
+	for (uint32_t i = 0; i < n_threads; i++) {
+		cf_thread_create_transient(run_pool_worker, pool);
+	}
+
+	return n_threads;
+}
+
+static void
+thread_pool_shutdown_threads(thread_pool* pool, uint32_t n_threads)
+{
+	// Send shutdown signal.
+	char* task = alloca(pool->task_size);
+
+	memset(task, 0, pool->task_size);
+	*(bool*)(task + pool->task_complete_offset) = true;
+
+	for (uint32_t i = 0; i < n_threads; i++) {
+		cf_queue_push(pool->dispatch_q, task);
+	}
+
+	// Wait till threads finish.
+	uint32_t complete;
+
+	for (uint32_t i = 0; i < n_threads; i++) {
+		cf_queue_pop(pool->complete_q, &complete, CF_QUEUE_FOREVER);
+	}
+}
+
+static void*
+run_pool_worker(void* data)
+{
+	thread_pool* pool = (thread_pool*)data;
+
+	char* task = alloca(pool->task_size);
+	bool* shutdown = (bool*)(task + pool->task_complete_offset);
+
+	// Retrieve tasks from queue and execute.
+	while (cf_queue_pop(pool->dispatch_q, task, CF_QUEUE_FOREVER) ==
+			CF_QUEUE_OK) {
+		// Check if thread should be shut down.
+		if (*shutdown) {
+			break;
+		}
+
+		// Run task.
+		pool->do_task(task);
+	}
+
+	// Send thread completion event back to caller.
+	uint32_t complete = 1;
+
+	cf_queue_push(pool->complete_q, &complete);
+
+	return NULL;
 }
