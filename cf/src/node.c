@@ -20,6 +20,10 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+//==========================================================
+// Includes.
+//
+
 #include "node.h"
 
 #include <errno.h>
@@ -31,23 +35,36 @@
 #include "log.h"
 
 
-uint32_t
-cf_nodeid_shash_fn(const void *key)
-{
-	cf_node id = *(const cf_node *)key;
+//==========================================================
+// Inlines & macros.
+//
 
-	return (uint32_t)(id >> 32) | (uint32_t)id;
+static inline uint32_t
+node_id_hash_fn(cf_node id)
+{
+	return (uint32_t)(id >> 32) ^ (uint32_t)id;
+}
+
+
+//==========================================================
+// Public API.
+//
+
+uint32_t
+cf_nodeid_shash_fn(const void* key)
+{
+	return node_id_hash_fn(*(const cf_node*)key);
 }
 
 uint32_t
-cf_nodeid_rchash_fn(const void *key, uint32_t key_size)
+cf_nodeid_rchash_fn(const void* key, uint32_t key_size)
 {
 	(void)key_size;
 
-	return cf_nodeid_shash_fn(key);
+	return node_id_hash_fn(*(const cf_node*)key);
 }
 
-char *
+char*
 cf_node_name()
 {
 	char buffer[1024];

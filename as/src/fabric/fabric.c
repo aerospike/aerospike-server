@@ -364,7 +364,7 @@ as_fabric_init()
 			FS_MSG_SCRATCH_SIZE, NULL, NULL);
 
 	g_fabric.node_hash = cf_rchash_create(cf_nodeid_rchash_fn,
-			fabric_node_destructor, sizeof(cf_node), 128, CF_RCHASH_MANY_LOCK);
+			fabric_node_destructor, sizeof(cf_node), 512, CF_RCHASH_MANY_LOCK);
 
 	g_published_endpoint_list = NULL;
 	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
