@@ -3816,7 +3816,7 @@ as_storage_overloaded_ssd(const as_namespace *ns, uint32_t margin,
 	uint32_t limit = ns->storage_max_write_q + margin;
 
 	if (ns->n_wblocks_to_flush > limit) {
-		cf_ticker_warning(AS_DRV_SSD, "{%s} %s fail: queue too deep: exceeds %u",
+		cf_ticker_warning(AS_DRV_SSD, "{%s} %s fail: queue too deep: exceeds max %u",
 				ns->name, tag, limit);
 		return true;
 	}
