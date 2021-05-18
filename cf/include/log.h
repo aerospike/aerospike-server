@@ -121,7 +121,6 @@ typedef enum {
 typedef struct cf_log_sink_s cf_log_sink;
 
 #define CF_LOG_OPEN_FLAGS (O_WRONLY | O_CREAT | O_APPEND)
-#define CF_LOG_REOPEN_FLAGS (O_WRONLY | O_CREAT | O_TRUNC)
 
 // OS related utilities. TODO - should be in their own file?
 #define CF_OS_OPEN_MODE_USR (S_IRUSR | S_IWUSR)

@@ -500,9 +500,7 @@ cf_log_rotate(void)
 
 		int old_fd = sink->fd;
 
-		// Note - we use O_TRUNC, so we assume the file has been moved/copied
-		// elsewhere, or we're ok losing it.
-		sink->fd = open(sink->path, CF_LOG_REOPEN_FLAGS, cf_os_log_perms());
+		sink->fd = open(sink->path, CF_LOG_OPEN_FLAGS, cf_os_log_perms());
 
 		usleep(1000); // threads may be interrupted while writing to old fd
 		close(old_fd);
