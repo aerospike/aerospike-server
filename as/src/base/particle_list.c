@@ -4337,7 +4337,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 	case AS_CDT_OP_LIST_INCREMENT: {
 		int64_t index;
-		cdt_payload delta = { NULL };
+		cdt_payload delta = { 0 };
 		uint64_t create = AS_PACKED_LIST_FLAG_NONE;
 		uint64_t modify = AS_CDT_LIST_MODIFY_DEFAULT;
 

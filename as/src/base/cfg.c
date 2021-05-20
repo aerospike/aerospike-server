@@ -3617,7 +3617,7 @@ as_config_init(const char* config_file)
 				c->sec_cfg.ldap_tls_disabled = cfg_bool(&line);
 				break;
 			case CASE_SECURITY_LDAP_POLLING_PERIOD:
-				c->sec_cfg.ldap_polling_period = cfg_seconds(&line, LDAP_POLLING_PERIOD_MIN, LDAP_POLLING_PERIOD_MAX);
+				c->sec_cfg.ldap_polling_period = cfg_seconds(&line, 0, LDAP_POLLING_PERIOD_MAX);
 				break;
 			case CASE_SECURITY_LDAP_QUERY_BASE_DN:
 				c->sec_cfg.ldap_query_base_dn = cfg_strdup_no_checks(&line);

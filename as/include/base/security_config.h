@@ -106,7 +106,6 @@ typedef struct as_sec_config_s {
 #define TPS_WEIGHT_MIN					2
 #define TPS_WEIGHT_MAX					20
 
-#define LDAP_POLLING_PERIOD_MIN			0 // zero means don't poll
 #define LDAP_POLLING_PERIOD_MAX			(60 * 60 * 24)
 #define LDAP_SESSION_TTL_MIN			120
 #define LDAP_SESSION_TTL_MAX			(60 * 60 * 24 * 10)

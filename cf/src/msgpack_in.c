@@ -1685,7 +1685,7 @@ msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 	case 0xc7: // ext 8
 	case 0xc8: // ext 16
 	case 0xc9: { // ext 32
-		msgpack_ext ext = { NULL }; // init for Centos6
+		msgpack_ext ext = { 0 }; // init for Centos6
 
 		msgpack_get_ext(&mp, &ext);
 		as_pack_ext_header(&pk, ext.size, ext.type);

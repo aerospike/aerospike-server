@@ -37,7 +37,7 @@
 // Globals.
 //
 
-cf_vault_config g_vault_cfg = { NULL };
+cf_vault_config g_vault_cfg = { 0 };
 
 
 //==========================================================
