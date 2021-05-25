@@ -2338,7 +2338,7 @@ as_config_init(const char* config_file)
 				c->run_as_daemon = cfg_bool_no_value_is_true(&line);
 				break;
 			case CASE_SERVICE_SCAN_MAX_DONE:
-				c->scan_max_done = cfg_u32(&line, 0, 1000);
+				c->scan_max_done = cfg_u32(&line, 0, 10000);
 				break;
 			case CASE_SERVICE_SCAN_THREADS_LIMIT:
 				c->n_scan_threads_limit = cfg_u32(&line, 1, 1024);
