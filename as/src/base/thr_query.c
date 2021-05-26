@@ -2508,7 +2508,8 @@ query_qtr_check_and_requeue(as_query_transaction *qtr)
 	if (qtr_finished(qtr)) {
 		if ((cf_atomic32_get(qtr->n_qwork_active) == 0)
 				&& (cf_atomic32_get(qtr->n_io_outstanding) == 0)
-				&& (cf_atomic32_get(qtr->n_udf_tr_queued) == 0)) {
+				&& (cf_atomic32_get(qtr->n_udf_tr_queued) == 0)
+				&& (cf_atomic32_get(qtr->n_ops_tr_queued) == 0)) {
 			cf_detail(AS_QUERY, "Request is finished");
 			return AS_QUERY_DONE;
 		}
@@ -2543,7 +2544,8 @@ query_qtr_check_and_requeue(as_query_transaction *qtr)
 		qtr_lock(qtr);
 		if ((cf_atomic32_get(qtr->n_qwork_active) != 0)
 				|| (cf_atomic32_get(qtr->n_io_outstanding) != 0)
-				|| (cf_atomic32_get(qtr->n_udf_tr_queued) != 0)) {
+				|| (cf_atomic32_get(qtr->n_udf_tr_queued) != 0)
+				|| (cf_atomic32_get(qtr->n_ops_tr_queued) != 0)) {
 			cf_detail(AS_QUERY, "Job Setup for Requeue %p", qtr);
 
 			// Release of one of the above will perform requeue... look for
