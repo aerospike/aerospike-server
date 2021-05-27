@@ -540,6 +540,7 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 	populate_cb_info* cbi = (populate_cb_info*)udata;
 
 	if (! cbi->p_set->index_enabled) {
+		as_record_done(r_ref, cbi->ns);
 		return false;
 	}
 
