@@ -477,6 +477,7 @@ typedef enum {
 	CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
 	CASE_NAMESPACE_INDEX_TYPE_BEGIN,
+	CASE_NAMESPACE_MAX_RECORD_SIZE,
 	CASE_NAMESPACE_MIGRATE_ORDER,
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
@@ -999,6 +1000,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ignore-migrate-fill-delay",		CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
 		{ "index-type",						CASE_NAMESPACE_INDEX_TYPE_BEGIN },
+		{ "max-record-size",				CASE_NAMESPACE_MAX_RECORD_SIZE },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
@@ -2980,6 +2982,9 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_MAX_RECORD_SIZE:
+				ns->max_record_size = cfg_u32_no_checks(&line);
+				break;
 			case CASE_NAMESPACE_MIGRATE_ORDER:
 				ns->migrate_order = cfg_u32(&line, 1, 10);
 				break;
@@ -3121,6 +3126,17 @@ as_config_init(const char* config_file)
 				}
 				if (ns->conflict_resolve_writes && ns->single_bin) {
 					cf_crash_nostack(AS_CFG, "{%s} 'conflict-resolve-writes' can't be true if 'single-bin' is true", ns->name);
+				}
+				if (ns->max_record_size != 0) {
+					if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && ns->max_record_size > 128 * 1024 * 1024) { // PROTO_SIZE_MAX
+						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 128M", ns->name);
+					}
+					if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->max_record_size > 8 * 1024 * 1024) { // PMEM_WRITE_BLOCK_SIZE
+						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 8M", ns->name);
+					}
+					if (ns->storage_type == AS_STORAGE_ENGINE_SSD && ns->max_record_size > ns->storage_write_block_size) {
+						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 'write-block-size'", ns->name);
+					}
 				}
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)

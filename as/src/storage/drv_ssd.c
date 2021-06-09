@@ -1487,10 +1487,20 @@ ssd_buffer_bins(as_storage_rd *rd)
 	as_record *r = rd->r;
 	drv_ssd *ssd = rd->ssd;
 
-	uint32_t flat_sz = rd->pickle == NULL ?
-			as_flat_record_size(rd) : rd->orig_pickle_sz;
+	uint32_t flat_sz;
+	uint32_t limit_sz;
 
-	if (flat_sz > ssd->write_block_size) {
+	if (rd->pickle == NULL) {
+		flat_sz = as_flat_record_size(rd);
+		limit_sz = ns->max_record_size == 0 ?
+				ssd->write_block_size : ns->max_record_size;
+	}
+	else {
+		flat_sz = rd->orig_pickle_sz;
+		limit_sz = ssd->write_block_size;
+	}
+
+	if (flat_sz > limit_sz) {
 		cf_detail(AS_DRV_SSD, "{%s} write: size %u - rejecting %pD", ns->name,
 				flat_sz, &r->keyd);
 		return -AS_ERR_RECORD_TOO_BIG;

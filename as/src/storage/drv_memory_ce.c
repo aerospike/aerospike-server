@@ -21,6 +21,7 @@
  */
 
 #include "base/datamodel.h"
+#include "base/proto.h"
 #include "fabric/partition.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
@@ -36,8 +37,19 @@ int
 as_storage_record_write_memory(as_storage_rd* rd)
 {
 	// Make a pickle if needed. (No pickle needed for drop.)
-	if ((rd->pickle != NULL || rd->n_bins != 0) && rd->keep_pickle) {
+	if (rd->n_bins != 0 && rd->keep_pickle) {
 		as_flat_pickle_record(rd);
+	}
+
+	as_namespace* ns = rd->ns;
+
+	if (ns->max_record_size != 0 && rd->pickle == NULL) {
+		uint32_t flat_sz = rd->pickle_sz == 0 ?
+				as_flat_record_size(rd) : rd->pickle_sz;
+
+		if (flat_sz > ns->max_record_size) {
+			return -AS_ERR_RECORD_TOO_BIG;
+		}
 	}
 
 	return 0;

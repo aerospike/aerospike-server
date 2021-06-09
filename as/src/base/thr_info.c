@@ -2042,6 +2042,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 									(ns->xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :
 											"illegal"))));
 
+	info_append_uint32(db, "max-record-size", ns->max_record_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
@@ -3139,6 +3140,27 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of default-ttl of ns %s from %u to %u", ns->name, ns->default_ttl, val);
 			ns->default_ttl = val;
+		}
+		else if (0 == as_info_parameter_get(params, "max-record-size", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 0) {
+				goto Error;
+			}
+			if (val != 0) {
+				if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && val > 128 * 1024 * 1024) { // PROTO_SIZE_MAX
+					cf_warning(AS_INFO, "max-record-size can't be bigger than 128M");
+					goto Error;
+				}
+				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && val > 8 * 1024 * 1024) { // PMEM_WRITE_BLOCK_SIZE
+					cf_warning(AS_INFO, "max-record-size can't be bigger than 8M");
+					goto Error;
+				}
+				if (ns->storage_type == AS_STORAGE_ENGINE_SSD && val > ns->storage_write_block_size) {
+					cf_warning(AS_INFO, "max-record-size can't be bigger than write-block-size");
+					goto Error;
+				}
+			}
+			cf_info(AS_INFO, "Changing value of max-record-size of ns %s from %u to %d", ns->name, ns->max_record_size, val);
+			ns->max_record_size = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-order", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 10) {
