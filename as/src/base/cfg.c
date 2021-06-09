@@ -311,6 +311,7 @@ typedef enum {
 	// For special debugging or bug-related repair:
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
 	CASE_SERVICE_INDENT_ALLOCATIONS,
+	CASE_SERVICE_SALT_ALLOCATIONS,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_NSUP_PERIOD,
@@ -827,6 +828,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
+		{ "salt-allocations",				CASE_SERVICE_SALT_ALLOCATIONS },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
@@ -2407,9 +2409,12 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
-			case CASE_SERVICE_INDENT_ALLOCATIONS:
-				c->indent_allocations = cfg_bool(&line);
-				break;
+				case CASE_SERVICE_INDENT_ALLOCATIONS:
+					c->indent_allocations = cfg_bool(&line);
+					break;
+				case CASE_SERVICE_SALT_ALLOCATIONS:
+					c->salt_allocations = cfg_bool(&line);
+					break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully");
 				break;
@@ -4002,7 +4007,8 @@ as_config_post_process(as_config* c, const char* config_file)
 		cf_crash_nostack(AS_CFG, "must configure at least one namespace");
 	}
 
-	cf_alloc_set_debug(c->debug_allocations, c->indent_allocations);
+	cf_alloc_set_debug(c->debug_allocations, c->indent_allocations,
+			c->salt_allocations);
 
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();

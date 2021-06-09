@@ -73,6 +73,9 @@
 
 #define MAX_INDENT (32 * 8)
 
+#define SALT_CHAR (0xAE)
+#define MAX_SALT_SZ (1024 * 1024 * 64ul)
+
 typedef struct site_info_s {
 	uint32_t site_id;
 	pid_t thread_id;
@@ -108,6 +111,7 @@ static int32_t g_startup_arena = -1;
 
 static cf_alloc_debug g_debug;
 static bool g_indent;
+static bool g_salt;
 
 static __thread as_random g_rand = { .initialized = false };
 
@@ -320,7 +324,8 @@ hook_handle_alloc_check(const void* ra, const void* p, size_t jem_sz)
 // site with the given address.
 
 static void
-hook_handle_free(const void *ra, void *p, size_t jem_sz)
+hook_handle_free(const void *ra, void *p, void *p_user, size_t jem_sz,
+		bool salt)
 {
 	hook_handle_alloc_check(ra, p, jem_sz);
 
@@ -360,6 +365,12 @@ hook_handle_free(const void *ra, void *p, size_t jem_sz)
 
 	for (uint32_t i = 0; i < 4 && i < delta; ++i) {
 		mark[i] = data[i];
+	}
+
+	if (salt) {
+		size_t sz = (size_t)(mark - (uint8_t *)p_user);
+
+		memset(p_user, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
 	}
 }
 
@@ -535,10 +546,12 @@ cf_alloc_init(void)
 }
 
 void
-cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations)
+cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations,
+		bool salt_allocations)
 {
 	g_debug = debug_allocations;
 	g_indent = indent_allocations;
+	g_salt = salt_allocations;
 
 	g_alloc_started = true;
 }
@@ -799,7 +812,7 @@ do_free(void *p_indent, const void *ra)
 	void *p = g_indent ? outdent(p_indent) : p_indent;
 	size_t jem_sz = jem_sallocx(p, 0);
 
-	hook_handle_free(ra, p, jem_sz);
+	hook_handle_free(ra, p, p_indent, jem_sz, g_salt);
 	jem_sdallocx(p, jem_sz, flags);
 }
 
@@ -902,6 +915,10 @@ do_mallocx(size_t sz, int32_t arena, const void *ra)
 	void *p_indent = g_indent ? indent(p) : p;
 
 	hook_handle_alloc(ra, p, p_indent, sz);
+
+	if (g_salt) {
+		memset(p_indent, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+	}
 
 	return p_indent;
 }
@@ -1039,7 +1056,7 @@ do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
 	void *p = g_indent ? outdent(p_indent) : p_indent;
 	size_t jem_sz = jem_sallocx(p, 0);
 
-	hook_handle_free(ra, p, jem_sz);
+	hook_handle_free(ra, p, p_indent, jem_sz, false);
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
@@ -1230,6 +1247,10 @@ do_valloc(size_t sz)
 	void *p = jem_aligned_alloc(PAGE_SZ, ext_sz);
 	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
+	if (g_salt) {
+		memset(p, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+	}
+
 	return p;
 }
 
@@ -1324,6 +1345,10 @@ cf_rc_alloc(size_t sz)
 		}
 
 		hook_handle_alloc(__builtin_return_address(0), p, p_indent, tot_sz);
+
+		if (g_salt) {
+			memset(p_indent, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+		}
 	}
 
 	cf_rc_header *head = p_indent;
@@ -1354,7 +1379,7 @@ do_rc_free(void *body, void *ra)
 	void *p = g_indent ? outdent(head) : head;
 	size_t jem_sz = jem_sallocx(p, 0);
 
-	hook_handle_free(ra, p, jem_sz);
+	hook_handle_free(ra, p, body, jem_sz, g_salt);
 	jem_sdallocx(p, jem_sz, flags);
 }
 

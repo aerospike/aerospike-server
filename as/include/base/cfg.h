@@ -152,6 +152,7 @@ typedef struct as_config_s {
 
 	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
 	bool			indent_allocations; // pointer indentation for better double-free detection
+	bool			salt_allocations; // initialize with junk - for internal use only
 
 	//--------------------------------------------
 	// network::service context.

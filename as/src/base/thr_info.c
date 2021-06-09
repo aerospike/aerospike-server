@@ -1882,6 +1882,7 @@ info_service_config_get(cf_dyn_buf *db)
 
 	info_append_string(db, "debug-allocations", debug_allocations_string());
 	info_append_bool(db, "indent-allocations", g_config.indent_allocations);
+	info_append_bool(db, "salt-allocations", g_config.salt_allocations);
 }
 
 static void
