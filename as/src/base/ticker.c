@@ -242,13 +242,11 @@ log_line_clock()
 
 		cf_info(AS_INFO, "   cluster-clock: skew-ms %lu outliers (%s)",
 				as_skew_monitor_skew(),
-				outliers_db.buf
-				);
+				outliers_db.buf);
 	}
 	else {
 		cf_info(AS_INFO, "   cluster-clock: skew-ms %lu",
-				as_skew_monitor_skew()
-				);
+				as_skew_monitor_skew());
 	}
 
 	cf_dyn_buf_free(&outliers_db);
@@ -270,8 +268,7 @@ log_line_system()
 	cf_info(AS_INFO, "   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d",
 			user_pct + kernel_pct, user_pct, kernel_pct,
 			free_mem / 1024,
-			free_pct
-			);
+			free_pct);
 }
 
 void
@@ -293,8 +290,7 @@ log_line_process()
 			process_cpu(),
 			ts.n_joinable, ts.n_detached, ts.n_pool_total, ts.n_pool_active,
 			allocated_kbytes, active_kbytes, mapped_kbytes,
-			efficiency_pct
-			);
+			efficiency_pct);
 }
 
 void
@@ -304,8 +300,7 @@ log_line_in_progress()
 			as_info_queue_get_size(),
 			rw_request_hash_count(),
 			as_proxy_hash_count(),
-			as_index_tree_gc_queue_size()
-			);
+			as_index_tree_gc_queue_size());
 }
 
 void
@@ -327,16 +322,14 @@ log_line_fds()
 	cf_info(AS_INFO, "   fds: proto (%lu,%lu,%lu) heartbeat (%lu,%lu,%lu) fabric (%lu,%lu,%lu)",
 			n_proto_fds_open, n_proto_fds_opened, n_proto_fds_closed,
 			n_hb_fds_open, n_hb_fds_opened, n_hb_fds_closed,
-			n_fabric_fds_open, n_fabric_fds_opened, n_fabric_fds_closed
-			);
+			n_fabric_fds_open, n_fabric_fds_opened, n_fabric_fds_closed);
 }
 
 void
 log_line_heartbeat()
 {
 	cf_info(AS_INFO, "   heartbeat-received: self %lu foreign %lu",
-			g_stats.heartbeat_received_self, g_stats.heartbeat_received_foreign
-			);
+			g_stats.heartbeat_received_self, g_stats.heartbeat_received_foreign);
 }
 
 void
@@ -365,8 +358,7 @@ log_fabric_rate(uint64_t delta_time)
 			g_stats.fabric_bulk_s_rate, g_stats.fabric_bulk_r_rate,
 			g_stats.fabric_ctrl_s_rate, g_stats.fabric_ctrl_r_rate,
 			g_stats.fabric_meta_s_rate, g_stats.fabric_meta_r_rate,
-			g_stats.fabric_rw_s_rate, g_stats.fabric_rw_r_rate
-			);
+			g_stats.fabric_rw_s_rate, g_stats.fabric_rw_r_rate);
 }
 
 void
@@ -397,8 +389,7 @@ log_line_early_fail()
 			n_tsvc_batch_sub,
 			n_tsvc_from_proxy_batch_sub,
 			n_tsvc_udf_sub,
-			n_tsvc_ops_sub
-			);
+			n_tsvc_ops_sub);
 }
 
 void
@@ -415,8 +406,7 @@ log_line_batch_index()
 
 	cf_info(AS_INFO, "   batch-index: batches (%lu,%lu,%lu) delays %lu",
 			n_complete, n_error, n_timeout,
-			n_delay
-			);
+			n_delay);
 }
 
 void
@@ -428,8 +418,7 @@ log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp)
 			n_objects,
 			mp->n_master_objects,
 			mp->n_prole_objects,
-			mp->n_non_replica_objects
-			);
+			mp->n_non_replica_objects);
 }
 
 void
@@ -451,8 +440,7 @@ log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 			ns->n_xdr_bin_cemeteries,
 			mp->n_master_tombstones,
 			mp->n_prole_tombstones,
-			mp->n_non_replica_tombstones
-			);
+			mp->n_non_replica_tombstones);
 }
 
 void
@@ -465,8 +453,7 @@ log_line_appeals(as_namespace* ns)
 	if (remaining_tx > 0 || active_tx > 0 || active_rx > 0) {
 		cf_info(AS_INFO, "{%s} appeals: remaining-tx %ld active (%ld,%ld)",
 				ns->name,
-				remaining_tx, active_tx, active_rx
-				);
+				remaining_tx, active_tx, active_rx);
 	}
 }
 
@@ -487,8 +474,7 @@ log_line_migrations(as_namespace* ns)
 				ns->name,
 				remaining_tx, remaining_rx, ns->migrate_signals_remaining,
 				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active, ns->migrate_signals_active,
-				complete_pct
-				);
+				complete_pct);
 	}
 	else {
 		cf_info(AS_INFO, "{%s} migrations: complete", ns->name);
@@ -509,8 +495,7 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 				as_set_index_used_bytes(ns),
 				sindex_mem,
 				data_mem,
-				mem_used_pct
-				);
+				mem_used_pct);
 	}
 	else {
 		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu set-index-bytes %lu sindex-bytes %lu used-pct %.2lf",
@@ -519,8 +504,7 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 				index_mem,
 				as_set_index_used_bytes(ns),
 				sindex_mem,
-				mem_used_pct
-				);
+				mem_used_pct);
 	}
 }
 
@@ -533,8 +517,7 @@ log_line_persistent_index_usage(as_namespace* ns, size_t used_size)
 		cf_info(AS_INFO, "{%s} index-pmem-usage: used-bytes %lu used-pct %lu",
 				ns->name,
 				used_size,
-				used_pct
-				);
+				used_pct);
 	}
 	else if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 		uint64_t used_pct = used_size * 100 / ns->mounts_size_limit;
@@ -546,8 +529,7 @@ log_line_persistent_index_usage(as_namespace* ns, size_t used_size)
 				used_size,
 				used_pct,
 				alloc_sz,
-				alloc_pct
-				);
+				alloc_pct);
 	}
 }
 
@@ -566,15 +548,13 @@ log_line_device_usage(as_namespace* ns)
 		cf_info(AS_INFO, "{%s} pmem-usage: used-bytes %lu avail-pct %d",
 				ns->name,
 				used_bytes,
-				available_pct
-				);
+				available_pct);
 	}
 	else if (ns->storage_data_in_memory) {
 		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d",
 				ns->name,
 				used_bytes,
-				available_pct
-				);
+				available_pct);
 	}
 	else {
 		uint32_t n_reads_from_cache = ns->n_reads_from_cache;
@@ -591,8 +571,7 @@ log_line_device_usage(as_namespace* ns)
 				ns->name,
 				used_bytes,
 				available_pct,
-				ns->cache_read_pct
-				);
+				ns->cache_read_pct);
 	}
 }
 
@@ -645,8 +624,7 @@ log_line_client(as_namespace* ns)
 			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
 			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
 			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error
-			);
+			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
@@ -668,8 +646,7 @@ log_line_xdr_client(as_namespace* ns)
 	cf_info(AS_INFO, "{%s} xdr-client: write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_write_success, n_write_error, n_write_timeout,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found
-			);
+			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found);
 }
 
 void
@@ -716,8 +693,7 @@ log_line_from_proxy(as_namespace* ns)
 			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
 			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
 			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error
-			);
+			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
@@ -739,8 +715,7 @@ log_line_xdr_from_proxy(as_namespace* ns)
 	cf_info(AS_INFO, "{%s} xdr-from-proxy: write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_write_success, n_write_error, n_write_timeout,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found
-			);
+			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found);
 }
 
 void
@@ -767,8 +742,7 @@ log_line_batch_sub(as_namespace* ns)
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
 			n_proxy_complete, n_proxy_error, n_proxy_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out
-			);
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out);
 }
 
 void
@@ -790,8 +764,7 @@ log_line_from_proxy_batch_sub(as_namespace* ns)
 	cf_info(AS_INFO, "{%s} from-proxy-batch-sub: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out
-			);
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out);
 }
 
 void
@@ -822,8 +795,7 @@ log_line_scan(as_namespace* ns)
 			n_basic_complete, n_basic_error, n_basic_abort,
 			n_aggr_complete, n_aggr_error, n_aggr_abort,
 			n_udf_bg_complete, n_udf_bg_error, n_udf_bg_abort,
-			n_ops_bg_complete, n_ops_bg_error, n_ops_bg_abort
-			);
+			n_ops_bg_complete, n_ops_bg_error, n_ops_bg_abort);
 }
 
 void
@@ -850,8 +822,7 @@ log_line_query(as_namespace* ns)
 			n_basic_success, n_basic_failure,
 			n_aggr_success, n_aggr_failure,
 			n_udf_bg_success, n_udf_bg_failure,
-			n_ops_bg_success, n_ops_bg_failure
-			);
+			n_ops_bg_success, n_ops_bg_failure);
 }
 
 void
@@ -878,8 +849,7 @@ log_line_udf_sub(as_namespace* ns)
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
 			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error
-			);
+			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
@@ -900,8 +870,7 @@ log_line_ops_sub(as_namespace* ns)
 	cf_info(AS_INFO, "{%s} ops-sub: tsvc (%lu,%lu) write (%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
-			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out
-			);
+			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out);
 }
 
 void
@@ -919,8 +888,7 @@ log_line_dup_res(as_namespace* ns)
 	cf_info(AS_INFO, "{%s} dup-res: ask %lu respond (%lu,%lu)",
 			ns->name,
 			n_ask,
-			n_respond_read, n_respond_no_read
-			);
+			n_respond_read, n_respond_no_read);
 }
 
 void
@@ -960,8 +928,7 @@ log_line_retransmits(as_namespace* ns)
 			n_all_udf_dup_res, n_all_udf_repl_write,
 			n_all_batch_sub_dup_res,
 			n_udf_sub_dup_res, n_udf_sub_repl_write,
-			n_ops_sub_dup_res, n_ops_sub_repl_write
-			);
+			n_ops_sub_dup_res, n_ops_sub_repl_write);
 }
 
 void
@@ -970,15 +937,17 @@ log_line_re_repl(as_namespace* ns)
 	uint64_t n_re_repl_success = ns->n_re_repl_success;
 	uint64_t n_re_repl_error = ns->n_re_repl_error;
 	uint64_t n_re_repl_timeout = ns->n_re_repl_timeout;
+	uint64_t n_unreplicated_records = ns->n_unreplicated_records;
 
-	if ((n_re_repl_success | n_re_repl_error | n_re_repl_timeout) == 0) {
+	if ((n_re_repl_success | n_re_repl_error | n_re_repl_timeout |
+			n_unreplicated_records) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} re-repl: all-triggers (%lu,%lu,%lu)",
+	cf_info(AS_INFO, "{%s} re-repl: all-triggers (%lu,%lu,%lu) unreplicated-records %lu",
 			ns->name,
-			n_re_repl_success, n_re_repl_error, n_re_repl_timeout
-			);
+			n_re_repl_success, n_re_repl_error, n_re_repl_timeout,
+			n_unreplicated_records);
 }
 
 void
@@ -999,8 +968,7 @@ log_line_special_errors(as_namespace* ns)
 			ns->name,
 			n_fail_key_busy,
 			n_fail_record_too_big,
-			n_fail_client_lost_conflict, n_fail_xdr_lost_conflict
-			);
+			n_fail_client_lost_conflict, n_fail_xdr_lost_conflict);
 }
 
 void

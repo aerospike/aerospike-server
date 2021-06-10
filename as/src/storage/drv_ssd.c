@@ -2682,6 +2682,8 @@ run_ssd_cold_start(void *udata)
 		as_truncate_list_cenotaphs(ns);
 		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 
+		ssd_cold_start_set_unrepl_stat(ns);
+
 		void *_t = NULL;
 
 		cf_queue_push(complete_q, &_t);

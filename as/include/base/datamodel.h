@@ -866,6 +866,7 @@ struct as_namespace_s {
 
 	// Consistency info.
 
+	uint64_t		n_unreplicated_records;
 	uint32_t		n_dead_partitions;
 	uint32_t		n_unavailable_partitions;
 	bool			clock_skew_stop_writes;

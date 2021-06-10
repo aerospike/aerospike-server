@@ -259,6 +259,7 @@ void ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks, struct as
 void ssd_adjust_versions(struct as_namespace_s *ns, drv_pmeta* pmeta);
 conflict_resolution_pol ssd_cold_start_policy(const struct as_namespace_s *ns);
 void ssd_cold_start_init_repl_state(struct as_namespace_s *ns, struct as_index_s* r);
+void ssd_cold_start_set_unrepl_stat(struct as_namespace_s *ns);
 
 // XDR.
 void ssd_cold_start_init_xdr_state(const struct as_flat_record_s* flat, struct as_index_s* r);
