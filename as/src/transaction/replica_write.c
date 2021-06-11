@@ -49,6 +49,7 @@
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
+#include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
@@ -271,6 +272,12 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 	// else - flat record, including tombstone.
+
+	// Replica writes are the last thing cut off when storage is backed up.
+	if (as_storage_overloaded(ns, 192, "replica write")) {
+		send_repl_write_ack(node, m, AS_ERR_DEVICE_OVERLOAD);
+		return;
+	}
 
 	as_remote_record rr = { .via = VIA_REPLICATION, .src = node };
 
