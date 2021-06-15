@@ -138,8 +138,6 @@ typedef struct as_xdr_dc_cfg_s {
 } as_xdr_dc_cfg;
 
 typedef struct as_xdr_config_s {
-	bool xdr_configured; // not actual config - indicates 'xdr' context present
-
 	uint8_t src_id;
 
 	// For debugging.

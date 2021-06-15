@@ -2151,7 +2151,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_BEGIN:
 				cfg_enterprise_only(&line);
-				c->xdr_cfg.xdr_configured = true;
 				cfg_begin_context(&state, XDR);
 				break;
 			case CASE_NOT_FOUND:
