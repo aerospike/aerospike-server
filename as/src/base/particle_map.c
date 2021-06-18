@@ -2295,6 +2295,17 @@ map_add_items_ordered(const packed_map *map, cdt_op_mem *com,
 	order_index_sorted_mark_dup_eles(val_ord, val_off, &dup_count, &dup_sz);
 
 	if (map->ele_count == 0) {
+		if (! control->allow_create) {
+			if (! control->no_fail) {
+				return -AS_ERR_ELEMENT_NOT_FOUND;
+			}
+
+			if (! control->do_partial) {
+				result_data_set_int(&com->result, map->ele_count);
+				return AS_OK;
+			}
+		}
+
 		uint32_t new_content_sz = order_index_get_ele_size(val_ord,
 				val_ord->max_idx, val_off);
 		uint32_t new_ele_count = val_ord->max_idx - dup_count;
