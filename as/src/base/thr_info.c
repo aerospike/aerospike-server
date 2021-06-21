@@ -2114,6 +2114,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		}
 
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
+		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
@@ -2159,6 +2160,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		}
 
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
+		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);

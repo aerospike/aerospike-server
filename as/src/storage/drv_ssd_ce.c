@@ -62,7 +62,7 @@ ssd_header_init_cfg(const as_namespace* ns, drv_ssd* ssd, drv_header* header)
 
 void
 ssd_header_validate_cfg(const as_namespace* ns, drv_ssd* ssd,
-		const drv_header* header)
+		drv_header* header)
 {
 	if ((header->generic.prefix.flags & DRV_HEADER_FLAG_SINGLE_BIN) != 0) {
 		if (! ns->single_bin) {

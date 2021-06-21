@@ -560,6 +560,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_PMEM_ENABLE_BENCHMARKS_STORAGE,
 	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION,
 	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_OLD_KEY_FILE,
 	CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS,
 	CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT,
@@ -590,6 +591,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OLD_KEY_FILE,
 	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
@@ -1091,6 +1093,7 @@ const cfg_opt NAMESPACE_STORAGE_PMEM_OPTS[] = {
 		{ "enable-benchmarks-storage",		CASE_NAMESPACE_STORAGE_PMEM_ENABLE_BENCHMARKS_STORAGE },
 		{ "encryption",						CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION },
 		{ "encryption-key-file",			CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE },
+		{ "encryption-old-key-file",		CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_OLD_KEY_FILE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT },
@@ -1121,6 +1124,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "enable-benchmarks-storage",		CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE },
 		{ "encryption",						CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION },
 		{ "encryption-key-file",			CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE },
+		{ "encryption-old-key-file",		CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OLD_KEY_FILE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
@@ -3288,6 +3292,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE:
 				ns->storage_encryption_key_file = cfg_strdup_no_checks(&line);
 				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_OLD_KEY_FILE:
+				ns->storage_encryption_old_key_file = cfg_strdup_no_checks(&line);
+				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
 				break;
@@ -3426,6 +3433,10 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE:
 				cfg_enterprise_only(&line);
 				ns->storage_encryption_key_file = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OLD_KEY_FILE:
+				cfg_enterprise_only(&line);
+				ns->storage_encryption_old_key_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;

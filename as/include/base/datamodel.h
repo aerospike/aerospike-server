@@ -710,6 +710,7 @@ struct as_namespace_s {
 	cf_atomic32		n_reads_from_device;
 
 	uint8_t			storage_encryption_key[64];
+	uint8_t			storage_encryption_old_key[64];
 
 	//--------------------------------------------
 	// Eviction.
@@ -834,6 +835,7 @@ struct as_namespace_s {
 	bool			storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
 	as_encryption_method storage_encryption; // relevant only for enterprise edition
 	char*			storage_encryption_key_file; // relevant only for enterprise edition
+	char*			storage_encryption_old_key_file; // relevant only for enterprise edition
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
