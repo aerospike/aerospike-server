@@ -51,14 +51,6 @@
 // Typedefs & constants.
 //
 
-// Minimum set sprigs - we're sharing the primary index tree's sprig locks.
-#define N_SET_SPRIGS NUM_LOCK_PAIRS
-
-typedef struct as_set_index_tree_s {
-	uarena ua;
-	uarena_handle roots[N_SET_SPRIGS];
-} as_set_index_tree;
-
 typedef struct stack_ele_s {
 	struct stack_ele_s* parent;
 	uarena_handle me_h;
@@ -120,7 +112,6 @@ static inline uint32_t ssprig_i_from_keyd(const cf_digest* keyd);
 static inline uint32_t stub_from_keyd(const cf_digest* keyd);
 static inline void ssri_from_ssprig_i(as_index_tree* tree, as_set_index_tree* stree, const cf_digest* keyd, uint32_t keyd_stub, uint32_t ssprig_i, ssprig_reduce_info* ssri);
 
-static bool ssprig_insert(ssprig_info* ssi, uint64_t key_r_h);
 static void ssprig_delete(ssprig_info* ssi);
 static bool ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata);
 static void ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h, as_index_ph_array* ph_a);
@@ -624,11 +615,11 @@ ssi_from_keyd(as_index_tree* tree, as_set_index_tree* stree,
 			((uint32_t)keyd->digest[4] << 3) |
 			((uint32_t)keyd->digest[5] >> 5);
 
-	uint32_t sprig_i = bits >> 23;
+	uint32_t ssprig_i = bits >> 23;
 
 	ssi->arena = tree->shared->arena;
 	ssi->ua = &stree->ua;
-	ssi->root = stree->roots + sprig_i;
+	ssi->root = stree->roots + ssprig_i;
 	ssi->keyd_stub = bits & ((1 << 23) - 1);
 	ssi->keyd = keyd;
 }
@@ -678,7 +669,8 @@ ssri_from_ssprig_i(as_index_tree* tree, as_set_index_tree* stree,
 // Local helpers - red-black sprigs.
 //
 
-static bool
+// Accessed by enterprise split.
+bool
 ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 {
 	// Shortcut inserting into empty sprig. May be common for set-indexes.

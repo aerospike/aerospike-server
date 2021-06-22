@@ -74,6 +74,14 @@ typedef struct uarena_s {
 // END uarena header.
 //--------------------------------------
 
+// Minimum set sprigs - we're sharing the primary index tree's sprig locks.
+#define N_SET_SPRIGS NUM_LOCK_PAIRS
+
+typedef struct as_set_index_tree_s {
+	uarena ua;
+	uarena_handle roots[N_SET_SPRIGS];
+} as_set_index_tree;
+
 typedef struct index_ele_s {
 	// Key - primary index arena handle.
 	uint64_t key_r_h: 40;
@@ -132,6 +140,7 @@ uint64_t as_set_index_used_bytes(const struct as_namespace_s* ns);
 // Private API - enterprise separation only.
 //
 
+bool ssprig_insert(ssprig_info* ssi, uint64_t key_r_h);
 bool ssprig_reduce_no_rc(struct as_index_tree_s* tree, ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata);
 
 static inline int
