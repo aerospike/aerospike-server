@@ -3010,6 +3010,8 @@ ssd_init_synchronous(drv_ssds *ssds)
 		}
 	}
 
+	ssd_clear_encryption_keys(ns);
+
 	if (first_used < 0) {
 		// Shouldn't find all fresh headers here during warm or cool restart.
 		if (! ns->cold_start) {

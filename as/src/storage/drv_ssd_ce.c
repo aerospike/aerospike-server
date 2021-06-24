@@ -77,6 +77,11 @@ ssd_header_validate_cfg(const as_namespace* ns, drv_ssd* ssd,
 }
 
 void
+ssd_clear_encryption_keys(as_namespace* ns)
+{
+}
+
+void
 ssd_flush_final_cfg(as_namespace* ns)
 {
 }
