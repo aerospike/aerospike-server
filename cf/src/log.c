@@ -245,7 +245,10 @@ cf_os_use_group_perms(bool use)
 	g_use_group_perms = use;
 
 	if (use) {
-		umask((mode_t)S_IWOTH);
+		umask((mode_t)(S_IROTH | S_IWOTH)); // but leaves GRP on
+	}
+	else {
+		umask((mode_t)(S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH));
 	}
 }
 
