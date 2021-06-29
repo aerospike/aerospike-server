@@ -7461,8 +7461,8 @@ static void
 hb_event_publish_pending()
 {
 	EXTERNAL_EVENT_PUBLISH_LOCK();
-	int num_events = cf_queue_sz(&g_hb_event_listeners.external_events_queue);
-	if (num_events <= 0) {
+
+	if (cf_queue_sz(&g_hb_event_listeners.external_events_queue) == 0) {
 		// Events need not be published.
 		goto Exit;
 	}

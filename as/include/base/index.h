@@ -337,7 +337,7 @@ tree_puddles_count(as_index_tree_shared* shared)
 //
 
 void as_index_tree_gc_init();
-int as_index_tree_gc_queue_size();
+uint32_t as_index_tree_gc_queue_size();
 
 as_index_tree* as_index_tree_create(as_index_tree_shared* shared, uint8_t id, as_index_tree_done_fn cb, void* udata);
 as_index_tree* as_index_tree_resume(as_index_tree_shared* shared, as_treex* xmem_trees, uint32_t pid, as_index_tree_done_fn cb, void* udata);

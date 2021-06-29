@@ -1324,12 +1324,12 @@ as_batch_queues_info(cf_dyn_buf* db)
 		as_batch_queue* bq = &batch_queues[i];
 		cf_dyn_buf_append_uint32(db, bq->tran_count);  // Batch count
 		cf_dyn_buf_append_char(db, ':');
-		cf_dyn_buf_append_int(db, cf_queue_sz(bq->response_queue));  // Buffer count
+		cf_dyn_buf_append_uint32(db, cf_queue_sz(bq->response_queue));  // Buffer count
 	}
 	cf_mutex_unlock(&batch_resize_lock);
 }
 
-int
+uint32_t
 as_batch_unused_buffers()
 {
 	return cf_queue_sz(batch_buffer_pool.queue);

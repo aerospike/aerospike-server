@@ -578,7 +578,7 @@ schedule_redistribution(void)
 {
 	cf_mutex_lock(&g_reaper_lock);
 
-	uint32_t n_remaining = g_n_slots - (uint32_t)cf_queue_sz(&g_free_slots);
+	uint32_t n_remaining = g_n_slots - cf_queue_sz(&g_free_slots);
 
 	for (uint32_t i = 0; n_remaining != 0; i++) {
 		as_file_handle* fd_h = g_file_handles[i];
@@ -713,7 +713,7 @@ stop_service(thread_ctx* ctx)
 
 		cf_mutex_lock(&g_reaper_lock);
 
-		uint32_t n_remaining = g_n_slots - (uint32_t)cf_queue_sz(&g_free_slots);
+		uint32_t n_remaining = g_n_slots - cf_queue_sz(&g_free_slots);
 
 		for (uint32_t i = 0; n_remaining != 0; i++) {
 			as_file_handle* fd_h = g_file_handles[i];
@@ -955,7 +955,7 @@ run_reaper(void* udata)
 
 		cf_mutex_lock(&g_reaper_lock);
 
-		uint32_t n_remaining = g_n_slots - (uint32_t)cf_queue_sz(&g_free_slots);
+		uint32_t n_remaining = g_n_slots - cf_queue_sz(&g_free_slots);
 
 		for (uint32_t i = 0; n_remaining != 0; i++) {
 			as_file_handle* fd_h = g_file_handles[i];

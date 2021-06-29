@@ -453,10 +453,10 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_get_aggregated_namespace_stats(db);
 
-	info_append_int(db, "info_queue", as_info_queue_get_size());
+	info_append_uint32(db, "info_queue", as_info_queue_get_size());
 	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
 	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
-	info_append_int(db, "tree_gc_queue", as_index_tree_gc_queue_size());
+	info_append_uint32(db, "tree_gc_queue", as_index_tree_gc_queue_size());
 
 	// Read closed before opened.
 	uint64_t n_proto_fds_closed = g_stats.proto_connections_closed;
@@ -509,7 +509,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	// Everything below is not in ticker...
 
-	info_append_int(db, "batch_index_unused_buffers", as_batch_unused_buffers());
+	info_append_uint32(db, "batch_index_unused_buffers", as_batch_unused_buffers());
 	info_append_uint64(db, "batch_index_huge_buffers", g_stats.batch_index_huge_buffers);
 	info_append_uint64(db, "batch_index_created_buffers", g_stats.batch_index_created_buffers);
 	info_append_uint64(db, "batch_index_destroyed_buffers", g_stats.batch_index_destroyed_buffers);
@@ -520,7 +520,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_format(db, "batch_index_proto_uncompressed_pct", "%.3f", g_stats.batch_comp_stat.uncomp_pct);
 	info_append_format(db, "batch_index_proto_compression_ratio", "%.3f", batch_ratio);
 
-	info_append_int(db, "scans_active", as_scan_get_active_job_count());
+	info_append_uint32(db, "scans_active", as_scan_get_active_job_count());
 
 	info_append_uint32(db, "query_short_running", g_query_short_running);
 	info_append_uint32(db, "query_long_running", g_query_long_running);
@@ -4991,7 +4991,7 @@ info_set_num_info_threads(uint32_t n_threads)
 }
 
 // Return the number of pending Info requests in the queue.
-int
+uint32_t
 as_info_queue_get_size()
 {
 	return cf_queue_sz(g_info_work_q);
@@ -6530,10 +6530,10 @@ int info_command_abort_scan(char *name, char *params, cf_dyn_buf *db) {
 
 int info_command_abort_all_scans(char *name, char *params, cf_dyn_buf *db) {
 
-	int n_scans_killed = as_scan_abort_all();
+	uint32_t n_scans_killed = as_scan_abort_all();
 
 	cf_dyn_buf_append_string(db, "OK - number of scans killed: ");
-	cf_dyn_buf_append_int(db, n_scans_killed);
+	cf_dyn_buf_append_uint32(db, n_scans_killed);
 
 	return 0;
 }

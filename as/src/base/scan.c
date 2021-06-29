@@ -197,7 +197,7 @@ as_scan_limit_finished_jobs(void)
 	as_scan_manager_limit_finished_jobs();
 }
 
-int
+uint32_t
 as_scan_get_active_job_count(void)
 {
 	return as_scan_manager_get_active_job_count();
@@ -230,7 +230,7 @@ as_scan_abort(uint64_t trid)
 	return as_scan_manager_abort_job(trid) ? 0 : -1;
 }
 
-int
+uint32_t
 as_scan_abort_all(void)
 {
 	return as_scan_manager_abort_all_jobs();

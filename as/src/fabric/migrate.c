@@ -295,9 +295,9 @@ as_migrate_dump(bool verbose)
 	cf_info(AS_MIGRATE, "---------------");
 	cf_info(AS_MIGRATE, "number of emigrations in g_emigration_hash: %d",
 			cf_rchash_get_size(g_emigration_hash));
-	cf_info(AS_MIGRATE, "number of requested emigrations waiting in g_emigration_q : %d",
+	cf_info(AS_MIGRATE, "number of requested emigrations waiting in g_emigration_q : %u",
 			cf_queue_sz(&g_emigration_q));
-	cf_info(AS_MIGRATE, "number of requested emigrations waiting in g_emigration_slow_q : %d",
+	cf_info(AS_MIGRATE, "number of requested emigrations waiting in g_emigration_slow_q : %u",
 			cf_queue_sz(&g_emigration_slow_q));
 	cf_info(AS_MIGRATE, "number of immigrations in g_immigration_hash: %d",
 			cf_rchash_get_size(g_immigration_hash));
@@ -525,7 +525,7 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 		return -1; // process immediately
 	}
 
-	if (emig->ctrl_q && cf_queue_sz(emig->ctrl_q) > 0) {
+	if (emig->ctrl_q && cf_queue_sz(emig->ctrl_q) != 0) {
 		// This emig was requeued after its start command got an ACK_EAGAIN,
 		// likely because dest hit 'migrate-max-num-incoming'. A new ack has
 		// arrived - if it's ACK_OK, don't leave remote node hanging.

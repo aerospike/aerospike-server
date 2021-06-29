@@ -296,7 +296,7 @@ log_line_process()
 void
 log_line_in_progress()
 {
-	cf_info(AS_INFO, "   in-progress: info-q %d rw-hash %u proxy-hash %u tree-gc-q %d",
+	cf_info(AS_INFO, "   in-progress: info-q %u rw-hash %u proxy-hash %u tree-gc-q %u",
 			as_info_queue_get_size(),
 			rw_request_hash_count(),
 			as_proxy_hash_count(),

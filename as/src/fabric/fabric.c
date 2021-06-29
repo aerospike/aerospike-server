@@ -630,7 +630,7 @@ as_fabric_dump(bool verbose)
 		}
 
 		cf_mutex_lock(&node->fc_hash_lock);
-		cf_info(AS_FABRIC, "   node %lx fds {via_connect={rw=%d ctrl=%d bulk=%d meta=%d} all=%d} live %d q {rw=%d ctrl=%d bulk=%d meta=%d}",
+		cf_info(AS_FABRIC, "   node %lx fds {via_connect={rw=%d ctrl=%d bulk=%d meta=%d} all=%d} live %d q {rw=%u ctrl=%u bulk=%u meta=%u}",
 				node->node_id,
 				node->connect_count[AS_FABRIC_CHANNEL_RW],
 				node->connect_count[AS_FABRIC_CHANNEL_CTRL],

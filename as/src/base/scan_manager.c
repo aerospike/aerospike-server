@@ -230,14 +230,14 @@ as_scan_manager_abort_job(uint64_t trid)
 	return true;
 }
 
-int
+uint32_t
 as_scan_manager_abort_all_jobs(void)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
-	int n_jobs = cf_queue_sz(g_mgr.active_jobs);
+	uint32_t n_jobs = cf_queue_sz(g_mgr.active_jobs);
 
-	if (n_jobs > 0) {
+	if (n_jobs != 0) {
 		cf_queue_reduce(g_mgr.active_jobs, abort_cb, NULL);
 	}
 
@@ -285,7 +285,7 @@ as_scan_manager_get_info(int* size)
 
 	cf_mutex_lock(&g_mgr.lock);
 
-	int n_jobs = cf_queue_sz(g_mgr.active_jobs) +
+	uint32_t n_jobs = cf_queue_sz(g_mgr.active_jobs) +
 			cf_queue_sz(g_mgr.finished_jobs);
 
 	if (n_jobs == 0) {
@@ -299,28 +299,28 @@ as_scan_manager_get_info(int* size)
 	cf_queue_reduce_reverse(g_mgr.active_jobs, info_cb, &item);
 	cf_queue_reduce_reverse(g_mgr.finished_jobs, info_cb, &item);
 
-	size_t stats_size = sizeof(as_mon_jobstat) * (uint32_t)n_jobs;
+	size_t stats_size = sizeof(as_mon_jobstat) * n_jobs;
 	as_mon_jobstat* stats = cf_malloc(stats_size);
 
 	memset(stats, 0, stats_size);
 
-	for (int i = 0; i < n_jobs; i++) {
+	for (uint32_t i = 0; i < n_jobs; i++) {
 		as_scan_job_info(_jobs[i], &stats[i]);
 	}
 
 	cf_mutex_unlock(&g_mgr.lock);
 
-	*size = n_jobs;
+	*size = (int)n_jobs; // no uint32_t upstream - may remove monitor
 
 	return stats; // caller must free this
 }
 
-int
+uint32_t
 as_scan_manager_get_active_job_count(void)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
-	int n_jobs = cf_queue_sz(g_mgr.active_jobs);
+	uint32_t n_jobs = cf_queue_sz(g_mgr.active_jobs);
 
 	cf_mutex_unlock(&g_mgr.lock);
 
@@ -344,7 +344,7 @@ add_scan_job_thread(as_scan_job* _job)
 static void
 evict_finished_jobs(void)
 {
-	int max_allowed = (int)as_load_uint32(&g_config.scan_max_done);
+	uint32_t max_allowed = as_load_uint32(&g_config.scan_max_done);
 
 	while (cf_queue_sz(g_mgr.finished_jobs) > max_allowed) {
 		as_scan_job* _job;

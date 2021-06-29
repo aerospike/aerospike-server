@@ -1030,7 +1030,7 @@ ssd_load_wblock_queues(drv_ssds *ssds)
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		cf_info(AS_DRV_SSD, "%s init wblocks: pristine-id %u pristine %u free-q %d, defrag-q %d",
+		cf_info(AS_DRV_SSD, "%s init wblocks: pristine-id %u pristine %u free-q %u, defrag-q %u",
 				ssd->name, ssd->pristine_wblock_id, num_pristine_wblocks(ssd),
 				cf_queue_sz(ssd->free_wblock_q),
 				cf_queue_sz(ssd->defrag_wblock_q));
@@ -1374,7 +1374,7 @@ ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 
 	if (ssd->post_write_q) {
 		// Release post-write queue swbs if we're over the limit.
-		while ((uint32_t)cf_queue_sz(ssd->post_write_q) >
+		while (cf_queue_sz(ssd->post_write_q) >
 				cf_atomic32_get(ssd->ns->storage_post_write_queue)) {
 			ssd_write_buf* cached_swb;
 
@@ -1822,15 +1822,15 @@ ssd_log_stats(drv_ssd *ssd, uint64_t *p_prev_n_total_writes,
 	*shadow_str = 0;
 
 	if (ssd->shadow_name) {
-		sprintf(shadow_str, " shadow-write-q %d",
+		sprintf(shadow_str, " shadow-write-q %u",
 				cf_queue_sz(ssd->swb_shadow_q));
 	}
 
-	uint32_t free_wblock_q_sz = (uint32_t)cf_queue_sz(ssd->free_wblock_q);
+	uint32_t free_wblock_q_sz = cf_queue_sz(ssd->free_wblock_q);
 	uint32_t n_pristine_wblocks = num_pristine_wblocks(ssd);
 	uint32_t n_free_wblocks = free_wblock_q_sz + n_pristine_wblocks;
 
-	cf_info(AS_DRV_SSD, "{%s} %s: used-bytes %lu free-wblocks %u write-q %d write (%lu,%.1f) defrag-q %d defrag-read (%lu,%.1f) defrag-write (%lu,%.1f)%s%s",
+	cf_info(AS_DRV_SSD, "{%s} %s: used-bytes %lu free-wblocks %u write-q %u write (%lu,%.1f) defrag-q %u defrag-read (%lu,%.1f) defrag-write (%lu,%.1f)%s%s",
 			ssd->ns->name, ssd->name,
 			ssd->inuse_size, n_free_wblocks,
 			cf_queue_sz(ssd->swb_write_q),
@@ -1862,7 +1862,7 @@ void
 ssd_free_swbs(drv_ssd *ssd)
 {
 	// Try to recover swbs, 16 at a time, down to 16.
-	for (int i = 0; i < 16 && cf_queue_sz(ssd->swb_free_q) > 16; i++) {
+	for (uint32_t i = 0; i < 16 && cf_queue_sz(ssd->swb_free_q) > 16; i++) {
 		ssd_write_buf* swb;
 
 		if (CF_QUEUE_OK !=
@@ -4138,12 +4138,12 @@ as_storage_shutdown_ssd(as_namespace *ns)
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
 
-		while (cf_queue_sz(ssd->swb_write_q)) {
+		while (cf_queue_sz(ssd->swb_write_q) != 0) {
 			usleep(1000);
 		}
 
 		if (ssd->shadow_name) {
-			while (cf_queue_sz(ssd->swb_shadow_q)) {
+			while (cf_queue_sz(ssd->swb_shadow_q) != 0) {
 				usleep(1000);
 			}
 		}

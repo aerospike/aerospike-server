@@ -701,10 +701,10 @@ as_smd_get_info(cf_dyn_buf* db)
 
 	cf_dyn_buf_append_string(db, "smd:");
 	cf_dyn_buf_append_string(db, "n_pending_sets=");
-	cf_dyn_buf_append_uint32(db, (uint32_t)cf_queue_sz(&g_smd.pending_set_q));
+	cf_dyn_buf_append_uint32(db, cf_queue_sz(&g_smd.pending_set_q));
 	cf_dyn_buf_append_char(db, ',');
 	cf_dyn_buf_append_string(db, "n_events=");
-	cf_dyn_buf_append_uint32(db, (uint32_t)cf_queue_sz(&g_smd.event_q));
+	cf_dyn_buf_append_uint32(db, cf_queue_sz(&g_smd.event_q));
 	cf_dyn_buf_append_char(db, ',');
 	cf_dyn_buf_append_string(db, "n_nodes=");
 	cf_dyn_buf_append_uint32(db, g_smd.node_count);
