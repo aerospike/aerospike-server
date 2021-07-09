@@ -527,7 +527,7 @@ cf_alloc_init(void)
 	// Double-check that hook_get_arena() works, as it depends on JEMalloc's
 	// internal data structures.
 
-	int32_t err = jem_mallctl("thread.tcache.flush", NULL, NULL, NULL, 0);
+	int err = jem_mallctl("thread.tcache.flush", NULL, NULL, NULL, 0);
 
 	if (err != 0) {
 		cf_crash(CF_ALLOC, "error while flushing thread cache: %d (%s)", err, cf_strerror(err));
@@ -562,7 +562,7 @@ cf_alloc_create_arena(void)
 	int32_t arena;
 	size_t arena_len = sizeof(arena);
 
-	int32_t err = jem_mallctl("arenas.extend", &arena, &arena_len, NULL, 0);
+	int err = jem_mallctl("arenas.extend", &arena, &arena_len, NULL, 0);
 
 	if (err != 0) {
 		cf_crash(CF_ALLOC, "failed to create new arena: %d (%s)", err, cf_strerror(err));
@@ -579,7 +579,7 @@ cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *map
 	uint64_t epoch = 1;
 	size_t len = sizeof(epoch);
 
-	int32_t err = jem_mallctl("epoch", &epoch, &len, &epoch, len);
+	int err = jem_mallctl("epoch", &epoch, &len, &epoch, len);
 
 	if (err != 0) {
 		cf_crash(CF_ALLOC, "failed to retrieve epoch: %d (%s)", err, cf_strerror(err));
@@ -823,6 +823,22 @@ free(void *p_indent)
 	do_free(p_indent, __builtin_return_address(0));
 }
 
+static void
+tcache_destroy(void *udata)
+{
+	(void)udata;
+
+	if (g_ns_tcache >= 0) {
+		size_t len = sizeof(g_ns_tcache);
+
+		int err = jem_mallctl("tcache.destroy", NULL, 0, &g_ns_tcache, len);
+
+		if (err != 0) {
+			cf_crash(CF_ALLOC, "failed to destroy cache: %d (%s)", err, cf_strerror(err));
+		}
+	}
+}
+
 static int32_t
 calc_alloc_flags(int32_t flags, int32_t arena)
 {
@@ -836,7 +852,8 @@ calc_alloc_flags(int32_t flags, int32_t arena)
 		// Create startup arena, if necessary.
 		if (g_startup_arena < 0) {
 			size_t len = sizeof(g_startup_arena);
-			int32_t err = jem_mallctl("arenas.extend", &g_startup_arena, &len,
+
+			int err = jem_mallctl("arenas.extend", &g_startup_arena, &len,
 					NULL, 0);
 
 			if (err != 0) {
@@ -883,11 +900,14 @@ calc_alloc_flags(int32_t flags, int32_t arena)
 
 	if (g_ns_tcache < 0) {
 		size_t len = sizeof(g_ns_tcache);
-		int32_t err = jem_mallctl("tcache.create", &g_ns_tcache, &len, NULL, 0);
+
+		int err = jem_mallctl("tcache.create", &g_ns_tcache, &len, NULL, 0);
 
 		if (err != 0) {
 			cf_crash(CF_ALLOC, "failed to create new cache: %d (%s)", err, cf_strerror(err));
 		}
+
+		cf_thread_add_exit(tcache_destroy, NULL);
 	}
 
 	// Add the second (non-default) per-thread cache to the flags.
