@@ -58,6 +58,7 @@
 #include "base/scan.h"
 #include "base/security.h"
 #include "base/service.h"
+#include "base/set_index.h"
 #include "base/smd.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
@@ -383,6 +384,7 @@ as_run(int argc, char **argv)
 	as_scan_init();				// scan a namespace or set
 	as_batch_init();			// batch transaction handling
 	as_mon_init();				// monitor
+	as_set_index_init();		// dynamic set-index population
 
 	// Wait for enough available storage. We've been defragging all along, but
 	// here we wait until it's enough. This may block for a long time.
