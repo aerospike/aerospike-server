@@ -773,6 +773,16 @@ log_write(cf_log_context context, cf_log_level level, const char* file_name,
 static int
 sprintf_now(char* buf)
 {
+	// Guard against reentrance since localtime_r() and gmtime_r() call
+	// allocation functions which may fail and write log lines.
+	static __thread bool g_reentrant = false;
+
+	if (g_reentrant) {
+		return 0;
+	}
+
+	g_reentrant = true;
+
 	struct timeval now_tv;
 	gettimeofday(&now_tv, NULL);
 
@@ -798,6 +808,8 @@ sprintf_now(char* buf)
 		strcpy(buf + pos, " GMT: ");
 		pos += 6;
 	}
+
+	g_reentrant = false;
 
 	return pos;
 }
