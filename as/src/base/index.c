@@ -930,9 +930,7 @@ as_index_sprig_delete(as_index_sprig *isprig, const cf_digest *keyd)
 	// Flag record as deleted.
 	as_index_invalidate_record(r);
 
-	// Rely on n_elements being little endian at the beginning of as_sprig. Only
-	// needs to be atomic during warm restart, but not worth special case.
-	cf_atomic32_decr((cf_atomic32*)isprig->sprig);
+	isprig->sprig->n_elements--;
 
 	cf_mutex_unlock(&isprig->pair->reduce_lock);
 
