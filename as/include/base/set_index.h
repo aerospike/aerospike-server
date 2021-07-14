@@ -152,7 +152,8 @@ ssprig_ele_cmp(const ssprig_info* ssi, const index_ele* e)
 	if (ssi->keyd_stub > e->keyd_stub) {
 		return 1;
 	}
-	else if (ssi->keyd_stub < e->keyd_stub) {
+
+	if (ssi->keyd_stub < e->keyd_stub) {
 		return -1;
 	}
 	// else - equal - need whole digests.
