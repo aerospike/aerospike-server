@@ -836,6 +836,8 @@ tcache_destroy(void *udata)
 		if (err != 0) {
 			cf_crash(CF_ALLOC, "failed to destroy cache: %d (%s)", err, cf_strerror(err));
 		}
+
+		g_ns_tcache = -1;
 	}
 }
 
