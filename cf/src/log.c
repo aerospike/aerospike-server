@@ -79,6 +79,7 @@ static const char* context_strings[] = {
 		"aggr",
 		"appeal",
 		"as",
+		"audit",
 		"batch",
 		"bin",
 		"config",

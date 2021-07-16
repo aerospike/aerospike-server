@@ -57,6 +57,7 @@ typedef enum {
 	AS_AGGR,
 	AS_APPEAL,
 	AS_AS,
+	AS_AUDIT,
 	AS_BATCH,
 	AS_BIN,
 	AS_CFG,
