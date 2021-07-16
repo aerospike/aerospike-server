@@ -206,12 +206,12 @@ cfg_set_defaults()
 
 	// TODO - security set default config API?
 	// Security defaults.
-	c->sec_cfg.n_ldap_login_threads = 8;
 	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
+	c->sec_cfg.session_ttl = 60 * 60 * 24;
 	c->sec_cfg.tps_weight = TPS_WEIGHT_MIN;
 	// Security LDAP defaults.
+	c->sec_cfg.n_ldap_login_threads = 8;
 	c->sec_cfg.ldap_polling_period = 60 * 5;
-	c->sec_cfg.ldap_session_ttl = 60 * 60 * 24;
 	c->sec_cfg.ldap_token_hash_method = AS_LDAP_EVP_SHA_256;
 	// Security syslog defaults.
 	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
@@ -639,8 +639,8 @@ typedef enum {
 	CASE_SECURITY_ENABLE_LDAP,
 	CASE_SECURITY_ENABLE_QUOTAS,
 	CASE_SECURITY_ENABLE_SECURITY,
-	CASE_SECURITY_LDAP_LOGIN_THREADS,
 	CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD,
+	CASE_SECURITY_SESSION_TTL,
 	CASE_SECURITY_TPS_WEIGHT,
 	CASE_SECURITY_LDAP_BEGIN,
 	CASE_SECURITY_LOG_BEGIN,
@@ -648,6 +648,7 @@ typedef enum {
 
 	// Security LDAP options:
 	CASE_SECURITY_LDAP_DISABLE_TLS,
+	CASE_SECURITY_LDAP_LOGIN_THREADS,
 	CASE_SECURITY_LDAP_POLLING_PERIOD,
 	CASE_SECURITY_LDAP_QUERY_BASE_DN,
 	CASE_SECURITY_LDAP_QUERY_USER_DN,
@@ -656,7 +657,6 @@ typedef enum {
 	CASE_SECURITY_LDAP_ROLE_QUERY_PATTERN,
 	CASE_SECURITY_LDAP_ROLE_QUERY_SEARCH_OU,
 	CASE_SECURITY_LDAP_SERVER,
-	CASE_SECURITY_LDAP_SESSION_TTL,
 	CASE_SECURITY_LDAP_TLS_CA_FILE,
 	CASE_SECURITY_LDAP_TOKEN_HASH_METHOD,
 	CASE_SECURITY_LDAP_USER_DN_PATTERN,
@@ -1183,8 +1183,8 @@ const cfg_opt SECURITY_OPTS[] = {
 		{ "enable-ldap",					CASE_SECURITY_ENABLE_LDAP },
 		{ "enable-quotas",					CASE_SECURITY_ENABLE_QUOTAS },
 		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
-		{ "ldap-login-threads",				CASE_SECURITY_LDAP_LOGIN_THREADS },
 		{ "privilege-refresh-period",		CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD },
+		{ "session-ttl",					CASE_SECURITY_SESSION_TTL },
 		{ "tps-weight",						CASE_SECURITY_TPS_WEIGHT },
 		{ "ldap",							CASE_SECURITY_LDAP_BEGIN },
 		{ "log",							CASE_SECURITY_LOG_BEGIN },
@@ -1194,6 +1194,7 @@ const cfg_opt SECURITY_OPTS[] = {
 
 const cfg_opt SECURITY_LDAP_OPTS[] = {
 		{ "disable-tls",					CASE_SECURITY_LDAP_DISABLE_TLS },
+		{ "login-threads",					CASE_SECURITY_LDAP_LOGIN_THREADS },
 		{ "polling-period",					CASE_SECURITY_LDAP_POLLING_PERIOD },
 		{ "query-base-dn",					CASE_SECURITY_LDAP_QUERY_BASE_DN },
 		{ "query-user-dn",					CASE_SECURITY_LDAP_QUERY_USER_DN },
@@ -1202,7 +1203,6 @@ const cfg_opt SECURITY_LDAP_OPTS[] = {
 		{ "role-query-pattern",				CASE_SECURITY_LDAP_ROLE_QUERY_PATTERN },
 		{ "role-query-search-ou",			CASE_SECURITY_LDAP_ROLE_QUERY_SEARCH_OU },
 		{ "server",							CASE_SECURITY_LDAP_SERVER },
-		{ "session-ttl",					CASE_SECURITY_LDAP_SESSION_TTL },
 		{ "tls-ca-file",					CASE_SECURITY_LDAP_TLS_CA_FILE },
 		{ "token-hash-method",				CASE_SECURITY_LDAP_TOKEN_HASH_METHOD },
 		{ "user-dn-pattern",				CASE_SECURITY_LDAP_USER_DN_PATTERN },
@@ -3612,11 +3612,11 @@ as_config_init(const char* config_file)
 			case CASE_SECURITY_ENABLE_SECURITY:
 				c->sec_cfg.security_enabled = cfg_bool(&line);
 				break;
-			case CASE_SECURITY_LDAP_LOGIN_THREADS:
-				c->sec_cfg.n_ldap_login_threads = cfg_u32(&line, 1, 64);
-				break;
 			case CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD:
 				c->sec_cfg.privilege_refresh_period = cfg_seconds(&line, PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
+				break;
+			case CASE_SECURITY_SESSION_TTL:
+				c->sec_cfg.session_ttl = cfg_seconds(&line, SECURITY_SESSION_TTL_MIN, SECURITY_SESSION_TTL_MAX);
 				break;
 			case CASE_SECURITY_TPS_WEIGHT:
 				c->sec_cfg.tps_weight = cfg_u32(&line, TPS_WEIGHT_MIN, TPS_WEIGHT_MAX);
@@ -3648,6 +3648,9 @@ as_config_init(const char* config_file)
 			case CASE_SECURITY_LDAP_DISABLE_TLS:
 				c->sec_cfg.ldap_tls_disabled = cfg_bool(&line);
 				break;
+			case CASE_SECURITY_LDAP_LOGIN_THREADS:
+				c->sec_cfg.n_ldap_login_threads = cfg_u32(&line, 1, 64);
+				break;
 			case CASE_SECURITY_LDAP_POLLING_PERIOD:
 				c->sec_cfg.ldap_polling_period = cfg_seconds(&line, 0, LDAP_POLLING_PERIOD_MAX);
 				break;
@@ -3671,9 +3674,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SECURITY_LDAP_SERVER:
 				c->sec_cfg.ldap_server = cfg_strdup_no_checks(&line);
-				break;
-			case CASE_SECURITY_LDAP_SESSION_TTL:
-				c->sec_cfg.ldap_session_ttl = cfg_seconds(&line, LDAP_SESSION_TTL_MIN, LDAP_SESSION_TTL_MAX);
 				break;
 			case CASE_SECURITY_LDAP_TLS_CA_FILE:
 				c->sec_cfg.ldap_tls_ca_file = cfg_strdup_no_checks(&line);
