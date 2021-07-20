@@ -165,8 +165,7 @@ log_ticker_frame(uint64_t delta_time)
 {
 	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u",
 			g_config.self_node,
-			as_exchange_cluster_size()
-			);
+			as_exchange_cluster_size());
 
 	log_line_clock();
 	log_line_system();
