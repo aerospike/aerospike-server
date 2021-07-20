@@ -208,7 +208,6 @@ static inline uint8_t *buf_pack_nil_rep(uint8_t *buf, uint32_t rep);
 static inline void pack_nil_rep(as_packer *pk, uint32_t rep);
 
 // cdt_process_state
-bool cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op);
 static bool cdt_process_state_init_from_vec(cdt_process_state *cdt_state, msgpack_in_vec* mv);
 
 // order_index
@@ -933,26 +932,6 @@ cdt_container_builder_set_result(cdt_container_builder *builder,
 //==========================================================
 // cdt_process_state functions.
 //
-
-bool
-cdt_process_state_init(cdt_process_state *cdt_state,
-		const as_msg_op *op)
-{
-	const uint8_t *data = op->name + op->name_sz;
-	uint32_t sz = op->op_sz - OP_FIXED_SZ - op->name_sz;
-
-	msgpack_vec vecs = {
-			.buf = data,
-			.buf_sz = sz
-	};
-
-	msgpack_in_vec mv = {
-			.n_vecs = 1,
-			.vecs = &vecs
-	};
-
-	return cdt_process_state_init_from_vec(cdt_state, &mv);
-}
 
 static bool
 cdt_process_state_init_from_vec(cdt_process_state *cdt_state,
@@ -2293,7 +2272,17 @@ as_bin_cdt_modify_tr(as_bin *b, const as_msg_op *op, as_bin *result,
 {
 	cdt_process_state state;
 
-	if (! cdt_process_state_init(&state, op)) {
+	msgpack_vec vecs = {
+			.buf = as_msg_op_get_value_p(op),
+			.buf_sz = as_msg_op_get_value_sz(op)
+	};
+
+	msgpack_in_vec mv = {
+			.n_vecs = 1,
+			.vecs = &vecs
+	};
+
+	if (! cdt_process_state_init_from_vec(&state, &mv)) {
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2305,7 +2294,17 @@ as_bin_cdt_read_tr(const as_bin *b, const as_msg_op *op, as_bin *result)
 {
 	cdt_process_state state;
 
-	if (! cdt_process_state_init(&state, op)) {
+	msgpack_vec vecs = {
+			.buf = as_msg_op_get_value_p(op),
+			.buf_sz = as_msg_op_get_value_sz(op)
+	};
+
+	msgpack_in_vec mv = {
+			.n_vecs = 1,
+			.vecs = &vecs
+	};
+
+	if (! cdt_process_state_init_from_vec(&state, &mv)) {
 		return -AS_ERR_PARAMETER;
 	}
 
