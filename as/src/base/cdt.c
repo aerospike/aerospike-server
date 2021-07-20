@@ -2273,7 +2273,7 @@ as_bin_cdt_modify_tr(as_bin *b, const as_msg_op *op, as_bin *result,
 	cdt_process_state state;
 
 	msgpack_vec vecs = {
-			.buf = as_msg_op_get_value_p(op),
+			.buf = as_msg_op_get_value_p((as_msg_op *)op),
 			.buf_sz = as_msg_op_get_value_sz(op)
 	};
 
@@ -2295,7 +2295,7 @@ as_bin_cdt_read_tr(const as_bin *b, const as_msg_op *op, as_bin *result)
 	cdt_process_state state;
 
 	msgpack_vec vecs = {
-			.buf = as_msg_op_get_value_p(op),
+			.buf = as_msg_op_get_value_p((as_msg_op *)op),
 			.buf_sz = as_msg_op_get_value_sz(op)
 	};
 
