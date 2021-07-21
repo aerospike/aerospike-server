@@ -6477,7 +6477,10 @@ clustering_nodes_to_add_get(cf_vector* nodes_to_add)
 static void
 clustering_orphan_quantum_interval_start_handle()
 {
-	if (!as_hb_self_is_duplicate()) {
+	if (as_hb_self_is_duplicate()) {
+		WARNING("duplicate node-id - remain orphan");
+	}
+	else {
 		// Try to join a cluster or form a new one.
 		clustering_join_or_form_cluster();
 	}
@@ -6802,6 +6805,7 @@ clustering_principal_quantum_interval_start_handle(
 	DETAIL("principal node quantum wakeup");
 
 	if (as_hb_self_is_duplicate()) {
+		WARNING("duplicate node-id - changing state to orphan");
 		// Cluster is in a bad shape and self node has a duplicate node-id.
 		register_become_orphan (AS_CLUSTERING_MEMBERSHIP_LOST);
 		return;
@@ -7084,6 +7088,7 @@ clustering_non_principal_quantum_interval_start_handle()
 	clustering_join_requests_reject_all();
 
 	if (as_hb_self_is_duplicate()) {
+		WARNING("duplicate node-id - changing state to orphan");
 		// Cluster is in a bad shape and self node has a duplicate node-id.
 		register_become_orphan (AS_CLUSTERING_MEMBERSHIP_LOST);
 		return;

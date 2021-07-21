@@ -8441,7 +8441,7 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 		as_endpoint_list_to_string(prev_fabric_endpoints,
 				prev_fabric_endpoints_str, sizeof(prev_fabric_endpoints_str));
 
-		TICKER_WARNING("node: %"PRIx64" fabric endpoints changed from {%s} to {%s}", source, prev_fabric_endpoints_str, curr_fabric_endpoints_str);
+		TICKER_WARNING("node: %"PRIx64" fabric endpoints changed from {%s} to {%s} - possible duplicate node-id", source, prev_fabric_endpoints_str, curr_fabric_endpoints_str);
 	}
 
 	hb_endpoint_change_tracker_update(&adjacent_node->endpoint_change_tracker,
