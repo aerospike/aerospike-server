@@ -3545,7 +3545,7 @@ as_config_init(const char* config_file)
 			break;
 
 		//----------------------------------------
-		// Parse namespace::2dsphere-within context items.
+		// Parse namespace::geo2dsphere-within context items.
 		//
 		case NAMESPACE_GEO2DSPHERE_WITHIN:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_GEO2DSPHERE_WITHIN_OPTS, NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS)) {

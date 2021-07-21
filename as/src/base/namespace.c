@@ -158,7 +158,7 @@ as_namespace_create(char *name)
 
 	ns->geo2dsphere_within_strict = true;
 	ns->geo2dsphere_within_min_level = 1;
-	ns->geo2dsphere_within_max_level = 30;
+	ns->geo2dsphere_within_max_level = 20;
 	ns->geo2dsphere_within_max_cells = 12;
 	ns->geo2dsphere_within_level_mod = 1;
 	ns->geo2dsphere_within_earth_radius_meters = 6371000;  // Wikipedia, mean
