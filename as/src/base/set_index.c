@@ -1025,21 +1025,7 @@ ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h,
 	}
 
 	if (ph_a->n_used == ph_a->capacity) {
-		uint32_t new_capacity = ph_a->capacity * 2;
-		size_t new_sz = sizeof(as_index_ph) * new_capacity;
-
-		if (ph_a->is_stack) {
-			as_index_ph* phs = cf_malloc(new_sz);
-
-			memcpy(phs, ph_a->phs, sizeof(as_index_ph) * ph_a->capacity);
-			ph_a->phs = phs;
-			ph_a->is_stack = false;
-		}
-		else {
-			ph_a->phs = cf_realloc(ph_a->phs, new_sz);
-		}
-
-		ph_a->capacity = new_capacity;
+		as_index_grow_ph_array(ph_a);
 	}
 
 	// We do not collect the element with the boundary digest.

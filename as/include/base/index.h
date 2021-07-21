@@ -287,7 +287,7 @@ typedef struct as_lock_pair_s {
 #define NUM_SPRIG_BITS 28 // 3.5 bytes - yes, that's a lot of sprigs
 
 typedef struct as_sprig_s {
-	uint64_t n_elements: 24; // max 16M records per sprig
+	// TODO - do we need this as_sprig struct now that n_elements is gone?
 	uint64_t root_h: 40;
 } as_sprig;
 
@@ -381,7 +381,9 @@ typedef struct as_index_ph_array_s {
 	as_index_ph* phs;
 } as_index_ph_array;
 
-#define MAX_STACK_PHS (8 * 1024) // TODO - go bigger?
+#define MAX_STACK_PHS (16 * 1024) // TODO - go bigger? Warn if we grow array?
+
+void as_index_grow_ph_array(as_index_ph_array* ph_a);
 
 
 //------------------------------------------------

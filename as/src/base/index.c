@@ -434,10 +434,8 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 {
 	cf_mutex_lock(&isprig->pair->reduce_lock);
 
-	uint32_t n_elements = (uint32_t)isprig->sprig->n_elements;
-
 	// Common to encounter empty sprigs.
-	if (n_elements == 0) {
+	if (isprig->sprig->root_h == SENTINEL_H) {
 		cf_mutex_unlock(&isprig->pair->reduce_lock);
 		return true;
 	}
@@ -445,14 +443,9 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 	as_index_ph stack_phs[MAX_STACK_PHS];
 	as_index_ph_array ph_a = {
 			.is_stack = true,
-			.capacity = n_elements, // unused for now
+			.capacity = MAX_STACK_PHS,
 			.phs = stack_phs
 	};
-
-	if (n_elements > MAX_STACK_PHS) {
-		ph_a.is_stack = false;
-		ph_a.phs = cf_malloc(sizeof(as_index_ph) * n_elements);
-	}
 
 	// Traverse just fills array, then we make callbacks outside reduce lock.
 	as_index_sprig_traverse(isprig, keyd, isprig->sprig->root_h, &ph_a);
@@ -518,6 +511,10 @@ as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd,
 		as_index_sprig_traverse(isprig, keyd, r->left_h, ph_a);
 	}
 
+	if (ph_a->n_used == ph_a->capacity) {
+		as_index_grow_ph_array(ph_a);
+	}
+
 	// We do not collect the element with the boundary digest.
 
 	if (keyd == NULL || cmp < 0) {
@@ -532,6 +529,26 @@ as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd,
 	}
 
 	as_index_sprig_traverse(isprig, keyd, r->right_h, ph_a);
+}
+
+void
+as_index_grow_ph_array(as_index_ph_array* ph_a)
+{
+	uint32_t new_capacity = ph_a->capacity * 2;
+	size_t new_sz = sizeof(as_index_ph) * new_capacity;
+
+	if (ph_a->is_stack) {
+		as_index_ph* phs = cf_malloc(new_sz);
+
+		memcpy(phs, ph_a->phs, sizeof(as_index_ph) * ph_a->capacity);
+		ph_a->phs = phs;
+		ph_a->is_stack = false;
+	}
+	else {
+		ph_a->phs = cf_realloc(ph_a->phs, new_sz);
+	}
+
+	ph_a->capacity = new_capacity;
 }
 
 void
@@ -735,11 +752,6 @@ as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id,
 		isprig->sprig->root_h = root_parent.left_h;
 	}
 
-	isprig->sprig->n_elements++;
-
-	// Surely we won't hit 16M elements, but...
-	cf_assert(isprig->sprig->n_elements != 0, AS_INDEX, "sprig overflow");
-
 	cf_mutex_unlock(&isprig->pair->reduce_lock);
 
 	index_ref->r = n;
@@ -875,10 +887,6 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 
 	// Flag record as deleted.
 	as_index_invalidate_record(r);
-
-	// Rely on n_elements being little endian at the beginning of as_sprig. Only
-	// needs to be atomic during warm restart, but not worth special case.
-	as_decr_uint32((uint32_t*)isprig->sprig);
 
 	cf_mutex_unlock(&isprig->pair->reduce_lock);
 
