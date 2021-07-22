@@ -287,9 +287,8 @@ typedef struct as_lock_pair_s {
 #define NUM_SPRIG_BITS 28 // 3.5 bytes - yes, that's a lot of sprigs
 
 typedef struct as_sprig_s {
-	// TODO - do we need this as_sprig struct now that n_elements is gone?
 	uint64_t root_h: 40;
-} as_sprig;
+} __attribute__((packed)) as_sprig;
 
 static inline as_lock_pair*
 tree_locks(as_index_tree* tree)
