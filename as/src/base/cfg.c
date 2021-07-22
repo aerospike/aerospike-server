@@ -709,6 +709,7 @@ typedef enum {
 	CASE_XDR_DC_AUTH_MODE_INTERNAL,
 	CASE_XDR_DC_AUTH_MODE_EXTERNAL,
 	CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE,
+	CASE_XDR_DC_AUTH_MODE_PKI,
 
 	// XDR DC namespace options:
 	CASE_XDR_DC_NAMESPACE_BIN_POLICY,
@@ -1262,7 +1263,8 @@ const cfg_opt XDR_DC_OPTS[] = {
 const cfg_opt XDR_DC_AUTH_MODE_OPTS[] = {
 		{ "internal",						CASE_XDR_DC_AUTH_MODE_INTERNAL },
 		{ "external",						CASE_XDR_DC_AUTH_MODE_EXTERNAL },
-		{ "external-insecure",				CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE }
+		{ "external-insecure",				CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE },
+		{ "pki",							CASE_XDR_DC_AUTH_MODE_PKI }
 };
 
 const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
@@ -3828,6 +3830,9 @@ as_config_init(const char* config_file)
 					break;
 				case CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE:
 					dc_cfg->auth_mode = XDR_AUTH_EXTERNAL_INSECURE;
+					break;
+				case CASE_XDR_DC_AUTH_MODE_PKI:
+					dc_cfg->auth_mode = XDR_AUTH_PKI;
 					break;
 				case CASE_NOT_FOUND:
 				default:

@@ -68,6 +68,7 @@ typedef enum {
 	XDR_AUTH_INTERNAL,
 	XDR_AUTH_EXTERNAL,
 	XDR_AUTH_EXTERNAL_INSECURE,
+	XDR_AUTH_PKI,
 	XDR_AUTH_KERBEROS_LOCAL, // TODO - not yet implemented
 	XDR_AUTH_KERBEROS_LDAP // TODO - not yet implemented
 } as_xdr_auth_mode;
