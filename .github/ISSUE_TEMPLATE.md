@@ -11,7 +11,7 @@ The issues submitted here should be Aerospike Server **code** related. Examples 
 
 __________
 
-**OS:** *Put your operating system here. For example: "Ubuntu 16.10", "CentOS 7", "Debian 8" etc.*
+**OS:** *Put your operating system here. For example: "Ubuntu 18.04 LTS", "CentOS 7", "Debian 8" etc.*
 
 **Aerospike version:** *Put your Aerospike release version or `git describe --long --all` output here. For example: "3.15.0.1, heads/master-0-g450aee1"*
 
