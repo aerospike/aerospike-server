@@ -6538,6 +6538,96 @@ int info_command_abort_all_scans(char *name, char *params, cf_dyn_buf *db) {
 	return 0;
 }
 
+int
+info_scan_show(char *name, cf_dyn_buf *db)
+{
+	(void)name;
+
+	as_mon_info_cmd(AS_MON_MODULES[SCAN_MOD], NULL, 0, 0, db);
+
+	return 0;
+}
+
+int
+info_command_scan_show(char *name, char *params, cf_dyn_buf *db)
+{
+	(void)name;
+
+	char trid_str[1 + 24 + 1] = { 0 }; // allow octal, decimal, hex
+	int trid_str_len = (int)sizeof(trid_str);
+	int rv = as_info_parameter_get(params, "trid", trid_str, &trid_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "trid too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-trid");
+		return 0;
+	}
+
+	uint64_t trid = 0;
+
+	if (rv == 0) {
+		// TODO - util which checks overflow, leading/trailing garbage, etc?
+		trid = strtoul(trid_str, NULL, 0);
+
+		if (trid == 0) { // includes missing value
+			cf_warning(AS_INFO, "trid value missing or 0");
+			cf_dyn_buf_append_string(db, "ERROR::bad-trid");
+			return 0;
+		}
+	}
+
+	as_mon_info_cmd(AS_MON_MODULES[SCAN_MOD], trid == 0 ? NULL : "get-job",
+			trid, 0, db);
+
+	return 0;
+}
+
+// Note - a bit different to 'query-list' which collects less info.
+// TODO - remove 'query-list'?
+int
+info_query_show(char *name, cf_dyn_buf *db)
+{
+	(void)name;
+
+	as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], NULL, 0, 0, db);
+
+	return 0;
+}
+
+int
+info_command_query_show(char *name, char *params, cf_dyn_buf *db)
+{
+	(void)name;
+
+	char trid_str[1 + 24 + 1] = { 0 }; // allow octal, decimal, hex
+	int trid_str_len = (int)sizeof(trid_str);
+	int rv = as_info_parameter_get(params, "trid", trid_str, &trid_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "trid too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-trid");
+		return 0;
+	}
+
+	uint64_t trid = 0;
+
+	if (rv == 0) {
+		// TODO - util which checks overflow, leading/trailing garbage, etc?
+		trid = strtoul(trid_str, NULL, 0);
+
+		if (trid == 0) { // includes missing value
+			cf_warning(AS_INFO, "trid value missing or 0");
+			cf_dyn_buf_append_string(db, "ERROR::bad-trid");
+			return 0;
+		}
+	}
+
+	as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], trid == 0 ? NULL : "get-job",
+			trid, 0, db);
+
+	return 0;
+}
+
 int info_command_query_kill(char *name, char *params, cf_dyn_buf *db) {
 	char context[100];
 	int  context_len = sizeof(context);
@@ -6730,6 +6820,7 @@ as_info_init()
 			"geo;"
 			"sindex-exists;"
 			"peers;pipelining;pscans;"
+			"query-show;"
 			"relaxed-sc;replicas;replicas-all;replicas-master;replicas-max;"
 			"truncate-namespace;"
 			"udf");
@@ -6756,11 +6847,12 @@ as_info_init()
 			"mcast;mesh;"
 			"name;namespace;namespaces;node;"
 			"physical-devices;"
-			"quiesce;quiesce-undo;"
+			"query-abort;query-show;quiesce;quiesce-undo;"
 			"racks;recluster;revive;roster;roster-set;"
-			"service;services;services-alumni;services-alumni-reset;set-config;"
-			"set-log;sets;show-devices;sindex;sindex-create;"
-			"sindex-delete;sindex-histogram;statistics;status;"
+			"scan-abort;scan-abort-all;scan-show;service;services;"
+			"services-alumni;services-alumni-reset;set-config;set-log;sets;"
+			"show-devices;sindex;sindex-create;sindex-delete;sindex-histogram;"
+			"statistics;status;"
 			"tip;tip-clear;truncate;truncate-namespace;truncate-namespace-undo;"
 			"truncate-undo;"
 			"version;",
@@ -6867,6 +6959,9 @@ as_info_init()
 	as_info_set_command("sindex-delete", info_command_sindex_delete, PERM_INDEX_MANAGE);  // Delete a secondary index.
 	as_info_set_command("sindex-exists", info_command_sindex_exists, PERM_INDEX_MANAGE);  // Does secondary index exist.
 
+	// Undocumented Secondary Index Command
+	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
+
 	// UDF
 	as_info_set_dynamic("udf-list", udf_cask_info_list, false);
 	as_info_set_command("udf-put", udf_cask_info_put, PERM_UDF_MANAGE);
@@ -6877,14 +6972,14 @@ as_info_init()
 	// JOBS
 	as_info_set_command("jobs", info_command_mon_cmd, PERM_JOB_MONITOR);  // Manipulate the multi-key lookup monitoring infrastructure.
 
-	// Undocumented Secondary Index Command
-	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
-
-	as_info_set_dynamic("query-list", as_query_list, false);
-	as_info_set_command("query-kill", info_command_query_kill, PERM_QUERY_MANAGE);
+	as_info_set_dynamic("query-show", info_query_show, false);
+	as_info_set_command("query-show", info_command_query_show, PERM_NONE);
+	as_info_set_command("query-abort", info_command_query_kill, PERM_QUERY_MANAGE);
+	as_info_set_dynamic("scan-show", info_scan_show, false);
+	as_info_set_command("scan-show", info_command_scan_show, PERM_NONE);
 	as_info_set_command("scan-abort", info_command_abort_scan, PERM_SCAN_MANAGE);            // Abort a scan with a given id.
 	as_info_set_command("scan-abort-all", info_command_abort_all_scans, PERM_SCAN_MANAGE);   // Abort all scans.
-	as_info_set_dynamic("scan-list", as_scan_list, false);                                   // List info for all scan jobs.
+
 	as_info_set_command("sindex-stat", info_command_sindex_stat, PERM_NONE);
 	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);
 	as_info_set_dynamic("sindex-builder-list", as_sbld_list, false);                         // List info for all secondary index builder jobs.

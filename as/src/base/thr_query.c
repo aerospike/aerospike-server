@@ -211,6 +211,8 @@ typedef struct as_query_transaction_s {
 												   // being touched.
 	cf_atomic64              net_io_bytes;
 	cf_atomic64              n_read_success;
+	uint64_t                 n_filtered_meta;
+	uint64_t                 n_filtered_bins;
 
 	/********************** Query Progress ***********************************/
 	cf_atomic32              n_qwork_active;
@@ -1608,6 +1610,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 
 			if (predrv == AS_EXP_FALSE) {
 				as_record_done(&r_ref, ns);
+				as_incr_uint64(&qtr->n_filtered_meta);
 				goto CLEANUP;
 			}
 		}
@@ -1645,6 +1648,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 				! as_exp_matches_record(qtr->predexp_eval, &predargs)) {
 			as_storage_record_close(&rd);
 			as_record_done(&r_ref, ns);
+			as_incr_uint64(&qtr->n_filtered_bins);
 			goto CLEANUP;
 		}
 
@@ -3318,55 +3322,13 @@ as_query_set_priority(uint64_t trid, uint32_t priority)
 	return rv;
 }
 
-int
-as_query_list_job_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
-{
-	as_query_transaction * qtr = (as_query_transaction*)object;
-	cf_dyn_buf * db = (cf_dyn_buf*) udata;
-
-	cf_dyn_buf_append_string(db, "trid=");
-	cf_dyn_buf_append_uint64(db, qtr->trid);
-	cf_dyn_buf_append_string(db, ":job_type=");
-	cf_dyn_buf_append_int(db, qtr->job_type);
-	cf_dyn_buf_append_string(db, ":n_result_records=");
-	cf_dyn_buf_append_uint64(db, cf_atomic_int_get(qtr->n_result_records));
-	cf_dyn_buf_append_string(db, ":run_time=");
-	cf_dyn_buf_append_uint64(db, (cf_getns() - qtr->start_time) / 1000);
-	cf_dyn_buf_append_string(db, ":state=");
-	if(qtr_failed(qtr)) {
-		cf_dyn_buf_append_string(db, "ABORTED");
-	} else {
-		cf_dyn_buf_append_string(db, "RUNNING");
-	}
-	cf_dyn_buf_append_string(db, ";");
-	return AS_QUERY_OK;
-}
-
-// Lists thr current running queries
-int
-as_query_list(char *name, cf_dyn_buf *db)
-{
-	uint32_t size = cf_rchash_get_size(g_query_job_hash);
-	// No elements in the query job hash, return failure
-	if (!size) {
-		cf_dyn_buf_append_string(db, "No running queries");
-	}
-	// Else go through all the jobs in the hash and list their statistics
-	else {
-		cf_rchash_reduce(g_query_job_hash, as_query_list_job_reduce_fn, db);
-		cf_dyn_buf_chomp(db);
-	}
-	return AS_QUERY_OK;
-}
-
-
 // query module to monitor
 void
 as_query_fill_jobstat(as_query_transaction *qtr, as_mon_jobstat *stat)
 {
 	stat->trid          = qtr->trid;
 	stat->run_time      = (cf_getns() - qtr->start_time) / 1000000;
-	stat->recs_succeeded = qtr->n_read_success;
+	stat->recs_succeeded = qtr->n_read_success; // TODO - this is not like scan
 	stat->net_io_bytes  = qtr->net_io_bytes;
 	stat->priority      = qtr->priority;
 
@@ -3383,8 +3345,8 @@ as_query_fill_jobstat(as_query_transaction *qtr, as_mon_jobstat *stat)
 	stat->job_type[0]     = '\0';
 
 	stat->recs_throttled = 0;
-	stat->recs_filtered_meta = 0;
-	stat->recs_filtered_bins = 0;
+	stat->recs_filtered_meta = qtr->n_filtered_meta;
+	stat->recs_filtered_bins = qtr->n_filtered_bins;
 	stat->recs_failed = 0;
 
 	strcpy(stat->ns, qtr->ns->name);

@@ -203,15 +203,6 @@ as_scan_get_active_job_count(void)
 	return as_scan_manager_get_active_job_count();
 }
 
-int
-as_scan_list(char* name, cf_dyn_buf* db)
-{
-	(void)name;
-
-	as_mon_info_cmd(AS_MON_MODULES[SCAN_MOD], NULL, 0, 0, db);
-	return 0;
-}
-
 as_mon_jobstat*
 as_scan_get_jobstat(uint64_t trid)
 {

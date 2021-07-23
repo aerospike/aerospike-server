@@ -48,7 +48,6 @@ void as_scan_init(void);
 int as_scan(struct as_transaction_s *tr, struct as_namespace_s *ns);
 void as_scan_limit_finished_jobs(void);
 uint32_t as_scan_get_active_job_count(void);
-int as_scan_list(char* name, cf_dyn_buf* db);
 struct as_mon_jobstat_s* as_scan_get_jobstat(uint64_t trid);
 struct as_mon_jobstat_s* as_scan_get_jobstat_all(int* size);
 int as_scan_abort(uint64_t trid);
