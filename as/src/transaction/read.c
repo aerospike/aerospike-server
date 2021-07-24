@@ -647,7 +647,7 @@ read_local(as_transaction* tr)
 		bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 
 		as_msg_op* op = 0;
-		int n = 0;
+		uint16_t n = 0;
 
 		while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
 			if (op->op == AS_MSG_OP_READ) {

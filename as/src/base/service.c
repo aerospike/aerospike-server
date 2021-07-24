@@ -226,7 +226,7 @@ as_service_set_threads(uint32_t n_threads)
 			cf_detail(AS_SERVICE, "sending terminator sid %u ctx %p", sid, ctx);
 
 			as_transaction tr;
-			as_transaction_init_head(&tr, NULL, NULL );
+			as_transaction_init_head(&tr, NULL, NULL);
 
 			cf_epoll_queue_push(&ctx->trans_q, &tr);
 			g_thread_ctxs[sid] = NULL;

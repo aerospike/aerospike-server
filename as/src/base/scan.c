@@ -1010,7 +1010,7 @@ bin_ids_from_op(as_msg* m, as_namespace* ns, int* result)
 	cf_vector* id_vec  = cf_vector_create(sizeof(uint16_t), m->n_ops, 0);
 
 	as_msg_op* op = NULL;
-	int n = 0;
+	uint16_t n = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
 		uint16_t id;
@@ -1902,7 +1902,7 @@ ops_bg_scan_get_ops(const as_msg* m, iops_expop** p_expops)
 
 	as_msg_op* op = NULL;
 	uint8_t* first = NULL;
-	int i = 0;
+	uint16_t i = 0;
 	bool has_expop = false;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {

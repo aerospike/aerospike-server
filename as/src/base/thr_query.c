@@ -2904,7 +2904,7 @@ query_setup_shared_msgp(as_query_transaction *qtr, as_transaction *tr)
 
 				as_msg_op* op = NULL;
 				uint8_t* first = NULL;
-				int i = 0;
+				uint16_t i = 0;
 				bool has_expop = false;
 
 				while ((op = as_msg_op_iterate(om, op, &i)) != NULL) {

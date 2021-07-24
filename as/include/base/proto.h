@@ -820,7 +820,7 @@ as_msg_op_skip(as_msg_op* op)
 }
 
 static inline as_msg_op*
-as_msg_op_iterate(const as_msg* msg, as_msg_op* current, int* n)
+as_msg_op_iterate(const as_msg* msg, as_msg_op* current, uint16_t* n)
 {
 	// Skip over the fields the first time.
 	if (! current) {

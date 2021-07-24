@@ -951,7 +951,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 
 	// Loop over ops to check and modify flags.
 	as_msg_op* op = NULL;
-	int i = 0;
+	uint16_t i = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
 		if (op->op == AS_MSG_OP_TOUCH) {
@@ -1772,7 +1772,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	int result;
 
 	as_msg_op* op = NULL;
-	int i = 0;
+	uint16_t i = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
 		if (! resolve_bin(rd, op, msg_lut, m->n_ops, &n_won, &result)) {
