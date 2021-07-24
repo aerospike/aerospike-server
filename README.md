@@ -22,7 +22,7 @@ information.  The full Telemetry data collection agent source code may be found 
 
 The Aerospike Database Server can be built and deployed on various
 current 64-bit GNU/Linux platform versions, such as the Red Hat family (e.g.,
-CentOS 7 or later), Debian 8 or later, and Ubuntu 16.04 or later.
+CentOS 7 or later), Debian 8 or later, and Ubuntu 18.04 or later.
 
 ### Dependencies
 
@@ -52,7 +52,7 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
 * The required CentOS 7/8 package to install is: `gcc-c++`.
 
-* The required Debian 8/9/10 and Ubuntu 16/18/20 package to install is: `g++`.
+* The required Debian 8/9/10 and Ubuntu 18/20 package to install is: `g++`.
 
 #### OpenSSL
 
@@ -62,7 +62,7 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 * The CentOS 7/8 OpenSSL packages to install are:  `openssl` and
 `openssl-devel`, and also `openssl-static` on CentOS 7.
 
-* The Debian 8/9/10 and Ubuntu 16/18/20 OpenSSL packages to install are:
+* The Debian 8/9/10 and Ubuntu 18/20 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
 
 #### Lua 5.1
@@ -79,7 +79,7 @@ by the build environment.  In that case:
 	* The CentOS 7/8 Lua package to install is:  `lua`, and also
 `lua-devel` and `lua-static` on CentOS 7.
 
-	* The Debian 8/9/10 and Ubuntu 16/18/20 Lua packages to install are:
+	* The Debian 8/9/10 and Ubuntu 18/20 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
@@ -92,7 +92,7 @@ Building on Ubuntu 18+ also requires installing `libz-dev`.
 
 Running the Telemetry Agent requires either Python 3+ or Python 2.6+,
 at least one of which is generally available by default on most
-platforms. On some distros, such as Ubuntu 16+, it may be necessary to
+platforms. On some distros, such as Ubuntu 18+, it may be necessary to
 install the package `python`, while on other distros, such as CentOS 8,
 the package name includes the major (and/or minor) version number, e.g.,
 `python3` or `python2`.
