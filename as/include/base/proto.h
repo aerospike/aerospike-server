@@ -95,7 +95,7 @@ struct as_storage_rd_s;
 #define AS_SEC_OK_LAST                  50 // the last message
 	// Security message errors.
 #define AS_SEC_ERR_NOT_SUPPORTED        51 // security features not supported
-#define AS_SEC_ERR_NOT_ENABLED          52 // security features not enabled
+#define AS_SEC_ERR_NOT_CONFIGURED       52 // security features not configured
 #define AS_SEC_ERR_SCHEME               53 // security scheme not supported
 #define AS_SEC_ERR_COMMAND              54 // unrecognized command
 #define AS_SEC_ERR_FIELD                55 // can't parse field
@@ -121,7 +121,7 @@ struct as_storage_rd_s;
 #define AS_SEC_ERR_NOT_WHITELISTED      82 // client IP-addr not on whitelist
 #define AS_SEC_ERR_QUOTA_EXCEEDED       83 // quota currently exceeded
 	// LDAP-related errors.
-#define AS_SEC_ERR_LDAP_NOT_ENABLED     90 // LDAP features not enabled
+#define AS_SEC_ERR_LDAP_NOT_CONFIGURED  90 // LDAP features not configured
 #define AS_SEC_ERR_LDAP_SETUP           91 // LDAP setup error
 #define AS_SEC_ERR_LDAP_TLS_SETUP       92 // LDAP TLS setup error
 #define AS_SEC_ERR_LDAP_AUTHENTICATION  93 // error authenticating LDAP user

@@ -636,15 +636,16 @@ typedef enum {
 	CASE_MOD_LUA_USER_PATH,
 
 	// Security options:
-	CASE_SECURITY_ENABLE_LDAP,
 	CASE_SECURITY_ENABLE_QUOTAS,
-	CASE_SECURITY_ENABLE_SECURITY,
 	CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD,
 	CASE_SECURITY_SESSION_TTL,
 	CASE_SECURITY_TPS_WEIGHT,
 	CASE_SECURITY_LDAP_BEGIN,
 	CASE_SECURITY_LOG_BEGIN,
 	CASE_SECURITY_SYSLOG_BEGIN,
+	// Obsoleted:
+	CASE_SECURITY_ENABLE_LDAP,
+	CASE_SECURITY_ENABLE_SECURITY,
 
 	// Security LDAP options:
 	CASE_SECURITY_LDAP_DISABLE_TLS,
@@ -1181,15 +1182,15 @@ const cfg_opt MOD_LUA_OPTS[] = {
 };
 
 const cfg_opt SECURITY_OPTS[] = {
-		{ "enable-ldap",					CASE_SECURITY_ENABLE_LDAP },
 		{ "enable-quotas",					CASE_SECURITY_ENABLE_QUOTAS },
-		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
 		{ "privilege-refresh-period",		CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD },
 		{ "session-ttl",					CASE_SECURITY_SESSION_TTL },
 		{ "tps-weight",						CASE_SECURITY_TPS_WEIGHT },
 		{ "ldap",							CASE_SECURITY_LDAP_BEGIN },
 		{ "log",							CASE_SECURITY_LOG_BEGIN },
 		{ "syslog",							CASE_SECURITY_SYSLOG_BEGIN },
+		{ "enable-ldap",					CASE_SECURITY_ENABLE_LDAP },
+		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -2154,6 +2155,7 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SECURITY_BEGIN:
 				cfg_enterprise_only(&line);
+				c->sec_cfg.security_configured = true;
 				cfg_begin_context(&state, SECURITY);
 				break;
 			case CASE_XDR_BEGIN:
@@ -3605,14 +3607,8 @@ as_config_init(const char* config_file)
 		//
 		case SECURITY:
 			switch (cfg_find_tok(line.name_tok, SECURITY_OPTS, NUM_SECURITY_OPTS)) {
-			case CASE_SECURITY_ENABLE_LDAP:
-				c->sec_cfg.ldap_enabled = cfg_bool(&line);
-				break;
 			case CASE_SECURITY_ENABLE_QUOTAS:
 				c->sec_cfg.quotas_enabled = cfg_bool(&line);
-				break;
-			case CASE_SECURITY_ENABLE_SECURITY:
-				c->sec_cfg.security_enabled = cfg_bool(&line);
 				break;
 			case CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD:
 				c->sec_cfg.privilege_refresh_period = cfg_seconds(&line, PRIVILEGE_REFRESH_PERIOD_MIN, PRIVILEGE_REFRESH_PERIOD_MAX);
@@ -3624,6 +3620,7 @@ as_config_init(const char* config_file)
 				c->sec_cfg.tps_weight = cfg_u32(&line, TPS_WEIGHT_MIN, TPS_WEIGHT_MAX);
 				break;
 			case CASE_SECURITY_LDAP_BEGIN:
+				c->sec_cfg.ldap_configured = true;
 				cfg_begin_context(&state, SECURITY_LDAP);
 				break;
 			case CASE_SECURITY_LOG_BEGIN:
@@ -3631,6 +3628,12 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SECURITY_SYSLOG_BEGIN:
 				cfg_begin_context(&state, SECURITY_SYSLOG);
+				break;
+			case CASE_SECURITY_ENABLE_LDAP:
+				cfg_obsolete(&line, "the 'ldap' context automatically enables LDAP");
+				break;
+			case CASE_SECURITY_ENABLE_SECURITY:
+				cfg_obsolete(&line, "the 'security' context automatically enables security");
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);

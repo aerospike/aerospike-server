@@ -73,14 +73,14 @@ typedef enum {
 
 // Security configuration.
 typedef struct as_sec_config_s {
-	bool				ldap_enabled;
+	bool				security_configured;			// indirect config
 	bool				quotas_enabled;
-	bool				security_enabled;
 	uint32_t			privilege_refresh_period;	// (seconds)
 	uint32_t			session_ttl;				// (seconds)
 	uint32_t			tps_weight;
 
 	// LDAP scope configuration.
+	bool				ldap_configured;				// indirect config
 	bool 				ldap_tls_disabled;
 	uint32_t			n_ldap_login_threads;
 	uint32_t			ldap_polling_period;		// (seconds)
