@@ -90,6 +90,17 @@ cf_memeq(const void* block, uint8_t c, size_t size)
 	return *p == c && memcmp(p, p + 1, size - 1) == 0;
 }
 
+// Not optimized! Until memset_s() and/or explicit_bzero() are universal...
+static inline void
+dead_bzero(void* block, size_t size)
+{
+	volatile uint8_t* p = (volatile uint8_t*)block;
+
+	for (uint64_t i = 0; i < size; i++) {
+		*p++ = 0;
+	}
+}
+
 // Number of bytes occupied by val converted to a "uintvar".
 static inline uint32_t
 uintvar_size(uint32_t val)
