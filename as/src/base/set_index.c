@@ -980,7 +980,7 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 		// Ignore this record if it's been deleted.
 		if (! as_index_is_valid_record(r_ref.r)) {
 			if (rc == 0) {
-				if (ssri->destructor) {
+				if (ssri->destructor != NULL) {
 					ssri->destructor(r_ref.r, ssri->destructor_udata);
 				}
 
