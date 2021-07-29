@@ -246,6 +246,8 @@ typedef struct as_transaction_s {
 #define AS_TRANSACTION_FLAG_RSV_PROLE		0x10 // enterprise-only
 #define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE	0x20 // enterprise-only
 
+// FIXME - consolidate before shipping 5.7.
+#define AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL	0x40
 
 void as_transaction_init_head(as_transaction *tr, const cf_digest *, cl_msg *);
 void as_transaction_init_body(as_transaction *tr);

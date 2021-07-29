@@ -92,6 +92,8 @@
 #define FABRIC_EPOLL_SEND_EVENTS	16
 #define FABRIC_EPOLL_RECV_EVENTS	1
 
+#define FABRIC_MESSAGE_OVERLOAD_COUNT	16
+
 typedef enum {
 	// These values go on the wire, so mind backward compatibility if changing.
 	FS_FIELD_NODE,
@@ -282,6 +284,8 @@ static bool fabric_node_is_connect_full(const fabric_node *node);
 
 static int fabric_get_node_list_fn(const void *key, uint32_t keylen, void *data, void *udata);
 static uint32_t fabric_get_node_list(node_list *nl);
+
+static bool fabric_node_is_overloaded(cf_node node_id, as_fabric_channel channel, uint32_t margin);
 
 // fabric_connection
 fabric_connection *fabric_connection_create(cf_socket *sock, cf_sock_addr *peer);
@@ -521,6 +525,19 @@ as_fabric_retransmit(cf_node node_id, msg *m, as_fabric_channel channel)
 	}
 
 	return AS_FABRIC_SUCCESS;
+}
+
+bool
+as_fabric_is_overloaded(const cf_node* node_list, uint32_t n_nodes,
+		as_fabric_channel channel, uint32_t margin)
+{
+	for (uint32_t i = 0; i < n_nodes; i++) {
+		if (fabric_node_is_overloaded(node_list[i], channel, margin)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 // TODO - make static registration
@@ -1259,6 +1276,26 @@ fabric_get_node_list(node_list *nl)
 	cf_rchash_reduce(g_fabric.node_hash, fabric_get_node_list_fn, nl);
 
 	return nl->count;
+}
+
+static bool
+fabric_node_is_overloaded(cf_node node_id, as_fabric_channel channel,
+		uint32_t margin)
+{
+	uint32_t threshold = FABRIC_MESSAGE_OVERLOAD_COUNT + margin;
+	fabric_node *node = NULL;
+
+	if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
+			(void **)&node) == CF_RCHASH_OK) {
+		uint32_t sz = cf_queue_sz(&node->send_queue[channel]);
+
+		cf_rc_release(node);
+
+		return sz >= threshold;
+	}
+
+	// No node case - we had the node and now we don't - proceed anyway.
+	return false;
 }
 
 

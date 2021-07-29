@@ -46,6 +46,7 @@
 #include "base/set_index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
@@ -478,6 +479,13 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		as_record_done(r_ref, ns);
 		tr->result_code = AS_ERR_UNAVAILABLE;
 		return TRANS_DONE_ERROR;
+	}
+
+	// Fire and forget can overload the fabric send queues - check.
+	if (respond_on_master_complete(tr) &&
+			as_fabric_is_overloaded(rw->dest_nodes, rw->n_dest_nodes,
+					AS_FABRIC_CHANNEL_RW, 8)) {
+		tr->flags |= AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL;
 	}
 
 	bool check_key = as_transaction_has_key(tr);

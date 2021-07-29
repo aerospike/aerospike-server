@@ -50,6 +50,7 @@
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
+#include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
@@ -746,6 +747,13 @@ write_master(rw_request* rw, as_transaction* tr)
 	if (! set_replica_destinations(tr, rw)) {
 		write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_UNAVAILABLE);
 		return TRANS_DONE_ERROR;
+	}
+
+	// Fire and forget can overload the fabric send queues - check.
+	if (respond_on_master_complete(tr) &&
+			as_fabric_is_overloaded(rw->dest_nodes, rw->n_dest_nodes,
+					AS_FABRIC_CHANNEL_RW, 0)) {
+		tr->flags |= AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL;
 	}
 
 	// Will we need a pickle?

@@ -121,6 +121,7 @@ void as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count);
 int as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel);
 int as_fabric_send_list(const cf_node *nodes, uint32_t node_count, msg *m, as_fabric_channel channel);
 int as_fabric_retransmit(cf_node node_id, msg *m, as_fabric_channel channel);
+bool as_fabric_is_overloaded(const cf_node* node_list, uint32_t n_nodes, as_fabric_channel channel, uint32_t margin);
 void as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz, as_fabric_msg_fn msg_cb, void *msg_udata);
 void as_fabric_info_peer_endpoints_get(cf_dyn_buf *db);
 bool as_fabric_is_published_endpoint_list(const struct as_endpoint_list_s *list);

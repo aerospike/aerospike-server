@@ -62,6 +62,7 @@
 #include "base/udf_cask.h"
 #include "base/udf_record.h"
 #include "base/xdr.h"
+#include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
@@ -974,6 +975,13 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	// Set up the nodes to which we'll write replicas.
 	if (! set_replica_destinations(tr, rw)) {
 		return AS_ERR_UNAVAILABLE;
+	}
+
+	// Fire and forget can overload the fabric send queues - check.
+	if (respond_on_master_complete(tr) &&
+			as_fabric_is_overloaded(rw->dest_nodes, rw->n_dest_nodes,
+					AS_FABRIC_CHANNEL_RW, 0)) {
+		tr->flags |= AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL;
 	}
 
 	// Will we need a pickle?

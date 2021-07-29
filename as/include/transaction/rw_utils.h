@@ -157,7 +157,8 @@ static inline bool
 respond_on_master_complete(as_transaction* tr)
 {
 	return tr->origin == FROM_CLIENT &&
-			TR_WRITE_COMMIT_LEVEL(tr) == AS_WRITE_COMMIT_LEVEL_MASTER;
+			TR_WRITE_COMMIT_LEVEL(tr) == AS_WRITE_COMMIT_LEVEL_MASTER &&
+			(tr->flags & AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL) == 0;
 }
 
 
