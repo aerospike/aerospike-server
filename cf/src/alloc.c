@@ -43,6 +43,7 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 
+#include "bits.h"
 #include "cf_thread.h"
 #include "log.h"
 
@@ -370,8 +371,7 @@ hook_handle_free(const void *ra, void *p, void *p_user, size_t jem_sz,
 	if (salt) {
 		size_t sz = (size_t)(mark - (uint8_t *)p_user);
 
-		// For performance, no dead_memset() - hope this won't be optimized out.
-		memset(p_user, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+		dead_memset(p_user, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
 	}
 }
 
