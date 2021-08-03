@@ -707,6 +707,7 @@ typedef enum {
 	CASE_XDR_DC_USE_ALTERNATE_ACCESS_ADDRESS,
 
 	// XDR DC authentication mode (value tokens):
+	CASE_XDR_DC_AUTH_MODE_NONE,
 	CASE_XDR_DC_AUTH_MODE_INTERNAL,
 	CASE_XDR_DC_AUTH_MODE_EXTERNAL,
 	CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE,
@@ -1262,6 +1263,7 @@ const cfg_opt XDR_DC_OPTS[] = {
 };
 
 const cfg_opt XDR_DC_AUTH_MODE_OPTS[] = {
+		{ "none",							CASE_XDR_DC_AUTH_MODE_NONE },
 		{ "internal",						CASE_XDR_DC_AUTH_MODE_INTERNAL },
 		{ "external",						CASE_XDR_DC_AUTH_MODE_EXTERNAL },
 		{ "external-insecure",				CASE_XDR_DC_AUTH_MODE_EXTERNAL_INSECURE },
@@ -3825,6 +3827,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_AUTH_MODE:
 				switch (cfg_find_tok(line.val_tok_1, XDR_DC_AUTH_MODE_OPTS, NUM_XDR_DC_AUTH_MODE_OPTS)) {
+				case CASE_XDR_DC_AUTH_MODE_NONE:
+					dc_cfg->auth_mode = XDR_AUTH_NONE;
+					break;
 				case CASE_XDR_DC_AUTH_MODE_INTERNAL:
 					dc_cfg->auth_mode = XDR_AUTH_INTERNAL;
 					break;
