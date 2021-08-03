@@ -3270,7 +3270,7 @@ as_config_init(const char* config_file)
 				ns->storage_defrag_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_STARTUP_MINIMUM:
-				ns->storage_defrag_startup_minimum = cfg_int(&line, 1, 99);
+				ns->storage_defrag_startup_minimum = cfg_int(&line, 0, 99);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_DIRECT_FILES:
 				ns->storage_direct_files = cfg_bool(&line);
@@ -3411,7 +3411,7 @@ as_config_init(const char* config_file)
 				ns->storage_defrag_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM:
-				ns->storage_defrag_startup_minimum = cfg_int(&line, 1, 99);
+				ns->storage_defrag_startup_minimum = cfg_int(&line, 0, 99);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DIRECT_FILES:
 				ns->storage_direct_files = cfg_bool(&line);
