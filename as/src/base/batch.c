@@ -1080,7 +1080,7 @@ as_batch_queue_task(as_transaction* btr)
 		}
 
 		// Submit transaction.
-		if (info != 0 && ns->storage_data_in_memory) {
+		if ((info != 0 && ns->storage_data_in_memory) || tran_count == 1) {
 			as_tsvc_process_transaction(&tr);
 		}
 		else {
