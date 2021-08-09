@@ -465,8 +465,8 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 	// Apply predexp metadata filter if present.
 
-	as_exp* predexp = NULL;
-	int result = build_predexp_and_filter_meta(tr, r, &predexp);
+	as_exp* filter_exp = NULL;
+	int result = handle_meta_filter(tr, r, &filter_exp);
 
 	if (result != 0) {
 		as_record_done(r_ref, ns);
@@ -490,21 +490,21 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 	bool check_key = as_transaction_has_key(tr);
 
-	if (ns->storage_data_in_memory || predexp != NULL || check_key) {
+	if (ns->storage_data_in_memory || filter_exp != NULL || check_key) {
 		as_storage_rd rd;
 		as_storage_record_open(ns, r, &rd);
 
 		// Apply predexp record bins filter if present.
-		if (predexp != NULL) {
-			if ((result = predexp_read_and_filter_bins(&rd, predexp)) != 0) {
-				as_exp_destroy(predexp);
+		if (filter_exp != NULL) {
+			if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
+				destroy_filter_exp(tr, filter_exp);
 				as_storage_record_close(&rd);
 				as_record_done(r_ref, ns);
 				tr->result_code = result;
 				return TRANS_DONE_ERROR;
 			}
 
-			as_exp_destroy(predexp);
+			destroy_filter_exp(tr, filter_exp);
 		}
 
 		// Check the key if required.

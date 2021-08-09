@@ -96,8 +96,6 @@ int write_master_preprocessing(as_transaction* tr);
 int write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		bool* p_record_level_replace, bool* p_must_fetch_data);
 bool check_msg_set_name(as_transaction* tr, const char* set_name);
-int iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
-		as_exp** predexp);
 
 int write_master_dim_single_bin(as_transaction* tr, as_index_ref* r_ref,
 		as_storage_rd* rd, rw_request* rw, bool* is_delete);
@@ -686,15 +684,11 @@ write_master(rw_request* rw, as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
-	// Apply predexp metadata filter if present.
+	as_exp* filter_exp = NULL;
 
-	as_exp* predexp = NULL;
-	as_exp* iops_predexp = NULL;
-
+	// Handle metadata filter if present.
 	if (! record_created && as_record_is_live(r) &&
-			(result = tr->origin == FROM_IOPS ?
-					iops_predexp_filter_meta(tr, r, &iops_predexp) :
-					build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
+			(result = handle_meta_filter(tr, r, &filter_exp)) != 0) {
 		write_master_failed(tr, &r_ref, false, tree, 0, result);
 		return TRANS_DONE_ERROR;
 	}
@@ -713,16 +707,15 @@ write_master(rw_request* rw, as_transaction* tr)
 		as_storage_record_open(ns, r, &rd);
 	}
 
-	// Apply predexp record bins filter if present.
-	if (predexp != NULL || iops_predexp != NULL) {
-		if ((result = predexp_read_and_filter_bins(&rd,
-				tr->origin == FROM_IOPS ? iops_predexp : predexp)) != 0) {
-			as_exp_destroy(predexp);
+	// Apply record bins filter if present.
+	if (filter_exp != NULL) {
+		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
+			destroy_filter_exp(tr, filter_exp);
 			write_master_failed(tr, &r_ref, false, tree, &rd, result);
 			return TRANS_DONE_ERROR;
 		}
 
-		as_exp_destroy(predexp);
+		destroy_filter_exp(tr, filter_exp);
 	}
 
 	// Shortcut for set name storage.
@@ -1144,30 +1137,6 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 	}
 
 	return true;
-}
-
-
-int
-iops_predexp_filter_meta(const as_transaction* tr, const as_record* r,
-		as_exp** predexp)
-{
-	*predexp = tr->from.iops_orig->predexp;
-
-	if (*predexp == NULL) {
-		return AS_OK;
-	}
-
-	as_exp_ctx predargs = { .ns = tr->rsv.ns, .r = (as_record*)r };
-	as_exp_trilean predrv = as_exp_matches_metadata(*predexp, &predargs);
-
-	if (predrv == AS_EXP_UNK) {
-		return AS_OK; // caller must later check bins using *predexp
-	}
-	// else - caller will not need to apply filter later.
-
-	*predexp = NULL;
-
-	return predrv == AS_EXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
 }
 
 

@@ -73,8 +73,6 @@ void read_timeout_cb(rw_request* rw);
 transaction_status read_local(as_transaction* tr);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code);
-int batch_predexp_filter_meta(const as_transaction* tr, const as_record* r,
-		as_exp** predexp);
 
 
 //==========================================================
@@ -559,14 +557,10 @@ read_local(as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
-	// Apply predexp metadata filter if present.
+	as_exp* filter_exp = NULL;
 
-	as_exp* predexp = NULL;
-	as_exp* batch_predexp = NULL;
-
-	if ((result = tr->origin == FROM_BATCH ?
-			batch_predexp_filter_meta(tr, r, &batch_predexp) :
-			build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
+	// Handle metadata filter if present.
+	if ((result = handle_meta_filter(tr, r, &filter_exp)) != 0) {
 		read_local_done(tr, &r_ref, NULL, result);
 		return TRANS_DONE_ERROR;
 	}
@@ -578,16 +572,15 @@ read_local(as_transaction* tr)
 	// If configuration permits, allow reads to use page cache.
 	rd.read_page_cache = ns->storage_read_page_cache;
 
-	// Apply predexp record bins filter if present.
-	if (predexp != NULL || batch_predexp != NULL) {
-		if ((result = predexp_read_and_filter_bins(&rd,
-				tr->origin == FROM_BATCH ? batch_predexp : predexp)) != 0) {
-			as_exp_destroy(predexp);
+	// Apply record bins filter if present.
+	if (filter_exp != NULL) {
+		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
+			destroy_filter_exp(tr, filter_exp);
 			read_local_done(tr, &r_ref, &rd, result);
 			return TRANS_DONE_ERROR;
 		}
 
-		as_exp_destroy(predexp);
+		destroy_filter_exp(tr, filter_exp);
 	}
 
 	// Check the key if required.
@@ -829,28 +822,4 @@ read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	tr->result_code = (uint8_t)result_code;
 
 	send_read_response(tr, NULL, NULL, 0, NULL);
-}
-
-
-int
-batch_predexp_filter_meta(const as_transaction* tr, const as_record* r,
-		as_exp** predexp)
-{
-	*predexp = as_batch_get_predexp(tr->from.batch_shared);
-
-	if (*predexp == NULL) {
-		return AS_OK;
-	}
-
-	as_exp_ctx predargs = { .ns = tr->rsv.ns, .r = (as_record*)r };
-	as_exp_trilean predrv = as_exp_matches_metadata(*predexp, &predargs);
-
-	if (predrv == AS_EXP_UNK) {
-		return AS_OK; // caller must later check bins using *predexp
-	}
-	// else - caller will not need to apply filter later.
-
-	*predexp = NULL;
-
-	return predrv == AS_EXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
 }

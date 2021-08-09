@@ -1864,7 +1864,7 @@ query_udf_bg_tr_complete(void *udata, int result)
 int
 query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
-	if (qtr->iudf_orig.predexp != NULL) {
+	if (qtr->iudf_orig.filter_exp != NULL) {
 		as_partition_reservation rsv_stack;
 		as_partition_reservation *rsv = &rsv_stack;
 		uint32_t pid = as_partition_getid(keyd);
@@ -1882,7 +1882,7 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 
 		as_exp_ctx predargs = { .ns = qtr->ns, .r = r_ref.r };
 
-		if (as_exp_matches_metadata(qtr->iudf_orig.predexp, &predargs) ==
+		if (as_exp_matches_metadata(qtr->iudf_orig.filter_exp, &predargs) ==
 				AS_EXP_FALSE) {
 			as_record_done(&r_ref, qtr->ns);
 			query_release_partition(qtr, rsv);
@@ -1985,7 +1985,7 @@ query_ops_bg_tr_complete(void *udata, int result)
 int
 query_ops_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
-	if (qtr->iops_orig.predexp != NULL) {
+	if (qtr->iops_orig.filter_exp != NULL) {
 		as_partition_reservation rsv_stack;
 		as_partition_reservation *rsv = &rsv_stack;
 		uint32_t pid = as_partition_getid(keyd);
@@ -2003,7 +2003,7 @@ query_ops_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 
 		as_exp_ctx predargs = { .ns = qtr->ns, .r = r_ref.r };
 
-		if (as_exp_matches_metadata(qtr->iops_orig.predexp, &predargs) ==
+		if (as_exp_matches_metadata(qtr->iops_orig.filter_exp, &predargs) ==
 				AS_EXP_FALSE) {
 			as_record_done(&r_ref, qtr->ns);
 			query_release_partition(qtr, rsv);
@@ -3168,12 +3168,12 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		qtr->compress_response = as_transaction_compress_response(tr);
 	}
 	else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
-		qtr->iudf_orig.predexp = predexp_eval;
+		qtr->iudf_orig.filter_exp = predexp_eval;
 		qtr->iudf_orig.cb     = query_udf_bg_tr_complete;
 		qtr->iudf_orig.udata  = (void *)qtr;
 	}
 	else if (qtr->job_type == QUERY_TYPE_OPS_BG) {
-		qtr->iops_orig.predexp = predexp_eval;
+		qtr->iops_orig.filter_exp = predexp_eval;
 		qtr->iops_orig.cb     = query_ops_bg_tr_complete;
 		qtr->iops_orig.udata  = (void *)qtr;
 	}

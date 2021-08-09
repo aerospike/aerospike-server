@@ -38,6 +38,7 @@
 #include "log.h"
 #include "msg.h"
 
+#include "base/batch.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
 #include "base/index.h"
@@ -47,6 +48,8 @@
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
+#include "transaction/udf.h"
+#include "transaction/write.h"
 
 
 //==========================================================
@@ -153,39 +156,62 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 
 
 int
-build_predexp_and_filter_meta(const as_transaction* tr, const as_record* r,
-		as_exp** predexp)
+handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 {
-	if (! as_transaction_has_predexp(tr)) {
-		*predexp = NULL;
-		return AS_OK;
+	switch (tr->origin) {
+	case FROM_BATCH:
+		if ((*exp = as_batch_get_predexp(tr->from.batch_shared)) == NULL) {
+			return AS_OK;
+		}
+		break;
+	case FROM_IUDF:
+		*exp = tr->from.iudf_orig->filter_exp;
+		return AS_OK; // meta filter was applied upstream - no need here
+	case FROM_IOPS:
+		*exp = tr->from.iops_orig->filter_exp;
+		return AS_OK; // meta filter was applied upstream - no need here
+	default:
+		if (! as_transaction_has_predexp(tr)) {
+			*exp = NULL;
+			return AS_OK;
+		}
+		as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
+				AS_MSG_FIELD_TYPE_PREDEXP);
+		if ((*exp = as_exp_filter_build(f, false)) == NULL) {
+			return AS_ERR_PARAMETER;
+		}
+		break;
 	}
 
-	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_PREDEXP);
+	// TODO - perhaps fields of as_exp_ctx should be const?
+	as_exp_ctx ctx = { .ns = tr->rsv.ns, .r = (as_record*)r };
+	as_exp_trilean tv = as_exp_matches_metadata(*exp, &ctx);
 
-	if ((*predexp = as_exp_filter_build(f, false)) == NULL) {
-		return AS_ERR_PARAMETER;
-	}
-
-	// TODO - perhaps fields of as_predexp_context should be const?
-	as_exp_ctx predargs = { .ns = tr->rsv.ns, .r = (as_record*)r };
-	as_exp_trilean predrv = as_exp_matches_metadata(*predexp, &predargs);
-
-	if (predrv == AS_EXP_UNK) {
-		return AS_OK; // caller must later check bins using *predexp
+	if (tv == AS_EXP_UNK) {
+		return AS_OK; // caller must later check bins using *exp
 	}
 	// else - caller will not need to apply filter later.
 
-	as_exp_destroy(*predexp);
-	*predexp = NULL;
+	destroy_filter_exp(tr, *exp);
+	*exp = NULL;
 
-	return predrv == AS_EXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
+	return tv == AS_EXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
+}
+
+
+void
+destroy_filter_exp(const as_transaction* tr, as_exp* exp)
+{
+	if (SHARED_MSGP(tr)) {
+		return;
+	}
+
+	as_exp_destroy(exp);
 }
 
 
 int
-predexp_read_and_filter_bins(as_storage_rd* rd, as_exp* predexp)
+read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
 {
 	as_namespace* ns = rd->ns;
 
@@ -197,9 +223,9 @@ predexp_read_and_filter_bins(as_storage_rd* rd, as_exp* predexp)
 		return -result;
 	}
 
-	as_exp_ctx predargs = { .ns = ns, .r = rd->r, .rd = rd };
+	as_exp_ctx ctx = { .ns = ns, .r = rd->r, .rd = rd };
 
-	if (! as_exp_matches_record(predexp, &predargs)) {
+	if (! as_exp_matches_record(exp, &ctx)) {
 		return AS_ERR_FILTERED_OUT;
 	}
 

@@ -64,7 +64,7 @@ typedef void (*iudf_cb)(void* udata, int result);
 typedef struct iudf_origin_s {
 	udf_def def;
 	struct cl_msg_s* msgp;
-	struct as_exp_s* predexp;
+	struct as_exp_s* filter_exp;
 	iudf_cb cb;
 	void* udata;
 } iudf_origin;
@@ -81,7 +81,7 @@ iudf_origin_destroy(iudf_origin* origin)
 		as_list_destroy(origin->def.arglist);
 	}
 
-	as_exp_destroy(origin->predexp);
+	as_exp_destroy(origin->filter_exp);
 	cf_free(origin->msgp);
 }
 

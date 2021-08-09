@@ -859,32 +859,30 @@ open_existing_record(udf_record* urecord)
 	as_record* r = urecord->r_ref->r;
 
 	int rv;
-	as_exp* predexp = NULL;
+	as_exp* filter_exp = NULL;
 
-	// Apply predexp metadata filter if present.
-	if (tr->origin != FROM_IUDF && as_record_is_live(r) &&
-			(rv = build_predexp_and_filter_meta(tr, r, &predexp)) != 0) {
+	// Handle metadata filter if present.
+	if (as_record_is_live(r) &&
+			(rv = handle_meta_filter(tr, r, &filter_exp)) != 0) {
 		return (uint8_t)rv;
 	}
 
-	// Apply predexp record bins filter if present.
-	if (predexp != NULL || (tr->origin == FROM_IUDF &&
-			tr->from.iudf_orig->predexp != NULL)) {
+	// Apply record bins filter if present.
+	if (filter_exp != NULL) {
 		if ((rv = udf_record_load(urecord)) != 0) {
 			cf_warning(AS_UDF, "record failed load");
-			as_exp_destroy(predexp);
+			destroy_filter_exp(tr, filter_exp);
 			return (uint8_t)rv;
 		}
 
-		as_exp_ctx predargs = { .ns = ns, .r = r, .rd = urecord->rd };
+		as_exp_ctx ctx = { .ns = ns, .r = r, .rd = urecord->rd };
 
-		if (! as_exp_matches_record(tr->origin == FROM_IUDF ?
-				tr->from.iudf_orig->predexp : predexp, &predargs)) {
-			as_exp_destroy(predexp);
+		if (! as_exp_matches_record(filter_exp, &ctx)) {
+			destroy_filter_exp(tr, filter_exp);
 			return AS_ERR_FILTERED_OUT;
 		}
 
-		as_exp_destroy(predexp);
+		destroy_filter_exp(tr, filter_exp);
 	}
 
 	if (as_transaction_has_key(tr)) {

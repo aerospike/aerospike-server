@@ -54,7 +54,7 @@ typedef void (*iops_cb)(void* udata, int result);
 
 typedef struct iops_origin_s {
 	struct cl_msg_s* msgp;
-	struct as_exp_s* predexp;
+	struct as_exp_s* filter_exp;
 	iops_expop* expops;
 	iops_cb cb;
 	void* udata;
@@ -82,7 +82,7 @@ iops_expops_destroy(iops_expop* expops, uint16_t count)
 static inline void
 iops_origin_destroy(iops_origin* origin)
 {
-	as_exp_destroy(origin->predexp);
+	as_exp_destroy(origin->filter_exp);
 	iops_expops_destroy(origin->expops, origin->msgp->msg.n_ops);
 	cf_free(origin->msgp);
 }

@@ -135,7 +135,7 @@ bool get_scan_sample_max(as_transaction* tr, uint64_t* sample_max);
 bool get_scan_rps(as_transaction* tr, uint32_t* rps);
 bool validate_background_scan_rps(const as_namespace* ns, uint32_t* rps);
 bool get_scan_socket_timeout(as_transaction* tr, uint32_t* timeout);
-bool get_scan_predexp(as_transaction* tr, as_exp** p_predexp);
+bool get_scan_filter_exp(as_transaction* tr, as_exp** exp);
 size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size, int32_t timeout, bool compress, as_proto_comp_stat* comp_stat);
 static inline bool excluded_set(as_index* r, uint16_t set_id);
 
@@ -440,7 +440,7 @@ get_scan_socket_timeout(as_transaction* tr, uint32_t* timeout)
 }
 
 bool
-get_scan_predexp(as_transaction* tr, as_exp** p_predexp)
+get_scan_filter_exp(as_transaction* tr, as_exp** exp)
 {
 	if (! as_transaction_has_predexp(tr)) {
 		return true;
@@ -449,9 +449,9 @@ get_scan_predexp(as_transaction* tr, as_exp** p_predexp)
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_PREDEXP);
 
-	*p_predexp = as_exp_filter_build(f, true);
+	*exp = as_exp_filter_build(f, true);
 
-	return *p_predexp != NULL;
+	return *exp != NULL;
 }
 
 size_t
@@ -635,7 +635,7 @@ typedef struct basic_scan_job_s {
 	bool			no_bin_data;
 	uint64_t		sample_max;
 	uint64_t		sample_count;
-	as_exp*			predexp;
+	as_exp*			filter_exp;
 	cf_vector*		bin_ids;
 } basic_scan_job;
 
@@ -658,7 +658,7 @@ typedef struct basic_scan_slice_s {
 } basic_scan_slice;
 
 bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
-bool basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r, as_exp** predexp);
+bool basic_scan_filter_meta(const basic_scan_job* job, const as_record* r, as_exp** exp);
 cf_vector* bin_ids_from_op(as_msg* m, as_namespace* ns, int* result);
 
 //----------------------------------------------------------
@@ -694,10 +694,10 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
-	as_exp* predexp = NULL;
+	as_exp* filter_exp = NULL;
 
-	if (! get_scan_predexp(tr, &predexp)) {
-		cf_warning(AS_SCAN, "basic scan job failed predexp processing");
+	if (! get_scan_filter_exp(tr, &filter_exp)) {
+		cf_warning(AS_SCAN, "basic scan job failed filter processing");
 		cf_free(pids);
 		return AS_ERR_PARAMETER;
 	}
@@ -708,7 +708,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	if (result != AS_OK) {
 		cf_warning(AS_SCAN, "basic scan job failed quota %d", result);
-		as_exp_destroy(predexp);
+		as_exp_destroy(filter_exp);
 		cf_free(pids);
 		return result;
 	}
@@ -725,7 +725,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
 	job->sample_max = sample_max;
 	job->sample_count = 0;
-	job->predexp = predexp;
+	job->filter_exp = filter_exp;
 	job->bin_ids = bin_ids_from_op(&tr->msgp->msg, ns, &result);
 
 	if (result != AS_OK) {
@@ -851,7 +851,7 @@ basic_scan_job_destroy(as_scan_job* _job)
 		cf_vector_destroy(job->bin_ids);
 	}
 
-	as_exp_destroy(job->predexp);
+	as_exp_destroy(job->filter_exp);
 }
 
 void
@@ -885,9 +885,9 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	as_exp* predexp = NULL;
+	as_exp* filter_exp = NULL;
 
-	if (! basic_scan_predexp_filter_meta(job, r, &predexp)) {
+	if (! basic_scan_filter_meta(job, r, &filter_exp)) {
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
 		return true;
@@ -897,7 +897,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_storage_record_open(ns, r, &rd);
 
-	if (predexp != NULL && predexp_read_and_filter_bins(&rd, predexp) != 0) {
+	if (filter_exp != NULL && read_and_filter_bins(&rd, filter_exp) != 0) {
 		as_storage_record_close(&rd);
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_bins);
@@ -970,27 +970,27 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 }
 
 bool
-basic_scan_predexp_filter_meta(const basic_scan_job* job, const as_record* r,
-		as_exp** predexp)
+basic_scan_filter_meta(const basic_scan_job* job, const as_record* r,
+		as_exp** exp)
 {
-	*predexp = job->predexp;
+	*exp = job->filter_exp;
 
-	if (*predexp == NULL) {
+	if (*exp == NULL) {
 		return true;
 	}
 
 	as_namespace* ns = ((as_scan_job*)job)->ns;
-	as_exp_ctx predargs = { .ns = ns, .r = (as_record*)r };
-	as_exp_trilean predrv = as_exp_matches_metadata(*predexp, &predargs);
+	as_exp_ctx ctx = { .ns = ns, .r = (as_record*)r };
+	as_exp_trilean tv = as_exp_matches_metadata(*exp, &ctx);
 
-	if (predrv == AS_EXP_UNK) {
-		return true; // caller must later check bins using *predexp
+	if (tv == AS_EXP_UNK) {
+		return true; // caller must later check bins using *exp
 	}
 	// else - caller will not need to apply filter later.
 
-	*predexp = NULL;
+	*exp = NULL;
 
-	return predrv == AS_EXP_TRUE;
+	return tv == AS_EXP_TRUE;
 }
 
 cf_vector*
@@ -1470,10 +1470,10 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	as_exp* predexp = NULL;
+	as_exp* filter_exp = NULL;
 
-	if (! get_scan_predexp(tr, &predexp)) {
-		cf_warning(AS_SCAN, "udf-bg scan job failed predexp processing");
+	if (! get_scan_filter_exp(tr, &filter_exp)) {
+		cf_warning(AS_SCAN, "udf-bg scan job failed filter processing");
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1483,7 +1483,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	if (result != AS_OK) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed quota %d", result);
-		as_exp_destroy(predexp);
+		as_exp_destroy(filter_exp);
 		return result;
 	}
 
@@ -1496,7 +1496,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	job->n_active_tr = 0;
 
-	job->origin.predexp = predexp; // first, so it's destroyed on failures
+	job->origin.filter_exp = filter_exp; // first, so it's destroyed on failures
 
 	if (! udf_def_init_from_msg(&job->origin.def, tr)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed def init");
@@ -1627,10 +1627,10 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	as_exp_ctx predargs = { .ns = ns, .r = r };
+	as_exp_ctx ctx = { .ns = ns, .r = r };
 
-	if (job->origin.predexp != NULL &&
-			as_exp_matches_metadata(job->origin.predexp, &predargs) ==
+	if (job->origin.filter_exp != NULL &&
+			as_exp_matches_metadata(job->origin.filter_exp, &ctx) ==
 					AS_EXP_FALSE) {
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
@@ -1743,10 +1743,10 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	as_exp* predexp = NULL;
+	as_exp* filter_exp = NULL;
 
-	if (! get_scan_predexp(tr, &predexp)) {
-		cf_warning(AS_SCAN, "ops-bg scan job failed get predexp");
+	if (! get_scan_filter_exp(tr, &filter_exp)) {
+		cf_warning(AS_SCAN, "ops-bg scan job failed filter processing");
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1756,7 +1756,7 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 
 	if (ops == NULL) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed get ops");
-		as_exp_destroy(predexp);
+		as_exp_destroy(filter_exp);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -1767,7 +1767,7 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 	if (result != AS_OK) {
 		cf_warning(AS_SCAN, "ops-bg scan job failed quota %d", result);
 		iops_expops_destroy(expops, om->n_ops);
-		as_exp_destroy(predexp);
+		as_exp_destroy(filter_exp);
 		return result;
 	}
 
@@ -1789,7 +1789,7 @@ ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns)
 			om->record_ttl, om->n_ops, ops,
 			tr->msgp->proto.sz - (ops - (uint8_t*)om));
 
-	job->origin.predexp = predexp;
+	job->origin.filter_exp = filter_exp;
 	job->origin.expops = expops;
 
 	job->origin.cb = ops_bg_scan_tr_complete;
@@ -1964,10 +1964,10 @@ ops_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	as_exp_ctx predargs = { .ns = ns, .r = r };
+	as_exp_ctx ctx = { .ns = ns, .r = r };
 
-	if (job->origin.predexp != NULL &&
-			as_exp_matches_metadata(job->origin.predexp, &predargs) ==
+	if (job->origin.filter_exp != NULL &&
+			as_exp_matches_metadata(job->origin.filter_exp, &ctx) ==
 					AS_EXP_FALSE) {
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_meta);
