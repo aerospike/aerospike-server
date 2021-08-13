@@ -53,6 +53,7 @@
 #include "cf_thread.h"
 #include "hist.h"
 #include "log.h"
+#include "pool.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"
@@ -75,6 +76,9 @@
 // Constants.
 //
 
+// TODO - could decrease this as number of drives increases?
+#define MAX_POOL_FDS 512 // power of 2 (rounds up anyway)
+
 #define WRITE_IN_PLACE 1
 
 
@@ -86,39 +90,69 @@
 int
 ssd_fd_get(drv_ssd *ssd)
 {
-	int fd = -1;
-	int rv = cf_queue_pop(ssd->fd_q, (void*)&fd, CF_QUEUE_NOWAIT);
+	while (true) {
+		int fd = cf_pool_int32_pop(&ssd->fd_pool);
 
-	if (rv != CF_QUEUE_OK) {
+		if (fd != -1) {
+			return fd;
+		}
+
+		uint32_t n_fds = as_load_uint32(&ssd->n_fds);
+
+		if (n_fds == MAX_POOL_FDS) {
+			cf_ticker_warning(AS_DRV_SSD, "%s: fd pool full", ssd->name);
+			sched_yield();
+			continue;
+		}
+
+		if (! as_cas_uint32(&ssd->n_fds, n_fds, n_fds + 1)) {
+			continue;
+		}
+
 		fd = open(ssd->name, ssd->open_flag, cf_os_base_perms());
 
-		if (-1 == fd) {
+		if (fd < 0) {
 			cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED open: errno %d (%s)",
 					ssd->name, errno, cf_strerror(errno));
 		}
-	}
 
-	return fd;
+		return fd;
+	}
 }
 
 
 int
 ssd_fd_cache_get(drv_ssd *ssd)
 {
-	int fd = -1;
-	int rv = cf_queue_pop(ssd->fd_cache_q, (void*)&fd, CF_QUEUE_NOWAIT);
+	while (true) {
+		int fd = cf_pool_int32_pop(&ssd->fd_cache_pool);
 
-	if (rv != CF_QUEUE_OK) {
+		if (fd != -1) {
+			return fd;
+		}
+
+		uint32_t n_fds = as_load_uint32(&ssd->n_cache_fds);
+
+		if (n_fds == MAX_POOL_FDS) {
+			cf_ticker_warning(AS_DRV_SSD, "%s: cache fd pool full", ssd->name);
+			sched_yield();
+			continue;
+		}
+
+		if (! as_cas_uint32(&ssd->n_cache_fds, n_fds, n_fds + 1)) {
+			continue;
+		}
+
 		fd = open(ssd->name, ssd->open_flag & ~(O_DIRECT | O_DSYNC),
 				cf_os_base_perms());
 
-		if (-1 == fd) {
+		if (fd < 0) {
 			cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED open: errno %d (%s)",
 					ssd->name, errno, cf_strerror(errno));
 		}
-	}
 
-	return fd;
+		return fd;
+	}
 }
 
 
@@ -131,7 +165,7 @@ ssd_shadow_fd_get(drv_ssd *ssd)
 	if (rv != CF_QUEUE_OK) {
 		fd = open(ssd->shadow_name, ssd->open_flag, cf_os_base_perms());
 
-		if (-1 == fd) {
+		if (fd < 0) {
 			cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED open: errno %d (%s)",
 					ssd->shadow_name, errno, cf_strerror(errno));
 		}
@@ -145,14 +179,14 @@ ssd_shadow_fd_get(drv_ssd *ssd)
 void
 ssd_fd_put(drv_ssd *ssd, int fd)
 {
-	cf_queue_push(ssd->fd_q, (void*)&fd);
+	cf_pool_int32_push(&ssd->fd_pool, fd);
 }
 
 
 static inline void
 ssd_fd_cache_put(drv_ssd *ssd, int fd)
 {
-	cf_queue_push(ssd->fd_cache_q, (void*)&fd);
+	cf_pool_int32_push(&ssd->fd_cache_pool, fd);
 }
 
 
@@ -744,7 +778,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 		cf_warning(AS_DRV_SSD, "%s: read failed: errno %d (%s)", ssd->name,
 				errno, cf_strerror(errno));
 		close(fd);
-		fd = -1;
+		as_decr_uint32(&ssd->n_fds);
 		goto Finished;
 	}
 
@@ -1144,6 +1178,8 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 					ssd->name, read_size, errno, cf_strerror(errno));
 			cf_free(read_buf);
 			close(fd);
+			as_decr_uint32(rd->read_page_cache ?
+					&ssd->n_cache_fds : &ssd->n_fds);
 			return -1;
 		}
 
@@ -3597,8 +3633,8 @@ as_storage_init_ssd(as_namespace *ns)
 
 		// Note: free_wblock_q, defrag_wblock_q created after loading devices.
 
-		ssd->fd_q = cf_queue_create(sizeof(int), true);
-		ssd->fd_cache_q = cf_queue_create(sizeof(int), true);
+		cf_pool_int32_init(&ssd->fd_pool, MAX_POOL_FDS, -1);
+		cf_pool_int32_init(&ssd->fd_cache_pool, MAX_POOL_FDS, -1);
 
 		if (ssd->shadow_name) {
 			ssd->shadow_fd_q = cf_queue_create(sizeof(int), true);

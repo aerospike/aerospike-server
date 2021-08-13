@@ -38,6 +38,7 @@
 #include "cf_thread.h"
 #include "hist.h"
 #include "log.h"
+#include "pool.h"
 
 #include "base/datamodel.h"
 #include "fabric/partition.h"
@@ -133,8 +134,12 @@ typedef struct drv_ssd_s {
 	cf_mutex		defrag_lock;		// lock protects writes to defrag swb
 	ssd_write_buf	*defrag_swb;		// swb currently being filled by defrag
 
-	cf_queue		*fd_q;				// queue of open fds
-	cf_queue		*fd_cache_q;		// queue of open fds that use page cache
+	cf_pool_int32	fd_pool;			// pool of open fds
+	uint32_t		n_fds;
+
+	cf_pool_int32	fd_cache_pool;		// pool of open fds that use page cache
+	uint32_t		n_cache_fds;
+
 	cf_queue		*shadow_fd_q;		// queue of open fds on shadow, if any
 
 	cf_queue		*free_wblock_q;		// IDs of free wblocks
