@@ -1845,7 +1845,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 
 			if (node->incoming_count[pool_id]++ >=
 					g_fabric_connect_limit[pool_id]) {
-				cf_queue_push(&node->incoming_overflow[pool_id], fc);
+				cf_queue_push(&node->incoming_overflow[pool_id], &fc);
 				cf_mutex_unlock(&node->incoming_fc_lock);
 				break;
 			}
