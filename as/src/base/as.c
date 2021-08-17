@@ -45,6 +45,7 @@
 #include "dns.h"
 #include "hardware.h"
 #include "log.h"
+#include "os.h"
 #include "tls.h"
 
 #include "base/batch.h"

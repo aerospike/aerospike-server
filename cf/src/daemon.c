@@ -40,6 +40,7 @@
 #include <sys/types.h>
 
 #include "log.h"
+#include "os.h"
 
 extern int capset(cap_user_header_t header, cap_user_data_t data);
 extern int capget(cap_user_header_t header, cap_user_data_t data);

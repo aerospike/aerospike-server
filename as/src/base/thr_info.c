@@ -48,6 +48,7 @@
 #include "dynbuf.h"
 #include "fetch.h"
 #include "log.h"
+#include "os.h"
 #include "shash.h"
 #include "socket.h"
 #include "vault.h"
@@ -1832,6 +1833,11 @@ info_service_config_get(cf_dyn_buf *db)
 		info_append_indexed_string(db, "feature-key-file", i, NULL, g_config.feature_key_files[i]);
 	}
 
+	info_append_bool(db, "ignore-best-min-free-kbytes", (g_config.ignore_best_practices & CF_OS_BP_MIN_FREE_KBYTES) != 0);
+	info_append_bool(db, "ignore-best-swappiness", (g_config.ignore_best_practices & CF_OS_BP_SWAPPINESS) != 0);
+	info_append_bool(db, "ignore-best-thp-defrag", (g_config.ignore_best_practices & CF_OS_BP_THP_DEFRAG) != 0);
+	info_append_bool(db, "ignore-best-thp-enabled", (g_config.ignore_best_practices & CF_OS_BP_THP_ENABLED) != 0);
+	info_append_bool(db, "ignore-best-zone-reclaim-mode", (g_config.ignore_best_practices & CF_OS_BP_ZONE_RECLAIM_MODE) != 0);
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
@@ -2036,7 +2042,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
 
 	info_append_string(db, "index-type",
-			ns->xmem_type == CF_XMEM_TYPE_UNDEFINED ? "undefined" :
+			ns->xmem_type == CF_XMEM_TYPE_MEM ? "mem" :
 					(ns->xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
 							(ns->xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
 									(ns->xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :

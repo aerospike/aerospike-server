@@ -59,6 +59,7 @@
 #include "cf_mutex.h"
 #include "daemon.h"
 #include "log.h"
+#include "os.h"
 #include "shash.h"
 #include "socket.h"
 
@@ -113,12 +114,6 @@ struct nvme_admin_cmd {
 #define POLICY_SCRIPT "/etc/aerospike/irqbalance-ban.sh"
 
 #define MEM_PAGE_SIZE (4096L)
-
-typedef enum {
-	FILE_RES_OK,
-	FILE_RES_NOT_FOUND,
-	FILE_RES_ERROR
-} file_res;
 
 typedef enum {
 	CHECK_PROC_PRESENT,
@@ -190,55 +185,7 @@ static cf_shash *g_dev_graph;
 static cf_mutex g_path_data_lock = CF_MUTEX_INIT;
 static cf_shash *g_path_data;
 
-static file_res
-read_file(const char *path, void *buff, size_t *limit)
-{
-	cf_detail(CF_HARDWARE, "reading file %s with buffer size %zu", path, *limit);
-	int32_t fd = open(path, O_RDONLY);
-
-	if (fd < 0) {
-		if (errno == ENOENT) {
-			cf_detail(CF_HARDWARE, "file %s not found", path);
-			return FILE_RES_NOT_FOUND;
-		}
-
-		cf_warning(CF_HARDWARE, "error while opening file %s for reading: %d (%s)",
-				path, errno, cf_strerror(errno));
-		return FILE_RES_ERROR;
-	}
-
-	size_t total = 0;
-
-	while (total < *limit) {
-		cf_detail(CF_HARDWARE, "reading %zd byte(s) at offset %zu", *limit - total, total);
-		ssize_t len = read(fd, (uint8_t *)buff + total, *limit - total);
-		CF_NEVER_FAILS(len);
-
-		if (len == 0) {
-			cf_detail(CF_HARDWARE, "EOF");
-			break;
-		}
-
-		total += (size_t)len;
-	}
-
-	cf_detail(CF_HARDWARE, "read %zu byte(s) from file %s", total, path);
-	file_res res;
-
-	if (total == *limit) {
-		cf_warning(CF_HARDWARE, "read buffer too small for file %s", path);
-		res = FILE_RES_ERROR;
-	}
-	else {
-		res = FILE_RES_OK;
-		*limit = total;
-	}
-
-	CF_NEVER_FAILS(close(fd));
-	return res;
-}
-
-static file_res
+static cf_os_file_res
 write_file(const char *path, const void *buff, size_t limit)
 {
 	cf_detail(CF_HARDWARE, "writing file %s with buffer size %zu", path, limit);
@@ -247,12 +194,12 @@ write_file(const char *path, const void *buff, size_t limit)
 	if (fd < 0) {
 		if (errno == ENOENT) {
 			cf_detail(CF_HARDWARE, "file %s not found", path);
-			return FILE_RES_NOT_FOUND;
+			return CF_OS_FILE_RES_NOT_FOUND;
 		}
 
 		cf_warning(CF_HARDWARE, "error while opening file %s for writing: %d (%s)",
 				path, errno, cf_strerror(errno));
-		return FILE_RES_ERROR;
+		return CF_OS_FILE_RES_ERROR;
 	}
 
 	size_t total = 0;
@@ -265,7 +212,7 @@ write_file(const char *path, const void *buff, size_t limit)
 			cf_warning(CF_HARDWARE, "error while writing to file %s: %d (%s)",
 					path, errno, cf_strerror(errno));
 			CF_NEVER_FAILS(close(fd));
-			return FILE_RES_ERROR;
+			return CF_OS_FILE_RES_ERROR;
 		}
 
 		total += (size_t)len;
@@ -273,13 +220,13 @@ write_file(const char *path, const void *buff, size_t limit)
 
 	cf_detail(CF_HARDWARE, "done writing");
 	CF_NEVER_FAILS(close(fd));
-	return FILE_RES_OK;
+	return CF_OS_FILE_RES_OK;
 }
 
 static void
 write_file_safe(const char *path, const void *buff, size_t limit)
 {
-	if (write_file(path, buff, limit) != FILE_RES_OK) {
+	if (write_file(path, buff, limit) != CF_OS_FILE_RES_OK) {
 		cf_crash(CF_HARDWARE, "write failed unexpectedly");
 	}
 }
@@ -465,83 +412,54 @@ mask_to_string(cpu_set_t *mask, char *buff, size_t limit)
 	}
 }
 
-static file_res
-read_value(const char *path, int64_t *val)
-{
-	cf_detail(CF_HARDWARE, "reading value from file %s", path);
-
-	char buff[100];
-	size_t limit = sizeof(buff);
-	file_res res = read_file(path, buff, &limit);
-
-	if (res != FILE_RES_OK) {
-		return res;
-	}
-
-	buff[limit - 1] = '\0';
-
-	cf_detail(CF_HARDWARE, "parsing value \"%s\"", buff);
-
-	char *end;
-	int64_t x = strtol(buff, &end, 10);
-
-	if (*end != '\0' || x >= CPU_SETSIZE) {
-		cf_warning(CF_HARDWARE, "invalid value \"%s\" in %s", buff, path);
-		return FILE_RES_ERROR;
-	}
-
-	*val = x;
-	return FILE_RES_OK;
-}
-
-static file_res
+static cf_os_file_res
 read_index(const char *path, uint16_t *val)
 {
 	int64_t x;
-	file_res res = read_value(path, &x);
+	cf_os_file_res res = cf_os_read_int_from_file(path, &x);
 
-	if (res != FILE_RES_OK) {
+	if (res != CF_OS_FILE_RES_OK) {
 		return res;
 	}
 
-	if (x < 0) {
+	if (x < 0 || x >= CPU_SETSIZE) {
 		cf_warning(CF_HARDWARE, "invalid index in %s", path);
-		return FILE_RES_ERROR;
+		return CF_OS_FILE_RES_ERROR;
 	}
 
 	*val = (uint16_t)x;
-	return FILE_RES_OK;
+	return CF_OS_FILE_RES_OK;
 }
 
-static file_res
+static cf_os_file_res
 read_numa_node(const char *path, cf_topo_numa_node_index *i_numa_node)
 {
 	int64_t x;
-	file_res res = read_value(path, &x);
+	cf_os_file_res res = cf_os_read_int_from_file(path, &x);
 
-	if (res != FILE_RES_OK) {
+	if (res != CF_OS_FILE_RES_OK) {
 		return res;
 	}
 
-	if (x < 0) {
+	if (x < 0 || x >= CPU_SETSIZE) {
 		cf_detail(CF_HARDWARE, "no NUMA node in %s", path);
-		return FILE_RES_ERROR;
+		return CF_OS_FILE_RES_ERROR;
 	}
 
 	*i_numa_node = (cf_topo_numa_node_index)x;
-	return FILE_RES_OK;
+	return CF_OS_FILE_RES_OK;
 }
 
-static file_res
+static cf_os_file_res
 read_device_numbers(const char *path, uint32_t *major, uint32_t *minor)
 {
 	cf_detail(CF_HARDWARE, "reading device numbers from file %s", path);
 
 	char buff[100];
 	size_t limit = sizeof(buff);
-	file_res res = read_file(path, buff, &limit);
+	cf_os_file_res res = cf_os_read_file(path, buff, &limit);
 
-	if (res != FILE_RES_OK) {
+	if (res != CF_OS_FILE_RES_OK) {
 		return res;
 	}
 
@@ -552,21 +470,21 @@ read_device_numbers(const char *path, uint32_t *major, uint32_t *minor)
 	if (sscanf(buff, "%u:%u\n", major, minor) != 2) {
 		cf_warning(CF_HARDWARE, "invalid device numbers \"%s\" in %s", buff,
 				path);
-		return FILE_RES_ERROR;
+		return CF_OS_FILE_RES_ERROR;
 	}
 
-	return FILE_RES_OK;
+	return CF_OS_FILE_RES_OK;
 }
 
-static file_res
+static cf_os_file_res
 read_list(const char *path, cpu_set_t *mask)
 {
 	cf_detail(CF_HARDWARE, "reading list from file %s", path);
 	char buff[1000];
 	size_t limit = sizeof(buff);
-	file_res res = read_file(path, buff, &limit);
+	cf_os_file_res res = cf_os_read_file(path, buff, &limit);
 
-	if (res != FILE_RES_OK) {
+	if (res != CF_OS_FILE_RES_OK) {
 		return res;
 	}
 
@@ -590,12 +508,12 @@ read_list(const char *path, cpu_set_t *mask)
 		}
 		else {
 			cf_warning(CF_HARDWARE, "invalid list \"%s\" in %s", buff, path);
-			return FILE_RES_ERROR;
+			return CF_OS_FILE_RES_ERROR;
 		}
 
 		if (from >= CPU_SETSIZE || thru >= CPU_SETSIZE || from > thru) {
 			cf_warning(CF_HARDWARE, "invalid list \"%s\" in %s", buff, path);
-			return FILE_RES_ERROR;
+			return CF_OS_FILE_RES_ERROR;
 		}
 
 		cf_detail(CF_HARDWARE, "marking %d through %d", (int32_t)from, (int32_t)thru);
@@ -615,7 +533,7 @@ read_list(const char *path, cpu_set_t *mask)
 	mask_to_string(mask, buff2, sizeof(buff2));
 	cf_detail(CF_HARDWARE, "list \"%s\" -> mask %s", buff, buff2);
 
-	return FILE_RES_OK;
+	return CF_OS_FILE_RES_OK;
 }
 
 static void
@@ -628,7 +546,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 		cf_detail(CF_HARDWARE, "detecting online CPUs on NUMA node %hu", a_numa_node);
 	}
 
-	if (read_list("/sys/devices/system/cpu/online", &g_os_cpus_online) != FILE_RES_OK) {
+	if (read_list("/sys/devices/system/cpu/online", &g_os_cpus_online) != CF_OS_FILE_RES_OK) {
 		cf_crash(CF_HARDWARE, "error while reading list of online CPUs");
 	}
 
@@ -674,16 +592,16 @@ detect(cf_topo_numa_node_index a_numa_node)
 				"/sys/devices/system/cpu/cpu%hu/topology/physical_package_id",
 				g_n_os_cpus);
 		os_package_index i_os_package;
-		file_res res = read_index(path, &i_os_package);
+		cf_os_file_res res = read_index(path, &i_os_package);
 
 		// The entry doesn't exist. We've processed all available CPUs. Stop
 		// looping through the CPUs.
 
-		if (res == FILE_RES_NOT_FOUND) {
+		if (res == CF_OS_FILE_RES_NOT_FOUND) {
 			break;
 		}
 
-		if (res != FILE_RES_OK) {
+		if (res != CF_OS_FILE_RES_OK) {
 			cf_crash(CF_HARDWARE, "error while reading OS package index from %s", path);
 			break;
 		}
@@ -706,7 +624,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 		os_core_index i_os_core;
 		res = read_index(path, &i_os_core);
 
-		if (res != FILE_RES_OK) {
+		if (res != CF_OS_FILE_RES_OK) {
 			cf_crash(CF_HARDWARE, "error while reading OS core index from %s", path);
 			break;
 		}
@@ -743,11 +661,11 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 			// We found the NUMA node that has the current CPU in its subtree.
 
-			if (res == FILE_RES_OK) {
+			if (res == CF_OS_FILE_RES_OK) {
 				break;
 			}
 
-			if (res != FILE_RES_NOT_FOUND) {
+			if (res != CF_OS_FILE_RES_NOT_FOUND) {
 				cf_crash(CF_HARDWARE, "error while reading core number from %s", path);
 			}
 		}
@@ -1095,14 +1013,14 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 		snprintf(path, sizeof(path), "/proc/%s/cmdline", ent.d_name);
 
 		limit = sizeof(cmd) - 1;
-		file_res rfr = read_file(path, cmd, &limit);
+		cf_os_file_res rfr = cf_os_read_file(path, cmd, &limit);
 
 		// Can legitimately happen, if the process has exited in the meantime.
-		if (rfr == FILE_RES_NOT_FOUND) {
+		if (rfr == CF_OS_FILE_RES_NOT_FOUND) {
 			continue;
 		}
 
-		if (rfr == FILE_RES_ERROR) {
+		if (rfr == CF_OS_FILE_RES_ERROR) {
 			cf_crash(CF_HARDWARE, "error while reading file %s", path);
 		}
 
@@ -1507,7 +1425,7 @@ pin_irq(irq_number i_irq, cf_topo_os_cpu_index i_os_cpu)
 	char path[1000];
 	snprintf(path, sizeof(path), "/proc/irq/%hu/smp_affinity", i_irq);
 
-	if (write_file(path, mask_str, strlen(mask_str)) != FILE_RES_OK) {
+	if (write_file(path, mask_str, strlen(mask_str)) != CF_OS_FILE_RES_OK) {
 		cf_crash(CF_HARDWARE, "error while pinning IRQ, path %s", path);
 	}
 }
@@ -2084,7 +2002,7 @@ collect_edges(const char *sys_dir, const char *prefix, bool flip,
 		dev_key_t sub_key;
 
 		if (read_device_numbers(sys_path, &sub_key.major, &sub_key.minor) !=
-				FILE_RES_OK) {
+				CF_OS_FILE_RES_OK) {
 			cf_detail(CF_HARDWARE, "no device numbers");
 			continue;
 		}
@@ -2168,7 +2086,7 @@ build_device_graph(void)
 			dev_key_t key;
 
 			if (read_device_numbers(sys_path, &key.major, &key.minor) !=
-					FILE_RES_OK) {
+					CF_OS_FILE_RES_OK) {
 				cf_detail(CF_HARDWARE, "no device numbers");
 				continue;
 			}
@@ -2355,7 +2273,7 @@ get_numa_node(const char *sys_path)
 
 		cf_topo_numa_node_index tmp;
 
-		if (read_numa_node(sys_numa, &tmp) == FILE_RES_OK) {
+		if (read_numa_node(sys_numa, &tmp) == CF_OS_FILE_RES_OK) {
 			cf_detail(CF_HARDWARE, "NUMA node found");
 			res = tmp;
 			break;
@@ -2700,7 +2618,7 @@ cf_storage_set_scheduler(const char *path, const char *sched)
 
 	for (uint32_t i = 0; i < data->n_sys_scheds; ++i) {
 		if (write_file(data->sys_scheds[i], sched, strlen(sched)) !=
-				FILE_RES_OK) {
+				CF_OS_FILE_RES_OK) {
 			failed = true;
 		}
 	}

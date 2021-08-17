@@ -53,6 +53,7 @@
 #include "cf_thread.h"
 #include "hist.h"
 #include "log.h"
+#include "os.h"
 #include "pool.h"
 #include "vmapx.h"
 

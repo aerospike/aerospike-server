@@ -109,7 +109,7 @@ as_namespace_create(char *name)
 	// Non-0/NULL/false configuration defaults.
 	//
 
-	ns->xmem_type = CF_XMEM_TYPE_UNDEFINED;
+	ns->xmem_type = CF_XMEM_TYPE_MEM;
 
 	ns->cfg_replication_factor = 2;
 	ns->replication_factor = 0; // gets set on rebalance
