@@ -58,21 +58,6 @@ uint32_up_to_pow2(uint32_t x)
 	return 1 << (64 - cf_msb64(x));
 }
 
-// TODO - move to as_atomic.h?
-static inline bool
-as_cas_ptr(void** target, void* old_value, void* new_value)
-{
-	return as_cas_uint64((uint64_t*)target, (uint64_t)old_value,
-			(uint64_t)new_value);
-}
-
-// TODO - move to as_atomic.h?
-static inline void*
-as_fas_ptr(void** target, void* value)
-{
-	return (void*)as_fas_uint64((uint64_t*)target, (uint64_t)value);
-}
-
 #define POOL_MOD(_ix) (_ix & (pool->capacity - 1))
 
 
