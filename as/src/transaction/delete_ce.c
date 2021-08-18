@@ -1,7 +1,7 @@
 /*
  * delete_ce.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -74,7 +74,7 @@ drop_local(as_namespace* ns, as_partition_reservation* rsv, as_index_ref* r_ref)
 	as_record* r = r_ref->r;
 
 	if (ns->storage_data_in_memory) {
-		record_delete_adjust_sindex(r, ns);
+		remove_from_sindex(ns, r_ref);
 	}
 
 	as_set_index_delete(ns, rsv->tree, as_index_get_set_id(r), r_ref->r_h);

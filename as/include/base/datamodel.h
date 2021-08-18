@@ -1,7 +1,7 @@
 /*
  * datamodel.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -84,6 +84,8 @@ typedef struct as_set_s as_set;
 struct as_exp_ctx_s;
 struct as_index_ref_s;
 struct as_index_tree_s;
+struct as_sindex_s;
+struct as_sindex_config_s;
 struct index_metadata_s;
 struct iops_expop_s;
 
@@ -462,8 +464,6 @@ extern bool as_record_is_live(const as_record *r);
 extern int as_record_get_create(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref, as_namespace *ns);
 extern int as_record_get(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref);
 extern int as_record_get_live(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref, as_namespace *ns);
-extern int as_record_exists(struct as_index_tree_s *tree, const cf_digest *keyd);
-extern int as_record_exists_live(struct as_index_tree_s *tree, const cf_digest *keyd, as_namespace *ns);
 extern void as_record_rescue(struct as_index_ref_s *r_ref, as_namespace *ns);
 
 extern void as_record_free_bin_space(as_record *r);
@@ -523,7 +523,7 @@ typedef struct as_remote_record_s {
 	bool xdr_bin_cemetery; // relevant only for enterprise edition
 } as_remote_record;
 
-int as_record_replace_if_better(as_remote_record *rr, bool skip_sindex);
+int as_record_replace_if_better(as_remote_record *rr);
 
 // For enterprise split only.
 int record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
@@ -548,29 +548,6 @@ trim_void_time(uint32_t void_time)
 	return void_time > max_void_time ? max_void_time : void_time;
 }
 
-
-#define AS_SINDEX_MAX		256
-
-#define MIN_PARTITIONS_PER_INDEX 1
-#define MAX_PARTITIONS_PER_INDEX 256
-#define DEFAULT_PARTITIONS_PER_INDEX 32
-#define MAX_PARTITIONS_PER_INDEX_CHAR 3 // Number of characters in max paritions per index
-
-// as_sindex structure which hangs from the ns.
-#define AS_SINDEX_INACTIVE			1 // On init, pre-loading
-#define AS_SINDEX_ACTIVE			2 // On creation and afterwards
-#define AS_SINDEX_DESTROY			3 // On destroy
-// dummy sindex state when ai_btree_create() returns error this
-// sindex is not available for any of the DML operations
-#define AS_SINDEX_NOTCREATED		4 // Un-used flag
-#define AS_SINDEX_FLAG_WACTIVE			0x01 // On ai btree create of sindex, never reset
-#define AS_SINDEX_FLAG_RACTIVE			0x02 // When sindex scan of database is completed
-#define AS_SINDEX_FLAG_DESTROY_CLEANUP 	0x04 // Called for AI clean-up during si deletion
-#define AS_SINDEX_FLAG_MIGRATE_CLEANUP  0x08 // Un-used
-#define AS_SINDEX_FLAG_POPULATING		0x10 // Indicates current si scan job, reset when scan is done.
-
-struct as_sindex_s;
-struct as_sindex_config_s;
 
 #define AS_SET_MAX_COUNT 0x3FF	// ID's 10 bits worth minus 1 (ID 0 means no set)
 #define AS_BINID_HAS_SINDEX_SIZE ((MAX_BIN_NAMES + 1) / (sizeof(uint32_t) * CHAR_BIT)) // round numerator to multiple of 32
@@ -729,12 +706,20 @@ struct as_namespace_s {
 	// Secondary index.
 	//
 
-	int				sindex_cnt;
+	uint64_t		si_n_recs_checked; // used only by startup ticker
+
+	uint32_t		sindex_cnt;
 	uint32_t		n_setless_sindexes;
 	struct as_sindex_s* sindex; // array with AS_MAX_SINDEX metadata
 	cf_shash*		sindex_set_binid_hash;
 	cf_shash*		sindex_iname_hash;
 	uint32_t		binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
+
+	cf_mutex		si_gc_list_mutex;
+	// The queues are not threadsafe - protected by si_gc_list_mutex.
+	cf_queue*		si_gc_rlist;
+	cf_queue*		si_gc_tlist;
+	bool			si_gc_tlist_map[AS_PARTITIONS][MAX_NUM_TREE_IDS];
 
 	//--------------------------------------------
 	// XDR.
@@ -829,7 +814,7 @@ struct as_namespace_s {
 	uint32_t		storage_defrag_lwm_pct;
 	uint32_t		storage_defrag_queue_min;
 	uint32_t		storage_defrag_sleep;
-	int				storage_defrag_startup_minimum;
+	uint32_t		storage_defrag_startup_minimum;
 	bool			storage_direct_files;
 	bool			storage_disable_odsync;
 	bool			storage_benchmarks_enabled; // histograms are per-drive except device-read-size & device-write-size
@@ -886,6 +871,10 @@ struct as_namespace_s {
 	int32_t			evict_ttl; // signed - possible (but weird) it's negative
 
 	uint32_t		nsup_cycle_duration; // seconds taken for most recent nsup cycle
+
+	// Sindex GC stats.
+
+	uint64_t		n_sindex_gc_cleaned;
 
 	// Memory usage stats.
 
@@ -1120,30 +1109,32 @@ struct as_namespace_s {
 
 	cf_atomic64		query_reqs;
 	cf_atomic64		query_fail;
+	cf_atomic64		query_false_positives;
+
 	cf_atomic64		query_short_queue_full;
 	cf_atomic64		query_long_queue_full;
 	cf_atomic64		query_short_reqs;
 	cf_atomic64		query_long_reqs;
 
-	cf_atomic64		n_lookup;
-	cf_atomic64		n_lookup_success;
-	cf_atomic64		n_lookup_abort;
-	cf_atomic64		n_lookup_errs;
-	cf_atomic64		lookup_response_size;
-	cf_atomic64		lookup_num_records;
+	cf_atomic64		n_query_basic_complete;
+	cf_atomic64		n_query_basic_error;
+	cf_atomic64		n_query_basic_abort;
 
-	cf_atomic64		n_aggregation;
-	cf_atomic64		n_agg_success;
-	cf_atomic64		n_agg_abort;
-	cf_atomic64		n_agg_errs;
-	cf_atomic64		agg_response_size;
-	cf_atomic64		agg_num_records;
+	cf_atomic64		n_query_basic_records;
 
-	cf_atomic64		n_query_udf_bg_success;
-	cf_atomic64		n_query_udf_bg_failure;
+	cf_atomic64		n_query_aggr_complete;
+	cf_atomic64		n_query_aggr_error;
+	cf_atomic64		n_query_aggr_abort;
 
-	cf_atomic64		n_query_ops_bg_success;
-	cf_atomic64		n_query_ops_bg_failure;
+	cf_atomic64		n_query_aggr_records;
+
+	cf_atomic64		n_query_udf_bg_complete;
+	cf_atomic64		n_query_udf_bg_error;
+	cf_atomic64		n_query_udf_bg_abort;
+
+	cf_atomic64		n_query_ops_bg_complete;
+	cf_atomic64		n_query_ops_bg_error;
+	cf_atomic64		n_query_ops_bg_abort;
 
 	// Geospatial query stats:
 	cf_atomic64		geo_region_query_count;		// number of region queries

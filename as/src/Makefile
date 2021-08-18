@@ -4,19 +4,6 @@
 DEPTH = ../..
 include $(DEPTH)/make_in/Makefile.in
 
-# Use SystemTap?  [By default, no.]
-USE_SYSTEMTAP = 0
-
-ifeq ($(USE_SYSTEMTAP),1)
-CFLAGS +=	-DUSE_SYSTEMTAP
-endif
-
-ifeq ($(USE_SYSTEMTAP),1)
-SYSTEMTAP_PROBES_D = base/probes.d
-SYSTEMTAP_PROBES_H = $(GEN_DIR)/probes.h
-SYSTEMTAP_PROBES_O = $(OBJECT_DIR)/probes.o
-endif
-
 ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
 endif
@@ -160,13 +147,16 @@ GEOSPATIAL_HEADERS += geospatial.h
 GEOSPATIAL_SOURCES += geojson.cc
 GEOSPATIAL_SOURCES += geospatial.cc
 
-SINDEX_HEADERS += job_manager.h
+SINDEX_HEADERS += gc.h
+SINDEX_HEADERS += populate.h
 SINDEX_HEADERS += secondary_index.h
-SINDEX_HEADERS += thr_sindex.h
 
-SINDEX_SOURCES += job_manager.c
+SINDEX_SOURCES += gc.c
+SINDEX_SOURCES += populate.c
 SINDEX_SOURCES += secondary_index.c
-SINDEX_SOURCES += thr_sindex.c
+ifneq ($(USE_EE),1)
+  SINDEX_SOURCES += gc_ce.c
+endif
 
 STORAGE_HEADERS += drv_common.h
 STORAGE_HEADERS += drv_ssd.h
@@ -297,12 +287,12 @@ LIBRARIES := $(AS_LIBRARIES) $(LIBRARIES)
 
 AS_LIB_DEPS = $(AS_LIBRARIES)
 
-OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(SYSTEMTAP_PROBES_O)
+OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ)
 OBJECTS = $(OBJECTS.c:%.cc=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
 
 .PHONY: all
-all: $(SYSTEMTAP_PROBES_H) $(SERVER)
+all: $(SERVER)
 
 .PHONY: clean
 clean:
@@ -327,11 +317,3 @@ include $(DEPTH)/make_in/Makefile.targets
 S2_WNO = -Wno-unused-local-typedefs -Wno-deprecated -Wno-sign-compare
 $(OBJECT_DIR)/geospatial/%.o: CXXFLAGS += $(S2_WNO) -D__STDC_LIMIT_MACROS
 $(OBJECT_DIR)/geospatial/%.o: CFLAGS := $(filter-out -std=gnu99,$(CFLAGS))
-
-ifeq ($(USE_SYSTEMTAP),1)
-$(SYSTEMTAP_PROBES_H):	$(SYSTEMTAP_PROBES_D)
-	dtrace -h -s $< -o $@
-
-$(SYSTEMTAP_PROBES_O):	$(SYSTEMTAP_PROBES_D)
-	dtrace -G -s $< -o $@
-endif

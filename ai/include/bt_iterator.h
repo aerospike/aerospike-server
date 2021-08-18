@@ -88,8 +88,6 @@ void     to_child(btIterator *iter, bt_n* self);
 int      init_iterator(bt *btr, bt_data_t simkey, struct btIterator *iter);
 
 btSIter *btGetRangeIter    (bt *btr, ai_obj *alow, ai_obj *ahigh,         bool asc);
-btSIter *btGetFullRangeIter(bt *btr,             bool asc, cswc_t *w);
-btSIter *btGetFullXthIter  (bt *btr,     ulong x, bool asc, cswc_t *w, long lim);
 btSIter *btSetFullRangeIter(btSIter *iter, bt *btr, bool asc, cswc_t *w);
 btSIter *btSetRangeIter    (btSIter *iter, bt *btr, ai_obj *alow, ai_obj *ahigh, bool asc);
 btEntry *btRangeNext           (btSIter *iter,                        bool asc);

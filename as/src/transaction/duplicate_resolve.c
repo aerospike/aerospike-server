@@ -543,7 +543,7 @@ apply_winner(rw_request* rw)
 
 	dup_res_init_repl_state(&rr, info);
 
-	rw->result_code = (uint8_t)as_record_replace_if_better(&rr, false);
+	rw->result_code = (uint8_t)as_record_replace_if_better(&rr);
 
 	// Duplicate resolution just treats these errors as successful no-ops:
 	if (rw->result_code == AS_ERR_RECORD_EXISTS ||

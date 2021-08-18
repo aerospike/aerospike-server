@@ -23,7 +23,6 @@
  * This file implements stream parsing for rows.
  */
 
-#include <assert.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +32,8 @@
 #include "ai_obj.h"
 #include "bt.h"
 #include "stream.h"
+
+#include "log.h"
 
 #include <citrusleaf/alloc.h>
 
@@ -52,7 +53,7 @@ int u160Cmp(void *s1, void *s2) {
 	} else return             (x1 > x2) ? 1 : -1;
 }
 
-static inline int LCmp(void *s1, void *s2) {
+int llCmp(void *s1, void *s2) {
 	llk   *ll1 = (llk *)s1;
 	llk   *ll2 = (llk *)s2;
 	long   l1  = ll1->key;
@@ -60,31 +61,31 @@ static inline int LCmp(void *s1, void *s2) {
 	return l1 == l2 ? 0 : (l1 > l2) ? 1 : -1;
 }
 
-int llCmp(void *s1, void *s2) {
-	return LCmp(s1, s2);
-}
-
-static inline int YCmp(void *s1, void *s2) {
+int ylCmp(void *s1, void *s2) {
 	ylk     *yl1 = (ylk *)s1;
 	ylk     *yl2 = (ylk *)s2;
 	uint160  y1  = yl1->key;
 	uint160  y2  = yl2->key;
 	return u160Cmp(&y1, &y2);
 }
-int ylCmp(void *s1, void *s2) {
-	return YCmp(s1, s2);
+
+int lCmp(void *s1, void *s2) {
+	lk *l1  = (lk *)s1;
+	lk *l2  = (lk *)s2;
+	long k1 = l1->key;
+	long k2 = l2->key;
+	return k1 == k2 ? 0 : (k1 > k2) ? 1 : -1;
 }
 
 void destroyBTKey(char *btkey, bool med) {
 	if (med) cf_free(btkey);
 }
 
-char *createBTKey(ai_obj *akey, bool *med, uint32 *ksize, bt *btr, btk_t *btk) {
+char *createBTKey(ai_obj *akey, bool *med, bt *btr, btk_t *btk) {
 	*med   = 0;
-	*ksize = VOIDSIZE;
 
-	if (NBT_DG(btr)) {
-		return (char *)&akey->y;
+	if (NBT(btr)) {
+		return (char *)&akey->l;
 	} else if (LL(btr)) {
 		btk->LL.key = akey->l;
 		return (char *)&btk->LL;
@@ -93,27 +94,28 @@ char *createBTKey(ai_obj *akey, bool *med, uint32 *ksize, bt *btr, btk_t *btk) {
 		return (char *)&btk->YL;
 	}
 	
-	assert(! "Unsupport Btree type"); 
+	cf_crash(AS_SINDEX, "Unsupported Btree type");
 	return NULL;
 }
 
 uchar *parseStream(uchar *stream, bt *btr) {
-	if (!stream || NBT_DG(btr)) {
+	if (!stream || NBT(btr)) {
 		return NULL;
 	} else if (LL(btr)) {
 		return (uchar *)(*(llk *)(stream)).val;
 	} else if (YL(btr)) {
 		return (uchar *)(long)(*(ylk *)(stream)).val;
 	}
-	assert(! "Unsupported Btree type");
+
+	cf_crash(AS_SINDEX, "Unsupported Btree type");
 	return NULL;
 }
 
 void convertStream2Key(uchar *stream, ai_obj *key, bt *btr) {
 	init_ai_obj(key);
-	if (NBT_DG(btr)) {
-		key->type = COL_TYPE_DIGEST;
-		memcpy(&key->y, stream, AS_DIGEST_KEY_SZ);
+	if (NBT(btr)) {
+		key->type = COL_TYPE_LONG;
+		key->l = ((lk *)stream)->key;
 	} else if (LL(btr)) {
 		key->type = COL_TYPE_LONG;
 		key->l = ((llk *)stream)->key;
@@ -121,46 +123,26 @@ void convertStream2Key(uchar *stream, ai_obj *key, bt *btr) {
 		key->type = COL_TYPE_DIGEST;
 		key->y = ((ylk *)stream)->key;
 	} else {
-		assert(! "Unsupported Btree type");
+		cf_crash(AS_SINDEX, "Unsupported Btree type");
 	}
 }
 
-static void *OBT_createStream(bt *btr, void *val, char *btkey, crs_t *crs) {
-   
-    if (LL(btr)) { 
-		llk *ll               = (llk *)btkey;
-		crs->LL_StreamPtr.key = ll->key;
-		crs->LL_StreamPtr.val = (ulong) val;
-        return &crs->LL_StreamPtr;
-	} else if (YL(btr)) {
-        ylk *yl               = (ylk *)btkey;
-        crs->YL_StreamPtr.key = yl->key;
-        crs->YL_StreamPtr.val = (ulong) val;
-        return &crs->YL_StreamPtr;
-    }
-	
-	assert(! "OBT_createStream ERROR");
-	return NULL;
-}
-
-void *createStream(bt *btr, void *val, char *btkey, uint32 klen, uint32 *size,
-				   crs_t *crs) {
+void *createStream(bt *btr, void *val, char *btkey, uint32 *size, crs_t *crs) {
 	*size = 0;
 	if (NBT(btr)) {
 		return btkey;
-	} else if (OTHER_BT(btr)) {
-		return OBT_createStream(btr, val, btkey, crs);
+	} else if (LL(btr)) {
+		llk *ll               = (llk *)btkey;
+		crs->LL_StreamPtr.key = ll->key;
+		crs->LL_StreamPtr.val = (ulong) val;
+		return &crs->LL_StreamPtr;
+	} else if (YL(btr)) {
+		ylk *yl               = (ylk *)btkey;
+		crs->YL_StreamPtr.key = yl->key;
+		crs->YL_StreamPtr.val = (ulong) val;
+		return &crs->YL_StreamPtr;
 	}
 
-	assert(! "Unsupported Btree type");
+	cf_crash(AS_SINDEX, "Unsupported Btree type");
 	return NULL;
-}
-
-bool destroyStream(bt *btr, uchar *ostream) {
-	if (!ostream || NBT(btr) || OTHER_BT(btr)) {
-		return 0;
-	}
-
-	assert(! "Unsupported Btree Type");
-	return 1;
 }

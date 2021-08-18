@@ -1,7 +1,7 @@
 /*
  * monitor.h
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -47,8 +47,7 @@
 
 typedef enum {
 	QUERY_MOD	= 0,
-	SCAN_MOD	= 1,
-	SBLD_MOD	= 2
+	SCAN_MOD	= 1
 } as_mon_module_slot;
 
 extern const char * AS_MON_MODULES[];
@@ -83,9 +82,9 @@ typedef struct as_mon_cb_s {
 	as_mon_jobstat *(*get_jobstat_all)	(int * size);
 
 	// Per transaction
-	int (*set_priority)	(uint64_t trid, uint32_t priority);
-	int (*kill)			(uint64_t trid);
-	int (*suspend)		(uint64_t trid);
+	bool (*set_priority)	(uint64_t trid, uint32_t priority);
+	bool (*kill)			(uint64_t trid);
+	int (*suspend)			(uint64_t trid);
 
 	// Per Module
 	// Numer of pending transaction of this job type in queue allowed

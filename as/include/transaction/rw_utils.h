@@ -1,7 +1,7 @@
 /*
  * rw_utils.h
  *
- * Copyright (C) 2016-2018 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -49,6 +49,7 @@
 struct as_bin_s;
 struct as_exp_s;
 struct as_index_s;
+struct as_index_ref_s;
 struct as_index_tree_s;
 struct as_msg_s;
 struct as_msg_op_s;
@@ -132,25 +133,23 @@ bool udf_delete_bin(struct as_storage_rd_s* rd, const char* name, struct as_bin_
 void write_resolved_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, struct as_bin_s* b);
 void delete_all_bins(struct as_storage_rd_s* rd);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
-bool write_sindex_update(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
-void record_delete_adjust_sindex(struct as_index_s* r, struct as_namespace_s* ns);
-void delete_adjust_sindex(struct as_storage_rd_s* rd);
-void remove_from_sindex(struct as_namespace_s* ns, const char* set_name, cf_digest* keyd, struct as_bin_s* bins, uint32_t n_bins);
+void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
+void remove_from_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
+void remove_from_sindex_bins(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* bins, uint32_t n_bins);
 void write_dim_single_bin_unwind(struct as_bin_s* old_bin, uint32_t n_old_bins, struct as_bin_s* new_bin, uint32_t n_new_bins, struct as_bin_s* cleanup_bins, uint32_t n_cleanup_bins);
 void write_dim_unwind(struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins, struct as_bin_s* cleanup_bins, uint32_t n_cleanup_bins);
 
 
-// TODO - rename as as_record_... and move to record.c?
 static inline bool
-record_has_sindex(const as_record* r, as_namespace* ns)
+set_has_sindex(const as_record* r, as_namespace* ns)
 {
-	if (! as_sindex_ns_has_sindex(ns)) {
+	if (ns->sindex_cnt == 0) {
 		return false;
 	}
 
 	as_set* set = as_namespace_get_record_set(ns, r);
 
-	return set ? set->n_sindexes != 0 : ns->n_setless_sindexes != 0;
+	return set != NULL ? set->n_sindexes != 0 : ns->n_setless_sindexes != 0;
 }
 
 

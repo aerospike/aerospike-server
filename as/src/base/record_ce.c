@@ -99,13 +99,6 @@ as_record_get_live(as_index_tree* tree, const cf_digest* keyd,
 	return as_index_get_vlock(tree, keyd, r_ref);
 }
 
-int
-as_record_exists_live(as_index_tree* tree, const cf_digest* keyd,
-		as_namespace* ns)
-{
-	return as_record_exists(tree, keyd);
-}
-
 void
 as_record_drop_stats(as_record* r, as_namespace* ns)
 {

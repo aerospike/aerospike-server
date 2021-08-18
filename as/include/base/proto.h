@@ -144,7 +144,7 @@ struct as_storage_rd_s;
 #define AS_ERR_SINDEX_OOM               202
 #define AS_ERR_SINDEX_NOT_READABLE      203
 #define AS_ERR_SINDEX_GENERIC           204
-#define AS_ERR_SINDEX_NAME              205
+#define AS_ERR_SINDEX_NAME              205 // never used
 #define AS_ERR_SINDEX_MAX_COUNT         206
 
 // Query.
@@ -663,14 +663,14 @@ typedef enum {
 //
 
 typedef int (*as_netio_finish_cb) (void* udata, int retcode);
-typedef int (*as_netio_start_cb) (void* udata, int seq);
+typedef int (*as_netio_start_cb) (void* udata, uint32_t seq);
 
 typedef struct as_netio_s {
 	as_netio_finish_cb finish_cb;
 	as_netio_start_cb start_cb;
 	void* data;
 	struct as_file_handle_s* fd_h;
-	cf_buf_builder* bb_r;
+	cf_buf_builder* bb;
 	uint32_t offset;
 	uint32_t seq;
 	bool slow;
@@ -731,7 +731,7 @@ size_t as_msg_send_fin_timeout(cf_socket* sock, uint32_t result_code,
 		int32_t timeout);
 
 void as_netio_init();
-int as_netio_send(as_netio* io, bool slow, bool blocking);
+int as_netio_send(as_netio* io);
 
 static inline bool
 as_proto_is_valid_type(const as_proto* proto)

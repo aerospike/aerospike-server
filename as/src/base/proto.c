@@ -45,7 +45,6 @@
 #include "socket.h"
 #include "vector.h"
 
-#include "base/as_stap.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/thr_tsvc.h"
@@ -78,7 +77,7 @@ static cf_queue g_netio_slow_queue;
 
 static int send_reply_buf(as_file_handle *fd_h, const uint8_t *msgp, size_t msg_sz);
 static void *run_netio(void *q_to_wait_on);
-static int netio_send_packet(as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset, bool blocking, bool compress, as_proto_comp_stat *comp_stat);
+static int netio_send_packet(as_netio *io, as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset, bool compress, as_proto_comp_stat *comp_stat);
 
 
 //==========================================================
@@ -780,13 +779,14 @@ as_netio_init()
 // ref for fd_h. The background thread is responsible for freeing up bb_r and
 // releasing ref to fd_h.
 int
-as_netio_send(as_netio *io, bool slow, bool blocking)
+as_netio_send(as_netio *io)
 {
 	int ret = io->start_cb(io, io->seq);
 
 	if (ret == AS_NETIO_OK) {
-		ret = io->finish_cb(io, netio_send_packet(io->fd_h, &io->bb_r,
-				&io->offset, blocking, io->compress_response, io->comp_stat));
+		// TODO: Pass only the io structure.
+		ret = io->finish_cb(io, netio_send_packet(io, io->fd_h, &io->bb,
+				&io->offset, io->compress_response, io->comp_stat));
 	} 
 	else {
 		ret = io->finish_cb(io, ret);
@@ -795,8 +795,7 @@ as_netio_send(as_netio *io, bool slow, bool blocking)
 	// If needs requeue then requeue it.
 	switch (ret) {
 	case AS_NETIO_CONTINUE:
-		io->slow = slow;
-		cf_queue_push(slow ? &g_netio_slow_queue : &g_netio_queue, io);
+		cf_queue_push(io->slow ? &g_netio_slow_queue : &g_netio_queue, io);
 		break;
 	default:
 		ret = AS_NETIO_OK;
@@ -846,22 +845,17 @@ run_netio(void *q_to_wait_on)
 			usleep(g_config.proto_slow_netio_sleep_ms * 1000);
 		}
 
-		as_netio_send(&io, true, false);
+		as_netio_send(&io);
 	}
 
 	return NULL;
 }
 
 static int
-netio_send_packet(as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset,
-		bool blocking, bool compress, as_proto_comp_stat *comp_stat)
+netio_send_packet(as_netio *io, as_file_handle *fd_h, cf_buf_builder **bb_r,
+		uint32_t *offset, bool compress, as_proto_comp_stat *comp_stat)
 {
-#if defined(USE_SYSTEMTAP)
-	uint64_t nodeid = g_config.self_node;
-#endif
-
 	cf_buf_builder *bb = *bb_r;
-
 	uint32_t pos = *offset;
 
 	if (pos == 0) {
@@ -892,8 +886,6 @@ netio_send_packet(as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset,
 	uint32_t len = bb->used_sz;
 	uint8_t *buf = bb->buf;
 
-	ASD_QUERY_SENDPACKET_STARTING(nodeid, pos, len);
-
 	int retry = 0;
 
 	cf_detail(AS_PROTO," start at %p %d %d", buf, pos, len);
@@ -915,10 +907,10 @@ netio_send_packet(as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset,
 				return AS_NETIO_IO_ERR;
 			}
 
-			if (! blocking && (retry > NETIO_MAX_IO_RETRY)) {
+			if (retry > NETIO_MAX_IO_RETRY) {
 				*offset = pos;
 				cf_detail(AS_PROTO," end at %p %d %d", buf, pos, len);
-				ASD_QUERY_SENDPACKET_CONTINUE(nodeid, pos);
+				io->slow = true;
 				return AS_NETIO_CONTINUE;
 			}
 
@@ -931,6 +923,5 @@ netio_send_packet(as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset,
 		}
 	}
 
-	ASD_QUERY_SENDPACKET_FINISHED(nodeid);
 	return AS_NETIO_OK;
 }

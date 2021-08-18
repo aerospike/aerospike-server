@@ -1,7 +1,7 @@
 /*
  * delete.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -517,11 +517,11 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 			return TRANS_DONE_ERROR;
 		}
 
-		if (ns->storage_data_in_memory) {
-			delete_adjust_sindex(&rd);
-		}
-
 		as_storage_record_close(&rd);
+
+		if (ns->storage_data_in_memory) {
+			remove_from_sindex(ns, r_ref);
+		}
 	}
 
 	as_set_index_delete(ns, tree, as_index_get_set_id(r), r_ref->r_h);

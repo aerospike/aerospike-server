@@ -1,7 +1,7 @@
 /*
- * roster.h
+ * gc.h
  *
- * Copyright (C) 2017-2020 Aerospike, Inc.
+ * Copyright (C) 2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,27 +26,44 @@
 // Includes.
 //
 
-#include <stdbool.h>
+#include "citrusleaf/cf_queue.h"
 
-#include "node.h"
+#include "arenax.h"
 
-#include "fabric/partition_balance.h"
+
+//==========================================================
+// Forward declarations.
+//
+
+struct as_index_ref_s;
+struct as_index_tree_s;
+struct as_namespace_s;
+
+
+//==========================================================
+// Typedefs & constants.
+//
+
+typedef struct rlist_ele_s {
+	cf_arenax_handle r_h: 40;
+} __attribute__ ((__packed__)) rlist_ele;
 
 
 //==========================================================
 // Public API.
 //
 
-void as_roster_init(void);
-bool as_roster_set_nodes_cmd(const char* ns_name, const char* nodes);
+void as_sindex_gc_ns_init(struct as_namespace_s* ns);
+void* as_sindex_run_gc(void* udata);
+
+void as_sindex_gc_record(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
+void as_sindex_gc_tree(struct as_namespace_s* ns, struct as_index_tree_s* tree);
 
 
 //==========================================================
-// Inlines & macros.
+// Private API - for enterprise separation only.
 //
 
-// Format is: <node-id-hex-str>:<rack-id-decimal-str>,
-#define ROSTER_STRING_ELE_LEN ((sizeof(cf_node) * 2) + 1 + MAX_RACK_ID_LEN + 1)
-
-// In string lists, separate node-id and rack-id with this character.
-#define ROSTER_ID_PAIR_SEPARATOR '@'
+void create_rlist(struct as_namespace_s* ns);
+void push_to_rlist(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
+void purge_rlist(struct as_namespace_s* ns, cf_queue* rlist);

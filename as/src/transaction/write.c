@@ -1,7 +1,7 @@
 /*
  * write.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -35,6 +35,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "arenax.h"
 #include "cf_mutex.h"
 #include "dynbuf.h"
 #include "log.h"
@@ -539,7 +540,7 @@ write_timeout_cb(rw_request* rw)
 transaction_status
 write_master(rw_request* rw, as_transaction* tr)
 {
-	CF_ALLOC_SET_NS_ARENA(tr->rsv.ns);
+	CF_ALLOC_SET_NS_ARENA_DIM(tr->rsv.ns);
 
 	//------------------------------------------------------
 	// Perform checks that don't need to loop over ops, or
@@ -628,12 +629,6 @@ write_master(rw_request* rw, as_transaction* tr)
 		// If it's an expired or truncated record, pretend it's a fresh create.
 		if (! record_created && is_doomed) {
 			as_set_index_delete_live(ns, tree, r, r_ref.r_h);
-
-			if (record_has_sindex(r, ns)) {
-				// Pessimistic, but not (yet) worth the full check.
-				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
-			}
-
 			as_record_rescue(&r_ref, ns);
 			record_created = true;
 		}
@@ -1377,10 +1372,12 @@ write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	// Success - adjust sindex, looking at old and new bins.
 	//
 
-	if (record_has_sindex(r, ns) &&
-			write_sindex_update(ns, rd->set_name, &tr->keyd, old_bins,
-					n_old_bins, rd->bins, rd->n_bins)) {
-		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+	if (set_has_sindex(r, ns)) {
+		update_sindex(ns, r_ref, old_bins, n_old_bins, rd->bins, rd->n_bins);
+	}
+	else {
+		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+		as_index_clear_in_sindex(r);
 	}
 
 	//------------------------------------------------------
@@ -1520,14 +1517,11 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 	as_record* r = rd->r;
-	bool has_sindex = record_has_sindex(r, ns);
+	bool set_has_si = set_has_sindex(r, ns);
+	bool si_needs_bins = set_has_si && r->in_sindex == 1;
 
 	// For sindex, we must read existing record even if replacing.
-	if (! must_fetch_data) {
-		must_fetch_data = has_sindex;
-	}
-
-	rd->ignore_record_on_device = ! must_fetch_data;
+	rd->ignore_record_on_device = ! must_fetch_data && ! si_needs_bins;
 
 	as_bin stack_bins[RECORD_MAX_BINS + m->n_ops];
 
@@ -1546,7 +1540,7 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	// bins array - to old bins array, for sindex purposes.
 	//
 
-	if (has_sindex && n_old_bins != 0) {
+	if (si_needs_bins && n_old_bins != 0) {
 		memcpy(old_bins, rd->bins, n_old_bins * sizeof(as_bin));
 
 		// If it's a replace, clear the new bins array.
@@ -1628,10 +1622,12 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	// Success - adjust sindex, looking at old and new bins.
 	//
 
-	if (has_sindex &&
-			write_sindex_update(ns, rd->set_name, &tr->keyd, old_bins,
-					n_old_bins, rd->bins, rd->n_bins)) {
-		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+	if (set_has_si) {
+		update_sindex(ns, r_ref, old_bins, n_old_bins, rd->bins, rd->n_bins);
+	}
+	else {
+		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+		as_index_clear_in_sindex(r);
 	}
 
 	//------------------------------------------------------

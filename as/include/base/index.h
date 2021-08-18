@@ -1,7 +1,7 @@
 /*
  * index.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -64,14 +64,15 @@ typedef struct as_index_s {
 
 	// offset: 34
 	uint16_t set_id_bits: 10;
-	uint16_t : 3;
+	uint16_t : 2;
+	uint16_t in_sindex: 1;
 	uint16_t xdr_bin_cemetery: 1;
 	uint16_t has_bin_meta: 1; // for data-in-memory only
-	uint16_t xdr_write : 1;
+	uint16_t xdr_write: 1;
 
 	// offset: 36
-	uint32_t xdr_tombstone : 1;
-	uint32_t xdr_nsup_tombstone : 1;
+	uint32_t xdr_tombstone: 1;
+	uint32_t xdr_nsup_tombstone: 1;
 	uint32_t void_time: 30;
 
 	// offset: 40
@@ -156,6 +157,24 @@ static inline bool
 as_index_is_valid_record(as_index* index)
 {
 	return index->generation != 0;
+}
+
+static inline void
+as_index_set_in_sindex(as_index* index)
+{
+	if (index->in_sindex == 0) {
+		as_index_reserve(index);
+		index->in_sindex = 1;
+	}
+}
+
+static inline void
+as_index_clear_in_sindex(as_index* index)
+{
+	if (index->in_sindex == 1) {
+		as_index_release(index);
+		index->in_sindex = 0;
+	}
 }
 
 
@@ -337,12 +356,13 @@ tree_puddles_count(as_index_tree_shared* shared)
 
 void as_index_tree_gc_init();
 uint32_t as_index_tree_gc_queue_size();
+void as_index_tree_gc(as_index_tree* tree);
 
 as_index_tree* as_index_tree_create(as_index_tree_shared* shared, uint8_t id, as_index_tree_done_fn cb, void* udata);
 as_index_tree* as_index_tree_resume(as_index_tree_shared* shared, as_treex* xmem_trees, uint32_t pid, as_index_tree_done_fn cb, void* udata);
 void as_index_tree_block(as_index_tree* tree);
 void as_index_tree_reserve(as_index_tree* tree);
-void as_index_tree_release(as_index_tree* tree);
+void as_index_tree_release(as_namespace* ns, as_index_tree* tree);
 uint64_t as_index_tree_size(as_index_tree* tree);
 
 typedef bool (*as_index_reduce_fn) (as_index_ref* value, void* udata);
@@ -353,11 +373,25 @@ bool as_index_reduce_from(as_index_tree* tree, const cf_digest* keyd, as_index_r
 bool as_index_reduce_live(as_index_tree* tree, as_index_reduce_fn cb, void* udata);
 bool as_index_reduce_from_live(as_index_tree* tree, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
 
-int as_index_try_exists(as_index_tree* tree, const cf_digest* keyd);
-int as_index_try_get_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
 int as_index_get_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
 int as_index_get_insert_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
+void as_index_vlock(as_index_tree* tree, as_index_ref* index_ref);
 void as_index_delete(as_index_tree* tree, const cf_digest* keyd);
+
+// Used by queries when reserving arena refs.
+static inline cf_mutex*
+as_index_rlock_from_keyd(as_index_tree* tree, const cf_digest* keyd)
+{
+	// Note - assumes 256 locks per partition!
+
+	// Get the 8 most significant non-pid bits in the digest. Note - this is
+	// hardwired around the way we currently extract the 12-bit partition-ID
+	// from the digest.
+	uint32_t lock_i = ((uint32_t)keyd->digest[1] & 0xF0) |
+			((uint32_t)keyd->digest[2] >> 4);
+
+	return &((tree_locks(tree) + lock_i))->reduce_lock;
+}
 
 // Used by as_index and set_index.
 

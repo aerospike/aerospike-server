@@ -41,12 +41,13 @@ using namespace std;
 class PointRegionHandler: public GeoJSON::GeometryHandler
 {
 public:
-	PointRegionHandler(as_namespace * ns)
-		: m_cellid(0)
+	PointRegionHandler(const as_namespace * ns)
+		: m_earth_radius_meters(ns ?
+			double(ns->geo2dsphere_within_earth_radius_meters) :
+			6371000)
+		, m_cellid(0)
 		, m_regionp(NULL)
 	{
-		m_earth_radius_meters =
-			ns ? double(ns->geo2dsphere_within_earth_radius_meters) : 6371000;
 	}
 
 	virtual void handle_point(S2CellId const & cellid) {
@@ -68,7 +69,7 @@ public:
 };
 
 bool
-geo_parse(as_namespace * ns,
+geo_parse(const as_namespace * ns,
 		  const char * buf,
 		  size_t bufsz,
 		  uint64_t * cellidp,
@@ -90,13 +91,13 @@ geo_parse(as_namespace * ns,
 }
 
 bool
-geo_region_cover(as_namespace * ns,
+geo_region_cover(const as_namespace * ns,
 				 geo_region_t region,
-				 int maxnumcells,
+				 uint32_t maxnumcells,
 				 uint64_t * cellctrp,
 				 uint64_t * cellminp,
 				 uint64_t * cellmaxp,
-				 int * numcellsp)
+				 uint32_t * numcellsp)
 {
 	try
 	{
@@ -129,10 +130,10 @@ geo_region_cover(as_namespace * ns,
 
 		for (size_t ii = 0; ii < covering.size(); ++ii)
 		{
-			if (ii == (size_t) maxnumcells)
+			if (ii == maxnumcells)
 			{
 				cf_warning(AS_GEO, (char *) "region covered with %zu cells, "
-						   "only %d allowed", covering.size(), maxnumcells);
+						   "only %u allowed", covering.size(), maxnumcells);
 				return false;
 			}
 
@@ -168,11 +169,10 @@ geo_region_cover(as_namespace * ns,
 }
 
 bool
-geo_point_centers(as_namespace * ns,
-				  uint64_t cellidval,
-				  int maxnumcenters,
+geo_point_centers(uint64_t cellidval,
+				  uint32_t maxnumcenters,
 				  uint64_t * center,
-				  int * numcentersp)
+				  uint32_t * numcentersp)
 {
 	try
 	{

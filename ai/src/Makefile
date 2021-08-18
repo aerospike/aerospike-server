@@ -4,9 +4,9 @@
 DEPTH = ../..
 include $(DEPTH)/make_in/Makefile.in
 
-HEADERS = ai_btree.h ai_types.h ai_obj.h bt.h bt_iterator.h bt_output.h btree.h btreepriv.h stream.h
+HEADERS = ai_btree.h ai_types.h ai_obj.h bt.h bt_iterator.h btree.h btreepriv.h stream.h
 
-SOURCES = ai_btree.c ai_obj.c bt.c bt_code.c bt_iterator.c bt_output.c stream.c
+SOURCES = ai_btree.c ai_obj.c bt.c bt_code.c bt_iterator.c stream.c
 
 INCLUDES += $(INCLUDE_DIR:%=-I%)
 INCLUDES += -I$(CF)/include -I$(AS)/include

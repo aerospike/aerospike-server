@@ -85,15 +85,6 @@ typedef struct as_stats_s {
 	// Batch-index proto compression stats.
 	as_proto_comp_stat batch_comp_stat; // relevant only for enterprise edition
 
-	// Query & secondary index stats.
-	cf_atomic64		query_false_positives;
-	cf_atomic64		sindex_gc_retries; // number of times sindex gc skips iteration on failure to get record lock
-	uint64_t		sindex_gc_list_creation_time; // cumulative sum of list creation phase in sindex gc
-	uint64_t		sindex_gc_list_deletion_time; // cumulative sum of list deletion phase in sindex gc
-	uint64_t		sindex_gc_objects_validated; // cumulative sum of sindex objects validated
-	uint64_t		sindex_gc_garbage_found; // amount of garbage found during list creation phase
-	uint64_t		sindex_gc_garbage_cleaned; // amount of garbage deleted during list deletion phase
-
 	// Fabric stats.
 	uint64_t		fabric_bulk_s_rate;
 	uint64_t		fabric_bulk_r_rate;

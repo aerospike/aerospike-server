@@ -23,7 +23,6 @@
  * This file implements Aerospike Index B-tree iterators.
  */
 
-#include <assert.h>
 #include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +33,9 @@
 #include "ai_obj.h"
 #include "bt_iterator.h"
 #include "stream.h"
+
+#include "log.h"
+
 #include <citrusleaf/alloc.h>
 
 // HELPER_DEFINES HELPER_DEFINES HELPER_DEFINES HELPER_DEFINES HELPER_DEFINES
@@ -47,7 +49,8 @@
   btSIter *siter = createIterator(btr, asc ? l : lrev, asc ? n : nrev);
 
 bt_ll_n *get_new_iter_child(btIterator *iter) { //printf("get_newiterchild\n");
-	assert(iter->num_nodes < MAX_BTREE_DEPTH);
+	cf_assert(iter->num_nodes < MAX_BTREE_DEPTH, AS_SINDEX, "invalid iter->num_nodes %u",
+			iter->num_nodes);
 	bt_ll_n *nn = &(iter->nodes[iter->num_nodes]);
 	bzero(nn, sizeof(bt_ll_n));
 	iter->num_nodes++;
@@ -271,8 +274,12 @@ static bool streamToBTEntry(uchar *stream, btSIter *siter, bt_n *x, int i) {
 	if (i < 0) i = 0;
 	convertStream2Key(stream, siter->be.key, siter->x.btr);
 	siter->be.val    = parseStream(stream, siter->x.btr);
-	bool  gost       = IS_GHOST(siter->x.btr, siter->be.val);
-	if (gost) {
+
+	// TODO: check ghost is always false? can remove IS_GHOST?
+	bool  ghost       = IS_GHOST(siter->x.btr, siter->be.val);
+	cf_assert(ghost == false, AS_SINDEX, "ghost is false");
+
+	if (ghost) {
 		siter->missed = 1;    // GHOST key
 		siter->nim = 0;
 	}
@@ -287,11 +294,9 @@ btSIter *btGetRangeIter(bt *btr, ai_obj *alow, ai_obj *ahigh, bool asc) {
 	if (!btr->root || !btr->numkeys)           return NULL;
 	btk_t btk;
 	bool med;
-	uint32 ksize;           //bt_dumptree(btr, btr->ktype);
 	CR8ITER8R(btr, asc, iter_leaf, iter_leaf_rev, iter_node, iter_node_rev);
 	setHigh(siter, asc ? ahigh : alow, btr->s.ktype);
-	char    *bkey  = createBTKey(asc ? alow : ahigh,
-								 &med, &ksize, btr, &btk); //D032
+	char    *bkey  = createBTKey(asc ? alow : ahigh, &med, btr, &btk); //D032
 	if (!bkey)                                 goto rangeiter_err;
 	bt_n *x  = NULL;
 	int i = -1;
@@ -310,11 +315,9 @@ btSIter *btSetRangeIter(btSIter * iter, bt *btr, ai_obj *alow, ai_obj *ahigh, bo
 	if (!btr->root || !btr->numkeys)           return NULL;
 	btk_t btk;
 	bool med;
-	uint32 ksize;           //bt_dumptree(btr, btr->ktype);
 	SETITER8R(iter, btr, asc, iter_leaf, iter_leaf_rev, iter_node, iter_node_rev);
 	setHigh(siter, asc ? ahigh : alow, btr->s.ktype);
-	char    *bkey  = createBTKey(asc ? alow : ahigh,
-								 &med, &ksize, btr, &btk); //D032
+	char    *bkey  = createBTKey(asc ? alow : ahigh, &med, btr, &btk); //D032
 	if (!bkey)                                 goto rangeiter_err;
 	bt_n *x  = NULL;
 	int i = -1;
@@ -381,34 +384,6 @@ bool assignMaxKey(bt *btr, ai_obj *akey) {
 	convertStream2Key(e, akey, btr);
 	return 1;
 }
-btSIter *btGetFullRangeIter(bt *btr, bool asc, cswc_t *w) {
-	cswc_t W; // used in setHigh()
-	if (!btr->root || !btr->numkeys)                      return NULL;
-	if (!w) w = &W;
-	ai_obj *aL = &w->wf.alow, *aH = &w->wf.ahigh;
-	if (!assignMinKey(btr, aL) || !assignMaxKey(btr, aH)) return NULL;
-	btk_t btk;
-	bool med;
-	uint32 ksize;
-	CR8ITER8R(btr, asc, iter_leaf, iter_leaf_rev, iter_node, iter_node_rev);
-	siter->scan = 1;
-	setHigh(siter, asc ? aH : aL, btr->s.ktype);
-	char *bkey  = createBTKey(asc ? aL : aH,
-							  &med, &ksize, btr, &btk); //DEST 030
-	if (!bkey)                                            goto frangeiter_err;
-	bt_n *x  = NULL;
-	int i = -1;
-	uchar *stream = setIter(btr, bkey, siter, asc ? aL : aH, &x, &i, asc);
-	destroyBTKey(bkey, med);                             /* DESTROYED 030 */
-	if (!stream && siter->missed)                         return siter;//IILMISS
-	if (!streamToBTEntry(stream, siter, x, i))            goto frangeiter_err;
-	if (btr->dirty_left) siter->missed = 1; // FULL means 100% FULL
-	return siter;
-
-frangeiter_err:
-	btReleaseRangeIterator(siter);
-	return NULL;
-}
 
 btSIter *btSetFullRangeIter(btSIter *iter, bt *btr, bool asc, cswc_t *w) {
 	cswc_t W; // used in setHigh()
@@ -418,12 +393,10 @@ btSIter *btSetFullRangeIter(btSIter *iter, bt *btr, bool asc, cswc_t *w) {
 	if (!assignMinKey(btr, aL) || !assignMaxKey(btr, aH)) return NULL;
 	btk_t btk;
 	bool med;
-	uint32 ksize;
 	SETITER8R(iter, btr, asc, iter_leaf, iter_leaf_rev, iter_node, iter_node_rev);
 	siter->scan = 1;
 	setHigh(siter, asc ? aH : aL, btr->s.ktype);
-	char *bkey  = createBTKey(asc ? aL : aH,
-							  &med, &ksize, btr, &btk); //DEST 030
+	char *bkey  = createBTKey(asc ? aL : aH, &med, btr, &btk); //DEST 030
 	if (!bkey)                                            goto frangeiter_err;
 	bt_n *x  = NULL;
 	int i = -1;
@@ -448,80 +421,3 @@ typedef struct four_longs {
 
 #define INIT_ITER_BEENTRY(siter, btr, x, i)  \
   { uchar *iistream = KEYS(btr, x, i); streamToBTEntry(iistream, siter, x, i); }
-static bool btScionFind(btSIter *siter, bt_n *x, ulong ofst, bt *btr, bool asc,
-						cswc_t  *w,     long  lim) {
-	int    i   = asc ? 0        : x->n;
-	int    fin = asc ? x->n + 1 : -1;
-	while (i != fin) {
-		if (x->leaf) break;
-		uint32_t scion = NODES(btr, x)[i]->scion;
-		if (scion >= ofst) {
-			bool i_end_n     = (i == siter->x.bln->self->n);
-			siter->x.bln->in = i;
-			siter->x.bln->ik = (i_end_n) ? i - 1 : i;
-			if (scion == ofst) {
-				if (!asc) {
-					siter->x.bln->in = siter->x.bln->ik = i - 1;
-				}
-				return 1;
-			}
-			siter->x.bln->child = get_new_iter_child(&siter->x);
-			to_child(&siter->x, NODES(btr, x)[i]);
-			bt_n *kid = NODES(btr, x)[i];
-			if (!kid->leaf) {
-				btScionFind(siter, kid, ofst, btr, asc, w, lim);
-				return 1;
-			} else x = kid;
-			break;
-		} else ofst -= (scion + 1); // +1 for NODE itself
-		i = asc ? i + 1 : i - 1;    // loop increment
-	}
-	// Now Find the rest of the OFFSET (respecting DRs)
-	uint32  n    = siter->x.bln->self->n;
-	i            = asc ? 0            : n - 1;
-	fin          = asc ? MIN(ofst, n) : MAX(-1, (n - ofst));
-	int last     = asc ? n - 1        : 0;
-	ulong   cnt  = 0;
-	//TODO findminnode() is too inefficient -> needs to be a part of btr
-	bt_n   *minx = findminnode(btr, btr->root);
-	int     btdl = btr->dirty_left;
-	int     dr   = 0;
-	while (i != fin) {
-		dr   = getDR(btr, x, i);
-		cnt += dr;
-		if (!i && x == minx) cnt += btdl;
-		if (cnt >= ofst) break;
-		cnt++;
-		i = asc ? i + 1 : i - 1; // loop increment
-	}
-	if      (i == fin && i == last) {
-		if (cnt >= x->scion) return 0;
-	}
-	else if (cnt < ofst)                                   return 0; //OFST 2big
-	siter->x.bln->ik = i;
-	INIT_ITER_BEENTRY(siter, btr, x, siter->x.bln->ik);
-	if (asc)  {
-		if ((ofst + dr) != cnt) siter->missed = 1;
-	}
-	else      {
-		if (!i && x == minx) {
-			if (ofst != (cnt - btdl)) siter->missed = 1;
-		}
-		else                 {
-			if (ofst != cnt)          siter->missed = 1;
-		}
-	}
-	return 1;
-}
-btSIter *btGetFullXthIter(bt *btr, ulong oofst, bool asc, cswc_t *w, long lim) {
-	ulong ofst = oofst;
-	cswc_t W; // used in setHigh()
-	if (!btr->root || !btr->numkeys)                      return NULL;
-	if (!w) w = &W;
-	ai_obj *aL = &w->wf.alow, *aH = &w->wf.ahigh;
-	if (!assignMinKey(btr, aL) || !assignMaxKey(btr, aH)) return NULL;
-	CR8ITER8R(btr, asc, iter_leaf, iter_leaf_rev, iter_node, iter_node_rev);
-	setHigh(siter, asc ? aH : aL, btr->s.ktype);
-	if (btScionFind(siter, btr->root, ofst, btr, asc, w, lim)) siter->empty = 0;
-	return siter;
-}

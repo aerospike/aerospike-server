@@ -1,7 +1,7 @@
 /*
- * bt_output.h
+ * populate.h
  *
- * Copyright (C) 2013 Aerospike, Inc.
+ * Copyright (C) 2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -19,16 +19,20 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
-/*
- *  SYNOPSIS
- *    This file provides declarations for the B-Tree output functions.
- */
 
 #pragma once
 
-#include <stdio.h>
+//==========================================================
+// Forward declarations.
+//
 
-#include "bt.h"
+struct as_sindex_s;
 
-void bt_dump_info(FILE *fp, bt *btr);
-void bt_dumptree(FILE *fp, bt *btr, bool is_index, bool verbose);
+
+//==========================================================
+// Public API.
+//
+
+void as_sindex_populate_startup(void);
+void as_sindex_populate_add(struct as_sindex_s* si);
+void as_sindex_populate_destroy(struct as_sindex_s* si);

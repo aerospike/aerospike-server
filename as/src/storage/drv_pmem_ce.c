@@ -85,6 +85,12 @@ as_storage_activate_pmem(as_namespace* ns)
 	pmem_crash_ce();
 }
 
+bool
+as_storage_wait_for_defrag_pmem(as_namespace* ns)
+{
+	pmem_crash_ce();
+}
+
 void
 as_storage_start_tomb_raider_pmem(as_namespace* ns)
 {
@@ -141,12 +147,6 @@ as_storage_record_load_pickle_pmem(as_storage_rd* rd)
 
 int
 as_storage_record_write_pmem(as_storage_rd* rd)
-{
-	pmem_crash_ce();
-}
-
-void
-as_storage_wait_for_defrag_pmem(as_namespace* ns)
 {
 	pmem_crash_ce();
 }

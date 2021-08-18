@@ -43,9 +43,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
-#include "base/truncate.h"
 #include "fabric/partition.h"
-#include "fabric/roster.h"
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
 
@@ -154,7 +152,7 @@ as_namespace_create(char *name)
 	ns->storage_post_write_queue = DEFAULT_POST_WRITE_QUEUE; // number of wblocks per device used as post-write cache
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 
-	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_INDEX;
+	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_SINDEX;
 
 	ns->geo2dsphere_within_strict = true;
 	ns->geo2dsphere_within_min_level = 1;
@@ -188,14 +186,7 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 		}
 
 		as_namespace_finish_setup(ns, instance);
-
-		as_truncate_init(ns);
-		as_sindex_init(ns);
 	}
-
-	as_roster_init_smd();
-	as_truncate_init_smd();
-	as_sindex_init_smd(); // before as_storage_init() populates the indexes
 }
 
 

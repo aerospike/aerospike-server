@@ -120,13 +120,11 @@ typedef struct as_config_s {
 	int				proto_slow_netio_sleep_ms; // dynamic only
 	uint32_t		query_bsize;
 	uint64_t		query_buf_size; // dynamic only
-	uint32_t		query_bufpool_size;
 	bool			query_in_transaction_thr;
 	uint32_t		query_long_q_max_size;
 	bool			query_enable_histogram;
-	bool			partitions_pre_reserved; // query will reserve all partitions up front
 	uint32_t		query_priority;
-	uint64_t		query_sleep_us;
+	uint32_t		query_sleep_us;
 	uint64_t		query_rec_count_bound;
 	bool			query_req_in_query_thread;
 	uint32_t		query_req_max_inflight;
@@ -140,7 +138,6 @@ typedef struct as_config_s {
 	uint32_t		n_scan_threads_limit;
 	uint32_t		n_service_threads;
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
-	uint32_t		sindex_gc_max_rate; // Max sindex entries processed per second for gc
 	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc
 	bool			stay_quiesced; // enterprise-only
 	uint32_t		ticker_interval;

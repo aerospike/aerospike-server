@@ -1,7 +1,7 @@
 /*
- * roster_ce.c
+ * gc_ce.c
  *
- * Copyright (C) 2017-2020 Aerospike, Inc.
+ * Copyright (C) 2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,26 +24,50 @@
 // Includes.
 //
 
-#include "fabric/roster.h"
+#include "sindex/gc.h"
 
-#include <stdbool.h>
+#include "citrusleaf/cf_queue.h"
 
+#include "arenax.h"
 #include "log.h"
+
+#include "base/datamodel.h"
+#include "base/index.h"
 
 
 //==========================================================
-// Public API.
+// Private API - for enterprise separation only.
 //
 
 void
-as_roster_init(void)
+create_rlist(as_namespace* ns)
 {
-	// CE Code doesn't invoke roster SMD module.
+	ns->si_gc_rlist = cf_queue_create(sizeof(rlist_ele), false);
 }
 
-bool
-as_roster_set_nodes_cmd(const char* ns_name, const char* nodes)
+void
+push_to_rlist(as_namespace* ns, as_index_ref* r_ref)
 {
-	cf_warning(AS_ROSTER, "roster is an enterprise feature");
-	return false;
+	rlist_ele ele = { .r_h = r_ref->r_h };
+
+	cf_queue_push(ns->si_gc_rlist, &ele);
+}
+
+void
+purge_rlist(as_namespace* ns, cf_queue* rlist)
+{
+	rlist_ele ele;
+
+	while (cf_queue_pop(rlist, &ele, CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
+		as_index* r = (as_index*)cf_arenax_resolve(ns->arena, ele.r_h);
+
+		// FIXME(laurynas): only for development.
+		cf_assert(r->in_sindex == 1, AS_SINDEX, "bad in_sindex bit");
+		cf_assert(r->rc == 1, AS_SINDEX, "bad ref count %u", r->rc);
+
+		as_record_destroy(r, ns);
+		cf_arenax_free(ns->arena, ele.r_h, NULL);
+	}
+
+	cf_queue_destroy(rlist);
 }

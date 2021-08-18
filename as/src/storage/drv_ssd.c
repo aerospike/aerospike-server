@@ -1,7 +1,7 @@
 /*
  * drv_ssd.c
  *
- * Copyright (C) 2009-2020 Aerospike, Inc.
+ * Copyright (C) 2009-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -2518,9 +2518,9 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		}
 		else {
 			// Success - adjust sindex, looking at old and new bins.
-			if (record_has_sindex(r, ns)) {
-				write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
-						old_bins, n_old_bins, rd.bins, rd.n_bins);
+			if (set_has_sindex(r, ns)) {
+				update_sindex(ns, &r_ref, old_bins, n_old_bins, rd.bins,
+						rd.n_bins);
 			}
 
 			as_bin_destroy_all(old_bins, n_old_bins);
@@ -2699,7 +2699,7 @@ run_ssd_cold_start(void *udata)
 
 	cf_info(AS_DRV_SSD, "device %s: reading device to load index", ssd->name);
 
-	CF_ALLOC_SET_NS_ARENA(ns);
+	CF_ALLOC_SET_NS_ARENA_DIM(ns);
 
 	ssd_cold_start_sweep(ssds, ssd);
 
@@ -2764,6 +2764,8 @@ start_loading_records(drv_ssds *ssds, cf_queue *complete_q)
 // Sindex startup utilities.
 //
 
+#define PROGRESS_RESOLUTION 1000
+
 static void* run_si_startup(void* udata);
 static void si_startup_sweep(drv_ssds* ssds, drv_ssd* ssd);
 static void si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd,
@@ -2778,17 +2780,13 @@ run_si_startup(void* udata)
 	// Reuse counter - may expire more records while building sindex.
 	ssd->record_add_expired_counter = 0;
 
-	ssds->si_start_ms = cf_getms();
+	// Reuse counter - now for progress in sindex ticker.
+	ssd->record_add_unique_counter = 0;
 
 	si_startup_sweep(ssds, ssd);
 
 	cf_info(AS_DRV_SSD, "device %s: sindex sweep complete: expired %lu",
 			ssd->name, ssd->record_add_expired_counter);
-
-	if (as_aaf_uint32(&ssds->si_n_ssds_remaining, -1) == 0) {
-		as_sindex_ticker_done(ssd->ns, NULL, ssds->si_start_ms);
-		as_sindex_boot_populateall_done(ssd->ns);
-	}
 
 	return NULL;
 }
@@ -2944,9 +2942,10 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 		return;
 	}
 
-	// TODO - rethink - count things we don't look at bins for?
-	as_sindex_ticker(ns, NULL, as_aaf_uint64(&ssds->si_n_recs_read, 1),
-			ssds->si_start_ms);
+	if (++ssd->record_add_unique_counter == PROGRESS_RESOLUTION) {
+		as_add_uint64(&ns->si_n_recs_checked, PROGRESS_RESOLUTION);
+		ssd->record_add_unique_counter = 0;
+	}
 
 	// Skip records that have expired since resuming the index.
 	if (as_record_is_expired(r)) {
@@ -2958,7 +2957,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 		return;
 	}
 
-	if (! record_has_sindex(r, ns)) {
+	if (! set_has_sindex(r, ns)) {
 		as_record_done(&r_ref, ns);
 		return; // not in a sindex
 	}
@@ -2972,8 +2971,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 		cf_crash(AS_DRV_SSD, "unpack bins failed");
 	}
 
-	write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd, NULL, 0,
-			bins, n_bins);
+	update_sindex(ns, &r_ref, NULL, 0, bins, n_bins);
 
 	as_record_done(&r_ref, ns);
 }
@@ -3582,11 +3580,6 @@ as_storage_init_ssd(as_namespace *ns)
 
 	cf_mutex_init(&ssds->flush_lock);
 
-	// Allow defrag to go full speed during startup - restore the configured
-	// settings when startup is done.
-	ns->saved_defrag_sleep = ns->storage_defrag_sleep;
-	ns->storage_defrag_sleep = 0;
-
 	// The queue limit is more efficient to work with.
 	ns->storage_max_write_q = (uint32_t)
 			(ssds->n_ssds * ns->storage_max_write_cache /
@@ -3733,11 +3726,14 @@ as_storage_sindex_build_all_ssd(as_namespace* ns)
 {
 	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
 
-	ssds->si_n_ssds_remaining = ssds->n_ssds;
-	ssds->si_n_recs_read = 0;
+	cf_tid tids[ssds->n_ssds];
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
-		cf_thread_create_transient(run_si_startup, &ssds->ssds[i]);
+		tids[i] = cf_thread_create_joinable(run_si_startup, &ssds->ssds[i]);
+	}
+
+	for (int i = 0; i < ssds->n_ssds; i++) {
+		cf_thread_join(tids[i]);
 	}
 }
 
@@ -3751,7 +3747,40 @@ as_storage_activate_ssd(as_namespace *ns)
 
 	ssd_start_maintenance_threads(ssds);
 	ssd_start_write_threads(ssds);
+
+	if (ns->storage_defrag_startup_minimum != 0) {
+		// Allow defrag to go full speed during startup - restore configured
+		// setting when startup is done.
+		ns->saved_defrag_sleep = ns->storage_defrag_sleep;
+		ns->storage_defrag_sleep = 0;
+	}
+
 	ssd_start_defrag_threads(ssds);
+}
+
+
+bool
+as_storage_wait_for_defrag_ssd(as_namespace *ns)
+{
+	if (ns->storage_defrag_startup_minimum == 0) {
+		return false; // nothing to do - don't wait
+	}
+
+	int avail_pct;
+
+	as_storage_stats_ssd(ns, &avail_pct, NULL);
+
+	if (avail_pct >= (int)ns->storage_defrag_startup_minimum) {
+		// Restore configured defrag throttling values.
+		ns->storage_defrag_sleep = ns->saved_defrag_sleep;
+		return false; // done - don't wait
+	}
+	// else - not done - wait.
+
+	cf_info(AS_DRV_SSD, "{%s} wait-for-defrag: avail-pct %d wait-for %u ...",
+			ns->name, avail_pct, ns->storage_defrag_startup_minimum);
+
+	return true;
 }
 
 
@@ -3834,31 +3863,6 @@ as_storage_record_close_ssd(as_storage_rd *rd)
 //==========================================================
 // Storage API implementation: storage capacity monitoring.
 //
-
-void
-as_storage_wait_for_defrag_ssd(as_namespace *ns)
-{
-	if (ns->storage_defrag_startup_minimum > 0) {
-		while (true) {
-			int avail_pct;
-
-			as_storage_stats_ssd(ns, &avail_pct, NULL);
-
-			if (avail_pct >= ns->storage_defrag_startup_minimum) {
-				break;
-			}
-
-			cf_info(AS_DRV_SSD, "namespace %s waiting for defrag: %d pct available, waiting for %d ...",
-					ns->name, avail_pct, ns->storage_defrag_startup_minimum);
-
-			sleep(2);
-		}
-	}
-
-	// Restore configured defrag throttling values.
-	ns->storage_defrag_sleep = ns->saved_defrag_sleep;
-}
-
 
 bool
 as_storage_overloaded_ssd(const as_namespace *ns, uint32_t margin,

@@ -40,10 +40,9 @@ struct udf_record_s;
 
 typedef struct {
 	as_stream_status                    (* ostream_write) (void *, as_val *);
-	void                                (* set_error)     (void *, int);
 	struct as_partition_reservation_s * (* ptn_reserve)   (void *, struct as_namespace_s *, uint32_t, struct as_partition_reservation_s *);
 	void                                (* ptn_release)   (void *, struct as_partition_reservation_s *);
-	bool                                (* pre_check)     (void *, struct udf_record_s *, void *);
+	bool                                (* pre_check)     (void *, struct udf_record_s *);
 } as_aggr_hooks;
 
 typedef struct {

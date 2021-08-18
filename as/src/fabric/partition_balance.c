@@ -1,7 +1,7 @@
 /*
  * partition_balance.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -94,8 +94,8 @@ sl_ix_t g_full_sl_ix_table[AS_CLUSTER_SZ * AS_PARTITIONS];
 extern cf_node* as_exchange_succession_unsafe();
 
 // Helpers - generic.
-void create_trees(as_partition* p, as_namespace* ns);
-void drop_trees(as_partition* p);
+void create_trees(as_namespace* ns, as_partition* p);
+void drop_trees(as_namespace* ns, as_partition* p);
 
 // Helpers - balance partitions.
 void fill_global_tables();
@@ -583,7 +583,7 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 	if (! is_self_replica(p) && ! as_partition_version_is_null(&p->version)) {
 		// ...  and not quiesced - drop partition.
 		if (drop_superfluous_version(p, ns)) {
-			drop_trees(p);
+			drop_trees(ns, p);
 			as_storage_save_pmeta(ns, p);
 		}
 		// ... or quiesced more than one node - become subset of final version.
@@ -636,7 +636,7 @@ pb_task_init(pb_task* task, cf_node dest, as_namespace* ns,
 }
 
 void
-create_trees(as_partition* p, as_namespace* ns)
+create_trees(as_namespace* ns, as_partition* p)
 {
 	cf_assert(! p->tree, AS_PARTITION, "unexpected - tree already exists");
 
@@ -649,13 +649,13 @@ create_trees(as_partition* p, as_namespace* ns)
 }
 
 void
-drop_trees(as_partition* p)
+drop_trees(as_namespace* ns, as_partition* p)
 {
 	if (! p->tree) {
 		return; // CP signals can get here - 0e/0r versions are witnesses
 	}
 
-	as_index_tree_release(p->tree);
+	as_index_tree_release(ns, p->tree);
 	p->tree = NULL;
 
 	// TODO - consider p->n_tombstones?
@@ -1484,14 +1484,14 @@ handle_version_change(as_partition* p, struct as_namespace_s* ns,
 
 	if (! as_partition_version_has_data(orig_version) &&
 			as_partition_version_has_data(&p->version)) {
-		create_trees(p, ns);
+		create_trees(ns, p);
 	}
 
 	if (as_partition_version_has_data(orig_version) &&
 			! as_partition_version_has_data(&p->version)) {
 		// FIXME - temporary paranoia.
 		cf_assert(p->tree, AS_PARTITION, "unexpected - null tree");
-		drop_trees(p);
+		drop_trees(ns, p);
 	}
 
 	as_storage_cache_pmeta(ns, p);

@@ -1,7 +1,7 @@
 /*
  * ticker.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -50,6 +50,7 @@
 #include "base/set_index.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
+#include "base/thr_query.h"
 #include "base/thr_tsvc.h"
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
@@ -58,7 +59,6 @@
 #include "fabric/partition.h"
 #include "fabric/skew_monitor.h"
 #include "sindex/secondary_index.h"
-#include "sindex/thr_sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -800,28 +800,32 @@ log_line_scan(as_namespace* ns)
 void
 log_line_query(as_namespace* ns)
 {
-	uint64_t n_basic_success = ns->n_lookup_success;
-	uint64_t n_basic_failure = ns->n_lookup_errs + ns->n_lookup_abort;
-	uint64_t n_aggr_success = ns->n_agg_success;
-	uint64_t n_aggr_failure = ns->n_agg_errs + ns->n_agg_abort;
-	uint64_t n_udf_bg_success = ns->n_query_udf_bg_success;
-	uint64_t n_udf_bg_failure = ns->n_query_udf_bg_failure;
-	uint64_t n_ops_bg_success = ns->n_query_ops_bg_success;
-	uint64_t n_ops_bg_failure = ns->n_query_ops_bg_failure;
+	uint64_t n_basic_complete = ns->n_query_basic_complete;
+	uint64_t n_basic_error = ns->n_query_basic_error;
+	uint64_t n_basic_abort = ns->n_query_basic_abort;
+	uint64_t n_aggr_complete = ns->n_query_aggr_complete;
+	uint64_t n_aggr_error = ns->n_query_aggr_error;
+	uint64_t n_aggr_abort = ns->n_query_aggr_abort;
+	uint64_t n_udf_bg_complete = ns->n_query_udf_bg_complete;
+	uint64_t n_udf_bg_error = ns->n_query_udf_bg_error;
+	uint64_t n_udf_bg_abort = ns->n_query_udf_bg_abort;
+	uint64_t n_ops_bg_complete = ns->n_query_ops_bg_complete;
+	uint64_t n_ops_bg_error = ns->n_query_ops_bg_error;
+	uint64_t n_ops_bg_abort = ns->n_query_ops_bg_abort;
 
-	if ((n_basic_success | n_basic_failure |
-			n_aggr_success | n_aggr_failure |
-			n_udf_bg_success | n_udf_bg_failure |
-			n_ops_bg_success | n_ops_bg_failure) == 0) {
+	if ((n_basic_complete | n_basic_error | n_basic_abort |
+			n_aggr_complete | n_aggr_error | n_aggr_abort |
+			n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort |
+			n_ops_bg_complete | n_ops_bg_error | n_ops_bg_abort) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} query: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu) ops-bg (%lu,%lu)",
+	cf_info(AS_INFO, "{%s} query: basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
 			ns->name,
-			n_basic_success, n_basic_failure,
-			n_aggr_success, n_aggr_failure,
-			n_udf_bg_success, n_udf_bg_failure,
-			n_ops_bg_success, n_ops_bg_failure);
+			n_basic_complete, n_basic_error, n_basic_abort,
+			n_aggr_complete, n_aggr_error, n_aggr_abort,
+			n_udf_bg_complete, n_udf_bg_error, n_udf_bg_abort,
+			n_ops_bg_complete, n_ops_bg_error, n_ops_bg_abort);
 }
 
 void

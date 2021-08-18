@@ -1,7 +1,7 @@
 /*
  * as.c
  *
- * Copyright (C) 2008-2020 Aerospike, Inc.
+ * Copyright (C) 2008-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -64,16 +64,18 @@
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
+#include "base/thr_query.h"
 #include "base/ticker.h"
+#include "base/truncate.h"
 #include "base/xdr.h"
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
+#include "fabric/roster.h"
 #include "fabric/skew_monitor.h"
 #include "sindex/secondary_index.h"
-#include "sindex/thr_sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -336,18 +338,23 @@ as_run(int argc, char **argv)
 
 	as_json_init();				// Jansson JSON API used by System Metadata
 	as_index_tree_gc_init();	// thread to purge dropped index trees
-	as_sindex_thr_init();		// defrag secondary index (ok during population)
 	as_nsup_init();				// load previous evict-void-time(s)
 	as_xdr_init();				// load persisted last-ship-time(s)
+	as_roster_init();			// load roster-related SMD
 
 	// Initialize namespaces. Each namespace decides here whether it will do a
 	// warm or cold start. Index arenas, partition structures and index tree
-	// structures are initialized. Secondary index system metadata is restored.
+	// structures are initialized. Set and bin name vmaps are initialized.
 	as_namespaces_init(cold_start_cmd, instance);
 
+	// These load SMD involving sets/bins, needed during storage init/load.
+	as_sindex_init();
+	as_truncate_init();
+
 	// Initialize the storage system. For warm and cool restarts, this includes
-	// fully resuming persisted indexes - this may take a few minutes.
+	// fully resuming persisted indexes.
 	as_storage_init();
+	// ... This could block for minutes ....................
 
 	// Migrate memory to correct NUMA node (includes resumed index arenas).
 	cf_topo_migrate_memory();
@@ -355,15 +362,19 @@ as_run(int argc, char **argv)
 	// Drop capabilities that we kept only for initialization.
 	cf_process_drop_startup_caps();
 
-	// Activate the storage system. For cold starts and cool restarts, this
-	// includes full drive scans - this may take several hours.
+	// For cold starts and cool restarts, this does full drive scans. (Also
+	// populates data-in-memory namespaces' secondary indexes.)
 	as_storage_load();
+	// ... This could block for hours ......................
 
-	// Populate all secondary indexes. This may block for a long time.
-	as_sindex_boot_populateall();
+	// Populate data-not-in-memory namespaces' secondary indexes.
+	as_sindex_load();
+	// ... This could block for a while ....................
 
-	// The defrag subsystem starts operating here.
+	// The defrag subsystem starts operating here. Wait for enough available
+	// storage.
 	as_storage_activate();
+	// ... This could block for a while ....................
 
 	cf_info(AS_AS, "initializing services...");
 
@@ -387,13 +398,10 @@ as_run(int argc, char **argv)
 	as_mon_init();				// monitor
 	as_set_index_init();		// dynamic set-index population
 
-	// Wait for enough available storage. We've been defragging all along, but
-	// here we wait until it's enough. This may block for a long time.
-	as_storage_wait_for_defrag();
-
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
+	as_sindex_start();			// starts sindex GC threads
 	as_smd_start();				// enables receiving cluster state change events
 	as_health_start();			// starts before fabric and hb to capture them
 	as_fabric_start();			// may send & receive fabric messages

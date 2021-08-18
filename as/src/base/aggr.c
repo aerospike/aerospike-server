@@ -85,55 +85,45 @@ ptn_release(aggr_state *astate)
 	}
 }
 
-#if 0
-// In case we ever need this hook...
-static void
-set_error(aggr_state *astate, int err)
-{
-	as_aggr_call  *call = astate->call;
-	if (call && call->aggr_hooks && call->aggr_hooks->set_error) {
-		call->aggr_hooks->set_error(astate->udata, err);
-	}
-}
-#endif // 0
-
 static bool
-pre_check(aggr_state *astate, void *skey)
+pre_check(aggr_state *astate)
 {
 	as_aggr_call  *call = astate->call;
 	if (call && call->aggr_hooks && call->aggr_hooks->pre_check) {
-		return call->aggr_hooks->pre_check(astate->udata, as_rec_source(astate->urec), skey);
+		return call->aggr_hooks->pre_check(astate->udata, as_rec_source(astate->urec));
 	}
 	return true; // if not defined pre_check succeeds
 }
 
-static int
+static bool
 aopen(aggr_state *astate, const cf_digest *digest)
 {
-	udf_record   * urecord  = as_rec_source(astate->urec);
-	as_transaction * tr     = urecord->tr;
+	udf_record *urecord = as_rec_source(astate->urec);
+	as_transaction *tr = urecord->tr;
+	int pid = as_partition_getid(digest);
 
-	int pid                = as_partition_getid(digest);
+	astate->rsv = ptn_reserve(astate, pid, &tr->rsv);
 
-	astate->rsv        = ptn_reserve(astate, pid, &tr->rsv);
-	if (!astate->rsv) {
-		cf_debug(AS_AGGR, "Reservation not done for partition %d", pid);
-		return -1;
+	if (astate->rsv == NULL) {
+		cf_debug(AS_AGGR, "reservation not done for partition %d", pid);
+		return false;
 	}
 
-	// NB: Partial Initialization due to heaviness. Not everything needed
-	// TODO: Make such initialization Commodity
-	tr->rsv.ns          = astate->rsv->ns;
-	tr->rsv.p           = astate->rsv->p;
-	tr->rsv.tree        = astate->rsv->tree;
-	tr->keyd            = *digest;
+	// NB: Partial Initialization due to heaviness. Not everything needed.
+	// tr->rsv is not set in case of pre-reservation or scans.
+	tr->rsv.ns = astate->rsv->ns;
+	tr->rsv.p = astate->rsv->p;
+	tr->rsv.tree = astate->rsv->tree;
+	tr->keyd = *digest;
 
 	if (udf_record_open(urecord) == 0) {
-		astate->rec_open   = true;
-		return 0;
+		astate->rec_open = true;
+		return true;
 	}
+
 	ptn_release(astate);
-	return -1;
+
+	return false;
 }
 
 void
@@ -171,28 +161,33 @@ acleanup(aggr_state *astate)
  * Aggregation Input Stream
  */
 // **************************************************************************************************
-cf_digest *
+static cf_digest *
 get_next(aggr_state *astate)
 {
 	astate->keys_arr_offset++;
-	if (!astate->keys_arr || (astate->keys_arr_offset == astate->keys_arr->num)) {
 
-		cf_ll_element * ele = cf_ll_getNext(astate->iter);
+	if (astate->keys_arr == NULL ||
+			astate->keys_arr_offset == astate->keys_arr->num) {
 
-		// if NULL or number of element 0. No holes expected
-		if (!ele) {
+		cf_ll_element *ele = cf_ll_getNext(astate->iter);
+
+		if (ele == NULL) {
 			return NULL;
 		}
 
-		astate->keys_arr    = ((as_index_keys_ll_element*)ele)->keys_arr;
-		if (!astate->keys_arr || (astate->keys_arr->num < 1)) {
-			astate->keys_arr = NULL;
-			return NULL;
-		}
-
+		astate->keys_arr = ((as_index_keys_ll_element *)ele)->keys_arr;
 		astate->keys_arr_offset = 0;
 	}
-	return &astate->keys_arr->pindex_digs[astate->keys_arr_offset];
+
+	// TODO - proper EE split.
+	if (astate->ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		return &astate->keys_arr->u.digests[astate->keys_arr_offset];
+	}
+
+	cf_arenax_handle r_h = astate->keys_arr->u.handles[astate->keys_arr_offset];
+	as_index *r = (as_index *)cf_arenax_resolve(astate->ns->arena, r_h);
+
+	return &r->keyd;
 }
 
 // only operates on the record as_val in the stream points to
@@ -207,20 +202,23 @@ istream_read(const as_stream *s)
 
 	aclose(astate);
 
-	// Iterate through stream to get next digest and
-	// populate record with it
-	while (!astate->rec_open) {
+	// Iterate through stream until we reach end or find a valid record.
+	while (true) {
+		const cf_digest *keyd = get_next(astate);
 
-		if (get_next(astate) == NULL) {
+		if (keyd == NULL) {
 			return NULL;
 		}
 
-		if (!aopen(astate, &astate->keys_arr->pindex_digs[astate->keys_arr_offset])) {
-			if (!pre_check(astate, &astate->keys_arr->sindex_keys[astate->keys_arr_offset])) {
-				aclose(astate);
+		if (aopen(astate, keyd)) {
+			if (pre_check(astate)) {
+				break;
 			}
+
+			aclose(astate);
 		}
 	}
+
 	return (as_val *)astate->urec;
 }
 

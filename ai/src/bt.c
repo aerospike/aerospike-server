@@ -24,7 +24,6 @@
  * Public B-tree operations w/ stream abstractions under the covers.
  */
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,7 +33,7 @@
 #include "bt_iterator.h"
 #include "stream.h"
 
-#include <citrusleaf/alloc.h>
+#include "log.h"
 
 bt *createIBT(col_type_t ktype, int imatch) {
 	bt_cmp_t cmp;
@@ -55,27 +54,21 @@ bt *createIBT(col_type_t ktype, int imatch) {
 		cmp = ylCmp;
 		bts.bflag = BTFLAG_U160_ULONG;
 	} else {                  /* STRING or FLOAT */
-		assert(!"Unsupport Key Type");
+		cf_crash(AS_SINDEX, "Unsupport Key Type");
 	}
 
 	return bt_create(cmp, &bts, 0);
 }
 
-bt *createNBT(col_type_t ktype) {
-	bt_cmp_t cmp;
+bt *createNBT() {
 	bts_t bts;
-	bts.ktype = ktype;
+	bts.ktype = COL_TYPE_LONG;
 	bts.btype = NODE_BTREE;
 	bts.num   = -1;
-	if (C_IS_DG(ktype)) {
-		cmp = u160Cmp;
-		bts.ksize = U160SIZE;
-		bts.bflag = BTFLAG_U160;
-	} else {
-		assert(!"Unsupport Key Type");
-	}
+	bts.ksize = L_SIZE;
+	bts.bflag = BTFLAG_ULONG;
 
-	return bt_create(cmp, &bts, 0);
+	return bt_create(lCmp, &bts, 0);
 }
 
 static void *abt_find(bt *btr, ai_obj *akey) {
@@ -94,15 +87,14 @@ static bool abt_del(bt *btr, ai_obj *akey, bool leafd) { // DELETE the row
 	DECLARE_BT_KEY(akey, 0)
 	dwd_t  dwd    = bt_delete(btr, btkey, leafd);        /* FREED 028 */
 	if (!dwd.k) return 0;
-	uchar *stream = dwd.k;
 	destroyBTKey(btkey, med);                            /* FREED 026 */
-	return destroyStream(btr, stream);                   /* DESTROYED 027 */
+	return 0;
 }
 static uint32 abt_insert(bt *btr, ai_obj *akey, void *val) {
 	crs_t crs;
 	uint32 ssize;
 	DECLARE_BT_KEY(akey, 0)
-	char *stream = createStream(btr, val, btkey, ksize, &ssize, &crs); // D 027
+	char *stream = createStream(btr, val, btkey, &ssize, &crs); // D 027
 	if (!stream) return 0;
 	destroyBTKey(btkey, med);                            /* FREED 026 */
 	if (!bt_insert(btr, stream, 0)) return 0;            /* FREE ME 028 */

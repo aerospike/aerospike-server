@@ -29,9 +29,9 @@
 #include "btree.h"
 
 // BTREE TYPE FLAGS
-#define BTFLAG_U160          0x00
 #define BTFLAG_ULONG_ULONG   0x01
 #define BTFLAG_U160_ULONG    0x02
+#define BTFLAG_ULONG         0x03
 
 struct btree { // 62 Bytes -> 64B
 	struct btreenode  *root;
@@ -61,7 +61,7 @@ struct btree { // 62 Bytes -> 64B
 typedef struct {
 	uint8_t    capacity;
 	uint8_t    used;
-	uint8_t    data[];
+	uint64_t    data[];
 } __attribute__ ((__packed__)) ai_arr;
 
 /*
@@ -91,15 +91,13 @@ typedef struct btreenode { // 9 bytes -> 16 bytes
 } __attribute__ ((packed)) bt_n;
 
 // BTREE access of KEYs & NODEs via position in bt_n
-void *KEYS(bt *btr, bt_n *x, int i);
-#define NODES(btr, x) ((bt_n **)((char *)x + btr->nodeofst))
 
-#define GET_BTN_SIZE(leaf)   \
-  size_t nsize = leaf          ? btr->kbyte : btr->nbyte;
-#define GET_BTN_MSIZE(dirty) \
-  size_t msize = (dirty == -1) ? nsize      : nsize + sizeof(void *);
-#define GET_BTN_SIZES(leaf, dirty) \
-    GET_BTN_SIZE(leaf) GET_BTN_MSIZE(dirty)
-#define GET_DS(x, nsize) (*((void **)((char *)x + nsize)))
+static inline void *KEYS(bt *btr, bt_n *x, int i) {
+	int   ofst = (i * btr->s.ksize);
+	char *v    = (char *)x + btr->keyofst + ofst;
+	return (void *)v;
+}
+
+#define NODES(btr, x) ((bt_n **)((char *)x + btr->nodeofst))
 
 bt_n *findminnode(bt *btr, bt_n *x);

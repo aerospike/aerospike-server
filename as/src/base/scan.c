@@ -1,7 +1,7 @@
 /*
  * scan.c
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -46,6 +46,7 @@
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_ll.h"
 
+#include "arenax.h"
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
@@ -66,9 +67,9 @@
 #include "base/security.h"
 #include "base/service.h"
 #include "base/set_index.h"
+#include "base/thr_query.h"
 #include "base/transaction.h"
 #include "fabric/partition.h"
-#include "sindex/secondary_index.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
@@ -215,10 +216,10 @@ as_scan_get_jobstat_all(int* size)
 	return as_scan_manager_get_info(size);
 }
 
-int
+bool
 as_scan_abort(uint64_t trid)
 {
-	return as_scan_manager_abort_job(trid) ? 0 : -1;
+	return as_scan_manager_abort_job(trid);
 }
 
 uint32_t
@@ -1069,21 +1070,20 @@ typedef struct aggr_scan_slice_s {
 
 bool aggr_scan_init(as_aggr_call* call, const as_transaction* tr);
 bool aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
-bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
+bool aggr_scan_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r, cf_arenax_handle r_h);
 as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns,
 		uint32_t pid, as_partition_reservation* rsv);
 as_stream_status aggr_scan_ostream_write(void* udata, as_val* val);
+void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
+		bool success);
+int aggr_scan_release_cb(cf_ll_element* ele, void* udata);
 
 const as_aggr_hooks scan_aggr_hooks = {
 	.ostream_write = aggr_scan_ostream_write,
-	.set_error     = NULL,
 	.ptn_reserve   = aggr_scan_ptn_reserve,
 	.ptn_release   = NULL,
 	.pre_check     = NULL
 };
-
-void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
-		bool success);
 
 //----------------------------------------------------------
 // aggr_scan_job public API.
@@ -1222,7 +1222,7 @@ aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 		as_result_destroy(&result);
 	}
 
-	cf_ll_reduce(&ll, true, as_index_keys_ll_reduce_fn, NULL);
+	cf_ll_reduce(&ll, true, aggr_scan_release_cb, rsv);
 
 	if (bb->used_sz > sizeof(as_proto)) {
 		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
@@ -1315,7 +1315,7 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	if (! aggr_scan_add_digest(slice->ll, &r->keyd)) {
+	if (! aggr_scan_add_digest(ns, slice->ll, r, r_ref->r_h)) {
 		as_record_done(r_ref, ns);
 		as_scan_manager_abandon_job(_job, AS_ERR_UNKNOWN);
 		return false;
@@ -1330,12 +1330,13 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 }
 
 bool
-aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd)
+aggr_scan_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
+		cf_arenax_handle r_h)
 {
 	as_index_keys_ll_element* tail_e = (as_index_keys_ll_element*)ll->tail;
 	as_index_keys_arr* keys_arr;
 
-	if (tail_e) {
+	if (tail_e != NULL) {
 		keys_arr = tail_e->keys_arr;
 
 		if (keys_arr->num == AS_INDEX_KEYS_PER_ARR) {
@@ -1343,18 +1344,26 @@ aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd)
 		}
 	}
 
-	if (! tail_e) {
-		if (! (keys_arr = as_index_get_keys_arr())) {
-			return false;
-		}
+	if (tail_e == NULL) {
+		keys_arr = cf_malloc(sizeof(as_index_keys_arr));
+		keys_arr->num = 0;
 
 		tail_e = cf_malloc(sizeof(as_index_keys_ll_element));
-
 		tail_e->keys_arr = keys_arr;
+
 		cf_ll_append(ll, (cf_ll_element*)tail_e);
 	}
 
-	keys_arr->pindex_digs[keys_arr->num] = *keyd;
+	// TODO - proper EE split.
+	if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		keys_arr->u.digests[keys_arr->num] = r->keyd;
+	}
+	else {
+		as_index_reserve(r);
+
+		keys_arr->u.handles[keys_arr->num] = (uint64_t)r_h;
+	}
+
 	keys_arr->num++;
 
 	return true;
@@ -1405,6 +1414,35 @@ aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
 	}
 }
 
+int
+aggr_scan_release_cb(cf_ll_element* ele, void* udata)
+{
+	as_partition_reservation* rsv = udata;
+	as_namespace* ns = rsv->ns;
+
+	// TODO - proper EE split.
+	if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		return CF_LL_REDUCE_DELETE;
+	}
+
+	as_index_tree* tree = rsv->tree;
+	as_index_keys_ll_element* node = (as_index_keys_ll_element*)ele;
+	as_index_keys_arr* k_a = node->keys_arr;
+
+	for (uint32_t i = 0; i < k_a->num; i++) {
+		cf_arenax_handle r_h = k_a->u.handles[i];
+
+		as_record* r = cf_arenax_resolve(ns->arena, r_h);
+		as_index_ref r_ref = { .r = r, .r_h = r_h };
+
+		as_index_vlock(tree, &r_ref);
+
+		as_index_release(r);
+		as_record_done(&r_ref, ns);
+	}
+
+	return CF_LL_REDUCE_DELETE;
+}
 
 
 //==============================================================================

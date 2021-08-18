@@ -1,7 +1,7 @@
 /*
  * thr_query.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,24 +20,60 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * QUERY Engine Defaults
- */
-// **************************************************************************************************
-#define QUERY_BATCH_SIZE              100
-#define AS_MAX_NUM_SCRIPT_PARAMS      10
-#define AS_QUERY_BUF_SIZE             1024 * 1024 * 2 // At least 2 Meg
-#define AS_QUERY_MAX_BUFS             256	// That makes it 512 meg max in steady state
-#define AS_QUERY_MAX_QREQ             1024	// this is 4 kb
-#define AS_QUERY_MAX_QTR_POOL		  128	// They are 4MB+ each ...
-#define AS_QUERY_MAX_THREADS          32
-#define AS_QUERY_MAX_WORKER_THREADS   15 * AS_QUERY_MAX_THREADS
-#define AS_QUERY_MAX_QREQ_INFLIGHT    100	// worker queue capping per query
-#define AS_QUERY_MAX_QUERY            500	// 32 MB be little generous for now!!
-#define AS_QUERY_MAX_SHORT_QUEUE_SZ   500	// maximum 500 outstanding short running queries
-#define AS_QUERY_MAX_LONG_QUEUE_SZ    500	// maximum 500 outstanding long  running queries
-#define AS_QUERY_MAX_UDF_TRANSACTIONS 20	// Higher the value more aggressive it will be
-#define AS_QUERY_MAX_OPS_TRANSACTIONS 20	// Higher the value more aggressive it will be
-#define AS_QUERY_UNTRACKED_TIME       1000 // (millisecond) 1 sec
-#define AS_QUERY_WAIT_MAX_TRAN_US     1000
-// **************************************************************************************************
+#pragma once
+
+//==========================================================
+// Includes.
+//
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "citrusleaf/cf_atomic.h"
+
+
+//==========================================================
+// Forward declarations.
+//
+
+struct as_config_s;
+struct as_index_ref_s;
+struct as_mon_jobstat_s;
+struct as_namespace_s;
+struct as_sindex_qctx_s;
+struct as_transaction_s;
+struct cf_dyn_buf_s;
+struct cf_ll_element_s;
+
+
+//==========================================================
+// Typedefs & constants.
+//
+
+#define AS_QUERY_MAX_THREADS 32
+#define AS_QUERY_MAX_WORKER_THREADS 15 * AS_QUERY_MAX_THREADS
+
+
+//==========================================================
+// Public API.
+//
+
+void as_index_keys_ll_destroy_fn(struct cf_ll_element_s* ele);
+void as_query_release_ref(struct as_namespace_s* ns, struct as_sindex_qctx_s* qctx, struct as_index_ref_s* r_ref);
+
+void as_query_init();
+bool as_query(struct as_transaction_s* tr, struct as_namespace_s* ns);
+void as_query_reinit(uint32_t new_thread_count);
+void as_query_worker_reinit(uint32_t new_thread_count);
+int as_query_list(char* name, struct cf_dyn_buf_s* db);
+bool as_query_kill(uint64_t trid);
+void as_query_gconfig_default(struct as_config_s* c);
+struct as_mon_jobstat_s* as_query_get_jobstat(uint64_t trid);
+struct as_mon_jobstat_s* as_query_get_jobstat_all(int* size);
+bool as_query_set_priority(uint64_t trid, uint32_t priority);
+void as_query_histogram_dumpall();
+
+bool as_query_reserve_partition_tree(struct as_namespace_s* ns, struct as_sindex_qctx_s* qctx, uint32_t pid);
+
+extern cf_atomic32 g_query_short_running;
+extern cf_atomic32 g_query_long_running;

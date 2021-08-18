@@ -1,7 +1,7 @@
 /*
  * thr_tsvc.c
  *
- * Copyright (C) 2008-2020 Aerospike, Inc.
+ * Copyright (C) 2008-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -44,12 +44,12 @@
 #include "base/scan.h"
 #include "base/security.h"
 #include "base/stats.h"
+#include "base/thr_query.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/xdr.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
-#include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/proxy.h"
@@ -204,7 +204,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 				goto Cleanup;
 			}
 
-			if (as_query(tr, ns) != 0) {
+			if (! as_query(tr, ns)) {
 				cf_atomic64_incr(&ns->query_fail);
 				as_multi_rec_transaction_error(tr, tr->result_code);
 			}

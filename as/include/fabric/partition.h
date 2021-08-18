@@ -1,7 +1,7 @@
 /*
  * partition.h
  *
- * Copyright (C) 2016-2019 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -176,6 +176,12 @@ typedef enum {
 	AS_MIGRATE_AGAIN
 } as_migrate_result;
 
+#define TREE_ID_NUM_BITS 6
+#define MAX_NUM_TREE_IDS (1 << TREE_ID_NUM_BITS) // 64
+#define TREE_ID_MASK (MAX_NUM_TREE_IDS - 1) // 0x3F
+
+COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
+
 
 //==========================================================
 // Public API.
@@ -206,11 +212,13 @@ int as_partition_reserve_replica(struct as_namespace_s* ns, uint32_t pid, as_par
 int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node);
 int as_partition_reserve_read_tr(struct as_namespace_s* ns, uint32_t pid, struct as_transaction_s* tr, cf_node* node);
 int as_partition_reserve_full(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
-int as_partition_prereserve_query(struct as_namespace_s* ns, bool can_partition_query[], as_partition_reservation rsv[]);
 int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_reservation* src);
 
 void as_partition_release(as_partition_reservation* rsv);
+
+struct as_index_tree_s* as_partition_tree_reserve_query(struct as_namespace_s* ns, uint32_t pid);
+void as_partition_tree_release(struct as_namespace_s* ns, struct as_index_tree_s* tree);
 
 void as_partition_advance_tree_id(as_partition* p, const char* ns_name);
 void as_partition_tree_done(uint8_t id, void* udata);
@@ -308,7 +316,6 @@ contains_self(const cf_node* nodes, uint32_t n_nodes)
 void client_replica_maps_create(struct as_namespace_s* ns);
 void client_replica_maps_clear(struct as_namespace_s* ns);
 bool client_replica_maps_update(struct as_namespace_s* ns, uint32_t pid);
-bool client_replica_maps_is_partition_queryable(const struct as_namespace_s* ns, uint32_t pid);
 
 
 //==========================================================

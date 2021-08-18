@@ -1,7 +1,7 @@
 /*
  * monitor.c
  *
- * Copyright (C) 2013-2020 Aerospike, Inc.
+ * Copyright (C) 2013-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -38,8 +38,7 @@
 
 #include "base/monitor.h"
 #include "base/scan.h"
-#include "sindex/secondary_index.h"
-#include "sindex/thr_sindex.h"
+#include "base/thr_query.h"
 
 
 #define AS_MON_MAX_MODULE 10
@@ -47,8 +46,7 @@
 // Indexed by as_mon_module_slot - keep in sync.
 const char * AS_MON_MODULES[] = {
 		"query",
-		"scan",
-		"sindex-builder"
+		"scan"
 };
 
 // functional declaration
@@ -66,7 +64,6 @@ as_mon_init()
 	g_as_mon_curr_mod_count = 0;
 	as_mon_register(AS_MON_MODULES[QUERY_MOD]);
 	as_mon_register(AS_MON_MODULES[SCAN_MOD]);
-	as_mon_register(AS_MON_MODULES[SBLD_MOD]);
 
 	// TODO: Add more stuff if there is any locks needs some stats needed etc etc ...
 	return AS_MON_OK;
@@ -81,9 +78,6 @@ as_mon_get_module(const char * module)
 	}
 	else if (strcmp(module, AS_MON_MODULES[SCAN_MOD]) == 0) {
 		mod = SCAN_MOD;
-	}
-	else if (strcmp(module, AS_MON_MODULES[SBLD_MOD]) == 0) {
-		mod = SBLD_MOD;
 	}
 	else {
 		return NULL;
@@ -131,19 +125,6 @@ as_mon_register(const char *module)
 		cb->set_maxpriority = NULL;
 		mod = SCAN_MOD;
 	}
-	else if (!strcmp(module, AS_MON_MODULES[SBLD_MOD]))
-	{
-		cb->get_jobstat     = as_sbld_get_jobstat;
-		cb->get_jobstat_all = as_sbld_get_jobstat_all;
-
-		cb->set_priority    = NULL;
-		cb->kill            = as_sbld_abort;
-		cb->suspend         = NULL;
-		cb->set_pendingmax  = NULL;
-		cb->set_maxinflight = NULL;
-		cb->set_maxpriority = NULL;
-		mod = SBLD_MOD;
-	}
 	else {
 		cf_warning(AS_MON, "wrong module parameter.");
 		return AS_MON_ERR;
@@ -181,7 +162,7 @@ as_mon_killjob(const char *module, uint64_t id, cf_dyn_buf *db)
 	}
 
 	if (mon_object->cb.kill) {
-		retval = mon_object->cb.kill(id);
+		retval = mon_object->cb.kill(id) ? AS_MON_OK : AS_MON_ERR;
 
 		if (retval == AS_MON_OK) {
 			cf_dyn_buf_append_string(db, "OK");
@@ -233,7 +214,8 @@ as_mon_set_priority(const char *module, uint64_t id, uint32_t priority, cf_dyn_b
 	}
 
 	if (mon_object->cb.set_priority) {
-		retval = mon_object->cb.set_priority(id, priority);
+		retval = mon_object->cb.set_priority(id, priority) ?
+				AS_MON_OK : AS_MON_ERR;
 
 		if (retval == AS_MON_OK) {
 			cf_dyn_buf_append_string(db, "OK");

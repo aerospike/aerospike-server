@@ -1,7 +1,7 @@
 /*
  * ai_types.h
  *
- * Copyright (C) 2013-2015 Aerospike, Inc.
+ * Copyright (C) 2013-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -27,25 +27,17 @@
 
 #pragma once
 
-#include <assert.h>
 #include <inttypes.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <sys/types.h>
 
-#include <citrusleaf/cf_ll.h>
-#include "sindex/secondary_index.h"
+#include <citrusleaf/cf_digest.h>
 
-#define uchar    unsigned char
-#define ushort16 unsigned short
-#define uint32   unsigned int
-#define ull      unsigned long long
-#define uint128  __uint128_t
+typedef unsigned char uchar;
+typedef unsigned short ushort16;
+typedef unsigned int uint32;
+typedef unsigned long long ull;
+typedef __uint128_t uint128;
 
-#define AS_DIGEST_KEY_SZ 20
-typedef struct uint160 {
-	char digest[AS_DIGEST_KEY_SZ];
-} uint160;
+typedef cf_digest uint160;
 
 // Same as as_sindex_ktype
 typedef uint8_t col_type_t;
@@ -61,41 +53,9 @@ typedef uint8_t col_type_t;
 // TODO - should this have C_IS_G as well
 #define C_IS_NUM(ctype)  (C_IS_L(ctype))
 
-#define VOIDINT (void *) (long)
-
-#define SPLICE_160(num)											\
-	ull ubh, ubm; uint32 u;										\
-	char *pbu = (char *) &num;									\
-	memcpy(&ubh, pbu + 12, 8);									\
-	memcpy(&ubm, pbu + 4,  8);									\
-	memcpy(&u,   pbu,      4);
-
-#define DEBUG_U160(fp, num)										\
-	{															\
-		SPLICE_160(num);										\
-		fprintf(fp, "DEBUG_U160: high: %llu mid: %llu low: %u", ubh, ubm, u); \
-	}
-
 /***************** Opaque Forward Type Declarations *****************/
 
 /*
  *  B-Tree Object [Implementation defined in "btreepriv.h".]
  */
 typedef struct btree bt;
-
-
-/***************** Type Declarations *****************/
-typedef struct ai_obj {
-	ulong    l;
-	uint160  y;
-	col_type_t type;
-} ai_obj;
-
-typedef struct filter {
-	ai_obj   alow;
-	ai_obj   ahigh;
-} f_t;
-
-typedef struct check_sql_where_clause {
-	f_t     wf;
-} cswc_t;

@@ -1,7 +1,7 @@
 /*
  * scan.h
  *
- * Copyright (C) 2015 Aerospike, Inc.
+ * Copyright (C) 2015-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -50,5 +50,5 @@ void as_scan_limit_finished_jobs(void);
 uint32_t as_scan_get_active_job_count(void);
 struct as_mon_jobstat_s* as_scan_get_jobstat(uint64_t trid);
 struct as_mon_jobstat_s* as_scan_get_jobstat_all(int* size);
-int as_scan_abort(uint64_t trid);
+bool as_scan_abort(uint64_t trid);
 uint32_t as_scan_abort_all(void);

@@ -1,7 +1,7 @@
 /*
  * index.c
  *
- * Copyright (C) 2012-2020 Aerospike, Inc.
+ * Copyright (C) 2012-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -46,6 +46,7 @@
 #include "base/datamodel.h"
 #include "base/set_index.h"
 #include "base/stats.h"
+#include "sindex/gc.h"
 
 
 //==========================================================
@@ -77,8 +78,6 @@ bool as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd, as_ind
 void as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd, cf_arenax_handle r_h, as_index_ph_array* ph_a);
 void as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h);
 
-int as_index_sprig_try_exists(as_index_sprig* isprig, const cf_digest* keyd);
-int as_index_sprig_try_get_vlock(as_index_sprig* isprig, const cf_digest* keyd, as_index_ref* index_ref);
 int as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id, const cf_digest* keyd, as_index_ref* index_ref);
 
 int as_index_sprig_search_lockless(as_index_sprig* isprig, const cf_digest* keyd, as_index** ret, cf_arenax_handle* ret_h);
@@ -104,7 +103,7 @@ as_index_sprig_from_i(as_index_tree* tree, as_index_sprig* isprig,
 
 
 //==========================================================
-// Public API - initialize garbage collection system.
+// Public API - garbage collection system.
 //
 
 void
@@ -118,6 +117,12 @@ uint32_t
 as_index_tree_gc_queue_size()
 {
 	return cf_queue_sz(&g_gc_queue);
+}
+
+void
+as_index_tree_gc(as_index_tree* tree)
+{
+	cf_queue_push(&g_gc_queue, &tree);
 }
 
 
@@ -192,7 +197,7 @@ as_index_tree_reserve(as_index_tree* tree)
 
 // Destroy a red-black tree; return 0 if the tree was destroyed or 1 otherwise.
 void
-as_index_tree_release(as_index_tree* tree)
+as_index_tree_release(as_namespace* ns, as_index_tree* tree)
 {
 	if (tree == NULL) {
 		return;
@@ -208,7 +213,12 @@ as_index_tree_release(as_index_tree* tree)
 
 	// TODO - call as_index_tree_destroy() directly if tree is empty?
 
-	cf_queue_push(&g_gc_queue, &tree);
+	if (ns->sindex_cnt > 0) {
+		as_sindex_gc_tree(ns, tree);
+	}
+	else {
+		as_index_tree_gc(tree);
+	}
 }
 
 // Get the number of elements in the tree.
@@ -271,46 +281,6 @@ as_index_reduce_from(as_index_tree* tree, const cf_digest* keyd,
 // Public API - get/insert/delete an element in a tree.
 //
 
-// Is there an element with specified digest in the tree?
-//
-// Returns:
-//		 0 - found (yes)
-//		-1 - not found (no)
-//		-2 - can't lock (don't know)
-int
-as_index_try_exists(as_index_tree* tree, const cf_digest* keyd)
-{
-	if (tree == NULL) {
-		return -1;
-	}
-
-	as_index_sprig isprig;
-	as_index_sprig_from_keyd(tree, &isprig, keyd);
-
-	return as_index_sprig_try_exists(&isprig, keyd);
-}
-
-// If there's an element with specified digest in the tree, return a locked
-// reference to it in index_ref.
-//
-// Returns:
-//		 0 - found (reference returned in index_ref)
-//		-1 - not found (index_ref untouched)
-//		-2 - can't lock (don't know, index_ref untouched)
-int
-as_index_try_get_vlock(as_index_tree* tree, const cf_digest* keyd,
-		as_index_ref* index_ref)
-{
-	if (tree == NULL) {
-		return -1;
-	}
-
-	as_index_sprig isprig;
-	as_index_sprig_from_keyd(tree, &isprig, keyd);
-
-	return as_index_sprig_try_get_vlock(&isprig, keyd, index_ref);
-}
-
 // If there's an element with specified digest in the tree, return a locked
 // reference to it in index_ref.
 //
@@ -356,6 +326,19 @@ as_index_get_insert_vlock(as_index_tree* tree, const cf_digest* keyd,
 	}
 
 	return result;
+}
+
+// Return a locked reference without searching the index.
+void
+as_index_vlock(as_index_tree* tree, as_index_ref* index_ref)
+{
+	as_index_sprig isprig;
+	as_index_sprig_from_keyd(tree, &isprig, &index_ref->r->keyd);
+
+	index_ref->puddle = isprig.puddle;
+	index_ref->olock = &isprig.pair->lock;
+
+	cf_mutex_lock(&isprig.pair->lock);
 }
 
 // If there's an element with specified digest in the tree, delete it.
@@ -468,12 +451,17 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 
 		// Ignore this record if it's been deleted.
 		if (! as_index_is_valid_record(r_ref.r)) {
+			as_namespace* ns = isprig->destructor_udata;
+
 			if (rc == 0) {
 				if (isprig->destructor != NULL) {
-					isprig->destructor(r_ref.r, isprig->destructor_udata);
+					isprig->destructor(r_ref.r, ns);
 				}
 
 				cf_arenax_free(isprig->arena, r_ref.r_h, NULL);
+			}
+			else if (r_ref.r->in_sindex == 1 && rc == 1) {
+				as_sindex_gc_record(ns, &r_ref);
 			}
 
 			cf_mutex_unlock(r_ref.olock);
@@ -565,7 +553,8 @@ as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h)
 
 	// There should be no references during a tree purge (reduce should have
 	// reserved the tree).
-	cf_assert(r->rc == 0, AS_INDEX, "purge found non-0 record rc 0x%hx", r->rc);
+	cf_assert(r->rc == 0 || (r->rc == 1 && r->in_sindex == 1), AS_INDEX,
+			"purge found non-0 record rc 0x%hx", r->rc);
 
 	if (isprig->destructor != NULL) {
 		isprig->destructor(r, isprig->destructor_udata);
@@ -578,42 +567,6 @@ as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h)
 //==========================================================
 // Local helpers - get/insert/delete an element in a sprig.
 //
-
-int
-as_index_sprig_try_exists(as_index_sprig* isprig, const cf_digest* keyd)
-{
-	if (! cf_mutex_trylock(&isprig->pair->lock)) {
-		return -2;
-	}
-
-	int rv = as_index_sprig_search_lockless(isprig, keyd, NULL, NULL);
-
-	cf_mutex_unlock(&isprig->pair->lock);
-
-	return rv;
-}
-
-int
-as_index_sprig_try_get_vlock(as_index_sprig* isprig, const cf_digest* keyd,
-		as_index_ref* index_ref)
-{
-	if (! cf_mutex_trylock(&isprig->pair->lock)) {
-		return -2;
-	}
-
-	int rv = as_index_sprig_search_lockless(isprig, keyd, &index_ref->r,
-			&index_ref->r_h);
-
-	if (rv != 0) {
-		cf_mutex_unlock(&isprig->pair->lock);
-		return rv;
-	}
-
-	index_ref->puddle = isprig->puddle;
-	index_ref->olock = &isprig->pair->lock;
-
-	return 0;
-}
 
 int
 as_index_sprig_get_vlock(as_index_sprig* isprig, const cf_digest* keyd,

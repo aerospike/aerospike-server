@@ -557,7 +557,7 @@ as_geojson_to_particle(const char *json, uint32_t jlen, as_particle **pp)
 	else if (region) { // REGION
 		p_geojson_mem->flags |= GEOJSON_ISREGION;
 
-		int numcells;
+		uint32_t numcells;
 
 		if (! geo_region_cover(NULL, region, MAX_REGION_CELLS, p_outcells, NULL,
 				NULL, &numcells)) {

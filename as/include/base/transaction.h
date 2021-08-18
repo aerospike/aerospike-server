@@ -239,15 +239,13 @@ typedef struct as_transaction_s {
 #define FROM_FLAG_RESTART_STRICT	0x0004 // enterprise-only
 
 // 'flags' bits - set in transaction body after queuing:
-#define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x01
-#define AS_TRANSACTION_FLAG_IS_DELETE		0x02
-#define AS_TRANSACTION_FLAG_XDR_TOMBSTONE	0x04 // enterprise-only
-#define AS_TRANSACTION_FLAG_MUST_PING		0x08 // enterprise-only
-#define AS_TRANSACTION_FLAG_RSV_PROLE		0x10 // enterprise-only
-#define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE	0x20 // enterprise-only
+#define AS_TRANSACTION_FLAG_IS_DELETE				0x01
+#define AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL	0x02
+#define AS_TRANSACTION_FLAG_XDR_TOMBSTONE			0x04 // enterprise-only
+#define AS_TRANSACTION_FLAG_MUST_PING				0x08 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_PROLE				0x10 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE			0x20 // enterprise-only
 
-// FIXME - consolidate before shipping 5.7.
-#define AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL	0x40
 
 void as_transaction_init_head(as_transaction *tr, const cf_digest *, cl_msg *);
 void as_transaction_init_body(as_transaction *tr);

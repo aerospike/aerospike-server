@@ -1,7 +1,7 @@
 /*
  * partition.c
  *
- * Copyright (C) 2008-2020 Aerospike, Inc.
+ * Copyright (C) 2008-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -46,17 +46,6 @@
 #include "base/set_index.h"
 #include "base/transaction.h"
 #include "fabric/partition_balance.h"
-
-
-//==========================================================
-// Typedefs & constants.
-//
-
-#define TREE_ID_NUM_BITS 6
-#define MAX_NUM_TREE_IDS (1 << TREE_ID_NUM_BITS) // 64
-#define TREE_ID_MASK (MAX_NUM_TREE_IDS - 1) // 0x3F
-
-COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
 
 
 //==========================================================
@@ -470,27 +459,6 @@ as_partition_reserve_full(as_namespace* ns, uint32_t pid,
 	return 0;
 }
 
-// Reserves all query-able partitions.
-// Returns the number of partitions reserved.
-int
-as_partition_prereserve_query(as_namespace* ns, bool can_partition_query[],
-		as_partition_reservation rsv[])
-{
-	int reserved = 0;
-
-	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		if (as_partition_reserve_query(ns, pid, &rsv[pid])) {
-			can_partition_query[pid] = false;
-		}
-		else {
-			can_partition_query[pid] = true;
-			reserved++;
-		}
-	}
-
-	return reserved;
-}
-
 // Reserve a partition for query.
 // Return value 0 means the reservation was taken, -1 means not.
 int
@@ -518,7 +486,43 @@ as_partition_reservation_copy(as_partition_reservation* dst,
 void
 as_partition_release(as_partition_reservation* rsv)
 {
-	as_index_tree_release(rsv->tree);
+	as_index_tree_release(rsv->ns, rsv->tree);
+}
+
+as_index_tree*
+as_partition_tree_reserve_query(as_namespace* ns, uint32_t pid)
+{
+	as_partition* p = &ns->partitions[pid];
+
+	cf_mutex_lock(&p->lock);
+
+	// If this partition is frozen, return.
+	if (p->n_replicas == 0) {
+		cf_mutex_unlock(&p->lock);
+		return NULL;
+	}
+
+	cf_node best_node = find_best_node(p, false);
+
+	// If this node is not the appropriate one, return.
+	if (best_node != g_config.self_node) {
+		cf_mutex_unlock(&p->lock);
+		return NULL;
+	}
+
+	as_index_tree* tree = p->tree;
+
+	as_index_tree_reserve(tree);
+
+	cf_mutex_unlock(&p->lock);
+
+	return tree;
+}
+
+void
+as_partition_tree_release(as_namespace* ns, as_index_tree* tree)
+{
+	as_index_tree_release(ns, tree);
 }
 
 void
@@ -712,19 +716,6 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 	}
 
 	return changed;
-}
-
-bool
-client_replica_maps_is_partition_queryable(const as_namespace* ns, uint32_t pid)
-{
-	uint32_t byte_i = pid >> 3;
-
-	const client_replica_map* repl_map = ns->replica_maps;
-	const volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
-
-	uint8_t set_mask = 0x80 >> (pid & 0x7);
-
-	return (*mbyte & set_mask) != 0;
 }
 
 

@@ -27,13 +27,13 @@
 
 #pragma once
 
+#include "ai_obj.h"
 #include "ai_types.h"
 
 struct btree;
 struct btreenode;
 
 #define VOIDSIZE   8 /* force to 8, otherwise UU would not work on 32bit */
-#define U160SIZE  AS_DIGEST_KEY_SZ
 
 typedef struct btree_specification { /* size 9B */
 	unsigned char   ktype;    /* [STRING,INT,FLOAT,LONG]--------------------| */

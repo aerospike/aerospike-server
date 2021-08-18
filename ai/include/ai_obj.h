@@ -1,7 +1,7 @@
 /*
  * ai_obj.h
  *
- * Copyright (C) 2013-2014 Aerospike, Inc.
+ * Copyright (C) 2013-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -25,9 +25,25 @@
 
 #pragma once
 
-#include <stdio.h>
+#include <sys/types.h>
 
 #include "ai_types.h"
+
+typedef struct ai_obj {
+	ulong    l;
+	uint160  y;
+	col_type_t type;
+} ai_obj;
+
+typedef struct filter {
+	ai_obj   alow;
+	ai_obj   ahigh;
+} f_t;
+
+typedef struct check_sql_where_clause {
+	f_t     wf;
+} cswc_t;
+
 
 void init_ai_obj(ai_obj *a);
 
@@ -38,5 +54,3 @@ void init_ai_objU160(ai_obj *a, uint160 y);
 void ai_objClone(ai_obj *dest, ai_obj *src);
 
 bool ai_objEQ(ai_obj *a, ai_obj *b);
-
-void dump_ai_obj_as_digest(FILE *fp, ai_obj *a);

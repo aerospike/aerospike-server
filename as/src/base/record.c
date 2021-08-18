@@ -1,7 +1,7 @@
 /*
  * record.c
  *
- * Copyright (C) 2012-2020 Aerospike, Inc.
+ * Copyright (C) 2012-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -44,6 +44,7 @@
 #include "base/proto.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
+#include "sindex/gc.h"
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
@@ -56,9 +57,9 @@
 static void record_replace_failed(as_remote_record *rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
 
 static int record_apply_dim_single_bin(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
-static int record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd, bool skip_sindex);
+static int record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
 static int record_apply_ssd_single_bin(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
-static int record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd, bool skip_sindex);
+static int record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
 
 
 //==========================================================
@@ -75,16 +76,6 @@ static inline int
 resolve_generation(uint16_t left, uint16_t right)
 {
 	return left == right ? 0 : (as_gen_less_than(left, right) ? 1 : -1);
-}
-
-// Assumes remote generation is not 0. (Local may be 0 if creating record.)
-static inline bool
-next_generation(uint16_t local, uint16_t remote, as_namespace* ns)
-{
-	local = plain_generation(local, ns);
-	remote = plain_generation(remote, ns);
-
-	return local == 0xFFFF ? remote == 1 : remote - local == 1;
 }
 
 
@@ -125,9 +116,16 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 {
 	as_record *r = r_ref->r;
 
-	if (! as_index_is_valid_record(r) && r->rc == 0) {
-		as_record_destroy(r, ns);
-		cf_arenax_free(ns->arena, r_ref->r_h, r_ref->puddle);
+	if (! as_index_is_valid_record(r)) {
+		if (r->rc == 0) {
+			cf_assert(r->in_sindex == 0, AS_RECORD, "bad in_sindex bit");
+
+			as_record_destroy(r, ns);
+			cf_arenax_free(ns->arena, r_ref->r_h, r_ref->puddle);
+		}
+		else if (r->in_sindex == 1 && r->rc == 1) {
+			as_sindex_gc_record(ns, r_ref);
+		}
 	}
 
 	cf_mutex_unlock(r_ref->olock);
@@ -137,16 +135,6 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 //==========================================================
 // Public API - record lifecycle utilities.
 //
-
-// Returns:
-//  0 - found
-// -1 - not found
-// -2 - can't lock
-int
-as_record_exists(as_index_tree *tree, const cf_digest *keyd)
-{
-	return as_index_try_exists(tree, keyd);
-}
 
 // TODO - inline this, if/when we unravel header files.
 bool
@@ -161,7 +149,7 @@ as_record_is_expired(const as_record *r)
 void
 as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 {
-	record_delete_adjust_sindex(r_ref->r, ns);
+	remove_from_sindex(ns, r_ref);
 	as_record_destroy(r_ref->r, ns);
 	as_index_clear_record_info(r_ref->r);
 	cf_atomic64_incr(&ns->n_objects);
@@ -268,11 +256,11 @@ as_record_allocate_key(as_record *r, const uint8_t *key, uint32_t key_size)
 
 // If remote record is better than local record, replace local with remote.
 int
-as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
+as_record_replace_if_better(as_remote_record *rr)
 {
 	as_namespace *ns = rr->rsv->ns;
 
-	CF_ALLOC_SET_NS_ARENA(ns);
+	CF_ALLOC_SET_NS_ARENA_DIM(ns);
 
 	as_index_tree *tree = rr->rsv->tree;
 
@@ -380,7 +368,7 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 			result = record_apply_dim_single_bin(rr, &r_ref, &rd);
 		}
 		else {
-			result = record_apply_dim(rr, &r_ref, &rd, skip_sindex);
+			result = record_apply_dim(rr, &r_ref, &rd);
 		}
 	}
 	else {
@@ -388,7 +376,7 @@ as_record_replace_if_better(as_remote_record *rr, bool skip_sindex)
 			result = record_apply_ssd_single_bin(rr, &r_ref, &rd);
 		}
 		else {
-			result = record_apply_ssd(rr, &r_ref, &rd, skip_sindex);
+			result = record_apply_ssd(rr, &r_ref, &rd);
 		}
 	}
 
@@ -539,8 +527,7 @@ record_apply_dim_single_bin(as_remote_record *rr, as_index_ref *r_ref,
 }
 
 static int
-record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
-		bool skip_sindex)
+record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
@@ -584,11 +571,12 @@ record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
 			&old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
-	if (! (skip_sindex &&
-			next_generation(r->generation, (uint16_t)rr->generation, ns)) &&
-					record_has_sindex(r, ns)) {
-		write_sindex_update(ns, as_index_get_set_name(r, ns), rr->keyd,
-				rd->bins, rd->n_bins, new_bins, n_new_bins);
+	if (set_has_sindex(r, ns)) {
+		update_sindex(ns, r_ref, rd->bins, rd->n_bins, new_bins, n_new_bins);
+	}
+	else {
+		// Sindex drop will leave in_sindex bit. Good opportunity to reset.
+		as_index_clear_in_sindex(r);
 	}
 
 	// Cleanup - destroy original bins, can't unwind after.
@@ -641,35 +629,32 @@ record_apply_ssd_single_bin(as_remote_record *rr, as_index_ref *r_ref,
 }
 
 static int
-record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
-		bool skip_sindex)
+record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
-	bool has_sindex = ! (skip_sindex &&
-			next_generation(r->generation, (uint16_t)rr->generation, ns)) &&
-					record_has_sindex(r, ns);
-
 	int result;
 
-	as_bin old_bins[has_sindex ? RECORD_MAX_BINS : 0];
+	bool set_has_si = set_has_sindex(r, ns);
+	bool si_needs_bins = set_has_si && r->in_sindex == 1;
+	as_bin old_bins[si_needs_bins ? RECORD_MAX_BINS : 0];
 
-	uint16_t n_new_bins = rr->n_bins;
-	as_bin new_bins[has_sindex ? n_new_bins : 0];
-
-	if (has_sindex) {
+	if (si_needs_bins) {
 		// TODO - don't need to load a bin cemetery for sindex - optimize?
 		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
 			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
 			return -result;
 		}
+	}
 
-		if (n_new_bins != 0 &&
-				(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-			cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
-			return -result;
-		}
+	uint16_t n_new_bins = rr->n_bins;
+	as_bin new_bins[set_has_si ? n_new_bins : 0];
+
+	if (set_has_si && n_new_bins != 0 &&
+			(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
+		return -result;
 	}
 
 	// Apply changes to metadata in as_index needed for and writing.
@@ -691,9 +676,12 @@ record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd,
 			&old_metadata);
 
 	// Success - adjust sindex, looking at old and new bins.
-	if (has_sindex) {
-		write_sindex_update(ns, as_index_get_set_name(r, ns), rr->keyd,
-				rd->bins, rd->n_bins, new_bins, n_new_bins);
+	if (set_has_si) {
+		update_sindex(ns, r_ref, rd->bins, rd->n_bins, new_bins, n_new_bins);
+	}
+	else {
+		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+		as_index_clear_in_sindex(r);
 	}
 
 	// Now ok to store or drop key, as determined by message.

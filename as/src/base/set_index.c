@@ -44,6 +44,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "fabric/partition.h"
+#include "sindex/gc.h"
 
 //#include "warnings.h"
 
@@ -979,12 +980,17 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 
 		// Ignore this record if it's been deleted.
 		if (! as_index_is_valid_record(r_ref.r)) {
+			as_namespace* ns = ssri->destructor_udata;
+
 			if (rc == 0) {
 				if (ssri->destructor != NULL) {
-					ssri->destructor(r_ref.r, ssri->destructor_udata);
+					ssri->destructor(r_ref.r, ns);
 				}
 
 				cf_arenax_free(ssi->arena, r_ref.r_h, NULL);
+			}
+			else if (r_ref.r->in_sindex == 1 && rc == 1) {
+				as_sindex_gc_record(ns, &r_ref);
 			}
 
 			cf_mutex_unlock(r_ref.olock);

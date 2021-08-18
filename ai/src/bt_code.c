@@ -12,7 +12,6 @@
  *    documentation and/or other materials provided with the distribution.
  */
 
-#include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -23,7 +22,11 @@
 #include "bt_iterator.h"
 #include "stream.h"
 
-#include <citrusleaf/alloc.h>
+#include "log.h"
+
+#include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_ll.h"
 
 /* CACHE TODO LIST
    8.) U128PK/FK CACHE:[EVICT,MISS] support
@@ -55,6 +58,14 @@ static ulong tot_num_bts     = 0; static ulong tot_num_bt_mem  = 0;
   #define BT_MEM_PROFILE_NODE
 #endif
 
+#define GET_BTN_SIZE(leaf)									\
+	size_t nsize = leaf          ? btr->kbyte : btr->nbyte;
+#define GET_BTN_MSIZE(dirty)											\
+	size_t msize = (dirty == -1) ? nsize      : nsize + sizeof(void *);
+#define GET_BTN_SIZES(leaf, dirty)				\
+    GET_BTN_SIZE(leaf) GET_BTN_MSIZE(dirty)
+#define GET_DS(x, nsize) (*((void **)((char *)x + nsize)))
+
 /* PROTOYPES */
 static void      release_dirty_stream(bt *btr, bt_n *x);
 static int       real_log2           (unsigned int a, int nbits);
@@ -81,23 +92,23 @@ static void bt_decrement_used_memory(bt *btr, size_t size) {  //DEBUG_DECR_MEM
 }
 // DIRTY_STREAM DIRTY_STREAM DIRTY_STREAM DIRTY_STREAM DIRTY_STREAM
 static uint32 get_dssize(bt *btr, char dirty) {
-    assert(dirty > 0);
+    cf_assert(dirty > 0, AS_SINDEX, "dirty(%d) <= 0", (int)dirty);
     uint32 drsize = (dirty == 3) ? sizeof(uint32)   :
                     (dirty == 2) ? sizeof(ushort16) : sizeof(uchar); // 1 
     //DEBUG_GETDSSIZE
     return (btr->t * 2) * drsize;
 }
 static void alloc_ds(bt *btr, bt_n *x, size_t size, char dirty) {
-    assert(dirty != -1);
+    cf_assert(dirty != -1, AS_SINDEX, "dirty = -1");
     void   **dsp    = (void *)((char *)x + size);
     if (!dirty) { *dsp = NULL; return; }
     size_t   dssize = get_dssize(btr, dirty);
-    void    *ds     = cf_malloc(dssize); bzero(ds, dssize); // FREEME 108
+    void *ds = cf_calloc_ns(1, dssize);
     bt_increment_used_memory(btr, dssize);
     *dsp            = ds;                                      //DEBUG_ALLOC_DS
 }
 void incr_ds(bt *btr, bt_n *x) {//USE: when a DR is too big for its DS (incr_ds)
-    assert(x->dirty > 0);
+    cf_assert(x->dirty > 0, AS_SINDEX, "dirty(%d) <= 0", (int)x->dirty);
     GET_BTN_SIZE(x->leaf)
     void   *ods    = GET_DS(x, nsize);
     uint32  osize  = get_dssize(btr, x->dirty);
@@ -110,7 +121,7 @@ void incr_ds(bt *btr, bt_n *x) {//USE: when a DR is too big for its DS (incr_ds)
     } else if (x->dirty == 2) {
         ushort16 *s_ds = (ushort16 *)ods; uint32   *d_ds = (uint32   *)nds;
         for (uint32 i = 0; i < num; i++) d_ds[i] = (uint32  )s_ds[i];
-    } else assert(!"incr_ds ERROR");
+    } else cf_crash(AS_SINDEX, "incr_ds ERROR");
     x->dirty++;                                             //DEBUG_RESIZE_DS_2
     cf_free(ods); bt_decrement_used_memory(btr, osize);
 }
@@ -120,7 +131,7 @@ void incr_ds(bt *btr, bt_n *x) {//USE: when a DR is too big for its DS (incr_ds)
 static bt_n *allocbtreenode(bt *btr, bool leaf, char dirty) {
     btr->numnodes++;
     GET_BTN_SIZES(leaf, dirty)   BT_MEM_PROFILE_NODE          //DEBUG_ALLOC_BTN
-    bt_n   *x     = cf_malloc(msize); bzero(x, msize);
+    bt_n *x = cf_calloc_ns(1, msize);
     bt_increment_used_memory(btr, msize);
     x->leaf       = -1;
     x->dirty      = dirty;
@@ -130,13 +141,13 @@ static bt_n *allocbtreenode(bt *btr, bool leaf, char dirty) {
 static bt *allocbtree() {
     int  size = sizeof(struct btree);
     BT_MEM_PROFILE_BT
-    bt  *btr  = (bt *) cf_malloc(size); bzero(btr, size);    // FREE ME 035
+    bt *btr = (bt *)cf_calloc_ns(1, size);
     bt_increment_used_memory(btr, size);                    //DEBUG_ALLOC_BTREE
     return btr;
 }
 
 static void release_dirty_stream(bt *btr, bt_n *x) {      //DEBUG_BTF_BTN_DIRTY
-    assert(x->dirty > 0);
+    cf_assert(x->dirty > 0, AS_SINDEX, "dirty(%d) <= 0", (int)x->dirty);
     GET_BTN_SIZE(x->leaf)
     bt_decrement_used_memory(btr, get_dssize(btr, x->dirty));
     void **dsp = GET_DS(x, nsize); cf_free(dsp);          // FREED 108
@@ -202,29 +213,6 @@ static inline int real_log2(unsigned int a, int nbits) {
     return i;
 }
 
-#if 0
-
-// TODO: global table is pain disabled for avoiding issue
-// open it up later
-/* Implement a lookup table for the log values.  This will only allocate
- * memory that we need.  This is much faster than calling the log2 routine
- * every time.  Doing 1 million insert, searches, and deletes will generate
- * ~58 million calls to log2.  Using a lookup table IS NECESSARY!
- -> memory usage of this is trivial, like less than 1KB */
-static inline int _log2(unsigned int a, int nbits) {
-    static char   *table   = NULL;
-    static uint32  alloced = 0;
-    uint32 i;
-    if (a >= alloced) {
-        table = cf_realloc(table, (a + 1) * sizeof *table);
-        for (i = alloced; i < a + 1; i++) table[i] = -1;
-        alloced = a + 1;
-    }
-    if (table[a] == -1) table[a] = real_log2(a, nbits);
-    return table[a];
-}
-#endif
-
 static inline int _log2(unsigned int a, int nbits) {
 	return real_log2(a, nbits);
 }
@@ -249,21 +237,6 @@ static int findkindex(bt *btr, bt_n *x, bt_data_t k, int *r, btIterator *iter) {
     if ((*rr = btr->cmp(k, KEYS(btr, x, i))) < 0)  i--;
     if (iter) { iter->bln->in = iter->bln->ik = (i > 0) ? i : 0; }
     return i;
-}
-
-// KEY_SHUFFLING KEY_SHUFFLING KEY_SHUFFLING KEY_SHUFFLING KEY_SHUFFLING
-// NOTE: KEYS are variable sizes: [4,8,12,16,20,24,32 bytes]
-#define ISVOID(btr)  (btr->s.ksize == VOIDSIZE)
-
-static inline void **AKEYS(bt *btr, bt_n *x, int i) {
-    int   ofst = (i * btr->s.ksize);
-    char *v    = (char *)x + btr->keyofst + ofst;                 //DEBUG_AKEYS
-    return (void **)v;
-}
-#define OKEYS(btr, x) ((void **)((char *)x + btr->keyofst))
-inline void *KEYS(bt *btr, bt_n *x, int i) {                       //DEBUG_KEYS
-    if      ISVOID(btr) return                  OKEYS(btr, x)[i];
-    else /* OTHER_BT */ return (void *)         AKEYS(btr, x, i);
 }
 
 // SCION SCION SCION SCION SCION SCION SCION SCION SCION SCION SCION SCION
@@ -324,7 +297,7 @@ uint32 getDR(bt *btr, bt_n *x, int i) {
         ushort16 *ds = (ushort16 *)dsp; return (uint32)ds[i];
     } else if (x->dirty == 3) {
         uint32   *ds = (uint32   *)dsp; return         ds[i];
-    } else assert(!"getDR ERROR");
+    } else cf_crash(AS_SINDEX, "getDR ERROR");
 }
 #define INCR_DS_SET_DR                                 \
   { incr_ds(btr, x); __setDR(btr, x, i, dr); return; }
@@ -341,7 +314,7 @@ static void __setDR(bt *btr, bt_n *x, int i, uint32 dr) {
     } else if (x->dirty == 3) { 
         uint32   *ds = (uint32   *)dsp;
         odr = ds[i]; ds[i] = dr;
-    } else assert(!"setDR ERROR");
+    } else cf_crash(AS_SINDEX, "setDR ERROR");
     (void) odr;        // silence compiler warnings
 }
 static bt_n *setDR(bt *btr, bt_n *x, int i, uint32 dr, bt_n *p, int pi) {
@@ -413,9 +386,8 @@ static bt_n *incrCase2B(bt *btr, bt_n *x, int i, int dr) {  //DEBUG_INCR_CASE2B
 
 // SET_BT_KEY SET_BT_KEY SET_BT_KEY SET_BT_KEY SET_BT_KEY SET_BT_KEY
 static void setBTKeyRaw(bt *btr, bt_n *x, int i, void *src) { //PRIVATE
-    void **dest = AKEYS(btr, x, i);
-    if      ISVOID(btr) *dest                  = src;   
-    else                memcpy(dest, src, btr->s.ksize);
+    void *dest = KEYS(btr, x, i);
+    memcpy(dest, src, btr->s.ksize);
     //DEBUG_SET_KEY
 }
 static bt_n *setBTKey(bt *btr,  bt_n *dx, int di,  bt_n *sx, int si,
@@ -448,8 +420,8 @@ static void mvXKeys(bt *btr, bt_n   **dx, int di,
             *dx = zeroDR(btr, *dx, dii, pd, pdi);
             if (x2x && *dx != *sx) *sx = *dx;
         }
-        bt_data_t *dest = AKEYS(btr, *dx, di);
-        bt_data_t *src  = AKEYS(btr, *sx, si);
+        bt_data_t dest = KEYS(btr, *dx, di);
+        bt_data_t src  = KEYS(btr, *sx, si);
         void      *dk   = (char *)dest + (i * ks);
         void      *sk   = (char *)src  + (i * ks);
         memcpy(dk, sk, ks);
@@ -551,7 +523,7 @@ static bt_n *replaceKeyWithGhost(bt *btr, bt_n *x, int i, bt_data_t k,
     //printf("replaceKeyWithGhost\n");
     ai_obj akey; convertStream2Key(k, &akey, btr);
     crs_t crs; uint32 ssize; DECLARE_BT_KEY(&akey, x)
-    char *stream = createStream(btr, NULL, btkey, ksize, &ssize, &crs);//DEST027
+    char *stream = createStream(btr, NULL, btkey, &ssize, &crs);//DEST027
     x            = overwriteDR(btr, x, i, dr, p, pi);
     setBTKeyRaw(btr, x, i, stream);
     return x;
@@ -568,11 +540,11 @@ static bt_n *replaceKeyWithGhost(bt *btr, bt_n *x, int i, bt_data_t k,
 
 #define CREATE_RETURN_DELETED_KEY(btr, kp, dr)        \
   dwd_t dwd; bzero(&dwd, sizeof(dwd_t)); dwd.dr = dr; \
-  if (BIG_BT(btr)) { memcpy(delbuf, kp, btr->s.ksize); } \
-  dwd.k = BIG_BT(btr) ? delbuf : kp;
+  memcpy(delbuf, kp, btr->s.ksize);                   \
+  dwd.k = delbuf;
 
 /* NOTE: ksize > 8 bytes needs buffer for CASE 1 */
-#define MAX_KEY_SIZE (AS_DIGEST_KEY_SZ *2)
+#define MAX_KEY_SIZE (CF_DIGEST_KEY_SZ * 2)
 
 #define DK_NONE 0
 #define DK_2A   1

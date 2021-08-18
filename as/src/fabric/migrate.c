@@ -1344,7 +1344,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 
 	immigration_init_repl_state(&rr, info);
 
-	int rv = as_record_replace_if_better(&rr, false);
+	int rv = as_record_replace_if_better(&rr);
 
 	// If replace failed, don't ack - it will be retransmitted.
 	if (! (rv == AS_OK ||

@@ -1,7 +1,7 @@
 /*
  * truncate.c
  *
- * Copyright (C) 2017-2020 Aerospike, Inc.
+ * Copyright (C) 2017-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -98,17 +98,17 @@ lut_from_smd(const as_smd_item* item)
 //
 
 void
-as_truncate_init(as_namespace* ns)
+as_truncate_init(void)
 {
-	truncate_startup_hash_init(ns);
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
-	ns->truncate.state = TRUNCATE_IDLE;
-	cf_mutex_init(&ns->truncate.state_lock);
-}
+		truncate_startup_hash_init(ns);
 
-void
-as_truncate_init_smd()
-{
+		ns->truncate.state = TRUNCATE_IDLE;
+		cf_mutex_init(&ns->truncate.state_lock);
+	}
+
 	as_smd_module_load(AS_SMD_MODULE_TRUNCATE, truncate_smd_accept_cb,
 			truncate_smd_conflict_cb, NULL);
 }
@@ -458,7 +458,11 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (r->last_update_time < ns->truncate.lut) {
 		cb_info->n_deleted++;
-		record_delete_adjust_sindex(r, ns);
+
+		if (ns->storage_data_in_memory) {
+			remove_from_sindex(ns, r_ref);
+		}
+
 		as_set_index_delete_live(ns, tree, r, r_ref->r_h);
 		as_index_delete(tree, &r->keyd);
 		as_record_done(r_ref, ns);
@@ -470,7 +474,11 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	// Delete records not updated since their set's threshold last-update-time.
 	if (p_set != NULL && r->last_update_time < p_set->truncate_lut) {
 		cb_info->n_deleted++;
-		record_delete_adjust_sindex(r, ns);
+
+		if (ns->storage_data_in_memory) {
+			remove_from_sindex(ns, r_ref);
+		}
+
 		as_set_index_delete_live(ns, tree, r, r_ref->r_h);
 		as_index_delete(tree, &r->keyd);
 	}

@@ -79,7 +79,6 @@
 #include "fabric/migrate.h"
 #include "fabric/partition_balance.h"
 #include "sindex/secondary_index.h"
-#include "sindex/thr_sindex.h"
 #include "storage/storage.h"
 
 
@@ -317,10 +316,8 @@ typedef enum {
 	CASE_SERVICE_OS_GROUP_PERMS,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
-	CASE_SERVICE_QUERY_BUFPOOL_SIZE,
 	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD,
 	CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE,
-	CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS,
 	CASE_SERVICE_QUERY_PRIORITY,
 	CASE_SERVICE_QUERY_PRIORITY_SLEEP_US,
 	CASE_SERVICE_QUERY_REC_COUNT_BOUND,
@@ -336,7 +333,6 @@ typedef enum {
 	CASE_SERVICE_SCAN_THREADS_LIMIT,
 	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
-	CASE_SERVICE_SINDEX_GC_MAX_RATE,
 	CASE_SERVICE_SINDEX_GC_PERIOD,
 	CASE_SERVICE_STAY_QUIESCED,
 	CASE_SERVICE_TICKER_INTERVAL,
@@ -848,10 +844,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "os-group-perms",					CASE_SERVICE_OS_GROUP_PERMS },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
-		{ "query-bufpool-size",				CASE_SERVICE_QUERY_BUFPOOL_SIZE },
 		{ "query-in-transaction-thread",	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD },
 		{ "query-long-q-max-size",			CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE },
-		{ "query-pre-reserve-partitions",   CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS },
 		{ "query-priority", 				CASE_SERVICE_QUERY_PRIORITY },
 		{ "query-priority-sleep-us", 		CASE_SERVICE_QUERY_PRIORITY_SLEEP_US },
 		{ "query-rec-count-bound",			CASE_SERVICE_QUERY_REC_COUNT_BOUND },
@@ -867,7 +861,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-threads-limit",				CASE_SERVICE_SCAN_THREADS_LIMIT },
 		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
-		{ "sindex-gc-max-rate",				CASE_SERVICE_SINDEX_GC_MAX_RATE },
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
 		{ "stay-quiesced",					CASE_SERVICE_STAY_QUIESCED },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
@@ -2372,23 +2365,17 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_QUERY_BATCH_SIZE:
 				c->query_bsize = cfg_int_no_checks(&line);
 				break;
-			case CASE_SERVICE_QUERY_BUFPOOL_SIZE:
-				c->query_bufpool_size = cfg_u32(&line, 1, UINT32_MAX);
-				break;
 			case CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD:
 				c->query_in_transaction_thr = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE:
 				c->query_long_q_max_size = cfg_u32(&line, 1, UINT32_MAX);
 				break;
-			case CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS:
-				c->partitions_pre_reserved = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_QUERY_PRIORITY:
 				c->query_priority = cfg_int_no_checks(&line);
 				break;
 			case CASE_SERVICE_QUERY_PRIORITY_SLEEP_US:
-				c->query_sleep_us = cfg_u64_no_checks(&line);
+				c->query_sleep_us = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_QUERY_REC_COUNT_BOUND:
 				c->query_rec_count_bound = cfg_u64(&line, 1, UINT64_MAX);
@@ -2427,10 +2414,7 @@ as_config_init(const char* config_file)
 				c->n_service_threads = cfg_u32(&line, 1, MAX_SERVICE_THREADS);
 				break;
 			case CASE_SERVICE_SINDEX_BUILDER_THREADS:
-				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
-				break;
-			case CASE_SERVICE_SINDEX_GC_MAX_RATE:
-				c->sindex_gc_max_rate = cfg_u32_no_checks(&line);
+				c->sindex_builder_threads = cfg_u32(&line, 1, 32);
 				break;
 			case CASE_SERVICE_SINDEX_GC_PERIOD:
 				c->sindex_gc_period = cfg_u32_no_checks(&line);
@@ -3336,7 +3320,7 @@ as_config_init(const char* config_file)
 				ns->storage_defrag_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_STARTUP_MINIMUM:
-				ns->storage_defrag_startup_minimum = cfg_int(&line, 0, 99);
+				ns->storage_defrag_startup_minimum = cfg_u32(&line, 0, 99);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_DIRECT_FILES:
 				ns->storage_direct_files = cfg_bool(&line);
@@ -3477,7 +3461,7 @@ as_config_init(const char* config_file)
 				ns->storage_defrag_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM:
-				ns->storage_defrag_startup_minimum = cfg_int(&line, 0, 99);
+				ns->storage_defrag_startup_minimum = cfg_u32(&line, 0, 99);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DIRECT_FILES:
 				ns->storage_direct_files = cfg_bool(&line);
@@ -3604,7 +3588,7 @@ as_config_init(const char* config_file)
 		case NAMESPACE_SINDEX:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
 			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
-				ns->sindex_num_partitions = cfg_u32(&line, MIN_PARTITIONS_PER_INDEX, MAX_PARTITIONS_PER_INDEX);
+				ns->sindex_num_partitions = cfg_u32(&line, MIN_PARTITIONS_PER_SINDEX, MAX_PARTITIONS_PER_SINDEX);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -4118,6 +4102,10 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
+
+	if (g_config.query_threads % 2 == 0) {
+		cf_crash_nostack(AS_CFG, "'query-threads' must be an even number");
+	}
 
 	// Check the configured file descriptor limit against the system limit.
 	struct rlimit fd_limit;

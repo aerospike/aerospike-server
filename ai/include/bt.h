@@ -30,7 +30,7 @@
 #include "btreepriv.h"
 
 bt *createIBT      (col_type_t ktype, int imatch);
-bt *createNBT      (col_type_t ktype);
+bt *createNBT      ();
 
 /* different Btree types */
 #define INDEX_BTREE   0
@@ -42,10 +42,7 @@ bt *createNBT      (col_type_t ktype);
 #define BTREE_LONG_TYPE_DEGREE    31 // node size becomes 504
 #define BTREE_STRING_TYPE_DEGREE  18 // node size becomes 512
 
-#define NBT_DG(btr) \
-  (btr->s.btype == NODE_BTREE && C_IS_DG(btr->s.ktype))
-
-#define NBT(btr) (NBT_DG(btr))
+#define NBT(btr) (btr->s.btype == NODE_BTREE)
 
 typedef struct ulong_ulong_key {
 	ulong key;
@@ -53,6 +50,7 @@ typedef struct ulong_ulong_key {
 }  __attribute__ ((packed)) llk;
 #define LL(btr) (btr->s.bflag & BTFLAG_ULONG_ULONG)
 #define LL_SIZE 16
+
 typedef struct u160_ulong_key {
 	uint160 key;
 	ulong   val;
@@ -60,14 +58,19 @@ typedef struct u160_ulong_key {
 #define YL(btr) (btr->s.bflag & BTFLAG_U160_ULONG)
 #define YL_SIZE 28
 
+typedef struct ulong_key {
+	ulong key;
+} __attribute__ ((packed)) lk;
+#define L_SIZE 8
+
 typedef struct btk_t {
 	llk LL;
 	ylk YL;
 } btk_t;
 
-#define DECLARE_BT_KEY(akey, ret)                                            \
-    bool  med; uint32 ksize; btk_t btk;                                      \
-    char *btkey = createBTKey(akey, &med, &ksize, btr, &btk);/*FREE ME 026*/ \
+#define DECLARE_BT_KEY(akey, ret)                                    \
+    bool  med; btk_t btk;                                            \
+    char *btkey = createBTKey(akey, &med, btr, &btk);/*FREE ME 026*/ \
     if (!btkey) return ret;
 
 typedef struct crs_t {
@@ -75,11 +78,7 @@ typedef struct crs_t {
 	ylk YL_StreamPtr;
 } crs_t;
 
-#define OTHER_BT(btr) (btr->s.bflag >= BTFLAG_ULONG_ULONG)
-#define NONE_BT(btr)  (btr->s.bflag == BTFLAG_U160)
-#define BIG_BT(btr)   (btr->s.ksize > 8)
-
-#define IS_GHOST(btr, rrow) (NONE_BT(btr) && rrow && !(*(uchar *)rrow))
+#define IS_GHOST(btr, rrow) (NBT(btr) && rrow && !(*(uchar *)rrow))
 
 void  btIndAdd   (bt *ibtr, ai_obj *ikey, bt  *nbtr);
 bt   *btIndFind  (bt *ibtr, ai_obj *ikey);

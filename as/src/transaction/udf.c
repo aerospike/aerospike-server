@@ -1,7 +1,7 @@
 /*
  * udf.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -136,6 +136,7 @@ static int udf_apply_record(udf_call* call, as_rec* rec, as_result* result);
 static bool udf_timer_timedout(const as_timer* timer);
 static uint64_t udf_timer_timeslice(const as_timer* timer);
 static uint8_t udf_master_write(udf_record* urecord, rw_request* rw);
+static void udf_update_sindex(udf_record* urecord);
 
 static void udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result, uint8_t result_code, cf_dyn_buf* db);
 static void udf_master_done(udf_record* urecord, as_rec* urec, as_result* result, cf_dyn_buf* db);
@@ -664,7 +665,7 @@ udf_timeout_cb(rw_request* rw)
 static transaction_status
 udf_master(rw_request* rw, as_transaction* tr)
 {
-	CF_ALLOC_SET_NS_ARENA(tr->rsv.ns);
+	CF_ALLOC_SET_NS_ARENA_DIM(tr->rsv.ns);
 
 	udf_def def;
 	udf_call call = { .def = &def, .tr = tr };
@@ -1056,26 +1057,15 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 			as_single_bin_copy(as_index_get_single_bin(r), rd->bins);
 		}
 		else {
-			if (record_has_sindex(r, ns) &&
-					// Adjust sindex, looking at old and new bins.
-					write_sindex_update(ns, as_index_get_set_name(r, ns),
-							&r->keyd, urecord->old_bins, urecord->n_old_bins,
-							rd->bins, rd->n_bins)) {
-				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
-			}
-
+			udf_update_sindex(urecord);
 			as_bin_destroy_all(urecord->cleanup_bins, urecord->n_cleanup_bins);
 			as_storage_rd_update_bin_space(rd);
 		}
 
 		as_storage_record_adjust_mem_stats(rd, urecord->old_memory_bytes);
 	}
-	else if (! ns->single_bin && record_has_sindex(r, ns) &&
-			// Adjust sindex, looking at old and new bins.
-			write_sindex_update(ns, as_index_get_set_name(r, ns), &r->keyd,
-					urecord->old_bins, urecord->n_old_bins, rd->bins,
-					rd->n_bins)) {
-		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+	else {
+		udf_update_sindex(urecord);
 	}
 
 	tr->generation = r->generation;
@@ -1095,6 +1085,22 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	will_replicate(r, ns);
 
 	return AS_OK;
+}
+
+static void
+udf_update_sindex(udf_record* urecord) {
+	as_namespace* ns = urecord->tr->rsv.ns;
+	as_storage_rd* rd = urecord->rd;
+	as_record* r = rd->r;
+
+	if (set_has_sindex(r, ns)) {
+		update_sindex(ns, urecord->r_ref, urecord->old_bins,
+				urecord->n_old_bins, rd->bins, rd->n_bins);
+	}
+	else {
+		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+		as_index_clear_in_sindex(r);
+	}
 }
 
 

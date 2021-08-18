@@ -31,11 +31,11 @@
 int u160Cmp (void *s1, void *s2);
 int llCmp   (void *s1, void *s2);
 int ylCmp   (void *s1, void *s2);
+int lCmp    (void *s1, void *s2);
 
-char *createBTKey(ai_obj *key, bool *med, uint32 *ksize, bt *btr, btk_t *btk);
+char *createBTKey(ai_obj *key, bool *med, bt *btr, btk_t *btk);
 void  destroyBTKey(char *btkey, bool  med);
 
 void   convertStream2Key(uchar *stream, ai_obj *key, bt *btr);
 uchar *parseStream(uchar *stream, bt *btr);
-void  *createStream(bt *btr, void *val, char *btkey, uint32 klen, uint32 *ssize, crs_t *crs);
-bool   destroyStream(bt *btr, uchar *ostream);
+void  *createStream(bt *btr, void *val, char *btkey, uint32 *ssize, crs_t *crs);

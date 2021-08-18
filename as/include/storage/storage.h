@@ -185,7 +185,6 @@ bool as_storage_record_load_pickle(as_storage_rd *rd);
 int as_storage_record_write(as_storage_rd *rd);
 
 // Storage capacity monitoring.
-void as_storage_wait_for_defrag();
 bool as_storage_overloaded(const struct as_namespace_s *ns, uint32_t margin, const char* tag); // returns true if write queue is too backed up
 void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
@@ -244,6 +243,7 @@ void as_storage_load_ssd(struct as_namespace_s *ns, cf_queue *complete_q); // ta
 void as_storage_load_ticker_ssd(const struct as_namespace_s *ns); // table used directly in as_storage_init()
 void as_storage_sindex_build_all_ssd(struct as_namespace_s *ns); // called directly without any table - TODO - add table?
 void as_storage_activate_ssd(struct as_namespace_s *ns);
+bool as_storage_wait_for_defrag_ssd(struct as_namespace_s *ns);
 void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
 void as_storage_shutdown_ssd(struct as_namespace_s *ns);
 
@@ -258,7 +258,6 @@ bool as_storage_record_load_key_ssd(as_storage_rd *rd);
 bool as_storage_record_load_pickle_ssd(as_storage_rd *rd);
 int as_storage_record_write_ssd(as_storage_rd *rd);
 
-void as_storage_wait_for_defrag_ssd(struct as_namespace_s *ns);
 bool as_storage_overloaded_ssd(const struct as_namespace_s *ns, uint32_t margin, const char* tag);
 void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
@@ -288,6 +287,7 @@ void as_storage_init_pmem(struct as_namespace_s *ns);
 void as_storage_load_pmem(struct as_namespace_s *ns, cf_queue *complete_q); // table used directly in as_storage_init()
 void as_storage_load_ticker_pmem(const struct as_namespace_s *ns); // table used directly in as_storage_init()
 void as_storage_activate_pmem(struct as_namespace_s* ns);
+bool as_storage_wait_for_defrag_pmem(struct as_namespace_s *ns);
 void as_storage_start_tomb_raider_pmem(struct as_namespace_s* ns);
 void as_storage_shutdown_pmem(struct as_namespace_s* ns);
 
@@ -302,7 +302,6 @@ bool as_storage_record_load_key_pmem(as_storage_rd *rd);
 bool as_storage_record_load_pickle_pmem(as_storage_rd* rd);
 int as_storage_record_write_pmem(as_storage_rd *rd);
 
-void as_storage_wait_for_defrag_pmem(struct as_namespace_s *ns);
 bool as_storage_overloaded_pmem(const struct as_namespace_s *ns, uint32_t margin, const char* tag);
 void as_storage_defrag_sweep_pmem(struct as_namespace_s *ns);
 

@@ -23,7 +23,6 @@
  *  Aerospike Index Object Implementation.
  */
 
-#include <assert.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,7 +33,7 @@
 #include "ai_obj.h"
 #include "stream.h"
 
-#include <citrusleaf/alloc.h>
+#include "log.h"
 
 void init_ai_obj(ai_obj *a)
 {
@@ -66,41 +65,11 @@ static int ai_objCmp(ai_obj *a, ai_obj *b)
 	} else if (C_IS_DG(a->type)) {
 		return u160Cmp(&a->y, &b->y);
 	} else {
-		assert(!"ai_objCmp ERROR");
+		cf_crash(AS_SINDEX, "ai_objCmp bad type %u", a->type);
 	}
 }
 
 bool ai_objEQ(ai_obj *a, ai_obj *b)
 {
 	return !ai_objCmp(a, b);
-}
-
-static void dump_ai_obj_internal(FILE *fp, ai_obj *a, bool as_digest)
-{
-	if (C_IS_L(a->type) || C_IS_G(a->type)) {
-		fprintf(fp, "\tLONG ai_obj: val: %lu\n", a->l);
-	} else if (C_IS_DG(a->type)) {
-		fprintf(fp, "\tU160 ai_obj:");
-		if (as_digest) {
-			uint8_t *d = (uint8_t *)&(a->y);
-			fprintf(fp, "0x"
-					"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
-					"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
-					d[0],  d[1],  d[2],  d[3],  d[4],
-					d[5],  d[6],  d[7],  d[8],  d[9],
-					d[10], d[11], d[12], d[13], d[14],
-					d[15], d[16], d[17], d[18], d[19]);
-		} else {
-			DEBUG_U160(fp, a->y);
-			fprintf(fp, "\n");
-		}
-	} else {
-		fprintf(fp, "\tUNINITIALISED ai_obj\n");
-	}
-}
-
-
-void dump_ai_obj_as_digest(FILE *fp, ai_obj *a)
-{
-	dump_ai_obj_internal(fp, a, true);
 }

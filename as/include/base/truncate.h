@@ -70,8 +70,7 @@ typedef struct as_truncate_s {
 // Public API.
 //
 
-void as_truncate_init(struct as_namespace_s* ns);
-void as_truncate_init_smd();
+void as_truncate_init(void);
 void as_truncate_list_cenotaphs(struct as_namespace_s* ns);
 bool as_truncate_lut_is_truncated(uint64_t rec_lut, struct as_namespace_s* ns, const char* set_name, uint32_t set_name_len);
 void as_truncate_done_startup(struct as_namespace_s* ns);
