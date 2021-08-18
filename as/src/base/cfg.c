@@ -4103,7 +4103,7 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
 
-	if (g_config.query_threads % 2 == 0) {
+	if (g_config.query_threads % 2 != 0) {
 		cf_crash_nostack(AS_CFG, "'query-threads' must be an even number");
 	}
 
