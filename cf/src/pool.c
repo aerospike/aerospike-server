@@ -58,7 +58,7 @@ uint32_up_to_pow2(uint32_t x)
 	return 1 << (64 - cf_msb64(x));
 }
 
-#define POOL_MOD(_ix) (_ix & (pool->capacity - 1))
+#define POOL_MOD(_ix) (_ix & pool->cap_minus_1)
 
 
 //==========================================================
@@ -72,6 +72,7 @@ cf_pool_int32_init(cf_pool_int32* pool, uint32_t capacity, int32_t empty_val)
 
 	*pool = (cf_pool_int32){
 			.capacity = round_capacity,
+			.cap_minus_1 = round_capacity - 1,
 			.empty_val = empty_val,
 			.data = cf_malloc(sizeof(int32_t) * round_capacity)
 	};
@@ -103,7 +104,7 @@ cf_pool_int32_pop(cf_pool_int32* pool)
 		return pool->empty_val;
 	}
 
-	// We now own one of the items in the queue.
+	// We now own one of the items in the pool.
 
 	int32_t val;
 
@@ -151,6 +152,7 @@ cf_pool_ptr_init(cf_pool_ptr* pool, uint32_t capacity)
 
 	*pool = (cf_pool_ptr){
 			.capacity = round_capacity,
+			.cap_minus_1 = round_capacity - 1,
 			.data = cf_calloc(round_capacity, sizeof(void*))
 	};
 }
@@ -177,7 +179,7 @@ cf_pool_ptr_pop(cf_pool_ptr* pool)
 		return NULL;
 	}
 
-	// We now own one of the items in the queue.
+	// We now own one of the items in the pool.
 
 	void* val;
 

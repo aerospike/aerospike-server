@@ -36,6 +36,7 @@
 
 typedef struct cf_pool_int32_s {
 	uint32_t capacity;
+	uint32_t cap_minus_1;
 
 	uint32_t read_ix;
 	uint32_t write_ix;
@@ -48,6 +49,7 @@ typedef struct cf_pool_int32_s {
 
 typedef struct cf_pool_ptr_s {
 	uint32_t capacity;
+	uint32_t cap_minus_1;
 
 	uint32_t read_ix;
 	uint32_t write_ix;
