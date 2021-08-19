@@ -147,18 +147,18 @@ pthread_rwlock_t g_sindex_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 // get should be called under SINDEX_GRLOCK
 
 static void
-set_binid_has_sindex(as_namespace *ns, uint32_t binid)
+binid_set_bit(as_namespace *ns, uint32_t binid)
 {
 	uint32_t index = binid / 32;
 
-	uint32_t temp = ns->binid_has_sindex[index];
+	uint32_t temp = ns->sindex_binid_bitmap[index];
 	temp |= (1U << (binid % 32));
 
-	ns->binid_has_sindex[index] = temp;
+	ns->sindex_binid_bitmap[index] = temp;
 }
 
 static void
-reset_binid_has_sindex(as_namespace *ns, uint32_t binid)
+binid_clear_bit(as_namespace *ns, uint32_t binid)
 {
 	for (uint32_t i = 0, a = 0; i < AS_SINDEX_MAX && a < ns->sindex_cnt; i++) {
 		as_sindex *si = &ns->sindex[i];
@@ -174,18 +174,18 @@ reset_binid_has_sindex(as_namespace *ns, uint32_t binid)
 
 	uint32_t index = binid / 32;
 
-	uint32_t temp = ns->binid_has_sindex[index];
+	uint32_t temp = ns->sindex_binid_bitmap[index];
 	temp &= ~(1U << (binid % 32));
 
-	ns->binid_has_sindex[index] = temp;
+	ns->sindex_binid_bitmap[index] = temp;
 }
 
 static bool
-binid_has_sindex(const as_namespace *ns, uint32_t binid)
+binid_bit_is_set(const as_namespace *ns, uint32_t binid)
 {
 	uint32_t index = binid / 32;
 
-	uint32_t temp = ns->binid_has_sindex[index];
+	uint32_t temp = ns->sindex_binid_bitmap[index];
 
 	return (temp & (1U << (binid % 32))) != 0;
 }
@@ -554,8 +554,8 @@ put_in_set_binid_hash(as_namespace *ns, char *set, uint32_t binid,
 /*
  * Should happen under SINDEX_GWLOCK.
  */
-bool
-as_sindex_delete_from_set_binid_hash(as_namespace *ns, as_sindex_metadata *imd)
+static bool
+delete_from_set_binid_hash(as_namespace *ns, as_sindex_metadata *imd)
 {
 	char si_prop[PROP_KEY_SIZE];
 
@@ -615,6 +615,41 @@ as_sindex_delete_from_set_binid_hash(as_namespace *ns, as_sindex_metadata *imd)
 	}
 
 	return true;
+}
+
+static bool
+add_defn(as_namespace *ns, as_sindex_metadata *imd, uint32_t si_ix)
+{
+	if (! put_in_set_binid_hash(ns, imd->set, imd->binid, si_ix)) {
+		cf_warning(AS_SINDEX, "failed to insert index %s in the set_binid hash",
+				imd->iname);
+		return false;
+	}
+
+	char padded_iname[AS_ID_INAME_SZ] = { 0 }; // must pad key
+
+	strcpy(padded_iname, imd->iname);
+	cf_shash_put(ns->sindex_iname_hash, padded_iname, &si_ix);
+
+	binid_set_bit(ns, imd->binid);
+
+	return true;
+}
+
+void
+as_sindex_delete_defn(as_namespace *ns, as_sindex_metadata *imd)
+{
+	if (! delete_from_set_binid_hash(ns, imd)) {
+		cf_warning(AS_SINDEX, "index %s not found in the set_binid hash",
+				imd->iname);
+	}
+
+	char padded_iname[AS_ID_INAME_SZ] = { 0 };
+
+	strcpy(padded_iname, imd->iname);
+	cf_shash_delete(ns->sindex_iname_hash, padded_iname);
+
+	binid_clear_bit(ns, imd->binid);
 }
 
 
@@ -704,7 +739,7 @@ uint32_t
 as_sindex_arr_lookup_by_set_binid_lockfree(const as_namespace *ns,
 		const char *set, uint32_t binid, as_sindex **si_arr)
 {
-	if (! binid_has_sindex(ns, binid)) {
+	if (! binid_bit_is_set(ns, binid)) {
 		return 0;
 	}
 
@@ -794,7 +829,7 @@ static as_sindex *
 lookup_by_defn_lockfree(const as_namespace *ns, const char *set, uint32_t binid,
 		as_sindex_ktype type, as_sindex_type itype, const char *path, char flag)
 {
-	if (! binid_has_sindex(ns, binid)) {
+	if (! binid_bit_is_set(ns, binid)) {
 		return NULL;
 	}
 
@@ -1176,12 +1211,7 @@ smd_startup_create(as_namespace *ns, as_sindex_metadata *imd)
 
 	uint32_t si_ix = ns->sindex_cnt;
 
-	put_in_set_binid_hash(ns, imd->set, imd->binid, si_ix);
-
-	char iname[AS_ID_INAME_SZ] = { 0 };
-
-	strcpy(iname, imd->iname);
-	cf_shash_put(ns->sindex_iname_hash, iname, &si_ix);
+	add_defn(ns, imd, si_ix);
 
 	// Init si.
 	as_sindex *si = &ns->sindex[si_ix]; // memset 0 at startup, + state INACTIVE
@@ -1204,7 +1234,6 @@ smd_startup_create(as_namespace *ns, as_sindex_metadata *imd)
 	// Init pimd.
 	create_pmeta(si, imd->n_pimds);
 	ai_btree_create(si->imd);
-	set_binid_has_sindex(ns, si->imd->binid);
 
 	setup_histogram(si);
 	stats_clear(si);
@@ -1222,8 +1251,8 @@ smd_startup_create(as_namespace *ns, as_sindex_metadata *imd)
 			(int64_t)ai_btree_get_isize(si->imd));
 }
 
-static void
-sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd)
+void
+as_sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd)
 {
 	uint32_t si_ix = AS_SINDEX_MAX;
 	as_sindex *si = NULL;
@@ -1257,16 +1286,9 @@ sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd)
 		return;
 	}
 
-	if (! put_in_set_binid_hash(ns, imd->set, imd->binid, si_ix)) {
-		cf_warning(AS_SINDEX, "failed to insert index %s in the set_binid hash",
-				imd->iname);
+	if (! add_defn(ns, imd, si_ix)) {
 		return;
 	}
-
-	char padded_iname[AS_ID_INAME_SZ] = { 0 }; // must pad key
-
-	strcpy(padded_iname, imd->iname);
-	cf_shash_put(ns->sindex_iname_hash, padded_iname, &si_ix);
 
 	// Init SI.
 	si = &ns->sindex[si_ix];
@@ -1285,7 +1307,6 @@ sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd)
 	// Init PIMD.
 	create_pmeta(si, imd->n_pimds);
 	ai_btree_create(si->imd);
-	set_binid_has_sindex(ns, si->imd->binid);
 
 	// Init stats.
 	setup_histogram(si);
@@ -1316,27 +1337,6 @@ sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd)
 	else {
 		as_sindex_populate_add(si);
 	}
-}
-
-void
-as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
-{
-	// Ideally there should be one lock per namespace, but because the
-	// Aerospike Index metadata is single global structure we need a overriding
-	// lock for that. NB if it becomes per namespace have a file lock
-	SINDEX_GWLOCK();
-
-	if (lookup_by_iname_lockfree(ns, imd->iname,
-			AS_SINDEX_LOOKUP_SKIP_RESERVATION |
-			AS_SINDEX_LOOKUP_SKIP_ACTIVE_CHECK) != NULL) {
-		cf_detail(AS_SINDEX,"Index %s already exists", imd->iname);
-		SINDEX_GWUNLOCK();
-		return;
-	}
-
-	sindex_create_lockless(ns, imd);
-
-	SINDEX_GWUNLOCK();
 }
 
 static void
@@ -1377,7 +1377,7 @@ smd_create(as_namespace *ns, as_sindex_metadata *imd)
 		}
 	}
 
-	cf_info(AS_SINDEX, "SINDEX CREATE: request received via smd for %s:%s",
+	cf_info(AS_SINDEX, "SINDEX CREATE: request received for %s:%s via smd",
 			ns->name, imd->iname);
 
 	if (found_defn) {
@@ -1385,7 +1385,6 @@ smd_create(as_namespace *ns, as_sindex_metadata *imd)
 
 		if (si->state == AS_SINDEX_ACTIVE) {
 			si->state = AS_SINDEX_DESTROY;
-			reset_binid_has_sindex(ns, si->imd->binid);
 			as_sindex_release(si);
 		}
 	}
@@ -1395,7 +1394,6 @@ smd_create(as_namespace *ns, as_sindex_metadata *imd)
 
 		if (si->state == AS_SINDEX_ACTIVE) {
 			si->state = AS_SINDEX_DESTROY;
-			reset_binid_has_sindex(ns, si->imd->binid);
 			as_sindex_release(si);
 		}
 	}
@@ -1417,7 +1415,7 @@ smd_create(as_namespace *ns, as_sindex_metadata *imd)
 	}
 
 	// Not found.
-	sindex_create_lockless(ns, imd);
+	as_sindex_create_lockless(ns, imd);
 
 	SINDEX_GWUNLOCK();
 }
@@ -1464,12 +1462,11 @@ smd_drop(as_namespace *ns, as_sindex_metadata *imd)
 		return;
 	}
 
-	cf_info(AS_SINDEX, "SINDEX DROP: request received via smd for %s:%s",
+	cf_info(AS_SINDEX, "SINDEX DROP: request received for %s:%s via smd",
 			ns->name, si->imd->iname);
 
 	if (si->state == AS_SINDEX_ACTIVE) {
 		si->state = AS_SINDEX_DESTROY;
-		reset_binid_has_sindex(ns, si->imd->binid);
 		as_sindex_release(si); // looked without reservation, releasing last ref
 	}
 
@@ -2472,7 +2469,7 @@ as_sindex_sbins_list_diff_populate(as_sindex_bin *sbins, as_namespace *ns, const
 {
 	uint16_t id = b_new->id;
 
-	if (! binid_has_sindex(ns, id)) {
+	if (! binid_bit_is_set(ns, id)) {
 		return 0;
 	}
 
@@ -2636,7 +2633,7 @@ sbins_from_bin_buf(as_namespace *ns, const char *set, const as_bin *b,
 		return 0;
 	}
 
-	if (! binid_has_sindex(ns, b->id)) {
+	if (! binid_bit_is_set(ns, b->id)) {
 		return 0;
 	}
 

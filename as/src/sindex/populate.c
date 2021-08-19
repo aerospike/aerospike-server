@@ -504,10 +504,7 @@ run_destroy_sindex(void* udata)
 				si->state, AS_SINDEX_DESTROY, si,
 				si != NULL ? (si->imd != NULL ? si->imd->iname : NULL) : NULL);
 
-		if (! as_sindex_delete_from_set_binid_hash(si->ns, si->imd)) {
-			cf_warning(AS_SINDEX, "index %s not found in the set_binid hash",
-					si->imd->iname);
-		}
+		as_sindex_delete_defn(si->ns, si->imd);
 
 		// Free entire usage counter before tree destroy.
 		cf_atomic64_sub(&si->ns->n_bytes_sindex_memory,
@@ -543,20 +540,17 @@ run_destroy_sindex(void* udata)
 
 		si->imd = NULL;
 
-		char padded_iname[AS_ID_INAME_SZ] = { 0 };
-
-		strcpy(padded_iname, imd->iname);
-		cf_shash_delete(si->ns->sindex_iname_hash, padded_iname);
-
 		as_namespace* ns = si->ns;
 
 		si->ns = NULL;
 
-		as_sindex_metadata* recreate_imd = NULL;
-
 		if (si->recreate_imd != NULL) {
-			recreate_imd = si->recreate_imd;
+			as_sindex_metadata* recreate_imd = si->recreate_imd;
 			si->recreate_imd = NULL;
+
+			as_sindex_create_lockless(ns, recreate_imd);
+			as_sindex_imd_free(recreate_imd);
+			cf_rc_free(recreate_imd);
 		}
 
 		// Remember this is going to release the write lock of meta-data first.
@@ -571,12 +565,6 @@ run_destroy_sindex(void* udata)
 
 		as_sindex_imd_free(imd);
 		cf_rc_free(imd);
-
-		if (recreate_imd != NULL) {
-			as_sindex_create(ns, recreate_imd);
-			as_sindex_imd_free(recreate_imd);
-			cf_rc_free(recreate_imd);
-		}
 	}
 
 	return NULL;

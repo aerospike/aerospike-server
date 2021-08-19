@@ -713,7 +713,7 @@ struct as_namespace_s {
 	struct as_sindex_s* sindex; // array with AS_MAX_SINDEX metadata
 	cf_shash*		sindex_set_binid_hash;
 	cf_shash*		sindex_iname_hash;
-	uint32_t		binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
+	uint32_t		sindex_binid_bitmap[AS_BINID_HAS_SINDEX_SIZE];
 
 	cf_mutex		si_gc_list_mutex;
 	// The queues are not threadsafe - protected by si_gc_list_mutex.

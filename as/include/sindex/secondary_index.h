@@ -411,7 +411,7 @@ void as_sindex_start(void);
  * 
 */
 // **************************************************************************************************
-extern void as_sindex_create(as_namespace *ns, as_sindex_metadata *imd);
+extern void as_sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd);
 extern void as_sindex_destroy_pmetadata(as_sindex *si);
 // **************************************************************************************************
 
@@ -443,7 +443,7 @@ const char * as_sindex_err_str(as_sindex_status status);
 uint8_t as_sindex_err_to_clienterr(int err, char *fname, int lineno);
 bool as_sindex_isactive(as_sindex *si);
 bool as_sindex_can_query(const as_sindex *si);
-bool as_sindex_delete_from_set_binid_hash(as_namespace *ns, as_sindex_metadata *imd);
+void as_sindex_delete_defn(as_namespace *ns, as_sindex_metadata *imd);
 as_val *as_sindex_extract_val_from_path(const as_sindex_metadata *imd, as_val *v);
 bool as_sindex_can_defrag_record(const as_namespace *ns, cf_arenax_handle r_h);
 bool as_sindex_extract_bin_path(as_sindex_metadata *imd, const char *path_str);
