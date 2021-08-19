@@ -87,7 +87,7 @@ typedef enum {
 #define RW_INFO_UNUSED_10		0x0010
 #define RW_INFO_UNUSED_20		0x0020
 #define RW_INFO_UNUSED_40		0x0040
-#define RW_INFO_SINDEX_TOUCHED	0x0080
+#define RW_INFO_UNUSED_80		0x0080 // was sindex-touched (used up to 5.6)
 #define RW_INFO_UNUSED_100		0x0100
 #define RW_INFO_UNREPLICATED	0x0200 // enterprise only
 

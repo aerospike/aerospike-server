@@ -435,9 +435,6 @@ pack_info_bits(as_transaction* tr)
 {
 	uint32_t info = 0;
 
-	// FIXME: do only in compatibility mode?
-	info |= RW_INFO_SINDEX_TOUCHED;
-
 	if (respond_on_master_complete(tr)) {
 		info |= RW_INFO_NO_REPL_ACK;
 	}
