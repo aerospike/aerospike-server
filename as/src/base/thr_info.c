@@ -6703,7 +6703,7 @@ as_info_init()
 	// Commands expected via asinfo/telnet. If it's not in this list, it's a
 	// "client-only" command, e.g. for cluster management.
 	as_info_set("help",
-			"bins;build;build_os;build_time;"
+			"best-practices;bins;build;build_os;build_time;"
 			"cluster-name;config-get;config-set;"
 			"digests;dump-cluster;dump-fabric;dump-hb;dump-hlc;dump-migrates;"
 			"dump-msgs;dump-rw;dump-si;dump-skew;dump-wb-summary;"
