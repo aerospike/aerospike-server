@@ -105,7 +105,7 @@ typedef struct as_config_s {
 	bool			fabric_benchmarks_enabled;
 	bool			health_check_enabled;
 	bool			info_hist_enabled;
-	uint64_t		ignore_best_practices;
+	bool			enforce_best_practices;
 	const char*		feature_key_files[MAX_FEATURE_KEY_FILES];
 	uint32_t		n_feature_key_files; // indirect config
 	uint32_t		n_info_threads;

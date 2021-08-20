@@ -112,6 +112,8 @@ int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
 
 as_stats g_stats = { 0 }; // separate .c file not worth it
 
+cf_dyn_buf g_bad_practices = { 0 };
+
 uint64_t g_start_sec; // start time of the server
 
 static cf_queue *g_info_work_q = 0;
@@ -399,6 +401,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 {
 	uint64_t now_sec = cf_get_seconds();
 
+	info_append_bool(db, "failed_best_practices", g_bad_practices.used_sz != 0);
+
 	as_exchange_cluster_info(db);
 	info_append_uint32(db, "cluster_min_compatibility_id", as_exchange_min_compatibility_id()); // not in ticker
 	info_append_uint32(db, "cluster_max_compatibility_id", as_exchange_max_compatibility_id()); // not in ticker
@@ -540,6 +544,21 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "fabric_rw_recv_rate", g_stats.fabric_rw_r_rate);
 
 	cf_dyn_buf_chomp(db);
+
+	return 0;
+}
+
+int
+info_get_best_practices(char *name, cf_dyn_buf *db)
+{
+	cf_dyn_buf_append_string(db, "failed_best_practices=");
+
+	if (g_bad_practices.used_sz == 0) {
+		cf_dyn_buf_append_string(db, "none");
+	}
+	else {
+		cf_dyn_buf_append_buf(db, g_bad_practices.buf, g_bad_practices.used_sz);
+	}
 
 	return 0;
 }
@@ -1734,16 +1753,12 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
+	info_append_bool(db, "enforce-best-practices", g_config.enforce_best_practices);
 
 	for (uint32_t i = 0; i < g_config.n_feature_key_files; i++) {
 		info_append_indexed_string(db, "feature-key-file", i, NULL, g_config.feature_key_files[i]);
 	}
 
-	info_append_bool(db, "ignore-best-min-free-kbytes", (g_config.ignore_best_practices & CF_OS_BP_MIN_FREE_KBYTES) != 0);
-	info_append_bool(db, "ignore-best-swappiness", (g_config.ignore_best_practices & CF_OS_BP_SWAPPINESS) != 0);
-	info_append_bool(db, "ignore-best-thp-defrag", (g_config.ignore_best_practices & CF_OS_BP_THP_DEFRAG) != 0);
-	info_append_bool(db, "ignore-best-thp-enabled", (g_config.ignore_best_practices & CF_OS_BP_THP_ENABLED) != 0);
-	info_append_bool(db, "ignore-best-zone-reclaim-mode", (g_config.ignore_best_practices & CF_OS_BP_ZONE_RECLAIM_MODE) != 0);
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
@@ -6715,6 +6730,7 @@ as_info_init()
 	// Set up some dynamic functions
 	as_info_set_dynamic("alumni-clear-std", as_service_list_dynamic, false);          // Supersedes "services-alumni" for non-TLS service.
 	as_info_set_dynamic("alumni-tls-std", as_service_list_dynamic, false);            // Supersedes "services-alumni" for TLS service.
+	as_info_set_dynamic("best-practices", info_get_best_practices, false);            // Returns best-practices information.
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
 	as_info_set_dynamic("cluster-name", info_get_cluster_name, false);                // Returns cluster name.
 	as_info_set_dynamic("endpoints", info_get_endpoints, false);                      // Returns the expanded bind / access address configuration.

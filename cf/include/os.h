@@ -31,19 +31,12 @@
 #include <stdint.h>
 #include <sys/stat.h>
 
+#include "dynbuf.h"
+
 
 //==========================================================
 // Typedefs & constants.
 //
-
-typedef enum {
-	CF_OS_BP_MIN_FREE_KBYTES = 1L << 0,
-	CF_OS_BP_SWAPPINESS = 1L << 1,
-	CF_OS_BP_THP_DEFRAG = 1L << 2,
-	CF_OS_BP_THP_ENABLED = 1L << 3,
-	CF_OS_BP_ZONE_RECLAIM_MODE = 1L << 4
-	// 32 to 63 reserved for cfg.
-} cf_os_bp;
 
 typedef enum {
 	CF_OS_FILE_RES_OK,
@@ -88,4 +81,4 @@ cf_os_file_res cf_os_read_int_from_file(const char* path, int64_t* val);
 // Public API - best practices.
 //
 
-bool cf_os_best_practices_check(uint64_t ignore, uint64_t max_alloc_sz);
+void cf_os_best_practices_check(cf_dyn_buf* db, uint64_t max_alloc_sz);

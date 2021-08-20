@@ -83,16 +83,6 @@
 
 
 //==========================================================
-// Typedefs & constants.
-//
-
-typedef enum {
-	// 0 to 31 reserved for os.
-	CFG_BP_SERVICE_THREADS = 1L << 32
-} cfg_bp;
-
-
-//==========================================================
 // Globals.
 //
 
@@ -130,24 +120,18 @@ static void cfg_init_serv_spec(cf_serv_spec* spec_p);
 static cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
 static char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
 static void cfg_keep_cap(bool keep, bool* what, int32_t cap);
-static void cfg_ignore_best_practice(const cfg_line* p_line, uint64_t value);
-static bool cfg_best_practices_check(void);
+static void cfg_best_practices_check(void);
 
 
 //==========================================================
 // Inlines & macros.
 //
 
-#define check_failed(_ignored, _flag, _name, _msg, ...) \
+#define check_failed(_db, _name, _msg, ...) \
 	do { \
-		if ((_ignored & _flag) != 0) { \
-			cf_info(AS_CFG, "ignored " _name " check - " _msg \
-					, ##__VA_ARGS__); \
-		} \
-		else { \
-			cf_warning(AS_CFG, "failed " _name " check - silence with 'ignore-best-" _name "' - " _msg \
-					, ##__VA_ARGS__); \
-		} \
+		cf_warning(AS_CFG, "failed " _name " check - " _msg, ##__VA_ARGS__); \
+		cf_dyn_buf_append_string(_db, _name); \
+		cf_dyn_buf_append_char(_db, ','); \
 	} \
 	while (false)
 
@@ -294,14 +278,8 @@ typedef enum {
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_HEALTH_CHECK,
 	CASE_SERVICE_ENABLE_HIST_INFO,
+	CASE_SERVICE_ENFORCE_BEST_PRACTICES,
 	CASE_SERVICE_FEATURE_KEY_FILE,
-	CASE_SERVICE_IGNORE_BEST_MIN_FREE_KBYTES,
-	CASE_SERVICE_IGNORE_BEST_PRACTICES,
-	CASE_SERVICE_IGNORE_BEST_SERVICE_THREADS,
-	CASE_SERVICE_IGNORE_BEST_SWAPPINESS,
-	CASE_SERVICE_IGNORE_BEST_THP_DEFRAG,
-	CASE_SERVICE_IGNORE_BEST_THP_ENABLED,
-	CASE_SERVICE_IGNORE_BEST_ZONE_RECLAIM_MODE,
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
 	CASE_SERVICE_LOG_LOCAL_TIME,
@@ -822,14 +800,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-health-check",			CASE_SERVICE_ENABLE_HEALTH_CHECK },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
+		{ "enforce-best-practices",			CASE_SERVICE_ENFORCE_BEST_PRACTICES },
 		{ "feature-key-file",				CASE_SERVICE_FEATURE_KEY_FILE },
-		{ "ignore-best-min-free-kbytes",	CASE_SERVICE_IGNORE_BEST_MIN_FREE_KBYTES },
-		{ "ignore-best-practices",			CASE_SERVICE_IGNORE_BEST_PRACTICES },
-		{ "ignore-best-service-threads",	CASE_SERVICE_IGNORE_BEST_SERVICE_THREADS },
-		{ "ignore-best-swappiness",			CASE_SERVICE_IGNORE_BEST_SWAPPINESS },
-		{ "ignore-best-thp-defrag",			CASE_SERVICE_IGNORE_BEST_THP_DEFRAG },
-		{ "ignore-best-thp-enabled",		CASE_SERVICE_IGNORE_BEST_THP_ENABLED },
-		{ "ignore-best-zone-reclaim-mode",	CASE_SERVICE_IGNORE_BEST_ZONE_RECLAIM_MODE },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
@@ -2297,30 +2269,12 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_ENABLE_HIST_INFO:
 				c->info_hist_enabled = cfg_bool(&line);
 				break;
+			case CASE_SERVICE_ENFORCE_BEST_PRACTICES:
+				c->enforce_best_practices = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_FEATURE_KEY_FILE:
 				cfg_enterprise_only(&line);
 				cfg_add_feature_key_file(cfg_strdup_no_checks(&line));
-				break;
-			case CASE_SERVICE_IGNORE_BEST_MIN_FREE_KBYTES:
-				cfg_ignore_best_practice(&line, CF_OS_BP_MIN_FREE_KBYTES);
-				break;
-			case CASE_SERVICE_IGNORE_BEST_PRACTICES:
-				cfg_ignore_best_practice(&line, ~0L);
-				break;
-			case CASE_SERVICE_IGNORE_BEST_SERVICE_THREADS:
-				cfg_ignore_best_practice(&line, CFG_BP_SERVICE_THREADS);
-				break;
-			case CASE_SERVICE_IGNORE_BEST_SWAPPINESS:
-				cfg_ignore_best_practice(&line, CF_OS_BP_SWAPPINESS);
-				break;
-			case CASE_SERVICE_IGNORE_BEST_THP_DEFRAG:
-				cfg_ignore_best_practice(&line, CF_OS_BP_THP_DEFRAG);
-				break;
-			case CASE_SERVICE_IGNORE_BEST_THP_ENABLED:
-				cfg_ignore_best_practice(&line, CF_OS_BP_THP_ENABLED);
-				break;
-			case CASE_SERVICE_IGNORE_BEST_ZONE_RECLAIM_MODE:
-				cfg_ignore_best_practice(&line, CF_OS_BP_ZONE_RECLAIM_MODE);
 				break;
 			case CASE_SERVICE_INFO_THREADS:
 				c->n_info_threads = cfg_u32(&line, 1, MAX_INFO_THREADS);
@@ -4370,7 +4324,6 @@ as_config_post_process(as_config* c, const char* config_file)
 	//
 
 	uint64_t max_alloc_sz = 0;
-	uint64_t ns_mem = 0;
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
@@ -4380,8 +4333,6 @@ as_config_post_process(as_config* c, const char* config_file)
 				ns->index_stage_size > max_alloc_sz) {
 			max_alloc_sz = ns->index_stage_size;
 		}
-
-		ns_mem += ns->memory_size;
 
 		client_replica_maps_create(ns);
 
@@ -4526,19 +4477,17 @@ as_config_post_process(as_config* c, const char* config_file)
 		ns->ttl_hist = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, TTL_HIST_NUM_BUCKETS);
 	}
 
-	uint64_t sys_mem = (uint64_t)sysconf(_SC_PHYS_PAGES) *
-			(uint64_t)sysconf(_SC_PAGESIZE);
+	cf_os_best_practices_check(&g_bad_practices, max_alloc_sz);
+	cfg_best_practices_check();
+	cf_dyn_buf_chomp_char(&g_bad_practices, ',');
 
-	if (ns_mem > sys_mem) {
-		cf_crash_nostack(AS_CFG, "namespaces specified more 'memory-size' than the system has RAM (%lu)",
-				sys_mem);
-	}
-
-	bool os_ok = cf_os_best_practices_check(g_config.ignore_best_practices, max_alloc_sz);
-	bool cfg_ok = cfg_best_practices_check();
-
-	if (! os_ok || ! cfg_ok) {
-		cf_crash_nostack(AS_CFG, "failed best-practices checks - see 'http://docs.aerospike.com/docs/operations/install/linux/bestpractices'");
+	if (g_bad_practices.used_sz != 0) {
+		if (c->enforce_best_practices) {
+			cf_crash_nostack(AS_CFG, "failed best-practices checks - see 'http://docs.aerospike.com/docs/operations/install/linux/bestpractices'");
+		}
+		else {
+			cf_warning(AS_CFG, "failed best-practices checks - see 'http://docs.aerospike.com/docs/operations/install/linux/bestpractices'");
+		}
 	}
 }
 
@@ -5155,30 +5104,31 @@ cfg_keep_cap(bool keep, bool* what, int32_t cap)
 }
 
 static void
-cfg_ignore_best_practice(const cfg_line* p_line, uint64_t value)
-{
-	if (cfg_bool(p_line)) {
-		g_config.ignore_best_practices |= value;
-	}
-}
-
-static bool
 cfg_best_practices_check(void)
 {
 	as_config* c = &g_config;
-	uint32_t n_cpus = (uint32_t)cf_topo_count_cpus();
-	uint64_t ignored = c->ignore_best_practices;
 
-	uint64_t failures = 0;
+	uint32_t n_cpus = (uint32_t)cf_topo_count_cpus();
 	uint32_t min_service_threads = c->n_namespaces_not_inlined != 0 ?
 			n_cpus * 3 : n_cpus;
 
 	if (c->n_service_threads < min_service_threads) {
-		failures |= CFG_BP_SERVICE_THREADS;
-		check_failed(ignored, CFG_BP_SERVICE_THREADS,
-				"service-threads", "'service-threads' should be at least %u",
-				min_service_threads);
+		check_failed(&g_bad_practices, "service-threads",
+				"'service-threads' should be at least %u", min_service_threads);
 	}
 
-	return (~c->ignore_best_practices & failures) == 0;
+	uint64_t ns_mem = 0;
+
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		ns_mem += g_config.namespaces[ns_ix]->memory_size;
+	}
+
+	uint64_t sys_mem = (uint64_t)sysconf(_SC_PHYS_PAGES) *
+			(uint64_t)sysconf(_SC_PAGESIZE);
+
+	if (ns_mem > sys_mem) {
+		check_failed(&g_bad_practices, "memory-size",
+				"namespaces specified more 'memory-size' than the system has RAM (%lu)",
+				sys_mem);
+	}
 }

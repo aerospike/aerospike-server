@@ -36,6 +36,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "dynbuf.h"
 #include "log.h"
 
 #include "warnings.h"
@@ -54,26 +55,21 @@ static bool g_use_group_perms = false;
 
 static cf_os_file_res cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf, size_t* limit);
 
-static uint64_t check_min_free_kbytes(uint64_t ignored, uint64_t max_alloc_sz);
-static uint64_t check_swappiness(uint64_t ignored);
-static uint64_t check_thp(uint64_t ignored);
-static uint64_t check_zone_reclaim_mode(uint64_t ignored);
+static void check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz);
+static void check_swappiness(cf_dyn_buf* db);
+static void check_thp(cf_dyn_buf* db);
+static void check_zone_reclaim_mode(cf_dyn_buf* db);
 
 
 //==========================================================
 // Inlines & macros.
 //
 
-#define check_failed(_ignored, _flag, _name, _msg, ...) \
+#define check_failed(_db, _name, _msg, ...) \
 	do { \
-		if ((_ignored & _flag) != 0) { \
-			cf_info(CF_OS, "ignored " _name " check - " _msg \
-					, ##__VA_ARGS__); \
-		} \
-		else { \
-			cf_warning(CF_OS, "failed " _name " check - silence with 'ignore-best-" _name "' - " _msg \
-					, ##__VA_ARGS__); \
-		} \
+		cf_warning(CF_OS, "failed " _name " check - " _msg, ##__VA_ARGS__); \
+		cf_dyn_buf_append_string(_db, _name); \
+		cf_dyn_buf_append_char(_db, ','); \
 	} \
 	while (false)
 
@@ -196,14 +192,13 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 // Public API - best practices.
 //
 
-bool
-cf_os_best_practices_check(uint64_t ignore, uint64_t max_alloc_sz)
+void
+cf_os_best_practices_check(cf_dyn_buf* db, uint64_t max_alloc_sz)
 {
-	uint64_t failures = check_min_free_kbytes(ignore, max_alloc_sz) |
-			check_thp(ignore) | check_swappiness(ignore) |
-			check_zone_reclaim_mode(ignore);
-
-	return (~ignore & failures) == 0;
+	check_min_free_kbytes(db, max_alloc_sz);
+	check_thp(db);
+	check_swappiness(db);
+	check_zone_reclaim_mode(db);
 }
 
 
@@ -231,35 +226,30 @@ cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf,
 // Local helpers - best practices.
 //
 
-static uint64_t
-check_min_free_kbytes(uint64_t ignored, uint64_t max_alloc_sz)
+static void
+check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz)
 {
 	static const char* path = "/proc/sys/vm/min_free_kbytes";
-
 	uint64_t minimum_kb = (max_alloc_sz / 1024) + (100 * 1024);
 	uint64_t min_free_kbytes;
 
 	switch (cf_os_read_int_from_file(path, (int64_t*)&min_free_kbytes)) {
 	case CF_OS_FILE_RES_OK:
 		if (min_free_kbytes < minimum_kb) {
-			check_failed(ignored, CF_OS_BP_MIN_FREE_KBYTES,
-					"min-free-kbytes", "min_free_kbytes should be at least %lu",
-					minimum_kb);
-			return CF_OS_BP_MIN_FREE_KBYTES;
+			check_failed(db, "min-free-kbytes",
+					"min_free_kbytes should be at least %lu", minimum_kb);
 		}
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
 		break;
 	case CF_OS_FILE_RES_ERROR:
 	default:
-		cf_crash(CF_OS, "error reading '%s'", path);
+		cf_crash_nostack(CF_OS, "error reading '%s'", path);
 	}
-
-	return 0;
 }
 
-static uint64_t
-check_swappiness(uint64_t ignored)
+static void
+check_swappiness(cf_dyn_buf* db)
 {
 	static const char* path = "/proc/sys/vm/swappiness";
 	int64_t swappiness;
@@ -267,23 +257,19 @@ check_swappiness(uint64_t ignored)
 	switch (cf_os_read_int_from_file(path, &swappiness)) {
 	case CF_OS_FILE_RES_OK:
 		if (swappiness != 0) {
-			check_failed(ignored, CF_OS_BP_SWAPPINESS,
-					"swappiness", "swappiness not set to 0");
-			return CF_OS_BP_SWAPPINESS;
+			check_failed(db, "swappiness", "swappiness not set to 0");
 		}
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
 		break;
 	case CF_OS_FILE_RES_ERROR:
 	default:
-		cf_crash(CF_OS, "error reading '%s'", path);
+		cf_crash_nostack(CF_OS, "error reading '%s'", path);
 	}
-
-	return 0;
 }
 
-static uint64_t
-check_thp(uint64_t ignored)
+static void
+check_thp(cf_dyn_buf* db)
 {
 	static const char* enabled_paths[] = {
 			"/sys/kernel/mm/transparent_hugepage/enabled",
@@ -291,25 +277,19 @@ check_thp(uint64_t ignored)
 	};
 	uint32_t n_enabled_paths = sizeof(enabled_paths) / sizeof(char*);
 
-	uint64_t failures = 0;
 	char buf[128];
-	size_t limit = sizeof(buf);
+	size_t limit = sizeof(buf) - 1;
 
 	switch (cf_os_read_any_file(enabled_paths, n_enabled_paths, buf, &limit)) {
 	case CF_OS_FILE_RES_OK:
-		buf[limit - 1] = '\0';
-
+		buf[limit] = '\0';
 		if (strstr(buf, "[never]") != NULL) {
-			return 0;
+			return;
 		}
-
 		if (strstr(buf, "[madvise]") == NULL) {
-			failures |= CF_OS_BP_THP_ENABLED;
-			check_failed(ignored, CF_OS_BP_THP_ENABLED,
-					"thp-enabled",
+			check_failed(db, "thp-enabled",
 					"THP enabled not set to either 'never' or 'madvise'");
 		}
-
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
 		cf_detail(CF_OS, "unable to find '/sys/kernel/mm/{redhat_,}transparent_hugepage/enabled'");
@@ -324,20 +304,16 @@ check_thp(uint64_t ignored)
 			"/sys/kernel/mm/redhat_transparent_hugepage/defrag"
 	};
 	uint32_t n_defrag_paths = sizeof(defrag_paths) / sizeof(char*);
-	limit = sizeof(buf);
+	limit = sizeof(buf) - 1;
 
 	switch (cf_os_read_any_file(defrag_paths, n_defrag_paths, buf, &limit)) {
 	case CF_OS_FILE_RES_OK:
-		buf[limit - 1] = '\0';
-
+		buf[limit] = '\0';
 		if (strstr(buf, "[never]") == NULL &&
 				strstr(buf, "[madvise]") == NULL) {
-			failures |= CF_OS_BP_THP_DEFRAG;
-			check_failed(ignored, CF_OS_BP_THP_DEFRAG,
-					"thp-defrag",
+			check_failed(db, "thp-defrag",
 					"THP defrag not set to either 'never' or 'madvise'");
 		}
-
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
 		cf_detail(CF_OS, "unable to find '/sys/kernel/mm/{redhat_,}transparent_hugepage/defrag'");
@@ -346,12 +322,10 @@ check_thp(uint64_t ignored)
 	default:
 		cf_crash_nostack(CF_OS, "error reading '/sys/kernel/mm/{redhat_,}transparent_hugepage/defrag'");
 	}
-
-	return failures;
 }
 
-static uint64_t
-check_zone_reclaim_mode(uint64_t ignored)
+static void
+check_zone_reclaim_mode(cf_dyn_buf* db)
 {
 	static const char* path = "/proc/sys/vm/zone_reclaim_mode";
 	int64_t mode;
@@ -359,18 +333,14 @@ check_zone_reclaim_mode(uint64_t ignored)
 	switch (cf_os_read_int_from_file(path, &mode)) {
 	case CF_OS_FILE_RES_OK:
 		if (mode != 0) {
-			check_failed(ignored, CF_OS_BP_ZONE_RECLAIM_MODE,
-					"zone-reclaim-mode",
+			check_failed(db, "zone-reclaim-mode",
 					"zone_reclaim_mode not set to 0");
-			return CF_OS_BP_ZONE_RECLAIM_MODE;
 		}
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
 		break;
 	case CF_OS_FILE_RES_ERROR:
 	default:
-		cf_crash(CF_OS, "error reading '%s'", path);
+		cf_crash_nostack(CF_OS, "error reading '%s'", path);
 	}
-
-	return 0;
 }
