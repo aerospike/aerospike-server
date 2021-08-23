@@ -5128,7 +5128,7 @@ cfg_best_practices_check(void)
 
 	if (ns_mem > sys_mem) {
 		check_failed(&g_bad_practices, "memory-size",
-				"namespaces specified more 'memory-size' than the system has RAM (%lu)",
-				sys_mem);
+				"'memory-size' for all namespaces (%lu) exceeds system RAM (%lu)",
+				ns_mem, sys_mem);
 	}
 }
