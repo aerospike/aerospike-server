@@ -560,13 +560,7 @@ delete_from_set_binid_hash(as_namespace *ns, as_sindex_metadata *imd)
 	char si_prop[PROP_KEY_SIZE];
 
 	memset(si_prop, 0, PROP_KEY_SIZE);
-
-	if (imd->set == NULL) {
-		sprintf(si_prop, "_%d", imd->binid);
-	}
-	else {
-		sprintf(si_prop, "%s_%d", imd->set, imd->binid);
-	}
+	sprintf(si_prop, "%s_%u", imd->set == NULL ? "" : imd->set, imd->binid);
 
 	// Get the sindex list corresponding to key.
 	cf_ll *si_ix_ll = NULL;
@@ -668,7 +662,7 @@ si_ix_list_by_defn(const as_namespace *ns, const char *set, uint32_t binid,
 	char si_prop[PROP_KEY_SIZE];
 
 	memset(si_prop, 0, PROP_KEY_SIZE);
-	sprintf(si_prop, "%s_%d", set == NULL ? "" : set, binid);
+	sprintf(si_prop, "%s_%u", set == NULL ? "" : set, binid);
 
 	int rv = cf_shash_get(ns->sindex_set_binid_hash, si_prop, si_ix_ll);
 

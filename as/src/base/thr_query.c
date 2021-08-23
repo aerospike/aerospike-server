@@ -1012,33 +1012,45 @@ hash_track_qtr(as_query_transaction *qtr)
  * Query Request IO functions
  */
 // **************************************************************************************************
-static bool
+static void
 query_add_response(query_work *qwork, as_storage_rd *rd)
 {
 	as_query_transaction *qtr = qwork->qtr;
 
-	// qwork->bb can be reallocated.
-	int32_t ret = as_msg_make_response_bufbuilder(&qwork->bb, rd,
-			qtr->no_bin_data, qtr->binlist);
+	if (qwork->bb != NULL) {
+		// qwork->bb can be reallocated.
+		as_msg_make_response_bufbuilder(&qwork->bb, rd, qtr->no_bin_data,
+				qtr->binlist);
 
-	cf_buf_builder *bb = qwork->bb;
+		cf_buf_builder *bb = qwork->bb;
 
-	if (ret < 0) {
-		cf_warning(AS_QUERY, "Failed to add record to response buffer, available = %zd",
-				bb->alloc_sz - bb->used_sz);
-		return false;
+		if (bb->used_sz >= g_config.query_buf_size) {
+			query_netio(qtr, bb);
+
+			qwork->bb = cf_buf_builder_create(g_config.query_buf_size);
+			cf_buf_builder_reserve(&qwork->bb, 8, NULL);
+		}
 	}
+	else {
+		cf_mutex_lock(&qtr->buf_mutex);
 
-	if (bb->used_sz >= g_config.query_buf_size) {
-		query_netio(qtr, bb);
+		// qtr->bb can be reallocated.
+		as_msg_make_response_bufbuilder(&qtr->bb, rd, qtr->no_bin_data,
+				qtr->binlist);
 
-		qwork->bb = cf_buf_builder_create(g_config.query_buf_size);
-		cf_buf_builder_reserve(&qwork->bb, 8, NULL);
+		cf_buf_builder *bb = qtr->bb;
+
+		if (bb->used_sz >= g_config.query_buf_size) {
+			query_netio(qtr, bb);
+
+			qtr->bb = cf_buf_builder_create(g_config.query_buf_size);
+			cf_buf_builder_reserve(&qtr->bb, 8, NULL);
+		}
+
+		cf_mutex_unlock(&qtr->buf_mutex);
 	}
 
 	cf_atomic64_incr(&qtr->n_result_records);
-
-	return true;
 }
 
 
@@ -1416,12 +1428,7 @@ query_io(query_work *qwork, as_record *r)
 		}
 	}
 
-	if (! query_add_response(qwork, &rd)) {
-		as_storage_record_close(&rd);
-		QTR_SET_ERR(qtr, AS_ERR_QUERY_CB);
-		return false;
-	}
-
+	query_add_response(qwork, &rd);
 	as_storage_record_close(&rd);
 
 	return true;
@@ -1848,8 +1855,13 @@ qwork_setup(query_work *qworkp, as_query_transaction *qtr)
 {
 	QTR_RESERVE(qtr);
 
-	qworkp->bb = cf_buf_builder_create(g_config.query_buf_size);
-	cf_buf_builder_reserve(&qworkp->bb, 8, NULL);
+	if (cf_atomic32_get(qtr->n_qwork_active) > 1) {
+		qworkp->bb = cf_buf_builder_create(g_config.query_buf_size);
+		cf_buf_builder_reserve(&qworkp->bb, 8, NULL);
+	}
+	else {
+		qworkp->bb = NULL;
+	}
 
 	qworkp->qtr = qtr;
 	qworkp->recl = qtr->qctx.recl;
@@ -1871,7 +1883,7 @@ qwork_teardown(query_work *qworkp)
 	}
 
 	// fd_h will not be set for background operations.
-	if (qtr->fd_h != NULL) {
+	if (qworkp->bb != NULL && qtr->fd_h != NULL) {
 		query_netio(qtr, qworkp->bb);
 	}
 
@@ -3087,12 +3099,6 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	}
 
 	if (si == NULL) {
-		if (setname == NULL) {
-			cf_warning(AS_QUERY, "Missing both index name and set name");
-			tr->result_code = AS_ERR_PARAMETER;
-			goto Cleanup;
-		}
-
 		// Look up sindex by bin in the query in case not specified in query.
 		si = si_from_range(ns, setname, srange);
 
@@ -3107,8 +3113,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		goto Cleanup;
 	}
 
-	cf_detail(AS_QUERY, "Query on index %s ",
-			((as_sindex_metadata *)si->imd)->iname);
+	cf_detail(AS_QUERY, "Query on index %s ", si->imd->iname);
 
 	as_query_transaction *qtr = cf_rc_alloc(sizeof(as_query_transaction));
 

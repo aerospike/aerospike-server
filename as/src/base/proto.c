@@ -377,11 +377,6 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 		}
 	}
 
-	// NULL buf-builder means just return size.
-	if (! bb_r) {
-		return (int32_t)msg_sz;
-	}
-
 	uint8_t *buf;
 
 	cf_buf_builder_reserve(bb_r, (int)msg_sz, &buf);
