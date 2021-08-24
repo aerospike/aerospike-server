@@ -275,10 +275,9 @@ startup_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	if (as_record_is_doomed(r, ns)) {
-		as_record_done(r_ref, ns);
-		return true;
-	}
+	// Note - we put expired records in the sindex. Replication does not check
+	// if an existing record being replaced is doomed, and will not put the
+	// record in the sindex if the bin(s) didn't change.
 
 	as_storage_rd rd;
 
