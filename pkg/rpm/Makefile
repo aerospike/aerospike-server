@@ -11,7 +11,7 @@ OPT_AS = $(BUILD_ROOT)/opt/aerospike
 REV = $(shell $(DEPTH)/build/version | sed 's/-/_/g')
 OS = $(shell $(DEPTH)/build/os_version)
 
-ifeq ($(OS),$(filter $(OS),amzn2 el7 el8))
+ifeq ($(OS),$(filter $(OS),amzn2 el7 rhel8))
   USE_SYSTEMD = 1
   CONF_VERSION = _systemd
 endif
