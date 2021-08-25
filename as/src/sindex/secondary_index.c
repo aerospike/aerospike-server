@@ -213,7 +213,7 @@ as_sindex_err_str(as_sindex_status status) {
 }
 
 bool
-as_sindex_isactive(as_sindex *si)
+as_sindex_isactive(const as_sindex *si)
 {
 	return si->state == AS_SINDEX_ACTIVE;
 }
@@ -974,7 +974,7 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	info_append_uint64(db, "query_basic_complete", complete);
 	info_append_uint64(db, "query_basic_error", error);
 	info_append_uint64(db, "query_basic_abort", abort);
-	info_append_uint64(db, "query_lookup_avg_rec_count", total ? records / total : 0);
+	info_append_uint64(db, "query_basic_avg_rec_count", total ? records / total : 0);
 
 	info_append_bool(db, "histogram", si->enable_histogram);
 
@@ -1276,7 +1276,7 @@ as_sindex_create_lockless(as_namespace *ns, as_sindex_metadata *imd)
 	imd->n_pimds = ns->sindex_num_partitions;
 
 	if (! populate_binid(ns, imd)) {
-		cf_warning(AS_SINDEX, "SINDEX CREATE : popluating bin id failed");
+		cf_warning(AS_SINDEX, "SINDEX CREATE : populating bin id failed");
 		return;
 	}
 

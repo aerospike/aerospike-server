@@ -61,7 +61,6 @@ purge_rlist(as_namespace* ns, cf_queue* rlist)
 	while (cf_queue_pop(rlist, &ele, CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
 		as_index* r = (as_index*)cf_arenax_resolve(ns->arena, ele.r_h);
 
-		// FIXME(laurynas): only for development.
 		cf_assert(r->in_sindex == 1, AS_SINDEX, "bad in_sindex bit");
 		cf_assert(r->rc == 1, AS_SINDEX, "bad ref count %u", r->rc);
 

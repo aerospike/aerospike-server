@@ -1,7 +1,7 @@
 /*
- * best_practices.h
+ * os.h
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2021 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -30,6 +30,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include "dynbuf.h"
 
@@ -55,14 +56,14 @@ typedef enum {
 void cf_os_use_group_perms(bool use);
 bool cf_os_is_using_group_perms(void);
 
-static inline uint16_t
+static inline mode_t
 cf_os_base_perms(void)
 {
 	return cf_os_is_using_group_perms() ?
 			CF_OS_OPEN_MODE_GRP : CF_OS_OPEN_MODE_USR;
 }
 
-static inline uint16_t
+static inline mode_t
 cf_os_log_perms(void)
 {
 	return cf_os_base_perms() | S_IRGRP | S_IROTH;

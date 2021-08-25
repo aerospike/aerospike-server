@@ -515,7 +515,7 @@ remove_from_sindex(as_namespace* ns, as_index_ref* r_ref)
 		return;
 	}
 
-	if(! set_has_sindex(r, ns)) {
+	if (! set_has_sindex(r, ns)) {
 		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
 		as_index_clear_in_sindex(r);
 		return;

@@ -1540,8 +1540,11 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	// bins array - to old bins array, for sindex purposes.
 	//
 
+	uint32_t n_old_bins_saved = 0;
+
 	if (si_needs_bins && n_old_bins != 0) {
 		memcpy(old_bins, rd->bins, n_old_bins * sizeof(as_bin));
+		n_old_bins_saved = n_old_bins;
 
 		// If it's a replace, clear the new bins array.
 		if (record_level_replace) {
@@ -1623,7 +1626,8 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	//
 
 	if (set_has_si) {
-		update_sindex(ns, r_ref, old_bins, n_old_bins, rd->bins, rd->n_bins);
+		update_sindex(ns, r_ref, old_bins, n_old_bins_saved, rd->bins,
+				rd->n_bins);
 	}
 	else {
 		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
