@@ -93,7 +93,6 @@ main() {
 
 	distro_id=${distro_id//[[:space:]]/}
 	distro_version=${distro_version//[[:space:]]/}
-	distro_version=${distro_version%%.*}
 
 	# Second chance for pre-release versions.
 	if [ -z "$distro_version" ]
