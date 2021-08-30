@@ -971,23 +971,17 @@ fabric_node_disconnect(cf_node node_id)
 	cf_mutex_unlock(&node->fc_hash_lock);
 
 	for (int i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
-		cf_mutex_lock(&node->send_queue_lock[i]);
-
 		while (node->send_fc_count[i] != 0) {
 			fabric_connection *fc = fc_pool_pop(&node->send_idle_fc_pool[i]);
 
 			if (fc == NULL) {
-				cf_mutex_unlock(&node->send_queue_lock[i]);
 				sched_yield();
-				cf_mutex_lock(&node->send_queue_lock[i]);
 				continue;
 			}
 
 			fabric_connection_send_unassign(fc);
 			fabric_connection_release(fc);
 		}
-
-		cf_mutex_unlock(&node->send_queue_lock[i]);
 
 		cf_mutex_lock(&node->incoming_fc_lock);
 
