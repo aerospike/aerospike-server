@@ -3905,7 +3905,19 @@ eval_let(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	rt_eval(rt, ret_val);
 
 	for (uint32_t i = 0; i < op->n_vars; i++) {
-		rt_value_destroy(&rt->vars[op->var_idx + i], rt);
+		rt_value* val = &rt->vars[op->var_idx + i];
+
+		if (ret_val->type == RT_BIN && val->type == RT_BIN &&
+				ret_val->r_bin.particle == val->r_bin.particle) {
+			continue;
+		}
+
+		if (ret_val->type == RT_GEO_COMPILED && val->type == RT_GEO_COMPILED &&
+			ret_val->r_geo.region == val->r_geo.region) {
+			continue;
+		}
+
+		rt_value_destroy(val, rt);
 	}
 }
 
