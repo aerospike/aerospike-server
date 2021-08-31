@@ -144,7 +144,6 @@ as_namespace_create(char *name)
 	ns->storage_write_block_size = 1024 * 1024;
 	ns->storage_defrag_lwm_pct = 50; // defrag if occupancy of block is < 50%
 	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock
-	ns->storage_defrag_startup_minimum = 6; // defrag until >= 6% disk is writable before joining cluster - 1% more than stop-writes
 	ns->storage_encryption = AS_ENCRYPTION_AES_128;
 	ns->storage_flush_max_us = 1000 * 1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
 	ns->storage_max_write_cache = DEFAULT_MAX_WRITE_CACHE;
