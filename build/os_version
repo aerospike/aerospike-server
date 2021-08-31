@@ -116,7 +116,7 @@ main() {
 		;;
   	'rhel' | 'redhat' | 'red hat' )
     		distro_long="${distro_id}${distro_version%%.*}"
-    		distro_short="el${distro_version}"
+    		distro_short="el${distro_version%%.*}"
     		;;
 	'fedora' )
 		distro_long="${distro_id}${distro_version}"
