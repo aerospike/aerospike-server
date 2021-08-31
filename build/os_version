@@ -57,7 +57,7 @@ main() {
 		*'centos'* )
 			distro_id='centos'
 			;;
-		*'red hat'* )
+		*'redhat'* | *'rhel'* | *'red hat'* )
 			distro_id='rhel'
 			;;
 		*'debian'* )
@@ -110,10 +110,14 @@ main() {
 	fi
 
 	case "$distro_id" in
-	'centos' | 'redhat' | 'rhel' )
+	'centos' )
 		distro_long="${distro_id}${distro_version%%.*}"
 		distro_short="el${distro_version%%.*}"
 		;;
+  	'rhel' | 'redhat' | 'red hat' )
+    		distro_long="${distro_id}${distro_version%%.*}"
+    		distro_short="el${distro_version%%.*}"
+    		;;
 	'fedora' )
 		distro_long="${distro_id}${distro_version}"
 		distro_short="fc${distro_version}"
