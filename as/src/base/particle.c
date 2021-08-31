@@ -125,7 +125,7 @@ trim_particle(as_bin *b, as_particle_type type, uint32_t orig_size)
 	uint32_t final_size = particle_vtable[type]->size_fn(b->particle);
 
 	if (final_size < orig_size) {
-		b->particle = cf_realloc(b->particle, final_size);
+		b->particle = cf_realloc_ns(b->particle, final_size);
 	}
 }
 
