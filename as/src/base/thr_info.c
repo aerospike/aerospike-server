@@ -289,15 +289,12 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 
 // TODO: This function should move elsewhere.
 void
-sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
+sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
+		uint64_t* thp_mem_kbytes)
 {
-	if (free_mem != NULL) {
-		*free_mem = 0;
-	}
-
-	if (free_pct != NULL) {
-		*free_pct = 0;
-	}
+	*free_mem_kbytes = 0;
+	*free_mem_pct = 0;
+	*thp_mem_kbytes = 0;
 
 	int32_t fd = open("/proc/meminfo", O_RDONLY);
 
@@ -339,6 +336,7 @@ sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 	uint64_t cached = 0;
 	uint64_t buffers = 0;
 	uint64_t shmem = 0;
+	uint64_t anon_huge_pages = 0;
 
 	char* cur = buf;
 	char* save_ptr = NULL;
@@ -379,6 +377,9 @@ sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 		else if (strcmp(name_tok, "Shmem") == 0) {
 			shmem = strtoul(value_tok, NULL, 0);
 		}
+		else if (strcmp(name_tok, "AnonHugePages") == 0) {
+			anon_huge_pages = strtoul(value_tok, NULL, 0);
+		}
 	}
 
 	// Add the cached memory and buffers, which are effectively available if and
@@ -386,13 +387,9 @@ sys_mem_info(uint64_t* free_mem, uint32_t* free_pct)
 	// the cached memory, but is not available.
 	uint64_t avail = mem_total - active - inactive + cached + buffers - shmem;
 
-	if (free_mem != NULL) {
-		*free_mem = avail * 1024;
-	}
-
-	if (free_pct != NULL) {
-		*free_pct = mem_total == 0 ? 0 : (avail * 100) / mem_total;
-	}
+	*free_mem_kbytes = avail;
+	*free_mem_pct = mem_total == 0 ? 0 : (avail * 100) / mem_total;
+	*thp_mem_kbytes = anon_huge_pages;
 }
 
 
@@ -422,10 +419,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint32(db, "system_user_cpu_pct", user_pct);
 	info_append_uint32(db, "system_kernel_cpu_pct", kernel_pct);
 
-	uint32_t free_pct;
+	uint64_t free_mem_kbytes;
+	uint32_t free_mem_pct;
+	uint64_t thp_mem_kbytes;
 
-	sys_mem_info(NULL, &free_pct);
-	info_append_int(db, "system_free_mem_pct", free_pct);
+	sys_mem_info(&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
+	info_append_uint64(db, "system_free_mem_kbytes", free_mem_kbytes);
+	info_append_int(db, "system_free_mem_pct", free_mem_pct);
+	info_append_uint64(db, "system_thp_mem_kbytes", thp_mem_kbytes);
 
 	info_append_uint32(db, "process_cpu_pct", g_process_cpu_pct);
 

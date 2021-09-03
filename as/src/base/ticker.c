@@ -259,15 +259,17 @@ log_line_system()
 
 	sys_cpu_info(&user_pct, &kernel_pct);
 
-	uint64_t free_mem;
-	uint32_t free_pct;
+	uint64_t free_mem_kbytes;
+	uint32_t free_mem_pct;
+	uint64_t thp_mem_kbytes;
 
-	sys_mem_info(&free_mem, &free_pct);
+	sys_mem_info(&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
 
-	cf_info(AS_INFO, "   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d",
+	cf_info(AS_INFO, "   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d thp-mem-kbytes %lu",
 			user_pct + kernel_pct, user_pct, kernel_pct,
-			free_mem / 1024,
-			free_pct);
+			free_mem_kbytes,
+			free_mem_pct,
+			thp_mem_kbytes);
 }
 
 void
