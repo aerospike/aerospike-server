@@ -273,12 +273,6 @@ repl_write_handle_op(cf_node node, msg* m)
 	}
 	// else - flat record, including tombstone.
 
-	// Replica writes are the last thing cut off when storage is backed up.
-	if (as_storage_overloaded(ns, 192, "replica write")) {
-		send_repl_write_ack(node, m, AS_ERR_DEVICE_OVERLOAD);
-		return;
-	}
-
 	as_remote_record rr = { .via = VIA_REPLICATION, .src = node };
 
 	if (msg_get_buf(m, RW_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
@@ -291,6 +285,12 @@ repl_write_handle_op(cf_node node, msg* m)
 	if (! as_flat_unpack_remote_record_meta(ns, &rr)) {
 		cf_warning(AS_RW, "repl_write_handle_op: bad record");
 		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
+		return;
+	}
+
+	// Replica writes are the last thing cut off when storage is backed up.
+	if (as_storage_overloaded(ns, 192, "replica write")) {
+		send_repl_write_ack_w_digest(node, m, AS_ERR_DEVICE_OVERLOAD, rr.keyd);
 		return;
 	}
 
