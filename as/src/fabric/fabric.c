@@ -1765,31 +1765,31 @@ fabric_connection_process_writable(fabric_connection *fc)
 
 		cf_mutex_lock(&node->send_queue_lock[pool]);
 
-		if (fc->failed) {
+		if (! fc->node->live || fc->failed) {
 			cf_mutex_unlock(&node->send_queue_lock[pool]);
 			return false;
 		}
 
 		if (cf_queue_pop(&node->send_queue[pool], &fc->s_msg_in_progress,
 				CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
-			fabric_connection_uncork(fc);
-			fc_pool_push(&node->send_idle_fc_pool[pool], fc);
 			cf_mutex_unlock(&node->send_queue_lock[pool]);
-			return true;
+
+			fabric_connection_uncork(fc);
+
+			cf_mutex_lock(&node->send_queue_lock[pool]);
+
+			if (cf_queue_pop(&node->send_queue[pool], &fc->s_msg_in_progress,
+					CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
+				fc_pool_push(&node->send_idle_fc_pool[pool], fc);
+				cf_mutex_unlock(&node->send_queue_lock[pool]);
+				return true;
+			}
 		}
 
 		cf_mutex_unlock(&node->send_queue_lock[pool]);
 	}
 
-	fabric_connection_uncork(fc);
-
-	if (! fc->node->live || fc->failed) {
-		return false;
-	}
-
-	fabric_connection_send_rearm(fc);
-
-	return true;
+	return false; // unreachable
 }
 
 // Return true on success.
