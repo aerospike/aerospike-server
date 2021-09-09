@@ -376,10 +376,10 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		uint32_t n_old_bins, as_bin* new_bins, uint32_t n_new_bins)
 {
 	uint32_t n_populated = 0;
-	bool already_in_sindex[n_new_bins];
+	bool bin_name_in_both[n_new_bins];
 
 	// Initialize before the critical section to make it shorter.
-	memset(already_in_sindex, 0, sizeof(already_in_sindex));
+	memset(bin_name_in_both, 0, sizeof(bin_name_in_both));
 
 	SINDEX_GRLOCK();
 
@@ -398,8 +398,6 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 				old_bins[i].id, &si_arr[si_arr_index]);
 	}
 
-	uint32_t n_old_sindexes = si_arr_index;
-
 	for (uint32_t i = 0; i < n_new_bins; i++) {
 		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
 				new_bins[i].id, &si_arr[si_arr_index]);
@@ -411,7 +409,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		return;
 	}
 
-	bool new_bins_in_sindex = si_arr_index != n_old_sindexes;
+	bool record_in_sindex = false;
 
 	// For every old bin, find the corresponding new bin (if any) and adjust the
 	// secondary index if the bin was modified. If no corresponding new bin is
@@ -430,7 +428,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 
 			if (b_old->id == b_new->id) {
 				found = true;
-				already_in_sindex[i_new] = true;
+				bin_name_in_both[i_new] = true;
 			}
 		}
 
@@ -440,7 +438,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 
 				if (b_old->id == b_new->id) {
 					found = true;
-					already_in_sindex[i_new] = true;
+					bin_name_in_both[i_new] = true;
 
 					break;
 				}
@@ -451,8 +449,31 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 			if (as_bin_get_particle_type(b_old) !=
 					as_bin_get_particle_type(b_new) ||
 					b_old->particle != b_new->particle) {
-				n_populated += as_sindex_sbins_populate(
-						&sbins[n_populated], ns, set_name, b_old, b_new);
+				n_populated += as_sindex_sbins_from_bin(ns, set_name, b_old,
+						&sbins[n_populated], AS_SINDEX_OP_DELETE);
+
+				uint32_t n = as_sindex_sbins_from_bin(ns, set_name, b_new,
+						&sbins[n_populated], AS_SINDEX_OP_INSERT);
+
+				if (n != 0) {
+					record_in_sindex = true;
+				}
+
+				n_populated += n;
+			}
+			else if (r->in_sindex == 1 && ! record_in_sindex) {
+				// We only need to see whether this bin is in any sindex...
+
+				SINDEX_BINS_SETUP(dummy_sbins, ns->sindex_cnt);
+
+				uint32_t n = as_sindex_sbins_from_bin(ns, set_name, b_new,
+						dummy_sbins, AS_SINDEX_OP_INSERT);
+
+				if (n != 0) {
+					record_in_sindex = true;
+				}
+
+				as_sindex_sbin_freeall(dummy_sbins, n);
 			}
 		}
 		else {
@@ -465,41 +486,38 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 	// in the loop above, so any left are just-created.
 
 	for (uint32_t i_new = 0; i_new < n_new_bins; i_new++) {
-		if (already_in_sindex[i_new]) {
+		if (bin_name_in_both[i_new]) {
 			continue;
 		}
 
-		n_populated += as_sindex_sbins_from_bin(ns, set_name, &new_bins[i_new],
+		uint32_t n = as_sindex_sbins_from_bin(ns, set_name, &new_bins[i_new],
 				&sbins[n_populated], AS_SINDEX_OP_INSERT);
+
+		if (n != 0) {
+			record_in_sindex = true;
+		}
+
+		n_populated += n;
 	}
 
 	SINDEX_GRUNLOCK();
 
+	if (record_in_sindex) {
+		// Mark record for sindex before insertion.
+		as_index_set_in_sindex(r);
+	}
+
 	if (n_populated != 0) {
 		CF_ALLOC_SET_NS_ARENA(ns);
 
-		if (new_bins_in_sindex) {
-			// Mark record for sindex before insertion.
-			for (uint32_t i = 0; i < n_populated; i++) {
-				if (sbins[i].op == AS_SINDEX_OP_INSERT) {
-					as_index_set_in_sindex(r);
-					break;
-				}
-			}
-		}
-
 		as_sindex_update_by_sbin(sbins, n_populated, r_ref->r_h);
-
-		if (! new_bins_in_sindex) {
-			// No sindex entries based on new bins. So, all the sindex entries
-			// should be deleted above.
-
-			// Unmark record for sindex after deletion. in_sindex may not be set
-			// if the sindex building is in progress.
-			as_index_clear_in_sindex(r);
-		}
-
 		as_sindex_sbin_freeall(sbins, n_populated);
+	}
+
+	if (! record_in_sindex) {
+		// Unmark record for sindex after deletion. in_sindex may not be set
+		// if the sindex building is in progress.
+		as_index_clear_in_sindex(r);
 	}
 
 	as_sindex_release_arr(si_arr, si_arr_index);
