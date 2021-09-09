@@ -324,19 +324,17 @@ execute_updates(udf_record* urecord)
 	as_namespace* ns = rd->ns;
 
 	if (! urecord->has_updates) {
-		// Special fast failure case - for this, it's worth it.
-		if (ns->clock_skew_stop_writes) {
-			urecord->result_code = AS_ERR_FORBIDDEN;
-			return -1;
-		}
-
-		// Special fast failure case - for this, it's worth it.
-		if (ns->stop_writes) {
-			urecord->result_code = AS_ERR_OUT_OF_SPACE;
-			return -1;
-		}
-
 		prepare_for_write(urecord);
+	}
+
+	if (ns->clock_skew_stop_writes) {
+		execute_failed(urecord, AS_ERR_FORBIDDEN);
+		return -1;
+	}
+
+	if (ns->stop_writes) {
+		execute_failed(urecord, AS_ERR_OUT_OF_SPACE);
+		return -1;
 	}
 
 	// TODO - bad bin name is just ignored - no equivalent to this.
