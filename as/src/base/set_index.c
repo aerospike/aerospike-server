@@ -1026,7 +1026,7 @@ ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h,
 	index_ele* r = uarena_resolve(ssi->ua, r_h);
 	int cmp = 0; // initialized to satisfy compiler
 
-	if (ssi->keyd == NULL || (cmp = ssprig_ele_cmp(ssi, r)) < 0) {
+	if (ssi->keyd == NULL || (cmp = ssprig_ele_cmp(ssi, r)) > 0) {
 		ssprig_traverse(ssri, r->left_h, ph_a);
 	}
 
@@ -1036,7 +1036,7 @@ ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h,
 
 	// We do not collect the element with the boundary digest.
 
-	if (ssi->keyd == NULL || cmp < 0) {
+	if (ssi->keyd == NULL || cmp > 0) {
 		as_index* key_r = cf_arenax_resolve(ssi->arena, r->key_r_h);
 
 		as_index_reserve(key_r);
