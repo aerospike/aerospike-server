@@ -3909,11 +3909,13 @@ eval_let(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		if (ret_val->type == RT_BIN && val->type == RT_BIN &&
 				ret_val->r_bin.particle == val->r_bin.particle) {
+			ret_val->do_not_destroy = 0;
 			continue;
 		}
 
 		if (ret_val->type == RT_GEO_COMPILED && val->type == RT_GEO_COMPILED &&
-			ret_val->r_geo.region == val->r_geo.region) {
+				ret_val->r_geo.region == val->r_geo.region) {
+			ret_val->do_not_destroy = 0;
 			continue;
 		}
 
