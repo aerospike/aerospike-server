@@ -4483,10 +4483,10 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	if (g_bad_practices.used_sz != 0) {
 		if (c->enforce_best_practices) {
-			cf_crash_nostack(AS_CFG, "failed best-practices checks - see 'http://docs.aerospike.com/docs/operations/install/linux/bestpractices'");
+			cf_crash_nostack(AS_CFG, "failed best-practices checks - see 'https://docs.aerospike.com/docs/operations/install/linux/bestpractices/index.html'");
 		}
 		else {
-			cf_warning(AS_CFG, "failed best-practices checks - see 'http://docs.aerospike.com/docs/operations/install/linux/bestpractices'");
+			cf_warning(AS_CFG, "failed best-practices checks - see 'https://docs.aerospike.com/docs/operations/install/linux/bestpractices/index.html'");
 		}
 	}
 }
