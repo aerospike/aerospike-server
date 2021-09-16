@@ -73,8 +73,7 @@ struct as_namespace_s;
 #define DRV_RECORD_MIN_SIZE \
 	(((uint32_t)sizeof(as_flat_record) + (RBLOCK_SIZE - 1)) & -RBLOCK_SIZE)
 
-#define DRV_DEFRAG_STARTUP_RESERVE	4
-#define DRV_DEFRAG_RUNTIME_RESERVE	4
+#define DRV_DEFRAG_RESERVE 8
 
 // Used when determining a device's io_min_size.
 #define LO_IO_MIN_SIZE 512
