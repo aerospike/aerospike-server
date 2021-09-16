@@ -82,6 +82,7 @@ cf_epoll_queue_init(cf_epoll_queue* q, uint32_t ele_sz, uint32_t capacity)
 void
 cf_epoll_queue_destroy(cf_epoll_queue* q)
 {
+	CF_NEVER_FAILS(close(q->event_fd));
 	cf_free(q->eles);
 }
 
