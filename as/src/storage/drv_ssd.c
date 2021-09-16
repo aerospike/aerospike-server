@@ -387,8 +387,12 @@ swb_dereference_and_release(drv_ssd *ssd, uint32_t wblock_id,
 }
 
 ssd_write_buf *
-swb_get(drv_ssd *ssd)
+swb_get(drv_ssd *ssd, bool use_reserve)
 {
+	if (! use_reserve && num_free_wblocks(ssd) <= DRV_DEFRAG_RESERVE) {
+		return NULL;
+	}
+
 	ssd_write_buf *swb;
 
 	if (CF_QUEUE_OK != cf_queue_pop(ssd->swb_free_q, &swb, CF_QUEUE_NOWAIT)) {
@@ -568,7 +572,7 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 	ssd_write_buf *swb = ssd->defrag_swb;
 
 	if (! swb) {
-		swb = swb_get(ssd);
+		swb = swb_get(ssd, true);
 		ssd->defrag_swb = swb;
 
 		if (! swb) {
@@ -586,14 +590,17 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 		cf_atomic64_incr(&ssd->n_defrag_wblock_writes);
 
 		// Get the new buffer.
-		swb = swb_get(ssd);
-		ssd->defrag_swb = swb;
+		while ((swb = swb_get(ssd, true)) == NULL) {
+			// If we got here, we used all our reserve wblocks, but the wblocks
+			// we defragged must still have non-zero inuse_sz. Must wait for
+			// those to become free.
+			cf_ticker_warning(AS_DRV_SSD, "{%s} defrag: drive %s totally full - waiting for vacated wblocks to be freed",
+					ssd->ns->name, ssd->name);
 
-		if (! swb) {
-			cf_warning(AS_DRV_SSD, "defrag_move_record: couldn't get swb");
-			cf_mutex_unlock(&ssd->defrag_lock);
-			return;
+			usleep(10 * 1000);
 		}
+
+		ssd->defrag_swb = swb;
 	}
 
 	memcpy(swb->buf + swb->pos, (const uint8_t*)flat, write_size);
@@ -676,49 +683,9 @@ ssd_record_defrag(drv_ssd *ssd, uint32_t wblock_id, as_flat_record *flat,
 }
 
 
-bool
-ssd_is_full(drv_ssd *ssd, uint32_t wblock_id)
-{
-	if (num_free_wblocks(ssd) > DRV_DEFRAG_STARTUP_RESERVE) {
-		return false;
-	}
-
-	ssd_wblock_state* p_wblock_state = &ssd->wblock_state[wblock_id];
-
-	cf_mutex_lock(&p_wblock_state->LOCK);
-
-	if (cf_atomic32_get(p_wblock_state->inuse_sz) == 0) {
-		// Lucky - wblock is empty, let ssd_defrag_wblock() free it.
-		cf_mutex_unlock(&p_wblock_state->LOCK);
-
-		return false;
-	}
-
-	cf_warning(AS_DRV_SSD, "{%s}: defrag: drive %s totally full, re-queuing wblock %u",
-			ssd->ns->name, ssd->name, wblock_id);
-
-	// Not using push_wblock_to_defrag_q() - state is already DEFRAG, we
-	// definitely have a queue, and it's better to push back to head.
-	cf_queue_push_head(ssd->defrag_wblock_q, &wblock_id);
-
-	cf_mutex_unlock(&p_wblock_state->LOCK);
-
-	// If we got here, we used all our runtime reserve wblocks, but the wblocks
-	// we defragged must still have non-zero inuse_sz. Must wait for those to
-	// become free. Sleep prevents retries from overwhelming the log.
-	sleep(1);
-
-	return true;
-}
-
-
 int
 ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 {
-	if (ssd_is_full(ssd, wblock_id)) {
-		return 0;
-	}
-
 	int record_count = 0;
 
 	ssd_wblock_state* p_wblock_state = &ssd->wblock_state[wblock_id];
@@ -1522,7 +1489,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 	ssd_write_buf *swb = cur_swb->swb;
 
 	if (! swb) {
-		swb = swb_get(ssd);
+		swb = swb_get(ssd, false);
 		cur_swb->swb = swb;
 
 		if (! swb) {
@@ -1542,7 +1509,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 		cur_swb->n_wblocks_written++;
 
 		// Get the new buffer.
-		swb = swb_get(ssd);
+		swb = swb_get(ssd, false);
 		cur_swb->swb = swb;
 
 		if (! swb) {
