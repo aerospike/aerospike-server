@@ -154,10 +154,6 @@ as_sindex_gc_tree(as_namespace* ns, as_index_tree* tree)
 static void
 gc_ns_cycle(as_namespace* ns)
 {
-	if (ns->sindex_cnt == 0) {
-		return;
-	}
-
 	cf_mutex_lock(&ns->si_gc_list_mutex);
 
 	cf_queue* rlist = ns->si_gc_rlist;
