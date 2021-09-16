@@ -277,7 +277,7 @@ uint64_t ssd_flush_max_us(const struct as_namespace_s *ns);
 void ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb);
 int ssd_write_bins(struct as_storage_rd_s *rd);
 int ssd_buffer_bins(struct as_storage_rd_s *rd);
-ssd_write_buf *swb_get(drv_ssd *ssd);
+ssd_write_buf *swb_get(drv_ssd *ssd, bool use_reserve);
 bool write_uses_post_write_q(struct as_storage_rd_s *rd);
 
 // Called in (enterprise-split) storage table function.
