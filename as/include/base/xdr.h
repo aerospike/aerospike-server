@@ -56,6 +56,8 @@ struct as_transaction_s;
 #define AS_XDR_MIN_PERIOD_MS 5
 #define AS_XDR_MAX_PERIOD_MS 1000
 
+#define AS_XDR_MIN_COMPRESSION_THRESHOLD 128
+
 #define AS_XDR_MAX_HOT_KEY_MS 5000
 
 #define AS_XDR_MIN_SC_REPLICATION_WAIT_MS 5
@@ -92,6 +94,7 @@ typedef struct as_xdr_dc_ns_cfg_s {
 
 	as_xdr_bin_policy bin_policy;
 	uint32_t compression_level;
+	uint32_t compression_threshold;
 	uint32_t delay_ms;
 	bool compression_enabled;
 	bool forward;

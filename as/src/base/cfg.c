@@ -728,6 +728,7 @@ typedef enum {
 	// XDR DC namespace options:
 	CASE_XDR_DC_NAMESPACE_BIN_POLICY,
 	CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL,
+	CASE_XDR_DC_NAMESPACE_COMPRESSION_THRESHOLD,
 	CASE_XDR_DC_NAMESPACE_DELAY_MS,
 	CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION,
 	CASE_XDR_DC_NAMESPACE_FORWARD,
@@ -1283,6 +1284,7 @@ const cfg_opt XDR_DC_AUTH_MODE_OPTS[] = {
 const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "bin-policy",						CASE_XDR_DC_NAMESPACE_BIN_POLICY },
 		{ "compression-level",				CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL },
+		{ "compression-threshold",			CASE_XDR_DC_NAMESPACE_COMPRESSION_THRESHOLD },
 		{ "delay-ms",						CASE_XDR_DC_NAMESPACE_DELAY_MS },
 		{ "enable-compression",				CASE_XDR_DC_NAMESPACE_ENABLE_COMPRESSION },
 		{ "forward",						CASE_XDR_DC_NAMESPACE_FORWARD },
@@ -3913,6 +3915,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_NAMESPACE_COMPRESSION_LEVEL:
 				dc_ns_cfg->compression_level = cfg_u32(&line, 1, 9);
+				break;
+			case CASE_XDR_DC_NAMESPACE_COMPRESSION_THRESHOLD:
+				dc_ns_cfg->compression_threshold = cfg_u32(&line, AS_XDR_MIN_COMPRESSION_THRESHOLD, UINT32_MAX);
 				break;
 			case CASE_XDR_DC_NAMESPACE_DELAY_MS:
 				dc_ns_cfg->delay_ms = cfg_u32(&line, 0, AS_XDR_MAX_HOT_KEY_MS);
