@@ -547,6 +547,7 @@ as_fabric_is_overloaded(const cf_node* node_list, uint32_t n_nodes,
 {
 	for (uint32_t i = 0; i < n_nodes; i++) {
 		if (fabric_node_is_overloaded(node_list[i], channel, margin)) {
+			cf_ticker_warning(AS_FABRIC, "overloaded send-q to node %lx", node_list[i]);
 			return true;
 		}
 	}
