@@ -517,6 +517,13 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 void
 apply_winner(rw_request* rw)
 {
+	as_namespace* ns = rw->rsv.ns;
+
+	if (as_storage_overloaded(ns, 0, "dup-res")) {
+		rw->result_code = AS_ERR_DEVICE_OVERLOAD;
+		return;
+	}
+
 	msg* m = rw->best_dup_msg;
 
 	as_remote_record rr = {
@@ -535,7 +542,7 @@ apply_winner(rw_request* rw)
 		cf_crash(AS_RW, "dup-res ack: no record"); // already parsed ok
 	}
 
-	if (! as_flat_unpack_remote_record_meta(rr.rsv->ns, &rr)) {
+	if (! as_flat_unpack_remote_record_meta(ns, &rr)) {
 		cf_warning(AS_RW, "dup-res ack: bad record %pD", &rw->keyd);
 		rw->result_code = AS_ERR_UNKNOWN;
 		return;
