@@ -105,6 +105,9 @@ cleanmodules:
 		$(MAKE) -C $(JEMALLOC) distclean; \
 	fi
 	if [ -e "$(LUAJIT)/Makefile" ]; then \
+		if [ ! -e "$(LUAJIT)/src/luaconf.h" ]; then \
+			ln -s "$(LUAJIT)/src/luaconf.h.orig" "$(LUAJIT)/src/luaconf.h"; \
+		fi; \
 		$(MAKE) -C $(LUAJIT) clean; \
 	fi
 	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) clean

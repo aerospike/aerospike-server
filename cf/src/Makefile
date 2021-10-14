@@ -72,7 +72,7 @@ endif
 LIBRARY = $(LIBRARY_DIR)/libcf.a
 
 INCLUDES += $(INCLUDE_DIR:%=-I%)
-INCLUDES += -I$(COMMON)/src/include
+INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(JEMALLOC)/include
 

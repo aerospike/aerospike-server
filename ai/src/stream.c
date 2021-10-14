@@ -31,6 +31,8 @@
 
 #include "ai_obj.h"
 #include "bt.h"
+#include "btree.h"
+#include "btreepriv.h"
 #include "stream.h"
 
 #include "log.h"

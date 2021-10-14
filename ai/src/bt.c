@@ -29,8 +29,10 @@
 #include <string.h>
 #include <strings.h>
 
+#include "ai_types.h"
 #include "bt.h"
 #include "bt_iterator.h"
+#include "btreepriv.h"
 #include "stream.h"
 
 #include "log.h"

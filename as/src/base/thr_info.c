@@ -89,6 +89,7 @@
 #include "fabric/roster.h"
 #include "fabric/service_list.h"
 #include "fabric/skew_monitor.h"
+#include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
