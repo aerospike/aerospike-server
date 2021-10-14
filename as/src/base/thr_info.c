@@ -1734,7 +1734,6 @@ void
 info_service_config_get(cf_dyn_buf *db)
 {
 	// Note - no user, group.
-	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
 	info_append_uint32(db, "proto-fd-max", g_config.n_proto_fd_max);
 
@@ -3090,6 +3089,18 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of nsup-threads of ns %s from %u to %d", ns->name, ns->n_nsup_threads, val);
 			ns->n_nsup_threads = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "replication-factor", context, &context_len)) {
+			if (ns->cp) {
+				cf_warning(AS_INFO, "{%s} 'replication-factor' is not yet dynamic with 'strong-consistency'", ns->name);
+				goto Error;
+			}
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > AS_CLUSTER_SZ) {
+				cf_warning(AS_INFO, "replication-factor must be between 1 and %u", AS_CLUSTER_SZ);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of replication-factor of ns %s from %u to %d", ns->name, ns->cfg_replication_factor, val);
+			ns->cfg_replication_factor = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "conflict-resolve-writes", context, &context_len)) {
 			if (as_config_error_enterprise_only()) {
@@ -5292,7 +5303,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// Using ns_ prefix to avoid confusion with global cluster_size.
 	info_append_uint32(db, "ns_cluster_size", ns->cluster_size);
 
-	// Using effective_ prefix to avoid confusion with configured value.
 	info_append_uint32(db, "effective_replication_factor", ns->replication_factor);
 
 	// Object counts.

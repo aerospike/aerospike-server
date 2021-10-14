@@ -99,7 +99,7 @@ void drop_trees(as_namespace* ns, as_partition* p);
 
 // Helpers - balance partitions.
 void fill_global_tables();
-void apply_single_replica_limit_ap(as_namespace* ns);
+void set_replication_factor_ap(as_namespace* ns);
 int find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns);
 uint32_t find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t working_master_n, cf_node dupls[]);
 void advance_version_ap(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns, uint32_t self_n,	uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[]);
@@ -767,7 +767,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	}
 
 	// Figure out effective replication factor in the face of node failures.
-	apply_single_replica_limit_ap(ns);
+	set_replication_factor_ap(ns);
 
 	// Active size will be less than cluster size if nodes are quiesced.
 	set_active_size(ns);
@@ -990,17 +990,15 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 }
 
 void
-apply_single_replica_limit_ap(as_namespace* ns)
+set_replication_factor_ap(as_namespace* ns)
 {
-	// Replication factor can't be bigger than observed cluster.
-	uint32_t repl_factor = ns->cluster_size < ns->cfg_replication_factor ?
-			ns->cluster_size : ns->cfg_replication_factor;
+	// If pre-5.8 node(s), use config value, else use matching exchanged value.
+	uint32_t repl_factor = ns->lo_repl_factor == 0 ?
+			ns->cfg_replication_factor : ns->lo_repl_factor;
 
-	// Reduce the replication factor to 1 if the cluster size is less than or
-	// equal to the specified limit.
-	ns->replication_factor =
-			ns->cluster_size <= g_config.paxos_single_replica_limit ?
-					1 : repl_factor;
+	// Replication factor can't be bigger than observed cluster.
+	ns->replication_factor = ns->cluster_size < repl_factor ?
+			ns->cluster_size : repl_factor;
 
 	cf_info(AS_PARTITION, "{%s} replication factor is %u", ns->name,
 			ns->replication_factor);

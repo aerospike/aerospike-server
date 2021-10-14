@@ -85,7 +85,6 @@ typedef struct as_config_s {
 
 	uid_t			uid;
 	gid_t			gid;
-	uint32_t		paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with replication factor 1
 	char*			pidfile;
 	uint32_t		n_proto_fd_max;
 

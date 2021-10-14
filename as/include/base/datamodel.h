@@ -1247,6 +1247,8 @@ struct as_namespace_s {
 	cf_node succession[AS_CLUSTER_SZ];
 	cf_node hub; // relevant only for XDR
 	as_partition_version cluster_versions[AS_CLUSTER_SZ][AS_PARTITIONS];
+	uint32_t lo_repl_factor;
+	uint32_t hi_repl_factor;
 	uint32_t rack_ids[AS_CLUSTER_SZ]; // is observed-rack-ids in CP mode
 
 	// Quiescence - relevant only for enterprise edition.

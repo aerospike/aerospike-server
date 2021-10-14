@@ -157,7 +157,6 @@ cfg_set_defaults()
 
 	c->uid = (uid_t)-1;
 	c->gid = (gid_t)-1;
-	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
 	c->n_proto_fd_max = 15000;
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
@@ -262,7 +261,6 @@ typedef enum {
 	// Normally visible, in canonical configuration file order:
 	CASE_SERVICE_USER,
 	CASE_SERVICE_GROUP,
-	CASE_SERVICE_PAXOS_SINGLE_REPLICA_LIMIT,
 	CASE_SERVICE_PIDFILE,
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
@@ -786,7 +784,6 @@ const cfg_opt GLOBAL_OPTS[] = {
 const cfg_opt SERVICE_OPTS[] = {
 		{ "user",							CASE_SERVICE_USER },
 		{ "group",							CASE_SERVICE_GROUP },
-		{ "paxos-single-replica-limit",		CASE_SERVICE_PAXOS_SINGLE_REPLICA_LIMIT },
 		{ "pidfile",						CASE_SERVICE_PIDFILE },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
 		{ "advertise-ipv6",					CASE_SERVICE_ADVERTISE_IPV6 },
@@ -2207,9 +2204,6 @@ as_config_init(const char* config_file)
 					c->gid = grp->gr_gid;
 					endgrent();
 				}
-				break;
-			case CASE_SERVICE_PAXOS_SINGLE_REPLICA_LIMIT:
-				c->paxos_single_replica_limit = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_PIDFILE:
 				c->pidfile = cfg_strdup_no_checks(&line);

@@ -262,7 +262,7 @@ as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime,
 			cf_dyn_buf_append_char(db, ',');
 		}
 
-		uint32_t repl_factor = ns->replication_factor;
+		uint32_t repl_factor = as_load_uint32(&ns->replication_factor);
 
 		// If we haven't rebalanced yet, report 1 column with no ownership.
 		if (repl_factor == 0) {
@@ -636,13 +636,12 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 void
 client_replica_maps_create(as_namespace* ns)
 {
-	uint32_t size = sizeof(client_replica_map) * ns->cfg_replication_factor;
+	uint32_t size = sizeof(client_replica_map) * AS_CLUSTER_SZ;
 
 	ns->replica_maps = cf_malloc(size);
 	memset(ns->replica_maps, 0, size);
 
-	for (uint32_t repl_ix = 0; repl_ix < ns->cfg_replication_factor;
-			repl_ix++) {
+	for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
 		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
 
 		cf_mutex_init(&repl_map->write_lock);
@@ -655,11 +654,9 @@ client_replica_maps_create(as_namespace* ns)
 void
 client_replica_maps_clear(as_namespace* ns)
 {
-	memset(ns->replica_maps, 0,
-			sizeof(client_replica_map) * ns->cfg_replication_factor);
+	memset(ns->replica_maps, 0, sizeof(client_replica_map) * AS_CLUSTER_SZ);
 
-	for (uint32_t repl_ix = 0; repl_ix < ns->cfg_replication_factor;
-			repl_ix++) {
+	for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
 		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
 
 		cf_b64_encode((uint8_t*)repl_map->bitmap,
@@ -682,13 +679,12 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 	uint8_t set_mask = 0x80 >> (pid & 0x7);
 	bool changed = false;
 
-	for (int repl_ix = 0; repl_ix < (int)ns->cfg_replication_factor;
-			repl_ix++) {
+	for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
 		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
 
 		volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
 
-		bool owned = replica == repl_ix ||
+		bool owned = replica == (int)repl_ix ||
 				// Working master also owns all immigrating prole columns, and
 				// if it's an acting master in a prole column, that column (e.g.
 				// full, and migrating to newly added master).

@@ -190,6 +190,11 @@ typedef struct as_exchange_node_namespace_data_s
 	as_exchange_ns_vinfos_payload* partition_versions;
 
 	/**
+	 * Sender's replication-factor.
+	 */
+	uint32_t replication_factor;
+
+	/**
 	 * Sender's rack id.
 	 */
 	uint32_t rack_id;
@@ -641,6 +646,7 @@ typedef enum
 	AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
 	AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
 	AS_EXCHANGE_MSG_COMPATIBILITY_ID,
+	AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
 
 	NUM_EXCHANGE_MSG_FIELDS
 } as_exchange_msg_fields;
@@ -661,7 +667,8 @@ static const msg_template exchange_msg_template[] = {
 		{ AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_COMPATIBILITY_ID, M_FT_UINT32 }
+		{ AS_EXCHANGE_MSG_COMPATIBILITY_ID, M_FT_UINT32 },
+		{ AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS, M_FT_MSGPACK }
 };
 
 COMPILER_ASSERT(sizeof(exchange_msg_template) / sizeof(msg_template) ==
@@ -1494,6 +1501,9 @@ exchange_msg_data_payload_set(msg* msg)
 
 	cf_vector_define(namespace_list, sizeof(msg_buf_ele), ns_count, 0);
 	cf_vector_define(partition_versions, sizeof(msg_buf_ele), ns_count, 0);
+
+	uint32_t replication_factors[ns_count];
+
 	uint32_t rack_ids[ns_count];
 
 	bool have_roster = false;
@@ -1539,6 +1549,9 @@ exchange_msg_data_payload_set(msg* msg)
 
 		cf_vector_append(&namespace_list, &ns_ele);
 		cf_vector_append(&partition_versions, &pv_ele);
+
+		replication_factors[ns_ix] = ns->cfg_replication_factor;
+
 		rack_ids[ns_ix] = ns->rack_id;
 
 		if (ns->smd_roster_generation != 0) {
@@ -1581,6 +1594,10 @@ exchange_msg_data_payload_set(msg* msg)
 	msg_msgpack_list_set_buf(msg, AS_EXCHANGE_MSG_NAMESPACES, &namespace_list);
 	msg_msgpack_list_set_buf(msg, AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS,
 			&partition_versions);
+
+	msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
+			replication_factors, ns_count);
+
 	msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_RACK_IDS, rack_ids,
 			ns_count);
 
@@ -1966,6 +1983,17 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 		return 0;
 	}
 
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS)
+			&& (!msg_msgpack_list_get_count(msg_event->msg,
+					AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
+					&num_namespace_elements_sent)
+					|| num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid replication factors from node %"PRIx64,
+				msg_event->msg_source);
+		return 0;
+	}
+
+	// FIXME - prepare for this to be optional some time in the future...
 	if (!msg_msgpack_list_get_count(msg_event->msg,
 			AS_EXCHANGE_MSG_NS_RACK_IDS, &num_namespace_elements_sent)
 			|| num_namespaces_sent != num_namespace_elements_sent) {
@@ -2493,6 +2521,14 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 				+ vinfo_payload->num_pids * sizeof(uint16_t);
 	}
 
+	if (namespace_data->replication_factor < ns->lo_repl_factor) {
+		ns->lo_repl_factor = namespace_data->replication_factor;
+	}
+
+	if (namespace_data->replication_factor > ns->hi_repl_factor) {
+		ns->hi_repl_factor = namespace_data->replication_factor;
+	}
+
 	ns->rack_ids[sl_ix] = namespace_data->rack_id;
 
 	if (namespace_data->roster_generation > ns->roster_generation) {
@@ -2595,6 +2631,27 @@ exchange_data_pre_commit_ap_cp_check()
 }
 
 /**
+ * Check that there's not a mixture of replication factors in any namespace.
+ */
+static bool
+exchange_data_pre_commit_repl_factor_check()
+{
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace* ns = g_config.namespaces[i];
+
+		// Note: lo of 0 means there was at least one pre-5.8 node.
+		if (ns->lo_repl_factor != 0 &&
+				ns->lo_repl_factor != ns->hi_repl_factor) {
+			WARNING("{%s} has unmatched replication factors from %u to %u",
+					ns->name, ns->lo_repl_factor, ns->hi_repl_factor);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/**
  * Pre commit namespace data anticipating a successful commit from the
  * principal. This pre commit is to ensure regime advances in cp mode to cover
  * the case where the principal commits exchange data but the commit to a
@@ -2619,6 +2676,9 @@ exchange_exchanging_pre_commit()
 
 		// Assuming zero to represent "null" partition.
 		memset(ns->cluster_versions, 0, sizeof(ns->cluster_versions));
+
+		ns->lo_repl_factor = UINT32_MAX;
+		ns->hi_repl_factor = 0;
 
 		memset(ns->rack_ids, 0, sizeof(ns->rack_ids));
 
@@ -2658,7 +2718,8 @@ exchange_exchanging_pre_commit()
 	}
 
 	// Collected all exchanged data - do final configuration consistency checks.
-	if (!exchange_data_pre_commit_ap_cp_check()) {
+	if (!exchange_data_pre_commit_ap_cp_check() ||
+			!exchange_data_pre_commit_repl_factor_check()) {
 		WARNING("abandoned exchange - fix configuration conflict");
 		pthread_mutex_unlock(&g_exchanged_info_lock);
 		EXCHANGE_UNLOCK();
@@ -2775,6 +2836,11 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 				num_namespaces_sent, 0);
 		cf_vector_define(partition_versions, sizeof(msg_buf_ele),
 				num_namespaces_sent, 0);
+
+		uint32_t replication_factors[num_namespaces_sent];
+
+		memset(replication_factors, 0, sizeof(replication_factors));
+
 		uint32_t rack_ids[num_namespaces_sent];
 
 		uint32_t roster_generations[num_namespaces_sent];
@@ -2806,8 +2872,20 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			goto Exit;
 		}
 
+		uint32_t num_replication_factors = num_namespaces_sent;
+
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS)
+				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+						AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
+						replication_factors, &num_replication_factors)) {
+			WARNING("received invalid replication factors from node %"PRIx64,
+					msg_event->msg_source);
+			goto Exit;
+		}
+
 		uint32_t num_rack_ids = num_namespaces_sent;
 
+		// FIXME - prepare for this to be optional some time in the future...
 		if (!msg_msgpack_list_get_uint32_array(msg_event->msg,
 				AS_EXCHANGE_MSG_NS_RACK_IDS, rack_ids, &num_rack_ids)) {
 			WARNING("received invalid cluster groups from node %"PRIx64,
@@ -2895,6 +2973,7 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			node_state.data->num_namespaces++;
 
 			namespace_data->local_namespace = matching_namespace;
+			namespace_data->replication_factor = replication_factors[i];
 			namespace_data->rack_id = rack_ids[i];
 			namespace_data->roster_generation = roster_generations[i];
 			namespace_data->eventual_regime = eventual_regimes[i];
