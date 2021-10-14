@@ -50,8 +50,9 @@
  *  8 - 5.2.0.17 & 5.3.0.8 - for (stripping) bin metadata and tombstones.
  *  9 - 5.4.0.3 - for (stripping) bin src-id or bin metadata and tombstones.
  * 10 - 5.5.0 - for converting bin cemeteries to regular tombstones.
+ * 11 - 5.8.0 - for revived nodes to require all nodes trusted.
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 10
+#define AS_EXCHANGE_COMPATIBILITY_ID 11
 
 /**
  * Number of quantum intervals in orphan state after which client transactions
