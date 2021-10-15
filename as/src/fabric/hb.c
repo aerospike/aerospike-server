@@ -497,6 +497,7 @@ if (((size) > STACK_ALLOC_LIMIT) && buffer) {cf_free(buffer);}
 #define TICKER_WARNING(format, ...)					\
 cf_ticker_warning(AS_HB, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_HB, format, ##__VA_ARGS__)
+#define TICKER_INFO(format, ...) cf_ticker_info(AS_HB, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_HB, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_HB, format, ##__VA_ARGS__)
 #define ASSERT(expression, message, ...)				\
@@ -4291,7 +4292,7 @@ channel_socket_should_live(cf_socket* socket, as_hb_channel* channel)
 					> cf_getms()) {
 		// Losing socket was a previous winner. Allow it time to do some work
 		// before knocking it off.
-		INFO("giving %d unresolved fd some grace time", CSFD(socket));
+		DETAIL("giving %d unresolved fd some grace time", CSFD(socket));
 		return true;
 	}
 	return false;
@@ -4370,9 +4371,9 @@ channel_socket_resolve(cf_socket* socket1, cf_socket* socket2)
 	else {
 		// Both connections have the same acceptor. Should not happen in
 		// practice. Despair and report resolution failure.
-		INFO(
-				"found redundant connections to same node, fds %d %d - choosing at random",
-				CSFD(socket1), CSFD(socket2));
+		TICKER_INFO(
+				"found redundant connections to same node (%lx) - choosing at random",
+				remote_nodeid);
 
 		if (cf_getms() % 2 == 0) {
 			winner_channel = &channel1;
@@ -4398,8 +4399,8 @@ channel_socket_resolve(cf_socket* socket1, cf_socket* socket2)
 		// with a seed address different from our published address.
 		//
 		// Break the cycle here and choose the loosing channel as the winner.
-		INFO("breaking socket resolve loop dropping winning fd %d",
-				CSFD(winner_socket));
+		INFO("breaking socket resolve loop with node %lx dropping winning fd %d",
+				remote_nodeid, CSFD(winner_socket));
 		winner_channel = (winner_channel == &channel1) ? &channel2 : &channel1;
 		winner_socket = (socket1 == winner_socket) ? socket2 : socket1;
 	}
@@ -6382,7 +6383,7 @@ mesh_node_data_update(as_hb_channel_event* event)
 				sizeof(endpoint_list_str2));
 
 		if (existing_mesh_node.endpoint_list) {
-			INFO("for node %"PRIx64" updating mesh endpoint address from {%s} to {%s}",event->nodeid,
+			TICKER_INFO("for node %"PRIx64" updating mesh endpoint address from {%s} to {%s}",event->nodeid,
 					endpoint_list_str1, endpoint_list_str2);
 		}
 
