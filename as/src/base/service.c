@@ -618,8 +618,7 @@ run_service(void* udata)
 	while (true) {
 		cf_poll_event events[N_EVENTS];
 		int32_t n_events = cf_poll_wait(poll, events, N_EVENTS, -1);
-
-		cf_assert(n_events >= 0, AS_SERVICE, "unexpected EINTR");
+		uint64_t events_ns = cf_getns();
 
 		for (uint32_t i = 0; i < (uint32_t)n_events; i++) {
 			uint32_t mask = events[i].events;
@@ -677,7 +676,9 @@ run_service(void* udata)
 			}
 
 			if (fd_h->proto == NULL && fd_h->proto_unread == sizeof(as_proto)) {
-				fd_h->last_used = cf_getns(); // request start time - for now
+				// Overload last_used for request start time. Note - latency
+				// will include unrelated events ahead of this one in this loop.
+				fd_h->last_used = events_ns;
 			}
 
 			if (! process_readable(fd_h)) {
