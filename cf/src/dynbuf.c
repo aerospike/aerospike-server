@@ -27,8 +27,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <arpa/inet.h>
-#include <asm/byteorder.h>
 
 #include <citrusleaf/alloc.h>
 
@@ -411,105 +409,6 @@ cf_buf_builder_reserve_internal(cf_buf_builder **bb_r, size_t sz)
 	}
 
 void
-cf_buf_builder_append_buf(cf_buf_builder **bb_r, uint8_t *buf, size_t sz)
-{
-	BB_RESERVE(sz);
-	cf_buf_builder *bb = *bb_r;
-	memcpy(&bb->buf[bb->used_sz], buf, sz);
-	bb->used_sz += sz;
-}
-
-void
-cf_buf_builder_append_string(cf_buf_builder **bb_r, const char *s)
-{
-	size_t	len = strlen(s);
-	BB_RESERVE(len);
-	cf_buf_builder *bb = *bb_r;
-	memcpy(&bb->buf[bb->used_sz], s, len);
-	bb->used_sz += len;
-}
-
-void
-cf_buf_builder_append_char(cf_buf_builder **bb_r, char c)
-{
-	BB_RESERVE(1);
-	cf_buf_builder *bb = *bb_r;
-	bb->buf[bb->used_sz] = (uint8_t)c;
-	bb->used_sz++;
-}
-
-void
-cf_buf_builder_append_ascii_int(cf_buf_builder **bb_r, int i)
-{
-	BB_RESERVE(12);
-	cf_buf_builder *bb = *bb_r;
-	bb->used_sz += cf_str_itoa(i, (char *)&bb->buf[bb->used_sz], 10);
-}
-
-void
-cf_buf_builder_append_ascii_uint64_x(cf_buf_builder **bb_r, uint64_t i)
-{
-	BB_RESERVE(18);
-	cf_buf_builder *bb = *bb_r;
-	bb->used_sz += cf_str_itoa_u64(i, (char *)&bb->buf[bb->used_sz], 16);
-}
-
-void
-cf_buf_builder_append_ascii_uint64(cf_buf_builder **bb_r, uint64_t i)
-{
-	BB_RESERVE(12);
-	cf_buf_builder *bb = *bb_r;
-	bb->used_sz += cf_str_itoa_u64(i, (char *)&bb->buf[bb->used_sz], 10);
-}
-
-void
-cf_buf_builder_append_ascii_uint32(cf_buf_builder **bb_r, uint32_t i)
-{
-	BB_RESERVE(12);
-	cf_buf_builder *bb = *bb_r;
-	bb->used_sz += cf_str_itoa_u32(i, (char *)&bb->buf[bb->used_sz], 10);
-}
-
-void
-cf_buf_builder_append_uint64(cf_buf_builder **bb_r, uint64_t i)
-{
-	BB_RESERVE(8);
-	cf_buf_builder *bb = *bb_r;
-	uint64_t *i_p = (uint64_t *)&bb->buf[bb->used_sz];
-	*i_p = __swab64(i);
-	bb->used_sz += 8;
-}
-
-void
-cf_buf_builder_append_uint32(cf_buf_builder **bb_r, uint32_t i)
-{
-	BB_RESERVE(4);
-	cf_buf_builder *bb = *bb_r;
-	uint32_t *i_p = (uint32_t *)&bb->buf[bb->used_sz];
-	*i_p = htonl(i);
-	bb->used_sz += 4;
-}
-
-void
-cf_buf_builder_append_uint16(cf_buf_builder **bb_r, uint16_t i)
-{
-	BB_RESERVE(2);
-	cf_buf_builder *bb = *bb_r;
-	uint16_t *i_p = (uint16_t *)&bb->buf[bb->used_sz];
-	*i_p = htons(i);
-	bb->used_sz += 2;
-}
-
-void
-cf_buf_builder_append_uint8(cf_buf_builder **bb_r, uint8_t i)
-{
-	BB_RESERVE(1);
-	cf_buf_builder *bb = *bb_r;
-	bb->buf[bb->used_sz] = i;
-	bb->used_sz ++;
-}
-
-void
 cf_buf_builder_reserve(cf_buf_builder **bb_r, int sz, uint8_t **buf)
 {
 	BB_RESERVE(sz);
@@ -520,20 +419,6 @@ cf_buf_builder_reserve(cf_buf_builder **bb_r, int sz, uint8_t **buf)
 	}
 
 	bb->used_sz += sz;
-}
-
-int
-cf_buf_builder_size(cf_buf_builder *bb)
-{
-	return bb->alloc_sz + sizeof(cf_buf_builder);
-}
-
-void
-cf_buf_builder_chomp(cf_buf_builder *bb)
-{
-	if (bb->used_sz > 0) {
-		bb->used_sz--;
-	}
 }
 
 cf_buf_builder *

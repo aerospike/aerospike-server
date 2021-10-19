@@ -86,25 +86,8 @@ typedef struct cf_buf_builder_s {
 extern cf_buf_builder *cf_buf_builder_create(size_t sz);
 extern void cf_buf_builder_free(cf_buf_builder *bb);
 extern void cf_buf_builder_reset(cf_buf_builder *bb);
-extern void cf_buf_builder_chomp(cf_buf_builder *bb_r);
-
-extern void cf_buf_builder_append_string(cf_buf_builder **bb_r, const char *s);
-extern void cf_buf_builder_append_char(cf_buf_builder **bb_r, char c);
-extern void cf_buf_builder_append_buf(cf_buf_builder **bb_r, uint8_t *buf, size_t sz);
-// These append ASCII versions:
-extern void cf_buf_builder_append_ascii_uint64_x(cf_buf_builder **bb_r, uint64_t i); // HEX FORMAT!
-extern void cf_buf_builder_append_ascii_uint64(cf_buf_builder **bb_r, uint64_t i);
-extern void cf_buf_builder_append_ascii_uint32(cf_buf_builder **bb_r, uint32_t i);
-extern void cf_buf_builder_append_ascii_int(cf_buf_builder **bb_r, int i);
-// These append network-order bytes:
-extern void cf_buf_builder_append_uint64(cf_buf_builder **bb_r, uint64_t i);
-extern void cf_buf_builder_append_uint32(cf_buf_builder **bb_r, uint32_t i);
-extern void cf_buf_builder_append_uint16(cf_buf_builder **bb_r, uint16_t i);
-extern void cf_buf_builder_append_uint8(cf_buf_builder **bb_r, uint8_t i);
 // Reserve the bytes and give me the handle to the spot reserved:
 extern void cf_buf_builder_reserve(cf_buf_builder **bb_r, int sz, uint8_t **buf);
-extern int cf_buf_builder_size(cf_buf_builder *bb);
-extern size_t get_new_size(int alloc, int used, int requested);
 
 // TODO - We've only implemented a few cf_ll_buf methods for now. We'll add more
 // functionality if and when it's needed.
