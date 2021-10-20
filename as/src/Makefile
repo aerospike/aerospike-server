@@ -71,7 +71,6 @@ BASE_SOURCES += particle_integer.c
 BASE_SOURCES += particle_list.c
 BASE_SOURCES += particle_map.c
 BASE_SOURCES += particle_string.c
-BASE_SOURCES += predexp.c
 BASE_SOURCES += proto.c
 BASE_SOURCES += record.c
 BASE_SOURCES += scan.c

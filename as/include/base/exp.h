@@ -74,8 +74,3 @@ as_exp_trilean as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* 
 bool as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx);
 bool as_exp_display(const as_exp* exp, cf_dyn_buf* db);
 void as_exp_destroy(as_exp* exp);
-
-as_exp* predexp_build_old(const as_msg_field* pfp);
-as_exp_trilean predexp_matches_metadata_old(const as_exp* predexp, const as_exp_ctx* ctx);
-bool predexp_matches_record_old(const as_exp* predexp, const as_exp_ctx* ctx);
-void predexp_destroy_old(as_exp* predexp);

@@ -499,7 +499,6 @@ static bool build_value_msgpack(build_args* args);
 // Build utilities.
 static bool parse_op_call(op_call* op, build_args* args);
 static bool build_set_expected_particle_type(build_args* args);
-static bool is_old_predexp(const uint8_t* buf);
 static as_exp* check_filter_exp(as_exp* exp);
 
 // Runtime.
@@ -751,12 +750,6 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 	cf_debug(AS_EXP, "as_exp_filter_build_base64 - buf_sz %u msg-dump:\n%*pH",
 			buf_sz_out, buf_sz_out, buf);
 
-	if (is_old_predexp(buf)) {
-		cf_warning(AS_EXP, "as_exp_filter_build_base64 - operation requires expressions found predexp");
-		cf_free(buf);
-		return NULL;
-	}
-
 	as_exp* exp = build_internal(buf, buf_sz_out, false);
 
 	if (exp == NULL) {
@@ -775,10 +768,6 @@ as_exp_filter_build(const as_msg_field* m, bool cpy_wire)
 	cf_debug(AS_EXP, "as_exp_filter_build - msg_field_sz %u msg-dump\n%*pH",
 			m->field_sz, as_msg_field_get_value_sz(m), m->data);
 
-	if (is_old_predexp(m->data)) {
-		return predexp_build_old(m);
-	}
-
 	as_exp* exp = build_internal(m->data, as_msg_field_get_value_sz(m),
 			cpy_wire);
 
@@ -794,11 +783,6 @@ as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 {
 	cf_debug(AS_EXP, "as_exp_build_buf - buf_sz %u buf-dump:\n%*pH",
 			buf_sz, buf_sz, buf);
-
-	if (is_old_predexp(buf)) {
-		cf_warning(AS_EXP, "as_exp_build_buf - operation requires expressions found predexp");
-		return NULL;
-	}
 
 	return build_internal(buf, buf_sz, cpy_wire);
 }
@@ -913,11 +897,6 @@ as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx)
 {
 	cf_assert(ctx->rd == NULL, AS_EXP, "invalid parameter");
 
-	// TODO - Remove in "six months".
-	if (predexp->version != 2) {
-		return predexp_matches_metadata_old(predexp, ctx);
-	}
-
 	as_exp_trilean ret = match_internal(predexp, ctx);
 
 	return ret;
@@ -927,11 +906,6 @@ bool
 as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx)
 {
 	cf_assert(ctx->rd != NULL, AS_EXP, "invalid parameter");
-
-	// TODO - Remove in "six months".
-	if (predexp->version != 2) {
-		return predexp_matches_record_old(predexp, ctx);
-	}
 
 	as_exp_trilean ret = match_internal(predexp, ctx);
 
@@ -958,11 +932,6 @@ as_exp_destroy(as_exp* exp)
 {
 	if (exp == NULL) {
 		return;
-	}
-
-	// TODO - Remove in "six months".
-	if (exp->version != 2) {
-		return predexp_destroy_old(exp);
 	}
 
 	for (uint32_t i = 0; i < exp->cleanup_stack_ix; i++) {
@@ -1002,7 +971,7 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 
 	if (msgpack_buf_get_list_ele_count(mp.buf, mp.buf_sz, &top_count) &&
 			top_count == 0) {
-		cf_warning(AS_EXP, "build_internal - expressions started with an empty list");
+		cf_warning(AS_EXP, "build_internal - invalid expression or empty list");
 		return NULL;
 	}
 
@@ -2793,13 +2762,6 @@ build_set_expected_particle_type(build_args* args)
 	}
 
 	return true;
-}
-
-static bool
-is_old_predexp(const uint8_t* buf)
-{
-	// TODO - Remove in "six months".
-	return buf[0] == 0;
 }
 
 static as_exp*
