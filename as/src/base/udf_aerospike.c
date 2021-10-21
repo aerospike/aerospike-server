@@ -250,7 +250,7 @@ udf_aerospike_rec_exists(const as_aerospike* as, const as_rec* rec)
 
 	udf_record* urecord = (udf_record*)as_rec_source(rec);
 
-	return urecord->is_open ? 1 : 0;
+	return urecord->is_open && as_record_is_live(urecord->r_ref->r) ? 1 : 0;
 }
 
 //------------------------------------------------
