@@ -289,7 +289,7 @@ typedef struct query_work_s {
 // **************************************************************************************************
 typedef struct query_jobstat_s {
 	int               index;
-	as_mon_jobstat ** jobstat;
+	as_mon_jobstat   *jobstat;
 	int               max_size;
 } query_jobstat;
 // **************************************************************************************************
@@ -3371,7 +3371,7 @@ mon_query_jobstat_reduce_fn(const void *key, uint32_t keylen, void *object,
 		return 0;
 	}
 
-	as_mon_jobstat *stat = job_pool->jobstat[job_pool->index++];
+	as_mon_jobstat *stat = &job_pool->jobstat[job_pool->index++];
 
 	query_fill_jobstat(qtr, stat);
 
@@ -3388,7 +3388,7 @@ as_query_get_jobstat_all(int * size)
 	query_jobstat     job_pool;
 
 	job_stats          = (as_mon_jobstat *) cf_malloc(sizeof(as_mon_jobstat) * (size_t)(*size));
-	job_pool.jobstat  = &job_stats;
+	job_pool.jobstat  = job_stats;
 	job_pool.index    = 0;
 	job_pool.max_size = *size;
 	cf_rchash_reduce(g_query_job_hash, mon_query_jobstat_reduce_fn, &job_pool);
