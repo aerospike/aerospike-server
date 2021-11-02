@@ -1734,8 +1734,6 @@ void
 info_service_config_get(cf_dyn_buf *db)
 {
 	// Note - no user, group.
-	info_append_string_safe(db, "pidfile", g_config.pidfile);
-	info_append_uint32(db, "proto-fd-max", g_config.n_proto_fd_max);
 
 	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
 	info_append_string(db, "auto-pin", auto_pin_string());
@@ -1749,6 +1747,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_get_printable_cluster_name(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
 
+	info_append_string(db, "debug-allocations", debug_allocations_string());
 	info_append_bool(db, "disable-udf-execution", g_config.udf_execution_disabled);
 	info_append_bool(db, "downgrading", g_config.downgrading);
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
@@ -1760,6 +1759,7 @@ info_service_config_get(cf_dyn_buf *db)
 		info_append_indexed_string(db, "feature-key-file", i, NULL, g_config.feature_key_files[i]);
 	}
 
+	info_append_bool(db, "indent-allocations", g_config.indent_allocations);
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
@@ -1772,7 +1772,9 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint64_x(db, "node-id", g_config.self_node); // may be configured or auto-generated
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_bool(db, "os-group-perms", cf_os_is_using_group_perms());
+	info_append_string_safe(db, "pidfile", g_config.pidfile);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
+	info_append_uint32(db, "proto-fd-max", g_config.n_proto_fd_max);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
 	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
 	info_append_uint32(db, "query-buf-size", g_config.query_buf_size); // dynamic only
@@ -1790,6 +1792,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint64(db, "query-untracked-time-ms", g_config.query_untracked_time_ms);
 	info_append_uint32(db, "query-worker-threads", g_config.query_worker_threads);
 	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
+	info_append_bool(db, "salt-allocations", g_config.salt_allocations);
 	info_append_uint32(db, "scan-max-done", g_config.scan_max_done);
 	info_append_uint32(db, "scan-threads-limit", g_config.n_scan_threads_limit);
 	info_append_uint32(db, "service-threads", g_config.n_service_threads);
@@ -1804,10 +1807,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "vault-token-file", g_vault_cfg.token_file);
 	info_append_string_safe(db, "vault-url", g_vault_cfg.url);
 	info_append_string_safe(db, "work-directory", g_config.work_directory);
-
-	info_append_string(db, "debug-allocations", debug_allocations_string());
-	info_append_bool(db, "indent-allocations", g_config.indent_allocations);
-	info_append_bool(db, "salt-allocations", g_config.salt_allocations);
 }
 
 static void
@@ -1823,12 +1822,12 @@ info_network_config_get(cf_dyn_buf *db)
 {
 	// Service:
 
-	info_append_int(db, "service.port", g_config.service.bind_port);
-	append_addrs(db, "service.address", &g_config.service.bind);
 	info_append_int(db, "service.access-port", g_config.service.std_port);
 	append_addrs(db, "service.access-address", &g_config.service.std);
+	append_addrs(db, "service.address", &g_config.service.bind);
 	info_append_int(db, "service.alternate-access-port", g_config.service.alt_port);
 	append_addrs(db, "service.alternate-access-address", &g_config.service.alt);
+	info_append_int(db, "service.port", g_config.service.bind_port);
 
 	info_append_int(db, "service.tls-port", g_config.tls_service.bind_port);
 	append_addrs(db, "service.tls-address", &g_config.tls_service.bind);
@@ -1852,7 +1851,6 @@ info_network_config_get(cf_dyn_buf *db)
 	// Fabric:
 
 	append_addrs(db, "fabric.address", &g_config.fabric.bind);
-	info_append_int(db, "fabric.port", g_config.fabric.bind_port);
 	append_addrs(db, "fabric.tls-address", &g_config.tls_fabric.bind);
 	info_append_int(db, "fabric.tls-port", g_config.tls_fabric.bind_port);
 	info_append_string_safe(db, "fabric.tls-name", g_config.tls_fabric.tls_our_name);
@@ -1870,6 +1868,7 @@ info_network_config_get(cf_dyn_buf *db)
 	info_append_int(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
 	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
 	info_append_int(db, "fabric.latency-max-ms", g_config.fabric_latency_max_ms);
+	info_append_int(db, "fabric.port", g_config.fabric.bind_port);
 	info_append_int(db, "fabric.recv-rearm-threshold", g_config.fabric_recv_rearm_threshold);
 	info_append_int(db, "fabric.send-threads", g_config.n_fabric_send_threads);
 
@@ -1924,10 +1923,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		return;
 	}
 
-	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
-	info_append_uint64(db, "memory-size", ns->memory_size);
-	info_append_uint32(db, "default-ttl", ns->default_ttl);
-
 	info_append_bool(db, "allow-ttl-without-nsup", ns->allow_ttl_without_nsup);
 	info_append_uint32(db, "background-scan-max-rps", ns->background_scan_max_rps);
 
@@ -1943,6 +1938,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	info_append_bool(db, "conflict-resolve-writes", ns->conflict_resolve_writes);
 	info_append_bool(db, "data-in-index", ns->data_in_index);
+	info_append_uint32(db, "default-ttl", ns->default_ttl);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
@@ -1968,6 +1964,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 											"illegal"))));
 
 	info_append_uint32(db, "max-record-size", ns->max_record_size);
+	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
@@ -1980,6 +1977,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "reject-non-xdr-writes", ns->reject_non_xdr_writes);
 	info_append_bool(db, "reject-xdr-writes", ns->reject_xdr_writes);
+	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_uint32(db, "single-scan-threads", ns->n_single_scan_threads);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
@@ -2019,7 +2017,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 			}
 		}
 
-		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
 		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
 		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
@@ -2040,6 +2037,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
 		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
@@ -2059,16 +2057,13 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 			}
 		}
 
-		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
-		info_append_string_safe(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode);
-		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
-		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
 		info_append_bool(db, "storage-engine.cache-replica-writes", ns->storage_cache_replica_writes);
 		info_append_bool(db, "storage-engine.cold-start-empty", ns->storage_cold_start_empty);
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
 		info_append_uint32(db, "storage-engine.commit-min-size", ns->storage_commit_min_size);
 		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
 		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
+		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
 		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
 		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
 		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
@@ -2086,14 +2081,17 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
 		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
 		info_append_bool(db, "storage-engine.read-page-cache", ns->storage_read_page_cache);
+		info_append_string_safe(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode);
 		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
 		info_append_bool(db, "storage-engine.sindex-startup-device-scan", ns->storage_sindex_startup_device_scan);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
+		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
 	}
 
 	info_append_uint32(db, "sindex.num-partitions", ns->sindex_num_partitions);

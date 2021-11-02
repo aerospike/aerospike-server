@@ -735,11 +735,6 @@ struct as_namespace_s {
 	// Configuration.
 	//
 
-	uint32_t		cfg_replication_factor;
-	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
-	uint64_t		memory_size;
-	uint32_t		default_ttl;
-
 	bool			allow_ttl_without_nsup;
 	uint32_t		background_scan_max_rps;
 	conflict_resolution_pol conflict_resolution_policy;
@@ -747,6 +742,7 @@ struct as_namespace_s {
 	bool			cp; // relevant only for enterprise edition
 	bool			cp_allow_drops; // relevant only for enterprise edition
 	bool			data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
+	uint32_t		default_ttl;
 	bool			cold_start_eviction_disabled;
 	bool			write_dup_res_disabled;
 	bool			disallow_null_setname;
@@ -764,6 +760,7 @@ struct as_namespace_s {
 	bool			ignore_migrate_fill_delay;
 	uint64_t		index_stage_size;
 	uint32_t		max_record_size;
+	uint64_t		memory_size;
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
@@ -776,6 +773,8 @@ struct as_namespace_s {
 	as_read_consistency_level read_consistency_level;
 	bool			reject_non_xdr_writes;
 	bool			reject_xdr_writes;
+	uint32_t		cfg_replication_factor;
+	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
 	bool			single_bin; // restrict the namespace to objects with exactly one bin
 	uint32_t		n_single_scan_threads;
 	uint32_t		stop_writes_pct;
@@ -798,12 +797,9 @@ struct as_namespace_s {
 	const char*		storage_devices[AS_STORAGE_MAX_DEVICES];
 	uint32_t		n_storage_devices; // indirect config - if devices array contains raw devices (or partitions)
 	uint32_t		n_storage_files; // indirect config - if devices array contains files
+
 	const char*		storage_shadows[AS_STORAGE_MAX_DEVICES];
 	uint32_t		n_storage_shadows; // indirect config
-	uint64_t		storage_filesize;
-	char*			storage_scheduler_mode; // relevant for devices only, not files
-	uint32_t		storage_write_block_size;
-	bool			storage_data_in_memory;
 
 	bool			storage_cache_replica_writes;
 	bool			storage_cold_start_empty;
@@ -811,6 +807,7 @@ struct as_namespace_s {
 	uint32_t		storage_commit_min_size; // relevant only for enterprise edition
 	as_compression_method storage_compression; // relevant only for enterprise edition
 	uint32_t		storage_compression_level; // relevant only for enterprise edition
+	bool			storage_data_in_memory;
 	uint32_t		storage_defrag_lwm_pct;
 	uint32_t		storage_defrag_queue_min;
 	uint32_t		storage_defrag_sleep;
@@ -821,14 +818,17 @@ struct as_namespace_s {
 	as_encryption_method storage_encryption; // relevant only for enterprise edition
 	char*			storage_encryption_key_file; // relevant only for enterprise edition
 	char*			storage_encryption_old_key_file; // relevant only for enterprise edition
+	uint64_t		storage_filesize;
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
 	bool			storage_read_page_cache;
+	char*			storage_scheduler_mode; // relevant for devices only, not files
 	bool			storage_serialize_tomb_raider; // relevant only for enterprise edition
 	bool			storage_sindex_startup_device_scan;
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
+	uint32_t		storage_write_block_size;
 
 	uint32_t		sindex_num_partitions;
 

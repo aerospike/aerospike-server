@@ -122,9 +122,6 @@ typedef struct as_xdr_dc_ns_cfg_s {
 typedef struct as_xdr_dc_cfg_s {
 	char* name;
 
-	cf_mutex seed_lock;
-	cf_vector seed_nodes; // from 'node-address-port'
-
 	as_xdr_auth_mode auth_mode; // Aerospike destinations only
 	char* auth_password_file; // Aerospike destinations only
 	char* auth_user; // Aerospike destinations only
@@ -132,6 +129,10 @@ typedef struct as_xdr_dc_cfg_s {
 	bool connector;
 	uint32_t max_recoveries_interleaved;
 	uint32_t max_used_service_threads;
+
+	cf_mutex seed_lock;
+	cf_vector seed_nodes; // from 'node-address-port'
+
 	uint32_t period_us;
 
 	char* tls_our_name;

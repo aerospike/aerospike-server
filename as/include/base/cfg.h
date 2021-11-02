@@ -81,15 +81,6 @@ typedef struct as_config_s {
 	// service context.
 	//
 
-	// Normally visible, in canonical configuration file order:
-
-	uid_t			uid;
-	gid_t			gid;
-	char*			pidfile;
-	uint32_t		n_proto_fd_max;
-
-	// Normally hidden:
-
 	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
 	cf_topo_auto_pin auto_pin;
 	uint32_t		n_batch_index_threads;
@@ -99,6 +90,7 @@ typedef struct as_config_s {
 	bool			batch_without_digests; // leave digests out of batch responses
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
+	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
 	bool			udf_execution_disabled;
 	bool			downgrading;
 	bool			fabric_benchmarks_enabled;
@@ -107,6 +99,8 @@ typedef struct as_config_s {
 	bool			enforce_best_practices;
 	const char*		feature_key_files[MAX_FEATURE_KEY_FILES];
 	uint32_t		n_feature_key_files; // indirect config
+	gid_t			gid;
+	bool			indent_allocations; // pointer indentation for better double-free detection
 	uint32_t		n_info_threads;
 	bool			keep_caps_ssd_health;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
@@ -115,7 +109,9 @@ typedef struct as_config_s {
 	uint32_t		migrate_max_num_incoming;
 	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
+	char*			pidfile;
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
+	uint32_t		n_proto_fd_max;
 	int				proto_slow_netio_sleep_ms; // dynamic only
 	uint32_t		query_bsize;
 	uint64_t		query_buf_size; // dynamic only
@@ -133,6 +129,7 @@ typedef struct as_config_s {
 	uint64_t		query_untracked_time_ms;
 	uint32_t		query_worker_threads;
 	bool			run_as_daemon;
+	bool			salt_allocations; // initialize with junk - for internal use only
 	uint32_t		scan_max_done; // maximum number of finished scans kept for monitoring
 	uint32_t		n_scan_threads_limit;
 	uint32_t		n_service_threads;
@@ -142,14 +139,9 @@ typedef struct as_config_s {
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
 	uint32_t		transaction_retry_ms;
+	uid_t			uid;
 	// Note - vault config is a cf global, so can't be here.
 	char*			work_directory;
-
-	// For special debugging or bug-related repair:
-
-	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
-	bool			indent_allocations; // pointer indentation for better double-free detection
-	bool			salt_allocations; // initialize with junk - for internal use only
 
 	//--------------------------------------------
 	// network::service context.
