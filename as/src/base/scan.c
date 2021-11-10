@@ -687,6 +687,11 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns)
 			! get_scan_rps(tr, &rps) ||
 			! get_scan_socket_timeout(tr, &timeout)) {
 		cf_warning(AS_SCAN, "basic scan job failed msg field processing");
+
+		if (pids != NULL) {
+			cf_free(pids);
+		}
+
 		return AS_ERR_PARAMETER;
 	}
 
