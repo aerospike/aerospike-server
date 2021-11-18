@@ -120,6 +120,8 @@ static int file_read(char * filename, uint8_t ** content, size_t * content_len, 
 			cf_free(src);
 			src = NULL;
 
+			cf_dyn_buf_free(&buf);
+
 			return 0;
 		}
 
