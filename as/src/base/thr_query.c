@@ -135,8 +135,6 @@
 #include "transaction/write.h"
 
 #include "ai_btree.h"
-#include "bt.h"
-#include "bt_iterator.h"
 
 #include "warnings.h"
 
@@ -263,7 +261,7 @@ typedef struct as_query_transaction_s {
 	*
 	* NB: Read Only or Single threaded
 	*/
-	struct ai_obj            bkey;
+	ai_obj                   bkey;
 	as_aggr_call             agg_call; // Stream UDF Details
 	iudf_origin              iudf_orig; // Background UDF details
 	iops_origin              iops_orig; // Background ops details
@@ -2316,13 +2314,13 @@ query_pimd(as_sindex *si, const as_query_range *srange, as_sindex_qctx *qctx)
 	as_sindex_pmetadata *pimd = &imd->pimd[qctx->pimd_ix];
 
 	PIMD_RLOCK(&pimd->slock);
-	int ret = ai_btree_query(imd, srange, qctx);
+	ai_btree_query(imd, srange, qctx);
 	PIMD_RUNLOCK(&pimd->slock);
 
 	// No histogram for query per call.
-	as_sindex_process_ret(si, ret, AS_SINDEX_OP_READ, 0, __LINE__);
+	as_sindex_process_ret(si, AS_SINDEX_OK, AS_SINDEX_OP_READ, 0, __LINE__);
 
-	return ret;
+	return AS_SINDEX_OK;
 }
 //                                        END -  SINDEX QUERY
 // ************************************************************************************************

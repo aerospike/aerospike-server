@@ -27,17 +27,9 @@
 
 #pragma once
 
-#include <inttypes.h>
+#include <stdint.h>
 
-#include <citrusleaf/cf_digest.h>
-
-typedef unsigned char uchar;
-typedef unsigned short ushort16;
-typedef unsigned int uint32;
-typedef unsigned long long ull;
 typedef __uint128_t uint128;
-
-typedef cf_digest uint160;
 
 // Same as as_sindex_ktype
 typedef uint8_t col_type_t;
@@ -47,15 +39,6 @@ typedef uint8_t col_type_t;
 #define COL_TYPE_GEOJSON  3
 #define COL_TYPE_MAX      4
 
-#define C_IS_L(ctype)    (ctype == COL_TYPE_LONG)
-#define C_IS_DG(ctype)   (ctype == COL_TYPE_DIGEST)
-#define C_IS_G(ctype)    (ctype == COL_TYPE_GEOJSON)
-// TODO - should this have C_IS_G as well
-#define C_IS_NUM(ctype)  (C_IS_L(ctype))
-
-/***************** Opaque Forward Type Declarations *****************/
-
-/*
- *  B-Tree Object [Implementation defined in "btreepriv.h".]
- */
-typedef struct btree bt;
+#define C_IS_LONG(ctype)    (ctype == COL_TYPE_LONG)
+#define C_IS_DIGEST(ctype)  (ctype == COL_TYPE_DIGEST)
+#define C_IS_GEOJSON(ctype) (ctype == COL_TYPE_GEOJSON)

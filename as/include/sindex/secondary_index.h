@@ -34,8 +34,10 @@
 #include "base/smd.h"
 #include "base/transaction.h"
 #include "fabric/partition.h"
+#include "sindex/btree.h"
 #include "storage/storage.h"
 
+#include "ai_obj.h"
 #include "ai_types.h"
 
 #include "arenax.h"
@@ -201,7 +203,7 @@ typedef struct as_sindex_stat_s {
 // **************************************************************************************************
 typedef struct as_sindex_physical_metadata_s {
 	pthread_rwlock_t    slock;
-	struct btree       *ibtr;
+	as_btree           *ibtr;
 } as_sindex_pmetadata;
 
 
@@ -318,7 +320,7 @@ typedef struct as_sindex_qctx_s {
 
 	// IBTR offset.
 	bool nbtr_done; // if nbtr done resume from key next to ibtr_last_key
-	struct ai_obj *ibtr_last_key; // offset in ibtr
+	ai_obj *ibtr_last_key; // offset in ibtr
 
 	// NBTR offset.
 	uint64_t nbtr_last_key;
@@ -587,7 +589,7 @@ extern bool as_sindex_iname_to_smd_key(const as_namespace *ns, const char *iname
 static inline int
 as_sindex_get_pimd_ix(const as_sindex_metadata *imd, const void *buf)
 {
-	return C_IS_DG(imd->sktype) ?
+	return C_IS_DIGEST(imd->sktype) ?
 			(int)*(uint128 *)buf % imd->n_pimds :
 			(int)*(int64_t *)buf % imd->n_pimds;
 }

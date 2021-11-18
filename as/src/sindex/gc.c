@@ -41,8 +41,6 @@
 #include "log.h"
 
 #include "ai_btree.h"
-#include "ai_obj.h"
-#include "bt_iterator.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -240,9 +238,9 @@ gc_si_pimd(as_sindex* si, as_sindex_pmetadata* pimd, uint64_t* n_cleaned)
 {
 	gc_offset offset; // skey + r_h offset
 
-	if(! assignMinKey(pimd->ibtr, &offset.ibtr_last_key)) {
-		return; // no keys in ibtr - nothing to GC
-	}
+	// FIXME - after changing the key comparison function, this may not be the
+	// minimal key any longer.
+	init_ai_obj(&offset.ibtr_last_key);
 
 	offset.nbtr_last_key = 0;
 	offset.done = false;

@@ -25,9 +25,9 @@
 #include <stdint.h>
 
 // TODO: replace includes with forward declarations
+#include "sindex/btree.h"
 #include "sindex/secondary_index.h"
 #include "ai_obj.h"
-#include "btreepriv.h"
 
 #include "arenax.h"
 
@@ -40,7 +40,7 @@ as_sindex_status ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd
 
 as_sindex_status ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *key, cf_arenax_handle r_h);
 
-int ai_btree_query(as_sindex_metadata *imd, const as_query_range *range, as_sindex_qctx *qctx);
+void ai_btree_query(as_sindex_metadata *imd, const as_query_range *range, as_sindex_qctx *qctx);
 
 uint64_t ai_btree_get_isize(as_sindex_metadata *imd);
 
@@ -48,12 +48,12 @@ uint64_t ai_btree_get_nsize(as_sindex_metadata *imd);
 
 uint64_t ai_btree_get_numkeys(as_sindex_metadata *imd);
 
-as_sindex_status ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, struct ai_obj *ibtr_last_key, cf_arenax_handle *nbtr_last_key, ulong lim, cf_ll *apk2d);
+as_sindex_status ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, ai_obj *ibtr_last_key, cf_arenax_handle *nbtr_last_key, ulong lim, cf_ll *apk2d);
 
 bool ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *apk2d, ulong n2del, ulong *deleted);
 
 void ai_btree_gc_list_destroy_fn(cf_ll_element *ele);
 
-void ai_btree_delete_ibtr(bt *ibtr);
+void ai_btree_delete_ibtr(as_btree *ibtr);
 
 void ai_btree_reset_pimd(as_sindex_pmetadata * pimd);

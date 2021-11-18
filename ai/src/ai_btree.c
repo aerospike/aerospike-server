@@ -20,17 +20,20 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#include "ai_btree.h"
+
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
+#include "ai_glue.h"
 #include "ai_obj.h"
-#include "ai_btree.h"
-#include "bt_iterator.h"
-#include "stream.h"
 
 #include "base/cfg.h"
 #include "base/index.h"
 #include "base/thr_query.h"
 #include "fabric/partition.h"
+#include "sindex/btree.h"
 #include "sindex/gc.h"
 #include "sindex/secondary_index.h"
 
@@ -65,6 +68,39 @@ typedef struct ll_sindex_gc_element_s {
 	objs_to_defrag_arr objs_to_defrag;
 } ll_sindex_gc_element;
 
+typedef struct add_recs_from_nbtr_ctx_s {
+	const as_sindex_metadata *imd;
+	as_btree *nbtr;
+	const ai_obj *ikey;
+	as_sindex_qctx *qctx;
+	const ai_obj *sfk;
+	bool resume;
+} add_recs_from_nbtr_ctx;
+
+typedef struct get_numeric_range_recl_ctx_s {
+	const as_sindex_metadata *imd;
+	as_btree *ibtr;
+	as_sindex_qctx *qctx;
+	const ai_obj *sfk;
+	bool resume;
+} get_numeric_range_recl_ctx;
+
+typedef struct build_defrag_list_from_nbtr_ctx_s {
+	const as_namespace *ns;
+	const ai_obj *ikey;
+	cf_arenax_handle *nbtr_last_key;
+	uint64_t *limit;
+	cf_ll *gc_list;
+} build_defrag_list_from_nbtr_ctx;
+
+typedef struct ai_btree_build_defrag_list_ctx_s {
+	const as_namespace *ns;
+	ai_obj *ibtr_last_key;
+	cf_arenax_handle *nbtr_last_key;
+	uint64_t limit;
+	cf_ll *gc_list;
+} ai_btree_build_defrag_list_ctx;
+
 static const uint8_t INIT_CAPACITY = 1;
 
 static ai_arr *
@@ -77,15 +113,12 @@ ai_arr_new()
 }
 
 static void
-ai_arr_move_to_tree(ai_arr *arr, bt *nbtr)
+ai_arr_move_to_tree(ai_arr *arr, as_btree *nbtr)
 {
 	for (int i = 0; i < arr->used; i++) {
 		ai_obj apk;
-		init_ai_objLong(&apk, arr->data[i]);
-		if (!btIndNodeAdd(nbtr, &apk)) {
-			// what to do ??
-			continue;
-		}
+		init_ai_objInteger(&apk, arr->data[i]);
+		btIndNodeAdd(nbtr, &apk);
 	}
 }
 
@@ -216,7 +249,7 @@ anbtr_check_convert(ai_nbtr *anbtr)
 		//cf_info(AS_SINDEX,"Flipped @ %d", arr->used);
 		ulong ba = ai_arr_size(arr);
 		// Allocate btree move digest from arr to btree
-		bt *nbtr = createNBT();
+		as_btree *nbtr = createNBT();
 		if (!nbtr) {
 			cf_warning(AS_SINDEX, "btree allocation failure");
 			return 0;
@@ -229,7 +262,7 @@ anbtr_check_convert(ai_nbtr *anbtr)
 		anbtr->u.nbtr = nbtr;
 		anbtr->is_btree = true;
 
-		ulong aa = nbtr->msize;
+		ulong aa = nbtr->size;
 		return (aa - ba);
 	}
 	return 0;
@@ -251,9 +284,9 @@ anbtr_check_convert(ai_nbtr *anbtr)
  *      AS_SINDEX_KEY_FOUND : If key already exists
  */
 static int
-reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk)
+reduced_iAdd(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
 {
-	ai_nbtr *anbtr = (ai_nbtr *)btIndFind(ibtr, acol);
+	ai_nbtr *anbtr = btIndFind(ibtr, acol);
 	ulong ba = 0, aa = 0;
 
 	if (!anbtr) {
@@ -261,17 +294,17 @@ reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk)
 		aa += sizeof(ai_nbtr);
 
 		anbtr->u.arr = ai_arr_new();
-		ibtr->nsize += ai_arr_size(anbtr->u.arr);
+		ibtr->extra_size += ai_arr_size(anbtr->u.arr);
 
-		btIndAdd(ibtr, acol, (bt *)anbtr);
+		btIndAdd(ibtr, acol, anbtr);
 	}
 
 	// Convert from arr to nbtr if limit is hit
-	ibtr->nsize += anbtr_check_convert(anbtr);
+	ibtr->extra_size += anbtr_check_convert(anbtr);
 
 	// If already a btree use it
 	if (anbtr->is_btree) {
-		bt *nbtr = anbtr->u.nbtr;
+		as_btree *nbtr = anbtr->u.nbtr;
 		if (!nbtr) {
 			return AS_SINDEX_ERR;
 		}
@@ -280,11 +313,9 @@ reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk)
 			return AS_SINDEX_KEY_FOUND;
 		}
 
-		ba += nbtr->msize;
-		if (!btIndNodeAdd(nbtr, apk)) {
-			return AS_SINDEX_ERR;
-		}
-		aa += nbtr->msize;
+		ba += nbtr->size;
+		btIndNodeAdd(nbtr, apk);
+		aa += nbtr->size;
 
 	} else {
 		ai_arr *arr = anbtr->u.arr;
@@ -294,14 +325,14 @@ reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk)
 
 		ba += ai_arr_size(anbtr->u.arr);
 		bool found = false;
-		ai_arr *t_arr = ai_arr_insert(arr, apk->l, &found);
+		ai_arr *t_arr = ai_arr_insert(arr, apk->integer, &found);
 		if (found) {
 			return AS_SINDEX_KEY_FOUND;
 		}
 		anbtr->u.arr = t_arr;
 		aa += ai_arr_size(anbtr->u.arr);
 	}
-	ibtr->nsize += (aa - ba);  // ibtr inherits nbtr
+	ibtr->extra_size += (aa - ba);  // ibtr inherits nbtr
 
 	return AS_SINDEX_OK;
 }
@@ -320,9 +351,9 @@ reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk)
  *      AS_SINDEX_KEY_NOTFOUND : If key does not exist
  */
 static int
-reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
+reduced_iRem(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
 {
-	ai_nbtr *anbtr = (ai_nbtr *)btIndFind(ibtr, acol);
+	ai_nbtr *anbtr = btIndFind(ibtr, acol);
 	ulong ba = 0, aa = 0;
 	if (!anbtr) {
 		return AS_SINDEX_KEY_NOTFOUND;
@@ -331,27 +362,20 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 		if (!anbtr->u.nbtr) return AS_SINDEX_ERR;
 
 		// Remove from nbtr if found
-		bt *nbtr = anbtr->u.nbtr;
+		as_btree *nbtr = anbtr->u.nbtr;
 		if (!btIndNodeExist(nbtr, apk)) {
 			return AS_SINDEX_KEY_NOTFOUND;
 		}
-		ba = nbtr->msize;
+		ba = nbtr->size;
 
-		// TODO - Needs to be cleaner, type convert from signed
-		// to unsigned. Should be 64 bit !!
-		int nkeys_before = nbtr->numkeys; 
-		int nkeys_after = btIndNodeDelete(nbtr, apk, NULL);
-		aa = nbtr->msize;
-
-		if (nkeys_after == nkeys_before) {
-			return AS_SINDEX_KEY_NOTFOUND;
-		}
+		btIndNodeDelete(nbtr, apk);
+		aa = nbtr->size;
 
 		// remove from ibtr
-		if (nkeys_after == 0) {
+		if (nbtr->n_keys == 0) {
 			btIndDelete(ibtr, acol);
 			aa = 0;
-			bt_destroy(nbtr);
+			as_btree_destroy(nbtr);
 			ba += sizeof(ai_nbtr);
 			cf_free(anbtr);
 		}
@@ -361,7 +385,7 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 		// Remove from arr if found
 		bool notfound = false;
 		ba = ai_arr_size(anbtr->u.arr);
-		anbtr->u.arr = ai_arr_delete(anbtr->u.arr, apk->l, &notfound);
+		anbtr->u.arr = ai_arr_delete(anbtr->u.arr, apk->integer, &notfound);
 		if (notfound) return AS_SINDEX_KEY_NOTFOUND;
 		aa = ai_arr_size(anbtr->u.arr);
 
@@ -374,7 +398,7 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 			cf_free(anbtr);
 		}
 	}
-	ibtr->nsize -= (ba - aa);
+	ibtr->extra_size -= (ba - aa);
 
 	return AS_SINDEX_OK;
 }
@@ -384,8 +408,8 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
  * 1. updates and ns->storage_data_in_memory deletes need pimd lock
  * 2. other deletes will queue to sindex gc which needs pimd lock
  */
-static int
-btree_addsinglerec(as_sindex_metadata *imd, cf_arenax_handle r_h,
+static void
+btree_addsinglerec(const as_sindex_metadata *imd, cf_arenax_handle r_h,
 		as_sindex_qctx *qctx)
 {
 	as_namespace *ns = imd->si->ns;
@@ -401,7 +425,7 @@ btree_addsinglerec(as_sindex_metadata *imd, cf_arenax_handle r_h,
 	if (! as_query_reserve_partition_tree(ns, qctx, pid) ||
 			r->tree_id != qctx->reserved_trees[pid]->id ||
 			r->generation == 0) {
-		return 0;
+		return;
 	}
 
 	static const uint8_t dummy_value = 0;
@@ -418,7 +442,7 @@ btree_addsinglerec(as_sindex_metadata *imd, cf_arenax_handle r_h,
 
 		if (cf_shash_put_unique(qctx->r_h_hash, &r_h, &dummy_value) ==
 				CF_SHASH_ERR_FOUND) {
-			return 0;
+			return;
 		}
 	}
 
@@ -432,7 +456,7 @@ btree_addsinglerec(as_sindex_metadata *imd, cf_arenax_handle r_h,
 
 		if (r->generation == 0) {
 			cf_mutex_unlock(rlock);
-			return 0;
+			return;
 		}
 
 		as_index_reserve(r);
@@ -471,75 +495,70 @@ btree_addsinglerec(as_sindex_metadata *imd, cf_arenax_handle r_h,
 
 	keys_arr->num++;
 	qctx->n_recs++;
-
-	return 0;
 }
 
-/*
- * Return 0 in case of success
- *       -1 in case of failure
- */
-static int
-add_recs_from_nbtr(as_sindex_metadata *imd, ai_obj *ikey, bt *nbtr,
-		as_sindex_qctx *qctx, bool fullrng)
+static bool
+add_recs_from_nbtr_cb(const void *key, void *value, void *udata)
 {
-	ai_obj sfk, efk;
-	init_ai_obj(&sfk);
-	init_ai_obj(&efk);
-	btSIter *nbi;
-	btEntry *nbe;
-	btSIter stack_nbi;
+	(void)value;
 
-	if (fullrng) {
-		nbi = btSetFullRangeIter(&stack_nbi, nbtr, 1, NULL);
-	} else { // search from LAST batches end-point
-		init_ai_objLong(&sfk, qctx->nbtr_last_key);
-		assignMaxKey(nbtr, &efk);
-		nbi = btSetRangeIter(&stack_nbi, nbtr, &sfk, &efk, 1);
-	}
+	const ai_obj *akey = key;
+	add_recs_from_nbtr_ctx *ctx = udata;
+	as_btree *nbtr = ctx->nbtr;
+	as_sindex_qctx *qctx = ctx->qctx;
 
-	// nbi will be NULL if elements >= sfk got deleted since last round.
-	if (nbi == NULL) {
-		return 0;
-	}
+	if (ctx->resume) {
+		ctx->resume = false;
 
-	int ret = 0;
-
-	while ((nbe = btRangeNext(nbi, 1))) {
-		ai_obj *akey = nbe->key;
-		// FIRST can be REPEAT (last batch)
-		if (!fullrng && ai_objEQ(&sfk, akey)) {
-			continue;
-		}
-		if (btree_addsinglerec(imd, (cf_arenax_handle)akey->l, qctx)) {
-			ret = -1;
-			break;
-		}
-		if (qctx->n_recs == qctx->bsize) {
-			if (ikey) {
-				ai_objClone(qctx->ibtr_last_key, ikey);
-			}
-			qctx->nbtr_last_key = akey->l;
-			break;
+		if (nbtr->key_comp(akey, ctx->sfk) == 0) {
+			return true;
 		}
 	}
 
-	btReleaseRangeIterator(nbi);
+	btree_addsinglerec(ctx->imd, (cf_arenax_handle)akey->integer, qctx);
 
-	return ret;
+	if (qctx->n_recs < qctx->bsize) {
+		return true;
+	}
+
+	if (ctx->ikey != NULL) {
+		ai_objClone(qctx->ibtr_last_key, ctx->ikey);
+	}
+
+	qctx->nbtr_last_key = akey->integer;
+	return false;
 }
 
-static int
-add_recs_from_arr(as_sindex_metadata *imd, ai_obj *ikey, ai_arr *arr,
-		as_sindex_qctx *qctx)
+static void
+add_recs_from_nbtr(const as_sindex_metadata *imd, const ai_obj *ikey,
+		as_btree *nbtr, as_sindex_qctx *qctx, bool resume)
 {
-	bool ret = 0;
+	ai_obj sfk;
 
+	add_recs_from_nbtr_ctx ctx = {
+		.imd = imd,
+		.nbtr = nbtr,
+		.ikey = ikey,
+		.qctx = qctx,
+		.sfk = NULL,
+		.resume = false
+	};
+
+	if (resume) {
+		init_ai_objInteger(&sfk, qctx->nbtr_last_key);
+		ctx.sfk = &sfk;
+		ctx.resume = true;
+	}
+
+	as_btree_reduce(nbtr, ctx.sfk, NULL, add_recs_from_nbtr_cb, &ctx);
+}
+
+static void
+add_recs_from_arr(const as_sindex_metadata *imd, const ai_obj *ikey,
+		ai_arr *arr, as_sindex_qctx *qctx)
+{
 	for (int i = 0; i < arr->used; i++) {
-		if (btree_addsinglerec(imd, (cf_arenax_handle)arr->data[i], qctx)) {
-			ret = -1;
-			break;
-		}
+		btree_addsinglerec(imd, (cf_arenax_handle)arr->data[i], qctx);
 		// do not break on hitting batch limit, if the tree converts to
 		// bt from arr, there is no way to know which digest were already
 		// returned when attempting subsequent batch. Return the entire
@@ -550,140 +569,122 @@ add_recs_from_arr(as_sindex_metadata *imd, ai_obj *ikey, ai_arr *arr,
 	if (ikey) {
 		ai_objClone(qctx->ibtr_last_key, ikey);
 	}
-
-	return ret;
 }
 
-/*
- * Return 0  in case of success
- *        -1 in case of failure
- */
-static int
+static void
 get_recl(as_sindex_metadata *imd, ai_obj *afk, as_sindex_qctx *qctx)
 {
 	as_sindex_pmetadata *pimd = &imd->pimd[qctx->pimd_ix];
-	ai_nbtr *anbtr = (ai_nbtr *)btIndFind(pimd->ibtr, afk);
+	ai_nbtr *anbtr = btIndFind(pimd->ibtr, afk);
 
 	if (!anbtr) {
-		return 0;
+		return;
 	}
 
 	if (anbtr->is_btree) {
-		if (add_recs_from_nbtr(imd, afk, anbtr->u.nbtr, qctx, qctx->new_ibtr)) {
-			return -1;
-		}
+		add_recs_from_nbtr(imd, afk, anbtr->u.nbtr, qctx, ! qctx->new_ibtr);
 	} else {
 		// If already entire batch is returned
 		if (qctx->nbtr_done) {
-			return 0;
+			return;
 		}
-		if (add_recs_from_arr(imd, afk, anbtr->u.arr, qctx)) {
-			return -1;
-		}
+		add_recs_from_arr(imd, afk, anbtr->u.arr, qctx);
 	}
-	return 0;
 }
 
-/*
- * Return 0  in case of success
- *        -1 in case of failure
- */
-static int
+static bool
+get_numeric_range_recl_cb(const void *key, void *value, void *udata)
+{
+	const ai_obj *ikey = key;
+	const ai_nbtr *anbtr = *(ai_nbtr **)value;
+	get_numeric_range_recl_ctx *ctx = udata;
+	as_sindex_qctx *qctx = ctx->qctx;
+	as_btree *ibtr = ctx->ibtr;
+	bool resume = false;
+
+	if (ctx->resume) {
+		bool nbtr_done = qctx->nbtr_done;
+
+		ctx->resume = false;
+		qctx->nbtr_done = false;
+
+		resume = ibtr->key_comp(ikey, ctx->sfk) == 0;
+
+		if (resume && nbtr_done) {
+			return true;
+		}
+	}
+
+	if (anbtr->is_btree) {
+		add_recs_from_nbtr(ctx->imd, ikey, anbtr->u.nbtr, qctx, resume);
+	} else {
+		add_recs_from_arr(ctx->imd, ikey, anbtr->u.arr, qctx);
+	}
+
+	if (qctx->n_recs < qctx->bsize) {
+		qctx->nbtr_done = false;
+		return true;
+	}
+
+	return false;
+}
+
+static void
 get_numeric_range_recl(as_sindex_metadata *imd, uint64_t begk, uint64_t endk, as_sindex_qctx *qctx)
 {
-	ai_obj sfk;
-	init_ai_objLong(&sfk, qctx->new_ibtr ? begk : qctx->ibtr_last_key->l);
-	ai_obj efk;
-	init_ai_objLong(&efk, endk);
 	as_sindex_pmetadata *pimd = &imd->pimd[qctx->pimd_ix];
-	bool fullrng              = qctx->new_ibtr;
-	int ret                   = 0;
-	btSIter *bi               = btGetRangeIter(pimd->ibtr, &sfk, &efk, 1);
-	btEntry *be;
+	as_btree *ibtr = pimd->ibtr;
 
-	if (bi) {
-		while ((be = btRangeNext(bi, 1))) {
-			ai_obj  *ikey  = be->key;
-			ai_nbtr *anbtr = be->val;
+	get_numeric_range_recl_ctx ctx = {
+		.imd = imd,
+		.ibtr = ibtr,
+		.qctx = qctx,
+	};
 
-			if (!anbtr) {
-				ret = -1;
-				break;
-			}
+	ai_obj sfk;
 
-			// figure out nbtr to deal with. If the key which was
-			// used last time vanishes work with next key. If the
-			// key exist but 'last' entry made to list in the last
-			// iteration; Move to next nbtr
-			if (!fullrng) {
-				if (!ai_objEQ(&sfk, ikey)) {
-					fullrng = 1; // bkey disappeared
-				} else if (qctx->nbtr_done) {
-					qctx->nbtr_done = false;
-					// If we are moving to the next key, we need 
-					// to search the full range.
-					fullrng = 1;
-					continue;
-				}
-			}
-
-			if (anbtr->is_btree) {
-				if (add_recs_from_nbtr(imd, ikey, anbtr->u.nbtr, qctx, fullrng)) {
-					ret = -1;
-					break;
-				}
-			} else {
-				if (add_recs_from_arr(imd, ikey, anbtr->u.arr, qctx)) {
-					ret = -1;
-					break;
-				}
-			}
-
-			// Since add_recs_from_arr() returns entire thing and do not support the batch limit,
-			// >= operator is needed here.
-			if (qctx->n_recs >= qctx->bsize) {
-				break;
-			}
-
-			// If it reaches here, this means last key could not fill the batch.
-			// So if we are to start a new key, search should be done on full range 
-			// and the new nbtr is obviously not done.
-			fullrng         = 1;
-			qctx->nbtr_done = false;
-		}
-		btReleaseRangeIterator(bi);
+	if (qctx->new_ibtr) {
+		init_ai_objInteger(&sfk, begk);
+		ctx.sfk = &sfk;
+		ctx.resume = false;
 	}
-	return ret;
+	else {
+		ctx.sfk = qctx->ibtr_last_key;
+		ctx.resume = true;
+	}
+
+	ai_obj efk;
+
+	init_ai_objInteger(&efk, endk);
+	as_btree_reduce(ibtr, ctx.sfk, &efk, get_numeric_range_recl_cb, &ctx);
 }
 
-int
+void
 ai_btree_query(as_sindex_metadata *imd, const as_query_range *srange,
 		as_sindex_qctx *qctx)
 {
-	bool err = 1;
 	if (!srange->isrange) { // EQUALITY LOOKUP
 		ai_obj afk;
 		init_ai_obj(&afk);
-		if (C_IS_DG(imd->sktype)) {
-			init_ai_objU160(&afk, srange->u.digest);
+		if (C_IS_DIGEST(imd->sktype)) {
+			init_ai_objDigest(&afk, &srange->u.digest);
 		}
 		else {
 			// geo queries can never be point queries. Must be NUMERIC.
-			init_ai_objLong(&afk, srange->u.r.start);
+			init_ai_objInteger(&afk, srange->u.r.start);
 		}
-		err = get_recl(imd, &afk, qctx);
+		get_recl(imd, &afk, qctx);
 	} else {                // RANGE LOOKUP
-		if (C_IS_L(imd->sktype)) {
-			err = get_numeric_range_recl(imd, srange->u.r.start, srange->u.r.end,
+		if (C_IS_LONG(imd->sktype)) {
+			get_numeric_range_recl(imd, srange->u.r.start, srange->u.r.end,
 					qctx);
 		}
 		else {
 			const as_query_range_start_end *r =
 					&srange->u.geo.r[qctx->range_index];
-			err = get_numeric_range_recl(imd, r->start, r->end, qctx);
+			get_numeric_range_recl(imd, r->start, r->end, qctx);
 		}
 	}
-	return (err ? AS_SINDEX_ERR_NO_MEMORY : AS_SINDEX_OK);
 }
 
 as_sindex_status
@@ -691,20 +692,20 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey,
 		cf_arenax_handle r_h)
 {
 	ai_obj ncol;
-	if (C_IS_DG(imd->sktype)) {
-		init_ai_objU160(&ncol, *(uint160 *)skey);
+	if (C_IS_DIGEST(imd->sktype)) {
+		init_ai_objDigest(&ncol, skey);
 	}
 	else {
 		// TODO - ai_obj type is LONG for both Geo and Long
-		init_ai_objLong(&ncol, *(ulong *)skey);
+		init_ai_objInteger(&ncol, *(ulong *)skey);
 	}
 
 	ai_obj apk;
-	init_ai_objLong(&apk, r_h);
+	init_ai_objInteger(&apk, r_h);
 
-	uint64_t before = pimd->ibtr->msize + pimd->ibtr->nsize;
+	uint64_t before = pimd->ibtr->size + pimd->ibtr->extra_size;
 	int ret = reduced_iAdd(pimd->ibtr, &ncol, &apk);
-	uint64_t after = pimd->ibtr->msize + pimd->ibtr->nsize;
+	uint64_t after = pimd->ibtr->size + pimd->ibtr->extra_size;
 	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory, (after - before));
 
 	if (ret && ret != AS_SINDEX_KEY_FOUND) {
@@ -725,23 +726,65 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey,
 	}
 
 	ai_obj ncol;
-	if (C_IS_DG(imd->sktype)) {
-		init_ai_objU160(&ncol, *(uint160 *)skey);
+	if (C_IS_DIGEST(imd->sktype)) {
+		init_ai_objDigest(&ncol, skey);
 	}
 	else {
 		// TODO - ai_obj type is LONG for both Geo and Long
-		init_ai_objLong(&ncol, *(ulong *)skey);
+		init_ai_objInteger(&ncol, *(ulong *)skey);
 	}
 
 	ai_obj apk;
-	init_ai_objLong(&apk, r_h);
+	init_ai_objInteger(&apk, r_h);
 
-	uint64_t before = pimd->ibtr->msize + pimd->ibtr->nsize;
+	uint64_t before = pimd->ibtr->size + pimd->ibtr->extra_size;
 	ret = reduced_iRem(pimd->ibtr, &ncol, &apk);
-	uint64_t after = pimd->ibtr->msize + pimd->ibtr->nsize;
+	uint64_t after = pimd->ibtr->size + pimd->ibtr->extra_size;
 	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory, (before - after));
 
 	return ret;
+}
+
+static bool
+build_defrag_list_from_nbtr_cb(const void *key, void *value, void *udata)
+{
+	(void)value;
+
+	const ai_obj *akey = key;
+	cf_arenax_handle r_h = akey->integer;
+	build_defrag_list_from_nbtr_ctx *ctx = udata;
+
+	// No need to check key for equality with ctx->nbtr_last_key, which will
+	// have been removed from tree by now.
+
+	if (as_sindex_can_defrag_record(ctx->ns, r_h)) {
+		ll_sindex_gc_element *ele = (ll_sindex_gc_element *)
+				cf_ll_get_tail(ctx->gc_list);
+
+		if (ele == NULL ||
+				ele->objs_to_defrag.num == SINDEX_GC_NUM_OBJS_PER_ARR) {
+			ele = cf_malloc(sizeof(ll_sindex_gc_element));
+			ele->objs_to_defrag.num = 0;
+			cf_ll_append(ctx->gc_list, (cf_ll_element *)ele);
+		}
+
+		objs_to_defrag_arr *dt = &ele->objs_to_defrag;
+		acol_handle *h = &dt->acol_handles[dt->num];
+
+		h->r_h = r_h;
+		ai_objClone(&h->acol, ctx->ikey);
+
+		dt->num++;
+	}
+
+	(*ctx->limit)--;
+
+	if (*ctx->limit == 0) {
+		*ctx->nbtr_last_key = r_h;
+		return false;
+	}
+
+	return true;
 }
 
 /*
@@ -749,66 +792,27 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey,
  * Mallocs the nodes of defrag_list
  */
 static void
-build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *ikey, bt *nbtr,
-		cf_arenax_handle *nbtr_last_key, ulong *limit, cf_ll *gc_list)
+build_defrag_list_from_nbtr(const as_namespace *ns, const ai_obj *ikey,
+		as_btree *nbtr, cf_arenax_handle *nbtr_last_key, ulong *limit,
+		cf_ll *gc_list)
 {
-	btEntry *nbe;
 	ai_obj sfk;
-	ai_obj efk;
+	init_ai_objInteger(&sfk, *nbtr_last_key);
 
-	init_ai_objLong(&sfk, (ulong)*nbtr_last_key);
-	assignMaxKey(nbtr, &efk);
+	build_defrag_list_from_nbtr_ctx ctx = {
+		.ns = ns,
+		.ikey = ikey,
+		.nbtr_last_key = nbtr_last_key,
+		.limit = limit,
+		.gc_list = gc_list
+	};
 
-	btSIter stack_nbi;
-
-	// STEP 1: go thru a portion of the nbtr and find to-be-deleted-PKs
-	btSIter *nbi = btSetRangeIter(&stack_nbi, nbtr, &sfk, &efk, true);
-
-	// nbi will be NULL if elements >= sfk got deleted since last round.
-	if (nbi == NULL) {
-		return;
-	}
-
-	while ((nbe = btRangeNext(nbi, 1))) {
-		ai_obj *akey = nbe->key;
-		cf_arenax_handle r_h = (cf_arenax_handle)akey->l;
-
-		if (as_sindex_can_defrag_record(ns, r_h)) {
-
-			bool create   = (cf_ll_size(gc_list) == 0) ? true : false;
-			objs_to_defrag_arr *dt;
-
-			if (!create) {
-				cf_ll_element * ele = cf_ll_get_tail(gc_list);
-				dt = &((ll_sindex_gc_element*)ele)->objs_to_defrag;
-				if (dt->num == SINDEX_GC_NUM_OBJS_PER_ARR) {
-					create = true;
-				}
-			}
-			if (create) {
-				ll_sindex_gc_element *node =
-						cf_malloc(sizeof(ll_sindex_gc_element));
-				dt = &node->objs_to_defrag;
-				dt->num = 0;
-				cf_ll_append(gc_list, (cf_ll_element *)node);
-			}
-			dt->acol_handles[dt->num].r_h = r_h;
-			ai_objClone(&(dt->acol_handles[dt->num].acol), ikey);
-
-			dt->num += 1;		
-		}
-		(*limit)--;
-		if (*limit == 0) {
-			*nbtr_last_key = r_h;
-			break;
-		}
-	}
-	btReleaseRangeIterator(nbi);
+	as_btree_reduce(nbtr, &sfk, NULL, build_defrag_list_from_nbtr_cb, &ctx);
 }
 
 static void
-build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr,
-		ulong *limit, cf_ll *gc_list)
+build_defrag_list_from_arr(const as_namespace *ns, const ai_obj *acol,
+		const ai_arr *arr, ulong *limit, cf_ll *gc_list)
 {
 	for (ulong i = 0; i < arr->used; i++) {
 		cf_arenax_handle r_h = (cf_arenax_handle)arr->data[i];
@@ -843,6 +847,35 @@ build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr,
 	}
 }
 
+static bool
+ai_btree_build_defrag_list_cb(const void *key, void *value, void *udata)
+{
+	const ai_obj *ikey = key;
+	ai_nbtr *anbtr = *(ai_nbtr **)value;
+	ai_btree_build_defrag_list_ctx *ctx = udata;
+
+	if (anbtr->is_btree) {
+		build_defrag_list_from_nbtr(ctx->ns, ikey, anbtr->u.nbtr,
+				ctx->nbtr_last_key, &ctx->limit, ctx->gc_list);
+	} else {
+		// We always process arrays fully and may cross the limit.
+		// limit == 0 indicates we met or crossed the limit.
+		build_defrag_list_from_arr(ctx->ns, ikey, anbtr->u.arr, &ctx->limit,
+				ctx->gc_list);
+	}
+
+	if (ctx->limit == 0) {
+		ai_objClone(ctx->ibtr_last_key, ikey);
+		cf_detail(AS_SINDEX,
+				"Current pimd may need more iteration of defragging.");
+		return false;
+	}
+
+	// Reinitialize the starting point when moving to the next nbtr.
+	*ctx->nbtr_last_key = 0;
+	return true;
+}
+
 /*
  * Aerospike Index interface to build a defrag_list.
  *
@@ -859,63 +892,30 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd,
 		ai_obj *ibtr_last_key, cf_arenax_handle *nbtr_last_key, ulong limit,
 		cf_ll *gc_list)
 {
-	int ret = AS_SINDEX_ERR;
-
-	if (!pimd || !imd) {
-		return ret;
+	// FIXME - should the latter two return AS_SINDEX_DONE?
+	if (imd == NULL || pimd == NULL || pimd->ibtr == NULL ||
+			pimd->ibtr->n_keys == 0) {
+		return AS_SINDEX_ERR;
 	}
 
 	as_namespace *ns = imd->si->ns;
-	if (!ns) {
+
+	if (ns == NULL) {
 		ns = as_namespace_get_byname(imd->ns_name);
 	}
 
-	if (!pimd || !pimd->ibtr || !pimd->ibtr->numkeys) {
-		goto END;
-	}
+	ai_btree_build_defrag_list_ctx ctx = {
+		.ns = ns,
+		.ibtr_last_key = ibtr_last_key,
+		.nbtr_last_key = nbtr_last_key,
+		.limit = limit,
+		.gc_list = gc_list
+	};
 
-	// Entry is range query, FROM previous icol TO maxKey(ibtr).
-	ai_obj iH;
-	assignMaxKey(pimd->ibtr, &iH);
-	btSIter *bi = btGetRangeIter(pimd->ibtr, ibtr_last_key, &iH, 1);
-	if (!bi) {
-		goto END;
-	}
+	as_btree_reduce(pimd->ibtr, ibtr_last_key, NULL,
+			ai_btree_build_defrag_list_cb, &ctx);
 
-	while ( true ) {
-		btEntry *be = btRangeNext(bi, 1);
-		if (!be) {
-			ret = AS_SINDEX_DONE;
-			break;
-		}
-		ai_obj *ikey = be->key;
-		ai_nbtr *anbtr = be->val;
-		if (!anbtr) {
-			break;
-		}
-		if (anbtr->is_btree) {
-			build_defrag_list_from_nbtr(ns, ikey, anbtr->u.nbtr,
-					nbtr_last_key, &limit, gc_list);
-		} else {
-			// We always process arrays fully and may cross the limit.
-			// limit == 0 indicates we met or crossed the limit.
-			build_defrag_list_from_arr(ns, ikey, anbtr->u.arr, &limit, gc_list);
-		}
-
-		if (limit == 0) {
-			ai_objClone(ibtr_last_key, ikey);
-			cf_detail(AS_SINDEX, "Current pimd may need more iteration of defragging.");
-			ret = AS_SINDEX_CONTINUE;
-			break;
-		}
-
-		// Reinitialize the starting point when moving to the next nbtr.
-		*nbtr_last_key = 0;
-	}
-	btReleaseRangeIterator(bi);
-END:
-
-	return ret;
+	return ctx.limit == 0 ? AS_SINDEX_CONTINUE : AS_SINDEX_DONE;
 }
 
 /*
@@ -949,17 +949,18 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 
 			ai_obj apk;
 
-			init_ai_objLong(&apk, dt->acol_handles[i].r_h);
+			init_ai_objInteger(&apk, dt->acol_handles[i].r_h);
 
 			ai_obj *acol = &(dt->acol_handles[i].acol);
 
-			cf_detail(AS_SINDEX, "Defragged %lu %lu", acol->l, apk.l);
+			cf_detail(AS_SINDEX, "Defragged %lu %lu", acol->integer,
+					apk.integer);
 
-			before += pimd->ibtr->msize + pimd->ibtr->nsize;
+			before += pimd->ibtr->size + pimd->ibtr->extra_size;
 			if (reduced_iRem(pimd->ibtr, acol, &apk) == AS_SINDEX_OK) {
 				success++;
 			}
-			after += pimd->ibtr->msize + pimd->ibtr->nsize;
+			after += pimd->ibtr->size + pimd->ibtr->extra_size;
 			dt->num -= 1;
 			n2del--;
 			if (n2del == 0) {
@@ -989,7 +990,7 @@ ai_btree_create(as_sindex_metadata *imd)
 {
 	for (uint32_t i = 0; i < imd->n_pimds; i++) {
 		as_sindex_pmetadata *pimd = &imd->pimd[i];
-		pimd->ibtr = createIBT(imd->sktype, -1);
+		pimd->ibtr = createIBT(imd->sktype);
 		if (! pimd->ibtr) {
 			cf_crash(AS_SINDEX, "Failed to allocate secondary index tree for ns:%s, indexname:%s",
 					imd->ns_name, imd->iname);
@@ -997,27 +998,29 @@ ai_btree_create(as_sindex_metadata *imd)
 	}
 }
 
-static void
-destroy_index(bt *ibtr, bt_n *n)                        
-{                                                                               
-	if (! n->leaf) {                                                             
-		for (int i = 0; i <= n->n; i++) {                                       
-			destroy_index(ibtr, NODES(ibtr, n)[i]);                     
-		}                                                                       
-	}                                                                           
+static bool
+destroy_index_cb(const void* key, void* value, void* udata)
+{
+	(void)key;
+	(void)udata;
 
-	for (int i = 0; i < n->n; i++) {                                            
-		void *be = KEYS(ibtr, n, i);                                            
-		ai_nbtr *anbtr = (ai_nbtr *) parseStream(be, ibtr);                     
-		if (anbtr) {                                                            
-			if (anbtr->is_btree) {                                              
-				bt_destroy(anbtr->u.nbtr);                                      
-			} else {                                                            
-				ai_arr_destroy(anbtr->u.arr);                                   
-			}                                                                   
-			cf_free(anbtr);                                                     
-		}                                                                       
-	}                                                                           
+	ai_nbtr* anbtr = *(ai_nbtr **)value;
+
+	if (anbtr->is_btree) {
+		as_btree_destroy(anbtr->u.nbtr);
+	} else {
+		ai_arr_destroy(anbtr->u.arr);
+	}
+
+	cf_free(anbtr);
+	return true;
+}
+
+static void
+destroy_index(as_btree *ibtr)
+{                                                                               
+	as_btree_reduce(ibtr, NULL, NULL, destroy_index_cb, NULL);
+	as_btree_destroy(ibtr);
 }                 
 
 uint64_t
@@ -1028,7 +1031,7 @@ ai_btree_get_numkeys(as_sindex_metadata *imd)
 	for (uint32_t i = 0; i < imd->n_pimds; i++) {
 		as_sindex_pmetadata *pimd = &imd->pimd[i];
 		PIMD_RLOCK(&pimd->slock);
-		val += pimd->ibtr->numkeys;
+		val += pimd->ibtr->n_keys;
 		PIMD_RUNLOCK(&pimd->slock);
 	}
 
@@ -1038,8 +1041,7 @@ ai_btree_get_numkeys(as_sindex_metadata *imd)
 static uint64_t
 ai_btree_get_pimd_isize(as_sindex_pmetadata *pimd)
 {
-	// TODO - Why check of > 0
-	return pimd->ibtr->msize > 0 ? pimd->ibtr->msize : 0;
+	return pimd->ibtr->size;
 }
 
 uint64_t
@@ -1058,8 +1060,7 @@ ai_btree_get_isize(as_sindex_metadata *imd)
 static uint64_t
 ai_btree_get_pimd_nsize(as_sindex_pmetadata *pimd)
 {
-	// TODO - Why check of > 0
-	return pimd->ibtr->nsize > 0 ? pimd->ibtr->nsize : 0;
+	return pimd->ibtr->extra_size;
 }
 
 uint64_t
@@ -1086,10 +1087,10 @@ ai_btree_reset_pimd(as_sindex_pmetadata *pimd)
 }
 
 void
-ai_btree_delete_ibtr(bt * ibtr)
+ai_btree_delete_ibtr(as_btree * ibtr)
 {
 	if (! ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
-	destroy_index(ibtr, ibtr->root); 
+	destroy_index(ibtr);
 }

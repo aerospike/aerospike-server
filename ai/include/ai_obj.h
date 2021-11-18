@@ -25,32 +25,18 @@
 
 #pragma once
 
-#include <sys/types.h>
+#include <stdint.h>
 
 #include "ai_types.h"
 
-typedef struct ai_obj {
-	ulong    l;
-	uint160  y;
-	col_type_t type;
+#include <citrusleaf/cf_digest.h>
+
+typedef union ai_obj_u {
+	uint64_t integer;
+	cf_digest digest;
 } ai_obj;
 
-typedef struct filter {
-	ai_obj   alow;
-	ai_obj   ahigh;
-} f_t;
-
-typedef struct check_sql_where_clause {
-	f_t     wf;
-} cswc_t;
-
-
 void init_ai_obj(ai_obj *a);
-
-void init_ai_objLong(ai_obj *a, ulong l);
-
-void init_ai_objU160(ai_obj *a, uint160 y);
-
-void ai_objClone(ai_obj *dest, ai_obj *src);
-
-bool ai_objEQ(ai_obj *a, ai_obj *b);
+void init_ai_objInteger(ai_obj *a, uint64_t x);
+void init_ai_objDigest(ai_obj *a, const cf_digest *x);
+void ai_objClone(ai_obj *dest, const ai_obj *src);

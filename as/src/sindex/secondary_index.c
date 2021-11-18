@@ -125,7 +125,6 @@
 
 #include "ai_btree.h"
 #include "ai_types.h"
-#include "bt_iterator.h"
 
 #include "warnings.h"
 

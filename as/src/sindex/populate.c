@@ -510,7 +510,7 @@ run_destroy_sindex(void* udata)
 
 		// Cache the ibtr pointers.
 		uint32_t n_pimds = si->imd->n_pimds;
-		struct btree* ibtr[n_pimds];
+		as_btree* ibtr[n_pimds];
 
 		for (uint32_t i = 0; i < n_pimds; i++) {
 			as_sindex_pmetadata* pimd = &si->imd->pimd[i];

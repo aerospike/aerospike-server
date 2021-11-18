@@ -23,53 +23,32 @@
  *  Aerospike Index Object Implementation.
  */
 
-#include <ctype.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
-#include <unistd.h>
-#include <sys/param.h>  // For MIN().
-
 #include "ai_obj.h"
-#include "stream.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "ai_glue.h"
 
 #include "log.h"
 
 void init_ai_obj(ai_obj *a)
 {
-	bzero(a, sizeof(ai_obj));
-	a->type = COL_TYPE_INVALID;
+	memset(a, 0, sizeof(ai_obj));
 }
 
-void init_ai_objLong(ai_obj *a, ulong l)
+void init_ai_objInteger(ai_obj *a, uint64_t x)
 {
 	init_ai_obj(a);
-	a->l = l;
-	a->type = COL_TYPE_LONG;
+	a->integer = x;
 }
 
-void init_ai_objU160(ai_obj *a, uint160 y) {
-	a->type = COL_TYPE_DIGEST;
-	a->y = y;
+void init_ai_objDigest(ai_obj *a, const cf_digest *x) {
+	a->digest = *x;
 }
 
-void ai_objClone(ai_obj *dest, ai_obj *src)
+void ai_objClone(ai_obj *dest, const ai_obj *src)
 {
 	memcpy(dest, src, sizeof(ai_obj));
-}
-
-static int ai_objCmp(ai_obj *a, ai_obj *b)
-{
-	if (C_IS_L(a->type) || C_IS_G(a->type)) {
-		return (a->l == b->l) ? 0 : ((a->l > b->l) ? 1 : -1);
-	} else if (C_IS_DG(a->type)) {
-		return u160Cmp(&a->y, &b->y);
-	} else {
-		cf_crash(AS_SINDEX, "ai_objCmp bad type %u", a->type);
-	}
-}
-
-bool ai_objEQ(ai_obj *a, ai_obj *b)
-{
-	return !ai_objCmp(a, b);
 }

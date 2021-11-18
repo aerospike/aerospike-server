@@ -146,10 +146,12 @@ GEOSPATIAL_HEADERS += geospatial.h
 GEOSPATIAL_SOURCES += geojson.cc
 GEOSPATIAL_SOURCES += geospatial.cc
 
+SINDEX_HEADERS += btree.h
 SINDEX_HEADERS += gc.h
 SINDEX_HEADERS += populate.h
 SINDEX_HEADERS += secondary_index.h
 
+SINDEX_SOURCES += btree.c
 SINDEX_SOURCES += gc.c
 SINDEX_SOURCES += populate.c
 SINDEX_SOURCES += secondary_index.c
