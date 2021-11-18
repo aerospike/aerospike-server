@@ -499,8 +499,7 @@ run_destroy_sindex(void* udata)
 
 		cf_assert(si->state == AS_SINDEX_DESTROY, AS_SINDEX,
 				"bad state %d at cleanup - expected %d for %p and %s",
-				si->state, AS_SINDEX_DESTROY, si,
-				si != NULL ? (si->imd != NULL ? si->imd->iname : NULL) : NULL);
+				si->state, AS_SINDEX_DESTROY, si, si->imd->iname);
 
 		as_sindex_delete_defn(si->ns, si->imd);
 
