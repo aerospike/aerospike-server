@@ -80,9 +80,9 @@ static void udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type ac
 static void udf_cask_smd_get_all_cb(const cf_vector* items, void* udata);
 
 // File utilities.
-static uint8_t* file_read(char* filename, size_t* p_sz, int* err);
-static bool file_write(char* filename, uint8_t* buf, size_t sz);
-static void file_remove(char* filename);
+static uint8_t* file_read(const char* filename, size_t* p_sz, int* err);
+static bool file_write(const char* filename, const uint8_t* buf, size_t sz);
+static void file_remove(const char* filename);
 
 
 //==========================================================
@@ -143,7 +143,7 @@ udf_cask_init(void)
 int
 udf_cask_info_clear_cache(char* name, char* params, cf_dyn_buf* out)
 {
-	cf_debug(AS_INFO, "UDF CASK INFO CLEAR CACHE");
+	cf_debug(AS_UDF, "UDF CASK INFO CLEAR CACHE");
 
 	// Command format:
 	// "udf-clear-cache:"
@@ -164,7 +164,7 @@ udf_cask_info_clear_cache(char* name, char* params, cf_dyn_buf* out)
 int
 udf_cask_info_get(char* name, char* params, cf_dyn_buf* out)
 {
-	cf_debug(AS_INFO, "UDF CASK INFO GET");
+	cf_debug(AS_UDF, "UDF CASK INFO GET");
 
 	// Command format:
 	// "udf-get:filename=<name>"
@@ -174,7 +174,7 @@ udf_cask_info_get(char* name, char* params, cf_dyn_buf* out)
 
 	if (as_info_parameter_get(params, "filename", filename,
 			&filename_len) != 0) {
-		cf_warning(AS_INFO, "invalid or missing filename");
+		cf_warning(AS_UDF, "invalid or missing filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return 0;
 	}
@@ -268,7 +268,7 @@ udf_cask_info_list(char* name, cf_dyn_buf* out)
 int
 udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 {
-	cf_debug(AS_INFO, "UDF CASK INFO PUT");
+	cf_debug(AS_UDF, "UDF CASK INFO PUT");
 
 	// Command format:
 	// "udf-put:filename=<name>;content-len=<len>[;udf-type=<type>];content=<base-64-encoded-lua-code>"
@@ -278,7 +278,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 
 	if (as_info_parameter_get(params, "filename", filename,
 			&filename_len) != 0) {
-		cf_warning(AS_INFO, "invalid or missing filename");
+		cf_warning(AS_UDF, "invalid or missing filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return 0;
 	}
@@ -287,7 +287,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 
 	if (dot == NULL || dot == filename || strlen(dot) == 1) {
 		// Invalid - no dot, OR dot at beginning, OR dot at end.
-		cf_warning(AS_INFO, "filename must have an extension");
+		cf_warning(AS_UDF, "filename must have an extension");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return 0;
 	}
@@ -297,7 +297,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 
 	if (as_info_parameter_get(params, "content-len", content_len,
 			&content_len_len) != 0) {
-		cf_warning(AS_INFO, "invalid or missing content-len");
+		cf_warning(AS_UDF, "invalid or missing content-len");
 		cf_dyn_buf_append_string(out, "error=invalid_content_len");
 		return 0;
 	}
@@ -312,7 +312,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 		strcpy(udf_type, LUA_TYPE_STR);
 	}
 	else if (pg == -2 || ! is_valid_udf_type(udf_type)) {
-		cf_warning(AS_INFO, "invalid udf-type %s", udf_type);
+		cf_warning(AS_UDF, "invalid udf-type %s", udf_type);
 		cf_dyn_buf_append_string(out, "error=invalid_udf_type");
 		return 0;
 	}
@@ -320,7 +320,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 	uint32_t len32;
 
 	if (cf_str_atoi_u32(content_len, &len32) != 0 || len32 % 4 != 0) {
-		cf_warning(AS_INFO, "invalid content-len %s", udf_type);
+		cf_warning(AS_UDF, "invalid content-len %s", udf_type);
 		cf_dyn_buf_append_string(out, "error=invalid_content_len");
 		return 0;
 	}
@@ -332,7 +332,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 
 	if (as_info_parameter_get(params, "content", content,
 			&i_content_len) != 0 || (uint32_t)i_content_len != len32) {
-		cf_warning(AS_INFO, "invalid or missing content");
+		cf_warning(AS_UDF, "invalid or missing content");
 		cf_dyn_buf_append_string(out, "error=invalid_content");
 		cf_free(content);
 		return 0;
@@ -342,7 +342,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 	uint32_t decoded_len = cf_b64_decoded_buf_size(encoded_len);
 
 	if (decoded_len > MAX_UDF_CONTENT_LENGTH) {
-		cf_warning(AS_INFO, "lua file size:%d > 1MB", decoded_len);
+		cf_warning(AS_UDF, "lua file size:%d > 1MB", decoded_len);
 		cf_dyn_buf_append_string(out, "error=invalid_udf_content_len,>1M");
 		cf_free(content);
 		return 0;
@@ -352,7 +352,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 
 	if (! cf_b64_validate_and_decode(content, encoded_len,
 			(uint8_t*)decoded_str, &decoded_len) ) {
-		cf_warning(AS_INFO, "invalid base64 content");
+		cf_warning(AS_UDF, "invalid base64 content");
 		cf_dyn_buf_append_string(out, "error=invalid_base64_content");
 		cf_free(decoded_str);
 		cf_free(content);
@@ -366,7 +366,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 	cf_free(decoded_str);
 
 	if (rv != 0) {
-		cf_warning(AS_INFO, "udf-put: compile error: [%s:%d] %s", err.file,
+		cf_warning(AS_UDF, "udf-put: compile error: [%s:%d] %s", err.file,
 				err.line, err.message);
 
 		cf_dyn_buf_append_string(out, "error=compile_error");
@@ -399,7 +399,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 	cf_free(content);
 
 	if (e != 0) {
-		cf_warning(AS_INFO, "could not encode UDF object");
+		cf_warning(AS_UDF, "could not encode UDF object");
 		cf_dyn_buf_append_string(out, "error=json_error");
 		json_decref(udf_obj);
 		return 0;
@@ -409,15 +409,15 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 
 	json_decref(udf_obj);
 
-	cf_debug(AS_INFO, "created json object %s", udf_obj_str);
+	cf_debug(AS_UDF, "created json object %s", udf_obj_str);
 
 	if (as_smd_set_blocking(AS_SMD_MODULE_UDF, filename, udf_obj_str, 0)) {
-		cf_info(AS_INFO, "UDF module %s/%s registered",
+		cf_info(AS_UDF, "UDF module %s/%s registered",
 				g_config.mod_lua.user_path, filename);
 		cf_dyn_buf_append_string(out, "ok");
 	}
 	else {
-		cf_warning(AS_INFO, "UDF module %s/%s registration timed out",
+		cf_warning(AS_UDF, "UDF module %s/%s registration timed out",
 				g_config.mod_lua.user_path, filename);
 		cf_dyn_buf_append_string(out, "error=timeout");
 	}
@@ -430,7 +430,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 int
 udf_cask_info_remove(char* name, char* params, cf_dyn_buf* out)
 {
-	cf_debug(AS_INFO, "UDF CASK INFO REMOVE");
+	cf_debug(AS_UDF, "UDF CASK INFO REMOVE");
 
 	// Command format:
 	// "udf-remove:filename=<name>"
@@ -440,7 +440,7 @@ udf_cask_info_remove(char* name, char* params, cf_dyn_buf* out)
 
 	if (as_info_parameter_get(params, "filename", filename,
 			&filename_len) != 0) {
-		cf_warning(AS_INFO, "invalid or missing filename");
+		cf_warning(AS_UDF, "invalid or missing filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return 0;
 	}
@@ -450,12 +450,12 @@ udf_cask_info_remove(char* name, char* params, cf_dyn_buf* out)
 	sprintf(file_path, "%s/%s", g_config.mod_lua.user_path, filename);
 
 	if (! as_smd_delete_blocking(AS_SMD_MODULE_UDF, filename, 0)) {
-		cf_warning(AS_INFO, "UDF module %s remove timed out", file_path);
+		cf_warning(AS_UDF, "UDF module %s remove timed out", file_path);
 		cf_dyn_buf_append_string(out, "error=timeout");
 		return -1;
 	}
 
-	cf_info(AS_INFO, "UDF module %s removed", file_path);
+	cf_info(AS_UDF, "UDF module %s removed", file_path);
 	cf_dyn_buf_append_string(out, "ok");
 
 	return 0;
@@ -583,7 +583,7 @@ udf_cask_smd_get_all_cb(const cf_vector* items, void* udata)
 //
 
 static uint8_t*
-file_read(char* filename, size_t* p_sz, int* err)
+file_read(const char* filename, size_t* p_sz, int* err)
 {
 	char file_path[MAX_FILE_PATH_SZ];
 
@@ -641,7 +641,7 @@ file_read(char* filename, size_t* p_sz, int* err)
 }
 
 static bool
-file_write(char* filename, uint8_t* buf, size_t sz)
+file_write(const char* filename, const uint8_t* buf, size_t sz)
 {
 	char file_path[MAX_FILE_PATH_SZ];
 
@@ -668,7 +668,7 @@ file_write(char* filename, uint8_t* buf, size_t sz)
 }
 
 static void
-file_remove(char* filename)
+file_remove(const char* filename)
 {
 	char file_path[MAX_FILE_PATH_SZ];
 
