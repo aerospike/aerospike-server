@@ -60,6 +60,17 @@
 #define BATCH_ERROR -1
 #define BATCH_DELAY 1
 
+// Batch parent flags.
+#define INLINE_DATA_IN_MEMORY   0x1 // or data in pmem
+#define INLINE_DATA_ON_DEVICE   0x2
+#define REPORT_ALL_ERRORS       0x4
+
+// as_batch_input repeat (or not) flags.
+#define REPEAT          0x1
+#define HAS_EXTRA_INFO  0x2
+#define HAS_GENERATION  0x4
+#define HAS_RECORD_TTL  0x8
+
 //---------------------------------------------------------
 // TYPES
 //---------------------------------------------------------
@@ -72,9 +83,7 @@ typedef struct {
 	uint32_t index;
 	cf_digest keyd;
 	uint8_t repeat;
-	uint8_t info1;
-	uint16_t n_fields;
-	uint16_t n_ops;
+	uint8_t variable_meta[];
 } __attribute__((__packed__)) as_batch_input;
 
 typedef struct {
@@ -100,6 +109,7 @@ struct as_batch_shared_s {
 	uint32_t buffer_offset;
 	as_batch_buffer* delayed_buffer;
 	int result_code;
+	bool report_all_errors;
 	bool in_trailer;
 	bool bad_response_fd;
 	bool compress_response;
@@ -714,8 +724,9 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 		as_batch_buffer_complete(shared, prev_buffer);
 	}
 
-	if (! (result_code == AS_OK || result_code == AS_ERR_NOT_FOUND ||
-			result_code == AS_ERR_FILTERED_OUT)) {
+	if (! shared->report_all_errors &&
+			! (result_code == AS_OK || result_code == AS_ERR_NOT_FOUND ||
+					result_code == AS_ERR_FILTERED_OUT)) {
 		// Result code can be set outside of lock because it doesn't matter which transaction's
 		// result code is used as long as it's an error.
 		shared->result_code = result_code;
@@ -833,11 +844,6 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, result);
 	}
 
-	// TODO - remove in "six months".
-	if (! g_config.batch_without_digests) {
-		cf_ticker_warning(AS_BATCH, "'batch-without-digests' deprecated - digests will not be returned in the future");
-	}
-
 	// Parse header
 	as_msg* bmsg = &btr->msgp->msg;
 	as_msg_swap_header(bmsg);
@@ -887,6 +893,10 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, AS_ERR_BATCH_MAX_REQUESTS);
 	}
 
+	uint8_t parent_flags = *data++;
+	bool inline_dim = (parent_flags & INLINE_DATA_IN_MEMORY) != 0;
+	bool inline_dev = (parent_flags & INLINE_DATA_ON_DEVICE) != 0;
+
 	// Initialize shared data
 	as_batch_shared* shared = cf_malloc(sizeof(as_batch_shared));
 
@@ -905,6 +915,7 @@ as_batch_queue_task(as_transaction* btr)
 	shared->msgp = btr->msgp;
 	shared->compress_response = as_transaction_compress_response(btr);
 	shared->tran_max = tran_count;
+	shared->report_all_errors = (parent_flags & REPORT_ALL_ERRORS) != 0;
 
 	// Find batch queue to send transaction responses.
 	as_batch_queue* batch_queue = &batch_queues[queue_index];
@@ -946,12 +957,8 @@ as_batch_queue_task(as_transaction* btr)
 	tr.start_time = btr->start_time;
 
 	// Read batch keys and initialize generic transactions.
-	as_batch_input* in;
-	cl_msg* out = NULL;
 	cl_msg* prev_msgp = NULL;
-	as_msg_op* op;
 	uint32_t tran_row = 0;
-	uint8_t info = *data++;  // allow transaction inline.
 
 	as_namespace* ns = NULL; // namespace of current sub-transaction
 
@@ -961,13 +968,13 @@ as_batch_queue_task(as_transaction* btr)
 	// an extra malloc for each transaction.
 	while (tran_row < tran_count && data + BATCH_REPEAT_SIZE <= limit) {
 		// Copy transaction data before memory gets overwritten.
-		in = (as_batch_input*)data;
+		as_batch_input* in = (as_batch_input*)data;
 
 		tr.from.batch_shared = shared; // is set NULL after sub-transaction
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
 		tr.keyd = in->keyd;
 
-		if (in->repeat) {
+		if ((in->repeat & REPEAT) != 0) {
 			if (! prev_msgp) {
 				break; // bad bytes from client - repeat set on first item
 			}
@@ -980,37 +987,77 @@ as_batch_queue_task(as_transaction* btr)
 			tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
 			as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 
-			// Row contains full namespace/bin names.
-			out = (cl_msg*)data;
+			bool has_extra_info = (in->repeat & HAS_EXTRA_INFO) != 0;
+			bool has_generation = (in->repeat & HAS_GENERATION) != 0;
+			bool has_record_ttl = (in->repeat & HAS_RECORD_TTL) != 0;
+			uint32_t cl_msg_indent = (has_extra_info ? 2 : 0) +
+					(has_generation ? sizeof(uint16_t) : 0) +
+					(has_record_ttl ? sizeof(uint32_t) : 0);
 
-			if (data + sizeof(cl_msg) + sizeof(as_msg_field) > limit) {
+			// Row contains full namespace/bin names.
+			cl_msg* out = (cl_msg*)(data + cl_msg_indent);
+
+			if ((uint8_t*)out + sizeof(cl_msg) + sizeof(as_msg_field) > limit) {
 				break;
 			}
 
+			data = in->variable_meta;
+
 			out->msg.header_sz = sizeof(as_msg);
-			out->msg.info1 = in->info1 &
-					(~AS_MSG_INFO1_COMPRESS_RESPONSE); // sub-tr not compressed
-			out->msg.info2 = 0;
-			out->msg.info3 = bmsg->info3 &
-					(AS_MSG_INFO3_SC_READ_RELAX | AS_MSG_INFO3_SC_READ_TYPE);
+			out->msg.info1 = *data++ &
+					// Compressed sub-transactions won't work - and proxied
+					// sub-transactions wouldn't ignore flag if set - clear it.
+					(~AS_MSG_INFO1_COMPRESS_RESPONSE) &
+					// XDR sub-transactions (likely) won't work - clear flag.
+					(~AS_MSG_INFO1_XDR);
+
+			if (has_extra_info) {
+				// Note - no checks - irrelevant flags will be ignored during
+				// sub-transactions. Currently, none will do harm if present.
+				out->msg.info2 = *data++;
+				out->msg.info3 = *data++;
+			}
+			else { // old client - needs SC read flags from parent
+				out->msg.info2 = 0;
+				out->msg.info3 = bmsg->info3 &
+						(AS_MSG_INFO3_SC_READ_RELAX | AS_MSG_INFO3_SC_READ_TYPE);
+			}
+
 			out->msg.unused = 0;
 			out->msg.result_code = 0;
-			out->msg.generation = 0;
-			out->msg.record_ttl = 0;
+
+			if (has_generation) {
+				out->msg.generation = cf_swap_from_be16(*(uint16_t*)data);
+				data += sizeof(uint16_t);
+			}
+			else {
+				out->msg.generation = 0;
+			}
+
+			if (has_record_ttl) {
+				out->msg.record_ttl = cf_swap_from_be32(*(uint32_t*)data);
+				data += sizeof(uint32_t);
+			}
+			else {
+				out->msg.record_ttl = 0;
+			}
+
 			out->msg.transaction_ttl = bmsg->transaction_ttl; // already swapped
+
 			// n_fields/n_ops is in exact same place on both input/output, but the value still
 			// needs to be swapped.
-			out->msg.n_fields = cf_swap_from_be16(in->n_fields);
+			out->msg.n_fields = cf_swap_from_be16(*(uint16_t*)data);
+			data += sizeof(uint16_t);
 
 			// Older clients sent zero, but always sent namespace.  Adjust this.
 			if (out->msg.n_fields == 0) {
 				out->msg.n_fields = 1;
 			}
 
-			out->msg.n_ops = cf_swap_from_be16(in->n_ops);
+			out->msg.n_ops = cf_swap_from_be16(*(uint16_t*)data);
+			data += sizeof(uint16_t);
 
 			// Namespace input is same as namespace field, so just leave in place and swap.
-			data += sizeof(cl_msg);
 			mf = (as_msg_field*)data;
 			as_msg_swap_field(mf);
 
@@ -1029,9 +1076,9 @@ as_batch_queue_task(as_transaction* btr)
 					goto TranEnd;
 				}
 
-				if (mf->type == AS_MSG_FIELD_TYPE_SET) {
-					as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_SET);
-				}
+				// Note - no checks - irrelevant fields will be ignored during
+				// sub-transactions. Currently, none will do harm if present.
+				as_transaction_set_msg_field_flag(&tr, mf->type);
 
 				as_msg_swap_field(mf);
 				mf = as_msg_field_get_next(mf);
@@ -1046,7 +1093,7 @@ as_batch_queue_task(as_transaction* btr)
 						goto TranEnd;
 					}
 
-					op = (as_msg_op*)data;
+					as_msg_op* op = (as_msg_op*)data;
 
 					// Swap can touch metadata bytes beyond as_msg_op struct.
 					if (as_msg_op_get_value_p(op) > limit) {
@@ -1080,13 +1127,15 @@ as_batch_queue_task(as_transaction* btr)
 		}
 
 		// Submit transaction.
-		if ((info != 0 && ns->storage_data_in_memory) || tran_count == 1) {
+		if (tran_count == 1 || (as_namespace_like_data_in_memory(ns) ?
+				inline_dim : inline_dev)) {
 			as_tsvc_process_transaction(&tr);
 		}
 		else {
 			// Queue transaction to be processed by a transaction thread.
 			as_service_enqueue_internal(&tr);
 		}
+
 		tran_row++;
 	}
 
@@ -1110,14 +1159,6 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 
 	// Calculate size.
 	size_t size = sizeof(as_msg);
-	uint16_t n_fields = 0;
-
-	bool no_digests = as_load_bool(&g_config.batch_without_digests);
-
-	if (! no_digests) {
-		size += sizeof(as_msg_field) + sizeof(cf_digest);
-		n_fields++;
-	}
 
 	for (uint16_t i = 0; i < n_bins; i++) {
 		as_bin* bin = bins[i];
@@ -1160,19 +1201,10 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 		// Overload transaction_ttl to store batch index.
 		m->transaction_ttl = tr->from_data.batch_index;
 
-		m->n_fields = n_fields;
+		m->n_fields = 0;
 		m->n_ops = n_bins;
 		as_msg_swap_header(m);
 		p += sizeof(as_msg);
-
-		if (! no_digests) {
-			as_msg_field* field = (as_msg_field*)p;
-			field->field_sz = sizeof(cf_digest) + 1;
-			field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
-			memcpy(field->data, &tr->keyd, sizeof(cf_digest));
-			as_msg_swap_field(field);
-			p += sizeof(as_msg_field) + sizeof(cf_digest);
-		}
 
 		for (uint16_t i = 0; i < n_bins; i++) {
 			as_bin* bin = bins[i];
@@ -1200,46 +1232,52 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 }
 
 void
-as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* digest, cl_msg* cmsg, size_t proxy_size)
+as_batch_add_made_result(as_batch_shared* shared, uint32_t index, cl_msg* msgp,
+		size_t msg_sz)
 {
-	as_msg* msg = &cmsg->msg;
-	size_t size = proxy_size - sizeof(as_proto);
-
-	bool no_digests = as_load_bool(&g_config.batch_without_digests);
-
-	if (! no_digests) {
-		size += sizeof(as_msg_field) + sizeof(cf_digest);
-	}
+	as_msg* m = &msgp->msg;
+	size_t sz = msg_sz - sizeof(as_proto);
 
 	as_batch_buffer* buffer;
 	bool complete;
-	uint8_t* data = as_batch_reserve(shared, size, msg->result_code, &buffer, &complete);
+	uint8_t* data = as_batch_reserve(shared, sz, m->result_code, &buffer,
+			&complete);
 
-	if (data) {
-		// Overload transaction_ttl to store batch index.
-		msg->transaction_ttl = htonl(index);
-
-		if (! no_digests) {
-			uint16_t n_fields = ntohs(msg->n_fields);
-			msg->n_fields = htons(n_fields + 1);
-		}
-
-		memcpy(data, msg, sizeof(as_msg));
-		uint8_t* trg = data + sizeof(as_msg);
-
-		if (! no_digests) {
-			as_msg_field* field = (as_msg_field*)trg;
-			field->field_sz = sizeof(cf_digest) + 1;
-			field->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
-			memcpy(field->data, digest, sizeof(cf_digest));
-			as_msg_swap_field(field);
-			trg += sizeof(as_msg_field) + sizeof(cf_digest);
-		}
-
-		// Copy others fields and ops.
-		size = ((uint8_t*)cmsg + proxy_size) - msg->data;
-		memcpy(trg, msg->data, size);
+	if (data != NULL) {
+		m->transaction_ttl = cf_swap_to_be32(index);
+		memcpy(data, m, sz);
 	}
+
+	as_batch_transaction_end(shared, buffer, complete);
+}
+
+// TODO - could also re-do this with explicit params to cover errors?
+void
+as_batch_add_ack(as_transaction* tr)
+{
+	as_batch_shared* shared = tr->from.batch_shared;
+	as_batch_buffer* buffer;
+	bool complete;
+	uint8_t* data = as_batch_reserve(shared, sizeof(as_msg), tr->result_code,
+			&buffer, &complete);
+
+	if (data != NULL) {
+		as_msg* m = (as_msg*)data;
+		m->header_sz = sizeof(as_msg);
+		m->info1 = 0;
+		m->info2 = 0;
+		m->info3 = 0;
+		m->unused = 0;
+		m->result_code = tr->result_code;
+		m->generation = plain_generation(tr->generation, tr->rsv.ns);
+		m->record_ttl = tr->void_time;
+		// Overload transaction_ttl to store batch index.
+		m->transaction_ttl = tr->from_data.batch_index;
+		m->n_fields = 0;
+		m->n_ops = 0;
+		as_msg_swap_header(m);
+	}
+
 	as_batch_transaction_end(shared, buffer, complete);
 }
 

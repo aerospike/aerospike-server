@@ -260,14 +260,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 		tr->keyd = *(cf_digest *)df->data;
 	}
-	else if (as_transaction_has_key(tr)) {
-		// Old client - deprecated.
-		cf_warning(AS_TSVC, "msg has key but no digest");
-		as_transaction_error(tr, ns, AS_ERR_UNSUPPORTED_FEATURE);
-		goto Cleanup;
-	}
-	// else - batch sub-transactions & all internal transactions have neither
-	// digest nor key in the message - digest is already in tr.
+	// else - batch sub-transactions & all internal transactions have no digest
+	// in the message - digest is already in tr.
 
 	// Process the transaction.
 

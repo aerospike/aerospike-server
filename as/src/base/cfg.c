@@ -161,7 +161,6 @@ cfg_set_defaults()
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
-	c->batch_without_digests = true;
 	c->feature_key_files[0] = "/etc/aerospike/features.conf";
 	c->n_info_threads = 16;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
@@ -263,7 +262,6 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
-	CASE_SERVICE_BATCH_WITHOUT_DIGESTS,
 	CASE_SERVICE_CLUSTER_NAME,
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
 	CASE_SERVICE_DISABLE_UDF_EXECUTION,
@@ -769,7 +767,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
-		{ "batch-without-digests",			CASE_SERVICE_BATCH_WITHOUT_DIGESTS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "disable-udf-execution",			CASE_SERVICE_DISABLE_UDF_EXECUTION },
@@ -2213,10 +2210,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS:
 				c->batch_max_unused_buffers = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_BATCH_WITHOUT_DIGESTS:
-				// TODO - remove in "six months".
-				c->batch_without_digests = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_CLUSTER_NAME:
 				cfg_set_cluster_name(line.val_tok_1);
@@ -4442,6 +4435,12 @@ as_config_post_process(as_config* c, const char* config_file)
 		ns->batch_sub_repl_ping_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-read-local", ns->name);
 		ns->batch_sub_read_local_hist = histogram_create(hist_name, scale);
+		sprintf(hist_name, "{%s}-batch-sub-write-master", ns->name);
+		ns->batch_sub_write_master_hist = histogram_create(hist_name, scale);
+		sprintf(hist_name, "{%s}-batch-sub-udf-master", ns->name);
+		ns->batch_sub_udf_master_hist = histogram_create(hist_name, scale);
+		sprintf(hist_name, "{%s}-batch-sub-repl-write", ns->name);
+		ns->batch_sub_repl_write_hist = histogram_create(hist_name, scale);
 		sprintf(hist_name, "{%s}-batch-sub-response", ns->name);
 		ns->batch_sub_response_hist = histogram_create(hist_name, scale);
 

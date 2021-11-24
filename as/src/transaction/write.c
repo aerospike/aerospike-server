@@ -40,6 +40,7 @@
 #include "dynbuf.h"
 #include "log.h"
 
+#include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
@@ -182,6 +183,46 @@ from_proxy_write_update_stats(as_namespace* ns, uint8_t result_code,
 	}
 }
 
+// Can't be an XDR write.
+static inline void
+batch_sub_write_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_batch_sub_write_success);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_batch_sub_write_error);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_batch_sub_write_timeout);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_batch_sub_write_filtered_out);
+		break;
+	}
+}
+
+// Can't be an XDR write.
+static inline void
+from_proxy_batch_sub_write_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_success);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_error);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_timeout);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_filtered_out);
+		break;
+	}
+}
+
 static inline void
 ops_sub_write_update_stats(as_namespace* ns, uint8_t result_code)
 {
@@ -210,6 +251,7 @@ transaction_status
 as_write_start(as_transaction* tr)
 {
 	BENCHMARK_START(tr, write, FROM_CLIENT);
+	BENCHMARK_START_FROM_BATCH(tr);
 	BENCHMARK_START(tr, ops_sub, FROM_IOPS);
 
 	// Apply XDR filter.
@@ -261,6 +303,7 @@ as_write_start(as_transaction* tr)
 	status = write_master(rw, tr);
 
 	BENCHMARK_NEXT_DATA_POINT_FROM(tr, write, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM(tr, batch_sub, FROM_BATCH, write_master);
 	BENCHMARK_NEXT_DATA_POINT_FROM(tr, ops_sub, FROM_IOPS, master);
 
 	// If error, transaction is finished.
@@ -347,6 +390,7 @@ bool
 write_dup_res_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, write, FROM_CLIENT, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, batch_sub, FROM_BATCH, dup_res);
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, ops_sub, FROM_IOPS, dup_res);
 
 	as_transaction tr;
@@ -360,6 +404,7 @@ write_dup_res_cb(rw_request* rw)
 	transaction_status status = write_master(rw, &tr);
 
 	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), write, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), batch_sub, FROM_BATCH, write_master);
 	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), ops_sub, FROM_IOPS, master);
 
 	if (status == TRANS_WAITING) {
@@ -422,6 +467,7 @@ void
 write_repl_write_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, write, FROM_CLIENT, repl_write);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, batch_sub, FROM_BATCH, repl_write);
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, ops_sub, FROM_IOPS, repl_write);
 
 	as_transaction tr;
@@ -481,8 +527,25 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
 					0, tr->rsv.ns, as_transaction_trid(tr));
 		}
-		from_proxy_write_update_stats(tr->rsv.ns, tr->result_code,
-				as_transaction_is_xdr(tr));
+		if (as_transaction_is_batch_sub(tr)) {
+			from_proxy_batch_sub_write_update_stats(tr->rsv.ns,
+					tr->result_code);
+		}
+		else {
+			from_proxy_write_update_stats(tr->rsv.ns, tr->result_code,
+					as_transaction_is_xdr(tr));
+		}
+		break;
+	case FROM_BATCH:
+		if (db && db->used_sz != 0) {
+			as_batch_add_made_result(tr->from.batch_shared,
+					tr->from_data.batch_index, (cl_msg*)db->buf, db->used_sz);
+		}
+		else {
+			as_batch_add_ack(tr);
+		}
+		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
+		batch_sub_write_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_IOPS:
 		tr->from.iops_orig->cb(tr->from.iops_orig->udata, tr->result_code);
@@ -516,8 +579,19 @@ write_timeout_cb(rw_request* rw)
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	case FROM_PROXY:
-		from_proxy_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
-				as_msg_is_xdr(&rw->msgp->msg));
+		if (rw_request_is_batch_sub(rw)) {
+			from_proxy_batch_sub_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		}
+		else {
+			from_proxy_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
+					as_msg_is_xdr(&rw->msgp->msg));
+		}
+		break;
+	case FROM_BATCH:
+		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
+				AS_ERR_TIMEOUT);
+		// Timeouts aren't included in histograms.
+		batch_sub_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_IOPS:
 		rw->from.iops_orig->cb(rw->from.iops_orig->udata, AS_ERR_TIMEOUT);

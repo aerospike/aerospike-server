@@ -491,15 +491,8 @@ proxyer_handle_batch_response(msg* m, proxy_request* pr)
 		return AS_ERR_UNKNOWN;
 	}
 
-	cf_digest* keyd;
-
-	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
-		cf_crash(AS_PROXY, "original msg get for digest failed");
-	}
-
-	as_batch_add_proxy_result(pr->from.batch_shared, pr->batch_index, keyd,
-			msgp, msgp_sz);
+	as_batch_add_made_result(pr->from.batch_shared, pr->batch_index, msgp,
+			msgp_sz);
 
 	return AS_OK;
 }

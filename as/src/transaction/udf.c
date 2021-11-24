@@ -50,6 +50,7 @@
 #include "dynbuf.h"
 #include "log.h"
 
+#include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
@@ -141,8 +142,8 @@ static void udf_update_sindex(udf_record* urecord);
 static void udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result, uint8_t result_code, cf_dyn_buf* db);
 static void udf_master_done(udf_record* urecord, as_rec* urec, as_result* result, cf_dyn_buf* db);
 
-static void update_lua_failure_stats(uint8_t origin, as_namespace* ns, const as_result* result);
-static void update_lua_success_stats(uint8_t origin, as_namespace* ns, udf_optype op);
+static void update_lua_failure_stats(const as_transaction* tr, as_namespace* ns, const as_result* result);
+static void update_lua_success_stats(const as_transaction* tr, as_namespace* ns, udf_optype op);
 
 static void process_failure(as_transaction* tr, const as_result* result, cf_dyn_buf* db);
 static void process_response(as_transaction* tr, bool success, const as_val* val, cf_dyn_buf* db);
@@ -186,6 +187,44 @@ from_proxy_udf_update_stats(as_namespace* ns, uint8_t result_code)
 		break;
 	case AS_ERR_FILTERED_OUT:
 		cf_atomic64_incr(&ns->n_from_proxy_udf_filtered_out);
+		break;
+	}
+}
+
+static inline void
+batch_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_batch_sub_udf_complete);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_batch_sub_udf_error);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_batch_sub_udf_timeout);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_batch_sub_udf_filtered_out);
+		break;
+	}
+}
+
+static inline void
+from_proxy_batch_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_complete);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_error);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_timeout);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_filtered_out);
 		break;
 	}
 }
@@ -308,6 +347,7 @@ transaction_status
 as_udf_start(as_transaction* tr)
 {
 	BENCHMARK_START(tr, udf, FROM_CLIENT);
+	BENCHMARK_START_FROM_BATCH(tr);
 	BENCHMARK_START(tr, udf_sub, FROM_IUDF);
 
 	// Temporary security vulnerability protection.
@@ -366,6 +406,7 @@ as_udf_start(as_transaction* tr)
 	status = udf_master(rw, tr);
 
 	BENCHMARK_NEXT_DATA_POINT_FROM(tr, udf, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM(tr, batch_sub, FROM_BATCH, udf_master);
 	BENCHMARK_NEXT_DATA_POINT_FROM(tr, udf_sub, FROM_IUDF, master);
 
 	// If error or UDF was a read, transaction is finished.
@@ -477,6 +518,7 @@ static bool
 udf_dup_res_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf, FROM_CLIENT, dup_res);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, batch_sub, FROM_BATCH, dup_res);
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf_sub, FROM_IUDF, dup_res);
 
 	as_transaction tr;
@@ -490,6 +532,7 @@ udf_dup_res_cb(rw_request* rw)
 	transaction_status status = udf_master(rw, &tr);
 
 	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), udf, FROM_CLIENT, master);
+	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), batch_sub, FROM_BATCH, udf_master);
 	BENCHMARK_NEXT_DATA_POINT_FROM((&tr), udf_sub, FROM_IUDF, master);
 
 	if (status == TRANS_WAITING) {
@@ -549,6 +592,7 @@ static void
 udf_repl_write_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf, FROM_CLIENT, repl_write);
+	BENCHMARK_NEXT_DATA_POINT_FROM(rw, batch_sub, FROM_BATCH, repl_write);
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, udf_sub, FROM_IUDF, repl_write);
 
 	as_transaction tr;
@@ -607,7 +651,23 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
 					0, tr->rsv.ns, as_transaction_trid(tr));
 		}
-		from_proxy_udf_update_stats(tr->rsv.ns, tr->result_code);
+		if (as_transaction_is_batch_sub(tr)) {
+			from_proxy_batch_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
+		}
+		else {
+			from_proxy_udf_update_stats(tr->rsv.ns, tr->result_code);
+		}
+		break;
+	case FROM_BATCH:
+		if (db != NULL && db->used_sz != 0) {
+			as_batch_add_made_result(tr->from.batch_shared,
+					tr->from_data.batch_index, (cl_msg*)db->buf, db->used_sz);
+		}
+		else {
+			as_batch_add_ack(tr);
+		}
+		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
+		batch_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_IUDF:
 		if (db != NULL && db->used_sz != 0) {
@@ -642,7 +702,18 @@ udf_timeout_cb(rw_request* rw)
 		client_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_PROXY:
-		from_proxy_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		if (rw_request_is_batch_sub(rw)) {
+			from_proxy_batch_sub_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		}
+		else {
+			from_proxy_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		}
+		break;
+	case FROM_BATCH:
+		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
+				AS_ERR_TIMEOUT);
+		// Timeouts aren't included in histograms.
+		batch_sub_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_IUDF:
 		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata, AS_ERR_TIMEOUT);
@@ -788,14 +859,14 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		// Note - destroying result will free the string value.
 		result.value = as_string_toval(&stack_s);
 
-		update_lua_failure_stats(tr->origin, ns, &result);
+		update_lua_failure_stats(tr, ns, &result);
 		udf_master_failed(&urecord, urec, &result, AS_ERR_UDF_EXECUTION, db);
 		return UDF_OPTYPE_NONE;
 	}
 
 	// If UDF environment setup succeeded, but as_result reports failure...
 	if (! result.is_success) {
-		update_lua_failure_stats(tr->origin, ns, &result);
+		update_lua_failure_stats(tr, ns, &result);
 		udf_master_failed(&urecord, urec, &result, AS_ERR_UDF_EXECUTION, db);
 		return UDF_OPTYPE_NONE;
 	}
@@ -845,7 +916,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		udf_master_done(&urecord, urec, &result, db);
 	}
 
-	update_lua_success_stats(tr->origin, ns, final_op);
+	update_lua_success_stats(tr, ns, final_op);
 
 	return final_op;
 }
@@ -1207,7 +1278,7 @@ udf_master_done(udf_record* urecord, as_rec* urec, as_result* result,
 //
 
 static void
-update_lua_failure_stats(uint8_t origin, as_namespace* ns,
+update_lua_failure_stats(const as_transaction* tr, as_namespace* ns,
 		const as_result* result)
 {
 	char* val_str = NULL;
@@ -1223,26 +1294,35 @@ update_lua_failure_stats(uint8_t origin, as_namespace* ns,
 		cf_free(val_str);
 	}
 
-	switch (origin) {
+	switch (tr->origin) {
 	case FROM_CLIENT:
 		cf_atomic64_incr(&ns->n_client_lang_error);
 		break;
 	case FROM_PROXY:
-		cf_atomic64_incr(&ns->n_from_proxy_lang_error);
+		if (as_transaction_is_batch_sub(tr)) {
+			cf_atomic64_incr(&ns->n_from_proxy_batch_sub_lang_error);
+		}
+		else {
+			cf_atomic64_incr(&ns->n_from_proxy_lang_error);
+		}
+		break;
+	case FROM_BATCH:
+		cf_atomic64_incr(&ns->n_batch_sub_lang_error);
 		break;
 	case FROM_IUDF:
 		cf_atomic64_incr(&ns->n_udf_sub_lang_error);
 		break;
 	default:
-		cf_crash(AS_UDF, "unexpected transaction origin %u", origin);
+		cf_crash(AS_UDF, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
 }
 
 static void
-update_lua_success_stats(uint8_t origin, as_namespace* ns, udf_optype op)
+update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
+		udf_optype op)
 {
-	switch (origin) {
+	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (op == UDF_OPTYPE_READ) {
 			cf_atomic64_incr(&ns->n_client_lang_read_success);
@@ -1255,14 +1335,40 @@ update_lua_success_stats(uint8_t origin, as_namespace* ns, udf_optype op)
 		}
 		break;
 	case FROM_PROXY:
+		if (as_transaction_is_batch_sub(tr)) {
+			if (op == UDF_OPTYPE_READ) {
+				cf_atomic64_incr(&ns->n_from_proxy_batch_sub_lang_read_success);
+			}
+			else if (op == UDF_OPTYPE_DELETE) {
+				cf_atomic64_incr(
+						&ns->n_from_proxy_batch_sub_lang_delete_success);
+			}
+			else if (op == UDF_OPTYPE_WRITE) {
+				cf_atomic64_incr(
+						&ns->n_from_proxy_batch_sub_lang_write_success);
+			}
+		}
+		else {
+			if (op == UDF_OPTYPE_READ) {
+				cf_atomic64_incr(&ns->n_from_proxy_lang_read_success);
+			}
+			else if (op == UDF_OPTYPE_DELETE) {
+				cf_atomic64_incr(&ns->n_from_proxy_lang_delete_success);
+			}
+			else if (op == UDF_OPTYPE_WRITE) {
+				cf_atomic64_incr(&ns->n_from_proxy_lang_write_success);
+			}
+		}
+		break;
+	case FROM_BATCH:
 		if (op == UDF_OPTYPE_READ) {
-			cf_atomic64_incr(&ns->n_from_proxy_lang_read_success);
+			cf_atomic64_incr(&ns->n_batch_sub_lang_read_success);
 		}
 		else if (op == UDF_OPTYPE_DELETE) {
-			cf_atomic64_incr(&ns->n_from_proxy_lang_delete_success);
+			cf_atomic64_incr(&ns->n_batch_sub_lang_delete_success);
 		}
 		else if (op == UDF_OPTYPE_WRITE) {
-			cf_atomic64_incr(&ns->n_from_proxy_lang_write_success);
+			cf_atomic64_incr(&ns->n_batch_sub_lang_write_success);
 		}
 		break;
 	case FROM_IUDF:
@@ -1279,7 +1385,7 @@ update_lua_success_stats(uint8_t origin, as_namespace* ns, udf_optype op)
 		}
 		break;
 	default:
-		cf_crash(AS_UDF, "unexpected transaction origin %u", origin);
+		cf_crash(AS_UDF, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
 }

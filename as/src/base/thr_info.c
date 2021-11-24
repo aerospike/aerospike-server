@@ -1741,7 +1741,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
-	info_append_bool(db, "batch-without-digests", g_config.batch_without_digests);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	info_get_printable_cluster_name(cluster_name);
@@ -2273,6 +2272,9 @@ batch_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 	histogram_rescale(ns->batch_sub_dup_res_hist, scale);
 	histogram_rescale(ns->batch_sub_repl_ping_hist, scale);
 	histogram_rescale(ns->batch_sub_read_local_hist, scale);
+	histogram_rescale(ns->batch_sub_write_master_hist, scale);
+	histogram_rescale(ns->batch_sub_udf_master_hist, scale);
+	histogram_rescale(ns->batch_sub_repl_write_hist, scale);
 	histogram_rescale(ns->batch_sub_response_hist, scale);
 }
 
@@ -2430,19 +2432,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of batch-max-unused-buffers from %d to %d ", g_config.batch_max_unused_buffers, val);
 			g_config.batch_max_unused_buffers = val;
-		}
-		else if (0 == as_info_parameter_get(params, "batch-without-digests", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of batch-without-digests to %s", context);
-				g_config.batch_without_digests = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of batch-without-digests to %s", context);
-				g_config.batch_without_digests = false;
-			}
-			else {
-				goto Error;
-			}
 		}
 		else if (0 == as_info_parameter_get(params, "proto-fd-max", context, &context_len)) {
 			if (cf_str_atoi(context, &val) != 0 || val < MIN_PROTO_FD_MAX || val > MAX_PROTO_FD_MAX) {
@@ -3999,6 +3988,9 @@ info_command_latencies(char* name, char* params, cf_dyn_buf* db)
 				histogram_get_latencies(ns->batch_sub_dup_res_hist, db);
 				histogram_get_latencies(ns->batch_sub_repl_ping_hist, db);
 				histogram_get_latencies(ns->batch_sub_read_local_hist, db);
+				histogram_get_latencies(ns->batch_sub_write_master_hist, db);
+				histogram_get_latencies(ns->batch_sub_udf_master_hist, db);
+				histogram_get_latencies(ns->batch_sub_repl_write_hist, db);
 				histogram_get_latencies(ns->batch_sub_response_hist, db);
 			}
 			else if (strcmp(hist_name, "benchmarks-udf-sub") == 0) {
@@ -5630,6 +5622,27 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "batch_sub_read_not_found", ns->n_batch_sub_read_not_found);
 	info_append_uint64(db, "batch_sub_read_filtered_out", ns->n_batch_sub_read_filtered_out);
 
+	info_append_uint64(db, "batch_sub_write_success", ns->n_batch_sub_write_success);
+	info_append_uint64(db, "batch_sub_write_error", ns->n_batch_sub_write_error);
+	info_append_uint64(db, "batch_sub_write_timeout", ns->n_batch_sub_write_timeout);
+	info_append_uint64(db, "batch_sub_write_filtered_out", ns->n_batch_sub_write_filtered_out);
+
+	info_append_uint64(db, "batch_sub_delete_success", ns->n_batch_sub_delete_success);
+	info_append_uint64(db, "batch_sub_delete_error", ns->n_batch_sub_delete_error);
+	info_append_uint64(db, "batch_sub_delete_timeout", ns->n_batch_sub_delete_timeout);
+	info_append_uint64(db, "batch_sub_delete_not_found", ns->n_batch_sub_delete_not_found);
+	info_append_uint64(db, "batch_sub_delete_filtered_out", ns->n_batch_sub_delete_filtered_out);
+
+	info_append_uint64(db, "batch_sub_udf_complete", ns->n_batch_sub_udf_complete);
+	info_append_uint64(db, "batch_sub_udf_error", ns->n_batch_sub_udf_error);
+	info_append_uint64(db, "batch_sub_udf_timeout", ns->n_batch_sub_udf_timeout);
+	info_append_uint64(db, "batch_sub_udf_filtered_out", ns->n_batch_sub_udf_filtered_out);
+
+	info_append_uint64(db, "batch_sub_lang_read_success", ns->n_batch_sub_lang_read_success);
+	info_append_uint64(db, "batch_sub_lang_write_success", ns->n_batch_sub_lang_write_success);
+	info_append_uint64(db, "batch_sub_lang_delete_success", ns->n_batch_sub_lang_delete_success);
+	info_append_uint64(db, "batch_sub_lang_error", ns->n_batch_sub_lang_error);
+
 	// From-proxy batch sub-transaction stats.
 
 	info_append_uint64(db, "from_proxy_batch_sub_tsvc_error", ns->n_from_proxy_batch_sub_tsvc_error);
@@ -5640,6 +5653,27 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "from_proxy_batch_sub_read_timeout", ns->n_from_proxy_batch_sub_read_timeout);
 	info_append_uint64(db, "from_proxy_batch_sub_read_not_found", ns->n_from_proxy_batch_sub_read_not_found);
 	info_append_uint64(db, "from_proxy_batch_sub_read_filtered_out", ns->n_from_proxy_batch_sub_read_filtered_out);
+
+	info_append_uint64(db, "from_proxy_batch_sub_write_success", ns->n_from_proxy_batch_sub_write_success);
+	info_append_uint64(db, "from_proxy_batch_sub_write_error", ns->n_from_proxy_batch_sub_write_error);
+	info_append_uint64(db, "from_proxy_batch_sub_write_timeout", ns->n_from_proxy_batch_sub_write_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_write_filtered_out", ns->n_from_proxy_batch_sub_write_filtered_out);
+
+	info_append_uint64(db, "from_proxy_batch_sub_delete_success", ns->n_from_proxy_batch_sub_delete_success);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_error", ns->n_from_proxy_batch_sub_delete_error);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_timeout", ns->n_from_proxy_batch_sub_delete_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_not_found", ns->n_from_proxy_batch_sub_delete_not_found);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_filtered_out", ns->n_from_proxy_batch_sub_delete_filtered_out);
+
+	info_append_uint64(db, "from_proxy_batch_sub_udf_complete", ns->n_from_proxy_batch_sub_udf_complete);
+	info_append_uint64(db, "from_proxy_batch_sub_udf_error", ns->n_from_proxy_batch_sub_udf_error);
+	info_append_uint64(db, "from_proxy_batch_sub_udf_timeout", ns->n_from_proxy_batch_sub_udf_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_udf_filtered_out", ns->n_from_proxy_batch_sub_udf_filtered_out);
+
+	info_append_uint64(db, "from_proxy_batch_sub_lang_read_success", ns->n_from_proxy_batch_sub_lang_read_success);
+	info_append_uint64(db, "from_proxy_batch_sub_lang_write_success", ns->n_from_proxy_batch_sub_lang_write_success);
+	info_append_uint64(db, "from_proxy_batch_sub_lang_delete_success", ns->n_from_proxy_batch_sub_lang_delete_success);
+	info_append_uint64(db, "from_proxy_batch_sub_lang_error", ns->n_from_proxy_batch_sub_lang_error);
 
 	// Internal-UDF sub-transaction stats.
 
@@ -6693,7 +6727,7 @@ as_info_init()
 	// Returns list of features supported by this server
 	static char features[1024];
 	strcat(features,
-			"batch-index;blob-bits;"
+			"batch-any;batch-index;blob-bits;"
 			"cdt-list;cdt-map;cluster-stable;"
 			"float;"
 			"geo;"

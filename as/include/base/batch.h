@@ -25,8 +25,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_digest.h"
-
 #include "dynbuf.h"
 
 struct as_bin_s;
@@ -42,7 +40,8 @@ typedef struct as_batch_shared_s as_batch_shared;
 int as_batch_init();
 int as_batch_queue_task(struct as_transaction_s* tr);
 void as_batch_add_result(struct as_transaction_s* tr, uint16_t n_bins, struct as_bin_s** bins, struct as_msg_op_s** ops);
-void as_batch_add_proxy_result(as_batch_shared* shared, uint32_t index, cf_digest* digest, struct cl_msg_s* cmsg, size_t size);
+void as_batch_add_made_result(as_batch_shared* shared, uint32_t index, struct cl_msg_s* msgp, size_t msg_sz);
+void as_batch_add_ack(struct as_transaction_s* tr);
 void as_batch_add_error(as_batch_shared* shared, uint32_t index, int result_code);
 int as_batch_threads_resize(uint32_t threads);
 void as_batch_queues_info(cf_dyn_buf* db);

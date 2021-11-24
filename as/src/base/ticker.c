@@ -83,14 +83,11 @@ void log_fabric_rate(uint64_t delta_time);
 void log_line_early_fail();
 void log_line_batch_index();
 
-void log_line_objects(as_namespace* ns, uint64_t n_objects,
-		repl_stats* mp);
-void log_line_tombstones(as_namespace* ns, uint64_t n_tombstones,
-		repl_stats* mp);
+void log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp);
+void log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp);
 void log_line_appeals(as_namespace* ns);
 void log_line_migrations(as_namespace* ns);
-void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
-		size_t sindex_mem, size_t data_mem);
+void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem, size_t sindex_mem, size_t data_mem);
 void log_line_persistent_index_usage(as_namespace* ns, size_t used_size);
 void log_line_device_usage(as_namespace* ns);
 
@@ -732,18 +729,43 @@ log_line_batch_sub(as_namespace* ns)
 	uint64_t n_read_timeout = ns->n_batch_sub_read_timeout;
 	uint64_t n_read_not_found = ns->n_batch_sub_read_not_found;
 	uint64_t n_read_filtered_out = ns->n_batch_sub_read_filtered_out;
+	uint64_t n_write_success = ns->n_batch_sub_write_success;
+	uint64_t n_write_error = ns->n_batch_sub_write_error;
+	uint64_t n_write_timeout = ns->n_batch_sub_write_timeout;
+	uint64_t n_write_filtered_out = ns->n_batch_sub_write_filtered_out;
+	uint64_t n_delete_success = ns->n_batch_sub_delete_success;
+	uint64_t n_delete_error = ns->n_batch_sub_delete_error;
+	uint64_t n_delete_timeout = ns->n_batch_sub_delete_timeout;
+	uint64_t n_delete_not_found = ns->n_batch_sub_delete_not_found;
+	uint64_t n_delete_filtered_out = ns->n_batch_sub_delete_filtered_out;
+	uint64_t n_udf_complete = ns->n_batch_sub_udf_complete;
+	uint64_t n_udf_error = ns->n_batch_sub_udf_error;
+	uint64_t n_udf_timeout = ns->n_batch_sub_udf_timeout;
+	uint64_t n_udf_filtered_out = ns->n_batch_sub_udf_filtered_out;
+	uint64_t n_lang_read_success = ns->n_batch_sub_lang_read_success;
+	uint64_t n_lang_write_success = ns->n_batch_sub_lang_write_success;
+	uint64_t n_lang_delete_success = ns->n_batch_sub_lang_delete_success;
+	uint64_t n_lang_error = ns->n_batch_sub_lang_error;
 
 	if ((n_tsvc_error | n_tsvc_timeout |
 			n_proxy_complete | n_proxy_error | n_proxy_timeout |
-			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out) == 0) {
+			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out |
+			n_write_success | n_write_error | n_write_timeout | n_write_filtered_out |
+			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
+			n_udf_complete | n_udf_error | n_udf_timeout | n_udf_filtered_out |
+			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} batch-sub: tsvc (%lu,%lu) proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu,%lu)",
+	cf_info(AS_INFO, "{%s} batch-sub: tsvc (%lu,%lu) proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
 			n_proxy_complete, n_proxy_error, n_proxy_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out);
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
+			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
+			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
+			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
+			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
@@ -756,16 +778,41 @@ log_line_from_proxy_batch_sub(as_namespace* ns)
 	uint64_t n_read_timeout = ns->n_from_proxy_batch_sub_read_timeout;
 	uint64_t n_read_not_found = ns->n_from_proxy_batch_sub_read_not_found;
 	uint64_t n_read_filtered_out = ns->n_from_proxy_batch_sub_read_filtered_out;
+	uint64_t n_write_success = ns->n_from_proxy_batch_sub_write_success;
+	uint64_t n_write_error = ns->n_from_proxy_batch_sub_write_error;
+	uint64_t n_write_timeout = ns->n_from_proxy_batch_sub_write_timeout;
+	uint64_t n_write_filtered_out = ns->n_from_proxy_batch_sub_write_filtered_out;
+	uint64_t n_delete_success = ns->n_from_proxy_batch_sub_delete_success;
+	uint64_t n_delete_error = ns->n_from_proxy_batch_sub_delete_error;
+	uint64_t n_delete_timeout = ns->n_from_proxy_batch_sub_delete_timeout;
+	uint64_t n_delete_not_found = ns->n_from_proxy_batch_sub_delete_not_found;
+	uint64_t n_delete_filtered_out = ns->n_from_proxy_batch_sub_delete_filtered_out;
+	uint64_t n_udf_complete = ns->n_from_proxy_batch_sub_udf_complete;
+	uint64_t n_udf_error = ns->n_from_proxy_batch_sub_udf_error;
+	uint64_t n_udf_timeout = ns->n_from_proxy_batch_sub_udf_timeout;
+	uint64_t n_udf_filtered_out = ns->n_from_proxy_batch_sub_udf_filtered_out;
+	uint64_t n_lang_read_success = ns->n_from_proxy_batch_sub_lang_read_success;
+	uint64_t n_lang_write_success = ns->n_from_proxy_batch_sub_lang_write_success;
+	uint64_t n_lang_delete_success = ns->n_from_proxy_batch_sub_lang_delete_success;
+	uint64_t n_lang_error = ns->n_from_proxy_batch_sub_lang_error;
 
 	if ((n_tsvc_error | n_tsvc_timeout |
-			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out) == 0) {
+			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out |
+			n_write_success | n_write_error | n_write_timeout | n_write_filtered_out |
+			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
+			n_udf_complete | n_udf_error | n_udf_timeout | n_udf_filtered_out |
+			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} from-proxy-batch-sub: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu,%lu)",
+	cf_info(AS_INFO, "{%s} from-proxy-batch-sub: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_tsvc_error, n_tsvc_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out);
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
+			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
+			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
+			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
+			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
@@ -1070,6 +1117,9 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->batch_sub_dup_res_hist);
 		histogram_dump(ns->batch_sub_repl_ping_hist);
 		histogram_dump(ns->batch_sub_read_local_hist);
+		histogram_dump(ns->batch_sub_write_master_hist);
+		histogram_dump(ns->batch_sub_udf_master_hist);
+		histogram_dump(ns->batch_sub_repl_write_hist);
 		histogram_dump(ns->batch_sub_response_hist);
 	}
 

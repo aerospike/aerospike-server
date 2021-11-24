@@ -38,6 +38,7 @@
 #include "dynbuf.h"
 #include "log.h"
 
+#include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
@@ -146,6 +147,52 @@ from_proxy_delete_update_stats(as_namespace* ns, uint8_t result_code,
 	case AS_ERR_FILTERED_OUT:
 		// Can't be an XDR delete.
 		cf_atomic64_incr(&ns->n_from_proxy_delete_filtered_out);
+		break;
+	}
+}
+
+// Can't be an XDR delete.
+static inline void
+batch_sub_delete_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_batch_sub_delete_success);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_batch_sub_delete_error);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_batch_sub_delete_timeout);
+		break;
+	case AS_ERR_NOT_FOUND:
+		cf_atomic64_incr(&ns->n_batch_sub_delete_not_found);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_batch_sub_delete_filtered_out);
+		break;
+	}
+}
+
+// Can't be an XDR delete.
+static inline void
+from_proxy_batch_sub_delete_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_OK:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_success);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_error);
+		break;
+	case AS_ERR_TIMEOUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_timeout);
+		break;
+	case AS_ERR_NOT_FOUND:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_not_found);
+		break;
+	case AS_ERR_FILTERED_OUT:
+		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_filtered_out);
 		break;
 	}
 }
@@ -402,8 +449,21 @@ send_delete_response(as_transaction* tr)
 		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 				tr->result_code, 0, 0, NULL, NULL, 0, tr->rsv.ns,
 				as_transaction_trid(tr));
-		from_proxy_delete_update_stats(tr->rsv.ns, tr->result_code,
-				as_transaction_is_xdr(tr));
+		if (as_transaction_is_batch_sub(tr)) {
+			from_proxy_batch_sub_delete_update_stats(tr->rsv.ns,
+					tr->result_code);
+		}
+		else {
+			from_proxy_delete_update_stats(tr->rsv.ns, tr->result_code,
+					as_transaction_is_xdr(tr));
+		}
+		break;
+	case FROM_BATCH:
+		// TODO - maybe future generic add_ack() can take these as params?
+		tr->generation = 0;
+		tr->void_time = 0;
+		as_batch_add_ack(tr);
+		batch_sub_delete_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
@@ -431,8 +491,20 @@ delete_timeout_cb(rw_request* rw)
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	case FROM_PROXY:
-		from_proxy_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
-				as_msg_is_xdr(&rw->msgp->msg));
+		if (rw_request_is_batch_sub(rw)) {
+			from_proxy_batch_sub_delete_update_stats(rw->rsv.ns,
+					AS_ERR_TIMEOUT);
+		}
+		else {
+			from_proxy_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
+					as_msg_is_xdr(&rw->msgp->msg));
+		}
+		break;
+	case FROM_BATCH:
+		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
+				AS_ERR_TIMEOUT);
+		// Timeouts aren't included in histograms.
+		batch_sub_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);

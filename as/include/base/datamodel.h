@@ -1023,6 +1023,27 @@ struct as_namespace_s {
 	cf_atomic64		n_batch_sub_read_not_found;
 	cf_atomic64		n_batch_sub_read_filtered_out;
 
+	cf_atomic64		n_batch_sub_write_success;
+	cf_atomic64		n_batch_sub_write_error;
+	cf_atomic64		n_batch_sub_write_timeout;
+	cf_atomic64		n_batch_sub_write_filtered_out;
+
+	cf_atomic64		n_batch_sub_delete_success;
+	cf_atomic64		n_batch_sub_delete_error;
+	cf_atomic64		n_batch_sub_delete_timeout;
+	cf_atomic64		n_batch_sub_delete_not_found;
+	cf_atomic64		n_batch_sub_delete_filtered_out;
+
+	cf_atomic64		n_batch_sub_udf_complete;
+	cf_atomic64		n_batch_sub_udf_error;
+	cf_atomic64		n_batch_sub_udf_timeout;
+	cf_atomic64		n_batch_sub_udf_filtered_out;
+
+	cf_atomic64		n_batch_sub_lang_read_success;
+	cf_atomic64		n_batch_sub_lang_write_success;
+	cf_atomic64		n_batch_sub_lang_delete_success;
+	cf_atomic64		n_batch_sub_lang_error;
+
 	// From-proxy batch sub-transaction stats.
 
 	cf_atomic64		n_from_proxy_batch_sub_tsvc_error;
@@ -1033,6 +1054,27 @@ struct as_namespace_s {
 	cf_atomic64		n_from_proxy_batch_sub_read_timeout;
 	cf_atomic64		n_from_proxy_batch_sub_read_not_found;
 	cf_atomic64		n_from_proxy_batch_sub_read_filtered_out;
+
+	cf_atomic64		n_from_proxy_batch_sub_write_success;
+	cf_atomic64		n_from_proxy_batch_sub_write_error;
+	cf_atomic64		n_from_proxy_batch_sub_write_timeout;
+	cf_atomic64		n_from_proxy_batch_sub_write_filtered_out;
+
+	cf_atomic64		n_from_proxy_batch_sub_delete_success;
+	cf_atomic64		n_from_proxy_batch_sub_delete_error;
+	cf_atomic64		n_from_proxy_batch_sub_delete_timeout;
+	cf_atomic64		n_from_proxy_batch_sub_delete_not_found;
+	cf_atomic64		n_from_proxy_batch_sub_delete_filtered_out;
+
+	cf_atomic64		n_from_proxy_batch_sub_udf_complete;
+	cf_atomic64		n_from_proxy_batch_sub_udf_error;
+	cf_atomic64		n_from_proxy_batch_sub_udf_timeout;
+	cf_atomic64		n_from_proxy_batch_sub_udf_filtered_out;
+
+	cf_atomic64		n_from_proxy_batch_sub_lang_read_success;
+	cf_atomic64		n_from_proxy_batch_sub_lang_write_success;
+	cf_atomic64		n_from_proxy_batch_sub_lang_delete_success;
+	cf_atomic64		n_from_proxy_batch_sub_lang_error;
 
 	// Internal-UDF sub-transaction stats.
 
@@ -1208,6 +1250,9 @@ struct as_namespace_s {
 	histogram*		batch_sub_dup_res_hist;
 	histogram*		batch_sub_repl_ping_hist;
 	histogram*		batch_sub_read_local_hist;
+	histogram*		batch_sub_write_master_hist;
+	histogram*		batch_sub_udf_master_hist;
+	histogram*		batch_sub_repl_write_hist;
 	histogram*		batch_sub_response_hist;
 
 	histogram*		udf_sub_start_hist;
@@ -1368,6 +1413,13 @@ extern void as_namespace_adjust_set_device_bytes(as_namespace *ns, uint16_t set_
 extern void as_namespace_release_set_id(as_namespace *ns, uint16_t set_id);
 extern void as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns);
 extern void as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name, cf_dyn_buf *db);
+
+static inline bool
+as_namespace_like_data_in_memory(const as_namespace *ns)
+{
+	return ns->storage_data_in_memory ||
+			ns->storage_type == AS_STORAGE_ENGINE_PMEM;
+}
 
 static inline bool
 as_namespace_cool_restarts(const as_namespace *ns)
