@@ -240,7 +240,13 @@ gc_si_pimd(as_sindex* si, as_sindex_pmetadata* pimd, uint64_t* n_cleaned)
 {
 	gc_offset offset; // skey + r_h offset
 
-	if(! assignMinKey(pimd->ibtr, &offset.ibtr_last_key)) {
+	PIMD_RLOCK(&pimd->slock);
+
+	bool has_keys = assignMinKey(pimd->ibtr, &offset.ibtr_last_key);
+
+	PIMD_RUNLOCK(&pimd->slock);
+
+	if(! has_keys) {
 		return; // no keys in ibtr - nothing to GC
 	}
 
