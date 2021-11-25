@@ -338,7 +338,7 @@ udf_cask_info_put(char* name, char* params, cf_dyn_buf* out)
 		return 0;
 	}
 
-	uint32_t encoded_len = strlen(content);
+	uint32_t encoded_len = len32;
 	uint32_t decoded_len = cf_b64_decoded_buf_size(encoded_len);
 
 	if (decoded_len > MAX_UDF_CONTENT_LENGTH) {
