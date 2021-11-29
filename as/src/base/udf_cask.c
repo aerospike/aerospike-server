@@ -188,22 +188,6 @@ udf_cask_info_get(char* name, char* params, cf_dyn_buf* out)
 	mod_lua_unlock(&mod_lua);
 
 	if (buf != NULL) {
-		// The "gen" field is the raw file SHA1-hashed, then base-64 encoded.
-		// Apparently no client ever reads this "gen" field. Instead, the client
-		// generates its own hash, which is different to this, and both are
-		// different to the "hash" fields returned by the "udf-list" command.
-		// TODO - remove "gen" field?
-
-		unsigned char hash[SHA_DIGEST_LENGTH];
-
-		SHA1(buf, buf_sz, hash);
-
-		uint32_t gen_len = cf_b64_encoded_len(SHA_DIGEST_LENGTH);
-		char gen[gen_len + 1];
-
-		cf_b64_encode(hash, SHA_DIGEST_LENGTH, gen);
-		gen[gen_len] = '\0';
-
 		// The "content" field is the raw file base-64 encoded.
 
 		size_t content_len = cf_b64_encoded_len(buf_sz);
@@ -212,11 +196,11 @@ udf_cask_info_get(char* name, char* params, cf_dyn_buf* out)
 		cf_b64_encode(buf, buf_sz, (char*)content);
 
 		// Response format:
-		// "gen=<base-64-hash>;type=<type>;content=<base-64-encoded-lua-code>"
+		// "type=<type>;content=<base-64-encoded-lua-code>"
 
-		cf_dyn_buf_append_string(out, "gen=");
-		cf_dyn_buf_append_string(out, gen);
-		cf_dyn_buf_append_string(out, ";type=");
+		// Note - removed "gen" field (unused by client) in 5.8.
+
+		cf_dyn_buf_append_string(out, "type=");
 		cf_dyn_buf_append_string(out, LUA_TYPE_STR);
 		cf_dyn_buf_append_string(out, ";content=");
 		cf_dyn_buf_append_buf(out, content, content_len);
@@ -257,8 +241,8 @@ udf_cask_info_list(char* name, cf_dyn_buf* out)
 
 	// The "hash" field is the SMD value SHA1-hashed, as a hex string. The
 	// SMD value is a JSON-formatted object, within which is base-64-encoded
-	// LUA code (i.e. base-64-encoded raw file content). This is different
-	// to the "gen" field returned by the "udf-get" command.
+	// LUA code (i.e. base-64-encoded raw file content). Note - this is
+	// different to what the client generates in the "udf-get" command.
 
 	as_smd_get_all(AS_SMD_MODULE_UDF, udf_cask_smd_get_all_cb, &get_data);
 
