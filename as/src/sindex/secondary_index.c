@@ -124,7 +124,7 @@
 #include "transaction/udf.h"
 
 #include "ai_btree.h"
-#include "ai_types.h"
+#include "ai_glue.h"
 
 #include "warnings.h"
 

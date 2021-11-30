@@ -27,7 +27,6 @@
 #include <string.h>
 
 #include "ai_glue.h"
-#include "ai_obj.h"
 
 #include "base/cfg.h"
 #include "base/index.h"
@@ -87,6 +86,7 @@ typedef struct get_numeric_range_recl_ctx_s {
 
 typedef struct build_defrag_list_from_nbtr_ctx_s {
 	const as_namespace *ns;
+	const as_btree *ibtr;
 	const ai_obj *ikey;
 	cf_arenax_handle *nbtr_last_key;
 	uint64_t *limit;
@@ -95,6 +95,7 @@ typedef struct build_defrag_list_from_nbtr_ctx_s {
 
 typedef struct ai_btree_build_defrag_list_ctx_s {
 	const as_namespace *ns;
+	const as_btree *ibtr;
 	ai_obj *ibtr_last_key;
 	cf_arenax_handle *nbtr_last_key;
 	uint64_t limit;
@@ -102,6 +103,24 @@ typedef struct ai_btree_build_defrag_list_ctx_s {
 } ai_btree_build_defrag_list_ctx;
 
 static const uint8_t INIT_CAPACITY = 1;
+
+#define ORDER_INTEGER 32
+#define ORDER_DIGEST 18
+
+static int32_t
+comp_digest(const void* key_1, const void* key_2)
+{
+	return memcmp(key_1, key_2, sizeof(cf_digest));
+}
+
+static int32_t
+comp_integer(const void* key_1, const void* key_2)
+{
+	const int64_t* int_1 = key_1;
+	const int64_t* int_2 = key_2;
+
+	return *int_1 == *int_2 ? 0 : (*int_1 > *int_2) ? 1 : -1;
+}
 
 static ai_arr *
 ai_arr_new()
@@ -116,9 +135,7 @@ static void
 ai_arr_move_to_tree(ai_arr *arr, as_btree *nbtr)
 {
 	for (int i = 0; i < arr->used; i++) {
-		ai_obj apk;
-		init_ai_objInteger(&apk, arr->data[i]);
-		btIndNodeAdd(nbtr, &apk);
+		as_btree_put(nbtr, (const ai_obj *)&arr->data[i], NULL);
 	}
 }
 
@@ -249,11 +266,8 @@ anbtr_check_convert(ai_nbtr *anbtr)
 		//cf_info(AS_SINDEX,"Flipped @ %d", arr->used);
 		ulong ba = ai_arr_size(arr);
 		// Allocate btree move digest from arr to btree
-		as_btree *nbtr = createNBT();
-		if (!nbtr) {
-			cf_warning(AS_SINDEX, "btree allocation failure");
-			return 0;
-		}
+		as_btree *nbtr = as_btree_create(comp_integer, sizeof(uint64_t), 0,
+				ORDER_INTEGER);
 
 		ai_arr_move_to_tree(arr, nbtr);
 		ai_arr_destroy(anbtr->u.arr);
@@ -284,19 +298,19 @@ anbtr_check_convert(ai_nbtr *anbtr)
  *      AS_SINDEX_KEY_FOUND : If key already exists
  */
 static int
-reduced_iAdd(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
+reduced_iAdd(as_btree *ibtr, const ai_obj *acol, const ai_obj *apk)
 {
-	ai_nbtr *anbtr = btIndFind(ibtr, acol);
+	ai_nbtr *anbtr;
 	ulong ba = 0, aa = 0;
 
-	if (!anbtr) {
+	if (! as_btree_get(ibtr, acol, &anbtr)) {
 		anbtr = cf_calloc_ns(1, sizeof(ai_nbtr));
 		aa += sizeof(ai_nbtr);
 
 		anbtr->u.arr = ai_arr_new();
 		ibtr->extra_size += ai_arr_size(anbtr->u.arr);
 
-		btIndAdd(ibtr, acol, anbtr);
+		as_btree_put(ibtr, acol, &anbtr);
 	}
 
 	// Convert from arr to nbtr if limit is hit
@@ -309,12 +323,12 @@ reduced_iAdd(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
 			return AS_SINDEX_ERR;
 		}
 
-		if (btIndNodeExist(nbtr, apk)) {
+		if (as_btree_get(nbtr, apk, NULL)) {
 			return AS_SINDEX_KEY_FOUND;
 		}
 
 		ba += nbtr->size;
-		btIndNodeAdd(nbtr, apk);
+		as_btree_put(nbtr, apk, NULL);
 		aa += nbtr->size;
 
 	} else {
@@ -351,11 +365,11 @@ reduced_iAdd(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
  *      AS_SINDEX_KEY_NOTFOUND : If key does not exist
  */
 static int
-reduced_iRem(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
+reduced_iRem(as_btree *ibtr, const ai_obj *acol, const ai_obj *apk)
 {
-	ai_nbtr *anbtr = btIndFind(ibtr, acol);
+	ai_nbtr *anbtr;
 	ulong ba = 0, aa = 0;
-	if (!anbtr) {
+	if (! as_btree_get(ibtr, acol, &anbtr)) {
 		return AS_SINDEX_KEY_NOTFOUND;
 	}
 	if (anbtr->is_btree) {
@@ -363,17 +377,17 @@ reduced_iRem(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
 
 		// Remove from nbtr if found
 		as_btree *nbtr = anbtr->u.nbtr;
-		if (!btIndNodeExist(nbtr, apk)) {
+		if (!as_btree_get(nbtr, apk, NULL)) {
 			return AS_SINDEX_KEY_NOTFOUND;
 		}
 		ba = nbtr->size;
 
-		btIndNodeDelete(nbtr, apk);
+		as_btree_delete(nbtr, apk);
 		aa = nbtr->size;
 
 		// remove from ibtr
 		if (nbtr->n_keys == 0) {
-			btIndDelete(ibtr, acol);
+			as_btree_delete(ibtr, acol);
 			aa = 0;
 			as_btree_destroy(nbtr);
 			ba += sizeof(ai_nbtr);
@@ -391,7 +405,7 @@ reduced_iRem(as_btree *ibtr, ai_obj *acol, ai_obj *apk)
 
 		// Remove from ibtr
 		if (anbtr->u.arr->used == 0) {
-			btIndDelete(ibtr, acol);
+			as_btree_delete(ibtr, acol);
 			aa = 0;
 			ai_arr_destroy(anbtr->u.arr);
 			ba += sizeof(ai_nbtr);
@@ -510,7 +524,7 @@ add_recs_from_nbtr_cb(const void *key, void *value, void *udata)
 	if (ctx->resume) {
 		ctx->resume = false;
 
-		if (nbtr->key_comp(akey, ctx->sfk) == 0) {
+		if (as_btree_compare_keys(nbtr, akey, ctx->sfk) == 0) {
 			return true;
 		}
 	}
@@ -522,7 +536,9 @@ add_recs_from_nbtr_cb(const void *key, void *value, void *udata)
 	}
 
 	if (ctx->ikey != NULL) {
-		ai_objClone(qctx->ibtr_last_key, ctx->ikey);
+		as_sindex_pmetadata *pimd = &ctx->imd->pimd[qctx->pimd_ix];
+
+		as_btree_copy_key(pimd->ibtr, qctx->ibtr_last_key, ctx->ikey);
 	}
 
 	qctx->nbtr_last_key = akey->integer;
@@ -545,7 +561,7 @@ add_recs_from_nbtr(const as_sindex_metadata *imd, const ai_obj *ikey,
 	};
 
 	if (resume) {
-		init_ai_objInteger(&sfk, qctx->nbtr_last_key);
+		as_btree_copy_key(nbtr, &sfk, &qctx->nbtr_last_key);
 		ctx.sfk = &sfk;
 		ctx.resume = true;
 	}
@@ -567,17 +583,19 @@ add_recs_from_arr(const as_sindex_metadata *imd, const ai_obj *ikey,
 	// mark nbtr as finished and copy the offset
 	qctx->nbtr_done = true;
 	if (ikey) {
-		ai_objClone(qctx->ibtr_last_key, ikey);
+		as_sindex_pmetadata *pimd = &imd->pimd[qctx->pimd_ix];
+
+		as_btree_copy_key(pimd->ibtr, qctx->ibtr_last_key, ikey);
 	}
 }
 
 static void
-get_recl(as_sindex_metadata *imd, ai_obj *afk, as_sindex_qctx *qctx)
+get_recl(as_sindex_metadata *imd, const ai_obj *afk, as_sindex_qctx *qctx)
 {
 	as_sindex_pmetadata *pimd = &imd->pimd[qctx->pimd_ix];
-	ai_nbtr *anbtr = btIndFind(pimd->ibtr, afk);
+	ai_nbtr *anbtr;
 
-	if (!anbtr) {
+	if (! as_btree_get(pimd->ibtr, afk, &anbtr)) {
 		return;
 	}
 
@@ -608,7 +626,7 @@ get_numeric_range_recl_cb(const void *key, void *value, void *udata)
 		ctx->resume = false;
 		qctx->nbtr_done = false;
 
-		resume = ibtr->key_comp(ikey, ctx->sfk) == 0;
+		resume = as_btree_compare_keys(ibtr, key, ctx->sfk) == 0;
 
 		if (resume && nbtr_done) {
 			return true;
@@ -634,29 +652,26 @@ get_numeric_range_recl(as_sindex_metadata *imd, uint64_t begk, uint64_t endk, as
 {
 	as_sindex_pmetadata *pimd = &imd->pimd[qctx->pimd_ix];
 	as_btree *ibtr = pimd->ibtr;
+	ai_obj sfk;
 
 	get_numeric_range_recl_ctx ctx = {
 		.imd = imd,
 		.ibtr = ibtr,
 		.qctx = qctx,
+		.sfk = &sfk
 	};
 
-	ai_obj sfk;
-
 	if (qctx->new_ibtr) {
-		init_ai_objInteger(&sfk, begk);
-		ctx.sfk = &sfk;
+		as_btree_copy_key(ibtr, &sfk, &begk);
 		ctx.resume = false;
 	}
 	else {
-		ctx.sfk = qctx->ibtr_last_key;
+		as_btree_copy_key(ibtr, &sfk, qctx->ibtr_last_key);
 		ctx.resume = true;
 	}
 
-	ai_obj efk;
-
-	init_ai_objInteger(&efk, endk);
-	as_btree_reduce(ibtr, ctx.sfk, &efk, get_numeric_range_recl_cb, &ctx);
+	as_btree_reduce(ibtr, &sfk, (const ai_obj *)&endk,
+			get_numeric_range_recl_cb, &ctx);
 }
 
 void
@@ -664,16 +679,15 @@ ai_btree_query(as_sindex_metadata *imd, const as_query_range *srange,
 		as_sindex_qctx *qctx)
 {
 	if (!srange->isrange) { // EQUALITY LOOKUP
-		ai_obj afk;
-		init_ai_obj(&afk);
+		const ai_obj *afk;
 		if (C_IS_DIGEST(imd->sktype)) {
-			init_ai_objDigest(&afk, &srange->u.digest);
+			afk = (const ai_obj *)&srange->u.digest;
 		}
 		else {
 			// geo queries can never be point queries. Must be NUMERIC.
-			init_ai_objInteger(&afk, srange->u.r.start);
+			afk = (const ai_obj *)&srange->u.r.start;
 		}
-		get_recl(imd, &afk, qctx);
+		get_recl(imd, afk, qctx);
 	} else {                // RANGE LOOKUP
 		if (C_IS_LONG(imd->sktype)) {
 			get_numeric_range_recl(imd, srange->u.r.start, srange->u.r.end,
@@ -688,23 +702,11 @@ ai_btree_query(as_sindex_metadata *imd, const as_query_range *srange,
 }
 
 as_sindex_status
-ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey,
-		cf_arenax_handle r_h)
+ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd,
+		const ai_obj *skey, cf_arenax_handle r_h)
 {
-	ai_obj ncol;
-	if (C_IS_DIGEST(imd->sktype)) {
-		init_ai_objDigest(&ncol, skey);
-	}
-	else {
-		// TODO - ai_obj type is LONG for both Geo and Long
-		init_ai_objInteger(&ncol, *(ulong *)skey);
-	}
-
-	ai_obj apk;
-	init_ai_objInteger(&apk, r_h);
-
 	uint64_t before = pimd->ibtr->size + pimd->ibtr->extra_size;
-	int ret = reduced_iAdd(pimd->ibtr, &ncol, &apk);
+	int ret = reduced_iAdd(pimd->ibtr, skey, (const ai_obj *)&r_h);
 	uint64_t after = pimd->ibtr->size + pimd->ibtr->extra_size;
 	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory, (after - before));
 
@@ -716,8 +718,8 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey,
 }
 
 as_sindex_status
-ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey,
-		cf_arenax_handle r_h)
+ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd,
+		const ai_obj *skey, cf_arenax_handle r_h)
 {
 	int ret = AS_SINDEX_OK;
 
@@ -725,20 +727,8 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey,
 		return AS_SINDEX_KEY_NOTFOUND;
 	}
 
-	ai_obj ncol;
-	if (C_IS_DIGEST(imd->sktype)) {
-		init_ai_objDigest(&ncol, skey);
-	}
-	else {
-		// TODO - ai_obj type is LONG for both Geo and Long
-		init_ai_objInteger(&ncol, *(ulong *)skey);
-	}
-
-	ai_obj apk;
-	init_ai_objInteger(&apk, r_h);
-
 	uint64_t before = pimd->ibtr->size + pimd->ibtr->extra_size;
-	ret = reduced_iRem(pimd->ibtr, &ncol, &apk);
+	ret = reduced_iRem(pimd->ibtr, skey, (const ai_obj *)&r_h);
 	uint64_t after = pimd->ibtr->size + pimd->ibtr->extra_size;
 	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory, (before - after));
 
@@ -772,7 +762,7 @@ build_defrag_list_from_nbtr_cb(const void *key, void *value, void *udata)
 		acol_handle *h = &dt->acol_handles[dt->num];
 
 		h->r_h = r_h;
-		ai_objClone(&h->acol, ctx->ikey);
+		as_btree_copy_key(ctx->ibtr, &h->acol, ctx->ikey);
 
 		dt->num++;
 	}
@@ -792,15 +782,16 @@ build_defrag_list_from_nbtr_cb(const void *key, void *value, void *udata)
  * Mallocs the nodes of defrag_list
  */
 static void
-build_defrag_list_from_nbtr(const as_namespace *ns, const ai_obj *ikey,
-		as_btree *nbtr, cf_arenax_handle *nbtr_last_key, ulong *limit,
-		cf_ll *gc_list)
+build_defrag_list_from_nbtr(const as_namespace *ns, const as_btree *ibtr,
+		const ai_obj *ikey, as_btree *nbtr, cf_arenax_handle *nbtr_last_key,
+		ulong *limit, cf_ll *gc_list)
 {
 	ai_obj sfk;
-	init_ai_objInteger(&sfk, *nbtr_last_key);
+	as_btree_copy_key(nbtr, &sfk, nbtr_last_key);
 
 	build_defrag_list_from_nbtr_ctx ctx = {
 		.ns = ns,
+		.ibtr = ibtr,
 		.ikey = ikey,
 		.nbtr_last_key = nbtr_last_key,
 		.limit = limit,
@@ -811,8 +802,8 @@ build_defrag_list_from_nbtr(const as_namespace *ns, const ai_obj *ikey,
 }
 
 static void
-build_defrag_list_from_arr(const as_namespace *ns, const ai_obj *acol,
-		const ai_arr *arr, ulong *limit, cf_ll *gc_list)
+build_defrag_list_from_arr(const as_namespace *ns, const as_btree *ibtr,
+		const ai_obj *acol, const ai_arr *arr, ulong *limit, cf_ll *gc_list)
 {
 	for (ulong i = 0; i < arr->used; i++) {
 		cf_arenax_handle r_h = (cf_arenax_handle)arr->data[i];
@@ -836,7 +827,7 @@ build_defrag_list_from_arr(const as_namespace *ns, const ai_obj *acol,
 				cf_ll_append(gc_list, (cf_ll_element *)node);
 			}
 			dt->acol_handles[dt->num].r_h = r_h;
-			ai_objClone(&(dt->acol_handles[dt->num].acol), acol);
+			as_btree_copy_key(ibtr, &dt->acol_handles[dt->num].acol, acol);
 
 			dt->num += 1;		
 		}
@@ -855,17 +846,17 @@ ai_btree_build_defrag_list_cb(const void *key, void *value, void *udata)
 	ai_btree_build_defrag_list_ctx *ctx = udata;
 
 	if (anbtr->is_btree) {
-		build_defrag_list_from_nbtr(ctx->ns, ikey, anbtr->u.nbtr,
+		build_defrag_list_from_nbtr(ctx->ns, ctx->ibtr, ikey, anbtr->u.nbtr,
 				ctx->nbtr_last_key, &ctx->limit, ctx->gc_list);
 	} else {
 		// We always process arrays fully and may cross the limit.
 		// limit == 0 indicates we met or crossed the limit.
-		build_defrag_list_from_arr(ctx->ns, ikey, anbtr->u.arr, &ctx->limit,
-				ctx->gc_list);
+		build_defrag_list_from_arr(ctx->ns, ctx->ibtr, ikey, anbtr->u.arr,
+				&ctx->limit, ctx->gc_list);
 	}
 
 	if (ctx->limit == 0) {
-		ai_objClone(ctx->ibtr_last_key, ikey);
+		as_btree_copy_key(ctx->ibtr, ctx->ibtr_last_key, ikey);
 		cf_detail(AS_SINDEX,
 				"Current pimd may need more iteration of defragging.");
 		return false;
@@ -906,14 +897,18 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd,
 
 	ai_btree_build_defrag_list_ctx ctx = {
 		.ns = ns,
+		.ibtr = pimd->ibtr,
 		.ibtr_last_key = ibtr_last_key,
 		.nbtr_last_key = nbtr_last_key,
 		.limit = limit,
 		.gc_list = gc_list
 	};
 
-	as_btree_reduce(pimd->ibtr, ibtr_last_key, NULL,
-			ai_btree_build_defrag_list_cb, &ctx);
+	ai_obj sfk;
+
+	as_btree_copy_key(pimd->ibtr, &sfk, ibtr_last_key);
+	as_btree_reduce(pimd->ibtr, &sfk, NULL, ai_btree_build_defrag_list_cb,
+			&ctx);
 
 	return ctx.limit == 0 ? AS_SINDEX_CONTINUE : AS_SINDEX_DONE;
 }
@@ -947,17 +942,14 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 		while (dt->num != 0) {
 			i = dt->num - 1;
 
-			ai_obj apk;
-
-			init_ai_objInteger(&apk, dt->acol_handles[i].r_h);
-
-			ai_obj *acol = &(dt->acol_handles[i].acol);
+			const ai_obj *apk = (const ai_obj *)&dt->acol_handles[i].r_h;
+			const ai_obj *acol = &dt->acol_handles[i].acol;
 
 			cf_detail(AS_SINDEX, "Defragged %lu %lu", acol->integer,
-					apk.integer);
+					apk->integer);
 
 			before += pimd->ibtr->size + pimd->ibtr->extra_size;
-			if (reduced_iRem(pimd->ibtr, acol, &apk) == AS_SINDEX_OK) {
+			if (reduced_iRem(pimd->ibtr, acol, apk) == AS_SINDEX_OK) {
 				success++;
 			}
 			after += pimd->ibtr->size + pimd->ibtr->extra_size;
@@ -990,11 +982,23 @@ ai_btree_create(as_sindex_metadata *imd)
 {
 	for (uint32_t i = 0; i < imd->n_pimds; i++) {
 		as_sindex_pmetadata *pimd = &imd->pimd[i];
-		pimd->ibtr = createIBT(imd->sktype);
-		if (! pimd->ibtr) {
-			cf_crash(AS_SINDEX, "Failed to allocate secondary index tree for ns:%s, indexname:%s",
-					imd->ns_name, imd->iname);
+		as_btree_key_comp_fn key_comp;
+		uint32_t key_sz;
+		uint32_t order;
+
+		if (C_IS_DIGEST(imd->sktype)) {
+			key_comp = comp_digest;
+			key_sz = sizeof(cf_digest);
+			order = ORDER_DIGEST;
 		}
+		else {
+			key_comp = comp_integer;
+			key_sz = sizeof(uint64_t);
+			order = ORDER_INTEGER;
+		}
+
+		pimd->ibtr = as_btree_create(key_comp, key_sz, sizeof(ai_nbtr *),
+				order);
 	}
 }
 

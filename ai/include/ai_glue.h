@@ -29,9 +29,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "ai_obj.h"
-#include "ai_types.h"
-
 #include "sindex/btree.h"
 
 #include "citrusleaf/cf_digest.h"
@@ -59,21 +56,24 @@ typedef struct ai_nbtr_s {
 
 #define L_SIZE sizeof(uint64_t)
 
+typedef union ai_obj_u {
+	int64_t integer;
+	cf_digest digest;
+} ai_obj;
+
+typedef __uint128_t uint128;
+
+#define COL_TYPE_INVALID  0
+#define COL_TYPE_LONG     1
+#define COL_TYPE_DIGEST   2
+#define COL_TYPE_GEOJSON  3
+#define COL_TYPE_MAX      4
+
 
 //==========================================================
 // Public API.
 //
 
-int32_t comp_digest(const void* key_1, const void* key_2);
-int32_t comp_integer(const void* key_1, const void* key_2);
-
-as_btree* createIBT(col_type_t type);
-as_btree* createNBT(void);
-
-void btIndAdd(as_btree* ibt, const ai_obj* ikey, const ai_nbtr* nbt);
-ai_nbtr* btIndFind(const as_btree* ibt, const ai_obj* ikey);
-void btIndDelete(as_btree* ibt, const ai_obj* ikey);
-
-void btIndNodeAdd(as_btree* nbt, const ai_obj* nkey);
-bool btIndNodeExist(const as_btree* nbt, const ai_obj* nkey);
-void btIndNodeDelete(as_btree* nbt, const ai_obj* nkey);
+#define C_IS_LONG(ctype)    (ctype == COL_TYPE_LONG)
+#define C_IS_DIGEST(ctype)  (ctype == COL_TYPE_DIGEST)
+#define C_IS_GEOJSON(ctype) (ctype == COL_TYPE_GEOJSON)

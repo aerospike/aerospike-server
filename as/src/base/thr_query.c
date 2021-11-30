@@ -2451,7 +2451,6 @@ query_run_setup(as_query_transaction *qtr)
 	qtr->qctx.n_recs = 0;
 	qtr->qctx.range_index = 0;
 	qtr->qctx.ibtr_last_key = &qtr->bkey;
-	init_ai_obj(qtr->qctx.ibtr_last_key);
 	qtr->qctx.nbtr_last_key = 0;
 	qtr->qctx.r_h_hash = NULL;
 

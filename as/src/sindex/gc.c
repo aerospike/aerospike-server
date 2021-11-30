@@ -41,6 +41,7 @@
 #include "log.h"
 
 #include "ai_btree.h"
+#include "ai_glue.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -236,12 +237,14 @@ gc_si(as_sindex* si, uint64_t* n_cleaned) {
 static void
 gc_si_pimd(as_sindex* si, as_sindex_pmetadata* pimd, uint64_t* n_cleaned)
 {
+	// FIXME - change minima when key comparison function changes.
+	static const ai_obj min_integer = { .integer = INT64_MIN };
+	static const ai_obj min_digest;
+
 	gc_offset offset; // skey + r_h offset
 
-	// FIXME - after changing the key comparison function, this may not be the
-	// minimal key any longer.
-	init_ai_obj(&offset.ibtr_last_key);
-
+	offset.ibtr_last_key = C_IS_DIGEST(si->imd->sktype) ?
+			min_digest : min_integer;
 	offset.nbtr_last_key = 0;
 	offset.done = false;
 

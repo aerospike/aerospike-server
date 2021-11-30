@@ -27,7 +27,7 @@
 // TODO: replace includes with forward declarations
 #include "sindex/btree.h"
 #include "sindex/secondary_index.h"
-#include "ai_obj.h"
+#include "ai_glue.h"
 
 #include "arenax.h"
 
@@ -36,9 +36,9 @@
 
 void ai_btree_create(as_sindex_metadata *imd);
 
-as_sindex_status ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *key, cf_arenax_handle r_h);
+as_sindex_status ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, const ai_obj *key, cf_arenax_handle r_h);
 
-as_sindex_status ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *key, cf_arenax_handle r_h);
+as_sindex_status ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, const ai_obj *key, cf_arenax_handle r_h);
 
 void ai_btree_query(as_sindex_metadata *imd, const as_query_range *range, as_sindex_qctx *qctx);
 

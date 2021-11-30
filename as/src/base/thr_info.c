@@ -55,7 +55,6 @@
 #include "vector.h"
 #include "xmem.h"
 
-#include "ai_obj.h"
 #include "ai_btree.h"
 
 #include "base/batch.h"

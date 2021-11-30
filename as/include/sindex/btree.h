@@ -75,3 +75,6 @@ bool as_btree_put(as_btree* bt, const void* key, const void* value);
 bool as_btree_get(const as_btree* bt, const void* key, void* value);
 bool as_btree_delete(as_btree* bt, const void* key);
 void as_btree_reduce(as_btree* bt, const void* start_key, const void* end_key, as_btree_reduce_fn cb, void* udata);
+
+int32_t as_btree_compare_keys(const as_btree* bt, const void* key_1, const void* key_2);
+void as_btree_copy_key(const as_btree* bt, void* to_key, const void* from_key);

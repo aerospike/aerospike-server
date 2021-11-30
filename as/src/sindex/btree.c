@@ -293,6 +293,18 @@ as_btree_reduce(as_btree* bt, const void* start_key, const void* end_key,
 	}
 }
 
+int32_t
+as_btree_compare_keys(const as_btree* bt, const void* key_1, const void* key_2)
+{
+	return bt->key_comp(key_1, key_2);
+}
+
+void
+as_btree_copy_key(const as_btree* bt, void* to_key, const void* from_key)
+{
+	memcpy(to_key, from_key, bt->key_sz);
+}
+
 
 //==========================================================
 // Local helpers.
@@ -449,6 +461,10 @@ btree_reduce(as_btree* bt, as_btree_node* node, const void* start_key,
 		if (! cb(key_cb, value_cb, udata)) {
 			return false;
 		}
+
+		// FIXME - should be able to NULL start_key here. Then we would not have
+		// to call as_btree_reduce() with a copy of the start key.
+		// start_key = NULL;
 	}
 
 	uint32_t i = (uint32_t)(bound.index + 1);

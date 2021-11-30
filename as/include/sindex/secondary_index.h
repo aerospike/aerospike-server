@@ -37,8 +37,7 @@
 #include "sindex/btree.h"
 #include "storage/storage.h"
 
-#include "ai_obj.h"
-#include "ai_types.h"
+#include "ai_glue.h"
 
 #include "arenax.h"
 #include "dynbuf.h"
