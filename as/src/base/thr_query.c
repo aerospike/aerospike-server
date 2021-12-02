@@ -940,8 +940,7 @@ hash_put_qtr(as_query_transaction * qtr)
 		return true;
 	}
 
-	int rv = cf_rchash_put_unique(g_query_job_hash, &qtr->trid,
-			sizeof(qtr->trid), qtr);
+	int rv = cf_rchash_put_unique(g_query_job_hash, &qtr->trid, qtr);
 
 	if (rv != CF_RCHASH_OK) {
 		cf_warning(AS_QUERY, "QTR Put in hash failed with error %d", rv);
@@ -955,7 +954,7 @@ hash_put_qtr(as_query_transaction * qtr)
 static bool
 hash_get_qtr(uint64_t trid, as_query_transaction ** qtr)
 {
-	int rv = cf_rchash_get(g_query_job_hash, &trid, sizeof(trid), (void **) qtr);
+	int rv = cf_rchash_get(g_query_job_hash, &trid, (void **) qtr);
 
 	if (rv != CF_RCHASH_OK) {
 		cf_info(AS_QUERY, "Query job with transaction id [%"PRIu64"] does not exist",
@@ -974,7 +973,7 @@ hash_delete_qtr(as_query_transaction *qtr)
 		return;
 	}
 
-	int rv = cf_rchash_delete(g_query_job_hash, &qtr->trid, sizeof(qtr->trid));
+	int rv = cf_rchash_delete(g_query_job_hash, &qtr->trid);
 
 	if (rv != CF_RCHASH_OK) {
 		cf_warning(AS_QUERY, "Failed to delete qtr from query hash.");
@@ -3355,11 +3354,9 @@ as_query_get_jobstat(uint64_t trid)
 
 
 static int
-mon_query_jobstat_reduce_fn(const void *key, uint32_t keylen, void *object,
-		void *udata)
+mon_query_jobstat_reduce_fn(const void *key, void *object, void *udata)
 {
 	(void)key;
-	(void)keylen;
 
 	as_query_transaction *qtr = (as_query_transaction *)object;
 	query_jobstat *job_pool = (query_jobstat *)udata;
@@ -3457,7 +3454,7 @@ as_query_init()
 	cf_detail(AS_QUERY, "Initialize %d Query Worker threads.", g_config.query_threads);
 
 	// global job hash to keep track of the query job
-	g_query_job_hash = cf_rchash_create(cf_rchash_fn_u32, NULL, sizeof(uint64_t), 64, CF_RCHASH_MANY_LOCK);
+	g_query_job_hash = cf_rchash_create(cf_rchash_fn_u32, NULL, sizeof(uint64_t), 64);
 
 	// I/O threads
 	g_query_work_queue = cf_queue_create(sizeof(query_work *), true);

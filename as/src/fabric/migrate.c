@@ -180,9 +180,9 @@ int emigration_reinsert_reduce_fn(const void *key, void *data, void *udata);
 void emigrate_record(emigration *emig, msg *m);
 
 // Immigration.
-uint32_t immigration_hashfn(const void *value, uint32_t value_len);
+uint32_t immigration_hashfn(const void *key);
 void *run_immigration_reaper(void *arg);
-int immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
+int immigration_reaper_reduce_fn(const void *key, void *object, void *udata);
 
 // Migrate fabric message handling.
 int migrate_receive_msg_cb(cf_node src, msg *m, void *udata);
@@ -195,8 +195,8 @@ void emigration_handle_insert_ack(cf_node src, msg *m);
 void emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op);
 
 // Info API helpers.
-int emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
-int immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
+int emigration_dump_reduce_fn(const void *key, void *object, void *udata);
+int immigration_dump_reduce_fn(const void *key, void *object, void *udata);
 
 
 //==========================================================
@@ -212,11 +212,10 @@ as_migrate_init()
 	cf_queue_init(&g_emigration_slow_q, sizeof(emigration*), 4096, true);
 
 	g_emigration_hash = cf_rchash_create(cf_rchash_fn_u32, emigration_destroy,
-			sizeof(uint32_t), 64, CF_RCHASH_MANY_LOCK);
+			sizeof(uint32_t), 64);
 
 	g_immigration_hash = cf_rchash_create(immigration_hashfn,
-			immigration_destroy, sizeof(immigration_hkey), 64,
-			CF_RCHASH_BIG_LOCK);
+			immigration_destroy, sizeof(immigration_hkey), 64);
 
 	// Looks like an as_priority_thread_pool, but the reduce-pop is different.
 	for (uint32_t i = 0; i < g_config.n_migrate_threads; i++) {
@@ -574,8 +573,7 @@ emigration_hash_insert(emigration *emig)
 	if (! emig->ctrl_q) {
 		emigration_init(emig); // creates emig->ctrl_q etc.
 
-		cf_rchash_put(g_emigration_hash, (void *)&emig->id, sizeof(emig->id),
-				(void *)emig);
+		cf_rchash_put(g_emigration_hash, (void *)&emig->id, (void *)emig);
 	}
 }
 
@@ -584,8 +582,7 @@ void
 emigration_hash_delete(emigration *emig)
 {
 	if (emig->ctrl_q) {
-		cf_rchash_delete(g_emigration_hash, (void *)&emig->id,
-				sizeof(emig->id));
+		cf_rchash_delete(g_emigration_hash, (void *)&emig->id);
 	}
 	else {
 		emigration_release(emig);
@@ -981,9 +978,9 @@ emigrate_record(emigration *emig, msg *m)
 //
 
 uint32_t
-immigration_hashfn(const void *value, uint32_t value_len)
+immigration_hashfn(const void *key)
 {
-	return ((const immigration_hkey *)value)->emig_id;
+	return ((const immigration_hkey *)key)->emig_id;
 }
 
 
@@ -1001,8 +998,7 @@ run_immigration_reaper(void *arg)
 
 
 int
-immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object,
-		void *udata)
+immigration_reaper_reduce_fn(const void *key, void *object, void *udata)
 {
 	immigration *immig = (immigration *)object;
 
@@ -1185,7 +1181,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 
 	while (true) {
 		if (cf_rchash_put_unique(g_immigration_hash, (void *)&hkey,
-				sizeof(hkey), (void *)immig) == CF_RCHASH_OK) {
+				(void *)immig) == CF_RCHASH_OK) {
 			cf_rc_reserve(immig); // so either put or get yields ref-count 2
 
 			// First start request (not a retransmit) for this pid this round,
@@ -1197,8 +1193,8 @@ immigration_handle_start_request(cf_node src, msg *m)
 
 		immigration *immig0;
 
-		if (cf_rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-				(void *)&immig0) == CF_RCHASH_OK) {
+		if (cf_rchash_get(g_immigration_hash, (void *)&hkey, (void *)&immig0) ==
+				CF_RCHASH_OK) {
 			immigration_release(immig); // free just-alloc'd immig ...
 
 			if (immig0->start_recv_ms == 0) {
@@ -1228,7 +1224,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 	case AS_MIGRATE_AGAIN:
 		// Remove from hash so that the immig can be tried again.
 		// Note - no real need to specify object, but paranoia costs nothing.
-		cf_rchash_delete_object(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+		cf_rchash_delete_object(g_immigration_hash, (void *)&hkey,
 				(void *)immig);
 		immigration_release(immig);
 		immigration_ack_start_request(src, m, OPERATION_START_ACK_EAGAIN);
@@ -1286,8 +1282,8 @@ immigration_handle_insert_request(cf_node src, msg *m)
 
 	immigration *immig;
 
-	if (cf_rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-			(void **)&immig) != CF_RCHASH_OK) {
+	if (cf_rchash_get(g_immigration_hash, (void *)&hkey, (void **)&immig) !=
+			CF_RCHASH_OK) {
 		// The immig no longer exists, likely the cluster key advanced and this
 		// record immigration is from prior round. Do not ack this request.
 		as_fabric_msg_put(m);
@@ -1388,8 +1384,8 @@ immigration_handle_done_request(cf_node src, msg *m)
 
 	immigration *immig;
 
-	if (cf_rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-			(void **)&immig) == CF_RCHASH_OK) {
+	if (cf_rchash_get(g_immigration_hash, (void *)&hkey, (void **)&immig) ==
+			CF_RCHASH_OK) {
 		if (immig->start_result != AS_MIGRATE_OK || immig->start_recv_ms == 0) {
 			// If this immigration didn't start and reserve a partition, it's
 			// likely in the hash on a retransmit and this DONE is for the
@@ -1508,8 +1504,8 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 
 	emigration *emig;
 
-	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
-			(void **)&emig) != CF_RCHASH_OK) {
+	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, (void **)&emig) !=
+			CF_RCHASH_OK) {
 		// Probably came from a migration prior to the latest rebalance.
 		as_fabric_msg_put(m);
 		return;
@@ -1571,8 +1567,8 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op)
 
 	emigration *emig;
 
-	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
-			(void **)&emig) == CF_RCHASH_OK) {
+	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, (void **)&emig) ==
+			CF_RCHASH_OK) {
 		if (emig->dest == src) {
 			if ((immig_features & MIG_FEATURE_MERGE) == 0) {
 				// TODO - rethink where this should go after further refactor.
@@ -1602,8 +1598,7 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op)
 //
 
 int
-emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
-		void *udata)
+emigration_dump_reduce_fn(const void *key, void *object, void *udata)
 {
 	uint32_t emig_id = *(const uint32_t *)key;
 	emigration *emig = (emigration *)object;
@@ -1619,8 +1614,7 @@ emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
 
 
 int
-immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
-		void *udata)
+immigration_dump_reduce_fn(const void *key, void *object, void *udata)
 {
 	const immigration_hkey *hkey = (const immigration_hkey *)key;
 	immigration *immig = (immigration *)object;

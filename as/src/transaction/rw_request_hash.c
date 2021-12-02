@@ -99,11 +99,11 @@ static cf_rchash* g_rw_request_hash = NULL;
 // Forward declarations.
 //
 
-uint32_t rw_request_hash_fn(const void* value, uint32_t value_len);
+uint32_t rw_request_hash_fn(const void* key);
 transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
 
 void* run_retransmit(void* arg);
-int retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata);
+int retransmit_reduce_fn(const void* key, void* data, void* udata);
 void update_retransmit_stats(const rw_request* rw);
 
 int rw_msg_cb(cf_node id, msg* m, void* udata);
@@ -117,8 +117,7 @@ void
 as_rw_init()
 {
 	g_rw_request_hash = cf_rchash_create(rw_request_hash_fn,
-			rw_request_hdestroy, sizeof(rw_request_hkey), 32 * 1024,
-			CF_RCHASH_MANY_LOCK);
+			rw_request_hdestroy, sizeof(rw_request_hkey), 32 * 1024);
 
 	cf_thread_create_detached(run_retransmit, NULL);
 
@@ -138,14 +137,13 @@ transaction_status
 rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 		as_transaction* tr)
 {
-	while (cf_rchash_put_unique(g_rw_request_hash, hkey, sizeof(*hkey), rw) !=
-			CF_RCHASH_OK) {
+	while (cf_rchash_put_unique(g_rw_request_hash, hkey, rw) != CF_RCHASH_OK) {
 		// rw_request with this digest already in hash - get it.
 
 		rw_request* rw0;
 
-		if (cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey),
-				(void**)&rw0) != CF_RCHASH_OK) {
+		if (cf_rchash_get(g_rw_request_hash, hkey, (void**)&rw0) !=
+				CF_RCHASH_OK) {
 			// But now it's gone - try insertion again immediately.
 			continue;
 		}
@@ -168,7 +166,7 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 void
 rw_request_hash_delete(rw_request_hkey* hkey, rw_request* rw)
 {
-	cf_rchash_delete_object(g_rw_request_hash, hkey, sizeof(*hkey), rw);
+	cf_rchash_delete_object(g_rw_request_hash, hkey, rw);
 }
 
 
@@ -177,7 +175,7 @@ rw_request_hash_get(rw_request_hkey* hkey)
 {
 	rw_request* rw = NULL;
 
-	cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey), (void**)&rw);
+	cf_rchash_get(g_rw_request_hash, hkey, (void**)&rw);
 
 	return rw;
 }
@@ -197,7 +195,7 @@ rw_request_hash_dump()
 //
 
 uint32_t
-rw_request_hash_fn(const void* key, uint32_t key_size)
+rw_request_hash_fn(const void* key)
 {
 	rw_request_hkey* hkey = (rw_request_hkey*)key;
 
@@ -260,7 +258,7 @@ run_retransmit(void* arg)
 
 
 int
-retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata)
+retransmit_reduce_fn(const void* key, void* data, void* udata)
 {
 	rw_request* rw = data;
 	now_times* now = (now_times*)udata;

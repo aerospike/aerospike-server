@@ -296,7 +296,7 @@ static bool fabric_node_add_connection(fabric_node *node, fabric_connection *fc)
 static uint8_t fabric_node_find_min_send_count(const fabric_node *node);
 static bool fabric_node_is_connect_full(const fabric_node *node);
 
-static int fabric_get_node_list_fn(const void *key, uint32_t keylen, void *data, void *udata);
+static int fabric_get_node_list_fn(const void *key, void *data, void *udata);
 static uint32_t fabric_get_node_list(node_list *nl);
 
 static bool fabric_node_is_overloaded(cf_node node_id, as_fabric_channel channel, uint32_t margin);
@@ -343,7 +343,7 @@ static void *run_fabric_send(void *arg);
 static void *run_fabric_accept(void *arg);
 
 // Ticker helpers.
-static int fabric_rate_node_reduce_fn(const void *key, uint32_t keylen, void *data, void *udata);
+static int fabric_rate_node_reduce_fn(const void *key, void *data, void *udata);
 static int fabric_rate_fc_reduce_fn(const void *key, void *data, void *udata);
 
 // Heartbeat.
@@ -382,7 +382,7 @@ as_fabric_init()
 			FS_MSG_SCRATCH_SIZE, NULL, NULL);
 
 	g_fabric.node_hash = cf_rchash_create(cf_nodeid_rchash_fn,
-			fabric_node_destructor, sizeof(cf_node), 512, CF_RCHASH_MANY_LOCK);
+			fabric_node_destructor, sizeof(cf_node), 512);
 
 	g_published_endpoint_list = NULL;
 	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
@@ -897,7 +897,7 @@ fabric_node_get(cf_node node_id)
 {
 	fabric_node *n = NULL;
 
-	cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node), (void **)&n);
+	cf_rchash_get(g_fabric.node_hash, &node_id, (void **)&n);
 
 	return n;
 }
@@ -907,12 +907,12 @@ fabric_node_get_or_create(cf_node node_id)
 {
 	fabric_node *new_node = fabric_node_create(node_id);
 
-	while (cf_rchash_put_unique(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			new_node) != CF_RCHASH_OK) {
+	while (cf_rchash_put_unique(g_fabric.node_hash, &node_id, new_node) !=
+			CF_RCHASH_OK) {
 		fabric_node *node;
 
-		if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
-				(void **)&node) == CF_RCHASH_OK) {
+		if (cf_rchash_get(g_fabric.node_hash, &node_id, (void **)&node) ==
+				CF_RCHASH_OK) {
 			fabric_node_release(new_node);
 			fabric_node_connect_all(node);
 			return node;
@@ -930,10 +930,9 @@ fabric_node_pop(cf_node node_id)
 {
 	fabric_node *node = NULL;
 
-	if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			(void **)&node) == CF_RCHASH_OK) {
-		cf_rchash_delete_object(g_fabric.node_hash, &node_id, sizeof(node_id),
-				node);
+	if (cf_rchash_get(g_fabric.node_hash, &node_id, (void **)&node) ==
+			CF_RCHASH_OK) {
+		cf_rchash_delete_object(g_fabric.node_hash, &node_id, node);
 	}
 
 	return node;
@@ -1305,8 +1304,7 @@ fabric_node_is_connect_full(const fabric_node *node)
 
 
 static int
-fabric_get_node_list_fn(const void *key, uint32_t keylen, void *data,
-		void *udata)
+fabric_get_node_list_fn(const void *key, void *data, void *udata)
 {
 	node_list *nl = (node_list *)udata;
 
@@ -1339,8 +1337,8 @@ fabric_node_is_overloaded(cf_node node_id, as_fabric_channel channel,
 	uint32_t threshold = FABRIC_MESSAGE_OVERLOAD_COUNT + margin;
 	fabric_node *node = NULL;
 
-	if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			(void **)&node) == CF_RCHASH_OK) {
+	if (cf_rchash_get(g_fabric.node_hash, &node_id, (void **)&node) ==
+			CF_RCHASH_OK) {
 		uint32_t sz = cf_queue_sz(&node->send_queue[channel]);
 
 		cf_rc_release(node);
@@ -2458,8 +2456,7 @@ run_fabric_accept(void *arg)
 }
 
 static int
-fabric_rate_node_reduce_fn(const void *key, uint32_t keylen, void *data,
-		void *udata)
+fabric_rate_node_reduce_fn(const void *key, void *data, void *udata)
 {
 	fabric_node *node = (fabric_node *)data;
 	fabric_rate *rate = (fabric_rate *)udata;

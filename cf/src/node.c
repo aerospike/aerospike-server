@@ -57,10 +57,8 @@ cf_nodeid_shash_fn(const void* key)
 }
 
 uint32_t
-cf_nodeid_rchash_fn(const void* key, uint32_t key_size)
+cf_nodeid_rchash_fn(const void* key)
 {
-	(void)key_size;
-
 	return node_id_hash_fn(*(const cf_node*)key);
 }
 
