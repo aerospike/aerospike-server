@@ -87,6 +87,8 @@ COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 
 #define RW_MSG_SCRATCH_SIZE 192
 
+#define RETRANSMIT_PERIOD_US (5 * 1000) // 5 ms
+
 
 //==========================================================
 // Globals.
@@ -243,14 +245,20 @@ void*
 run_retransmit(void* arg)
 {
 	while (true) {
-		usleep(130 * 1000);
-
 		now_times now;
 
 		now.now_ns = cf_getns();
 		now.now_ms = now.now_ns / 1000000;
 
-		cf_rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
+		if (cf_rchash_get_size(g_rw_request_hash) != 0) {
+			cf_rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
+		}
+
+		uint64_t lap_us = (cf_getns() - now.now_ns) / 1000;
+
+		if (lap_us < RETRANSMIT_PERIOD_US) {
+			usleep(RETRANSMIT_PERIOD_US - lap_us);
+		}
 	}
 
 	return NULL;
