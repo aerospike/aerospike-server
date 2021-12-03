@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 
@@ -63,7 +64,7 @@ static inline cf_shash_ele* cf_shash_get_bucket(cf_shash* h, uint32_t i);
 static inline void cf_shash_fill_element(cf_shash_ele* e, cf_shash* h, const void* key, const void* value);
 static inline void cf_shash_size_incr(cf_shash* h);
 static inline void cf_shash_size_decr(cf_shash* h);
-int cf_shash_delete_or_pop(cf_shash* h, const void* key, void* value);
+static int cf_shash_delete_or_pop(cf_shash* h, const void* key, void* value);
 
 
 //==========================================================
@@ -141,9 +142,7 @@ cf_shash_create(cf_shash_hash_fn h_fn, uint32_t key_size, uint32_t value_size,
 void
 cf_shash_destroy(cf_shash* h)
 {
-	if (h == NULL) {
-		return;
-	}
+	cf_assert(h != NULL, CF_MISC, "bad param");
 
 	cf_shash_destroy_elements(h);
 
@@ -160,12 +159,11 @@ cf_shash_destroy(cf_shash* h)
 }
 
 uint32_t
-cf_shash_get_size(cf_shash* h)
+cf_shash_get_size(const cf_shash* h)
 {
 	cf_assert(h != NULL, CF_MISC, "bad param");
 
-	// For now, not bothering with different methods per lock mode.
-	return cf_atomic32_get(h->n_elements);
+	return h->n_elements;
 }
 
 void
@@ -556,18 +554,16 @@ cf_shash_fill_element(cf_shash_ele* e, cf_shash* h, const void* key,
 static inline void
 cf_shash_size_incr(cf_shash* h)
 {
-	// For now, not bothering with different methods per lock mode.
-	cf_atomic32_incr(&h->n_elements);
+	as_incr_int32(&h->n_elements);
 }
 
 static inline void
 cf_shash_size_decr(cf_shash* h)
 {
-	// For now, not bothering with different methods per lock mode.
-	cf_atomic32_decr(&h->n_elements);
+	as_decr_int32(&h->n_elements);
 }
 
-int
+static int
 cf_shash_delete_or_pop(cf_shash* h, const void* key, void* value)
 {
 	cf_assert(h != NULL && key != NULL, CF_MISC, "bad param");

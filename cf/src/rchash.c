@@ -135,8 +135,7 @@ cf_rchash_get_size(const cf_rchash* h)
 {
 	cf_assert(h != NULL, CF_MISC, "bad param");
 
-	// For now, not bothering with different methods per lock mode.
-	return as_load_uint32(&h->n_elements);
+	return h->n_elements;
 }
 
 // If key is not already in hash, insert it with specified rc_malloc'd object.
@@ -504,14 +503,12 @@ cf_rchash_fill_element(cf_rchash_ele* e, cf_rchash* h, const void* key,
 static inline void
 cf_rchash_size_incr(cf_rchash* h)
 {
-	// For now, not bothering with different methods per lock mode.
 	as_incr_int32(&h->n_elements);
 }
 
 static inline void
 cf_rchash_size_decr(cf_rchash* h)
 {
-	// For now, not bothering with different methods per lock mode.
 	as_decr_int32(&h->n_elements);
 }
 
