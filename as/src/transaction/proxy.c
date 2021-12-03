@@ -124,6 +124,8 @@ typedef struct proxy_request_s {
 	as_namespace*	ns;
 } proxy_request;
 
+#define TIMEOUT_PERIOD_US (5 * 1000) // 5 ms
+
 
 //==========================================================
 // Globals.
@@ -638,14 +640,20 @@ void*
 run_proxy_timeout(void* arg)
 {
 	while (true) {
-		usleep(75 * 1000);
-
 		now_times now;
 
 		now.now_ns = cf_getns();
 		now.now_ms = now.now_ns / 1000000;
 
-		cf_shash_reduce(g_proxy_hash, proxy_timeout_reduce_fn, &now);
+		if (cf_shash_get_size(g_proxy_hash)) {
+			cf_shash_reduce(g_proxy_hash, proxy_timeout_reduce_fn, &now);
+		}
+
+		uint64_t lap_us = (cf_getns() - now.now_ns) / 1000;
+
+		if (lap_us < TIMEOUT_PERIOD_US) {
+			usleep(TIMEOUT_PERIOD_US - lap_us);
+		}
 	}
 
 	return NULL;
