@@ -63,14 +63,12 @@ typedef enum {
 	// ... 6 unused bits ...
 
 	// Data transactions' system metadata management.
-	PERM_INDEX_MANAGE	= 0x00010000,
-	PERM_UDF_MANAGE		= 0x00020000,
-	PERM_SCAN_MANAGE	= 0x00040000,
-	PERM_QUERY_MANAGE	= 0x00080000,
-	PERM_JOB_MONITOR	= 0x00100000,
-	PERM_TRUNCATE		= 0x00200000,
-	PERM_EVICT_MANAGE	= 0x00400000,
-	// ... 1 unused bit ...
+	PERM_UDF_ADMIN		= 0x00010000,
+	PERM_SINDEX_ADMIN	= 0x00020000,
+	PERM_QUERY_ADMIN	= 0x00040000,
+	PERM_TRUNCATE		= 0x00080000,
+	PERM_EVICT_ADMIN	= 0x00100000,
+	// ... 3 unused bits ...
 
 	// Deployment operations management.
 	PERM_SET_CONFIG		= 0x01000000,

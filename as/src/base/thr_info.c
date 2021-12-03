@@ -4534,10 +4534,10 @@ append_sec_err_str(cf_dyn_buf *db, uint32_t result, as_sec_perm cmd_perm) {
 		return;
 	case AS_SEC_ERR_ROLE_VIOLATION:
 		switch (cmd_perm) {
-		case PERM_INDEX_MANAGE:
+		case PERM_SINDEX_ADMIN:
 			SINDEX_FAIL_RESPONSE(db, result, "role violation");
 			return;
-		case PERM_UDF_MANAGE:
+		case PERM_UDF_ADMIN:
 			cf_dyn_buf_append_string(db, "error=role_violation");
 			return;
 		default:
@@ -6833,7 +6833,7 @@ as_info_init()
 	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
 	as_info_set_command("dump-skew", info_command_dump_skew, PERM_LOGGING_CTRL);              // Print information about clock skew
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
-	as_info_set_command("eviction-reset", info_command_eviction_reset, PERM_EVICT_MANAGE);    // Delete or manually set SMD evict-void-time.
+	as_info_set_command("eviction-reset", info_command_eviction_reset, PERM_EVICT_ADMIN);     // Delete or manually set SMD evict-void-time.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
 	as_info_set_command("get-stats", info_command_get_stats, PERM_NONE);                      // Returns statistics for a particular context.
@@ -6867,30 +6867,30 @@ as_info_init()
 	// SINDEX
 	as_info_set_dynamic("sindex", info_get_sindexes, false);
 	as_info_set_tree("sindex", info_get_tree_sindexes);
-	as_info_set_command("sindex-create", info_command_sindex_create, PERM_INDEX_MANAGE);  // Create a secondary index.
-	as_info_set_command("sindex-delete", info_command_sindex_delete, PERM_INDEX_MANAGE);  // Delete a secondary index.
-	as_info_set_command("sindex-exists", info_command_sindex_exists, PERM_INDEX_MANAGE);  // Does secondary index exist.
+	as_info_set_command("sindex-create", info_command_sindex_create, PERM_SINDEX_ADMIN); // Create a secondary index.
+	as_info_set_command("sindex-delete", info_command_sindex_delete, PERM_SINDEX_ADMIN); // Delete a secondary index.
+	as_info_set_command("sindex-exists", info_command_sindex_exists, PERM_SINDEX_ADMIN); // Does secondary index exist.
 
 	// Undocumented Secondary Index Command
 	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
 
 	// UDF
 	as_info_set_dynamic("udf-list", udf_cask_info_list, false);
-	as_info_set_command("udf-put", udf_cask_info_put, PERM_UDF_MANAGE);
+	as_info_set_command("udf-put", udf_cask_info_put, PERM_UDF_ADMIN);
 	as_info_set_command("udf-get", udf_cask_info_get, PERM_NONE);
-	as_info_set_command("udf-remove", udf_cask_info_remove, PERM_UDF_MANAGE);
-	as_info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PERM_UDF_MANAGE);
+	as_info_set_command("udf-remove", udf_cask_info_remove, PERM_UDF_ADMIN);
+	as_info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PERM_UDF_ADMIN);
 
 	// JOBS
-	as_info_set_command("jobs", info_command_mon_cmd, PERM_JOB_MONITOR);  // Manipulate the multi-key lookup monitoring infrastructure.
+	as_info_set_command("jobs", info_command_mon_cmd, PERM_QUERY_ADMIN); // Manipulate the multi-key lookup monitoring infrastructure.
 
 	as_info_set_dynamic("query-show", info_query_show, false);
 	as_info_set_command("query-show", info_command_query_show, PERM_NONE);
-	as_info_set_command("query-abort", info_command_query_kill, PERM_QUERY_MANAGE);
+	as_info_set_command("query-abort", info_command_query_kill, PERM_QUERY_ADMIN);
 	as_info_set_dynamic("scan-show", info_scan_show, false);
 	as_info_set_command("scan-show", info_command_scan_show, PERM_NONE);
-	as_info_set_command("scan-abort", info_command_abort_scan, PERM_SCAN_MANAGE);            // Abort a scan with a given id.
-	as_info_set_command("scan-abort-all", info_command_abort_all_scans, PERM_SCAN_MANAGE);   // Abort all scans.
+	as_info_set_command("scan-abort", info_command_abort_scan, PERM_QUERY_ADMIN);             // Abort a scan with a given id.
+	as_info_set_command("scan-abort-all", info_command_abort_all_scans, PERM_QUERY_ADMIN);    // Abort all scans.
 
 	as_info_set_command("sindex-stat", info_command_sindex_stat, PERM_NONE);
 	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);
