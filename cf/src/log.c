@@ -277,7 +277,7 @@ cf_log_init(bool early_verbose)
 	}
 
 	g_ticker_hash = cf_shash_create(cache_hash_fn, sizeof(cf_log_cache_hkey),
-			sizeof(uint32_t), 256, CF_SHASH_MANY_LOCK);
+			sizeof(uint32_t), 256, true);
 
 	register_custom_conversions();
 }

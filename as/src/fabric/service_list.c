@@ -353,10 +353,10 @@ as_service_list_init(void)
 	// These hash tables are created without locks.
 
 	g_info = cf_shash_create(cf_shash_fn_zstr, HASH_STR_SZ,
-			sizeof(char *), 32, 0);
+			sizeof(char *), 32, false);
 
 	g_peers = cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
-			sizeof(peer_t *), AS_CLUSTER_SZ, 0);
+			sizeof(peer_t *), AS_CLUSTER_SZ, false);
 
 	cf_queue_init(&g_wake_up, sizeof(uint8_t), 1, true);
 

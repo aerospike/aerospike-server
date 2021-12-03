@@ -885,7 +885,7 @@ fabric_node_create(cf_node node_id)
 	cf_mutex_init(&node->fc_hash_lock);
 
 	node->fc_hash = cf_shash_create(cf_shash_fn_ptr,
-			sizeof(fabric_connection *), 0, 32, 0);
+			sizeof(fabric_connection *), 0, 32, false);
 
 	cf_detail(AS_FABRIC, "fabric_node_create(%lx) node %p", node_id, node);
 

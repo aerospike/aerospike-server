@@ -308,7 +308,7 @@ void
 as_health_start()
 {
 	g_stats = cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
-			sizeof(peer_stats*), AS_CLUSTER_SZ, CF_SHASH_MANY_LOCK);
+			sizeof(peer_stats*), AS_CLUSTER_SZ, true);
 	g_outliers = cf_vector_create(sizeof(outlier), 10, 0);
 
 	create_local_stats();

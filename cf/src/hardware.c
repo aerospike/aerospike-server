@@ -2061,7 +2061,7 @@ build_device_graph(void)
 	};
 
 	g_dev_graph = cf_shash_create(dev_key_hash, sizeof(dev_key_t),
-			sizeof(dev_node_t *), 256, 0);
+			sizeof(dev_node_t *), 256, false);
 
 	for (int32_t i_dir = 0; sys_dirs[i_dir] != NULL; ++i_dir) {
 		const char *sys_dir = sys_dirs[i_dir];
@@ -2544,7 +2544,7 @@ get_path_data(const char *any_path)
 
 	if (g_path_data == NULL) {
 		g_path_data = cf_shash_create(cf_shash_fn_zstr,
-				DEVICE_PATH_SIZE, sizeof(path_data_t *), 256, 0);
+				DEVICE_PATH_SIZE, sizeof(path_data_t *), 256, false);
 	}
 
 	size_t len = strlen(any_path);

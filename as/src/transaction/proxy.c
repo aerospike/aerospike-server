@@ -202,7 +202,7 @@ void
 as_proxy_init()
 {
 	g_proxy_hash = cf_shash_create(cf_shash_fn_u32, sizeof(uint32_t),
-			sizeof(proxy_request), 4 * 1024, CF_SHASH_MANY_LOCK);
+			sizeof(proxy_request), 4 * 1024, true);
 
 	cf_thread_create_detached(run_proxy_timeout, NULL);
 

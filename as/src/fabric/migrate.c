@@ -334,7 +334,7 @@ void
 emigration_init(emigration *emig)
 {
 	emig->reinsert_hash = cf_shash_create(cf_shash_fn_u32, sizeof(uint64_t),
-			sizeof(emigration_reinsert_ctrl), 16 * 1024, CF_SHASH_MANY_LOCK);
+			sizeof(emigration_reinsert_ctrl), 16 * 1024, true);
 	emig->ctrl_q = cf_queue_create(sizeof(int), true);
 	emig->meta_q = meta_in_q_create();
 }

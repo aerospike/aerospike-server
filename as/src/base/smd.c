@@ -632,7 +632,7 @@ as_smd_start(void)
 	}
 
 	g_smd.set_h = cf_shash_create(cf_shash_fn_u32, sizeof(uint32_t),
-			sizeof(smd_set_entry*), 64, 0);
+			sizeof(smd_set_entry*), 64, false);
 
 	as_fabric_register_msg_fn(M_TYPE_SMD, smd_mt, sizeof(smd_mt),
 			SMD_MSG_SCRATCH_SIZE, smd_msg_recv_cb, NULL);

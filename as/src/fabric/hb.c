@@ -5003,12 +5003,12 @@ channel_init()
 	// Initialize the nodeid to socket hash.
 	g_hb.channel_state.nodeid_to_socket = cf_shash_create(cf_nodeid_shash_fn,
 			sizeof(cf_node), sizeof(cf_socket*), AS_HB_CLUSTER_MAX_SIZE_SOFT,
-			0);
+			false);
 
 	// Initialize the socket to channel state hash.
 	g_hb.channel_state.socket_to_channel = cf_shash_create(hb_socket_hash_fn,
 			sizeof(cf_socket*), sizeof(as_hb_channel),
-			AS_HB_CLUSTER_MAX_SIZE_SOFT, 0);
+			AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	g_hb.channel_state.status = AS_HB_STATUS_STOPPED;
 
@@ -6880,7 +6880,7 @@ mesh_init()
 	// Initialize the mesh node hash.
 	g_hb.mode_state.mesh_state.nodeid_to_mesh_node = cf_shash_create(
 			cf_nodeid_shash_fn, sizeof(cf_node), sizeof(as_hb_mesh_node),
-			AS_HB_CLUSTER_MAX_SIZE_SOFT, 0);
+			AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	// Initialize the seed list.
 	cf_vector_init(&g_hb.mode_state.mesh_state.seeds, sizeof(as_hb_mesh_seed),
@@ -8175,15 +8175,15 @@ hb_init()
 
 	// Initialize the adjacency hash.
 	g_hb.adjacency = cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
-			sizeof(as_hb_adjacent_node), AS_HB_CLUSTER_MAX_SIZE_SOFT, 0);
+			sizeof(as_hb_adjacent_node), AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	// Initialize the on_probation hash.
 	g_hb.on_probation = cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
-			sizeof(as_hb_adjacent_node), AS_HB_CLUSTER_MAX_SIZE_SOFT, 0);
+			sizeof(as_hb_adjacent_node), AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	// Initialize the temporary hash to map nodeid to index.
 	g_hb.nodeid_to_index = cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
-			sizeof(int), AS_HB_CLUSTER_MAX_SIZE_SOFT, 0);
+			sizeof(int), AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	// Initialize unpublished event queue.
 	cf_queue_init(&g_hb_event_listeners.external_events_queue,

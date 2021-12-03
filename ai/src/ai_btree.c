@@ -451,7 +451,7 @@ btree_addsinglerec(const as_sindex_metadata *imd, cf_arenax_handle r_h,
 		if (qctx->r_h_hash == NULL) {
 			// No locking because only query generator uses this.
 			qctx->r_h_hash = cf_shash_create(cf_shash_fn_u32,
-					sizeof(cf_arenax_chunk), 0, 64 * 1024, 0);
+					sizeof(cf_arenax_chunk), 0, 64 * 1024, false);
 		}
 
 		if (cf_shash_put_unique(qctx->r_h_hash, &r_h, &dummy_value) ==

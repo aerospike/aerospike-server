@@ -1891,7 +1891,7 @@ exchange_data_namespace_payload_add(as_namespace* ns, cf_dyn_buf* dyn_buf)
 	// having the vinfo.
 	cf_shash* ns_hash = cf_shash_create(exchange_vinfo_shash,
 			sizeof(as_partition_version), sizeof(cf_vector*),
-			AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT, 0);
+			AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT, false);
 
 	as_partition* partitions = ns->partitions;
 
@@ -3538,7 +3538,7 @@ exchange_init()
 	// Initialize the adjacencies.
 	g_exchange.nodeid_to_node_state = cf_shash_create(cf_nodeid_shash_fn,
 			sizeof(cf_node), sizeof(as_exchange_node_state),
-			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, 0);
+			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, false);
 
 	cf_vector_init(&g_exchange.succession_list, sizeof(cf_node),
 	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);

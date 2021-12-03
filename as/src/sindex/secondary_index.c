@@ -2395,7 +2395,7 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 	}
 
 	cf_shash *hash = cf_shash_create(cf_shash_fn_u32, sbin_data_size(type), 1,
-			short_list_count, 0);
+			short_list_count, false);
 
 	// Add elements of shorter list into hash with value = false.
 	for (uint32_t i = 0; i < short_list_count; i++) {
@@ -3116,10 +3116,10 @@ as_sindex_init(void)
 		}
 
 		ns->sindex_set_binid_hash = cf_shash_create(cf_shash_fn_zstr,
-				PROP_KEY_SIZE, sizeof(cf_ll *), AS_SINDEX_MAX, 0);
+				PROP_KEY_SIZE, sizeof(cf_ll *), AS_SINDEX_MAX, false);
 
 		ns->sindex_iname_hash = cf_shash_create(cf_shash_fn_zstr,
-				AS_ID_INAME_SZ, sizeof(uint32_t), AS_SINDEX_MAX, 0);
+				AS_ID_INAME_SZ, sizeof(uint32_t), AS_SINDEX_MAX, false);
 
 		as_sindex_gc_ns_init(ns);
 	}

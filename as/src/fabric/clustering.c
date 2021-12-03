@@ -6597,7 +6597,7 @@ clustering_principal_majority_preferred_principal_get()
 	// having the vinfo.
 	cf_shash* preferred_principal_votes = cf_shash_create(cf_nodeid_shash_fn,
 			sizeof(cf_node), sizeof(int), AS_CLUSTERING_CLUSTER_MAX_SIZE_SOFT,
-			0);
+			false);
 
 	CLUSTERING_LOCK();
 
@@ -7761,7 +7761,7 @@ clustering_init()
 
 	g_clustering.join_request_blackout = cf_shash_create(cf_nodeid_shash_fn,
 			sizeof(cf_node), sizeof(cf_clock),
-			AS_CLUSTERING_CLUSTER_MAX_SIZE_SOFT, 0);
+			AS_CLUSTERING_CLUSTER_MAX_SIZE_SOFT, false);
 
 	vector_lockless_init(&g_clustering.pending_join_requests, cf_node);
 
