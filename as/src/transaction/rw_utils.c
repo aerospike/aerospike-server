@@ -160,7 +160,14 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 {
 	switch (tr->origin) {
 	case FROM_BATCH:
-		if ((*exp = as_batch_get_predexp(tr->from.batch_shared)) == NULL) {
+		if (as_transaction_has_predexp(tr)) {
+			as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
+					AS_MSG_FIELD_TYPE_PREDEXP);
+			if ((*exp = as_exp_filter_build(f, false)) == NULL) {
+				return AS_ERR_PARAMETER;
+			}
+		}
+		else if ((*exp = as_batch_get_predexp(tr->from.batch_shared)) == NULL) {
 			return AS_OK;
 		}
 		break;
@@ -202,11 +209,19 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 void
 destroy_filter_exp(const as_transaction* tr, as_exp* exp)
 {
-	if (SHARED_MSGP(tr)) {
-		return;
+	switch (tr->origin) {
+	case FROM_BATCH:
+		if (as_transaction_has_predexp(tr)) {
+			as_exp_destroy(exp);
+		}
+		break;
+	case FROM_IUDF:
+	case FROM_IOPS:
+		break;
+	default:
+		as_exp_destroy(exp);
+		break;
 	}
-
-	as_exp_destroy(exp);
 }
 
 

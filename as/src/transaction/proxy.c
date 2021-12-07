@@ -256,7 +256,7 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 	if (tr->origin == FROM_BATCH) {
 		as_msg_field* f = as_batch_get_predexp_mf(tr->from.batch_shared);
 
-		if (f == NULL) {
+		if (f == NULL || as_transaction_has_predexp(tr)) {
 			msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)tr->msgp,
 					sizeof(as_proto) + tr->msgp->proto.sz, MSG_SET_COPY);
 		}
