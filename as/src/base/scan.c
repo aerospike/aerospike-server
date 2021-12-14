@@ -123,12 +123,6 @@ int ops_bg_scan_job_start(as_transaction* tr, as_namespace* ns);
 // Non-class-specific utilities.
 //
 
-typedef struct scan_options_s {
-	int			priority;
-	bool		fail_on_cluster_change;
-	uint32_t	sample_pct;
-} scan_options;
-
 scan_type get_scan_type(as_transaction* tr);
 bool get_scan_set(as_transaction* tr, as_namespace* ns, char* set_name, uint16_t* set_id);
 bool get_scan_pids(as_transaction* tr, as_scan_pid** p_pids);
@@ -655,7 +649,6 @@ const as_scan_vtable basic_scan_job_vtable = {
 typedef struct basic_scan_slice_s {
 	basic_scan_job*		job;
 	cf_buf_builder**	bb_r;
-	uint64_t			count;
 } basic_scan_slice;
 
 bool basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
@@ -1076,11 +1069,9 @@ typedef struct aggr_scan_slice_s {
 bool aggr_scan_init(as_aggr_call* call, const as_transaction* tr);
 bool aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r, cf_arenax_handle r_h);
-as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns,
-		uint32_t pid, as_partition_reservation* rsv);
 as_stream_status aggr_scan_ostream_write(void* udata, as_val* val);
-void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
-		bool success);
+as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns, uint32_t pid, as_partition_reservation* rsv);
+void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val, bool success);
 int aggr_scan_release_cb(cf_ll_element* ele, void* udata);
 
 const as_aggr_hooks scan_aggr_hooks = {
@@ -1374,6 +1365,19 @@ aggr_scan_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
 	return true;
 }
 
+as_stream_status
+aggr_scan_ostream_write(void* udata, as_val* val)
+{
+	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
+
+	if (val != NULL) {
+		aggr_scan_add_val_response(slice, val, true);
+		as_val_destroy(val);
+	}
+
+	return AS_STREAM_OK;
+}
+
 as_partition_reservation*
 aggr_scan_ptn_reserve(void* udata, as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv)
@@ -1381,19 +1385,6 @@ aggr_scan_ptn_reserve(void* udata, as_namespace* ns, uint32_t pid,
 	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
 
 	return slice->rsv;
-}
-
-as_stream_status
-aggr_scan_ostream_write(void* udata, as_val* val)
-{
-	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
-
-	if (val) {
-		aggr_scan_add_val_response(slice, val, true);
-		as_val_destroy(val);
-	}
-
-	return AS_STREAM_OK;
 }
 
 void
