@@ -545,14 +545,19 @@ udf_cask_smd_get_all_cb(const cf_vector* items, void* udata)
 		cf_dyn_buf_append_string(out, item->key);
 		cf_dyn_buf_append_string(out, ",");
 
-		unsigned char hash[SHA_DIGEST_LENGTH];
-		unsigned char sha1_hex_buff[CF_SHA_HEX_BUFF_LEN + 1];
+		unsigned char hash[CF_SHA_DIGEST_LENGTH];
 
-		SHA1((uint8_t*)item->value, strlen(item->value), hash);
-		cf_convert_sha1_to_hex(hash, sha1_hex_buff);
+		cf_SHA1((uint8_t*)item->value, strlen(item->value), hash);
+
+		char hex_buf[(CF_SHA_DIGEST_LENGTH * 2) + 1];
+		char* at = hex_buf;
+
+		for (uint32_t j = 0; j < CF_SHA_DIGEST_LENGTH; j++) {
+			at += sprintf(at, "%02x", hash[i]);
+		}
 
 		cf_dyn_buf_append_string(out, "hash=");
-		cf_dyn_buf_append_buf(out, sha1_hex_buff, CF_SHA_HEX_BUFF_LEN);
+		cf_dyn_buf_append_buf(out, (uint8_t*)hex_buf, CF_SHA_DIGEST_LENGTH * 2);
 		cf_dyn_buf_append_string(out, ",type=");
 		cf_dyn_buf_append_string(out, LUA_TYPE_STR);
 		cf_dyn_buf_append_string(out, ";");
