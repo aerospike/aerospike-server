@@ -761,35 +761,32 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 		cf_buf_builder** bb_r)
 {
 	basic_scan_job* job = (basic_scan_job*)_job;
-	as_index_tree* tree = rsv->tree;
 	cf_buf_builder* bb = *bb_r;
 
 	if (bb == NULL) {
-		bb = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+		*bb_r = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
+		cf_buf_builder_reserve(bb_r, (int)sizeof(as_proto), NULL);
 	}
-	else {
-		cf_buf_builder_reset(bb);
+	else if (rsv == NULL) { // this thread finished all its partitions
+		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
+		return;
 	}
 
-	cf_buf_builder_reserve(&bb, (int)sizeof(as_proto), NULL);
+	as_index_tree* tree = rsv->tree;
 
 	if (tree == NULL) {
-		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_ERR_UNAVAILABLE);
-		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
-		*bb_r = bb;
+		as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_ERR_UNAVAILABLE);
 		return;
 	}
 
 	if (_job->set_id == INVALID_SET_ID && _job->set_name[0] != '\0') {
-		as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
-		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
-		*bb_r = bb;
+		as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_OK);
 		return;
 	}
 
 	bool used_set_index = false;
 	uint64_t slice_start = cf_getus();
-	basic_scan_slice slice = { job, &bb };
+	basic_scan_slice slice = { job, bb_r };
 
 	if (job->sample_max == 0 || job->sample_count < job->sample_max) {
 		cf_digest* keyd = _job->pids[rsv->p->id].has_digest ?
@@ -804,13 +801,7 @@ basic_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 		}
 	}
 
-	as_msg_pid_done_bufbuilder(&bb, rsv->p->id, AS_OK);
-
-	if (bb->used_sz > sizeof(as_proto)) {
-		conn_scan_job_send_response((conn_scan_job*)job, bb->buf, bb->used_sz);
-	}
-
-	*bb_r = bb;
+	as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_OK);
 
 	cf_detail(AS_SCAN, "%s:%u basic scan job %lu %stook %lu us",
 			rsv->ns->name, rsv->p->id, _job->trid,
@@ -1162,6 +1153,10 @@ void
 aggr_scan_job_slice(as_scan_job* _job, as_partition_reservation* rsv,
 		cf_buf_builder** bb_r)
 {
+	if (rsv == NULL) { // this thread finished all its partitions
+		return;
+	}
+
 	aggr_scan_job* job = (aggr_scan_job*)_job;
 	cf_ll ll;
 

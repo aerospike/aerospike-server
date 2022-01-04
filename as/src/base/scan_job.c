@@ -203,6 +203,7 @@ as_scan_job_run(void* pv_job)
 	}
 
 	if (bb != NULL) {
+		_job->vtable.slice_fn(_job, NULL, &bb);
 		cf_buf_builder_free(bb);
 	}
 
