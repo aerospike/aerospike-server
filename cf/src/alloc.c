@@ -626,8 +626,8 @@ cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *map
 	}
 
 	if (efficiency_pct) {
-		*efficiency_pct = mapped != 0 ?
-				(double)allocated * 100.0 / (double)mapped : 0.0;
+		*efficiency_pct = active != 0 ?
+				(double)allocated * 100.0 / (double)active : 0.0;
 	}
 
 	if (site_count) {
