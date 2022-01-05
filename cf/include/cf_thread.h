@@ -28,6 +28,8 @@
 
 #include <pthread.h>
 #include <signal.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
