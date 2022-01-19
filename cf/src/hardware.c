@@ -140,7 +140,7 @@ static uint16_t g_n_numa_nodes;
 static uint16_t g_n_cores;
 static uint16_t g_n_os_cpus;
 static uint16_t g_n_cpus;
-static uint16_t g_n_irq_cpus;
+static uint16_t g_n_irq_cpus[CF_SOCK_CFG_MAX];
 
 static os_numa_node_index g_numa_node_index_to_os_numa_node_index[CPU_SETSIZE];
 static cf_topo_os_cpu_index g_core_index_to_os_cpu_index[CPU_SETSIZE];
@@ -866,7 +866,10 @@ cf_topo_current_cpu(void)
 cf_topo_cpu_index
 cf_topo_socket_cpu(const cf_socket *sock)
 {
-	cf_detail(CF_HARDWARE, "determining CPU index for socket FD %d", CSFD(sock));
+	uint32_t i_addr = ((cf_sock_cfg *)sock->cfg)->i_addr;
+
+	cf_detail(CF_HARDWARE, "determining CPU index for address index %u, socket FD %d",
+			i_addr, CSFD(sock));
 
 	int32_t os;
 	socklen_t len = sizeof(os);
@@ -893,10 +896,10 @@ cf_topo_socket_cpu(const cf_socket *sock)
 	// it does happen for connections from the local machine, because they don't
 	// go through the NIC hardware. In this case, pick a random CPU.
 
-	if (i_cpu >= g_n_irq_cpus) {
+	if (i_cpu >= g_n_irq_cpus[i_addr]) {
 		i_cpu = (cf_topo_cpu_index)pick_random(g_n_cpus);
 		cf_detail(CF_HARDWARE, "randomizing unexpected CPU index >%hu to %hu",
-				g_n_irq_cpus - 1, i_cpu);
+				g_n_irq_cpus[i_addr] - 1, i_cpu);
 		return i_cpu;
 	}
 
@@ -911,7 +914,8 @@ cf_topo_socket_cpu(const cf_socket *sock)
 	// with a probability of p2 = g_n_irq_cpus / g_n_cpus == 2 / 8 == 0.25, which
 	// yields the desired total probability of p1 * p2 = 0.5 * 0.25 = 0.125.
 
-	if (pick_random(100000) < g_n_irq_cpus * (uint32_t)100000 / g_n_cpus) {
+	if (pick_random(100000) < g_n_irq_cpus[i_addr] * (uint32_t)100000 /
+			g_n_cpus) {
 		cf_detail(CF_HARDWARE, "staying on CPU index %hu", i_cpu);
 		return i_cpu;
 	}
@@ -920,8 +924,8 @@ cf_topo_socket_cpu(const cf_socket *sock)
 	// NIC interrupts, i.e., one of the remaining 6 CPUs [2 .. 8] in our example.
 	// This reaches each CPU with a probability of (1 - p2) / 6 = 0.125.
 
-	i_cpu = (cf_topo_cpu_index)(g_n_irq_cpus +
-			pick_random((uint32_t)g_n_cpus - (uint32_t)g_n_irq_cpus));
+	i_cpu = (cf_topo_cpu_index)(g_n_irq_cpus[i_addr] +
+			pick_random((uint32_t)g_n_cpus - (uint32_t)g_n_irq_cpus[i_addr]));
 	cf_detail(CF_HARDWARE, "redirecting to CPU index %hu", i_cpu);
 	return i_cpu;
 }
@@ -1615,7 +1619,7 @@ check_irqbalance(void)
 }
 
 static void
-config_interface(const char *if_name, bool rfs, irq_list *irqs)
+config_interface(uint32_t i_addr, const char *if_name, bool rfs, irq_list *irqs)
 {
 	uint16_t n_irq_cpus = 0;
 	cf_topo_os_cpu_index i_os_cpu = fix_os_cpu_index(0, &g_os_cpus_online);
@@ -1631,12 +1635,12 @@ config_interface(const char *if_name, bool rfs, irq_list *irqs)
 
 	cf_detail(CF_HARDWARE, "interface %s with %hu RX interrupt(s)", if_name, n_irq_cpus);
 
-	if (g_n_irq_cpus == 0) {
-		g_n_irq_cpus = n_irq_cpus;
+	if (g_n_irq_cpus[i_addr] == 0) {
+		g_n_irq_cpus[i_addr] = n_irq_cpus;
 	}
-	else if (n_irq_cpus != g_n_irq_cpus) {
+	else if (n_irq_cpus != g_n_irq_cpus[i_addr]) {
 		cf_crash(CF_HARDWARE, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
-				if_name, n_irq_cpus, g_n_irq_cpus);
+				if_name, n_irq_cpus, g_n_irq_cpus[i_addr]);
 	}
 
 	disable_rps(if_name);
@@ -1660,7 +1664,7 @@ config_interface(const char *if_name, bool rfs, irq_list *irqs)
 }
 
 static void
-config_interface_numa(const char *if_name, irq_list *irqs)
+config_interface_numa(uint32_t i_addr, const char *if_name, irq_list *irqs)
 {
 	uint16_t n_irq_cpus = 0;
 	cf_topo_os_cpu_index i_os_cpu[g_n_numa_nodes];
@@ -1700,12 +1704,12 @@ config_interface_numa(const char *if_name, irq_list *irqs)
 	cf_detail(CF_HARDWARE, "interface %s with %hu RX interrupt(s) on NUMA node %hu",
 			if_name, n_irq_cpus, g_i_numa_node);
 
-	if (g_n_irq_cpus == 0) {
-		g_n_irq_cpus = n_irq_cpus;
+	if (g_n_irq_cpus[i_addr] == 0) {
+		g_n_irq_cpus[i_addr] = n_irq_cpus;
 	}
-	else if (n_irq_cpus != g_n_irq_cpus) {
+	else if (n_irq_cpus != g_n_irq_cpus[i_addr]) {
 		cf_crash(CF_HARDWARE, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
-				if_name, n_irq_cpus, g_n_irq_cpus);
+				if_name, n_irq_cpus, g_n_irq_cpus[i_addr]);
 	}
 
 	disable_rps(if_name);
@@ -1714,7 +1718,7 @@ config_interface_numa(const char *if_name, irq_list *irqs)
 }
 
 static void
-optimize_interface(const char *if_name)
+optimize_interface(uint32_t i_addr, const char *if_name)
 {
 	cf_detail(CF_HARDWARE, "optimizing interface %s", if_name);
 	uint16_t n_queues = interface_rx_queues(if_name);
@@ -1737,11 +1741,11 @@ optimize_interface(const char *if_name)
 	if (n_irq_cpus == g_n_cpus) {
 		if (g_i_numa_node != INVALID_INDEX) {
 			cf_detail(CF_HARDWARE, "setting up for a fancy interface with NUMA");
-			config_interface_numa(if_name, &irqs);
+			config_interface_numa(i_addr, if_name, &irqs);
 		}
 		else {
 			cf_detail(CF_HARDWARE, "setting up for a fancy interface, no NUMA");
-			config_interface(if_name, false, &irqs);
+			config_interface(i_addr, if_name, false, &irqs);
 		}
 	}
 	else {
@@ -1752,11 +1756,11 @@ optimize_interface(const char *if_name)
 
 		if (g_i_numa_node != INVALID_INDEX) {
 			cf_detail(CF_HARDWARE, "setting up for a lame interface with NUMA");
-			config_interface_numa(if_name, &irqs);
+			config_interface_numa(i_addr, if_name, &irqs);
 		}
 		else {
 			cf_detail(CF_HARDWARE, "setting up for a lame interface, no NUMA");
-			config_interface(if_name, true, &irqs);
+			config_interface(i_addr, if_name, true, &irqs);
 		}
 	}
 }
@@ -1811,7 +1815,7 @@ optimize_interfaces(const cf_addr_list *addrs)
 		cf_inter_expand_bond(phys_name, exp_names, &n_exp);
 
 		for (uint32_t k = 0; k < n_exp; ++k) {
-			optimize_interface(exp_names[k]);
+			optimize_interface(i, exp_names[k]);
 			cf_free(exp_names[k]);
 		}
 	}

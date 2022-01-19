@@ -4767,6 +4767,8 @@ cfg_serv_spec_to_bind(const cf_serv_spec* spec, const cf_serv_spec* def_spec, cf
 			cf_crash_nostack(AS_CFG, "Invalid address: %s", addrs->addrs[i]);
 		}
 
+		cfg.i_addr = i;
+
 		for (uint32_t k = 0; k < n_resol; ++k) {
 			cf_ip_addr_copy(&resol[k], &cfg.addr);
 

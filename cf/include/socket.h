@@ -153,6 +153,7 @@ typedef struct cf_sock_cfg_s {
 	cf_sock_owner owner;
 	cf_ip_port port;
 	cf_ip_addr addr;
+	uint32_t i_addr;
 } cf_sock_cfg;
 
 typedef struct cf_serv_cfg_s {

@@ -477,6 +477,7 @@ cf_sock_cfg_init(cf_sock_cfg *cfg, cf_sock_owner owner)
 	cfg->owner = owner;
 	cfg->port = 0;
 	cf_ip_addr_set_any(&cfg->addr);
+	cfg->i_addr = 0;
 }
 
 void
@@ -485,6 +486,7 @@ cf_sock_cfg_copy(const cf_sock_cfg *from, cf_sock_cfg *to)
 	to->owner = from->owner;
 	to->port = from->port;
 	cf_ip_addr_copy(&from->addr, &to->addr);
+	to->i_addr = from->i_addr;
 }
 
 void
