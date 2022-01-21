@@ -553,7 +553,7 @@ udf_cask_smd_get_all_cb(const cf_vector* items, void* udata)
 		char* at = hex_buf;
 
 		for (uint32_t j = 0; j < CF_SHA_DIGEST_LENGTH; j++) {
-			at += sprintf(at, "%02x", hash[i]);
+			at += sprintf(at, "%02x", hash[j]);
 		}
 
 		cf_dyn_buf_append_string(out, "hash=");
