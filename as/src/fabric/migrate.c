@@ -135,6 +135,8 @@ typedef struct emigration_reinsert_ctrl_s {
 	uint64_t xmit_ms; // time of last xmit - 0 when done
 	emigration *emig;
 	msg *m;
+	cf_digest keyd;
+	uint64_t lut;
 } emigration_reinsert_ctrl;
 
 
@@ -175,9 +177,8 @@ bool emigrate_tree(emigration *emig);
 bool emigration_send_done(emigration *emig);
 void *run_emigration_reinserter(void *arg);
 bool emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
-void emigrate_fill_msg(as_storage_rd *rd, msg *m);
 int emigration_reinsert_reduce_fn(const void *key, void *data, void *udata);
-void emigrate_record(emigration *emig, msg *m);
+void emigrate_record(emigration *emig, msg *m, cf_digest* keyd, uint64_t lut);
 
 // Immigration.
 uint32_t immigration_hashfn(const void *key);
@@ -873,6 +874,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	msg *m = as_fabric_msg_get(M_TYPE_MIGRATE);
 
+	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT);
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 
 	uint32_t info = emigration_pack_info(emig, r);
@@ -885,13 +887,23 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	as_storage_record_open(ns, r, &rd);
 
-	emigrate_fill_msg(&rd, m);
+	if (as_storage_rd_load_pickle(&rd)) {
+		msg_set_buf(m, MIG_FIELD_RECORD, rd.pickle, rd.pickle_sz,
+				MSG_SET_HANDOFF_MALLOC);
+	}
+	else {
+		cf_warning(AS_MIGRATE, "unreadable digest %pD", &r->keyd);
+	}
 
 	as_storage_record_close(&rd);
+
+	cf_digest keyd = r->keyd;
+	uint64_t lut = r->last_update_time;
+
 	as_record_done(r_ref, ns);
 
 	// This might block if the queues are backed up.
-	emigrate_record(emig, m);
+	emigrate_record(emig, m, &keyd, lut);
 
 	cf_atomic_int_incr(&ns->migrate_records_transmitted);
 
@@ -915,18 +927,6 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 }
 
 
-void
-emigrate_fill_msg(as_storage_rd *rd, msg *m)
-{
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT);
-
-	as_storage_rd_load_pickle(rd); // FIXME - handle error returned
-
-	msg_set_buf(m, MIG_FIELD_RECORD, rd->pickle, rd->pickle_sz,
-			MSG_SET_HANDOFF_MALLOC);
-}
-
-
 int
 emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 {
@@ -935,33 +935,68 @@ emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 	uint64_t now = (uint64_t)udata;
 
 	if (ri_ctrl->xmit_ms + ns->migrate_retransmit_ms < now) {
+		bool satisfied = false;
+		as_index_ref r_ref;
+
+		if (as_record_get(ri_ctrl->emig->rsv.tree, &ri_ctrl->keyd,
+				&r_ref) == 0) {
+			if (r_ref.r->last_update_time != ri_ctrl->lut) {
+				satisfied = true; // replication satisfied by recent update
+			}
+
+			as_record_done(&r_ref, ns);
+		}
+		else {
+			satisfied = true; // replication satisfied by recent drop
+		}
+
+		if (satisfied) {
+			if (cf_atomic32_sub(&ri_ctrl->emig->bytes_emigrating,
+					(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
+				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
+			}
+
+			as_fabric_msg_put(ri_ctrl->m);
+
+			return CF_SHASH_REDUCE_DELETE;
+		}
+
+		if (msg_is_set(ri_ctrl->m, MIG_FIELD_RECORD)) {
+			cf_detail(AS_MIGRATE, "retransmit digest %pD", &ri_ctrl->keyd);
+		}
+		else {
+			cf_warning(AS_MIGRATE, "unreadable digest %pD", &ri_ctrl->keyd);
+		}
+
 		if (as_fabric_retransmit(ri_ctrl->emig->dest, ri_ctrl->m,
 				AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
-			return -1; // this will stop the reduce
+			return CF_SHASH_ERR; // this will stop the reduce
 		}
 
 		ri_ctrl->xmit_ms = now;
 		cf_atomic_int_incr(&ns->migrate_record_retransmits);
 	}
 
-	return 0;
+	return CF_SHASH_OK;
 }
 
 
 void
-emigrate_record(emigration *emig, msg *m)
+emigrate_record(emigration *emig, msg *m, cf_digest* keyd, uint64_t lut)
 {
 	uint64_t insert_id = emig->insert_id++;
 
 	msg_set_uint64(m, MIG_FIELD_EMIG_INSERT_ID, insert_id);
 
-	emigration_reinsert_ctrl ri_ctrl;
+	emigration_reinsert_ctrl ri_ctrl = {
+			.xmit_ms = cf_getms(),
+			.emig = emig,
+			.m = m,
+			.keyd = *keyd,
+			.lut = lut,
+	};
 
 	msg_incr_ref(m); // the reference in the hash
-	ri_ctrl.m = m;
-	ri_ctrl.emig = emig;
-	ri_ctrl.xmit_ms = cf_getms();
-
 	cf_shash_put(emig->reinsert_hash, &insert_id, &ri_ctrl);
 
 	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
@@ -1534,7 +1569,6 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 			as_fabric_msg_put(ri_ctrl->m);
 			// At this point, the rt is *GONE*.
 			cf_shash_delete_lockfree(emig->reinsert_hash, &insert_id);
-			ri_ctrl = NULL;
 		}
 		else {
 			cf_warning(AS_MIGRATE, "insert ack: unexpected source %lx", src);
