@@ -104,6 +104,10 @@ main() {
 		then
 			debian_version=10
 		fi
+		if [[ "$debian_version" = "bullseye"* ]]
+		then
+			debian_version=11
+		fi
 		distro_version=${debian_version%%.*}
 		;;
 	    esac
