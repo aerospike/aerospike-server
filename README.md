@@ -21,7 +21,7 @@ information.  The full Telemetry data collection agent source code may be found 
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
-current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8, Debian 8 or later, and Ubuntu 18.04 or later.
+current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8, Debian 9 or later, and Ubuntu 18.04 or later.
 
 ### Dependencies
 
@@ -51,7 +51,7 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
 * The required CentOS 7 & Red Hat Enterprise Linux 8 package to install is: `gcc-c++`.
 
-* The required Debian 8/9/10 and Ubuntu 18/20 package to install is: `g++`.
+* The required Debian 9/10/11 and Ubuntu 18/20 package to install is: `g++`.
 
 #### OpenSSL
 
@@ -61,7 +61,7 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 * The CentOS 7 &  Red Hat Enterprise Linux 8 OpenSSL packages to install are:  `openssl` and
 `openssl-devel`, and also `openssl-static` on CentOS 7.
 
-* The Debian 8/9/10 and Ubuntu 18/20 OpenSSL packages to install are:
+* The Debian 9/10/11 and Ubuntu 18/20 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
 
 #### Lua 5.1
@@ -78,7 +78,7 @@ by the build environment.  In that case:
 	* The CentOS 7 & Red Hat Enterprise Linux 8 Lua package to install is:  `lua`, and also
 `lua-devel` and `lua-static` on CentOS 7.
 
-	* The Debian 8/9/10 and Ubuntu 18/20 Lua packages to install are:
+	* The Debian 9/10/11 and Ubuntu 18/20 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
