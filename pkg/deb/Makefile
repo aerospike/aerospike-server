@@ -94,7 +94,7 @@ endif
 
 ifeq ($(EDITION),community)
   ifeq ($(USE_SYSTEMD),1)
-	install -pm 755 $(DEPTH)/as/etc/aerospike_telemetry.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike_telemetry.service
+	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike_telemetry.service
 	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike_telemetry
   else
 	install -pm 755 $(DEPTH)/as/etc/init-telemetry-script.deb $(BUILD_ROOT)/etc/init.d/aerospike_telemetry
@@ -106,8 +106,8 @@ ifeq ($(EDITION),community)
 	install -pm 644 $(DEPTH)/as/etc/telemetry.conf $(BUILD_ROOT)/etc/aerospike
 	install -pm 644 $(DEPTH)/modules/telemetry/README.md $(OPT_AS)/doc/TELEMETRY.md
 	install -pm 755 $(DEPTH)/modules/telemetry/telemetry.py $(OPT_AS)/telemetry
-	install -pm 755 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
-	install -pm 755 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
+	install -pm 644 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
+	install -pm 644 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
 endif
 
 	install -d $(OPT_AS)/data
