@@ -427,7 +427,8 @@ extern void as_bin_set_tombstone(as_bin* b);
 extern bool as_bin_empty_if_all_tombstones(as_storage_rd* rd, bool is_dd);
 extern void as_bin_clear_meta(as_bin* b);
 extern void as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from);
-extern int32_t as_bin_get_id(const as_namespace *ns, const char *name);
+extern bool as_bin_get_id(const as_namespace *ns, const char *name, uint16_t *id);
+extern bool as_bin_get_id_w_len(const as_namespace *ns, const char *name, size_t len, uint16_t *id);
 extern bool as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len, uint16_t *id);
 extern const char* as_bin_get_name_from_id(const as_namespace *ns, uint16_t id);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
@@ -736,7 +737,7 @@ struct as_namespace_s {
 	//
 
 	bool			allow_ttl_without_nsup;
-	uint32_t		background_scan_max_rps;
+	uint32_t		background_query_max_rps;
 	conflict_resolution_pol conflict_resolution_policy;
 	bool			conflict_resolve_writes;
 	bool			cp; // relevant only for enterprise edition
@@ -776,7 +777,7 @@ struct as_namespace_s {
 	uint32_t		cfg_replication_factor;
 	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
 	bool			single_bin; // restrict the namespace to objects with exactly one bin
-	uint32_t		n_single_scan_threads;
+	uint32_t		n_single_query_threads;
 	uint32_t		stop_writes_pct;
 	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
@@ -879,7 +880,7 @@ struct as_namespace_s {
 	// Memory usage stats.
 
 	cf_atomic_int	n_bytes_memory;
-	cf_atomic64		n_bytes_sindex_memory;
+	uint64_t		n_bytes_sindex_memory;
 
 	// Persistent storage stats.
 
@@ -890,7 +891,6 @@ struct as_namespace_s {
 	// Proto-compression stats.
 
 	as_proto_comp_stat record_comp_stat; // relevant only for enterprise edition
-	as_proto_comp_stat scan_comp_stat; // relevant only for enterprise edition
 	as_proto_comp_stat query_comp_stat; // relevant only for enterprise edition
 
 	// Migration stats.
@@ -1129,54 +1129,49 @@ struct as_namespace_s {
 	uint64_t		n_retransmit_ops_sub_dup_res;
 	uint64_t		n_retransmit_ops_sub_repl_write;
 
-	// Scan stats.
+	// Primary index query (formerly scan) stats.
 
-	uint64_t		n_scan_basic_complete;
-	uint64_t		n_scan_basic_error;
-	uint64_t		n_scan_basic_abort;
+	uint64_t		n_pi_query_short_basic_complete;
+	uint64_t		n_pi_query_short_basic_error;
+	uint64_t		n_pi_query_short_basic_timeout;
 
-	uint64_t		n_scan_aggr_complete;
-	uint64_t		n_scan_aggr_error;
-	uint64_t		n_scan_aggr_abort;
+	uint64_t		n_pi_query_long_basic_complete;
+	uint64_t		n_pi_query_long_basic_error;
+	uint64_t		n_pi_query_long_basic_abort;
 
-	uint64_t		n_scan_udf_bg_complete;
-	uint64_t		n_scan_udf_bg_error;
-	uint64_t		n_scan_udf_bg_abort;
+	uint64_t		n_pi_query_aggr_complete;
+	uint64_t		n_pi_query_aggr_error;
+	uint64_t		n_pi_query_aggr_abort;
 
-	uint64_t		n_scan_ops_bg_complete;
-	uint64_t		n_scan_ops_bg_error;
-	uint64_t		n_scan_ops_bg_abort;
+	uint64_t		n_pi_query_udf_bg_complete;
+	uint64_t		n_pi_query_udf_bg_error;
+	uint64_t		n_pi_query_udf_bg_abort;
 
-	// Query stats.
+	uint64_t		n_pi_query_ops_bg_complete;
+	uint64_t		n_pi_query_ops_bg_error;
+	uint64_t		n_pi_query_ops_bg_abort;
 
-	cf_atomic64		query_reqs;
-	cf_atomic64		query_fail;
-	cf_atomic64		query_false_positives;
+	// Secondary index query stats.
 
-	cf_atomic64		query_short_queue_full;
-	cf_atomic64		query_long_queue_full;
-	cf_atomic64		query_short_reqs;
-	cf_atomic64		query_long_reqs;
+	uint64_t		n_si_query_short_basic_complete;
+	uint64_t		n_si_query_short_basic_error;
+	uint64_t		n_si_query_short_basic_timeout;
 
-	cf_atomic64		n_query_basic_complete;
-	cf_atomic64		n_query_basic_error;
-	cf_atomic64		n_query_basic_abort;
+	uint64_t		n_si_query_long_basic_complete;
+	uint64_t		n_si_query_long_basic_error;
+	uint64_t		n_si_query_long_basic_abort;
 
-	cf_atomic64		n_query_basic_records;
+	uint64_t		n_si_query_aggr_complete;
+	uint64_t		n_si_query_aggr_error;
+	uint64_t		n_si_query_aggr_abort;
 
-	cf_atomic64		n_query_aggr_complete;
-	cf_atomic64		n_query_aggr_error;
-	cf_atomic64		n_query_aggr_abort;
+	uint64_t		n_si_query_udf_bg_complete;
+	uint64_t		n_si_query_udf_bg_error;
+	uint64_t		n_si_query_udf_bg_abort;
 
-	cf_atomic64		n_query_aggr_records;
-
-	cf_atomic64		n_query_udf_bg_complete;
-	cf_atomic64		n_query_udf_bg_error;
-	cf_atomic64		n_query_udf_bg_abort;
-
-	cf_atomic64		n_query_ops_bg_complete;
-	cf_atomic64		n_query_ops_bg_error;
-	cf_atomic64		n_query_ops_bg_abort;
+	uint64_t		n_si_query_ops_bg_complete;
+	uint64_t		n_si_query_ops_bg_error;
+	uint64_t		n_si_query_ops_bg_abort;
 
 	// Geospatial query stats:
 	cf_atomic64		geo_region_query_count;		// number of region queries
@@ -1208,15 +1203,19 @@ struct as_namespace_s {
 	histogram*		read_hist;
 	histogram*		write_hist;
 	histogram*		udf_hist;
-	histogram*		query_hist;
-	histogram*		query_rec_count_hist; // not tracked
+	histogram*		pi_query_hist;
+	histogram*		pi_query_rec_count_hist; // not tracked
+	histogram*		si_query_hist;
+	histogram*		si_query_rec_count_hist; // not tracked
 	histogram*		re_repl_hist; // relevant only for enterprise edition
 
 	bool			read_hist_active;
 	bool			write_hist_active;
 	bool			udf_hist_active;
-	bool			query_hist_active;
-	bool			query_rec_count_hist_active;
+	bool			pi_query_hist_active;
+	bool			pi_query_rec_count_hist_active;
+	bool			si_query_hist_active;
+	bool			si_query_rec_count_hist_active;
 	bool			re_repl_hist_active; // relevant only for enterprise edition
 
 	// Activate-by-config histograms.

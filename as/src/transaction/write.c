@@ -548,7 +548,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		batch_sub_write_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_IOPS:
-		tr->from.iops_orig->cb(tr->from.iops_orig->udata, tr->result_code);
+		tr->from.iops_orig->done_cb(tr->from.iops_orig->udata, tr->result_code);
 		BENCHMARK_NEXT_DATA_POINT(tr, ops_sub, response);
 		ops_sub_write_update_stats(tr->rsv.ns, tr->result_code);
 		break;
@@ -594,7 +594,7 @@ write_timeout_cb(rw_request* rw)
 		batch_sub_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_IOPS:
-		rw->from.iops_orig->cb(rw->from.iops_orig->udata, AS_ERR_TIMEOUT);
+		rw->from.iops_orig->done_cb(rw->from.iops_orig->udata, AS_ERR_TIMEOUT);
 		// Timeouts aren't included in histograms.
 		ops_sub_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
@@ -785,6 +785,17 @@ write_master(rw_request* rw, as_transaction* tr)
 		}
 
 		destroy_filter_exp(tr, filter_exp);
+	}
+
+	// Check background si-queries for false positives.
+	if (tr->origin == FROM_IOPS) {
+		iops_origin* origin = tr->from.iops_orig;
+
+		if (origin->check_cb != NULL &&
+				! origin->check_cb(origin->udata, &rd)) {
+			write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_NOT_FOUND);
+			return TRANS_DONE_ERROR;
+		}
 	}
 
 	// Shortcut for set name storage.

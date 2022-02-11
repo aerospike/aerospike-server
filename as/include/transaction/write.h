@@ -26,6 +26,10 @@
 // Includes.
 //
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include "citrusleaf/alloc.h"
 
 #include "base/exp.h"
@@ -37,6 +41,7 @@
 //
 
 struct as_exp_s;
+struct as_storage_rd_s;
 struct as_transaction_s;
 struct cl_msg_s;
 
@@ -50,13 +55,15 @@ typedef struct iops_expop_s {
 	uint64_t flags;
 } iops_expop;
 
-typedef void (*iops_cb)(void* udata, int result);
+typedef bool (*iops_check_cb)(void* udata, struct as_storage_rd_s* rd);
+typedef void (*iops_done_cb)(void* udata, int result);
 
 typedef struct iops_origin_s {
 	struct cl_msg_s* msgp;
 	struct as_exp_s* filter_exp;
 	iops_expop* expops;
-	iops_cb cb;
+	iops_check_cb check_cb;
+	iops_done_cb done_cb;
 	void* udata;
 } iops_origin;
 
@@ -83,6 +90,9 @@ static inline void
 iops_origin_destroy(iops_origin* origin)
 {
 	as_exp_destroy(origin->filter_exp);
-	iops_expops_destroy(origin->expops, origin->msgp->msg.n_ops);
-	cf_free(origin->msgp);
+
+	if (origin->msgp != NULL) {
+		iops_expops_destroy(origin->expops, origin->msgp->msg.n_ops);
+		cf_free(origin->msgp);
+	}
 }

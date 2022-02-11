@@ -52,7 +52,7 @@
 typedef struct {
 	// Iteration
 	cf_ll_iterator        * iter;
-	as_index_keys_arr     * keys_arr;
+	as_aggr_keys_arr     * keys_arr;
 	int                     keys_arr_offset;
 
 	// Record
@@ -65,25 +65,6 @@ typedef struct {
 	as_aggr_call          * call;   // Aggregation info
 	void                  * udata;  // Execution context
 } aggr_state;
-
-static as_partition_reservation *
-ptn_reserve(aggr_state *astate, uint32_t pid, as_partition_reservation *rsv)
-{
-	as_aggr_call *call = astate->call;
-	if (call && call->aggr_hooks && call->aggr_hooks->ptn_reserve) {
-		return call->aggr_hooks->ptn_reserve(astate->udata, astate->ns, pid, rsv);
-	}
-	return NULL;
-}
-
-static void
-ptn_release(aggr_state *astate)
-{
-	as_aggr_call  *call = astate->call;
-	if (call && call->aggr_hooks && call->aggr_hooks->ptn_release) {
-		call->aggr_hooks->ptn_release(astate->udata, astate->rsv);
-	}
-}
 
 static bool
 pre_check(aggr_state *astate)
@@ -100,14 +81,9 @@ aopen(aggr_state *astate, const cf_digest *digest)
 {
 	udf_record *urecord = as_rec_source(astate->urec);
 	as_transaction *tr = urecord->tr;
-	int pid = as_partition_getid(digest);
 
-	astate->rsv = ptn_reserve(astate, pid, &tr->rsv);
-
-	if (astate->rsv == NULL) {
-		cf_debug(AS_AGGR, "reservation not done for partition %d", pid);
-		return false;
-	}
+	cf_assert(astate->rsv != NULL, AS_AGGR, "reservation not done for partition %d",
+			as_partition_getid(digest));
 
 	// NB: Partial Initialization due to heaviness. Not everything needed.
 	// tr->rsv is not set in case of pre-reservation or scans.
@@ -120,8 +96,6 @@ aopen(aggr_state *astate, const cf_digest *digest)
 		astate->rec_open = true;
 		return true;
 	}
-
-	ptn_release(astate);
 
 	return false;
 }
@@ -137,7 +111,6 @@ aclose(aggr_state *astate)
 	// may have changed under the hood.
 	if (astate->rec_open) {
 		udf_record_close(as_rec_source(astate->urec));
-		ptn_release(astate);
 		astate->rec_open = false;
 	}
 	return;
@@ -175,7 +148,7 @@ get_next(aggr_state *astate)
 			return NULL;
 		}
 
-		astate->keys_arr = ((as_index_keys_ll_element *)ele)->keys_arr;
+		astate->keys_arr = ((as_aggr_keys_ll_element *)ele)->keys_arr;
 		astate->keys_arr_offset = 0;
 	}
 
@@ -274,13 +247,13 @@ static const as_aerospike_hooks as_aggr_aerospike_hooks = {
 
 
 int
-as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void * udata, as_result * ap_res)
+as_aggr_process(as_namespace* ns, as_partition_reservation* rsv,
+		as_aggr_call* ag_call, cf_ll* ap_recl, void* udata, as_result* ap_res)
 {
 	as_index_ref    r_ref;
 	as_storage_rd   rd;
 	bzero(&rd, sizeof(as_storage_rd));
 	as_transaction  tr;
-
 
 	udf_record urecord;
 	udf_record_init(&urecord);
@@ -297,7 +270,7 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 		.call            = ag_call,
 		.udata           = udata,
 		.rec_open        = false,
-		.rsv             = &tr.rsv,
+		.rsv             = rsv,
 		.ns              = ns
 	};
 
@@ -327,4 +300,52 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 
 	acleanup(&astate);
 	return ret;
+}
+
+int
+as_aggr_keys_release_cb(cf_ll_element* ele, void* udata)
+{
+	as_aggr_release_udata* r_udata = (as_aggr_release_udata*)udata;
+	as_namespace* ns = r_udata->ns;
+
+	// TODO - proper EE split.
+	if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		return CF_LL_REDUCE_DELETE;
+	}
+
+	const as_aggr_keys_ll_element* node = (const as_aggr_keys_ll_element*)ele;
+	const as_aggr_keys_arr* k_a = node->keys_arr;
+	as_index_tree* tree = r_udata->tree;
+
+	for (uint32_t i = 0; i < k_a->num; i++) {
+		cf_arenax_handle r_h = k_a->u.handles[i];
+
+		// Queries will set r_h to 0 when they finish processing the record.
+		if (r_h == 0) {
+			continue;
+		}
+
+		as_record* r = cf_arenax_resolve(ns->arena, r_h);
+		as_index_ref r_ref = {
+				.r = r,
+				.r_h = r_h,
+				.olock = as_index_olock_from_keyd(tree, &r->keyd)
+		};
+
+		cf_mutex_lock(r_ref.olock);
+
+		as_index_release(r);
+		as_record_done(&r_ref, ns);
+	}
+
+	return CF_LL_REDUCE_DELETE;
+}
+
+void
+as_aggr_keys_destroy_cb(cf_ll_element* ele)
+{
+	as_aggr_keys_ll_element* node = (as_aggr_keys_ll_element*)ele;
+
+	cf_free(node->keys_arr);
+	cf_free(node);
 }

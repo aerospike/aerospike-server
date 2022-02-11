@@ -76,7 +76,7 @@ struct as_storage_rd_s;
 #define AS_ERR_INCOMPATIBLE_TYPE        12
 #define AS_ERR_RECORD_TOO_BIG           13
 #define AS_ERR_KEY_BUSY                 14
-#define AS_ERR_SCAN_ABORT               15
+#define AS_ERR_QUERY_ABORT              15
 #define AS_ERR_UNSUPPORTED_FEATURE      16
 #define AS_ERR_BIN_NOT_FOUND            17
 #define AS_ERR_DEVICE_OVERLOAD          18
@@ -141,19 +141,11 @@ struct as_storage_rd_s;
 // Secondary Index.
 #define AS_ERR_SINDEX_FOUND             200
 #define AS_ERR_SINDEX_NOT_FOUND         201
-#define AS_ERR_SINDEX_OOM               202
+#define AS_ERR_SINDEX_OOM               202 // never used
 #define AS_ERR_SINDEX_NOT_READABLE      203
-#define AS_ERR_SINDEX_GENERIC           204
+#define AS_ERR_SINDEX_GENERIC           204 // ? never used directly
 #define AS_ERR_SINDEX_NAME              205 // never used
 #define AS_ERR_SINDEX_MAX_COUNT         206
-
-// Query.
-#define AS_ERR_QUERY_USER_ABORT         210
-#define AS_ERR_QUERY_QUEUE_FULL         211
-#define AS_ERR_QUERY_TIMEOUT            212
-#define AS_ERR_QUERY_CB                 213
-#define AS_ERR_QUERY_NET_IO             214
-#define AS_ERR_QUERY_DUPLICATE          215
 
 //------------------------------------------------
 // as_proto.
@@ -222,7 +214,7 @@ typedef struct cl_msg_s {
 // Bits in info1.
 #define AS_MSG_INFO1_READ                   (1 << 0) // contains a read operation
 #define AS_MSG_INFO1_GET_ALL                (1 << 1) // get all bins
-	// Bit 2 is unused.
+#define AS_MSG_INFO1_SHORT_QUERY            (1 << 2) // bypass monitoring, inline if data-in-memory
 #define AS_MSG_INFO1_BATCH                  (1 << 3) // batch protocol
 #define AS_MSG_INFO1_XDR                    (1 << 4) // operation is via XDR
 #define AS_MSG_INFO1_GET_NO_BINS            (1 << 5) // get record metadata only - no bin metadata or data
@@ -242,7 +234,7 @@ typedef struct cl_msg_s {
 // Bits in info3.
 #define AS_MSG_INFO3_LAST                   (1 << 0) // this is the last of a multi-part message
 #define AS_MSG_INFO3_COMMIT_LEVEL_MASTER    (1 << 1) // "fire and forget" replica writes
-#define AS_MSG_INFO3_PARTITION_DONE         (1 << 2) // in scan/query response, partition is done
+#define AS_MSG_INFO3_PARTITION_DONE         (1 << 2) // in query response, partition is done
 #define AS_MSG_INFO3_UPDATE_ONLY            (1 << 3) // update existing record only, do not create new record
 #define AS_MSG_INFO3_CREATE_OR_REPLACE      (1 << 4) // completely replace existing record, or create new record
 #define AS_MSG_INFO3_REPLACE_ONLY           (1 << 5) // completely replace existing record, do not create new record
@@ -279,18 +271,19 @@ typedef struct as_msg_field_s {
 	// 3 is unused.
 #define AS_MSG_FIELD_TYPE_DIGEST_RIPE       4
 	// 5 is unused.
-#define AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY 6 // old batch - unsupported
+	// 6 is unused. Was old batch.
 #define AS_MSG_FIELD_TYPE_TRID              7
-#define AS_MSG_FIELD_TYPE_SCAN_OPTIONS      8 // old scan - unsupported
+	// 8 is unused. Was old scan options.
 #define AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT    9
 #define AS_MSG_FIELD_TYPE_RECS_PER_SEC      10
 #define AS_MSG_FIELD_TYPE_PID_ARRAY         11
 #define AS_MSG_FIELD_TYPE_DIGEST_ARRAY      12
 #define AS_MSG_FIELD_TYPE_SAMPLE_MAX        13
 #define AS_MSG_FIELD_TYPE_LUT               14 // for XDR writes only
+#define AS_MSG_FIELD_TYPE_BVAL_ARRAY        15
 
 // Secondary index.
-#define AS_MSG_FIELD_TYPE_INDEX_NAME        21
+#define AS_MSG_FIELD_TYPE_INDEX_NAME        21 // was superfluous - but reserved for future use
 #define AS_MSG_FIELD_TYPE_INDEX_RANGE       22
 #define AS_MSG_FIELD_TYPE_INDEX_TYPE        26
 
@@ -301,7 +294,7 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_UDF_OP            33
 
 // More generic.
-#define AS_MSG_FIELD_TYPE_QUERY_BINLIST     40
+#define AS_MSG_FIELD_TYPE_QUERY_BINLIST     40 // deprecated - now use bin-ops
 #define AS_MSG_FIELD_TYPE_BATCH             41
 #define AS_MSG_FIELD_TYPE_BATCH_WITH_SET    42
 #define AS_MSG_FIELD_TYPE_PREDEXP           43
@@ -311,26 +304,24 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_SET                (1 << 1)
 #define AS_MSG_FIELD_BIT_KEY                (1 << 2)
 #define AS_MSG_FIELD_BIT_DIGEST_RIPE        (1 << 3)
-#define AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY  (1 << 4) // old batch - unsupported
-#define AS_MSG_FIELD_BIT_TRID               (1 << 5)
-#define AS_MSG_FIELD_BIT_SCAN_OPTIONS       (1 << 6) // old scan - unsupported
-#define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 7)
-#define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 8)
-#define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 9)
-#define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 10)
-#define AS_MSG_FIELD_BIT_SAMPLE_MAX         (1 << 11)
-#define AS_MSG_FIELD_BIT_LUT                (1 << 12) // for XDR writes only
-#define AS_MSG_FIELD_BIT_INDEX_NAME         (1 << 13)
-#define AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 14)
-#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 15)
-#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 16)
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 17)
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 18)
-#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 19)
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 20)
-#define AS_MSG_FIELD_BIT_BATCH              (1 << 21)
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 22)
-#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 23)
+#define AS_MSG_FIELD_BIT_TRID               (1 << 4)
+#define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 5)
+#define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 6)
+#define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 7)
+#define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 8)
+#define AS_MSG_FIELD_BIT_SAMPLE_MAX         (1 << 9)
+#define AS_MSG_FIELD_BIT_LUT                (1 << 10) // for XDR writes only
+#define AS_MSG_FIELD_BIT_BVAL_ARRAY         (1 << 11)
+#define AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 12)
+#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 13)
+#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 14)
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 15)
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 16)
+#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 17)
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 18)
+#define AS_MSG_FIELD_BIT_BATCH              (1 << 19)
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 20)
+#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 21)
 
 //------------------------------------------------
 // as_msg_op.
@@ -658,32 +649,6 @@ typedef enum {
 	AS_EXP_FLAG_EVAL_NO_FAIL    = 1 << 4
 } as_exp_flags;
 
-//------------------------------------------------
-// Query responses.
-//
-
-typedef int (*as_netio_finish_cb) (void* udata, int retcode);
-typedef int (*as_netio_start_cb) (void* udata, uint32_t seq);
-
-typedef struct as_netio_s {
-	as_netio_finish_cb finish_cb;
-	as_netio_start_cb start_cb;
-	void* data;
-	struct as_file_handle_s* fd_h;
-	cf_buf_builder* bb;
-	uint32_t offset;
-	uint32_t seq;
-	bool slow;
-	bool compress_response;
-	as_proto_comp_stat* comp_stat;
-	uint64_t start_time;
-} as_netio;
-
-#define AS_NETIO_OK         0
-#define AS_NETIO_CONTINUE   1
-#define AS_NETIO_ERR        2
-#define AS_NETIO_IO_ERR     3
-
 
 //==========================================================
 // Public API.
@@ -711,9 +676,11 @@ cl_msg* as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint16_t bin_count, struct as_namespace_s* ns, cl_msg* msgp_in,
 		size_t* msg_sz_in, uint64_t trid);
 int32_t as_msg_make_response_bufbuilder(cf_buf_builder** bb_r,
-		struct as_storage_rd_s* rd, bool no_bin_data, cf_vector* select_bins);
+		struct as_storage_rd_s* rd, bool no_bin_data,
+		const cf_vector* select_bins, bool send_bval, int64_t bval);
 void as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid,
 		int result);
+void as_msg_fin_bufbuilder(cf_buf_builder** bb_r, int result);
 cl_msg* as_msg_make_val_response(bool success, const as_val* val,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		uint64_t trid, size_t* p_msg_sz);
@@ -729,9 +696,6 @@ int as_msg_send_ops_reply(struct as_file_handle_s* fd_h, const cf_dyn_buf* db,
 bool as_msg_send_fin(cf_socket* sock, uint32_t result_code);
 size_t as_msg_send_fin_timeout(cf_socket* sock, uint32_t result_code,
 		int32_t timeout);
-
-void as_netio_init();
-int as_netio_send(as_netio* io);
 
 static inline bool
 as_proto_is_valid_type(const as_proto* proto)

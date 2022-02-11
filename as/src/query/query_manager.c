@@ -1,7 +1,7 @@
 /*
- * scan_manager.c
+ * query_manager.c
  *
- * Copyright (C) 2019-2020 Aerospike, Inc.
+ * Copyright (C) 2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,7 +24,7 @@
 // Includes.
 //
 
-#include "base/scan_manager.h"
+#include "query/query_manager.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -39,8 +39,9 @@
 
 #include "base/cfg.h"
 #include "base/monitor.h"
-#include "base/scan_job.h"
+#include "base/proto.h"
 #include "fabric/partition.h"
+#include "query/query_job.h"
 
 #include "warnings.h"
 
@@ -51,12 +52,12 @@
 
 typedef struct find_item_s {
 	uint64_t trid;
-	as_scan_job* _job;
+	as_query_job* _job;
 	bool remove_job;
 } find_item;
 
 typedef struct info_item_s {
-	as_scan_job** p_job;
+	as_query_job** p_job;
 } info_item;
 
 
@@ -64,23 +65,23 @@ typedef struct info_item_s {
 // Globals.
 //
 
-uint32_t g_n_threads = 0;
+uint32_t g_n_query_threads = 0;
 
-static as_scan_manager g_mgr;
+static as_query_manager g_mgr;
 
 
 //==========================================================
 // Forward declarations.
 //
 
-static void add_scan_job_thread(as_scan_job* _job);
+static void add_query_job_thread(as_query_job* _job);
 static void evict_finished_jobs(void);
 static int abort_cb(void* buf, void* udata);
 static int info_cb(void* buf, void* udata);
-static as_scan_job* find_any(uint64_t trid);
-static as_scan_job* find_active(uint64_t trid);
-static as_scan_job* remove_active(uint64_t trid);
-static as_scan_job* find_job(cf_queue* jobs, uint64_t trid, bool remove_job);
+static as_query_job* find_any(uint64_t trid);
+static as_query_job* find_active(uint64_t trid);
+static as_query_job* remove_active(uint64_t trid);
+static as_query_job* find_job(cf_queue* jobs, uint64_t trid, bool remove_job);
 static int find_cb(void* buf, void* udata);
 
 
@@ -89,38 +90,49 @@ static int find_cb(void* buf, void* udata);
 //
 
 void
-as_scan_manager_init(void)
+as_query_manager_startup_init(void)
 {
 	cf_mutex_init(&g_mgr.lock);
 
-	g_mgr.active_jobs = cf_queue_create(sizeof(as_scan_job*), false);
-	g_mgr.finished_jobs = cf_queue_create(sizeof(as_scan_job*), false);
+	g_mgr.active_jobs = cf_queue_create(sizeof(as_query_job*), false);
+	g_mgr.finished_jobs = cf_queue_create(sizeof(as_query_job*), false);
 }
 
 int
-as_scan_manager_start_job(as_scan_job* _job)
+as_query_manager_start_job(as_query_job* _job)
 {
+	if (_job->si != NULL) {
+		_job->start_ms_clepoch = cf_clepoch_milliseconds();
+	}
+
+	if (_job->do_inline) {
+		as_query_job_run((void*)_job);
+		return 0;
+	}
+
 	cf_mutex_lock(&g_mgr.lock);
 
-	if (g_n_threads >= g_config.n_scan_threads_limit) {
-		cf_warning(AS_SCAN, "at scan threads limit - can't start new scan");
+	if (g_n_query_threads >= g_config.n_query_threads_limit) {
+		cf_warning(AS_QUERY, "at query threads limit - can't start new query");
 		cf_mutex_unlock(&g_mgr.lock);
-		return AS_SCAN_ERR_FORBIDDEN;
+		return AS_ERR_FORBIDDEN;
 	}
 
-	// Make sure trid is unique.
-	if (find_any(_job->trid)) {
-		cf_warning(AS_SCAN, "job with trid %lu already active", _job->trid);
-		cf_mutex_unlock(&g_mgr.lock);
-		return AS_SCAN_ERR_PARAMETER;
+	if (! _job->is_short) {
+		_job->base_us = _job->start_ns / 1000; // for throttling
+
+		// Make sure trid is unique.
+		if (find_any(_job->trid)) {
+			cf_warning(AS_QUERY, "job with trid %lu already active",
+					_job->trid);
+			cf_mutex_unlock(&g_mgr.lock);
+			return AS_ERR_PARAMETER;
+		}
+
+		cf_queue_push(g_mgr.active_jobs, &_job);
 	}
 
-	_job->start_us = cf_getus();
-	_job->base_us = _job->start_us;
-
-	cf_queue_push(g_mgr.active_jobs, &_job);
-
-	add_scan_job_thread(_job);
+	add_query_job_thread(_job);
 
 	cf_mutex_unlock(&g_mgr.lock);
 
@@ -128,25 +140,25 @@ as_scan_manager_start_job(as_scan_job* _job)
 }
 
 void
-as_scan_manager_add_job_thread(as_scan_job* _job)
+as_query_manager_add_job_thread(as_query_job* _job)
 {
 	if ((_job->n_pids_requested != 0 &&
 			_job->n_threads >= (uint32_t)_job->n_pids_requested) ||
-			_job->n_threads >= _job->ns->n_single_scan_threads) {
+			_job->n_threads >= _job->ns->n_single_query_threads) {
 		return;
 	}
 
 	cf_mutex_lock(&g_mgr.lock);
 
-	if (g_n_threads < g_config.n_scan_threads_limit) {
-		add_scan_job_thread(_job);
+	if (g_n_query_threads < g_config.n_query_threads_limit) {
+		add_query_job_thread(_job);
 	}
 
 	cf_mutex_unlock(&g_mgr.lock);
 }
 
 void
-as_scan_manager_add_max_job_threads(as_scan_job* _job)
+as_query_manager_add_max_job_threads(as_query_job* _job)
 {
 	uint32_t n_pids = _job->n_pids_requested == 0 ?
 			AS_PARTITIONS : (uint32_t)_job->n_pids_requested;
@@ -155,13 +167,13 @@ as_scan_manager_add_max_job_threads(as_scan_job* _job)
 		return;
 	}
 
-	uint32_t single_max = as_load_uint32(&_job->ns->n_single_scan_threads);
+	uint32_t single_max = as_load_uint32(&_job->ns->n_single_query_threads);
 
 	if (_job->n_threads >= single_max) {
 		return;
 	}
 
-	// Don't need more threads than there are partitions to scan.
+	// Don't need more threads than there are partitions to query.
 	uint32_t n_extra = n_pids - _job->n_threads;
 
 	uint32_t single_extra = single_max - _job->n_threads;
@@ -170,36 +182,36 @@ as_scan_manager_add_max_job_threads(as_scan_job* _job)
 		n_extra = single_extra;
 	}
 
-	uint32_t all_max = as_load_uint32(&g_config.n_scan_threads_limit);
+	uint32_t all_max = as_load_uint32(&g_config.n_query_threads_limit);
 
 	cf_mutex_lock(&g_mgr.lock);
 
-	if (g_n_threads >= all_max) {
+	if (g_n_query_threads >= all_max) {
 		cf_mutex_unlock(&g_mgr.lock);
 		return;
 	}
 
-	uint32_t all_extra = all_max - g_n_threads;
+	uint32_t all_extra = all_max - g_n_query_threads;
 
 	if (all_extra < n_extra) {
 		n_extra = all_extra;
 	}
 
 	for (uint32_t n = 0; n < n_extra; n++) {
-		add_scan_job_thread(_job);
+		add_query_job_thread(_job);
 	}
 
 	cf_mutex_unlock(&g_mgr.lock);
 }
 
 void
-as_scan_manager_finish_job(as_scan_job* _job)
+as_query_manager_finish_job(as_query_job* _job)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
 	remove_active(_job->trid);
 
-	_job->finish_us = cf_getus();
+	_job->finish_ns = cf_getns();
 	cf_queue_push(g_mgr.finished_jobs, &_job);
 	evict_finished_jobs();
 
@@ -207,17 +219,17 @@ as_scan_manager_finish_job(as_scan_job* _job)
 }
 
 void
-as_scan_manager_abandon_job(as_scan_job* _job, int reason)
+as_query_manager_abandon_job(as_query_job* _job, int reason)
 {
 	_job->abandoned = reason;
 }
 
 bool
-as_scan_manager_abort_job(uint64_t trid)
+as_query_manager_abort_job(uint64_t trid)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
-	as_scan_job* _job = find_active(trid);
+	as_query_job* _job = find_active(trid);
 
 	cf_mutex_unlock(&g_mgr.lock);
 
@@ -225,13 +237,13 @@ as_scan_manager_abort_job(uint64_t trid)
 		return false;
 	}
 
-	_job->abandoned = AS_SCAN_ERR_USER_ABORT;
+	_job->abandoned = AS_ERR_QUERY_ABORT;
 
 	return true;
 }
 
 uint32_t
-as_scan_manager_abort_all_jobs(void)
+as_query_manager_abort_all_jobs(void)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
@@ -247,7 +259,7 @@ as_scan_manager_abort_all_jobs(void)
 }
 
 void
-as_scan_manager_limit_finished_jobs(void)
+as_query_manager_limit_finished_jobs(void)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
@@ -257,11 +269,11 @@ as_scan_manager_limit_finished_jobs(void)
 }
 
 as_mon_jobstat*
-as_scan_manager_get_job_info(uint64_t trid)
+as_query_manager_get_job_info(uint64_t trid)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
-	as_scan_job* _job = find_any(trid);
+	as_query_job* _job = find_any(trid);
 
 	if (_job == NULL) {
 		cf_mutex_unlock(&g_mgr.lock);
@@ -271,7 +283,7 @@ as_scan_manager_get_job_info(uint64_t trid)
 	as_mon_jobstat* stat = cf_malloc(sizeof(as_mon_jobstat));
 
 	memset(stat, 0, sizeof(as_mon_jobstat));
-	as_scan_job_info(_job, stat);
+	as_query_job_info(_job, stat);
 
 	cf_mutex_unlock(&g_mgr.lock);
 
@@ -279,7 +291,7 @@ as_scan_manager_get_job_info(uint64_t trid)
 }
 
 as_mon_jobstat*
-as_scan_manager_get_info(int* size)
+as_query_manager_get_info(int* size)
 {
 	*size = 0;
 
@@ -293,7 +305,7 @@ as_scan_manager_get_info(int* size)
 		return NULL;
 	}
 
-	as_scan_job* _jobs[n_jobs];
+	as_query_job* _jobs[n_jobs];
 	info_item item = { _jobs };
 
 	cf_queue_reduce_reverse(g_mgr.active_jobs, info_cb, &item);
@@ -305,7 +317,7 @@ as_scan_manager_get_info(int* size)
 	memset(stats, 0, stats_size);
 
 	for (uint32_t i = 0; i < n_jobs; i++) {
-		as_scan_job_info(_jobs[i], &stats[i]);
+		as_query_job_info(_jobs[i], &stats[i]);
 	}
 
 	cf_mutex_unlock(&g_mgr.lock);
@@ -316,7 +328,7 @@ as_scan_manager_get_info(int* size)
 }
 
 uint32_t
-as_scan_manager_get_active_job_count(void)
+as_query_manager_get_active_job_count(void)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
@@ -333,24 +345,24 @@ as_scan_manager_get_active_job_count(void)
 //
 
 static void
-add_scan_job_thread(as_scan_job* _job)
+add_query_job_thread(as_query_job* _job)
 {
-	as_incr_uint32(&g_n_threads);
+	as_incr_uint32(&g_n_query_threads);
 	as_incr_uint32(&_job->n_threads);
 
-	cf_thread_create_transient(as_scan_job_run, _job);
+	cf_thread_create_transient(as_query_job_run, _job);
 }
 
 static void
 evict_finished_jobs(void)
 {
-	uint32_t max_allowed = as_load_uint32(&g_config.scan_max_done);
+	uint32_t max_allowed = as_load_uint32(&g_config.query_max_done);
 
 	while (cf_queue_sz(g_mgr.finished_jobs) > max_allowed) {
-		as_scan_job* _job;
+		as_query_job* _job;
 
 		cf_queue_pop(g_mgr.finished_jobs, &_job, 0);
-		as_scan_job_destroy(_job);
+		as_query_job_destroy(_job);
 	}
 }
 
@@ -359,9 +371,9 @@ abort_cb(void* buf, void* udata)
 {
 	(void)udata;
 
-	as_scan_job* _job = *(as_scan_job**)buf;
+	as_query_job* _job = *(as_query_job**)buf;
 
-	_job->abandoned = AS_SCAN_ERR_USER_ABORT;
+	_job->abandoned = AS_ERR_QUERY_ABORT;
 
 	return 0;
 }
@@ -369,7 +381,7 @@ abort_cb(void* buf, void* udata)
 static int
 info_cb(void* buf, void* udata)
 {
-	as_scan_job* _job = *(as_scan_job**)buf;
+	as_query_job* _job = *(as_query_job**)buf;
 	info_item* item = (info_item*)udata;
 
 	*item->p_job++ = _job;
@@ -377,10 +389,10 @@ info_cb(void* buf, void* udata)
 	return 0;
 }
 
-static as_scan_job*
+static as_query_job*
 find_any(uint64_t trid)
 {
-	as_scan_job* _job = find_job(g_mgr.active_jobs, trid, false);
+	as_query_job* _job = find_job(g_mgr.active_jobs, trid, false);
 
 	if (_job == NULL) {
 		_job = find_job(g_mgr.finished_jobs, trid, false);
@@ -389,19 +401,19 @@ find_any(uint64_t trid)
 	return _job;
 }
 
-static as_scan_job*
+static as_query_job*
 find_active(uint64_t trid)
 {
 	return find_job(g_mgr.active_jobs, trid, false);
 }
 
-static as_scan_job*
+static as_query_job*
 remove_active(uint64_t trid)
 {
 	return find_job(g_mgr.active_jobs, trid, true);
 }
 
-static as_scan_job*
+static as_query_job*
 find_job(cf_queue* jobs, uint64_t trid, bool remove_job)
 {
 	find_item item = { trid, NULL, remove_job };
@@ -414,7 +426,7 @@ find_job(cf_queue* jobs, uint64_t trid, bool remove_job)
 static int
 find_cb(void* buf, void* udata)
 {
-	as_scan_job* _job = *(as_scan_job**)buf;
+	as_query_job* _job = *(as_query_job**)buf;
 	find_item* match = (find_item*)udata;
 
 	if (match->trid == _job->trid) {

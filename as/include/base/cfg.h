@@ -36,6 +36,7 @@
 
 #include "enhanced_alloc.h"
 #include "hardware.h"
+#include "hist.h"
 #include "node.h"
 #include "socket.h"
 #include "tls.h"
@@ -111,26 +112,10 @@ typedef struct as_config_s {
 	char*			pidfile;
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	uint32_t		n_proto_fd_max;
-	int				proto_slow_netio_sleep_ms; // dynamic only
-	uint32_t		query_bsize;
-	uint64_t		query_buf_size; // dynamic only
-	bool			query_in_transaction_thr;
-	uint32_t		query_long_q_max_size;
-	bool			query_enable_histogram;
-	uint32_t		query_priority;
-	uint32_t		query_sleep_us;
-	uint64_t		query_rec_count_bound;
-	bool			query_req_in_query_thread;
-	uint32_t		query_req_max_inflight;
-	uint32_t		query_short_q_max_size;
-	uint32_t		query_threads;
-	uint32_t		query_threshold;
-	uint64_t		query_untracked_time_ms;
-	uint32_t		query_worker_threads;
+	uint32_t		query_max_done; // maximum number of finished queries kept for monitoring
+	uint32_t		n_query_threads_limit;
 	bool			run_as_daemon;
 	bool			salt_allocations; // initialize with junk - for internal use only
-	uint32_t		scan_max_done; // maximum number of finished scans kept for monitoring
-	uint32_t		n_scan_threads_limit;
 	uint32_t		n_service_threads;
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc
@@ -242,6 +227,13 @@ bool as_config_error_enterprise_feature_only(const char* name);
 bool as_info_error_enterprise_only(); // TODO - until we have an info split
 
 extern as_config g_config;
+
+static inline histogram_scale
+as_config_histogram_scale(void)
+{
+	return g_config.microsecond_histograms ?
+			HIST_MICROSECONDS : HIST_MILLISECONDS;
+}
 
 static inline bool
 as_config_is_cpu_pinned(void)

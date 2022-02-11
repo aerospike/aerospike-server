@@ -46,8 +46,7 @@
 #define TRID_LIST_SIZE 1000
 
 typedef enum {
-	QUERY_MOD	= 0,
-	SCAN_MOD	= 1
+	QUERY_MOD	= 0
 } as_mon_module_slot;
 
 extern const char * AS_MON_MODULES[];
@@ -58,7 +57,6 @@ typedef struct as_mon_jobstat_s {
 	char		job_type[32];
 	char		ns[AS_ID_NAMESPACE_SZ];
 	char		set[AS_SET_NAME_MAX_SIZE];
-	uint32_t	priority;
 	uint32_t	n_pids_requested;
 	uint32_t	rps;
 	uint32_t	active_threads;
@@ -72,6 +70,7 @@ typedef struct as_mon_jobstat_s {
 	uint64_t	recs_succeeded;
 	uint64_t	recs_failed;
 	uint64_t	net_io_bytes;
+	uint64_t	net_io_time;
 	uint32_t	socket_timeout;
 	char		client[64];
 	char		jdata[512];
@@ -82,22 +81,7 @@ typedef struct as_mon_cb_s {
 	as_mon_jobstat *(*get_jobstat_all)	(int * size);
 
 	// Per transaction
-	bool (*set_priority)	(uint64_t trid, uint32_t priority);
-	bool (*kill)			(uint64_t trid);
-	int (*suspend)			(uint64_t trid);
-
-	// Per Module
-	// Numer of pending transaction of this job type in queue allowed
-	// incoming more than this will be rejected.
-	int	(*set_pendingmax)	(int);
-
-	// Set the number of transaction that can be inflight at
-	// any point of time.
-	int (*set_maxinflight)	(int);
-
-	// Any individual transaction priority has upper bound of max
-	// priority of jobtype
-	int (*set_maxpriority)	(int);
+	bool (*kill)						(uint64_t trid);
 } as_mon_cb;
 
 // Structure to register module with as mon interface.

@@ -55,8 +55,6 @@
 #include "vector.h"
 #include "xmem.h"
 
-#include "ai_btree.h"
-
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -65,14 +63,12 @@
 #include "base/index.h"
 #include "base/monitor.h"
 #include "base/nsup.h"
-#include "base/scan.h"
 #include "base/security.h"
 #include "base/service.h"
 #include "base/set_index.h"
 #include "base/smd.h"
 #include "base/stats.h"
 #include "base/thr_info_port.h"
-#include "base/thr_query.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/truncate.h"
@@ -88,6 +84,7 @@
 #include "fabric/roster.h"
 #include "fabric/service_list.h"
 #include "fabric/skew_monitor.h"
+#include "query/query.h"
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
@@ -521,10 +518,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_format(db, "batch_index_proto_uncompressed_pct", "%.3f", g_stats.batch_comp_stat.uncomp_pct);
 	info_append_format(db, "batch_index_proto_compression_ratio", "%.3f", batch_ratio);
 
-	info_append_uint32(db, "scans_active", as_scan_get_active_job_count());
-
-	info_append_uint32(db, "query_short_running", g_query_short_running);
-	info_append_uint32(db, "query_long_running", g_query_long_running);
+	info_append_uint32(db, "queries_active", as_query_get_active_job_count());
 
 	char paxos_principal[16 + 1];
 	sprintf(paxos_principal, "%lX", as_exchange_principal());
@@ -1633,6 +1627,11 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
+	// For backward compatibility:
+	if (strcmp(module, "scan") == 0) {
+		strcpy(module, "query");
+	}
+
 	rv = as_info_parameter_get(params, "cmd", cmd, &cmd_len);
 	if (rv == -1) {
 		as_mon_info_cmd(module, NULL, 0, 0, db);
@@ -1773,26 +1772,10 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_uint32(db, "proto-fd-max", g_config.n_proto_fd_max);
-	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
-	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
-	info_append_uint32(db, "query-buf-size", g_config.query_buf_size); // dynamic only
-	info_append_bool(db, "query-in-transaction-thread", g_config.query_in_transaction_thr);
-	info_append_uint32(db, "query-long-q-max-size", g_config.query_long_q_max_size);
-	info_append_bool(db, "query-microbenchmark", g_config.query_enable_histogram); // dynamic only
-	info_append_uint32(db, "query-priority", g_config.query_priority);
-	info_append_uint32(db, "query-priority-sleep-us", g_config.query_sleep_us);
-	info_append_uint64(db, "query-rec-count-bound", g_config.query_rec_count_bound);
-	info_append_bool(db, "query-req-in-query-thread", g_config.query_req_in_query_thread);
-	info_append_uint32(db, "query-req-max-inflight", g_config.query_req_max_inflight);
-	info_append_uint32(db, "query-short-q-max-size", g_config.query_short_q_max_size);
-	info_append_uint32(db, "query-threads", g_config.query_threads);
-	info_append_uint32(db, "query-threshold", g_config.query_threshold);
-	info_append_uint64(db, "query-untracked-time-ms", g_config.query_untracked_time_ms);
-	info_append_uint32(db, "query-worker-threads", g_config.query_worker_threads);
+	info_append_uint32(db, "query-max-done", g_config.query_max_done);
+	info_append_uint32(db, "query-threads-limit", g_config.n_query_threads_limit);
 	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
 	info_append_bool(db, "salt-allocations", g_config.salt_allocations);
-	info_append_uint32(db, "scan-max-done", g_config.scan_max_done);
-	info_append_uint32(db, "scan-threads-limit", g_config.n_scan_threads_limit);
 	info_append_uint32(db, "service-threads", g_config.n_service_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
@@ -1922,7 +1905,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	}
 
 	info_append_bool(db, "allow-ttl-without-nsup", ns->allow_ttl_without_nsup);
-	info_append_uint32(db, "background-scan-max-rps", ns->background_scan_max_rps);
+	info_append_uint32(db, "background-query-max-rps", ns->background_query_max_rps);
 
 	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
 		info_append_string(db, "conflict-resolution-policy", "generation");
@@ -1977,7 +1960,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "reject-xdr-writes", ns->reject_xdr_writes);
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_bool(db, "single-bin", ns->single_bin);
-	info_append_uint32(db, "single-scan-threads", ns->n_single_scan_threads);
+	info_append_uint32(db, "single-query-threads", ns->n_single_query_threads);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
 	info_append_bool(db, "strong-consistency", ns->cp);
 	info_append_bool(db, "strong-consistency-allow-expunge", ns->cp_allow_drops);
@@ -2196,8 +2179,7 @@ info_command_get_stats(char *name, char *params, cf_dyn_buf *db)
 static void
 fabric_histogram_clear_all(void)
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	histogram_rescale(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], scale);
 	histogram_rescale(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK], scale);
@@ -2220,8 +2202,7 @@ fabric_histogram_clear_all(void)
 static void
 read_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	histogram_rescale(ns->read_start_hist, scale);
 	histogram_rescale(ns->read_restart_hist, scale);
@@ -2234,8 +2215,7 @@ read_benchmarks_histogram_clear_all(as_namespace* ns)
 static void
 write_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	histogram_rescale(ns->write_start_hist, scale);
 	histogram_rescale(ns->write_restart_hist, scale);
@@ -2248,8 +2228,7 @@ write_benchmarks_histogram_clear_all(as_namespace* ns)
 static void
 udf_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	histogram_rescale(ns->udf_start_hist, scale);
 	histogram_rescale(ns->udf_restart_hist, scale);
@@ -2262,8 +2241,7 @@ udf_benchmarks_histogram_clear_all(as_namespace* ns)
 static void
 batch_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	histogram_rescale(ns->batch_sub_prestart_hist, scale);
 	histogram_rescale(ns->batch_sub_start_hist, scale);
@@ -2280,8 +2258,7 @@ batch_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 static void
 udf_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	histogram_rescale(ns->udf_sub_start_hist, scale);
 	histogram_rescale(ns->udf_sub_restart_hist, scale);
@@ -2294,8 +2271,7 @@ udf_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 static void
 ops_sub_benchmarks_histogram_clear_all(as_namespace* ns)
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	histogram_rescale(ns->ops_sub_start_hist, scale);
 	histogram_rescale(ns->ops_sub_restart_hist, scale);
@@ -2391,22 +2367,22 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of ticker-interval from %d to %d ", g_config.ticker_interval, val);
 			g_config.ticker_interval = val;
 		}
-		else if (0 == as_info_parameter_get(params, "scan-max-done", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "query-max-done", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
 			if (val < 0 || val > 10000) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of scan-max-done from %d to %d ", g_config.scan_max_done, val);
-			g_config.scan_max_done = val;
-			as_scan_limit_finished_jobs();
+			cf_info(AS_INFO, "Changing value of query-max-done from %d to %d ", g_config.query_max_done, val);
+			g_config.query_max_done = val;
+			as_query_limit_finished_jobs();
 		}
-		else if (0 == as_info_parameter_get(params, "scan-threads-limit", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "query-threads-limit", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 1024) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of scan-threads-limit from %u to %d ", g_config.n_scan_threads_limit, val);
-			g_config.n_scan_threads_limit = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of query-threads-limit from %u to %d ", g_config.n_query_threads_limit, val);
+			g_config.n_query_threads_limit = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "batch-index-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
@@ -2448,12 +2424,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of proto-fd-idle-ms from %d to %d ", g_config.proto_fd_idle_ms, val);
 			g_config.proto_fd_idle_ms = val;
-		}
-		else if (0 == as_info_parameter_get(params, "proto-slow-netio-sleep-ms", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of proto-slow-netio-sleep-ms from %d to %d ", g_config.proto_slow_netio_sleep_ms, val);
-			g_config.proto_slow_netio_sleep_ms = val;
 		}
 		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
 			if (!as_config_cluster_name_set(context)) {
@@ -2510,43 +2480,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			if (0 != cf_str_atoi(context, &val) || (0 > val) || (as_clustering_cluster_size_min_set(val) < 0))
 				goto Error;
 		}
-		else if (0 == as_info_parameter_get(params, "query-buf-size", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "query-buf-size = %"PRIu64"", val);
-			if (val < 1024) {
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-buf-size from %"PRIu64" to %"PRIu64"", g_config.query_buf_size, val);
-			g_config.query_buf_size = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-threshold", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "query-threshold = %"PRIu64"", val);
-			if ((int64_t)val <= 0) {
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-threshold from %u to %"PRIu64, g_config.query_threshold, val);
-			g_config.query_threshold = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-untracked-time-ms", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "query-untracked-time = %"PRIu64" milli seconds", val);
-			if ((int64_t)val < 0) {
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-untracked-time from %"PRIu64" milli seconds to %"PRIu64" milli seconds",
-						g_config.query_untracked_time_ms, val);
-			g_config.query_untracked_time_ms = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-rec-count-bound", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "query-rec-count-bound = %"PRIu64"", val);
-			if ((int64_t)val <= 0) {
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-rec-count-bound from %"PRIu64" to %"PRIu64" ", g_config.query_rec_count_bound, val);
-			g_config.query_rec_count_bound = val;
-		}
 		else if (0 == as_info_parameter_get(params, "sindex-builder-threads", context, &context_len)) {
 			int val = 0;
 			if (0 != cf_str_atoi(context, &val) || (val > 32)) {
@@ -2561,110 +2494,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of sindex-gc-period from %d to %d ", g_config.sindex_gc_period, val);
 			g_config.sindex_gc_period = (uint32_t)val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-threads", context, &context_len)) {
-			uint32_t val = atol(context);
-			cf_info(AS_INFO, "query-threads = %u", val);
-			if (val == 0 || val % 2 != 0 || val > AS_QUERY_MAX_THREADS) {
-				cf_warning(AS_INFO, "query-threads should be an even number <= %u", AS_QUERY_MAX_THREADS);
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-threads from %u to %u", g_config.query_threads, val);
-			as_query_reinit(val);
-		}
-		else if (0 == as_info_parameter_get(params, "query-worker-threads", context, &context_len)) {
-			uint32_t val = atol(context);
-			cf_info(AS_INFO, "query-worker-threads = %u", val);
-			if (val == 0 || val > AS_QUERY_MAX_WORKER_THREADS) {
-				cf_warning(AS_INFO, "query-worker-threads should be a number <= %u", AS_QUERY_MAX_WORKER_THREADS);
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-worker-threads from %u to %u", g_config.query_worker_threads, val);
-			as_query_worker_reinit(val);
-		}
-		else if (0 == as_info_parameter_get(params, "query-priority", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query_priority = %"PRIu64, val);
-			if (val == 0) {
-				cf_warning(AS_INFO, "query_priority should be a number %s", context);
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-priority from %d to %"PRIu64, g_config.query_priority, val);
-			g_config.query_priority = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-priority-sleep-us", context, &context_len)) {
-			uint32_t val = atol(context);
-			if(val == 0) {
-				cf_warning(AS_INFO, "query_sleep should be a number %s", context);
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-sleep from %u uSec to %u uSec ", g_config.query_sleep_us, val);
-			g_config.query_sleep_us = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-batch-size", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-batch-size = %"PRIu64, val);
-			if((int)val <= 0) {
-				cf_warning(AS_INFO, "query-batch-size should be a positive number");
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-batch-size from %d to %"PRIu64, g_config.query_bsize, val);
-			g_config.query_bsize = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-req-max-inflight", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-req-max-inflight = %"PRIu64, val);
-			if((int)val <= 0) {
-				cf_warning(AS_INFO, "query-req-max-inflight should be a positive number");
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-req-max-inflight from %d to %"PRIu64, g_config.query_req_max_inflight, val);
-			g_config.query_req_max_inflight = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-in-transaction-thread", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of query-in-transaction-thread  from %s to %s", bool_val[g_config.query_in_transaction_thr], context);
-				g_config.query_in_transaction_thr = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of query-in-transaction-thread  from %s to %s", bool_val[g_config.query_in_transaction_thr], context);
-				g_config.query_in_transaction_thr = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "query-req-in-query-thread", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of query-req-in-query-thread from %s to %s", bool_val[g_config.query_req_in_query_thread], context);
-				g_config.query_req_in_query_thread = true;
-
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of query-req-in-query-thread from %s to %s", bool_val[g_config.query_req_in_query_thread], context);
-				g_config.query_req_in_query_thread = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "query-short-q-max-size", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-short-q-max-size = %"PRIu64, val);
-			if((int)val <= 0) {
-				cf_warning(AS_INFO, "query-short-q-max-size should be a positive number");
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-short-q-max-size from %d to %"PRIu64, g_config.query_short_q_max_size, val);
-			g_config.query_short_q_max_size = val;
-		}
-		else if (0 == as_info_parameter_get(params, "query-long-q-max-size", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-long-q-max-size = %"PRIu64, val);
-			if((int)val <= 0) {
-				cf_warning(AS_INFO, "query-long-q-max-size should be a positive number");
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %"PRIu64, g_config.query_long_q_max_size, val);
-			g_config.query_long_q_max_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "microsecond-histograms", context, &context_len)) {
 			if (any_benchmarks_enabled()) {
@@ -2725,19 +2554,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				cf_info(AS_INFO, "Changing value of enable-hist-info to %s", context);
 				g_config.info_hist_enabled = false;
 				histogram_clear(g_stats.info_hist);
-			}
-			else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "query-microbenchmark", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of query-enable-histogram to %s", context);
-				g_config.query_enable_histogram = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of query-enable-histogram to %s", context);
-				g_config.query_enable_histogram = false;
 			}
 			else {
 				goto Error;
@@ -2973,19 +2789,19 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of evict-hist-buckets of ns %s from %u to %d ", ns->name, ns->evict_hist_buckets, val);
 			ns->evict_hist_buckets = (uint32_t)val;
 		}
-		else if (0 == as_info_parameter_get(params, "background-scan-max-rps", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "background-query-max-rps", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 1000000) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of background-scan-max-rps of ns %s from %u to %d ", ns->name, ns->background_scan_max_rps, val);
-			ns->background_scan_max_rps = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of background-query-max-rps of ns %s from %u to %d ", ns->name, ns->background_query_max_rps, val);
+			ns->background_query_max_rps = (uint32_t)val;
 		}
-		else if (0 == as_info_parameter_get(params, "single-scan-threads", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "single-query-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 128) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of single-scan-threads of ns %s from %u to %d ", ns->name, ns->n_single_scan_threads, val);
-			ns->n_single_scan_threads = (uint32_t)val;
+			cf_info(AS_INFO, "Changing value of single-query-threads of ns %s from %u to %d ", ns->name, ns->n_single_query_threads, val);
+			ns->n_single_query_threads = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "stop-writes-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || val < 0 || val > 100) {
@@ -3887,7 +3703,8 @@ info_command_latencies(char* name, char* params, cf_dyn_buf* db)
 			histogram_get_latencies(ns->read_hist, db);
 			histogram_get_latencies(ns->write_hist, db);
 			histogram_get_latencies(ns->udf_hist, db);
-			histogram_get_latencies(ns->query_hist, db);
+			histogram_get_latencies(ns->pi_query_hist, db);
+			histogram_get_latencies(ns->si_query_hist, db);
 		}
 	}
 	else {
@@ -3947,8 +3764,11 @@ info_command_latencies(char* name, char* params, cf_dyn_buf* db)
 			else if (strcmp(hist_name, "udf") == 0) {
 				histogram_get_latencies(ns->udf_hist, db);
 			}
-			else if (strcmp(hist_name, "query") == 0) {
-				histogram_get_latencies(ns->query_hist, db);
+			else if (strcmp(hist_name, "pi-query") == 0) {
+				histogram_get_latencies(ns->pi_query_hist, db);
+			}
+			else if (strcmp(hist_name, "si-query") == 0) {
+				histogram_get_latencies(ns->si_query_hist, db);
 			}
 			else if (strcmp(hist_name, "re-repl") == 0) {
 				histogram_get_latencies(ns->re_repl_hist, db);
@@ -5464,12 +5284,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_format(db, "record_proto_uncompressed_pct", "%.3f", ns->record_comp_stat.uncomp_pct);
 	info_append_format(db, "record_proto_compression_ratio", "%.3f", record_ratio);
 
-	double scan_orig_sz = as_load_double(&ns->scan_comp_stat.avg_orig_sz);
-	double scan_ratio = scan_orig_sz > 0.0 ? ns->scan_comp_stat.avg_comp_sz / scan_orig_sz : 1.0;
-
-	info_append_format(db, "scan_proto_uncompressed_pct", "%.3f", ns->scan_comp_stat.uncomp_pct);
-	info_append_format(db, "scan_proto_compression_ratio", "%.3f", scan_ratio);
-
 	double query_orig_sz = as_load_double(&ns->query_comp_stat.avg_orig_sz);
 	double query_ratio = query_orig_sz > 0.0 ? ns->query_comp_stat.avg_comp_sz / query_orig_sz : 1.0;
 
@@ -5727,64 +5541,49 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "retransmit_ops_sub_dup_res", ns->n_retransmit_ops_sub_dup_res);
 	info_append_uint64(db, "retransmit_ops_sub_repl_write", ns->n_retransmit_ops_sub_repl_write);
 
-	// Scan stats.
+	// Primary index query (formerly scan) stats.
 
-	info_append_uint64(db, "scan_basic_complete", ns->n_scan_basic_complete);
-	info_append_uint64(db, "scan_basic_error", ns->n_scan_basic_error);
-	info_append_uint64(db, "scan_basic_abort", ns->n_scan_basic_abort);
+	info_append_uint64(db, "pi_query_short_basic_complete", ns->n_pi_query_short_basic_complete);
+	info_append_uint64(db, "pi_query_short_basic_error", ns->n_pi_query_short_basic_error);
+	info_append_uint64(db, "pi_query_short_basic_timeout", ns->n_pi_query_short_basic_timeout);
 
-	info_append_uint64(db, "scan_aggr_complete", ns->n_scan_aggr_complete);
-	info_append_uint64(db, "scan_aggr_error", ns->n_scan_aggr_error);
-	info_append_uint64(db, "scan_aggr_abort", ns->n_scan_aggr_abort);
+	info_append_uint64(db, "pi_query_long_basic_complete", ns->n_pi_query_long_basic_complete);
+	info_append_uint64(db, "pi_query_long_basic_error", ns->n_pi_query_long_basic_error);
+	info_append_uint64(db, "pi_query_long_basic_abort", ns->n_pi_query_long_basic_abort);
 
-	info_append_uint64(db, "scan_udf_bg_complete", ns->n_scan_udf_bg_complete);
-	info_append_uint64(db, "scan_udf_bg_error", ns->n_scan_udf_bg_error);
-	info_append_uint64(db, "scan_udf_bg_abort", ns->n_scan_udf_bg_abort);
+	info_append_uint64(db, "pi_query_aggr_complete", ns->n_pi_query_aggr_complete);
+	info_append_uint64(db, "pi_query_aggr_error", ns->n_pi_query_aggr_error);
+	info_append_uint64(db, "pi_query_aggr_abort", ns->n_pi_query_aggr_abort);
 
-	info_append_uint64(db, "scan_ops_bg_complete", ns->n_scan_ops_bg_complete);
-	info_append_uint64(db, "scan_ops_bg_error", ns->n_scan_ops_bg_error);
-	info_append_uint64(db, "scan_ops_bg_abort", ns->n_scan_ops_bg_abort);
+	info_append_uint64(db, "pi_query_udf_bg_complete", ns->n_pi_query_udf_bg_complete);
+	info_append_uint64(db, "pi_query_udf_bg_error", ns->n_pi_query_udf_bg_error);
+	info_append_uint64(db, "pi_query_udf_bg_abort", ns->n_pi_query_udf_bg_abort);
 
-	// Query stats.
+	info_append_uint64(db, "pi_query_ops_bg_complete", ns->n_pi_query_ops_bg_complete);
+	info_append_uint64(db, "pi_query_ops_bg_error", ns->n_pi_query_ops_bg_error);
+	info_append_uint64(db, "pi_query_ops_bg_abort", ns->n_pi_query_ops_bg_abort);
 
-	uint64_t basic_complete	= ns->n_query_basic_complete;
-	uint64_t basic_error	= ns->n_query_basic_error;
-	uint64_t basic_abort	= ns->n_query_basic_abort;
-	uint64_t basic_total	= basic_complete + basic_error + basic_abort;
-	uint64_t basic_records	= ns->n_query_basic_records;
+	// Secondary index query stats.
 
-	uint64_t aggr_complete	= ns->n_query_aggr_complete;
-	uint64_t aggr_error		= ns->n_query_aggr_error;
-	uint64_t aggr_abort		= ns->n_query_aggr_abort;
-	uint64_t aggr_total		= aggr_complete + aggr_error + aggr_abort;
-	uint64_t aggr_records	= ns->n_query_aggr_records;
+	info_append_uint64(db, "si_query_short_basic_complete", ns->n_si_query_short_basic_complete);
+	info_append_uint64(db, "si_query_short_basic_error", ns->n_si_query_short_basic_error);
+	info_append_uint64(db, "si_query_short_basic_timeout", ns->n_si_query_short_basic_timeout);
 
-	info_append_uint64(db, "query_reqs", ns->query_reqs);
-	info_append_uint64(db, "query_fail", ns->query_fail);
-	info_append_uint64(db, "query_false_positives", ns->query_false_positives);
+	info_append_uint64(db, "si_query_long_basic_complete", ns->n_si_query_long_basic_complete);
+	info_append_uint64(db, "si_query_long_basic_error", ns->n_si_query_long_basic_error);
+	info_append_uint64(db, "si_query_long_basic_abort", ns->n_si_query_long_basic_abort);
 
-	info_append_uint64(db, "query_short_queue_full", ns->query_short_queue_full);
-	info_append_uint64(db, "query_long_queue_full", ns->query_long_queue_full);
-	info_append_uint64(db, "query_short_reqs", ns->query_short_reqs);
-	info_append_uint64(db, "query_long_reqs", ns->query_long_reqs);
+	info_append_uint64(db, "si_query_aggr_complete", ns->n_si_query_aggr_complete);
+	info_append_uint64(db, "si_query_aggr_error", ns->n_si_query_aggr_error);
+	info_append_uint64(db, "si_query_aggr_abort", ns->n_si_query_aggr_abort);
 
-	info_append_uint64(db, "query_basic_complete", basic_complete);
-	info_append_uint64(db, "query_basic_error", basic_error);
-	info_append_uint64(db, "query_basic_abort", basic_abort);
-	info_append_uint64(db, "query_basic_avg_rec_count", basic_total ? basic_records / basic_total : 0);
+	info_append_uint64(db, "si_query_udf_bg_complete", ns->n_si_query_udf_bg_complete);
+	info_append_uint64(db, "si_query_udf_bg_error", ns->n_si_query_udf_bg_error);
+	info_append_uint64(db, "si_query_udf_bg_abort", ns->n_si_query_udf_bg_abort);
 
-	info_append_uint64(db, "query_aggr_complete", aggr_complete);
-	info_append_uint64(db, "query_aggr_error", aggr_error);
-	info_append_uint64(db, "query_aggr_abort", aggr_abort);
-	info_append_uint64(db, "query_aggr_avg_rec_count", aggr_total ? aggr_records / aggr_total : 0);
-
-	info_append_uint64(db, "query_udf_bg_complete", ns->n_query_udf_bg_complete);
-	info_append_uint64(db, "query_udf_bg_error", ns->n_query_udf_bg_error);
-	info_append_uint64(db, "query_udf_bg_abort", ns->n_query_udf_bg_abort);
-
-	info_append_uint64(db, "query_ops_bg_complete", ns->n_query_ops_bg_complete);
-	info_append_uint64(db, "query_ops_bg_error", ns->n_query_ops_bg_error);
-	info_append_uint64(db, "query_ops_bg_abort", ns->n_query_ops_bg_abort);
+	info_append_uint64(db, "si_query_ops_bg_complete", ns->n_si_query_ops_bg_complete);
+	info_append_uint64(db, "si_query_ops_bg_error", ns->n_si_query_ops_bg_error);
+	info_append_uint64(db, "si_query_ops_bg_abort", ns->n_si_query_ops_bg_abort);
 
 	// Geospatial query stats:
 	info_append_uint64(db, "geo_region_query_reqs", ns->geo_region_query_count);
@@ -6428,85 +6227,6 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 	return 0;
 }
 
-int info_command_abort_scan(char *name, char *params, cf_dyn_buf *db) {
-	char context[100];
-	int  context_len = sizeof(context);
-	bool success = false;
-
-	if (0 == as_info_parameter_get(params, "id", context, &context_len)) {
-		uint64_t trid;
-		trid = strtoull(context, NULL, 10);
-		if (trid != 0) {
-			success = as_scan_abort(trid);
-		}
-	}
-
-	if (! success) {
-		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_ERR_NOT_FOUND);
-		cf_dyn_buf_append_string(db, ":Transaction Not Found");
-	}
-	else {
-		cf_dyn_buf_append_string(db, "OK");
-	}
-
-	return 0;
-}
-
-int info_command_abort_all_scans(char *name, char *params, cf_dyn_buf *db) {
-
-	uint32_t n_scans_killed = as_scan_abort_all();
-
-	cf_dyn_buf_append_string(db, "OK - number of scans killed: ");
-	cf_dyn_buf_append_uint32(db, n_scans_killed);
-
-	return 0;
-}
-
-int
-info_scan_show(char *name, cf_dyn_buf *db)
-{
-	(void)name;
-
-	as_mon_info_cmd(AS_MON_MODULES[SCAN_MOD], NULL, 0, 0, db);
-
-	return 0;
-}
-
-int
-info_command_scan_show(char *name, char *params, cf_dyn_buf *db)
-{
-	(void)name;
-
-	char trid_str[1 + 24 + 1] = { 0 }; // allow octal, decimal, hex
-	int trid_str_len = (int)sizeof(trid_str);
-	int rv = as_info_parameter_get(params, "trid", trid_str, &trid_str_len);
-
-	if (rv == -2) {
-		cf_warning(AS_INFO, "trid too long");
-		cf_dyn_buf_append_string(db, "ERROR::bad-trid");
-		return 0;
-	}
-
-	uint64_t trid = 0;
-
-	if (rv == 0) {
-		// TODO - util which checks overflow, leading/trailing garbage, etc?
-		trid = strtoul(trid_str, NULL, 0);
-
-		if (trid == 0) { // includes missing value
-			cf_warning(AS_INFO, "trid value missing or 0");
-			cf_dyn_buf_append_string(db, "ERROR::bad-trid");
-			return 0;
-		}
-	}
-
-	as_mon_info_cmd(AS_MON_MODULES[SCAN_MOD], trid == 0 ? NULL : "get-job",
-			trid, 0, db);
-
-	return 0;
-}
-
 // Note - a bit different to 'query-list' which collects less info.
 // TODO - remove 'query-list'?
 int
@@ -6534,50 +6254,86 @@ info_command_query_show(char *name, char *params, cf_dyn_buf *db)
 		return 0;
 	}
 
+	if (rv == -1) { // no trid specified - show all
+		as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], NULL, 0, 0, db);
+		return 0;
+	}
+
 	uint64_t trid = 0;
 
-	if (rv == 0) {
-		// TODO - util which checks overflow, leading/trailing garbage, etc?
-		trid = strtoul(trid_str, NULL, 0);
+	if (cf_strtoul_u64_raw(trid_str, &trid) != 0 || trid == 0) {
+		cf_warning(AS_INFO, "bad trid %s", trid_str);
+		cf_dyn_buf_append_string(db, "ERROR::bad-trid");
+		return 0;
+	}
 
-		if (trid == 0) { // includes missing value
-			cf_warning(AS_INFO, "trid value missing or 0");
+	as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], "get-job", trid, 0, db);
+
+	return 0;
+}
+
+static int
+info_command_abort_query(char *name, char *params, cf_dyn_buf *db)
+{
+	(void)name;
+
+	char trid_str[1 + 24 + 1] = { 0 }; // allow octal, decimal, hex
+	int trid_str_len = (int)sizeof(trid_str);
+	int rv = as_info_parameter_get(params, "trid", trid_str, &trid_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "trid too long");
+		cf_dyn_buf_append_string(db, "ERROR::bad-trid");
+		return 0;
+	}
+
+	// Allow 'id' for backward compatibility of scan-abort. Remove in 6 months.
+	if (rv == -1) {
+		rv = as_info_parameter_get(params, "id", trid_str, &trid_str_len);
+
+		if (rv == -2) {
+			cf_warning(AS_INFO, "id too long");
 			cf_dyn_buf_append_string(db, "ERROR::bad-trid");
 			return 0;
 		}
 	}
 
-	as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], trid == 0 ? NULL : "get-job",
-			trid, 0, db);
+	if (rv == -1) {
+		cf_warning(AS_INFO, "trid missing");
+		cf_dyn_buf_append_string(db, "ERROR::trid-missing");
+		return 0;
+	}
+
+	uint64_t trid = 0;
+
+	if (cf_strtoul_u64_raw(trid_str, &trid) != 0 || trid == 0) {
+		cf_warning(AS_INFO, "bad trid %s", trid_str);
+		cf_dyn_buf_append_string(db, "ERROR::bad-trid");
+		return 0;
+	}
+
+	if (as_query_abort(trid)) {
+		cf_dyn_buf_append_string(db, "OK");
+		return 0;
+	}
+
+	cf_dyn_buf_append_string(db, "ERROR:");
+	cf_dyn_buf_append_int(db, AS_ERR_NOT_FOUND);
+	cf_dyn_buf_append_string(db, ":trid-not-active");
 
 	return 0;
 }
 
-int info_command_query_kill(char *name, char *params, cf_dyn_buf *db) {
-	char context[100];
-	int context_len = sizeof(context);
-	bool rv = false;
+int info_command_abort_all_queries(char *name, char *params, cf_dyn_buf *db) {
 
-	if (as_info_parameter_get(params, "trid", context, &context_len) == 0) {
-		uint64_t trid = strtoull(context, NULL, 10);
+	uint32_t n_queries_killed = as_query_abort_all();
 
-		if (trid != 0) {
-			rv = as_query_kill(trid);
-		}
-	}
-
-	if (! rv) {
-		cf_dyn_buf_append_string(db, "Transaction Not Found");
-	}
-	else {
-		cf_dyn_buf_append_string(db, "Ok");
-	}
+	cf_dyn_buf_append_string(db, "OK - number of queries killed: ");
+	cf_dyn_buf_append_uint32(db, n_queries_killed);
 
 	return 0;
-
-
-
 }
+
 int info_command_sindex_stat(char *name, char *params, cf_dyn_buf *db) {
 	as_namespace  *ns = NULL;
 	char * iname = NULL;
@@ -6594,57 +6350,6 @@ int info_command_sindex_stat(char *name, char *params, cf_dyn_buf *db) {
 				as_sindex_err_str(resp));
 	}
 
-	if (iname) {
-		cf_free(iname);
-	}
-	return(0);
-}
-
-
-// sindex-histogram:ns=test_D;indexname=indname;enable=true/false
-int info_command_sindex_histogram(char *name, char *params, cf_dyn_buf *db)
-{
-	as_namespace * ns = NULL;
-	char * iname = NULL;
-	if (as_info_parse_ns_iname(params, &ns, &iname, db, "SINDEX HISTOGRAM")) {
-		return 0;
-	}
-
-	char op[10];
-	int op_len = sizeof(op);
-
-	if (as_info_parameter_get(params, "enable", op, &op_len)) {
-		cf_info(AS_INFO, "SINDEX HISTOGRAM : invalid OP");
-		cf_dyn_buf_append_string(db, "Invalid Op");
-		goto END;
-	}
-
-	bool enable = false;
-	if (!strncmp(op, "true", 5) && op_len != 5) {
-		enable = true;
-	}
-	else if (!strncmp(op, "false", 6) && op_len != 6) {
-		enable = false;
-	}
-	else {
-		cf_info(AS_INFO, "SINDEX HISTOGRAM : invalid OP");
-		cf_dyn_buf_append_string(db, "Invalid Op");
-		goto END;
-	}
-
-	int resp = as_sindex_histogram_enable(ns, iname, enable);
-	if (resp) {
-		cf_warning(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s failed with error %d",
-			iname, ns->name, resp);
-		SINDEX_FAIL_RESPONSE(db, AS_SINDEX_ERR_TO_CLIENTERR(resp),
-				as_sindex_err_str(resp));
-	} else {
-		cf_dyn_buf_append_string(db, "Ok");
-		cf_info(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s histogram is set as %s",
-			iname, ns->name, op);
-	}
-
-END:
 	if (iname) {
 		cf_free(iname);
 	}
@@ -6731,7 +6436,7 @@ as_info_init()
 			"float;"
 			"geo;"
 			"sindex-exists;"
-			"peers;pipelining;pscans;"
+			"peers;pipelining;pquery;pscans;"
 			"query-show;"
 			"relaxed-sc;replicas;replicas-all;replicas-master;replicas-max;"
 			"truncate-namespace;"
@@ -6759,11 +6464,11 @@ as_info_init()
 			"mcast;mesh;"
 			"name;namespace;namespaces;node;"
 			"physical-devices;"
-			"query-abort;query-show;quiesce;quiesce-undo;"
+			"query-abort;query-abort-all;query-show;quiesce;quiesce-undo;"
 			"racks;recluster;revive;roster;roster-set;"
 			"scan-abort;scan-abort-all;scan-show;service;services;"
 			"services-alumni;services-alumni-reset;set-config;set-log;sets;"
-			"show-devices;sindex;sindex-create;sindex-delete;sindex-histogram;"
+			"show-devices;sindex;sindex-create;sindex-delete;"
 			"statistics;status;"
 			"tip;tip-clear;truncate;truncate-namespace;truncate-namespace-undo;"
 			"truncate-undo;"
@@ -6871,9 +6576,6 @@ as_info_init()
 	as_info_set_command("sindex-delete", info_command_sindex_delete, PERM_SINDEX_ADMIN); // Delete a secondary index.
 	as_info_set_command("sindex-exists", info_command_sindex_exists, PERM_SINDEX_ADMIN); // Does secondary index exist.
 
-	// Undocumented Secondary Index Command
-	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
-
 	// UDF
 	as_info_set_dynamic("udf-list", udf_cask_info_list, false);
 	as_info_set_command("udf-put", udf_cask_info_put, PERM_UDF_ADMIN);
@@ -6882,15 +6584,19 @@ as_info_init()
 	as_info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PERM_UDF_ADMIN);
 
 	// JOBS
+	// TODO - deprecated - remove September 2022 +
 	as_info_set_command("jobs", info_command_mon_cmd, PERM_QUERY_ADMIN); // Manipulate the multi-key lookup monitoring infrastructure.
+
+	// TODO - deprecated - remove January 2023 +:
+	as_info_set_dynamic("scan-show", info_query_show, false);
+	as_info_set_command("scan-show", info_command_query_show, PERM_NONE);
+	as_info_set_command("scan-abort", info_command_abort_query, PERM_QUERY_ADMIN);
+	as_info_set_command("scan-abort-all", info_command_abort_all_queries, PERM_QUERY_ADMIN); // Abort all queries.
 
 	as_info_set_dynamic("query-show", info_query_show, false);
 	as_info_set_command("query-show", info_command_query_show, PERM_NONE);
-	as_info_set_command("query-abort", info_command_query_kill, PERM_QUERY_ADMIN);
-	as_info_set_dynamic("scan-show", info_scan_show, false);
-	as_info_set_command("scan-show", info_command_scan_show, PERM_NONE);
-	as_info_set_command("scan-abort", info_command_abort_scan, PERM_QUERY_ADMIN);             // Abort a scan with a given id.
-	as_info_set_command("scan-abort-all", info_command_abort_all_scans, PERM_QUERY_ADMIN);    // Abort all scans.
+	as_info_set_command("query-abort", info_command_abort_query, PERM_QUERY_ADMIN);
+	as_info_set_command("query-abort-all", info_command_abort_all_queries, PERM_QUERY_ADMIN); // Abort all queries.
 
 	as_info_set_command("sindex-stat", info_command_sindex_stat, PERM_NONE);
 	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);

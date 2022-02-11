@@ -45,11 +45,11 @@ typedef struct cf_condition_s {
 
 #define CF_MUTEX_INIT { 0 }
 #define cf_mutex_init(__m) (__m)->u32 = 0
-#define cf_mutex_destroy(__m) // no-op
+#define cf_mutex_destroy(__m) ((void)__m) // no-op
 
 #define CF_CONDITION_INIT { 0 }
 #define cf_condition_init(__m) (__m)->seq = 0
-#define cf_condition_destroy(__m) // no-op
+#define cf_condition_destroy(__m) ((void)__m) // no-op
 
 
 //==========================================================

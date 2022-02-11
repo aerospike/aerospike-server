@@ -25,9 +25,6 @@ BASE_HEADERS += particle.h
 BASE_HEADERS += particle_blob.h
 BASE_HEADERS += particle_integer.h
 BASE_HEADERS += proto.h
-BASE_HEADERS += scan.h
-BASE_HEADERS += scan_job.h
-BASE_HEADERS += scan_manager.h
 BASE_HEADERS += security.h
 BASE_HEADERS += security_config.h
 BASE_HEADERS += service.h
@@ -35,7 +32,6 @@ BASE_HEADERS += set_index.h
 BASE_HEADERS += smd.h
 BASE_HEADERS += stats.h
 BASE_HEADERS += thr_info.h
-BASE_HEADERS += thr_query.h
 BASE_HEADERS += thr_tsvc.h
 BASE_HEADERS += ticker.h
 BASE_HEADERS += transaction.h
@@ -73,16 +69,12 @@ BASE_SOURCES += particle_map.c
 BASE_SOURCES += particle_string.c
 BASE_SOURCES += proto.c
 BASE_SOURCES += record.c
-BASE_SOURCES += scan.c
-BASE_SOURCES += scan_job.c
-BASE_SOURCES += scan_manager.c
 BASE_SOURCES += service.c
 BASE_SOURCES += set_index.c
 BASE_SOURCES += signal.c
 BASE_SOURCES += smd.c
 BASE_SOURCES += thr_info.c
 BASE_SOURCES += thr_info_port.c
-BASE_SOURCES += thr_query.c
 BASE_SOURCES += thr_tsvc.c
 BASE_SOURCES += ticker.c
 BASE_SOURCES += transaction.c
@@ -146,17 +138,26 @@ GEOSPATIAL_HEADERS += geospatial.h
 GEOSPATIAL_SOURCES += geojson.cc
 GEOSPATIAL_SOURCES += geospatial.cc
 
-SINDEX_HEADERS += btree.h
+QUERY_HEADERS += query.h
+QUERY_HEADERS += query_job.h
+QUERY_HEADERS += query_manager.h
+
+QUERY_SOURCES += query.c
+QUERY_SOURCES += query_job.c
+QUERY_SOURCES += query_manager.c
+
 SINDEX_HEADERS += gc.h
 SINDEX_HEADERS += populate.h
 SINDEX_HEADERS += secondary_index.h
+SINDEX_HEADERS += sindex_tree.h
 
-SINDEX_SOURCES += btree.c
 SINDEX_SOURCES += gc.c
 SINDEX_SOURCES += populate.c
 SINDEX_SOURCES += secondary_index.c
+SINDEX_SOURCES += sindex_tree.c
 ifneq ($(USE_EE),1)
   SINDEX_SOURCES += gc_ce.c
+  SINDEX_SOURCES += sindex_tree_ce.c
 endif
 
 STORAGE_HEADERS += drv_common.h
@@ -209,6 +210,7 @@ endif
 HEADERS = $(BASE_HEADERS:%=base/%)
 HEADERS += $(FABRIC_HEADERS:%=fabric/%)
 HEADERS += $(GEOSPATIAL_HEADERS:%=geospatial/%)
+HEADERS += $(QUERY_HEADERS:%=query/%)
 HEADERS += $(SINDEX_HEADERS:%=sindex/%)
 HEADERS += $(STORAGE_HEADERS:%=storage/%)
 HEADERS += $(TRANSACTION_HEADERS:%=transaction/%)
@@ -217,6 +219,7 @@ HEADERS += $(XDR_HEADERS:%=xdr/%)
 SOURCES = $(BASE_SOURCES:%=base/%)
 SOURCES += $(FABRIC_SOURCES:%=fabric/%)
 SOURCES += $(GEOSPATIAL_SOURCES:%=geospatial/%)
+SOURCES += $(QUERY_SOURCES:%=query/%)
 SOURCES += $(SINDEX_SOURCES:%=sindex/%)
 SOURCES += $(STORAGE_SOURCES:%=storage/%)
 SOURCES += $(TRANSACTION_SOURCES:%=transaction/%)
@@ -226,7 +229,6 @@ SERVER = $(BIN_DIR)/asd
 
 INCLUDES += $(INCLUDE_DIR:%=-I%)
 INCLUDES += -I$(CF)/include
-INCLUDES += -I$(AI)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
@@ -243,7 +245,6 @@ else
 endif
 
 AS_LIBRARIES += $(LIBRARY_DIR)/libcf.a
-AS_LIBRARIES += $(LIBRARY_DIR)/libai.a
 AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
 AS_LIBRARIES += $(JEMALLOC)/lib/libjemalloc.a
 AS_LIBRARIES += $(MOD_LUA)/target/$(PLATFORM)/lib/libmod_lua.a

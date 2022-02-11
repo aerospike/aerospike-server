@@ -39,15 +39,13 @@
 #include "cf_thread.h"
 #include "log.h"
 
-#include "ai_btree.h"
-#include "ai_glue.h"
-
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/set_index.h"
 #include "fabric/partition.h"
 #include "sindex/secondary_index.h"
+#include "sindex/sindex_tree.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
@@ -346,13 +344,13 @@ populate(as_sindex* si)
 	}
 
 	si->readable = true;
-	si->stats.populate_pct = 100;
+	si->populate_pct = 100;
 
 	// TODO - really nead loadtime stat? Doesn't last through restart.
-	si->stats.loadtime = cf_getms() - start_ms;
+	si->load_time = cf_getms() - start_ms;
 
 	cf_info(AS_SINDEX, "{%s} ... done populating sindex %s (%lu ms)", ns->name,
-			si->imd->iname, si->stats.loadtime);
+			si->imd->iname, si->load_time);
 }
 
 static void*
@@ -420,7 +418,7 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 		uint64_t n = as_aaf_uint64(cbi->p_n_total_reduced, PROGRESS_RESOLUTION);
 		uint64_t n_objects = ns->n_objects;
 
-		si->stats.populate_pct = (uint32_t)
+		si->populate_pct = (uint32_t)
 				(n > n_objects ? 100 : (n * 100) / n_objects);
 	}
 
@@ -503,23 +501,8 @@ run_destroy_sindex(void* udata)
 
 		as_sindex_delete_defn(si->ns, si->imd);
 
-		// Free entire usage counter before tree destroy.
-		cf_atomic64_sub(&si->ns->n_bytes_sindex_memory,
-				(int64_t)(ai_btree_get_isize(si->imd) +
-						ai_btree_get_nsize(si->imd)));
+		as_sindex_tree_destroy(si);
 
-		// Cache the ibtr pointers.
-		uint32_t n_pimds = si->imd->n_pimds;
-		as_btree* ibtr[n_pimds];
-
-		for (uint32_t i = 0; i < n_pimds; i++) {
-			as_sindex_pmetadata* pimd = &si->imd->pimd[i];
-
-			ibtr[i] = pimd->ibtr;
-			ai_btree_reset_pimd(pimd);
-		}
-
-		as_sindex_destroy_pmetadata(si);
 		si->state = AS_SINDEX_INACTIVE;
 
 		si->ns->sindex_cnt--;
@@ -554,11 +537,6 @@ run_destroy_sindex(void* udata)
 		// This is the only special case where both GLOCK and LOCK is called
 		// together.
 		SINDEX_GWUNLOCK();
-
-		// Destroy cached ibtr pointer.
-		for (uint32_t i = 0; i < imd->n_pimds; i++) {
-			ai_btree_delete_ibtr(ibtr[i]);
-		}
 
 		as_sindex_imd_free(imd);
 		cf_rc_free(imd);

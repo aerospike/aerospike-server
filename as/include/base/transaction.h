@@ -303,17 +303,10 @@ as_transaction_has_no_key_or_digest(const as_transaction *tr)
 }
 
 static inline bool
-as_transaction_is_multi_record(const as_transaction *tr)
+as_transaction_is_query(const as_transaction *tr)
 {
 	return tr->origin == FROM_CLIENT &&
 			(tr->msg_fields & (AS_MSG_FIELD_BIT_KEY | AS_MSG_FIELD_BIT_DIGEST_RIPE)) == 0;
-}
-
-static inline bool
-as_transaction_is_batch_direct(const as_transaction *tr)
-{
-	// Assumes we're already multi-record.
-	return (tr->msg_fields & AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY) != 0;
 }
 
 static inline bool
@@ -329,10 +322,16 @@ as_transaction_has_digests(const as_transaction *tr)
 }
 
 static inline bool
-as_transaction_is_query(const as_transaction *tr)
+as_transaction_has_where_clause(const as_transaction *tr)
 {
 	// Assumes we're already multi-record.
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_INDEX_RANGE) != 0;
+}
+
+static inline bool
+as_transaction_has_index_type(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_INDEX_TYPE) != 0;
 }
 
 static inline bool
@@ -348,9 +347,9 @@ as_transaction_has_udf_op(const as_transaction *tr)
 }
 
 static inline bool
-as_transaction_has_scan_options(const as_transaction *tr)
+as_transaction_has_query_binlist(const as_transaction *tr)
 {
-	return (tr->msg_fields & AS_MSG_FIELD_BIT_SCAN_OPTIONS) != 0;
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_QUERY_BINLIST) != 0;
 }
 
 static inline bool
@@ -369,6 +368,12 @@ static inline bool
 as_transaction_has_sample_max(const as_transaction *tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_SAMPLE_MAX) != 0;
+}
+
+static inline bool
+as_transaction_has_bval_array(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_BVAL_ARRAY) != 0;
 }
 
 static inline bool
@@ -453,6 +458,12 @@ static inline bool
 as_transaction_is_strict_read(const as_transaction *tr)
 {
 	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) == 0;
+}
+
+static inline bool
+as_transaction_is_short_query(const as_transaction *tr)
+{
+	return (tr->msgp->msg.info1 & AS_MSG_INFO1_SHORT_QUERY) != 0;
 }
 
 void as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig);

@@ -43,7 +43,6 @@
 #include "base/batch.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
-#include "base/scan.h"
 #include "base/security.h"
 #include "base/service.h"
 #include "base/stats.h"
@@ -155,14 +154,8 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_DIGEST_RIPE:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_DIGEST_RIPE;
 		break;
-	case AS_MSG_FIELD_TYPE_DIGEST_RIPE_ARRAY:
-		tr->msg_fields |= AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY;
-		break;
 	case AS_MSG_FIELD_TYPE_TRID:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_TRID;
-		break;
-	case AS_MSG_FIELD_TYPE_SCAN_OPTIONS:
-		tr->msg_fields |= AS_MSG_FIELD_BIT_SCAN_OPTIONS;
 		break;
 	case AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_SOCKET_TIMEOUT;
@@ -182,8 +175,8 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_LUT:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_LUT;
 		break;
-	case AS_MSG_FIELD_TYPE_INDEX_NAME:
-		tr->msg_fields |= AS_MSG_FIELD_BIT_INDEX_NAME;
+	case AS_MSG_FIELD_TYPE_BVAL_ARRAY:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_BVAL_ARRAY;
 		break;
 	case AS_MSG_FIELD_TYPE_INDEX_RANGE:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_INDEX_RANGE;
@@ -299,9 +292,9 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 	return true;
 }
 
-// Initialize an internal UDF transaction (for a UDF scan/query). Uses shared
-// message with namespace but no digest, and no set for now since these
-// transactions won't get security checked, and can't create a record.
+// Initialize an internal UDF transaction (for a UDF query). Uses shared message
+// with namespace but no digest, and no set for now since these transactions
+// won't get security checked, and can't create a record.
 void
 as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
 		iudf_origin* iudf_orig)
@@ -317,7 +310,7 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
 	tr->start_time = cf_getns();
 }
 
-// Initialize an internal ops transaction (for an ops scan/query). Uses shared
+// Initialize an internal ops transaction (for an ops query). Uses shared
 // message with namespace but no digest, and no set for now since these
 // transactions won't get security checked, and can't create a record.
 void
@@ -399,14 +392,14 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		break;
 	case FROM_IUDF:
 		if (tr->from.iudf_orig) {
-			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, error_code);
+			tr->from.iudf_orig->done_cb(tr->from.iudf_orig->udata, error_code);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 		}
 		UPDATE_ERROR_STATS(udf_sub);
 		break;
 	case FROM_IOPS:
 		if (tr->from.iops_orig) {
-			tr->from.iops_orig->cb(tr->from.iops_orig->udata, error_code);
+			tr->from.iops_orig->done_cb(tr->from.iops_orig->udata, error_code);
 			tr->from.iops_orig = NULL; // pattern, not needed
 		}
 		UPDATE_ERROR_STATS(ops_sub);
@@ -425,8 +418,8 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 	}
 }
 
-// TODO - temporary, until scan & query can do their own synchronous failure
-// responses. (Here we forfeit namespace info and add to global-scope error.)
+// TODO - temporary, until query can do its own synchronous failure responses.
+// (Here we forfeit namespace info and add to global-scope error.)
 void
 as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 {

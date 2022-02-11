@@ -70,7 +70,6 @@
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
-#include "base/thr_query.h"
 #include "base/transaction_policy.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
@@ -166,15 +165,13 @@ cfg_set_defaults()
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
 	c->n_migrate_threads = 1;
 	cf_os_use_group_perms(false);
-	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
+	c->query_max_done = 100;
+	c->n_query_threads_limit = 128;
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
-	c->scan_max_done = 100;
-	c->n_scan_threads_limit = 128;
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
 	as_sindex_gconfig_default(c);
-	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
 	c->debug_allocations = CF_ALLOC_DEBUG_NONE;
 
@@ -287,23 +284,10 @@ typedef enum {
 	CASE_SERVICE_PIDFILE,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_PROTO_FD_MAX,
-	CASE_SERVICE_QUERY_BATCH_SIZE,
-	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD,
-	CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE,
-	CASE_SERVICE_QUERY_PRIORITY,
-	CASE_SERVICE_QUERY_PRIORITY_SLEEP_US,
-	CASE_SERVICE_QUERY_REC_COUNT_BOUND,
-	CASE_SERVICE_QUERY_REQ_IN_QUERY_THREAD,
-	CASE_SERVICE_QUERY_REQ_MAX_INFLIGHT,
-	CASE_SERVICE_QUERY_SHORT_Q_MAX_SIZE,
-	CASE_SERVICE_QUERY_THREADS,
-	CASE_SERVICE_QUERY_THRESHOLD,
-	CASE_SERVICE_QUERY_UNTRACKED_TIME_MS,
-	CASE_SERVICE_QUERY_WORKER_THREADS,
+	CASE_SERVICE_QUERY_MAX_DONE,
+	CASE_SERVICE_QUERY_THREADS_LIMIT,
 	CASE_SERVICE_RUN_AS_DAEMON,
 	CASE_SERVICE_SALT_ALLOCATIONS,
-	CASE_SERVICE_SCAN_MAX_DONE,
-	CASE_SERVICE_SCAN_THREADS_LIMIT,
 	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_GC_PERIOD,
@@ -322,8 +306,10 @@ typedef enum {
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
+	CASE_SERVICE_SCAN_MAX_DONE,
 	CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS,
 	CASE_SERVICE_SCAN_THREADS,
+	CASE_SERVICE_SCAN_THREADS_LIMIT,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_QUEUES,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
@@ -445,7 +431,7 @@ typedef enum {
 
 	// Namespace options:
 	CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP,
-	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
+	CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES,
 	CASE_NAMESPACE_DATA_IN_INDEX,
@@ -482,7 +468,7 @@ typedef enum {
 	CASE_NAMESPACE_REJECT_XDR_WRITES,
 	CASE_NAMESPACE_REPLICATION_FACTOR,
 	CASE_NAMESPACE_SINGLE_BIN,
-	CASE_NAMESPACE_SINGLE_SCAN_THREADS,
+	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
 	CASE_NAMESPACE_STRONG_CONSISTENCY,
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
@@ -501,7 +487,9 @@ typedef enum {
 	CASE_NAMESPACE_SINDEX_BEGIN,
 	CASE_NAMESPACE_STORAGE_ENGINE_BEGIN,
 	// Obsoleted:
+	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
 	CASE_NAMESPACE_DISABLE_NSUP,
+	CASE_NAMESPACE_SINGLE_SCAN_THREADS,
 
 	// Namespace conflict-resolution-policy options (value tokens):
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION,
@@ -792,23 +780,10 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "pidfile",						CASE_SERVICE_PIDFILE },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
-		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
-		{ "query-in-transaction-thread",	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD },
-		{ "query-long-q-max-size",			CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE },
-		{ "query-priority", 				CASE_SERVICE_QUERY_PRIORITY },
-		{ "query-priority-sleep-us", 		CASE_SERVICE_QUERY_PRIORITY_SLEEP_US },
-		{ "query-rec-count-bound",			CASE_SERVICE_QUERY_REC_COUNT_BOUND },
-		{ "query-req-in-query-thread",		CASE_SERVICE_QUERY_REQ_IN_QUERY_THREAD },
-		{ "query-req-max-inflight",			CASE_SERVICE_QUERY_REQ_MAX_INFLIGHT },
-		{ "query-short-q-max-size",			CASE_SERVICE_QUERY_SHORT_Q_MAX_SIZE },
-		{ "query-threads",					CASE_SERVICE_QUERY_THREADS },
-		{ "query-threshold", 				CASE_SERVICE_QUERY_THRESHOLD },
-		{ "query-untracked-time-ms",		CASE_SERVICE_QUERY_UNTRACKED_TIME_MS },
-		{ "query-worker-threads",			CASE_SERVICE_QUERY_WORKER_THREADS },
+		{ "query-max-done",					CASE_SERVICE_QUERY_MAX_DONE },
+		{ "query-threads-limit",			CASE_SERVICE_QUERY_THREADS_LIMIT },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
 		{ "salt-allocations",				CASE_SERVICE_SALT_ALLOCATIONS },
-		{ "scan-max-done",					CASE_SERVICE_SCAN_MAX_DONE },
-		{ "scan-threads-limit",				CASE_SERVICE_SCAN_THREADS_LIMIT },
 		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
@@ -827,8 +802,10 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
+		{ "scan-max-done",					CASE_SERVICE_SCAN_MAX_DONE },
 		{ "scan-max-udf-transactions",		CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS },
 		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
+		{ "scan-threads-limit",				CASE_SERVICE_SCAN_THREADS_LIMIT },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
@@ -972,7 +949,7 @@ const cfg_opt NETWORK_TLS_OPTS[] = {
 
 const cfg_opt NAMESPACE_OPTS[] = {
 		{ "allow-ttl-without-nsup",			CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP },
-		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
+		{ "background-query-max-rps",		CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "conflict-resolve-writes",		CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
@@ -1009,7 +986,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "reject-xdr-writes",				CASE_NAMESPACE_REJECT_XDR_WRITES },
 		{ "replication-factor",				CASE_NAMESPACE_REPLICATION_FACTOR },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
-		{ "single-scan-threads",			CASE_NAMESPACE_SINGLE_SCAN_THREADS },
+		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
 		{ "strong-consistency",				CASE_NAMESPACE_STRONG_CONSISTENCY },
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
@@ -1028,7 +1005,9 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
 		{ "storage-engine",					CASE_NAMESPACE_STORAGE_ENGINE_BEGIN },
 		// Obsoleted:
+		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
 		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
+		{ "single-scan-threads",			CASE_NAMESPACE_SINGLE_SCAN_THREADS },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -2312,56 +2291,17 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_u32(&line, MIN_PROTO_FD_MAX, MAX_PROTO_FD_MAX);
 				break;
-			case CASE_SERVICE_QUERY_BATCH_SIZE:
-				c->query_bsize = cfg_int_no_checks(&line);
+			case CASE_SERVICE_QUERY_MAX_DONE:
+				c->query_max_done = cfg_u32(&line, 0, 10000);
 				break;
-			case CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD:
-				c->query_in_transaction_thr = cfg_bool(&line);
-				break;
-			case CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE:
-				c->query_long_q_max_size = cfg_u32(&line, 1, UINT32_MAX);
-				break;
-			case CASE_SERVICE_QUERY_PRIORITY:
-				c->query_priority = cfg_int_no_checks(&line);
-				break;
-			case CASE_SERVICE_QUERY_PRIORITY_SLEEP_US:
-				c->query_sleep_us = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_QUERY_REC_COUNT_BOUND:
-				c->query_rec_count_bound = cfg_u64(&line, 1, UINT64_MAX);
-				break;
-			case CASE_SERVICE_QUERY_REQ_IN_QUERY_THREAD:
-				c->query_req_in_query_thread = cfg_bool(&line);
-				break;
-			case CASE_SERVICE_QUERY_REQ_MAX_INFLIGHT:
-				c->query_req_max_inflight = cfg_u32(&line, 1, UINT32_MAX);
-				break;
-			case CASE_SERVICE_QUERY_SHORT_Q_MAX_SIZE:
-				c->query_short_q_max_size = cfg_u32(&line, 1, UINT32_MAX);
-				break;
-			case CASE_SERVICE_QUERY_THREADS:
-				c->query_threads = cfg_u32(&line, 1, AS_QUERY_MAX_THREADS);
-				break;
-			case CASE_SERVICE_QUERY_THRESHOLD:
-				c->query_threshold = cfg_int_no_checks(&line);
-				break;
-			case CASE_SERVICE_QUERY_UNTRACKED_TIME_MS:
-				c->query_untracked_time_ms = cfg_u64_no_checks(&line);
-				break;
-			case CASE_SERVICE_QUERY_WORKER_THREADS:
-				c->query_worker_threads = cfg_u32(&line, 1, AS_QUERY_MAX_WORKER_THREADS);
+			case CASE_SERVICE_QUERY_THREADS_LIMIT:
+				c->n_query_threads_limit = cfg_u32(&line, 1, 1024);
 				break;
 			case CASE_SERVICE_RUN_AS_DAEMON:
 				c->run_as_daemon = cfg_bool_no_value_is_true(&line);
 				break;
 			case CASE_SERVICE_SALT_ALLOCATIONS:
 				c->salt_allocations = cfg_bool(&line);
-				break;
-			case CASE_SERVICE_SCAN_MAX_DONE:
-				c->scan_max_done = cfg_u32(&line, 0, 10000);
-				break;
-			case CASE_SERVICE_SCAN_THREADS_LIMIT:
-				c->n_scan_threads_limit = cfg_u32(&line, 1, 1024);
 				break;
 			case CASE_SERVICE_SERVICE_THREADS:
 				c->n_service_threads = cfg_u32(&line, 1, MAX_SERVICE_THREADS);
@@ -2427,11 +2367,17 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION:
 				cfg_obsolete(&line, "please use namespace context 'write-commit-level-override' and/or write transaction policy");
 				break;
+			case CASE_SERVICE_SCAN_MAX_DONE:
+				cfg_obsolete(&line, "please use 'query-max-done'");
+				break;
 			case CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS:
 				cfg_obsolete(&line, "please use namespace context 'background-scan-max-rps'");
 				break;
 			case CASE_SERVICE_SCAN_THREADS:
 				cfg_obsolete(&line, "please use 'scan-threads-limit' and namespace context 'single-scan-threads'");
+				break;
+			case CASE_SERVICE_SCAN_THREADS_LIMIT:
+				cfg_obsolete(&line, "please use 'query-threads-limit'");
 				break;
 			case CASE_SERVICE_TRANSACTION_PENDING_LIMIT:
 				cfg_obsolete(&line, "please use namespace context 'transaction-pending-limit'");
@@ -2859,8 +2805,8 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP:
 				ns->allow_ttl_without_nsup = cfg_bool(&line);
 				break;
-			case CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS:
-				ns->background_scan_max_rps = cfg_u32(&line, 1, 1000000);
+			case CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS:
+				ns->background_query_max_rps = cfg_u32(&line, 1, 1000000);
 				break;
 			case CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_CONFLICT_RESOLUTION_OPTS, NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS)) {
@@ -2999,8 +2945,8 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_SINGLE_BIN:
 				ns->single_bin = cfg_bool(&line);
 				break;
-			case CASE_NAMESPACE_SINGLE_SCAN_THREADS:
-				ns->n_single_scan_threads = cfg_u32(&line, 1, 128);
+			case CASE_NAMESPACE_SINGLE_QUERY_THREADS:
+				ns->n_single_query_threads = cfg_u32(&line, 1, 128);
 				break;
 			case CASE_NAMESPACE_STOP_WRITES_PCT:
 				ns->stop_writes_pct = cfg_u32(&line, 0, 100);
@@ -3112,8 +3058,14 @@ as_config_init(const char* config_file)
 				}
 				break;
 			// Obsoleted:
+			case CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS:
+				cfg_obsolete(&line, "please use 'background-query-max-rps'");
+				break;
 			case CASE_NAMESPACE_DISABLE_NSUP:
 				cfg_obsolete(&line, "please set 'nsup-period' to 0 to disable nsup");
+				break;
+			case CASE_NAMESPACE_SINGLE_SCAN_THREADS:
+				cfg_obsolete(&line, "please use 'single-query-threads'");
 				break;
 			case CASE_CONTEXT_END:
 				if (ns->memory_size == 0) {
@@ -4058,10 +4010,6 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
 
-	if (g_config.query_threads % 2 != 0) {
-		cf_crash_nostack(AS_CFG, "'query-threads' must be an even number");
-	}
-
 	// Check the configured file descriptor limit against the system limit.
 	struct rlimit fd_limit;
 
@@ -4354,9 +4302,7 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		as_storage_cfg_init(ns);
 
-		histogram_scale scale = g_config.microsecond_histograms ?
-				HIST_MICROSECONDS : HIST_MILLISECONDS;
-
+		histogram_scale scale = as_config_histogram_scale();
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
 		// One-way activated histograms.
@@ -4370,11 +4316,17 @@ as_config_post_process(as_config* c, const char* config_file)
 		sprintf(hist_name, "{%s}-udf", ns->name);
 		ns->udf_hist = histogram_create(hist_name, scale);
 
-		sprintf(hist_name, "{%s}-query", ns->name);
-		ns->query_hist = histogram_create(hist_name, scale);
+		sprintf(hist_name, "{%s}-pi-query", ns->name);
+		ns->pi_query_hist = histogram_create(hist_name, scale);
 
-		sprintf(hist_name, "{%s}-query-rec-count", ns->name);
-		ns->query_rec_count_hist = histogram_create(hist_name, HIST_COUNT);
+		sprintf(hist_name, "{%s}-pi-query-rec-count", ns->name);
+		ns->pi_query_rec_count_hist = histogram_create(hist_name, HIST_COUNT);
+
+		sprintf(hist_name, "{%s}-si-query", ns->name);
+		ns->si_query_hist = histogram_create(hist_name, scale);
+
+		sprintf(hist_name, "{%s}-si-query-rec-count", ns->name);
+		ns->si_query_rec_count_hist = histogram_create(hist_name, HIST_COUNT);
 
 		sprintf(hist_name, "{%s}-re-repl", ns->name);
 		ns->re_repl_hist = histogram_create(hist_name, scale);
@@ -4979,8 +4931,7 @@ cfg_add_ldap_role_query_pattern(char* pattern)
 static void
 cfg_create_all_histograms()
 {
-	histogram_scale scale = g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	histogram_scale scale = as_config_histogram_scale();
 
 	g_stats.batch_index_hist = histogram_create("batch-index", scale);
 

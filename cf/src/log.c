@@ -115,7 +115,6 @@ static const char* context_strings[] = {
 		"roster",
 		"rw",
 		"rw-client",
-		"scan",
 		"security",
 		"service",
 		"service-list",

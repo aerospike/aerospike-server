@@ -41,6 +41,7 @@ int cf_str_atoi_seconds(char *s, uint32_t *value);
 int cf_strtoul_x64(const char *s, uint64_t *value);
 int cf_strtoul_u32(const char *s, uint32_t *value);
 int cf_strtoul_u64(const char *s, uint64_t *value);
+int cf_strtoul_u64_raw(const char *s, uint64_t *value);
 int cf_strtol_i32(const char *s, int32_t *value);
 
 // Split the string 'str' based on input breaks in 'fmt'.
@@ -51,13 +52,14 @@ struct cf_vector_s;
 extern void cf_str_split(char *fmt, char *str, struct cf_vector_s *v);
 
 static inline int
-cf_str_strnchr(uint8_t *s, int sz, int c)
+cf_str_strnchr(const uint8_t *s, int sz, int c)
 {
 	for (int i = 0; i < sz; i++) {
 		if (s[i] == c) {
 			return i;
 		}
 	}
+
 	return -1;
 }
 

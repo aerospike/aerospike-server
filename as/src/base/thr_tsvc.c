@@ -41,15 +41,14 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
-#include "base/scan.h"
 #include "base/security.h"
 #include "base/stats.h"
-#include "base/thr_query.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/xdr.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
+#include "query/query.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/proxy.h"
@@ -68,17 +67,6 @@ static inline bool
 should_security_check_data_op(const as_transaction *tr)
 {
 	return tr->origin == FROM_CLIENT || tr->origin == FROM_BATCH;
-}
-
-static inline as_sec_perm
-scan_perm(const as_transaction *tr)
-{
-	if (as_transaction_is_udf(tr)) {
-		return PERM_UDF_SCAN;
-	}
-
-	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ?
-			PERM_OPS_SCAN : PERM_SCAN;
 }
 
 static inline as_sec_perm
@@ -171,54 +159,27 @@ as_tsvc_process_transaction(as_transaction *tr)
 		else {
 			cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
 			as_transaction_error(tr, NULL, AS_ERR_UNAVAILABLE);
-			// Note that we forfeited namespace info above so scan & query don't
-			// get counted as single-record error.
+			// Note that we forfeited namespace info above so query doesn't get
+			// counted as single-record error.
 		}
 
 		goto Cleanup;
 	}
 
 	//------------------------------------------------------
-	// Multi-record transaction.
+	// Query.
 	//
 
-	if (as_transaction_is_multi_record(tr)) {
-		if (m->transaction_ttl != 0) {
-			// Queries may specify transaction_ttl, but don't use
-			// g_config.transaction_max_ns as a default. Assuming specified TTL
-			// is large enough that it's not worth checking for timeout here.
-			tr->end_time = tr->start_time +
-					((uint64_t)m->transaction_ttl * 1000000);
+	if (as_transaction_is_query(tr)) {
+		if (! as_security_check_data_op(tr, ns, query_perm(tr))) {
+			as_multi_rec_transaction_error(tr, tr->result_code);
+			goto Cleanup;
 		}
 
-		if (as_transaction_is_batch_direct(tr)) {
-			// Old batch - unsupported.
-			as_multi_rec_transaction_error(tr, AS_ERR_UNSUPPORTED_FEATURE);
-		}
-		else if (as_transaction_is_query(tr)) {
-			// Query.
-			cf_atomic64_incr(&ns->query_reqs);
+		rv = as_query(tr, ns);
 
-			if (! as_security_check_data_op(tr, ns, query_perm(tr))) {
-				as_multi_rec_transaction_error(tr, tr->result_code);
-				goto Cleanup;
-			}
-
-			if (! as_query(tr, ns)) {
-				cf_atomic64_incr(&ns->query_fail);
-				as_multi_rec_transaction_error(tr, tr->result_code);
-			}
-		}
-		else {
-			// Scan.
-			if (! as_security_check_data_op(tr, ns, scan_perm(tr))) {
-				as_multi_rec_transaction_error(tr, tr->result_code);
-				goto Cleanup;
-			}
-
-			if ((rv = as_scan(tr, ns)) != 0) {
-				as_multi_rec_transaction_error(tr, rv);
-			}
+		if (rv != 0) {
+			as_multi_rec_transaction_error(tr, rv);
 		}
 
 		goto Cleanup;
@@ -370,11 +331,13 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.proxy_node = 0; // pattern, not needed
 			break;
 		case FROM_IUDF:
-			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, AS_ERR_UNKNOWN);
+			tr->from.iudf_orig->done_cb(tr->from.iudf_orig->udata,
+					AS_ERR_UNKNOWN);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 			break;
 		case FROM_IOPS:
-			tr->from.iops_orig->cb(tr->from.iops_orig->udata, AS_ERR_UNKNOWN);
+			tr->from.iops_orig->done_cb(tr->from.iops_orig->udata,
+					AS_ERR_UNKNOWN);
 			tr->from.iops_orig = NULL; // pattern, not needed
 			break;
 		case FROM_RE_REPL:

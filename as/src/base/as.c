@@ -56,7 +56,6 @@
 #include "base/json_init.h"
 #include "base/monitor.h"
 #include "base/nsup.h"
-#include "base/scan.h"
 #include "base/security.h"
 #include "base/service.h"
 #include "base/set_index.h"
@@ -64,7 +63,6 @@
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
-#include "base/thr_query.h"
 #include "base/ticker.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
@@ -75,6 +73,7 @@
 #include "fabric/migrate.h"
 #include "fabric/roster.h"
 #include "fabric/skew_monitor.h"
+#include "query/query.h"
 #include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
@@ -379,7 +378,6 @@ as_run(int argc, char **argv)
 	cf_info(AS_AS, "initializing services...");
 
 	cf_dns_init();				// DNS resolver
-	as_netio_init();			// query responses
 	as_security_init();			// security features
 	as_service_init();			// server may process internal transactions
 	as_hb_init();				// inter-node heartbeat
@@ -393,7 +391,6 @@ as_run(int argc, char **argv)
 	as_rw_init();				// read & write service
 	as_query_init();			// query transaction handling
 	as_udf_init();				// user-defined functions
-	as_scan_init();				// scan a namespace or set
 	as_batch_init();			// batch transaction handling
 	as_mon_init();				// monitor
 	as_set_index_init();		// dynamic set-index population

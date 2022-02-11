@@ -31,40 +31,20 @@
 #include <unistd.h>
 
 #include "aerospike/as_atomic.h"
-#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_ll.h"
 #include "citrusleaf/cf_queue.h"
 
-#include "arenax.h"
 #include "cf_mutex.h"
 #include "log.h"
-
-#include "ai_btree.h"
-#include "ai_glue.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/stats.h"
 #include "sindex/secondary_index.h"
+#include "sindex/sindex_tree.h"
 
 #include "warnings.h"
-
-
-//==========================================================
-// Typedefs & constants.
-//
-
-typedef struct gc_offset_s {
-	ai_obj ibtr_last_key;
-	cf_arenax_handle nbtr_last_key;
-	bool done;
-} gc_offset;
-
-// TODO - Find the correct values.
-#define CREATE_LIST_PER_ITERATION_LIMIT 10000
-#define PROCESS_LIST_PER_ITERATION_LIMIT  10
 
 
 //==========================================================
@@ -73,11 +53,6 @@ typedef struct gc_offset_s {
 
 static void gc_ns_cycle(as_namespace* ns);
 static void gc_ns(as_namespace* ns);
-static void gc_si(as_sindex* si, uint64_t* n_cleaned);
-static void gc_si_pimd(as_sindex* si, as_sindex_pmetadata* pimd, uint64_t* n_cleaned);
-static bool gc_create_list(as_sindex* si, as_sindex_pmetadata* pimd, cf_ll* gc_list, gc_offset* offsetp);
-static void gc_process_list(as_sindex* si, as_sindex_pmetadata* pimd, cf_ll* gc_list, uint64_t* n_cleaned);
-static int ll_sindex_gc_reduce_fn(cf_ll_element* ele, void* udata);
 
 
 //==========================================================
@@ -196,7 +171,7 @@ gc_ns(as_namespace* ns)
 	cf_info(AS_SINDEX, "{%s} sindex-gc-start", ns->name);
 
 	uint64_t start_ms = cf_getms();
-	uint64_t n_cleaned = 0;
+	uint64_t n_cleaned = ns->n_sindex_gc_cleaned;
 
 	// Avoid using ns->sindex_cnt as it needs a lock (for entire GC cycle).
 	for (uint32_t i = 0; i < AS_SINDEX_MAX; i++) {
@@ -213,122 +188,12 @@ gc_ns(as_namespace* ns)
 
 		SINDEX_GRUNLOCK();
 
-		gc_si(si, &n_cleaned);
+		as_sindex_tree_gc(si);
 
 		as_sindex_release(si);
 	}
 
-	ns->n_sindex_gc_cleaned += n_cleaned;
-
 	cf_info(AS_SINDEX, "{%s} sindex-gc-done: cleaned (%lu,%lu) total-ms %lu",
-			ns->name, ns->n_sindex_gc_cleaned, n_cleaned,
-			cf_getms() - start_ms);
-}
-
-static void
-gc_si(as_sindex* si, uint64_t* n_cleaned) {
-	for (uint32_t i = 0; i < si->imd->n_pimds; i++) {
-		as_sindex_pmetadata* pimd = &si->imd->pimd[i];
-
-		gc_si_pimd(si, pimd, n_cleaned);
-	}
-}
-
-static void
-gc_si_pimd(as_sindex* si, as_sindex_pmetadata* pimd, uint64_t* n_cleaned)
-{
-	// FIXME - change minima when key comparison function changes.
-	static const ai_obj min_integer = { .integer = INT64_MIN };
-	static const ai_obj min_digest;
-
-	gc_offset offset; // skey + r_h offset
-
-	offset.ibtr_last_key = C_IS_DIGEST(si->imd->sktype) ?
-			min_digest : min_integer;
-	offset.nbtr_last_key = 0;
-	offset.done = false;
-
-	cf_ll gc_list;
-
-	cf_ll_init(&gc_list, &ai_btree_gc_list_destroy_fn, false);
-
-	while (true) {
-		// Checking state without lock - if we read a stale value we will delete
-		// a few handles. It is ok as we have a tree reference.
-		if (si->state == AS_SINDEX_DESTROY) {
-			break;
-		}
-
-		if (! gc_create_list(si, pimd, &gc_list, &offset)) {
-			break;
-		}
-
-		if (cf_ll_size(&gc_list) > 0) {
-			gc_process_list(si, pimd, &gc_list, n_cleaned);
-			cf_ll_reduce(&gc_list, true, ll_sindex_gc_reduce_fn, NULL);
-		}
-
-		if (offset.done) {
-			break;
-		}
-	}
-
-	cf_ll_reduce(&gc_list, true, ll_sindex_gc_reduce_fn, NULL);
-}
-
-// true if tree is done
-// false if more in tree
-static bool
-gc_create_list(as_sindex* si, as_sindex_pmetadata* pimd, cf_ll* gc_list,
-		gc_offset* offsetp)
-{
-	uint64_t limit_per_iteration = CREATE_LIST_PER_ITERATION_LIMIT;
-
-	PIMD_RLOCK(&pimd->slock);
-
-	as_sindex_status status = ai_btree_build_defrag_list(si->imd, pimd,
-			&offsetp->ibtr_last_key, &offsetp->nbtr_last_key,
-			limit_per_iteration, gc_list);
-
-	PIMD_RUNLOCK(&pimd->slock);
-
-	if (status == AS_SINDEX_DONE) {
-		offsetp->done = true;
-	}
-
-	return status != AS_SINDEX_ERR;
-}
-
-static void
-gc_process_list(as_sindex* si, as_sindex_pmetadata* pimd, cf_ll* gc_list,
-		uint64_t* n_cleaned)
-{
-	uint64_t n_deleted = 0;
-	uint64_t limit_per_iteration = PROCESS_LIST_PER_ITERATION_LIMIT;
-
-	bool more = true;
-
-	while (more) {
-		PIMD_WLOCK(&pimd->slock);
-
-		more = ai_btree_defrag_list(si->imd, pimd, gc_list,
-				limit_per_iteration, &n_deleted);
-
-		PIMD_WUNLOCK(&pimd->slock);
-	}
-
-	// Update secondary index object count statistics aggressively.
-	cf_atomic64_add(&si->stats.n_objects, (int64_t)-n_deleted);
-	cf_atomic64_add(&si->stats.n_defrag_records, (int64_t)n_deleted);
-
-	*n_cleaned += n_deleted;
-}
-
-static int
-ll_sindex_gc_reduce_fn(cf_ll_element* ele, void* udata)
-{
-	(void)ele;
-	(void)udata;
-
-	return CF_LL_REDUCE_DELETE;
+			ns->name, ns->n_sindex_gc_cleaned,
+			ns->n_sindex_gc_cleaned - n_cleaned, cf_getms() - start_ms);
 }

@@ -27,6 +27,7 @@
 //
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "aerospike/as_aerospike.h"
@@ -42,6 +43,7 @@
 //
 
 struct as_exp_s;
+struct as_storage_rd_s;
 struct as_transaction_s;
 struct cl_msg_s;
 
@@ -59,13 +61,15 @@ typedef struct udf_def_s {
 	uint8_t type;
 } udf_def;
 
-typedef void (*iudf_cb)(void* udata, int result);
+typedef bool (*iudf_check_cb)(void* udata, struct as_storage_rd_s* rd);
+typedef void (*iudf_done_cb)(void* udata, int result);
 
 typedef struct iudf_origin_s {
 	udf_def def;
 	struct cl_msg_s* msgp;
 	struct as_exp_s* filter_exp;
-	iudf_cb cb;
+	iudf_check_cb check_cb;
+	iudf_done_cb done_cb;
 	void* udata;
 } iudf_origin;
 
@@ -82,7 +86,10 @@ iudf_origin_destroy(iudf_origin* origin)
 	}
 
 	as_exp_destroy(origin->filter_exp);
-	cf_free(origin->msgp);
+
+	if (origin->msgp != NULL) {
+		cf_free(origin->msgp);
+	}
 }
 
 void as_udf_init();

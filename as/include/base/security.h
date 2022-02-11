@@ -51,16 +51,13 @@ typedef enum {
 
 	// Data transactions.
 	PERM_READ			= 0x0001,
-	PERM_SCAN			= 0x0002,
-	PERM_QUERY			= 0x0004,
-	PERM_WRITE			= 0x0008,
-	PERM_DELETE			= 0x0010,
-	PERM_UDF_APPLY		= 0x0020,
-	PERM_UDF_SCAN		= 0x0040,
-	PERM_UDF_QUERY		= 0x0080,
-	PERM_OPS_SCAN		= 0x0100,
-	PERM_OPS_QUERY		= 0x0200,
-	// ... 6 unused bits ...
+	PERM_QUERY			= 0x0002,
+	PERM_WRITE			= 0x0004,
+	PERM_DELETE			= 0x0008,
+	PERM_UDF_APPLY		= 0x0010,
+	PERM_UDF_QUERY		= 0x0020,
+	PERM_OPS_QUERY		= 0x0040,
+	// ... 9 unused bits ...
 
 	// Data transactions' system metadata management.
 	PERM_UDF_ADMIN		= 0x00010000,

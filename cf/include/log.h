@@ -92,7 +92,6 @@ typedef enum {
 	AS_ROSTER,
 	AS_RW,
 	AS_RW_CLIENT, // special detail context
-	AS_SCAN,
 	AS_SECURITY,
 	AS_SERVICE,
 	AS_SERVICE_LIST,

@@ -673,7 +673,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		if (db != NULL && db->used_sz != 0) {
 			cf_crash(AS_RW, "unexpected - internal udf has response");
 		}
-		tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
+		tr->from.iudf_orig->done_cb(tr->from.iudf_orig->udata, tr->result_code);
 		BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, response);
 		udf_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
@@ -716,7 +716,7 @@ udf_timeout_cb(rw_request* rw)
 		batch_sub_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_IUDF:
-		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata, AS_ERR_TIMEOUT);
+		rw->from.iudf_orig->done_cb(rw->from.iudf_orig->udata, AS_ERR_TIMEOUT);
 		// Timeouts aren't included in histograms.
 		udf_sub_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
@@ -929,6 +929,7 @@ open_existing_record(udf_record* urecord)
 	as_transaction* tr = urecord->tr;
 	as_namespace* ns = tr->rsv.ns;
 	as_record* r = urecord->r_ref->r;
+	as_storage_rd* rd = urecord->rd; // note - stack struct not opened!
 
 	int rv;
 	as_exp* filter_exp = NULL;
@@ -947,7 +948,7 @@ open_existing_record(udf_record* urecord)
 			return (uint8_t)rv;
 		}
 
-		as_exp_ctx ctx = { .ns = ns, .r = r, .rd = urecord->rd };
+		as_exp_ctx ctx = { .ns = ns, .r = r, .rd = rd };
 
 		if (! as_exp_matches_record(filter_exp, &ctx)) {
 			destroy_filter_exp(tr, filter_exp);
@@ -957,13 +958,26 @@ open_existing_record(udf_record* urecord)
 		destroy_filter_exp(tr, filter_exp);
 	}
 
+	if (tr->origin == FROM_IUDF) {
+		iudf_origin* origin = tr->from.iudf_orig;
+
+		if (origin->check_cb != NULL) {
+			if ((rv = udf_record_load(urecord)) != 0) {
+				cf_warning(AS_UDF, "record failed load");
+				return (uint8_t)rv;
+			}
+
+			if (! origin->check_cb(origin->udata, rd)) {
+				return AS_ERR_NOT_FOUND;
+			}
+		}
+	}
+
 	if (as_transaction_has_key(tr)) {
 		if ((rv = udf_record_load(urecord)) != 0) {
 			cf_warning(AS_UDF, "record failed load");
 			return (uint8_t)rv;
 		}
-
-		as_storage_rd* rd = urecord->rd;
 
 		if (rd->key != NULL) {
 			// If both the record and the message have keys, check them.
@@ -1374,7 +1388,7 @@ update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
 	case FROM_IUDF:
 		if (op == UDF_OPTYPE_READ) {
 			// Note - this would be weird, since there's nowhere for a
-			// response to go in our current UDF scans & queries.
+			// response to go in our current UDF queries.
 			cf_atomic64_incr(&ns->n_udf_sub_lang_read_success);
 		}
 		else if (op == UDF_OPTYPE_DELETE) {

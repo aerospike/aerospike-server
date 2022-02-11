@@ -1,7 +1,7 @@
 /*
- * scan_job.c
+ * query_job.c
  *
- * Copyright (C) 2019-2020 Aerospike, Inc.
+ * Copyright (C) 2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,7 +24,7 @@
 // Includes.
 //
 
-#include "base/scan_job.h"
+#include "query/query_job.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -36,14 +36,18 @@
 
 #include "cf_thread.h"
 #include "dynbuf.h"
+#include "hist.h"
 #include "log.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/monitor.h"
-#include "base/scan_manager.h"
+#include "base/proto.h"
 #include "base/security.h"
+#include "base/transaction.h"
 #include "fabric/partition.h"
+#include "geospatial/geospatial.h"
+#include "query/query_manager.h"
 
 #include "warnings.h"
 
@@ -61,41 +65,30 @@
 // Globals.
 //
 
-static uint32_t g_scan_job_trid = 0;
+static uint32_t g_query_job_trid = 0;
 
 
 //==========================================================
 // Forward declarations.
 //
 
-static void as_scan_job_finish(as_scan_job* _job);
-static uint32_t throttle_sleep(as_scan_job* _job, uint64_t count, uint64_t now);
+static void finish(as_query_job* _job);
+static void range_free(as_query_range* range);
+static uint32_t throttle_sleep(as_query_job* _job, uint64_t count, uint64_t now);
 
 
 //==========================================================
 // Inlines & macros.
 //
 
-static inline void
-count_pids_requested(as_scan_job* _job)
-{
-	if (_job->pids != NULL) {
-		for (uint32_t i = 0; i < AS_PARTITIONS; i++) {
-			if (_job->pids[i].requested) {
-				_job->n_pids_requested++;
-			}
-		}
-	}
-}
-
 static inline uint64_t
-scan_job_trid(uint64_t trid)
+query_job_trid(uint64_t trid)
 {
-	return trid != 0 ? trid : (uint64_t)as_aaf_uint32(&g_scan_job_trid, 1);
+	return trid != 0 ? trid : (uint64_t)as_aaf_uint32(&g_query_job_trid, 1);
 }
 
 static inline float
-progress_pct(as_scan_job* _job)
+progress_pct(as_query_job* _job)
 {
 	uint32_t pid = _job->pid + 1;
 
@@ -112,13 +105,13 @@ result_str(int result)
 	switch (result) {
 	case 0:
 		return "ok";
-	case AS_SCAN_ERR_UNKNOWN:
+	case AS_ERR_UNKNOWN:
 		return "abandoned-unknown";
-	case AS_SCAN_ERR_USER_ABORT:
+	case AS_ERR_QUERY_ABORT:
 		return "user-aborted";
-	case AS_SCAN_ERR_RESPONSE_ERROR:
+	case AS_QUERY_RESPONSE_ERROR:
 		return "abandoned-response-error";
-	case AS_SCAN_ERR_RESPONSE_TIMEOUT:
+	case AS_QUERY_RESPONSE_TIMEOUT:
 		return "abandoned-response-timeout";
 	default:
 		return "abandoned-?";
@@ -131,36 +124,28 @@ result_str(int result)
 //
 
 void
-as_scan_job_init(as_scan_job* _job, const as_scan_vtable* vtable, uint64_t trid,
-		as_namespace* ns, const char* set_name, uint16_t set_id,
-		as_scan_pid* pids, uint32_t rps, void* rps_udata, const char* client)
+as_query_job_init(as_query_job* _job, const as_query_vtable* vtable,
+		const as_transaction* tr, as_namespace* ns)
 {
-	*_job = (as_scan_job){
-			.vtable = *vtable,
-			.trid = scan_job_trid(trid),
-			.ns = ns,
-			.set_id = set_id,
-			.pids = pids,
-			.rps = rps,
-			.rps_udata = rps_udata
-	};
+	_job->vtable = *vtable;
+	_job->trid = query_job_trid(as_transaction_trid(tr));
+	_job->ns = ns;
+	_job->start_ns = tr->start_time;
 
-	strcpy(_job->set_name, set_name);
-	strcpy(_job->client, client);
-	count_pids_requested(_job);
+	strcpy(_job->client, tr->from.proto_fd_h->client);
 }
 
 void*
-as_scan_job_run(void* pv_job)
+as_query_job_run(void* pv_job)
 {
-	as_scan_job* _job = (as_scan_job*)pv_job;
+	as_query_job* _job = (as_query_job*)pv_job;
 
-	if (! _job->started) {
+	if (! _job->is_short && ! _job->started) {
 		_job->base_sys_tid = cf_thread_sys_tid();
 		_job->started = true;
 
 		if (_job->rps == 0) {
-			as_scan_manager_add_max_job_threads(_job);
+			as_query_manager_add_max_job_threads(_job);
 		}
 	}
 
@@ -195,9 +180,9 @@ as_scan_job_run(void* pv_job)
 		_job->vtable.slice_fn(_job, &rsv, &bb);
 		as_partition_release(&rsv);
 
-		if (cf_thread_sys_tid() != _job->base_sys_tid &&
-				(_job->n_threads > _job->ns->n_single_scan_threads ||
-						g_n_threads > g_config.n_scan_threads_limit)) {
+		if (! _job->is_short && cf_thread_sys_tid() != _job->base_sys_tid &&
+				(_job->n_threads > _job->ns->n_single_query_threads ||
+						g_n_query_threads > g_config.n_query_threads_limit)) {
 			break;
 		}
 	}
@@ -207,39 +192,58 @@ as_scan_job_run(void* pv_job)
 		cf_buf_builder_free(bb);
 	}
 
-	as_decr_uint32(&g_n_threads);
+	int32_t n = 0;
 
-	int32_t n = (int32_t)as_aaf_uint32(&_job->n_threads, -1);
+	if (! _job->do_inline) {
+		as_decr_uint32(&g_n_query_threads);
+		n = (int32_t)as_aaf_uint32(&_job->n_threads, -1);
 
-	cf_assert(n >= 0, AS_SCAN, "scan job thread underflow %d", n);
+		cf_assert(n >= 0, AS_QUERY, "query job thread underflow %d", n);
+	}
 
 	if (n == 0) {
-		as_scan_job_finish(_job);
-		as_scan_manager_finish_job(_job);
+		finish(_job);
+
+		if (_job->is_short) {
+			as_query_job_destroy(_job);
+		}
+		else {
+			as_query_manager_finish_job(_job);
+		}
 	}
 
 	return NULL;
 }
 
 uint32_t
-as_scan_job_throttle(as_scan_job* _job)
+as_query_job_throttle(as_query_job* _job)
 {
-	uint64_t count = as_aaf_uint64(&_job->n_throttled, 1);
-	uint64_t now = cf_getus();
+	uint64_t count;
+	uint64_t now;
 
 	if (cf_thread_sys_tid() != _job->base_sys_tid) {
-		return _job->rps == 0 ? 0 : throttle_sleep(_job, count, now);
+		if (_job->rps == 0) {
+			return 0;
+		}
+
+		count = as_aaf_uint64(&_job->n_throttled, 1);
+		now = cf_getus();
+
+		return throttle_sleep(_job, count, now);
 	}
 	// else - only base thread adds extra threads.
 
 	if (_job->rps == 0) {
 		if (_job->pid < AS_PARTITIONS - 1) {
 			// Don't re-add threads that drop near the end.
-			as_scan_manager_add_max_job_threads(_job);
+			as_query_manager_add_max_job_threads(_job);
 		}
 
 		return 0;
 	}
+
+	count = as_aaf_uint64(&_job->n_throttled, 1);
+	now = cf_getus();
 
 	uint32_t sleep_us =  throttle_sleep(_job, count, now);
 
@@ -263,14 +267,14 @@ as_scan_job_throttle(as_scan_job* _job)
 		_job->base_us = now;
 		_job->base_count = count;
 
-		as_scan_manager_add_job_thread(_job);
+		as_query_manager_add_job_thread(_job);
 	}
 
 	return 0;
 }
 
 void
-as_scan_job_destroy(as_scan_job* _job)
+as_query_job_destroy(as_query_job* _job)
 {
 	_job->vtable.destroy_fn(_job);
 
@@ -278,30 +282,38 @@ as_scan_job_destroy(as_scan_job* _job)
 		as_security_done_rps(_job->rps_udata, _job->rps, true);
 	}
 
-	if (_job->pids) {
+	if (_job->pids != NULL) {
 		cf_free(_job->pids);
+	}
+
+	if (_job->si != NULL) {
+		as_sindex_release(_job->si);
+	}
+
+	if (_job->range != NULL) {
+		range_free(_job->range);
 	}
 
 	cf_free(_job);
 }
 
 void
-as_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
+as_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
 {
-	uint64_t now = cf_getus();
-	bool done = _job->finish_us != 0;
-	uint64_t since_start_us = now - _job->start_us;
-	uint64_t since_finish_us = done ? now - _job->finish_us : 0;
-	uint64_t active_us = done ?
-			_job->finish_us - _job->start_us : since_start_us;
+	uint64_t now = cf_getns();
+	bool done = _job->finish_ns != 0;
+	uint64_t since_start_ns = now - _job->start_ns;
+	uint64_t since_finish_ns = done ? now - _job->finish_ns : 0;
+	uint64_t active_ns = done ?
+			_job->finish_ns - _job->start_ns : since_start_ns;
 
 	stat->trid = _job->trid;
 	stat->n_pids_requested = _job->n_pids_requested;
 	stat->rps = _job->rps;
 	stat->active_threads = _job->n_threads;
 	stat->progress_pct = progress_pct(_job);
-	stat->run_time = active_us / 1000;
-	stat->time_since_done = since_finish_us / 1000;
+	stat->run_time = active_ns / 1000000;
+	stat->time_since_done = since_finish_ns / 1000000;
 
 	stat->recs_throttled = _job->n_throttled;
 	stat->recs_filtered_meta = _job->n_filtered_meta;
@@ -337,7 +349,7 @@ as_scan_job_info(as_scan_job* _job, as_mon_jobstat* stat)
 //
 
 static void
-as_scan_job_finish(as_scan_job* _job)
+finish(as_query_job* _job)
 {
 	_job->vtable.finish_fn(_job);
 
@@ -345,10 +357,32 @@ as_scan_job_finish(as_scan_job* _job)
 		as_security_done_rps(_job->rps_udata, _job->rps, false);
 		_job->rps_udata = NULL;
 	}
+
+	if (_job->si != NULL) {
+		as_sindex_release(_job->si);
+		_job->si = NULL;
+	}
+}
+
+// So that calloc'ed but not fully initialized range is freed correctly.
+COMPILER_ASSERT(AS_PARTICLE_TYPE_GEOJSON != 0);
+
+static void
+range_free(as_query_range* range)
+{
+	if (range->bin_type == AS_PARTICLE_TYPE_GEOJSON) {
+		cf_free(range->u.geo.r);
+
+		if (range->u.geo.region) {
+			geo_region_destroy(range->u.geo.region);
+		}
+	}
+
+	cf_free(range);
 }
 
 static uint32_t
-throttle_sleep(as_scan_job* _job, uint64_t count, uint64_t now)
+throttle_sleep(as_query_job* _job, uint64_t count, uint64_t now)
 {
 	uint64_t target_us = ((count - _job->base_count) * 1000000) / _job->rps;
 	int64_t sleep_us = (int64_t)(target_us - (now - _job->base_us));

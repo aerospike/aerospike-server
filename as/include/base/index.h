@@ -375,10 +375,24 @@ bool as_index_reduce_from_live(as_index_tree* tree, const cf_digest* keyd, as_in
 
 int as_index_get_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
 int as_index_get_insert_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
-void as_index_vlock(as_index_tree* tree, as_index_ref* index_ref);
 void as_index_delete(as_index_tree* tree, const cf_digest* keyd);
 
 // Used by queries when reserving arena refs.
+
+static inline cf_mutex*
+as_index_olock_from_keyd(as_index_tree* tree, const cf_digest* keyd)
+{
+	// Note - assumes 256 locks per partition!
+
+	// Get the 8 most significant non-pid bits in the digest. Note - this is
+	// hardwired around the way we currently extract the 12-bit partition-ID
+	// from the digest.
+	uint32_t lock_i = ((uint32_t)keyd->digest[1] & 0xF0) |
+			((uint32_t)keyd->digest[2] >> 4);
+
+	return &((tree_locks(tree) + lock_i))->lock;
+}
+
 static inline cf_mutex*
 as_index_rlock_from_keyd(as_index_tree* tree, const cf_digest* keyd)
 {

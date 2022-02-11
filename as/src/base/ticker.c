@@ -50,7 +50,6 @@
 #include "base/set_index.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
-#include "base/thr_query.h"
 #include "base/thr_tsvc.h"
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
@@ -58,7 +57,7 @@
 #include "fabric/hb.h"
 #include "fabric/partition.h"
 #include "fabric/skew_monitor.h"
-#include "sindex/secondary_index.h"
+#include "query/query.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -97,8 +96,8 @@ void log_line_from_proxy(as_namespace* ns);
 void log_line_xdr_from_proxy(as_namespace* ns);
 void log_line_batch_sub(as_namespace* ns);
 void log_line_from_proxy_batch_sub(as_namespace* ns);
-void log_line_scan(as_namespace* ns);
-void log_line_query(as_namespace* ns);
+void log_line_pi_query(as_namespace* ns);
+void log_line_si_query(as_namespace* ns);
 void log_line_udf_sub(as_namespace* ns);
 void log_line_ops_sub(as_namespace* ns);
 void log_line_dup_res(as_namespace* ns);
@@ -210,8 +209,8 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_xdr_from_proxy(ns);
 		log_line_batch_sub(ns);
 		log_line_from_proxy_batch_sub(ns);
-		log_line_scan(ns);
-		log_line_query(ns);
+		log_line_pi_query(ns);
+		log_line_si_query(ns);
 		log_line_udf_sub(ns);
 		log_line_ops_sub(ns);
 		log_line_dup_res(ns);
@@ -816,62 +815,72 @@ log_line_from_proxy_batch_sub(as_namespace* ns)
 }
 
 void
-log_line_scan(as_namespace* ns)
+log_line_pi_query(as_namespace* ns)
 {
-	uint64_t n_basic_complete = ns->n_scan_basic_complete;
-	uint64_t n_basic_error = ns->n_scan_basic_error;
-	uint64_t n_basic_abort = ns->n_scan_basic_abort;
-	uint64_t n_aggr_complete = ns->n_scan_aggr_complete;
-	uint64_t n_aggr_error = ns->n_scan_aggr_error;
-	uint64_t n_aggr_abort = ns->n_scan_aggr_abort;
-	uint64_t n_udf_bg_complete = ns->n_scan_udf_bg_complete;
-	uint64_t n_udf_bg_error = ns->n_scan_udf_bg_error;
-	uint64_t n_udf_bg_abort = ns->n_scan_udf_bg_abort;
-	uint64_t n_ops_bg_complete = ns->n_scan_ops_bg_complete;
-	uint64_t n_ops_bg_error = ns->n_scan_ops_bg_error;
-	uint64_t n_ops_bg_abort = ns->n_scan_ops_bg_abort;
+	uint64_t n_short_basic_complete = ns->n_pi_query_short_basic_complete;
+	uint64_t n_short_basic_error = ns->n_pi_query_short_basic_error;
+	uint64_t n_short_basic_timeout = ns->n_pi_query_short_basic_timeout;
+	uint64_t n_long_basic_complete = ns->n_pi_query_long_basic_complete;
+	uint64_t n_long_basic_error = ns->n_pi_query_long_basic_error;
+	uint64_t n_long_basic_abort = ns->n_pi_query_long_basic_abort;
+	uint64_t n_aggr_complete = ns->n_pi_query_aggr_complete;
+	uint64_t n_aggr_error = ns->n_pi_query_aggr_error;
+	uint64_t n_aggr_abort = ns->n_pi_query_aggr_abort;
+	uint64_t n_udf_bg_complete = ns->n_pi_query_udf_bg_complete;
+	uint64_t n_udf_bg_error = ns->n_pi_query_udf_bg_error;
+	uint64_t n_udf_bg_abort = ns->n_pi_query_udf_bg_abort;
+	uint64_t n_ops_bg_complete = ns->n_pi_query_ops_bg_complete;
+	uint64_t n_ops_bg_error = ns->n_pi_query_ops_bg_error;
+	uint64_t n_ops_bg_abort = ns->n_pi_query_ops_bg_abort;
 
-	if ((n_basic_complete | n_basic_error | n_basic_abort |
+	if ((n_short_basic_complete | n_short_basic_error | n_short_basic_timeout |
+			n_long_basic_complete | n_long_basic_error | n_long_basic_abort |
 			n_aggr_complete | n_aggr_error | n_aggr_abort |
 			n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort |
 			n_ops_bg_complete | n_ops_bg_error | n_ops_bg_abort) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
+	cf_info(AS_INFO, "{%s} pi-query: short-basic (%lu,%lu,%lu) long-basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
 			ns->name,
-			n_basic_complete, n_basic_error, n_basic_abort,
+			n_short_basic_complete, n_short_basic_error, n_short_basic_timeout,
+			n_long_basic_complete, n_long_basic_error, n_long_basic_abort,
 			n_aggr_complete, n_aggr_error, n_aggr_abort,
 			n_udf_bg_complete, n_udf_bg_error, n_udf_bg_abort,
 			n_ops_bg_complete, n_ops_bg_error, n_ops_bg_abort);
 }
 
 void
-log_line_query(as_namespace* ns)
+log_line_si_query(as_namespace* ns)
 {
-	uint64_t n_basic_complete = ns->n_query_basic_complete;
-	uint64_t n_basic_error = ns->n_query_basic_error;
-	uint64_t n_basic_abort = ns->n_query_basic_abort;
-	uint64_t n_aggr_complete = ns->n_query_aggr_complete;
-	uint64_t n_aggr_error = ns->n_query_aggr_error;
-	uint64_t n_aggr_abort = ns->n_query_aggr_abort;
-	uint64_t n_udf_bg_complete = ns->n_query_udf_bg_complete;
-	uint64_t n_udf_bg_error = ns->n_query_udf_bg_error;
-	uint64_t n_udf_bg_abort = ns->n_query_udf_bg_abort;
-	uint64_t n_ops_bg_complete = ns->n_query_ops_bg_complete;
-	uint64_t n_ops_bg_error = ns->n_query_ops_bg_error;
-	uint64_t n_ops_bg_abort = ns->n_query_ops_bg_abort;
+	uint64_t n_short_basic_complete = ns->n_si_query_short_basic_complete;
+	uint64_t n_short_basic_error = ns->n_si_query_short_basic_error;
+	uint64_t n_short_basic_timeout = ns->n_si_query_short_basic_timeout;
+	uint64_t n_long_basic_complete = ns->n_si_query_long_basic_complete;
+	uint64_t n_long_basic_error = ns->n_si_query_long_basic_error;
+	uint64_t n_long_basic_abort = ns->n_si_query_long_basic_abort;
+	uint64_t n_aggr_complete = ns->n_si_query_aggr_complete;
+	uint64_t n_aggr_error = ns->n_si_query_aggr_error;
+	uint64_t n_aggr_abort = ns->n_si_query_aggr_abort;
+	uint64_t n_udf_bg_complete = ns->n_si_query_udf_bg_complete;
+	uint64_t n_udf_bg_error = ns->n_si_query_udf_bg_error;
+	uint64_t n_udf_bg_abort = ns->n_si_query_udf_bg_abort;
+	uint64_t n_ops_bg_complete = ns->n_si_query_ops_bg_complete;
+	uint64_t n_ops_bg_error = ns->n_si_query_ops_bg_error;
+	uint64_t n_ops_bg_abort = ns->n_si_query_ops_bg_abort;
 
-	if ((n_basic_complete | n_basic_error | n_basic_abort |
+	if ((n_short_basic_complete | n_short_basic_error | n_short_basic_timeout |
+			n_long_basic_complete | n_long_basic_error | n_long_basic_abort |
 			n_aggr_complete | n_aggr_error | n_aggr_abort |
 			n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort |
 			n_ops_bg_complete | n_ops_bg_error | n_ops_bg_abort) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} query: basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
+	cf_info(AS_INFO, "{%s} si-query: short-basic (%lu,%lu,%lu) long-basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
 			ns->name,
-			n_basic_complete, n_basic_error, n_basic_abort,
+			n_short_basic_complete, n_short_basic_error, n_short_basic_timeout,
+			n_long_basic_complete, n_long_basic_error, n_long_basic_abort,
 			n_aggr_complete, n_aggr_error, n_aggr_abort,
 			n_udf_bg_complete, n_udf_bg_error, n_udf_bg_abort,
 			n_ops_bg_complete, n_ops_bg_error, n_ops_bg_abort);
@@ -1052,8 +1061,6 @@ dump_global_histograms()
 		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
 		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
 	}
-
-	as_query_histogram_dumpall();
 }
 
 void
@@ -1098,12 +1105,20 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->udf_response_hist);
 	}
 
-	if (ns->query_hist_active) {
-		histogram_dump(ns->query_hist);
+	if (ns->pi_query_hist_active) {
+		histogram_dump(ns->pi_query_hist);
 	}
 
-	if (ns->query_rec_count_hist_active) {
-		histogram_dump(ns->query_rec_count_hist);
+	if (ns->pi_query_rec_count_hist_active) {
+		histogram_dump(ns->pi_query_rec_count_hist);
+	}
+
+	if (ns->si_query_hist_active) {
+		histogram_dump(ns->si_query_hist);
+	}
+
+	if (ns->si_query_rec_count_hist_active) {
+		histogram_dump(ns->si_query_rec_count_hist);
 	}
 
 	if (ns->proxy_hist_enabled) {
@@ -1148,6 +1163,4 @@ dump_namespace_histograms(as_namespace* ns)
 	if (ns->storage_benchmarks_enabled) {
 		as_storage_ticker_stats(ns);
 	}
-
-	as_sindex_histogram_dumpall(ns);
 }

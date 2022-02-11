@@ -57,18 +57,9 @@
 //
 
 #define MSG_STACK_BUFFER_SZ (1024 * 16)
-#define NETIO_MAX_IO_RETRY 5
 
 static const char SUCCESS_BIN_NAME[] = "SUCCESS";
 static const char FAILURE_BIN_NAME[] = "FAILURE";
-
-
-//==========================================================
-// Globals.
-//
-
-static cf_queue g_netio_queue;
-static cf_queue g_netio_slow_queue;
 
 
 //==========================================================
@@ -76,8 +67,6 @@ static cf_queue g_netio_slow_queue;
 //
 
 static int send_reply_buf(as_file_handle *fd_h, const uint8_t *msgp, size_t msg_sz);
-static void *run_netio(void *q_to_wait_on);
-static int netio_send_packet(as_netio *io, as_file_handle *fd_h, cf_buf_builder **bb_r, uint32_t *offset, bool compress, as_proto_comp_stat *comp_stat);
 
 
 //==========================================================
@@ -292,7 +281,8 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 // Pass NULL bb_r for sizing only. Return value is size if >= 0, error if < 0.
 int32_t
 as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
-		bool no_bin_data, cf_vector *select_bins)
+		bool no_bin_data, const cf_vector *select_bins, bool send_bval,
+		int64_t bval)
 {
 	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
@@ -327,6 +317,11 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	if (key) {
 		n_fields++;
 		msg_sz += sizeof(as_msg_field) + key_size;
+	}
+
+	if (send_bval) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + sizeof(bval);
 	}
 
 	uint32_t n_select_bins = 0;
@@ -438,6 +433,15 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 		buf += sizeof(as_msg_field) + key_size;
 	}
 
+	if (send_bval) {
+		mf = (as_msg_field *)buf;
+		mf->field_sz = sizeof(bval) + 1;
+		mf->type = AS_MSG_FIELD_TYPE_BVAL_ARRAY;
+		*(uint64_t*)mf->data = cf_swap_to_le64((uint64_t)bval);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + sizeof(bval);
+	}
+
 	if (no_bin_data) {
 		return (int32_t)msg_sz;
 	}
@@ -504,10 +508,28 @@ as_msg_pid_done_bufbuilder(cf_buf_builder **bb_r, uint32_t pid, int result)
 	as_msg *m = (as_msg *)buf;
 
 	*m = (as_msg){
-			.info3 = AS_MSG_INFO3_PARTITION_DONE,
 			.header_sz = sizeof(as_msg),
+			.info3 = AS_MSG_INFO3_PARTITION_DONE,
 			.result_code = result,
 			.generation = pid // HACK - more efficient than separate field
+	};
+
+	as_msg_swap_header(m);
+}
+
+void
+as_msg_fin_bufbuilder(cf_buf_builder **bb_r, int result)
+{
+	uint8_t *buf;
+
+	cf_buf_builder_reserve(bb_r, (int)sizeof(as_msg), &buf);
+
+	as_msg *m = (as_msg *)buf;
+
+	*m = (as_msg){
+			.header_sz = sizeof(as_msg),
+			.info3 = AS_MSG_INFO3_LAST,
+			.result_code = result
 	};
 
 	as_msg_swap_header(m);
@@ -738,70 +760,6 @@ as_msg_send_fin_timeout(cf_socket *sock, uint32_t result_code, int32_t timeout)
 
 
 //==========================================================
-// Public API - query "net-IO" responses.
-//
-
-void 
-as_netio_init()
-{
-	cf_queue_init(&g_netio_queue, sizeof(as_netio), 64, true);
-	cf_queue_init(&g_netio_slow_queue, sizeof(as_netio), 64, true);
-
-	cf_thread_create_detached(run_netio, (void *)&g_netio_queue);
-	cf_thread_create_detached(run_netio, (void *)&g_netio_slow_queue);
-}
-
-// Based on io object, send buffer to the network, or queue for retry.
-//
-// start_cb: Callback to the module before the real IO is started. Returns:
-//      AS_NETIO_OK: Everything ok, go ahead with IO.
-//      AS_NETIO_ERR: If there was issue like abort/err/timeout etc.
-//
-// finish_cb: Callback to module with status code of the IO call. Returns:
-//      AS_NETIO_OK: Everything ok.
-//      AS_NETIO_CONTINUE: The IO was requeued.
-//      AS_NETIO_ERR: IO erred out due to some issue.
-//
-// finish_cb should do the needful like release ref to user data etc.
-//
-// Returns:
-// AS_NETIO_OK: Everything is fine, both start_cb & finish_cb were called.
-// AS_NETIO_ERR: Something failed either calling start_cb or while doing
-//      network IO, finish_cb is called.
-//
-// This function consumes qtr reference. It calls finish_cb which releases ref
-// to qtr. In case of AS_NETIO_CONTINUE: this function also consumes bb_r and
-// ref for fd_h. The background thread is responsible for freeing up bb_r and
-// releasing ref to fd_h.
-int
-as_netio_send(as_netio *io)
-{
-	int ret = io->start_cb(io, io->seq);
-
-	if (ret == AS_NETIO_OK) {
-		// TODO: Pass only the io structure.
-		ret = io->finish_cb(io, netio_send_packet(io, io->fd_h, &io->bb,
-				&io->offset, io->compress_response, io->comp_stat));
-	} 
-	else {
-		ret = io->finish_cb(io, ret);
-	}
-
-	// If needs requeue then requeue it.
-	switch (ret) {
-	case AS_NETIO_CONTINUE:
-		cf_queue_push(io->slow ? &g_netio_slow_queue : &g_netio_queue, io);
-		break;
-	default:
-		ret = AS_NETIO_OK;
-		break;
-	}
-
-	return ret;
-}
-
-
-//==========================================================
 // Local helpers.
 //
 
@@ -822,101 +780,4 @@ send_reply_buf(as_file_handle *fd_h, const uint8_t *msgp, size_t msg_sz)
 
 	as_end_of_transaction_ok(fd_h);
 	return 0;
-}
-
-static void *
-run_netio(void *q_to_wait_on)
-{
-	cf_queue *q = (cf_queue*)q_to_wait_on;
-
-	while (true) {
-		as_netio io;
-
-		if (cf_queue_pop(q, &io, CF_QUEUE_FOREVER) != 0) {
-			cf_crash(AS_PROTO, "failed to pop from IO worker queue.");
-		}
-
-		if (io.slow) {
-			usleep(g_config.proto_slow_netio_sleep_ms * 1000);
-		}
-
-		as_netio_send(&io);
-	}
-
-	return NULL;
-}
-
-static int
-netio_send_packet(as_netio *io, as_file_handle *fd_h, cf_buf_builder **bb_r,
-		uint32_t *offset, bool compress, as_proto_comp_stat *comp_stat)
-{
-	cf_buf_builder *bb = *bb_r;
-	uint32_t pos = *offset;
-
-	if (pos == 0) {
-		as_proto *proto = (as_proto *)bb->buf;
-
-		proto->version = PROTO_VERSION;
-		proto->type = PROTO_TYPE_AS_MSG;
-		proto->sz = bb->used_sz - sizeof(as_proto);
-		as_proto_swap(proto);
-
-		if (compress) {
-			size_t proto_sz = bb->used_sz;
-			uint8_t* buf = as_proto_compress_alloc((const uint8_t*)bb,
-					sizeof(cf_buf_builder) + bb->alloc_sz,
-					sizeof(cf_buf_builder), &proto_sz, comp_stat);
-
-			if (buf != (uint8_t*)bb) {
-				cf_free(bb);
-
-				bb = (cf_buf_builder *)buf;
-				bb->used_sz = proto_sz;
-
-				*bb_r = bb;
-			}
-		}
-	}
-
-	uint32_t len = bb->used_sz;
-	uint8_t *buf = bb->buf;
-
-	int retry = 0;
-
-	cf_detail(AS_PROTO," start at %p %d %d", buf, pos, len);
-
-	while (pos < len) {
-		int rv = cf_socket_send(&fd_h->sock, buf + pos, len - pos,
-				MSG_NOSIGNAL);
-
-		if (rv == 0) {
-			cf_warning(AS_PROTO, "packet send response returned 0 fd %d",
-					CSFD(&fd_h->sock));
-			return AS_NETIO_IO_ERR;
-		}
-
-		if (rv < 0) {
-			if (errno != EAGAIN) {
-				cf_debug(AS_PROTO, "packet send response error returned %d errno %d fd %d",
-						rv, errno, CSFD(&fd_h->sock));
-				return AS_NETIO_IO_ERR;
-			}
-
-			if (retry > NETIO_MAX_IO_RETRY) {
-				*offset = pos;
-				cf_detail(AS_PROTO," end at %p %d %d", buf, pos, len);
-				io->slow = true;
-				return AS_NETIO_CONTINUE;
-			}
-
-			retry++;
-			// bigger packets so try few extra times
-			usleep(100);
-		}
-		else {
-			pos += rv;
-		}
-	}
-
-	return AS_NETIO_OK;
 }

@@ -27,6 +27,7 @@
 
 #include "cf_str.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -299,7 +300,7 @@ cf_strtoul_u32(const char *s, uint32_t *value)
 		return -1;
 	}
 
-	// Don't allow trailing non-hex characters.
+	// Don't allow trailing non-digit characters.
 	if (tail && *tail != 0) {
 		return -1;
 	}
@@ -326,7 +327,35 @@ cf_strtoul_u64(const char *s, uint64_t *value)
 		return -1;
 	}
 
-	// Don't allow trailing non-hex characters.
+	// Don't allow trailing non-digit characters.
+	if (tail && *tail != 0) {
+		return -1;
+	}
+
+	*value = i;
+
+	return 0;
+}
+
+// Like cf_strtoul_u64() but doesn't force base 10, and allows sign character.
+int
+cf_strtoul_u64_raw(const char *s, uint64_t *value)
+{
+	if (isspace(*s)) {
+		return -1;
+	}
+
+	errno = 0;
+
+	char* tail = NULL;
+	uint64_t i = strtoul(s, &tail, 0);
+
+	// Check for overflow.
+	if (errno == ERANGE) {
+		return -1;
+	}
+
+	// Don't allow trailing non-digit characters.
 	if (tail && *tail != 0) {
 		return -1;
 	}
@@ -353,7 +382,7 @@ cf_strtol_i32(const char *s, int32_t *value)
 		return -1;
 	}
 
-	// Don't allow trailing non-hex characters.
+	// Don't allow trailing non-digit characters.
 	if (tail && *tail != 0) {
 		return -1;
 	}

@@ -328,19 +328,6 @@ as_index_get_insert_vlock(as_index_tree* tree, const cf_digest* keyd,
 	return result;
 }
 
-// Return a locked reference without searching the index.
-void
-as_index_vlock(as_index_tree* tree, as_index_ref* index_ref)
-{
-	as_index_sprig isprig;
-	as_index_sprig_from_keyd(tree, &isprig, &index_ref->r->keyd);
-
-	index_ref->puddle = isprig.puddle;
-	index_ref->olock = &isprig.pair->lock;
-
-	cf_mutex_lock(&isprig.pair->lock);
-}
-
 // If there's an element with specified digest in the tree, delete it.
 //
 // This MUST be called under the record (sprig) lock!
