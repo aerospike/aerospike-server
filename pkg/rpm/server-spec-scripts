@@ -3,7 +3,18 @@ if ! id -g aerospike >/dev/null 2>&1; then
 	echo "Adding group aerospike"
 	/usr/sbin/groupadd -r aerospike
 fi
+
+noshell="/bin/false"
+
+if [ -x "/usr/sbin/nologin" ]; then
+	noshell="/usr/sbin/nologin"
+else
+	noshell="/sbin/nologin"
+fi
+
 if ! id -u aerospike >/dev/null 2>&1; then
 	echo "Adding user aerospike"
-	/usr/sbin/useradd -r -d /opt/aerospike -c 'Aerospike server' -g aerospike -s /sbin/nologin aerospike
+	/usr/sbin/useradd -r -d /opt/aerospike -c 'Aerospike server' -g aerospike -s $noshell aerospike
+else
+	/usr/sbin/usermod -s $noshell aerospike
 fi
