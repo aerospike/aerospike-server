@@ -50,13 +50,13 @@ struct as_namespace_s;
 // Typedefs & constants.
 //
 
-#define DRV_HEADER_OLD_MAGIC	(0x4349747275730707L)
 #define DRV_HEADER_MAGIC		(0x4349747275730322L)
-#define DRV_VERSION				3
+#define DRV_VERSION				4
 // DRV_VERSION history:
 // 1 - original
 // 2 - minimum storage increment (RBLOCK_SIZE) from 512 to 128 bytes
 // 3 - total overhaul including changed magic and moved version
+// 4 - added end-mark and switched encryption-at-rest key processing
 
 // Device header flags.
 #define DRV_HEADER_FLAG_TRUSTED				0x01

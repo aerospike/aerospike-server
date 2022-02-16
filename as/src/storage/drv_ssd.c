@@ -324,6 +324,31 @@ ssd_release_vacated_wblock(drv_ssd *ssd, uint32_t wblock_id,
 }
 
 
+static inline bool
+ssd_check_end_mark(const uint8_t *mark, const as_flat_record *flat)
+{
+	return *(uint32_t*)mark == ssd_make_end_mark(flat);
+}
+
+
+static inline const uint8_t *
+ssd_find_and_check_end_mark(const uint8_t *end, const as_flat_record *flat)
+{
+	uint32_t match = ssd_make_end_mark(flat);
+	const uint8_t *mark = end - END_MARK_SZ;
+
+	for (uint32_t i = 0; i < RBLOCK_SIZE; i++) {
+		if (*(uint32_t*)mark == match) {
+			return mark;
+		}
+
+		mark--;
+	}
+
+	return NULL;
+}
+
+
 //------------------------------------------------
 // ssd_write_buf "swb" methods.
 //
@@ -1254,7 +1279,7 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	int result = as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end,
+	int result = as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end, true,
 			rd->flat_n_bins, rd->bins);
 
 	if (result == AS_OK) {
@@ -1285,12 +1310,22 @@ as_storage_record_load_pickle_ssd(as_storage_rd *rd)
 		return false;
 	}
 
-	size_t sz = rd->flat_end - (const uint8_t*)rd->flat;
+	const uint8_t *mark = ssd_find_and_check_end_mark(rd->flat_end, rd->flat);
+
+	if (mark == NULL) {
+		return false;
+	}
+
+	size_t sz = mark - (const uint8_t*)rd->flat;
 
 	rd->pickle = cf_malloc(sz);
 	rd->pickle_sz = (uint32_t)sz;
 
 	memcpy(rd->pickle, rd->flat, sz);
+
+	if (rd->flat_end - mark >= RBLOCK_SIZE) {
+		((as_flat_record*)rd->pickle)->n_rblocks--;
+	}
 
 	return true;
 }
@@ -1507,9 +1542,11 @@ ssd_buffer_bins(as_storage_rd *rd)
 		limit_sz = ssd->write_block_size;
 	}
 
-	if (flat_sz > limit_sz) {
+	uint32_t flat_w_mark_sz = flat_sz + END_MARK_SZ;
+
+	if (flat_w_mark_sz > limit_sz) {
 		cf_detail(AS_DRV_SSD, "{%s} write: size %u - rejecting %pD", ns->name,
-				flat_sz, &r->keyd);
+				flat_w_mark_sz, &r->keyd);
 		return -AS_ERR_RECORD_TOO_BIG;
 	}
 
@@ -1517,11 +1554,14 @@ ssd_buffer_bins(as_storage_rd *rd)
 
 	if (rd->pickle == NULL) {
 		flat = as_flat_compress_bins_and_pack_record(rd, ssd->write_block_size,
-				false, &flat_sz);
+				false, true, &flat_w_mark_sz);
 	}
 	else {
 		flat = (as_flat_record *)rd->pickle;
+
+		// Limit check used orig size, but from here on use compressed size.
 		flat_sz = rd->pickle_sz;
+		flat_w_mark_sz = flat_sz + END_MARK_SZ;
 
 		// Tree IDs are node-local - can't use those sent from other nodes.
 		flat->tree_id = r->tree_id;
@@ -1529,7 +1569,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 
 	// Note - this is the only place where rounding size (up to a  multiple of
 	// RBLOCK_SIZE) is really necessary.
-	uint32_t write_sz = SIZE_UP_TO_RBLOCK_SIZE(flat_sz);
+	uint32_t write_sz = SIZE_UP_TO_RBLOCK_SIZE(flat_w_mark_sz);
 
 	// Reserve the portion of the current swb where this record will be written.
 
@@ -1573,6 +1613,11 @@ ssd_buffer_bins(as_storage_rd *rd)
 	}
 
 	uint32_t n_rblocks = ROUNDED_SIZE_TO_N_RBLOCKS(write_sz);
+
+	if (rd->pickle != NULL) {
+		flat->n_rblocks = n_rblocks;
+	}
+
 	uint32_t swb_pos;
 	int rv = 0;
 
@@ -1609,11 +1654,17 @@ ssd_buffer_bins(as_storage_rd *rd)
 		memcpy(flat_in_swb, flat, flat_sz);
 	}
 
+	ssd_add_end_mark((uint8_t*)flat_in_swb + flat_sz, flat_in_swb);
+
 	// Make a pickle if needed.
 	if (rd->keep_pickle) {
 		rd->pickle_sz = flat_sz;
 		rd->pickle = cf_malloc(flat_sz);
 		memcpy(rd->pickle, flat_in_swb, flat_sz);
+
+		if (write_sz - flat_sz >= RBLOCK_SIZE) {
+			((as_flat_record*)rd->pickle)->n_rblocks--;
+		}
 	}
 
 	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id) + swb_pos;
@@ -2156,20 +2207,25 @@ ssd_read_header(drv_ssd *ssd)
 
 	drv_prefix *prefix = &header->generic.prefix;
 
-	if (prefix->magic == DRV_HEADER_OLD_MAGIC) {
-		cf_crash(AS_DRV_SSD, "%s: Aerospike device has old format - must erase device to upgrade",
-				ssd_name);
-	}
-
 	// Normal path for a fresh drive.
 	if (prefix->magic != DRV_HEADER_MAGIC) {
-		cf_detail(AS_DRV_SSD, "%s: bad magic - fresh drive?", ssd_name);
+		if (! cf_memeq(header, 0, read_size)) {
+			cf_crash(AS_DRV_SSD, "%s: not an Aerospike device but not erased - check config or erase device",
+					ssd_name);
+		}
+
+		cf_detail(AS_DRV_SSD, "%s: zero magic - fresh device", ssd_name);
 		cf_free(header);
 		use_shadow ? ssd_shadow_fd_put(ssd, fd) : ssd_fd_put(ssd, fd);
 		return NULL;
 	}
 
 	if (prefix->version != DRV_VERSION) {
+		if (prefix->version == 3) { // 2 & 1 weren't at this location on device
+			cf_crash(AS_DRV_SSD, "%s: Aerospike device has old format - must erase device to upgrade",
+					ssd_name);
+		}
+
 		cf_crash(AS_DRV_SSD, "%s: unknown version %u", ssd_name,
 				prefix->version);
 	}
@@ -2356,9 +2412,16 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		return;
 	}
 
-	if (! as_flat_check_packed_bins(p_read, end, opt_meta.n_bins,
-			ns->single_bin)) {
+	const uint8_t* exact_end = as_flat_check_packed_bins(p_read, end, true,
+			opt_meta.n_bins, ns->single_bin);
+
+	if (exact_end == NULL) {
 		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
+		return;
+	}
+
+	if (! ssd_check_end_mark(exact_end - END_MARK_SZ, flat)) {
+		cf_warning(AS_DRV_SSD, "bad end marker for %pD", &flat->keyd);
 		return;
 	}
 
@@ -2469,7 +2532,8 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		rd.n_bins = n_new_bins;
 		rd.bins = new_bins;
 
-		if (as_flat_unpack_bins(ns, p_read, end, rd.n_bins, rd.bins) < 0) {
+		if (as_flat_unpack_bins(ns, p_read, end, true, rd.n_bins,
+				rd.bins) < 0) {
 			cf_crash(AS_DRV_SSD, "%pD - unpack bins failed", &r->keyd);
 		}
 
@@ -2874,8 +2938,8 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	}
 
 	if (! ns->cold_start &&
-			! as_flat_check_packed_bins(p_read, end, opt_meta.n_bins,
-					ns->single_bin)) {
+			as_flat_check_packed_bins(p_read, end, true, opt_meta.n_bins,
+					ns->single_bin) == NULL) {
 		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
 		return;
 	}
@@ -2937,7 +3001,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	uint16_t n_bins = (uint16_t)opt_meta.n_bins;
 	as_bin bins[n_bins];
 
-	if (as_flat_unpack_bins(ns, p_read, end, n_bins, bins) < 0) {
+	if (as_flat_unpack_bins(ns, p_read, end, true, n_bins, bins) < 0) {
 		cf_crash(AS_DRV_SSD, "unpack bins failed");
 	}
 

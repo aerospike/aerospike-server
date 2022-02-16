@@ -44,8 +44,10 @@
 #include "base/proto.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
+#include "fabric/exchange.h" // for compatibility-id only
 #include "sindex/gc.h"
 #include "sindex/secondary_index.h"
+#include "storage/flat.h" // for compatibility-id only
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
@@ -335,6 +337,16 @@ as_record_replace_if_better(as_remote_record *rr)
 		}
 	}
 	// else - not bothering to check that sets match.
+
+	// TODO - remove in "six months".
+	if (rr->via != VIA_REPLICATION &&
+			ns->storage_type == AS_STORAGE_ENGINE_SSD &&
+			as_exchange_min_compatibility_id() < 11) {
+		if (! as_flat_fix_padded_rr(rr, ns->single_bin)) {
+			record_replace_failed(rr, &r_ref, NULL, is_create);
+			return AS_OK;
+		}
+	}
 
 	as_storage_rd rd;
 

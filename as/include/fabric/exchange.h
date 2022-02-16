@@ -50,7 +50,7 @@
  *  8 - 5.2.0.17 & 5.3.0.8 - for (stripping) bin metadata and tombstones.
  *  9 - 5.4.0.3 - for (stripping) bin src-id or bin metadata and tombstones.
  * 10 - 5.5.0 - for converting bin cemeteries to regular tombstones.
- * 11 - 5.8.0 - for revived nodes to require all nodes trusted.
+ * 11 - 6.0.0 - for AER-6487 (revived nodes) & AER-6513 (storage end mark).
  */
 #define AS_EXCHANGE_COMPATIBILITY_ID 11
 

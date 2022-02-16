@@ -65,7 +65,7 @@ as_flat_pickle_record(as_storage_rd* rd)
 
 	// Note - will no-op for storage-engine memory, which doesn't compress.
 	as_flat_record* flat = as_flat_compress_bins_and_pack_record(rd,
-			rd->ns->storage_write_block_size, false, &rd->pickle_sz);
+			rd->ns->storage_write_block_size, false, false, &rd->pickle_sz);
 
 	rd->pickle = cf_malloc(rd->pickle_sz);
 
@@ -264,6 +264,34 @@ as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,
 	return at; // could be NULL, but would already have logged warning
 }
 
+// TODO - remove in "six months" - not bothering with EE separation.
+bool
+as_flat_fix_padded_rr(as_remote_record* rr, bool single_bin)
+{
+	if (rr->pickle_sz % RBLOCK_SIZE != 0) {
+		return true; // new node sent this - already exact
+	}
+
+	if (rr->cm.method == AS_COMPRESSION_NONE) {
+		const uint8_t* flat_bins = rr->pickle + rr->meta_sz;
+		const uint8_t* end = rr->pickle + rr->pickle_sz;
+
+		const uint8_t* exact_end = as_flat_check_packed_bins(flat_bins, end,
+				false, rr->n_bins, single_bin);
+
+		if (exact_end == NULL) {
+			return false;
+		}
+
+		rr->pickle_sz = exact_end - rr->pickle;
+	}
+	else {
+		rr->pickle_sz = rr->meta_sz + rr->cm.comp_sz;
+	}
+
+	return true;
+}
+
 int
 as_flat_unpack_remote_bins(as_remote_record* rr, as_bin* bins)
 {
@@ -277,12 +305,12 @@ as_flat_unpack_remote_bins(as_remote_record* rr, as_bin* bins)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	return as_flat_unpack_bins(ns, flat_bins, end, rr->n_bins, bins);
+	return as_flat_unpack_bins(ns, flat_bins, end, false, rr->n_bins, bins);
 }
 
 int
 as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
-		uint16_t n_bins, as_bin* bins)
+		bool end_marked, uint16_t n_bins, as_bin* bins)
 {
 	uint16_t i;
 
@@ -361,6 +389,10 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 		return -AS_ERR_UNKNOWN;
 	}
 
+	if (end_marked) {
+		at += END_MARK_SZ;
+	}
+
 	if (at > end) {
 		cf_warning(AS_FLAT, "incomplete flat bin");
 		as_bin_destroy_all_dim(ns, bins, n_bins);
@@ -377,14 +409,14 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 	return 0;
 }
 
-bool
+const uint8_t*
 as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
-		uint32_t n_bins, bool single_bin)
+		bool end_marked, uint32_t n_bins, bool single_bin)
 {
 	for (uint32_t i = 0; i < n_bins; i++) {
 		if (at >= end) {
 			cf_warning(AS_FLAT, "incomplete flat bin");
-			return false;
+			return NULL;
 		}
 
 		if (! single_bin) {
@@ -392,7 +424,7 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 
 			if (name_len >= AS_BIN_NAME_MAX_SZ) {
 				cf_warning(AS_FLAT, "bad flat bin name");
-				return false;
+				return NULL;
 			}
 
 			at += name_len;
@@ -405,27 +437,31 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 				}
 
 				if ((at = skip_bin_src_id(flags, at, end)) == NULL) {
-					return false;
+					return NULL;
 				}
 			}
 		}
 
 		if ((at = as_particle_skip_flat(at, end)) == NULL) {
-			return false;
+			return NULL;
 		}
+	}
+
+	if (end_marked) {
+		at += END_MARK_SZ;
 	}
 
 	if (at > end) {
 		cf_warning(AS_FLAT, "incomplete flat record");
-		return false;
+		return NULL;
 	}
 
 	if (at + RBLOCK_SIZE <= end) {
 		cf_warning(AS_FLAT, "extra rblocks follow flat record");
-		return false;
+		return NULL;
 	}
 
-	return true;
+	return at;
 }
 
 

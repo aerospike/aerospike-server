@@ -32,6 +32,8 @@
 #include <sys/types.h>
 
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_byte_order.h"
+#include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
@@ -286,6 +288,22 @@ bool write_uses_post_write_q(struct as_storage_rd_s *rd);
 
 // Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);
+
+static inline uint32_t
+ssd_make_end_mark(const as_flat_record *flat)
+{
+	// Hash digest and LUT.
+	uint32_t hash = cf_wyhash32((const uint8_t*)&flat->keyd, 25);
+
+	// Reserve a bit for signature flag.
+	return cf_swap_to_le32(hash & 0x7FFFffff);
+}
+
+static inline void
+ssd_add_end_mark(uint8_t *mark, const as_flat_record *flat)
+{
+	*(uint32_t*)mark = ssd_make_end_mark(flat);
+}
 
 
 //

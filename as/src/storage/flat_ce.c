@@ -42,7 +42,7 @@
 
 as_flat_record*
 as_flat_compress_bins_and_pack_record(const as_storage_rd* rd,
-		uint32_t max_orig_sz, bool dirty, uint32_t* flat_sz)
+		uint32_t max_orig_sz, bool dirty, bool will_mark_end, uint32_t* flat_sz)
 {
 	return NULL;
 }
