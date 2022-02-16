@@ -20,6 +20,7 @@ HEADERS += dynbuf.h
 HEADERS += enhanced_alloc.h
 HEADERS += epoll_queue.h
 HEADERS += fetch.h
+HEADERS += fips.h
 HEADERS += hist.h
 HEADERS += linear_hist.h
 HEADERS += log.h
@@ -64,6 +65,7 @@ SOURCES += vmapx.c
 
 ifneq ($(USE_EE),1)
   SOURCES += arenax_ce.c
+  SOURCES += fips_ce.c
   SOURCES += socket_ce.c
   SOURCES += tls_ce.c
   SOURCES += vault_ce.c

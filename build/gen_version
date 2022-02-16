@@ -3,7 +3,7 @@
 EDITION=${1:-community}
 BUILD_OS=${2:-unknown}
 FEATURES=""
-if [ $EDITION == enterprise ]; then
+if [ $EDITION = enterprise -o $EDITION = fips ]; then
    FEATURES=";xdr"
 fi
 

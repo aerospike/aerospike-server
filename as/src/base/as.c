@@ -43,6 +43,7 @@
 #include "cf_thread.h"
 #include "daemon.h"
 #include "dns.h"
+#include "fips.h"
 #include "hardware.h"
 #include "log.h"
 #include "os.h"
@@ -265,6 +266,7 @@ as_run(int argc, char **argv)
 	cf_alloc_init();
 	cf_thread_init();
 	as_signal_setup();
+	cf_fips_init();
 	tls_check_init();
 
 	// Set all fields in the global runtime configuration instance. This parses
