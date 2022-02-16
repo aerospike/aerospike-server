@@ -99,7 +99,7 @@ cf_shash_fn_ptr(const void* key)
 uint32_t
 cf_shash_fn_zstr(const void* key)
 {
-	return cf_hash_fnv32((const uint8_t*)key, strlen(key));
+	return cf_wyhash32((const uint8_t*)key, strlen(key));
 }
 
 

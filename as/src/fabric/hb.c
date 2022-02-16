@@ -2659,7 +2659,7 @@ static uint32_t
 hb_socket_hash_fn(const void* key)
 {
 	const cf_socket** socket = (const cf_socket**)key;
-	return cf_hash_jen32((const uint8_t*)socket, sizeof(cf_socket*));
+	return cf_hash_ptr32((const void*)socket);
 }
 
 /**

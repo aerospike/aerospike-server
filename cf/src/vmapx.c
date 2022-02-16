@@ -357,8 +357,7 @@ vhash_destroy(vhash* h)
 void
 vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 {
-	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)zkey, key_len);
-	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
+	uint32_t row_i = cf_wyhash32((const uint8_t*)zkey, key_len) % h->n_rows;
 
 	vhash_ele* e_head = (vhash_ele*)(h->table + (h->ele_size * row_i));
 
@@ -386,8 +385,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 bool
 vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value)
 {
-	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)key, key_len);
-	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
+	uint32_t row_i = cf_wyhash32((const uint8_t*)key, key_len) % h->n_rows;
 
 	if (! h->row_usage[row_i]) {
 		return false;

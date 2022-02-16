@@ -82,7 +82,7 @@ cf_rchash_fn_u32(const void* key)
 uint32_t
 cf_rchash_fn_zstr(const void* key)
 {
-	return cf_hash_fnv32((const uint8_t*)key, strlen(key));
+	return cf_wyhash32((const uint8_t*)key, strlen(key));
 }
 
 

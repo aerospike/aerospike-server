@@ -2573,9 +2573,7 @@ smd_hash_get(const smd_hash* h, const char* key, uint32_t* value)
 static uint32_t
 smd_hash_get_row_i(const char* key)
 {
-	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)key, strlen(key));
-
-	return (uint32_t)(hashed_key % N_HASH_ROWS);
+	return cf_wyhash32((const uint8_t*)key, strlen(key)) % N_HASH_ROWS;
 }
 
 
