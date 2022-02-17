@@ -1555,6 +1555,7 @@ ssd_buffer_bins(as_storage_rd *rd)
 	if (rd->pickle == NULL) {
 		flat = as_flat_compress_bins_and_pack_record(rd, ssd->write_block_size,
 				false, true, &flat_w_mark_sz);
+		flat_sz = flat_w_mark_sz - END_MARK_SZ;
 	}
 	else {
 		flat = (as_flat_record *)rd->pickle;
