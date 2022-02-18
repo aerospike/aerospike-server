@@ -332,17 +332,16 @@ ssd_check_end_mark(const uint8_t *mark, const as_flat_record *flat)
 
 
 static inline const uint8_t *
-ssd_find_and_check_end_mark(const uint8_t *end, const as_flat_record *flat)
+ssd_find_and_check_end_mark(const uint8_t *at, const as_flat_record *flat)
 {
 	uint32_t match = ssd_make_end_mark(flat);
-	const uint8_t *mark = end - END_MARK_SZ;
 
 	for (uint32_t i = 0; i < RBLOCK_SIZE; i++) {
-		if (*(uint32_t*)mark == match) {
-			return mark;
+		if (*(uint32_t*)at == match) {
+			return at;
 		}
 
-		mark--;
+		at--;
 	}
 
 	return NULL;
@@ -1227,7 +1226,9 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 
 	as_flat_opt_meta opt_meta = { { 0 } };
 
-	rd->flat_end = (const uint8_t*)flat + record_size;
+	// Includes round rblock padding, so may not literally exclude the mark.
+	rd->flat_end = (const uint8_t*)flat + record_size - END_MARK_SZ;
+
 	rd->flat_bins = as_flat_unpack_record_meta(flat, rd->flat_end, &opt_meta,
 			ns->single_bin);
 
@@ -1279,7 +1280,7 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	int result = as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end, true,
+	int result = as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end, false,
 			rd->flat_n_bins, rd->bins);
 
 	if (result == AS_OK) {
@@ -1323,7 +1324,7 @@ as_storage_record_load_pickle_ssd(as_storage_rd *rd)
 
 	memcpy(rd->pickle, rd->flat, sz);
 
-	if (rd->flat_end - mark >= RBLOCK_SIZE) {
+	if (rd->flat_end - mark >= RBLOCK_SIZE - END_MARK_SZ) {
 		((as_flat_record*)rd->pickle)->n_rblocks--;
 	}
 
