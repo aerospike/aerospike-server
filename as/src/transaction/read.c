@@ -745,7 +745,7 @@ read_local(as_transaction* tr)
 				as_bin_set_empty(rb);
 
 				if ((result = as_bin_exp_read_from_client(&exp_ctx, op, rb)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_read_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW, "{%s} read_local: failed as_bin_exp_read_from_client() %pD", ns->name, &tr->keyd);
 					as_bin_destroy_all(result_bins, n_result_bins);
 					read_local_done(tr, &r_ref, &rd, -result);
 					return TRANS_DONE_ERROR;
