@@ -166,8 +166,8 @@ bool as_flat_unpack_remote_record_meta(struct as_namespace_s* ns, struct as_remo
 const uint8_t* as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end, struct as_flat_opt_meta_s* opt_meta, bool single_bin);
 bool as_flat_fix_padded_rr(struct as_remote_record_s* rr, bool single_bin); // TODO - remove in "six months"
 int as_flat_unpack_remote_bins(struct as_remote_record_s* rr, struct as_bin_s* bins);
-int as_flat_unpack_bins(struct as_namespace_s* ns, const uint8_t* at, const uint8_t* end, bool end_marked, uint16_t n_bins, struct as_bin_s* bins);
-const uint8_t* as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end, bool end_marked, uint32_t n_bins, bool single_bin);
+int as_flat_unpack_bins(struct as_namespace_s* ns, const uint8_t* at, const uint8_t* end, uint16_t n_bins, struct as_bin_s* bins);
+const uint8_t* as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end, uint32_t n_bins, bool single_bin);
 
 uint32_t as_flat_orig_pickle_size(const struct as_remote_record_s* rr, uint32_t pickle_sz);
 bool as_flat_decompress_bins(const as_flat_comp_meta* cm, struct as_storage_rd_s* rd);

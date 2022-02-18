@@ -1280,7 +1280,7 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	int result = as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end, false,
+	int result = as_flat_unpack_bins(rd->ns, rd->flat_bins, rd->flat_end,
 			rd->flat_n_bins, rd->bins);
 
 	if (result == AS_OK) {
@@ -2392,7 +2392,9 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	as_namespace* ns = ssds->ns;
 	as_partition* p_partition = &ns->partitions[pid];
 
-	const uint8_t* end = (const uint8_t*)flat + record_size;
+	// Includes round rblock padding, so may not literally exclude the mark.
+	const uint8_t* end = (const uint8_t*)flat + record_size - END_MARK_SZ;
+
 	as_flat_opt_meta opt_meta = { { 0 } };
 
 	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta,
@@ -2414,7 +2416,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		return;
 	}
 
-	const uint8_t* exact_end = as_flat_check_packed_bins(p_read, end, true,
+	const uint8_t* exact_end = as_flat_check_packed_bins(p_read, end,
 			opt_meta.n_bins, ns->single_bin);
 
 	if (exact_end == NULL) {
@@ -2422,7 +2424,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		return;
 	}
 
-	if (! ssd_check_end_mark(exact_end - END_MARK_SZ, flat)) {
+	if (! ssd_check_end_mark(exact_end, flat)) {
 		cf_warning(AS_DRV_SSD, "bad end marker for %pD", &flat->keyd);
 		return;
 	}
@@ -2534,8 +2536,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		rd.n_bins = n_new_bins;
 		rd.bins = new_bins;
 
-		if (as_flat_unpack_bins(ns, p_read, end, true, rd.n_bins,
-				rd.bins) < 0) {
+		if (as_flat_unpack_bins(ns, p_read, end, rd.n_bins, rd.bins) < 0) {
 			cf_crash(AS_DRV_SSD, "%pD - unpack bins failed", &r->keyd);
 		}
 
@@ -2922,7 +2923,9 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 
 	as_namespace* ns = ssds->ns;
 
-	const uint8_t* end = (const uint8_t*)flat + record_size;
+	// Includes round rblock padding, so may not literally exclude the mark.
+	const uint8_t* end = (const uint8_t*)flat + record_size - END_MARK_SZ;
+
 	as_flat_opt_meta opt_meta = { { 0 } };
 
 	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta,
@@ -2940,7 +2943,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	}
 
 	if (! ns->cold_start &&
-			as_flat_check_packed_bins(p_read, end, true, opt_meta.n_bins,
+			as_flat_check_packed_bins(p_read, end, opt_meta.n_bins,
 					ns->single_bin) == NULL) {
 		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
 		return;
@@ -3003,7 +3006,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	uint16_t n_bins = (uint16_t)opt_meta.n_bins;
 	as_bin bins[n_bins];
 
-	if (as_flat_unpack_bins(ns, p_read, end, true, n_bins, bins) < 0) {
+	if (as_flat_unpack_bins(ns, p_read, end, n_bins, bins) < 0) {
 		cf_crash(AS_DRV_SSD, "unpack bins failed");
 	}
 

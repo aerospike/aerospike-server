@@ -277,7 +277,7 @@ as_flat_fix_padded_rr(as_remote_record* rr, bool single_bin)
 		const uint8_t* end = rr->pickle + rr->pickle_sz;
 
 		const uint8_t* exact_end = as_flat_check_packed_bins(flat_bins, end,
-				false, rr->n_bins, single_bin);
+				rr->n_bins, single_bin);
 
 		if (exact_end == NULL) {
 			return false;
@@ -305,12 +305,12 @@ as_flat_unpack_remote_bins(as_remote_record* rr, as_bin* bins)
 		return -AS_ERR_UNKNOWN;
 	}
 
-	return as_flat_unpack_bins(ns, flat_bins, end, false, rr->n_bins, bins);
+	return as_flat_unpack_bins(ns, flat_bins, end, rr->n_bins, bins);
 }
 
 int
 as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
-		bool end_marked, uint16_t n_bins, as_bin* bins)
+		uint16_t n_bins, as_bin* bins)
 {
 	uint16_t i;
 
@@ -389,10 +389,6 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 		return -AS_ERR_UNKNOWN;
 	}
 
-	if (end_marked) {
-		at += END_MARK_SZ;
-	}
-
 	if (at > end) {
 		cf_warning(AS_FLAT, "incomplete flat bin");
 		as_bin_destroy_all_dim(ns, bins, n_bins);
@@ -411,7 +407,7 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 
 const uint8_t*
 as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
-		bool end_marked, uint32_t n_bins, bool single_bin)
+		uint32_t n_bins, bool single_bin)
 {
 	for (uint32_t i = 0; i < n_bins; i++) {
 		if (at >= end) {
@@ -445,10 +441,6 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 		if ((at = as_particle_skip_flat(at, end)) == NULL) {
 			return NULL;
 		}
-	}
-
-	if (end_marked) {
-		at += END_MARK_SZ;
 	}
 
 	if (at > end) {
