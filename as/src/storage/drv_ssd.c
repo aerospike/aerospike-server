@@ -2410,8 +2410,10 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		return;
 	}
 
+	const uint8_t* cb_end = NULL;
+
 	if (! as_flat_decompress_buffer(&opt_meta.cm, ns->storage_write_block_size,
-			&p_read, &end)) {
+			&p_read, &end, &cb_end)) {
 		cf_warning(AS_DRV_SSD, "bad compressed data for %pD", &flat->keyd);
 		return;
 	}
@@ -2424,7 +2426,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		return;
 	}
 
-	if (! ssd_check_end_mark(exact_end, flat)) {
+	if (! ssd_check_end_mark(cb_end == NULL ? exact_end : cb_end, flat)) {
 		cf_warning(AS_DRV_SSD, "bad end marker for %pD", &flat->keyd);
 		return;
 	}
@@ -2937,7 +2939,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	}
 
 	if (! as_flat_decompress_buffer(&opt_meta.cm, ns->storage_write_block_size,
-			&p_read, &end)) {
+			&p_read, &end, NULL)) {
 		cf_warning(AS_DRV_SSD, "bad compressed data for %pD", &flat->keyd);
 		return;
 	}

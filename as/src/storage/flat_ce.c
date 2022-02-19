@@ -61,7 +61,7 @@ as_flat_decompress_bins(const as_flat_comp_meta *cm, as_storage_rd *rd)
 
 bool
 as_flat_decompress_buffer(const as_flat_comp_meta* cm, uint32_t max_orig_sz,
-		const uint8_t** at, const uint8_t** end)
+		const uint8_t** at, const uint8_t** end, const uint8_t** cb_end)
 {
 	return true;
 }
