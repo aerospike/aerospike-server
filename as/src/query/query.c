@@ -1411,13 +1411,6 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 		return result;
 	}
 
-	cf_debug(AS_QUERY, "starting basic query job %lu {%s:%s:%s} n-pids-requested %hu rps %u sample-max %lu%s socket-timeout %d from %s",
-			_job->trid, ns->name, _job->set_name,
-			_job->si != NULL ? _job->si->imd->iname : "<pi-query>",
-			_job->n_pids_requested, _job->rps, job->sample_max,
-			job->no_bin_data ? " metadata-only" : "", conn_job->fd_timeout,
-			_job->client);
-
 	if (_job->is_short) {
 		if (m->transaction_ttl != 0) {
 			job->end_ns = tr->start_time +
@@ -1426,6 +1419,14 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 		else {
 			job->end_ns = tr->start_time + DEFAULT_TTL_NS;
 		}
+	}
+	else {
+		cf_debug(AS_QUERY, "starting basic query job %lu {%s:%s:%s} n-pids-requested %hu rps %u sample-max %lu%s socket-timeout %d from %s",
+				_job->trid, ns->name, _job->set_name,
+				_job->si != NULL ? _job->si->imd->iname : "<pi-query>",
+				_job->n_pids_requested, _job->rps, job->sample_max,
+				job->no_bin_data ? " metadata-only" : "", conn_job->fd_timeout,
+				_job->client);
 	}
 
 	result = as_query_manager_start_job(_job);
@@ -1527,9 +1528,10 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 		as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_OK);
 	}
 
-	cf_detail(AS_QUERY, "%s:%u basic query job %lu took %lu us",
-			rsv->ns->name, rsv->p->id, _job->trid,
-			(cf_getns() - slice_start) / 1000);
+	if (! _job->is_short) {
+		cf_detail(AS_QUERY, "basic query job %lu pid %u took %lu us",
+				_job->trid, rsv->p->id, (cf_getns() - slice_start) / 1000);
+	}
 }
 
 static void
@@ -1598,8 +1600,11 @@ basic_query_job_finish(as_query_job* _job)
 		break;
 	}
 
-	cf_debug(AS_QUERY, "finished basic query job %lu (%d)", _job->trid,
-			_job->abandoned);
+	if (! _job->is_short) {
+		cf_debug(AS_QUERY, "finished basic query job %lu (%d) in %lu ms",
+				_job->trid, _job->abandoned,
+				(cf_getns() - _job->start_ns) / 1000000);
+	}
 }
 
 static void
