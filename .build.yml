@@ -2,10 +2,13 @@ name: aerospike-server
 
 environment:
   EEREPO: modules/ee
+  FIPSREPO: modules/fips
 
 dependency:
   - url: git@github.com:citrusleaf/aerospike-server-enterprise
     dir: $EEREPO
+  - url: git@github.com:citrusleaf/aerospike-server-fips
+    dir: $FIPSREPO
 
 container:
   - base:
@@ -40,5 +43,14 @@ build:
       - make -j +ee
       - make $PKG+ee
       - make source+ee
+    artifact:
+      - pkg/packages/*
+  - name: fips
+    environment:
+      EEREPO: /work/source/$EEREPO
+      FIPSREPO: /work/source/$FIPSREPO
+    script:
+      - make -j +fips
+      - make $PKG+fips
     artifact:
       - pkg/packages/*
