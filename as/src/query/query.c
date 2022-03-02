@@ -639,7 +639,6 @@ range_from_msg_integer(const uint8_t* data, as_query_range* range)
 
 	int64_t end = (int64_t)cf_swap_from_be64(*((uint64_t*)data));
 	range->u.r.end = end;
-	data += sizeof(uint64_t);
 
 	if (start > end) {
 		cf_warning(AS_QUERY, "invalid range - %ld..%ld", start, end);
