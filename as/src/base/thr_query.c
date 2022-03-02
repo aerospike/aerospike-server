@@ -1385,6 +1385,21 @@ query_io(query_work *qwork, as_record *r)
 	as_storage_record_open(ns, r, &rd);
 	qtr->n_read_success += 1;
 
+	if (tv == AS_EXP_UNK) {
+		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
+			as_storage_record_close(&rd);
+			return true;
+		}
+
+		ctx.rd = &rd;
+
+		if (! as_exp_matches_record(qtr->filter_exp, &ctx)) {
+			as_storage_record_close(&rd);
+			as_incr_uint64(&qtr->n_filtered_bins);
+			return true;
+		}
+	}
+
 	if (qtr->no_bin_data) {
 		// Geo query always needs deeper check as it may return cell IDs outside
 		// the query region depending on config (min-level, max-cells, ...).
@@ -1405,15 +1420,6 @@ query_io(query_work *qwork, as_record *r)
 	else {
 		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 			as_storage_record_close(&rd);
-			return true;
-		}
-
-		ctx.rd = &rd;
-
-		if (tv == AS_EXP_UNK &&
-				! as_exp_matches_record(qtr->filter_exp, &ctx)) {
-			as_storage_record_close(&rd);
-			as_incr_uint64(&qtr->n_filtered_bins);
 			return true;
 		}
 
