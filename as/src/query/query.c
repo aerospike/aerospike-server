@@ -101,7 +101,7 @@ typedef enum {
 
 #define MAX_ACTIVE_TRANSACTIONS 200
 
-#define DEFAULT_TTL_NS (1 * 1000000000) // 1 second
+#define DEFAULT_TTL_NS 1000000000 // 1 second
 
 
 //==========================================================
@@ -1451,9 +1451,8 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 		cf_buf_builder** bb_r)
 {
 	basic_query_job* job = (basic_query_job*)_job;
-	cf_buf_builder* bb = *bb_r;
 
-	if (bb == NULL) {
+	if (*bb_r == NULL) {
 		*bb_r = cf_buf_builder_create(INIT_BUF_BUILDER_SIZE);
 		cf_buf_builder_reserve(bb_r, (int)sizeof(as_proto), NULL);
 	}
@@ -1462,6 +1461,8 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 			as_msg_fin_bufbuilder(bb_r, _job->abandoned);
 			// Won't send fin later in finish().
 		}
+
+		cf_buf_builder* bb = *bb_r;
 
 		if (bb->used_sz > sizeof(as_proto)) {
 			conn_query_job_send_response((conn_query_job*)job, bb->buf,
