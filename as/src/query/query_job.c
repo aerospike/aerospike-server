@@ -192,14 +192,11 @@ as_query_job_run(void* pv_job)
 		cf_buf_builder_free(bb);
 	}
 
-	int32_t n = 0;
+	as_decr_uint32(&g_n_query_threads);
 
-	if (! _job->do_inline) {
-		as_decr_uint32(&g_n_query_threads);
-		n = (int32_t)as_aaf_uint32(&_job->n_threads, -1);
+	int32_t n = (int32_t)as_aaf_uint32(&_job->n_threads, -1);
 
-		cf_assert(n >= 0, AS_QUERY, "query job thread underflow %d", n);
-	}
+	cf_assert(n >= 0, AS_QUERY, "query job thread underflow %d", n);
 
 	if (n == 0) {
 		finish(_job);

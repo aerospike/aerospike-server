@@ -1334,10 +1334,9 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	conn_query_job* conn_job = (conn_query_job*)job;
 	as_query_job* _job = (as_query_job*)job;
 
-	// Short/inline queries only for basic queries, but use base job member.
+	// Short queries only for basic queries, but use base job member.
 	if (as_transaction_is_short_query(tr)) {
 		_job->is_short = true;
-		_job->do_inline = _job->is_short && ns->storage_data_in_memory;
 	}
 
 	// TODO - temporary - won't need after January 2023.
