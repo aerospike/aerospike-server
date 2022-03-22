@@ -307,8 +307,6 @@ typedef enum {
 	CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
 	CASE_SERVICE_SCAN_MAX_DONE,
-	CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS,
-	CASE_SERVICE_SCAN_THREADS,
 	CASE_SERVICE_SCAN_THREADS_LIMIT,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_QUEUES,
@@ -803,8 +801,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "object-size-hist-period",		CASE_SERVICE_OBJECT_SIZE_HIST_PERIOD },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
 		{ "scan-max-done",					CASE_SERVICE_SCAN_MAX_DONE },
-		{ "scan-max-udf-transactions",		CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS },
-		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
 		{ "scan-threads-limit",				CASE_SERVICE_SCAN_THREADS_LIMIT },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
@@ -2369,12 +2365,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_SCAN_MAX_DONE:
 				cfg_obsolete(&line, "please use 'query-max-done'");
-				break;
-			case CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS:
-				cfg_obsolete(&line, "please use namespace context 'background-scan-max-rps'");
-				break;
-			case CASE_SERVICE_SCAN_THREADS:
-				cfg_obsolete(&line, "please use 'scan-threads-limit' and namespace context 'single-scan-threads'");
 				break;
 			case CASE_SERVICE_SCAN_THREADS_LIMIT:
 				cfg_obsolete(&line, "please use 'query-threads-limit'");
