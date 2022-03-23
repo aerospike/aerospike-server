@@ -614,7 +614,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 {
 	// Paranoia - shouldn't get here on losing race with timeout.
 	if (tr->from.any == NULL) {
-		cf_warning(AS_RW, "transaction origin %u has null 'from'", tr->origin);
+		cf_warning(AS_UDF, "transaction origin %u has null 'from'", tr->origin);
 		return;
 	}
 
@@ -671,14 +671,14 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		break;
 	case FROM_IUDF:
 		if (db != NULL && db->used_sz != 0) {
-			cf_crash(AS_RW, "unexpected - internal udf has response");
+			cf_crash(AS_UDF, "unexpected - internal udf has response");
 		}
 		tr->from.iudf_orig->done_cb(tr->from.iudf_orig->udata, tr->result_code);
 		BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, response);
 		udf_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	default:
-		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
+		cf_crash(AS_UDF, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
 
@@ -721,7 +721,7 @@ udf_timeout_cb(rw_request* rw)
 		udf_sub_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
 	default:
-		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
+		cf_crash(AS_UDF, "unexpected transaction origin %u", rw->origin);
 		break;
 	}
 
