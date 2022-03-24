@@ -3122,6 +3122,7 @@ as_config_init(const char* config_file)
 					cfg_enterprise_only(&line);
 					ns->storage_type = AS_STORAGE_ENGINE_PMEM;
 					ns->storage_data_in_memory = false;
+					ns->storage_write_block_size = 8 * 1024 * 1024;
 					cfg_begin_context(&state, NAMESPACE_STORAGE_PMEM);
 					break;
 				case CASE_NAMESPACE_STORAGE_SSD:
