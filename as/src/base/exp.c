@@ -499,7 +499,7 @@ static bool build_value_msgpack(build_args* args);
 // Build utilities.
 static bool parse_op_call(op_call* op, build_args* args);
 static bool build_set_expected_particle_type(build_args* args);
-static bool is_old_predexp(const uint8_t* buf);
+static bool is_old_predexp(const uint8_t* buf, uint32_t buf_sz);
 static as_exp* check_filter_exp(as_exp* exp);
 
 // Runtime.
@@ -751,7 +751,7 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 	cf_debug(AS_EXP, "as_exp_filter_build_base64 - buf_sz %u msg-dump:\n%*pH",
 			buf_sz_out, buf_sz_out, buf);
 
-	if (is_old_predexp(buf)) {
+	if (is_old_predexp(buf, buf_sz_out)) {
 		cf_warning(AS_EXP, "as_exp_filter_build_base64 - operation requires expressions found predexp");
 		cf_free(buf);
 		return NULL;
@@ -772,15 +772,16 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 as_exp*
 as_exp_filter_build(const as_msg_field* m, bool cpy_wire)
 {
-	cf_debug(AS_EXP, "as_exp_filter_build - msg_field_sz %u msg-dump\n%*pH",
-			m->field_sz, as_msg_field_get_value_sz(m), m->data);
+	uint32_t sz = as_msg_field_get_value_sz(m);
 
-	if (is_old_predexp(m->data)) {
+	cf_debug(AS_EXP, "as_exp_filter_build - msg_field_sz %u msg-dump\n%*pH",
+			m->field_sz, sz, m->data);
+
+	if (is_old_predexp(m->data, sz)) {
 		return predexp_build_old(m);
 	}
 
-	as_exp* exp = build_internal(m->data, as_msg_field_get_value_sz(m),
-			cpy_wire);
+	as_exp* exp = build_internal(m->data, sz, cpy_wire);
 
 	if (exp == NULL) {
 		return NULL;
@@ -795,7 +796,7 @@ as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 	cf_debug(AS_EXP, "as_exp_build_buf - buf_sz %u buf-dump:\n%*pH",
 			buf_sz, buf_sz, buf);
 
-	if (is_old_predexp(buf)) {
+	if (is_old_predexp(buf, buf_sz)) {
 		cf_warning(AS_EXP, "as_exp_build_buf - operation requires expressions found predexp");
 		return NULL;
 	}
@@ -2796,10 +2797,10 @@ build_set_expected_particle_type(build_args* args)
 }
 
 static bool
-is_old_predexp(const uint8_t* buf)
+is_old_predexp(const uint8_t* buf, uint32_t buf_sz)
 {
 	// TODO - Remove in "six months".
-	return buf[0] == 0;
+	return buf[0] == 0 && buf_sz != 1;
 }
 
 static as_exp*
