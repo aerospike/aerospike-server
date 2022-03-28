@@ -575,16 +575,17 @@ as_exp_build_base64(const char* buf64, uint32_t buf64_sz)
 as_exp*
 as_exp_build(const as_msg_field* msg, bool cpy_wire)
 {
+	uint32_t sz = as_msg_field_get_value_sz(msg);
+
 	cf_debug(AS_EXP, "as_exp_build - msg_sz %u msg", msg->field_sz);
-	cf_debug(AS_EXP, "as_exp_build - msg-dump:\n%*pH",
-			as_msg_field_get_value_sz(msg), msg->data);
+	cf_debug(AS_EXP, "as_exp_build - msg-dump:\n%*pH", sz, msg->data);
 
 	// TODO - Remove in "six months".
-	if (msg->data[0] == 0) {
+	if (sz > 1 && msg->data[0] == 0) {
 		return predexp_build_old(msg);
 	}
 
-	return build_internal(msg->data, as_msg_field_get_value_sz(msg), cpy_wire);
+	return build_internal(msg->data, sz, cpy_wire);
 }
 
 as_exp_trilean
