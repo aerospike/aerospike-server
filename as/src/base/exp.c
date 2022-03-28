@@ -2800,7 +2800,7 @@ static bool
 is_old_predexp(const uint8_t* buf, uint32_t buf_sz)
 {
 	// TODO - Remove in "six months".
-	return buf[0] == 0 && buf_sz != 1;
+	return buf_sz > 1 && buf[0] == 0;
 }
 
 static as_exp*
