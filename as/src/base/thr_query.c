@@ -1861,7 +1861,8 @@ qwork_setup(query_work *qworkp, as_query_transaction *qtr)
 {
 	QTR_RESERVE(qtr);
 
-	if (cf_atomic32_get(qtr->n_qwork_active) > 1) {
+	// fd_h will not be set for background operations. qwork->bb not needed.
+	if (qtr->fd_h != NULL && cf_atomic32_get(qtr->n_qwork_active) > 1) {
 		qworkp->bb = cf_buf_builder_create(g_config.query_buf_size);
 		cf_buf_builder_reserve(&qworkp->bb, 8, NULL);
 	}
