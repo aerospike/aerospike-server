@@ -5584,7 +5584,7 @@ register_init()
  * Returns true if register sync is pending.
  */
 static bool
-register_is_sycn_pending()
+register_is_sync_pending()
 {
 	CLUSTERING_LOCK();
 	bool sync_pending = cf_vector_size(&g_register.sync_pending) > 0;
@@ -5602,7 +5602,7 @@ static void
 register_check_and_switch_synced()
 {
 	CLUSTERING_LOCK();
-	if (!register_is_sycn_pending()
+	if (!register_is_sync_pending()
 			&& g_register.state != AS_CLUSTERING_REGISTER_STATE_SYNCED) {
 		g_register.state = AS_CLUSTERING_REGISTER_STATE_SYNCED;
 		// Generate internal cluster changed synced.
@@ -5659,7 +5659,7 @@ register_syncing_timer_event_handle()
 		goto Exit;
 	}
 
-	if (register_is_sycn_pending()) {
+	if (register_is_sync_pending()) {
 		// Update pending nodes based on heartbeat status.
 		int num_pending = cf_vector_size(&g_register.sync_pending);
 		for (int i = 0; i < num_pending; i++) {
