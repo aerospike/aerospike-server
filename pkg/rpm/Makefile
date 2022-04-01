@@ -105,7 +105,7 @@ package:
 	install -d $(SOURCE_ROOT)/RPMS/x86_64
 
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/rpm/server-spec-base > $(PKG)/rpm/aerospike.spec
-ifeq ($(EDITION),fips)
+ifeq ($(EDITION),federal)
 	cat $(EEREPO)/pkg/rpm/server-spec-fips >> $(PKG)/rpm/aerospike.spec
 endif
 ifneq ($(USE_SYSTEMD),1)
