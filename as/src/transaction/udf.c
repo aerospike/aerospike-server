@@ -1413,13 +1413,7 @@ static void
 process_failure(as_transaction* tr, const as_result* result, cf_dyn_buf* db)
 {
 	if (result->is_success) { // yes - this can happen
-		static const char IGNORED[] = "result value ignored";
-		as_string stack_s;
-
-		as_string_init_wlen(&stack_s, (char*)IGNORED, sizeof(IGNORED) - 1,
-				false);
-
-		process_response(tr, false, as_string_toval(&stack_s), db);
+		process_response(tr, false, NULL, db);
 		return;
 	}
 
@@ -1449,13 +1443,26 @@ process_response(as_transaction* tr, bool success, const as_val* val,
 		return;
 	}
 
-	// Note - this function quietly handles a null val. The response call will
-	// be given a bin with a name but not 'in use', and it does the right thing.
-
 	size_t msg_sz = 0;
 
-	db->buf = (uint8_t*)as_msg_make_val_response(success, val, tr->result_code,
-			tr->generation, tr->void_time, as_transaction_trid(tr), &msg_sz);
+	if (! success && val == NULL) {
+		// As of 6.0 we don't send a FAILURE bin except on UDF execution errors.
+		// (Older clients never looked at it, and new batched UDF responses are
+		// better off without it.)
+
+		db->buf = (uint8_t*)as_msg_make_no_val_response(tr->result_code,
+				tr->generation, tr->void_time, as_transaction_trid(tr),
+				&msg_sz);
+	}
+	else {
+		// Note - this function quietly handles a null val. The response will
+		// contain a bin-op with a name (SUCCESS) but a null particle, which the
+		// clients/apps handle.
+
+		db->buf = (uint8_t*)as_msg_make_val_response(success, val,
+				tr->result_code, tr->generation, tr->void_time,
+				as_transaction_trid(tr), &msg_sz);
+	}
 
 	db->is_stack = false;
 	db->alloc_sz = msg_sz;

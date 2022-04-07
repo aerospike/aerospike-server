@@ -536,6 +536,60 @@ as_msg_fin_bufbuilder(cf_buf_builder **bb_r, int result)
 }
 
 cl_msg *
+as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
+		uint32_t void_time, uint64_t trid, size_t *p_msg_sz)
+{
+	uint16_t n_fields = 0;
+	size_t msg_sz = sizeof(cl_msg);
+
+	if (trid != 0) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + sizeof(trid);
+	}
+
+	uint8_t *buf = cf_malloc(msg_sz);
+	cl_msg *msgp = (cl_msg *)buf;
+
+	msgp->proto.version = PROTO_VERSION;
+	msgp->proto.type = PROTO_TYPE_AS_MSG;
+	msgp->proto.sz = msg_sz - sizeof(as_proto);
+
+	as_proto_swap(&msgp->proto);
+
+	as_msg *m = &msgp->msg;
+
+	m->header_sz = sizeof(as_msg);
+	m->info1 = 0;
+	m->info2 = 0;
+	m->info3 = 0;
+	m->unused = 0;
+	m->result_code = result_code;
+	m->generation = generation;
+	m->record_ttl = void_time;
+	m->transaction_ttl = 0;
+	m->n_fields = n_fields;
+	m->n_ops = 0;
+
+	as_msg_swap_header(m);
+
+	buf = m->data;
+
+	if (trid != 0) {
+		as_msg_field *mf = (as_msg_field *)buf;
+
+		mf->field_sz = 1 + sizeof(uint64_t);
+		mf->type = AS_MSG_FIELD_TYPE_TRID;
+		*(uint64_t *)mf->data = cf_swap_to_be64(trid);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + sizeof(uint64_t);
+	}
+
+	*p_msg_sz = msg_sz;
+
+	return msgp;
+}
+
+cl_msg *
 as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, uint64_t trid,
 		size_t *p_msg_sz)

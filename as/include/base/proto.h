@@ -681,6 +681,8 @@ int32_t as_msg_make_response_bufbuilder(cf_buf_builder** bb_r,
 void as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid,
 		int result);
 void as_msg_fin_bufbuilder(cf_buf_builder** bb_r, int result);
+cl_msg* as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
+		uint32_t void_time, uint64_t trid, size_t *p_msg_sz);
 cl_msg* as_msg_make_val_response(bool success, const as_val* val,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		uint64_t trid, size_t* p_msg_sz);
