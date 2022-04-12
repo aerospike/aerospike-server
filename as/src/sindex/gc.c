@@ -48,6 +48,13 @@
 
 
 //==========================================================
+// Typedefs & constants.
+//
+
+#define THROTTLE_THRESHOLD (64 * 1024 * 1024)
+
+
+//==========================================================
 // Forward declarations.
 //
 
@@ -103,8 +110,33 @@ as_sindex_gc_record(as_namespace* ns, as_index_ref* r_ref)
 	cf_mutex_lock(&ns->si_gc_list_mutex);
 
 	push_to_rlist(ns, r_ref);
+	ns->si_gc_rlist_full = cf_queue_sz(ns->si_gc_rlist) >= THROTTLE_THRESHOLD;
 
 	cf_mutex_unlock(&ns->si_gc_list_mutex);
+}
+
+void
+as_sindex_gc_record_throttle(as_namespace* ns)
+{
+	if (! ns->si_gc_rlist_full) {
+		return;
+	}
+
+	while (true) {
+		cf_ticker_info(AS_SINDEX, "{%s} gc rlist full - throttling", ns->name);
+
+		sleep(1);
+
+		cf_mutex_lock(&ns->si_gc_list_mutex);
+
+		if (cf_queue_sz(ns->si_gc_rlist) < THROTTLE_THRESHOLD) {
+			ns->si_gc_rlist_full = false; // optional - but can't hurt
+			cf_mutex_unlock(&ns->si_gc_list_mutex);
+			return;
+		}
+
+		cf_mutex_unlock(&ns->si_gc_list_mutex);
+	}
 }
 
 void

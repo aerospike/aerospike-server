@@ -50,6 +50,7 @@
 #include "base/set_index.h"
 #include "base/smd.h"
 #include "fabric/partition.h"
+#include "sindex/gc.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 
@@ -461,6 +462,7 @@ expire_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 	else if (per_thread->now > void_time) {
 		if (drop_local(ns, per_thread->rsv, r_ref)) {
+			as_sindex_gc_record_throttle(ns);
 			per_thread->n_expired++;
 		}
 
@@ -583,6 +585,7 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	else if (per_thread->sets_not_evicting[as_index_get_set_id(r)]) {
 		if (per_thread->now > void_time) {
 			if (drop_local(ns, per_thread->rsv, r_ref)) {
+				as_sindex_gc_record_throttle(ns);
 				per_thread->n_expired++;
 			}
 
@@ -591,6 +594,7 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 	else if (per_thread->evict_void_time > void_time) {
 		if (drop_local(ns, per_thread->rsv, r_ref)) {
+			as_sindex_gc_record_throttle(ns);
 			per_thread->n_evicted++;
 		}
 

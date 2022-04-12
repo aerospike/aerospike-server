@@ -716,6 +716,7 @@ struct as_namespace_s {
 	cf_shash*		sindex_iname_hash;
 	uint32_t		sindex_binid_bitmap[AS_BINID_HAS_SINDEX_SIZE];
 
+	bool			si_gc_rlist_full;
 	cf_mutex		si_gc_list_mutex;
 	// The queues are not threadsafe - protected by si_gc_list_mutex.
 	cf_queue*		si_gc_rlist;

@@ -47,6 +47,7 @@
 #include "base/index.h"
 #include "base/set_index.h"
 #include "base/smd.h"
+#include "sindex/gc.h"
 #include "transaction/rw_utils.h"
 
 
@@ -466,6 +467,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_set_index_delete_live(ns, tree, r, r_ref->r_h);
 		as_index_delete(tree, &r->keyd);
 		as_record_done(r_ref, ns);
+		as_sindex_gc_record_throttle(ns);
 		return true;
 	}
 
@@ -484,6 +486,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_record_done(r_ref, ns);
+	as_sindex_gc_record_throttle(ns);
 
 	return true;
 }
