@@ -57,6 +57,7 @@ void as_sindex_gc_ns_init(struct as_namespace_s* ns);
 void* as_sindex_run_gc(void* udata);
 
 void as_sindex_gc_record(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
+void as_sindex_gc_record_throttle(struct as_namespace_s* ns);
 void as_sindex_gc_tree(struct as_namespace_s* ns, struct as_index_tree_s* tree);
 
 
