@@ -3445,8 +3445,16 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 					ns->storage_max_write_cache / ns->storage_write_block_size);
 		}
 		else if (0 == as_info_parameter_get(params, "min-avail-pct", context, &context_len)) {
-			ns->storage_min_avail_pct = atoi(context);
-			cf_info(AS_INFO, "Changing value of min-avail-pct of ns %s from %u to %u ", ns->name, ns->storage_min_avail_pct, atoi(context));
+			if (0 != cf_str_atoi(context, &val)) {
+				cf_warning(AS_INFO, "ns %s, min-avail-pct %s is not a number", ns->name, context);
+				goto Error;
+			}
+			if (val > 100 || val < 0) {
+				cf_warning(AS_INFO, "ns %s, min-avail-pct %d must be between 0 and 100", ns->name, val);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of min-avail-pct of ns %s from %u to %d ", ns->name, ns->storage_min_avail_pct, val);
+			ns->storage_min_avail_pct = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "post-write-queue", context, &context_len)) {
 			if (ns->storage_data_in_memory) {
