@@ -115,10 +115,10 @@ static bool gc_collect_cb(const si_btree_key* key, void* udata);
 static void query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, as_sindex_reduce_fn cb, void* udata);
 static bool query_collect_cb(const si_btree_key* key, void* udata);
 
-static si_btree* si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t order);
-static void si_btree_destroy(si_btree* bt);
-static bool si_btree_put(si_btree* bt, const si_btree_key* key);
-static bool si_btree_delete(si_btree* bt, const si_btree_key* key);
+static si_btree* si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t order, uint64_t* size);
+static void si_btree_destroy(si_btree* bt, uint64_t* size);
+static bool si_btree_put(si_btree* bt, const si_btree_key* key, uint64_t* size);
+static bool si_btree_delete(si_btree* bt, const si_btree_key* key, uint64_t* size);
 
 static void btree_destroy(si_btree* bt, si_btree_node* node);
 static bool btree_put(si_btree* bt, si_btree_node* node, const si_btree_key* key);
@@ -292,10 +292,7 @@ as_sindex_tree_create(as_sindex* si)
 
 	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
 		si->imd->btrees[ix] = si_btree_create(si->ns->arena, unsigned_bvals,
-				BTREE_ORDER);
-
-		as_add_uint64(&si->ns->n_bytes_sindex_memory,
-				(int64_t)si->imd->btrees[ix]->size);
+				BTREE_ORDER, &si->ns->n_bytes_sindex_memory);
 	}
 }
 
@@ -303,10 +300,7 @@ void
 as_sindex_tree_destroy(as_sindex* si)
 {
 	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		as_add_uint64(&si->ns->n_bytes_sindex_memory,
-				-(int64_t)si->imd->btrees[ix]->size);
-
-		si_btree_destroy(si->imd->btrees[ix]);
+		si_btree_destroy(si->imd->btrees[ix], &si->ns->n_bytes_sindex_memory);
 	}
 
 	cf_free(si->imd->btrees);
@@ -357,15 +351,7 @@ as_sindex_tree_put(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 			.r_h = r_h
 	};
 
-	int64_t sz = (int64_t)bt->size;
-
-	bool rv = si_btree_put(bt, &key);
-
-	if ((int64_t)bt->size != sz) {
-		as_add_uint64(&si->ns->n_bytes_sindex_memory, (int64_t)bt->size - sz);
-	}
-
-	return rv;
+	return si_btree_put(bt, &key, &si->ns->n_bytes_sindex_memory);
 }
 
 bool
@@ -380,15 +366,7 @@ as_sindex_tree_delete(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 			.r_h = r_h
 	};
 
-	int64_t sz = (int64_t)bt->size;
-
-	bool rv = si_btree_delete(bt, &key);
-
-	if ((int64_t)bt->size != sz) {
-		as_add_uint64(&si->ns->n_bytes_sindex_memory, (int64_t)bt->size - sz);
-	}
-
-	return rv;
+	return si_btree_delete(bt, &key, &si->ns->n_bytes_sindex_memory);
 }
 
 void
@@ -443,7 +421,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 		first = false;
 
 		for (uint32_t i = 0; i < ci.n_keys; i++) {
-			si_btree_delete(bt, &keys[i]);
+			si_btree_delete(bt, &keys[i], &ns->n_bytes_sindex_memory);
 		}
 
 		si->n_defrag_records += ci.n_keys;
@@ -611,7 +589,8 @@ query_collect_cb(const si_btree_key* key, void* udata)
 //
 
 static si_btree*
-si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t order)
+si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t order,
+		uint64_t* size)
 {
 	cf_assert(order % 2 == 0, AS_SINDEX, "odd B-tree order: %u", order);
 
@@ -643,21 +622,27 @@ si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t order)
 	bt->n_keys = 0;
 	bt->size = sizeof(si_btree) + bt->leaf_sz;
 
+	as_add_uint64(size, (int64_t)bt->size);
+
 	return bt;
 }
 
 static void
-si_btree_destroy(si_btree* bt)
+si_btree_destroy(si_btree* bt, uint64_t* size)
 {
+	as_add_uint64(size, -(int64_t)bt->size);
+
 	btree_destroy(bt, bt->root);
 	pthread_rwlock_destroy(&bt->lock);
 	cf_free(bt);
 }
 
 static bool
-si_btree_put(si_btree* bt, const si_btree_key* key)
+si_btree_put(si_btree* bt, const si_btree_key* key, uint64_t* size)
 {
 	pthread_rwlock_wrlock(&bt->lock);
+
+	int64_t old_size = (int64_t)bt->size;
 
 	if (bt->root->n_keys == bt->max_degree - 1) {
 		si_btree_node* root = create_node(bt, false);
@@ -672,22 +657,36 @@ si_btree_put(si_btree* bt, const si_btree_key* key)
 	}
 
 	if (! btree_put(bt, bt->root, key)) {
+		if ((int64_t)bt->size != old_size) {
+			as_add_uint64(size, (int64_t)bt->size - old_size);
+		}
+
 		pthread_rwlock_unlock(&bt->lock);
 		return false;
 	}
 
 	bt->n_keys++;
 
+	if ((int64_t)bt->size != old_size) {
+		as_add_uint64(size, (int64_t)bt->size - old_size);
+	}
+
 	pthread_rwlock_unlock(&bt->lock);
 	return true;
 }
 
 static bool
-si_btree_delete(si_btree* bt, const si_btree_key* key)
+si_btree_delete(si_btree* bt, const si_btree_key* key, uint64_t* size)
 {
 	pthread_rwlock_wrlock(&bt->lock);
 
+	int64_t old_size = (int64_t)bt->size;
+
 	if (! btree_delete(bt, bt->root, KEY_MODE_MATCH, key, NULL)) {
+		if ((int64_t)bt->size != old_size) {
+			as_add_uint64(size, (int64_t)bt->size - old_size);
+		}
+
 		pthread_rwlock_unlock(&bt->lock);
 		return false;
 	}
@@ -703,6 +702,10 @@ si_btree_delete(si_btree* bt, const si_btree_key* key)
 
 		bt->n_nodes--;
 		bt->size -= bt->inner_sz;
+	}
+
+	if ((int64_t)bt->size != old_size) {
+		as_add_uint64(size, (int64_t)bt->size - old_size);
 	}
 
 	pthread_rwlock_unlock(&bt->lock);
