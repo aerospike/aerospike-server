@@ -58,12 +58,11 @@ typedef struct si_btree_s {
 	pthread_rwlock_t lock;
 	cf_arenax* arena;
 	bool unsigned_bvals;
-	uint32_t min_degree;
-	uint32_t max_degree;
+	uint32_t node_sz;
+	uint32_t inner_order;
+	uint32_t leaf_order;
 	uint32_t keys_off;
 	uint32_t children_off;
-	uint32_t inner_sz;
-	uint32_t leaf_sz;
 	struct si_btree_node_s* root;
 	uint64_t n_nodes;
 	uint64_t n_keys;
