@@ -410,7 +410,7 @@ as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_
 	}
 
 	if (shared->report_error_rec) {
-		// Ensures this is the last buffer sent.
+		// If error, ensures this is the last buffer sent.
 		shared->result_code = buffer->result_code;
 	}
 

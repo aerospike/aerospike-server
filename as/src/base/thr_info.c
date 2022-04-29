@@ -494,6 +494,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "early_tsvc_udf_sub_error", g_stats.n_tsvc_udf_sub_error);
 	info_append_uint64(db, "early_tsvc_ops_sub_error", g_stats.n_tsvc_ops_sub_error);
 
+	info_append_uint32(db, "long_queries_active", as_query_get_active_job_count());
+
 	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
 
 	cf_dyn_buf_append_string(db, "batch_index_queue=");
@@ -518,13 +520,11 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_format(db, "batch_index_proto_uncompressed_pct", "%.3f", g_stats.batch_comp_stat.uncomp_pct);
 	info_append_format(db, "batch_index_proto_compression_ratio", "%.3f", batch_ratio);
 
-	info_append_uint32(db, "queries_active", as_query_get_active_job_count());
-
 	char paxos_principal[16 + 1];
 	sprintf(paxos_principal, "%lX", as_exchange_principal());
 	info_append_string(db, "paxos_principal", paxos_principal);
 
-	info_append_uint64(db, "time_since_rebalance", now_sec - g_rebalance_sec); // not in ticker
+	info_append_uint64(db, "time_since_rebalance", now_sec - g_rebalance_sec);
 
 	info_append_bool(db, "migrate_allowed", as_partition_balance_are_migrations_allowed());
 	info_append_uint64(db, "migrate_partitions_remaining", as_partition_balance_remaining_migrations());

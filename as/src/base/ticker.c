@@ -293,11 +293,12 @@ log_line_process()
 void
 log_line_in_progress()
 {
-	cf_info(AS_INFO, "   in-progress: info-q %u rw-hash %u proxy-hash %u tree-gc-q %u",
+	cf_info(AS_INFO, "   in-progress: info-q %u rw-hash %u proxy-hash %u tree-gc-q %u long-queries %u",
 			as_info_queue_get_size(),
 			rw_request_hash_count(),
 			as_proxy_hash_count(),
-			as_index_tree_gc_queue_size());
+			as_index_tree_gc_queue_size(),
+			as_query_get_active_job_count());
 }
 
 void
