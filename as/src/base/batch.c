@@ -64,6 +64,7 @@
 #define INLINE_DATA_IN_MEMORY   0x1 // or data in pmem
 #define INLINE_DATA_ON_DEVICE   0x2
 #define REPORT_ALL_ERRORS       0x4
+#define REPORT_ERROR_REC        0x8
 
 // as_batch_input repeat (or not) flags.
 #define REPEAT          0x1
@@ -91,12 +92,15 @@ typedef struct {
 	uint32_t size;
 	uint32_t tran_count;
 	cf_atomic32 writers;
+	int result_code;
+	uint32_t unused;
 	as_proto proto;
 	uint8_t data[];
 } __attribute__((__packed__)) as_batch_buffer;
 
 struct as_batch_shared_s {
 	cf_mutex lock;
+	int result_code;
 	cf_queue* response_queue;
 	as_file_handle* fd_h;
 	cl_msg* msgp;
@@ -108,8 +112,8 @@ struct as_batch_shared_s {
 	uint32_t tran_max;
 	uint32_t buffer_offset;
 	as_batch_buffer* delayed_buffer;
-	int result_code;
 	bool report_all_errors;
+	bool report_error_rec;
 	bool in_trailer;
 	bool bad_response_fd;
 	bool compress_response;
@@ -405,6 +409,11 @@ as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_
 		return as_batch_buffer_end(queue, shared, buffer, BATCH_ERROR);
 	}
 
+	if (shared->report_error_rec) {
+		// Ensures this is the last buffer sent.
+		shared->result_code = buffer->result_code;
+	}
+
 	shared->buffer_offset = 0;
 
 	// Send buffer block to client socket.
@@ -672,6 +681,7 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 	buffer->size = size;
 	buffer->tran_count = 1;
 	buffer->writers = 2;
+	buffer->result_code = 0;
 	shared->buffer = buffer;
 	return buffer->data;
 }
@@ -727,9 +737,14 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 	if (! shared->report_all_errors &&
 			! (result_code == AS_OK || result_code == AS_ERR_NOT_FOUND ||
 					result_code == AS_ERR_FILTERED_OUT)) {
-		// Result code can be set outside of lock because it doesn't matter which transaction's
-		// result code is used as long as it's an error.
-		shared->result_code = result_code;
+		if (shared->report_error_rec) {
+			// When this buffer is processed, result_code transfers to shared,
+			// which will ensure it's the last buffer in the response.
+			(*buffer_out)->result_code = result_code;
+		}
+		else {
+			shared->result_code = result_code;
+		}
 	}
 	return data;
 }
@@ -916,6 +931,7 @@ as_batch_queue_task(as_transaction* btr)
 	shared->compress_response = as_transaction_compress_response(btr);
 	shared->tran_max = tran_count;
 	shared->report_all_errors = (parent_flags & REPORT_ALL_ERRORS) != 0;
+	shared->report_error_rec = (parent_flags & REPORT_ERROR_REC) != 0;
 
 	// Find batch queue to send transaction responses.
 	as_batch_queue* batch_queue = &batch_queues[queue_index];
