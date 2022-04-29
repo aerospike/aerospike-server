@@ -606,14 +606,15 @@ si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t node_sz,
 
 	bt->node_sz = node_sz;
 
-	bt->inner_order = (((((node_sz - sizeof(si_btree_node) - SARENA_REF_SZ) /
+	bt->inner_order = (uint32_t)
+			(((((node_sz - sizeof(si_btree_node) - SARENA_REF_SZ) /
 			(sizeof(si_btree_key) + SARENA_REF_SZ)) + 1) / 2) * 2); // 186 (226)
-	bt->leaf_order = (((((node_sz - sizeof(si_btree_node)) /
+	bt->leaf_order = (uint32_t)
+			(((((node_sz - sizeof(si_btree_node)) /
 			sizeof(si_btree_key)) + 1) / 2) * 2); // 292
 
-	bt->keys_off = sizeof(si_btree_node);
-	bt->children_off = node_sz -
-			(bt->inner_order * (uint32_t)sizeof(si_btree_key));
+	bt->keys_off = (uint32_t)sizeof(si_btree_node);
+	bt->children_off = node_sz - (bt->inner_order * SARENA_REF_SZ);
 
 	bt->root = create_node(bt, true);
 	bt->n_nodes = 1;
@@ -750,7 +751,7 @@ btree_put(si_btree* bt, si_btree_node* node, const si_btree_key* key)
 	key_bound bound = greatest_lower_bound(bt, node, key);
 
 	if (bound.equal) {
-		si_btree_key* node_key = mut_key(bt, node, bound.index);
+		si_btree_key* node_key = mut_key(bt, node, (uint32_t)bound.index);
 
 		if (key->r_h != node_key->r_h) {
 			*node_key = *key; // replace old key pending garbage collection
@@ -1134,13 +1135,13 @@ create_node(const si_btree* bt, bool leaf)
 
 	if (leaf) {
 		node->leaf = 1;
-		node->min_degree = bt->leaf_order / 2;
-		node->max_degree = bt->leaf_order;
+		node->min_degree = (uint16_t)bt->leaf_order / 2;
+		node->max_degree = (uint16_t)bt->leaf_order;
 	}
 	else {
 		node->leaf = 0;
-		node->min_degree = bt->inner_order / 2;
-		node->max_degree = bt->inner_order;
+		node->min_degree = (uint16_t)bt->inner_order / 2;
+		node->max_degree = (uint16_t)bt->inner_order;
 	}
 
 	return node;
@@ -1327,7 +1328,8 @@ split_child(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child)
 	bt->n_nodes++;
 	bt->size += bt->node_sz;
 
-	move_keys(bt, sibling, 0, child, child->min_degree, child->min_degree - 1);
+	move_keys(bt, sibling, 0, child, child->min_degree,
+			(uint32_t)child->min_degree - 1);
 
 	if (child->leaf == 0) {
 		move_children(bt, sibling, 0, child, child->min_degree,
