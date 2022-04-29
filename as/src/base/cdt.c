@@ -519,6 +519,9 @@ result_data_set_not_found(cdt_result_data *rd, int64_t index)
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(rd->result, 0);
 		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(rd->result, false);
+		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
 		if (rd->is_multi) {
@@ -559,6 +562,9 @@ result_data_set_index_rank_count(cdt_result_data *rd, uint32_t start,
 		break;
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(rd->result, inverted ? ele_count - count : count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(rd->result, inverted ? count == 0 : count != 0);
 		break;
 	case RESULT_TYPE_REVINDEX:
 	case RESULT_TYPE_REVRANK:
@@ -616,6 +622,7 @@ result_data_set_range(cdt_result_data *rd, uint32_t start, uint32_t count,
 	case RESULT_TYPE_NONE:
 		break;
 	case RESULT_TYPE_COUNT:
+	case RESULT_TYPE_EXISTS:
 	case RESULT_TYPE_REVINDEX:
 	case RESULT_TYPE_REVRANK:
 	case RESULT_TYPE_INDEX:
@@ -786,6 +793,13 @@ as_bin_set_double(as_bin *b, double value)
 {
 	*((double *)(&b->particle)) = value;
 	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_FLOAT);
+}
+
+void
+as_bin_set_bool(as_bin *b, bool value)
+{
+	b->particle = (as_particle *)(uint64_t)(value ? 1 : 0);
+	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_BOOL);
 }
 
 
@@ -2743,7 +2757,8 @@ bool
 offset_index_find_items(offset_index *full_offidx,
 		cdt_find_items_idxs_type find_type, msgpack_in *mp_items,
 		order_index *items_ordidx_r, bool inverted, uint64_t *rm_mask,
-		uint32_t *rm_count_r, order_index *rm_ranks_r, rollback_alloc *alloc)
+		uint32_t *rm_count_r, order_index *rm_ranks_r, rollback_alloc *alloc,
+		bool exit_early)
 {
 	bool (*unpack_fn)(msgpack_in *mp, cdt_payload *payload_r);
 	uint32_t items_count = items_ordidx_r->_.ele_count;
@@ -2762,7 +2777,6 @@ offset_index_find_items(offset_index *full_offidx,
 		break;
 	default:
 		cf_crash(AS_PARTICLE, "bad input");
-		return false; // dummy return to quash warning
 	}
 
 	if (! list_full_offset_index_fill_to(&items_offidx,
@@ -2784,6 +2798,7 @@ offset_index_find_items(offset_index *full_offidx,
 	};
 
 	if (rm_ranks_r) {
+		cf_assert(! exit_early, AS_PARTICLE, "invalid usage");
 		order_index_clear(rm_ranks_r);
 	}
 
@@ -2826,6 +2841,11 @@ offset_index_find_items(offset_index *full_offidx,
 			if (find.found) {
 				cdt_idx_mask_set(rm_mask, i);
 				rm_count++;
+
+				if (exit_early) {
+					*rm_count_r = rm_count;
+					return true;
+				}
 			}
 		}
 		else if (! find.found) {
@@ -3313,7 +3333,6 @@ order_index_get(const order_index *ordidx, uint32_t index)
 //  target == 0 means find first instance of value.
 //  target == ele_count means find last instance of value.
 //  target > ele_count means don't check idx.
-// Return true success.
 void
 order_index_find_rank_by_value(const order_index *ordidx,
 		const cdt_payload *value, const offset_index *full_offidx,

@@ -486,7 +486,8 @@ typedef enum {
 	RESULT_TYPE_INDEX_RANGE     = 9,
 	RESULT_TYPE_REVINDEX_RANGE  = 10,
 	RESULT_TYPE_RANK_RANGE      = 11,
-	RESULT_TYPE_REVRANK_RANGE   = 12
+	RESULT_TYPE_REVRANK_RANGE   = 12,
+	RESULT_TYPE_EXISTS          = 13
 } result_type_t;
 
 typedef enum {

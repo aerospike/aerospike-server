@@ -312,6 +312,7 @@ void result_data_set_int_list_by_mask(cdt_result_data *rd, const uint64_t *mask,
 // as_bin
 void as_bin_set_int(as_bin *b, int64_t value);
 void as_bin_set_double(as_bin *b, double value);
+void as_bin_set_bool(as_bin *b, bool value);
 void as_bin_set_unordered_empty_list(as_bin *b, rollback_alloc *alloc_buf);
 void as_bin_set_empty_packed_map(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags);
 
@@ -375,7 +376,7 @@ void offset_index_add_ele(offset_index *dest, const offset_index *src, uint32_t 
 void offset_index_move_ele(offset_index *dest, const offset_index *src, uint32_t ele_idx, uint32_t to_idx);
 void offset_index_append_size(offset_index *offidx, uint32_t delta);
 
-bool offset_index_find_items(offset_index *full_offidx, cdt_find_items_idxs_type find_type, msgpack_in *mp_items, order_index *items_ordidx_r, bool inverted, uint64_t *rm_mask, uint32_t *rm_count_r, order_index *rm_ranks_r, rollback_alloc *alloc);
+bool offset_index_find_items(offset_index *full_offidx, cdt_find_items_idxs_type find_type, msgpack_in *mp_items, order_index *items_ordidx_r, bool inverted, uint64_t *rm_mask, uint32_t *rm_count_r, order_index *rm_ranks_r, rollback_alloc *alloc, bool exit_early);
 
 void *offset_index_get_mem(const offset_index *offidx, uint32_t index);
 uint32_t offset_index_size(const offset_index *offidx);

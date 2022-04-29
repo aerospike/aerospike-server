@@ -2040,6 +2040,9 @@ packed_list_trim(const packed_list *list, cdt_op_mem *com, uint32_t index,
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, rm_count);
 		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, rm_count != 0);
+		break;
 	case RESULT_TYPE_REVINDEX:
 	case RESULT_TYPE_INDEX: {
 		bool is_rev = (result->type == RESULT_TYPE_REVINDEX);
@@ -2263,6 +2266,10 @@ packed_list_get_remove_by_index_range(const packed_list *list, cdt_op_mem *com,
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, list->ele_count - op.new_ele_count);
 		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result,
+				list->ele_count - op.new_ele_count != 0);
+		break;
 	case RESULT_TYPE_VALUE: {
 		const uint8_t *result_ptr = list->contents + op.seg1_sz;
 		uint32_t end = (op.seg2_sz != 0) ? op.seg2_offset : list->content_sz;
@@ -2402,6 +2409,7 @@ packed_list_get_remove_by_value_interval(const packed_list *list,
 	switch (result->type) {
 	case RESULT_TYPE_NONE:
 	case RESULT_TYPE_COUNT:
+	case RESULT_TYPE_EXISTS:
 	case RESULT_TYPE_REVRANK:
 	case RESULT_TYPE_RANK:
 	case RESULT_TYPE_REVRANK_RANGE:
@@ -2533,6 +2541,7 @@ packed_list_get_remove_by_rank_range(const packed_list *list, cdt_op_mem *com,
 	switch (result->type) {
 	case RESULT_TYPE_NONE:
 	case RESULT_TYPE_COUNT:
+	case RESULT_TYPE_EXISTS:
 	case RESULT_TYPE_RANK:
 	case RESULT_TYPE_REVRANK:
 	case RESULT_TYPE_RANK_RANGE:
@@ -2574,6 +2583,11 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 	define_order_index2(rm_rc, list->ele_count, 2 * items_count,
 			com->alloc_idx);
 	uint32_t rc_count = 0;
+	bool inverted = result_data_is_inverted(result);
+	bool need_mask = (cdt_op_is_modify(com) ||
+			result->type == RESULT_TYPE_COUNT ||
+			(inverted && result->type != RESULT_TYPE_NONE));
+	bool exit_early = ! need_mask && result->type == RESULT_TYPE_EXISTS;
 
 	for (uint32_t i = 0; i < items_count; i++) {
 		cdt_payload value = {
@@ -2595,14 +2609,14 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 		order_index_set(&rm_rc, 2 * i, rank);
 		order_index_set(&rm_rc, (2 * i) + 1, count);
 		rc_count += count;
+
+		if (exit_early && count != 0) {
+			break;
+		}
 	}
 
 	uint32_t rm_sz = 0;
 	uint32_t rm_count = 0;
-	bool inverted = result_data_is_inverted(result);
-	bool need_mask = (cdt_op_is_modify(com) ||
-			result->type == RESULT_TYPE_COUNT ||
-			(inverted && result->type != RESULT_TYPE_NONE));
 	define_cond_cdt_idx_mask(rm_mask, list->ele_count, need_mask,
 			com->alloc_idx);
 
@@ -2636,6 +2650,9 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 		break;
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, rm_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, rm_count != 0);
 		break;
 	case RESULT_TYPE_INDEX:
 	case RESULT_TYPE_REVINDEX:
@@ -2731,10 +2748,12 @@ packed_list_get_remove_all_by_value_list(const packed_list *list,
 	define_cdt_idx_mask(rm_mask, list->ele_count, com->alloc_idx);
 	definep_cond_order_index2(rc, list->ele_count, items_count * 2,
 			is_ret_rank, com->alloc_idx);
+	bool exit_early = ! cdt_op_is_modify(com) && ! inverted &&
+			result->type == RESULT_TYPE_EXISTS;
 
 	if (! offset_index_find_items(full->offidx,
 			CDT_FIND_ITEMS_IDXS_FOR_LIST_VALUE, &mp_items, &value_list_ordidx,
-			inverted, rm_mask, &rm_count, rc, com->alloc_idx)) {
+			inverted, rm_mask, &rm_count, rc, com->alloc_idx, exit_early)) {
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2775,6 +2794,9 @@ packed_list_get_remove_all_by_value_list(const packed_list *list,
 		break;
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, rm_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, rm_count != 0);
 		break;
 	case RESULT_TYPE_VALUE: {
 		list_result_data_set_values_by_mask(result, rm_mask, full->offidx,

@@ -3188,12 +3188,12 @@ packed_map_find_rank_range_by_value_interval_unordered(const packed_map *map,
 			.buf_sz = value_end->sz
 	};
 
-	bool can_early_exit = false;
+	bool can_exit_early = false;
 	uint32_t temp_rank;
 
 	if (rank == NULL) {
 		rank = &temp_rank;
-		can_early_exit = true;
+		can_exit_early = true;
 	}
 
 	*rank = 0;
@@ -3247,7 +3247,7 @@ packed_map_find_rank_range_by_value_interval_unordered(const packed_map *map,
 
 					*count = 1;
 
-					if (can_early_exit) {
+					if (can_exit_early) {
 						break;
 					}
 				}
@@ -3606,6 +3606,9 @@ packed_map_trim_ordered(const packed_map *map, cdt_op_mem *com, uint32_t index,
 		break;
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, rm_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, rm_count != 0);
 		break;
 	case RESULT_TYPE_REVINDEX:
 	case RESULT_TYPE_INDEX: {
@@ -4099,6 +4102,7 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 	switch (result->type) {
 	case RESULT_TYPE_NONE:
 	case RESULT_TYPE_COUNT:
+	case RESULT_TYPE_EXISTS:
 	case RESULT_TYPE_RANK:
 	case RESULT_TYPE_REVRANK:
 		ret = result_data_set_index_rank_count(result, urank, count32,
@@ -4220,12 +4224,20 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 	cdt_result_data *result = &com->result;
 	define_order_index2(rm_ic, map->ele_count, 2 * items_count, com->alloc_idx);
 	uint32_t rc_count = 0;
+	bool inverted = result_data_is_inverted(result);
+	bool need_mask = cdt_op_is_modify(com) ||
+			result_data_is_return_elements(result) ||
+			result->type == RESULT_TYPE_COUNT ||
+			(inverted && result->type != RESULT_TYPE_NONE);
+	bool exit_early = ! need_mask && result->type == RESULT_TYPE_EXISTS;
 
 	for (uint32_t i = 0; i < items_count; i++) {
 		cdt_payload key = {
 				.ptr = items_mp->buf + items_mp->offset,
 				.sz = items_mp->offset
 		};
+
+		items_mp->has_nonstorage = false;
 
 		if (msgpack_sz(items_mp) == 0) {
 			cf_warning(AS_PARTICLE, "packed_map_get_remove_all_by_key_list_ordered() invalid parameter");
@@ -4234,23 +4246,53 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 
 		key.sz = items_mp->offset - key.sz;
 
-		map_ele_find find_key;
+		uint32_t rank;
+		uint32_t count;
 
-		map_ele_find_init(&find_key, map);
-		packed_map_find_key(map, &find_key, &key);
+		if (items_mp->has_nonstorage) {
+			order_index_find find_key = {
+					.count = map->ele_count,
+					.target = 0
+			};
 
-		uint32_t count = find_key.found_key ? 1 : 0;
+			order_index_find_rank_by_value(NULL, &key, &map->offidx, &find_key,
+					false);
 
-		order_index_set(&rm_ic, 2 * i, find_key.idx);
+			rank = find_key.result;
+
+			if (find_key.found) {
+				find_key.start = rank;
+				find_key.count -= rank;
+				find_key.target = map->ele_count;
+
+				order_index_find_rank_by_value(NULL, &key, &map->offidx,
+						&find_key, false);
+
+				count = find_key.result - rank;
+			}
+			else {
+				count = 0;
+			}
+		}
+		else {
+			map_ele_find find_key;
+
+			map_ele_find_init(&find_key, map);
+			packed_map_find_key(map, &find_key, &key);
+
+			rank = find_key.idx;
+			count = find_key.found_key ? 1 : 0;
+		}
+
+		order_index_set(&rm_ic, 2 * i, rank);
 		order_index_set(&rm_ic, (2 * i) + 1, count);
 		rc_count += count;
+
+		if (exit_early && count != 0) {
+			break;
+		}
 	}
 
-	bool inverted = result_data_is_inverted(result);
-	bool need_mask = cdt_op_is_modify(com) ||
-			result_data_is_return_elements(result) ||
-			result->type == RESULT_TYPE_COUNT ||
-			(inverted && result->type != RESULT_TYPE_NONE);
 	define_cond_cdt_idx_mask(rm_mask, map->ele_count, need_mask,
 			com->alloc_idx);
 	uint32_t rm_sz = 0;
@@ -4280,6 +4322,9 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 		break;
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(com->result.result, rm_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(com->result.result, rm_count != 0);
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
@@ -4320,10 +4365,12 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map *map,
 	define_order_index(key_list_ordidx, items_count, com->alloc_idx);
 	definep_cond_order_index2(ic, map->ele_count, items_count * 2,
 			is_ret_index, com->alloc_idx);
+	bool exit_early = ! cdt_op_is_modify(com) && ! inverted &&
+			result->type == RESULT_TYPE_EXISTS;
 
 	if (! offset_index_find_items((offset_index *)&map->offidx,
 			CDT_FIND_ITEMS_IDXS_FOR_MAP_KEY, items_mp, &key_list_ordidx,
-			inverted, rm_mask, &rm_count, ic, com->alloc_idx)) {
+			inverted, rm_mask, &rm_count, ic, com->alloc_idx, exit_early)) {
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4343,6 +4390,9 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map *map,
 	}
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(com->result.result, rm_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(com->result.result, rm_count != 0);
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
@@ -4425,10 +4475,12 @@ packed_map_get_remove_all_by_value_list(const packed_map *map, cdt_op_mem *com,
 	define_order_index(value_list_ordidx, items_count, com->alloc_idx);
 	definep_cond_order_index2(rc, map->ele_count, items_count * 2, is_ret_rank,
 			com->alloc_idx);
+	bool exit_early = ! cdt_op_is_modify(com) && ! inverted &&
+			result->type == RESULT_TYPE_EXISTS;
 
 	if (! offset_index_find_items(u->offidx,
 			CDT_FIND_ITEMS_IDXS_FOR_MAP_VALUE, &items_mp, &value_list_ordidx,
-			inverted, rm_mask, &rm_count, rc, com->alloc_idx)) {
+			inverted, rm_mask, &rm_count, rc, com->alloc_idx, exit_early)) {
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -4454,6 +4506,9 @@ packed_map_get_remove_all_by_value_list(const packed_map *map, cdt_op_mem *com,
 	}
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, rm_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, rm_count != 0);
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
@@ -4487,6 +4542,13 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 	cdt_result_data *result = &com->result;
 	define_order_index2(rm_rc, map->ele_count, 2 * items_count, com->alloc_idx);
 	uint32_t rc_count = 0;
+	bool inverted = result_data_is_inverted(result);
+	bool need_mask = cdt_op_is_modify(com) ||
+			result_data_is_return_elements(result) ||
+			result->type == RESULT_TYPE_COUNT ||
+			result->type == RESULT_TYPE_EXISTS ||
+			(inverted && result->type != RESULT_TYPE_NONE);
+	bool exit_early = ! need_mask && result->type == RESULT_TYPE_EXISTS;
 
 	packed_map_ensure_ordidx_filled(map);
 
@@ -4512,13 +4574,12 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 		order_index_set(&rm_rc, 2 * i, rank);
 		order_index_set(&rm_rc, (2 * i) + 1, count);
 		rc_count += count;
+
+		if (exit_early && count != 0) {
+			break;
+		}
 	}
 
-	bool inverted = result_data_is_inverted(result);
-	bool need_mask = cdt_op_is_modify(com) ||
-			result_data_is_return_elements(result) ||
-			result->type == RESULT_TYPE_COUNT ||
-			(inverted && result->type != RESULT_TYPE_NONE);
 	define_cond_cdt_idx_mask(rm_mask, map->ele_count, need_mask,
 			com->alloc_idx);
 	uint32_t rm_sz = 0;
@@ -4559,6 +4620,9 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 		break;
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, rm_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, rm_count != 0);
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
@@ -4686,6 +4750,9 @@ packed_map_get_remove_all(const packed_map *map, cdt_op_mem *com)
 	}
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, map->ele_count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, map->ele_count != 0);
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
@@ -5517,6 +5584,9 @@ packed_map_build_result_by_key(const packed_map *map, const cdt_payload *key,
 		break;
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, count);
+		break;
+	case RESULT_TYPE_EXISTS:
+		as_bin_set_bool(result->result, count != 0);
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
