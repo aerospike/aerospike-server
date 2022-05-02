@@ -325,13 +325,7 @@ as_query_manager_get_info(int* size)
 uint32_t
 as_query_manager_get_active_job_count(void)
 {
-	cf_mutex_lock(&g_mgr.lock);
-
-	uint32_t n_jobs = cf_queue_sz(g_mgr.active_jobs);
-
-	cf_mutex_unlock(&g_mgr.lock);
-
-	return n_jobs;
+	return cf_queue_sz(g_mgr.active_jobs);
 }
 
 
