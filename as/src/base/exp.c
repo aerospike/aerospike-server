@@ -33,11 +33,6 @@
 #include <regex.h>
 #include <stdint.h>
 
-#include <aerospike/as_arraylist.h>
-#include <aerospike/as_arraylist_iterator.h>
-#include <aerospike/as_hashmap_iterator.h>
-#include <aerospike/as_map.h>
-
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_b64.h"
 #include "citrusleaf/cf_byte_order.h"

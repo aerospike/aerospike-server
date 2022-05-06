@@ -26,7 +26,9 @@
 #include <string.h>
 
 #include "aerospike/as_buffer.h"
+#include "aerospike/as_map.h"
 #include "aerospike/as_msgpack.h"
+#include "aerospike/as_orderedmap.h"
 #include "aerospike/as_serializer.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
@@ -846,7 +848,7 @@ map_to_asval(const as_particle *p)
 	as_serializer_destroy(&s);
 
 	if (! val) {
-		return (as_val *)as_hashmap_new(0);
+		return (as_val *)as_orderedmap_new(0);
 	}
 
 	packed_map map;

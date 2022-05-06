@@ -94,11 +94,9 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "aerospike/as_arraylist.h"
-#include "aerospike/as_arraylist_iterator.h"
 #include "aerospike/as_atomic.h"
 #include "aerospike/as_buffer.h"
-#include "aerospike/as_hashmap.h"
-#include "aerospike/as_hashmap_iterator.h"
+#include "aerospike/as_map.h"
 #include "aerospike/as_msgpack.h"
 #include "aerospike/as_pair.h"
 #include "aerospike/as_serializer.h"

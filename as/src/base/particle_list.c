@@ -26,7 +26,9 @@
 #include <string.h>
 #include <sys/param.h>
 
+#include "aerospike/as_arraylist.h"
 #include "aerospike/as_buffer.h"
+#include "aerospike/as_list.h"
 #include "aerospike/as_msgpack.h"
 #include "aerospike/as_serializer.h"
 #include "aerospike/as_val.h"
