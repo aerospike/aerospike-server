@@ -59,9 +59,9 @@ cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles,
 cf_arenax_err
 cf_arenax_add_stage(cf_arenax* arena)
 {
-	if (arena->stage_count >= arena->max_stages) {
+	if (arena->stage_count >= CF_ARENAX_MAX_STAGES) {
 		cf_ticker_warning(CF_ARENAX, "can't allocate more than %u arena stages",
-				arena->max_stages);
+				CF_ARENAX_MAX_STAGES);
 		return CF_ARENAX_ERR_STAGE_CREATE;
 	}
 

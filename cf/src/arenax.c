@@ -82,8 +82,8 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	arena->element_size = element_size;
 	arena->chunk_count = chunk_count;
 	arena->stage_capacity = stage_capacity;
-	arena->max_stages = CF_ARENAX_MAX_STAGES;
-	arena->unused = 0;
+	arena->unused_1 = 0;
+	arena->unused_2 = 0;
 
 	arena->stage_size = (size_t)stage_capacity * element_size;
 

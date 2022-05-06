@@ -83,8 +83,8 @@ typedef struct cf_arenax_s {
 	key_t				key_base;
 	uint32_t			element_size;
 	uint32_t			stage_capacity;
-	uint32_t			max_stages;
-	uint32_t			unused;
+	uint32_t			unused_1;
+	uint32_t			unused_2;
 
 	// Configuration (derived).
 	size_t				stage_size;
