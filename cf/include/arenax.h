@@ -139,7 +139,7 @@ const char* cf_arenax_errstr(cf_arenax_err err);
 
 void cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
-		uint32_t chunk_count, uint32_t stage_capacity, uint32_t max_stages);
+		uint32_t chunk_count, uint32_t stage_capacity);
 
 cf_arenax_handle cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle);
 void cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle);
