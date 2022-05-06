@@ -135,7 +135,6 @@ typedef struct cf_arenax_puddle_s {
 // Public API.
 //
 
-size_t cf_arenax_sizeof();
 const char* cf_arenax_errstr(cf_arenax_err err);
 
 void cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,

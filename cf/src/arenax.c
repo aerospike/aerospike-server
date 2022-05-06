@@ -58,14 +58,6 @@ const char* ARENAX_ERR_STRINGS[] = {
 // Public API.
 //
 
-// Return persistent memory size needed. Excludes stages, which cf_arenax
-// handles internally.
-size_t
-cf_arenax_sizeof()
-{
-	return sizeof(cf_arenax);
-}
-
 // Convert cf_arenax_err to meaningful string.
 const char*
 cf_arenax_errstr(cf_arenax_err err)
@@ -82,22 +74,15 @@ cf_arenax_errstr(cf_arenax_err err)
 void
 cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
-		uint32_t chunk_count, uint32_t stage_capacity, uint32_t max_stages)
+		uint32_t chunk_count, uint32_t stage_capacity)
 {
-	if (max_stages == 0) {
-		max_stages = CF_ARENAX_MAX_STAGES;
-	}
-	else if (max_stages > CF_ARENAX_MAX_STAGES) {
-		cf_crash(CF_ARENAX, "max stages %u too large", max_stages);
-	}
-
 	arena->xmem_type = xmem_type;
 	arena->xmem_type_cfg = xmem_type_cfg;
 	arena->key_base = key_base;
 	arena->element_size = element_size;
 	arena->chunk_count = chunk_count;
 	arena->stage_capacity = stage_capacity;
-	arena->max_stages = max_stages;
+	arena->max_stages = CF_ARENAX_MAX_STAGES;
 	arena->unused = 0;
 
 	arena->stage_size = (size_t)stage_capacity * element_size;
