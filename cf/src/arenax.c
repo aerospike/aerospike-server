@@ -74,18 +74,17 @@ cf_arenax_errstr(cf_arenax_err err)
 void
 cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
-		uint32_t chunk_count, uint32_t stage_capacity)
+		uint32_t chunk_count, size_t stage_size)
 {
 	arena->xmem_type = xmem_type;
 	arena->xmem_type_cfg = xmem_type_cfg;
 	arena->key_base = key_base;
 	arena->element_size = element_size;
 	arena->chunk_count = chunk_count;
-	arena->stage_capacity = stage_capacity;
+	arena->stage_capacity = (uint32_t)(stage_size / element_size);
 	arena->unused_1 = 0;
 	arena->unused_2 = 0;
-
-	arena->stage_size = (size_t)stage_capacity * element_size;
+	arena->stage_size = stage_size;
 
 	arena->free_h = 0;
 
@@ -180,14 +179,6 @@ cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle)
 	arena->free_h = h;
 
 	cf_mutex_unlock(&arena->lock);
-}
-
-// Convert cf_arenax_handle to memory address.
-void*
-cf_arenax_resolve(cf_arenax* arena, cf_arenax_handle h)
-{
-	return arena->stages[h >> ELEMENT_ID_NUM_BITS] +
-			((h & ELEMENT_ID_MASK) * arena->element_size);
 }
 
 bool

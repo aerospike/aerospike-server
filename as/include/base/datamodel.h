@@ -246,7 +246,6 @@ extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_l
 extern int as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
 
 // as_val:
-extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
 extern int as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val);
 extern void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 extern as_val *as_bin_particle_to_asval(const as_bin *b);

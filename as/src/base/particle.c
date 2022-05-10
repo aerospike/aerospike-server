@@ -611,42 +611,6 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 // Handle as_val translation.
 //
 
-// FIXME - customize for predexp, so it doesn't need to switch jemalloc arenas.
-int
-as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
-{
-	uint8_t old_type = as_bin_get_particle_type(b);
-	as_particle_type new_type = as_particle_type_from_asval(val);
-
-	if (new_type == AS_PARTICLE_TYPE_NULL) {
-		// Currently UDF code just skips unmanageable as_val types.
-		return 0;
-	}
-
-	uint32_t new_mem_size = particle_vtable[new_type]->size_from_asval_fn(val);
-	// TODO - could this ever fail?
-
-	as_particle *old_particle = b->particle;
-
-	if (new_mem_size != 0) {
-		b->particle = cf_malloc_ns(new_mem_size);
-	}
-
-	// Load the new particle into the bin.
-	particle_vtable[new_type]->from_asval_fn(val, &b->particle);
-	// TODO - could this ever fail?
-
-	if (as_bin_is_used(b)) {
-		// Destroy the old particle.
-		particle_vtable[old_type]->destructor_fn(old_particle);
-	}
-
-	// Set the bin's state member.
-	as_bin_state_set_from_type(b, new_type);
-
-	return 0;
-}
-
 int
 as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val)
 {

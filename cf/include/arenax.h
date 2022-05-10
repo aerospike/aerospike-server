@@ -82,11 +82,9 @@ typedef struct cf_arenax_s {
 	const void*			xmem_type_cfg;
 	key_t				key_base;
 	uint32_t			element_size;
-	uint32_t			stage_capacity;
+	uint32_t			stage_capacity; // derived
 	uint32_t			unused_1;
 	uint32_t			unused_2;
-
-	// Configuration (derived).
 	size_t				stage_size;
 
 	// Free-element list (non-chunked allocations).
@@ -139,16 +137,23 @@ const char* cf_arenax_errstr(cf_arenax_err err);
 
 void cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 		const void* xmem_type_cfg, key_t key_base, uint32_t element_size,
-		uint32_t chunk_count, uint32_t stage_capacity);
+		uint32_t chunk_count, size_t stage_size);
 
 cf_arenax_handle cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle);
 void cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle);
 
-void* cf_arenax_resolve(cf_arenax* arena, cf_arenax_handle h);
 bool cf_arenax_is_stage_address(cf_arenax* arena, const void* address);
 
 bool cf_arenax_want_prefetch(cf_arenax* arena);
 void cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles, uint32_t n_puddles);
+
+// Convert cf_arenax_handle to memory address.
+static inline void*
+cf_arenax_resolve(const cf_arenax* arena, cf_arenax_handle h)
+{
+	return arena->stages[h >> ELEMENT_ID_NUM_BITS] +
+			((h & ELEMENT_ID_MASK) * arena->element_size);
+}
 
 
 //==========================================================
