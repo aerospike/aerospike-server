@@ -71,7 +71,7 @@ cf_tid cf_thread_create_joinable(cf_thread_run_fn run, void* udata);
 void cf_thread_get_stats(cf_thread_stats* stats);
 int32_t cf_thread_traces(char* key, cf_dyn_buf* db);
 void cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx);
-void cf_thread_realloc(void** pp, size_t* psz);
+void cf_thread_realloc(void** pp, size_t sz);
 void cf_thread_add_exit(cf_thread_exit_fn cb, void* udata);
 void cf_thread_remove_exit(cf_thread_exit_fn cb);
 
