@@ -86,8 +86,8 @@ void log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp);
 void log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp);
 void log_line_appeals(as_namespace* ns);
 void log_line_migrations(as_namespace* ns);
-void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem, size_t sindex_mem, size_t data_mem);
-void log_line_persistent_index_usage(as_namespace* ns, size_t used_size);
+void log_line_memory_usage(as_namespace* ns, uint64_t index_used_sz);
+void log_line_persistent_index_usage(as_namespace* ns, uint64_t used_sz);
 void log_line_device_usage(as_namespace* ns);
 
 void log_line_client(as_namespace* ns);
@@ -175,22 +175,12 @@ log_ticker_frame(uint64_t delta_time)
 
 	dump_global_histograms();
 
-	size_t total_ns_memory_inuse = 0;
-
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		uint64_t n_objects = ns->n_objects;
 		uint64_t n_tombstones = ns->n_tombstones;
-
-		size_t index_used = (n_objects + n_tombstones) * sizeof(as_index);
-
-		size_t index_mem = as_namespace_index_persisted(ns) ? 0 : index_used;
-		size_t sindex_mem = ns->n_bytes_sindex_memory;
-		size_t data_mem = ns->n_bytes_memory;
-		size_t total_mem = index_mem + sindex_mem + data_mem;
-
-		total_ns_memory_inuse += total_mem;
+		uint64_t index_used_sz = (n_objects + n_tombstones) * sizeof(as_index);
 
 		repl_stats mp;
 		as_partition_get_replica_stats(ns, &mp);
@@ -199,8 +189,8 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_tombstones(ns, n_tombstones, &mp);
 		log_line_appeals(ns);
 		log_line_migrations(ns);
-		log_line_memory_usage(ns, total_mem, index_mem, sindex_mem, data_mem);
-		log_line_persistent_index_usage(ns, index_used);
+		log_line_memory_usage(ns, index_used_sz);
+		log_line_persistent_index_usage(ns, index_used_sz);
 		log_line_device_usage(ns);
 
 		log_line_client(ns);
@@ -479,9 +469,14 @@ log_line_migrations(as_namespace* ns)
 }
 
 void
-log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
-		size_t sindex_mem, size_t data_mem)
+log_line_memory_usage(as_namespace* ns, uint64_t index_used_sz)
 {
+	uint64_t index_mem = as_namespace_index_persisted(ns) ? 0 : index_used_sz;
+	uint64_t set_index_mem = as_set_index_used_bytes(ns);
+	uint64_t sindex_mem = ns->n_bytes_sindex_memory;
+	uint64_t data_mem = ns->n_bytes_memory;
+	uint64_t total_mem = index_mem + set_index_mem + sindex_mem + data_mem;
+
 	double mem_used_pct = (double)(total_mem * 100) / (double)ns->memory_size;
 
 	if (ns->storage_data_in_memory) {
@@ -489,7 +484,7 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 				ns->name,
 				total_mem,
 				index_mem,
-				as_set_index_used_bytes(ns),
+				set_index_mem,
 				sindex_mem,
 				data_mem,
 				mem_used_pct);
@@ -499,31 +494,31 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 				ns->name,
 				total_mem,
 				index_mem,
-				as_set_index_used_bytes(ns),
+				set_index_mem,
 				sindex_mem,
 				mem_used_pct);
 	}
 }
 
 void
-log_line_persistent_index_usage(as_namespace* ns, size_t used_size)
+log_line_persistent_index_usage(as_namespace* ns, uint64_t used_sz)
 {
 	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
-		uint64_t used_pct = used_size * 100 / ns->mounts_size_limit;
+		uint64_t used_pct = used_sz * 100 / ns->mounts_size_limit;
 
 		cf_info(AS_INFO, "{%s} index-pmem-usage: used-bytes %lu used-pct %lu",
 				ns->name,
-				used_size,
+				used_sz,
 				used_pct);
 	}
 	else if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
-		uint64_t used_pct = used_size * 100 / ns->mounts_size_limit;
+		uint64_t used_pct = used_sz * 100 / ns->mounts_size_limit;
 		uint64_t alloc_sz = as_load_uint64(&ns->arena->alloc_sz);
 		uint64_t alloc_pct = alloc_sz * 100 / ns->mounts_size_limit;
 
 		cf_info(AS_INFO, "{%s} index-flash-usage: used-bytes %lu used-pct %lu alloc-bytes %lu alloc-pct %lu",
 				ns->name,
-				used_size,
+				used_sz,
 				used_pct,
 				alloc_sz,
 				alloc_pct);
