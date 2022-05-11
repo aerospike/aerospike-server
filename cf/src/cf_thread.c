@@ -1,7 +1,7 @@
 /*
  * cf_thread.c
  *
- * Copyright (C) 2018-2021 Aerospike, Inc.
+ * Copyright (C) 2018-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
