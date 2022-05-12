@@ -57,6 +57,7 @@ typedef struct as_mon_jobstat_s {
 	char		job_type[32];
 	char		ns[AS_ID_NAMESPACE_SZ];
 	char		set[AS_SET_NAME_MAX_SIZE];
+	char		si_name[AS_ID_INAME_SZ];
 	uint32_t	n_pids_requested;
 	uint32_t	rps;
 	uint32_t	active_threads;
