@@ -854,7 +854,7 @@ map_to_asval(const as_particle *p)
 	packed_map map;
 
 	packed_map_init_from_particle(&map, p, false);
-	((as_map *)val)->flags = (uint32_t)map.flags;
+	as_orderedmap_set_flags((as_orderedmap *)val, (uint32_t)map.flags);
 
 	return val;
 }
