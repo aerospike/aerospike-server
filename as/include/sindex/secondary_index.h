@@ -34,6 +34,7 @@
 #include "base/smd.h"
 #include "base/transaction.h"
 #include "fabric/partition.h"
+#include "sindex/sindex_arena.h"
 #include "storage/storage.h"
 
 #include "arenax.h"
@@ -393,4 +394,10 @@ static inline int64_t
 as_sindex_string_to_bval(const char* s, size_t len)
 {
 	return (int64_t)cf_wyhash64((const void*)s, len);
+}
+
+static inline uint64_t
+as_sindex_used_bytes(const as_namespace* ns)
+{
+	return ns->si_arena->n_used_eles * ns->si_arena->ele_sz;
 }

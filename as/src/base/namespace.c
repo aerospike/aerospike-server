@@ -109,9 +109,6 @@ as_namespace_create(char *name)
 
 	ns->xmem_type = CF_XMEM_TYPE_MEM;
 
-	ns->cfg_replication_factor = 2;
-	ns->replication_factor = 0; // gets set on rebalance
-
 	ns->background_query_max_rps = 10000; // internal write generation limit
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
@@ -122,14 +119,17 @@ as_namespace_create(char *name)
 	ns->migrate_sleep = 1;
 	ns->nsup_hist_period = 60 * 60; // 1 hour
 	ns->n_nsup_threads = 1;
+	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_PROTO;
-	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
+	ns->cfg_replication_factor = 2;
+	ns->replication_factor = 0; // gets set on rebalance
+	ns->sindex_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->n_single_query_threads = 4; // maximum number of threads a single query may run
+	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
 	ns->transaction_pending_limit = 20;
 	ns->n_truncate_threads = 4;
-	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
 	ns->xdr_bin_tombstone_ttl_ms = 60 * 60 * 24 * 1000UL; // 1 day
 	ns->xdr_tomb_raider_period = 2 * 60; // 2 minutes

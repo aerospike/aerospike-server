@@ -78,6 +78,7 @@
 #include "fabric/migrate.h"
 #include "fabric/partition_balance.h"
 #include "sindex/secondary_index.h"
+#include "sindex/sindex_arena.h"
 #include "storage/storage.h"
 
 
@@ -465,6 +466,7 @@ typedef enum {
 	CASE_NAMESPACE_REJECT_NON_XDR_WRITES,
 	CASE_NAMESPACE_REJECT_XDR_WRITES,
 	CASE_NAMESPACE_REPLICATION_FACTOR,
+	CASE_NAMESPACE_SINDEX_STAGE_SIZE,
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
@@ -981,6 +983,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "reject-non-xdr-writes",			CASE_NAMESPACE_REJECT_NON_XDR_WRITES },
 		{ "reject-xdr-writes",				CASE_NAMESPACE_REJECT_XDR_WRITES },
 		{ "replication-factor",				CASE_NAMESPACE_REPLICATION_FACTOR },
+		{ "sindex-stage-size",				CASE_NAMESPACE_SINDEX_STAGE_SIZE },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
@@ -2932,6 +2935,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_REPLICATION_FACTOR:
 				ns->cfg_replication_factor = cfg_u32(&line, 1, AS_CLUSTER_SZ);
 				break;
+			case CASE_NAMESPACE_SINDEX_STAGE_SIZE:
+				ns->sindex_stage_size = cfg_u64_power_of_2(&line, SI_ARENA_MIN_STAGE_SIZE, SI_ARENA_MAX_STAGE_SIZE);
+				break;
 			case CASE_NAMESPACE_SINGLE_BIN:
 				ns->single_bin = cfg_bool(&line);
 				break;
@@ -4272,6 +4278,10 @@ as_config_post_process(as_config* c, const char* config_file)
 				ns->xmem_type == CF_XMEM_TYPE_SHMEM) &&
 				ns->index_stage_size > max_alloc_sz) {
 			max_alloc_sz = ns->index_stage_size;
+		}
+
+		if (ns->sindex_stage_size > max_alloc_sz) {
+			max_alloc_sz = ns->sindex_stage_size;
 		}
 
 		client_replica_maps_create(ns);

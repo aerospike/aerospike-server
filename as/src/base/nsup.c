@@ -51,6 +51,7 @@
 #include "base/smd.h"
 #include "fabric/partition.h"
 #include "sindex/gc.h"
+#include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 
@@ -629,7 +630,7 @@ eval_hwm_breached(as_namespace* ns)
 	}
 
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
-	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
+	uint64_t sindex_sz = as_sindex_used_bytes(ns);
 	uint64_t dim_sz = ns->n_bytes_memory;
 	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
 	uint64_t mem_hwm = (ns->memory_size * ns->hwm_memory_pct) / 100;
@@ -854,7 +855,7 @@ eval_stop_writes(as_namespace* ns)
 	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
 			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
-	uint64_t sindex_sz = ns->n_bytes_sindex_memory;
+	uint64_t sindex_sz = as_sindex_used_bytes(ns);
 	uint64_t dim_sz = ns->n_bytes_memory;
 	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
 

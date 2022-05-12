@@ -46,6 +46,7 @@
 #include "fabric/partition.h"
 #include "query/query_job.h"
 #include "sindex/secondary_index.h"
+#include "sindex/sindex_arena.h"
 
 //#include "warnings.h"
 
@@ -58,9 +59,6 @@
 //==========================================================
 // Typedefs & constants.
 //
-
-#define NODE_SZ 4096 // TODO - assert equal to sarena element size
-#define SARENA_REF_SZ 8 // TODO - from sarena ref
 
 typedef struct si_btree_node_s {
 	uint16_t n_keys;
@@ -116,12 +114,12 @@ static bool gc_collect_cb(const si_btree_key* key, void* udata);
 static void query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, as_sindex_reduce_fn cb, void* udata);
 static bool query_collect_cb(const si_btree_key* key, void* udata);
 
-static si_btree* si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t node_sz, uint64_t* size);
-static void si_btree_destroy(si_btree* bt, uint64_t* size);
-static bool si_btree_put(si_btree* bt, const si_btree_key* key, uint64_t* size);
-static bool si_btree_delete(si_btree* bt, const si_btree_key* key, uint64_t* size);
+static si_btree* si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena, bool unsigned_bvals);
+static void si_btree_destroy(si_btree* bt);
+static bool si_btree_put(si_btree* bt, const si_btree_key* key);
+static bool si_btree_delete(si_btree* bt, const si_btree_key* key);
 
-static void btree_destroy(si_btree* bt, si_btree_node* node);
+static void btree_destroy(si_btree* bt, si_arena_handle node_h);
 static bool btree_put(si_btree* bt, si_btree_node* node, const si_btree_key* key);
 static bool btree_delete(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out);
 static bool btree_reduce(si_btree* bt, si_btree_node* node, const search_key* start_skey, const search_key* end_skey, si_btree_reduce_fn cb, void* udata);
@@ -129,19 +127,19 @@ static bool delete_case_1(si_btree* bt, si_btree_node* node, key_mode mode, cons
 static bool delete_case_2(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, key_bound bound);
 static bool delete_case_2a(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child);
 static bool delete_case_2b(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child);
-static bool delete_case_2c(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* left, si_btree_node* right);
+static bool delete_case_2c(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* left, si_arena_handle right_h);
 static bool delete_case_3(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, key_bound bound);
 static bool delete_case_3a_left(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_btree_node* sibling);
 static bool delete_case_3a_right(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_btree_node* sibling);
-static bool delete_case_3b_left(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_btree_node* sibling);
-static bool delete_case_3b_right(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_btree_node* sibling);
-static si_btree_node* create_node(const si_btree* bt, bool leaf);
+static bool delete_case_3b_left(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_arena_handle child_h, si_btree_node* sibling);
+static bool delete_case_3b_right(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_arena_handle sibling_h);
+static si_arena_handle create_node(const si_btree* bt, bool leaf);
 static void move_keys(const si_btree* bt, si_btree_node* dst, uint32_t dst_i, si_btree_node* src, uint32_t src_i, uint32_t n_keys);
 static void move_children(const si_btree* bt, si_btree_node* dst, uint32_t dst_i, si_btree_node* src, uint32_t src_i, uint32_t n_children);
 static key_bound greatest_lower_bound(const si_btree* bt, const si_btree_node* node, const si_btree_key* key);
 static key_bound left_bound(const si_btree* bt, const si_btree_node* node, const search_key* skey);
 static void split_child(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child);
-static void merge_children(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* left, si_btree_node* right);
+static void merge_children(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* left, si_arena_handle right_h);
 
 
 //==========================================================
@@ -256,26 +254,30 @@ set_key(const si_btree* bt, si_btree_node* node, uint32_t i,
 	memcpy(node_key, key, sizeof(si_btree_key));
 }
 
-static inline si_btree_node**
+static inline si_arena_handle*
 mut_children(const si_btree* bt, si_btree_node* node)
 {
-	return (si_btree_node**)((uint8_t*)node + bt->children_off);
+	return (si_arena_handle*)((uint8_t*)node + bt->children_off);
 }
 
-static inline si_btree_node* const*
-const_children(const si_btree* bt, const si_btree_node* node)
+static inline const si_arena_handle*
+const_children(const si_btree* bt, si_btree_node* node)
 {
-	return (si_btree_node* const*)((const uint8_t*)node + bt->children_off);
+	return (const si_arena_handle*)((const uint8_t*)node + bt->children_off);
 }
 
 static inline void
 set_child(const si_btree* bt, si_btree_node* node, uint32_t i,
-		si_btree_node* child)
+		si_arena_handle child_h)
 {
-	si_btree_node** node_children = mut_children(bt, node);
+	si_arena_handle* node_children = mut_children(bt, node);
 
-	node_children[i] = child;
+	node_children[i] = child_h;
 }
+
+// TODO - will promote for EE.
+#define SI_RESOLVE(_h) \
+	((si_btree_node*)as_sindex_arena_resolve(bt->si_arena, _h))
 
 
 //==========================================================
@@ -285,13 +287,15 @@ set_child(const si_btree* bt, si_btree_node* node, uint32_t i,
 void
 as_sindex_tree_create(as_sindex* si)
 {
+	as_namespace* ns = si->ns;
+
 	si->imd->btrees = cf_malloc(si->imd->n_pimds * sizeof(si_btree*));
 
 	bool unsigned_bvals = si->imd->sktype == COL_TYPE_GEOJSON;
 
 	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		si->imd->btrees[ix] = si_btree_create(si->ns->arena, unsigned_bvals,
-				NODE_SZ, &si->ns->n_bytes_sindex_memory);
+		si->imd->btrees[ix] = si_btree_create(ns->arena, ns->si_arena,
+				unsigned_bvals);
 	}
 }
 
@@ -299,7 +303,7 @@ void
 as_sindex_tree_destroy(as_sindex* si)
 {
 	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		si_btree_destroy(si->imd->btrees[ix], &si->ns->n_bytes_sindex_memory);
+		si_btree_destroy(si->imd->btrees[ix]);
 	}
 
 	cf_free(si->imd->btrees);
@@ -321,13 +325,13 @@ as_sindex_tree_n_keys(const as_sindex* si)
 uint64_t
 as_sindex_tree_mem_size(const as_sindex* si)
 {
-	uint64_t sz = 0;
+	uint64_t n_nodes = 0;
 
 	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		sz += si->imd->btrees[ix]->size;
+		n_nodes += si->imd->btrees[ix]->n_nodes;
 	}
 
-	return sz;
+	return n_nodes * si->ns->si_arena->ele_sz; // ignore si_btree overhead
 }
 
 void
@@ -350,7 +354,7 @@ as_sindex_tree_put(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 			.r_h = r_h
 	};
 
-	return si_btree_put(bt, &key, &si->ns->n_bytes_sindex_memory);
+	return si_btree_put(bt, &key);
 }
 
 bool
@@ -365,7 +369,7 @@ as_sindex_tree_delete(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 			.r_h = r_h
 	};
 
-	return si_btree_delete(bt, &key, &si->ns->n_bytes_sindex_memory);
+	return si_btree_delete(bt, &key);
 }
 
 void
@@ -420,7 +424,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 		first = false;
 
 		for (uint32_t i = 0; i < ci.n_keys; i++) {
-			si_btree_delete(bt, &keys[i], &ns->n_bytes_sindex_memory);
+			si_btree_delete(bt, &keys[i]);
 		}
 
 		si->n_defrag_records += ci.n_keys;
@@ -588,8 +592,8 @@ query_collect_cb(const si_btree_key* key, void* udata)
 //
 
 static si_btree*
-si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t node_sz,
-		uint64_t* size)
+si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena,
+		bool unsigned_bvals)
 {
 	si_btree* bt = cf_calloc(1, sizeof(si_btree));
 
@@ -602,109 +606,92 @@ si_btree_create(cf_arenax* arena, bool unsigned_bvals, uint32_t node_sz,
 	pthread_rwlock_init(&bt->lock, &rwattr);
 
 	bt->arena = arena;
+	bt->si_arena = si_arena;
 	bt->unsigned_bvals = unsigned_bvals;
 
-	bt->node_sz = node_sz;
+	uint32_t node_sz = si_arena->ele_sz;
 
 	bt->inner_order = (uint32_t)
-			(((((node_sz - sizeof(si_btree_node) - SARENA_REF_SZ) /
-			(sizeof(si_btree_key) + SARENA_REF_SZ)) + 1) / 2) * 2); // 186 (226)
+			(((((node_sz - sizeof(si_btree_node) - sizeof(si_arena_handle)) /
+			(sizeof(si_btree_key) + sizeof(si_arena_handle))) + 1) / 2) * 2);
+			// 226
 	bt->leaf_order = (uint32_t)
 			(((((node_sz - sizeof(si_btree_node)) /
-			sizeof(si_btree_key)) + 1) / 2) * 2); // 292
+			sizeof(si_btree_key)) + 1) / 2) * 2);
+			// 292
 
 	bt->keys_off = (uint32_t)sizeof(si_btree_node);
-	bt->children_off = node_sz - (bt->inner_order * SARENA_REF_SZ);
+	bt->children_off = (uint32_t)
+			(node_sz - (bt->inner_order * sizeof(si_arena_handle)));
 
-	bt->root = create_node(bt, true);
+	bt->root_h = create_node(bt, true);
 	bt->n_nodes = 1;
 	bt->n_keys = 0;
-	bt->size = sizeof(si_btree) + node_sz;
-
-	as_add_uint64(size, (int64_t)bt->size);
 
 	return bt;
 }
 
 static void
-si_btree_destroy(si_btree* bt, uint64_t* size)
+si_btree_destroy(si_btree* bt)
 {
-	as_add_uint64(size, -(int64_t)bt->size);
-
-	btree_destroy(bt, bt->root);
+	btree_destroy(bt, bt->root_h);
 	pthread_rwlock_destroy(&bt->lock);
 	cf_free(bt);
 }
 
 static bool
-si_btree_put(si_btree* bt, const si_btree_key* key, uint64_t* size)
+si_btree_put(si_btree* bt, const si_btree_key* key)
 {
 	pthread_rwlock_wrlock(&bt->lock);
 
-	int64_t old_size = (int64_t)bt->size;
+	si_btree_node* root = SI_RESOLVE(bt->root_h);
 
-	if (bt->root->n_keys == bt->root->max_degree - 1) {
-		si_btree_node* root = create_node(bt, false);
+	if (root->n_keys == root->max_degree - 1) {
+		si_arena_handle new_root_h = create_node(bt, false);
+		si_btree_node* new_root = SI_RESOLVE(new_root_h);
 
 		bt->n_nodes++;
-		bt->size += bt->node_sz;
 
-		set_child(bt, root, 0, bt->root);
-		split_child(bt, root, 0, bt->root);
+		set_child(bt, new_root, 0, bt->root_h);
+		split_child(bt, new_root, 0, root);
 
-		bt->root = root;
+		bt->root_h = new_root_h;
+		root = new_root;
 	}
 
-	if (! btree_put(bt, bt->root, key)) {
-		if ((int64_t)bt->size != old_size) {
-			as_add_uint64(size, (int64_t)bt->size - old_size);
-		}
-
+	if (! btree_put(bt, root, key)) {
 		pthread_rwlock_unlock(&bt->lock);
 		return false;
 	}
 
 	bt->n_keys++;
 
-	if ((int64_t)bt->size != old_size) {
-		as_add_uint64(size, (int64_t)bt->size - old_size);
-	}
-
 	pthread_rwlock_unlock(&bt->lock);
 	return true;
 }
 
 static bool
-si_btree_delete(si_btree* bt, const si_btree_key* key, uint64_t* size)
+si_btree_delete(si_btree* bt, const si_btree_key* key)
 {
 	pthread_rwlock_wrlock(&bt->lock);
 
-	int64_t old_size = (int64_t)bt->size;
+	si_btree_node* root = SI_RESOLVE(bt->root_h);
 
-	if (! btree_delete(bt, bt->root, KEY_MODE_MATCH, key, NULL)) {
-		if ((int64_t)bt->size != old_size) {
-			as_add_uint64(size, (int64_t)bt->size - old_size);
-		}
-
+	if (! btree_delete(bt, root, KEY_MODE_MATCH, key, NULL)) {
 		pthread_rwlock_unlock(&bt->lock);
 		return false;
 	}
 
 	bt->n_keys--;
 
-	si_btree_node* root = bt->root;
-
 	if (root->n_keys == 0 && root->leaf == 0) {
-		bt->root = const_children(bt, root)[0];
+		si_arena_handle root_h = bt->root_h;
 
-		cf_free(root);
+		bt->root_h = const_children(bt, root)[0];
+
+		as_sindex_arena_free(bt->si_arena, root_h);
 
 		bt->n_nodes--;
-		bt->size -= bt->node_sz;
-	}
-
-	if ((int64_t)bt->size != old_size) {
-		as_add_uint64(size, (int64_t)bt->size - old_size);
 	}
 
 	pthread_rwlock_unlock(&bt->lock);
@@ -718,7 +705,7 @@ si_btree_reduce(si_btree* bt, const search_key* start_skey,
 {
 	pthread_rwlock_rdlock(&bt->lock);
 
-	btree_reduce(bt, bt->root, start_skey, end_skey, cb, udata);
+	btree_reduce(bt, SI_RESOLVE(bt->root_h), start_skey, end_skey, cb, udata);
 
 	pthread_rwlock_unlock(&bt->lock);
 }
@@ -729,17 +716,19 @@ si_btree_reduce(si_btree* bt, const search_key* start_skey,
 //
 
 static void
-btree_destroy(si_btree* bt, si_btree_node* node)
+btree_destroy(si_btree* bt, si_arena_handle node_h)
 {
+	si_btree_node* node = SI_RESOLVE(node_h);
+
 	if (node->leaf == 0) {
-		si_btree_node** children = mut_children(bt, node);
+		si_arena_handle* children = mut_children(bt, node);
 
 		for (uint32_t i = 0; i <= node->n_keys; i++) {
 			btree_destroy(bt, children[i]);
 		}
 	}
 
-	cf_free(node);
+	as_sindex_arena_free(bt->si_arena, node_h);
 }
 
 static bool
@@ -772,10 +761,11 @@ btree_put(si_btree* bt, si_btree_node* node, const si_btree_key* key)
 		return true;
 	}
 
-	si_btree_node** children = mut_children(bt, node);
+	si_arena_handle* children = mut_children(bt, node);
+	si_btree_node* child = SI_RESOLVE(children[i]);
 
-	if (children[i]->n_keys == children[i]->max_degree - 1) {
-		split_child(bt, node, i, children[i]);
+	if (child->n_keys == child->max_degree - 1) {
+		split_child(bt, node, i, child);
 
 		// split_child() pulled up a key to i - look at it.
 
@@ -792,10 +782,11 @@ btree_put(si_btree* bt, si_btree_node* node, const si_btree_key* key)
 
 		if (comp > 0) {
 			i++;
+			child = SI_RESOLVE(children[i]);
 		}
 	}
 
-	return btree_put(bt, children[i], key);
+	return btree_put(bt, child, key);
 }
 
 static bool
@@ -807,10 +798,12 @@ btree_delete(si_btree* bt, si_btree_node* node, key_mode mode,
 	cf_assert(mode == KEY_MODE_MATCH || (key_in == NULL && key_out != NULL),
 			AS_SINDEX, "bad arguments");
 
-	cf_assert(node == bt->root || node->n_keys >= node->min_degree, AS_SINDEX,
+	si_btree_node* root = SI_RESOLVE(bt->root_h);
+
+	cf_assert(node == root || node->n_keys >= node->min_degree, AS_SINDEX,
 			"bad key count: %d", node->n_keys);
 
-	if (node == bt->root && node->n_keys == 0) {
+	if (node == root && node->n_keys == 0) {
 		return false;
 	}
 
@@ -863,11 +856,12 @@ btree_reduce(si_btree* bt, si_btree_node* node, const search_key* start_skey,
 	}
 
 	uint32_t i = (uint32_t)(bound.index + 1);
-	si_btree_node* const* children = node->leaf == 0 ?
+	const si_arena_handle* children = node->leaf == 0 ?
 			const_children(bt, node) : NULL;
 
 	if (children != NULL &&
-			! btree_reduce(bt, children[i], start_skey, end_skey, cb, udata)) {
+			! btree_reduce(bt, SI_RESOLVE(children[i]), start_skey, end_skey,
+					cb, udata)) {
 		return false;
 	}
 
@@ -883,7 +877,8 @@ btree_reduce(si_btree* bt, si_btree_node* node, const search_key* start_skey,
 		}
 
 		if (children != NULL &&
-				! btree_reduce(bt, children[i], NULL, end_skey, cb, udata)) {
+				! btree_reduce(bt, SI_RESOLVE(children[i]), NULL, end_skey,
+						cb, udata)) {
 			return false;
 		}
 
@@ -945,20 +940,21 @@ delete_case_2(si_btree* bt, si_btree_node* node, key_mode mode,
 	cf_assert(bound.equal, AS_SINDEX, "bad equality flag");
 
 	uint32_t i = (uint32_t)bound.index;
-	si_btree_node** children = mut_children(bt, node);
-	si_btree_node* left = children[i];
+	si_arena_handle* children = mut_children(bt, node);
+	si_btree_node* left = SI_RESOLVE(children[i]);
 
 	if (left->n_keys >= left->min_degree) {
 		return delete_case_2a(bt, node, i, left);
 	}
 
-	si_btree_node* right = children[i + 1];
+	si_arena_handle right_h = children[i + 1];
+	si_btree_node* right = SI_RESOLVE(right_h);
 
 	if (right->n_keys >= right->min_degree) {
 		return delete_case_2b(bt, node, i, right);
 	}
 
-	return delete_case_2c(bt, node, mode, key_in, key_out, i, left, right);
+	return delete_case_2c(bt, node, mode, key_in, key_out, i, left, right_h);
 }
 
 static bool
@@ -988,9 +984,9 @@ delete_case_2b(si_btree* bt, si_btree_node* node, uint32_t i,
 static bool
 delete_case_2c(si_btree* bt, si_btree_node* node, key_mode mode,
 		const si_btree_key* key_in, si_btree_key* key_out, uint32_t i,
-		si_btree_node* left, si_btree_node* right)
+		si_btree_node* left, si_arena_handle right_h)
 {
-	merge_children(bt, node, i, left, right);
+	merge_children(bt, node, i, left, right_h);
 
 	return btree_delete(bt, left, mode, key_in, key_out);
 }
@@ -1003,8 +999,9 @@ delete_case_3(si_btree* bt, si_btree_node* node, key_mode mode,
 	cf_assert(! bound.equal, AS_SINDEX, "bad equality flag");
 
 	uint32_t i = (uint32_t)(bound.index + 1);
-	si_btree_node** children = mut_children(bt, node);
-	si_btree_node* child = children[i];
+	si_arena_handle* children = mut_children(bt, node);
+	si_arena_handle child_h = children[i];
+	si_btree_node* child = SI_RESOLVE(child_h);
 
 	if (child->n_keys >= child->min_degree) {
 		return btree_delete(bt, child, mode, key_in, key_out);
@@ -1014,7 +1011,7 @@ delete_case_3(si_btree* bt, si_btree_node* node, key_mode mode,
 			"bad key count: %d", child->n_keys);
 
 	if (i > 0) {
-		si_btree_node* sibling = children[i - 1];
+		si_btree_node* sibling = SI_RESOLVE(children[i - 1]);
 
 		if (sibling->n_keys >= sibling->min_degree) {
 			return delete_case_3a_left(bt, node, mode, key_in, key_out, i,
@@ -1026,7 +1023,7 @@ delete_case_3(si_btree* bt, si_btree_node* node, key_mode mode,
 	}
 
 	if (i < node->n_keys) {
-		si_btree_node* sibling = children[i + 1];
+		si_btree_node* sibling = SI_RESOLVE(children[i + 1]);
 
 		if (sibling->n_keys >= sibling->min_degree) {
 			return delete_case_3a_right(bt, node, mode, key_in, key_out, i,
@@ -1038,16 +1035,16 @@ delete_case_3(si_btree* bt, si_btree_node* node, key_mode mode,
 	}
 
 	if (i > 0) {
-		si_btree_node* sibling = children[i - 1];
+		si_btree_node* sibling = SI_RESOLVE(children[i - 1]);
 
-		return delete_case_3b_left(bt, node, mode, key_in, key_out, i, child,
+		return delete_case_3b_left(bt, node, mode, key_in, key_out, i, child_h,
 				sibling);
 	}
 
-	si_btree_node* sibling = children[i + 1];
+	si_arena_handle sibling_h = children[i + 1];
 
 	return delete_case_3b_right(bt, node, mode, key_in, key_out, i, child,
-			sibling);
+			sibling_h);
 }
 
 static bool
@@ -1109,9 +1106,9 @@ delete_case_3a_right(si_btree* bt, si_btree_node* node, key_mode mode,
 static bool
 delete_case_3b_left(si_btree* bt, si_btree_node* node, key_mode mode,
 		const si_btree_key* key_in, si_btree_key* key_out, uint32_t i,
-		si_btree_node* child, si_btree_node* sibling)
+		si_arena_handle child_h, si_btree_node* sibling)
 {
-	merge_children(bt, node, i - 1, sibling, child);
+	merge_children(bt, node, i - 1, sibling, child_h);
 
 	return btree_delete(bt, sibling, mode, key_in, key_out);
 }
@@ -1119,32 +1116,34 @@ delete_case_3b_left(si_btree* bt, si_btree_node* node, key_mode mode,
 static bool
 delete_case_3b_right(si_btree* bt, si_btree_node* node, key_mode mode,
 		const si_btree_key* key_in, si_btree_key* key_out, uint32_t i,
-		si_btree_node* child, si_btree_node* sibling)
+		si_btree_node* child, si_arena_handle sibling_h)
 {
-	merge_children(bt, node, i, child, sibling);
+	merge_children(bt, node, i, child, sibling_h);
 
 	return btree_delete(bt, child, mode, key_in, key_out);
 }
 
-static si_btree_node*
+static si_arena_handle
 create_node(const si_btree* bt, bool leaf)
 {
-	si_btree_node* node = cf_calloc(1, bt->node_sz);
-
-	node->n_keys = 0;
+	si_arena_handle h = as_sindex_arena_alloc(bt->si_arena);
+	si_btree_node* node = SI_RESOLVE(h);
 
 	if (leaf) {
-		node->leaf = 1;
-		node->min_degree = (uint16_t)bt->leaf_order / 2;
-		node->max_degree = (uint16_t)bt->leaf_order;
+		*node = (si_btree_node){
+				.leaf = 1,
+				.min_degree = (uint16_t)(bt->leaf_order / 2),
+				.max_degree = (uint16_t)bt->leaf_order
+		};
 	}
 	else {
-		node->leaf = 0;
-		node->min_degree = (uint16_t)bt->inner_order / 2;
-		node->max_degree = (uint16_t)bt->inner_order;
+		*node = (si_btree_node){
+				.min_degree = (uint16_t)(bt->inner_order / 2),
+				.max_degree = (uint16_t)bt->inner_order
+		};
 	}
 
-	return node;
+	return h;
 }
 
 static void
@@ -1161,11 +1160,11 @@ static void
 move_children(const si_btree* bt, si_btree_node* dst, uint32_t dst_i,
 		si_btree_node* src, uint32_t src_i, uint32_t n_children)
 {
-	si_btree_node** dst_children = mut_children(bt, dst);
-	si_btree_node* const* src_children = const_children(bt, src);
+	si_arena_handle* dst_children = mut_children(bt, dst);
+	const si_arena_handle* src_children = const_children(bt, src);
 
 	memmove(&dst_children[dst_i], &src_children[src_i],
-			n_children * sizeof(si_btree_node*));
+			n_children * sizeof(si_arena_handle));
 }
 
 #if BINARY_SEARCH == 0
@@ -1323,10 +1322,10 @@ split_child(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child)
 
 	// Child's last (min_degree - 1) keys go to new sibling.
 
-	si_btree_node* sibling = create_node(bt, child->leaf != 0);
+	si_arena_handle sibling_h = create_node(bt, child->leaf != 0);
+	si_btree_node* sibling = SI_RESOLVE(sibling_h);
 
 	bt->n_nodes++;
-	bt->size += bt->node_sz;
 
 	move_keys(bt, sibling, 0, child, child->min_degree,
 			(uint32_t)child->min_degree - 1);
@@ -1351,18 +1350,21 @@ split_child(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child)
 
 	move_keys(bt, node, i, child, (uint32_t)child->n_keys - 1, 1);
 
-	set_child(bt, node, i + 1, sibling);
+	set_child(bt, node, i + 1, sibling_h);
 
 	child->n_keys--;
 }
 
 static void
 merge_children(si_btree* bt, si_btree_node* node, uint32_t i,
-		si_btree_node* left, si_btree_node* right)
+		si_btree_node* left, si_arena_handle right_h)
 {
-	cf_assert(node != bt->root || node->n_keys > 0, AS_SINDEX,
+	si_btree_node* root = SI_RESOLVE(bt->root_h);
+	si_btree_node* right = SI_RESOLVE(right_h);
+
+	cf_assert(node != root || node->n_keys > 0, AS_SINDEX,
 			"bad key count: %d", node->n_keys);
-	cf_assert(node == bt->root || node->n_keys >= node->min_degree, AS_SINDEX,
+	cf_assert(node == root || node->n_keys >= node->min_degree, AS_SINDEX,
 			"bad key count: %d", node->n_keys);
 	cf_assert(node->leaf == 0, AS_SINDEX, "bad leaf flag");
 	cf_assert(left->leaf == right->leaf, AS_SINDEX, "bad leaf flag");
@@ -1396,8 +1398,7 @@ merge_children(si_btree* bt, si_btree_node* node, uint32_t i,
 
 	node->n_keys--;
 
-	cf_free(right);
+	as_sindex_arena_free(bt->si_arena, right_h);
 
 	bt->n_nodes--;
-	bt->size -= bt->node_sz;
 }

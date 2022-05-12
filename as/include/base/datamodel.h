@@ -85,6 +85,7 @@ struct as_exp_ctx_s;
 struct as_index_ref_s;
 struct as_index_tree_s;
 struct as_sindex_s;
+struct as_sindex_arena_s;
 struct as_sindex_config_s;
 struct index_metadata_s;
 struct iops_expop_s;
@@ -631,6 +632,9 @@ struct as_namespace_s {
 	as_set*			sets_cfg_array;
 	uint32_t		sets_cfg_count;
 
+	// Pointer to sindex arena structure. TODO - adapt for warm restart!
+	struct as_sindex_arena_s* si_arena;
+
 	// Configuration flags relevant for warm or cool restart.
 	uint32_t		xmem_flags;
 
@@ -776,6 +780,7 @@ struct as_namespace_s {
 	bool			reject_xdr_writes;
 	uint32_t		cfg_replication_factor;
 	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
+	uint64_t		sindex_stage_size;
 	bool			single_bin; // restrict the namespace to objects with exactly one bin
 	uint32_t		n_single_query_threads;
 	uint32_t		stop_writes_pct;
@@ -880,7 +885,6 @@ struct as_namespace_s {
 	// Memory usage stats.
 
 	cf_atomic_int	n_bytes_memory;
-	uint64_t		n_bytes_sindex_memory;
 
 	// Persistent storage stats.
 

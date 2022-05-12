@@ -2797,6 +2797,9 @@ as_sindex_smd_accept_cb(const cf_vector *items, as_smd_accept_type accept_type)
 //                                     END - SMD CALLBACKS
 // ************************************************************************************************
 
+// TODO - re-situate for warm restart.
+#include "sindex/sindex_arena.h"
+
 void
 as_sindex_init(void)
 {
@@ -2818,6 +2821,11 @@ as_sindex_init(void)
 				AS_ID_INAME_SZ, sizeof(uint32_t), AS_SINDEX_MAX, false);
 
 		as_sindex_gc_ns_init(ns);
+
+		// TODO - re-situate for warm restart.
+		ns->si_arena = cf_calloc(1, sizeof(as_sindex_arena));
+		// TODO - ele_sz may one day come (indirectly - flash/RAM) from config.
+		as_sindex_arena_init(ns->si_arena, 4096, ns->sindex_stage_size);
 	}
 
 	pthread_rwlockattr_t rwattr;

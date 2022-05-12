@@ -58,6 +58,7 @@
 #include "fabric/partition.h"
 #include "fabric/skew_monitor.h"
 #include "query/query.h"
+#include "sindex/secondary_index.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -474,7 +475,7 @@ log_line_memory_usage(as_namespace* ns, uint64_t index_used_sz)
 {
 	uint64_t index_mem = as_namespace_index_persisted(ns) ? 0 : index_used_sz;
 	uint64_t set_index_mem = as_set_index_used_bytes(ns);
-	uint64_t sindex_mem = ns->n_bytes_sindex_memory;
+	uint64_t sindex_mem = as_sindex_used_bytes(ns);
 	uint64_t data_mem = ns->n_bytes_memory;
 	uint64_t total_mem = index_mem + set_index_mem + sindex_mem + data_mem;
 

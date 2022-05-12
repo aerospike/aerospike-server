@@ -221,7 +221,7 @@ run_ticker(void* udata)
 				100.0 : (double)(n_recs_checked * 100) / (double)n_objects;
 
 		cf_info(AS_SINDEX, "{%s} sindex-ticker: mem-used %lu objects-scanned %lu progress-pct %.3f",
-				ns->name, ns->n_bytes_sindex_memory, n_recs_checked, pct);
+				ns->name, as_sindex_used_bytes(ns), n_recs_checked, pct);
 	}
 
 	return NULL;

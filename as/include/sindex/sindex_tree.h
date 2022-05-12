@@ -34,6 +34,8 @@
 
 #include "arenax.h"
 
+#include "sindex/sindex_arena.h"
+
 
 //==========================================================
 // Forward declarations.
@@ -43,6 +45,7 @@ struct as_index_ref_s;
 struct as_partition_reservation_s;
 struct as_query_range_s;
 struct as_sindex_s;
+struct as_sindex_arena_s;
 struct si_btree_node_s;
 
 
@@ -57,16 +60,15 @@ typedef bool (*as_sindex_reduce_fn)(struct as_index_ref_s* value, int64_t bval, 
 typedef struct si_btree_s {
 	pthread_rwlock_t lock;
 	cf_arenax* arena;
+	struct as_sindex_arena_s* si_arena;
 	bool unsigned_bvals;
-	uint32_t node_sz;
 	uint32_t inner_order;
 	uint32_t leaf_order;
 	uint32_t keys_off;
 	uint32_t children_off;
-	struct si_btree_node_s* root;
+	si_arena_handle root_h;
 	uint64_t n_nodes;
 	uint64_t n_keys;
-	uint64_t size;
 } si_btree;
 
 typedef struct si_btree_key_s {

@@ -1959,6 +1959,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "reject-non-xdr-writes", ns->reject_non_xdr_writes);
 	info_append_bool(db, "reject-xdr-writes", ns->reject_xdr_writes);
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
+	info_append_uint64(db, "sindex-stage-size", ns->sindex_stage_size);
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_uint32(db, "single-query-threads", ns->n_single_query_threads);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
@@ -5176,7 +5177,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	uint64_t data_memory = ns->n_bytes_memory;
 	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;
 	uint64_t set_index_memory = as_set_index_used_bytes(ns);
-	uint64_t sindex_memory = ns->n_bytes_sindex_memory;
+	uint64_t sindex_memory = as_sindex_used_bytes(ns);
 	uint64_t used_memory = data_memory + index_memory + set_index_memory + sindex_memory;
 
 	info_append_uint64(db, "memory_used_bytes", used_memory);
