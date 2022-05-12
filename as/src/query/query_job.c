@@ -320,10 +320,7 @@ as_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
 
 	strcpy(stat->ns, _job->ns->name);
 	strcpy(stat->set, _job->set_name);
-
-	if (_job->si != NULL) {
-		strcpy(stat->si_name, _job->si->imd->iname);
-	}
+	strcpy(stat->si_name, _job->si_name);
 
 	strcpy(stat->client, _job->client);
 

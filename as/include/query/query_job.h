@@ -110,6 +110,7 @@ typedef struct as_query_job_s {
 	struct as_namespace_s* ns;
 	struct as_sindex_s* si;
 	struct as_query_range_s* range;
+	char si_name[AS_ID_INAME_SZ];
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
 

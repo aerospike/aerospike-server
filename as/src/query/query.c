@@ -836,7 +836,13 @@ find_sindex(as_query_job* _job)
 			as_sindex_sktype_from_pktype(range->bin_type), range->itype,
 			range->bin_path, 0);
 
-	return _job->si != NULL;
+	if (_job->si == NULL) {
+		return false;
+	}
+
+	strcpy(_job->si_name, _job->si->imd->iname);
+
+	return true;
 }
 
 static bool
@@ -1421,7 +1427,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	else {
 		cf_debug(AS_QUERY, "starting basic query job %lu {%s:%s:%s} n-pids-requested %hu rps %u sample-max %lu%s socket-timeout %d from %s",
 				_job->trid, ns->name, _job->set_name,
-				_job->si != NULL ? _job->si->imd->iname : "<pi-query>",
+				_job->si != NULL ? _job->si_name : "<pi-query>",
 				_job->n_pids_requested, _job->rps, job->sample_max,
 				job->no_bin_data ? " metadata-only" : "", conn_job->fd_timeout,
 				_job->client);
