@@ -840,7 +840,9 @@ find_sindex(as_query_job* _job)
 		return false;
 	}
 
-	strcpy(_job->si_name, _job->si->imd->iname);
+	if (! _job->is_short) {
+		strcpy(_job->si_name, _job->si->imd->iname);
+	}
 
 	return true;
 }
