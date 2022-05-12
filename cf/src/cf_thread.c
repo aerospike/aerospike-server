@@ -264,18 +264,12 @@ cf_thread_realloc(void** pp, size_t* psz)
 			cf_assert(psz == talloc->psz, CF_MISC, "unmatched realloc psz");
 
 			*pp = cf_realloc(*pp, *psz);
+			// Don't bother save size - only needs to be zeroed on cleanup.
 
-			if (*pp != NULL) {
-				*talloc->pp = *pp;
-				// Don't bother save size - only needs to be zeroed on cleanup.
-			}
-			else {
+			if (*pp == NULL) {
 				uint32_t last_i = g_n_allocs - 1;
 
-				if (i != last_i) {
-					*talloc = g_allocs[last_i];
-				}
-
+				*talloc = g_allocs[last_i]; // no-op if i == last_i
 				g_n_allocs--;
 			}
 
