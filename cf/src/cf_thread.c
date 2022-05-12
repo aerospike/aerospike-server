@@ -67,6 +67,11 @@ typedef struct thread_info_s {
 	void* addrs[MAX_N_ADDRS];
 } thread_info;
 
+typedef struct thread_alloc_s {
+	void** pp;
+	size_t* psz;
+} thread_alloc;
+
 typedef struct thread_exit_s {
 	cf_thread_exit_fn cb;
 	void* udata;
@@ -95,7 +100,7 @@ static __thread thread_info* g_thread_info;
 static volatile uint32_t g_traces_pending;
 static volatile uint32_t g_traces_done;
 
-static __thread void*** g_allocs = NULL;
+static __thread thread_alloc* g_allocs = NULL;
 static __thread uint32_t g_n_allocs = 0;
 
 static __thread thread_exit* g_exits = NULL;
@@ -250,16 +255,27 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 }
 
 void
-cf_thread_realloc(void** pp, size_t sz)
+cf_thread_realloc(void** pp, size_t* psz)
 {
 	for (uint32_t i = 0; i < g_n_allocs; i++) {
-		if (pp == g_allocs[i]) {
-			*pp = cf_realloc(*pp, sz);
+		thread_alloc* talloc = &g_allocs[i];
 
-			if (*pp == NULL) { // i.e. sz == 0, free
+		if (pp == talloc->pp) {
+			cf_assert(psz == talloc->psz, CF_MISC, "unmatched realloc psz");
+
+			*pp = cf_realloc(*pp, *psz);
+
+			if (*pp != NULL) {
+				*talloc->pp = *pp;
+				// Don't bother save size - only needs to be zeroed on cleanup.
+			}
+			else {
 				uint32_t last_i = g_n_allocs - 1;
 
-				g_allocs[i] = g_allocs[last_i]; // no-op if i == last_i
+				if (i != last_i) {
+					*talloc = g_allocs[last_i];
+				}
+
 				g_n_allocs--;
 			}
 
@@ -269,10 +285,13 @@ cf_thread_realloc(void** pp, size_t sz)
 
 	cf_assert(*pp == NULL, CF_MISC, "non-null pointer for new alloc");
 
-	*pp = cf_malloc(sz);
+	*pp = cf_malloc(*psz);
 
-	g_allocs = cf_realloc(g_allocs, (g_n_allocs + 1) * sizeof(void**));
-	g_allocs[g_n_allocs++] = pp;
+	g_allocs = cf_realloc(g_allocs, (g_n_allocs + 1) * sizeof(thread_alloc));
+
+	thread_alloc new_talloc = { .pp = pp, .psz = psz };
+
+	g_allocs[g_n_allocs++] = new_talloc;
 }
 
 void
@@ -452,8 +471,12 @@ cleanup(void)
 {
 	if (g_allocs != NULL) {
 		for (uint32_t i = 0; i < g_n_allocs; i++) {
-			cf_free(*g_allocs[i]);
-			*g_allocs[i] = NULL;
+			thread_alloc* talloc = &g_allocs[i];
+
+			cf_free(*talloc->pp);
+
+			*talloc->pp = NULL;
+			*talloc->psz = 0;
 		}
 
 		cf_free(g_allocs);
