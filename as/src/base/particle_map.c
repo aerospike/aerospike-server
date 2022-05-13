@@ -725,6 +725,7 @@ map_size_from_asval(const as_val *val)
 
 	uint32_t sz = as_serializer_serialize_getsize(&s, (as_val *)val);
 
+	cf_assert(sz > 0, AS_PARTICLE, "map_size_from_asval() failed to getsize");
 	as_serializer_destroy(&s);
 
 	const as_map *map = (const as_map *)val;
@@ -850,11 +851,6 @@ map_to_asval(const as_particle *p)
 	if (! val) {
 		return (as_val *)as_orderedmap_new(0);
 	}
-
-	packed_map map;
-
-	packed_map_init_from_particle(&map, p, false);
-	as_orderedmap_set_flags((as_orderedmap *)val, (uint32_t)map.flags);
 
 	return val;
 }
