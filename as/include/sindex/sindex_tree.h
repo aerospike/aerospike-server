@@ -86,9 +86,6 @@ typedef struct search_key_s {
 
 typedef bool (*si_btree_reduce_fn)(const si_btree_key* key, void* udata);
 
-// So that with a maximum 1024 query threads we can't have rc > 60 * 1024.
-#define MAX_QUERY_BURST 60
-
 
 //==========================================================
 // Public API.

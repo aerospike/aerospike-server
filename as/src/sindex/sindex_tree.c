@@ -84,6 +84,8 @@ typedef enum key_mode_s {
 typedef struct gc_collect_cb_info_s {
 	as_namespace* ns;
 
+	uint32_t max_burst;
+
 	uint32_t n_keys_reduced;
 	uint32_t n_keys;
 	si_btree_key* keys;
@@ -105,6 +107,9 @@ typedef struct query_collect_cb_info_s {
 } query_collect_cb_info;
 
 #define MAX_GC_BURST 1000
+#define MAX_GC_BURST_AF 30 // limit primary index IO under sindex tree lock
+
+#define MAX_QUERY_BURST 100
 
 
 //==========================================================
@@ -423,11 +428,15 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 {
 	as_namespace* ns = si->ns;
 
+	uint32_t max_burst = ns->xmem_type == CF_XMEM_TYPE_FLASH ?
+			MAX_GC_BURST_AF : MAX_GC_BURST;
+
 	bool first = true;
-	si_btree_key keys[MAX_GC_BURST];
+	si_btree_key keys[max_burst];
 
 	gc_collect_cb_info ci = {
 			.ns = ns,
+			.max_burst = max_burst,
 			.keys = keys
 	};
 
@@ -445,7 +454,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 		si->n_defrag_records += ci.n_keys;
 		ns->n_sindex_gc_cleaned += ci.n_keys;
 
-		if (ci.n_keys_reduced != MAX_GC_BURST) {
+		if (ci.n_keys_reduced != max_burst) {
 			return; // done with this physical tree
 		}
 
@@ -467,7 +476,7 @@ gc_collect_cb(const si_btree_key* key, void* udata)
 		ci->keys[ci->n_keys++] = *key;
 	}
 
-	if (++ci->n_keys_reduced == MAX_GC_BURST) {
+	if (++ci->n_keys_reduced == ci->max_burst) {
 		ci->last.bval = key->bval;
 		ci->last.has_digest = true;
 		ci->last.keyd_stub = get_keyd_stub(&r->keyd);
