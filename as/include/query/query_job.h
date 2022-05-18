@@ -77,6 +77,7 @@ typedef struct as_query_range_s {
 	as_particle_type bin_type;
 	as_sindex_type itype;
 	bool isrange;
+	bool de_dup;
 	char bin_path[AS_SINDEX_MAX_PATH_LENGTH];
 } as_query_range;
 

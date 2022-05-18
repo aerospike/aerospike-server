@@ -26,6 +26,7 @@
 
 #include "sindex/sindex_tree.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "citrusleaf/cf_digest.h"
@@ -42,7 +43,7 @@
 void
 query_reduce_no_rc(si_btree* bt, as_partition_reservation* rsv,
 		int64_t start_bval, int64_t end_bval, int64_t resume_bval,
-		cf_digest* keyd, as_sindex_reduce_fn cb, void* udata)
+		cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata)
 {
 	cf_crash(AS_SINDEX, "CE code called query_reduce_no_rc()");
 }

@@ -99,6 +99,8 @@ typedef struct query_collect_cb_info_s {
 	uint32_t n_keys;
 	si_btree_key* keys;
 
+	bool de_dup;
+
 	search_key last;
 } query_collect_cb_info;
 
@@ -111,7 +113,7 @@ typedef struct query_collect_cb_info_s {
 
 static void gc_reduce_and_delete(as_sindex* si, si_btree* bt);
 static bool gc_collect_cb(const si_btree_key* key, void* udata);
-static void query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, as_sindex_reduce_fn cb, void* udata);
+static void query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
 static bool query_collect_cb(const si_btree_key* key, void* udata);
 
 static si_btree* si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena, bool unsigned_bvals);
@@ -145,6 +147,18 @@ static void merge_children(si_btree* bt, si_btree_node* node, uint32_t i, si_btr
 //==========================================================
 // Inlines & macros.
 //
+
+static inline bool
+find_r_h(cf_arenax_handle r_h, const si_btree_key* keys, uint32_t n_keys)
+{
+	for (uint32_t i = 0; i < n_keys; i++) {
+		if (keys[i].r_h == r_h) {
+			return true;
+		}
+	}
+
+	return false;
+}
 
 static inline int32_t
 bval_cmp(int64_t bval_1, int64_t bval_2)
@@ -388,14 +402,15 @@ as_sindex_tree_query(as_sindex* si, const as_query_range* range,
 				continue;
 			}
 
-			query_reduce(bt, rsv, r->start, r->end, bval, keyd, cb, udata);
+			query_reduce(bt, rsv, r->start, r->end, bval, keyd, range->de_dup,
+					cb, udata);
 		}
 
 		return;
 	}
 
-	query_reduce(bt, rsv, range->u.r.start, range->u.r.end, bval, keyd, cb,
-			udata);
+	query_reduce(bt, rsv, range->u.r.start, range->u.r.end, bval, keyd,
+			range->de_dup, cb, udata);
 }
 
 
@@ -466,14 +481,14 @@ gc_collect_cb(const si_btree_key* key, void* udata)
 
 static void
 query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval,
-		int64_t end_bval, int64_t resume_bval, cf_digest* keyd,
+		int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup,
 		as_sindex_reduce_fn cb, void* udata)
 {
 	as_namespace* ns = rsv->ns;
 
 	if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
-		query_reduce_no_rc(bt, rsv, start_bval, end_bval, resume_bval, keyd, cb,
-				udata);
+		query_reduce_no_rc(bt, rsv, start_bval, end_bval, resume_bval, keyd,
+				de_dup, cb, udata);
 		return;
 	}
 
@@ -483,6 +498,7 @@ query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval,
 			.arena = bt->arena,
 			.tree = rsv->tree,
 			.keys = keys,
+			.de_dup = de_dup,
 			.last = { .bval = start_bval }
 	};
 
@@ -557,11 +573,8 @@ query_collect_cb(const si_btree_key* key, void* udata)
 
 	as_index* r = cf_arenax_resolve(ci->arena, key->r_h);
 
-	if (r->tree_id == tree->id && r->generation != 0) {
-		if (r->rc > MAX_QUERY_BURST * 1024) {
-			cf_crash(AS_SINDEX, "unexpected - query rc %hu", r->rc);
-		}
-
+	if (r->tree_id == tree->id && r->generation != 0 && (r->rc == 1 ||
+			! (ci->de_dup && find_r_h(key->r_h, ci->keys, ci->n_keys)))) {
 		cf_mutex* rlock = as_index_rlock_from_keyd(tree, &r->keyd);
 
 		cf_mutex_lock(rlock);

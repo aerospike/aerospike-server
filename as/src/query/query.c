@@ -502,6 +502,8 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 	f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_TYPE);
 	range->itype = (f == NULL) ? AS_SINDEX_ITYPE_DEFAULT : *f->data;
 
+	range->de_dup = range->isrange && range->itype != AS_SINDEX_ITYPE_DEFAULT;
+
 	return true;
 }
 
