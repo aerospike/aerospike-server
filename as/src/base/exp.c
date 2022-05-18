@@ -606,7 +606,6 @@ static void display_msgpack(msgpack_in* mp, cf_dyn_buf* db);
 static void debug_exp_check(const as_exp* exp);
 
 
-
 //==========================================================
 // Inlines & macros.
 //
