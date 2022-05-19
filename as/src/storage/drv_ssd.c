@@ -3161,14 +3161,6 @@ ssd_init_synchronous(drv_ssds *ssds)
 					ns->name, ssds->ssds[first_used].name, ssd->name);
 		}
 
-		// These should all be 0, unless upgrading from pre-4.5.1.
-		if (prefix_first->last_evict_void_time !=
-				prefix_i->last_evict_void_time) {
-			cf_warning(AS_DRV_SSD, "{%s} devices have inconsistent evict-void-times - ignoring",
-					ns->name);
-			prefix_first->last_evict_void_time = 0;
-		}
-
 		if ((prefix_i->flags & DRV_HEADER_FLAG_TRUSTED) == 0) {
 			cf_info(AS_DRV_SSD, "{%s} device %s prior shutdown not clean",
 					ns->name, ssd->name);
@@ -3177,19 +3169,6 @@ ssd_init_synchronous(drv_ssds *ssds)
 
 		if ((prefix_i->flags & DRV_HEADER_FLAG_COMMIT_TO_DEVICE) == 0) {
 			non_commit_drive = true;
-		}
-	}
-
-	// Handle devices' evict threshold - may be upgrading from pre-4.5.1.
-	if (prefix_first->last_evict_void_time != 0) {
-		if (ns->smd_evict_void_time == 0) {
-			ns->smd_evict_void_time = prefix_first->last_evict_void_time;
-			ns->evict_void_time = ns->smd_evict_void_time;
-			// Leave header threshold in case we don't commit SMD threshold.
-		}
-		else {
-			// Use SMD threshold, may now erase header threshold.
-			prefix_first->last_evict_void_time = 0;
 		}
 	}
 

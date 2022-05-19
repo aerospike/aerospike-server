@@ -88,7 +88,7 @@ typedef struct drv_prefix_s {
 	uint32_t	flags;
 	uint32_t	write_block_size;
 	uint32_t	eventual_regime;
-	uint32_t	last_evict_void_time;
+	uint32_t	unused; // was eviction threshold pre-4.5.1
 	uint32_t	roster_generation;
 } drv_prefix;
 
