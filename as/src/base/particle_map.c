@@ -28,7 +28,6 @@
 #include "aerospike/as_buffer.h"
 #include "aerospike/as_map.h"
 #include "aerospike/as_msgpack.h"
-#include "aerospike/as_orderedmap.h"
 #include "aerospike/as_serializer.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
@@ -848,8 +847,8 @@ map_to_asval(const as_particle *p)
 	as_serializer_deserialize(&s, &buf, &val);
 	as_serializer_destroy(&s);
 
-	if (! val) {
-		return (as_val *)as_orderedmap_new(0);
+	if (val == NULL) {
+		cf_warning(AS_PARTICLE, "map deserialize failed"); // TODO - assert?
 	}
 
 	return val;

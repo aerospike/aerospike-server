@@ -26,7 +26,6 @@
 #include <string.h>
 #include <sys/param.h>
 
-#include "aerospike/as_arraylist.h"
 #include "aerospike/as_buffer.h"
 #include "aerospike/as_list.h"
 #include "aerospike/as_msgpack.h"
@@ -618,8 +617,8 @@ list_to_asval(const as_particle *p)
 	as_serializer_deserialize(&s, &buf, &val);
 	as_serializer_destroy(&s);
 
-	if (! val) {
-		return (as_val *)as_arraylist_new(0, 1);
+	if (val == NULL) {
+		cf_warning(AS_PARTICLE, "list deserialize failed"); // TODO - assert?
 	}
 
 	return val;
