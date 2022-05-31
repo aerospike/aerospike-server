@@ -4530,6 +4530,10 @@ get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
 static as_exp_trilean
 cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1)
 {
+	if (e0->r_trilean == AS_EXP_UNK || e1->r_trilean == AS_EXP_UNK) {
+		return AS_EXP_UNK;
+	}
+
 	switch (code) {
 	case EXP_CMP_EQ:
 		return (e0->r_trilean == e1->r_trilean) ? AS_EXP_TRUE : AS_EXP_FALSE;
