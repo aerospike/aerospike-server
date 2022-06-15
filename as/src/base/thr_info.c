@@ -4081,9 +4081,7 @@ info_command_roster_set(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the roster-set command.
 
-	bool ok = as_roster_set_nodes_cmd(ns_name, nodes);
-
-	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::roster-set");
+	as_roster_set_nodes_cmd(ns_name, nodes, db);
 
 	return 0;
 }
@@ -4135,10 +4133,7 @@ info_command_truncate_namespace(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the truncate command.
 
-	bool ok = as_truncate_cmd(ns_name, NULL, lut_rv == 0 ? lut_str : NULL);
-
-	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate");
-
+	as_truncate_cmd(ns_name, NULL, lut_rv == 0 ? lut_str : NULL, db);
 	return 0;
 }
 
@@ -4175,9 +4170,7 @@ info_command_truncate_namespace_undo(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the truncate-undo command.
 
-	bool ok = as_truncate_undo_cmd(ns_name, NULL);
-
-	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate-undo");
+	as_truncate_undo_cmd(ns_name, NULL, db);
 
 	return 0;
 }
@@ -4229,10 +4222,7 @@ info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the truncate command.
 
-	bool ok = as_truncate_cmd(ns_name, set_name, lut_rv == 0 ? lut_str : NULL);
-
-	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate");
-
+	as_truncate_cmd(ns_name, set_name, lut_rv == 0 ? lut_str : NULL, db);
 	return 0;
 }
 
@@ -4269,9 +4259,7 @@ info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the truncate-undo command.
 
-	bool ok = as_truncate_undo_cmd(ns_name, set_name);
-
-	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate-undo");
+	as_truncate_undo_cmd(ns_name, set_name, db);
 
 	return 0;
 }
@@ -4311,9 +4299,7 @@ info_command_eviction_reset(char *name, char *params, cf_dyn_buf *db)
 
 	// Issue the eviction-reset command.
 
-	bool ok = as_nsup_eviction_reset_cmd(ns_name, ttl_rv == 0 ? ttl_str : NULL);
-
-	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::eviction-reset");
+	as_nsup_eviction_reset_cmd(ns_name, ttl_rv == 0 ? ttl_str : NULL, db);
 
 	return 0;
 }

@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 
+#include "dynbuf.h"
 #include "node.h"
 
 #include "fabric/partition_balance.h"
@@ -38,7 +39,7 @@
 //
 
 void as_roster_init(void);
-bool as_roster_set_nodes_cmd(const char* ns_name, const char* nodes);
+void as_roster_set_nodes_cmd(const char* ns_name, const char* nodes, cf_dyn_buf* db);
 
 
 //==========================================================

@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 
+#include "dynbuf.h"
 #include "log.h"
 
 
@@ -41,9 +42,9 @@ as_roster_init(void)
 	// CE Code doesn't invoke roster SMD module.
 }
 
-bool
-as_roster_set_nodes_cmd(const char* ns_name, const char* nodes)
+void
+as_roster_set_nodes_cmd(const char* ns_name, const char* nodes, cf_dyn_buf* db)
 {
 	cf_warning(AS_ROSTER, "roster is an enterprise feature");
-	return false;
+	cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 }

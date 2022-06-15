@@ -40,6 +40,7 @@
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
+#include "dynbuf.h"
 #include "log.h"
 #include "vmapx.h"
 
@@ -116,8 +117,9 @@ as_truncate_init(void)
 
 // SMD key is "ns-name|set-name" or "ns-name".
 // SMD value is last-update-time as decimal string.
-bool
-as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
+void
+as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str,
+		cf_dyn_buf* db)
 {
 	char smd_key[TRUNCATE_KEY_SIZE];
 
@@ -163,13 +165,15 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 		if (lut == 0) {
 			cf_warning(AS_TRUNCATE, "command lut %s (%s) would truncate to 0",
 					lut_str, utc_sec);
-			return false;
+			cf_dyn_buf_append_string(db, "ERROR::would-truncate-to-0");
+			return;
 		}
 
 		if (lut > now) {
 			cf_warning(AS_TRUNCATE, "command lut %s (%s) is in the future",
 					lut_str, utc_sec);
-			return false;
+			cf_dyn_buf_append_string(db, "ERROR::would-truncate-in-the-future");
+			return;
 		}
 
 		cf_info(AS_TRUNCATE, "{%s} got command to truncate to %s (%lu)",
@@ -181,12 +185,18 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 	sprintf(smd_value, "%lu", lut);
 
 	// Broadcast the truncate command to all nodes (including this one).
-	return as_smd_set_blocking(AS_SMD_MODULE_TRUNCATE, smd_key, smd_value, 0);
+	if (! as_smd_set_blocking(AS_SMD_MODULE_TRUNCATE, smd_key, smd_value, 0)) {
+		cf_warning(AS_TRUNCATE, "timeout truncating %s to %lu", smd_key, lut);
+		cf_dyn_buf_append_string(db, "ERROR::timeout");
+		return;
+	}
+
+	cf_dyn_buf_append_string(db, "ok");
 }
 
 // SMD key is "ns-name|set-name" or "ns-name".
-bool
-as_truncate_undo_cmd(const char* ns_name, const char* set_name)
+void
+as_truncate_undo_cmd(const char* ns_name, const char* set_name, cf_dyn_buf* db)
 {
 	char smd_key[TRUNCATE_KEY_SIZE];
 
@@ -202,7 +212,13 @@ as_truncate_undo_cmd(const char* ns_name, const char* set_name)
 	cf_info(AS_TRUNCATE, "{%s} got command to undo truncate", smd_key);
 
 	// Broadcast the truncate-undo command to all nodes (including this one).
-	return as_smd_delete_blocking(AS_SMD_MODULE_TRUNCATE, smd_key, 0);
+	if (! as_smd_delete_blocking(AS_SMD_MODULE_TRUNCATE, smd_key, 0)) {
+		cf_warning(AS_INFO, "{%s} timeout during undo truncate", smd_key);
+		cf_dyn_buf_append_string(db, "ERROR::timeout");
+		return;
+	}
+
+	cf_dyn_buf_append_string(db, "ok");
 }
 
 bool

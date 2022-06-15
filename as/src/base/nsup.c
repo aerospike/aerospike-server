@@ -37,6 +37,7 @@
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_thread.h"
+#include "dynbuf.h"
 #include "hardware.h"
 #include "linear_hist.h"
 #include "log.h"
@@ -218,25 +219,30 @@ as_nsup_handle_clock_skew(as_namespace* ns, uint64_t skew_ms)
 	return false;
 }
 
-bool
-as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str)
+void
+as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
+		cf_dyn_buf *db)
 {
 	if (ttl_str == NULL) {
 		cf_info(AS_NSUP, "{%s} got command to delete evict-void-time", ns_name);
 
 		if (! as_smd_delete_blocking(AS_SMD_MODULE_EVICT, ns_name, 0)) {
-			cf_warning(AS_NSUP, "{%s} failed delete evict-void-time", ns_name);
-			return false;
+			cf_warning(AS_NSUP, "{%s} timeout deleting evict-void-time",
+					ns_name);
+			cf_dyn_buf_append_string(db, "ERROR::timeout");
+			return;
 		}
 
-		return true;
+		cf_dyn_buf_append_string(db, "ok");
+		return;
 	}
 
 	uint64_t ttl = strtoul(ttl_str, NULL, 0);
 
 	if (ttl > MAX_ALLOWED_TTL) {
 		cf_warning(AS_NSUP, "{%s} command ttl %lu is too big", ns_name, ttl);
-		return false;
+		cf_dyn_buf_append_string(db, "ERROR::ttl-too-big");
+		return;
 	}
 
 	uint32_t now = as_record_void_time_get();
@@ -250,12 +256,13 @@ as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str)
 	sprintf(value, "%u", evict_void_time);
 
 	if (! as_smd_set_blocking(AS_SMD_MODULE_EVICT, ns_name, value, 0)) {
-		cf_warning(AS_NSUP, "{%s} failed set evict-ttl %lu evict-void-time %u",
+		cf_warning(AS_NSUP, "{%s} timeout setting evict-ttl %lu evict-void-time %u",
 				ns_name, ttl, evict_void_time);
-		return false;
+		cf_dyn_buf_append_string(db, "ERROR::timeout");
+		return;
 	}
 
-	return true;
+	cf_dyn_buf_append_string(db, "ok");
 }
 
 bool
@@ -360,7 +367,7 @@ run_expire_or_evict(void* udata)
 
 					if (! as_smd_delete_blocking(AS_SMD_MODULE_EVICT, ns->name,
 							EVICT_SMD_TIMEOUT)) {
-						cf_warning(AS_NSUP, "{%s} failed delete evict-void-time",
+						cf_warning(AS_NSUP, "{%s} timeout deleting evict-void-time",
 								ns->name);
 					}
 				}
@@ -371,7 +378,7 @@ run_expire_or_evict(void* udata)
 
 				if (! as_smd_set_blocking(AS_SMD_MODULE_EVICT, ns->name, value,
 						EVICT_SMD_TIMEOUT)) {
-					cf_warning(AS_NSUP, "{%s} failed set evict-void-time %u",
+					cf_warning(AS_NSUP, "{%s} timeout setting evict-void-time %u",
 							ns->name, evict_void_time);
 				}
 
