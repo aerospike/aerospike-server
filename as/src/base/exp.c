@@ -209,10 +209,25 @@ static const char* result_type_str[] = {
 		[TYPE_BLOB] = "blob",
 		[TYPE_FLOAT] = "float",
 		[TYPE_GEOJSON] = "geojson",
-		[TYPE_HLL] = "hll",
+		[TYPE_HLL] = "hll"
 };
 
 ARRAY_ASSERT(result_type_str, TYPE_END);
+
+static const exp_op_code result_type_to_op_code[] = {
+		[TYPE_NIL] = VOP_VALUE_NIL,
+		[TYPE_TRILEAN] = VOP_VALUE_TRILEAN,
+		[TYPE_INT] = VOP_VALUE_INT,
+		[TYPE_STR] = VOP_VALUE_STR,
+		[TYPE_LIST] = VOP_VALUE_LIST,
+		[TYPE_MAP] = VOP_VALUE_MAP,
+		[TYPE_BLOB] = VOP_VALUE_BLOB,
+		[TYPE_FLOAT] = VOP_VALUE_FLOAT,
+		[TYPE_GEOJSON] = VOP_VALUE_GEO,
+		[TYPE_HLL] = VOP_VALUE_HLL
+};
+
+ARRAY_ASSERT(result_type_to_op_code, TYPE_END);
 
 typedef struct op_base_mem_s {
 	uint32_t instr_end_ix;
@@ -1159,32 +1174,11 @@ build_next(build_args* args)
 static const op_table_entry*
 build_get_entry(result_type type)
 {
-	switch (type) {
-	case TYPE_NIL:
-		return &op_table[VOP_VALUE_NIL];
-	case TYPE_TRILEAN:
-		return &op_table[VOP_VALUE_TRILEAN];
-	case TYPE_INT:
-		return &op_table[VOP_VALUE_INT];
-	case TYPE_FLOAT:
-		return &op_table[VOP_VALUE_FLOAT];
-	case TYPE_STR:
-		return &op_table[VOP_VALUE_STR];
-	case TYPE_BLOB:
-		return &op_table[VOP_VALUE_BLOB];
-	case TYPE_GEOJSON:
-		return &op_table[VOP_VALUE_GEO];
-	case TYPE_HLL:
-		return &op_table[VOP_VALUE_HLL];
-	case TYPE_MAP:
-		return &op_table[VOP_VALUE_MAP];
-	case TYPE_LIST:
-		return &op_table[VOP_VALUE_LIST];
-	default:
-		break;
+	if ((uint32_t)type >= TYPE_END) {
+		return NULL;
 	}
 
-	return NULL;
+	return &op_table[result_type_to_op_code[type]];
 }
 
 static bool
@@ -2195,6 +2189,9 @@ build_cond(build_args* args)
 				result_type_to_str(type));
 		return false;
 	}
+
+	args->entry = build_get_entry(type);
+	cf_assert(args->entry != NULL, AS_EXP, "unexpected type %d", type);
 
 	return true;
 }
