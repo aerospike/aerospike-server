@@ -1,7 +1,7 @@
 /*
  * gc.c
  *
- * Copyright (C) 2021 Aerospike, Inc.
+ * Copyright (C) 2021-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -41,7 +41,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/stats.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"
 
 #include "warnings.h"
@@ -205,13 +205,12 @@ gc_ns(as_namespace* ns)
 	uint64_t start_ms = cf_getms();
 	uint64_t n_cleaned = ns->n_sindex_gc_cleaned;
 
-	// Avoid using ns->sindex_cnt as it needs a lock (for entire GC cycle).
-	for (uint32_t i = 0; i < AS_SINDEX_MAX; i++) {
+	for (uint32_t i = 0; i < MAX_N_SINDEXES; i++) {
 		SINDEX_GRLOCK();
 
-		as_sindex* si = &ns->sindex[i];
+		as_sindex* si = ns->sindexes[i];
 
-		if (! as_sindex_isactive(si)) {
+		if (si == NULL) {
 			SINDEX_GRUNLOCK();
 			continue;
 		}

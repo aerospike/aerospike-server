@@ -29,8 +29,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-#include "citrusleaf/alloc.h"
+#include <sys/types.h>
 
 #include "cf_mutex.h"
 #include "log.h"
@@ -39,45 +38,15 @@
 
 
 //==========================================================
-// Typedefs & constants.
-//
-
-// TODO - will promote for EE.
-typedef struct si_arena_free_ele_s {
-	uint64_t magic;
-	si_arena_handle next_h;
-} si_arena_free_ele;
-
-#define SI_FREE_MAGIC 0xf7f7fefefefef7f7UL
-
-
-//==========================================================
-// Forward declarations.
-//
-
-// TODO - will split for EE.
-void si_arena_add_stage(as_sindex_arena* arena);
-
-
-//==========================================================
-// Inlines & macros.
-//
-
-// TODO - will promote for EE.
-static inline void
-si_arena_set_handle(si_arena_handle* h, uint32_t stage_id, uint32_t ele_id)
-{
-	*h = (stage_id << SI_ELE_ID_N_BITS) | ele_id;
-}
-
-
-//==========================================================
 // Public API.
 //
 
 void
-as_sindex_arena_init(as_sindex_arena* arena, uint32_t ele_sz, size_t stage_sz)
+as_sindex_arena_init(as_sindex_arena* arena, key_t key_base, uint32_t ele_sz,
+		size_t stage_sz)
 {
+	arena->key_base = key_base;
+
 	arena->ele_sz = ele_sz;
 	arena->stage_capacity = (uint32_t)(stage_sz / ele_sz);
 	arena->stage_sz = stage_sz;
@@ -85,7 +54,7 @@ as_sindex_arena_init(as_sindex_arena* arena, uint32_t ele_sz, size_t stage_sz)
 	arena->free_h = 0;
 	arena->n_used_eles = 0;
 
-	// Skip 0:0 so null handle is never used. TODO - bother?
+	// Skip 0:0 so null handle is never used. Not necessary but seems nice.
 	arena->at_stage_id = 0;
 	arena->at_ele_id = 1;
 
@@ -116,7 +85,7 @@ as_sindex_arena_alloc(as_sindex_arena* arena)
 		if (arena->n_stages == 0) {
 			si_arena_add_stage(arena);
 
-			// Clear the null element. TODO - bother?
+			// Clear the null element. Not necessary but seems nice.
 			memset(as_sindex_arena_resolve(arena, 0), 0, arena->ele_sz);
 		}
 
@@ -149,26 +118,11 @@ as_sindex_arena_free(as_sindex_arena* arena, si_arena_handle h)
 	free_ele->next_h = arena->free_h;
 	arena->free_h = h;
 
-	arena->n_used_eles--;
+	if (--arena->n_used_eles == 0) {
+		cf_info(AS_SINDEX, "removing %u empty arena stage(s)", arena->n_stages);
+
+		si_arena_reset(arena);
+	}
 
 	cf_mutex_unlock(&arena->lock);
 }
-
-
-//==========================================================
-// Local helpers.
-//
-
-// TODO - assumes we can't fail - ok?
-void
-si_arena_add_stage(as_sindex_arena* arena)
-{
-	if (arena->n_stages >= SI_ARENA_MAX_STAGES) {
-		cf_crash(AS_SINDEX, "can't allocate more than %u arena stages",
-				SI_ARENA_MAX_STAGES);
-	}
-
-	arena->stages[arena->n_stages++] = cf_malloc(arena->stage_sz);
-}
-
-

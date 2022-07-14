@@ -537,7 +537,7 @@ udf_cask_smd_get_all_cb(const cf_vector* items, void* udata)
 	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
 		as_smd_item* item = cf_vector_get_ptr(items, i);
 
-		if (item->value == NULL) { // TODO - do we get SMD tombstones here?
+		if (item->value == NULL) {
 			continue;
 		}
 

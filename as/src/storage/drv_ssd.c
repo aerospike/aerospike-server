@@ -66,7 +66,7 @@
 #include "base/set_index.h"
 #include "base/truncate.h"
 #include "fabric/partition.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/drv_common.h"
 #include "storage/flat.h"
 #include "storage/storage.h"

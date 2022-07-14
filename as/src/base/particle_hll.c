@@ -1,7 +1,7 @@
 /*
  * particle_hll.c
  *
- * Copyright (C) 2020 Aerospike, Inc.
+ * Copyright (C) 2020-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -855,7 +855,7 @@ hll_parse_elements(hll_state* state, hll_op* op)
 			}
 
 			// Un-const e->buf to compactify.
-			e->sz = msgpack_compactify((uint8_t*)e->buf, e->sz);
+			e->sz = msgpack_compactify((uint8_t*)e->buf, e->sz, NULL);
 
 			if (e->sz == 0) {
 				cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) unable to normalize element (%u)",

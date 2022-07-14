@@ -43,6 +43,7 @@
 #include "base/index.h"
 #include "base/thr_info.h"
 #include "fabric/partition.h"
+#include "sindex/sindex.h"
 
 
 //==========================================================
@@ -271,6 +272,8 @@ as_storage_shutdown(uint32_t instance)
 		}
 
 		cf_info(AS_STORAGE, "{%s} partitions shut down", ns->name);
+
+		as_sindex_shutdown(ns);
 
 		// Now flush everything outstanding to storage devices.
 		as_storage_shutdown_table[ns->storage_type](ns);

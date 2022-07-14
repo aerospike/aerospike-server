@@ -52,10 +52,12 @@
 #include "dynbuf.h"
 #include "hist.h"
 #include "log.h"
+#include "msgpack_in.h"
 #include "socket.h"
 #include "vector.h"
 
 #include "base/aggr.h"
+#include "base/cdt.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
@@ -72,13 +74,13 @@
 #include "geospatial/geospatial.h"
 #include "query/query_job.h"
 #include "query/query_manager.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
 
-#include "warnings.h"
+//#include "warnings.h"
 
 
 //==============================================================================
@@ -133,10 +135,9 @@ static bool get_query_socket_timeout(const as_transaction* tr, int32_t* timeout)
 static bool get_query_sample_max(const as_transaction* tr, uint64_t* sample_max);
 static bool get_query_filter_exp(const as_transaction* tr, as_exp** exp);
 
-static bool extract_bin_from_path(const char* path_str, size_t path_str_len, char* bin);
-static bool range_from_msg_integer(const uint8_t* data, as_query_range* range);
-static bool range_from_msg_string(const uint8_t* data, as_query_range* range);
-static bool range_from_msg_geojson(as_namespace* ns, const uint8_t* data, as_query_range* range);
+static bool range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len);
+static bool range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len);
+static bool range_from_msg_geojson(as_namespace* ns, const uint8_t* data, as_query_range* range, uint32_t len);
 static void sort_geo_range(as_query_geo_range* geo);
 
 static bool find_sindex(as_query_job* _job);
@@ -146,17 +147,26 @@ static size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, s
 
 static bool record_matches_query(as_query_job* _job, as_storage_rd* rd);
 static bool record_matches_query_cdt(as_query_job* _job, const as_bin* b);
-static bool query_match_integer_fromval(const as_query_job* _job, const as_val* v);
-static bool query_match_string_fromval(const as_query_job* _job, const as_val* v);
-static bool query_match_geojson_fromval(const as_query_job* _job, const as_val* v);
-static bool query_match_mapkeys_foreach(const as_val* key, const as_val* val, void* udata);
-static bool query_match_mapvalues_foreach(const as_val* key, const as_val* val, void* udata);
-static bool query_match_listele_foreach(as_val* val, void* udata);
+static bool match_mapkeys_foreach(msgpack_in* key, msgpack_in* val, void* udata);
+static bool match_mapvalues_foreach(msgpack_in* key, msgpack_in* val, void* udata);
+static bool match_listeles_foreach(msgpack_in* element, void* udata);
+static bool match_integer_element(const as_query_job* _job, msgpack_in* element);
+static bool match_string_element(const as_query_job* _job, msgpack_in* element);
+static bool match_geojson_element(const as_query_job* _job, msgpack_in* element);
 
 
 //==========================================================
 // Inlines & macros.
 //
+
+static inline bool
+strings_match(const as_query_range* range, const char* str, size_t len)
+{
+	return range->str_len == len &&
+			range->u.r.start == as_sindex_string_to_bval(str, len) &&
+			memcmp(range->str_stub, str, len < sizeof(range->str_stub) ?
+					len : sizeof(range->str_stub)) == 0;
+}
 
 static inline const char*
 query_type_str(query_type type)
@@ -272,6 +282,11 @@ get_query_type(const as_transaction* tr)
 
 	const as_msg_field* udf_op_f = as_transaction_has_udf_op(tr) ?
 			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_UDF_OP) : NULL;
+
+	if (as_msg_field_get_value_sz(udf_op_f) != sizeof(uint8_t)) {
+		cf_warning(AS_QUERY, "cannot parse udf op");
+		return QUERY_TYPE_UNKNOWN;
+	}
 
 	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_AGGREGATE) {
 		return QUERY_TYPE_AGGR;
@@ -444,6 +459,15 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_INDEX_RANGE);
 	const uint8_t* data = f->data;
+	uint32_t len = as_msg_field_get_value_sz(f);
+
+	if (len == 0) {
+		cf_warning(AS_QUERY, "cannot parse index range");
+		return false;
+	}
+
+	len--;
+
 	uint8_t n_range = *data++;
 
 	if (n_range != 1) {
@@ -454,25 +478,37 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 	as_query_range* range = cf_calloc(1, sizeof(as_query_range));
 	*range_r = range; // link it to the job so that as_job_destroy will clean it
 
-	size_t bin_path_len = *data++;
-
-	memcpy(range->bin_path, data, bin_path_len);
-	range->bin_path[bin_path_len] = '\0';
-
-	char binname[AS_BIN_NAME_MAX_SZ];
-
-	if (! extract_bin_from_path(range->bin_path, bin_path_len, binname)) {
-		cf_warning(AS_QUERY, "failed to extract bin name from bin path %s",
-				range->bin_path);
+	if (len == 0) {
+		cf_warning(AS_QUERY, "cannot parse bin name");
 		return false;
 	}
 
-	if (! as_bin_get_id(ns, binname, &range->bin_id)) {
-		cf_warning(AS_QUERY, "bin %s not found", binname);
+	len--;
+
+	uint8_t bin_name_len = *data++;
+
+	if (bin_name_len == 0 || bin_name_len >= AS_BIN_NAME_MAX_SZ) {
+		cf_warning(AS_QUERY, "bin name either 0 or too large %u",
+				bin_name_len);
 		return false;
 	}
 
-	data += bin_path_len;
+	if (len < bin_name_len) {
+		cf_warning(AS_QUERY, "cannot parse bin name");
+		return false;
+	}
+
+	memcpy(range->bin_name, data, bin_name_len); // null-terminated via calloc
+
+	len -= bin_name_len;
+	data += bin_name_len;
+
+	if (len == 0) {
+		cf_warning(AS_QUERY, "cannot parse particle-type");
+		return false;
+	}
+
+	len--;
 
 	as_particle_type type = *data++;
 
@@ -482,13 +518,13 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 
 	switch (type) {
 	case AS_PARTICLE_TYPE_INTEGER:
-		success = range_from_msg_integer(data, range);
+		success = range_from_msg_integer(data, range, len);
 		break;
 	case AS_PARTICLE_TYPE_STRING:
-		success = range_from_msg_string(data, range);
+		success = range_from_msg_string(data, range, len);
 		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
-		success = range_from_msg_geojson(ns, data, range);
+		success = range_from_msg_geojson(ns, data, range, len);
 		break;
 	default:
 		cf_warning(AS_QUERY, "invalid type");
@@ -500,9 +536,64 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 	}
 
 	f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_TYPE);
+
+	if (f != NULL && as_msg_field_get_value_sz(f) == 0) {
+		cf_warning(AS_QUERY, "cannot parse itype");
+		return false;
+	}
+
 	range->itype = (f == NULL) ? AS_SINDEX_ITYPE_DEFAULT : *f->data;
 
 	range->de_dup = range->isrange && range->itype != AS_SINDEX_ITYPE_DEFAULT;
+
+	f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_CONTEXT);
+
+	if (f != NULL) {
+		if (as_msg_field_get_value_sz(f) == 0) {
+			cf_warning(AS_QUERY, "cannot parse index context");
+			return false;
+		}
+
+		range->ctx_buf_sz = as_msg_field_get_value_sz(f);
+
+		if (range->ctx_buf_sz == 0) {
+			cf_warning(AS_QUERY, "invalid index context");
+			return false;
+		}
+
+		range->ctx_buf = cf_malloc(range->ctx_buf_sz);
+		memcpy(range->ctx_buf, f->data, range->ctx_buf_sz);
+
+		bool was_modified;
+
+		range->ctx_buf_sz = msgpack_compactify(range->ctx_buf,
+				range->ctx_buf_sz, &was_modified);
+
+		if (range->ctx_buf_sz == 0) {
+			cf_warning(AS_QUERY, "invalid index context - could not compactify");
+			return false;
+		}
+
+		if (was_modified) {
+			cf_warning(AS_QUERY, "invalid index context - msgpack not normalized");
+			return false;
+		}
+
+		msgpack_vec vecs[1];
+		msgpack_in_vec mv = {
+				.n_vecs = 1,
+				.vecs = vecs
+		};
+
+		vecs[0].buf = range->ctx_buf;
+		vecs[0].buf_sz = range->ctx_buf_sz;
+		vecs[0].offset = 0;
+
+		if (! cdt_context_read_check_peek(&mv)) {
+			cf_warning(AS_QUERY, "invalid index context");
+			return false;
+		}
+	}
 
 	return true;
 }
@@ -522,8 +613,9 @@ get_query_rps(const as_transaction* tr, uint32_t* rps)
 	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_RECS_PER_SEC);
 
-	if (as_msg_field_get_value_sz(f) != 4) {
-		cf_warning(AS_QUERY, "query recs-per-sec field size not 4");
+	if (as_msg_field_get_value_sz(f) != sizeof(uint32_t)) {
+		cf_warning(AS_QUERY, "query recs-per-sec field size not %lu",
+				sizeof(uint32_t));
 		return false;
 	}
 
@@ -542,8 +634,9 @@ get_query_socket_timeout(const as_transaction* tr, int32_t* timeout)
 	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT);
 
-	if (as_msg_field_get_value_sz(f) != 4) {
-		cf_warning(AS_QUERY, "query socket timeout field size not 4");
+	if (as_msg_field_get_value_sz(f) != sizeof(uint32_t)) {
+		cf_warning(AS_QUERY, "query socket timeout field size not %lu",
+				sizeof(uint32_t));
 		return false;
 	}
 
@@ -564,8 +657,9 @@ get_query_sample_max(const as_transaction* tr, uint64_t* sample_max)
 	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_SAMPLE_MAX);
 
-	if (as_msg_field_get_value_sz(f) != 8) {
-		cf_warning(AS_QUERY, "query sample-max field size not 8");
+	if (as_msg_field_get_value_sz(f) != sizeof(uint64_t)) {
+		cf_warning(AS_QUERY, "query sample-max field size not %lu",
+				sizeof(uint64_t));
 		return false;
 	}
 
@@ -590,33 +684,13 @@ get_query_filter_exp(const as_transaction* tr, as_exp** exp)
 }
 
 static bool
-extract_bin_from_path(const char* path_str, size_t path_str_len, char* bin)
+range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len)
 {
-	if (path_str_len > AS_SINDEX_MAX_PATH_LENGTH) {
-		cf_warning(AS_QUERY, "bin path length exceeds the maximum allowed");
+	if (len < (sizeof(uint32_t) * 2) + (sizeof(uint64_t) * 2)) {
+		cf_warning(AS_QUERY, "cannot parse integer range");
 		return false;
 	}
 
-	uint32_t end = 0;
-
-	while (end < path_str_len && path_str[end] != '.' && path_str[end] != '['
-			&& path_str[end] != ']') {
-		end++;
-	}
-
-	if (end > 0 && end < AS_BIN_NAME_MAX_SZ) {
-		memcpy(bin, path_str, end);
-		bin[end] = '\0';
-		return true;
-	}
-
-	cf_warning(AS_QUERY, "bin name too long");
-	return false;
-}
-
-static bool
-range_from_msg_integer(const uint8_t* data, as_query_range* range)
-{
 	uint32_t startl = ntohl(*((uint32_t*)data));
 
 	if (startl != 8) {
@@ -655,87 +729,128 @@ range_from_msg_integer(const uint8_t* data, as_query_range* range)
 }
 
 static bool
-range_from_msg_string(const uint8_t* data, as_query_range* range)
+range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 {
-	uint32_t startl = ntohl(*((uint32_t*)data));
-
-	if (startl >= AS_SINDEX_MAX_STRING_KSIZE) {
-		cf_warning(AS_QUERY, "Value length %u too long", startl);
+	if (len < sizeof(uint32_t)) {
+		cf_warning(AS_QUERY, "cannot parse string range");
 		return false;
 	}
 
+	uint32_t startl = ntohl(*((uint32_t*)data));
+
+	if (startl >= MAX_STRING_KSIZE) {
+		cf_warning(AS_QUERY, "value length %u too long", startl);
+		return false;
+	}
+
+	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
 
 	const char* start_binval = (const char*)data;
 
+	if (len < startl) {
+		cf_warning(AS_QUERY, "cannot parse string range");
+		return false;
+	}
+
+	len -= startl;
 	data += startl;
+
+	if (len < sizeof(uint32_t)) {
+		cf_warning(AS_QUERY, "cannot parse string range");
+		return false;
+	}
 
 	uint32_t endl = ntohl(*((uint32_t*)data));
 
+	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
 
 	const char* end_binval = (const char*)data;
 
+	if (len < endl) {
+		cf_warning(AS_QUERY, "cannot parse string range");
+		return false;
+	}
+
 	if (startl != endl || (memcmp(start_binval, end_binval, startl) != 0)) {
-		cf_warning(AS_QUERY, "Only Equality Query Supported in Strings %s-%s",
+		cf_warning(AS_QUERY, "only equality query supported in strings %s-%s",
 				start_binval, end_binval);
 		return false;
 	}
 
 	range->u.r.start = as_sindex_string_to_bval(start_binval, startl);
 	range->u.r.end = range->u.r.start;
+
+	range->str_len = startl;
+	memcpy(range->str_stub, start_binval, startl < sizeof(range->str_stub) ?
+			startl : sizeof(range->str_stub));
+
 	range->isrange = false;
 
-	cf_debug(AS_QUERY, "Range is equal %s, %s", start_binval, end_binval);
+	cf_debug(AS_QUERY, "range is equal %s, %s", start_binval, end_binval);
 
 	return true;
 }
 
 static bool
 range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
-		as_query_range* range)
+		as_query_range* range, uint32_t len)
 {
-	uint32_t startl = ntohl(*((uint32_t*)data));
-
-	if ((startl == 0) || (startl >= AS_SINDEX_MAX_GEOJSON_KSIZE)) {
-		cf_warning(AS_QUERY, "Invalid query key size %u", startl);
+	if (len < sizeof(uint32_t)) {
+		cf_warning(AS_QUERY, "cannot parse geojson range");
 		return false;
 	}
 
+	uint32_t startl = ntohl(*((uint32_t*)data));
+
+	if ((startl == 0) || (startl >= MAX_GEOJSON_KSIZE)) {
+		cf_warning(AS_QUERY, "invalid query key size %u", startl);
+		return false;
+	}
+
+	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
+
+	if (len < startl) {
+		cf_warning(AS_QUERY, "cannot parse geojson range");
+		return false;
+	}
 
 	const char* start_binval = (const char*)data;
 
+	len -= startl;
 	data += startl;
+
+	if (len < sizeof(uint32_t)) {
+		cf_warning(AS_QUERY, "cannot parse geojson range");
+		return false;
+	}
 
 	uint32_t endl = ntohl(*((uint32_t*)data));
 
+	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
+
+	if (len < endl) {
+		cf_warning(AS_QUERY, "cannot parse geojson range");
+		return false;
+	}
 
 	const char* end_binval = (const char*)data;
 
 	// TODO: same JSON content may not be byte-identical.
 	if (startl != endl || (memcmp(start_binval, end_binval, startl) != 0)) {
-		cf_warning(AS_QUERY, "only Geospatial Query Supported on GeoJSON %s-%s",
+		cf_warning(AS_QUERY, "only geospatial query supported on geojson %s-%s",
 				start_binval, end_binval);
 		return false;
 	}
 
 	as_query_geo_range* geo = &range->u.geo;
 
-	if (! geo_parse(ns, start_binval, startl, &geo->cellid, &geo->region)) {
-		// geo_parse will have printed a warning.
-		return false;
-	}
-
-	if (geo->cellid != 0 && geo->region != NULL) {
-		geo_region_destroy(geo->region);
-		cf_warning(AS_GEO, "query geo_parse: both point and region not allowed");
-		return false;
-	}
-
-	if (geo->cellid == 0 && geo->region == NULL) {
-		cf_warning(AS_GEO, "query geo_parse: neither point nor region present");
+	if (! as_geojson_parse(ns, start_binval, startl, &geo->cellid,
+			&geo->region)) {
+		// as_geojson_parse will have printed a warning.
 		return false;
 	}
 
@@ -833,17 +948,20 @@ find_sindex(as_query_job* _job)
 		return true;
 	}
 
-	// Look up sindex by bin in the query in case not specified in query.
-	_job->si = as_sindex_lookup_by_defn(_job->ns, _job->set_name, range->bin_id,
-			as_sindex_sktype_from_pktype(range->bin_type), range->itype,
-			range->bin_path, 0);
+	if (! as_bin_get_id(_job->ns, range->bin_name, &range->bin_id)) {
+		cf_warning(AS_QUERY, "bin %s not found", range->bin_name);
+		return false;
+	}
+
+	_job->si = as_sindex_lookup_by_defn(_job->ns, _job->set_id, range->bin_id,
+			range->bin_type, range->itype, range->ctx_buf, range->ctx_buf_sz);
 
 	if (_job->si == NULL) {
 		return false;
 	}
 
 	if (! _job->is_short) {
-		strcpy(_job->si_name, _job->si->imd->iname);
+		strcpy(_job->si_name, _job->si->iname);
 	}
 
 	return true;
@@ -902,10 +1020,8 @@ static bool
 record_matches_query(as_query_job* _job, as_storage_rd* rd)
 {
 	if (! record_changed_since_start(_job, rd->r) &&
-			// Geo needs to check bounds anyway.
-			_job->si->imd->sktype != COL_TYPE_GEOJSON &&
-			// Strings need to check for hash collisions.
-			_job->si->imd->sktype != COL_TYPE_DIGEST) {
+			_job->si->ktype != AS_PARTICLE_TYPE_GEOJSON && // geo needs to check bounds anyway
+			_job->si->ktype != AS_PARTICLE_TYPE_STRING) { // strings need to check for hash collisions
 		return true;
 	}
 
@@ -916,39 +1032,63 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 	}
 
 	const as_query_range* range = _job->range;
-	const as_sindex_metadata* imd = _job->si->imd;
+	const as_sindex* si = _job->si;
 
-	as_bin* b = as_bin_get_by_id_live(rd, imd->binid);
+	const as_bin* b = as_bin_get_by_id_live(rd, si->bin_id);
 
 	if (b == NULL) {
 		return false;
 	}
 
 	as_particle_type type = as_bin_get_particle_type(b);
+	as_bin ctx_bin = { 0 };
+
+	if (range->ctx_buf != NULL) {
+		if (type != AS_PARTICLE_TYPE_LIST && type != AS_PARTICLE_TYPE_MAP) {
+			return false;
+		}
+
+		if (! as_bin_cdt_get_by_context(b, si->ctx_buf, si->ctx_buf_sz,
+				&ctx_bin, false)) {
+			return false;
+		}
+
+		type = as_bin_get_particle_type(&ctx_bin);
+
+		if (type == AS_PARTICLE_TYPE_GEOJSON &&
+				! as_bin_cdt_context_geojson_parse(&ctx_bin)) {
+			return false;
+		}
+
+		b = &ctx_bin;
+	}
+
+	bool ret = false;
 
 	switch (type) {
 		case AS_PARTICLE_TYPE_INTEGER:
-			if ((type != as_sindex_pktype(imd)) || (type != range->bin_type)) {
-				return false;
+			if ((type != si->ktype) || (type != range->bin_type)) {
+				break;
 			}
 
 			int64_t i = as_bin_particle_integer_value(b);
 
 			// Start and end are same for point query.
-			return range->u.r.start <= i && i <= range->u.r.end;
+			ret = range->u.r.start <= i && i <= range->u.r.end;
+			break;
 		case AS_PARTICLE_TYPE_STRING:
-			if ((type != as_sindex_pktype(imd)) || (type != range->bin_type)) {
-				return false;
+			if ((type != si->ktype) || (type != range->bin_type)) {
+				break;
 			}
 
-			char* buf;
-			uint32_t psz = as_bin_particle_string_ptr(b, &buf);
+			char* str;
+			uint32_t len = as_bin_particle_string_ptr(b, &str);
 
-			// Always a point query.
-			return range->u.r.start == as_sindex_string_to_bval(buf, psz);
+			ret = strings_match(range, str, len);
+			break;
 		case AS_PARTICLE_TYPE_GEOJSON:
-			if ((type != as_sindex_pktype(imd)) || (type != range->bin_type)) {
-				return false;
+			if ((type != si->ktype) || (type != range->bin_type)) {
+				break;
 			}
 
 			as_namespace* ns = _job->ns;
@@ -964,182 +1104,170 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 				cf_atomic64_incr(&ns->geo_region_query_falsepos);
 			}
 
-			return iswithin;
+			ret = iswithin;
+			break;
 		case AS_PARTICLE_TYPE_MAP:
 		case AS_PARTICLE_TYPE_LIST:
 			// For CDT bins, we need to see if any value within the CDT matches
 			// the query. This can be performance hit for big lists and maps.
-			return record_matches_query_cdt(_job, b);
+			ret = record_matches_query_cdt(_job, b);
+			break;
 		default:
-			return false;
+			break;
 	}
+
+	if (range->ctx_buf != NULL) {
+		as_bin_particle_destroy(&ctx_bin);
+	}
+
+	return ret;
 }
 
 static bool
 record_matches_query_cdt(as_query_job* _job, const as_bin* b)
 {
-	const as_sindex_metadata* imd = _job->si->imd;
-	as_val* bin_val = as_bin_particle_to_asval(b);
-	as_val* val = as_sindex_extract_val_from_path(imd, bin_val);
-
-	if (val == NULL) {
-		as_val_destroy(bin_val);
-		return false;
-	}
-
+	const as_sindex* si = _job->si;
 	bool match = false;
+	as_particle_type type = as_bin_get_particle_type(b);
 
-	if (val->type == AS_INTEGER) {
-		if (imd->itype == AS_SINDEX_ITYPE_DEFAULT) {
-			match = query_match_integer_fromval(_job, val);
+	if (type == AS_PARTICLE_TYPE_MAP) {
+		if (si->itype == AS_SINDEX_ITYPE_MAPKEYS) {
+			match = ! as_bin_map_foreach(b, match_mapkeys_foreach, _job);
+		}
+		else if (si->itype == AS_SINDEX_ITYPE_MAPVALUES) {
+			match = ! as_bin_map_foreach(b, match_mapvalues_foreach, _job);
 		}
 	}
-	else if (val->type == AS_STRING) {
-		if (imd->itype == AS_SINDEX_ITYPE_DEFAULT) {
-			match = query_match_string_fromval(_job, val);
+	else if (type == AS_PARTICLE_TYPE_LIST) {
+		if (si->itype == AS_SINDEX_ITYPE_LIST) {
+			match = ! as_bin_list_foreach(b, match_listeles_foreach, _job);
 		}
 	}
-	else if (val->type == AS_MAP) {
-		if (imd->itype == AS_SINDEX_ITYPE_MAPKEYS) {
-			const as_map* map = as_map_fromval(val);
-			match = ! as_map_foreach(map, query_match_mapkeys_foreach, _job);
-		}
-		else if (imd->itype == AS_SINDEX_ITYPE_MAPVALUES) {
-			const as_map* map = as_map_fromval(val);
-			match = ! as_map_foreach(map, query_match_mapvalues_foreach, _job);
-		}
-	}
-	else if (val->type == AS_LIST) {
-		if (imd->itype == AS_SINDEX_ITYPE_LIST) {
-			const as_list* list = as_list_fromval(val);
-			match = ! as_list_foreach(list, query_match_listele_foreach, _job);
-		}
-	}
-
-	as_val_val_destroy(bin_val);
 
 	return match;
 }
 
+// Stop iterating if a match is found (by returning false).
 static bool
-query_match_integer_fromval(const as_query_job* _job, const as_val* v)
+match_mapkeys_foreach(msgpack_in* key, msgpack_in* val, void* udata)
+{
+	(void)val;
+
+	const as_query_job* _job = (as_query_job*)udata;
+	msgpack_type type = msgpack_peek_type(key);
+
+	switch (type) {
+	case MSGPACK_TYPE_NEGINT:
+	case MSGPACK_TYPE_INT:
+		return ! match_integer_element(_job, key);
+	case MSGPACK_TYPE_STRING:
+		return ! match_string_element(_job, key);
+	case MSGPACK_TYPE_GEOJSON:
+		return ! match_geojson_element(_job, key);
+	default:
+		return true; // true means didn't match
+	}
+}
+
+// Stop iterating if a match is found (by returning false).
+static bool
+match_mapvalues_foreach(msgpack_in* key, msgpack_in* val, void* udata)
+{
+	(void)key;
+
+	const as_query_job* _job = (as_query_job*)udata;
+	msgpack_type type = msgpack_peek_type(val);
+
+	switch (type) {
+	case MSGPACK_TYPE_NEGINT:
+	case MSGPACK_TYPE_INT:
+		return ! match_integer_element(_job, val);
+	case MSGPACK_TYPE_STRING:
+		return ! match_string_element(_job, val);
+	case MSGPACK_TYPE_GEOJSON:
+		return ! match_geojson_element(_job, val);
+	default:
+		return true; // true means didn't match
+	}
+}
+
+// Stop iterating if a match is found (by returning false).
+static bool
+match_listeles_foreach(msgpack_in* element, void* udata)
+{
+	const as_query_job* _job = (as_query_job*)udata;
+	msgpack_type type = msgpack_peek_type(element);
+
+	switch (type) {
+	case MSGPACK_TYPE_NEGINT:
+	case MSGPACK_TYPE_INT:
+		return ! match_integer_element(_job, element);
+	case MSGPACK_TYPE_STRING:
+		return ! match_string_element(_job, element);
+	case MSGPACK_TYPE_GEOJSON:
+		return ! match_geojson_element(_job, element);
+	default:
+		return true; // true means didn't match
+	}
+}
+
+static bool
+match_integer_element(const as_query_job* _job, msgpack_in* element)
 {
 	const as_query_range* range = _job->range;
-	const as_sindex_metadata* imd = _job->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_INTEGER) ||
+	if ((_job->si->ktype != AS_PARTICLE_TYPE_INTEGER) ||
 			(range->bin_type != AS_PARTICLE_TYPE_INTEGER)) {
 		return false;
 	}
 
-	int64_t i = as_integer_get(as_integer_fromval(v));
+	int64_t i;
+
+	if (! msgpack_get_int64(element, &i)) {
+		return false;
+	}
 
 	// Start and end are same for point query.
 	return range->u.r.start <= i && i <= range->u.r.end;
 }
 
 static bool
-query_match_string_fromval(const as_query_job* _job, const as_val* v)
+match_string_element(const as_query_job* _job, msgpack_in* element)
 {
 	const as_query_range* range = _job->range;
-	const as_sindex_metadata* imd = _job->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_STRING) ||
+	if ((_job->si->ktype != AS_PARTICLE_TYPE_STRING) ||
 			(range->bin_type != AS_PARTICLE_TYPE_STRING)) {
 		return false;
 	}
 
-	as_string* s = as_string_fromval(v);
+	uint32_t str_sz;
+	const uint8_t* str = msgpack_get_bin(element, &str_sz);
 
-	return range->u.r.start ==
-			as_sindex_string_to_bval(as_string_get(s), as_string_len(s));
+	if (str == NULL || str_sz == 0 || *str != AS_PARTICLE_TYPE_STRING) {
+		return false;
+	}
+
+	// Skip as_bytes type.
+	str++;
+	str_sz--;
+
+	return strings_match(range, (const char*)str, str_sz);
 }
 
 static bool
-query_match_geojson_fromval(const as_query_job* _job, const as_val* v)
+match_geojson_element(const as_query_job* _job, msgpack_in* element)
 {
 	const as_query_range* range = _job->range;
-	const as_sindex_metadata* imd = _job->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_GEOJSON) ||
+	if ((_job->si->ktype != AS_PARTICLE_TYPE_GEOJSON) ||
 			(range->bin_type != AS_PARTICLE_TYPE_GEOJSON)) {
 		return false;
 	}
 
-	return as_particle_geojson_match_asval(v, range->u.geo.cellid,
+	return as_particle_geojson_match_msgpack(element, range->u.geo.cellid,
 			range->u.geo.region, _job->ns->geo2dsphere_within_strict);
 }
-
-// Stop iterating if a match is found (by returning false).
-static bool
-query_match_mapkeys_foreach(const as_val* key, const as_val* val, void* udata)
-{
-	(void)val;
-
-	const as_query_job* _job = (as_query_job*)udata;
-
-	switch (key->type) {
-	case AS_STRING:
-		// If matches return false
-		return ! query_match_string_fromval(_job, (as_val*)key);
-	case AS_INTEGER:
-		// If matches return false
-		return ! query_match_integer_fromval(_job, (as_val*)key);
-	case AS_GEOJSON:
-		// If matches return false
-		return ! query_match_geojson_fromval(_job, (as_val*)key);
-	default:
-		// All others don't match
-		return true;
-	}
-}
-
-// Stop iterating if a match is found (by returning false).
-static bool
-query_match_mapvalues_foreach(const as_val* key, const as_val* val, void* udata)
-{
-	(void)key;
-
-	const as_query_job* _job = (as_query_job*)udata;
-
-	switch (val->type) {
-	case AS_STRING:
-		// If matches return false
-		return ! query_match_string_fromval(_job, (as_val*)val);
-	case AS_INTEGER:
-		// If matches return false
-		return ! query_match_integer_fromval(_job, (as_val*)val);
-	case AS_GEOJSON:
-		// If matches return false
-		return ! query_match_geojson_fromval(_job, (as_val*)val);
-	default:
-		// All others don't match
-		return true;
-	}
-}
-
-// Stop iterating if a match is found (by returning false).
-static bool
-query_match_listele_foreach(as_val* val, void* udata)
-{
-	const as_query_job* _job = (as_query_job*)udata;
-
-	switch (val->type) {
-	case AS_STRING:
-		// If matches return false
-		return ! query_match_string_fromval(_job, val);
-	case AS_INTEGER:
-		// If matches return false
-		return ! query_match_integer_fromval(_job, val);
-	case AS_GEOJSON:
-		// If matches return false
-		return ! query_match_geojson_fromval(_job, val);
-	default:
-		// All others don't match
-		return true;
-	}
-}
-
 
 
 //==============================================================================
@@ -1370,7 +1498,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_SINDEX_NOT_FOUND;
 	}
 
-	if (_job->si != NULL && ! as_sindex_can_query(_job->si)) {
+	if (_job->si != NULL && ! _job->si->readable) {
 		as_query_job_destroy(_job);
 		return AS_ERR_SINDEX_NOT_READABLE;
 	}
@@ -1732,7 +1860,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 
 	as_index* r = r_ref->r;
 
-	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
+	if (excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
 		return true;
 	}
@@ -1963,7 +2091,7 @@ aggr_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_SINDEX_NOT_FOUND;
 	}
 
-	if (_job->si != NULL && ! as_sindex_can_query(_job->si)) {
+	if (_job->si != NULL && ! _job->si->readable) {
 		as_query_job_destroy(_job);
 		return AS_ERR_SINDEX_NOT_READABLE;
 	}
@@ -2398,7 +2526,7 @@ udf_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_SINDEX_NOT_FOUND;
 	}
 
-	if (_job->si != NULL && ! as_sindex_can_query(_job->si)) {
+	if (_job->si != NULL && ! _job->si->readable) {
 		as_query_job_destroy(_job);
 		return AS_ERR_SINDEX_NOT_READABLE;
 	}
@@ -2730,7 +2858,7 @@ ops_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_SINDEX_NOT_FOUND;
 	}
 
-	if (_job->si != NULL && ! as_sindex_can_query(_job->si)) {
+	if (_job->si != NULL && ! _job->si->readable) {
 		as_query_job_destroy(_job);
 		return AS_ERR_SINDEX_NOT_READABLE;
 	}

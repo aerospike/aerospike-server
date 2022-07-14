@@ -1,5 +1,5 @@
 /*
- * sindex_tree_ce.c
+ * sindex_arena_ce.c
  *
  * Copyright (C) 2022 Aerospike, Inc.
  *
@@ -24,39 +24,44 @@
 // Includes.
 //
 
-#include "sindex/sindex_tree.h"
+#include "sindex/sindex_arena.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-
-#include "citrusleaf/cf_digest.h"
+#include "citrusleaf/alloc.h"
 
 #include "log.h"
 
-#include "base/datamodel.h"
-#include "fabric/partition.h"
-#include "sindex/sindex.h"
-
-
-//==========================================================
-// Public API.
-//
-
-void
-as_sindex_tree_resume(as_sindex* si)
-{
-	cf_crash(AS_SINDEX, "CE code called as_sindex_tree_resume()");
-}
+#include "warnings.h"
 
 
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
+// TODO - assumes we can't fail - ok?
 void
-query_reduce_no_rc(si_btree* bt, as_partition_reservation* rsv,
-		int64_t start_bval, int64_t end_bval, int64_t resume_bval,
-		cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata)
+si_arena_add_stage(as_sindex_arena* arena)
 {
-	cf_crash(AS_SINDEX, "CE code called query_reduce_no_rc()");
+	if (arena->n_stages >= SI_ARENA_MAX_STAGES) {
+		cf_crash(AS_SINDEX, "can't allocate more than %u arena stages",
+				SI_ARENA_MAX_STAGES);
+	}
+
+	arena->stages[arena->n_stages++] = cf_malloc(arena->stage_sz);
+}
+
+void
+si_arena_reset(as_sindex_arena* arena)
+{
+	for (uint32_t i = 0; i < arena->n_stages; i++) {
+		cf_free(arena->stages[i]);
+	}
+
+	arena->free_h = 0;
+
+	// Skip 0:0 so null handle is never used. TODO - bother?
+	arena->at_stage_id = 0;
+	arena->at_ele_id = 1;
+
+	arena->n_stages = 0;
+	memset(arena->stages, 0, sizeof(arena->stages));
 }

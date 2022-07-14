@@ -58,7 +58,7 @@
 #include "fabric/partition.h"
 #include "fabric/skew_monitor.h"
 #include "query/query.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"

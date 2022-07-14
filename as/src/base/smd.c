@@ -354,7 +354,7 @@ static bool smd_msg_parse(msg* m, smd_op* op);
 static bool smd_msg_parse_items(msg* m, smd_op* op);
 
 // Event loop.
-static void* run_smd(void*);
+static void* run_smd(void* udata);
 static int pr_try_retransmit(void);
 static int set_orig_try_retransmit_or_expire(void);
 static int set_orig_reduce_cb(const void* key, void* value, void* udata);
@@ -640,6 +640,14 @@ as_smd_start(void)
 	as_exchange_register_listener(smd_cluster_changed_cb, NULL);
 
 	cf_thread_create_detached(run_smd, NULL);
+}
+
+void
+as_smd_shutdown(void)
+{
+	smd_lock();
+
+	cf_info(AS_SMD, "SMD module shut down");
 }
 
 void

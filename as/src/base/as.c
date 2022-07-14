@@ -75,7 +75,7 @@
 #include "fabric/roster.h"
 #include "fabric/skew_monitor.h"
 #include "query/query.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -343,18 +343,25 @@ as_run(int argc, char **argv)
 	as_xdr_init();				// load persisted last-ship-time(s)
 	as_roster_init();			// load roster-related SMD
 
-	// Initialize namespaces. Each namespace decides here whether it will do a
-	// warm or cold start. Index arenas, partition structures and index tree
-	// structures are initialized. Set and bin name vmaps are initialized.
-	as_namespaces_init(cold_start_cmd, instance);
+	// Set up namespaces. Each namespace decides here whether it will do a warm
+	// or cold start. Index arenas, set and bin name vmaps are initialized.
+	as_namespaces_setup(cold_start_cmd, instance);
 
 	// These load SMD involving sets/bins, needed during storage init/load.
 	as_sindex_init();
 	as_truncate_init();
 
+	// Initialize namespaces. Partition structures and index tree structures are
+	// initialized.
+	as_namespaces_init(cold_start_cmd, instance);
+
 	// Initialize the storage system. For warm and cool restarts, this includes
 	// fully resuming persisted indexes.
 	as_storage_init();
+	// ... This could block for minutes ....................
+
+	// For warm and cool restarts, fully resume persisted sindexes.
+	as_sindex_resume();
 	// ... This could block for minutes ....................
 
 	// Migrate memory to correct NUMA node (includes resumed index arenas).
@@ -447,6 +454,9 @@ as_run(int argc, char **argv)
 	// If this node was not quiesced and storage shutdown takes very long (e.g.
 	// flushing pmem index), best to get kicked out of the cluster quickly.
 	as_hb_shutdown();
+
+	// Make sure committed SMD files are in sync with SMD callback activity.
+	as_smd_shutdown();
 
 	if (! as_storage_shutdown(instance)) {
 		cf_warning(AS_AS, "failed clean shutdown - exiting");

@@ -1,7 +1,7 @@
 /*
  * msgpack_in.h
  *
- * Copyright (C) 2019 Aerospike, Inc.
+ * Copyright (C) 2019-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -91,6 +91,18 @@ typedef enum {
 	MSGPACK_N_TYPES
 } msgpack_type;
 
+typedef struct msgpack_display_str_s {
+	char str[100];
+} msgpack_display_str;
+
+#define define_msgpack_vec_copy(__name, __copy_ptr) \
+		msgpack_vec __name ## __vecs[(__copy_ptr)->n_vecs]; \
+		for (uint32_t i = 0; i < (__copy_ptr)->n_vecs; i++) { \
+			__name ## __vecs[i] = (__copy_ptr)->vecs[i]; \
+		} \
+		msgpack_in_vec __name = *(__copy_ptr); \
+		__name.vecs = __name ## __vecs;
+
 
 //==========================================================
 // Public API.
@@ -165,7 +177,7 @@ msgpack_buf_get_map_ele_count(const uint8_t *buf, uint32_t buf_sz,
 	return msgpack_get_map_ele_count(&mp, count_r);
 }
 
-uint32_t msgpack_compactify(uint8_t *buf, uint32_t buf_sz);
+uint32_t msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified);
 
 uint32_t msgpack_sz_vec(msgpack_in_vec *mv);
 bool msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value);
@@ -181,5 +193,7 @@ bool msgpack_get_list_ele_count_vec(msgpack_in_vec *mv, uint32_t *count_r);
 msgpack_type msgpack_peek_type_vec(const msgpack_in_vec *mv);
 const uint8_t *msgpack_get_ele_vec(msgpack_in_vec *mv, uint32_t *sz_r);
 const uint8_t *msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r);
+
+bool msgpack_display(msgpack_in *mp, msgpack_display_str *str);
 
 void msgpack_print_vec(msgpack_in_vec *mv, const char *name);

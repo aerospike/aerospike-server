@@ -28,6 +28,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "cf_mutex.h"
 
@@ -36,7 +37,7 @@
 // Typedefs & constants.
 //
 
-#define SI_ARENA_MAX_STAGES 2048 // TODO - what?
+#define SI_ARENA_MAX_STAGES 2048
 
 #define SI_ARENA_MIN_STAGE_SIZE (128L * 1024L * 1024L) // 128M
 #define SI_ARENA_MAX_STAGE_SIZE (4L * 1024L * 1024L * 1024L) // 4G
@@ -48,6 +49,8 @@
 typedef uint32_t si_arena_handle;
 
 typedef struct as_sindex_arena_s {
+	key_t key_base; // enterprise only - to create stage (xmem) blocks
+
 	// Configuration (passed in constructors).
 	uint32_t ele_sz;
 	uint32_t stage_capacity; // derived
@@ -70,12 +73,19 @@ typedef struct as_sindex_arena_s {
 
 } as_sindex_arena;
 
+typedef struct si_arena_free_ele_s {
+	uint64_t magic;
+	si_arena_handle next_h;
+} si_arena_free_ele;
+
+#define SI_FREE_MAGIC 0xf7f7fefefefef7f7UL
+
 
 //==========================================================
 // Public API.
 //
 
-void as_sindex_arena_init(as_sindex_arena* arena, uint32_t ele_sz, size_t stage_sz);
+void as_sindex_arena_init(as_sindex_arena* arena, key_t key_base, uint32_t ele_sz, size_t stage_sz);
 
 si_arena_handle as_sindex_arena_alloc(as_sindex_arena* arena);
 void as_sindex_arena_free(as_sindex_arena* arena, si_arena_handle h);
@@ -85,4 +95,18 @@ as_sindex_arena_resolve(as_sindex_arena* arena, si_arena_handle h)
 {
 	return arena->stages[h >> SI_ELE_ID_N_BITS] +
 			((h & SI_ELE_ID_MASK) * arena->ele_sz);
+}
+
+
+//==========================================================
+// Private API - for enterprise separation only.
+//
+
+void si_arena_add_stage(as_sindex_arena* arena);
+void si_arena_reset(as_sindex_arena* arena);
+
+static inline void
+si_arena_set_handle(si_arena_handle* h, uint32_t stage_id, uint32_t ele_id)
+{
+	*h = (stage_id << SI_ELE_ID_N_BITS) | ele_id;
 }

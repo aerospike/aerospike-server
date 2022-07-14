@@ -78,6 +78,7 @@ typedef void (*as_smd_set_fn)(bool result, void* udata);
 
 void as_smd_module_load(as_smd_id id, as_smd_accept_fn accept_cb, as_smd_conflict_fn conflict_cb, const cf_vector* default_items);
 void as_smd_start(void);
+void as_smd_shutdown(void);
 // timeout 0 is default timeout in msec.
 void as_smd_set(as_smd_id id, const char* key, const char* value, as_smd_set_fn set_cb, void* udata, uint64_t timeout);
 bool as_smd_set_blocking(as_smd_id id, const char* key, const char* value, uint64_t timeout);

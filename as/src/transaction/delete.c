@@ -49,7 +49,7 @@
 #include "base/transaction_policy.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/proxy.h"

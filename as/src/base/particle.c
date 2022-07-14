@@ -680,25 +680,37 @@ as_bin_particle_to_asval(const as_bin *b)
 // Handle msgpack translation.
 //
 
-int
-as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size)
+int32_t
+as_particle_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 {
-	// We assume the bin is empty.
-
 	as_particle_type type = as_particle_type_from_msgpack(packed, packed_size);
 
 	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_ERR_UNKNOWN;
+		return -1;
 	}
 
 	if (type == AS_PARTICLE_TYPE_NULL) {
-		return AS_OK;
+		return 0;
 	}
 
-	uint32_t mem_size = particle_vtable[type]->size_from_msgpack_fn(packed, packed_size);
+	return particle_vtable[type]->size_from_msgpack_fn(packed, packed_size);
+}
 
-	if (mem_size != 0) {
-		b->particle = cf_malloc(mem_size); // response, so not cf_malloc_ns()
+bool
+as_bin_particle_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size, void *mem)
+{
+	as_particle_type type = as_particle_type_from_msgpack(packed, packed_size);
+
+	if (type == AS_PARTICLE_TYPE_BAD) {
+		return false;
+	}
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		return true;
+	}
+
+	if (mem != NULL) {
+		b->particle = mem;
 	}
 
 	particle_vtable[type]->from_msgpack_fn(packed, packed_size, &b->particle);
@@ -706,7 +718,7 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 	// Set the bin's state member.
 	as_bin_state_set_from_type(b, type);
 
-	return AS_OK;
+	return true;
 }
 
 //------------------------------------------------

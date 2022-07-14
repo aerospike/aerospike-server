@@ -1,7 +1,7 @@
 /*
  * cdt.c
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -23,6 +23,7 @@
 #include "base/cdt.h"
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -285,6 +286,8 @@ static uint8_t *cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t
 static void cdt_context_fill_unpacker(cdt_context *ctx, msgpack_in *mp);
 
 static void cdt_context_unwind(cdt_context *ctx);
+
+static bool cdt_context_type_is_read(uint8_t ctx_type);
 
 // as_bin_cdt_packed functions
 static int cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result, cf_ll_buf *particles_llb, bool alloc_ns);
@@ -1165,150 +1168,15 @@ cdt_process_state_get_op_name(const cdt_process_state *state)
 bool
 cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 {
-	static cdt_subcontext_fn list_table[AS_CDT_MAX_CTX] = {
-			[AS_CDT_CTX_INDEX] = list_subcontext_by_index,
-			[AS_CDT_CTX_RANK] = list_subcontext_by_rank,
-			[AS_CDT_CTX_KEY] = list_subcontext_by_key,
-			[AS_CDT_CTX_VALUE] = list_subcontext_by_value,
-	};
-
-	static cdt_subcontext_fn map_table[AS_CDT_MAX_CTX] = {
-			[AS_CDT_CTX_INDEX] = map_subcontext_by_index,
-			[AS_CDT_CTX_RANK] = map_subcontext_by_rank,
-			[AS_CDT_CTX_KEY] = map_subcontext_by_key,
-			[AS_CDT_CTX_VALUE] = map_subcontext_by_value,
-	};
-
 	if (state->ele_count != 2) {
 		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() param count %u != 2", state->ele_count);
 		com->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
 
-	uint8_t bin_type = as_bin_get_particle_type(com->ctx.b);
-	bool bin_was_empty = false;
-
-	if (bin_type == AS_PARTICLE_TYPE_NULL && cdt_op_is_modify(com)) {
-		bin_was_empty = true;
-	}
-	else if (bin_type != AS_PARTICLE_TYPE_LIST &&
-			bin_type != AS_PARTICLE_TYPE_MAP) {
-		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bin type %u is not list or map", bin_type);
-		com->ret_code = -AS_ERR_PARAMETER;
+	if ((com->ret_code = cdt_context_dig(&com->ctx, state->mv,
+			cdt_op_is_modify(com))) != AS_OK) {
 		return false;
-	}
-
-	uint32_t ctx_param_count = 0;
-
-	msgpack_vec* vec = &state->mv->vecs[state->mv->idx];
-
-	if (! msgpack_get_list_ele_count_vec(state->mv, &ctx_param_count) ||
-			ctx_param_count == 0 || (ctx_param_count & 1) == 1) {
-		cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bad context param count %u", ctx_param_count);
-		com->ret_code = -AS_ERR_PARAMETER;
-		return false;
-	}
-
-	for (uint32_t i = 0; i < ctx_param_count; i += 2) {
-		uint64_t ctx_type;
-		bool ret;
-		uint32_t start_off = vec->offset;
-
-		if (! msgpack_get_uint64_vec(state->mv, &ctx_type)) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() param %u expected int", i);
-			com->ret_code = -AS_ERR_PARAMETER;
-			return false;
-		}
-
-		uint8_t table_i = (uint8_t)ctx_type & AS_CDT_CTX_BASE_MASK;
-
-		if (table_i >= AS_CDT_MAX_CTX) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context type 0x%lx", ctx_type);
-			com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-			return false;
-		}
-
-		com->ctx.create_ctx_type = ctx_type;
-		com->ctx.create_flag_on = (ctx_type & AS_CDT_CTX_CREATE_MASK) != 0;
-
-		if (bin_was_empty) {
-			if (! com->ctx.create_flag_on) {
-				cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() bin is empty and op has no create flag(s)");
-				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-				return false;
-			}
-
-			com->ctx.create_triggered = true;
-			com->ctx.create_ctx_start = vec->buf + start_off;
-			com->ctx.create_ctx_count = (ctx_param_count - i) / 2;
-
-			if (! cdt_context_ctx_type_create_sz(state->mv,
-					&com->ctx.create_sz, ctx_type)) {
-				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-				return false;
-			}
-
-			if (! cdt_context_count_create_sz(state->mv, &com->ctx.create_sz,
-					com->ctx.create_ctx_count - 1)) {
-				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-				return false;
-			}
-
-			break;
-		}
-
-		msgpack_in mp;
-
-		cdt_context_fill_unpacker(&com->ctx, &mp);
-		cf_assert(mp.buf_sz != 0, AS_PARTICLE, "invalid mp.buf_sz due to cdt_context_fill_unpacker being called in not-yet-existent context");
-
-		msgpack_type type = msgpack_peek_type(&mp);
-
-		if (type != MSGPACK_TYPE_MAP && type != MSGPACK_TYPE_LIST) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() type %d is not list or map", type);
-			com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-			return false;
-		}
-
-		if (type == MSGPACK_TYPE_LIST) {
-			if ((ctx_type & AS_CDT_CTX_MAP) != 0) {
-				cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context type 0x%lx for list element", ctx_type);
-				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-				return false;
-			}
-
-			ret = list_table[table_i](&com->ctx, state->mv);
-		}
-		else { // map
-			if ((ctx_type & AS_CDT_CTX_LIST) != 0) {
-				cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context type 0x%lx for map element", ctx_type);
-				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-				return false;
-			}
-
-			ret = map_table[table_i](&com->ctx, state->mv);
-		}
-
-		if (! ret) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_context_eval() invalid context at param %u", i);
-			com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-			return false;
-		}
-
-		if (com->ctx.create_triggered) {
-			com->ctx.create_ctx_start = vec->buf + start_off;
-			com->ctx.create_ctx_count = (ctx_param_count - i) / 2;
-
-			if (! cdt_op_is_modify(com) ||
-					! cdt_context_count_create_sz(state->mv,
-							&com->ctx.create_sz,
-							com->ctx.create_ctx_count - 1)) {
-				com->ret_code = -AS_ERR_OP_NOT_APPLICABLE;
-				return false;
-			}
-
-			break;
-		}
 	}
 
 	uint32_t ele_count;
@@ -2138,6 +2006,171 @@ cdt_context_push(cdt_context *ctx, uint32_t idx, uint8_t *idx_mem, uint8_t type)
 	ctx->stack_idx++;
 }
 
+int
+cdt_context_dig(cdt_context *ctx, msgpack_in_vec *mv, bool is_modify)
+{
+	static cdt_subcontext_fn list_table[AS_CDT_MAX_CTX] = {
+			[AS_CDT_CTX_INDEX] = list_subcontext_by_index,
+			[AS_CDT_CTX_RANK] = list_subcontext_by_rank,
+			[AS_CDT_CTX_KEY] = list_subcontext_by_key,
+			[AS_CDT_CTX_VALUE] = list_subcontext_by_value,
+	};
+
+	static cdt_subcontext_fn map_table[AS_CDT_MAX_CTX] = {
+			[AS_CDT_CTX_INDEX] = map_subcontext_by_index,
+			[AS_CDT_CTX_RANK] = map_subcontext_by_rank,
+			[AS_CDT_CTX_KEY] = map_subcontext_by_key,
+			[AS_CDT_CTX_VALUE] = map_subcontext_by_value,
+	};
+
+	uint8_t bin_type = as_bin_get_particle_type(ctx->b);
+	bool bin_was_empty = false;
+
+	if (bin_type == AS_PARTICLE_TYPE_NULL && is_modify) {
+		bin_was_empty = true;
+	}
+	else if (bin_type != AS_PARTICLE_TYPE_LIST &&
+			bin_type != AS_PARTICLE_TYPE_MAP) {
+		cf_detail(AS_PARTICLE, "cdt_context_dig() bin type %u is not list or map", bin_type);
+		return -AS_ERR_PARAMETER;
+	}
+
+	uint32_t ctx_param_count = 0;
+
+	msgpack_vec* vec = &mv->vecs[mv->idx];
+
+	if (! msgpack_get_list_ele_count_vec(mv, &ctx_param_count) ||
+			ctx_param_count == 0 || (ctx_param_count & 1) == 1) {
+		cf_warning(AS_PARTICLE, "cdt_context_dig() bad context param count %u", ctx_param_count);
+		return -AS_ERR_PARAMETER;
+	}
+
+	for (uint32_t i = 0; i < ctx_param_count; i += 2) {
+		uint64_t ctx_type;
+		bool ret;
+		uint32_t start_off = vec->offset;
+
+		if (! msgpack_get_uint64_vec(mv, &ctx_type)) {
+			cf_warning(AS_PARTICLE, "cdt_context_dig() param %u expected int", i);
+			return -AS_ERR_PARAMETER;
+		}
+
+		uint8_t table_i = (uint8_t)ctx_type & AS_CDT_CTX_BASE_MASK;
+
+		if (table_i >= AS_CDT_MAX_CTX) {
+			cf_warning(AS_PARTICLE, "cdt_context_dig() invalid context type 0x%lx", ctx_type);
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
+		ctx->create_ctx_type = ctx_type;
+		ctx->create_flag_on = (ctx_type & AS_CDT_CTX_CREATE_MASK) != 0;
+
+		if (bin_was_empty) {
+			if (! ctx->create_flag_on) {
+				cf_detail(AS_PARTICLE, "cdt_context_dig() bin is empty and op has no create flag(s)");
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
+
+			ctx->create_triggered = true;
+			ctx->create_ctx_start = vec->buf + start_off;
+			ctx->create_ctx_count = (ctx_param_count - i) / 2;
+
+			if (! cdt_context_ctx_type_create_sz(mv, &ctx->create_sz,
+					ctx_type)) {
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
+
+			if (! cdt_context_count_create_sz(mv, &ctx->create_sz,
+					ctx->create_ctx_count - 1)) {
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
+
+			break;
+		}
+
+		msgpack_in mp;
+
+		cdt_context_fill_unpacker(ctx, &mp);
+		cf_assert(mp.buf_sz != 0, AS_PARTICLE, "invalid mp.buf_sz due to cdt_context_fill_unpacker being called in not-yet-existent context");
+
+		msgpack_type type = msgpack_peek_type(&mp);
+
+		if (type != MSGPACK_TYPE_MAP && type != MSGPACK_TYPE_LIST) {
+			cf_detail(AS_PARTICLE, "cdt_context_dig() type %d is not list or map", type);
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
+		if (type == MSGPACK_TYPE_LIST) {
+			if ((ctx_type & AS_CDT_CTX_MAP) != 0) {
+				cf_detail(AS_PARTICLE, "cdt_context_dig() invalid context type 0x%lx for list element", ctx_type);
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
+
+			ret = list_table[table_i](ctx, mv);
+		}
+		else { // map
+			if ((ctx_type & AS_CDT_CTX_LIST) != 0) {
+				cf_detail(AS_PARTICLE, "cdt_context_dig() invalid context type 0x%lx for map element", ctx_type);
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
+
+			ret = map_table[table_i](ctx, mv);
+		}
+
+		if (! ret) {
+			cf_detail(AS_PARTICLE, "cdt_context_dig() invalid context at param %u", i);
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
+		if (ctx->create_triggered) {
+			ctx->create_ctx_start = vec->buf + start_off;
+			ctx->create_ctx_count = (ctx_param_count - i) / 2;
+
+			if (! is_modify ||
+					! cdt_context_count_create_sz(mv, &ctx->create_sz,
+							ctx->create_ctx_count - 1)) {
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
+
+			break;
+		}
+	}
+
+	return AS_OK;
+}
+
+bool
+cdt_context_read_check_peek(const msgpack_in_vec *ctx)
+{
+	define_msgpack_vec_copy(mv, ctx);
+	uint32_t count;
+
+	if (! msgpack_get_list_ele_count_vec(&mv, &count)) {
+		return false;
+	}
+
+	if (count == 0 || count % 2 != 0) {
+		return false;
+	}
+
+	count /= 2;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint64_t type;
+
+		if (! msgpack_get_uint64_vec(&mv, &type) ||
+				! cdt_context_type_is_read((uint8_t)type)) {
+			return false;
+		}
+
+		if (msgpack_sz_vec(&mv) == 0) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 static inline void
 cdt_context_destroy(cdt_context *ctx)
 {
@@ -2174,6 +2207,12 @@ cdt_context_unwind(cdt_context *ctx)
 	}
 
 	cf_free(ctx->pstack);
+}
+
+static bool
+cdt_context_type_is_read(uint8_t ctx_type)
+{
+	return (ctx_type <= 0x23 && (ctx_type & 0xf) <= 3 && ctx_type != 0x12);
 }
 
 
@@ -2231,31 +2270,17 @@ bool
 rollback_alloc_from_msgpack(rollback_alloc *alloc_buf, as_bin *b,
 		const cdt_payload *seg)
 {
-	// We assume the bin is empty.
+	cf_assert(as_bin_is_unused(b), AS_PARTICLE, "bin not empty");
 
-	as_particle_type type = as_particle_type_from_msgpack(seg->ptr, seg->sz);
+	int32_t sz = as_particle_size_from_msgpack(seg->ptr, seg->sz);
 
-	if (type == AS_PARTICLE_TYPE_BAD) {
+	if (sz < 0) {
 		return false;
 	}
 
-	if (type == AS_PARTICLE_TYPE_NULL) {
-		return true;
-	}
+	uint8_t *mem = (sz == 0) ? NULL : rollback_alloc_reserve(alloc_buf, sz);
 
-	uint32_t sz =
-			particle_vtable[type]->size_from_msgpack_fn(seg->ptr, seg->sz);
-
-	if (sz != 0) {
-		b->particle = (as_particle *)rollback_alloc_reserve(alloc_buf, sz);
-	}
-
-	particle_vtable[type]->from_msgpack_fn(seg->ptr, seg->sz, &b->particle);
-
-	// Set the bin's state member.
-	as_bin_state_set_from_type(b, type);
-
-	return true;
+	return as_bin_particle_from_msgpack(b, seg->ptr, seg->sz, mem);
 }
 
 
@@ -2421,6 +2446,54 @@ as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result,
 	}
 
 	return cdt_packed_read(&state, b, result, alloc_ns);
+}
+
+bool
+as_bin_cdt_get_by_context(const as_bin *b, const uint8_t* ctx, uint32_t ctx_sz,
+		as_bin *result, bool alloc_ns)
+{
+	msgpack_vec vecs[1];
+	msgpack_in_vec mv = {
+			.n_vecs = 1,
+			.vecs = vecs
+	};
+
+	vecs[0].buf = ctx;
+	vecs[0].buf_sz = ctx_sz;
+	vecs[0].offset = 0;
+
+	return as_bin_cdt_get_by_context_vec(b, &mv, result, alloc_ns);
+}
+
+bool
+as_bin_cdt_get_by_context_vec(const as_bin *b, msgpack_in_vec *ctx_mv,
+		as_bin *result, bool alloc_ns)
+{
+	if (! cdt_context_read_check_peek(ctx_mv)) {
+		return false;
+	}
+
+	define_rollback_alloc(alloc_result, NULL, 1, alloc_ns);
+
+	cdt_context ctx = {
+			.b = (as_bin *)b,
+			.alloc_buf = NULL
+	};
+
+	if (cdt_context_dig(&ctx, ctx_mv, false) != AS_OK) {
+		return false;
+	}
+
+	msgpack_in mp;
+
+	cdt_context_fill_unpacker(&ctx, &mp);
+
+	const cdt_payload cp = {
+			.ptr = mp.buf,
+			.sz = mp.buf_sz
+	};
+
+	return rollback_alloc_from_msgpack(alloc_result, result, &cp);
 }
 
 
@@ -4292,7 +4365,7 @@ cdt_check_buf(const uint8_t *buf, uint32_t buf_sz)
 
 
 //==========================================================
-// exp
+// display
 //
 
 const char *
@@ -4305,6 +4378,67 @@ cdt_exp_display_name(as_cdt_optype op)
 	}
 
 	return name != NULL ? name : "INVALID_CDT_OP";
+}
+
+bool
+cdt_ctx_to_dynbuf(const uint8_t *ctx, uint32_t ctx_sz, cf_dyn_buf *db)
+{
+	static const char *ctx_names[] = {
+			[AS_CDT_CTX_INDEX] = "by_index",
+			[AS_CDT_CTX_RANK] = "by_rank",
+			[AS_CDT_CTX_KEY] = "by_key",
+			[AS_CDT_CTX_VALUE] = "by_value"
+	};
+
+	msgpack_in mp = {
+			.buf = ctx,
+			.buf_sz = ctx_sz
+	};
+	uint32_t ele_count;
+
+	if (! msgpack_get_list_ele_count(&mp, &ele_count) || (ele_count & 1) != 0) {
+		return false;
+	}
+
+	cf_dyn_buf_append_string(db, "[");
+
+	for (uint32_t i = 0; i < ele_count / 2; i++) {
+		int64_t ctx_type;
+
+		if (! msgpack_get_int64(&mp, &ctx_type)) {
+			return false;
+		}
+
+		uint8_t table_i = (uint8_t)ctx_type & AS_CDT_CTX_BASE_MASK;
+
+		if (table_i >= AS_CDT_MAX_CTX) {
+			return false;
+		}
+
+		if (i != 0) {
+			cf_dyn_buf_append_string(db, ", ");
+		}
+
+		if ((ctx_type & AS_CDT_CTX_LIST) != 0) {
+			cf_dyn_buf_append_string(db, "list_");
+		}
+		else if ((ctx_type & AS_CDT_CTX_MAP) != 0) {
+			cf_dyn_buf_append_string(db, "map_");
+		}
+
+		cf_dyn_buf_append_string(db, ctx_names[table_i]);
+
+		msgpack_display_str s;
+
+		if (! msgpack_display(&mp, &s)) {
+			return false;
+		}
+
+		cf_dyn_buf_append_format(db, "(%s)", s.str);
+	}
+
+	cf_dyn_buf_append_string(db, "]");
+	return true;
 }
 
 

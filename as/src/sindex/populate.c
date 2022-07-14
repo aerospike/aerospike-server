@@ -1,7 +1,7 @@
 /*
  * populate.c
  *
- * Copyright (C) 2021 Aerospike, Inc.
+ * Copyright (C) 2021-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -44,7 +44,7 @@
 #include "base/index.h"
 #include "base/set_index.h"
 #include "fabric/partition.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
@@ -56,7 +56,7 @@
 // Typedefs & constants.
 //
 
-#define N_STARTUP_THREADS 32 // FIXME - what?
+#define N_STARTUP_THREADS 32 // TODO - use 5x CPUs?
 
 #define TICKER_INTERVAL (5 * 1000) // 5 seconds
 #define PROGRESS_RESOLUTION 1000
@@ -75,7 +75,6 @@ typedef struct startup_cb_info_s {
 typedef struct populate_info_s {
 	as_namespace* ns;
 	as_sindex* si;
-	uint16_t set_id;
 	uint32_t pid;
 	uint64_t n_total_reduced;
 	bool aborted;
@@ -84,7 +83,6 @@ typedef struct populate_info_s {
 typedef struct populate_cb_info_s {
 	as_namespace* ns;
 	as_sindex* si;
-	uint16_t set_id;
 	as_index_tree* tree;
 	uint64_t* p_n_total_reduced;
 	bool* p_aborted;
@@ -107,6 +105,7 @@ static cf_queue g_destroy_sindex_q;
 //
 
 static void populate_startup(as_namespace* ns);
+static void mark_all_readable(as_namespace* ns);
 static void* run_ticker(void* udata);
 static void* run_startup(void* udata);
 static bool startup_reduce_cb(as_index_ref* r_ref, void* udata);
@@ -136,7 +135,11 @@ as_sindex_populate_startup(void)
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
-		if (ns->sindex_cnt == 0) {
+		if (as_sindex_n_sindexes(ns) == 0) {
+			continue;
+		}
+
+		if (ns->sindexes_resumed_readable) {
 			continue;
 		}
 
@@ -144,6 +147,8 @@ as_sindex_populate_startup(void)
 			populate_startup(ns);
 		}
 		// else - data-in-memory (cold or cool restart) - already built sindex.
+
+		mark_all_readable(ns);
 
 		cf_info(AS_SINDEX, "{%s} sindex population done", ns->name);
 	}
@@ -208,6 +213,19 @@ populate_startup(as_namespace* ns)
 	cf_thread_join(ticker_tid);
 }
 
+static void
+mark_all_readable(as_namespace* ns)
+{
+	for (uint32_t i = 0; i < MAX_N_SINDEXES; i++) {
+		as_sindex* si = ns->sindexes[i];
+
+		if (si != NULL) {
+			si->readable = true;
+			si->populate_pct = 100;
+		}
+	}
+}
+
 static void*
 run_ticker(void* udata)
 {
@@ -220,7 +238,7 @@ run_ticker(void* udata)
 		double pct = n_objects == 0 ?
 				100.0 : (double)(n_recs_checked * 100) / (double)n_objects;
 
-		cf_info(AS_SINDEX, "{%s} sindex-ticker: mem-used %lu objects-scanned %lu progress-pct %.3f",
+		cf_info(AS_SINDEX, "{%s} sindex-populate: mem-used %lu objects-scanned %lu progress-pct %.3f",
 				ns->name, as_sindex_used_bytes(ns), n_recs_checked, pct);
 	}
 
@@ -232,8 +250,6 @@ run_startup(void* udata)
 {
 	startup_info* starti = (startup_info*)udata;
 	as_namespace* ns = starti->ns;
-
-	CF_ALLOC_SET_NS_ARENA(ns);
 
 	startup_cb_info cbi = { .ns = ns };
 
@@ -292,7 +308,7 @@ startup_reduce_cb(as_index_ref* r_ref, void* udata)
 		return true;
 	}
 
-	as_sindex_putall_rd(ns, &rd, r_ref);
+	as_sindex_put_all_rd(ns, &rd, r_ref);
 
 	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
@@ -309,22 +325,12 @@ static void
 populate(as_sindex* si)
 {
 	as_namespace* ns = si->ns;
-	as_sindex_metadata* imd = si->imd;
 
-	cf_info(AS_SINDEX, "{%s} populating sindex %s ...", ns->name, imd->iname);
+	cf_info(AS_SINDEX, "{%s} populating sindex %s ...", ns->name, si->iname);
 
 	uint64_t start_ms = cf_getms();
 
-	// TODO - might be nice to put set_id on si and/or imd?
-	char* set_name = imd->set;
-	uint16_t set_id = set_name != NULL ?
-			as_namespace_get_set_id(ns, set_name) : INVALID_SET_ID;
-
-	populate_info popi = {
-			.ns = ns,
-			.si = si,
-			.set_id = set_id
-	};
+	populate_info popi = { .ns = ns, .si = si };
 
 	uint32_t n_threads = as_load_uint32(&g_config.sindex_builder_threads);
 	cf_tid tids[n_threads];
@@ -339,7 +345,7 @@ populate(as_sindex* si)
 
 	if (popi.aborted) {
 		cf_info(AS_SINDEX, "{%s} ... aborted populating sindex %s", ns->name,
-				si->imd->iname);
+				si->iname);
 		return;
 	}
 
@@ -350,7 +356,7 @@ populate(as_sindex* si)
 	si->load_time = cf_getms() - start_ms;
 
 	cf_info(AS_SINDEX, "{%s} ... done populating sindex %s (%lu ms)", ns->name,
-			si->imd->iname, si->load_time);
+			si->iname, si->load_time);
 }
 
 static void*
@@ -358,14 +364,10 @@ run_populate(void* udata)
 {
 	populate_info* popi = (populate_info*)udata;
 	as_namespace* ns = popi->ns;
-	uint16_t set_id = popi->set_id;
-
-	CF_ALLOC_SET_NS_ARENA(ns);
 
 	populate_cb_info cbi = {
 			.ns = ns,
 			.si = popi->si,
-			.set_id = set_id,
 			.p_n_total_reduced = &popi->n_total_reduced,
 			.p_aborted = &popi->aborted
 	};
@@ -389,8 +391,8 @@ run_populate(void* udata)
 
 		cbi.tree = tree;
 
-		if (! as_set_index_reduce(ns, tree, set_id, NULL, populate_reduce_cb,
-				&cbi)) {
+		if (! as_set_index_reduce(ns, tree, popi->si->set_id, NULL,
+				populate_reduce_cb, &cbi)) {
 			as_index_reduce_live(tree, populate_reduce_cb, &cbi);
 		}
 
@@ -412,6 +414,12 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 		return false;
 	}
 
+	if (si->dropped) {
+		*cbi->p_aborted = true;
+		as_record_done(r_ref, ns);
+		return false;
+	}
+
 	if (++cbi->n_reduced == PROGRESS_RESOLUTION) {
 		cbi->n_reduced = 0;
 
@@ -424,8 +432,8 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_index* r = r_ref->r;
 
-	// This comparison also works building index on records not in a set.
-	if (cbi->set_id != as_index_get_set_id(r)) {
+	// This also populates whole-namespace sindexes.
+	if (si->set_id != INVALID_SET_ID && si->set_id != as_index_get_set_id(r)) {
 		as_record_done(r_ref, ns);
 		return true;
 	}
@@ -442,18 +450,13 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 		cf_warning(AS_SINDEX, "{%s} populating sindex %s - failed to read %pD",
-				ns->name, si->imd->iname, &r->keyd);
+				ns->name, si->iname, &r->keyd);
 		as_storage_record_close(&rd);
 		as_record_done(r_ref, ns);
 		return true;
 	}
 
-	if (! as_sindex_put_rd(si, &rd, r_ref)) {
-		as_storage_record_close(&rd);
-		as_record_done(r_ref, ns);
-		*cbi->p_aborted = true;
-		return false; // cancelled because sindex dropped
-	}
+	as_sindex_put_rd(si, &rd, r_ref);
 
 	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
@@ -477,6 +480,7 @@ run_add_sindex(void* udata)
 		cf_queue_pop(&g_add_sindex_q, &si, CF_QUEUE_FOREVER);
 
 		populate(si);
+		as_sindex_tree_collect_cardinality(si);
 		as_sindex_release(si);
 	}
 
@@ -493,53 +497,17 @@ run_destroy_sindex(void* udata)
 
 		cf_queue_pop(&g_destroy_sindex_q, &si, CF_QUEUE_FOREVER);
 
-		SINDEX_GWLOCK();
-
-		cf_assert(si->state == AS_SINDEX_DESTROY, AS_SINDEX,
-				"bad state %d at cleanup - expected %d for %p and %s",
-				si->state, AS_SINDEX_DESTROY, si, si->imd->iname);
-
-		as_sindex_delete_defn(si->ns, si->imd);
-
 		as_sindex_tree_destroy(si);
 
-		si->state = AS_SINDEX_INACTIVE;
-
-		si->ns->sindex_cnt--;
-
-		if (si->imd->set != NULL) {
-			as_set* p_set = as_namespace_get_set_by_name(si->ns, si->imd->set);
-
-			p_set->n_sindexes--;
-		}
-		else {
-			si->ns->n_setless_sindexes--;
+		if (si->ctx_b64 != NULL) {
+			cf_free(si->ctx_b64);
 		}
 
-		as_sindex_metadata* imd = si->imd;
-
-		si->imd = NULL;
-
-		as_namespace* ns = si->ns;
-
-		si->ns = NULL;
-
-		if (si->recreate_imd != NULL) {
-			as_sindex_metadata* recreate_imd = si->recreate_imd;
-			si->recreate_imd = NULL;
-
-			as_sindex_create_lockless(ns, recreate_imd);
-			as_sindex_imd_free(recreate_imd);
-			cf_rc_free(recreate_imd);
+		if (si->ctx_buf != NULL) {
+			cf_free(si->ctx_buf);
 		}
 
-		// Remember this is going to release the write lock of meta-data first.
-		// This is the only special case where both GLOCK and LOCK is called
-		// together.
-		SINDEX_GWUNLOCK();
-
-		as_sindex_imd_free(imd);
-		cf_rc_free(imd);
+		cf_rc_free(si);
 	}
 
 	return NULL;

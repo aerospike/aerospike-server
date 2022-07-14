@@ -1,7 +1,7 @@
 /*
  * cdt.h
  *
- * Copyright (C) 2015-2019 Aerospike, Inc.
+ * Copyright (C) 2015-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -234,6 +234,9 @@ typedef enum {
 	CDT_FIND_ITEMS_IDXS_FOR_MAP_VALUE
 } cdt_find_items_idxs_type;
 
+typedef bool (*list_foreach_callback)(msgpack_in *element, void *udata);
+typedef bool (*map_foreach_callback)(msgpack_in *key, msgpack_in *value, void *udata);
+
 #define define_offset_index(__name, __contents, __content_sz, __ele_count, __alloc) \
 		offset_index __name; \
 		offset_index_init(&__name, NULL, __ele_count, __contents, __content_sz); \
@@ -315,6 +318,9 @@ void as_bin_set_double(as_bin *b, double value);
 void as_bin_set_bool(as_bin *b, bool value);
 void as_bin_set_unordered_empty_list(as_bin *b, rollback_alloc *alloc_buf);
 void as_bin_set_empty_packed_map(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags);
+
+bool as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata);
+bool as_bin_map_foreach(const as_bin *b, map_foreach_callback cb, void *udata);
 
 // cdt_delta_value
 bool cdt_calc_delta_init(cdt_calc_delta *cdv, const cdt_payload *delta_value, bool is_decrement);
@@ -494,6 +500,9 @@ uint8_t *cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz);
 
 void cdt_context_push(cdt_context *ctx, uint32_t idx, uint8_t *idx_mem, uint8_t type);
 
+bool cdt_context_read_check_peek(const msgpack_in_vec *ctx);
+int cdt_context_dig(cdt_context *ctx, msgpack_in_vec *mv, bool is_modify);
+
 static inline bool
 cdt_context_is_toplvl(const cdt_context *ctx)
 {
@@ -505,8 +514,10 @@ bool cdt_check(msgpack_in *mp, bool check_end);
 bool cdt_check_rep(msgpack_in *mp, uint32_t rep);
 bool cdt_check_buf(const uint8_t *ptr, uint32_t sz);
 
-// exp
+// display
 const char *cdt_exp_display_name(as_cdt_optype op);
+
+bool cdt_ctx_to_dynbuf(const uint8_t *ctx, uint32_t ctx_sz, cf_dyn_buf *db);
 
 // Debugging support
 bool cdt_verify(cdt_context *ctx);

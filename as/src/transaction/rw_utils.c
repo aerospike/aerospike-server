@@ -45,7 +45,7 @@
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
 #include "transaction/udf.h"
@@ -390,7 +390,6 @@ void
 update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		uint32_t n_old_bins, as_bin* new_bins, uint32_t n_new_bins)
 {
-	uint32_t n_populated = 0;
 	bool bin_name_in_both[n_new_bins];
 
 	// Initialize before the critical section to make it shorter.
@@ -399,22 +398,23 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 	SINDEX_GRLOCK();
 
 	// At max we will do both insert & delete for every sindex in the namespace.
-	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
+	uint32_t n_sindexes = as_sindex_n_sindexes(ns);
+	uint32_t n_sbins = 2 * n_sindexes;
 
 	as_index* r = r_ref->r;
-	const char* set_name = as_index_get_set_name(r, ns);
-	as_sindex* si_arr[2 * ns->sindex_cnt];
+	uint16_t set_id = as_index_get_set_id(r);
+	as_sindex* si_arr[n_sbins];
 	uint32_t si_arr_index = 0;
 
 	// Reserve matching SIs.
 
 	for (uint32_t i = 0; i < n_old_bins; i++) {
-		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+		si_arr_index += as_sindex_arr_lookup_by_set_and_bin_lockfree(ns, set_id,
 				old_bins[i].id, &si_arr[si_arr_index]);
 	}
 
 	for (uint32_t i = 0; i < n_new_bins; i++) {
-		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+		si_arr_index += as_sindex_arr_lookup_by_set_and_bin_lockfree(ns, set_id,
 				new_bins[i].id, &si_arr[si_arr_index]);
 	}
 
@@ -423,6 +423,9 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		as_index_clear_in_sindex(r); // no sindex corresponding to old/new bins
 		return;
 	}
+
+	as_sindex_bin sbins[n_sbins];
+	uint32_t n_populated = 0;
 
 	bool record_in_sindex = false;
 
@@ -464,10 +467,10 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 			if (as_bin_get_particle_type(b_old) !=
 					as_bin_get_particle_type(b_new) ||
 					b_old->particle != b_new->particle) {
-				n_populated += as_sindex_sbins_from_bin(ns, set_name, b_old,
+				n_populated += as_sindex_sbins_from_bin(ns, set_id, b_old,
 						&sbins[n_populated], AS_SINDEX_OP_DELETE);
 
-				uint32_t n = as_sindex_sbins_from_bin(ns, set_name, b_new,
+				uint32_t n = as_sindex_sbins_from_bin(ns, set_id, b_new,
 						&sbins[n_populated], AS_SINDEX_OP_INSERT);
 
 				if (n != 0) {
@@ -479,20 +482,20 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 			else if (r->in_sindex == 1 && ! record_in_sindex) {
 				// We only need to see whether this bin is in any sindex...
 
-				SINDEX_BINS_SETUP(dummy_sbins, ns->sindex_cnt);
+				as_sindex_bin dummy_sbins[n_sindexes];
 
-				uint32_t n = as_sindex_sbins_from_bin(ns, set_name, b_new,
+				uint32_t n = as_sindex_sbins_from_bin(ns, set_id, b_new,
 						dummy_sbins, AS_SINDEX_OP_INSERT);
 
 				if (n != 0) {
 					record_in_sindex = true;
 				}
 
-				as_sindex_sbin_freeall(dummy_sbins, n);
+				as_sindex_sbin_free_all(dummy_sbins, n);
 			}
 		}
 		else {
-			n_populated += as_sindex_sbins_from_bin(ns, set_name, b_old,
+			n_populated += as_sindex_sbins_from_bin(ns, set_id, b_old,
 					&sbins[n_populated], AS_SINDEX_OP_DELETE);
 		}
 	}
@@ -505,7 +508,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 			continue;
 		}
 
-		uint32_t n = as_sindex_sbins_from_bin(ns, set_name, &new_bins[i_new],
+		uint32_t n = as_sindex_sbins_from_bin(ns, set_id, &new_bins[i_new],
 				&sbins[n_populated], AS_SINDEX_OP_INSERT);
 
 		if (n != 0) {
@@ -523,10 +526,8 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 	}
 
 	if (n_populated != 0) {
-		CF_ALLOC_SET_NS_ARENA(ns);
-
 		as_sindex_update_by_sbin(sbins, n_populated, r_ref->r_h);
-		as_sindex_sbin_freeall(sbins, n_populated);
+		as_sindex_sbin_free_all(sbins, n_populated);
 	}
 
 	if (! record_in_sindex) {
@@ -573,32 +574,32 @@ remove_from_sindex_bins(as_namespace* ns, as_index_ref* r_ref, as_bin* bins,
 {
 	SINDEX_GRLOCK();
 
-	SINDEX_BINS_SETUP(sbins, ns->sindex_cnt);
+	uint32_t n_sindexes = as_sindex_n_sindexes(ns);
 
-	as_sindex* si_arr[ns->sindex_cnt];
+	as_sindex* si_arr[n_sindexes];
 	uint32_t si_arr_index = 0;
-	uint32_t n_populated = 0;
 	as_index* r = r_ref->r;
-	const char* set_name = as_index_get_set_name(r, ns);
+	uint16_t set_id = as_index_get_set_id(r);
 
 	// Reserve matching sindexes.
 	for (uint32_t i = 0; i < n_bins; i++) {
-		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+		si_arr_index += as_sindex_arr_lookup_by_set_and_bin_lockfree(ns, set_id,
 				bins[i].id, &si_arr[si_arr_index]);
 	}
 
+	as_sindex_bin sbins[n_sindexes];
+	uint32_t n_populated = 0;
+
 	for (uint32_t i = 0; i < n_bins; i++) {
-		n_populated += as_sindex_sbins_from_bin(ns, set_name, &bins[i],
+		n_populated += as_sindex_sbins_from_bin(ns, set_id, &bins[i],
 				&sbins[n_populated], AS_SINDEX_OP_DELETE);
 	}
 
 	SINDEX_GRUNLOCK();
 
 	if (n_populated != 0) {
-		CF_ALLOC_SET_NS_ARENA(ns);
-
 		as_sindex_update_by_sbin(sbins, n_populated, r_ref->r_h);
-		as_sindex_sbin_freeall(sbins, n_populated);
+		as_sindex_sbin_free_all(sbins, n_populated);
 	}
 
 	// Unmark record for sindex after deletion.

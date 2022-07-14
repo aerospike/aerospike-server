@@ -44,7 +44,7 @@
 #include "base/index.h"
 #include "base/proto.h"
 #include "fabric/partition.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/storage.h"
 
 
@@ -151,8 +151,6 @@ as_namespace_create(char *name)
 	ns->storage_post_write_queue = DEFAULT_POST_WRITE_QUEUE; // number of wblocks per device used as post-write cache
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 
-	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_SINDEX;
-
 	ns->geo2dsphere_within_strict = true;
 	ns->geo2dsphere_within_min_level = 1;
 	ns->geo2dsphere_within_max_level = 20;
@@ -170,8 +168,6 @@ as_namespace_create(char *name)
 void
 as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 {
-	as_namespaces_setup(cold_start_cmd, instance);
-
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace *ns = g_config.namespaces[ns_ix];
 

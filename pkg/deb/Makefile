@@ -65,6 +65,11 @@ endif
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_ssd.conf
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_mesh.conf
 
+ifeq ($(USE_EE),1)
+	echo "/etc/aerospike/features.conf" >> $(BUILD_ROOT)/DEBIAN/conffiles
+	install -pm 644 $(EEREPO)/etc/eval_features.conf $(BUILD_ROOT)/etc/aerospike/features.conf
+endif
+
 ifeq ($(USE_SYSTEMD),1)
 	cat $(DEPTH)/as/etc/aerospike.service.head >> $(PKG)/deb/aerospike.service
   ifeq ($(EDITION),community)

@@ -376,6 +376,10 @@ range_free(as_query_range* range)
 		}
 	}
 
+	if (range->ctx_buf != NULL) {
+		cf_free(range->ctx_buf);
+	}
+
 	cf_free(range);
 }
 

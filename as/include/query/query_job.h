@@ -33,7 +33,7 @@
 #include "dynbuf.h"
 
 #include "base/datamodel.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 
 
 //==========================================================
@@ -73,12 +73,17 @@ typedef struct as_query_range_s {
 		as_query_geo_range geo;
 	} u;
 
+	uint32_t str_len;
+	char str_stub[16];
+
 	uint16_t bin_id;
 	as_particle_type bin_type;
 	as_sindex_type itype;
 	bool isrange;
 	bool de_dup;
-	char bin_path[AS_SINDEX_MAX_PATH_LENGTH];
+	char bin_name[AS_BIN_NAME_MAX_SZ];
+	uint8_t* ctx_buf;
+	uint32_t ctx_buf_sz;
 } as_query_range;
 
 typedef void (*as_query_slice_fn)(struct as_query_job_s* _job, struct as_partition_reservation_s* rsv, cf_buf_builder** bb_r);
@@ -111,7 +116,7 @@ typedef struct as_query_job_s {
 	struct as_namespace_s* ns;
 	struct as_sindex_s* si;
 	struct as_query_range_s* range;
-	char si_name[AS_ID_INAME_SZ];
+	char si_name[INAME_MAX_SZ];
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	uint16_t set_id;
 

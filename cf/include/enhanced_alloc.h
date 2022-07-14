@@ -62,25 +62,8 @@ void cf_alloc_init(void);
 void cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations, bool salt_allocations);
 int32_t cf_alloc_create_arena(void);
 
-#define CF_ALLOC_SET_NS_ARENA(ns) \
-	(g_ns_arena = ns->jem_arena)
-
 #define CF_ALLOC_SET_NS_ARENA_DIM(ns) \
 	(g_ns_arena = ns->storage_data_in_memory ? ns->jem_arena : -1)
-
-static inline int32_t
-cf_alloc_clear_ns_arena(void)
-{
-	int32_t old_arena = g_ns_arena;
-	g_ns_arena = -1;
-	return old_arena;
-}
-
-static inline void
-cf_alloc_restore_ns_arena(int32_t old_arena)
-{
-	g_ns_arena = old_arena;
-}
 
 void cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *mapped_kbytes, double *efficiency_pct, uint32_t *site_count);
 void cf_alloc_log_stats(const char *file, const char *opts);

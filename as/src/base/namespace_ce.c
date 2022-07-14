@@ -36,6 +36,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "sindex/sindex_arena.h"
 
 
 //==========================================================
@@ -49,6 +50,14 @@ static void setup_namespace(as_namespace* ns);
 // Public API.
 //
 
+void
+as_namespaces_setup(bool cold_start_cmd, uint32_t instance)
+{
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		setup_namespace(g_config.namespaces[i]);
+	}
+}
+
 bool
 as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance)
 {
@@ -60,14 +69,6 @@ as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance)
 //==========================================================
 // Private API - for enterprise separation only.
 //
-
-void
-as_namespaces_setup(bool cold_start_cmd, uint32_t instance)
-{
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		setup_namespace(g_config.namespaces[i]);
-	}
-}
 
 void
 as_namespace_finish_setup(as_namespace *ns, uint32_t instance)
@@ -118,4 +119,9 @@ setup_namespace(as_namespace* ns)
 	ns->tree_shared.arena = ns->arena;
 
 	cf_arenax_init(ns->arena, ns->xmem_type, ns->xmem_type_cfg, 0, (uint32_t)sizeof(as_index), 1, ns->index_stage_size);
+
+	ns->si_arena = cf_calloc(1, sizeof(as_sindex_arena));
+
+	as_sindex_arena_init(ns->si_arena, 0, SI_ARENA_ELE_SZ,
+			ns->sindex_stage_size);
 }

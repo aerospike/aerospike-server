@@ -47,6 +47,7 @@
 #include "base/set_index.h"
 #include "base/stats.h"
 #include "sindex/gc.h"
+#include "sindex/sindex.h"
 
 
 //==========================================================
@@ -213,7 +214,7 @@ as_index_tree_release(as_namespace* ns, as_index_tree* tree)
 
 	// TODO - call as_index_tree_destroy() directly if tree is empty?
 
-	if (ns->sindex_cnt > 0) {
+	if (as_sindex_n_sindexes(ns) != 0) {
 		as_sindex_gc_tree(ns, tree);
 	}
 	else {

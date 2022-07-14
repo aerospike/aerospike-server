@@ -52,7 +52,7 @@
 #include "base/smd.h"
 #include "fabric/partition.h"
 #include "sindex/gc.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 

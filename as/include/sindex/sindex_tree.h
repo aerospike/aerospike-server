@@ -62,6 +62,8 @@ typedef struct si_btree_s {
 	cf_arenax* arena;
 	struct as_sindex_arena_s* si_arena;
 	bool unsigned_bvals;
+	uint32_t si_id;
+	uint16_t tree_ix;
 	uint32_t inner_order;
 	uint32_t leaf_order;
 	uint32_t keys_off;
@@ -70,6 +72,15 @@ typedef struct si_btree_s {
 	uint64_t n_nodes;
 	uint64_t n_keys;
 } si_btree;
+
+typedef struct si_btree_node_s {
+	uint32_t leaf : 1;
+	uint32_t si_id : 31;
+	uint16_t tree_ix;
+	uint16_t n_keys;
+	uint16_t min_degree;
+	uint16_t max_degree;
+} si_btree_node;
 
 typedef struct si_btree_key_s {
 	int64_t bval;
@@ -92,6 +103,7 @@ typedef bool (*si_btree_reduce_fn)(const si_btree_key* key, void* udata);
 //
 
 void as_sindex_tree_create(struct as_sindex_s* si);
+void as_sindex_tree_resume(struct as_sindex_s* si);
 void as_sindex_tree_destroy(struct as_sindex_s* si);
 
 uint64_t as_sindex_tree_n_keys(const struct as_sindex_s* si);
@@ -103,6 +115,8 @@ bool as_sindex_tree_put(struct as_sindex_s* si, int64_t bval, cf_arenax_handle r
 bool as_sindex_tree_delete(struct as_sindex_s* si, int64_t bval, cf_arenax_handle r_h);
 void as_sindex_tree_query(struct as_sindex_s* si, const struct as_query_range_s* range, struct as_partition_reservation_s* rsv, int64_t bval, cf_digest* keyd, as_sindex_reduce_fn cb, void* udata);
 
+void as_sindex_tree_collect_cardinality(struct as_sindex_s* si);
+
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -110,6 +124,7 @@ void as_sindex_tree_query(struct as_sindex_s* si, const struct as_query_range_s*
 
 void query_reduce_no_rc(si_btree* bt, struct as_partition_reservation_s* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
 
+bool si_btree_delete(si_btree* bt, const si_btree_key* key);
 void si_btree_reduce(si_btree* bt, const search_key* start_skey, const search_key* end_skey, si_btree_reduce_fn cb, void* udata);
 
 static inline uint8_t

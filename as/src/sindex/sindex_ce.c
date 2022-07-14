@@ -1,5 +1,5 @@
 /*
- * sindex_tree_ce.c
+ * sindex_ce.c
  *
  * Copyright (C) 2022 Aerospike, Inc.
  *
@@ -24,18 +24,14 @@
 // Includes.
 //
 
-#include "sindex/sindex_tree.h"
+#include "sindex/sindex.h"
 
-#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
-
-#include "citrusleaf/cf_digest.h"
 
 #include "log.h"
 
 #include "base/datamodel.h"
-#include "fabric/partition.h"
-#include "sindex/sindex.h"
 
 
 //==========================================================
@@ -43,9 +39,13 @@
 //
 
 void
-as_sindex_tree_resume(as_sindex* si)
+as_sindex_resume(void)
 {
-	cf_crash(AS_SINDEX, "CE code called as_sindex_tree_resume()");
+}
+
+void
+as_sindex_shutdown(as_namespace* ns)
+{
 }
 
 
@@ -54,9 +54,30 @@ as_sindex_tree_resume(as_sindex* si)
 //
 
 void
-query_reduce_no_rc(si_btree* bt, as_partition_reservation* rsv,
-		int64_t start_bval, int64_t end_bval, int64_t resume_bval,
-		cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata)
+add_to_sindexes(as_sindex* si)
 {
-	cf_crash(AS_SINDEX, "CE code called query_reduce_no_rc()");
+	as_namespace* ns = si->ns;
+
+	for (uint32_t i = 0; i < MAX_N_SINDEXES; i++) {
+		if (ns->sindexes[i] == NULL) {
+			ns->sindexes[i] = si;
+			ns->si_ids[i] = i;
+			si->id = i;
+
+			return;
+		}
+	}
+
+	cf_crash(AS_SINDEX, "sindex array already full");
+}
+
+void
+drop_from_sindexes(as_sindex* si)
+{
+	si->ns->sindexes[si->id] = NULL;
+}
+
+void
+as_sindex_resume_check(void)
+{
 }

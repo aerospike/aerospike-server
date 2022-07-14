@@ -1,7 +1,7 @@
 /*
  * particle_map.c
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -1006,6 +1006,40 @@ as_bin_set_empty_packed_map(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags)
 }
 
 bool
+as_bin_map_foreach(const as_bin *b, map_foreach_callback cb, void *udata)
+{
+	packed_map map;
+
+	if (! packed_map_init_from_bin(&map, b, false)) {
+		return false;
+	}
+
+	msgpack_in mp = {
+			.buf = map.contents,
+			.buf_sz = map.content_sz
+	};
+
+	for (uint32_t i = 0; i < map.ele_count; i++) {
+		const uint8_t *key_start = mp.buf + mp.offset;
+		msgpack_in key = {
+				.buf = key_start,
+				.buf_sz = msgpack_sz(&mp)
+		};
+		const uint8_t *val_start = mp.buf + mp.offset;
+		msgpack_in val = {
+				.buf = val_start,
+				.buf_sz = msgpack_sz(&mp)
+		};
+
+		if (key.buf_sz == 0 || val.buf_sz == 0 || ! cb(&key, &val, udata)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool
 map_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 {
 	int64_t index;
@@ -1025,7 +1059,7 @@ map_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 
 	if (! calc_index_count(index, 1, map.ele_count, &uindex, &count32,
 			false)) {
-		cf_warning(AS_PARTICLE, "map_subcontext_by_index() index %ld out of bounds for ele_count %u", index, map.ele_count);
+		cf_detail(AS_PARTICLE, "map_subcontext_by_index() index %ld out of bounds for ele_count %u", index, map.ele_count);
 		return false;
 	}
 
@@ -1081,7 +1115,7 @@ map_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val)
 	}
 
 	if (! calc_index_count(rank, 1, map.ele_count, &urank, &count32, false)) {
-		cf_warning(AS_PARTICLE, "map_subcontext_by_rank() rank %ld out of bounds for ele_count %u", rank, map.ele_count);
+		cf_detail(AS_PARTICLE, "map_subcontext_by_rank() rank %ld out of bounds for ele_count %u", rank, map.ele_count);
 		return false;
 	}
 
@@ -1173,7 +1207,7 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 				cf_warning(AS_PARTICLE, "map_subcontext_by_key() cannot create key with non-storage element(s)");
 			}
 			else {
-				cf_warning(AS_PARTICLE, "map_subcontext_by_key() key not found");
+				cf_detail(AS_PARTICLE, "map_subcontext_by_key() key not found");
 			}
 
 			rollback_alloc_rollback(alloc_idx);
@@ -1202,7 +1236,7 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 				return true;
 			}
 
-			cf_warning(AS_PARTICLE, "map_subcontext_by_key() key not found");
+			cf_detail(AS_PARTICLE, "map_subcontext_by_key() key not found");
 			rollback_alloc_rollback(alloc_idx);
 			return false;
 		}
@@ -1236,7 +1270,7 @@ map_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val)
 	}
 
 	if (map.ele_count == 0) {
-		cf_warning(AS_PARTICLE, "map_subcontext_by_value() map is empty");
+		cf_detail(AS_PARTICLE, "map_subcontext_by_value() map is empty");
 		return false;
 	}
 
@@ -1268,7 +1302,7 @@ map_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val)
 	}
 
 	if (count == 0) {
-		cf_warning(AS_PARTICLE, "map_subcontext_by_value() value not found");
+		cf_detail(AS_PARTICLE, "map_subcontext_by_value() value not found");
 		rollback_alloc_rollback(alloc_idx);
 		return false;
 	}

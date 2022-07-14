@@ -1,7 +1,7 @@
 /*
  * dynbuf.c
  *
- * Copyright (C) 2008-2020 Aerospike, Inc.
+ * Copyright (C) 2008-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -111,7 +111,7 @@ cf_dyn_buf_reserve(cf_dyn_buf *db, size_t sz, uint8_t **from)
 }
 
 void
-cf_dyn_buf_append_buf(cf_dyn_buf *db, uint8_t *buf, size_t sz)
+cf_dyn_buf_append_buf(cf_dyn_buf *db, const uint8_t *buf, size_t sz)
 {
 	DB_RESERVE(sz);
 	memcpy(&db->buf[db->used_sz], buf, sz);

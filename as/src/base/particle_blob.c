@@ -659,23 +659,19 @@ blob_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp)
 			.buf_sz = packed_size
 	};
 
-	uint32_t size;
-	const uint8_t* ptr = msgpack_get_bin(&mp, &size);//pk.buffer + pk.offset;
+	uint32_t blob_sz;
+	const uint8_t* blob = msgpack_get_bin(&mp, &blob_sz);
 
-	cf_assert(ptr != NULL, AS_PARTICLE, "invalid msgpack");
+	cf_assert(blob != NULL, AS_PARTICLE, "invalid msgpack");
 
-	uint8_t type = *ptr;
-
-	// Adjust for type (1 byte).
-	ptr++;
-	size--;
+	as_bytes_type type = *blob++;
+	blob_sz--;
 
 	blob_mem* p_blob_mem = (blob_mem*)*pp;
 
-	p_blob_mem->type = (uint8_t)blob_bytes_type_to_particle_type(
-			(as_bytes_type)type);
-	p_blob_mem->sz = size;
-	memcpy(p_blob_mem->data, ptr, p_blob_mem->sz);
+	p_blob_mem->type = (uint8_t)blob_bytes_type_to_particle_type(type);
+	p_blob_mem->sz = blob_sz;
+	memcpy(p_blob_mem->data, blob, p_blob_mem->sz);
 }
 
 //------------------------------------------------

@@ -119,6 +119,7 @@ COMPILER_ASSERT(sizeof(cf_arenax) == 152 + (8 * CF_ARENAX_MAX_STAGES));
 
 typedef struct free_element_s {
 	uint32_t			magic;
+	uint8_t				pad[52]; // so next_h overwrites least critical member
 	cf_arenax_handle	next_h;
 } free_element;
 

@@ -38,7 +38,7 @@
 #include "base/datamodel.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "transaction/rw_request.h"
 
 
@@ -143,13 +143,17 @@ void write_dim_unwind(struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_
 static inline bool
 set_has_sindex(const as_record* r, as_namespace* ns)
 {
-	if (ns->sindex_cnt == 0) {
+	if (as_sindex_n_sindexes(ns) == 0) {
 		return false;
+	}
+
+	if (ns->n_setless_sindexes != 0) {
+		return true;
 	}
 
 	as_set* set = as_namespace_get_record_set(ns, r);
 
-	return set != NULL ? set->n_sindexes != 0 : ns->n_setless_sindexes != 0;
+	return set != NULL && set->n_sindexes != 0;
 }
 
 

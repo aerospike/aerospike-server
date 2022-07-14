@@ -46,7 +46,7 @@
 #include "base/xdr.h"
 #include "fabric/exchange.h" // for compatibility-id only
 #include "sindex/gc.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "storage/flat.h" // for compatibility-id only
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"

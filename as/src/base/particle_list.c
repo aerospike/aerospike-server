@@ -1,7 +1,7 @@
 /*
  * particle_list.c
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -797,7 +797,7 @@ list_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 					uindex = list.ele_count;
 				}
 				else {
-					cf_warning(AS_PARTICLE, "list_subcontext_by_index() index %ld out of bounds for ele_count %u", index, list.ele_count);
+					cf_detail(AS_PARTICLE, "list_subcontext_by_index() index %ld out of bounds for ele_count %u", index, list.ele_count);
 					return false;
 				}
 			}
@@ -820,7 +820,7 @@ list_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 			return true;
 		}
 		else {
-			cf_warning(AS_PARTICLE, "list_subcontext_by_index() index %ld out of bounds for ele_count %u", index, list.ele_count);
+			cf_detail(AS_PARTICLE, "list_subcontext_by_index() index %ld out of bounds for ele_count %u", index, list.ele_count);
 			return false;
 		}
 	}
@@ -886,7 +886,7 @@ list_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val)
 
 	if (! calc_index_count(rank, 1, list.ele_count, &urank, &count32,
 			false)) {
-		cf_warning(AS_PARTICLE, "list_subcontext_by_rank() rank %ld out of bounds for ele_count %u", rank, list.ele_count);
+		cf_detail(AS_PARTICLE, "list_subcontext_by_rank() rank %ld out of bounds for ele_count %u", rank, list.ele_count);
 		return false;
 	}
 
@@ -948,7 +948,7 @@ list_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val)
 	}
 
 	if (list.ele_count == 0) {
-		cf_warning(AS_PARTICLE, "list_subcontext_by_value() list is empty");
+		cf_detail(AS_PARTICLE, "list_subcontext_by_value() list is empty");
 		return false;
 	}
 
@@ -985,7 +985,7 @@ list_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val)
 	}
 
 	if (count == 0) {
-		cf_warning(AS_PARTICLE, "list_subcontext_by_value() value not found");
+		cf_detail(AS_PARTICLE, "list_subcontext_by_value() value not found");
 		rollback_alloc_rollback(alloc_idx);
 		return false;
 	}
@@ -1266,6 +1266,33 @@ as_bin_set_ordered_empty_list(as_bin *b, rollback_alloc *alloc_buf)
 	b->particle = list_simple_create_from_buf(alloc_buf, 1,
 			list_ordered_empty.data + 1, LIST_EMPTY_FLAGED_SIZE - 1);
 	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_LIST);
+}
+
+bool
+as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata)
+{
+	packed_list list;
+
+	packed_list_init_from_bin(&list, b);
+
+	msgpack_in mp = {
+			.buf = list.contents,
+			.buf_sz = list.content_sz
+	};
+
+	for (uint32_t i = 0; i < list.ele_count; i++) {
+		const uint8_t *start = mp.buf + mp.offset;
+		msgpack_in val = {
+				.buf = start,
+				.buf_sz = msgpack_sz(&mp)
+		};
+
+		if (val.buf_sz == 0 || ! cb(&val, udata)) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 //------------------------------------------------
@@ -2289,9 +2316,17 @@ packed_list_get_remove_by_index_range(const packed_list *list, cdt_op_mem *com,
 			as_bin_state_set_from_type(result->result, AS_PARTICLE_TYPE_LIST);
 		}
 		else if (result_sz != 0) {
+			const cdt_payload cp = {
+					.ptr = result_ptr,
+					.sz = result_sz
+			};
+
 			cf_assert(count32 <= 1, AS_PARTICLE, "packed_list_get_remove_by_index_range() result must be list for count > 1");
-			as_bin_particle_alloc_from_msgpack(result->result, result_ptr,
-					result_sz);
+
+			if (! rollback_alloc_from_msgpack(result->alloc, result->result,
+					&cp)) {
+				return -AS_ERR_UNKNOWN;
+			}
 		}
 		// else - leave result bin empty because result_size is 0.
 		break;
@@ -5140,9 +5175,12 @@ list_result_data_set_values_by_ordidx(cdt_result_data *rd,
 			uint32_t i = order_index_get(ordidx, 0);
 			uint32_t offset = offset_index_get_const(full_offidx, i);
 			uint32_t sz = offset_index_get_delta_const(full_offidx, i);
+			const cdt_payload cp = {
+					.ptr = full_offidx->contents + offset,
+					.sz = sz
+			};
 
-			return as_bin_particle_alloc_from_msgpack(rd->result,
-					full_offidx->contents + offset, sz) == AS_OK;
+			return rollback_alloc_from_msgpack(rd->alloc, rd->result, &cp);
 		}
 
 		return true;

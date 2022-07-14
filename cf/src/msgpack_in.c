@@ -1,7 +1,7 @@
 /*
  * msgpack_in.c
  *
- * Copyright (C) 2019-2020 Aerospike, Inc.
+ * Copyright (C) 2019-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "aerospike/as_bytes.h"
@@ -325,6 +326,140 @@ msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r)
 	}
 
 	return buf;
+}
+
+bool
+msgpack_display(msgpack_in *mp, msgpack_display_str *str)
+{
+	msgpack_type type = msgpack_peek_type(mp);
+
+	switch (type) {
+	case MSGPACK_TYPE_NIL:
+		strcpy(str->str, "nil");
+		return true;
+	case MSGPACK_TYPE_FALSE:
+		strcpy(str->str, "false");
+		return true;
+	case MSGPACK_TYPE_TRUE:
+		strcpy(str->str, "true");
+		return true;
+	case MSGPACK_TYPE_NEGINT:
+	case MSGPACK_TYPE_INT: {
+		int64_t v;
+
+		if (! msgpack_get_int64(mp, &v)) {
+			return false;
+		}
+
+		sprintf(str->str, "%ld", v);
+
+		return true;
+	}
+	case MSGPACK_TYPE_GEOJSON: {
+		uint32_t sz;
+		const uint8_t *p = msgpack_get_bin(mp, &sz);
+
+		if (p == NULL) {
+			return false;
+		}
+
+		sprintf(str->str, "<geojson#%u>", sz - 1);
+
+		return true;
+	}
+	case MSGPACK_TYPE_STRING: {
+		uint32_t sz;
+		const uint8_t *p = msgpack_get_bin(mp, &sz);
+
+		if (p == NULL) {
+			return false;
+		}
+
+		sprintf(str->str, "<string#%u>", sz - 1);
+
+		return true;
+	}
+	case MSGPACK_TYPE_LIST: {
+		uint32_t ele_count;
+
+		if (! msgpack_get_list_ele_count(mp, &ele_count)) {
+			return false;
+		}
+
+		sprintf(str->str, "<list#%u>", ele_count);
+
+		return true;
+	}
+	case MSGPACK_TYPE_MAP: {
+		uint32_t ele_count;
+
+		if (! msgpack_get_map_ele_count(mp, &ele_count)) {
+			return false;
+		}
+
+		sprintf(str->str, "<map#%u>", ele_count);
+
+		return true;
+	}
+	case MSGPACK_TYPE_BYTES: {
+		uint32_t sz;
+		const uint8_t *p = msgpack_get_bin(mp, &sz);
+
+		if (p == NULL) {
+			return false;
+		}
+
+		if (sz == 0) {
+			strcpy(str->str, "<blob#_>");
+			return true;
+		}
+
+		uint8_t type = p[0];
+
+		switch (type) {
+		case AS_BYTES_HLL:
+			sprintf(str->str, "<hll#%u>", sz - 1);
+			break;
+		default:
+			sprintf(str->str, "<blob#%u>", sz - 1);
+			break;
+		}
+
+		return true;
+	}
+	case MSGPACK_TYPE_DOUBLE: {
+		double value;
+
+		if (! msgpack_get_double(mp, &value)) {
+			return false;
+		}
+
+		sprintf(str->str, "%lf", value);
+
+		return true;
+	}
+	case MSGPACK_TYPE_EXT: {
+		msgpack_ext ext;
+
+		if (! msgpack_get_ext(mp, &ext)) {
+			return false;
+		}
+
+		sprintf(str->str, "<ext#%u>", ext.size);
+
+		return true;
+	}
+	case MSGPACK_TYPE_CMP_WILDCARD:
+		strcpy(str->str, "*");
+		return true;
+	case MSGPACK_TYPE_CMP_INF:
+		strcpy(str->str, "inf");
+		return true;
+	default:
+		break;
+	}
+
+	return false;
 }
 
 void
@@ -908,7 +1043,7 @@ msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r)
 }
 
 uint32_t
-msgpack_compactify(uint8_t *buf, uint32_t buf_sz)
+msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified)
 {
 	uint32_t count = 1;
 	const uint8_t * const start = buf;
@@ -916,6 +1051,10 @@ msgpack_compactify(uint8_t *buf, uint32_t buf_sz)
 	bool has_nonstorage = false;
 	uint8_t *dst_start = buf;
 	uint8_t *src_start = buf;
+
+	if (was_modified != NULL) {
+		*was_modified = false;
+	}
 
 	for (uint32_t i = 0; i < count; i++) {
 		uint8_t * const ele_start = buf;
@@ -930,6 +1069,10 @@ msgpack_compactify(uint8_t *buf, uint32_t buf_sz)
 		}
 
 		if (not_compact) {
+			if (was_modified != NULL) {
+				*was_modified = true;
+			}
+
 			if (dst_start != src_start) {
 				size_t sz = ele_start - src_start;
 

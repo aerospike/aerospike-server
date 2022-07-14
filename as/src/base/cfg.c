@@ -77,7 +77,7 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/partition_balance.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "sindex/sindex_arena.h"
 #include "storage/storage.h"
 
@@ -169,10 +169,11 @@ cfg_set_defaults()
 	c->query_max_done = 100;
 	c->n_query_threads_limit = 128;
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
+	c->sindex_builder_threads = 4;
+	c->sindex_gc_period = 10; // every 10 seconds
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
-	as_sindex_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
 	c->debug_allocations = CF_ALLOC_DEBUG_NONE;
 
@@ -484,7 +485,6 @@ typedef enum {
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN,
 	CASE_NAMESPACE_INDEX_TYPE_BEGIN,
 	CASE_NAMESPACE_SET_BEGIN,
-	CASE_NAMESPACE_SINDEX_BEGIN,
 	CASE_NAMESPACE_STORAGE_ENGINE_BEGIN,
 	// Obsoleted:
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
@@ -596,9 +596,6 @@ typedef enum {
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_INDEX,
 	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
-
-	// Namespace sindex options:
-	CASE_NAMESPACE_SINDEX_NUM_PARTITIONS,
 
 	// Namespace geo2dsphere within options:
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT,
@@ -1001,7 +998,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "geo2dsphere-within",				CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN },
 		{ "index-type",						CASE_NAMESPACE_INDEX_TYPE_BEGIN },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
-		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
 		{ "storage-engine",					CASE_NAMESPACE_STORAGE_ENGINE_BEGIN },
 		// Obsoleted:
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
@@ -1130,11 +1126,6 @@ const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "disable-eviction",				CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "enable-index",					CASE_NAMESPACE_SET_ENABLE_INDEX },
 		{ "stop-writes-count",				CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
-		{ "}",								CASE_CONTEXT_END }
-};
-
-const cfg_opt NAMESPACE_SINDEX_OPTS[] = {
-		{ "num-partitions",					CASE_NAMESPACE_SINDEX_NUM_PARTITIONS },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1311,7 +1302,6 @@ const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_
 const int NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS	= sizeof(NAMESPACE_STORAGE_COMPRESSION_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS		= sizeof(NAMESPACE_STORAGE_ENCRYPTION_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_opt);
-const int NUM_NAMESPACE_SINDEX_OPTS					= sizeof(NAMESPACE_SINDEX_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS		= sizeof(NAMESPACE_GEO2DSPHERE_WITHIN_OPTS) / sizeof(cfg_opt);
 const int NUM_MOD_LUA_OPTS							= sizeof(MOD_LUA_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_OPTS							= sizeof(SECURITY_OPTS) / sizeof(cfg_opt);
@@ -1363,7 +1353,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_CONTEXT,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
-	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
+	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DC, XDR_DC_NAMESPACE,
@@ -1377,7 +1367,7 @@ const char* CFG_PARSER_STATES[] = {
 		"SERVICE",
 		"LOGGING", "LOGGING_CONTEXT",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO", "NETWORK_TLS",
-		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
+		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
 		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG", "SECURITY_SYSLOG",
 		"XDR", "XDR_DC", "XDR_DC_NAMESPACE"
@@ -3027,9 +3017,6 @@ as_config_init(const char* config_file)
 				cfg_strcpy(&line, p_set->name, AS_SET_NAME_MAX_SIZE);
 				cfg_begin_context(&state, NAMESPACE_SET);
 				break;
-			case CASE_NAMESPACE_SINDEX_BEGIN:
-				cfg_begin_context(&state, NAMESPACE_SINDEX);
-				break;
 			case CASE_NAMESPACE_STORAGE_ENGINE_BEGIN:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
 				case CASE_NAMESPACE_STORAGE_MEMORY:
@@ -3465,24 +3452,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
 				p_set->stop_writes_count = cfg_u64_no_checks(&line);
-				break;
-			case CASE_CONTEXT_END:
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//----------------------------------------
-		// Parse namespace::sindex context items.
-		//
-		case NAMESPACE_SINDEX:
-			switch (cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
-			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
-				ns->sindex_num_partitions = cfg_u32(&line, MIN_PARTITIONS_PER_SINDEX, MAX_PARTITIONS_PER_SINDEX);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);

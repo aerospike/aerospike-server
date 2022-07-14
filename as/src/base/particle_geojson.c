@@ -130,11 +130,18 @@ typedef struct geojson_flat_s {
 
 
 //==========================================================
-// Forward declarations.
+// Inlines & macros.
 //
 
-static inline uint32_t geojson_mem_sz(uint32_t ncells, size_t jlen);
-static inline bool geojson_parse(const char *json, uint32_t jlen, uint64_t *cellid, geo_region_t *region);
+static inline uint32_t
+geojson_mem_sz(uint32_t ncells, size_t jlen)
+{
+	return (uint32_t)(
+			sizeof(uint8_t) +				// flags
+			sizeof(uint16_t) +				// ncells (always 0 here)
+			(ncells * sizeof(uint64_t)) +	// cell array
+			jlen);							// json string
+}
 
 
 //==========================================================
@@ -329,7 +336,7 @@ geojson_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 	size_t jsz = (size_t)packed_size;
 
 	// Compute the size; we won't be writing any cellids ...
-	return as_geojson_particle_sz(0, jsz);
+	return as_geojson_particle_sz(MAX_REGION_CELLS, jsz);
 }
 
 void
@@ -342,25 +349,23 @@ geojson_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **
 			.buf_sz = packed_size
 	};
 
-	uint32_t blob_size;
-	const uint8_t *ptr = msgpack_get_bin(&mp, &blob_size);
+	uint32_t json_sz;
+	const uint8_t *json = msgpack_get_bin(&mp, &json_sz);
 
-	cf_assert(ptr != NULL, AS_PARTICLE, "invalid msgpack");
-	// *ptr should be AS_BYTES_GEOJSON at this point.
+	cf_assert(json != NULL, AS_PARTICLE, "invalid msgpack");
+	// *json should be AS_BYTES_GEOJSON at this point.
 
-	// Adjust for type (1 byte).
-	ptr++;
-	blob_size--;
-
-	size_t jsz = (size_t)blob_size;
+	// Skip as_bytes type.
+	json++;
+	json_sz--;
 
 	p_geojson_mem->type = AS_PARTICLE_TYPE_GEOJSON;
-	p_geojson_mem->sz = geojson_mem_sz(0, jsz);
+	p_geojson_mem->sz = geojson_mem_sz(0, json_sz);
 	p_geojson_mem->flags = 0;
 	p_geojson_mem->ncells = 0;
 
 	uint8_t *p8 = (uint8_t *)p_geojson_mem->data;
-	memcpy(p8, ptr, jsz);
+	memcpy(p8, json, json_sz);
 }
 
 
@@ -421,17 +426,25 @@ as_particle_geojson_match(as_particle *particle, uint64_t query_cellid,
 }
 
 bool
-as_particle_geojson_match_asval(const as_val *val, uint64_t query_cellid,
+as_particle_geojson_match_msgpack(msgpack_in* element, uint64_t query_cellid,
 		geo_region_t query_region, bool is_strict)
 {
-	as_geojson *pg = as_geojson_fromval(val);
-	size_t jlen = as_geojson_len(pg);
-	const char *json = as_geojson_get(pg);
+	uint32_t json_sz;
+	const uint8_t* json = msgpack_get_bin(element, &json_sz);
+
+	if (json_sz == 0 || json == NULL || *json != AS_PARTICLE_TYPE_GEOJSON) {
+		return false;
+	}
+
+	// Skip as_bytes type.
+	json++;
+	json_sz--;
 
 	uint64_t candidate_cellid = 0;
 	geo_region_t candidate_region = NULL;
 
-	if (! geo_parse(NULL, json, jlen, &candidate_cellid, &candidate_region)) {
+	if (! geo_parse(NULL, (const char*)json, json_sz, &candidate_cellid,
+			&candidate_region)) {
 		cf_warning(AS_PARTICLE, "geo_parse() failed - unexpected");
 		geo_region_destroy(candidate_region);
 		return false;
@@ -457,7 +470,9 @@ as_geojson_mem_jsonstr(const as_particle *particle, size_t *p_jlen)
 }
 
 bool
-as_geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t candidate_region, uint64_t query_cellid, geo_region_t query_region, bool is_strict)
+as_geojson_match(bool candidate_is_region, uint64_t candidate_cellid,
+		geo_region_t candidate_region, uint64_t query_cellid,
+		geo_region_t query_region, bool is_strict)
 {
 	// Determine whether the candidate geometry is a match for the
 	// query geometry.
@@ -517,15 +532,6 @@ as_geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region
 	return false;
 }
 
-const uint8_t *
-as_geojson_msgpack_jsonstr(struct msgpack_in_s *mp, uint32_t *jsonsz_r)
-{
-	const uint8_t *ptr = msgpack_get_bin(mp, jsonsz_r);
-	// *ptr should be AS_BYTES_GEOJSON at this point.
-	(*jsonsz_r)--;
-	return ptr + 1;
-}
-
 inline uint32_t
 as_geojson_particle_sz(uint32_t ncells, size_t jlen)
 {
@@ -536,40 +542,71 @@ as_geojson_particle_sz(uint32_t ncells, size_t jlen)
 }
 
 bool
+as_geojson_parse(const as_namespace *ns, const char *json, uint32_t jlen,
+		uint64_t *cellid, geo_region_t *region)
+{
+	*cellid = 0;
+	*region = NULL;
+
+	if (! geo_parse(ns, json, jlen, cellid, region)) {
+		cf_warning(AS_PARTICLE, "geo_parse failed");
+		return false;
+	}
+
+	if (*cellid != 0 && *region != NULL) {
+		cf_warning(AS_PARTICLE, "geo_parse found both point and region");
+		geo_region_destroy(region);
+		*cellid = 0;
+		*region = NULL;
+		return false;
+	}
+
+	if (*cellid == 0 && *region == NULL) {
+		cf_warning(AS_PARTICLE, "geo_parse found neither point nor region");
+		return false;
+	}
+
+	return true;
+}
+
+// FIXME - writing a cell-less particle on failure is overkill - we can/should
+// handle failure in the callers, and leave pp untouched here.
+bool
 as_geojson_to_particle(const char *json, uint32_t jlen, as_particle **pp)
 {
-	geojson_mem *p_geojson_mem = (geojson_mem *)*pp;
 	uint64_t cellid;
 	geo_region_t region;
-	bool ret = true;
-	uint64_t *p_outcells = (uint64_t *)p_geojson_mem->data;
 
-	if (! geojson_parse(json, jlen, &cellid, &region)) {
-		ret = false;
-	}
+	bool ret = as_geojson_parse(NULL, json, jlen, &cellid, &region);
+
+	geojson_mem *p_geojson_mem = (geojson_mem *)*pp;
+	uint64_t *p_outcells = (uint64_t *)p_geojson_mem->data;
 
 	p_geojson_mem->flags = 0;
 
-	if (cellid) { // POINT
+	if (cellid != 0) { // POINT
 		p_geojson_mem->ncells = 1;
 		p_outcells[0] = cellid;
 	}
-	else if (region) { // REGION
+	else if (region != NULL) { // REGION
 		p_geojson_mem->flags |= GEOJSON_ISREGION;
 
-		uint32_t numcells;
+		uint32_t ncells;
 
 		if (! geo_region_cover(NULL, region, MAX_REGION_CELLS, p_outcells, NULL,
-				NULL, &numcells)) {
+				NULL, &ncells)) {
 			cf_warning(AS_PARTICLE, "geo_region_cover failed");
+
 			ret = false;
-			numcells = 0;
+			ncells = 0;
 		}
 
-		p_geojson_mem->ncells = (uint16_t)numcells;
 		geo_region_destroy(region);
+
+		p_geojson_mem->ncells = (uint16_t)ncells;
 	}
 	else {
+		// ret is false - parse failed, or both/neither point & region.
 		p_geojson_mem->ncells = 0;
 	}
 
@@ -584,45 +621,56 @@ as_geojson_to_particle(const char *json, uint32_t jlen, as_particle **pp)
 	return ret;
 }
 
-
-//==========================================================
-// Local helpers.
-//
-
-static inline uint32_t
-geojson_mem_sz(uint32_t ncells, size_t jlen)
+bool
+as_bin_cdt_context_geojson_parse(as_bin *b)
 {
-	return (uint32_t)(
-			sizeof(uint8_t) +				// flags
-			sizeof(uint16_t) +				// ncells (always 0 here)
-			(ncells * sizeof(uint64_t)) +	// cell array
-			jlen);							// json string
-}
+	size_t json_sz;
+	char const *json = as_geojson_mem_jsonstr(b->particle, &json_sz);
 
-static inline bool
-geojson_parse(const char *json, uint32_t jlen, uint64_t *cellid,
-		geo_region_t *region)
-{
-	*cellid = 0;
-	*region = NULL;
+	uint64_t cellid;
+	geo_region_t region;
 
-	if (! geo_parse(NULL, json, jlen, cellid, region)) {
-		cf_warning(AS_PARTICLE, "geo_parse failed");
+	if (! as_geojson_parse(NULL, json, (uint32_t)json_sz, &cellid, &region)) {
 		return false;
 	}
 
-	if (*cellid != 0 && *region != NULL) {
+	geojson_mem *p_geojson_mem = (geojson_mem *)b->particle;
+	uint64_t *p_outcells = (uint64_t *)p_geojson_mem->data;
+
+	p_geojson_mem->flags = 0;
+
+	cf_assert(p_geojson_mem->ncells == 0, AS_PARTICLE, "ncells %u not zero",
+			p_geojson_mem->ncells);
+
+	if (cellid != 0) { // POINT
+		p_geojson_mem->ncells = 1;
+		memmove(p_geojson_mem->data + sizeof(uint64_t), p_geojson_mem->data,
+				p_geojson_mem->sz - sizeof(uint8_t) - sizeof(uint16_t));
+		p_outcells[0] = cellid;
+	}
+	else { // REGION
+		uint64_t temp_cells[MAX_REGION_CELLS];
+		uint32_t ncells;
+
+		p_geojson_mem->flags = GEOJSON_ISREGION;
+
+		if (! geo_region_cover(NULL, region, MAX_REGION_CELLS, temp_cells, NULL,
+				NULL, &ncells)) {
+			cf_warning(AS_PARTICLE, "geo_region_cover failed");
+			geo_region_destroy(region);
+			return false;
+		}
+
 		geo_region_destroy(region);
-		cf_warning(AS_PARTICLE, "geo_parse found both point and region");
-		*cellid = 0;
-		*region = NULL;
-		return false;
+
+		p_geojson_mem->ncells = (uint16_t)ncells;
+		memmove(p_geojson_mem->data + ncells * sizeof(uint64_t),
+				p_geojson_mem->data,
+				p_geojson_mem->sz - sizeof(uint8_t) - sizeof(uint16_t));
+		memcpy(p_outcells, temp_cells, ncells * sizeof(uint64_t));
 	}
 
-	if (*cellid == 0 && *region == NULL) {
-		cf_warning(AS_PARTICLE, "geo_parse found neither point nor region");
-		return false;
-	}
+	p_geojson_mem->sz += sizeof(uint64_t) * p_geojson_mem->ncells;
 
 	return true;
 }

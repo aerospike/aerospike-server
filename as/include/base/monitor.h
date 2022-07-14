@@ -38,6 +38,7 @@
 #include "dynbuf.h"
 
 #include "base/datamodel.h"
+#include "sindex/sindex.h"
 
 
 #define AS_MON_OK 0
@@ -57,7 +58,7 @@ typedef struct as_mon_jobstat_s {
 	char		job_type[32];
 	char		ns[AS_ID_NAMESPACE_SZ];
 	char		set[AS_SET_NAME_MAX_SIZE];
-	char		si_name[AS_ID_INAME_SZ];
+	char		si_name[INAME_MAX_SZ];
 	uint32_t	n_pids_requested;
 	uint32_t	rps;
 	uint32_t	active_threads;

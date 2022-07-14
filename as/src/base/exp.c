@@ -850,14 +850,15 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 				.buf_sz = ret_val.r_geo_const.op->content_sz
 		};
 
-		uint32_t jlen = 0;
-		const char* json = (const char*)msgpack_get_bin(&mp, &jlen);
+		uint32_t json_sz = 0;
+		const char* json = (const char*)msgpack_get_bin(&mp, &json_sz);
 
+		// Skip as_bytes type.
 		json++;
-		jlen--;
+		json_sz--;
 
 		// TODO - already checked in eval_bin?
-		if (! as_geojson_to_particle(json, jlen, &rb->particle)) {
+		if (! as_geojson_to_particle(json, json_sz, &rb->particle)) {
 			cf_warning(AS_EXP, "as_exp_evel - invalid geojson");
 			return false;
 		}
@@ -2546,6 +2547,7 @@ build_value_geo(build_args* args)
 	const uint8_t* json = msgpack_get_bin(&args->mp, &json_sz);
 
 	cf_assert(json_sz != 0, AS_EXP, "unexpected");
+
 	op->content_sz = (uint32_t)(args->mp.buf + args->mp.offset - op->contents);
 
 	if (json == NULL) {
@@ -2554,15 +2556,17 @@ build_value_geo(build_args* args)
 		return false;
 	}
 
+	// Skip as_bytes type.
+	json++;
 	json_sz--;
-	json++; // skip as_bytes type
 
 	uint64_t cellid;
 	geo_region_t region;
 
 	op->compiled.region = NULL;
 
-	if (! geo_parse(NULL, (const char*)json, json_sz, &cellid, &region)) {
+	if (! as_geojson_parse(NULL, (const char*)json, json_sz, &cellid,
+			&region)) {
 		cf_warning(AS_EXP, "build_value_geo - error %u invalid geojson",
 				AS_ERR_PARAMETER);
 		return false;
@@ -4271,7 +4275,7 @@ json_to_rt_geo(const uint8_t* json, size_t jsonsz, rt_value* val)
 
 	*val = (rt_value){ 0 };
 
-	if (! geo_parse(NULL, (const char*)json, jsonsz, &cellid, &region)) {
+	if (! as_geojson_parse(NULL, (const char*)json, jsonsz, &cellid, &region)) {
 		val->type = RT_TRILEAN;
 		val->r_trilean = AS_EXP_UNK;
 		return;
@@ -5192,10 +5196,9 @@ display_msgpack(msgpack_in* mp, cf_dyn_buf* db)
 	}
 	case MSGPACK_TYPE_STRING: {
 		uint32_t str_sz;
-		const uint8_t* str = msgpack_get_bin(mp, &str_sz);
+		msgpack_get_bin(mp, &str_sz);
 
 		if (str_sz != 0) {
-			str++;
 			str_sz--;
 		}
 

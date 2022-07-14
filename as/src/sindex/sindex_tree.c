@@ -26,18 +26,22 @@
 
 #include "sindex/sindex_tree.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 #include <xmmintrin.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_hash_math.h"
 
 #include "arenax.h"
+#include "bits.h"
 #include "log.h"
 #include "xmem.h"
 
@@ -45,7 +49,7 @@
 #include "base/index.h"
 #include "fabric/partition.h"
 #include "query/query_job.h"
-#include "sindex/secondary_index.h"
+#include "sindex/sindex.h"
 #include "sindex/sindex_arena.h"
 
 //#include "warnings.h"
@@ -53,22 +57,31 @@
 #pragma GCC diagnostic warning "-Wcast-qual"
 #pragma GCC diagnostic warning "-Wcast-align"
 
-#define BINARY_SEARCH 0
+#define BINARY_SEARCH 1
 
 
 //==========================================================
 // Typedefs & constants.
 //
 
-typedef struct si_btree_node_s {
-	uint16_t n_keys;
-	uint16_t leaf : 1; // TODO - change to bool? (Or will we need the 15 bits?)
-	uint16_t : 15;
-	uint16_t min_degree;
-	uint16_t max_degree;
-} si_btree_node;
+#define MAX_GC_BURST 1000
+#define MAX_GC_BURST_AF 30 // limit primary index IO under sindex tree lock
+
+#define MAX_QUERY_BURST 100
+
+#define MAX_CARDINALITY_BURST 1000
 
 #define CACHE_LINE_SZ 64
+
+#define HLL_N_INDEX_BITS 16
+#define HLL_N_REGISTERS (1 << HLL_N_INDEX_BITS) // 64K
+
+#define HLL_BITS 6
+#define HLL_MAX_VALUE (1 << HLL_BITS)
+
+#define HLL_REGISTERS_SZ (HLL_BITS * HLL_N_REGISTERS / 8) // 48K
+
+#define HLL_ALPHA (0.7213 / (1.0 + 1.079 / HLL_N_REGISTERS))
 
 typedef struct key_bound_s {
 	int32_t index;
@@ -106,10 +119,21 @@ typedef struct query_collect_cb_info_s {
 	search_key last;
 } query_collect_cb_info;
 
-#define MAX_GC_BURST 1000
-#define MAX_GC_BURST_AF 30 // limit primary index IO under sindex tree lock
+typedef struct hyperloglog_s {
+	uint8_t registers[HLL_REGISTERS_SZ];
+} hyperloglog;
 
-#define MAX_QUERY_BURST 100
+typedef struct cardinality_collect_cb_info_s {
+	as_namespace* ns;
+
+	uint64_t* n_keys;
+	hyperloglog* bval_hll;
+	hyperloglog* rec_hll;
+
+	uint32_t n_keys_reduced;
+
+	search_key last;
+} cardinality_collect_cb_info;
 
 
 //==========================================================
@@ -120,11 +144,12 @@ static void gc_reduce_and_delete(as_sindex* si, si_btree* bt);
 static bool gc_collect_cb(const si_btree_key* key, void* udata);
 static void query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
 static bool query_collect_cb(const si_btree_key* key, void* udata);
+static void cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys, hyperloglog* bval_hll, hyperloglog* rec_hll);
+static bool cardinality_collect_cb(const si_btree_key* key, void* udata);
 
-static si_btree* si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena, bool unsigned_bvals);
+static si_btree* si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena, bool unsigned_bvals, uint32_t si_id, uint16_t tree_ix);
 static void si_btree_destroy(si_btree* bt);
 static bool si_btree_put(si_btree* bt, const si_btree_key* key);
-static bool si_btree_delete(si_btree* bt, const si_btree_key* key);
 
 static void btree_destroy(si_btree* bt, si_arena_handle node_h);
 static bool btree_put(si_btree* bt, si_btree_node* node, const si_btree_key* key);
@@ -147,6 +172,15 @@ static key_bound greatest_lower_bound(const si_btree* bt, const si_btree_node* n
 static key_bound left_bound(const si_btree* bt, const si_btree_node* node, const search_key* skey);
 static void split_child(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child);
 static void merge_children(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* left, si_arena_handle right_h);
+
+static void hll_add(hyperloglog* hll, const uint8_t* buf, size_t buf_sz);
+static uint64_t hll_estimate_cardinality(const hyperloglog* hll);
+
+static void hll_hash(const uint8_t* ele, size_t ele_sz, uint16_t* register_ix, uint64_t* value);
+static uint64_t hll_get_register(const hyperloglog* hll, uint32_t r);
+static void hll_set_register(hyperloglog* hll, uint32_t r, uint64_t value);
+static double hll_tau(double val);
+static double hll_sigma(double val);
 
 
 //==========================================================
@@ -294,9 +328,10 @@ set_child(const si_btree* bt, si_btree_node* node, uint32_t i,
 	node_children[i] = child_h;
 }
 
-// TODO - will promote for EE.
 #define SI_RESOLVE(_h) \
 	((si_btree_node*)as_sindex_arena_resolve(bt->si_arena, _h))
+
+#define ROUND_FRACTION(n, d) ((uint64_t)(((double)n / d) + 0.5))
 
 
 //==========================================================
@@ -308,25 +343,25 @@ as_sindex_tree_create(as_sindex* si)
 {
 	as_namespace* ns = si->ns;
 
-	si->imd->btrees = cf_malloc(si->imd->n_pimds * sizeof(si_btree*));
+	si->btrees = cf_malloc(si->n_btrees * sizeof(si_btree*));
 
-	bool unsigned_bvals = si->imd->sktype == COL_TYPE_GEOJSON;
+	bool unsigned_bvals = si->ktype == AS_PARTICLE_TYPE_GEOJSON;
 
-	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		si->imd->btrees[ix] = si_btree_create(ns->arena, ns->si_arena,
-				unsigned_bvals);
+	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		si->btrees[ix] = si_btree_create(ns->arena, ns->si_arena,
+				unsigned_bvals, si->id, (uint16_t)ix);
 	}
 }
 
 void
 as_sindex_tree_destroy(as_sindex* si)
 {
-	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		si_btree_destroy(si->imd->btrees[ix]);
+	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		si_btree_destroy(si->btrees[ix]);
 	}
 
-	cf_free(si->imd->btrees);
-	si->imd->btrees = NULL;
+	cf_free(si->btrees);
+	si->btrees = NULL;
 }
 
 uint64_t
@@ -334,8 +369,8 @@ as_sindex_tree_n_keys(const as_sindex* si)
 {
 	uint64_t n_keys = 0;
 
-	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		n_keys += si->imd->btrees[ix]->n_keys;
+	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		n_keys += si->btrees[ix]->n_keys;
 	}
 
 	return n_keys;
@@ -346,8 +381,8 @@ as_sindex_tree_mem_size(const as_sindex* si)
 {
 	uint64_t n_nodes = 0;
 
-	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		n_nodes += si->imd->btrees[ix]->n_nodes;
+	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		n_nodes += si->btrees[ix]->n_nodes;
 	}
 
 	return n_nodes * si->ns->si_arena->ele_sz; // ignore si_btree overhead
@@ -356,8 +391,8 @@ as_sindex_tree_mem_size(const as_sindex* si)
 void
 as_sindex_tree_gc(as_sindex* si)
 {
-	for (uint32_t ix = 0; ix < si->imd->n_pimds; ix++) {
-		gc_reduce_and_delete(si, si->imd->btrees[ix]);
+	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		gc_reduce_and_delete(si, si->btrees[ix]);
 	}
 }
 
@@ -365,7 +400,7 @@ bool
 as_sindex_tree_put(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 {
 	as_index* r = cf_arenax_resolve(si->ns->arena, r_h);
-	si_btree* bt = si->imd->btrees[as_partition_getid(&r->keyd)];
+	si_btree* bt = si->btrees[as_partition_getid(&r->keyd)];
 
 	si_btree_key key = {
 			.bval = bval,
@@ -380,7 +415,7 @@ bool
 as_sindex_tree_delete(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 {
 	as_index* r = cf_arenax_resolve(si->ns->arena, r_h);
-	si_btree* bt = si->imd->btrees[as_partition_getid(&r->keyd)];
+	si_btree* bt = si->btrees[as_partition_getid(&r->keyd)];
 
 	si_btree_key key = {
 			.bval = bval,
@@ -396,10 +431,9 @@ as_sindex_tree_query(as_sindex* si, const as_query_range* range,
 		as_partition_reservation* rsv, int64_t bval, cf_digest* keyd,
 		as_sindex_reduce_fn cb, void* udata)
 {
-	si_btree* bt = si->imd->btrees[rsv->p->id];
+	si_btree* bt = si->btrees[rsv->p->id];
 
-	// TODO - better way to tell geo query/sindex?
-	if (si->imd->sktype == COL_TYPE_GEOJSON && range->isrange) {
+	if (range->bin_type == AS_PARTICLE_TYPE_GEOJSON && range->isrange) {
 		for (uint32_t r_ix = 0; r_ix < range->u.geo.num_r; r_ix++) {
 			as_query_range_start_end* r = &range->u.geo.r[r_ix];
 
@@ -418,12 +452,46 @@ as_sindex_tree_query(as_sindex* si, const as_query_range* range,
 			range->de_dup, cb, udata);
 }
 
+void
+as_sindex_tree_collect_cardinality(as_sindex* si)
+{
+	uint64_t n_keys = 0;
+	hyperloglog bval_hll = { { 0 } };
+	hyperloglog* rec_hll = si->itype == AS_SINDEX_ITYPE_DEFAULT ?
+			NULL : cf_calloc(1, sizeof(hyperloglog));
+
+	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		si_btree* bt = si->btrees[ix];
+
+		if (bt->n_keys != 0) {
+			cardinality_reduce(si, bt, &n_keys, &bval_hll, rec_hll);
+
+			usleep(100);
+		}
+	}
+
+	uint64_t n_bvals = hll_estimate_cardinality(&bval_hll);
+
+	si->keys_per_bval = n_bvals == 0 ? 0 : ROUND_FRACTION(n_keys, n_bvals);
+
+	if (rec_hll != NULL) {
+		uint64_t n_recs = hll_estimate_cardinality(rec_hll);
+
+		si->keys_per_rec = n_recs == 0 ? 0 : ROUND_FRACTION(n_keys, n_recs);
+
+		cf_free(rec_hll);
+	}
+	else {
+		si->keys_per_rec = n_keys == 0 ? 0 : 1;
+	}
+}
+
 
 //==========================================================
 // Local helpers - reduce utilities.
 //
 
-void
+static void
 gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 {
 	as_namespace* ns = si->ns;
@@ -440,7 +508,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 			.keys = keys
 	};
 
-	while (true) {
+	while (! si->dropped) {
 		search_key* last = first ? NULL : &ci.last;
 
 		si_btree_reduce(bt, last, NULL, gc_collect_cb, &ci);
@@ -608,6 +676,67 @@ query_collect_cb(const si_btree_key* key, void* udata)
 	return true;
 }
 
+static void
+cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys,
+		hyperloglog* bval_hll, hyperloglog* rec_hll)
+{
+	as_namespace* ns = si->ns;
+
+	bool first = true;
+
+	cardinality_collect_cb_info ci = {
+			.ns = ns,
+			.n_keys = n_keys,
+			.bval_hll = bval_hll,
+			.rec_hll = rec_hll
+	};
+
+	while (! si->dropped) {
+		search_key* last = first ? NULL : &ci.last;
+
+		si_btree_reduce(bt, last, NULL, cardinality_collect_cb, &ci);
+
+		first = false;
+
+		if (ci.n_keys_reduced != MAX_CARDINALITY_BURST) {
+			return; // done with this physical tree
+		}
+
+		ci.n_keys_reduced = 0;
+	}
+}
+
+static bool
+cardinality_collect_cb(const si_btree_key* key, void* udata)
+{
+	cardinality_collect_cb_info* ci = (cardinality_collect_cb_info*)udata;
+	as_namespace* ns = ci->ns;
+
+	(*ci->n_keys)++;
+
+	hll_add(ci->bval_hll, (const uint8_t*)&key->bval, sizeof(key->bval));
+
+	if (ci->rec_hll != NULL) {
+		uint64_t h = key->r_h;
+
+		// TODO - worth it to "swap" to LE and use 5 bytes?
+		hll_add(ci->rec_hll, (const uint8_t*)&h, sizeof(h));
+	}
+
+	if (++ci->n_keys_reduced == MAX_CARDINALITY_BURST) {
+		as_index* r = cf_arenax_resolve(ns->arena, key->r_h);
+
+		ci->last.bval = key->bval;
+		ci->last.has_digest = true;
+		ci->last.keyd_stub = get_keyd_stub(&r->keyd);
+		ci->last.keyd = r->keyd;
+
+		return false; // stops si_btree_reduce()
+	}
+
+	return true;
+}
+
 
 //==========================================================
 // Local helpers - si_btree layer.
@@ -615,7 +744,7 @@ query_collect_cb(const si_btree_key* key, void* udata)
 
 static si_btree*
 si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena,
-		bool unsigned_bvals)
+		bool unsigned_bvals, uint32_t si_id, uint16_t tree_ix)
 {
 	si_btree* bt = cf_calloc(1, sizeof(si_btree));
 
@@ -630,6 +759,8 @@ si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena,
 	bt->arena = arena;
 	bt->si_arena = si_arena;
 	bt->unsigned_bvals = unsigned_bvals;
+	bt->si_id = si_id;
+	bt->tree_ix = tree_ix;
 
 	uint32_t node_sz = si_arena->ele_sz;
 
@@ -692,7 +823,8 @@ si_btree_put(si_btree* bt, const si_btree_key* key)
 	return true;
 }
 
-static bool
+// Accessed from enterprise split.
+bool
 si_btree_delete(si_btree* bt, const si_btree_key* key)
 {
 	pthread_rwlock_wrlock(&bt->lock);
@@ -1154,12 +1286,16 @@ create_node(const si_btree* bt, bool leaf)
 	if (leaf) {
 		*node = (si_btree_node){
 				.leaf = 1,
+				.si_id = bt->si_id,
+				.tree_ix = bt->tree_ix,
 				.min_degree = (uint16_t)(bt->leaf_order / 2),
 				.max_degree = (uint16_t)bt->leaf_order
 		};
 	}
 	else {
 		*node = (si_btree_node){
+				.si_id = bt->si_id,
+				.tree_ix = bt->tree_ix,
 				.min_degree = (uint16_t)(bt->inner_order / 2),
 				.max_degree = (uint16_t)bt->inner_order
 		};
@@ -1423,4 +1559,153 @@ merge_children(si_btree* bt, si_btree_node* node, uint32_t i,
 	as_sindex_arena_free(bt->si_arena, right_h);
 
 	bt->n_nodes--;
+}
+
+
+//==========================================================
+// Local helpers - HLL.
+// TODO - use refactored hmh lib code from particle_hll.c?
+//
+
+static void
+hll_add(hyperloglog* hll, const uint8_t* buf, size_t buf_sz)
+{
+	uint16_t register_ix;
+	uint64_t new_value;
+
+	hll_hash(buf, buf_sz, &register_ix, &new_value);
+
+	if (new_value > hll_get_register(hll, register_ix)) {
+		hll_set_register(hll, register_ix, new_value);
+	}
+}
+
+static uint64_t
+hll_estimate_cardinality(const hyperloglog* hll)
+{
+	uint32_t c[HLL_MAX_VALUE + 1] = { 0 }; // q_bits + 1
+
+	for (uint32_t r = 0; r < HLL_N_REGISTERS; r++) {
+		c[hll_get_register(hll, r)]++;
+	}
+
+	double z = HLL_N_REGISTERS *
+			hll_tau(c[HLL_MAX_VALUE] / (double)HLL_N_REGISTERS);
+
+	for (uint32_t k = HLL_MAX_VALUE; k > 0; k--) {
+		z = 0.5 * (z + c[k]);
+	}
+
+	z += HLL_N_REGISTERS * hll_sigma(c[0] / (double)HLL_N_REGISTERS);
+
+	return (uint64_t)
+			(llroundl(HLL_ALPHA * HLL_N_REGISTERS * HLL_N_REGISTERS / z));
+}
+
+static void
+hll_hash(const uint8_t* ele, size_t ele_sz, uint16_t* register_ix,
+		uint64_t* value)
+{
+	uint8_t hash[16];
+
+	murmurHash3_x64_128(ele, ele_sz, hash);
+
+	uint64_t* hash_64 = (uint64_t*)hash;
+	uint16_t index_mask = (uint16_t)(HLL_N_REGISTERS - 1);
+
+	*register_ix = (uint16_t)hash_64[0] & index_mask;
+	*value = (uint64_t)(cf_lsb64(hash_64[1]) + 1);
+}
+
+static uint64_t
+hll_get_register(const hyperloglog* hll, uint32_t r) {
+	uint32_t bit_offset = HLL_BITS * r;
+	uint32_t byte_offset = bit_offset / 8;
+	uint32_t bit_end = HLL_BITS * HLL_N_REGISTERS;
+	uint32_t byte_end = (bit_end + 7) / 8;
+	uint32_t max_offset = byte_end - 8;
+
+	uint32_t l_bit = bit_offset % 8;
+
+	if (byte_offset > max_offset) {
+		l_bit += (byte_offset - max_offset) * 8;
+		byte_offset = max_offset;
+	}
+
+	const uint64_t* dwords = (const uint64_t*)(hll->registers + byte_offset);
+	uint64_t value = cf_swap_from_be64(dwords[0]);
+	uint32_t shift_bits = 64 - (l_bit + HLL_BITS);
+
+	uint64_t mask = HLL_MAX_VALUE - 1;
+
+	return (value >> shift_bits) & mask;
+}
+
+static void
+hll_set_register(hyperloglog* hll, uint32_t r, uint64_t value) {
+	uint32_t bit_offset = HLL_BITS * r;
+	uint32_t byte_offset = bit_offset / 8;
+	uint32_t bit_end = HLL_BITS * HLL_N_REGISTERS;
+	uint32_t byte_end = (bit_end + 7) / 8;
+	uint32_t max_offset = byte_end - 8;
+
+	uint32_t shift_bits = bit_offset % 8;
+
+	if (byte_offset > max_offset) {
+		shift_bits += (byte_offset - max_offset) * 8;
+		byte_offset = max_offset;
+	}
+
+	uint64_t mask = (uint64_t)(HLL_MAX_VALUE - 1) << (64 - HLL_BITS);
+
+	mask >>= shift_bits;
+	value <<= (64 - HLL_BITS);
+	value >>= shift_bits;
+
+	uint64_t* dwords = (uint64_t*)(hll->registers + byte_offset);
+	uint64_t dword = cf_swap_from_be64(dwords[0]);
+
+	dwords[0] = cf_swap_to_be64((dword & ~mask) | value);
+}
+
+static double
+hll_tau(double val)
+{
+	if (val == 0.0 || val == 1.0) {
+		return 0.0;
+	}
+
+	double z_prime;
+	double y = 1.0;
+	double z = 1 - val;
+
+	do {
+		val = sqrt(val);
+		z_prime = z;
+		y *= 0.5;
+		z -= pow(1 - val, 2) * y;
+	} while (z_prime != z);
+
+	return z / 3;
+}
+
+static double
+hll_sigma(double val)
+{
+	if (val == 1.0) {
+		return INFINITY;
+	}
+
+	double z_prime;
+	double y = 1;
+	double z = val;
+
+	do {
+		val *= val;
+		z_prime = z;
+		z += val * y;
+		y += y;
+	} while (z_prime != z);
+
+	return z;
 }

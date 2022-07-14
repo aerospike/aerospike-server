@@ -1,7 +1,7 @@
 /*
  * proto.h
  *
- * Copyright (C) 2008-2018 Aerospike, Inc.
+ * Copyright (C) 2008-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -285,6 +285,7 @@ typedef struct as_msg_field_s {
 // Secondary index.
 #define AS_MSG_FIELD_TYPE_INDEX_NAME        21 // was superfluous - but reserved for future use
 #define AS_MSG_FIELD_TYPE_INDEX_RANGE       22
+#define AS_MSG_FIELD_TYPE_INDEX_CONTEXT     23
 #define AS_MSG_FIELD_TYPE_INDEX_TYPE        26
 
 // UDF.

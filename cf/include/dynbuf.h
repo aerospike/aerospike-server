@@ -1,7 +1,7 @@
 /*
  * dynbuf.h
  *
- * Copyright (C) 2009-2020 Aerospike, Inc.
+ * Copyright (C) 2009-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -49,7 +49,7 @@ extern void cf_dyn_buf_reserve(cf_dyn_buf *db, size_t sz, uint8_t **from);
 extern void cf_dyn_buf_append_string(cf_dyn_buf *db, const char *s);
 extern void cf_dyn_buf_append_char(cf_dyn_buf *db, char c);
 extern void cf_dyn_buf_append_bool(cf_dyn_buf *db, bool b);
-extern void cf_dyn_buf_append_buf(cf_dyn_buf *db, uint8_t *buf, size_t sz);
+extern void cf_dyn_buf_append_buf(cf_dyn_buf *db, const uint8_t *buf, size_t sz);
 extern void cf_dyn_buf_append_int(cf_dyn_buf *db, int i);
 extern void cf_dyn_buf_append_uint64_x(cf_dyn_buf *db, uint64_t i); // HEX FORMAT!
 extern void cf_dyn_buf_append_uint64(cf_dyn_buf *db, uint64_t i);
