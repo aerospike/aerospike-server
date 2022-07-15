@@ -748,12 +748,12 @@ range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 	data += sizeof(uint32_t);
 	len -= (uint32_t)sizeof(uint32_t);
 
-	const char* startp = (const char*)data;
-
 	if (len < startl) {
 		cf_warning(AS_QUERY, "cannot parse string range");
 		return false;
 	}
+
+	const char* startp = (const char*)data;
 
 	data += startl;
 	len -= startl;
