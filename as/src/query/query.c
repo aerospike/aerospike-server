@@ -701,7 +701,6 @@ range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len)
 	data += sizeof(uint32_t);
 
 	int64_t start = (int64_t)cf_swap_from_be64(*((uint64_t*)data));
-	range->u.r.start = start;
 
 	data += sizeof(uint64_t);
 
@@ -715,12 +714,14 @@ range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len)
 	data += sizeof(uint32_t);
 
 	int64_t end = (int64_t)cf_swap_from_be64(*((uint64_t*)data));
-	range->u.r.end = end;
 
 	if (start > end) {
 		cf_warning(AS_QUERY, "invalid range - %ld ... %ld", start, end);
 		return false;
 	}
+
+	range->u.r.start = start;
+	range->u.r.end = end;
 
 	range->isrange = start != end;
 
@@ -747,7 +748,7 @@ range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 	data += sizeof(uint32_t);
 	len -= (uint32_t)sizeof(uint32_t);
 
-	const char* start = (const char*)data;
+	const char* startp = (const char*)data;
 
 	if (len < startl) {
 		cf_warning(AS_QUERY, "cannot parse string range");
@@ -767,28 +768,28 @@ range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 	data += sizeof(uint32_t);
 	len -= (uint32_t)sizeof(uint32_t);
 
-	const char* end = (const char*)data;
-
 	if (len < endl) {
 		cf_warning(AS_QUERY, "cannot parse string range");
 		return false;
 	}
 
-	if (startl != endl || memcmp(start, end, startl) != 0) {
+	// Here, data points to redundant 'end' string.
+
+	if (startl != endl || memcmp(startp, data, startl) != 0) {
 		cf_warning(AS_QUERY, "only equality queries supported on strings");
 		return false;
 	}
 
-	range->u.r.start = as_sindex_string_to_bval(start, startl);
+	range->u.r.start = as_sindex_string_to_bval(startp, startl);
 	range->u.r.end = range->u.r.start;
 
 	range->str_len = startl;
-	memcpy(range->str_stub, start, startl < sizeof(range->str_stub) ?
+	memcpy(range->str_stub, startp, startl < sizeof(range->str_stub) ?
 			startl : sizeof(range->str_stub));
 
 	range->isrange = false;
 
-	cf_debug(AS_QUERY, "query on string %.*s", startl, start);
+	cf_debug(AS_QUERY, "query on string %.*s", startl, startp);
 
 	return true;
 }
@@ -817,7 +818,7 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 		return false;
 	}
 
-	const char* start = (const char*)data;
+	const char* startp = (const char*)data;
 
 	data += startl;
 	len -= startl;
@@ -837,17 +838,16 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 		return false;
 	}
 
-	const char* end = (const char*)data;
+	// Here, data points to redundant 'end' string.
 
-	// TODO: same JSON content may not be byte-identical.
-	if (startl != endl || memcmp(start, end, startl) != 0) {
+	if (startl != endl || memcmp(startp, data, startl) != 0) {
 		cf_warning(AS_QUERY, "only geospatial query supported on geojson");
 		return false;
 	}
 
 	as_query_geo_range* geo = &range->u.geo;
 
-	if (! as_geojson_parse(ns, start, startl, &geo->cellid, &geo->region)) {
+	if (! as_geojson_parse(ns, startp, startl, &geo->cellid, &geo->region)) {
 		// as_geojson_parse will have printed a warning.
 		return false;
 	}
@@ -889,9 +889,8 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 		cf_atomic64_incr(&ns->geo_region_query_count);
 		cf_atomic64_add(&ns->geo_region_query_cells, ncells);
 
-		// Geospatial queries use multiple srange elements.	 Many
-		// of the fields are copied from the first cell because
-		// they were filled in above.
+		// Geospatial queries use multiple srange elements. Many of the fields
+		// are copied from the first cell because they were filled in above.
 		for (uint32_t i = 0; i < ncells; i++) {
 			geo->r[i].start = (int64_t)cellmin[i];
 			geo->r[i].end = (int64_t)cellmax[i];
