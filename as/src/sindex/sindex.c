@@ -331,9 +331,7 @@ as_sindex_put_rd(as_sindex* si, as_storage_rd* rd, as_index_ref* r_ref)
 
 	if (sbin_from_bin(si, b, &sbin)) {
 		// Mark record for sindex before insertion.
-		as_index* r = r_ref->r;
-
-		as_index_set_in_sindex(r);
+		as_index_set_in_sindex(r_ref->r);
 
 		as_sindex_update_by_sbin(&sbin, 1, r_ref->r_h);
 		sbin_free(&sbin);
@@ -557,8 +555,8 @@ as_sindex_stats_str(as_namespace* ns, char* iname, cf_dyn_buf* db)
 	info_append_uint64(db, "entries", as_sindex_tree_n_keys(si));
 	info_append_uint64(db, "memory_used", as_sindex_tree_mem_size(si));
 
-	info_append_uint64(db, "keys_per_bval", si->keys_per_bval);
-	info_append_uint64(db, "keys_per_rec", si->keys_per_rec);
+	info_append_uint64(db, "entries_per_bval", si->keys_per_bval);
+	info_append_uint64(db, "entries_per_rec", si->keys_per_rec);
 
 	info_append_uint32(db, "load_pct", si->populate_pct);
 	info_append_uint64(db, "load_time", si->load_time);

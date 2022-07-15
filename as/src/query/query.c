@@ -691,10 +691,10 @@ range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len)
 		return false;
 	}
 
-	uint32_t startl = ntohl(*((uint32_t*)data));
+	uint32_t startl = cf_swap_from_be32(*((uint32_t*)data));
 
 	if (startl != 8) {
-		cf_warning(AS_QUERY, "can only handle 8 byte numerics %u", startl);
+		cf_warning(AS_QUERY, "can only handle 8 byte integers %u", startl);
 		return false;
 	}
 
@@ -702,12 +702,13 @@ range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len)
 
 	int64_t start = (int64_t)cf_swap_from_be64(*((uint64_t*)data));
 	range->u.r.start = start;
+
 	data += sizeof(uint64_t);
 
-	uint32_t endl = ntohl(*((uint32_t*)data));
+	uint32_t endl = cf_swap_from_be32(*((uint32_t*)data));
 
 	if (endl != 8) {
-		cf_warning(AS_QUERY, "can only handle 8 byte numerics %u", endl);
+		cf_warning(AS_QUERY, "can only handle 8 byte integers %u", endl);
 		return false;
 	}
 
@@ -717,13 +718,13 @@ range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len)
 	range->u.r.end = end;
 
 	if (start > end) {
-		cf_warning(AS_QUERY, "invalid range - %ld..%ld", start, end);
+		cf_warning(AS_QUERY, "invalid range - %ld ... %ld", start, end);
 		return false;
 	}
 
 	range->isrange = start != end;
 
-	cf_debug(AS_QUERY, "range - %ld..%ld", start, end);
+	cf_debug(AS_QUERY, "query range - %ld ... %ld", start, end);
 
 	return true;
 }
@@ -736,59 +737,58 @@ range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 		return false;
 	}
 
-	uint32_t startl = ntohl(*((uint32_t*)data));
+	uint32_t startl = cf_swap_from_be32(*((uint32_t*)data));
 
 	if (startl >= MAX_STRING_KSIZE) {
-		cf_warning(AS_QUERY, "value length %u too long", startl);
+		cf_warning(AS_QUERY, "query string too long - %u", startl);
 		return false;
 	}
 
-	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
+	len -= (uint32_t)sizeof(uint32_t);
 
-	const char* start_binval = (const char*)data;
+	const char* start = (const char*)data;
 
 	if (len < startl) {
 		cf_warning(AS_QUERY, "cannot parse string range");
 		return false;
 	}
 
-	len -= startl;
 	data += startl;
+	len -= startl;
 
 	if (len < sizeof(uint32_t)) {
 		cf_warning(AS_QUERY, "cannot parse string range");
 		return false;
 	}
 
-	uint32_t endl = ntohl(*((uint32_t*)data));
+	uint32_t endl = cf_swap_from_be32(*((uint32_t*)data));
 
-	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
+	len -= (uint32_t)sizeof(uint32_t);
 
-	const char* end_binval = (const char*)data;
+	const char* end = (const char*)data;
 
 	if (len < endl) {
 		cf_warning(AS_QUERY, "cannot parse string range");
 		return false;
 	}
 
-	if (startl != endl || (memcmp(start_binval, end_binval, startl) != 0)) {
-		cf_warning(AS_QUERY, "only equality query supported in strings %s-%s",
-				start_binval, end_binval);
+	if (startl != endl || memcmp(start, end, startl) != 0) {
+		cf_warning(AS_QUERY, "only equality queries supported on strings");
 		return false;
 	}
 
-	range->u.r.start = as_sindex_string_to_bval(start_binval, startl);
+	range->u.r.start = as_sindex_string_to_bval(start, startl);
 	range->u.r.end = range->u.r.start;
 
 	range->str_len = startl;
-	memcpy(range->str_stub, start_binval, startl < sizeof(range->str_stub) ?
+	memcpy(range->str_stub, start, startl < sizeof(range->str_stub) ?
 			startl : sizeof(range->str_stub));
 
 	range->isrange = false;
 
-	cf_debug(AS_QUERY, "range is equal %s, %s", start_binval, end_binval);
+	cf_debug(AS_QUERY, "query on string %.*s", startl, start);
 
 	return true;
 }
@@ -802,103 +802,97 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 		return false;
 	}
 
-	uint32_t startl = ntohl(*((uint32_t*)data));
+	uint32_t startl = cf_swap_from_be32(*((uint32_t*)data));
 
-	if ((startl == 0) || (startl >= MAX_GEOJSON_KSIZE)) {
-		cf_warning(AS_QUERY, "invalid query key size %u", startl);
+	if (startl == 0 || startl >= MAX_GEOJSON_KSIZE) {
+		cf_warning(AS_QUERY, "invalid query key size - %u", startl);
 		return false;
 	}
 
-	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
+	len -= (uint32_t)sizeof(uint32_t);
 
 	if (len < startl) {
 		cf_warning(AS_QUERY, "cannot parse geojson range");
 		return false;
 	}
 
-	const char* start_binval = (const char*)data;
+	const char* start = (const char*)data;
 
-	len -= startl;
 	data += startl;
+	len -= startl;
 
 	if (len < sizeof(uint32_t)) {
 		cf_warning(AS_QUERY, "cannot parse geojson range");
 		return false;
 	}
 
-	uint32_t endl = ntohl(*((uint32_t*)data));
+	uint32_t endl = cf_swap_from_be32(*((uint32_t*)data));
 
-	len -= (uint32_t)sizeof(uint32_t);
 	data += sizeof(uint32_t);
+	len -= (uint32_t)sizeof(uint32_t);
 
 	if (len < endl) {
 		cf_warning(AS_QUERY, "cannot parse geojson range");
 		return false;
 	}
 
-	const char* end_binval = (const char*)data;
+	const char* end = (const char*)data;
 
 	// TODO: same JSON content may not be byte-identical.
-	if (startl != endl || (memcmp(start_binval, end_binval, startl) != 0)) {
-		cf_warning(AS_QUERY, "only geospatial query supported on geojson %s-%s",
-				start_binval, end_binval);
+	if (startl != endl || memcmp(start, end, startl) != 0) {
+		cf_warning(AS_QUERY, "only geospatial query supported on geojson");
 		return false;
 	}
 
 	as_query_geo_range* geo = &range->u.geo;
 
-	if (! as_geojson_parse(ns, start_binval, startl, &geo->cellid,
-			&geo->region)) {
+	if (! as_geojson_parse(ns, start, startl, &geo->cellid, &geo->region)) {
 		// as_geojson_parse will have printed a warning.
 		return false;
 	}
 
-	if (geo->cellid != 0) {
-		// regions-containing-point query
-
+	if (geo->cellid != 0) { // regions-containing-point query
 		uint64_t center[MAX_REGION_LEVELS];
-		uint32_t numcenters;
+		uint32_t ncenters;
 
 		if (! geo_point_centers(geo->cellid, MAX_REGION_LEVELS, center,
-						&numcenters)) {
+				&ncenters)) {
 			// geo_point_centers will have printed a warning.
 			return false;
 		}
 
-		geo->r = cf_calloc(numcenters, sizeof(as_query_range_start_end));
-		geo->num_r = (uint8_t)numcenters;
+		geo->r = cf_calloc(ncenters, sizeof(as_query_range_start_end));
+		geo->num_r = (uint8_t)ncenters;
 
 		// Geospatial queries use multiple srange elements.
-		for (uint32_t i = 0; i < numcenters; i++) {
+		for (uint32_t i = 0; i < ncenters; i++) {
 			geo->r[i].start = (int64_t)center[i];
 			geo->r[i].end = (int64_t)center[i];
 		}
 	}
-	else {
-		// points-inside-region query
-
+	else { // points-inside-region query
 		uint64_t cellmin[MAX_REGION_CELLS];
 		uint64_t cellmax[MAX_REGION_CELLS];
-		uint32_t numcells;
+		uint32_t ncells;
 
 		if (! geo_region_cover(ns, geo->region, MAX_REGION_CELLS, NULL, cellmin,
-						cellmax, &numcells)) {
+				cellmax, &ncells)) {
 			geo_region_destroy(geo->region);
 			// geo_point_centers will have printed a warning.
 			return false;
 		}
 
-		geo->r = cf_calloc(numcells, sizeof(as_query_range_start_end));
-		geo->num_r = (uint8_t)numcells;
+		geo->r = cf_calloc(ncells, sizeof(as_query_range_start_end));
+		geo->num_r = (uint8_t)ncells;
 
 		cf_atomic64_incr(&ns->geo_region_query_count);
-		cf_atomic64_add(&ns->geo_region_query_cells, numcells);
+		cf_atomic64_add(&ns->geo_region_query_cells, ncells);
 
 		// Geospatial queries use multiple srange elements.	 Many
 		// of the fields are copied from the first cell because
 		// they were filled in above.
-		for (uint32_t i = 0; i < numcells; i++) {
+		for (uint32_t i = 0; i < ncells; i++) {
 			geo->r[i].start = (int64_t)cellmin[i];
 			geo->r[i].end = (int64_t)cellmax[i];
 		}
@@ -926,6 +920,7 @@ sort_geo_range(as_query_geo_range* geo)
 		for (uint8_t i = 0; i < geo->num_r - 1; i++) {
 			if ((uint64_t)geo->r[i].start > (uint64_t)geo->r[i + 1].start) {
 				as_query_range_start_end temp = geo->r[i];
+
 				geo->r[i] = geo->r[i + 1];
 				geo->r[i + 1] = temp;
 
