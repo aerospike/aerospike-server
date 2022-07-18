@@ -519,7 +519,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 			si_btree_delete(bt, &keys[i]);
 		}
 
-		si->n_defrag_records += ci.n_keys;
+		si->n_gc_cleaned += ci.n_keys;
 		ns->n_sindex_gc_cleaned += ci.n_keys;
 
 		if (ci.n_keys_reduced != max_burst) {
@@ -545,10 +545,12 @@ gc_collect_cb(const si_btree_key* key, void* udata)
 	}
 
 	if (++ci->n_keys_reduced == ci->max_burst) {
-		ci->last.bval = key->bval;
-		ci->last.has_digest = true;
-		ci->last.keyd_stub = get_keyd_stub(&r->keyd);
-		ci->last.keyd = r->keyd;
+		ci->last = (search_key){
+				.bval = key->bval,
+				.has_digest = true,
+				.keyd_stub = get_keyd_stub(&r->keyd),
+				.keyd = r->keyd
+		};
 
 		return false; // stops si_btree_reduce()
 	}
@@ -582,10 +584,12 @@ query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval,
 	if (keyd != NULL && (bt->unsigned_bvals ?
 			(uint64_t)resume_bval >= (uint64_t)start_bval :
 			resume_bval >= start_bval)) {
-		ci.last.bval = resume_bval;
-		ci.last.has_digest = true;
-		ci.last.keyd_stub = get_keyd_stub(keyd);
-		ci.last.keyd = *keyd;
+		ci.last = (search_key){
+				.bval = resume_bval,
+				.has_digest = true,
+				.keyd_stub = get_keyd_stub(keyd),
+				.keyd = *keyd
+		};
 	}
 
 	if (bt->unsigned_bvals ?
@@ -665,10 +669,12 @@ query_collect_cb(const si_btree_key* key, void* udata)
 	}
 
 	if (++ci->n_keys_reduced == MAX_QUERY_BURST) {
-		ci->last.bval = key->bval;
-		ci->last.has_digest = true;
-		ci->last.keyd_stub = get_keyd_stub(&r->keyd);
-		ci->last.keyd = r->keyd;
+		ci->last = (search_key){
+				.bval = key->bval,
+				.has_digest = true,
+				.keyd_stub = get_keyd_stub(&r->keyd),
+				.keyd = r->keyd
+		};
 
 		return false; // stops si_btree_reduce()
 	}

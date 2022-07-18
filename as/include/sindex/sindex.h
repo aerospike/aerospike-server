@@ -107,7 +107,7 @@ typedef struct as_sindex_s {
 	uint64_t keys_per_rec;
 	uint64_t load_time;
 	uint32_t populate_pct;
-	uint64_t n_defrag_records;
+	uint64_t n_gc_cleaned;
 
 	uint32_t n_btrees;
 	struct si_btree_s** btrees;

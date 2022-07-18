@@ -96,8 +96,6 @@ typedef enum {
 	QUERY_TYPE_UNKNOWN	= -1
 } query_type;
 
-#define LOW_PRIORITY_RPS 5000 // for compatibility with old clients
-
 #define INIT_BUF_BUILDER_SIZE (1024U * 1024U * 7U / 4U) // 1.75M
 #define QUERY_CHUNK_LIMIT (1024U * 1024U)
 
@@ -466,30 +464,24 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 		return false;
 	}
 
+	uint8_t n_ranges = *data++;
 	len--;
 
-	uint8_t n_range = *data++;
-
-	if (n_range != 1) {
-		cf_warning(AS_QUERY, "range must be 1, passed %u", n_range);
+	if (n_ranges != 1) {
+		cf_warning(AS_QUERY, "%u ranges - only 1 supported", n_ranges);
 		return false;
 	}
-
-	as_query_range* range = cf_calloc(1, sizeof(as_query_range));
-	*range_r = range; // link it to the job so that as_job_destroy will clean it
 
 	if (len == 0) {
 		cf_warning(AS_QUERY, "cannot parse bin name");
 		return false;
 	}
 
+	uint8_t bin_name_len = *data++;
 	len--;
 
-	uint8_t bin_name_len = *data++;
-
 	if (bin_name_len == 0 || bin_name_len >= AS_BIN_NAME_MAX_SZ) {
-		cf_warning(AS_QUERY, "bin name either 0 or too large %u",
-				bin_name_len);
+		cf_warning(AS_QUERY, "invalid bin name length %u", bin_name_len);
 		return false;
 	}
 
@@ -498,25 +490,25 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 		return false;
 	}
 
+	as_query_range* range = cf_calloc(1, sizeof(as_query_range));
+	*range_r = range; // link it to the job so that as_job_destroy will clean it
+
 	memcpy(range->bin_name, data, bin_name_len); // null-terminated via calloc
 
-	len -= bin_name_len;
 	data += bin_name_len;
+	len -= bin_name_len;
 
 	if (len == 0) {
 		cf_warning(AS_QUERY, "cannot parse particle-type");
 		return false;
 	}
 
+	range->bin_type = *data++;
 	len--;
-
-	as_particle_type type = *data++;
-
-	range->bin_type = type;
 
 	bool success;
 
-	switch (type) {
+	switch (range->bin_type) {
 	case AS_PARTICLE_TYPE_INTEGER:
 		success = range_from_msg_integer(data, range, len);
 		break;
@@ -527,7 +519,7 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 		success = range_from_msg_geojson(ns, data, range, len);
 		break;
 	default:
-		cf_warning(AS_QUERY, "invalid type");
+		cf_warning(AS_QUERY, "invalid type %u", range->bin_type);
 		success = false;
 	}
 
@@ -755,30 +747,8 @@ range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 
 	const char* startp = (const char*)data;
 
-	data += startl;
-	len -= startl;
-
-	if (len < sizeof(uint32_t)) {
-		cf_warning(AS_QUERY, "cannot parse string range");
-		return false;
-	}
-
-	uint32_t endl = cf_swap_from_be32(*((uint32_t*)data));
-
-	data += sizeof(uint32_t);
-	len -= (uint32_t)sizeof(uint32_t);
-
-	if (len < endl) {
-		cf_warning(AS_QUERY, "cannot parse string range");
-		return false;
-	}
-
-	// Here, data points to redundant 'end' string.
-
-	if (startl != endl || memcmp(startp, data, startl) != 0) {
-		cf_warning(AS_QUERY, "only equality queries supported on strings");
-		return false;
-	}
+	// Currently, clients also send an 'end' string which is identical to the
+	// 'start' string. Ignore that here for performance, since it's redundant.
 
 	range->u.r.start = as_sindex_string_to_bval(startp, startl);
 	range->u.r.end = range->u.r.start;
@@ -820,30 +790,8 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 
 	const char* startp = (const char*)data;
 
-	data += startl;
-	len -= startl;
-
-	if (len < sizeof(uint32_t)) {
-		cf_warning(AS_QUERY, "cannot parse geojson range");
-		return false;
-	}
-
-	uint32_t endl = cf_swap_from_be32(*((uint32_t*)data));
-
-	data += sizeof(uint32_t);
-	len -= (uint32_t)sizeof(uint32_t);
-
-	if (len < endl) {
-		cf_warning(AS_QUERY, "cannot parse geojson range");
-		return false;
-	}
-
-	// Here, data points to redundant 'end' string.
-
-	if (startl != endl || memcmp(startp, data, startl) != 0) {
-		cf_warning(AS_QUERY, "only geospatial query supported on geojson");
-		return false;
-	}
+	// Currently, clients also send an 'end' string which is identical to the
+	// 'start' string. Ignore that here for performance, since it's redundant.
 
 	as_query_geo_range* geo = &range->u.geo;
 
@@ -1448,7 +1396,7 @@ typedef struct basic_query_slice_s {
 } basic_query_slice;
 
 static void basic_query_job_init(basic_query_job* job);
-static bool basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns, cf_vector** binlist);
+static bool basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns, cf_vector** bin_ids);
 static bool basic_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
 static bool basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
 static bool basic_query_filter_meta(const basic_query_job* job, const as_record* r, as_exp** exp);

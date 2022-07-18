@@ -561,7 +561,7 @@ as_sindex_stats_str(as_namespace* ns, char* iname, cf_dyn_buf* db)
 	info_append_uint32(db, "load_pct", si->populate_pct);
 	info_append_uint64(db, "load_time", si->load_time);
 
-	info_append_uint64(db, "stat_gc_recs", si->n_defrag_records);
+	info_append_uint64(db, "stat_gc_recs", si->n_gc_cleaned);
 
 	cf_dyn_buf_chomp(db);
 

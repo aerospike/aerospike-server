@@ -24,12 +24,10 @@
 // Includes.
 //
 
-#include <alloca.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -46,7 +44,6 @@
 #include "base/xdr.h"
 #include "fabric/exchange.h" // for compatibility-id only
 #include "sindex/gc.h"
-#include "sindex/sindex.h"
 #include "storage/flat.h" // for compatibility-id only
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
@@ -191,8 +188,6 @@ as_record_destroy(as_record *r, as_namespace *ns)
 
 	// Dereference record's storage used-size.
 	as_storage_destroy_record(ns, r);
-
-	return;
 }
 
 // Called only if data-in-memory, and not single-bin.
