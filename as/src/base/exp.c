@@ -5054,9 +5054,9 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 	switch (system_type) {
 	case CALL_CDT:
 		if (op_code == AS_CDT_OP_CONTEXT_EVAL) {
-			msgpack_in mp_ctx = mp;
+			msgpack_in mp_ctx = mp; // save ctx position to print later
 
-			msgpack_sz(&mp);
+			msgpack_sz(&mp); // skip ctx to print call name first
 
 			if (! msgpack_get_list_ele_count(&mp, &ele_count)) {
 				cf_crash(AS_EXP, "unexpected");
@@ -5066,28 +5066,13 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 				cf_crash(AS_EXP, "unexpected");
 			}
 
-			cf_dyn_buf_append_format(db, "%s([", cdt_exp_display_name(op_code));
+			cf_dyn_buf_append_format(db, "%s(", cdt_exp_display_name(op_code));
 
-			uint32_t context_len;
-
-			if (! msgpack_get_list_ele_count(&mp_ctx, &context_len)) {
+			if (! cdt_msgpack_ctx_to_dynbuf(&mp_ctx, db)) {
 				cf_crash(AS_EXP, "unexpected");
 			}
 
-			const char* prefix = "";
-
-			context_len /= 2;
-
-			for (uint32_t i = 0; i < context_len; i++) {
-				int64_t ctx_type;
-
-				msgpack_get_int64(&mp_ctx, &ctx_type);
-				cf_dyn_buf_append_format(db, "%s%ld, ", prefix, ctx_type);
-				display_msgpack(&mp_ctx, db);
-				prefix = ", ";
-			}
-
-			cf_dyn_buf_append_string(db, "], ");
+			cf_dyn_buf_append_string(db, ", ");
 		}
 		else {
 			cf_dyn_buf_append_format(db, "%s(NULL, ",
@@ -5142,11 +5127,34 @@ display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 
 	switch (ob->code) {
 	case VOP_VALUE_NIL:
-	case VOP_VALUE_GEO:
-	case VOP_VALUE_LIST:
-	case VOP_VALUE_MSGPACK:
-		cf_dyn_buf_append_string(db, op_table[ob->code].name);
+		cf_dyn_buf_append_string(db, "nil");
 		break;
+	case VOP_VALUE_GEO:
+		cf_dyn_buf_append_format(db, "<geojson#%u>",
+				((op_value_blob*)ob)->value_sz);
+		break;
+	case VOP_VALUE_LIST: {
+		op_value_blob* op_b = (op_value_blob*)ob;
+		uint32_t ele_count = UINT32_MAX;
+
+		msgpack_buf_get_list_ele_count(op_b->value, op_b->value_sz, &ele_count);
+		cf_dyn_buf_append_format(db, "<list#%u>", ele_count);
+		break;
+	}
+	case VOP_VALUE_MSGPACK: {
+		op_value_blob* op_b = (op_value_blob*)ob;
+		uint32_t ele_count = UINT32_MAX;
+
+		if (msgpack_buf_get_map_ele_count(op_b->value, op_b->value_sz,
+				&ele_count)) {
+			cf_dyn_buf_append_format(db, "<map#%u>", ele_count);
+		}
+		else {
+			cf_dyn_buf_append_format(db, "<ext#%u>", op_b->value_sz);
+		}
+
+		break;
+	}
 	case VOP_VALUE_BOOL:
 		cf_dyn_buf_append_bool(db, ((op_value_bool*)ob)->value);
 		break;
@@ -5216,24 +5224,33 @@ display_msgpack(msgpack_in* mp, cf_dyn_buf* db)
 	}
 	case MSGPACK_TYPE_STRING: {
 		uint32_t str_sz;
+
 		msgpack_get_bin(mp, &str_sz);
-
-		if (str_sz != 0) {
-			str_sz--;
-		}
-
-		cf_dyn_buf_append_format(db, "<string#%u>", str_sz);
+		cf_dyn_buf_append_format(db, "<string#%u>", str_sz - 1);
 		break;
 	}
 	case MSGPACK_TYPE_BYTES: {
 		uint32_t blob_sz;
-		msgpack_get_bin(mp, &blob_sz);
+		const uint8_t* blob = msgpack_get_bin(mp, &blob_sz);
 
-		if (blob_sz != 0) {
-			blob_sz--;
+		if (blob_sz == 0) {
+			cf_dyn_buf_append_format(db, "<blob#_>");
+			break;
 		}
 
-		cf_dyn_buf_append_format(db, "<blob#%u>", blob_sz);
+		if (blob[0] == AS_BYTES_HLL) {
+			cf_dyn_buf_append_format(db, "<hll#%u>", blob_sz - 1);
+			break;
+		}
+
+		cf_dyn_buf_append_format(db, "<blob#%u>", blob_sz - 1);
+		break;
+	}
+	case MSGPACK_TYPE_GEOJSON: {
+		uint32_t geo_sz;
+
+		msgpack_get_bin(mp, &geo_sz);
+		cf_dyn_buf_append_format(db, "<geojson#%u>", geo_sz - 1);
 		break;
 	}
 	default:

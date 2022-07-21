@@ -4383,6 +4383,17 @@ cdt_exp_display_name(as_cdt_optype op)
 bool
 cdt_ctx_to_dynbuf(const uint8_t *ctx, uint32_t ctx_sz, cf_dyn_buf *db)
 {
+	msgpack_in mp = {
+			.buf = ctx,
+			.buf_sz = ctx_sz
+	};
+
+	return cdt_msgpack_ctx_to_dynbuf(&mp, db);
+}
+
+bool
+cdt_msgpack_ctx_to_dynbuf(msgpack_in *mp, cf_dyn_buf *db)
+{
 	static const char *ctx_names[] = {
 			[AS_CDT_CTX_INDEX] = "by_index",
 			[AS_CDT_CTX_RANK] = "by_rank",
@@ -4390,13 +4401,9 @@ cdt_ctx_to_dynbuf(const uint8_t *ctx, uint32_t ctx_sz, cf_dyn_buf *db)
 			[AS_CDT_CTX_VALUE] = "by_value"
 	};
 
-	msgpack_in mp = {
-			.buf = ctx,
-			.buf_sz = ctx_sz
-	};
 	uint32_t ele_count;
 
-	if (! msgpack_get_list_ele_count(&mp, &ele_count) || (ele_count & 1) != 0) {
+	if (! msgpack_get_list_ele_count(mp, &ele_count) || (ele_count & 1) != 0) {
 		return false;
 	}
 
@@ -4405,7 +4412,7 @@ cdt_ctx_to_dynbuf(const uint8_t *ctx, uint32_t ctx_sz, cf_dyn_buf *db)
 	for (uint32_t i = 0; i < ele_count / 2; i++) {
 		int64_t ctx_type;
 
-		if (! msgpack_get_int64(&mp, &ctx_type)) {
+		if (! msgpack_get_int64(mp, &ctx_type)) {
 			return false;
 		}
 
@@ -4430,7 +4437,7 @@ cdt_ctx_to_dynbuf(const uint8_t *ctx, uint32_t ctx_sz, cf_dyn_buf *db)
 
 		msgpack_display_str s;
 
-		if (! msgpack_display(&mp, &s)) {
+		if (! msgpack_display(mp, &s)) {
 			return false;
 		}
 

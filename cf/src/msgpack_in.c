@@ -67,7 +67,6 @@ typedef struct {
 // Forward declarations.
 //
 
-static inline msgpack_type bytes_internal_to_msgpack_type(uint8_t type, uint32_t len);
 static inline msgpack_type bytes_internal_to_type(uint8_t type, uint32_t len);
 
 static inline const uint8_t *msgpack_sz_table(const uint8_t *buf, const uint8_t * const end, uint32_t *count, bool *has_nonstorage);
@@ -355,18 +354,6 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 
 		return true;
 	}
-	case MSGPACK_TYPE_GEOJSON: {
-		uint32_t sz;
-		const uint8_t *p = msgpack_get_bin(mp, &sz);
-
-		if (p == NULL) {
-			return false;
-		}
-
-		sprintf(str->str, "<geojson#%u>", sz - 1);
-
-		return true;
-	}
 	case MSGPACK_TYPE_STRING: {
 		uint32_t sz;
 		const uint8_t *p = msgpack_get_bin(mp, &sz);
@@ -414,17 +401,12 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 			return true;
 		}
 
-		uint8_t type = p[0];
-
-		switch (type) {
-		case AS_BYTES_HLL:
+		if (p[0] == AS_BYTES_HLL) {
 			sprintf(str->str, "<hll#%u>", sz - 1);
-			break;
-		default:
-			sprintf(str->str, "<blob#%u>", sz - 1);
-			break;
+			return true;
 		}
 
+		sprintf(str->str, "<blob#%u>", sz - 1);
 		return true;
 	}
 	case MSGPACK_TYPE_DOUBLE: {
@@ -435,6 +417,18 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 		}
 
 		sprintf(str->str, "%lf", value);
+
+		return true;
+	}
+	case MSGPACK_TYPE_GEOJSON: {
+		uint32_t sz;
+		const uint8_t *p = msgpack_get_bin(mp, &sz);
+
+		if (p == NULL) {
+			return false;
+		}
+
+		sprintf(str->str, "<geojson#%u>", sz - 1);
 
 		return true;
 	}
@@ -1103,25 +1097,6 @@ msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified)
 //
 
 static inline msgpack_type
-bytes_internal_to_msgpack_type(uint8_t type, uint32_t len)
-{
-	if (len == 0) {
-		return MSGPACK_TYPE_BYTES;
-	}
-
-	if (type == AS_BYTES_STRING) {
-		return MSGPACK_TYPE_STRING;
-	}
-
-	if (type == AS_BYTES_GEOJSON) {
-		return MSGPACK_TYPE_GEOJSON;
-	}
-
-	// All other types are considered BYTES.
-	return MSGPACK_TYPE_BYTES;
-}
-
-static inline msgpack_type
 bytes_internal_to_type(uint8_t type, uint32_t len)
 {
 	if (len == 0) {
@@ -1455,7 +1430,7 @@ msgpack_cmp_parse(parse_meta *meta)
 		meta->len = *meta->buf;
 		meta->buf += 1 + meta->len;
 		CMP_PARSE_BUF_CHECK(meta, 0);
-		meta->type = bytes_internal_to_msgpack_type(*meta->data, meta->len);
+		meta->type = bytes_internal_to_type(*meta->data, meta->len);
 		return;
 
 	case 0xc5:
@@ -1465,7 +1440,7 @@ msgpack_cmp_parse(parse_meta *meta)
 		meta->len = cf_swap_from_be16(*(uint16_t *)meta->buf);
 		meta->buf += 2 + meta->len;
 		CMP_PARSE_BUF_CHECK(meta, 0);
-		meta->type = bytes_internal_to_msgpack_type(*meta->data, meta->len);
+		meta->type = bytes_internal_to_type(*meta->data, meta->len);
 		return;
 
 	case 0xc6:
@@ -1475,7 +1450,7 @@ msgpack_cmp_parse(parse_meta *meta)
 		meta->len = cf_swap_from_be32(*(uint32_t *)meta->buf);
 		meta->buf += 4 + meta->len;
 		CMP_PARSE_BUF_CHECK(meta, 0);
-		meta->type = bytes_internal_to_msgpack_type(*meta->data, meta->len);
+		meta->type = bytes_internal_to_type(*meta->data, meta->len);
 		return;
 
 	case 0xdc: { // list with 16 bit header
@@ -1631,7 +1606,7 @@ msgpack_cmp_parse(parse_meta *meta)
 		meta->len = b & 0x1f;
 		meta->buf += meta->len;
 		CMP_PARSE_BUF_CHECK(meta, 0);
-		meta->type = bytes_internal_to_msgpack_type(*meta->data, meta->len);
+		meta->type = bytes_internal_to_type(*meta->data, meta->len);
 		return;
 	}
 

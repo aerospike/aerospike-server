@@ -518,6 +518,7 @@ bool cdt_check_buf(const uint8_t *ptr, uint32_t sz);
 const char *cdt_exp_display_name(as_cdt_optype op);
 
 bool cdt_ctx_to_dynbuf(const uint8_t *ctx, uint32_t ctx_sz, cf_dyn_buf *db);
+bool cdt_msgpack_ctx_to_dynbuf(msgpack_in *mp, cf_dyn_buf *db);
 
 // Debugging support
 bool cdt_verify(cdt_context *ctx);
