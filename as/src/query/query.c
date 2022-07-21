@@ -224,7 +224,6 @@ as_query(as_transaction* tr, as_namespace* ns)
 	case QUERY_TYPE_OPS_BG:
 		return ops_bg_query_job_start(tr, ns);
 	default:
-		cf_warning(AS_QUERY, "can't identify query type");
 		return AS_ERR_PARAMETER;
 	}
 }
@@ -277,24 +276,30 @@ get_query_type(const as_transaction* tr)
 		return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ?
 				QUERY_TYPE_OPS_BG : QUERY_TYPE_BASIC;
 	}
+	// else - UDF query.
 
-	const as_msg_field* udf_op_f = as_transaction_has_udf_op(tr) ?
-			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_UDF_OP) : NULL;
+	const as_msg_field* udf_op_f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_UDF_OP);
 
-	if (as_msg_field_get_value_sz(udf_op_f) != sizeof(uint8_t)) {
-		cf_warning(AS_QUERY, "cannot parse udf op");
+	if (udf_op_f == NULL) {
+		cf_warning(AS_QUERY, "missing udf-op");
 		return QUERY_TYPE_UNKNOWN;
 	}
 
-	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_AGGREGATE) {
+	if (as_msg_field_get_value_sz(udf_op_f) != sizeof(uint8_t)) {
+		cf_warning(AS_QUERY, "udf-op field size not %zu", sizeof(uint8_t));
+		return QUERY_TYPE_UNKNOWN;
+	}
+
+	switch ((as_udf_op)*udf_op_f->data) {
+	case AS_UDF_OP_AGGREGATE:
 		return QUERY_TYPE_AGGR;
-	}
-
-	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_BACKGROUND) {
+	case AS_UDF_OP_BACKGROUND:
 		return QUERY_TYPE_UDF_BG;
+	default:
+		cf_warning(AS_QUERY, "unknown udf-op %u", *udf_op_f->data);
+		return QUERY_TYPE_UNKNOWN;
 	}
-
-	return QUERY_TYPE_UNKNOWN;
 }
 
 static bool
@@ -499,7 +504,7 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 	len -= bin_name_len;
 
 	if (len == 0) {
-		cf_warning(AS_QUERY, "cannot parse particle-type");
+		cf_warning(AS_QUERY, "cannot parse particle type");
 		return false;
 	}
 
@@ -519,7 +524,7 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 		success = range_from_msg_geojson(ns, data, range, len);
 		break;
 	default:
-		cf_warning(AS_QUERY, "invalid type %u", range->bin_type);
+		cf_warning(AS_QUERY, "invalid particle type %u", range->bin_type);
 		success = false;
 	}
 
@@ -534,7 +539,7 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 		return false;
 	}
 
-	range->itype = (f == NULL) ? AS_SINDEX_ITYPE_DEFAULT : *f->data;
+	range->itype = f == NULL ? AS_SINDEX_ITYPE_DEFAULT : *f->data;
 
 	range->de_dup = range->isrange && range->itype != AS_SINDEX_ITYPE_DEFAULT;
 
@@ -606,7 +611,7 @@ get_query_rps(const as_transaction* tr, uint32_t* rps)
 			AS_MSG_FIELD_TYPE_RECS_PER_SEC);
 
 	if (as_msg_field_get_value_sz(f) != sizeof(uint32_t)) {
-		cf_warning(AS_QUERY, "query recs-per-sec field size not %lu",
+		cf_warning(AS_QUERY, "recs-per-sec field size not %zu",
 				sizeof(uint32_t));
 		return false;
 	}
@@ -627,7 +632,7 @@ get_query_socket_timeout(const as_transaction* tr, int32_t* timeout)
 			AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT);
 
 	if (as_msg_field_get_value_sz(f) != sizeof(uint32_t)) {
-		cf_warning(AS_QUERY, "query socket timeout field size not %lu",
+		cf_warning(AS_QUERY, "socket-timeout field size not %zu",
 				sizeof(uint32_t));
 		return false;
 	}
@@ -650,8 +655,7 @@ get_query_sample_max(const as_transaction* tr, uint64_t* sample_max)
 			AS_MSG_FIELD_TYPE_SAMPLE_MAX);
 
 	if (as_msg_field_get_value_sz(f) != sizeof(uint64_t)) {
-		cf_warning(AS_QUERY, "query sample-max field size not %lu",
-				sizeof(uint64_t));
+		cf_warning(AS_QUERY, "sample-max field size not %zu", sizeof(uint64_t));
 		return false;
 	}
 
@@ -2585,6 +2589,7 @@ udf_bg_query_job_finish(as_query_job* _job)
 		break;
 	case AS_ERR_UNKNOWN:
 	default:
+		// Note - this is unreachable for now - we only abandon via abort.
 		as_incr_uint64(_job->si == NULL ?
 				&ns->n_pi_query_udf_bg_error : &ns->n_si_query_udf_bg_error);
 		break;
@@ -2922,6 +2927,7 @@ ops_bg_query_job_finish(as_query_job* _job)
 		break;
 	case AS_ERR_UNKNOWN:
 	default:
+		// Note - this is unreachable for now - we only abandon via abort.
 		as_incr_uint64(_job->si == NULL ?
 				&ns->n_pi_query_ops_bg_error : &ns->n_si_query_ops_bg_error);
 		break;

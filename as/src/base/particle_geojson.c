@@ -555,7 +555,7 @@ as_geojson_parse(const as_namespace *ns, const char *json, uint32_t jlen,
 
 	if (*cellid != 0 && *region != NULL) {
 		cf_warning(AS_PARTICLE, "geo_parse found both point and region");
-		geo_region_destroy(region);
+		geo_region_destroy(*region);
 		*cellid = 0;
 		*region = NULL;
 		return false;
