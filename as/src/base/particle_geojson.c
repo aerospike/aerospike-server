@@ -674,3 +674,21 @@ as_bin_cdt_context_geojson_parse(as_bin *b)
 
 	return true;
 }
+
+void
+as_bin_particle_geojson_trim(as_bin *b)
+{
+	cf_assert(as_bin_get_particle_type(b) == AS_PARTICLE_TYPE_GEOJSON,
+			AS_PARTICLE, "not a geojson bin");
+
+	geojson_mem *p_geojson_mem = (geojson_mem *)b->particle;
+	uint32_t size = p_geojson_mem->sz + sizeof(uint8_t) + sizeof(uint32_t);
+
+	// Assume original size was over allocated.
+	uint32_t orig_size = size +
+			(MAX_REGION_CELLS - p_geojson_mem->ncells) * sizeof(uint64_t);
+
+	if (size != orig_size) {
+		b->particle = cf_realloc_ns(b->particle, size);
+	}
+}

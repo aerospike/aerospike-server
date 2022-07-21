@@ -841,7 +841,7 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		break;
 	case RT_GEO_CONST:
 		rb->particle = rt_alloc_mem(&rt, as_geojson_particle_sz(
-				MAX_REGION_CELLS, ret_val.r_geo_const.op->content_sz));
+				MAX_REGION_CELLS, ret_val.r_geo_const.op->content_sz)); // over allocate
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_GEOJSON);
 		((cdt_mem*)rb->particle)->type = AS_PARTICLE_TYPE_GEOJSON;
 
@@ -861,6 +861,10 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		if (! as_geojson_to_particle(json, json_sz, &rb->particle)) {
 			cf_warning(AS_EXP, "as_exp_evel - invalid geojson");
 			return false;
+		}
+
+		if (rt.ll_buf == NULL && rt.alloc_ns) {
+			as_bin_particle_geojson_trim(rb); // realloc over allocated space
 		}
 
 		break;
@@ -4167,6 +4171,18 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		as_bin_particle_destroy(b);
 		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
+		if (! as_bin_cdt_context_geojson_parse(b)) {
+			ret_val->type = RT_TRILEAN;
+			ret_val->r_trilean = AS_EXP_UNK;
+			as_bin_particle_destroy(b);
+			return;
+		}
+
+		if (rt->alloc_ns) {
+			as_bin_particle_geojson_trim(b);
+		}
+
+		// no break
 	case AS_PARTICLE_TYPE_STRING:
 	case AS_PARTICLE_TYPE_BLOB:
 	case AS_PARTICLE_TYPE_HLL:
@@ -4734,10 +4750,18 @@ rt_value_bin_translate(rt_value* to, const rt_value* from)
 	case AS_PARTICLE_TYPE_STRING:
 	case AS_PARTICLE_TYPE_BLOB:
 	case AS_PARTICLE_TYPE_HLL:
-	case AS_PARTICLE_TYPE_GEOJSON:
 		to->type = type; // runtime_type matches particle type for these types
 		to->r_bytes.sz = as_bin_particle_string_ptr(&b,
 				(char**)&to->r_bytes.contents);
+		break;
+	case AS_PARTICLE_TYPE_GEOJSON:
+		to->type = type; // runtime_type matches particle type for AS_PARTICLE_TYPE_GEOJSON
+
+		size_t sz;
+
+		to->r_bytes.contents =
+				(const uint8_t*)as_geojson_mem_jsonstr(b.particle, &sz);
+		to->r_bytes.sz = (uint32_t)sz;
 		break;
 	case AS_PARTICLE_TYPE_MAP:
 	case AS_PARTICLE_TYPE_LIST: {

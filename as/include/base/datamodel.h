@@ -307,6 +307,7 @@ uint32_t as_geojson_particle_sz(uint32_t ncells, size_t jlen);
 bool as_geojson_parse(const struct as_namespace_s *ns, const char *json, uint32_t jlen, uint64_t *cellid, geo_region_t *region);
 bool as_geojson_to_particle(const char *json, uint32_t jlen, as_particle **pp);
 bool as_bin_cdt_context_geojson_parse(as_bin *b);
+void as_bin_particle_geojson_trim(as_bin *b);
 
 // list:
 void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
