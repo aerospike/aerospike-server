@@ -7,7 +7,7 @@
 	url = https://github.com/aerospike/aerospike-mod-lua.git
 [submodule "modules/jansson"]
 	path = modules/jansson
-	url = http://github.com/akheron/jansson
+	url = https://github.com/akheron/jansson
 	ignore = dirty
 [submodule "modules/luajit"]
 	path = modules/luajit
@@ -24,7 +24,7 @@
 	ignore = dirty
 [submodule "modules/spdk"]
 	path = modules/spdk
-	url = http://github.com/spdk/spdk
+	url = https://github.com/spdk/spdk
 [submodule "modules/lthread"]
 	path = modules/lthread
-	url = http://github.com/mita/lthread
+	url = https://github.com/mita/lthread
