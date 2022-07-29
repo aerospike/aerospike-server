@@ -566,6 +566,15 @@ cf_buf_builder_reset(cf_buf_builder *bb)
 // functionality if and when it's needed.
 
 void
+cf_ll_buf_init_heap(cf_ll_buf *llb, size_t buf_sz)
+{
+	cf_ll_buf_stage *stage = cf_malloc(sizeof(cf_ll_buf_stage) + buf_sz);
+
+	*stage = (cf_ll_buf_stage){ .buf_sz = buf_sz };
+	*llb = (cf_ll_buf){ .head = stage, .tail = stage };
+}
+
+void
 cf_ll_buf_grow(cf_ll_buf *llb, size_t sz)
 {
 	size_t buf_sz = sz > llb->head->buf_sz ? sz : llb->head->buf_sz;

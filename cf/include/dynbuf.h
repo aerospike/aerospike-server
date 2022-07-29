@@ -130,5 +130,6 @@ typedef struct cf_ll_buf_s {
 		ll_buf_stage##__x->used_sz = 0; \
 		cf_ll_buf __x = { true, ll_buf_stage##__x, ll_buf_stage##__x }
 
+extern void cf_ll_buf_init_heap(cf_ll_buf *llb, size_t buf_sz);
 extern void cf_ll_buf_reserve(cf_ll_buf *llb, size_t sz, uint8_t **from);
 extern void cf_ll_buf_free(cf_ll_buf *llb);

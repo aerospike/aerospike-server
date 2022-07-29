@@ -1167,8 +1167,8 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 		as_rec_destroy(urec);
 	}
 
-	if (urecord->particle_buf != NULL) {
-		cf_free(urecord->particle_buf);
+	if (urecord->particle_llb.head != NULL) {
+		cf_ll_buf_free(&urecord->particle_llb);
 	}
 
 	udf_record_cache_free(urecord);
@@ -1194,8 +1194,8 @@ udf_master_done(udf_record* urecord, as_rec* urec, as_result* result,
 	as_result_destroy(result);
 	as_rec_destroy(urec);
 
-	if (urecord->particle_buf != NULL) {
-		cf_free(urecord->particle_buf);
+	if (urecord->particle_llb.head != NULL) {
+		cf_ll_buf_free(&urecord->particle_llb);
 	}
 
 	udf_record_cache_free(urecord);
