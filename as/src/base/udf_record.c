@@ -40,6 +40,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "dynbuf.h"
 #include "log.h"
 
 #include "base/cfg.h"
@@ -145,9 +146,7 @@ udf_record_init(udf_record* urecord)
 	urecord->result_code = AS_OK;
 	urecord->old_memory_bytes = 0;
 
-	urecord->particle_buf = NULL;
-	urecord->buf_size = 0;
-	urecord->buf_offset = 0;
+	urecord->particle_llb = (cf_ll_buf){ 0 };
 
 	urecord->n_old_bins = 0;
 	urecord->n_cleanup_bins = 0;
@@ -273,7 +272,7 @@ udf_record_close(udf_record* urecord)
 		// FIXME - development paranoia - remove eventually.
 		cf_assert(! urecord->has_updates, AS_UDF,
 				"unexpected - record has updates");
-		cf_assert(urecord->particle_buf == NULL, AS_UDF,
+		cf_assert(urecord->particle_llb.head == NULL, AS_UDF,
 				"unexpected - has particle buf");
 
 		if (urecord->is_loaded) {

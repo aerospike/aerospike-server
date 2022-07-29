@@ -35,6 +35,8 @@
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_atomic.h"
 
+#include "dynbuf.h"
+
 #include "base/datamodel.h"
 
 
@@ -76,10 +78,7 @@ typedef struct udf_record_s {
 	uint8_t result_code; // only set when we fail execute_updates()
 	uint32_t old_memory_bytes; // DIM only
 
-	// Non-DIM only.
-	uint8_t* particle_buf;
-	size_t buf_size;
-	size_t buf_offset;
+	cf_ll_buf particle_llb; // non-DIM only
 
 	as_bin stack_bins[RECORD_MAX_BINS]; // new bins if writing
 
