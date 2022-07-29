@@ -38,6 +38,7 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "dynbuf.h"
 #include "log.h"
 
 #include "base/datamodel.h"
@@ -454,9 +455,10 @@ execute_failed(udf_record* urecord, int result_code)
 
 	rd->n_bins = (uint16_t)urecord->n_old_bins;
 
-	if (urecord->particle_buf != NULL) {
-		cf_free(urecord->particle_buf);
-		urecord->particle_buf = NULL;
+
+	if (urecord->particle_llb.head != NULL) {
+		cf_ll_buf_free(&urecord->particle_llb);
+		urecord->particle_llb.head = NULL;
 	}
 
 	udf_record_cache_free(urecord);
@@ -526,25 +528,14 @@ get_particle_buf(udf_record* urecord, uint32_t size)
 {
 	as_namespace* ns = urecord->rd->ns;
 
-	if (urecord->particle_buf == NULL) {
-		urecord->buf_size = ns->storage_write_block_size;
-		urecord->buf_offset = 0;
-
-		urecord->particle_buf = cf_malloc(urecord->buf_size);
+	if (urecord->particle_llb.head == NULL) {
+		cf_ll_buf_init_heap(&urecord->particle_llb,
+				ns->storage_write_block_size);
 	}
 
-	size_t new_size = urecord->buf_offset + size;
+	uint8_t* buf;
 
-	if (new_size > urecord->buf_size) {
-		urecord->buf_size = (new_size + CAPACITY_STEP - 1) & -CAPACITY_STEP;
-
-		urecord->particle_buf = cf_realloc(urecord->particle_buf,
-				urecord->buf_size);
-	}
-
-	uint8_t* buf = urecord->particle_buf + urecord->buf_offset;
-
-	urecord->buf_offset += size;
+	cf_ll_buf_reserve(&urecord->particle_llb, size, &buf);
 
 	return buf;
 }
