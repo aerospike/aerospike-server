@@ -545,8 +545,12 @@ remove_from_sindex(as_namespace* ns, as_index_ref* r_ref)
 
 	as_bin stack_bins[RECORD_MAX_BINS];
 
-	as_storage_rd_load_bins(&rd, stack_bins);
-	remove_from_sindex_bins(ns, r_ref, rd.bins, rd.n_bins);
+	if (as_storage_rd_load_bins(&rd, stack_bins) == 0) {
+		remove_from_sindex_bins(ns, r_ref, rd.bins, rd.n_bins);
+	}
+	else {
+		cf_warning(AS_RW, "failed removing record from sindex - sindex leak");
+	}
 
 	as_storage_record_close(&rd);
 }

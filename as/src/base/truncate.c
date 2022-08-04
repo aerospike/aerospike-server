@@ -460,7 +460,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (r->last_update_time < ns->truncate.lut) {
 		cb_info->n_deleted++;
 
-		if (ns->storage_data_in_memory) {
+		if (ns->storage_data_in_memory || ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 			remove_from_sindex(ns, r_ref);
 		}
 
@@ -477,7 +477,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (p_set != NULL && r->last_update_time < p_set->truncate_lut) {
 		cb_info->n_deleted++;
 
-		if (ns->storage_data_in_memory) {
+		if (ns->storage_data_in_memory || ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 			remove_from_sindex(ns, r_ref);
 		}
 
