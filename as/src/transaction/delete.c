@@ -591,7 +591,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 		as_storage_record_close(&rd);
 
-		if (ns->storage_data_in_memory) {
+		if (ns->storage_data_in_memory || ns->xmem_type == CF_XMEM_TYPE_FLASH) {
 			remove_from_sindex(ns, r_ref);
 		}
 	}
