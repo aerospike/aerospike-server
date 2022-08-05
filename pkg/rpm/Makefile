@@ -44,17 +44,16 @@ ifeq ($(USE_SYSTEMD),1)
 endif
 	install -pm 755 $(DEPTH)/as/etc/irqbalance-ban.sh $(BUILD_ROOT)/etc/aerospike/irqbalance-ban.sh
 	install -pm 644 $(DEPTH)/as/etc/aerospike$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
-	cat $(DEPTH)/as/etc/README.sample.conf.md > $(BUILD_ROOT)/etc/aerospike/sample/README.md
+	install -pm 644 $(DEPTH)/as/etc/README.sample.conf.md $(BUILD_ROOT)/etc/aerospike/sample/README.md
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_ssd.conf
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_mesh.conf
 
 ifeq ($(USE_SYSTEMD),1)
-	cat $(DEPTH)/as/etc/aerospike.service.head >> $(PKG)/rpm/aerospike.service
+	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service.head $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
   ifeq ($(EDITION),community)
-	cat $(DEPTH)/as/etc/aerospike.service.telemetry >> $(PKG)/rpm/aerospike.service
+	cat $(DEPTH)/as/etc/aerospike.service.telemetry >> $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
   endif
-	cat $(DEPTH)/as/etc/aerospike.service.tail >> $(PKG)/rpm/aerospike.service
-	install -p -D -m 644 $(PKG)/rpm/aerospike.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
+	cat $(DEPTH)/as/etc/aerospike.service.tail >> $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.tmpfiles $(BUILD_ROOT)/etc/tmpfiles.d/aerospike.conf
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike
 	install -p -D -m 755 $(DEPTH)/as/etc/asd-systemd-helper $(BUILD_ROOT)/usr/bin/asd-systemd-helper
@@ -151,9 +150,6 @@ endif
 
 clean:
 	rm -rf $(PKG)/rpm/aerospike.spec
-ifeq ($(USE_SYSTEMD),1)
-	rm -rf $(PKG)/rpm/aerospike.service
-endif
 	rm -rf $(SOURCE_ROOT)/*
 
 ifeq ($(USE_EE),1)
