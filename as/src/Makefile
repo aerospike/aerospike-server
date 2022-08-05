@@ -158,7 +158,6 @@ SINDEX_SOURCES += sindex.c
 SINDEX_SOURCES += sindex_arena.c
 SINDEX_SOURCES += sindex_tree.c
 ifneq ($(USE_EE),1)
-  SINDEX_SOURCES += gc_ce.c
   SINDEX_SOURCES += sindex_ce.c
   SINDEX_SOURCES += sindex_arena_ce.c
   SINDEX_SOURCES += sindex_tree_ce.c

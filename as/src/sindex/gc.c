@@ -34,6 +34,7 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
 
+#include "arenax.h"
 #include "cf_mutex.h"
 #include "log.h"
 
@@ -44,12 +45,16 @@
 #include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"
 
-#include "warnings.h"
+//#include "warnings.h"
 
 
 //==========================================================
 // Typedefs & constants.
 //
+
+typedef struct rlist_ele_s {
+	cf_arenax_handle r_h: 40;
+} __attribute__ ((__packed__)) rlist_ele;
 
 #define THROTTLE_THRESHOLD (64 * 1024 * 1024)
 
@@ -71,7 +76,7 @@ as_sindex_gc_ns_init(as_namespace* ns)
 {
 	cf_mutex_init(&ns->si_gc_list_mutex);
 
-	create_rlist(ns);
+	ns->si_gc_rlist = cf_queue_create(sizeof(rlist_ele), false);
 	ns->si_gc_tlist = cf_queue_create(sizeof(as_index_tree*), false);
 }
 
@@ -106,10 +111,15 @@ as_sindex_gc_record(as_namespace* ns, as_index_ref* r_ref)
 
 	cf_assert(! ns->storage_data_in_memory, AS_SINDEX,
 			"data-in-memory ns queuing to rlist");
+	cf_assert(ns->xmem_type != CF_XMEM_TYPE_FLASH, AS_SINDEX,
+			"flash-index ns queuing to rlist");
 
 	cf_mutex_lock(&ns->si_gc_list_mutex);
 
-	push_to_rlist(ns, r_ref);
+	rlist_ele ele = { .r_h = r_ref->r_h };
+
+	cf_queue_push(ns->si_gc_rlist, &ele);
+
 	ns->si_gc_rlist_full = cf_queue_sz(ns->si_gc_rlist) >= THROTTLE_THRESHOLD;
 
 	cf_mutex_unlock(&ns->si_gc_list_mutex);
@@ -165,20 +175,32 @@ gc_ns_cycle(as_namespace* ns)
 	cf_queue* rlist = ns->si_gc_rlist;
 	cf_queue* tlist = ns->si_gc_tlist;
 
-	// rlist is always empty for in-memory ns.
+	// rlist is always empty for in-memory or all-flash ns.
 	if (cf_queue_sz(rlist) == 0 && cf_queue_sz(tlist) == 0) {
 		cf_mutex_unlock(&ns->si_gc_list_mutex);
 		return;
 	}
 
-	create_rlist(ns);
+	ns->si_gc_rlist = cf_queue_create(sizeof(rlist_ele), false);
 	ns->si_gc_tlist = cf_queue_create(sizeof(as_index_tree*), false);
 
 	cf_mutex_unlock(&ns->si_gc_list_mutex);
 
 	gc_ns(ns);
 
-	purge_rlist(ns, rlist);
+	rlist_ele ele;
+
+	while (cf_queue_pop(rlist, &ele, CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
+		as_index* r = (as_index*)cf_arenax_resolve(ns->arena, ele.r_h);
+
+		cf_assert(r->in_sindex == 1, AS_SINDEX, "bad in_sindex bit");
+		cf_assert(r->rc == 1, AS_SINDEX, "bad ref count %u", r->rc);
+
+		as_record_destroy(r, ns);
+		cf_arenax_free(ns->arena, ele.r_h, NULL);
+	}
+
+	cf_queue_destroy(rlist);
 
 	as_index_tree* tree;
 
