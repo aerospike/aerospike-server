@@ -399,8 +399,6 @@ typedef struct runtime_s {
 	const uint8_t* instr_ptr;
 	rt_value* vars;
 	uint32_t op_ix;
-
-	cf_ll_buf* ll_buf;
 	bool alloc_ns;
 } runtime;
 
@@ -565,13 +563,13 @@ static void eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 
 // Runtime utilities.
-static void rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from);
+static void rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from, cf_ll_buf* ll_buf);
 static void json_to_rt_geo(const uint8_t* json, size_t jsonsz, rt_value* val);
 static void particle_to_rt_geo(const as_particle* p, rt_value* val);
 static bool bin_is_type(const as_bin* b, result_type type);
 static void rt_skip(runtime* rt, uint32_t instr_count);
 static void rt_value_translate(rt_value* to, const rt_value* from);
-static void rt_value_destroy(rt_value* val, runtime* rt);
+static void rt_value_destroy(rt_value* val);
 static void rt_value_get_geo(rt_value* val, geo_data* result);
 static bool get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin);
 
@@ -587,9 +585,8 @@ static as_exp_trilean cmp_msgpack(exp_op_code code, const rt_value* v0, const rt
 static void call_cleanup(void** blob, uint32_t blob_ix, as_bin** bin, uint32_t bin_ix);
 static void pack_typed_str(as_packer* pk, const uint8_t* buf, uint32_t sz, uint8_t type);
 static bool rt_value_bin_translate(rt_value* to, const rt_value* from);
-static void* rt_alloc_mem(runtime* rt, size_t sz);
-static void rt_free_mem(runtime*rt, void* ptr);
-static bool msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from);
+static void* rt_alloc_mem(runtime* rt, size_t sz, cf_ll_buf* ll_buf);
+static bool msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf);
 
 // Runtime runtime display.
 static void rt_display(runtime* rt, cf_dyn_buf* db);
@@ -807,14 +804,13 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 			.ctx = ctx,
 			.instr_ptr = exp->mem,
 			.vars = vars,
-			.ll_buf = particles_llb,
 			.alloc_ns = is_modify
 	};
 
 	rt_eval(&rt, &ret_val);
 
 	if (ret_val.type == RT_BIN_PTR) {
-		rt_value_bin_ptr_to_bin(&rt, rb, &ret_val);
+		rt_value_bin_ptr_to_bin(&rt, rb, &ret_val, particles_llb);
 		return true;
 	}
 
@@ -841,7 +837,8 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		break;
 	case RT_GEO_CONST:
 		rb->particle = rt_alloc_mem(&rt, as_geojson_particle_sz(
-				MAX_REGION_CELLS, ret_val.r_geo_const.op->content_sz)); // over allocate
+				MAX_REGION_CELLS, ret_val.r_geo_const.op->content_sz),
+				particles_llb); // over allocate
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_GEOJSON);
 		((cdt_mem*)rb->particle)->type = AS_PARTICLE_TYPE_GEOJSON;
 
@@ -859,11 +856,16 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 
 		// TODO - already checked in eval_bin?
 		if (! as_geojson_to_particle(json, json_sz, &rb->particle)) {
-			cf_warning(AS_EXP, "as_exp_evel - invalid geojson");
+			cf_warning(AS_EXP, "as_exp_eval - invalid geojson");
+
+			if (particles_llb == NULL) {
+				as_bin_particle_destroy(rb);
+			}
+
 			return false;
 		}
 
-		if (rt.ll_buf == NULL && rt.alloc_ns) {
+		if (particles_llb == NULL && rt.alloc_ns) {
 			as_bin_particle_geojson_trim(rb); // realloc over allocated space
 		}
 
@@ -875,7 +877,8 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 			AS_PARTICLE_TYPE_STRING : (ret_val.type == RT_BLOB ?
 				AS_PARTICLE_TYPE_BLOB : AS_PARTICLE_TYPE_HLL);
 
-		rb->particle = rt_alloc_mem(&rt, sizeof(cdt_mem) + ret_val.r_bytes.sz);
+		rb->particle = rt_alloc_mem(&rt, sizeof(cdt_mem) + ret_val.r_bytes.sz,
+				particles_llb);
 
 		((cdt_mem*)rb->particle)->sz = ret_val.r_bytes.sz;
 		((cdt_mem*)rb->particle)->type = (uint8_t)particle_type;
@@ -886,12 +889,24 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 	}
 	case RT_BIN:
 		rb->state = ret_val.r_bin.state;
-		rb->particle = ret_val.r_bin.particle;
-		break; // do not destroy ret_val
+
+		if (particles_llb == NULL) {
+			rb->particle = ret_val.r_bin.particle;
+		}
+		else {
+			as_bin* b = &ret_val.r_bin;
+			uint32_t sz = sizeof(cdt_mem) + ((cdt_mem*)b->particle)->sz;
+
+			rb->particle = rt_alloc_mem(&rt, sz, particles_llb);
+			memcpy(rb->particle, b->particle, sz);
+
+			as_bin_particle_destroy(b);
+		}
+
+		break;
 	case RT_MSGPACK:
-		if (! msgpack_to_bin(&rt, rb, &ret_val)) {
+		if (! msgpack_to_bin(&rt, rb, &ret_val, particles_llb)) {
 			cf_warning(AS_EXP, "as_exp_eval - invalid msgpack");
-			rt_value_destroy(&ret_val, NULL);
 			return false;
 		}
 
@@ -899,7 +914,7 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 	default:
 		cf_warning(AS_EXP, "as_exp_eval - unexpected result type (%u)",
 				ret_val.type);
-		rt_value_destroy(&ret_val, NULL);
+		rt_value_destroy(&ret_val);
 		return false;
 	}
 
@@ -2796,7 +2811,7 @@ match_internal(const as_exp* predexp, const as_exp_ctx* ctx)
 	rt_eval(&rt, &ret_val);
 
 	if (ret_val.type != RT_TRILEAN) {
-		rt_value_destroy(&ret_val, NULL);
+		rt_value_destroy(&ret_val);
 		return AS_EXP_FALSE;
 	}
 
@@ -2851,7 +2866,7 @@ eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	if (rt_eval(rt, &arg1)) {
-		rt_value_destroy(&arg0, NULL);
+		rt_value_destroy(&arg0);
 		*ret_val = arg1;
 		return;
 	}
@@ -2901,10 +2916,10 @@ eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		cf_crash(AS_EXP, "unexpected type %u", v0.type);
 	}
 
-	rt_value_destroy(&arg0, NULL);
-	rt_value_destroy(&arg1, NULL);
-	rt_value_destroy(&v0, NULL);
-	rt_value_destroy(&v1, NULL);
+	rt_value_destroy(&arg0);
+	rt_value_destroy(&arg1);
+	rt_value_destroy(&v0);
+	rt_value_destroy(&v1);
 }
 
 static void
@@ -2918,7 +2933,7 @@ eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	const uint8_t* str = rt_value_get_str(ret_val, &str_sz);
 
 	if (str == NULL) {
-		rt_value_destroy(ret_val, NULL);
+		rt_value_destroy(ret_val);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -2930,7 +2945,7 @@ eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	cf_free(tmp);
 
-	rt_value_destroy(ret_val, NULL);
+	rt_value_destroy(ret_val);
 	ret_val->type = RT_TRILEAN;
 	ret_val->r_trilean = (rv == 0) ? AS_EXP_TRUE : AS_EXP_FALSE;
 }
@@ -3880,7 +3895,7 @@ eval_let(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			continue;
 		}
 
-		rt_value_destroy(val, rt);
+		rt_value_destroy(val);
 	}
 }
 
@@ -4021,7 +4036,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		old = *b;
 		break;
 	case RT_BIN: // from call
-		b = &bin_arg.r_bin;
+		b = &bin_arg.r_bin; // particle on heap
 		old = *b;
 		break;
 	case RT_BLOB:
@@ -4031,7 +4046,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		b = &bin_arg.r_bin;
 		bin_arg.type = RT_BIN;
 		bin_arg.r_bin.particle = rt_alloc_mem(rt, (size_t)temp.r_bytes.sz +
-				sizeof(cdt_mem));
+				sizeof(cdt_mem), NULL);
 
 		cdt_mem* p_cdt_mem = (cdt_mem*)bin_arg.r_bin.particle;
 
@@ -4042,7 +4057,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		memcpy(p_cdt_mem->data, temp.r_bytes.contents, p_cdt_mem->sz);
 
 		old = *b;
-		rt_value_destroy(&temp, NULL);
+		rt_value_destroy(&temp);
 		break;
 	}
 	case RT_MSGPACK: {
@@ -4051,7 +4066,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		b = &bin_arg.r_bin;
 		bin_arg.type = RT_BIN;
 
-		if (! msgpack_to_bin(rt, &bin_arg.r_bin, &temp)) {
+		if (! msgpack_to_bin(rt, &bin_arg.r_bin, &temp, NULL)) {
 			ret_val->type = RT_TRILEAN;
 			ret_val->r_trilean = AS_EXP_UNK;
 			call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
@@ -4060,7 +4075,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		}
 
 		old = *b;
-		rt_value_destroy(&temp, NULL);
+		rt_value_destroy(&temp);
 
 		break;
 	}
@@ -4107,7 +4122,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup, bin_cleanup_ix);
 
 	if (ret != AS_OK) {
-		rt_value_destroy(&bin_arg, rt);
+		rt_value_destroy(&bin_arg);
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
 		return;
@@ -4121,7 +4136,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		as_bin_particle_destroy(&rb);
 	}
 	else {
-		rt_value_destroy(&bin_arg, rt);
+		rt_value_destroy(&bin_arg);
 		b = &rb;
 	}
 
@@ -4254,7 +4269,8 @@ eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 //
 
 static void
-rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from)
+rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from,
+		cf_ll_buf* ll_buf)
 {
 	as_bin b = *from->r_bin_p;
 	uint8_t type = as_bin_get_particle_type(&b);
@@ -4275,7 +4291,7 @@ rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from)
 		;
 		uint32_t sz = sizeof(cdt_mem) + ((cdt_mem*)b.particle)->sz;
 
-		rb->particle = rt_alloc_mem(rt, sz);
+		rb->particle = rt_alloc_mem(rt, sz, ll_buf);
 		memcpy(rb->particle, b.particle, sz);
 		break;
 	default:
@@ -4437,7 +4453,7 @@ rt_value_translate(rt_value* to, const rt_value* from)
 }
 
 static void
-rt_value_destroy(rt_value* val, runtime* rt)
+rt_value_destroy(rt_value* val)
 {
 	if (val == NULL) {
 		return;
@@ -4447,16 +4463,12 @@ rt_value_destroy(rt_value* val, runtime* rt)
 		return;
 	}
 
-	if (val->type == RT_GEO_COMPILED && val->r_geo.type == GEO_REGION_NEED_FREE) {
+	if (val->type == RT_GEO_COMPILED &&
+			val->r_geo.type == GEO_REGION_NEED_FREE) {
 		geo_region_destroy(val->r_geo.region);
 	}
-	else if (val->type == RT_BIN && ! as_bin_is_unused(&val->r_bin)) {
-		if (rt) {
-			rt_free_mem(rt, val->r_bin.particle);
-		}
-		else {
-			as_bin_particle_destroy(&val->r_bin);
-		}
+	else if (val->type == RT_BIN) {
+		as_bin_particle_destroy(&val->r_bin);
 	}
 }
 
@@ -4782,12 +4794,12 @@ rt_value_bin_translate(rt_value* to, const rt_value* from)
 }
 
 static void*
-rt_alloc_mem(runtime* rt, size_t sz)
+rt_alloc_mem(runtime* rt, size_t sz, cf_ll_buf* ll_buf)
 {
-	if (rt->ll_buf != NULL) {
+	if (ll_buf != NULL) {
 		uint8_t *ptr;
 
-		cf_ll_buf_reserve(rt->ll_buf, sz, &ptr);
+		cf_ll_buf_reserve(ll_buf, sz, &ptr);
 
 		return ptr;
 	}
@@ -4795,23 +4807,13 @@ rt_alloc_mem(runtime* rt, size_t sz)
 	return rt->alloc_ns ? cf_malloc_ns(sz) : cf_malloc(sz);
 }
 
-static void
-rt_free_mem(runtime*rt, void* ptr)
-{
-	if (rt->ll_buf) {
-		return;
-	}
-
-	cf_free(ptr);
-}
-
 static bool
-msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from)
+msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 {
 	msgpack_type type = msgpack_buf_peek_type(from->r_bytes.contents,
 			from->r_bytes.sz);
 
-	to->particle = rt_alloc_mem(rt, from->r_bytes.sz + sizeof(cdt_mem));
+	to->particle = rt_alloc_mem(rt, from->r_bytes.sz + sizeof(cdt_mem), ll_buf);
 
 	cdt_mem* p_cdt_mem = (cdt_mem*)to->particle;
 
