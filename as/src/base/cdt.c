@@ -4395,10 +4395,10 @@ bool
 cdt_msgpack_ctx_to_dynbuf(msgpack_in *mp, cf_dyn_buf *db)
 {
 	static const char *ctx_names[] = {
-			[AS_CDT_CTX_INDEX] = "by_index",
-			[AS_CDT_CTX_RANK] = "by_rank",
-			[AS_CDT_CTX_KEY] = "by_key",
-			[AS_CDT_CTX_VALUE] = "by_value"
+			[AS_CDT_CTX_INDEX] = "index",
+			[AS_CDT_CTX_RANK] = "rank",
+			[AS_CDT_CTX_KEY] = "key",
+			[AS_CDT_CTX_VALUE] = "value"
 	};
 
 	uint32_t ele_count;
