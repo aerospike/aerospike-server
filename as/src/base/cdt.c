@@ -1212,7 +1212,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			com->ctx.data_sz = 0;
 			if (! cdt_verify(&com->ctx)) {
 				cdt_context_print(&com->ctx, "ctx");
-				cf_crash(AS_PARTICLE, "cdt_process_state_context_eval: param_count %u", ctx_param_count);
+				cf_crash(AS_PARTICLE, "cdt_process_state_context_eval");
 			}
 #endif
 		}
