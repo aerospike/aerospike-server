@@ -1875,13 +1875,13 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 
 			if (is_ordered) {
 				offset_index_init(&topoff, (uint8_t *)ext.data,
-						ctx->top_ele_count, NULL, new_content_sz);
+						ctx->top_ele_count, NULL, ctx->top_content_sz);
 				offset_index_init(&newoff, NULL, ctx->top_ele_count, NULL,
 						new_content_sz);
 			}
 			else {
 				list_partial_offset_index_init(&topoff, (uint8_t *)ext.data,
-						ctx->top_ele_count, NULL, new_content_sz);
+						ctx->top_ele_count, NULL, ctx->top_content_sz);
 				list_partial_offset_index_init(&newoff, NULL,
 						ctx->top_ele_count, NULL, new_content_sz);
 			}
