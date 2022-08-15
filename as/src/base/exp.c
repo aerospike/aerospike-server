@@ -5132,8 +5132,15 @@ display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 		cf_dyn_buf_append_string(db, "nil");
 		break;
 	case VOP_VALUE_GEO:
-		cf_dyn_buf_append_format(db, "<geojson#%u>",
-				((op_value_blob*)ob)->value_sz);
+		;
+		uint32_t sz;
+		msgpack_in mp = {
+				.buf = ((op_value_geo*)ob)->contents,
+				.buf_sz = ((op_value_geo*)ob)->content_sz
+		};
+
+		msgpack_get_bin(&mp, &sz);
+		cf_dyn_buf_append_format(db, "<geojson#%u>", sz - 1);
 		break;
 	case VOP_VALUE_LIST: {
 		op_value_blob* op_b = (op_value_blob*)ob;
