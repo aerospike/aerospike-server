@@ -82,7 +82,7 @@ void as_service_start(void);
 void as_service_set_threads(uint32_t n_threads);
 bool as_service_set_proto_fd_max(uint32_t val);
 void as_service_rearm(struct as_file_handle_s* fd_h);
-void as_service_enqueue_internal_raw(struct as_transaction_s* tr, const cf_digest* d, uint32_t max_threads, bool ignore_pin);
+void as_service_enqueue_internal_raw(struct as_transaction_s* tr, const cf_digest* d, uint32_t max_threads, bool use_pid);
 
 static inline void
 as_service_enqueue_internal(struct as_transaction_s* tr)
