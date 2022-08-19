@@ -2403,6 +2403,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	// Skip records that have expired.
 	if (opt_meta.void_time != 0 && ns->cold_start_now > opt_meta.void_time) {
 		if (! is_create) {
+			remove_from_sindex(ns, &r_ref); // no-op unless data-in-memory
 			as_set_index_delete_live(ns, p_partition->tree, r, r_ref.r_h);
 		}
 
@@ -2416,6 +2417,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	if (opt_meta.void_time != 0 && ns->evict_void_time > opt_meta.void_time &&
 			drv_is_set_evictable(ns, &opt_meta)) {
 		if (! is_create) {
+			remove_from_sindex(ns, &r_ref); // no-op unless data-in-memory
 			as_set_index_delete_live(ns, p_partition->tree, r, r_ref.r_h);
 		}
 
