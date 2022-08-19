@@ -55,6 +55,7 @@
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
+#include "transaction/rw_utils.h"
 
 #include "warnings.h"
 
@@ -1259,6 +1260,8 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 	else if (! per_thread->sets_not_evicting[as_index_get_set_id(r)] &&
 			ns->evict_void_time > void_time) {
+		remove_from_sindex(ns, r_ref); // no-op unless data-in-memory
+
 		as_index_tree* tree = per_thread->rsv->tree;
 
 		// Note - can't be a tombstone.
