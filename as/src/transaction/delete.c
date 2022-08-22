@@ -562,7 +562,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 	bool check_key = as_transaction_has_key(tr);
 
-	if (ns->storage_data_in_memory || filter_exp != NULL || check_key) {
+	if (filter_exp != NULL || check_key) {
 		as_storage_rd rd;
 		as_storage_record_open(ns, r, &rd);
 
@@ -590,10 +590,10 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		}
 
 		as_storage_record_close(&rd);
+	}
 
-		if (ns->storage_data_in_memory || ns->xmem_type == CF_XMEM_TYPE_FLASH) {
-			remove_from_sindex(ns, r_ref);
-		}
+	if (ns->storage_data_in_memory || ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		remove_from_sindex(ns, r_ref);
 	}
 
 	as_set_index_delete(ns, tree, as_index_get_set_id(r), r_ref->r_h);
