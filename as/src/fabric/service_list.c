@@ -48,6 +48,7 @@
 #include "shash.h"
 #include "socket.h"
 
+#include "base/cfg.h"
 #include "base/security.h"
 #include "base/service.h"
 #include "base/thr_info.h"
