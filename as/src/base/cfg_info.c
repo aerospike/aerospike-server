@@ -719,8 +719,8 @@ cfg_set_service(const char* cmd)
 				g_config.batch_max_unused_buffers, val);
 		g_config.batch_max_unused_buffers = val;
 	}
-	else if (as_info_parameter_get(cmd, "cluster-name", v, &v_len)) {
-		if (! as_config_cluster_name_set(v) == 0) {
+	else if (as_info_parameter_get(cmd, "cluster-name", v, &v_len) == 0) {
+		if (! as_config_cluster_name_set(v)) {
 			return false;
 		}
 		cf_info(AS_INFO, "Changing value of cluster-name to '%s'", v);
