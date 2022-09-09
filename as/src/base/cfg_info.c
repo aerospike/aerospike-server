@@ -89,7 +89,7 @@ static int cfg_set(char* name, char* cmd, cf_dyn_buf* db);
 static bool cfg_set_service(const char* cmd);
 static bool cfg_set_network(const char* cmd);
 static bool cfg_set_namespace(const char* cmd);
-static bool cfg_set_set(const char* cmd, as_namespace* ns);
+static bool cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name, size_t set_name_len);
 
 // Histogram helpers.
 static void fabric_histogram_clear_all(void);
@@ -1140,7 +1140,7 @@ cfg_set_namespace(const char* cmd)
 	v_len = sizeof(v);
 
 	if (as_info_parameter_get(cmd, "set", v, &v_len) == 0) {
-		return cfg_set_set(cmd, ns);
+		return cfg_set_set(cmd, ns, v, (size_t)v_len);
 	}
 	else if (as_info_parameter_get(cmd, "allow-ttl-without-nsup", v,
 			&v_len) == 0) {
@@ -2117,20 +2117,14 @@ cfg_set_namespace(const char* cmd)
 }
 
 static bool
-cfg_set_set(const char* cmd, as_namespace* ns)
+cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
+		size_t set_name_len)
 {
-	char v[1024];
-	int v_len = sizeof(v);
-
-	if (v_len == 0 || v_len >= AS_SET_NAME_MAX_SIZE) {
-		cf_warning(AS_INFO, "illegal length %d for set name %s", v_len, v);
+	if (set_name_len == 0 || set_name_len >= AS_SET_NAME_MAX_SIZE) {
+		cf_warning(AS_INFO, "illegal length %zu for set name %s", set_name_len,
+				set_name);
 		return false;
 	}
-
-	char set_name[AS_SET_NAME_MAX_SIZE];
-	size_t set_name_len = (size_t)v_len;
-
-	strcpy(set_name, v);
 
 	// Valid configurations should create set if it doesn't exist. Checks if
 	// there is a vmap set with the same name and if so returns a ptr to it. If
@@ -2143,7 +2137,8 @@ cfg_set_set(const char* cmd, as_namespace* ns)
 		return false;
 	}
 
-	v_len = sizeof(v);
+	char v[1024];
+	int v_len = sizeof(v);
 
 	if (as_info_parameter_get(cmd, "disable-eviction", v, &v_len) == 0) {
 		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
