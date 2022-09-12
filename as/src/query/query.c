@@ -459,6 +459,11 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 		return true;
 	}
 
+	if (ns->single_bin) {
+		cf_warning(AS_QUERY, "si-queries not supported - single-bin namespace");
+		return false;
+	}
+
 	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_INDEX_RANGE);
 	const uint8_t* data = f->data;
@@ -1723,11 +1728,6 @@ static bool
 basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns,
 		cf_vector** bin_ids)
 {
-	if (! as_transaction_has_where_clause(tr) && ns->single_bin) {
-		cf_warning(AS_QUERY, "can't select bins - single-bin namespace");
-		return false;
-	}
-
 	bool has_binlist = as_transaction_has_query_binlist(tr);
 	const as_msg* m = &tr->msgp->msg;
 	bool has_ops = m->n_ops > 0;
@@ -1739,6 +1739,12 @@ basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns,
 
 	if (! has_binlist && ! has_ops) {
 		return true;
+	}
+	// else - bin selection requested.
+
+	if (ns->single_bin) {
+		cf_warning(AS_QUERY, "can't select bins - single-bin namespace");
+		return false;
 	}
 
 	// TODO - temporary - won't need bin-list support after January 2023.
