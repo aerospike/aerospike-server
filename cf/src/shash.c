@@ -554,13 +554,13 @@ cf_shash_fill_element(cf_shash_ele* e, cf_shash* h, const void* key,
 static inline void
 cf_shash_size_incr(cf_shash* h)
 {
-	as_incr_int32(&h->n_elements);
+	as_incr_uint32(&h->n_elements);
 }
 
 static inline void
 cf_shash_size_decr(cf_shash* h)
 {
-	as_decr_int32(&h->n_elements);
+	as_decr_uint32(&h->n_elements);
 }
 
 static int

@@ -101,7 +101,7 @@ typedef enum {
 } as_compression_method;
 
 #define NS_COMPRESSION() ({ \
-		as_compression_method meth = as_load_int32(&ns->storage_compression); \
+		as_compression_method meth = as_load_uint32(&ns->storage_compression); \
 		(meth == AS_COMPRESSION_NONE ? "none" : \
 			(meth == AS_COMPRESSION_LZ4 ? "lz4" : \
 				(meth == AS_COMPRESSION_SNAPPY ? "snappy" : \

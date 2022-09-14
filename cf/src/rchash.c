@@ -503,13 +503,13 @@ cf_rchash_fill_element(cf_rchash_ele* e, cf_rchash* h, const void* key,
 static inline void
 cf_rchash_size_incr(cf_rchash* h)
 {
-	as_incr_int32(&h->n_elements);
+	as_incr_uint32(&h->n_elements);
 }
 
 static inline void
 cf_rchash_size_decr(cf_rchash* h)
 {
-	as_decr_int32(&h->n_elements);
+	as_decr_uint32(&h->n_elements);
 }
 
 static inline void
