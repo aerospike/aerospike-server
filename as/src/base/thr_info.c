@@ -879,15 +879,10 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 			return 0;
 		}
 
-		if (rv == -1) {
-			// Ensure migrations are complete for all namespaces.
+		uint32_t n_namespaces = g_config.n_namespaces;
+		as_namespace** namespaces = g_config.namespaces;
 
-			if (as_partition_balance_remaining_migrations() != 0) {
-				cf_dyn_buf_append_string(db, "ERROR::unstable-cluster");
-				return 0;
-			}
-		}
-		else {
+		if (rv == 0) {
 			// Ensure migrations are complete for the requested namespace only.
 			as_namespace *ns = as_namespace_get_byname(ns_name);
 
@@ -896,6 +891,13 @@ info_command_cluster_stable(char *name, char *params, cf_dyn_buf *db)
 				cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
 				return 0;
 			}
+
+			n_namespaces = 1;
+			namespaces = &namespaces[ns->ix];
+		}
+
+		for (uint32_t ns_ix = 0; ns_ix < n_namespaces; ns_ix++) {
+			as_namespace* ns = namespaces[ns_ix];
 
 			if (ns->migrate_tx_partitions_remaining +
 					ns->migrate_rx_partitions_remaining +
