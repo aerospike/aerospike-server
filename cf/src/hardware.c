@@ -2697,13 +2697,39 @@ cf_storage_is_root_fs(const char *path)
 	return vfs.f_fsid == root_id;
 }
 
+static bool
+write_file_int_if(const char *path, uint32_t val)
+{
+	int64_t cur_val;
+
+	if (cf_os_read_int_from_file(path, &cur_val) != CF_OS_FILE_RES_OK) {
+		cf_crash(CF_HARDWARE, "can't open %s for reading", path);
+	}
+
+	if ((int64_t)val == cur_val) {
+		return true; // already set
+	}
+
+	char val_str[16];
+	size_t limit = (size_t)sprintf(val_str, "%u", val);
+
+	return write_file(path, (const void*)val_str, limit) == CF_OS_FILE_RES_OK;
+}
+
 void
 cf_page_cache_dirty_limits(void)
 {
-	write_file_safe("/proc/sys/vm/dirty_bytes", "16777216", 8);
-	write_file_safe("/proc/sys/vm/dirty_background_bytes", "1", 1);
-	write_file_safe("/proc/sys/vm/dirty_expire_centisecs", "1", 1);
-	write_file_safe("/proc/sys/vm/dirty_writeback_centisecs", "10", 2);
+	if (! (write_file_int_if("/proc/sys/vm/dirty_bytes", 16777216) &&
+			write_file_int_if("/proc/sys/vm/dirty_background_bytes", 1) &&
+			write_file_int_if("/proc/sys/vm/dirty_expire_centisecs", 1) &&
+			write_file_int_if("/proc/sys/vm/dirty_writeback_centisecs", 10))) {
+		cf_crash_nostack(CF_HARDWARE, "each of: "
+				"/proc/sys/vm/dirty_bytes = 16777216, "
+				"/proc/sys/vm/dirty_background_bytes = 1, "
+				"/proc/sys/vm/dirty_expire_centisecs = 1, "
+				"/proc/sys/vm/dirty_writeback_centisecs = 10 "
+				"must be set before starting server - can't write to file(s)");
+	}
 }
 
 bool
