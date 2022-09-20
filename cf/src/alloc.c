@@ -47,10 +47,10 @@
 #include "cf_thread.h"
 #include "log.h"
 
+#include "aerospike/as_atomic.h"
 #include "aerospike/as_random.h"
-#include "aerospike/ck/ck_pr.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_hash_math.h"
 
 #include "warnings.h"
 
@@ -74,8 +74,8 @@
 
 #define MAX_INDENT (32 * 8)
 
-#define SALT_CHAR (0xAE)
-#define MAX_SALT_SZ (1024 * 1024 * 64ul)
+#define POISON_CHAR (0xae)
+#define MAX_POISON_SZ (1024 * 1024 * 64ul)
 
 typedef struct site_info_s {
 	uint32_t site_id;
@@ -112,7 +112,7 @@ static int32_t g_startup_arena = -1;
 
 static cf_alloc_debug g_debug;
 static bool g_indent;
-static bool g_salt;
+static bool g_poison;
 
 static __thread as_random g_rand = { .initialized = false };
 
@@ -155,10 +155,10 @@ hook_get_arena(const void *p_indent)
 static uint32_t
 hook_get_site_id(const void *ra)
 {
-	uint32_t site_id = (uint32_t)(uint64_t)ra & (MAX_SITES - 1);
+	uint32_t site_id = cf_hash_ptr32(&ra) & (MAX_SITES - 1);
 
 	for (uint32_t i = 0; i < MAX_SITES; ++i) {
-		const void *site_ra = ck_pr_load_ptr(g_site_ras + site_id);
+		const void *site_ra = as_load_rlx(g_site_ras + site_id);
 
 		// The allocation site is already registered and we found its
 		// slot. Return the slot index.
@@ -169,12 +169,20 @@ hook_get_site_id(const void *ra)
 
 		// We reached an empty slot, i.e., the allocation site isn't yet
 		// registered. Try to register it. If somebody else managed to grab
-		// this slot in the meantime, keep looping. Otherwise return the
-		// slot index.
+		// this slot in the meantime, keep looping, unless they grabbed it
+		// for the same address as ours. Otherwise return the slot index.
 
-		if (site_ra == NULL && ck_pr_cas_ptr(g_site_ras + site_id, NULL, (void *)ra)) {
-			ck_pr_inc_32(&g_n_site_ras);
-			return site_id;
+		if (site_ra == NULL) {
+			if (as_cas_rlx(g_site_ras + site_id, &site_ra, ra)) {
+				// We took the empty slot.
+				as_faa_rlx(&g_n_site_ras, 1);
+				return site_id;
+			}
+
+			if (site_ra == ra) {
+				// Somebody else took the empty slot, but for the same address.
+				return site_id;
+			}
 		}
 
 		site_id = (site_id + 1) & (MAX_SITES - 1);
@@ -189,14 +197,14 @@ hook_get_site_id(const void *ra)
 static uint32_t
 hook_new_site_info_id(void)
 {
-	uint64_t info_id = ck_pr_faa_64(&g_n_site_infos, 1);
+	uint64_t info_id = as_faa_rlx(&g_n_site_infos, 1);
 
 	if (info_id < MAX_SITES * MAX_THREADS) {
 		return (uint32_t)info_id;
 	}
 
 	if (info_id == MAX_SITES * MAX_THREADS) {
-		cf_ticker_warning(CF_ALLOC, "site info pool exhausted");
+		cf_warning(CF_ALLOC, "site info pool exhausted");
 	}
 
 	return 0;
@@ -227,10 +235,12 @@ hook_get_site_info_id(uint32_t site_id)
 
 	site_info *info = g_site_infos + info_id;
 
-	info->site_id = site_id;
 	info->thread_id = cf_thread_sys_tid();
 	info->size_lo = 0;
 	info->size_hi = 0;
+
+	// Set site_id field last - it acts as a "site_info is valid" flag.
+	as_store_rls(&info->site_id, site_id);
 
 	g_thread_site_infos[site_id] = info_id;
 	return info_id;
@@ -284,7 +294,7 @@ hook_handle_alloc(const void *ra, void *p, void *p_indent, size_t sz)
 }
 
 static void
-hook_handle_alloc_check(const void* ra, const void* p, size_t jem_sz)
+hook_handle_free_check(const void* ra, const void* p, size_t jem_sz)
 {
 	uint8_t *data = (uint8_t *)p + jem_sz - sizeof(uint32_t);
 	uint32_t *data32 = (uint32_t *)data;
@@ -301,13 +311,13 @@ hook_handle_alloc_check(const void* ra, const void* p, size_t jem_sz)
 	if (delta == 0xffff) {
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, potential double free, possibly freed before with RA 0x%lx",
 				jem_sz, p, cf_log_strip_aslr(ra),
-				cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id)));
+				cf_log_strip_aslr(as_load_rlx(g_site_ras + site_id)));
 	}
 
 	if (delta > jem_sz - sizeof(uint32_t)) {
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid delta length, possibly allocated with RA 0x%lx",
 				jem_sz, p, cf_log_strip_aslr(ra),
-				cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id)));
+				cf_log_strip_aslr(as_load_rlx(g_site_ras + site_id)));
 	}
 
 	uint8_t *mark = data - delta;
@@ -316,7 +326,7 @@ hook_handle_alloc_check(const void* ra, const void* p, size_t jem_sz)
 		if (mark[i] != data[i]) {
 			cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid mark, possibly allocated with RA 0x%lx",
 					jem_sz, p, cf_log_strip_aslr(ra),
-					cf_log_strip_aslr(ck_pr_load_ptr(g_site_ras + site_id)));
+					cf_log_strip_aslr(as_load_rlx(g_site_ras + site_id)));
 		}
 	}
 }
@@ -326,9 +336,9 @@ hook_handle_alloc_check(const void* ra, const void* p, size_t jem_sz)
 
 static void
 hook_handle_free(const void *ra, void *p, void *p_user, size_t jem_sz,
-		bool salt)
+		bool poison)
 {
-	hook_handle_alloc_check(ra, p, jem_sz);
+	hook_handle_free_check(ra, p, jem_sz);
 
 	uint8_t *data = (uint8_t *)p + jem_sz - sizeof(uint32_t);
 	uint32_t *data32 = (uint32_t *)data;
@@ -368,10 +378,11 @@ hook_handle_free(const void *ra, void *p, void *p_user, size_t jem_sz,
 		mark[i] = data[i];
 	}
 
-	if (salt) {
+	if (poison) {
 		size_t sz = (size_t)(mark - (uint8_t *)p_user);
 
-		dead_memset(p_user, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+		dead_memset(p_user, POISON_CHAR, sz > MAX_POISON_SZ ?
+				MAX_POISON_SZ : sz);
 	}
 }
 
@@ -548,11 +559,11 @@ cf_alloc_init(void)
 
 void
 cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations,
-		bool salt_allocations)
+		bool poison_allocations)
 {
 	g_debug = debug_allocations;
 	g_indent = indent_allocations;
-	g_salt = salt_allocations;
+	g_poison = poison_allocations;
 
 	g_alloc_started = true;
 }
@@ -631,7 +642,7 @@ cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *map
 	}
 
 	if (site_count) {
-		*site_count = ck_pr_load_32(&g_n_site_ras);
+		*site_count = as_load_rlx(&g_n_site_ras);
 	}
 }
 
@@ -714,7 +725,7 @@ cf_alloc_log_site_infos(const char *file)
 	}
 
 	time_to_file(fh);
-	uint64_t n_site_infos = ck_pr_load_64(&g_n_site_infos);
+	uint64_t n_site_infos = as_load_rlx(&g_n_site_infos);
 
 	if (n_site_infos > MAX_SITES * MAX_THREADS) {
 		n_site_infos = MAX_SITES * MAX_THREADS;
@@ -722,7 +733,14 @@ cf_alloc_log_site_infos(const char *file)
 
 	for (uint64_t i = 1; i < n_site_infos; ++i) {
 		site_info *info = g_site_infos + i;
-		const void *ra = ck_pr_load_ptr(g_site_ras + info->site_id);
+		// See corresponding as_store_rls() in hook_get_site_info_id().
+		uint32_t site_id = as_load_acq(&info->site_id);
+
+		if (site_id == 0) {
+			continue;
+		}
+
+		const void *ra = as_load_rlx(g_site_ras + site_id);
 
 		fprintf(fh, "0x%016" PRIx64 " %9d 0x%016zx 0x%016zx\n",
 				cf_log_strip_aslr(ra), info->thread_id, info->size_hi,
@@ -813,7 +831,7 @@ do_free(void *p_indent, const void *ra)
 	void *p = g_indent ? outdent(p_indent) : p_indent;
 	size_t jem_sz = jem_sallocx(p, 0);
 
-	hook_handle_free(ra, p, p_indent, jem_sz, g_salt);
+	hook_handle_free(ra, p, p_indent, jem_sz, g_poison);
 	jem_sdallocx(p, jem_sz, flags);
 }
 
@@ -939,8 +957,8 @@ do_mallocx(size_t sz, int32_t arena, const void *ra)
 
 	hook_handle_alloc(ra, p, p_indent, sz);
 
-	if (g_salt) {
-		memset(p_indent, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+	if (g_poison) {
+		memset(p_indent, POISON_CHAR, sz > MAX_POISON_SZ ? MAX_POISON_SZ : sz);
 	}
 
 	return p_indent;
@@ -1221,6 +1239,8 @@ posix_memalign(void **p, size_t align, size_t sz)
 		return jem_posix_memalign(p, align, sz == 0 ? 1 : sz);
 	}
 
+	// When indentation is enabled, align to 4096+ to mark as unindented.
+
 	if (g_indent) {
 		align = (align + 0xffful) & ~0xffful;
 	}
@@ -1246,6 +1266,8 @@ aligned_alloc(size_t align, size_t sz)
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
 	}
 
+	// When indentation is enabled, align to 4096+ to mark as unindented.
+
 	if (g_indent) {
 		align = (align + 0xffful) & ~0xffful;
 	}
@@ -1270,8 +1292,8 @@ do_valloc(size_t sz)
 	void *p = jem_aligned_alloc(PAGE_SZ, ext_sz);
 	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
-	if (g_salt) {
-		memset(p, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+	if (g_poison) {
+		memset(p, POISON_CHAR, sz > MAX_POISON_SZ ? MAX_POISON_SZ : sz);
 	}
 
 	return p;
@@ -1297,6 +1319,8 @@ memalign(size_t align, size_t sz)
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
 	}
 
+	// When indentation is enabled, align to 4096+ to mark as unindented.
+
 	if (g_indent) {
 		align = (align + 0xffful) & ~0xffful;
 	}
@@ -1319,7 +1343,7 @@ pvalloc(size_t sz)
 }
 
 static void
-do_alloc_check(const void* p_indent, const void* ra)
+do_validate_pointer(const void* p_indent, const void* ra)
 {
 	if (p_indent == NULL) {
 		return;
@@ -1334,13 +1358,13 @@ do_alloc_check(const void* p_indent, const void* ra)
 	const void *p = g_indent ? outdent((void*)p_indent) : p_indent;
 	size_t jem_sz = jem_sallocx(p, 0);
 
-	hook_handle_alloc_check(ra, p, jem_sz);
+	hook_handle_free_check(ra, p, jem_sz);
 }
 
 void
-cf_alloc_check(const void* p_indent)
+cf_validate_pointer(const void* p_indent)
 {
-	do_alloc_check(p_indent, __builtin_return_address(0));
+	do_validate_pointer(p_indent, __builtin_return_address(0));
 }
 
 void *
@@ -1369,8 +1393,9 @@ cf_rc_alloc(size_t sz)
 
 		hook_handle_alloc(__builtin_return_address(0), p, p_indent, tot_sz);
 
-		if (g_salt) {
-			memset(p_indent, SALT_CHAR, sz > MAX_SALT_SZ ? MAX_SALT_SZ : sz);
+		if (g_poison) {
+			memset(p_indent, POISON_CHAR, sz > MAX_POISON_SZ ?
+					MAX_POISON_SZ : sz);
 		}
 	}
 
@@ -1402,7 +1427,7 @@ do_rc_free(void *body, void *ra)
 	void *p = g_indent ? outdent(head) : head;
 	size_t jem_sz = jem_sallocx(p, 0);
 
-	hook_handle_free(ra, p, body, jem_sz, g_salt);
+	hook_handle_free(ra, p, body, jem_sz, g_poison);
 	jem_sdallocx(p, jem_sz, flags);
 }
 
@@ -1412,35 +1437,33 @@ cf_rc_free(void *body)
 	do_rc_free(body, __builtin_return_address(0));
 }
 
-int32_t
+uint32_t
 cf_rc_reserve(void *body)
 {
 	cf_rc_header *head = (cf_rc_header *)body - 1;
-	return cf_atomic32_incr(&head->rc);
+	return as_aaf_rlx(&head->rc, 1);
 }
 
-int32_t
+uint32_t
 cf_rc_release(void *body)
 {
 	cf_rc_header *head = (cf_rc_header *)body - 1;
-	int32_t rc = cf_atomic32_decr(&head->rc);
+	uint32_t rc = as_aaf_rls(&head->rc, -1);
 
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc,
-			rc);
+	cf_assert(rc != (uint32_t)-1, CF_ALLOC, "reference count underflow");
 
 	return rc;
 }
 
-int32_t
+uint32_t
 cf_rc_releaseandfree(void *body)
 {
 	cf_rc_header *head = (cf_rc_header *)body - 1;
-	int32_t rc = cf_atomic32_decr(&head->rc);
+	uint32_t rc = as_aaf_rls(&head->rc, -1);
 
-	cf_assert(rc >= 0, CF_ALLOC, "reference count underflow: %d (0x%x)", rc,
-			rc);
+	cf_assert(rc != (uint32_t)-1, CF_ALLOC, "reference count underflow");
 
-	if (rc > 0) {
+	if (rc != 0) {
 		return rc;
 	}
 
@@ -1448,9 +1471,9 @@ cf_rc_releaseandfree(void *body)
 	return 0;
 }
 
-int32_t
+uint32_t
 cf_rc_count(const void *body)
 {
 	const cf_rc_header *head = (const cf_rc_header *)body - 1;
-	return (int32_t)head->rc;
+	return head->rc;
 }

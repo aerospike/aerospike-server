@@ -280,11 +280,7 @@ as_sindex_reserve(as_sindex* si)
 void
 as_sindex_release(as_sindex* si)
 {
-	int32_t rc = cf_rc_release(si);
-
-	cf_assert(rc >= 0, AS_SINDEX, "ref-count underflow %d", rc);
-
-	if (rc == 0) {
+	if (cf_rc_release(si) == 0) {
 		// We might be in a transaction, so destroy asynchronously.
 		as_sindex_populate_destroy(si);
 	}

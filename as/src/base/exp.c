@@ -5286,7 +5286,7 @@ debug_exp_check(const as_exp* exp)
 		return;
 	}
 
-	cf_alloc_check(exp->buf_cleanup);
-	cf_alloc_check(exp);
+	cf_validate_pointer(exp->buf_cleanup);
+	cf_validate_pointer(exp);
 #endif
 }

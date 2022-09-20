@@ -191,17 +191,12 @@ msg_create(msg_type type)
 void
 msg_destroy(msg *m)
 {
-	int cnt = cf_rc_release(m);
-
-	if (cnt == 0) {
+	if (cf_rc_release(m) == 0) {
 		for (uint32_t i = 0; i < m->n_fields; i++) {
 			mf_destroy(&m->f[i]);
 		}
 
 		msg_put(m);
-	}
-	else {
-		cf_assert(cnt > 0, CF_MSG, "msg_destroy(%p) extra call", m);
 	}
 }
 
@@ -1099,8 +1094,8 @@ msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r,
 void
 msg_dump(const msg *m, const char *info)
 {
-	cf_info(CF_MSG, "msg_dump: %s: msg %p rc %d n-fields %u bytes-used %u bytes-alloc'd %u type %d",
-			info, m, (int)cf_rc_count((void*)m), m->n_fields, m->bytes_used,
+	cf_info(CF_MSG, "msg_dump: %s: msg %p rc %u n-fields %u bytes-used %u bytes-alloc'd %u type %d",
+			info, m, cf_rc_count((void*)m), m->n_fields, m->bytes_used,
 			m->bytes_alloc, m->type);
 
 	for (uint32_t i = 0; i < m->n_fields; i++) {

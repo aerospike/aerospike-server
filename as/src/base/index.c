@@ -204,9 +204,7 @@ as_index_tree_release(as_namespace* ns, as_index_tree* tree)
 		return;
 	}
 
-	int rc = cf_rc_release(tree);
-
-	if (rc > 0) {
+	if (cf_rc_release(tree) != 0) {
 		return;
 	}
 

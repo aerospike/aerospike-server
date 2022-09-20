@@ -40,8 +40,8 @@
 //
 
 typedef struct cf_rc_header_s {
-	cf_atomic32 rc;
-	uint32_t	sz;
+	uint32_t rc;
+	uint32_t sz;
 } cf_rc_header;
 
 typedef enum {
@@ -103,7 +103,7 @@ void *cf_alloc_realloc_arena(void *p, size_t sz, int32_t arena);
 
 #define cf_free(_p)              free(_p)
 
-void cf_alloc_check(const void* p_indent);
+void cf_validate_pointer(const void* p_indent);
 
 extern bool g_alloc_started;
 
@@ -115,7 +115,7 @@ extern bool g_alloc_started;
 void *cf_rc_alloc(size_t sz);
 void cf_rc_free(void *p);
 
-int32_t cf_rc_count(const void *p);
-int32_t cf_rc_reserve(void *p);
-int32_t cf_rc_release(void *p);
-int32_t cf_rc_releaseandfree(void *p);
+uint32_t cf_rc_count(const void *p);
+uint32_t cf_rc_reserve(void *p);
+uint32_t cf_rc_release(void *p);
+uint32_t cf_rc_releaseandfree(void *p);

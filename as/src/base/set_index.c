@@ -191,8 +191,8 @@ as_set_index_destroy_all(as_index_tree* tree)
 
 		if (stree != NULL) {
 			// TODO - paranoia - remove or simplify eventually.
-			int32_t rc = cf_rc_count(stree);
-			cf_assert(rc == 1, AS_INDEX, "bad stree rc %d id %u", rc, set_id);
+			uint32_t rc = cf_rc_count(stree);
+			cf_assert(rc == 1, AS_INDEX, "bad stree rc %u id %u", rc, set_id);
 
 			stree_destroy(stree); // ok to directly destroy stree
 		}
