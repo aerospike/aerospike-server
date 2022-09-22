@@ -144,7 +144,6 @@ as_record_is_expired(const as_record *r)
 
 // Called when writes encounter a "doomed" record, to delete the doomed record
 // and create a new one in place without giving up the record lock.
-// FIXME - won't be able to "rescue" with future sindex method - will go away.
 void
 as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 {
