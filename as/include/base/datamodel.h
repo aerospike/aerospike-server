@@ -28,8 +28,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "aerospike/as_val.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -691,14 +691,14 @@ typedef struct as_namespace_s {
 
 	uint64_t		drive_size; // discovered (and rounded) size of drive
 	uint32_t		storage_max_write_q; // storage_max_write_cache is converted to this
-	cf_atomic32		n_wblocks_to_flush; // on write queues or shadow queues
+	uint32_t		n_wblocks_to_flush; // on write queues or shadow queues
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
 	uint32_t		defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
 
 	// For data-not-in-memory, we optionally cache swbs after writing to device.
 	// To track fraction of reads from cache:
-	cf_atomic32		n_reads_from_cache;
-	cf_atomic32		n_reads_from_device;
+	uint32_t		n_reads_from_cache;
+	uint32_t		n_reads_from_device;
 
 	uint8_t			storage_encryption_key[64];
 	uint8_t			storage_encryption_old_key[64];
@@ -844,7 +844,7 @@ typedef struct as_namespace_s {
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
-	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
+	uint32_t	 	storage_post_write_queue; // number of swbs/device held after writing to device
 	bool			storage_read_page_cache;
 	char*			storage_scheduler_mode; // relevant for devices only, not files
 	bool			storage_serialize_tomb_raider; // relevant only for enterprise edition
@@ -865,8 +865,8 @@ typedef struct as_namespace_s {
 
 	// Object counts.
 
-	cf_atomic64		n_objects;
-	cf_atomic64		n_tombstones; // relevant only for enterprise edition
+	uint64_t		n_objects;
+	uint64_t		n_tombstones; // relevant only for enterprise edition
 	uint64_t		n_xdr_tombstones; // subset of n_tombstones
 	uint64_t		n_durable_tombstones; // subset of n_tombstones
 	uint64_t		n_xdr_bin_cemeteries; // subset of n_tombstones
@@ -898,7 +898,7 @@ typedef struct as_namespace_s {
 
 	// Memory usage stats.
 
-	cf_atomic_int	n_bytes_memory;
+	uint64_t		n_bytes_memory;
 
 	// Persistent storage stats.
 
@@ -913,218 +913,218 @@ typedef struct as_namespace_s {
 
 	// Migration stats.
 
-	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only
-	cf_atomic_int	migrate_tx_instance_count; // debug only
-	cf_atomic_int	migrate_rx_instance_count; // debug only
-	cf_atomic_int	migrate_tx_partitions_active;
-	cf_atomic_int	migrate_rx_partitions_active;
-	cf_atomic_int	migrate_tx_partitions_initial;
-	cf_atomic_int	migrate_tx_partitions_remaining;
-	cf_atomic_int	migrate_tx_partitions_lead_remaining;
-	cf_atomic_int	migrate_rx_partitions_initial;
-	cf_atomic_int	migrate_rx_partitions_remaining;
-	cf_atomic_int	migrate_signals_active;
-	cf_atomic_int	migrate_signals_remaining;
-	cf_atomic_int	appeals_tx_active; // relevant only for enterprise edition
-	cf_atomic_int	appeals_rx_active; // relevant only for enterprise edition
-	cf_atomic_int	appeals_tx_remaining; // relevant only for enterprise edition
+	uint64_t		migrate_tx_partitions_imbalance; // debug only
+	uint64_t		migrate_tx_instance_count; // debug only
+	uint64_t		migrate_rx_instance_count; // debug only
+	uint64_t		migrate_tx_partitions_active;
+	uint64_t		migrate_rx_partitions_active;
+	uint64_t		migrate_tx_partitions_initial;
+	uint64_t		migrate_tx_partitions_remaining;
+	uint64_t		migrate_tx_partitions_lead_remaining;
+	uint64_t		migrate_rx_partitions_initial;
+	uint64_t		migrate_rx_partitions_remaining;
+	uint64_t		migrate_signals_active;
+	uint64_t		migrate_signals_remaining;
+	uint64_t		appeals_tx_active; // relevant only for enterprise edition
+	uint64_t		appeals_rx_active; // relevant only for enterprise edition
+	uint64_t		appeals_tx_remaining; // relevant only for enterprise edition
 
 	// Per-record migration stats:
-	cf_atomic_int	migrate_records_skipped; // relevant only for enterprise edition
-	cf_atomic_int	migrate_records_transmitted;
-	cf_atomic_int	migrate_record_retransmits;
-	cf_atomic_int	migrate_record_receives;
-	cf_atomic_int	appeals_records_exonerated; // relevant only for enterprise edition
+	uint64_t		migrate_records_skipped; // relevant only for enterprise edition
+	uint64_t		migrate_records_transmitted;
+	uint64_t		migrate_record_retransmits;
+	uint64_t		migrate_record_receives;
+	uint64_t		appeals_records_exonerated; // relevant only for enterprise edition
 
 	// From-client transaction stats.
 
-	cf_atomic64		n_client_tsvc_error;
-	cf_atomic64		n_client_tsvc_timeout;
+	uint64_t		n_client_tsvc_error;
+	uint64_t		n_client_tsvc_timeout;
 
-	cf_atomic64		n_client_proxy_complete;
-	cf_atomic64		n_client_proxy_error;
-	cf_atomic64		n_client_proxy_timeout;
+	uint64_t		n_client_proxy_complete;
+	uint64_t		n_client_proxy_error;
+	uint64_t		n_client_proxy_timeout;
 
-	cf_atomic64		n_client_read_success;
-	cf_atomic64		n_client_read_error;
-	cf_atomic64		n_client_read_timeout;
-	cf_atomic64		n_client_read_not_found;
-	cf_atomic64		n_client_read_filtered_out;
+	uint64_t		n_client_read_success;
+	uint64_t		n_client_read_error;
+	uint64_t		n_client_read_timeout;
+	uint64_t		n_client_read_not_found;
+	uint64_t		n_client_read_filtered_out;
 
-	cf_atomic64		n_client_write_success;
-	cf_atomic64		n_client_write_error;
-	cf_atomic64		n_client_write_timeout;
-	cf_atomic64		n_client_write_filtered_out;
+	uint64_t		n_client_write_success;
+	uint64_t		n_client_write_error;
+	uint64_t		n_client_write_timeout;
+	uint64_t		n_client_write_filtered_out;
 
 	// Subset of n_client_write_... above, respectively.
-	cf_atomic64		n_xdr_client_write_success;
-	cf_atomic64		n_xdr_client_write_error;
-	cf_atomic64		n_xdr_client_write_timeout;
+	uint64_t		n_xdr_client_write_success;
+	uint64_t		n_xdr_client_write_error;
+	uint64_t		n_xdr_client_write_timeout;
 
-	cf_atomic64		n_client_delete_success;
-	cf_atomic64		n_client_delete_error;
-	cf_atomic64		n_client_delete_timeout;
-	cf_atomic64		n_client_delete_not_found;
-	cf_atomic64		n_client_delete_filtered_out;
+	uint64_t		n_client_delete_success;
+	uint64_t		n_client_delete_error;
+	uint64_t		n_client_delete_timeout;
+	uint64_t		n_client_delete_not_found;
+	uint64_t		n_client_delete_filtered_out;
 
 	// Subset of n_client_delete_... above, respectively.
-	cf_atomic64		n_xdr_client_delete_success;
-	cf_atomic64		n_xdr_client_delete_error;
-	cf_atomic64		n_xdr_client_delete_timeout;
-	cf_atomic64		n_xdr_client_delete_not_found;
+	uint64_t		n_xdr_client_delete_success;
+	uint64_t		n_xdr_client_delete_error;
+	uint64_t		n_xdr_client_delete_timeout;
+	uint64_t		n_xdr_client_delete_not_found;
 
-	cf_atomic64		n_client_udf_complete;
-	cf_atomic64		n_client_udf_error;
-	cf_atomic64		n_client_udf_timeout;
-	cf_atomic64		n_client_udf_filtered_out;
+	uint64_t		n_client_udf_complete;
+	uint64_t		n_client_udf_error;
+	uint64_t		n_client_udf_timeout;
+	uint64_t		n_client_udf_filtered_out;
 
-	cf_atomic64		n_client_lang_read_success;
-	cf_atomic64		n_client_lang_write_success;
-	cf_atomic64		n_client_lang_delete_success;
-	cf_atomic64		n_client_lang_error;
+	uint64_t		n_client_lang_read_success;
+	uint64_t		n_client_lang_write_success;
+	uint64_t		n_client_lang_delete_success;
+	uint64_t		n_client_lang_error;
 
 	// From-proxy transaction stats.
 
-	cf_atomic64		n_from_proxy_tsvc_error;
-	cf_atomic64		n_from_proxy_tsvc_timeout;
+	uint64_t		n_from_proxy_tsvc_error;
+	uint64_t		n_from_proxy_tsvc_timeout;
 
-	cf_atomic64		n_from_proxy_read_success;
-	cf_atomic64		n_from_proxy_read_error;
-	cf_atomic64		n_from_proxy_read_timeout;
-	cf_atomic64		n_from_proxy_read_not_found;
-	cf_atomic64		n_from_proxy_read_filtered_out;
+	uint64_t		n_from_proxy_read_success;
+	uint64_t		n_from_proxy_read_error;
+	uint64_t		n_from_proxy_read_timeout;
+	uint64_t		n_from_proxy_read_not_found;
+	uint64_t		n_from_proxy_read_filtered_out;
 
-	cf_atomic64		n_from_proxy_write_success;
-	cf_atomic64		n_from_proxy_write_error;
-	cf_atomic64		n_from_proxy_write_timeout;
-	cf_atomic64		n_from_proxy_write_filtered_out;
+	uint64_t		n_from_proxy_write_success;
+	uint64_t		n_from_proxy_write_error;
+	uint64_t		n_from_proxy_write_timeout;
+	uint64_t		n_from_proxy_write_filtered_out;
 
 	// Subset of n_from_proxy_write_... above, respectively.
-	cf_atomic64		n_xdr_from_proxy_write_success;
-	cf_atomic64		n_xdr_from_proxy_write_error;
-	cf_atomic64		n_xdr_from_proxy_write_timeout;
+	uint64_t		n_xdr_from_proxy_write_success;
+	uint64_t		n_xdr_from_proxy_write_error;
+	uint64_t		n_xdr_from_proxy_write_timeout;
 
-	cf_atomic64		n_from_proxy_delete_success;
-	cf_atomic64		n_from_proxy_delete_error;
-	cf_atomic64		n_from_proxy_delete_timeout;
-	cf_atomic64		n_from_proxy_delete_not_found;
-	cf_atomic64		n_from_proxy_delete_filtered_out;
+	uint64_t		n_from_proxy_delete_success;
+	uint64_t		n_from_proxy_delete_error;
+	uint64_t		n_from_proxy_delete_timeout;
+	uint64_t		n_from_proxy_delete_not_found;
+	uint64_t		n_from_proxy_delete_filtered_out;
 
 	// Subset of n_from_proxy_delete_... above, respectively.
-	cf_atomic64		n_xdr_from_proxy_delete_success;
-	cf_atomic64		n_xdr_from_proxy_delete_error;
-	cf_atomic64		n_xdr_from_proxy_delete_timeout;
-	cf_atomic64		n_xdr_from_proxy_delete_not_found;
+	uint64_t		n_xdr_from_proxy_delete_success;
+	uint64_t		n_xdr_from_proxy_delete_error;
+	uint64_t		n_xdr_from_proxy_delete_timeout;
+	uint64_t		n_xdr_from_proxy_delete_not_found;
 
-	cf_atomic64		n_from_proxy_udf_complete;
-	cf_atomic64		n_from_proxy_udf_error;
-	cf_atomic64		n_from_proxy_udf_timeout;
-	cf_atomic64		n_from_proxy_udf_filtered_out;
+	uint64_t		n_from_proxy_udf_complete;
+	uint64_t		n_from_proxy_udf_error;
+	uint64_t		n_from_proxy_udf_timeout;
+	uint64_t		n_from_proxy_udf_filtered_out;
 
-	cf_atomic64		n_from_proxy_lang_read_success;
-	cf_atomic64		n_from_proxy_lang_write_success;
-	cf_atomic64		n_from_proxy_lang_delete_success;
-	cf_atomic64		n_from_proxy_lang_error;
+	uint64_t		n_from_proxy_lang_read_success;
+	uint64_t		n_from_proxy_lang_write_success;
+	uint64_t		n_from_proxy_lang_delete_success;
+	uint64_t		n_from_proxy_lang_error;
 
 	// Batch sub-transaction stats.
 
-	cf_atomic64		n_batch_sub_tsvc_error;
-	cf_atomic64		n_batch_sub_tsvc_timeout;
+	uint64_t		n_batch_sub_tsvc_error;
+	uint64_t		n_batch_sub_tsvc_timeout;
 
-	cf_atomic64		n_batch_sub_proxy_complete;
-	cf_atomic64		n_batch_sub_proxy_error;
-	cf_atomic64		n_batch_sub_proxy_timeout;
+	uint64_t		n_batch_sub_proxy_complete;
+	uint64_t		n_batch_sub_proxy_error;
+	uint64_t		n_batch_sub_proxy_timeout;
 
-	cf_atomic64		n_batch_sub_read_success;
-	cf_atomic64		n_batch_sub_read_error;
-	cf_atomic64		n_batch_sub_read_timeout;
-	cf_atomic64		n_batch_sub_read_not_found;
-	cf_atomic64		n_batch_sub_read_filtered_out;
+	uint64_t		n_batch_sub_read_success;
+	uint64_t		n_batch_sub_read_error;
+	uint64_t		n_batch_sub_read_timeout;
+	uint64_t		n_batch_sub_read_not_found;
+	uint64_t		n_batch_sub_read_filtered_out;
 
-	cf_atomic64		n_batch_sub_write_success;
-	cf_atomic64		n_batch_sub_write_error;
-	cf_atomic64		n_batch_sub_write_timeout;
-	cf_atomic64		n_batch_sub_write_filtered_out;
+	uint64_t		n_batch_sub_write_success;
+	uint64_t		n_batch_sub_write_error;
+	uint64_t		n_batch_sub_write_timeout;
+	uint64_t		n_batch_sub_write_filtered_out;
 
-	cf_atomic64		n_batch_sub_delete_success;
-	cf_atomic64		n_batch_sub_delete_error;
-	cf_atomic64		n_batch_sub_delete_timeout;
-	cf_atomic64		n_batch_sub_delete_not_found;
-	cf_atomic64		n_batch_sub_delete_filtered_out;
+	uint64_t		n_batch_sub_delete_success;
+	uint64_t		n_batch_sub_delete_error;
+	uint64_t		n_batch_sub_delete_timeout;
+	uint64_t		n_batch_sub_delete_not_found;
+	uint64_t		n_batch_sub_delete_filtered_out;
 
-	cf_atomic64		n_batch_sub_udf_complete;
-	cf_atomic64		n_batch_sub_udf_error;
-	cf_atomic64		n_batch_sub_udf_timeout;
-	cf_atomic64		n_batch_sub_udf_filtered_out;
+	uint64_t		n_batch_sub_udf_complete;
+	uint64_t		n_batch_sub_udf_error;
+	uint64_t		n_batch_sub_udf_timeout;
+	uint64_t		n_batch_sub_udf_filtered_out;
 
-	cf_atomic64		n_batch_sub_lang_read_success;
-	cf_atomic64		n_batch_sub_lang_write_success;
-	cf_atomic64		n_batch_sub_lang_delete_success;
-	cf_atomic64		n_batch_sub_lang_error;
+	uint64_t		n_batch_sub_lang_read_success;
+	uint64_t		n_batch_sub_lang_write_success;
+	uint64_t		n_batch_sub_lang_delete_success;
+	uint64_t		n_batch_sub_lang_error;
 
 	// From-proxy batch sub-transaction stats.
 
-	cf_atomic64		n_from_proxy_batch_sub_tsvc_error;
-	cf_atomic64		n_from_proxy_batch_sub_tsvc_timeout;
+	uint64_t		n_from_proxy_batch_sub_tsvc_error;
+	uint64_t		n_from_proxy_batch_sub_tsvc_timeout;
 
-	cf_atomic64		n_from_proxy_batch_sub_read_success;
-	cf_atomic64		n_from_proxy_batch_sub_read_error;
-	cf_atomic64		n_from_proxy_batch_sub_read_timeout;
-	cf_atomic64		n_from_proxy_batch_sub_read_not_found;
-	cf_atomic64		n_from_proxy_batch_sub_read_filtered_out;
+	uint64_t		n_from_proxy_batch_sub_read_success;
+	uint64_t		n_from_proxy_batch_sub_read_error;
+	uint64_t		n_from_proxy_batch_sub_read_timeout;
+	uint64_t		n_from_proxy_batch_sub_read_not_found;
+	uint64_t		n_from_proxy_batch_sub_read_filtered_out;
 
-	cf_atomic64		n_from_proxy_batch_sub_write_success;
-	cf_atomic64		n_from_proxy_batch_sub_write_error;
-	cf_atomic64		n_from_proxy_batch_sub_write_timeout;
-	cf_atomic64		n_from_proxy_batch_sub_write_filtered_out;
+	uint64_t		n_from_proxy_batch_sub_write_success;
+	uint64_t		n_from_proxy_batch_sub_write_error;
+	uint64_t		n_from_proxy_batch_sub_write_timeout;
+	uint64_t		n_from_proxy_batch_sub_write_filtered_out;
 
-	cf_atomic64		n_from_proxy_batch_sub_delete_success;
-	cf_atomic64		n_from_proxy_batch_sub_delete_error;
-	cf_atomic64		n_from_proxy_batch_sub_delete_timeout;
-	cf_atomic64		n_from_proxy_batch_sub_delete_not_found;
-	cf_atomic64		n_from_proxy_batch_sub_delete_filtered_out;
+	uint64_t		n_from_proxy_batch_sub_delete_success;
+	uint64_t		n_from_proxy_batch_sub_delete_error;
+	uint64_t		n_from_proxy_batch_sub_delete_timeout;
+	uint64_t		n_from_proxy_batch_sub_delete_not_found;
+	uint64_t		n_from_proxy_batch_sub_delete_filtered_out;
 
-	cf_atomic64		n_from_proxy_batch_sub_udf_complete;
-	cf_atomic64		n_from_proxy_batch_sub_udf_error;
-	cf_atomic64		n_from_proxy_batch_sub_udf_timeout;
-	cf_atomic64		n_from_proxy_batch_sub_udf_filtered_out;
+	uint64_t		n_from_proxy_batch_sub_udf_complete;
+	uint64_t		n_from_proxy_batch_sub_udf_error;
+	uint64_t		n_from_proxy_batch_sub_udf_timeout;
+	uint64_t		n_from_proxy_batch_sub_udf_filtered_out;
 
-	cf_atomic64		n_from_proxy_batch_sub_lang_read_success;
-	cf_atomic64		n_from_proxy_batch_sub_lang_write_success;
-	cf_atomic64		n_from_proxy_batch_sub_lang_delete_success;
-	cf_atomic64		n_from_proxy_batch_sub_lang_error;
+	uint64_t		n_from_proxy_batch_sub_lang_read_success;
+	uint64_t		n_from_proxy_batch_sub_lang_write_success;
+	uint64_t		n_from_proxy_batch_sub_lang_delete_success;
+	uint64_t		n_from_proxy_batch_sub_lang_error;
 
 	// Internal-UDF sub-transaction stats.
 
-	cf_atomic64		n_udf_sub_tsvc_error;
-	cf_atomic64		n_udf_sub_tsvc_timeout;
+	uint64_t		n_udf_sub_tsvc_error;
+	uint64_t		n_udf_sub_tsvc_timeout;
 
-	cf_atomic64		n_udf_sub_udf_complete;
-	cf_atomic64		n_udf_sub_udf_error;
-	cf_atomic64		n_udf_sub_udf_timeout;
+	uint64_t		n_udf_sub_udf_complete;
+	uint64_t		n_udf_sub_udf_error;
+	uint64_t		n_udf_sub_udf_timeout;
 	uint64_t		n_udf_sub_udf_filtered_out;
 
-	cf_atomic64		n_udf_sub_lang_read_success;
-	cf_atomic64		n_udf_sub_lang_write_success;
-	cf_atomic64		n_udf_sub_lang_delete_success;
-	cf_atomic64		n_udf_sub_lang_error;
+	uint64_t		n_udf_sub_lang_read_success;
+	uint64_t		n_udf_sub_lang_write_success;
+	uint64_t		n_udf_sub_lang_delete_success;
+	uint64_t		n_udf_sub_lang_error;
 
 	// Internal-ops sub-transaction stats.
 
-	cf_atomic64		n_ops_sub_tsvc_error;
-	cf_atomic64		n_ops_sub_tsvc_timeout;
+	uint64_t		n_ops_sub_tsvc_error;
+	uint64_t		n_ops_sub_tsvc_timeout;
 
-	cf_atomic64		n_ops_sub_write_success;
-	cf_atomic64		n_ops_sub_write_error;
-	cf_atomic64		n_ops_sub_write_timeout;
+	uint64_t		n_ops_sub_write_success;
+	uint64_t		n_ops_sub_write_error;
+	uint64_t		n_ops_sub_write_timeout;
 	uint64_t		n_ops_sub_write_filtered_out;
 
 	// Duplicate resolution stats.
 
-	cf_atomic64		n_dup_res_ask;
+	uint64_t		n_dup_res_ask;
 
-	cf_atomic64		n_dup_res_respond_read;
-	cf_atomic64		n_dup_res_respond_no_read;
+	uint64_t		n_dup_res_respond_read;
+	uint64_t		n_dup_res_respond_no_read;
 
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
@@ -1192,29 +1192,29 @@ typedef struct as_namespace_s {
 	uint64_t		n_si_query_ops_bg_abort;
 
 	// Geospatial query stats:
-	cf_atomic64		geo_region_query_count;		// number of region queries
-	cf_atomic64		geo_region_query_cells;		// number of cells used by region queries
-	cf_atomic64		geo_region_query_points;	// number of valid points found
-	cf_atomic64		geo_region_query_falsepos;	// number of false positives found
+	uint64_t		geo_region_query_count;		// number of region queries
+	uint64_t		geo_region_query_cells;		// number of cells used by region queries
+	uint64_t		geo_region_query_points;	// number of valid points found
+	uint64_t		geo_region_query_falsepos;	// number of false positives found
 
 	// Re-replication stats - relevant only for enterprise edition.
 
-	cf_atomic64		n_re_repl_success;
-	cf_atomic64		n_re_repl_error;
-	cf_atomic64		n_re_repl_timeout;
+	uint64_t		n_re_repl_success;
+	uint64_t		n_re_repl_error;
+	uint64_t		n_re_repl_timeout;
 
 	// Special errors that deserve their own counters:
 
-	cf_atomic64		n_fail_xdr_forbidden;
-	cf_atomic64		n_fail_key_busy;
-	cf_atomic64		n_fail_generation;
-	cf_atomic64		n_fail_record_too_big;
-	cf_atomic64		n_fail_client_lost_conflict;
-	cf_atomic64		n_fail_xdr_lost_conflict;
+	uint64_t		n_fail_xdr_forbidden;
+	uint64_t		n_fail_key_busy;
+	uint64_t		n_fail_generation;
+	uint64_t		n_fail_record_too_big;
+	uint64_t		n_fail_client_lost_conflict;
+	uint64_t		n_fail_xdr_lost_conflict;
 
 	// Special non-error counters:
 
-	cf_atomic64		n_deleted_last_bin;
+	uint64_t		n_deleted_last_bin;
 
 	// One-way automatically activated histograms.
 
@@ -1349,11 +1349,11 @@ typedef struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
 
 	// Only name survives warm/cool restart - these are all reset.
-	cf_atomic64		n_objects;
-	cf_atomic64		n_tombstones;		// relevant only for enterprise edition
-	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
-	cf_atomic64		n_bytes_device;		// sets's total on-device record data size
-	cf_atomic64		stop_writes_count;	// restrict number of records in a set
+	uint64_t		n_objects;
+	uint64_t		n_tombstones;		// relevant only for enterprise edition
+	uint64_t		n_bytes_memory;		// for data-in-memory only - sets's total record data size
+	uint64_t		n_bytes_device;		// sets's total on-device record data size
+	uint64_t		stop_writes_count;	// restrict number of records in a set
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
 	uint32_t		n_sindexes;
 	bool			eviction_disabled;	// don't evict anything in this set (note - expiration still works)
@@ -1366,10 +1366,9 @@ COMPILER_ASSERT(sizeof(as_set) == 128);
 
 static inline bool
 as_set_stop_writes(as_set *p_set) {
-	uint64_t n_objects = cf_atomic64_get(p_set->n_objects);
-	uint64_t stop_writes_count = cf_atomic64_get(p_set->stop_writes_count);
+	uint64_t stop_writes_count = as_load_uint64(&p_set->stop_writes_count);
 
-	return stop_writes_count != 0 && n_objects >= stop_writes_count;
+	return stop_writes_count != 0 && p_set->n_objects >= stop_writes_count;
 }
 
 // These bin functions must be below definition of struct as_namespace_s:

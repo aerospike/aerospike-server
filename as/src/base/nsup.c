@@ -639,7 +639,7 @@ eval_hwm_breached(as_namespace* ns)
 
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
 	uint64_t sindex_sz = as_sindex_used_bytes(ns);
-	uint64_t dim_sz = ns->n_bytes_memory;
+	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
 	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
 	uint64_t mem_hwm = (ns->memory_size * ns->hwm_memory_pct) / 100;
 
@@ -864,7 +864,7 @@ eval_stop_writes(as_namespace* ns)
 			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
 	uint64_t sindex_sz = as_sindex_used_bytes(ns);
-	uint64_t dim_sz = ns->n_bytes_memory;
+	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
 	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
 
 	static const char* reasons[] = {

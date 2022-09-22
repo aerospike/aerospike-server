@@ -32,8 +32,8 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -132,7 +132,7 @@ typedef struct proxy_request_s {
 //
 
 static cf_shash* g_proxy_hash = NULL;
-static cf_atomic32 g_proxy_tid = 0;
+static uint32_t g_proxy_tid = 0;
 
 
 //==========================================================
@@ -168,13 +168,13 @@ client_proxy_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_client_proxy_complete);
+		as_incr_uint64(&ns->n_client_proxy_complete);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_client_proxy_timeout);
+		as_incr_uint64(&ns->n_client_proxy_timeout);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_client_proxy_error);
+		as_incr_uint64(&ns->n_client_proxy_error);
 		break;
 	}
 }
@@ -184,13 +184,13 @@ batch_sub_proxy_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_batch_sub_proxy_complete);
+		as_incr_uint64(&ns->n_batch_sub_proxy_complete);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_batch_sub_proxy_timeout);
+		as_incr_uint64(&ns->n_batch_sub_proxy_timeout);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_batch_sub_proxy_error);
+		as_incr_uint64(&ns->n_batch_sub_proxy_error);
 		break;
 	}
 }
@@ -246,7 +246,7 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 
 	msg* m = as_fabric_msg_get(M_TYPE_PROXY);
 
-	uint32_t tid = cf_atomic32_incr(&g_proxy_tid);
+	uint32_t tid = as_faa_uint32(&g_proxy_tid, 1);
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_REQUEST);
 	msg_set_uint32(m, PROXY_FIELD_TID, tid);

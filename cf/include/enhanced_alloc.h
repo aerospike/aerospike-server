@@ -32,8 +32,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h"
-
 
 //==========================================================
 // Typedefs & constants.

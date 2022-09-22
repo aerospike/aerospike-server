@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h"
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "cf_mutex.h"
@@ -393,7 +393,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	dup_res_translate_result_code(rw);
 
-	cf_atomic64_add(&rw->rsv.ns->n_dup_res_ask, rw->n_dest_nodes);
+	as_add_uint64(&rw->rsv.ns->n_dup_res_ask, rw->n_dest_nodes);
 
 	bool delete_from_hash = rw->dup_res_cb(rw);
 
@@ -439,10 +439,10 @@ done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref,
 
 	if (rd) {
 		as_storage_record_close(rd);
-		cf_atomic64_incr(&ns->n_dup_res_respond_read);
+		as_incr_uint64(&ns->n_dup_res_respond_read);
 	}
 	else {
-		cf_atomic64_incr(&ns->n_dup_res_respond_no_read);
+		as_incr_uint64(&ns->n_dup_res_respond_no_read);
 	}
 
 	if (r_ref) {

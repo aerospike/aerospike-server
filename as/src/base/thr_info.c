@@ -44,7 +44,6 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
@@ -1084,7 +1083,7 @@ run_info(void* unused)
 		}
 
 		G_HIST_INSERT_DATA_POINT(info_hist, it.start_time);
-		cf_atomic64_incr(&g_stats.info_complete);
+		as_incr_uint64(&g_stats.info_complete);
 	}
 
 	return NULL;
@@ -2456,7 +2455,7 @@ dyn_objects(char* name, cf_dyn_buf* db)
 static int
 dyn_partition_generation(char* name, cf_dyn_buf* db)
 {
-	cf_dyn_buf_append_int(db, (int)g_partition_generation);
+	cf_dyn_buf_append_int(db, g_partition_generation);
 
 	return 0;
 }
@@ -3707,13 +3706,13 @@ dyn_statistics(char* name, cf_dyn_buf* db)
 	info_append_uint32(db, "tree_gc_queue", as_index_tree_gc_queue_size());
 
 	// Read closed before opened.
-	uint64_t n_proto_fds_closed = g_stats.proto_connections_closed;
-	uint64_t n_hb_fds_closed = g_stats.heartbeat_connections_closed;
-	uint64_t n_fabric_fds_closed = g_stats.fabric_connections_closed;
+	uint64_t n_proto_fds_closed = as_load_uint64(&g_stats.proto_connections_closed);
+	uint64_t n_hb_fds_closed = as_load_uint64(&g_stats.heartbeat_connections_closed);
+	uint64_t n_fabric_fds_closed = as_load_uint64(&g_stats.fabric_connections_closed);
 	// TODO - non-86 memory barrier.
-	uint64_t n_proto_fds_opened = g_stats.proto_connections_opened;
-	uint64_t n_hb_fds_opened = g_stats.heartbeat_connections_opened;
-	uint64_t n_fabric_fds_opened = g_stats.fabric_connections_opened;
+	uint64_t n_proto_fds_opened = as_load_uint64(&g_stats.proto_connections_opened);
+	uint64_t n_hb_fds_opened = as_load_uint64(&g_stats.heartbeat_connections_opened);
+	uint64_t n_fabric_fds_opened = as_load_uint64(&g_stats.fabric_connections_opened);
 
 	uint64_t n_proto_fds_open = n_proto_fds_opened - n_proto_fds_closed;
 	uint64_t n_hb_fds_open = n_hb_fds_opened - n_hb_fds_closed;
@@ -4253,7 +4252,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	uint64_t index_used = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 
-	uint64_t data_memory = ns->n_bytes_memory;
+	uint64_t data_memory = as_load_uint64(&ns->n_bytes_memory);
 	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;
 	uint64_t set_index_memory = as_set_index_used_bytes(ns);
 	uint64_t sindex_memory = as_sindex_used_bytes(ns);

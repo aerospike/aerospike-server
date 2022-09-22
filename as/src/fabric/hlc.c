@@ -25,8 +25,8 @@
 #include <math.h>
 #include <sys/param.h> // For MAX() and MIN().
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_atomic.h"
 
 #include "log.h"
 
@@ -91,12 +91,12 @@ static as_hlc_timestamp g_now;
 /**
  * Previous value of the physical component.
  */
-static cf_atomic64 g_prev_physical_component;
+static uint64_t g_prev_physical_component;
 
 /**
  * Previous value of the wall clock, when the physical component changed.
  */
-static cf_atomic64 g_prev_wall_clock;
+static uint64_t g_prev_wall_clock;
 
 /*
  * ----------------------------------------------------------------------------
@@ -136,8 +136,6 @@ if (!(expression)) {WARNING(message, __VA_ARGS__);}
  */
 static cf_clock
 hlc_wall_clock_get();
-static as_hlc_timestamp
-hlc_ts_get();
 static bool
 hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
 		cf_node source);
@@ -192,7 +190,7 @@ as_hlc_timestamp_now()
 	// but even with reasonable contention should not take more then a few
 	// iterations to succeed.
 	while (true) {
-		as_hlc_timestamp current_hlc_ts = hlc_ts_get();
+		as_hlc_timestamp current_hlc_ts = as_load_uint64(&g_now);
 
 		// Initialize the new physical and logical values to current values.
 		cf_clock new_hlc_physical_ts = hlc_physical_ts_get(current_hlc_ts);
@@ -247,7 +245,7 @@ as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
 	// but even with reasonable contention should not take more then a few
 	// iterations to succeed.
 	while (true) {
-		as_hlc_timestamp current_hlc_ts = hlc_ts_get();
+		as_hlc_timestamp current_hlc_ts = as_load_uint64(&g_now);
 
 		cf_clock current_hlc_physical_ts = hlc_physical_ts_get(current_hlc_ts);
 		uint16_t current_hlc_logical_ts = hlc_logical_ts_get(current_hlc_ts);
@@ -512,9 +510,10 @@ hlc_logical_ts_incr(uint16_t* logical_ts, cf_clock* physical_ts,
 		(*physical_ts)++;
 	}
 	cf_clock physical_component_diff = *physical_ts - g_prev_physical_component;
+	uint64_t prev_wall_clock = as_load_uint64(&g_prev_wall_clock);
 	cf_clock wall_clock_diff =
-			(wall_clock_now > g_prev_wall_clock) ?
-					wall_clock_now - g_prev_wall_clock : 0;
+			(wall_clock_now > prev_wall_clock) ?
+					wall_clock_now - prev_wall_clock : 0;
 	if (physical_component_diff < wall_clock_diff) {
 		*physical_ts += wall_clock_diff - physical_component_diff;
 	}
@@ -530,18 +529,6 @@ static void
 hlc_logical_ts_set(as_hlc_timestamp* hlc_ts, uint16_t logical_ts)
 {
 	*hlc_ts = (*hlc_ts & PHYSICAL_TS_MASK) | (((uint64_t)logical_ts));
-}
-
-/**
- * Get current value for the global timestamp atomically.
- *
- * @param new_value the new value for the global timestamp.
- * @return true on successful set, false on failure to do an atomic set.
- */
-static as_hlc_timestamp
-hlc_ts_get()
-{
-	return ck_pr_load_64(&g_now);
 }
 
 /**
@@ -563,5 +550,5 @@ hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
 	if (jump > HLC_JUMP_WARN && old_value > 0) {
 		INFO("HLC jumped by %"PRIu64" ms cause:%"PRIx64" old:%"PRIu64" new:%"PRIu64, jump, source, old_value, new_value);
 	}
-	return ck_pr_cas_64(&g_now, old_value, new_value);
+	return as_cas_uint64(&g_now, old_value, new_value);
 }

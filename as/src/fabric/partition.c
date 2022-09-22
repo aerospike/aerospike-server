@@ -31,8 +31,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_b64.h"
 
 #include "cf_mutex.h"
@@ -741,7 +741,7 @@ void
 accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects,
 		uint64_t* p_n_tombstones)
 {
-	int64_t n_tombstones = (int64_t)p->n_tombstones;
+	int64_t n_tombstones = (int64_t)as_load_uint64(&p->n_tombstones);
 	int64_t n_objects = (int64_t)as_index_tree_size(p->tree) - n_tombstones;
 
 	*p_n_objects += n_objects > 0 ? (uint64_t)n_objects : 0;

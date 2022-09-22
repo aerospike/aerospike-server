@@ -60,7 +60,6 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
@@ -257,7 +256,7 @@ static bool g_published_endpoint_list_ipv4_only;
 static uint32_t g_fabric_connect_limit[AS_FABRIC_N_CHANNELS];
 
 // Receive thread connects per channel.
-static cf_atomic32 g_n_channel_connects[AS_FABRIC_N_CHANNELS];
+static uint32_t g_n_channel_connects[AS_FABRIC_N_CHANNELS];
 
 
 //==========================================================
@@ -1073,7 +1072,7 @@ fabric_node_connect(fabric_node *node, uint32_t ch)
 
 	msg *m = as_fabric_msg_get(M_TYPE_FABRIC);
 
-	cf_atomic64_incr(&g_stats.fabric_connections_opened);
+	as_incr_uint64(&g_stats.fabric_connections_opened);
 	as_health_add_node_counter(node->node_id, AS_HEALTH_NODE_FABRIC_FDS);
 
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node);
@@ -1086,7 +1085,7 @@ fabric_node_connect(fabric_node *node, uint32_t ch)
 	fc->started_via_connect = true;
 	fc->s_channel = ch;
 
-	uint32_t ix = (cf_atomic32_incr(&g_n_channel_connects[ch]) - 1) %
+	uint32_t ix = as_faa_uint32(&g_n_channel_connects[ch], 1) %
 			g_config.n_fabric_channel_recv_pools[ch];
 
 	fc->pool = &g_fabric.recv_pool[ch][ix];
@@ -1432,7 +1431,8 @@ fabric_connection_release(fabric_connection *fc)
 
 		cf_socket_close(&fc->sock);
 		cf_socket_term(&fc->sock);
-		cf_atomic64_incr(&g_stats.fabric_connections_closed);
+		// TODO - needs 'release' semantic.
+		as_incr_uint64(&g_stats.fabric_connections_closed);
 
 		cf_free(fc->r_bigbuf);
 		cf_rc_free(fc);
@@ -1588,7 +1588,7 @@ fabric_connection_disconnect(fabric_connection *fc)
 	if (fc->started_via_connect) {
 		cf_mutex_lock(&node->connect_lock);
 
-		cf_atomic32_decr(&node->connect_count[ch]);
+		node->connect_count[ch]--;
 		node->connect_full = false;
 
 		cf_mutex_unlock(&node->connect_lock);
@@ -1826,7 +1826,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	fc->r_sz = 0;
 	fc->r_buf_sz = 0;
 
-	uint32_t ix = (cf_atomic32_incr(&g_n_channel_connects[ch]) - 1) %
+	uint32_t ix = as_faa_uint32(&g_n_channel_connects[ch], 1) %
 			g_config.n_fabric_channel_recv_pools[ch];
 
 	// fc->pool needs to be set before placing into send_idle_fc_queue.
@@ -2415,7 +2415,7 @@ run_fabric_accept(void *arg)
 				}
 
 				cf_detail(AS_FABRIC, "fabric_accept: accepting new sock %d", CSFD(&csock));
-				cf_atomic64_incr(&g_stats.fabric_connections_opened);
+				as_incr_uint64(&g_stats.fabric_connections_opened);
 
 				fabric_connection *fc = fabric_connection_create(&csock, &sa);
 

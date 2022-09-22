@@ -32,7 +32,6 @@
 
 #include "aerospike/as_rec.h"
 #include "aerospike/as_val.h"
-#include "citrusleaf/cf_atomic.h"
 
 #include "dynbuf.h"
 

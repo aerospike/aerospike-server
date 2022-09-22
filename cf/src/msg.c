@@ -36,7 +36,6 @@
 
 #include "aerospike/as_msgpack.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "dynbuf.h"

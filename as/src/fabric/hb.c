@@ -33,8 +33,8 @@
 #include <sys/types.h>
 #include <zlib.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
@@ -3765,7 +3765,8 @@ channel_socket_close(cf_socket* socket, bool remote_close,
 		goto Exit;
 	}
 
-	cf_atomic_int_incr(&g_stats.heartbeat_connections_closed);
+	// TODO - needs 'release' semantic.
+	as_incr_uint64(&g_stats.heartbeat_connections_closed);
 	DEBUG("closing channel with fd %d", CSFD(socket));
 
 	channel_socket_destroy(socket);
@@ -3903,7 +3904,7 @@ channel_accept_connection(cf_socket* lsock)
 	}
 
 	// Update the stats to reflect to a new connection opened.
-	cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
+	as_incr_uint64(&g_stats.heartbeat_connections_opened);
 
 	char caddr_str[DNS_NAME_MAX_SIZE];
 	cf_sock_addr_to_string_safe(&caddr, caddr_str, sizeof(caddr_str));
@@ -3920,7 +3921,8 @@ channel_accept_connection(cf_socket* lsock)
 			cf_socket_close(&csock);
 			cf_socket_term(&csock);
 
-			cf_atomic_int_incr(&g_stats.heartbeat_connections_closed);
+			// TODO - needs 'release' semantic.
+			as_incr_uint64(&g_stats.heartbeat_connections_closed);
 			return;
 		}
 	}
@@ -4865,7 +4867,7 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 				config_connect_timeout_get(), sock);
 
 		if (connected_endpoint) {
-			cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
+			as_incr_uint64(&g_stats.heartbeat_connections_opened);
 
 			cf_sock_addr endpoint_addr;
 			memset(&endpoint_addr, 0, sizeof(endpoint_addr));
@@ -4877,7 +4879,8 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 				channel_socket_destroy(sock);
 				sock = NULL;
 
-				cf_atomic_int_incr(&g_stats.heartbeat_connections_closed);
+				// TODO - needs 'release' semantic.
+				as_incr_uint64(&g_stats.heartbeat_connections_closed);
 				continue;
 			}
 
@@ -4893,7 +4896,8 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 					channel_socket_destroy(sock);
 					sock = NULL;
 
-					cf_atomic_int_incr(&g_stats.heartbeat_connections_closed);
+					// TODO - needs 'release' semantic.
+					as_incr_uint64(&g_stats.heartbeat_connections_closed);
 					return;
 				}
 			}
@@ -8494,7 +8498,7 @@ hb_channel_on_self_pulse(as_hb_channel_event* msg_event)
 		TICKER_WARNING("duplicate node-id: %" PRIx64 " with fabric endpoints {%s}", config_self_nodeid_get(), endpoint_list_str);
 	}
 	else {
-		cf_atomic_int_incr(&g_stats.heartbeat_received_self);
+		as_incr_uint64(&g_stats.heartbeat_received_self);
 	}
 
 Exit:
@@ -8544,7 +8548,7 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	// Check if this node needs to be on probation.
 	should_be_on_probation = !hb_node_can_consider_adjacent(&adjacent_node);
 
-	cf_atomic_int_incr(&g_stats.heartbeat_received_foreign);
+	as_incr_uint64(&g_stats.heartbeat_received_foreign);
 
 	bool is_new = !should_be_on_probation && !is_in_adjacency;
 

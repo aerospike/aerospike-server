@@ -843,8 +843,8 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 		geo->r = cf_calloc(ncells, sizeof(as_query_range_start_end));
 		geo->num_r = (uint8_t)ncells;
 
-		cf_atomic64_incr(&ns->geo_region_query_count);
-		cf_atomic64_add(&ns->geo_region_query_cells, ncells);
+		as_incr_uint64(&ns->geo_region_query_count);
+		as_add_uint64(&ns->geo_region_query_cells, (int64_t)ncells);
 
 		// Geospatial queries use multiple srange elements. Many of the fields
 		// are copied from the first cell because they were filled in above.
@@ -1049,10 +1049,10 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 					ns->geo2dsphere_within_strict);
 
 			if (iswithin) {
-				cf_atomic64_incr(&ns->geo_region_query_points);
+				as_incr_uint64(&ns->geo_region_query_points);
 			}
 			else {
-				cf_atomic64_incr(&ns->geo_region_query_falsepos);
+				as_incr_uint64(&ns->geo_region_query_falsepos);
 			}
 
 			ret = iswithin;

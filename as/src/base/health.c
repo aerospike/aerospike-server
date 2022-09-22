@@ -32,7 +32,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "citrusleaf/cf_atomic.h"
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
@@ -63,8 +63,8 @@
 #define SEC_US (1000 * 1000)
 
 typedef struct bucket_s {
-	cf_atomic64 sample_sum;
-	cf_atomic32 n_samples; // relevant only for specific stats
+	uint64_t sample_sum;
+	uint32_t n_samples; // relevant only for specific stats
 } bucket;
 
 typedef struct health_stat_s {
@@ -189,7 +189,7 @@ add_counter_sample(health_stat* hs)
 	bucket* b = &hs->buckets[hs->cur_bucket];
 
 	// For counters, sample_sum is just the total count, n_samples is unused.
-	cf_atomic64_incr(&b->sample_sum);
+	as_incr_uint64(&b->sample_sum);
 }
 
 static inline void
@@ -197,8 +197,8 @@ add_latency_sample(health_stat* hs, uint64_t delta_us)
 {
 	bucket* b = &hs->buckets[hs->cur_bucket];
 
-	cf_atomic64_add(&b->sample_sum, delta_us);
-	cf_atomic32_incr(&b->n_samples);
+	as_add_uint64(&b->sample_sum, (int64_t)delta_us);
+	as_incr_uint32(&b->n_samples);
 }
 
 static inline double
@@ -880,8 +880,8 @@ shift_window_local_stat()
 			uint32_t index = (stat->cur_bucket + 1) % spec->n_buckets;
 			bucket* new_bucket = &stat->buckets[index];
 
-			cf_atomic64_set(&new_bucket->sample_sum, 0);
-			cf_atomic32_set(&new_bucket->n_samples, 0);
+			new_bucket->sample_sum = 0;
+			new_bucket->n_samples = 0;
 			stat->cur_bucket = index;
 		}
 	}
@@ -902,8 +902,8 @@ shift_window_node_stat(peer_stats* ps)
 		index = (index + 1) % node_stat_spec[type].n_buckets;
 		bucket* new_bucket = &stat->buckets[index];
 
-		cf_atomic64_set(&new_bucket->sample_sum, 0);
-		cf_atomic64_set(&new_bucket->n_samples, 0);
+		new_bucket->sample_sum = 0;
+		new_bucket->n_samples = 0;
 		stat->cur_bucket = index;
 	}
 }
@@ -924,8 +924,8 @@ shift_window_ns_stat(peer_stats* ps)
 			index = (index + 1) % ns_stat_spec[type].n_buckets;
 			bucket* new_bucket = &stat->buckets[index];
 
-			cf_atomic64_set(&new_bucket->sample_sum, 0);
-			cf_atomic32_set(&new_bucket->n_samples, 0);
+			new_bucket->sample_sum = 0;
+			new_bucket->n_samples = 0;
 			stat->cur_bucket = index;
 		}
 	}

@@ -32,7 +32,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "cf_mutex.h"
@@ -84,8 +83,8 @@ typedef struct as_partition_s {
 	// Used during every transaction.
 	//
 
-	cf_atomic64 n_tombstones; // relevant only for enterprise edition
-	cf_atomic32 max_void_time; // TODO - do we really need this?
+	uint64_t n_tombstones; // relevant only for enterprise edition
+	uint32_t max_void_time; // TODO - do we really need this?
 
 	cf_mutex lock;
 

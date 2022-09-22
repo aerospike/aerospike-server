@@ -31,7 +31,6 @@
 #include <stdint.h>
 
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
@@ -97,19 +96,19 @@ client_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_client_read_success);
+		as_incr_uint64(&ns->n_client_read_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_client_read_error);
+		as_incr_uint64(&ns->n_client_read_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_client_read_timeout);
+		as_incr_uint64(&ns->n_client_read_timeout);
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_client_read_not_found);
+		as_incr_uint64(&ns->n_client_read_not_found);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_client_read_filtered_out);
+		as_incr_uint64(&ns->n_client_read_filtered_out);
 		break;
 	}
 }
@@ -119,19 +118,19 @@ from_proxy_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_read_success);
+		as_incr_uint64(&ns->n_from_proxy_read_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_read_error);
+		as_incr_uint64(&ns->n_from_proxy_read_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_read_timeout);
+		as_incr_uint64(&ns->n_from_proxy_read_timeout);
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_from_proxy_read_not_found);
+		as_incr_uint64(&ns->n_from_proxy_read_not_found);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_from_proxy_read_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_read_filtered_out);
 		break;
 	}
 }
@@ -141,19 +140,19 @@ batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_batch_sub_read_success);
+		as_incr_uint64(&ns->n_batch_sub_read_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_batch_sub_read_error);
+		as_incr_uint64(&ns->n_batch_sub_read_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_batch_sub_read_timeout);
+		as_incr_uint64(&ns->n_batch_sub_read_timeout);
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_batch_sub_read_not_found);
+		as_incr_uint64(&ns->n_batch_sub_read_not_found);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_batch_sub_read_filtered_out);
+		as_incr_uint64(&ns->n_batch_sub_read_filtered_out);
 		break;
 	}
 }
@@ -163,19 +162,19 @@ from_proxy_batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_success);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_read_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_error);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_read_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_timeout);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_read_timeout);
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_not_found);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_read_not_found);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_read_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_read_filtered_out);
 		break;
 	}
 }

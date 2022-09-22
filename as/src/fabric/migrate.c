@@ -34,8 +34,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
@@ -149,7 +149,7 @@ cf_rchash *g_immigration_hash = NULL;
 cf_queue g_emigration_q;
 
 static uint64_t g_avoid_dest = 0;
-static cf_atomic32 g_emigration_id = 0;
+static uint32_t g_emigration_id = 0;
 static cf_queue g_emigration_slow_q;
 
 
@@ -241,7 +241,7 @@ as_migrate_emigrate(const pb_task *task)
 
 	emig->dest = task->dest;
 	emig->cluster_key = task->cluster_key;
-	emig->id = cf_atomic32_incr(&g_emigration_id);
+	emig->id = as_faa_uint32(&g_emigration_id, 1);
 	emig->type = task->type;
 	emig->tx_flags = task->tx_flags;
 	emig->state = EMIG_STATE_ACTIVE;
@@ -257,7 +257,7 @@ as_migrate_emigrate(const pb_task *task)
 
 	emig->from_replica = is_self_replica(emig->rsv.p);
 
-	cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_instance_count);
+	as_incr_uint64(&emig->rsv.ns->migrate_tx_instance_count);
 
 	emigrate_queue_push(emig);
 }
@@ -363,7 +363,7 @@ emigration_destroy(void *parm)
 
 	as_partition_release(&emig->rsv);
 
-	cf_atomic_int_decr(&emig->rsv.ns->migrate_tx_instance_count);
+	as_decr_uint64(&emig->rsv.ns->migrate_tx_instance_count);
 }
 
 
@@ -402,7 +402,7 @@ immigration_destroy(void *parm)
 		meta_out_q_destroy(immig->meta_q);
 	}
 
-	cf_atomic_int_decr(&immig->ns->migrate_rx_instance_count);
+	as_decr_uint64(&immig->ns->migrate_rx_instance_count);
 }
 
 
@@ -448,14 +448,14 @@ run_emigration(void *arg)
 
 		switch (emig->type) {
 		case PB_TASK_EMIG_TRANSFER:
-			cf_atomic_int_incr(&ns->migrate_tx_partitions_active);
+			as_incr_uint64(&ns->migrate_tx_partitions_active);
 			requeued = emigrate_transfer(emig);
-			cf_atomic_int_decr(&ns->migrate_tx_partitions_active);
+			as_decr_uint64(&ns->migrate_tx_partitions_active);
 			break;
 		case PB_TASK_EMIG_SIGNAL_ALL_DONE:
-			cf_atomic_int_incr(&ns->migrate_signals_active);
+			as_incr_uint64(&ns->migrate_signals_active);
 			emigrate_signal(emig);
-			cf_atomic_int_decr(&ns->migrate_signals_active);
+			as_decr_uint64(&ns->migrate_signals_active);
 			break;
 		default:
 			cf_crash(AS_MIGRATE, "bad emig type %u", emig->type);
@@ -737,7 +737,7 @@ emigration_send_start(emigration *emig)
 			case OPERATION_START_ACK_FAIL:
 				cf_warning(AS_MIGRATE, "imbalance: %lx refused migrate with ACK_FAIL",
 						emig->dest);
-				cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
+				as_incr_uint64(&ns->migrate_tx_partitions_imbalance);
 				as_fabric_msg_put(m);
 				return EMIG_START_RESULT_ERROR;
 			default:
@@ -761,17 +761,17 @@ emigrate_tree(emigration *emig)
 		return true;
 	}
 
-	cf_atomic32_set(&emig->state, EMIG_STATE_ACTIVE);
+	emig->state = EMIG_STATE_ACTIVE;
 
 	cf_tid tid = cf_thread_create_joinable(run_emigration_reinserter,
 			(void*)emig);
 
 	if (as_index_reduce(emig->rsv.tree, emigrate_tree_reduce_fn, emig)) {
 		// Sets EMIG_STATE_FINISHED only if not already EMIG_STATE_ABORTED.
-		cf_atomic32_setmax(&emig->state, EMIG_STATE_FINISHED);
+		as_setmax_uint32(&emig->state, EMIG_STATE_FINISHED);
 	}
 	else {
-		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+		emig->state = EMIG_STATE_ABORTED;
 	}
 
 	cf_thread_join(tid);
@@ -836,9 +836,9 @@ run_emigration_reinserter(void *arg)
 	emigration_state emig_state;
 
 	// Reduce over the reinsert hash until finished.
-	while ((emig_state = cf_atomic32_get(emig->state)) != EMIG_STATE_ABORTED) {
+	while ((emig_state = as_load_uint32(&emig->state)) != EMIG_STATE_ABORTED) {
 		if (emig->cluster_key != as_exchange_cluster_key()) {
-			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+			emig->state = EMIG_STATE_ABORTED;
 			return NULL;
 		}
 
@@ -905,7 +905,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	// This might block if the queues are backed up.
 	emigrate_record(emig, m, &keyd, lut);
 
-	cf_atomic_int_incr(&ns->migrate_records_transmitted);
+	as_incr_uint64(&ns->migrate_records_transmitted);
 
 	if (ns->migrate_sleep != 0) {
 		usleep(ns->migrate_sleep);
@@ -913,7 +913,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	uint32_t waits = 0;
 
-	while (cf_atomic32_get(emig->bytes_emigrating) > MAX_BYTES_EMIGRATING &&
+	while (emig->bytes_emigrating > MAX_BYTES_EMIGRATING &&
 			emig->cluster_key == as_exchange_cluster_key()) {
 		usleep(1000);
 
@@ -951,8 +951,8 @@ emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 		}
 
 		if (satisfied) {
-			if (cf_atomic32_sub(&ri_ctrl->emig->bytes_emigrating,
-					(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
+			if ((int32_t)as_aaf_uint32(&ri_ctrl->emig->bytes_emigrating,
+					-(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
 			}
 
@@ -974,7 +974,7 @@ emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 		}
 
 		ri_ctrl->xmit_ms = now;
-		cf_atomic_int_incr(&ns->migrate_record_retransmits);
+		as_incr_uint64(&ns->migrate_record_retransmits);
 	}
 
 	return CF_SHASH_OK;
@@ -999,7 +999,7 @@ emigrate_record(emigration *emig, msg *m, cf_digest* keyd, uint64_t lut)
 	msg_incr_ref(m); // the reference in the hash
 	cf_shash_put(emig->reinsert_hash, &insert_id, &ri_ctrl);
 
-	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
+	as_add_uint32(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
 
 	if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_BULK) !=
 			AS_FABRIC_SUCCESS) {
@@ -1048,13 +1048,14 @@ immigration_reaper_reduce_fn(const void *key, void *object, void *udata)
 		if (immig->start_result == AS_MIGRATE_OK &&
 				// If we started ok, must be a cluster key change - make sure
 				// DONE handler doesn't also decrement active counter.
-				cf_atomic32_incr(&immig->done_recv) == 1) {
+				as_faa_uint32(&immig->done_recv, 1) == 0) {
 			as_namespace *ns = immig->rsv.ns;
 
-			if (cf_atomic_int_decr(&ns->migrate_rx_partitions_active) < 0) {
-				cf_warning(AS_MIGRATE, "migrate_rx_partitions_active < 0");
-				cf_atomic_int_incr(&ns->migrate_rx_partitions_active);
-			}
+			int64_t n_migrate_rx_partitions_active = (int64_t)
+					as_aaf_uint64(&ns->migrate_rx_partitions_active, -1);
+
+			cf_assert(n_migrate_rx_partitions_active >= 0, AS_MIGRATE,
+					"migrate_rx_partitions_active < 0");
 		}
 
 		return CF_RCHASH_REDUCE_DELETE;
@@ -1195,7 +1196,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 
 	immigration *immig = cf_rc_alloc(sizeof(immigration));
 
-	cf_atomic_int_incr(&ns->migrate_rx_instance_count);
+	as_incr_uint64(&ns->migrate_rx_instance_count);
 
 	immig->src = src;
 	immig->cluster_key = cluster_key;
@@ -1271,7 +1272,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 
 	if (immig->start_recv_ms == 0) {
 		as_partition_reserve(ns, pid, &immig->rsv);
-		cf_atomic_int_incr(&immig->rsv.ns->migrate_rx_partitions_active);
+		as_incr_uint64(&immig->rsv.ns->migrate_rx_partitions_active);
 
 		if (! immigration_start_meta_sender(immig, emig_features,
 				emig_n_recs)) {
@@ -1334,7 +1335,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		return;
 	}
 
-	cf_atomic_int_incr(&immig->rsv.ns->migrate_record_receives);
+	as_incr_uint64(&immig->rsv.ns->migrate_record_receives);
 
 	if (immig->cluster_key != as_exchange_cluster_key()) {
 		immigration_release(immig);
@@ -1430,16 +1431,17 @@ immigration_handle_done_request(cf_node src, msg *m)
 			return;
 		}
 
-		if (cf_atomic32_incr(&immig->done_recv) == 1) {
+		if (as_faa_uint32(&immig->done_recv, 1) == 0) {
 			// Record the time of the first DONE received.
 			immig->done_recv_ms = cf_getms();
 
 			as_namespace *ns = immig->rsv.ns;
 
-			if (cf_atomic_int_decr(&ns->migrate_rx_partitions_active) < 0) {
-				cf_warning(AS_MIGRATE, "migrate_rx_partitions_active < 0");
-				cf_atomic_int_incr(&ns->migrate_rx_partitions_active);
-			}
+			int64_t n_migrate_rx_partitions_active = (int64_t)
+					as_aaf_uint64(&ns->migrate_rx_partitions_active, -1);
+
+			cf_assert(n_migrate_rx_partitions_active >= 0, AS_MIGRATE,
+					"migrate_rx_partitions_active < 0");
 
 			as_partition_immigrate_done(ns, immig->rsv.p->id,
 					immig->cluster_key, immig->src);
@@ -1561,8 +1563,8 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 	if (cf_shash_get_vlock(emig->reinsert_hash, &insert_id, (void **)&ri_ctrl,
 			&vlock) == CF_SHASH_OK) {
 		if (src == emig->dest) {
-			if (cf_atomic32_sub(&emig->bytes_emigrating,
-					(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
+			if ((int32_t)as_aaf_uint32(&emig->bytes_emigrating,
+					-(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
 			}
 

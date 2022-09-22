@@ -32,7 +32,6 @@
 #include <stdint.h>
 
 #include "aerospike/mod_lua_config.h"
-#include "citrusleaf/cf_atomic.h"
 
 #include "enhanced_alloc.h"
 #include "hardware.h"

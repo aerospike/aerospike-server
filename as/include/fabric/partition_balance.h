@@ -29,7 +29,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_queue.h"
 
 #include "dynbuf.h"
@@ -109,7 +108,7 @@ as_migrate_result as_partition_migrations_all_done(struct as_namespace_s* ns, ui
 void as_partition_signal_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key);
 
 // Counter that tells clients partition ownership has changed.
-extern cf_atomic32 g_partition_generation;
+extern int32_t g_partition_generation;
 
 // Time of last rebalance.
 extern uint64_t g_rebalance_sec;

@@ -291,11 +291,8 @@ as_aggr_process(as_namespace* ns, as_partition_reservation* rsv,
 	as_stream ostream;
 	as_stream_init(&ostream, &astate, &ostream_hooks);
 
-	as_udf_context ctx = {
-		.as         = &as,
-		.timer      = NULL,
-		.memtracker = NULL
-	};
+	as_udf_context ctx = { .as = &as };
+
 	int ret = as_module_apply_stream(&mod_lua, &ctx, ag_call->def.filename, ag_call->def.function, &istream, ag_call->def.arglist, &ostream, ap_res);
 
 	acleanup(&astate);

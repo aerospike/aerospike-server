@@ -41,9 +41,7 @@
 #include "aerospike/as_types.h"
 #include "aerospike/as_udf_context.h"
 #include "aerospike/mod_lua.h"
-
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
@@ -158,16 +156,16 @@ client_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_client_udf_complete);
+		as_incr_uint64(&ns->n_client_udf_complete);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_client_udf_error);
+		as_incr_uint64(&ns->n_client_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_client_udf_timeout);
+		as_incr_uint64(&ns->n_client_udf_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_client_udf_filtered_out);
+		as_incr_uint64(&ns->n_client_udf_filtered_out);
 		break;
 	}
 }
@@ -177,16 +175,16 @@ from_proxy_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_udf_complete);
+		as_incr_uint64(&ns->n_from_proxy_udf_complete);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_udf_error);
+		as_incr_uint64(&ns->n_from_proxy_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_udf_timeout);
+		as_incr_uint64(&ns->n_from_proxy_udf_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_from_proxy_udf_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_udf_filtered_out);
 		break;
 	}
 }
@@ -196,16 +194,16 @@ batch_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_batch_sub_udf_complete);
+		as_incr_uint64(&ns->n_batch_sub_udf_complete);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_batch_sub_udf_error);
+		as_incr_uint64(&ns->n_batch_sub_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_batch_sub_udf_timeout);
+		as_incr_uint64(&ns->n_batch_sub_udf_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_batch_sub_udf_filtered_out);
+		as_incr_uint64(&ns->n_batch_sub_udf_filtered_out);
 		break;
 	}
 }
@@ -215,16 +213,16 @@ from_proxy_batch_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_complete);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_udf_complete);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_error);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_timeout);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_udf_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_udf_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_udf_filtered_out);
 		break;
 	}
 }
@@ -234,13 +232,13 @@ udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_udf_sub_udf_complete);
+		as_incr_uint64(&ns->n_udf_sub_udf_complete);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_udf_sub_udf_error);
+		as_incr_uint64(&ns->n_udf_sub_udf_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_udf_sub_udf_timeout);
+		as_incr_uint64(&ns->n_udf_sub_udf_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT: // doesn't include those filtered out by metadata
 		as_incr_uint64(&ns->n_udf_sub_udf_filtered_out);
@@ -1005,18 +1003,13 @@ udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 	as_timer timer;
 
 	static const as_timer_hooks udf_timer_hooks = {
-		.destroy	= NULL,
-		.timedout	= udf_timer_timedout,
-		.timeslice	= udf_timer_timeslice
+		.timedout = udf_timer_timedout,
+		.timeslice = udf_timer_timeslice
 	};
 
 	as_timer_init(&timer, NULL, &udf_timer_hooks);
 
-	as_udf_context ctx = {
-		.as			= &g_as_aerospike,
-		.timer		= &timer,
-		.memtracker	= NULL
-	};
+	as_udf_context ctx = { .as = &g_as_aerospike, .timer = &timer };
 
 	return as_module_apply_record(&mod_lua, &ctx, call->def->filename,
 			call->def->function, rec, call->def->arglist, result);
@@ -1164,7 +1157,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	}
 	// Or (normally) adjust max void-time.
 	else if (r->void_time != 0) {
-		cf_atomic32_setmax(&tr->rsv.p->max_void_time, (int32_t)r->void_time);
+		as_setmax_uint32(&tr->rsv.p->max_void_time, r->void_time);
 	}
 
 	will_replicate(r, ns);
@@ -1234,7 +1227,7 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 	// FIXME - add generation check?
 	case AS_ERR_RECORD_TOO_BIG:
 		cf_detail(AS_UDF, "{%s} record too big %pD", ns->name, &tr->keyd);
-		cf_atomic64_incr(&ns->n_fail_record_too_big);
+		as_incr_uint64(&ns->n_fail_record_too_big);
 		break;
 	default:
 		// These either log warnings or aren't interesting enough to count.
@@ -1310,21 +1303,21 @@ update_lua_failure_stats(const as_transaction* tr, as_namespace* ns,
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		cf_atomic64_incr(&ns->n_client_lang_error);
+		as_incr_uint64(&ns->n_client_lang_error);
 		break;
 	case FROM_PROXY:
 		if (as_transaction_is_batch_sub(tr)) {
-			cf_atomic64_incr(&ns->n_from_proxy_batch_sub_lang_error);
+			as_incr_uint64(&ns->n_from_proxy_batch_sub_lang_error);
 		}
 		else {
-			cf_atomic64_incr(&ns->n_from_proxy_lang_error);
+			as_incr_uint64(&ns->n_from_proxy_lang_error);
 		}
 		break;
 	case FROM_BATCH:
-		cf_atomic64_incr(&ns->n_batch_sub_lang_error);
+		as_incr_uint64(&ns->n_batch_sub_lang_error);
 		break;
 	case FROM_IUDF:
-		cf_atomic64_incr(&ns->n_udf_sub_lang_error);
+		as_incr_uint64(&ns->n_udf_sub_lang_error);
 		break;
 	default:
 		cf_crash(AS_UDF, "unexpected transaction origin %u", tr->origin);
@@ -1339,63 +1332,63 @@ update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (op == UDF_OPTYPE_READ) {
-			cf_atomic64_incr(&ns->n_client_lang_read_success);
+			as_incr_uint64(&ns->n_client_lang_read_success);
 		}
 		else if (op == UDF_OPTYPE_DELETE) {
-			cf_atomic64_incr(&ns->n_client_lang_delete_success);
+			as_incr_uint64(&ns->n_client_lang_delete_success);
 		}
 		else if (op == UDF_OPTYPE_WRITE) {
-			cf_atomic64_incr(&ns->n_client_lang_write_success);
+			as_incr_uint64(&ns->n_client_lang_write_success);
 		}
 		break;
 	case FROM_PROXY:
 		if (as_transaction_is_batch_sub(tr)) {
 			if (op == UDF_OPTYPE_READ) {
-				cf_atomic64_incr(&ns->n_from_proxy_batch_sub_lang_read_success);
+				as_incr_uint64(&ns->n_from_proxy_batch_sub_lang_read_success);
 			}
 			else if (op == UDF_OPTYPE_DELETE) {
-				cf_atomic64_incr(
+				as_incr_uint64(
 						&ns->n_from_proxy_batch_sub_lang_delete_success);
 			}
 			else if (op == UDF_OPTYPE_WRITE) {
-				cf_atomic64_incr(
+				as_incr_uint64(
 						&ns->n_from_proxy_batch_sub_lang_write_success);
 			}
 		}
 		else {
 			if (op == UDF_OPTYPE_READ) {
-				cf_atomic64_incr(&ns->n_from_proxy_lang_read_success);
+				as_incr_uint64(&ns->n_from_proxy_lang_read_success);
 			}
 			else if (op == UDF_OPTYPE_DELETE) {
-				cf_atomic64_incr(&ns->n_from_proxy_lang_delete_success);
+				as_incr_uint64(&ns->n_from_proxy_lang_delete_success);
 			}
 			else if (op == UDF_OPTYPE_WRITE) {
-				cf_atomic64_incr(&ns->n_from_proxy_lang_write_success);
+				as_incr_uint64(&ns->n_from_proxy_lang_write_success);
 			}
 		}
 		break;
 	case FROM_BATCH:
 		if (op == UDF_OPTYPE_READ) {
-			cf_atomic64_incr(&ns->n_batch_sub_lang_read_success);
+			as_incr_uint64(&ns->n_batch_sub_lang_read_success);
 		}
 		else if (op == UDF_OPTYPE_DELETE) {
-			cf_atomic64_incr(&ns->n_batch_sub_lang_delete_success);
+			as_incr_uint64(&ns->n_batch_sub_lang_delete_success);
 		}
 		else if (op == UDF_OPTYPE_WRITE) {
-			cf_atomic64_incr(&ns->n_batch_sub_lang_write_success);
+			as_incr_uint64(&ns->n_batch_sub_lang_write_success);
 		}
 		break;
 	case FROM_IUDF:
 		if (op == UDF_OPTYPE_READ) {
 			// Note - this would be weird, since there's nowhere for a
 			// response to go in our current UDF queries.
-			cf_atomic64_incr(&ns->n_udf_sub_lang_read_success);
+			as_incr_uint64(&ns->n_udf_sub_lang_read_success);
 		}
 		else if (op == UDF_OPTYPE_DELETE) {
-			cf_atomic64_incr(&ns->n_udf_sub_lang_delete_success);
+			as_incr_uint64(&ns->n_udf_sub_lang_delete_success);
 		}
 		else if (op == UDF_OPTYPE_WRITE) {
-			cf_atomic64_incr(&ns->n_udf_sub_lang_write_success);
+			as_incr_uint64(&ns->n_udf_sub_lang_write_success);
 		}
 		break;
 	default:

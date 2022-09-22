@@ -41,7 +41,6 @@
 
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "arenax.h"

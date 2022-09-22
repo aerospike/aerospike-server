@@ -29,8 +29,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "arenax.h"
@@ -93,7 +93,7 @@ as_record_get_create(as_index_tree *tree, const cf_digest *keyd,
 	int rv = as_index_get_insert_vlock(tree, keyd, r_ref);
 
 	if (rv == 1) {
-		cf_atomic64_incr(&ns->n_objects);
+		as_incr_uint64(&ns->n_objects);
 	}
 
 	return rv;
@@ -151,7 +151,7 @@ as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 	remove_from_sindex(ns, r_ref);
 	as_record_destroy(r_ref->r, ns);
 	as_index_clear_record_info(r_ref->r);
-	cf_atomic64_incr(&ns->n_objects);
+	as_incr_uint64(&ns->n_objects);
 }
 
 // Called only after last reference is released. Called by as_record_done(),

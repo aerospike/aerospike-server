@@ -29,8 +29,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 
 #include "dynbuf.h"
 #include "hist.h"
@@ -340,7 +340,7 @@ as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len,
 		return -2;
 	}
 
-	cf_atomic64_incr(&p_set->n_objects);
+	as_incr_uint64(&p_set->n_objects);
 
 	return 0;
 }
@@ -501,9 +501,11 @@ as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id,
 		return;
 	}
 
-	if (cf_atomic64_add(&p_set->n_bytes_memory, delta_bytes) < 0) {
-		cf_warning(AS_NAMESPACE, "set-id %u - negative memory!", set_id);
-	}
+	uint64_t n_bytes = as_aaf_uint64(&p_set->n_bytes_memory, delta_bytes);
+
+	cf_assert((int64_t)n_bytes >= 0, AS_NAMESPACE,
+			"{%s} set-id %u - negative n_bytes_memory %ld (delta_bytes %ld)",
+			ns->name, set_id, (int64_t)n_bytes, delta_bytes);
 }
 
 
@@ -523,9 +525,11 @@ as_namespace_adjust_set_device_bytes(as_namespace *ns, uint16_t set_id,
 		return;
 	}
 
-	if (cf_atomic64_add(&p_set->n_bytes_device, delta_bytes) < 0) {
-		cf_warning(AS_NAMESPACE, "set-id %u - negative device bytes!", set_id);
-	}
+	uint64_t n_bytes = as_aaf_uint64(&p_set->n_bytes_device, delta_bytes);
+
+	cf_assert((int64_t)n_bytes >= 0, AS_NAMESPACE,
+			"{%s} set-id %u - negative n_bytes_device %ld (delta_bytes %ld)",
+			ns->name, set_id, (int64_t)n_bytes, delta_bytes);
 }
 
 
@@ -543,9 +547,10 @@ as_namespace_release_set_id(as_namespace *ns, uint16_t set_id)
 		return;
 	}
 
-	if (cf_atomic64_decr(&p_set->n_objects) < 0) {
-		cf_warning(AS_NAMESPACE, "set-id %u - negative objects!", set_id);
-	}
+	uint64_t n_objects = as_aaf_uint64(&p_set->n_objects, -1);
+
+	cf_assert(n_objects != (uint64_t)-1, AS_NAMESPACE,
+			"{%s} set-id %u - n_objects underflow", ns->name, set_id);
 }
 
 
@@ -656,19 +661,19 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	// Statistics:
 
 	cf_dyn_buf_append_string(db, "objects=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_objects));
+	cf_dyn_buf_append_uint64(db, p_set->n_objects);
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "tombstones=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_tombstones));
+	cf_dyn_buf_append_uint64(db, p_set->n_tombstones);
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "memory_data_bytes=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_bytes_memory));
+	cf_dyn_buf_append_uint64(db, p_set->n_bytes_memory);
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "device_data_bytes=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_bytes_device));
+	cf_dyn_buf_append_uint64(db, p_set->n_bytes_device);
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "truncate_lut=");
@@ -694,6 +699,6 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "stop-writes-count=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->stop_writes_count));
+	cf_dyn_buf_append_uint64(db, p_set->stop_writes_count);
 	cf_dyn_buf_append_char(db, ';');
 }

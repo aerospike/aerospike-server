@@ -23,7 +23,6 @@
 #include "aerospike/as_atomic.h"
 #include "aerospike/as_buffer_pool.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
@@ -91,7 +90,7 @@ typedef struct {
 	uint32_t capacity;
 	uint32_t size;
 	uint32_t tran_count;
-	cf_atomic32 writers;
+	uint32_t writers;
 	int result_code;
 	uint32_t unused;
 	as_proto proto;
@@ -129,7 +128,7 @@ typedef struct {
 typedef struct {
 	cf_queue* response_queue;
 	cf_queue* complete_queue;
-	cf_atomic32 tran_count;
+	uint32_t tran_count;
 	uint32_t delay_count;
 	volatile bool active;
 } as_batch_queue;
@@ -217,10 +216,10 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	btr->msgp = 0;
 
 	if (result_code == AS_ERR_TIMEOUT) {
-		cf_atomic64_incr(&g_stats.batch_index_timeout);
+		as_incr_uint64(&g_stats.batch_index_timeout);
 	}
 	else {
-		cf_atomic64_incr(&g_stats.batch_index_errors);
+		as_incr_uint64(&g_stats.batch_index_errors);
 	}
 	return status;
 }
@@ -255,7 +254,7 @@ as_batch_release_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 	if (as_buffer_pool_push_limit(&batch_buffer_pool, buffer, buffer->capacity,
 			g_config.batch_max_unused_buffers) != 0) {
 		// The push frees buffer on failure, so we just increment stat.
-		cf_atomic64_incr(&g_stats.batch_index_destroyed_buffers);
+		as_incr_uint64(&g_stats.batch_index_destroyed_buffers);
 	}
 }
 
@@ -272,14 +271,14 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 
 	// Check return code in order to update statistics.
 	if (status == 0 && shared->result_code == 0) {
-		cf_atomic64_incr(&g_stats.batch_index_complete);
+		as_incr_uint64(&g_stats.batch_index_complete);
 	}
 	else {
 		if (shared->result_code == AS_ERR_TIMEOUT) {
-			cf_atomic64_incr(&g_stats.batch_index_timeout);
+			as_incr_uint64(&g_stats.batch_index_timeout);
 		}
 		else {
-			cf_atomic64_incr(&g_stats.batch_index_errors);
+			as_incr_uint64(&g_stats.batch_index_errors);
 		}
 	}
 
@@ -294,7 +293,9 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 	// It's critical that this count is decremented after the transaction is
 	// completely finished with the queue because "shutdown threads" relies
 	// on this information when performing graceful shutdown.
-	cf_atomic32_decr(&queue->tran_count);
+	uint32_t tc = as_aaf_uint32_rls(&queue->tran_count, -1);
+
+	cf_assert(tc != (uint32_t)-1, AS_BATCH, "tran_count underflow");
 }
 
 static bool
@@ -451,7 +452,7 @@ as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_
 static inline void
 as_batch_delay_buffer(as_batch_queue* queue)
 {
-	cf_atomic64_incr(&g_stats.batch_index_delay);
+	as_incr_uint64(&g_stats.batch_index_delay);
 
 	// If all batch transactions on this thread are delayed, avoid tight loop.
 	if (queue->tran_count == queue->delay_count) {
@@ -644,7 +645,7 @@ as_batch_buffer_create(uint32_t size)
 {
 	as_batch_buffer* buffer = cf_malloc(size);
 	buffer->capacity = size - batch_buffer_pool.header_size;
-	cf_atomic64_incr(&g_stats.batch_index_created_buffers);
+	as_incr_uint64(&g_stats.batch_index_created_buffers);
 	return buffer;
 }
 
@@ -658,7 +659,7 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 		// Requested size is greater than fixed buffer size.
 		// Allocate new buffer, but don't put back into pool.
 		buffer = as_batch_buffer_create(mem_size);
-		cf_atomic64_incr(&g_stats.batch_index_huge_buffers);
+		as_incr_uint64(&g_stats.batch_index_huge_buffers);
 	}
 	else {
 		// Pop existing buffer from queue.
@@ -689,8 +690,12 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 static inline void
 as_batch_buffer_complete(as_batch_shared* shared, as_batch_buffer* buffer)
 {
+	uint32_t n_writers = as_aaf_uint32_rls(&buffer->writers, -1);
+
+	cf_assert(n_writers != (uint32_t)-1, AS_BATCH, "writers underflow");
+
 	// Flush when all writers have finished writing into the buffer.
-	if (cf_atomic32_decr(&buffer->writers) == 0) {
+	if (n_writers == 0) {
 		as_batch_response response = {.shared = shared, .buffer = buffer};
 		cf_queue_push(shared->response_queue, &response);
 	}
@@ -717,7 +722,7 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 		data = buffer->data + buffer->size;
 		buffer->size += size;
 		buffer->tran_count++;
-		cf_atomic32_incr(&buffer->writers);
+		as_incr_uint32(&buffer->writers);
 		*buffer_out = buffer;
 		cf_mutex_unlock(&shared->lock);
 	}
@@ -784,7 +789,7 @@ as_batch_terminate(as_batch_shared* shared, uint32_t tran_count, int result_code
 	else {
 		// Buffer exists. Add phantom transactions.
 		buffer->tran_count += tran_count;
-		cf_atomic32_incr(&buffer->writers);
+		as_incr_uint32(&buffer->writers);
 	}
 	cf_mutex_unlock(&shared->lock);
 	as_batch_transaction_end(shared, buffer, complete);
@@ -828,7 +833,7 @@ as_batch_init()
 int
 as_batch_queue_task(as_transaction* btr)
 {
-	uint64_t counter = cf_atomic64_incr(&g_stats.batch_index_initiate);
+	uint64_t counter = as_aaf_uint64(&g_stats.batch_index_initiate, 1);
 	uint32_t thread_size = batch_thread_pool.n_threads;
 
 	if (thread_size == 0 || thread_size > MAX_BATCH_THREADS) {
@@ -961,7 +966,7 @@ as_batch_queue_task(as_transaction* btr)
 	}
 
 	// Increment batch queue transaction count.
-	cf_atomic32_incr(&batch_queue->tran_count);
+	as_incr_uint32(&batch_queue->tran_count);
 	shared->response_queue = batch_queue->response_queue;
 
 	// Initialize generic transaction.

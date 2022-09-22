@@ -28,7 +28,6 @@
 #include <sys/param.h> // For MAX() and MIN().
 
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
 

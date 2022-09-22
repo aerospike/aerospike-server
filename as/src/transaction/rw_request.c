@@ -30,8 +30,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "cf_mutex.h"
@@ -60,7 +60,7 @@ typedef struct rw_wait_ele_s {
 // Globals.
 //
 
-static cf_atomic32 g_rw_tid = 0;
+static uint32_t g_rw_tid = 0;
 
 
 //==========================================================
@@ -113,7 +113,7 @@ rw_request_create(cf_digest* keyd)
 	rw->response_db.alloc_sz = 0;
 	rw->response_db.used_sz = 0;
 
-	rw->tid = cf_atomic32_incr(&g_rw_tid);
+	rw->tid = as_faa_uint32(&g_rw_tid, 1);
 	rw->dup_res_complete = false;
 	rw->repl_write_complete = false;
 	rw->repl_ping_complete = false;

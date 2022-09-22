@@ -27,7 +27,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_atomic.h"
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "log.h"
@@ -104,7 +104,7 @@ as_record_drop_stats(as_record* r, as_namespace* ns)
 {
 	as_namespace_release_set_id(ns, as_index_get_set_id(r));
 
-	cf_atomic64_decr(&ns->n_objects);
+	as_decr_uint64(&ns->n_objects);
 }
 
 void

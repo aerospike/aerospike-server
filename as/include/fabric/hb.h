@@ -25,8 +25,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_atomic.h"
-
 #include "msg.h"
 #include "socket.h"
 #include "tls.h"

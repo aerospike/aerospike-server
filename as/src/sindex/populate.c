@@ -32,7 +32,6 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_queue.h"
 
@@ -234,7 +233,7 @@ run_ticker(void* udata)
 
 	while (cf_queue_pop(g_ticker_done_q, &x, TICKER_INTERVAL) != CF_QUEUE_OK) {
 		uint64_t n_recs_checked = as_load_uint64(&ns->si_n_recs_checked);
-		uint64_t n_objects = ns->n_objects;
+		uint64_t n_objects = as_load_uint64(&ns->n_objects);
 		double pct = n_objects == 0 ?
 				100.0 : (double)(n_recs_checked * 100) / (double)n_objects;
 
@@ -424,7 +423,7 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 		cbi->n_reduced = 0;
 
 		uint64_t n = as_aaf_uint64(cbi->p_n_total_reduced, PROGRESS_RESOLUTION);
-		uint64_t n_objects = ns->n_objects;
+		uint64_t n_objects = as_load_uint64(&ns->n_objects);
 
 		si->populate_pct = (uint32_t)
 				(n > n_objects ? 100 : (n * 100) / n_objects);

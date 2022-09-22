@@ -32,8 +32,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 
@@ -63,7 +63,7 @@ const as_partition_version ZERO_VERSION = { 0 };
 // Globals.
 //
 
-cf_atomic32 g_partition_generation = (uint32_t)-1;
+int32_t g_partition_generation = -1;
 uint64_t g_rebalance_sec;
 uint64_t g_rebalance_generation = 0;
 
@@ -71,7 +71,7 @@ uint64_t g_rebalance_generation = 0;
 // TODO - ok as non-volatile, but should selectively load/store in the future.
 static int g_init_balance_done = false;
 
-static cf_atomic32 g_migrate_num_incoming = 0;
+static uint32_t g_migrate_num_incoming = 0;
 
 // Using int for 4-byte size, but maintaining bool semantics.
 volatile int g_allow_migrations = false;
@@ -165,7 +165,7 @@ as_partition_balance_synchronize_migrations()
 
 	// Prior-round migrations won't decrement g_migrate_num_incoming due to
 	// cluster key check.
-	cf_atomic32_set(&g_migrate_num_incoming, 0);
+	g_migrate_num_incoming = 0;
 }
 
 
@@ -243,7 +243,8 @@ as_partition_balance_revert_to_orphan()
 		ns->n_unavailable_partitions = AS_PARTITIONS;
 	}
 
-	cf_atomic32_incr(&g_partition_generation);
+	// FIXME - store - store barrier needed?
+	as_incr_int32(&g_partition_generation);
 }
 
 void
@@ -286,7 +287,9 @@ as_partition_balance()
 
 	// All partitions now have replicas assigned, ok to allow transactions.
 	g_init_balance_done = true;
-	cf_atomic32_incr(&g_partition_generation);
+
+	// FIXME - store - store barrier needed?
+	as_incr_int32(&g_partition_generation);
 
 	g_allow_migrations = true;
 	cf_detail(AS_PARTITION, "allow migrations");
@@ -357,16 +360,15 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 	p->pending_emigrations--;
 
 	int64_t migrates_tx_remaining =
-			cf_atomic_int_decr(&ns->migrate_tx_partitions_remaining);
+			(int64_t)as_aaf_uint64(&ns->migrate_tx_partitions_remaining, -1);
 
-	if (migrates_tx_remaining < 0){
-		cf_warning(AS_PARTITION, "{%s:%u} (%hu,%ld) emigrate_done - counter went negative",
-				ns->name, pid, p->pending_emigrations, migrates_tx_remaining);
-	}
+	cf_assert(migrates_tx_remaining >= 0, AS_PARTITION,
+			"{%s:%u} (%hu,%ld) emigrate_done - counter went negative", ns->name,
+			pid, p->pending_emigrations, migrates_tx_remaining);
 
 	if ((tx_flags & TX_FLAGS_LEAD) != 0) {
 		p->pending_lead_emigrations--;
-		cf_atomic_int_decr(&ns->migrate_tx_partitions_lead_remaining);
+		as_decr_uint64(&ns->migrate_tx_partitions_lead_remaining);
 	}
 
 	if (! is_self_final_master(p)) {
@@ -380,7 +382,8 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 	p->immigrators[dest_ix] = false;
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic32_incr(&g_partition_generation);
+		// FIXME - store - store barrier needed?
+		as_incr_int32(&g_partition_generation);
 	}
 
 	cf_queue mq;
@@ -425,18 +428,18 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		return AS_MIGRATE_AGAIN;
 	}
 
-	uint32_t num_incoming = (uint32_t)cf_atomic32_incr(&g_migrate_num_incoming);
+	uint32_t num_incoming = as_aaf_uint32(&g_migrate_num_incoming, 1);
 
 	if (num_incoming > g_config.migrate_max_num_incoming) {
 		cf_debug(AS_PARTITION, "{%s:%u} immigrate_start - exceeded max_num_incoming",
 				ns->name, pid);
-		cf_atomic32_decr(&g_migrate_num_incoming);
+		as_decr_uint32(&g_migrate_num_incoming);
 		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_AGAIN;
 	}
 
 	if (! partition_immigration_is_valid(p, source_node, ns, "start")) {
-		cf_atomic32_decr(&g_migrate_num_incoming);
+		as_decr_uint32(&g_migrate_num_incoming);
 		cf_mutex_unlock(&p->lock);
 		return AS_MIGRATE_FAIL;
 	}
@@ -466,7 +469,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		return AS_MIGRATE_FAIL;
 	}
 
-	cf_atomic32_decr(&g_migrate_num_incoming);
+	as_decr_uint32(&g_migrate_num_incoming);
 
 	if (! partition_immigration_is_valid(p, source_node, ns, "done")) {
 		cf_mutex_unlock(&p->lock);
@@ -476,13 +479,11 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	p->pending_immigrations--;
 
 	int64_t migrates_rx_remaining =
-			cf_atomic_int_decr(&ns->migrate_rx_partitions_remaining);
+			(int64_t)as_aaf_uint64(&ns->migrate_rx_partitions_remaining, -1);
 
-	// Sanity-check only.
-	if (migrates_rx_remaining < 0) {
-		cf_warning(AS_PARTITION, "{%s:%u} (%hu,%ld) immigrate_done - counter went negative",
-				ns->name, pid, p->pending_immigrations, migrates_rx_remaining);
-	}
+	cf_assert(migrates_rx_remaining >= 0, AS_PARTITION,
+			"{%s:%u} (%hu,%ld) immigrate_done - counter went negative",
+			ns->name, pid, p->pending_immigrations, migrates_rx_remaining);
 
 	if (p->pending_immigrations == 0 &&
 			! as_partition_version_same(&p->version, &p->final_version)) {
@@ -492,7 +493,8 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 	if (! is_self_final_master(p)) {
 		if (client_replica_maps_update(ns, pid)) {
-			cf_atomic32_incr(&g_partition_generation);
+			// FIXME - store - store barrier needed?
+			as_incr_int32(&g_partition_generation);
 		}
 
 		cf_mutex_unlock(&p->lock);
@@ -511,7 +513,8 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic32_incr(&g_partition_generation);
+		// FIXME - store - store barrier needed?
+		as_incr_int32(&g_partition_generation);
 	}
 
 	if (p->pending_immigrations != 0) {
@@ -612,7 +615,7 @@ as_partition_signal_done(as_namespace* ns, uint32_t pid,
 		return;
 	}
 
-	cf_atomic_int_decr(&ns->migrate_signals_remaining);
+	as_decr_uint64(&ns->migrate_signals_remaining);
 
 	cf_mutex_unlock(&p->lock);
 }
@@ -659,7 +662,7 @@ drop_trees(as_namespace* ns, as_partition* p)
 	p->tree = NULL;
 
 	// TODO - consider p->n_tombstones?
-	cf_atomic32_set(&p->max_void_time, 0);
+	p->max_void_time = 0;
 }
 
 

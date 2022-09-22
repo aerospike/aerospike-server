@@ -33,8 +33,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h"
-
 #include "cf_str.h"
 #include "hardware.h"
 #include "hist.h"
@@ -2027,7 +2025,7 @@ cfg_set_namespace(const char* cmd)
 		}
 		cf_info(AS_INFO, "Changing value of post-write-queue of ns %s from %d to %d ",
 				ns->name, ns->storage_post_write_queue, val);
-		cf_atomic32_set(&ns->storage_post_write_queue, (uint32_t)val);
+		ns->storage_post_write_queue = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "read-page-cache", v, &v_len) == 0) {
 		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
@@ -2174,7 +2172,7 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 		uint64_t val = atoll(v);
 		cf_info(AS_INFO, "Changing value of stop-writes-count of ns %s set %s to %lu",
 				ns->name, p_set->name, val);
-		cf_atomic64_set(&p_set->stop_writes_count, val);
+		p_set->stop_writes_count = val;
 	}
 	else {
 		return false;

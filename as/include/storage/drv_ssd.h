@@ -31,7 +31,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
@@ -81,8 +80,8 @@ typedef struct vacated_wblock_s {
 // (the full buffer is) flushed to a device.
 //
 typedef struct {
-	cf_atomic32			rc;
-	cf_atomic32			n_writers;	// number of concurrent writers
+	uint32_t			rc;
+	uint32_t			n_writers;	// number of concurrent writers
 	bool				dirty;		// written to since last flushed
 	bool				use_post_write_q;
 	uint32_t			n_vacated;
@@ -99,11 +98,11 @@ typedef struct {
 // Per-wblock information.
 //
 typedef struct ssd_wblock_state_s {
-	cf_atomic32			inuse_sz;	// number of bytes currently used in the wblock
+	uint32_t			inuse_sz;	// number of bytes currently used in the wblock
 	cf_mutex			LOCK;		// transactions, write_worker, and defrag all are interested in wblock_state
 	ssd_write_buf		*swb;		// pending writes for the wblock, also treated as a cache for reads
 	uint32_t			state;		// for now just a defrag flag
-	cf_atomic32			n_vac_dests; // number of wblocks into which this wblock defragged
+	uint32_t			n_vac_dests; // number of wblocks into which this wblock defragged
 } ssd_wblock_state;
 
 
@@ -154,15 +153,15 @@ typedef struct drv_ssd_s {
 
 	uint8_t			encryption_key[64];		// relevant for enterprise edition only
 
-	cf_atomic64		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
-	cf_atomic64		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
+	uint64_t		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
+	uint64_t		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
 
-	cf_atomic64		n_wblock_defrag_io_skips;	// total number of wblocks empty on defrag_wblock_q pop
-	cf_atomic64		n_wblock_direct_frees;		// total number of wblocks freed by other than defrag
+	uint64_t		n_wblock_defrag_io_skips;	// total number of wblocks empty on defrag_wblock_q pop
+	uint64_t		n_wblock_direct_frees;		// total number of wblocks freed by other than defrag
 
 	volatile uint64_t n_tomb_raider_reads;	// relevant for enterprise edition only
 
-	cf_atomic32		defrag_sweep;		// defrag sweep flag
+	uint32_t		defrag_sweep;		// defrag sweep flag
 
 	uint64_t		file_size;
 	int				file_id;
@@ -175,7 +174,7 @@ typedef struct drv_ssd_s {
 	uint64_t		commit_min_size;		// commit (write) operations are aligned and sized in multiples of this
 	uint64_t		shadow_commit_min_size;	// shadow commit (write) operations are aligned and sized in multiples of this
 
-	cf_atomic64		inuse_size;			// number of bytes in actual use on this device
+	uint64_t		inuse_size;			// number of bytes in actual use on this device
 
 	uint32_t		write_block_size;	// number of bytes to write at a time
 	uint32_t		first_wblock_id;	// wblock-id of first non-header wblock

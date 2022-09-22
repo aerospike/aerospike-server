@@ -25,8 +25,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_atomic.h"
-
 #include "dynbuf.h"
 #include "node.h"
 #include "vector.h"

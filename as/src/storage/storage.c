@@ -867,7 +867,7 @@ as_storage_record_adjust_mem_stats(as_storage_rd *rd, uint32_t start_bytes)
 	int64_t delta_bytes = (int64_t)end_bytes - (int64_t)start_bytes;
 
 	if (delta_bytes != 0) {
-		cf_atomic_int_add(&ns->n_bytes_memory, delta_bytes);
+		as_add_uint64(&ns->n_bytes_memory, delta_bytes);
 		as_namespace_adjust_set_memory(ns, as_index_get_set_id(r), delta_bytes);
 	}
 }
@@ -883,11 +883,10 @@ as_storage_record_drop_from_mem_stats(as_storage_rd *rd)
 
 	as_record *r = rd->r;
 
-	uint64_t drop_bytes = as_storage_record_mem_size(ns, r);
+	int64_t delta_bytes = -(int64_t)as_storage_record_mem_size(ns, r);
 
-	cf_atomic_int_sub(&ns->n_bytes_memory, drop_bytes);
-	as_namespace_adjust_set_memory(ns, as_index_get_set_id(r),
-			-(int64_t)drop_bytes);
+	as_add_uint64(&ns->n_bytes_memory, delta_bytes);
+	as_namespace_adjust_set_memory(ns, as_index_get_set_id(r), delta_bytes);
 }
 
 void

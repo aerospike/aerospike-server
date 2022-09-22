@@ -32,8 +32,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
@@ -222,7 +222,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 		// If we're over the hot key pending limit, fail this transaction.
 		cf_detail(AS_RW, "{%s} key busy %pD", ns->name, &tr->keyd);
 
-		cf_atomic64_incr(&ns->n_fail_key_busy);
+		as_incr_uint64(&ns->n_fail_key_busy);
 		tr->result_code = AS_ERR_KEY_BUSY;
 
 		return TRANS_DONE_ERROR;

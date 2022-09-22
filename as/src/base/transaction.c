@@ -33,7 +33,6 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -337,20 +336,20 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 	cf_free(tr->msgp);
 	tr->msgp = NULL;
 
-	cf_atomic64_incr(&g_stats.n_demarshal_error);
+	as_incr_uint64(&g_stats.n_demarshal_error);
 }
 
 #define UPDATE_ERROR_STATS(name) \
 	if (ns) { \
 		if (error_code == AS_ERR_TIMEOUT) { \
-			cf_atomic64_incr(&ns->n_##name##_tsvc_timeout); \
+			as_incr_uint64(&ns->n_##name##_tsvc_timeout); \
 		} \
 		else { \
-			cf_atomic64_incr(&ns->n_##name##_tsvc_error); \
+			as_incr_uint64(&ns->n_##name##_tsvc_error); \
 		} \
 	} \
 	else { \
-		cf_atomic64_incr(&g_stats.n_tsvc_##name##_error); \
+		as_incr_uint64(&g_stats.n_tsvc_##name##_error); \
 	}
 
 void
@@ -434,7 +433,7 @@ as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
-		cf_atomic64_incr(&g_stats.n_tsvc_client_error);
+		as_incr_uint64(&g_stats.n_tsvc_client_error);
 		break;
 	default:
 		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
@@ -462,7 +461,8 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 	}
 
 	cf_rc_free(proto_fd_h);
-	cf_atomic64_incr(&g_stats.proto_connections_closed);
+	// TODO - needs 'release' semantic.
+	as_incr_uint64(&g_stats.proto_connections_closed);
 }
 
 void

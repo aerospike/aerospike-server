@@ -28,8 +28,6 @@
 
 #include <stdint.h>
 
-#include "citrusleaf/cf_atomic.h"
-
 #include "hist.h"
 
 #include "base/proto.h"
@@ -43,44 +41,44 @@
 typedef struct as_stats_s {
 
 	// Connection stats.
-	cf_atomic64		proto_connections_opened; // not just a statistic
-	cf_atomic64		proto_connections_closed; // not just a statistic
+	uint64_t		proto_connections_opened; // not just a statistic
+	uint64_t		proto_connections_closed; // not just a statistic
 	// In ticker but not collected via info:
-	cf_atomic64		heartbeat_connections_opened;
-	cf_atomic64		heartbeat_connections_closed;
-	cf_atomic64		fabric_connections_opened;
-	cf_atomic64		fabric_connections_closed;
+	uint64_t		heartbeat_connections_opened;
+	uint64_t		heartbeat_connections_closed;
+	uint64_t		fabric_connections_opened;
+	uint64_t		fabric_connections_closed;
 
 	// Heartbeat stats.
-	cf_atomic64		heartbeat_received_self;
-	cf_atomic64		heartbeat_received_foreign;
+	uint64_t		heartbeat_received_self;
+	uint64_t		heartbeat_received_foreign;
 
 	// Demarshal stats.
 	uint64_t		reaper_count; // not in ticker - incremented only in reaper thread
 
 	// Info stats.
-	cf_atomic64		info_complete;
+	uint64_t		info_complete;
 
 	// Early transaction errors.
-	cf_atomic64		n_demarshal_error;
-	cf_atomic64		n_tsvc_client_error;
-	cf_atomic64		n_tsvc_from_proxy_error;
-	cf_atomic64		n_tsvc_batch_sub_error;
-	cf_atomic64		n_tsvc_from_proxy_batch_sub_error;
-	cf_atomic64		n_tsvc_udf_sub_error;
-	cf_atomic64		n_tsvc_ops_sub_error;
+	uint64_t		n_demarshal_error;
+	uint64_t		n_tsvc_client_error;
+	uint64_t		n_tsvc_from_proxy_error;
+	uint64_t		n_tsvc_batch_sub_error;
+	uint64_t		n_tsvc_from_proxy_batch_sub_error;
+	uint64_t		n_tsvc_udf_sub_error;
+	uint64_t		n_tsvc_ops_sub_error;
 
 	// Batch-index stats.
-	cf_atomic64		batch_index_initiate; // not in ticker - not just a statistic
-	cf_atomic64		batch_index_complete;
-	cf_atomic64		batch_index_errors;
-	cf_atomic64		batch_index_timeout;
-	cf_atomic64		batch_index_delay;
+	uint64_t		batch_index_initiate; // not in ticker - not just a statistic
+	uint64_t		batch_index_complete;
+	uint64_t		batch_index_errors;
+	uint64_t		batch_index_timeout;
+	uint64_t		batch_index_delay;
 
 	// Batch-index buffer stats.
-	cf_atomic64		batch_index_huge_buffers; // not in ticker
-	cf_atomic64		batch_index_created_buffers; // not in ticker
-	cf_atomic64		batch_index_destroyed_buffers; // not in ticker
+	uint64_t		batch_index_huge_buffers; // not in ticker
+	uint64_t		batch_index_created_buffers; // not in ticker
+	uint64_t		batch_index_destroyed_buffers; // not in ticker
 
 	// Batch-index proto compression stats.
 	as_proto_comp_stat batch_comp_stat; // relevant only for enterprise edition

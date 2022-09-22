@@ -39,7 +39,6 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
@@ -421,11 +420,13 @@ run_accept(void* udata)
 			cf_sock_cfg* cfg = ssock->cfg;
 
 			// Ensure that proto_connections_closed is read first.
-			uint64_t n_closed = g_stats.proto_connections_closed;
-			uint64_t n_opened = g_stats.proto_connections_opened;
-			uint64_t n_open = n_opened - n_closed;
+			uint64_t n_closed =
+					as_load_uint64(&g_stats.proto_connections_closed);
+			// TODO - non-86 memory barrier.
+			uint64_t n_opened =
+					as_load_uint64(&g_stats.proto_connections_opened);
 
-			if (n_open >= g_config.n_proto_fd_max) {
+			if (n_opened - n_closed >= g_config.n_proto_fd_max) {
 				cf_ticker_warning(AS_SERVICE,
 						"refusing client connection - proto-fd-max %u",
 						g_config.n_proto_fd_max);
@@ -476,7 +477,7 @@ run_accept(void* udata)
 
 			assign_socket(fd_h); // arms (EPOLLIN)
 
-			cf_atomic64_incr(&g_stats.proto_connections_opened);
+			as_incr_uint64(&g_stats.proto_connections_opened);
 		}
 	}
 

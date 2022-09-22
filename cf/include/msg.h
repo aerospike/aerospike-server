@@ -29,7 +29,6 @@
 #include <sys/socket.h>
 
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 
 #include "dynbuf.h"
 #include "vector.h"

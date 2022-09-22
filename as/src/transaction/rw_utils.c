@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h"
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -71,7 +71,7 @@ xdr_allows_write(as_transaction* tr)
 		}
 	}
 
-	cf_atomic_int_incr(&tr->rsv.ns->n_fail_xdr_forbidden);
+	as_incr_uint64(&tr->rsv.ns->n_fail_xdr_forbidden);
 
 	return false;
 }

@@ -29,7 +29,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
@@ -154,11 +153,11 @@ typedef struct emigration_s {
 	uint32_t    id;
 	pb_task_type type;
 	uint32_t    tx_flags;
-	cf_atomic32 state;
+	uint32_t    state;
 	bool        from_replica;
 	uint64_t    wait_until_ms;
 
-	cf_atomic32 bytes_emigrating;
+	uint32_t    bytes_emigrating;
 	cf_shash    *reinsert_hash;
 	uint64_t    insert_id;
 	cf_queue    *ctrl_q;
@@ -172,7 +171,7 @@ typedef struct immigration_s {
 	uint64_t         cluster_key;
 	uint32_t         pid;
 
-	cf_atomic32      done_recv;      // flag - 0 if not yet received, atomic counter for receives
+	uint32_t         done_recv;      // flag - 0 if not yet received, atomic counter for receives
 	uint64_t         start_recv_ms;  // time the first START event was received
 	uint64_t         done_recv_ms;   // time the first DONE event was received
 

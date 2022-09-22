@@ -30,8 +30,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
@@ -85,32 +85,32 @@ client_delete_update_stats(as_namespace* ns, uint8_t result_code,
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_client_delete_success);
+		as_incr_uint64(&ns->n_client_delete_success);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_delete_success);
+			as_incr_uint64(&ns->n_xdr_client_delete_success);
 		}
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_client_delete_error);
+		as_incr_uint64(&ns->n_client_delete_error);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_delete_error);
+			as_incr_uint64(&ns->n_xdr_client_delete_error);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_client_delete_timeout);
+		as_incr_uint64(&ns->n_client_delete_timeout);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_delete_timeout);
+			as_incr_uint64(&ns->n_xdr_client_delete_timeout);
 		}
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_client_delete_not_found);
+		as_incr_uint64(&ns->n_client_delete_not_found);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_delete_not_found);
+			as_incr_uint64(&ns->n_xdr_client_delete_not_found);
 		}
 		break;
 	case AS_ERR_FILTERED_OUT:
 		// Can't be an XDR delete.
-		cf_atomic64_incr(&ns->n_client_delete_filtered_out);
+		as_incr_uint64(&ns->n_client_delete_filtered_out);
 		break;
 	}
 }
@@ -121,32 +121,32 @@ from_proxy_delete_update_stats(as_namespace* ns, uint8_t result_code,
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_delete_success);
+		as_incr_uint64(&ns->n_from_proxy_delete_success);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_success);
+			as_incr_uint64(&ns->n_xdr_from_proxy_delete_success);
 		}
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_delete_error);
+		as_incr_uint64(&ns->n_from_proxy_delete_error);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_error);
+			as_incr_uint64(&ns->n_xdr_from_proxy_delete_error);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_delete_timeout);
+		as_incr_uint64(&ns->n_from_proxy_delete_timeout);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_timeout);
+			as_incr_uint64(&ns->n_xdr_from_proxy_delete_timeout);
 		}
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_from_proxy_delete_not_found);
+		as_incr_uint64(&ns->n_from_proxy_delete_not_found);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_delete_not_found);
+			as_incr_uint64(&ns->n_xdr_from_proxy_delete_not_found);
 		}
 		break;
 	case AS_ERR_FILTERED_OUT:
 		// Can't be an XDR delete.
-		cf_atomic64_incr(&ns->n_from_proxy_delete_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_delete_filtered_out);
 		break;
 	}
 }
@@ -157,19 +157,19 @@ batch_sub_delete_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_batch_sub_delete_success);
+		as_incr_uint64(&ns->n_batch_sub_delete_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_batch_sub_delete_error);
+		as_incr_uint64(&ns->n_batch_sub_delete_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_batch_sub_delete_timeout);
+		as_incr_uint64(&ns->n_batch_sub_delete_timeout);
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_batch_sub_delete_not_found);
+		as_incr_uint64(&ns->n_batch_sub_delete_not_found);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_batch_sub_delete_filtered_out);
+		as_incr_uint64(&ns->n_batch_sub_delete_filtered_out);
 		break;
 	}
 }
@@ -180,19 +180,19 @@ from_proxy_batch_sub_delete_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_success);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_delete_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_error);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_delete_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_timeout);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_delete_timeout);
 		break;
 	case AS_ERR_NOT_FOUND:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_not_found);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_delete_not_found);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_delete_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_delete_filtered_out);
 		break;
 	}
 }
@@ -530,7 +530,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 	// Check generation requirement, if any.
 	if (! generation_check(r, m, ns)) {
 		as_record_done(r_ref, ns);
-		cf_atomic64_incr(&ns->n_fail_generation);
+		as_incr_uint64(&ns->n_fail_generation);
 		tr->result_code = AS_ERR_GENERATION;
 		return TRANS_DONE_ERROR;
 	}

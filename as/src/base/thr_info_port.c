@@ -31,7 +31,6 @@
 #include <sys/ioctl.h>
 
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 
 #include "cf_str.h"
 #include "cf_thread.h"

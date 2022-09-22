@@ -32,7 +32,6 @@
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "arenax.h"
@@ -129,26 +128,26 @@ client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_client_write_success);
+		as_incr_uint64(&ns->n_client_write_success);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_write_success);
+			as_incr_uint64(&ns->n_xdr_client_write_success);
 		}
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_client_write_error);
+		as_incr_uint64(&ns->n_client_write_error);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_write_error);
+			as_incr_uint64(&ns->n_xdr_client_write_error);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_client_write_timeout);
+		as_incr_uint64(&ns->n_client_write_timeout);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_client_write_timeout);
+			as_incr_uint64(&ns->n_xdr_client_write_timeout);
 		}
 		break;
 	case AS_ERR_FILTERED_OUT:
 		// Can't be an XDR write.
-		cf_atomic64_incr(&ns->n_client_write_filtered_out);
+		as_incr_uint64(&ns->n_client_write_filtered_out);
 		break;
 	}
 }
@@ -159,26 +158,26 @@ from_proxy_write_update_stats(as_namespace* ns, uint8_t result_code,
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_write_success);
+		as_incr_uint64(&ns->n_from_proxy_write_success);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_success);
+			as_incr_uint64(&ns->n_xdr_from_proxy_write_success);
 		}
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_write_error);
+		as_incr_uint64(&ns->n_from_proxy_write_error);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_error);
+			as_incr_uint64(&ns->n_xdr_from_proxy_write_error);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_write_timeout);
+		as_incr_uint64(&ns->n_from_proxy_write_timeout);
 		if (is_xdr_op) {
-			cf_atomic64_incr(&ns->n_xdr_from_proxy_write_timeout);
+			as_incr_uint64(&ns->n_xdr_from_proxy_write_timeout);
 		}
 		break;
 	case AS_ERR_FILTERED_OUT:
 		// Can't be an XDR write.
-		cf_atomic64_incr(&ns->n_from_proxy_write_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_write_filtered_out);
 		break;
 	}
 }
@@ -189,16 +188,16 @@ batch_sub_write_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_batch_sub_write_success);
+		as_incr_uint64(&ns->n_batch_sub_write_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_batch_sub_write_error);
+		as_incr_uint64(&ns->n_batch_sub_write_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_batch_sub_write_timeout);
+		as_incr_uint64(&ns->n_batch_sub_write_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_batch_sub_write_filtered_out);
+		as_incr_uint64(&ns->n_batch_sub_write_filtered_out);
 		break;
 	}
 }
@@ -209,16 +208,16 @@ from_proxy_batch_sub_write_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_success);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_write_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_error);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_write_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_timeout);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_write_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT:
-		cf_atomic64_incr(&ns->n_from_proxy_batch_sub_write_filtered_out);
+		as_incr_uint64(&ns->n_from_proxy_batch_sub_write_filtered_out);
 		break;
 	}
 }
@@ -228,13 +227,13 @@ ops_sub_write_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_OK:
-		cf_atomic64_incr(&ns->n_ops_sub_write_success);
+		as_incr_uint64(&ns->n_ops_sub_write_success);
 		break;
 	default:
-		cf_atomic64_incr(&ns->n_ops_sub_write_error);
+		as_incr_uint64(&ns->n_ops_sub_write_error);
 		break;
 	case AS_ERR_TIMEOUT:
-		cf_atomic64_incr(&ns->n_ops_sub_write_timeout);
+		as_incr_uint64(&ns->n_ops_sub_write_timeout);
 		break;
 	case AS_ERR_FILTERED_OUT: // doesn't include those filtered out by metadata
 		as_incr_uint64(&ns->n_ops_sub_write_filtered_out);
@@ -883,12 +882,12 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Handle deletion if appropriate.
 	if (is_delete) {
 		write_delete_record(r_ref.r, tree);
-		cf_atomic64_incr(&ns->n_deleted_last_bin);
+		as_incr_uint64(&ns->n_deleted_last_bin);
 		tr->flags |= AS_TRANSACTION_FLAG_IS_DELETE;
 	}
 	// Or (normally) adjust max void-time.
 	else if (r->void_time != 0) {
-		cf_atomic32_setmax(&tr->rsv.p->max_void_time, (int32_t)r->void_time);
+		as_setmax_uint32(&tr->rsv.p->max_void_time, r->void_time);
 	}
 
 	will_replicate(r, ns);
@@ -930,11 +929,11 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 
 	switch (result_code) {
 	case AS_ERR_GENERATION:
-		cf_atomic64_incr(&ns->n_fail_generation);
+		as_incr_uint64(&ns->n_fail_generation);
 		break;
 	case AS_ERR_RECORD_TOO_BIG:
 		cf_detail(AS_RW, "{%s} write_master: record too big %pD", ns->name, &tr->keyd);
-		cf_atomic64_incr(&ns->n_fail_record_too_big);
+		as_incr_uint64(&ns->n_fail_record_too_big);
 		break;
 	default:
 		// These either log warnings or aren't interesting enough to count.

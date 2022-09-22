@@ -188,12 +188,12 @@ as_hb_msg_send_hlc_ts_get(msg* msg, as_hlc_timestamp* send_ts);
 /**
  * Last time skew was checked.
  */
-static cf_atomic64 g_last_skew_check_time = 0;
+static uint64_t g_last_skew_check_time = 0;
 
 /**
  * Current value of clock skew.
  */
-static cf_atomic64 g_skew = 0;
+static uint64_t g_skew = 0;
 
 /**
  * Self HLC delta over the last skew window. Access should under the self skew
@@ -447,11 +447,10 @@ Cleanup:
 static void
 skew_monitor_update()
 {
-	cf_clock now = cf_getms();
-	cf_atomic64_set(&g_last_skew_check_time, now);
+	g_last_skew_check_time = cf_getms();
 
 	uint64_t skew = skew_monitor_compute_skew();
-	cf_atomic64_set(&g_skew, skew);
+	g_skew = skew;
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
@@ -573,7 +572,7 @@ skew_monitor_outliers_from_skew_summary(cf_vector* outliers,
 static uint32_t
 skew_monitor_outliers(cf_vector* outliers)
 {
-	if (as_skew_monitor_skew() < skew_monitor_outlier_detection_threshold()) {
+	if (g_skew < skew_monitor_outlier_detection_threshold()) {
 		// Skew is not significant. Skip printing outliers.
 		return 0;
 	}
@@ -629,7 +628,7 @@ skew_monitor_hb_plugin_set_fn(msg* msg)
 	pthread_mutex_unlock(&g_self_skew_lock);
 
 	cf_clock now = cf_getms();
-	if (cf_atomic64_get(g_last_skew_check_time) + skew_check_interval() < now) {
+	if (g_last_skew_check_time + skew_check_interval() < now) {
 		skew_monitor_update();
 	}
 }
@@ -774,7 +773,7 @@ as_skew_monitor_init()
 uint64_t
 as_skew_monitor_skew()
 {
-	return cf_atomic64_get(g_skew);
+	return g_skew;
 }
 
 /**
@@ -841,7 +840,7 @@ as_skew_monitor_dump()
 			buffer, VECTOR_FLAG_INITZERO);
 	as_exchange_succession(&node_vector);
 
-	INFO("CSM: cluster-clock-skew:%ld", as_skew_monitor_skew());
+	INFO("CSM: cluster-clock-skew:%ld", g_skew);
 	if (cf_vector_size(&node_vector) <= 1) {
 		// Self node is an orphan or single node cluster. No cluster wide skew.
 		goto Cleanup;
