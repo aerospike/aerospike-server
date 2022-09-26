@@ -614,7 +614,22 @@ udf_record_numbins(const as_rec* rec)
 		return 0;
 	}
 
-	return urecord->rd->n_bins;
+	uint16_t n_bins = urecord->rd->n_bins;
+	// Note - for now, we think we can't see unused bins (within n_bins) here.
+
+	if (urecord->rd->ns->single_bin) {
+		return n_bins;
+	}
+
+	uint16_t n_live_bins = 0;
+
+	for (uint16_t i = 0; i < n_bins; i++) {
+		if (as_bin_is_live(&urecord->rd->bins[i])) {
+			n_live_bins++;
+		}
+	}
+
+	return n_live_bins;
 }
 
 //------------------------------------------------
@@ -644,6 +659,7 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 
 	as_namespace* ns = urecord->rd->ns;
 	uint16_t n_bins = urecord->rd->n_bins;
+	// Note - for now, we think we can't see unused bins (within n_bins) here.
 
 	if (ns->single_bin) {
 		char empty[] = "";
@@ -653,15 +669,20 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 	}
 
 	char bin_names[n_bins * AS_BIN_NAME_MAX_SZ];
+	uint16_t n_live_bins = 0;
 
 	for (uint16_t i = 0; i < n_bins; i++) {
-		as_bin *b = &urecord->rd->bins[i];
+		as_bin* b = &urecord->rd->bins[i];
 
-		const char* name = as_bin_get_name_from_id(ns, b->id);
-		strcpy(bin_names + (i * AS_BIN_NAME_MAX_SZ), name);
+		if (as_bin_is_live(b)) {
+			const char* name = as_bin_get_name_from_id(ns, b->id);
+
+			strcpy(bin_names + (i * AS_BIN_NAME_MAX_SZ), name);
+			n_live_bins++;
+		}
 	}
 
-	cb(bin_names, n_bins, AS_BIN_NAME_MAX_SZ, udata);
+	cb(bin_names, n_live_bins, AS_BIN_NAME_MAX_SZ, udata);
 
 	return 0;
 }
