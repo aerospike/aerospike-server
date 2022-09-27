@@ -677,7 +677,7 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 		if (as_bin_is_live(b)) {
 			const char* name = as_bin_get_name_from_id(ns, b->id);
 
-			strcpy(bin_names + (i * AS_BIN_NAME_MAX_SZ), name);
+			strcpy(bin_names + (n_live_bins * AS_BIN_NAME_MAX_SZ), name);
 			n_live_bins++;
 		}
 	}
