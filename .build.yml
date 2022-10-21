@@ -12,16 +12,19 @@ dependency:
 
 container:
   - base:
-      - docker.qe.aerospike.com/build/aerospike-server:amazonlinux-1
-      - docker.qe.aerospike.com/build/aerospike-server:amazonlinux-2
-      - docker.qe.aerospike.com/build/aerospike-server:centos-7
-      - docker.qe.aerospike.com/build/aerospike-server:rhel-8
-      - docker.qe.aerospike.com/build/aerospike-server:debian-9
-      - docker.qe.aerospike.com/build/aerospike-server:debian-10
-      - docker.qe.aerospike.com/build/aerospike-server:debian-11
-      - docker.qe.aerospike.com/build/aerospike-server:oraclelinux-7
-      - docker.qe.aerospike.com/build/aerospike-server:ubuntu-18.04
-      - docker.qe.aerospike.com/build/aerospike-server:ubuntu-20.04
+      - docker.qe.aerospike.com/build/aerospike-server:arm-centos-7
+      - docker.qe.aerospike.com/build/aerospike-server:arm-rhel-8
+      - docker.qe.aerospike.com/build/aerospike-server:arm-debian-10
+      - docker.qe.aerospike.com/build/aerospike-server:arm-debian-11
+      - docker.qe.aerospike.com/build/aerospike-server:arm-ubuntu-18.04
+      - docker.qe.aerospike.com/build/aerospike-server:arm-ubuntu-20.04
+
+      - docker.qe.aerospike.com/build/aerospike-server:x86-centos-7
+      - docker.qe.aerospike.com/build/aerospike-server:x86-rhel-8
+      - docker.qe.aerospike.com/build/aerospike-server:x86-debian-10
+      - docker.qe.aerospike.com/build/aerospike-server:x86-debian-11
+      - docker.qe.aerospike.com/build/aerospike-server:x86-ubuntu-18.04
+      - docker.qe.aerospike.com/build/aerospike-server:x86-ubuntu-20.04
 
 build:
   - name: community

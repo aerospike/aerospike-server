@@ -25,20 +25,15 @@ LIBRARIES += -lpthread -lrt -ldl -lz -lm
 #   "" (the default) means "src".  Automatically set to "../m4/" during non-zero macro expansion build phases.
 SRCDIR =
 
-# Popular values:
-#   x86_64 for 64-bit Intel
-#   i686 for 32-bit Intel
-MARCH_NATIVE = $(shell uname -m)
-
 # If GCC v4.4.7 or later, use DWARF version 4, othewise use version 2:
-ifeq ($(shell $(DEPTH)/build/VersionCheck.py 'gcc -dumpversion' 4.4.7), 1)
+ifeq ($(shell $(DEPTH)/build/versioncheck '$(CC_VERSION)' 4.4.7), 1)
   DWARF_VERSION=4
 else
   DWARF_VERSION=2
 endif
 
 # Overrride optimizations via: make O=n
-O = 3 
+O = 3
 
 ifeq ($(DOPROFILE),1)
   OPTFLAGS = -O$(O) -fPIE -pg -fprofile-arcs -ftest-coverage -DDOPROFILE
@@ -65,12 +60,26 @@ endif
 # loops of this size are unlikely in our code.
 #
 # O3 also enables -finline-functions, among other things.
-COMMON_CFLAGS = -gdwarf-$(DWARF_VERSION) -g3 $(OPTFLAGS) -fno-common -fno-strict-aliasing -Wall $(AS_CFLAGS) $(AS_EE_CFLAGS)
+COMMON_CFLAGS = -gdwarf-$(DWARF_VERSION) -g3 $(OPTFLAGS) -fno-common -fno-strict-aliasing -Wall $(AS_CFLAGS)
 
 # Code generated for the "nocona" architecture has been determined to run well on a wide variety of current machines.
-ifneq ($(ARCH),$(filter $(ARCH),ppc64 ppc64le))
+ifeq ($(ARCH),x86_64)
   COMMON_CFLAGS += -march=nocona
 endif
+
+ifeq ($(ARCH), aarch64)
+  COMMON_CFLAGS += -mcpu=neoverse-n1
+  COMMON_CFLAGS += -fplugin=$(TSO)/tso.so
+  COMMON_CFLAGS += -fplugin-arg-tso-enable=$(PLUGIN_ENABLE)
+  COMMON_CFLAGS += -fplugin-arg-tso-exclude=$(TSO)/exclude_ce.txt
+  COMMON_CFLAGS += -fplugin-arg-tso-track-deps=yes
+  COMMON_CFLAGS += -fplugin-arg-tso-fix-asm=$(PLUGIN_FIX_ASM)
+  COMMON_CFLAGS += -fplugin-arg-tso-fix-built-in=$(PLUGIN_FIX_BUILT_IN)
+  COMMON_CFLAGS += -fplugin-arg-tso-profiling=$(PLUGIN_PROFILING)
+endif
+
+# EE-specific flags, must go after -fplugin.
+COMMON_CFLAGS += $(AS_EE_CFLAGS)
 
 # Generate dependency files.
 COMMON_CFLAGS += -MMD
@@ -82,21 +91,15 @@ COMMON_CFLAGS += -Werror
 COMMON_FLAGS += -fno-stack-clash-protection
 
 # Override certain warnings under GCC v9+.
-ifeq ($(shell $(DEPTH)/build/VersionCheck.py 'gcc -dumpversion' 9), 1)
+ifeq ($(shell $(DEPTH)/build/versioncheck '$(CC_VERSION)' 9.0.0), 1)
   # Disable compilation failure due to warnings about possibly unaligned pointers into packed structs.
   COMMON_CFLAGS += -Wno-address-of-packed-member
 endif
 
-CFLAGS = $(COMMON_CFLAGS) -DMARCH_$(MARCH_NATIVE)
+CFLAGS = $(COMMON_CFLAGS) -DMARCH_$(ARCH)
 
 # Define a macro for the base source file name.
 DEF_FN += -D__FILENAME__=\"$(notdir $<)\"
-
-# Alternative Compiler Flags Settings:
-# Note:  "native" is optimized for the build environment, which might not be the same as the deployment environment:
-#CFAGS_NATIVE = $(COMMON_CFLAGS) -march=native
-#CFLAGS_64 = $(COMMON_FLAGS) -DMARCH_x86_64
-#CFLAGS_32 = $(COMMON_CFLAGS) -DMARCH_i686
 
 LDFLAGS = -rdynamic -L$(CF_LIB_DIR)
 

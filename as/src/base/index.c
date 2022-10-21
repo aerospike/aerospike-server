@@ -30,8 +30,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <xmmintrin.h>
 
+#include "aerospike/as_arch.h"
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
@@ -72,20 +72,20 @@ static cf_queue g_gc_queue;
 // Forward declarations.
 //
 
-void* run_index_tree_gc(void* unused);
-void as_index_tree_destroy(as_index_tree* tree);
+static void* run_index_tree_gc(void* unused);
+static void as_index_tree_destroy(as_index_tree* tree);
 
-bool as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
-void as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd, cf_arenax_handle r_h, as_index_ph_array* ph_a);
-void as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h);
+static bool as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
+static void as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd, cf_arenax_handle r_h, as_index_ph_array* ph_a);
+static void as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h);
 
-int as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id, const cf_digest* keyd, as_index_ref* index_ref);
+static int as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id, const cf_digest* keyd, as_index_ref* index_ref);
 
-int as_index_sprig_search_lockless(as_index_sprig* isprig, const cf_digest* keyd, as_index** ret, cf_arenax_handle* ret_h);
-void as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent, as_index_ele* ele);
-void as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent, as_index_ele* ele);
-void as_index_rotate_left(as_index_ele* a, as_index_ele* b);
-void as_index_rotate_right(as_index_ele* a, as_index_ele* b);
+static int as_index_sprig_search_lockless(as_index_sprig* isprig, const cf_digest* keyd, as_index** ret, cf_arenax_handle* ret_h);
+static void as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent, as_index_ele* ele);
+static void as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent, as_index_ele* ele);
+static void as_index_rotate_left(as_index_ele* a, as_index_ele* b);
+static void as_index_rotate_right(as_index_ele* a, as_index_ele* b);
 
 static inline void
 as_index_sprig_from_i(as_index_tree* tree, as_index_sprig* isprig,
@@ -351,7 +351,7 @@ as_index_delete(as_index_tree* tree, const cf_digest* keyd)
 // Local helpers - garbage collection, generic.
 //
 
-void*
+static void*
 run_index_tree_gc(void* unused)
 {
 	as_index_tree* tree;
@@ -363,7 +363,7 @@ run_index_tree_gc(void* unused)
 	return NULL;
 }
 
-void
+static void
 as_index_tree_destroy(as_index_tree* tree)
 {
 	for (uint32_t i = 0; i < tree->shared->n_sprigs; i++) {
@@ -397,7 +397,7 @@ as_index_tree_destroy(as_index_tree* tree)
 
 // Make a callback for a specified number of elements in the tree, from outside
 // the tree lock.
-bool
+static bool
 as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 		as_index_reduce_fn cb, void* udata)
 {
@@ -470,7 +470,7 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 	return do_more;
 }
 
-void
+static void
 as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd,
 		cf_arenax_handle r_h, as_index_ph_array* ph_a)
 {
@@ -505,6 +505,7 @@ as_index_sprig_traverse(as_index_sprig* isprig, const cf_digest* keyd,
 	as_index_sprig_traverse(isprig, keyd, r->right_h, ph_a);
 }
 
+// Used also by set indexes, not a local helper.
 void
 as_index_grow_ph_array(as_index_ph_array* ph_a)
 {
@@ -525,7 +526,7 @@ as_index_grow_ph_array(as_index_ph_array* ph_a)
 	ph_a->capacity = new_capacity;
 }
 
-void
+static void
 as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h)
 {
 	if (r_h == SENTINEL_H) {
@@ -554,6 +555,7 @@ as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h)
 // Local helpers - get/insert/delete an element in a sprig.
 //
 
+// Used by EE index and set index functions, not a local helper.
 int
 as_index_sprig_get_vlock(as_index_sprig* isprig, const cf_digest* keyd,
 		as_index_ref* index_ref)
@@ -574,7 +576,7 @@ as_index_sprig_get_vlock(as_index_sprig* isprig, const cf_digest* keyd,
 	return 0;
 }
 
-int
+static int
 as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id,
 		const cf_digest* keyd, as_index_ref* index_ref)
 {
@@ -611,7 +613,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id,
 			ele->me_h = t_h;
 			ele->me = t;
 
-			_mm_prefetch(t, _MM_HINT_NTA);
+			as_arch_prefetch_nt(t);
 
 			if ((cmp = cf_digest_compare(keyd, &t->keyd)) == 0) {
 				// The element already exists, simply return it.
@@ -702,6 +704,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig* isprig, uint8_t tree_id,
 	return 1;
 }
 
+// Used by EE index function, not a local helper.
 // This MUST be called under the record (sprig) lock!
 int
 as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
@@ -733,7 +736,7 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 		ele->me_h = r_h;
 		ele->me = r;
 
-		_mm_prefetch(r, _MM_HINT_NTA);
+		as_arch_prefetch_nt(r);
 
 		int cmp = cf_digest_compare(keyd, &r->keyd);
 
@@ -837,7 +840,7 @@ as_index_sprig_delete(as_index_sprig* isprig, const cf_digest* keyd)
 // Local helpers - search/rebalance a sprig.
 //
 
-int
+static int
 as_index_sprig_search_lockless(as_index_sprig* isprig, const cf_digest* keyd,
 		as_index** ret, cf_arenax_handle* ret_h)
 {
@@ -846,7 +849,7 @@ as_index_sprig_search_lockless(as_index_sprig* isprig, const cf_digest* keyd,
 	while (r_h != SENTINEL_H) {
 		as_index* r = RESOLVE(r_h);
 
-		_mm_prefetch(r, _MM_HINT_NTA);
+		as_arch_prefetch_nt(r);
 
 		int cmp = cf_digest_compare(keyd, &r->keyd);
 
@@ -868,7 +871,7 @@ as_index_sprig_search_lockless(as_index_sprig* isprig, const cf_digest* keyd,
 	return -1; // not found
 }
 
-void
+static void
 as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent,
 		as_index_ele* ele)
 {
@@ -958,7 +961,7 @@ as_index_sprig_insert_rebalance(as_index_sprig* isprig, as_index* root_parent,
 	RESOLVE(root_parent->left_h)->color = BLACK;
 }
 
-void
+static void
 as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 		as_index_ele* ele)
 {
@@ -1107,7 +1110,7 @@ as_index_sprig_delete_rebalance(as_index_sprig* isprig, as_index* root_parent,
 	r_e->me->color = BLACK;
 }
 
-void
+static void
 as_index_rotate_left(as_index_ele* a, as_index_ele* b)
 {
 	// Element b is element a's right child - a will become b's left child.
@@ -1140,7 +1143,7 @@ as_index_rotate_left(as_index_ele* a, as_index_ele* b)
 	a->parent = b;
 }
 
-void
+static void
 as_index_rotate_right(as_index_ele* a, as_index_ele* b)
 {
 	// Element b is element a's left child - a will become b's right child.

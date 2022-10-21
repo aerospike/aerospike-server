@@ -60,12 +60,11 @@
 // Forward declarations.
 //
 
-uint32_t pack_info_bits(as_transaction* tr);
-void send_repl_write_ack(cf_node node, msg* m, uint32_t result);
-void send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result,
-		const cf_digest* keyd);
-uint32_t parse_result_code(msg* m);
-void drop_replica(as_partition_reservation* rsv, cf_digest* keyd);
+static uint32_t pack_info_bits(as_transaction* tr);
+static void send_repl_write_ack(cf_node node, msg* m, uint32_t result);
+static void send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result, const cf_digest* keyd);
+static uint32_t parse_result_code(msg* m);
+static void drop_replica(as_partition_reservation* rsv, cf_digest* keyd);
 
 
 //==========================================================
@@ -107,7 +106,6 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	}
 }
 
-
 void
 repl_write_setup_rw(rw_request* rw, as_transaction* tr,
 		repl_write_done_cb repl_write_cb, timeout_done_cb timeout_cb)
@@ -146,13 +144,12 @@ repl_write_setup_rw(rw_request* rw, as_transaction* tr,
 	}
 
 	// Allow retransmit thread to destroy rw_request as soon as we unlock.
-	rw->is_set_up = true;
+	as_store_bool_rls(&rw->is_set_up, true);
 
 	if (as_health_sample_replica_write()) {
 		rw->repl_start_us = cf_getus();
 	}
 }
-
 
 void
 repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
@@ -180,7 +177,6 @@ repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
 		rw->repl_start_us = cf_getus();
 	}
 }
-
 
 void
 repl_write_reset_replicas(rw_request* rw)
@@ -223,7 +219,6 @@ repl_write_reset_replicas(rw_request* rw)
 		rw->dest_complete[n] = complete[n];
 	}
 }
-
 
 void
 repl_write_handle_op(cf_node node, msg* m)
@@ -310,7 +305,6 @@ repl_write_handle_op(cf_node node, msg* m)
 	as_partition_release(&rsv);
 	send_repl_write_ack_w_digest(node, m, result, rr.keyd);
 }
-
 
 void
 repl_write_handle_ack(cf_node node, msg* m)
@@ -430,7 +424,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 // Local helpers.
 //
 
-uint32_t
+static uint32_t
 pack_info_bits(as_transaction* tr)
 {
 	uint32_t info = 0;
@@ -442,8 +436,7 @@ pack_info_bits(as_transaction* tr)
 	return info;
 }
 
-
-void
+static void
 send_repl_write_ack(cf_node node, msg* m, uint32_t result)
 {
 	uint32_t info = 0;
@@ -465,8 +458,7 @@ send_repl_write_ack(cf_node node, msg* m, uint32_t result)
 	}
 }
 
-
-void
+static void
 send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result,
 		const cf_digest* keyd)
 {
@@ -491,8 +483,7 @@ send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result,
 	}
 }
 
-
-uint32_t
+static uint32_t
 parse_result_code(msg* m)
 {
 	uint32_t result_code;
@@ -505,8 +496,7 @@ parse_result_code(msg* m)
 	return result_code;
 }
 
-
-void
+static void
 drop_replica(as_partition_reservation* rsv, cf_digest* keyd)
 {
 	// Shortcut pointers & flags.

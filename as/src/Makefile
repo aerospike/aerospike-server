@@ -274,6 +274,7 @@ else
       $(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
       $(wildcard /usr/lib/liblua.a), \
       $(wildcard /usr/lib/powerpc64le-linux-gnu/liblua.a), \
+      $(wildcard /usr/lib/aarch64-linux-gnu/liblua5.1.a), \
       $(error Cannot find "liblua.a"))
   else
     LIBRARIES += -llua$(LUA_SUFFIX)

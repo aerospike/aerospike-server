@@ -101,14 +101,14 @@ static cf_rchash* g_rw_request_hash = NULL;
 // Forward declarations.
 //
 
-uint32_t rw_request_hash_fn(const void* key);
-transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
+static uint32_t rw_request_hash_fn(const void* key);
+static transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
 
-void* run_retransmit(void* arg);
-int retransmit_reduce_fn(const void* key, void* data, void* udata);
-void update_retransmit_stats(const rw_request* rw);
+static void* run_retransmit(void* arg);
+static int retransmit_reduce_fn(const void* key, void* data, void* udata);
+static void update_retransmit_stats(const rw_request* rw);
 
-int rw_msg_cb(cf_node id, msg* m, void* udata);
+static int rw_msg_cb(cf_node id, msg* m, void* udata);
 
 
 //==========================================================
@@ -127,13 +127,11 @@ as_rw_init()
 			RW_MSG_SCRATCH_SIZE, rw_msg_cb, NULL);
 }
 
-
 uint32_t
 rw_request_hash_count()
 {
 	return cf_rchash_get_size(g_rw_request_hash);
 }
-
 
 transaction_status
 rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
@@ -164,13 +162,11 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 	return TRANS_IN_PROGRESS; // rw_request was inserted in the hash
 }
 
-
 void
 rw_request_hash_delete(rw_request_hkey* hkey, rw_request* rw)
 {
 	cf_rchash_delete_object(g_rw_request_hash, hkey, rw);
 }
-
 
 rw_request*
 rw_request_hash_get(rw_request_hkey* hkey)
@@ -181,7 +177,6 @@ rw_request_hash_get(rw_request_hkey* hkey)
 
 	return rw;
 }
-
 
 // For debugging only.
 void
@@ -196,7 +191,7 @@ rw_request_hash_dump()
 // Local helpers - hash insertion.
 //
 
-uint32_t
+static uint32_t
 rw_request_hash_fn(const void* key)
 {
 	rw_request_hkey* hkey = (rw_request_hkey*)key;
@@ -204,8 +199,7 @@ rw_request_hash_fn(const void* key)
 	return *(uint32_t*)&hkey->keyd.digest[DIGEST_HASH_BASE_BYTE];
 }
 
-
-transaction_status
+static transaction_status
 handle_hot_key(rw_request* rw0, as_transaction* tr)
 {
 	as_namespace* ns = tr->rsv.ns;
@@ -241,7 +235,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 // Local helpers - retransmit.
 //
 
-void*
+static void*
 run_retransmit(void* arg)
 {
 	while (true) {
@@ -264,14 +258,13 @@ run_retransmit(void* arg)
 	return NULL;
 }
 
-
-int
+static int
 retransmit_reduce_fn(const void* key, void* data, void* udata)
 {
 	rw_request* rw = data;
 	now_times* now = (now_times*)udata;
 
-	if (! rw->is_set_up) {
+	if (! as_load_bool_acq(&rw->is_set_up)) {
 		return 0;
 	}
 
@@ -307,8 +300,7 @@ retransmit_reduce_fn(const void* key, void* data, void* udata)
 	return 0;
 }
 
-
-void
+static void
 update_retransmit_stats(const rw_request* rw)
 {
 	as_namespace* ns = rw->rsv.ns;
@@ -394,7 +386,7 @@ update_retransmit_stats(const rw_request* rw)
 // Local helpers - handle RW fabric messages.
 //
 
-int
+static int
 rw_msg_cb(cf_node id, msg* m, void* udata)
 {
 	uint32_t op;

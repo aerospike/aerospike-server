@@ -6,6 +6,7 @@
 TAGS
 run
 target
+tso/tso.so
 
 # emacs backup / temp files
 *~

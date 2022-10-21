@@ -55,6 +55,9 @@ ifeq ($(USE_LUAJIT),1)
 endif
 	$(MAKE) -C $(JEMALLOC)
 	$(MAKE) -C $(JANSSON)
+ifeq ($(ARCH), aarch64)
+	$(MAKE) -C $(TSO)
+endif
 	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)" OS=$(UNAME)
 	$(MAKE) -C $(CF)
 	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1 OS=$(UNAME)
@@ -94,6 +97,7 @@ clean:	cleanbasic cleanmodules cleandist
 cleanbasic:
 	$(RM) $(VERSION_SRC) $(VERSION_OBJ)
 	$(RM) -rf $(TARGET_DIR)
+	$(MAKE) -C $(TSO) clean
 
 .PHONY: cleanmodules
 cleanmodules:
@@ -106,12 +110,14 @@ cleanmodules:
 		$(MAKE) -C $(JEMALLOC) clean; \
 		$(MAKE) -C $(JEMALLOC) distclean; \
 	fi
+ifeq ($(ARCH), x86_64)
 	if [ -e "$(LUAJIT)/Makefile" ]; then \
 		if [ ! -e "$(LUAJIT)/src/luaconf.h" ]; then \
 			ln -s "$(LUAJIT)/src/luaconf.h.orig" "$(LUAJIT)/src/luaconf.h"; \
 		fi; \
 		$(MAKE) -C $(LUAJIT) clean; \
 	fi
+endif
 	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) clean
 	$(MAKE) -C $(S2) clean
 

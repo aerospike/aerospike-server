@@ -1,0 +1,78 @@
+#!/bin/sh
+
+checkversion()
+{
+    if [ "$#" -ne 2 ]; then
+        echo "versioncheck expects 2 arguments - version and min_version"
+        echo "Example:"
+        echo "versioncheck 1.2.3 1.1.1"
+        echo "1"
+        echo "versioncheck 1.1.1 1.2.3"
+        echo "0"
+        echo "versioncheck 1.1.1 1.1.1"
+        echo "1"
+        exit 1
+    fi
+
+    version=$1
+    min_version=$2
+
+    check=$(printf "$min_version\n$version" | sort --version-sort | head -1)
+
+    if [ "$min_version" = "$check" ]; then
+        echo "1"
+    else
+        echo "0"
+    fi
+}
+
+checkit()
+{
+    if [ "$(checkversion $1 $2)" != "$3" ]; then
+        echo "FAIL: $2 <= $1 expected $3"
+        exit 1;
+    fi
+}
+
+test()
+{
+    if [ "$1" != "--test" ]; then
+        return
+    fi
+
+    # Check examples
+    checkit 1.2.3 1.1.1 1
+    checkit 1.1.1 1.2.3 0
+    checkit 1.1.1 1.1.1 1
+
+    # 4 parts
+    checkit 1.0.0.0 0.0.0.1 1
+    checkit 0.0.0.1 1.0.0.0 0
+
+    # Mixed 3 and 4 parts
+    checkit 1.0.0 0.0.0.1 1
+    checkit 0.0.0.1 1.0.0 0
+    checkit 0.1 0.0.0.1 1
+    checkit 0.0.0.1 0.1 0
+
+    # Git describe
+    checkit 1.0.0-1-g123456789 1.0.0 1
+    checkit 1.0.0-1-g123456789 1.0.0-1 1
+    checkit 1.0.0-2 1.0.0-1 1
+    checkit 1.0.0-1 1.0.0-2 0
+
+    # Two digit vs one digit parts
+    checkit 10.0.0 9.0.0 1
+    checkit 9.0.0 10.0.0 0
+    checkit 0.10.0 0.9.0 1
+    checkit 0.9.0 0.10.0 0
+    checkit 0.0.10 0.0.9 1
+    checkit 0.0.9 0.0.10 0
+
+    checkit 9 4.4.7 1
+
+    exit
+}
+
+test $@
+checkversion $@

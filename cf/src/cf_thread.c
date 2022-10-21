@@ -150,7 +150,7 @@ cf_thread_create_transient(cf_thread_run_fn run, void* udata)
 	if (g_n_pool_active == g_n_pool_total) {
 		g_n_pool_total++;
 
-		thread_info* info = make_thread_info(run_pool, udata);
+		thread_info* info = make_thread_info(run_pool, NULL);
 		pthread_t tid;
 		int result = pthread_create(&tid, &g_attr_detached, pool_shim_fn, info);
 

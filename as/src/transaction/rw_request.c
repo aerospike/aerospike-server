@@ -140,7 +140,6 @@ rw_request_create(cf_digest* keyd)
 	return rw;
 }
 
-
 void
 rw_request_destroy(rw_request* rw)
 {
@@ -192,7 +191,6 @@ rw_request_destroy(rw_request* rw)
 	}
 }
 
-
 void
 rw_request_wait_q_push(rw_request* rw, as_transaction* tr)
 {
@@ -215,7 +213,6 @@ rw_request_wait_q_push(rw_request* rw, as_transaction* tr)
 
 	rw->wait_queue_depth++;
 }
-
 
 void
 rw_request_wait_q_push_head(rw_request* rw, as_transaction* tr)

@@ -588,11 +588,11 @@ cf_log_stack_trace(void* ctx)
 {
 	ucontext_t* uc = (ucontext_t*)ctx;
 	mcontext_t* mc = (mcontext_t*)&uc->uc_mcontext;
+	char reg_str[1000];
+#if defined __x86_64__
 	uint64_t* gregs = (uint64_t*)&mc->gregs[0];
 
-	char regs[1000];
-
-	sprintf(regs,
+	sprintf(reg_str,
 		"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx "
 		"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx "
 		"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx",
@@ -601,8 +601,24 @@ cf_log_stack_trace(void* ctx)
 		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
 		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15],
 		gregs[REG_RIP]);
+#elif defined __aarch64__
+	uint64_t fault = (uint64_t)mc->fault_address;
+	uint64_t* regs = (uint64_t*)&mc->regs[0];
+	uint64_t sp = (uint64_t)mc->sp;
+	uint64_t pc = (uint64_t)mc->pc;
 
-	cf_warning(AS_AS, "stacktrace: registers: %s", regs);
+	char* p = reg_str;
+
+	p += sprintf(p, "fault %016lx ", fault);
+
+	for (uint32_t i = 0; i < 31; i++) {
+		p += sprintf(p, "x%u %016lx ", i, regs[i]);
+	}
+
+	sprintf(p, "x31 %016lx pc %016lx", sp, pc);
+#endif
+
+	cf_warning(AS_AS, "stacktrace: registers: %s", reg_str);
 
 	void* bt[MAX_BACKTRACE_DEPTH];
 	char trace[MAX_BACKTRACE_DEPTH * 20];

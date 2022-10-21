@@ -416,7 +416,7 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 			return false;
 		}
 
-		sprintf(str->str, "%lf", value);
+		sprintf(str->str, "%f", value);
 
 		return true;
 	}

@@ -56,12 +56,12 @@ typedef struct cf_condition_s {
 // Public API.
 //
 
-void cf_mutex_lock(cf_mutex *m);
-void cf_mutex_unlock(cf_mutex *m);
-bool cf_mutex_trylock(cf_mutex *m);
+void cf_mutex_lock(cf_mutex* m);
+void cf_mutex_unlock(cf_mutex* m);
+bool cf_mutex_trylock(cf_mutex* m);
 
-void cf_mutex_lock_spin(cf_mutex *m);
-void cf_mutex_unlock_spin(cf_mutex *m);
+void cf_mutex_lock_spin(cf_mutex* m);
+void cf_mutex_unlock_spin(cf_mutex* m);
 
-void cf_condition_wait(cf_condition *c, cf_mutex *m);
-void cf_condition_signal(cf_condition *c);
+void cf_condition_wait(cf_condition* c, cf_mutex* m);
+void cf_condition_signal(cf_condition* c);

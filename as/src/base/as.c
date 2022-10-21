@@ -105,10 +105,6 @@ static const struct option CMD_OPTS[] = {
 
 static const char HELP[] =
 		"\n"
-		"Aerospike server installation installs the script /etc/init.d/aerospike which\n"
-		"is normally used to start and stop the server. The script is also found as\n"
-		"as/etc/init-script in the source tree.\n"
-		"\n"
 		"asd informative command-line options:\n"
 		"\n"
 		"--help"

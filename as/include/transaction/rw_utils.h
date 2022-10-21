@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "msg.h"
@@ -143,6 +144,8 @@ void write_dim_unwind(struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_
 static inline bool
 set_has_sindex(const as_record* r, as_namespace* ns)
 {
+	as_fence_seq();
+
 	if (as_sindex_n_sindexes(ns) == 0) {
 		return false;
 	}

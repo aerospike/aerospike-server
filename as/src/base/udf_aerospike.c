@@ -85,9 +85,8 @@ static uint8_t* get_particle_buf(udf_record* urecord, uint32_t size);
 //
 
 static inline void
-param_check(const as_aerospike* as, const as_rec* rec)
+param_check(const as_rec* rec)
 {
-	cf_assert(as != NULL, AS_UDF, "null as_aerospike object");
 	cf_assert(rec != NULL, AS_UDF, "null as_rec object");
 	cf_assert(as_rec_source(rec) != NULL, AS_UDF, "null udf_record object");
 }
@@ -119,7 +118,9 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 {
 	// FIXME - do the exact return values really matter?
 
-	param_check(as, rec);
+	(void)as;
+
+	param_check(rec);
 
 	udf_record* urecord = (udf_record*)as_rec_source(rec);
 	as_storage_rd* rd = urecord->rd;
@@ -221,7 +222,9 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 static int
 udf_aerospike_rec_update(const as_aerospike* as, const as_rec* rec)
 {
-	param_check(as, rec);
+	(void)as;
+
+	param_check(rec);
 
 	udf_record* urecord = (udf_record*)as_rec_source(rec);
 
@@ -244,7 +247,9 @@ udf_aerospike_rec_update(const as_aerospike* as, const as_rec* rec)
 static int
 udf_aerospike_rec_exists(const as_aerospike* as, const as_rec* rec)
 {
-	param_check(as, rec);
+	(void)as;
+
+	param_check(rec);
 
 	udf_record* urecord = (udf_record*)as_rec_source(rec);
 
@@ -257,7 +262,9 @@ udf_aerospike_rec_exists(const as_aerospike* as, const as_rec* rec)
 static int
 udf_aerospike_rec_remove(const as_aerospike* as, const as_rec* rec)
 {
-	param_check(as, rec);
+	(void)as;
+
+	param_check(rec);
 
 	udf_record* urecord = (udf_record*)as_rec_source(rec);
 

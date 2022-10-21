@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 
@@ -84,7 +85,7 @@ void
 cf_vmapx_release(cf_vmapx* vmap)
 {
 	// Helps in handling bins vmap, which doesn't exist in single-bin mode.
-	if (! vmap) {
+	if (vmap == NULL) {
 		return;
 	}
 
@@ -234,13 +235,13 @@ cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name, size_t name_len,
 	}
 
 	// Add name to vector (and clear rest of value).
-	char* value_ptr = (char*)vmapx_value_ptr(vmap, count);
+	char* value_ptr = (char*)(vmap->values + (vmap->value_size * count));
 
 	memset((void*)value_ptr, 0, vmap->value_size);
 	memcpy((void*)value_ptr, name, name_len);
 
-	// Increment count here so indexes returned by other public API calls (just
-	// after adding to hash below) are guaranteed to be valid.
+	as_fence_rls(); // so (new) index used by other threads will be valid
+
 	vmap->count++;
 
 	// Add to hash.
@@ -264,6 +265,8 @@ cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name, size_t name_len,
 void*
 vmapx_value_ptr(const cf_vmapx* vmap, uint32_t index)
 {
+	as_fence_acq(); // opposite of as_fence_rls() in cf_vmapx_put_unique_w_len()
+
 	return (void*)(vmap->values + (vmap->value_size * index));
 }
 
@@ -335,7 +338,7 @@ vhash_destroy(vhash* h)
 	vhash_ele* e_table = (vhash_ele*)h->table;
 
 	for (uint32_t i = 0; i < h->n_rows; i++) {
-		if (e_table->next) {
+		if (e_table->next != NULL) {
 			vhash_ele* e = e_table->next;
 
 			while (e != NULL) {
@@ -365,8 +368,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 		vhash_set_ele_key(VHASH_ELE_KEY_PTR(e_head), h->key_size, zkey,
 				key_len + 1);
 		*VHASH_ELE_VALUE_PTR(h, e_head) = value;
-		// TODO - need barrier?
-		h->row_usage[row_i] = true;
+		as_store_bool_rls(&h->row_usage[row_i], true);
 
 		return;
 	}
@@ -377,7 +379,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 	*VHASH_ELE_VALUE_PTR(h, e) = value;
 
 	e->next = e_head->next;
-	// TODO - need barrier?
+	as_fence_rls();
 	e_head->next = e;
 }
 
@@ -387,11 +389,10 @@ vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value)
 {
 	uint32_t row_i = cf_wyhash32((const uint8_t*)key, key_len) % h->n_rows;
 
-	if (! h->row_usage[row_i]) {
+	if (! as_load_bool_acq(&h->row_usage[row_i])) {
 		return false;
 	}
 
-	// TODO - need barrier?
 	vhash_ele* e = (vhash_ele*)(h->table + (h->ele_size * row_i));
 
 	while (e != NULL) {

@@ -175,7 +175,7 @@ hook_get_site_id(const void *ra)
 		if (site_ra == NULL) {
 			if (as_cas_rlx(g_site_ras + site_id, &site_ra, ra)) {
 				// We took the empty slot.
-				as_faa_rlx(&g_n_site_ras, 1);
+				as_incr_uint32(&g_n_site_ras);
 				return site_id;
 			}
 
@@ -197,7 +197,7 @@ hook_get_site_id(const void *ra)
 static uint32_t
 hook_new_site_info_id(void)
 {
-	uint64_t info_id = as_faa_rlx(&g_n_site_infos, 1);
+	uint64_t info_id = as_faa_uint64(&g_n_site_infos, 1);
 
 	if (info_id < MAX_SITES * MAX_THREADS) {
 		return (uint32_t)info_id;
@@ -240,7 +240,7 @@ hook_get_site_info_id(uint32_t site_id)
 	info->size_hi = 0;
 
 	// Set site_id field last - it acts as a "site_info is valid" flag.
-	as_store_rls(&info->site_id, site_id);
+	as_store_uint32_rls(&info->site_id, site_id);
 
 	g_thread_site_infos[site_id] = info_id;
 	return info_id;
@@ -642,7 +642,7 @@ cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *map
 	}
 
 	if (site_count) {
-		*site_count = as_load_rlx(&g_n_site_ras);
+		*site_count = as_load_uint32(&g_n_site_ras);
 	}
 }
 
@@ -725,7 +725,7 @@ cf_alloc_log_site_infos(const char *file)
 	}
 
 	time_to_file(fh);
-	uint64_t n_site_infos = as_load_rlx(&g_n_site_infos);
+	uint64_t n_site_infos = as_load_uint64(&g_n_site_infos);
 
 	if (n_site_infos > MAX_SITES * MAX_THREADS) {
 		n_site_infos = MAX_SITES * MAX_THREADS;
@@ -734,7 +734,7 @@ cf_alloc_log_site_infos(const char *file)
 	for (uint64_t i = 1; i < n_site_infos; ++i) {
 		site_info *info = g_site_infos + i;
 		// See corresponding as_store_rls() in hook_get_site_info_id().
-		uint32_t site_id = as_load_acq(&info->site_id);
+		uint32_t site_id = as_load_uint32_acq(&info->site_id);
 
 		if (site_id == 0) {
 			continue;
@@ -1441,16 +1441,21 @@ uint32_t
 cf_rc_reserve(void *body)
 {
 	cf_rc_header *head = (cf_rc_header *)body - 1;
-	return as_aaf_rlx(&head->rc, 1);
+	return as_aaf_uint32(&head->rc, 1);
 }
 
 uint32_t
 cf_rc_release(void *body)
 {
 	cf_rc_header *head = (cf_rc_header *)body - 1;
-	uint32_t rc = as_aaf_rls(&head->rc, -1);
+	uint32_t rc = as_aaf_uint32_rls(&head->rc, -1);
 
 	cf_assert(rc != (uint32_t)-1, CF_ALLOC, "reference count underflow");
+
+	if (rc == 0) {
+		// Subsequent destructor may require a full barrier (e.g. rw_request).
+		as_fence_seq();
+	}
 
 	return rc;
 }
@@ -1459,7 +1464,7 @@ uint32_t
 cf_rc_releaseandfree(void *body)
 {
 	cf_rc_header *head = (cf_rc_header *)body - 1;
-	uint32_t rc = as_aaf_rls(&head->rc, -1);
+	uint32_t rc = as_aaf_uint32_rls(&head->rc, -1);
 
 	cf_assert(rc != (uint32_t)-1, CF_ALLOC, "reference count underflow");
 

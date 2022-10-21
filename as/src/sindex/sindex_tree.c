@@ -33,8 +33,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <xmmintrin.h>
 
+#include "aerospike/as_arch.h"
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
@@ -1341,12 +1341,12 @@ greatest_lower_bound(const si_btree* bt, const si_btree_node* node,
 	const si_btree_key* key_i = const_key(bt, node, 0);
 	const uint8_t* pref = (const uint8_t*)key_i;
 
-	_mm_prefetch(pref, _MM_HINT_NTA);
+	as_arch_prefetch_nt(pref);
 
 	for (uint32_t i = 0; i < node->n_keys; i++) {
 		if ((const uint8_t*)key_i >= pref) {
 			pref += CACHE_LINE_SZ;
-			_mm_prefetch(pref, _MM_HINT_NTA);
+			as_arch_prefetch_nt(pref);
 		}
 
 		int32_t rel = key_cmp(bt, key, key_i);
@@ -1380,7 +1380,7 @@ greatest_lower_bound(const si_btree* bt, const si_btree_node* node,
 		int32_t i = (lower + upper) / 2;
 		const si_btree_key* key_i = const_key(bt, node, (uint32_t)i);
 
-		_mm_prefetch(key_i, _MM_HINT_NTA);
+		as_arch_prefetch_nt(key_i);
 
 		int32_t rel = key_cmp(bt, key_i, key);
 
@@ -1413,12 +1413,12 @@ left_bound(const si_btree* bt, const si_btree_node* node,
 	const si_btree_key* key_i = const_key(bt, node, 0);
 	const uint8_t* pref = (const uint8_t*)key_i;
 
-	_mm_prefetch(pref, _MM_HINT_NTA);
+	as_arch_prefetch_nt(pref);
 
 	for (uint32_t i = 0; i < node->n_keys; i++) {
 		if ((const uint8_t*)key_i >= pref) {
 			pref += CACHE_LINE_SZ;
-			_mm_prefetch(pref, _MM_HINT_NTA);
+			as_arch_prefetch_nt(pref);
 		}
 
 		int32_t rel = skey_cmp(bt, skey, key_i);
@@ -1452,7 +1452,7 @@ left_bound(const si_btree* bt, const si_btree_node* node,
 		int32_t i = (lower + upper) / 2;
 		const si_btree_key* key_i = const_key(bt, node, (uint32_t)i);
 
-		_mm_prefetch(key_i, _MM_HINT_NTA);
+		as_arch_prefetch_nt(key_i);
 
 		int32_t rel = skey_cmp(bt, skey, key_i);
 

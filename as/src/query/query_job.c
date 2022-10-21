@@ -194,11 +194,14 @@ as_query_job_run(void* pv_job)
 
 	as_decr_uint32(&g_n_query_threads);
 
-	int32_t n = (int32_t)as_aaf_uint32(&_job->n_threads, -1);
+	int32_t n = (int32_t)as_aaf_uint32_rls(&_job->n_threads, -1);
 
 	cf_assert(n >= 0, AS_QUERY, "query job thread underflow %d", n);
 
 	if (n == 0) {
+		// Subsequent finish/destroy may require a full barrier.
+		as_fence_seq();
+
 		finish(_job);
 
 		if (_job->is_short) {

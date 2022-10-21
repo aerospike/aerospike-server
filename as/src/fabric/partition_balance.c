@@ -243,7 +243,7 @@ as_partition_balance_revert_to_orphan()
 		ns->n_unavailable_partitions = AS_PARTITIONS;
 	}
 
-	// FIXME - store - store barrier needed?
+	// TODO - ARM TSO plugin - will need release semantic.
 	as_incr_int32(&g_partition_generation);
 }
 
@@ -288,7 +288,7 @@ as_partition_balance()
 	// All partitions now have replicas assigned, ok to allow transactions.
 	g_init_balance_done = true;
 
-	// FIXME - store - store barrier needed?
+	// TODO - ARM TSO plugin - will need release semantic.
 	as_incr_int32(&g_partition_generation);
 
 	g_allow_migrations = true;
@@ -382,7 +382,7 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 	p->immigrators[dest_ix] = false;
 
 	if (client_replica_maps_update(ns, pid)) {
-		// FIXME - store - store barrier needed?
+		// TODO - ARM TSO plugin - will need release semantic.
 		as_incr_int32(&g_partition_generation);
 	}
 
@@ -493,7 +493,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 	if (! is_self_final_master(p)) {
 		if (client_replica_maps_update(ns, pid)) {
-			// FIXME - store - store barrier needed?
+			// TODO - ARM TSO plugin - will need release semantic.
 			as_incr_int32(&g_partition_generation);
 		}
 
@@ -513,7 +513,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		// FIXME - store - store barrier needed?
+		// TODO - ARM TSO plugin - will need release semantic.
 		as_incr_int32(&g_partition_generation);
 	}
 

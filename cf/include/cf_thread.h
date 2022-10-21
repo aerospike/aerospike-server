@@ -76,6 +76,12 @@ void cf_thread_add_exit(cf_thread_exit_fn cb, void* udata);
 void cf_thread_remove_exit(cf_thread_exit_fn cb);
 
 static inline void
+cf_thread_yield(void)
+{
+	pthread_yield();
+}
+
+static inline void
 cf_thread_join(cf_tid tid)
 {
 	pthread_join(tid, NULL);

@@ -57,12 +57,12 @@
 // Forward declarations.
 //
 
-int fill_ack_w_pickle(as_storage_rd* rd, msg* m);
-void done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref, as_storage_rd* rd);
-void send_dup_res_ack(cf_node node, msg* m, uint32_t result, uint32_t info);
-void send_dup_res_ack_preserved(cf_node node, msg* m, uint32_t result, uint32_t info);
-uint32_t parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time);
-void apply_winner(rw_request* rw);
+static int fill_ack_w_pickle(as_storage_rd* rd, msg* m);
+static void done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref, as_storage_rd* rd);
+static void send_dup_res_ack(cf_node node, msg* m, uint32_t result, uint32_t info);
+static void send_dup_res_ack_preserved(cf_node node, msg* m, uint32_t result, uint32_t info);
+static uint32_t parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time);
+static void apply_winner(rw_request* rw);
 
 
 //==========================================================
@@ -96,7 +96,6 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 		as_record_done(&r_ref, ns);
 	}
 }
-
 
 void
 dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb,
@@ -136,9 +135,8 @@ dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb,
 	}
 
 	// Allow retransmit thread to destroy rw as soon as we unlock.
-	rw->is_set_up = true;
+	as_store_bool_rls(&rw->is_set_up, true);
 }
-
 
 void
 dup_res_handle_request(cf_node node, msg* m)
@@ -225,7 +223,6 @@ dup_res_handle_request(cf_node node, msg* m)
 	done_handle_request(&rsv, &r_ref, &rd);
 	send_dup_res_ack_preserved(node, m, AS_OK, info);
 }
-
 
 void
 dup_res_handle_ack(cf_node node, msg* m)
@@ -413,7 +410,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 // Local helpers.
 //
 
-int
+static int
 fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 {
 	if (! as_storage_rd_load_pickle(rd)) {
@@ -430,8 +427,7 @@ fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 	return AS_OK;
 }
 
-
-void
+static void
 done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref,
 		as_storage_rd* rd)
 {
@@ -452,8 +448,7 @@ done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref,
 	as_partition_release(rsv);
 }
 
-
-void
+static void
 send_dup_res_ack(cf_node node, msg* m, uint32_t result, uint32_t info)
 {
 	msg_preserve_fields(m, 3, RW_FIELD_NS_IX, RW_FIELD_DIGEST, RW_FIELD_TID);
@@ -461,8 +456,7 @@ send_dup_res_ack(cf_node node, msg* m, uint32_t result, uint32_t info)
 	send_dup_res_ack_preserved(node, m, result, info);
 }
 
-
-void
+static void
 send_dup_res_ack_preserved(cf_node node, msg* m, uint32_t result, uint32_t info)
 {
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP_ACK);
@@ -477,8 +471,7 @@ send_dup_res_ack_preserved(cf_node node, msg* m, uint32_t result, uint32_t info)
 	}
 }
 
-
-uint32_t
+static uint32_t
 parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 {
 	uint32_t result_code;
@@ -513,8 +506,7 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 	return AS_OK;
 }
 
-
-void
+static void
 apply_winner(rw_request* rw)
 {
 	as_namespace* ns = rw->rsv.ns;

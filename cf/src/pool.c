@@ -91,16 +91,16 @@ cf_pool_int32_destroy(cf_pool_int32* pool)
 int32_t
 cf_pool_int32_pop(cf_pool_int32* pool)
 {
-	int32_t count = as_load_int32(&pool->count);
+	int32_t count = as_load_rlx(&pool->count);
 
 	if (count <= 0) {
 		return pool->empty_val;
 	}
 
-	count = as_aaf_int32(&pool->count, -1);
+	count = as_aaf_acq(&pool->count, -1);
 
 	if (count < 0) {
-		as_incr_int32(&pool->count);
+		as_faa_rlx(&pool->count, 1);
 		return pool->empty_val;
 	}
 
@@ -109,11 +109,11 @@ cf_pool_int32_pop(cf_pool_int32* pool)
 	int32_t val;
 
 	while (true) {
-		uint32_t read_ix = as_faa_uint32(&pool->read_ix, 1);
+		uint32_t read_ix = as_faa_rlx(&pool->read_ix, 1);
 		uint32_t ix = POOL_MOD(read_ix);
 
 		if (pool->data[ix] != pool->empty_val) {
-			val = as_fas_int32(&pool->data[ix], pool->empty_val);
+			val = as_fas_rlx(&pool->data[ix], pool->empty_val);
 
 			if (val != pool->empty_val) {
 				break;
@@ -128,16 +128,17 @@ void
 cf_pool_int32_push(cf_pool_int32* pool, int32_t val)
 {
 	while (true) {
-		uint32_t write_ix = as_faa_uint32(&pool->write_ix, 1);
+		uint32_t write_ix = as_faa_rlx(&pool->write_ix, 1);
 		uint32_t ix = POOL_MOD(write_ix);
+		int32_t empty = pool->empty_val;
 
 		if (pool->data[ix] == pool->empty_val &&
-				as_cas_int32(&pool->data[ix], pool->empty_val, val)) {
+				as_cas_rlx(&pool->data[ix], &empty, val)) {
 			break;
 		}
 	}
 
-	as_incr_int32(&pool->count);
+	as_faa_rls(&pool->count, 1);
 }
 
 
@@ -166,16 +167,16 @@ cf_pool_ptr_destroy(cf_pool_ptr* pool)
 void*
 cf_pool_ptr_pop(cf_pool_ptr* pool)
 {
-	int32_t count = as_load_int32(&pool->count);
+	int32_t count = as_load_rlx(&pool->count);
 
 	if (count <= 0) {
 		return NULL;
 	}
 
-	count = as_aaf_int32(&pool->count, -1);
+	count = as_aaf_acq(&pool->count, -1);
 
 	if (count < 0) {
-		as_incr_int32(&pool->count);
+		as_faa_rlx(&pool->count, 1);
 		return NULL;
 	}
 
@@ -184,11 +185,11 @@ cf_pool_ptr_pop(cf_pool_ptr* pool)
 	void* val;
 
 	while (true) {
-		uint32_t read_ix = as_faa_uint32(&pool->read_ix, 1);
+		uint32_t read_ix = as_faa_rlx(&pool->read_ix, 1);
 		uint32_t ix = POOL_MOD(read_ix);
 
 		if (pool->data[ix] != NULL) {
-			val = as_fas_ptr(&pool->data[ix], NULL);
+			val = as_fas_rlx(&pool->data[ix], NULL);
 
 			if (val != NULL) {
 				break;
@@ -203,15 +204,16 @@ void
 cf_pool_ptr_push(cf_pool_ptr* pool, void* val)
 {
 	while (true) {
-		uint32_t write_ix = as_faa_uint32(&pool->write_ix, 1);
+		uint32_t write_ix = as_faa_rlx(&pool->write_ix, 1);
 		uint32_t ix = POOL_MOD(write_ix);
+		void* n = NULL;
 
-		if (pool->data[ix] == NULL && as_cas_ptr(&pool->data[ix], NULL, val)) {
+		if (pool->data[ix] == NULL && as_cas_rlx(&pool->data[ix], &n, val)) {
 			break;
 		}
 	}
 
-	as_incr_int32(&pool->count);
+	as_faa_rls(&pool->count, 1);
 }
 
 bool
@@ -230,12 +232,12 @@ cf_pool_ptr_remove(cf_pool_ptr* pool, void* val)
 	uint32_t ix;
 
 	for (ix = 0; ix < pool->capacity; ix++) {
-		if (pool->data[ix] == val) {
+		if (as_load_rlx(&pool->data[ix]) == val) {
 			break;
 		}
 	}
 
-	if (ix == pool->capacity || ! as_cas_ptr(&pool->data[ix], val, val2)) {
+	if (ix == pool->capacity || ! as_cas_rlx(&pool->data[ix], &val, val2)) {
 		cf_pool_ptr_push(pool, val2);
 		return false;
 	}
@@ -246,7 +248,7 @@ cf_pool_ptr_remove(cf_pool_ptr* pool, void* val)
 uint32_t
 cf_pool_ptr_count(const cf_pool_ptr* pool)
 {
-	int32_t count = as_load_int32(&pool->count);
+	int32_t count = as_load_rlx(&pool->count);
 
 	return count < 0 ? 0 : (uint32_t)count;
 }

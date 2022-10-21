@@ -193,6 +193,10 @@ linear_hist_merge(linear_hist *h1, linear_hist *h2)
 // Insert a data point. Points out of range will
 // end up in the bucket at the appropriate end.
 //
+// Note - for now linear histograms are always
+// generated in a single thread, so no need for
+// atomic increment.
+//
 void
 linear_hist_insert_data_point(linear_hist *h, uint32_t point)
 {

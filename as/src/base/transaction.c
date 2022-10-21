@@ -461,8 +461,8 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 	}
 
 	cf_rc_free(proto_fd_h);
-	// TODO - needs 'release' semantic.
-	as_incr_uint64(&g_stats.proto_connections_closed);
+
+	as_incr_uint64_rls(&g_stats.proto_connections_closed);
 }
 
 void
@@ -476,7 +476,7 @@ as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 	as_service_rearm(proto_fd_h);
 
 	// Now allow service threads to exit and close the epoll instance.
-	as_decr_uint32(&proto_fd_h->in_transaction);
+	as_decr_uint32_rls(&proto_fd_h->in_transaction);
 }
 
 void

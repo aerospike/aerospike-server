@@ -139,18 +139,18 @@ static uint32_t g_proxy_tid = 0;
 // Forward declarations.
 //
 
-void* run_proxy_timeout(void* arg);
-int proxy_timeout_reduce_fn(const void* key, void* data, void* udata);
+static cl_msg* new_msg_w_extra_field(const cl_msg* msgp, const as_msg_field* f);
+static void proxyer_handle_response(msg* m, uint32_t tid);
+static int proxyer_handle_client_response(msg* m, proxy_request* pr);
+static int proxyer_handle_batch_response(msg* m, proxy_request* pr);
+static void proxyer_handle_return_to_sender(msg* m, uint32_t tid);
 
-int proxy_msg_cb(cf_node src, msg* m, void* udata);
+static void proxyee_handle_request(cf_node src, msg* m, uint32_t tid);
 
-cl_msg* new_msg_w_extra_field(const cl_msg* msgp, const as_msg_field* f);
-void proxyer_handle_response(msg* m, uint32_t tid);
-int proxyer_handle_client_response(msg* m, proxy_request* pr);
-int proxyer_handle_batch_response(msg* m, proxy_request* pr);
-void proxyer_handle_return_to_sender(msg* m, uint32_t tid);
+static void* run_proxy_timeout(void* arg);
+static int proxy_timeout_reduce_fn(const void* key, void* data, void* udata);
 
-void proxyee_handle_request(cf_node src, msg* m, uint32_t tid);
+static int proxy_msg_cb(cf_node src, msg* m, void* udata);
 
 
 //==========================================================
@@ -212,13 +212,11 @@ as_proxy_init()
 			PROXY_MSG_SCRATCH_SIZE, proxy_msg_cb, NULL);
 }
 
-
 uint32_t
 as_proxy_hash_count()
 {
 	return cf_shash_get_size(g_proxy_hash);
 }
-
 
 // Proxyer - divert a transaction request to another node.
 void
@@ -306,7 +304,6 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 	as_health_add_node_counter(dst, AS_HEALTH_NODE_PROXIES);
 }
 
-
 // Proxyee - transaction reservation failed here, tell proxyer to try again.
 void
 as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
@@ -325,7 +322,6 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 		as_fabric_msg_put(m);
 	}
 }
-
 
 // Proxyee - transaction completed here, send response to proxyer.
 void
@@ -348,7 +344,6 @@ as_proxy_send_response(cf_node dst, uint32_t proxy_tid, uint32_t result_code,
 		as_fabric_msg_put(m);
 	}
 }
-
 
 // Proxyee - transaction completed here, send response to proxyer.
 void
@@ -392,7 +387,7 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db,
 // Local helpers - proxyer.
 //
 
-cl_msg*
+static cl_msg*
 new_msg_w_extra_field(const cl_msg* msgp, const as_msg_field* f)
 {
 	size_t old_sz = sizeof(as_proto) + msgp->proto.sz;
@@ -415,7 +410,7 @@ new_msg_w_extra_field(const cl_msg* msgp, const as_msg_field* f)
 	return new_msgp;
 }
 
-void
+static void
 proxyer_handle_response(msg* m, uint32_t tid)
 {
 	proxy_request pr;
@@ -454,8 +449,7 @@ proxyer_handle_response(msg* m, uint32_t tid)
 	}
 }
 
-
-int
+static int
 proxyer_handle_client_response(msg* m, proxy_request* pr)
 {
 	uint8_t* proto;
@@ -480,8 +474,7 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 	return AS_OK;
 }
 
-
-int
+static int
 proxyer_handle_batch_response(msg* m, proxy_request* pr)
 {
 	cl_msg* msgp;
@@ -499,8 +492,7 @@ proxyer_handle_batch_response(msg* m, proxy_request* pr)
 	return AS_OK;
 }
 
-
-void
+static void
 proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 {
 	proxy_request* pr;
@@ -572,7 +564,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 // Local helpers - proxyee.
 //
 
-void
+static void
 proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 {
 	cf_digest* keyd;
@@ -636,7 +628,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 // Local helpers - timeout.
 //
 
-void*
+static void*
 run_proxy_timeout(void* arg)
 {
 	while (true) {
@@ -659,8 +651,7 @@ run_proxy_timeout(void* arg)
 	return NULL;
 }
 
-
-int
+static int
 proxy_timeout_reduce_fn(const void* key, void* data, void* udata)
 {
 	proxy_request* pr = data;
@@ -703,7 +694,7 @@ proxy_timeout_reduce_fn(const void* key, void* data, void* udata)
 // Local helpers - handle PROXY fabric messages.
 //
 
-int
+static int
 proxy_msg_cb(cf_node src, msg* m, void* udata)
 {
 	uint32_t op;

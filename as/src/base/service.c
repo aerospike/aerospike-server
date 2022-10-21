@@ -422,7 +422,7 @@ run_accept(void* udata)
 			// Ensure that proto_connections_closed is read first.
 			uint64_t n_closed =
 					as_load_uint64(&g_stats.proto_connections_closed);
-			// TODO - non-86 memory barrier.
+			// TODO - ARM TSO plugin - will need barrier.
 			uint64_t n_opened =
 					as_load_uint64(&g_stats.proto_connections_opened);
 

@@ -2455,6 +2455,7 @@ dyn_objects(char* name, cf_dyn_buf* db)
 static int
 dyn_partition_generation(char* name, cf_dyn_buf* db)
 {
+	// TODO - ARM TSO plugin - will need acquire semantic.
 	cf_dyn_buf_append_int(db, g_partition_generation);
 
 	return 0;
@@ -3709,7 +3710,7 @@ dyn_statistics(char* name, cf_dyn_buf* db)
 	uint64_t n_proto_fds_closed = as_load_uint64(&g_stats.proto_connections_closed);
 	uint64_t n_hb_fds_closed = as_load_uint64(&g_stats.heartbeat_connections_closed);
 	uint64_t n_fabric_fds_closed = as_load_uint64(&g_stats.fabric_connections_closed);
-	// TODO - non-86 memory barrier.
+	// TODO - ARM TSO plugin - will need barrier.
 	uint64_t n_proto_fds_opened = as_load_uint64(&g_stats.proto_connections_opened);
 	uint64_t n_hb_fds_opened = as_load_uint64(&g_stats.heartbeat_connections_opened);
 	uint64_t n_fabric_fds_opened = as_load_uint64(&g_stats.fabric_connections_opened);

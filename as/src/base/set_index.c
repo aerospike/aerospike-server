@@ -367,10 +367,11 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 	}
 
 	p_set->index_populating = true;
-	// TODO - non-x86 would need memory barrier here.
-	p_set->index_enabled = true;
+	as_store_bool_rls(&p_set->index_enabled, true);
 
 	cf_mutex_unlock(&g_balance_lock);
+
+	as_fence_seq();
 
 	if (p_set->n_objects == 0) {
 		p_set->index_populating = false;
@@ -459,6 +460,8 @@ is_set_indexed(const as_namespace* ns, uint16_t set_id)
 		cf_crash(AS_INDEX, "failed to get set index %u from vmap", set_ix);
 	}
 
+	as_fence_seq();
+
 	return p_set->index_enabled;
 }
 
@@ -477,7 +480,7 @@ is_set_populated(const as_namespace* ns, uint16_t set_id)
 		cf_crash(AS_INDEX, "failed to get set index %u from vmap", set_ix);
 	}
 
-	return p_set->index_enabled && ! p_set->index_populating;
+	return as_load_bool_acq(&p_set->index_enabled) && ! p_set->index_populating;
 }
 
 

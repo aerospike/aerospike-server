@@ -52,12 +52,12 @@
 // Forward declarations.
 //
 
-cf_node find_best_node(const as_partition* p, bool is_read);
-void accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects, uint64_t* p_n_tombstones);
-void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
-char partition_descriptor(const as_partition* p);
-int partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid);
-bool should_working_master_own(const as_namespace* ns, uint32_t pid, uint32_t repl_ix);
+static cf_node find_best_node(const as_partition* p, bool is_read);
+static void accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects, uint64_t* p_n_tombstones);
+static void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
+static char partition_descriptor(const as_partition* p);
+static int partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid);
+static bool should_working_master_own(const as_namespace* ns, uint32_t pid, uint32_t repl_ix);
 
 
 //==========================================================
@@ -520,12 +520,6 @@ as_partition_tree_reserve_query(as_namespace* ns, uint32_t pid)
 }
 
 void
-as_partition_tree_release(as_namespace* ns, as_index_tree* tree)
-{
-	as_index_tree_release(ns, tree);
-}
-
-void
 as_partition_advance_tree_id(as_partition* p, const char* ns_name)
 {
 	uint32_t n_hanging;
@@ -720,7 +714,7 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 //
 
 // Find best node to handle read/write. Called within partition lock.
-cf_node
+static cf_node
 find_best_node(const as_partition* p, bool is_read)
 {
 	// Working master (final or acting) returns self, eventual master returns
@@ -737,7 +731,7 @@ find_best_node(const as_partition* p, bool is_read)
 	return p->replicas[0]; // final master as a last resort
 }
 
-void
+static void
 accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects,
 		uint64_t* p_n_tombstones)
 {
@@ -748,7 +742,7 @@ accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects,
 	*p_n_tombstones += (uint64_t)n_tombstones;
 }
 
-void
+static void
 partition_reserve_lockfree(as_partition* p, as_namespace* ns,
 		as_partition_reservation* rsv)
 {
@@ -765,7 +759,7 @@ partition_reserve_lockfree(as_partition* p, as_namespace* ns,
 	}
 }
 
-char
+static char
 partition_descriptor(const as_partition* p)
 {
 	if (find_self_in_replicas(p) >= 0) { // -1 if not
@@ -779,7 +773,7 @@ partition_descriptor(const as_partition* p)
 	return as_partition_version_has_data(&p->version) ? 'Z' : 'X';
 }
 
-int
+static int
 partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid)
 {
 	const as_partition* p = &ns->partitions[pid];
@@ -800,7 +794,7 @@ partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid)
 	return -1; // not a replica
 }
 
-bool
+static bool
 should_working_master_own(const as_namespace* ns, uint32_t pid,
 		uint32_t repl_ix)
 {

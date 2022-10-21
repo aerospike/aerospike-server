@@ -293,7 +293,8 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 	// It's critical that this count is decremented after the transaction is
 	// completely finished with the queue because "shutdown threads" relies
 	// on this information when performing graceful shutdown.
-	uint32_t tc = as_aaf_uint32_rls(&queue->tran_count, -1);
+	// TODO - ARM TSO plugin - will need release semantic? Or new pattern?
+	uint32_t tc = as_aaf_uint32(&queue->tran_count, -1);
 
 	cf_assert(tc != (uint32_t)-1, AS_BATCH, "tran_count underflow");
 }
@@ -456,7 +457,7 @@ as_batch_delay_buffer(as_batch_queue* queue)
 
 	// If all batch transactions on this thread are delayed, avoid tight loop.
 	if (queue->tran_count == queue->delay_count) {
-		pthread_yield(); // not cf_thread_yield() - we're using as_thread_pool
+		cf_thread_yield();
 	}
 }
 
@@ -690,7 +691,8 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 static inline void
 as_batch_buffer_complete(as_batch_shared* shared, as_batch_buffer* buffer)
 {
-	uint32_t n_writers = as_aaf_uint32_rls(&buffer->writers, -1);
+	// TODO - ARM TSO plugin - will need release semantic.
+	uint32_t n_writers = as_aaf_uint32(&buffer->writers, -1);
 
 	cf_assert(n_writers != (uint32_t)-1, AS_BATCH, "writers underflow");
 
@@ -908,8 +910,10 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
-	if (tran_count > g_config.batch_max_requests) {
-		cf_warning(AS_BATCH, "Batch request size %u exceeds max %u", tran_count, g_config.batch_max_requests);
+	uint32_t max_requests = as_load_uint32(&g_config.batch_max_requests);
+
+	if (tran_count > max_requests) {
+		cf_warning(AS_BATCH, "Batch request size %u exceeds max %u", tran_count, max_requests);
 		return as_batch_send_error(btr, AS_ERR_BATCH_MAX_REQUESTS);
 	}
 

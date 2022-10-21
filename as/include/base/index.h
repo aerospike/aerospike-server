@@ -117,17 +117,26 @@ COMPILER_ASSERT(sizeof(as_index) == 64);
 // Accessor functions for bits in as_index.
 //
 
-#define as_index_reserve(_r) ({ \
-	uint16_t rc = as_aaf_uint16(&(_r->rc), 1); \
-	cf_assert(rc != 0, AS_INDEX, "ref-count overflow"); \
-	rc; \
-})
+static inline uint16_t
+as_index_reserve(as_index* index)
+{
+	uint16_t rc = as_aaf_uint16(&(index->rc), 1);
 
-#define as_index_release(_r) ({ \
-	uint16_t rc = as_aaf_uint16(&(_r->rc), -1); \
-	cf_assert(rc != (uint16_t)-1, AS_INDEX, "ref-count underflow"); \
-	rc; \
-})
+	cf_assert(rc != 0, AS_INDEX, "ref-count overflow");
+
+	return rc;
+}
+
+// No '_rls' needed on atomic decrement here since this is always under olock.
+static inline uint16_t
+as_index_release(as_index* index)
+{
+	uint16_t rc = as_aaf_uint16(&(index->rc), -1);
+
+	cf_assert(rc != (uint16_t)-1, AS_INDEX, "ref-count underflow");
+
+	return rc;
+}
 
 // Fast way to clear the record portion of as_index.
 // Note - relies on current layout and size of as_index!

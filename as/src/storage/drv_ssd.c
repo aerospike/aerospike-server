@@ -298,7 +298,8 @@ ssd_release_vacated_wblock(drv_ssd *ssd, uint32_t wblock_id,
 			"device %s: wblock-id %u state not DEFRAG while defragging",
 			ssd->name, wblock_id);
 
-	uint32_t n_vac_dests = as_aaf_uint32_rls(&p_wblock_state->n_vac_dests, -1);
+	// TODO - ARM TSO plugin - will need release semantic.
+	uint32_t n_vac_dests = as_aaf_uint32(&p_wblock_state->n_vac_dests, -1);
 
 	cf_assert(n_vac_dests != (uint32_t)-1, AS_DRV_SSD,
 			"device %s: wblock-id %u vacation destinations underflow",
@@ -403,7 +404,8 @@ swb_check_and_reserve(ssd_wblock_state *wblock_state, ssd_write_buf **p_swb)
 static inline void
 swb_release(ssd_write_buf *swb)
 {
-	uint32_t rc = as_aaf_uint32_rls(&swb->rc, -1);
+	// TODO - ARM TSO plugin - will need release semantic.
+	uint32_t rc = as_aaf_uint32(&swb->rc, -1);
 
 	cf_assert(rc != (uint32_t)-1, AS_DRV_SSD, "swb ref-count underflow");
 
@@ -1691,8 +1693,8 @@ ssd_buffer_bins(as_storage_rd *rd)
 	}
 
 	// We are finished writing to the buffer.
-	// TODO - add as_decr_uint32_rls() wrapper?
-	as_aaf_uint32_rls(&swb->n_writers, -1);
+	// TODO - ARM TSO plugin - will need release semantic.
+	as_decr_uint32(&swb->n_writers);
 
 	if (ns->storage_benchmarks_enabled) {
 		histogram_insert_raw(ns->device_write_size_hist, write_sz);

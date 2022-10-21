@@ -1,2 +1,0 @@
-/etc/init.d/aerospike_telemetry
-%config(noreplace) /etc/logrotate.d/aerospike_telemetry

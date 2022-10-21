@@ -921,14 +921,16 @@ find_sindex(as_query_job* _job)
 static bool
 validate_background_query_rps(const as_namespace* ns, uint32_t* rps)
 {
-	if (*rps > ns->background_query_max_rps) {
+	uint32_t max_rps = as_load_uint32(&ns->background_query_max_rps);
+
+	if (*rps > max_rps) {
 		cf_warning(AS_QUERY, "query rps %u exceeds 'background-query-max-rps' %u",
-				*rps, ns->background_query_max_rps);
+				*rps, max_rps);
 		return false;
 	}
 
 	if (*rps == 0) {
-		*rps = ns->background_query_max_rps;
+		*rps = max_rps;
 	}
 
 	return true;
@@ -2581,6 +2583,9 @@ udf_bg_query_job_finish(as_query_job* _job)
 		usleep(100);
 	}
 
+	// Subsequent activity may require a full barrier.
+	as_fence_seq();
+
 	as_namespace* ns = _job->ns;
 
 	switch (_job->abandoned) {
@@ -2715,8 +2720,6 @@ udf_bg_query_tr_complete(void* udata, int result)
 	as_query_job* _job = (as_query_job*)udata;
 	udf_bg_query_job* job = (udf_bg_query_job*)_job;
 
-	as_decr_uint32(&job->n_active_tr);
-
 	switch (result) {
 	case AS_OK:
 		as_incr_uint64(&_job->n_succeeded);
@@ -2730,6 +2733,8 @@ udf_bg_query_tr_complete(void* udata, int result)
 		as_incr_uint64(&_job->n_failed);
 		break;
 	}
+
+	as_decr_uint32_rls(&job->n_active_tr);
 }
 
 
@@ -2918,6 +2923,9 @@ ops_bg_query_job_finish(as_query_job* _job)
 	while (job->n_active_tr != 0) {
 		usleep(100);
 	}
+
+	// Subsequent activity may require a full barrier.
+	as_fence_seq();
 
 	as_namespace* ns = _job->ns;
 
@@ -3109,8 +3117,6 @@ ops_bg_query_tr_complete(void* udata, int result)
 	as_query_job* _job = (as_query_job*)udata;
 	ops_bg_query_job* job = (ops_bg_query_job*)_job;
 
-	as_decr_uint32(&job->n_active_tr);
-
 	switch (result) {
 	case AS_OK:
 		as_incr_uint64(&_job->n_succeeded);
@@ -3124,4 +3130,6 @@ ops_bg_query_tr_complete(void* udata, int result)
 		as_incr_uint64(&_job->n_failed);
 		break;
 	}
+
+	as_decr_uint32_rls(&job->n_active_tr);
 }

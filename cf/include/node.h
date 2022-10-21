@@ -31,7 +31,6 @@ typedef uint64_t cf_node;
 
 uint32_t cf_nodeid_shash_fn(const void *key);
 uint32_t cf_nodeid_rchash_fn(const void *key);
-char *cf_node_name();
 
 static inline int
 index_of_node(const cf_node* nodes, uint32_t n_nodes, cf_node node)

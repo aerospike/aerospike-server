@@ -1,7 +1,7 @@
 /*
  * cf_mutex.c
  *
- * Copyright (C) 2017-2020 Aerospike, Inc.
+ * Copyright (C) 2017-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -34,6 +34,9 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include "aerospike/as_arch.h"
+#include "aerospike/as_atomic.h"
+
 #include "log.h"
 
 
@@ -49,14 +52,11 @@
 //
 
 inline static void
-sys_futex(void *uaddr, int op, int val)
+sys_futex(void* uaddr, int op, int val)
 {
 	syscall(SYS_futex, uaddr, op, val, NULL, NULL, 0);
 }
 
-#define xchg(__ptr, __val) __sync_lock_test_and_set(__ptr, __val)
-#define cmpxchg(__ptr, __cmp, __set) __sync_val_compare_and_swap(__ptr, __cmp, __set)
-#define cpu_relax() asm volatile("pause\n": : :"memory")
 #define unlikely(__expr) __builtin_expect(!! (__expr), 0)
 #define likely(__expr) __builtin_expect(!! (__expr), 1)
 
@@ -66,25 +66,27 @@ sys_futex(void *uaddr, int op, int val)
 //
 
 void
-cf_mutex_lock(cf_mutex *m)
+cf_mutex_lock(cf_mutex* m)
 {
-	if (likely(cmpxchg((uint32_t *)m, 0, 1) == 0)) {
+	uint32_t zero = 0;
+
+	if (likely(as_cas_acq((uint32_t*)m, &zero, 1))) {
 		return; // was not locked
 	}
 
-	if (m->u32 == 2) {
+	if (as_load_rlx(&m->u32) == 2) {
 		sys_futex(m, FUTEX_WAIT_PRIVATE, 2);
 	}
 
-	while (xchg((uint32_t *)m, 2) != 0) {
+	while (as_fas_acq((uint32_t*)m, 2) != 0) {
 		sys_futex(m, FUTEX_WAIT_PRIVATE, 2);
 	}
 }
 
 void
-cf_mutex_unlock(cf_mutex *m)
+cf_mutex_unlock(cf_mutex* m)
 {
-	uint32_t check = xchg((uint32_t *)m, 0);
+	uint32_t check = as_fas_rls((uint32_t*)m, 0);
 
 	if (unlikely(check == 2)) {
 		sys_futex(m, FUTEX_WAKE_PRIVATE, 1);
@@ -96,9 +98,11 @@ cf_mutex_unlock(cf_mutex *m)
 
 // Return true if lock success.
 bool
-cf_mutex_trylock(cf_mutex *m)
+cf_mutex_trylock(cf_mutex* m)
 {
-	if (cmpxchg((uint32_t *)m, 0, 1) == 0) {
+	uint32_t zero = 0;
+
+	if (likely(as_cas_acq((uint32_t*)m, &zero, 1))) {
 		return true; // was not locked
 	}
 
@@ -106,42 +110,61 @@ cf_mutex_trylock(cf_mutex *m)
 }
 
 void
-cf_mutex_lock_spin(cf_mutex *m)
+cf_mutex_lock_spin(cf_mutex* m)
 {
-	for (int i = 0; i < FUTEX_SPIN_MAX; i++) {
-		if (cmpxchg((uint32_t *)m, 0, 1) == 0) {
+	int i = 0;
+
+	while (true) {
+		uint32_t zero = 0;
+
+		if (as_cas_acq((uint32_t*)m, &zero, 1)) {
 			return; // was not locked
 		}
 
-		cpu_relax();
+		for (; i < FUTEX_SPIN_MAX; i++) {
+			if (as_load_rlx((uint32_t*)m) == 0) {
+				break;
+			}
+
+			as_arch_pause();
+		}
+
+		if (i == FUTEX_SPIN_MAX) {
+			break;
+		}
 	}
 
 	if (m->u32 == 2) {
 		sys_futex(m, FUTEX_WAIT_PRIVATE, 2);
 	}
 
-	while (xchg((uint32_t *)m, 2) != 0) {
+	while (as_fas_acq((uint32_t*)m, 2) != 0) {
 		sys_futex(m, FUTEX_WAIT_PRIVATE, 2);
 	}
 }
 
 void
-cf_mutex_unlock_spin(cf_mutex *m)
+cf_mutex_unlock_spin(cf_mutex* m)
 {
-	uint32_t check = xchg((uint32_t *)m, 0);
+	uint32_t check = as_fas_rls((uint32_t*)m, 0);
 
 	if (unlikely(check == 2)) {
 		// Spin and hope someone takes the lock.
 		for (int i = 0; i < FUTEX_SPIN_MAX; i++) {
-			if (m->u32 != 0) {
-				if (cmpxchg((uint32_t *)m, 1, 2) == 0) {
-					break;
+			// Try to hand off contended condition.
+			if (as_load_rlx(&m->u32) != 0) {
+				uint32_t v = 1;
+
+				if (as_cas_rlx((uint32_t*)m, &v, 2)) {
+					return; // someone else took the lock
 				}
 
-				return; // someone else took the lock
+				if (v == 0) {
+					break; // failed to hand off
+				}
 			}
 
-			cpu_relax();
+			as_arch_pause();
 		}
 
 		sys_futex(m, FUTEX_WAKE_PRIVATE, 1);
@@ -157,7 +180,7 @@ cf_mutex_unlock_spin(cf_mutex *m)
 //
 
 void
-cf_condition_wait(cf_condition *c, cf_mutex *m)
+cf_condition_wait(cf_condition* c, cf_mutex* m)
 {
 	uint32_t seq = c->seq;
 
@@ -167,7 +190,7 @@ cf_condition_wait(cf_condition *c, cf_mutex *m)
 }
 
 void
-cf_condition_signal(cf_condition *c)
+cf_condition_signal(cf_condition* c)
 {
 	__sync_fetch_and_add(&c->seq, 1);
 	sys_futex(&c->seq, FUTEX_WAKE_PRIVATE, 1);

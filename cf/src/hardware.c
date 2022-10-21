@@ -2811,3 +2811,59 @@ cf_mount_is_local(const char *path)
 
 	return numa_node == g_i_numa_node;
 }
+
+
+// TODO - TEMPORARY tooling to count how often plug-in memory barriers are hit.
+
+#include <link.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+
+static uint64_t* g_tso_counters = NULL;
+static uint64_t g_tso_aslr_offset;
+
+#define TSO_PROF_DAT "/tmp/tso-prof.dat"
+#define TSO_PROF_DAT_SZ (1 * 1024 * 1024 * 1024)
+
+void cf_tso_count_barrier(void);
+
+void
+cf_tso_count_barrier(void)
+{
+	const void* ra = __builtin_return_address(0);
+
+	__sync_synchronize();
+
+	if (g_tso_counters == NULL) {
+		// Don't use inline function open() to avoid infinite recursion.
+		int32_t fd = (int32_t)syscall(SYS_openat, AT_FDCWD, TSO_PROF_DAT,
+				O_CREAT | O_TRUNC | O_RDWR | O_LARGEFILE, 0644);
+
+		cf_assert(fd >= 0, CF_HARDWARE, "failed to create " TSO_PROF_DAT);
+
+		int32_t err = posix_fallocate(fd, 0, TSO_PROF_DAT_SZ);
+
+		cf_assert(err == 0, CF_HARDWARE, "failed to allocate " TSO_PROF_DAT);
+
+		g_tso_counters = mmap(NULL, TSO_PROF_DAT_SZ, PROT_READ | PROT_WRITE,
+				MAP_SHARED, fd, 0);
+
+		cf_assert(g_tso_counters != MAP_FAILED, CF_HARDWARE, "failed to map "
+				TSO_PROF_DAT);
+
+		close(fd);
+
+		err = madvise(g_tso_counters, TSO_PROF_DAT_SZ, MADV_RANDOM);
+
+		cf_assert(err == 0, CF_HARDWARE, "failed to advise on " TSO_PROF_DAT);
+
+		g_tso_aslr_offset = _r_debug.r_map->l_addr;
+	}
+
+	// Subtract 4 from the return address to get the address of the call
+	// instruction.
+	uint64_t i = (uint64_t)ra - 4 - g_tso_aslr_offset;
+
+	// Don't use as_atomic inline function to avoid infinite recursion.
+	__atomic_fetch_add(g_tso_counters + i, 1, __ATOMIC_RELAXED);
+}

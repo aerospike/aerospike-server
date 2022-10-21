@@ -4,7 +4,7 @@ Release: 1%{?dist}
 Summary: The Aerospike Database
 License: Proprietary
 Group: Application
-BuildArch: x86_64
+BuildArch: @ARCH@
 Vendor: Aerospike, Inc.
 
 %description

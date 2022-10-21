@@ -974,6 +974,8 @@ smd_create(as_sindex_def* def, bool startup)
 		return;
 	}
 
+	as_fence_seq();
+
 	if (p_set == NULL ? ns->n_objects == 0 : p_set->n_objects == 0) {
 		// Shortcut if the set is empty.
 

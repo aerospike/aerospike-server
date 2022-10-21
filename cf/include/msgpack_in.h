@@ -92,7 +92,7 @@ typedef enum {
 } msgpack_type;
 
 typedef struct msgpack_display_str_s {
-	char str[100];
+	char str[512];
 } msgpack_display_str;
 
 #define define_msgpack_vec_copy(__name, __copy_ptr) \

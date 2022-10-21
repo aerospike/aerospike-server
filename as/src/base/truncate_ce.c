@@ -41,12 +41,10 @@ as_truncate_done_startup(as_namespace* ns)
 {
 }
 
-
 void
 as_truncate_list_cenotaphs(as_namespace* ns)
 {
 }
-
 
 bool
 as_truncate_lut_is_truncated(uint64_t rec_lut, as_namespace* ns,
@@ -65,9 +63,7 @@ truncate_startup_hash_init(as_namespace* ns)
 {
 }
 
-
 void
 truncate_action_startup(as_namespace* ns, const char* set_name, uint64_t lut)
 {
 }
-

@@ -26,13 +26,7 @@
 
 #include "node.h"
 
-#include <errno.h>
 #include <stdint.h>
-#include <unistd.h>
-
-#include "citrusleaf/alloc.h"
-
-#include "log.h"
 
 
 //==========================================================
@@ -60,23 +54,4 @@ uint32_t
 cf_nodeid_rchash_fn(const void* key)
 {
 	return node_id_hash_fn(*(const cf_node*)key);
-}
-
-char*
-cf_node_name()
-{
-	char buffer[1024];
-	int res = gethostname(buffer, sizeof(buffer));
-
-	if (res == (int)sizeof(buffer) || (res < 0 && errno == ENAMETOOLONG)) {
-		cf_crash(CF_MISC, "host name too long");
-	}
-
-	if (res < 0) {
-		cf_warning(CF_MISC, "error while determining host name: %d (%s)",
-				errno, cf_strerror(errno));
-		buffer[0] = 0;
-	}
-
-	return cf_strdup(buffer);
 }

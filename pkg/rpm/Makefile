@@ -11,10 +11,7 @@ OPT_AS = $(BUILD_ROOT)/opt/aerospike
 REV = $(shell $(DEPTH)/build/version | sed 's/-/_/g')
 OS = $(shell $(DEPTH)/build/os_version)
 
-ifeq ($(OS),$(filter $(OS),amzn2 el7 el8))
-  USE_SYSTEMD = 1
-  CONF_VERSION = _systemd
-endif
+CONF_VERSION = _systemd
 
 ifeq ($(USE_EE),1)
 all:	dist-ee package clean
@@ -26,29 +23,18 @@ endif
 dist:
 	install -d $(BUILD_ROOT)/etc/aerospike
 	install -d $(BUILD_ROOT)/etc/aerospike/sample
-
-ifeq ($(USE_SYSTEMD),1)
 	install -d $(BUILD_ROOT)/usr/lib/systemd/system
 	install -d $(BUILD_ROOT)/etc/systemd/system/aerospike.service.d
-else
-	install -d $(BUILD_ROOT)/var/log/aerospike
-	install -d $(BUILD_ROOT)/var/run/aerospike
-	install -d $(BUILD_ROOT)/etc/init.d
-	install -d $(BUILD_ROOT)/etc/logrotate.d
-endif
 	install -d $(BUILD_ROOT)/usr/bin
 
 	install -pm 755 $(BIN_DIR)/asd $(BUILD_ROOT)/usr/bin/asd
-ifeq ($(USE_SYSTEMD),1)
 	install -pm 755 $(DEPTH)/tools/bin/asd-coldstart $(BUILD_ROOT)/usr/bin/asd-coldstart
-endif
 	install -pm 755 $(DEPTH)/as/etc/irqbalance-ban.sh $(BUILD_ROOT)/etc/aerospike/irqbalance-ban.sh
 	install -pm 644 $(DEPTH)/as/etc/aerospike$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
 	install -pm 644 $(DEPTH)/as/etc/README.sample.conf.md $(BUILD_ROOT)/etc/aerospike/sample/README.md
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_ssd.conf
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_mesh.conf
 
-ifeq ($(USE_SYSTEMD),1)
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service.head $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
   ifeq ($(EDITION),community)
 	cat $(DEPTH)/as/etc/aerospike.service.telemetry >> $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
@@ -58,11 +44,6 @@ ifeq ($(USE_SYSTEMD),1)
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike
 	install -p -D -m 755 $(DEPTH)/as/etc/asd-systemd-helper $(BUILD_ROOT)/usr/bin/asd-systemd-helper
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service.d/* $(BUILD_ROOT)/etc/systemd/system/aerospike.service.d
-else
-	install -pm 755 $(DEPTH)/as/etc/init-script $(BUILD_ROOT)/etc/init.d/aerospike
-	sed -i 's/@EDITION@/$(EDITION)/g' $(BUILD_ROOT)/etc/init.d/aerospike
-	install -pm 644 $(DEPTH)/as/etc/logrotate_asd $(BUILD_ROOT)/etc/logrotate.d/aerospike
-endif
 
 	install -d $(OPT_AS)/doc
 ifeq ($(EDITION),community)
@@ -74,13 +55,8 @@ else
 endif
 
 ifeq ($(EDITION),community)
-  ifeq ($(USE_SYSTEMD),1)
 	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike_telemetry.service
 	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike_telemetry
-  else
-	install -pm 755 $(DEPTH)/as/etc/init-telemetry-script $(BUILD_ROOT)/etc/init.d/aerospike_telemetry
-	install -pm 644 $(DEPTH)/as/etc/logrotate_telemetry $(BUILD_ROOT)/etc/logrotate.d/aerospike_telemetry
-  endif
 	install -d $(OPT_AS)/telemetry
 	install -d $(OPT_AS)/telemetry/phonehome
 	install -d $(OPT_AS)/telemetry/daemon
@@ -100,21 +76,14 @@ endif
 
 package:
 	install -pm 644 $(OPT_AS)/doc/LICENSE $(PKG)/packages
-	install -d $(SOURCE_ROOT)/RPMS/x86_64
+	install -d $(SOURCE_ROOT)/RPMS/$(ARCH)
 
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/rpm/server-spec-base > $(PKG)/rpm/aerospike.spec
 ifeq ($(EDITION),federal)
 	cat $(EEREPO)/pkg/rpm/server-spec-fips >> $(PKG)/rpm/aerospike.spec
 endif
-ifneq ($(USE_SYSTEMD),1)
-	cat $(PKG)/rpm/server-spec-logrotate >> $(PKG)/rpm/aerospike.spec
-endif
 	cat $(PKG)/rpm/server-spec-files >> $(PKG)/rpm/aerospike.spec
-ifeq ($(USE_SYSTEMD),1)
 	cat $(PKG)/rpm/server-spec-systemd >> $(PKG)/rpm/aerospike.spec
-else
-	cat $(PKG)/rpm/server-spec-sysv >> $(PKG)/rpm/aerospike.spec
-endif
 
 ifeq ($(USE_EE),1)
 	cat $(EEREPO)/pkg/rpm/as-files >> $(PKG)/rpm/aerospike.spec
@@ -129,19 +98,13 @@ endif
 
 ifeq ($(EDITION),community)
 	cat $(PKG)/rpm/server-spec-telemetry >> $(PKG)/rpm/aerospike.spec
-  ifeq ($(USE_SYSTEMD),1)
 	cat $(PKG)/rpm/server-spec-telemetry-systemd >> $(PKG)/rpm/aerospike.spec
-  else
-	cat $(PKG)/rpm/server-spec-telemetry-sysv >> $(PKG)/rpm/aerospike.spec
-  endif
 endif
 	cat $(PKG)/rpm/server-spec-scripts >> $(PKG)/rpm/aerospike.spec
-ifeq ($(USE_SYSTEMD),1)
-	cat $(PKG)/rpm/server-spec-scripts-systemd >> $(PKG)/rpm/aerospike.spec
-endif
 
 	sed -i 's/@RELEASE@/'$(OS)'/g' $(PKG)/rpm/aerospike.spec
 	sed -i 's/@EDITION@/'$(EDITION)'/g' $(PKG)/rpm/aerospike.spec
+	sed -i 's/@ARCH@/'$(ARCH)'/g' $(PKG)/rpm/aerospike.spec
 
 	cd $(DEPTH); rpmbuild -bb -vv --define "dist .$(OS)" --buildroot $(BUILD_ROOT) $(PKG)/rpm/aerospike.spec
 

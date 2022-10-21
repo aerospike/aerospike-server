@@ -217,7 +217,6 @@ void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_r
 void as_partition_release(as_partition_reservation* rsv);
 
 struct as_index_tree_s* as_partition_tree_reserve_query(struct as_namespace_s* ns, uint32_t pid);
-void as_partition_tree_release(struct as_namespace_s* ns, struct as_index_tree_s* tree);
 
 void as_partition_advance_tree_id(as_partition* p, const char* ns_name);
 void as_partition_tree_done(uint8_t id, void* udata);
