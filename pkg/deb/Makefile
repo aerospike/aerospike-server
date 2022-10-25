@@ -21,19 +21,7 @@ CONF_VERSION = _systemd
 DEPS =
 
 PKG_ARCH = $(shell dpkg-architecture -q DEB_BUILD_ARCH)
-
-ifeq ($(ARCH), x86_64)
-    # Breaks deb conventions, but continue using x86_64 for backwards
-    # compatibility. Reconsider with next major release.
-	COMPAT_ARCH = $(ARCH)
-else ifeq ($(ARCH), aarch64)
-	COMPAT_ARCH = $(PKG_ARCH)
-else
-	$(error unhandled arch "$(ARCH)")
-endif
-
-
-DEB = $(PKG)/packages/aerospike-server-$(EDITION)-$(REV).$(OS).$(COMPAT_ARCH).deb
+DEB = $(PKG)/packages/aerospike-server-$(EDITION)_$(REV)-1$(OS)_$(PKG_ARCH).deb
 
 ifeq ($(USE_EE),1)
 all:	dist-ee package clean
