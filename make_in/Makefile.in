@@ -79,7 +79,7 @@ COMMON_CFLAGS += -MMD
 COMMON_CFLAGS += -Werror
 
 # In Ubuntu 20.04 and RHEL8, GCC has stack clash protection enabled by default.
-COMMON_FLAGS += -fno-stack-clash-protection
+COMMON_CFLAGS += -fno-stack-clash-protection
 
 # Override certain warnings under GCC v9+.
 ifeq ($(shell $(DEPTH)/build/VersionCheck.py 'gcc -dumpversion' 9), 1)
