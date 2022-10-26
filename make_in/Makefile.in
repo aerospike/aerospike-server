@@ -87,8 +87,10 @@ COMMON_CFLAGS += -MMD
 # Require strict warning-free compilation.
 COMMON_CFLAGS += -Werror
 
-# In Ubuntu 20.04 and RHEL8, GCC has stack clash protection enabled by default.
-COMMON_CFLAGS += -fno-stack-clash-protection
+ifeq ($(shell $(DEPTH)/build/versioncheck '$(CC_VERSION)' 8.0.0), 1)
+  # In Ubuntu 20.04 and RHEL8, GCC has stack clash protection enabled by default.
+  COMMON_CFLAGS += -fno-stack-clash-protection
+endif
 
 # Override certain warnings under GCC v9+.
 ifeq ($(shell $(DEPTH)/build/versioncheck '$(CC_VERSION)' 9.0.0), 1)
