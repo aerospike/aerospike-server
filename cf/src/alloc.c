@@ -1453,8 +1453,8 @@ cf_rc_release(void *body)
 	cf_assert(rc != (uint32_t)-1, CF_ALLOC, "reference count underflow");
 
 	if (rc == 0) {
-		// Subsequent destructor may require a full barrier (e.g. rw_request).
-		as_fence_seq();
+		// Subsequent destructor may require an 'acquire' barrier.
+		as_fence_acq();
 	}
 
 	return rc;

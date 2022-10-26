@@ -2583,8 +2583,8 @@ udf_bg_query_job_finish(as_query_job* _job)
 		usleep(100);
 	}
 
-	// Subsequent activity may require a full barrier.
-	as_fence_seq();
+	// Subsequent activity may require an 'acquire' barrier.
+	as_fence_acq();
 
 	as_namespace* ns = _job->ns;
 
@@ -2924,8 +2924,8 @@ ops_bg_query_job_finish(as_query_job* _job)
 		usleep(100);
 	}
 
-	// Subsequent activity may require a full barrier.
-	as_fence_seq();
+	// Subsequent activity may require an 'acquire' barrier.
+	as_fence_acq();
 
 	as_namespace* ns = _job->ns;
 
