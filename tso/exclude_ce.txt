@@ -142,6 +142,8 @@ batch.c:as_batch_add_result
 batch.c:as_batch_reserve
 batch.c:as_batch_queue_task
 
+service.c:process_readable
+
 #------------------------------
 # as/fabric
 #
