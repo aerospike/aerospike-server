@@ -1021,10 +1021,10 @@ info_set_command(const char* name, as_info_command_fn command_fn,
 // Local helpers - info execution.
 //
 
-void*
+static void*
 run_info(void* unused)
 {
-	while(true) {
+	while (true) {
 		as_info_transaction it;
 
 		if (cf_queue_pop(g_info_work_q, &it, CF_QUEUE_FOREVER) != 0) {
