@@ -307,6 +307,13 @@ set_key(const si_btree* bt, si_btree_node* node, uint32_t i,
 	memcpy(node_key, key, sizeof(si_btree_key));
 }
 
+static inline bool
+refs_match(const si_btree* bt, const si_btree_node* node, int32_t i,
+		const si_btree_key* key)
+{
+	return key->r_h == const_key(bt, node, (uint32_t)i)->r_h;
+}
+
 static inline si_arena_handle*
 mut_children(const si_btree* bt, si_btree_node* node)
 {
@@ -976,6 +983,9 @@ btree_delete(si_btree* bt, si_btree_node* node, key_mode mode,
 	switch (mode) {
 	case KEY_MODE_MATCH:
 		bound = greatest_lower_bound(bt, node, key_in);
+		if (bound.equal && ! refs_match(bt, node, bound.index, key_in)) {
+			return false;
+		}
 		break;
 
 	case KEY_MODE_MIN:
@@ -1059,6 +1069,9 @@ delete_case_1(si_btree* bt, si_btree_node* node, key_mode mode,
 	switch (mode) {
 	case KEY_MODE_MATCH:
 		bound = greatest_lower_bound(bt, node, key_in);
+		if (bound.equal && ! refs_match(bt, node, bound.index, key_in)) {
+			return false;
+		}
 		break;
 
 	case KEY_MODE_MIN:
