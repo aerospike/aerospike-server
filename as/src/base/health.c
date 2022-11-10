@@ -418,7 +418,7 @@ compute_local_stats_mov_avg(local_all_mov_avg* lma)
 			dma->value = compute_mov_avg(hs->buckets, spec->n_buckets,
 					spec->is_counter);
 
-			cf_detail(AS_HEALTH, "moving average: device %s value %lf current bucket %lu",
+			cf_detail(AS_HEALTH, "moving average: device %s value %f current bucket %lu",
 					device_name, dma->value,
 					hs->buckets[hs->cur_bucket].sample_sum);
 		}
@@ -456,7 +456,7 @@ compute_node_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs, cf_node node)
 				spec->is_counter);
 		cs->cl_node_stats[type].n_nodes++;
 
-		cf_detail(AS_HEALTH, "moving average/sum: node %lx type %u value %lf current-bucket %lu",
+		cf_detail(AS_HEALTH, "moving average/sum: node %lx type %u value %f current-bucket %lu",
 				node, type, nma->value, hs->buckets[hs->cur_bucket].sample_sum);
 	}
 }
@@ -493,7 +493,7 @@ compute_ns_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs, cf_node node)
 					spec->is_counter);
 			cs->cl_ns_stats[ns_ix][type].n_nodes++;
 
-			cf_detail(AS_HEALTH, "moving average/sum: node %lx ns-ix %u type %u value %lf current-bucket %lu",
+			cf_detail(AS_HEALTH, "moving average/sum: node %lx ns-ix %u type %u value %f current-bucket %lu",
 					node, ns_ix, type, nma->value,
 					hs->buckets[hs->cur_bucket].sample_sum);
 		}

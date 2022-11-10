@@ -5171,7 +5171,7 @@ display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 		cf_dyn_buf_append_format(db, "%ld", ((op_value_int*)ob)->value);
 		break;
 	case VOP_VALUE_FLOAT:
-		cf_dyn_buf_append_format(db, "%lf", ((op_value_float*)ob)->value);
+		cf_dyn_buf_append_format(db, "%f", ((op_value_float*)ob)->value);
 		break;
 	case VOP_VALUE_STR:
 		cf_dyn_buf_append_format(db, "<string#%u>",
@@ -5228,7 +5228,7 @@ display_msgpack(msgpack_in* mp, cf_dyn_buf* db)
 		double ctx_double;
 
 		msgpack_get_double(mp, &ctx_double);
-		cf_dyn_buf_append_format(db, "%lf", ctx_double);
+		cf_dyn_buf_append_format(db, "%f", ctx_double);
 		break;
 	}
 	case MSGPACK_TYPE_STRING: {
