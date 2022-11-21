@@ -4280,24 +4280,24 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	// Persistent index stats.
 
-	if (ns->xmem_type == CF_XMEM_TYPE_PMEM) {
+	if (ns->pi_xmem_type == CF_XMEM_TYPE_PMEM) {
 		// If numa-pinned, not all configured mounts are used.
 		if (as_config_is_numa_pinned()) {
-			for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
-				if (cf_mount_is_local(ns->xmem_mounts[i])) {
+			for (uint32_t i = 0; i < ns->n_pi_xmem_mounts; i++) {
+				if (cf_mount_is_local(ns->pi_xmem_mounts[i])) {
 					info_append_indexed_string(db, "local_mount", i, NULL,
-							ns->xmem_mounts[i]);
+							ns->pi_xmem_mounts[i]);
 				}
 			}
 		}
 
-		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
+		uint64_t used_pct = index_used * 100 / ns->pi_mounts_size_limit;
 
 		info_append_uint64(db, "index_pmem_used_bytes", index_used);
 		info_append_uint64(db, "index_pmem_used_pct", used_pct);
 	}
-	else if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
-		uint64_t used_pct = index_used * 100 / ns->mounts_size_limit;
+	else if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
+		uint64_t used_pct = index_used * 100 / ns->pi_mounts_size_limit;
 
 		info_append_uint64(db, "index_flash_used_bytes", index_used);
 		info_append_uint64(db, "index_flash_used_pct", used_pct);
@@ -4306,7 +4306,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 		info_append_uint64(db, "index_flash_alloc_bytes", alloc_sz);
 		info_append_uint64(db, "index_flash_alloc_pct",
-				alloc_sz * 100 / ns->mounts_size_limit);
+				alloc_sz * 100 / ns->pi_mounts_size_limit);
 
 		add_index_device_stats(ns, db);
 	}
@@ -4881,9 +4881,9 @@ as_info_parse_ns_iname(char* params, as_namespace** ns, char** iname,
 static void
 add_index_device_stats(as_namespace* ns, cf_dyn_buf* db)
 {
-	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
+	for (uint32_t i = 0; i < ns->n_pi_xmem_mounts; i++) {
 		info_append_indexed_int(db, "index-type.mount", i, "age",
-				oldest_nvme_age(ns->xmem_mounts[i]));
+				oldest_nvme_age(ns->pi_xmem_mounts[i]));
 	}
 }
 

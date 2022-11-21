@@ -153,7 +153,7 @@ get_next(aggr_state *astate)
 	}
 
 	// TODO - proper EE split.
-	if (astate->ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+	if (astate->ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		return &astate->keys_arr->u.digests[astate->keys_arr_offset];
 	}
 
@@ -306,7 +306,7 @@ as_aggr_keys_release_cb(cf_ll_element* ele, void* udata)
 	as_namespace* ns = r_udata->ns;
 
 	// TODO - proper EE split.
-	if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+	if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		return CF_LL_REDUCE_DELETE;
 	}
 

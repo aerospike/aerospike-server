@@ -396,14 +396,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_uint32(db, "high-water-memory-pct", ns->hwm_memory_pct);
 	info_append_bool(db, "ignore-migrate-fill-delay", ns->ignore_migrate_fill_delay);
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
-
-	info_append_string(db, "index-type",
-			ns->xmem_type == CF_XMEM_TYPE_MEM ? "mem" :
-					(ns->xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
-							(ns->xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
-									(ns->xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :
-											"illegal"))));
-
 	info_append_uint32(db, "max-record-size", ns->max_record_size);
 	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
@@ -434,13 +426,42 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_uint32(db, "xdr-tomb-raider-period", ns->xdr_tomb_raider_period);
 	info_append_uint32(db, "xdr-tomb-raider-threads", ns->n_xdr_tomb_raider_threads);
 
-	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
-		info_append_indexed_string(db, "index-type.mount", i, NULL, ns->xmem_mounts[i]);
+	info_append_bool(db, "geo2dsphere-within.strict", ns->geo2dsphere_within_strict);
+	info_append_uint32(db, "geo2dsphere-within.min-level", (uint32_t)ns->geo2dsphere_within_min_level);
+	info_append_uint32(db, "geo2dsphere-within.max-level", (uint32_t)ns->geo2dsphere_within_max_level);
+	info_append_uint32(db, "geo2dsphere-within.max-cells", (uint32_t)ns->geo2dsphere_within_max_cells);
+	info_append_uint32(db, "geo2dsphere-within.level-mod", (uint32_t)ns->geo2dsphere_within_level_mod);
+	info_append_uint32(db, "geo2dsphere-within.earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters);
+
+	info_append_string(db, "index-type",
+			ns->pi_xmem_type == CF_XMEM_TYPE_MEM ? "mem" :
+					(ns->pi_xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
+							(ns->pi_xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
+									(ns->pi_xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :
+											"illegal"))));
+
+	for (uint32_t i = 0; i < ns->n_pi_xmem_mounts; i++) {
+		info_append_indexed_string(db, "index-type.mount", i, NULL, ns->pi_xmem_mounts[i]);
 	}
 
 	if (as_namespace_index_persisted(ns)) {
-		info_append_uint32(db, "index-type.mounts-high-water-pct", ns->mounts_hwm_pct);
-		info_append_uint64(db, "index-type.mounts-size-limit", ns->mounts_size_limit);
+		info_append_uint32(db, "index-type.mounts-high-water-pct", ns->pi_mounts_hwm_pct);
+		info_append_uint64(db, "index-type.mounts-size-limit", ns->pi_mounts_size_limit);
+	}
+
+	info_append_string(db, "sindex-type",
+			ns->si_xmem_type == CF_XMEM_TYPE_MEM ? "mem" :
+					(ns->si_xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
+							(ns->si_xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
+									"illegal")));
+
+	for (uint32_t i = 0; i < ns->n_si_xmem_mounts; i++) {
+		info_append_indexed_string(db, "sindex-type.mount", i, NULL, ns->si_xmem_mounts[i]);
+	}
+
+	if (as_namespace_sindex_persisted(ns)) {
+		info_append_uint32(db, "sindex-type.mounts-high-water-pct", ns->si_mounts_hwm_pct);
+		info_append_uint64(db, "sindex-type.mounts-size-limit", ns->si_mounts_size_limit);
 	}
 
 	info_append_string(db, "storage-engine",
@@ -535,13 +556,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
 	}
-
-	info_append_bool(db, "geo2dsphere-within.strict", ns->geo2dsphere_within_strict);
-	info_append_uint32(db, "geo2dsphere-within.min-level", (uint32_t)ns->geo2dsphere_within_min_level);
-	info_append_uint32(db, "geo2dsphere-within.max-level", (uint32_t)ns->geo2dsphere_within_max_level);
-	info_append_uint32(db, "geo2dsphere-within.max-cells", (uint32_t)ns->geo2dsphere_within_max_cells);
-	info_append_uint32(db, "geo2dsphere-within.level-mod", (uint32_t)ns->geo2dsphere_within_level_mod);
-	info_append_uint32(db, "geo2dsphere-within.earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters);
 }
 
 
@@ -1532,8 +1546,8 @@ cfg_set_namespace(const char* cmd)
 			return false;
 		}
 		cf_info(AS_INFO, "Changing value of mounts-high-water-pct of ns %s from %u to %d ",
-				ns->name, ns->mounts_hwm_pct, val);
-		ns->mounts_hwm_pct = (uint32_t)val;
+				ns->name, ns->pi_mounts_hwm_pct, val);
+		ns->pi_mounts_hwm_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "mounts-size-limit", v, &v_len) == 0) {
 		if (! as_namespace_index_persisted(ns)) {
@@ -1541,14 +1555,14 @@ cfg_set_namespace(const char* cmd)
 			return false;
 		}
 		uint64_t val;
-		uint64_t min = (ns->xmem_type == CF_XMEM_TYPE_FLASH ? 4 : 1) *
+		uint64_t min = (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH ? 4 : 1) *
 				1024UL * 1024UL * 1024UL;
 		if (cf_str_atoi_u64(v, &val) != 0 || val < min) {
 			return false;
 		}
 		cf_info(AS_INFO, "Changing value of mounts-size-limit of ns %s from %lu to %lu",
-				ns->name, ns->mounts_size_limit, val);
-		ns->mounts_size_limit = val;
+				ns->name, ns->pi_mounts_size_limit, val);
+		ns->pi_mounts_size_limit = val;
 	}
 	else if (as_info_parameter_get(cmd, "nsup-hist-period", v, &v_len) == 0) {
 		uint32_t val;

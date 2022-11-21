@@ -503,7 +503,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 {
 	as_namespace* ns = si->ns;
 
-	uint32_t max_burst = ns->xmem_type == CF_XMEM_TYPE_FLASH ?
+	uint32_t max_burst = ns->pi_xmem_type == CF_XMEM_TYPE_FLASH ?
 			MAX_GC_BURST_AF : MAX_GC_BURST;
 
 	bool first = true;
@@ -572,7 +572,7 @@ query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval,
 {
 	as_namespace* ns = rsv->ns;
 
-	if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+	if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		query_reduce_no_rc(bt, rsv, start_bval, end_bval, resume_bval, keyd,
 				de_dup, cb, udata);
 		return;

@@ -628,19 +628,40 @@ eval_hwm_breached(as_namespace* ns)
 	uint64_t index_mem_sz = 0;
 	uint64_t index_dev_sz = 0;
 	uint64_t pix_hwm = 0;
+	char index_dev_tag[128];
 
 	if (as_namespace_index_persisted(ns)) {
 		index_dev_sz = index_sz;
-		pix_hwm = (ns->mounts_size_limit * ns->mounts_hwm_pct) / 100;
+		pix_hwm = (ns->pi_mounts_size_limit * ns->pi_mounts_hwm_pct) / 100;
+		sprintf(index_dev_tag, ", index-device sz:%lu hwm:%lu", index_dev_sz,
+				pix_hwm);
 	}
 	else {
 		index_mem_sz = index_sz;
+		index_dev_tag[0] = '\0';
+	}
+
+	uint64_t sindex_sz = as_sindex_used_bytes(ns);
+
+	uint64_t sindex_mem_sz = 0;
+	uint64_t sindex_dev_sz = 0;
+	uint64_t psix_hwm = 0;
+	char sindex_dev_tag[128];
+
+	if (as_namespace_sindex_persisted(ns)) {
+		sindex_dev_sz = sindex_sz;
+		psix_hwm = (ns->si_mounts_size_limit * ns->si_mounts_hwm_pct) / 100;
+		sprintf(sindex_dev_tag, ", sindex-device sz:%lu hwm:%lu", sindex_dev_sz,
+				psix_hwm);
+	}
+	else {
+		sindex_mem_sz = sindex_sz;
+		sindex_dev_tag[0] = '\0';
 	}
 
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
-	uint64_t sindex_sz = as_sindex_used_bytes(ns);
 	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
-	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
+	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_mem_sz + dim_sz;
 	uint64_t mem_hwm = (ns->memory_size * ns->hwm_memory_pct) / 100;
 
 	uint64_t used_disk_sz = 0;
@@ -650,14 +671,22 @@ eval_hwm_breached(as_namespace* ns)
 	uint64_t ssd_hwm = (ns->drive_size * ns->hwm_disk_pct) / 100;
 
 	static const char* reasons[] = {
-			NULL,								// 0x0
-			"(memory)",							// 0x1
-			"(index-device)",					// 0x2
-			"(memory & index-device)",			// 0x3 (0x1 | 0x2)
-			"(disk)",							// 0x4
-			"(memory & disk)",					// 0x5 (0x1 | 0x4)
-			"(index-device & disk)",			// 0x6 (0x2 | 0x4)
-			"(memory & index-device & disk)"	// 0x7 (0x1 | 0x2 | 0x4)
+			NULL,												// 0x0
+			"(memory)",											// 0x1
+			"(index-device)",									// 0x2
+			"(memory & index-device)",							// 0x3 (1|2)
+			"(sindex-device)",									// 0x4
+			"(memory & sindex-device)",							// 0x5 (1|4)
+			"(index-device & sindex-device)",					// 0x6 (2|4)
+			"(memory & index-device & sindex-device)",			// 0x7 (1|2|4)
+			"(disk)",											// 0x8
+			"(memory & disk)",									// 0x9 (1|8)
+			"(index-device & disk)",							// 0xA (2|8)
+			"(memory & index-device & disk)",					// 0xB (1|2|8)
+			"(sindex-device & disk)",							// 0xC (4|8)
+			"(memory & sindex-device & disk)",					// 0xD (1|4|8)
+			"(index-device & sindex-device & disk)",			// 0xE (2|4|8)
+			"(memory & index-device & sindex-device & disk)",	// 0xF (1|2|4|8)
 	};
 
 	uint32_t how_breached = 0x0;
@@ -670,25 +699,31 @@ eval_hwm_breached(as_namespace* ns)
 		how_breached |= 0x2;
 	}
 
-	if (ssd_hwm != 0 && used_disk_sz > ssd_hwm) {
+	if (psix_hwm != 0 && sindex_dev_sz > psix_hwm) {
 		how_breached |= 0x4;
 	}
 
+	if (ssd_hwm != 0 && used_disk_sz > ssd_hwm) {
+		how_breached |= 0x8;
+	}
+
 	if (how_breached != 0) {
-		cf_warning(AS_NSUP, "{%s} breached eviction hwm %s, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
+		cf_warning(AS_NSUP, "{%s} breached eviction hwm %s, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
 				ns->name, reasons[how_breached],
 				mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz, mem_hwm,
-				index_dev_sz, pix_hwm,
+				index_dev_tag,
+				sindex_dev_tag,
 				used_disk_sz, ssd_hwm);
 
 		ns->hwm_breached = true;
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} no eviction hwm breached, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu, index-device sz:%lu hwm:%lu, disk sz:%lu hwm:%lu",
+	cf_debug(AS_NSUP, "{%s} no eviction hwm breached, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
 			ns->name,
 			mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz, mem_hwm,
-			index_dev_sz, pix_hwm,
+			index_dev_tag,
+			sindex_dev_tag,
 			used_disk_sz, ssd_hwm);
 
 	ns->hwm_breached = false;
@@ -863,9 +898,11 @@ eval_stop_writes(as_namespace* ns)
 	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
 			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
-	uint64_t sindex_sz = as_sindex_used_bytes(ns);
+	// Note that persisted sindex is not counted against stop-writes.
+	uint64_t sindex_mem_sz = as_namespace_sindex_persisted(ns) ?
+			0 : as_sindex_used_bytes(ns);
 	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
-	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_sz + dim_sz;
+	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_mem_sz + dim_sz;
 
 	static const char* reasons[] = {
 			NULL,									// 0x0
@@ -887,7 +924,7 @@ eval_stop_writes(as_namespace* ns)
 	if (why_stopped != 0) {
 		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
 				ns->name, reasons[why_stopped],
-				mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz,
+				mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
 				mem_stop_writes, device_avail_pct);
 
 		ns->stop_writes = true;
@@ -896,7 +933,7 @@ eval_stop_writes(as_namespace* ns)
 
 	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
 			ns->name,
-			mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz,
+			mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
 			mem_stop_writes, device_avail_pct);
 
 	ns->stop_writes = false;

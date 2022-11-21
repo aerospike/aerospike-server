@@ -509,7 +509,7 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd)
 		return; // not found is ok from master's perspective.
 	}
 
-	if (ns->storage_data_in_memory || ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+	if (ns->storage_data_in_memory || ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		remove_from_sindex(ns, &r_ref);
 	}
 

@@ -109,7 +109,8 @@ static void cfg_serv_spec_std_to_access(const cf_serv_spec* spec, cf_addr_list* 
 static void cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* access);
 static void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port, bool tls);
 static as_set* cfg_add_set(as_namespace* ns);
-static void cfg_add_xmem_mount(as_namespace* ns, const char* mount);
+static void cfg_add_pi_xmem_mount(as_namespace* ns, const char* mount);
+static void cfg_add_si_xmem_mount(as_namespace* ns, const char* mount);
 static void cfg_add_storage_file(as_namespace* ns, const char* file_name, const char* shadow_name);
 static void cfg_add_storage_device(as_namespace* ns, const char* device_name, const char* shadow_name);
 static void cfg_set_cluster_name(char* cluster_name);
@@ -484,6 +485,7 @@ typedef enum {
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN,
 	CASE_NAMESPACE_INDEX_TYPE_BEGIN,
 	CASE_NAMESPACE_SET_BEGIN,
+	CASE_NAMESPACE_SINDEX_TYPE_BEGIN,
 	CASE_NAMESPACE_STORAGE_ENGINE_BEGIN,
 	// Obsoleted:
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
@@ -509,6 +511,10 @@ typedef enum {
 	CASE_NAMESPACE_INDEX_TYPE_PMEM,
 	CASE_NAMESPACE_INDEX_TYPE_FLASH,
 
+	// Namespace sindex-type options (value tokens):
+	CASE_NAMESPACE_SINDEX_TYPE_SHMEM,
+	CASE_NAMESPACE_SINDEX_TYPE_PMEM,
+
 	// Namespace storage-engine options (value tokens):
 	CASE_NAMESPACE_STORAGE_MEMORY,
 	CASE_NAMESPACE_STORAGE_PMEM,
@@ -523,6 +529,11 @@ typedef enum {
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT,
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT,
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT,
+
+	// Namespace sindex-type pmem options:
+	CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNT,
+	CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT,
+	CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT,
 
 	// Namespace storage-engine pmem options:
 	CASE_NAMESPACE_STORAGE_PMEM_COMMIT_TO_DEVICE,
@@ -997,6 +1008,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "geo2dsphere-within",				CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN },
 		{ "index-type",						CASE_NAMESPACE_INDEX_TYPE_BEGIN },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
+		{ "sindex-type",					CASE_NAMESPACE_SINDEX_TYPE_BEGIN },
 		{ "storage-engine",					CASE_NAMESPACE_STORAGE_ENGINE_BEGIN },
 		// Obsoleted:
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
@@ -1028,6 +1040,11 @@ const cfg_opt NAMESPACE_INDEX_TYPE_OPTS[] = {
 		{ "flash",							CASE_NAMESPACE_INDEX_TYPE_FLASH }
 };
 
+const cfg_opt NAMESPACE_SINDEX_TYPE_OPTS[] = {
+		{ "shmem",							CASE_NAMESPACE_SINDEX_TYPE_SHMEM },
+		{ "pmem",							CASE_NAMESPACE_SINDEX_TYPE_PMEM }
+};
+
 const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
 		{ "memory",							CASE_NAMESPACE_STORAGE_MEMORY },
 		{ "pmem",							CASE_NAMESPACE_STORAGE_PMEM },
@@ -1045,6 +1062,13 @@ const cfg_opt NAMESPACE_INDEX_TYPE_FLASH_OPTS[] = {
 		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT },
 		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT },
 		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT },
+		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt NAMESPACE_SINDEX_TYPE_PMEM_OPTS[] = {
+		{ "mount",							CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNT },
+		{ "mounts-high-water-pct",			CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT },
+		{ "mounts-size-limit",				CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1293,9 +1317,11 @@ const int NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS	= sizeof(NAMESPACE_CONFLICT_RES
 const int NUM_NAMESPACE_READ_CONSISTENCY_OPTS		= sizeof(NAMESPACE_READ_CONSISTENCY_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_WRITE_COMMIT_OPTS			= sizeof(NAMESPACE_WRITE_COMMIT_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_OPTS				= sizeof(NAMESPACE_INDEX_TYPE_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_SINDEX_TYPE_OPTS			= sizeof(NAMESPACE_SINDEX_TYPE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_FLASH_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_SINDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_SINDEX_TYPE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_PMEM_OPTS			= sizeof(NAMESPACE_STORAGE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS	= sizeof(NAMESPACE_STORAGE_COMPRESSION_OPTS) / sizeof(cfg_opt);
@@ -1352,7 +1378,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_CONTEXT,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
-	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_GEO2DSPHERE_WITHIN,
+	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_SINDEX_TYPE_PMEM, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DC, XDR_DC_NAMESPACE,
@@ -1366,7 +1392,7 @@ const char* CFG_PARSER_STATES[] = {
 		"SERVICE",
 		"LOGGING", "LOGGING_CONTEXT",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO", "NETWORK_TLS",
-		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_GEO2DSPHERE_WITHIN",
+		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_SINDEX_TYPE_PMEM", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
 		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG", "SECURITY_SYSLOG",
 		"XDR", "XDR_DC", "XDR_DC_NAMESPACE"
@@ -2995,14 +3021,14 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_INDEX_TYPE_OPTS, NUM_NAMESPACE_INDEX_TYPE_OPTS)) {
 				case CASE_NAMESPACE_INDEX_TYPE_SHMEM:
-					ns->xmem_type = CF_XMEM_TYPE_SHMEM;
+					ns->pi_xmem_type = CF_XMEM_TYPE_SHMEM;
 					break;
 				case CASE_NAMESPACE_INDEX_TYPE_PMEM:
-					ns->xmem_type = CF_XMEM_TYPE_PMEM;
+					ns->pi_xmem_type = CF_XMEM_TYPE_PMEM;
 					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_PMEM);
 					break;
 				case CASE_NAMESPACE_INDEX_TYPE_FLASH:
-					ns->xmem_type = CF_XMEM_TYPE_FLASH;
+					ns->pi_xmem_type = CF_XMEM_TYPE_FLASH;
 					cfg_begin_context(&state, NAMESPACE_INDEX_TYPE_FLASH);
 					break;
 				case CASE_NOT_FOUND:
@@ -3015,6 +3041,22 @@ as_config_init(const char* config_file)
 				p_set = cfg_add_set(ns);
 				cfg_strcpy(&line, p_set->name, AS_SET_NAME_MAX_SIZE);
 				cfg_begin_context(&state, NAMESPACE_SET);
+				break;
+			case CASE_NAMESPACE_SINDEX_TYPE_BEGIN:
+				cfg_enterprise_only(&line);
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_SINDEX_TYPE_OPTS, NUM_NAMESPACE_SINDEX_TYPE_OPTS)) {
+				case CASE_NAMESPACE_SINDEX_TYPE_SHMEM:
+					ns->si_xmem_type = CF_XMEM_TYPE_SHMEM;
+					break;
+				case CASE_NAMESPACE_SINDEX_TYPE_PMEM:
+					ns->si_xmem_type = CF_XMEM_TYPE_PMEM;
+					cfg_begin_context(&state, NAMESPACE_SINDEX_TYPE_PMEM);
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
 				break;
 			case CASE_NAMESPACE_STORAGE_ENGINE_BEGIN:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
@@ -3060,7 +3102,7 @@ as_config_init(const char* config_file)
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
 					cf_crash_nostack(AS_CFG, "{%s} 'data-in-index' can't be true unless 'storage-engine device' and both 'single-bin' and 'data-in-memory' are true", ns->name);
 				}
-				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 					cf_crash_nostack(AS_CFG, "{%s} 'storage-engine pmem' can't be used with 'index-type flash'", ns->name);
 				}
 				if (ns->conflict_resolve_writes && ns->single_bin) {
@@ -3102,16 +3144,16 @@ as_config_init(const char* config_file)
 		case NAMESPACE_INDEX_TYPE_PMEM:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_PMEM_OPTS, NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS)) {
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT:
-				cfg_add_xmem_mount(ns, cfg_strdup_no_checks(&line));
+				cfg_add_pi_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT:
-				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				ns->pi_mounts_hwm_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT:
-				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				ns->pi_mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
 				break;
 			case CASE_CONTEXT_END:
-				if (ns->mounts_size_limit == 0) {
+				if (ns->pi_mounts_size_limit == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
 				}
 				cfg_end_context(&state);
@@ -3129,21 +3171,48 @@ as_config_init(const char* config_file)
 		case NAMESPACE_INDEX_TYPE_FLASH:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_FLASH_OPTS, NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS)) {
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT:
-				cfg_add_xmem_mount(ns, cfg_strdup_no_checks(&line));
+				cfg_add_pi_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT:
-				ns->mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				ns->pi_mounts_hwm_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT:
-				ns->mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
+				ns->pi_mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
 				break;
 			case CASE_CONTEXT_END:
-				if (ns->mounts_size_limit == 0) {
+				if (ns->pi_mounts_size_limit == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
 				}
 				cfg_end_context(&state);
 				// TODO - main() doesn't yet support initialization as root.
 				cf_page_cache_dirty_limits();
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse namespace::sindex-type pmem context items.
+		//
+		case NAMESPACE_SINDEX_TYPE_PMEM:
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_TYPE_PMEM_OPTS, NUM_NAMESPACE_SINDEX_TYPE_PMEM_OPTS)) {
+			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNT:
+				cfg_add_si_xmem_mount(ns, cfg_strdup_no_checks(&line));
+				break;
+			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT:
+				ns->si_mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT:
+				ns->si_mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				break;
+			case CASE_CONTEXT_END:
+				if (ns->si_mounts_size_limit == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure sindex 'mounts-size-limit'", ns->name);
+				}
+				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
 			default:
@@ -4242,8 +4311,8 @@ as_config_post_process(as_config* c, const char* config_file)
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
 
-		if ((ns->xmem_type == CF_XMEM_TYPE_MEM ||
-				ns->xmem_type == CF_XMEM_TYPE_SHMEM) &&
+		if ((ns->pi_xmem_type == CF_XMEM_TYPE_MEM ||
+				ns->pi_xmem_type == CF_XMEM_TYPE_SHMEM) &&
 				ns->index_stage_size > max_alloc_sz) {
 			max_alloc_sz = ns->index_stage_size;
 		}
@@ -4257,7 +4326,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		uint32_t sprigs_offset = sizeof(as_lock_pair) * NUM_LOCK_PAIRS;
 		uint32_t puddles_offset = 0;
 
-		if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+		if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 			puddles_offset = sprigs_offset + sizeof(as_sprig) * ns->tree_shared.n_sprigs;
 		}
 
@@ -4781,19 +4850,36 @@ cfg_add_set(as_namespace* ns)
 
 // TODO - should be split function or move to EE?
 static void
-cfg_add_xmem_mount(as_namespace* ns, const char* mount)
+cfg_add_pi_xmem_mount(as_namespace* ns, const char* mount)
 {
-	if (ns->n_xmem_mounts == CF_XMEM_MAX_MOUNTS) {
-		cf_crash_nostack(AS_CFG, "{%s} too many mounts", ns->name);
+	if (ns->n_pi_xmem_mounts == CF_XMEM_MAX_MOUNTS) {
+		cf_crash_nostack(AS_CFG, "{%s} too many index mounts", ns->name);
 	}
 
-	for (uint32_t i = 0; i < ns->n_xmem_mounts; i++) {
-		if (strcmp(mount, ns->xmem_mounts[i]) == 0) {
-			cf_crash_nostack(AS_CFG, "{%s} duplicate mount %s", ns->name, mount);
+	for (uint32_t i = 0; i < ns->n_pi_xmem_mounts; i++) {
+		if (strcmp(mount, ns->pi_xmem_mounts[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate index mount %s", ns->name, mount);
 		}
 	}
 
-	ns->xmem_mounts[ns->n_xmem_mounts++] = mount;
+	ns->pi_xmem_mounts[ns->n_pi_xmem_mounts++] = mount;
+}
+
+// TODO - should be split function or move to EE?
+static void
+cfg_add_si_xmem_mount(as_namespace* ns, const char* mount)
+{
+	if (ns->n_si_xmem_mounts == CF_XMEM_MAX_MOUNTS) {
+		cf_crash_nostack(AS_CFG, "{%s} too many sindex mounts", ns->name);
+	}
+
+	for (uint32_t i = 0; i < ns->n_si_xmem_mounts; i++) {
+		if (strcmp(mount, ns->si_xmem_mounts[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate sindex mount %s", ns->name, mount);
+		}
+	}
+
+	ns->si_xmem_mounts[ns->n_si_xmem_mounts++] = mount;
 }
 
 static void

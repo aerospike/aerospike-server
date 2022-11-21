@@ -111,7 +111,7 @@ as_sindex_gc_record(as_namespace* ns, as_index_ref* r_ref)
 
 	cf_assert(! ns->storage_data_in_memory, AS_SINDEX,
 			"data-in-memory ns queuing to rlist");
-	cf_assert(ns->xmem_type != CF_XMEM_TYPE_FLASH, AS_SINDEX,
+	cf_assert(ns->pi_xmem_type != CF_XMEM_TYPE_FLASH, AS_SINDEX,
 			"flash-index ns queuing to rlist");
 
 	cf_mutex_lock(&ns->si_gc_list_mutex);

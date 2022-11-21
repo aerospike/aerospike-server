@@ -97,7 +97,8 @@ as_namespace_create(char *name)
 	// Non-0/NULL/false configuration defaults.
 	//
 
-	ns->xmem_type = CF_XMEM_TYPE_MEM;
+	ns->pi_xmem_type = CF_XMEM_TYPE_MEM;
+	ns->si_xmem_type = CF_XMEM_TYPE_MEM;
 
 	ns->background_query_max_rps = 10000; // internal write generation limit
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;

@@ -2330,7 +2330,7 @@ aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
 	}
 
 	// TODO - proper EE split.
-	if (ns->xmem_type == CF_XMEM_TYPE_FLASH) {
+	if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		keys_arr->u.digests[keys_arr->num] = r->keyd;
 	}
 	else {

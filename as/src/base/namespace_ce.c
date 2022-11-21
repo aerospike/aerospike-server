@@ -118,10 +118,10 @@ setup_namespace(as_namespace* ns)
 	ns->arena = (cf_arenax*)cf_malloc(sizeof(cf_arenax));
 	ns->tree_shared.arena = ns->arena;
 
-	cf_arenax_init(ns->arena, ns->xmem_type, ns->xmem_type_cfg, 0, (uint32_t)sizeof(as_index), 1, ns->index_stage_size);
+	cf_arenax_init(ns->arena, ns->pi_xmem_type, ns->pi_xmem_type_cfg, 0, (uint32_t)sizeof(as_index), 1, ns->index_stage_size);
 
 	ns->si_arena = cf_calloc(1, sizeof(as_sindex_arena));
 
-	as_sindex_arena_init(ns->si_arena, 0, SI_ARENA_ELE_SZ,
-			ns->sindex_stage_size);
+	as_sindex_arena_init(ns->si_arena, ns->si_xmem_type, ns->si_xmem_type_cfg,
+			0, SI_ARENA_ELE_SZ, ns->sindex_stage_size);
 }

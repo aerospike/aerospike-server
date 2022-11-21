@@ -31,6 +31,7 @@
 #include <sys/types.h>
 
 #include "cf_mutex.h"
+#include "xmem.h"
 
 
 //==========================================================
@@ -49,6 +50,9 @@
 typedef uint32_t si_arena_handle;
 
 typedef struct as_sindex_arena_s {
+	cf_xmem_type xmem_type;
+	const void* xmem_type_cfg;
+
 	key_t key_base; // enterprise only - to create stage (xmem) blocks
 
 	// Configuration (passed in constructors).
@@ -85,7 +89,7 @@ typedef struct si_arena_free_ele_s {
 // Public API.
 //
 
-void as_sindex_arena_init(as_sindex_arena* arena, key_t key_base, uint32_t ele_sz, size_t stage_sz);
+void as_sindex_arena_init(as_sindex_arena* arena, cf_xmem_type xmem_type, const void* xmem_type_cfg, key_t key_base, uint32_t ele_sz, size_t stage_sz);
 
 si_arena_handle as_sindex_arena_alloc(as_sindex_arena* arena);
 void as_sindex_arena_free(as_sindex_arena* arena, si_arena_handle h);

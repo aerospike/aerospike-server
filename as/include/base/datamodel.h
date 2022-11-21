@@ -612,9 +612,9 @@ typedef struct as_namespace_s {
 	// Persistent memory.
 	//
 
-	// Persistent memory type (default is shmem).
-	cf_xmem_type	xmem_type;
-	const void*		xmem_type_cfg;
+	// Index persistent memory type (default is shmem).
+	cf_xmem_type	pi_xmem_type;
+	const void*		pi_xmem_type_cfg;
 
 	// Persistent memory "base" block ID for this namespace.
 	uint32_t		xmem_id;
@@ -637,6 +637,10 @@ typedef struct as_namespace_s {
 	// Temporary array of sets to hold config values until sets vmap is ready.
 	struct as_set_s* sets_cfg_array;
 	uint32_t		sets_cfg_count;
+
+	// Sindex persistent memory type (default is shmem).
+	cf_xmem_type	si_xmem_type;
+	const void*		si_xmem_type_cfg;
 
 	// Pointer to sindex persistent memory "meta" block.
 	uint8_t*		xmem_si_meta;
@@ -809,10 +813,15 @@ typedef struct as_namespace_s {
 	uint32_t		xdr_tomb_raider_period;
 	uint32_t		n_xdr_tomb_raider_threads;
 
-	const char*		xmem_mounts[CF_XMEM_MAX_MOUNTS];
-	uint32_t		n_xmem_mounts; // indirect config
-	uint32_t		mounts_hwm_pct;
-	uint64_t		mounts_size_limit;
+	const char*		pi_xmem_mounts[CF_XMEM_MAX_MOUNTS];
+	uint32_t		n_pi_xmem_mounts; // indirect config
+	uint32_t		pi_mounts_hwm_pct;
+	uint64_t		pi_mounts_size_limit;
+
+	const char*		si_xmem_mounts[CF_XMEM_MAX_MOUNTS];
+	uint32_t		n_si_xmem_mounts; // indirect config
+	uint32_t		si_mounts_hwm_pct;
+	uint64_t		si_mounts_size_limit;
 
 	as_storage_type storage_type;
 
@@ -1451,8 +1460,14 @@ as_namespace_start_mode_str(const as_namespace *ns)
 static inline bool
 as_namespace_index_persisted(const as_namespace *ns)
 {
-	return ns->xmem_type == CF_XMEM_TYPE_PMEM ||
-			ns->xmem_type == CF_XMEM_TYPE_FLASH;
+	return ns->pi_xmem_type == CF_XMEM_TYPE_PMEM ||
+			ns->pi_xmem_type == CF_XMEM_TYPE_FLASH;
+}
+
+static inline bool
+as_namespace_sindex_persisted(const as_namespace *ns)
+{
+	return ns->si_xmem_type == CF_XMEM_TYPE_PMEM;
 }
 
 // Persistent Memory Management

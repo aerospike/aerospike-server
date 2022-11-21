@@ -33,6 +33,7 @@
 
 #include "cf_mutex.h"
 #include "log.h"
+#include "xmem.h"
 
 #include "warnings.h"
 
@@ -42,9 +43,13 @@
 //
 
 void
-as_sindex_arena_init(as_sindex_arena* arena, key_t key_base, uint32_t ele_sz,
+as_sindex_arena_init(as_sindex_arena* arena, cf_xmem_type xmem_type,
+		const void* xmem_type_cfg, key_t key_base, uint32_t ele_sz,
 		size_t stage_sz)
 {
+	arena->xmem_type = xmem_type;
+	arena->xmem_type_cfg = xmem_type_cfg;
+
 	arena->key_base = key_base;
 
 	arena->ele_sz = ele_sz;
