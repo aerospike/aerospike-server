@@ -4252,11 +4252,12 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	// Memory usage stats.
 
 	uint64_t index_used = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
+	uint64_t sindex_used = as_sindex_used_bytes(ns);
 
 	uint64_t data_memory = as_load_uint64(&ns->n_bytes_memory);
 	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;
 	uint64_t set_index_memory = as_set_index_used_bytes(ns);
-	uint64_t sindex_memory = as_sindex_used_bytes(ns);
+	uint64_t sindex_memory = as_namespace_sindex_persisted(ns) ? 0 : sindex_used;
 	uint64_t used_memory = data_memory + index_memory + set_index_memory + sindex_memory;
 
 	info_append_uint64(db, "memory_used_bytes", used_memory);
@@ -4285,7 +4286,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 		if (as_config_is_numa_pinned()) {
 			for (uint32_t i = 0; i < ns->n_pi_xmem_mounts; i++) {
 				if (cf_mount_is_local(ns->pi_xmem_mounts[i])) {
-					info_append_indexed_string(db, "local_mount", i, NULL,
+					info_append_indexed_string(db, "index_local_mount", i, NULL,
 							ns->pi_xmem_mounts[i]);
 				}
 			}
@@ -4309,6 +4310,25 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 				alloc_sz * 100 / ns->pi_mounts_size_limit);
 
 		add_index_device_stats(ns, db);
+	}
+
+	// Persistent sindex stats.
+
+	if (ns->si_xmem_type == CF_XMEM_TYPE_PMEM) {
+		// If numa-pinned, not all configured mounts are used.
+		if (as_config_is_numa_pinned()) {
+			for (uint32_t i = 0; i < ns->n_si_xmem_mounts; i++) {
+				if (cf_mount_is_local(ns->si_xmem_mounts[i])) {
+					info_append_indexed_string(db, "sindex_local_mount", i,
+							NULL, ns->si_xmem_mounts[i]);
+				}
+			}
+		}
+
+		uint64_t used_pct = sindex_used * 100 / ns->si_mounts_size_limit;
+
+		info_append_uint64(db, "sindex_pmem_used_bytes", sindex_used);
+		info_append_uint64(db, "sindex_pmem_used_pct", used_pct);
 	}
 
 	// Persistent storage stats.
