@@ -187,6 +187,7 @@ COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
 //
 
 void as_partition_init(struct as_namespace_s* ns, uint32_t pid);
+void as_partition_tree_shutdown(struct as_namespace_s* ns, uint32_t pid);
 void as_partition_shutdown(struct as_namespace_s* ns, uint32_t pid);
 
 void as_partition_create_set_index(struct as_namespace_s* ns, uint32_t pid, uint16_t set_id);

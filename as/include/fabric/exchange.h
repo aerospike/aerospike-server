@@ -111,10 +111,10 @@ void
 as_exchange_start();
 
 /**
- * Stop exchange subsystem.
+ * Shut down exchange subsystem.
  */
 void
-as_exchange_stop();
+as_exchange_shutdown();
 
 /**
  * Register to receive cluster-changed events.

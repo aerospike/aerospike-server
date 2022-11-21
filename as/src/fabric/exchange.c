@@ -3643,11 +3643,12 @@ as_exchange_start()
 }
 
 /**
- * Stop exchange subsystem.
+ * Shut down exchange subsystem.
  */
 void
-as_exchange_stop()
+as_exchange_shutdown()
 {
+	pthread_mutex_lock(&g_exchanged_info_lock);
 }
 
 /**

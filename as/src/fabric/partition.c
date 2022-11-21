@@ -89,32 +89,29 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 }
 
 void
+as_partition_tree_shutdown(as_namespace* ns, uint32_t pid)
+{
+	as_partition* p = &ns->partitions[pid];
+
+	cf_mutex_lock(&p->lock);
+
+	as_index_tree* tree = p->tree;
+	as_index_tree_reserve(tree);
+
+	cf_mutex_unlock(&p->lock);
+
+	// Must come outside partition lock, since transactions may take partition
+	// lock under the record (sprig) lock. Migration may cause null tree to be
+	// swizzled in after this, but that's ok.
+	as_index_tree_block(tree);
+}
+
+void
 as_partition_shutdown(as_namespace* ns, uint32_t pid)
 {
 	as_partition* p = &ns->partitions[pid];
 
-	while (true) {
-		cf_mutex_lock(&p->lock);
-
-		as_index_tree* tree = p->tree;
-		as_index_tree_reserve(tree);
-
-		cf_mutex_unlock(&p->lock);
-
-		// Must come outside partition lock, since transactions may take
-		// partition lock under the record (sprig) lock.
-		as_index_tree_block(tree);
-
-		// If lucky, this remains locked and we complete shutdown.
-		cf_mutex_lock(&p->lock);
-
-		if (tree == p->tree) {
-			break; // lucky - same tree we blocked
-		}
-
-		// Bad luck - blocked a tree that just got switched, block the new one.
-		cf_mutex_unlock(&p->lock);
-	}
+	cf_mutex_lock(&p->lock);
 }
 
 void

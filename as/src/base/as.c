@@ -451,6 +451,10 @@ as_run(int argc, char **argv)
 	// flushing pmem index), best to get kicked out of the cluster quickly.
 	as_hb_shutdown();
 
+	// Block partition rebalance to prevent new (non-null) partition trees from
+	// being swizzled in.
+	as_exchange_shutdown();
+
 	// Make sure committed SMD files are in sync with SMD callback activity.
 	as_smd_shutdown();
 

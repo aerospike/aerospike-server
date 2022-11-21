@@ -264,9 +264,15 @@ as_storage_shutdown(uint32_t instance)
 			continue;
 		}
 
-		// Lock all record locks - stops everything writing to current wblocks
-		// such that each write's record lock scope is either completed or
-		// never entered.
+		// Lock all record locks - ensure each operation's record lock scope is
+		// either completed or never entered.
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition_tree_shutdown(ns, pid);
+		}
+
+		// Lock all partition locks - ensure partition info in device header is
+		// not changing (migrations may still drop trees). Separate loop so
+		// (future) async-IO partition locks don't need to be coroutine aware.
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition_shutdown(ns, pid);
 		}
