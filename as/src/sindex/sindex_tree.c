@@ -843,13 +843,11 @@ si_btree_delete(si_btree* bt, const si_btree_key* key)
 	pthread_rwlock_wrlock(&bt->lock);
 
 	si_btree_node* root = SI_RESOLVE(bt->root_h);
+	bool found = btree_delete(bt, root, KEY_MODE_MATCH, key, NULL);
 
-	if (! btree_delete(bt, root, KEY_MODE_MATCH, key, NULL)) {
-		pthread_rwlock_unlock(&bt->lock);
-		return false;
+	if (found) {
+		bt->n_keys--;
 	}
-
-	bt->n_keys--;
 
 	if (root->n_keys == 0 && root->leaf == 0) {
 		si_arena_handle root_h = bt->root_h;
@@ -862,7 +860,7 @@ si_btree_delete(si_btree* bt, const si_btree_key* key)
 	}
 
 	pthread_rwlock_unlock(&bt->lock);
-	return true;
+	return found;
 }
 
 // Accessed from enterprise split.
