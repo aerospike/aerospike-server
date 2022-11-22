@@ -688,17 +688,11 @@ si_btree_delete(si_btree* bt, const si_btree_key* key, uint64_t* size)
 	pthread_rwlock_wrlock(&bt->lock);
 
 	int64_t old_size = (int64_t)bt->size;
+	bool found = btree_delete(bt, bt->root, KEY_MODE_MATCH, key, NULL);
 
-	if (! btree_delete(bt, bt->root, KEY_MODE_MATCH, key, NULL)) {
-		if ((int64_t)bt->size != old_size) {
-			as_add_uint64(size, (int64_t)bt->size - old_size);
-		}
-
-		pthread_rwlock_unlock(&bt->lock);
-		return false;
+	if (found) {
+		bt->n_keys--;
 	}
-
-	bt->n_keys--;
 
 	si_btree_node* root = bt->root;
 
@@ -716,7 +710,7 @@ si_btree_delete(si_btree* bt, const si_btree_key* key, uint64_t* size)
 	}
 
 	pthread_rwlock_unlock(&bt->lock);
-	return true;
+	return found;
 }
 
 // Accessed from enterprise split.
