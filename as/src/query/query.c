@@ -2079,7 +2079,7 @@ aggr_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	cf_info(AS_QUERY, "starting aggregation query job %lu {%s:%s:%s} rps %u socket-timeout %d from %s",
+	cf_debug(AS_QUERY, "starting aggregation query job %lu {%s:%s:%s} rps %u socket-timeout %d from %s",
 			_job->trid, ns->name, _job->set_name,
 			_job->si != NULL ? _job->si_name : "<pi-query>",
 			_job->rps, conn_job->fd_timeout, _job->client);
@@ -2213,7 +2213,7 @@ aggr_query_job_finish(as_query_job* _job)
 		break;
 	}
 
-	cf_info(AS_QUERY, "finished aggregation query job %lu (%d)", _job->trid,
+	cf_debug(AS_QUERY, "finished aggregation query job %lu (%d)", _job->trid,
 			_job->abandoned);
 }
 
