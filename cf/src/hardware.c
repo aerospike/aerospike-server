@@ -183,7 +183,8 @@ typedef struct path_data_s {
 static cf_shash *g_dev_graph;
 
 static cf_mutex g_path_data_lock = CF_MUTEX_INIT;
-static cf_shash *g_path_data;
+static cf_shash *g_path_data_hash;
+static path_data_t *g_fake_path_data = NULL;
 
 static cf_os_file_res
 write_file(const char *path, const void *buff, size_t limit)
@@ -2204,7 +2205,7 @@ get_mounted_device(const char *fs_path)
 	}
 
 	if (strncmp(best_path, "/dev", 4) != 0) {
-		// Don't warn; could be tmpfs, etc.
+		// Don't warn; could be tmpfs, overlay (docker), NFS etc.
 		cf_detail(CF_HARDWARE, "invalid device %s found for %s", best_path,
 				fs_path);
 		return NULL;
@@ -2546,8 +2547,8 @@ get_path_data(const char *any_path)
 		build_device_graph();
 	}
 
-	if (g_path_data == NULL) {
-		g_path_data = cf_shash_create(cf_shash_fn_zstr,
+	if (g_path_data_hash == NULL) {
+		g_path_data_hash = cf_shash_create(cf_shash_fn_zstr,
 				DEVICE_PATH_SIZE, sizeof(path_data_t *), 256, false);
 	}
 
@@ -2566,29 +2567,29 @@ get_path_data(const char *any_path)
 
 	path_data_t *data;
 
-	if (cf_shash_get(g_path_data, key, &data) != CF_SHASH_OK) {
-		cf_detail(CF_HARDWARE, "no path data");
+	if (cf_shash_get(g_path_data_hash, key, &data) != CF_SHASH_OK) {
+		cf_detail(CF_HARDWARE, "no path data for %s", any_path);
 
 		data = new_path_data(any_path);
 
 		if (data == NULL) {
-			cf_mutex_unlock(&g_path_data_lock);
-			return NULL;
+			// Insert fake entry to avoid re-discovery (repeated system calls).
+			data = g_fake_path_data;
 		}
 
-		cf_shash_put_unique(g_path_data, key, &data);
+		cf_shash_put_unique(g_path_data_hash, key, &data);
 	}
 	else {
-		cf_detail(CF_HARDWARE, "existing path data");
+		cf_detail(CF_HARDWARE, "existing path data for %s : %s", any_path,
+				data != NULL ? data->info.dev_path : "invalid");
 	}
 
-	cf_clock now = cf_get_seconds();
-
-	if (now > data->mod_time + 86400) {
+	if (data != NULL && cf_get_seconds() > data->mod_time + 86400) {
 		update_path_data(data);
 	}
 
 	cf_mutex_unlock(&g_path_data_lock);
+
 	return data;
 }
 
