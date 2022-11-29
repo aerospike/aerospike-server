@@ -57,7 +57,7 @@
 #include "fabric/hb.h"
 #include "fabric/partition.h"
 #include "fabric/skew_monitor.h"
-#include "query/query.h"
+#include "query/query_manager.h"
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
@@ -292,7 +292,7 @@ log_line_in_progress()
 			rw_request_hash_count(),
 			as_proxy_hash_count(),
 			as_index_tree_gc_queue_size(),
-			as_query_get_active_job_count());
+			as_query_manager_get_active_job_count());
 }
 
 void

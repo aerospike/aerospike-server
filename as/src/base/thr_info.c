@@ -70,7 +70,6 @@
 #include "base/features.h"
 #include "base/health.h"
 #include "base/index.h"
-#include "base/monitor.h"
 #include "base/nsup.h"
 #include "base/security.h"
 #include "base/service.h"
@@ -93,7 +92,7 @@
 #include "fabric/roster.h"
 #include "fabric/service_list.h"
 #include "fabric/skew_monitor.h"
-#include "query/query.h"
+#include "query/query_manager.h"
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
@@ -224,7 +223,6 @@ static int dyn_health_stats(char* name, cf_dyn_buf* db);
 static int cmd_histogram(char* name, char* params, cf_dyn_buf* db);
 static int dyn_index_pressure(char* name, cf_dyn_buf* db);
 static int cmd_jem_stats(char* name, char* params, cf_dyn_buf* db);
-static int cmd_jobs(char* name, char* params, cf_dyn_buf* db);
 static int cmd_latencies(char* name, char* params, cf_dyn_buf* db);
 static int tree_log(char* name, char* subtree, cf_dyn_buf* db);
 static int cmd_log_message(char* name, char* params, cf_dyn_buf* db);
@@ -506,10 +504,6 @@ as_info_init()
 	info_set_command("udf-get", udf_cask_info_get, PERM_NONE);
 	info_set_command("udf-remove", udf_cask_info_remove, PERM_UDF_ADMIN);
 	info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PERM_UDF_ADMIN);
-
-	// JOBS
-	// TODO - deprecated - remove September 2022 +
-	info_set_command("jobs", cmd_jobs, PERM_QUERY_ADMIN);                       // Manipulate the multi-key lookup monitoring infrastructure.
 
 	// TODO - deprecated - remove January 2023 +:
 	info_set_dynamic("scan-show", dyn_query_show, false);
@@ -2013,108 +2007,6 @@ cmd_jem_stats(char* name, char* params, cf_dyn_buf* db)
 	return 0;
 }
 
-static int
-cmd_jobs(char* name, char* params, cf_dyn_buf* db)
-{
-	cf_debug(AS_INFO, "add-module command received: params %s", params);
-
-	// Command Format:  "jobs:[module=<string>;cmd=<command>;<parameters>]"
-	//                  asinfo -v 'jobs'              -> list all jobs
-	//                  asinfo -v 'jobs:module=query' -> list all jobs for query module
-	//                  asinfo -v 'jobs:module=query;cmd=kill-job;trid=<trid>'
-	//                  asinfo -v 'jobs:module=query;cmd=set-priority;trid=<trid>;value=<val>'
-	//
-	// where <module> is one of following:
-	//     - query
-	//     - scan
-
-	char cmd[13];
-	char module[21];
-	char job_id[24];
-	char val_str[11];
-	int cmd_len       = sizeof(cmd);
-	int module_len    = sizeof(module);
-	int job_id_len    = sizeof(job_id);
-	int val_len       = sizeof(val_str);
-	uint64_t trid     = 0;
-	uint32_t value    = 0;
-
-	cmd[0]     = '\0';
-	module[0]  = '\0';
-	job_id[0]  = '\0';
-	val_str[0] = '\0';
-
-	// Read the parameters: module cmd trid value
-	int rv = as_info_parameter_get(params, "module", module, &module_len);
-	if (rv == -1) {
-		as_mon_info_cmd(NULL, NULL, 0, 0, db);
-		return 0;
-	}
-	else if (rv == -2) {
-		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
-		cf_dyn_buf_append_string(db, ":\"module\" parameter too long (> ");
-		cf_dyn_buf_append_int(db, module_len-1);
-		cf_dyn_buf_append_string(db, " chars)");
-		return 0;
-	}
-
-	// For backward compatibility:
-	if (strcmp(module, "scan") == 0) {
-		strcpy(module, "query");
-	}
-
-	rv = as_info_parameter_get(params, "cmd", cmd, &cmd_len);
-	if (rv == -1) {
-		as_mon_info_cmd(module, NULL, 0, 0, db);
-		return 0;
-	}
-	else if (rv == -2) {
-		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
-		cf_dyn_buf_append_string(db, ":\"cmd\" parameter too long (> ");
-		cf_dyn_buf_append_int(db, cmd_len-1);
-		cf_dyn_buf_append_string(db, " chars)");
-		return 0;
-	}
-
-	rv = as_info_parameter_get(params, "trid", job_id, &job_id_len);
-	if (rv == 0) {
-		trid  = strtoull(job_id, NULL, 10);
-	}
-	else if (rv == -1) {
-		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
-		cf_dyn_buf_append_string(db, ":no \"trid\" parameter specified");
-		return 0;
-	}
-	else if (rv == -2) {
-		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
-		cf_dyn_buf_append_string(db, ":\"trid\" parameter too long (> ");
-		cf_dyn_buf_append_int(db, job_id_len-1);
-		cf_dyn_buf_append_string(db, " chars)");
-		return 0;
-	}
-
-	rv = as_info_parameter_get(params, "value", val_str, &val_len);
-	if (rv == 0) {
-		value = strtoul(val_str, NULL, 10);
-	}
-	else if (rv == -2) {
-		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_int(db, AS_ERR_PARAMETER);
-		cf_dyn_buf_append_string(db, ":\"value\" parameter too long (> ");
-		cf_dyn_buf_append_int(db, val_len-1);
-		cf_dyn_buf_append_string(db, " chars)");
-		return 0;
-	}
-
-	cf_info(AS_INFO, "%s %s %lu %u", module, cmd, trid, value);
-	as_mon_info_cmd(module, cmd, trid, value, db);
-	return 0;
-}
-
 // latencies:[hist=<name>]
 //
 // If no hist param, command applies to ?
@@ -2520,7 +2412,7 @@ cmd_physical_devices(char* name, char* params, cf_dyn_buf* db)
 static int
 cmd_query_abort_all(char* name, char* params, cf_dyn_buf* db)
 {
-	uint32_t n_queries_killed = as_query_abort_all();
+	uint32_t n_queries_killed = as_query_manager_abort_all_jobs();
 
 	cf_dyn_buf_append_string(db, "OK - number of queries killed: ");
 	cf_dyn_buf_append_uint32(db, n_queries_killed);
@@ -2568,7 +2460,7 @@ cmd_query_abort(char* name, char* params, cf_dyn_buf* db)
 		return 0;
 	}
 
-	if (as_query_abort(trid)) {
+	if (as_query_manager_abort_job(trid)) {
 		cf_dyn_buf_append_string(db, "OK");
 		return 0;
 	}
@@ -2596,7 +2488,7 @@ cmd_query_show(char* name, char* params, cf_dyn_buf* db)
 	}
 
 	if (rv == -1) { // no trid specified - show all
-		as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], NULL, 0, 0, db);
+		as_query_manager_get_all_jobs_info(db);
 		return 0;
 	}
 
@@ -2608,19 +2500,17 @@ cmd_query_show(char* name, char* params, cf_dyn_buf* db)
 		return 0;
 	}
 
-	as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], "get-job", trid, 0, db);
+	as_query_manager_get_job_info(trid, db);
 
 	return 0;
 }
 
-// Note - a bit different to 'query-list' which collects less info.
-// TODO - remove 'query-list'?
 static int
 dyn_query_show(char* name, cf_dyn_buf* db)
 {
 	(void)name;
 
-	as_mon_info_cmd(AS_MON_MODULES[QUERY_MOD], NULL, 0, 0, db);
+	as_query_manager_get_all_jobs_info(db);
 
 	return 0;
 }
@@ -3744,7 +3634,7 @@ dyn_statistics(char* name, cf_dyn_buf* db)
 	info_append_uint64(db, "early_tsvc_udf_sub_error", g_stats.n_tsvc_udf_sub_error);
 	info_append_uint64(db, "early_tsvc_ops_sub_error", g_stats.n_tsvc_ops_sub_error);
 
-	info_append_uint32(db, "long_queries_active", as_query_get_active_job_count());
+	info_append_uint32(db, "long_queries_active", as_query_manager_get_active_job_count());
 
 	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
 

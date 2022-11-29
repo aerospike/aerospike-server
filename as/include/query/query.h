@@ -23,19 +23,9 @@
 #pragma once
 
 //==========================================================
-// Includes.
-//
-
-#include <stdint.h>
-
-#include "dynbuf.h"
-
-
-//==========================================================
 // Forward declarations.
 //
 
-struct as_mon_jobstat_s;
 struct as_namespace_s;
 struct as_transaction_s;
 
@@ -44,11 +34,4 @@ struct as_transaction_s;
 // Public API.
 //
 
-void as_query_init(void);
 int as_query(struct as_transaction_s *tr, struct as_namespace_s *ns);
-void as_query_limit_finished_jobs(void);
-uint32_t as_query_get_active_job_count(void);
-struct as_mon_jobstat_s* as_query_get_jobstat(uint64_t trid);
-struct as_mon_jobstat_s* as_query_get_jobstat_all(int* size);
-bool as_query_abort(uint64_t trid);
-uint32_t as_query_abort_all(void);

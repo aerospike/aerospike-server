@@ -41,7 +41,6 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/monitor.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/transaction.h"
@@ -298,7 +297,7 @@ as_query_job_destroy(as_query_job* _job)
 }
 
 void
-as_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
+as_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 {
 	uint64_t now = cf_getns();
 	bool done = _job->finish_ns != 0;
@@ -307,28 +306,67 @@ as_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
 	uint64_t active_ns = done ?
 			_job->finish_ns - _job->start_ns : since_start_ns;
 
-	stat->trid = _job->trid;
-	stat->n_pids_requested = _job->n_pids_requested;
-	stat->rps = _job->rps;
-	stat->active_threads = _job->n_threads;
-	stat->progress_pct = progress_pct(_job);
-	stat->run_time = active_ns / 1000000;
-	stat->time_since_done = since_finish_ns / 1000000;
+	cf_dyn_buf_append_string(db, "trid=");
+	cf_dyn_buf_append_uint64(db, _job->trid);
 
-	stat->recs_throttled = _job->n_throttled;
-	stat->recs_filtered_meta = _job->n_filtered_meta;
-	stat->recs_filtered_bins = _job->n_filtered_bins;
-	stat->recs_succeeded = _job->n_succeeded;
-	stat->recs_failed = _job->n_failed;
+	cf_dyn_buf_append_string(db, ":ns=");
+	cf_dyn_buf_append_string(db, _job->ns->name);
 
-	strcpy(stat->ns, _job->ns->name);
-	strcpy(stat->set, _job->set_name);
-	strcpy(stat->si_name, _job->si_name);
+	if (_job->set_name[0]) {
+		cf_dyn_buf_append_string(db, ":set=");
+		cf_dyn_buf_append_string(db, _job->set_name);
+	}
 
-	strcpy(stat->client, _job->client);
+	if (_job->si_name[0]) {
+		cf_dyn_buf_append_string(db, ":sindex-name=");
+		cf_dyn_buf_append_string(db, _job->si_name);
+	}
+
+	if (_job->n_pids_requested != 0) {
+		cf_dyn_buf_append_string(db, ":n-pids-requested=");
+		cf_dyn_buf_append_uint32(db, _job->n_pids_requested);
+	}
+
+	cf_dyn_buf_append_string(db, ":rps=");
+	cf_dyn_buf_append_uint32(db, _job->rps);
+
+	cf_dyn_buf_append_string(db, ":active-threads=");
+	cf_dyn_buf_append_uint32(db, _job->n_threads);
+
+	cf_dyn_buf_append_string(db, ":status=");
+	cf_dyn_buf_append_format(db, "%s(%s)", done ? "done" : "active",
+			result_str(_job->abandoned));
+
+	cf_dyn_buf_append_string(db, ":job-progress=");
+	cf_dyn_buf_append_format(db, "%.2f", progress_pct(_job));
+
+	cf_dyn_buf_append_string(db, ":run-time=");
+	cf_dyn_buf_append_uint64(db, active_ns / 1000000);
+
+	cf_dyn_buf_append_string(db, ":time-since-done=");
+	cf_dyn_buf_append_uint64(db, since_finish_ns / 1000000);
+
+	cf_dyn_buf_append_string(db, ":recs-throttled=");
+	cf_dyn_buf_append_uint64(db, _job->n_throttled);
+
+	cf_dyn_buf_append_string(db, ":recs-filtered-meta=");
+	cf_dyn_buf_append_uint64(db, _job->n_filtered_meta);
+
+	cf_dyn_buf_append_string(db, ":recs-filtered-bins=");
+	cf_dyn_buf_append_uint64(db, _job->n_filtered_bins);
+
+	cf_dyn_buf_append_string(db, ":recs-succeeded=");
+	cf_dyn_buf_append_uint64(db, _job->n_succeeded);
+
+	cf_dyn_buf_append_string(db, ":recs-failed=");
+	cf_dyn_buf_append_uint64(db, _job->n_failed);
+
+	char client[64];
+
+	strcpy(client, _job->client);
 
 	// TODO - if we fix the monitor to not use colons as separators, remove:
-	char* escape = stat->client;
+	char* escape = client;
 
 	while (*escape != 0) {
 		if (*escape == ':') {
@@ -338,10 +376,10 @@ as_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
 		escape++;
 	}
 
-	sprintf(stat->status, "%s(%s)", done ? "done" : "active",
-			result_str(_job->abandoned));
+	cf_dyn_buf_append_string(db, ":from=");
+	cf_dyn_buf_append_string(db, client);
 
-	_job->vtable.info_mon_fn(_job, stat);
+	_job->vtable.info_mon_fn(_job, db);
 }
 
 

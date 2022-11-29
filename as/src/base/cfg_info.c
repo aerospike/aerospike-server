@@ -56,7 +56,7 @@
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
-#include "query/query.h"
+#include "query/query_manager.h"
 #include "storage/storage.h"
 
 
@@ -910,7 +910,7 @@ cfg_set_service(const char* cmd)
 		cf_info(AS_INFO, "Changing value of query-max-done from %d to %d ",
 				g_config.query_max_done, val);
 		g_config.query_max_done = val;
-		as_query_limit_finished_jobs();
+		as_query_manager_limit_finished_jobs();
 	}
 	else if (as_info_parameter_get(cmd, "query-threads-limit", v,
 			&v_len) == 0) {

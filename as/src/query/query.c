@@ -63,7 +63,6 @@
 #include "base/exp.h"
 #include "base/expop.h"
 #include "base/index.h"
-#include "base/monitor.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/service.h"
@@ -205,12 +204,6 @@ throttle_sleep(as_query_job* _job)
 // Public API.
 //
 
-void
-as_query_init(void)
-{
-	as_query_manager_startup_init();
-}
-
 int
 as_query(as_transaction* tr, as_namespace* ns)
 {
@@ -226,42 +219,6 @@ as_query(as_transaction* tr, as_namespace* ns)
 	default:
 		return AS_ERR_PARAMETER;
 	}
-}
-
-void
-as_query_limit_finished_jobs(void)
-{
-	as_query_manager_limit_finished_jobs();
-}
-
-uint32_t
-as_query_get_active_job_count(void)
-{
-	return as_query_manager_get_active_job_count();
-}
-
-as_mon_jobstat*
-as_query_get_jobstat(uint64_t trid)
-{
-	return as_query_manager_get_job_info(trid);
-}
-
-as_mon_jobstat*
-as_query_get_jobstat_all(int* size)
-{
-	return as_query_manager_get_info(size);
-}
-
-bool
-as_query_abort(uint64_t trid)
-{
-	return as_query_manager_abort_job(trid);
-}
-
-uint32_t
-as_query_abort_all(void)
-{
-	return as_query_manager_abort_all_jobs();
 }
 
 
@@ -1250,7 +1207,7 @@ static void conn_query_job_destroy(conn_query_job* job);
 static void conn_query_job_finish(conn_query_job* job);
 static bool conn_query_job_send_response(conn_query_job* job, uint8_t* buf, size_t size);
 static void conn_query_job_release_fd(conn_query_job* job, bool force_close);
-static void conn_query_job_info(conn_query_job* job, as_mon_jobstat* stat);
+static void conn_query_job_info(conn_query_job* job, cf_dyn_buf* db);
 
 //----------------------------------------------------------
 // conn_query_job API.
@@ -1357,12 +1314,17 @@ conn_query_job_release_fd(conn_query_job* job, bool force_close)
 }
 
 static void
-conn_query_job_info(conn_query_job* job, as_mon_jobstat* stat)
+conn_query_job_info(conn_query_job* job, cf_dyn_buf* db)
 {
-	stat->net_io_bytes = job->net_io_bytes;
-	stat->net_io_time = job->net_io_ns / 1000000;
-	stat->socket_timeout =
-			job->fd_timeout == -1 ? 0 : (uint32_t)job->fd_timeout;
+	cf_dyn_buf_append_string(db, ":net-io-bytes=");
+	cf_dyn_buf_append_uint64(db, job->net_io_bytes);
+
+	cf_dyn_buf_append_string(db, ":net-io-time=");
+	cf_dyn_buf_append_uint64(db, job->net_io_ns / 1000000);
+
+	cf_dyn_buf_append_string(db, ":socket-timeout=");
+	cf_dyn_buf_append_uint32(db,
+			job->fd_timeout == -1 ? 0 : (uint32_t)job->fd_timeout);
 }
 
 
@@ -1392,7 +1354,7 @@ typedef struct basic_query_job_s {
 static void basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void basic_query_job_finish(as_query_job* _job);
 static void basic_query_job_destroy(as_query_job* _job);
-static void basic_query_job_info(as_query_job* _job, as_mon_jobstat* stat);
+static void basic_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
 static const as_query_vtable basic_query_job_vtable = {
 	basic_query_job_slice,
@@ -1710,10 +1672,12 @@ basic_query_job_destroy(as_query_job* _job)
 }
 
 static void
-basic_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
+basic_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 {
-	strcpy(stat->job_type, query_type_str(QUERY_TYPE_BASIC));
-	conn_query_job_info((conn_query_job*)_job, stat);
+	cf_dyn_buf_append_string(db, ":job-type=");
+	cf_dyn_buf_append_string(db, query_type_str(QUERY_TYPE_BASIC));
+
+	conn_query_job_info((conn_query_job*)_job, db);
 }
 
 //----------------------------------------------------------
@@ -1964,7 +1928,7 @@ typedef struct aggr_query_job_s {
 static void aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void aggr_query_job_finish(as_query_job* _job);
 static void aggr_query_job_destroy(as_query_job* _job);
-static void aggr_query_job_info(as_query_job* _job, as_mon_jobstat* stat);
+static void aggr_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
 static const as_query_vtable aggr_query_job_vtable = {
 	aggr_query_job_slice,
@@ -2228,10 +2192,12 @@ aggr_query_job_destroy(as_query_job* _job)
 }
 
 static void
-aggr_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
+aggr_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 {
-	strcpy(stat->job_type, query_type_str(QUERY_TYPE_AGGR));
-	conn_query_job_info((conn_query_job*)_job, stat);
+	cf_dyn_buf_append_string(db, ":job-type=");
+	cf_dyn_buf_append_string(db, query_type_str(QUERY_TYPE_AGGR));
+
+	conn_query_job_info((conn_query_job*)_job, db);
 }
 
 //----------------------------------------------------------
@@ -2418,7 +2384,7 @@ typedef struct udf_bg_query_job_s {
 static void udf_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void udf_bg_query_job_finish(as_query_job* _job);
 static void udf_bg_query_job_destroy(as_query_job* _job);
-static void udf_bg_query_job_info(as_query_job* _job, as_mon_jobstat* stat);
+static void udf_bg_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
 static const as_query_vtable udf_bg_query_job_vtable = {
 	udf_bg_query_job_slice,
@@ -2619,16 +2585,21 @@ udf_bg_query_job_destroy(as_query_job* _job)
 }
 
 static void
-udf_bg_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
+udf_bg_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 {
-	strcpy(stat->job_type, query_type_str(QUERY_TYPE_UDF_BG));
-	stat->net_io_bytes = sizeof(cl_msg); // size of original synchronous fin
-	stat->socket_timeout = CF_SOCKET_TIMEOUT;
+	cf_dyn_buf_append_string(db, ":job-type=");
+	cf_dyn_buf_append_string(db, query_type_str(QUERY_TYPE_UDF_BG));
+
+	cf_dyn_buf_append_string(db, ":net-io-bytes=");
+	cf_dyn_buf_append_uint64(db, sizeof(cl_msg)); // original synchronous fin
+
+	cf_dyn_buf_append_string(db, ":socket-timeout=");
+	cf_dyn_buf_append_uint32(db, CF_SOCKET_TIMEOUT);
 
 	udf_bg_query_job* job = (udf_bg_query_job*)_job;
-	char* extra = stat->jdata + strlen(stat->jdata);
 
-	sprintf(extra, ":udf-filename=%s:udf-function=%s:udf-active=%u",
+	cf_dyn_buf_append_format(db,
+			":udf-filename=%s:udf-function=%s:udf-active=%u",
 			job->origin.def.filename, job->origin.def.function,
 			job->n_active_tr);
 }
@@ -2759,7 +2730,7 @@ typedef struct ops_bg_query_job_s {
 static void ops_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void ops_bg_query_job_finish(as_query_job* _job);
 static void ops_bg_query_job_destroy(as_query_job* _job);
-static void ops_bg_query_job_info(as_query_job* _job, as_mon_jobstat* stat);
+static void ops_bg_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
 static const as_query_vtable ops_bg_query_job_vtable = {
 	ops_bg_query_job_slice,
@@ -2960,16 +2931,20 @@ ops_bg_query_job_destroy(as_query_job* _job)
 }
 
 static void
-ops_bg_query_job_info(as_query_job* _job, as_mon_jobstat* stat)
+ops_bg_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 {
-	strcpy(stat->job_type, query_type_str(QUERY_TYPE_OPS_BG));
-	stat->net_io_bytes = sizeof(cl_msg); // size of original synchronous fin
-	stat->socket_timeout = CF_SOCKET_TIMEOUT;
+	cf_dyn_buf_append_string(db, ":job-type=");
+	cf_dyn_buf_append_string(db, query_type_str(QUERY_TYPE_OPS_BG));
+
+	cf_dyn_buf_append_string(db, ":net-io-bytes=");
+	cf_dyn_buf_append_uint64(db, sizeof(cl_msg)); // original synchronous fin
+
+	cf_dyn_buf_append_string(db, ":socket-timeout=");
+	cf_dyn_buf_append_uint32(db, CF_SOCKET_TIMEOUT);
 
 	ops_bg_query_job* job = (ops_bg_query_job*)_job;
-	char* extra = stat->jdata + strlen(stat->jdata);
 
-	sprintf(extra, ":ops-active=%u", job->n_active_tr);
+	cf_dyn_buf_append_format(db, ":ops-active=%u", job->n_active_tr);
 }
 
 //----------------------------------------------------------

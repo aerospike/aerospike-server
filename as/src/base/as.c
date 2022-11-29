@@ -55,7 +55,6 @@
 #include "base/health.h"
 #include "base/index.h"
 #include "base/json_init.h"
-#include "base/monitor.h"
 #include "base/nsup.h"
 #include "base/security.h"
 #include "base/service.h"
@@ -74,7 +73,7 @@
 #include "fabric/migrate.h"
 #include "fabric/roster.h"
 #include "fabric/skew_monitor.h"
-#include "query/query.h"
+#include "query/query_manager.h"
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
@@ -394,10 +393,9 @@ as_run(int argc, char **argv)
 	as_migrate_init();			// move data between nodes
 	as_proxy_init();			// do work on behalf of others
 	as_rw_init();				// read & write service
-	as_query_init();			// query transaction handling
+	as_query_manager_init();	// query transaction handling
 	as_udf_init();				// user-defined functions
 	as_batch_init();			// batch transaction handling
-	as_mon_init();				// monitor
 	as_set_index_init();		// dynamic set-index population
 
 	// Start subsystems. At this point we may begin communicating with other

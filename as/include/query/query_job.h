@@ -40,7 +40,6 @@
 // Forward declarations.
 //
 
-struct as_mon_jobstat_s;
 struct as_namespace_s;
 struct as_partition_reservation_s;
 struct as_query_job_s;
@@ -89,7 +88,7 @@ typedef struct as_query_range_s {
 typedef void (*as_query_slice_fn)(struct as_query_job_s* _job, struct as_partition_reservation_s* rsv, cf_buf_builder** bb_r);
 typedef void (*as_query_finish_fn)(struct as_query_job_s* _job);
 typedef void (*as_query_destroy_fn)(struct as_query_job_s* _job);
-typedef void (*as_query_info_fn)(struct as_query_job_s* _job, struct as_mon_jobstat_s* stat);
+typedef void (*as_query_info_fn)(struct as_query_job_s* _job, cf_dyn_buf* db);
 
 typedef struct as_query_vtable_s {
 	as_query_slice_fn slice_fn;
@@ -164,4 +163,4 @@ void as_query_job_init(as_query_job* _job, const as_query_vtable* vtable, const 
 void* as_query_job_run(void* pv_job);
 uint32_t as_query_job_throttle(as_query_job* _job);
 void as_query_job_destroy(as_query_job* _job);
-void as_query_job_info(as_query_job* _job, struct as_mon_jobstat_s* stat);
+void as_query_job_info(as_query_job* _job, cf_dyn_buf* db);

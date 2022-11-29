@@ -32,13 +32,13 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
+#include "dynbuf.h"
 
 
 //==========================================================
 // Forward declarations.
 //
 
-struct as_mon_jobstat_s;
 struct as_query_job_s;
 
 
@@ -64,7 +64,7 @@ extern uint32_t g_n_query_threads;
 // Public API.
 //
 
-void as_query_manager_startup_init(void);
+void as_query_manager_init(void);
 int as_query_manager_start_job(struct as_query_job_s* _job);
 void as_query_manager_add_job_thread(struct as_query_job_s* _job);
 void as_query_manager_add_max_job_threads(struct as_query_job_s* _job);
@@ -73,6 +73,6 @@ void as_query_manager_abandon_job(struct as_query_job_s* _job, int reason);
 bool as_query_manager_abort_job(uint64_t trid);
 uint32_t as_query_manager_abort_all_jobs(void);
 void as_query_manager_limit_finished_jobs(void);
-struct as_mon_jobstat_s* as_query_manager_get_job_info(uint64_t trid);
-struct as_mon_jobstat_s* as_query_manager_get_info(int* size);
+void as_query_manager_get_job_info(uint64_t trid, cf_dyn_buf* db);
+void as_query_manager_get_all_jobs_info(cf_dyn_buf* db);
 uint32_t as_query_manager_get_active_job_count(void);

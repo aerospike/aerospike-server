@@ -35,10 +35,10 @@
 
 #include "cf_mutex.h"
 #include "cf_thread.h"
+#include "dynbuf.h"
 #include "log.h"
 
 #include "base/cfg.h"
-#include "base/monitor.h"
 #include "base/proto.h"
 #include "fabric/partition.h"
 #include "query/query_job.h"
@@ -90,7 +90,7 @@ static int find_cb(void* buf, void* udata);
 //
 
 void
-as_query_manager_startup_init(void)
+as_query_manager_init(void)
 {
 	cf_mutex_init(&g_mgr.lock);
 
@@ -263,8 +263,8 @@ as_query_manager_limit_finished_jobs(void)
 	cf_mutex_unlock(&g_mgr.lock);
 }
 
-as_mon_jobstat*
-as_query_manager_get_job_info(uint64_t trid)
+void
+as_query_manager_get_job_info(uint64_t trid, cf_dyn_buf* db)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
@@ -272,24 +272,17 @@ as_query_manager_get_job_info(uint64_t trid)
 
 	if (_job == NULL) {
 		cf_mutex_unlock(&g_mgr.lock);
-		return NULL;
+		return;
 	}
 
-	as_mon_jobstat* stat = cf_malloc(sizeof(as_mon_jobstat));
-
-	memset(stat, 0, sizeof(as_mon_jobstat));
-	as_query_job_info(_job, stat);
+	as_query_job_info(_job, db);
 
 	cf_mutex_unlock(&g_mgr.lock);
-
-	return stat; // caller must free this
 }
 
-as_mon_jobstat*
-as_query_manager_get_info(int* size)
+void
+as_query_manager_get_all_jobs_info(cf_dyn_buf* db)
 {
-	*size = 0;
-
 	cf_mutex_lock(&g_mgr.lock);
 
 	uint32_t n_jobs = cf_queue_sz(g_mgr.active_jobs) +
@@ -297,7 +290,7 @@ as_query_manager_get_info(int* size)
 
 	if (n_jobs == 0) {
 		cf_mutex_unlock(&g_mgr.lock);
-		return NULL;
+		return;
 	}
 
 	as_query_job* _jobs[n_jobs];
@@ -306,20 +299,17 @@ as_query_manager_get_info(int* size)
 	cf_queue_reduce_reverse(g_mgr.active_jobs, info_cb, &item);
 	cf_queue_reduce_reverse(g_mgr.finished_jobs, info_cb, &item);
 
-	size_t stats_size = sizeof(as_mon_jobstat) * n_jobs;
-	as_mon_jobstat* stats = cf_malloc(stats_size);
-
-	memset(stats, 0, stats_size);
-
 	for (uint32_t i = 0; i < n_jobs; i++) {
-		as_query_job_info(_jobs[i], &stats[i]);
+		as_query_job* _job = _jobs[i];
+
+		as_query_job_info(_job, db);
+
+		cf_dyn_buf_append_char(db, ';');
 	}
 
+	cf_dyn_buf_chomp(db);
+
 	cf_mutex_unlock(&g_mgr.lock);
-
-	*size = (int)n_jobs; // no uint32_t upstream - may remove monitor
-
-	return stats; // caller must free this
 }
 
 uint32_t
