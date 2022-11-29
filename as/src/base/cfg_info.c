@@ -231,6 +231,7 @@ cfg_get_service(cf_dyn_buf* db)
 	}
 
 	info_append_bool(db, "indent-allocations", g_config.indent_allocations);
+	info_append_uint64(db, "info-max-ms", g_config.info_max_ns / 1000000);
 	info_append_uint32(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "keep-caps-ssd-health", g_config.keep_caps_ssd_health);
 	info_append_bool(db, "log-local-time", cf_log_is_using_local_time());
@@ -255,7 +256,7 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
 	info_append_bool(db, "stay-quiesced", g_config.stay_quiesced);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
-	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
+	info_append_uint64(db, "transaction-max-ms", g_config.transaction_max_ns / 1000000);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
 	info_append_string_safe(db, "vault-ca", g_vault_cfg.ca);
 	info_append_string_safe(db, "vault-path", g_vault_cfg.path);
@@ -800,6 +801,19 @@ cfg_set_service(const char* cmd)
 		else {
 			return false;
 		}
+	}
+	else if (as_info_parameter_get(cmd, "info-max-ms", v, &v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0) {
+			return false;
+		}
+		if (val < MIN_INFO_MAX_MS || val > MAX_INFO_MAX_MS) {
+			cf_warning(AS_INFO, "info-max-ms %d must be between %u and %u", val,
+					MIN_INFO_MAX_MS, MAX_INFO_MAX_MS);
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of info-max-ms from %lu to %d ",
+				(g_config.info_max_ns / 1000000), val);
+		g_config.info_max_ns = (uint64_t)val * 1000000;
 	}
 	else if (as_info_parameter_get(cmd, "info-threads", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0) {

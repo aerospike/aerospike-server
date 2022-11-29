@@ -162,6 +162,7 @@ cfg_set_defaults()
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
 	c->feature_key_files[0] = "/etc/aerospike/features.conf";
+	c->info_max_ns = MAX_INFO_MAX_MS * 1000000UL;
 	c->n_info_threads = 16;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
 	c->n_migrate_threads = 1;
@@ -271,6 +272,7 @@ typedef enum {
 	CASE_SERVICE_FEATURE_KEY_FILE,
 	CASE_SERVICE_GROUP,
 	CASE_SERVICE_INDENT_ALLOCATIONS,
+	CASE_SERVICE_INFO_MAX_MS,
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_KEEP_CAPS_SSD_HEALTH,
 	CASE_SERVICE_LOG_LOCAL_TIME,
@@ -772,6 +774,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "feature-key-file",				CASE_SERVICE_FEATURE_KEY_FILE },
 		{ "group",							CASE_SERVICE_GROUP },
 		{ "indent-allocations",				CASE_SERVICE_INDENT_ALLOCATIONS },
+		{ "info-max-ms",					CASE_SERVICE_INFO_MAX_MS },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "keep-caps-ssd-health",			CASE_SERVICE_KEEP_CAPS_SSD_HEALTH },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
@@ -2258,6 +2261,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_INDENT_ALLOCATIONS:
 				c->indent_allocations = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_INFO_MAX_MS:
+				c->info_max_ns = cfg_u64(&line, MIN_INFO_MAX_MS, MAX_INFO_MAX_MS) * 1000000;
 				break;
 			case CASE_SERVICE_INFO_THREADS:
 				c->n_info_threads = cfg_u32(&line, 1, MAX_INFO_THREADS);

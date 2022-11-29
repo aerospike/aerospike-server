@@ -194,8 +194,9 @@ static int info_set_command(const char* name, as_info_command_fn command_fn, as_
 
 // Info execution.
 static void* run_info(void* unused);
-static int info_all(const as_file_handle* fd_h, cf_dyn_buf* db);
-static int info_some(char* buf, char* buf_lim, const as_file_handle* fd_h, cf_dyn_buf* db);
+static bool authenticate(const as_file_handle* fd_h, cf_dyn_buf* db);
+static int info_summary(cf_dyn_buf* db);
+static int handle_cmds(char* buf, uint64_t sz, const as_file_handle* fd_h, cf_dyn_buf* db);
 static void append_sec_err_str(cf_dyn_buf* db, uint32_t result, as_sec_perm cmd_perm);
 
 // Info commands.
@@ -589,12 +590,11 @@ as_info_parameter_get(const char* param_str, const char* param, char* value,
 int
 as_info_buffer(uint8_t* req_buf, size_t req_buf_len, cf_dyn_buf* rsp)
 {
-	// Either we'e doing all, or doing some
 	if (req_buf_len == 0) {
-		info_all(NULL, rsp);
+		info_summary(rsp); // no commands specified
 	}
 	else {
-		info_some((char*)req_buf, (char*)(req_buf + req_buf_len), NULL, rsp);
+		handle_cmds((char*)req_buf, req_buf_len, NULL, rsp);
 	}
 
 	return 0;
@@ -1021,82 +1021,92 @@ run_info(void* unused)
 	while (true) {
 		as_info_transaction it;
 
-		if (cf_queue_pop(g_info_work_q, &it, CF_QUEUE_FOREVER) != 0) {
-			cf_crash(AS_TSVC, "unable to pop from info work queue");
-		}
+		cf_queue_pop(g_info_work_q, &it, CF_QUEUE_FOREVER);
 
 		if (it.fd_h == NULL) {
 			break; // termination signal
 		}
 
+		bool timeout = cf_getns() > it.start_time + g_config.info_max_ns;
+
 		as_file_handle* fd_h = it.fd_h;
-		as_proto* pr = it.proto;
+		as_proto* proto = it.proto;
 
-		// Allocate an output buffer sufficiently large to avoid ever resizing
+		// Allocate an output stack buffer large enough to avoid resizing.
 		cf_dyn_buf_define_size(db, 128 * 1024);
-		// write space for the header
-		uint64_t h = 0;
 
-		cf_dyn_buf_append_buf(&db, (uint8_t*) &h, sizeof(h));
+		// Leave space for the response header.
+		cf_dyn_buf_reserve(&db, sizeof(as_proto), NULL);
 
-		// Either we'e doing all, or doing some
-		if (pr->sz == 0) {
-			info_all(fd_h, &db);
+		if (timeout) {
+			cf_dyn_buf_append_string(&db, "ERROR::timeout");
+		}
+		else if (authenticate(fd_h, &db)) {
+			if (proto->sz == 0) {
+				info_summary(&db); // no commands specified
+			}
+			else {
+				handle_cmds((char*)proto->body, proto->sz, fd_h, &db);
+			}
+		}
+
+		cf_free(proto);
+
+		// Write response header into reserved space.
+		as_proto* header = (as_proto*)db.buf;
+
+		*header = (as_proto){
+				.version = PROTO_VERSION,
+				.type = PROTO_TYPE_INFO,
+				.sz = db.used_sz - sizeof(as_proto)
+		};
+
+		as_proto_swap(header);
+
+		if (cf_socket_send_all(&fd_h->sock, db.buf, db.used_sz,
+				MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) == 0) {
+			as_end_of_transaction_ok(fd_h);
 		}
 		else {
-			info_some((char*)pr->body, (char*)pr->body + pr->sz, fd_h, &db);
-		}
-
-		// write the proto header in the space we pre-wrote
-		db.buf[0] = 2;
-		db.buf[1] = 1;
-
-		uint64_t sz = db.used_sz - 8;
-
-		db.buf[4] = (sz >> 24) & 0xff;
-		db.buf[5] = (sz >> 16) & 0xff;
-		db.buf[6] = (sz >> 8) & 0xff;
-		db.buf[7] = sz & 0xff;
-
-		// write the data buffer
-		if (cf_socket_send_all(&fd_h->sock, db.buf, db.used_sz,
-				MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
 			cf_info(AS_INFO, "error sending to %s - fd %d sz %zu %s",
 					fd_h->client, CSFD(&fd_h->sock), db.used_sz,
 					cf_strerror(errno));
 			as_end_of_transaction_force_close(fd_h);
-			fd_h = NULL;
 		}
 
 		cf_dyn_buf_free(&db);
-		cf_free(pr);
 
-		if (fd_h != NULL) {
-			as_end_of_transaction_ok(fd_h);
-			fd_h = NULL;
+		if (timeout) {
+			as_incr_uint64(&g_stats.info_timeout);
 		}
-
-		G_HIST_INSERT_DATA_POINT(info_hist, it.start_time);
-		as_incr_uint64(&g_stats.info_complete);
+		else {
+			G_HIST_INSERT_DATA_POINT(info_hist, it.start_time);
+			as_incr_uint64(&g_stats.info_complete);
+		}
 	}
 
 	return NULL;
 }
 
-// Pull up all elements in both list into the buffers (efficient enough if
-// you're looking for lots of things). But only gets 'default' values.
-static int
-info_all(const as_file_handle* fd_h, cf_dyn_buf* db)
+static bool
+authenticate(const as_file_handle* fd_h, cf_dyn_buf* db)
 {
 	uint8_t auth_result = as_security_check_auth(fd_h);
 
-	if (auth_result != AS_OK) {
-		as_security_log(fd_h, auth_result, PERM_NONE, "info-all request", NULL);
-		append_sec_err_str(db, auth_result, PERM_NONE);
-		cf_dyn_buf_append_char(db, EOL);
-		return 0;
+	if (auth_result == AS_OK) {
+		return true;
 	}
 
+	as_security_log(fd_h, auth_result, PERM_NONE, "info request", NULL);
+	append_sec_err_str(db, auth_result, PERM_NONE);
+	cf_dyn_buf_append_char(db, '\n');
+
+	return false;
+}
+
+static int
+info_summary(cf_dyn_buf* db)
+{
 	info_static* s = static_head;
 
 	while (s != NULL) {
@@ -1125,21 +1135,10 @@ info_all(const as_file_handle* fd_h, cf_dyn_buf* db)
 	return 0;
 }
 
-// Parse the input buffer. It contains a list of keys that should be spit back.
-// Do the parse, call the necessary function collecting the information in
-// question.
 static int
-info_some(char* buf, char* buf_lim, const as_file_handle* fd_h, cf_dyn_buf* db)
+handle_cmds(char* buf, uint64_t sz, const as_file_handle* fd_h, cf_dyn_buf* db)
 {
-	uint8_t auth_result = as_security_check_auth(fd_h);
-
-	if (auth_result != AS_OK) {
-		// TODO - log null-terminated buf as detail?
-		as_security_log(fd_h, auth_result, PERM_NONE, "info request", NULL);
-		append_sec_err_str(db, auth_result, PERM_NONE);
-		cf_dyn_buf_append_char(db, EOL);
-		return 0;
-	}
+	char* buf_lim = buf + sz;
 
 	// For each incoming name
 	char* c = buf;
@@ -3625,6 +3624,7 @@ dyn_statistics(char* name, cf_dyn_buf* db)
 	info_append_uint64(db, "reaped_fds", g_stats.reaper_count); // not in ticker
 
 	info_append_uint64(db, "info_complete", g_stats.info_complete); // not in ticker
+	info_append_uint64(db, "info_timeout", g_stats.info_timeout); // not in ticker
 
 	info_append_uint64(db, "demarshal_error", g_stats.n_demarshal_error);
 	info_append_uint64(db, "early_tsvc_client_error", g_stats.n_tsvc_client_error);

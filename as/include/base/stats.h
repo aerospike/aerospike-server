@@ -58,6 +58,7 @@ typedef struct as_stats_s {
 
 	// Info stats.
 	uint64_t		info_complete;
+	uint64_t		info_timeout;
 
 	// Early transaction errors.
 	uint64_t		n_demarshal_error;
