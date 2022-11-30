@@ -1040,6 +1040,7 @@ run_info(void* unused)
 
 		if (timeout) {
 			cf_dyn_buf_append_string(&db, "ERROR::timeout");
+			cf_dyn_buf_append_char(&db, EOL);
 		}
 		else if (authenticate(fd_h, &db)) {
 			if (proto->sz == 0) {
@@ -1099,7 +1100,7 @@ authenticate(const as_file_handle* fd_h, cf_dyn_buf* db)
 
 	as_security_log(fd_h, auth_result, PERM_NONE, "info request", NULL);
 	append_sec_err_str(db, auth_result, PERM_NONE);
-	cf_dyn_buf_append_char(db, '\n');
+	cf_dyn_buf_append_char(db, EOL);
 
 	return false;
 }
