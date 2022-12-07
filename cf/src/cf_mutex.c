@@ -27,7 +27,7 @@
 
 #include <cf_mutex.h>
 
-#include <linux/futex.h>
+#include <sys/futex.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
