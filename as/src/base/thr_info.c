@@ -3414,6 +3414,13 @@ cmd_sindex_exists(char* name, char* params, cf_dyn_buf* db)
 
 	const as_namespace* ns = as_namespace_get_byname(ns_str);
 
+	if (ns == NULL) {
+		cf_warning(AS_INFO, "sindex-exists %s: 'ns' %s not found",
+				index_name_str, ns_str);
+		INFO_FAIL_RESPONSE(db, AS_ERR_NAMESPACE, "'ns' not found");
+		return 0;
+	}
+
 	cf_dyn_buf_append_string(db, as_sindex_exists(ns, index_name_str) ?
 			"true" : "false");
 
