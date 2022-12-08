@@ -1,7 +1,7 @@
 /*
  * duplicate_resolve.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -69,8 +69,33 @@ static void apply_winner(rw_request* rw);
 // Public API.
 //
 
+bool
+dup_res_start(rw_request* rw, as_transaction* tr, dup_res_start_cb cb)
+{
+	as_index_ref r_ref;
+
+	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) != 0) {
+		return false;
+	}
+
+	as_record* r = r_ref.r;
+	as_namespace* ns = tr->rsv.ns;
+
+	if (r->last_update_time > tr->rsv.p->dup_res_cutoff_ms) {
+		// Duplicate resolution for record must already have been done.
+		as_record_done(&r_ref, ns);
+		return false;
+	}
+
+	cb(rw, tr, r);
+
+	as_record_done(&r_ref, ns);
+
+	return true;
+}
+
 void
-dup_res_make_message(rw_request* rw, as_transaction* tr)
+dup_res_make_message(rw_request* rw, as_transaction* tr, as_record* r)
 {
 	rw->dest_msg = as_fabric_msg_get(M_TYPE_RW);
 
@@ -85,16 +110,9 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 			MSG_SET_COPY);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
-	as_index_ref r_ref;
+	msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
+	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
 
-	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) == 0) {
-		as_record* r = r_ref.r;
-
-		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
-
-		as_record_done(&r_ref, ns);
-	}
 }
 
 void

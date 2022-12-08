@@ -59,7 +59,7 @@
 // Forward declarations.
 //
 
-void start_read_dup_res(rw_request* rw, as_transaction* tr);
+void read_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
 void start_repl_ping(rw_request* rw, as_transaction* tr);
 bool read_dup_res_cb(rw_request* rw);
 void repl_ping_after_dup_res(rw_request* rw, as_transaction* tr);
@@ -225,11 +225,10 @@ as_read_start(as_transaction* tr)
 	}
 	// else - rw_request is now in hash, continue...
 
-	if (must_duplicate_resolve) {
-		start_read_dup_res(rw, tr);
-
-		// Started duplicate resolution.
-		return TRANS_IN_PROGRESS;
+	// If there are duplicates to resolve, start doing so.
+	if (must_duplicate_resolve &&
+			dup_res_start(rw, tr, read_dup_res_start_cb)) {
+		return TRANS_IN_PROGRESS; // started duplicate resolution
 	}
 
 	if (must_ping) {
@@ -261,11 +260,11 @@ as_read_start(as_transaction* tr)
 //
 
 void
-start_read_dup_res(rw_request* rw, as_transaction* tr)
+read_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 {
 	// Finish initializing rw_request, construct and send dup-res message.
 
-	dup_res_make_message(rw, tr);
+	dup_res_make_message(rw, tr, r);
 
 	cf_mutex_lock(&rw->lock);
 

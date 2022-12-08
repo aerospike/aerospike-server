@@ -58,6 +58,8 @@
 
 const as_partition_version ZERO_VERSION = { 0 };
 
+#define AP_DUP_RES_CUTOFF_SAFETY_MS 3000
+
 
 //==========================================================
 // Globals.
@@ -101,7 +103,7 @@ void drop_trees(as_namespace* ns, as_partition* p);
 void fill_global_tables();
 void set_replication_factor_ap(as_namespace* ns);
 int find_working_master_ap(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns);
-uint32_t find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t working_master_n, cf_node dupls[]);
+uint32_t find_duplicates_ap(as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t working_master_n, cf_node dupls[]);
 void advance_version_ap(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns, uint32_t self_n,	uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[]);
 uint32_t fill_family_versions(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[], as_partition_version family_versions[]);
 bool has_replica_parent(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns, const as_partition_version* subset_version, uint32_t subset_n);
@@ -1115,7 +1117,7 @@ shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix,
 }
 
 uint32_t
-find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq,
+find_duplicates_ap(as_partition* p, const cf_node* ns_node_seq,
 		const sl_ix_t* ns_sl_ix, const as_namespace* ns,
 		uint32_t working_master_n, cf_node dupls[])
 {
@@ -1124,11 +1126,26 @@ find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq,
 
 	memset(parent_dupl_versions, 0, sizeof(parent_dupl_versions));
 
+	uint64_t one_ckey = 0;
+	bool reset_dup_res_ms = false;
+
 	for (uint32_t n = 0; n < ns->cluster_size; n++) {
 		const as_partition_version* version = INPUT_VERSION(n);
 
-		// Skip versions without data, and postpone subsets to next pass.
-		if (! as_partition_version_has_data(version) || version->subset == 1) {
+		// Skip versions without data.
+		if (! as_partition_version_has_data(version)) {
+			continue;
+		}
+
+		if (one_ckey == 0) {
+			one_ckey = version->ckey;
+		}
+		else if (version->ckey != one_ckey) {
+			reset_dup_res_ms = true; // duplicates have different ckeys
+		}
+
+		// Postpone subsets to next pass.
+		if (version->subset == 1) {
 			continue;
 		}
 
@@ -1153,6 +1170,12 @@ find_duplicates_ap(const as_partition* p, const cf_node* ns_node_seq,
 			parent_dupl_versions[n_dupl] = *version;
 			dupls[n_dupl++] = ns_node_seq[n];
 		}
+	}
+
+	// If duplicates did not all rebalance together before, reset dup-res time.
+	if (reset_dup_res_ms) {
+		p->dup_res_cutoff_ms = cf_clepoch_milliseconds() +
+				AP_DUP_RES_CUTOFF_SAFETY_MS;
 	}
 
 	// Second pass to deal with subsets.

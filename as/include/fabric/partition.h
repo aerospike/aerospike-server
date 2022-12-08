@@ -127,7 +127,9 @@ typedef struct as_partition_s {
 	// @ 40 bytes - room for 3 duplicates within above 64-byte cache line.
 	cf_node dupls[AS_CLUSTER_SZ];
 
-	uint8_t align_2[24];
+	uint64_t dup_res_cutoff_ms;
+
+	uint8_t align_2[16];
 	// @ 64-byte-aligned boundary.
 
 	bool immigrators[AS_CLUSTER_SZ];

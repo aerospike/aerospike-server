@@ -1,7 +1,7 @@
 /*
  * duplicate_resolve.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2016-2022 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -36,15 +36,24 @@
 // Forward declarations.
 //
 
+struct as_index_s;
 struct as_transaction_s;
 struct rw_request_s;
+
+
+//==========================================================
+// Typedefs & constants.
+//
+
+typedef void (*dup_res_start_cb) (struct rw_request_s* rw, struct as_transaction_s* tr, struct as_index_s* r);
 
 
 //==========================================================
 // Public API.
 //
 
-void dup_res_make_message(struct rw_request_s* rw, struct as_transaction_s* tr);
+bool dup_res_start(struct rw_request_s* rw, struct as_transaction_s* tr, dup_res_start_cb cb);
+void dup_res_make_message(struct rw_request_s* rw, struct as_transaction_s* tr, struct as_index_s* r);
 void dup_res_setup_rw(struct rw_request_s* rw, struct as_transaction_s* tr, dup_res_done_cb dup_res_cb, timeout_done_cb timeout_cb);
 void dup_res_handle_request(cf_node node, msg* m);
 void dup_res_handle_ack(cf_node node, msg* m);

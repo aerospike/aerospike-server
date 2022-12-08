@@ -44,7 +44,7 @@
 //
 
 uint32_t
-clock_skew_stop_writes_sec()
+clock_skew_stop_writes_sec(void)
 {
 	return 0;
 }

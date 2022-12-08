@@ -462,7 +462,7 @@ typedef enum {
 } conflict_resolution_pol;
 
 /* Record function declarations */
-uint32_t clock_skew_stop_writes_sec();
+uint32_t clock_skew_stop_writes_sec(void);
 bool as_record_handle_clock_skew(struct as_namespace_s* ns, uint64_t skew_ms);
 uint16_t plain_generation(uint16_t regime_generation, const struct as_namespace_s* ns);
 void as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms, const struct as_namespace_s* ns);

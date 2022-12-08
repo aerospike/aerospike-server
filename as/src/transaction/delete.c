@@ -63,7 +63,7 @@
 // Forward declarations.
 //
 
-void start_delete_dup_res(rw_request* rw, as_transaction* tr);
+void delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
 void start_delete_repl_write(rw_request* rw, as_transaction* tr);
 void start_delete_repl_write_forget(rw_request* rw, as_transaction* tr);
 bool delete_dup_res_cb(rw_request* rw);
@@ -251,11 +251,8 @@ as_delete_start(as_transaction* tr)
 
 	// If there are duplicates to resolve, start doing so.
 	// TODO - should we bother if there's no generation check?
-	if (tr->rsv.n_dupl != 0) {
-		start_delete_dup_res(rw, tr);
-
-		// Started duplicate resolution.
-		return TRANS_IN_PROGRESS;
+	if (tr->rsv.n_dupl != 0 && dup_res_start(rw, tr, delete_dup_res_start_cb)) {
+		return TRANS_IN_PROGRESS; // started duplicate resolution
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
@@ -298,11 +295,11 @@ as_delete_start(as_transaction* tr)
 //
 
 void
-start_delete_dup_res(rw_request* rw, as_transaction* tr)
+delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 {
 	// Finish initializing rw, construct and send dup-res message.
 
-	dup_res_make_message(rw, tr);
+	dup_res_make_message(rw, tr, r);
 
 	cf_mutex_lock(&rw->lock);
 
