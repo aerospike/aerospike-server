@@ -837,6 +837,7 @@ typedef struct as_namespace_s {
 	bool			storage_commit_to_device; // relevant only for enterprise edition
 	uint32_t		storage_commit_min_size; // relevant only for enterprise edition
 	as_compression_method storage_compression; // relevant only for enterprise edition
+	uint32_t		storage_compression_acceleration; // relevant only for enterprise edition
 	uint32_t		storage_compression_level; // relevant only for enterprise edition
 	bool			storage_data_in_memory;
 	uint32_t		storage_defrag_lwm_pct;

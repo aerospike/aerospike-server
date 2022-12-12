@@ -483,6 +483,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
 		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
+		info_append_uint32(db, "storage-engine.compression-acceleration", NS_COMPRESSION_ACCELERATION());
 		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
 		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
 		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
@@ -526,6 +527,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
 		info_append_uint32(db, "storage-engine.commit-min-size", ns->storage_commit_min_size);
 		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
+		info_append_uint32(db, "storage-engine.compression-acceleration", NS_COMPRESSION_ACCELERATION());
 		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
 		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
 		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
@@ -1933,6 +1935,19 @@ cfg_set_namespace(const char* cmd)
 		}
 		cf_info(AS_INFO, "Changing value of compression of ns %s from %s to %s",
 				ns->name, orig, v);
+	}
+	else if (as_info_parameter_get(cmd, "compression-acceleration", v,
+			&v_len) == 0) {
+		if (as_config_error_enterprise_only()) {
+			cf_warning(AS_INFO, "compression-acceleration is enterprise-only");
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < 1 || val > 65537) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of compression-acceleration of ns %s from %u to %d",
+				ns->name, ns->storage_compression_acceleration, val);
+		ns->storage_compression_acceleration = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "compression-level", v, &v_len) == 0) {
 		if (as_config_error_enterprise_only()) {

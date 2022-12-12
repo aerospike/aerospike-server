@@ -540,6 +540,7 @@ typedef enum {
 	// Namespace storage-engine pmem options:
 	CASE_NAMESPACE_STORAGE_PMEM_COMMIT_TO_DEVICE,
 	CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION,
+	CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_ACCELERATION,
 	CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_LEVEL,
 	CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_LWM_PCT,
 	CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_QUEUE_MIN,
@@ -565,6 +566,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_TO_DEVICE,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_MIN_SIZE,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION,
+	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ACCELERATION,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL,
 	CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT,
@@ -1078,6 +1080,7 @@ const cfg_opt NAMESPACE_SINDEX_TYPE_PMEM_OPTS[] = {
 const cfg_opt NAMESPACE_STORAGE_PMEM_OPTS[] = {
 		{ "commit-to-device",				CASE_NAMESPACE_STORAGE_PMEM_COMMIT_TO_DEVICE },
 		{ "compression",					CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION },
+		{ "compression-acceleration",		CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_ACCELERATION },
 		{ "compression-level",				CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_LEVEL },
 		{ "defrag-lwm-pct",					CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_LWM_PCT },
 		{ "defrag-queue-min",				CASE_NAMESPACE_STORAGE_PMEM_DEFRAG_QUEUE_MIN },
@@ -1105,6 +1108,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "commit-to-device",				CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_TO_DEVICE },
 		{ "commit-min-size",				CASE_NAMESPACE_STORAGE_DEVICE_COMMIT_MIN_SIZE },
 		{ "compression",					CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION },
+		{ "compression-acceleration",		CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ACCELERATION },
 		{ "compression-level",				CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL },
 		{ "data-in-memory",					CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY },
 		{ "defrag-lwm-pct",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT },
@@ -3255,6 +3259,9 @@ as_config_init(const char* config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_ACCELERATION:
+				ns->storage_compression_acceleration = cfg_u32(&line, 1, 65537);
+				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_COMPRESSION_LEVEL:
 				ns->storage_compression_level = cfg_u32(&line, 1, 9);
 				break;
@@ -3331,6 +3338,9 @@ as_config_init(const char* config_file)
 				if (ns->storage_commit_to_device && ns->storage_disable_odsync)	{
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);
 				}
+				if (ns->storage_compression_acceleration != 0 && ns->storage_compression != AS_COMPRESSION_LZ4) {
+					cf_crash_nostack(AS_CFG, "{%s} 'compression-acceleration' is only relevant for 'compression lz4'", ns->name);
+				}
 				if (ns->storage_compression_level != 0 && ns->storage_compression != AS_COMPRESSION_ZSTD) {
 					cf_crash_nostack(AS_CFG, "{%s} 'compression-level' is only relevant for 'compression zstd'", ns->name);
 				}
@@ -3382,6 +3392,10 @@ as_config_init(const char* config_file)
 					cfg_unknown_val_tok_1(&line);
 					break;
 				}
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ACCELERATION:
+				cfg_enterprise_only(&line);
+				ns->storage_compression_acceleration = cfg_u32(&line, 1, 65537);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL:
 				cfg_enterprise_only(&line);
@@ -3500,6 +3514,9 @@ as_config_init(const char* config_file)
 				}
 				if (ns->storage_commit_to_device && ns->storage_disable_odsync) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);
+				}
+				if (ns->storage_compression_acceleration != 0 && ns->storage_compression != AS_COMPRESSION_LZ4) {
+					cf_crash_nostack(AS_CFG, "{%s} 'compression-acceleration' is only relevant for 'compression lz4'", ns->name);
 				}
 				if (ns->storage_compression_level != 0 && ns->storage_compression != AS_COMPRESSION_ZSTD) {
 					cf_crash_nostack(AS_CFG, "{%s} 'compression-level' is only relevant for 'compression zstd'", ns->name);

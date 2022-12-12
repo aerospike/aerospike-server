@@ -109,6 +109,12 @@ typedef enum {
 						"illegal")))); \
 	})
 
+#define NS_COMPRESSION_ACCELERATION() ({ \
+		uint32_t acc = as_load_uint32(&ns->storage_compression_acceleration); \
+		(ns->storage_compression == AS_COMPRESSION_LZ4 && acc == 0 ? \
+				1 : acc); \
+	})
+
 #define NS_COMPRESSION_LEVEL() ({ \
 		uint32_t level = as_load_uint32(&ns->storage_compression_level); \
 		(ns->storage_compression == AS_COMPRESSION_ZSTD && level == 0 ? \
