@@ -75,7 +75,8 @@ dup_res_start(rw_request* rw, as_transaction* tr, dup_res_start_cb cb)
 	as_index_ref r_ref;
 
 	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) != 0) {
-		return false;
+		cb(rw, tr, NULL);
+		return true;
 	}
 
 	as_record* r = r_ref.r;
@@ -110,9 +111,10 @@ dup_res_make_message(rw_request* rw, as_transaction* tr, as_record* r)
 			MSG_SET_COPY);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
-	msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
-
+	if (r != NULL) {
+		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
+		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
+	}
 }
 
 void
