@@ -770,6 +770,7 @@ typedef struct as_namespace_s {
 	uint32_t		default_ttl;
 	bool			cold_start_eviction_disabled;
 	bool			write_dup_res_disabled;
+	bool			ap_disallow_drops;
 	bool			disallow_null_setname;
 	bool			batch_sub_benchmarks_enabled;
 	bool			ops_sub_benchmarks_enabled;

@@ -440,6 +440,7 @@ typedef enum {
 	CASE_NAMESPACE_DEFAULT_TTL,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
+	CASE_NAMESPACE_DISALLOW_EXPUNGE,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_OPS_SUB,
@@ -966,6 +967,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "default-ttl",					CASE_NAMESPACE_DEFAULT_TTL },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
+		{ "disallow-expunge",				CASE_NAMESPACE_DISALLOW_EXPUNGE },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
 		{ "enable-benchmarks-ops-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_OPS_SUB },
@@ -2855,6 +2857,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_DISABLE_WRITE_DUP_RES:
 				ns->write_dup_res_disabled = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_DISALLOW_EXPUNGE:
+				cfg_enterprise_only(&line);
+				ns->ap_disallow_drops = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_DISALLOW_NULL_SETNAME:
 				ns->disallow_null_setname = cfg_bool(&line);

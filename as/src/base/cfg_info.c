@@ -383,6 +383,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_uint32(db, "default-ttl", ns->default_ttl);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
+	info_append_bool(db, "disallow-expunge", ns->ap_disallow_drops);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-ops-sub", ns->ops_sub_benchmarks_enabled);
@@ -1276,6 +1277,30 @@ cfg_set_namespace(const char* cmd)
 			cf_info(AS_INFO, "Changing value of disable-write-dup-res of ns %s from %s to %s",
 					ns->name, bool_val[ns->write_dup_res_disabled], v);
 			ns->write_dup_res_disabled = false;
+		}
+		else {
+			return false;
+		}
+	}
+	else if (as_info_parameter_get(cmd, "disallow-expunge", v, &v_len) == 0) {
+		if (as_config_error_enterprise_only()) {
+			cf_warning(AS_INFO, "disallow-expunge is enterprise-only");
+			return false;
+		}
+		if (ns->cp) {
+			cf_warning(AS_INFO, "{%s} 'disallow-expunge' is not applicable with 'strong-consistency'",
+					ns->name);
+			return false;
+		}
+		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+			cf_info(AS_INFO, "Changing value of disallow-expunge of ns %s from %s to %s",
+					ns->name, bool_val[ns->ap_disallow_drops], v);
+			ns->ap_disallow_drops = true;
+		}
+		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+			cf_info(AS_INFO, "Changing value of disallow-expunge of ns %s from %s to %s",
+					ns->name, bool_val[ns->ap_disallow_drops], v);
+			ns->ap_disallow_drops = false;
 		}
 		else {
 			return false;
