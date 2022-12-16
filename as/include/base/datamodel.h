@@ -1365,21 +1365,32 @@ typedef struct as_set_s {
 	uint64_t		n_bytes_memory;		// for data-in-memory only - sets's total record data size
 	uint64_t		n_bytes_device;		// sets's total on-device record data size
 	uint64_t		stop_writes_count;	// restrict number of records in a set
+	uint64_t		stop_writes_size;	// restrict record data size (bytes) in a set
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
 	uint32_t		n_sindexes;
 	bool			eviction_disabled;	// don't evict anything in this set (note - expiration still works)
 	bool			index_enabled;
 	bool			index_populating;
-	uint8_t			pad[9];
+	uint8_t			pad[1];
 } as_set;
 
 COMPILER_ASSERT(sizeof(as_set) == 128);
 
 static inline bool
-as_set_stop_writes(as_set *p_set) {
+as_set_count_stop_writes(const as_set* p_set)
+{
 	uint64_t stop_writes_count = as_load_uint64(&p_set->stop_writes_count);
 
 	return stop_writes_count != 0 && p_set->n_objects >= stop_writes_count;
+}
+
+static inline bool
+as_set_size_stop_writes(const as_set* p_set, const as_namespace* ns)
+{
+	uint64_t stop_writes_size = as_load_uint64(&p_set->stop_writes_size);
+
+	return stop_writes_size != 0 && (ns->storage_data_in_memory ?
+			p_set->n_bytes_memory : p_set->n_bytes_device) > stop_writes_size;
 }
 
 // These bin functions must be below definition of struct as_namespace_s:
