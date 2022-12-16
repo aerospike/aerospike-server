@@ -739,8 +739,17 @@ write_master(rw_request* rw, as_transaction* tr)
 		}
 	}
 
+	as_set* p_set = as_namespace_get_record_set(ns, r);
+
+	// Enforce set size limit, if any.
+	if (as_set_size_stop_writes(p_set, ns)) {
+		cf_ticker_warning(AS_RW, "{%s|%s} at stop-writes-size - can't write", ns->name, p_set->name);
+		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_FORBIDDEN);
+		return TRANS_DONE_ERROR;
+	}
+
 	// Shortcut set name.
-	const char* set_name = as_index_get_set_name(r, ns);
+	const char* set_name = p_set == NULL ? NULL : p_set->name;
 
 	// If record existed, check that as_msg set name matches.
 	if (! record_created && tr->origin != FROM_IOPS &&

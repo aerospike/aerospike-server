@@ -195,6 +195,7 @@ as_namespace_configure_sets(as_namespace *ns)
 
 			// Transfer configurable metadata.
 			p_set->stop_writes_count = ns->sets_cfg_array[i].stop_writes_count;
+			p_set->stop_writes_size = ns->sets_cfg_array[i].stop_writes_size;
 			p_set->eviction_disabled = ns->sets_cfg_array[i].eviction_disabled;
 			p_set->index_enabled = ns->sets_cfg_array[i].index_enabled;
 		}
@@ -337,7 +338,9 @@ as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len,
 		return -1;
 	}
 
-	if (apply_restrictions && as_set_stop_writes(p_set)) {
+	if (apply_restrictions && as_set_count_stop_writes(p_set)) {
+		cf_ticker_warning(AS_NAMESPACE, "{%s|%s} at stop-writes-count - can't add record",
+				ns->name, p_set->name);
 		return -2;
 	}
 
@@ -701,5 +704,9 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, "stop-writes-count=");
 	cf_dyn_buf_append_uint64(db, p_set->stop_writes_count);
+	cf_dyn_buf_append_char(db, ':');
+
+	cf_dyn_buf_append_string(db, "stop-writes-size=");
+	cf_dyn_buf_append_uint64(db, p_set->stop_writes_size);
 	cf_dyn_buf_append_char(db, ';');
 }

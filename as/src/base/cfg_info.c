@@ -2217,6 +2217,15 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 				ns->name, p_set->name, val);
 		p_set->stop_writes_count = val;
 	}
+	else if (as_info_parameter_get(cmd, "stop-writes-size", v, &v_len) == 0) {
+		uint64_t val;
+		if (cf_str_atoi_u64(v, &val) != 0) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of stop-writes-size of ns %s set %s to %lu",
+				ns->name, p_set->name, val);
+		p_set->stop_writes_size = val;
+	}
 	else {
 		return false;
 	}

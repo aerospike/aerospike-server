@@ -345,6 +345,15 @@ execute_updates(udf_record* urecord)
 		return -1;
 	}
 
+	as_set* p_set = as_namespace_get_record_set(ns, rd->r);
+
+	if (as_set_size_stop_writes(p_set, ns)) {
+		cf_ticker_warning(AS_UDF, "{%s|%s} at stop-writes-size - can't execute",
+				ns->name, p_set->name);
+		execute_failed(urecord, AS_ERR_FORBIDDEN);
+		return -1;
+	}
+
 	// TODO - bad bin name is just ignored - no equivalent to this.
 	if (urecord->too_many_bins) {
 		execute_failed(urecord, AS_ERR_BIN_NAME);

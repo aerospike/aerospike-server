@@ -610,6 +610,7 @@ typedef enum {
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_INDEX,
 	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
+	CASE_NAMESPACE_SET_STOP_WRITES_SIZE,
 
 	// Namespace geo2dsphere within options:
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT,
@@ -1156,6 +1157,7 @@ const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "disable-eviction",				CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "enable-index",					CASE_NAMESPACE_SET_ENABLE_INDEX },
 		{ "stop-writes-count",				CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
+		{ "stop-writes-size",				CASE_NAMESPACE_SET_STOP_WRITES_SIZE },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -3543,6 +3545,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
 				p_set->stop_writes_count = cfg_u64_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_SET_STOP_WRITES_SIZE:
+				p_set->stop_writes_size = cfg_u64_no_checks(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
