@@ -1387,6 +1387,10 @@ as_set_count_stop_writes(const as_set* p_set)
 static inline bool
 as_set_size_stop_writes(const as_set* p_set, const as_namespace* ns)
 {
+	if (p_set == NULL) {
+		return false;
+	}
+
 	uint64_t stop_writes_size = as_load_uint64(&p_set->stop_writes_size);
 
 	return stop_writes_size != 0 && (ns->storage_data_in_memory ?
