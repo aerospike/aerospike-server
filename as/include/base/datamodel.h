@@ -785,6 +785,7 @@ typedef struct as_namespace_s {
 	uint32_t		hwm_memory_pct;
 	bool			ignore_migrate_fill_delay;
 	uint64_t		index_stage_size;
+	bool			inline_short_queries;
 	uint32_t		max_record_size;
 	uint64_t		memory_size;
 	uint32_t		migrate_order;

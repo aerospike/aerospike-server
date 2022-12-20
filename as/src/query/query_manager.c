@@ -105,6 +105,11 @@ as_query_manager_start_job(as_query_job* _job)
 		_job->start_ms_clepoch = cf_clepoch_milliseconds();
 	}
 
+	if (_job->do_inline) {
+		as_query_job_run((void*)_job);
+		return 0;
+	}
+
 	cf_mutex_lock(&g_mgr.lock);
 
 	if (g_n_query_threads >= g_config.n_query_threads_limit) {

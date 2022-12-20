@@ -398,6 +398,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_uint32(db, "high-water-memory-pct", ns->hwm_memory_pct);
 	info_append_bool(db, "ignore-migrate-fill-delay", ns->ignore_migrate_fill_delay);
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
+	info_append_bool(db, "inline-short-queries", ns->inline_short_queries);
 	info_append_uint32(db, "max-record-size", ns->max_record_size);
 	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
@@ -1507,6 +1508,26 @@ cfg_set_namespace(const char* cmd)
 			cf_info(AS_INFO, "Changing value of ignore-migrate-fill-delay of ns %s to %s",
 					ns->name, v);
 			ns->ignore_migrate_fill_delay = false;
+		}
+		else {
+			return false;
+		}
+	}
+	else if (as_info_parameter_get(cmd, "inline-short-queries", v,
+			&v_len) == 0) {
+		if (! ns->storage_data_in_memory) {
+			cf_warning(AS_INFO, "inline-short-queries can't be set unless data-in-memory");
+			return false;
+		}
+		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+			cf_info(AS_INFO, "Changing value of inline-short-queries of ns %s to %s",
+					ns->name, v);
+			ns->inline_short_queries = true;
+		}
+		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+			cf_info(AS_INFO, "Changing value of inline-short-queries of ns %s to %s",
+					ns->name, v);
+			ns->inline_short_queries = false;
 		}
 		else {
 			return false;

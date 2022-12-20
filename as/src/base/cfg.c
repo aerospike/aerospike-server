@@ -455,6 +455,7 @@ typedef enum {
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
 	CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
+	CASE_NAMESPACE_INLINE_SHORT_QUERIES,
 	CASE_NAMESPACE_MAX_RECORD_SIZE,
 	CASE_NAMESPACE_MEMORY_SIZE,
 	CASE_NAMESPACE_MIGRATE_ORDER,
@@ -983,6 +984,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
 		{ "ignore-migrate-fill-delay",		CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
+		{ "inline-short-queries",			CASE_NAMESPACE_INLINE_SHORT_QUERIES },
 		{ "max-record-size",				CASE_NAMESPACE_MAX_RECORD_SIZE },
 		{ "memory-size",					CASE_NAMESPACE_MEMORY_SIZE },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
@@ -2907,6 +2909,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_INDEX_STAGE_SIZE:
 				ns->index_stage_size = cfg_u64_power_of_2(&line, CF_ARENAX_MIN_STAGE_SIZE, CF_ARENAX_MAX_STAGE_SIZE);
 				break;
+			case CASE_NAMESPACE_INLINE_SHORT_QUERIES:
+				ns->inline_short_queries = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_MAX_RECORD_SIZE:
 				ns->max_record_size = cfg_u32_no_checks(&line);
 				break;
@@ -3125,6 +3130,9 @@ as_config_init(const char* config_file)
 				}
 				if (ns->conflict_resolve_writes && ns->single_bin) {
 					cf_crash_nostack(AS_CFG, "{%s} 'conflict-resolve-writes' can't be true if 'single-bin' is true", ns->name);
+				}
+				if (ns->inline_short_queries && ! ns->storage_data_in_memory) {
+					cf_crash_nostack(AS_CFG, "{%s} 'inline-short-queries' can't be true unless 'data-in-memory' is true", ns->name);
 				}
 				if (ns->max_record_size != 0) {
 					if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && ns->max_record_size > 128 * 1024 * 1024) { // PROTO_SIZE_MAX

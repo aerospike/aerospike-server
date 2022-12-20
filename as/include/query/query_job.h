@@ -124,6 +124,7 @@ typedef struct as_query_job_s {
 
 	// Query threading model:
 	bool is_short;
+	bool do_inline;
 
 	// Handle active phase:
 	uint32_t n_threads;

@@ -191,11 +191,14 @@ as_query_job_run(void* pv_job)
 		cf_buf_builder_free(bb);
 	}
 
-	as_decr_uint32(&g_n_query_threads);
+	int32_t n = 0;
 
-	int32_t n = (int32_t)as_aaf_uint32_rls(&_job->n_threads, -1);
+	if (! _job->do_inline) {
+		as_decr_uint32(&g_n_query_threads);
+		n = (int32_t)as_aaf_uint32_rls(&_job->n_threads, -1);
 
-	cf_assert(n >= 0, AS_QUERY, "query job thread underflow %d", n);
+		cf_assert(n >= 0, AS_QUERY, "query job thread underflow %d", n);
+	}
 
 	if (n == 0) {
 		// Subsequent finish/destroy may require an 'acquire' barrier.

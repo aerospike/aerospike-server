@@ -1390,6 +1390,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	// Short queries only for basic queries, but use base job member.
 	if (as_transaction_is_short_query(tr)) {
 		_job->is_short = true;
+		_job->do_inline = ns->inline_short_queries;
 	}
 
 	// TODO - temporary - won't need after January 2023.
