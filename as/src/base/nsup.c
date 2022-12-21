@@ -910,7 +910,7 @@ eval_stop_writes(as_namespace* ns)
 	}
 
 	if (device_used_pct > ns->storage_max_used_pct) {
-		strcat(reasons, "device-used-size & ");
+		strcat(reasons, "device-used-pct & ");
 	}
 
 	if (reasons[0] != '\0') {
