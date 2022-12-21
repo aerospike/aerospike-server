@@ -806,6 +806,7 @@ typedef struct as_namespace_s {
 	bool			single_bin; // restrict the namespace to objects with exactly one bin
 	uint32_t		n_single_query_threads;
 	uint32_t		stop_writes_pct;
+	uint32_t		stop_writes_sys_memory_pct;
 	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
 	uint32_t		transaction_pending_limit; // 0 means no limit
@@ -854,6 +855,7 @@ typedef struct as_namespace_s {
 	char*			storage_encryption_old_key_file; // relevant only for enterprise edition
 	uint64_t		storage_filesize;
 	uint64_t		storage_flush_max_us;
+	uint32_t		storage_max_used_pct;
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
 	uint32_t	 	storage_post_write_queue; // number of swbs/device held after writing to device

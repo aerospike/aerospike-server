@@ -50,6 +50,7 @@
 #include "base/index.h"
 #include "base/set_index.h"
 #include "base/smd.h"
+#include "base/thr_info.h"
 #include "fabric/partition.h"
 #include "sindex/gc.h"
 #include "sindex/sindex.h"
@@ -148,6 +149,7 @@ static void update_stats(as_namespace* ns, uint64_t n_0_void_time, uint64_t n_ex
 
 static void* run_stop_writes(void* udata);
 static bool eval_stop_writes(as_namespace* ns);
+static uint32_t sys_mem_pct(void);
 
 static void* run_nsup_histograms(void* udata);
 static void collect_nsup_histograms(as_namespace* ns);
@@ -670,46 +672,29 @@ eval_hwm_breached(as_namespace* ns)
 
 	uint64_t ssd_hwm = (ns->drive_size * ns->hwm_disk_pct) / 100;
 
-	static const char* reasons[] = {
-			NULL,												// 0x0
-			"(memory)",											// 0x1
-			"(index-device)",									// 0x2
-			"(memory & index-device)",							// 0x3 (1|2)
-			"(sindex-device)",									// 0x4
-			"(memory & sindex-device)",							// 0x5 (1|4)
-			"(index-device & sindex-device)",					// 0x6 (2|4)
-			"(memory & index-device & sindex-device)",			// 0x7 (1|2|4)
-			"(disk)",											// 0x8
-			"(memory & disk)",									// 0x9 (1|8)
-			"(index-device & disk)",							// 0xA (2|8)
-			"(memory & index-device & disk)",					// 0xB (1|2|8)
-			"(sindex-device & disk)",							// 0xC (4|8)
-			"(memory & sindex-device & disk)",					// 0xD (1|4|8)
-			"(index-device & sindex-device & disk)",			// 0xE (2|4|8)
-			"(memory & index-device & sindex-device & disk)",	// 0xF (1|2|4|8)
-	};
-
-	uint32_t how_breached = 0x0;
+	char reasons[128] = { 0 };
 
 	if (mem_hwm != 0 && mem_sz > mem_hwm) {
-		how_breached |= 0x1;
+		strcpy(reasons, "memory & ");
 	}
 
 	if (pix_hwm != 0 && index_dev_sz > pix_hwm) {
-		how_breached |= 0x2;
+		strcat(reasons, "index-device & ");
 	}
 
 	if (psix_hwm != 0 && sindex_dev_sz > psix_hwm) {
-		how_breached |= 0x4;
+		strcat(reasons, "sindex-device & ");
 	}
 
 	if (ssd_hwm != 0 && used_disk_sz > ssd_hwm) {
-		how_breached |= 0x8;
+		strcat(reasons, "disk & ");
 	}
 
-	if (how_breached != 0) {
-		cf_warning(AS_NSUP, "{%s} breached eviction hwm %s, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
-				ns->name, reasons[how_breached],
+	if (reasons[0] != '\0') {
+		reasons[strlen(reasons) - 3] = '\0'; // strip " & " off end
+
+		cf_warning(AS_NSUP, "{%s} breached eviction hwm (%s), memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
+				ns->name, reasons,
 				mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz, mem_hwm,
 				index_dev_tag,
 				sindex_dev_tag,
@@ -888,11 +873,9 @@ run_stop_writes(void* udata)
 static bool
 eval_stop_writes(as_namespace* ns)
 {
+	uint32_t sys_memory_pct = sys_mem_pct();
+
 	uint64_t mem_stop_writes = (ns->memory_size * ns->stop_writes_pct) / 100;
-
-	int device_avail_pct = 0;
-
-	as_storage_stats(ns, &device_avail_pct, NULL);
 
 	// Note that persisted index is not counted against stop-writes.
 	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
@@ -904,41 +887,64 @@ eval_stop_writes(as_namespace* ns)
 	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
 	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_mem_sz + dim_sz;
 
-	static const char* reasons[] = {
-			NULL,									// 0x0
-			"(memory)",								// 0x1
-			"(device-avail-pct)",					// 0x2
-			"(memory & device-avail-pct)"			// 0x3 (0x1 | 0x2)
-	};
+	int device_avail_pct = 0;
+	uint64_t device_used_sz = 0;
 
-	uint32_t why_stopped = 0x0;
+	as_storage_stats(ns, &device_avail_pct, &device_used_sz);
+
+	uint32_t device_used_pct = ns->drive_size == 0 ?
+			0 : (uint32_t)((device_used_sz * 100) / ns->drive_size);
+
+	char reasons[128] = { 0 };
+
+	if (sys_memory_pct > ns->stop_writes_sys_memory_pct) {
+		strcpy(reasons, "sys-memory & ");
+	}
 
 	if (mem_sz > mem_stop_writes) {
-		why_stopped |= 0x1;
+		strcat(reasons, "memory & ");
 	}
 
 	if (device_avail_pct < (int)ns->storage_min_avail_pct) {
-		why_stopped |= 0x2;
+		strcat(reasons, "device-avail-pct & ");
 	}
 
-	if (why_stopped != 0) {
-		cf_warning(AS_NSUP, "{%s} breached stop-writes limit %s, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
-				ns->name, reasons[why_stopped],
+	if (device_used_pct > ns->storage_max_used_pct) {
+		strcat(reasons, "device-used-size & ");
+	}
+
+	if (reasons[0] != '\0') {
+		reasons[strlen(reasons) - 3] = '\0'; // strip " & " off end
+
+		cf_warning(AS_NSUP, "{%s} breached stop-writes limit (%s), sys-memory pct:%u, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d used-pct:%u",
+				ns->name, reasons, sys_memory_pct,
 				mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
-				mem_stop_writes, device_avail_pct);
+				mem_stop_writes, device_avail_pct, device_used_pct);
 
 		ns->stop_writes = true;
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d",
-			ns->name,
+	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, sys-memory pct:%u, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d used-pct:%u",
+			ns->name, sys_memory_pct,
 			mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
-			mem_stop_writes, device_avail_pct);
+			mem_stop_writes, device_avail_pct, device_used_pct);
 
 	ns->stop_writes = false;
 
 	return false;
+}
+
+static uint32_t
+sys_mem_pct(void)
+{
+	uint64_t free_mem_kbytes;
+	uint32_t free_mem_pct;
+	uint64_t thp_mem_kbytes;
+
+	sys_mem_info(&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
+
+	return 100 - free_mem_pct;
 }
 
 

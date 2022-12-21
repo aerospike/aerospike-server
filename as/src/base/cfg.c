@@ -475,6 +475,7 @@ typedef enum {
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
+	CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_STRONG_CONSISTENCY,
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
 	CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE,
@@ -557,6 +558,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_PMEM_FILE,
 	CASE_NAMESPACE_STORAGE_PMEM_FILESIZE,
 	CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS,
+	CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT,
 	CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER,
@@ -585,6 +587,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_FILE,
 	CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE,
 	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
+	CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
@@ -1004,6 +1007,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
+		{ "stop-writes-sys-memory-pct",		CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT },
 		{ "strong-consistency",				CASE_NAMESPACE_STRONG_CONSISTENCY },
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
 		{ "tomb-raider-eligible-age",		CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE },
@@ -1100,6 +1104,7 @@ const cfg_opt NAMESPACE_STORAGE_PMEM_OPTS[] = {
 		{ "file",							CASE_NAMESPACE_STORAGE_PMEM_FILE },
 		{ "filesize",						CASE_NAMESPACE_STORAGE_PMEM_FILESIZE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS },
+		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT },
 		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER },
@@ -1130,6 +1135,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "file",							CASE_NAMESPACE_STORAGE_DEVICE_FILE },
 		{ "filesize",						CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
+		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
@@ -2985,6 +2991,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STOP_WRITES_PCT:
 				ns->stop_writes_pct = cfg_u32(&line, 0, 100);
 				break;
+			case CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT:
+				ns->stop_writes_sys_memory_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_STRONG_CONSISTENCY:
 				cfg_enterprise_only(&line);
 				ns->cp = cfg_bool(&line);
@@ -3332,6 +3341,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
 				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT:
+				ns->storage_max_used_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
 				break;
@@ -3475,6 +3487,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT:
+				ns->storage_max_used_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);

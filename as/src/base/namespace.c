@@ -116,7 +116,8 @@ as_namespace_create(char *name)
 	ns->replication_factor = 0; // gets set on rebalance
 	ns->sindex_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->n_single_query_threads = 4; // maximum number of threads a single query may run
-	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
+	ns->stop_writes_pct = 90; // stop writes when 90% of configured namespace memory limit is used
+	ns->stop_writes_sys_memory_pct = 90; // stop writes when 90% of system memory is used
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
 	ns->transaction_pending_limit = 20;
@@ -137,6 +138,7 @@ as_namespace_create(char *name)
 	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock
 	ns->storage_encryption = AS_ENCRYPTION_AES_128;
 	ns->storage_flush_max_us = 1000 * 1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
+	ns->storage_max_used_pct = 70; // stop writes when > 70% disk is used
 	ns->storage_max_write_cache = DEFAULT_MAX_WRITE_CACHE;
 	ns->storage_min_avail_pct = 5; // stop writes when < 5% disk is writable
 	ns->storage_post_write_queue = DEFAULT_POST_WRITE_QUEUE; // number of wblocks per device used as post-write cache

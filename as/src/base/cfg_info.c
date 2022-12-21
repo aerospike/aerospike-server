@@ -418,6 +418,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_uint32(db, "single-query-threads", ns->n_single_query_threads);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
+	info_append_uint32(db, "stop-writes-sys-memory-pct", ns->stop_writes_sys_memory_pct);
 	info_append_bool(db, "strong-consistency", ns->cp);
 	info_append_bool(db, "strong-consistency-allow-expunge", ns->cp_allow_drops);
 	info_append_uint32(db, "tomb-raider-eligible-age", ns->tomb_raider_eligible_age);
@@ -506,6 +507,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint32(db, "storage-engine.max-used-pct", ns->storage_max_used_pct);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
@@ -551,6 +553,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint32(db, "storage-engine.max-used-pct", ns->storage_max_used_pct);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
@@ -1777,6 +1780,15 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->stop_writes_pct, val);
 		ns->stop_writes_pct = (uint32_t)val;
 	}
+	else if (as_info_parameter_get(cmd, "stop-writes-sys-memory-pct", v,
+			&v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of stop-writes-sys-memory-pct memory of ns %s from %u to %d ",
+				ns->name, ns->stop_writes_sys_memory_pct, val);
+		ns->stop_writes_sys_memory_pct = (uint32_t)val;
+	}
 	else if (as_info_parameter_get(cmd, "strong-consistency-allow-expunge", v,
 			&v_len) == 0) {
 		if (! ns->cp) {
@@ -2064,6 +2076,21 @@ cfg_set_namespace(const char* cmd)
 		cf_info(AS_INFO, "Changing value of flush-max-ms of ns %s from %lu to %d",
 				ns->name, ns->storage_flush_max_us / 1000, val);
 		ns->storage_flush_max_us = (uint64_t)val * 1000;
+	}
+	else if (as_info_parameter_get(cmd, "max-used-pct", v, &v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0) {
+			cf_warning(AS_INFO, "ns %s, max-used-pct %s is not a number",
+					ns->name, v);
+			return false;
+		}
+		if (val > 100 || val < 0) {
+			cf_warning(AS_INFO, "ns %s, max-used-pct %d must be between 0 and 100",
+					ns->name, val);
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of max-used-pct of ns %s from %u to %d ",
+				ns->name, ns->storage_max_used_pct, val);
+		ns->storage_max_used_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "max-write-cache", v, &v_len) == 0) {
 		uint64_t val_u64;
