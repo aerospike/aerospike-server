@@ -36,6 +36,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <linux/capability.h>
+#include <linux/fs.h> // for BLKGETSIZE64
+#include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/types.h>
 
@@ -5202,5 +5204,42 @@ cfg_best_practices_check(void)
 		check_failed(&g_bad_practices, "memory-size",
 				"'memory-size' for all namespaces (%lu) exceeds system RAM (%lu)",
 				ns_mem, sys_mem);
+	}
+
+	uint32_t margin = 8 * 1024 * 1024; // header size ... use write-block-size?
+
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		uint64_t max_sz = 0;
+		uint64_t min_sz = UINT64_MAX;
+
+		for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
+			int fd = open(ns->storage_devices[i], O_RDWR | O_DIRECT);
+
+			if (fd == -1) {
+				cf_crash(AS_CFG, "{%s} unable to open device %s: %s", ns->name,
+						ns->storage_devices[i], cf_strerror(errno));
+			}
+
+			uint64_t sz = 0;
+
+			ioctl(fd, BLKGETSIZE64, &sz); // gets the number of bytes
+			close(fd);
+
+			if (sz > max_sz) {
+				max_sz = sz;
+			}
+
+			if (sz < min_sz) {
+				min_sz = sz;
+			}
+		}
+
+		if (max_sz != 0 && max_sz - min_sz > margin) {
+			check_failed(&g_bad_practices, "device",
+					"{%s} 'device' sizes must match to within %u bytes",
+					ns->name, margin);
+		}
 	}
 }
