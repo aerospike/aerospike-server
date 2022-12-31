@@ -394,9 +394,13 @@ btree_addsinglerec(as_sindex_metadata *imd, cf_arenax_handle r_h,
 	uint16_t rc = r->rc;
 
 	// Once sindex is marked for destruction, write can reset in_sindex.
-	cf_assert(imd->si->state == AS_SINDEX_DESTROY || rc > 0, AS_SINDEX,
-			"invalid rc %u in_sindex %u gen %lu si-state %u", rc,
-			(uint16_t)r->in_sindex, (uint64_t)r->generation, imd->si->state);
+	as_set *p_set;
+	cf_assert(rc > 0 || imd->si->state == AS_SINDEX_DESTROY, AS_SINDEX,
+			"{%s|%s} keyd %pD rc 0 in_sindex %u gen %lu si %s si-state %u",
+			ns->name, (p_set = as_namespace_get_record_set(ns, r)) != NULL ?
+					p_set->name : "null",
+			&r->keyd, (uint16_t)r->in_sindex, (uint64_t)r->generation,
+			imd->iname, imd->si->state);
 
 	if (! as_query_reserve_partition_tree(ns, qctx, pid) ||
 			r->tree_id != qctx->reserved_trees[pid]->id ||
@@ -889,6 +893,12 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd,
 			break;
 		}
 		ai_obj *ikey = be->key;
+
+		// If we paused at the sub-tree boundary, do the whole new sub-tree.
+		if (! ai_objEQ(ibtr_last_key, ikey)) {
+			*nbtr_last_key = 0;
+		}
+
 		ai_nbtr *anbtr = be->val;
 		if (!anbtr) {
 			break;
