@@ -36,9 +36,9 @@
 #include <unistd.h>
 
 #include "aerospike/as_atomic.h"
+#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
 
-#include "cf_mutex.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
 #include "log.h"
@@ -56,10 +56,24 @@
 // Typedefs & constants.
 //
 
+typedef struct truncate_job_s {
+	as_namespace* ns;
+	as_set* p_set;
+	uint16_t set_id;
+	bool use_set_index;
+	uint64_t lut;
+	uint32_t n_threads;
+	uint32_t pid;
+	uint64_t n_deleted;
+} truncate_job;
+
 typedef struct truncate_reduce_cb_info_s {
 	as_namespace* ns;
+	as_set* p_set;
+	uint16_t set_id;
+	uint64_t lut;
 	as_index_tree* tree;
-	int64_t n_deleted;
+	uint64_t n_deleted;
 } truncate_reduce_cb_info;
 
 // Includes 1 for delimiter and 1 for null-terminator.
@@ -78,9 +92,7 @@ static void truncate_smd_accept_cb(const cf_vector* items, as_smd_accept_type ac
 
 static void truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut);
 static void truncate_action_undo(as_namespace* ns, const char* set_name);
-static void truncate_all(as_namespace* ns);
 static void* run_truncate(void* arg);
-static void truncate_finish(as_namespace* ns);
 static bool truncate_reduce_cb(as_index_ref* r_ref, void* udata);
 
 
@@ -106,9 +118,6 @@ as_truncate_init(void)
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		truncate_startup_hash_init(ns);
-
-		ns->truncate.state = TRUNCATE_IDLE;
-		cf_mutex_init(&ns->truncate.state_lock);
 	}
 
 	as_smd_module_load(AS_SMD_MODULE_TRUNCATE, truncate_smd_accept_cb,
@@ -226,7 +235,7 @@ as_truncate_now_is_truncated(struct as_namespace_s* ns, uint16_t set_id)
 {
 	uint64_t now = cf_clepoch_milliseconds();
 
-	if (now < ns->truncate.lut) {
+	if (now < ns->truncate_lut) {
 		return true;
 	}
 
@@ -238,7 +247,7 @@ as_truncate_now_is_truncated(struct as_namespace_s* ns, uint16_t set_id)
 bool
 as_truncate_record_is_truncated(const as_record* r, as_namespace* ns)
 {
-	if (r->last_update_time < ns->truncate.lut) {
+	if (r->last_update_time < ns->truncate_lut) {
 		return true;
 	}
 
@@ -309,8 +318,14 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 				lut - now);
 	}
 
+	as_set* p_set = NULL;
+	uint16_t set_id = INVALID_SET_ID;
+
+	uint32_t n_threads = as_load_uint32(&ns->n_truncate_threads);
+
 	if (set_name != NULL) {
-		as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
+		set_id = as_namespace_get_set_id(ns, set_name);
+		p_set = as_namespace_get_set_by_id(ns, set_id);
 
 		if (p_set == NULL) {
 			cf_info(AS_TRUNCATE, "{%s|%s} truncate for nonexistent set",
@@ -324,44 +339,42 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 			return;
 		}
 
-		cf_info(AS_TRUNCATE, "{%s|%s} truncating to %lu", ns->name, set_name,
-				lut);
+		cf_info(AS_TRUNCATE, "{%s|%s} truncating to %lu on %u threads",
+				ns->name, set_name, lut, n_threads);
 
 		p_set->truncate_lut = lut;
+		p_set->truncating = true;
 	}
 	else {
-		if (lut <= ns->truncate.lut) {
+		if (lut <= ns->truncate_lut) {
 			cf_info(AS_TRUNCATE, "{%s} truncate lut %lu <= ns lut %lu",
-					ns->name, lut, ns->truncate.lut);
+					ns->name, lut, ns->truncate_lut);
 			return;
 		}
 
-		cf_info(AS_TRUNCATE, "{%s} truncating to %lu", ns->name, lut);
+		cf_info(AS_TRUNCATE, "{%s} truncating to %lu on %u threads", ns->name,
+				lut, n_threads);
 
-		ns->truncate.lut = lut;
+		ns->truncate_lut = lut;
+		ns->truncating = true;
 	}
 
 	// Truncate to new last-update-time.
 
-	cf_mutex_lock(&ns->truncate.state_lock);
+	truncate_job* jobi = cf_malloc(sizeof(truncate_job));
 
-	switch (ns->truncate.state) {
-	case TRUNCATE_IDLE:
-		truncate_all(ns);
-		break;
-	case TRUNCATE_RUNNING:
-		cf_info(AS_TRUNCATE, "{%s} flagging truncate to restart", ns->name);
-		ns->truncate.state = TRUNCATE_RESTART;
-		break;
-	case TRUNCATE_RESTART:
-		cf_info(AS_TRUNCATE, "{%s} truncate already will restart", ns->name);
-		break;
-	default:
-		cf_crash(AS_TRUNCATE, "bad truncate state %d", ns->truncate.state);
-		break;
+	*jobi = (truncate_job){
+			.ns = ns,
+			.p_set = p_set,
+			.set_id = set_id,
+			.use_set_index = p_set != NULL ? p_set->n_tombstones == 0 : false,
+			.lut = lut,
+			.n_threads = n_threads
+	};
+
+	for (uint32_t i = 0; i < n_threads; i++) {
+		cf_thread_create_transient(run_truncate, jobi);
 	}
-
-	cf_mutex_unlock(&ns->truncate.state_lock);
 }
 
 static void
@@ -380,127 +393,126 @@ truncate_action_undo(as_namespace* ns, const char* set_name)
 				set_name, p_set->truncate_lut);
 
 		p_set->truncate_lut = 0;
+		p_set->truncating = false;
 	}
 	else {
 		cf_info(AS_TRUNCATE, "{%s} undoing truncate - was to %lu", ns->name,
-				ns->truncate.lut);
+				ns->truncate_lut);
 
-		ns->truncate.lut = 0;
-	}
-}
-
-// Called under truncate lock.
-static void
-truncate_all(as_namespace* ns)
-{
-	// TODO - skipping sindex deletion shortcut - can't do that if we want to
-	// keep writing through set truncates. Is this ok?
-
-	uint32_t n_threads = as_load_uint32(&ns->n_truncate_threads);
-
-	cf_info(AS_TRUNCATE, "{%s} %s truncate on %u threads", ns->name,
-			ns->truncate.state == TRUNCATE_IDLE ? "starting" : "restarting",
-			n_threads);
-
-	ns->truncate.state = TRUNCATE_RUNNING;
-	as_store_uint32(&ns->truncate.n_threads_running, n_threads);
-	as_store_uint32(&ns->truncate.pid, 0);
-
-	as_store_uint64(&ns->truncate.n_records_this_run, 0);
-
-	for (uint32_t i = 0; i < n_threads; i++) {
-		cf_thread_create_transient(run_truncate, (void*)ns);
+		ns->truncate_lut = 0;
+		ns->truncating = false;
 	}
 }
 
 static void*
 run_truncate(void* arg)
 {
-	as_namespace* ns = (as_namespace*)arg;
+	truncate_job* jobi = (truncate_job*)arg;
+	as_namespace* ns = jobi->ns;
+	as_set* p_set = jobi->p_set;
+	uint64_t lut = jobi->lut;
 	uint32_t pid;
 
-	while ((pid = as_faa_uint32(&ns->truncate.pid, 1)) < AS_PARTITIONS) {
+	while ((pid = as_faa_uint32(&jobi->pid, 1)) < AS_PARTITIONS) {
 		as_partition_reservation rsv;
 		as_partition_reserve(ns, pid, &rsv);
 
-		truncate_reduce_cb_info cb_info = { .ns = ns, .tree = rsv.tree };
+		truncate_reduce_cb_info cbi = {
+				.ns = ns,
+				.p_set = jobi->p_set,
+				.set_id = jobi->set_id,
+				.lut = lut,
+				.tree = rsv.tree
+		};
 
-		as_index_reduce(rsv.tree, truncate_reduce_cb, (void*)&cb_info);
-		as_partition_release(&rsv);
-
-		as_add_uint64(&ns->truncate.n_records_this_run, cb_info.n_deleted);
-	}
-
-	truncate_finish(ns);
-
-	return NULL;
-}
-
-static void
-truncate_finish(as_namespace* ns)
-{
-	if (as_aaf_uint32(&ns->truncate.n_threads_running, -1) == 0) {
-		cf_mutex_lock(&ns->truncate.state_lock);
-
-		ns->truncate.n_records += ns->truncate.n_records_this_run;
-
-		cf_info(AS_TRUNCATE, "{%s} truncated records (%lu,%lu)", ns->name,
-				ns->truncate.n_records_this_run, ns->truncate.n_records);
-
-		switch (ns->truncate.state) {
-		case TRUNCATE_RUNNING:
-			cf_info(AS_TRUNCATE, "{%s} done truncate", ns->name);
-			ns->truncate.state = TRUNCATE_IDLE;
-			break;
-		case TRUNCATE_RESTART:
-			truncate_all(ns);
-			break;
-		case TRUNCATE_IDLE:
-		default:
-			cf_crash(AS_TRUNCATE, "bad truncate state %d", ns->truncate.state);
-			break;
+		if (! (jobi->use_set_index && as_set_index_reduce(ns, rsv.tree,
+				jobi->set_id, NULL, truncate_reduce_cb, (void*)&cbi))) {
+			as_index_reduce(rsv.tree, truncate_reduce_cb, (void*)&cbi);
 		}
 
-		cf_mutex_unlock(&ns->truncate.state_lock);
+		as_partition_release(&rsv);
+
+		as_add_uint64(&jobi->n_deleted, (int64_t)cbi.n_deleted);
 	}
+
+	if (as_aaf_uint32(&jobi->n_threads, -1) == 0) {
+		if (p_set != NULL) {
+			if (p_set->truncate_lut == lut) {
+				cf_info(AS_TRUNCATE, "{%s|%s} done truncate to %lu deleted %lu",
+						ns->name, p_set->name, lut, jobi->n_deleted);
+
+				p_set->truncating = false;
+			}
+			else {
+				cf_info(AS_TRUNCATE, "{%s|%s} abandoned truncate to %lu deleted %lu - truncate-lut is now %lu",
+						ns->name, p_set->name, lut, jobi->n_deleted,
+						p_set->truncate_lut);
+			}
+		}
+		else {
+			if (ns->truncate_lut == lut) {
+				cf_info(AS_TRUNCATE, "{%s} done truncate to %lu deleted %lu",
+						ns->name, lut, jobi->n_deleted);
+
+				ns->truncating = false;
+			}
+			else {
+				cf_info(AS_TRUNCATE, "{%s} abandoned truncate to %lu deleted %lu - truncate-lut is now %lu",
+						ns->name, lut, jobi->n_deleted, ns->truncate_lut);
+			}
+		}
+
+		cf_free(jobi);
+	}
+
+	return NULL;
 }
 
 static bool
 truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_record* r = r_ref->r;
-	truncate_reduce_cb_info* cb_info = (truncate_reduce_cb_info*)udata;
-	as_namespace* ns = cb_info->ns;
-	as_index_tree* tree = cb_info->tree;
+	truncate_reduce_cb_info* cbi = (truncate_reduce_cb_info*)udata;
+	as_namespace* ns = cbi->ns;
+	as_set* p_set = cbi->p_set;
+	as_index_tree* tree = cbi->tree;
 
-	if (r->last_update_time < ns->truncate.lut) {
-		cb_info->n_deleted++;
-
-		if (ns->storage_data_in_memory ||
-				ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
-			remove_from_sindex(ns, r_ref);
+	if (p_set != NULL) {
+		if (p_set->truncate_lut != cbi->lut) {
+			as_record_done(r_ref, ns);
+			return false;
 		}
 
-		as_set_index_delete_live(ns, tree, r, r_ref->r_h);
-		as_index_delete(tree, &r->keyd);
-		as_record_done(r_ref, ns);
-		as_sindex_gc_record_throttle(ns);
-		return true;
+		if (as_index_get_set_id(r) == cbi->set_id &&
+				r->last_update_time < cbi->lut) {
+			cbi->n_deleted++;
+
+			if (ns->storage_data_in_memory ||
+					ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
+				remove_from_sindex(ns, r_ref);
+			}
+
+			as_set_index_delete_live(ns, tree, r, r_ref->r_h);
+			as_index_delete(tree, &r->keyd);
+		}
 	}
-
-	as_set* p_set = as_namespace_get_record_set(ns, r);
-
-	// Delete records not updated since their set's threshold last-update-time.
-	if (p_set != NULL && r->last_update_time < p_set->truncate_lut) {
-		cb_info->n_deleted++;
-
-		if (ns->storage_data_in_memory ||
-				ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
-			remove_from_sindex(ns, r_ref);
+	else {
+		if (ns->truncate_lut != cbi->lut) {
+			as_record_done(r_ref, ns);
+			return false;
 		}
 
-		as_set_index_delete_live(ns, tree, r, r_ref->r_h);
-		as_index_delete(tree, &r->keyd);
+		if (r->last_update_time < cbi->lut) {
+			cbi->n_deleted++;
+
+			if (ns->storage_data_in_memory ||
+					ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
+				remove_from_sindex(ns, r_ref);
+			}
+
+			as_set_index_delete_live(ns, tree, r, r_ref->r_h);
+			as_index_delete(tree, &r->keyd);
+		}
 	}
 
 	as_record_done(r_ref, ns);

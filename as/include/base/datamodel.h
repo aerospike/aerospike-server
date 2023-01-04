@@ -718,7 +718,9 @@ typedef struct as_namespace_s {
 	// Truncate records.
 	//
 
-	as_truncate		truncate;
+	uint64_t		truncate_lut;
+	cf_shash*		truncate_startup_set_hash; // relevant only for enterprise edition
+	bool			truncating;
 
 	//--------------------------------------------
 	// Secondary index.
@@ -1374,7 +1376,7 @@ typedef struct as_set_s {
 	bool			eviction_disabled;	// don't evict anything in this set (note - expiration still works)
 	bool			index_enabled;
 	bool			index_populating;
-	uint8_t			pad[1];
+	bool			truncating;
 } as_set;
 
 COMPILER_ASSERT(sizeof(as_set) == 128);

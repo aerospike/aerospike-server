@@ -694,6 +694,10 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_bool(db, p_set->index_populating);
 	cf_dyn_buf_append_char(db, ':');
 
+	cf_dyn_buf_append_string(db, "truncating=");
+	cf_dyn_buf_append_bool(db, p_set->truncating);
+	cf_dyn_buf_append_char(db, ':');
+
 	// Configuration:
 
 	cf_dyn_buf_append_string(db, "disable-eviction=");

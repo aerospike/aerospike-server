@@ -4140,8 +4140,8 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	// Truncate stats.
 
-	info_append_uint64(db, "truncate_lut", ns->truncate.lut);
-	info_append_uint64(db, "truncated_records", ns->truncate.n_records);
+	info_append_uint64(db, "truncate_lut", ns->truncate_lut);
+	info_append_bool(db, "truncating", ns->truncating);
 
 	// Sindex GC stats.
 
