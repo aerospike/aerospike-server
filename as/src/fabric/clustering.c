@@ -3729,6 +3729,9 @@ msg_succession_list_field_set(msg* msg, cf_vector* succession_list,
 	size_t buffer_size = num_elements * sizeof(cf_node);
 	cf_node* succession_buffer = (cf_node*)BUFFER_ALLOC_OR_DIE(buffer_size);
 
+	// Make GCC understand that sucession_buffer is initialized.
+	cf_assert(num_elements > 0, AS_CLUSTERING, "num_elements == 0");
+
 	for (int i = 0; i < num_elements; i++) {
 		cf_vector_get(succession_list, i, &succession_buffer[i]);
 	}

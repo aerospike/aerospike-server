@@ -1592,6 +1592,9 @@ hmh_estimate_union_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 static void
 hmh_compatible_template(uint32_t n_hmhs, const hll_t** hmhs, hll_t* template)
 {
+	// Make GCC understand that hmhs[0] is initialized.
+	cf_assert(n_hmhs != 0, AS_PARTICLE, "n_hmhs == 0");
+
 	uint8_t index_bits = hmhs[0]->n_index_bits;
 	uint64_t minhash_bits = hmhs[0]->n_minhash_bits;
 

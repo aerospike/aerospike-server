@@ -27,6 +27,7 @@
 //
 
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -78,7 +79,7 @@ void cf_thread_remove_exit(cf_thread_exit_fn cb);
 static inline void
 cf_thread_yield(void)
 {
-	pthread_yield();
+	sched_yield();
 }
 
 static inline void
