@@ -953,7 +953,7 @@ as_batch_queue_task(as_transaction* btr)
 		batch_queue = as_batch_find_queue(queue_index);
 
 		if (! batch_queue) {
-			cf_warning(AS_BATCH, "Failed to find active batch queue that is not full");
+			cf_ticker_warning(AS_BATCH, "failed to find active batch queue that is not full");
 			cf_free(shared);
 			return as_batch_send_error(btr, AS_ERR_BATCH_QUEUES_FULL);
 		}
