@@ -394,6 +394,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_bool(db, "enable-hist-proxy", ns->proxy_hist_enabled);
 	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
 	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
+	info_append_bool(db, "force-long-queries", ns->force_long_queries);
 	info_append_uint32(db, "high-water-disk-pct", ns->hwm_disk_pct);
 	info_append_uint32(db, "high-water-memory-pct", ns->hwm_memory_pct);
 	info_append_bool(db, "ignore-migrate-fill-delay", ns->ignore_migrate_fill_delay);
@@ -1477,6 +1478,21 @@ cfg_set_namespace(const char* cmd)
 		cf_info(AS_INFO, "Changing value of evict-tenths-pct memory of ns %s from %d to %d ",
 				ns->name, ns->evict_tenths_pct, atoi(v));
 		ns->evict_tenths_pct = atoi(v);
+	}
+	else if (as_info_parameter_get(cmd, "force-long-queries", v, &v_len) == 0) {
+		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+			cf_info(AS_INFO, "Changing value of force-long-queries of ns %s to %s",
+					ns->name, v);
+			ns->force_long_queries = true;
+		}
+		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+			cf_info(AS_INFO, "Changing value of force-long-queries of ns %s to %s",
+					ns->name, v);
+			ns->force_long_queries = false;
+		}
+		else {
+			return false;
+		}
 	}
 	else if (as_info_parameter_get(cmd, "high-water-disk-pct", v,
 			&v_len) == 0) {

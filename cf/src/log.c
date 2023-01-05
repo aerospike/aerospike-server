@@ -83,6 +83,7 @@ static const char* context_strings[] = {
 		"as",
 		"audit",
 		"batch",
+		"batch-sub",
 		"bin",
 		"config",
 		"clustering",

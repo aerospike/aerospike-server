@@ -45,6 +45,7 @@
 #include "log.h"
 
 #include "base/cfg.h"
+#include "base/cfg_info.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/set_index.h"
@@ -161,9 +162,13 @@ run_ticker(void* arg)
 void
 log_ticker_frame(uint64_t delta_time)
 {
-	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u",
+	char cluster_name[AS_CLUSTER_NAME_SZ];
+	as_cfg_info_get_printable_cluster_name(cluster_name);
+
+	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u CLUSTER-NAME %s",
 			g_config.self_node,
-			as_exchange_cluster_size());
+			as_exchange_cluster_size(),
+			cluster_name);
 
 	log_line_clock();
 	log_line_system();

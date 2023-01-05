@@ -1388,7 +1388,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	as_query_job* _job = (as_query_job*)job;
 
 	// Short queries only for basic queries, but use base job member.
-	if (as_transaction_is_short_query(tr)) {
+	if (as_transaction_is_short_query(tr) && ! ns->force_long_queries) {
 		_job->is_short = true;
 		_job->do_inline = ns->inline_short_queries;
 	}

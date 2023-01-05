@@ -60,6 +60,7 @@ typedef enum {
 	AS_AS,
 	AS_AUDIT,
 	AS_BATCH,
+	AS_BATCH_SUB, // special detail context
 	AS_BIN,
 	AS_CFG,
 	AS_CLUSTERING,
