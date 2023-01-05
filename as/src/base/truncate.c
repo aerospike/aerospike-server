@@ -411,23 +411,32 @@ run_truncate(void* arg)
 	as_namespace* ns = jobi->ns;
 	as_set* p_set = jobi->p_set;
 	uint64_t lut = jobi->lut;
+
+	truncate_reduce_cb_info cbi = {
+			.ns = ns,
+			.p_set = jobi->p_set,
+			.set_id = jobi->set_id,
+			.lut = lut
+	};
+
 	uint32_t pid;
 
 	while ((pid = as_faa_uint32(&jobi->pid, 1)) < AS_PARTITIONS) {
 		as_partition_reservation rsv;
 		as_partition_reserve(ns, pid, &rsv);
 
-		truncate_reduce_cb_info cbi = {
-				.ns = ns,
-				.p_set = jobi->p_set,
-				.set_id = jobi->set_id,
-				.lut = lut,
-				.tree = rsv.tree
-		};
+		as_index_tree* tree = rsv.tree;
 
-		if (! (jobi->use_set_index && as_set_index_reduce(ns, rsv.tree,
+		if (tree == NULL) {
+			as_partition_release(&rsv);
+			continue;
+		}
+
+		cbi.tree = tree;
+
+		if (! (jobi->use_set_index && as_set_index_reduce(ns, tree,
 				jobi->set_id, NULL, truncate_reduce_cb, (void*)&cbi))) {
-			as_index_reduce(rsv.tree, truncate_reduce_cb, (void*)&cbi);
+			as_index_reduce(tree, truncate_reduce_cb, (void*)&cbi);
 		}
 
 		as_partition_release(&rsv);
