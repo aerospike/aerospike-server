@@ -117,6 +117,9 @@ typedef struct prep_evict_per_thread_info_s {
 
 #define EVICT_SMD_TIMEOUT (5 * 1000) // 5 seconds
 
+#define TOO_LONG_MS (2 * 60 * 60 * 1000) // 2 hours
+#define TOO_MUCH_DELETED_PCT 1.0
+
 #define EVAL_STOP_WRITES_PERIOD 10 // seconds
 
 #define EVAL_WRITE_STATE_FREQUENCY 1024
@@ -847,6 +850,17 @@ update_stats(as_namespace* ns, uint64_t n_0_void_time,
 			ns->n_evicted_objects, n_evicted_objects,
 			ns->evict_ttl,
 			total_duration_ms);
+
+	if (total_duration_ms > TOO_LONG_MS) {
+		double pct_deleted =
+				(double)(n_expired_objects + n_evicted_objects) * 100.0 /
+				(double)ns->n_objects;
+
+		if (pct_deleted > TOO_MUCH_DELETED_PCT) {
+			cf_warning(AS_NSUP, "{%s} nsup deleted %.2f%% of namespace - configure more nsup threads?",
+					ns->name, pct_deleted);
+		}
+	}
 }
 
 
