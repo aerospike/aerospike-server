@@ -145,7 +145,8 @@ typedef struct as_query_job_s {
 
 	// For tracking:
 	char client[64];
-	uint16_t n_pids_requested;
+	uint16_t n_pids_requested; // also to limit threads
+	uint16_t n_keyds_requested;
 	uint64_t start_ns;
 	uint64_t finish_ns;
 	uint64_t n_throttled;

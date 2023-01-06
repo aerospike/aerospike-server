@@ -328,6 +328,9 @@ as_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 	if (_job->n_pids_requested != 0) {
 		cf_dyn_buf_append_string(db, ":n-pids-requested=");
 		cf_dyn_buf_append_uint32(db, _job->n_pids_requested);
+
+		cf_dyn_buf_append_string(db, ":n-keyds-requested=");
+		cf_dyn_buf_append_uint32(db, _job->n_keyds_requested);
 	}
 
 	cf_dyn_buf_append_string(db, ":rps=");

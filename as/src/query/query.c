@@ -123,7 +123,7 @@ static int ops_bg_query_job_start(as_transaction* tr, as_namespace* ns);
 static query_type get_query_type(const as_transaction* tr);
 
 static bool get_query_set(const as_transaction* tr, as_namespace* ns, char* set_name, uint16_t* set_id);
-static bool get_query_pids(const as_transaction* tr, as_query_pid** p_pids, uint16_t* n_pids_requested);
+static bool get_query_pids(const as_transaction* tr, as_query_pid** p_pids, uint16_t* n_pids_requested, uint16_t* n_keyds_requested);
 static bool get_query_range(const as_transaction* tr, as_namespace* ns, as_query_range** range_r);
 static bool get_query_rps(const as_transaction* tr, uint32_t* rps);
 
@@ -298,7 +298,7 @@ get_query_set(const as_transaction* tr, as_namespace* ns, char* set_name,
 
 static bool
 get_query_pids(const as_transaction* tr, as_query_pid** p_pids,
-		uint16_t* n_pids_requested)
+		uint16_t* n_pids_requested, uint16_t* n_keyds_requested)
 {
 	if (! as_transaction_has_pids(tr) && ! as_transaction_has_digests(tr)) {
 		return true;
@@ -395,6 +395,7 @@ get_query_pids(const as_transaction* tr, as_query_pid** p_pids,
 			};
 
 			(*n_pids_requested)++;
+			(*n_keyds_requested)++;
 		}
 	}
 	else if (as_transaction_has_bval_array(tr)) {
@@ -1401,7 +1402,8 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	as_query_job_init(_job, &basic_query_job_vtable, tr, ns);
 
 	if (! get_query_set(tr, ns, _job->set_name, &_job->set_id) ||
-			! get_query_pids(tr, &_job->pids, &_job->n_pids_requested) ||
+			! get_query_pids(tr, &_job->pids, &_job->n_pids_requested,
+					&_job->n_keyds_requested) ||
 			! get_query_range(tr, ns, &_job->range) ||
 			! get_query_rps(tr, &_job->rps)) {
 		cf_warning(AS_QUERY, "basic query job failed msg field processing");
@@ -1473,12 +1475,12 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 		}
 	}
 	else {
-		cf_debug(AS_QUERY, "starting basic query job %lu {%s:%s:%s} n-pids-requested %hu rps %u sample-max %lu%s socket-timeout %d from %s",
+		cf_debug(AS_QUERY, "starting basic query job %lu {%s:%s:%s} n-pids-requested (%hu,%hu) rps %u sample-max %lu%s socket-timeout %d from %s",
 				_job->trid, ns->name, _job->set_name,
 				_job->si != NULL ? _job->si_name : "<pi-query>",
-				_job->n_pids_requested, _job->rps, job->sample_max,
-				job->no_bin_data ? " metadata-only" : "", conn_job->fd_timeout,
-				_job->client);
+				_job->n_pids_requested, _job->n_keyds_requested, _job->rps,
+				job->sample_max, job->no_bin_data ? " metadata-only" : "",
+				conn_job->fd_timeout, _job->client);
 	}
 
 	result = as_query_manager_start_job(_job);
