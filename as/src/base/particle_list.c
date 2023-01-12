@@ -5094,7 +5094,9 @@ list_result_data_set_not_found(cdt_result_data *rd, int64_t index)
 {
 	switch (rd->type) {
 	case RESULT_TYPE_KEY:
-	case RESULT_TYPE_MAP:
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP:
 		return false;
 	default:
 		break;

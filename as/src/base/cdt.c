@@ -531,9 +531,11 @@ result_data_set_not_found(cdt_result_data *rd, int64_t index)
 			as_bin_set_unordered_empty_list(rd->result, rd->alloc);
 		}
 		break;
-	case RESULT_TYPE_MAP:
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP:
 		as_bin_set_empty_packed_map(rd->result, rd->alloc,
-				AS_PACKED_MAP_FLAG_PRESERVE_ORDER);
+				result_map_type_to_map_flags(rd->type));
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "result_data_set_not_found() invalid result type %d", rd->type);

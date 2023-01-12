@@ -558,10 +558,18 @@ result_data_set_int(cdt_result_data *rd, int64_t value)
 }
 
 static inline bool
+result_data_is_return_map(const cdt_result_data *rd)
+{
+	return rd->type == RESULT_TYPE_KEY_VALUE_MAP ||
+			rd->type == RESULT_TYPE_UNORDERED_MAP ||
+			rd->type == RESULT_TYPE_ORDERED_MAP;
+}
+
+static inline bool
 result_data_is_return_elements(const cdt_result_data *rd)
 {
 	return (rd->type == RESULT_TYPE_KEY || rd->type == RESULT_TYPE_VALUE ||
-			rd->type == RESULT_TYPE_MAP);
+			result_data_is_return_map(rd));
 }
 
 static inline bool
@@ -588,6 +596,23 @@ result_data_is_return_rank_range(const cdt_result_data *rd)
 {
 	return (rd->type == RESULT_TYPE_REVRANK_RANGE ||
 			rd->type == RESULT_TYPE_RANK_RANGE);
+}
+
+static inline uint8_t
+result_map_type_to_map_flags(result_type_t type)
+{
+	switch (type) {
+	case RESULT_TYPE_KEY_VALUE_MAP:
+		return AS_PACKED_MAP_FLAG_PRESERVE_ORDER;
+	case RESULT_TYPE_UNORDERED_MAP:
+		return AS_PACKED_MAP_FLAG_NONE;
+	case RESULT_TYPE_ORDERED_MAP:
+		return AS_PACKED_MAP_FLAG_K_ORDERED;
+	default:
+		break;
+	}
+
+	return 0;
 }
 
 static inline void

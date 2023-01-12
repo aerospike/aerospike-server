@@ -441,6 +441,7 @@ static msgpack_cmp_type packed_map_compare_values(msgpack_in *mp1, msgpack_in *m
 static msgpack_cmp_type packed_map_compare_value_by_idx(const void *ptr, uint32_t idx1, uint32_t idx2);
 
 static void packed_map_write_k_ordered(const packed_map *map, uint8_t *write_ptr, offset_index *offsets_new);
+static void packed_map_sort_in_place(packed_map *map);
 
 // packed_map_op
 static void packed_map_op_init(packed_map_op *op, const packed_map *map);
@@ -3660,7 +3661,9 @@ packed_map_trim_ordered(const packed_map *map, cdt_op_mem *com, uint32_t index,
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP:
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP:
 		result->flags = AS_CDT_OP_FLAG_INVERTED;
 
 		if (! packed_map_build_ele_result_by_idx_range(map, index, count,
@@ -3809,7 +3812,9 @@ packed_map_get_remove_by_index_range(const packed_map *map, cdt_op_mem *com,
 			break;
 		case RESULT_TYPE_KEY:
 		case RESULT_TYPE_VALUE:
-		case RESULT_TYPE_MAP: {
+		case RESULT_TYPE_KEY_VALUE_MAP:
+		case RESULT_TYPE_UNORDERED_MAP:
+		case RESULT_TYPE_ORDERED_MAP: {
 			bool success;
 
 			if (inverted) {
@@ -4152,7 +4157,9 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP:
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP:
 		if (inverted) {
 			if (! packed_map_build_ele_result_by_mask(map, rm_mask,
 					rm_count, rm_sz, result)) {
@@ -4359,7 +4366,9 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP:
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP:
 		if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count,
 				rm_sz, result)) {
 			cf_warning(AS_PARTICLE, "packed_map_get_remove_all_by_key_list_ordered() invalid packed map");
@@ -4427,7 +4436,9 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map *map,
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP: {
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP: {
 		if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count, rm_sz,
 				result)) {
 			return -AS_ERR_UNKNOWN;
@@ -4543,7 +4554,9 @@ packed_map_get_remove_all_by_value_list(const packed_map *map, cdt_op_mem *com,
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP: {
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP: {
 		if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count, rm_sz,
 				result)) {
 			return -AS_ERR_UNKNOWN;
@@ -4657,7 +4670,9 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP: {
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP: {
 		if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count, rm_sz,
 				result)) {
 			cf_warning(AS_PARTICLE, "packed_map_remove_all_value_items_ordered() invalid packed map");
@@ -4787,7 +4802,9 @@ packed_map_get_remove_all(const packed_map *map, cdt_op_mem *com)
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP: {
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP: {
 		if (! packed_map_build_ele_result_by_idx_range(map, 0, map->ele_count,
 				result)) {
 			return -AS_ERR_UNKNOWN;
@@ -5375,9 +5392,10 @@ packed_map_build_ele_result_by_idx_range(const packed_map *map,
 		max_sz = map->content_sz - max_sz;
 	}
 
-	if (result->type == RESULT_TYPE_MAP) {
-		cdt_map_builder_start(&builder, result->alloc, ret_count, max_sz,
-				AS_PACKED_MAP_FLAG_PRESERVE_ORDER);
+	if (result_data_is_return_map(result)) {
+		uint8_t flag = result_map_type_to_map_flags(result->type);
+
+		cdt_map_builder_start(&builder, result->alloc, ret_count, max_sz, flag);
 
 		if (inverted) {
 			uint32_t tail_sz = map->content_sz - offset1;
@@ -5392,6 +5410,13 @@ packed_map_build_ele_result_by_idx_range(const packed_map *map,
 
 		*builder.sz += max_sz;
 		cdt_container_builder_set_result(&builder, result);
+
+		if (flag == AS_PACKED_MAP_FLAG_K_ORDERED && ! map_is_k_ordered(map)) { // need sorting
+			packed_map map_to_sort;
+
+			packed_map_init_from_particle(&map_to_sort, builder.particle, true);
+			packed_map_sort_in_place(&map_to_sort);
+		}
 
 		return true;
 	}
@@ -5468,11 +5493,11 @@ packed_map_build_ele_result_by_ele_idx(const packed_map *map,
 	cdt_container_builder builder;
 	uint32_t max_sz = (count != 0 ? rm_sz : 0);
 
-	if (result->type == RESULT_TYPE_MAP) {
+	if (result_data_is_return_map(result)) {
 		get_by_index_func = packed_map_get_pair_by_idx;
 
 		cdt_map_builder_start(&builder, result->alloc, count, max_sz,
-				AS_PACKED_MAP_FLAG_PRESERVE_ORDER);
+				result_map_type_to_map_flags(result->type));
 	}
 	else {
 		if (result->type == RESULT_TYPE_KEY) {
@@ -5535,12 +5560,16 @@ packed_map_build_ele_result_by_mask(const packed_map *map, const uint64_t *mask,
 	packed_map_get_by_idx_func get_by_index_func;
 	cdt_container_builder builder;
 	uint32_t max_sz = (count != 0 ? rm_sz : 0);
+	bool need_sort = false;
 
-	if (result->type == RESULT_TYPE_MAP) {
+	if (result_data_is_return_map(result)) {
+		uint8_t flag = result_map_type_to_map_flags(result->type);
+
 		get_by_index_func = packed_map_get_pair_by_idx;
+		cdt_map_builder_start(&builder, result->alloc, count, max_sz, flag);
 
-		cdt_map_builder_start(&builder, result->alloc, count, max_sz,
-				AS_PACKED_MAP_FLAG_PRESERVE_ORDER);
+		need_sort = (flag == AS_PACKED_MAP_FLAG_K_ORDERED &&
+				! map_is_k_ordered(map));
 	}
 	else {
 		if (result->type == RESULT_TYPE_KEY) {
@@ -5566,6 +5595,13 @@ packed_map_build_ele_result_by_mask(const packed_map *map, const uint64_t *mask,
 	}
 
 	cdt_container_builder_set_result(&builder, result);
+
+	if (need_sort) {
+		packed_map map_to_sort;
+
+		packed_map_init_from_particle(&map_to_sort, builder.particle, true);
+		packed_map_sort_in_place(&map_to_sort);
+	}
 
 	return true;
 }
@@ -5621,7 +5657,9 @@ packed_map_build_result_by_key(const packed_map *map, const cdt_payload *key,
 		break;
 	case RESULT_TYPE_KEY:
 	case RESULT_TYPE_VALUE:
-	case RESULT_TYPE_MAP:
+	case RESULT_TYPE_KEY_VALUE_MAP:
+	case RESULT_TYPE_UNORDERED_MAP:
+	case RESULT_TYPE_ORDERED_MAP:
 		if (! packed_map_build_ele_result_by_idx_range(map, idx, count,
 				result)) {
 			return -AS_ERR_UNKNOWN;
@@ -5814,6 +5852,19 @@ packed_map_write_k_ordered(const packed_map *map, uint8_t *write_ptr,
 	}
 
 	rollback_alloc_rollback(alloc_idx);
+}
+
+static void
+packed_map_sort_in_place(packed_map *map)
+{
+	uint8_t *temp_mem = cf_malloc(map->content_sz);
+	offset_index temp_offidx;
+	uint8_t *start_write = (uint8_t *)map->contents;
+
+	offset_index_init(&temp_offidx, NULL, 0, NULL, 0);
+	packed_map_write_k_ordered(map, temp_mem, &temp_offidx);
+	memcpy(start_write, temp_mem, map->content_sz);
+	cf_free(temp_mem);
 }
 
 //------------------------------------------------
