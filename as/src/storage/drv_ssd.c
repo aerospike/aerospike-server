@@ -1338,6 +1338,151 @@ as_storage_record_load_pickle_ssd(as_storage_rd *rd)
 }
 
 
+bool
+as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
+{
+	as_record *r = rd->r;
+	drv_ssd *ssd = rd->ssd;
+
+	if (STORAGE_RBLOCK_IS_INVALID(r->rblock_id)) {
+		cf_warning(AS_DRV_SSD, "read-raw: invalid rblock_id");
+		return false;
+	}
+
+	uint64_t record_offset = RBLOCK_ID_TO_OFFSET(r->rblock_id);
+	uint32_t record_size = N_RBLOCKS_TO_SIZE(r->n_rblocks);
+	uint64_t record_end_offset = record_offset + record_size;
+
+	uint32_t wblock_id = OFFSET_TO_WBLOCK_ID(ssd, record_offset);
+
+	if (wblock_id >= ssd->n_wblocks || wblock_id < ssd->first_wblock_id) {
+		cf_warning(AS_DRV_SSD, "read-raw: bad offset %lu", record_offset);
+		return false;
+	}
+
+	if (record_size < DRV_RECORD_MIN_SIZE) {
+		cf_warning(AS_DRV_SSD, "read-raw: bad record size %u", record_size);
+		return false;
+	}
+
+	if (record_end_offset > WBLOCK_ID_TO_OFFSET(ssd, wblock_id + 1)) {
+		cf_warning(AS_DRV_SSD, "read-raw: record size %u crosses wblock boundary",
+				record_size);
+		return false;
+	}
+
+	uint8_t *read_buf = NULL;
+	as_flat_record *flat = NULL;
+
+	ssd_write_buf *swb = NULL;
+
+	swb_check_and_reserve(&ssd->wblock_state[wblock_id], &swb);
+
+	if (swb != NULL) {
+		// Data is in write buffer, so read it from there.
+
+		read_buf = cf_malloc(record_size);
+		flat = (as_flat_record*)read_buf;
+
+		int swb_offset = record_offset - WBLOCK_ID_TO_OFFSET(ssd, wblock_id);
+		memcpy(read_buf, swb->buf + swb_offset, record_size);
+		swb_release(swb);
+
+		if (! leave_encrypted) {
+			ssd_decrypt_whole(ssd, record_offset, r->n_rblocks, flat);
+		}
+	}
+	else {
+		// Normal case - data is read from device.
+
+		uint64_t read_offset = BYTES_DOWN_TO_IO_MIN(ssd, record_offset);
+		uint64_t read_end_offset = BYTES_UP_TO_IO_MIN(ssd, record_end_offset);
+		size_t read_size = read_end_offset - read_offset;
+		uint64_t record_buf_indent = record_offset - read_offset;
+
+		read_buf = cf_valloc(read_size);
+
+		int fd = rd->read_page_cache ? ssd_fd_cache_get(ssd) : ssd_fd_get(ssd);
+
+		if (! pread_all(fd, read_buf, read_size, (off_t)read_offset)) {
+			cf_warning(AS_DRV_SSD, "read-raw %s: IO failed errno %d (%s) size %lu",
+					ssd->name, errno, cf_strerror(errno), read_size);
+			cf_free(read_buf);
+			close(fd);
+			as_decr_uint32(rd->read_page_cache ?
+					&ssd->n_cache_fds : &ssd->n_fds);
+			return false;
+		}
+
+		if (rd->read_page_cache) {
+			ssd_fd_cache_put(ssd, fd);
+		}
+		else {
+			ssd_fd_put(ssd, fd);
+		}
+
+		flat = (as_flat_record*)(read_buf + record_buf_indent);
+
+		if (! leave_encrypted) {
+			ssd_decrypt_whole(ssd, record_offset, r->n_rblocks, flat);
+		}
+	}
+
+	// Sanity checks.
+
+	if (flat->magic != AS_FLAT_MAGIC) {
+		cf_warning(AS_DRV_SSD, "read-raw %s: bad block magic 0x%x offset %lu",
+				ssd->name, flat->magic, record_offset);
+		// But continue anyway...
+	}
+
+	if (flat->n_rblocks != r->n_rblocks) {
+		cf_warning(AS_DRV_SSD, "read-raw %s: bad n-rblocks %u expecting %u",
+				ssd->name, flat->n_rblocks, r->n_rblocks);
+		// But continue anyway...
+	}
+
+	if (cf_digest_compare(&flat->keyd, &r->keyd) != 0) {
+		cf_warning(AS_DRV_SSD, "read-raw %s: wrong digest %pD", ssd->name,
+				&flat->keyd);
+		// But continue anyway...
+	}
+
+	if (flat->xdr_write != r->xdr_write) {
+		cf_warning(AS_DRV_SSD, "read-raw %s: bad xdr-write %u expecting %u",
+				ssd->name, flat->xdr_write, r->xdr_write);
+		// But continue anyway...
+	}
+
+	if (flat->tree_id != r->tree_id) {
+		cf_warning(AS_DRV_SSD, "read-raw %s: bad tree-id %u expecting %u",
+				ssd->name, flat->tree_id, r->tree_id);
+		// But continue anyway...
+	}
+
+	if (flat->generation != r->generation) {
+		cf_warning(AS_DRV_SSD, "read-raw %s: bad generation %u expecting %u",
+				ssd->name, flat->generation, r->generation);
+		// But continue anyway...
+	}
+
+	if (flat->last_update_time != r->last_update_time) {
+		cf_warning(AS_DRV_SSD, "read-raw %s: bad lut %lu expecting %lu",
+				ssd->name, (uint64_t)flat->last_update_time,
+				(uint64_t)r->last_update_time);
+		// But continue anyway...
+	}
+
+	rd->flat = flat;
+	rd->read_buf = read_buf; // no need to free read_buf on error now
+
+	// Does not exclude the mark!
+	rd->flat_end = (const uint8_t*)flat + record_size;
+
+	return true;
+}
+
+
 //==========================================================
 // Record writing utilities.
 //

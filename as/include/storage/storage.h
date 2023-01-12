@@ -182,6 +182,7 @@ void as_storage_record_close(as_storage_rd *rd);
 int as_storage_record_load_bins(as_storage_rd *rd);
 bool as_storage_record_load_key(as_storage_rd *rd);
 bool as_storage_record_load_pickle(as_storage_rd *rd);
+bool as_storage_record_load_raw(as_storage_rd *rd, bool leave_encrypted);
 int as_storage_record_write(as_storage_rd *rd);
 
 // Storage capacity monitoring.
@@ -256,6 +257,7 @@ void as_storage_record_close_ssd(as_storage_rd *rd);
 int as_storage_record_load_bins_ssd(as_storage_rd *rd);
 bool as_storage_record_load_key_ssd(as_storage_rd *rd);
 bool as_storage_record_load_pickle_ssd(as_storage_rd *rd);
+bool as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted);
 int as_storage_record_write_ssd(as_storage_rd *rd);
 
 bool as_storage_overloaded_ssd(const struct as_namespace_s *ns, uint32_t margin, const char* tag);
@@ -300,6 +302,7 @@ void as_storage_record_close_pmem(as_storage_rd *rd);
 int as_storage_record_load_bins_pmem(as_storage_rd *rd);
 bool as_storage_record_load_key_pmem(as_storage_rd *rd);
 bool as_storage_record_load_pickle_pmem(as_storage_rd* rd);
+bool as_storage_record_load_raw_pmem(as_storage_rd* rd, bool leave_encrypted);
 int as_storage_record_write_pmem(as_storage_rd *rd);
 
 bool as_storage_overloaded_pmem(const struct as_namespace_s *ns, uint32_t margin, const char* tag);

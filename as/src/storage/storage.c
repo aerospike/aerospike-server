@@ -474,6 +474,27 @@ as_storage_record_load_pickle(as_storage_rd *rd)
 }
 
 //--------------------------------------
+// as_storage_record_load_raw
+//
+
+typedef bool (*as_storage_record_load_raw_fn)(as_storage_rd *rd, bool leave_encrypted);
+static const as_storage_record_load_raw_fn as_storage_record_load_raw_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record load raw
+	as_storage_record_load_raw_pmem,
+	as_storage_record_load_raw_ssd
+};
+
+bool
+as_storage_record_load_raw(as_storage_rd *rd, bool leave_encrypted)
+{
+	if (as_storage_record_load_raw_table[rd->ns->storage_type]) {
+		return as_storage_record_load_raw_table[rd->ns->storage_type](rd, leave_encrypted);
+	}
+
+	return false;
+}
+
+//--------------------------------------
 // as_storage_record_write
 //
 

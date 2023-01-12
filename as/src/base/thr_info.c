@@ -205,6 +205,8 @@ static int dyn_bins(char* name, cf_dyn_buf* db);
 static int tree_bins(char* name, char* subtree, cf_dyn_buf* db);
 static int dyn_cluster_name(char* name, cf_dyn_buf* db);
 static int cmd_cluster_stable(char* name, char* params, cf_dyn_buf* db);
+static int cmd_debug_record(char* name, char* params, cf_dyn_buf* db);
+static int cmd_debug_record_meta(char* name, char* params, cf_dyn_buf* db);
 static int cmd_dump_cluster(char* name, char* params, cf_dyn_buf* db);
 static int cmd_dump_fabric(char* name, char* params, cf_dyn_buf* db);
 static int cmd_dump_hb(char* name, char* params, cf_dyn_buf* db);
@@ -285,6 +287,7 @@ static int32_t oldest_nvme_age(const char* path);
 static void add_data_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static void find_sindex_key(const cf_vector* items, void* udata);
 static void smd_show_cb(const cf_vector* items, void* udata);
+static void debug_record(char* params, cf_dyn_buf* db, bool all_data);
 
 
 //==========================================================
@@ -452,6 +455,8 @@ as_info_init()
 	info_set_command("cluster-stable", cmd_cluster_stable, PERM_NONE);          // Returns cluster key if cluster is stable.
 	info_set_command("config-get", as_cfg_info_cmd_config_get, PERM_NONE);      // Returns running config for specified context.
 	info_set_command("config-set", as_cfg_info_cmd_config_set, PERM_SET_CONFIG); // Set a configuration parameter at run time, configuration parameter must be dynamic.
+	info_set_command("debug-record", cmd_debug_record, PERM_RECORD_INFO);       // Get a record including data, or as pickle, or "raw".
+	info_set_command("debug-record-meta", cmd_debug_record_meta, PERM_RECORD_INFO); // Get a record's metadata.
 	info_set_command("dump-cluster", cmd_dump_cluster, PERM_LOGGING_CTRL);      // Print debug information about clustering and exchange to the log file.
 	info_set_command("dump-fabric", cmd_dump_fabric, PERM_LOGGING_CTRL);        // Print debug information about fabric to the log file.
 	info_set_command("dump-hb", cmd_dump_hb, PERM_LOGGING_CTRL);                // Print debug information about heartbeat state to the log file.
@@ -1499,6 +1504,27 @@ cmd_cluster_stable(char* name, char* params, cf_dyn_buf* db)
 	}
 
 	cf_dyn_buf_append_uint64_x(db, begin_cluster_key);
+
+	return 0;
+}
+
+static int
+cmd_debug_record(char* name, char* params, cf_dyn_buf* db)
+{
+	// Command Format:  "debug-record:namespace=<ns-name>;keyd=<hex-digest>[;mode=<mode>]"
+	// where <mode> is one of: pickle or raw or raw-encrypted
+
+	debug_record(params, db, true);
+
+	return 0;
+}
+
+static int
+cmd_debug_record_meta(char* name, char* params, cf_dyn_buf* db)
+{
+	// Command Format:  "debug-record-meta:namespace=<ns-name>;keyd=<hex-digest>"
+
+	debug_record(params, db, false);
 
 	return 0;
 }
@@ -4935,4 +4961,388 @@ smd_show_cb(const cf_vector* items, void* udata)
 	else {
 		cf_dyn_buf_append_string(db, "<empty>");
 	}
+}
+
+// TODO - these utilities are like the info_append_...() set but with commas -
+// move them elsewhere? (Like dynbuf?)
+
+static inline void
+db_append_uint32(cf_dyn_buf* db, const char* name, uint32_t value)
+{
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_uint32(db, value);
+	cf_dyn_buf_append_char(db, ',');
+}
+
+static inline void
+db_append_uint64(cf_dyn_buf* db, const char* name, uint64_t value)
+{
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_uint64(db, value);
+	cf_dyn_buf_append_char(db, ',');
+}
+
+static inline void
+db_append_uint64_x(cf_dyn_buf* db, const char* name, uint64_t value)
+{
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_uint64_x(db, value);
+	cf_dyn_buf_append_char(db, ',');
+}
+
+static inline void
+db_append_string_safe(cf_dyn_buf* db, const char* name, const char* value)
+{
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_string(db, value ? value : "null");
+	cf_dyn_buf_append_char(db, ',');
+}
+
+static inline void
+db_append_format(cf_dyn_buf* db, const char* name, const char* form, ...)
+{
+	va_list va;
+	va_start(va, form);
+
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_format_va(db, form, va);
+	cf_dyn_buf_append_char(db, ',');
+
+	va_end(va);
+}
+
+static inline void
+db_append_hex(cf_dyn_buf* db, const char* name, const uint8_t* buf, uint32_t sz,
+		char delimiter)
+{
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+
+	for (uint32_t i = 0; i < sz; i++) {
+		cf_dyn_buf_append_format(db, "%02x", buf[i]);
+	}
+
+	cf_dyn_buf_append_char(db, delimiter);
+}
+
+static void
+debug_record(char* params, cf_dyn_buf* db, bool all_data)
+{
+	// Get the namespace name.
+
+	char ns_name[AS_ID_NAMESPACE_SZ];
+	int ns_name_len = (int)sizeof(ns_name);
+	int ns_rv = as_info_parameter_get(params, "namespace", ns_name,
+			&ns_name_len);
+
+	if (ns_rv != 0 || ns_name_len == 0) {
+		cf_warning(AS_INFO, "debug-record: missing or invalid namespace name");
+		cf_dyn_buf_append_string(db, "ERROR::namespace-name");
+		return;
+	}
+
+	as_namespace* ns = as_namespace_get_byname(ns_name);
+
+	if (ns == NULL) {
+		cf_warning(AS_INFO, "debug-record: unknown namespace %s", ns_name);
+		cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
+		return;
+	}
+
+	// Get the digest.
+
+	char keyd_str[(CF_DIGEST_KEY_SZ * 2) + 1];
+	int keyd_str_len = (int)sizeof(keyd_str);
+	int keyd_rv = as_info_parameter_get(params, "keyd", keyd_str,
+			&keyd_str_len);
+
+	if (keyd_rv != 0 || keyd_str_len != CF_DIGEST_KEY_SZ * 2) {
+		cf_warning(AS_INFO, "debug-record: missing or invalid keyd");
+		cf_dyn_buf_append_string(db, "ERROR::keyd");
+		return;
+	}
+
+	char hex_byte[2 + 1] = { 0 };
+	char* at = keyd_str;
+
+	cf_digest keyd;
+
+	for (uint32_t i = 0; i < CF_DIGEST_KEY_SZ; i++) {
+		hex_byte[0] = *at++;
+		hex_byte[1] = *at++;
+
+		uint64_t val;
+
+		if (cf_strtoul_x64(hex_byte, &val) != 0) {
+			cf_warning(AS_INFO, "debug-record: bad keyd %s", keyd_str);
+			cf_dyn_buf_append_string(db, "ERROR::bad-keyd");
+			return;
+		}
+
+		keyd.digest[i] = (uint8_t)val;
+	}
+
+	// Get the mode, if applicable.
+
+	bool as_pickle = false;
+	bool as_raw = false;
+	bool leave_encrypted = false;
+
+	if (all_data) {
+		char mode[AS_ID_NAMESPACE_SZ];
+		int mode_len = (int)sizeof(mode);
+		int mode_rv = as_info_parameter_get(params, "mode", mode, &mode_len);
+
+		if (mode_rv == -2 || (mode_rv == 0 && mode_len == 0)) {
+			cf_warning(AS_INFO, "debug-record: missing or invalid mode");
+			cf_dyn_buf_append_string(db, "ERROR::mode");
+			return;
+		}
+
+		if (mode_rv == 0) {
+			if (strcmp(mode, "pickle") == 0) {
+				as_pickle = true;
+			}
+			else if (strcmp(mode, "raw") == 0) {
+				as_raw = true;
+			}
+			else if (strcmp(mode, "raw-encrypted") == 0) {
+				as_raw = true;
+				leave_encrypted = true;
+			}
+			else {
+				cf_warning(AS_INFO, "debug-record: unknown mode");
+				cf_dyn_buf_append_string(db, "ERROR::unknown-mode");
+				return;
+			}
+		}
+	}
+
+	// Get the record.
+
+	as_partition_reservation rsv;
+	uint32_t pid = as_partition_getid(&keyd);
+
+	as_partition_reserve(ns, pid, &rsv);
+
+	as_index_ref r_ref;
+
+	if (as_record_get(rsv.tree, &keyd, &r_ref) != 0) {
+		as_partition_release(&rsv);
+		cf_warning(AS_INFO, "debug-record: %pD not found", &keyd);
+		cf_dyn_buf_append_string(db, "ERROR::record-not-found");
+		return;
+	}
+
+	info_append_uint32(db, "pid", pid);
+
+	cf_mutex_lock(&rsv.p->lock); // hack using lock outside of partition code
+	info_append_int(db, "repl-ix", find_self_in_replicas(rsv.p));
+	cf_mutex_unlock(&rsv.p->lock);
+
+	as_index* r = r_ref.r;
+
+	// Start of index.
+	cf_dyn_buf_append_string(db, "index=");
+
+	db_append_uint32(db, "rc", r->rc);
+	db_append_uint32(db, "tree-id", r->tree_id);
+	db_append_uint32(db, "color", r->color);
+	db_append_uint64_x(db, "left", r->left_h);
+	db_append_uint64_x(db, "right", r->right_h);
+	db_append_uint32(db, "set-id", r->set_id_bits);
+	db_append_string_safe(db, "set-name",
+			as_namespace_get_set_name(ns, r->set_id_bits));
+	db_append_uint32(db, "in-sindex", r->in_sindex);
+	db_append_uint32(db, "xdr-bin-cemetery", r->xdr_bin_cemetery);
+	db_append_uint32(db, "has-bin-meta", r->has_bin_meta);
+	db_append_uint32(db, "xdr-write", r->xdr_write);
+	db_append_uint32(db, "xdr-tombstone", r->xdr_tombstone);
+	db_append_uint32(db, "xdr-nsup-tombstone", r->xdr_nsup_tombstone);
+	db_append_uint32(db, "void-time", r->void_time);
+	db_append_uint64(db, "lut", r->last_update_time);
+	db_append_uint64(db, "generation", plain_generation(r->generation, ns));
+
+	if (ns->cp) { // hack instead of split regime() wrapper
+		db_append_uint64(db, "regime", r->generation >> 10); // GEN_BITS
+	}
+
+	db_append_uint64(db, "rblock-id", r->rblock_id);
+	db_append_uint64(db, "n-rblocks", r->n_rblocks);
+	db_append_uint64(db, "file-id", r->file_id);
+
+	uint32_t n_devices = as_namespace_device_count(ns);
+
+	if (n_devices != 0 && r->file_id < n_devices) {
+		db_append_string_safe(db,
+				ns->n_storage_devices != 0 ? "device-name" : "file-name",
+				ns->storage_devices[r->file_id]);
+	}
+
+	db_append_uint64(db, "key-stored", r->key_stored);
+	db_append_uint32(db, "repl-state", r->repl_state);
+	db_append_uint32(db, "tombstone", r->tombstone);
+	db_append_uint32(db, "cenotaph", r->cenotaph);
+	db_append_uint32(db, "single-bin-state", r->single_bin_state);
+
+	info_append_uint64_x(db, "dim", (uint64_t)r->dim);
+	// End of index.
+
+	as_storage_rd rd;
+
+	as_storage_record_open(ns, r, &rd);
+
+	if (as_pickle) {
+		if (as_storage_rd_load_pickle(&rd)) {
+			info_append_uint32(db, "pickle-size", rd.pickle_sz);
+			db_append_hex(db, "pickle", rd.pickle, rd.pickle_sz, ';');
+		}
+
+		as_storage_record_close(&rd);
+		as_record_done(&r_ref, ns);
+		as_partition_release(&rsv);
+
+		cf_dyn_buf_chomp(db);
+
+		return;
+	}
+
+	if (as_raw) {
+		if (as_storage_record_load_raw(&rd, leave_encrypted)) {
+			const uint8_t* raw = (const uint8_t*)rd.flat;
+			uint32_t sz = (uint32_t)(rd.flat_end - raw);
+
+			info_append_uint32(db, "raw-size", sz);
+			db_append_hex(db, "raw-bytes", raw, sz, ';');
+		}
+
+		as_storage_record_close(&rd);
+		as_record_done(&r_ref, ns);
+		as_partition_release(&rsv);
+
+		cf_dyn_buf_chomp(db);
+
+		return;
+	}
+
+	if (r->key_stored == 1 && as_storage_rd_load_key(&rd)) {
+		// Start of key.
+		cf_dyn_buf_append_string(db, "key=");
+
+		uint8_t type = *rd.key;
+		const uint8_t* key = rd.key + 1;
+		uint32_t sz = rd.key_size - 1;
+
+		db_append_uint32(db, "flat-size", rd.key_size);
+		db_append_uint32(db, "type", type);
+
+		if (all_data) {
+			switch (type) {
+			case AS_PARTICLE_TYPE_INTEGER:
+				if (sz == sizeof(uint64_t)) {
+					// Flat integer keys are in big-endian order.
+					db_append_uint64(db, "value",
+							cf_swap_from_be64(*(uint64_t*)key));
+				}
+				break;
+			case AS_PARTICLE_TYPE_STRING:
+			case AS_PARTICLE_TYPE_BLOB:
+				// Apparently we can get CDTs here? And floats?!
+			default:
+				db_append_hex(db, "value", key, sz, ',');
+				break;
+			}
+		}
+
+		cf_dyn_buf_chomp(db);
+		cf_dyn_buf_append_char(db, ';');
+		// End of key.
+	}
+
+	as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
+
+	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
+		as_record_done(&r_ref, ns);
+		as_partition_release(&rsv);
+		cf_warning(AS_INFO, "debug-record: failed to load bins");
+		cf_dyn_buf_chomp(db);
+		return;
+	}
+
+	info_append_uint32(db, "n-bins", rd.n_bins);
+
+	// Start of bins.
+	if (rd.n_bins != 0) {
+		cf_dyn_buf_append_string(db, "bins=");
+	}
+
+	for (uint16_t i = 0; i < rd.n_bins; i++) {
+		as_bin* b = &rd.bins[i];
+
+		if (! ns->single_bin) {
+			db_append_uint32(db, "bin-id", b->id);
+			db_append_string_safe(db, "bin-name",
+					as_bin_get_name_from_id(ns, b->id));
+			db_append_uint32(db, "xdr-write", b->xdr_write);
+			db_append_uint64(db, "lut", b->lut);
+			db_append_uint32(db, "src-id", b->src_id);
+		}
+
+		db_append_uint32(db, "state", b->state);
+
+		switch (b->state) {
+		case AS_BIN_STATE_UNUSED:
+		case AS_BIN_STATE_TOMBSTONE:
+			break;
+		case AS_BIN_STATE_INUSE_INTEGER:
+			db_append_uint32(db, "type", AS_PARTICLE_TYPE_INTEGER);
+			if (all_data) {
+				db_append_uint64(db, "value", (uint64_t)b->particle);
+			}
+			break;
+		case AS_BIN_STATE_INUSE_FLOAT:
+			db_append_uint32(db, "type", AS_PARTICLE_TYPE_FLOAT);
+			if (all_data) {
+				db_append_format(db, "value", "%f", *(double*)&b->particle);
+			}
+			break;
+		case AS_BIN_STATE_INUSE_BOOL:
+			db_append_uint32(db, "type", AS_PARTICLE_TYPE_BOOL);
+			if (all_data) {
+				db_append_uint32(db, "value", (uint8_t)(uint64_t)b->particle);
+			}
+			break;
+		case AS_BIN_STATE_INUSE_OTHER:
+			db_append_uint32(db, "type", b->particle->type);
+			{
+				uint32_t sz = *(uint32_t*)b->particle->data; // hack
+
+				db_append_uint32(db, "data-size", sz);
+
+				if (all_data) {
+					db_append_hex(db, "value",
+							b->particle->data + sizeof(uint32_t), sz, ',');
+				}
+			}
+			break;
+		default:
+			cf_warning(AS_INFO, "debug-record: bad bin state %u", b->state);
+			break;
+		}
+
+		cf_dyn_buf_chomp(db);
+		cf_dyn_buf_append_char(db, ':'); // delimit multiple bins
+	}
+	// End of bins.
+
+	as_storage_record_close(&rd);
+	as_record_done(&r_ref, ns);
+	as_partition_release(&rsv);
+
+	cf_dyn_buf_chomp(db);
 }

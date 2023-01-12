@@ -145,6 +145,12 @@ as_storage_record_load_pickle_pmem(as_storage_rd* rd)
 	pmem_crash_ce();
 }
 
+bool
+as_storage_record_load_raw_pmem(as_storage_rd* rd, bool leave_encrypted)
+{
+	pmem_crash_ce();
+}
+
 int
 as_storage_record_write_pmem(as_storage_rd* rd)
 {

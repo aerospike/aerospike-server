@@ -65,7 +65,8 @@ typedef enum {
 	PERM_QUERY_ADMIN	= 0x00040000,
 	PERM_TRUNCATE		= 0x00080000,
 	PERM_EVICT_ADMIN	= 0x00100000,
-	// ... 3 unused bits ...
+	PERM_RECORD_INFO	= 0x00200000,
+	// ... 2 unused bits ...
 
 	// Deployment operations management.
 	PERM_SET_CONFIG		= 0x01000000,
