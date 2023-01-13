@@ -8557,6 +8557,8 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 						source, mcsize);
 				last_cluster_breach_print = cf_getms() / 1000L;
 			}
+			// Not handing over to probation or adjacency hash.
+			hb_adjacent_node_destroy(&adjacent_node);
 			goto Exit;
 		}
 	}
