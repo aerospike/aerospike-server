@@ -923,7 +923,8 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 
 	switch (type) {
 		case AS_PARTICLE_TYPE_INTEGER:
-			if ((type != as_sindex_pktype(imd)) || (type != range->bin_type)) {
+			if (type != as_sindex_pktype(imd) ||
+					imd->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				return false;
 			}
 
@@ -932,7 +933,8 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 			// Start and end are same for point query.
 			return range->u.r.start <= i && i <= range->u.r.end;
 		case AS_PARTICLE_TYPE_STRING:
-			if ((type != as_sindex_pktype(imd)) || (type != range->bin_type)) {
+			if (type != as_sindex_pktype(imd) ||
+					imd->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				return false;
 			}
 
@@ -942,7 +944,8 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 			// Always a point query.
 			return range->u.r.start == as_sindex_string_to_bval(buf, psz);
 		case AS_PARTICLE_TYPE_GEOJSON:
-			if ((type != as_sindex_pktype(imd)) || (type != range->bin_type)) {
+			if (type != as_sindex_pktype(imd) ||
+					imd->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				return false;
 			}
 
@@ -1022,8 +1025,7 @@ query_match_integer_fromval(const as_query_job* _job, const as_val* v)
 	const as_query_range* range = _job->range;
 	const as_sindex_metadata* imd = _job->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_INTEGER) ||
-			(range->bin_type != AS_PARTICLE_TYPE_INTEGER)) {
+	if (as_sindex_pktype(imd) != AS_PARTICLE_TYPE_INTEGER) {
 		return false;
 	}
 
@@ -1039,8 +1041,7 @@ query_match_string_fromval(const as_query_job* _job, const as_val* v)
 	const as_query_range* range = _job->range;
 	const as_sindex_metadata* imd = _job->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_STRING) ||
-			(range->bin_type != AS_PARTICLE_TYPE_STRING)) {
+	if (as_sindex_pktype(imd) != AS_PARTICLE_TYPE_STRING) {
 		return false;
 	}
 
@@ -1056,8 +1057,7 @@ query_match_geojson_fromval(const as_query_job* _job, const as_val* v)
 	const as_query_range* range = _job->range;
 	const as_sindex_metadata* imd = _job->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_GEOJSON) ||
-			(range->bin_type != AS_PARTICLE_TYPE_GEOJSON)) {
+	if (as_sindex_pktype(imd) != AS_PARTICLE_TYPE_GEOJSON) {
 		return false;
 	}
 
