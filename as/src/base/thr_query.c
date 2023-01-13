@@ -1113,8 +1113,7 @@ query_match_integer_fromval(const as_query_transaction *qtr, const as_val *v)
 	const as_query_range *srange = qtr->srange;
 	const as_sindex_metadata *imd = qtr->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_INTEGER) ||
-			(srange->bin_type != AS_PARTICLE_TYPE_INTEGER)) {
+	if (as_sindex_pktype(imd) != AS_PARTICLE_TYPE_INTEGER) {
 		return false;
 	}
 
@@ -1130,8 +1129,7 @@ query_match_string_fromval(const as_query_transaction *qtr, const as_val *v)
 	const as_query_range *srange = qtr->srange;
 	const as_sindex_metadata *imd = qtr->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_STRING) ||
-			(srange->bin_type != AS_PARTICLE_TYPE_STRING)) {
+	if (as_sindex_pktype(imd) != AS_PARTICLE_TYPE_STRING) {
 		return false;
 	}
 
@@ -1146,11 +1144,9 @@ query_match_string_fromval(const as_query_transaction *qtr, const as_val *v)
 static bool
 query_match_geojson_fromval(const as_query_transaction *qtr, const as_val *v)
 {
-	const as_query_range *srange = qtr->srange;
 	const as_sindex_metadata *imd = qtr->si->imd;
 
-	if ((as_sindex_pktype(imd) != AS_PARTICLE_TYPE_GEOJSON) ||
-			(srange->bin_type != AS_PARTICLE_TYPE_GEOJSON)) {
+	if (as_sindex_pktype(imd) != AS_PARTICLE_TYPE_GEOJSON) {
 		return false;
 	}
 
@@ -1298,7 +1294,8 @@ record_matches_query(as_query_transaction *qtr, as_storage_rd *rd)
 
 	switch (type) {
 		case AS_PARTICLE_TYPE_INTEGER:
-			if ((type != as_sindex_pktype(imd)) || (type != srange->bin_type)) {
+			if (type != as_sindex_pktype(imd) ||
+					imd->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				return false;
 			}
 
@@ -1307,7 +1304,8 @@ record_matches_query(as_query_transaction *qtr, as_storage_rd *rd)
 			// Start and end are same for point query.
 			return srange->u.r.start <= i && i <= srange->u.r.end;
 		case AS_PARTICLE_TYPE_STRING:
-			if ((type != as_sindex_pktype(imd)) || (type != srange->bin_type)) {
+			if (type != as_sindex_pktype(imd) ||
+					imd->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				return false;
 			}
 
@@ -1318,7 +1316,8 @@ record_matches_query(as_query_transaction *qtr, as_storage_rd *rd)
 
 			return memcmp(&srange->u.digest, &digest, CF_DIGEST_KEY_SZ) == 0;
 		case AS_PARTICLE_TYPE_GEOJSON:
-			if ((type != as_sindex_pktype(imd)) || (type != srange->bin_type)) {
+			if (type != as_sindex_pktype(imd) ||
+					imd->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				return false;
 			}
 
