@@ -151,7 +151,7 @@ static bool prep_evict_reduce_cb(as_index_ref* r_ref, void* udata);
 static void update_stats(as_namespace* ns, uint64_t n_0_void_time, uint64_t n_expired_objects, uint64_t n_evicted_objects, uint64_t start_ms);
 
 static void* run_stop_writes(void* udata);
-static bool eval_stop_writes(as_namespace* ns);
+static bool eval_stop_writes(as_namespace* ns, bool cold_starting);
 static uint32_t sys_mem_pct(void);
 
 static void* run_nsup_histograms(void* udata);
@@ -877,7 +877,7 @@ run_stop_writes(void* udata)
 		sleep(EVAL_STOP_WRITES_PERIOD);
 
 		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-			eval_stop_writes(g_config.namespaces[ns_ix]);
+			eval_stop_writes(g_config.namespaces[ns_ix], false);
 		}
 	}
 
@@ -885,7 +885,7 @@ run_stop_writes(void* udata)
 }
 
 static bool
-eval_stop_writes(as_namespace* ns)
+eval_stop_writes(as_namespace* ns, bool cold_starting)
 {
 	uint32_t sys_memory_pct = sys_mem_pct();
 
@@ -901,12 +901,14 @@ eval_stop_writes(as_namespace* ns)
 	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
 	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_mem_sz + dim_sz;
 
+	// Note that device storage limits are ignored during cold start
+	// (device_avail_pct will be 0, device_used_sz is ignored via flag).
 	int device_avail_pct = 0;
 	uint64_t device_used_sz = 0;
 
 	as_storage_stats(ns, &device_avail_pct, &device_used_sz);
 
-	uint32_t device_used_pct = ns->drive_size == 0 ?
+	uint32_t device_used_pct = cold_starting || ns->drive_size == 0 ?
 			0 : (uint32_t)((device_used_sz * 100) / ns->drive_size);
 
 	char reasons[128] = { 0 };
@@ -1132,7 +1134,7 @@ cold_start_evict(as_namespace* ns)
 		ns->cold_start_now = now;
 	}
 
-	if (eval_stop_writes(ns)) {
+	if (eval_stop_writes(ns, true)) {
 		cf_warning(AS_NSUP, "{%s} hit stop-writes limit", ns->name);
 		return false;
 	}
