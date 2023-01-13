@@ -1018,7 +1018,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 
 	switch (type) {
 		case AS_PARTICLE_TYPE_INTEGER:
-			if ((type != si->ktype) || (type != range->bin_type)) {
+			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				break;
 			}
 
@@ -1028,7 +1028,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 			ret = range->u.r.start <= i && i <= range->u.r.end;
 			break;
 		case AS_PARTICLE_TYPE_STRING:
-			if ((type != si->ktype) || (type != range->bin_type)) {
+			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				break;
 			}
 
@@ -1038,7 +1038,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 			ret = strings_match(range, str, len);
 			break;
 		case AS_PARTICLE_TYPE_GEOJSON:
-			if ((type != si->ktype) || (type != range->bin_type)) {
+			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
 				break;
 			}
 
@@ -1167,8 +1167,7 @@ match_integer_element(const as_query_job* _job, msgpack_in* element)
 {
 	const as_query_range* range = _job->range;
 
-	if ((_job->si->ktype != AS_PARTICLE_TYPE_INTEGER) ||
-			(range->bin_type != AS_PARTICLE_TYPE_INTEGER)) {
+	if (_job->si->ktype != AS_PARTICLE_TYPE_INTEGER) {
 		return false;
 	}
 
@@ -1187,8 +1186,7 @@ match_string_element(const as_query_job* _job, msgpack_in* element)
 {
 	const as_query_range* range = _job->range;
 
-	if ((_job->si->ktype != AS_PARTICLE_TYPE_STRING) ||
-			(range->bin_type != AS_PARTICLE_TYPE_STRING)) {
+	if (_job->si->ktype != AS_PARTICLE_TYPE_STRING) {
 		return false;
 	}
 
@@ -1211,8 +1209,7 @@ match_geojson_element(const as_query_job* _job, msgpack_in* element)
 {
 	const as_query_range* range = _job->range;
 
-	if ((_job->si->ktype != AS_PARTICLE_TYPE_GEOJSON) ||
-			(range->bin_type != AS_PARTICLE_TYPE_GEOJSON)) {
+	if (_job->si->ktype != AS_PARTICLE_TYPE_GEOJSON) {
 		return false;
 	}
 
