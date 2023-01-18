@@ -151,6 +151,8 @@
 #define MAX_OPS_TRANSACTIONS 20 // Higher the value more aggressive it will be
 #define AS_QUERY_UNTRACKED_TIME 1000 // (millisecond) 1 sec
 
+#define RECORD_CHANGED_SAFETY_MS 3000 // clock skew & bins change after LUT
+
 /*
  * Query Transaction State
  */
@@ -1346,7 +1348,8 @@ record_matches_query(as_query_transaction *qtr, as_storage_rd *rd)
 static bool
 record_changed_since_start(const as_query_transaction *qtr, const as_record *r)
 {
-	return r->last_update_time > qtr->start_time_clepoch;
+	return r->last_update_time + RECORD_CHANGED_SAFETY_MS >
+			qtr->start_time_clepoch;
 }
 
 // Partition reservations are taken while building the record list (list of r_h)
