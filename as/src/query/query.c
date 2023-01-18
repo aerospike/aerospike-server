@@ -94,6 +94,8 @@ typedef enum {
 	QUERY_TYPE_UNKNOWN	= -1
 } query_type;
 
+#define RECORD_CHANGED_SAFETY_MS 3000 // clock skew & bins change after LUT
+
 #define LOW_PRIORITY_RPS 5000 // for compatibility with old clients
 
 #define INIT_BUF_BUILDER_SIZE (1024U * 1024U * 7U / 4U) // 1.75M
@@ -157,6 +159,13 @@ static bool query_match_listele_foreach(as_val* val, void* udata);
 //==========================================================
 // Inlines & macros.
 //
+
+static inline bool
+record_changed_since_start(const as_query_job* _job, const as_record *r)
+{
+	return r->last_update_time + RECORD_CHANGED_SAFETY_MS >
+			_job->start_ms_clepoch;
+}
 
 static inline const char*
 query_type_str(query_type type)
@@ -885,12 +894,6 @@ send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size,
 	}
 
 	return sizeof(as_proto) + size;
-}
-
-static inline bool
-record_changed_since_start(const as_query_job* _job, const as_record *r)
-{
-	return r->last_update_time > _job->start_ms_clepoch;
 }
 
 static bool
