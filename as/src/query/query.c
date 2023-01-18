@@ -96,6 +96,8 @@ typedef enum {
 	QUERY_TYPE_UNKNOWN	= -1
 } query_type;
 
+#define RECORD_CHANGED_SAFETY_MS 3000 // clock skew & bins change after LUT
+
 #define INIT_BUF_BUILDER_SIZE (1024U * 1024U * 7U / 4U) // 1.75M
 #define QUERY_CHUNK_LIMIT (1024U * 1024U)
 
@@ -156,6 +158,13 @@ static bool match_geojson_element(const as_query_job* _job, msgpack_in* element)
 //==========================================================
 // Inlines & macros.
 //
+
+static inline bool
+record_changed_since_start(const as_query_job* _job, const as_record *r)
+{
+	return r->last_update_time + RECORD_CHANGED_SAFETY_MS >
+			_job->start_ms_clepoch;
+}
 
 static inline bool
 strings_match(const as_query_range* range, const char* str, size_t len)
@@ -961,12 +970,6 @@ send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size,
 	}
 
 	return sizeof(as_proto) + size;
-}
-
-static inline bool
-record_changed_since_start(const as_query_job* _job, const as_record *r)
-{
-	return r->last_update_time > _job->start_ms_clepoch;
 }
 
 static bool
