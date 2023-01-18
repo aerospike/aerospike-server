@@ -1417,7 +1417,6 @@ build_compare(build_args* args)
 	}
 
 	switch (ltype) {
-	case TYPE_MAP:
 	case TYPE_GEOJSON:
 	case TYPE_HLL:
 		cf_warning(AS_EXP, "build_compare - error %u cannot compare arg type %u (%s)",
@@ -4443,10 +4442,18 @@ rt_value_translate(rt_value* to, const rt_value* from)
 		to->r_bytes.contents = val.ptr;
 		break;
 	}
+	case AS_PARTICLE_TYPE_MAP: {
+		cdt_payload val;
+
+		as_bin_particle_map_get_packed_val(bin, &val);
+		to->type = RT_MSGPACK;
+		to->r_bytes.sz = val.sz;
+		to->r_bytes.contents = val.ptr;
+		break;
+	}
 	case AS_PARTICLE_TYPE_INTEGER:
 	case AS_PARTICLE_TYPE_FLOAT:
 	case AS_PARTICLE_TYPE_HLL:
-	case AS_PARTICLE_TYPE_MAP:
 	default:
 		cf_crash(AS_EXP, "unexpected");
 	}
@@ -4656,6 +4663,13 @@ cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
 	msgpack_cmp_type cmp = msgpack_cmp(&mp0, &mp1);
 
 	if (cmp == MSGPACK_CMP_ERROR) {
+		return AS_EXP_UNK;
+	}
+
+	if (mp0.has_unordered_map || mp1.has_unordered_map) {
+		cf_debug(AS_EXP, "illegal comparison of structure containing unordered map - arg0 %s arg1 %s",
+				mp0.has_unordered_map ? "has unordered" : "is ok",
+				mp1.has_unordered_map ? "has unordered" : "is ok");
 		return AS_EXP_UNK;
 	}
 

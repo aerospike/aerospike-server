@@ -60,6 +60,7 @@ typedef struct {
 	uint32_t len;
 	msgpack_type type;
 	bool has_nonstorage;
+	bool has_unordered_map;
 } parse_meta;
 
 
@@ -513,6 +514,8 @@ msgpack_cmp(msgpack_in *mp0, msgpack_in *mp1)
 
 	mp0->has_nonstorage = meta0.has_nonstorage;
 	mp1->has_nonstorage = meta1.has_nonstorage;
+	mp0->has_unordered_map = meta0.has_unordered_map;
+	mp1->has_unordered_map = meta1.has_unordered_map;
 	mp0->offset = meta0.buf - mp0->buf;
 	mp1->offset = meta1.buf - mp1->buf;
 
@@ -1322,7 +1325,15 @@ cmp_parse_container(parse_meta *meta, uint32_t count)
 		break;
 	default:
 		// not an ext type
+		if (meta->type == MSGPACK_TYPE_MAP) {
+			meta->has_unordered_map = true;
+		}
 		return;
+	}
+
+	if (meta->type == MSGPACK_TYPE_MAP &&
+			(type & AS_PACKED_MAP_FLAG_K_ORDERED) == 0) {
+		meta->has_unordered_map = true;
 	}
 
 	if (type == CMP_EXT_TYPE) {

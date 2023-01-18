@@ -996,7 +996,7 @@ map_to_flat(const as_particle *p, uint8_t *flat)
 
 
 //==========================================================
-// Global API.
+// as_bin particle functions specific to MAP.
 //
 
 void
@@ -1038,6 +1038,15 @@ as_bin_map_foreach(const as_bin *b, map_foreach_callback cb, void *udata)
 	}
 
 	return true;
+}
+
+void
+as_bin_particle_map_get_packed_val(const as_bin *b, cdt_payload *packed)
+{
+	const map_mem *p_map_mem = (const map_mem *)b->particle;
+
+	packed->ptr = (uint8_t *)p_map_mem->data;
+	packed->sz = p_map_mem->sz;
 }
 
 bool

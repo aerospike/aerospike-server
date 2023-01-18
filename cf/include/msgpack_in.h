@@ -39,6 +39,7 @@ typedef struct msgpack_in_s {
 	uint32_t buf_sz;
 	uint32_t offset;
 	bool has_nonstorage;
+	bool has_unordered_map;
 } msgpack_in;
 
 typedef struct msgpack_vec_s {

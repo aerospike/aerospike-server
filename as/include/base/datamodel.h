@@ -312,6 +312,9 @@ void as_bin_particle_geojson_trim(as_bin *b);
 // list:
 void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
 
+// map:
+void as_bin_particle_map_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
+
 int as_bin_cdt_modify_tr(as_bin *b, const struct as_msg_op_s *op, as_bin *result, cf_ll_buf *particles_llb);
 int as_bin_cdt_read_tr(const as_bin *b, const struct as_msg_op_s *op, as_bin *result);
 int as_bin_cdt_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *result, bool alloc_ns);
