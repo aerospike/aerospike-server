@@ -2546,7 +2546,7 @@ cmd_quiesce(char* name, char* params, cf_dyn_buf* db)
 {
 	// Command format: "quiesce:"
 
-	if (as_error_enterprise_only()) {
+	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 		return 0;
 	}
@@ -2572,7 +2572,7 @@ cmd_quiesce_undo(char* name, char* params, cf_dyn_buf* db)
 {
 	// Command format: "quiesce-undo:"
 
-	if (as_error_enterprise_only()) {
+	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 		return 0;
 	}
@@ -2596,7 +2596,7 @@ cmd_quiesce_undo(char* name, char* params, cf_dyn_buf* db)
 static int
 dyn_rack_ids(char* name, cf_dyn_buf* db)
 {
-	if (as_error_enterprise_only()) {
+	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 		return 0;
 	}
@@ -2611,7 +2611,7 @@ cmd_racks(char* name, char* params, cf_dyn_buf* db)
 {
 	// Command format: "racks:{namespace=<namespace-name>}"
 
-	if (as_error_enterprise_only()) {
+	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 		return 0;
 	}
@@ -2758,7 +2758,7 @@ dyn_replicas_master(char* name, cf_dyn_buf* db)
 static int
 cmd_revive(char* name, char* params, cf_dyn_buf* db)
 {
-	if (as_error_enterprise_only()) {
+	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 		return 0;
 	}
@@ -2814,7 +2814,7 @@ cmd_revive(char* name, char* params, cf_dyn_buf* db)
 static int
 cmd_roster(char* name, char* params, cf_dyn_buf* db)
 {
-	if (as_error_enterprise_only()) {
+	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 		return 0;
 	}
@@ -2864,12 +2864,12 @@ cmd_roster(char* name, char* params, cf_dyn_buf* db)
 //
 //   roster-set:namespace=<ns-name>;nodes=<nodes-string>
 //
-// where <nodes-string> is comma-separated list of node-id@rack-id pairs, and
-// the @rack-id may be absent, indicating a rack-id of 0.
+// where <nodes-string> is comma-separated list of node-id:rack-id pairs, and
+// the :rack-id may be absent, indicating a rack-id of 0.
 static int
 cmd_roster_set(char* name, char* params, cf_dyn_buf* db)
 {
-	if (as_error_enterprise_only()) {
+	if (as_info_error_enterprise_only()) {
 		cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
 		return 0;
 	}
@@ -3522,7 +3522,7 @@ cmd_smd_show(char* name, char* params, cf_dyn_buf* db)
 		as_smd_get_all(AS_SMD_MODULE_EVICT, smd_show_cb, db);
 	}
 	else if(strcasecmp(module_str, "roster") == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_info_error_enterprise_only()) {
 			INFO_ERROR_RESPONSE(db, AS_ERR_ENTERPRISE_ONLY, "enterprise-only");
 			return 0;
 		}
@@ -3530,7 +3530,7 @@ cmd_smd_show(char* name, char* params, cf_dyn_buf* db)
 		as_smd_get_all(AS_SMD_MODULE_ROSTER, smd_show_cb, db);
 	}
 	else if(strcasecmp(module_str, "security") == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_info_error_enterprise_only()) {
 			INFO_ERROR_RESPONSE(db, AS_ERR_ENTERPRISE_ONLY, "enterprise-only");
 			return 0;
 		}
@@ -3548,7 +3548,7 @@ cmd_smd_show(char* name, char* params, cf_dyn_buf* db)
 		as_smd_get_all(AS_SMD_MODULE_UDF, smd_show_cb, db);
 	}
 	else if(strcasecmp(module_str, "XDR") == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_info_error_enterprise_only()) {
 			INFO_ERROR_RESPONSE(db, AS_ERR_ENTERPRISE_ONLY, "enterprise-only");
 			return 0;
 		}

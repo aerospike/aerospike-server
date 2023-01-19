@@ -50,18 +50,23 @@ as_config_init_namespace(as_namespace* ns)
 {
 }
 
-// TODO - until we have an info split.
 bool
-as_error_enterprise_only()
+as_config_error_enterprise_only()
 {
+	return true;
+}
+
+bool
+as_config_error_enterprise_feature_only(const char* name)
+{
+	cf_crash(AS_CFG, "community edition checking enterprise feature");
 	return true;
 }
 
 // TODO - until we have an info split.
 bool
-as_error_enterprise_feature_only(const char* name)
+as_info_error_enterprise_only()
 {
-	cf_crash(AS_CFG, "community edition checking enterprise feature");
 	return true;
 }
 

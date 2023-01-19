@@ -653,7 +653,7 @@ cfg_set(char* name, char* cmd, cf_dyn_buf* db)
 		}
 	}
 	else if (strcmp(context, "security") == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "security is enterprise-only");
 			cf_dyn_buf_append_string(db, "error");
 			return 0;
@@ -665,7 +665,7 @@ cfg_set(char* name, char* cmd, cf_dyn_buf* db)
 		}
 	}
 	else if (strcmp(context, "xdr") == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "XDR is enterprise-only");
 			cf_dyn_buf_append_string(db, "error");
 			return 0;
@@ -856,7 +856,7 @@ cfg_set_service(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "migrate-fill-delay", v, &v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "migrate-fill-delay is enterprise-only");
 			return false;
 		}
@@ -1225,7 +1225,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "conflict-resolve-writes", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "conflict-resolve-writes is enterprise-only");
 			return false;
 		}
@@ -1288,7 +1288,7 @@ cfg_set_namespace(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "disallow-expunge", v, &v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "disallow-expunge is enterprise-only");
 			return false;
 		}
@@ -1514,7 +1514,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "ignore-migrate-fill-delay", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "ignore-migrate-fill-delay is enterprise-only");
 			return false;
 		}
@@ -1673,7 +1673,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "prefer-uniform-balance", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "prefer-uniform-balance is enterprise-only");
 			return false;
 		}
@@ -1692,13 +1692,8 @@ cfg_set_namespace(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "rack-id", v, &v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "rack-id is enterprise-only");
-			return false;
-		}
-		if (as_error_enterprise_feature_only("rack-aware")) {
-			cf_warning(AS_INFO, "{%s} feature key does not allow rack-aware",
-					ns->name);
 			return false;
 		}
 		if (cf_str_atoi(v, &val) != 0) {
@@ -1833,7 +1828,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "tomb-raider-eligible-age", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "tomb-raider-eligible-age is enterprise-only");
 			return false;
 		}
@@ -1847,7 +1842,7 @@ cfg_set_namespace(const char* cmd)
 		ns->tomb_raider_eligible_age = val;
 	}
 	else if (as_info_parameter_get(cmd, "tomb-raider-period", v, &v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "tomb-raider-period is enterprise-only");
 			return false;
 		}
@@ -1909,7 +1904,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "xdr-bin-tombstone-ttl", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "xdr-bin-tombstone-ttl is enterprise-only");
 			return false;
 		}
@@ -1929,7 +1924,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "xdr-tomb-raider-period", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "xdr-tomb-raider-period is enterprise-only");
 			return false;
 		}
@@ -1943,7 +1938,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "xdr-tomb-raider-threads", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "xdr-tomb-raider-threads is enterprise-only");
 			return false;
 		}
@@ -1981,11 +1976,11 @@ cfg_set_namespace(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "compression", v, &v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "compression is enterprise-only");
 			return false;
 		}
-		if (as_error_enterprise_feature_only("compression")) {
+		if (as_config_error_enterprise_feature_only("compression")) {
 			cf_warning(AS_INFO, "{%s} feature key does not allow compression",
 					ns->name);
 			return false;
@@ -2017,7 +2012,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "compression-acceleration", v,
 			&v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "compression-acceleration is enterprise-only");
 			return false;
 		}
@@ -2029,7 +2024,7 @@ cfg_set_namespace(const char* cmd)
 		ns->storage_compression_acceleration = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "compression-level", v, &v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "compression-level is enterprise-only");
 			return false;
 		}
@@ -2180,7 +2175,7 @@ cfg_set_namespace(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "tomb-raider-sleep", v, &v_len) == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_config_error_enterprise_only()) {
 			cf_warning(AS_INFO, "tomb-raider-sleep is enterprise-only");
 			return false;
 		}
