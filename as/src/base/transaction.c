@@ -405,11 +405,10 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		break;
 	case FROM_RE_REPL:
 		if (tr->from.re_repl_orig_cb) {
-			tr->result_code = error_code;
 			tr->from.re_repl_orig_cb(tr);
 			tr->from.re_repl_orig_cb = NULL; // pattern, not needed
 		}
-		// Re-replications take care of stats independently.
+		UPDATE_ERROR_STATS(re_repl);
 		break;
 	default:
 		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);

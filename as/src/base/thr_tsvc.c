@@ -30,6 +30,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
@@ -341,16 +342,19 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.proxy_node = 0; // pattern, not needed
 			break;
 		case FROM_IUDF:
+			as_incr_uint64(&ns->n_udf_sub_tsvc_error);
 			tr->from.iudf_orig->done_cb(tr->from.iudf_orig->udata,
 					AS_ERR_UNKNOWN);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 			break;
 		case FROM_IOPS:
+			as_incr_uint64(&ns->n_ops_sub_tsvc_error);
 			tr->from.iops_orig->done_cb(tr->from.iops_orig->udata,
 					AS_ERR_UNKNOWN);
 			tr->from.iops_orig = NULL; // pattern, not needed
 			break;
 		case FROM_RE_REPL:
+			as_incr_uint64(&ns->n_re_repl_tsvc_error);
 			tr->from.re_repl_orig_cb(tr);
 			tr->from.re_repl_orig_cb = NULL; // pattern, not needed
 			break;

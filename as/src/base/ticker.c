@@ -1014,18 +1014,22 @@ log_line_retransmits(as_namespace* ns)
 void
 log_line_re_repl(as_namespace* ns)
 {
+	uint64_t n_tsvc_error = as_load_uint64(&ns->n_re_repl_tsvc_error);
+	uint64_t n_tsvc_timeout = as_load_uint64(&ns->n_re_repl_tsvc_timeout);
 	uint64_t n_re_repl_success = as_load_uint64(&ns->n_re_repl_success);
 	uint64_t n_re_repl_error = as_load_uint64(&ns->n_re_repl_error);
 	uint64_t n_re_repl_timeout = as_load_uint64(&ns->n_re_repl_timeout);
 	uint64_t n_unreplicated_records = as_load_uint64(&ns->n_unreplicated_records);
 
-	if ((n_re_repl_success | n_re_repl_error | n_re_repl_timeout |
+	if ((n_tsvc_error | n_tsvc_timeout |
+			n_re_repl_success | n_re_repl_error | n_re_repl_timeout |
 			n_unreplicated_records) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} re-repl: all-triggers (%lu,%lu,%lu) unreplicated-records %lu",
+	cf_info(AS_INFO, "{%s} re-repl: tsvc (%lu,%lu) all-triggers (%lu,%lu,%lu) unreplicated-records %lu",
 			ns->name,
+			n_tsvc_error, n_tsvc_timeout,
 			n_re_repl_success, n_re_repl_error, n_re_repl_timeout,
 			n_unreplicated_records);
 }

@@ -4626,6 +4626,9 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	// Re-replication stats - relevant only for enterprise edition.
 
+	info_append_uint64(db, "re_repl_tsvc_error", ns->n_re_repl_tsvc_error);
+	info_append_uint64(db, "re_repl_tsvc_timeout", ns->n_re_repl_tsvc_timeout);
+
 	info_append_uint64(db, "re_repl_success", ns->n_re_repl_success);
 	info_append_uint64(db, "re_repl_error", ns->n_re_repl_error);
 	info_append_uint64(db, "re_repl_timeout", ns->n_re_repl_timeout);

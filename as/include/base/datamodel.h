@@ -1219,6 +1219,9 @@ typedef struct as_namespace_s {
 
 	// Re-replication stats - relevant only for enterprise edition.
 
+	uint64_t		n_re_repl_tsvc_error;
+	uint64_t		n_re_repl_tsvc_timeout;
+
 	uint64_t		n_re_repl_success;
 	uint64_t		n_re_repl_error;
 	uint64_t		n_re_repl_timeout;
