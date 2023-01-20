@@ -222,9 +222,10 @@ bool as_config_cluster_name_set(const char* cluster_name);
 bool as_config_cluster_name_matches(const char* cluster_name);
 
 void as_config_init_namespace(struct as_namespace_s* ns);
-bool as_config_error_enterprise_only();
-bool as_config_error_enterprise_feature_only(const char* name);
-bool as_info_error_enterprise_only(); // TODO - until we have an info split
+
+// TODO - until we have an info split.
+bool as_error_enterprise_only();
+bool as_error_enterprise_feature_only(const char* name);
 
 extern as_config g_config;
 
