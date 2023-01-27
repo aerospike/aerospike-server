@@ -110,14 +110,9 @@ cleanmodules:
 		$(MAKE) -C $(JEMALLOC) clean; \
 		$(MAKE) -C $(JEMALLOC) distclean; \
 	fi
-ifeq ($(ARCH), x86_64)
 	if [ -e "$(LUAJIT)/Makefile" ]; then \
-		if [ ! -e "$(LUAJIT)/src/luaconf.h" ]; then \
-			ln -s "$(LUAJIT)/src/luaconf.h.orig" "$(LUAJIT)/src/luaconf.h"; \
-		fi; \
 		$(MAKE) -C $(LUAJIT) clean; \
 	fi
-endif
 	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) clean
 	$(MAKE) -C $(S2) clean
 
@@ -168,9 +163,6 @@ $(JEMALLOC)/configure:
 
 $(JEMALLOC)/Makefile: $(JEMALLOC)/configure
 	cd $(JEMALLOC) && ./configure $(JEM_CONFIG_OPT)
-
-$(LUAJIT)/src/luaconf.h: $(LUAJIT)/src/luaconf.h.orig
-	ln -s $(notdir $<) $@
 
 .PHONY: source
 source: src
