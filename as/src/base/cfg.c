@@ -3142,9 +3142,6 @@ as_config_init(const char* config_file)
 				if (ns->conflict_resolve_writes && ns->single_bin) {
 					cf_crash_nostack(AS_CFG, "{%s} 'conflict-resolve-writes' can't be true if 'single-bin' is true", ns->name);
 				}
-				if (ns->inline_short_queries && ! ns->storage_data_in_memory) {
-					cf_crash_nostack(AS_CFG, "{%s} 'inline-short-queries' can't be true unless 'data-in-memory' is true", ns->name);
-				}
 				if (ns->max_record_size != 0) {
 					if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && ns->max_record_size > 128 * 1024 * 1024) { // PROTO_SIZE_MAX
 						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 128M", ns->name);

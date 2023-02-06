@@ -1534,10 +1534,6 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "inline-short-queries", v,
 			&v_len) == 0) {
-		if (! ns->storage_data_in_memory) {
-			cf_warning(AS_INFO, "inline-short-queries can't be set unless data-in-memory");
-			return false;
-		}
 		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
 			cf_info(AS_INFO, "Changing value of inline-short-queries of ns %s to %s",
 					ns->name, v);
