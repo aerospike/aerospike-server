@@ -1103,52 +1103,52 @@ sanity_check_flat(const drv_ssd *ssd, const as_record *r,
 		uint64_t record_offset, const as_flat_record *flat)
 {
 	as_namespace *ns = ssd->ns;
-	bool failed = false;
+	bool ok = true;
 
 	if (flat->magic != AS_FLAT_MAGIC) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad block magic 0x%x offset %lu",
 				ns->name, ssd->name, &r->keyd, flat->magic, record_offset);
-		failed = true;
+		ok = false;
 	}
 
 	if (flat->n_rblocks != r->n_rblocks) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad n-rblocks %u expecting %u",
 				ns->name, ssd->name, &r->keyd, flat->n_rblocks, r->n_rblocks);
-		failed = true;
+		ok = false;
 	}
 
 	if (cf_digest_compare(&flat->keyd, &r->keyd) != 0) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD but found flat digest %pD",
 				ns->name, ssd->name, &r->keyd, &flat->keyd);
-		failed = true;
+		ok = false;
 	}
 
 	if (flat->xdr_write != r->xdr_write) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad xdr-write %u expecting %u",
 				ns->name, ssd->name, &r->keyd, flat->xdr_write, r->xdr_write);
-		failed = true;
+		ok = false;
 	}
 
 	if (flat->tree_id != r->tree_id) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad tree-id %u expecting %u",
 				ns->name, ssd->name, &r->keyd, flat->tree_id, r->tree_id);
-		failed = true;
+		ok = false;
 	}
 
 	if (flat->generation != r->generation) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad generation %u expecting %u",
 				ns->name, ssd->name, &r->keyd, flat->generation, r->generation);
-		failed = true;
+		ok = false;
 	}
 
 	if (flat->last_update_time != r->last_update_time) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad lut %lu expecting %lu",
 				ns->name, ssd->name, &r->keyd, (uint64_t)flat->last_update_time,
 				(uint64_t)r->last_update_time);
-		failed = true;
+		ok = false;
 	}
 
-	return failed;
+	return ok;
 }
 
 
@@ -1165,27 +1165,27 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 
 	uint32_t wblock_id = OFFSET_TO_WBLOCK_ID(ssd, record_offset);
 
-	bool bad_location = false;
+	bool ok = true;
 
 	if (wblock_id >= ssd->n_wblocks || wblock_id < ssd->first_wblock_id) {
 		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad offset %lu", ns->name,
 				&r->keyd, record_offset);
-		bad_location = true;
+		ok = false;
 	}
 
 	if (record_size < DRV_RECORD_MIN_SIZE) {
 		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad record size %u",
 				ns->name, &r->keyd, record_size);
-		bad_location = true;
+		ok = false;
 	}
 
 	if (record_end_offset > WBLOCK_ID_TO_OFFSET(ssd, wblock_id + 1)) {
 		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD record size %u crosses wblock boundary",
 				ns->name, &r->keyd, record_size);
-		bad_location = true;
+		ok = false;
 	}
 
-	if (bad_location) {
+	if (! ok) {
 		return -1;
 	}
 
@@ -1395,27 +1395,27 @@ as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 
 	uint32_t wblock_id = OFFSET_TO_WBLOCK_ID(ssd, record_offset);
 
-	bool bad_location = false;
+	bool ok = true;
 
 	if (wblock_id >= ssd->n_wblocks || wblock_id < ssd->first_wblock_id) {
 		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad offset %lu", ns->name,
 				&r->keyd, record_offset);
-		bad_location = true;
+		ok = false;
 	}
 
 	if (record_size < DRV_RECORD_MIN_SIZE) {
 		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad record size %u",
 				ns->name, &r->keyd, record_size);
-		bad_location = true;
+		ok = false;
 	}
 
 	if (record_end_offset > WBLOCK_ID_TO_OFFSET(ssd, wblock_id + 1)) {
 		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD record size %u crosses wblock boundary",
 				ns->name, &r->keyd, record_size);
-		bad_location = true;
+		ok = false;
 	}
 
-	if (bad_location) {
+	if (! ok) {
 		return false;
 	}
 
