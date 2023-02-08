@@ -5009,8 +5009,9 @@ cfg_add_storage_device(as_namespace* ns, const char* device_name,
 }
 
 static void
-cfg_set_cluster_name(char* cluster_name){
-	if(!as_config_cluster_name_set(cluster_name)){
+cfg_set_cluster_name(char* cluster_name)
+{
+	if (! as_config_cluster_name_set(cluster_name)) {
 		cf_crash_nostack(AS_CFG, "cluster name '%s' is not allowed", cluster_name);
 	}
 }
