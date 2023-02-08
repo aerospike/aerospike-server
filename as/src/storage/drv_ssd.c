@@ -1102,47 +1102,48 @@ static bool
 sanity_check_flat(const drv_ssd *ssd, const as_record *r,
 		uint64_t record_offset, const as_flat_record *flat)
 {
+	as_namespace *ns = ssd->ns;
 	bool failed = false;
 
 	if (flat->magic != AS_FLAT_MAGIC) {
-		cf_warning(AS_DRV_SSD, "read %s: digest %pD bad block magic 0x%x offset %lu",
-				ssd->name, &r->keyd, flat->magic, record_offset);
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad block magic 0x%x offset %lu",
+				ns->name, ssd->name, &r->keyd, flat->magic, record_offset);
 		failed = true;
 	}
 
 	if (flat->n_rblocks != r->n_rblocks) {
-		cf_warning(AS_DRV_SSD, "read %s: digest %pD bad n-rblocks %u expecting %u",
-				ssd->name, &r->keyd, flat->n_rblocks, r->n_rblocks);
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad n-rblocks %u expecting %u",
+				ns->name, ssd->name, &r->keyd, flat->n_rblocks, r->n_rblocks);
 		failed = true;
 	}
 
 	if (cf_digest_compare(&flat->keyd, &r->keyd) != 0) {
-		cf_warning(AS_DRV_SSD, "read %s: digest %pD but found flat digest %pD",
-				ssd->name, &r->keyd, &flat->keyd);
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD but found flat digest %pD",
+				ns->name, ssd->name, &r->keyd, &flat->keyd);
 		failed = true;
 	}
 
 	if (flat->xdr_write != r->xdr_write) {
-		cf_warning(AS_DRV_SSD, "read %s: digest %pD bad xdr-write %u expecting %u",
-				ssd->name, &r->keyd, flat->xdr_write, r->xdr_write);
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad xdr-write %u expecting %u",
+				ns->name, ssd->name, &r->keyd, flat->xdr_write, r->xdr_write);
 		failed = true;
 	}
 
 	if (flat->tree_id != r->tree_id) {
-		cf_warning(AS_DRV_SSD, "read %s: digest %pD bad tree-id %u expecting %u",
-				ssd->name, &r->keyd, flat->tree_id, r->tree_id);
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad tree-id %u expecting %u",
+				ns->name, ssd->name, &r->keyd, flat->tree_id, r->tree_id);
 		failed = true;
 	}
 
 	if (flat->generation != r->generation) {
-		cf_warning(AS_DRV_SSD, "read %s: digest %pD bad generation %u expecting %u",
-				ssd->name, &r->keyd, flat->generation, r->generation);
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad generation %u expecting %u",
+				ns->name, ssd->name, &r->keyd, flat->generation, r->generation);
 		failed = true;
 	}
 
 	if (flat->last_update_time != r->last_update_time) {
-		cf_warning(AS_DRV_SSD, "read %s: digest %pD bad lut %lu expecting %lu",
-				ssd->name, &r->keyd, (uint64_t)flat->last_update_time,
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad lut %lu expecting %lu",
+				ns->name, ssd->name, &r->keyd, (uint64_t)flat->last_update_time,
 				(uint64_t)r->last_update_time);
 		failed = true;
 	}
@@ -1167,20 +1168,20 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	bool bad_location = false;
 
 	if (wblock_id >= ssd->n_wblocks || wblock_id < ssd->first_wblock_id) {
-		cf_warning(AS_DRV_SSD, "{%s} read: bad offset %lu digest %pD", ns->name,
-				record_offset, &r->keyd);
+		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad offset %lu", ns->name,
+				&r->keyd, record_offset);
 		bad_location = true;
 	}
 
 	if (record_size < DRV_RECORD_MIN_SIZE) {
-		cf_warning(AS_DRV_SSD, "{%s} read: bad record size %u digest %pD",
-				ns->name, record_size, &r->keyd);
+		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad record size %u",
+				ns->name, &r->keyd, record_size);
 		bad_location = true;
 	}
 
 	if (record_end_offset > WBLOCK_ID_TO_OFFSET(ssd, wblock_id + 1)) {
-		cf_warning(AS_DRV_SSD, "{%s} read: record size %u crosses wblock boundary digest %pD",
-				ns->name, record_size, &r->keyd);
+		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD record size %u crosses wblock boundary",
+				ns->name, &r->keyd, record_size);
 		bad_location = true;
 	}
 
@@ -1209,8 +1210,8 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		ssd_decrypt_whole(ssd, record_offset, r->n_rblocks, flat);
 
 		if (! sanity_check_flat(ssd, r, record_offset, flat)) {
-			cf_warning(AS_DRV_SSD, "read %s: digest %pD failed read from buffer",
-					ssd->name, &r->keyd);
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD failed read from buffer",
+					ns->name, ssd->name, &r->keyd);
 			cf_free(read_buf);
 			return -1;
 		}
@@ -1232,9 +1233,9 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		uint64_t start_us = as_health_sample_device_read() ? cf_getus() : 0;
 
 		if (! pread_all(fd, read_buf, read_size, (off_t)read_offset)) {
-			cf_warning(AS_DRV_SSD, "{%s} read %s: IO failed errno %d (%s) size %lu digest %pD",
-					ns->name, ssd->name, errno, cf_strerror(errno), read_size,
-					&r->keyd);
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD IO failed errno %d (%s) size %lu",
+					ns->name, ssd->name, &r->keyd, errno, cf_strerror(errno),
+					read_size);
 			cf_free(read_buf);
 			close(fd);
 			as_decr_uint32(rd->read_page_cache ?
@@ -1259,8 +1260,8 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		ssd_decrypt_whole(ssd, record_offset, r->n_rblocks, flat);
 
 		if (! sanity_check_flat(ssd, r, record_offset, flat)) {
-			cf_warning(AS_DRV_SSD, "read %s: digest %pD failed read directly from device",
-					ssd->name, &r->keyd);
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD failed read directly from device",
+					ns->name, ssd->name, &r->keyd);
 			cf_free(read_buf);
 			return -1;
 		}
@@ -1282,7 +1283,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 			ns->single_bin);
 
 	if (! rd->flat_bins) {
-		cf_warning(AS_DRV_SSD, "{%s} read %s: bad record metadata digest %pD",
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad record metadata",
 				ns->name, ssd->name, &r->keyd);
 		return -1;
 	}
@@ -1293,7 +1294,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	}
 
 	if (! as_flat_decompress_bins(&opt_meta.cm, rd)) {
-		cf_warning(AS_DRV_SSD, "{%s} read %s: bad compressed data digest %pD",
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad compressed data",
 				ns->name, ssd->name, &r->keyd);
 		return -1;
 	}
@@ -1384,6 +1385,7 @@ as_storage_record_load_pickle_ssd(as_storage_rd *rd)
 bool
 as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 {
+	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
 	drv_ssd *ssd = rd->ssd;
 
@@ -1396,18 +1398,20 @@ as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 	bool bad_location = false;
 
 	if (wblock_id >= ssd->n_wblocks || wblock_id < ssd->first_wblock_id) {
-		cf_warning(AS_DRV_SSD, "read-raw: bad offset %lu", record_offset);
+		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad offset %lu", ns->name,
+				&r->keyd, record_offset);
 		bad_location = true;
 	}
 
 	if (record_size < DRV_RECORD_MIN_SIZE) {
-		cf_warning(AS_DRV_SSD, "read-raw: bad record size %u", record_size);
+		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD bad record size %u",
+				ns->name, &r->keyd, record_size);
 		bad_location = true;
 	}
 
 	if (record_end_offset > WBLOCK_ID_TO_OFFSET(ssd, wblock_id + 1)) {
-		cf_warning(AS_DRV_SSD, "read-raw: record size %u crosses wblock boundary",
-				record_size);
+		cf_warning(AS_DRV_SSD, "{%s} read: digest %pD record size %u crosses wblock boundary",
+				ns->name, &r->keyd, record_size);
 		bad_location = true;
 	}
 
@@ -1437,8 +1441,8 @@ as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 		}
 
 		if (! sanity_check_flat(ssd, r, record_offset, flat)) {
-			cf_warning(AS_DRV_SSD, "read-raw %s: digest %pD failed read from buffer",
-					ssd->name, &r->keyd);
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD failed read from buffer",
+					ns->name, ssd->name, &r->keyd);
 			// Continue even on failure...
 		}
 	}
@@ -1455,8 +1459,9 @@ as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 		int fd = rd->read_page_cache ? ssd_fd_cache_get(ssd) : ssd_fd_get(ssd);
 
 		if (! pread_all(fd, read_buf, read_size, (off_t)read_offset)) {
-			cf_warning(AS_DRV_SSD, "read-raw %s: IO failed errno %d (%s) size %lu",
-					ssd->name, errno, cf_strerror(errno), read_size);
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD IO failed errno %d (%s) size %lu",
+					ns->name, ssd->name, &r->keyd, errno, cf_strerror(errno),
+					read_size);
 			cf_free(read_buf);
 			close(fd);
 			as_decr_uint32(rd->read_page_cache ?
@@ -1478,8 +1483,8 @@ as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 		}
 
 		if (! sanity_check_flat(ssd, r, record_offset, flat)) {
-			cf_warning(AS_DRV_SSD, "read-raw %s: digest %pD failed read directly from device",
-					ssd->name, &r->keyd);
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD failed read directly from device",
+					ns->name, ssd->name, &r->keyd);
 			// Continue even on failure...
 		}
 	}

@@ -164,9 +164,8 @@ COMPILER_ASSERT(offsetof(drv_header, generic.prefix) == 0);
 // Conversions between offsets and rblocks.
 //
 
-// TODO - make checks stricter (exclude drive header, consider drive size) ???
+// Really just means "was set", doesn't fully validate...
 #define STORAGE_RBLOCK_IS_VALID(__x) ((__x) != 0)
-#define STORAGE_RBLOCK_IS_INVALID(__x) ((__x) == 0)
 
 // Convert byte offset to rblock_id, as long as offset is already a multiple of
 // rblock size.
