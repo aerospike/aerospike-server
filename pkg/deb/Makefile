@@ -11,7 +11,7 @@ OPT_AS = $(BUILD_ROOT)/opt/aerospike
 REV = $(shell $(DEPTH)/build/version)
 OS = $(shell $(DEPTH)/build/os_version)
 SIZE = $(shell du -k $(BIN_DIR)/asd | cut -f1)
-DEPS = 
+DEPS =
 
 comma:= ,
 empty:=
@@ -55,6 +55,9 @@ endif
 ifeq ($(USE_EE),1)
 	echo "/etc/aerospike/features.conf" >> $(BUILD_ROOT)/DEBIAN/conffiles
 	install -pm 644 $(EEREPO)/etc/eval_features.conf $(BUILD_ROOT)/etc/aerospike/features.conf
+endif
+ifeq ($(EDITION),federal)
+	cat $(EEREPO)/pkg/deb/fips-files >> $(BUILD_ROOT)/DEBIAN/conffiles
 endif
 
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service.head $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service

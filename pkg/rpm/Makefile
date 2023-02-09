@@ -95,6 +95,9 @@ ifeq ($(USE_EE),1)
 	echo "%config(noreplace) /etc/aerospike/features.conf" >> $(PKG)/rpm/aerospike.spec
 	install -pm 644 $(EEREPO)/etc/eval_features.conf $(BUILD_ROOT)/etc/aerospike/features.conf
 endif
+ifeq ($(EDITION),federal)
+	cat $(EEREPO)/pkg/rpm/fips-files >> $(PKG)/rpm/aerospike.spec
+endif
 
 ifeq ($(EDITION),community)
 	cat $(PKG)/rpm/server-spec-telemetry >> $(PKG)/rpm/aerospike.spec
