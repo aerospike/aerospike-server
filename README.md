@@ -21,7 +21,7 @@ information.  The full Telemetry data collection agent source code may be found 
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
-current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8, Debian 9 or later, and Ubuntu 18.04 or later.
+current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8, Debian 10 or later, and Ubuntu 18.04 or later.
 
 ### Dependencies
 
@@ -49,19 +49,19 @@ the build environment, including:
 The C++ compiler is required for the Aerospike geospatial indexing
 feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
-* The required CentOS 7 & Red Hat Enterprise Linux 8 package to install is: `gcc-c++`.
+* The required CentOS 7 & Red Hat Enterprise Linux 8/9 package to install is: `gcc-c++`.
 
-* The required Debian 9/10/11 and Ubuntu 18/20 package to install is: `g++`.
+* The required Debian 10/11 and Ubuntu 18/20/22 package to install is: `g++`.
 
 #### OpenSSL
 
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
 (RIPEMD-160 & SHA-1) and pseudo-random number generation.
 
-* The CentOS 7 &  Red Hat Enterprise Linux 8 OpenSSL packages to install are:  `openssl` and
+* The CentOS 7 &  Red Hat Enterprise Linux 8/9 OpenSSL packages to install are:  `openssl` and
 `openssl-devel`, and also `openssl-static` on CentOS 7.
 
-* The Debian 9/10/11 and Ubuntu 18/20 OpenSSL packages to install are:
+* The Debian 10/11 and Ubuntu 18/20/22 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
 
 #### Lua 5.1
@@ -75,10 +75,10 @@ Function (UDF) support.
 * Alternatively, it is possible to build with standard Lua 5.1 provided
 by the build environment.  In that case:
 
-	* The CentOS 7 & Red Hat Enterprise Linux 8 Lua package to install is:  `lua`, and also
+	* The CentOS 7 & Red Hat Enterprise Linux 8/9 Lua package to install is:  `lua`, and also
 `lua-devel` and `lua-static` on CentOS 7.
 
-	* The Debian 9/10/11 and Ubuntu 18/20 Lua packages to install are:
+	* The Debian 10/11 and Ubuntu 18/20/22 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
@@ -92,7 +92,7 @@ Building on Ubuntu 18+ also requires installing `libz-dev`.
 Running the Telemetry Agent requires either Python 3+ or Python 2.6+,
 at least one of which is generally available by default on most
 platforms. On some distros, such as Ubuntu 18+, it may be necessary to
-install the package `python`, while on other distros, such as Red Hat Enterprise Linux 8,
+install the package `python`, while on other distros, such as Red Hat Enterprise Linux 8+,
 the package name includes the major (and/or minor) version number, e.g.,
 `python3` or `python2`.
 
