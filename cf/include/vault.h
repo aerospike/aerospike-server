@@ -40,8 +40,9 @@
 
 typedef struct cf_vault_config_s {
 	const char* ca;
+	const char* namespace;
 	const char* path;
-	const char* token_file;
+	char* token_file;
 	const char* url;
 } cf_vault_config;
 
@@ -52,6 +53,7 @@ typedef struct cf_vault_config_s {
 
 bool cf_vault_is_configured(void);
 uint8_t* cf_vault_fetch_bytes(const char* path, size_t* size_r);
+bool cf_vault_update_token(const char* path);
 
 static inline bool
 cf_vault_is_vault_path(const char* path)

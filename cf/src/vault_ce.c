@@ -57,3 +57,10 @@ cf_vault_fetch_bytes(const char* path, size_t* size_r)
 	cf_crash(CF_VAULT, "unreachable function for CE");
 	return NULL;
 }
+
+bool
+cf_vault_update_token(const char* path)
+{
+	cf_crash(CF_VAULT, "unreachable function for CE");
+	return false;
+}

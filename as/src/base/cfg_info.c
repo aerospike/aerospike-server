@@ -259,6 +259,7 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint64(db, "transaction-max-ms", g_config.transaction_max_ns / 1000000);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
 	info_append_string_safe(db, "vault-ca", g_vault_cfg.ca);
+	info_append_string_safe(db, "vault-namespace", g_vault_cfg.namespace);
 	info_append_string_safe(db, "vault-path", g_vault_cfg.path);
 	info_append_string_safe(db, "vault-token-file", g_vault_cfg.token_file);
 	info_append_string_safe(db, "vault-url", g_vault_cfg.url);
@@ -1009,6 +1010,20 @@ cfg_set_service(const char* cmd)
 		cf_info(AS_INFO, "Changing value of transaction-retry-ms from %d to %d ",
 				g_config.transaction_retry_ms, val);
 		g_config.transaction_retry_ms = val;
+	}
+	else if (as_info_parameter_get(cmd, "vault-token-file", v, &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "vault-token-file is enterprise-only");
+			return false;
+		}
+		if (! cf_vault_is_configured()) {
+			cf_warning(AS_INFO, "vault is not dynamically configurable");
+			return false;
+		}
+		if (! cf_vault_update_token(v)) {
+			cf_warning(AS_INFO, "failed to update vault token");
+			return false;
+		}
 	}
 	else {
 		return false;

@@ -303,6 +303,7 @@ typedef enum {
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
 	CASE_SERVICE_USER,
 	CASE_SERVICE_VAULT_CA,
+	CASE_SERVICE_VAULT_NAMESPACE,
 	CASE_SERVICE_VAULT_PATH,
 	CASE_SERVICE_VAULT_TOKEN_FILE,
 	CASE_SERVICE_VAULT_URL,
@@ -813,6 +814,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
 		{ "user",							CASE_SERVICE_USER },
 		{ "vault-ca",						CASE_SERVICE_VAULT_CA },
+		{ "vault-namespace",				CASE_SERVICE_VAULT_NAMESPACE },
 		{ "vault-path",						CASE_SERVICE_VAULT_PATH },
 		{ "vault-token-file",				CASE_SERVICE_VAULT_TOKEN_FILE },
 		{ "vault-url",						CASE_SERVICE_VAULT_URL },
@@ -2376,6 +2378,10 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_VAULT_CA:
 				cfg_enterprise_only(&line);
 				g_vault_cfg.ca = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_SERVICE_VAULT_NAMESPACE:
+				cfg_enterprise_only(&line);
+				g_vault_cfg.namespace = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_VAULT_PATH:
 				cfg_enterprise_only(&line);
