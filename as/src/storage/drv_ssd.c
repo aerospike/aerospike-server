@@ -1106,7 +1106,7 @@ sanity_check_flat(const drv_ssd *ssd, const as_record *r,
 	bool ok = true;
 
 	if (flat->magic != AS_FLAT_MAGIC) {
-		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad block magic 0x%x offset %lu",
+		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad magic 0x%x offset %lu",
 				ns->name, ssd->name, &r->keyd, flat->magic, record_offset);
 		ok = false;
 	}
