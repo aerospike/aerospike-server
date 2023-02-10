@@ -183,20 +183,19 @@ as_security_transact(as_transaction* tr)
 //
 
 void
-as_security_config_log_scope(uint32_t sink, const char* ns_name,
-		const char* set_name)
+as_security_config_log_scope(const char* ns_name, const char* set_name)
 {
 	cf_crash(AS_SECURITY, "CE called as_security_config_log_scope()");
 }
 
 void
-as_security_config_log_role(uint32_t sink, const char* role)
+as_security_config_log_role(const char* role)
 {
 	cf_crash(AS_SECURITY, "CE called as_security_config_log_role()");
 }
 
 void
-as_security_config_log_user(uint32_t sink, const char* user)
+as_security_config_log_user(const char* user)
 {
 	cf_crash(AS_SECURITY, "CE called as_security_config_log_user()");
 }

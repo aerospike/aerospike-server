@@ -189,8 +189,11 @@ bool cf_log_is_using_millis(void);
 //
 
 void cf_log_init(bool early_verbose);
-cf_log_sink* cf_log_init_sink(const char* path);
+cf_log_sink* cf_log_init_sink(const char* path, int facility, const char* tag);
 bool cf_log_init_level(cf_log_sink* sink, const char* context_str, const char* level_str);
+bool cf_log_init_facility(cf_log_sink* sink, const char* facility_str);
+void cf_log_init_path(cf_log_sink* sink, const char* path);
+void cf_log_init_tag(cf_log_sink* sink, const char* tag);
 void cf_log_activate_sinks(void);
 bool cf_log_set_level(uint32_t id, const char* context_str, const char* level_str);
 void cf_log_get_sinks(cf_dyn_buf* db);

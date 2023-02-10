@@ -35,8 +35,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -58,6 +62,8 @@
 struct cf_log_sink_s {
 	const char* path;
 	int fd;
+	int facility;    // for syslog only
+	const char* tag; // for syslog only
 	cf_log_level levels[CF_LOG_N_CONTEXTS];
 };
 
@@ -142,6 +148,36 @@ static const char* level_strings[] = {
 
 ARRAY_ASSERT(level_strings, CF_LOG_N_LEVELS);
 
+typedef struct facility_code_s {
+	const char* name;
+	int code;
+} facility_code;
+
+static const facility_code facility_codes[] = {
+		{ "auth", LOG_AUTH },
+		{ "authpriv", LOG_AUTHPRIV },
+		{ "cron", LOG_CRON },
+		{ "daemon", LOG_DAEMON },
+		{ "ftp", LOG_FTP },
+		{ "kern", LOG_KERN },
+		{ "lpr", LOG_LPR },
+		{ "mail", LOG_MAIL },
+		{ "news", LOG_NEWS },
+		{ "syslog", LOG_SYSLOG },
+		{ "user", LOG_USER },
+		{ "uucp", LOG_UUCP },
+		{ "local0", LOG_LOCAL0 },
+		{ "local1", LOG_LOCAL1 },
+		{ "local2", LOG_LOCAL2 },
+		{ "local3", LOG_LOCAL3 },
+		{ "local4", LOG_LOCAL4 },
+		{ "local5", LOG_LOCAL5 },
+		{ "local6", LOG_LOCAL6 },
+		{ "local7", LOG_LOCAL7 }
+};
+
+#define N_FACILITY_CODES (sizeof(facility_codes) / sizeof(facility_code))
+
 #define CACHE_MSG_MAX_SIZE 128
 
 typedef struct cf_log_cache_hkey_s {
@@ -157,6 +193,8 @@ typedef struct cf_log_cache_hkey_s {
 #define MAX_LOG_STRING_LEN (MAX_LOG_STRING_SZ - 1) // room for \n instead of \0
 
 #define MAX_ADJUSTED_STRING_SZ 2048 // trust adjusted format won't exceed this
+
+#define SYSLOG_TIME_SZ 15
 
 #define MAX_BACKTRACE_DEPTH 50
 
@@ -177,6 +215,7 @@ static cf_shash* g_ticker_hash;
 static bool g_sinks_activated = false;
 static uint32_t g_n_sinks = 0;
 static cf_log_sink g_sinks[MAX_SINKS];
+static bool g_use_syslog = false;
 
 
 //==========================================================
@@ -189,7 +228,14 @@ static bool get_context(const char* context_str, cf_log_context* context);
 static bool get_level(const char* level_str, cf_log_level* level);
 static void update_most_verbose_level(cf_log_context context);
 static void log_write(cf_log_context context, cf_log_level level, const char* file_name, int line, const char* format, va_list argp);
+static uint32_t get_log_fds(cf_log_context context, cf_log_level level, int* fds);
 static int sprintf_now(char* buf);
+static void write_all(int fd, const char* buf, size_t sz);
+static void syslog_write(cf_log_context context, cf_log_level level, const char* file_name, int line, const char* format, va_list argp);
+static uint32_t get_syslog_sinks(cf_log_context context, cf_log_level level, cf_log_sink** sinks);
+static void syslog_sprintf_now(char* buf);
+static int syslog_level(cf_log_level level);
+static void syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time, const char* buf, size_t buf_sz);
 static int cache_reduce_fn(const void* key, void* data, void* udata);
 
 static void register_custom_conversions(void);
@@ -209,28 +255,6 @@ level_tag(cf_log_level level)
 {
 	// FIXME - we wanted to manipulate CRITICAL?
 	return level_strings[level];
-}
-
-static inline void
-write_all(int fd, const char* buf, size_t sz)
-{
-	while (sz != 0) {
-		ssize_t sz_wr = write(fd, buf, sz);
-
-		if (sz_wr == 0) {
-			fprintf(stderr, "zero-size log write to %d\n", fd);
-			break;
-		}
-
-		if (sz_wr < 0) {
-			fprintf(stderr, "log write to %d failed: %d (%s)\n", fd, errno,
-					cf_strerror(errno));
-			break;
-		}
-
-		buf += sz_wr;
-		sz -= (size_t)sz_wr;
-	}
 }
 
 
@@ -283,7 +307,7 @@ cf_log_init(bool early_verbose)
 }
 
 cf_log_sink*
-cf_log_init_sink(const char* path)
+cf_log_init_sink(const char* path, int facility, const char* tag)
 {
 	if (g_n_sinks >= MAX_SINKS) {
 		cf_crash_nostack(CF_MISC, "can't configure > %d log sinks", MAX_SINKS);
@@ -292,6 +316,15 @@ cf_log_init_sink(const char* path)
 	cf_log_sink* sink = &g_sinks[g_n_sinks];
 
 	sink->path = path != NULL ? cf_strdup(path) : NULL;
+	sink->facility = facility;
+
+	if (tag != NULL) {
+		sink->tag = cf_strdup(tag);
+		g_use_syslog = true;
+	}
+	else {
+		sink->tag = NULL;
+	}
 
 	// Set default for all contexts.
 	for (cf_log_context context = 0; context < CF_LOG_N_CONTEXTS; context++) {
@@ -332,6 +365,43 @@ cf_log_init_level(cf_log_sink* sink, const char* context_str,
 	return true;
 }
 
+bool
+cf_log_init_facility(cf_log_sink* sink, const char* facility_str)
+{
+	if (*facility_str == '\0') {
+		return true; // will use the default
+	}
+
+	for (uint32_t i = 0; i < N_FACILITY_CODES; i++) {
+		if (strcmp(facility_codes[i].name, facility_str) == 0) {
+			sink->facility = facility_codes[i].code;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void
+cf_log_init_path(cf_log_sink* sink, const char* path)
+{
+	if (*path != '\0') {
+		cf_free((void*)sink->path);
+		sink->path = cf_strdup(path);
+	}
+	// else - will use the default.
+}
+
+void
+cf_log_init_tag(cf_log_sink* sink, const char* tag)
+{
+	if (*tag != '\0') {
+		cf_free((void*)sink->tag);
+		sink->tag = cf_strdup(tag);
+	}
+	// else - will use the default.
+}
+
 void
 cf_log_activate_sinks(void)
 {
@@ -343,11 +413,22 @@ cf_log_activate_sinks(void)
 			continue;
 		}
 
-		sink->fd = open(sink->path, CF_LOG_OPEN_FLAGS, cf_os_log_perms());
+		if (sink->tag == NULL) {
+			sink->fd = open(sink->path, CF_LOG_OPEN_FLAGS, cf_os_log_perms());
+
+			if (sink->fd < 0) {
+				cf_crash_nostack(CF_MISC, "can't open %s: %d (%s)", sink->path,
+						errno, cf_strerror(errno));
+			}
+
+			continue;
+		}
+
+		sink->fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 
 		if (sink->fd < 0) {
-			cf_crash_nostack(CF_MISC, "can't open %s: %d (%s)", sink->path,
-					errno, cf_strerror(errno));
+			cf_crash_nostack(CF_MISC, "can't create socket: %d (%s)", errno,
+					cf_strerror(errno));
 		}
 	}
 
@@ -500,6 +581,7 @@ cf_log_write(cf_log_context context, cf_log_level level, const char* file_name,
 	va_start(argp, format);
 
 	log_write(context, level, file_name, line, format, argp);
+	syslog_write(context, level, file_name, line, format, argp);
 
 	va_end(argp);
 }
@@ -512,6 +594,7 @@ cf_log_write_no_return(int sig, cf_log_context context, const char* file_name,
 	va_start(argp, format);
 
 	log_write(context, CF_CRITICAL, file_name, line, format, argp);
+	syslog_write(context, CF_CRITICAL, file_name, line, format, argp);
 
 	va_end(argp);
 
@@ -725,6 +808,13 @@ static void
 log_write(cf_log_context context, cf_log_level level, const char* file_name,
 		int line, const char* format, va_list argp)
 {
+	int fds[g_n_sinks];
+	uint32_t n_fds = get_log_fds(context, level, fds);
+
+	if (n_fds == 0) {
+		return;
+	}
+
 	char buf[MAX_LOG_STRING_SZ];
 
 	int pos = sprintf_now(buf);
@@ -745,20 +835,30 @@ log_write(cf_log_context context, cf_log_level level, const char* file_name,
 
 	buf[pos++] = '\n';
 
-	if (! g_sinks_activated) {
-		write_all(STDERR_FILENO, buf, (size_t)pos);
-		return;
+	for (uint32_t i = 0; i < n_fds; i++) {
+		write_all(fds[i], buf, (size_t)pos);
 	}
+}
+
+static uint32_t
+get_log_fds(cf_log_context context, cf_log_level level, int* fds)
+{
+	if (! g_sinks_activated) {
+		fds[0] = STDERR_FILENO;
+		return 1;
+	}
+
+	uint32_t n_fds = 0;
 
 	for (uint32_t i = 0; i < g_n_sinks; i++) {
 		cf_log_sink* sink = &g_sinks[i];
 
-		if (level > sink->levels[context]) {
-			continue;
+		if (sink->tag == NULL && level <= sink->levels[context]) {
+			fds[n_fds++] = sink->fd;
 		}
-
-		write_all(sink->fd, buf, (size_t)pos);
 	}
+
+	return n_fds;
 }
 
 static int
@@ -803,6 +903,170 @@ sprintf_now(char* buf)
 	g_reentrant = false;
 
 	return pos;
+}
+
+static void
+write_all(int fd, const char* buf, size_t sz)
+{
+	while (sz != 0) {
+		ssize_t sz_wr = write(fd, buf, sz);
+
+		if (sz_wr == 0) {
+			fprintf(stderr, "zero-size log write to %d\n", fd);
+			break;
+		}
+
+		if (sz_wr < 0) {
+			fprintf(stderr, "log write to %d failed: %d (%s)\n", fd, errno,
+					cf_strerror(errno));
+			break;
+		}
+
+		buf += sz_wr;
+		sz -= (size_t)sz_wr;
+	}
+}
+
+static void
+syslog_write(cf_log_context context, cf_log_level level, const char* file_name,
+		int line, const char* format, va_list argp)
+{
+	cf_log_sink* sinks[g_n_sinks];
+	uint32_t n_sinks = get_syslog_sinks(context, level, sinks);
+
+	if (n_sinks == 0) {
+		return;
+	}
+
+	char time[SYSLOG_TIME_SZ];
+
+	syslog_sprintf_now(time);
+
+	char buf[MAX_LOG_STRING_SZ];
+
+	int pos = sprintf(buf, "%s (%s): (%s:%d) ", level_tag(level),
+			context_strings[context], file_name, line);
+
+	char adjusted[MAX_ADJUSTED_STRING_SZ];
+
+	adjust_format(format, adjusted);
+
+	pos += vsnprintf(buf + pos, MAX_LOG_STRING_LEN - (size_t)pos, adjusted,
+			argp);
+
+	if (pos > MAX_LOG_STRING_LEN) {
+		pos = MAX_LOG_STRING_LEN;
+	}
+
+	int sys_level = syslog_level(level);
+
+	for (uint32_t i = 0; i < n_sinks; i++) {
+		syslog_write_sink(sinks[i], sys_level, time, buf, (size_t)pos);
+	}
+}
+
+static uint32_t
+get_syslog_sinks(cf_log_context context, cf_log_level level,
+		cf_log_sink** sinks)
+{
+	if (! g_use_syslog || ! g_sinks_activated) {
+		return 0;
+	}
+
+	uint32_t n_sinks = 0;
+
+	for (uint32_t i = 0; i < g_n_sinks; i++) {
+		cf_log_sink* sink = &g_sinks[i];
+
+		if (sink->tag != NULL && level <= sink->levels[context]) {
+			sinks[n_sinks++] = sink;
+		}
+	}
+
+	return n_sinks;
+}
+
+static void
+syslog_sprintf_now(char* buf)
+{
+	// Guard against reentrance since localtime_r() and gmtime_r() call
+	// allocation functions which may fail and write log lines.
+	static __thread bool g_reentrant = false;
+
+	if (g_reentrant) {
+		memcpy(buf, "Jan  1 00:00:00", SYSLOG_TIME_SZ);
+		return;
+	}
+
+	g_reentrant = true;
+
+	struct timeval now_tv;
+	gettimeofday(&now_tv, NULL);
+
+	struct tm now_tm;
+
+	if (g_use_local_time) {
+		localtime_r(&now_tv.tv_sec, &now_tm);
+	}
+	else {
+		gmtime_r(&now_tv.tv_sec, &now_tm);
+	}
+
+	strftime(buf, 999, "%b %e %T", &now_tm);
+
+	g_reentrant = false;
+}
+
+static int
+syslog_level(cf_log_level level)
+{
+	switch (level) {
+	case CF_CRITICAL:
+		return LOG_EMERG;
+	case CF_WARNING:
+		return LOG_WARNING;
+	case CF_INFO:
+		return LOG_INFO;
+	default:
+		return LOG_DEBUG;
+	}
+}
+
+static void
+syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time,
+		const char* buf, size_t buf_sz)
+{
+	int priority = (sink->facility << 3) | sys_level;
+	size_t tag_len = strlen(sink->tag);
+	char dgram[1 + 11 + 1 + SYSLOG_TIME_SZ + 1 + tag_len + 2 + buf_sz];
+
+	size_t pos = (size_t)sprintf(dgram, "<%d>", priority);
+
+	memcpy(dgram + pos, time, SYSLOG_TIME_SZ);
+	pos += SYSLOG_TIME_SZ;
+
+	*(dgram + pos++) = ' ';
+
+	memcpy(dgram + pos, sink->tag, tag_len);
+	pos += tag_len;
+
+	*(dgram + pos++) = ':';
+	*(dgram + pos++) = ' ';
+
+	memcpy(dgram + pos, buf, buf_sz);
+	pos += buf_sz;
+
+	struct sockaddr_un addr;
+
+	addr.sun_family = AF_UNIX;
+	strcpy(addr.sun_path, sink->path);
+
+	ssize_t res = sendto(sink->fd, dgram, pos, 0, &addr, sizeof(addr));
+
+	if (res < 0) {
+		fprintf(stderr, "failed to send to %s: %d (%s)\n", addr.sun_path, errno,
+				cf_strerror(errno));
+	}
 }
 
 static int

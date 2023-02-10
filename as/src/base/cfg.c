@@ -40,6 +40,7 @@
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/types.h>
+#include <syslog.h>
 
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/alloc.h"
@@ -227,8 +228,6 @@ cfg_set_defaults()
 	c->sec_cfg.n_ldap_login_threads = 8;
 	c->sec_cfg.ldap_polling_period = 60 * 5;
 	c->sec_cfg.ldap_token_hash_method = AS_LDAP_EVP_SHA_256;
-	// Security syslog defaults.
-	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
 }
 
 //==========================================================
@@ -336,9 +335,16 @@ typedef enum {
 	// Sub-contexts:
 	CASE_LOG_CONSOLE_BEGIN,
 	CASE_LOG_FILE_BEGIN,
+	CASE_LOG_SYSLOG_BEGIN,
 
-	// Logging context options:
+	// Logging console and file options:
 	CASE_LOG_CONTEXT_CONTEXT,
+
+	// Logging syslog options:
+	CASE_LOG_SYSLOG_CONTEXT,
+	CASE_LOG_SYSLOG_FACILITY,
+	CASE_LOG_SYSLOG_PATH,
+	CASE_LOG_SYSLOG_TAG,
 
 	// Network options:
 	// Sub-contexts, in canonical configuration file order:
@@ -640,10 +646,10 @@ typedef enum {
 	// Sub-contexts:
 	CASE_SECURITY_LDAP_BEGIN,
 	CASE_SECURITY_LOG_BEGIN,
-	CASE_SECURITY_SYSLOG_BEGIN,
 	// Obsoleted:
 	CASE_SECURITY_ENABLE_LDAP,
 	CASE_SECURITY_ENABLE_SECURITY,
+	CASE_SECURITY_SYSLOG_BEGIN,
 
 	// Security LDAP options:
 	CASE_SECURITY_LDAP_DISABLE_TLS,
@@ -673,16 +679,6 @@ typedef enum {
 	CASE_SECURITY_LOG_REPORT_SYS_ADMIN,
 	CASE_SECURITY_LOG_REPORT_USER_ADMIN,
 	CASE_SECURITY_LOG_REPORT_VIOLATION,
-
-	// Security syslog options:
-	CASE_SECURITY_SYSLOG_LOCAL,
-	CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION,
-	CASE_SECURITY_SYSLOG_REPORT_DATA_OP,
-	CASE_SECURITY_SYSLOG_REPORT_DATA_OP_ROLE,
-	CASE_SECURITY_SYSLOG_REPORT_DATA_OP_USER,
-	CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN,
-	CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN,
-	CASE_SECURITY_SYSLOG_REPORT_VIOLATION,
 
 	// XDR options:
 	CASE_XDR_SRC_ID,
@@ -851,11 +847,20 @@ const cfg_opt LOGGING_OPTS[] = {
 		// Sub-contexts:
 		{ "console",						CASE_LOG_CONSOLE_BEGIN },
 		{ "file",							CASE_LOG_FILE_BEGIN },
+		{ "syslog",							CASE_LOG_SYSLOG_BEGIN },
 		{ "}",								CASE_CONTEXT_END }
 };
 
 const cfg_opt LOGGING_CONTEXT_OPTS[] = {
 		{ "context",						CASE_LOG_CONTEXT_CONTEXT },
+		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt LOGGING_SYSLOG_OPTS[] = {
+		{ "context",						CASE_LOG_SYSLOG_CONTEXT },
+		{ "facility",						CASE_LOG_SYSLOG_FACILITY },
+		{ "path",							CASE_LOG_SYSLOG_PATH },
+		{ "tag",							CASE_LOG_SYSLOG_TAG },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1199,10 +1204,10 @@ const cfg_opt SECURITY_OPTS[] = {
 		// Sub-contexts:
 		{ "ldap",							CASE_SECURITY_LDAP_BEGIN },
 		{ "log",							CASE_SECURITY_LOG_BEGIN },
-		{ "syslog",							CASE_SECURITY_SYSLOG_BEGIN },
 		// Obsoleted:
 		{ "enable-ldap",					CASE_SECURITY_ENABLE_LDAP },
 		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
+		{ "syslog",							CASE_SECURITY_SYSLOG_BEGIN },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1237,18 +1242,6 @@ const cfg_opt SECURITY_LOG_OPTS[] = {
 		{ "report-sys-admin",				CASE_SECURITY_LOG_REPORT_SYS_ADMIN },
 		{ "report-user-admin",				CASE_SECURITY_LOG_REPORT_USER_ADMIN },
 		{ "report-violation",				CASE_SECURITY_LOG_REPORT_VIOLATION },
-		{ "}",								CASE_CONTEXT_END }
-};
-
-const cfg_opt SECURITY_SYSLOG_OPTS[] = {
-		{ "local",							CASE_SECURITY_SYSLOG_LOCAL },
-		{ "report-authentication",			CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION },
-		{ "report-data-op",					CASE_SECURITY_SYSLOG_REPORT_DATA_OP },
-		{ "report-data-op-role",			CASE_SECURITY_SYSLOG_REPORT_DATA_OP_ROLE },
-		{ "report-data-op-user",			CASE_SECURITY_SYSLOG_REPORT_DATA_OP_USER },
-		{ "report-sys-admin",				CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN },
-		{ "report-user-admin",				CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN },
-		{ "report-violation",				CASE_SECURITY_SYSLOG_REPORT_VIOLATION },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1327,6 +1320,7 @@ const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof
 const int NUM_SERVICE_DEBUG_ALLOCATIONS_OPTS		= sizeof(SERVICE_DEBUG_ALLOCATIONS_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_CONTEXT_OPTS					= sizeof(LOGGING_CONTEXT_OPTS) / sizeof(cfg_opt);
+const int NUM_LOGGING_SYSLOG_OPTS					= sizeof(LOGGING_SYSLOG_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_OPTS							= sizeof(NETWORK_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_SERVICE_OPTS					= sizeof(NETWORK_SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_HEARTBEAT_OPTS				= sizeof(NETWORK_HEARTBEAT_OPTS) / sizeof(cfg_opt);
@@ -1356,7 +1350,6 @@ const int NUM_SECURITY_OPTS							= sizeof(SECURITY_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_LDAP_OPTS					= sizeof(SECURITY_LDAP_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS	= sizeof(SECURITY_LDAP_TOKEN_HASH_METHOD_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_LOG_OPTS						= sizeof(SECURITY_LOG_OPTS) / sizeof(cfg_opt);
-const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_OPTS								= sizeof(XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_OPTS							= sizeof(XDR_DC_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_NAMESPACE_OPTS					= sizeof(XDR_DC_NAMESPACE_OPTS) / sizeof(cfg_opt);
@@ -1399,11 +1392,11 @@ const int NUM_DEVICE_SCHEDULER_MODES = sizeof(DEVICE_SCHEDULER_MODES) / sizeof(c
 typedef enum {
 	GLOBAL,
 	SERVICE,
-	LOGGING, LOGGING_CONTEXT,
+	LOGGING, LOGGING_CONTEXT, LOGGING_SYSLOG,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
 	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_SINDEX_TYPE_PMEM, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
-	SECURITY, SECURITY_LDAP, SECURITY_LOG, SECURITY_SYSLOG,
+	SECURITY, SECURITY_LDAP, SECURITY_LOG,
 	XDR, XDR_DC, XDR_DC_NAMESPACE,
 	// Must be last, use for sanity-checking:
 	PARSER_STATE_MAX_PLUS_1
@@ -1413,11 +1406,11 @@ typedef enum {
 const char* CFG_PARSER_STATES[] = {
 		"GLOBAL",
 		"SERVICE",
-		"LOGGING", "LOGGING_CONTEXT",
+		"LOGGING", "LOGGING_CONTEXT", "LOGGING_SYSLOG",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO", "NETWORK_TLS",
 		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_SINDEX_TYPE_PMEM", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
-		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG", "SECURITY_SYSLOG",
+		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG",
 		"XDR", "XDR_DC", "XDR_DC_NAMESPACE"
 };
 
@@ -2446,12 +2439,16 @@ as_config_init(const char* config_file)
 			switch (cfg_find_tok(line.name_tok, LOGGING_OPTS, NUM_LOGGING_OPTS)) {
 			// Sub-contexts:
 			case CASE_LOG_CONSOLE_BEGIN:
-				sink = cf_log_init_sink(NULL);
+				sink = cf_log_init_sink(NULL, -1, NULL);
 				cfg_begin_context(&state, LOGGING_CONTEXT);
 				break;
 			case CASE_LOG_FILE_BEGIN:
-				sink = cf_log_init_sink(line.val_tok_1);
+				sink = cf_log_init_sink(line.val_tok_1, -1, NULL);
 				cfg_begin_context(&state, LOGGING_CONTEXT);
+				break;
+			case CASE_LOG_SYSLOG_BEGIN:
+				sink = cf_log_init_sink("/dev/log", LOG_LOCAL0, "asd"); // FIXME - #defines!
+				cfg_begin_context(&state, LOGGING_SYSLOG);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -2472,6 +2469,38 @@ as_config_init(const char* config_file)
 				if (! cf_log_init_level(sink, line.val_tok_1, line.val_tok_2)) {
 					cf_crash_nostack(AS_CFG, "line %d :: can't add logging context %s %s", line_num, line.val_tok_1, line.val_tok_2);
 				}
+				break;
+			case CASE_CONTEXT_END:
+				sink = NULL;
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse logging::syslog context items.
+		//
+		case LOGGING_SYSLOG:
+			switch (cfg_find_tok(line.name_tok, LOGGING_SYSLOG_OPTS, NUM_LOGGING_SYSLOG_OPTS)) {
+			case CASE_LOG_SYSLOG_CONTEXT:
+				if (! cf_log_init_level(sink, line.val_tok_1, line.val_tok_2)) {
+					cf_crash_nostack(AS_CFG, "line %d :: can't add logging context %s %s", line_num, line.val_tok_1, line.val_tok_2);
+				}
+				break;
+			case CASE_LOG_SYSLOG_FACILITY:
+				if (! cf_log_init_facility(sink, line.val_tok_1)) {
+					cf_crash_nostack(AS_CFG, "line %d :: can't add logging facility %s", line_num, line.val_tok_1);
+				}
+				break;
+			case CASE_LOG_SYSLOG_PATH:
+				cf_log_init_path(sink, line.val_tok_1);
+				break;
+			case CASE_LOG_SYSLOG_TAG:
+				cf_log_init_tag(sink, line.val_tok_1);
 				break;
 			case CASE_CONTEXT_END:
 				sink = NULL;
@@ -3672,15 +3701,15 @@ as_config_init(const char* config_file)
 			case CASE_SECURITY_LOG_BEGIN:
 				cfg_begin_context(&state, SECURITY_LOG);
 				break;
-			case CASE_SECURITY_SYSLOG_BEGIN:
-				cfg_begin_context(&state, SECURITY_SYSLOG);
-				break;
 			// Obsoleted:
 			case CASE_SECURITY_ENABLE_LDAP:
 				cfg_obsolete(&line, "the 'ldap' context automatically enables LDAP");
 				break;
 			case CASE_SECURITY_ENABLE_SECURITY:
 				cfg_obsolete(&line, "the 'security' context automatically enables security");
+				break;
+			case CASE_SECURITY_SYSLOG_BEGIN:
+				cfg_obsolete(&line, "the 'syslog' sub-context is no longer supported"); // FIXME - actual wording!
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -3766,64 +3795,25 @@ as_config_init(const char* config_file)
 		case SECURITY_LOG:
 			switch (cfg_find_tok(line.name_tok, SECURITY_LOG_OPTS, NUM_SECURITY_LOG_OPTS)) {
 			case CASE_SECURITY_LOG_REPORT_AUTHENTICATION:
-				c->sec_cfg.report.authentication |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
+				c->sec_cfg.report.authentication = cfg_bool(&line);
 				break;
 			case CASE_SECURITY_LOG_REPORT_DATA_OP:
-				as_security_config_log_scope(AS_SEC_SINK_LOG, line.val_tok_1, line.val_tok_2);
+				as_security_config_log_scope(line.val_tok_1, line.val_tok_2);
 				break;
 			case CASE_SECURITY_LOG_REPORT_DATA_OP_ROLE:
-				as_security_config_log_role(AS_SEC_SINK_LOG, line.val_tok_1);
+				as_security_config_log_role(line.val_tok_1);
 				break;
 			case CASE_SECURITY_LOG_REPORT_DATA_OP_USER:
-				as_security_config_log_user(AS_SEC_SINK_LOG, line.val_tok_1);
+				as_security_config_log_user(line.val_tok_1);
 				break;
 			case CASE_SECURITY_LOG_REPORT_SYS_ADMIN:
-				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
+				c->sec_cfg.report.sys_admin = cfg_bool(&line);
 				break;
 			case CASE_SECURITY_LOG_REPORT_USER_ADMIN:
-				c->sec_cfg.report.user_admin |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
+				c->sec_cfg.report.user_admin = cfg_bool(&line);
 				break;
 			case CASE_SECURITY_LOG_REPORT_VIOLATION:
-				c->sec_cfg.report.violation |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
-				break;
-			case CASE_CONTEXT_END:
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//----------------------------------------
-		// Parse security::syslog context items.
-		//
-		case SECURITY_SYSLOG:
-			switch (cfg_find_tok(line.name_tok, SECURITY_SYSLOG_OPTS, NUM_SECURITY_SYSLOG_OPTS)) {
-			case CASE_SECURITY_SYSLOG_LOCAL:
-				c->sec_cfg.syslog_local = (as_sec_syslog_local)cfg_int(&line, AS_SYSLOG_MIN, AS_SYSLOG_MAX);
-				break;
-			case CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION:
-				c->sec_cfg.report.authentication |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
-				break;
-			case CASE_SECURITY_SYSLOG_REPORT_DATA_OP:
-				as_security_config_log_scope(AS_SEC_SINK_SYSLOG, line.val_tok_1, line.val_tok_2);
-				break;
-			case CASE_SECURITY_SYSLOG_REPORT_DATA_OP_ROLE:
-				as_security_config_log_role(AS_SEC_SINK_SYSLOG, line.val_tok_1);
-				break;
-			case CASE_SECURITY_SYSLOG_REPORT_DATA_OP_USER:
-				as_security_config_log_user(AS_SEC_SINK_SYSLOG, line.val_tok_1);
-				break;
-			case CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN:
-				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
-				break;
-			case CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN:
-				c->sec_cfg.report.user_admin |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
-				break;
-			case CASE_SECURITY_SYSLOG_REPORT_VIOLATION:
-				c->sec_cfg.report.violation |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
+				c->sec_cfg.report.violation = cfg_bool(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);

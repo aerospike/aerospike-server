@@ -30,34 +30,13 @@
 // Typedefs & constants.
 //
 
-// Syslog "local" facilities.
-typedef enum {
-	AS_SYSLOG_NONE		= -1,
-	AS_SYSLOG_MIN		= 0,
-	AS_SYSLOG_MAX		= 7,
-
-	// May configure any facility from "local0" to "local7".
-	AS_SYSLOG_LOCAL0	= 0,
-	AS_SYSLOG_LOCAL1	= 1,
-	AS_SYSLOG_LOCAL2	= 2,
-	AS_SYSLOG_LOCAL3	= 3,
-	AS_SYSLOG_LOCAL4	= 4,
-	AS_SYSLOG_LOCAL5	= 5,
-	AS_SYSLOG_LOCAL6	= 6,
-	AS_SYSLOG_LOCAL7	= 7,
-} as_sec_syslog_local;
-
-// Security-related reporting sink bit-field flags.
-#define AS_SEC_SINK_LOG		0x1
-#define AS_SEC_SINK_SYSLOG	0x2
-
-// Security-related reporting sinks as bit-fields.
+// Security-related reporting.
 typedef struct as_sec_report_s {
-	uint32_t	authentication;
-	uint32_t	data_op;
-	uint32_t	sys_admin;
-	uint32_t	user_admin;
-	uint32_t	violation;
+	bool authentication;
+	bool data_op;
+	bool sys_admin;
+	bool user_admin;
+	bool violation;
 } as_sec_report;
 
 // Hopefully nobody really needs this many.
@@ -96,9 +75,8 @@ typedef struct as_sec_config_s {
 	char*				ldap_user_dn_pattern;
 	char*				ldap_user_query_pattern;
 
-	// log & syslog scope configuration.
-	as_sec_report		report;						// reporting sinks
-	as_sec_syslog_local	syslog_local;				// syslog local facility
+	// log scope configuration.
+	as_sec_report		report;
 } as_sec_config;
 
 #define PRIVILEGE_REFRESH_PERIOD_MIN	10
@@ -115,7 +93,6 @@ typedef struct as_sec_config_s {
 // Public API.
 //
 
-void as_security_config_log_scope(uint32_t sink, const char* ns_name,
-		const char* set_name);
-void as_security_config_log_role(uint32_t sink, const char* role);
-void as_security_config_log_user(uint32_t sink, const char* user);
+void as_security_config_log_scope(const char* ns_name, const char* set_name);
+void as_security_config_log_role(const char* role);
+void as_security_config_log_user(const char* user);
