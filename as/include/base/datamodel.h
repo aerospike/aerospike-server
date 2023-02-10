@@ -911,6 +911,7 @@ typedef struct as_namespace_s {
 	int32_t			evict_ttl; // signed - possible (but weird) it's negative
 
 	uint32_t		nsup_cycle_duration; // seconds taken for most recent nsup cycle
+	double			nsup_cycle_deleted_pct; // percentage of namespace expired/evicted for most recent nsup cycle
 
 	// Sindex GC stats.
 
