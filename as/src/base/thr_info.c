@@ -166,6 +166,9 @@ extern const char aerospike_build_id[];
 extern const char aerospike_build_time[];
 extern const char aerospike_build_type[];
 extern const char aerospike_build_os[];
+extern const char aerospike_build_arch[];
+extern const char aerospike_build_sha[];
+extern const char aerospike_build_ee_sha[];
 extern const char aerospike_build_features[];
 
 static cf_mutex g_info_lock = CF_MUTEX_INIT;
@@ -341,6 +344,9 @@ as_info_init()
 	info_set("build", aerospike_build_id, true);                                // Returns the build number for this server.
 	info_set("build_os", aerospike_build_os, true);                             // Return the OS used to create this build.
 	info_set("build_time", aerospike_build_time, true);                         // Return the creation time of this build.
+	info_set("build_arch", aerospike_build_arch, true);                         // Return the CPU architecture for this build.
+	info_set("build_sha", aerospike_build_sha, true);                           // Return the git SHA used for this build.
+	info_set("build_ee_sha", aerospike_build_ee_sha, true);                     // Return the ee git SHA used for this build.
 	info_set("edition", aerospike_build_type, true);                            // Return the edition of this build.
 	info_set("compatibility-id", compatibility_id, true);                       // Used for compatibility purposes.
 	info_set("digests", "RIPEMD160", false);                                    // Returns the hashing algorithm used by the server for key hashing.

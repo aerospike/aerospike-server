@@ -144,7 +144,7 @@ rpm deb tar src:
 	$(MAKE) -C pkg/$@ EDITION=$(EDITION)
 
 $(VERSION_SRC):	targetdirs
-	build/gen_version $(EDITION) $(OS) > $(VERSION_SRC)
+	build/gen_version $(EDITION) $(OS) $(ARCH) $(EE_SHA) > $(VERSION_SRC)
 
 $(VERSION_OBJ):	$(VERSION_SRC)
 	$(CC) -o $@ -c $<
