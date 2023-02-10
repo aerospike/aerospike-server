@@ -108,10 +108,10 @@ reraise_signal(int sig_num)
 }
 
 static inline void
-log_abort(const char* signal, const char* tag)
+log_abort(const char* signal)
 {
-	cf_warning(AS_AS, "%s received, %s %s build %s os %s arch %s sha %.7s%s%.7s",
-			signal, tag, aerospike_build_type, aerospike_build_id,
+	cf_warning(AS_AS, "%s received, aborting %s build %s os %s arch %s sha %.7s%s%.7s",
+			signal, aerospike_build_type, aerospike_build_id,
 			aerospike_build_os, aerospike_build_arch,
 			aerospike_build_sha,
 			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
@@ -127,7 +127,7 @@ log_abort(const char* signal, const char* tag)
 static void
 as_sig_handle_abort(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGABRT", "aborting");
+	log_abort("SIGABRT");
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -135,7 +135,7 @@ as_sig_handle_abort(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_bus(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGBUS", "aborting");
+	log_abort("SIGBUS");
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -144,7 +144,7 @@ as_sig_handle_bus(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_fpe(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGFPE", "aborting");
+	log_abort("SIGFPE");
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -162,7 +162,7 @@ as_sig_handle_hup(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_ill(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGILL", "aborting");
+	log_abort("SIGILL");
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -172,7 +172,7 @@ as_sig_handle_ill(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGINT", "aborting");
+	log_abort("SIGINT");
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -186,7 +186,7 @@ as_sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_quit(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGQUIT", "aborting");
+	log_abort("SIGQUIT");
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -195,7 +195,7 @@ as_sig_handle_quit(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_segv(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGSEGV", "aborting");
+	log_abort("SIGSEGV");
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -204,7 +204,12 @@ as_sig_handle_segv(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGTERM", "shutting down");
+	cf_info(AS_AS, "SIGTERM received, shutting down %s build %s os %s arch %s sha %.7s%s%.7s",
+			aerospike_build_type, aerospike_build_id,
+			aerospike_build_os, aerospike_build_arch,
+			aerospike_build_sha,
+			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
+			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -218,7 +223,7 @@ as_sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_usr1(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_abort("SIGUSR1", "aborting");
+	log_abort("SIGUSR1");
 	cf_log_stack_trace(ctx);
 	reraise_signal(SIGABRT);
 }
