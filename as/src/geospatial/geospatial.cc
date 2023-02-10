@@ -1,7 +1,7 @@
 /*
  * geospatial.cc
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,7 +26,7 @@
 
 #include <stdexcept>
 
-#include <s2regioncoverer.h>
+#include <s2/s2region_coverer.h>
 
 extern "C" {
 #include "log.h"
@@ -54,9 +54,8 @@ public:
 		m_cellid = cellid;
 	}
 
-	virtual bool handle_region(S2Region * regionp) {
+	virtual void handle_region(S2Region * regionp) {
 		m_regionp = regionp;
-		return false;	// Don't delete this region, please.
 	}
 
 	virtual double earth_radius_meters() {
@@ -104,19 +103,20 @@ geo_region_cover(const as_namespace * ns,
 		S2Region * regionp = (S2Region *) region;
 
 		S2RegionCoverer coverer;
+		S2RegionCoverer::Options * options = coverer.mutable_options();
 		if (ns) {
-			coverer.set_min_level(ns->geo2dsphere_within_min_level);
-			coverer.set_max_level(ns->geo2dsphere_within_max_level);
-			coverer.set_max_cells(ns->geo2dsphere_within_max_cells);
-			coverer.set_level_mod(ns->geo2dsphere_within_level_mod);
+			options->set_min_level(ns->geo2dsphere_within_min_level);
+			options->set_max_level(ns->geo2dsphere_within_max_level);
+			options->set_max_cells(ns->geo2dsphere_within_max_cells);
+			options->set_level_mod(ns->geo2dsphere_within_level_mod);
 		}
 		else {
 			// FIXME - we really don't want to hardcode these values, but
 			// some callers can't provide the namespace context ...
-			coverer.set_min_level(1);
-			coverer.set_max_level(30);
-			coverer.set_max_cells(12);
-			coverer.set_level_mod(1);
+			options->set_min_level(1);
+			options->set_max_level(30);
+			options->set_max_cells(12);
+			options->set_level_mod(1);
 		}
 		vector<S2CellId> covering;
 		coverer.GetCovering(*regionp, &covering);
@@ -124,7 +124,7 @@ geo_region_cover(const as_namespace * ns,
 		// The coverer can always return 6 cells, even when max cells is
 		// less (regions which intersect all cube faces).  If we get more
 		// then we asked for and it's greater then 6 something is wrong.
-		if (covering.size() > max(size_t(6), size_t(coverer.max_cells()))) {
+		if (covering.size() > max(size_t(6), size_t(options->max_cells()))) {
 			return false;
 		}
 
@@ -207,7 +207,7 @@ geo_point_within(uint64_t cellidval, geo_region_t region)
 	{
 		S2Region * regionp = (S2Region *) region;
 		S2CellId cellid(cellidval);
-		bool iswithin = regionp->VirtualContainsPoint(cellid.ToPoint());
+		bool iswithin = regionp->Contains(cellid.ToPoint());
 		return iswithin;
 	}
 	catch (exception const & ex)

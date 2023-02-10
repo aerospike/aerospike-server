@@ -12,13 +12,18 @@
 [submodule "modules/luajit"]
 	path = modules/luajit
 	url = https://github.com/aerospike/luajit.git
-[submodule "modules/s2-geometry-library"]
-	path = modules/s2-geometry-library
-	url = https://github.com/aerospike/s2-geometry-library.git
 [submodule "modules/telemetry"]
 	path = modules/telemetry
 	url = https://github.com/aerospike/aerospike-telemetry-agent.git
 [submodule "modules/jemalloc"]
 	path = modules/jemalloc
 	url = https://github.com/aerospike/jemalloc.git
+	ignore = dirty
+[submodule "modules/abseil-cpp"]
+	path = modules/abseil-cpp
+	url = https://github.com/aerospike/abseil-cpp.git
+	ignore = dirty
+[submodule "modules/s2geometry"]
+	path = modules/s2geometry
+	url = https://github.com/aerospike/s2geometry.git
 	ignore = dirty

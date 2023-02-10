@@ -1,7 +1,7 @@
 /*
  * geojson.cc
  *
- * Copyright (C) 2015-2020 Aerospike, Inc.
+ * Copyright (C) 2015-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -27,12 +27,11 @@
 
 #include <jansson.h>
 
-#include <s2.h>
-#include <s2cap.h>
-#include <s2cellid.h>
-#include <s2polygon.h>
-#include <s2regionunion.h>
-#include <s2latlng.h>
+#include <s2/s2cap.h>
+#include <s2/s2cell_id.h>
+#include <s2/s2polygon.h>
+#include <s2/s2region_union.h>
+#include <s2/s2latlng.h>
 
 #include "geospatial/scoped.h"
 #include "geospatial/throwstream.h"
@@ -91,7 +90,7 @@ traverse_point(json_t * coord)
 	return latlng.ToPoint();
 }
 
-S2Loop *
+unique_ptr<S2Loop>
 traverse_loop(json_t * vertices)
 {
 	if (! vertices) {
@@ -124,12 +123,12 @@ traverse_loop(json_t * vertices)
 	}
 	points.pop_back();
 
-	auto_ptr<S2Loop> loop(new S2Loop(points));
+	unique_ptr<S2Loop> loop(new S2Loop(points));
 	loop->Normalize();
-	return loop.release();
+	return loop;
 }
 
-S2Polygon *
+unique_ptr<S2Polygon>
 traverse_polygon(json_t * loops)
 {
 	if (! loops) {
@@ -140,27 +139,24 @@ traverse_polygon(json_t * loops)
 		throwstream(runtime_error, "polygon body is not array");
 	}
 
-	vector<S2Loop *> loopv;
+	vector<unique_ptr<S2Loop>> loopv;
 	try
 	{
 		for (size_t ii = 0; ii < json_array_size(loops); ++ii) {
 			loopv.push_back(traverse_loop(json_array_get(loops, ii)));
 		}
 
-		return new S2Polygon(&loopv);
+		return make_unique<S2Polygon>(move(loopv));
 	}
 	catch (...)
 	{
-		for (size_t ii = 0; ii < loopv.size(); ++ii) {
-			delete loopv[ii];
-		}
 		throw;
 	}
 }
 
 void process_point(GeoJSON::GeometryHandler & geohand, json_t * coord)
 {
-	geohand.handle_point(S2CellId::FromPoint(traverse_point(coord)));
+	geohand.handle_point(S2CellId(traverse_point(coord)));
 }
 
 void
@@ -174,10 +170,8 @@ process_polygon(GeoJSON::GeometryHandler & geohand, json_t * coord)
 		throwstream(runtime_error, "coordinates are not array");
 	}
 
-	S2Polygon * poly = traverse_polygon(coord);
-	if (geohand.handle_region(poly)) {
-		delete poly;
-	}
+	unique_ptr<S2Polygon> polygonp = traverse_polygon(coord);
+	geohand.handle_region(polygonp.release());
 }
 
 void
@@ -191,16 +185,13 @@ process_multipolygon(GeoJSON::GeometryHandler & geohand, json_t * coord)
 		throwstream(runtime_error, "coordinates are not array");
 	}
 
-	auto_ptr<S2RegionUnion> regionsp(new S2RegionUnion);
+	unique_ptr<S2RegionUnion> regionsp(new S2RegionUnion);
 
 	for (size_t ii = 0; ii < json_array_size(coord); ++ii) {
 		regionsp->Add(traverse_polygon(json_array_get(coord, ii)));
 	}
 
-	if (! geohand.handle_region(regionsp.get())) {
-		// Handler took ownership.
-		regionsp.release();
-	}
+	geohand.handle_region(regionsp.release());
 }
 
 void
@@ -239,12 +230,9 @@ process_circle(GeoJSON::GeometryHandler & geohand, json_t * coord)
 
 	S1Angle angle = S1Angle::Radians(radius / geohand.earth_radius_meters());
 
-	auto_ptr<S2Cap> capp(S2Cap::FromAxisAngle(center, angle).Clone());
+	unique_ptr<S2Cap> capp(new S2Cap(center, angle));
 
-	if (! geohand.handle_region(capp.get())) {
-		// Handler took ownership.
-		capp.release();
-	}
+	geohand.handle_region(capp.release());
 }
 
 void traverse_geometry(GeoJSON::GeometryHandler & geohand, json_t * geom)
@@ -293,10 +281,9 @@ void GeometryHandler::handle_point(S2CellId const & i_cellid)
 	// nothing by default
 }
 
-bool GeometryHandler::handle_region(S2Region * i_regionp)
+void GeometryHandler::handle_region(S2Region * i_regionp)
 {
-	// By default, caller should delete the region.
-	return true;
+	// nothing by default
 }
 
 void parse(GeometryHandler & geohand, string const & geostr)

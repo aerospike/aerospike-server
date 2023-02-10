@@ -235,7 +235,8 @@ INCLUDES += -I$(CF)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
-INCLUDES += -I$(S2)
+INCLUDES += -I$(S2)/src
+INCLUDES += -I$(ABSL)
 
 ifeq ($(USE_LUAJIT),1)
   INCLUDES += -I$(LUAJIT)/src
@@ -285,9 +286,10 @@ else
   LIBRARIES += -L$(JANSSON)/src/.libs -ljansson
 endif
 
-LIBRARIES += -L$(S2) -ls2 -ls2cellid -lgoogle-strings -lgoogle-base \
-			-lgoogle-util-coding -lgoogle-util-math \
-			$(shell curl-config --libs) -lstdc++
+LIBRARIES += $(shell curl-config --libs) -lstdc++
+
+AS_LIBRARIES += $(S2)/build/libs2.a
+AS_LIBRARIES += $(ABSL_LIB_DIR)/libabsl.a
 
 LIBRARIES := $(AS_LIBRARIES) $(LIBRARIES)
 
@@ -320,6 +322,6 @@ $(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
 include $(DEPTH)/make_in/Makefile.targets
 
 # Ignore S2 induced warnings
-S2_WNO = -Wno-unused-local-typedefs -Wno-deprecated -Wno-sign-compare
-$(OBJECT_DIR)/geospatial/%.o: CXXFLAGS += $(S2_WNO) -D__STDC_LIMIT_MACROS
+S2_WNO = -Wno-attributes -Wno-sign-compare -Wno-deprecated-declarations -Wno-class-memaccess
+$(OBJECT_DIR)/geospatial/%.o: CXXFLAGS += $(S2_WNO) -std=c++17 -D__STDC_LIMIT_MACROS
 $(OBJECT_DIR)/geospatial/%.o: CFLAGS := $(filter-out -std=gnu99,$(CFLAGS))

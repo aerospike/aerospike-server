@@ -42,14 +42,14 @@ include make_in/Makefile.vars
 
 .PHONY: all server
 all server: aslibs
-	$(MAKE) -C as
+	$(MAKE) -C as OS=$(OS)
 
 .PHONY: lib
 lib: aslibs
-	$(MAKE) -C as $@ STATIC_LIB=1
+	$(MAKE) -C as $@ STATIC_LIB=1 OS=$(OS)
 
 .PHONY: aslibs
-aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LUAJIT)/src/luaconf.h
+aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LUAJIT)/src/luaconf.h s2lib
 ifeq ($(USE_LUAJIT),1)
 	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so CCDEBUG=-g
 endif
@@ -61,8 +61,29 @@ endif
 	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)" OS=$(UNAME)
 	$(MAKE) -C $(CF)
 	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1 OS=$(UNAME)
-	$(MAKE) -C $(S2)
 
+.PHONY: absllib
+absllib:
+ifeq ($(OS),$(filter $(OS), el7 ubuntu18.04)) # cmake version < 3.13
+	mkdir -p $(ABSL)/build
+	cd $(ABSL)/build && $(CMAKE) -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON -DCMAKE_CXX_STANDARD=17 ..
+else
+	$(CMAKE) -S $(ABSL) -B $(ABSL)/build -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON -DCMAKE_CXX_STANDARD=17
+endif
+	$(CMAKE) --build $(ABSL)/build
+	$(CMAKE) --build $(ABSL)/build --target install
+	ar rcsT $(ABSL_LIB_DIR)/libabsl.a $(ABSL_LIB_DIR)/libabsl_*.a
+
+.PHONY: s2lib
+s2lib: absllib
+ifeq ($(OS),$(filter $(OS), el7 ubuntu18.04)) # cmake version < 3.13
+	mkdir -p $(S2)/build
+	cd $(S2)/build && $(CMAKE) $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_STANDARD=17 ..
+else
+	$(CMAKE) -S $(S2) -B $(S2)/build $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_STANDARD=17
+endif
+	$(CMAKE) --build $(S2)/build -- -j 4 # Limit threads as the default spawns too many
+	
 .PHONY: targetdirs
 targetdirs:
 	mkdir -p $(GEN_DIR) $(LIBRARY_DIR) $(BIN_DIR)
@@ -114,7 +135,8 @@ cleanmodules:
 		$(MAKE) -C $(LUAJIT) clean; \
 	fi
 	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) clean
-	$(MAKE) -C $(S2) clean
+	$(RM) -rf $(ABSL)/build $(ABSL)/installation # ABSL default clean leaves files in build directory
+	$(RM) -rf $(S2)/build # S2 default clean leaves files in build directory
 
 .PHONY: cleandist
 cleandist:

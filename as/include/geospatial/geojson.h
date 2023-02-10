@@ -1,5 +1,5 @@
 /* 
- * Copyright 2015 Aerospike, Inc.
+ * Copyright 2015-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more
  * contributor license agreements.
@@ -23,8 +23,8 @@
 
 #include <jansson.h>
 
-#include <s2cellid.h>
-#include <s2region.h>
+#include <s2/s2cell_id.h>
+#include <s2/s2region.h>
 
 namespace GeoJSON {
 
@@ -35,7 +35,7 @@ public:
 
 	virtual void handle_point(S2CellId const & cellid);
 
-	virtual bool handle_region(S2Region * regionp);
+	virtual void handle_region(S2Region * i_regionp);
 
 	virtual double earth_radius_meters() {
 		return 6371000.0;		// Wikipedia, mean radius.
