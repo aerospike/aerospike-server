@@ -84,9 +84,11 @@ traverse_point(json_t * coord)
 	// cout << setprecision(15) << latval << ", " << lngval << endl;
 
 	S2LatLng latlng = S2LatLng::FromDegrees(latval, lngval);
+
 	if (! latlng.is_valid()) {
 		throwstream(runtime_error, "invalid latitude-longitude");
 	}
+
 	return latlng.ToPoint();
 }
 
@@ -124,6 +126,11 @@ traverse_loop(json_t * vertices)
 	points.pop_back();
 
 	unique_ptr<S2Loop> loop(new S2Loop(points));
+
+	if (! loop->IsValid()) {
+		throwstream(runtime_error, "invalid loop");
+	}
+
 	loop->Normalize();
 	return loop;
 }
@@ -146,7 +153,13 @@ traverse_polygon(json_t * loops)
 			loopv.push_back(traverse_loop(json_array_get(loops, ii)));
 		}
 
-		return make_unique<S2Polygon>(move(loopv));
+		unique_ptr<S2Polygon> polygon = make_unique<S2Polygon>(move(loopv));
+
+		if (! polygon->IsValid()) {
+			throwstream(runtime_error, "invalid polygon");
+		}
+
+		return polygon;
 	}
 	catch (...)
 	{
@@ -231,6 +244,10 @@ process_circle(GeoJSON::GeometryHandler & geohand, json_t * coord)
 	S1Angle angle = S1Angle::Radians(radius / geohand.earth_radius_meters());
 
 	unique_ptr<S2Cap> capp(new S2Cap(center, angle));
+
+	if (! capp->is_valid()) {
+		throwstream(runtime_error, "invalid circle");
+	}
 
 	geohand.handle_region(capp.release());
 }
