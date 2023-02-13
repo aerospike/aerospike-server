@@ -62,13 +62,15 @@ endif
 	$(MAKE) -C $(CF)
 	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1 OS=$(UNAME)
 
+S2_FLAGS = -DCMAKE_CXX_STANDARD=17 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
 .PHONY: absllib
 absllib:
 ifeq ($(OS),$(filter $(OS), el7 ubuntu18.04)) # cmake version < 3.13
 	mkdir -p $(ABSL)/build
-	cd $(ABSL)/build && $(CMAKE) -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON -DCMAKE_CXX_STANDARD=17 ..
+	cd $(ABSL)/build && $(CMAKE) $(S2_FLAGS) -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON ..
 else
-	$(CMAKE) -S $(ABSL) -B $(ABSL)/build -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON -DCMAKE_CXX_STANDARD=17
+	$(CMAKE) -S $(ABSL) -B $(ABSL)/build $(S2_FLAGS) -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON
 endif
 	$(CMAKE) --build $(ABSL)/build
 	$(CMAKE) --build $(ABSL)/build --target install
@@ -78,11 +80,11 @@ endif
 s2lib: absllib
 ifeq ($(OS),$(filter $(OS), el7 ubuntu18.04)) # cmake version < 3.13
 	mkdir -p $(S2)/build
-	cd $(S2)/build && $(CMAKE) $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_STANDARD=17 ..
+	cd $(S2)/build && $(CMAKE) $(S2_FLAGS) $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF ..
 else
-	$(CMAKE) -S $(S2) -B $(S2)/build $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_STANDARD=17
+	$(CMAKE) -S $(S2) -B $(S2)/build $(S2_FLAGS) $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF
 endif
-	$(CMAKE) --build $(S2)/build -- -j 4 # Limit threads as the default spawns too many
+	$(CMAKE) --build $(S2)/build -- -j 8  # Limit threads as the default spawns too many
 	
 .PHONY: targetdirs
 targetdirs:
