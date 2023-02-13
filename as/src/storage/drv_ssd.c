@@ -1282,7 +1282,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	rd->flat_bins = as_flat_unpack_record_meta(flat, rd->flat_end, &opt_meta,
 			ns->single_bin);
 
-	if (! rd->flat_bins) {
+	if (rd->flat_bins == NULL) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad record metadata",
 				ns->name, ssd->name, &r->keyd);
 		return -1;
@@ -1299,7 +1299,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		return -1;
 	}
 
-	if (opt_meta.key) {
+	if (opt_meta.key != NULL) {
 		rd->key_size = opt_meta.key_size;
 		rd->key = opt_meta.key;
 	}
