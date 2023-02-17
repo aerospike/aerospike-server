@@ -40,6 +40,8 @@ the build environment, including:
 
 * `automake`
 
+* `cmake`
+
 * `libtool`
 
 * `make`
@@ -102,13 +104,14 @@ The Aerospike Database Server build depends upon 8 submodules:
 
 | Submodule | Description |
 |---------- | ----------- |
+| abseil-cpp | Support for the S2 Spherical Geometry Library |
 | common    | The Aerospike Common Library |
 | jansson   | C library for encoding, decoding and manipulating JSON data |
 | jemalloc  | The JEMalloc Memory Allocator |
 | lua-core  | The Aerospike Core Lua Source Files |
 | luajit    | The LuaJIT (Just-In-Time Compiler for Lua) |
 | mod-lua   | The Aerospike Lua Interface |
-| s2-geometry-library | The S2 Spherical Geometry Library |
+| s2geometry | The S2 Spherical Geometry Library |
 | telemetry | The Aerospike Telemetry Agent (Community Edition only) |
 
 After the initial cloning of the `aerospike-server` repo., the
