@@ -21,7 +21,7 @@ information.  The full Telemetry data collection agent source code may be found 
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
-current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8, Debian 10 or later, and Ubuntu 20.04 or later.
+current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8/9, Debian 10 or later, and Ubuntu 20.04 or later.
 
 ### Dependencies
 
