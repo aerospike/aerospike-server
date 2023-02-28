@@ -230,7 +230,8 @@ static void update_most_verbose_level(cf_log_context context);
 static void log_write(cf_log_context context, cf_log_level level, const char* file_name, int line, const char* format, va_list argp);
 static uint32_t get_log_fds(cf_log_context context, cf_log_level level, int* fds);
 static int sprintf_now(char* buf);
-static void write_all(int fd, const char* buf, size_t sz);
+static bool write_all(int fd, const char* buf, size_t sz);
+static int32_t syslog_socket(const char* path);
 static void syslog_write(cf_log_context context, cf_log_level level, const char* file_name, int line, const char* format, va_list argp);
 static uint32_t get_syslog_sinks(cf_log_context context, cf_log_level level, cf_log_sink** sinks);
 static void syslog_sprintf_now(char* buf);
@@ -424,11 +425,10 @@ cf_log_activate_sinks(void)
 			continue;
 		}
 
-		sink->fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+		sink->fd = syslog_socket(sink->path);
 
 		if (sink->fd < 0) {
-			cf_crash_nostack(CF_MISC, "can't create socket: %d (%s)", errno,
-					cf_strerror(errno));
+			cf_crash_nostack(CF_MISC, "can't connect to %s", sink->path);
 		}
 	}
 
@@ -549,7 +549,7 @@ cf_log_rotate(void)
 	for (uint32_t i = 0; i < g_n_sinks; i++) {
 		cf_log_sink* sink = &g_sinks[i];
 
-		if (sink->path == NULL) {
+		if (sink->path == NULL || sink->tag != NULL) {
 			continue;
 		}
 
@@ -905,7 +905,7 @@ sprintf_now(char* buf)
 	return pos;
 }
 
-static void
+static bool
 write_all(int fd, const char* buf, size_t sz)
 {
 	while (sz != 0) {
@@ -913,18 +913,45 @@ write_all(int fd, const char* buf, size_t sz)
 
 		if (sz_wr == 0) {
 			fprintf(stderr, "zero-size log write to %d\n", fd);
-			break;
+			return false;
 		}
 
 		if (sz_wr < 0) {
 			fprintf(stderr, "log write to %d failed: %d (%s)\n", fd, errno,
 					cf_strerror(errno));
-			break;
+			return false;
 		}
 
 		buf += sz_wr;
 		sz -= (size_t)sz_wr;
 	}
+
+	return true;
+}
+
+static int32_t
+syslog_socket(const char* path)
+{
+	struct sockaddr_un addr;
+
+	addr.sun_family = AF_UNIX;
+	strcpy(addr.sun_path, path);
+
+	int32_t fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+
+	if (connect(fd, &addr, sizeof(addr)) >= 0) {
+		return fd;
+	}
+
+	close(fd);
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	if (connect(fd, &addr, sizeof(addr)) >= 0) {
+		return fd;
+	}
+
+	close(fd);
+	return -1;
 }
 
 static void
@@ -1038,7 +1065,7 @@ syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time,
 {
 	int priority = (sink->facility << 3) | sys_level;
 	size_t tag_len = strlen(sink->tag);
-	char dgram[1 + 11 + 1 + SYSLOG_TIME_SZ + 1 + tag_len + 2 + buf_sz];
+	char dgram[1 + 11 + 1 + SYSLOG_TIME_SZ + 1 + tag_len + 2 + buf_sz + 1];
 
 	size_t pos = (size_t)sprintf(dgram, "<%d>", priority);
 
@@ -1056,16 +1083,31 @@ syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time,
 	memcpy(dgram + pos, buf, buf_sz);
 	pos += buf_sz;
 
-	struct sockaddr_un addr;
+	*(dgram + pos++) = '\0';
 
-	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, sink->path);
+	for (uint32_t tries = 0; tries < 2; tries++) {
+		if (sink->fd < 0) {
+			sink->fd = syslog_socket(sink->path);
 
-	ssize_t res = sendto(sink->fd, dgram, pos, 0, &addr, sizeof(addr));
+			if (sink->fd < 0) {
+				fprintf(stderr, "can't connect to %s\n", sink->path);
+				break;
+			}
+		}
 
-	if (res < 0) {
-		fprintf(stderr, "failed to send to %s: %d (%s)\n", addr.sun_path, errno,
-				cf_strerror(errno));
+		int32_t opt;
+		socklen_t len = sizeof(opt);
+		int32_t rv = getsockopt(sink->fd, SOL_SOCKET, SO_TYPE, &opt, &len);
+
+		cf_assert(rv == 0, CF_MISC, "can't get type of socket to %s\n",
+				sink->path);
+
+		if (write_all(sink->fd, dgram, opt == SOCK_STREAM ? pos : pos - 1)) {
+			break;
+		}
+
+		close(sink->fd);
+		sink->fd = -1;
 	}
 }
 
