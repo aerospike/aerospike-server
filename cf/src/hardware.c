@@ -133,7 +133,7 @@ typedef struct {
 	uint16_t per_cpu;
 } irq_list;
 
-static cpu_set_t g_os_cpus_online;
+static cpu_set_t g_os_cpus_available;
 static cpu_set_t g_numa_node_os_cpus_online[CPU_SETSIZE];
 
 static uint16_t g_n_numa_nodes;
@@ -491,6 +491,10 @@ read_list(const char *path, cpu_set_t *mask)
 	buff[limit - 1] = '\0';
 	cf_detail(CF_HARDWARE, "parsing list \"%s\"", buff);
 
+	if (buff[0] == 0) {
+		return CF_OS_FILE_RES_NOT_FOUND;
+	}
+
 	CPU_ZERO(mask);
 	char *walker = buff;
 
@@ -537,6 +541,44 @@ read_list(const char *path, cpu_set_t *mask)
 }
 
 static void
+apply_cpuset(void)
+{
+	cf_detail(CF_HARDWARE, "reading /proc/self/cpuset");
+
+	char path[1000];
+	size_t length = sizeof(path);
+	cf_os_file_res res = cf_os_read_file("/proc/self/cpuset", path, &length);
+
+	if (res != CF_OS_FILE_RES_OK) {
+		cf_warning(CF_HARDWARE, "bad or missing /proc/self/cpuset file");
+		return;
+	}
+
+	cf_assert(length >= 1, CF_HARDWARE, "short /proc/self/cpuset file");
+	length--;
+
+	while (length != 0) {
+		char full_path[1100];
+		cpu_set_t cpus_in_set;
+
+		path[length] = 0; // '\n' or '/'
+		snprintf(full_path, sizeof(full_path), "/sys/fs/cgroup%s/cpuset.cpus",
+				path);
+
+		cf_detail(CF_HARDWARE, "reading %s", full_path);
+
+		if (read_list(full_path, &cpus_in_set) == CF_OS_FILE_RES_OK) {
+			cf_detail(CF_HARDWARE, "applying cpuset");
+			CPU_AND(&g_os_cpus_available, &g_os_cpus_available, &cpus_in_set);
+		}
+
+		while (length != 0 && path[length] != '/') {
+			length--;
+		}
+	}
+}
+
+static void
 detect(cf_topo_numa_node_index a_numa_node)
 {
 	if (a_numa_node == INVALID_INDEX) {
@@ -546,9 +588,11 @@ detect(cf_topo_numa_node_index a_numa_node)
 		cf_detail(CF_HARDWARE, "detecting online CPUs on NUMA node %hu", a_numa_node);
 	}
 
-	if (read_list("/sys/devices/system/cpu/online", &g_os_cpus_online) != CF_OS_FILE_RES_OK) {
+	if (read_list("/sys/devices/system/cpu/online", &g_os_cpus_available) != CF_OS_FILE_RES_OK) {
 		cf_crash(CF_HARDWARE, "error while reading list of online CPUs");
 	}
+
+	apply_cpuset();
 
 	cf_detail(CF_HARDWARE, "learning CPU topology");
 
@@ -610,7 +654,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 		// Only consider CPUs that are actually in use.
 
-		if (!CPU_ISSET(g_n_os_cpus, &g_os_cpus_online)) {
+		if (!CPU_ISSET(g_n_os_cpus, &g_os_cpus_available)) {
 			cf_detail(CF_HARDWARE, "OS CPU index %hu is offline", g_n_os_cpus);
 			continue;
 		}
@@ -1464,7 +1508,7 @@ config_steering(const char *format, const char *if_name, uint16_t n_queues, bool
 		i_queue = 0;
 
 		for (cf_topo_os_cpu_index i_os_cpu = 0; i_os_cpu < g_n_os_cpus; ++i_os_cpu) {
-			if (CPU_ISSET(i_os_cpu, &g_os_cpus_online)) {
+			if (CPU_ISSET(i_os_cpu, &g_os_cpus_available)) {
 				CPU_SET(i_os_cpu, &masks[i_queue % n_queues]);
 				++i_queue;
 			}
@@ -1622,14 +1666,14 @@ static void
 config_interface(uint32_t i_addr, const char *if_name, bool rfs, irq_list *irqs)
 {
 	uint16_t n_irq_cpus = 0;
-	cf_topo_os_cpu_index i_os_cpu = fix_os_cpu_index(0, &g_os_cpus_online);
+	cf_topo_os_cpu_index i_os_cpu = fix_os_cpu_index(0, &g_os_cpus_available);
 
 	for (uint16_t i = 0; i < irqs->n_irqs; ++i) {
 		pin_irq(irqs->irqs[i], i_os_cpu);
 
 		if (i % irqs->per_cpu == irqs->per_cpu - 1) {
 			++n_irq_cpus;
-			i_os_cpu = fix_os_cpu_index((cf_topo_os_cpu_index)(i_os_cpu + 1), &g_os_cpus_online);
+			i_os_cpu = fix_os_cpu_index((cf_topo_os_cpu_index)(i_os_cpu + 1), &g_os_cpus_available);
 		}
 	}
 
