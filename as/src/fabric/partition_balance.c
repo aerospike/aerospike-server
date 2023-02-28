@@ -1126,8 +1126,8 @@ find_duplicates_ap(as_partition* p, const cf_node* ns_node_seq,
 
 	memset(parent_dupl_versions, 0, sizeof(parent_dupl_versions));
 
-	uint64_t one_ckey = 0;
-	bool reset_dup_res_ms = false;
+	uint64_t first_ckey = 0;
+	bool different_ckeys = false;
 
 	for (uint32_t n = 0; n < ns->cluster_size; n++) {
 		const as_partition_version* version = INPUT_VERSION(n);
@@ -1137,11 +1137,11 @@ find_duplicates_ap(as_partition* p, const cf_node* ns_node_seq,
 			continue;
 		}
 
-		if (one_ckey == 0) {
-			one_ckey = version->ckey;
+		if (first_ckey == 0) {
+			first_ckey = version->ckey;
 		}
-		else if (version->ckey != one_ckey) {
-			reset_dup_res_ms = true; // duplicates have different ckeys
+		else if (version->ckey != first_ckey) {
+			different_ckeys = true; // duplicates have different ckeys
 		}
 
 		// Postpone subsets to next pass.
@@ -1172,8 +1172,9 @@ find_duplicates_ap(as_partition* p, const cf_node* ns_node_seq,
 		}
 	}
 
-	// If duplicates did not all rebalance together before, reset dup-res time.
-	if (reset_dup_res_ms) {
+	// If duplicates did not all rebalance together before, or the master is
+	// changing, reset dup-res time.
+	if (different_ckeys || INPUT_VERSION(working_master_n)->master == 0) {
 		p->dup_res_cutoff_ms = cf_clepoch_milliseconds() +
 				AP_DUP_RES_CUTOFF_SAFETY_MS;
 	}
