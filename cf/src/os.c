@@ -141,7 +141,7 @@ cf_os_read_file(const char* path, void* buf, size_t* limit)
 
 	cf_detail(CF_OS, "read %zu byte(s) from file %s", total, path);
 
-	bool res;
+	cf_os_file_res res;
 
 	if (total == *limit) {
 		cf_warning(CF_OS, "read buffer too small for file %s", path);
