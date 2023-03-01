@@ -630,7 +630,7 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 
 	as_packer pk = {
 			.buffer = p_map_mem->data,
-			.capacity = value_size + extra_sz
+			.capacity = value_size + extra_sz + ext_content_sz
 	};
 
 	offset_index offidx;
