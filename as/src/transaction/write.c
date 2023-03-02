@@ -1932,6 +1932,10 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					as_bin cleanup_bin;
 					as_bin_copy(ns, &cleanup_bin, b);
 
+					// Clear deleted bin necessary for single-bin, but doing it
+					// generally for code simplicity.
+					as_bin_set_empty(b);
+
 					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 				}
 			}
