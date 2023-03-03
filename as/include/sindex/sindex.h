@@ -31,6 +31,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 
 #include "arenax.h"
@@ -135,11 +136,6 @@ void as_sindex_load(void);
 void as_sindex_start(void);
 void as_sindex_shutdown(struct as_namespace_s* ns);
 
-// Reserve/release.
-void as_sindex_reserve(as_sindex* si);
-void as_sindex_release(as_sindex* si);
-void as_sindex_release_arr(as_sindex* si_arr[], uint32_t si_arr_sz);
-
 // Populate sindexes.
 void as_sindex_put_all_rd(struct as_namespace_s* ns, struct as_storage_rd_s* rd, struct as_index_ref_s* r_ref);
 void as_sindex_put_rd(as_sindex* si, struct as_storage_rd_s* rd, struct as_index_ref_s* r_ref);
@@ -181,6 +177,26 @@ static inline uint64_t
 as_sindex_used_bytes(const as_namespace* ns)
 {
 	return ns->si_arena->n_used_eles * ns->si_arena->ele_sz;
+}
+
+static inline void
+as_sindex_reserve(as_sindex* si)
+{
+	cf_rc_reserve(si);
+}
+
+static inline void
+as_sindex_release(as_sindex* si)
+{
+	cf_rc_release(si);
+}
+
+static inline void
+as_sindex_release_arr(as_sindex* si_arr[], uint32_t si_arr_sz)
+{
+	for (uint32_t i = 0; i < si_arr_sz; i++) {
+		as_sindex_release(si_arr[i]);
+	}
 }
 
 // Lifecycle lock.

@@ -124,7 +124,7 @@ typedef struct hyperloglog_s {
 } hyperloglog;
 
 typedef struct cardinality_collect_cb_info_s {
-	as_namespace* ns;
+	as_sindex* si;
 
 	uint64_t* n_keys;
 	hyperloglog* bval_hll;
@@ -142,7 +142,7 @@ typedef struct cardinality_collect_cb_info_s {
 
 static void gc_reduce_and_delete(as_sindex* si, si_btree* bt);
 static bool gc_collect_cb(const si_btree_key* key, void* udata);
-static void query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
+static void query_reduce(as_sindex* si, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
 static bool query_collect_cb(const si_btree_key* key, void* udata);
 static void cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys, hyperloglog* bval_hll, hyperloglog* rec_hll);
 static bool cardinality_collect_cb(const si_btree_key* key, void* udata);
@@ -399,6 +399,10 @@ void
 as_sindex_tree_gc(as_sindex* si)
 {
 	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		if (si->dropped) {
+			return;
+		}
+
 		gc_reduce_and_delete(si, si->btrees[ix]);
 	}
 }
@@ -438,7 +442,9 @@ as_sindex_tree_query(as_sindex* si, const as_query_range* range,
 		as_partition_reservation* rsv, int64_t bval, cf_digest* keyd,
 		as_sindex_reduce_fn cb, void* udata)
 {
-	si_btree* bt = si->btrees[rsv->p->id];
+	if (si->dropped) {
+		return;
+	}
 
 	if (range->bin_type == AS_PARTICLE_TYPE_GEOJSON && range->isrange) {
 		for (uint32_t r_ix = 0; r_ix < range->u.geo.num_r; r_ix++) {
@@ -448,14 +454,14 @@ as_sindex_tree_query(as_sindex* si, const as_query_range* range,
 				continue;
 			}
 
-			query_reduce(bt, rsv, r->start, r->end, bval, keyd, range->de_dup,
+			query_reduce(si, rsv, r->start, r->end, bval, keyd, range->de_dup,
 					cb, udata);
 		}
 
 		return;
 	}
 
-	query_reduce(bt, rsv, range->u.r.start, range->u.r.end, bval, keyd,
+	query_reduce(si, rsv, range->u.r.start, range->u.r.end, bval, keyd,
 			range->de_dup, cb, udata);
 }
 
@@ -468,6 +474,10 @@ as_sindex_tree_collect_cardinality(as_sindex* si)
 			NULL : cf_calloc(1, sizeof(hyperloglog));
 
 	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
+		if (si->dropped) {
+			return;
+		}
+
 		si_btree* bt = si->btrees[ix];
 
 		if (bt->n_keys != 0) {
@@ -515,7 +525,7 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 			.keys = keys
 	};
 
-	while (! si->dropped) {
+	while (true) {
 		search_key* last = first ? NULL : &ci.last;
 
 		si_btree_reduce(bt, last, NULL, gc_collect_cb, &ci);
@@ -523,11 +533,15 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 		first = false;
 
 		for (uint32_t i = 0; i < ci.n_keys; i++) {
-			si_btree_delete(bt, &keys[i]);
-		}
+			if (si->dropped) {
+				return;
+			}
 
-		si->n_gc_cleaned += ci.n_keys;
-		ns->n_sindex_gc_cleaned += ci.n_keys;
+			si_btree_delete(bt, &keys[i]);
+
+			si->n_gc_cleaned++;
+			ns->n_sindex_gc_cleaned++;
+		}
 
 		if (ci.n_keys_reduced != max_burst) {
 			return; // done with this physical tree
@@ -566,18 +580,19 @@ gc_collect_cb(const si_btree_key* key, void* udata)
 }
 
 static void
-query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval,
+query_reduce(as_sindex* si, as_partition_reservation* rsv, int64_t start_bval,
 		int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup,
 		as_sindex_reduce_fn cb, void* udata)
 {
 	as_namespace* ns = rsv->ns;
 
 	if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
-		query_reduce_no_rc(bt, rsv, start_bval, end_bval, resume_bval, keyd,
+		query_reduce_no_rc(si, rsv, start_bval, end_bval, resume_bval, keyd,
 				de_dup, cb, udata);
 		return;
 	}
 
+	si_btree* bt = si->btrees[rsv->p->id];
 	si_btree_key keys[MAX_QUERY_BURST];
 
 	query_collect_cb_info ci = {
@@ -613,6 +628,10 @@ query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval,
 		bool do_more = true;
 
 		for (uint32_t i = 0; i < ci.n_keys; i++) {
+			if (si->dropped) {
+				do_more = false;
+			}
+
 			si_btree_key* key = &keys[i];
 
 			as_record* r = cf_arenax_resolve(bt->arena, key->r_h);
@@ -641,7 +660,7 @@ query_reduce(si_btree* bt, as_partition_reservation* rsv, int64_t start_bval,
 		}
 
 		if (! do_more) {
-			return; // user callback stopped query
+			return; // user callback or sindex drop stopped query
 		}
 
 		if (ci.n_keys_reduced != MAX_QUERY_BURST) {
@@ -693,18 +712,16 @@ static void
 cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys,
 		hyperloglog* bval_hll, hyperloglog* rec_hll)
 {
-	as_namespace* ns = si->ns;
-
 	bool first = true;
 
 	cardinality_collect_cb_info ci = {
-			.ns = ns,
+			.si = si,
 			.n_keys = n_keys,
 			.bval_hll = bval_hll,
 			.rec_hll = rec_hll
 	};
 
-	while (! si->dropped) {
+	while (true) {
 		search_key* last = first ? NULL : &ci.last;
 
 		si_btree_reduce(bt, last, NULL, cardinality_collect_cb, &ci);
@@ -712,7 +729,7 @@ cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys,
 		first = false;
 
 		if (ci.n_keys_reduced != MAX_CARDINALITY_BURST) {
-			return; // done with this physical tree
+			return; // done with this physical tree or dropped sindex
 		}
 
 		ci.n_keys_reduced = 0;
@@ -723,7 +740,10 @@ static bool
 cardinality_collect_cb(const si_btree_key* key, void* udata)
 {
 	cardinality_collect_cb_info* ci = (cardinality_collect_cb_info*)udata;
-	as_namespace* ns = ci->ns;
+
+	if (ci->si->dropped) {
+		return false; // stops si_btree_reduce() short of full burst
+	}
 
 	(*ci->n_keys)++;
 
@@ -737,7 +757,7 @@ cardinality_collect_cb(const si_btree_key* key, void* udata)
 	}
 
 	if (++ci->n_keys_reduced == MAX_CARDINALITY_BURST) {
-		as_index* r = cf_arenax_resolve(ns->arena, key->r_h);
+		as_index* r = cf_arenax_resolve(ci->si->ns->arena, key->r_h);
 
 		ci->last.bval = key->bval;
 		ci->last.has_digest = true;
