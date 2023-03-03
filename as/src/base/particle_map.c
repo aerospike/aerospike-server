@@ -4333,6 +4333,9 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 		cdt_idx_mask_set_by_irc(rm_mask, &rm_ic, NULL, inverted);
 		rm_count = cdt_idx_mask_bit_count(rm_mask, map->ele_count);
 	}
+	else if (result->type == RESULT_TYPE_EXISTS) {
+		rm_count = rc_count; // approximate for exists reads
+	}
 
 	if (cdt_op_is_modify(com)) {
 		packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
