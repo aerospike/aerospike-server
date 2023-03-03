@@ -54,7 +54,7 @@ as_sindex_tree_resume(as_sindex* si)
 //
 
 void
-query_reduce_no_rc(si_btree* bt, as_partition_reservation* rsv,
+query_reduce_no_rc(as_sindex* si, as_partition_reservation* rsv,
 		int64_t start_bval, int64_t end_bval, int64_t resume_bval,
 		cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata)
 {

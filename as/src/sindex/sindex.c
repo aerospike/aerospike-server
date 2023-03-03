@@ -268,38 +268,6 @@ as_sindex_start(void)
 
 
 //==========================================================
-// Public API - reserve/release.
-//
-
-void
-as_sindex_reserve(as_sindex* si)
-{
-	cf_rc_reserve(si);
-}
-
-void
-as_sindex_release(as_sindex* si)
-{
-	int32_t rc = cf_rc_release(si);
-
-	cf_assert(rc >= 0, AS_SINDEX, "ref-count underflow %d", rc);
-
-	if (rc == 0) {
-		// We might be in a transaction, so destroy asynchronously.
-		as_sindex_populate_destroy(si);
-	}
-}
-
-void
-as_sindex_release_arr(as_sindex* si_arr[], uint32_t si_arr_sz)
-{
-	for (uint32_t i = 0; i < si_arr_sz; i++) {
-		as_sindex_release(si_arr[i]);
-	}
-}
-
-
-//==========================================================
 // Public API - populate sindexes.
 //
 
@@ -1028,6 +996,14 @@ smd_drop(as_sindex_def* def)
 	cf_info(AS_SINDEX, "SINDEX DROP: request received for %s:%s via smd",
 			ns->name, si->iname);
 
+	si->dropped = true; // allow queries, populate & GC to abort
+
+	while (cf_rc_count(si) > 1) {
+		as_arch_pause();
+	}
+
+	// Nothing new can reserve the sindex - remove it.
+
 	drop_from_sindexes(si); // must precede bin_bitmap_clear()
 
 	delete_sindex(si);
@@ -1043,8 +1019,11 @@ smd_drop(as_sindex_def* def)
 
 	SINDEX_GWUNLOCK();
 
-	si->dropped = true; // allow populate & GC to abort
-	as_sindex_release(si); // release original rc-alloc ref-count
+	// Release original rc-alloc ref-count - not necessary but feels proper.
+	as_sindex_release(si);
+	cf_assert(cf_rc_count(si) == 0, AS_SINDEX, "non-zero rc for %s", si->iname);
+
+	as_sindex_populate_destroy(si);
 }
 
 static void

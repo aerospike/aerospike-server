@@ -122,7 +122,7 @@ void as_sindex_tree_collect_cardinality(struct as_sindex_s* si);
 // Private API - for enterprise separation only.
 //
 
-void query_reduce_no_rc(si_btree* bt, struct as_partition_reservation_s* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
+void query_reduce_no_rc(struct as_sindex_s* si, struct as_partition_reservation_s* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
 
 bool si_btree_delete(si_btree* bt, const si_btree_key* key);
 void si_btree_reduce(si_btree* bt, const search_key* start_skey, const search_key* end_skey, si_btree_reduce_fn cb, void* udata);
