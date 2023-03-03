@@ -32,6 +32,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_b64.h"
@@ -999,7 +1000,7 @@ smd_drop(as_sindex_def* def)
 	si->dropped = true; // allow queries, populate & GC to abort
 
 	while (cf_rc_count(si) > 1) {
-		as_arch_pause();
+		usleep(1);
 	}
 
 	// Nothing new can reserve the sindex - remove it.
