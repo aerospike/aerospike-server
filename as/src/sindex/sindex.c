@@ -521,7 +521,7 @@ as_sindex_stats_str(as_namespace* ns, char* iname, cf_dyn_buf* db)
 	}
 
 	info_append_uint64(db, "entries", as_sindex_tree_n_keys(si));
-	info_append_uint64(db, "memory_used", as_sindex_tree_mem_size(si));
+	info_append_uint64(db, "used_bytes", as_sindex_tree_mem_size(si));
 
 	info_append_uint64(db, "entries_per_bval", si->keys_per_bval);
 	info_append_uint64(db, "entries_per_rec", si->keys_per_rec);
