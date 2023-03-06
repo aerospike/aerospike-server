@@ -107,7 +107,7 @@ endif
 
 package:
 	install -pm 644 $(OPT_AS)/doc/LICENSE $(PKG)/packages
-	fakeroot dpkg-deb --build $(BUILD_ROOT) $(DEB)
+	fakeroot dpkg-deb -Z xz --build $(BUILD_ROOT) $(DEB)
 
 clean:
 	rm -rf $(SOURCE_ROOT)/*
