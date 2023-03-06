@@ -39,6 +39,7 @@
 #include "shash.h"
 
 #include "base/datamodel.h"
+#include "sindex/populate.h"
 #include "sindex/sindex_arena.h"
 
 
@@ -188,7 +189,9 @@ as_sindex_reserve(as_sindex* si)
 static inline void
 as_sindex_release(as_sindex* si)
 {
-	cf_rc_release(si);
+	if (cf_rc_release(si) == 0) {
+		as_sindex_populate_destroy(si);
+	}
 }
 
 static inline void

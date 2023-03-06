@@ -495,6 +495,7 @@ as_sindex_itype_from_string(const char* itype_str) {
 
 	return AS_SINDEX_N_ITYPES;
 }
+
 bool
 as_sindex_exists(const as_namespace* ns, const char* iname)
 {
@@ -1000,12 +1001,6 @@ smd_drop(as_sindex_def* def)
 
 	si->dropped = true; // allow queries, populate & GC to abort
 
-	while (cf_rc_count(si) > 1) {
-		as_arch_pause();
-	}
-
-	// Nothing new can reserve the sindex - remove it.
-
 	drop_from_sindexes(si); // must precede bin_bitmap_clear()
 
 	delete_sindex(si);
@@ -1021,11 +1016,8 @@ smd_drop(as_sindex_def* def)
 
 	SINDEX_GWUNLOCK();
 
-	// Release original rc-alloc ref-count - not necessary but feels proper.
+	// Release original rc-alloc ref-count.
 	as_sindex_release(si);
-	cf_assert(cf_rc_count(si) == 0, AS_SINDEX, "non-zero rc for %s", si->iname);
-
-	as_sindex_populate_destroy(si);
 }
 
 static void
