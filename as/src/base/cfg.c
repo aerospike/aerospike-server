@@ -2447,7 +2447,7 @@ as_config_init(const char* config_file)
 				cfg_begin_context(&state, LOGGING_CONTEXT);
 				break;
 			case CASE_LOG_SYSLOG_BEGIN:
-				sink = cf_log_init_sink("/dev/log", LOG_LOCAL0, "asd"); // FIXME - #defines!
+				sink = cf_log_init_sink(DEFAULT_SYSLOG_PATH, LOG_LOCAL0, DEFAULT_SYSLOG_TAG);
 				cfg_begin_context(&state, LOGGING_SYSLOG);
 				break;
 			case CASE_CONTEXT_END:

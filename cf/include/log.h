@@ -124,6 +124,9 @@ typedef struct cf_log_sink_s cf_log_sink;
 
 #define CF_LOG_OPEN_FLAGS (O_WRONLY | O_CREAT | O_APPEND)
 
+#define DEFAULT_SYSLOG_PATH "/dev/log"
+#define DEFAULT_SYSLOG_TAG "asd"
+
 
 //==========================================================
 // Public API - compile-time helpers.
