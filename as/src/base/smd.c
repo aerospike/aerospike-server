@@ -1036,26 +1036,41 @@ run_smd(void* udata)
 	(void)udata;
 
 	while (true) {
-		smd_op* op = NULL;
 		int wait_ms = set_orig_try_retransmit_or_expire();
 
 		if (smd_is_pr()) {
 			int pr_wait_ms = pr_try_retransmit();
 
-			if (pr_wait_ms == INT_MAX) {
-				cf_queue_pop(&g_smd.pending_set_q, &op, CF_QUEUE_NOWAIT);
-			}
-			else if (pr_wait_ms < wait_ms) {
+			if (pr_wait_ms < wait_ms) {
 				wait_ms = pr_wait_ms;
 			}
+
+			uint32_t n_pending = cf_queue_sz(&g_smd.pending_set_q);
+
+			for (uint32_t i = 0; i < n_pending; i++) {
+				smd_op* pending_op;
+
+				cf_queue_pop(&g_smd.pending_set_q, &pending_op,
+						CF_QUEUE_NOWAIT);
+
+				if (pending_op->module->state == STATE_PR) {
+					smd_lock();
+					smd_event(pending_op);
+					smd_unlock();
+
+					smd_op_destroy(pending_op);
+				}
+				else {
+					cf_queue_push(&g_smd.pending_set_q, &pending_op);
+				}
+			}
 		}
 
-		if (op == NULL) {
-			cf_queue_pop(&g_smd.event_q, &op,
-					wait_ms == INT_MAX ? CF_QUEUE_FOREVER : wait_ms);
-		}
+		smd_op* op;
 
-		if (op != NULL) {
+		if (cf_queue_pop(&g_smd.event_q, &op,
+				wait_ms == INT_MAX ? CF_QUEUE_FOREVER : wait_ms) ==
+						CF_QUEUE_OK) {
 			smd_lock();
 			smd_event(op);
 			smd_unlock();
@@ -1080,7 +1095,7 @@ pr_try_retransmit(void)
 			continue;
 		}
 
-		if (module->retry_next_ms != 0 && module->retry_next_ms < now_ms) {
+		if (module->retry_next_ms != 0 && module->retry_next_ms <= now_ms) {
 			pr_send_msgs(module);
 		}
 
@@ -1121,7 +1136,7 @@ set_orig_reduce_cb(const void* key, void* value, void* udata)
 		return CF_SHASH_REDUCE_DELETE;
 	}
 
-	if (entry->retry_next_ms != 0 && entry->retry_next_ms < p->now_ms) {
+	if (entry->retry_next_ms != 0 && entry->retry_next_ms <= p->now_ms) {
 		send_set_from_orig(*(uint32_t*)key, entry);
 	}
 
