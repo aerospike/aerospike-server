@@ -541,7 +541,7 @@ read_list(const char *path, cpu_set_t *mask)
 }
 
 static void
-apply_cpuset(void)
+apply_cpuset(const char* base)
 {
 	cf_detail(CF_HARDWARE, "reading /proc/self/cpuset");
 
@@ -562,8 +562,7 @@ apply_cpuset(void)
 		cpu_set_t cpus_in_set;
 
 		path[length] = 0; // '\n' or '/'
-		snprintf(full_path, sizeof(full_path), "/sys/fs/cgroup%s/cpuset.cpus",
-				path);
+		snprintf(full_path, sizeof(full_path), "%s%s/cpuset.cpus", base, path);
 
 		cf_detail(CF_HARDWARE, "reading %s", full_path);
 
@@ -592,7 +591,8 @@ detect(cf_topo_numa_node_index a_numa_node)
 		cf_crash(CF_HARDWARE, "error while reading list of online CPUs");
 	}
 
-	apply_cpuset();
+	apply_cpuset("/sys/fs/cgroup/cpuset"); // cgroup v1
+	apply_cpuset("/sys/fs/cgroup"); // cgroup v2
 
 	cf_detail(CF_HARDWARE, "learning CPU topology");
 
