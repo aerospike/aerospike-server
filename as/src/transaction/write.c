@@ -2084,6 +2084,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				return result;
 			}
 
+			bool created_bin = as_bin_is_unused(b);
 			const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
 			const iops_expop* expop = tr->origin == FROM_IOPS ?
 					&tr->from.iops_orig->expops[i] : NULL;
@@ -2099,7 +2100,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				// Account for noop EXP operations. Modifying non-mutable
 				// particle contents in-place is still disallowed.
-				if (cleanup_bin.particle != b->particle) {
+				if (cleanup_bin.particle != b->particle && as_bin_is_used(b)) {
 					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 				}
 			}
@@ -2115,10 +2116,14 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
 			}
 
-			// The op will not empty a bin, but may leave a freshly created bin
-			// empty. In this case it must be last in rd->bins - remove it.
 			if (as_bin_is_unused(b)) {
-				rd->n_bins--;
+				if (created_bin) {
+					rd->n_bins--;
+				}
+				else {
+					// Can't fail - bin was already created.
+					delete_bin(rd, op, msg_lut, cleanup_bins, p_n_cleanup_bins, &result);
+				}
 			}
 		}
 		else if (op->op == AS_MSG_OP_EXP_READ) {
