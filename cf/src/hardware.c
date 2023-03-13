@@ -557,7 +557,7 @@ apply_cpuset(const char* base)
 	cf_assert(length >= 1, CF_HARDWARE, "short /proc/self/cpuset file");
 	length--;
 
-	while (length != 0) {
+	while (true) {
 		char full_path[1100];
 		cpu_set_t cpus_in_set;
 
@@ -569,6 +569,10 @@ apply_cpuset(const char* base)
 		if (read_list(full_path, &cpus_in_set) == CF_OS_FILE_RES_OK) {
 			cf_detail(CF_HARDWARE, "applying cpuset");
 			CPU_AND(&g_os_cpus_available, &g_os_cpus_available, &cpus_in_set);
+		}
+
+		if (length == 0) {
+			break;
 		}
 
 		while (length != 0 && path[length] != '/') {
