@@ -1498,8 +1498,7 @@ map_allidx_vla_sz(const packed_map *map)
 	uint32_t sz = 0;
 
 	if (! offset_index_is_valid(&map->offidx)) {
-		sz = offset_index_size(&map->offidx) +
-				order_index_size(&map->ordidx);
+		sz = offset_index_size(&map->offidx) + order_index_size(&map->ordidx);
 	}
 	else if (! order_index_is_valid(&map->ordidx)) {
 		sz = order_index_size(&map->ordidx);
@@ -2915,8 +2914,8 @@ packed_map_unpack_hdridx(packed_map *map, bool fill_idxs)
 		uint8_t *ptr = (uint8_t *)ext.data;
 		uint32_t sz = offset_index_size(&map->offidx);
 
-		if ((map->flags & AS_PACKED_MAP_FLAG_OFF_IDX) && index_sz_left >= sz &&
-				sz != 0) {
+		if ((map->flags & AS_PACKED_MAP_FLAG_OFF_IDX) != 0
+				&& index_sz_left >= sz && sz != 0) {
 			offset_index_set_ptr(&map->offidx, ptr, map->packed + mp.offset);
 			ptr += sz;
 			index_sz_left -= sz;
@@ -2928,8 +2927,8 @@ packed_map_unpack_hdridx(packed_map *map, bool fill_idxs)
 
 		sz = order_index_size(&map->ordidx);
 
-		if ((map->flags & AS_PACKED_MAP_FLAG_ORD_IDX) && index_sz_left >= sz &&
-				map->ele_count > 1) {
+		if ((map->flags & AS_PACKED_MAP_FLAG_ORD_IDX) != 0
+				&& index_sz_left >= sz && map->ele_count > 1) {
 			order_index_set_ptr(&map->ordidx, ptr);
 		}
 	}
@@ -3591,8 +3590,7 @@ packed_map_get_remove_by_key_interval(const packed_map *map, cdt_op_mem *com,
 		}
 	}
 	else if (result_data_is_return_rank(result)) {
-		packed_map_build_rank_result_by_mask(map, rm_mask, rm_count,
-				result);
+		packed_map_build_rank_result_by_mask(map, rm_mask, rm_count, result);
 	}
 	else {
 		ret = result_data_set_range(result, index, count, map->ele_count);
@@ -5425,8 +5423,10 @@ packed_map_build_ele_result_by_idx_range(const packed_map *map,
 
 		if (flag == AS_PACKED_MAP_FLAG_K_ORDERED && ! map_is_k_ordered(map)) { // need sorting
 			packed_map map_to_sort;
+			bool check = packed_map_init_from_particle(&map_to_sort,
+					builder.particle, false);
 
-			packed_map_init_from_particle(&map_to_sort, builder.particle, true);
+			cf_assert(check, AS_PARTICLE, "invalid map");
 			packed_map_sort_in_place(&map_to_sort);
 		}
 
@@ -5610,8 +5610,10 @@ packed_map_build_ele_result_by_mask(const packed_map *map, const uint64_t *mask,
 
 	if (need_sort) {
 		packed_map map_to_sort;
+		bool check = packed_map_init_from_particle(&map_to_sort,
+				builder.particle, false);
 
-		packed_map_init_from_particle(&map_to_sort, builder.particle, true);
+		cf_assert(check, AS_PARTICLE, "invalid map");
 		packed_map_sort_in_place(&map_to_sort);
 	}
 
@@ -5840,11 +5842,16 @@ packed_map_write_k_ordered(const packed_map *map, uint8_t *write_ptr,
 	uint32_t ele_count = map->ele_count;
 	define_rollback_alloc(alloc_idx, NULL, 2, false); // for temp indexes
 	define_order_index(key_ordidx, ele_count, alloc_idx);
+	setup_map_must_have_offidx(u, map, alloc_idx);
+
+	bool check = packed_map_check_and_fill_offidx(map);
+	cf_assert(check, AS_PARTICLE, "invalid map");
 
 	order_index_set_sorted_with_offsets(&key_ordidx, &map->offidx, SORT_BY_KEY);
 
 	const uint8_t *ptr = map->offidx.contents;
-	bool has_new_offsets = ! offset_index_is_null(offsets_new);
+	bool has_new_offsets = offsets_new != NULL &&
+			! offset_index_is_null(offsets_new);
 
 	if (has_new_offsets) {
 		offset_index_set_filled(offsets_new, 1);
@@ -5870,11 +5877,9 @@ static void
 packed_map_sort_in_place(packed_map *map)
 {
 	uint8_t *temp_mem = cf_malloc(map->content_sz);
-	offset_index temp_offidx;
 	uint8_t *start_write = (uint8_t *)map->contents;
 
-	offset_index_init(&temp_offidx, NULL, 0, NULL, 0);
-	packed_map_write_k_ordered(map, temp_mem, &temp_offidx);
+	packed_map_write_k_ordered(map, temp_mem, NULL);
 	memcpy(start_write, temp_mem, map->content_sz);
 	cf_free(temp_mem);
 }
