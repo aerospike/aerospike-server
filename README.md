@@ -28,6 +28,8 @@ current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise
 The majority of the Aerospike source code is written in the C
 programming language, conforming to the ANSI C99 standard.
 
+To install dependencies run `./bin/install-dependencies.sh` in the aerospike-server repo.
+
 In particular, the following tools and libraries are needed:
 
 #### C Compiler Toolchain
@@ -60,11 +62,9 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
 (RIPEMD-160 & SHA-1) and pseudo-random number generation.
 
-* The CentOS 7 &  Red Hat Enterprise Linux 8/9 OpenSSL packages to install are:  `openssl` and
-`openssl-devel`, and also `openssl-static` on CentOS 7.
+* The CentOS 7 &  Red Hat Enterprise Linux 8/9 OpenSSL package to install:  `openssl-devel`
 
-* The Debian 10/11 and Ubuntu 20/22 OpenSSL packages to install are:
-`openssl` and `libssl-dev`.
+* The Debian 10/11 and Ubuntu 20/22 OpenSSL packages to install: `libssl-dev`.
 
 #### Lua 5.1
 
@@ -85,9 +85,11 @@ by the build environment.  In that case:
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
 
-#### zlib
+#### Zlib
 
-Building on Ubuntu 20+ also requires installing `libz-dev`.
+* The CentOS 7 &  Red Hat Enterprise Linux 8/9 requires `zlib-devel`
+
+* The Debian 10/11 and Ubuntu 20/22 requiresi `zlib1g-dev`.
 
 #### Python 3 or 2
 
