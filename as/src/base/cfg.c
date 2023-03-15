@@ -3709,7 +3709,7 @@ as_config_init(const char* config_file)
 				cfg_obsolete(&line, "the 'security' context automatically enables security");
 				break;
 			case CASE_SECURITY_SYSLOG_BEGIN:
-				cfg_obsolete(&line, "the 'syslog' sub-context is no longer supported"); // FIXME - actual wording!
+				cfg_obsolete(&line, "please use a logging context 'syslog' log sink");
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
