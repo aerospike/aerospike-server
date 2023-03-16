@@ -127,9 +127,10 @@ traverse_loop(json_t * vertices)
 
 	unique_ptr<S2Loop> loop(new S2Loop(points));
 
-	if (! loop->IsValid()) {
-		throwstream(runtime_error, "invalid loop");
-	}
+	// TODO - caused rare odd results - be conservative until we know more.
+//	if (! loop->IsValid()) {
+//		throwstream(runtime_error, "invalid loop");
+//	}
 
 	loop->Normalize();
 	return loop;
@@ -155,9 +156,10 @@ traverse_polygon(json_t * loops)
 
 		unique_ptr<S2Polygon> polygon = make_unique<S2Polygon>(move(loopv));
 
-		if (! polygon->IsValid()) {
-			throwstream(runtime_error, "invalid polygon");
-		}
+		// TODO - caused rare odd results - be conservative until we know more.
+//		if (! polygon->IsValid()) {
+//			throwstream(runtime_error, "invalid polygon");
+//		}
 
 		return polygon;
 	}
@@ -245,9 +247,10 @@ process_circle(GeoJSON::GeometryHandler & geohand, json_t * coord)
 
 	unique_ptr<S2Cap> capp(new S2Cap(center, angle));
 
-	if (! capp->is_valid()) {
-		throwstream(runtime_error, "invalid circle");
-	}
+	// TODO - caused rare odd results - be conservative until we know more.
+//	if (! capp->is_valid()) {
+//		throwstream(runtime_error, "invalid circle");
+//	}
 
 	geohand.handle_region(capp.release());
 }
