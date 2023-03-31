@@ -4519,7 +4519,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 
 	if (ret != AS_OK) {
-		if (ret == AS_ERR_ELEMENT_NOT_FOUND || ret == AS_ERR_ELEMENT_EXISTS) {
+		if (ret == -AS_ERR_ELEMENT_NOT_FOUND || ret == -AS_ERR_ELEMENT_EXISTS) {
 			cf_detail(AS_PARTICLE, "%s: failed", cdt_process_state_get_op_name(state));
 		}
 		else {
