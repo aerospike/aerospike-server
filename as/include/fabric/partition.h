@@ -263,12 +263,6 @@ as_partition_version_has_data(const as_partition_version* version)
 }
 
 static inline bool
-as_partition_version_is_full(const as_partition_version* version)
-{
-	return version->ckey != 0 && version->subset == 0;
-}
-
-static inline bool
 as_partition_version_same(const as_partition_version* v1, const as_partition_version* v2)
 {
 	return *(uint64_t*)v1 == *(uint64_t*)v2;
@@ -296,6 +290,15 @@ static inline bool
 contains_self(const cf_node* nodes, uint32_t n_nodes)
 {
 	return contains_node(nodes, n_nodes, g_config.self_node);
+}
+
+static inline bool
+as_partition_is_full(const as_partition* p)
+{
+	// Any replica without pending immigrations is full ...
+	return p->pending_immigrations == 0 && (is_self_replica(p) ||
+			// Also a non-replica acting master when there are no duplicates.
+			(p->working_master == g_config.self_node && p->n_dupl == 0));
 }
 
 #define AS_PARTITION_ID_UNDEF ((uint16_t)0xFFFF)
