@@ -447,7 +447,7 @@ as_partition_reserve_full(as_namespace* ns, uint32_t pid,
 
 	cf_mutex_lock(&p->lock);
 
-	if (! as_partition_version_is_full(&p->version)) {
+	if (! as_partition_is_full(p)) {
 		cf_mutex_unlock(&p->lock);
 		return -1;
 	}
