@@ -399,10 +399,9 @@ as_info_init()
 			"physical-devices;"
 			"query-abort;query-abort-all;query-show;quiesce;quiesce-undo;"
 			"racks;recluster;revive;roster;roster-set;"
-			"scan-abort;scan-abort-all;scan-show;service;services;"
-			"services-alumni;services-alumni-reset;set-config;set-log;sets;"
-			"show-devices;sindex;sindex-create;sindex-delete;smd-show;"
-			"statistics;status;"
+			"service;services;services-alumni;services-alumni-reset;set-config;"
+			"set-log;sets;show-devices;sindex;sindex-create;sindex-delete;"
+			"smd-show;statistics;status;"
 			"tip;tip-clear;truncate;truncate-namespace;truncate-namespace-undo;"
 			"truncate-undo;"
 			"version;",
@@ -516,12 +515,6 @@ as_info_init()
 	info_set_command("udf-get", udf_cask_info_get, PERM_NONE);
 	info_set_command("udf-remove", udf_cask_info_remove, PERM_UDF_ADMIN);
 	info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PERM_UDF_ADMIN);
-
-	// TODO - deprecated - remove January 2023 +:
-	info_set_dynamic("scan-show", dyn_query_show, false);
-	info_set_command("scan-show", cmd_query_show, PERM_NONE);
-	info_set_command("scan-abort", cmd_query_abort, PERM_QUERY_ADMIN);
-	info_set_command("scan-abort-all", cmd_query_abort_all, PERM_QUERY_ADMIN);  // Abort all queries.
 
 	info_set_dynamic("query-show", dyn_query_show, false);
 	info_set_command("query-show", cmd_query_show, PERM_NONE);
