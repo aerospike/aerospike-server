@@ -18,6 +18,7 @@ container:
       - docker.qe.aerospike.com/build/aerospike-server:arm-debian-11
       - docker.qe.aerospike.com/build/aerospike-server:arm-ubuntu-20.04
       - docker.qe.aerospike.com/build/aerospike-server:arm-ubuntu-22.04
+      - docker.qe.aerospike.com/build/aerospike-server:arm-amazonlinux-2023
 
       - docker.qe.aerospike.com/build/aerospike-server:x86-centos-7
       - docker.qe.aerospike.com/build/aerospike-server:x86-rhel-8
@@ -26,6 +27,7 @@ container:
       - docker.qe.aerospike.com/build/aerospike-server:x86-debian-11
       - docker.qe.aerospike.com/build/aerospike-server:x86-ubuntu-20.04
       - docker.qe.aerospike.com/build/aerospike-server:x86-ubuntu-22.04
+      - docker.qe.aerospike.com/build/aerospike-server:x86-amazonlinux-2023
 
 build:
   - name: community
