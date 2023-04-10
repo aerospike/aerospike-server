@@ -1344,7 +1344,6 @@ typedef struct basic_query_job_s {
 
 	// Derived class data:
 	uint64_t end_ns;
-	bool old_client; // TODO - temporary - won't need after January 2023
 	bool no_bin_data;
 	uint64_t sample_max;
 	uint64_t sample_count;
@@ -1384,6 +1383,12 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 {
 	as_msg* m = &tr->msgp->msg;
 
+	// TODO - phase out now? Or if/when future clients stop sending bit?
+	if ((m->info3 & AS_MSG_INFO3_PARTITION_DONE) == 0) {
+		cf_warning(AS_QUERY, "basic query expects unsupported pid-done-ok");
+		return AS_ERR_UNSUPPORTED_FEATURE;
+	}
+
 	basic_query_job* job = cf_calloc(1, sizeof(basic_query_job));
 	conn_query_job* conn_job = (conn_query_job*)job;
 	as_query_job* _job = (as_query_job*)job;
@@ -1392,11 +1397,6 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	if (as_transaction_is_short_query(tr) && ! ns->force_long_queries) {
 		_job->is_short = true;
 		_job->do_inline = ns->inline_short_queries;
-	}
-
-	// TODO - temporary - won't need after January 2023.
-	if ((m->info3 & AS_MSG_INFO3_PARTITION_DONE) == 0) {
-		job->old_client = true;
 	}
 
 	as_query_job_init(_job, &basic_query_job_vtable, tr, ns);
@@ -1411,6 +1411,13 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
+	// TODO - roll into above, return AS_ERR_PARAMETER?
+	if (_job->pids == NULL) {
+		cf_warning(AS_QUERY, "basic query missing pids and digests fields");
+		as_query_job_destroy(_job);
+		return AS_ERR_UNSUPPORTED_FEATURE;
+	}
+
 	if (! find_sindex(_job)) {
 		as_query_job_destroy(_job);
 		return AS_ERR_SINDEX_NOT_FOUND;
@@ -1419,17 +1426,6 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	if (_job->si != NULL && ! _job->si->readable) {
 		as_query_job_destroy(_job);
 		return AS_ERR_SINDEX_NOT_READABLE;
-	}
-
-	// TODO - won't need after January 2023 - when si-queries always have pids.
-	if (_job->si == NULL) {
-		if (_job->pids == NULL) {
-			cf_warning(AS_QUERY, "basic query missing pids and digests fields");
-			as_query_job_destroy(_job);
-			return AS_ERR_UNSUPPORTED_FEATURE;
-		}
-
-		cf_assert(_job->n_pids_requested != 0, AS_QUERY, "0 pids requested");
 	}
 
 	// Take ownership of socket from transaction.
@@ -1529,18 +1525,11 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	as_index_tree* tree = rsv->tree;
 
 	if (tree == NULL) {
-		if (_job->pids != NULL) {
-			as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_ERR_UNAVAILABLE);
-		}
-
+		as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_ERR_UNAVAILABLE);
 		return;
 	}
 
 	if (_job->set_id == INVALID_SET_ID && _job->set_name[0] != '\0') {
-		if (job->old_client && _job->pids != NULL) {
-			as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_OK);
-		}
-
 		return;
 	}
 
@@ -1556,14 +1545,11 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	if (job->sample_max == 0 || job->sample_count < job->sample_max) {
 		int64_t bval = 0;
 		cf_digest* keyd = NULL;
+		as_query_pid* qp = &_job->pids[rsv->p->id];
 
-		if (_job->pids != NULL) {
-			as_query_pid* qp = &_job->pids[rsv->p->id];
-
-			if (qp->has_resume) {
-				bval = qp->bval;
-				keyd = &qp->keyd;
-			}
+		if (qp->has_resume) {
+			bval = qp->bval;
+			keyd = &qp->keyd;
 		}
 
 		if (_job->si != NULL) {
@@ -1577,10 +1563,6 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 						basic_pi_query_job_reduce_cb, (void*)&slice);
 			}
 		}
-	}
-
-	if (job->old_client && _job->pids != NULL) {
-		as_msg_pid_done_bufbuilder(bb_r, rsv->p->id, AS_OK);
 	}
 
 	if (! _job->is_short) {
@@ -1837,11 +1819,9 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		}
 	}
 
-	bool send_bval = _job->si != NULL && _job->pids != NULL;
-
 	if (job->no_bin_data) {
-		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL, send_bval,
-				bval);
+		as_msg_make_response_bufbuilder(slice->bb_r, &rd, true, NULL,
+				_job->si != NULL, bval);
 	}
 	else {
 		as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
@@ -1855,7 +1835,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		}
 
 		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false, job->bin_ids,
-				send_bval, bval);
+				_job->si != NULL, bval);
 	}
 
 	as_storage_record_close(&rd);
