@@ -91,22 +91,19 @@ as_flat_record_size(const as_storage_rd* rd)
 	for (uint16_t b = 0; b < rd->n_bins; b++) {
 		as_bin* bin = &rd->bins[b];
 
-		uint32_t name_sz = 0;
+		uint32_t name_sz =
+				1 + (uint32_t)strlen(as_bin_get_name_from_id(ns, bin->id));
+
 		uint32_t meta_sz = 0;
 
-		if (! ns->single_bin) {
-			name_sz = 1 +
-					(uint32_t)strlen(as_bin_get_name_from_id(ns, bin->id));
+		if (as_bin_has_meta(bin)) {
+			meta_sz = 1;
 
-			if (as_bin_has_meta(bin)) {
-				meta_sz = 1;
-
-				if (bin->lut != 0) {
-					meta_sz += sizeof(flat_bin_lut);
-				}
-
-				meta_sz += bin_src_id_flat_size(bin);
+			if (bin->lut != 0) {
+				meta_sz += sizeof(flat_bin_lut);
 			}
+
+			meta_sz += bin_src_id_flat_size(bin);
 		}
 
 		write_sz += name_sz + meta_sz + as_bin_particle_flat_size(bin);
@@ -152,7 +149,7 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 	as_flat_opt_meta opt_meta = { { 0 } };
 
 	const uint8_t* flat_bins = as_flat_unpack_record_meta(flat,
-				rr->pickle + rr->pickle_sz, &opt_meta, ns->single_bin);
+				rr->pickle + rr->pickle_sz, &opt_meta);
 
 	if (flat_bins == NULL) {
 		return false;
@@ -175,7 +172,7 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 // Caller has already checked that end is within read buffer.
 const uint8_t*
 as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,
-		as_flat_opt_meta* opt_meta, bool single_bin)
+		as_flat_opt_meta* opt_meta)
 {
 	if (flat->generation == 0) {
 		cf_warning(AS_FLAT, "generation 0");
@@ -241,16 +238,11 @@ as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,
 	}
 
 	if (flat->has_bins == 1) {
-		if (single_bin) {
-			opt_meta->n_bins = 1;
-		}
-		else {
-			opt_meta->n_bins = uintvar_parse(&at, end);
+		opt_meta->n_bins = uintvar_parse(&at, end);
 
-			if (opt_meta->n_bins == 0 || opt_meta->n_bins > RECORD_MAX_BINS) {
-				cf_warning(AS_FLAT, "bad n-bins %u", opt_meta->n_bins);
-				return NULL;
-			}
+		if (opt_meta->n_bins == 0 || opt_meta->n_bins > RECORD_MAX_BINS) {
+			cf_warning(AS_FLAT, "bad n-bins %u", opt_meta->n_bins);
+			return NULL;
 		}
 	}
 
@@ -266,7 +258,7 @@ as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,
 
 // TODO - remove in "six months" - not bothering with EE separation.
 bool
-as_flat_fix_padded_rr(as_remote_record* rr, bool single_bin)
+as_flat_fix_padded_rr(as_remote_record* rr)
 {
 	if (rr->pickle_sz % RBLOCK_SIZE != 0) {
 		return true; // new node sent this - already exact
@@ -277,7 +269,7 @@ as_flat_fix_padded_rr(as_remote_record* rr, bool single_bin)
 		const uint8_t* end = rr->pickle + rr->pickle_sz;
 
 		const uint8_t* exact_end = as_flat_check_packed_bins(flat_bins, end,
-				rr->n_bins, single_bin);
+				rr->n_bins);
 
 		if (exact_end == NULL) {
 			return false;
@@ -317,61 +309,59 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 	for (i = 0; i < n_bins; i++) {
 		as_bin* b = &bins[i];
 
-		if (! ns->single_bin) {
-			if (at >= end) {
-				cf_warning(AS_FLAT, "incomplete flat bin");
+		if (at >= end) {
+			cf_warning(AS_FLAT, "incomplete flat bin");
+			break;
+		}
+
+		size_t name_len = *at++;
+
+		if (name_len >= AS_BIN_NAME_MAX_SZ) {
+			cf_warning(AS_FLAT, "bad flat bin name");
+			break;
+		}
+
+		if (at + name_len > end) {
+			cf_warning(AS_FLAT, "incomplete flat bin");
+			break;
+		}
+
+		if (! as_bin_set_id_from_name_w_len(ns, b, at, name_len)) {
+			cf_warning(AS_FLAT, "flat bin name failed to assign id");
+			break;
+		}
+
+		at += name_len;
+
+		as_bin_clear_meta(b);
+
+		if (at >= end) {
+			cf_warning(AS_FLAT, "incomplete flat bin");
+			break;
+		}
+
+		if ((*at & BIN_HAS_META) != 0) {
+			uint8_t flags = *at++;
+
+			if ((flags & BIN_UNKNOWN_FLAGS) != 0) {
+				cf_warning(AS_FLAT, "unknown bin flags");
 				break;
 			}
 
-			size_t name_len = *at++;
+			unpack_bin_xdr_write(flags, b);
 
-			if (name_len >= AS_BIN_NAME_MAX_SZ) {
-				cf_warning(AS_FLAT, "bad flat bin name");
-				break;
-			}
-
-			if (at + name_len > end) {
-				cf_warning(AS_FLAT, "incomplete flat bin");
-				break;
-			}
-
-			if (! as_bin_set_id_from_name_w_len(ns, b, at, name_len)) {
-				cf_warning(AS_FLAT, "flat bin name failed to assign id");
-				break;
-			}
-
-			at += name_len;
-
-			as_bin_clear_meta(b);
-
-			if (at >= end) {
-				cf_warning(AS_FLAT, "incomplete flat bin");
-				break;
-			}
-
-			if ((*at & BIN_HAS_META) != 0) {
-				uint8_t flags = *at++;
-
-				if ((flags & BIN_UNKNOWN_FLAGS) != 0) {
-					cf_warning(AS_FLAT, "unknown bin flags");
+			if ((flags & BIN_HAS_LUT) != 0) {
+				if (at + sizeof(flat_bin_lut) > end) {
+					cf_warning(AS_FLAT, "incomplete flat bin");
 					break;
 				}
 
-				unpack_bin_xdr_write(flags, b);
+				b->lut = ((flat_bin_lut*)at)->lut;
+				at += sizeof(flat_bin_lut);
+			}
 
-				if ((flags & BIN_HAS_LUT) != 0) {
-					if (at + sizeof(flat_bin_lut) > end) {
-						cf_warning(AS_FLAT, "incomplete flat bin");
-						break;
-					}
-
-					b->lut = ((flat_bin_lut*)at)->lut;
-					at += sizeof(flat_bin_lut);
-				}
-
-				if ((at = unpack_bin_src_id(flags, at, end, b)) == NULL) {
-					break;
-				}
+			if ((at = unpack_bin_src_id(flags, at, end, b)) == NULL) {
+				break;
 			}
 		}
 
@@ -407,7 +397,7 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 
 const uint8_t*
 as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
-		uint32_t n_bins, bool single_bin)
+		uint32_t n_bins)
 {
 	for (uint32_t i = 0; i < n_bins; i++) {
 		if (at >= end) {
@@ -415,26 +405,24 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 			return NULL;
 		}
 
-		if (! single_bin) {
-			uint8_t name_len = *at++;
+		uint8_t name_len = *at++;
 
-			if (name_len >= AS_BIN_NAME_MAX_SZ) {
-				cf_warning(AS_FLAT, "bad flat bin name");
-				return NULL;
+		if (name_len >= AS_BIN_NAME_MAX_SZ) {
+			cf_warning(AS_FLAT, "bad flat bin name");
+			return NULL;
+		}
+
+		at += name_len;
+
+		if ((*at & BIN_HAS_META) != 0) {
+			uint8_t flags = *at++;
+
+			if ((flags & BIN_HAS_LUT) != 0) {
+				at += sizeof(flat_bin_lut);
 			}
 
-			at += name_len;
-
-			if ((*at & BIN_HAS_META) != 0) {
-				uint8_t flags = *at++;
-
-				if ((flags & BIN_HAS_LUT) != 0) {
-					at += sizeof(flat_bin_lut);
-				}
-
-				if ((at = skip_bin_src_id(flags, at, end)) == NULL) {
-					return NULL;
-				}
+			if ((at = skip_bin_src_id(flags, at, end)) == NULL) {
+				return NULL;
 			}
 		}
 
@@ -487,7 +475,7 @@ flat_record_overhead_size(const as_storage_rd* rd)
 		size += uintvar_size(rd->key_size) + rd->key_size;
 	}
 
-	if (! rd->ns->single_bin && rd->n_bins != 0) {
+	if (rd->n_bins != 0) {
 		size += uintvar_size(rd->n_bins);
 	}
 
@@ -498,7 +486,6 @@ uint8_t*
 flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 		const as_flat_comp_meta* cm, as_flat_record* flat)
 {
-	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
 
 	flat->magic = dirty ? AS_FLAT_MAGIC_DIRTY : AS_FLAT_MAGIC;
@@ -559,10 +546,7 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 	}
 
 	if (rd->n_bins != 0) {
-		if (! ns->single_bin) {
-			at = uintvar_pack(at, rd->n_bins);
-		}
-
+		at = uintvar_pack(at, rd->n_bins);
 		flat->has_bins = 1;
 	}
 	else {
@@ -582,29 +566,27 @@ flatten_bins(const as_storage_rd* rd, uint8_t* buf, uint32_t* sz)
 	for (uint16_t b = 0; b < rd->n_bins; b++) {
 		as_bin* bin = &rd->bins[b];
 
-		if (! ns->single_bin) {
-			const char* bin_name = as_bin_get_name_from_id(ns, bin->id);
-			size_t name_len = strlen(bin_name);
+		const char* bin_name = as_bin_get_name_from_id(ns, bin->id);
+		size_t name_len = strlen(bin_name);
 
-			*buf++ = (uint8_t)name_len;
-			memcpy(buf, bin_name, name_len);
-			buf += name_len;
+		*buf++ = (uint8_t)name_len;
+		memcpy(buf, bin_name, name_len);
+		buf += name_len;
 
-			if (as_bin_has_meta(bin)) {
-				uint8_t* flags = buf++;
+		if (as_bin_has_meta(bin)) {
+			uint8_t* flags = buf++;
 
-				*flags = BIN_HAS_META;
+			*flags = BIN_HAS_META;
 
-				flatten_bin_xdr_write(bin, flags);
+			flatten_bin_xdr_write(bin, flags);
 
-				if (bin->lut != 0) {
-					*flags |= BIN_HAS_LUT;
-					((flat_bin_lut*)buf)->lut = bin->lut;
-					buf += sizeof(flat_bin_lut);
-				}
-
-				buf += flatten_bin_src_id(bin, flags, buf);
+			if (bin->lut != 0) {
+				*flags |= BIN_HAS_LUT;
+				((flat_bin_lut*)buf)->lut = bin->lut;
+				buf += sizeof(flat_bin_lut);
 			}
+
+			buf += flatten_bin_src_id(bin, flags, buf);
 		}
 
 		buf += as_bin_particle_to_flat(bin, buf);

@@ -44,13 +44,12 @@
 // Inlines & macros.
 //
 
+// FIXME - now that single-bin is gone, do we still need this?
 static inline void
 as_bin_init_nameless(as_bin* b)
 {
 	as_bin_set_empty(b);
 	b->particle = NULL;
-	// Don't touch b->unused - like b->id, it's past the end of its enclosing
-	// as_index if single-bin, data-in-memory.
 }
 
 static inline as_bin_space*
@@ -72,23 +71,9 @@ safe_n_bins(const as_record* r)
 // Public API.
 //
 
-// Can't inline - compiler warns of as_bin members we don't want to initialize.
-void
-as_bin_copy(const as_namespace* ns, as_bin* to, const as_bin* from)
-{
-	if (ns->single_bin) {
-		as_single_bin_copy(to, from);
-	}
-	else {
-		*to = *from;
-	}
-}
-
 bool
 as_bin_get_id(const as_namespace* ns, const char* name, uint16_t* id)
 {
-	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
-
 	uint32_t idx;
 
 	if (cf_vmapx_get_index(ns->p_bin_name_vmap, name, &idx) == CF_VMAPX_OK) {
@@ -103,8 +88,6 @@ bool
 as_bin_get_id_w_len(const as_namespace* ns, const char* name, size_t len,
 		uint16_t* id)
 {
-	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
-
 	uint32_t idx;
 
 	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, name, len, &idx) ==
@@ -120,11 +103,6 @@ bool
 as_bin_get_or_assign_id_w_len(as_namespace* ns, const char* name, size_t len,
 		uint16_t* id)
 {
-	// May later replace with assert if we never call with single-bin.
-	if (ns->single_bin) {
-		return true;
-	}
-
 	uint32_t idx;
 
 	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, name, len, &idx) ==
@@ -158,8 +136,6 @@ as_bin_get_or_assign_id_w_len(as_namespace* ns, const char* name, size_t len,
 const char*
 as_bin_get_name_from_id(const as_namespace* ns, uint16_t id)
 {
-	cf_assert(! ns->single_bin, AS_BIN, "unexpected single-bin call");
-
 	const char* name = NULL;
 
 	if (cf_vmapx_get_by_index(ns->p_bin_name_vmap, id, (void**)&name) !=
@@ -181,34 +157,28 @@ as_storage_rd_load_bins(as_storage_rd* rd, as_bin* stack_bins)
 	if (ns->storage_data_in_memory) {
 		as_record* r = rd->r;
 
-		if (ns->single_bin) {
-			rd->bins = as_index_get_single_bin(r);
-			rd->n_bins = as_bin_is_used(rd->bins) ? 1 : 0;
+		rd->bins = stack_bins;
+		rd->n_bins = safe_n_bins(r);
+
+		if (rd->n_bins == 0) {
+			return 0;
+		}
+
+		as_bin_space* bin_space = as_index_get_bin_space(r);
+
+		if (r->has_bin_meta == 0) {
+			as_bin_no_meta* stored_bins = (as_bin_no_meta*)bin_space->bins;
+
+			for (uint16_t i = 0; i < rd->n_bins; i++) {
+				as_bin* b = &rd->bins[i];
+
+				*(as_bin_no_meta*)b = stored_bins[i];
+				as_bin_clear_meta(b);
+			}
 		}
 		else {
-			rd->bins = stack_bins;
-			rd->n_bins = safe_n_bins(r);
-
-			if (rd->n_bins == 0) {
-				return 0;
-			}
-
-			as_bin_space* bin_space = as_index_get_bin_space(r);
-
-			if (r->has_bin_meta == 0) {
-				as_bin_no_meta* stored_bins = (as_bin_no_meta*)bin_space->bins;
-
-				for (uint16_t i = 0; i < rd->n_bins; i++) {
-					as_bin* b = &rd->bins[i];
-
-					*(as_bin_no_meta*)b = stored_bins[i];
-					as_bin_clear_meta(b);
-				}
-			}
-			else {
-				memcpy((void*)rd->bins, (const void*)bin_space->bins,
-						rd->n_bins * sizeof(as_bin));
-			}
+			memcpy((void*)rd->bins, (const void*)bin_space->bins,
+					rd->n_bins * sizeof(as_bin));
 		}
 
 		return 0;
@@ -298,10 +268,6 @@ as_bin_get(as_storage_rd* rd, const char* name)
 as_bin*
 as_bin_get_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
 {
-	if (rd->ns->single_bin) {
-		return rd->n_bins == 0 ? NULL : rd->bins;
-	}
-
 	uint32_t id;
 
 	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char*)name,
@@ -329,10 +295,6 @@ as_bin_get_live(as_storage_rd* rd, const char* name)
 as_bin*
 as_bin_get_live_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
 {
-	if (rd->ns->single_bin) {
-		return rd->n_bins == 0 ? NULL : rd->bins;
-	}
-
 	uint32_t id;
 
 	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char*)name,
@@ -365,16 +327,6 @@ as_bin_get_or_create_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 		int* result)
 {
 	as_namespace* ns = rd->ns;
-
-	if (ns->single_bin) {
-		if (rd->n_bins == 0) {
-			as_bin_init_nameless(rd->bins);
-			rd->n_bins = 1;
-		}
-
-		return rd->bins;
-	}
-
 	uint32_t id;
 
 	if (cf_vmapx_get_index_w_len(ns->p_bin_name_vmap, (const char*)name, len,
@@ -426,23 +378,6 @@ bool
 as_bin_pop_w_len(as_storage_rd* rd, const uint8_t* name, size_t len,
 		as_bin* bin)
 {
-	if (rd->ns->single_bin) {
-		if (rd->n_bins == 0) {
-			return false;
-		}
-
-		as_single_bin_copy(bin, rd->bins);
-		as_bin_remove(rd, 0);
-
-		// Note - for single-bin DIM as_storage_rd_load_bins() derives
-		// rd->n_bins from bin (used) state - must clear deleted bin.
-		if (rd->ns->storage_data_in_memory) {
-			as_bin_set_empty(rd->bins);
-		}
-
-		return true;
-	}
-
 	uint32_t id;
 
 	if (cf_vmapx_get_index_w_len(rd->ns->p_bin_name_vmap, (const char*)name,

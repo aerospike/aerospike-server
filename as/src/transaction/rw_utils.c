@@ -230,7 +230,7 @@ read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
 {
 	as_namespace* ns = rd->ns;
 
-	as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
+	as_bin stack_bins[RECORD_MAX_BINS];
 
 	int result = as_storage_rd_load_bins(rd, stack_bins);
 
@@ -270,12 +270,6 @@ get_msg_key(as_transaction* tr, as_storage_rd* rd)
 {
 	if (! as_transaction_has_key(tr)) {
 		return true;
-	}
-
-	if (rd->ns->single_bin && rd->ns->storage_data_in_memory) {
-		cf_warning(AS_RW, "{%s} can't store key if data-in-memory & single-bin",
-				tr->rsv.ns->name);
-		return false;
 	}
 
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_KEY);
@@ -610,41 +604,6 @@ remove_from_sindex_bins(as_namespace* ns, as_index_ref* r_ref, as_bin* bins,
 	as_index_clear_in_sindex(r);
 
 	as_sindex_release_arr(si_arr, si_arr_index);
-}
-
-
-void
-write_dim_single_bin_unwind(as_bin* old_bin, uint32_t n_old_bins,
-		as_bin* new_bin, uint32_t n_new_bins, as_bin* cleanup_bins,
-		uint32_t n_cleanup_bins)
-{
-	if (n_new_bins == 1 && as_bin_is_live(new_bin) &&
-			! as_bin_is_embedded_particle(new_bin)) {
-		if (n_old_bins == 1) {
-			if (new_bin->particle != as_bin_get_particle(old_bin)) {
-				as_bin_particle_destroy(new_bin);
-			}
-		}
-		else {
-			as_bin_particle_destroy(new_bin);
-		}
-	}
-
-	for (uint32_t i_cleanup = 0; i_cleanup < n_cleanup_bins; i_cleanup++) {
-		as_bin* b_cleanup = &cleanup_bins[i_cleanup];
-		as_particle* p_cleanup = b_cleanup->particle;
-
-		if (n_old_bins == 1) {
-			if (p_cleanup != as_bin_get_particle(old_bin)) {
-				as_bin_particle_destroy(b_cleanup);
-			}
-		}
-		else {
-			as_bin_particle_destroy(b_cleanup);
-		}
-	}
-
-	// The index element's embedded bin is still old_bins.
 }
 
 

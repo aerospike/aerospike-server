@@ -55,9 +55,6 @@ run_ssd_cool_start(void* udata)
 void
 ssd_header_init_cfg(const as_namespace* ns, drv_ssd* ssd, drv_header* header)
 {
-	if (ns->single_bin) {
-		header->generic.prefix.flags |= DRV_HEADER_FLAG_SINGLE_BIN;
-	}
 }
 
 void
@@ -65,14 +62,7 @@ ssd_header_validate_cfg(const as_namespace* ns, drv_ssd* ssd,
 		drv_header* header)
 {
 	if ((header->generic.prefix.flags & DRV_HEADER_FLAG_SINGLE_BIN) != 0) {
-		if (! ns->single_bin) {
-			cf_crash(AS_DRV_SSD, "device has 'single-bin' data but 'single-bin' is not configured");
-		}
-	}
-	else {
-		if (ns->single_bin) {
-			cf_crash(AS_DRV_SSD, "device has multi-bin data but 'single-bin' is configured");
-		}
+		cf_crash(AS_DRV_SSD, "device has 'single-bin' data but 'single-bin' is no longer supported");
 	}
 }
 

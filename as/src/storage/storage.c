@@ -839,12 +839,6 @@ as_storage_record_mem_size(const as_namespace *ns, const as_record *r)
 		return 0;
 	}
 
-	if (ns->single_bin) {
-		as_bin *b = as_index_get_single_bin(r);
-
-		return as_bin_is_used(b) ? as_bin_particle_size(b) : 0;
-	}
-
 	uint64_t sz = 0;
 
 	if (r->key_stored == 1) {
@@ -961,7 +955,7 @@ as_storage_rd_load_pickle(as_storage_rd *rd)
 		as_storage_record_get_set_name(rd);
 		as_storage_rd_load_key(rd);
 
-		as_bin stack_bins[rd->ns->single_bin ? 0 : RECORD_MAX_BINS];
+		as_bin stack_bins[RECORD_MAX_BINS];
 
 		as_storage_rd_load_bins(rd, stack_bins);
 		as_flat_pickle_record(rd);

@@ -286,8 +286,7 @@ udf_aerospike_rec_remove(const as_aerospike* as, const as_rec* rec)
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
 		as_bin* b = &rd->bins[i];
 
-		const char* name = ns->single_bin ?
-				"" : as_bin_get_name_from_id(ns, b->id);
+		const char* name = as_bin_get_name_from_id(ns, b->id);
 
 		udf_record_cache_set(urecord, name, NULL, true);
 	}
@@ -424,18 +423,8 @@ prepare_for_write(udf_record* urecord)
 		return;
 	}
 
-	if (ns->single_bin) {
-		if (ns->storage_data_in_memory) {
-			// Note - single-bin load doesn't copy to stack bins.
-			as_single_bin_copy(urecord->stack_bins, rd->bins);
-		}
-
-		as_single_bin_copy(urecord->old_bins, rd->bins);
-	}
-	else {
-		memcpy(urecord->old_bins, rd->bins, rd->n_bins * sizeof(as_bin));
-		prepare_bin_metadata(urecord->tr, rd);
-	}
+	memcpy(urecord->old_bins, rd->bins, rd->n_bins * sizeof(as_bin));
+	prepare_bin_metadata(urecord->tr, rd);
 }
 
 static void
@@ -448,25 +437,13 @@ execute_failed(udf_record* urecord, int result_code)
 	as_namespace* ns = rd->ns;
 
 	if (ns->storage_data_in_memory) {
-		if (ns->single_bin) {
-			write_dim_single_bin_unwind(urecord->old_bins, urecord->n_old_bins,
-					rd->bins, rd->n_bins, urecord->cleanup_bins,
-					urecord->n_cleanup_bins);
-		}
-		else {
-			write_dim_unwind(urecord->old_bins, urecord->n_old_bins, rd->bins,
-					rd->n_bins, urecord->cleanup_bins, urecord->n_cleanup_bins);
-		}
+		write_dim_unwind(urecord->old_bins, urecord->n_old_bins, rd->bins,
+				rd->n_bins, urecord->cleanup_bins, urecord->n_cleanup_bins);
 	}
 
 	if (urecord->n_old_bins != 0) {
-		if (ns->single_bin) {
-			as_single_bin_copy(rd->bins, urecord->old_bins);
-		}
-		else {
-			memcpy(rd->bins, urecord->old_bins,
-					urecord->n_old_bins * sizeof(as_bin));
-		}
+		memcpy(rd->bins, urecord->old_bins,
+				urecord->n_old_bins * sizeof(as_bin));
 	}
 
 	rd->n_bins = (uint16_t)urecord->n_old_bins;
@@ -518,8 +495,7 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 	}
 
 	if (ns->storage_data_in_memory) {
-		as_bin cleanup_bin;
-		as_bin_copy(ns, &cleanup_bin, b);
+		as_bin cleanup_bin = *b;
 
 		if ((rv = as_bin_particle_alloc_from_asval(b, val)) != 0) {
 			cf_warning(AS_UDF, "can't convert as_val to particle in %s", name);

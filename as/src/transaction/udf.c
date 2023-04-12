@@ -1127,16 +1127,9 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	as_record_finalize_key(r, ns, rd->key, rd->key_size);
 
 	if (ns->storage_data_in_memory) {
-		if (ns->single_bin) {
-			as_bin_destroy_all(urecord->cleanup_bins, urecord->n_cleanup_bins);
-			as_single_bin_copy(as_index_get_single_bin(r), rd->bins);
-		}
-		else {
-			udf_update_sindex(urecord);
-			as_bin_destroy_all(urecord->cleanup_bins, urecord->n_cleanup_bins);
-			as_storage_rd_update_bin_space(rd);
-		}
-
+		udf_update_sindex(urecord);
+		as_bin_destroy_all(urecord->cleanup_bins, urecord->n_cleanup_bins);
+		as_storage_rd_update_bin_space(rd);
 		as_storage_record_adjust_mem_stats(rd, urecord->old_memory_bytes);
 	}
 	else {
@@ -1197,16 +1190,9 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 			as_storage_rd* rd = urecord->rd;
 
 			if (urecord->has_updates && ns->storage_data_in_memory) {
-				if (ns->single_bin) {
-					write_dim_single_bin_unwind(urecord->old_bins,
-							urecord->n_old_bins, rd->bins, rd->n_bins,
-							urecord->cleanup_bins, urecord->n_cleanup_bins);
-				}
-				else {
-					write_dim_unwind(urecord->old_bins, urecord->n_old_bins,
-							rd->bins, rd->n_bins, urecord->cleanup_bins,
-							urecord->n_cleanup_bins);
-				}
+				write_dim_unwind(urecord->old_bins, urecord->n_old_bins,
+						rd->bins, rd->n_bins, urecord->cleanup_bins,
+						urecord->n_cleanup_bins);
 			}
 
 			if ((urecord->result_code != AS_OK || urecord->has_updates) &&

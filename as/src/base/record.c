@@ -55,9 +55,7 @@
 
 static void record_replace_failed(as_remote_record *rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
 
-static int record_apply_dim_single_bin(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
 static int record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
-static int record_apply_ssd_single_bin(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
 static int record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
 
 
@@ -166,20 +164,15 @@ as_record_destroy(as_record *r, as_namespace *ns)
 		rd.r = r;
 		rd.ns = ns;
 
-		as_bin stack_bins[ns->single_bin ? 0 : RECORD_MAX_BINS];
+		as_bin stack_bins[RECORD_MAX_BINS];
 
 		as_storage_rd_load_bins(&rd, stack_bins);
-
 		as_storage_record_drop_from_mem_stats(&rd);
-
 		as_bin_destroy_all(rd.bins, rd.n_bins);
+		as_record_free_bin_space(r);
 
-		if (! ns->single_bin) {
-			as_record_free_bin_space(r);
-
-			if (r->dim) {
-				cf_free(r->dim); // frees the key
-			}
+		if (r->dim) {
+			cf_free(r->dim); // frees the key
 		}
 	}
 
@@ -189,7 +182,7 @@ as_record_destroy(as_record *r, as_namespace *ns)
 	as_storage_destroy_record(ns, r);
 }
 
-// Called only if data-in-memory, and not single-bin.
+// Called only if data-in-memory.
 void
 as_record_free_bin_space(as_record *r)
 {
@@ -336,7 +329,7 @@ as_record_replace_if_better(as_remote_record *rr)
 	if (rr->via != VIA_REPLICATION &&
 			ns->storage_type == AS_STORAGE_ENGINE_SSD &&
 			as_exchange_min_compatibility_id() < 11) {
-		if (! as_flat_fix_padded_rr(rr, ns->single_bin)) {
+		if (! as_flat_fix_padded_rr(rr)) {
 			record_replace_failed(rr, &r_ref, NULL, is_create);
 			return AS_OK;
 		}
@@ -370,20 +363,10 @@ as_record_replace_if_better(as_remote_record *rr)
 	// else - dup-res goes in SWB_MASTER.
 
 	if (ns->storage_data_in_memory) {
-		if (ns->single_bin) {
-			result = record_apply_dim_single_bin(rr, &r_ref, &rd);
-		}
-		else {
-			result = record_apply_dim(rr, &r_ref, &rd);
-		}
+		result = record_apply_dim(rr, &r_ref, &rd);
 	}
 	else {
-		if (ns->single_bin) {
-			result = record_apply_ssd_single_bin(rr, &r_ref, &rd);
-		}
-		else {
-			result = record_apply_ssd(rr, &r_ref, &rd);
-		}
+		result = record_apply_ssd(rr, &r_ref, &rd);
 	}
 
 	if (result != 0) {
@@ -471,68 +454,6 @@ record_replace_failed(as_remote_record *rr, as_index_ref* r_ref,
 }
 
 static int
-record_apply_dim_single_bin(as_remote_record *rr, as_index_ref *r_ref,
-		as_storage_rd *rd)
-{
-	as_namespace* ns = rr->rsv->ns;
-	as_record* r = rd->r;
-
-	as_storage_rd_load_bins(rd, NULL);
-
-	// For memory accounting, note current usage.
-	uint32_t memory_bytes = as_storage_record_mem_size(ns, r);
-
-	int result;
-
-	uint16_t n_new_bins = rr->n_bins;
-	as_bin new_bin;
-
-	// Fill the new bins and particles.
-	if (n_new_bins == 1 &&
-			(result = as_flat_unpack_remote_bins(rr, &new_bin)) != 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bin %pD", ns->name, rr->keyd);
-		return -result;
-	}
-
-	// Apply changes to metadata in as_index needed for and writing.
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	replace_index_metadata(rr, r);
-
-	// Write the record to storage. Note - here the pickle is directly stored -
-	// we will not use rd->bins and rd->n_bins at all to write.
-	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
-		unwind_index_metadata(&old_metadata, r);
-		as_bin_destroy_all(&new_bin, n_new_bins);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
-			&old_metadata);
-
-	// Cleanup - destroy original bin, can't unwind after.
-	as_bin_destroy_all(rd->bins, rd->n_bins);
-
-	// Move the new bin into the index.
-	if (n_new_bins == 1) {
-		as_single_bin_copy(rd->bins, &new_bin);
-	}
-	else {
-		as_bin_set_empty(rd->bins);
-	}
-
-	rd->n_bins = n_new_bins;
-	rd->bins = &new_bin;
-
-	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-
-	return AS_OK;
-}
-
-static int
 record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd)
 {
 	as_namespace* ns = rd->ns;
@@ -597,39 +518,6 @@ record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd)
 	as_record_finalize_key(r, ns, rr->key, rr->key_size);
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-
-	return AS_OK;
-}
-
-static int
-record_apply_ssd_single_bin(as_remote_record *rr, as_index_ref *r_ref,
-		as_storage_rd *rd)
-{
-	as_namespace* ns = rd->ns;
-	as_record* r = rd->r;
-
-	// Apply changes to metadata in as_index needed for and writing.
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	replace_index_metadata(rr, r);
-
-	// Write the record to storage. Note - here the pickle is directly stored -
-	// we will not use rd->bins and rd->n_bins at all to write.
-	int result = as_storage_record_write(rd);
-
-	if (result < 0) {
-		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
-		unwind_index_metadata(&old_metadata, r);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, rr->n_bins,
-			&old_metadata);
-
-	// Now ok to store or drop key, as determined by message.
-	as_record_finalize_key(r, ns, rr->key, rr->key_size);
 
 	return AS_OK;
 }

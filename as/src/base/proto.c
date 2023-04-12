@@ -192,8 +192,7 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 			msg_sz += ops[i]->name_sz;
 		}
 		else if (bins[i]) {
-			msg_sz += ns->single_bin ?
-					0 : strlen(as_bin_get_name_from_id(ns, bins[i]->id));
+			msg_sz += strlen(as_bin_get_name_from_id(ns, bins[i]->id));
 		}
 		else {
 			cf_crash(AS_PROTO, "making response message with null bin and op");
@@ -363,8 +362,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 				}
 
 				msg_sz += sizeof(as_msg_op);
-				msg_sz += ns->single_bin ?
-						0 : strlen(as_bin_get_name_from_id(ns, b->id));
+				msg_sz += strlen(as_bin_get_name_from_id(ns, b->id));
 				msg_sz += as_bin_particle_client_value_size(b);
 
 				n_bins_returned++;

@@ -709,12 +709,6 @@ smd_item_to_def(const char* smd_key, const char* smd_value, as_sindex_def* def)
 		return false;
 	}
 
-	if (def->ns->single_bin) {
-		cf_warning(AS_SINDEX, "skipping secondary index on single-bin namespace %s",
-				def->ns->name);
-		return false;
-	}
-
 	read = tok + 1;
 	tok = strchr(read, TOK_CHAR_DELIMITER);
 

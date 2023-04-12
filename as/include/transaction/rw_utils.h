@@ -137,7 +137,6 @@ void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void remove_from_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
 void remove_from_sindex_bins(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* bins, uint32_t n_bins);
-void write_dim_single_bin_unwind(struct as_bin_s* old_bin, uint32_t n_old_bins, struct as_bin_s* new_bin, uint32_t n_new_bins, struct as_bin_s* cleanup_bins, uint32_t n_cleanup_bins);
 void write_dim_unwind(struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins, struct as_bin_s* cleanup_bins, uint32_t n_cleanup_bins);
 
 

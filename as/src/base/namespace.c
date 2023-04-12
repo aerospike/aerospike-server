@@ -568,21 +568,16 @@ as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns)
 		cf_dyn_buf_append_char(db, ':');
 	}
 
-	if (ns->single_bin) {
-		cf_dyn_buf_append_string(db, "[single-bin]");
-	}
-	else {
-		uint32_t bin_count = cf_vmapx_count(ns->p_bin_name_vmap);
+	uint32_t bin_count = cf_vmapx_count(ns->p_bin_name_vmap);
 
-		cf_dyn_buf_append_string(db, "bin_names=");
-		cf_dyn_buf_append_uint32(db, bin_count);
-		cf_dyn_buf_append_string(db, ",bin_names_quota=");
-		cf_dyn_buf_append_uint32(db, MAX_BIN_NAMES);
+	cf_dyn_buf_append_string(db, "bin_names=");
+	cf_dyn_buf_append_uint32(db, bin_count);
+	cf_dyn_buf_append_string(db, ",bin_names_quota=");
+	cf_dyn_buf_append_uint32(db, MAX_BIN_NAMES);
 
-		for (uint16_t i = 0; i < (uint16_t)bin_count; i++) {
-			cf_dyn_buf_append_char(db, ',');
-			cf_dyn_buf_append_string(db, as_bin_get_name_from_id(ns, i));
-		}
+	for (uint16_t i = 0; i < (uint16_t)bin_count; i++) {
+		cf_dyn_buf_append_char(db, ',');
+		cf_dyn_buf_append_string(db, as_bin_get_name_from_id(ns, i));
 	}
 
 	if (show_ns) {

@@ -84,11 +84,6 @@ cf_vmapx_init(cf_vmapx* vmap, uint32_t value_size, uint32_t max_count,
 void
 cf_vmapx_release(cf_vmapx* vmap)
 {
-	// Helps in handling bins vmap, which doesn't exist in single-bin mode.
-	if (vmap == NULL) {
-		return;
-	}
-
 	cf_mutex_destroy(&vmap->write_lock);
 
 	vhash_destroy(vmap->hash);

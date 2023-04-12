@@ -1193,7 +1193,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 			size += ops[i]->name_sz;
 		}
 		else if (bin) {
-			size += ns->single_bin ? 0 : strlen(as_bin_get_name_from_id(ns, bin->id));
+			size += strlen(as_bin_get_name_from_id(ns, bin->id));
 		}
 		else {
 			cf_crash(AS_BATCH, "making response message with null bin and op");

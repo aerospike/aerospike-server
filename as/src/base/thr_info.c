@@ -4199,9 +4199,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "xmem_id", ns->xmem_id);
 
 	// Remaining bin-name slots.
-	if (! ns->single_bin) {
-		info_append_uint32(db, "available_bin_names", MAX_BIN_NAMES - cf_vmapx_count(ns->p_bin_name_vmap));
-	}
+	info_append_uint32(db, "available_bin_names", MAX_BIN_NAMES - cf_vmapx_count(ns->p_bin_name_vmap));
 
 	// Persistent index stats.
 
@@ -5192,7 +5190,6 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 	db_append_uint32(db, "repl-state", r->repl_state);
 	db_append_uint32(db, "tombstone", r->tombstone);
 	db_append_uint32(db, "cenotaph", r->cenotaph);
-	db_append_uint32(db, "single-bin-state", r->single_bin_state);
 
 	info_append_uint64_x(db, "dim", (uint64_t)r->dim);
 	// End of index.
@@ -5268,7 +5265,7 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 		// End of key.
 	}
 
-	as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
+	as_bin stack_bins[RECORD_MAX_BINS];
 
 	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 		as_record_done(&r_ref, ns);
@@ -5288,14 +5285,12 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 	for (uint16_t i = 0; i < rd.n_bins; i++) {
 		as_bin* b = &rd.bins[i];
 
-		if (! ns->single_bin) {
-			db_append_uint32(db, "bin-id", b->id);
-			db_append_string_safe(db, "bin-name",
-					as_bin_get_name_from_id(ns, b->id));
-			db_append_uint32(db, "xdr-write", b->xdr_write);
-			db_append_uint64(db, "lut", b->lut);
-			db_append_uint32(db, "src-id", b->src_id);
-		}
+		db_append_uint32(db, "bin-id", b->id);
+		db_append_string_safe(db, "bin-name",
+				as_bin_get_name_from_id(ns, b->id));
+		db_append_uint32(db, "xdr-write", b->xdr_write);
+		db_append_uint64(db, "lut", b->lut);
+		db_append_uint32(db, "src-id", b->src_id);
 
 		db_append_uint32(db, "state", b->state);
 

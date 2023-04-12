@@ -98,13 +98,8 @@ int write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		bool* p_record_level_replace, bool* p_must_fetch_data);
 bool check_msg_set_name(as_transaction* tr, const char* set_name);
 
-int write_master_dim_single_bin(as_transaction* tr, as_index_ref* r_ref,
-		as_storage_rd* rd, rw_request* rw, bool* is_delete);
 int write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		bool record_level_replace, rw_request* rw, bool* is_delete);
-int write_master_ssd_single_bin(as_transaction* tr, as_index_ref* r_ref,
-		as_storage_rd* rd, bool must_fetch_data, rw_request* rw,
-		bool* is_delete);
 int write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		bool must_fetch_data, bool record_level_replace, rw_request* rw,
 		bool* is_delete);
@@ -848,27 +843,14 @@ write_master(rw_request* rw, as_transaction* tr)
 	bool is_delete = false;
 
 	if (ns->storage_data_in_memory) {
-		if (ns->single_bin) {
-			result = write_master_dim_single_bin(tr, &r_ref, &rd,
-					rw, &is_delete);
-		}
-		else {
-			result = write_master_dim(tr, &r_ref, &rd,
-					record_level_replace,
-					rw, &is_delete);
-		}
+		result = write_master_dim(tr, &r_ref, &rd,
+				record_level_replace,
+				rw, &is_delete);
 	}
 	else {
-		if (ns->single_bin) {
-			result = write_master_ssd_single_bin(tr, &r_ref, &rd,
-					must_fetch_data,
-					rw, &is_delete);
-		}
-		else {
-			result = write_master_ssd(tr, &r_ref, &rd,
-					must_fetch_data, record_level_replace,
-					rw, &is_delete);
-		}
+		result = write_master_ssd(tr, &r_ref, &rd,
+				must_fetch_data, record_level_replace,
+				rw, &is_delete);
 	}
 
 	if (result != 0) {
@@ -1030,7 +1012,6 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		return AS_ERR_PARAMETER;
 	}
 
-	bool single_bin_write_first = false;
 	bool has_read_op = false;
 	bool has_read_all_op = false;
 	bool generates_response_bin = false;
@@ -1050,30 +1031,6 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			continue;
 		}
 
-		if (ns->data_in_index && ! OP_IS_READ(op->op)) {
-			uint32_t particle_type = op->particle_type;
-
-			if (op->op == AS_MSG_OP_EXP_MODIFY) {
-				as_exp* exp;
-				uint64_t flags;
-
-				if (! as_exp_op_parse(op, &exp, &flags, true, false)) {
-					return AS_ERR_PARAMETER;
-				}
-
-				particle_type = exp->expected_type;
-				as_exp_destroy(exp);
-			}
-
-			if (! is_embedded_particle_type(particle_type) &&
-					// Allow AS_PARTICLE_TYPE_NULL, although bin-delete
-					// operations are not likely in single-bin configuration.
-					particle_type != AS_PARTICLE_TYPE_NULL) {
-				cf_warning(AS_RW, "{%s} write_master: %u can't write data type %u in data-in-index configuration %pD", ns->name, op->op, particle_type, &tr->keyd);
-				return AS_ERR_INCOMPATIBLE_TYPE;
-			}
-		}
-
 		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
 			cf_warning(AS_RW, "{%s} write_master: bin name too long (%d) %pD", ns->name, op->name_sz, &tr->keyd);
 			return AS_ERR_BIN_NAME;
@@ -1084,12 +1041,6 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 					record_level_replace) {
 				cf_warning(AS_RW, "{%s} write_master: bin delete can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
-			}
-
-			// Note - bin delete will mean record is read from device - not
-			// efficient, but not worth more code to optimize this use case.
-			if (ns->single_bin && i == 0 && op->particle_type != AS_PARTICLE_TYPE_NULL) {
-				single_bin_write_first = true;
 			}
 		}
 		else if (OP_IS_MODIFY(op->op)) {
@@ -1180,16 +1131,11 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		return AS_ERR_PARAMETER;
 	}
 
-	bool must_fetch_data = ! record_level_replace;
-	// Multi-bin case may modify this to force fetch if there's a sindex.
-
-	if (single_bin_write_first && must_fetch_data) {
-		must_fetch_data = false;
-	}
-
 	*p_must_not_create = must_not_create;
 	*p_record_level_replace = record_level_replace;
-	*p_must_fetch_data = must_fetch_data;
+
+	// May modify this later to force fetch if there's a sindex.
+	*p_must_fetch_data = ! record_level_replace;
 
 	return 0;
 }
@@ -1226,128 +1172,11 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 
 
 //==========================================================
-// write_master() splits based on configuration -
-// data-in-memory & single-bin.
+// write_master() splits based on data-in-memory config.
 //
 // These handle the bin operations part of write_master()
 // which are very different per configuration.
 //
-
-int
-write_master_dim_single_bin(as_transaction* tr, as_index_ref* r_ref,
-		as_storage_rd* rd, rw_request* rw, bool* is_delete)
-{
-	// Shortcut pointers.
-	as_msg* m = &tr->msgp->msg;
-	as_namespace* ns = tr->rsv.ns;
-	as_record* r = rd->r;
-
-	as_storage_rd_load_bins(rd, NULL);
-
-	// For memory accounting, note current usage.
-	uint32_t memory_bytes = 0;
-
-	if (rd->n_bins != 0) {
-		memory_bytes = as_storage_record_mem_size(ns, r);
-	}
-
-	//------------------------------------------------------
-	// Copy existing bin into old_bin to enable unwinding.
-	//
-
-	uint32_t n_old_bins = rd->n_bins;
-	as_bin* old_bin = rd->bins;
-
-	as_bin stack_bin;
-
-	as_single_bin_copy(&stack_bin, rd->bins); // may copy empty bin
-
-	rd->bins = &stack_bin;
-
-	// Collect bins (old or intermediate versions) to destroy on cleanup.
-	as_bin cleanup_bins[m->n_ops];
-	uint32_t n_cleanup_bins = 0;
-
-	//------------------------------------------------------
-	// Apply changes to metadata in as_index needed for
-	// response, pickling, and writing.
-	//
-
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	advance_record_version(tr, r);
-	set_xdr_write(tr, r);
-
-	//------------------------------------------------------
-	// Loop over bin ops to affect new bin space, creating
-	// the new record bin to write.
-	//
-
-	int result = write_master_bin_ops(tr, rd, NULL, cleanup_bins,
-			&n_cleanup_bins, &rw->response_db);
-
-	if (result != 0) {
-		unwind_index_metadata(&old_metadata, r);
-		write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-		return result;
-	}
-
-	//------------------------------------------------------
-	// Created the new bin to write.
-	//
-
-	if (rd->n_bins == 0) {
-		if (n_old_bins == 0) {
-			unwind_index_metadata(&old_metadata, r);
-			write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-			return AS_ERR_NOT_FOUND;
-		}
-
-		if ((result = validate_delete_durability(tr)) != AS_OK) {
-			unwind_index_metadata(&old_metadata, r);
-			write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-			return result;
-		}
-
-		*is_delete = true;
-	}
-
-	transition_delete_metadata(tr, r, *is_delete, false);
-
-	//------------------------------------------------------
-	// Write the record to storage.
-	//
-
-	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
-		unwind_index_metadata(&old_metadata, r);
-		write_dim_single_bin_unwind(old_bin, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
-			&old_metadata);
-	pickle_all(rd, rw);
-
-	//------------------------------------------------------
-	// Cleanup - destroy relevant bins, can't unwind after.
-	//
-
-	as_bin_destroy_all(cleanup_bins, n_cleanup_bins);
-
-	//------------------------------------------------------
-	// Final changes to record data in as_index.
-	//
-
-	as_single_bin_copy(as_index_get_single_bin(r), rd->bins);
-
-	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-
-	return 0;
-}
-
 
 int
 write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
@@ -1493,106 +1322,6 @@ write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	}
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-
-	return 0;
-}
-
-
-int
-write_master_ssd_single_bin(as_transaction* tr, as_index_ref* r_ref,
-		as_storage_rd* rd, bool must_fetch_data, rw_request* rw,
-		bool* is_delete)
-{
-	// Shortcut pointers.
-	as_namespace* ns = tr->rsv.ns;
-	as_record* r = rd->r;
-
-	rd->ignore_record_on_device = ! must_fetch_data;
-
-	as_bin stack_bin;
-
-	int result = as_storage_rd_load_bins(rd, &stack_bin);
-
-	if (result < 0) {
-		cf_warning(AS_RW, "{%s} write_master: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
-		return -result;
-	}
-
-	uint32_t n_old_bins = rd->n_bins;
-
-	//------------------------------------------------------
-	// Apply changes to metadata in as_index needed for
-	// response, pickling, and writing.
-	//
-
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	advance_record_version(tr, r);
-	set_xdr_write(tr, r);
-
-	//------------------------------------------------------
-	// Loop over bin ops to affect new bin space, creating
-	// the new record bin to write.
-	//
-
-	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
-
-	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
-			&rw->response_db)) != 0) {
-		cf_ll_buf_free(&particles_llb);
-		unwind_index_metadata(&old_metadata, r);
-		return result;
-	}
-
-	//------------------------------------------------------
-	// Created the new bin to write.
-	//
-
-	if (rd->n_bins == 0) {
-		if (n_old_bins == 0) {
-			cf_ll_buf_free(&particles_llb);
-			unwind_index_metadata(&old_metadata, r);
-			return AS_ERR_NOT_FOUND;
-		}
-
-		if ((result = validate_delete_durability(tr)) != AS_OK) {
-			cf_ll_buf_free(&particles_llb);
-			unwind_index_metadata(&old_metadata, r);
-			return result;
-		}
-
-		*is_delete = true;
-	}
-
-	transition_delete_metadata(tr, r, *is_delete, false);
-
-	//------------------------------------------------------
-	// Write the record to storage.
-	//
-
-	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
-		cf_ll_buf_free(&particles_llb);
-		unwind_index_metadata(&old_metadata, r);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
-			&old_metadata);
-	pickle_all(rd, rw);
-
-	//------------------------------------------------------
-	// Final changes to record data in as_index.
-	//
-
-	// Accommodate a new stored key - wasn't needed for pickling and writing.
-	if (r->key_stored == 0 && rd->key) {
-		r->key_stored = 1;
-	}
-
-	cf_ll_buf_free(&particles_llb);
 
 	return 0;
 }
@@ -1857,7 +1586,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 		if (op->op == AS_MSG_OP_WRITE) {
 			// AS_PARTICLE_TYPE_NULL means delete the bin.
-			// TODO - should this even be allowed for single-bin?
 			if (op->particle_type == AS_PARTICLE_TYPE_NULL) {
 				if (! delete_bin(rd, op, msg_lut, cleanup_bins, p_n_cleanup_bins, &result)) {
 					return result;
@@ -1874,8 +1602,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				write_resolved_bin(rd, op, msg_lut, b);
 
 				if (ns->storage_data_in_memory) {
-					as_bin cleanup_bin;
-					as_bin_copy(ns, &cleanup_bin, b);
+					as_bin cleanup_bin = *b;
 
 					if ((result = as_bin_particle_alloc_from_client(b, op)) < 0) {
 						cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_alloc_from_client() %pD", ns->name, &tr->keyd);
@@ -1906,8 +1633,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 
 			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin;
-				as_bin_copy(ns, &cleanup_bin, b);
+				as_bin cleanup_bin = *b;
 
 				if ((result = as_bin_particle_alloc_modify_from_client(b, op)) < 0) {
 					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
@@ -1931,19 +1657,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		else if (op->op == AS_MSG_OP_DELETE_ALL) {
 			if (ns->storage_data_in_memory) {
 				for (uint16_t i = 0; i < rd->n_bins; i++) {
-					as_bin* b = &rd->bins[i];
-
-					// Double copy necessary for single-bin, but doing it
-					// generally for code simplicity.
-					as_bin cleanup_bin;
-					as_bin_copy(ns, &cleanup_bin, b);
-
-					// Clear deleted bin necessary for single-bin.
-					if (ns->single_bin) {
-						as_bin_set_empty(b);
-					}
-
-					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
+					append_bin_to_destroy(&rd->bins[i], cleanup_bins, p_n_cleanup_bins);
 				}
 			}
 
@@ -1960,7 +1674,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				if (! as_bin_is_tombstone(b)) {
 					// ops array will not be not used in this case.
-					as_bin_copy(ns, &response_bins[(*p_n_response_bins)++], b);
+					response_bins[(*p_n_response_bins)++] = *b;
 				}
 			}
 		}
@@ -1969,7 +1683,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 			if (b) {
 				ops[*p_n_response_bins] = op;
-				as_bin_copy(ns, &response_bins[(*p_n_response_bins)++], b);
+				response_bins[(*p_n_response_bins)++] = *b;
 			}
 			else if (respond_all_ops) {
 				ops[*p_n_response_bins] = op;
@@ -1984,8 +1698,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 
 			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin;
-				as_bin_copy(ns, &cleanup_bin, b);
+				as_bin cleanup_bin = *b;
 
 				if ((result = as_bin_bits_alloc_modify_from_client(b, op)) < 0) {
 					cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
@@ -2048,8 +1761,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			as_bin_set_empty(&result_bin);
 
 			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin;
-				as_bin_copy(ns, &cleanup_bin, b);
+				as_bin cleanup_bin = *b;
 
 				if ((result = as_bin_hll_alloc_modify_from_client(b, op, &result_bin)) < 0) {
 					cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
@@ -2113,8 +1825,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			as_bin_set_empty(&result_bin);
 
 			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin;
-				as_bin_copy(ns, &cleanup_bin, b);
+				as_bin cleanup_bin = *b;
 
 				if ((result = as_bin_cdt_alloc_modify_from_client(b, op, &result_bin)) < 0) {
 					cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
@@ -2180,8 +1891,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					&tr->from.iops_orig->expops[i] : NULL;
 
 			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin;
-				as_bin_copy(ns, &cleanup_bin, b);
+				as_bin cleanup_bin = *b;
 
 				if ((result = as_bin_exp_alloc_modify_from_client(&exp_ctx, b, op, expop)) < 0) {
 					cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_alloc_modify_from_client() %pD", ns->name, &tr->keyd);

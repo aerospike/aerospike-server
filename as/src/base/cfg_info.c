@@ -380,7 +380,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	}
 
 	info_append_bool(db, "conflict-resolve-writes", ns->conflict_resolve_writes);
-	info_append_bool(db, "data-in-index", ns->data_in_index);
 	info_append_uint32(db, "default-ttl", ns->default_ttl);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
@@ -417,7 +416,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_bool(db, "reject-xdr-writes", ns->reject_xdr_writes);
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_uint64(db, "sindex-stage-size", ns->sindex_stage_size);
-	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_uint32(db, "single-query-threads", ns->n_single_query_threads);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
 	info_append_uint32(db, "stop-writes-sys-memory-pct", ns->stop_writes_sys_memory_pct);
@@ -1242,10 +1240,6 @@ cfg_set_namespace(const char* cmd)
 			&v_len) == 0) {
 		if (as_error_enterprise_only()) {
 			cf_warning(AS_INFO, "conflict-resolve-writes is enterprise-only");
-			return false;
-		}
-		if (ns->single_bin) {
-			cf_warning(AS_INFO, "conflict-resolve-writes can't be set for single-bin namespace");
 			return false;
 		}
 		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {

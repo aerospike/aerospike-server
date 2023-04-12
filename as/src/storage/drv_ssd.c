@@ -1279,8 +1279,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	// Includes round rblock padding, so may not literally exclude the mark.
 	rd->flat_end = (const uint8_t*)flat + record_size - END_MARK_SZ;
 
-	rd->flat_bins = as_flat_unpack_record_meta(flat, rd->flat_end, &opt_meta,
-			ns->single_bin);
+	rd->flat_bins = as_flat_unpack_record_meta(flat, rd->flat_end, &opt_meta);
 
 	if (rd->flat_bins == NULL) {
 		cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad record metadata",
@@ -2564,8 +2563,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 	as_flat_opt_meta opt_meta = { { 0 } };
 
-	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta,
-			ns->single_bin);
+	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta);
 
 	if (! p_read) {
 		cf_warning(AS_DRV_SSD, "bad metadata for %pD", &flat->keyd);
@@ -2586,7 +2584,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	}
 
 	const uint8_t* exact_end = as_flat_check_packed_bins(p_read, end,
-			opt_meta.n_bins, ns->single_bin);
+			opt_meta.n_bins);
 
 	if (exact_end == NULL) {
 		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
@@ -2692,7 +2690,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 			as_storage_record_open(ns, r, &rd);
 		}
 
-		as_bin stack_bins[ns->single_bin ? 0 : RECORD_MAX_BINS];
+		as_bin stack_bins[RECORD_MAX_BINS];
 
 		as_storage_rd_load_bins(&rd, stack_bins);
 
@@ -2714,26 +2712,13 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 		// Do this early since set-id is needed for the secondary index update.
 		drv_apply_opt_meta(r, ns, &opt_meta);
 
-		if (ns->single_bin) {
-			as_bin_destroy_all(old_bins, n_old_bins);
-
-			if (rd.n_bins == 1) {
-				as_single_bin_copy(as_index_get_single_bin(r), rd.bins);
-			}
-			else {
-				as_bin_set_empty(as_index_get_single_bin(r));
-			}
+		// Success - adjust sindex, looking at old and new bins.
+		if (set_has_sindex(r, ns)) {
+			update_sindex(ns, &r_ref, old_bins, n_old_bins, rd.bins, rd.n_bins);
 		}
-		else {
-			// Success - adjust sindex, looking at old and new bins.
-			if (set_has_sindex(r, ns)) {
-				update_sindex(ns, &r_ref, old_bins, n_old_bins, rd.bins,
-						rd.n_bins);
-			}
 
-			as_bin_destroy_all(old_bins, n_old_bins);
-			as_storage_rd_update_bin_space(&rd);
-		}
+		as_bin_destroy_all(old_bins, n_old_bins);
+		as_storage_rd_update_bin_space(&rd);
 
 		as_storage_record_adjust_mem_stats(&rd, bytes_memory);
 		as_storage_record_close(&rd);
@@ -3099,8 +3084,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 
 	as_flat_opt_meta opt_meta = { { 0 } };
 
-	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta,
-			ns->single_bin);
+	const uint8_t* p_read = as_flat_unpack_record_meta(flat, end, &opt_meta);
 
 	if (! p_read) {
 		cf_warning(AS_DRV_SSD, "bad metadata for %pD", &flat->keyd);
@@ -3114,8 +3098,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	}
 
 	if (! ns->cold_start &&
-			as_flat_check_packed_bins(p_read, end, opt_meta.n_bins,
-					ns->single_bin) == NULL) {
+			as_flat_check_packed_bins(p_read, end, opt_meta.n_bins) == NULL) {
 		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
 		return;
 	}
@@ -3866,7 +3849,7 @@ as_storage_load_ssd(as_namespace *ns, cf_queue *complete_q)
 
 	// If devices have data, and it's cold start or cool restart, scan devices.
 	if (! ssds->all_fresh &&
-			(ns->cold_start || as_namespace_cool_restarts(ns))) {
+			(ns->cold_start || ns->storage_data_in_memory)) {
 		// Fire off threads to scan devices to build index and/or load record
 		// data into memory - will signal completion when threads are all done.
 		start_loading_records(ssds, complete_q);

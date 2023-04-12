@@ -616,10 +616,6 @@ udf_record_numbins(const as_rec* rec)
 	uint16_t n_bins = urecord->rd->n_bins;
 	// Note - for now, we think we can't see unused bins (within n_bins) here.
 
-	if (urecord->rd->ns->single_bin) {
-		return n_bins;
-	}
-
 	uint16_t n_live_bins = 0;
 
 	for (uint16_t i = 0; i < n_bins; i++) {
@@ -660,13 +656,6 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 	uint16_t n_bins = urecord->rd->n_bins;
 	// Note - for now, we think we can't see unused bins (within n_bins) here.
 
-	if (ns->single_bin) {
-		char empty[] = "";
-
-		cb(empty, n_bins, AS_BIN_NAME_MAX_SZ, udata);
-		return 0;
-	}
-
 	char bin_names[n_bins * AS_BIN_NAME_MAX_SZ];
 	uint16_t n_live_bins = 0;
 
@@ -698,21 +687,11 @@ param_check_w_bin(const as_rec* rec, const char* name)
 
 	cf_assert(name != NULL, AS_UDF, "null bin name");
 
-	udf_record* urecord = (udf_record*)as_rec_source(rec);
-
-	if (urecord->tr->rsv.ns->single_bin) {
-		if (*name != 0) {
-			cf_warning(AS_UDF, "non-empty bin name in single-bin namespace");
-			return false;
-		}
-
-		return true;
-	}
-
-	if (*name == 0) {
-		cf_warning(AS_UDF, "empty bin name");
-		return false;
-	}
+	// FIXME - is an empty bin name ok now that single-bin is gone?
+//	if (*name == 0) {
+//		cf_warning(AS_UDF, "empty bin name");
+//		return false;
+//	}
 
 	if (strlen(name) >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_UDF, "bin name %s too big", name);

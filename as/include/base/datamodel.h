@@ -147,7 +147,7 @@ typedef struct as_particle_s {
 } __attribute__ ((__packed__)) as_particle;
 
 // Constants used for the as_bin state value (4 bits, 16 values).
-#define AS_BIN_STATE_UNUSED			0 // must be 0 for single-bin initialization
+#define AS_BIN_STATE_UNUSED			0
 #define AS_BIN_STATE_INUSE_INTEGER	1
 #define AS_BIN_STATE_TOMBSTONE		2 // enterprise only
 #define AS_BIN_STATE_INUSE_OTHER	3
@@ -155,13 +155,12 @@ typedef struct as_particle_s {
 #define AS_BIN_STATE_INUSE_BOOL		5
 
 typedef struct as_bin_s {
-	uint8_t do_not_use: 4;	// can't use due to single-bin embedding in index
+	uint8_t : 4;
 	uint8_t state: 4;		// see AS_BIN_STATE_...
 	as_particle* particle;	// for embedded particle this is value, not pointer
-
-	// Never read or write these bytes in single-bin configuration:
-
 	uint16_t id;			// ID of bin name
+
+	// Not included in as_bin_no_meta ...
 
 	uint8_t xdr_write: 1;	// enterprise only
 	uint8_t unused_flags: 7;
@@ -322,16 +321,6 @@ int as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result, boo
 bool as_bin_cdt_get_by_context(const as_bin *b, const uint8_t* ctx, uint32_t ctx_sz, as_bin *result, bool alloc_ns);
 bool as_bin_cdt_get_by_context_vec(const as_bin *b, msgpack_in_vec *ctx_mv, as_bin *result, bool alloc_ns);
 
-// For copying as_bin structs without the last 3 bytes.
-static inline void
-as_single_bin_copy(as_bin *to, const as_bin *from)
-{
-	// Do not copy do_not_use since it may overlap other as_index bits.
-	to->state = from->state;
-	to->particle = from->particle;
-	// Do not copy id or unused since they are off the end of the as_index.
-}
-
 static inline bool
 as_bin_has_meta(const as_bin *b)
 {
@@ -387,7 +376,6 @@ as_bin_remove(as_storage_rd *rd, uint32_t i)
 	rd->n_bins--;
 
 	if (i < rd->n_bins) {
-		// Note - can't get here for single bin, so plain copy is safe.
 		rd->bins[i] = rd->bins[rd->n_bins];
 	}
 }
@@ -429,7 +417,6 @@ bool as_bin_is_live(const as_bin* b);
 void as_bin_set_tombstone(as_bin* b);
 bool as_bin_empty_if_all_tombstones(struct as_storage_rd_s* rd, bool is_dd);
 void as_bin_clear_meta(as_bin* b);
-void as_bin_copy(const struct as_namespace_s* ns, as_bin* to, const as_bin* from);
 bool as_bin_get_id(const struct as_namespace_s *ns, const char *name, uint16_t *id);
 bool as_bin_get_id_w_len(const struct as_namespace_s *ns, const char *name, size_t len, uint16_t *id);
 bool as_bin_get_or_assign_id_w_len(struct as_namespace_s *ns, const char *name, size_t len, uint16_t *id);
@@ -771,7 +758,6 @@ typedef struct as_namespace_s {
 	bool			conflict_resolve_writes;
 	bool			cp; // relevant only for enterprise edition
 	bool			cp_allow_drops; // relevant only for enterprise edition
-	bool			data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	uint32_t		default_ttl;
 	bool			cold_start_eviction_disabled;
 	bool			write_dup_res_disabled;
@@ -809,7 +795,6 @@ typedef struct as_namespace_s {
 	uint32_t		cfg_replication_factor;
 	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
 	uint64_t		sindex_stage_size;
-	bool			single_bin; // restrict the namespace to objects with exactly one bin
 	uint32_t		n_single_query_threads;
 	uint32_t		stop_writes_pct;
 	uint32_t		stop_writes_sys_memory_pct;
@@ -1415,10 +1400,6 @@ as_set_size_stop_writes(const as_set* p_set, const as_namespace* ns)
 static inline size_t
 as_bin_memcpy_name(const as_namespace* ns, uint8_t* buf, as_bin* b)
 {
-	if (ns->single_bin) {
-		return 0;
-	}
-
 	const char* name = as_bin_get_name_from_id(ns, b->id);
 	char* to = (char*)buf;
 
@@ -1468,12 +1449,6 @@ as_namespace_like_data_in_memory(const as_namespace *ns)
 			ns->storage_type == AS_STORAGE_ENGINE_PMEM;
 }
 
-static inline bool
-as_namespace_cool_restarts(const as_namespace *ns)
-{
-	return ns->storage_data_in_memory && ! ns->data_in_index;
-}
-
 static inline uint32_t
 as_namespace_device_count(const as_namespace *ns)
 {
@@ -1484,7 +1459,7 @@ as_namespace_device_count(const as_namespace *ns)
 static inline const char*
 as_namespace_start_mode_str(const as_namespace *ns)
 {
-	return as_namespace_cool_restarts(ns) ? "cool" : "warm";
+	return ns->storage_data_in_memory ? "cool" : "warm";
 }
 
 static inline bool

@@ -4497,17 +4497,11 @@ rt_value_get_geo(rt_value* val, geo_data* result)
 static bool
 get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
 {
-	if (rd->ns->single_bin) {
-		if (len != 0) {
-			cf_warning(AS_EXP, "get_live_bin - illegal bin name (%.*s) for single-bin",
-					(int)len, name);
-			return false;
-		}
-	}
-	else if (len == 0) {
-		cf_warning(AS_EXP, "get_live_bin - illegal zero lenght bin name for multi-bin");
-		return false;
-	}
+	// FIXME - is an empty bin name ok now that single-bin is gone?
+//	if (len == 0) {
+//		cf_warning(AS_EXP, "get_live_bin - illegal zero length bin name for multi-bin");
+//		return false;
+//	}
 
 	*p_bin = as_bin_get_live_w_len(rd, name, len);
 

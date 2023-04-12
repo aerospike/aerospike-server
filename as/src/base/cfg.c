@@ -445,7 +445,6 @@ typedef enum {
 	CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES,
-	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DEFAULT_TTL,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
@@ -481,7 +480,6 @@ typedef enum {
 	CASE_NAMESPACE_REJECT_XDR_WRITES,
 	CASE_NAMESPACE_REPLICATION_FACTOR,
 	CASE_NAMESPACE_SINDEX_STAGE_SIZE,
-	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
 	CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT,
@@ -503,7 +501,9 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_ENGINE_BEGIN,
 	// Obsoleted:
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
+	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISABLE_NSUP,
+	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_SINGLE_SCAN_THREADS,
 
 	// Namespace conflict-resolution-policy options (value tokens):
@@ -977,7 +977,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "background-query-max-rps",		CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "conflict-resolve-writes",		CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES },
-		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "default-ttl",					CASE_NAMESPACE_DEFAULT_TTL },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
@@ -1013,7 +1012,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "reject-xdr-writes",				CASE_NAMESPACE_REJECT_XDR_WRITES },
 		{ "replication-factor",				CASE_NAMESPACE_REPLICATION_FACTOR },
 		{ "sindex-stage-size",				CASE_NAMESPACE_SINDEX_STAGE_SIZE },
-		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
 		{ "stop-writes-sys-memory-pct",		CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT },
@@ -1035,7 +1033,9 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "storage-engine",					CASE_NAMESPACE_STORAGE_ENGINE_BEGIN },
 		// Obsoleted:
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
+		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
+		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "single-scan-threads",			CASE_NAMESPACE_SINGLE_SCAN_THREADS },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -2893,9 +2893,6 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->conflict_resolve_writes = cfg_bool(&line);
 				break;
-			case CASE_NAMESPACE_DATA_IN_INDEX:
-				ns->data_in_index = cfg_bool(&line);
-				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
 				ns->default_ttl = cfg_seconds(&line, 0, MAX_ALLOWED_TTL);
 				break;
@@ -3018,9 +3015,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_SINDEX_STAGE_SIZE:
 				ns->sindex_stage_size = cfg_u64_power_of_2(&line, SI_ARENA_MIN_STAGE_SIZE, SI_ARENA_MAX_STAGE_SIZE);
-				break;
-			case CASE_NAMESPACE_SINGLE_BIN:
-				ns->single_bin = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_SINGLE_QUERY_THREADS:
 				ns->n_single_query_threads = cfg_u32(&line, 1, 128);
@@ -3155,8 +3149,14 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS:
 				cfg_obsolete(&line, "please use 'background-query-max-rps'");
 				break;
+			case CASE_NAMESPACE_DATA_IN_INDEX:
+				cfg_obsolete(&line, "see documentation for converting to multi-bin"); // FIXME - actual wording!
+				break;
 			case CASE_NAMESPACE_DISABLE_NSUP:
 				cfg_obsolete(&line, "please set 'nsup-period' to 0 to disable nsup");
+				break;
+			case CASE_NAMESPACE_SINGLE_BIN:
+				cfg_obsolete(&line, "see documentation for converting to multi-bin"); // FIXME - actual wording!
 				break;
 			case CASE_NAMESPACE_SINGLE_SCAN_THREADS:
 				cfg_obsolete(&line, "please use 'single-query-threads'");
@@ -3168,14 +3168,8 @@ as_config_init(const char* config_file)
 				if (ns->default_ttl != 0 && ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'nsup-period' or 'allow-ttl-without-nsup' true if 'default-ttl' is non-zero", ns->name);
 				}
-				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
-					cf_crash_nostack(AS_CFG, "{%s} 'data-in-index' can't be true unless 'storage-engine device' and both 'single-bin' and 'data-in-memory' are true", ns->name);
-				}
 				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 					cf_crash_nostack(AS_CFG, "{%s} 'storage-engine pmem' can't be used with 'index-type flash'", ns->name);
-				}
-				if (ns->conflict_resolve_writes && ns->single_bin) {
-					cf_crash_nostack(AS_CFG, "{%s} 'conflict-resolve-writes' can't be true if 'single-bin' is true", ns->name);
 				}
 				if (ns->max_record_size != 0) {
 					if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && ns->max_record_size > 128 * 1024 * 1024) { // PROTO_SIZE_MAX

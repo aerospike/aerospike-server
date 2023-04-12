@@ -296,7 +296,7 @@ startup_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_storage_record_open(ns, r, &rd);
 
-	as_bin stack_bins[RECORD_MAX_BINS]; // no sindexes for single-bin
+	as_bin stack_bins[RECORD_MAX_BINS];
 
 	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 		// FIXME - better to just cf_crash?
@@ -445,7 +445,7 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_storage_record_open(ns, r, &rd);
 
-	as_bin stack_bins[RECORD_MAX_BINS]; // no sindexes for single-bin
+	as_bin stack_bins[RECORD_MAX_BINS];
 
 	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 		cf_warning(AS_SINDEX, "{%s} populating sindex %s - failed to read %pD",

@@ -426,11 +426,6 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 		return true;
 	}
 
-	if (ns->single_bin) {
-		cf_warning(AS_QUERY, "si-queries not supported - single-bin namespace");
-		return false;
-	}
-
 	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_INDEX_RANGE);
 	const uint8_t* data = f->data;
@@ -939,7 +934,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 		return true;
 	}
 
-	as_bin stack_bins[RECORD_MAX_BINS]; // never single-bin
+	as_bin stack_bins[RECORD_MAX_BINS];
 
 	if (as_storage_rd_load_bins(rd, stack_bins) < 0) {
 		return false; // for now - not separating error from false positive
@@ -1693,11 +1688,6 @@ basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns,
 	}
 	// else - bin selection requested.
 
-	if (ns->single_bin) {
-		cf_warning(AS_QUERY, "can't select bins - single-bin namespace");
-		return false;
-	}
-
 	// TODO - temporary - won't need bin-list support after January 2023.
 	if (has_binlist) {
 		const as_msg_field* f = as_msg_field_get(m,
@@ -1824,7 +1814,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 				_job->si != NULL, bval);
 	}
 	else {
-		as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
+		as_bin stack_bins[RECORD_MAX_BINS];
 
 		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
 			cf_warning(AS_QUERY, "job %lu - record unreadable", _job->trid);

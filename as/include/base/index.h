@@ -87,19 +87,14 @@ typedef struct as_index_s {
 	uint64_t key_stored: 1;
 
 	// offset: 55
-	// In single-bin mode for data-in-memory namespaces, this offset is cast to
-	// an as_bin, but only 4 bits get used (for the as_bin state). The other 4
-	// bits are used for replication state and index flags.
 	uint8_t repl_state: 2;
 	uint8_t tombstone: 1;
 	uint8_t cenotaph: 1;
-	uint8_t single_bin_state: 4; // used indirectly, only in single-bin mode
+	uint8_t : 4;
 
 	// offset: 56
 	// For data-not-in-memory namespaces, these 8 bytes are currently unused.
-	// For data-in-memory namespaces: in single-bin mode the as_bin is embedded
-	// here (these 8 bytes plus 4 bits in flex_bits above), but in multi-bin
-	// mode this is a pointer to either of:
+	// For data-in-memory namespaces, this is a pointer to either of:
 	// - an as_bin_space containing n_bins and an array of as_bin structs
 	// - an as_rec_space containing an as_bin_space pointer and other metadata
 	void* dim;
@@ -109,8 +104,6 @@ typedef struct as_index_s {
 } __attribute__ ((__packed__)) as_index;
 
 COMPILER_ASSERT(sizeof(as_index) == 64);
-
-#define AS_INDEX_SINGLE_BIN_OFFSET 55 // can't use offsetof() with bit fields
 
 
 //==========================================================
@@ -188,15 +181,8 @@ as_index_clear_in_sindex(as_index* index)
 
 
 //------------------------------------------------
-// Single bin, as_bin_space & as_rec_space.
+// as_bin_space & as_rec_space.
 //
-
-static inline as_bin*
-as_index_get_single_bin(const as_index* index)
-{
-	// We only use 4 bits of the first byte for the bin state.
-	return (as_bin*)((uint8_t*)index + AS_INDEX_SINGLE_BIN_OFFSET);
-}
 
 static inline as_bin_space*
 as_index_get_bin_space(const as_index* index)

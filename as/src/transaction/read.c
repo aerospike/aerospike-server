@@ -566,7 +566,7 @@ read_local(as_transaction* tr)
 		return TRANS_DONE_SUCCESS;
 	}
 
-	as_bin stack_bins[ns->single_bin ? 1 : RECORD_MAX_BINS];
+	as_bin stack_bins[RECORD_MAX_BINS];
 
 	if ((result = as_storage_rd_load_bins(&rd, stack_bins)) < 0) {
 		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
