@@ -199,6 +199,9 @@ flat.h
 drv_common.c
 drv_memory_ce.c
 drv_memory.c
+drv_pmem_ce.c
+drv_ssd.c
+drv_ssd_ce.c
 flat_ce.c
 flat.c
 storage.c
