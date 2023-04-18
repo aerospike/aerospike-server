@@ -30,8 +30,6 @@
 
 #include <citrusleaf/alloc.h>
 
-#include "cf_str.h"
-
 
 #define MAX_BACKOFF (1024 * 256)
 #define MAX_FORMAT 100
@@ -155,28 +153,28 @@ void
 cf_dyn_buf_append_int(cf_dyn_buf *db, int i)
 {
 	DB_RESERVE(12);
-	db->used_sz += cf_str_itoa(i, (char *)&db->buf[db->used_sz], 10);
+	db->used_sz += sprintf((char *)&db->buf[db->used_sz], "%d", i);
 }
 
 void
 cf_dyn_buf_append_uint64_x(cf_dyn_buf *db, uint64_t i)
 {
 	DB_RESERVE(18);
-	db->used_sz += cf_str_itoa_u64(i, (char *)&db->buf[db->used_sz], 16);
+	db->used_sz += sprintf((char *)&db->buf[db->used_sz], "%lX", i);
 }
 
 void
 cf_dyn_buf_append_uint64(cf_dyn_buf *db, uint64_t i)
 {
 	DB_RESERVE(22);
-	db->used_sz += cf_str_itoa_u64(i, (char *)&db->buf[db->used_sz], 10);
+	db->used_sz += sprintf((char *)&db->buf[db->used_sz], "%lu", i);
 }
 
 void
 cf_dyn_buf_append_uint32(cf_dyn_buf *db, uint32_t i)
 {
 	DB_RESERVE(12);
-	db->used_sz += cf_str_itoa_u32(i, (char *)&db->buf[db->used_sz], 10);
+	db->used_sz += sprintf((char *)&db->buf[db->used_sz], "%u", i);
 }
 
 void

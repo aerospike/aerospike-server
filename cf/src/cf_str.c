@@ -36,8 +36,6 @@
 #include "vector.h"
 
 
-static char itoa_table[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N' };
-
 // return 0 on success, -1 on fail
 int cf_str_atoi(char *s, int *value)
 {
@@ -390,94 +388,6 @@ cf_strtol_i32(const char *s, int32_t *value)
 	*value = (int32_t)i;
 
 	return 0;
-}
-
-unsigned int
-cf_str_itoa(int _value, char *_s, int _radix)
-{
-	// special case is the easy way
-	if (_value == 0) {
-		_s[0] = itoa_table[0];
-		_s[1] = 0;
-		return(1);
-	}
-
-	// Account for negatives
-	unsigned int sign_len = 0;
-	if (_value < 0) {
-		*_s++ = '-';
-		_value = - _value;
-		sign_len = 1;
-	}
-	int _v = _value;
-	unsigned int _nd = 0;
-	while (_v) {
-		_nd++;
-		_v /= _radix;
-	}
-
-	unsigned int rv = sign_len + _nd;
-	_s[_nd] = 0;
-	while (_nd) {
-		_nd --;
-		_s[_nd ] = itoa_table [ _value % _radix ];
-		_value = _value / _radix;
-	}
-	return(rv);
-}
-
-unsigned int
-cf_str_itoa_u64(uint64_t _value, char *_s, int _radix)
-{
-	// special case is the easy way
-	if (_value == 0) {
-		_s[0] = itoa_table[0];
-		_s[1] = 0;
-		return(1);
-	}
-
-	uint64_t _v = _value;
-	unsigned int _nd = 0;
-	while (_v) {
-		_nd++;
-		_v /= _radix;
-	}
-
-	unsigned int rv = _nd;
-	_s[_nd] = 0;
-	while (_nd) {
-		_nd --;
-		_s[_nd ] = itoa_table [ _value % _radix ];
-		_value = _value / _radix;
-	}
-	return(rv);
-}
-
-unsigned int
-cf_str_itoa_u32(uint32_t _value, char *_s, int _radix)
-{
-	// special case is the easy way
-	if (_value == 0) {
-		_s[0] = itoa_table[0];
-		_s[1] = 0;
-		return(1);
-	}
-
-	uint32_t _v = _value;
-	unsigned int _nd = 0;
-	while (_v) {
-		_nd++;
-		_v /= _radix;
-	}
-
-	unsigned int rv = _nd;
-	_s[_nd] = 0;
-	while (_nd) {
-		_nd --;
-		_s[_nd ] = itoa_table [ _value % _radix ];
-		_value = _value / _radix;
-	}
-	return(rv);
 }
 
 void

@@ -24,12 +24,6 @@
 
 #include <stdint.h>
 
-// These functions convert integers into a string, writing into the provided
-// buffer, and return the number of bytes written.
-unsigned int cf_str_itoa(int value, char *s, int radix);
-unsigned int cf_str_itoa_u64(uint64_t value, char *s, int radix);
-unsigned int cf_str_itoa_u32(uint32_t value, char *s, int radix);
-
 // These functions convert a string to a number of different integer types, and
 // returns 0 on success.
 int cf_str_atoi(char *s, int *value);

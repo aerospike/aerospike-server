@@ -334,13 +334,11 @@ as_info_init()
 {
 	g_info_work_q = cf_queue_create(sizeof(as_info_transaction), true);
 
-	char vstr[64];
-	sprintf(vstr, "%s build %s", aerospike_build_type, aerospike_build_id);
+	char istr[1024];
 
-	char compatibility_id[20];
-	cf_str_itoa(AS_EXCHANGE_COMPATIBILITY_ID, compatibility_id, 10);
+	sprintf(istr, "%s build %s", aerospike_build_type, aerospike_build_id);
+	info_set("version", istr, true);                                            // Returns the edition and build number.
 
-	info_set("version", vstr, true);                                            // Returns the edition and build number.
 	info_set("build", aerospike_build_id, true);                                // Returns the build number for this server.
 	info_set("build_os", aerospike_build_os, true);                             // Return the OS used to create this build.
 	info_set("build_time", aerospike_build_time, true);                         // Return the creation time of this build.
@@ -348,16 +346,18 @@ as_info_init()
 	info_set("build_sha", aerospike_build_sha, true);                           // Return the git SHA used for this build.
 	info_set("build_ee_sha", aerospike_build_ee_sha, true);                     // Return the ee git SHA used for this build.
 	info_set("edition", aerospike_build_type, true);                            // Return the edition of this build.
-	info_set("compatibility-id", compatibility_id, true);                       // Used for compatibility purposes.
+
+	sprintf(istr, "%u", AS_EXCHANGE_COMPATIBILITY_ID);
+	info_set("compatibility-id", istr, true);                                   // Used for compatibility purposes.
+
 	info_set("digests", "RIPEMD160", false);                                    // Returns the hashing algorithm used by the server for key hashing.
 	info_set("status", "ok", false);                                            // Always returns ok, used to verify service port is open.
 	info_set("STATUS", "OK", false);                                            // Always returns OK, used to verify service port is open.
 
-	char istr[1024];
-	cf_str_itoa(AS_PARTITIONS, istr, 10);
+	sprintf(istr, "%u", AS_PARTITIONS);
 	info_set("partitions", istr, false);                                        // Returns the number of partitions used to hash keys across.
 
-	cf_str_itoa_u64(g_config.self_node, istr, 16);
+	sprintf(istr, "%lX", g_config.self_node);
 	info_set("node", istr, true);                                               // Node ID. Unique 15 character hex string for each node based on the mac address and port.
 	info_set("name", istr, false);                                              // Alias to 'node'.
 

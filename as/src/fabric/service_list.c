@@ -1293,7 +1293,7 @@ build_peers_reduce(const void *key, void *data, void *udata)
 	}
 
 	char node_str[17];
-	cf_str_itoa_u64(node, node_str, 16);
+	sprintf(node_str, "%lX", node);
 
 	cf_dyn_buf_append_char(db, '[');
 	cf_dyn_buf_append_string(db, node_str);
