@@ -110,7 +110,7 @@ typedef struct as_config_s {
 	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
 	char*			pidfile;
-	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
+	uint32_t		proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	uint32_t		n_proto_fd_max;
 	uint32_t		query_max_done; // maximum number of finished queries kept for monitoring
 	uint32_t		n_query_threads_limit;

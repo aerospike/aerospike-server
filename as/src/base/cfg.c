@@ -2319,7 +2319,7 @@ as_config_init(const char* config_file)
 				c->pidfile = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_PROTO_FD_IDLE_MS:
-				c->proto_fd_idle_ms = cfg_int_no_checks(&line);
+				c->proto_fd_idle_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_u32(&line, MIN_PROTO_FD_MAX, MAX_PROTO_FD_MAX);

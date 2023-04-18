@@ -245,7 +245,7 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_bool(db, "os-group-perms", cf_os_is_using_group_perms());
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
-	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
+	info_append_uint32(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_uint32(db, "proto-fd-max", g_config.n_proto_fd_max);
 	info_append_uint32(db, "query-max-done", g_config.query_max_done);
 	info_append_uint32(db, "query-threads-limit", g_config.n_query_threads_limit);
@@ -901,12 +901,12 @@ cfg_set_service(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "proto-fd-idle-ms", v, &v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0) {
+		if (cf_str_atoi(v, &val) != 0 || val < 0) {
 			return false;
 		}
-		cf_info(AS_INFO, "Changing value of proto-fd-idle-ms from %d to %d ",
+		cf_info(AS_INFO, "Changing value of proto-fd-idle-ms from %u to %d ",
 				g_config.proto_fd_idle_ms, val);
-		g_config.proto_fd_idle_ms = val;
+		g_config.proto_fd_idle_ms = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "proto-fd-max", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0 || val < MIN_PROTO_FD_MAX ||
