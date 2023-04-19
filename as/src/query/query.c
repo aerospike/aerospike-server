@@ -1983,7 +1983,7 @@ static void aggr_query_job_init(aggr_query_job* job);
 static bool aggr_query_init(as_aggr_call* call, const as_transaction* tr);
 static bool aggr_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
 static bool aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
-static bool aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r, cf_arenax_handle r_h);
+static void aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r, cf_arenax_handle r_h);
 static as_stream_status aggr_query_ostream_write(void* udata, as_val* val);
 static bool aggr_query_pre_check(void* udata, udf_record* urecord);
 static void aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val, bool success);
@@ -2290,11 +2290,7 @@ aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		return true;
 	}
 
-	if (! aggr_query_add_digest(ns, slice->ll, r, r_ref->r_h)) {
-		as_record_done(r_ref, ns);
-		as_query_manager_abandon_job(_job, AS_ERR_UNKNOWN);
-		return false;
-	}
+	aggr_query_add_digest(ns, slice->ll, r, r_ref->r_h);
 
 	as_record_done(r_ref, ns);
 	as_incr_uint64(&_job->n_succeeded);
@@ -2304,7 +2300,7 @@ aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	return true;
 }
 
-static bool
+static void
 aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
 		cf_arenax_handle r_h)
 {
@@ -2334,14 +2330,15 @@ aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
 		keys_arr->u.digests[keys_arr->num] = r->keyd;
 	}
 	else {
-		as_index_reserve(r);
+		if (r->rc > 50000) {
+			return; // hack - avoid ref-count overflow
+		}
 
+		as_index_reserve(r);
 		keys_arr->u.handles[keys_arr->num] = (uint64_t)r_h;
 	}
 
 	keys_arr->num++;
-
-	return true;
 }
 
 static as_stream_status
