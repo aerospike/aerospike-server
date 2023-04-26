@@ -1,7 +1,7 @@
 /*
  * as.c
  *
- * Copyright (C) 2008-2021 Aerospike, Inc.
+ * Copyright (C) 2008-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
