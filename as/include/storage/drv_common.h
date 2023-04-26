@@ -150,10 +150,11 @@ COMPILER_ASSERT(offsetof(drv_header, generic.prefix) == 0);
 
 #define STORAGE_INVALID_WBLOCK 0xFFFFffff
 
-// Ultimately this may become a full-blown state, but for now it's effectively
-// just a defrag flag.
-#define WBLOCK_STATE_NONE		0
-#define WBLOCK_STATE_DEFRAG		1
+#define WBLOCK_STATE_FREE			0
+#define WBLOCK_STATE_RESERVED		1
+#define WBLOCK_STATE_USED			2
+#define WBLOCK_STATE_DEFRAG			3
+#define WBLOCK_STATE_EMPTYING		4
 
 
 //==========================================================

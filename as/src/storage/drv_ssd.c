@@ -227,6 +227,7 @@ push_wblock_to_free_q(drv_ssd *ssd, uint32_t wblock_id)
 	cf_assert(wblock_id < ssd->n_wblocks, AS_DRV_SSD,
 			"pushing bad wblock_id %d to free_wblock_q", (int32_t)wblock_id);
 
+	ssd->wblock_state[wblock_id].state = WBLOCK_STATE_FREE;
 	cf_queue_push(ssd->free_wblock_q, &wblock_id);
 }
 
@@ -295,8 +296,8 @@ ssd_release_vacated_wblock(drv_ssd *ssd, uint32_t wblock_id,
 			ssd->name, wblock_id);
 
 	cf_assert(p_wblock_state->state == WBLOCK_STATE_DEFRAG, AS_DRV_SSD,
-			"device %s: wblock-id %u state not DEFRAG while defragging",
-			ssd->name, wblock_id);
+			"device %s: wblock-id %u state %u releasing vacation destination",
+			ssd->name, wblock_id, p_wblock_state->state);
 
 	uint32_t n_vac_dests = as_aaf_uint32_rls(&p_wblock_state->n_vac_dests, -1);
 
@@ -313,13 +314,11 @@ ssd_release_vacated_wblock(drv_ssd *ssd, uint32_t wblock_id,
 
 	cf_mutex_lock(&p_wblock_state->LOCK);
 
-	p_wblock_state->state = WBLOCK_STATE_NONE;
-
-	// Free the wblock if it's empty.
-	if (p_wblock_state->inuse_sz == 0 &&
-			// TODO - given assertions above, this condition is superfluous:
-			p_wblock_state->swb == NULL) {
+	if (p_wblock_state->inuse_sz == 0) {
 		push_wblock_to_free_q(ssd, wblock_id);
+	}
+	else {
+		p_wblock_state->state = WBLOCK_STATE_EMPTYING;
 	}
 
 	cf_mutex_unlock(&p_wblock_state->LOCK);
@@ -420,35 +419,34 @@ swb_release(ssd_write_buf *swb)
 }
 
 static inline void
-swb_dereference_and_release(drv_ssd *ssd, uint32_t wblock_id,
-		ssd_write_buf *swb)
+swb_dereference_and_release(drv_ssd *ssd, ssd_write_buf *swb)
 {
+	uint32_t wblock_id = swb->wblock_id;
 	ssd_wblock_state *wblock_state = &ssd->wblock_state[wblock_id];
 
-	cf_mutex_lock(&wblock_state->LOCK);
-
 	cf_assert(swb == wblock_state->swb, AS_DRV_SSD,
-			"releasing wrong swb! %p (%d) != %p (%d), thread %d",
-			swb, (int32_t)swb->wblock_id, wblock_state->swb,
-			(int32_t)wblock_state->swb->wblock_id, cf_thread_sys_tid());
+			"releasing wrong swb! %p (%u) != %p (%u), thread %d",
+			swb, wblock_id, wblock_state->swb, wblock_state->swb->wblock_id,
+			cf_thread_sys_tid());
+
+	cf_assert(wblock_state->state == WBLOCK_STATE_RESERVED, AS_DRV_SSD,
+			"device %s: wblock-id %u state %u on swb release", ssd->name,
+			wblock_id, wblock_state->state);
+
+	cf_mutex_lock(&wblock_state->LOCK);
 
 	swb_release(wblock_state->swb);
 	wblock_state->swb = NULL;
 
-	cf_assert(wblock_state->state != WBLOCK_STATE_DEFRAG, AS_DRV_SSD,
-			"device %s: wblock-id %u state is DEFRAG on swb release", ssd->name,
-			wblock_id);
-
-	uint32_t inuse_sz = as_load_uint32(&wblock_state->inuse_sz);
-
-	// Free wblock if all three gating conditions hold.
-	if (inuse_sz == 0) {
+	if (wblock_state->inuse_sz == 0) {
 		as_incr_uint64(&ssd->n_wblock_direct_frees);
 		push_wblock_to_free_q(ssd, wblock_id);
 	}
-	// Queue wblock for defrag if applicable.
-	else if (inuse_sz < ssd->ns->defrag_lwm_size) {
+	else if (wblock_state->inuse_sz < ssd->ns->defrag_lwm_size) {
 		push_wblock_to_defrag_q(ssd, wblock_id);
+	}
+	else {
+		wblock_state->state = WBLOCK_STATE_USED;
 	}
 
 	cf_mutex_unlock(&wblock_state->LOCK);
@@ -481,6 +479,12 @@ swb_get(drv_ssd *ssd, bool use_reserve)
 		return NULL;
 	}
 
+	cf_assert(swb->rc == 0, AS_DRV_SSD,
+			"device %s: wblock-id %u swb rc %u off free-q", ssd->name,
+			swb->wblock_id, swb->rc);
+
+	swb->rc = 1;
+
 	ssd_wblock_state* p_wblock_state = &ssd->wblock_state[swb->wblock_id];
 
 	uint32_t inuse_sz = as_load_uint32(&p_wblock_state->inuse_sz);
@@ -493,16 +497,12 @@ swb_get(drv_ssd *ssd, bool use_reserve)
 			"device %s: wblock-id %u swb not null off free-q", ssd->name,
 			swb->wblock_id);
 
-	cf_assert(p_wblock_state->state != WBLOCK_STATE_DEFRAG, AS_DRV_SSD,
-			"device %s: wblock-id %u state DEFRAG off free-q", ssd->name,
-			swb->wblock_id);
+	cf_assert(p_wblock_state->state == WBLOCK_STATE_FREE, AS_DRV_SSD,
+			"device %s: wblock-id %u state %u off free-q", ssd->name,
+			swb->wblock_id, p_wblock_state->state);
 
-	cf_mutex_lock(&p_wblock_state->LOCK);
-
-	swb_reserve(swb);
 	p_wblock_state->swb = swb;
-
-	cf_mutex_unlock(&p_wblock_state->LOCK);
+	p_wblock_state->state = WBLOCK_STATE_RESERVED;
 
 	return swb;
 }
@@ -598,16 +598,18 @@ ssd_block_free(drv_ssd *ssd, uint64_t rblock_id, uint32_t n_rblocks, char *msg)
 			wblock_id, resulting_inuse_sz < 0 ? "over-freed" : "bad inuse_sz",
 			(int32_t)size, resulting_inuse_sz);
 
-	if (p_wblock_state->swb == NULL &&
-			p_wblock_state->state != WBLOCK_STATE_DEFRAG) {
-		// Free wblock if all three gating conditions hold.
+	if (p_wblock_state->state == WBLOCK_STATE_USED) {
 		if (resulting_inuse_sz == 0) {
 			as_incr_uint64(&ssd->n_wblock_direct_frees);
 			push_wblock_to_free_q(ssd, wblock_id);
 		}
-		// Queue wblock for defrag if appropriate.
 		else if (resulting_inuse_sz < ssd->ns->defrag_lwm_size) {
 			push_wblock_to_defrag_q(ssd, wblock_id);
+		}
+	}
+	else if (p_wblock_state->state == WBLOCK_STATE_EMPTYING) {
+		if (resulting_inuse_sz == 0) {
+			push_wblock_to_free_q(ssd, wblock_id);
 		}
 	}
 
@@ -1027,6 +1029,9 @@ run_load_queues(void *pv_data)
 		else if (inuse_sz < lwm_size) {
 			defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size], wblock_id);
 		}
+		else {
+			ssd->wblock_state[wblock_id].state = WBLOCK_STATE_USED;
+		}
 	}
 
 	defrag_pens_dump(pens, lwm_pct, ssd->name);
@@ -1090,7 +1095,7 @@ ssd_wblock_init(drv_ssd *ssd)
 		p_wblock_state->inuse_sz = 0;
 		cf_mutex_init(&p_wblock_state->LOCK);
 		p_wblock_state->swb = NULL;
-		p_wblock_state->state = WBLOCK_STATE_NONE;
+		p_wblock_state->state = WBLOCK_STATE_FREE;
 		p_wblock_state->n_vac_dests = 0;
 	}
 }
@@ -1567,9 +1572,9 @@ ssd_write_sanity_checks(drv_ssd *ssd, ssd_write_buf *swb)
 			"device %s: wblock-id %u swb not consistent while writing",
 			ssd->name, swb->wblock_id);
 
-	cf_assert(p_wblock_state->state != WBLOCK_STATE_DEFRAG, AS_DRV_SSD,
-			"device %s: wblock-id %u state DEFRAG while writing", ssd->name,
-			swb->wblock_id);
+	cf_assert(p_wblock_state->state == WBLOCK_STATE_RESERVED, AS_DRV_SSD,
+			"device %s: wblock-id %u state %u off write-q", ssd->name,
+			swb->wblock_id, p_wblock_state->state);
 }
 
 
@@ -1581,7 +1586,7 @@ ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 		cf_queue_push(ssd->post_write_q, &swb);
 	}
 	else {
-		swb_dereference_and_release(ssd, swb->wblock_id, swb);
+		swb_dereference_and_release(ssd, swb);
 	}
 
 	if (ssd->post_write_q) {
@@ -1598,8 +1603,7 @@ ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 				break;
 			}
 
-			swb_dereference_and_release(ssd, cached_swb->wblock_id,
-					cached_swb);
+			swb_dereference_and_release(ssd, cached_swb);
 		}
 	}
 }
@@ -2208,12 +2212,8 @@ ssd_defrag_sweep(drv_ssd *ssd)
 
 		cf_mutex_lock(&p_wblock_state->LOCK);
 
-		uint32_t inuse_sz = as_load_uint32(&p_wblock_state->inuse_sz);
-
-		if (p_wblock_state->swb == NULL &&
-				p_wblock_state->state != WBLOCK_STATE_DEFRAG &&
-					inuse_sz != 0 &&
-						inuse_sz < ssd->ns->defrag_lwm_size) {
+		if (p_wblock_state->state == WBLOCK_STATE_USED &&
+				p_wblock_state->inuse_sz < ssd->ns->defrag_lwm_size) {
 			push_wblock_to_defrag_q(ssd, wblock_id);
 			n_queued++;
 		}
