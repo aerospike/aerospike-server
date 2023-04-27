@@ -32,6 +32,7 @@
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 
+#include "cf_mutex.h"
 #include "dynbuf.h"
 #include "hist.h"
 #include "linear_hist.h"
@@ -90,8 +91,8 @@ as_namespace_create(char *name)
 	ns->jem_arena = cf_alloc_create_arena();
 	cf_info(AS_NAMESPACE, "{%s} uses JEMalloc arena %d", name, ns->jem_arena);
 
-	ns->cold_start = false; // try warm or cool restart unless told not to
-	ns->arena = NULL; // can't create the arena until the configuration has been done
+	cf_mutex_init(&ns->query_rsvs_lock); // nowhere better to do this
+	ns->query_rsvs_prev_gen = -1; // must start same as g_partition_generation
 
 	//--------------------------------------------
 	// Non-0/NULL/false configuration defaults.

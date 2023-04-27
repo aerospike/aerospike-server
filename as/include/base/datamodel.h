@@ -713,6 +713,14 @@ typedef struct as_namespace_s {
 	bool			truncating;
 
 	//--------------------------------------------
+	// Short query reservations.
+	//
+
+	cf_mutex		query_rsvs_lock;
+	int32_t			query_rsvs_prev_gen;
+	as_partition_reservation* query_rsvs;
+
+	//--------------------------------------------
 	// Secondary index.
 	//
 

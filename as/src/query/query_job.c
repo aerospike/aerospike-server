@@ -45,6 +45,7 @@
 #include "base/security.h"
 #include "base/transaction.h"
 #include "fabric/partition.h"
+#include "fabric/partition_balance.h"
 #include "geospatial/geospatial.h"
 #include "query/query_manager.h"
 
@@ -71,6 +72,8 @@ static uint32_t g_query_job_trid = 0;
 // Forward declarations.
 //
 
+static void reserve_rsvs(as_query_job* _job);
+static void release_rsvs(as_partition_reservation* query_rsvs);
 static void finish(as_query_job* _job);
 static void range_free(as_query_range* range);
 static uint32_t throttle_sleep(as_query_job* _job, uint64_t count, uint64_t now);
@@ -148,6 +151,10 @@ as_query_job_run(void* pv_job)
 		}
 	}
 
+	if (_job->is_short) {
+		reserve_rsvs(_job);
+	}
+
 	cf_buf_builder* bb = NULL;
 	uint32_t pid;
 
@@ -161,6 +168,11 @@ as_query_job_run(void* pv_job)
 		}
 		else {
 			if (! _job->pids[pid].requested) {
+				continue;
+			}
+
+			if (_job->is_short) {
+				_job->vtable.slice_fn(_job, &_job->query_rsvs[pid], &bb);
 				continue;
 			}
 
@@ -189,6 +201,10 @@ as_query_job_run(void* pv_job)
 	if (bb != NULL) {
 		_job->vtable.slice_fn(_job, NULL, &bb);
 		cf_buf_builder_free(bb);
+	}
+
+	if (_job->is_short) {
+		release_rsvs(_job->query_rsvs);
 	}
 
 	int32_t n = 0;
@@ -392,6 +408,65 @@ as_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 //==========================================================
 // Local helpers.
 //
+
+static void
+reserve_rsvs(as_query_job* _job)
+{
+	as_namespace* ns = _job->ns;
+	as_partition_reservation* old_rsvs = NULL;
+
+	cf_mutex_lock(&ns->query_rsvs_lock);
+
+	int32_t cur_gen = as_load_int32(&g_partition_generation);
+
+	if (ns->query_rsvs_prev_gen != cur_gen) {
+		ns->query_rsvs_prev_gen = cur_gen;
+
+		old_rsvs = ns->query_rsvs;
+
+		ns->query_rsvs =
+				cf_rc_alloc(sizeof(as_partition_reservation) * AS_PARTITIONS);
+
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition_reservation* rsv = &ns->query_rsvs[pid];
+
+			if (as_partition_reserve_full(ns, pid, rsv) != 0) {
+				// Null tree causes slice_fn to send partition-done error.
+				*rsv = (as_partition_reservation){
+						.ns = ns,
+						.p = &ns->partitions[pid]
+				};
+			}
+		}
+	}
+
+	cf_rc_reserve(ns->query_rsvs);
+	_job->query_rsvs = ns->query_rsvs;
+
+	cf_mutex_unlock(&ns->query_rsvs_lock);
+
+	if (old_rsvs != NULL) {
+		release_rsvs(old_rsvs);
+	}
+}
+
+static void
+release_rsvs(as_partition_reservation* query_rsvs)
+{
+	uint32_t rc = cf_rc_release(query_rsvs);
+
+	if (rc == 0) {
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition_reservation* rsv = &query_rsvs[pid];
+
+			if (rsv->tree != NULL) {
+				as_partition_release(rsv);
+			}
+		}
+
+		cf_rc_free(query_rsvs);
+	}
+}
 
 static void
 finish(as_query_job* _job)

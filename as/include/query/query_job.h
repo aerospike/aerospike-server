@@ -122,6 +122,9 @@ typedef struct as_query_job_s {
 	// Partition scope:
 	as_query_pid* pids;
 
+	// Partition reservations for short queries:
+	struct as_partition_reservation_s* query_rsvs;
+
 	// Query threading model:
 	bool is_short;
 	bool do_inline;
