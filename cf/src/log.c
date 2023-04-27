@@ -808,7 +808,7 @@ static void
 log_write(cf_log_context context, cf_log_level level, const char* file_name,
 		int line, const char* format, va_list argp)
 {
-	int fds[g_n_sinks];
+	int fds[g_n_sinks + 1]; // +1 for g_n_sinks == 0 && ! g_sinks_activated
 	uint32_t n_fds = get_log_fds(context, level, fds);
 
 	if (n_fds == 0) {
