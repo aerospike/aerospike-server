@@ -404,6 +404,22 @@ as_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 	_job->vtable.info_mon_fn(_job, db);
 }
 
+void
+as_query_job_release_rsvs(as_namespace* ns)
+{
+	cf_mutex_lock(&ns->query_rsvs_lock);
+
+	as_partition_reservation* old_rsvs = ns->query_rsvs;
+
+	ns->query_rsvs = NULL;
+
+	cf_mutex_unlock(&ns->query_rsvs_lock);
+
+	if (old_rsvs != NULL) {
+		release_rsvs(old_rsvs);
+	}
+}
+
 
 //==========================================================
 // Local helpers.
@@ -413,17 +429,10 @@ static void
 reserve_rsvs(as_query_job* _job)
 {
 	as_namespace* ns = _job->ns;
-	as_partition_reservation* old_rsvs = NULL;
 
 	cf_mutex_lock(&ns->query_rsvs_lock);
 
-	int32_t cur_gen = as_load_int32(&g_partition_generation);
-
-	if (ns->query_rsvs_prev_gen != cur_gen) {
-		ns->query_rsvs_prev_gen = cur_gen;
-
-		old_rsvs = ns->query_rsvs;
-
+	if (ns->query_rsvs == NULL) {
 		ns->query_rsvs =
 				cf_rc_alloc(sizeof(as_partition_reservation) * AS_PARTITIONS);
 
@@ -444,10 +453,6 @@ reserve_rsvs(as_query_job* _job)
 	_job->query_rsvs = ns->query_rsvs;
 
 	cf_mutex_unlock(&ns->query_rsvs_lock);
-
-	if (old_rsvs != NULL) {
-		release_rsvs(old_rsvs);
-	}
 }
 
 static void

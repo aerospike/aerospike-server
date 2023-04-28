@@ -92,7 +92,6 @@ as_namespace_create(char *name)
 	cf_info(AS_NAMESPACE, "{%s} uses JEMalloc arena %d", name, ns->jem_arena);
 
 	cf_mutex_init(&ns->query_rsvs_lock); // nowhere better to do this
-	ns->query_rsvs_prev_gen = -1; // must start same as g_partition_generation
 
 	//--------------------------------------------
 	// Non-0/NULL/false configuration defaults.

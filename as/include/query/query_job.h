@@ -169,3 +169,4 @@ void* as_query_job_run(void* pv_job);
 uint32_t as_query_job_throttle(as_query_job* _job);
 void as_query_job_destroy(as_query_job* _job);
 void as_query_job_info(as_query_job* _job, cf_dyn_buf* db);
+void as_query_job_release_rsvs(struct as_namespace_s* ns);

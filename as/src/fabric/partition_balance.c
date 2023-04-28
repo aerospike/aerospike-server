@@ -49,6 +49,7 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/partition.h"
+#include "query/query_job.h"
 #include "storage/storage.h"
 
 
@@ -243,6 +244,7 @@ as_partition_balance_revert_to_orphan()
 		}
 
 		ns->n_unavailable_partitions = AS_PARTITIONS;
+		as_query_job_release_rsvs(ns);
 	}
 
 	// TODO - ARM TSO plugin - will need release semantic.
@@ -280,7 +282,10 @@ as_partition_balance()
 	as_set_index_balance_lock();
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		balance_namespace(g_config.namespaces[ns_ix], &mq);
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		balance_namespace(ns, &mq);
+		as_query_job_release_rsvs(ns);
 	}
 
 	as_set_index_balance_unlock();
@@ -384,6 +389,7 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 	p->immigrators[dest_ix] = false;
 
 	if (client_replica_maps_update(ns, pid)) {
+		as_query_job_release_rsvs(ns);
 		// TODO - ARM TSO plugin - will need release semantic.
 		as_incr_int32(&g_partition_generation);
 	}
@@ -495,6 +501,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 	if (! is_self_final_master(p)) {
 		if (client_replica_maps_update(ns, pid)) {
+			as_query_job_release_rsvs(ns);
 			// TODO - ARM TSO plugin - will need release semantic.
 			as_incr_int32(&g_partition_generation);
 		}
@@ -515,6 +522,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
+		as_query_job_release_rsvs(ns);
 		// TODO - ARM TSO plugin - will need release semantic.
 		as_incr_int32(&g_partition_generation);
 	}
