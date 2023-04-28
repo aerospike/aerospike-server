@@ -124,7 +124,7 @@ static void assign_socket(as_file_handle* fd_h);
 static uint32_t select_sid(void);
 static uint32_t select_sid_pinned(cf_topo_cpu_index i_cpu);
 static uint32_t select_sid_adq(cf_topo_napi_id id);
-static uint32_t select_sid_specified(const cf_digest* d, uint32_t max_threads, bool use_pid);
+static uint32_t select_sid_specified(const cf_digest* keyd, uint32_t max_threads);
 static void schedule_redistribution(void);
 
 // Demarshal requests.
@@ -292,13 +292,12 @@ as_service_rearm(as_file_handle* fd_h)
 }
 
 void
-as_service_enqueue_internal_raw(as_transaction* tr, const cf_digest* d,
-		uint32_t max_threads, bool use_pid)
+as_service_enqueue_internal_raw(as_transaction* tr, uint32_t max_threads)
 {
+	cf_digest* keyd = &tr->keyd;
+
 	while (true) {
-		uint32_t sid = d != NULL || ! as_config_is_cpu_pinned() ?
-				select_sid_specified(d, max_threads, use_pid) :
-				select_sid_pinned(cf_topo_current_cpu());
+		uint32_t sid = select_sid_specified(keyd, max_threads);
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -557,7 +556,7 @@ select_sid_adq(cf_topo_napi_id id)
 }
 
 static uint32_t
-select_sid_specified(const cf_digest* d, uint32_t max_threads, bool use_pid)
+select_sid_specified(const cf_digest* keyd, uint32_t max_threads)
 {
 	uint32_t n_service_threads = as_load_uint32(&g_config.n_service_threads);
 
@@ -565,15 +564,7 @@ select_sid_specified(const cf_digest* d, uint32_t max_threads, bool use_pid)
 		max_threads = n_service_threads;
 	}
 
-	if (d != NULL) {
-		return use_pid ?
-				as_partition_getid(d) % max_threads :
-				*(uint32_t*)&d->digest[DIGEST_RAND_BASE_BYTE] % max_threads;
-	}
-
-	static uint32_t rr = 0;
-
-	return rr++ % max_threads;
+	return as_partition_getid(keyd) % max_threads;
 }
 
 static void
