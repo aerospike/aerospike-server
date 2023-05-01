@@ -566,6 +566,12 @@ result_data_is_return_map(const cdt_result_data *rd)
 }
 
 static inline bool
+result_data_is_ordered(const cdt_result_data *rd)
+{
+	return rd->type == RESULT_TYPE_ORDERED_MAP;
+}
+
+static inline bool
 result_data_is_return_elements(const cdt_result_data *rd)
 {
 	return (rd->type == RESULT_TYPE_KEY || rd->type == RESULT_TYPE_VALUE ||

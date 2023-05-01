@@ -3912,6 +3912,7 @@ packed_map_get_remove_by_value_interval(const packed_map *map, cdt_op_mem *com,
 
 		uint32_t rm_count = (inverted ? map->ele_count - count : count);
 		bool need_mask = cdt_op_is_modify(com) ||
+				result_data_is_ordered(result) ||
 				(inverted && (result_data_is_return_elements(result) ||
 						result_data_is_return_index(result)));
 		define_cond_cdt_idx_mask(rm_mask, map->ele_count, need_mask,
@@ -3928,7 +3929,7 @@ packed_map_get_remove_by_value_interval(const packed_map *map, cdt_op_mem *com,
 		}
 
 		if (result_data_is_return_elements(result)) {
-			if (inverted) {
+			if (inverted || result_data_is_ordered(result)) {
 				if (! packed_map_build_ele_result_by_mask(map, rm_mask,
 						rm_count, rm_sz, result)) {
 					cf_warning(AS_PARTICLE, "packed_map_get_remove_by_value_interval() invalid packed map");
