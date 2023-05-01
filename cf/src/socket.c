@@ -652,9 +652,10 @@ cf_socket_set_cork(cf_socket *sock, int cork)
 }
 
 void
-cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count)
+cf_socket_keep_alive(cf_socket *sock, uint32_t idle, uint32_t interval,
+		uint32_t count)
 {
-	static const int32_t flag = 1;
+	static const uint32_t flag = 1;
 	forgive_setsockopt(sock->fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
 
 	if (idle > 0) {
@@ -674,7 +675,7 @@ cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t co
 	// setting is ineffective in this case. Approximate (Linux -4.18) or emulate
 	// (Linux 4.18+) keep-alive via TCP_USER_TIMEOUT.
 
-	int32_t user_timeout = (idle + interval * count) * 1000;
+	uint32_t user_timeout = (idle + interval * count) * 1000;
 
 	if (user_timeout > 0) {
 		if (setsockopt(sock->fd, SOL_TCP, TCP_USER_TIMEOUT, &user_timeout,

@@ -264,7 +264,7 @@ void cf_socket_disable_blocking(cf_socket *sock);
 void cf_socket_disable_nagle(cf_socket *sock);
 void cf_socket_enable_nagle(cf_socket *sock);
 void cf_socket_set_cork(cf_socket *sock, int cork);
-void cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count);
+void cf_socket_keep_alive(cf_socket *sock, uint32_t idle, uint32_t interval, uint32_t count);
 void cf_socket_set_send_buffer(cf_socket *sock, int32_t size);
 void cf_socket_set_receive_buffer(cf_socket *sock, int32_t size);
 void cf_socket_set_window(cf_socket *sock, int32_t size);

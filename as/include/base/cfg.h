@@ -164,9 +164,9 @@ typedef struct as_config_s {
 	uint32_t		n_fabric_channel_recv_pools[AS_FABRIC_N_CHANNELS];
 	uint32_t		n_fabric_channel_recv_threads[AS_FABRIC_N_CHANNELS];
 	bool			fabric_keepalive_enabled;
-	int				fabric_keepalive_intvl;
-	int				fabric_keepalive_probes;
-	int				fabric_keepalive_time;
+	uint32_t		fabric_keepalive_intvl;
+	uint32_t		fabric_keepalive_probes;
+	uint32_t		fabric_keepalive_time;
 	uint32_t		fabric_latency_max_ms; // time window for ordering
 	uint32_t		fabric_recv_rearm_threshold;
 	uint32_t		n_fabric_send_threads;

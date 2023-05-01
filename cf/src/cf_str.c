@@ -33,8 +33,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "vector.h"
-
 
 // return 0 on success, -1 on fail
 int cf_str_atoi(char *s, int *value)
@@ -109,54 +107,6 @@ int cf_str_atoi_u32(char *s, unsigned int *value)
 	}
 	*value = i;
 	return(0);
-}
-
-int cf_str_atoi_64(char *s, int64_t *value)
-{
-	int64_t i = 0;
-	bool neg = false;
-
-	if (*s == '-') { neg = true; s++; }
-
-	while (*s >= '0' && *s <= '9') {
-		i *= 10;
-		i += *s - '0';
-		s++;
-	}
-	switch (*s) {
-		case 'k':
-		case 'K':
-			i *= 1024L;
-			s++;
-			break;
-		case 'M':
-		case 'm':
-			i *= (1024L * 1024L);
-			s++;
-			break;
-		case 'G':
-		case 'g':
-			i *= (1024L * 1024L * 1024L);
-			s++;
-			break;
-		case 'T':
-		case 't':
-			i *= (1024L * 1024L * 1024L * 1024L);
-			s++;
-			break;
-		case 'P':
-		case 'p':
-			i *= (1024L * 1024L * 1024L * 1024L * 1024L);
-			s++;
-			break;
-		default:
-			break;
-	}
-	if (*s != 0) {
-		return(-1); // reached a non-num before EOL
-	}
-	*value = neg ? -i : i;
-	 return(0);
 }
 
 int cf_str_atoi_u64(char *s, uint64_t *value)
@@ -388,24 +338,4 @@ cf_strtol_i32(const char *s, int32_t *value)
 	*value = (int32_t)i;
 
 	return 0;
-}
-
-void
-cf_str_split(char *fmt, char *str, cf_vector *v)
-{
-	char c;
-	char *prev = str;
-	while ((c = *str)) {
-		for (uint32_t j = 0; fmt[j]; j++) {
-			if (fmt[j] == c) {
-				*str = 0;
-				cf_vector_append(v, &prev);
-				prev = str+1;
-				break;
-			}
-		}
-		str++;
-	}
-	if (prev != str)
-		cf_vector_append(v, &prev);
 }

@@ -28,7 +28,6 @@
 // returns 0 on success.
 int cf_str_atoi(char *s, int *value);
 int cf_str_atoi_u32(char *s, uint32_t *value);
-int cf_str_atoi_64(char *s, int64_t *value);
 int cf_str_atoi_u64(char *s, uint64_t *value);
 int cf_str_atoi_seconds(char *s, uint32_t *value);
 
@@ -37,13 +36,6 @@ int cf_strtoul_u32(const char *s, uint32_t *value);
 int cf_strtoul_u64(const char *s, uint64_t *value);
 int cf_strtoul_u64_raw(const char *s, uint64_t *value);
 int cf_strtol_i32(const char *s, int32_t *value);
-
-// Split the string 'str' based on input breaks in 'fmt'.
-// - The splitting is destructive.
-// - The pointers will be added to the end of vector '*v'.
-// - The vector better be created with object size 'void *'.
-struct cf_vector_s;
-extern void cf_str_split(char *fmt, char *str, struct cf_vector_s *v);
 
 static inline int
 cf_str_strnchr(const uint8_t *s, int sz, int c)

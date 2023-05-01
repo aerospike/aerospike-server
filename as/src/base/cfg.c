@@ -1494,21 +1494,21 @@ cfg_find_tok(const char* tok, const cfg_opt opts[], int num_opts)
 // We won't parse lines longer than this.
 #define MAX_LINE_SIZE 1024
 
-void
+static void
 cfg_unknown_name_tok(const cfg_line* p_line)
 {
 	cf_crash_nostack(AS_CFG, "line %d :: unknown config parameter name '%s'",
 			p_line->num, p_line->name_tok);
 }
 
-void
+static void
 cfg_unknown_val_tok_1(const cfg_line* p_line)
 {
 	cf_crash_nostack(AS_CFG, "line %d :: %s has unknown value '%s'",
 			p_line->num, p_line->name_tok, p_line->val_tok_1);
 }
 
-void
+static void
 cfg_obsolete(const cfg_line* p_line, const char* message)
 {
 	cf_crash_nostack(AS_CFG, "line %d :: '%s' is obsolete%s%s",
@@ -1516,7 +1516,7 @@ cfg_obsolete(const cfg_line* p_line, const char* message)
 					message ? message : "");
 }
 
-char*
+static char*
 cfg_strdup_anyval(const cfg_line* p_line, const char* val_tok, size_t max_size,
 		bool is_required)
 {
@@ -1538,33 +1538,33 @@ cfg_strdup_anyval(const cfg_line* p_line, const char* val_tok, size_t max_size,
 	return cf_strdup(val_tok);
 }
 
-char*
+static char*
 cfg_strdup(const cfg_line* p_line, size_t max_size)
 {
 	return cfg_strdup_anyval(p_line, p_line->val_tok_1, max_size, true);
 }
 
-char*
+static char*
 cfg_strdup_no_checks(const cfg_line* p_line)
 {
 	return cfg_strdup_anyval(p_line, p_line->val_tok_1, MAX_LINE_SIZE, true);
 }
 
-char*
+static char*
 cfg_strdup_val2_no_checks(const cfg_line* p_line, bool is_required)
 {
 	return cfg_strdup_anyval(p_line, p_line->val_tok_2, MAX_LINE_SIZE,
 			is_required);
 }
 
-char*
+static char*
 cfg_strdup_val3_no_checks(const cfg_line* p_line, bool is_required)
 {
 	return cfg_strdup_anyval(p_line, p_line->val_tok_3, MAX_LINE_SIZE,
 			is_required);
 }
 
-char*
+static char*
 cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
 {
 	for (int i = 0; i < num_toks; i++) {
@@ -1595,7 +1595,7 @@ cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
 	return NULL;
 }
 
-void
+static void
 cfg_strcpy(const cfg_line* p_line, char* p_str, size_t max_size)
 {
 	size_t tok1_len = strlen(p_line->val_tok_1);
@@ -1613,7 +1613,7 @@ cfg_strcpy(const cfg_line* p_line, char* p_str, size_t max_size)
 	strcpy(p_str, p_line->val_tok_1);
 }
 
-bool
+static bool
 cfg_bool(const cfg_line* p_line)
 {
 	if (strcasecmp(p_line->val_tok_1, "true") == 0 || strcasecmp(p_line->val_tok_1, "yes") == 0) {
@@ -1636,139 +1636,13 @@ cfg_bool(const cfg_line* p_line)
 	return false;
 }
 
-bool
+static bool
 cfg_bool_no_value_is_true(const cfg_line* p_line)
 {
 	return (*p_line->val_tok_1 == '\0') ? true : cfg_bool(p_line);
 }
 
-int64_t
-cfg_i64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
-{
-	if (*val_tok == '\0') {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must specify an integer value",
-				p_line->num, p_line->name_tok);
-	}
-
-	int64_t value;
-
-	if (0 != cf_str_atoi_64(val_tok, &value)) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must be a number, not %s",
-				p_line->num, p_line->name_tok, val_tok);
-	}
-
-	return value;
-}
-
-int64_t
-cfg_i64_no_checks(const cfg_line* p_line)
-{
-	return cfg_i64_anyval_no_checks(p_line, p_line->val_tok_1);
-}
-
-int64_t
-cfg_i64_val2_no_checks(const cfg_line* p_line)
-{
-	return cfg_i64_anyval_no_checks(p_line, p_line->val_tok_2);
-}
-
-int64_t
-cfg_i64_val3_no_checks(const cfg_line* p_line)
-{
-	return cfg_i64_anyval_no_checks(p_line, p_line->val_tok_3);
-}
-
-int64_t
-cfg_i64(const cfg_line* p_line, int64_t min, int64_t max)
-{
-	int64_t value = cfg_i64_no_checks(p_line);
-
-	if (value < min || value > max) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %ld and <= %ld, not %ld",
-				p_line->num, p_line->name_tok, min, max, value);
-	}
-
-	return value;
-}
-
-int
-cfg_int_no_checks(const cfg_line* p_line)
-{
-	int64_t value = cfg_i64_no_checks(p_line);
-
-	if (value < INT32_MIN || value > INT32_MAX) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
-				p_line->num, p_line->name_tok, value);
-	}
-
-	return (int)value;
-}
-
-int
-cfg_int(const cfg_line* p_line, int min, int max)
-{
-	int value = cfg_int_no_checks(p_line);
-
-	if (value < min || value > max) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %d and <= %d, not %d",
-				p_line->num, p_line->name_tok, min, max, value);
-	}
-
-	return value;
-}
-
-int
-cfg_int_val2_no_checks(const cfg_line* p_line)
-{
-	int64_t value = cfg_i64_val2_no_checks(p_line);
-
-	if (value < INT32_MIN || value > INT32_MAX) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
-				p_line->num, p_line->name_tok, value);
-	}
-
-	return (int)value;
-}
-
-int
-cfg_int_val3_no_checks(const cfg_line* p_line)
-{
-	int64_t value = cfg_i64_val3_no_checks(p_line);
-
-	if (value < INT32_MIN || value > INT32_MAX) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
-				p_line->num, p_line->name_tok, value);
-	}
-
-	return (int)value;
-}
-int
-cfg_int_val2(const cfg_line* p_line, int min, int max)
-{
-	int value = cfg_int_val2_no_checks(p_line);
-
-	if (value < min || value > max) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %d and <= %d, not %d",
-				p_line->num, p_line->name_tok, min, max, value);
-	}
-
-	return value;
-}
-
-int
-cfg_int_val3(const cfg_line* p_line, int min, int max)
-{
-	int value = cfg_int_val3_no_checks(p_line);
-
-	if (value < min || value > max) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %d and <= %d, not %d",
-				p_line->num, p_line->name_tok, min, max, value);
-	}
-
-	return value;
-}
-
-uint64_t
+static uint64_t
 cfg_x64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
 {
 	if (*val_tok == '\0') {
@@ -1786,13 +1660,13 @@ cfg_x64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
 	return value;
 }
 
-uint64_t
+static uint64_t
 cfg_x64_no_checks(const cfg_line* p_line)
 {
 	return cfg_x64_anyval_no_checks(p_line, p_line->val_tok_1);
 }
 
-uint64_t
+static uint64_t
 cfg_x64(const cfg_line* p_line, uint64_t min, uint64_t max)
 {
 	uint64_t value = cfg_x64_no_checks(p_line);
@@ -1811,7 +1685,7 @@ cfg_x64(const cfg_line* p_line, uint64_t min, uint64_t max)
 	return value;
 }
 
-uint64_t
+static uint64_t
 cfg_u64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
 {
 	if (*val_tok == '\0') {
@@ -1829,19 +1703,19 @@ cfg_u64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
 	return value;
 }
 
-uint64_t
+static uint64_t
 cfg_u64_no_checks(const cfg_line* p_line)
 {
 	return cfg_u64_anyval_no_checks(p_line, p_line->val_tok_1);
 }
 
-uint64_t
+static uint64_t
 cfg_u64_val2_no_checks(const cfg_line* p_line)
 {
 	return cfg_u64_anyval_no_checks(p_line, p_line->val_tok_2);
 }
 
-uint64_t
+static uint64_t
 cfg_u64(const cfg_line* p_line, uint64_t min, uint64_t max)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
@@ -1861,7 +1735,7 @@ cfg_u64(const cfg_line* p_line, uint64_t min, uint64_t max)
 }
 
 // Note - accepts 0 if min is 0.
-uint64_t
+static uint64_t
 cfg_u64_power_of_2(const cfg_line* p_line, uint64_t min, uint64_t max)
 {
 	uint64_t value = cfg_u64(p_line, min, max);
@@ -1874,7 +1748,7 @@ cfg_u64_power_of_2(const cfg_line* p_line, uint64_t min, uint64_t max)
 	return value;
 }
 
-uint32_t
+static uint32_t
 cfg_u32_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
@@ -1887,7 +1761,7 @@ cfg_u32_no_checks(const cfg_line* p_line)
 	return (uint32_t)value;
 }
 
-uint32_t
+static uint32_t
 cfg_u32(const cfg_line* p_line, uint32_t min, uint32_t max)
 {
 	uint32_t value = cfg_u32_no_checks(p_line);
@@ -1907,7 +1781,7 @@ cfg_u32(const cfg_line* p_line, uint32_t min, uint32_t max)
 }
 
 // Note - accepts 0 if min is 0.
-uint32_t
+static uint32_t
 cfg_u32_power_of_2(const cfg_line* p_line, uint32_t min, uint32_t max)
 {
 	uint32_t value = cfg_u32(p_line, min, max);
@@ -1920,7 +1794,7 @@ cfg_u32_power_of_2(const cfg_line* p_line, uint32_t min, uint32_t max)
 	return value;
 }
 
-uint32_t
+static uint32_t
 cfg_u32_multiple_of(const cfg_line* p_line, uint32_t factor)
 {
 	cf_assert(factor != 0, AS_CFG, "can't ask for multiple of 0");
@@ -1935,7 +1809,7 @@ cfg_u32_multiple_of(const cfg_line* p_line, uint32_t factor)
 	return value;
 }
 
-uint16_t
+static uint16_t
 cfg_u16_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
@@ -1948,7 +1822,7 @@ cfg_u16_no_checks(const cfg_line* p_line)
 	return (uint16_t)value;
 }
 
-uint16_t
+static uint16_t
 cfg_u16(const cfg_line* p_line, uint16_t min, uint16_t max)
 {
 	uint16_t value = cfg_u16_no_checks(p_line);
@@ -1967,7 +1841,33 @@ cfg_u16(const cfg_line* p_line, uint16_t min, uint16_t max)
 	return value;
 }
 
-uint8_t
+static uint16_t
+cfg_u16_val2_no_checks(const cfg_line* p_line)
+{
+	uint64_t value = cfg_u64_val2_no_checks(p_line);
+
+	if (value > UINT16_MAX) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s %lu overflows unsigned short",
+				p_line->num, p_line->name_tok, value);
+	}
+
+	return (uint16_t)value;
+}
+
+static uint16_t
+cfg_u16_val2(const cfg_line* p_line, uint16_t min, uint16_t max)
+{
+	uint16_t value = cfg_u16_val2_no_checks(p_line);
+
+	if (value < min || value > max) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %u and <= %u, not %u",
+				p_line->num, p_line->name_tok, min, max, value);
+	}
+
+	return value;
+}
+
+static uint8_t
 cfg_u8_no_checks(const cfg_line* p_line)
 {
 	uint64_t value = cfg_u64_no_checks(p_line);
@@ -1980,7 +1880,7 @@ cfg_u8_no_checks(const cfg_line* p_line)
 	return (uint8_t)value;
 }
 
-uint8_t
+static uint8_t
 cfg_u8(const cfg_line* p_line, uint8_t min, uint8_t max)
 {
 	uint8_t value = cfg_u8_no_checks(p_line);
@@ -1999,7 +1899,7 @@ cfg_u8(const cfg_line* p_line, uint8_t min, uint8_t max)
 	return value;
 }
 
-uint32_t
+static uint32_t
 cfg_seconds_no_checks(const cfg_line* p_line)
 {
 	if (*p_line->val_tok_1 == '\0') {
@@ -2017,7 +1917,7 @@ cfg_seconds_no_checks(const cfg_line* p_line)
 	return value;
 }
 
-uint32_t
+static uint32_t
 cfg_seconds(const cfg_line* p_line, uint32_t min, uint32_t max)
 {
 	uint32_t value = cfg_seconds_no_checks(p_line);
@@ -2037,19 +1937,19 @@ cfg_seconds(const cfg_line* p_line, uint32_t min, uint32_t max)
 }
 
 // Minimum & maximum port numbers:
-const int CFG_MIN_PORT = 1024;
-const int CFG_MAX_PORT = UINT16_MAX;
+const uint16_t CFG_MIN_PORT = 1024;
+const uint16_t CFG_MAX_PORT = UINT16_MAX;
 
-cf_ip_port
+static cf_ip_port
 cfg_port(const cfg_line* p_line)
 {
-	return (cf_ip_port)cfg_int(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
+	return (cf_ip_port)cfg_u16(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
 }
 
-cf_ip_port
+static cf_ip_port
 cfg_port_val2(const cfg_line* p_line)
 {
-	return (cf_ip_port)cfg_int_val2(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
+	return (cf_ip_port)cfg_u16_val2(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
 }
 
 //------------------------------------------------
@@ -2758,16 +2658,16 @@ as_config_init(const char* config_file)
 				c->fabric_keepalive_enabled = cfg_bool(&line);
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_INTVL:
-				c->fabric_keepalive_intvl = cfg_int_no_checks(&line);
+				c->fabric_keepalive_intvl = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_PROBES:
-				c->fabric_keepalive_probes = cfg_int_no_checks(&line);
+				c->fabric_keepalive_probes = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_TIME:
-				c->fabric_keepalive_time = cfg_int_no_checks(&line);
+				c->fabric_keepalive_time = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_FABRIC_LATENCY_MAX_MS:
-				c->fabric_latency_max_ms = cfg_int(&line, 0, 1000);
+				c->fabric_latency_max_ms = cfg_u32(&line, 0, 1000);
 				break;
 			case CASE_NETWORK_FABRIC_PORT:
 				c->fabric.bind_port = cfg_port(&line);

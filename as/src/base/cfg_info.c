@@ -270,18 +270,18 @@ static void
 cfg_get_network(cf_dyn_buf* db)
 {
 	// Service:
-	info_append_int(db, "service.access-port", g_config.service.std_port);
+	info_append_uint32(db, "service.access-port", g_config.service.std_port);
 	append_addrs(db, "service.access-address", &g_config.service.std);
 	append_addrs(db, "service.address", &g_config.service.bind);
-	info_append_int(db, "service.alternate-access-port", g_config.service.alt_port);
+	info_append_uint32(db, "service.alternate-access-port", g_config.service.alt_port);
 	append_addrs(db, "service.alternate-access-address", &g_config.service.alt);
-	info_append_int(db, "service.port", g_config.service.bind_port);
+	info_append_uint32(db, "service.port", g_config.service.bind_port);
 
-	info_append_int(db, "service.tls-port", g_config.tls_service.bind_port);
+	info_append_uint32(db, "service.tls-port", g_config.tls_service.bind_port);
 	append_addrs(db, "service.tls-address", &g_config.tls_service.bind);
-	info_append_int(db, "service.tls-access-port", g_config.tls_service.std_port);
+	info_append_uint32(db, "service.tls-access-port", g_config.tls_service.std_port);
 	append_addrs(db, "service.tls-access-address", &g_config.tls_service.std);
-	info_append_int(db, "service.tls-alternate-access-port", g_config.tls_service.alt_port);
+	info_append_uint32(db, "service.tls-alternate-access-port", g_config.tls_service.alt_port);
 	append_addrs(db, "service.tls-alternate-access-address", &g_config.tls_service.alt);
 	info_append_string_safe(db, "service.tls-name", g_config.tls_service.tls_our_name);
 
@@ -298,7 +298,7 @@ cfg_get_network(cf_dyn_buf* db)
 	// Fabric:
 	append_addrs(db, "fabric.address", &g_config.fabric.bind);
 	append_addrs(db, "fabric.tls-address", &g_config.tls_fabric.bind);
-	info_append_int(db, "fabric.tls-port", g_config.tls_fabric.bind_port);
+	info_append_uint32(db, "fabric.tls-port", g_config.tls_fabric.bind_port);
 	info_append_string_safe(db, "fabric.tls-name", g_config.tls_fabric.tls_our_name);
 	info_append_uint32(db, "fabric.channel-bulk-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_BULK]);
 	info_append_uint32(db, "fabric.channel-bulk-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK]);
@@ -310,17 +310,17 @@ cfg_get_network(cf_dyn_buf* db)
 	info_append_uint32(db, "fabric.channel-rw-recv-pools", g_config.n_fabric_channel_recv_pools[AS_FABRIC_CHANNEL_RW]);
 	info_append_uint32(db, "fabric.channel-rw-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW]);
 	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
-	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
-	info_append_int(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
-	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
-	info_append_int(db, "fabric.latency-max-ms", g_config.fabric_latency_max_ms);
-	info_append_int(db, "fabric.port", g_config.fabric.bind_port);
-	info_append_int(db, "fabric.recv-rearm-threshold", g_config.fabric_recv_rearm_threshold);
-	info_append_int(db, "fabric.send-threads", g_config.n_fabric_send_threads);
+	info_append_uint32(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
+	info_append_uint32(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
+	info_append_uint32(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
+	info_append_uint32(db, "fabric.latency-max-ms", g_config.fabric_latency_max_ms);
+	info_append_uint32(db, "fabric.port", g_config.fabric.bind_port);
+	info_append_uint32(db, "fabric.recv-rearm-threshold", g_config.fabric_recv_rearm_threshold);
+	info_append_uint32(db, "fabric.send-threads", g_config.n_fabric_send_threads);
 
 	// Info:
 	append_addrs(db, "info.address", &g_config.info.bind);
-	info_append_int(db, "info.port", g_config.info.bind_port);
+	info_append_uint32(db, "info.port", g_config.info.bind_port);
 
 	// TLS:
 	for (uint32_t i = 0; i < g_config.n_tls_specs; ++i) {
