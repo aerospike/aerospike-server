@@ -244,7 +244,7 @@ as_partition_balance_revert_to_orphan()
 		}
 
 		ns->n_unavailable_partitions = AS_PARTITIONS;
-		as_query_job_swizzle_rsvs(ns, (uint32_t)-1);
+		as_query_job_swizzle_rsvs(ns);
 	}
 
 	// TODO - ARM TSO plugin - will need release semantic.
@@ -285,7 +285,7 @@ as_partition_balance()
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		balance_namespace(ns, &mq);
-		as_query_job_swizzle_rsvs(ns, (uint32_t)-1);
+		as_query_job_swizzle_rsvs(ns);
 	}
 
 	as_set_index_balance_unlock();
@@ -388,8 +388,10 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 
 	p->immigrators[dest_ix] = false;
 
+	bool swizzle = false;
+
 	if (client_replica_maps_update(ns, pid)) {
-		as_query_job_swizzle_rsvs(ns, pid);
+		swizzle = true;
 		// TODO - ARM TSO plugin - will need release semantic.
 		as_incr_int32(&g_partition_generation);
 	}
@@ -410,6 +412,10 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	cf_mutex_unlock(&p->lock);
+
+	if (swizzle) {
+		as_query_job_swizzle_rsvs(ns);
+	}
 
 	if (w_ix >= 0) {
 		while (cf_queue_pop(&mq, &task, CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
@@ -499,14 +505,21 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		as_storage_save_pmeta(ns, p);
 	}
 
+	bool swizzle = false;
+
 	if (! is_self_final_master(p)) {
 		if (client_replica_maps_update(ns, pid)) {
-			as_query_job_swizzle_rsvs(ns, pid);
+			swizzle = true;
 			// TODO - ARM TSO plugin - will need release semantic.
 			as_incr_int32(&g_partition_generation);
 		}
 
 		cf_mutex_unlock(&p->lock);
+
+		if (swizzle) {
+			as_query_job_swizzle_rsvs(ns);
+		}
+
 		return AS_MIGRATE_OK;
 	}
 
@@ -522,13 +535,18 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		as_query_job_swizzle_rsvs(ns, pid);
+		swizzle = true;
 		// TODO - ARM TSO plugin - will need release semantic.
 		as_incr_int32(&g_partition_generation);
 	}
 
 	if (p->pending_immigrations != 0) {
 		cf_mutex_unlock(&p->lock);
+
+		if (swizzle) {
+			as_query_job_swizzle_rsvs(ns);
+		}
+
 		return AS_MIGRATE_OK;
 	}
 
@@ -560,6 +578,10 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	cf_mutex_unlock(&p->lock);
+
+	if (swizzle) {
+		as_query_job_swizzle_rsvs(ns);
+	}
 
 	while (cf_queue_pop(&mq, &task, 0) == CF_QUEUE_OK) {
 		as_migrate_emigrate(&task);
