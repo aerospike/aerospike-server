@@ -4168,7 +4168,7 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 	case RESULT_TYPE_KEY_VALUE_MAP:
 	case RESULT_TYPE_UNORDERED_MAP:
 	case RESULT_TYPE_ORDERED_MAP:
-		if (inverted) {
+		if (inverted || result_data_is_ordered(result)) {
 			if (! packed_map_build_ele_result_by_mask(map, rm_mask,
 					rm_count, rm_sz, result)) {
 				cf_warning(AS_PARTICLE, "packed_map_get_remove_by_rank_range() invalid packed map");
