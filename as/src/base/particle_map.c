@@ -4098,6 +4098,7 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 	const order_index *ordidx = &map->ordidx;
 	define_cdt_idx_mask(rm_mask, map->ele_count, com->alloc_idx);
 	order_index ret_idxs;
+	bool is_build_elements_by_mask = inverted || result_data_is_ordered(result);
 
 	if (! order_index_is_null(ordidx)) {
 		packed_map_ensure_ordidx_filled(map);
@@ -4116,7 +4117,7 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 		cdt_idx_mask_set_by_ordidx(rm_mask, &heap._, heap.filled, count32,
 				inverted);
 
-		if (! inverted) {
+		if (! is_build_elements_by_mask) {
 			if (heap.cmp == MSGPACK_CMP_LESS) {
 				// Reorder results from lowest to highest order.
 				order_heap_reverse_end(&heap, count32);
@@ -4168,9 +4169,9 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 	case RESULT_TYPE_KEY_VALUE_MAP:
 	case RESULT_TYPE_UNORDERED_MAP:
 	case RESULT_TYPE_ORDERED_MAP:
-		if (inverted || result_data_is_ordered(result)) {
-			if (! packed_map_build_ele_result_by_mask(map, rm_mask,
-					rm_count, rm_sz, result)) {
+		if (is_build_elements_by_mask) {
+			if (! packed_map_build_ele_result_by_mask(map, rm_mask, rm_count,
+					rm_sz, result)) {
 				cf_warning(AS_PARTICLE, "packed_map_get_remove_by_rank_range() invalid packed map");
 				return -AS_ERR_PARAMETER;
 			}
