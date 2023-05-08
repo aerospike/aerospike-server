@@ -120,8 +120,7 @@ as_xdr_io_event(uint32_t mask, void* data)
 }
 
 void
-as_xdr_timer_event(uint32_t sid, cf_poll_event* events, int32_t n_events,
-		uint32_t e_ix)
+as_xdr_timer_event(cf_poll_event* events, int32_t n_events, uint32_t e_ix)
 {
 }
 
