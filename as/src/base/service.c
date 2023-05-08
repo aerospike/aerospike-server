@@ -75,7 +75,6 @@
 #define XDR_READ_BUFFER_SIZE (15 * 1024 * 1024)
 
 typedef struct thread_ctx_s {
-	uint32_t sid;
 	cf_topo_cpu_index i_cpu;
 	cf_mutex* lock;
 	cf_poll poll;
@@ -124,7 +123,7 @@ static void assign_socket(as_file_handle* fd_h);
 static uint32_t select_sid(void);
 static uint32_t select_sid_pinned(cf_topo_cpu_index i_cpu);
 static uint32_t select_sid_adq(cf_topo_napi_id id);
-static uint32_t select_sid_specified(const cf_digest* keyd, uint32_t max_threads);
+static uint32_t select_sid_specified(const cf_digest* keyd);
 static void schedule_redistribution(void);
 
 // Demarshal requests.
@@ -292,12 +291,12 @@ as_service_rearm(as_file_handle* fd_h)
 }
 
 void
-as_service_enqueue_internal_raw(as_transaction* tr, uint32_t max_threads)
+as_service_enqueue_internal(as_transaction* tr)
 {
 	cf_digest* keyd = &tr->keyd;
 
 	while (true) {
-		uint32_t sid = select_sid_specified(keyd, max_threads);
+		uint32_t sid = select_sid_specified(keyd);
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -324,8 +323,6 @@ create_service_thread(uint32_t sid)
 	thread_ctx* ctx = cf_malloc(sizeof(thread_ctx));
 
 	cf_detail(AS_SERVICE, "starting sid %u ctx %p", sid, ctx);
-
-	ctx->sid = sid;
 
 	if (as_config_is_cpu_pinned()) {
 		ctx->i_cpu = (cf_topo_cpu_index)(sid % cf_topo_count_cpus());
@@ -556,15 +553,9 @@ select_sid_adq(cf_topo_napi_id id)
 }
 
 static uint32_t
-select_sid_specified(const cf_digest* keyd, uint32_t max_threads)
+select_sid_specified(const cf_digest* keyd)
 {
-	uint32_t n_service_threads = as_load_uint32(&g_config.n_service_threads);
-
-	if (max_threads == 0 || max_threads > n_service_threads) {
-		max_threads = n_service_threads;
-	}
-
-	return as_partition_getid(keyd) % max_threads;
+	return as_partition_getid(keyd) % g_config.n_service_threads;
 }
 
 static void
@@ -638,7 +629,7 @@ run_service(void* udata)
 			}
 
 			if (type == CF_POLL_DATA_XDR_TIMER) {
-				as_xdr_timer_event(ctx->sid, events, n_events, i);
+				as_xdr_timer_event(events, n_events, i);
 				continue;
 			}
 			// else - type == CF_POLL_DATA_CLIENT_IO

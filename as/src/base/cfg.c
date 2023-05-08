@@ -691,7 +691,6 @@ typedef enum {
 	CASE_XDR_DC_AUTH_USER,
 	CASE_XDR_DC_CONNECTOR,
 	CASE_XDR_DC_MAX_RECOVERIES_INTERLEAVED,
-	CASE_XDR_DC_MAX_USED_SERVICE_THREADS,
 	CASE_XDR_DC_NODE_ADDRESS_PORT,
 	CASE_XDR_DC_PERIOD_MS,
 	CASE_XDR_DC_TLS_NAME,
@@ -1258,7 +1257,6 @@ const cfg_opt XDR_DC_OPTS[] = {
 		{ "auth-user",						CASE_XDR_DC_AUTH_USER },
 		{ "connector",						CASE_XDR_DC_CONNECTOR },
 		{ "max-recoveries-interleaved",		CASE_XDR_DC_MAX_RECOVERIES_INTERLEAVED },
-		{ "max-used-service-threads",		CASE_XDR_DC_MAX_USED_SERVICE_THREADS },
 		{ "node-address-port",				CASE_XDR_DC_NODE_ADDRESS_PORT },
 		{ "period-ms",						CASE_XDR_DC_PERIOD_MS },
 		{ "tls-name",						CASE_XDR_DC_TLS_NAME },
@@ -3781,9 +3779,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_MAX_RECOVERIES_INTERLEAVED:
 				dc_cfg->max_recoveries_interleaved = cfg_u32_no_checks(&line);
-				break;
-			case CASE_XDR_DC_MAX_USED_SERVICE_THREADS:
-				dc_cfg->max_used_service_threads = cfg_u32(&line, 0, MAX_SERVICE_THREADS);
 				break;
 			case CASE_XDR_DC_NODE_ADDRESS_PORT:
 				as_xdr_startup_add_seed(dc_cfg, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, true), cfg_strdup_val3_no_checks(&line, false));
