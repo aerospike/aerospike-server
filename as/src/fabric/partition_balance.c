@@ -244,7 +244,7 @@ as_partition_balance_revert_to_orphan()
 		}
 
 		ns->n_unavailable_partitions = AS_PARTITIONS;
-		as_query_job_swizzle_rsvs(ns);
+		as_query_job_release_rsvs(ns);
 	}
 
 	// TODO - ARM TSO plugin - will need release semantic.
@@ -285,7 +285,7 @@ as_partition_balance()
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		balance_namespace(ns, &mq);
-		as_query_job_swizzle_rsvs(ns);
+		as_query_job_release_rsvs(ns);
 	}
 
 	as_set_index_balance_unlock();
@@ -414,7 +414,7 @@ as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 	cf_mutex_unlock(&p->lock);
 
 	if (swizzle) {
-		as_query_job_swizzle_rsvs(ns);
+		as_query_job_release_rsvs(ns);
 	}
 
 	if (w_ix >= 0) {
@@ -517,7 +517,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		cf_mutex_unlock(&p->lock);
 
 		if (swizzle) {
-			as_query_job_swizzle_rsvs(ns);
+			as_query_job_release_rsvs(ns);
 		}
 
 		return AS_MIGRATE_OK;
@@ -544,7 +544,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		cf_mutex_unlock(&p->lock);
 
 		if (swizzle) {
-			as_query_job_swizzle_rsvs(ns);
+			as_query_job_release_rsvs(ns);
 		}
 
 		return AS_MIGRATE_OK;
@@ -580,7 +580,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	cf_mutex_unlock(&p->lock);
 
 	if (swizzle) {
-		as_query_job_swizzle_rsvs(ns);
+		as_query_job_release_rsvs(ns);
 	}
 
 	while (cf_queue_pop(&mq, &task, 0) == CF_QUEUE_OK) {
