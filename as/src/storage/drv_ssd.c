@@ -3203,7 +3203,8 @@ ssd_init_synchronous(drv_ssds *ssds)
 	ssds->generic->prefix.random = random;
 	ssds->generic->prefix.flags &= ~DRV_HEADER_FLAG_TRUSTED;
 
-	if (fresh_drive || (ns->dirty_restart && non_commit_drive)) {
+	if (fresh_drive || n_ssds < prefix_first->n_devices ||
+			(ns->dirty_restart && non_commit_drive)) {
 		ssd_adjust_versions(ns, ssds->generic->pmeta);
 	}
 
