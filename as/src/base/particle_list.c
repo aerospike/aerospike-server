@@ -2660,6 +2660,9 @@ packed_list_get_remove_all_by_value_list_ordered(const packed_list *list,
 		cdt_idx_mask_set_by_irc(rm_mask, &rm_rc, NULL, inverted);
 		rm_count = cdt_idx_mask_bit_count(rm_mask, list->ele_count);
 	}
+	else {
+		rm_count = rc_count;
+	}
 
 	if (cdt_op_is_modify(com)) {
 		if (rm_count == list->ele_count) {
