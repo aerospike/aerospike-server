@@ -328,11 +328,7 @@ sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 	}
 
 	uint64_t mem_total = 0;
-	uint64_t active = 0;
-	uint64_t inactive = 0;
-	uint64_t cached = 0;
-	uint64_t buffers = 0;
-	uint64_t shmem = 0;
+	uint64_t mem_available = 0;
 	uint64_t anon_huge_pages = 0;
 
 	char* cur = buf;
@@ -359,33 +355,16 @@ sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 		if (strcmp(name_tok, "MemTotal") == 0) {
 			mem_total = strtoul(value_tok, NULL, 0);
 		}
-		else if (strcmp(name_tok, "Active") == 0) {
-			active = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "Inactive") == 0) {
-			inactive = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "Cached") == 0) {
-			cached = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "Buffers") == 0) {
-			buffers = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "Shmem") == 0) {
-			shmem = strtoul(value_tok, NULL, 0);
+		else if (strcmp(name_tok, "MemAvailable") == 0) {
+			mem_available = strtoul(value_tok, NULL, 0);
 		}
 		else if (strcmp(name_tok, "AnonHugePages") == 0) {
 			anon_huge_pages = strtoul(value_tok, NULL, 0);
 		}
 	}
 
-	// Add the cached memory and buffers, which are effectively available if and
-	// when needed. Caution: subtract the shared memory, which is included in
-	// the cached memory, but is not available.
-	uint64_t avail = mem_total - active - inactive + cached + buffers - shmem;
-
-	*free_mem_kbytes = avail;
-	*free_mem_pct = mem_total == 0 ? 0 : (avail * 100) / mem_total;
+	*free_mem_kbytes = mem_available;
+	*free_mem_pct = mem_total == 0 ? 0 : (mem_available * 100) / mem_total;
 	*thp_mem_kbytes = anon_huge_pages;
 }
 
