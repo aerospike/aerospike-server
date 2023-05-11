@@ -433,6 +433,7 @@ run_truncate(void* arg)
 		}
 
 		cbi.tree = tree;
+		cbi.n_deleted = 0;
 
 		if (! (jobi->use_set_index && as_set_index_reduce(ns, tree,
 				jobi->set_id, NULL, truncate_reduce_cb, (void*)&cbi))) {
