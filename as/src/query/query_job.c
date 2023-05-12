@@ -405,28 +405,13 @@ as_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 }
 
 void
-as_query_job_swizzle_rsvs(as_namespace* ns)
+as_query_job_release_rsvs(as_namespace* ns)
 {
-	as_partition_reservation* new_rsvs =
-			cf_rc_alloc(sizeof(as_partition_reservation) * AS_PARTITIONS);
-
-	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		as_partition_reservation* rsv = &new_rsvs[pid];
-
-		if (as_partition_reserve_full(ns, pid, rsv) != 0) {
-			// Null tree causes slice_fn to send partition-done error.
-			*rsv = (as_partition_reservation){
-					.ns = ns,
-					.p = &ns->partitions[pid]
-			};
-		}
-	}
-
 	cf_mutex_lock(&ns->query_rsvs_lock);
 
 	as_partition_reservation* old_rsvs = ns->query_rsvs;
 
-	ns->query_rsvs = new_rsvs;
+	ns->query_rsvs = NULL;
 
 	cf_mutex_unlock(&ns->query_rsvs_lock);
 
@@ -446,6 +431,23 @@ reserve_rsvs(as_query_job* _job)
 	as_namespace* ns = _job->ns;
 
 	cf_mutex_lock(&ns->query_rsvs_lock);
+
+	if (ns->query_rsvs == NULL) {
+		ns->query_rsvs =
+				cf_rc_alloc(sizeof(as_partition_reservation) * AS_PARTITIONS);
+
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition_reservation* rsv = &ns->query_rsvs[pid];
+
+			if (as_partition_reserve_full(ns, pid, rsv) != 0) {
+				// Null tree causes slice_fn to send partition-done error.
+				*rsv = (as_partition_reservation){
+						.ns = ns,
+						.p = &ns->partitions[pid]
+				};
+			}
+		}
+	}
 
 	cf_rc_reserve(ns->query_rsvs);
 	_job->query_rsvs = ns->query_rsvs;
