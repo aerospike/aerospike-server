@@ -2427,6 +2427,32 @@ ssd_read_header(drv_ssd *ssd)
 				header->unique.device_id);
 	}
 
+	// If shadow shut down cleanly, cold start off local drive if it's there.
+	// Note - before ssd_header_validate_cfg() which might write to header.
+	if (use_shadow && (prefix->flags & DRV_HEADER_FLAG_TRUSTED) != 0) {
+		int local_fd = ssd_fd_get(ssd);
+		size_t local_read_size = BYTES_UP_TO_IO_MIN(ssd, sizeof(drv_header));
+		drv_header *local_header = cf_valloc(local_read_size);
+
+		if (! pread_all(local_fd, (void*)local_header, local_read_size, 0)) {
+			cf_crash(AS_DRV_SSD, "%s: local header read failed: errno %d (%s)",
+					ssd->name, errno, cf_strerror(errno));
+		}
+
+		// Temporary buffer, ok to 0 to compare with shadow.
+		local_header->unique.pristine_offset = 0;
+
+		size_t sz = local_read_size < read_size ? local_read_size : read_size;
+
+		// If the local device header matches, we can use it for cold start.
+		if (memcmp(local_header, header, sz) == 0) {
+			ssd->cold_start_local = true;
+		}
+
+		cf_free(local_header);
+		ssd_fd_put(ssd, local_fd);
+	}
+
 	ssd_header_validate_cfg(ns, ssd, header);
 
 	if (header->unique.pristine_offset != 0 && // always 0 before 4.6
@@ -2772,7 +2798,7 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 
 	uint8_t *buf = cf_valloc(wblock_size);
 
-	bool read_shadow = ssd->shadow_name;
+	bool read_shadow = ssd->shadow_name && ! ssd->cold_start_local;
 	const char *read_ssd_name = read_shadow ? ssd->shadow_name : ssd->name;
 	int fd = read_shadow ? ssd_shadow_fd_get(ssd) : ssd_fd_get(ssd);
 	int write_fd = read_shadow ? ssd_fd_get(ssd) : -1;

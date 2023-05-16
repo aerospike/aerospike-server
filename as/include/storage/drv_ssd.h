@@ -184,6 +184,8 @@ typedef struct drv_ssd_s {
 	uint32_t			n_wblocks;		// number of wblocks on this device
 	ssd_wblock_state	*wblock_state;	// array of info per wblock on this device
 
+	bool			cold_start_local;	// i.e. instead of from shadow
+
 	uint32_t		sweep_wblock_id;				// wblocks read at startup
 	uint64_t		record_add_older_counter;		// records not inserted due to better existing one
 	uint64_t		record_add_expired_counter;		// records not inserted due to expiration
