@@ -2455,7 +2455,7 @@ ssd_read_header(drv_ssd *ssd)
 
 	ssd_header_validate_cfg(ns, ssd, header);
 
-	if (header->unique.pristine_offset != 0 && // always 0 before 4.6
+	if (header->unique.pristine_offset != 0 && // always 0 on shadow
 			(header->unique.pristine_offset < DRV_HEADER_SIZE ||
 					header->unique.pristine_offset > ssd->file_size)) {
 		cf_crash(AS_DRV_SSD, "%s: bad pristine offset %lu", ssd_name,
