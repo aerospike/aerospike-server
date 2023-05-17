@@ -2325,7 +2325,6 @@ cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 	rollback_alloc_rollback(alloc_idx);
 
 	if (! success) {
-		as_bin_set_empty(b);
 		as_bin_set_empty(result);
 		rollback_alloc_rollback(alloc_buf);
 		rollback_alloc_rollback(alloc_result);
