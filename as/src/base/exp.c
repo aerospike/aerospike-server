@@ -4820,25 +4820,27 @@ msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 {
 	msgpack_type type = msgpack_buf_peek_type(from->r_bytes.contents,
 			from->r_bytes.sz);
-
-	to->particle = rt_alloc_mem(rt, from->r_bytes.sz + sizeof(cdt_mem), ll_buf);
-
-	cdt_mem* p_cdt_mem = (cdt_mem*)to->particle;
+	uint8_t p_type;
 
 	switch (type) {
 	case MSGPACK_TYPE_LIST:
-		p_cdt_mem->type = AS_PARTICLE_TYPE_LIST;
+		p_type = AS_PARTICLE_TYPE_LIST;
 		break;
 	case MSGPACK_TYPE_MAP:
-		p_cdt_mem->type = AS_PARTICLE_TYPE_MAP;
+		p_type = AS_PARTICLE_TYPE_MAP;
 		break;
 	case MSGPACK_TYPE_BYTES:
-		p_cdt_mem->type = AS_PARTICLE_TYPE_BLOB;
+		p_type = AS_PARTICLE_TYPE_BLOB;
 		break;
 	default:
 		return false;
 	}
 
+	to->particle = rt_alloc_mem(rt, from->r_bytes.sz + sizeof(cdt_mem), ll_buf);
+
+	cdt_mem* p_cdt_mem = (cdt_mem*)to->particle;
+
+	p_cdt_mem->type = p_type;
 	as_bin_state_set_from_type(to, p_cdt_mem->type);
 	p_cdt_mem->sz = from->r_bytes.sz;
 	memcpy(p_cdt_mem->data, from->r_bytes.contents, p_cdt_mem->sz);
