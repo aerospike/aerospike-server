@@ -2310,6 +2310,7 @@ cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 			.ret_code = AS_OK,
 	};
 
+	as_bin old_bin = { .state = b->state, .particle = b->particle };
 	bool success;
 
 	if (state->type == AS_CDT_OP_CONTEXT_EVAL) {
@@ -2325,6 +2326,8 @@ cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 	rollback_alloc_rollback(alloc_idx);
 
 	if (! success) {
+		b->state = old_bin.state;
+		b->particle = old_bin.particle;
 		as_bin_set_empty(result);
 		rollback_alloc_rollback(alloc_buf);
 		rollback_alloc_rollback(alloc_result);
