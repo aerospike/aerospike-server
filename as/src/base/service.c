@@ -123,7 +123,7 @@ static void assign_socket(as_file_handle* fd_h);
 static uint32_t select_sid(void);
 static uint32_t select_sid_pinned(cf_topo_cpu_index i_cpu);
 static uint32_t select_sid_adq(cf_topo_napi_id id);
-static uint32_t select_sid_specified(const cf_digest* keyd);
+static uint32_t select_sid_keyd(const cf_digest* keyd);
 static void schedule_redistribution(void);
 
 // Demarshal requests.
@@ -293,10 +293,29 @@ as_service_rearm(as_file_handle* fd_h)
 void
 as_service_enqueue_internal(as_transaction* tr)
 {
-	cf_digest* keyd = &tr->keyd;
-
 	while (true) {
-		uint32_t sid = select_sid_specified(keyd);
+		uint32_t sid = as_config_is_cpu_pinned() ?
+				select_sid_pinned(cf_topo_current_cpu()) : select_sid();
+
+		cf_mutex_lock(&g_thread_locks[sid]);
+
+		thread_ctx* ctx = g_thread_ctxs[sid];
+
+		if (ctx != NULL) {
+			cf_epoll_queue_push(&ctx->trans_q, tr);
+			cf_mutex_unlock(&g_thread_locks[sid]);
+			break;
+		}
+
+		cf_mutex_unlock(&g_thread_locks[sid]);
+	}
+}
+
+void
+as_service_enqueue_internal_keyd(as_transaction* tr)
+{
+	while (true) {
+		uint32_t sid = select_sid_keyd(&tr->keyd);
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -553,7 +572,7 @@ select_sid_adq(cf_topo_napi_id id)
 }
 
 static uint32_t
-select_sid_specified(const cf_digest* keyd)
+select_sid_keyd(const cf_digest* keyd)
 {
 	return as_partition_getid(keyd) % g_config.n_service_threads;
 }

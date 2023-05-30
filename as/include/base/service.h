@@ -81,3 +81,4 @@ void as_service_set_threads(uint32_t n_threads);
 bool as_service_set_proto_fd_max(uint32_t val);
 void as_service_rearm(struct as_file_handle_s* fd_h);
 void as_service_enqueue_internal(struct as_transaction_s* tr);
+void as_service_enqueue_internal_keyd(struct as_transaction_s* tr);
