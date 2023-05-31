@@ -1479,7 +1479,8 @@ as_namespace_index_persisted(const as_namespace *ns)
 static inline bool
 as_namespace_sindex_persisted(const as_namespace *ns)
 {
-	return ns->si_xmem_type == CF_XMEM_TYPE_PMEM;
+	return ns->si_xmem_type == CF_XMEM_TYPE_PMEM ||
+			ns->si_xmem_type == CF_XMEM_TYPE_FLASH;
 }
 
 // Persistent Memory Management

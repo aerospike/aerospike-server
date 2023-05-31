@@ -547,6 +547,14 @@ log_line_persistent_sindex_usage(as_namespace* ns, uint64_t used_sz)
 				used_sz,
 				used_pct);
 	}
+	else if (ns->si_xmem_type == CF_XMEM_TYPE_FLASH) {
+		uint64_t used_pct = used_sz * 100 / ns->si_mounts_size_limit;
+
+		cf_info(AS_INFO, "{%s} sindex-flash-usage: used-bytes %lu used-pct %lu",
+				ns->name,
+				used_sz,
+				used_pct);
+	}
 }
 
 void

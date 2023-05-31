@@ -286,6 +286,7 @@ static void namespace_rack_info(as_namespace* ns, cf_dyn_buf* db, uint32_t* rack
 static void namespace_roster_info(as_namespace* ns, cf_dyn_buf* db);
 static int as_info_parse_ns_iname(char* params, as_namespace** ns, char** iname, cf_dyn_buf* db, char* sindex_cmd);
 static void add_index_device_stats(as_namespace* ns, cf_dyn_buf* db);
+static void add_sindex_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static int32_t oldest_nvme_age(const char* path);
 static void add_data_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static void find_sindex_key(const cf_vector* items, void* udata);
@@ -4231,6 +4232,14 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 		info_append_uint64(db, "sindex_pmem_used_bytes", sindex_used);
 		info_append_uint64(db, "sindex_pmem_used_pct", used_pct);
 	}
+	else if (ns->si_xmem_type == CF_XMEM_TYPE_FLASH) {
+		uint64_t used_pct = sindex_used * 100 / ns->si_mounts_size_limit;
+
+		info_append_uint64(db, "sindex_flash_used_bytes", sindex_used);
+		info_append_uint64(db, "sindex_flash_used_pct", used_pct);
+
+		add_sindex_device_stats(ns, db);
+	}
 
 	// Persistent storage stats.
 
@@ -4808,6 +4817,15 @@ add_index_device_stats(as_namespace* ns, cf_dyn_buf* db)
 	for (uint32_t i = 0; i < ns->n_pi_xmem_mounts; i++) {
 		info_append_indexed_int(db, "index-type.mount", i, "age",
 				oldest_nvme_age(ns->pi_xmem_mounts[i]));
+	}
+}
+
+static void
+add_sindex_device_stats(as_namespace* ns, cf_dyn_buf* db)
+{
+	for (uint32_t i = 0; i < ns->n_si_xmem_mounts; i++) {
+		info_append_indexed_int(db, "sindex-type.mount", i, "age",
+				oldest_nvme_age(ns->si_xmem_mounts[i]));
 	}
 }
 

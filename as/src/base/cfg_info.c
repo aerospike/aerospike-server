@@ -457,7 +457,8 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 			ns->si_xmem_type == CF_XMEM_TYPE_MEM ? "mem" :
 					(ns->si_xmem_type == CF_XMEM_TYPE_SHMEM ? "shmem" :
 							(ns->si_xmem_type == CF_XMEM_TYPE_PMEM ? "pmem" :
-									"illegal")));
+									(ns->si_xmem_type == CF_XMEM_TYPE_FLASH ? "flash" :
+											"illegal"))));
 
 	for (uint32_t i = 0; i < ns->n_si_xmem_mounts; i++) {
 		info_append_indexed_string(db, "sindex-type.mount", i, NULL, ns->si_xmem_mounts[i]);
