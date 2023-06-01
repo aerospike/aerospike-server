@@ -1195,6 +1195,24 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 	state->type = (as_cdt_optype)type64;
 	state->ele_count = ele_count - 1;
 
+	if (! com->ctx.create_triggered) {
+		msgpack_in mp;
+		msgpack_type ctx_type;
+		msgpack_type expected = IS_CDT_LIST_OP(state->type) ?
+				MSGPACK_TYPE_LIST : MSGPACK_TYPE_MAP;
+
+		cdt_context_fill_unpacker(&com->ctx, &mp);
+		ctx_type = msgpack_peek_type(&mp);
+
+		if (ctx_type != expected) {
+			const char *name = IS_CDT_LIST_OP(state->type) ? "list" : "map";
+
+			cf_warning(AS_PARTICLE, "subcontext type %d != expected type %d (%s)", ctx_type, expected, name);
+			com->ret_code = -AS_ERR_PARAMETER;
+			return false;
+		}
+	}
+
 	if (cdt_op_is_modify(com)) {
 		bool ret;
 

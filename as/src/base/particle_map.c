@@ -7331,8 +7331,8 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 		}
 	}
 	else if (map.ele_count > 0) { // check unordered key uniqueness
-		define_rollback_alloc(alloc_idx, NULL, 2, false); // for temp indexes
-		define_order_index(key_ordidx, map.ele_count, alloc_idx);
+		define_rollback_alloc(alloc_ordidx, NULL, 2, false); // for temp indexes
+		define_order_index(key_ordidx, map.ele_count, alloc_ordidx);
 
 		order_index_set_sorted_with_offsets(&key_ordidx, u->offidx,
 				SORT_BY_KEY);
@@ -7343,8 +7343,11 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 		if (! order_index_sorted_mark_dup_eles(&key_ordidx, u->offidx,
 				&dup_count, &dup_sz)) {
 			cf_warning(AS_PARTICLE, "map_verify() mark dup failed");
+			rollback_alloc_rollback(alloc_ordidx);
 			return false;
 		}
+
+		rollback_alloc_rollback(alloc_ordidx);
 
 		if (dup_count != 0) {
 			cf_warning(AS_PARTICLE, "map_verify() dup key");
