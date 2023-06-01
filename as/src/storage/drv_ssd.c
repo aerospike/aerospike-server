@@ -1,7 +1,7 @@
 /*
  * drv_ssd.c
  *
- * Copyright (C) 2009-2021 Aerospike, Inc.
+ * Copyright (C) 2009-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,10 +20,9 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/* SYNOPSIS
- * "file" based storage driver, which applies to both SSD namespaces and, in
- * some cases, to file-backed main-memory namespaces.
- */
+//==========================================================
+// Includes.
+//
 
 #include "storage/drv_ssd.h"
 
