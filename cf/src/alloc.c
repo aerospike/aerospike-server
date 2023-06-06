@@ -401,7 +401,8 @@ indent_hops(void *p)
 	// Indented pointer must not look like aligned allocation. See outdent().
 
 	do {
-		n_hops = 2 + (as_random_next_uint32(&g_rand) % ((MAX_INDENT / 8) - 1));
+		n_hops = 2 + (as_random_next_uint32(&g_rand) % (MAX_INDENT / 8));
+		n_hops &= ~1U; // make it even - results in 16-byte aligned indents
 		p_indent = (void **)p + n_hops;
 	}
 	while (((uint64_t)p_indent & 0xfff) == 0);
