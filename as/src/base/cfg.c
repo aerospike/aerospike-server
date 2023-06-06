@@ -162,7 +162,6 @@ cfg_set_defaults()
 	c->gid = (gid_t)-1;
 	c->n_proto_fd_max = 15000;
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
-	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
 	c->feature_key_files[0] = "/etc/aerospike/features.conf";
 	c->info_max_ns = MAX_INFO_MAX_MS * 1000000UL;
@@ -261,7 +260,6 @@ typedef enum {
 	CASE_SERVICE_AUTO_PIN,
 	CASE_SERVICE_BATCH_INDEX_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
-	CASE_SERVICE_BATCH_MAX_REQUESTS,
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
 	CASE_SERVICE_CLUSTER_NAME,
 	CASE_SERVICE_DEBUG_ALLOCATIONS,
@@ -773,7 +771,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "auto-pin",						CASE_SERVICE_AUTO_PIN },
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
-		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
 		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
@@ -2079,9 +2076,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE:
 				c->batch_max_buffers_per_queue = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_BATCH_MAX_REQUESTS:
-				c->batch_max_requests = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS:
 				c->batch_max_unused_buffers = cfg_u32_no_checks(&line);

@@ -85,7 +85,6 @@ typedef struct as_config_s {
 	cf_topo_auto_pin auto_pin;
 	uint32_t		n_batch_index_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
-	uint32_t		batch_max_requests; // maximum count of database requests in a single batch
 	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;

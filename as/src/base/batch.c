@@ -910,13 +910,6 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
-	uint32_t max_requests = as_load_uint32(&g_config.batch_max_requests);
-
-	if (tran_count > max_requests) {
-		cf_warning(AS_BATCH, "Batch request size %u exceeds max %u", tran_count, max_requests);
-		return as_batch_send_error(btr, AS_ERR_BATCH_MAX_REQUESTS);
-	}
-
 	uint8_t parent_flags = *data++;
 	bool inline_dim = (parent_flags & INLINE_DATA_IN_MEMORY) != 0;
 	bool inline_dev = (parent_flags & INLINE_DATA_ON_DEVICE) != 0;
