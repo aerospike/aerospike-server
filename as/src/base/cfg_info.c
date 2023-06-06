@@ -559,7 +559,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
 		info_append_bool(db, "storage-engine.read-page-cache", ns->storage_read_page_cache);
-		info_append_string_safe(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode);
 		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
 		info_append_bool(db, "storage-engine.sindex-startup-device-scan", ns->storage_sindex_startup_device_scan);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);

@@ -3514,11 +3514,6 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 
 		cf_info(AS_DRV_SSD, "opened device %s: usable size %lu, io-min-size %lu",
 				ssd->name, ssd->file_size, ssd->io_min_size);
-
-		if (ns->storage_scheduler_mode) {
-			// Set scheduler mode specified in config file.
-			cf_storage_set_scheduler(ssd->name, ns->storage_scheduler_mode);
-		}
 	}
 
 	*ssds_p = ssds;
@@ -3568,12 +3563,6 @@ ssd_init_shadow_devices(as_namespace *ns, drv_ssds *ssds)
 
 		cf_info(AS_DRV_SSD, "shadow device %s is compatible with main device, shadow-io-min-size %lu",
 				ssd->shadow_name, ssd->shadow_io_min_size);
-
-		if (ns->storage_scheduler_mode) {
-			// Set scheduler mode specified in config file.
-			cf_storage_set_scheduler(ssd->shadow_name,
-					ns->storage_scheduler_mode);
-		}
 	}
 }
 

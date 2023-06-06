@@ -132,7 +132,6 @@ as_namespace_create(char *name)
 	// Note - default true is consistent with AS_STORAGE_ENGINE_MEMORY, but
 	// cfg.c will set default false for AS_STORAGE_ENGINE_SSD.
 
-	ns->storage_scheduler_mode = NULL; // null indicates default is to not change scheduler mode
 	ns->storage_write_block_size = 1024 * 1024;
 	ns->storage_defrag_lwm_pct = 50; // defrag if occupancy of block is < 50%
 	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock

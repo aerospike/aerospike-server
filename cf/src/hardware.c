@@ -153,7 +153,6 @@ static cf_topo_numa_node_index g_i_numa_node;
 #define DEVICE_NAME_SIZE 256
 
 #define MAX_DEVICE_CHILDREN 100
-#define MAX_DEVICE_SCHEDULERS 100
 
 typedef struct dev_key_s {
 	uint32_t major;
@@ -168,15 +167,10 @@ typedef struct dev_node_s {
 	char dev_path[DEVICE_PATH_SIZE];
 
 	char sys_home[DEVICE_PATH_SIZE];
-	char sys_sched[DEVICE_PATH_SIZE];
 } dev_node_t;
 
 typedef struct path_data_s {
 	cf_storage_device_info info;
-
-	uint32_t n_sys_scheds;
-	const char *sys_scheds[MAX_DEVICE_SCHEDULERS];
-
 	cf_clock mod_time;
 } path_data_t;
 
@@ -2156,14 +2150,8 @@ build_device_graph(void)
 			snprintf(sys_path, DEVICE_PATH_SIZE, "%s/%s/queue/scheduler",
 					sys_dir, ent.d_name);
 
-			if (path_exists(sys_path)) {
-				strcpy(node->sys_sched, sys_path);
-			}
-
-			cf_detail(CF_HARDWARE, "new device %s (%u:%u), home %s, "
-					"scheduler %s", node->dev_path, key.major, key.minor,
-					node->sys_home, node->sys_sched[0] != 0 ?
-							node->sys_sched : "-");
+			cf_detail(CF_HARDWARE, "new device %s (%u:%u), home %s",
+					node->dev_path, key.major, key.minor, node->sys_home);
 
 			if (cf_shash_put_unique(g_dev_graph, &key, &node) != CF_SHASH_OK) {
 				cf_warning(CF_HARDWARE, "duplicate device %s (%u:%u)",
@@ -2473,21 +2461,6 @@ visit_children(path_data_t *data, dev_node_t *node)
 	cf_detail(CF_HARDWARE, "considering %s for %s", node->dev_path,
 			info->dev_path);
 
-	if (node->sys_sched[0] != 0) {
-		cf_detail(CF_HARDWARE, "found scheduler %s", node->sys_sched);
-
-		uint32_t n_sys_scheds = data->n_sys_scheds;
-
-		if (n_sys_scheds >= CF_STORAGE_MAX_PHYS) {
-			cf_warning(CF_HARDWARE, "too many schedulers for %s",
-					info->dev_path);
-			return;
-		}
-
-		data->sys_scheds[n_sys_scheds] = node->sys_sched;
-		++data->n_sys_scheds;
-	}
-
 	if (node->n_children == 0) {
 		cf_detail(CF_HARDWARE, "found physical device");
 
@@ -2573,7 +2546,6 @@ new_path_data(const char *any_path)
 
 	cf_detail(CF_HARDWARE, "collecting dependency info");
 
-	data->n_sys_scheds = 0;
 	info->n_phys = 0;
 
 	visit_children(data, node);
@@ -2653,36 +2625,6 @@ cf_storage_get_device_info(const char *path)
 	}
 
 	return &data->info;
-}
-
-void
-cf_storage_set_scheduler(const char *path, const char *sched)
-{
-	cf_detail(CF_HARDWARE, "setting scheduler for %s to %s", path, sched);
-
-	path_data_t *data = get_path_data(path);
-
-	if (data == NULL) {
-		cf_warning(CF_HARDWARE, "couldn't find path data for %s", path);
-		return;
-	}
-
-	bool failed = false;
-
-	for (uint32_t i = 0; i < data->n_sys_scheds; ++i) {
-		if (write_file(data->sys_scheds[i], sched, strlen(sched)) !=
-				CF_OS_FILE_RES_OK) {
-			failed = true;
-		}
-	}
-
-	if (failed) {
-		cf_warning(CF_HARDWARE, "couldn't set scheduler for %s to %s", path,
-				sched);
-	}
-	else {
-		cf_info(CF_HARDWARE, "set scheduler for %s to %s", path, sched);
-	}
 }
 
 int64_t

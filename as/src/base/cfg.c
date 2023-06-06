@@ -607,7 +607,6 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
 	CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE,
-	CASE_NAMESPACE_STORAGE_DEVICE_SCHEDULER_MODE,
 	CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER,
 	CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN,
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
@@ -1162,7 +1161,6 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
 		{ "read-page-cache",				CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE },
-		{ "scheduler-mode",					CASE_NAMESPACE_STORAGE_DEVICE_SCHEDULER_MODE },
 		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
 		{ "sindex-startup-device-scan",		CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
@@ -1372,20 +1370,6 @@ const int NUM_XDR_DC_NAMESPACE_WRITE_POLICY_OPTS	= sizeof(XDR_DC_NAMESPACE_WRITE
 
 
 //==========================================================
-// Configuration value constants not for switch cases.
-//
-
-const char* DEVICE_SCHEDULER_MODES[] = {
-		"anticipatory",
-		"cfq",				// best for rotational drives
-		"deadline",
-		"noop"				// best for SSDs
-};
-
-const int NUM_DEVICE_SCHEDULER_MODES = sizeof(DEVICE_SCHEDULER_MODES) / sizeof(const char*);
-
-
-//==========================================================
 // Generic parsing utilities.
 //
 
@@ -1575,37 +1559,6 @@ cfg_strdup_val3_no_checks(const cfg_line* p_line, bool is_required)
 {
 	return cfg_strdup_anyval(p_line, p_line->val_tok_3, MAX_LINE_SIZE,
 			is_required);
-}
-
-static char*
-cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
-{
-	for (int i = 0; i < num_toks; i++) {
-		if (strcmp(p_line->val_tok_1, toks[i]) == 0) {
-			return cf_strdup(p_line->val_tok_1);
-		}
-	}
-
-	uint32_t valid_toks_size = (num_toks * 2) + 1;
-
-	for (int i = 0; i < num_toks; i++) {
-		valid_toks_size += strlen(toks[i]);
-	}
-
-	char valid_toks[valid_toks_size];
-
-	valid_toks[0] = 0;
-
-	for (int i = 0; i < num_toks; i++) {
-		strcat(valid_toks, toks[i]);
-		strcat(valid_toks, ", ");
-	}
-
-	cf_crash_nostack(AS_CFG, "line %d :: %s must be one of: %snot %s",
-			p_line->num, p_line->name_tok, valid_toks, p_line->val_tok_1);
-
-	// Won't get here, but quiet warnings...
-	return NULL;
 }
 
 static void
@@ -3474,9 +3427,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE:
 				ns->storage_read_page_cache = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_SCHEDULER_MODE:
-				ns->storage_scheduler_mode = cfg_strdup_one_of(&line, DEVICE_SCHEDULER_MODES, NUM_DEVICE_SCHEDULER_MODES);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER:
 				cfg_enterprise_only(&line);

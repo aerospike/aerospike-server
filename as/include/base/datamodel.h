@@ -858,7 +858,6 @@ typedef struct as_namespace_s {
 	uint32_t		storage_min_avail_pct;
 	uint32_t	 	storage_post_write_queue; // number of swbs/device held after writing to device
 	bool			storage_read_page_cache;
-	char*			storage_scheduler_mode; // relevant for devices only, not files
 	bool			storage_serialize_tomb_raider; // relevant only for enterprise edition
 	bool			storage_sindex_startup_device_scan;
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition

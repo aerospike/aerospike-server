@@ -76,7 +76,6 @@ typedef struct cf_storage_device_s {
 } cf_storage_device_info;
 
 cf_storage_device_info *cf_storage_get_device_info(const char *path);
-void cf_storage_set_scheduler(const char *path, const char *sched);
 int64_t cf_storage_file_system_size(const char *path);
 bool cf_storage_is_root_fs(const char *path);
 
