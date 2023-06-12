@@ -921,10 +921,10 @@ as_batch_queue_task(as_transaction* btr)
 
 	cf_mutex_init(&shared->lock);
 
-	// Abandon batch at twice batch timeout if batch timeout is defined.
+	// Abandon batch at batch timeout if batch timeout is defined.
 	// If batch timeout is zero, abandon after 30 seconds.
-	shared->end = btr->start_time + ((bmsg->transaction_ttl != 0) ?
-			((uint64_t)bmsg->transaction_ttl * 1000 * 1000 * 2) :
+	shared->end = btr->start_time + (bmsg->transaction_ttl != 0 ?
+			(uint64_t)bmsg->transaction_ttl * 1000 * 1000 :
 			BATCH_ABANDON_LIMIT);
 
 	shared->start = btr->start_time;
