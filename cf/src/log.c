@@ -77,7 +77,6 @@ static const char* context_strings[] = {
 		"hardware",
 		"msg",
 		"os",
-		"rbuffer",
 		"socket",
 		"tls",
 		"vault",
@@ -106,14 +105,12 @@ static const char* context_strings[] = {
 		"index",
 		"info",
 		"info-port",
-		"job",
+		"key-busy",
 		"migrate",
-		"mon",
 		"namespace",
 		"nsup",
 		"particle",
 		"partition",
-		"paxos",
 		"proto",
 		"proxy",
 		"proxy-divert",
@@ -623,12 +620,14 @@ cf_log_write_cache(cf_log_context context, cf_log_level level,
 			.msg = { 0 } // must pad hash keys
 	};
 
-	size_t limit = sizeof(key.msg) - 1; // truncate leaving null-terminator
-
 	va_list argp;
-
 	va_start(argp, format);
-	vsnprintf(key.msg, limit, format, argp);
+
+	char adjusted[MAX_ADJUSTED_STRING_SZ];
+
+	adjust_format(format, adjusted);
+	vsnprintf(key.msg, sizeof(key.msg) - 1, adjusted, argp);
+
 	va_end(argp);
 
 	while (true) {

@@ -43,6 +43,7 @@
 #include "node.h"
 #include "rchash.h"
 
+#include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
@@ -103,6 +104,8 @@ static cf_rchash* g_rw_request_hash = NULL;
 
 static uint32_t rw_request_hash_fn(const void* key);
 static transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
+static const char* action_tag(const as_transaction* tr);
+static const char* from_tag(const as_transaction* tr);
 
 static void* run_retransmit(void* arg);
 static int retransmit_reduce_fn(const void* key, void* data, void* udata);
@@ -214,7 +217,8 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 	else if (ns->transaction_pending_limit != 0 &&
 			rw0->wait_queue_depth > ns->transaction_pending_limit) {
 		// If we're over the hot key pending limit, fail this transaction.
-		cf_detail(AS_RW, "{%s} key busy %pD", ns->name, &tr->keyd);
+		cf_ticker_detail(AS_KEY_BUSY, "{%s} %pD %s from %s", ns->name,
+				&tr->keyd, action_tag(tr), from_tag(tr));
 
 		as_incr_uint64(&ns->n_fail_key_busy);
 		tr->result_code = AS_ERR_KEY_BUSY;
@@ -227,6 +231,44 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 		rw_request_wait_q_push(rw0, tr);
 
 		return TRANS_WAITING;
+	}
+}
+
+static const char*
+action_tag(const as_transaction* tr)
+{
+	if (as_transaction_is_batch_sub(tr)) {
+		return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) == 0 ?
+				"batch-sub-read" : (as_transaction_is_delete(tr) ?
+						"batch-sub-delete" : (as_transaction_is_udf(tr) ?
+								"batch-sub-udf" : "batch-sub-write"));
+	}
+
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) == 0 ?
+			"read" : (as_transaction_is_delete(tr) ?
+					"delete" : (as_transaction_is_udf(tr) ?
+							"udf" : "write"));
+}
+
+static const char*
+from_tag(const as_transaction* tr)
+{
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		return tr->from.proto_fd_h->client;
+	case FROM_PROXY:
+		return "proxy";
+	case FROM_BATCH:
+		return as_batch_get_fd_h(tr->from.batch_shared)->client;
+	case FROM_IUDF:
+		return "bg-udf";
+	case FROM_IOPS:
+		return "bg-ops";
+	case FROM_RE_REPL:
+		return "re-repl";
+	default:
+		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
+		return NULL;
 	}
 }
 

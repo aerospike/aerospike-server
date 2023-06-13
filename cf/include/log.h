@@ -48,7 +48,6 @@ typedef enum {
 	CF_HARDWARE,
 	CF_MSG,
 	CF_OS,
-	CF_RBUFFER,
 	CF_SOCKET,
 	CF_TLS,
 	CF_VAULT,
@@ -77,14 +76,12 @@ typedef enum {
 	AS_INDEX,
 	AS_INFO,
 	AS_INFO_PORT,
-	AS_JOB,
+	AS_KEY_BUSY, // special detail context
 	AS_MIGRATE,
-	AS_MON,
 	AS_NAMESPACE,
 	AS_NSUP,
 	AS_PARTICLE,
 	AS_PARTITION,
-	AS_PAXOS,
 	AS_PROTO,
 	AS_PROXY,
 	AS_PROXY_DIVERT, // special detail context
