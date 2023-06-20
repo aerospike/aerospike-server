@@ -1641,6 +1641,19 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->pi_mounts_hwm_pct, val);
 		ns->pi_mounts_hwm_pct = (uint32_t)val;
 	}
+	else if (as_info_parameter_get(cmd, "sindex-type.mounts-high-water-pct", v,
+			&v_len) == 0) {
+		if (! as_namespace_index_persisted(ns)) {
+			cf_warning(AS_INFO, "sindex-type.mounts-high-water-pct is not relevant for this sindex-type");
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of sindex-type.mounts-high-water-pct of ns %s from %u to %d ",
+				ns->name, ns->si_mounts_hwm_pct, val);
+		ns->si_mounts_hwm_pct = (uint32_t)val;
+	}
 	else if (as_info_parameter_get(cmd, "mounts-size-limit", v, &v_len) == 0) {
 		if (! as_namespace_index_persisted(ns)) {
 			cf_warning(AS_INFO, "mounts-size-limit is not relevant for this index-type");
@@ -1655,6 +1668,19 @@ cfg_set_namespace(const char* cmd)
 		cf_info(AS_INFO, "Changing value of mounts-size-limit of ns %s from %lu to %lu",
 				ns->name, ns->pi_mounts_size_limit, val);
 		ns->pi_mounts_size_limit = val;
+	}
+	else if (as_info_parameter_get(cmd, "sindex-type.mounts-size-limit", v, &v_len) == 0) {
+		if (! as_namespace_index_persisted(ns)) {
+			cf_warning(AS_INFO, "sindex-type.mounts-size-limit is not relevant for this sindex-type");
+			return false;
+		}
+		uint64_t val;
+		if (cf_str_atoi_u64(v, &val) != 0 || val < 1024UL * 1024UL * 1024UL) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of sindex-type.mounts-size-limit of ns %s from %lu to %lu",
+				ns->name, ns->si_mounts_size_limit, val);
+		ns->si_mounts_size_limit = val;
 	}
 	else if (as_info_parameter_get(cmd, "nsup-hist-period", v, &v_len) == 0) {
 		uint32_t val;
