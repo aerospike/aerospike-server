@@ -1,6 +1,4 @@
-#!/usr/bin/env python2
-
-from __future__ import print_function
+#!/usr/bin/env python3
 
 from collections import Counter
 from operator import itemgetter
@@ -24,7 +22,7 @@ def check_output(args):
 
 
 def map_address(addr, asd_path):
-    if not addr in addr_map:
+    if addr not in addr_map:
         try:
             resolv = check_output(["addr2line", "-e", asd_path, addr])
 
@@ -71,7 +69,7 @@ def parse_mem(in_path):
                 (addr_s, tid_s, size_hi_s, size_lo_s) = m.group(1, 2, 3, 4)
 
                 addr = int(addr_s, 16)
-                tid = int(tid_s, 16)
+                # tid = int(tid_s, 16)  # unused
                 size_hi = int(size_hi_s, 16)
                 size_lo = int(size_lo_s, 16)
 
