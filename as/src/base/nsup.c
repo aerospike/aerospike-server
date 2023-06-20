@@ -698,10 +698,8 @@ eval_hwm_breached(as_namespace* ns)
 
 		cf_warning(AS_NSUP, "{%s} breached eviction hwm (%s), memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
 				ns->name, reasons,
-				mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz, mem_hwm,
-				index_dev_tag,
-				sindex_dev_tag,
-				used_disk_sz, ssd_hwm);
+				mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
+				mem_hwm, index_dev_tag, sindex_dev_tag, used_disk_sz, ssd_hwm);
 
 		ns->hwm_breached = true;
 		return true;
@@ -709,10 +707,8 @@ eval_hwm_breached(as_namespace* ns)
 
 	cf_debug(AS_NSUP, "{%s} no eviction hwm breached, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
 			ns->name,
-			mem_sz, index_mem_sz, set_index_sz, sindex_sz, dim_sz, mem_hwm,
-			index_dev_tag,
-			sindex_dev_tag,
-			used_disk_sz, ssd_hwm);
+			mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
+			mem_hwm, index_dev_tag, sindex_dev_tag, used_disk_sz, ssd_hwm);
 
 	ns->hwm_breached = false;
 
