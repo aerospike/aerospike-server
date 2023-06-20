@@ -1208,7 +1208,7 @@ cdt_process_state_context_eval(cdt_process_state *state, cdt_op_mem *com)
 			const char *name = IS_CDT_LIST_OP(state->type) ? "list" : "map";
 
 			cf_warning(AS_PARTICLE, "subcontext type %d != expected type %d (%s)", ctx_type, expected, name);
-			com->ret_code = -AS_ERR_PARAMETER;
+			com->ret_code = -AS_ERR_INCOMPATIBLE_TYPE;
 			return false;
 		}
 	}
