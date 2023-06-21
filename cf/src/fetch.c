@@ -39,6 +39,7 @@
 #include "citrusleaf/cf_b64.h"
 
 #include "log.h"
+#include "secrets.h"
 #include "vault.h"
 
 
@@ -70,27 +71,32 @@ static uint8_t* fetch_bytes_from_file(const char* file_path, size_t* size_r);
 // Inlines & macros.
 //
 
-static inline bool
-is_env_path(const char* path)
-{
-	return strncmp(path, ENV_PATH_PREFIX, ENV_PATH_PREFIX_LEN) == 0;
-}
-
-static inline bool
-is_env_b64_path(const char* path)
-{
-	return strncmp(path, ENV_B64_PATH_PREFIX, ENV_B64_PATH_PREFIX_LEN) == 0;
-}
-
 
 //==========================================================
 // Public API.
 //
 
-bool
-cf_fetch_is_env_path(const char* path)
+path_type
+cf_fetch_path_type(const char* path)
 {
-	return is_env_path(path) || is_env_b64_path(path);
+	if (strncmp(path, ENV_PATH_PREFIX, ENV_PATH_PREFIX_LEN) == 0) {
+		return PATH_TYPE_ENV;
+	}
+
+	if (strncmp(path, ENV_B64_PATH_PREFIX, ENV_B64_PATH_PREFIX_LEN) == 0) {
+		return PATH_TYPE_ENV_B64;
+	}
+
+	if (strncmp(path, CF_SECRETS_PATH_PREFIX,
+			CF_SECRETS_PATH_PREFIX_LEN) == 0) {
+		return PATH_TYPE_SECRETS;
+	}
+
+	if (strncmp(path, CF_VAULT_PATH_PREFIX, CF_VAULT_PATH_PREFIX_LEN) == 0) {
+		return PATH_TYPE_VAULT;
+	}
+
+	return PATH_TYPE_FILE; // no prefix
 }
 
 // Caller must cf_free return value when done.
@@ -99,23 +105,23 @@ cf_fetch_bytes(const char* path, size_t* size_r)
 {
 	cf_assert(path != NULL, CF_MISC, "fetch with null path");
 
-	if (is_env_path(path)) {
+	path_type type = cf_fetch_path_type(path);
+
+	switch (type) {
+	case PATH_TYPE_ENV:
 		return fetch_env_bytes(path, size_r);
-	}
-
-	if (is_env_b64_path(path)) {
+	case PATH_TYPE_ENV_B64:
 		return fetch_env_b64_bytes(path, size_r);
-	}
-
-	if (cf_vault_is_vault_path(path)) {
-		if (! cf_vault_is_configured()) {
-			return NULL;
-		}
-
+	case PATH_TYPE_FILE:
+		return fetch_bytes_from_file(path, size_r);
+	case PATH_TYPE_SECRETS:
+		return cf_secrets_fetch_bytes(path, size_r);
+	case PATH_TYPE_VAULT:
 		return cf_vault_fetch_bytes(path, size_r);
+	default:
+		cf_crash(CF_MISC, "invalid path type %d", type);
+		return NULL;
 	}
-
-	return fetch_bytes_from_file(path, size_r);
 }
 
 // Caller must cf_free return value when done.

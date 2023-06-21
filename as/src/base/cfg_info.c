@@ -39,6 +39,7 @@
 #include "dynbuf.h"
 #include "log.h"
 #include "os.h"
+#include "secrets.h"
 #include "socket.h"
 #include "vault.h"
 
@@ -250,6 +251,20 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint32(db, "query-threads-limit", g_config.n_query_threads_limit);
 	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
 	info_append_bool(db, "salt-allocations", g_config.salt_allocations);
+
+	cf_dyn_buf_append_string(db, "secrets-address-port=");
+	cf_dyn_buf_append_string(db, g_secrets_cfg.addr);
+	cf_dyn_buf_append_char(db, ':');
+	cf_dyn_buf_append_string(db, g_secrets_cfg.port);
+
+	if (g_secrets_cfg.tls_name != NULL) {
+		cf_dyn_buf_append_char(db, ':');
+		cf_dyn_buf_append_string(db, g_secrets_cfg.tls_name);
+	}
+
+	cf_dyn_buf_append_char(db, ';');
+
+	info_append_string_safe(db, "secrets-tls-context", g_secrets_cfg.tls_context);
 	info_append_uint32(db, "service-threads", g_config.n_service_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);

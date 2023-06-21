@@ -39,7 +39,7 @@
 // Typedefs & constants.
 //
 
-// Must be in sync with cf_log_context_strings.
+// Must be in sync with context_strings.
 typedef enum {
 	CF_MISC,
 
@@ -48,6 +48,7 @@ typedef enum {
 	CF_HARDWARE,
 	CF_MSG,
 	CF_OS,
+	CF_SECRETS,
 	CF_SOCKET,
 	CF_TLS,
 	CF_VAULT,

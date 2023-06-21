@@ -77,6 +77,7 @@ static const char* context_strings[] = {
 		"hardware",
 		"msg",
 		"os",
+		"secrets",
 		"socket",
 		"tls",
 		"vault",

@@ -34,10 +34,23 @@
 
 
 //==========================================================
+// Typedefs & constants.
+//
+
+typedef enum {
+	PATH_TYPE_ENV,
+	PATH_TYPE_ENV_B64,
+	PATH_TYPE_FILE,
+	PATH_TYPE_SECRETS,
+	PATH_TYPE_VAULT
+} path_type;
+
+
+//==========================================================
 // Public API.
 //
 
-bool cf_fetch_is_env_path(const char* path);
+path_type cf_fetch_path_type(const char* path);
 uint8_t* cf_fetch_bytes(const char* path, size_t* buf_sz_r);
 char* cf_fetch_string(const char* path);
 

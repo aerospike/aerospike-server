@@ -1,7 +1,7 @@
 /*
- * vault.h
+ * secrets.h
  *
- * Copyright (C) 2020 Aerospike, Inc.
+ * Copyright (C) 2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -30,29 +30,33 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "tls.h"
+
 
 //==========================================================
 // Typedefs & constants.
 //
 
-#define CF_VAULT_PATH_PREFIX "vault:"
-#define CF_VAULT_PATH_PREFIX_LEN (sizeof(CF_VAULT_PATH_PREFIX) - 1)
+#define CF_SECRETS_PATH_PREFIX "secrets:"
+#define CF_SECRETS_PATH_PREFIX_LEN (sizeof(CF_SECRETS_PATH_PREFIX) - 1)
 
-typedef struct cf_vault_config_s {
-	const char* ca;
-	const char* namespace;
-	const char* path;
-	char* token_file;
-	const char* url;
-} cf_vault_config;
+typedef struct cf_secrets_config_s {
+	const char* addr;
+	const char* port;
+	char* tls_name;
+	char* tls_context;
+
+	// Derived fields.
+	bool configured;
+	cf_tls_spec* tls_spec;
+	cf_tls_info* tls;
+} cf_secrets_config;
 
 
 //==========================================================
 // Public API.
 //
 
-bool cf_vault_is_configured(void);
-uint8_t* cf_vault_fetch_bytes(const char* path, size_t* size_r);
-bool cf_vault_update_token(const char* path);
+uint8_t* cf_secrets_fetch_bytes(const char* path, size_t* size_r);
 
-extern cf_vault_config g_vault_cfg;
+extern cf_secrets_config g_secrets_cfg;

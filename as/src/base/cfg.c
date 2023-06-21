@@ -58,6 +58,7 @@
 #include "msg.h"
 #include "node.h"
 #include "os.h"
+#include "secrets.h"
 #include "socket.h"
 #include "tls.h"
 #include "vault.h"
@@ -111,6 +112,7 @@ static void cfg_serv_spec_to_bind(const cf_serv_spec* spec, const cf_serv_spec* 
 static void cfg_serv_spec_std_to_access(const cf_serv_spec* spec, cf_addr_list* access);
 static void cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* access);
 static void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port, bool tls);
+static void cfg_add_secrets_addr_port(char* addr, char* port, char* tls_name);
 static as_set* cfg_add_set(as_namespace* ns);
 static void cfg_add_pi_xmem_mount(as_namespace* ns, const char* mount);
 static void cfg_add_si_xmem_mount(as_namespace* ns, const char* mount);
@@ -291,6 +293,8 @@ typedef enum {
 	CASE_SERVICE_QUERY_THREADS_LIMIT,
 	CASE_SERVICE_RUN_AS_DAEMON,
 	CASE_SERVICE_SALT_ALLOCATIONS,
+	CASE_SERVICE_SECRETS_ADDRESS_PORT,
+	CASE_SERVICE_SECRETS_TLS_CONTEXT,
 	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_GC_PERIOD,
@@ -802,6 +806,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "query-threads-limit",			CASE_SERVICE_QUERY_THREADS_LIMIT },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
 		{ "salt-allocations",				CASE_SERVICE_SALT_ALLOCATIONS },
+		{ "secrets-address-port",           CASE_SERVICE_SECRETS_ADDRESS_PORT },
+		{ "secrets-tls-context",            CASE_SERVICE_SECRETS_TLS_CONTEXT },
 		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
@@ -2195,6 +2201,14 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_SALT_ALLOCATIONS:
 				c->salt_allocations = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_SECRETS_ADDRESS_PORT:
+				cfg_enterprise_only(&line);
+				cfg_add_secrets_addr_port(cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, true), cfg_strdup_val3_no_checks(&line, false));
+				break;
+			case CASE_SERVICE_SECRETS_TLS_CONTEXT:
+				cfg_enterprise_only(&line);
+				g_secrets_cfg.tls_context = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_SERVICE_THREADS:
 				c->n_service_threads = cfg_u32(&line, 1, MAX_SERVICE_THREADS);
@@ -4759,6 +4773,14 @@ cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port, bool tls)
 	if (i == AS_CLUSTER_SZ) {
 		cf_crash_nostack(AS_CFG, "can't configure more than %d mesh-seed-address-port entries", AS_CLUSTER_SZ);
 	}
+}
+
+static void
+cfg_add_secrets_addr_port(char* addr, char* port, char* tls_name)
+{
+	g_secrets_cfg.addr = addr;
+	g_secrets_cfg.port = port;
+	g_secrets_cfg.tls_name = tls_name;
 }
 
 static as_set*

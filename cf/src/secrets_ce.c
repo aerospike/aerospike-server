@@ -1,7 +1,7 @@
 /*
- * vault.h
+ * secrets_ce.c
  *
- * Copyright (C) 2020 Aerospike, Inc.
+ * Copyright (C) 2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,39 +20,32 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#pragma once
-
 //==========================================================
 // Includes.
 //
 
-#include <stdbool.h>
+#include "secrets.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
+#include "log.h"
+
 
 //==========================================================
-// Typedefs & constants.
+// Globals.
 //
 
-#define CF_VAULT_PATH_PREFIX "vault:"
-#define CF_VAULT_PATH_PREFIX_LEN (sizeof(CF_VAULT_PATH_PREFIX) - 1)
-
-typedef struct cf_vault_config_s {
-	const char* ca;
-	const char* namespace;
-	const char* path;
-	char* token_file;
-	const char* url;
-} cf_vault_config;
+cf_secrets_config g_secrets_cfg = { 0 };
 
 
 //==========================================================
 // Public API.
 //
 
-bool cf_vault_is_configured(void);
-uint8_t* cf_vault_fetch_bytes(const char* path, size_t* size_r);
-bool cf_vault_update_token(const char* path);
-
-extern cf_vault_config g_vault_cfg;
+uint8_t*
+cf_secrets_fetch_bytes(const char* path, size_t* size_r)
+{
+	cf_crash(CF_SECRETS, "unreachable function for CE");
+	return NULL;
+}

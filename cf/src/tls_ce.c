@@ -85,7 +85,7 @@ tls_config_server_context(cf_tls_spec *tspec, bool auth_client, uint32_t n_peer_
 }
 
 cf_tls_info *
-tls_config_intra_context(cf_tls_spec *tspec, const char *which)
+tls_config_intra_context(cf_tls_spec *tspec, char *which)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return NULL;
