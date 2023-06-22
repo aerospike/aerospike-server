@@ -2044,6 +2044,9 @@ cmd_latencies(char* name, char* params, cf_dyn_buf* db)
 			histogram_get_latencies(ns->read_hist, db);
 			histogram_get_latencies(ns->write_hist, db);
 			histogram_get_latencies(ns->udf_hist, db);
+			histogram_get_latencies(ns->batch_sub_read_hist, db);
+			histogram_get_latencies(ns->batch_sub_write_hist, db);
+			histogram_get_latencies(ns->batch_sub_udf_hist, db);
 			histogram_get_latencies(ns->pi_query_hist, db);
 			histogram_get_latencies(ns->si_query_hist, db);
 		}
@@ -2104,6 +2107,15 @@ cmd_latencies(char* name, char* params, cf_dyn_buf* db)
 			}
 			else if (strcmp(hist_name, "udf") == 0) {
 				histogram_get_latencies(ns->udf_hist, db);
+			}
+			else if (strcmp(hist_name, "batch-sub-read") == 0) {
+				histogram_get_latencies(ns->batch_sub_read_hist, db);
+			}
+			else if (strcmp(hist_name, "batch-sub-write") == 0) {
+				histogram_get_latencies(ns->batch_sub_write_hist, db);
+			}
+			else if (strcmp(hist_name, "batch-sub-udf") == 0) {
+				histogram_get_latencies(ns->batch_sub_udf_hist, db);
 			}
 			else if (strcmp(hist_name, "pi-query") == 0) {
 				histogram_get_latencies(ns->pi_query_hist, db);

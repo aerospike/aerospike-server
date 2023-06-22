@@ -4299,6 +4299,15 @@ as_config_post_process(as_config* c, const char* config_file)
 		sprintf(hist_name, "{%s}-udf", ns->name);
 		ns->udf_hist = histogram_create(hist_name, scale);
 
+		sprintf(hist_name, "{%s}-batch-sub-read", ns->name);
+		ns->batch_sub_read_hist = histogram_create(hist_name, scale);
+
+		sprintf(hist_name, "{%s}-batch-sub-write", ns->name);
+		ns->batch_sub_write_hist = histogram_create(hist_name, scale);
+
+		sprintf(hist_name, "{%s}-batch-sub-udf", ns->name);
+		ns->batch_sub_udf_hist = histogram_create(hist_name, scale);
+
 		sprintf(hist_name, "{%s}-pi-query", ns->name);
 		ns->pi_query_hist = histogram_create(hist_name, scale);
 

@@ -1236,6 +1236,9 @@ typedef struct as_namespace_s {
 	histogram*		read_hist;
 	histogram*		write_hist;
 	histogram*		udf_hist;
+	histogram*		batch_sub_read_hist;
+	histogram*		batch_sub_write_hist;
+	histogram*		batch_sub_udf_hist;
 	histogram*		pi_query_hist;
 	histogram*		pi_query_rec_count_hist; // not tracked
 	histogram*		si_query_hist;
@@ -1245,6 +1248,9 @@ typedef struct as_namespace_s {
 	bool			read_hist_active;
 	bool			write_hist_active;
 	bool			udf_hist_active;
+	bool			batch_sub_read_hist_active;
+	bool			batch_sub_write_hist_active;
+	bool			batch_sub_udf_hist_active;
 	bool			pi_query_hist_active;
 	bool			pi_query_rec_count_hist_active;
 	bool			si_query_hist_active;

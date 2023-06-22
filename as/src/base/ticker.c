@@ -1136,6 +1136,31 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->udf_response_hist);
 	}
 
+	if (ns->batch_sub_read_hist_active) {
+		histogram_dump(ns->batch_sub_read_hist);
+	}
+
+	if (ns->batch_sub_write_hist_active) {
+		histogram_dump(ns->batch_sub_write_hist);
+	}
+
+	if (ns->batch_sub_udf_hist_active) {
+		histogram_dump(ns->batch_sub_udf_hist);
+	}
+
+	if (ns->batch_sub_benchmarks_enabled) {
+		histogram_dump(ns->batch_sub_prestart_hist);
+		histogram_dump(ns->batch_sub_start_hist);
+		histogram_dump(ns->batch_sub_restart_hist);
+		histogram_dump(ns->batch_sub_dup_res_hist);
+		histogram_dump(ns->batch_sub_repl_ping_hist);
+		histogram_dump(ns->batch_sub_read_local_hist);
+		histogram_dump(ns->batch_sub_write_master_hist);
+		histogram_dump(ns->batch_sub_udf_master_hist);
+		histogram_dump(ns->batch_sub_repl_write_hist);
+		histogram_dump(ns->batch_sub_response_hist);
+	}
+
 	if (ns->pi_query_hist_active) {
 		histogram_dump(ns->pi_query_hist);
 	}
@@ -1154,19 +1179,6 @@ dump_namespace_histograms(as_namespace* ns)
 
 	if (ns->proxy_hist_enabled) {
 		histogram_dump(ns->proxy_hist);
-	}
-
-	if (ns->batch_sub_benchmarks_enabled) {
-		histogram_dump(ns->batch_sub_prestart_hist);
-		histogram_dump(ns->batch_sub_start_hist);
-		histogram_dump(ns->batch_sub_restart_hist);
-		histogram_dump(ns->batch_sub_dup_res_hist);
-		histogram_dump(ns->batch_sub_repl_ping_hist);
-		histogram_dump(ns->batch_sub_read_local_hist);
-		histogram_dump(ns->batch_sub_write_master_hist);
-		histogram_dump(ns->batch_sub_udf_master_hist);
-		histogram_dump(ns->batch_sub_repl_write_hist);
-		histogram_dump(ns->batch_sub_response_hist);
 	}
 
 	if (ns->udf_sub_benchmarks_enabled) {

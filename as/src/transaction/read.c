@@ -425,6 +425,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, read_local);
 		as_batch_add_result(tr, n_bins, response_bins, ops);
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
+		HIST_ACTIVATE_INSERT_DATA_POINT(tr, batch_sub_read_hist);
 		batch_sub_read_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	default:

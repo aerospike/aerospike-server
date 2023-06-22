@@ -536,6 +536,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 			as_batch_add_ack(tr);
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
+		HIST_ACTIVATE_INSERT_DATA_POINT(tr, batch_sub_write_hist);
 		batch_sub_write_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_IOPS:
