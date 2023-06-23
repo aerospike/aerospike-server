@@ -2112,7 +2112,8 @@ aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	cf_ll_reduce(&ll, true, as_aggr_keys_release_cb, &udata);
 
 	if (bb->used_sz > sizeof(as_proto)) {
-		conn_query_job_send_response((conn_query_job*)job, bb->buf, bb->used_sz);
+		conn_query_job_send_response((conn_query_job*)job, bb->buf,
+				bb->used_sz);
 	}
 
 	*bb_r = bb;
