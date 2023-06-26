@@ -51,7 +51,7 @@ void tls_socket_close(cf_socket *sock);
 
 char *tls_read_password(const char *path);
 cf_tls_info *tls_config_server_context(cf_tls_spec *tspec, bool auth_client, uint32_t n_peer_names, char **peer_names);
-cf_tls_info *tls_config_intra_context(cf_tls_spec *tspec, char *which);
+cf_tls_info *tls_config_intra_context(cf_tls_spec *tspec, const char *which);
 
 void tls_socket_prepare_server(cf_tls_info *info, cf_socket *sock);
 void tls_socket_prepare_client(cf_tls_info *info, cf_socket *sock);
