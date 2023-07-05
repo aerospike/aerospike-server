@@ -109,7 +109,6 @@ typedef struct info_static_s {
 	bool def; // default, but default is a reserved word
 	char* name;
 	char* value;
-	size_t value_sz;
 } info_static;
 
 typedef struct info_dynamic_s {
@@ -171,7 +170,6 @@ extern const char aerospike_build_sha[];
 extern const char aerospike_build_ee_sha[];
 extern const char aerospike_build_features[];
 
-static cf_mutex g_info_lock = CF_MUTEX_INIT;
 info_static* static_head = 0;
 info_dynamic* dynamic_head = 0;
 info_tree* tree_head = 0;
@@ -842,125 +840,69 @@ sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
 static int
 info_set(const char* name, const char* value, bool def)
 {
-	size_t value_sz = strlen(value);
+	info_static* e = static_head;
 
-	cf_mutex_lock(&g_info_lock);
-
-	// Delete case
-	if (value_sz == 0 || value == 0) {
-		info_static* p = 0;
-		info_static* e = static_head;
-
-		while (e != NULL) {
-			if (strcmp(name, e->name) == 0) {
-				if (p != NULL) {
-					p->next = e->next;
-					cf_free(e->name);
-					cf_free(e->value);
-					cf_free(e);
-				}
-				else {
-					info_static* _t = static_head->next;
-					cf_free(e->name);
-					cf_free(e->value);
-					cf_free(static_head);
-					static_head = _t;
-				}
-				break;
-			}
-
-			p = e;
-			e = e->next;
-		}
-	}
-	// insert case
-	else {
-		info_static* e = static_head;
-
-		// search for old value and overwrite
-		while (e != NULL) {
-			if (strcmp(name, e->name) == 0) {
-				cf_free(e->value);
-				e->value = cf_malloc(value_sz);
-				memcpy(e->value, value, value_sz);
-				e->value_sz = value_sz;
-				break;
-			}
-
-			e = e->next;
+	// Verify name is only set once.
+	while (e != NULL) {
+		if (strcmp(name, e->name) == 0) {
+			cf_crash(AS_INFO, "%s set more than once", name);
 		}
 
-		// not found, insert fresh
-		if (e == NULL) {
-			info_static* _t = cf_malloc(sizeof(info_static));
-			_t->next = static_head;
-			_t->def = def;
-			_t->name = cf_strdup(name);
-			_t->value = cf_malloc(value_sz);
-			memcpy(_t->value, value, value_sz);
-			_t->value_sz = value_sz;
-			static_head = _t;
-		}
+		e = e->next;
 	}
 
-	cf_mutex_unlock(&g_info_lock);
+	e = cf_malloc(sizeof(info_static));
+	e->next = static_head;
+	e->def = def;
+	e->name = cf_strdup(name);
+	e->value = cf_strdup(value);
+	static_head = e;
+
 	return 0;
 }
 
 static int
 info_set_dynamic(const char* name, as_info_get_value_fn gv_fn, bool def)
 {
-	cf_mutex_lock(&g_info_lock);
-
 	info_dynamic* e = dynamic_head;
 
 	while (e != NULL) {
 		if (strcmp(name, e->name) == 0) {
-			e->value_fn = gv_fn;
-			break;
+			cf_crash(AS_INFO, "%s set more than once", name);
 		}
 
 		e = e->next;
 	}
 
-	if (e == NULL) {
-		e = cf_malloc(sizeof(info_dynamic));
-		e->def = def;
-		e->name = cf_strdup(name);
-		e->value_fn = gv_fn;
-		e->next = dynamic_head;
-		dynamic_head = e;
-	}
+	e = cf_malloc(sizeof(info_dynamic));
+	e->def = def;
+	e->name = cf_strdup(name);
+	e->value_fn = gv_fn;
+	e->next = dynamic_head;
+	dynamic_head = e;
 
-	cf_mutex_unlock(&g_info_lock);
 	return 0;
 }
 
 static int
 info_set_tree(char* name, as_info_get_tree_fn gv_fn)
 {
-	cf_mutex_lock(&g_info_lock);
-
 	info_tree* e = tree_head;
 
 	while (e != NULL) {
 		if (strcmp(name, e->name) == 0) {
-			e->tree_fn = gv_fn;
-			break;
+			cf_crash(AS_INFO, "%s set more than once", name);
 		}
 
 		e = e->next;
 	}
 
-	if (e == NULL) {
-		e = cf_malloc(sizeof(info_tree));
-		e->name = cf_strdup(name);
-		e->tree_fn = gv_fn;
-		e->next = tree_head;
-		tree_head = e;
-	}
+	e = cf_malloc(sizeof(info_tree));
+	e->name = cf_strdup(name);
+	e->tree_fn = gv_fn;
+	e->next = tree_head;
+	tree_head = e;
 
-	cf_mutex_unlock(&g_info_lock);
 	return 0;
 }
 
@@ -968,29 +910,23 @@ static int
 info_set_command(const char* name, as_info_command_fn command_fn,
 		as_sec_perm required_perm)
 {
-	cf_mutex_lock(&g_info_lock);
-
 	info_command* e = command_head;
 
 	while (e != NULL) {
 		if (strcmp(name, e->name) == 0) {
-			e->command_fn = command_fn;
-			break;
+			cf_crash(AS_INFO, "%s set more than once", name);
 		}
 
 		e = e->next;
 	}
 
-	if (e == NULL) {
-		e = cf_malloc(sizeof(info_command));
-		e->name = cf_strdup(name);
-		e->command_fn = command_fn;
-		e->required_perm = required_perm;
-		e->next = command_head;
-		command_head = e;
-	}
+	e = cf_malloc(sizeof(info_command));
+	e->name = cf_strdup(name);
+	e->command_fn = command_fn;
+	e->required_perm = required_perm;
+	e->next = command_head;
+	command_head = e;
 
-	cf_mutex_unlock(&g_info_lock);
 	return 0;
 }
 
@@ -1098,7 +1034,7 @@ info_summary(cf_dyn_buf* db)
 		if (s->def == true) {
 			cf_dyn_buf_append_string(db, s->name);
 			cf_dyn_buf_append_char(db, SEP);
-			cf_dyn_buf_append_buf(db, (uint8_t*) s->value, s->value_sz);
+			cf_dyn_buf_append_string(db, s->value);
 			cf_dyn_buf_append_char(db, EOL);
 		}
 		s = s->next;
@@ -1143,7 +1079,7 @@ handle_cmds(char* buf, uint64_t sz, const as_file_handle* fd_h, cf_dyn_buf* db)
 					// return exact command string received from client
 					cf_dyn_buf_append_string(db, name);
 					cf_dyn_buf_append_char(db, SEP);
-					cf_dyn_buf_append_buf(db, (uint8_t*) s->value, s->value_sz);
+					cf_dyn_buf_append_string(db, s->value);
 					cf_dyn_buf_append_char(db, EOL);
 					handled = true;
 					break;
@@ -3409,9 +3345,8 @@ cmd_sindex_stat(char* name, char* params, cf_dyn_buf* db)
 		INFO_FAIL_RESPONSE(db, AS_ERR_SINDEX_NOT_FOUND, "NO INDEX");
 	}
 
-	if (iname) {
-		cf_free(iname);
-	}
+	cf_free(iname);
+
 	return 0;
 }
 
