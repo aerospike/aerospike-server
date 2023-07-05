@@ -1703,11 +1703,6 @@ hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs)
 
 	uint32_t n_union = hmh_n_used_registers(agg_hmh);
 
-	if (n_union == 0) {
-		// If all sets are empty then they are the same.
-		return 1.0;
-	}
-
 	hmh_init(agg_hmh, template.n_index_bits, template.n_minhash_bits);
 	hmh_union(agg_hmh, hmhs[0]);
 
