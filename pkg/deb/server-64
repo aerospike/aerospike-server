@@ -3,7 +3,7 @@ Version: @VERSION@-1
 Section: Databases
 Priority: optional
 Architecture: @ARCH@
-Depends: libc6 (>= 2.7)@DEPS@
+Depends: @DEPS@
 Maintainer: Aerospike, Inc. <support@aerospike.com>
 Description: The Aerospike distributed datastore allows fully scalable and reliable data storage with elastic server properties.
 Installed-Size: @SIZE@

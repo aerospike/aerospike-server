@@ -18,7 +18,6 @@ empty:=
 space:= $(empty) $(empty)
 
 CONF_VERSION = _systemd
-DEPS =
 
 PKG_ARCH = $(shell dpkg-architecture -q DEB_BUILD_ARCH)
 DEB = $(PKG)/packages/aerospike-server-$(EDITION)_$(REV)-1$(OS)_$(PKG_ARCH).deb
@@ -37,6 +36,8 @@ dist:
 	install -d $(BUILD_ROOT)/usr/lib/systemd/system
 	install -d $(BUILD_ROOT)/etc/systemd/system/aerospike.service.d
 	install -d $(BUILD_ROOT)/usr/bin
+	install -d $(PKG)/deb/debian
+	touch $(PKG)/deb/debian/control
 
 	install -pm 644 $(PKG)/deb/conffiles $(BUILD_ROOT)/DEBIAN
 ifeq ($(EDITION),community)
@@ -103,9 +104,13 @@ endif
 	sed -i 's/@EDITION@/'$(EDITION)'/g' $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@ARCH@/'$(PKG_ARCH)'/g' $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@SIZE@/'$(SIZE)'/g' $(BUILD_ROOT)/DEBIAN/control
-	sed -i 's/@DEPS@/$(addprefix $(comma), $(subst $(space),$(comma),$(strip $(DEPS))))/g' $(BUILD_ROOT)/DEBIAN/control
 
-package:
+.PHONY: gen-deps
+gen-deps:
+	$(eval DEPS := $(shell /usr/bin/dpkg-shlibdeps -O $(BUILD_ROOT)/usr/bin/asd | sed 's/shlibs:Depends=//'))
+	sed -i 's/@DEPS@/$(DEPS)/g' $(BUILD_ROOT)/DEBIAN/control
+
+package: gen-deps
 	install -pm 644 $(OPT_AS)/doc/LICENSE $(PKG)/packages
 	fakeroot dpkg-deb -Z xz --build $(BUILD_ROOT) $(DEB)
 
