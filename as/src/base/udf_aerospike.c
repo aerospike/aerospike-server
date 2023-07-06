@@ -168,22 +168,20 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 	}
 	// else - record created or rescued.
 
-	if (tr->msgp != NULL) {
-		int rv_set = as_transaction_has_set(tr) ?
-				set_set_from_msg(r, ns, &tr->msgp->msg) : 0;
+	int rv_set = as_transaction_has_set(tr) ?
+			set_set_from_msg(r, ns, &tr->msgp->msg) : 0;
 
-		if (rv_set != 0) {
-			as_index_delete(tree, keyd);
-			as_record_done(r_ref, ns);
-			return 4;
-		}
+	if (rv_set != 0) {
+		as_index_delete(tree, keyd);
+		as_record_done(r_ref, ns);
+		return 4;
+	}
 
-		// Don't write record if it would be truncated.
-		if (as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
-			as_index_delete(tree, keyd);
-			as_record_done(r_ref, ns);
-			return 4;
-		}
+	// Don't write record if it would be truncated.
+	if (as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
+		as_index_delete(tree, keyd);
+		as_record_done(r_ref, ns);
+		return 4;
 	}
 
 	as_storage_record_create(ns, r, rd);

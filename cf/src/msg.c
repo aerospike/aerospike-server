@@ -609,11 +609,7 @@ msg_set_str(msg *m, int field_id, const char *v, msg_set_type type)
 	}
 	else if (type == MSG_SET_HANDOFF_MALLOC) {
 		mf->u.str = (char *)v;
-		mf->is_free = (v != NULL);
-
-		if (! v) {
-			cf_warning(CF_MSG, "handoff malloc with null pointer");
-		}
+		mf->is_free = true;
 	}
 
 	mf->is_set = true;
@@ -641,15 +637,10 @@ msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t sz,
 		}
 
 		memcpy(mf->u.buf, v, sz);
-
 	}
 	else if (type == MSG_SET_HANDOFF_MALLOC) {
 		mf->u.buf = (void *)v;
-		mf->is_free = (v != NULL);
-
-		if (! v) {
-			cf_warning(CF_MSG, "handoff malloc with null pointer");
-		}
+		mf->is_free = true;
 	}
 
 	mf->is_set = true;

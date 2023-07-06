@@ -426,7 +426,8 @@ cf_log_activate_sinks(void)
 		sink->fd = syslog_socket(sink->path);
 
 		if (sink->fd < 0) {
-			cf_crash_nostack(CF_MISC, "can't connect to %s", sink->path);
+			cf_crash_nostack(CF_MISC, "can't connect to %s: %d (%s)",
+					sink->path, errno, cf_strerror(errno));
 		}
 	}
 
@@ -886,14 +887,15 @@ sprintf_now(char* buf)
 		gmtime_r(&now_tv.tv_sec, &now_tm);
 	}
 
-	int pos = (int)strftime(buf, 999, "%b %d %Y %T", &now_tm);
+	int pos = (int)strftime(buf, MAX_LOG_STRING_SZ, "%b %d %Y %T", &now_tm);
 
 	if (g_use_millis) {
 		pos += sprintf(buf + pos, ".%03ld", now_tv.tv_usec / 1000);
 	}
 
 	if (g_use_local_time) {
-		pos += (int)strftime(buf + pos, 999, " GMT%z: ", &now_tm);
+		pos += (int)strftime(buf + pos, MAX_LOG_STRING_SZ - (size_t)pos,
+				" GMT%z: ", &now_tm);
 	}
 	else {
 		strcpy(buf + pos, " GMT: ");
@@ -938,6 +940,10 @@ syslog_socket(const char* path)
 	strcpy(addr.sun_path, path);
 
 	int32_t fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+
+	if (fd < 0) {
+		return -1;
+	}
 
 	if (connect(fd, &addr, sizeof(addr)) >= 0) {
 		return fd;
@@ -1039,7 +1045,7 @@ syslog_sprintf_now(char* buf)
 		gmtime_r(&now_tv.tv_sec, &now_tm);
 	}
 
-	strftime(buf, 999, "%b %e %T", &now_tm);
+	strftime(buf, SYSLOG_TIME_SZ, "%b %e %T", &now_tm);
 
 	g_reentrant = false;
 }
@@ -1090,7 +1096,8 @@ syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time,
 			sink->fd = syslog_socket(sink->path);
 
 			if (sink->fd < 0) {
-				fprintf(stderr, "can't connect to %s\n", sink->path);
+				fprintf(stderr, "can't connect to %s: %d (%s)\n", sink->path,
+						errno, cf_strerror(errno));
 				break;
 			}
 		}
