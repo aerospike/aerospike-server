@@ -475,6 +475,10 @@ as_sindex_tree_collect_cardinality(as_sindex* si)
 
 	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
 		if (si->dropped) {
+			if (rec_hll != NULL) {
+				cf_free(rec_hll);
+			}
+
 			return;
 		}
 
