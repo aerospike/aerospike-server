@@ -44,6 +44,6 @@ typedef struct cf_uds_s {
 // Public API.
 //
 
-bool cf_uds_connect(char* path, cf_uds* sock);
+bool cf_uds_connect(const char* path, cf_uds* sock);
 int32_t cf_uds_send_all(cf_uds* sock, const void* buf, size_t size, int32_t flags);
 int32_t cf_uds_recv_all(cf_uds* sock, void* buf, size_t size, int32_t flags);

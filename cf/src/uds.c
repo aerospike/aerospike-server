@@ -33,6 +33,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <unistd.h>
 
 #include "log.h"
 
@@ -44,18 +45,9 @@
 //
 
 bool
-cf_uds_connect(char* path, cf_uds* sock)
+cf_uds_connect(const char* path, cf_uds* sock)
 {
-	// Create a Unix domain socket.
-	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-
-	if (sockfd == -1) {
-		cf_warning(CF_SOCKET, "error while creating socket for %s: %d (%s)",
-				path, errno, cf_strerror(errno));
-		return false;
-	}
-
-	struct sockaddr_un addr;
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
 
 	if (strlen(path) >= sizeof(addr.sun_path)) {
 		cf_warning(CF_SOCKET, "uds path %s must be < %lu characters", path,
@@ -63,17 +55,25 @@ cf_uds_connect(char* path, cf_uds* sock)
 		return false;
 	}
 
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
 	strcpy(addr.sun_path, path);
 
-	if (connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-		cf_ticker_warning(CF_SOCKET, "error while connect to %s: %d (%s)",
+	// Create a Unix domain socket.
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	if (fd == -1) {
+		cf_warning(CF_SOCKET, "error while creating socket for %s: %d (%s)",
 				path, errno, cf_strerror(errno));
 		return false;
 	}
 
-	sock->fd = sockfd;
+	if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+		cf_ticker_warning(CF_SOCKET, "error while connect to %s: %d (%s)",
+				path, errno, cf_strerror(errno));
+		close(fd);
+		return false;
+	}
+
+	sock->fd = fd;
 
 	return true;
 }
