@@ -295,6 +295,7 @@ typedef enum {
 	CASE_SERVICE_SALT_ALLOCATIONS,
 	CASE_SERVICE_SECRETS_ADDRESS_PORT,
 	CASE_SERVICE_SECRETS_TLS_CONTEXT,
+	CASE_SERVICE_SECRETS_UDS_PATH,
 	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_GC_PERIOD,
@@ -806,8 +807,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "query-threads-limit",			CASE_SERVICE_QUERY_THREADS_LIMIT },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
 		{ "salt-allocations",				CASE_SERVICE_SALT_ALLOCATIONS },
-		{ "secrets-address-port",           CASE_SERVICE_SECRETS_ADDRESS_PORT },
-		{ "secrets-tls-context",            CASE_SERVICE_SECRETS_TLS_CONTEXT },
+		{ "secrets-address-port",			CASE_SERVICE_SECRETS_ADDRESS_PORT },
+		{ "secrets-tls-context",			CASE_SERVICE_SECRETS_TLS_CONTEXT },
+		{ "secrets-uds-path",				CASE_SERVICE_SECRETS_UDS_PATH },
 		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
@@ -2209,6 +2211,10 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_SECRETS_TLS_CONTEXT:
 				cfg_enterprise_only(&line);
 				g_secrets_cfg.tls_context = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_SERVICE_SECRETS_UDS_PATH:
+				cfg_enterprise_only(&line);
+				g_secrets_cfg.uds_path = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_SERVICE_THREADS:
 				c->n_service_threads = cfg_u32(&line, 1, MAX_SERVICE_THREADS);

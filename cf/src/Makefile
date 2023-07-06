@@ -34,6 +34,7 @@ HEADERS += secrets.h
 HEADERS += shash.h
 HEADERS += socket.h
 HEADERS += tls.h
+HEADERS += uds.h
 HEADERS += vault.h
 HEADERS += vector.h
 HEADERS += vmapx.h
@@ -61,6 +62,7 @@ SOURCES += pool.c
 SOURCES += rchash.c
 SOURCES += shash.c
 SOURCES += socket.c
+SOURCES += uds.c
 SOURCES += vector.c
 SOURCES += vmapx.c
 

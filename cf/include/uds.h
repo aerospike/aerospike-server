@@ -1,5 +1,5 @@
 /*
- * secrets.h
+ * uds.h
  *
  * Copyright (C) 2023 Aerospike, Inc.
  *
@@ -30,34 +30,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "tls.h"
-
 
 //==========================================================
 // Typedefs & constants.
 //
 
-#define CF_SECRETS_PATH_PREFIX "secrets:"
-#define CF_SECRETS_PATH_PREFIX_LEN (sizeof(CF_SECRETS_PATH_PREFIX) - 1)
-
-typedef struct cf_secrets_config_s {
-	const char* addr;
-	const char* port;
-	char* tls_name;
-	char* tls_context;
-	char* uds_path;
-
-	// Derived fields.
-	bool configured;
-	cf_tls_spec* tls_spec;
-	cf_tls_info* tls;
-} cf_secrets_config;
+typedef struct cf_uds_s {
+	int32_t fd;
+} cf_uds;
 
 
 //==========================================================
 // Public API.
 //
 
-uint8_t* cf_secrets_fetch_bytes(const char* path, size_t* size_r);
-
-extern cf_secrets_config g_secrets_cfg;
+bool cf_uds_connect(char* path, cf_uds* sock);
+int32_t cf_uds_send_all(cf_uds* sock, const void* buf, size_t size, int32_t flags);
+int32_t cf_uds_recv_all(cf_uds* sock, void* buf, size_t size, int32_t flags);
