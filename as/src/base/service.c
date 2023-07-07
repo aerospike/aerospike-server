@@ -761,9 +761,9 @@ stop_service(thread_ctx* ctx)
 	cf_poll_destroy(ctx->poll);
 	cf_epoll_queue_destroy(&ctx->trans_q);
 
-	cf_free(ctx);
-
 	cf_detail(AS_SERVICE, "stopped ctx %p", ctx);
+
+        cf_free(ctx);
 }
 
 static void

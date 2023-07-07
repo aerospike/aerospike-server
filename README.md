@@ -21,7 +21,8 @@ information.  The full Telemetry data collection agent source code may be found 
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
-current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8/9, Debian 10 or later, and Ubuntu 20.04 or later.
+current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8/9, Amazon Linux 2023, 
+Debian 10 or later, and Ubuntu 20.04 or later.
 
 ### Dependencies
 
@@ -55,7 +56,7 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
 * The required CentOS 7 & Red Hat Enterprise Linux 8/9 package to install is: `gcc-c++`.
 
-* The required Debian 10/11 and Ubuntu 20/22 package to install is: `g++`.
+* The required Debian 10/11/12 and Ubuntu 20/22 package to install is: `g++`.
 
 #### OpenSSL
 
@@ -64,7 +65,7 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 
 * The CentOS 7 &  Red Hat Enterprise Linux 8/9 OpenSSL package to install:  `openssl-devel`
 
-* The Debian 10/11 and Ubuntu 20/22 OpenSSL packages to install: `libssl-dev`.
+* The Debian 10/11/12 and Ubuntu 20/22 OpenSSL packages to install: `libssl-dev`.
 
 #### Lua 5.1
 
@@ -80,7 +81,7 @@ by the build environment.  In that case:
 	* The CentOS 7 & Red Hat Enterprise Linux 8/9 Lua package to install is:  `lua`, and also
 `lua-devel` and `lua-static` on CentOS 7.
 
-	* The Debian 10/11 and Ubuntu 20/22 Lua packages to install are:
+	* The Debian 10/11/12 and Ubuntu 20/22 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
@@ -89,7 +90,7 @@ by the build environment.  In that case:
 
 * The CentOS 7 &  Red Hat Enterprise Linux 8/9 requires `zlib-devel`
 
-* The Debian 10/11 and Ubuntu 20/22 requiresi `zlib1g-dev`.
+* The Debian 10/11/12 and Ubuntu 20/22 requiresi `zlib1g-dev`.
 
 #### Python 3 or 2
 

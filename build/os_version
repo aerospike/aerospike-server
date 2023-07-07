@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ------------------------------------------------------------------------------
-# Copyright 2012-2019 Aerospike, Inc.
+# Copyright 2012-2023 Aerospike, Inc.
 #
 # Portions may be licensed to Aerospike, Inc. under one or more contributor
 # license agreements.
@@ -20,7 +20,7 @@ OPT_LONG=0
 
 if [ "$1" = "-long" ]
 then
-  OPT_LONG=1
+	OPT_LONG=1
 fi
 
 error() {
@@ -36,7 +36,7 @@ main() {
 	local distro_short=''
 
 	# Make sure this script is running on Linux
-	# The script is not designed to work on non-Linux 
+	# The script is not designed to work on non-Linux
 	# operating systems.
 	kernel=$(uname -s | tr '[:upper:]' '[:lower:]')
 	if [ "$kernel" != 'linux' ]
@@ -97,16 +97,22 @@ main() {
 	# Second chance for pre-release versions.
 	if [ -z "$distro_version" ]
 	then
-	    case "$distro_id" in
-	    'debian' )
+		case "$distro_id" in
+		'debian' )
 		debian_version=$(cat /etc/debian_version | tr '[:upper:]' '[:lower:]')
 		if [[ "$debian_version" = "buster"* ]]
 		then
 			debian_version=10
-		fi
-		if [[ "$debian_version" = "bullseye"* ]]
+		elif [[ "$debian_version" = "bullseye"* ]]
 		then
 			debian_version=11
+		elif [[ "$debian_version" = "bookworm"* ]]
+		then
+			debian_version=12
+		fi
+		if [[ "$debian_version" = "bookworm"* ]]
+		then
+			debian_version=12
 		fi
 		distro_version=${debian_version%%.*}
 		;;
@@ -118,10 +124,10 @@ main() {
 		distro_long="${distro_id}${distro_version%%.*}"
 		distro_short="el${distro_version%%.*}"
 		;;
-  	'rhel' | 'redhat' | 'red hat' )
-    		distro_long="${distro_id}${distro_version%%.*}"
-    		distro_short="el${distro_version%%.*}"
-    		;;
+	'rhel' | 'redhat' | 'red hat' )
+		distro_long="${distro_id}${distro_version%%.*}"
+		distro_short="el${distro_version%%.*}"
+		;;
 	'fedora' )
 		distro_long="${distro_id}${distro_version}"
 		distro_short="fc${distro_version}"
