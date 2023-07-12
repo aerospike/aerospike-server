@@ -1,7 +1,7 @@
 /*
  * sindex.c
  *
- * Copyright (C) 2022 Aerospike, Inc.
+ * Copyright (C) 2022-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,7 +26,6 @@
 
 #include "sindex/sindex.h"
 
-#include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -229,19 +228,11 @@ as_sindex_init(void)
 
 	pthread_rwlockattr_t rwattr;
 
-	if (pthread_rwlockattr_init(&rwattr) != 0) {
-		cf_crash(AS_SINDEX, "pthread_rwlockattr_init: %s", cf_strerror(errno));
-	}
+	pthread_rwlockattr_init(&rwattr);
+	pthread_rwlockattr_setkind_np(&rwattr,
+			PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
 
-	if (pthread_rwlockattr_setkind_np(&rwattr,
-			PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP) != 0) {
-		cf_crash(AS_SINDEX, "pthread_rwlockattr_setkind_np: %s",
-				cf_strerror(errno));
-	}
-
-	if (pthread_rwlock_init(&g_sindex_rwlock, &rwattr) != 0) {
-		cf_crash(AS_SINDEX, "pthread_rwlock_init: %s", cf_strerror(errno));
-	}
+	pthread_rwlock_init(&g_sindex_rwlock, &rwattr);
 
 	as_smd_module_load(AS_SMD_MODULE_SINDEX, as_sindex_smd_accept_cb, NULL,
 			NULL);
