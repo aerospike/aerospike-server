@@ -763,7 +763,7 @@ stop_service(thread_ctx* ctx)
 
 	cf_detail(AS_SERVICE, "stopped ctx %p", ctx);
 
-        cf_free(ctx);
+	cf_free(ctx);
 }
 
 static void
