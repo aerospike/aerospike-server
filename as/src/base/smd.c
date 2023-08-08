@@ -1028,7 +1028,11 @@ run_smd(void* udata)
 	(void)udata;
 
 	while (true) {
+		smd_lock();
+
 		int wait_ms = set_orig_try_retransmit_or_expire();
+
+		smd_unlock();
 
 		if (smd_is_pr()) {
 			int pr_wait_ms = pr_try_retransmit();
