@@ -24,15 +24,19 @@
 // Includes.
 //
 
+#include <inttypes.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "cf_thread.h"
 #include "log.h"
+#include "warnings.h"
 
 
 //==========================================================
@@ -48,6 +52,20 @@ extern const char aerospike_build_os[];
 extern const char aerospike_build_arch[];
 extern const char aerospike_build_sha[];
 extern const char aerospike_build_ee_sha[];
+
+// Support building with pre-4.0 kernel headers.
+
+#if ! defined BUS_MCEERR_AR
+#define BUS_MCEERR_AR 4
+#endif
+
+#if ! defined BUS_MCEERR_AO
+#define BUS_MCEERR_AO 5
+#endif
+
+#if ! defined SEGV_BNDERR
+#define SEGV_BNDERR 3
+#endif
 
 
 //==========================================================
@@ -118,6 +136,93 @@ log_abort(const char* signal)
 			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
 }
 
+static inline const char*
+siginfo_code_str(const siginfo_t* info)
+{
+	// Strings placed corresponding to the numeric value of the constant. See:
+	// https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/siginfo.h
+	static const char* const cs_all[] = { "SI_USER", "SI_QUEUE", "SI_TIMER",
+			"SI_MESGQ", "SI_ASYNCIO", "SI_SIGIO", "SI_TKILL" };
+	static const char* const cs_ill[] = { 0, "ILL_ILLOPC", "ILL_ILLOPN",
+			"ILL_ILLADR", "ILL_ILLTRP", "ILL_PRVOPC", "ILL_COPROC",
+			"ILL_BADSTK", "ILL_BADIADDR" };
+	static const char* const cs_bus[] = { 0, "BUS_ADRALN", "BUS_ADRERR",
+			"BUS_OBJERR", "BUS_MCEERR_AR", "BUS_MCEERR_AO" };
+	static const char* const cs_fpe[] = { 0, "FPE_INTDIV", "FPE_INTOVF",
+			"FPE_FLTDIV", "FPE_FLTOVF", "FPE_FLTUND", "FPE_FLTRES",
+			"FPE_FLTINV", "FPE_FLTSUB" };
+	static const char* const cs_segv[] = { 0, "SEGV_MAPERR", "SEGV_ACCERR",
+			"SEGV_BNDERR", "SEGV_PKUERR" };
+	static const char* const* sig_cs[] = {
+			[SIGILL] = cs_ill,
+			[SIGBUS] = cs_bus,
+			[SIGFPE] = cs_fpe,
+			[SIGSEGV] = cs_segv
+	};
+	static const int32_t cs_len[] = {
+			[SIGILL] = sizeof(cs_ill) / sizeof(char*),
+			[SIGBUS] = sizeof(cs_bus) / sizeof(char*),
+			[SIGFPE] = sizeof(cs_fpe) / sizeof(char*),
+			[SIGSEGV] = sizeof(cs_segv) / sizeof(char*)
+	};
+
+	if (info->si_code == SI_KERNEL) {
+		return "SI_KERNEL";
+	}
+
+	if (info->si_code <= 0) {
+		int32_t code = -info->si_code;
+
+		return code < (int32_t)(sizeof(cs_all) / sizeof(char*)) ?
+				cs_all[code] : "(unimpl)";
+	}
+
+	if (info->si_signo == SIGILL || info->si_signo == SIGBUS ||
+			info->si_signo == SIGFPE || info->si_signo == SIGSEGV) {
+		int32_t signo = info->si_signo;
+		int32_t code = info->si_code;
+
+		return code < cs_len[signo] ? sig_cs[signo][code] : "(unimpl)";
+	}
+
+	// Only if si_signo is SIGTRAP, SIGCHLD, SIGIO/SIGPOLL, or SIGSYS.
+	cf_warning(AS_AS, "called from unexpected signal handler");
+	return "(unimpl)";
+}
+
+static inline void
+log_siginfo(const siginfo_t* info)
+{
+	char buf[512];
+	int32_t written = sprintf(buf, "si_code %s (%d)", siginfo_code_str(info),
+			info->si_code);
+
+	if (info->si_signo == SIGILL || info->si_signo == SIGBUS ||
+			info->si_signo == SIGFPE || info->si_signo == SIGSEGV) {
+		written += sprintf(buf + written, " si_addr 0x%016lx",
+				(uintptr_t)info->si_addr);
+	}
+
+	if (info->si_code == SI_USER) {
+		written += sprintf(buf + written, " si_uid %d si_pid %u", info->si_uid,
+				info->si_pid);
+	}
+
+	if (info->si_signo == SIGBUS && (info->si_code == BUS_MCEERR_AR ||
+			info->si_code == BUS_MCEERR_AO)) {
+		written += sprintf(buf + written, " si_addr_lsb 0x%04x",
+				info->si_addr_lsb);
+	}
+
+	if (info->si_signo == SIGSEGV && info->si_code == SEGV_BNDERR) {
+		written += sprintf(buf + written,
+				" si_lower 0x%016lx si_upper 0x%016lx",
+				(uintptr_t)info->si_lower, (uintptr_t)info->si_upper);
+	}
+
+	cf_warning(AS_AS, "%s", buf);
+}
+
 
 //==========================================================
 // Signal handlers.
@@ -128,6 +233,7 @@ static void
 as_sig_handle_abort(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGABRT");
+	log_siginfo(info);
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -136,6 +242,7 @@ static void
 as_sig_handle_bus(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGBUS");
+	log_siginfo(info);
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -145,6 +252,7 @@ static void
 as_sig_handle_fpe(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGFPE");
+	log_siginfo(info);
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -153,6 +261,10 @@ as_sig_handle_fpe(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_hup(int sig_num, siginfo_t* info, void* ctx)
 {
+	(void)sig_num;
+	(void)info;
+	(void)ctx;
+
 	cf_info(AS_AS, "SIGHUP received, rolling log");
 
 	cf_log_rotate();
@@ -163,6 +275,7 @@ static void
 as_sig_handle_ill(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGILL");
+	log_siginfo(info);
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -172,6 +285,10 @@ as_sig_handle_ill(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 {
+	(void)sig_num;
+	(void)info;
+	(void)ctx;
+
 	log_abort("SIGINT");
 
 	if (! g_startup_complete) {
@@ -187,6 +304,7 @@ static void
 as_sig_handle_quit(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGQUIT");
+	log_siginfo(info);
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -196,6 +314,7 @@ static void
 as_sig_handle_segv(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGSEGV");
+	log_siginfo(info);
 	cf_log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
@@ -204,6 +323,10 @@ as_sig_handle_segv(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 {
+	(void)sig_num;
+	(void)info;
+	(void)ctx;
+
 	cf_info(AS_AS, "SIGTERM received, shutting down %s build %s os %s arch %s sha %.7s%s%.7s",
 			aerospike_build_type, aerospike_build_id,
 			aerospike_build_os, aerospike_build_arch,
@@ -223,7 +346,12 @@ as_sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_usr1(int sig_num, siginfo_t* info, void* ctx)
 {
+	(void)sig_num;
+	(void)info;
+	(void)ctx;
+
 	log_abort("SIGUSR1");
+	log_siginfo(info);
 	cf_log_stack_trace(ctx);
 	reraise_signal(SIGABRT);
 }
@@ -232,6 +360,8 @@ as_sig_handle_usr1(int sig_num, siginfo_t* info, void* ctx)
 //==========================================================
 // Public API.
 //
+
+void as_signal_setup(); // no signal.h, appease GCC
 
 void
 as_signal_setup()
