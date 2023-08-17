@@ -1648,7 +1648,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "sindex-type.mounts-high-water-pct", v,
 			&v_len) == 0) {
-		if (! as_namespace_index_persisted(ns)) {
+		if (! as_namespace_sindex_persisted(ns)) {
 			cf_warning(AS_INFO, "sindex-type.mounts-high-water-pct is not relevant for this sindex-type");
 			return false;
 		}
@@ -1675,7 +1675,7 @@ cfg_set_namespace(const char* cmd)
 		ns->pi_mounts_size_limit = val;
 	}
 	else if (as_info_parameter_get(cmd, "sindex-type.mounts-size-limit", v, &v_len) == 0) {
-		if (! as_namespace_index_persisted(ns)) {
+		if (! as_namespace_sindex_persisted(ns)) {
 			cf_warning(AS_INFO, "sindex-type.mounts-size-limit is not relevant for this sindex-type");
 			return false;
 		}
