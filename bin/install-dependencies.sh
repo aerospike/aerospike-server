@@ -10,6 +10,26 @@ function usage() {
 }
 
 
+function install_script_dependencies() {
+	# Needed for 'which' and 'getopt'.
+
+	echo -e "\e[32mInstalling script dependencies, os=${OS}...\e[0m"
+
+	case "$OS" in
+	'debian10' | 'debian11' | 'debian12' | 'ubuntu20.04' | 'ubuntu22.04' )
+		apt-get install -y --no-install-recommends util-linux debianutils
+		;;
+	# centos7 is the base image for rhel7
+	'amzn2023' | 'centos7' | 'rhel8' | 'rhel9' )
+		yum install -y util-linux which
+		;;
+	*)
+		echo -e "\e[31mAerospike server (CE) currently does not support the distribution ${OS}.\e[0m"
+		exit 1
+	esac
+}
+
+
 function parse_args() {
 	RUNTIME_ONLY="false"
 
@@ -36,7 +56,7 @@ function parse_args() {
 			break
 			;;
 		*)
-			echo "Unexpected option: $1"
+			echo -e "\e[31mUnexpected option: $1\e[0m"
 			usage
 			exit 1
 			;;
@@ -46,18 +66,19 @@ function parse_args() {
 
 
 function main() {
-	parse_args "$@"
 	OS=$(./build/os_version -long)
+	install_script_dependencies
+	parse_args "$@"
 
 	SUDO=""
 	if which sudo >/dev/null; then
 		SUDO="$(which sudo)"
 	fi
 
-	echo "Installing server dependencies, os=${OS}, runtime-only=${RUNTIME_ONLY}..."
+	echo -e "\e[32mInstalling server dependencies, os=${OS}, runtime-only=${RUNTIME_ONLY}...\e[0m"
 
 	case "$OS" in
-	'debian10' | 'debian11' | 'ubuntu20.04' | 'ubuntu22.04' )
+	'debian10' | 'debian11' | 'debian12' | 'ubuntu20.04' | 'ubuntu22.04' )
 		${SUDO} apt-get update
 		packages=(libssl-dev zlib1g-dev)  # # Common packages (build + Runtime)
 		# Add packages for build-only mode (i.e., runtime-only is not set)
@@ -73,11 +94,11 @@ function main() {
 				make)
 		fi
 
-		DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y --no-install-recommends  "${packages[@]}"
+		DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y --no-install-recommends "${packages[@]}"
 		;;
 
 	# centos7 is the base image for rhel7
-	'centos7' | 'rhel8' | 'rhel9' )
+	'amzn2023' | 'centos7' | 'rhel8' | 'rhel9' )
 		packages=(openssl-devel zlib-devel)  # Common packages (build + Runtime).
 
 		# Add packages for build-only mode (i.e., runtime-only is not set)
@@ -98,8 +119,8 @@ function main() {
 		if [ "$RUNTIME_ONLY" = "false" ] && [ "$OS" = "centos7" ]; then
 			# Should install the release repo's before installing
 			# the packages.
-			${SUDO} yum install centos-release-scl -y  # software collection repo
-			${SUDO} yum install epel-release -y
+			${SUDO} yum install -y centos-release-scl  # software collection repo
+			${SUDO} yum install -y epel-release
 
 			${SUDO} yum install -y \
 				cmake3 \
@@ -107,13 +128,11 @@ function main() {
 				devtoolset-9-gcc-c++
 		fi
 		;;
-
 	*)
-		echo "Aerospike server (CE) currently does not support the distribution ${OS}."
-		exit 1
+		echo -e "\e[31mAerospike server (CE) currently does not support the distribution ${OS}.\e[0m"
 		;;
 	esac
-	
+
 	if [ -n  "${EEREPO-}" ]; then
 		opt_flags=()
 		[[ ${RUNTIME_ONLY} == true ]] && opt_flags+=(--runtime-only)
@@ -124,6 +143,8 @@ function main() {
 		"${EEREPO}"/bin/install-ee-dependencies.sh --os="${OS}" "${opt_flags[@]}"
 		[[ $OS = "centos7" ]] && set -u
 	fi
+
+	echo -e "\e[32mFinished.\e[0m"
 }
 
 main "$@"
