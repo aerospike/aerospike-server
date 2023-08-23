@@ -49,12 +49,13 @@ lib: aslibs
 	$(MAKE) -C as $@ STATIC_LIB=1 OS=$(OS)
 
 .PHONY: aslibs
-aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LUAJIT)/src/luaconf.h s2lib
+aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LIBBACKTRACE)/Makefile $(LUAJIT)/src/luaconf.h s2lib
+	$(MAKE) -C $(JANSSON)
+	$(MAKE) -C $(JEMALLOC)
+	$(MAKE) -C $(LIBBACKTRACE)
 ifeq ($(USE_LUAJIT),1)
 	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so CCDEBUG=-g
 endif
-	$(MAKE) -C $(JEMALLOC)
-	$(MAKE) -C $(JANSSON)
 ifeq ($(ARCH), aarch64)
 	$(MAKE) -C $(TSO)
 endif
@@ -133,6 +134,9 @@ cleanmodules:
 		$(MAKE) -C $(JEMALLOC) clean; \
 		$(MAKE) -C $(JEMALLOC) distclean; \
 	fi
+	if [ -e "$(LIBBACKTRACE)/Makefile" ]; then \
+		$(MAKE) -C $(LIBBACKTRACE) clean; \
+	fi
 	if [ -e "$(LUAJIT)/Makefile" ]; then \
 		$(MAKE) -C $(LUAJIT) clean; \
 	fi
@@ -158,6 +162,7 @@ cleangit:
 	cd $(COMMON); $(GIT_CLEAN)
 	cd $(JANSSON); $(GIT_CLEAN)
 	cd $(JEMALLOC); $(GIT_CLEAN)
+	cd $(LIBBACKTRACE); $(GIT_CLEAN)
 	cd $(LUAJIT); $(GIT_CLEAN)
 	cd $(MOD_LUA); $(GIT_CLEAN)
 	cd $(S2); $(GIT_CLEAN)
@@ -187,6 +192,9 @@ $(JEMALLOC)/configure:
 
 $(JEMALLOC)/Makefile: $(JEMALLOC)/configure
 	cd $(JEMALLOC) && ./configure $(JEM_CONFIG_OPT)
+
+$(LIBBACKTRACE)/Makefile: $(LIBBACKTRACE)/configure
+	cd $(LIBBACKTRACE) && ./configure $(LIBBACKTRACE_CONFIG_OPT)
 
 .PHONY: source
 source: src

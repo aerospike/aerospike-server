@@ -27,3 +27,7 @@
 	path = modules/s2geometry
 	url = https://github.com/aerospike/s2geometry.git
 	ignore = dirty
+[submodule "modules/libbacktrace"]
+	path = modules/libbacktrace
+	url = https://github.com/aerospike/libbacktrace.git
+	ignore = dirty

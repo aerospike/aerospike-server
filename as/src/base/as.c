@@ -48,6 +48,7 @@
 #include "log.h"
 #include "os.h"
 #include "tls.h"
+#include "trace.h"
 
 #include "base/batch.h"
 #include "base/cfg.h"
@@ -259,6 +260,7 @@ as_run(int argc, char **argv)
 	// Initializations before config parsing.
 	cf_log_init(early_verbose);
 	cf_alloc_init();
+	cf_trace_init();
 	cf_thread_init();
 	as_signal_setup();
 	cf_fips_init();

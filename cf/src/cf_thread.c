@@ -27,7 +27,6 @@
 #include "cf_thread.h"
 
 #include <errno.h>
-#include <execinfo.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -43,6 +42,7 @@
 #include "cf_mutex.h"
 #include "dynbuf.h"
 #include "log.h"
+#include "trace.h"
 
 #include "warnings.h"
 
@@ -56,15 +56,13 @@ typedef struct thread_req_s {
 	void* udata;
 } thread_req;
 
-#define MAX_N_ADDRS 50
-
 typedef struct thread_info_s {
 	cf_ll_element link; // base object must be first
 	cf_thread_run_fn run;
 	void* udata;
 	pid_t sys_tid;
 	uint32_t n_addrs;
-	void* addrs[MAX_N_ADDRS];
+	void* addrs[MAX_BACKTRACE_DEPTH];
 } thread_info;
 
 typedef struct thread_alloc_s {
@@ -97,8 +95,8 @@ static uint32_t g_n_pool_active = 0;
 static cf_ll g_thread_list;
 static __thread thread_info* g_thread_info;
 
-static volatile uint32_t g_traces_pending;
-static volatile uint32_t g_traces_done;
+static uint32_t g_traces_pending;
+static uint32_t g_traces_done;
 
 static __thread thread_alloc* g_allocs = NULL;
 static __thread uint32_t g_n_allocs = 0;
@@ -249,9 +247,9 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 	(void)info;
 	(void)ctx;
 
-	g_thread_info->n_addrs = (uint32_t)backtrace(g_thread_info->addrs,
-			MAX_N_ADDRS);
-	g_traces_done++;
+	g_thread_info->n_addrs = (uint32_t)cf_backtrace(g_thread_info->addrs,
+			MAX_BACKTRACE_DEPTH);
+	as_incr_uint32(&g_traces_done);
 }
 
 void
@@ -436,23 +434,18 @@ print_traces_cb(cf_ll_element* ele, void* udata)
 	cf_dyn_buf* db = (cf_dyn_buf*)udata;
 
 	cf_dyn_buf_append_format(db, "---------- %d (0x%lx) ----------;",
-			info->sys_tid, cf_log_strip_aslr(info->run));
+			info->sys_tid, cf_strip_aslr(info->run));
 
 	if (info->n_addrs == 0) { // race: thread created after we sent SIGUSR2
 		return 0;
 	}
 
-	char** syms = backtrace_symbols(info->addrs, (int32_t)info->n_addrs);
+	for (uint32_t i = 0; i < info->n_addrs; i++) {
+		char sym_str[SYM_STR_MAX_SZ];
 
-	if (syms == NULL) {
-		cf_dyn_buf_append_format(db, "failed;");
-	}
-	else {
-		for (uint32_t i = 0; i < info->n_addrs; i++) {
-			cf_dyn_buf_append_format(db, "%s;", syms[i]);
-		}
-
-		free(syms);
+		cf_addr_to_sym_str(sym_str, info->addrs[i]);
+		cf_dyn_buf_append_string(db, sym_str);
+		cf_dyn_buf_append_char(db, ';');
 	}
 
 	info->n_addrs = 0;

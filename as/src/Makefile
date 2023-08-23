@@ -231,12 +231,12 @@ SOURCES += $(XDR_SOURCES:%=xdr/%)
 SERVER = $(BIN_DIR)/asd
 
 INCLUDES += $(INCLUDE_DIR:%=-I%)
+INCLUDES += -I$(ABSL)
 INCLUDES += -I$(CF)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(S2)/src
-INCLUDES += -I$(ABSL)
 
 ifeq ($(USE_LUAJIT),1)
   INCLUDES += -I$(LUAJIT)/src
@@ -251,6 +251,7 @@ endif
 AS_LIBRARIES += $(LIBRARY_DIR)/libcf.a
 AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
 AS_LIBRARIES += $(JEMALLOC)/lib/libjemalloc.a
+AS_LIBRARIES += $(LIBBACKTRACE)/.libs/libbacktrace.a
 AS_LIBRARIES += $(MOD_LUA)/target/$(PLATFORM)/lib/libmod_lua.a
 
 ifeq ($(DOPROFILE),1)

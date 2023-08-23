@@ -25,6 +25,7 @@
 //
 
 #include <inttypes.h>
+#include <link.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -32,10 +33,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 #include "cf_thread.h"
 #include "log.h"
+#include "trace.h"
+
 #include "warnings.h"
 
 
@@ -122,7 +126,7 @@ log_abort(const char* signal)
 			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
 }
 
-static inline const char*
+static const char*
 siginfo_code_str(const siginfo_t* info)
 {
 	// Strings placed corresponding to the numeric value of the constant. See:
@@ -176,7 +180,7 @@ siginfo_code_str(const siginfo_t* info)
 	return "(unimpl)";
 }
 
-static inline void
+static void
 log_siginfo(const siginfo_t* info)
 {
 	char buf[512];
@@ -213,6 +217,66 @@ log_siginfo(const siginfo_t* info)
 	cf_warning(AS_AS, "%s", buf);
 }
 
+// Unlike cf_log_stack_trace(), includes registers and addresses.
+static void
+log_stack_trace(void* ctx)
+{
+	ucontext_t* uc = (ucontext_t*)ctx;
+	mcontext_t* mc = (mcontext_t*)&uc->uc_mcontext;
+	char reg_str[1000];
+#if defined __x86_64__
+	uint64_t* gregs = (uint64_t*)&mc->gregs[0];
+
+	sprintf(reg_str,
+		"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx "
+		"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx "
+		"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx",
+		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
+		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
+		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
+		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15],
+		gregs[REG_RIP]);
+#elif defined __aarch64__
+	uint64_t fault = (uint64_t)mc->fault_address;
+	uint64_t* regs = (uint64_t*)&mc->regs[0];
+	uint64_t sp = (uint64_t)mc->sp;
+	uint64_t pc = (uint64_t)mc->pc;
+
+	char* p = reg_str;
+
+	p += sprintf(p, "fault %016lx ", fault);
+
+	for (uint32_t i = 0; i < 31; i++) {
+		p += sprintf(p, "x%u %016lx ", i, regs[i]);
+	}
+
+	sprintf(p, "x31 %016lx pc %016lx", sp, pc);
+#endif
+
+	cf_warning(AS_AS, "stacktrace: registers: %s", reg_str);
+
+	void* bt[MAX_BACKTRACE_DEPTH];
+	char trace[MAX_BACKTRACE_DEPTH * 20];
+
+	int n_frames = cf_backtrace(bt, MAX_BACKTRACE_DEPTH);
+	int off = 0;
+
+	for (int i = 0; i < n_frames; i++) {
+		off += sprintf(trace + off, " 0x%lx", cf_strip_aslr(bt[i]));
+	}
+
+	cf_warning(AS_AS, "stacktrace: found %d frames:%s offset 0x%lx", n_frames,
+			trace, _r_debug.r_map->l_addr);
+
+	for (int i = 0; i < n_frames; i++) {
+		char sym_str[SYM_STR_MAX_SZ];
+
+		cf_addr_to_sym_str(sym_str, bt[i]);
+		cf_warning(AS_AS, "stacktrace: frame %d: %s [0x%lx]", i, sym_str,
+				cf_strip_aslr(bt[i]));
+	}
+}
+
 
 //==========================================================
 // Signal handlers.
@@ -224,7 +288,7 @@ as_sig_handle_abort(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGABRT");
 	log_siginfo(info);
-	cf_log_stack_trace(ctx);
+	log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -233,7 +297,7 @@ as_sig_handle_bus(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGBUS");
 	log_siginfo(info);
-	cf_log_stack_trace(ctx);
+	log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -243,7 +307,7 @@ as_sig_handle_fpe(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGFPE");
 	log_siginfo(info);
-	cf_log_stack_trace(ctx);
+	log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -266,7 +330,7 @@ as_sig_handle_ill(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGILL");
 	log_siginfo(info);
-	cf_log_stack_trace(ctx);
+	log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -295,7 +359,7 @@ as_sig_handle_quit(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGQUIT");
 	log_siginfo(info);
-	cf_log_stack_trace(ctx);
+	log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -305,7 +369,7 @@ as_sig_handle_segv(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGSEGV");
 	log_siginfo(info);
-	cf_log_stack_trace(ctx);
+	log_stack_trace(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -342,7 +406,7 @@ as_sig_handle_usr1(int sig_num, siginfo_t* info, void* ctx)
 
 	log_abort("SIGUSR1");
 	log_siginfo(info);
-	cf_log_stack_trace(ctx);
+	log_stack_trace(ctx);
 	reraise_signal(SIGABRT);
 }
 

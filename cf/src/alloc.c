@@ -46,6 +46,7 @@
 #include "bits.h"
 #include "cf_thread.h"
 #include "log.h"
+#include "trace.h"
 
 #include "aerospike/as_atomic.h"
 #include "aerospike/as_random.h"
@@ -305,19 +306,19 @@ hook_handle_free_check(const void* ra, const void* p, size_t jem_sz)
 
 	if (site_id >= MAX_SITES) {
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid site ID",
-				jem_sz, p, cf_log_strip_aslr(ra));
+				jem_sz, p, cf_strip_aslr(ra));
 	}
 
 	if (delta == 0xffff) {
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, potential double free, possibly freed before with RA 0x%lx",
-				jem_sz, p, cf_log_strip_aslr(ra),
-				cf_log_strip_aslr(as_load_rlx(g_site_ras + site_id)));
+				jem_sz, p, cf_strip_aslr(ra),
+				cf_strip_aslr(as_load_rlx(g_site_ras + site_id)));
 	}
 
 	if (delta > jem_sz - sizeof(uint32_t)) {
 		cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid delta length, possibly allocated with RA 0x%lx",
-				jem_sz, p, cf_log_strip_aslr(ra),
-				cf_log_strip_aslr(as_load_rlx(g_site_ras + site_id)));
+				jem_sz, p, cf_strip_aslr(ra),
+				cf_strip_aslr(as_load_rlx(g_site_ras + site_id)));
 	}
 
 	uint8_t *mark = data - delta;
@@ -325,8 +326,8 @@ hook_handle_free_check(const void* ra, const void* p, size_t jem_sz)
 	for (uint32_t i = 0; i < 4 && i < delta; ++i) {
 		if (mark[i] != data[i]) {
 			cf_crash(CF_ALLOC, "corruption %zu@%p RA 0x%lx, invalid mark, possibly allocated with RA 0x%lx",
-					jem_sz, p, cf_log_strip_aslr(ra),
-					cf_log_strip_aslr(as_load_rlx(g_site_ras + site_id)));
+					jem_sz, p, cf_strip_aslr(ra),
+					cf_strip_aslr(as_load_rlx(g_site_ras + site_id)));
 		}
 	}
 }
@@ -744,7 +745,7 @@ cf_alloc_log_site_infos(const char *file)
 		const void *ra = as_load_rlx(g_site_ras + site_id);
 
 		fprintf(fh, "0x%016" PRIx64 " %9d 0x%016zx 0x%016zx\n",
-				cf_log_strip_aslr(ra), info->thread_id, info->size_hi,
+				cf_strip_aslr(ra), info->thread_id, info->size_hi,
 				info->size_lo);
 	}
 

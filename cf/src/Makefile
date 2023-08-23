@@ -34,6 +34,7 @@ HEADERS += secrets.h
 HEADERS += shash.h
 HEADERS += socket.h
 HEADERS += tls.h
+HEADERS += trace.h
 HEADERS += uds.h
 HEADERS += vault.h
 HEADERS += vector.h
@@ -62,6 +63,7 @@ SOURCES += pool.c
 SOURCES += rchash.c
 SOURCES += shash.c
 SOURCES += socket.c
+SOURCES += trace.c
 SOURCES += uds.c
 SOURCES += vector.c
 SOURCES += vmapx.c
@@ -81,6 +83,7 @@ INCLUDES += $(INCLUDE_DIR:%=-I%)
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(JEMALLOC)/include
+INCLUDES += -I$(LIBBACKTRACE)
 
 OBJECTS = $(SOURCES:%.c=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)

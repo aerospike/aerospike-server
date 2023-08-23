@@ -293,5 +293,5 @@ void cf_log_dump_cache(void);
 // Public API - stack trace.
 //
 
-void cf_log_stack_trace(void* ctx);
-uint64_t cf_log_strip_aslr(const void* addr);
+// For debugging, in case we need a stack trace without stopping the server.
+void cf_log_stack_trace(void);

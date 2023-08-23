@@ -27,12 +27,11 @@
 #include "log.h"
 
 #include <errno.h>
-#include <execinfo.h>
 #include <fcntl.h>
-#include <link.h>
 #include <printf.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/socket.h>
@@ -51,6 +50,7 @@
 #include "cf_mutex.h"
 #include "os.h"
 #include "shash.h"
+#include "trace.h"
 
 #include "warnings.h"
 
@@ -193,11 +193,6 @@ typedef struct cf_log_cache_hkey_s {
 #define MAX_ADJUSTED_STRING_SZ 2048 // trust adjusted format won't exceed this
 
 #define SYSLOG_TIME_SZ 15
-
-#define MAX_BACKTRACE_DEPTH 50
-
-extern char __executable_start;
-extern char __etext;
 
 
 //==========================================================
@@ -669,76 +664,17 @@ cf_log_dump_cache(void)
 //
 
 void
-cf_log_stack_trace(void* ctx)
+cf_log_stack_trace(void)
 {
-	ucontext_t* uc = (ucontext_t*)ctx;
-	mcontext_t* mc = (mcontext_t*)&uc->uc_mcontext;
-	char reg_str[1000];
-#if defined __x86_64__
-	uint64_t* gregs = (uint64_t*)&mc->gregs[0];
-
-	sprintf(reg_str,
-		"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx "
-		"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx "
-		"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx",
-		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
-		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
-		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
-		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15],
-		gregs[REG_RIP]);
-#elif defined __aarch64__
-	uint64_t fault = (uint64_t)mc->fault_address;
-	uint64_t* regs = (uint64_t*)&mc->regs[0];
-	uint64_t sp = (uint64_t)mc->sp;
-	uint64_t pc = (uint64_t)mc->pc;
-
-	char* p = reg_str;
-
-	p += sprintf(p, "fault %016lx ", fault);
-
-	for (uint32_t i = 0; i < 31; i++) {
-		p += sprintf(p, "x%u %016lx ", i, regs[i]);
-	}
-
-	sprintf(p, "x31 %016lx pc %016lx", sp, pc);
-#endif
-
-	cf_warning(AS_AS, "stacktrace: registers: %s", reg_str);
-
 	void* bt[MAX_BACKTRACE_DEPTH];
-	char trace[MAX_BACKTRACE_DEPTH * 20];
-
-	int n_frames = backtrace(bt, MAX_BACKTRACE_DEPTH);
-	int off = 0;
+	int n_frames = cf_backtrace(bt, MAX_BACKTRACE_DEPTH);
 
 	for (int i = 0; i < n_frames; i++) {
-		off += sprintf(trace + off, " 0x%lx", cf_log_strip_aslr(bt[i]));
+		char sym_str[SYM_STR_MAX_SZ];
+
+		cf_addr_to_sym_str(sym_str, bt[i]);
+		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, sym_str);
 	}
-
-	cf_warning(AS_AS, "stacktrace: found %d frames:%s offset 0x%lx", n_frames,
-			trace, _r_debug.r_map->l_addr);
-
-	char** syms = backtrace_symbols(bt, n_frames);
-
-	if (syms == NULL) {
-		cf_warning(AS_AS, "stacktrace: found no symbols");
-		return;
-	}
-
-	for (int i = 0; i < n_frames; i++) {
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, syms[i]);
-	}
-}
-
-uint64_t
-cf_log_strip_aslr(const void* addr)
-{
-	void* start = &__executable_start;
-	void* end = &__etext;
-	uint64_t aslr_offset = _r_debug.r_map->l_addr;
-
-	return addr >= start && addr < end ?
-			(uint64_t)addr - aslr_offset : (uint64_t)addr;
 }
 
 
