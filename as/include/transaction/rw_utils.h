@@ -98,6 +98,8 @@ typedef struct now_times_s {
 //
 
 bool convert_to_write(struct as_transaction_s* tr, struct cl_msg_s** p_msgp);
+void convert_batched_to_write(const struct as_namespace_s* ns, struct as_transaction_s* tr, void** p_extra_msgps);
+void destroy_batch_extra_msgps(void* extra_msgps);
 int validate_delete_durability(struct as_transaction_s* tr);
 bool xdr_allows_write(struct as_transaction_s* tr);
 void send_rw_messages(struct rw_request_s* rw);
