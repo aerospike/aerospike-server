@@ -37,6 +37,7 @@
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "transaction/rw_utils.h"
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "hardware.h"
@@ -118,6 +119,7 @@ struct as_batch_shared_s {
 	bool compress_response;
 	as_msg_field* predexp_mf;
 	as_exp* predexp;
+	void* extra_msgps;
 };
 
 typedef struct {
@@ -286,6 +288,7 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 	cf_mutex_destroy(&shared->lock);
 
 	// Release memory
+	destroy_batch_extra_msgps(shared->extra_msgps);
 	as_exp_destroy(shared->predexp);
 	cf_free(shared->msgp);
 	cf_free(shared);
@@ -1136,7 +1139,13 @@ as_batch_queue_task(as_transaction* btr)
 			out->proto.type = PROTO_TYPE_AS_MSG;
 			out->proto.sz = (data - (uint8_t*)&out->msg);
 			tr.msgp = out;
-			prev_msgp = out;
+
+			if (as_transaction_is_delete(&tr)) {
+				// If durable & 'ship-bin-luts', generate bin cemetery.
+				convert_batched_to_write(ns, &tr, &shared->extra_msgps);
+			}
+
+			prev_msgp = tr.msgp;
 		}
 
 		if (data > limit) {
