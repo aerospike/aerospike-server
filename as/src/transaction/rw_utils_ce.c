@@ -52,6 +52,19 @@ convert_to_write(as_transaction* tr, cl_msg** p_msgp)
 }
 
 
+void
+convert_batched_to_write(const as_namespace* ns, as_transaction* tr,
+		void** p_extra_msgps)
+{
+}
+
+
+void
+destroy_batch_extra_msgps(void* extra_msgps)
+{
+}
+
+
 int
 validate_delete_durability(as_transaction* tr)
 {
