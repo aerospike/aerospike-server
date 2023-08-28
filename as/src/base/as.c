@@ -185,11 +185,11 @@ bool g_shutdown_started = false;
 //
 
 // signal.c doesn't have header file.
-extern void as_signal_setup();
+extern void as_signal_setup(void);
 
 static void write_pidfile(char *pidfile);
 static void validate_directory(const char *path, const char *log_tag);
-static void validate_smd_directory();
+static void validate_smd_directory(void);
 
 
 //==========================================================
@@ -529,7 +529,7 @@ validate_directory(const char *path, const char *log_tag)
 }
 
 static void
-validate_smd_directory()
+validate_smd_directory(void)
 {
 	size_t len = strlen(g_config.work_directory);
 	char smd_path[len + sizeof(SMD_DIR_NAME)];

@@ -68,10 +68,127 @@ extern bool g_startup_complete;
 
 
 //==========================================================
-// Local helpers.
+// Forward declarations.
 //
 
-static inline void
+static void sig_trace_and_reraise(int sig_num, siginfo_t* info, void* ctx);
+static void sig_handle_hup(int sig_num, siginfo_t* info, void* ctx);
+static void sig_handle_int(int sig_num, siginfo_t* info, void* ctx);
+static void sig_handle_term(int sig_num, siginfo_t* info, void* ctx);
+
+static void set_action(int sig_num, action_t act);
+static void set_handler(int sig_num, sighandler_t hand);
+static void log_signal(int sig_num, const char* msg_str);
+static void log_siginfo(const siginfo_t* info);
+static const char* siginfo_code_str(const siginfo_t* info);
+static void log_stack_trace(void* ctx);
+
+
+//==========================================================
+// Public API.
+//
+
+void as_signal_setup(void); // no signal.h, appease GCC
+
+void
+as_signal_setup(void)
+{
+	set_action(SIGABRT, sig_trace_and_reraise);
+	set_action(SIGBUS, sig_trace_and_reraise);
+	set_action(SIGFPE, sig_trace_and_reraise);
+	set_action(SIGHUP, sig_handle_hup);
+	set_action(SIGILL, sig_trace_and_reraise);
+	set_action(SIGINT, sig_handle_int);
+	set_action(SIGQUIT, sig_trace_and_reraise); // intentional trigger
+	set_action(SIGSEGV, sig_trace_and_reraise);
+	set_action(SIGTERM, sig_handle_term);
+	set_action(SIGUSR1, sig_trace_and_reraise); // cf_crash() & cf_assert()
+	set_action(SIGUSR2, cf_thread_traces_action);
+
+	// Block SIGPIPE signal when there is some error while writing to pipe. The
+	// write() call will return with a normal error which we can handle.
+	set_handler(SIGPIPE, SIG_IGN);
+}
+
+
+//==========================================================
+// Local helpers - signal handlers.
+//
+
+static void
+sig_trace_and_reraise(int sig_num, siginfo_t* info, void* ctx)
+{
+	log_signal(sig_num, "aborting");
+	log_siginfo(info);
+	log_stack_trace(ctx);
+
+	if (sig_num == SIGUSR1) {
+		sig_num = SIGABRT;
+	}
+
+	if (getpid() == 1) {
+		cf_warning(AS_AS, "pid 1 received signal %d - exiting", sig_num);
+		_exit(1);
+	}
+
+	set_handler(sig_num, SIG_DFL);
+	raise(sig_num);
+}
+
+// This signal is our cue to roll the log.
+static void
+sig_handle_hup(int sig_num, siginfo_t* info, void* ctx)
+{
+	(void)sig_num;
+	(void)info;
+	(void)ctx;
+
+	cf_info(AS_AS, "SIGHUP received, rolling log");
+
+	cf_log_rotate();
+}
+
+// We get here on cf_crash_nostack(), cf_assert_nostack(), or Ctrl-C when
+// running in foreground.
+static void
+sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
+{
+	(void)info;
+	(void)ctx;
+
+	log_signal(sig_num, "aborting");
+
+	if (! g_startup_complete) {
+		cf_warning(AS_AS, "startup was not complete, exiting immediately");
+		_exit(1);
+	}
+
+	pthread_mutex_unlock(&g_main_deadlock);
+}
+
+// We get here on normal shutdown.
+static void
+sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
+{
+	(void)info;
+	(void)ctx;
+
+	log_signal(sig_num, "shutting down");
+
+	if (! g_startup_complete) {
+		cf_warning(AS_AS, "startup was not complete, exiting immediately");
+		_exit(0);
+	}
+
+	pthread_mutex_unlock(&g_main_deadlock);
+}
+
+
+//==========================================================
+// Local helpers - miscellaneous.
+//
+
+static void
 set_action(int sig_num, action_t act)
 {
 	struct sigaction sa;
@@ -87,7 +204,7 @@ set_action(int sig_num, action_t act)
 	}
 }
 
-static inline void
+static void
 set_handler(int sig_num, sighandler_t hand)
 {
 	struct sigaction sa;
@@ -103,27 +220,61 @@ set_handler(int sig_num, sighandler_t hand)
 	}
 }
 
-static inline void
-reraise_signal(int sig_num)
+static void
+log_signal(int sig_num, const char* msg_str)
 {
-	if (getpid() == 1) {
-		cf_warning(AS_AS, "pid 1 received signal %d - exiting", sig_num);
-		_exit(1);
-	}
+	static const char* const signal_str[] = {
+		[SIGINT] = "INT",
+		[SIGQUIT] = "QUIT",
+		[SIGILL] = "ILL",
+		[SIGABRT] = "ABRT",
+		[SIGBUS] = "BUS",
+		[SIGFPE] = "FPE",
+		[SIGUSR1] = "USR1",
+		[SIGSEGV] = "SEGV",
+		[SIGTERM] = "TERM"
+	};
 
-	set_handler(sig_num, SIG_DFL);
-	raise(sig_num);
-}
-
-static inline void
-log_abort(const char* signal)
-{
-	cf_warning(AS_AS, "%s received, aborting %s build %s os %s arch %s sha %.7s%s%.7s",
-			signal, aerospike_build_type, aerospike_build_id,
-			aerospike_build_os, aerospike_build_arch,
+	cf_warning(AS_AS, "SIG%s received, %s %s build %s os %s arch %s sha %.7s%s%.7s",
+			signal_str[sig_num], msg_str, aerospike_build_type,
+			aerospike_build_id, aerospike_build_os, aerospike_build_arch,
 			aerospike_build_sha,
 			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
 			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
+}
+
+static void
+log_siginfo(const siginfo_t* info)
+{
+	char buf[512];
+	char* at = buf;
+
+	at += sprintf(at, "si_code %s (%d)", siginfo_code_str(info), info->si_code);
+
+	if (info->si_signo == SIGILL || info->si_signo == SIGBUS ||
+			info->si_signo == SIGFPE || info->si_signo == SIGSEGV) {
+		at += sprintf(at, " si_addr 0x%016lx", (uintptr_t)info->si_addr);
+	}
+
+	if (info->si_code == SI_USER) {
+		at += sprintf(at, " si_uid %d si_pid %u", info->si_uid, info->si_pid);
+	}
+
+#if defined BUS_MCEERR_AR && defined BUS_MCEERR_AO
+	if (info->si_signo == SIGBUS && (info->si_code == BUS_MCEERR_AR ||
+			info->si_code == BUS_MCEERR_AO)) {
+		at += sprintf(at, " si_addr_lsb 0x%04x", info->si_addr_lsb);
+	}
+#endif
+
+#if defined SEGV_BNDERR
+	if (info->si_signo == SIGSEGV && info->si_code == SEGV_BNDERR) {
+		sprintf(at, " si_lower 0x%016lx si_upper 0x%016lx",
+				(uintptr_t)info->si_lower, (uintptr_t)info->si_upper);
+	}
+#endif
+
+	cf_warning(AS_AS, "%s", buf);
 }
 
 static const char*
@@ -180,43 +331,6 @@ siginfo_code_str(const siginfo_t* info)
 	return "(unimpl)";
 }
 
-static void
-log_siginfo(const siginfo_t* info)
-{
-	char buf[512];
-	int32_t written = sprintf(buf, "si_code %s (%d)", siginfo_code_str(info),
-			info->si_code);
-
-	if (info->si_signo == SIGILL || info->si_signo == SIGBUS ||
-			info->si_signo == SIGFPE || info->si_signo == SIGSEGV) {
-		written += sprintf(buf + written, " si_addr 0x%016lx",
-				(uintptr_t)info->si_addr);
-	}
-
-	if (info->si_code == SI_USER) {
-		written += sprintf(buf + written, " si_uid %d si_pid %u", info->si_uid,
-				info->si_pid);
-	}
-
-#if defined BUS_MCEERR_AR && defined BUS_MCEERR_AO
-	if (info->si_signo == SIGBUS && (info->si_code == BUS_MCEERR_AR ||
-			info->si_code == BUS_MCEERR_AO)) {
-		written += sprintf(buf + written, " si_addr_lsb 0x%04x",
-				info->si_addr_lsb);
-	}
-#endif
-
-#if defined SEGV_BNDERR
-	if (info->si_signo == SIGSEGV && info->si_code == SEGV_BNDERR) {
-		written += sprintf(buf + written,
-				" si_lower 0x%016lx si_upper 0x%016lx",
-				(uintptr_t)info->si_lower, (uintptr_t)info->si_upper);
-	}
-#endif
-
-	cf_warning(AS_AS, "%s", buf);
-}
-
 // Unlike cf_log_stack_trace(), includes registers and addresses.
 static void
 log_stack_trace(void* ctx)
@@ -256,13 +370,13 @@ log_stack_trace(void* ctx)
 	cf_warning(AS_AS, "stacktrace: registers: %s", reg_str);
 
 	void* bt[MAX_BACKTRACE_DEPTH];
-	char trace[MAX_BACKTRACE_DEPTH * 20];
-
 	int n_frames = cf_backtrace(bt, MAX_BACKTRACE_DEPTH);
-	int off = 0;
+
+	char trace[MAX_BACKTRACE_DEPTH * 20];
+	char* at = trace;
 
 	for (int i = 0; i < n_frames; i++) {
-		off += sprintf(trace + off, " 0x%lx", cf_strip_aslr(bt[i]));
+		at += sprintf(at, " 0x%lx", cf_strip_aslr(bt[i]));
 	}
 
 	cf_warning(AS_AS, "stacktrace: found %d frames:%s offset 0x%lx", n_frames,
@@ -275,164 +389,4 @@ log_stack_trace(void* ctx)
 		cf_warning(AS_AS, "stacktrace: frame %d: %s [0x%lx]", i, sym_str,
 				cf_strip_aslr(bt[i]));
 	}
-}
-
-
-//==========================================================
-// Signal handlers.
-//
-
-// We get here on some crashes.
-static void
-as_sig_handle_abort(int sig_num, siginfo_t* info, void* ctx)
-{
-	log_abort("SIGABRT");
-	log_siginfo(info);
-	log_stack_trace(ctx);
-	reraise_signal(sig_num);
-}
-
-static void
-as_sig_handle_bus(int sig_num, siginfo_t* info, void* ctx)
-{
-	log_abort("SIGBUS");
-	log_siginfo(info);
-	log_stack_trace(ctx);
-	reraise_signal(sig_num);
-}
-
-// Floating point exception.
-static void
-as_sig_handle_fpe(int sig_num, siginfo_t* info, void* ctx)
-{
-	log_abort("SIGFPE");
-	log_siginfo(info);
-	log_stack_trace(ctx);
-	reraise_signal(sig_num);
-}
-
-// This signal is our cue to roll the log.
-static void
-as_sig_handle_hup(int sig_num, siginfo_t* info, void* ctx)
-{
-	(void)sig_num;
-	(void)info;
-	(void)ctx;
-
-	cf_info(AS_AS, "SIGHUP received, rolling log");
-
-	cf_log_rotate();
-}
-
-// We get here on some crashes.
-static void
-as_sig_handle_ill(int sig_num, siginfo_t* info, void* ctx)
-{
-	log_abort("SIGILL");
-	log_siginfo(info);
-	log_stack_trace(ctx);
-	reraise_signal(sig_num);
-}
-
-// We get here on cf_crash_nostack(), cf_assert_nostack(), or Ctrl-C when
-// running in foreground.
-static void
-as_sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
-{
-	(void)sig_num;
-	(void)info;
-	(void)ctx;
-
-	log_abort("SIGINT");
-
-	if (! g_startup_complete) {
-		cf_warning(AS_AS, "startup was not complete, exiting immediately");
-		_exit(1);
-	}
-
-	pthread_mutex_unlock(&g_main_deadlock);
-}
-
-// We get here if we intentionally trigger the signal.
-static void
-as_sig_handle_quit(int sig_num, siginfo_t* info, void* ctx)
-{
-	log_abort("SIGQUIT");
-	log_siginfo(info);
-	log_stack_trace(ctx);
-	reraise_signal(sig_num);
-}
-
-// We get here on some crashes.
-static void
-as_sig_handle_segv(int sig_num, siginfo_t* info, void* ctx)
-{
-	log_abort("SIGSEGV");
-	log_siginfo(info);
-	log_stack_trace(ctx);
-	reraise_signal(sig_num);
-}
-
-// We get here on normal shutdown.
-static void
-as_sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
-{
-	(void)sig_num;
-	(void)info;
-	(void)ctx;
-
-	cf_info(AS_AS, "SIGTERM received, shutting down %s build %s os %s arch %s sha %.7s%s%.7s",
-			aerospike_build_type, aerospike_build_id,
-			aerospike_build_os, aerospike_build_arch,
-			aerospike_build_sha,
-			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
-			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
-
-	if (! g_startup_complete) {
-		cf_warning(AS_AS, "startup was not complete, exiting immediately");
-		_exit(0);
-	}
-
-	pthread_mutex_unlock(&g_main_deadlock);
-}
-
-// We get here on cf_crash() and cf_assert().
-static void
-as_sig_handle_usr1(int sig_num, siginfo_t* info, void* ctx)
-{
-	(void)sig_num;
-	(void)info;
-	(void)ctx;
-
-	log_abort("SIGUSR1");
-	log_siginfo(info);
-	log_stack_trace(ctx);
-	reraise_signal(SIGABRT);
-}
-
-
-//==========================================================
-// Public API.
-//
-
-void as_signal_setup(); // no signal.h, appease GCC
-
-void
-as_signal_setup()
-{
-	set_action(SIGABRT, as_sig_handle_abort);
-	set_action(SIGBUS, as_sig_handle_bus);
-	set_action(SIGFPE, as_sig_handle_fpe);
-	set_action(SIGHUP, as_sig_handle_hup);
-	set_action(SIGILL, as_sig_handle_ill);
-	set_action(SIGINT, as_sig_handle_int);
-	set_action(SIGQUIT, as_sig_handle_quit);
-	set_action(SIGSEGV, as_sig_handle_segv);
-	set_action(SIGTERM, as_sig_handle_term);
-	set_action(SIGUSR1, as_sig_handle_usr1);
-	set_action(SIGUSR2, cf_thread_traces_action);
-
-	// Block SIGPIPE signal when there is some error while writing to pipe. The
-	// write() call will return with a normal error which we can handle.
-	set_handler(SIGPIPE, SIG_IGN);
 }
