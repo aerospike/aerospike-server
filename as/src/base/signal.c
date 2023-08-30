@@ -57,6 +57,18 @@ extern const char aerospike_build_arch[];
 extern const char aerospike_build_sha[];
 extern const char aerospike_build_ee_sha[];
 
+// Use our own - sys_siglist[] deprecated in glibc 2.31.
+static const char* const signal_str[] = {
+	[SIGINT] = "INT",
+	[SIGQUIT] = "QUIT",
+	[SIGILL] = "ILL",
+	[SIGABRT] = "ABRT",
+	[SIGBUS] = "BUS",
+	[SIGFPE] = "FPE",
+	[SIGUSR1] = "USR1",
+	[SIGSEGV] = "SEGV"
+};
+
 
 //==========================================================
 // Globals.
@@ -71,14 +83,15 @@ extern bool g_startup_complete;
 // Forward declarations.
 //
 
+static void set_action(int sig_num, action_t act);
+static void set_handler(int sig_num, sighandler_t hand);
+
 static void sig_trace_and_reraise(int sig_num, siginfo_t* info, void* ctx);
 static void sig_handle_hup(int sig_num, siginfo_t* info, void* ctx);
 static void sig_handle_int(int sig_num, siginfo_t* info, void* ctx);
 static void sig_handle_term(int sig_num, siginfo_t* info, void* ctx);
 
-static void set_action(int sig_num, action_t act);
-static void set_handler(int sig_num, sighandler_t hand);
-static void log_signal(int sig_num, const char* msg_str);
+static void log_abort(int sig_num);
 static void log_siginfo(const siginfo_t* info);
 static const char* siginfo_code_str(const siginfo_t* info);
 static void log_stack_trace(void* ctx);
@@ -112,23 +125,62 @@ as_signal_setup(void)
 
 
 //==========================================================
+// Local helpers - set signal handlers.
+//
+
+static void
+set_action(int sig_num, action_t act)
+{
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+
+	sa.sa_sigaction = act;
+	sigemptyset(&sa.sa_mask);
+	// SA_SIGINFO prefers sa_sigaction over sa_handler.
+	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+
+	if (sigaction(sig_num, &sa, NULL) < 0) {
+		cf_warning(AS_AS, "could not register signal handler for %d", sig_num);
+		_exit(1);
+	}
+}
+
+static void
+set_handler(int sig_num, sighandler_t hand)
+{
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+
+	sa.sa_handler = hand;
+	sigemptyset(&sa.sa_mask);
+	// No SA_SIGINFO; use sa_handler.
+	sa.sa_flags = SA_RESTART;
+
+	if (sigaction(sig_num, &sa, NULL) < 0) {
+		cf_warning(AS_AS, "could not register signal handler for %d", sig_num);
+		_exit(1);
+	}
+}
+
+
+//==========================================================
 // Local helpers - signal handlers.
 //
 
 static void
 sig_trace_and_reraise(int sig_num, siginfo_t* info, void* ctx)
 {
-	log_signal(sig_num, "aborting");
+	log_abort(sig_num);
 	log_siginfo(info);
 	log_stack_trace(ctx);
 
-	if (sig_num == SIGUSR1) {
-		sig_num = SIGABRT;
+	if (getpid() == 1) { // can happen in containers
+		cf_warning(AS_AS, "pid 1 received %s - exiting", signal_str[sig_num]);
+		_exit(1);
 	}
 
-	if (getpid() == 1) {
-		cf_warning(AS_AS, "pid 1 received signal %d - exiting", sig_num);
-		_exit(1);
+	if (sig_num == SIGUSR1) {
+		sig_num = SIGABRT;
 	}
 
 	set_handler(sig_num, SIG_DFL);
@@ -156,7 +208,7 @@ sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 	(void)info;
 	(void)ctx;
 
-	log_signal(sig_num, "aborting");
+	log_abort(sig_num);
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -170,10 +222,15 @@ sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 static void
 sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 {
+	(void)sig_num;
 	(void)info;
 	(void)ctx;
 
-	log_signal(sig_num, "shutting down");
+	cf_info(AS_AS, "SIGTERM received, shutting down %s build %s os %s arch %s sha %.7s%s%.7s",
+			aerospike_build_type, aerospike_build_id, aerospike_build_os,
+			aerospike_build_arch, aerospike_build_sha,
+			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
+			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -185,60 +242,15 @@ sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 
 
 //==========================================================
-// Local helpers - miscellaneous.
+// Local helpers - logging.
 //
 
 static void
-set_action(int sig_num, action_t act)
+log_abort(int sig_num)
 {
-	struct sigaction sa;
-	memset(&sa, 0, sizeof(sa));
-
-	sa.sa_sigaction = act;
-	sigemptyset(&sa.sa_mask);
-	// SA_SIGINFO prefers sa_sigaction over sa_handler.
-	sa.sa_flags = SA_RESTART | SA_SIGINFO;
-
-	if (sigaction(sig_num, &sa, NULL) < 0) {
-		cf_crash(AS_AS, "could not register signal handler for %d", sig_num);
-	}
-}
-
-static void
-set_handler(int sig_num, sighandler_t hand)
-{
-	struct sigaction sa;
-	memset(&sa, 0, sizeof(sa));
-
-	sa.sa_handler = hand;
-	sigemptyset(&sa.sa_mask);
-	// No SA_SIGINFO; use sa_handler.
-	sa.sa_flags = SA_RESTART;
-
-	if (sigaction(sig_num, &sa, NULL) < 0) {
-		cf_crash(AS_AS, "could not register signal handler for %d", sig_num);
-	}
-}
-
-static void
-log_signal(int sig_num, const char* msg_str)
-{
-	static const char* const signal_str[] = {
-		[SIGINT] = "INT",
-		[SIGQUIT] = "QUIT",
-		[SIGILL] = "ILL",
-		[SIGABRT] = "ABRT",
-		[SIGBUS] = "BUS",
-		[SIGFPE] = "FPE",
-		[SIGUSR1] = "USR1",
-		[SIGSEGV] = "SEGV",
-		[SIGTERM] = "TERM"
-	};
-
-	cf_warning(AS_AS, "SIG%s received, %s %s build %s os %s arch %s sha %.7s%s%.7s",
-			signal_str[sig_num], msg_str, aerospike_build_type,
-			aerospike_build_id, aerospike_build_os, aerospike_build_arch,
-			aerospike_build_sha,
+	cf_warning(AS_AS, "SIG%s received, aborting %s build %s os %s arch %s sha %.7s%s%.7s",
+			signal_str[sig_num], aerospike_build_type, aerospike_build_id,
+			aerospike_build_os, aerospike_build_arch, aerospike_build_sha,
 			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
 			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
 }
