@@ -2694,19 +2694,6 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 	// We'll keep the record we're now reading ...
 
-	ssd_cold_start_init_repl_state(ns, r);
-
-	// Set/reset the record's last-update-time generation, and void-time.
-	r->last_update_time = flat->last_update_time;
-	r->generation = flat->generation;
-	r->void_time = opt_meta.void_time;
-
-	// Set/reset the records's XDR-write status.
-	ssd_cold_start_init_xdr_state(flat, r);
-
-	// Update maximum void-time.
-	as_setmax_uint32(&p_partition->max_void_time, r->void_time);
-
 	// If data is in memory, load bins and particles, adjust secondary index.
 	if (ns->storage_data_in_memory) {
 		as_storage_rd rd;
@@ -2737,7 +2724,8 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 			cf_crash(AS_DRV_SSD, "%pD - unpack bins failed", &r->keyd);
 		}
 
-		// Do this early since set-id is needed for the secondary index update.
+		// Before secondary index update since set-id is needed, but after old
+		// memory stats are collected, which need old key-stored state.
 		drv_apply_opt_meta(r, ns, &opt_meta);
 
 		// Success - adjust sindex, looking at old and new bins.
@@ -2754,6 +2742,18 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 	else {
 		drv_apply_opt_meta(r, ns, &opt_meta);
 	}
+
+	// Set/reset the record's last-update-time, generation, and void-time.
+	r->last_update_time = flat->last_update_time;
+	r->generation = flat->generation;
+	r->void_time = opt_meta.void_time;
+
+	// Update maximum void-time.
+	as_setmax_uint32(&p_partition->max_void_time, r->void_time);
+
+	// Set/reset the records's replication state and XDR-write status.
+	ssd_cold_start_init_repl_state(ns, r);
+	ssd_cold_start_init_xdr_state(flat, r);
 
 	if (is_create) {
 		ssd->record_add_unique_counter++;
