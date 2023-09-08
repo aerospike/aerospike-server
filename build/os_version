@@ -54,9 +54,6 @@ main() {
 	then
 		issue=$(cat /etc/issue | tr '[:upper:]' '[:lower:]')
 		case "$issue" in
-		*'centos'* )
-			distro_id='centos'
-			;;
 		*'redhat'* | *'rhel'* | *'red hat'* )
 			distro_id='rhel'
 			;;
@@ -70,13 +67,9 @@ main() {
 		esac
 
 		case "$distro_id" in
-		'centos' | 'rhel' )
+		'rhel' )
 			local release=''
-			if [ -f /etc/centos-release ]; then
-				release=$(cat /etc/centos-release | tr '[:upper:]' '[:lower:]')
-			elif [ -f /etc/redhat-release ]; then
-				release=$(cat /etc/redhat-release | tr '[:upper:]' '[:lower:]')
-			fi
+			release=$(cat /etc/redhat-release | tr '[:upper:]' '[:lower:]')
 			release_version=${release##*release}
 			distro_version=${release_version%%.*}
 			;;
@@ -100,17 +93,10 @@ main() {
 		case "$distro_id" in
 		'debian' )
 		debian_version=$(cat /etc/debian_version | tr '[:upper:]' '[:lower:]')
-		if [[ "$debian_version" = "buster"* ]]
-		then
-			debian_version=10
-		elif [[ "$debian_version" = "bullseye"* ]]
+		if [[ "$debian_version" = "bullseye"* ]]
 		then
 			debian_version=11
 		elif [[ "$debian_version" = "bookworm"* ]]
-		then
-			debian_version=12
-		fi
-		if [[ "$debian_version" = "bookworm"* ]]
 		then
 			debian_version=12
 		fi
@@ -120,10 +106,6 @@ main() {
 	fi
 
 	case "$distro_id" in
-	'centos' )
-		distro_long="${distro_id}${distro_version%%.*}"
-		distro_short="el${distro_version%%.*}"
-		;;
 	'rhel' | 'redhat' | 'red hat' )
 		distro_long="${distro_id}${distro_version%%.*}"
 		distro_short="el${distro_version%%.*}"
@@ -131,19 +113,6 @@ main() {
 	'fedora' )
 		distro_long="${distro_id}${distro_version}"
 		distro_short="fc${distro_version}"
-		;;
-	'amzn' )
-		if [[ "${NAME}" = "Amazon Linux AMI" ]]
-		then
-			distro_version="1"
-		fi
-		distro_long="${distro_id}${distro_version}"
-		distro_short="${distro_id}${distro_version}"
-		;;
-	'ol' )
-		distro_version="${distro_version%%.*}"
-		distro_long="oraclelinux${distro_version}"
-		distro_short="el${distro_version}"
 		;;
 	* )
 		distro_long="${distro_id}${distro_version}"
