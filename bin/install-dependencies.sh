@@ -49,9 +49,9 @@ function parse_args() {
 
 function maybe() {
 	if [ "$DRY_RUN" = "false" ]; then
-		$1;
+		eval "$1";
 	else
-	    echo "$1";
+		echo "$1";
 	fi
 }
 
@@ -89,7 +89,7 @@ function main() {
 				   libldap2-dev)
 		fi
 
-		maybe "DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y --no-install-recommends \"${packages[*]}\""
+		maybe "DEBIAN_FRONTEND=noninteractive ${SUDO} apt-get install -y --no-install-recommends ${packages[*]}"
 		;;
 
 	'amzn2023' | 'rhel8' | 'rhel9' )
@@ -111,7 +111,7 @@ function main() {
 				   openldap-devel)
 		fi
 
-		maybe "${SUDO} yum install -y \"${packages[*]}\""
+		maybe "${SUDO} yum install -y ${packages[*]}"
 		;;
 	*)
 		log_warn "Aerospike server (CE) currently does not support the distribution ${OS}."
