@@ -27,12 +27,6 @@
 #       deb:  Suitable for building and installing on Debian-derived systems.
 #       tar:  Makes an "Every Linux" distribution, packaged as a compressed "tar" archive.
 #
-# Targets for running the Aerospike Server in the source tree:
-#
-#   make init    - Initialize the server run-time directories.
-#   make start   - Start the server.
-#   make stop    - Stop the server.
-#
 
 OS = $(shell build/os_version)
 UNAME=$(shell uname)
@@ -67,24 +61,14 @@ S2_FLAGS = -DCMAKE_CXX_STANDARD=17 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
 .PHONY: absllib
 absllib:
-ifeq ($(OS),$(filter $(OS), el7 ubuntu18.04)) # cmake version < 3.13
-	mkdir -p $(ABSL)/build
-	cd $(ABSL)/build && $(CMAKE) $(S2_FLAGS) -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON -DCMAKE_INSTALL_MESSAGE=LAZY -DCMAKE_TARGET_MESSAGES=OFF ..
-else
 	$(CMAKE) -S $(ABSL) -B $(ABSL)/build $(S2_FLAGS) -DCMAKE_INSTALL_PREFIX=$(ABSL)/installation -DABSL_ENABLE_INSTALL=ON -DCMAKE_INSTALL_MESSAGE=LAZY -DCMAKE_TARGET_MESSAGES=OFF
-endif
 	$(CMAKE) --build $(ABSL)/build -- --no-print-directory
 	$(CMAKE) --build $(ABSL)/build --target install -- --no-print-directory
 	ar rcsT $(ABSL_LIB_DIR)/libabsl.a $(ABSL_LIB_DIR)/libabsl_*.a
 
 .PHONY: s2lib
 s2lib: absllib
-ifeq ($(OS),$(filter $(OS), el7 ubuntu18.04)) # cmake version < 3.13
-	mkdir -p $(S2)/build
-	cd $(S2)/build && $(CMAKE) $(S2_FLAGS) $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF ..
-else
 	$(CMAKE) -S $(S2) -B $(S2)/build $(S2_FLAGS) $(if $(OPENSSL_INCLUDE_DIR),-DOPENSSL_INCLUDE_DIR=$(OPENSSL_INCLUDE_DIR),) -DCMAKE_PREFIX_PATH=$(ABSL)/installation -DBUILD_SHARED_LIBS=OFF
-endif
 	$(CMAKE) --build $(S2)/build -- -j 8  # Limit threads as the default spawns too many
 
 .PHONY: targetdirs
@@ -97,22 +81,6 @@ targetdirs:
 
 strip:	server
 	$(MAKE) -C as strip
-
-.PHONY: init start stop
-init:
-	@echo "Creating and initializing working directories..."
-	mkdir -p run/log run/work/smd run/work/usr/udf/lua
-
-start:
-	@echo "Running the Aerospike Server locally..."
-	@PIDFILE=run/asd.pid ; if [ -f $$PIDFILE ]; then echo "Aerospike already running?  Please do \"make stop\" first."; exit -1; fi
-	@nohup ./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf > /dev/null 2>&1 &
-	$(BIN_DIR)/asd --config-file as/etc/aerospike_dev.conf
-
-stop:
-	@echo "Stopping the local Aerospike Server..."
-	@PIDFILE=run/asd.pid ; if [ -f $$PIDFILE ]; then kill `cat $$PIDFILE`; rm $$PIDFILE; fi
-	@PID=`pgrep telemetry.py | grep -v grep`; if [ -n "$$PID" ]; then kill $$PID; fi
 
 .PHONY: clean
 clean:	cleanbasic cleanmodules cleandist
@@ -136,6 +104,7 @@ cleanmodules:
 	fi
 	if [ -e "$(LIBBACKTRACE)/Makefile" ]; then \
 		$(MAKE) -C $(LIBBACKTRACE) clean; \
+		$(MAKE) -C $(LIBBACKTRACE) distclean; \
 	fi
 	if [ -e "$(LUAJIT)/Makefile" ]; then \
 		$(MAKE) -C $(LUAJIT) clean; \
