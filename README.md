@@ -197,38 +197,6 @@ then to control the state of the Aerospike daemon, either via the SysV
 daemon init script commands, e.g., `service aerospike start`, or else
 via `systemctl` on `systemd`-based systems, e.g., `systemctl start aerospike`.
 
-A convenient way to run Aerospike in a development environment is to use
-the following commands from within the top-level directory of the source
-code tree (`aerospike-server`):
-
-To create and initialize the `run` directory with the files needed for
-running Aerospike, use:
-
-	$ make init
-
-or, equivalently:
-
-	$ mkdir -p run/{log,work/{smd,{sys,usr}/udf/lua}}
-	$ cp -pr modules/lua-core/src/* run/work/sys/udf/lua
-
-To launch the server with `as/etc/aerospike_dev.conf` as the config:
-
-	$ make start
-
-or, equivalently:
-
-	$ nohup ./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf > /dev/null 2>&1 &
-	$ target/Linux-x86_64/bin/asd --config-file as/etc/aerospike_dev.conf
-
-To halt the server:
-
-	$ make stop
-
-or, equivalently:
-
-	$ PID=`pgrep telemetry.py | grep -v grep`; if [ -n "$PID" ]; then kill $PID; fi
-	$ kill `cat run/asd.pid` ; rm run/asd.pid
-
 Please refer to the full documentation on the Aerospike web site,
 [`http://aerospike.com/docs/`](http://aerospike.com/docs/), for more
 detailed information about configuring and running the Aerospike
