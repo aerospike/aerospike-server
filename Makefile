@@ -43,19 +43,16 @@ lib: aslibs
 	$(MAKE) -C as $@ STATIC_LIB=1 OS=$(OS)
 
 .PHONY: aslibs
-aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LIBBACKTRACE)/Makefile $(LUAJIT)/src/luaconf.h s2lib
+aslibs: targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LIBBACKTRACE)/Makefile s2lib
 	$(MAKE) -C $(JANSSON)
 	$(MAKE) -C $(JEMALLOC)
 	$(MAKE) -C $(LIBBACKTRACE)
-ifeq ($(USE_LUAJIT),1)
-	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so CCDEBUG=-g
-endif
 ifeq ($(ARCH), aarch64)
 	$(MAKE) -C $(TSO)
 endif
 	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)" OS=$(UNAME)
 	$(MAKE) -C $(CF)
-	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) TARGET_SERVER=1 OS=$(UNAME)
+	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) LUAMOD=$(LUAMOD) EXT_CFLAGS="$(EXT_CFLAGS)" TARGET_SERVER=1 OS=$(UNAME)
 
 S2_FLAGS = -DCMAKE_CXX_STANDARD=17 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
@@ -106,10 +103,7 @@ cleanmodules:
 		$(MAKE) -C $(LIBBACKTRACE) clean; \
 		$(MAKE) -C $(LIBBACKTRACE) distclean; \
 	fi
-	if [ -e "$(LUAJIT)/Makefile" ]; then \
-		$(MAKE) -C $(LUAJIT) clean; \
-	fi
-	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) clean
+	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) LUAMOD=$(LUAMOD) clean
 	$(RM) -rf $(ABSL)/build $(ABSL)/installation # ABSL default clean leaves files in build directory
 	$(RM) -rf $(S2)/build # S2 default clean leaves files in build directory
 
@@ -132,7 +126,6 @@ cleangit:
 	cd $(JANSSON); $(GIT_CLEAN)
 	cd $(JEMALLOC); $(GIT_CLEAN)
 	cd $(LIBBACKTRACE); $(GIT_CLEAN)
-	cd $(LUAJIT); $(GIT_CLEAN)
 	cd $(MOD_LUA); $(GIT_CLEAN)
 	cd $(S2); $(GIT_CLEAN)
 	$(GIT_CLEAN)

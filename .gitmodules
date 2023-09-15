@@ -5,16 +5,15 @@
 [submodule "modules/mod-lua"]
 	path = modules/mod-lua
 	url = https://github.com/aerospike/aerospike-mod-lua.git
+	ignore = dirty
 [submodule "modules/jansson"]
 	path = modules/jansson
 	url = https://github.com/aerospike/jansson.git
 	ignore = dirty
-[submodule "modules/luajit"]
-	path = modules/luajit
-	url = https://github.com/aerospike/luajit.git
 [submodule "modules/telemetry"]
 	path = modules/telemetry
 	url = https://github.com/aerospike/aerospike-telemetry-agent.git
+	ignore = dirty
 [submodule "modules/jemalloc"]
 	path = modules/jemalloc
 	url = https://github.com/aerospike/jemalloc.git
@@ -30,4 +29,8 @@
 [submodule "modules/libbacktrace"]
 	path = modules/libbacktrace
 	url = https://github.com/aerospike/libbacktrace.git
+	ignore = dirty
+[submodule "modules/lua"]
+	path = modules/lua
+	url = https://github.com/aerospike/lua.git
 	ignore = dirty

@@ -238,16 +238,6 @@ INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(S2)/src
 
-ifeq ($(USE_LUAJIT),1)
-  INCLUDES += -I$(LUAJIT)/src
-else
-  INCLUDE_LUA_5_1 = /usr/include/lua5.1
-  ifneq ($(wildcard $(INCLUDE_LUA_5_1)),)
-    INCLUDES += -I$(INCLUDE_LUA_5_1)
-    LUA_SUFFIX = 5.1
-  endif
-endif
-
 AS_LIBRARIES += $(LIBRARY_DIR)/libcf.a
 AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
 AS_LIBRARIES += $(JEMALLOC)/lib/libjemalloc.a
@@ -258,28 +248,7 @@ ifeq ($(DOPROFILE),1)
   LIBRARIES += -pg -fprofile-arcs -lgcov
 endif
 
-# Add either the LuaJIT or Lua library
-ifeq ($(USE_LUAJIT),1)
-  ifeq ($(LD_LUAJIT),static)
-    AS_LIBRARIES += $(LUAJIT)/src/libluajit.a
-  else
-    LIBRARIES += -L$(LUAJIT)/src -lluajit
-  endif
-else
-  ifeq ($(LD_LUA),static)
-    # Find and add the static Lua library.
-    AS_LIBRARIES += $(or \
-      $(wildcard /usr/local/lib/liblua.a), \
-      $(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
-      $(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
-      $(wildcard /usr/lib/liblua.a), \
-      $(wildcard /usr/lib/powerpc64le-linux-gnu/liblua.a), \
-      $(wildcard /usr/lib/aarch64-linux-gnu/liblua5.1.a), \
-      $(error Cannot find "liblua.a"))
-  else
-    LIBRARIES += -llua$(LUA_SUFFIX)
-  endif
-endif
+AS_LIBRARIES += $(LUAMOD)/liblua.a
 
 ifeq ($(LD_JANSSON),static)
   AS_LIBRARIES += $(JANSSON)/src/.libs/libjansson.a

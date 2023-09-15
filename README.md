@@ -21,8 +21,8 @@ information.  The full Telemetry data collection agent source code may be found 
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
-current 64-bit GNU/Linux platform versions, such as Centos 7, Red Hat Enterprise Linux 8/9, Amazon Linux 2023, 
-Debian 10 or later, and Ubuntu 20.04 or later.
+current 64-bit GNU/Linux platform versions, such as Red Hat Enterprise Linux 8/9, Amazon Linux 2023, 
+Debian 11 or later, and Ubuntu 20.04 or later.
 
 ### Dependencies
 
@@ -54,43 +54,24 @@ the build environment, including:
 The C++ compiler is required for the Aerospike geospatial indexing
 feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
-* The required CentOS 7 & Red Hat Enterprise Linux 8/9 package to install is: `gcc-c++`.
+* The required Red Hat Enterprise Linux 8/9 package to install is: `gcc-c++`.
 
-* The required Debian 10/11/12 and Ubuntu 20/22 package to install is: `g++`.
+* The required Debian 11/12 and Ubuntu 20/22 package to install is: `g++`.
 
 #### OpenSSL
 
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
 (RIPEMD-160 & SHA-1) and pseudo-random number generation.
 
-* The CentOS 7 &  Red Hat Enterprise Linux 8/9 OpenSSL package to install:  `openssl-devel`
+* The Red Hat Enterprise Linux 8/9 OpenSSL package to install:  `openssl-devel`
 
-* The Debian 10/11/12 and Ubuntu 20/22 OpenSSL packages to install: `libssl-dev`.
-
-#### Lua 5.1
-
-The [Lua](http://www.lua.org) 5.1 language is required for User Defined
-Function (UDF) support.
-
-* By default, Aerospike builds with Lua 5.1 support provided by the
-[LuaJIT](http://luajit.org) submodule.
-
-* Alternatively, it is possible to build with standard Lua 5.1 provided
-by the build environment.  In that case:
-
-	* The CentOS 7 & Red Hat Enterprise Linux 8/9 Lua package to install is:  `lua`, and also
-`lua-devel` and `lua-static` on CentOS 7.
-
-	* The Debian 10/11/12 and Ubuntu 20/22 Lua packages to install are:
-`lua5.1` and `liblua5.1-dev`.
-
-	* Build by passing the `USE_LUAJIT=0` option to `make`.
+* The Debian 11/12 and Ubuntu 20/22 OpenSSL packages to install: `libssl-dev`.
 
 #### Zlib
 
-* The CentOS 7 &  Red Hat Enterprise Linux 8/9 requires `zlib-devel`
+* The Red Hat Enterprise Linux 8/9 requires `zlib-devel`
 
-* The Debian 10/11/12 and Ubuntu 20/22 requiresi `zlib1g-dev`.
+* The Debian 11/12 and Ubuntu 20/22 requiresi `zlib1g-dev`.
 
 #### Python 3 or 2
 
@@ -111,8 +92,7 @@ The Aerospike Database Server build depends upon 8 submodules:
 | common    | The Aerospike Common Library |
 | jansson   | C library for encoding, decoding and manipulating JSON data |
 | jemalloc  | The JEMalloc Memory Allocator |
-| lua-core  | The Aerospike Core Lua Source Files |
-| luajit    | The LuaJIT (Just-In-Time Compiler for Lua) |
+| lua       | The Lua runtime |
 | mod-lua   | The Aerospike Lua Interface |
 | s2geometry | The S2 Spherical Geometry Library |
 | telemetry | The Aerospike Telemetry Agent (Community Edition only) |
@@ -193,12 +173,11 @@ deployment or software development.
 The preferred method for running Aerospike in a production environment
 is to build and install the Aerospike package appropriate for the target
 Linux distribution (i.e., an `".rpm"`, `".deb"`, or `".tgz"` file), and
-then to control the state of the Aerospike daemon, either via the SysV
-daemon init script commands, e.g., `service aerospike start`, or else
-via `systemctl` on `systemd`-based systems, e.g., `systemctl start aerospike`.
+then to control the state of the Aerospike daemon via `systemctl` on
+e.g., `systemctl start aerospike`.
 
 Please refer to the full documentation on the Aerospike web site,
-[`http://aerospike.com/docs/`](http://aerospike.com/docs/), for more
+[`https://docs.aerospike.com/`](https://docs.aerospike.com/), for more
 detailed information about configuring and running the Aerospike
 Database Server, as well as about the Aerospike client API packages
 for popular programming languages.
