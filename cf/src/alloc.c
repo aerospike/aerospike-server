@@ -38,6 +38,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <jemalloc/internal/jemalloc_internal_defs.h>
 #include <jemalloc/jemalloc.h>
 
 #include <sys/syscall.h>
@@ -58,7 +59,7 @@
 #undef strndup
 
 #define N_ARENAS 149 // used to be 150; now arena 149 is startup arena
-#define PAGE_SZ 4096
+#define PAGE_SZ (1ul << LG_PAGE)
 
 #define MAX_SITES 4096
 #define MAX_THREADS 1024
@@ -127,13 +128,13 @@ hook_get_arena(const void *p_indent)
 {
 	// Disregard indent by rounding down to page boundary. Works universally:
 	//
-	//   - Small / large: chunk's base aligned to 2 MiB && p >= base + 0x1000.
-	//   - Huge: p aligned to 2 MiB && MAX_INDENT < 0x1000.
+	//   - Small / large: chunk's base aligned to 2 MiB && p >= base + PAGE_SZ.
+	//   - Huge: p aligned to 2 MiB && MAX_INDENT < PAGE_SZ.
 	//
 	// A huge allocations is thus rounded to its actual p (aligned to 2 MiB),
 	// but a small or large allocation is never rounded to the chunk's base.
 
-	const void *p = (const void *)((uint64_t)p_indent & ~0xffful);
+	const void *p = (const void *)((uint64_t)p_indent & -PAGE_SZ);
 
 	int32_t **base = (int32_t **)((uint64_t)p & ~je_chunksize_mask);
 	int32_t *arena;
@@ -405,7 +406,7 @@ indent_hops(void *p)
 		n_hops &= ~1U; // make it even - results in 16-byte aligned indents
 		p_indent = (void **)p + n_hops;
 	}
-	while (((uint64_t)p_indent & 0xfff) == 0);
+	while (((uint64_t)p_indent & (PAGE_SZ - 1)) == 0);
 
 	return n_hops;
 }
@@ -452,7 +453,7 @@ outdent(void *p_indent)
 {
 	// Aligned allocations aren't indented.
 
-	if (((uint64_t)p_indent & 0xfff) == 0) {
+	if (((uint64_t)p_indent & (PAGE_SZ - 1)) == 0) {
 		return p_indent;
 	}
 
@@ -471,6 +472,22 @@ outdent(void *p_indent)
 	}
 
 	return (void *)p;
+}
+
+static void
+page_size_check(void)
+{
+	int64_t page_sz = sysconf(_SC_PAGESIZE);
+
+	if (page_sz < 0) {
+		cf_crash_nostack(CF_ALLOC, "failed to get kernel page size: %d (%s)",
+			errno, cf_strerror(errno));
+	}
+
+	if ((uint64_t)page_sz != PAGE_SZ) {
+		cf_crash_nostack(CF_ALLOC, "bad kernel page size %ld, expected %lu",
+			page_sz, PAGE_SZ);
+	}
 }
 
 static void
@@ -529,6 +546,7 @@ valgrind_check(void)
 void
 cf_alloc_init(void)
 {
+	page_size_check();
 	valgrind_check();
 
 	// Turn off libstdc++'s memory caching, as it just duplicates JEMalloc's.
@@ -1240,10 +1258,10 @@ posix_memalign(void **p, size_t align, size_t sz)
 		return jem_posix_memalign(p, align, sz == 0 ? 1 : sz);
 	}
 
-	// When indentation is enabled, align to 4096+ to mark as unindented.
+	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
 
 	if (g_indent) {
-		align = (align + 0xffful) & ~0xffful;
+		align = (align + (PAGE_SZ - 1)) & -PAGE_SZ;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
@@ -1267,10 +1285,10 @@ aligned_alloc(size_t align, size_t sz)
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
 	}
 
-	// When indentation is enabled, align to 4096+ to mark as unindented.
+	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
 
 	if (g_indent) {
-		align = (align + 0xffful) & ~0xffful;
+		align = (align + (PAGE_SZ - 1)) & -PAGE_SZ;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
@@ -1320,10 +1338,10 @@ memalign(size_t align, size_t sz)
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
 	}
 
-	// When indentation is enabled, align to 4096+ to mark as unindented.
+	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
 
 	if (g_indent) {
-		align = (align + 0xffful) & ~0xffful;
+		align = (align + (PAGE_SZ - 1)) & -PAGE_SZ;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
