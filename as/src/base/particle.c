@@ -74,6 +74,7 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_RUBY_BLOB]	= &blob_vtable,
 		[AS_PARTICLE_TYPE_PHP_BLOB]		= &blob_vtable,
 		[AS_PARTICLE_TYPE_ERLANG_BLOB]	= &blob_vtable,
+		[AS_PARTICLE_TYPE_VECTOR]		= &blob_vtable,
 		[AS_PARTICLE_TYPE_BOOL]			= &bool_vtable,
 		[AS_PARTICLE_TYPE_HLL]			= &hll_vtable,
 		[AS_PARTICLE_TYPE_MAP]			= &map_vtable,
@@ -101,6 +102,7 @@ safe_particle_type(uint8_t type)
 	case AS_PARTICLE_TYPE_RUBY_BLOB:
 	case AS_PARTICLE_TYPE_PHP_BLOB:
 	case AS_PARTICLE_TYPE_ERLANG_BLOB:
+	case AS_PARTICLE_TYPE_VECTOR:
 	case AS_PARTICLE_TYPE_BOOL:
 	case AS_PARTICLE_TYPE_HLL:
 	case AS_PARTICLE_TYPE_MAP:

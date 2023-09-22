@@ -250,6 +250,8 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 		return AS_PARTICLE_TYPE_PHP_BLOB;
 	case AS_BYTES_ERLANG:
 		return AS_PARTICLE_TYPE_ERLANG_BLOB;
+	case AS_BYTES_VECTOR:
+		return AS_PARTICLE_TYPE_VECTOR;
 	case AS_BYTES_HLL:
 		return AS_PARTICLE_TYPE_HLL;
 	case AS_BYTES_GEOJSON:

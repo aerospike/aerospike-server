@@ -402,8 +402,8 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 			return true;
 		}
 
-		if (p[0] == AS_BYTES_HLL) {
-			sprintf(str->str, "<hll#%u>", sz - 1);
+		if (p[0] != AS_BYTES_BLOB) {
+			sprintf(str->str, "<blob%u#%u>", p[0], sz - 1);
 			return true;
 		}
 
