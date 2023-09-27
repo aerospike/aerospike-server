@@ -50,6 +50,7 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
 
+#include "cf_thread.h"
 #include "dns.h"
 #include "log.h"
 #include "tls.h"
@@ -1073,38 +1074,31 @@ int32_t
 cf_socket_send_msg(cf_socket *sock, struct msghdr *m, int32_t flags)
 {
 	if (sock->ssl) {
-		int32_t bytes = 0;
-		struct iovec *v = m->msg_iov;
+		struct iovec *iov = m->msg_iov;
+		size_t sz = 0;
 
 		for (socklen_t i = 0; i < m->msg_iovlen; i++) {
-			int rv = 0;
-
-			if (v->iov_len > 0) {
-				rv = tls_socket_send(sock, v->iov_base, v->iov_len, flags, 0);
-			}
-
-			if (rv < 0) {
-				// errno is set by tls_socket_send.
-				if (errno == ETIMEDOUT) {
-					errno = EAGAIN;
-				}
-
-				if (errno == EAGAIN && bytes != 0) {
-					break; // partial send
-				}
-
-				return rv;
-			}
-			else if (rv < v->iov_len) {
-				bytes += rv;
-				break;
-			}
-
-			bytes += rv;
-			v++;
+			sz += iov[i].iov_len;
 		}
 
-		return bytes;
+		static __thread size_t buffer_sz = 0;
+		static __thread void* buffer = NULL;
+
+		if (sz > buffer_sz) {
+			buffer_sz = sz;
+			cf_thread_realloc(&buffer, &buffer_sz);
+		}
+
+		uint8_t *p = buffer;
+
+		for (socklen_t i = 0; i < m->msg_iovlen; i++) {
+			size_t len = iov[i].iov_len;
+
+			memcpy(p, iov[i].iov_base, len);
+			p += len;
+		}
+
+		return cf_socket_send(sock, buffer, sz, flags);
 	}
 
 	int32_t res = sendmsg(sock->fd, m, flags | MSG_NOSIGNAL);
