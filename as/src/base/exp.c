@@ -645,6 +645,21 @@ build_args_setup(build_args* args, const char* name)
 	return true;
 }
 
+static inline bool
+rt_value_need_destroy(const rt_value* bin_arg, const as_bin* old,
+		const as_bin* b)
+{
+	return bin_arg->type == RT_BIN && ! bin_arg->do_not_destroy &&
+			old->particle != b->particle;
+}
+
+static inline bool
+rt_value_keep_do_not_destroy(const rt_value* bin_arg, const as_bin* b)
+{
+	return bin_arg->type == RT_BIN && bin_arg->do_not_destroy &&
+			bin_arg->r_bin.particle == b->particle;
+}
+
 
 //==========================================================
 // Op table.
@@ -3939,7 +3954,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			vecs[vec_ix].buf = pk.buffer + pk.offset;
 			vecs[vec_ix].offset = 0;
 
-			if (from->type == RT_BIN) {
+			if (from->type == RT_BIN && ! from->do_not_destroy) {
 				bin_cleanup[bin_cleanup_ix++] = &from->r_bin;
 			}
 
@@ -4129,7 +4144,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	if (is_modify_local) {
-		if (old.particle != b->particle && bin_arg.type == RT_BIN) {
+		if (rt_value_need_destroy(&bin_arg, &old, b)) {
 			as_bin_particle_destroy(&old);
 		}
 
@@ -4143,7 +4158,9 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	if (! bin_is_type(b, op->type)) {
 		if (! is_modify_local || bin_arg.type == RT_BIN ||
 				old.particle != b->particle) {
-			as_bin_particle_destroy(b);
+			if (rt_value_need_destroy(&bin_arg, &old, b)) {
+				as_bin_particle_destroy(b);
+			}
 		}
 
 		ret_val->type = RT_TRILEAN;
@@ -4161,6 +4178,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		ret_val->type = RT_BIN;
 		ret_val->r_bin = *b;
+		ret_val->do_not_destroy = rt_value_keep_do_not_destroy(&bin_arg, b);
 		return;
 	}
 
@@ -4205,6 +4223,8 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	case AS_PARTICLE_TYPE_LIST:
 		ret_val->type = RT_BIN;
 		ret_val->r_bin = *b;
+		// Don't suspect this is exploitable, added for future proofing.
+		ret_val->do_not_destroy = rt_value_keep_do_not_destroy(&bin_arg, b);
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected");
