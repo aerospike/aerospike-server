@@ -65,7 +65,7 @@ struct as_namespace_s;
 
 #define NO_NS_IX AS_NAMESPACE_SZ
 
-#define AS_CLUSTER_NAME_SZ 65
+#define AS_CLUSTER_NAME_SZ 64
 
 #define MAX_FEATURE_KEY_FILES 32
 
@@ -88,9 +88,8 @@ typedef struct as_config_s {
 	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
-	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
+	bool			debug_allocations; // instrument the memory allocation API
 	bool			udf_execution_disabled;
-	bool			downgrading;
 	bool			fabric_benchmarks_enabled;
 	bool			health_check_enabled;
 	bool			info_hist_enabled;
@@ -109,12 +108,13 @@ typedef struct as_config_s {
 	uint32_t		n_migrate_threads;
 	char*			node_id_interface;
 	char*			pidfile;
+	bool			poison_allocations; // initialize with junk - for internal use only
 	uint32_t		proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	uint32_t		n_proto_fd_max;
+	uint32_t		quarantine_allocations; // delay free() for better use-after-free detection
 	uint32_t		query_max_done; // maximum number of finished queries kept for monitoring
 	uint32_t		n_query_threads_limit;
 	bool			run_as_daemon;
-	bool			salt_allocations; // initialize with junk - for internal use only
 	uint32_t		n_service_threads;
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc

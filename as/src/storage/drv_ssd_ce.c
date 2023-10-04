@@ -43,15 +43,6 @@ ssd_resume_devices(drv_ssds* ssds)
 	cf_crash(AS_DRV_SSD, "community edition called ssd_resume_devices()");
 }
 
-void*
-run_ssd_cool_start(void* udata)
-{
-	// Should not get here - for enterprise version only.
-	cf_crash(AS_DRV_SSD, "community edition called run_ssd_cool_start()");
-
-	return NULL;
-}
-
 void
 ssd_header_init_cfg(const as_namespace* ns, drv_ssd* ssd, drv_header* header)
 {
@@ -162,11 +153,6 @@ as_storage_record_write_ssd(as_storage_rd* rd)
 {
 	// No-op for drops, caller will drop record.
 	return rd->pickle != NULL || rd->n_bins != 0 ? ssd_write(rd) : 0;
-}
-
-void
-as_storage_cfg_init_ssd(as_namespace* ns)
-{
 }
 
 void

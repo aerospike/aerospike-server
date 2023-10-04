@@ -63,7 +63,6 @@ const as_particle_vtable string_vtable = {
 		blob_incr_from_wire,
 		blob_size_from_wire,
 		blob_from_wire,
-		blob_compare_from_wire,
 		blob_wire_size,
 		blob_to_wire,
 
@@ -77,7 +76,6 @@ const as_particle_vtable string_vtable = {
 		blob_from_msgpack,
 
 		blob_skip_flat,
-		blob_cast_from_flat,
 		blob_from_flat,
 		blob_flat_size,
 		blob_to_flat

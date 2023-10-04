@@ -1154,8 +1154,8 @@ as_batch_queue_task(as_transaction* btr)
 		}
 
 		// Submit transaction.
-		if (tran_count == 1 || (as_namespace_like_data_in_memory(ns) ?
-				inline_dim : inline_dev)) {
+		if (tran_count == 1 || (ns->storage_type == AS_STORAGE_ENGINE_SSD ?
+				inline_dev : inline_dim)) {
 			as_tsvc_process_transaction(&tr);
 		}
 		else {
@@ -1195,7 +1195,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 			size += ops[i]->name_sz;
 		}
 		else if (bin) {
-			size += strlen(as_bin_get_name_from_id(ns, bin->id));
+			size += strlen(bin->name);
 		}
 		else {
 			cf_crash(AS_BATCH, "making response message with null bin and op");
@@ -1246,7 +1246,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 				op->name_sz = src->name_sz;
 			}
 			else {
-				op->name_sz = as_bin_memcpy_name(ns, op->name, bin);
+				op->name_sz = as_bin_memcpy_name(op->name, bin);
 			}
 
 			op->op_sz = OP_FIXED_SZ + op->name_sz;

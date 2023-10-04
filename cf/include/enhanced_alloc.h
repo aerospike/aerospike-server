@@ -42,26 +42,13 @@ typedef struct cf_rc_header_s {
 	uint32_t sz;
 } cf_rc_header;
 
-typedef enum {
-	CF_ALLOC_DEBUG_NONE,
-	CF_ALLOC_DEBUG_TRANSIENT,
-	CF_ALLOC_DEBUG_PERSISTENT,
-	CF_ALLOC_DEBUG_ALL
-} cf_alloc_debug;
-
 
 //==========================================================
 // Public API - arena management and stats.
 //
 
-extern __thread int32_t g_ns_arena;
-
 void cf_alloc_init(void);
-void cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations, bool salt_allocations);
-int32_t cf_alloc_create_arena(void);
-
-#define CF_ALLOC_SET_NS_ARENA_DIM(ns) \
-	(g_ns_arena = ns->storage_data_in_memory ? ns->jem_arena : -1)
+void cf_alloc_set_debug(bool debug_allocations, bool indent_allocations, bool poison_allocations, uint32_t quarantine_allocations);
 
 void cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *mapped_kbytes, double *efficiency_pct, uint32_t *site_count);
 void cf_alloc_log_stats(const char *file, const char *opts);
@@ -74,21 +61,11 @@ void cf_alloc_log_site_infos(const char *file);
 
 // Don't call these directly - use wrappers below.
 void *cf_alloc_try_malloc(size_t sz);
-void *cf_alloc_malloc_arena(size_t sz, int32_t arena);
-void *cf_alloc_calloc_arena(size_t n, size_t sz, int32_t arena);
-void *cf_alloc_realloc_arena(void *p, size_t sz, int32_t arena);
 
 #define cf_try_malloc(_sz)       cf_alloc_try_malloc(_sz)
-
 #define cf_malloc(_sz)           malloc(_sz)
-#define cf_malloc_ns(_sz)        cf_alloc_malloc_arena(_sz, g_ns_arena)
-
 #define cf_calloc(_n, _sz)       calloc(_n, _sz)
-#define cf_calloc_ns(_n, _sz)    cf_alloc_calloc_arena(_n, _sz, g_ns_arena)
-
 #define cf_realloc(_p, _sz)      realloc(_p, _sz)
-#define cf_realloc_ns(_p, _sz)   cf_alloc_realloc_arena(_p, _sz, g_ns_arena)
-
 #define cf_valloc(_sz)           valloc(_sz)
 
 #define cf_strdup(_s)            strdup(_s)

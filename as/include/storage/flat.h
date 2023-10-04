@@ -61,7 +61,7 @@ typedef struct as_flat_record_s {
 	uint32_t magic;
 
 	// offset: 4
-	uint32_t n_rblocks: 19; // unused if storage-engine memory
+	uint32_t n_rblocks: 19;
 	uint32_t has_void_time: 1;
 	uint32_t has_set: 1;
 	uint32_t has_key: 1;
@@ -162,7 +162,6 @@ typedef struct flat_bin_lut_s {
 // Public API.
 //
 
-void as_flat_pickle_record(struct as_storage_rd_s* rd);
 uint32_t as_flat_record_size(const struct as_storage_rd_s* rd);
 void as_flat_pack_record(const struct as_storage_rd_s* rd, uint32_t n_rblocks, bool dirty, as_flat_record* flat);
 

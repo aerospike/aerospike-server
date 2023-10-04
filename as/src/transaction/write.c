@@ -78,40 +78,25 @@ COMPILER_ASSERT(RECORD_MAX_BINS + MAX_N_OPS < 64 * 1024);
 // Forward declarations.
 //
 
-void write_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
-void start_write_repl_write(rw_request* rw, as_transaction* tr);
-void start_write_repl_write_forget(rw_request* rw, as_transaction* tr);
-bool write_dup_res_cb(rw_request* rw);
-void write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
-void write_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr);
-void write_repl_write_cb(rw_request* rw);
+static void write_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
+static void start_write_repl_write(rw_request* rw, as_transaction* tr);
+static void start_write_repl_write_forget(rw_request* rw, as_transaction* tr);
+static bool write_dup_res_cb(rw_request* rw);
+static void write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
+static void write_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr);
+static void write_repl_write_cb(rw_request* rw);
 
-void send_write_response(as_transaction* tr, cf_dyn_buf* db);
-void write_timeout_cb(rw_request* rw);
+static void send_write_response(as_transaction* tr, cf_dyn_buf* db);
+static void write_timeout_cb(rw_request* rw);
 
-transaction_status write_master(rw_request* rw, as_transaction* tr);
-void write_master_failed(as_transaction* tr, as_index_ref* r_ref,
-		bool record_created, as_index_tree* tree, as_storage_rd* rd,
-		int result_code);
-int write_master_preprocessing(as_transaction* tr);
-int write_master_policies(as_transaction* tr, bool* p_must_not_create,
-		bool* p_record_level_replace, bool* p_must_fetch_data);
-bool check_msg_set_name(as_transaction* tr, const char* set_name);
-
-int write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
-		bool record_level_replace, rw_request* rw, bool* is_delete);
-int write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
-		bool must_fetch_data, bool record_level_replace, rw_request* rw,
-		bool* is_delete);
-
-int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
-		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db);
-int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
-		as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins,
-		as_bin* result_bins, uint32_t* p_n_result_bins,
-		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins);
+static transaction_status write_master(rw_request* rw, as_transaction* tr);
+static void write_master_failed(as_transaction* tr, as_index_ref* r_ref, bool record_created, as_index_tree* tree, as_storage_rd* rd, int result_code);
+static int write_master_preprocessing(as_transaction* tr);
+static int write_master_policies(as_transaction* tr, bool* p_must_not_create, bool* p_record_level_replace, bool* p_must_fetch_data);
+static bool check_msg_set_name(as_transaction* tr, const char* set_name);
+static int write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, bool must_fetch_data, bool record_level_replace, rw_request* rw, bool* is_delete);
+static int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd, cf_ll_buf* particles_llb, cf_dyn_buf* db);
+static int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd, as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins, as_bin* result_bins, uint32_t* p_n_result_bins, cf_ll_buf* particles_llb);
 
 
 //==========================================================
@@ -335,7 +320,7 @@ as_write_start(as_transaction* tr)
 // Local helpers - transaction flow.
 //
 
-void
+static void
 write_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 {
 	// Finish initializing rw, construct and send dup-res message.
@@ -350,8 +335,7 @@ write_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 	cf_mutex_unlock(&rw->lock);
 }
 
-
-void
+static void
 start_write_repl_write(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send repl-write message.
@@ -366,8 +350,7 @@ start_write_repl_write(rw_request* rw, as_transaction* tr)
 	cf_mutex_unlock(&rw->lock);
 }
 
-
-void
+static void
 start_write_repl_write_forget(rw_request* rw, as_transaction* tr)
 {
 	// Construct and send repl-write message. No need to finish rw setup.
@@ -376,8 +359,7 @@ start_write_repl_write_forget(rw_request* rw, as_transaction* tr)
 	send_rw_messages_forget(rw);
 }
 
-
-bool
+static bool
 write_dup_res_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, write, FROM_CLIENT, dup_res);
@@ -430,8 +412,7 @@ write_dup_res_cb(rw_request* rw)
 	return false;
 }
 
-
-void
+static void
 write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Recycle rw_request that was just used for duplicate resolution to now do
@@ -442,8 +423,7 @@ write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	send_rw_messages(rw);
 }
 
-
-void
+static void
 write_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Send replica writes. Not waiting for acks, so need to reset rw_request.
@@ -453,8 +433,7 @@ write_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr)
 	send_rw_messages_forget(rw);
 }
 
-
-void
+static void
 write_repl_write_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, write, FROM_CLIENT, repl_write);
@@ -475,7 +454,7 @@ write_repl_write_cb(rw_request* rw)
 // Local helpers - transaction end.
 //
 
-void
+static void
 send_write_response(as_transaction* tr, cf_dyn_buf* db)
 {
 	// Paranoia - shouldn't get here on losing race with timeout.
@@ -552,8 +531,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 	tr->from.any = NULL; // pattern, not needed
 }
 
-
-void
+static void
 write_timeout_cb(rw_request* rw)
 {
 	if (! rw->from.any) {
@@ -603,11 +581,9 @@ write_timeout_cb(rw_request* rw)
 // Local helpers - write master.
 //
 
-transaction_status
+static transaction_status
 write_master(rw_request* rw, as_transaction* tr)
 {
-	CF_ALLOC_SET_NS_ARENA_DIM(tr->rsv.ns);
-
 	//------------------------------------------------------
 	// Perform checks that don't need to loop over ops, or
 	// create or find (and lock) the as_index.
@@ -738,7 +714,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	as_set* p_set = as_namespace_get_record_set(ns, r);
 
 	// Enforce set size limit, if any.
-	if (as_set_size_stop_writes(p_set, ns)) {
+	if (as_set_size_stop_writes(p_set)) {
 		cf_ticker_warning(AS_RW, "{%s|%s} at stop-writes-size - can't write", ns->name, p_set->name);
 		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_FORBIDDEN);
 		return TRANS_DONE_ERROR;
@@ -814,7 +790,19 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Convert message TTL special value if appropriate.
 	if (m->record_ttl == TTL_DONT_UPDATE &&
 			(record_created || ! as_record_is_live(r))) {
-		m->record_ttl = TTL_NAMESPACE_DEFAULT;
+		m->record_ttl = TTL_USE_DEFAULT;
+	}
+
+	if (! is_valid_ttl(m->record_ttl)) {
+		cf_warning(AS_RW, "write_master: invalid ttl %u", m->record_ttl);
+		write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_PARAMETER);
+		return false;
+	}
+
+	if (is_ttl_disallowed(m->record_ttl, ns, p_set)) {
+		cf_ticker_warning(AS_RW, "write_master: disallowed ttl with nsup-period 0");
+		write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_FORBIDDEN);
+		return false;
 	}
 
 	// Set up the nodes to which we'll write replicas.
@@ -837,22 +825,13 @@ write_master(rw_request* rw, as_transaction* tr)
 	uint64_t prev_lut = r->last_update_time;
 
 	//------------------------------------------------------
-	// Split write_master() according to configuration to
-	// handle record bins.
+	// Handle bin operations and commit master.
 	//
 
 	bool is_delete = false;
 
-	if (ns->storage_data_in_memory) {
-		result = write_master_dim(tr, &r_ref, &rd,
-				record_level_replace,
-				rw, &is_delete);
-	}
-	else {
-		result = write_master_ssd(tr, &r_ref, &rd,
-				must_fetch_data, record_level_replace,
-				rw, &is_delete);
-	}
+	result = write_master_apply(tr, &r_ref, &rd, must_fetch_data,
+			record_level_replace, rw, &is_delete);
 
 	if (result != 0) {
 		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
@@ -896,8 +875,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	return TRANS_IN_PROGRESS;
 }
 
-
-void
+static void
 write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 		bool record_created, as_index_tree* tree, as_storage_rd* rd,
 		int result_code)
@@ -932,8 +910,7 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 	tr->result_code = (uint8_t)result_code;
 }
 
-
-int
+static int
 write_master_preprocessing(as_transaction* tr)
 {
 	as_namespace* ns = tr->rsv.ns;
@@ -948,18 +925,6 @@ write_master_preprocessing(as_transaction* tr)
 	// ns->stop_writes is set by nsup if configured threshold is breached.
 	if (ns->stop_writes) {
 		write_master_failed(tr, 0, false, 0, 0, AS_ERR_OUT_OF_SPACE);
-		return false;
-	}
-
-	if (! is_valid_ttl(m->record_ttl)) {
-		cf_warning(AS_RW, "write_master: invalid ttl %u", m->record_ttl);
-		write_master_failed(tr, 0, false, 0, 0, AS_ERR_PARAMETER);
-		return false;
-	}
-
-	if (is_ttl_disallowed(m->record_ttl, ns)) {
-		cf_ticker_warning(AS_RW, "write_master: disallowed ttl with nsup-period 0");
-		write_master_failed(tr, 0, false, 0, 0, AS_ERR_FORBIDDEN);
 		return false;
 	}
 
@@ -978,8 +943,7 @@ write_master_preprocessing(as_transaction* tr)
 	return true;
 }
 
-
-int
+static int
 write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		bool* p_record_level_replace, bool* p_must_fetch_data)
 {
@@ -1032,8 +996,8 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			continue;
 		}
 
-		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
-			cf_warning(AS_RW, "{%s} write_master: bin name too long (%d) %pD", ns->name, op->name_sz, &tr->keyd);
+		if (! as_bin_name_check(op->name, op->name_sz)) {
+			cf_warning(AS_RW, "{%s} write_master: bad bin name %.*s (%u) %pD", ns->name, op->name_sz, op->name, op->name_sz, &tr->keyd);
 			return AS_ERR_BIN_NAME;
 		}
 
@@ -1141,8 +1105,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	return 0;
 }
 
-
-bool
+static bool
 check_msg_set_name(as_transaction* tr, const char* set_name)
 {
 	as_msg_field* f = as_transaction_has_set(tr) ?
@@ -1171,165 +1134,8 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 	return true;
 }
 
-
-//==========================================================
-// write_master() splits based on data-in-memory config.
-//
-// These handle the bin operations part of write_master()
-// which are very different per configuration.
-//
-
-int
-write_master_dim(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
-		bool record_level_replace, rw_request* rw, bool* is_delete)
-{
-	// Shortcut pointers.
-	as_msg* m = &tr->msgp->msg;
-	as_namespace* ns = tr->rsv.ns;
-	as_record* r = rd->r;
-
-	as_bin old_bins[RECORD_MAX_BINS];
-
-	as_storage_rd_load_bins(rd, old_bins);
-
-	// For memory accounting, note current usage.
-	uint32_t memory_bytes = as_storage_record_mem_size(ns, r);
-
-	//------------------------------------------------------
-	// Copy existing bins to new space, and keep old bins
-	// intact for sindex adjustment and so it's possible to
-	// unwind on failure.
-	//
-
-	uint32_t n_old_bins = rd->n_bins;
-
-	as_bin stack_bins[n_old_bins + m->n_ops]; // can't be more than this
-
-	if (record_level_replace) {
-		rd->n_bins = 0;
-	}
-	else if (n_old_bins != 0) {
-		memcpy(stack_bins, old_bins, n_old_bins * sizeof(as_bin));
-	}
-
-	rd->bins = stack_bins;
-
-	// Collect bins (old or intermediate versions) to destroy on cleanup.
-	// Note - one delete-all op may destroy many bins. Size is max possible + 1.
-	as_bin cleanup_bins[n_old_bins + m->n_ops];
-	uint32_t n_cleanup_bins = 0;
-
-	//------------------------------------------------------
-	// Apply changes to metadata in as_index needed for
-	// response, pickling, and writing.
-	//
-
-	prepare_bin_metadata(tr, rd);
-
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	advance_record_version(tr, r);
-	set_xdr_write(tr, r);
-
-	//------------------------------------------------------
-	// Loop over bin ops to affect new bin space, creating
-	// the new record bins to write.
-	//
-
-	int result = write_master_bin_ops(tr, rd, NULL, cleanup_bins,
-			&n_cleanup_bins, &rw->response_db);
-
-	if (result != 0) {
-		unwind_index_metadata(&old_metadata, r);
-		write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-		return result;
-	}
-
-	//------------------------------------------------------
-	// Created the new bins to write.
-	//
-
-	*is_delete = as_bin_empty_if_all_tombstones(rd,
-			as_transaction_is_durable_delete(tr));
-
-	if (*is_delete) {
-		if (! as_transaction_is_xdr(tr) &&
-				(n_old_bins == 0 || ! as_record_is_live(r))) {
-			// Didn't exist or was bin cemetery (tombstone bit not yet updated).
-			unwind_index_metadata(&old_metadata, r);
-			write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-			return AS_ERR_NOT_FOUND;
-		}
-
-		if ((result = validate_delete_durability(tr)) != AS_OK) {
-			unwind_index_metadata(&old_metadata, r);
-			write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-			return result;
-		}
-	}
-
-	transition_delete_metadata(tr, r, *is_delete,
-			*is_delete && rd->n_bins != 0);
-
-	//------------------------------------------------------
-	// Write the record to storage.
-	//
-
-	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
-		unwind_index_metadata(&old_metadata, r);
-		write_dim_unwind(old_bins, n_old_bins, rd->bins, rd->n_bins, cleanup_bins, n_cleanup_bins);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
-			&old_metadata);
-	pickle_all(rd, rw);
-
-	//------------------------------------------------------
-	// Success - adjust sindex, looking at old and new bins.
-	//
-
-	if (set_has_sindex(r, ns)) {
-		update_sindex(ns, r_ref, old_bins, n_old_bins, rd->bins, rd->n_bins);
-	}
-	else {
-		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
-		as_index_clear_in_sindex(r);
-	}
-
-	//------------------------------------------------------
-	// Cleanup - destroy relevant bins, can't unwind after.
-	//
-
-	if (record_level_replace) {
-		as_bin_destroy_all(old_bins, n_old_bins);
-	}
-
-	as_bin_destroy_all(cleanup_bins, n_cleanup_bins);
-
-	//------------------------------------------------------
-	// Final changes to record data in as_index.
-	//
-
-	as_storage_rd_update_bin_space(rd);
-
-	// Accommodate a new stored key - wasn't needed for pickling and writing.
-	if (r->key_stored == 0 && rd->key) {
-		as_record_allocate_key(r, rd->key, rd->key_size);
-		r->key_stored = 1;
-	}
-
-	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-
-	return 0;
-}
-
-
-int
-write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
+static int
+write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		bool must_fetch_data, bool record_level_replace, rw_request* rw,
 		bool* is_delete)
 {
@@ -1392,7 +1198,7 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 
 	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
-	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
+	if ((result = write_master_bin_ops(tr, rd, &particles_llb,
 			&rw->response_db)) != 0) {
 		cf_ll_buf_free(&particles_llb);
 		unwind_index_metadata(&old_metadata, r);
@@ -1468,15 +1274,9 @@ write_master_ssd(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	return 0;
 }
 
-
-//==========================================================
-// write_master() - apply record updates.
-//
-
-int
+static int
 write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
-		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db)
+		cf_ll_buf* particles_llb, cf_dyn_buf* db)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1492,8 +1292,7 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 	uint32_t n_result_bins = 0;
 
 	int result = write_master_bin_ops_loop(tr, rd, ops, response_bins,
-			&n_response_bins, result_bins, &n_result_bins, particles_llb,
-			cleanup_bins, p_n_cleanup_bins);
+			&n_response_bins, result_bins, &n_result_bins, particles_llb);
 
 	if (result != 0) {
 		as_bin_destroy_all(result_bins, n_result_bins);
@@ -1545,13 +1344,11 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 	return 0;
 }
 
-
-int
+static int
 write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins,
 		as_bin* result_bins, uint32_t* p_n_result_bins,
-		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins)
+		cf_ll_buf* particles_llb)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1588,35 +1385,17 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		if (op->op == AS_MSG_OP_WRITE) {
 			// AS_PARTICLE_TYPE_NULL means delete the bin.
 			if (op->particle_type == AS_PARTICLE_TYPE_NULL) {
-				if (! delete_bin(rd, op, msg_lut, cleanup_bins, p_n_cleanup_bins, &result)) {
-					return result;
-				}
+				delete_bin(rd, op, msg_lut);
 			}
 			// It's a regular bin write.
 			else {
-				as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz, &result);
-
-				if (! b) {
-					return result;
-				}
+				as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
 				write_resolved_bin(rd, op, msg_lut, b);
 
-				if (ns->storage_data_in_memory) {
-					as_bin cleanup_bin = *b;
-
-					if ((result = as_bin_particle_alloc_from_client(b, op)) < 0) {
-						cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_alloc_from_client() %pD", ns->name, &tr->keyd);
-						return -result;
-					}
-
-					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
-				}
-				else {
-					if ((result = as_bin_particle_stack_from_client(b, particles_llb, op)) < 0) {
-						cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_from_client() %pD", ns->name, &tr->keyd);
-						return -result;
-					}
+				if ((result = as_bin_particle_stack_from_client(b, particles_llb, op)) < 0) {
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_from_client() %pD", ns->name, &tr->keyd);
+					return -result;
 				}
 			}
 
@@ -1627,27 +1406,11 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		}
 		// Modify an existing bin value.
 		else if (OP_IS_MODIFY(op->op)) {
-			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz, &result);
+			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
-			if (! b) {
-				return result;
-			}
-
-			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin = *b;
-
-				if ((result = as_bin_particle_alloc_modify_from_client(b, op)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
-			}
-			else {
-				if ((result = as_bin_particle_stack_modify_from_client(b, particles_llb, op)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
+			if ((result = as_bin_particle_stack_modify_from_client(b, particles_llb, op)) < 0) {
+				cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+				return -result;
 			}
 
 			if (respond_all_ops) {
@@ -1656,12 +1419,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else if (op->op == AS_MSG_OP_DELETE_ALL) {
-			if (ns->storage_data_in_memory) {
-				for (uint16_t i = 0; i < rd->n_bins; i++) {
-					append_bin_to_destroy(&rd->bins[i], cleanup_bins, p_n_cleanup_bins);
-				}
-			}
-
 			delete_all_bins(rd);
 
 			if (respond_all_ops) {
@@ -1692,31 +1449,11 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else if (op->op == AS_MSG_OP_BITS_MODIFY) {
-			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz, &result);
+			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
-			if (! b) {
-				return result;
-			}
-
-			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin = *b;
-
-				if ((result = as_bin_bits_alloc_modify_from_client(b, op)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				// Account for noop bits operations. Modifying non-mutable
-				// particle contents in-place is still disallowed.
-				if (cleanup_bin.particle != b->particle) {
-					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
-				}
-			}
-			else {
-				if ((result = as_bin_bits_stack_modify_from_client(b, particles_llb, op)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_stack_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
+			if ((result = as_bin_bits_stack_modify_from_client(b, particles_llb, op)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+				return -result;
 			}
 
 			if (respond_all_ops) {
@@ -1752,34 +1489,14 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else if (op->op == AS_MSG_OP_HLL_MODIFY) {
-			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz, &result);
-
-			if (! b) {
-				return result;
-			}
+			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
 			as_bin result_bin;
 			as_bin_set_empty(&result_bin);
 
-			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin = *b;
-
-				if ((result = as_bin_hll_alloc_modify_from_client(b, op, &result_bin)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				// Account for noop HLL operations. Modifying non-mutable
-				// particle contents in-place is still disallowed.
-				if (cleanup_bin.particle != b->particle) {
-					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
-				}
-			}
-			else {
-				if ((result = as_bin_hll_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_stack_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
+			if ((result = as_bin_hll_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+				return -result;
 			}
 
 			if (respond_all_ops || as_bin_is_used(&result_bin)) {
@@ -1816,34 +1533,14 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
-			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz, &result);
-
-			if (! b) {
-				return result;
-			}
+			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
 			as_bin result_bin;
 			as_bin_set_empty(&result_bin);
 
-			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin = *b;
-
-				if ((result = as_bin_cdt_alloc_modify_from_client(b, op, &result_bin)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				// Account for noop CDT operations. Modifying non-mutable
-				// particle contents in-place is still disallowed.
-				if (cleanup_bin.particle != b->particle) {
-					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
-				}
-			}
-			else {
-				if ((result = as_bin_cdt_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_stack_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
+			if ((result = as_bin_cdt_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+				return -result;
 			}
 
 			if (respond_all_ops || as_bin_is_used(&result_bin)) {
@@ -1880,36 +1577,16 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else if (op->op == AS_MSG_OP_EXP_MODIFY) {
-			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz, &result);
-
-			if (! b) {
-				return result;
-			}
+			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
 			bool created_bin = as_bin_is_unused(b);
 			const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
 			const iops_expop* expop = tr->origin == FROM_IOPS ?
 					&tr->from.iops_orig->expops[i] : NULL;
 
-			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin = *b;
-
-				if ((result = as_bin_exp_alloc_modify_from_client(&exp_ctx, b, op, expop)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_alloc_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				// Account for noop EXP operations. Modifying non-mutable
-				// particle contents in-place is still disallowed.
-				if (cleanup_bin.particle != b->particle && as_bin_is_used(b)) {
-					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
-				}
-			}
-			else {
-				if ((result = as_bin_exp_stack_modify_from_client(&exp_ctx, b, particles_llb, op, expop)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_stack_modify_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
+			if ((result = as_bin_exp_stack_modify_from_client(&exp_ctx, b, particles_llb, op, expop)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+				return -result;
 			}
 
 			if (respond_all_ops) {
@@ -1922,8 +1599,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 					rd->n_bins--;
 				}
 				else {
-					// Can't fail - bin was already created.
-					delete_bin(rd, op, msg_lut, cleanup_bins, p_n_cleanup_bins, &result);
+					delete_bin(rd, op, msg_lut);
 				}
 			}
 		}

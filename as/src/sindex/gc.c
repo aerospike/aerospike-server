@@ -109,8 +109,8 @@ as_sindex_gc_record(as_namespace* ns, as_index_ref* r_ref)
 		return;
 	}
 
-	cf_assert(! ns->storage_data_in_memory, AS_SINDEX,
-			"data-in-memory ns queuing to rlist");
+	cf_assert(ns->storage_type == AS_STORAGE_ENGINE_SSD, AS_SINDEX,
+			"data in memory or pmem ns queuing to rlist");
 	cf_assert(ns->pi_xmem_type != CF_XMEM_TYPE_FLASH, AS_SINDEX,
 			"flash-index ns queuing to rlist");
 
@@ -232,18 +232,18 @@ gc_ns(as_namespace* ns)
 
 		as_sindex* si = ns->sindexes[i];
 
-		if (si == NULL) {
+		if (si == NULL || si->dropped) {
 			SINDEX_GRUNLOCK();
 			continue;
 		}
 
-		as_sindex_reserve(si);
+		as_sindex_job_reserve(si);
 
 		SINDEX_GRUNLOCK();
 
 		as_sindex_tree_gc(si);
 
-		as_sindex_release(si);
+		as_sindex_job_release(si);
 	}
 
 	cf_info(AS_SINDEX, "{%s} sindex-gc-done: cleaned (%lu,%lu) total-ms %lu",

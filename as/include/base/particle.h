@@ -41,7 +41,6 @@ typedef int (*as_particle_prepend_from_wire_fn) (as_particle_type wire_type, con
 typedef int (*as_particle_incr_from_wire_fn) (as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 typedef int32_t (*as_particle_size_from_wire_fn) (const uint8_t *wire_value, uint32_t value_size);
 typedef int (*as_particle_from_wire_fn) (as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-typedef int (*as_particle_compare_from_wire_fn) (const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size);
 typedef uint32_t (*as_particle_wire_size_fn) (const as_particle *p);
 typedef uint32_t (*as_particle_to_wire_fn) (const as_particle *p, uint8_t *wire);
 
@@ -58,7 +57,6 @@ typedef void (*as_particle_from_msgpack_fn) (const uint8_t *packed, uint32_t pac
 
 // Handle on-device "flat" format.
 typedef const uint8_t * (*as_particle_skip_flat_fn) (const uint8_t *flat, const uint8_t *end);
-typedef const uint8_t * (*as_particle_cast_from_flat_fn) (const uint8_t *flat, const uint8_t *end, as_particle **pp);
 typedef const uint8_t * (*as_particle_from_flat_fn) (const uint8_t *flat, const uint8_t *end, as_particle **pp);
 typedef uint32_t (*as_particle_flat_size_fn) (const as_particle *p);
 typedef uint32_t (*as_particle_to_flat_fn) (const as_particle *p, uint8_t *flat);
@@ -77,7 +75,6 @@ typedef struct as_particle_vtable_s {
 	as_particle_incr_from_wire_fn			incr_from_wire_fn;
 	as_particle_size_from_wire_fn			size_from_wire_fn;
 	as_particle_from_wire_fn				from_wire_fn;
-	as_particle_compare_from_wire_fn		compare_from_wire_fn; // TODO - unused - keep this?
 	as_particle_wire_size_fn				wire_size_fn;
 	as_particle_to_wire_fn					to_wire_fn;
 
@@ -91,7 +88,6 @@ typedef struct as_particle_vtable_s {
 	as_particle_from_msgpack_fn				from_msgpack_fn;
 
 	as_particle_skip_flat_fn				skip_flat_fn;
-	as_particle_cast_from_flat_fn			cast_from_flat_fn;
 	as_particle_from_flat_fn				from_flat_fn;
 	as_particle_flat_size_fn				flat_size_fn;
 	as_particle_to_flat_fn					to_flat_fn;

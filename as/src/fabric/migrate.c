@@ -887,7 +887,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	as_storage_record_open(ns, r, &rd);
 
-	if (as_storage_rd_load_pickle(&rd)) {
+	if (as_storage_record_load_pickle(&rd)) {
 		msg_set_buf(m, MIG_FIELD_RECORD, rd.pickle, rd.pickle_sz,
 				MSG_SET_HANDOFF_MALLOC);
 	}

@@ -60,7 +60,6 @@ int list_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value
 int list_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 int32_t list_size_from_wire(const uint8_t *wire_value, uint32_t value_size);
 int list_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int list_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size);
 uint32_t list_wire_size(const as_particle *p);
 uint32_t list_to_wire(const as_particle *p, uint8_t *wire);
 
@@ -74,11 +73,6 @@ uint32_t list_asval_to_wire(const as_val *val, uint8_t *wire);
 // Handle msgpack translation.
 uint32_t list_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
 void list_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
-
-// Handle on-device "flat" format.
-const uint8_t *list_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
-uint32_t list_flat_size(const as_particle *p);
-uint32_t list_to_flat(const as_particle *p, uint8_t *flat);
 
 
 //==========================================================
@@ -95,7 +89,6 @@ const as_particle_vtable list_vtable = {
 		list_incr_from_wire,
 		list_size_from_wire,
 		list_from_wire,
-		list_compare_from_wire,
 		list_wire_size,
 		list_to_wire,
 
@@ -109,10 +102,9 @@ const as_particle_vtable list_vtable = {
 		list_from_msgpack,
 
 		blob_skip_flat,
-		blob_cast_from_flat,
-		list_from_flat,
-		list_flat_size,
-		list_to_flat
+		blob_from_flat,
+		blob_flat_size,
+		blob_to_flat
 };
 
 
@@ -123,8 +115,6 @@ const as_particle_vtable list_vtable = {
 #if defined(CDT_DEBUG_VERIFY)
 #define LIST_DEBUG_VERIFY
 #endif
-
-#define PACKED_LIST_INDEX_STEP 128
 
 typedef struct packed_list_s {
 	const uint8_t *packed;
@@ -159,36 +149,44 @@ typedef struct list_mem_s {
 	uint8_t data[];
 } __attribute__ ((__packed__)) list_mem;
 
-typedef struct list_flat_s {
-	uint8_t type;
-	uint32_t sz; // host order on device and in memory
-	uint8_t data[];
-} __attribute__ ((__packed__)) list_flat;
+typedef struct list_mem_static_s {
+	uint8_t		type;
+	uint32_t	sz;
+	uint8_t		list_hdr;
+	uint8_t		ext_hdr;
+	uint8_t		ext_sz;
+	uint8_t		ext_flags;
+} __attribute__ ((__packed__)) list_mem_static;
+
+#define STATIC_ENTRY(__flags) { \
+	.type = AS_PARTICLE_TYPE_LIST, \
+	.sz = 4, \
+	.list_hdr = 0x91, \
+	.ext_hdr = 0xC7, \
+	.ext_sz = 0, \
+	.ext_flags = __flags \
+}
 
 typedef enum {
-	LIST_EMPTY_LIST_HDR = 0,
-	LIST_EMPTY_EXT_HDR,
-	LIST_EMPTY_EXT_SZ,
-	LIST_EMPTY_EXT_FLAGS,
-	LIST_EMPTY_FLAGED_SIZE
-} list_empty_bytes;
+	STATIC_LIST_UNORDERED = 0,
+	STATIC_LIST_UNORDERED_IDX,
+	STATIC_LIST_ORDERED,
+	STATIC_LIST_ORDERED_IDX,
+} list_static_types;
 
-static const list_mem list_ordered_empty = {
-		.type = AS_PARTICLE_TYPE_LIST,
-		.sz = LIST_EMPTY_FLAGED_SIZE,
-		.data = {
-				[LIST_EMPTY_LIST_HDR] = 0x91,
-				[LIST_EMPTY_EXT_HDR] = 0xC7,
-				[LIST_EMPTY_EXT_SZ] = 0,
-				[LIST_EMPTY_EXT_FLAGS] = AS_PACKED_LIST_FLAG_ORDERED
-		}
+static list_mem_static list_static[] = {
+		[STATIC_LIST_UNORDERED] = {
+				.type = AS_PARTICLE_TYPE_LIST,
+				.sz = 1,
+				.list_hdr = 0x90
+		},
+		[STATIC_LIST_UNORDERED_IDX] = STATIC_ENTRY(AS_PACKED_PERSIST_INDEX),
+		[STATIC_LIST_ORDERED] = STATIC_ENTRY(AS_PACKED_LIST_FLAG_ORDERED),
+		[STATIC_LIST_ORDERED_IDX] = STATIC_ENTRY(
+				AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX)
 };
 
-static const list_mem list_mem_empty = {
-		.type = AS_PARTICLE_TYPE_LIST,
-		.sz = 1,
-		.data = {0x90}
-};
+static uint32_t n_list_static = sizeof(list_static) / sizeof(list_mem_static);
 
 typedef struct {
 	const offset_index *offsets;
@@ -236,21 +234,17 @@ typedef struct {
 // Forward declarations.
 //
 
+static inline bool is_persist_index(uint8_t flags);
 static inline bool is_list_type(uint8_t type);
 static inline bool flags_is_ordered(uint8_t flags);
 static inline bool list_is_ordered(const packed_list *list);
-static inline uint8_t get_ext_flags(bool ordered);
-static uint32_t list_calc_ext_content_sz(uint32_t ele_count, uint32_t content_sz, bool ordered);
 
 static uint32_t list_pack_header(uint8_t *buf, uint32_t ele_count);
 static void list_pack_empty_index(as_packer *pk, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz, bool is_ordered);
 
-// as_bin
-static void as_bin_set_ordered_empty_list(as_bin *b, rollback_alloc *alloc_buf);
-
 // cdt_context
-static inline void cdt_context_set_empty_list(cdt_context *ctx, bool is_ordered);
-static inline void cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uint64_t create_flags);
+static inline void cdt_context_set_empty_list(cdt_context *ctx, uint8_t flags);
+static inline void cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uint64_t flags);
 
 static inline bool cdt_context_list_need_idx_mem(const cdt_context *ctx, const packed_list *list, bool is_dim);
 static inline void cdt_context_list_push(cdt_context *ctx, const packed_list *list, uint32_t idx, rollback_alloc *alloc_idx, bool is_dim, bool need_idx_mem);
@@ -272,10 +266,6 @@ static uint32_t packed_list_find_idx_offset_continue(const packed_list *list, ui
 static void packed_list_find_rank_range_by_value_interval_ordered(const packed_list *list, const cdt_payload *value_start, const cdt_payload *value_end, uint32_t *rank_r, uint32_t *count_r, bool is_multi);
 static bool packed_list_find_rank_range_by_value_interval_unordered(const packed_list *list, const cdt_payload *value_start, const cdt_payload *value_end, uint32_t *rank, uint32_t *count, uint64_t *mask_val, bool inverted, bool is_multi);
 
-static uint32_t packed_list_mem_sz(const packed_list *list, bool has_ext, uint32_t *ext_content_sz_r);
-static uint32_t packed_list_pack_buf(const packed_list *list, uint8_t *buf, uint32_t sz, uint32_t ext_content_sz, bool strip_flags);
-static list_mem *packed_list_pack_mem(const packed_list *list, list_mem *p_list_mem);
-static void packed_list_content_pack(const packed_list *list, as_packer *pk);
 static int packed_list_remove_by_idx(const packed_list *list, cdt_op_mem *com, const uint64_t rm_idx, uint32_t *rm_sz);
 static int packed_list_remove_by_mask(const packed_list *list, cdt_op_mem *com, const uint64_t *rm_mask, uint32_t rm_count, uint32_t *rm_sz);
 
@@ -292,7 +282,6 @@ static int packed_list_add_items_ordered(const packed_list *list, cdt_op_mem *co
 static int packed_list_replace_ordered(const packed_list *list, cdt_op_mem *com, uint32_t index, const cdt_payload *value, uint64_t mod_flags);
 
 static bool packed_list_check_order_and_fill_offidx(const packed_list *list);
-static bool packed_list_deep_check_order_and_fill_offidx(const packed_list *list);
 
 // packed_list_op
 static void packed_list_op_init(packed_list_op *op, const packed_list *list);
@@ -331,7 +320,6 @@ static void list_offset_index_rm_mask_cpy(offset_index *dst, const offset_index 
 
 // list_order_index
 static int list_order_index_sort_cmp_fn(const void *x, const void *y, void *p);
-static uint8_t *list_order_index_pack(const order_index *ordidx, const offset_index *full_offidx, uint8_t *buf, offset_index *new_offidx);
 
 // list_order_heap
 static msgpack_cmp_type list_order_heap_cmp_fn(const void *udata, uint32_t idx1, uint32_t idx2);
@@ -406,52 +394,52 @@ list_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 int32_t
 list_size_from_wire(const uint8_t *wire_value, uint32_t value_size)
 {
-	// TODO - CDT can't determine in memory or not.
-	packed_list list;
+	msgpack_type type;
+	uint32_t sz = cdt_untrusted_max_size(wire_value, value_size, &type);
 
-	if (! packed_list_init(&list, wire_value, value_size)) {
-		cf_warning(AS_PARTICLE, "list_size_from_wire() invalid packed list");
+	if (sz == 0 || type != MSGPACK_TYPE_LIST) {
+		cf_warning(AS_PARTICLE, "list_size_from_wire() invalid list input sz %u type %d", sz, type);
 		return -AS_ERR_UNKNOWN;
 	}
 
-	return (int32_t)(sizeof(list_mem) + packed_list_mem_sz(&list, true, NULL));
+	return (int32_t)(sizeof(list_mem) + sz);
 }
 
 int
 list_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 		uint32_t value_size, as_particle **pp)
 {
-	// TODO - CDT can't determine in memory or not.
-	// It works for data-not-in-memory but we'll incur a memcpy that could be
-	// eliminated.
-	packed_list list;
-	bool is_valid = packed_list_init(&list, wire_value, value_size);
+	list_mem *p_list_mem = (list_mem *)*pp;
+	uint32_t sz = cdt_untrusted_rewrite(p_list_mem->data, wire_value,
+			value_size, false);
 
-	cf_assert(is_valid, AS_PARTICLE, "list_from_wire() invalid packed list");
-
-	list_mem *p_list_mem = packed_list_pack_mem(&list, (list_mem *)*pp);
-
-	p_list_mem->type = wire_type;
-
-	packed_list new_list;
-	bool check = packed_list_init_from_particle(&new_list, *pp);
-
-	cf_assert(check, AS_PARTICLE, "list_from_wire() invalid list");
-
-	if (! packed_list_deep_check_order_and_fill_offidx(&new_list)) {
+	if (sz == 0) {
 		cf_warning(AS_PARTICLE, "list_from_wire() invalid packed list");
 		return -AS_ERR_UNKNOWN;
 	}
 
-	return AS_OK;
-}
+	p_list_mem->type = wire_type;
+	p_list_mem->sz = sz;
 
-int
-list_compare_from_wire(const as_particle *p, as_particle_type wire_type,
-		const uint8_t *wire_value, uint32_t value_size)
-{
-	cf_warning(AS_PARTICLE, "list_compare_from_wire() not implemented");
-	return -AS_ERR_INCOMPATIBLE_TYPE;
+#ifdef LIST_DEBUG_VERIFY
+	{
+		as_bin b;
+		b.particle = *pp;
+		as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_LIST);
+
+		const cdt_context ctx = {
+				.b = &b,
+				.orig = b.particle,
+		};
+
+		if (! list_verify(&ctx)) {
+			print_packed(p_list_mem->data, p_list_mem->sz, "data");
+			cf_crash(AS_PARTICLE, "list_from_wire: pp=%p wire_value=%p", pp, wire_value);
+		}
+	}
+#endif
+
+	return AS_OK;
 }
 
 uint32_t
@@ -460,16 +448,22 @@ list_wire_size(const as_particle *p)
 	define_packed_list_particle(list, p, success);
 	cf_assert(success, AS_PARTICLE, "list_wire_size() invalid packed list");
 
-	return packed_list_mem_sz(&list, false, NULL);
+	if (list.ext_flags == 0) {
+		return list.packed_sz;
+	}
+
+	uint32_t sz = list.content_sz;
+
+	sz += as_pack_list_header_get_size(list.ele_count + 1);
+	sz += 3;
+
+	return sz;
 }
 
 uint32_t
 list_to_wire(const as_particle *p, uint8_t *wire)
 {
-	define_packed_list_particle(list, p, success);
-	cf_assert(success, AS_PARTICLE, "list_to_wire() invalid packed list");
-
-	return packed_list_pack_buf(&list, wire, INT_MAX, 0, true);
+	return cdt_particle_strip_indexes(p, wire, MSGPACK_TYPE_LIST);
 }
 
 //------------------------------------------------
@@ -492,8 +486,8 @@ list_size_from_asval(const as_val *val)
 	uint32_t base_hdr_sz = as_pack_list_header_get_size(ele_count);
 	uint32_t content_sz = sz - base_hdr_sz;
 	bool is_ordered = flags_is_ordered((uint8_t)list->flags);
-	uint32_t ext_content_sz = list_calc_ext_content_sz(ele_count, content_sz,
-			is_ordered);
+	uint32_t ext_content_sz = list_calc_ext_content_sz(list->flags, ele_count,
+			content_sz);
 	uint32_t hdr_sz = (is_ordered || ext_content_sz != 0) ?
 			as_pack_list_header_get_size(ele_count + 1) : base_hdr_sz;
 
@@ -520,8 +514,8 @@ list_from_asval(const as_val *val, as_particle **pp)
 	uint32_t base_hdr_sz = as_pack_list_header_get_size(ele_count);
 	uint32_t content_sz = (uint32_t)sz - base_hdr_sz;
 	bool is_ordered = flags_is_ordered((uint8_t)list->flags);
-	uint32_t ext_content_sz = list_calc_ext_content_sz(ele_count, content_sz,
-			is_ordered);
+	uint32_t ext_content_sz = list_calc_ext_content_sz(list->flags, ele_count,
+			content_sz);
 
 	if (is_ordered || ext_content_sz != 0) {
 		uint32_t hdr_sz = as_pack_list_header_get_size(ele_count + 1);
@@ -538,7 +532,8 @@ list_from_asval(const as_val *val, as_particle **pp)
 		};
 
 		as_pack_list_header(&pk, ele_count + 1);
-		as_pack_ext_header(&pk, ext_content_sz, get_ext_flags(is_ordered));
+		as_pack_ext_header(&pk, ext_content_sz,
+				list_get_ext_flags(is_ordered, is_persist_index(list->flags)));
 
 		if (ext_content_sz != 0) {
 			list_pack_empty_index(&pk, ele_count, NULL, content_sz, is_ordered);
@@ -554,6 +549,9 @@ list_from_asval(const as_val *val, as_particle **pp)
 
 			cf_assert(check, AS_PARTICLE, "invalid list");
 
+			// TODO - Fix as_val ext packing as as_msgpack currently turns all
+			// ordered lists into regular lists. We fix the top level here but
+			// any sub-level ordered lists are lost (becoming unordered).
 			if (! packed_list_check_order_and_fill_offidx(&new_list)) {
 				uint8_t *temp_mem = NULL;
 				uint8_t buf[sizeof(packed_list) +
@@ -571,11 +569,13 @@ list_from_asval(const as_val *val, as_particle **pp)
 
 				memcpy(ptr, p_list_mem->data, p_list_mem->sz);
 
-				define_rollback_alloc(alloc_idx, NULL, 1, false); // for temp indexes
+				define_rollback_alloc(alloc_idx, NULL, 2); // for temp indexes
 				define_order_index(ordidx, new_list.ele_count, alloc_idx);
 				packed_list not_ordered_list;
 
 				packed_list_init(&not_ordered_list, ptr, p_list_mem->sz);
+				setup_list_must_have_full_offidx(full, &not_ordered_list,
+						alloc_idx);
 				list_full_offset_index_fill_all(&not_ordered_list.offidx);
 
 				if (! list_order_index_sort(&ordidx, &not_ordered_list.offidx,
@@ -583,8 +583,9 @@ list_from_asval(const as_val *val, as_particle **pp)
 					cf_crash(AS_PARTICLE, "list_sort() invalid list");
 				}
 
-				list_order_index_pack(&ordidx, &not_ordered_list.offidx,
-						(uint8_t *)new_list.contents, &new_list.offidx);
+				order_index_write_eles(&ordidx, ele_count,
+						&not_ordered_list.offidx, (uint8_t *)new_list.contents,
+						&new_list.offidx, false);
 
 				rollback_alloc_rollback(alloc_idx);
 				cf_free(temp_mem);
@@ -671,81 +672,6 @@ list_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 	memcpy(p_list_mem->data, packed, p_list_mem->sz);
 }
 
-//------------------------------------------------
-// Handle on-device "flat" format.
-//
-
-const uint8_t *
-list_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
-{
-	if (flat + sizeof(list_flat) > end) {
-		cf_warning(AS_PARTICLE, "incomplete flat list");
-		return NULL;
-	}
-
-	// Convert temp buffer from disk to data-in-memory.
-	const list_flat *p_list_flat = (const list_flat *)flat;
-
-	flat += sizeof(list_flat) + p_list_flat->sz;
-
-	if (flat > end) {
-		cf_warning(AS_PARTICLE, "incomplete flat list");
-		return NULL;
-	}
-
-	packed_list list;
-
-	if (! packed_list_init(&list, p_list_flat->data, p_list_flat->sz)) {
-		cf_warning(AS_PARTICLE, "list_from_flat() invalid packed list");
-		return NULL;
-	}
-
-	list_mem *p_list_mem = packed_list_pack_mem(&list, NULL);
-
-	p_list_mem->type = p_list_flat->type;
-	*pp = (as_particle *)p_list_mem;
-
-	packed_list new_list;
-	bool check = packed_list_init_from_particle(&new_list, *pp);
-
-	cf_assert(check, AS_PARTICLE, "list_from_flat() invalid list");
-
-	if (! packed_list_check_order_and_fill_offidx(&new_list)) {
-		cf_warning(AS_PARTICLE, "list_from_flat() invalid packed list");
-		return NULL;
-	}
-
-	return flat;
-}
-
-uint32_t
-list_flat_size(const as_particle *p)
-{
-	define_packed_list_particle(list, p, success);
-	cf_assert(success, AS_PARTICLE, "list_to_flat() invalid packed list");
-
-	return sizeof(list_flat) + packed_list_mem_sz(&list, false, NULL);
-}
-
-uint32_t
-list_to_flat(const as_particle *p, uint8_t *flat)
-{
-	define_packed_list_particle(list, p, success);
-	list_flat *p_list_flat = (list_flat *)flat;
-
-	cf_assert(success, AS_PARTICLE, "list_to_flat() invalid packed list");
-	p_list_flat->sz = packed_list_mem_sz(&list, false, NULL);
-
-	uint32_t check = packed_list_pack_buf(&list, p_list_flat->data,
-			p_list_flat->sz, 0, true);
-
-	cf_assert(check == p_list_flat->sz, AS_PARTICLE, "size mismatch check(%u) != sz(%u), ele_count %u content_sz %u flags 0x%x", check, p_list_flat->sz, list.ele_count, list.content_sz, list.ext_flags);
-
-	// Already wrote the type.
-
-	return sizeof(list_flat) + p_list_flat->sz;
-}
-
 
 //==========================================================
 // as_bin particle functions specific to LIST.
@@ -791,7 +717,7 @@ list_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 				if (list_is_ordered(&list)) {
 					uindex = list.ele_count;
 				}
-				else if ((ctx->create_ctx_type & AS_CDT_CTX_CREATE_MASK) ==
+				else if (ctx->create_ctx_type ==
 						AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND) {
 					ctx->list_nil_pad = (uint32_t)index - list.ele_count;
 					uindex = list.ele_count;
@@ -811,7 +737,7 @@ list_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 			ctx->create_hdr_ptr = list.packed;
 
 			bool is_dim = ! offset_index_is_null(&list.offidx);
-			define_rollback_alloc(alloc_idx, NULL, 1, false);
+			define_rollback_alloc(alloc_idx, NULL, 1);
 
 			cdt_context_list_push(ctx, &list, uindex, alloc_idx, is_dim, false);
 			ctx->data_offset += list.packed_sz;
@@ -827,7 +753,7 @@ list_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val)
 
 	bool is_dim = ! offset_index_is_null(&list.offidx);
 	bool need_idx_mem = cdt_context_list_need_idx_mem(ctx, &list, is_dim);
-	define_rollback_alloc(alloc_idx, NULL, 1, false); // for temp indexes
+	define_rollback_alloc(alloc_idx, NULL, 1); // for temp indexes
 	setup_list_context_full_offidx(full, &list, alloc_idx, need_idx_mem);
 
 	if (! list_full_offset_index_fill_to(full->offidx,
@@ -892,7 +818,7 @@ list_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val)
 
 	bool is_dim = ! offset_index_is_null(&list.offidx);
 	bool need_idx_mem = cdt_context_list_need_idx_mem(ctx, &list, is_dim);
-	define_rollback_alloc(alloc_idx, NULL, 8, false); // for temp indexes
+	define_rollback_alloc(alloc_idx, NULL, 8); // for temp indexes
 	setup_list_context_full_offidx(full, &list, alloc_idx, need_idx_mem);
 
 	if (! list_full_offset_index_fill_all(full->offidx)) {
@@ -954,7 +880,7 @@ list_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val)
 
 	bool is_dim = ! offset_index_is_null(&list.offidx);
 	bool need_idx_mem = cdt_context_list_need_idx_mem(ctx, &list, is_dim);
-	define_rollback_alloc(alloc_idx, NULL, 8, false); // for temp indexes
+	define_rollback_alloc(alloc_idx, NULL, 8); // for temp indexes
 	setup_list_context_full_offidx(full, &list, alloc_idx, need_idx_mem);
 
 	if (! list_full_offset_index_fill_all(full->offidx)) {
@@ -1038,7 +964,7 @@ cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 		offset_index_set_ptr(&orig.offidx, p->idx_mem, orig.contents);
 	}
 
-	define_rollback_alloc(alloc_idx, NULL, 1, false); // for temp indexes
+	define_rollback_alloc(alloc_idx, NULL, 1); // for temp indexes
 	setup_list_must_have_full_offidx(full, &orig, alloc_idx);
 
 	if (! list_full_offset_index_fill_to(full->offidx, orig.ele_count, true)) {
@@ -1112,21 +1038,24 @@ cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p)
 }
 
 uint8_t
-list_get_ctx_flags(bool is_ordered, bool is_toplvl)
+list_get_ext_flags(bool is_ordered, bool is_persist)
 {
-	if (is_toplvl) {
-		return is_ordered ?
-				AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_LIST_FLAG_FULLOFF_IDX :
-				AS_PACKED_LIST_FLAG_NONE | AS_PACKED_LIST_FLAG_OFF_IDX;
-	}
+	uint8_t flags = is_ordered ?
+			AS_PACKED_LIST_FLAG_ORDERED : AS_PACKED_LIST_FLAG_NONE;
 
-	return is_ordered ? AS_PACKED_LIST_FLAG_ORDERED : AS_PACKED_LIST_FLAG_NONE;
+	return is_persist ? flags | AS_PACKED_PERSIST_INDEX : flags;
 }
 
 
 //==========================================================
 // Local helpers.
 //
+
+static inline bool
+is_persist_index(uint8_t flags)
+{
+	return (flags & AS_PACKED_PERSIST_INDEX) != 0;
+}
 
 static inline bool
 is_list_type(uint8_t type)
@@ -1187,24 +1116,16 @@ strip_ext_flags(uint8_t flags)
 	return flags & AS_PACKED_LIST_FLAG_ORDERED;
 }
 
-static inline uint8_t
-get_ext_flags(bool ordered)
+uint32_t
+list_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz)
 {
-	return ordered ?
-			(AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_LIST_FLAG_FULLOFF_IDX) :
-			AS_PACKED_LIST_FLAG_OFF_IDX;
-}
-
-static uint32_t
-list_calc_ext_content_sz(uint32_t ele_count, uint32_t content_sz, bool ordered)
-{
-	if (ele_count <= 1) {
+	if (ele_count <= 1 || ! is_persist_index(flags)) {
 		return 0;
 	}
 
 	offset_index offidx;
 
-	if (! ordered) {
+	if (! flags_is_ordered(flags)) {
 		list_partial_offset_index_init(&offidx, NULL, ele_count, NULL,
 				content_sz);
 	}
@@ -1249,22 +1170,42 @@ list_pack_empty_index(as_packer *pk, uint32_t ele_count,
 	pk->offset += offset_index_size(&offidx);
 }
 
+static inline bool
+is_list_mem_static(const as_particle *p)
+{
+	return p >= (const as_particle *)list_static &&
+			p <= (const as_particle *)&list_static[n_list_static - 1];
+}
+
+static inline uint32_t
+list_flags_to_static_ix(uint8_t flags)
+{
+	switch (flags) {
+	case AS_PACKED_PERSIST_INDEX:
+		return STATIC_LIST_UNORDERED_IDX;
+	case AS_PACKED_LIST_FLAG_ORDERED:
+		return STATIC_LIST_ORDERED;
+	case AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX:
+		return STATIC_LIST_ORDERED_IDX;
+	default:
+		break;
+	}
+
+	return STATIC_LIST_UNORDERED;
+}
+
 //------------------------------------------------
 // as_bin
 //
 
 void
-as_bin_set_unordered_empty_list(as_bin *b, rollback_alloc *alloc_buf)
+as_bin_set_empty_list(as_bin *b, uint8_t flags, rollback_alloc *alloc_buf)
 {
-	b->particle = list_simple_create_from_buf(alloc_buf, 0, NULL, 0);
-	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_LIST);
-}
+	uint32_t static_ix = list_flags_to_static_ix(flags);
+	list_mem_static *list = &list_static[static_ix];
 
-static void
-as_bin_set_ordered_empty_list(as_bin *b, rollback_alloc *alloc_buf)
-{
-	b->particle = list_simple_create_from_buf(alloc_buf, 1,
-			list_ordered_empty.data + 1, LIST_EMPTY_FLAGED_SIZE - 1);
+	b->particle = rollback_alloc_copy(alloc_buf, list,
+			list->sz + sizeof(list_mem));
 	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_LIST);
 }
 
@@ -1300,36 +1241,34 @@ as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata)
 //
 
 static inline void
-cdt_context_set_empty_list(cdt_context *ctx, bool is_ordered)
+cdt_context_set_empty_list(cdt_context *ctx, uint8_t flags)
 {
 	if (cdt_context_is_toplvl(ctx) && ! ctx->create_triggered) {
-		if (is_ordered) {
-			as_bin_set_ordered_empty_list(ctx->b, ctx->alloc_buf);
-		}
-		else {
-			as_bin_set_unordered_empty_list(ctx->b, ctx->alloc_buf);
-		}
+		as_bin_set_empty_list(ctx->b, flags, ctx->alloc_buf);
 	}
 	else {
-		list_setup_bin_ctx(ctx, is_ordered ?
-				AS_PACKED_LIST_FLAG_ORDERED : AS_PACKED_LIST_FLAG_NONE,
-				0, 0, 0, NULL, NULL);
+		list_setup_bin_ctx(ctx, flags, 0, 0, 0, NULL, NULL);
 	}
 }
 
 static inline void
-cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uint64_t create_flags)
+cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uint64_t flags)
 {
+	if (! cdt_check_flags(flags, MSGPACK_TYPE_LIST)) {
+		flags = AS_PACKED_LIST_FLAG_NONE;
+	}
+
 	if (ctx->create_triggered) {
-		ctx->create_flags = create_flags;
+		ctx->create_flags = flags;
 		return;
 	}
 
 	if (! as_bin_is_live(ctx->b)) {
 		cf_assert(ctx->data_sz == 0, AS_PARTICLE, "invalid state");
-		ctx->b->particle = flags_is_ordered(create_flags) ?
-				(as_particle *)&list_ordered_empty :
-				(as_particle *)&list_mem_empty;
+
+		uint32_t static_ix = list_flags_to_static_ix(flags);
+
+		ctx->b->particle = (as_particle *)&list_static[static_ix];
 		as_bin_state_set_from_type(ctx->b, AS_PARTICLE_TYPE_LIST);
 	}
 }
@@ -1452,14 +1391,11 @@ packed_list_init_from_com(packed_list *list, cdt_op_mem *com)
 		list->ele_count = 0;
 		list->contents = NULL;
 
-		if (flags_is_ordered(ctx->create_flags)) {
-			list->packed = list_ordered_empty.data;
-			list->packed_sz = list_ordered_empty.sz;
-		}
-		else {
-			list->packed = list_mem_empty.data;
-			list->packed_sz = list_mem_empty.sz;
-		}
+		uint32_t static_ix = list_flags_to_static_ix(ctx->create_flags);
+		list_mem *ls = (list_mem *)&list_static[static_ix];
+
+		list->packed = ls->data;
+		list->packed_sz = ls->sz;
 
 		return packed_list_unpack_hdridx(list);
 	}
@@ -1899,89 +1835,6 @@ packed_list_find_rank_range_by_value_interval_unordered(const packed_list *list,
 	}
 
 	return true;
-}
-
-static uint32_t
-packed_list_mem_sz(const packed_list *list, bool has_ext,
-		uint32_t *ext_content_sz_r)
-{
-	bool ordered = list_is_ordered(list);
-	uint32_t ext_cont_sz = 0;
-
-	if (has_ext) {
-		ext_cont_sz = list_calc_ext_content_sz(list->ele_count,
-				list->content_sz, ordered);
-
-		if (ext_content_sz_r) {
-			*ext_content_sz_r = ext_cont_sz;
-		}
-	}
-	else if (! ordered) {
-		return as_pack_list_header_get_size(list->ele_count) + list->content_sz;
-	}
-
-	if (! ordered && ext_cont_sz == 0) {
-		return as_pack_list_header_get_size(list->ele_count) + list->content_sz;
-	}
-
-	return as_pack_list_header_get_size(list->ele_count + 1) +
-			as_pack_ext_header_get_size(ext_cont_sz) + ext_cont_sz +
-			list->content_sz;
-}
-
-static uint32_t
-packed_list_pack_buf(const packed_list *list, uint8_t *buf, uint32_t sz,
-		uint32_t ext_content_sz, bool strip_flags)
-{
-	as_packer pk = {
-			.buffer = buf,
-			.capacity = sz
-	};
-
-	bool ordered = list_is_ordered(list);
-
-	if (ordered || ext_content_sz != 0) {
-		as_pack_list_header(&pk, list->ele_count + 1);
-		as_pack_ext_header(&pk, ext_content_sz, strip_flags ?
-				strip_ext_flags(list->ext_flags) : get_ext_flags(ordered));
-
-		if (ext_content_sz != 0) {
-			list_pack_empty_index(&pk, list->ele_count, NULL, list->content_sz,
-					ordered);
-		}
-	}
-	else {
-		as_pack_list_header(&pk, list->ele_count);
-	}
-
-	packed_list_content_pack(list, &pk);
-
-	return pk.offset;
-}
-
-static list_mem *
-packed_list_pack_mem(const packed_list *list, list_mem *p_list_mem)
-{
-	uint32_t ext_content_sz = 0;
-	uint32_t sz = packed_list_mem_sz(list, true, &ext_content_sz);
-
-	if (! p_list_mem) {
-		p_list_mem = cf_malloc_ns(sizeof(list_mem) + sz);
-	}
-
-	p_list_mem->sz = sz;
-	packed_list_pack_buf(list, p_list_mem->data, sz, ext_content_sz, false);
-
-	return p_list_mem;
-}
-
-static void
-packed_list_content_pack(const packed_list *list, as_packer *pk)
-{
-	uint8_t *ptr = pk->buffer + pk->offset;
-
-	memcpy(ptr, list->contents, list->content_sz);
-	pk->offset += list->content_sz;
 }
 
 static int
@@ -3443,63 +3296,6 @@ packed_list_check_order_and_fill_offidx(const packed_list *list)
 	return true;
 }
 
-static bool
-packed_list_deep_check_order_and_fill_offidx(const packed_list *list)
-{
-	if (list->ele_count == 0) {
-		return true;
-	}
-
-	offset_index *offidx = (offset_index *)&list->offidx;
-
-	if (list_is_ordered(list)) {
-		if (! offset_index_deep_check_order_and_fill(offidx, false)) {
-			return false;
-		}
-
-		return true;
-	}
-
-	msgpack_in mp = {
-			.buf = list->contents,
-			.buf_sz = list->content_sz
-	};
-
-	if (! offset_index_is_null(offidx)) {
-		uint32_t blocks = list_offset_partial_index_count(list->ele_count);
-
-		for (uint32_t j = 1; j < blocks; j++) {
-			if (! cdt_check_rep(&mp, PACKED_LIST_INDEX_STEP)) {
-				return false;
-			}
-
-			offset_index_set(offidx, j, mp.offset);
-		}
-
-		offset_index_set_filled(offidx, blocks);
-
-		if (blocks != 0) {
-			blocks--;
-		}
-
-		uint32_t mod_count = list->ele_count - blocks * PACKED_LIST_INDEX_STEP;
-
-		if (mod_count != 0 && ! cdt_check_rep(&mp, mod_count)) {
-			return false;
-		}
-	}
-	else if (! cdt_check_rep(&mp, list->ele_count)) {
-		return false;
-	}
-
-	if (mp.offset != mp.buf_sz) {
-		cf_warning(AS_PARTICLE, "packed_list_deep_check_order_and_fill_offidx() padding not allowed, size %u", mp.buf_sz - mp.offset);
-		return false;
-	}
-
-	return true;
-}
-
 //----------------------------------------------------------
 // packed_list_op
 //
@@ -3687,13 +3483,10 @@ list_simple_create_from_buf(rollback_alloc *alloc_buf, uint32_t ele_count,
 		const uint8_t *contents, uint32_t content_sz)
 {
 	list_mem *p_list_mem = list_create(alloc_buf, ele_count, content_sz);
+	uint32_t hdr_sz = list_pack_header(p_list_mem->data, ele_count);
 
-	if (p_list_mem) {
-		uint32_t hdr_sz = list_pack_header(p_list_mem->data, ele_count);
-
-		if (content_sz > 0 && contents) {
-			memcpy(p_list_mem->data + hdr_sz, contents, content_sz);
-		}
+	if (content_sz > 0 && contents != NULL) {
+		memcpy(p_list_mem->data + hdr_sz, contents, content_sz);
 	}
 
 	return (as_particle *)p_list_mem;
@@ -3721,24 +3514,24 @@ list_set_flags(cdt_op_mem *com, uint8_t set_flags)
 		return -AS_ERR_PARAMETER;
 	}
 
-	bool reorder = false;
-	bool was_ordered = list_is_ordered(&list);
-
-	if (flags_is_ordered(set_flags)) {
-		if (was_ordered) {
-			return AS_OK; // no-op
-		}
-
-		if (list.ele_count > 1) {
-			reorder = true;
-		}
+	if (! cdt_check_flags(set_flags, MSGPACK_TYPE_LIST)) {
+		cf_warning(AS_PARTICLE, "list_set_flags() invalid flags 0x%x", set_flags);
+		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
-	else {
-		if (! was_ordered) {
-			cdt_context_list_handle_possible_noop(&com->ctx);
-			return AS_OK; // no-op
-		}
+
+	// TODO - support persist index for non-toplvl
+	if (is_persist_index(set_flags) && ! cdt_context_is_toplvl(&com->ctx)) {
+		cf_warning(AS_PARTICLE, "list_set_flags() persist flag invalid for non-top level");
+		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
+
+	if (set_flags == list.ext_flags) {
+		cdt_context_list_handle_possible_noop(&com->ctx);
+		return AS_OK; // no-op
+	}
+
+	bool reorder = flags_is_ordered(set_flags) && ! list_is_ordered(&list) &&
+			list.ele_count > 1;
 
 	offset_index new_offidx;
 	uint8_t * const ptr = list_setup_bin_ctx(&com->ctx, set_flags,
@@ -3764,7 +3557,8 @@ list_set_flags(cdt_op_mem *com, uint8_t set_flags)
 			return -AS_ERR_PARAMETER;
 		}
 
-		list_order_index_pack(&ordidx, full->offidx, ptr, &new_offidx);
+		order_index_write_eles(&ordidx, list.ele_count, full->offidx, ptr,
+				&new_offidx, false);
 	}
 
 #ifdef LIST_DEBUG_VERIFY
@@ -4014,7 +3808,8 @@ list_sort(cdt_op_mem *com, as_cdt_sort_flags sort_flags)
 			list.content_sz - rm_sz, list.ele_count - rm_count, 0, &list.offidx,
 			&new_offidx);
 
-	ptr = list_order_index_pack(&ordidx, full->offidx, ptr, &new_offidx);
+	ptr = order_index_write_eles(&ordidx, list.ele_count, full->offidx, ptr,
+			&new_offidx, false);
 
 #ifdef LIST_DEBUG_VERIFY
 	if (! list_verify(&com->ctx)) {
@@ -4102,10 +3897,9 @@ list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags,
 		uint32_t content_sz, uint32_t ele_count, uint32_t idx_trunc,
 		const offset_index *old_offidx, offset_index *new_offidx)
 {
-	bool set_ordered = flags_is_ordered(flags);
-	uint32_t ext_content_sz = list_calc_ext_content_sz(ele_count, content_sz,
-			set_ordered);
-	uint32_t ext_sz = (ext_content_sz == 0 && ! set_ordered) ?
+	uint32_t ext_content_sz = list_calc_ext_content_sz(flags, ele_count,
+			content_sz);
+	uint32_t ext_sz = (ext_content_sz == 0 && flags == 0) ?
 			0 : as_pack_ext_header_get_size(ext_content_sz) + ext_content_sz;
 	list_mem *p_list_mem = list_create(alloc_buf,
 			ele_count + (ext_sz == 0 ? 0 : 1), ext_sz + content_sz);
@@ -4130,23 +3924,31 @@ list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags,
 	}
 
 	as_pack_list_header(&pk, ele_count + 1);
-	as_pack_ext_header(&pk, ext_content_sz, get_ext_flags(set_ordered));
+	as_pack_ext_header(&pk, ext_content_sz, flags);
 
-	uint8_t * const ptr = pk.buffer + pk.offset;
+	uint8_t *ptr = pk.buffer + pk.offset;
 	offset_index offidx_temp;
-	uint8_t * const contents = pk.buffer + pk.offset + ext_content_sz;
+	uint8_t * const contents = ptr + ext_content_sz;
 
 	if (! new_offidx) {
 		new_offidx = &offidx_temp;
 	}
 
-	if (! set_ordered) {
+	if (ext_content_sz == 0) {
+		ptr = NULL;
+	}
+
+	if (! flags_is_ordered(flags)) {
 		list_partial_offset_index_init(new_offidx, ptr, ele_count, contents,
 				content_sz);
 		idx_trunc /= PACKED_LIST_INDEX_STEP;
 	}
 	else {
 		offset_index_init(new_offidx, ptr, ele_count, contents, content_sz);
+	}
+
+	if (ptr == NULL) {
+		return contents;
 	}
 
 	if (idx_trunc == 0 || ! old_offidx || offset_index_is_null(old_offidx)) {
@@ -4171,9 +3973,9 @@ list_setup_bin_ctx(cdt_context *ctx, uint8_t flags, uint32_t content_sz,
 				ele_count, idx_trunc, old_offidx, new_offidx);
 	}
 
-	bool set_ordered = flags_is_ordered(flags);
-	uint32_t ext_sz = (! set_ordered) ? 0 : as_pack_ext_header_get_size(0);
-	uint32_t hdr_count = ele_count + (! set_ordered ? 0 : 1);
+	bool is_flagged = flags != 0;
+	uint32_t ext_sz = (! is_flagged) ? 0 : as_pack_ext_header_get_size(0);
+	uint32_t hdr_count = ele_count + (! is_flagged ? 0 : 1);
 	uint32_t list_sz = as_pack_list_header_get_size(hdr_count) + ext_sz +
 			content_sz;
 	uint8_t *ptr = cdt_context_create_new_particle(ctx, list_sz);
@@ -4186,9 +3988,8 @@ list_setup_bin_ctx(cdt_context *ctx, uint8_t flags, uint32_t content_sz,
 	int check = as_pack_list_header(&pk, hdr_count);
 	cf_assert(check == 0, AS_PARTICLE, "pack list header failed");
 
-	if (set_ordered) {
-		as_pack_ext_header(&pk, 0,
-				set_ordered ? AS_PACKED_LIST_FLAG_ORDERED : 0);
+	if (is_flagged) {
+		as_pack_ext_header(&pk, 0, flags);
 	}
 
 	if (new_offidx) {
@@ -4592,11 +4393,11 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state,
 	}
 
 	// In case of no-op.
-	if (ctx->b->particle == (const as_particle *)&list_mem_empty) {
-		cdt_context_set_empty_list(ctx, false);
-	}
-	else if (ctx->b->particle == (const as_particle *)&list_ordered_empty) {
-		cdt_context_set_empty_list(ctx, true);
+	if (is_list_mem_static(ctx->b->particle)) {
+		list_mem_static *mem_static = (list_mem_static *)ctx->b->particle;
+
+		ctx->b->particle = rollback_alloc_copy(ctx->alloc_buf, mem_static,
+				mem_static->sz + sizeof(list_mem));
 	}
 
 	return true;
@@ -5014,53 +4815,6 @@ list_order_index_sort(order_index *ordidx, const offset_index *full_offidx,
 	return ! udata.error;
 }
 
-static uint8_t *
-list_order_index_pack(const order_index *ordidx,
-		const offset_index *full_offidx, uint8_t *buf, offset_index *new_offidx)
-{
-	cf_assert(new_offidx, AS_PARTICLE, "new_offidx null");
-	cf_assert(full_offidx->_.ele_count != 0, AS_PARTICLE, "ele_count == 0");
-
-	const uint8_t *contents = full_offidx->contents;
-	uint32_t buf_off = 0;
-	uint32_t write_count = 0;
-
-	for (uint32_t i = 0; i < full_offidx->_.ele_count; i++) {
-		uint32_t idx = order_index_get(ordidx, i);
-
-		if (idx == full_offidx->_.ele_count) {
-			continue;
-		}
-
-		uint32_t off = offset_index_get_const(full_offidx, idx);
-		uint32_t sz = offset_index_get_delta_const(full_offidx, idx);
-
-		memcpy(buf + buf_off, contents + off, sz);
-		buf_off += sz;
-		write_count++;
-
-		if (offset_index_is_null(new_offidx)) {
-			continue;
-		}
-
-		if (! new_offidx->is_partial) {
-			offset_index_set(new_offidx, write_count, buf_off);
-		}
-		else if (write_count % PACKED_LIST_INDEX_STEP == 0 &&
-				new_offidx->_.ele_count != 0) {
-			uint32_t new_idx = write_count / PACKED_LIST_INDEX_STEP;
-			offset_index_set(new_offidx, new_idx, buf_off);
-		}
-	}
-
-	if (! offset_index_is_null(new_offidx)) {
-		offset_index_set_filled(new_offidx, (new_offidx->is_partial ?
-				new_offidx->_.ele_count : write_count));
-	}
-
-	return buf + buf_off;
-}
-
 
 //==========================================================
 // list_order_heap
@@ -5199,7 +4953,7 @@ list_result_data_set_values_by_ordidx(cdt_result_data *rd,
 
 	rd->result->particle = list_simple_create(rd->alloc, count, sz,
 			&ptr);
-	order_index_write_eles(ordidx, count, full_offidx, ptr, false);
+	order_index_write_eles(ordidx, count, full_offidx, ptr, NULL, false);
 	as_bin_state_set_from_type(rd->result, AS_PARTICLE_TYPE_LIST);
 
 	return true;
@@ -5345,7 +5099,7 @@ list_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 bool
 list_verify(const cdt_context *ctx)
 {
-	define_rollback_alloc(alloc_idx, NULL, 8, false); // for temp indexes
+	define_rollback_alloc(alloc_idx, NULL, 8); // for temp indexes
 	bool ret = list_verify_fn(ctx, alloc_idx);
 
 	rollback_alloc_rollback(alloc_idx);

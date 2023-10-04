@@ -41,6 +41,7 @@
 #include <sys/un.h>
 #include <syslog.h>
 #include <time.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 #include "aerospike/as_log.h"
@@ -93,6 +94,7 @@ static const char* context_strings[] = {
 		"bin",
 		"config",
 		"clustering",
+		"drv-mem",
 		"drv_pmem",
 		"drv_ssd",
 		"exchange",
@@ -200,6 +202,9 @@ typedef struct cf_log_cache_hkey_s {
 //
 
 cf_log_level g_most_verbose_levels[CF_LOG_N_CONTEXTS];
+
+__thread ucontext_t g_crash_ctx;
+__thread bool g_crash_ctx_valid = false;
 
 static bool g_use_local_time = false;
 static bool g_use_millis = false;

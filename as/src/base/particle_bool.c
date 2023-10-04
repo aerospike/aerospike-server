@@ -47,7 +47,6 @@
 // Handle "wire" format.
 int bool_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
 int bool_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
-int bool_compare_from_wire(const as_particle* p, as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size);
 uint32_t bool_wire_size(const as_particle* p);
 uint32_t bool_to_wire(const as_particle* p, uint8_t* wire);
 
@@ -81,7 +80,6 @@ const as_particle_vtable bool_vtable = {
 		bool_incr_from_wire,
 		integer_size_from_wire,
 		bool_from_wire,
-		bool_compare_from_wire,
 		bool_wire_size,
 		bool_to_wire,
 
@@ -96,7 +94,6 @@ const as_particle_vtable bool_vtable = {
 
 		bool_skip_flat,
 		bool_from_flat, // cast copies embedded value out
-		bool_from_flat,
 		bool_flat_size,
 		bool_to_flat
 };
@@ -153,21 +150,6 @@ bool_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	*pp = (as_particle*)(uint64_t)*wire_value;
 
 	return 0;
-}
-
-int
-bool_compare_from_wire(const as_particle* p, as_particle_type wire_type,
-		const uint8_t* wire_value, uint32_t value_size)
-{
-	if (wire_type != AS_PARTICLE_TYPE_BOOL) {
-		return 1;
-	}
-
-	if (value_size != 1 || *wire_value > 1) {
-		return -AS_ERR_UNKNOWN;
-	}
-
-	return (uint64_t)p == (uint64_t)*wire_value ? 0 : 1;
 }
 
 uint32_t

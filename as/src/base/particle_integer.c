@@ -62,7 +62,6 @@ const as_particle_vtable integer_vtable = {
 		integer_incr_from_wire,
 		integer_size_from_wire,
 		integer_from_wire,
-		integer_compare_from_wire,
 		integer_wire_size,
 		integer_to_wire,
 
@@ -77,7 +76,6 @@ const as_particle_vtable integer_vtable = {
 
 		integer_skip_flat,
 		integer_from_flat, // cast copies embedded value out
-		integer_from_flat,
 		integer_flat_size,
 		integer_to_flat
 };
@@ -219,35 +217,6 @@ integer_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_
 	*pp = (as_particle *)i;
 
 	return 0;
-}
-
-int
-integer_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size)
-{
-	if (wire_type != AS_PARTICLE_TYPE_INTEGER) {
-		return 1;
-	}
-
-	uint64_t i;
-
-	switch (value_size) {
-	case 8:
-		i = cf_swap_from_be64(*(uint64_t *)wire_value);
-		break;
-	case 4:
-		i = (uint64_t)cf_swap_from_be32(*(uint32_t *)wire_value);
-		break;
-	case 2:
-		i = (uint64_t)cf_swap_from_be16(*(uint16_t *)wire_value);
-		break;
-	case 1:
-		i = (uint64_t)*wire_value;
-		break;
-	default:
-		return -AS_ERR_UNKNOWN;
-	}
-
-	return (uint64_t)p == i ? 0 : 1;
 }
 
 uint32_t

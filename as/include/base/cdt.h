@@ -39,33 +39,27 @@
 // Typedefs & constants.
 //
 
-//#define CDT_DEBUG_VERIFY
+// #define CDT_DEBUG_VERIFY
+
+#define PACKED_LIST_INDEX_STEP 128
 
 #define CDT_MAX_PACKED_INT_SZ (sizeof(uint64_t) + 1)
 #define CDT_MAX_STACK_OBJ_SZ  (1024 * 1024)
 #define CDT_MAX_PARAM_LIST_COUNT (1024 * 1024)
 
-#define AS_PACKED_LIST_FLAG_NONE     0x00
-#define AS_PACKED_LIST_FLAG_ORDERED  0x01
-
-#define AS_PACKED_LIST_FLAG_OFF_IDX     0x10
-#define AS_PACKED_LIST_FLAG_FULLOFF_IDX 0x20
-
 typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
 	size_t malloc_list_cap;
-	bool malloc_ns;
 	void *malloc_list[];
 } rollback_alloc;
 
-#define define_rollback_alloc(__name, __alloc_buf, __rollback_size, __malloc_ns) \
+#define define_rollback_alloc(__name, __alloc_buf, __rollback_size) \
 	uint8_t __name ## __mem[sizeof(rollback_alloc) + sizeof(void *) * (__alloc_buf ? 0 : __rollback_size)]; \
 	rollback_alloc * const __name = (rollback_alloc *)__name ## __mem; \
 	__name->ll_buf = __alloc_buf; \
 	__name->malloc_list_sz = 0; \
-	__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size); \
-	__name->malloc_ns = __malloc_ns;
+	__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size);
 
 typedef struct cdt_process_state_s {
 	as_cdt_optype type;
@@ -123,8 +117,8 @@ typedef struct cdt_context_s {
 	bool create_triggered;
 	uint32_t create_sz;
 	const uint8_t *create_ctx_start;
-	uint64_t create_ctx_type;
 	uint32_t create_ctx_count;
+	uint16_t create_ctx_type;
 	uint8_t create_flags;
 
 	uint32_t list_nil_pad;
@@ -234,6 +228,11 @@ typedef enum {
 	CDT_FIND_ITEMS_IDXS_FOR_MAP_VALUE
 } cdt_find_items_idxs_type;
 
+typedef enum {
+	MAP_SORT_BY_KEY,
+	MAP_SORT_BY_VALUE
+} map_sort_by_t;
+
 typedef bool (*list_foreach_callback)(msgpack_in *element, void *udata);
 typedef bool (*map_foreach_callback)(msgpack_in *key, msgpack_in *value, void *udata);
 
@@ -316,11 +315,14 @@ void result_data_set_int_list_by_mask(cdt_result_data *rd, const uint64_t *mask,
 void as_bin_set_int(as_bin *b, int64_t value);
 void as_bin_set_double(as_bin *b, double value);
 void as_bin_set_bool(as_bin *b, bool value);
-void as_bin_set_unordered_empty_list(as_bin *b, rollback_alloc *alloc_buf);
-void as_bin_set_empty_packed_map(as_bin *b, rollback_alloc *alloc_buf, uint8_t flags);
+void as_bin_set_empty_list(as_bin *b, uint8_t flags, rollback_alloc *alloc_buf);
+void as_bin_set_empty_map(as_bin *b, uint8_t flags, rollback_alloc *alloc_buf);
 
 bool as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata);
 bool as_bin_map_foreach(const as_bin *b, map_foreach_callback cb, void *udata);
+
+// cdt_particle
+uint32_t cdt_particle_strip_indexes(const as_particle *p, uint8_t *dest, msgpack_type expected_type);
 
 // cdt_delta_value
 bool cdt_calc_delta_init(cdt_calc_delta *cdv, const cdt_payload *delta_value, bool is_decrement);
@@ -360,6 +362,7 @@ void rollback_alloc_push(rollback_alloc *packed_alloc, void *ptr);
 uint8_t *rollback_alloc_reserve(rollback_alloc *alloc_buf, size_t sz);
 void rollback_alloc_rollback(rollback_alloc *alloc_buf);
 bool rollback_alloc_from_msgpack(rollback_alloc *alloc_buf, as_bin *b, const cdt_payload *seg);
+void *rollback_alloc_copy(rollback_alloc *alloc_buf, void *buf, uint32_t buf_sz);
 
 // msgpacked_index
 void msgpacked_index_set(msgpacked_index *idxs, uint32_t index, uint32_t value);
@@ -394,7 +397,6 @@ uint32_t offset_index_get_delta_const(const offset_index *offidx, uint32_t index
 uint32_t offset_index_get_filled(const offset_index *offidx);
 
 bool offset_index_check_order_and_fill(offset_index *offidx, bool pairs);
-bool offset_index_deep_check_order_and_fill(offset_index *offidx, bool is_map);
 
 uint32_t offset_index_vla_sz(const offset_index *offidx);
 void offset_index_alloc_temp(offset_index *offidx, uint8_t *mem_temp, rollback_alloc *alloc);
@@ -425,7 +427,8 @@ uint32_t order_index_get(const order_index *ordidx, uint32_t index);
 void order_index_find_rank_by_value(const order_index *ordidx, const cdt_payload *value, const offset_index *full_offidx, order_index_find *find, bool skip_key);
 
 uint32_t order_index_get_ele_size(const order_index *ordidx, uint32_t count, const offset_index *full_offidx);
-uint8_t *order_index_write_eles(const order_index *ordidx, uint32_t count, const offset_index *full_offidx, uint8_t *ptr, bool invert);
+uint8_t *order_index_write_eles(const order_index *ordidx, uint32_t count, const offset_index *full_offidx, uint8_t *ptr, offset_index *new_offidx, bool invert);
+bool order_index_check_order(const order_index *ordidx, const offset_index *full_offidx);
 
 uint32_t order_index_adjust_value(const order_index_adjust *via, uint32_t src);
 void order_index_copy(order_index *dest, const order_index *src, uint32_t d_start, uint32_t s_start, uint32_t count, const order_index_adjust *adjust);
@@ -466,6 +469,7 @@ uint32_t cdt_idx_mask_get_content_sz(const uint64_t *mask, uint32_t count, const
 void cdt_idx_mask_print(const uint64_t *mask, uint32_t ele_count, const char *name);
 
 // list
+uint32_t list_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz);
 void list_partial_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz);
 
 bool list_full_offset_index_fill_to(offset_index *offidx, uint32_t index, bool check_storage);
@@ -481,9 +485,14 @@ bool list_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val);
 
 void cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 
-uint8_t list_get_ctx_flags(bool is_ordered, bool is_toplvl);
+uint8_t list_get_ext_flags(bool is_ordered, bool is_persist);
 
 // map
+uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz);
+
+bool map_offset_index_check_and_fill(offset_index *offidx, uint32_t index);
+void map_order_index_set_sorted(order_index *ordidx, const offset_index *offsets, const uint8_t *ele_start, uint32_t tot_ele_sz, map_sort_by_t sort_by);
+
 bool map_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val);
 bool map_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val);
 bool map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val);
@@ -491,7 +500,7 @@ bool map_subcontext_by_value(cdt_context *ctx, msgpack_in_vec *val);
 
 void cdt_context_unwind_map(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 
-uint8_t map_get_ctx_flags(uint8_t ctx_type, bool is_toplvl);
+uint8_t map_get_ext_flags(uint16_t ctx_type, bool is_toplvl);
 
 // cdt_context
 uint32_t cdt_context_get_sz(cdt_context *ctx);
@@ -509,10 +518,15 @@ cdt_context_is_toplvl(const cdt_context *ctx)
 	return ctx->data_offset == 0 && ctx->data_sz == 0;
 }
 
+// cdt_untrusted
+uint32_t cdt_untrusted_max_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *type);
+uint32_t cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_sz, bool allow_subindex);
+
 // cdt_check
 bool cdt_check(msgpack_in *mp, bool check_end);
 bool cdt_check_rep(msgpack_in *mp, uint32_t rep);
 bool cdt_check_buf(const uint8_t *ptr, uint32_t sz);
+bool cdt_check_flags(uint8_t flags, msgpack_type type);
 
 // display
 const char *cdt_exp_display_name(as_cdt_optype op);

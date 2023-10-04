@@ -68,7 +68,7 @@ drv_apply_opt_meta(as_record* r, as_namespace* ns,
 	}
 
 	// Store or drop the key according to the props we read.
-	as_record_finalize_key(r, ns, opt_meta->key, opt_meta->key_size);
+	as_record_finalize_key(r, opt_meta->key, opt_meta->key_size);
 }
 
 bool

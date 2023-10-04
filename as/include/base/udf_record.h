@@ -74,17 +74,13 @@ typedef struct udf_record_s {
 	bool has_updates;
 
 	uint8_t result_code; // only set when we fail execute_updates()
-	uint32_t old_memory_bytes; // DIM only
 
-	cf_ll_buf particle_llb; // non-DIM only
+	cf_ll_buf particle_llb;
 
 	as_bin stack_bins[RECORD_MAX_BINS]; // new bins if writing
 
 	uint32_t n_old_bins;
-	uint32_t n_cleanup_bins; // DIM only
-
 	as_bin old_bins[UDF_BIN_LIMIT];
-	as_bin cleanup_bins[UDF_BIN_LIMIT]; // DIM only
 
 	uint32_t n_inserts; // updates that are not deletes
 	uint32_t n_updates;

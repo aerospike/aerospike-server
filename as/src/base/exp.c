@@ -113,7 +113,7 @@ typedef enum {
 	EXP_MAX = 51,
 
 	EXP_META_DIGEST_MOD = 64,
-	EXP_META_DEVICE_SIZE = 65,
+	EXP_META_DEVICE_SIZE = 65, // deprecated
 	EXP_META_LAST_UPDATE = 66,
 	EXP_META_SINCE_UPDATE = 67,
 	EXP_META_VOID_TIME = 68,
@@ -121,7 +121,8 @@ typedef enum {
 	EXP_META_SET_NAME = 70,
 	EXP_META_KEY_EXISTS = 71,
 	EXP_META_IS_TOMBSTONE = 72,
-	EXP_META_MEMORY_SIZE = 73,
+	EXP_META_MEMORY_SIZE = 73, // deprecated
+	EXP_META_RECORD_SIZE = 74,
 
 	EXP_REC_KEY = 80,
 	EXP_BIN = 81,
@@ -399,7 +400,6 @@ typedef struct runtime_s {
 	const uint8_t* instr_ptr;
 	rt_value* vars;
 	uint32_t op_ix;
-	bool alloc_ns;
 } runtime;
 
 typedef struct op_table_entry_s op_table_entry;
@@ -438,10 +438,9 @@ struct op_table_entry_s {
 	uint32_t eval_param_count;
 	result_type r_type;
 	const char* name;
-	bool alloc_ns;
 };
 
-#define OP_TABLE_ENTRY(__code, __name, __size_name, __build_name, __eval_name, __display_name, __static_param_count, __eval_param_count, __r_type, __alloc_ns) \
+#define OP_TABLE_ENTRY(__code, __name, __size_name, __build_name, __eval_name, __display_name, __static_param_count, __eval_param_count, __r_type) \
 		[__code].code = __code, \
 		[__code].name = __name, \
 		[__code].size = (uint32_t)sizeof(__size_name), \
@@ -450,8 +449,7 @@ struct op_table_entry_s {
 		[__code].display_cb = __display_name, \
 		[__code].static_param_count = __static_param_count, \
 		[__code].eval_param_count = __eval_param_count, \
-		[__code].r_type = __r_type, \
-		[__code].alloc_ns = __alloc_ns,
+		[__code].r_type = __r_type,
 
 #define result_type_to_str(__type) (__type > 0 && __type < TYPE_END ? \
 		result_type_str[__type] : "invalid")
@@ -553,6 +551,7 @@ static void eval_meta_set_name(runtime* rt, const op_base_mem* ob, rt_value* ret
 static void eval_meta_key_exists(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_meta_record_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
@@ -666,86 +665,87 @@ rt_value_keep_do_not_destroy(const rt_value* bin_arg, const as_bin* b)
 //
 
 static const op_table_entry op_table[] = {
-		OP_TABLE_ENTRY(EXP_UNK, "unknown", op_base_mem, build_default, eval_unknown, display_0_args, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_UNK, "unknown", op_base_mem, build_default, eval_unknown, display_0_args, 0, 0, TYPE_TRILEAN)
 
-		OP_TABLE_ENTRY(EXP_CMP_EQ, "eq", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_CMP_NE, "ne", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_CMP_GT, "gt", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_CMP_GE, "ge", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_CMP_LT, "lt", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_CMP_LE, "le", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_EQ, "eq", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_CMP_NE, "ne", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_CMP_GT, "gt", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_CMP_GE, "ge", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_CMP_LT, "lt", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_CMP_LE, "le", op_base_mem, build_compare, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
 
-		OP_TABLE_ENTRY(EXP_CMP_REGEX, "cmp_regex", op_cmp_regex, build_cmp_regex, eval_cmp_regex, display_cmp_regex, 2, 1, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_CMP_GEO, "cmp_geo", op_base_mem, build_cmp_geo, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_CMP_REGEX, "cmp_regex", op_cmp_regex, build_cmp_regex, eval_cmp_regex, display_cmp_regex, 2, 1, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_CMP_GEO, "cmp_geo", op_base_mem, build_cmp_geo, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
 
-		OP_TABLE_ENTRY(EXP_AND, "and", op_base_mem, build_logical_vargs, eval_and, display_logical_vargs, 0, 0, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_OR, "or", op_base_mem, build_logical_vargs, eval_or, display_logical_vargs, 0, 0, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_NOT, "not", op_base_mem, build_logical_not, eval_not, display_1_arg, 0, 1, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_EXCLUSIVE, "exclusive", op_base_mem, build_logical_vargs, eval_exclusive, display_logical_vargs, 0, 0, TYPE_TRILEAN, false)
+		OP_TABLE_ENTRY(EXP_AND, "and", op_base_mem, build_logical_vargs, eval_and, display_logical_vargs, 0, 0, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_OR, "or", op_base_mem, build_logical_vargs, eval_or, display_logical_vargs, 0, 0, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_NOT, "not", op_base_mem, build_logical_not, eval_not, display_1_arg, 0, 1, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_EXCLUSIVE, "exclusive", op_base_mem, build_logical_vargs, eval_exclusive, display_logical_vargs, 0, 0, TYPE_TRILEAN)
 
-		OP_TABLE_ENTRY(EXP_ADD, "add", op_base_mem, build_math_vargs, eval_add, display_math_vargs, 0, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_SUB, "sub", op_base_mem, build_math_vargs, eval_sub, display_math_vargs, 0, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_MUL, "mul", op_base_mem, build_math_vargs, eval_mul, display_math_vargs, 0, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_DIV, "div", op_base_mem, build_math_vargs, eval_div, display_math_vargs, 0, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_POW, "pow", op_base_mem, build_math_pow, eval_pow, display_2_args, 0, 2, TYPE_FLOAT, false)
-		OP_TABLE_ENTRY(EXP_LOG, "log", op_base_mem, build_math_log, eval_log, display_2_args, 0, 2, TYPE_FLOAT, false)
-		OP_TABLE_ENTRY(EXP_MOD, "mod", op_base_mem, build_math_mod, eval_mod, display_2_args, 0, 2, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_ABS, "abs", op_base_mem, build_number_op, eval_abs, display_1_arg, 0, 1, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_FLOOR, "floor", op_base_mem, build_float_op, eval_floor, display_1_arg, 0, 1, TYPE_FLOAT, false)
-		OP_TABLE_ENTRY(EXP_CEIL, "ceil", op_base_mem, build_float_op, eval_ceil, display_1_arg, 0, 1, TYPE_FLOAT, false)
-		OP_TABLE_ENTRY(EXP_TO_INT, "to_int", op_base_mem, build_float_op, eval_to_int, display_1_arg, 0, 1, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_TO_FLOAT, "to_float", op_base_mem, build_int_op, eval_to_float, display_1_arg, 0, 1, TYPE_FLOAT, false)
+		OP_TABLE_ENTRY(EXP_ADD, "add", op_base_mem, build_math_vargs, eval_add, display_math_vargs, 0, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_SUB, "sub", op_base_mem, build_math_vargs, eval_sub, display_math_vargs, 0, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_MUL, "mul", op_base_mem, build_math_vargs, eval_mul, display_math_vargs, 0, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_DIV, "div", op_base_mem, build_math_vargs, eval_div, display_math_vargs, 0, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_POW, "pow", op_base_mem, build_math_pow, eval_pow, display_2_args, 0, 2, TYPE_FLOAT)
+		OP_TABLE_ENTRY(EXP_LOG, "log", op_base_mem, build_math_log, eval_log, display_2_args, 0, 2, TYPE_FLOAT)
+		OP_TABLE_ENTRY(EXP_MOD, "mod", op_base_mem, build_math_mod, eval_mod, display_2_args, 0, 2, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_ABS, "abs", op_base_mem, build_number_op, eval_abs, display_1_arg, 0, 1, TYPE_END)
+		OP_TABLE_ENTRY(EXP_FLOOR, "floor", op_base_mem, build_float_op, eval_floor, display_1_arg, 0, 1, TYPE_FLOAT)
+		OP_TABLE_ENTRY(EXP_CEIL, "ceil", op_base_mem, build_float_op, eval_ceil, display_1_arg, 0, 1, TYPE_FLOAT)
+		OP_TABLE_ENTRY(EXP_TO_INT, "to_int", op_base_mem, build_float_op, eval_to_int, display_1_arg, 0, 1, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_TO_FLOAT, "to_float", op_base_mem, build_int_op, eval_to_float, display_1_arg, 0, 1, TYPE_FLOAT)
 
-		OP_TABLE_ENTRY(EXP_INT_AND, "int_and", op_base_mem, build_int_vargs, eval_int_and, display_int_vargs, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_OR, "int_or", op_base_mem, build_int_vargs, eval_int_or, display_int_vargs, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_XOR, "int_xor", op_base_mem, build_int_vargs, eval_int_xor, display_int_vargs, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_NOT, "int_not", op_base_mem, build_int_one, eval_int_not, display_1_arg, 0, 1, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_LSHIFT, "int_lshift", op_base_mem, build_int_shift, eval_int_lshift, display_2_args, 0, 2, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_RSHIFT, "int_rshift", op_base_mem, build_int_shift, eval_int_rshift, display_2_args, 0, 2, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_ARSHIFT, "int_arshift", op_base_mem, build_int_shift, eval_int_arshift, display_2_args, 0, 2, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_COUNT, "int_count", op_base_mem, build_int_one, eval_int_count, display_1_arg, 0, 1, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_LSCAN, "int_lscan", op_base_mem, build_int_scan, eval_int_lscan, display_2_args, 0, 2, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_INT_RSCAN, "int_rscan", op_base_mem, build_int_scan, eval_int_rscan, display_2_args, 0, 2, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_INT_AND, "int_and", op_base_mem, build_int_vargs, eval_int_and, display_int_vargs, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_OR, "int_or", op_base_mem, build_int_vargs, eval_int_or, display_int_vargs, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_XOR, "int_xor", op_base_mem, build_int_vargs, eval_int_xor, display_int_vargs, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_NOT, "int_not", op_base_mem, build_int_one, eval_int_not, display_1_arg, 0, 1, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_LSHIFT, "int_lshift", op_base_mem, build_int_shift, eval_int_lshift, display_2_args, 0, 2, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_RSHIFT, "int_rshift", op_base_mem, build_int_shift, eval_int_rshift, display_2_args, 0, 2, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_ARSHIFT, "int_arshift", op_base_mem, build_int_shift, eval_int_arshift, display_2_args, 0, 2, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_COUNT, "int_count", op_base_mem, build_int_one, eval_int_count, display_1_arg, 0, 1, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_LSCAN, "int_lscan", op_base_mem, build_int_scan, eval_int_lscan, display_2_args, 0, 2, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_INT_RSCAN, "int_rscan", op_base_mem, build_int_scan, eval_int_rscan, display_2_args, 0, 2, TYPE_INT)
 
-		OP_TABLE_ENTRY(EXP_MIN, "min", op_base_mem, build_math_vargs, eval_min, display_math_vargs, 0, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_MAX, "max", op_base_mem, build_math_vargs, eval_max, display_math_vargs, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(EXP_MIN, "min", op_base_mem, build_math_vargs, eval_min, display_math_vargs, 0, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_MAX, "max", op_base_mem, build_math_vargs, eval_max, display_math_vargs, 0, 0, TYPE_END)
 
-		OP_TABLE_ENTRY(EXP_META_DIGEST_MOD, "digest_modulo", op_meta_digest_modulo, build_meta_digest_mod, eval_meta_digest_mod, display_meta_digest_mod, 1, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_META_DEVICE_SIZE, "device_size", op_base_mem, build_default, eval_meta_device_size, display_0_args, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_META_LAST_UPDATE, "last_update", op_base_mem, build_default, eval_meta_last_update, display_0_args, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_META_SINCE_UPDATE, "since_update", op_base_mem, build_default, eval_meta_since_update, display_0_args, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_META_VOID_TIME, "void_time", op_base_mem, build_default, eval_meta_void_time, display_0_args, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_META_TTL, "ttl", op_base_mem, build_default, eval_meta_ttl, display_0_args, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(EXP_META_SET_NAME, "set_name", op_base_mem, build_default, eval_meta_set_name, display_0_args, 0, 0, TYPE_STR, false)
-		OP_TABLE_ENTRY(EXP_META_KEY_EXISTS, "key_exists", op_base_mem, build_default, eval_meta_key_exists, display_0_args, 0, 0, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_META_IS_TOMBSTONE, "is_tombstone", op_base_mem, build_default, eval_meta_is_tombstone, display_0_args, 0, 0, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(EXP_META_MEMORY_SIZE, "memory_size", op_base_mem, build_default, eval_meta_memory_size, display_0_args, 0, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_META_DIGEST_MOD, "digest_modulo", op_meta_digest_modulo, build_meta_digest_mod, eval_meta_digest_mod, display_meta_digest_mod, 1, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_META_DEVICE_SIZE, "device_size", op_base_mem, build_default, eval_meta_device_size, display_0_args, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_META_LAST_UPDATE, "last_update", op_base_mem, build_default, eval_meta_last_update, display_0_args, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_META_SINCE_UPDATE, "since_update", op_base_mem, build_default, eval_meta_since_update, display_0_args, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_META_VOID_TIME, "void_time", op_base_mem, build_default, eval_meta_void_time, display_0_args, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_META_TTL, "ttl", op_base_mem, build_default, eval_meta_ttl, display_0_args, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_META_SET_NAME, "set_name", op_base_mem, build_default, eval_meta_set_name, display_0_args, 0, 0, TYPE_STR)
+		OP_TABLE_ENTRY(EXP_META_KEY_EXISTS, "key_exists", op_base_mem, build_default, eval_meta_key_exists, display_0_args, 0, 0, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_META_IS_TOMBSTONE, "is_tombstone", op_base_mem, build_default, eval_meta_is_tombstone, display_0_args, 0, 0, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_META_MEMORY_SIZE, "memory_size", op_base_mem, build_default, eval_meta_memory_size, display_0_args, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(EXP_META_RECORD_SIZE, "record_size", op_base_mem, build_default, eval_meta_record_size, display_0_args, 0, 0, TYPE_INT)
 
-		OP_TABLE_ENTRY(EXP_REC_KEY, "key", op_rec_key, build_rec_key, eval_rec_key, display_0_args, 1, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_BIN, "bin", op_bin, build_bin, eval_bin, display_bin, 2, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_BIN_TYPE, "bin_type", op_bin_type, build_bin_type, eval_bin_type, display_bin_type, 1, 0, TYPE_INT, false)
+		OP_TABLE_ENTRY(EXP_REC_KEY, "key", op_rec_key, build_rec_key, eval_rec_key, display_0_args, 1, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_BIN, "bin", op_bin, build_bin, eval_bin, display_bin, 2, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_BIN_TYPE, "bin_type", op_bin_type, build_bin_type, eval_bin_type, display_bin_type, 1, 0, TYPE_INT)
 
-		OP_TABLE_ENTRY(EXP_COND, "cond", op_cond, build_cond, eval_cond, display_cond, 0, 0, TYPE_END, true)
-		OP_TABLE_ENTRY(EXP_VAR, "var", op_var, build_var, eval_var, display_var, 1, 0, TYPE_END, false)
-		OP_TABLE_ENTRY(EXP_LET, "let", op_let, build_let, eval_let, display_let, 0, 0, TYPE_END, true)
-		OP_TABLE_ENTRY(EXP_QUOTE, "quote", op_value_blob, build_quote, eval_value, display_value, 1, 0, TYPE_LIST, false)
-		OP_TABLE_ENTRY(EXP_CALL, "call", op_call, build_call, eval_call, display_call, 2, 2, TYPE_END, true)
+		OP_TABLE_ENTRY(EXP_COND, "cond", op_cond, build_cond, eval_cond, display_cond, 0, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_VAR, "var", op_var, build_var, eval_var, display_var, 1, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_LET, "let", op_let, build_let, eval_let, display_let, 0, 0, TYPE_END)
+		OP_TABLE_ENTRY(EXP_QUOTE, "quote", op_value_blob, build_quote, eval_value, display_value, 1, 0, TYPE_LIST)
+		OP_TABLE_ENTRY(EXP_CALL, "call", op_call, build_call, eval_call, display_call, 2, 2, TYPE_END)
 
-		OP_TABLE_ENTRY(VOP_VALUE_NIL, "nil", op_base_mem, build_value_nil, eval_value, display_value, 0, 0, TYPE_NIL, false)
-		OP_TABLE_ENTRY(VOP_VALUE_BOOL, "bool", op_value_bool, build_value_bool, eval_value, display_value, 0, 0, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(VOP_VALUE_TRILEAN, "trilean", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_TRILEAN, false)
-		OP_TABLE_ENTRY(VOP_VALUE_INT, "int", op_value_int, build_value_int, eval_value, display_value, 0, 0, TYPE_INT, false)
-		OP_TABLE_ENTRY(VOP_VALUE_FLOAT, "float", op_value_float, build_value_float, eval_value, display_value, 0, 0, TYPE_FLOAT, false)
-		OP_TABLE_ENTRY(VOP_VALUE_STR, "str", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_STR, false)
-		OP_TABLE_ENTRY(VOP_VALUE_BLOB, "blob", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_BLOB, false)
-		OP_TABLE_ENTRY(VOP_VALUE_GEO, "geo", op_value_geo, build_value_geo, eval_value, display_value, 0, 0, TYPE_GEOJSON, false)
-		OP_TABLE_ENTRY(VOP_VALUE_MSGPACK, "msgpack", op_value_blob, build_value_msgpack, eval_value, display_value, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(VOP_VALUE_NIL, "nil", op_base_mem, build_value_nil, eval_value, display_value, 0, 0, TYPE_NIL)
+		OP_TABLE_ENTRY(VOP_VALUE_BOOL, "bool", op_value_bool, build_value_bool, eval_value, display_value, 0, 0, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(VOP_VALUE_TRILEAN, "trilean", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(VOP_VALUE_INT, "int", op_value_int, build_value_int, eval_value, display_value, 0, 0, TYPE_INT)
+		OP_TABLE_ENTRY(VOP_VALUE_FLOAT, "float", op_value_float, build_value_float, eval_value, display_value, 0, 0, TYPE_FLOAT)
+		OP_TABLE_ENTRY(VOP_VALUE_STR, "str", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_STR)
+		OP_TABLE_ENTRY(VOP_VALUE_BLOB, "blob", op_value_blob, build_value_blob, eval_value, display_value, 0, 0, TYPE_BLOB)
+		OP_TABLE_ENTRY(VOP_VALUE_GEO, "geo", op_value_geo, build_value_geo, eval_value, display_value, 0, 0, TYPE_GEOJSON)
+		OP_TABLE_ENTRY(VOP_VALUE_MSGPACK, "msgpack", op_value_blob, build_value_msgpack, eval_value, display_value, 0, 0, TYPE_END)
 
-		OP_TABLE_ENTRY(VOP_VALUE_HLL, "hll", op_value_blob, NULL, eval_value, display_value, 0, 0, TYPE_HLL, false)
-		OP_TABLE_ENTRY(VOP_VALUE_MAP, "map", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_MAP, false)
-		OP_TABLE_ENTRY(VOP_VALUE_LIST, "list", op_value_blob, NULL, eval_value, display_value, 0, 0, TYPE_LIST, false)
+		OP_TABLE_ENTRY(VOP_VALUE_HLL, "hll", op_value_blob, NULL, eval_value, display_value, 0, 0, TYPE_HLL)
+		OP_TABLE_ENTRY(VOP_VALUE_MAP, "map", op_base_mem, NULL, eval_value, display_value, 0, 0, TYPE_MAP)
+		OP_TABLE_ENTRY(VOP_VALUE_LIST, "list", op_value_blob, NULL, eval_value, display_value, 0, 0, TYPE_LIST)
 
-		OP_TABLE_ENTRY(VOP_COND_CASE, "case", op_base_mem, NULL, NULL, display_case, 0, 0, TYPE_END, false)
+		OP_TABLE_ENTRY(VOP_COND_CASE, "case", op_base_mem, NULL, NULL, display_case, 0, 0, TYPE_END)
 };
 
 
@@ -810,7 +810,7 @@ as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 
 bool
 as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
-		cf_ll_buf* particles_llb, bool is_modify)
+		cf_ll_buf* particles_llb)
 {
 	rt_value vars[exp->max_var_count];
 	rt_value ret_val;
@@ -819,7 +819,6 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 			.ctx = ctx,
 			.instr_ptr = exp->mem,
 			.vars = vars,
-			.alloc_ns = is_modify
 	};
 
 	rt_eval(&rt, &ret_val);
@@ -878,10 +877,6 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 			}
 
 			return false;
-		}
-
-		if (particles_llb == NULL && rt.alloc_ns) {
-			as_bin_particle_geojson_trim(rb); // realloc over allocated space
 		}
 
 		break;
@@ -2050,7 +2045,6 @@ build_rec_key(build_args* args)
 	return true;
 }
 
-
 static bool
 build_bin(build_args* args)
 {
@@ -2077,6 +2071,12 @@ build_bin(build_args* args)
 		return false;
 	}
 
+	if (! as_bin_name_check(op->name, op->name_sz)) {
+		cf_warning(AS_EXP, "build_bin - error %u parsed invalid bin name",
+				AS_ERR_PARAMETER);
+		return false;
+	}
+
 	if ((args->entry = build_get_entry(op->type)) == NULL) {
 		cf_warning(AS_EXP, "build_bin - error %u invalid result_type %d (%s)",
 				AS_ERR_PARAMETER, op->type, result_type_to_str(op->type));
@@ -2098,7 +2098,13 @@ build_bin_type(build_args* args)
 	op->name = msgpack_get_bin(&args->mp, &op->name_sz);
 
 	if (op->name == NULL) {
-		cf_warning(AS_EXP, "build_bin_name - error %u failed to parse a string",
+		cf_warning(AS_EXP, "build_bin_type - error %u failed to parse a string",
+				AS_ERR_PARAMETER);
+		return false;
+	}
+
+	if (! as_bin_name_check(op->name, op->name_sz)) {
+		cf_warning(AS_EXP, "build_bin_type - error %u parsed invalid bin name",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -2842,17 +2848,12 @@ rt_eval(runtime* rt, rt_value* ret_val)
 	op_base_mem* ob = (op_base_mem*)rt->instr_ptr;
 	const op_table_entry* entry = &op_table[ob->code];
 
-	bool alloc_ns = rt->alloc_ns;
-
-	rt->alloc_ns = rt->alloc_ns && entry->alloc_ns;
 	rt->op_ix++;
 	rt->instr_ptr += entry->size;
 	*ret_val = (rt_value){ 0 };
 	entry->eval_cb(rt, ob, ret_val);
 
 	bool ret = rt_value_is_unknown(ret_val);
-
-	rt->alloc_ns = alloc_ns;
 
 	return ret;
 }
@@ -3603,14 +3604,15 @@ eval_meta_digest_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	ret_val->r_int = (int64_t)val % op->mod;
 }
 
+// Deprecated - replaced with eval_meta_record_size().
 static void
 eval_meta_device_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	(void)ob;
 
 	ret_val->type = RT_INT;
-	ret_val->r_int =
-			(int64_t)as_storage_record_device_size(rt->ctx->ns, rt->ctx->r);
+	ret_val->r_int = as_namespace_is_memory_only(rt->ctx->ns) ?
+			0 : (int64_t)as_record_stored_size(rt->ctx->r);
 }
 
 static void
@@ -3695,14 +3697,24 @@ eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			AS_EXP_FALSE : AS_EXP_TRUE);
 }
 
+// Deprecated - replaced with eval_meta_record_size().
 static void
 eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	(void)ob;
 
 	ret_val->type = RT_INT;
-	ret_val->r_int =
-			(int64_t)as_storage_record_mem_size(rt->ctx->ns, rt->ctx->r);
+	ret_val->r_int = rt->ctx->ns->storage_type == AS_STORAGE_ENGINE_MEMORY ?
+			(int64_t)as_record_stored_size(rt->ctx->r) : 0;
+}
+
+static void
+eval_meta_record_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	(void)ob;
+
+	ret_val->type = RT_INT;
+	ret_val->r_int = (int64_t)as_record_stored_size(rt->ctx->r);
 }
 
 static void
@@ -4107,26 +4119,26 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	switch (op->system_type & (uint32_t)~CALL_FLAG_MODIFY_LOCAL) {
 	case CALL_CDT:
 		if (is_modify_local) {
-			ret = as_bin_cdt_modify_exp(b, &mv, &rb, rt->alloc_ns);
+			ret = as_bin_cdt_modify_exp(b, &mv, &rb);
 		}
 		else {
-			ret = as_bin_cdt_read_exp(b, &mv, &rb, rt->alloc_ns);
+			ret = as_bin_cdt_read_exp(b, &mv, &rb);
 		}
 		break;
 	case CALL_BITS:
 		if (is_modify_local) {
-			ret = as_bin_bits_modify_exp(b, &mv, rt->alloc_ns);
+			ret = as_bin_bits_modify_exp(b, &mv);
 		}
 		else {
-			ret = as_bin_bits_read_exp(b, &mv, &rb, rt->alloc_ns);
+			ret = as_bin_bits_read_exp(b, &mv, &rb);
 		}
 		break;
 	case CALL_HLL:
 		if (is_modify_local) {
-			ret = as_bin_hll_modify_exp(b, &mv, &rb, rt->alloc_ns);
+			ret = as_bin_hll_modify_exp(b, &mv, &rb);
 		}
 		else {
-			ret = as_bin_hll_read_exp(b, &mv, &rb, rt->alloc_ns);
+			ret = as_bin_hll_read_exp(b, &mv, &rb);
 		}
 		break;
 	default:
@@ -4208,10 +4220,6 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			ret_val->r_trilean = AS_EXP_UNK;
 			as_bin_particle_destroy(b);
 			return;
-		}
-
-		if (rt->alloc_ns) {
-			as_bin_particle_geojson_trim(b);
 		}
 
 		// no break
@@ -4517,7 +4525,7 @@ rt_value_get_geo(rt_value* val, geo_data* result)
 static bool
 get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
 {
-	// FIXME - is an empty bin name ok now that single-bin is gone?
+	// Note - empty bin name ok for now - single-bin "soft landing".
 //	if (len == 0) {
 //		cf_warning(AS_EXP, "get_live_bin - illegal zero length bin name for multi-bin");
 //		return false;
@@ -4832,7 +4840,7 @@ rt_alloc_mem(runtime* rt, size_t sz, cf_ll_buf* ll_buf)
 		return ptr;
 	}
 
-	return rt->alloc_ns ? cf_malloc_ns(sz) : cf_malloc(sz);
+	return cf_malloc(sz);
 }
 
 static bool

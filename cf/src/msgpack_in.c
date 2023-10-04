@@ -78,9 +78,6 @@ static inline uint64_t extract_neg_int64(const uint8_t *ptr, uint8_t sz);
 static inline void cmp_parse_container(parse_meta *meta, uint32_t count);
 static inline msgpack_cmp_type msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1);
 
-static inline uint32_t msgpack_compactify_element(uint8_t *dest, const uint8_t *src);
-static inline uint8_t *msgpack_compact_table(uint8_t *buf, const uint8_t * const end, uint32_t *count, bool *has_nonstorage, bool *not_compact);
-
 
 //==========================================================
 // Inlines & macros.
@@ -1057,8 +1054,8 @@ msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified)
 		uint8_t * const ele_start = buf;
 		bool not_compact = false;
 
-		buf = msgpack_compact_table(buf, end, &count, &has_nonstorage,
-				&not_compact);
+		buf = (uint8_t *)msgpack_parse(buf, end, &count, NULL,
+				&has_nonstorage, &not_compact);
 
 		if (buf > end || buf == NULL) {
 			cf_warning(AS_PARTICLE, "msgpack_sz_internal: invalid at i %u count %u", i, count);
@@ -1740,7 +1737,7 @@ msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1)
 	return end_result;
 }
 
-static inline uint32_t
+uint32_t
 msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 {
 	msgpack_in mp = {
@@ -1841,60 +1838,81 @@ msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 	return pk.offset;
 }
 
-static inline uint8_t *
-msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
-		uint32_t *count, bool *has_nonstorage, bool *not_compact)
+const uint8_t *
+msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
+		msgpack_type *type, bool *has_nonstorage, bool *not_compact)
 {
 	SZ_PARSE_BUF_CHECK(buf, end, 1);
 
 	uint8_t b = *buf++;
+	msgpack_type dummy;
+
+	if (type == NULL) {
+		type = &dummy;
+	}
 
 	switch (b) {
 	case 0xc0: // nil
+		*type = MSGPACK_TYPE_NIL;
+		return buf;
 	case 0xc2: // boolean false
+		*type = MSGPACK_TYPE_FALSE;
+		return buf;
 	case 0xc3: // boolean true
+		*type = MSGPACK_TYPE_TRUE;
 		return buf;
 	case 0xc1: // reserved
+		*type = MSGPACK_TYPE_ERROR;
 		return NULL;
 
 	case 0xcc: // unsigned 8 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 1);
 		*not_compact = *buf <= 0x7f;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 1;
 	case 0xcd: // unsigned 16 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
 		*not_compact = cf_swap_from_be16(*(uint16_t *)buf) <= 0xff;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 2;
 	case 0xce: // unsigned 32 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
 		*not_compact = cf_swap_from_be32(*(uint32_t *)buf) <= 0xffff;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 4;
 	case 0xcf: // unsigned 64 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 8);
 		*not_compact = cf_swap_from_be64(*(uint64_t *)buf) <= 0xffffffffULL;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 8;
 
 	case 0xd0: // signed 8 bit integer
 		*not_compact = (*buf & 0x80) == 0 || *buf >= 0xe0;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 1;
 	case 0xd1: // signed 16 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
 		*not_compact = (*buf & 0x80) == 0 ||
 				cf_swap_from_be16(*(uint16_t *)buf) >= 0xff00;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 2;
 	case 0xd2: // signed 32 bit integer
 		*not_compact = (*buf & 0x80) == 0 ||
 				cf_swap_from_be32(*(uint32_t *)buf) >= 0xffff0000;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 4;
 	case 0xd3: // signed 64 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 8);
 		*not_compact = (*buf & 0x80) == 0 ||
 				cf_swap_from_be64(*(uint64_t *)buf) >= 0xffffffff00000000ULL;
+		*type = MSGPACK_TYPE_INT;
 		return buf + 8;
 
 	case 0xca: // float
+		*type = MSGPACK_TYPE_DOUBLE;
 		return buf + 4;
 	case 0xcb: // double
+		*type = MSGPACK_TYPE_DOUBLE;
 		return buf + 8;
 
 	case 0xc4: // bin 8
@@ -1903,6 +1921,7 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 	case 0xd9: // str 8
 		SZ_PARSE_BUF_CHECK(buf, end, 1);
 		*not_compact |= *buf <= 0x1f;
+		*type = MSGPACK_TYPE_BYTES;
 		return buf + 1 + *buf;
 
 	case 0xc5: // bin 16
@@ -1914,6 +1933,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
 
 		*not_compact |= len <= 0xff;
+		*type = MSGPACK_TYPE_BYTES;
+
 		return buf + 2 + len;
 	}
 	case 0xc6: // bin 32
@@ -1925,6 +1946,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
 
 		*not_compact |= len <= 0xffff;
+		*type = MSGPACK_TYPE_BYTES;
+
 		return buf + 4 + len;
 	}
 
@@ -1935,6 +1958,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 
 		*not_compact = len <= 0x0f;
 		*count += len;
+		*type = MSGPACK_TYPE_LIST;
+
 		return buf + 2;
 	}
 	case 0xdd: { // list with 32 bit header
@@ -1944,6 +1969,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 
 		*not_compact = len <= 0xffff;
 		*count += len;
+		*type = MSGPACK_TYPE_LIST;
+
 		return buf + 4;
 	}
 
@@ -1954,6 +1981,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 
 		*not_compact = len <= 0x0f;
 		*count += 2 * len;
+		*type = MSGPACK_TYPE_MAP;
+
 		return buf + 2;
 	}
 	case 0xdf: // map with 32 bit header
@@ -1963,6 +1992,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 
 		*not_compact = len <= 0xffff;
 		*count += 2 * len;
+		*type = MSGPACK_TYPE_MAP;
+
 		return buf + 4;
 
 	case 0xd4: // fixext 1
@@ -1972,6 +2003,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 			*has_nonstorage = true;
 		}
 
+		*type = MSGPACK_TYPE_EXT;
+
 		return buf + 1 + 1;
 	case 0xd5: // fixext 2
 		SZ_PARSE_BUF_CHECK(buf, end, 1);
@@ -1980,12 +2013,17 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 			*has_nonstorage = true;
 		}
 
+		*type = MSGPACK_TYPE_EXT;
+
 		return buf + 1 + 2;
 	case 0xd6: // fixext 4
+		*type = MSGPACK_TYPE_EXT;
 		return buf + 1 + 4;
 	case 0xd7: // fixext 8
+		*type = MSGPACK_TYPE_EXT;
 		return buf + 1 + 8;
 	case 0xd8: // fixext 16
+		*type = MSGPACK_TYPE_EXT;
 		return buf + 1 + 16;
 	case 0xc7: // ext 8
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
@@ -1998,6 +2036,8 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 			*not_compact = (*buf & 0xe0) == 0 && (*buf & (*buf - 1)) == 0; // *buf is 1, 2, 4, 8, or 16
 		}
 
+		*type = MSGPACK_TYPE_EXT;
+
 		return buf + 1 + 1 + *buf;
 	case 0xc8: { // ext 16
 		SZ_PARSE_BUF_CHECK(buf, end, 3);
@@ -2009,6 +2049,7 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 		}
 
 		*not_compact = len <= 0xff;
+		*type = MSGPACK_TYPE_EXT;
 
 		return buf + 2 + 1 + len;
 	}
@@ -2022,6 +2063,7 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 		}
 
 		*not_compact = len <= 0xffff;
+		*type = MSGPACK_TYPE_EXT;
 
 		return buf + 4 + 1 + len;
 	}
@@ -2030,22 +2072,27 @@ msgpack_compact_table(uint8_t *buf, const uint8_t * const end,
 	}
 
 	if (b < 0x80 || b >= 0xe0) { // 8 bit combined integer
+		*type = MSGPACK_TYPE_INT;
 		return buf;
 	}
 
 	if ((b & 0xe0) == 0xa0) { // raw bytes with 8 bit combined header
+		*type = MSGPACK_TYPE_BYTES;
 		return buf + (b & 0x1f);
 	}
 
 	if ((b & 0xf0) == 0x80) { // map with 8 bit combined header
 		*count += 2 * (b & 0x0f);
+		*type = MSGPACK_TYPE_MAP;
 		return buf;
 	}
 
 	if ((b & 0xf0) == 0x90) { // list with 8 bit combined header
 		*count += b & 0x0f;
+		*type = MSGPACK_TYPE_LIST;
 		return buf;
 	}
 
+	*type = MSGPACK_TYPE_ERROR;
 	return NULL;
 }

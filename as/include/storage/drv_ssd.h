@@ -31,8 +31,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include "citrusleaf/cf_byte_order.h"
-#include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
@@ -52,7 +50,6 @@
 // Forward declarations.
 //
 
-struct as_flat_opt_meta_s;
 struct as_flat_record_s;
 struct as_index_ref_s;
 struct as_index_s;
@@ -84,6 +81,7 @@ typedef struct {
 	uint32_t			n_writers;	// number of concurrent writers
 	bool				dirty;		// written to since last flushed
 	bool				use_post_write_q;
+	uint32_t			flush_pos;	// pos on last flush
 	uint32_t			n_vacated;
 	uint32_t			vacated_capacity;
 	vacated_wblock		*vacated_wblocks;
@@ -239,14 +237,8 @@ typedef struct ssd_load_records_info_s {
 	void *complete_rc;
 } ssd_load_records_info;
 
-// Warm and cool restart.
+// Warm restart.
 void ssd_resume_devices(drv_ssds *ssds);
-void *run_ssd_cool_start(void *udata);
-void ssd_load_wblock_queues(drv_ssds *ssds);
-void ssd_start_maintenance_threads(drv_ssds *ssds);
-void ssd_start_write_threads(drv_ssds *ssds);
-void ssd_start_defrag_threads(drv_ssds *ssds);
-void apply_opt_meta(struct as_index_s *r, struct as_namespace_s *ns, const struct as_flat_opt_meta_s *opt_meta);
 
 // Tomb raider.
 void ssd_cold_start_adjust_cenotaph(struct as_namespace_s *ns, const struct as_flat_record_s *flat, uint32_t block_void_time, struct as_index_s *r);
@@ -290,22 +282,6 @@ bool write_uses_post_write_q(struct as_storage_rd_s *rd);
 // Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);
 
-static inline uint32_t
-ssd_make_end_mark(const as_flat_record *flat)
-{
-	// Hash digest and LUT.
-	uint32_t hash = cf_wyhash32((const uint8_t*)&flat->keyd, 25);
-
-	// Reserve a bit for signature flag.
-	return cf_swap_to_le32(hash & 0x7FFFffff);
-}
-
-static inline void
-ssd_add_end_mark(uint8_t *mark, const as_flat_record *flat)
-{
-	*(uint32_t*)mark = ssd_make_end_mark(flat);
-}
-
 
 //
 // Conversions between bytes/rblocks and wblocks.
@@ -318,12 +294,17 @@ static inline uint32_t OFFSET_TO_WBLOCK_ID(drv_ssd *ssd, uint64_t offset) {
 
 // Convert wblock_id to byte offset.
 static inline uint64_t WBLOCK_ID_TO_OFFSET(drv_ssd *ssd, uint32_t wblock_id) {
-	return (uint64_t)wblock_id * (uint64_t)ssd->write_block_size;
+	return (uint64_t)wblock_id * ssd->write_block_size;
 }
 
 // Convert rblock_id to wblock_id.
 static inline uint32_t RBLOCK_ID_TO_WBLOCK_ID(drv_ssd *ssd, uint64_t rblock_id) {
 	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) / ssd->write_block_size);
+}
+
+// Convert rblock_id to 'pos' or 'indent' within wblock.
+static inline uint32_t RBLOCK_ID_TO_POS(drv_ssd *ssd, uint64_t rblock_id) {
+	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) & (ssd->write_block_size - 1));
 }
 
 

@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "aerospike/as_arch.h"
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -71,8 +72,6 @@ typedef struct index_metadata_s {
 	uint64_t last_update_time;
 	uint16_t generation;
 
-	bool has_bin_meta; // relevant only for data-in-memory
-
 	bool xdr_write; // relevant only for enterprise edition
 
 	bool tombstone; // relevant only for enterprise edition
@@ -86,11 +85,6 @@ typedef struct now_times_s {
 	uint64_t now_ns;
 	uint64_t now_ms;
 } now_times;
-
-// For now, use only for as_msg record_ttl special values.
-#define TTL_NAMESPACE_DEFAULT	0
-#define TTL_NEVER_EXPIRE		((uint32_t)-1)
-#define TTL_DONT_UPDATE			((uint32_t)-2)
 
 
 //==========================================================
@@ -131,16 +125,14 @@ void transition_delete_metadata(struct as_transaction_s* tr, struct as_index_s* 
 bool forbid_resolve(const struct as_transaction_s* tr, const struct as_storage_rd_s* rd, uint64_t msg_lut);
 bool resolve_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, uint16_t n_ops, uint16_t* n_won, int* result);
 bool udf_resolve_bin(struct as_storage_rd_s* rd, const char* name);
-bool delete_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, struct as_bin_s* cleanup_bins, uint32_t* p_n_cleanup_bins, int* result);
-bool udf_delete_bin(struct as_storage_rd_s* rd, const char* name, struct as_bin_s* cleanup_bins, uint32_t* p_n_cleanup_bins, int* result);
+void delete_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut);
+void udf_delete_bin(struct as_storage_rd_s* rd, const char* name);
 void write_resolved_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, struct as_bin_s* b);
 void delete_all_bins(struct as_storage_rd_s* rd);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void remove_from_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
 void remove_from_sindex_bins(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* bins, uint32_t n_bins);
-void write_dim_unwind(struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins, struct as_bin_s* cleanup_bins, uint32_t n_cleanup_bins);
-
 
 static inline bool
 set_has_sindex(const as_record* r, as_namespace* ns)
@@ -160,7 +152,6 @@ set_has_sindex(const as_record* r, as_namespace* ns)
 	return set != NULL && set->n_sindexes != 0;
 }
 
-
 static inline bool
 respond_on_master_complete(as_transaction* tr)
 {
@@ -168,7 +159,6 @@ respond_on_master_complete(as_transaction* tr)
 			TR_WRITE_COMMIT_LEVEL(tr) == AS_WRITE_COMMIT_LEVEL_MASTER &&
 			(tr->flags & AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL) == 0;
 }
-
 
 // FIXME - switch p_n_bins to uint16_t*.
 static inline void
@@ -179,7 +169,6 @@ append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 	}
 }
 
-
 // Not a nice way to specify a read-all op - dictated by backward compatibility.
 // Note - must check this before checking for normal read op!
 static inline bool
@@ -189,26 +178,40 @@ op_is_read_all(as_msg_op* op, as_msg* m)
 			(m->info1 & AS_MSG_INFO1_GET_ALL) != 0;
 }
 
-
 static inline bool
 is_valid_ttl(uint32_t ttl)
 {
 	// Note - for now, ttl must be as_msg record_ttl.
-	// Note - ttl <= MAX_ALLOWED_TTL includes ttl == TTL_NAMESPACE_DEFAULT.
+	// Note - ttl <= MAX_ALLOWED_TTL includes ttl == TTL_USE_DEFAULT.
 	return ttl <= MAX_ALLOWED_TTL ||
 			ttl == TTL_NEVER_EXPIRE || ttl == TTL_DONT_UPDATE;
 }
 
+static inline uint32_t
+effective_default_ttl(const as_namespace* ns, const as_set* p_set)
+{
+	as_arch_compiler_barrier(); // so caller won't inline this twice
+
+	if (p_set == NULL) {
+		return ns->default_ttl;
+	}
+
+	uint32_t set_default_ttl = as_load_uint32(&p_set->default_ttl);
+
+	return set_default_ttl == 0 ?
+			ns->default_ttl :
+			(set_default_ttl == TTL_NEVER_EXPIRE ? 0 : set_default_ttl);
+}
 
 static inline bool
-is_ttl_disallowed(uint32_t ttl, const as_namespace* ns)
+is_ttl_disallowed(uint32_t ttl, const as_namespace* ns, const as_set* p_set)
 {
 	// Note: Excludes TTL_NEVER_EXPIRE and TTL_DONT_UPDATE.
 	return ((int32_t)ttl > 0 ||
-			(ttl == TTL_NAMESPACE_DEFAULT && ns->default_ttl != 0)) &&
-					ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup;
+			(ttl == TTL_USE_DEFAULT &&
+					effective_default_ttl(ns, p_set) != 0)) &&
+			ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup;
 }
-
 
 static inline void
 clear_delete_response_metadata(as_transaction* tr)

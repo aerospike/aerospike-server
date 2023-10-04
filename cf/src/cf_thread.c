@@ -75,6 +75,11 @@ typedef struct thread_exit_s {
 	void* udata;
 } thread_exit;
 
+typedef struct sys_tid_run_fn_s {
+	pid_t sys_tid;
+	cf_thread_run_fn run;
+} sys_tid_run_fn;
+
 
 //==========================================================
 // Globals.
@@ -118,6 +123,7 @@ static void* detached_shim_fn(void* udata);
 static void* joinable_shim_fn(void* udata);
 static int32_t collect_traces_cb(cf_ll_element* ele, void* udata);
 static int32_t print_traces_cb(cf_ll_element* ele, void* udata);
+static int32_t get_run_fn_cb(cf_ll_element* ele, void* udata);
 static void cleanup(void);
 
 
@@ -250,6 +256,18 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 	g_thread_info->n_addrs = (uint32_t)cf_backtrace(g_thread_info->addrs,
 			MAX_BACKTRACE_DEPTH);
 	as_incr_uint32(&g_traces_done);
+}
+
+cf_thread_run_fn 
+cf_thread_get_run_fn(pid_t sys_tid)
+{
+	sys_tid_run_fn ctx = {
+		.sys_tid = sys_tid
+	};
+
+	cf_ll_reduce(&g_thread_list, true, get_run_fn_cb, &ctx);
+
+	return ctx.run;
 }
 
 void
@@ -449,6 +467,20 @@ print_traces_cb(cf_ll_element* ele, void* udata)
 	}
 
 	info->n_addrs = 0;
+
+	return 0;
+}
+
+static int32_t
+get_run_fn_cb(cf_ll_element* ele, void* udata)
+{
+	thread_info* info = (thread_info*)ele;
+	sys_tid_run_fn* ctx = (sys_tid_run_fn*)udata;
+
+	if (info->sys_tid == ctx->sys_tid) {
+		ctx->run = info->run;
+		return CF_LL_REDUCE_MATCHED;
+	}
 
 	return 0;
 }

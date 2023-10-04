@@ -77,7 +77,6 @@ const as_particle_vtable hll_vtable = {
 		hll_incr_from_wire,
 		blob_size_from_wire,
 		hll_from_wire,
-		blob_compare_from_wire,
 		blob_wire_size,
 		blob_to_wire,
 
@@ -91,7 +90,6 @@ const as_particle_vtable hll_vtable = {
 		blob_from_msgpack,
 
 		blob_skip_flat,
-		blob_cast_from_flat,
 		blob_from_flat,
 		blob_flat_size,
 		blob_to_flat
@@ -137,8 +135,6 @@ typedef struct hll_op_s {
 	uint8_t n_minhash_bits;
 	const uint8_t* hll;
 	uint64_t flags;
-
-	bool alloc_ns;
 } hll_op;
 
 struct hll_state_s;
@@ -179,8 +175,8 @@ typedef struct hll_state_s {
 void hll_op_destroy(hll_op* op);
 
 static bool hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read);
-static int hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb, bool alloc_ns);
-static int hll_read(hll_state* state, const as_bin* b, as_bin* rb, bool alloc_ns);
+static int hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb);
+static int hll_read(hll_state* state, const as_bin* b, as_bin* rb);
 static int32_t hll_verify_bin(const as_bin* b);
 static bool hll_parse_op(hll_state* state, hll_op* op);
 static bool hll_parse_n_index_bits(hll_state* state, hll_op* op);
@@ -434,7 +430,7 @@ as_bin_hll_modify_tr(as_bin* b, const as_msg_op* msg_op,
 		return -AS_ERR_PARAMETER;
 	}
 
-	return hll_modify(&state, b, particles_llb, rb, true);
+	return hll_modify(&state, b, particles_llb, rb);
 }
 
 int
@@ -447,12 +443,11 @@ as_bin_hll_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return hll_read(&state, b, rb, false);
+	return hll_read(&state, b, rb);
 }
 
 int
-as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb,
-		bool alloc_ns)
+as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
 {
 	hll_state state = { 0 };
 
@@ -461,12 +456,11 @@ as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb,
 		return -AS_ERR_PARAMETER;
 	}
 
-	return hll_modify(&state, b, NULL, rb, alloc_ns);
+	return hll_modify(&state, b, NULL, rb);
 }
 
 int
-as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb,
-		bool alloc_ns)
+as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
 {
 	hll_state state = { 0 };
 
@@ -475,7 +469,7 @@ as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb,
 		return -AS_ERR_PARAMETER;
 	}
 
-	return hll_read(&state, b, rb, alloc_ns);
+	return hll_read(&state, b, rb);
 }
 
 const char*
@@ -571,8 +565,7 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 }
 
 static int
-hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb,
-		bool alloc_ns)
+hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 {
 	int32_t verify_result = hll_verify_bin(b);
 
@@ -636,8 +629,7 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb,
 	size_t alloc_size = sizeof(hll_mem) + new_size;
 
 	if (particles_llb == NULL) {
-		b->particle = alloc_ns ?
-				cf_malloc_ns(alloc_size) : cf_malloc(alloc_size);
+		b->particle = cf_malloc(alloc_size);
 	}
 	else {
 		cf_ll_buf_reserve(particles_llb, alloc_size, (uint8_t**)&b->particle);
@@ -655,7 +647,7 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb,
 }
 
 static int
-hll_read(hll_state* state, const as_bin* b, as_bin* rb, bool alloc_ns)
+hll_read(hll_state* state, const as_bin* b, as_bin* rb)
 {
 	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
 
@@ -665,7 +657,7 @@ hll_read(hll_state* state, const as_bin* b, as_bin* rb, bool alloc_ns)
 		return verify_result;
 	}
 
-	hll_op op = { .alloc_ns = alloc_ns };
+	hll_op op = { 0 };
 
 	if (! hll_parse_op(state, &op)) {
 		hll_op_destroy(&op);
@@ -1343,8 +1335,7 @@ hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb)
 	uint32_t answer_sz = hmh_required_sz(template.n_index_bits,
 			template.n_minhash_bits);
 	size_t alloc_size = sizeof(hll_mem) + answer_sz;
-	hll_mem* answer = op->alloc_ns ?
-			cf_malloc_ns(alloc_size) : cf_malloc(alloc_size);
+	hll_mem* answer = cf_malloc(alloc_size);
 	hll_t* union_hmh = (hll_t*)answer->data;
 
 	hmh_init(union_hmh, template.n_index_bits, template.n_minhash_bits);
@@ -1418,7 +1409,7 @@ hll_read_op_describe(const hll_op* op, const hll_t* from, as_bin* rb)
 {
 	(void)op;
 
-	define_rollback_alloc(alloc, NULL, 1, false);
+	define_rollback_alloc(alloc, NULL, 1);
 	cdt_result_data rd = { .result=rb, .alloc=alloc };
 
 	result_data_set_list_int2x(&rd, from->n_index_bits, from->n_minhash_bits);

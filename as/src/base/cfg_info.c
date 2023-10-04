@@ -80,7 +80,6 @@ static void cfg_get_namespace(char* context, cf_dyn_buf* db);
 
 // cfg_get_* helpers.
 static const char* auto_pin_string(void);
-static const char* debug_allocations_string(void);
 static void append_addrs(cf_dyn_buf* db, const char* name, const cf_addr_list* list);
 
 // Command config-set helpers.
@@ -188,16 +187,6 @@ as_cfg_info_cmd_config_set(char* name, char* params, cf_dyn_buf* db)
 	return result;
 }
 
-void
-as_cfg_info_get_printable_cluster_name(char* cluster_name)
-{
-	as_config_cluster_name_get(cluster_name);
-
-	if (cluster_name[0] == '\0') {
-		strcpy(cluster_name, "null");
-	}
-}
-
 
 //==========================================================
 // Local helpers - command config-get helpers.
@@ -215,12 +204,11 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
-	as_cfg_info_get_printable_cluster_name(cluster_name);
+	as_config_cluster_name_get(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
 
-	info_append_string(db, "debug-allocations", debug_allocations_string());
+	info_append_bool(db, "debug-allocations", g_config.debug_allocations);
 	info_append_bool(db, "disable-udf-execution", g_config.udf_execution_disabled);
-	info_append_bool(db, "downgrading", g_config.downgrading);
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-health-check", g_config.health_check_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
@@ -245,12 +233,13 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_bool(db, "os-group-perms", cf_os_is_using_group_perms());
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
+	info_append_bool(db, "poison-allocations", g_config.poison_allocations);
 	info_append_uint32(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_uint32(db, "proto-fd-max", g_config.n_proto_fd_max);
+	info_append_uint32(db, "quarantine-allocations", g_config.quarantine_allocations);
 	info_append_uint32(db, "query-max-done", g_config.query_max_done);
 	info_append_uint32(db, "query-threads-limit", g_config.n_query_threads_limit);
 	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
-	info_append_bool(db, "salt-allocations", g_config.salt_allocations);
 
 	if (g_secrets_cfg.configured) {
 		cf_dyn_buf_append_string(db, "secrets-address-port=");
@@ -412,15 +401,13 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_bool(db, "enable-benchmarks-write", ns->write_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-proxy", ns->proxy_hist_enabled);
 	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
+	info_append_uint32(db, "evict-sys-memory-pct", ns->evict_sys_memory_pct);
 	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
 	info_append_bool(db, "force-long-queries", ns->force_long_queries);
-	info_append_uint32(db, "high-water-disk-pct", ns->hwm_disk_pct);
-	info_append_uint32(db, "high-water-memory-pct", ns->hwm_memory_pct);
 	info_append_bool(db, "ignore-migrate-fill-delay", ns->ignore_migrate_fill_delay);
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
 	info_append_bool(db, "inline-short-queries", ns->inline_short_queries);
 	info_append_uint32(db, "max-record-size", ns->max_record_size);
-	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
@@ -436,7 +423,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_uint32(db, "replication-factor", ns->cfg_replication_factor);
 	info_append_uint64(db, "sindex-stage-size", ns->sindex_stage_size);
 	info_append_uint32(db, "single-query-threads", ns->n_single_query_threads);
-	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
 	info_append_uint32(db, "stop-writes-sys-memory-pct", ns->stop_writes_sys_memory_pct);
 	info_append_bool(db, "strong-consistency", ns->cp);
 	info_append_bool(db, "strong-consistency-allow-expunge", ns->cp_allow_drops);
@@ -468,8 +454,8 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	}
 
 	if (as_namespace_index_persisted(ns)) {
-		info_append_uint32(db, "index-type.mounts-high-water-pct", ns->pi_mounts_hwm_pct);
-		info_append_uint64(db, "index-type.mounts-size-limit", ns->pi_mounts_size_limit);
+		info_append_uint32(db, "index-type.evict-mounts-pct", ns->pi_evict_mounts_pct);
+		info_append_uint64(db, "index-type.mounts-budget", ns->pi_mounts_budget);
 	}
 
 	info_append_string(db, "sindex-type",
@@ -484,8 +470,8 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	}
 
 	if (as_namespace_sindex_persisted(ns)) {
-		info_append_uint32(db, "sindex-type.mounts-high-water-pct", ns->si_mounts_hwm_pct);
-		info_append_uint64(db, "sindex-type.mounts-size-limit", ns->si_mounts_size_limit);
+		info_append_uint32(db, "sindex-type.evict-mounts-pct", ns->si_evict_mounts_pct);
+		info_append_uint64(db, "sindex-type.mounts-budget", ns->si_mounts_budget);
 	}
 
 	info_append_string(db, "storage-engine",
@@ -493,7 +479,49 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 				(ns->storage_type == AS_STORAGE_ENGINE_PMEM ? "pmem" :
 					(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal"))));
 
-	if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
+	if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+		for (uint32_t i = 0; i < ns->n_storage_stripes; i++) {
+			info_append_indexed_string(db, "storage-engine.stripe", i, NULL, ns->storage_devices[i]);
+
+			if (ns->n_storage_shadows != 0) {
+				const char* tag = ns->n_storage_devices != 0 ?
+						"storage-engine.device" : "storage-engine.file";
+
+				info_append_indexed_string(db, tag, i, NULL, ns->storage_shadows[i]);
+			}
+		}
+
+		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
+		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
+		info_append_uint32(db, "storage-engine.compression-acceleration", NS_COMPRESSION_ACCELERATION());
+		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
+		info_append_uint64(db, "storage-engine.data-size", ns->storage_data_size);
+		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
+		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
+		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
+		info_append_uint32(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
+		info_append_bool(db, "storage-engine.direct-files", ns->storage_direct_files);
+		info_append_bool(db, "storage-engine.disable-odsync", ns->storage_disable_odsync);
+		info_append_bool(db, "storage-engine.enable-benchmarks-storage", ns->storage_benchmarks_enabled);
+
+		if (ns->storage_encryption_key_file != NULL) {
+			info_append_string(db, "storage-engine.encryption",
+				ns->storage_encryption == AS_ENCRYPTION_AES_128 ? "aes-128" :
+					(ns->storage_encryption == AS_ENCRYPTION_AES_256 ? "aes-256" :
+						"illegal"));
+		}
+
+		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
+		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
+		info_append_uint32(db, "storage-engine.evict-used-pct", ns->storage_evict_used_pct);
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
+		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
+		info_append_uint32(db, "storage-engine.stop-writes-avail-pct", ns->storage_stop_writes_avail_pct);
+		info_append_uint32(db, "storage-engine.stop-writes-used-pct", ns->storage_stop_writes_used_pct);
+		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
+	}
+	else if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
 		uint32_t n = as_namespace_device_count(ns);
 
 		for (uint32_t i = 0; i < n; i++) {
@@ -525,12 +553,12 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
 		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
+		info_append_uint32(db, "storage-engine.evict-used-pct", ns->storage_evict_used_pct);
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
-		info_append_uint32(db, "storage-engine.max-used-pct", ns->storage_max_used_pct);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
-		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
-		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
+		info_append_uint32(db, "storage-engine.stop-writes-avail-pct", ns->storage_stop_writes_avail_pct);
+		info_append_uint32(db, "storage-engine.stop-writes-used-pct", ns->storage_stop_writes_used_pct);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 	}
 	else if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -553,7 +581,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
 		info_append_uint32(db, "storage-engine.compression-acceleration", NS_COMPRESSION_ACCELERATION());
 		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());
-		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
 		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
 		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
 		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
@@ -571,15 +598,16 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 
 		info_append_string_safe(db, "storage-engine.encryption-key-file", ns->storage_encryption_key_file);
 		info_append_string_safe(db, "storage-engine.encryption-old-key-file", ns->storage_encryption_old_key_file);
+		info_append_uint32(db, "storage-engine.evict-used-pct", ns->storage_evict_used_pct);
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
-		info_append_uint32(db, "storage-engine.max-used-pct", ns->storage_max_used_pct);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
-		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
 		info_append_bool(db, "storage-engine.read-page-cache", ns->storage_read_page_cache);
 		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
 		info_append_bool(db, "storage-engine.sindex-startup-device-scan", ns->storage_sindex_startup_device_scan);
+		info_append_uint32(db, "storage-engine.stop-writes-avail-pct", ns->storage_stop_writes_avail_pct);
+		info_append_uint32(db, "storage-engine.stop-writes-used-pct", ns->storage_stop_writes_used_pct);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
 	}
@@ -604,24 +632,6 @@ auto_pin_string(void)
 		return "adq";
 	default:
 		cf_crash(CF_ALLOC, "invalid CF_TOPO_AUTO_* value");
-		return NULL;
-	}
-}
-
-static const char*
-debug_allocations_string(void)
-{
-	switch (g_config.debug_allocations) {
-	case CF_ALLOC_DEBUG_NONE:
-		return "none";
-	case CF_ALLOC_DEBUG_TRANSIENT:
-		return "transient";
-	case CF_ALLOC_DEBUG_PERSISTENT:
-		return "persistent";
-	case CF_ALLOC_DEBUG_ALL:
-		return "all";
-	default:
-		cf_crash(CF_ALLOC, "invalid CF_ALLOC_DEBUG_* value");
 		return NULL;
 	}
 }
@@ -752,22 +762,10 @@ cfg_set_service(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "cluster-name", v, &v_len) == 0) {
 		if (! as_config_cluster_name_set(v)) {
+			cf_warning(AS_INFO, "bad cluster name '%s' - ignoring", v);
 			return false;
 		}
 		cf_info(AS_INFO, "Changing value of cluster-name to '%s'", v);
-	}
-	else if (as_info_parameter_get(cmd, "downgrading", v, &v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
-			cf_info(AS_INFO, "Changing value of downgrading to %s", v);
-			g_config.downgrading = true;
-		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
-			cf_info(AS_INFO, "Changing value of downgrading to %s", v);
-			g_config.downgrading = false;
-		}
-		else {
-			return false;
-		}
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-fabric", v,
 			&v_len) == 0) {
@@ -1270,7 +1268,7 @@ cfg_set_namespace(const char* cmd)
 	else if (as_info_parameter_get(cmd, "default-ttl", v, &v_len) == 0) {
 		uint32_t val;
 		if (cf_str_atoi_seconds(v, &val) != 0) {
-			cf_warning(AS_INFO, "default-ttl must be an unsigned number with time unit (s, m, h, or d)");
+			cf_warning(AS_INFO, "default-ttl must be an unsigned number with optional time unit (s, m, h, or d)");
 			return false;
 		}
 		if (val > MAX_ALLOWED_TTL) {
@@ -1494,6 +1492,15 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->evict_hist_buckets, val);
 		ns->evict_hist_buckets = (uint32_t)val;
 	}
+	else if (as_info_parameter_get(cmd, "evict-sys-memory-pct", v,
+			&v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of evict-sys-memory-pct memory of ns %s from %u to %d ",
+				ns->name, ns->evict_sys_memory_pct, val);
+		ns->evict_sys_memory_pct = (uint32_t)val;
+	}
 	else if (as_info_parameter_get(cmd, "evict-tenths-pct", v, &v_len) == 0) {
 		cf_info(AS_INFO, "Changing value of evict-tenths-pct memory of ns %s from %d to %d ",
 				ns->name, ns->evict_tenths_pct, atoi(v));
@@ -1513,24 +1520,6 @@ cfg_set_namespace(const char* cmd)
 		else {
 			return false;
 		}
-	}
-	else if (as_info_parameter_get(cmd, "high-water-disk-pct", v,
-			&v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of high-water-disk-pct of ns %s from %u to %d ",
-				ns->name, ns->hwm_disk_pct, val);
-		ns->hwm_disk_pct = (uint32_t)val;
-	}
-	else if (as_info_parameter_get(cmd, "high-water-memory-pct", v,
-			&v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of high-water-memory-pct memory of ns %s from %u to %d ",
-				ns->name, ns->hwm_memory_pct, val);
-		ns->hwm_memory_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "ignore-migrate-fill-delay", v,
 			&v_len) == 0) {
@@ -1593,21 +1582,6 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->max_record_size, val);
 		ns->max_record_size = (uint32_t)val;
 	}
-	else if (as_info_parameter_get(cmd, "memory-size", v, &v_len) == 0) {
-		uint64_t val;
-		if (cf_str_atoi_u64(v, &val) != 0) {
-			return false;
-		}
-		cf_debug(AS_INFO, "memory-size = %lu", val);
-		if (val > ns->memory_size)
-			ns->memory_size = val;
-		if (val < (ns->memory_size / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of memory-size of ns %s from %lu to %lu",
-				ns->name, ns->memory_size, val);
-		ns->memory_size = val;
-	}
 	else if (as_info_parameter_get(cmd, "migrate-order", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0 || val < 1 || val > 10) {
 			return false;
@@ -1632,60 +1606,6 @@ cfg_set_namespace(const char* cmd)
 		cf_info(AS_INFO, "Changing value of migrate-sleep of ns %s from %u to %d",
 				ns->name, ns->migrate_sleep, val);
 		ns->migrate_sleep = (uint32_t)val;
-	}
-	else if (as_info_parameter_get(cmd, "mounts-high-water-pct", v,
-			&v_len) == 0) {
-		if (! as_namespace_index_persisted(ns)) {
-			cf_warning(AS_INFO, "mounts-high-water-pct is not relevant for this index-type");
-			return false;
-		}
-		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of mounts-high-water-pct of ns %s from %u to %d ",
-				ns->name, ns->pi_mounts_hwm_pct, val);
-		ns->pi_mounts_hwm_pct = (uint32_t)val;
-	}
-	else if (as_info_parameter_get(cmd, "sindex-type.mounts-high-water-pct", v,
-			&v_len) == 0) {
-		if (! as_namespace_sindex_persisted(ns)) {
-			cf_warning(AS_INFO, "sindex-type.mounts-high-water-pct is not relevant for this sindex-type");
-			return false;
-		}
-		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of sindex-type.mounts-high-water-pct of ns %s from %u to %d ",
-				ns->name, ns->si_mounts_hwm_pct, val);
-		ns->si_mounts_hwm_pct = (uint32_t)val;
-	}
-	else if (as_info_parameter_get(cmd, "mounts-size-limit", v, &v_len) == 0) {
-		if (! as_namespace_index_persisted(ns)) {
-			cf_warning(AS_INFO, "mounts-size-limit is not relevant for this index-type");
-			return false;
-		}
-		uint64_t val;
-		uint64_t min = (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH ? 4 : 1) *
-				1024UL * 1024UL * 1024UL;
-		if (cf_str_atoi_u64(v, &val) != 0 || val < min) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of mounts-size-limit of ns %s from %lu to %lu",
-				ns->name, ns->pi_mounts_size_limit, val);
-		ns->pi_mounts_size_limit = val;
-	}
-	else if (as_info_parameter_get(cmd, "sindex-type.mounts-size-limit", v, &v_len) == 0) {
-		if (! as_namespace_sindex_persisted(ns)) {
-			cf_warning(AS_INFO, "sindex-type.mounts-size-limit is not relevant for this sindex-type");
-			return false;
-		}
-		uint64_t val;
-		if (cf_str_atoi_u64(v, &val) != 0 || val < 1024UL * 1024UL * 1024UL) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of sindex-type.mounts-size-limit of ns %s from %lu to %lu",
-				ns->name, ns->si_mounts_size_limit, val);
-		ns->si_mounts_size_limit = val;
 	}
 	else if (as_info_parameter_get(cmd, "nsup-hist-period", v, &v_len) == 0) {
 		uint32_t val;
@@ -1834,14 +1754,6 @@ cfg_set_namespace(const char* cmd)
 		cf_info(AS_INFO, "Changing value of single-query-threads of ns %s from %u to %d ",
 				ns->name, ns->n_single_query_threads, val);
 		ns->n_single_query_threads = (uint32_t)val;
-	}
-	else if (as_info_parameter_get(cmd, "stop-writes-pct", v, &v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of stop-writes-pct memory of ns %s from %u to %d ",
-				ns->name, ns->stop_writes_pct, val);
-		ns->stop_writes_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "stop-writes-sys-memory-pct", v,
 			&v_len) == 0) {
@@ -1998,13 +1910,77 @@ cfg_set_namespace(const char* cmd)
 	}
 
 	//------------------------------------------------------
+	// index-type is sub-context in cfg file:
+	//
+
+	else if (as_info_parameter_get(cmd, "index-type.evict-mounts-pct", v,
+			&v_len) == 0) {
+		if (! as_namespace_index_persisted(ns)) {
+			cf_warning(AS_INFO, "index-type.evict-mounts-pct is not relevant for this index-type");
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of index-type.evict-mounts-pct of ns %s from %u to %d ",
+				ns->name, ns->pi_evict_mounts_pct, val);
+		ns->pi_evict_mounts_pct = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "index-type.mounts-budget", v, &v_len) == 0) {
+		if (! as_namespace_index_persisted(ns)) {
+			cf_warning(AS_INFO, "index-type.mounts-budget is not relevant for this index-type");
+			return false;
+		}
+		uint64_t val;
+		uint64_t min = (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH ? 4 : 1) *
+				1024UL * 1024UL * 1024UL;
+		if (cf_str_atoi_u64(v, &val) != 0 || val < min) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of index-type.mounts-budget of ns %s from %lu to %lu",
+				ns->name, ns->pi_mounts_budget, val);
+		ns->pi_mounts_budget = val;
+	}
+
+	//------------------------------------------------------
+	// sindex-type is sub-context in cfg file:
+	//
+
+	else if (as_info_parameter_get(cmd, "sindex-type.evict-mounts-pct", v,
+			&v_len) == 0) {
+		if (! as_namespace_sindex_persisted(ns)) {
+			cf_warning(AS_INFO, "sindex-type.evict-mounts-pct is not relevant for this sindex-type");
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of sindex-type.evict-mounts-pct of ns %s from %u to %d ",
+				ns->name, ns->si_evict_mounts_pct, val);
+		ns->si_evict_mounts_pct = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "sindex-type.mounts-budget", v, &v_len) == 0) {
+		if (! as_namespace_sindex_persisted(ns)) {
+			cf_warning(AS_INFO, "sindex-type.mounts-budget is not relevant for this sindex-type");
+			return false;
+		}
+		uint64_t val;
+		if (cf_str_atoi_u64(v, &val) != 0 || val < 1024UL * 1024UL * 1024UL) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of sindex-type.mounts-budget of ns %s from %lu to %lu",
+				ns->name, ns->si_mounts_budget, val);
+		ns->si_mounts_budget = val;
+	}
+
+	//------------------------------------------------------
 	// storage-engine is sub-context in cfg file:
 	//
 
 	else if (as_info_parameter_get(cmd, "cache-replica-writes", v,
 			&v_len) == 0) {
-		if (ns->storage_data_in_memory) {
-			cf_warning(AS_INFO, "ns %s, can't set cache-replica-writes if data-in-memory",
+		if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
+			cf_warning(AS_INFO, "ns %s, can't set cache-replica-writes if not storage-engine device",
 					ns->name);
 			return false;
 		}
@@ -2029,12 +2005,6 @@ cfg_set_namespace(const char* cmd)
 		}
 		if (as_error_enterprise_feature_only("compression")) {
 			cf_warning(AS_INFO, "{%s} feature key does not allow compression",
-					ns->name);
-			return false;
-		}
-		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
-			// Note - harmful to configure compression for memory-only!
-			cf_warning(AS_INFO, "{%s} compression is not available for storage-engine memory",
 					ns->name);
 			return false;
 		}
@@ -2132,6 +2102,15 @@ cfg_set_namespace(const char* cmd)
 			return false;
 		}
 	}
+	else if (as_info_parameter_get(cmd, "evict-used-pct", v,
+			&v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of evict-used-pct of ns %s from %u to %d ",
+				ns->name, ns->storage_evict_used_pct, val);
+		ns->storage_evict_used_pct = (uint32_t)val;
+	}
 	else if (as_info_parameter_get(cmd, "flush-max-ms", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0) {
 			return false;
@@ -2139,21 +2118,6 @@ cfg_set_namespace(const char* cmd)
 		cf_info(AS_INFO, "Changing value of flush-max-ms of ns %s from %lu to %d",
 				ns->name, ns->storage_flush_max_us / 1000, val);
 		ns->storage_flush_max_us = (uint64_t)val * 1000;
-	}
-	else if (as_info_parameter_get(cmd, "max-used-pct", v, &v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0) {
-			cf_warning(AS_INFO, "ns %s, max-used-pct %s is not a number",
-					ns->name, v);
-			return false;
-		}
-		if (val > 100 || val < 0) {
-			cf_warning(AS_INFO, "ns %s, max-used-pct %d must be between 0 and 100",
-					ns->name, val);
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of max-used-pct of ns %s from %u to %d ",
-				ns->name, ns->storage_max_used_pct, val);
-		ns->storage_max_used_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "max-write-cache", v, &v_len) == 0) {
 		uint64_t val_u64;
@@ -2171,24 +2135,9 @@ cfg_set_namespace(const char* cmd)
 		ns->storage_max_write_q = (uint32_t)(as_namespace_device_count(ns) *
 				ns->storage_max_write_cache / ns->storage_write_block_size);
 	}
-	else if (as_info_parameter_get(cmd, "min-avail-pct", v, &v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0) {
-			cf_warning(AS_INFO, "ns %s, min-avail-pct %s is not a number",
-					ns->name, v);
-			return false;
-		}
-		if (val > 100 || val < 0) {
-			cf_warning(AS_INFO, "ns %s, min-avail-pct %d must be between 0 and 100",
-					ns->name, val);
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of min-avail-pct of ns %s from %u to %d ",
-				ns->name, ns->storage_min_avail_pct, val);
-		ns->storage_min_avail_pct = (uint32_t)val;
-	}
 	else if (as_info_parameter_get(cmd, "post-write-queue", v, &v_len) == 0) {
-		if (ns->storage_data_in_memory) {
-			cf_warning(AS_INFO, "ns %s, can't set post-write-queue if data-in-memory",
+		if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
+			cf_warning(AS_INFO, "ns %s, can't set post-write-queue if not storage-engine device",
 					ns->name);
 			return false;
 		}
@@ -2207,6 +2156,11 @@ cfg_set_namespace(const char* cmd)
 		ns->storage_post_write_queue = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "read-page-cache", v, &v_len) == 0) {
+		if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
+			cf_warning(AS_INFO, "ns %s, can't set read-page-cache if not storage-engine device",
+					ns->name);
+			return false;
+		}
 		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
 			cf_info(AS_INFO, "Changing value of read-page-cache of ns %s from %s to %s",
 					ns->name, bool_val[ns->storage_read_page_cache], v);
@@ -2220,6 +2174,36 @@ cfg_set_namespace(const char* cmd)
 		else {
 			return false;
 		}
+	}
+	else if (as_info_parameter_get(cmd, "stop-writes-avail-pct", v, &v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0) {
+			cf_warning(AS_INFO, "ns %s, stop-writes-avail-pct %s is not a number",
+					ns->name, v);
+			return false;
+		}
+		if (val > 100 || val < 0) {
+			cf_warning(AS_INFO, "ns %s, stop-writes-avail-pct %d must be between 0 and 100",
+					ns->name, val);
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of stop-writes-avail-pct of ns %s from %u to %d ",
+				ns->name, ns->storage_stop_writes_avail_pct, val);
+		ns->storage_stop_writes_avail_pct = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "stop-writes-used-pct", v, &v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0) {
+			cf_warning(AS_INFO, "ns %s, stop-writes-used-pct %s is not a number",
+					ns->name, v);
+			return false;
+		}
+		if (val > 100 || val < 0) {
+			cf_warning(AS_INFO, "ns %s, stop-writes-used-pct %d must be between 0 and 100",
+					ns->name, val);
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of stop-writes-used-pct of ns %s from %u to %d ",
+				ns->name, ns->storage_stop_writes_used_pct, val);
+		ns->storage_stop_writes_used_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "tomb-raider-sleep", v, &v_len) == 0) {
 		if (as_error_enterprise_only()) {
@@ -2317,7 +2301,27 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 	char v[1024];
 	int v_len = sizeof(v);
 
-	if (as_info_parameter_get(cmd, "disable-eviction", v, &v_len) == 0) {
+	if (as_info_parameter_get(cmd, "default-ttl", v, &v_len) == 0) {
+		uint32_t val;
+		if (cf_str_atoi_seconds(v, &val) != 0) {
+			cf_warning(AS_INFO, "default-ttl must be -1, 0, or a number with optional time unit (s, m, h, or d)");
+			return false;
+		}
+		if (val > MAX_ALLOWED_TTL && val != TTL_NEVER_EXPIRE) {
+			cf_warning(AS_INFO, "default-ttl must be <= %u seconds",
+					MAX_ALLOWED_TTL);
+			return false;
+		}
+		if (val != TTL_NEVER_EXPIRE && ns->nsup_period == 0 &&
+				! ns->allow_ttl_without_nsup) {
+			cf_warning(AS_INFO, "must configure non-zero nsup-period or allow-ttl-without-nsup true to set default-ttl > 0");
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of default-ttl of ns %s from %d to %d",
+				ns->name, (int32_t)ns->default_ttl, (int32_t)val);
+		ns->default_ttl = val;
+	}
+	else if (as_info_parameter_get(cmd, "disable-eviction", v, &v_len) == 0) {
 		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
 			cf_info(AS_INFO, "Changing value of disable-eviction of ns %s set %s to %s",
 					ns->name, p_set->name, v);

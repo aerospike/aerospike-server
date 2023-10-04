@@ -73,7 +73,7 @@ drop_local(as_namespace* ns, as_partition_reservation* rsv, as_index_ref* r_ref)
 {
 	as_record* r = r_ref->r;
 
-	if (ns->storage_data_in_memory) {
+	if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
 		remove_from_sindex(ns, r_ref);
 	}
 

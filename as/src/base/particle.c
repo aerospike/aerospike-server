@@ -116,21 +116,6 @@ safe_particle_type(uint8_t type)
 	}
 }
 
-static inline void
-trim_particle(as_bin *b, as_particle_type type, uint32_t orig_size)
-{
-	if (type != AS_PARTICLE_TYPE_GEOJSON) {
-		return;
-	}
-	// else - GEOJSON particles over-allocate up to 2K - recover memory.
-
-	uint32_t final_size = particle_vtable[type]->size_fn(b->particle);
-
-	if (final_size < orig_size) {
-		b->particle = cf_realloc_ns(b->particle, final_size);
-	}
-}
-
 
 //==========================================================
 // Particle "class static" functions.
@@ -306,105 +291,6 @@ as_bin_particle_size(as_bin *b)
 //
 
 int
-as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
-{
-	// This method does not destroy the existing particle, if any. We assume
-	// there is a copy of this bin (and particle reference) elsewhere, and that
-	// the copy will be responsible for the existing particle. Therefore it's
-	// important on failure to leave the existing particle intact.
-
-	uint8_t operation = op->op;
-	as_particle_type op_type = safe_particle_type(op->particle_type);
-
-	if (op_type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_ERR_PARAMETER;
-	}
-
-	uint32_t op_value_size = as_msg_op_get_value_sz(op);
-	const uint8_t *op_value = as_msg_op_get_value_p(op);
-
-	// Currently all operations become creates if there's no existing particle.
-	if (! as_bin_is_live(b)) {
-		int32_t mem_size = particle_vtable[op_type]->size_from_wire_fn(op_value, op_value_size);
-
-		if (mem_size < 0) {
-			return (int)mem_size;
-		}
-
-		as_particle *old_particle = b->particle; // FIXME - not needed
-
-		if (mem_size != 0) {
-			b->particle = cf_malloc_ns((size_t)mem_size);
-		}
-
-		// Load the new particle into the bin.
-		int result = particle_vtable[op_type]->from_wire_fn(op_type, op_value, op_value_size, &b->particle);
-
-		// Set the bin's state member.
-		if (result == 0) {
-			trim_particle(b, op_type, (uint32_t)mem_size);
-			as_bin_state_set_from_type(b, op_type);
-		}
-		else {
-			if (mem_size != 0) {
-				cf_free(b->particle);
-			}
-
-			b->particle = old_particle; // FIXME - just set NULL
-		}
-
-		return result;
-	}
-
-	// There is an existing particle, which we will modify.
-	uint8_t existing_type = as_bin_get_particle_type(b);
-	int32_t new_mem_size = 0;
-	as_particle *new_particle = NULL;
-
-	as_particle *old_particle = b->particle;
-	int result = 0;
-
-	switch (operation) {
-	case AS_MSG_OP_INCR:
-		result = particle_vtable[existing_type]->incr_from_wire_fn(op_type, op_value, op_value_size, &b->particle);
-		break;
-	case AS_MSG_OP_APPEND:
-		new_mem_size = particle_vtable[existing_type]->concat_size_from_wire_fn(op_type, op_value, op_value_size, &b->particle);
-		if (new_mem_size < 0) {
-			return new_mem_size;
-		}
-		new_particle = cf_malloc_ns((size_t)new_mem_size);
-		memcpy(new_particle, b->particle, particle_vtable[existing_type]->size_fn(b->particle));
-		b->particle = new_particle;
-		result = particle_vtable[existing_type]->append_from_wire_fn(op_type, op_value, op_value_size, &b->particle);
-		break;
-	case AS_MSG_OP_PREPEND:
-		new_mem_size = particle_vtable[existing_type]->concat_size_from_wire_fn(op_type, op_value, op_value_size, &b->particle);
-		if (new_mem_size < 0) {
-			return new_mem_size;
-		}
-		new_particle = cf_malloc_ns((size_t)new_mem_size);
-		memcpy(new_particle, b->particle, particle_vtable[existing_type]->size_fn(b->particle));
-		b->particle = new_particle;
-		result = particle_vtable[existing_type]->prepend_from_wire_fn(op_type, op_value, op_value_size, &b->particle);
-		break;
-	default:
-		// TODO - just crash?
-		return -AS_ERR_UNKNOWN;
-	}
-
-	if (result < 0) {
-		if (new_mem_size != 0) {
-			cf_free(b->particle);
-		}
-
-		b->particle = old_particle;
-	}
-
-	return result;
-}
-
-int
 as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op)
 {
 	uint8_t operation = op->op;
@@ -480,53 +366,6 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 	}
 
 	if (result < 0) {
-		b->particle = old_particle;
-	}
-
-	return result;
-}
-
-int
-as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op)
-{
-	// This method does not destroy the existing particle, if any. We assume
-	// there is a copy of this bin (and particle reference) elsewhere, and that
-	// the copy will be responsible for the existing particle. Therefore it's
-	// important on failure to leave the existing particle intact.
-
-	as_particle_type type = safe_particle_type(op->particle_type);
-
-	if (type == AS_PARTICLE_TYPE_BAD) {
-		return -AS_ERR_PARAMETER;
-	}
-
-	uint32_t value_size = as_msg_op_get_value_sz(op);
-	const uint8_t *value = as_msg_op_get_value_p(op);
-	int32_t mem_size = particle_vtable[type]->size_from_wire_fn(value, value_size);
-
-	if (mem_size < 0) {
-		return (int)mem_size;
-	}
-
-	as_particle *old_particle = b->particle;
-
-	if (mem_size != 0) {
-		b->particle = cf_malloc_ns((size_t)mem_size);
-	}
-
-	// Load the new particle into the bin.
-	int result = particle_vtable[type]->from_wire_fn(type, value, value_size, &b->particle);
-
-	// Set the bin's state member.
-	if (result == 0) {
-		trim_particle(b, type, (uint32_t)mem_size);
-		as_bin_state_set_from_type(b, type);
-	}
-	else {
-		if (mem_size != 0) {
-			cf_free(b->particle);
-		}
-
 		b->particle = old_particle;
 	}
 
@@ -612,33 +451,6 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 //------------------------------------------------
 // Handle as_val translation.
 //
-
-int
-as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val)
-{
-	as_particle_type type = as_particle_type_from_asval(val);
-
-	if (type == AS_PARTICLE_TYPE_NULL) {
-		// Currently UDF code just skips unmanageable as_val types.
-		return 0;
-	}
-
-	uint32_t mem_size = particle_vtable[type]->size_from_asval_fn(val);
-	// TODO - could this ever fail?
-
-	if (mem_size != 0) {
-		b->particle = cf_malloc_ns(mem_size);
-	}
-
-	// Load the new particle into the bin.
-	particle_vtable[type]->from_asval_fn(val, &b->particle);
-	// TODO - could this ever fail?
-
-	// Set the bin's state member.
-	as_bin_state_set_from_type(b, type);
-
-	return 0;
-}
 
 void
 as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val)
@@ -728,7 +540,7 @@ as_bin_particle_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_s
 //
 
 const uint8_t *
-as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
+as_bin_particle_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
 {
 	// We assume the bin is empty.
 
@@ -749,48 +561,13 @@ as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *en
 	}
 
 	// Cast the new particle into the bin.
-	flat = particle_vtable[type]->cast_from_flat_fn(flat, end, &b->particle);
-
-	// Set the bin's state member.
-	if (flat) {
-		as_bin_state_set_from_type(b, type);
-	}
-	// else - bin remains unpopulated.
-
-	return flat;
-}
-
-const uint8_t *
-as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end)
-{
-	// We assume the bin is empty.
-
-	if (flat >= end) {
-		cf_warning(AS_PARTICLE, "incomplete flat particle");
-		return NULL;
-	}
-
-	if (as_bin_particle_is_tombstone((as_particle_type)*flat)) {
-		as_bin_set_tombstone(b);
-		return flat + 1;
-	}
-
-	as_particle_type type = safe_particle_type(*flat);
-
-	if (type == AS_PARTICLE_TYPE_BAD) {
-		return NULL;
-	}
-
-	// Load the new particle into the bin.
 	flat = particle_vtable[type]->from_flat_fn(flat, end, &b->particle);
 
 	// Set the bin's state member.
 	if (flat) {
 		as_bin_state_set_from_type(b, type);
 	}
-	else {
-		as_bin_set_empty(b);
-	}
+	// else - bin remains unpopulated.
 
 	return flat;
 }
@@ -832,12 +609,6 @@ as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 //
 
 int
-as_bin_bits_alloc_modify_from_client(as_bin *b, as_msg_op *op)
-{
-	return as_bin_bits_modify_tr(b, op, NULL);
-}
-
-int
 as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op)
 {
 	return as_bin_bits_modify_tr(b, op, particles_llb);
@@ -857,12 +628,6 @@ as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
 //------------------------------------------------
 // Handle "wire" format.
 //
-
-int
-as_bin_hll_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *rb)
-{
-	return as_bin_hll_modify_tr(b, op, NULL, rb);
-}
 
 int
 as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb)
@@ -886,12 +651,6 @@ as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb)
 //
 
 int
-as_bin_cdt_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *result)
-{
-	return as_bin_cdt_modify_tr(b, op, result, NULL);
-}
-
-int
 as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *result)
 {
 	return as_bin_cdt_modify_tr(b, op, result, particles_llb);
@@ -911,12 +670,6 @@ as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
 //------------------------------------------------
 // Handle "wire" format.
 //
-
-int
-as_bin_exp_alloc_modify_from_client(const as_exp_ctx* ctx, as_bin *b, as_msg_op *op, const iops_expop* expop)
-{
-	return as_exp_modify_tr(ctx, b, op, NULL, expop);
-}
 
 int
 as_bin_exp_stack_modify_from_client(const as_exp_ctx* ctx, as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, const iops_expop* expop)

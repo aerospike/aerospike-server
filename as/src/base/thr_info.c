@@ -202,8 +202,6 @@ static void append_sec_err_str(cf_dyn_buf* db, uint32_t result, as_sec_perm cmd_
 
 // Info commands.
 static int dyn_best_practices(char* name, cf_dyn_buf* db);
-static int dyn_bins(char* name, cf_dyn_buf* db);
-static int tree_bins(char* name, char* subtree, cf_dyn_buf* db);
 static int dyn_cluster_name(char* name, cf_dyn_buf* db);
 static int cmd_cluster_stable(char* name, char* params, cf_dyn_buf* db);
 static int cmd_debug_record(char* name, char* params, cf_dyn_buf* db);
@@ -286,6 +284,7 @@ static int as_info_parse_ns_iname(char* params, as_namespace** ns, char** iname,
 static void add_index_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static void add_sindex_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static int32_t oldest_nvme_age(const char* path);
+static void add_data_stripe_stats(as_namespace* ns, cf_dyn_buf* db);
 static void add_data_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static void find_sindex_key(const cf_vector* items, void* udata);
 static void smd_show_cb(const cf_vector* items, void* udata);
@@ -410,7 +409,6 @@ as_info_init()
 	info_set_dynamic("alumni-clear-std", as_service_list_dynamic, false);       // Supersedes "services-alumni" for non-TLS service.
 	info_set_dynamic("alumni-tls-std", as_service_list_dynamic, false);         // Supersedes "services-alumni" for TLS service.
 	info_set_dynamic("best-practices", dyn_best_practices, false);              // Returns best-practices information.
-	info_set_dynamic("bins", dyn_bins, false);                                  // Returns bin usage information and used bin names.
 	info_set_dynamic("cluster-name", dyn_cluster_name, false);                  // Returns cluster name.
 	info_set_dynamic("endpoints", dyn_endpoints, false);                        // Returns the expanded bind / access address configuration.
 	info_set_dynamic("feature-key", dyn_feature_key, false);                    // Returns the contents of the feature key (except signature).
@@ -450,7 +448,6 @@ as_info_init()
 	info_set_dynamic("thread-traces", cf_thread_traces, false);                 // Returns backtraces for all threads.
 
 	// Tree-based names.
-	info_set_tree("bins", tree_bins);                                           // Returns bin usage information and used bin names for all or a particular namespace.
 	info_set_tree("log", tree_log);
 	info_set_tree("namespace", tree_namespace);                                 // Returns health and usage stats for a particular namespace.
 	info_set_tree("sets", tree_sets);                                           // Returns set statistics for all or a particular set.
@@ -1256,48 +1253,11 @@ dyn_best_practices(char* name, cf_dyn_buf* db)
 }
 
 static int
-dyn_bins(char* name, cf_dyn_buf* db)
-{
-	return tree_bins(name, "", db);
-}
-
-static int
-tree_bins(char* name, char* subtree, cf_dyn_buf* db)
-{
-	as_namespace* ns = NULL;
-
-	// if there is a subtree, get the namespace
-	if (subtree && strlen(subtree) > 0) {
-		ns = as_namespace_get_byname(subtree);
-
-		if (ns == NULL) {
-			cf_dyn_buf_append_string(db, "ns_type=unknown");
-			return 0;
-		}
-	}
-
-	// format w/o namespace is
-	// ns:num-bin-names=val1,bin-names-quota=val2,name1,name2,...;ns:...
-	if (ns == NULL) {
-		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-			as_namespace_get_bins_info(g_config.namespaces[i], db, true);
-		}
-	}
-	// format w/namespace is
-	// num-bin-names=val1,bin-names-quota=val2,name1,name2,...
-	else {
-		as_namespace_get_bins_info(ns, db, false);
-	}
-
-	return 0;
-}
-
-static int
 dyn_cluster_name(char* name, cf_dyn_buf* db)
 {
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 
-	as_cfg_info_get_printable_cluster_name(cluster_name);
+	as_config_cluster_name_get(cluster_name);
 	cf_dyn_buf_append_string(db, cluster_name);
 
 	return 0;
@@ -3072,7 +3032,7 @@ cmd_sindex_create(char* name, char* params, cf_dyn_buf* db)
 	if (ktype == AS_PARTICLE_TYPE_BAD) {
 		cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s'",
 				index_name_str, type_str);
-		INFO_FAIL_RESPONSE(db, AS_ERR_PARAMETER, "bad 'indexdata' bin type - must be one of 'numeric', 'string', 'geo2dsphere'");
+		INFO_FAIL_RESPONSE(db, AS_ERR_PARAMETER, "bad 'indexdata' bin type - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
 		return 0;
 	}
 
@@ -4100,35 +4060,19 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	info_append_uint64(db, "sindex_gc_cleaned", ns->n_sindex_gc_cleaned);
 
-	// Memory usage stats.
-
-	uint64_t index_used = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
-	uint64_t sindex_used = as_sindex_used_bytes(ns);
-
-	uint64_t data_memory = as_load_uint64(&ns->n_bytes_memory);
-	uint64_t index_memory = as_namespace_index_persisted(ns) ? 0 : index_used;
-	uint64_t set_index_memory = as_set_index_used_bytes(ns);
-	uint64_t sindex_memory = as_namespace_sindex_persisted(ns) ? 0 : sindex_used;
-	uint64_t used_memory = data_memory + index_memory + set_index_memory + sindex_memory;
-
-	info_append_uint64(db, "memory_used_bytes", used_memory);
-	info_append_uint64(db, "memory_used_data_bytes", data_memory);
-	info_append_uint64(db, "memory_used_index_bytes", index_memory);
-	info_append_uint64(db, "memory_used_set_index_bytes", set_index_memory);
-	info_append_uint64(db, "memory_used_sindex_bytes", sindex_memory);
-
-	uint64_t free_pct = ns->memory_size > used_memory ?
-			((ns->memory_size - used_memory) * 100L) / ns->memory_size : 0;
-
-	info_append_uint64(db, "memory_free_pct", free_pct);
-
 	// Persistent memory block keys' namespace ID (enterprise only).
 	info_append_uint32(db, "xmem_id", ns->xmem_id);
 
-	// Remaining bin-name slots.
-	info_append_uint32(db, "available_bin_names", MAX_BIN_NAMES - cf_vmapx_count(ns->p_bin_name_vmap));
+	// Primary index stats.
 
-	// Persistent index stats.
+	uint64_t index_used = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
+
+	info_append_uint64(db, "index_used_bytes", index_used);
+
+	if (as_namespace_index_persisted(ns)) {
+		info_append_uint64(db, "index_mounts_used_pct",
+				index_used * 100 / ns->pi_mounts_budget);
+	}
 
 	if (ns->pi_xmem_type == CF_XMEM_TYPE_PMEM) {
 		// If numa-pinned, not all configured mounts are used.
@@ -4140,28 +4084,33 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 				}
 			}
 		}
-
-		uint64_t used_pct = index_used * 100 / ns->pi_mounts_size_limit;
-
-		info_append_uint64(db, "index_pmem_used_bytes", index_used);
-		info_append_uint64(db, "index_pmem_used_pct", used_pct);
 	}
 	else if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
-		uint64_t used_pct = index_used * 100 / ns->pi_mounts_size_limit;
-
-		info_append_uint64(db, "index_flash_used_bytes", index_used);
-		info_append_uint64(db, "index_flash_used_pct", used_pct);
-
 		uint64_t alloc_sz = as_load_uint64(&ns->arena->alloc_sz);
 
 		info_append_uint64(db, "index_flash_alloc_bytes", alloc_sz);
 		info_append_uint64(db, "index_flash_alloc_pct",
-				alloc_sz * 100 / ns->pi_mounts_size_limit);
+				alloc_sz * 100 / ns->pi_mounts_budget);
 
 		add_index_device_stats(ns, db);
 	}
 
-	// Persistent sindex stats.
+	// Set index stats.
+
+	uint64_t set_index_used = as_set_index_used_bytes(ns);
+
+	info_append_uint64(db, "set_index_used_bytes", set_index_used);
+
+	// Secondary index stats.
+
+	uint64_t sindex_used = as_sindex_used_bytes(ns);
+
+	info_append_uint64(db, "sindex_used_bytes", sindex_used);
+
+	if (as_namespace_sindex_persisted(ns)) {
+		info_append_uint64(db, "sindex_pmem_used_pct",
+				sindex_used * 100 / ns->si_mounts_budget);
+	}
 
 	if (ns->si_xmem_type == CF_XMEM_TYPE_PMEM) {
 		// If numa-pinned, not all configured mounts are used.
@@ -4173,71 +4122,37 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 				}
 			}
 		}
-
-		uint64_t used_pct = sindex_used * 100 / ns->si_mounts_size_limit;
-
-		info_append_uint64(db, "sindex_pmem_used_bytes", sindex_used);
-		info_append_uint64(db, "sindex_pmem_used_pct", used_pct);
 	}
 	else if (ns->si_xmem_type == CF_XMEM_TYPE_FLASH) {
-		uint64_t used_pct = sindex_used * 100 / ns->si_mounts_size_limit;
-
-		info_append_uint64(db, "sindex_flash_used_bytes", sindex_used);
-		info_append_uint64(db, "sindex_flash_used_pct", used_pct);
-
 		add_sindex_device_stats(ns, db);
 	}
 
-	// Persistent storage stats.
+	// Storage stats.
 
-	if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
-		int available_pct = 0;
-		uint64_t used_bytes = 0;
+	info_append_uint64(db, "data_total_bytes", ns->drives_size);
 
-		as_storage_stats(ns, &available_pct, &used_bytes);
+	uint32_t avail_pct = 0;
+	uint64_t used_bytes = 0;
 
-		info_append_uint64(db, "pmem_total_bytes", ns->drive_size);
-		info_append_uint64(db, "pmem_used_bytes", used_bytes);
+	as_storage_stats(ns, &avail_pct, &used_bytes);
 
-		free_pct = (ns->drive_size != 0 && (ns->drive_size > used_bytes)) ?
-				((ns->drive_size - used_bytes) * 100L) / ns->drive_size : 0;
+	info_append_uint64(db, "data_used_bytes", used_bytes);
+	info_append_uint64(db, "data_used_pct", used_bytes * 100 / ns->drives_size);
+	info_append_uint32(db, "data_avail_pct", avail_pct);
 
-		info_append_uint64(db, "pmem_free_pct", free_pct);
-		info_append_int(db, "pmem_available_pct", available_pct);
+	double orig_sz = as_load_double(&ns->comp_avg_orig_sz);
+	double ratio = orig_sz > 0.0 ? ns->comp_avg_comp_sz / orig_sz : 1.0;
 
-		if (ns->storage_compression != AS_COMPRESSION_NONE) {
-			double orig_sz = as_load_double(&ns->comp_avg_orig_sz);
-			double ratio = orig_sz > 0.0 ? ns->comp_avg_comp_sz / orig_sz : 1.0;
+	info_append_format(db, "data_compression_ratio", "%.3f", ratio);
 
-			info_append_format(db, "pmem_compression_ratio", "%.3f", ratio);
-		}
-
+	if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+		add_data_stripe_stats(ns, db);
+	}
+	else if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
 		add_data_device_stats(ns, db);
 	}
 	else if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-		int available_pct = 0;
-		uint64_t used_bytes = 0;
-		as_storage_stats(ns, &available_pct, &used_bytes);
-
-		info_append_uint64(db, "device_total_bytes", ns->drive_size);
-		info_append_uint64(db, "device_used_bytes", used_bytes);
-
-		free_pct = (ns->drive_size != 0 && (ns->drive_size > used_bytes)) ?
-				((ns->drive_size - used_bytes) * 100L) / ns->drive_size : 0;
-
-		info_append_uint64(db, "device_free_pct", free_pct);
-		info_append_int(db, "device_available_pct", available_pct);
-
-		if (ns->storage_compression != AS_COMPRESSION_NONE) {
-			double orig_sz = as_load_double(&ns->comp_avg_orig_sz);
-			double ratio = orig_sz > 0.0 ? ns->comp_avg_comp_sz / orig_sz : 1.0;
-
-			info_append_format(db, "device_compression_ratio", "%.3f", ratio);
-		}
-
-		if (! ns->storage_data_in_memory) {
-			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
-		}
+		info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 
 		add_data_device_stats(ns, db);
 	}
@@ -4797,6 +4712,34 @@ oldest_nvme_age(const char* path)
 }
 
 static void
+add_data_stripe_stats(as_namespace* ns, cf_dyn_buf* db)
+{
+	const char* tag = "storage-engine.stripe";
+
+	for (uint32_t i = 0; i < ns->n_storage_stripes; i++) {
+		storage_device_stats stats;
+		as_storage_device_stats(ns, i, &stats);
+
+		info_append_indexed_uint64(db, tag, i, "used_bytes", stats.used_sz);
+		info_append_indexed_uint32(db, tag, i, "free_wblocks", stats.n_free_wblocks);
+
+		info_append_indexed_uint64(db, tag, i, "writes", stats.n_writes);
+
+		info_append_indexed_uint32(db, tag, i, "defrag_q", stats.defrag_q_sz);
+		info_append_indexed_uint64(db, tag, i, "defrag_reads", stats.n_defrag_reads);
+		info_append_indexed_uint64(db, tag, i, "defrag_writes", stats.n_defrag_writes);
+
+		if (ns->n_storage_shadows != 0) {
+			info_append_indexed_uint32(db, tag, i, "backing_write_q", stats.shadow_write_q_sz);
+
+			// Can't tell if this is local or remote - just try it.
+			info_append_indexed_int(db, tag, i, "age",
+					oldest_nvme_age(ns->storage_shadows[i]));
+		}
+	}
+}
+
+static void
 add_data_device_stats(as_namespace* ns, cf_dyn_buf* db)
 {
 	uint32_t n = as_namespace_device_count(ns);
@@ -4817,10 +4760,14 @@ add_data_device_stats(as_namespace* ns, cf_dyn_buf* db)
 		info_append_indexed_uint64(db, tag, i, "defrag_reads", stats.n_defrag_reads);
 		info_append_indexed_uint64(db, tag, i, "defrag_writes", stats.n_defrag_writes);
 
-		info_append_indexed_uint32(db, tag, i, "shadow_write_q", stats.shadow_write_q_sz);
+		if (ns->n_storage_shadows != 0) {
+			info_append_indexed_uint32(db, tag, i, "shadow_write_q", stats.shadow_write_q_sz);
+		}
 
 		info_append_indexed_int(db, tag, i, "age",
 				oldest_nvme_age(ns->storage_devices[i]));
+
+		// Note - no shadow ages since they're likely remote.
 	}
 }
 
@@ -5106,7 +5053,6 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 			as_namespace_get_set_name(ns, r->set_id_bits));
 	db_append_uint32(db, "in-sindex", r->in_sindex);
 	db_append_uint32(db, "xdr-bin-cemetery", r->xdr_bin_cemetery);
-	db_append_uint32(db, "has-bin-meta", r->has_bin_meta);
 	db_append_uint32(db, "xdr-write", r->xdr_write);
 	db_append_uint32(db, "xdr-tombstone", r->xdr_tombstone);
 	db_append_uint32(db, "xdr-nsup-tombstone", r->xdr_nsup_tombstone);
@@ -5122,12 +5068,15 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 	db_append_uint64(db, "n-rblocks", r->n_rblocks);
 	db_append_uint64(db, "file-id", r->file_id);
 
-	uint32_t n_devices = as_namespace_device_count(ns);
+	uint32_t n_devices = ns->n_storage_stripes != 0 ?
+			ns->n_storage_stripes : as_namespace_device_count(ns);
 
 	if (n_devices != 0 && r->file_id < n_devices) {
-		db_append_string_safe(db,
-				ns->n_storage_devices != 0 ? "device-name" : "file-name",
-				ns->storage_devices[r->file_id]);
+		const char* tag = ns->n_storage_stripes != 0 ?
+				"stripe-name" : (ns->n_storage_devices != 0 ?
+						"device-name" : "file-name");
+
+		db_append_string_safe(db, tag, ns->storage_devices[r->file_id]);
 	}
 
 	db_append_uint64(db, "key-stored", r->key_stored);
@@ -5143,7 +5092,7 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 	as_storage_record_open(ns, r, &rd);
 
 	if (as_pickle) {
-		if (as_storage_rd_load_pickle(&rd)) {
+		if (as_storage_record_load_pickle(&rd)) {
 			info_append_uint32(db, "pickle-size", rd.pickle_sz);
 			db_append_hex(db, "pickle", rd.pickle, rd.pickle_sz, ';');
 		}
@@ -5229,9 +5178,7 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 	for (uint16_t i = 0; i < rd.n_bins; i++) {
 		as_bin* b = &rd.bins[i];
 
-		db_append_uint32(db, "bin-id", b->id);
-		db_append_string_safe(db, "bin-name",
-				as_bin_get_name_from_id(ns, b->id));
+		db_append_string_safe(db, "bin-name", b->name);
 		db_append_uint32(db, "xdr-write", b->xdr_write);
 		db_append_uint64(db, "lut", b->lut);
 		db_append_uint32(db, "src-id", b->src_id);

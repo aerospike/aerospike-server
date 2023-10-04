@@ -63,16 +63,16 @@
 // Forward declarations.
 //
 
-void delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
-void start_delete_repl_write(rw_request* rw, as_transaction* tr);
-void start_delete_repl_write_forget(rw_request* rw, as_transaction* tr);
-bool delete_dup_res_cb(rw_request* rw);
-void delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
-void delete_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr);
-void delete_repl_write_cb(rw_request* rw);
+static void delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
+static void start_delete_repl_write(rw_request* rw, as_transaction* tr);
+static void start_delete_repl_write_forget(rw_request* rw, as_transaction* tr);
+static bool delete_dup_res_cb(rw_request* rw);
+static void delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
+static void delete_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr);
+static void delete_repl_write_cb(rw_request* rw);
 
-void send_delete_response(as_transaction* tr);
-void delete_timeout_cb(rw_request* rw);
+static void send_delete_response(as_transaction* tr);
+static void delete_timeout_cb(rw_request* rw);
 
 
 //==========================================================
@@ -294,7 +294,7 @@ as_delete_start(as_transaction* tr)
 // Local helpers - transaction flow.
 //
 
-void
+static void
 delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 {
 	// Finish initializing rw, construct and send dup-res message.
@@ -309,8 +309,7 @@ delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 	cf_mutex_unlock(&rw->lock);
 }
 
-
-void
+static void
 start_delete_repl_write(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send repl-delete message.
@@ -325,8 +324,7 @@ start_delete_repl_write(rw_request* rw, as_transaction* tr)
 	cf_mutex_unlock(&rw->lock);
 }
 
-
-void
+static void
 start_delete_repl_write_forget(rw_request* rw, as_transaction* tr)
 {
 	// Construct and send repl-write message. No need to finish rw setup.
@@ -335,8 +333,7 @@ start_delete_repl_write_forget(rw_request* rw, as_transaction* tr)
 	send_rw_messages_forget(rw);
 }
 
-
-bool
+static bool
 delete_dup_res_cb(rw_request* rw)
 {
 	as_transaction tr;
@@ -382,8 +379,7 @@ delete_dup_res_cb(rw_request* rw)
 	return false;
 }
 
-
-void
+static void
 delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Recycle rw_request that was just used for duplicate resolution to now do
@@ -394,8 +390,7 @@ delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	send_rw_messages(rw);
 }
 
-
-void
+static void
 delete_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Send replica writes. Not waiting for acks, so need to reset rw_request.
@@ -405,8 +400,7 @@ delete_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr)
 	send_rw_messages_forget(rw);
 }
 
-
-void
+static void
 delete_repl_write_cb(rw_request* rw)
 {
 	as_transaction tr;
@@ -423,7 +417,7 @@ delete_repl_write_cb(rw_request* rw)
 // Local helpers - transaction end.
 //
 
-void
+static void
 send_delete_response(as_transaction* tr)
 {
 	// Paranoia - shouldn't get here on losing race with timeout.
@@ -470,8 +464,7 @@ send_delete_response(as_transaction* tr)
 	tr->from.any = NULL; // pattern, not needed
 }
 
-
-void
+static void
 delete_timeout_cb(rw_request* rw)
 {
 	if (! rw->from.any) {
@@ -516,6 +509,7 @@ delete_timeout_cb(rw_request* rw)
 // Local helpers - delete master.
 //
 
+// Not static - called by split.
 transaction_status
 drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 {
@@ -589,7 +583,8 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		as_storage_record_close(&rd);
 	}
 
-	if (ns->storage_data_in_memory || ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
+	if (ns->storage_type != AS_STORAGE_ENGINE_SSD ||
+			ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		remove_from_sindex(ns, r_ref);
 	}
 

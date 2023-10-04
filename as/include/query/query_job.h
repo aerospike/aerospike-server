@@ -72,10 +72,10 @@ typedef struct as_query_range_s {
 		as_query_geo_range geo;
 	} u;
 
-	uint32_t str_len;
-	char str_stub[16];
+	// Used to match blobs and strings:
+	uint32_t blob_sz;
+	char stub[16];
 
-	uint16_t bin_id;
 	as_particle_type bin_type;
 	as_sindex_type itype;
 	bool isrange;

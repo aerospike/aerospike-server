@@ -114,9 +114,12 @@ static void cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* 
 static void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port, bool tls);
 static void cfg_add_secrets_addr_port(char* addr, char* port, char* tls_name);
 static as_set* cfg_add_set(as_namespace* ns);
+static uint32_t cfg_check_set_default_ttl(const char* ns_name, const char* set_name, uint32_t value);
 static void cfg_add_pi_xmem_mount(as_namespace* ns, const char* mount);
 static void cfg_add_si_xmem_mount(as_namespace* ns, const char* mount);
+static void cfg_add_mem_shadow_file(as_namespace* ns, const char* file_name);
 static void cfg_add_storage_file(as_namespace* ns, const char* file_name, const char* shadow_name);
+static void cfg_add_mem_shadow_device(as_namespace* ns, const char* device_name);
 static void cfg_add_storage_device(as_namespace* ns, const char* device_name, const char* shadow_name);
 static void cfg_set_cluster_name(char* cluster_name);
 static void cfg_add_ldap_role_query_pattern(char* pattern);
@@ -180,7 +183,6 @@ cfg_set_defaults()
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
 	c->work_directory = "/opt/aerospike";
-	c->debug_allocations = CF_ALLOC_DEBUG_NONE;
 
 	// Network heartbeat defaults.
 	c->hb_config.mode = AS_HB_MODE_UNDEF;
@@ -287,12 +289,13 @@ typedef enum {
 	CASE_SERVICE_NODE_ID_INTERFACE,
 	CASE_SERVICE_OS_GROUP_PERMS,
 	CASE_SERVICE_PIDFILE,
+	CASE_SERVICE_POISON_ALLOCATIONS,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_PROTO_FD_MAX,
+	CASE_SERVICE_QUARANTINE_ALLOCATIONS,
 	CASE_SERVICE_QUERY_MAX_DONE,
 	CASE_SERVICE_QUERY_THREADS_LIMIT,
 	CASE_SERVICE_RUN_AS_DAEMON,
-	CASE_SERVICE_SALT_ALLOCATIONS,
 	CASE_SERVICE_SECRETS_ADDRESS_PORT,
 	CASE_SERVICE_SECRETS_TLS_CONTEXT,
 	CASE_SERVICE_SECRETS_UDS_PATH,
@@ -327,12 +330,6 @@ typedef enum {
 	CASE_SERVICE_AUTO_PIN_CPU,
 	CASE_SERVICE_AUTO_PIN_NUMA,
 	CASE_SERVICE_AUTO_PIN_ADQ,
-
-	// Service debug-allocations options (value tokens):
-	CASE_SERVICE_DEBUG_ALLOCATIONS_NONE,
-	CASE_SERVICE_DEBUG_ALLOCATIONS_TRANSIENT,
-	CASE_SERVICE_DEBUG_ALLOCATIONS_PERSISTENT,
-	CASE_SERVICE_DEBUG_ALLOCATIONS_ALL,
 
 	// Logging options:
 	// Sub-contexts:
@@ -461,14 +458,12 @@ typedef enum {
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE,
 	CASE_NAMESPACE_ENABLE_HIST_PROXY,
 	CASE_NAMESPACE_EVICT_HIST_BUCKETS,
+	CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
-	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
-	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
 	CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
 	CASE_NAMESPACE_INLINE_SHORT_QUERIES,
 	CASE_NAMESPACE_MAX_RECORD_SIZE,
-	CASE_NAMESPACE_MEMORY_SIZE,
 	CASE_NAMESPACE_MIGRATE_ORDER,
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
@@ -484,7 +479,6 @@ typedef enum {
 	CASE_NAMESPACE_REPLICATION_FACTOR,
 	CASE_NAMESPACE_SINDEX_STAGE_SIZE,
 	CASE_NAMESPACE_SINGLE_QUERY_THREADS,
-	CASE_NAMESPACE_STOP_WRITES_PCT,
 	CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_STRONG_CONSISTENCY,
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
@@ -506,8 +500,12 @@ typedef enum {
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISABLE_NSUP,
+	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
+	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
+	CASE_NAMESPACE_MEMORY_SIZE,
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_SINGLE_SCAN_THREADS,
+	CASE_NAMESPACE_STOP_WRITES_PCT,
 
 	// Namespace conflict-resolution-policy options (value tokens):
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION,
@@ -539,24 +537,65 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE,
 
 	// Namespace index-type pmem options:
+	CASE_NAMESPACE_INDEX_TYPE_PMEM_EVICT_MOUNTS_PCT,
 	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT,
+	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_BUDGET,
+	// Obsoleted:
 	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT,
 	CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT,
 
 	// Namespace index-type flash options:
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_EVICT_MOUNTS_PCT,
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT,
+	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_BUDGET,
+	// Obsoleted:
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT,
 	CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT,
 
 	// Namespace sindex-type pmem options:
+	CASE_NAMESPACE_SINDEX_TYPE_PMEM_EVICT_MOUNTS_PCT,
 	CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNT,
+	CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_BUDGET,
+	// Obsoleted:
 	CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT,
 	CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT,
 
 	// Namespace sindex-type flash options:
+	CASE_NAMESPACE_SINDEX_TYPE_FLASH_EVICT_MOUNTS_PCT,
 	CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNT,
+	CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_BUDGET,
+	// Obsoleted:
 	CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT,
 	CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT,
+
+	// Namespace storage-engine memory options:
+	CASE_NAMESPACE_STORAGE_MEMORY_COMMIT_TO_DEVICE,
+	CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION,
+	CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_ACCELERATION,
+	CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_LEVEL,
+	CASE_NAMESPACE_STORAGE_MEMORY_DATA_SIZE,
+	CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_LWM_PCT,
+	CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_QUEUE_MIN,
+	CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_SLEEP,
+	CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_STARTUP_MINIMUM,
+	CASE_NAMESPACE_STORAGE_MEMORY_DEVICE,
+	CASE_NAMESPACE_STORAGE_MEMORY_DIRECT_FILES,
+	CASE_NAMESPACE_STORAGE_MEMORY_DISABLE_ODSYNC,
+	CASE_NAMESPACE_STORAGE_MEMORY_ENABLE_BENCHMARKS_STORAGE,
+	CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION,
+	CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_OLD_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_MEMORY_EVICT_USED_PCT,
+	CASE_NAMESPACE_STORAGE_MEMORY_FILE,
+	CASE_NAMESPACE_STORAGE_MEMORY_FILESIZE,
+	CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_MAX_MS,
+	CASE_NAMESPACE_STORAGE_MEMORY_MAX_WRITE_CACHE,
+	CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_AVAIL_PCT,
+	CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_USED_PCT,
+	CASE_NAMESPACE_STORAGE_MEMORY_TOMB_RAIDER_SLEEP,
+	// Obsoleted:
+	CASE_NAMESPACE_STORAGE_MEMORY_MAX_USED_PCT,
+	CASE_NAMESPACE_STORAGE_MEMORY_MIN_AVAIL_PCT,
 
 	// Namespace storage-engine pmem options:
 	CASE_NAMESPACE_STORAGE_PMEM_COMMIT_TO_DEVICE,
@@ -573,14 +612,17 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION,
 	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE,
 	CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_OLD_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_PMEM_EVICT_USED_PCT,
 	CASE_NAMESPACE_STORAGE_PMEM_FILE,
 	CASE_NAMESPACE_STORAGE_PMEM_FILESIZE,
 	CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS,
-	CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT,
 	CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE,
-	CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT,
-	CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER,
+	CASE_NAMESPACE_STORAGE_PMEM_STOP_WRITES_AVAIL_PCT,
+	CASE_NAMESPACE_STORAGE_PMEM_STOP_WRITES_USED_PCT,
 	CASE_NAMESPACE_STORAGE_PMEM_TOMB_RAIDER_SLEEP,
+	// Obsoleted:
+	CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT,
+	CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT,
 
 	// Namespace storage-engine device options:
 	CASE_NAMESPACE_STORAGE_DEVICE_CACHE_REPLICA_WRITES,
@@ -590,7 +632,6 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ACCELERATION,
 	CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL,
-	CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_QUEUE_MIN,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP,
@@ -602,21 +643,24 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OLD_KEY_FILE,
+	CASE_NAMESPACE_STORAGE_DEVICE_EVICT_USED_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_FILE,
 	CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE,
 	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
-	CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
-	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
 	CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER,
 	CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN,
+	CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_AVAIL_PCT,
+	CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_USED_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE,
 	// Obsoleted:
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
 	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
+	CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT,
+	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 
 	// Namespace storage compression options (value tokens):
 	CASE_NAMESPACE_STORAGE_COMPRESSION_NONE,
@@ -629,6 +673,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_256,
 
 	// Namespace set options:
+	CASE_NAMESPACE_SET_DEFAULT_TTL,
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_INDEX,
 	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
@@ -801,12 +846,13 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
 		{ "os-group-perms",					CASE_SERVICE_OS_GROUP_PERMS },
 		{ "pidfile",						CASE_SERVICE_PIDFILE },
+		{ "poison-allocations",				CASE_SERVICE_POISON_ALLOCATIONS },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
+		{ "quarantine-allocations",			CASE_SERVICE_QUARANTINE_ALLOCATIONS },
 		{ "query-max-done",					CASE_SERVICE_QUERY_MAX_DONE },
 		{ "query-threads-limit",			CASE_SERVICE_QUERY_THREADS_LIMIT },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
-		{ "salt-allocations",				CASE_SERVICE_SALT_ALLOCATIONS },
 		{ "secrets-address-port",			CASE_SERVICE_SECRETS_ADDRESS_PORT },
 		{ "secrets-tls-context",			CASE_SERVICE_SECRETS_TLS_CONTEXT },
 		{ "secrets-uds-path",				CASE_SERVICE_SECRETS_UDS_PATH },
@@ -843,13 +889,6 @@ const cfg_opt SERVICE_AUTO_PIN_OPTS[] = {
 		{ "cpu",							CASE_SERVICE_AUTO_PIN_CPU },
 		{ "numa",							CASE_SERVICE_AUTO_PIN_NUMA },
 		{ "adq",							CASE_SERVICE_AUTO_PIN_ADQ }
-};
-
-const cfg_opt SERVICE_DEBUG_ALLOCATIONS_OPTS[] = {
-		{ "none",							CASE_SERVICE_DEBUG_ALLOCATIONS_NONE },
-		{ "transient",						CASE_SERVICE_DEBUG_ALLOCATIONS_TRANSIENT },
-		{ "persistent",						CASE_SERVICE_DEBUG_ALLOCATIONS_PERSISTENT },
-		{ "all",							CASE_SERVICE_DEBUG_ALLOCATIONS_ALL }
 };
 
 const cfg_opt LOGGING_OPTS[] = {
@@ -999,14 +1038,12 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "enable-benchmarks-write",		CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE },
 		{ "enable-hist-proxy",				CASE_NAMESPACE_ENABLE_HIST_PROXY },
 		{ "evict-hist-buckets",				CASE_NAMESPACE_EVICT_HIST_BUCKETS },
+		{ "evict-sys-memory-pct",			CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT },
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
-		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
-		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
 		{ "ignore-migrate-fill-delay",		CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
 		{ "inline-short-queries",			CASE_NAMESPACE_INLINE_SHORT_QUERIES },
 		{ "max-record-size",				CASE_NAMESPACE_MAX_RECORD_SIZE },
-		{ "memory-size",					CASE_NAMESPACE_MEMORY_SIZE },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
@@ -1022,7 +1059,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "replication-factor",				CASE_NAMESPACE_REPLICATION_FACTOR },
 		{ "sindex-stage-size",				CASE_NAMESPACE_SINDEX_STAGE_SIZE },
 		{ "single-query-threads",			CASE_NAMESPACE_SINGLE_QUERY_THREADS },
-		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
 		{ "stop-writes-sys-memory-pct",		CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT },
 		{ "strong-consistency",				CASE_NAMESPACE_STRONG_CONSISTENCY },
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
@@ -1044,8 +1080,12 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
+		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
+		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
+		{ "memory-size",					CASE_NAMESPACE_MEMORY_SIZE },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "single-scan-threads",			CASE_NAMESPACE_SINGLE_SCAN_THREADS },
+		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1085,30 +1125,73 @@ const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
 };
 
 const cfg_opt NAMESPACE_INDEX_TYPE_PMEM_OPTS[] = {
+		{ "evict-mounts-pct",				CASE_NAMESPACE_INDEX_TYPE_PMEM_EVICT_MOUNTS_PCT },
 		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT },
+		{ "mounts-budget",					CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_BUDGET },
+		// Obsoleted:
 		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT },
 		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
 const cfg_opt NAMESPACE_INDEX_TYPE_FLASH_OPTS[] = {
+		{ "evict-mounts-pct",				CASE_NAMESPACE_INDEX_TYPE_FLASH_EVICT_MOUNTS_PCT },
 		{ "mount",							CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT },
+		{ "mounts-budget",					CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_BUDGET },
+		// Obsoleted:
 		{ "mounts-high-water-pct",			CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT },
 		{ "mounts-size-limit",				CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
 const cfg_opt NAMESPACE_SINDEX_TYPE_PMEM_OPTS[] = {
+		{ "evict-mounts-pct",				CASE_NAMESPACE_SINDEX_TYPE_PMEM_EVICT_MOUNTS_PCT },
 		{ "mount",							CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNT },
+		{ "mounts-budget",					CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_BUDGET },
+		// Obsoleted:
 		{ "mounts-high-water-pct",			CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT },
 		{ "mounts-size-limit",				CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
 const cfg_opt NAMESPACE_SINDEX_TYPE_FLASH_OPTS[] = {
+		{ "evict-mounts-pct",				CASE_NAMESPACE_SINDEX_TYPE_FLASH_EVICT_MOUNTS_PCT },
 		{ "mount",							CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNT },
+		{ "mounts-budget",					CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_BUDGET },
+		// Obsoleted:
 		{ "mounts-high-water-pct",			CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT },
 		{ "mounts-size-limit",				CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT },
+		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt NAMESPACE_STORAGE_MEMORY_OPTS[] = {
+		{ "commit-to-device",				CASE_NAMESPACE_STORAGE_MEMORY_COMMIT_TO_DEVICE },
+		{ "compression",					CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION },
+		{ "compression-acceleration",		CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_ACCELERATION },
+		{ "compression-level",				CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_LEVEL },
+		{ "data-size",						CASE_NAMESPACE_STORAGE_MEMORY_DATA_SIZE },
+		{ "defrag-lwm-pct",					CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_LWM_PCT },
+		{ "defrag-queue-min",				CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_QUEUE_MIN },
+		{ "defrag-sleep",					CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_SLEEP },
+		{ "defrag-startup-minimum",			CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_STARTUP_MINIMUM },
+		{ "device",							CASE_NAMESPACE_STORAGE_MEMORY_DEVICE },
+		{ "direct-files",					CASE_NAMESPACE_STORAGE_MEMORY_DIRECT_FILES },
+		{ "disable-odsync",					CASE_NAMESPACE_STORAGE_MEMORY_DISABLE_ODSYNC },
+		{ "enable-benchmarks-storage",		CASE_NAMESPACE_STORAGE_MEMORY_ENABLE_BENCHMARKS_STORAGE },
+		{ "encryption",						CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION },
+		{ "encryption-key-file",			CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_KEY_FILE },
+		{ "encryption-old-key-file",		CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_OLD_KEY_FILE },
+		{ "evict-used-pct",					CASE_NAMESPACE_STORAGE_MEMORY_EVICT_USED_PCT },
+		{ "file",							CASE_NAMESPACE_STORAGE_MEMORY_FILE },
+		{ "filesize",						CASE_NAMESPACE_STORAGE_MEMORY_FILESIZE },
+		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_MAX_MS },
+		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_MEMORY_MAX_WRITE_CACHE },
+		{ "stop-writes-avail-pct",			CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_AVAIL_PCT },
+		{ "stop-writes-used-pct",			CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_USED_PCT },
+		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_MEMORY_TOMB_RAIDER_SLEEP },
+		// Obsoleted:
+		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_MEMORY_MAX_USED_PCT },
+		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_MEMORY_MIN_AVAIL_PCT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1127,14 +1210,17 @@ const cfg_opt NAMESPACE_STORAGE_PMEM_OPTS[] = {
 		{ "encryption",						CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION },
 		{ "encryption-key-file",			CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_KEY_FILE },
 		{ "encryption-old-key-file",		CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_OLD_KEY_FILE },
+		{ "evict-used-pct",					CASE_NAMESPACE_STORAGE_PMEM_EVICT_USED_PCT },
 		{ "file",							CASE_NAMESPACE_STORAGE_PMEM_FILE },
 		{ "filesize",						CASE_NAMESPACE_STORAGE_PMEM_FILESIZE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS },
-		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE },
-		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT },
-		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER },
+		{ "stop-writes-avail-pct",			CASE_NAMESPACE_STORAGE_PMEM_STOP_WRITES_AVAIL_PCT },
+		{ "stop-writes-used-pct",			CASE_NAMESPACE_STORAGE_PMEM_STOP_WRITES_USED_PCT },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_PMEM_TOMB_RAIDER_SLEEP },
+		// Obsoleted:
+		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT },
+		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1146,7 +1232,6 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "compression",					CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION },
 		{ "compression-acceleration",		CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_ACCELERATION },
 		{ "compression-level",				CASE_NAMESPACE_STORAGE_DEVICE_COMPRESSION_LEVEL },
-		{ "data-in-memory",					CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY },
 		{ "defrag-lwm-pct",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT },
 		{ "defrag-queue-min",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_QUEUE_MIN },
 		{ "defrag-sleep",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP },
@@ -1158,21 +1243,24 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "encryption",						CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION },
 		{ "encryption-key-file",			CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_KEY_FILE },
 		{ "encryption-old-key-file",		CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION_OLD_KEY_FILE },
+		{ "evict-used-pct",					CASE_NAMESPACE_STORAGE_DEVICE_EVICT_USED_PCT },
 		{ "file",							CASE_NAMESPACE_STORAGE_DEVICE_FILE },
 		{ "filesize",						CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
-		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
-		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
 		{ "read-page-cache",				CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE },
 		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
 		{ "sindex-startup-device-scan",		CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN },
+		{ "stop-writes-avail-pct",			CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_AVAIL_PCT },
+		{ "stop-writes-used-pct",			CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_USED_PCT },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
 		{ "write-block-size",				CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE },
 		// Obsoleted:
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
 		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
+		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT },
+		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1189,6 +1277,7 @@ const cfg_opt NAMESPACE_STORAGE_ENCRYPTION_OPTS[] = {
 };
 
 const cfg_opt NAMESPACE_SET_OPTS[] = {
+		{ "default-ttl",					CASE_NAMESPACE_SET_DEFAULT_TTL },
 		{ "disable-eviction",				CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "enable-index",					CASE_NAMESPACE_SET_ENABLE_INDEX },
 		{ "stop-writes-count",				CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
@@ -1332,7 +1421,6 @@ const cfg_opt XDR_DC_NAMESPACE_WRITE_POLICY_OPTS[] = {
 const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
-const int NUM_SERVICE_DEBUG_ALLOCATIONS_OPTS		= sizeof(SERVICE_DEBUG_ALLOCATIONS_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_CONTEXT_OPTS					= sizeof(LOGGING_CONTEXT_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_SYSLOG_OPTS					= sizeof(LOGGING_SYSLOG_OPTS) / sizeof(cfg_opt);
@@ -1355,6 +1443,7 @@ const int NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_PMEM
 const int NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS		= sizeof(NAMESPACE_INDEX_TYPE_FLASH_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SINDEX_TYPE_PMEM_OPTS		= sizeof(NAMESPACE_SINDEX_TYPE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SINDEX_TYPE_FLASH_OPTS		= sizeof(NAMESPACE_SINDEX_TYPE_FLASH_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_STORAGE_MEMORY_OPTS			= sizeof(NAMESPACE_STORAGE_MEMORY_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_PMEM_OPTS			= sizeof(NAMESPACE_STORAGE_PMEM_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS	= sizeof(NAMESPACE_STORAGE_COMPRESSION_OPTS) / sizeof(cfg_opt);
@@ -1396,7 +1485,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_CONTEXT, LOGGING_SYSLOG,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO, NETWORK_TLS,
-	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_SINDEX_TYPE_PMEM, NAMESPACE_SINDEX_TYPE_FLASH, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_GEO2DSPHERE_WITHIN,
+	NAMESPACE, NAMESPACE_INDEX_TYPE_PMEM, NAMESPACE_INDEX_TYPE_FLASH, NAMESPACE_SINDEX_TYPE_PMEM, NAMESPACE_SINDEX_TYPE_FLASH, NAMESPACE_STORAGE_MEMORY, NAMESPACE_STORAGE_PMEM, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
 	SECURITY, SECURITY_LDAP, SECURITY_LOG,
 	XDR, XDR_DC, XDR_DC_NAMESPACE,
@@ -1410,7 +1499,7 @@ const char* CFG_PARSER_STATES[] = {
 		"SERVICE",
 		"LOGGING", "LOGGING_CONTEXT", "LOGGING_SYSLOG",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO", "NETWORK_TLS",
-		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_SINDEX_TYPE_PMEM", "NAMESPACE_SINDEX_TYPE_FLASH", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_GEO2DSPHERE_WITHIN",
+		"NAMESPACE", "NAMESPACE_INDEX_TYPE_PMEM", "NAMESPACE_INDEX_TYPE_SSD", "NAMESPACE_SINDEX_TYPE_PMEM", "NAMESPACE_SINDEX_TYPE_FLASH", "NAMESPACE_STORAGE_MEMORY", "NAMESPACE_STORAGE_PMEM", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
 		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG",
 		"XDR", "XDR_DC", "XDR_DC_NAMESPACE"
@@ -2092,24 +2181,7 @@ as_config_init(const char* config_file)
 				cfg_set_cluster_name(line.val_tok_1);
 				break;
 			case CASE_SERVICE_DEBUG_ALLOCATIONS:
-				switch (cfg_find_tok(line.val_tok_1, SERVICE_DEBUG_ALLOCATIONS_OPTS, NUM_SERVICE_DEBUG_ALLOCATIONS_OPTS)) {
-				case CASE_SERVICE_DEBUG_ALLOCATIONS_NONE:
-					c->debug_allocations = CF_ALLOC_DEBUG_NONE;
-					break;
-				case CASE_SERVICE_DEBUG_ALLOCATIONS_TRANSIENT:
-					c->debug_allocations = CF_ALLOC_DEBUG_TRANSIENT;
-					break;
-				case CASE_SERVICE_DEBUG_ALLOCATIONS_PERSISTENT:
-					c->debug_allocations = CF_ALLOC_DEBUG_PERSISTENT;
-					break;
-				case CASE_SERVICE_DEBUG_ALLOCATIONS_ALL:
-					c->debug_allocations = CF_ALLOC_DEBUG_ALL;
-					break;
-				case CASE_NOT_FOUND:
-				default:
-					cfg_unknown_val_tok_1(&line);
-					break;
-				}
+				c->debug_allocations = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_DISABLE_UDF_EXECUTION:
 				c->udf_execution_disabled = cfg_bool(&line);
@@ -2186,11 +2258,17 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_PIDFILE:
 				c->pidfile = cfg_strdup_no_checks(&line);
 				break;
+			case CASE_SERVICE_POISON_ALLOCATIONS:
+				c->poison_allocations = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_PROTO_FD_IDLE_MS:
 				c->proto_fd_idle_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_u32(&line, MIN_PROTO_FD_MAX, MAX_PROTO_FD_MAX);
+				break;
+			case CASE_SERVICE_QUARANTINE_ALLOCATIONS:
+				c->quarantine_allocations = cfg_u32(&line, 0, 100000000);
 				break;
 			case CASE_SERVICE_QUERY_MAX_DONE:
 				c->query_max_done = cfg_u32(&line, 0, 10000);
@@ -2200,9 +2278,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_RUN_AS_DAEMON:
 				c->run_as_daemon = cfg_bool_no_value_is_true(&line);
-				break;
-			case CASE_SERVICE_SALT_ALLOCATIONS:
-				c->salt_allocations = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_SECRETS_ADDRESS_PORT:
 				cfg_enterprise_only(&line);
@@ -2813,14 +2888,11 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_EVICT_HIST_BUCKETS:
 				ns->evict_hist_buckets = cfg_u32(&line, 100, 10000000);
 				break;
+			case CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT:
+				ns->evict_sys_memory_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_EVICT_TENTHS_PCT:
 				ns->evict_tenths_pct = cfg_u32_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_HIGH_WATER_DISK_PCT:
-				ns->hwm_disk_pct = cfg_u32(&line, 0, 100);
-				break;
-			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
-				ns->hwm_memory_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY:
 				cfg_enterprise_only(&line);
@@ -2834,9 +2906,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_MAX_RECORD_SIZE:
 				ns->max_record_size = cfg_u32_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_MEMORY_SIZE:
-				ns->memory_size = cfg_u64(&line, 1024 * 1024, UINT64_MAX);
 				break;
 			case CASE_NAMESPACE_MIGRATE_ORDER:
 				ns->migrate_order = cfg_u32(&line, 1, 10);
@@ -2898,9 +2967,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_SINGLE_QUERY_THREADS:
 				ns->n_single_query_threads = cfg_u32(&line, 1, 128);
-				break;
-			case CASE_NAMESPACE_STOP_WRITES_PCT:
-				ns->stop_writes_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STOP_WRITES_SYS_MEMORY_PCT:
 				ns->stop_writes_sys_memory_pct = cfg_u32(&line, 0, 100);
@@ -3009,18 +3075,18 @@ as_config_init(const char* config_file)
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
 				case CASE_NAMESPACE_STORAGE_MEMORY:
 					ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
-					ns->storage_data_in_memory = true;
+					ns->storage_post_write_queue = 0; // override non-0 default for info purposes
+					ns->storage_write_block_size = 8 * 1024 * 1024;
+					cfg_begin_context(&state, NAMESPACE_STORAGE_MEMORY);
 					break;
 				case CASE_NAMESPACE_STORAGE_PMEM:
 					cfg_enterprise_only(&line);
 					ns->storage_type = AS_STORAGE_ENGINE_PMEM;
-					ns->storage_data_in_memory = false;
 					ns->storage_write_block_size = 8 * 1024 * 1024;
 					cfg_begin_context(&state, NAMESPACE_STORAGE_PMEM);
 					break;
 				case CASE_NAMESPACE_STORAGE_DEVICE:
 					ns->storage_type = AS_STORAGE_ENGINE_SSD;
-					ns->storage_data_in_memory = false;
 					cfg_begin_context(&state, NAMESPACE_STORAGE_DEVICE);
 					break;
 				case CASE_NOT_FOUND:
@@ -3034,30 +3100,42 @@ as_config_init(const char* config_file)
 				cfg_obsolete(&line, "please use 'background-query-max-rps'");
 				break;
 			case CASE_NAMESPACE_DATA_IN_INDEX:
-				cfg_obsolete(&line, "see documentation for converting to multi-bin"); // FIXME - actual wording!
+				cfg_obsolete(&line, "see documentation for converting to multi-bin");
 				break;
 			case CASE_NAMESPACE_DISABLE_NSUP:
 				cfg_obsolete(&line, "please set 'nsup-period' to 0 to disable nsup");
 				break;
+			case CASE_NAMESPACE_HIGH_WATER_DISK_PCT:
+				cfg_obsolete(&line, "please use storage context 'evict-used-pct'");
+				break;
+			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
+				cfg_obsolete(&line, "please use 'evict-sys-memory-pct'");
+				break;
+			case CASE_NAMESPACE_MEMORY_SIZE:
+				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct' and 'evict-sys-memory-pct' for stop-writes & eviction");
+				break;
 			case CASE_NAMESPACE_SINGLE_BIN:
-				cfg_obsolete(&line, "see documentation for converting to multi-bin"); // FIXME - actual wording!
+				cfg_obsolete(&line, "see documentation for converting to multi-bin");
 				break;
 			case CASE_NAMESPACE_SINGLE_SCAN_THREADS:
 				cfg_obsolete(&line, "please use 'single-query-threads'");
 				break;
+			case CASE_NAMESPACE_STOP_WRITES_PCT:
+				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct'");
+				break;
 			case CASE_CONTEXT_END:
-				if (ns->memory_size == 0) {
-					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'memory-size'", ns->name);
+				if (ns->storage_type == AS_STORAGE_ENGINE_UNDEFINED) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'storage-engine'", ns->name);
+				}
+				if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH && ns->storage_type != AS_STORAGE_ENGINE_SSD) {
+					cf_crash_nostack(AS_CFG, "{%s} 'index-type flash' can only be used with 'storage-engine device'", ns->name);
 				}
 				if (ns->default_ttl != 0 && ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'nsup-period' or 'allow-ttl-without-nsup' true if 'default-ttl' is non-zero", ns->name);
 				}
-				if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
-					cf_crash_nostack(AS_CFG, "{%s} 'storage-engine pmem' can't be used with 'index-type flash'", ns->name);
-				}
 				if (ns->max_record_size != 0) {
-					if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && ns->max_record_size > 128 * 1024 * 1024) { // PROTO_SIZE_MAX
-						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 128M", ns->name);
+					if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && ns->max_record_size > 8 * 1024 * 1024) { // MEM_WRITE_BLOCK_SIZE
+						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 8M", ns->name);
 					}
 					if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->max_record_size > 8 * 1024 * 1024) { // PMEM_WRITE_BLOCK_SIZE
 						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 8M", ns->name);
@@ -3066,14 +3144,11 @@ as_config_init(const char* config_file)
 						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 'write-block-size'", ns->name);
 					}
 				}
-				if (ns->storage_data_in_memory) {
-					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
-				}
-				if ((ns->storage_data_in_memory && ! ns->storage_commit_to_device) || ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
-					c->n_namespaces_inlined++;
+				if (ns->storage_type == AS_STORAGE_ENGINE_SSD || (ns->storage_commit_to_device && ns->n_storage_shadows != 0)) {
+					c->n_namespaces_not_inlined++;
 				}
 				else {
-					c->n_namespaces_not_inlined++;
+					c->n_namespaces_inlined++;
 				}
 				ns = NULL;
 				cfg_end_context(&state);
@@ -3090,18 +3165,25 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE_INDEX_TYPE_PMEM:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_PMEM_OPTS, NUM_NAMESPACE_INDEX_TYPE_PMEM_OPTS)) {
+			case CASE_NAMESPACE_INDEX_TYPE_PMEM_EVICT_MOUNTS_PCT:
+				ns->pi_evict_mounts_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNT:
 				cfg_add_pi_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
+			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_BUDGET:
+				ns->pi_mounts_budget = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				break;
+			// Obsoleted:
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT:
-				ns->pi_mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				cfg_obsolete(&line, "please use 'evict-mounts-pct'");
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT:
-				ns->pi_mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				cfg_obsolete(&line, "please use 'mounts-budget'");
 				break;
 			case CASE_CONTEXT_END:
-				if (ns->pi_mounts_size_limit == 0) {
-					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
+				if (ns->pi_mounts_budget == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-budget'", ns->name);
 				}
 				cfg_end_context(&state);
 				break;
@@ -3117,18 +3199,25 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE_INDEX_TYPE_FLASH:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_INDEX_TYPE_FLASH_OPTS, NUM_NAMESPACE_INDEX_TYPE_FLASH_OPTS)) {
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_EVICT_MOUNTS_PCT:
+				ns->pi_evict_mounts_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNT:
 				cfg_add_pi_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
+			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_BUDGET:
+				ns->pi_mounts_budget = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
+				break;
+			// Obsoleted:
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT:
-				ns->pi_mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				cfg_obsolete(&line, "please use 'evict-mounts-pct'");
 				break;
 			case CASE_NAMESPACE_INDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT:
-				ns->pi_mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL * 4UL, UINT64_MAX);
+				cfg_obsolete(&line, "please use 'mounts-budget'");
 				break;
 			case CASE_CONTEXT_END:
-				if (ns->pi_mounts_size_limit == 0) {
-					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-size-limit'", ns->name);
+				if (ns->pi_mounts_budget == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'mounts-budget'", ns->name);
 				}
 				cfg_end_context(&state);
 				// TODO - main() doesn't yet support initialization as root.
@@ -3146,18 +3235,25 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE_SINDEX_TYPE_PMEM:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_TYPE_PMEM_OPTS, NUM_NAMESPACE_SINDEX_TYPE_PMEM_OPTS)) {
+			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_EVICT_MOUNTS_PCT:
+				ns->si_evict_mounts_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNT:
 				cfg_add_si_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
+			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_BUDGET:
+				ns->si_mounts_budget = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				break;
+			// Obsoleted:
 			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_HIGH_WATER_PCT:
-				ns->si_mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				cfg_obsolete(&line, "please use 'evict-mounts-pct'");
 				break;
 			case CASE_NAMESPACE_SINDEX_TYPE_PMEM_MOUNTS_SIZE_LIMIT:
-				ns->si_mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				cfg_obsolete(&line, "please use 'mounts-budget'");
 				break;
 			case CASE_CONTEXT_END:
-				if (ns->si_mounts_size_limit == 0) {
-					cf_crash_nostack(AS_CFG, "{%s} must configure sindex 'mounts-size-limit'", ns->name);
+				if (ns->si_mounts_budget == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure sindex 'mounts-budget'", ns->name);
 				}
 				cfg_end_context(&state);
 				break;
@@ -3173,18 +3269,169 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE_SINDEX_TYPE_FLASH:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_TYPE_FLASH_OPTS, NUM_NAMESPACE_SINDEX_TYPE_FLASH_OPTS)) {
+			case CASE_NAMESPACE_SINDEX_TYPE_FLASH_EVICT_MOUNTS_PCT:
+				ns->si_evict_mounts_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNT:
 				cfg_add_si_xmem_mount(ns, cfg_strdup_no_checks(&line));
 				break;
+			case CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_BUDGET:
+				ns->si_mounts_budget = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				break;
+			// Obsoleted:
 			case CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_HIGH_WATER_PCT:
-				ns->si_mounts_hwm_pct = cfg_u32(&line, 0, 100);
+				cfg_obsolete(&line, "please use 'evict-mounts-pct'");
 				break;
 			case CASE_NAMESPACE_SINDEX_TYPE_FLASH_MOUNTS_SIZE_LIMIT:
-				ns->si_mounts_size_limit = cfg_u64(&line, 1024UL * 1024UL * 1024UL, UINT64_MAX);
+				cfg_obsolete(&line, "please use 'mounts-budget'");
 				break;
 			case CASE_CONTEXT_END:
-				if (ns->si_mounts_size_limit == 0) {
-					cf_crash_nostack(AS_CFG, "{%s} must configure sindex 'mounts-size-limit'", ns->name);
+				if (ns->si_mounts_budget == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure sindex 'mounts-budget'", ns->name);
+				}
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse namespace::storage-engine memory context items.
+		//
+		case NAMESPACE_STORAGE_MEMORY:
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_MEMORY_OPTS, NUM_NAMESPACE_STORAGE_MEMORY_OPTS)) {
+			case CASE_NAMESPACE_STORAGE_MEMORY_COMMIT_TO_DEVICE:
+				ns->storage_commit_to_device = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION:
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_COMPRESSION_OPTS, NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS)) {
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_NONE:
+					ns->storage_compression = AS_COMPRESSION_NONE;
+					break;
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_LZ4:
+					ns->storage_compression = AS_COMPRESSION_LZ4;
+					break;
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_SNAPPY:
+					ns->storage_compression = AS_COMPRESSION_SNAPPY;
+					break;
+				case CASE_NAMESPACE_STORAGE_COMPRESSION_ZSTD:
+					ns->storage_compression = AS_COMPRESSION_ZSTD;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_ACCELERATION:
+				ns->storage_compression_acceleration = cfg_u32(&line, 1, 65537);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_LEVEL:
+				ns->storage_compression_level = cfg_u32(&line, 1, 9);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DATA_SIZE:
+				ns->storage_data_size = cfg_u64(&line, 1024 * 1024 * 1024, 256UL * 1024 * 1024 * 1024 * 1024);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_LWM_PCT:
+				ns->storage_defrag_lwm_pct = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_QUEUE_MIN:
+				ns->storage_defrag_queue_min = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_SLEEP:
+				ns->storage_defrag_sleep = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_STARTUP_MINIMUM:
+				ns->storage_defrag_startup_minimum = cfg_u32(&line, 0, 99);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DEVICE:
+				cfg_add_mem_shadow_device(ns, cfg_strdup_no_checks(&line));
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DIRECT_FILES:
+				ns->storage_direct_files = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_DISABLE_ODSYNC:
+				ns->storage_disable_odsync = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_ENABLE_BENCHMARKS_STORAGE:
+				ns->storage_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION:
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_ENCRYPTION_OPTS, NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS))
+				{
+				case CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_128:
+					ns->storage_encryption = AS_ENCRYPTION_AES_128;
+					break;
+				case CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_256:
+					ns->storage_encryption = AS_ENCRYPTION_AES_256;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_KEY_FILE:
+				ns->storage_encryption_key_file = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_OLD_KEY_FILE:
+				ns->storage_encryption_old_key_file = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_EVICT_USED_PCT:
+				ns->storage_evict_used_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_FILE:
+				cfg_add_mem_shadow_file(ns, cfg_strdup_no_checks(&line));
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_FILESIZE:
+				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_MAX_MS:
+				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_MAX_WRITE_CACHE:
+				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_AVAIL_PCT:
+				ns->storage_stop_writes_avail_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_USED_PCT:
+				ns->storage_stop_writes_used_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_TOMB_RAIDER_SLEEP:
+				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
+				break;
+			// Obsoleted:
+			case CASE_NAMESPACE_STORAGE_MEMORY_MAX_USED_PCT:
+				cfg_obsolete(&line, "please use 'stop-writes-used-pct' instead");
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_MIN_AVAIL_PCT:
+				cfg_obsolete(&line, "please use 'stop-writes-avail-pct' instead");
+				break;
+			case CASE_CONTEXT_END:
+				if (ns->n_storage_shadows == 0 && ns->storage_data_size == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'data-size' if not using storage backing", ns->name);
+				}
+				if (ns->n_storage_shadows != 0 && ns->storage_data_size != 0) {
+					cf_crash_nostack(AS_CFG, "{%s} can't configure 'data-size' if using storage backing", ns->name);
+				}
+				if (ns->n_storage_files != 0 && ns->storage_filesize == 0) {
+					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
+				}
+				if (ns->n_storage_shadows == 0 && ns->storage_encryption_key_file != NULL) {
+					cf_crash_nostack(AS_CFG, "{%s} 'encryption-key-file' is only relevant if using storage backing", ns->name);
+				}
+				if (ns->storage_commit_to_device && ns->storage_disable_odsync)	{
+					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);
+				}
+				if (ns->storage_compression_acceleration != 0 && ns->storage_compression != AS_COMPRESSION_LZ4) {
+					cf_crash_nostack(AS_CFG, "{%s} 'compression-acceleration' is only relevant for 'compression lz4'", ns->name);
+				}
+				if (ns->storage_compression_level != 0 && ns->storage_compression != AS_COMPRESSION_ZSTD) {
+					cf_crash_nostack(AS_CFG, "{%s} 'compression-level' is only relevant for 'compression zstd'", ns->name);
 				}
 				cfg_end_context(&state);
 				break;
@@ -3271,6 +3518,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION_OLD_KEY_FILE:
 				ns->storage_encryption_old_key_file = cfg_strdup_no_checks(&line);
 				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_EVICT_USED_PCT:
+				ns->storage_evict_used_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_FILE:
 				cfg_add_storage_file(ns, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, false));
 				break;
@@ -3280,20 +3530,24 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
 				break;
-			case CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT:
-				ns->storage_max_used_pct = cfg_u32(&line, 0, 100);
-				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
 				break;
-			case CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT:
-				ns->storage_min_avail_pct = cfg_u32(&line, 0, 100);
+			case CASE_NAMESPACE_STORAGE_PMEM_STOP_WRITES_AVAIL_PCT:
+				ns->storage_stop_writes_avail_pct = cfg_u32(&line, 0, 100);
 				break;
-			case CASE_NAMESPACE_STORAGE_PMEM_SERIALIZE_TOMB_RAIDER:
-				ns->storage_serialize_tomb_raider = cfg_bool(&line);
+			case CASE_NAMESPACE_STORAGE_PMEM_STOP_WRITES_USED_PCT:
+				ns->storage_stop_writes_used_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_TOMB_RAIDER_SLEEP:
 				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
+				break;
+			// Obsoleted:
+			case CASE_NAMESPACE_STORAGE_PMEM_MAX_USED_PCT:
+				cfg_obsolete(&line, "please use 'stop-writes-used-pct' instead");
+				break;
+			case CASE_NAMESPACE_STORAGE_PMEM_MIN_AVAIL_PCT:
+				cfg_obsolete(&line, "please use 'stop-writes-avail-pct' instead");
 				break;
 			case CASE_CONTEXT_END:
 				if (ns->n_storage_files == 0) {
@@ -3368,9 +3622,6 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->storage_compression_level = cfg_u32(&line, 1, 9);
 				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY:
-				ns->storage_data_in_memory = cfg_bool(&line);
-				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT:
 				ns->storage_defrag_lwm_pct = cfg_u32_no_checks(&line);
 				break;
@@ -3418,6 +3669,9 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->storage_encryption_old_key_file = cfg_strdup_no_checks(&line);
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_EVICT_USED_PCT:
+				ns->storage_evict_used_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILE:
 				cfg_add_storage_file(ns, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, false));
 				break;
@@ -3427,14 +3681,8 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
 				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT:
-				ns->storage_max_used_pct = cfg_u32(&line, 0, 100);
-				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
-				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT:
-				ns->storage_min_avail_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
 				ns->storage_post_write_queue = cfg_u32(&line, 0, MAX_POST_WRITE_QUEUE);
@@ -3448,6 +3696,12 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN:
 				ns->storage_sindex_startup_device_scan = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_AVAIL_PCT:
+				ns->storage_stop_writes_avail_pct = cfg_u32(&line, 0, 100);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_USED_PCT:
+				ns->storage_stop_writes_used_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP:
 				cfg_enterprise_only(&line);
@@ -3463,21 +3717,18 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC:
 				cfg_obsolete(&line, "please use 'flush-files' instead");
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT:
+				cfg_obsolete(&line, "please use 'stop-writes-used-pct' instead");
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT:
+				cfg_obsolete(&line, "please use 'stop-writes-avail-pct' instead");
+				break;
 			case CASE_CONTEXT_END:
 				if (ns->n_storage_devices == 0 && ns->n_storage_files == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} has no devices or files", ns->name);
 				}
 				if (ns->n_storage_files != 0 && ns->storage_filesize == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
-				}
-				if (ns->storage_data_in_memory && ns->storage_post_write_queue != 0 && ns->storage_post_write_queue != DEFAULT_POST_WRITE_QUEUE) {
-					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'post-write-queue' and 'data-in-memory'", ns->name);
-				}
-				if (ns->storage_cache_replica_writes && ns->storage_data_in_memory) {
-					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'cache-replica-writes' and 'data-in-memory'", ns->name);
-				}
-				if (ns->storage_sindex_startup_device_scan && ns->storage_data_in_memory) {
-					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'sindex-startup-device-scan' and 'data-in-memory'", ns->name);
 				}
 				if (ns->storage_commit_to_device && ns->storage_disable_odsync) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);
@@ -3502,6 +3753,9 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE_SET:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SET_OPTS, NUM_NAMESPACE_SET_OPTS)) {
+			case CASE_NAMESPACE_SET_DEFAULT_TTL:
+				p_set->default_ttl = cfg_check_set_default_ttl(ns->name, p_set->name, cfg_seconds_no_checks(&line));
+				break;
 			case CASE_NAMESPACE_SET_DISABLE_EVICTION:
 				p_set->eviction_disabled = cfg_bool(&line);
 				break;
@@ -3985,12 +4239,16 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Done echoing configuration file to log.
 	//--------------------------------------------
 
+	if (g_config.cluster_name[0] == '\0') {
+		cf_crash_nostack(AS_CFG, "must configure 'cluster-name'");
+	}
+
 	if (g_config.n_namespaces == 0) {
 		cf_crash_nostack(AS_CFG, "must configure at least one namespace");
 	}
 
 	cf_alloc_set_debug(c->debug_allocations, c->indent_allocations,
-			c->salt_allocations);
+			c->poison_allocations, c->quarantine_allocations);
 
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
@@ -4289,8 +4547,6 @@ as_config_post_process(as_config* c, const char* config_file)
 		ns->tree_shared.sprigs_offset		= sprigs_offset;
 		ns->tree_shared.puddles_offset		= puddles_offset;
 
-		as_storage_cfg_init(ns);
-
 		histogram_scale scale = as_config_histogram_scale();
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
@@ -4453,41 +4709,28 @@ as_config_post_process(as_config* c, const char* config_file)
 // Public API - Cluster name.
 //
 
-static cf_mutex g_config_lock = CF_MUTEX_INIT;
+static cf_mutex g_cluster_name_lock = CF_MUTEX_INIT;
 
 void
 as_config_cluster_name_get(char* cluster_name)
 {
-	cf_mutex_lock(&g_config_lock);
+	cf_mutex_lock(&g_cluster_name_lock);
 	strcpy(cluster_name, g_config.cluster_name);
-	cf_mutex_unlock(&g_config_lock);
+	cf_mutex_unlock(&g_cluster_name_lock);
 }
 
 bool
 as_config_cluster_name_set(const char* cluster_name)
 {
-	if (cluster_name[0] == '\0') {
-		cf_warning(AS_CFG, "cluster name '%s' is not allowed. Ignoring.", cluster_name);
+	size_t len = strlen(cluster_name);
+
+	if (len == 0 || len >= AS_CLUSTER_NAME_SZ) {
 		return false;
 	}
 
-	if (strlen(cluster_name) >= AS_CLUSTER_NAME_SZ) {
-		cf_warning(AS_CFG, "size of cluster name should not be greater than %d characters. Ignoring cluster name '%s'.",
-			AS_CLUSTER_NAME_SZ - 1, cluster_name);
-		return false;
-	}
-
-	cf_mutex_lock(&g_config_lock);
-
-	if (strcmp(cluster_name, "null") == 0) {
-		// 'null' is a special value representing an unset cluster-name.
-		strcpy(g_config.cluster_name, "");
-	}
-	else {
-		strcpy(g_config.cluster_name, cluster_name);
-	}
-
-	cf_mutex_unlock(&g_config_lock);
+	cf_mutex_lock(&g_cluster_name_lock);
+	strcpy(g_config.cluster_name, cluster_name);
+	cf_mutex_unlock(&g_cluster_name_lock);
 
 	return true;
 }
@@ -4495,9 +4738,10 @@ as_config_cluster_name_set(const char* cluster_name)
 bool
 as_config_cluster_name_matches(const char* cluster_name)
 {
-	cf_mutex_lock(&g_config_lock);
+	cf_mutex_lock(&g_cluster_name_lock);
 	bool matches = strcmp(cluster_name, g_config.cluster_name) == 0;
-	cf_mutex_unlock(&g_config_lock);
+	cf_mutex_unlock(&g_cluster_name_lock);
+
 	return matches;
 }
 
@@ -4816,6 +5060,18 @@ cfg_add_set(as_namespace* ns)
 	return &ns->sets_cfg_array[ns->sets_cfg_count++];
 }
 
+static uint32_t
+cfg_check_set_default_ttl(const char* ns_name, const char* set_name,
+		uint32_t value)
+{
+	if (value > MAX_ALLOWED_TTL && value != TTL_NEVER_EXPIRE) {
+		cf_crash_nostack(AS_CFG, "{%s|%s} default-ttl must be <= %u seconds",
+				ns_name, set_name, MAX_ALLOWED_TTL);
+	}
+
+	return value;
+}
+
 // TODO - should be split function or move to EE?
 static void
 cfg_add_pi_xmem_mount(as_namespace* ns, const char* mount)
@@ -4851,6 +5107,29 @@ cfg_add_si_xmem_mount(as_namespace* ns, const char* mount)
 }
 
 static void
+cfg_add_mem_shadow_file(as_namespace* ns, const char* file_name)
+{
+	if (ns->n_storage_devices != 0) {
+		cf_crash_nostack(AS_CFG, "{%s} mixture of storage files and devices", ns->name);
+	}
+
+	if (ns->n_storage_files == AS_STORAGE_MAX_DEVICES) {
+		cf_crash_nostack(AS_CFG, "{%s} too many storage files", ns->name);
+	}
+
+	for (uint32_t i = 0; i < ns->n_storage_files; i++) {
+		if (strcmp(file_name, ns->storage_shadows[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage file %s", ns->name, file_name);
+		}
+	}
+
+	ns->storage_shadows[ns->n_storage_shadows++] = file_name;
+	ns->n_storage_files++;
+	// Note - n_storage_files used only for error checking here, and to signify
+	// later that shadows are files.
+}
+
+static void
 cfg_add_storage_file(as_namespace* ns, const char* file_name,
 		const char* shadow_name)
 {
@@ -4883,6 +5162,30 @@ cfg_add_storage_file(as_namespace* ns, const char* file_name,
 			ns->n_storage_shadows != ns->n_storage_files) {
 		cf_crash_nostack(AS_CFG, "{%s} no shadow for file %s", ns->name, file_name);
 	}
+}
+
+static void
+cfg_add_mem_shadow_device(as_namespace* ns, const char* device_name)
+{
+	if (ns->n_storage_files != 0) {
+		cf_crash_nostack(AS_CFG, "{%s} mixture of storage files and devices", ns->name);
+	}
+
+	if (ns->n_storage_devices == AS_STORAGE_MAX_DEVICES) {
+		cf_crash_nostack(AS_CFG, "{%s} too many storage devices", ns->name);
+	}
+
+	for (uint32_t i = 0; i < ns->n_storage_devices; i++) {
+		if (strcmp(device_name, ns->storage_shadows[i]) == 0) {
+			cf_crash_nostack(AS_CFG, "{%s} duplicate storage device %s", ns->name, device_name);
+		}
+	}
+
+	ns->storage_shadows[ns->n_storage_shadows++] = device_name;
+	ns->storage_devices[ns->n_storage_devices++] = device_name;
+	// Note - load devices array here for best practices device size check. The
+	// array will later be used to keep memory stripes. Also, n_storage_devices
+	// will signify later that shadows are devices.
 }
 
 static void
@@ -4924,7 +5227,7 @@ static void
 cfg_set_cluster_name(char* cluster_name)
 {
 	if (! as_config_cluster_name_set(cluster_name)) {
-		cf_crash_nostack(AS_CFG, "cluster name '%s' is not allowed", cluster_name);
+		cf_crash_nostack(AS_CFG, "bad cluster name '%s'", cluster_name);
 	}
 }
 
@@ -5102,20 +5405,6 @@ cfg_best_practices_check(void)
 	}
 
 	uint64_t ns_mem = 0;
-
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		ns_mem += g_config.namespaces[ns_ix]->memory_size;
-	}
-
-	uint64_t sys_mem = (uint64_t)sysconf(_SC_PHYS_PAGES) *
-			(uint64_t)sysconf(_SC_PAGESIZE);
-
-	if (ns_mem > sys_mem) {
-		check_failed(&g_bad_practices, "memory-size",
-				"'memory-size' for all namespaces (%lu) exceeds system RAM (%lu)",
-				ns_mem, sys_mem);
-	}
-
 	uint32_t margin = 8 * 1024 * 1024; // header size ... use write-block-size?
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
@@ -5151,5 +5440,26 @@ cfg_best_practices_check(void)
 					"{%s} 'device' sizes must match to within %u bytes",
 					ns->name, margin);
 		}
+
+		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+			if (ns->storage_data_size != 0) {
+				ns_mem += ns->storage_data_size;
+			}
+			else if (ns->n_storage_files != 0) {
+				ns_mem += ns->storage_filesize * ns->n_storage_files;
+			}
+			else {
+				ns_mem += min_sz * ns->n_storage_devices;
+			}
+		}
+	}
+
+	uint64_t sys_mem = (uint64_t)sysconf(_SC_PHYS_PAGES) *
+			(uint64_t)sysconf(_SC_PAGESIZE);
+
+	if (ns_mem > sys_mem) {
+		check_failed(&g_bad_practices, "memory",
+				"data memory spec for all namespaces (%lu) exceeds system memory (%lu)",
+				ns_mem, sys_mem);
 	}
 }

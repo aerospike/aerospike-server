@@ -31,6 +31,9 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "citrusleaf/cf_byte_order.h"
+#include "citrusleaf/cf_hash_math.h"
+
 #include "log.h"
 
 #include "fabric/partition.h"
@@ -150,6 +153,9 @@ COMPILER_ASSERT(offsetof(drv_header, generic.prefix) == 0);
 
 #define STORAGE_INVALID_WBLOCK 0xFFFFffff
 
+// Really just means "was set", doesn't fully validate...
+#define STORAGE_RBLOCK_IS_VALID(__x) ((__x) != 0)
+
 #define WBLOCK_STATE_FREE			0
 #define WBLOCK_STATE_RESERVED		1
 #define WBLOCK_STATE_USED			2
@@ -158,15 +164,17 @@ COMPILER_ASSERT(offsetof(drv_header, generic.prefix) == 0);
 
 
 //==========================================================
-// Inlines and macros.
+// Public API - shared code between storage engines.
 //
+
+bool drv_is_set_evictable(const struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
+void drv_apply_opt_meta(struct as_index_s* r, struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
+bool pread_all(int fd, void* buf, size_t size, off_t offset);
+bool pwrite_all(int fd, const void* buf, size_t size, off_t offset);
 
 //
 // Conversions between offsets and rblocks.
 //
-
-// Really just means "was set", doesn't fully validate...
-#define STORAGE_RBLOCK_IS_VALID(__x) ((__x) != 0)
 
 // Convert byte offset to rblock_id, as long as offset is already a multiple of
 // rblock size.
@@ -178,17 +186,49 @@ OFFSET_TO_RBLOCK_ID(uint64_t offset)
 
 // Convert rblock_id to byte offset.
 static inline uint64_t
-RBLOCK_ID_TO_OFFSET(uint64_t rblocks)
+RBLOCK_ID_TO_OFFSET(uint64_t rblock_id)
 {
-	return rblocks << LOG_2_RBLOCK_SIZE;
+	return rblock_id << LOG_2_RBLOCK_SIZE;
 }
 
-
-//==========================================================
-// Public API - shared code between storage engines.
+//
+// End-mark utilities.
 //
 
-bool drv_is_set_evictable(const struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
-void drv_apply_opt_meta(struct as_index_s* r, struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
-bool pread_all(int fd, void* buf, size_t size, off_t offset);
-bool pwrite_all(int fd, const void* buf, size_t size, off_t offset);
+static inline uint32_t
+drv_make_end_mark(const as_flat_record* flat)
+{
+	// Hash digest and LUT.
+	uint32_t hash = cf_wyhash32((const uint8_t*)&flat->keyd, 25);
+
+	// Reserve a bit for signature flag.
+	return cf_swap_to_le32(hash & 0x7FFFffff);
+}
+
+static inline void
+drv_add_end_mark(uint8_t* mark, const as_flat_record* flat)
+{
+	*(uint32_t*)mark = drv_make_end_mark(flat);
+}
+
+static inline bool
+drv_check_end_mark(const uint8_t* mark, const as_flat_record* flat)
+{
+	return *(uint32_t*)mark == drv_make_end_mark(flat);
+}
+
+static inline const uint8_t*
+drv_find_and_check_end_mark(const uint8_t* at, const as_flat_record* flat)
+{
+	uint32_t match = drv_make_end_mark(flat);
+
+	for (uint32_t i = 0; i < RBLOCK_SIZE; i++) {
+		if (*(uint32_t*)at == match) {
+			return at;
+		}
+
+		at--;
+	}
+
+	return NULL;
+}

@@ -43,47 +43,12 @@
 
 
 //==========================================================
-// Inlines & macros.
-//
-
-// storage-engine memory may truncate n_rblocks at 19 bits - only check those.
-static inline uint32_t
-check_n_rblocks(uint32_t size)
-{
-	return SIZE_TO_N_RBLOCKS(size) & ((1 << 19) - 1);
-}
-
-
-//==========================================================
 // Public API.
 //
-
-void
-as_flat_pickle_record(as_storage_rd* rd)
-{
-	rd->pickle_sz = as_flat_record_size(rd);
-
-	// Note - will no-op for storage-engine memory, which doesn't compress.
-	as_flat_record* flat = as_flat_compress_bins_and_pack_record(rd,
-			rd->ns->storage_write_block_size, false, false, &rd->pickle_sz);
-
-	rd->pickle = cf_malloc(rd->pickle_sz);
-
-	if (flat == NULL) {
-		// Note - storage-engine memory may truncate n_rblocks at 19 bits.
-		as_flat_pack_record(rd, SIZE_TO_N_RBLOCKS(rd->pickle_sz), false,
-				(as_flat_record*)rd->pickle);
-	}
-	else {
-		memcpy(rd->pickle, flat, rd->pickle_sz);
-	}
-}
 
 uint32_t
 as_flat_record_size(const as_storage_rd* rd)
 {
-	as_namespace* ns = rd->ns;
-
 	// Start with the record storage overhead.
 	uint32_t write_sz = flat_record_overhead_size(rd);
 
@@ -91,9 +56,7 @@ as_flat_record_size(const as_storage_rd* rd)
 	for (uint16_t b = 0; b < rd->n_bins; b++) {
 		as_bin* bin = &rd->bins[b];
 
-		uint32_t name_sz =
-				1 + (uint32_t)strlen(as_bin_get_name_from_id(ns, bin->id));
-
+		uint32_t name_sz = 1 + (uint32_t)strlen(bin->name);
 		uint32_t meta_sz = 0;
 
 		if (as_bin_has_meta(bin)) {
@@ -136,7 +99,7 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 		return false;
 	}
 
-	if (flat->n_rblocks != check_n_rblocks((uint32_t)rr->pickle_sz)) {
+	if (flat->n_rblocks != SIZE_TO_N_RBLOCKS((uint32_t)rr->pickle_sz)) {
 		cf_warning(AS_FLAT, "n_rblocks mismatch (%u,%zu)", flat->n_rblocks,
 				rr->pickle_sz);
 		return false;
@@ -326,10 +289,8 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 			break;
 		}
 
-		if (! as_bin_set_id_from_name_w_len(ns, b, at, name_len)) {
-			cf_warning(AS_FLAT, "flat bin name failed to assign id");
-			break;
-		}
+		memcpy(b->name, at, name_len);
+		b->name[name_len] = '\0'; // note - not padded!
 
 		at += name_len;
 
@@ -365,9 +326,7 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 			}
 		}
 
-		at = ns->storage_data_in_memory ?
-				as_bin_particle_alloc_from_flat(b, at, end) :
-				as_bin_particle_cast_from_flat(b, at, end);
+		at = as_bin_particle_from_flat(b, at, end);
 
 		if (at == NULL) {
 			break;
@@ -375,20 +334,17 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 	}
 
 	if (i < n_bins) {
-		as_bin_destroy_all_dim(ns, bins, i);
 		return -AS_ERR_UNKNOWN;
 	}
 
 	if (at > end) {
 		cf_warning(AS_FLAT, "incomplete flat bin");
-		as_bin_destroy_all_dim(ns, bins, n_bins);
 		return -AS_ERR_UNKNOWN;
 	}
 
 	// Some (but not all) callers pass end as an rblock-rounded value.
 	if (at + RBLOCK_SIZE <= end) {
 		cf_warning(AS_FLAT, "extra rblocks follow flat bin");
-		as_bin_destroy_all_dim(ns, bins, n_bins);
 		return -AS_ERR_UNKNOWN;
 	}
 
@@ -559,18 +515,15 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 void
 flatten_bins(const as_storage_rd* rd, uint8_t* buf, uint32_t* sz)
 {
-	as_namespace* ns = rd->ns;
-
 	uint8_t* start = buf;
 
 	for (uint16_t b = 0; b < rd->n_bins; b++) {
 		as_bin* bin = &rd->bins[b];
 
-		const char* bin_name = as_bin_get_name_from_id(ns, bin->id);
-		size_t name_len = strlen(bin_name);
+		size_t name_len = strlen(bin->name);
 
 		*buf++ = (uint8_t)name_len;
-		memcpy(buf, bin_name, name_len);
+		memcpy(buf, bin->name, name_len);
 		buf += name_len;
 
 		if (as_bin_has_meta(bin)) {

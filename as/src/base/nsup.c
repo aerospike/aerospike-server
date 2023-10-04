@@ -628,87 +628,98 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 static bool
 eval_hwm_breached(as_namespace* ns)
 {
-	uint64_t index_sz = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
+	uint32_t sys_memory_pct = sys_mem_pct();
 
+	uint64_t index_used_sz =
+			(ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t index_mem_sz = 0;
-	uint64_t index_dev_sz = 0;
-	uint64_t pix_hwm = 0;
+	uint32_t index_dev_used_pct = 0;
 	char index_dev_tag[128];
 
 	if (as_namespace_index_persisted(ns)) {
-		index_dev_sz = index_sz;
-		pix_hwm = (ns->pi_mounts_size_limit * ns->pi_mounts_hwm_pct) / 100;
-		sprintf(index_dev_tag, ", index-device sz:%lu hwm:%lu", index_dev_sz,
-				pix_hwm);
+		index_dev_used_pct =
+				(uint32_t)((index_used_sz * 100) / ns->pi_mounts_budget);
+		sprintf(index_dev_tag, ", index-device sz:%lu used-pct:%u",
+				index_used_sz, index_dev_used_pct);
 	}
 	else {
-		index_mem_sz = index_sz;
+		index_mem_sz = index_used_sz;
 		index_dev_tag[0] = '\0';
 	}
 
-	uint64_t sindex_sz = as_sindex_used_bytes(ns);
-
+	uint64_t sindex_used_sz = as_sindex_used_bytes(ns);
 	uint64_t sindex_mem_sz = 0;
-	uint64_t sindex_dev_sz = 0;
-	uint64_t psix_hwm = 0;
+	uint32_t sindex_dev_used_pct = 0;
 	char sindex_dev_tag[128];
 
 	if (as_namespace_sindex_persisted(ns)) {
-		sindex_dev_sz = sindex_sz;
-		psix_hwm = (ns->si_mounts_size_limit * ns->si_mounts_hwm_pct) / 100;
-		sprintf(sindex_dev_tag, ", sindex-device sz:%lu hwm:%lu", sindex_dev_sz,
-				psix_hwm);
+		sindex_dev_used_pct =
+				(uint32_t)((sindex_used_sz * 100) / ns->si_mounts_budget);
+		sprintf(sindex_dev_tag, ", sindex-device sz:%lu used-pct:%u",
+				sindex_used_sz, sindex_dev_used_pct);
 	}
 	else {
-		sindex_mem_sz = sindex_sz;
+		sindex_mem_sz = sindex_used_sz;
 		sindex_dev_tag[0] = '\0';
 	}
 
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
-	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
-	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_mem_sz + dim_sz;
-	uint64_t mem_hwm = (ns->memory_size * ns->hwm_memory_pct) / 100;
+	uint64_t ixs_sz = index_mem_sz + set_index_sz + sindex_mem_sz;
 
-	uint64_t used_disk_sz = 0;
+	uint64_t data_used_sz = 0;
 
-	as_storage_stats(ns, NULL, &used_disk_sz);
+	as_storage_stats(ns, NULL, &data_used_sz);
 
-	uint64_t ssd_hwm = (ns->drive_size * ns->hwm_disk_pct) / 100;
+	uint32_t data_used_pct = (uint32_t)((data_used_sz * 100) / ns->drives_size);
 
 	char reasons[128] = { 0 };
+	char* at = reasons;
 
-	if (mem_hwm != 0 && mem_sz > mem_hwm) {
-		strcpy(reasons, "memory & ");
+	uint32_t cfg_pct = as_load_uint32(&ns->evict_sys_memory_pct);
+
+	// Note - not >= since sys_memory_pct is rounded up, not down.
+	if (cfg_pct != 0 && sys_memory_pct > cfg_pct) {
+		at = stpcpy(at, "sys-memory & ");
 	}
 
-	if (pix_hwm != 0 && index_dev_sz > pix_hwm) {
-		strcat(reasons, "index-device & ");
+	cfg_pct = as_load_uint32(&ns->pi_evict_mounts_pct);
+
+	if (cfg_pct != 0 && index_dev_used_pct >= cfg_pct) {
+		at = stpcpy(at, "index-device & ");
 	}
 
-	if (psix_hwm != 0 && sindex_dev_sz > psix_hwm) {
-		strcat(reasons, "sindex-device & ");
+	cfg_pct = as_load_uint32(&ns->si_evict_mounts_pct);
+
+	if (cfg_pct != 0 && sindex_dev_used_pct >= cfg_pct) {
+		at = stpcpy(at, "sindex-device & ");
 	}
 
-	if (ssd_hwm != 0 && used_disk_sz > ssd_hwm) {
-		strcat(reasons, "disk & ");
+	cfg_pct = as_load_uint32(&ns->storage_evict_used_pct);
+
+	if (cfg_pct != 0 && data_used_pct >= cfg_pct) {
+		at = stpcpy(at, "data-used-pct & ");
 	}
 
-	if (reasons[0] != '\0') {
-		reasons[strlen(reasons) - 3] = '\0'; // strip " & " off end
+	if (at != reasons) {
+		at[-3] = '\0'; // strip " & " off end
 
-		cf_warning(AS_NSUP, "{%s} breached eviction hwm (%s), memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
-				ns->name, reasons,
-				mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
-				mem_hwm, index_dev_tag, sindex_dev_tag, used_disk_sz, ssd_hwm);
+		cf_warning(AS_NSUP, "{%s} breached eviction limit (%s), sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s, data used-pct:%u",
+				ns->name, reasons, sys_memory_pct,
+				ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
+				index_dev_tag,
+				sindex_dev_tag,
+				data_used_pct);
 
 		ns->hwm_breached = true;
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} no eviction hwm breached, memory sz:%lu (%lu + %lu + %lu + %lu) hwm:%lu%s%s, disk sz:%lu hwm:%lu",
-			ns->name,
-			mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
-			mem_hwm, index_dev_tag, sindex_dev_tag, used_disk_sz, ssd_hwm);
+	cf_debug(AS_NSUP, "{%s} no eviction limit breached, sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s, data used-pct:%u",
+			ns->name, sys_memory_pct,
+			ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
+			index_dev_tag,
+			sindex_dev_tag,
+			data_used_pct);
 
 	ns->hwm_breached = false;
 
@@ -886,8 +897,6 @@ eval_stop_writes(as_namespace* ns, bool cold_starting)
 {
 	uint32_t sys_memory_pct = sys_mem_pct();
 
-	uint64_t mem_stop_writes = (ns->memory_size * ns->stop_writes_pct) / 100;
-
 	// Note that persisted index is not counted against stop-writes.
 	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
 			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
@@ -895,53 +904,55 @@ eval_stop_writes(as_namespace* ns, bool cold_starting)
 	// Note that persisted sindex is not counted against stop-writes.
 	uint64_t sindex_mem_sz = as_namespace_sindex_persisted(ns) ?
 			0 : as_sindex_used_bytes(ns);
-	uint64_t dim_sz = as_load_uint64(&ns->n_bytes_memory);
-	uint64_t mem_sz = index_mem_sz + set_index_sz + sindex_mem_sz + dim_sz;
+	uint64_t ixs_sz = index_mem_sz + set_index_sz + sindex_mem_sz;
 
 	// Note that device storage limits are ignored during cold start
-	// (device_avail_pct will be 0, device_used_sz is ignored via flag).
-	int device_avail_pct = 0;
-	uint64_t device_used_sz = 0;
+	// (data_avail_pct will be 0, data_used_sz is ignored via flag).
+	uint32_t data_avail_pct = 0;
+	uint64_t data_used_sz = 0;
 
-	as_storage_stats(ns, &device_avail_pct, &device_used_sz);
+	as_storage_stats(ns, &data_avail_pct, &data_used_sz);
 
-	uint32_t device_used_pct = cold_starting || ns->drive_size == 0 ?
-			0 : (uint32_t)((device_used_sz * 100) / ns->drive_size);
+	uint32_t data_used_pct = (uint32_t)((data_used_sz * 100) / ns->drives_size);
 
 	char reasons[128] = { 0 };
+	char* at = reasons;
 
-	if (sys_memory_pct > ns->stop_writes_sys_memory_pct) {
-		strcpy(reasons, "sys-memory & ");
+	uint32_t cfg_pct = as_load_uint32(&ns->stop_writes_sys_memory_pct);
+
+	// Note - not >= since sys_memory_pct is rounded up, not down.
+	if (cfg_pct != 0 && sys_memory_pct > cfg_pct) {
+		at = stpcpy(at, "sys-memory & ");
 	}
 
-	if (mem_sz > mem_stop_writes) {
-		strcat(reasons, "memory & ");
+	// Note - configured value 0 automatically switches this off. Also, not <=
+	// because avail vs. used, though data_avail_pct is rounded down.
+	if (data_avail_pct < ns->storage_stop_writes_avail_pct) {
+		at = stpcpy(at, "data-avail-pct & ");
 	}
 
-	if (device_avail_pct < (int)ns->storage_min_avail_pct) {
-		strcat(reasons, "device-avail-pct & ");
+	cfg_pct = as_load_uint32(&ns->storage_stop_writes_used_pct);
+
+	if (! cold_starting && cfg_pct != 0 && data_used_pct >= cfg_pct) {
+		at = stpcpy(at, "data-used-pct & ");
 	}
 
-	if (device_used_pct > ns->storage_max_used_pct) {
-		strcat(reasons, "device-used-pct & ");
-	}
+	if (at != reasons) {
+		at[-3] = '\0'; // strip " & " off end
 
-	if (reasons[0] != '\0') {
-		reasons[strlen(reasons) - 3] = '\0'; // strip " & " off end
-
-		cf_warning(AS_NSUP, "{%s} breached stop-writes limit (%s), sys-memory pct:%u, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d used-pct:%u",
+		cf_warning(AS_NSUP, "{%s} breached stop-writes limit (%s), sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu), data avail-pct:%u used-pct:%u",
 				ns->name, reasons, sys_memory_pct,
-				mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
-				mem_stop_writes, device_avail_pct, device_used_pct);
+				ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
+				data_avail_pct, data_used_pct);
 
 		ns->stop_writes = true;
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, sys-memory pct:%u, memory sz:%lu (%lu + %lu + %lu + %lu) limit:%lu, disk avail-pct:%d used-pct:%u",
+	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu), data avail-pct:%u used-pct:%u",
 			ns->name, sys_memory_pct,
-			mem_sz, index_mem_sz, set_index_sz, sindex_mem_sz, dim_sz,
-			mem_stop_writes, device_avail_pct, device_used_pct);
+			ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
+			data_avail_pct, data_used_pct);
 
 	ns->stop_writes = false;
 
@@ -1093,9 +1104,7 @@ nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 		linear_hist_insert_data_point(set_ttl_hist, void_time);
 	}
 
-	uint32_t size = ns->storage_type == AS_STORAGE_ENGINE_MEMORY ?
-			as_storage_record_mem_size(ns, r) :
-			as_storage_record_device_size(ns, r);
+	uint32_t size = as_record_stored_size(r);
 
 	histogram_insert_raw_unsafe(ns->obj_size_log_hist, size);
 	linear_hist_insert_data_point(ns->obj_size_lin_hist, size);

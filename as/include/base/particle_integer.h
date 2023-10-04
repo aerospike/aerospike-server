@@ -40,7 +40,6 @@ int integer_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_va
 int integer_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 int32_t integer_size_from_wire(const uint8_t *wire_value, uint32_t value_size);
 int integer_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int integer_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size);
 uint32_t integer_wire_size(const as_particle *p);
 uint32_t integer_to_wire(const as_particle *p, uint8_t *wire);
 

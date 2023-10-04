@@ -135,7 +135,6 @@ static int udf_apply_record(udf_call* call, as_rec* rec, as_result* result);
 static bool udf_timer_timedout(const as_timer* timer);
 static uint64_t udf_timer_timeslice(const as_timer* timer);
 static uint8_t udf_master_write(udf_record* urecord, rw_request* rw);
-static void udf_update_sindex(udf_record* urecord);
 
 static void udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result, uint8_t result_code, cf_dyn_buf* db);
 static void udf_master_done(udf_record* urecord, as_rec* urec, as_result* result, cf_dyn_buf* db);
@@ -732,8 +731,6 @@ udf_timeout_cb(rw_request* rw)
 static transaction_status
 udf_master(rw_request* rw, as_transaction* tr)
 {
-	CF_ALLOC_SET_NS_ARENA_DIM(tr->rsv.ns);
-
 	udf_def def;
 	udf_call call = { .def = &def, .tr = tr };
 
@@ -1066,7 +1063,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 
 	// Convert message TTL special value if appropriate.
 	if (m->record_ttl == TTL_DONT_UPDATE && urecord->n_old_bins == 0) {
-		m->record_ttl = TTL_NAMESPACE_DEFAULT;
+		m->record_ttl = TTL_USE_DEFAULT;
 	}
 
 	if (! is_valid_ttl(m->record_ttl)) {
@@ -1074,7 +1071,8 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 		return AS_ERR_PARAMETER;
 	}
 
-	if (is_ttl_disallowed(m->record_ttl, ns)) {
+	if (is_ttl_disallowed(m->record_ttl, ns,
+			as_namespace_get_record_set(ns, r))) {
 		cf_ticker_warning(AS_UDF, "disallowed ttl with nsup-period 0");
 		return AS_ERR_FORBIDDEN;
 	}
@@ -1125,16 +1123,16 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	//
 
 	// Store or drop the key as appropriate.
-	as_record_finalize_key(r, ns, rd->key, rd->key_size);
+	as_record_finalize_key(r, rd->key, rd->key_size);
 
-	if (ns->storage_data_in_memory) {
-		udf_update_sindex(urecord);
-		as_bin_destroy_all(urecord->cleanup_bins, urecord->n_cleanup_bins);
-		as_storage_rd_update_bin_space(rd);
-		as_storage_record_adjust_mem_stats(rd, urecord->old_memory_bytes);
+	// Update sindex.
+	if (set_has_sindex(r, ns)) {
+		update_sindex(ns, urecord->r_ref, urecord->old_bins,
+				urecord->n_old_bins, rd->bins, rd->n_bins);
 	}
 	else {
-		udf_update_sindex(urecord);
+		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+		as_index_clear_in_sindex(r);
 	}
 
 	tr->generation = r->generation;
@@ -1156,22 +1154,6 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	return AS_OK;
 }
 
-static void
-udf_update_sindex(udf_record* urecord) {
-	as_namespace* ns = urecord->tr->rsv.ns;
-	as_storage_rd* rd = urecord->rd;
-	as_record* r = rd->r;
-
-	if (set_has_sindex(r, ns)) {
-		update_sindex(ns, urecord->r_ref, urecord->old_bins,
-				urecord->n_old_bins, rd->bins, rd->n_bins);
-	}
-	else {
-		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
-		as_index_clear_in_sindex(r);
-	}
-}
-
 
 //==========================================================
 // Local helpers - cleanup after applying UDF.
@@ -1189,12 +1171,6 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 
 		if (urecord->is_loaded) {
 			as_storage_rd* rd = urecord->rd;
-
-			if (urecord->has_updates && ns->storage_data_in_memory) {
-				write_dim_unwind(urecord->old_bins, urecord->n_old_bins,
-						rd->bins, rd->n_bins, urecord->cleanup_bins,
-						urecord->n_cleanup_bins);
-			}
 
 			if ((urecord->result_code != AS_OK || urecord->has_updates) &&
 					urecord->n_old_bins == 0) {

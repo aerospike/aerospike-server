@@ -31,6 +31,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_hash_math.h"
 
@@ -60,7 +61,8 @@ struct si_btree_s;
 #define INAME_MAX_SZ 64
 
 // Sanity check limits.
-#define MAX_STRING_KSIZE 2048 // TODO - increase?
+#define MAX_STRING_KSIZE 2048
+#define MAX_BLOB_KSIZE 2048
 #define MAX_GEOJSON_KSIZE (1024 * 1024)
 
 // Info command parsing buffer sizes.
@@ -91,7 +93,6 @@ typedef struct as_sindex_s {
 	uint16_t set_id;
 
 	char bin_name[AS_BIN_NAME_MAX_SZ];
-	uint16_t bin_id;
 
 	as_particle_type ktype;
 	as_sindex_type itype;
@@ -104,6 +105,7 @@ typedef struct as_sindex_s {
 
 	bool readable; // false while building sindex
 	bool dropped;
+	uint32_t n_jobs;
 
 	uint64_t keys_per_bval;
 	uint64_t keys_per_rec;
@@ -142,13 +144,12 @@ void as_sindex_put_all_rd(struct as_namespace_s* ns, struct as_storage_rd_s* rd,
 void as_sindex_put_rd(as_sindex* si, struct as_storage_rd_s* rd, struct as_index_ref_s* r_ref);
 
 // Modify sindexes from writes/deletes.
-uint32_t as_sindex_arr_lookup_by_set_and_bin_lockfree(const struct as_namespace_s* ns, uint16_t set_id, uint16_t bin_id, as_sindex** si_arr);
-uint32_t as_sindex_sbins_from_bin(struct as_namespace_s* ns, uint16_t set_id, const as_bin* b, as_sindex_bin* start_sbin, as_sindex_op op);
-void as_sindex_update_by_sbin(as_sindex_bin* start_sbin, uint32_t n_sbins, cf_arenax_handle r_h);
-void as_sindex_sbin_free_all(as_sindex_bin* sbin, uint32_t n_sbins);
+uint32_t as_sindex_sbins_from_bin(struct as_namespace_s* ns, uint16_t set_id, const as_bin* b, as_sindex_bin* sbins, as_sindex_op op);
+void as_sindex_update_by_sbin(as_sindex_bin* sbins, uint32_t n_sbins, cf_arenax_handle r_h);
+void as_sindex_sbin_free_all(as_sindex_bin* sbins, uint32_t n_sbins);
 
 // Query.
-as_sindex* as_sindex_lookup_by_defn(const struct as_namespace_s* ns, uint16_t set_id, uint16_t bin_id, as_particle_type ktype, as_sindex_type itype, const uint8_t* ctx_buf, uint32_t ctx_buf_sz);
+as_sindex* as_sindex_lookup_by_defn(const struct as_namespace_s* ns, uint16_t set_id, const char* bin_name, as_particle_type ktype, as_sindex_type itype, const uint8_t* ctx_buf, uint32_t ctx_buf_sz);
 
 // GC.
 as_sindex* as_sindex_lookup_by_iname_lockfree(const struct as_namespace_s* ns, const char* iname);
@@ -174,6 +175,12 @@ as_sindex_string_to_bval(const char* s, size_t len)
 	return (int64_t)cf_wyhash64((const void*)s, len);
 }
 
+static inline int64_t
+as_sindex_blob_to_bval(const uint8_t* blob, size_t sz)
+{
+	return (int64_t)cf_wyhash64((const void*)blob, sz);
+}
+
 static inline uint64_t
 as_sindex_used_bytes(const as_namespace* ns)
 {
@@ -195,11 +202,15 @@ as_sindex_release(as_sindex* si)
 }
 
 static inline void
-as_sindex_release_arr(as_sindex* si_arr[], uint32_t si_arr_sz)
+as_sindex_job_reserve(as_sindex* si)
 {
-	for (uint32_t i = 0; i < si_arr_sz; i++) {
-		as_sindex_release(si_arr[i]);
-	}
+	as_incr_uint32(&si->n_jobs);
+}
+
+static inline void
+as_sindex_job_release(as_sindex* si)
+{
+	as_decr_uint32_rls(&si->n_jobs);
 }
 
 // Lifecycle lock.

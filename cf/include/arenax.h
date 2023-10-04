@@ -75,7 +75,7 @@ typedef struct cf_arenax_chunk_s {
 } __attribute__((packed)) cf_arenax_chunk;
 
 // DO NOT access this member data directly - use the API!
-// Caution - changing this struct could break warm or cool restart.
+// Caution - changing this struct could break warm restart.
 typedef struct cf_arenax_s {
 	// Configuration (passed in constructors).
 	cf_xmem_type		xmem_type;

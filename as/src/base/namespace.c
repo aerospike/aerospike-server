@@ -88,9 +88,6 @@ as_namespace_create(char *name)
 	strcpy(ns->name, name);
 	ns->ix = g_config.n_namespaces++;
 
-	ns->jem_arena = cf_alloc_create_arena();
-	cf_info(AS_NAMESPACE, "{%s} uses JEMalloc arena %d", name, ns->jem_arena);
-
 	cf_mutex_init(&ns->query_rsvs_lock); // nowhere better to do this
 
 	//--------------------------------------------
@@ -116,7 +113,6 @@ as_namespace_create(char *name)
 	ns->replication_factor = 0; // gets set on rebalance
 	ns->sindex_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->n_single_query_threads = 4; // maximum number of threads a single query may run
-	ns->stop_writes_pct = 90; // stop writes when 90% of configured namespace memory limit is used
 	ns->stop_writes_sys_memory_pct = 90; // stop writes when 90% of system memory is used
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
@@ -127,20 +123,17 @@ as_namespace_create(char *name)
 	ns->xdr_tomb_raider_period = 2 * 60; // 2 minutes
 	ns->n_xdr_tomb_raider_threads = 1;
 
-	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
-	ns->storage_data_in_memory = true;
-	// Note - default true is consistent with AS_STORAGE_ENGINE_MEMORY, but
-	// cfg.c will set default false for AS_STORAGE_ENGINE_SSD.
+	ns->storage_type = AS_STORAGE_ENGINE_UNDEFINED;
 
 	ns->storage_write_block_size = 1024 * 1024;
 	ns->storage_defrag_lwm_pct = 50; // defrag if occupancy of block is < 50%
 	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock
 	ns->storage_encryption = AS_ENCRYPTION_AES_128;
 	ns->storage_flush_max_us = 1000 * 1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
-	ns->storage_max_used_pct = 70; // stop writes when > 70% disk is used
 	ns->storage_max_write_cache = DEFAULT_MAX_WRITE_CACHE;
-	ns->storage_min_avail_pct = 5; // stop writes when < 5% disk is writable
 	ns->storage_post_write_queue = DEFAULT_POST_WRITE_QUEUE; // number of wblocks per device used as post-write cache
+	ns->storage_stop_writes_avail_pct = 5; // stop writes when < 5% disk is writable
+	ns->storage_stop_writes_used_pct = 70; // stop writes when > 70% disk is used
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 
 	ns->geo2dsphere_within_strict = true;
@@ -197,6 +190,7 @@ as_namespace_configure_sets(as_namespace *ns)
 			// Transfer configurable metadata.
 			p_set->stop_writes_count = ns->sets_cfg_array[i].stop_writes_count;
 			p_set->stop_writes_size = ns->sets_cfg_array[i].stop_writes_size;
+			p_set->default_ttl = ns->sets_cfg_array[i].default_ttl;
 			p_set->eviction_disabled = ns->sets_cfg_array[i].eviction_disabled;
 			p_set->index_enabled = ns->sets_cfg_array[i].index_enabled;
 		}
@@ -434,7 +428,7 @@ as_namespace_get_set_by_name(as_namespace *ns, const char *set_name)
 
 
 as_set *
-as_namespace_get_set_by_id(as_namespace *ns, uint16_t set_id)
+as_namespace_get_set_by_id(const as_namespace *ns, uint16_t set_id)
 {
 	if (set_id == INVALID_SET_ID) {
 		return NULL;
@@ -454,7 +448,7 @@ as_namespace_get_set_by_id(as_namespace *ns, uint16_t set_id)
 
 
 as_set *
-as_namespace_get_record_set(as_namespace *ns, const as_record *r)
+as_namespace_get_record_set(const as_namespace *ns, const as_record *r)
 {
 	return as_namespace_get_set_by_id(ns, as_index_get_set_id(r));
 }
@@ -491,7 +485,7 @@ as_namespace_get_set_info(as_namespace *ns, const char *set_name,
 
 
 void
-as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id,
+as_namespace_adjust_set_data_used_bytes(as_namespace *ns, uint16_t set_id,
 		int64_t delta_bytes)
 {
 	if (set_id == INVALID_SET_ID) {
@@ -506,31 +500,7 @@ as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id,
 		return;
 	}
 
-	uint64_t n_bytes = as_aaf_uint64(&p_set->n_bytes_memory, delta_bytes);
-
-	cf_assert((int64_t)n_bytes >= 0, AS_NAMESPACE,
-			"{%s} set-id %u - negative n_bytes_memory %ld (delta_bytes %ld)",
-			ns->name, set_id, (int64_t)n_bytes, delta_bytes);
-}
-
-
-void
-as_namespace_adjust_set_device_bytes(as_namespace *ns, uint16_t set_id,
-		int64_t delta_bytes)
-{
-	if (set_id == INVALID_SET_ID) {
-		return;
-	}
-
-	as_set *p_set;
-
-	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) !=
-			CF_VMAPX_OK) {
-		cf_warning(AS_NAMESPACE, "set-id %u - failed vmap get", set_id);
-		return;
-	}
-
-	uint64_t n_bytes = as_aaf_uint64(&p_set->n_bytes_device, delta_bytes);
+	uint64_t n_bytes = as_aaf_uint64(&p_set->data_used_bytes, delta_bytes);
 
 	cf_assert((int64_t)n_bytes >= 0, AS_NAMESPACE,
 			"{%s} set-id %u - negative n_bytes_device %ld (delta_bytes %ld)",
@@ -556,32 +526,6 @@ as_namespace_release_set_id(as_namespace *ns, uint16_t set_id)
 
 	cf_assert(n_objects != (uint64_t)-1, AS_NAMESPACE,
 			"{%s} set-id %u - n_objects underflow", ns->name, set_id);
-}
-
-
-void
-as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns)
-{
-	if (show_ns) {
-		cf_dyn_buf_append_string(db, ns->name);
-		cf_dyn_buf_append_char(db, ':');
-	}
-
-	uint32_t bin_count = cf_vmapx_count(ns->p_bin_name_vmap);
-
-	cf_dyn_buf_append_string(db, "bin_names=");
-	cf_dyn_buf_append_uint32(db, bin_count);
-	cf_dyn_buf_append_string(db, ",bin_names_quota=");
-	cf_dyn_buf_append_uint32(db, MAX_BIN_NAMES);
-
-	for (uint16_t i = 0; i < (uint16_t)bin_count; i++) {
-		cf_dyn_buf_append_char(db, ',');
-		cf_dyn_buf_append_string(db, as_bin_get_name_from_id(ns, i));
-	}
-
-	if (show_ns) {
-		cf_dyn_buf_append_char(db, ';');
-	}
 }
 
 
@@ -668,12 +612,8 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, p_set->n_tombstones);
 	cf_dyn_buf_append_char(db, ':');
 
-	cf_dyn_buf_append_string(db, "memory_data_bytes=");
-	cf_dyn_buf_append_uint64(db, p_set->n_bytes_memory);
-	cf_dyn_buf_append_char(db, ':');
-
-	cf_dyn_buf_append_string(db, "device_data_bytes=");
-	cf_dyn_buf_append_uint64(db, p_set->n_bytes_device);
+	cf_dyn_buf_append_string(db, "data_used_bytes=");
+	cf_dyn_buf_append_uint64(db, p_set->data_used_bytes);
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "truncate_lut=");
@@ -693,6 +633,10 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ':');
 
 	// Configuration:
+
+	cf_dyn_buf_append_string(db, "default-ttl=");
+	cf_dyn_buf_append_uint32(db, p_set->default_ttl);
+	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "disable-eviction=");
 	cf_dyn_buf_append_bool(db, p_set->eviction_disabled);

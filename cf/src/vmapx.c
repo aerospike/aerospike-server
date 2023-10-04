@@ -184,7 +184,7 @@ cf_vmapx_get_index_w_len(const cf_vmapx* vmap, const char* name,
 
 // The value must begin with a string which is its name. (The hash map is not
 // stored in persistent memory, so names must be in the vector to enable us to
-// rebuild the hash map on warm or cool restart.)
+// rebuild the hash map on warm restart.)
 //
 // If name is not found, add new name, clear rest of value in vector, and return
 // newly assigned index (and CF_VMAPX_OK). If name is found, return index for

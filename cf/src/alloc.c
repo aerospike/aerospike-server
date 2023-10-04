@@ -38,12 +38,15 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <jemalloc/internal/jemalloc_internal_defs.h>
 #include <jemalloc/jemalloc.h>
 
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 
 #include "bits.h"
+#include "cf_mutex.h"
 #include "cf_thread.h"
 #include "log.h"
 #include "trace.h"
@@ -59,7 +62,7 @@
 #undef strndup
 
 #define N_ARENAS 149 // used to be 150; now arena 149 is startup arena
-#define PAGE_SZ 4096
+#define PAGE_SZ (1ul << LG_PAGE)
 
 #define MAX_SITES 4096
 #define MAX_THREADS 1024
@@ -85,6 +88,16 @@ typedef struct site_info_s {
 	size_t size_hi;
 } site_info;
 
+typedef struct quarantined_s {
+	uint32_t site_id;
+	pid_t thread_id;
+	void *p;
+	uint32_t jem_sz;
+	int32_t flags;
+	uint32_t hash;
+	cf_mutex mutex;
+} quarantined;
+
 // Old glibc versions don't provide this; work around compiler warning.
 void *aligned_alloc(size_t align, size_t sz);
 
@@ -96,9 +109,6 @@ const char *jem_malloc_conf = "narenas:" STR(N_ARENAS);
 extern size_t je_chunksize_mask;
 extern void *je_huge_aalloc(const void *p);
 
-__thread int32_t g_ns_arena = -1;
-static __thread int32_t g_ns_tcache = -1;
-
 static const void *g_site_ras[MAX_SITES];
 static uint32_t g_n_site_ras;
 
@@ -108,12 +118,16 @@ static uint64_t g_n_site_infos = 1;
 
 static __thread uint32_t g_thread_site_infos[MAX_SITES];
 
+static quarantined *g_quarantined;
+static uint64_t g_n_quarantined = 0;
+
 bool g_alloc_started = false;
 static int32_t g_startup_arena = -1;
 
-static cf_alloc_debug g_debug;
+static bool g_debug;
 static bool g_indent;
 static bool g_poison;
+static uint32_t g_quarantine;
 
 static __thread as_random g_rand = { .initialized = false };
 
@@ -128,13 +142,13 @@ hook_get_arena(const void *p_indent)
 {
 	// Disregard indent by rounding down to page boundary. Works universally:
 	//
-	//   - Small / large: chunk's base aligned to 2 MiB && p >= base + 0x1000.
-	//   - Huge: p aligned to 2 MiB && MAX_INDENT < 0x1000.
+	//   - Small / large: chunk's base aligned to 2 MiB && p >= base + PAGE_SZ.
+	//   - Huge: p aligned to 2 MiB && MAX_INDENT < PAGE_SZ.
 	//
 	// A huge allocations is thus rounded to its actual p (aligned to 2 MiB),
 	// but a small or large allocation is never rounded to the chunk's base.
 
-	const void *p = (const void *)((uint64_t)p_indent & ~0xffful);
+	const void *p = (const void *)((uint64_t)p_indent & -PAGE_SZ);
 
 	int32_t **base = (int32_t **)((uint64_t)p & ~je_chunksize_mask);
 	int32_t *arena;
@@ -387,6 +401,56 @@ hook_handle_free(const void *ra, void *p, void *p_user, size_t jem_sz,
 	}
 }
 
+static void
+hook_quarantine_or_free(const void *ra, void *p, size_t jem_sz, int32_t flags)
+{
+	if (g_quarantine == 0 || jem_sz > MAX_POISON_SZ) {
+		jem_sdallocx(p, jem_sz, flags);
+		return;
+	}
+
+	uint32_t i;
+	quarantined *q;
+
+	for (i = 0; i < g_quarantine; i++) {
+		uint64_t n = as_faa_uint64(&g_n_quarantined, 1);
+		q = g_quarantined + n % g_quarantine;
+
+		if (cf_mutex_trylock(&q->mutex)) {
+			break;
+		}
+	}
+
+	if (i == g_quarantine) {
+		jem_sdallocx(p, jem_sz, flags);
+		return;
+	}
+
+	if (q->p != NULL) {
+		uint32_t hash = cf_wyhash32(q->p, q->jem_sz);
+
+		if (hash != q->hash) {
+			cf_thread_run_fn run = cf_thread_get_run_fn(q->thread_id);
+
+			cf_crash_nostack(CF_ALLOC,
+				"use after free in %u@%p, quarantined on thread 0x%lx with RA 0x%lx",
+				q->jem_sz, q->p, cf_strip_aslr(run),
+				cf_strip_aslr(as_load_rlx(g_site_ras + q->site_id)));
+		}
+
+		jem_sdallocx(q->p, q->jem_sz, q->flags);
+	}
+
+	q->site_id = hook_get_site_id(ra);
+	q->thread_id = cf_thread_sys_tid();
+	q->p = p;
+	q->jem_sz = (uint32_t)jem_sz;
+	q->flags = flags;
+	q->hash = cf_wyhash32(p, jem_sz);
+
+	cf_mutex_unlock(&q->mutex);
+}
+
 static uint32_t
 indent_hops(void *p)
 {
@@ -406,7 +470,7 @@ indent_hops(void *p)
 		n_hops &= ~1U; // make it even - results in 16-byte aligned indents
 		p_indent = (void **)p + n_hops;
 	}
-	while (((uint64_t)p_indent & 0xfff) == 0);
+	while (((uint64_t)p_indent & (PAGE_SZ - 1)) == 0);
 
 	return n_hops;
 }
@@ -453,7 +517,7 @@ outdent(void *p_indent)
 {
 	// Aligned allocations aren't indented.
 
-	if (((uint64_t)p_indent & 0xfff) == 0) {
+	if (((uint64_t)p_indent & (PAGE_SZ - 1)) == 0) {
 		return p_indent;
 	}
 
@@ -475,6 +539,22 @@ outdent(void *p_indent)
 }
 
 static void
+page_size_check(void)
+{
+	int64_t page_sz = sysconf(_SC_PAGESIZE);
+
+	if (page_sz < 0) {
+		cf_crash_nostack(CF_ALLOC, "failed to get kernel page size: %d (%s)",
+			errno, cf_strerror(errno));
+	}
+
+	if ((uint64_t)page_sz != PAGE_SZ) {
+		cf_crash_nostack(CF_ALLOC, "bad kernel page size %ld, expected %lu",
+			page_sz, PAGE_SZ);
+	}
+}
+
+static void
 valgrind_check(void)
 {
 	// Make sure that we actually call into JEMalloc when invoking malloc().
@@ -484,7 +564,7 @@ valgrind_check(void)
 	//
 	// The problem with this is that Valgrind only redirects the standard API
 	// functions. It does not know about, and thus doesn't redirect, our
-	// non-standard functions, e.g., cf_alloc_malloc_arena().
+	// non-standard functions, e.g., cf_alloc_try_malloc().
 	//
 	// As we use both, standard and non-standard functions, to allocate memory,
 	// we would end up with an inconsistent mix of allocations, some allocated
@@ -530,6 +610,7 @@ valgrind_check(void)
 void
 cf_alloc_init(void)
 {
+	page_size_check();
 	valgrind_check();
 
 	// Turn off libstdc++'s memory caching, as it just duplicates JEMalloc's.
@@ -559,31 +640,40 @@ cf_alloc_init(void)
 	}
 }
 
+static void
+prepare_quarantine(void)
+{
+	size_t size = (g_quarantine * sizeof(quarantined) + PAGE_SZ - 1) &
+		-(size_t)PAGE_SZ;
+
+	g_quarantined = mmap(NULL, size, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+	if (g_quarantined == MAP_FAILED) {
+		cf_crash(CF_ALLOC, "failed to map %zu bytes for quarantine", size);
+	}
+
+	for (size_t i = 0; i < g_quarantine; i++) {
+		quarantined *q = g_quarantined + i;
+
+		cf_mutex_init(&q->mutex);
+	}
+}
+
 void
-cf_alloc_set_debug(cf_alloc_debug debug_allocations, bool indent_allocations,
-		bool poison_allocations)
+cf_alloc_set_debug(bool debug_allocations, bool indent_allocations,
+		bool poison_allocations, uint32_t quarantine_allocations)
 {
 	g_debug = debug_allocations;
 	g_indent = indent_allocations;
 	g_poison = poison_allocations;
+	g_quarantine = quarantine_allocations;
 
-	g_alloc_started = true;
-}
-
-int32_t
-cf_alloc_create_arena(void)
-{
-	int32_t arena;
-	size_t arena_len = sizeof(arena);
-
-	int err = jem_mallctl("arenas.extend", &arena, &arena_len, NULL, 0);
-
-	if (err != 0) {
-		cf_crash(CF_ALLOC, "failed to create new arena: %d (%s)", err, cf_strerror(err));
+	if (quarantine_allocations != 0) {
+		prepare_quarantine();
 	}
 
-	cf_debug(CF_ALLOC, "created new arena %d", arena);
-	return arena;
+	g_alloc_started = true;
 }
 
 void
@@ -753,66 +843,32 @@ cf_alloc_log_site_infos(const char *file)
 }
 
 static bool
-is_transient(int32_t arena)
+want_debug_alloc(void)
 {
-	// Note that this also considers -1 (i.e., the default thread arena)
-	// to be transient, in addition to arenas 0 .. (N_ARENAS - 1).
-
-	return arena < N_ARENAS;
+	// Exempt allocations during the startup phase.
+	return g_debug && g_alloc_started;
 }
 
 static bool
-want_debug(int32_t arena)
+want_debug_free(int32_t arena)
 {
-	// No debugging during startup and for startup arena.
+	// Expect the startup arena during the startup phase.
+	cf_assert(g_alloc_started || arena == N_ARENAS, CF_ALLOC,
+			"bad arena %d during startup", arena);
 
-	if (!g_alloc_started || arena == N_ARENAS) {
-		return false;
-	}
-
-	switch (g_debug) {
-	case CF_ALLOC_DEBUG_NONE:
-		return false;
-
-	case CF_ALLOC_DEBUG_TRANSIENT:
-		return is_transient(arena);
-
-	case CF_ALLOC_DEBUG_PERSISTENT:
-		return !is_transient(arena);
-
-	case CF_ALLOC_DEBUG_ALL:
-		return true;
-	}
-
-	// Not reached.
-	return false;
+	// Exempt allocations in the startup arena.
+	return g_debug && arena != N_ARENAS;
 }
 
 static int32_t
 calc_free_flags(int32_t arena)
 {
+	// Expect the startup arena during the startup phase.
 	cf_assert(g_alloc_started || arena == N_ARENAS, CF_ALLOC,
 			"bad arena %d during startup", arena);
 
 	// Bypass the thread-local cache for allocations in the startup arena.
-
-	if (arena == g_startup_arena) {
-		return MALLOCX_TCACHE_NONE;
-	}
-
-	// If it's a transient allocation, then simply use the default
-	// thread-local cache. No flags needed. Same, if we don't debug
-	// at all; then we can save ourselves the second cache.
-
-	if (is_transient(arena) || g_debug == CF_ALLOC_DEBUG_NONE) {
-		return 0;
-	}
-
-	// If it's a persistent allocation, then use the second per-thread
-	// cache. Add it to the flags. See calc_alloc_flags() for more on
-	// this second cache.
-
-	return MALLOCX_TCACHE(g_ns_tcache);
+	return arena == g_startup_arena ? MALLOCX_TCACHE_NONE : 0;
 }
 
 static void
@@ -825,7 +881,7 @@ do_free(void *p_indent, const void *ra)
 	int32_t arena = hook_get_arena(p_indent);
 	int32_t flags = calc_free_flags(arena);
 
-	if (!want_debug(arena)) {
+	if (!want_debug_free(arena)) {
 		jem_dallocx(p_indent, flags); // not indented
 		return;
 	}
@@ -834,7 +890,7 @@ do_free(void *p_indent, const void *ra)
 	size_t jem_sz = jem_sallocx(p, 0);
 
 	hook_handle_free(ra, p, p_indent, jem_sz, g_poison);
-	jem_sdallocx(p, jem_sz, flags);
+	hook_quarantine_or_free(ra, p, jem_sz, flags);
 }
 
 void
@@ -844,107 +900,45 @@ free(void *p_indent)
 	do_free(p_indent, __builtin_return_address(0));
 }
 
-static void
-tcache_destroy(void *udata)
-{
-	(void)udata;
-
-	if (g_ns_tcache >= 0) {
-		size_t len = sizeof(g_ns_tcache);
-
-		int err = jem_mallctl("tcache.destroy", NULL, 0, &g_ns_tcache, len);
-
-		if (err != 0) {
-			cf_crash(CF_ALLOC, "failed to destroy cache: %d (%s)", err, cf_strerror(err));
-		}
-
-		g_ns_tcache = -1;
-	}
-}
-
 static int32_t
-calc_alloc_flags(int32_t flags, int32_t arena)
+calc_alloc_flags(int32_t flags)
 {
-	cf_assert(g_alloc_started || arena < 0, CF_ALLOC,
-			"bad arena %d during startup", arena);
+	if (g_alloc_started) {
+		// Default arena - no additional flags needed.
+		return flags;
+	}
 
 	// During startup, allocate from the startup arena and bypass the
 	// thread-local cache.
 
-	if (!g_alloc_started) {
-		// Create startup arena, if necessary.
-		if (g_startup_arena < 0) {
-			size_t len = sizeof(g_startup_arena);
+	if (g_startup_arena < 0) {
+		size_t len = sizeof(g_startup_arena);
 
-			int err = jem_mallctl("arenas.extend", &g_startup_arena, &len,
-					NULL, 0);
-
-			if (err != 0) {
-				cf_crash(CF_ALLOC, "failed to create startup arena: %d (%s)",
-						err, cf_strerror(err));
-			}
-
-			// Expect arena 149.
-			cf_assert(g_startup_arena == N_ARENAS, CF_ALLOC,
-					"bad startup arena %d", g_startup_arena);
-		}
-
-		// Set startup arena, bypass thread-local cache.
-		flags |= MALLOCX_ARENA(g_startup_arena) | MALLOCX_TCACHE_NONE;
-
-		return flags;
-	}
-
-	// Default arena and default thread-local cache. No additional flags
-	// needed.
-
-	if (arena < 0) {
-		return flags;
-	}
-
-	// We're allocating from a specific arena. Add it to the flags.
-
-	flags |= MALLOCX_ARENA(arena);
-
-	// If it's an arena for transient allocations, then we use the default
-	// thread-local cache. No additional flags needed. Same, if we don't
-	// debug at all; then we can save ourselves the second cache.
-
-	if (is_transient(arena) || g_debug == CF_ALLOC_DEBUG_NONE) {
-		return flags;
-	}
-
-	// We have a second per-thread cache for persistent allocations. In this
-	// way we never mix persistent allocations and transient allocations in
-	// the same cache. We need to keep them apart, because debugging may be
-	// enabled for one, but not the other.
-
-	// Create the second per-thread cache, if we haven't already done so.
-
-	if (g_ns_tcache < 0) {
-		size_t len = sizeof(g_ns_tcache);
-
-		int err = jem_mallctl("tcache.create", &g_ns_tcache, &len, NULL, 0);
+		int err = jem_mallctl("arenas.extend", &g_startup_arena, &len,
+				NULL, 0);
 
 		if (err != 0) {
-			cf_crash(CF_ALLOC, "failed to create new cache: %d (%s)", err, cf_strerror(err));
+			cf_crash(CF_ALLOC, "failed to create startup arena: %d (%s)",
+					err, cf_strerror(err));
 		}
 
-		cf_thread_add_exit(tcache_destroy, NULL);
+		// Expect arena 149.
+		cf_assert(g_startup_arena == N_ARENAS, CF_ALLOC,
+				"bad startup arena %d", g_startup_arena);
 	}
 
-	// Add the second (non-default) per-thread cache to the flags.
+	// Set startup arena, bypass thread-local cache.
+	flags |= MALLOCX_ARENA(g_startup_arena) | MALLOCX_TCACHE_NONE;
 
-	flags |= MALLOCX_TCACHE(g_ns_tcache);
 	return flags;
 }
 
 static void *
-do_mallocx(size_t sz, int32_t arena, const void *ra)
+do_mallocx(size_t sz, const void *ra)
 {
-	int32_t flags = calc_alloc_flags(0, arena);
+	int32_t flags = calc_alloc_flags(0);
 
-	if (!want_debug(arena)) {
+	if (!want_debug_alloc()) {
 		return jem_mallocx(sz == 0 ? 1 : sz, flags);
 	}
 
@@ -970,27 +964,14 @@ void *
 cf_alloc_try_malloc(size_t sz)
 {
 	// Allowed to return NULL.
-	return do_mallocx(sz, -1, __builtin_return_address(0));
-}
-
-void *
-cf_alloc_malloc_arena(size_t sz, int32_t arena)
-{
-	cf_assert(g_alloc_started, CF_ALLOC, "arena allocation during startup");
-
-	void *p_indent = do_mallocx(sz, arena, __builtin_return_address(0));
-
-	cf_assert(p_indent != NULL, CF_ALLOC, "malloc_ns failed sz %zu arena %d",
-			sz, arena);
-
-	return p_indent;
+	return do_mallocx(sz, __builtin_return_address(0));
 }
 
 void *
 __attribute__ ((noinline))
 malloc(size_t sz)
 {
-	void *p_indent = do_mallocx(sz, -1, __builtin_return_address(0));
+	void *p_indent = do_mallocx(sz, __builtin_return_address(0));
 
 	cf_assert(p_indent != NULL, CF_ALLOC, "malloc failed sz %zu", sz);
 
@@ -998,12 +979,12 @@ malloc(size_t sz)
 }
 
 static void *
-do_callocx(size_t n, size_t sz, int32_t arena, const void *ra)
+do_callocx(size_t n, size_t sz, const void *ra)
 {
-	int32_t flags = calc_alloc_flags(MALLOCX_ZERO, arena);
+	int32_t flags = calc_alloc_flags(MALLOCX_ZERO);
 	size_t tot_sz = n * sz;
 
-	if (!want_debug(arena)) {
+	if (!want_debug_alloc()) {
 		return jem_mallocx(tot_sz == 0 ? 1 : tot_sz, flags);
 	}
 
@@ -1022,22 +1003,9 @@ do_callocx(size_t n, size_t sz, int32_t arena, const void *ra)
 }
 
 void *
-cf_alloc_calloc_arena(size_t n, size_t sz, int32_t arena)
-{
-	cf_assert(g_alloc_started, CF_ALLOC, "arena allocation during startup");
-
-	void *p_indent = do_callocx(n, sz, arena, __builtin_return_address(0));
-
-	cf_assert(p_indent != NULL, CF_ALLOC,
-			"calloc_ns failed n %zu sz %zu arena %d", n, sz, arena);
-
-	return p_indent;
-}
-
-void *
 calloc(size_t n, size_t sz)
 {
-	void *p_indent = do_callocx(n, sz, -1, __builtin_return_address(0));
+	void *p_indent = do_callocx(n, sz, __builtin_return_address(0));
 
 	cf_assert(p_indent != NULL, CF_ALLOC, "calloc failed n %zu sz %zu", n, sz);
 
@@ -1045,22 +1013,22 @@ calloc(size_t n, size_t sz)
 }
 
 static void *
-do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
+do_rallocx(void *p_indent, size_t sz, const void *ra)
 {
 	if (p_indent == NULL) {
-		return do_mallocx(sz, arena, ra);
+		return do_mallocx(sz, ra);
 	}
 
 	int32_t arena_p = hook_get_arena(p_indent);
 
-	bool debug_p = want_debug(arena_p);
-	bool debug = want_debug(arena);
+	bool debug_p = want_debug_free(arena_p);
+	bool debug = want_debug_alloc();
 
 	// Allow debug change for startup arena - handled below.
 
 	if (debug != debug_p && arena_p != N_ARENAS) {
-		cf_crash(CF_ALLOC, "debug change - p_indent %p arena_p %d arena %d",
-				p_indent, arena_p, arena);
+		cf_crash(CF_ALLOC, "debug change - p_indent %p arena_p %d", p_indent,
+				arena_p);
 	}
 
 	if (sz == 0) {
@@ -1068,7 +1036,7 @@ do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
 		return NULL;
 	}
 
-	int32_t flags = calc_alloc_flags(0, arena);
+	int32_t flags = calc_alloc_flags(0);
 
 	// Going from startup or non-debug arena to non-debug arena.
 
@@ -1080,7 +1048,7 @@ do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
 
 	if (arena_p == N_ARENAS) {
 		void *p = p_indent; // not indented
-		void *p_move = do_mallocx(sz, arena, ra);
+		void *p_move = do_mallocx(sz, ra);
 
 		size_t sz_move = jem_sallocx(p, 0);
 
@@ -1116,23 +1084,9 @@ do_rallocx(void *p_indent, size_t sz, int32_t arena, const void *ra)
 }
 
 void *
-cf_alloc_realloc_arena(void *p_indent, size_t sz, int32_t arena)
-{
-	cf_assert(g_alloc_started, CF_ALLOC, "arena allocation during startup");
-
-	void *p2_indent = do_rallocx(p_indent, sz, arena,
-			__builtin_return_address(0));
-
-	cf_assert(p2_indent != NULL || sz == 0, CF_ALLOC,
-			"realloc_ns failed sz %zu arena %d", sz, arena);
-
-	return p2_indent;
-}
-
-void *
 realloc(void *p_indent, size_t sz)
 {
-	void *p2_indent = do_rallocx(p_indent, sz, -1, __builtin_return_address(0));
+	void *p2_indent = do_rallocx(p_indent, sz, __builtin_return_address(0));
 
 	cf_assert(p2_indent != NULL || sz == 0, CF_ALLOC, "realloc failed sz %zu",
 			sz);
@@ -1143,12 +1097,12 @@ realloc(void *p_indent, size_t sz)
 static char *
 do_strdup(const char *s, size_t n, const void *ra)
 {
-	int32_t flags = calc_alloc_flags(0, -1);
+	int32_t flags = calc_alloc_flags(0);
 
 	size_t sz = n + 1;
 	size_t ext_sz = sz;
 
-	if (want_debug(-1)) {
+	if (want_debug_alloc()) {
 		ext_sz += sizeof(uint32_t);
 
 		if (g_indent) {
@@ -1159,7 +1113,7 @@ do_strdup(const char *s, size_t n, const void *ra)
 	char *s2 = jem_mallocx(ext_sz, flags);
 	char *s2_indent = s2;
 
-	if (want_debug(-1)) {
+	if (want_debug_alloc()) {
 		if (g_indent) {
 			s2_indent = indent(s2);
 		}
@@ -1237,14 +1191,14 @@ posix_memalign(void **p, size_t align, size_t sz)
 	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
 	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
 
-	if (!want_debug(-1)) {
+	if (!want_debug_alloc()) {
 		return jem_posix_memalign(p, align, sz == 0 ? 1 : sz);
 	}
 
-	// When indentation is enabled, align to 4096+ to mark as unindented.
+	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
 
 	if (g_indent) {
-		align = (align + 0xffful) & ~0xffful;
+		align = (align + (PAGE_SZ - 1)) & -PAGE_SZ;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
@@ -1264,14 +1218,14 @@ aligned_alloc(size_t align, size_t sz)
 	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
 	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
 
-	if (!want_debug(-1)) {
+	if (!want_debug_alloc()) {
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
 	}
 
-	// When indentation is enabled, align to 4096+ to mark as unindented.
+	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
 
 	if (g_indent) {
-		align = (align + 0xffful) & ~0xffful;
+		align = (align + (PAGE_SZ - 1)) & -PAGE_SZ;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
@@ -1285,7 +1239,7 @@ aligned_alloc(size_t align, size_t sz)
 static void *
 do_valloc(size_t sz)
 {
-	if (!want_debug(-1)) {
+	if (!want_debug_alloc()) {
 		return jem_aligned_alloc(PAGE_SZ, sz == 0 ? 1 : sz);
 	}
 
@@ -1317,14 +1271,14 @@ memalign(size_t align, size_t sz)
 	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
 	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
 
-	if (!want_debug(-1)) {
+	if (!want_debug_alloc()) {
 		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
 	}
 
-	// When indentation is enabled, align to 4096+ to mark as unindented.
+	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
 
 	if (g_indent) {
-		align = (align + 0xffful) & ~0xffful;
+		align = (align + (PAGE_SZ - 1)) & -PAGE_SZ;
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
@@ -1353,7 +1307,7 @@ do_validate_pointer(const void* p_indent, const void* ra)
 
 	int32_t arena = hook_get_arena(p_indent);
 
-	if (! want_debug(arena)) {
+	if (! want_debug_free(arena)) {
 		return;
 	}
 
@@ -1372,12 +1326,12 @@ cf_validate_pointer(const void* p_indent)
 void *
 cf_rc_alloc(size_t sz)
 {
-	int32_t flags = calc_alloc_flags(0, -1);
+	int32_t flags = calc_alloc_flags(0);
 
 	size_t tot_sz = sizeof(cf_rc_header) + sz;
 	size_t ext_sz = tot_sz;
 
-	if (want_debug(-1)) {
+	if (want_debug_alloc()) {
 		ext_sz += sizeof(uint32_t);
 
 		if (g_indent) {
@@ -1388,7 +1342,7 @@ cf_rc_alloc(size_t sz)
 	void *p = jem_mallocx(ext_sz, flags);
 	void *p_indent = p;
 
-	if (want_debug(-1)) {
+	if (want_debug_alloc()) {
 		if (g_indent) {
 			p_indent = indent(p);
 		}
@@ -1421,7 +1375,7 @@ do_rc_free(void *body, void *ra)
 	int32_t arena = hook_get_arena(head);
 	int32_t flags = calc_free_flags(arena);
 
-	if (!want_debug(arena)) {
+	if (!want_debug_free(arena)) {
 		jem_dallocx(head, flags); // not indented
 		return;
 	}
@@ -1430,7 +1384,7 @@ do_rc_free(void *body, void *ra)
 	size_t jem_sz = jem_sallocx(p, 0);
 
 	hook_handle_free(ra, p, body, jem_sz, g_poison);
-	jem_sdallocx(p, jem_sz, flags);
+	hook_quarantine_or_free(ra, p, jem_sz, flags);
 }
 
 void

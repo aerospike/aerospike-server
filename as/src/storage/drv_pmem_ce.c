@@ -56,12 +56,6 @@ pmem_crash_ce(void)
 //
 
 void
-as_storage_cfg_init_pmem(as_namespace* ns)
-{
-	pmem_crash_ce();
-}
-
-void
 as_storage_init_pmem(as_namespace* ns)
 {
 	pmem_crash_ce();
@@ -157,13 +151,6 @@ as_storage_record_write_pmem(as_storage_rd* rd)
 	pmem_crash_ce();
 }
 
-bool
-as_storage_overloaded_pmem(const as_namespace* ns, uint32_t margin,
-		const char* tag)
-{
-	pmem_crash_ce();
-}
-
 void
 as_storage_defrag_sweep_pmem(as_namespace* ns)
 {
@@ -220,7 +207,7 @@ as_storage_flush_pmeta_pmem(as_namespace* ns, uint32_t start_pid,
 }
 
 void
-as_storage_stats_pmem(as_namespace* ns, int* available_pct,
+as_storage_stats_pmem(as_namespace* ns, uint32_t* avail_pct,
 		uint64_t* used_bytes)
 {
 	pmem_crash_ce();
@@ -247,12 +234,6 @@ as_storage_dump_wb_summary_pmem(const as_namespace* ns)
 
 void
 as_storage_histogram_clear_pmem(as_namespace* ns)
-{
-	pmem_crash_ce();
-}
-
-uint32_t
-as_storage_record_device_size_pmem(const as_record* r)
 {
 	pmem_crash_ce();
 }

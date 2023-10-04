@@ -31,6 +31,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_b64.h"
@@ -76,6 +77,11 @@ typedef struct as_sindex_def_s {
 	uint32_t ctx_buf_sz;
 } as_sindex_def;
 
+typedef struct defn_hash_key_s {
+	uint16_t set_id;
+	char bin_name[AS_BIN_NAME_MAX_SZ];
+} defn_hash_key;
+
 typedef struct defn_hash_ele_s {
 	cf_ll_element ele;
 	as_sindex* si;
@@ -111,21 +117,17 @@ static bool smd_item_to_def(const char* smd_key, const char* smd_value, as_sinde
 static void smd_create(as_sindex_def* def, bool startup);
 static void smd_drop(as_sindex_def* def);
 static void rename_sindex(as_sindex* si, const char* iname);
-static void add_sindex(as_sindex* si, uint16_t bin_id);
+static void add_sindex(as_sindex* si);
 static void delete_sindex(as_sindex* si);
 
-static void defn_hash_put(as_sindex* si, uint16_t bin_id);
+static uint32_t defn_hash_fn(const void* key);
+static void defn_hash_put(as_sindex* si);
 static void defn_hash_delete(as_sindex* si);
 static void defn_hash_destroy_cb(cf_ll_element* ele);
 
-static void bin_bitmap_set(as_namespace* ns, uint32_t bin_id);
-static void bin_bitmap_clear(as_namespace* ns, uint32_t bin_id);
-static bool bin_bitmap_is_set(const as_namespace* ns, uint32_t bin_id);
-
-static uint32_t si_arr_by_set_and_bin(const as_namespace* ns, uint16_t set_id, uint16_t bin_id, as_sindex** si_arr);
-static uint32_t sbins_arr_from_bin(as_namespace* ns, uint16_t set_id, const as_bin* b, as_sindex_bin* start_sbin, as_sindex_op op);
-static cf_ll* si_list_by_defn(const as_namespace* ns, uint16_t set_id, uint16_t bin_id);
-static as_sindex* si_by_defn(const as_namespace* ns, uint16_t set_id, uint16_t bin_id, as_particle_type ktype, as_sindex_type itype, const uint8_t* ctx_buf, uint32_t ctx_buf_sz);
+static uint32_t sbins_arr_from_bin(as_namespace* ns, uint16_t set_id, const as_bin* b, as_sindex_bin* sbins, as_sindex_op op);
+static cf_ll* si_list_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name);
+static as_sindex* si_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name, as_particle_type ktype, as_sindex_type itype, const uint8_t* ctx_buf, uint32_t ctx_buf_sz);
 static bool compare_ctx(const uint8_t* ctx1_buf, uint32_t ctx1_buf_sz, const uint8_t* ctx2_buf, uint32_t ctx2_buf_sz);
 
 static bool sbin_from_bin(as_sindex* si, const as_bin* b, as_sindex_bin* sbin);
@@ -140,6 +142,7 @@ static bool add_mapvalues_foreach(msgpack_in* key, msgpack_in* val, void* udata)
 
 static void add_long_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 static void add_string_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
+static void add_blob_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 static void add_geojson_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 
 static char const* ktype_str(as_particle_type ktype);
@@ -166,6 +169,9 @@ add_keytype_from_msgpack(as_particle_type ktype, msgpack_in* element,
 	case AS_PARTICLE_TYPE_STRING:
 		add_string_from_msgpack(element, sbin);
 		break;
+	case AS_PARTICLE_TYPE_BLOB:
+		add_blob_from_msgpack(element, sbin);
+		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
 		add_geojson_from_msgpack(element, sbin);
 		break;
@@ -184,12 +190,6 @@ as_sindex_def_free(as_sindex_def* def)
 	if (def->ctx_buf != NULL) {
 		cf_free(def->ctx_buf);
 	}
-}
-
-static inline uint32_t
-defn_key(uint32_t set_id, uint32_t bin_id)
-{
-	return (set_id << 16) | bin_id;
 }
 
 static inline void
@@ -217,8 +217,8 @@ as_sindex_init(void)
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
-		ns->sindex_defn_hash = cf_shash_create(cf_shash_fn_u32,
-				sizeof(uint32_t), sizeof(cf_ll*), MAX_N_SINDEXES + 1, false);
+		ns->sindex_defn_hash = cf_shash_create(defn_hash_fn,
+				sizeof(defn_hash_key), sizeof(cf_ll*), MAX_N_SINDEXES, false);
 
 		ns->sindex_iname_hash = cf_shash_create(cf_shash_fn_zstr,
 				INAME_MAX_SZ, sizeof(as_sindex*), MAX_N_SINDEXES, false);
@@ -303,53 +303,31 @@ as_sindex_put_rd(as_sindex* si, as_storage_rd* rd, as_index_ref* r_ref)
 //
 
 uint32_t
-as_sindex_arr_lookup_by_set_and_bin_lockfree(const as_namespace* ns,
-		uint16_t set_id, uint16_t bin_id, as_sindex** si_arr)
-{
-	if (! bin_bitmap_is_set(ns, bin_id)) {
-		return 0;
-	}
-
-	uint32_t n_sindexes = si_arr_by_set_and_bin(ns, set_id, bin_id, si_arr);
-
-	if (set_id != INVALID_SET_ID) {
-		n_sindexes += si_arr_by_set_and_bin(ns, INVALID_SET_ID, bin_id,
-				si_arr + n_sindexes);
-	}
-
-	return n_sindexes;
-}
-
-uint32_t
 as_sindex_sbins_from_bin(as_namespace* ns, uint16_t set_id, const as_bin* b,
-		as_sindex_bin* start_sbin, as_sindex_op op)
+		as_sindex_bin* sbins, as_sindex_op op)
 {
 	if (as_bin_is_tombstone(b)) {
 		return 0;
 	}
 
-	if (! bin_bitmap_is_set(ns, b->id)) {
-		return 0;
-	}
-
-	uint32_t n_populated = sbins_arr_from_bin(ns, set_id, b, start_sbin, op);
+	uint32_t n_populated = sbins_arr_from_bin(ns, set_id, b, sbins, op);
 
 	if (set_id != INVALID_SET_ID) {
 		n_populated += sbins_arr_from_bin(ns, INVALID_SET_ID, b,
-				start_sbin + n_populated, op);
+				sbins + n_populated, op);
 	}
 
 	return n_populated;
 }
 
 void
-as_sindex_update_by_sbin(as_sindex_bin* start_sbin, uint32_t n_sbins,
+as_sindex_update_by_sbin(as_sindex_bin* sbins, uint32_t n_sbins,
 		cf_arenax_handle r_h)
 {
 	// Deletes before inserts - a sindex key can recur with different op.
 
 	for (uint32_t i = 0; i < n_sbins; i++) {
-		as_sindex_bin* sbin = &start_sbin[i];
+		as_sindex_bin* sbin = &sbins[i];
 
 		if (sbin->op == AS_SINDEX_OP_DELETE) {
 			for (uint32_t j = 0; j < sbin->n_values; j++) {
@@ -361,7 +339,7 @@ as_sindex_update_by_sbin(as_sindex_bin* start_sbin, uint32_t n_sbins,
 	}
 
 	for (uint32_t i = 0; i < n_sbins; i++) {
-		as_sindex_bin* sbin = &start_sbin[i];
+		as_sindex_bin* sbin = &sbins[i];
 
 		if (sbin->op == AS_SINDEX_OP_INSERT) {
 			for (uint32_t j = 0; j < sbin->n_values; j++) {
@@ -374,10 +352,13 @@ as_sindex_update_by_sbin(as_sindex_bin* start_sbin, uint32_t n_sbins,
 }
 
 void
-as_sindex_sbin_free_all(as_sindex_bin* sbin, uint32_t n_sbins)
+as_sindex_sbin_free_all(as_sindex_bin* sbins, uint32_t n_sbins)
 {
-	for (uint32_t i = 0; i < n_sbins; i++)  {
-		sbin_free(&sbin[i]);
+	for (uint32_t i = 0; i < n_sbins; i++) {
+		as_sindex_bin* sbin = &sbins[i];
+
+		as_sindex_release(sbin->si);
+		sbin_free(sbin);
 	}
 }
 
@@ -388,27 +369,25 @@ as_sindex_sbin_free_all(as_sindex_bin* sbin, uint32_t n_sbins)
 
 as_sindex*
 as_sindex_lookup_by_defn(const as_namespace* ns, uint16_t set_id,
-		uint16_t bin_id, as_particle_type ktype, as_sindex_type itype,
+		const char* bin_name, as_particle_type ktype, as_sindex_type itype,
 		const uint8_t* ctx_buf, uint32_t ctx_buf_sz)
 {
 	SINDEX_GRLOCK();
 
-	if (! bin_bitmap_is_set(ns, bin_id)) {
+	as_sindex* si = si_by_defn(ns, set_id, bin_name, ktype, itype, ctx_buf,
+			ctx_buf_sz);
+
+	if (si == NULL && set_id != INVALID_SET_ID) {
+		si = si_by_defn(ns, INVALID_SET_ID, bin_name, ktype, itype, ctx_buf,
+				ctx_buf_sz);
+	}
+
+	if (si == NULL || si->dropped) {
 		SINDEX_GRUNLOCK();
 		return NULL;
 	}
 
-	as_sindex* si = si_by_defn(ns, set_id, bin_id, ktype, itype, ctx_buf,
-			ctx_buf_sz);
-
-	if (si == NULL && set_id != INVALID_SET_ID) {
-		si = si_by_defn(ns, INVALID_SET_ID, bin_id, ktype, itype, ctx_buf,
-				ctx_buf_sz);
-	}
-
-	if (si != NULL) {
-		as_sindex_reserve(si);
-	}
+	as_sindex_job_reserve(si);
 
 	SINDEX_GRUNLOCK();
 
@@ -455,6 +434,10 @@ as_sindex_ktype_from_string(const char* ktype_str)
 
 	if (strcasecmp(ktype_str, "string") == 0) {
 		return AS_PARTICLE_TYPE_STRING;
+	}
+
+	if (strcasecmp(ktype_str, "blob") == 0) {
+		return AS_PARTICLE_TYPE_BLOB;
 	}
 
 	if (strcasecmp(ktype_str, "geo2dsphere") == 0) {
@@ -847,16 +830,6 @@ smd_create(as_sindex_def* def, bool startup)
 		return;
 	}
 
-	uint16_t bin_id;
-
-	if (! as_bin_get_or_assign_id_w_len(ns, def->bin_name,
-			strlen(def->bin_name), &bin_id)) {
-		cf_warning(AS_SINDEX, "SINDEX CREATE: can't assign bin-id - ignoring %s",
-				def->iname);
-		SINDEX_GWUNLOCK();
-		return;
-	}
-
 	as_set* p_set = NULL;
 	uint16_t set_id = INVALID_SET_ID;
 
@@ -868,7 +841,7 @@ smd_create(as_sindex_def* def, bool startup)
 		return;
 	}
 
-	if ((cur_si = si_by_defn(ns, set_id, bin_id, def->ktype, def->itype,
+	if ((cur_si = si_by_defn(ns, set_id, def->bin_name, def->ktype, def->itype,
 			def->ctx_buf, def->ctx_buf_sz)) != NULL) {
 		cf_info(AS_SINDEX, "SINDEX CREATE: renaming %s to %s", cur_si->iname,
 				def->iname);
@@ -891,7 +864,6 @@ smd_create(as_sindex_def* def, bool startup)
 	*si = (as_sindex){
 			.ns = ns,
 			.set_id = set_id,
-			.bin_id = bin_id,
 			.ktype = def->ktype,
 			.itype = def->itype,
 			.ctx_b64 = def->ctx_b64,
@@ -917,7 +889,7 @@ smd_create(as_sindex_def* def, bool startup)
 		as_sindex_tree_resume(si);
 	}
 
-	add_sindex(si, bin_id);
+	add_sindex(si);
 
 	if (def->set_name[0] == '\0') {
 		ns->n_setless_sindexes++;
@@ -955,14 +927,6 @@ smd_drop(as_sindex_def* def)
 	SINDEX_GWLOCK();
 
 	as_namespace* ns = def->ns;
-	uint16_t bin_id;
-
-	if (! as_bin_get_id(ns, def->bin_name, &bin_id)) {
-		cf_warning(AS_SINDEX, "SINDEX DROP: bin '%s' not found", def->bin_name);
-		SINDEX_GWUNLOCK();
-		return;
-	}
-
 	uint16_t set_id = INVALID_SET_ID;
 
 	if (def->set_name[0] != '\0' && (set_id =
@@ -972,8 +936,8 @@ smd_drop(as_sindex_def* def)
 		return;
 	}
 
-	as_sindex* si = si_by_defn(ns, set_id, bin_id, def->ktype, def->itype,
-			def->ctx_buf, def->ctx_buf_sz);
+	as_sindex* si = si_by_defn(ns, set_id, def->bin_name, def->ktype,
+			def->itype, def->ctx_buf, def->ctx_buf_sz);
 
 	if (si == NULL) {
 		cf_warning(AS_SINDEX, "SINDEX DROP: defn not found");
@@ -984,7 +948,22 @@ smd_drop(as_sindex_def* def)
 	cf_info(AS_SINDEX, "SINDEX DROP: request received for %s:%s via smd",
 			ns->name, si->iname);
 
-	si->dropped = true; // allow queries, populate & GC to abort
+	si->dropped = true; // allow queries, populate, GC, collect-stats to abort
+
+	SINDEX_GWUNLOCK();
+
+	// Wait for queries etc. to be done with this sindex.
+	while (si->n_jobs != 0) {
+		usleep(100);
+	}
+
+	as_fence_acq();
+
+	// At this point, no queries etc. can operate on this sindex. It's safe to
+	// remove it and allow transactions to vacate/recycle references in the
+	// sindex without harming the queries etc. (See AER-6611.)
+
+	SINDEX_GWLOCK();
 
 	drop_from_sindexes(si); // must precede bin_bitmap_clear()
 
@@ -1017,13 +996,12 @@ rename_sindex(as_sindex* si, const char* iname)
 }
 
 static void
-add_sindex(as_sindex* si, uint16_t bin_id)
+add_sindex(as_sindex* si)
 {
 	as_namespace* ns = si->ns;
 
-	defn_hash_put(si, bin_id);
+	defn_hash_put(si);
 	cf_shash_put(ns->sindex_iname_hash, si->iname, &si);
-	bin_bitmap_set(ns, bin_id);
 }
 
 static void
@@ -1033,7 +1011,6 @@ delete_sindex(as_sindex* si)
 
 	defn_hash_delete(si);
 	cf_shash_delete(ns->sindex_iname_hash, si->iname);
-	bin_bitmap_clear(ns, si->bin_id);
 }
 
 
@@ -1041,12 +1018,20 @@ delete_sindex(as_sindex* si)
 // Local helpers - set+bin-id hash.
 //
 
+static uint32_t
+defn_hash_fn(const void* key)
+{
+	return cf_wyhash32((const uint8_t*)key, sizeof(defn_hash_key));
+}
+
 static void
-defn_hash_put(as_sindex* si, uint16_t bin_id)
+defn_hash_put(as_sindex* si)
 {
 	as_namespace* ns = si->ns;
 
-	uint32_t key = defn_key(si->set_id, bin_id);
+	defn_hash_key key = { .set_id = si->set_id };
+	strcpy(key.bin_name, si->bin_name);
+
 	cf_ll* si_ll = NULL;
 
 	int rv = cf_shash_get(ns->sindex_defn_hash, &key, &si_ll);
@@ -1068,7 +1053,9 @@ defn_hash_delete(as_sindex* si)
 {
 	as_namespace* ns = si->ns;
 
-	uint32_t key = defn_key(si->set_id, si->bin_id);
+	defn_hash_key key = { .set_id = si->set_id };
+	strcpy(key.bin_name, si->bin_name);
+
 	cf_ll* si_ll = NULL;
 
 	cf_shash_get(ns->sindex_defn_hash, &key, &si_ll);
@@ -1101,84 +1088,14 @@ defn_hash_destroy_cb(cf_ll_element* ele)
 
 
 //==========================================================
-// Local helpers - bin-id bitmap.
-//
-
-static void
-bin_bitmap_set(as_namespace* ns, uint32_t bin_id)
-{
-	uint32_t index = bin_id / 32;
-	uint32_t temp = ns->sindex_bin_bitmap[index];
-
-	temp |= (1U << (bin_id % 32));
-
-	ns->sindex_bin_bitmap[index] = temp;
-}
-
-static void
-bin_bitmap_clear(as_namespace* ns, uint32_t bin_id)
-{
-	for (uint32_t i = 0; i < MAX_N_SINDEXES; i++) {
-		as_sindex* si = ns->sindexes[i];
-
-		if (si != NULL && (uint32_t)si->bin_id == bin_id) {
-			return;
-		}
-	}
-
-	uint32_t index = bin_id / 32;
-	uint32_t temp = ns->sindex_bin_bitmap[index];
-
-	temp &= ~(1U << (bin_id % 32));
-
-	ns->sindex_bin_bitmap[index] = temp;
-}
-
-static bool
-bin_bitmap_is_set(const as_namespace* ns, uint32_t bin_id)
-{
-	uint32_t index = bin_id / 32;
-	uint32_t temp = ns->sindex_bin_bitmap[index];
-
-	return (temp & (1U << (bin_id % 32))) != 0;
-}
-
-
-//==========================================================
 // Local helpers - sindex lookup.
 //
 
 static uint32_t
-si_arr_by_set_and_bin(const as_namespace* ns,
-		uint16_t set_id, uint16_t bin_id, as_sindex** si_arr)
-{
-	cf_ll* si_ll = si_list_by_defn(ns, set_id, bin_id);
-
-	if (si_ll == NULL) {
-		return 0;
-	}
-
-	cf_ll_element* ele = cf_ll_get_head(si_ll);
-	uint32_t n_sindexes = 0;
-
-	while (ele != NULL) {
-		defn_hash_ele* si_ele = (defn_hash_ele*)ele;
-		as_sindex* si = si_ele->si;
-
-		as_sindex_reserve(si);
-
-		si_arr[n_sindexes++] = si;
-		ele = ele->next;
-	}
-
-	return n_sindexes;
-}
-
-static uint32_t
 sbins_arr_from_bin(as_namespace* ns, uint16_t set_id, const as_bin* b,
-		as_sindex_bin* start_sbin, as_sindex_op op)
+		as_sindex_bin* sbins, as_sindex_op op)
 {
-	cf_ll* si_ll = si_list_by_defn(ns, set_id, b->id);
+	cf_ll* si_ll = si_list_by_defn(ns, set_id, b->name);
 
 	if (si_ll == NULL) {
 		return 0;
@@ -1190,13 +1107,15 @@ sbins_arr_from_bin(as_namespace* ns, uint16_t set_id, const as_bin* b,
 	while (ele != NULL) {
 		defn_hash_ele* si_ele = (defn_hash_ele*)ele;
 		as_sindex* si = si_ele->si;
-		as_sindex_bin* sbin = &start_sbin[n_populated];
+		as_sindex_bin* sbin = &sbins[n_populated];
 
 		init_sbin(sbin, op, si);
 
 		if (sbin_from_bin(si, b, sbin)) {
 			n_populated++;
-			// sbin free will happen once sbin is updated in sindex tree.
+
+			as_sindex_reserve(si);
+			// Release & free will happen once sbin is updated in sindex tree.
 		}
 		else {
 			sbin_free(sbin);
@@ -1209,9 +1128,11 @@ sbins_arr_from_bin(as_namespace* ns, uint16_t set_id, const as_bin* b,
 }
 
 static cf_ll*
-si_list_by_defn(const as_namespace* ns, uint16_t set_id, uint16_t bin_id)
+si_list_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name)
 {
-	uint32_t key = defn_key(set_id, bin_id);
+	defn_hash_key key = { .set_id = set_id };
+	strcpy(key.bin_name, bin_name);
+
 	cf_ll* si_ll = NULL;
 
 	cf_shash_get(ns->sindex_defn_hash, &key, &si_ll);
@@ -1220,11 +1141,11 @@ si_list_by_defn(const as_namespace* ns, uint16_t set_id, uint16_t bin_id)
 }
 
 static as_sindex*
-si_by_defn(const as_namespace* ns, uint16_t set_id, uint16_t bin_id,
+si_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name,
 		as_particle_type ktype, as_sindex_type itype, const uint8_t* ctx_buf,
 		uint32_t ctx_buf_sz)
 {
-	cf_ll* si_ll = si_list_by_defn(ns, set_id, bin_id);
+	cf_ll* si_ll = si_list_by_defn(ns, set_id, bin_name);
 
 	if (si_ll == NULL) {
 		return NULL;
@@ -1281,7 +1202,7 @@ sbin_from_bin(as_sindex* si, const as_bin* b, as_sindex_bin* sbin)
 		}
 
 		if (! as_bin_cdt_get_by_context(b, si->ctx_buf, si->ctx_buf_sz,
-				&ctx_bin, false)) {
+				&ctx_bin)) {
 			return false;
 		}
 
@@ -1341,6 +1262,21 @@ sbin_from_simple_bin(as_sindex* si, const as_bin* b, as_sindex_bin* sbin)
 		}
 
 		add_value_to_sbin(sbin, as_sindex_string_to_bval(str, len));
+
+		return true;
+	}
+
+	if (type == AS_PARTICLE_TYPE_BLOB) {
+		uint8_t* blob;
+		uint32_t sz = as_bin_particle_blob_ptr(b, &blob);
+
+		if (sz > MAX_BLOB_KSIZE) {
+			cf_ticker_warning(AS_SINDEX, "failed sindex on bin %s - blob longer than %u",
+					si->bin_name, MAX_BLOB_KSIZE);
+			return false;
+		}
+
+		add_value_to_sbin(sbin, as_sindex_blob_to_bval(blob, sz));
 
 		return true;
 	}
@@ -1492,6 +1428,23 @@ add_string_from_msgpack(msgpack_in* element, as_sindex_bin* sbin)
 }
 
 static void
+add_blob_from_msgpack(msgpack_in* element, as_sindex_bin* sbin)
+{
+	uint32_t blob_sz;
+	const uint8_t* blob = msgpack_get_bin(element, &blob_sz);
+
+	if (blob_sz == 0 || blob == NULL || *blob != AS_PARTICLE_TYPE_BLOB) {
+		return;
+	}
+
+	// Skip as_bytes type.
+	blob++;
+	blob_sz--;
+
+	add_value_to_sbin(sbin, as_sindex_blob_to_bval(blob, blob_sz));
+}
+
+static void
 add_geojson_from_msgpack(msgpack_in* element, as_sindex_bin* sbin)
 {
 	uint32_t json_sz;
@@ -1546,6 +1499,7 @@ ktype_str(as_particle_type ktype)
 	switch (ktype) {
 	case AS_PARTICLE_TYPE_INTEGER: return "numeric";
 	case AS_PARTICLE_TYPE_STRING: return "string";
+	case AS_PARTICLE_TYPE_BLOB: return "blob";
 	case AS_PARTICLE_TYPE_GEOJSON: return "geo2dsphere";
 	default:
 		cf_crash(AS_SINDEX, "invalid ktype %d", ktype);
@@ -1560,6 +1514,7 @@ ktype_from_smd_char(char c)
 	switch (c) {
 	case 'I': return AS_PARTICLE_TYPE_INTEGER;
 	case 'S': return AS_PARTICLE_TYPE_STRING;
+	case 'B': return AS_PARTICLE_TYPE_BLOB;
 	case 'G': return AS_PARTICLE_TYPE_GEOJSON;
 	default:
 		cf_warning(AS_SINDEX, "invalid smd ktype %c", c);
@@ -1573,6 +1528,7 @@ ktype_to_smd_char(as_particle_type ktype)
 	switch (ktype) {
 	case AS_PARTICLE_TYPE_INTEGER: return 'I';
 	case AS_PARTICLE_TYPE_STRING: return 'S';
+	case AS_PARTICLE_TYPE_BLOB: return 'B';
 	case AS_PARTICLE_TYPE_GEOJSON: return 'G';
 	default:
 		cf_crash(AS_SINDEX, "invalid ktype %d", ktype);
@@ -1626,18 +1582,18 @@ run_cardinality(void* udata)
 
 			as_sindex* si = ns->sindexes[i];
 
-			if (si == NULL || ! si->readable) {
+			if (si == NULL || si->dropped || ! si->readable) {
 				SINDEX_GRUNLOCK();
 				continue;
 			}
 
-			as_sindex_reserve(si);
+			as_sindex_job_reserve(si);
 
 			SINDEX_GRUNLOCK();
 
 			as_sindex_tree_collect_cardinality(si);
 
-			as_sindex_release(si);
+			as_sindex_job_release(si);
 		}
 
 		sleep(CARDINALITY_PERIOD);

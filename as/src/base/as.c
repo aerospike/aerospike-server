@@ -352,12 +352,12 @@ as_run(int argc, char **argv)
 	// initialized.
 	as_namespaces_init(cold_start_cmd, instance);
 
-	// Initialize the storage system. For warm and cool restarts, this includes
-	// fully resuming persisted indexes.
+	// Initialize the storage system. For warm restarts, this includes fully
+	// resuming persisted indexes.
 	as_storage_init();
 	// ... This could block for minutes ....................
 
-	// For warm and cool restarts, fully resume persisted sindexes.
+	// For warm restarts, fully resume persisted sindexes.
 	as_sindex_resume();
 	// ... This could block for minutes ....................
 
@@ -367,12 +367,12 @@ as_run(int argc, char **argv)
 	// Drop capabilities that we kept only for initialization.
 	cf_process_drop_startup_caps();
 
-	// For cold starts and cool restarts, this does full drive scans. (Also
-	// populates data-in-memory namespaces' secondary indexes.)
+	// For cold starts, this does full drive scans. (Also populates
+	// storage-engine memory & pmem namespaces' secondary indexes.)
 	as_storage_load();
 	// ... This could block for hours ......................
 
-	// Populate data-not-in-memory namespaces' secondary indexes.
+	// Populate storage-engine device namespaces' secondary indexes.
 	as_sindex_load();
 	// ... This could block for a while ....................
 

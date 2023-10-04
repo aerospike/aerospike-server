@@ -497,7 +497,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 				r->last_update_time < cbi->lut) {
 			cbi->n_deleted++;
 
-			if (ns->storage_data_in_memory ||
+			if (ns->storage_type != AS_STORAGE_ENGINE_SSD ||
 					ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 				remove_from_sindex(ns, r_ref);
 			}
@@ -515,7 +515,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 		if (r->last_update_time < cbi->lut) {
 			cbi->n_deleted++;
 
-			if (ns->storage_data_in_memory ||
+			if (ns->storage_type != AS_STORAGE_ENGINE_SSD ||
 					ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 				remove_from_sindex(ns, r_ref);
 			}

@@ -63,11 +63,10 @@ typedef struct as_index_s {
 	uint64_t right_h: 40;
 
 	// offset: 34
-	uint16_t set_id_bits: 10;
-	uint16_t : 2;
+	uint16_t set_id_bits: 12;
 	uint16_t in_sindex: 1;
 	uint16_t xdr_bin_cemetery: 1;
-	uint16_t has_bin_meta: 1; // for data-in-memory only
+	uint16_t has_bin_meta: 1; // named for warm restart erase (was for old DIM)
 	uint16_t xdr_write: 1;
 
 	// offset: 36
@@ -93,10 +92,7 @@ typedef struct as_index_s {
 	uint8_t : 4;
 
 	// offset: 56
-	// For data-not-in-memory namespaces, these 8 bytes are currently unused.
-	// For data-in-memory namespaces, this is a pointer to either of:
-	// - an as_bin_space containing n_bins and an array of as_bin structs
-	// - an as_rec_space containing an as_bin_space pointer and other metadata
+	// These 8 bytes are currently unused.
 	void* dim;
 
 	// final size: 64
@@ -176,29 +172,6 @@ as_index_clear_in_sindex(as_index* index)
 	if (index->in_sindex == 1) {
 		as_index_release(index);
 		index->in_sindex = 0;
-	}
-}
-
-
-//------------------------------------------------
-// as_bin_space & as_rec_space.
-//
-
-static inline as_bin_space*
-as_index_get_bin_space(const as_index* index)
-{
-	return index->key_stored == 1 ?
-			((as_rec_space*)index->dim)->bin_space : (as_bin_space*)index->dim;
-}
-
-static inline void
-as_index_set_bin_space(as_index* index, as_bin_space* bin_space)
-{
-	if (index->key_stored == 1) {
-		((as_rec_space*)index->dim)->bin_space = bin_space;
-	}
-	else {
-		index->dim = (void*)bin_space;
 	}
 }
 

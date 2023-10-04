@@ -152,6 +152,20 @@ bool msgpack_get_double(msgpack_in *mp, double *x);
 const uint8_t *msgpack_get_bin(msgpack_in *mp, uint32_t *sz_r);
 
 bool msgpack_get_ext(msgpack_in *mp, msgpack_ext *ext);
+static inline uint32_t
+msgpack_buf_get_ext(const uint8_t *buf, uint32_t buf_sz, msgpack_ext *ext)
+{
+	msgpack_in mp = {
+			.buf = buf,
+			.buf_sz = buf_sz
+	};
+
+	if (! msgpack_get_ext(&mp, ext)) {
+		return 0;
+	}
+
+	return mp.offset;
+}
 
 bool msgpack_get_list_ele_count(msgpack_in *mp, uint32_t *count_r);
 static inline bool
@@ -179,6 +193,8 @@ msgpack_buf_get_map_ele_count(const uint8_t *buf, uint32_t buf_sz,
 }
 
 uint32_t msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified);
+uint32_t msgpack_compactify_element(uint8_t *dest, const uint8_t *src);
+const uint8_t *msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count, msgpack_type *type, bool *has_nonstorage, bool *not_compact);
 
 uint32_t msgpack_sz_vec(msgpack_in_vec *mv);
 bool msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value);

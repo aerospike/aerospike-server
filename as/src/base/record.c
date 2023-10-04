@@ -44,7 +44,7 @@
 #include "base/xdr.h"
 #include "fabric/exchange.h" // for compatibility-id only
 #include "sindex/gc.h"
-#include "storage/flat.h" // for compatibility-id only
+#include "storage/flat.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
@@ -53,10 +53,9 @@
 // Forward declarations.
 //
 
-static void record_replace_failed(as_remote_record *rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
+static void record_replace_failed(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
 
-static int record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
-static int record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd);
+static int record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd);
 
 
 //==========================================================
@@ -85,8 +84,8 @@ resolve_generation(uint16_t left, uint16_t right)
 //  0 - found existing record
 // -1 - failure - could not allocate arena stage
 int
-as_record_get_create(as_index_tree *tree, const cf_digest *keyd,
-		as_index_ref *r_ref, as_namespace *ns)
+as_record_get_create(as_index_tree* tree, const cf_digest* keyd,
+		as_index_ref* r_ref, as_namespace* ns)
 {
 	int rv = as_index_get_insert_vlock(tree, keyd, r_ref);
 
@@ -101,7 +100,7 @@ as_record_get_create(as_index_tree *tree, const cf_digest *keyd,
 //  0 - found
 // -1 - not found
 int
-as_record_get(as_index_tree *tree, const cf_digest *keyd, as_index_ref *r_ref)
+as_record_get(as_index_tree* tree, const cf_digest* keyd, as_index_ref* r_ref)
 {
 	return as_index_get_vlock(tree, keyd, r_ref);
 }
@@ -109,9 +108,9 @@ as_record_get(as_index_tree *tree, const cf_digest *keyd, as_index_ref *r_ref)
 // Done with record - unlock. If record was removed from tree and is not
 // reserved (by reduce), destroy record and free arena element.
 void
-as_record_done(as_index_ref *r_ref, as_namespace *ns)
+as_record_done(as_index_ref* r_ref, as_namespace* ns)
 {
-	as_record *r = r_ref->r;
+	as_record* r = r_ref->r;
 
 	if (! as_index_is_valid_record(r)) {
 		if (r->rc == 0) {
@@ -134,8 +133,15 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 //
 
 // TODO - inline this, if/when we unravel header files.
+uint32_t
+as_record_stored_size(const as_record* r)
+{
+	return N_RBLOCKS_TO_SIZE(r->n_rblocks);
+}
+
+// TODO - inline this, if/when we unravel header files.
 bool
-as_record_is_expired(const as_record *r)
+as_record_is_expired(const as_record* r)
 {
 	return r->void_time != 0 && r->void_time < as_record_void_time_get();
 }
@@ -143,7 +149,7 @@ as_record_is_expired(const as_record *r)
 // Called when writes encounter a "doomed" record, to delete the doomed record
 // and create a new one in place without giving up the record lock.
 void
-as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
+as_record_rescue(as_index_ref* r_ref, as_namespace* ns)
 {
 	remove_from_sindex(ns, r_ref);
 	as_record_destroy(r_ref->r, ns);
@@ -154,88 +160,29 @@ as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 // Called only after last reference is released. Called by as_record_done(),
 // also given to index trees to be called when tree releases record reference.
 void
-as_record_destroy(as_record *r, as_namespace *ns)
+as_record_destroy(as_record* r, as_namespace* ns)
 {
-	if (ns->storage_data_in_memory) {
-		// Note - rd is a limited container here - not calling
-		// as_storage_record_create(), _open(), _close().
-		as_storage_rd rd;
-
-		rd.r = r;
-		rd.ns = ns;
-
-		as_bin stack_bins[RECORD_MAX_BINS];
-
-		as_storage_rd_load_bins(&rd, stack_bins);
-		as_storage_record_drop_from_mem_stats(&rd);
-		as_bin_destroy_all(rd.bins, rd.n_bins);
-		as_record_free_bin_space(r);
-
-		if (r->dim) {
-			cf_free(r->dim); // frees the key
-		}
-	}
-
 	as_record_drop_stats(r, ns);
 
 	// Dereference record's storage used-size.
 	as_storage_destroy_record(ns, r);
 }
 
-// Called only if data-in-memory.
-void
-as_record_free_bin_space(as_record *r)
-{
-	as_bin_space *bin_space = as_index_get_bin_space(r);
-
-	if (bin_space) {
-		cf_free((void*)bin_space);
-		as_index_set_bin_space(r, NULL);
-	}
-}
-
 // Note - this is not called on the master write (or durable delete) path, where
 // keys are stored but never dropped. Only a UDF will drop a key on master.
 void
-as_record_finalize_key(as_record *r, const as_namespace *ns, const uint8_t *key,
-		uint32_t key_size)
+as_record_finalize_key(as_record* r, const uint8_t* key, uint32_t key_size)
 {
 	// If a key wasn't stored, and we got one, accommodate it.
 	if (r->key_stored == 0) {
 		if (key != NULL) {
-			if (ns->storage_data_in_memory) {
-				as_record_allocate_key(r, key, key_size);
-			}
-
 			r->key_stored = 1;
 		}
 	}
 	// If a key was stored, but we didn't get one, remove the key.
 	else if (key == NULL) {
-		if (ns->storage_data_in_memory) {
-			as_bin_space *bin_space = ((as_rec_space *)r->dim)->bin_space;
-
-			cf_free(r->dim);
-			r->dim = (void *)bin_space;
-		}
-
 		r->key_stored = 0;
 	}
-}
-
-// Called only for data-in-memory multi-bin, with no key currently stored.
-// Note - have to modify if/when other metadata joins key in as_rec_space.
-void
-as_record_allocate_key(as_record *r, const uint8_t *key, uint32_t key_size)
-{
-	as_rec_space *rec_space = (as_rec_space *)
-			cf_malloc_ns(sizeof(as_rec_space) + key_size);
-
-	rec_space->bin_space = (as_bin_space *)r->dim;
-	rec_space->key_size = key_size;
-	memcpy((void*)rec_space->key, (const void*)key, key_size);
-
-	r->dim = (void*)rec_space;
 }
 
 
@@ -245,14 +192,11 @@ as_record_allocate_key(as_record *r, const uint8_t *key, uint32_t key_size)
 
 // If remote record is better than local record, replace local with remote.
 int
-as_record_replace_if_better(as_remote_record *rr)
+as_record_replace_if_better(as_remote_record* rr)
 {
-	as_namespace *ns = rr->rsv->ns;
+	as_namespace* ns = rr->rsv->ns;
 
-	CF_ALLOC_SET_NS_ARENA_DIM(ns);
-
-	as_index_tree *tree = rr->rsv->tree;
-
+	as_index_tree* tree = rr->rsv->tree;
 	as_index_ref r_ref;
 	int rv = as_record_get_create(tree, rr->keyd, &r_ref, ns);
 
@@ -261,7 +205,7 @@ as_record_replace_if_better(as_remote_record *rr)
 	}
 
 	bool is_create = rv == 1;
-	as_index *r = r_ref.r;
+	as_index* r = r_ref.r;
 
 	int result;
 
@@ -309,7 +253,7 @@ as_record_replace_if_better(as_remote_record *rr)
 
 	// If creating record, write set-ID into index.
 	if (is_create) {
-		if (rr->set_name && (result = as_index_set_set_w_len(r, ns,
+		if (rr->set_name != NULL && (result = as_index_set_set_w_len(r, ns,
 				rr->set_name, rr->set_name_len, false)) < 0) {
 			record_replace_failed(rr, &r_ref, NULL, is_create);
 			return -result;
@@ -326,8 +270,11 @@ as_record_replace_if_better(as_remote_record *rr)
 	// else - not bothering to check that sets match.
 
 	// TODO - remove in "six months".
+	// Note - including AS_STORAGE_ENGINE_MEMORY now: it needs exact sizes since
+	// it uses an end mark, and even though old memory pickles would not have
+	// been padded, let's cover switching from SSD to MEMORY during upgrade.
 	if (rr->via != VIA_REPLICATION &&
-			ns->storage_type == AS_STORAGE_ENGINE_SSD &&
+			ns->storage_type != AS_STORAGE_ENGINE_PMEM &&
 			as_exchange_min_compatibility_id() < 11) {
 		if (! as_flat_fix_padded_rr(rr)) {
 			record_replace_failed(rr, &r_ref, NULL, is_create);
@@ -345,7 +292,7 @@ as_record_replace_if_better(as_remote_record *rr)
 	}
 
 	rd.pickle = rr->pickle;
-	rd.pickle_sz = rr->pickle_sz;
+	rd.pickle_sz = (uint32_t)rr->pickle_sz;
 	rd.orig_pickle_sz = as_flat_orig_pickle_size(rr, rd.pickle_sz);
 
 	// Note - deal with key after reading existing record (if such), in case
@@ -362,14 +309,7 @@ as_record_replace_if_better(as_remote_record *rr)
 	}
 	// else - dup-res goes in SWB_MASTER.
 
-	if (ns->storage_data_in_memory) {
-		result = record_apply_dim(rr, &r_ref, &rd);
-	}
-	else {
-		result = record_apply_ssd(rr, &r_ref, &rd);
-	}
-
-	if (result != 0) {
+	if ((result = record_apply(rr, &r_ref, &rd)) != 0) {
 		record_replace_failed(rr, &r_ref, &rd, is_create);
 		return result;
 	}
@@ -439,10 +379,10 @@ as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen,
 //
 
 static void
-record_replace_failed(as_remote_record *rr, as_index_ref* r_ref,
+record_replace_failed(as_remote_record* rr, as_index_ref* r_ref,
 		as_storage_rd* rd, bool is_create)
 {
-	if (rd) {
+	if (rd != NULL) {
 		as_storage_record_close(rd);
 	}
 
@@ -454,76 +394,7 @@ record_replace_failed(as_remote_record *rr, as_index_ref* r_ref,
 }
 
 static int
-record_apply_dim(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd)
-{
-	as_namespace* ns = rd->ns;
-	as_record* r = rd->r;
-
-	as_bin stack_bins[RECORD_MAX_BINS];
-
-	as_storage_rd_load_bins(rd, stack_bins);
-
-	// For memory accounting, note current usage.
-	uint32_t memory_bytes = as_storage_record_mem_size(ns, r);
-
-	int result;
-
-	uint16_t n_new_bins = rr->n_bins;
-	as_bin new_bins[n_new_bins];
-
-	// Fill the new bins and particles.
-	if (n_new_bins != 0 &&
-			(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
-		return -result;
-	}
-
-	// Apply changes to metadata in as_index needed for and writing.
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	replace_index_metadata(rr, r);
-
-	// Write the record to storage. Note - here the pickle is directly stored -
-	// we will not use rd->bins and rd->n_bins at all to write.
-	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
-		unwind_index_metadata(&old_metadata, r);
-		as_bin_destroy_all(new_bins, n_new_bins);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
-			&old_metadata);
-
-	// Success - adjust sindex, looking at old and new bins.
-	if (set_has_sindex(r, ns)) {
-		update_sindex(ns, r_ref, rd->bins, rd->n_bins, new_bins, n_new_bins);
-	}
-	else {
-		// Sindex drop will leave in_sindex bit. Good opportunity to reset.
-		as_index_clear_in_sindex(r);
-	}
-
-	// Cleanup - destroy original bins, can't unwind after.
-	as_bin_destroy_all(rd->bins, rd->n_bins);
-
-	rd->n_bins = n_new_bins;
-	rd->bins = new_bins;
-
-	as_storage_rd_update_bin_space(rd);
-
-	// Now ok to store or drop key, as determined by message.
-	as_record_finalize_key(r, ns, rr->key, rr->key_size);
-
-	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-
-	return AS_OK;
-}
-
-static int
-record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd)
+record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 {
 	as_namespace* ns = rd->ns;
 	as_record* r = rd->r;
@@ -579,7 +450,7 @@ record_apply_ssd(as_remote_record *rr, as_index_ref *r_ref, as_storage_rd *rd)
 	}
 
 	// Now ok to store or drop key, as determined by message.
-	as_record_finalize_key(r, ns, rr->key, rr->key_size);
+	as_record_finalize_key(r, rr->key, rr->key_size);
 
 	return AS_OK;
 }

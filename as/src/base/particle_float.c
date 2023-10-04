@@ -47,7 +47,6 @@
 // Handle "wire" format.
 int float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 int float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size);
 
 // Handle as_val translation.
 void float_from_asval(const as_val *val, as_particle **pp);
@@ -78,7 +77,6 @@ const as_particle_vtable float_vtable = {
 		float_incr_from_wire,
 		integer_size_from_wire,
 		float_from_wire,
-		float_compare_from_wire,
 		integer_wire_size,
 		integer_to_wire,
 
@@ -93,7 +91,6 @@ const as_particle_vtable float_vtable = {
 
 		float_skip_flat,
 		float_from_flat, // cast copies embedded value out
-		float_from_flat,
 		float_flat_size,
 		float_to_flat
 };
@@ -154,20 +151,6 @@ float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t 
 	}
 
 	return integer_from_wire(wire_type, wire_value, value_size, pp);
-}
-
-int
-float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size)
-{
-	if (wire_type != AS_PARTICLE_TYPE_FLOAT) {
-		return 1;
-	}
-
-	if (value_size != 8) {
-		return -AS_ERR_UNKNOWN;
-	}
-
-	return integer_compare_from_wire(p, AS_PARTICLE_TYPE_INTEGER, wire_value, value_size);
 }
 
 //------------------------------------------------

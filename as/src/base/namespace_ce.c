@@ -92,22 +92,16 @@ setup_namespace(as_namespace* ns)
 	// Set up the set name vmap.
 	//
 
-	ns->p_sets_vmap = (cf_vmapx*)cf_malloc(cf_vmapx_sizeof(sizeof(as_set), AS_SET_MAX_COUNT));
+	ns->p_sets_vmap = (cf_vmapx*)
+			cf_malloc(cf_vmapx_sizeof(sizeof(as_set), AS_SET_MAX_COUNT));
 
-	cf_vmapx_init(ns->p_sets_vmap, sizeof(as_set), AS_SET_MAX_COUNT, 1024, AS_SET_NAME_MAX_SIZE);
+	cf_vmapx_init(ns->p_sets_vmap, sizeof(as_set), AS_SET_MAX_COUNT,
+			AS_SET_MAX_COUNT + 1, AS_SET_NAME_MAX_SIZE);
 
 	// Transfer configuration file information about sets.
 	if (! as_namespace_configure_sets(ns)) {
 		cf_crash(AS_NAMESPACE, "{%s} can't configure sets", ns->name);
 	}
-
-	//--------------------------------------------
-	// Set up the bin name vmap.
-	//
-
-	ns->p_bin_name_vmap = (cf_vmapx*)cf_malloc(cf_vmapx_sizeof(AS_BIN_NAME_MAX_SZ, MAX_BIN_NAMES));
-
-	cf_vmapx_init(ns->p_bin_name_vmap, AS_BIN_NAME_MAX_SZ, MAX_BIN_NAMES, 64 * 1024, AS_BIN_NAME_MAX_SZ);
 
 	//--------------------------------------------
 	// Set up the index arena.
@@ -116,7 +110,8 @@ setup_namespace(as_namespace* ns)
 	ns->arena = (cf_arenax*)cf_malloc(sizeof(cf_arenax));
 	ns->tree_shared.arena = ns->arena;
 
-	cf_arenax_init(ns->arena, ns->pi_xmem_type, ns->pi_xmem_type_cfg, 0, (uint32_t)sizeof(as_index), 1, ns->index_stage_size);
+	cf_arenax_init(ns->arena, ns->pi_xmem_type, ns->pi_xmem_type_cfg, 0,
+			(uint32_t)sizeof(as_index), 1, ns->index_stage_size);
 
 	ns->si_arena = cf_calloc(1, sizeof(as_sindex_arena));
 

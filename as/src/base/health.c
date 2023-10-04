@@ -183,6 +183,13 @@ static int32_t update_mov_avg_reduce_fn(const void* key, void* data, void* udata
 // Inlines & macros.
 //
 
+static inline uint32_t
+num_read_devices(const as_namespace* ns)
+{
+	// Storage-engine memory shadows are never read at runtime - no metrics.
+	return ns->n_storage_stripes != 0 ? 0 : as_namespace_device_count(ns);
+}
+
 static inline void
 add_counter_sample(health_stat* hs)
 {
@@ -405,8 +412,7 @@ compute_local_stats_mov_avg(local_all_mov_avg* lma)
 	const stat_spec* spec = &local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		uint32_t n_devices =
-				as_namespace_device_count(g_config.namespaces[ns_ix]);
+		uint32_t n_devices = num_read_devices(g_config.namespaces[ns_ix]);
 
 		for (uint32_t d_id = 0; d_id < n_devices; d_id++) {
 			health_stat* hs = &g_local_stats.device_read_lat[ns_ix][d_id];
@@ -509,7 +515,7 @@ create_local_stats()
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 		health_stat* device_stats = g_local_stats.device_read_lat[ns_ix];
-		uint32_t n_devices = as_namespace_device_count(ns);
+		uint32_t n_devices = num_read_devices(ns);
 
 		for (uint32_t d_id = 0; d_id < n_devices; d_id++) {
 			health_stat* hs = &device_stats[d_id];
@@ -570,8 +576,7 @@ static void
 find_outliers_from_local_stats(local_all_mov_avg* lma)
 {
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		uint32_t n_devices =
-				as_namespace_device_count(g_config.namespaces[ns_ix]);
+		uint32_t n_devices = num_read_devices(g_config.namespaces[ns_ix]);
 		mov_avg* dma = lma->device_mov_avg[ns_ix];
 		const stat_spec* spec =
 				&local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
@@ -664,7 +669,7 @@ print_local_stats(cf_dyn_buf* db)
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 		health_stat* device_stats = g_local_stats.device_read_lat[ns_ix];
-		uint32_t n_devices = as_namespace_device_count(ns);
+		uint32_t n_devices = num_read_devices(ns);
 		const stat_spec* spec =
 				&local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
 
@@ -781,8 +786,7 @@ reset_local_stats()
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		health_stat* device_stats = g_local_stats.device_read_lat[ns_ix];
-		uint32_t n_devices =
-				as_namespace_device_count(g_config.namespaces[ns_ix]);
+		uint32_t n_devices = num_read_devices(g_config.namespaces[ns_ix]);
 
 		for (uint32_t d_id = 0; d_id < n_devices; d_id++) {
 			health_stat* hs = &device_stats[d_id];
@@ -872,8 +876,7 @@ shift_window_local_stat()
 	const stat_spec* spec = &local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		uint32_t n_devices =
-				as_namespace_device_count(g_config.namespaces[ns_ix]);
+		uint32_t n_devices = num_read_devices(g_config.namespaces[ns_ix]);
 
 		for (uint32_t d_id = 0; d_id < n_devices; d_id++) {
 			health_stat* stat = &g_local_stats.device_read_lat[ns_ix][d_id];

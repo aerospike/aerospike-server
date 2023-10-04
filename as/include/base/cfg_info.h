@@ -37,4 +37,3 @@ void as_cfg_info_cmd_config_get_with_params(char* name, char* params, cf_dyn_buf
 int as_cfg_info_cmd_config_get(char* name, char* params, cf_dyn_buf* db);
 void as_cfg_info_namespace_config_get(char* context, cf_dyn_buf* db);
 int as_cfg_info_cmd_config_set(char* name, char* params, cf_dyn_buf* db);
-void as_cfg_info_get_printable_cluster_name(char* cluster_name);

@@ -4512,8 +4512,8 @@ channel_msg_sanity_check(as_hb_channel_event* msg_event)
 
 			channel_event_queue(&mismatch_event);
 
-			TICKER_WARNING("ignoring message from %"PRIX64" with different cluster name(%s)",
-					src_nodeid, remote_cluster_name[0] == '\0' ? "null" : remote_cluster_name );
+			TICKER_WARNING("ignoring message from %"PRIX64" with different cluster name '%s'",
+					src_nodeid, remote_cluster_name);
 			rv = -1;
 		}
 	}
@@ -7589,9 +7589,7 @@ hb_plugin_set_fn(msg* msg)
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	as_config_cluster_name_get(cluster_name);
 
-	if (cluster_name[0] != '\0') {
-		msg_set_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name, MSG_SET_COPY);
-	}
+	msg_set_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name, MSG_SET_COPY);
 }
 
 /**

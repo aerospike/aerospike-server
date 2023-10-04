@@ -27,6 +27,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include "aerospike/as_atomic.h"
 #include "aerospike/as_val.h"
@@ -61,6 +62,9 @@
 #define TTL_HIST_NUM_BUCKETS 100
 
 #define MAX_ALLOWED_TTL (3600 * 24 * 365 * 10) // 10 years
+#define TTL_USE_DEFAULT 0
+#define TTL_NEVER_EXPIRE ((uint32_t)-1) // config for set (but not namespace)
+#define TTL_DONT_UPDATE  ((uint32_t)-2) // not config - in client msg only
 
 // [0-1] for partition-id
 // [1-4] for tree sprigs and locks
@@ -96,7 +100,6 @@ struct rollback_alloc_s;
 #define AS_ID_NAMESPACE_SZ 32
 
 #define AS_BIN_NAME_MAX_SZ 16 // changing this breaks warm restart
-#define MAX_BIN_NAMES 0xFFFF // changing this breaks warm restart
 #define RECORD_MAX_BINS 0X7FFF
 
 #define MAX_N_SINDEXES 256
@@ -159,40 +162,13 @@ typedef struct as_bin_s {
 	uint8_t : 4;
 	uint8_t state: 4;		// see AS_BIN_STATE_...
 	as_particle* particle;	// for embedded particle this is value, not pointer
-	uint16_t id;			// ID of bin name
-
-	// Not included in as_bin_no_meta ...
+	char name[AS_BIN_NAME_MAX_SZ];
 
 	uint8_t xdr_write: 1;	// enterprise only
 	uint8_t unused_flags: 7;
 	uint64_t lut: 40;
 	uint8_t src_id;
 } __attribute__ ((__packed__)) as_bin;
-
-typedef struct as_bin_no_meta_s {
-	uint64_t dummy64;
-	uint32_t dummy24: 24;
-} __attribute__ ((__packed__)) as_bin_no_meta;
-
-COMPILER_ASSERT(sizeof(as_bin_no_meta) == offsetof(as_bin, id) + 2);
-
-// For data-in-memory namespaces in multi-bin mode, we keep an array of as_bin
-// structs in memory, accessed via this struct.
-typedef struct as_bin_space_s {
-	uint16_t n_bins;
-	as_bin bins[0]; // may be array of as_bin or as_min_bin
-} __attribute__ ((__packed__)) as_bin_space;
-
-// For data-in-memory namespaces in multi-bin mode, if we're storing extra
-// record metadata, we access it via this struct. In this case the index points
-// here instead of directly to an as_bin_space.
-typedef struct as_rec_space_s {
-	as_bin_space* bin_space;
-
-	// So far the key is the only extra record metadata we store in memory.
-	uint32_t key_size;
-	uint8_t key[0];
-} __attribute__ ((__packed__)) as_rec_space;
 
 /* Particle function declarations */
 
@@ -219,39 +195,32 @@ void as_bin_particle_destroy(as_bin *b);
 uint32_t as_bin_particle_size(as_bin *b);
 
 // wire:
-int as_bin_particle_alloc_modify_from_client(as_bin *b, const struct as_msg_op_s *op);
 int as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const struct as_msg_op_s *op);
-int as_bin_particle_alloc_from_client(as_bin *b, const struct as_msg_op_s *op);
 int as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const struct as_msg_op_s *op);
 uint32_t as_bin_particle_client_value_size(const as_bin *b);
 uint32_t as_bin_particle_to_client(const as_bin *b, struct as_msg_op_s *op);
 
 // Different for blob bitwise operations - we don't use the normal APIs and
 // particle table functions.
-int as_bin_bits_alloc_modify_from_client(as_bin *b, struct as_msg_op_s *op);
 int as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op);
 int as_bin_bits_read_from_client(const as_bin *b, struct as_msg_op_s *op, as_bin *result);
 
 // Different for HLL operations - we don't use the normal APIs and particle
 // table functions.
-int as_bin_hll_alloc_modify_from_client(as_bin *b, struct as_msg_op_s *op, as_bin *rb);
 int as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, as_bin *rb);
 int as_bin_hll_read_from_client(const as_bin *b, struct as_msg_op_s *op, as_bin *rb);
 
 // Different for CDTs - the operations may return results, so we don't use the
 // normal APIs and particle table functions.
-int as_bin_cdt_alloc_modify_from_client(as_bin *b, struct as_msg_op_s *op, as_bin *result);
 int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, as_bin *result);
 int as_bin_cdt_read_from_client(const as_bin *b, struct as_msg_op_s *op, as_bin *result);
 
 // as_val:
-int as_bin_particle_alloc_from_asval(as_bin *b, const as_val *val);
 void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 as_val *as_bin_particle_to_asval(const as_bin *b);
 
 // Different for expression operations - we don't use the normal APIs and
 // particle table functions.
-int as_bin_exp_alloc_modify_from_client(const struct as_exp_ctx_s* ctx, as_bin *b, struct as_msg_op_s *op, const struct iops_expop_s* expop);
 int as_bin_exp_stack_modify_from_client(const struct as_exp_ctx_s* ctx, as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, const struct iops_expop_s* expop);
 int as_bin_exp_read_from_client(const struct as_exp_ctx_s* ctx, struct as_msg_op_s *op, as_bin *rb);
 
@@ -260,8 +229,7 @@ int32_t as_particle_size_from_msgpack(const uint8_t *packed, uint32_t packed_siz
 bool as_bin_particle_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size, void *mem);
 
 // flat:
-const uint8_t *as_bin_particle_cast_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
-const uint8_t *as_bin_particle_alloc_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
+const uint8_t *as_bin_particle_from_flat(as_bin *b, const uint8_t *flat, const uint8_t *end);
 uint32_t as_bin_particle_flat_size(as_bin *b);
 uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
 
@@ -281,17 +249,18 @@ bool as_bin_particle_bool_value(const as_bin *b);
 uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
 
 // blob:
+uint32_t as_bin_particle_blob_ptr(const as_bin *b, uint8_t **p_value);
 int as_bin_bits_modify_tr(as_bin *b, const struct as_msg_op_s *msg_op, cf_ll_buf *particles_llb);
 int as_bin_bits_read_tr(const as_bin *b, const struct as_msg_op_s *msg_op, as_bin *result);
-int as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv, bool alloc_ns);
-int as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb, bool alloc_ns);
+int as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv);
+int as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb);
 const char* as_bits_op_name(uint32_t op_code, bool is_modify);
 
 // HLL:
 int as_bin_hll_modify_tr(as_bin *b, const struct as_msg_op_s *msg_op, cf_ll_buf *particles_llb, as_bin* rb);
 int as_bin_hll_read_tr(const as_bin *b, const struct as_msg_op_s *msg_op, as_bin *rb);
-int as_bin_hll_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *rb, bool alloc_ns);
-int as_bin_hll_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb, bool alloc_ns);
+int as_bin_hll_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *rb);
+int as_bin_hll_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb);
 const char* as_hll_op_name(uint32_t op_code, bool is_modify);
 
 // geojson:
@@ -307,7 +276,6 @@ uint32_t as_geojson_particle_sz(uint32_t ncells, size_t jlen);
 bool as_geojson_parse(const struct as_namespace_s *ns, const char *json, uint32_t jlen, uint64_t *cellid, geo_region_t *region);
 bool as_geojson_to_particle(const char *json, uint32_t jlen, as_particle **pp);
 bool as_bin_cdt_context_geojson_parse(as_bin *b);
-void as_bin_particle_geojson_trim(as_bin *b);
 
 // list:
 void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
@@ -317,10 +285,25 @@ void as_bin_particle_map_get_packed_val(const as_bin *b, struct cdt_payload_s *p
 
 int as_bin_cdt_modify_tr(as_bin *b, const struct as_msg_op_s *op, as_bin *result, cf_ll_buf *particles_llb);
 int as_bin_cdt_read_tr(const as_bin *b, const struct as_msg_op_s *op, as_bin *result);
-int as_bin_cdt_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *result, bool alloc_ns);
-int as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result, bool alloc_ns);
-bool as_bin_cdt_get_by_context(const as_bin *b, const uint8_t* ctx, uint32_t ctx_sz, as_bin *result, bool alloc_ns);
-bool as_bin_cdt_get_by_context_vec(const as_bin *b, msgpack_in_vec *ctx_mv, as_bin *result, bool alloc_ns);
+int as_bin_cdt_modify_exp(as_bin *b, msgpack_in_vec* mv, as_bin *result);
+int as_bin_cdt_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *result);
+bool as_bin_cdt_get_by_context(const as_bin *b, const uint8_t* ctx, uint32_t ctx_sz, as_bin *result);
+
+static inline bool
+as_bin_name_check(const uint8_t* name, uint32_t len)
+{
+	if (len >= AS_BIN_NAME_MAX_SZ) {
+		return false;
+	}
+
+	for (uint32_t i = 0; i < len; i++) {
+		if (name[i] == '\0') {
+			return false;
+		}
+	}
+
+	return true;
+}
 
 static inline bool
 as_bin_has_meta(const as_bin *b)
@@ -418,31 +401,15 @@ bool as_bin_is_live(const as_bin* b);
 void as_bin_set_tombstone(as_bin* b);
 bool as_bin_empty_if_all_tombstones(struct as_storage_rd_s* rd, bool is_dd);
 void as_bin_clear_meta(as_bin* b);
-bool as_bin_get_id(const struct as_namespace_s *ns, const char *name, uint16_t *id);
-bool as_bin_get_id_w_len(const struct as_namespace_s *ns, const char *name, size_t len, uint16_t *id);
-bool as_bin_get_or_assign_id_w_len(struct as_namespace_s *ns, const char *name, size_t len, uint16_t *id);
-const char* as_bin_get_name_from_id(const struct as_namespace_s *ns, uint16_t id);
 int as_storage_rd_load_bins(struct as_storage_rd_s *rd, as_bin *stack_bins);
-void as_storage_rd_update_bin_space(struct as_storage_rd_s* rd);
-as_bin *as_bin_get_by_id_live(struct as_storage_rd_s *rd, uint32_t id);
 as_bin *as_bin_get(struct as_storage_rd_s *rd, const char *name);
 as_bin *as_bin_get_w_len(struct as_storage_rd_s *rd, const uint8_t *name, size_t len);
 as_bin *as_bin_get_live(struct as_storage_rd_s *rd, const char *name);
 as_bin *as_bin_get_live_w_len(struct as_storage_rd_s *rd, const uint8_t *name, size_t len);
-as_bin *as_bin_get_or_create(struct as_storage_rd_s *rd, const char *name, int *result);
-as_bin *as_bin_get_or_create_w_len(struct as_storage_rd_s *rd, const uint8_t *name, size_t len, int *result);
-bool as_bin_pop(struct as_storage_rd_s* rd, const char* name, as_bin* bin);
-bool as_bin_pop_w_len(struct as_storage_rd_s* rd, const uint8_t* name, size_t len, as_bin* bin);
-
-static inline bool
-as_bin_set_id_from_name_w_len(struct as_namespace_s *ns, as_bin *b,
-		const uint8_t *buf, size_t len)
-{
-	return as_bin_get_or_assign_id_w_len(ns, (const char *)buf, len, &b->id);
-}
-
-// Special API for downgrades.
-int as_bin_downgrade_pickle(struct as_storage_rd_s* rd);
+as_bin *as_bin_get_or_create(struct as_storage_rd_s *rd, const char *name);
+as_bin *as_bin_get_or_create_w_len(struct as_storage_rd_s *rd, const uint8_t *name, size_t len);
+void as_bin_delete(struct as_storage_rd_s* rd, const char* name);
+void as_bin_delete_w_len(struct as_storage_rd_s* rd, const uint8_t* name, size_t len);
 
 
 typedef enum {
@@ -465,8 +432,6 @@ int as_record_get(struct as_index_tree_s *tree, const cf_digest *keyd, struct as
 int as_record_get_live(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 void as_record_rescue(struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 
-void as_record_free_bin_space(as_record *r);
-
 void as_record_destroy(as_record *r, struct as_namespace_s *ns);
 void as_record_done(struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 
@@ -475,10 +440,8 @@ void as_record_transition_stats(as_record* r, struct as_namespace_s* ns, const s
 
 void as_record_transition_set_index(struct as_index_tree_s* tree, struct as_index_ref_s* r_ref, struct as_namespace_s* ns, uint16_t n_bins, const struct index_metadata_s* old);
 
-void as_record_finalize_key(as_record* r, const struct as_namespace_s* ns, const uint8_t* key, uint32_t key_size);
-void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
+void as_record_finalize_key(as_record* r, const uint8_t* key, uint32_t key_size);
 int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
-int as_record_set_set_from_msg(as_record *r, struct as_namespace_s *ns, struct as_msg_s *m);
 
 static inline int
 resolve_last_update_time(uint64_t left, uint64_t right)
@@ -528,6 +491,8 @@ int as_record_replace_if_better(as_remote_record *rr);
 int record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
 void replace_index_metadata(const as_remote_record *rr, as_record *r);
 
+uint32_t as_record_stored_size(const as_record* r); // TODO - eventually inline
+
 #define as_record_void_time_get() cf_clepoch_seconds()
 bool as_record_is_expired(const as_record *r); // TODO - eventually inline
 
@@ -547,8 +512,7 @@ trim_void_time(uint32_t void_time)
 }
 
 
-#define AS_SET_MAX_COUNT 0x3FF	// ID's 10 bits worth minus 1 (ID 0 means no set)
-#define SINDEX_BIN_BITMAP_ARR_SZ ((MAX_BIN_NAMES + 1) / (sizeof(uint32_t) * CHAR_BIT)) // round numerator to multiple of 32
+#define AS_SET_MAX_COUNT ((1 << 12) - 1) // ID 0 means no set
 
 
 // TODO - would be nice to put this in as_index.h:
@@ -619,9 +583,6 @@ typedef struct as_namespace_s {
 	// Pointer to arena structure (not stages) in persistent memory base block.
 	cf_arenax*		arena;
 
-	// Pointer to bin name vmap in persistent memory base block.
-	cf_vmapx*		p_bin_name_vmap;
-
 	// Pointer to set information vmap in persistent memory base block.
 	cf_vmapx*		p_sets_vmap;
 
@@ -640,8 +601,15 @@ typedef struct as_namespace_s {
 	struct as_flat_sindex_s* flat_sindexes;
 	uint32_t		n_flat_sindexes;
 
-	// Configuration flags relevant for warm or cool restart.
+	// Configuration flags relevant for warm restart.
 	uint32_t		xmem_flags;
+
+	// Data shmem key base for this namespace.
+	key_t			data_key_base;
+
+	// Temporary array of data shmem "stripes" used at startup.
+	void*			stripes;
+	size_t			stripe_sz;
 
 	//--------------------------------------------
 	// Cold start.
@@ -661,15 +629,12 @@ typedef struct as_namespace_s {
 	uint32_t		cold_start_record_add_count;
 	uint32_t		cold_start_now;
 
-	// For sanity checking at startup (also used during warm or cool restart).
+	// For sanity checking at startup (also used during warm restart).
 	uint32_t		startup_max_void_time;
 
 	//--------------------------------------------
 	// Memory management.
 	//
-
-	// JEMalloc arena to be used for long-term storage in this namespace (-1 if nonexistent.)
-	int jem_arena;
 
 	// Cached partition ownership info for clients.
 	struct client_replica_map_s* replica_maps;
@@ -684,7 +649,7 @@ typedef struct as_namespace_s {
 	// This is typecast to (drv_ssds*) in storage code.
 	void*			storage_private;
 
-	uint64_t		drive_size; // discovered (and rounded) size of drive
+	uint64_t		drives_size; // usable size of all drives
 	uint32_t		storage_max_write_q; // storage_max_write_cache is converted to this
 	uint32_t		n_wblocks_to_flush; // on write queues or shadow queues
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
@@ -731,13 +696,12 @@ typedef struct as_namespace_s {
 
 	uint8_t*		si_startup_gc_bitmap; // optimize sindex startup GC
 	bool			si_startup_gc_needed; // may not need sindex startup GC
-	bool			sindexes_resumed_readable; // optimize startup populate and cool start
+	bool			sindexes_resumed_readable; // optimize startup populate
 	uint64_t		si_n_recs_checked; // used only by startup ticker
 
 	uint32_t		n_setless_sindexes;
 	cf_shash*		sindex_defn_hash;
 	cf_shash*		sindex_iname_hash;
-	uint32_t		sindex_bin_bitmap[SINDEX_BIN_BITMAP_ARR_SZ];
 
 	bool			si_gc_rlist_full;
 	cf_mutex		si_gc_list_mutex;
@@ -779,15 +743,13 @@ typedef struct as_namespace_s {
 	bool			write_benchmarks_enabled;
 	bool			proxy_hist_enabled;
 	uint32_t		evict_hist_buckets;
+	uint32_t		evict_sys_memory_pct;
 	uint32_t		evict_tenths_pct;
 	bool			force_long_queries; // for debugging only
-	uint32_t		hwm_disk_pct;
-	uint32_t		hwm_memory_pct;
 	bool			ignore_migrate_fill_delay;
 	uint64_t		index_stage_size;
 	bool			inline_short_queries;
 	uint32_t		max_record_size;
-	uint64_t		memory_size;
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
@@ -804,7 +766,6 @@ typedef struct as_namespace_s {
 	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
 	uint64_t		sindex_stage_size;
 	uint32_t		n_single_query_threads;
-	uint32_t		stop_writes_pct;
 	uint32_t		stop_writes_sys_memory_pct;
 	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
@@ -817,17 +778,18 @@ typedef struct as_namespace_s {
 
 	const char*		pi_xmem_mounts[CF_XMEM_MAX_MOUNTS];
 	uint32_t		n_pi_xmem_mounts; // indirect config
-	uint32_t		pi_mounts_hwm_pct;
-	uint64_t		pi_mounts_size_limit;
+	uint32_t		pi_evict_mounts_pct;
+	uint64_t		pi_mounts_budget;
 
 	const char*		si_xmem_mounts[CF_XMEM_MAX_MOUNTS];
 	uint32_t		n_si_xmem_mounts; // indirect config
-	uint32_t		si_mounts_hwm_pct;
-	uint64_t		si_mounts_size_limit;
+	uint32_t		si_evict_mounts_pct;
+	uint64_t		si_mounts_budget;
 
 	as_storage_type storage_type;
 
 	const char*		storage_devices[AS_STORAGE_MAX_DEVICES];
+	uint32_t		n_storage_stripes; // indirect config - if devices array contains memory stripes
 	uint32_t		n_storage_devices; // indirect config - if devices array contains raw devices (or partitions)
 	uint32_t		n_storage_files; // indirect config - if devices array contains files
 
@@ -841,7 +803,6 @@ typedef struct as_namespace_s {
 	as_compression_method storage_compression; // relevant only for enterprise edition
 	uint32_t		storage_compression_acceleration; // relevant only for enterprise edition
 	uint32_t		storage_compression_level; // relevant only for enterprise edition
-	bool			storage_data_in_memory;
 	uint32_t		storage_defrag_lwm_pct;
 	uint32_t		storage_defrag_queue_min;
 	uint32_t		storage_defrag_sleep;
@@ -852,16 +813,18 @@ typedef struct as_namespace_s {
 	as_encryption_method storage_encryption; // relevant only for enterprise edition
 	char*			storage_encryption_key_file; // relevant only for enterprise edition
 	char*			storage_encryption_old_key_file; // relevant only for enterprise edition
+	uint32_t		storage_evict_used_pct;
 	uint64_t		storage_filesize;
 	uint64_t		storage_flush_max_us;
-	uint32_t		storage_max_used_pct;
 	uint64_t		storage_max_write_cache;
-	uint32_t		storage_min_avail_pct;
 	uint32_t	 	storage_post_write_queue; // number of swbs/device held after writing to device
 	bool			storage_read_page_cache;
 	bool			storage_serialize_tomb_raider; // relevant only for enterprise edition
 	bool			storage_sindex_startup_device_scan;
+	uint32_t		storage_stop_writes_avail_pct;
+	uint32_t		storage_stop_writes_used_pct;
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
+	uint64_t		storage_data_size;
 	uint32_t		storage_write_block_size;
 
 	bool			geo2dsphere_within_strict;
@@ -908,10 +871,6 @@ typedef struct as_namespace_s {
 	// Sindex GC stats.
 
 	uint64_t		n_sindex_gc_cleaned;
-
-	// Memory usage stats.
-
-	uint64_t		n_bytes_memory;
 
 	// Persistent storage stats.
 
@@ -1366,23 +1325,24 @@ typedef struct as_namespace_s {
 
 #define INVALID_SET_ID 0
 
-// Caution - changing the size of this struct will break warm/cool restart.
+// Caution - changing the size of this struct will break warm restart.
 typedef struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
 
-	// Only name survives warm/cool restart - these are all reset.
+	// Only name survives warm restart - these are all reset.
 	uint64_t		n_objects;
 	uint64_t		n_tombstones;		// relevant only for enterprise edition
-	uint64_t		n_bytes_memory;		// for data-in-memory only - sets's total record data size
-	uint64_t		n_bytes_device;		// sets's total on-device record data size
+	uint64_t		data_used_bytes;	// sets's total record data size
 	uint64_t		stop_writes_count;	// restrict number of records in a set
 	uint64_t		stop_writes_size;	// restrict record data size (bytes) in a set
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
 	uint32_t		n_sindexes;
+	uint32_t		default_ttl;		// can override namespace default_ttl
 	bool			eviction_disabled;	// don't evict anything in this set (note - expiration still works)
 	bool			index_enabled;
 	bool			index_populating;
 	bool			truncating;
+	uint32_t		unused;
 } as_set;
 
 COMPILER_ASSERT(sizeof(as_set) == 128);
@@ -1396,7 +1356,7 @@ as_set_count_stop_writes(const as_set* p_set)
 }
 
 static inline bool
-as_set_size_stop_writes(const as_set* p_set, const as_namespace* ns)
+as_set_size_stop_writes(const as_set* p_set)
 {
 	if (p_set == NULL) {
 		return false;
@@ -1404,16 +1364,15 @@ as_set_size_stop_writes(const as_set* p_set, const as_namespace* ns)
 
 	uint64_t stop_writes_size = as_load_uint64(&p_set->stop_writes_size);
 
-	return stop_writes_size != 0 && (ns->storage_data_in_memory ?
-			p_set->n_bytes_memory : p_set->n_bytes_device) > stop_writes_size;
+	return stop_writes_size != 0 && p_set->data_used_bytes > stop_writes_size;
 }
 
 // These bin functions must be below definition of struct as_namespace_s:
 
 static inline size_t
-as_bin_memcpy_name(const as_namespace* ns, uint8_t* buf, as_bin* b)
+as_bin_memcpy_name(uint8_t* buf, as_bin* b)
 {
-	const char* name = as_bin_get_name_from_id(ns, b->id);
+	const char* name = b->name;
 	char* to = (char*)buf;
 
 	while (*name != '\0') {
@@ -1421,14 +1380,6 @@ as_bin_memcpy_name(const as_namespace* ns, uint8_t* buf, as_bin* b)
 	}
 
 	return (uint8_t*)to - buf;
-}
-
-static inline void
-as_bin_destroy_all_dim(const as_namespace* ns, as_bin* bins, uint32_t n_bins)
-{
-	if (ns->storage_data_in_memory) {
-		as_bin_destroy_all(bins, n_bins);
-	}
 }
 
 /* Namespace function declarations */
@@ -1446,20 +1397,18 @@ uint16_t as_namespace_get_create_set_id(as_namespace *ns, const char *set_name);
 int as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions);
 int as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, struct as_set_s **pp_set, uint16_t *p_set_id);
 struct as_set_s *as_namespace_get_set_by_name(as_namespace *ns, const char *set_name);
-struct as_set_s* as_namespace_get_set_by_id(as_namespace* ns, uint16_t set_id);
-struct as_set_s* as_namespace_get_record_set(as_namespace *ns, const as_record *r);
+struct as_set_s* as_namespace_get_set_by_id(const as_namespace* ns, uint16_t set_id);
+struct as_set_s* as_namespace_get_record_set(const as_namespace *ns, const as_record *r);
 void as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf_dyn_buf *db);
-void as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id, int64_t delta_bytes);
-void as_namespace_adjust_set_device_bytes(as_namespace *ns, uint16_t set_id, int64_t delta_bytes);
+void as_namespace_adjust_set_data_used_bytes(as_namespace *ns, uint16_t set_id, int64_t delta_bytes);
 void as_namespace_release_set_id(as_namespace *ns, uint16_t set_id);
-void as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns);
 void as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name, cf_dyn_buf *db);
 
 static inline bool
-as_namespace_like_data_in_memory(const as_namespace *ns)
+as_namespace_is_memory_only(const as_namespace *ns)
 {
-	return ns->storage_data_in_memory ||
-			ns->storage_type == AS_STORAGE_ENGINE_PMEM;
+	return ns->storage_type == AS_STORAGE_ENGINE_MEMORY &&
+			ns->n_storage_shadows == 0;
 }
 
 static inline uint32_t
@@ -1467,12 +1416,6 @@ as_namespace_device_count(const as_namespace *ns)
 {
 	// Only one of them will ever be non-zero.
 	return ns->n_storage_devices + ns->n_storage_files;
-}
-
-static inline const char*
-as_namespace_start_mode_str(const as_namespace *ns)
-{
-	return ns->storage_data_in_memory ? "cool" : "warm";
 }
 
 static inline bool

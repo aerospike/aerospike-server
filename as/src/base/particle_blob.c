@@ -61,7 +61,6 @@ const as_particle_vtable blob_vtable = {
 		blob_incr_from_wire,
 		blob_size_from_wire,
 		blob_from_wire,
-		blob_compare_from_wire,
 		blob_wire_size,
 		blob_to_wire,
 
@@ -75,7 +74,6 @@ const as_particle_vtable blob_vtable = {
 		blob_from_msgpack,
 
 		blob_skip_flat,
-		blob_cast_from_flat,
 		blob_from_flat,
 		blob_flat_size,
 		blob_to_flat
@@ -105,8 +103,6 @@ typedef struct bits_op_s {
 	const uint8_t* buf;
 	uint64_t subflags;
 	uint64_t flags;
-
-	bool alloc_ns;
 } bits_op;
 
 struct bits_state_s;
@@ -163,8 +159,8 @@ typedef struct bits_state_s {
 //
 
 static bool bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read);
-static int bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb, bool alloc_ns);
-static int bits_read(bits_state* state, const as_bin* b, as_bin* rb, bool alloc_ns);
+static int bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb);
+static int bits_read(bits_state* state, const as_bin* b, as_bin* rb);
 static bool bits_parse_op(bits_state* state, bits_op* op);
 static bool bits_parse_byte_offset(bits_state* state, bits_op* op);
 static bool bits_parse_offset(bits_state* state, bits_op* op);
@@ -560,17 +556,6 @@ blob_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 	return 0;
 }
 
-int
-blob_compare_from_wire(const as_particle* p, as_particle_type wire_type,
-		const uint8_t* wire_value, uint32_t value_size)
-{
-	blob_mem* p_blob_mem = (blob_mem*)p;
-
-	return (wire_type == p_blob_mem->type &&
-			value_size == p_blob_mem->sz &&
-			memcmp(wire_value, p_blob_mem->data, value_size) == 0) ? 0 : 1;
-}
-
 uint32_t
 blob_wire_size(const as_particle* p)
 {
@@ -694,7 +679,7 @@ blob_skip_flat(const uint8_t* flat, const uint8_t* end)
 }
 
 const uint8_t*
-blob_cast_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp)
+blob_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp)
 {
 	if (flat + sizeof(blob_flat) > end) {
 		cf_warning(AS_PARTICLE, "incomplete flat blob/string");
@@ -707,37 +692,6 @@ blob_cast_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp)
 	*pp = (as_particle*)p_blob_flat;
 
 	return flat + sizeof(blob_flat) + p_blob_flat->size;
-}
-
-const uint8_t*
-blob_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp)
-{
-	if (flat + sizeof(blob_flat) > end) {
-		cf_warning(AS_PARTICLE, "incomplete flat blob/string");
-		return NULL;
-	}
-
-	const blob_flat* p_blob_flat = (const blob_flat*)flat;
-
-	// Flat value is same as in-memory value.
-	size_t mem_size = sizeof(blob_mem) + p_blob_flat->size;
-
-	flat += mem_size; // blob_mem same size as blob_flat
-
-	if (flat > end) {
-		cf_warning(AS_PARTICLE, "incomplete flat blob/string");
-		return NULL;
-	}
-
-	blob_mem* p_blob_mem = (blob_mem*)cf_malloc_ns(mem_size);
-
-	p_blob_mem->type = p_blob_flat->type;
-	p_blob_mem->sz = p_blob_flat->size;
-	memcpy(p_blob_mem->data, p_blob_flat->data, p_blob_mem->sz);
-
-	*pp = (as_particle*)p_blob_mem;
-
-	return flat;
 }
 
 uint32_t
@@ -764,6 +718,17 @@ blob_to_flat(const as_particle* p, uint8_t* flat)
 // as_bin particle functions specific to BLOB.
 //
 
+uint32_t
+as_bin_particle_blob_ptr(const as_bin* b, uint8_t** p_value)
+{
+	// Caller must ensure this is called only for BLOB particles.
+	blob_mem* p_blob_mem = (blob_mem*)b->particle;
+
+	*p_value = p_blob_mem->data;
+
+	return p_blob_mem->sz;
+}
+
 int
 as_bin_bits_modify_tr(as_bin* b, const as_msg_op* msg_op,
 		cf_ll_buf* particles_llb)
@@ -782,7 +747,7 @@ as_bin_bits_modify_tr(as_bin* b, const as_msg_op* msg_op,
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_modify(&state, b, particles_llb, true);
+	return bits_modify(&state, b, particles_llb);
 }
 
 int
@@ -802,11 +767,11 @@ as_bin_bits_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_read(&state, b, rb, false);
+	return bits_read(&state, b, rb);
 }
 
 int
-as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv, bool alloc_ns)
+as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv)
 {
 	bits_state state = { 0 };
 
@@ -815,12 +780,11 @@ as_bin_bits_modify_exp(as_bin *b, msgpack_in_vec* mv, bool alloc_ns)
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_modify(&state, b, NULL, alloc_ns);
+	return bits_modify(&state, b, NULL);
 }
 
 int
-as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb,
-		bool alloc_ns)
+as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb)
 {
 	bits_state state = { 0 };
 
@@ -829,7 +793,7 @@ as_bin_bits_read_exp(const as_bin *b, msgpack_in_vec* mv, as_bin *rb,
 		return -AS_ERR_PARAMETER;
 	}
 
-	return bits_read(&state, b, rb, alloc_ns);
+	return bits_read(&state, b, rb);
 }
 
 const char*
@@ -914,7 +878,7 @@ bits_state_init(bits_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 }
 
 static int
-bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb, bool alloc_ns)
+bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb)
 {
 	bits_op op = { 0 };
 
@@ -975,8 +939,7 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb, bool alloc_n
 	size_t alloc_size = sizeof(blob_mem) + (size_t)state->new_size;
 
 	if (particles_llb == NULL) {
-		b->particle = alloc_ns ?
-				cf_malloc_ns(alloc_size) : cf_malloc(alloc_size);
+		b->particle = cf_malloc(alloc_size);
 	}
 	else {
 		cf_ll_buf_reserve(particles_llb, alloc_size, (uint8_t**)&b->particle);
@@ -1007,11 +970,11 @@ bits_modify(bits_state* state, as_bin* b, cf_ll_buf* particles_llb, bool alloc_n
 }
 
 static int
-bits_read(bits_state* state, const as_bin* b, as_bin* rb, bool alloc_ns)
+bits_read(bits_state* state, const as_bin* b, as_bin* rb)
 {
 	cf_assert(as_bin_is_live(b), AS_PARTICLE, "unused or dead bin");
 
-	bits_op op = { .alloc_ns = alloc_ns };
+	bits_op op = { 0 };
 
 	if (! bits_parse_op(state, &op)) {
 		return -AS_ERR_PARAMETER;
@@ -2026,8 +1989,7 @@ bits_read_op_get(const bits_op* op, const uint8_t* from, as_bin* rb,
 	};
 
 	size_t alloc_size = sizeof(blob_mem) + n_bytes;
-	blob_mem* answer = op->alloc_ns ?
-			cf_malloc_ns(alloc_size) : cf_malloc(alloc_size);
+	blob_mem* answer = cf_malloc(alloc_size);
 
 	lshift(&cmd, answer->data, from, n_bytes);
 

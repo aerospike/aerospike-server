@@ -40,7 +40,7 @@
 typedef struct vhash_s vhash;
 
 // DO NOT access this member data directly - use the API!
-// Caution - changing this struct could break warm or cool restart.
+// Caution - changing this struct could break warm restart.
 typedef struct cf_vmapx_s {
 	// Vector-related.
 	uint32_t			value_size;

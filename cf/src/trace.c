@@ -90,8 +90,8 @@ cf_backtrace(void** buf, int sz)
 uint64_t
 cf_strip_aslr(const void* addr)
 {
-	void* start = &__executable_start;
-	void* end = &__etext;
+	const void* start = &__executable_start;
+	const void* end = &__etext;
 	uint64_t aslr_offset = _r_debug.r_map->l_addr;
 
 	return addr >= start && addr < end ?

@@ -142,10 +142,10 @@ as_sindex_populate_startup(void)
 			continue;
 		}
 
-		if (! ns->storage_data_in_memory) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_SSD || ! ns->cold_start) {
 			populate_startup(ns);
 		}
-		// else - data-in-memory (cold or cool restart) - already built sindex.
+		// else - memory or pmem (cold restart) - already built sindex.
 
 		mark_all_readable(ns);
 
@@ -164,7 +164,7 @@ as_sindex_populate_startup(void)
 void
 as_sindex_populate_add(as_sindex* si)
 {
-	as_sindex_reserve(si); // for ref in queue
+	as_sindex_job_reserve(si);
 	cf_queue_push(&g_add_sindex_q, &si);
 }
 
@@ -480,7 +480,7 @@ run_add_sindex(void* udata)
 
 		populate(si);
 		as_sindex_tree_collect_cardinality(si);
-		as_sindex_release(si);
+		as_sindex_job_release(si);
 	}
 
 	return NULL;

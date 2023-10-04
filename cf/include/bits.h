@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "aerospike/as_atomic.h"
+#include "aerospike/as_arch.h"
 
 
 //==========================================================
@@ -97,8 +97,7 @@ dead_memset(void* block, int c, size_t size)
 {
 	memset(block, c, size);
 
-	// Compiler barrier so memset() can't be optimized out.
-	as_fence_rlx();
+	as_arch_compiler_barrier(); // so memset() can't be optimized out
 }
 
 // Number of bytes occupied by val converted to a "uintvar".

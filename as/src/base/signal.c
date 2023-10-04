@@ -172,7 +172,7 @@ sig_trace_and_reraise(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort(sig_num);
 	log_siginfo(info);
-	log_stack_trace(ctx);
+	log_stack_trace(g_crash_ctx_valid ? &g_crash_ctx : ctx);
 
 	if (getpid() == 1) { // can happen in containers
 		cf_warning(AS_AS, "pid 1 received %s - exiting", signal_str[sig_num]);
@@ -272,19 +272,15 @@ log_siginfo(const siginfo_t* info)
 		at += sprintf(at, " si_uid %d si_pid %u", info->si_uid, info->si_pid);
 	}
 
-#if defined BUS_MCEERR_AR && defined BUS_MCEERR_AO
 	if (info->si_signo == SIGBUS && (info->si_code == BUS_MCEERR_AR ||
 			info->si_code == BUS_MCEERR_AO)) {
 		at += sprintf(at, " si_addr_lsb 0x%04x", info->si_addr_lsb);
 	}
-#endif
 
-#if defined SEGV_BNDERR
 	if (info->si_signo == SIGSEGV && info->si_code == SEGV_BNDERR) {
 		sprintf(at, " si_lower 0x%016lx si_upper 0x%016lx",
 				(uintptr_t)info->si_lower, (uintptr_t)info->si_upper);
 	}
-#endif
 
 	cf_warning(AS_AS, "%s", buf);
 }

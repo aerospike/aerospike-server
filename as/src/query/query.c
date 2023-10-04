@@ -136,6 +136,7 @@ static bool get_query_filter_exp(const as_transaction* tr, as_exp** exp);
 
 static bool range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len);
 static bool range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len);
+static bool range_from_msg_blob(const uint8_t* data, as_query_range* range, uint32_t len);
 static bool range_from_msg_geojson(as_namespace* ns, const uint8_t* data, as_query_range* range, uint32_t len);
 static void sort_geo_range(as_query_geo_range* geo);
 
@@ -151,6 +152,7 @@ static bool match_mapvalues_foreach(msgpack_in* key, msgpack_in* val, void* udat
 static bool match_listeles_foreach(msgpack_in* element, void* udata);
 static bool match_integer_element(const as_query_job* _job, msgpack_in* element);
 static bool match_string_element(const as_query_job* _job, msgpack_in* element);
+static bool match_blob_element(const as_query_job* _job, msgpack_in* element);
 static bool match_geojson_element(const as_query_job* _job, msgpack_in* element);
 
 
@@ -168,10 +170,19 @@ record_changed_since_start(const as_query_job* _job, const as_record *r)
 static inline bool
 strings_match(const as_query_range* range, const char* str, size_t len)
 {
-	return range->str_len == len &&
+	return range->blob_sz == len &&
 			range->u.r.start == as_sindex_string_to_bval(str, len) &&
-			memcmp(range->str_stub, str, len < sizeof(range->str_stub) ?
-					len : sizeof(range->str_stub)) == 0;
+			memcmp(range->stub, str, len < sizeof(range->stub) ?
+					len : sizeof(range->stub)) == 0;
+}
+
+static inline bool
+blobs_match(const as_query_range* range, const uint8_t* blob, size_t sz)
+{
+	return range->blob_sz == sz &&
+			range->u.r.start == as_sindex_blob_to_bval(blob, sz) &&
+			memcmp(range->stub, blob, sz < sizeof(range->stub) ?
+					sz : sizeof(range->stub)) == 0;
 }
 
 static inline const char*
@@ -487,6 +498,9 @@ get_query_range(const as_transaction* tr, as_namespace* ns,
 	case AS_PARTICLE_TYPE_STRING:
 		success = range_from_msg_string(data, range, len);
 		break;
+	case AS_PARTICLE_TYPE_BLOB:
+		success = range_from_msg_blob(data, range, len);
+		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
 		success = range_from_msg_geojson(ns, data, range, len);
 		break;
@@ -724,13 +738,55 @@ range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 	range->u.r.start = as_sindex_string_to_bval(startp, startl);
 	range->u.r.end = range->u.r.start;
 
-	range->str_len = startl;
-	memcpy(range->str_stub, startp, startl < sizeof(range->str_stub) ?
-			startl : sizeof(range->str_stub));
+	range->blob_sz = startl;
+	memcpy(range->stub, startp, startl < sizeof(range->stub) ?
+			startl : sizeof(range->stub));
 
 	range->isrange = false;
 
 	cf_debug(AS_QUERY, "query on string %.*s", startl, startp);
+
+	return true;
+}
+
+static bool
+range_from_msg_blob(const uint8_t* data, as_query_range* range, uint32_t len)
+{
+	if (len < sizeof(uint32_t)) {
+		cf_warning(AS_QUERY, "cannot parse blob range");
+		return false;
+	}
+
+	uint32_t startl = cf_swap_from_be32(*((uint32_t*)data));
+
+	if (startl >= MAX_BLOB_KSIZE) {
+		cf_warning(AS_QUERY, "query blob too long - %u", startl);
+		return false;
+	}
+
+	data += sizeof(uint32_t);
+	len -= (uint32_t)sizeof(uint32_t);
+
+	if (len < startl) {
+		cf_warning(AS_QUERY, "cannot parse blob range");
+		return false;
+	}
+
+	const uint8_t* startp = data;
+
+	// Currently, clients also send an 'end' blob which is identical to the
+	// 'start' blob. Ignore that here for performance, since it's redundant.
+
+	range->u.r.start = as_sindex_blob_to_bval(startp, startl);
+	range->u.r.end = range->u.r.start;
+
+	range->blob_sz = startl;
+	memcpy(range->stub, startp, startl < sizeof(range->stub) ?
+			startl : sizeof(range->stub));
+
+	range->isrange = false;
+
+	cf_debug(AS_QUERY, "query on blob %.*s", startl, startp);
 
 	return true;
 }
@@ -861,12 +917,7 @@ find_sindex(as_query_job* _job)
 		return true;
 	}
 
-	if (! as_bin_get_id(_job->ns, range->bin_name, &range->bin_id)) {
-		cf_warning(AS_QUERY, "bin %s not found", range->bin_name);
-		return false;
-	}
-
-	_job->si = as_sindex_lookup_by_defn(_job->ns, _job->set_id, range->bin_id,
+	_job->si = as_sindex_lookup_by_defn(_job->ns, _job->set_id, range->bin_name,
 			range->bin_type, range->itype, range->ctx_buf, range->ctx_buf_sz);
 
 	if (_job->si == NULL) {
@@ -930,7 +981,8 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 {
 	if (! record_changed_since_start(_job, rd->r) &&
 			_job->si->ktype != AS_PARTICLE_TYPE_GEOJSON && // geo needs to check bounds anyway
-			_job->si->ktype != AS_PARTICLE_TYPE_STRING) { // strings need to check for hash collisions
+			_job->si->ktype != AS_PARTICLE_TYPE_STRING &&
+			_job->si->ktype != AS_PARTICLE_TYPE_BLOB) { // strings & blobs need to check for hash collisions
 		return true;
 	}
 
@@ -943,7 +995,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 	const as_query_range* range = _job->range;
 	const as_sindex* si = _job->si;
 
-	const as_bin* b = as_bin_get_by_id_live(rd, si->bin_id);
+	const as_bin* b = as_bin_get_live(rd, si->bin_name);
 
 	if (b == NULL) {
 		return false;
@@ -958,7 +1010,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 		}
 
 		if (! as_bin_cdt_get_by_context(b, si->ctx_buf, si->ctx_buf_sz,
-				&ctx_bin, false)) {
+				&ctx_bin)) {
 			return false;
 		}
 
@@ -994,6 +1046,16 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 			uint32_t len = as_bin_particle_string_ptr(b, &str);
 
 			ret = strings_match(range, str, len);
+			break;
+		case AS_PARTICLE_TYPE_BLOB:
+			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
+				break;
+			}
+
+			uint8_t* blob;
+			uint32_t sz = as_bin_particle_blob_ptr(b, &blob);
+
+			ret = blobs_match(range, blob, sz);
 			break;
 		case AS_PARTICLE_TYPE_GEOJSON:
 			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
@@ -1071,6 +1133,8 @@ match_mapkeys_foreach(msgpack_in* key, msgpack_in* val, void* udata)
 		return ! match_integer_element(_job, key);
 	case MSGPACK_TYPE_STRING:
 		return ! match_string_element(_job, key);
+	case MSGPACK_TYPE_BYTES:
+		return ! match_blob_element(_job, key);
 	case MSGPACK_TYPE_GEOJSON:
 		return ! match_geojson_element(_job, key);
 	default:
@@ -1093,6 +1157,8 @@ match_mapvalues_foreach(msgpack_in* key, msgpack_in* val, void* udata)
 		return ! match_integer_element(_job, val);
 	case MSGPACK_TYPE_STRING:
 		return ! match_string_element(_job, val);
+	case MSGPACK_TYPE_BYTES:
+		return ! match_blob_element(_job, val);
 	case MSGPACK_TYPE_GEOJSON:
 		return ! match_geojson_element(_job, val);
 	default:
@@ -1113,6 +1179,8 @@ match_listeles_foreach(msgpack_in* element, void* udata)
 		return ! match_integer_element(_job, element);
 	case MSGPACK_TYPE_STRING:
 		return ! match_string_element(_job, element);
+	case MSGPACK_TYPE_BYTES:
+		return ! match_blob_element(_job, element);
 	case MSGPACK_TYPE_GEOJSON:
 		return ! match_geojson_element(_job, element);
 	default:
@@ -1160,6 +1228,29 @@ match_string_element(const as_query_job* _job, msgpack_in* element)
 	str_sz--;
 
 	return strings_match(range, (const char*)str, str_sz);
+}
+
+static bool
+match_blob_element(const as_query_job* _job, msgpack_in* element)
+{
+	const as_query_range* range = _job->range;
+
+	if (_job->si->ktype != AS_PARTICLE_TYPE_BLOB) {
+		return false;
+	}
+
+	uint32_t blob_sz;
+	const uint8_t* blob = msgpack_get_bin(element, &blob_sz);
+
+	if (blob == NULL || blob_sz == 0 || *blob != AS_PARTICLE_TYPE_BLOB) {
+		return false;
+	}
+
+	// Skip as_bytes type.
+	blob++;
+	blob_sz--;
+
+	return blobs_match(range, blob, blob_sz);
 }
 
 static bool
@@ -1343,7 +1434,7 @@ typedef struct basic_query_job_s {
 	uint64_t sample_max;
 	uint64_t sample_count;
 	as_exp* filter_exp;
-	cf_vector* bin_ids;
+	cf_vector* bin_names;
 } basic_query_job;
 
 static void basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
@@ -1364,7 +1455,7 @@ typedef struct basic_query_slice_s {
 } basic_query_slice;
 
 static void basic_query_job_init(basic_query_job* job);
-static bool basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns, cf_vector** bin_ids);
+static bool basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns, cf_vector** bin_names);
 static bool basic_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
 static bool basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
 static bool basic_query_filter_meta(const basic_query_job* job, const as_record* r, as_exp** exp);
@@ -1436,7 +1527,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	basic_query_job_init(job);
 
 	if (! get_query_sample_max(tr, &job->sample_max) ||
-			! basic_query_get_bin_ids(tr, ns, &job->bin_ids) ||
+			! basic_query_get_bin_names(tr, ns, &job->bin_names) ||
 			! get_query_filter_exp(tr, &job->filter_exp)) {
 		cf_warning(AS_QUERY, "basic query job failed msg field processing");
 		conn_query_job_destroy(conn_job);
@@ -1644,8 +1735,8 @@ basic_query_job_destroy(as_query_job* _job)
 {
 	basic_query_job* job = (basic_query_job*)_job;
 
-	if (job->bin_ids != NULL) {
-		cf_vector_destroy(job->bin_ids);
+	if (job->bin_names != NULL) {
+		cf_vector_destroy(job->bin_names);
 	}
 
 	as_exp_destroy(job->filter_exp);
@@ -1671,8 +1762,8 @@ basic_query_job_init(basic_query_job* job)
 }
 
 static bool
-basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns,
-		cf_vector** bin_ids)
+basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
+		cf_vector** bin_names)
 {
 	bool has_binlist = as_transaction_has_query_binlist(tr);
 	const as_msg* m = &tr->msgp->msg;
@@ -1695,17 +1786,24 @@ basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns,
 		const uint8_t* data = f->data;
 		uint32_t n_bins = *data++; // only <= 255 bins (ops do more)
 
-		*bin_ids = cf_vector_create(sizeof(uint16_t), n_bins, 0);
+		*bin_names = cf_vector_create(AS_BIN_NAME_MAX_SZ, n_bins, 0);
 
 		for (uint32_t i = 0; i < n_bins; ++i) {
-			size_t len = *data++;
-			uint16_t id;
+			uint32_t len = *data++;
 
-			if (! as_bin_get_id_w_len(ns, (const char*)data, len, &id)) {
+			if (! as_bin_name_check(data, len)) {
+				cf_warning(AS_QUERY, "ignoring bad bin name %.*s (%u)", len,
+						data, len);
 				continue;
 			}
 
-			cf_vector_append_unique(*bin_ids, &id);
+			char bin_name[AS_BIN_NAME_MAX_SZ];
+
+			memcpy(bin_name, data, len);
+			bin_name[len] = '\0';
+
+			cf_vector_append(*bin_names, bin_name);
+
 			data += len;
 		}
 
@@ -1713,20 +1811,24 @@ basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns,
 	}
 	// else - has ops
 
-	*bin_ids = cf_vector_create(sizeof(uint16_t), m->n_ops, 0);
+	*bin_names = cf_vector_create(AS_BIN_NAME_MAX_SZ, m->n_ops, 0);
 
 	as_msg_op* op = NULL;
 	uint16_t n = 0;
 
 	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
-		uint16_t id;
-
-		if (! as_bin_get_id_w_len(ns, (const char*)op->name, op->name_sz,
-				&id)) {
+		if (! as_bin_name_check(op->name, op->name_sz)) {
+			cf_warning(AS_QUERY, "ignoring bad bin name %.*s (%u)", op->name_sz,
+					op->name, op->name_sz);
 			continue;
 		}
 
-		cf_vector_append_unique(*bin_ids, &id);
+		char bin_name[AS_BIN_NAME_MAX_SZ];
+
+		memcpy(bin_name, op->name, op->name_sz);
+		bin_name[op->name_sz] = '\0';
+
+		cf_vector_append(*bin_names, bin_name);
 	}
 
 	return true;
@@ -1780,7 +1882,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&_job->n_filtered_bins);
 
-		if (! ns->storage_data_in_memory && ! _job->is_short) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_SSD && ! _job->is_short) {
 			throttle_sleep(_job);
 		}
 
@@ -1824,7 +1926,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 			return true;
 		}
 
-		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false, job->bin_ids,
+		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false, job->bin_names,
 				_job->si != NULL, bval);
 	}
 

@@ -192,7 +192,7 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 			msg_sz += ops[i]->name_sz;
 		}
 		else if (bins[i]) {
-			msg_sz += strlen(as_bin_get_name_from_id(ns, bins[i]->id));
+			msg_sz += strlen(bins[i]->name);
 		}
 		else {
 			cf_crash(AS_PROTO, "making response message with null bin and op");
@@ -263,7 +263,7 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		}
 		else {
 			op->op = AS_MSG_OP_READ;
-			op->name_sz = as_bin_memcpy_name(ns, op->name, bins[i]);
+			op->name_sz = as_bin_memcpy_name(op->name, bins[i]);
 		}
 
 		op->op_sz = OP_FIXED_SZ + op->name_sz;
@@ -331,18 +331,17 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			n_select_bins = cf_vector_size(select_bins);
 
 			for (uint32_t i = 0; i < n_select_bins; i++) {
-				uint16_t bin_id;
+				const char* bin_name =
+						(const char*)cf_vector_getp((cf_vector*)select_bins, i);
 
-				cf_vector_get(select_bins, i, (void*)&bin_id);
-
-				as_bin *b = as_bin_get_by_id_live(rd, bin_id);
+				as_bin *b = as_bin_get_live(rd, bin_name);
 
 				if (! b) {
 					continue;
 				}
 
 				msg_sz += sizeof(as_msg_op);
-				msg_sz += strlen(as_bin_get_name_from_id(ns, bin_id));
+				msg_sz += strlen(bin_name);
 				msg_sz += as_bin_particle_client_value_size(b);
 
 				n_bins_returned++;
@@ -362,7 +361,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 				}
 
 				msg_sz += sizeof(as_msg_op);
-				msg_sz += strlen(as_bin_get_name_from_id(ns, b->id));
+				msg_sz += strlen(b->name);
 				msg_sz += as_bin_particle_client_value_size(b);
 
 				n_bins_returned++;
@@ -446,11 +445,10 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 
 	if (select_bins) {
 		for (uint32_t i = 0; i < n_select_bins; i++) {
-			uint16_t bin_id;
+			const char* bin_name =
+					(const char*)cf_vector_getp((cf_vector*)select_bins, i);
 
-			cf_vector_get(select_bins, i, (void*)&bin_id);
-
-			as_bin *b = as_bin_get_by_id_live(rd, bin_id);
+			as_bin *b = as_bin_get_live(rd, bin_name);
 
 			if (! b) {
 				continue;
@@ -461,7 +459,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			op->op = AS_MSG_OP_READ;
 			op->has_lut = 0;
 			op->unused_flags = 0;
-			op->name_sz = as_bin_memcpy_name(ns, op->name, b);
+			op->name_sz = as_bin_memcpy_name(op->name, b);
 			op->op_sz = OP_FIXED_SZ + op->name_sz;
 
 			buf += sizeof(as_msg_op) + op->name_sz;
@@ -483,7 +481,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			op->op = AS_MSG_OP_READ;
 			op->has_lut = 0;
 			op->unused_flags = 0;
-			op->name_sz = as_bin_memcpy_name(ns, op->name, b);
+			op->name_sz = as_bin_memcpy_name(op->name, b);
 			op->op_sz = OP_FIXED_SZ + op->name_sz;
 
 			buf += sizeof(as_msg_op) + op->name_sz;

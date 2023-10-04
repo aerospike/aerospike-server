@@ -433,7 +433,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 static int
 fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 {
-	if (! as_storage_rd_load_pickle(rd)) {
+	if (! as_storage_record_load_pickle(rd)) {
 		return -AS_ERR_UNKNOWN;
 	}
 

@@ -55,7 +55,7 @@
 // Forward declarations.
 //
 
-static int eval_op(as_exp* exp, const as_exp_ctx* ctx, uint64_t flags, as_bin* rb, cf_ll_buf* particles_llb, bool is_modify);
+static int eval_op(as_exp* exp, const as_exp_ctx* ctx, uint64_t flags, as_bin* rb, cf_ll_buf* particles_llb);
 
 
 //==========================================================
@@ -181,7 +181,7 @@ as_exp_modify_tr(const as_exp_ctx* ctx, as_bin* b, const as_msg_op* msg_op,
 
 	as_particle* old_particle = b->particle;
 	uint8_t old_type = as_bin_get_particle_type(b);
-	int rv = eval_op(exp, ctx, flags, b, particles_llb, true);
+	int rv = eval_op(exp, ctx, flags, b, particles_llb);
 
 	exp_destroy_if(expop, exp);
 
@@ -216,7 +216,7 @@ as_exp_read_tr(const as_exp_ctx* ctx, const as_msg_op* msg_op, as_bin* rb)
 		return -AS_ERR_PARAMETER;
 	}
 
-	int rv = eval_op(exp, ctx, flags, rb, NULL, false);
+	int rv = eval_op(exp, ctx, flags, rb, NULL);
 
 	as_exp_destroy(exp);
 
@@ -230,9 +230,9 @@ as_exp_read_tr(const as_exp_ctx* ctx, const as_msg_op* msg_op, as_bin* rb)
 
 static int
 eval_op(as_exp* exp, const as_exp_ctx* ctx, uint64_t flags, as_bin* rb,
-		cf_ll_buf* particles_llb, bool is_modify)
+		cf_ll_buf* particles_llb)
 {
-	bool success = as_exp_eval(exp, ctx, rb, particles_llb, is_modify);
+	bool success = as_exp_eval(exp, ctx, rb, particles_llb);
 
 	if (! success) {
 		if ((flags & AS_EXP_FLAG_EVAL_NO_FAIL) != 0) {

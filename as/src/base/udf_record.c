@@ -68,6 +68,7 @@ static as_bytes* udf_record_digest(const as_rec* rec);
 static uint64_t udf_record_last_update_time(const as_rec* rec);
 static uint16_t udf_record_gen(const as_rec* rec);
 static uint32_t udf_record_ttl(const as_rec* rec);
+static uint32_t udf_record_size(const as_rec* rec);
 static uint32_t udf_record_memory_size(const as_rec* rec);
 static uint32_t udf_record_device_size(const as_rec* rec);
 static uint16_t udf_record_numbins(const as_rec* rec);
@@ -105,6 +106,7 @@ const as_rec_hooks udf_record_hooks = {
 		.last_update_time   = udf_record_last_update_time,
 		.gen                = udf_record_gen,
 		.ttl                = udf_record_ttl,
+		.size               = udf_record_size,
 		.memory_size        = udf_record_memory_size,
 		.device_size        = udf_record_device_size,
 		.numbins            = udf_record_numbins,
@@ -119,6 +121,7 @@ const as_rec_hooks as_aggr_record_hooks = {
 		.last_update_time   = udf_record_last_update_time,
 		.gen                = udf_record_gen,
 		.ttl                = udf_record_ttl,
+		.size               = udf_record_size,
 		.memory_size        = udf_record_memory_size,
 		.device_size        = udf_record_device_size,
 		.numbins            = udf_record_numbins,
@@ -143,12 +146,10 @@ udf_record_init(udf_record* urecord)
 	urecord->has_updates = false;
 
 	urecord->result_code = AS_OK;
-	urecord->old_memory_bytes = 0;
 
 	urecord->particle_llb = (cf_ll_buf){ 0 };
 
 	urecord->n_old_bins = 0;
-	urecord->n_cleanup_bins = 0;
 	urecord->n_inserts = 0;
 	urecord->n_updates = 0;
 }
@@ -557,8 +558,27 @@ udf_record_ttl(const as_rec* rec)
 }
 
 //------------------------------------------------
+// sz = record.size(rec)
+//
+static uint32_t
+udf_record_size(const as_rec* rec)
+{
+	param_check(rec);
+
+	udf_record* urecord = (udf_record*)as_rec_source(rec);
+
+	if (! urecord->is_open) {
+		cf_warning(AS_UDF, "record not open");
+		return 0;
+	}
+
+	return as_record_stored_size(urecord->r_ref->r);
+}
+
+//------------------------------------------------
 // sz = record.memory_size(rec)
 //
+// Deprecated - replaced with record.size().
 static uint32_t
 udf_record_memory_size(const as_rec* rec)
 {
@@ -571,12 +591,14 @@ udf_record_memory_size(const as_rec* rec)
 		return 0;
 	}
 
-	return as_storage_record_mem_size(urecord->tr->rsv.ns, urecord->r_ref->r);
+	return urecord->tr->rsv.ns->storage_type == AS_STORAGE_ENGINE_MEMORY ?
+			as_record_stored_size(urecord->r_ref->r) : 0;
 }
 
 //------------------------------------------------
 // sz = record.device_size(rec)
 //
+// Deprecated - replaced with record.size().
 static uint32_t
 udf_record_device_size(const as_rec* rec)
 {
@@ -589,8 +611,8 @@ udf_record_device_size(const as_rec* rec)
 		return 0;
 	}
 
-	return as_storage_record_device_size(urecord->tr->rsv.ns,
-			urecord->r_ref->r);
+	return as_namespace_is_memory_only(urecord->tr->rsv.ns) ?
+			0 : as_record_stored_size(urecord->r_ref->r);
 }
 
 //------------------------------------------------
@@ -652,7 +674,6 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 		return -1;
 	}
 
-	as_namespace* ns = urecord->rd->ns;
 	uint16_t n_bins = urecord->rd->n_bins;
 	// Note - for now, we think we can't see unused bins (within n_bins) here.
 
@@ -663,9 +684,7 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 		as_bin* b = &urecord->rd->bins[i];
 
 		if (as_bin_is_live(b)) {
-			const char* name = as_bin_get_name_from_id(ns, b->id);
-
-			strcpy(bin_names + (n_live_bins * AS_BIN_NAME_MAX_SZ), name);
+			strcpy(bin_names + (n_live_bins * AS_BIN_NAME_MAX_SZ), b->name);
 			n_live_bins++;
 		}
 	}
@@ -687,7 +706,7 @@ param_check_w_bin(const as_rec* rec, const char* name)
 
 	cf_assert(name != NULL, AS_UDF, "null bin name");
 
-	// FIXME - is an empty bin name ok now that single-bin is gone?
+	// Note - empty bin name ok for now - single-bin "soft landing".
 //	if (*name == 0) {
 //		cf_warning(AS_UDF, "empty bin name");
 //		return false;

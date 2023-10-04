@@ -33,6 +33,7 @@
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
+#include "shash.h"
 #include "socket.h"
 #include "tls.h"
 #include "vector.h"
@@ -65,6 +66,11 @@ struct as_transaction_s;
 
 #define AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT 1024
 #define AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT (1024 * 1024)
+
+// For set and bin "projection" filters.
+#define SHIPPING_UNSPECIFIED 0
+#define SHIPPING_ENABLED 1
+#define SHIPPING_DISABLED 2
 
 typedef enum {
 	XDR_AUTH_NONE,
@@ -112,11 +118,11 @@ typedef struct as_xdr_dc_ns_cfg_s {
 
 	cf_vector* ignored_sets; // startup only
 	cf_vector* shipped_sets; // startup only
-	uint8_t sets[1024]; // AS_SET_MAX_COUNT + 1
+	uint8_t sets[4096]; // AS_SET_MAX_COUNT + 1
 
 	cf_vector* ignored_bins; // startup only
 	cf_vector* shipped_bins; // startup only
-	uint8_t bins[(64 * 1024) - 1]; // MAX_BIN_NAMES
+	cf_shash* bin_filter_hash;
 } as_xdr_dc_ns_cfg;
 
 typedef struct as_xdr_dc_cfg_s {

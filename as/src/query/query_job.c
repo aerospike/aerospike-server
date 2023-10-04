@@ -305,7 +305,7 @@ as_query_job_destroy(as_query_job* _job)
 	}
 
 	if (_job->si != NULL) {
-		as_sindex_release(_job->si);
+		as_sindex_job_release(_job->si);
 	}
 
 	if (_job->range != NULL) {
@@ -484,7 +484,7 @@ finish(as_query_job* _job)
 	}
 
 	if (_job->si != NULL) {
-		as_sindex_release(_job->si);
+		as_sindex_job_release(_job->si);
 		_job->si = NULL;
 	}
 }

@@ -75,7 +75,6 @@ static cf_clock udf_aerospike_get_current_time(const as_aerospike* as);
 static int execute_updates(udf_record* urecord);
 static void prepare_for_write(udf_record* urecord);
 static void execute_failed(udf_record* urecord, int result_code);
-static int execute_delete_bin(udf_record* urecord, const char* name);
 static int execute_set_bin(udf_record* urecord, const char* name, const as_val* val);
 static uint8_t* get_particle_buf(udf_record* urecord, uint32_t size);
 
@@ -279,14 +278,11 @@ udf_aerospike_rec_remove(const as_aerospike* as, const as_rec* rec)
 	udf_record_cache_free(urecord);
 
 	as_storage_rd* rd = urecord->rd;
-	as_namespace* ns = rd->ns;
 
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
 		as_bin* b = &rd->bins[i];
 
-		const char* name = as_bin_get_name_from_id(ns, b->id);
-
-		udf_record_cache_set(urecord, name, NULL, true);
+		udf_record_cache_set(urecord, b->name, NULL, true);
 	}
 
 	return execute_updates(urecord);
@@ -344,7 +340,7 @@ execute_updates(udf_record* urecord)
 
 	as_set* p_set = as_namespace_get_record_set(ns, rd->r);
 
-	if (as_set_size_stop_writes(p_set, ns)) {
+	if (as_set_size_stop_writes(p_set)) {
 		cf_ticker_warning(AS_UDF, "{%s|%s} at stop-writes-size - can't execute",
 				ns->name, p_set->name);
 		execute_failed(urecord, AS_ERR_FORBIDDEN);
@@ -370,13 +366,7 @@ execute_updates(udf_record* urecord)
 			}
 
 			if (val == NULL || val->type == AS_NIL) {
-				int rv = execute_delete_bin(urecord, name);
-
-				if (rv != AS_OK) {
-					execute_failed(urecord, rv);
-					return -1;
-				}
-
+				udf_delete_bin(urecord->rd, name);
 				udf_record_cache_reclaim(urecord, i--); // decrements n_updates
 			}
 			else {
@@ -411,9 +401,6 @@ static void
 prepare_for_write(udf_record* urecord)
 {
 	as_storage_rd* rd = urecord->rd;
-	as_namespace* ns = rd->ns;
-
-	urecord->old_memory_bytes = as_storage_record_mem_size(ns, rd->r);
 
 	urecord->n_old_bins = rd->n_bins;
 
@@ -432,12 +419,6 @@ execute_failed(udf_record* urecord, int result_code)
 	urecord->has_updates = false;
 
 	as_storage_rd* rd = urecord->rd;
-	as_namespace* ns = rd->ns;
-
-	if (ns->storage_data_in_memory) {
-		write_dim_unwind(urecord->old_bins, urecord->n_old_bins, rd->bins,
-				rd->n_bins, urecord->cleanup_bins, urecord->n_cleanup_bins);
-	}
 
 	if (urecord->n_old_bins != 0) {
 		memcpy(rd->bins, urecord->old_bins,
@@ -445,7 +426,6 @@ execute_failed(udf_record* urecord, int result_code)
 	}
 
 	rd->n_bins = (uint16_t)urecord->n_old_bins;
-
 
 	if (urecord->particle_llb.head != NULL) {
 		cf_ll_buf_free(&urecord->particle_llb);
@@ -456,23 +436,9 @@ execute_failed(udf_record* urecord, int result_code)
 }
 
 static int
-execute_delete_bin(udf_record* urecord, const char* name)
-{
-	int result;
-
-	if (! udf_delete_bin(urecord->rd, name,
-			urecord->cleanup_bins, &urecord->n_cleanup_bins, &result)) {
-		return result;
-	}
-
-	return AS_OK;
-}
-
-static int
 execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 {
 	as_storage_rd* rd = urecord->rd;
-	as_namespace* ns = rd->ns;
 
 	if (as_particle_type_from_asval(val) == AS_PARTICLE_TYPE_NULL) {
 		cf_warning(AS_UDF, "setting bin %s with unusable as_val", name);
@@ -484,31 +450,11 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 		return AS_ERR_BIN_NAME;
 	}
 
-	int rv;
-	as_bin* b = as_bin_get_or_create(rd, name, &rv);
+	as_bin* b = as_bin_get_or_create(rd, name);
+	uint32_t size = as_particle_size_from_asval(val);
+	uint8_t* buf = get_particle_buf(urecord, size);
 
-	if (b == NULL) {
-		cf_warning(AS_UDF, "can't create bin %s", name);
-		return rv;
-	}
-
-	if (ns->storage_data_in_memory) {
-		as_bin cleanup_bin = *b;
-
-		if ((rv = as_bin_particle_alloc_from_asval(b, val)) != 0) {
-			cf_warning(AS_UDF, "can't convert as_val to particle in %s", name);
-			return -rv;
-		}
-
-		append_bin_to_destroy(&cleanup_bin, urecord->cleanup_bins,
-				&urecord->n_cleanup_bins);
-	}
-	else {
-		uint32_t size = as_particle_size_from_asval(val);
-		uint8_t* buf = get_particle_buf(urecord, size);
-
-		as_bin_particle_stack_from_asval(b, buf, val);
-	}
+	as_bin_particle_stack_from_asval(b, buf, val);
 
 	return AS_OK;
 }

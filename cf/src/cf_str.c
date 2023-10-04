@@ -156,9 +156,9 @@ int cf_str_atoi_u64(char *s, uint64_t *value)
 
 int cf_str_atoi_seconds(char *s, uint32_t *value)
 {
-	// Special case: treat -1 the same as 0.
-	if (*s == '-' && *(s + 1) == '1') {
-		*value = 0;
+	// Special case: accept -1.
+	if (*s == '-' && *(s + 1) == '1' && *(s + 2) == 0) {
+		*value = (uint32_t)-1;
 		return 0;
 	}
 

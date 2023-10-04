@@ -59,19 +59,17 @@
 // Forward declarations.
 //
 
-void read_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
-void start_repl_ping(rw_request* rw, as_transaction* tr);
-bool read_dup_res_cb(rw_request* rw);
-void repl_ping_after_dup_res(rw_request* rw, as_transaction* tr);
-void repl_ping_cb(rw_request* rw);
+static void read_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
+static void start_repl_ping(rw_request* rw, as_transaction* tr);
+static bool read_dup_res_cb(rw_request* rw);
+static void repl_ping_after_dup_res(rw_request* rw, as_transaction* tr);
+static void repl_ping_cb(rw_request* rw);
 
-void send_read_response(as_transaction* tr, as_msg_op** ops,
-		as_bin** response_bins, uint16_t n_bins, cf_dyn_buf* db);
-void read_timeout_cb(rw_request* rw);
+static void send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins, uint16_t n_bins, cf_dyn_buf* db);
+static void read_timeout_cb(rw_request* rw);
 
-transaction_status read_local(as_transaction* tr);
-void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
-		int result_code);
+static transaction_status read_local(as_transaction* tr);
+static void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, int result_code);
 
 
 //==========================================================
@@ -259,7 +257,7 @@ as_read_start(as_transaction* tr)
 // Local helpers - transaction flow.
 //
 
-void
+static void
 read_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 {
 	// Finish initializing rw_request, construct and send dup-res message.
@@ -274,8 +272,7 @@ read_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r)
 	cf_mutex_unlock(&rw->lock);
 }
 
-
-void
+static void
 start_repl_ping(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send repl-ping message.
@@ -290,8 +287,7 @@ start_repl_ping(rw_request* rw, as_transaction* tr)
 	cf_mutex_unlock(&rw->lock);
 }
 
-
-bool
+static bool
 read_dup_res_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, read, FROM_CLIENT, dup_res);
@@ -333,8 +329,7 @@ read_dup_res_cb(rw_request* rw)
 	return true;
 }
 
-
-void
+static void
 repl_ping_after_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Recycle rw_request that was just used for duplicate resolution to now do
@@ -345,8 +340,7 @@ repl_ping_after_dup_res(rw_request* rw, as_transaction* tr)
 	send_rw_messages(rw);
 }
 
-
-void
+static void
 repl_ping_cb(rw_request* rw)
 {
 	BENCHMARK_NEXT_DATA_POINT_FROM(rw, read, FROM_CLIENT, repl_ping);
@@ -372,7 +366,7 @@ repl_ping_cb(rw_request* rw)
 // Local helpers - transaction end.
 //
 
-void
+static void
 send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		uint16_t n_bins, cf_dyn_buf* db)
 {
@@ -436,8 +430,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 	tr->from.any = NULL; // pattern, not needed
 }
 
-
-void
+static void
 read_timeout_cb(rw_request* rw)
 {
 	if (! rw->from.any) {
@@ -478,7 +471,7 @@ read_timeout_cb(rw_request* rw)
 // Local helpers - read local.
 //
 
-transaction_status
+static transaction_status
 read_local(as_transaction* tr)
 {
 	as_msg* m = &tr->msgp->msg;
@@ -610,6 +603,13 @@ read_local(as_transaction* tr)
 		uint16_t n = 0;
 
 		while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
+			if (! as_bin_name_check(op->name, op->name_sz)) {
+				cf_warning(AS_RW, "{%s} read_local: bad bin name %.*s (%u) %pD", ns->name, op->name_sz, op->name, op->name_sz, &tr->keyd);
+				as_bin_destroy_all(result_bins, n_result_bins);
+				read_local_done(tr, &r_ref, &rd, AS_ERR_BIN_NAME);
+				return TRANS_DONE_ERROR;
+			}
+
 			if (op->op == AS_MSG_OP_READ) {
 				as_bin* b = as_bin_get_live_w_len(&rd, op->name, op->name_sz);
 
@@ -773,8 +773,7 @@ read_local(as_transaction* tr)
 	return TRANS_DONE_SUCCESS;
 }
 
-
-void
+static void
 read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code)
 {

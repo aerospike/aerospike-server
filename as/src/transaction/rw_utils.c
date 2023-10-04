@@ -76,7 +76,6 @@ xdr_allows_write(as_transaction* tr)
 	return false;
 }
 
-
 void
 send_rw_messages(rw_request* rw)
 {
@@ -95,7 +94,6 @@ send_rw_messages(rw_request* rw)
 	}
 }
 
-
 void
 send_rw_messages_forget(rw_request* rw)
 {
@@ -108,7 +106,6 @@ send_rw_messages_forget(rw_request* rw)
 		}
 	}
 }
-
 
 bool
 set_name_check(const as_transaction* tr, const as_record* r)
@@ -139,7 +136,6 @@ set_name_check(const as_transaction* tr, const as_record* r)
 	return true;
 }
 
-
 int
 set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 {
@@ -153,7 +149,6 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 	// Given the name, find/assign the set-ID and write it in the as_index.
 	return as_index_set_set_w_len(r, ns, (const char*)f->data, name_len, true);
 }
-
 
 int
 handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
@@ -205,7 +200,6 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 	return tv == AS_EXP_TRUE ? AS_OK : AS_ERR_FILTERED_OUT;
 }
 
-
 void
 destroy_filter_exp(const as_transaction* tr, as_exp* exp)
 {
@@ -223,7 +217,6 @@ destroy_filter_exp(const as_transaction* tr, as_exp* exp)
 		break;
 	}
 }
-
 
 int
 read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
@@ -247,7 +240,6 @@ read_and_filter_bins(as_storage_rd* rd, as_exp* exp)
 	return AS_OK;
 }
 
-
 // Caller must have checked that key is present in message.
 bool
 check_msg_key(as_msg* m, as_storage_rd* rd)
@@ -263,7 +255,6 @@ check_msg_key(as_msg* m, as_storage_rd* rd)
 
 	return true;
 }
-
 
 bool
 get_msg_key(as_transaction* tr, as_storage_rd* rd)
@@ -289,7 +280,6 @@ get_msg_key(as_transaction* tr, as_storage_rd* rd)
 
 	return true;
 }
-
 
 int
 handle_msg_key(as_transaction* tr, as_storage_rd* rd)
@@ -329,7 +319,6 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 	return 0;
 }
 
-
 void
 advance_record_version(const as_transaction* tr, as_record* r)
 {
@@ -340,14 +329,18 @@ advance_record_version(const as_transaction* tr, as_record* r)
 	uint64_t now = cf_clepoch_milliseconds();
 
 	switch (m->record_ttl) {
-	case TTL_NAMESPACE_DEFAULT:
-		if (ns->default_ttl != 0) {
-			// Set record void-time using default TTL value.
-			r->void_time = (now / 1000) + ns->default_ttl;
-		}
-		else {
-			// Default TTL is "never expire".
-			r->void_time = 0;
+	case TTL_USE_DEFAULT: {
+			uint32_t default_ttl = effective_default_ttl(ns,
+					as_namespace_get_record_set(ns, r));
+
+			if (default_ttl != 0) {
+				// Set record void-time using default TTL value.
+				r->void_time = (now / 1000) + default_ttl;
+			}
+			else {
+				// Default TTL is "never expire".
+				r->void_time = 0;
+			}
 		}
 		break;
 	case TTL_NEVER_EXPIRE:
@@ -368,7 +361,6 @@ advance_record_version(const as_transaction* tr, as_record* r)
 	as_record_increment_generation(r, ns);
 }
 
-
 void
 pickle_all(as_storage_rd* rd, rw_request* rw)
 {
@@ -379,11 +371,13 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 	// else - no destination node(s).
 }
 
-
 void
 update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		uint32_t n_old_bins, as_bin* new_bins, uint32_t n_new_bins)
 {
+	as_index* r = r_ref->r;
+	uint16_t set_id = as_index_get_set_id(r);
+
 	bool bin_name_in_both[n_new_bins];
 
 	// Initialize before the critical section to make it shorter.
@@ -393,34 +387,8 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 
 	// At max we will do both insert & delete for every sindex in the namespace.
 	uint32_t n_sindexes = as_sindex_n_sindexes(ns);
-	uint32_t n_sbins = 2 * n_sindexes;
-
-	as_index* r = r_ref->r;
-	uint16_t set_id = as_index_get_set_id(r);
-	as_sindex* si_arr[n_sbins];
-	uint32_t si_arr_index = 0;
-
-	// Reserve matching SIs.
-
-	for (uint32_t i = 0; i < n_old_bins; i++) {
-		si_arr_index += as_sindex_arr_lookup_by_set_and_bin_lockfree(ns, set_id,
-				old_bins[i].id, &si_arr[si_arr_index]);
-	}
-
-	for (uint32_t i = 0; i < n_new_bins; i++) {
-		si_arr_index += as_sindex_arr_lookup_by_set_and_bin_lockfree(ns, set_id,
-				new_bins[i].id, &si_arr[si_arr_index]);
-	}
-
-	if (si_arr_index == 0) {
-		SINDEX_GRUNLOCK();
-		as_index_clear_in_sindex(r); // no sindex corresponding to old/new bins
-		return;
-	}
-
-	as_sindex_bin sbins[n_sbins];
+	as_sindex_bin sbins[2 * n_sindexes];
 	uint32_t n_populated = 0;
-
 	bool record_in_sindex = false;
 
 	// For every old bin, find the corresponding new bin (if any) and adjust the
@@ -438,7 +406,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 
 			b_new = &new_bins[i_new];
 
-			if (b_old->id == b_new->id) {
+			if (strcmp(b_old->name, b_new->name) == 0) {
 				found = true;
 				bin_name_in_both[i_new] = true;
 			}
@@ -448,7 +416,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 			for (uint32_t i_new = 0; i_new < n_new_bins; i_new++) {
 				b_new = &new_bins[i_new];
 
-				if (b_old->id == b_new->id) {
+				if (strcmp(b_old->name, b_new->name) == 0) {
 					found = true;
 					bin_name_in_both[i_new] = true;
 
@@ -496,7 +464,6 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 
 	// Now find the new bins that are just-created bins. We've marked the others
 	// in the loop above, so any left are just-created.
-
 	for (uint32_t i_new = 0; i_new < n_new_bins; i_new++) {
 		if (bin_name_in_both[i_new]) {
 			continue;
@@ -529,10 +496,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		// if the sindex building is in progress.
 		as_index_clear_in_sindex(r);
 	}
-
-	as_sindex_release_arr(si_arr, si_arr_index);
 }
-
 
 void
 remove_from_sindex(as_namespace* ns, as_index_ref* r_ref)
@@ -565,27 +529,16 @@ remove_from_sindex(as_namespace* ns, as_index_ref* r_ref)
 	as_storage_record_close(&rd);
 }
 
-
 void
 remove_from_sindex_bins(as_namespace* ns, as_index_ref* r_ref, as_bin* bins,
 		uint32_t n_bins)
 {
-	SINDEX_GRLOCK();
-
-	uint32_t n_sindexes = as_sindex_n_sindexes(ns);
-
-	as_sindex* si_arr[n_sindexes];
-	uint32_t si_arr_index = 0;
 	as_index* r = r_ref->r;
 	uint16_t set_id = as_index_get_set_id(r);
 
-	// Reserve matching sindexes.
-	for (uint32_t i = 0; i < n_bins; i++) {
-		si_arr_index += as_sindex_arr_lookup_by_set_and_bin_lockfree(ns, set_id,
-				bins[i].id, &si_arr[si_arr_index]);
-	}
+	SINDEX_GRLOCK();
 
-	as_sindex_bin sbins[n_sindexes];
+	as_sindex_bin sbins[as_sindex_n_sindexes(ns)];
 	uint32_t n_populated = 0;
 
 	for (uint32_t i = 0; i < n_bins; i++) {
@@ -602,68 +555,4 @@ remove_from_sindex_bins(as_namespace* ns, as_index_ref* r_ref, as_bin* bins,
 
 	// Unmark record for sindex after deletion.
 	as_index_clear_in_sindex(r);
-
-	as_sindex_release_arr(si_arr, si_arr_index);
-}
-
-
-void
-write_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
-		uint32_t n_new_bins, as_bin* cleanup_bins, uint32_t n_cleanup_bins)
-{
-	for (uint32_t i_new = 0; i_new < n_new_bins; i_new++) {
-		as_bin* b_new = &new_bins[i_new];
-
-		if (! as_bin_is_live(b_new)) {
-			continue;
-		}
-
-		// Embedded particles have no-op destructors - skip loop over old bins.
-		if (as_bin_is_embedded_particle(b_new)) {
-			continue;
-		}
-
-		as_particle* p_new = b_new->particle;
-		uint32_t i_old;
-
-		for (i_old = 0; i_old < n_old_bins; i_old++) {
-			as_bin* b_old = &old_bins[i_old];
-
-			if (b_new->id == b_old->id) {
-				if (p_new != as_bin_get_particle(b_old)) {
-					as_bin_particle_destroy(b_new);
-				}
-
-				break;
-			}
-		}
-
-		if (i_old == n_old_bins) {
-			as_bin_particle_destroy(b_new);
-		}
-	}
-
-	for (uint32_t i_cleanup = 0; i_cleanup < n_cleanup_bins; i_cleanup++) {
-		as_bin* b_cleanup = &cleanup_bins[i_cleanup];
-		as_particle* p_cleanup = b_cleanup->particle;
-		uint32_t i_old;
-
-		for (i_old = 0; i_old < n_old_bins; i_old++) {
-			as_bin* b_old = &old_bins[i_old];
-
-			if (b_cleanup->id == b_old->id) {
-				if (p_cleanup != as_bin_get_particle(b_old)) {
-					as_bin_particle_destroy(b_cleanup);
-				}
-
-				break;
-			}
-		}
-
-		if (i_old == n_old_bins) {
-			as_bin_particle_destroy(b_cleanup);
-		}
-	}
-
-	// The index element's as_bin_space pointer still points at old bins.
 }

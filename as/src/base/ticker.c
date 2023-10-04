@@ -45,7 +45,6 @@
 #include "log.h"
 
 #include "base/cfg.h"
-#include "base/cfg_info.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/set_index.h"
@@ -88,10 +87,10 @@ void log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp);
 void log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp);
 void log_line_appeals(as_namespace* ns);
 void log_line_migrations(as_namespace* ns);
-void log_line_memory_usage(as_namespace* ns, uint64_t index_used_sz, uint64_t sindex_used_sz);
-void log_line_persistent_index_usage(as_namespace* ns, uint64_t used_sz);
-void log_line_persistent_sindex_usage(as_namespace* ns, uint64_t used_sz);
-void log_line_device_usage(as_namespace* ns);
+void log_line_index_usage(as_namespace* ns, uint64_t n_records);
+void log_line_set_index_usage(as_namespace* ns);
+void log_line_sindex_usage(as_namespace* ns);
+void log_line_data_usage(as_namespace* ns);
 
 void log_line_client(as_namespace* ns);
 void log_line_xdr_client(as_namespace* ns);
@@ -163,7 +162,7 @@ void
 log_ticker_frame(uint64_t delta_time)
 {
 	char cluster_name[AS_CLUSTER_NAME_SZ];
-	as_cfg_info_get_printable_cluster_name(cluster_name);
+	as_config_cluster_name_get(cluster_name);
 
 	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u CLUSTER-NAME %s",
 			g_config.self_node,
@@ -187,8 +186,6 @@ log_ticker_frame(uint64_t delta_time)
 
 		uint64_t n_objects = as_load_uint64(&ns->n_objects);
 		uint64_t n_tombstones = as_load_uint64(&ns->n_tombstones);
-		uint64_t index_used_sz = (n_objects + n_tombstones) * sizeof(as_index);
-		uint64_t sindex_used_sz = as_sindex_used_bytes(ns);
 
 		repl_stats mp;
 		as_partition_get_replica_stats(ns, &mp);
@@ -197,10 +194,10 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_tombstones(ns, n_tombstones, &mp);
 		log_line_appeals(ns);
 		log_line_migrations(ns);
-		log_line_memory_usage(ns, index_used_sz, sindex_used_sz);
-		log_line_persistent_index_usage(ns, index_used_sz);
-		log_line_persistent_sindex_usage(ns, sindex_used_sz);
-		log_line_device_usage(ns);
+		log_line_index_usage(ns, n_objects + n_tombstones);
+		log_line_set_index_usage(ns);
+		log_line_sindex_usage(ns);
+		log_line_data_usage(ns);
 
 		log_line_client(ns);
 		log_line_xdr_client(ns);
@@ -479,108 +476,83 @@ log_line_migrations(as_namespace* ns)
 }
 
 void
-log_line_memory_usage(as_namespace* ns, uint64_t index_used_sz,
-		uint64_t sindex_used_sz)
+log_line_index_usage(as_namespace* ns, uint64_t n_records)
 {
-	uint64_t index_mem = as_namespace_index_persisted(ns) ? 0 : index_used_sz;
-	uint64_t set_index_mem = as_set_index_used_bytes(ns);
-	uint64_t sindex_mem = as_namespace_sindex_persisted(ns) ? 0 : sindex_used_sz;
-	uint64_t data_mem = as_load_uint64(&ns->n_bytes_memory);
-	uint64_t total_mem = index_mem + set_index_mem + sindex_mem + data_mem;
+	uint64_t used_sz = n_records * sizeof(as_index);
 
-	double mem_used_pct = (double)(total_mem * 100) / (double)ns->memory_size;
-
-	if (ns->storage_data_in_memory) {
-		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu set-index-bytes %lu sindex-bytes %lu data-bytes %lu used-pct %.2lf",
-				ns->name,
-				total_mem,
-				index_mem,
-				set_index_mem,
-				sindex_mem,
-				data_mem,
-				mem_used_pct);
-	}
-	else {
-		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu set-index-bytes %lu sindex-bytes %lu used-pct %.2lf",
-				ns->name,
-				total_mem,
-				index_mem,
-				set_index_mem,
-				sindex_mem,
-				mem_used_pct);
-	}
-}
-
-void
-log_line_persistent_index_usage(as_namespace* ns, uint64_t used_sz)
-{
 	if (ns->pi_xmem_type == CF_XMEM_TYPE_PMEM) {
-		uint64_t used_pct = used_sz * 100 / ns->pi_mounts_size_limit;
+		uint64_t used_pct = used_sz * 100 / ns->pi_mounts_budget;
 
-		cf_info(AS_INFO, "{%s} index-pmem-usage: used-bytes %lu used-pct %lu",
+		cf_info(AS_INFO, "{%s} index-usage: used-bytes %lu used-pct %lu",
 				ns->name,
 				used_sz,
 				used_pct);
 	}
 	else if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
-		uint64_t used_pct = used_sz * 100 / ns->pi_mounts_size_limit;
+		uint64_t used_pct = used_sz * 100 / ns->pi_mounts_budget;
 		uint64_t alloc_sz = as_load_uint64(&ns->arena->alloc_sz);
-		uint64_t alloc_pct = alloc_sz * 100 / ns->pi_mounts_size_limit;
+		uint64_t alloc_pct = alloc_sz * 100 / ns->pi_mounts_budget;
 
-		cf_info(AS_INFO, "{%s} index-flash-usage: used-bytes %lu used-pct %lu alloc-bytes %lu alloc-pct %lu",
+		cf_info(AS_INFO, "{%s} index-usage: used-bytes %lu used-pct %lu alloc-bytes %lu alloc-pct %lu",
 				ns->name,
 				used_sz,
 				used_pct,
 				alloc_sz,
 				alloc_pct);
 	}
-}
-
-void
-log_line_persistent_sindex_usage(as_namespace* ns, uint64_t used_sz)
-{
-	if (ns->si_xmem_type == CF_XMEM_TYPE_PMEM) {
-		uint64_t used_pct = used_sz * 100 / ns->si_mounts_size_limit;
-
-		cf_info(AS_INFO, "{%s} sindex-pmem-usage: used-bytes %lu used-pct %lu",
+	else { // CE (RAM) or CF_XMEM_TYPE_SHMEM
+		cf_info(AS_INFO, "{%s} index-usage: used-bytes %lu",
 				ns->name,
-				used_sz,
-				used_pct);
-	}
-	else if (ns->si_xmem_type == CF_XMEM_TYPE_FLASH) {
-		uint64_t used_pct = used_sz * 100 / ns->si_mounts_size_limit;
-
-		cf_info(AS_INFO, "{%s} sindex-flash-usage: used-bytes %lu used-pct %lu",
-				ns->name,
-				used_sz,
-				used_pct);
+				used_sz);
 	}
 }
 
 void
-log_line_device_usage(as_namespace* ns)
+log_line_set_index_usage(as_namespace* ns)
 {
-	if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+	uint64_t used_sz = as_set_index_used_bytes(ns);
+
+	if (used_sz == 0) {
 		return;
 	}
 
-	int available_pct;
-	uint64_t used_bytes;
-	as_storage_stats(ns, &available_pct, &used_bytes);
+	cf_info(AS_INFO, "{%s} set-index-usage: used-bytes %lu",
+			ns->name,
+			used_sz);
+}
 
-	if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
-		cf_info(AS_INFO, "{%s} pmem-usage: used-bytes %lu avail-pct %d",
-				ns->name,
-				used_bytes,
-				available_pct);
+void
+log_line_sindex_usage(as_namespace* ns)
+{
+	uint64_t used_sz = as_sindex_used_bytes(ns);
+
+	if (used_sz == 0) {
+		return;
 	}
-	else if (ns->storage_data_in_memory) {
-		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d",
+
+	if (as_namespace_sindex_persisted(ns)) {
+		uint64_t used_pct = used_sz * 100 / ns->si_mounts_budget;
+
+		cf_info(AS_INFO, "{%s} sindex-usage: used-bytes %lu used-pct %lu",
 				ns->name,
-				used_bytes,
-				available_pct);
+				used_sz,
+				used_pct);
 	}
-	else {
+	else { // CE (RAM) or CF_XMEM_TYPE_SHMEM
+		cf_info(AS_INFO, "{%s} sindex-usage: used-bytes %lu",
+				ns->name,
+				used_sz);
+	}
+}
+
+void
+log_line_data_usage(as_namespace* ns)
+{
+	uint32_t avail_pct;
+	uint64_t used_bytes;
+	as_storage_stats(ns, &avail_pct, &used_bytes);
+
+	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		uint32_t n_reads_from_cache = as_load_uint32(&ns->n_reads_from_cache);
 		uint32_t n_total_reads = ns->n_reads_from_device + n_reads_from_cache;
 
@@ -591,11 +563,17 @@ log_line_device_usage(as_namespace* ns)
 				(float)(100 * n_reads_from_cache) /
 				(float)(n_total_reads == 0 ? 1 : n_total_reads);
 
-		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d cache-read-pct %.2f",
+		cf_info(AS_INFO, "{%s} data-usage: used-bytes %lu avail-pct %u cache-read-pct %.2f",
 				ns->name,
 				used_bytes,
-				available_pct,
+				avail_pct,
 				ns->cache_read_pct);
+	}
+	else { // memory or pmem
+		cf_info(AS_INFO, "{%s} data-usage: used-bytes %lu avail-pct %u",
+				ns->name,
+				used_bytes,
+				avail_pct);
 	}
 }
 

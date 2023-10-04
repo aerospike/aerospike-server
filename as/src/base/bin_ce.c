@@ -91,14 +91,3 @@ as_bin_clear_meta(as_bin* b)
 	b->unused_flags = 0;
 	b->lut = 0;
 }
-
-
-//==========================================================
-// Special API for downgrades.
-//
-
-int
-as_bin_downgrade_pickle(as_storage_rd* rd)
-{
-	return 0;
-}

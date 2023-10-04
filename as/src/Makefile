@@ -164,17 +164,18 @@ ifneq ($(USE_EE),1)
 endif
 
 STORAGE_HEADERS += drv_common.h
+STORAGE_HEADERS += drv_mem.h
 STORAGE_HEADERS += drv_ssd.h
 STORAGE_HEADERS += flat.h
 STORAGE_HEADERS += storage.h
 
-STORAGE_SOURCES += drv_memory.c
+STORAGE_SOURCES += drv_mem.c
 STORAGE_SOURCES += drv_ssd.c
 STORAGE_SOURCES += flat.c
 STORAGE_SOURCES += drv_common.c
 STORAGE_SOURCES += storage.c
 ifneq ($(USE_EE),1)
-  STORAGE_SOURCES += drv_memory_ce.c
+  STORAGE_SOURCES += drv_mem_ce.c
   STORAGE_SOURCES += drv_pmem_ce.c
   STORAGE_SOURCES += drv_ssd_ce.c
   STORAGE_SOURCES += flat_ce.c
