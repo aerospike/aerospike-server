@@ -214,10 +214,12 @@ as_sig_handle_term(int sig_num, siginfo_t *info, void *ctx)
 void
 as_sig_handle_usr1(int sig_num, siginfo_t *info, void *ctx)
 {
+	(void)ctx;
+
 	cf_warning(AS_AS, "SIGUSR1 received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	cf_log_stack_trace(ctx);
+	cf_log_stack_trace(&g_crash_ctx);
 	reraise_signal(SIGABRT);
 }
 
