@@ -657,6 +657,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE,
 	// Obsoleted:
+	CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY,
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
 	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT,
@@ -1257,6 +1258,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
 		{ "write-block-size",				CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE },
 		// Obsoleted:
+		{ "data-in-memory",					CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY },
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
 		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
 		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT },
@@ -3711,6 +3713,9 @@ as_config_init(const char* config_file)
 				ns->storage_write_block_size = cfg_u32_power_of_2(&line, MIN_WRITE_BLOCK_SIZE, MAX_WRITE_BLOCK_SIZE);
 				break;
 			// Obsoleted:
+			case CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY:
+				cfg_obsolete(&line, "please use 'storage-engine memory' to store data in memory");
+				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT:
 				cfg_obsolete(&line, "please use 'read-page-cache' instead");
 				break;
