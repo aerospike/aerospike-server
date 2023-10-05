@@ -104,6 +104,7 @@ void *cf_alloc_realloc_arena(void *p, size_t sz, int32_t arena);
 #define cf_free(_p)              free(_p)
 
 void cf_alloc_check(const void* p_indent);
+void cf_trim_region_to_mapped(void **p, size_t *sz);
 
 extern bool g_alloc_started;
 
