@@ -223,8 +223,10 @@ as_sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 static void
 as_sig_handle_usr1(int sig_num, siginfo_t* info, void* ctx)
 {
+	(void)ctx;
+
 	log_abort("SIGUSR1");
-	cf_log_stack_trace(ctx);
+	cf_log_stack_trace(&g_crash_ctx);
 	reraise_signal(SIGABRT);
 }
 

@@ -31,6 +31,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <ucontext.h>
 
 #include "dynbuf.h"
 
@@ -220,6 +221,8 @@ void cf_log_write_no_return(int sig, cf_log_context context,
 
 extern cf_log_level g_most_verbose_levels[];
 
+extern __thread ucontext_t g_crash_ctx;
+
 // This is ONLY to keep Eclipse happy without having to tell it __FILENAME__ is
 // defined. The make process will define it via the -D mechanism.
 #ifndef __FILENAME__
@@ -227,8 +230,11 @@ extern cf_log_level g_most_verbose_levels[];
 #endif
 
 #define cf_crash(context, ...) \
-	cf_log_write_no_return(SIGUSR1, (context), __FILENAME__, __LINE__, \
-			__VA_ARGS__)
+	do { \
+		getcontext(&g_crash_ctx); \
+		cf_log_write_no_return(SIGUSR1, (context), __FILENAME__, __LINE__, \
+				__VA_ARGS__); \
+	} while (false)
 
 #define cf_crash_nostack(context, ...) \
 	cf_log_write_no_return(SIGINT, (context), __FILENAME__, __LINE__, \
