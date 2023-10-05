@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include "cf_thread.h"
+#include "enhanced_alloc.h"
 #include "log.h"
 
 
@@ -118,6 +119,74 @@ log_abort(const char* signal)
 			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
 }
 
+static void
+log_memory(void* ctx)
+{
+	ucontext_t* uc = (ucontext_t*)ctx;
+	mcontext_t* mc = (mcontext_t*)&uc->uc_mcontext;
+#if defined __x86_64__
+	uint64_t* gregs = (uint64_t*)&mc->gregs[0];
+
+	static const char* names[16] = {
+		"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9",
+		"r10", "r11", "r12", "r13", "r14", "r15"
+	};
+
+	uint64_t values[16] = {
+		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
+		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
+		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
+		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15]
+	};
+
+	uint32_t n_regs = 16;
+#elif defined __aarch64__
+	uint64_t* regs = (uint64_t*)&mc->regs[0];
+	uint64_t sp = (uint64_t)mc->sp;
+
+	static const char* names[32] = {
+		"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10",
+		"x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20",
+		"x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30",
+		"x31"
+	};
+
+	uint64_t values[32];
+
+	for (uint32_t i = 0; i < 31; i++) {
+		values[i] = regs[i];
+	}
+
+	values[31] = sp;
+
+	uint32_t n_regs = 32;
+#endif
+
+	for (uint32_t i = 0; i < n_regs; i++) {
+		if (values[i] < 64) {
+			continue;
+		}
+
+		void* p = (void*)((values[i] & -16ul) - 64);
+		size_t sz = 64 + 16 + 64;
+
+		cf_trim_region_to_mapped(&p, &sz);
+
+		if (sz == 0) {
+			continue;
+		}
+
+		char buff[3 * sz + 1];
+
+		for (uint32_t k = 0; k < sz; k++) {
+			sprintf(buff + 3 * k, " %02x", ((uint8_t*)p)[k]);
+		}
+
+		cf_warning(AS_AS, "stacktrace: memory %s 0x%lx%s", names[i],
+			(uint64_t)p, buff);
+	}
+}
+
 
 //==========================================================
 // Signal handlers.
@@ -129,6 +198,7 @@ as_sig_handle_abort(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGABRT");
 	cf_log_stack_trace(ctx);
+	log_memory(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -137,6 +207,7 @@ as_sig_handle_bus(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGBUS");
 	cf_log_stack_trace(ctx);
+	log_memory(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -146,6 +217,7 @@ as_sig_handle_fpe(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGFPE");
 	cf_log_stack_trace(ctx);
+	log_memory(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -164,6 +236,7 @@ as_sig_handle_ill(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGILL");
 	cf_log_stack_trace(ctx);
+	log_memory(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -188,6 +261,7 @@ as_sig_handle_quit(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGQUIT");
 	cf_log_stack_trace(ctx);
+	log_memory(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -197,6 +271,7 @@ as_sig_handle_segv(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort("SIGSEGV");
 	cf_log_stack_trace(ctx);
+	log_memory(ctx);
 	reraise_signal(sig_num);
 }
 
@@ -227,6 +302,7 @@ as_sig_handle_usr1(int sig_num, siginfo_t* info, void* ctx)
 
 	log_abort("SIGUSR1");
 	cf_log_stack_trace(&g_crash_ctx);
+	log_memory(&g_crash_ctx);
 	reraise_signal(SIGABRT);
 }
 
