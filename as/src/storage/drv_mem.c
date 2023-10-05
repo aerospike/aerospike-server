@@ -3068,8 +3068,9 @@ run_mem_maintenance(void* udata)
 
 		static const uint64_t DEFRAG_FLUSH_MAX_US = 3UL * 1000 * 1000; // 3 sec
 
-		if (mem->shadow_name != NULL &&
-				now >= prev_defrag_flush + DEFRAG_FLUSH_MAX_US) {
+		// Note - call even for memory-only - no flush, but we still want
+		// callbacks to release vacated wblocks.
+		if (now >= prev_defrag_flush + DEFRAG_FLUSH_MAX_US) {
 			flush_defrag_mwb(mem, &prev_n_defrag_writes_flush);
 			prev_defrag_flush = now;
 			next = next_time(now, DEFRAG_FLUSH_MAX_US, next);
@@ -3272,9 +3273,13 @@ flush_defrag_mwb(drv_mem* mem, uint64_t* p_prev_n_defrag_writes)
 	mem_write_block* mwb = mem->defrag_mwb;
 
 	if (mwb && mwb->n_vacated != 0) {
+		// May not need memset for memory-only, but do it anyway.
 		memset(&mwb->base_addr[mwb->pos], 0, MEM_WRITE_BLOCK_SIZE - mwb->pos);
 		mem_wait_writers_done(mwb);
-		shadow_flush_mwb(mem, mwb);
+
+		if (mem->shadow_name != NULL) {
+			shadow_flush_mwb(mem, mwb);
+		}
 
 		// The whole point - free source wblocks.
 		mwb_release_all_vacated_wblocks(mwb);
