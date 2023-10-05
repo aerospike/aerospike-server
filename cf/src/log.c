@@ -42,6 +42,7 @@
 #include <sys/un.h>
 #include <syslog.h>
 #include <time.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 #include "aerospike/as_log.h"
@@ -205,6 +206,8 @@ extern char __etext;
 //
 
 cf_log_level g_most_verbose_levels[CF_LOG_N_CONTEXTS];
+
+__thread ucontext_t g_crash_ctx;
 
 static bool g_use_local_time = false;
 static bool g_use_millis = false;
