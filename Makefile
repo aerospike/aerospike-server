@@ -14,7 +14,6 @@
 #
 #   make deb     - Package server for Debian / Ubuntu platforms as a ".deb" file.
 #   make rpm     - Package server for the Red Hat Package Manager (RPM.)
-#   make tar     - Package server as a compressed tarball for every Linux platform.
 #   make source  - Package the server source code as a compressed "tar" archive.
 #
 # Building a distribution release is a two step process:
@@ -25,7 +24,6 @@
 #
 #       rpm:  Suitable for building and installing on Red Hat-derived systems.
 #       deb:  Suitable for building and installing on Debian-derived systems.
-#       tar:  Makes an "Every Linux" distribution, packaged as a compressed "tar" archive.
 #
 
 OS = $(shell build/os_version)
@@ -130,8 +128,8 @@ cleangit:
 	cd $(S2); $(GIT_CLEAN)
 	$(GIT_CLEAN)
 
-.PHONY: rpm deb tar
-rpm deb tar src:
+.PHONY: rpm deb
+rpm deb src:
 	$(MAKE) -C pkg/$@ EDITION=$(EDITION)
 
 $(VERSION_SRC):	targetdirs
