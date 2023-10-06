@@ -125,8 +125,6 @@ on multiple CPU cores. For example, to run four parallel jobs:
 
 	$ make rpm      -- Build the Red Hat Package Manager (RPM) package.
 
-	$ make tar      -- Build the "Every Linux" compressed "tar" archive (".tgz") package.
-
 	$ make source   -- Package the source code as a compressed "tar" archive.
 
 	$ make clean    -- Delete any existing build products, excluding built packages.

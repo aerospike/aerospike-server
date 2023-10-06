@@ -35,7 +35,6 @@ build:
     script:
       - make -j
       - make $PKG
-      - make tar
       - make source
       - cp -p modules/telemetry/{README,TELEMETRY}.md
     artifact:
