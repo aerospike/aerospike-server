@@ -2317,9 +2317,9 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 			cf_warning(AS_INFO, "must configure non-zero nsup-period or allow-ttl-without-nsup true to set default-ttl > 0");
 			return false;
 		}
-		cf_info(AS_INFO, "Changing value of default-ttl of ns %s from %d to %d",
-				ns->name, (int32_t)ns->default_ttl, (int32_t)val);
-		ns->default_ttl = val;
+		cf_info(AS_INFO, "Changing value of default-ttl of ns %s set %s to %d",
+				ns->name, p_set->name, (int32_t)val);
+		p_set->default_ttl = val;
 	}
 	else if (as_info_parameter_get(cmd, "disable-eviction", v, &v_len) == 0) {
 		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
