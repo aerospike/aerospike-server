@@ -187,7 +187,6 @@ write_bins(as_storage_rd* rd)
 void
 decrypt_record(drv_mem* mem, uint64_t off, as_flat_record* flat)
 {
-	cf_crash(AS_DRV_MEM, "community edition called decrypt_record()");
 }
 
 uint8_t*
