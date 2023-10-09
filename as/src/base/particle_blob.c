@@ -226,11 +226,12 @@ static void restore_ends(const bits_op* op, uint8_t* to, const uint8_t* from, ui
 // Inlines & macros.
 //
 
+// Called converting from as_val after UDF, and converting from msgpack.
 static inline as_particle_type
 blob_bytes_type_to_particle_type(as_bytes_type type)
 {
 	switch (type) {
-	case AS_BYTES_STRING:
+	case AS_BYTES_STRING: // not from as_val, but from msgpack
 		return AS_PARTICLE_TYPE_STRING;
 	case AS_BYTES_BLOB:
 		return AS_PARTICLE_TYPE_BLOB;
@@ -250,19 +251,45 @@ blob_bytes_type_to_particle_type(as_bytes_type type)
 		return AS_PARTICLE_TYPE_VECTOR;
 	case AS_BYTES_HLL:
 		return AS_PARTICLE_TYPE_HLL;
-	case AS_BYTES_GEOJSON:
+	case AS_BYTES_GEOJSON: // TODO - can't get here, but paranoia
 		return AS_PARTICLE_TYPE_GEOJSON;
-	case AS_BYTES_INTEGER:
-	case AS_BYTES_DOUBLE:
-	case AS_BYTES_MAP:
-	case AS_BYTES_LIST:
-	case AS_BYTES_UNDEF:
 	default:
 		break;
 	}
 
-	// Invalid blob types remain as blobs.
+	// Invalid blob types remain as blobs. TODO - warn or assert?
 	return AS_PARTICLE_TYPE_BLOB;
+}
+
+// Called converting to as_val in UDF.
+static inline as_bytes_type
+blob_particle_type_to_bytes_type(as_particle_type type)
+{
+	switch (type) {
+	case AS_PARTICLE_TYPE_BLOB:
+		return AS_BYTES_BLOB;
+	case AS_PARTICLE_TYPE_JAVA_BLOB:
+		return AS_BYTES_JAVA;
+	case AS_PARTICLE_TYPE_CSHARP_BLOB:
+		return AS_BYTES_CSHARP;
+	case AS_PARTICLE_TYPE_PYTHON_BLOB:
+		return AS_BYTES_PYTHON;
+	case AS_PARTICLE_TYPE_RUBY_BLOB:
+		return AS_BYTES_RUBY;
+	case AS_PARTICLE_TYPE_PHP_BLOB:
+		return AS_BYTES_PHP;
+	case AS_PARTICLE_TYPE_ERLANG_BLOB:
+		return AS_BYTES_ERLANG;
+	case AS_PARTICLE_TYPE_VECTOR:
+		return AS_BYTES_VECTOR;
+	case AS_PARTICLE_TYPE_HLL:
+		return AS_BYTES_HLL;
+	default:
+		break;
+	}
+
+	// Invalid blob types remain as blobs. TODO - warn or assert?
+	return AS_BYTES_BLOB;
 }
 
 #define INIT_MV_FROM_MSG(_msg_op) \
@@ -605,7 +632,11 @@ blob_to_asval(const as_particle* p)
 
 	memcpy(value, p_blob_mem->data, p_blob_mem->sz);
 
-	return (as_val*)as_bytes_new_wrap(value, p_blob_mem->sz, true);
+	as_bytes* val = as_bytes_new_wrap(value, p_blob_mem->sz, true);
+
+	val->type = blob_particle_type_to_bytes_type(p_blob_mem->type);
+
+	return (as_val*)val;
 }
 
 uint32_t
