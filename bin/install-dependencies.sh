@@ -57,8 +57,9 @@ function maybe() {
 
 
 function main() {
-	OS=$(./build/os_version -long)
 	parse_args "$@"
+	
+	OS=${OS:="$(./build/os_version -long)"}
 
 	SUDO=""
 	if command -v sudo >/dev/null; then
@@ -113,8 +114,10 @@ function main() {
 
 		maybe "${SUDO} yum install -y ${packages[*]}"
 		;;
+
 	*)
 		log_warn "Aerospike server (CE) currently does not support the distribution ${OS}."
+		exit 1
 		;;
 	esac
 

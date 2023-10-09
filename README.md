@@ -29,7 +29,8 @@ Debian 11 or later, and Ubuntu 20.04 or later.
 The majority of the Aerospike source code is written in the C
 programming language, conforming to the ANSI C99 standard.
 
-To install dependencies run `./bin/install-dependencies.sh` in the aerospike-server repo.
+To install dependencies for a development environment run
+`./bin/install-dependencies.sh` in the aerospike-server repo.
 
 In particular, the following tools and libraries are needed:
 
@@ -84,7 +85,7 @@ the package name includes the major (and/or minor) version number, e.g.,
 
 ### Submodules
 
-The Aerospike Database Server build depends upon 8 submodules:
+The Aerospike Database Server build depends upon the following submodules:
 
 | Submodule | Description |
 |---------- | ----------- |
@@ -92,6 +93,7 @@ The Aerospike Database Server build depends upon 8 submodules:
 | common    | The Aerospike Common Library |
 | jansson   | C library for encoding, decoding and manipulating JSON data |
 | jemalloc  | The JEMalloc Memory Allocator |
+| libbacktrace | A C library that may be linked into a C/C++ program to produce symbolic backtraces |
 | lua       | The Lua runtime |
 | mod-lua   | The Aerospike Lua Interface |
 | s2geometry | The S2 Spherical Geometry Library |
@@ -143,7 +145,7 @@ on multiple CPU cores. For example, to run four parallel jobs:
 
 #### Example:
 
-	$ make USE_JEM=0   -- Default build *without* JEMalloc support.
+	$ make  -- Default build.
 
 ## Configuring Aerospike
 
