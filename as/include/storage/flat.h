@@ -175,6 +175,7 @@ int as_flat_unpack_bins(struct as_namespace_s* ns, const uint8_t* at, const uint
 const uint8_t* as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end, uint32_t n_bins);
 
 uint32_t as_flat_orig_pickle_size(const struct as_remote_record_s* rr, uint32_t pickle_sz);
+bool as_flat_skip_bins(const as_flat_comp_meta* cm, struct as_storage_rd_s* rd);
 bool as_flat_decompress_bins(const as_flat_comp_meta* cm, struct as_storage_rd_s* rd);
 bool as_flat_decompress_buffer(const as_flat_comp_meta* cm, uint32_t max_orig_sz, const uint8_t** at, const uint8_t** end, const uint8_t** cb_end);
 

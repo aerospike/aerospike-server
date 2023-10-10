@@ -216,19 +216,3 @@ drv_check_end_mark(const uint8_t* mark, const as_flat_record* flat)
 {
 	return *(uint32_t*)mark == drv_make_end_mark(flat);
 }
-
-static inline const uint8_t*
-drv_find_and_check_end_mark(const uint8_t* at, const as_flat_record* flat)
-{
-	uint32_t match = drv_make_end_mark(flat);
-
-	for (uint32_t i = 0; i < RBLOCK_SIZE; i++) {
-		if (*(uint32_t*)at == match) {
-			return at;
-		}
-
-		at--;
-	}
-
-	return NULL;
-}

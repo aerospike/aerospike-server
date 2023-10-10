@@ -54,6 +54,15 @@ as_flat_orig_pickle_size(const as_remote_record* rr, uint32_t pickle_sz)
 }
 
 bool
+as_flat_skip_bins(const as_flat_comp_meta* cm, as_storage_rd* rd)
+{
+	rd->flat_end = as_flat_check_packed_bins(rd->flat_bins, rd->flat_end,
+			rd->flat_n_bins);
+
+	return rd->flat_end != NULL;
+}
+
+bool
 as_flat_decompress_bins(const as_flat_comp_meta *cm, as_storage_rd *rd)
 {
 	return true;

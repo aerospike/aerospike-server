@@ -1255,6 +1255,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 	as_flat_opt_meta opt_meta = { { 0 } };
 
 	// Includes round rblock padding, so may not literally exclude the mark.
+	// (Is set exactly to mark below, if skipping or decompressing bins.)
 	rd->flat_end = (const uint8_t*)flat + record_size - END_MARK_SZ;
 
 	rd->flat_bins = as_flat_unpack_record_meta(flat, rd->flat_end, &opt_meta);
@@ -1265,8 +1266,15 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		return -1;
 	}
 
-	// After unpacking meta so there's a bit of sanity checking.
+	rd->flat_n_bins = (uint16_t)opt_meta.n_bins;
+
 	if (pickle_only) {
+		if (! as_flat_skip_bins(&opt_meta.cm, rd)) {
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad bin data",
+					ns->name, ssd->name, &r->keyd);
+			return -1;
+		}
+
 		return 0;
 	}
 
@@ -1281,8 +1289,6 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		rd->key = opt_meta.key;
 	}
 	// else - if updating record without key, leave rd (msg) key to be stored.
-
-	rd->flat_n_bins = (uint16_t)opt_meta.n_bins;
 
 	return 0;
 }
@@ -1338,22 +1344,14 @@ as_storage_record_load_pickle_ssd(as_storage_rd *rd)
 		return false;
 	}
 
-	const uint8_t *mark = drv_find_and_check_end_mark(rd->flat_end, rd->flat);
-
-	if (mark == NULL) {
-		return false;
-	}
-
-	size_t sz = mark - (const uint8_t*)rd->flat;
+	size_t sz = rd->flat_end - (const uint8_t*)rd->flat;
 
 	rd->pickle = cf_malloc(sz);
 	rd->pickle_sz = (uint32_t)sz;
 
 	memcpy(rd->pickle, rd->flat, sz);
 
-	if (rd->flat_end - mark >= RBLOCK_SIZE - END_MARK_SZ) {
-		((as_flat_record*)rd->pickle)->n_rblocks--;
-	}
+	((as_flat_record*)rd->pickle)->n_rblocks = SIZE_TO_N_RBLOCKS(sz);
 
 	return true;
 }
