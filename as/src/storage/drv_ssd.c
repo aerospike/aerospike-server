@@ -1088,7 +1088,7 @@ skip_bins(const as_flat_comp_meta* cm, as_storage_rd* rd)
 {
 	if (cm->method == AS_COMPRESSION_NONE) {
 		rd->flat_end = as_flat_check_packed_bins(rd->flat_bins, rd->flat_end,
-				rd->flat_n_bins);
+				rd->flat_n_bins, rd->ns->single_bin);
 		return rd->flat_end != NULL;
 	}
 
