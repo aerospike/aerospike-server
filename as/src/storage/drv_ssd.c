@@ -332,23 +332,6 @@ ssd_check_end_mark(const uint8_t *mark, const as_flat_record *flat)
 }
 
 
-static inline const uint8_t *
-ssd_find_and_check_end_mark(const uint8_t *at, const as_flat_record *flat)
-{
-	uint32_t match = ssd_make_end_mark(flat);
-
-	for (uint32_t i = 0; i < RBLOCK_SIZE; i++) {
-		if (*(uint32_t*)at == match) {
-			return at;
-		}
-
-		at--;
-	}
-
-	return NULL;
-}
-
-
 //------------------------------------------------
 // ssd_write_buf "swb" methods.
 //
@@ -1098,6 +1081,30 @@ ssd_wblock_init(drv_ssd *ssd)
 // Record reading utilities.
 //
 
+
+// For hotfix purposes only - no EE split or as_flat_... API.
+static bool
+skip_bins(const as_flat_comp_meta* cm, as_storage_rd* rd)
+{
+	if (cm->method == AS_COMPRESSION_NONE) {
+		rd->flat_end = as_flat_check_packed_bins(rd->flat_bins, rd->flat_end,
+				rd->flat_n_bins);
+		return rd->flat_end != NULL;
+	}
+
+	const uint8_t* end = rd->flat_bins + cm->comp_sz;
+
+	if (end > rd->flat_end) {
+		cf_warning(AS_DRV_SSD, "bad compressed size");
+		return false;
+	}
+
+	rd->flat_end = end;
+
+	return true;
+}
+
+
 int
 ssd_read_record(as_storage_rd *rd, bool pickle_only)
 {
@@ -1244,8 +1251,16 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		return -1;
 	}
 
+	rd->flat_n_bins = (uint16_t)opt_meta.n_bins;
+
 	// After unpacking meta so there's a bit of sanity checking.
 	if (pickle_only) {
+		if (! skip_bins(&opt_meta.cm, rd)) {
+			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD bad bin data",
+					ns->name, ssd->name, &r->keyd);
+			return -1;
+		}
+
 		return 0;
 	}
 
@@ -1260,8 +1275,6 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		rd->key = opt_meta.key;
 	}
 	// else - if updating record without key, leave rd (msg) key to be stored.
-
-	rd->flat_n_bins = (uint16_t)opt_meta.n_bins;
 
 	return 0;
 }
@@ -1317,22 +1330,14 @@ as_storage_record_load_pickle_ssd(as_storage_rd *rd)
 		return false;
 	}
 
-	const uint8_t *mark = ssd_find_and_check_end_mark(rd->flat_end, rd->flat);
-
-	if (mark == NULL) {
-		return false;
-	}
-
-	size_t sz = mark - (const uint8_t*)rd->flat;
+	size_t sz = rd->flat_end - (const uint8_t*)rd->flat;
 
 	rd->pickle = cf_malloc(sz);
 	rd->pickle_sz = (uint32_t)sz;
 
 	memcpy(rd->pickle, rd->flat, sz);
 
-	if (rd->flat_end - mark >= RBLOCK_SIZE - END_MARK_SZ) {
-		((as_flat_record*)rd->pickle)->n_rblocks--;
-	}
+	((as_flat_record*)rd->pickle)->n_rblocks = SIZE_TO_N_RBLOCKS(sz);
 
 	return true;
 }
