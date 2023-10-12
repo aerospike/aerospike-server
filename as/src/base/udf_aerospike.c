@@ -454,7 +454,7 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 	uint32_t size = as_particle_size_from_asval(val);
 	uint8_t* buf = get_particle_buf(urecord, size);
 
-	as_bin_particle_stack_from_asval(b, buf, val);
+	as_bin_particle_from_asval(b, buf, val);
 
 	return AS_OK;
 }

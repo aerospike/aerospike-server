@@ -1,7 +1,7 @@
 /*
  * particle.c
  *
- * Copyright (C) 2008-2020 Aerospike, Inc.
+ * Copyright (C) 2008-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,6 +20,9 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+//==========================================================
+// Includes.
+//
 
 #include "base/particle.h"
 
@@ -291,7 +294,7 @@ as_bin_particle_size(as_bin *b)
 //
 
 int
-as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op)
+as_bin_particle_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op)
 {
 	uint8_t operation = op->op;
 	as_particle_type op_type = safe_particle_type(op->particle_type);
@@ -373,7 +376,7 @@ as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, co
 }
 
 int
-as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op)
+as_bin_particle_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op)
 {
 	// We assume that if we're using stack particles, the old particle is either
 	// nonexistent or also a stack particle - either way, don't destroy.
@@ -453,10 +456,10 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 //
 
 void
-as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val)
+as_bin_particle_from_asval(as_bin *b, uint8_t *stack, const as_val *val)
 {
-	// We assume that if we're using stack particles, the old particle is either
-	// nonexistent or also a stack particle - either way, don't destroy.
+	// We're using stack particles, so the old particle is either nonexistent or
+	// also a stack particle - either way, don't destroy.
 
 	as_particle_type type = as_particle_type_from_asval(val);
 
@@ -609,7 +612,7 @@ as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 //
 
 int
-as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op)
+as_bin_bits_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op)
 {
 	return as_bin_bits_modify_tr(b, op, particles_llb);
 }
@@ -630,7 +633,7 @@ as_bin_bits_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
 //
 
 int
-as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb)
+as_bin_hll_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *rb)
 {
 	return as_bin_hll_modify_tr(b, op, particles_llb, rb);
 }
@@ -651,7 +654,7 @@ as_bin_hll_read_from_client(const as_bin *b, as_msg_op *op, as_bin *rb)
 //
 
 int
-as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *result)
+as_bin_cdt_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *result)
 {
 	return as_bin_cdt_modify_tr(b, op, result, particles_llb);
 }
@@ -672,7 +675,7 @@ as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
 //
 
 int
-as_bin_exp_stack_modify_from_client(const as_exp_ctx* ctx, as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, const iops_expop* expop)
+as_bin_exp_modify_from_client(const as_exp_ctx* ctx, as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, const iops_expop* expop)
 {
 	return as_exp_modify_tr(ctx, b, op, particles_llb, expop);
 }

@@ -1393,8 +1393,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				write_resolved_bin(rd, op, msg_lut, b);
 
-				if ((result = as_bin_particle_stack_from_client(b, particles_llb, op)) < 0) {
-					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_from_client() %pD", ns->name, &tr->keyd);
+				if ((result = as_bin_particle_from_client(b, particles_llb, op)) < 0) {
+					cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_from_client() %pD", ns->name, &tr->keyd);
 					return -result;
 				}
 			}
@@ -1408,8 +1408,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		else if (OP_IS_MODIFY(op->op)) {
 			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
-			if ((result = as_bin_particle_stack_modify_from_client(b, particles_llb, op)) < 0) {
-				cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+			if ((result = as_bin_particle_modify_from_client(b, particles_llb, op)) < 0) {
+				cf_warning(AS_RW, "{%s} write_master: failed as_bin_particle_modify_from_client() %pD", ns->name, &tr->keyd);
 				return -result;
 			}
 
@@ -1451,8 +1451,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		else if (op->op == AS_MSG_OP_BITS_MODIFY) {
 			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
-			if ((result = as_bin_bits_stack_modify_from_client(b, particles_llb, op)) < 0) {
-				cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+			if ((result = as_bin_bits_modify_from_client(b, particles_llb, op)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_modify_from_client() %pD", ns->name, &tr->keyd);
 				return -result;
 			}
 
@@ -1494,8 +1494,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			as_bin result_bin;
 			as_bin_set_empty(&result_bin);
 
-			if ((result = as_bin_hll_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
-				cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+			if ((result = as_bin_hll_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_modify_from_client() %pD", ns->name, &tr->keyd);
 				return -result;
 			}
 
@@ -1538,8 +1538,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			as_bin result_bin;
 			as_bin_set_empty(&result_bin);
 
-			if ((result = as_bin_cdt_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
-				cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+			if ((result = as_bin_cdt_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_modify_from_client() %pD", ns->name, &tr->keyd);
 				return -result;
 			}
 
@@ -1584,8 +1584,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			const iops_expop* expop = tr->origin == FROM_IOPS ?
 					&tr->from.iops_orig->expops[i] : NULL;
 
-			if ((result = as_bin_exp_stack_modify_from_client(&exp_ctx, b, particles_llb, op, expop)) < 0) {
-				cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_stack_modify_from_client() %pD", ns->name, &tr->keyd);
+			if ((result = as_bin_exp_modify_from_client(&exp_ctx, b, particles_llb, op, expop)) < 0) {
+				cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_modify_from_client() %pD", ns->name, &tr->keyd);
 				return -result;
 			}
 

@@ -195,33 +195,33 @@ void as_bin_particle_destroy(as_bin *b);
 uint32_t as_bin_particle_size(as_bin *b);
 
 // wire:
-int as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const struct as_msg_op_s *op);
-int as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const struct as_msg_op_s *op);
+int as_bin_particle_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const struct as_msg_op_s *op);
+int as_bin_particle_from_client(as_bin *b, cf_ll_buf *particles_llb, const struct as_msg_op_s *op);
 uint32_t as_bin_particle_client_value_size(const as_bin *b);
 uint32_t as_bin_particle_to_client(const as_bin *b, struct as_msg_op_s *op);
 
 // Different for blob bitwise operations - we don't use the normal APIs and
 // particle table functions.
-int as_bin_bits_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op);
+int as_bin_bits_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op);
 int as_bin_bits_read_from_client(const as_bin *b, struct as_msg_op_s *op, as_bin *result);
 
 // Different for HLL operations - we don't use the normal APIs and particle
 // table functions.
-int as_bin_hll_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, as_bin *rb);
+int as_bin_hll_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, as_bin *rb);
 int as_bin_hll_read_from_client(const as_bin *b, struct as_msg_op_s *op, as_bin *rb);
 
 // Different for CDTs - the operations may return results, so we don't use the
 // normal APIs and particle table functions.
-int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, as_bin *result);
+int as_bin_cdt_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, as_bin *result);
 int as_bin_cdt_read_from_client(const as_bin *b, struct as_msg_op_s *op, as_bin *result);
 
 // as_val:
-void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
+void as_bin_particle_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 as_val *as_bin_particle_to_asval(const as_bin *b);
 
 // Different for expression operations - we don't use the normal APIs and
 // particle table functions.
-int as_bin_exp_stack_modify_from_client(const struct as_exp_ctx_s* ctx, as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, const struct iops_expop_s* expop);
+int as_bin_exp_modify_from_client(const struct as_exp_ctx_s* ctx, as_bin *b, cf_ll_buf *particles_llb, struct as_msg_op_s *op, const struct iops_expop_s* expop);
 int as_bin_exp_read_from_client(const struct as_exp_ctx_s* ctx, struct as_msg_op_s *op, as_bin *rb);
 
 // msgpack:
