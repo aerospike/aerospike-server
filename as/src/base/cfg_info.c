@@ -577,7 +577,6 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_bool(db, "storage-engine.cache-replica-writes", ns->storage_cache_replica_writes);
 		info_append_bool(db, "storage-engine.cold-start-empty", ns->storage_cold_start_empty);
 		info_append_bool(db, "storage-engine.commit-to-device", ns->storage_commit_to_device);
-		info_append_uint32(db, "storage-engine.commit-min-size", ns->storage_commit_min_size);
 		info_append_string(db, "storage-engine.compression", NS_COMPRESSION());
 		info_append_uint32(db, "storage-engine.compression-acceleration", NS_COMPRESSION_ACCELERATION());
 		info_append_uint32(db, "storage-engine.compression-level", NS_COMPRESSION_LEVEL());

@@ -169,9 +169,6 @@ typedef struct drv_ssd_s {
 	uint64_t		io_min_size;		// device IO operations are aligned and sized in multiples of this
 	uint64_t		shadow_io_min_size;	// shadow device IO operations are aligned and sized in multiples of this
 
-	uint64_t		commit_min_size;		// commit (write) operations are aligned and sized in multiples of this
-	uint64_t		shadow_commit_min_size;	// shadow commit (write) operations are aligned and sized in multiples of this
-
 	uint64_t		inuse_size;			// number of bytes in actual use on this device
 
 	uint32_t		write_block_size;	// number of bytes to write at a time
