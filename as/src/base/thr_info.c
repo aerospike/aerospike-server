@@ -4108,7 +4108,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "sindex_used_bytes", sindex_used);
 
 	if (as_namespace_sindex_persisted(ns)) {
-		info_append_uint64(db, "sindex_pmem_used_pct",
+		info_append_uint64(db, "sindex_mounts_used_pct",
 				sindex_used * 100 / ns->si_mounts_budget);
 	}
 
