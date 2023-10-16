@@ -304,9 +304,7 @@ static uint8_t map_adjust_incoming_flags(uint8_t flags);
 static inline uint32_t map_allidx_vla_sz(const packed_map *map);
 static inline void map_allidx_alloc_temp(const packed_map *map, uint8_t *mem_temp, rollback_alloc *alloc);
 
-static inline uint32_t map_ext_content_sz(const packed_map *map);
 static inline bool map_is_k_ordered(const packed_map *map);
-static inline bool map_is_kv_ordered(const packed_map *map);
 static inline bool map_has_offidx(const packed_map *map);
 
 // cdt_context
@@ -1367,22 +1365,10 @@ map_allidx_alloc_temp(const packed_map *map, uint8_t *mem_temp,
 	}
 }
 
-static inline uint32_t
-map_ext_content_sz(const packed_map *map)
-{
-	return map_calc_ext_content_sz(map->flags, map->ele_count, map->content_sz);
-}
-
 static inline bool
 map_is_k_ordered(const packed_map *map)
 {
 	return is_k_ordered(map->flags);
-}
-
-static inline bool
-map_is_kv_ordered(const packed_map *map)
-{
-	return is_kv_ordered(map->flags);
 }
 
 static inline bool

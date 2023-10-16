@@ -1110,12 +1110,6 @@ mod_flags_return_exists(uint64_t flags)
 	return -AS_ERR_ELEMENT_EXISTS;
 }
 
-static inline uint8_t
-strip_ext_flags(uint8_t flags)
-{
-	return flags & AS_PACKED_LIST_FLAG_ORDERED;
-}
-
 uint32_t
 list_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz)
 {
