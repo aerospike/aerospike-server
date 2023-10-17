@@ -41,6 +41,15 @@ else
   OPTFLAGS = -O$(O)
 endif
 
+COMPILER_VERSION := $(strip $(shell $(CC) --version))
+ifeq (Foundation,$(findstring Foundation,$(COMPILER_VERSION)))
+  COMPILER_TYPE := gcc
+else ifeq (clang,$(findstring clang,$(COMPILER_VERSION)))
+  COMPILER_TYPE := clang
+else
+  $(warning Unknown compiler)
+endif
+
 # Strict aliasing is really interesting. -fno-strict-aliasing relaxes the coding rules, but makes
 # some code run a little slower. I'm not seeing a real difference at the moment, so turning it off
 # I think to get the real speed, you turn on -fstrict-aliasing, and the appropriate -W, which 

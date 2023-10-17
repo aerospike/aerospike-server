@@ -13,4 +13,4 @@ $(OBJECT_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) $(DEF_FN) -o $@$(SUFFIX) -c $(INCLUDES) $(SRCDIR)$<
 
 $(OBJECT_DIR)/%.o: %.cc
-	$(CXX) $(CXXFLAGS) $(CFLAGS) $(DEF_FN) -o $@$(SUFFIX) -c $(INCLUDES) $(SRCDIR)$<
+	$(CXX) $(CFLAGS) $(CXXFLAGS) $(DEF_FN) -o $@$(SUFFIX) -c $(INCLUDES) $(SRCDIR)$<

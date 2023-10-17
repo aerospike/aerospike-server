@@ -293,6 +293,14 @@ $(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
 include $(DEPTH)/make_in/Makefile.targets
 
 # Ignore S2 induced warnings
-S2_WNO = -Wno-attributes -Wno-sign-compare -Wno-deprecated-declarations -Wno-class-memaccess
+S2_WNO := -Wno-attributes -Wno-sign-compare -Wno-deprecated-declarations
+ifeq (gcc,$(COMPILER_TYPE))
+  S2_WNO += -Wno-class-memaccess
+endif
+
+ifeq (clang,$(COMPILER_TYPE))
+  S2_WNO += -Wno-unused-private-field
+endif
+
 $(OBJECT_DIR)/geospatial/%.o: CXXFLAGS += $(S2_WNO) -std=c++17 -D__STDC_LIMIT_MACROS
 $(OBJECT_DIR)/geospatial/%.o: CFLAGS := $(filter-out -std=gnu99,$(CFLAGS))
