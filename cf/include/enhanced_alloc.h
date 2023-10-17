@@ -79,6 +79,7 @@ void *cf_alloc_try_malloc(size_t sz);
 #define cf_free(_p)              free(_p)
 
 void cf_validate_pointer(const void* p_indent);
+void cf_trim_region_to_mapped(void **p, size_t *sz);
 
 extern bool g_alloc_started;
 

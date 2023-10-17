@@ -1323,6 +1323,27 @@ cf_validate_pointer(const void* p_indent)
 	do_validate_pointer(p_indent, __builtin_return_address(0));
 }
 
+void
+cf_trim_region_to_mapped(void **p, size_t *sz)
+{
+	cf_assert(*sz <= PAGE_SZ, CF_ALLOC, "bad size: %zu", *sz);
+
+	void *lo = (void *)((uint64_t)*p & -PAGE_SZ);
+	void *hi = (void *)(((uint64_t)*p + *sz - 1) & -PAGE_SZ);
+
+	bool lo_ok = madvise(lo, PAGE_SZ, MADV_NORMAL) == 0;
+	bool hi_ok = madvise(hi, PAGE_SZ, MADV_NORMAL) == 0;
+
+	if (!lo_ok) {
+		*sz -= (size_t)((uint8_t *)hi - (uint8_t *)*p);
+		*p = hi;
+	}
+
+	if (!hi_ok) {
+		*sz -= (size_t)(((uint8_t *)*p + *sz) - (uint8_t *)hi);
+	}
+}
+
 void *
 cf_rc_alloc(size_t sz)
 {
