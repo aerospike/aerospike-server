@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 #include "cf_thread.h"
+#include "enhanced_alloc.h"
 #include "log.h"
 #include "trace.h"
 
@@ -95,6 +96,7 @@ static void log_abort(int sig_num);
 static void log_siginfo(const siginfo_t* info);
 static const char* siginfo_code_str(const siginfo_t* info);
 static void log_stack_trace(void* ctx);
+static void log_memory(void* ctx);
 
 
 //==========================================================
@@ -172,7 +174,13 @@ sig_trace_and_reraise(int sig_num, siginfo_t* info, void* ctx)
 {
 	log_abort(sig_num);
 	log_siginfo(info);
-	log_stack_trace(g_crash_ctx_valid ? &g_crash_ctx : ctx);
+
+	if (g_crash_ctx_valid) {
+		ctx = &g_crash_ctx;
+	}
+
+	log_stack_trace(ctx);
+	log_memory(ctx);
 
 	if (getpid() == 1) { // can happen in containers
 		cf_warning(AS_AS, "pid 1 received %s - exiting", signal_str[sig_num]);
@@ -396,5 +404,73 @@ log_stack_trace(void* ctx)
 		cf_addr_to_sym_str(sym_str, bt[i]);
 		cf_warning(AS_AS, "stacktrace: frame %d: %s [0x%lx]", i, sym_str,
 				cf_strip_aslr(bt[i]));
+	}
+}
+
+static void
+log_memory(void* ctx)
+{
+	ucontext_t* uc = (ucontext_t*)ctx;
+	mcontext_t* mc = (mcontext_t*)&uc->uc_mcontext;
+#if defined __x86_64__
+	uint64_t* gregs = (uint64_t*)&mc->gregs[0];
+
+	static const char* names[16] = {
+		"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9",
+		"r10", "r11", "r12", "r13", "r14", "r15"
+	};
+
+	uint64_t values[16] = {
+		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
+		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
+		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
+		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15]
+	};
+
+	uint32_t n_regs = 16;
+#elif defined __aarch64__
+	uint64_t* regs = (uint64_t*)&mc->regs[0];
+	uint64_t sp = (uint64_t)mc->sp;
+
+	static const char* names[32] = {
+		"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10",
+		"x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20",
+		"x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30",
+		"x31"
+	};
+
+	uint64_t values[32];
+
+	for (uint32_t i = 0; i < 31; i++) {
+		values[i] = regs[i];
+	}
+
+	values[31] = sp;
+
+	uint32_t n_regs = 32;
+#endif
+
+	for (uint32_t i = 0; i < n_regs; i++) {
+		if (values[i] < 64) {
+			continue;
+		}
+
+		void* p = (void*)((values[i] & -16ul) - 64);
+		size_t sz = 64 + 16 + 64;
+
+		cf_trim_region_to_mapped(&p, &sz);
+
+		if (sz == 0) {
+			continue;
+		}
+
+		char buf[3 * sz + 1];
+
+		for (uint32_t k = 0; k < sz; k++) {
+			sprintf(buf + 3 * k, " %02x", ((uint8_t*)p)[k]);
+		}
+
+		cf_warning(AS_AS, "stacktrace: memory %s 0x%lx%s", names[i],
+			(uint64_t)p, buf);
 	}
 }

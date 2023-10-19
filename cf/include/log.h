@@ -210,6 +210,10 @@ void cf_log_rotate(void);
 // Public API - write to log.
 //
 
+// Force getcontext() into a different compilation unit - else GCC 12 mistakenly
+// assumes we will call setcontext() or swapcontext() later.
+void cf_log_stash_context(void);
+
 void cf_log_write(cf_log_context context, cf_log_level level,
 		const char* file_name, int line, const char* format, ...)
 		__attribute__ ((format (printf, 5, 6)));
@@ -231,8 +235,7 @@ extern __thread bool g_crash_ctx_valid;
 
 #define cf_crash(context, ...) \
 	do { \
-		getcontext(&g_crash_ctx); \
-		g_crash_ctx_valid = true; \
+		cf_log_stash_context(); \
 		cf_log_write_no_return(SIGUSR1, (context), __FILENAME__, __LINE__, \
 				__VA_ARGS__); \
 	} while (false)

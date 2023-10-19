@@ -573,6 +573,13 @@ cf_log_rotate(void)
 //
 
 void
+cf_log_stash_context(void)
+{
+	getcontext(&g_crash_ctx);
+	g_crash_ctx_valid = true;
+}
+
+void
 cf_log_write(cf_log_context context, cf_log_level level, const char* file_name,
 		int line, const char* format, ...)
 {
