@@ -1785,7 +1785,10 @@ msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 		const uint8_t *buf = msgpack_get_bin(&mp, &buf_sz);
 
 		as_pack_str(&pk, NULL, buf_sz);
-		memmove(pk.buffer + pk.offset, buf, buf_sz);
+
+		if (pk.buffer != NULL) {
+			memmove(pk.buffer + pk.offset, buf, buf_sz);
+		}
 
 		return pk.offset + buf_sz;
 	}
@@ -1815,7 +1818,10 @@ msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 
 		msgpack_get_ext(&mp, &ext);
 		as_pack_ext_header(&pk, ext.size, ext.type);
-		memmove(pk.buffer + pk.offset, ext.data, ext.size);
+
+		if (pk.buffer != NULL) {
+			memmove(pk.buffer + pk.offset, ext.data, ext.size);
+		}
 
 		return pk.offset + ext.size;
 	}
@@ -1832,7 +1838,7 @@ msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 	case 0xd7: // fixext 8
 	case 0xd8: // fixext 16
 	default:
-		cf_crash(AS_PARTICLE, "unexpected %x", *src);
+		cf_crash(AS_PARTICLE, "unexpected %x %*pH", *src, 10, src);
 	}
 
 	return pk.offset;
@@ -1850,6 +1856,8 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	if (type == NULL) {
 		type = &dummy;
 	}
+
+	uint32_t ret;
 
 	switch (b) {
 	case 0xc0: // nil
@@ -1887,6 +1895,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 		return buf + 8;
 
 	case 0xd0: // signed 8 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 1);
 		*not_compact = (*buf & 0x80) == 0 || *buf >= 0xe0;
 		*type = MSGPACK_TYPE_INT;
 		return buf + 1;
@@ -1897,6 +1906,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 		*type = MSGPACK_TYPE_INT;
 		return buf + 2;
 	case 0xd2: // signed 32 bit integer
+		SZ_PARSE_BUF_CHECK(buf, end, 4);
 		*not_compact = (*buf & 0x80) == 0 ||
 				cf_swap_from_be32(*(uint32_t *)buf) >= 0xffff0000;
 		*type = MSGPACK_TYPE_INT;
@@ -1909,9 +1919,11 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 		return buf + 8;
 
 	case 0xca: // float
+		SZ_PARSE_BUF_CHECK(buf, end, 4);
 		*type = MSGPACK_TYPE_DOUBLE;
 		return buf + 4;
 	case 0xcb: // double
+		SZ_PARSE_BUF_CHECK(buf, end, 8);
 		*type = MSGPACK_TYPE_DOUBLE;
 		return buf + 8;
 
@@ -1920,9 +1932,10 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 		// no break
 	case 0xd9: // str 8
 		SZ_PARSE_BUF_CHECK(buf, end, 1);
-		*not_compact |= *buf <= 0x1f;
+		*not_compact = *buf <= 0x1f;
 		*type = MSGPACK_TYPE_BYTES;
-		return buf + 1 + *buf;
+		ret = 1 + *buf;
+		break;
 
 	case 0xc5: // bin 16
 		*not_compact = true;
@@ -1932,10 +1945,11 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 
 		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
 
-		*not_compact |= len <= 0xff;
+		*not_compact = len <= 0xff;
 		*type = MSGPACK_TYPE_BYTES;
+		ret = 2 + len;
 
-		return buf + 2 + len;
+		break;
 	}
 	case 0xc6: // bin 32
 		*not_compact = true;
@@ -1945,10 +1959,11 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 
 		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
 
-		*not_compact |= len <= 0xffff;
+		*not_compact = len <= 0xffff;
 		*type = MSGPACK_TYPE_BYTES;
+		ret = 4 + len;
 
-		return buf + 4 + len;
+		break;
 	}
 
 	case 0xdc: { // list with 16 bit header
@@ -1997,7 +2012,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 		return buf + 4;
 
 	case 0xd4: // fixext 1
-		SZ_PARSE_BUF_CHECK(buf, end, 1);
+		SZ_PARSE_BUF_CHECK(buf, end, 2);
 
 		if (*buf == CMP_EXT_TYPE) {
 			*has_nonstorage = true;
@@ -2007,7 +2022,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 
 		return buf + 1 + 1;
 	case 0xd5: // fixext 2
-		SZ_PARSE_BUF_CHECK(buf, end, 1);
+		SZ_PARSE_BUF_CHECK(buf, end, 3);
 
 		if (*buf == CMP_EXT_TYPE) {
 			*has_nonstorage = true;
@@ -2017,12 +2032,15 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 
 		return buf + 1 + 2;
 	case 0xd6: // fixext 4
+		SZ_PARSE_BUF_CHECK(buf, end, 5);
 		*type = MSGPACK_TYPE_EXT;
 		return buf + 1 + 4;
 	case 0xd7: // fixext 8
+		SZ_PARSE_BUF_CHECK(buf, end, 9);
 		*type = MSGPACK_TYPE_EXT;
 		return buf + 1 + 8;
 	case 0xd8: // fixext 16
+		SZ_PARSE_BUF_CHECK(buf, end, 17);
 		*type = MSGPACK_TYPE_EXT;
 		return buf + 1 + 16;
 	case 0xc7: // ext 8
@@ -2037,8 +2055,8 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 		}
 
 		*type = MSGPACK_TYPE_EXT;
-
-		return buf + 1 + 1 + *buf;
+		ret = 1 + 1 + *buf;
+		break;
 	case 0xc8: { // ext 16
 		SZ_PARSE_BUF_CHECK(buf, end, 3);
 
@@ -2050,8 +2068,8 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 
 		*not_compact = len <= 0xff;
 		*type = MSGPACK_TYPE_EXT;
-
-		return buf + 2 + 1 + len;
+		ret = 2 + 1 + len;
+		break;
 	}
 	case 0xc9: { // ext 32
 		SZ_PARSE_BUF_CHECK(buf, end, 5);
@@ -2064,35 +2082,36 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 
 		*not_compact = len <= 0xffff;
 		*type = MSGPACK_TYPE_EXT;
-
-		return buf + 4 + 1 + len;
-	}
-	default:
+		ret = 4 + 1 + len;
 		break;
 	}
+	default:
+		if (b < 0x80 || b >= 0xe0) { // 8 bit combined integer
+			*type = MSGPACK_TYPE_INT;
+			return buf;
+		}
 
-	if (b < 0x80 || b >= 0xe0) { // 8 bit combined integer
-		*type = MSGPACK_TYPE_INT;
-		return buf;
+		if ((b & 0xe0) == 0xa0) { // raw bytes with 8 bit combined header
+			*type = MSGPACK_TYPE_BYTES;
+			return buf + (b & 0x1f);
+		}
+
+		if ((b & 0xf0) == 0x80) { // map with 8 bit combined header
+			*count += 2 * (b & 0x0f);
+			*type = MSGPACK_TYPE_MAP;
+			return buf;
+		}
+
+		if ((b & 0xf0) == 0x90) { // list with 8 bit combined header
+			*count += b & 0x0f;
+			*type = MSGPACK_TYPE_LIST;
+			return buf;
+		}
+
+		*type = MSGPACK_TYPE_ERROR;
+		return NULL;
 	}
 
-	if ((b & 0xe0) == 0xa0) { // raw bytes with 8 bit combined header
-		*type = MSGPACK_TYPE_BYTES;
-		return buf + (b & 0x1f);
-	}
-
-	if ((b & 0xf0) == 0x80) { // map with 8 bit combined header
-		*count += 2 * (b & 0x0f);
-		*type = MSGPACK_TYPE_MAP;
-		return buf;
-	}
-
-	if ((b & 0xf0) == 0x90) { // list with 8 bit combined header
-		*count += b & 0x0f;
-		*type = MSGPACK_TYPE_LIST;
-		return buf;
-	}
-
-	*type = MSGPACK_TYPE_ERROR;
-	return NULL;
+	SZ_PARSE_BUF_CHECK(buf, end, ret);
+	return buf + ret;
 }
