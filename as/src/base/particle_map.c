@@ -977,6 +977,7 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 				false);
 
 		if (new_sz == 0) {
+			cf_free(new_key);
 			return false;
 		}
 
