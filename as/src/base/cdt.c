@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_map_iterator.h"
 #include "aerospike/as_msgpack.h"
 #include "citrusleaf/cf_byte_order.h"
 
@@ -201,6 +202,7 @@ typedef struct {
 	msgpack_in prev;
 	uint8_t type;
 	uint8_t ext_type;
+	bool need_sort;
 } cdt_stack_entry;
 
 typedef struct {
@@ -208,6 +210,8 @@ typedef struct {
 	cdt_stack_entry *entries;
 	uint32_t entries_cap;
 	uint32_t ilevel;
+	msgpack_type toplvl_type;
+	bool has_toplvl;
 } cdt_stack;
 
 static const char* cdt_exp_display_names[] = {
@@ -289,6 +293,9 @@ static bool unpack_map_value(msgpack_in *mp, cdt_payload *payload_r);
 static inline uint8_t *buf_pack_nil_rep(uint8_t *buf, uint32_t rep);
 static inline void pack_nil_rep(as_packer *pk, uint32_t rep);
 
+// asval
+static bool asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s);
+
 // cdt_process_state
 static bool cdt_process_state_init_from_vec(cdt_process_state *cdt_state, msgpack_in_vec* mv);
 
@@ -314,11 +321,6 @@ static bool cdt_context_type_is_read(uint8_t ctx_type);
 // as_bin_cdt_packed functions
 static int cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result, cf_ll_buf *particles_llb);
 static int cdt_packed_read(cdt_process_state *state, const as_bin *b, as_bin *result);
-
-// cdt_check
-static bool cdt_check_list(msgpack_in *mp);
-static bool cdt_check_map(msgpack_in *mp);
-static bool cdt_check_internal(msgpack_in *mp);
 
 
 //==========================================================
@@ -499,6 +501,263 @@ pack_nil_rep(as_packer *pk, uint32_t rep)
 
 
 //==========================================================
+// asval
+//
+
+static bool
+asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
+{
+	switch (as_val_type(val)) {
+	case AS_NIL:
+	case AS_BOOLEAN:
+	case AS_INTEGER:
+	case AS_DOUBLE:
+	case AS_STRING:
+	case AS_BYTES:
+	case AS_GEOJSON:
+	case AS_CMP_WILDCARD:
+	case AS_CMP_INF: {
+		uint8_t *wptr = (pk->buffer == NULL) ? NULL : pk->buffer + pk->offset;
+		int sz = as_serializer_serialize_presized(s, val, wptr);
+
+		if (sz > 0) {
+			pk->offset += sz;
+			return true;
+		}
+
+		break;
+	}
+	case AS_LIST: {
+		as_list *plist = (as_list *)val;
+		uint32_t ele_count = as_list_size(plist);
+		uint8_t flags = plist->flags;
+
+		if (pk->offset != 0) { // top level check
+			flags &= ~AS_PACKED_PERSIST_INDEX;
+		}
+
+		flags &= ~(AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX);
+
+		bool is_ordered = (flags & AS_PACKED_LIST_FLAG_ORDERED) != 0;
+		bool is_write = (pk->buffer != NULL);
+
+		if (flags != 0) {
+			as_pack_list_header(pk, ele_count + 1);
+			as_pack_ext_header(pk, 0, flags);
+		}
+		else {
+			as_pack_list_header(pk, ele_count);
+		}
+
+		msgpack_in prev = {
+				.buf = pk->buffer + pk->offset,
+				.buf_sz = UINT_MAX
+		};
+
+		bool need_sort = false;
+
+		for (uint32_t i = 0; i < ele_count; i++) {
+			const as_val *ele = as_list_get(plist, i);
+			uint8_t *start = pk->buffer + pk->offset;
+
+			if (! asval_serialize_internal(ele, pk, s)) {
+				return false;
+			}
+
+			if (i != 0 && is_ordered && ! need_sort && is_write) {
+				msgpack_in mp = {
+						.buf = start,
+						.buf_sz = UINT_MAX
+				};
+
+				msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
+
+				switch (cmp) {
+				case MSGPACK_CMP_GREATER:
+					need_sort = true;
+					break;
+				default:
+					break;
+				}
+			}
+		}
+
+		bool is_post_sizer = ! is_write && flags_is_persist(flags);
+
+		if (need_sort || flags_is_persist(flags)) {
+			// Adjust sizer for top level offset indexes.
+			uint8_t *contents = (uint8_t *)prev.buf;
+			uint32_t content_sz =
+					(uint32_t)(pk->buffer + pk->offset - contents);
+			uint32_t ext_content_sz = list_calc_ext_content_sz(flags, ele_count,
+					content_sz);
+			uint32_t delta = as_pack_ext_header_get_size(ext_content_sz) +
+					ext_content_sz - as_pack_ext_header_get_size(0);
+
+			if (is_post_sizer) {
+				pk->offset += delta;
+			}
+			else if (need_sort) {
+				uint8_t *temp_mem = cf_malloc(content_sz);
+				define_rollback_alloc(alloc_idx, NULL, 2); // for temp indexes
+				define_order_index(ordidx, ele_count, alloc_idx);
+				define_offset_index(offidx, temp_mem, content_sz, ele_count,
+						alloc_idx);
+
+				offset_index_set_filled(&offidx, 1);
+				memcpy(temp_mem, contents, content_sz);
+
+				if (! offset_index_fill(&offidx, false, true) ||
+						! list_order_index_sort(&ordidx, &offidx,
+								AS_CDT_SORT_ASCENDING)) {
+					rollback_alloc_rollback(alloc_idx);
+					cf_free(temp_mem);
+					return false;
+				}
+
+				if (flags_is_persist(flags)) {
+					as_packer pk2 = {
+							.buffer = pk->buffer,
+							.offset =
+									as_pack_list_header_get_size(ele_count + 1),
+							.capacity = UINT_MAX
+					};
+
+					offset_index new_offidx;
+
+					as_pack_ext_header(&pk2, ext_content_sz, flags);
+					offset_index_init(&new_offidx, pk2.buffer + pk2.offset,
+							ele_count, temp_mem, content_sz);
+					order_index_write_eles(&ordidx, ele_count, &offidx,
+							contents + delta, &new_offidx, false);
+					pk->offset += delta;
+				}
+				else {
+					order_index_write_eles(&ordidx, ele_count, &offidx,
+							contents, NULL, false);
+				}
+
+				rollback_alloc_rollback(alloc_idx);
+				cf_free(temp_mem);
+			}
+			else { // persist index
+				memmove(contents + delta, contents, content_sz);
+				pk->offset += delta;
+
+				as_packer pk2 = {
+						.buffer = pk->buffer,
+						.offset =
+								as_pack_list_header_get_size(ele_count + 1),
+						.capacity = UINT_MAX
+				};
+
+				as_pack_ext_header(&pk2, ext_content_sz, flags);
+
+				offset_index offidx;
+
+				offset_index_init(&offidx, pk2.buffer + pk2.offset, ele_count,
+						contents + delta, content_sz);
+
+				return offset_index_fill(&offidx, false, true);
+			}
+		}
+
+		break;
+	}
+	case AS_MAP: {
+		as_map *pmap = (as_map *)val;
+		uint32_t ele_count = as_map_size(pmap);
+		uint8_t flags = pmap->flags;
+
+		if (pk->offset != 0) { // top level check
+			flags &= ~AS_PACKED_PERSIST_INDEX;
+		}
+
+		flags &= ~(AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX);
+
+		as_pack_map_header(pk, ele_count + 1);
+
+		uint32_t ext_offset = pk->offset;
+
+		as_pack_ext_header(pk, 0, flags | MAP_INTERNAL_K_ORDERED);
+		as_pack_nil(pk);
+
+		uint32_t contents_offset = pk->offset;
+		as_map_iterator it;
+
+		as_map_iterator_init(&it, pmap);
+
+		for (uint32_t i = 0; i < ele_count * 2; i++) {
+			as_pair *pair = (as_pair *)as_iterator_next((as_iterator *)&it);
+
+			if (! asval_serialize_internal(as_pair_1(pair), pk, s)) {
+				return false;
+			}
+
+			if (! asval_serialize_internal(as_pair_2(pair), pk, s)) {
+				return false;
+			}
+		}
+
+		if (flags_is_persist(flags)) {
+			uint32_t content_sz = pk->offset - contents_offset;
+			uint32_t ext_content_sz = map_calc_ext_content_sz(flags, ele_count,
+					content_sz);
+			uint32_t delta = as_pack_ext_header_get_size(ext_content_sz) +
+					ext_content_sz - as_pack_ext_header_get_size(0);
+
+			pk->offset += delta;
+
+			if (pk->buffer != NULL) { // write mode
+				memmove(pk->buffer + contents_offset + delta,
+						pk->buffer + contents_offset, content_sz);
+
+				as_packer pk2 = {
+						.buffer = pk->buffer,
+						.offset = ext_offset,
+						.capacity = UINT_MAX
+				};
+
+				as_pack_ext_header(&pk2, ext_content_sz, flags);
+				as_pack_nil(&pk2);
+
+				offset_index offidx;
+				offset_index_init(&offidx, pk2.buffer + pk2.offset, ele_count,
+						pk->buffer + contents_offset + delta, content_sz);
+
+				return offset_index_fill(&offidx, true, true);
+			}
+		}
+
+		break;
+	}
+	default:
+		return false;
+	}
+
+	return true;
+}
+
+uint32_t
+asval_serialize(const as_val *val, uint8_t *buf)
+{
+	as_packer pk = {
+			.buffer = buf,
+			.capacity = INT_MAX
+	};
+
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	if (! asval_serialize_internal(val, &pk, &s)) {
+		return 0;
+	}
+
+	return pk.offset;
+}
+
+
+//==========================================================
 // Global helpers.
 //
 
@@ -545,26 +804,6 @@ calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index,
 
 	*out_index = in_index;
 	*out_count = in_count;
-}
-
-bool
-cdt_check_storage_list_contents(const uint8_t *buf, uint32_t sz, uint32_t count)
-{
-	if (count == 0) {
-		return true;
-	}
-
-	msgpack_in mp = {
-			.buf = buf,
-			.buf_sz = sz
-	};
-
-	if (msgpack_sz_rep(&mp, count) != mp.buf_sz || mp.has_nonstorage) {
-		cf_warning(AS_PARTICLE, "cdt_check_storage_list_content() invalid msgpack: count %u offset %u buf_sz %u", count, mp.offset, mp.buf_sz);
-		return false;
-	}
-
-	return true;
 }
 
 
@@ -897,55 +1136,95 @@ cdt_particle_strip_indexes(const as_particle *p, uint8_t *dest,
 	cf_assert(p_cdt_mem->sz != 0, AS_PARTICLE, "invalid particle");
 
 	const uint8_t *b = p_cdt_mem->data;
+	const uint8_t *prev_b = p_cdt_mem->data;
 	const uint8_t *end = b + p_cdt_mem->sz;
+	uint8_t *wptr = dest;
 	uint32_t count = 1;
 	msgpack_type type;
 	bool has_nonstorage = false;
 	bool not_compact = false;
-	uint32_t old_count = count;
 
-	b = msgpack_parse(b, end, &count, &type, &has_nonstorage, &not_compact);
-	cf_assert(! has_nonstorage && b != NULL, AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p", has_nonstorage, b);
-	cf_assert(type == expected_type, AS_PARTICLE, "invalid cdt type %d", type);
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t old_count = count;
+		const uint8_t *next_b = msgpack_parse(b, end, &count, &type,
+				&has_nonstorage, &not_compact);
+		uint32_t ele_count = count - old_count;
 
-	while (true) {
-		if (old_count == count) {
-			break;
+		cf_assert(! has_nonstorage && b != NULL, AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p", has_nonstorage, b);
+
+		if (i == 0) {
+			cf_assert(type == expected_type, AS_PARTICLE, "invalid cdt type %d", type);
 		}
 
-		msgpack_type next_type = msgpack_buf_peek_type(b, end - b);
+		if (old_count == count) { // not list/map or empty list/map
+			b = next_b;
+			continue;
+		}
+
+		msgpack_type next_type = msgpack_buf_peek_type(next_b, end - next_b);
 
 		if (next_type != MSGPACK_TYPE_EXT) {
-			break;
+			b = next_b;
+			continue;
 		}
 
 		msgpack_ext ext;
-		uint32_t ext_sz = msgpack_buf_get_ext(b, end - b, &ext);
+		uint32_t ext_sz = msgpack_buf_get_ext(next_b, end - next_b, &ext);
 
 		cf_assert(ext_sz != 0, AS_PARTICLE, "invalid msgpack: b %lx", *(uint64_t*)b);
 
-		if (ext.size == 0) {
-			break;
+		if (ext.size == 0 && (type == MSGPACK_TYPE_LIST ||
+				(ext.type & MAP_INTERNAL_K_ORDERED) == 0)) {
+			b = next_b;
+			continue;
 		}
 
-		size_t write_sz = b - p_cdt_mem->data;
+		size_t sz = b - prev_b;
+
+		memcpy(wptr, prev_b, sz);
+		wptr += sz;
+		next_b += ext_sz;
+		prev_b = next_b;
+		count--;
 
 		as_packer pk = {
-				.buffer = dest,
+				.buffer = wptr,
 				.capacity = UINT_MAX
 		};
 
-		as_pack_append(&pk, p_cdt_mem->data, write_sz); // header
-		b += ext_sz;
-		as_pack_ext_header(&pk, 0, ext.type);
-		as_pack_append(&pk, b, end - b);
+		if (type == MSGPACK_TYPE_MAP) {
+			ele_count /= 2;
+			ext.type &= ~MAP_INTERNAL_K_ORDERED;
 
-		return pk.offset;
+			if (ext.type == 0) {
+				uint32_t dummy_count;
+
+				as_pack_map_header(&pk, ele_count - 1);
+				next_b = msgpack_parse(next_b, end, &dummy_count, NULL,
+						&has_nonstorage, &not_compact);
+				prev_b = next_b;
+				count--;
+			}
+			else {
+				as_pack_map_header(&pk, ele_count);
+				as_pack_ext_header(&pk, 0, ext.type);
+			}
+		}
+		else { // LIST
+			as_pack_list_header(&pk, ele_count);
+			as_pack_ext_header(&pk, 0, ext.type);
+		}
+
+		wptr += pk.offset;
+		b = next_b;
 	}
 
-	memcpy(dest, p_cdt_mem->data, p_cdt_mem->sz);
+	size_t sz = b - prev_b;
 
-	return p_cdt_mem->sz;
+	memcpy(wptr, prev_b, sz);
+	wptr += sz;
+
+	return (uint32_t)(wptr - dest);
 }
 
 
@@ -1480,18 +1759,27 @@ cdt_context_ctx_type_create_sz(msgpack_in_vec *mv, uint32_t *sz,
 	if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
 		mv->has_nonstorage = false;
 
+		msgpack_vec *v = &mv->vecs[mv->idx];
+		uint32_t n_unordered_maps;
+		const uint8_t *start = v->buf + v->offset;
 		uint32_t key_sz = msgpack_sz_vec(mv);
 
-		if (key_sz == 0 || mv->has_nonstorage) {
+		if (key_sz == 0 || mv->has_nonstorage ||
+				cdt_untrusted_count_rewrites(start, key_sz, NULL, NULL,
+						&n_unordered_maps, NULL) == NULL) {
 			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context key");
 			return false;
 		}
 
-		*sz += key_sz;
-
-		if ((ctx_type & AS_CDT_CTX_CREATE_MAP_K_ORDERED) != 0) {
-			*sz += 3 + 1; // ext element pair size
+		if (n_unordered_maps != 0) {
+			if ((key_sz = cdt_untrusted_get_size(start, key_sz, NULL, false)) ==
+					0) {
+				return false;
+			}
 		}
+
+		*sz += key_sz;
+		*sz += 3 + 1; // ext element pair size
 	}
 	else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
 		int64_t idx;
@@ -1618,14 +1906,9 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 					.capacity = ~(0U)
 			};
 
-			if ((cr_type & AS_CDT_CTX_CREATE_MAP_K_ORDERED) != 0) {
-				as_pack_map_header(&pk, 2);
-				as_pack_ext_header(&pk, 0, map_get_ext_flags(cr_type, true));
-				as_pack_nil(&pk);
-			}
-			else {
-				as_pack_map_header(&pk, 1);
-			}
+			as_pack_map_header(&pk, 2);
+			as_pack_ext_header(&pk, 0, map_get_ext_flags(cr_type, true));
+			as_pack_nil(&pk);
 
 			to_ptr += pk.offset;
 		}
@@ -1637,8 +1920,13 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 			cf_crash(AS_PARTICLE, "cdt_context_fill_create() invalid context key");
 		}
 
-		memcpy(to_ptr, key_ptr, key_sz);
-		to_ptr += key_sz;
+		uint32_t to_sz = cdt_untrusted_rewrite(to_ptr, key_ptr, key_sz, false);
+
+		if (to_sz == 0) {
+			return NULL;
+		}
+
+		to_ptr += to_sz;
 	}
 	else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
 		int64_t idx;
@@ -1692,13 +1980,13 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 	}
 	else if (write_tophdr) {
 		cf_warning(AS_PARTICLE, "cdt_context_fill_create() invalid ctx_type %lx", ctx_type);
-		return false;
+		return NULL;
 	}
 
 	for (uint32_t i = 1; i < ctx->create_ctx_count; i++) {
 		if (! msgpack_get_uint64(&mp, &ctx_type)) {
 			cf_warning(AS_PARTICLE, "cdt_context_fill_create() param pair %u expected int", i);
-			return false;
+			return NULL;
 		}
 
 		masked_type = ctx_type & AS_CDT_CTX_TYPE_MASK;
@@ -1706,7 +1994,7 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 
 		if ((cr_type & AS_CDT_CTX_CREATE_PERSIST_INDEX) != 0) {
 			cf_warning(AS_PARTICLE, "cdt_context_fill_create() PERSIST_INDEX only allowed for top level list/map");
-			return false;
+			return NULL;
 		}
 
 		if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
@@ -1715,14 +2003,9 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 					.capacity = ~(0U)
 			};
 
-			if ((cr_type & AS_CDT_CTX_CREATE_MAP_K_ORDERED) != 0) {
-				as_pack_map_header(&pk, 2);
-				as_pack_ext_header(&pk, 0, map_get_ext_flags(ctx_type, false));
-				as_pack_nil(&pk);
-			}
-			else {
-				as_pack_map_header(&pk, 1);
-			}
+			as_pack_map_header(&pk, 2);
+			as_pack_ext_header(&pk, 0, map_get_ext_flags(ctx_type, false));
+			as_pack_nil(&pk);
 
 			const uint8_t *key_ptr = mp.buf + mp.offset;
 			uint32_t key_sz = msgpack_sz(&mp);
@@ -1924,33 +2207,43 @@ cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz)
 		uint32_t hdr_sz = mp.offset;
 		cf_assert(check, AS_PARTICLE, "msgpack_get_list_ele_count failed");
 
-		if (msgpack_peek_is_ext(&mp) && msgpack_get_ext(&mp, &ext) &&
-				(ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
-			offset_index_init(&newoff, NULL, ctx->top_ele_count + 1, NULL,
-					new_content_sz);
-			new_ext_cont_sz = offset_index_size(&newoff);
-			new_sz += as_pack_ext_header_get_size(new_ext_cont_sz) +
-					new_ext_cont_sz - mp.offset + hdr_sz;
+		if (! msgpack_peek_is_ext(&mp)) {
+			ext.type = 0;
+		}
+		else if ((check = msgpack_get_ext(&mp, &ext)) &&
+				flags_is_persist(ext.type)) {
+			if ((ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
+				offset_index_init(&newoff, NULL, ctx->top_ele_count + 1, NULL,
+						new_content_sz);
+				new_ext_cont_sz = offset_index_size(&newoff);
+				new_sz += as_pack_ext_header_get_size(new_ext_cont_sz) +
+						new_ext_cont_sz - mp.offset + hdr_sz;
+			}
+			else {
+				list_partial_offset_index_init(&newoff, NULL,
+						ctx->top_ele_count + ctx->list_nil_pad + 1, NULL,
+						new_content_sz);
+				new_ext_cont_sz = offset_index_size(&newoff);
+
+				if (new_ext_cont_sz != 0) {
+					new_sz += as_pack_list_header_get_size(ctx->top_ele_count +
+							ctx->list_nil_pad + 1 + 1);
+					new_sz += as_pack_ext_header_get_size(new_ext_cont_sz);
+					new_sz += new_ext_cont_sz;
+					new_sz -= mp.offset;
+
+					// Undo delta hdr calculation from
+					// list_subcontext_by_index() because non-top-level was
+					// assumed.
+					new_sz += as_pack_list_header_get_size(ctx->top_ele_count);
+					new_sz -= as_pack_list_header_get_size(ctx->top_ele_count +
+							ctx->list_nil_pad + 1);
+				}
+				// else -- already taken care of by list_subcontext_by_index().
+			}
 		}
 		else {
-			ext.type = 0;
-			list_partial_offset_index_init(&newoff, NULL, ctx->top_ele_count +
-					ctx->list_nil_pad + 1, NULL, new_content_sz);
-			new_ext_cont_sz = offset_index_size(&newoff);
-
-			if (new_ext_cont_sz != 0) {
-				new_sz += as_pack_list_header_get_size(ctx->top_ele_count +
-						ctx->list_nil_pad + 1 + 1);
-				new_sz += as_pack_ext_header_get_size(new_ext_cont_sz);
-				new_sz += new_ext_cont_sz;
-				new_sz -= mp.offset;
-
-				// Undo delta hdr calculation from list_subcontext_by_index()
-				// because non-top-level was assumed.
-				new_sz += as_pack_list_header_get_size(ctx->top_ele_count);
-				new_sz -= as_pack_list_header_get_size(ctx->top_ele_count + ctx->list_nil_pad + 1);
-			}
-			// else -- already taken care of by list_subcontext_by_index().
+			cf_assert(check, AS_PARTICLE, "list as_unpack_ext failed");
 		}
 	}
 	else if (orig_type == MSGPACK_TYPE_MAP) {
@@ -1958,25 +2251,30 @@ cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz)
 		uint32_t hdr_sz = mp.offset;
 		cf_assert(check, AS_PARTICLE, "msgpack_get_map_ele_count failed");
 
-		if (msgpack_peek_is_ext(&mp) && (check = msgpack_get_ext(&mp, &ext)) &&
-				(ext.type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
-			offset_index_init(&newoff, NULL, ctx->top_ele_count + 1, NULL,
-					new_content_sz);
-			new_ext_cont_sz = offset_index_size(&newoff);
+		if (! msgpack_peek_is_ext(&mp)) {
+			ext.type = 0;
+		}
+		else if (msgpack_get_ext(&mp, &ext)) {
+			if (flags_is_persist(ext.type)) {
+				offset_index_init(&newoff, NULL, ctx->top_ele_count + 1, NULL,
+						new_content_sz);
+				new_ext_cont_sz = offset_index_size(&newoff);
 
-			if ((ext.type & AS_PACKED_MAP_FLAG_V_ORDERED) != 0) {
-				order_index neword;
+				if ((ext.type & AS_PACKED_MAP_FLAG_V_ORDERED) != 0) {
+					order_index neword;
 
-				order_index_init(&neword, NULL, ctx->top_ele_count + 1);
-				new_ext_cont_sz += order_index_size(&neword);
+					order_index_init(&neword, NULL, ctx->top_ele_count + 1);
+					new_ext_cont_sz += order_index_size(&neword);
+				}
+
+				new_sz += as_pack_ext_header_get_size(new_ext_cont_sz) +
+						new_ext_cont_sz - mp.offset + hdr_sz;
 			}
 
-			new_sz += as_pack_ext_header_get_size(new_ext_cont_sz) +
-					new_ext_cont_sz - mp.offset + hdr_sz;
+			ext.type |= MAP_INTERNAL_K_ORDERED;
 		}
 		else {
-			cf_assert(check, AS_PARTICLE, "as_unpack_ext failed");
-			ext.type = 0;
+			cf_crash(AS_PARTICLE, "map as_unpack_ext failed");
 		}
 	}
 	else {
@@ -1993,20 +2291,16 @@ cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz)
 	};
 
 	if (orig_type == MSGPACK_TYPE_LIST) {
-		if ((ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
-			as_pack_list_header(&pk, ctx->top_ele_count + 1 + 1); // 1 for ext, 1 for created element
-			as_pack_ext_header(&pk, new_ext_cont_sz, ext.type);
-			offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
-			offset_index_set_filled(&newoff, 1); // TODO - patch newoff
-			pk.offset += offset_index_size(&newoff);
-		}
-		else if (new_ext_cont_sz != 0) {
+		if (ext.type != 0) {
 			as_pack_list_header(&pk, ctx->top_ele_count + ctx->list_nil_pad +
-					1 + 1);
+					1 + 1); // 1 for ext, 1 for created element
 			as_pack_ext_header(&pk, new_ext_cont_sz, ext.type);
-			offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
-			offset_index_set_filled(&newoff, 1); // TODO - patch newoff
-			pk.offset += offset_index_size(&newoff);
+
+			if (flags_is_persist(ext.type)) {
+				offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
+				offset_index_set_filled(&newoff, 1); // TODO - patch newoff
+				pk.offset += offset_index_size(&newoff);
+			}
 		}
 		else {
 			as_pack_list_header(&pk, ctx->top_ele_count + ctx->list_nil_pad +
@@ -2016,20 +2310,23 @@ cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz)
 		to_ptr += pk.offset;
 	}
 	else if (orig_type == MSGPACK_TYPE_MAP) {
-		if ((ext.type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
+		if (ext.type != 0) {
 			as_pack_map_header(&pk, ctx->top_ele_count + 1 + 1); // 1 for ext, 1 for created element
 			as_pack_ext_header(&pk, new_ext_cont_sz, ext.type);
-			offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
-			offset_index_set_filled(&newoff, 1); // TODO - patch newoff
-			pk.offset += offset_index_size(&newoff);
 
-			if ((ext.type & AS_PACKED_MAP_FLAG_V_ORDERED) != 0) {
-				order_index neword;
+			if (flags_is_persist(ext.type)) {
+				offset_index_set_ptr(&newoff, pk.buffer + pk.offset, NULL);
+				offset_index_set_filled(&newoff, 1); // TODO - patch newoff
+				pk.offset += offset_index_size(&newoff);
 
-				order_index_init(&neword, pk.buffer + pk.offset,
-						ctx->top_ele_count + 1); // 1 for created element
-				order_index_set(&neword, 0, ctx->top_ele_count + 1);
-				pk.offset += order_index_size(&neword);
+				if ((ext.type & AS_PACKED_MAP_FLAG_V_ORDERED) != 0) {
+					order_index neword;
+
+					order_index_init(&neword, pk.buffer + pk.offset,
+							ctx->top_ele_count + 1); // 1 for created element
+					order_index_set(&neword, 0, ctx->top_ele_count + 1);
+					pk.offset += order_index_size(&neword);
+				}
 			}
 		}
 		else {
@@ -2053,6 +2350,10 @@ cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz)
 	}
 
 	to_ptr = cdt_context_fill_create(ctx, to_ptr, false);
+
+	if (to_ptr == NULL) {
+		return NULL;
+	}
 
 	memcpy(to_ptr + subctx_sz,
 			orig_data + ctx->data_offset + ctx->data_sz,
@@ -2239,6 +2540,10 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 
 	if (ctx->create_triggered) {
 		to_ptr = cdt_context_fill_create(ctx, to_ptr, false);
+	}
+
+	if (to_ptr == NULL) {
+		return NULL;
 	}
 
 	memcpy(to_ptr + subctx_sz,
@@ -2584,6 +2889,7 @@ cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 	define_rollback_alloc(alloc_buf, particles_llb, 1);
 	define_rollback_alloc(alloc_result, NULL, 1); // results always on the heap
 	define_rollback_alloc(alloc_idx, NULL, 8); // for temp indexes
+	define_rollback_alloc(alloc_convert, NULL, 2); // for converting to internal order
 
 	cdt_op_mem com = {
 			.ctx = {
@@ -2596,6 +2902,7 @@ cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 					.alloc = alloc_result
 			},
 			.alloc_idx = alloc_idx,
+			.alloc_convert = alloc_convert,
 			.ret_code = AS_OK,
 	};
 
@@ -2613,6 +2920,7 @@ cdt_packed_modify(cdt_process_state *state, as_bin *b, as_bin *result,
 	}
 
 	rollback_alloc_rollback(alloc_idx);
+	rollback_alloc_rollback(alloc_convert);
 
 	if (! success) {
 		*b = old_bin;
@@ -3108,8 +3416,7 @@ offset_index_find_items(offset_index *full_offidx,
 		cf_crash(AS_PARTICLE, "bad input");
 	}
 
-	if (! list_full_offset_index_fill_to(&items_offidx,
-			items_offidx._.ele_count, false)) {
+	if (! offset_index_fill(&items_offidx, false, false)) {
 		cf_warning(AS_PARTICLE, "offset_index_find_items() invalid parameter list");
 		return false;
 	}
@@ -3289,63 +3596,36 @@ offset_index_get_filled(const offset_index *offidx)
 }
 
 bool
-offset_index_check_order_and_fill(offset_index *offidx, bool is_map)
+offset_index_fill(offset_index *offidx, bool is_map, bool check_storage)
 {
+	uint32_t start = offset_index_get_filled(offidx);
 	uint32_t ele_count = offidx->_.ele_count;
+	uint32_t rep = is_map ? 2 : 1;
 
-	if (ele_count == 0) {
+	if (ele_count <= 1 || start == ele_count) {
 		return true;
 	}
 
-	bool is_valid = offset_index_is_valid(offidx);
-
-	msgpack_in mp = {
-			.buf = offidx->contents,
-			.buf_sz = offidx->content_sz
-	};
-
-	if (msgpack_sz_rep(&mp, is_map ? 2 : 1) == 0 || mp.has_nonstorage) {
+	if (! offset_index_is_valid(offidx)) {
 		return false;
 	}
 
-	if (is_valid) {
-		offset_index_set(offidx, 1, mp.offset);
-	}
-
-	if (ele_count == 1) {
-		return true;
-	}
-
-	msgpack_in mp_prev = {
+	msgpack_in mp = {
 			.buf = offidx->contents,
-			.buf_sz = offidx->content_sz
+			.buf_sz = offidx->content_sz,
+			.offset = offset_index_get_const(offidx, start - 1)
 	};
 
-	for (uint32_t i = 1; i < ele_count; i++) {
-		msgpack_cmp_type cmp = msgpack_cmp(&mp_prev, &mp);
-
-		if (is_map) {
-			if (cmp != MSGPACK_CMP_LESS) { // check key
-				return false;
-			}
-
-			if (msgpack_sz(&mp_prev) == 0 || msgpack_sz(&mp) == 0 ||
-					mp.has_nonstorage) { // check value
-				return false;
-			}
-		}
-		else if (cmp != MSGPACK_CMP_LESS && cmp != MSGPACK_CMP_EQUAL) {
+	for (uint32_t i = start; i < ele_count; i++) {
+		if (msgpack_sz_rep(&mp, rep) == 0 ||
+				(check_storage && mp.has_nonstorage)) {
 			return false;
 		}
 
-		if (is_valid) {
-			offset_index_set(offidx, i + 1, mp.offset);
-		}
+		offset_index_set(offidx, i, mp.offset);
 	}
 
-	if (is_valid) {
-		offset_index_set_filled(offidx, ele_count);
-	}
+	offset_index_set_filled(offidx, ele_count);
 
 	return true;
 }
@@ -3500,6 +3780,14 @@ void
 order_index_clear(order_index *ordidx)
 {
 	memset(ordidx->_.ptr, 0, order_index_size(ordidx));
+}
+
+void
+order_index_init_values(order_index *ordidx)
+{
+	for (uint32_t i = 0; i < ordidx->_.ele_count; i++) {
+		order_index_set(ordidx, i, i);
+	}
 }
 
 bool
@@ -4400,77 +4688,220 @@ list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r)
 // cdt_untrusted
 //
 
+const uint8_t *
+cdt_untrusted_count_rewrites(const uint8_t *buf, uint32_t buf_sz,
+		uint32_t *n_nonstorage, uint32_t *n_not_compact,
+		uint32_t *n_unordered_maps, uint32_t *n_persist_flags)
+{
+	if (buf_sz == 0) {
+		return NULL;
+	}
+
+	const uint8_t *next_b = buf;
+	const uint8_t *end = buf + buf_sz;
+	uint32_t count = 1;
+	uint32_t dummy_int;
+
+	if (n_nonstorage == NULL) {
+		n_nonstorage = &dummy_int;
+	}
+
+	if (n_unordered_maps == NULL) {
+		n_unordered_maps = &dummy_int;
+	}
+
+	if (n_persist_flags == NULL) {
+		n_persist_flags = &dummy_int;
+	}
+
+	if (n_not_compact == NULL) {
+		n_not_compact = &dummy_int;
+	}
+
+	*n_nonstorage = 0;
+	*n_unordered_maps = 0;
+	*n_persist_flags = 0;
+	*n_not_compact = 0;
+
+	for (uint32_t i = 0; i < count; i++) {
+		const uint8_t *b = next_b;
+		msgpack_type type;
+		bool has_nonstorage = false;
+		bool not_compact = false;
+
+		if ((next_b = msgpack_parse(b, end, &count, &type, &has_nonstorage,
+				&not_compact)) == NULL) {
+			return NULL;
+		}
+
+		if (has_nonstorage) {
+			(*n_nonstorage)++;
+		}
+
+		if (not_compact) {
+			(*n_not_compact)++;
+		}
+
+		if (type != MSGPACK_TYPE_LIST && type != MSGPACK_TYPE_MAP) {
+			continue;
+		}
+
+		msgpack_type next_type = msgpack_buf_peek_type(next_b, end - next_b);
+
+		if (next_type != MSGPACK_TYPE_EXT) {
+			if (type == MSGPACK_TYPE_MAP) {
+				(*n_unordered_maps)++;
+			}
+
+			continue;
+		}
+
+		msgpack_ext ext;
+		uint32_t ext_sz = msgpack_buf_get_ext(next_b, end - next_b, &ext);
+
+		if (ext_sz == 0) {
+			(*n_unordered_maps)++;
+		}
+
+		next_b += ext_sz;
+		count--;
+
+		if (flags_is_persist(ext.type)) {
+			(*n_persist_flags)++;
+		}
+
+		if (type == MSGPACK_TYPE_LIST) {
+			continue;
+		}
+
+		if (ext.type == 0) {
+			(*n_unordered_maps)++;
+		}
+	}
+
+	return next_b;
+}
+
 uint32_t
-cdt_untrusted_max_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *type)
+cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
+		bool has_toplvl)
 {
 	if (buf_sz == 0) {
 		return 0; // error
 	}
 
-	const uint8_t *b = buf;
+	const uint8_t *next_b = buf;
 	const uint8_t *end = buf + buf_sz;
 	uint32_t count = 1;
-	bool has_nonstorage = false;
-	bool not_compact = false;
-	uint32_t old_count = count;
+	uint8_t top_flags = 0;
+	uint32_t ret_sz = 0;
+	uint32_t top_ele_count = 0; // set to 0 to shut the compiler up
+	msgpack_type dummy_type;
 
-	b = msgpack_parse(b, end, &count, type, &has_nonstorage, &not_compact);
-
-	if (has_nonstorage || b == NULL) {
-		cf_warning(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p", has_nonstorage, b);
-		return 0;
+	if (ptype == NULL) {
+		ptype = &dummy_type;
 	}
 
-	switch (*type) {
-	case MSGPACK_TYPE_MAP:
-	case MSGPACK_TYPE_LIST:
-		break;
-	default:
-		cf_warning(AS_PARTICLE, "invalid cdt type %d", *type);
-		return 0;
+	for (uint32_t i = 0; i < count; i++) {
+		const uint8_t *b = next_b;
+		uint32_t old_count = count;
+		msgpack_type type;
+		bool has_nonstorage = false;
+		bool not_compact = false;
+
+		next_b = msgpack_parse(b, end, &count, &type, &has_nonstorage,
+				&not_compact);
+
+		uint32_t ele_count = count - old_count;
+		uint32_t parse_sz = (uint32_t)(next_b - b);
+
+		if (has_nonstorage || next_b == NULL) {
+			cf_warning(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p", has_nonstorage, b);
+			return 0;
+		}
+
+		if (type == MSGPACK_TYPE_MAP) {
+			ele_count /= 2;
+		}
+
+		if (i == 0) {
+			top_ele_count = ele_count;
+			*ptype = type;
+		}
+
+		if (old_count == count || msgpack_buf_peek_type(next_b, end - next_b) !=
+				MSGPACK_TYPE_EXT) {
+			if (type == MSGPACK_TYPE_MAP) {
+				ret_sz += as_pack_map_header_get_size(ele_count + 1) +
+						as_pack_ext_header_get_size(0) + as_pack_nil_size();
+			}
+			else if (not_compact) {
+				ret_sz += msgpack_compactify_element(NULL, b);
+			}
+			else {
+				ret_sz += parse_sz;
+			}
+
+			continue;
+		}
+
+		msgpack_ext ext;
+		uint32_t ext_sz = msgpack_buf_get_ext(next_b, end - next_b, &ext);
+
+		if (ext_sz == 0) {
+			cf_warning(AS_PARTICLE, "invalid msgpack: b %lx", *(uint64_t*)b);
+			return 0;
+		}
+
+		next_b += ext_sz;
+		count--; // ext element was parsed
+
+		if (i == 0 && has_toplvl) {
+			top_flags = ext.type;
+		}
+		else {
+			ext.type &= ~AS_PACKED_PERSIST_INDEX;
+		}
+
+		if (type == MSGPACK_TYPE_MAP) {
+			ret_sz += as_pack_map_header_get_size(ele_count);
+			ret_sz += as_pack_ext_header_get_size(0);
+		}
+		else { // LIST
+			if (ext.type == 0) {
+				ret_sz += as_pack_list_header_get_size(ele_count - 1);
+			}
+			else {
+				ret_sz += as_pack_list_header_get_size(ele_count);
+				ret_sz += as_pack_ext_header_get_size(0);
+			}
+		}
 	}
 
-	if (old_count == count) {
-		return buf_sz;
+	if (flags_is_persist(top_flags)) {
+		if (*ptype == MSGPACK_TYPE_MAP) {
+			uint32_t content_sz = ret_sz -
+					as_pack_map_header_get_size(top_ele_count) -
+					as_pack_ext_header_get_size(0) - as_pack_nil_size();
+			uint32_t ext_content_sz = map_calc_ext_content_sz(top_flags,
+					top_ele_count, content_sz);
+
+			ret_sz += as_pack_ext_header_get_size(ext_content_sz);
+		}
+		else { // LIST
+			uint32_t content_sz = ret_sz -
+					as_pack_list_header_get_size(top_ele_count) -
+					as_pack_ext_header_get_size(0);
+			uint32_t ext_content_sz = list_calc_ext_content_sz(top_flags,
+					top_ele_count, content_sz);
+
+			ret_sz += as_pack_ext_header_get_size(ext_content_sz);
+		}
+
+		ret_sz -= as_pack_ext_header_get_size(0);
 	}
 
-	msgpack_type next_type = msgpack_buf_peek_type(b, end - b);
-
-	if (next_type != MSGPACK_TYPE_EXT) {
-		return buf_sz;
-	}
-
-	count--;
-
-	msgpack_ext ext;
-	uint32_t ext_sz = msgpack_buf_get_ext(b, end - b, &ext);
-	uint32_t ele_count = count - old_count;
-
-	if (*type == MSGPACK_TYPE_MAP) {
-		ele_count /= 2;
-	}
-
-	if (ext_sz == 0) {
-		cf_warning(AS_PARTICLE, "invalid msgpack: b %lx", *(uint64_t*)b);
-		return 0;
-	}
-
-	if ((ext.type & AS_PACKED_PERSIST_INDEX) == 0) {
-		return buf_sz;
-	}
-
-	uint32_t idx_sz;
-
-	b += ext_sz;
-
-	if (*type == MSGPACK_TYPE_MAP) {
-		idx_sz = map_calc_ext_content_sz(ext.type, ele_count, end - b);
-	}
-	else {
-		idx_sz = list_calc_ext_content_sz(ext.type, ele_count, end - b);
-	}
-
-	return buf_sz + as_pack_ext_header_get_size(idx_sz) - ext.size;
+	return ret_sz;
 }
 
 static cdt_stack_entry *
@@ -4512,7 +4943,7 @@ cdt_stack_decr_level(cdt_stack *cs)
 
 static uint32_t
 cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
-		uint32_t src_sz, bool allow_subindex)
+		uint32_t src_sz)
 {
 	uint8_t *wptr = dest;
 	const uint8_t *b = src;
@@ -4530,63 +4961,83 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 		msgpack_type type;
 		const uint8_t *next_b = msgpack_parse(b, end, &count, &type,
 				&has_nonstorage, &not_compact);
-		uint32_t sz = next_b - b;
+		uint32_t parse_sz = next_b - b;
 		uint32_t ele_count = count - old_count;
+
+		if (i == 0) {
+			cs->toplvl_type = type;
+		}
 
 		if (type == MSGPACK_TYPE_MAP) {
 			ele_count /= 2;
 		}
 
 		if (has_nonstorage || next_b == NULL) {
-			cf_warning(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p sz %u", has_nonstorage, b,
-					(uint32_t)(end - b));
+			cf_warning(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p sz %u i %u", has_nonstorage, b,
+					(uint32_t)(end - b), i);
 			return 0;
 		}
-
-		if (i == 0 && type != MSGPACK_TYPE_LIST && type != MSGPACK_TYPE_MAP) {
-			cf_warning(AS_PARTICLE, "top level is not a list or map b %lx", *(uint64_t*)b);
-			return 0;
-		}
-
-		if (not_compact) {
-			// TODO - track compactify
-			uint32_t new_sz = msgpack_compactify_element(wptr, b);
-
-			wptr += new_sz;
-		}
-		else { // TODO - optimize for fewer memcpy call(s)
-			memcpy(wptr, b, sz);
-			wptr += sz;
-		}
-
-		b = next_b;
 
 		cdt_stack_entry *pe = cdt_stack_get_entry(cs);
 		bool do_incr_ix = (i != 0);
 
-		if (ele_count != 0) { // non-empty list/map
-			do_incr_ix = false;
+		as_packer pk = {
+				.buffer = wptr,
+				.capacity = UINT32_MAX
+		};
 
+		if (type != MSGPACK_TYPE_LIST && type != MSGPACK_TYPE_MAP) {
+			if (not_compact) {
+				uint32_t new_sz = msgpack_compactify_element(wptr, b);
+
+				pk.offset += new_sz;
+			}
+			else { // TODO - optimize for fewer memcpy call(s)
+				as_pack_append(&pk, b, parse_sz);
+			}
+
+			if (i == 0) {
+				b = next_b;
+				wptr += pk.offset;
+				break;
+			}
+		}
+		else if (ele_count == 0) { // empty list/map
+			switch (type) {
+			case MSGPACK_TYPE_LIST:
+				as_pack_list_header(&pk, 0);
+				break;
+			case MSGPACK_TYPE_MAP:
+				// Convert to internal k-ordered.
+				as_pack_map_header(&pk, 1);
+				as_pack_ext_header(&pk, 0, MAP_INTERNAL_K_ORDERED);
+				as_pack_nil(&pk);
+				break;
+			default:
+				break;
+			}
+
+			if (i == 0) {
+				b = next_b;
+				wptr += pk.offset;
+				break;
+			}
+		}
+		else { // non-empty list/map
 			if (i != 0) {
 				pe = cdt_stack_incr_level(cs);
 			}
 
-			msgpack_type next_type;
-			uint32_t temp_count = 0;
+			uint32_t tail_sz = (uint32_t)(end - next_b);
 
 			pe->ix = 0;
-			next_b = msgpack_parse(b, end, &temp_count, &next_type,
-					&has_nonstorage, &not_compact);
+			do_incr_ix = false;
 
-			if (has_nonstorage || next_b == NULL) {
-				cf_warning(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p", has_nonstorage, b);
-				return 0;
-			}
-
-			if (next_type == MSGPACK_TYPE_EXT) {
+			if (msgpack_buf_peek_type(next_b, tail_sz) == MSGPACK_TYPE_EXT) {
 				msgpack_ext ext;
+				uint32_t ext_sz = msgpack_buf_get_ext(next_b, tail_sz, &ext);
 
-				if (msgpack_buf_get_ext(b, end - b, &ext) == 0) {
+				if (ext_sz == 0) {
 					cf_warning(AS_PARTICLE, "invalid msgpack: b %lx", *(uint64_t*)b);
 					return 0;
 				}
@@ -4596,17 +5047,31 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 					return 0;
 				}
 
+				next_b += ext_sz;
 				ele_count--;
 
-				if (type == MSGPACK_TYPE_MAP) {
+				if (i != 0 || ! cs->has_toplvl) {
+					// Quietly ignore when asking to persist index at sub-level.
+					ext.type &= ~AS_PACKED_PERSIST_INDEX;
+				}
+
+				if (type == MSGPACK_TYPE_MAP) { // parse 2nd meta element for maps
+					msgpack_type next_type;
+					uint32_t temp_count = 0;
 					count--;
 					next_b = msgpack_parse(next_b, end, &temp_count, &next_type,
 							&has_nonstorage, &not_compact);
+					ext.type |= MAP_INTERNAL_K_ORDERED;
+					as_pack_map_header(&pk, ele_count + 1);
+				}
+				else { // LIST
+					as_pack_list_header(&pk, ele_count +
+							(ext.type != 0 ? 1 : 0));
 				}
 
 				uint32_t est_content_sz = end - next_b; // maybe inaccurate due to padding
 
-				if ((ext.type & AS_PACKED_PERSIST_INDEX) != 0) {
+				if (flags_is_persist(ext.type)) {
 					uint32_t ext_content_sz;
 
 					if (type == MSGPACK_TYPE_MAP) {
@@ -4618,81 +5083,69 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 								ele_count, est_content_sz);
 					}
 
-					if (! allow_subindex) {
-						if (i != 0) { // not top-level and sub-level index not allowed.
-							return 0;
-						}
-					}
-					else if (i != 0) { // not top level but sub-level index allowed
-						cf_warning(AS_PARTICLE, "sub-level index not yet supported");
-						return 0;
-					}
-
-					as_packer pk = {
-							.buffer = wptr,
-							.capacity = UINT32_MAX
-					};
-
-					pe->ext_start = wptr;
+					pe->ext_start = pk.buffer + pk.offset;
 					as_pack_ext_header(&pk, ext_content_sz, ext.type);
-					wptr += pk.offset;
 
-					uint8_t *idx_mem = wptr;
+					uint8_t *idx_mem = pk.buffer + pk.offset;
 
-					wptr += ext_content_sz;
+					pk.offset += ext_content_sz;
+
+					if (type == MSGPACK_TYPE_MAP) {
+						as_pack_nil(&pk);
+					}
+
+					uint8_t *contents = pk.buffer + pk.offset;
 
 					if (type == MSGPACK_TYPE_LIST &&
 							ext.type == AS_PACKED_PERSIST_INDEX) {
 						// Set partial indexes to empty state.
 						list_partial_offset_index_init(&pe->offidx, idx_mem,
-								ele_count, wptr, est_content_sz);
+								ele_count, contents, est_content_sz);
 						offset_index_set_filled(&pe->offidx, 1);
 						offset_index_set_ptr(&pe->offidx, NULL, NULL);
 					}
 					else {
-						offset_index_init(&pe->offidx, idx_mem, ele_count, wptr,
-								est_content_sz);
+						offset_index_init(&pe->offidx, idx_mem, ele_count,
+								contents, est_content_sz);
 						offset_index_set_filled(&pe->offidx, ele_count);
 					}
 
 					pe->ext_content_sz = ext_content_sz;
 				}
-				else {
+				else { // not persist
 					if (ext.type != 0) {
-						as_packer pk = {
-								.buffer = wptr,
-								.capacity = UINT32_MAX
-						};
-
 						pe->ext_start = wptr;
 						as_pack_ext_header(&pk, 0, ext.type);
-						wptr += pk.offset;
+
+						if (type == MSGPACK_TYPE_MAP) {
+							as_pack_nil(&pk);
+						}
 					}
 
-					offset_index_init(&pe->offidx, NULL, ele_count, wptr,
-							est_content_sz);
+					offset_index_init(&pe->offidx, NULL, ele_count,
+							pk.buffer + pk.offset, est_content_sz);
 				}
 
-				if (type == MSGPACK_TYPE_MAP) {
-					if (ext.type != 0) {
-						as_packer pk = {
-								.buffer = wptr,
-								.capacity = UINT32_MAX
-						};
-
-						as_pack_nil(&pk);
-						wptr += pk.offset;
-					}
-				}
-
-				pe->new_contents = wptr;
+				pe->new_contents = pk.buffer + pk.offset;
 				pe->ext_type = ext.type;
 				count--;
-				b = next_b;
 			}
 			else { // ! MSGPACK_TYPE_EXT
-				offset_index_init(&pe->offidx, NULL, ele_count, wptr, end - b);
-				pe->ext_type = 0;
+				if (type == MSGPACK_TYPE_MAP) {
+					// Convert to internal k-ordered.
+					as_pack_map_header(&pk, ele_count + 1);
+					as_pack_ext_header(&pk, 0, MAP_INTERNAL_K_ORDERED);
+					as_pack_nil(&pk);
+					pe->ext_type = MAP_INTERNAL_K_ORDERED;
+				}
+				else { // list
+					as_pack_list_header(&pk, ele_count);
+					pe->ext_type = 0;
+				}
+
+				pe->new_contents = pk.buffer + pk.offset;
+				offset_index_init(&pe->offidx, NULL, ele_count,
+						pe->new_contents, end - b);
 			}
 
 			if (ele_count == 0) {
@@ -4705,18 +5158,69 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 				pe->type = (uint8_t)type;
 				pe->n_msgpack = ele_count *
 						((type == MSGPACK_TYPE_MAP) ? 2 : 1);
-				pe->prev.buf = b;
+				pe->prev.buf = next_b;
 				pe->prev.buf_sz = UINT32_MAX;
+				pe->need_sort = false;
 			}
 		}
 
+		b = next_b;
+		wptr += pk.offset;
+
 		while (do_incr_ix) {
-			uint32_t offset = wptr - pe->new_contents;
+			uint32_t offset = (uint32_t)(wptr - pe->new_contents);
 
 			ele_count = pe->offidx._.ele_count;
 			pe->ix++;
 
 			if (pe->ix >= pe->n_msgpack) {
+				if (pe->need_sort) {
+					define_rollback_alloc(alloc_idx, NULL, 2);
+					define_order_index(ordidx, ele_count, alloc_idx);
+					define_offset_index(new_offidx, pe->new_contents, offset,
+							ele_count, alloc_idx);
+					uint8_t *sort_contents = cf_malloc(offset);
+
+					if (pe->type == MSGPACK_TYPE_LIST) {
+						// TODO - track list sorting
+						if (! offset_index_is_valid(&pe->offidx)) {
+							list_full_offset_index_fill_all(&new_offidx);
+						}
+						else {
+							offset_index_copy(&new_offidx, &pe->offidx, 0, 0,
+									ele_count, 0);
+						}
+
+						if (! list_order_index_sort(&ordidx, &new_offidx,
+								AS_CDT_SORT_ASCENDING)) {
+							cf_crash(AS_PARTICLE, "unexpected");
+						}
+					}
+					else {
+						// TODO - track map sorting
+						if (! offset_index_is_valid(&pe->offidx)) {
+							map_offset_index_check_and_fill(&new_offidx,
+									ele_count);
+						}
+						else {
+							offset_index_copy(&new_offidx, &pe->offidx, 0, 0,
+									ele_count, 0);
+						}
+
+						map_order_index_set_sorted(&ordidx, &new_offidx,
+								pe->new_contents, pe->offidx.content_sz,
+								MAP_SORT_BY_KEY);
+					}
+
+					wptr = order_index_write_eles(&ordidx, ele_count,
+							&new_offidx, sort_contents, &pe->offidx, false);
+					cf_assert(wptr - sort_contents == offset, AS_PARTICLE, "write mismatch %lu != %u", wptr - sort_contents, offset);
+					memcpy(pe->new_contents, sort_contents, offset);
+					wptr = pe->new_contents + offset;
+					cf_free(sort_contents);
+					rollback_alloc_rollback(alloc_idx);
+				}
+
 				uint8_t ext_type_pkv = AS_PACKED_PERSIST_INDEX |
 						AS_PACKED_MAP_FLAG_KV_ORDERED;
 
@@ -4763,19 +5267,16 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 			}
 
 			uint32_t idx = pe->ix;
-			bool do_set_offidx = true;
+			bool is_ele_key = true;
 			bool check_ordered = false;
 
 			if (pe->type == MSGPACK_TYPE_MAP) {
 				idx /= 2;
+				check_ordered = ! pe->need_sort;
 
 				if (pe->ix % 2 != 0) {
-					do_set_offidx = false;
+					is_ele_key = false;
 				}
-				else if ((pe->ext_type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
-					check_ordered = true;
-				}
-
 			}
 			else if (pe->type == MSGPACK_TYPE_LIST) {
 				if ((pe->ext_type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
@@ -4783,7 +5284,7 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 				}
 			}
 
-			if (check_ordered) {
+			if (check_ordered && is_ele_key) {
 				pe->prev.offset = 0;
 
 				msgpack_in mp = {
@@ -4795,11 +5296,32 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 
 				switch (cmp) {
 				case MSGPACK_CMP_LESS:
+					break;
 				case MSGPACK_CMP_EQUAL:
+					if (pe->type == MSGPACK_TYPE_MAP) {
+						cf_warning(AS_PARTICLE, "map has duplicate keys");
+						return 0;
+					}
 					break;
 				case MSGPACK_CMP_GREATER:
-					cf_warning(AS_PARTICLE, "list/map not ordered as expected");
-					return 0;
+					switch (pe->type) {
+					case MSGPACK_TYPE_LIST:
+						if ((pe->ext_type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
+							cf_warning(AS_PARTICLE, "list not ordered as expected");
+							return 0;
+						}
+						break;
+					case MSGPACK_TYPE_MAP:
+						if ((pe->ext_type & AS_PACKED_MAP_FLAG_K_ORDERED) !=
+								0) {
+							cf_warning(AS_PARTICLE, "map not ordered as expected");
+							return 0;
+						}
+						break;
+					}
+
+					pe->need_sort = true;
+					break;
 				case MSGPACK_CMP_ERROR:
 				case MSGPACK_CMP_END:
 				default:
@@ -4809,7 +5331,7 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 				pe->prev = mp;
 			}
 
-			if (offset_index_is_valid(&pe->offidx) && do_set_offidx) {
+			if (offset_index_is_valid(&pe->offidx) && is_ele_key) {
 				offset_index_set(&pe->offidx, idx, offset);
 			}
 
@@ -4817,11 +5339,17 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 		}
 	}
 
+	if (b != end) {
+		cf_warning(AS_PARTICLE, "list/map rejected padding size %lu != 0", end - b);
+		return 0;
+	}
+
 	return wptr - dest;
 }
 
-uint32_t cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_sz,
-		bool allow_subindex)
+uint32_t
+cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_sz,
+		bool has_toplvl)
 {
 	cdt_stack cs;
 
@@ -4830,9 +5358,9 @@ uint32_t cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_s
 	cs.ilevel = 0;
 	cs.entries->n_msgpack = 1;
 	cs.entries->ix = 0;
+	cs.has_toplvl = has_toplvl;
 
-	uint32_t ret = cdt_stack_untrusted_rewrite(&cs, dest, src, src_sz,
-			allow_subindex);
+	uint32_t ret = cdt_stack_untrusted_rewrite(&cs, dest, src, src_sz);
 
 	if (cs.entries != cs.entries0) {
 		cf_free(cs.entries);
@@ -4846,291 +5374,16 @@ uint32_t cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_s
 // cdt_check
 //
 
-static bool
-cdt_check_list(msgpack_in *mp)
-{
-	uint32_t ele_count;
-
-	if (! msgpack_get_list_ele_count(mp, &ele_count)) {
-		cf_warning(AS_PARTICLE, "cdt_list_check() invalid header");
-		return false;
-	}
-
-	if (ele_count == 0) {
-		return true;
-	}
-
-	msgpack_type type = msgpack_peek_type(mp);
-
-	if (type == MSGPACK_TYPE_EXT) {
-		msgpack_ext ext;
-
-		if (! msgpack_get_ext(mp, &ext)) {
-			cf_warning(AS_PARTICLE, "cdt_check_list() invalid metadata");
-			return false;
-		}
-
-		ele_count--;
-
-		if (ele_count == 0) {
-			return true;
-		}
-
-		if ((ext.type & AS_PACKED_LIST_FLAG_ORDERED) != 0) {
-			msgpack_in mp0 = *mp;
-
-			if (! cdt_check_internal(mp)) {
-				return false;
-			}
-
-			for (uint32_t i = 1; i < ele_count; i++) {
-				msgpack_cmp_type cmp = msgpack_cmp_peek(&mp0, mp);
-
-				if (cmp != MSGPACK_CMP_LESS && cmp != MSGPACK_CMP_EQUAL) {
-					cf_warning(AS_PARTICLE, "cdt_check_list() element out of order at idx %u", i + 1);
-					return false;
-				}
-
-				mp0.offset = mp->offset;
-
-				if (! cdt_check_internal(mp)) {
-					return false;
-				}
-			}
-
-			return ! mp->has_nonstorage;
-		}
-	}
-
-	for (uint32_t i = 0; i < ele_count; i++) {
-		if (! cdt_check_internal(mp)) {
-			return false;
-		}
-	}
-
-	return ! mp->has_nonstorage;
-}
-
-static bool
-cdt_check_map(msgpack_in *mp)
-{
-	uint32_t ele_count;
-
-	if (! msgpack_get_map_ele_count(mp, &ele_count)) {
-		cf_warning(AS_PARTICLE, "cdt_map_check() invalid header");
-		return false;
-	}
-
-	if (ele_count == 0) {
-		return true;
-	}
-
-	msgpack_type type = msgpack_peek_type(mp);
-
-	if (type == MSGPACK_TYPE_EXT) {
-		msgpack_ext ext;
-
-		if (! msgpack_get_ext(mp, &ext) || msgpack_sz(mp) == 0) {
-			cf_warning(AS_PARTICLE, "cdt_map_check() invalid metadata");
-			return false;
-		}
-
-		ele_count--;
-
-		if (ele_count == 0) {
-			return true;
-		}
-
-		if ((ext.type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
-
-			msgpack_in mp0 = *mp;
-
-			if (! cdt_check_internal(mp)) {
-				return false;
-			}
-
-			if (! cdt_check_internal(mp)) {
-				return false;
-			}
-
-			for (uint32_t i = 1; i < ele_count; i++) {
-				if (msgpack_cmp_peek(&mp0, mp) != MSGPACK_CMP_LESS) {
-					cf_warning(AS_PARTICLE, "cdt_map_check() element out of order at idx %u", i + 1);
-					return false;
-				}
-
-				mp0.offset = mp->offset;
-
-				if (! cdt_check_internal(mp)) {
-					return false;
-				}
-
-				if (! cdt_check_internal(mp)) {
-					return false;
-				}
-			}
-
-			return ! mp->has_nonstorage;
-		}
-	}
-
-	if (ele_count == 1) {
-		return cdt_check_internal(mp) && cdt_check_internal(mp) &&
-				! mp->has_nonstorage;
-	}
-
-	offset_index offidx;
-
-	offset_index_init(&offidx, NULL, ele_count, NULL, mp->buf_sz - mp->offset);
-
-	uint8_t *offmem = cf_malloc(offset_index_size(&offidx));
-	uint32_t offset_start = mp->offset;
-
-	offset_index_set_ptr(&offidx, offmem, mp->buf + mp->offset);
-	offset_index_set_filled(&offidx, ele_count);
-
-	for (uint32_t i = 0; i < ele_count; i++) {
-		offset_index_set(&offidx, i, mp->offset - offset_start);
-
-		if (! cdt_check_internal(mp)) {
-			cf_free(offmem);
-			return false;
-		}
-
-		if (! cdt_check_internal(mp)) {
-			cf_free(offmem);
-			return false;
-		}
-	}
-
-	order_index ordidx;
-	uint8_t *ordmem = cf_malloc(order_index_calc_size(ele_count, ele_count));
-
-	order_index_init(&ordidx, ordmem, ele_count);
-	order_index_map_sort(&ordidx, &offidx);
-
-	uint32_t idx = order_index_get(&ordidx, 0);
-
-	msgpack_in mp0 = {
-			.buf = offidx.contents,
-			.buf_sz = offidx.content_sz,
-			.offset = offset_index_get_const(&offidx, idx)
-	};
-
-	msgpack_in mp1 = mp0;
-
-	for (uint32_t i = 1; i < ele_count; i++) {
-		idx = order_index_get(&ordidx, i);
-		mp1.offset = offset_index_get_const(&offidx, idx);
-
-		msgpack_cmp_type cmp = msgpack_cmp_peek(&mp0, &mp1);
-
-		if (cmp != MSGPACK_CMP_LESS) {
-			cf_warning(AS_PARTICLE, "cdt_map_check() duplicate element detected at rank %u idx %u cmp %d", i, idx, cmp);
-			cf_free(offmem);
-			cf_free(ordmem);
-			return false;
-		}
-
-		mp0.offset = mp1.offset;
-	}
-
-	cf_free(offmem);
-	cf_free(ordmem);
-
-	return ! mp->has_nonstorage;
-}
-
-static bool
-cdt_check_internal(msgpack_in *mp)
-{
-	msgpack_type type = msgpack_peek_type(mp);
-
-	if (type == MSGPACK_TYPE_MAP) {
-		return cdt_check_map(mp);
-	}
-	else if (type == MSGPACK_TYPE_LIST) {
-		return cdt_check_list(mp);
-	}
-	else if (type == MSGPACK_TYPE_ERROR) {
-		cf_warning(AS_PARTICLE, "cdt_check_internal() type error at offset %u", mp->offset);
-		return false;
-	}
-
-	return msgpack_sz(mp) != 0;
-}
-
-bool
-cdt_check(msgpack_in *mp, bool check_end)
-{
-	if (! cdt_check_internal(mp)) {
-		if (mp->has_nonstorage) {
-			cf_warning(AS_PARTICLE, "cdt_check() non-storage element detected at offset %u", mp->offset);
-		}
-
-		return false;
-	}
-
-	if (check_end && mp->offset != mp->buf_sz) {
-		cf_warning(AS_PARTICLE, "cdt_check_buf() buffer has %u bytes padding", mp->buf_sz - mp->offset);
-		return false;
-	}
-
-	return true;
-}
-
-bool
-cdt_check_rep(msgpack_in *mp, uint32_t rep)
-{
-	for (uint32_t i = 0; i < rep; i++) {
-		if (! cdt_check_internal(mp)) {
-			if (mp->has_nonstorage) {
-				cf_warning(AS_PARTICLE, "cdt_check() non-storage element detected at offset %u", mp->offset);
-			}
-
-			return false;
-		}
-	}
-
-	return true;
-}
-
-bool
-cdt_check_buf(const uint8_t *buf, uint32_t buf_sz)
-{
-	msgpack_in mp = {
-			.buf = buf,
-			.buf_sz = buf_sz
-	};
-
-	return cdt_check(&mp, true);
-}
-
 bool
 cdt_check_flags(uint8_t flags, msgpack_type type)
 {
 	if (type == MSGPACK_TYPE_LIST) {
-		switch (flags) {
-		case AS_PACKED_LIST_FLAG_NONE:
-		case AS_PACKED_LIST_FLAG_ORDERED:
-		case AS_PACKED_PERSIST_INDEX:
-		case AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX:
-		return true;
-		default:
-			break;
-		}
+		uint8_t valid = AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX;
+		return (flags & ~valid) == 0;
 	}
 	else if (type == MSGPACK_TYPE_MAP) {
-		switch (flags) {
-		case AS_PACKED_MAP_FLAG_NONE:
-		case AS_PACKED_MAP_FLAG_K_ORDERED:
-		case AS_PACKED_MAP_FLAG_KV_ORDERED:
-		case AS_PACKED_MAP_FLAG_K_ORDERED | AS_PACKED_PERSIST_INDEX:
-		case AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX:
-		return true;
-		default:
-			break;
-		}
+		uint8_t valid = AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX;
+		return (flags & ~valid) == 0;
 	}
 
 	return false;
@@ -5280,7 +5533,7 @@ print_packed(const uint8_t *packed, uint32_t sz, const char *name)
 
 	for (uint32_t i = 0; i < n; i++) {
 		if (i == n - 1) {
-			line_sz = sz % limit;
+			line_sz = sz - i * limit;
 		}
 
 		print_hex(packed + limit * i, line_sz, mem, sizeof(mem));
@@ -5291,12 +5544,6 @@ print_packed(const uint8_t *packed, uint32_t sz, const char *name)
 void
 cdt_bin_print(const as_bin *b, const char *name)
 {
-	typedef struct {
-		uint8_t type;
-		uint32_t sz;
-		uint8_t data[];
-	} __attribute__ ((__packed__)) cdt_mem;
-
 	const cdt_mem *p = (const cdt_mem *)b->particle;
 	uint8_t bintype = as_bin_get_particle_type(b);
 
@@ -5316,6 +5563,11 @@ cdt_context_print(const cdt_context *ctx, const char *name)
 	cf_warning(AS_PARTICLE, "cdt_context: offset %u sz %u bin_type %d delta_off %d delta_sz %d", ctx->data_offset, ctx->data_sz, as_bin_get_particle_type(ctx->b), ctx->delta_off, ctx->delta_sz);
 
 	const cdt_mem *p = (const cdt_mem *)ctx->b->particle;
+	const cdt_mem *orig = (const cdt_mem *)ctx->orig;
+
+	if (orig != NULL) {
+		print_packed(orig->data, orig->sz, "ctx->orig");
+	}
 
 	if (p == NULL) {
 		print_packed(NULL, 0, name);

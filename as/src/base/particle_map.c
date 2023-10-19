@@ -119,8 +119,6 @@ const as_particle_vtable map_vtable = {
 
 #define AS_PACKED_MAP_FLAG_RESERVED_0 0x04 // placeholder for multimap
 
-#define AS_PACKED_MAP_FLAG_VALID_MASK (AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX)
-
 struct packed_map_s;
 
 typedef void (*packed_map_get_by_idx_func)(const struct packed_map_s *userdata, cdt_payload *contents, uint32_t index);
@@ -195,28 +193,31 @@ typedef struct map_mem_static_s {
 		.map_hdr = 0x81, \
 		.ext_hdr = 0xC7, \
 		.ext_sz = 0, \
-		.ext_flags = __flags, \
+		.ext_flags = (__flags) | MAP_INTERNAL_K_ORDERED, \
 		.nil = 0xC0 \
 }
 
 typedef enum {
 	STATIC_MAP_UNORDERED = 0,
 	STATIC_MAP_K,
+	STATIC_MAP_V,
 	STATIC_MAP_KV,
+	STATIC_MAP_P,
 	STATIC_MAP_KP,
+	STATIC_MAP_VP,
 	STATIC_MAP_KVP,
 } map_static_types;
 
 static map_mem_static map_static[] = {
-		[STATIC_MAP_UNORDERED] = {
-				.type = AS_PARTICLE_TYPE_MAP,
-				.sz = 1,
-				.map_hdr = 0x80
-		},
+		[STATIC_MAP_UNORDERED] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_NONE),
 		[STATIC_MAP_K] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_K_ORDERED),
+		[STATIC_MAP_V] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_V_ORDERED),
 		[STATIC_MAP_KV] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_KV_ORDERED),
+		[STATIC_MAP_P] = STATIC_ENTRY(AS_PACKED_PERSIST_INDEX),
 		[STATIC_MAP_KP] = STATIC_ENTRY(
 				AS_PACKED_MAP_FLAG_K_ORDERED | AS_PACKED_PERSIST_INDEX),
+		[STATIC_MAP_VP] = STATIC_ENTRY(
+				AS_PACKED_MAP_FLAG_V_ORDERED | AS_PACKED_PERSIST_INDEX),
 		[STATIC_MAP_KVP] = STATIC_ENTRY(
 				AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX)
 };
@@ -297,9 +298,7 @@ typedef struct {
 //
 
 static inline bool is_map_type(uint8_t type);
-static inline bool is_k_ordered(uint8_t flags);
 static inline bool is_kv_ordered(uint8_t flags);
-static uint8_t map_adjust_incoming_flags(uint8_t flags);
 
 static inline uint32_t map_allidx_vla_sz(const packed_map *map);
 static inline void map_allidx_alloc_temp(const packed_map *map, uint8_t *mem_temp, rollback_alloc *alloc);
@@ -309,19 +308,19 @@ static inline bool map_has_offidx(const packed_map *map);
 
 // cdt_context
 static inline void cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags);
-static inline void cdt_context_set_empty_map(cdt_context *ctx, uint8_t flags);
+static inline bool cdt_context_set_empty_map(cdt_context *ctx, uint8_t flags);
 static inline void cdt_context_set_by_map_idx(cdt_context *ctx, const packed_map *map, uint32_t idx);
 static inline void cdt_context_set_by_map_create(cdt_context *ctx, const packed_map *map, uint32_t idx);
 
 static inline void cdt_context_map_push(cdt_context *ctx, const packed_map *map, uint32_t idx);
-static inline void cdt_context_map_handle_possible_noop(cdt_context *ctx);
+static inline bool cdt_context_map_handle_possible_noop(cdt_context *ctx);
 
 // map_packer
 static as_particle *map_packer_create_particle(map_packer *mpk, rollback_alloc *alloc_buf);
-static void map_packer_create_particle_ctx(map_packer *mpk, cdt_context *ctx);
+static bool map_packer_create_particle_ctx(map_packer *mpk, cdt_context *ctx);
 static void map_packer_init(map_packer *mpk, uint32_t ele_count, uint8_t flags, uint32_t content_sz);
 
-static void map_packer_setup_bin(map_packer *mpk, cdt_op_mem *com);
+static bool map_packer_setup_bin(map_packer *mpk, cdt_op_mem *com);
 
 static void map_packer_write_hdridx(map_packer *mpk);
 static void map_packer_fill_offset_index(map_packer *mpk);
@@ -334,12 +333,11 @@ static inline void map_packer_write_msgpack_seg(map_packer *mpk, const cdt_paylo
 
 // map_op
 static int map_set_flags(cdt_op_mem *com, uint8_t set_flags);
-static int map_increment(cdt_op_mem *com, const cdt_payload *key, const cdt_payload *delta_value, bool is_decrement);
+static int map_increment(cdt_op_mem *com, cdt_payload *key, const cdt_payload *delta_value, bool is_decrement);
 
-static int map_add(cdt_op_mem *com, const cdt_payload *key, const cdt_payload *value, const map_add_control *control, bool set_result);
+static int map_add(cdt_op_mem *com, cdt_payload *key, cdt_payload *value, const map_add_control *control, bool set_result);
 static int map_add_items(cdt_op_mem *com, const cdt_payload *items, const map_add_control *control);
 static int map_add_items_ordered(const packed_map *map, cdt_op_mem *com, const offset_index *val_off, order_index *val_ord, const map_add_control *control);
-static int map_add_items_unordered(const packed_map *map, cdt_op_mem *com, const offset_index *val_off, order_index *val_ord, const map_add_control *control);
 
 static int map_remove_by_key_interval(cdt_op_mem *com, const cdt_payload *key_start, const cdt_payload *key_end);
 static int map_remove_by_index_range(cdt_op_mem *com, int64_t index, uint64_t count);
@@ -361,6 +359,7 @@ static bool packed_map_init_from_bin(packed_map *map, const as_bin *b, bool fill
 static bool packed_map_init_from_ctx(packed_map *map, const cdt_context *ctx, bool fill_idxs);
 static inline bool packed_map_init_from_com(packed_map *map, cdt_op_mem *com, bool fill_idxs);
 static bool packed_map_unpack_hdridx(packed_map *map, bool fill_idxs);
+static void packed_map_convert_to_iko(packed_map *map, cdt_op_mem *com);
 
 static void packed_map_ensure_ordidx_filled(const packed_map *map);
 static bool packed_map_check_and_fill_offidx(const packed_map *map);
@@ -394,9 +393,8 @@ static int packed_map_get_remove_by_rel_rank_range(const packed_map *map, cdt_op
 
 static int packed_map_get_remove_all(const packed_map *map, cdt_op_mem *com);
 
-static void packed_map_remove_by_mask(const packed_map *map, cdt_op_mem *com, const uint64_t *rm_mask, uint32_t count, uint32_t *rm_sz_r);
-static void packed_map_remove_idx_range(const packed_map *map, cdt_op_mem *com, uint32_t idx, uint32_t count);
-
+static bool packed_map_remove_by_mask(const packed_map *map, cdt_op_mem *com, const uint64_t *rm_mask, uint32_t count, uint32_t *rm_sz_r);
+static bool packed_map_remove_idx_range(const packed_map *map, cdt_op_mem *com, uint32_t idx, uint32_t count);
 
 static void packed_map_get_range_by_key_interval_unordered(const packed_map *map, const cdt_payload *key_start, const cdt_payload *key_end, uint32_t *index, uint32_t *count, uint64_t *mask);
 static void packed_map_get_range_by_key_interval_ordered(const packed_map *map, const cdt_payload *key_start, const cdt_payload *key_end, uint32_t *index, uint32_t *count);
@@ -423,7 +421,7 @@ static msgpack_cmp_type packed_map_compare_key_by_idx(const void *ptr, uint32_t 
 static msgpack_cmp_type packed_map_compare_values(msgpack_in *mp1, msgpack_in *mp2);
 static msgpack_cmp_type packed_map_compare_value_by_idx(const void *ptr, uint32_t idx1, uint32_t idx2);
 
-static void packed_map_write_k_ordered(const packed_map *map, uint8_t *write_ptr, offset_index *offsets_new);
+static uint8_t *packed_map_write_k_ordered(const packed_map *map, uint8_t *write_ptr, offset_index *offsets_new);
 static void packed_map_sort_in_place(packed_map *map);
 
 // packed_map_op
@@ -532,7 +530,7 @@ int32_t
 map_size_from_wire(const uint8_t *wire_value, uint32_t value_size)
 {
 	msgpack_type type;
-	uint32_t sz = cdt_untrusted_max_size(wire_value, value_size, &type);
+	uint32_t sz = cdt_untrusted_get_size(wire_value, value_size, &type, true);
 
 	if (sz == 0 || type != MSGPACK_TYPE_MAP) {
 		cf_warning(AS_PARTICLE, "map_size_from_wire() invalid map input sz %u type %d", sz, type);
@@ -547,8 +545,8 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 		uint32_t value_size, as_particle **pp)
 {
 	map_mem *p_map_mem = (map_mem *)*pp;
-	uint32_t sz = cdt_untrusted_rewrite(p_map_mem->data, wire_value, value_size,
-			false);
+	uint32_t sz = cdt_untrusted_rewrite(p_map_mem->data, wire_value,
+			value_size, true);
 
 	if (sz == 0) {
 		cf_warning(AS_PARTICLE, "map_from_wire() invalid packed map");
@@ -570,11 +568,13 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 		};
 
 		if (! map_verify(&ctx)) {
-			print_packed(p_map_mem->data, p_map_mem->sz, "data");
+			print_packed(wire_value, value_size, "map_from_wire0");
+			print_packed(p_map_mem->data, p_map_mem->sz, "map_from_wire");
 			cf_crash(AS_PARTICLE, "map_from_wire: pp=%p wire_value=%p", pp, wire_value);
 		}
 	}
 #endif
+
 	return AS_OK;
 }
 
@@ -608,7 +608,34 @@ map_wire_size(const as_particle *p)
 uint32_t
 map_to_wire(const as_particle *p, uint8_t *wire)
 {
-	return cdt_particle_strip_indexes(p, wire, MSGPACK_TYPE_MAP);
+	uint32_t sz = cdt_particle_strip_indexes(p, wire, MSGPACK_TYPE_MAP);
+
+#ifdef MAP_DEBUG_VERIFY
+	{
+		map_mem *p_map_mem = cf_malloc(sizeof(map_mem) + sz);
+		as_bin b;
+
+		b.particle = (as_particle *)p_map_mem;
+		memcpy(p_map_mem->data, wire, sz);
+		p_map_mem->type = AS_PARTICLE_TYPE_MAP;
+		p_map_mem->sz = sz;
+		as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_MAP);
+
+		const cdt_context ctx = {
+				.b = &b,
+				.orig = (as_particle*)p,
+		};
+
+		if (! map_verify(&ctx)) {
+			cdt_bin_print(&b, "map_to_wire");
+			cf_crash(AS_PARTICLE, "map_to_wire");
+		}
+
+		cf_free(p_map_mem);
+	}
+#endif
+
+	return sz;
 }
 
 //------------------------------------------------
@@ -618,31 +645,9 @@ map_to_wire(const as_particle *p, uint8_t *wire)
 uint32_t
 map_size_from_asval(const as_val *val)
 {
-	as_serializer s;
-	as_msgpack_init(&s);
+	uint32_t sz = asval_serialize((as_val *)val, NULL);
 
-	uint32_t sz = as_serializer_serialize_getsize(&s, (as_val *)val);
-
-	cf_assert(sz > 0, AS_PARTICLE, "map_size_from_asval() failed to getsize");
-	as_serializer_destroy(&s);
-
-	const as_map *map = (const as_map *)val;
-
-	if (map->flags == 0) {
-		return (uint32_t)sizeof(map_mem) + sz;
-	}
-
-	uint32_t ele_count = as_map_size(map);
-	uint32_t map_hdr_sz = as_pack_list_header_get_size(ele_count);
-	uint32_t content_sz = sz - map_hdr_sz;
-	uint32_t ext_content_sz = map_calc_ext_content_sz(map->flags, ele_count,
-			content_sz);
-
-	sz = (uint32_t)sizeof(map_mem);
-	sz += as_pack_list_header_get_size(ele_count + 1) + content_sz;
-	sz += as_pack_ext_header_get_size(ext_content_sz);	// ext header and length field
-	sz += ext_content_sz;								// ext content
-	sz++;												// nil pair
+	cf_assert(sz != 0, AS_PARTICLE, "map_size_from_asval() failed to getsize");
 
 	return (uint32_t)sizeof(map_mem) + sz;
 }
@@ -651,62 +656,11 @@ void
 map_from_asval(const as_val *val, as_particle **pp)
 {
 	map_mem *p_map_mem = (map_mem *)*pp;
-	const as_map *av_map = (const as_map *)val;
+	uint32_t sz = asval_serialize(val, p_map_mem->data);
 
+	cf_assert(sz != 0, AS_PARTICLE, "map_from_asval() failed to presize");
+	p_map_mem->sz = sz;
 	p_map_mem->type = AS_PARTICLE_TYPE_MAP;
-
-	as_serializer s;
-	as_msgpack_init(&s);
-
-	int32_t sz = as_serializer_serialize_presized(&s, val, p_map_mem->data);
-
-	cf_assert(sz >= 0, AS_PARTICLE, "map_from_asval() failed to presize");
-	as_serializer_destroy(&s);
-
-	if (av_map->flags == 0) {
-		p_map_mem->sz = (uint32_t)sz;
-		return;
-	}
-
-	uint8_t *temp_mem = NULL;
-	uint8_t buf[sizeof(packed_map) + (sz < CDT_MAX_STACK_OBJ_SZ ? sz : 0)];
-	packed_map *map = (packed_map *)buf;
-	bool success;
-
-	if (sz < CDT_MAX_STACK_OBJ_SZ) {
-		memcpy(buf + sizeof(packed_map), p_map_mem->data, sz);
-		success = packed_map_init(map, buf + sizeof(packed_map), sz, false);
-	}
-	else {
-		temp_mem = cf_malloc(sz);
-		memcpy(temp_mem, p_map_mem->data, sz);
-		success = packed_map_init(map, temp_mem, sz, false);
-	}
-
-	cf_assert(success, AS_PARTICLE, "map_from_asval() failed to unpack header");
-
-	uint8_t map_flags = map_adjust_incoming_flags(av_map->flags);
-	define_map_packer(mpk, map->ele_count, map_flags, map->content_sz);
-	define_rollback_alloc(alloc_idx, NULL, 2); // for temp indexes
-
-	mpk.write_ptr = p_map_mem->data;
-	map_packer_write_hdridx(&mpk);
-
-	setup_map_must_have_offidx(old, map, alloc_idx);
-	bool check = packed_map_check_and_fill_offidx(map);
-	cf_assert(check, AS_PARTICLE, "invalid map");
-
-	packed_map_write_k_ordered(map, mpk.write_ptr, &mpk.offidx);
-
-	p_map_mem->sz =
-			(uint32_t)(mpk.contents - p_map_mem->data + map->content_sz);
-
-	if (! order_index_is_null(&mpk.ordidx)) {
-		order_index_set(&mpk.ordidx, 0, map->ele_count);
-	}
-
-	cf_free(temp_mem);
-	rollback_alloc_rollback(alloc_idx);
 
 #ifdef MAP_DEBUG_VERIFY
 	{
@@ -721,7 +675,7 @@ map_from_asval(const as_val *val, as_particle **pp)
 
 		if (! map_verify(&ctx)) {
 			cdt_bin_print(&b, "map_from_asval");
-			cf_crash(AS_PARTICLE, "map_from_asval: ele_count %u", map->ele_count);
+			cf_crash(AS_PARTICLE, "map_from_asval");
 		}
 	}
 #endif
@@ -1002,9 +956,38 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 		return false;
 	}
 
+	uint32_t n_unordered_map;
+	uint8_t *new_key = NULL;
+
+	if (cdt_untrusted_count_rewrites(key.ptr, key.sz, NULL, NULL,
+			&n_unordered_map, NULL) == NULL) {
+		return false;
+	}
+
+	if (n_unordered_map != 0) {
+		uint32_t mem_sz = cdt_untrusted_get_size(key.ptr, key.sz, NULL, false);
+
+		if (mem_sz == 0) {
+			return false;
+		}
+
+		new_key = cf_malloc(mem_sz);
+
+		uint32_t new_sz = cdt_untrusted_rewrite(new_key, key.ptr, key.sz,
+				false);
+
+		if (new_sz == 0) {
+			return false;
+		}
+
+		key.ptr = new_key;
+		key.sz = new_sz;
+	}
+
 	if (map_is_k_ordered(&map)) {
 		packed_map_get_range_by_key_interval_ordered(&map, &key, &key, &index,
 				&count);
+		cf_free(new_key);
 
 		if (count == 0) {
 			if (ctx->create_flag_on && ! val->has_nonstorage) {
@@ -1039,13 +1022,14 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 
 		map_ele_find_init(&find_key, &map);
 		packed_map_find_key(&map, &find_key, &key);
+		cf_free(new_key);
 
 		if (! find_key.found_key) {
 			if (ctx->create_flag_on && ! val->has_nonstorage) {
 				ctx->create_triggered = true;
 				ctx->create_hdr_ptr = map.packed;
 				ctx->create_sz += key.sz;
-				ctx->create_sz += cdt_hdr_delta_sz(map.ele_count, 1);
+				ctx->create_sz += cdt_hdr_delta_sz(map.ele_count, 2); // +1 for ext pair, +1 for added pair
 
 				cdt_context_set_by_map_create(ctx, &map, 0);
 
@@ -1212,14 +1196,15 @@ map_get_ext_flags(uint16_t ctx_type, bool is_toplvl)
 	ctx_type &= AS_CDT_CTX_CREATE_MASK;
 
 	uint16_t order_type = ctx_type & ~AS_CDT_CTX_CREATE_PERSIST_INDEX;
+	uint8_t flags = MAP_INTERNAL_K_ORDERED;
 
 	if (order_type == AS_CDT_CTX_CREATE_MAP_UNORDERED) {
-		return 0;
+		return flags;
 	}
 
-	uint8_t flags = AS_PACKED_MAP_FLAG_K_ORDERED;
+	flags |= AS_PACKED_MAP_FLAG_K_ORDERED;
 
-	if ((ctx_type & AS_CDT_CTX_CREATE_PERSIST_INDEX) != 0) {
+	if ((ctx_type & AS_CDT_CTX_CREATE_PERSIST_INDEX) != 0 && is_toplvl) {
 		flags |= AS_PACKED_PERSIST_INDEX;
 	}
 
@@ -1248,38 +1233,32 @@ is_map_type(uint8_t type)
 static inline bool
 is_k_ordered(uint8_t flags)
 {
-	return (flags & AS_PACKED_MAP_FLAG_K_ORDERED) != 0;
+	return (flags & AS_PACKED_MAP_FLAG_K_ORDERED) != 0 ||
+			(flags & MAP_INTERNAL_K_ORDERED) != 0;
 }
 
 static inline bool
 is_kv_ordered(uint8_t flags)
 {
-	return (flags & AS_PACKED_MAP_FLAG_KV_ORDERED) ==
-			AS_PACKED_MAP_FLAG_KV_ORDERED;
-}
-
-static inline bool
-is_persist_index(uint8_t flags)
-{
-	return (flags & AS_PACKED_PERSIST_INDEX) != 0;
+	return (flags & AS_PACKED_MAP_FLAG_V_ORDERED) != 0;
 }
 
 static inline bool
 is_persist_k(uint8_t flags)
 {
-	return is_k_ordered(flags) && is_persist_index(flags);
+	return is_k_ordered(flags) && flags_is_persist(flags);
 }
 
 static inline bool
 is_persist_kv(uint8_t flags)
 {
-	return is_kv_ordered(flags) && is_persist_index(flags);
+	return is_kv_ordered(flags) && flags_is_persist(flags);
 }
 
 uint32_t
 map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz)
 {
-	if (ele_count <= 1 || ! is_persist_index(flags)) {
+	if (ele_count <= 1 || ! flags_is_persist(flags)) {
 		return 0;
 	}
 
@@ -1300,17 +1279,6 @@ map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz)
 	}
 
 	return sz;
-}
-
-static uint8_t
-map_adjust_incoming_flags(uint8_t flags)
-{
-	if ((flags & AS_PACKED_MAP_FLAG_KV_ORDERED) ==
-			AS_PACKED_MAP_FLAG_V_ORDERED) {
-		flags = 0;
-	}
-
-	return flags & AS_PACKED_MAP_FLAG_VALID_MASK;
 }
 
 static inline uint32_t
@@ -1387,13 +1355,17 @@ is_map_mem_static(const as_particle *p)
 static inline uint32_t
 map_flags_to_static_ix(uint8_t flags)
 {
-	switch (flags) {
+	switch (flags & ~MAP_INTERNAL_K_ORDERED) {
 	case AS_PACKED_MAP_FLAG_K_ORDERED:
 		return STATIC_MAP_K;
+	case AS_PACKED_MAP_FLAG_V_ORDERED:
+		return STATIC_MAP_V;
 	case AS_PACKED_MAP_FLAG_KV_ORDERED:
 		return STATIC_MAP_KV;
 	case AS_PACKED_MAP_FLAG_K_ORDERED | AS_PACKED_PERSIST_INDEX:
 		return STATIC_MAP_KP;
+	case AS_PACKED_MAP_FLAG_V_ORDERED | AS_PACKED_PERSIST_INDEX:
+		return STATIC_MAP_VP;
 	case AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX:
 		return STATIC_MAP_KVP;
 	default:
@@ -1410,6 +1382,10 @@ map_flags_to_static_ix(uint8_t flags)
 static inline void
 cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags)
 {
+	if (! cdt_context_is_toplvl(ctx)) {
+		flags &= ~AS_PACKED_PERSIST_INDEX; // silently ignore
+	}
+
 	if (! cdt_check_flags(flags, MSGPACK_TYPE_MAP)) {
 		flags = AS_PACKED_MAP_FLAG_NONE;
 	}
@@ -1427,18 +1403,22 @@ cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags)
 	}
 }
 
-static inline void
+static inline bool
 cdt_context_set_empty_map(cdt_context *ctx, uint8_t flags)
 {
 	if (cdt_context_is_toplvl(ctx) && ! ctx->create_triggered) {
 		as_bin_set_empty_map(ctx->b, flags, ctx->alloc_buf);
-		return;
+		return true;
 	}
 
 	define_map_packer(mpk, 0, flags, 0);
 
-	map_packer_create_particle_ctx(&mpk, ctx);
+	if (! map_packer_create_particle_ctx(&mpk, ctx)) {
+		return false;
+	}
+
 	map_packer_write_hdridx(&mpk);
+	return true;
 }
 
 static inline void
@@ -1482,12 +1462,14 @@ cdt_context_map_push(cdt_context *ctx, const packed_map *map, uint32_t idx)
 	}
 }
 
-static inline void
+static inline bool
 cdt_context_map_handle_possible_noop(cdt_context *ctx)
 {
 	if (ctx->create_triggered) {
-		cdt_context_set_empty_map(ctx, ctx->create_flags);
+		return cdt_context_set_empty_map(ctx, ctx->create_flags);
 	}
+
+	return true;
 }
 
 //------------------------------------------------
@@ -1509,18 +1491,20 @@ map_packer_create_particle(map_packer *mpk, rollback_alloc *alloc_buf)
 	return (as_particle *)p_map_mem;
 }
 
-static void
+static bool
 map_packer_create_particle_ctx(map_packer *mpk, cdt_context *ctx)
 {
 	if (ctx->data_sz == 0 && ! ctx->create_triggered) {
 		ctx->b->particle = map_packer_create_particle(mpk, ctx->alloc_buf);
-		return;
+		return true;
 	}
 
 	uint32_t map_sz = mpk->ext_sz + mpk->content_sz +
 			as_pack_map_header_get_size(mpk->ele_count + (mpk->flags ? 1 : 0));
 	mpk->write_ptr = cdt_context_create_new_particle(ctx, map_sz);
 	mpk->ext_content_sz = 0; // no indexes for non-top context levels
+
+	return mpk->write_ptr != NULL;
 }
 
 static void
@@ -1558,11 +1542,15 @@ map_packer_init(map_packer *mpk, uint32_t ele_count, uint8_t flags,
 	mpk->contents = NULL;
 }
 
-static void
+static bool
 map_packer_setup_bin(map_packer *mpk, cdt_op_mem *com)
 {
-	map_packer_create_particle_ctx(mpk, &com->ctx);
+	if (! map_packer_create_particle_ctx(mpk, &com->ctx)) {
+		return false;
+	}
+
 	map_packer_write_hdridx(mpk);
+	return true;
 }
 
 static void
@@ -1774,16 +1762,19 @@ map_set_flags(cdt_op_mem *com, uint8_t set_flags)
 	}
 
 	// TODO - support persist index for non-toplvl
-	if (is_persist_index(set_flags) && ! cdt_context_is_toplvl(&com->ctx)) {
-		cf_warning(AS_PARTICLE, "map_set_flags() persist flag invalid for non-top level");
-		return -AS_ERR_OP_NOT_APPLICABLE;
+	if (flags_is_persist(set_flags) && ! cdt_context_is_toplvl(&com->ctx)) {
+		set_flags &= ~AS_PACKED_PERSIST_INDEX; // silently ignore
 	}
+
+	set_flags |= MAP_INTERNAL_K_ORDERED;
 
 	define_map_packer(mpk, ele_count, set_flags, map.content_sz);
 
-	map_packer_setup_bin(&mpk, com);
+	if (! map_packer_setup_bin(&mpk, com)) {
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
 
-	if (is_k_ordered(set_flags) && ele_count > 1 && ! is_k_ordered(map.flags)) { // reorder
+	if (ele_count > 1 && ! is_k_ordered(map.flags)) { // reorder
 		setup_map_must_have_offidx(u, &map, com->alloc_idx);
 
 		if (! packed_map_check_and_fill_offidx(&map)) {
@@ -1819,9 +1810,12 @@ map_set_flags(cdt_op_mem *com, uint8_t set_flags)
 
 #ifdef MAP_DEBUG_VERIFY
 	if (! map_verify(&com->ctx)) {
-		cdt_bin_print(com->ctx.b, "packed_map_set_flags");
-		map_print(&map, "original");
-		cf_crash(AS_PARTICLE, "map_set_flags: ele_count %u", map.ele_count);
+		cdt_mem *mem = (cdt_mem *)com->ctx.orig;
+		print_packed(mem->data, mem->sz, "map_set_flags:top0");
+		map_print(&map, "map_set_flags0");
+		cdt_context_print(&com->ctx, "map_set_flags:top");
+		cdt_bin_print(com->ctx.b, "map_set_flags");
+		cf_crash(AS_PARTICLE, "map_set_flags: set_flags %u", set_flags);
 	}
 #endif
 
@@ -1829,8 +1823,8 @@ map_set_flags(cdt_op_mem *com, uint8_t set_flags)
 }
 
 static int
-map_increment(cdt_op_mem *com, const cdt_payload *key,
-		const cdt_payload *delta_value, bool is_decrement)
+map_increment(cdt_op_mem *com, cdt_payload *key, const cdt_payload *delta_value,
+		bool is_decrement)
 {
 	packed_map map;
 
@@ -1891,14 +1885,39 @@ map_increment(cdt_op_mem *com, const cdt_payload *key,
 }
 
 static int
-map_add(cdt_op_mem *com, const cdt_payload *key, const cdt_payload *value,
+map_add(cdt_op_mem *com, cdt_payload *key, cdt_payload *value,
 		const map_add_control *control, bool set_result)
 {
-	if (! cdt_check_storage_list_contents(key->ptr, key->sz, 1) ||
-			! cdt_check_storage_list_contents(value->ptr, value->sz, 1)) {
+	uint32_t k_sz = cdt_untrusted_get_size(key->ptr, key->sz, NULL, false);
+	uint32_t v_sz = cdt_untrusted_get_size(value->ptr, value->sz, NULL, false);
+	uint32_t rewrite_sz = k_sz + v_sz;
+
+	if (k_sz == 0 || v_sz == 0) {
 		cf_warning(AS_PARTICLE, "map_add() invalid params");
 		return -AS_ERR_PARAMETER;
 	}
+
+	define_temp_memory(val_mem, com->alloc_convert, rewrite_sz,
+			CDT_MAX_STACK_OBJ_SZ);
+
+	k_sz = cdt_untrusted_rewrite(val_mem, key->ptr, key->sz, false);
+
+	if (k_sz == 0) {
+		cf_warning(AS_PARTICLE, "map_add() invalid params");
+		return -AS_ERR_PARAMETER;
+	}
+
+	v_sz = cdt_untrusted_rewrite(val_mem + k_sz, value->ptr, value->sz, false);
+
+	if (v_sz == 0) {
+		cf_warning(AS_PARTICLE, "map_add() invalid params");
+		return -AS_ERR_PARAMETER;
+	}
+
+	key->ptr = val_mem;
+	key->sz = k_sz;
+	value->ptr = val_mem + k_sz;
+	value->sz = v_sz;
 
 	packed_map map;
 
@@ -1906,6 +1925,8 @@ map_add(cdt_op_mem *com, const cdt_payload *key, const cdt_payload *value,
 		cf_warning(AS_PARTICLE, "map_add() invalid packed map, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
+
+	packed_map_convert_to_iko(&map, com);
 
 	setup_map_must_have_offidx(u, &map, com->alloc_idx);
 
@@ -1962,7 +1983,9 @@ map_add(cdt_op_mem *com, const cdt_payload *key, const cdt_payload *value,
 	uint32_t content_sz = new_sz + key->sz + value->sz;
 	define_map_packer(mpk, op.new_ele_count, map.flags, content_sz);
 
-	map_packer_setup_bin(&mpk, com);
+	if (! map_packer_setup_bin(&mpk, com)) {
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
 
 	map_packer_write_seg1(&mpk, &op);
 	map_packer_write_msgpack_seg(&mpk, key);
@@ -1992,142 +2015,10 @@ map_add(cdt_op_mem *com, const cdt_payload *key, const cdt_payload *value,
 }
 
 static int
-map_add_items_unordered(const packed_map *map, cdt_op_mem *com,
-		const offset_index *val_off, order_index *val_ord,
-		const map_add_control *control)
-{
-	define_cdt_idx_mask(rm_mask, map->ele_count, com->alloc_idx);
-	define_cdt_idx_mask(found_mask, val_ord->max_idx, com->alloc_idx);
-	uint32_t rm_count = 0;
-	uint32_t rm_sz = 0;
-
-	for (uint32_t i = 0; i < map->ele_count; i++) {
-		uint32_t offset = offset_index_get_const(&map->offidx, i);
-
-		cdt_payload value = {
-				.ptr = map->contents + offset,
-				.sz = map->content_sz - offset
-		};
-
-		order_index_find find = {
-				.count = val_ord->max_idx,
-				.target = 0 // find first occurrence of value
-		};
-
-		order_index_find_rank_by_value(val_ord, &value, val_off, &find, false);
-
-		if (find.found) {
-			cdt_idx_mask_set(found_mask, find.result);
-
-			// ADD for [key exist].
-			if (! control->allow_overwrite) {
-				if (control->no_fail) {
-					if (control->do_partial) {
-						continue;
-					}
-
-					result_data_set_int(&com->result, map->ele_count);
-					return AS_OK;
-				}
-
-				return -AS_ERR_ELEMENT_EXISTS;
-			}
-
-			cdt_idx_mask_set(rm_mask, i);
-			rm_count++;
-			rm_sz += offset_index_get_delta_const(&map->offidx, i);
-		}
-	}
-
-	uint32_t dup_count;
-	uint32_t dup_sz;
-
-	order_index_sorted_mark_dup_eles(val_ord, val_off, &dup_count, &dup_sz);
-
-	if (! control->allow_overwrite && control->no_fail && control->do_partial) {
-		for (uint32_t i = 0; i < val_ord->max_idx; i++) {
-			uint32_t idx = order_index_get(val_ord, i);
-
-			if (idx == val_ord->max_idx) {
-				continue;
-			}
-
-			if (cdt_idx_mask_is_set(found_mask, i)) {
-				order_index_set(val_ord, i, val_ord->max_idx);
-				dup_count++;
-				dup_sz += offset_index_get_delta_const(val_off, idx);
-			}
-		}
-	}
-
-	if (! control->allow_create) {
-		// REPLACE for ![key exist].
-		if (cdt_idx_mask_bit_count(found_mask, val_ord->max_idx) !=
-				val_ord->max_idx - dup_count) {
-			if (control->no_fail) {
-				if (control->do_partial) {
-					for (uint32_t i = 0; i < val_ord->max_idx; i++) {
-						uint32_t idx = order_index_get(val_ord, i);
-
-						if (idx == val_ord->max_idx) {
-							continue;
-						}
-
-						if (! cdt_idx_mask_is_set(found_mask, i)) {
-							order_index_set(val_ord, i, val_ord->max_idx);
-							dup_count++;
-							dup_sz += offset_index_get_delta_const(val_off,
-									idx);
-						}
-					}
-				}
-				else {
-					result_data_set_int(&com->result, map->ele_count);
-					return AS_OK;
-				}
-			}
-			else {
-				return -AS_ERR_ELEMENT_NOT_FOUND;
-			}
-		}
-	}
-
-	uint32_t new_ele_count = map->ele_count - rm_count +
-			val_ord->max_idx - dup_count;
-	uint32_t new_content_sz = map->content_sz - rm_sz +
-			val_off->content_sz - dup_sz;
-	define_map_packer(mpk, new_ele_count, map->flags, new_content_sz);
-
-	map_packer_setup_bin(&mpk, com);
-	mpk.write_ptr = cdt_idx_mask_write_eles(rm_mask, rm_count, &map->offidx,
-			mpk.write_ptr, true);
-	mpk.write_ptr = order_index_write_eles(val_ord, val_ord->max_idx, val_off,
-			mpk.write_ptr, NULL, false);
-	result_data_set_int(&com->result, new_ele_count);
-
-#ifdef MAP_DEBUG_VERIFY
-	if (! map_verify(&com->ctx)) {
-		cdt_bin_print(com->ctx.b, "map_add_items_unordered");
-		map_print(map, "original");
-		offset_index_print(val_off, "val_off");
-		order_index_print(val_ord, "val_ord");
-		cf_crash(AS_PARTICLE, "ele_count %u dup_count %u dup_sz %u new_ele_count %u new_content_sz %u", map->ele_count, dup_count, dup_sz, new_ele_count, new_content_sz);
-	}
-#endif
-
-	return AS_OK;
-}
-
-static int
 map_add_items_ordered(const packed_map *map, cdt_op_mem *com,
 		const offset_index *val_off, order_index *val_ord,
 		const map_add_control *control)
 {
-	uint32_t dup_count;
-	uint32_t dup_sz;
-
-	order_index_sorted_mark_dup_eles(val_ord, val_off, &dup_count, &dup_sz);
-
 	if (map->ele_count == 0) {
 		if (! control->allow_create) {
 			if (! control->no_fail) {
@@ -2142,10 +2033,13 @@ map_add_items_ordered(const packed_map *map, cdt_op_mem *com,
 
 		uint32_t new_content_sz = order_index_get_ele_size(val_ord,
 				val_ord->max_idx, val_off);
-		uint32_t new_ele_count = val_ord->max_idx - dup_count;
+		uint32_t new_ele_count = val_ord->max_idx;
 		define_map_packer(mpk, new_ele_count, map->flags, new_content_sz);
 
-		map_packer_setup_bin(&mpk, com);
+		if (! map_packer_setup_bin(&mpk, com)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
 		order_index_write_eles(val_ord, val_ord->max_idx, val_off,
 				mpk.write_ptr, &mpk.offidx, false);
 
@@ -2157,11 +2051,11 @@ map_add_items_ordered(const packed_map *map, cdt_op_mem *com,
 
 #ifdef MAP_DEBUG_VERIFY
 		if (! map_verify(&com->ctx)) {
-			cdt_bin_print(com->ctx.b, "map_add_items_ordered");
 			map_print(map, "original");
+			cdt_bin_print(com->ctx.b, "map_add_items_ordered");
 			offset_index_print(val_off, "val_off");
 			order_index_print(val_ord, "val_ord");
-			cf_crash(AS_PARTICLE, "ele_count 0 dup_count %u dup_sz %u new_ele_count %u new_content_sz %u", dup_count, dup_sz, new_ele_count, new_content_sz);
+			cf_crash(AS_PARTICLE, "ele_count 0 new_ele_count %u new_content_sz %u", new_ele_count, new_content_sz);
 		}
 #endif
 
@@ -2173,6 +2067,9 @@ map_add_items_ordered(const packed_map *map, cdt_op_mem *com,
 	uint32_t rm_sz = 0;
 	define_order_index2(insert_idx, map->ele_count, val_ord->max_idx,
 			com->alloc_idx);
+
+	uint32_t dup_count = 0;
+	uint32_t dup_sz = 0;
 
 	for (uint32_t i = 0; i < val_ord->max_idx; i++) {
 		uint32_t val_idx = order_index_get(val_ord, i);
@@ -2248,7 +2145,9 @@ map_add_items_ordered(const packed_map *map, cdt_op_mem *com,
 	define_map_packer(mpk, new_ele_count, map->flags, new_content_sz);
 	uint32_t start_off = 0;
 
-	map_packer_setup_bin(&mpk, com);
+	if (! map_packer_setup_bin(&mpk, com)) {
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
 
 	for (uint32_t i = 0; i < val_ord->max_idx; i++) {
 		uint32_t val_idx = order_index_get(val_ord, i);
@@ -2360,8 +2259,8 @@ map_add_items_ordered(const packed_map *map, cdt_op_mem *com,
 
 #ifdef MAP_DEBUG_VERIFY
 	if (! map_verify(&com->ctx)) {
-		cdt_bin_print(com->ctx.b, "map_add_items_ordered");
 		map_print(map, "original");
+		cdt_bin_print(com->ctx.b, "map_add_items_ordered");
 		offset_index_print(val_off, "val_off");
 		order_index_print(val_ord, "val_ord");
 		cf_crash(AS_PARTICLE, "ele_count %u dup_count %u dup_sz %u new_ele_count %u new_content_sz %u", map->ele_count, dup_count, dup_sz, new_ele_count, new_content_sz);
@@ -2375,38 +2274,56 @@ static int
 map_add_items(cdt_op_mem *com, const cdt_payload *items,
 		const map_add_control *control)
 {
-	msgpack_in mp = {
-			.buf = items->ptr,
-			.buf_sz = items->sz
-	};
+	msgpack_type type;
+	uint32_t rewrite_sz = cdt_untrusted_get_size(items->ptr, items->sz, &type,
+			false);
 
-	uint32_t items_count;
-
-	if (! msgpack_get_map_ele_count(&mp, &items_count)) {
-		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter, expected packed map");
+	if (rewrite_sz == 0 || type != MSGPACK_TYPE_MAP) {
+		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter, type %d", type);
 		return -AS_ERR_PARAMETER;
 	}
 
-	if (items_count != 0 && msgpack_peek_is_ext(&mp)) {
-		if (msgpack_sz(&mp) == 0 || msgpack_sz(&mp) == 0) {
-			cf_warning(AS_PARTICLE, "map_add_items() invalid parameter");
-			return -AS_ERR_PARAMETER;
+	define_temp_memory(val_mem, com->alloc_convert, rewrite_sz,
+			CDT_MAX_STACK_OBJ_SZ);
+
+	rewrite_sz = cdt_untrusted_rewrite(val_mem, items->ptr, items->sz, false);
+
+	if (rewrite_sz == 0) {
+		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter");
+		return -AS_ERR_PARAMETER;
+	}
+
+	msgpack_in mp = {
+			.buf = val_mem,
+			.buf_sz = rewrite_sz
+	};
+
+	uint32_t val_count;
+
+	if (! msgpack_get_map_ele_count(&mp, &val_count)) {
+		cf_crash(AS_PARTICLE, "unexpected");
+	}
+
+	if (val_count != 0 && msgpack_peek_is_ext(&mp)) {
+		if (msgpack_sz_rep(&mp, 2) == 0) {
+			cf_crash(AS_PARTICLE, "unexpected");
 		}
 
-		items_count--;
+		val_count--;
 	}
 
 	const uint8_t *val_contents = mp.buf + mp.offset;
 	uint32_t val_content_sz = mp.buf_sz - mp.offset;
-	uint32_t val_count = items_count;
 	define_order_index(val_ord, val_count, com->alloc_idx);
 	define_offset_index(val_off, val_contents, val_content_sz, val_count,
 			com->alloc_idx);
 
-	if (! map_offset_index_check_and_fill(&val_off, val_count)) {
+	if (! offset_index_fill(&val_off, true, false)) {
 		cf_warning(AS_PARTICLE, "map_add_items() invalid parameter");
 		return -AS_ERR_PARAMETER;
 	}
+
+	order_index_init_values(&val_ord);
 
 	packed_map map;
 
@@ -2415,9 +2332,15 @@ map_add_items(cdt_op_mem *com, const cdt_payload *items,
 		return -AS_ERR_PARAMETER;
 	}
 
+	packed_map_convert_to_iko(&map, com);
+
 	if (val_count == 0) {
 		result_data_set_int(&com->result, map.ele_count);
-		cdt_context_map_handle_possible_noop(&com->ctx);
+
+		if (! cdt_context_map_handle_possible_noop(&com->ctx)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
 		return AS_OK; // no-op
 	}
 
@@ -2428,14 +2351,7 @@ map_add_items(cdt_op_mem *com, const cdt_payload *items,
 		return -AS_ERR_PARAMETER;
 	}
 
-	map_order_index_set_sorted(&val_ord, &val_off, val_contents, val_content_sz,
-			MAP_SORT_BY_KEY);
-
-	if (map_is_k_ordered(&map)) {
-		return map_add_items_ordered(&map, com, &val_off, &val_ord, control);
-	}
-
-	return map_add_items_unordered(&map, com, &val_off, &val_ord, control);
+	return map_add_items_ordered(&map, com, &val_off, &val_ord, control);
 }
 
 static int
@@ -2449,6 +2365,8 @@ map_remove_by_key_interval(cdt_op_mem *com, const cdt_payload *key_start,
 		return -AS_ERR_PARAMETER;
 	}
 
+	packed_map_convert_to_iko(&map, com);
+
 	return packed_map_get_remove_by_key_interval(&map, com, key_start, key_end);
 }
 
@@ -2461,6 +2379,8 @@ map_remove_by_index_range(cdt_op_mem *com, int64_t index, uint64_t count)
 		cf_warning(AS_PARTICLE, "packed_map_remove_by_index_range() invalid packed map index, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
+
+	packed_map_convert_to_iko(&map, com);
 
 	return packed_map_get_remove_by_index_range(&map, com, index, count);
 }
@@ -2478,6 +2398,8 @@ map_remove_by_value_interval(cdt_op_mem *com, const cdt_payload *value_start,
 		return -AS_ERR_PARAMETER;
 	}
 
+	packed_map_convert_to_iko(&map, com);
+
 	return packed_map_get_remove_by_value_interval(&map, com, value_start,
 			value_end);
 }
@@ -2492,6 +2414,8 @@ map_remove_by_rank_range(cdt_op_mem *com, int64_t rank, uint64_t count)
 		return -AS_ERR_PARAMETER;
 	}
 
+	packed_map_convert_to_iko(&map, com);
+
 	return packed_map_get_remove_by_rank_range(&map, com, rank, count);
 }
 
@@ -2505,6 +2429,8 @@ map_remove_by_rel_index_range(cdt_op_mem *com, const cdt_payload *key,
 		cf_warning(AS_PARTICLE, "map_remove_by_rel_index_range() invalid packed map index, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
+
+	packed_map_convert_to_iko(&map, com);
 
 	return packed_map_get_remove_by_rel_index_range(&map, com, key, index,
 			count);
@@ -2521,6 +2447,8 @@ map_remove_by_rel_rank_range(cdt_op_mem *com, const cdt_payload *value,
 		return -AS_ERR_PARAMETER;
 	}
 
+	packed_map_convert_to_iko(&map, com);
+
 	return packed_map_get_remove_by_rel_rank_range(&map, com, value, rank,
 			count);
 }
@@ -2535,6 +2463,8 @@ map_remove_all_by_key_list(cdt_op_mem *com, const cdt_payload *key_list)
 		return -AS_ERR_PARAMETER;
 	}
 
+	packed_map_convert_to_iko(&map, com);
+
 	return packed_map_get_remove_all_by_key_list(&map, com, key_list);
 }
 
@@ -2547,6 +2477,8 @@ map_remove_all_by_value_list(cdt_op_mem *com, const cdt_payload *value_list)
 		cf_warning(AS_PARTICLE, "map_get_remove_all_value_items() invalid packed map, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
+
+	packed_map_convert_to_iko(&map, com);
 
 	return packed_map_get_remove_all_by_value_list(&map, com, value_list);
 }
@@ -2561,9 +2493,11 @@ map_clear(cdt_op_mem *com)
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_map_packer(mpk, 0, map.flags, 0);
+	define_map_packer(mpk, 0, map.flags | MAP_INTERNAL_K_ORDERED, 0);
 
-	map_packer_setup_bin(&mpk, com);
+	if (! map_packer_setup_bin(&mpk, com)) {
+		return -AS_ERR_OP_NOT_APPLICABLE;
+	}
 
 	return AS_OK;
 }
@@ -2715,6 +2649,42 @@ packed_map_unpack_hdridx(packed_map *map, bool fill_idxs)
 	}
 
 	return true;
+}
+
+static void
+packed_map_convert_to_iko(packed_map *map, cdt_op_mem *com)
+{
+	if ((map->flags & MAP_INTERNAL_K_ORDERED) != 0) {
+		return;
+	}
+
+	if ((map->flags & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
+		map->flags |= MAP_INTERNAL_K_ORDERED;
+		return;
+	}
+
+	uint32_t new_sz = map->packed_sz;
+
+	new_sz += as_pack_map_header_get_size(map->ele_count + 1);
+	new_sz -= as_pack_map_header_get_size(map->ele_count);
+	new_sz += as_pack_ext_header_get_size(0) + as_pack_nil_size();
+
+	uint8_t *mem = rollback_alloc_reserve(com->alloc_convert, new_sz);
+
+	as_packer pk = {
+			.buffer = mem,
+			.capacity = new_sz
+	};
+
+	as_pack_map_header(&pk, map->ele_count + 1);
+	as_pack_ext_header(&pk, 0, MAP_INTERNAL_K_ORDERED);
+	as_pack_nil(&pk);
+
+	uint8_t *end = packed_map_write_k_ordered(map, pk.buffer + pk.offset, NULL);
+
+	cf_assert(end - mem == new_sz, AS_PARTICLE, "size mismatch %lu != %u", end - mem, new_sz);
+
+	packed_map_init(map, mem, new_sz, false);
 }
 
 static void
@@ -3292,7 +3262,10 @@ packed_map_get_remove_by_key_interval(const packed_map *map, cdt_op_mem *com,
 					find_key.sz);
 			define_map_packer(mpk, op.new_ele_count, map->flags, new_sz);
 
-			map_packer_setup_bin(&mpk, com);
+			if (! map_packer_setup_bin(&mpk, com)) {
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
+
 			map_packer_write_seg1(&mpk, &op);
 			map_packer_write_seg2(&mpk, &op);
 		}
@@ -3325,7 +3298,9 @@ packed_map_get_remove_by_key_interval(const packed_map *map, cdt_op_mem *com,
 	int ret = AS_OK;
 
 	if (cdt_op_is_modify(com)) {
-		packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
 	}
 
 	if (result_data_is_return_elements(result)) {
@@ -3381,7 +3356,10 @@ packed_map_trim_ordered(const packed_map *map, cdt_op_mem *com, uint32_t index,
 	if (cdt_op_is_modify(com)) {
 		define_map_packer(mpk, count, map->flags, content_sz);
 
-		map_packer_setup_bin(&mpk, com);
+		if (! map_packer_setup_bin(&mpk, com)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
+
 		memcpy(mpk.write_ptr, map->contents + offset0, content_sz);
 	}
 
@@ -3507,7 +3485,9 @@ packed_map_get_remove_by_index_range(const packed_map *map, cdt_op_mem *com,
 
 	if (map_is_k_ordered(map)) {
 		if (cdt_op_is_modify(com)) {
-			packed_map_remove_idx_range(map, com, uindex, count32);
+			if (! packed_map_remove_idx_range(map, com, uindex, count32)) {
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
 		}
 
 		if (result_data_is_return_elements(result)) {
@@ -3543,7 +3523,10 @@ packed_map_get_remove_by_index_range(const packed_map *map, cdt_op_mem *com,
 				inverted);
 
 		if (cdt_op_is_modify(com)) {
-			packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+			if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count,
+					&rm_sz)) {
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
 		}
 
 		switch (result->type) {
@@ -3670,7 +3653,10 @@ packed_map_get_remove_by_value_interval(const packed_map *map, cdt_op_mem *com,
 		}
 
 		if (cdt_op_is_modify(com)) {
-			packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+			if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count,
+					&rm_sz)) {
+				return -AS_ERR_OP_NOT_APPLICABLE;
+			}
 		}
 
 		if (result_data_is_return_elements(result)) {
@@ -3741,7 +3727,10 @@ packed_map_get_remove_by_value_interval(const packed_map *map, cdt_op_mem *com,
 			}
 
 			if (cdt_op_is_modify(com)) {
-				packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+				if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count,
+						&rm_sz)) {
+					return -AS_ERR_OP_NOT_APPLICABLE;
+				}
 			}
 
 			if (result_data_is_return_elements(result)) {
@@ -3886,7 +3875,9 @@ packed_map_get_remove_by_rank_range(const packed_map *map, cdt_op_mem *com,
 	int ret = AS_OK;
 
 	if (cdt_op_is_modify(com)) {
-		packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
 	}
 
 	switch (result->type) {
@@ -4099,7 +4090,9 @@ packed_map_get_remove_all_by_key_list_ordered(const packed_map *map,
 	}
 
 	if (cdt_op_is_modify(com)) {
-		packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
 	}
 
 	switch (result->type) {
@@ -4174,7 +4167,9 @@ packed_map_get_remove_all_by_key_list_unordered(const packed_map *map,
 	uint32_t rm_sz = 0;
 
 	if (cdt_op_is_modify(com)) {
-		packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
 	}
 
 	switch (result->type) {
@@ -4286,7 +4281,9 @@ packed_map_get_remove_all_by_value_list(const packed_map *map, cdt_op_mem *com,
 	uint32_t rm_sz = 0;
 
 	if (cdt_op_is_modify(com)) {
-		packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
 	}
 
 	switch (result->type) {
@@ -4392,7 +4389,9 @@ packed_map_get_remove_all_by_value_list_ordered(const packed_map *map,
 	}
 
 	if (cdt_op_is_modify(com)) {
-		packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz);
+		if (! packed_map_remove_by_mask(map, com, rm_mask, rm_count, &rm_sz)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
 	}
 
 	switch (result->type) {
@@ -4524,7 +4523,9 @@ packed_map_get_remove_all(const packed_map *map, cdt_op_mem *com)
 	cf_assert(! result_data_is_inverted(result), AS_PARTICLE, "packed_map_get_remove_all() INVERTED flag is invalid here");
 
 	if (cdt_op_is_modify(com)) {
-		cdt_context_set_empty_map(&com->ctx, map->flags);
+		if (! cdt_context_set_empty_map(&com->ctx, map->flags)) {
+			return -AS_ERR_OP_NOT_APPLICABLE;
+		}
 	}
 
 	bool is_rev = false;
@@ -4590,12 +4591,12 @@ packed_map_get_remove_all(const packed_map *map, cdt_op_mem *com)
 	return AS_OK;
 }
 
-static void
+static bool
 packed_map_remove_by_mask(const packed_map *map, cdt_op_mem *com,
 		const uint64_t *rm_mask, uint32_t count, uint32_t *rm_sz_r)
 {
 	if (count == 0) {
-		return;
+		return true;
 	}
 
 	const offset_index *offidx = &map->offidx;
@@ -4609,7 +4610,10 @@ packed_map_remove_by_mask(const packed_map *map, cdt_op_mem *com,
 	uint32_t content_sz = map->content_sz - rm_sz;
 	define_map_packer(mpk, new_ele_count, map->flags, content_sz);
 
-	map_packer_setup_bin(&mpk, com);
+	if (! map_packer_setup_bin(&mpk, com)) {
+		return false;
+	}
+
 	mpk.write_ptr = cdt_idx_mask_write_eles(rm_mask, count, offidx,
 			mpk.write_ptr, true);
 
@@ -4628,9 +4632,11 @@ packed_map_remove_by_mask(const packed_map *map, cdt_op_mem *com,
 					mpk.content_sz, MAP_SORT_BY_VALUE);
 		}
 	}
+
+	return true;
 }
 
-static void
+static bool
 packed_map_remove_idx_range(const packed_map *map, cdt_op_mem *com,
 		uint32_t idx, uint32_t count)
 {
@@ -4642,7 +4648,9 @@ packed_map_remove_idx_range(const packed_map *map, cdt_op_mem *com,
 	uint32_t new_ele_count = map->ele_count - count;
 	define_map_packer(mpk, new_ele_count, map->flags, content_sz);
 
-	map_packer_setup_bin(&mpk, com);
+	if (! map_packer_setup_bin(&mpk, com)) {
+		return false;
+	}
 
 	uint32_t tail_sz = map->content_sz - offset1;
 
@@ -4679,7 +4687,7 @@ packed_map_remove_idx_range(const packed_map *map, cdt_op_mem *com,
 		}
 	}
 
-	return;
+	return true;
 }
 
 static void
@@ -5583,7 +5591,7 @@ packed_map_compare_value_by_idx(const void *ptr, uint32_t idx1, uint32_t idx2)
 	return packed_map_compare_values(&mp1, &mp2);
 }
 
-static void
+static uint8_t *
 packed_map_write_k_ordered(const packed_map *map, uint8_t *write_ptr,
 		offset_index *offsets_new)
 {
@@ -5597,9 +5605,13 @@ packed_map_write_k_ordered(const packed_map *map, uint8_t *write_ptr,
 
 	order_index_set_sorted_with_offsets(&key_ordidx, &map->offidx,
 			MAP_SORT_BY_KEY);
-	order_index_write_eles(&key_ordidx, ele_count, &map->offidx, write_ptr,
-			offsets_new, false);
+
+	uint8_t *ret = order_index_write_eles(&key_ordidx, ele_count, &map->offidx,
+			write_ptr, offsets_new, false);
+
 	rollback_alloc_rollback(alloc_idx);
+
+	return ret;
 }
 
 static void
@@ -5910,10 +5922,7 @@ map_offset_index_copy_rm_range(offset_index *dest, const offset_index *src,
 void
 order_index_map_sort(order_index *ordidx, const offset_index *offidx)
 {
-	for (uint32_t i = 0; i < ordidx->_.ele_count; i++) {
-		order_index_set(ordidx, i, i);
-	}
-
+	order_index_init_values(ordidx);
 	order_index_sort(ordidx, offidx, offidx->contents, offidx->content_sz,
 			MAP_SORT_BY_KEY);
 }
@@ -6873,7 +6882,7 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 	uint8_t type = as_bin_get_particle_type(ctx->b);
 
 	if (type != AS_PARTICLE_TYPE_LIST && type != AS_PARTICLE_TYPE_MAP) {
-		cf_warning(AS_PARTICLE, "map_verify() non-map type: %u", type);
+		cf_warning(AS_PARTICLE, "map_verify() top-level not list or map type: %u", type);
 		return false;
 	}
 

@@ -47,12 +47,19 @@
 #define CDT_MAX_STACK_OBJ_SZ  (1024 * 1024)
 #define CDT_MAX_PARAM_LIST_COUNT (1024 * 1024)
 
+#define MAP_INTERNAL_K_ORDERED 0x20
+
 typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
 	size_t malloc_list_cap;
 	void *malloc_list[];
 } rollback_alloc;
+
+#define define_temp_memory(__name, __alloc_buf, __alloc_sz, __max_stack) \
+	uint32_t __name ## __sz = ((__alloc_sz) > (__max_stack)) ? 1 : __alloc_sz; \
+	uint8_t __name ## __mem[__name ## __sz]; \
+	uint8_t *__name = ((__alloc_sz) > (__max_stack)) ? rollback_alloc_reserve(__alloc_buf, __alloc_sz) : __name ## __mem
 
 #define define_rollback_alloc(__name, __alloc_buf, __rollback_size) \
 	uint8_t __name ## __mem[sizeof(rollback_alloc) + sizeof(void *) * (__alloc_buf ? 0 : __rollback_size)]; \
@@ -132,6 +139,7 @@ typedef struct cdt_op_mem_s {
 	cdt_context ctx;
 	cdt_result_data result;
 	rollback_alloc *alloc_idx;
+	rollback_alloc *alloc_convert;
 	int ret_code;
 } cdt_op_mem;
 
@@ -300,7 +308,8 @@ static const uint8_t msgpack_nil[1] = {0xC0};
 bool calc_index_count(int64_t in_index, uint64_t in_count, uint32_t ele_count, uint32_t *out_index, uint32_t *out_count, bool is_multi);
 void calc_rel_index_count(int64_t in_index, uint64_t in_count, uint32_t rel_index, int64_t *out_index, uint64_t *out_count);
 
-bool cdt_check_storage_list_contents(const uint8_t *buf, uint32_t sz, uint32_t count);
+// asval
+uint32_t asval_serialize(const as_val *val, uint8_t *buf);
 
 // cdt_result_data
 bool result_data_set_not_found(cdt_result_data *rd, int64_t index);
@@ -396,7 +405,7 @@ uint32_t offset_index_get_const(const offset_index *offidx, uint32_t idx);
 uint32_t offset_index_get_delta_const(const offset_index *offidx, uint32_t index);
 uint32_t offset_index_get_filled(const offset_index *offidx);
 
-bool offset_index_check_order_and_fill(offset_index *offidx, bool pairs);
+bool offset_index_fill(offset_index *offidx, bool is_map, bool check_storage);
 
 uint32_t offset_index_vla_sz(const offset_index *offidx);
 void offset_index_alloc_temp(offset_index *offidx, uint8_t *mem_temp, rollback_alloc *alloc);
@@ -413,6 +422,7 @@ void order_index_set(order_index *ordidx, uint32_t index, uint32_t value);
 void order_index_set_ptr(order_index *ordidx, uint8_t *ptr);
 void order_index_incr(order_index *ordidx, uint32_t index);
 void order_index_clear(order_index *ordidx);
+void order_index_init_values(order_index *ordidx);
 bool order_index_sorted_mark_dup_eles(order_index *ordidx, const offset_index *full_offidx, uint32_t *count_r, uint32_t *sz_r);
 
 uint32_t order_index_size(const order_index *ordidx);
@@ -519,13 +529,11 @@ cdt_context_is_toplvl(const cdt_context *ctx)
 }
 
 // cdt_untrusted
-uint32_t cdt_untrusted_max_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *type);
-uint32_t cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_sz, bool allow_subindex);
+const uint8_t *cdt_untrusted_count_rewrites(const uint8_t *buf, uint32_t buf_sz, uint32_t *n_nonstorage, uint32_t *n_not_compact, uint32_t *n_unordered_maps, uint32_t *n_persist_flags);
+uint32_t cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *type, bool has_toplvl);
+uint32_t cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_sz, bool has_toplvl);
 
 // cdt_check
-bool cdt_check(msgpack_in *mp, bool check_end);
-bool cdt_check_rep(msgpack_in *mp, uint32_t rep);
-bool cdt_check_buf(const uint8_t *ptr, uint32_t sz);
 bool cdt_check_flags(uint8_t flags, msgpack_type type);
 
 // display
@@ -548,6 +556,12 @@ void cdt_context_print(const cdt_context *ctx, const char *name);
 //==========================================================
 // Inline functions.
 //
+
+static inline bool
+flags_is_persist(uint8_t flags)
+{
+	return (flags & AS_PACKED_PERSIST_INDEX) != 0;
+}
 
 static inline bool
 result_data_is_inverted(cdt_result_data *rd)
