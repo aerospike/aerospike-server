@@ -442,17 +442,9 @@ list_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 uint32_t
 list_wire_size(const as_particle *p)
 {
-	define_packed_list_particle(list, p, success);
-	cf_assert(success, AS_PARTICLE, "list_wire_size() invalid packed list");
+	uint32_t sz = cdt_particle_strip_indexes(p, NULL, MSGPACK_TYPE_LIST);
 
-	if (list.ext_flags == 0) {
-		return list.packed_sz;
-	}
-
-	uint32_t sz = list.content_sz;
-
-	sz += as_pack_list_header_get_size(list.ele_count + 1);
-	sz += 3;
+	cf_assert(sz != 0, AS_PARTICLE, "sz == 0");
 
 	return sz;
 }

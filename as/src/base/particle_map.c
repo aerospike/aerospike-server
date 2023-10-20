@@ -581,26 +581,9 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 uint32_t
 map_wire_size(const as_particle *p)
 {
-	packed_map map;
+	uint32_t sz = cdt_particle_strip_indexes(p, NULL, AS_PARTICLE_TYPE_MAP);
 
-	if (! packed_map_init_from_particle(&map, p, false)) {
-		as_bin b = {
-				.particle = (as_particle *)p
-		};
-
-		as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_MAP);
-		cdt_bin_print(&b, "map");
-		cf_crash(AS_PARTICLE, "map_wire_size() invalid packed map");
-	}
-
-	if (map.flags == 0) {
-		return map.packed_sz;
-	}
-
-	uint32_t sz = map.content_sz;
-
-	sz += as_pack_map_header_get_size(map.ele_count + 1);
-	sz += 3 + 1; // 3 for min ext hdr and 1 for nil pair
+	cf_assert(sz != 0, AS_PARTICLE, "sz == 0");
 
 	return sz;
 }
