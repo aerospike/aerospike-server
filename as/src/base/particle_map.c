@@ -581,7 +581,7 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 uint32_t
 map_wire_size(const as_particle *p)
 {
-	uint32_t sz = cdt_particle_strip_indexes(p, NULL, AS_PARTICLE_TYPE_MAP);
+	uint32_t sz = cdt_particle_strip_indexes(p, NULL, MSGPACK_TYPE_MAP);
 
 	cf_assert(sz != 0, AS_PARTICLE, "sz == 0");
 
