@@ -525,7 +525,8 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 			return true;
 		}
 
-		break;
+		cf_warning(AS_PARTICLE, "asval_serialize_internal() failed to parse type %d", as_val_type(val));
+		return false;
 	}
 	case AS_LIST: {
 		as_list *plist = (as_list *)val;
@@ -536,10 +537,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 			flags &= ~AS_PACKED_PERSIST_INDEX;
 		}
 
-		flags &= ~(AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX);
-
-		bool is_ordered = (flags & AS_PACKED_LIST_FLAG_ORDERED) != 0;
-		bool is_write = (pk->buffer != NULL);
+		flags &= AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX;
 
 		if (flags != 0) {
 			as_pack_list_header(pk, ele_count + 1);
@@ -554,6 +552,8 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 				.buf_sz = UINT_MAX
 		};
 
+		bool is_ordered = (flags & AS_PACKED_LIST_FLAG_ORDERED) != 0;
+		bool is_write = (pk->buffer != NULL);
 		bool need_sort = false;
 
 		for (uint32_t i = 0; i < ele_count; i++) {
@@ -598,19 +598,26 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 				pk->offset += delta;
 			}
 			else if (need_sort) {
-				uint8_t *temp_mem = cf_malloc(content_sz);
-				define_rollback_alloc(alloc_idx, NULL, 2); // for temp indexes
-				define_order_index(ordidx, ele_count, alloc_idx);
-				define_offset_index(offidx, temp_mem, content_sz, ele_count,
-						alloc_idx);
+				offset_index offidx;
+				order_index ordidx;
 
-				offset_index_set_filled(&offidx, 1);
+				offset_index_init(&offidx, NULL, ele_count, NULL, content_sz);
+				order_index_init(&ordidx, NULL, ele_count);
+
+				uint8_t *temp_mem = cf_malloc(content_sz +
+						offset_index_size(&offidx) + order_index_size(&ordidx));
+				uint8_t *write_mem = temp_mem;
+
 				memcpy(temp_mem, contents, content_sz);
+				write_mem += content_sz;
+				offset_index_set_ptr(&offidx, write_mem, temp_mem);
+				write_mem += offset_index_size(&offidx);
+				order_index_set_ptr(&ordidx, write_mem);
+				offset_index_set_filled(&offidx, 1);
 
 				if (! offset_index_fill(&offidx, false, true) ||
 						! list_order_index_sort(&ordidx, &offidx,
 								AS_CDT_SORT_ASCENDING)) {
-					rollback_alloc_rollback(alloc_idx);
 					cf_free(temp_mem);
 					cf_warning(AS_PARTICLE, "asval_serialize_internal() failed to sort list");
 					return false;
@@ -629,16 +636,20 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 					as_pack_ext_header(&pk2, ext_content_sz, flags);
 					offset_index_init(&new_offidx, pk2.buffer + pk2.offset,
 							ele_count, temp_mem, content_sz);
-					order_index_write_eles(&ordidx, ele_count, &offidx,
-							contents + delta, &new_offidx, false);
+
+					uint8_t *check = order_index_write_eles(&ordidx, ele_count,
+							&offidx, contents + delta, &new_offidx, false);
+
 					pk->offset += delta;
+					cf_assert(check == contents + delta + content_sz, AS_PARTICLE, "content mismatch %p != %p", check, contents + delta + content_sz);
 				}
 				else {
-					order_index_write_eles(&ordidx, ele_count, &offidx,
-							contents, NULL, false);
+					uint8_t *check = order_index_write_eles(&ordidx, ele_count,
+							&offidx, contents, NULL, false);
+
+					cf_assert(check == contents + content_sz, AS_PARTICLE, "content mismatch %p != %p", check, contents + content_sz);
 				}
 
-				rollback_alloc_rollback(alloc_idx);
 				cf_free(temp_mem);
 			}
 			else { // persist index
@@ -674,7 +685,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 			flags &= ~AS_PACKED_PERSIST_INDEX;
 		}
 
-		flags &= ~(AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX);
+		flags &= AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX;
 
 		as_pack_map_header(pk, ele_count + 1);
 
@@ -688,7 +699,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 
 		as_map_iterator_init(&it, pmap);
 
-		for (uint32_t i = 0; i < ele_count * 2; i++) {
+		for (uint32_t i = 0; i < ele_count; i++) {
 			as_pair *pair = (as_pair *)as_iterator_next((as_iterator *)&it);
 
 			if (! asval_serialize_internal(as_pair_1(pair), pk, s)) {
@@ -733,7 +744,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 		break;
 	}
 	default:
-		cf_warning(AS_PARTICLE, "asval_serialize_internal() unexpected type %d", as_val_type(val));
+		cf_warning(AS_PARTICLE, "asval_serialize_internal() as_val %p buf %p offset %u unexpected type %d", val, pk->buffer, pk->offset, as_val_type(val));
 		return false;
 	}
 
@@ -1137,92 +1148,70 @@ cdt_particle_strip_indexes(const as_particle *p, uint8_t *dest,
 
 	cf_assert(p_cdt_mem->sz != 0, AS_PARTICLE, "invalid particle");
 
-	const uint8_t *b = p_cdt_mem->data;
-	const uint8_t *prev_b = p_cdt_mem->data;
-	const uint8_t *end = b + p_cdt_mem->sz;
-	uint32_t count = 1;
-	msgpack_type type;
-	bool has_nonstorage = false;
-	bool not_compact = false;
-
-	as_packer pk = {
-			.buffer = dest,
-			.capacity = UINT_MAX
-	};
-
-	for (uint32_t i = 0; i < count; i++) {
+	while (true) {
+		const uint8_t *b = p_cdt_mem->data;
+		const uint8_t *end = b + p_cdt_mem->sz;
+		uint32_t count = 1;
+		msgpack_type type;
+		bool has_nonstorage = false;
+		bool not_compact = false;
 		uint32_t old_count = count;
-		const uint8_t *next_b = msgpack_parse(b, end, &count, &type,
-				&has_nonstorage, &not_compact);
+
+		b = msgpack_parse(b, end, &count, &type, &has_nonstorage, &not_compact);
+
 		uint32_t ele_count = count - old_count;
 
 		cf_assert(! has_nonstorage && b != NULL, AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p", has_nonstorage, b);
 
-		if (i == 0) {
+		if (expected_type != 0) {
 			cf_assert(type == expected_type, AS_PARTICLE, "invalid cdt type %d", type);
 		}
 
 		if (old_count == count) { // not list/map or empty list/map
-			b = next_b;
-			continue;
+			break;
 		}
 
-		msgpack_type next_type = msgpack_buf_peek_type(next_b, end - next_b);
+		msgpack_type next_type = msgpack_buf_peek_type(b, end - b);
 
 		if (next_type != MSGPACK_TYPE_EXT) {
-			b = next_b;
-			continue;
+			break;
 		}
 
 		msgpack_ext ext;
-		uint32_t ext_sz = msgpack_buf_get_ext(next_b, end - next_b, &ext);
+		uint32_t ext_sz = msgpack_buf_get_ext(b, end - b, &ext);
 
 		cf_assert(ext_sz != 0, AS_PARTICLE, "invalid msgpack: b %lx", *(uint64_t*)b);
 
-		if (ext.size == 0 && (type == MSGPACK_TYPE_LIST ||
-				(ext.type & MAP_INTERNAL_K_ORDERED) == 0)) {
-			b = next_b;
-			continue;
+		if (ext.size == 0) {
+			break;
 		}
 
-		size_t sz = b - prev_b;
+		b += ext_sz;
 
-		as_pack_append(&pk, prev_b, sz);
-		next_b += ext_sz;
-		prev_b = next_b;
-		count--;
+		as_packer pk = {
+				.buffer = dest,
+				.capacity = UINT_MAX
+		};
 
 		if (type == MSGPACK_TYPE_MAP) {
-			ele_count /= 2;
-			ext.type &= ~MAP_INTERNAL_K_ORDERED;
-
-			if (ext.type == 0) {
-				uint32_t dummy_count;
-
-				as_pack_map_header(&pk, ele_count - 1);
-				next_b = msgpack_parse(next_b, end, &dummy_count, NULL,
-						&has_nonstorage, &not_compact);
-				prev_b = next_b;
-				count--;
-			}
-			else {
-				as_pack_map_header(&pk, ele_count);
-				as_pack_ext_header(&pk, 0, ext.type);
-			}
+			as_pack_map_header(&pk, ele_count / 2);
+			as_pack_ext_header(&pk, 0, ext.type);
 		}
 		else { // LIST
 			as_pack_list_header(&pk, ele_count);
 			as_pack_ext_header(&pk, 0, ext.type);
 		}
 
-		b = next_b;
+		as_pack_append(&pk, b, end - b);
+
+		return pk.offset;
 	}
 
-	size_t sz = b - prev_b;
+	if (dest != NULL) {
+		memcpy(dest, p_cdt_mem->data, p_cdt_mem->sz);
+	}
 
-	as_pack_append(&pk, prev_b, sz);
-
-	return pk.offset;
+	return p_cdt_mem->sz;
 }
 
 
@@ -2130,6 +2119,9 @@ cdt_context_create_new_particle_crnew(cdt_context *ctx, uint32_t subctx_sz)
 		as_bin_state_set_from_type(ctx->b, AS_PARTICLE_TYPE_MAP);
 	}
 
+	cf_assert(new_sz == (uint32_t)(to_ptr - p_cdt_mem->data) + subctx_sz, AS_PARTICLE, "cdt_context_create_new_particle_crnew() size mismatch %u != %u",
+			new_sz, (uint32_t)(to_ptr - p_cdt_mem->data) + subctx_sz);
+
 	return to_ptr;
 }
 
@@ -2544,14 +2536,18 @@ cdt_context_create_new_particle(cdt_context *ctx, uint32_t subctx_sz)
 		return NULL;
 	}
 
-	memcpy(to_ptr + subctx_sz,
-			orig_data + ctx->data_offset + ctx->data_sz,
-			orig_sz - ctx->data_sz - ctx->data_offset);
+	uint32_t tail_sz = orig_sz - ctx->data_sz - ctx->data_offset;
+	uint8_t *write_tail = to_ptr + subctx_sz;
+
+	memcpy(write_tail, orig_data + ctx->data_offset + ctx->data_sz, tail_sz);
+	write_tail += tail_sz;
 
 	p_cdt_mem->sz = new_sz;
 	p_cdt_mem->type = ((cdt_mem *)ctx->b->particle)->type;
-
 	ctx->b->particle = (as_particle *)p_cdt_mem;
+
+	cf_assert(new_sz == (uint32_t)(write_tail - p_cdt_mem->data), AS_PARTICLE, "size mismatch %u != %u",
+			new_sz, (uint32_t)(write_tail - p_cdt_mem->data));
 
 	return to_ptr;
 }

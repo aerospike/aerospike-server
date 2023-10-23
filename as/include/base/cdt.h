@@ -39,7 +39,7 @@
 // Typedefs & constants.
 //
 
-// #define CDT_DEBUG_VERIFY
+//#define CDT_DEBUG_VERIFY
 
 #define PACKED_LIST_INDEX_STEP 128
 

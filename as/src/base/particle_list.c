@@ -3940,7 +3940,8 @@ list_setup_bin_ctx(cdt_context *ctx, uint8_t flags, uint32_t content_sz,
 	cf_assert(check == 0, AS_PARTICLE, "pack list header failed");
 
 	if (is_flagged) {
-		as_pack_ext_header(&pk, 0, flags);
+		check = as_pack_ext_header(&pk, 0, flags);
+		cf_assert(check == 0, AS_PARTICLE, "pack ext header failed");
 	}
 
 	if (new_offidx) {
