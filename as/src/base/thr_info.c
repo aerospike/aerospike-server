@@ -363,7 +363,7 @@ as_info_init()
 	static char features[1024];
 	strcat(features,
 			"batch-any;batch-index;blob-bits;"
-			"cdt-list;cdt-map;cluster-stable;"
+			"cdt-index;cdt-list;cdt-map;cluster-stable;"
 			"float;"
 			"geo;"
 			"sindex-exists;"
