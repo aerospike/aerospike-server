@@ -136,6 +136,8 @@ typedef struct packed_map_s {
 	order_index ordidx;
 
 	uint32_t ele_count; // excludes ext pair
+
+	bool is_iko;
 } packed_map;
 
 typedef struct packed_map_op_s {
@@ -193,7 +195,7 @@ typedef struct map_mem_static_s {
 		.map_hdr = 0x81, \
 		.ext_hdr = 0xC7, \
 		.ext_sz = 0, \
-		.ext_flags = (__flags) | MAP_INTERNAL_K_ORDERED, \
+		.ext_flags = (__flags), \
 		.nil = 0xC0 \
 }
 
@@ -209,7 +211,11 @@ typedef enum {
 } map_static_types;
 
 static map_mem_static map_static[] = {
-		[STATIC_MAP_UNORDERED] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_NONE),
+		[STATIC_MAP_UNORDERED] = {
+				.type = AS_PARTICLE_TYPE_MAP,
+				.sz = 1,
+				.map_hdr = 0x80
+		},
 		[STATIC_MAP_K] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_K_ORDERED),
 		[STATIC_MAP_V] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_V_ORDERED),
 		[STATIC_MAP_KV] = STATIC_ENTRY(AS_PACKED_MAP_FLAG_KV_ORDERED),
@@ -373,6 +379,7 @@ static void packed_map_find_rank_by_value_indexed(const packed_map *map, map_ele
 static void packed_map_find_rank_range_by_value_interval_indexed(const packed_map *map, const cdt_payload *value_start, const cdt_payload *value_end, uint32_t *rank, uint32_t *count, bool is_multi);
 static void packed_map_find_rank_range_by_value_interval_unordered(const packed_map *map, const cdt_payload *value_start, const cdt_payload *value_end, uint32_t *rank, uint32_t *count, uint64_t *mask, bool is_multi);
 static void packed_map_find_key_indexed(const packed_map *map, map_ele_find *find, const cdt_payload *key);
+static bool packed_map_find_key_maybe_unordered(const packed_map *map, map_ele_find *find, const cdt_payload *key);
 static bool packed_map_find_key(const packed_map *map, map_ele_find *find, const cdt_payload *key);
 
 static int packed_map_get_remove_by_key_interval(const packed_map *map, cdt_op_mem *com, const cdt_payload *key_start, const cdt_payload *key_end);
@@ -581,7 +588,7 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 uint32_t
 map_wire_size(const as_particle *p)
 {
-	uint32_t sz = cdt_particle_strip_indexes(p, NULL, MSGPACK_TYPE_MAP);
+	uint32_t sz = cdt_strip_indexes_from_particle(p, NULL, MSGPACK_TYPE_MAP);
 
 	cf_assert(sz != 0, AS_PARTICLE, "sz == 0");
 
@@ -591,7 +598,7 @@ map_wire_size(const as_particle *p)
 uint32_t
 map_to_wire(const as_particle *p, uint8_t *wire)
 {
-	uint32_t sz = cdt_particle_strip_indexes(p, wire, MSGPACK_TYPE_MAP);
+	uint32_t sz = cdt_strip_indexes_from_particle(p, wire, MSGPACK_TYPE_MAP);
 
 #ifdef MAP_DEBUG_VERIFY
 	{
@@ -939,39 +946,9 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 		return false;
 	}
 
-	uint32_t n_unordered_map;
-	uint8_t *new_key = NULL;
-
-	if (cdt_untrusted_count_rewrites(key.ptr, key.sz, NULL, NULL,
-			&n_unordered_map, NULL) == NULL) {
-		return false;
-	}
-
-	if (n_unordered_map != 0) {
-		uint32_t mem_sz = cdt_untrusted_get_size(key.ptr, key.sz, NULL, false);
-
-		if (mem_sz == 0) {
-			return false;
-		}
-
-		new_key = cf_malloc(mem_sz);
-
-		uint32_t new_sz = cdt_untrusted_rewrite(new_key, key.ptr, key.sz,
-				false);
-
-		if (new_sz == 0) {
-			cf_free(new_key);
-			return false;
-		}
-
-		key.ptr = new_key;
-		key.sz = new_sz;
-	}
-
 	if (map_is_k_ordered(&map)) {
 		packed_map_get_range_by_key_interval_ordered(&map, &key, &key, &index,
 				&count);
-		cf_free(new_key);
 
 		if (count == 0) {
 			if (ctx->create_flag_on && ! val->has_nonstorage) {
@@ -1005,8 +982,7 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 		map_ele_find find_key;
 
 		map_ele_find_init(&find_key, &map);
-		packed_map_find_key(&map, &find_key, &key);
-		cf_free(new_key);
+		packed_map_find_key_maybe_unordered(&map, &find_key, &key);
 
 		if (! find_key.found_key) {
 			if (ctx->create_flag_on && ! val->has_nonstorage) {
@@ -1015,7 +991,11 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 				ctx->create_sz += key.sz;
 				ctx->create_sz += cdt_hdr_delta_sz(map.ele_count, 2); // +1 for ext pair, +1 for added pair
 
-				cdt_context_set_by_map_create(ctx, &map, 0);
+				if (find_key.idx == map.ele_count) {
+					find_key.idx = 0;
+				}
+
+				cdt_context_set_by_map_create(ctx, &map, find_key.idx);
 
 				return true;
 			}
@@ -1180,27 +1160,23 @@ map_get_ext_flags(uint16_t ctx_type, bool is_toplvl)
 	ctx_type &= AS_CDT_CTX_CREATE_MASK;
 
 	uint16_t order_type = ctx_type & ~AS_CDT_CTX_CREATE_PERSIST_INDEX;
-	uint8_t flags = MAP_INTERNAL_K_ORDERED;
-
-	if (order_type == AS_CDT_CTX_CREATE_MAP_UNORDERED) {
-		return flags;
-	}
-
-	flags |= AS_PACKED_MAP_FLAG_K_ORDERED;
+	uint8_t flags = 0;
 
 	if ((ctx_type & AS_CDT_CTX_CREATE_PERSIST_INDEX) != 0 && is_toplvl) {
 		flags |= AS_PACKED_PERSIST_INDEX;
 	}
 
-	if (order_type == AS_CDT_CTX_CREATE_MAP_K_ORDERED) {
-		return flags;
-	}
-	else if (order_type == AS_CDT_CTX_CREATE_MAP_KV_ORDERED) {
-		return flags | AS_PACKED_MAP_FLAG_V_ORDERED;
+	switch (order_type) {
+	case AS_CDT_CTX_CREATE_MAP_K_ORDERED:
+		return flags | AS_PACKED_MAP_FLAG_K_ORDERED;
+	case AS_CDT_CTX_CREATE_MAP_KV_ORDERED:
+		return flags | AS_PACKED_MAP_FLAG_KV_ORDERED;
+	case AS_CDT_CTX_CREATE_MAP_UNORDERED:
+	default:
+		break;
 	}
 
-	cf_crash(AS_PARTICLE, "unexpected");
-	return 0;
+	return flags;
 }
 
 
@@ -1217,8 +1193,7 @@ is_map_type(uint8_t type)
 static inline bool
 is_k_ordered(uint8_t flags)
 {
-	return (flags & AS_PACKED_MAP_FLAG_K_ORDERED) != 0 ||
-			(flags & MAP_INTERNAL_K_ORDERED) != 0;
+	return flags != 0;
 }
 
 static inline bool
@@ -1320,7 +1295,7 @@ map_allidx_alloc_temp(const packed_map *map, uint8_t *mem_temp,
 static inline bool
 map_is_k_ordered(const packed_map *map)
 {
-	return is_k_ordered(map->flags);
+	return is_k_ordered(map->flags) || map->is_iko;
 }
 
 static inline bool
@@ -1339,7 +1314,7 @@ is_map_mem_static(const as_particle *p)
 static inline uint32_t
 map_flags_to_static_ix(uint8_t flags)
 {
-	switch (flags & ~MAP_INTERNAL_K_ORDERED) {
+	switch (flags) {
 	case AS_PACKED_MAP_FLAG_K_ORDERED:
 		return STATIC_MAP_K;
 	case AS_PACKED_MAP_FLAG_V_ORDERED:
@@ -1371,7 +1346,7 @@ cdt_context_use_static_map_if_notinuse(cdt_context *ctx, uint8_t flags)
 	}
 
 	if (! cdt_check_flags(flags, MSGPACK_TYPE_MAP)) {
-		flags = AS_PACKED_MAP_FLAG_NONE;
+		flags = 0;
 	}
 
 	if (ctx->create_triggered) {
@@ -1484,7 +1459,7 @@ map_packer_create_particle_ctx(map_packer *mpk, cdt_context *ctx)
 	}
 
 	uint32_t map_sz = mpk->ext_sz + mpk->content_sz +
-			as_pack_map_header_get_size(mpk->ele_count + (mpk->flags ? 1 : 0));
+			as_pack_map_header_get_size(mpk->ele_count + (mpk->flags == 0 ? 0 : 1));
 	mpk->write_ptr = cdt_context_create_new_particle(ctx, map_sz);
 	mpk->ext_content_sz = 0; // no indexes for non-top context levels
 
@@ -1513,7 +1488,7 @@ map_packer_init(map_packer *mpk, uint32_t ele_count, uint8_t flags,
 
 	mpk->flags = flags;
 
-	if (flags == AS_PACKED_MAP_FLAG_NONE) {
+	if (flags == 0) {
 		mpk->ext_header_sz = 0;
 		mpk->ext_sz = 0;
 	}
@@ -1545,10 +1520,9 @@ map_packer_write_hdridx(map_packer *mpk)
 			.capacity = INT_MAX
 	};
 
-	as_pack_map_header(&write, mpk->ele_count +
-			(mpk->flags == AS_PACKED_MAP_FLAG_NONE ? 0 : 1));
+	as_pack_map_header(&write, mpk->ele_count + (mpk->flags == 0 ? 0 : 1));
 
-	if (mpk->flags == AS_PACKED_MAP_FLAG_NONE) {
+	if (mpk->flags == 0) {
 		mpk->write_ptr += write.offset;
 		mpk->contents = mpk->write_ptr;
 		mpk->offidx.contents = mpk->contents;
@@ -1745,12 +1719,9 @@ map_set_flags(cdt_op_mem *com, uint8_t set_flags)
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
-	// TODO - support persist index for non-toplvl
 	if (flags_is_persist(set_flags) && ! cdt_context_is_toplvl(&com->ctx)) {
 		set_flags &= ~AS_PACKED_PERSIST_INDEX; // silently ignore
 	}
-
-	set_flags |= MAP_INTERNAL_K_ORDERED;
 
 	define_map_packer(mpk, ele_count, set_flags, map.content_sz);
 
@@ -1830,7 +1801,7 @@ map_increment(cdt_op_mem *com, cdt_payload *key, const cdt_payload *delta_value,
 	map_ele_find_init(&find_key, &map);
 
 	if (! packed_map_find_key(&map, &find_key, key)) {
-		cf_warning(AS_PARTICLE, "map_increment() invalid packed map, ele_count=%u", map.ele_count);
+		cf_detail(AS_PARTICLE, "map_increment() key not found");
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -2308,6 +2279,7 @@ map_add_items(cdt_op_mem *com, const cdt_payload *items,
 	}
 
 	order_index_init_values(&val_ord);
+	order_index_set_sorted_with_offsets(&val_ord, &val_off, MAP_SORT_BY_KEY);
 
 	packed_map map;
 
@@ -2477,7 +2449,7 @@ map_clear(cdt_op_mem *com)
 		return -AS_ERR_PARAMETER;
 	}
 
-	define_map_packer(mpk, 0, map.flags | MAP_INTERNAL_K_ORDERED, 0);
+	define_map_packer(mpk, 0, map.flags, 0);
 
 	if (! map_packer_setup_bin(&mpk, com)) {
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -2568,6 +2540,8 @@ packed_map_unpack_hdridx(packed_map *map, bool fill_idxs)
 			.buf_sz = map->packed_sz
 	};
 
+	map->is_iko = false;
+
 	if (map->packed_sz == 0) {
 		map->flags = 0;
 		return false;
@@ -2629,7 +2603,7 @@ packed_map_unpack_hdridx(packed_map *map, bool fill_idxs)
 		offset_index_init(&map->offidx, NULL, ele_count, map->contents,
 				map->content_sz);
 		order_index_init(&map->ordidx, NULL, ele_count);
-		map->flags = AS_PACKED_MAP_FLAG_NONE;
+		map->flags = 0;
 	}
 
 	return true;
@@ -2638,21 +2612,11 @@ packed_map_unpack_hdridx(packed_map *map, bool fill_idxs)
 static void
 packed_map_convert_to_iko(packed_map *map, cdt_op_mem *com)
 {
-	if ((map->flags & MAP_INTERNAL_K_ORDERED) != 0) {
-		return;
-	}
-
-	if ((map->flags & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
-		map->flags |= MAP_INTERNAL_K_ORDERED;
+	if (map->flags != 0) {
 		return;
 	}
 
 	uint32_t new_sz = map->packed_sz;
-
-	new_sz += as_pack_map_header_get_size(map->ele_count + 1);
-	new_sz -= as_pack_map_header_get_size(map->ele_count);
-	new_sz += as_pack_ext_header_get_size(0) + as_pack_nil_size();
-
 	uint8_t *mem = rollback_alloc_reserve(com->alloc_convert, new_sz);
 
 	as_packer pk = {
@@ -2660,15 +2624,14 @@ packed_map_convert_to_iko(packed_map *map, cdt_op_mem *com)
 			.capacity = new_sz
 	};
 
-	as_pack_map_header(&pk, map->ele_count + 1);
-	as_pack_ext_header(&pk, 0, MAP_INTERNAL_K_ORDERED);
-	as_pack_nil(&pk);
+	as_pack_map_header(&pk, map->ele_count);
 
 	uint8_t *end = packed_map_write_k_ordered(map, pk.buffer + pk.offset, NULL);
 
 	cf_assert(end - mem == new_sz, AS_PARTICLE, "size mismatch %lu != %u", end - mem, new_sz);
 
 	packed_map_init(map, mem, new_sz, false);
+	map->is_iko = true;
 }
 
 static void
@@ -3112,6 +3075,83 @@ packed_map_find_key_indexed(const packed_map *map, map_ele_find *find,
 		}
 	}
 }
+
+static bool
+packed_map_find_key_maybe_unordered(const packed_map *map, map_ele_find *find,
+		const cdt_payload *key)
+{
+	uint32_t ele_count = map->ele_count;
+	const offset_index *offidx = (const offset_index *)&map->offidx;
+
+	if (ele_count == 0) {
+		return true;
+	}
+
+	cf_assert(offset_index_is_full(offidx), AS_PARTICLE, "offidx not full");
+
+	msgpack_in mp_key = {
+			.buf = key->ptr,
+			.buf_sz = key->sz
+	};
+
+	define_map_msgpack_in(mp, map);
+	uint32_t content_sz = mp.buf_sz;
+	msgpack_in prev_mp;
+	bool is_ordered = true;
+
+	for (uint32_t i = 0; i < ele_count; i++) {
+		mp.offset = offset_index_get_const(offidx, i);
+
+		uint32_t key_offset = mp.offset;
+		msgpack_cmp_type cmp = msgpack_cmp_peek(&mp_key, &mp);
+
+		cf_assert(cmp != MSGPACK_CMP_ERROR, AS_PARTICLE, "compare error");
+
+		if (is_ordered) {
+			if (i != 0) {
+				msgpack_cmp_type order_cmp = msgpack_cmp_peek(&prev_mp, &mp);
+
+				if (order_cmp != MSGPACK_CMP_GREATER) {
+					is_ordered = false;
+				}
+			}
+
+			prev_mp = mp;
+		}
+
+		if (cmp == MSGPACK_CMP_EQUAL) {
+			// Get value offset.
+			if (msgpack_sz(&mp) == 0) {
+				cf_warning(AS_PARTICLE, "msgpack error at offset %u", mp.offset);
+				return false;
+			}
+
+			find->found_key = true;
+			find->idx = i;
+			find->key_offset = key_offset;
+			find->value_offset = mp.offset;
+			find->sz = offset_index_get_const(offidx, i + 1) - key_offset;
+
+			return true;
+		}
+		else if (is_ordered && find->idx == ele_count &&
+				cmp == MSGPACK_CMP_LESS) {
+			find->idx = i;
+			find->key_offset = key_offset;
+			find->value_offset = key_offset;
+			find->sz = 0;
+		}
+	}
+
+	if (find->idx == ele_count) {
+		find->key_offset = content_sz;
+		find->value_offset = content_sz;
+		find->sz = 0;
+	}
+
+	return true;
+}
+
 
 static bool
 packed_map_find_key(const packed_map *map, map_ele_find *find,
@@ -6150,16 +6190,17 @@ cdt_map_builder_start(cdt_container_builder *builder, rollback_alloc *alloc_buf,
 
 	as_packer pk = {
 			.buffer = p_map_mem->data,
-			.capacity = INT_MAX
+			.capacity = UINT32_MAX
 	};
 
-	if (flags != AS_PACKED_MAP_FLAG_NONE) {
+	if (flags == 0) {
+		as_pack_map_header(&pk, ele_count);
+	}
+	else
+	{
 		as_pack_map_header(&pk, ele_count + 1);
 		as_pack_ext_header(&pk, 0, flags);
-		pk.buffer[pk.offset++] = msgpack_nil[0];
-	}
-	else {
-		as_pack_map_header(&pk, ele_count);
+		as_pack_nil(&pk);
 	}
 
 	p_map_mem->type = AS_PARTICLE_TYPE_MAP;
@@ -6945,6 +6986,8 @@ map_verify_fn(const cdt_context *ctx, rollback_alloc *alloc_idx)
 		cf_warning(AS_PARTICLE, "map_verify() content_sz=%u expected=%u", map.content_sz, mp.offset);
 		return false;
 	}
+
+	map.flags &= ~AS_PACKED_MAP_FLAG_PRESERVE_ORDER; // don't check this flag
 
 	// Check key orders.
 	if (map_is_k_ordered(&map) && map.ele_count > 0) {

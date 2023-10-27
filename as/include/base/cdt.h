@@ -47,8 +47,6 @@
 #define CDT_MAX_STACK_OBJ_SZ  (1024 * 1024)
 #define CDT_MAX_PARAM_LIST_COUNT (1024 * 1024)
 
-#define MAP_INTERNAL_K_ORDERED 0x20
-
 typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
@@ -330,8 +328,8 @@ void as_bin_set_empty_map(as_bin *b, uint8_t flags, rollback_alloc *alloc_buf);
 bool as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata);
 bool as_bin_map_foreach(const as_bin *b, map_foreach_callback cb, void *udata);
 
-// cdt_particle
-uint32_t cdt_particle_strip_indexes(const as_particle *p, uint8_t *dest, msgpack_type expected_type);
+// cdt_strip
+uint32_t cdt_strip_indexes_from_particle(const as_particle *p, uint8_t *dest, msgpack_type expected_type);
 
 // cdt_delta_value
 bool cdt_calc_delta_init(cdt_calc_delta *cdv, const cdt_payload *delta_value, bool is_decrement);
@@ -529,7 +527,6 @@ cdt_context_is_toplvl(const cdt_context *ctx)
 }
 
 // cdt_untrusted
-const uint8_t *cdt_untrusted_count_rewrites(const uint8_t *buf, uint32_t buf_sz, uint32_t *n_nonstorage, uint32_t *n_not_compact, uint32_t *n_unordered_maps, uint32_t *n_persist_flags);
 uint32_t cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *type, bool has_toplvl);
 uint32_t cdt_untrusted_rewrite(uint8_t *dest, const uint8_t *src, uint32_t src_sz, bool has_toplvl);
 

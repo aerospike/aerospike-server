@@ -442,7 +442,7 @@ list_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 uint32_t
 list_wire_size(const as_particle *p)
 {
-	uint32_t sz = cdt_particle_strip_indexes(p, NULL, MSGPACK_TYPE_LIST);
+	uint32_t sz = cdt_strip_indexes_from_particle(p, NULL, MSGPACK_TYPE_LIST);
 
 	cf_assert(sz != 0, AS_PARTICLE, "sz == 0");
 
@@ -452,7 +452,7 @@ list_wire_size(const as_particle *p)
 uint32_t
 list_to_wire(const as_particle *p, uint8_t *wire)
 {
-	uint32_t sz = cdt_particle_strip_indexes(p, wire, MSGPACK_TYPE_LIST);
+	uint32_t sz = cdt_strip_indexes_from_particle(p, wire, MSGPACK_TYPE_LIST);
 
 #ifdef LIST_DEBUG_VERIFY
 	{

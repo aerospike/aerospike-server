@@ -549,7 +549,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 
 		msgpack_in prev = {
 				.buf = pk->buffer + pk->offset,
-				.buf_sz = UINT_MAX
+				.buf_sz = UINT32_MAX
 		};
 
 		bool is_ordered = (flags & AS_PACKED_LIST_FLAG_ORDERED) != 0;
@@ -567,7 +567,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 			if (i != 0 && is_ordered && ! need_sort && is_write) {
 				msgpack_in mp = {
 						.buf = start,
-						.buf_sz = UINT_MAX
+						.buf_sz = UINT32_MAX
 				};
 
 				msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
@@ -628,7 +628,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 							.buffer = pk->buffer,
 							.offset =
 									as_pack_list_header_get_size(ele_count + 1),
-							.capacity = UINT_MAX
+							.capacity = UINT32_MAX
 					};
 
 					offset_index new_offidx;
@@ -660,7 +660,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 						.buffer = pk->buffer,
 						.offset =
 								as_pack_list_header_get_size(ele_count + 1),
-						.capacity = UINT_MAX
+						.capacity = UINT32_MAX
 				};
 
 				as_pack_ext_header(&pk2, ext_content_sz, flags);
@@ -687,12 +687,14 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 
 		flags &= AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_PERSIST_INDEX;
 
-		as_pack_map_header(pk, ele_count + 1);
+		as_pack_map_header(pk, ele_count + (flags == 0 ? 0 : 1));
 
 		uint32_t ext_offset = pk->offset;
 
-		as_pack_ext_header(pk, 0, flags | MAP_INTERNAL_K_ORDERED);
-		as_pack_nil(pk);
+		if (flags != 0) {
+			as_pack_ext_header(pk, 0, flags);
+			as_pack_nil(pk);
+		}
 
 		uint32_t contents_offset = pk->offset;
 		as_map_iterator it;
@@ -727,7 +729,7 @@ asval_serialize_internal(const as_val *val, as_packer *pk, as_serializer *s)
 				as_packer pk2 = {
 						.buffer = pk->buffer,
 						.offset = ext_offset,
-						.capacity = UINT_MAX
+						.capacity = UINT32_MAX
 				};
 
 				as_pack_ext_header(&pk2, ext_content_sz, flags);
@@ -1137,11 +1139,11 @@ as_bin_set_bool(as_bin *b, bool value)
 
 
 //==========================================================
-// cdt_particle
+// cdt_strip
 //
 
 uint32_t
-cdt_particle_strip_indexes(const as_particle *p, uint8_t *dest,
+cdt_strip_indexes_from_particle(const as_particle *p, uint8_t *dest,
 		msgpack_type expected_type)
 {
 	const cdt_mem *p_cdt_mem = (const cdt_mem *)p;
@@ -1182,24 +1184,37 @@ cdt_particle_strip_indexes(const as_particle *p, uint8_t *dest,
 
 		cf_assert(ext_sz != 0, AS_PARTICLE, "invalid msgpack: b %lx", *(uint64_t*)b);
 
-		if (ext.size == 0) {
+		if (ext.size == 0 && ! flags_is_persist(ext.type)) {
 			break;
 		}
 
+		ext.type &= ~AS_PACKED_PERSIST_INDEX;
 		b += ext_sz;
 
 		as_packer pk = {
 				.buffer = dest,
-				.capacity = UINT_MAX
+				.capacity = UINT32_MAX
 		};
 
 		if (type == MSGPACK_TYPE_MAP) {
-			as_pack_map_header(&pk, ele_count / 2);
-			as_pack_ext_header(&pk, 0, ext.type);
+			ele_count /= 2;
+
+			if (ext.type == 0) {
+				as_pack_map_header(&pk, ele_count - 1);
+			}
+			else {
+				as_pack_map_header(&pk, ele_count);
+				as_pack_ext_header(&pk, 0, ext.type);
+			}
 		}
 		else { // LIST
-			as_pack_list_header(&pk, ele_count);
-			as_pack_ext_header(&pk, 0, ext.type);
+			if (ext.type == 0) {
+				as_pack_list_header(&pk, ele_count - 1);
+			}
+			else {
+				as_pack_list_header(&pk, ele_count);
+				as_pack_ext_header(&pk, 0, ext.type);
+			}
 		}
 
 		as_pack_append(&pk, b, end - b);
@@ -1738,35 +1753,25 @@ cdt_context_ctx_create_type_check(uint64_t ctx_type)
 }
 
 static bool
-cdt_context_ctx_type_create_sz(msgpack_in_vec *mv, uint32_t *sz,
-		uint64_t ctx_type)
+cdt_context_ctx_type_create_sz(msgpack_in_vec *mv, uint32_t *sz, uint64_t ctx_type)
 {
 	uint8_t masked_type = (uint8_t)(ctx_type & AS_CDT_CTX_TYPE_MASK);
 
 	if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
 		mv->has_nonstorage = false;
 
-		msgpack_vec *v = &mv->vecs[mv->idx];
-		uint32_t n_unordered_maps;
-		const uint8_t *start = v->buf + v->offset;
 		uint32_t key_sz = msgpack_sz_vec(mv);
 
-		if (key_sz == 0 || mv->has_nonstorage ||
-				cdt_untrusted_count_rewrites(start, key_sz, NULL, NULL,
-						&n_unordered_maps, NULL) == NULL) {
+		if (key_sz == 0 || mv->has_nonstorage) {
 			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context key");
 			return false;
 		}
 
-		if (n_unordered_maps != 0) {
-			if ((key_sz = cdt_untrusted_get_size(start, key_sz, NULL, false)) ==
-					0) {
-				return false;
-			}
-		}
-
 		*sz += key_sz;
-		*sz += 3 + 1; // ext element pair size
+
+		if (map_get_ext_flags(ctx_type, true) != 0) {
+			*sz += 3 + 1; // ext element pair size
+		}
 	}
 	else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
 		int64_t idx;
@@ -1818,8 +1823,7 @@ cdt_context_ctx_type_create_sz(msgpack_in_vec *mv, uint32_t *sz,
 }
 
 static bool
-cdt_context_count_create_sz(msgpack_in_vec *mv, uint32_t *sz,
-		uint32_t param_count)
+cdt_context_count_create_sz(msgpack_in_vec *mv, uint32_t *sz, uint32_t param_count)
 {
 	for (uint32_t i = 0; i < param_count; i++) {
 		uint64_t ctx_type;
@@ -1852,7 +1856,7 @@ cdt_context_get_toplvl_type_int(const cdt_context *ctx, int64_t *index_r)
 {
 	msgpack_in mp = {
 			.buf = ctx->create_ctx_start,
-			.buf_sz = ~(0U)
+			.buf_sz = UINT32_MAX
 	};
 
 	uint64_t ctx_type;
@@ -1874,7 +1878,7 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 {
 	msgpack_in mp = {
 			.buf = ctx->create_ctx_start,
-			.buf_sz = ~(0U)
+			.buf_sz = UINT32_MAX
 	};
 
 	uint64_t ctx_type;
@@ -1890,12 +1894,19 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 		if (write_tophdr) {
 			as_packer pk = {
 					.buffer = to_ptr,
-					.capacity = ~(0U)
+					.capacity = UINT32_MAX
 			};
 
-			as_pack_map_header(&pk, 2);
-			as_pack_ext_header(&pk, 0, map_get_ext_flags(cr_type, true));
-			as_pack_nil(&pk);
+			uint8_t flags = map_get_ext_flags(cr_type, true);
+
+			if (flags == 0) {
+				as_pack_map_header(&pk, 1);
+			}
+			else {
+				as_pack_map_header(&pk, 2);
+				as_pack_ext_header(&pk, 0, flags);
+				as_pack_nil(&pk);
+			}
 
 			to_ptr += pk.offset;
 		}
@@ -1925,7 +1936,7 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 		if (write_tophdr) {
 			as_packer pk = {
 					.buffer = to_ptr,
-					.capacity = ~(0U)
+					.capacity = UINT32_MAX
 			};
 
 			if (idx == -1) {
@@ -1987,12 +1998,20 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 		if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
 			as_packer pk = {
 					.buffer = to_ptr,
-					.capacity = ~(0U)
+					.capacity = UINT32_MAX
 			};
 
-			as_pack_map_header(&pk, 2);
-			as_pack_ext_header(&pk, 0, map_get_ext_flags(ctx_type, false));
-			as_pack_nil(&pk);
+
+			uint8_t flags = map_get_ext_flags(ctx_type, false);
+
+			if (flags == 0) {
+				as_pack_map_header(&pk, 1);
+			}
+			else {
+				as_pack_map_header(&pk, 2);
+				as_pack_ext_header(&pk, 0, flags);
+				as_pack_nil(&pk);
+			}
 
 			const uint8_t *key_ptr = mp.buf + mp.offset;
 			uint32_t key_sz = msgpack_sz(&mp);
@@ -2018,7 +2037,7 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 
 			as_packer pk = {
 					.buffer = to_ptr,
-					.capacity = ~(0U)
+					.capacity = UINT32_MAX
 			};
 
 			if (cr_type == AS_CDT_CTX_CREATE_LIST_ORDERED) {
@@ -2087,7 +2106,7 @@ cdt_context_create_new_particle_crnew(cdt_context *ctx, uint32_t subctx_sz)
 	if (need_ext_contents) {
 		as_packer pk = {
 				.buffer = to_ptr,
-				.capacity = ~(0U)
+				.capacity = UINT32_MAX
 		};
 
 		offset_index off;
@@ -2260,8 +2279,6 @@ cdt_context_create_new_particle_crtop(cdt_context *ctx, uint32_t subctx_sz)
 				new_sz += as_pack_ext_header_get_size(new_ext_cont_sz) +
 						new_ext_cont_sz - mp.offset + hdr_sz;
 			}
-
-			ext.type |= MAP_INTERNAL_K_ORDERED;
 		}
 		else {
 			cf_crash(AS_PARTICLE, "map as_unpack_ext failed");
@@ -2606,8 +2623,7 @@ cdt_context_dig(cdt_context *ctx, msgpack_in_vec *mv, bool is_modify)
 	if (bin_type == AS_PARTICLE_TYPE_NULL && is_modify) {
 		bin_was_empty = true;
 	}
-	else if (bin_type != AS_PARTICLE_TYPE_LIST &&
-			bin_type != AS_PARTICLE_TYPE_MAP) {
+	else if (bin_type != AS_PARTICLE_TYPE_LIST && bin_type != AS_PARTICLE_TYPE_MAP) {
 		cf_detail(AS_PARTICLE, "cdt_context_dig() bin type %u is not list or map", bin_type);
 		return -AS_ERR_PARAMETER;
 	}
@@ -4682,100 +4698,6 @@ list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r)
 // cdt_untrusted
 //
 
-const uint8_t *
-cdt_untrusted_count_rewrites(const uint8_t *buf, uint32_t buf_sz,
-		uint32_t *n_nonstorage, uint32_t *n_not_compact,
-		uint32_t *n_unordered_maps, uint32_t *n_persist_flags)
-{
-	if (buf_sz == 0) {
-		return NULL;
-	}
-
-	const uint8_t *next_b = buf;
-	const uint8_t *end = buf + buf_sz;
-	uint32_t count = 1;
-	uint32_t dummy_int;
-
-	if (n_nonstorage == NULL) {
-		n_nonstorage = &dummy_int;
-	}
-
-	if (n_unordered_maps == NULL) {
-		n_unordered_maps = &dummy_int;
-	}
-
-	if (n_persist_flags == NULL) {
-		n_persist_flags = &dummy_int;
-	}
-
-	if (n_not_compact == NULL) {
-		n_not_compact = &dummy_int;
-	}
-
-	*n_nonstorage = 0;
-	*n_unordered_maps = 0;
-	*n_persist_flags = 0;
-	*n_not_compact = 0;
-
-	for (uint32_t i = 0; i < count; i++) {
-		const uint8_t *b = next_b;
-		msgpack_type type;
-		bool has_nonstorage = false;
-		bool not_compact = false;
-
-		if ((next_b = msgpack_parse(b, end, &count, &type, &has_nonstorage,
-				&not_compact)) == NULL) {
-			return NULL;
-		}
-
-		if (has_nonstorage) {
-			(*n_nonstorage)++;
-		}
-
-		if (not_compact) {
-			(*n_not_compact)++;
-		}
-
-		if (type != MSGPACK_TYPE_LIST && type != MSGPACK_TYPE_MAP) {
-			continue;
-		}
-
-		msgpack_type next_type = msgpack_buf_peek_type(next_b, end - next_b);
-
-		if (next_type != MSGPACK_TYPE_EXT) {
-			if (type == MSGPACK_TYPE_MAP) {
-				(*n_unordered_maps)++;
-			}
-
-			continue;
-		}
-
-		msgpack_ext ext;
-		uint32_t ext_sz = msgpack_buf_get_ext(next_b, end - next_b, &ext);
-
-		if (ext_sz == 0) {
-			(*n_unordered_maps)++;
-		}
-
-		next_b += ext_sz;
-		count--;
-
-		if (flags_is_persist(ext.type)) {
-			(*n_persist_flags)++;
-		}
-
-		if (type == MSGPACK_TYPE_LIST) {
-			continue;
-		}
-
-		if (ext.type == 0) {
-			(*n_unordered_maps)++;
-		}
-	}
-
-	return next_b;
-}
-
 uint32_t
 cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 		bool has_toplvl)
@@ -4803,8 +4725,7 @@ cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 		bool has_nonstorage = false;
 		bool not_compact = false;
 
-		next_b = msgpack_parse(b, end, &count, &type, &has_nonstorage,
-				&not_compact);
+		next_b = msgpack_parse(b, end, &count, &type, &has_nonstorage, &not_compact);
 
 		uint32_t ele_count = count - old_count;
 		uint32_t parse_sz = (uint32_t)(next_b - b);
@@ -4825,11 +4746,7 @@ cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 
 		if (old_count == count || msgpack_buf_peek_type(next_b, end - next_b) !=
 				MSGPACK_TYPE_EXT) {
-			if (type == MSGPACK_TYPE_MAP) {
-				ret_sz += as_pack_map_header_get_size(ele_count + 1) +
-						as_pack_ext_header_get_size(0) + as_pack_nil_size();
-			}
-			else if (not_compact) {
+			if (not_compact) {
 				ret_sz += msgpack_compactify_element(NULL, b);
 			}
 			else {
@@ -4858,10 +4775,19 @@ cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 		}
 
 		if (type == MSGPACK_TYPE_MAP) {
-			ret_sz += as_pack_map_header_get_size(ele_count);
-			ret_sz += as_pack_ext_header_get_size(0);
+			ext.type &= AS_PACKED_PERSIST_INDEX | AS_PACKED_MAP_FLAG_KV_ORDERED;
+
+			if (ext.type == 0) {
+				ret_sz += as_pack_map_header_get_size(ele_count - 1);
+			}
+			else {
+				ret_sz += as_pack_map_header_get_size(ele_count);
+				ret_sz += as_pack_ext_header_get_size(0);
+			}
 		}
 		else { // LIST
+			ext.type &= AS_PACKED_PERSIST_INDEX | AS_PACKED_LIST_FLAG_ORDERED;
+
 			if (ext.type == 0) {
 				ret_sz += as_pack_list_header_get_size(ele_count - 1);
 			}
@@ -5002,10 +4928,7 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 				as_pack_list_header(&pk, 0);
 				break;
 			case MSGPACK_TYPE_MAP:
-				// Convert to internal k-ordered.
-				as_pack_map_header(&pk, 1);
-				as_pack_ext_header(&pk, 0, MAP_INTERNAL_K_ORDERED);
-				as_pack_nil(&pk);
+				as_pack_map_header(&pk, 0);
 				break;
 			default:
 				break;
@@ -5036,11 +4959,6 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 					return 0;
 				}
 
-				if (! cdt_check_flags(ext.type, type)) {
-					cf_warning(AS_PARTICLE, "invalid cdt flags 0x%x type %d", ext.type, type);
-					return 0;
-				}
-
 				next_b += ext_sz;
 				ele_count--;
 
@@ -5052,15 +4970,17 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 				if (type == MSGPACK_TYPE_MAP) { // parse 2nd meta element for maps
 					msgpack_type next_type;
 					uint32_t temp_count = 0;
+
 					count--;
 					next_b = msgpack_parse(next_b, end, &temp_count, &next_type,
 							&has_nonstorage, &not_compact);
-					ext.type |= MAP_INTERNAL_K_ORDERED;
-					as_pack_map_header(&pk, ele_count + 1);
+					ext.type &= AS_PACKED_MAP_FLAG_KV_ORDERED |
+							AS_PACKED_PERSIST_INDEX;
+					as_pack_map_header(&pk, ele_count + (ext.type == 0 ? 0 : 1));
 				}
 				else { // LIST
-					as_pack_list_header(&pk, ele_count +
-							(ext.type != 0 ? 1 : 0));
+					ext.type &= AS_PACKED_LIST_FLAG_ORDERED | AS_PACKED_PERSIST_INDEX;
+					as_pack_list_header(&pk, ele_count + (ext.type == 0 ? 0 : 1));
 				}
 
 				uint32_t est_content_sz = end - next_b; // maybe inaccurate due to padding
@@ -5126,11 +5046,8 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 			}
 			else { // ! MSGPACK_TYPE_EXT
 				if (type == MSGPACK_TYPE_MAP) {
-					// Convert to internal k-ordered.
-					as_pack_map_header(&pk, ele_count + 1);
-					as_pack_ext_header(&pk, 0, MAP_INTERNAL_K_ORDERED);
-					as_pack_nil(&pk);
-					pe->ext_type = MAP_INTERNAL_K_ORDERED;
+					as_pack_map_header(&pk, ele_count);
+					pe->ext_type = 0;
 				}
 				else { // list
 					as_pack_list_header(&pk, ele_count);
@@ -5306,8 +5223,7 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 						}
 						break;
 					case MSGPACK_TYPE_MAP:
-						if ((pe->ext_type & AS_PACKED_MAP_FLAG_K_ORDERED) !=
-								0) {
+						if ((pe->ext_type & AS_PACKED_MAP_FLAG_K_ORDERED) != 0) {
 							cf_warning(AS_PARTICLE, "map not ordered as expected");
 							return 0;
 						}
