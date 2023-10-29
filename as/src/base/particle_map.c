@@ -982,18 +982,16 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 		map_ele_find find_key;
 
 		map_ele_find_init(&find_key, &map);
-		packed_map_find_key_maybe_unordered(&map, &find_key, &key);
+		bool check = packed_map_find_key_maybe_unordered(&map, &find_key, &key);
+
+		cf_assert(check, AS_PARTICLE, "unexpected");
 
 		if (! find_key.found_key) {
 			if (ctx->create_flag_on && ! val->has_nonstorage) {
 				ctx->create_triggered = true;
 				ctx->create_hdr_ptr = map.packed;
 				ctx->create_sz += key.sz;
-				ctx->create_sz += cdt_hdr_delta_sz(map.ele_count, 2); // +1 for ext pair, +1 for added pair
-
-				if (find_key.idx == map.ele_count) {
-					find_key.idx = 0;
-				}
+				ctx->create_sz += cdt_hdr_delta_sz(map.ele_count, 1);
 
 				cdt_context_set_by_map_create(ctx, &map, find_key.idx);
 
@@ -1881,8 +1879,6 @@ map_add(cdt_op_mem *com, cdt_payload *key, cdt_payload *value,
 		return -AS_ERR_PARAMETER;
 	}
 
-	packed_map_convert_to_iko(&map, com);
-
 	setup_map_must_have_offidx(u, &map, com->alloc_idx);
 
 	if (! packed_map_check_and_fill_offidx(&map)) {
@@ -1893,7 +1889,11 @@ map_add(cdt_op_mem *com, cdt_payload *key, cdt_payload *value,
 	map_ele_find find_key_to_remove;
 	map_ele_find_init(&find_key_to_remove, &map);
 
-	if (! packed_map_find_key(&map, &find_key_to_remove, key)) {
+	if (map_is_k_ordered(&map)) {
+		packed_map_find_key_indexed(&map, &find_key_to_remove, key);
+	}
+	else if (! packed_map_find_key_maybe_unordered(&map, &find_key_to_remove,
+			key)) {
 		cf_warning(AS_PARTICLE, "map_add() invalid packed map, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
@@ -3105,14 +3105,22 @@ packed_map_find_key_maybe_unordered(const packed_map *map, map_ele_find *find,
 		uint32_t key_offset = mp.offset;
 		msgpack_cmp_type cmp = msgpack_cmp_peek(&mp_key, &mp);
 
-		cf_assert(cmp != MSGPACK_CMP_ERROR, AS_PARTICLE, "compare error");
+		if (cmp == MSGPACK_CMP_ERROR) {
+			return false;
+		}
 
 		if (is_ordered) {
 			if (i != 0) {
 				msgpack_cmp_type order_cmp = msgpack_cmp_peek(&prev_mp, &mp);
 
-				if (order_cmp != MSGPACK_CMP_GREATER) {
+				switch (order_cmp) {
+				case MSGPACK_CMP_LESS:
+					break;
+				case MSGPACK_CMP_GREATER:
 					is_ordered = false;
+					break;
+				default:
+					return false;
 				}
 			}
 
