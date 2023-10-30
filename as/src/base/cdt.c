@@ -1760,9 +1760,15 @@ cdt_context_ctx_type_create_sz(msgpack_in_vec *mv, uint32_t *sz, uint64_t ctx_ty
 	if (masked_type == (AS_CDT_CTX_KEY | AS_CDT_CTX_MAP)) {
 		mv->has_nonstorage = false;
 
-		uint32_t key_sz = msgpack_sz_vec(mv);
+		uint32_t key_sz;
+		const uint8_t *key = msgpack_get_ele_vec(mv, &key_sz);
 
-		if (key_sz == 0 || mv->has_nonstorage) {
+		if (key == NULL || mv->has_nonstorage) {
+			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context key");
+			return false;
+		}
+
+		if ((key_sz = cdt_untrusted_get_size(key, key_sz, NULL, false)) == 0) {
 			cf_warning(AS_PARTICLE, "cdt_context_ctx_type_create_sz() invalid context key");
 			return false;
 		}
@@ -2013,6 +2019,8 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 				as_pack_nil(&pk);
 			}
 
+			to_ptr += pk.offset;
+
 			const uint8_t *key_ptr = mp.buf + mp.offset;
 			uint32_t key_sz = msgpack_sz(&mp);
 
@@ -2020,9 +2028,14 @@ cdt_context_fill_create(const cdt_context *ctx, uint8_t *to_ptr,
 				cf_crash(AS_PARTICLE, "cdt_context_fill_create() invalid context key");
 			}
 
-			to_ptr += pk.offset;
-			memcpy(to_ptr, key_ptr, key_sz);
-			to_ptr += key_sz;
+			uint32_t to_sz = cdt_untrusted_rewrite(to_ptr, key_ptr, key_sz,
+					false);
+
+			if (to_sz == 0) {
+				return NULL;
+			}
+
+			to_ptr += to_sz;
 		}
 		else if (masked_type == (AS_CDT_CTX_INDEX | AS_CDT_CTX_LIST)) {
 			int64_t idx;

@@ -946,9 +946,15 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 		return false;
 	}
 
+	uint8_t *new_key = cf_malloc(key.sz);
+
+	key.sz = cdt_untrusted_rewrite(new_key, key.ptr, key.sz, false);
+	key.ptr = new_key;
+
 	if (map_is_k_ordered(&map)) {
 		packed_map_get_range_by_key_interval_ordered(&map, &key, &key, &index,
 				&count);
+		cf_free(new_key);
 
 		if (count == 0) {
 			if (ctx->create_flag_on && ! val->has_nonstorage) {
@@ -983,6 +989,7 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 
 		map_ele_find_init(&find_key, &map);
 		bool check = packed_map_find_key_maybe_unordered(&map, &find_key, &key);
+		cf_free(new_key);
 
 		cf_assert(check, AS_PARTICLE, "unexpected");
 
@@ -2321,8 +2328,6 @@ map_remove_by_key_interval(cdt_op_mem *com, const cdt_payload *key_start,
 		return -AS_ERR_PARAMETER;
 	}
 
-	packed_map_convert_to_iko(&map, com);
-
 	return packed_map_get_remove_by_key_interval(&map, com, key_start, key_end);
 }
 
@@ -2335,8 +2340,6 @@ map_remove_by_index_range(cdt_op_mem *com, int64_t index, uint64_t count)
 		cf_warning(AS_PARTICLE, "packed_map_remove_by_index_range() invalid packed map index, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
-
-	packed_map_convert_to_iko(&map, com);
 
 	return packed_map_get_remove_by_index_range(&map, com, index, count);
 }
@@ -2354,8 +2357,6 @@ map_remove_by_value_interval(cdt_op_mem *com, const cdt_payload *value_start,
 		return -AS_ERR_PARAMETER;
 	}
 
-	packed_map_convert_to_iko(&map, com);
-
 	return packed_map_get_remove_by_value_interval(&map, com, value_start,
 			value_end);
 }
@@ -2370,8 +2371,6 @@ map_remove_by_rank_range(cdt_op_mem *com, int64_t rank, uint64_t count)
 		return -AS_ERR_PARAMETER;
 	}
 
-	packed_map_convert_to_iko(&map, com);
-
 	return packed_map_get_remove_by_rank_range(&map, com, rank, count);
 }
 
@@ -2385,8 +2384,6 @@ map_remove_by_rel_index_range(cdt_op_mem *com, const cdt_payload *key,
 		cf_warning(AS_PARTICLE, "map_remove_by_rel_index_range() invalid packed map index, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
-
-	packed_map_convert_to_iko(&map, com);
 
 	return packed_map_get_remove_by_rel_index_range(&map, com, key, index,
 			count);
@@ -2403,8 +2400,6 @@ map_remove_by_rel_rank_range(cdt_op_mem *com, const cdt_payload *value,
 		return -AS_ERR_PARAMETER;
 	}
 
-	packed_map_convert_to_iko(&map, com);
-
 	return packed_map_get_remove_by_rel_rank_range(&map, com, value, rank,
 			count);
 }
@@ -2419,8 +2414,6 @@ map_remove_all_by_key_list(cdt_op_mem *com, const cdt_payload *key_list)
 		return -AS_ERR_PARAMETER;
 	}
 
-	packed_map_convert_to_iko(&map, com);
-
 	return packed_map_get_remove_all_by_key_list(&map, com, key_list);
 }
 
@@ -2433,8 +2426,6 @@ map_remove_all_by_value_list(cdt_op_mem *com, const cdt_payload *value_list)
 		cf_warning(AS_PARTICLE, "map_get_remove_all_value_items() invalid packed map, ele_count=%u", map.ele_count);
 		return -AS_ERR_PARAMETER;
 	}
-
-	packed_map_convert_to_iko(&map, com);
 
 	return packed_map_get_remove_all_by_value_list(&map, com, value_list);
 }
