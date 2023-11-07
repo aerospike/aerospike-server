@@ -143,6 +143,7 @@ endif
 	sed -i 's/@RELEASE@/'$(OS)'/g' $(PKG)/rpm/aerospike.spec
 	sed -i 's/@EDITION@/'$(EDITION)'/g' $(PKG)/rpm/aerospike.spec
 
+	sed -i '1i Requires(pre): /usr/sbin/useradd' $(PKG)/rpm/aerospike.spec
 	cd $(DEPTH); rpmbuild -bb -vv --define "dist .$(OS)" --buildroot $(BUILD_ROOT) $(PKG)/rpm/aerospike.spec
 
 	find $(SOURCE_ROOT)/RPMS -type f -exec mv {} $(PKG)/packages \;
