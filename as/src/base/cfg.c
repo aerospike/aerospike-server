@@ -3072,6 +3072,10 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_NAMESPACE_STORAGE_ENGINE_BEGIN:
+				// Special check - duplicate storage-engines are nasty.
+				if (ns->storage_type != AS_STORAGE_ENGINE_UNDEFINED) {
+					cf_crash_nostack(AS_CFG, "{%s} can only configure one 'storage-engine'", ns->name);
+				}
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
 				case CASE_NAMESPACE_STORAGE_MEMORY:
 					ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
