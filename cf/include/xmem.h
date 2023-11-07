@@ -38,4 +38,4 @@ typedef enum {
 	CF_NUM_XMEM_TYPES
 } cf_xmem_type;
 
-#define CF_XMEM_MAX_MOUNTS 16
+#define CF_XMEM_MAX_MOUNTS 32
