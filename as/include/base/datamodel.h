@@ -192,7 +192,6 @@ const uint8_t *as_particle_skip_flat(const uint8_t *flat, const uint8_t *end);
 // as_bin particle function declarations
 
 void as_bin_particle_destroy(as_bin *b);
-uint32_t as_bin_particle_size(as_bin *b);
 
 // wire:
 int as_bin_particle_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const struct as_msg_op_s *op);

@@ -279,16 +279,6 @@ as_bin_particle_destroy(as_bin *b)
 	b->particle = NULL;
 }
 
-uint32_t
-as_bin_particle_size(as_bin *b)
-{
-	if (as_bin_is_tombstone(b)) {
-		return 0;
-	}
-
-	return particle_vtable[as_bin_get_particle_type(b)]->size_fn(b->particle);
-}
-
 //------------------------------------------------
 // Handle "wire" format.
 //

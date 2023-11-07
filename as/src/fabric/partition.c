@@ -456,15 +456,6 @@ as_partition_reserve_full(as_namespace* ns, uint32_t pid,
 	return 0;
 }
 
-// Reserve a partition for query.
-// Return value 0 means the reservation was taken, -1 means not.
-int
-as_partition_reserve_query(as_namespace* ns, uint32_t pid,
-		as_partition_reservation* rsv)
-{
-	return as_partition_reserve_write(ns, pid, rsv, NULL);
-}
-
 void
 as_partition_reservation_copy(as_partition_reservation* dst,
 		as_partition_reservation* src)
@@ -484,36 +475,6 @@ void
 as_partition_release(as_partition_reservation* rsv)
 {
 	as_index_tree_release(rsv->ns, rsv->tree);
-}
-
-as_index_tree*
-as_partition_tree_reserve_query(as_namespace* ns, uint32_t pid)
-{
-	as_partition* p = &ns->partitions[pid];
-
-	cf_mutex_lock(&p->lock);
-
-	// If this partition is frozen, return.
-	if (p->n_replicas == 0) {
-		cf_mutex_unlock(&p->lock);
-		return NULL;
-	}
-
-	cf_node best_node = find_best_node(p, false);
-
-	// If this node is not the appropriate one, return.
-	if (best_node != g_config.self_node) {
-		cf_mutex_unlock(&p->lock);
-		return NULL;
-	}
-
-	as_index_tree* tree = p->tree;
-
-	as_index_tree_reserve(tree);
-
-	cf_mutex_unlock(&p->lock);
-
-	return tree;
 }
 
 void
