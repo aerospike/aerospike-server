@@ -2416,6 +2416,8 @@ buffer_bins(as_storage_rd* rd)
 		}
 	}
 
+	mem_write_block* old_mwb = NULL;
+
 	// Check if there's enough space in current buffer - if not, enqueue it to
 	// be flushed to device, and grab a new buffer.
 	if (write_sz > MEM_WRITE_BLOCK_SIZE - mwb->pos) {
@@ -2424,9 +2426,7 @@ buffer_bins(as_storage_rd* rd)
 			push_wblock_to_shadow_q(mem, mwb);
 		}
 		else {
-			mem_wait_writers_done(mwb);
-			mem_mprotect(mwb->base_addr, MEM_WRITE_BLOCK_SIZE, PROT_READ);
-			mwb_release(mem, mwb);
+			old_mwb = mwb; // stash for release outside lock
 		}
 
 		cur_mwb->n_wblocks_written++;
@@ -2508,6 +2508,13 @@ buffer_bins(as_storage_rd* rd)
 
 	if (ns->storage_benchmarks_enabled) {
 		histogram_insert_raw(ns->device_write_size_hist, write_sz);
+	}
+
+	// Outside lock to not block other threads trying to write to new mwb.
+	if (old_mwb != NULL) {
+		mem_wait_writers_done(old_mwb);
+		mem_mprotect(old_mwb->base_addr, MEM_WRITE_BLOCK_SIZE, PROT_READ);
+		mwb_release(mem, old_mwb);
 	}
 
 	return 0;
