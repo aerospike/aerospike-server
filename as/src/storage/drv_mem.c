@@ -3566,10 +3566,10 @@ shadow_flush_mwb(drv_mem* mem, mem_write_block* mwb)
 	int fd = shadow_fd_get(mem);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(mwb->wblock_id);
 
-	uint64_t start_ns = mem->ns->storage_benchmarks_enabled ? cf_getns() : 0;
-
 	// The only place we ever encrypt.
 	uint8_t* buf = encrypt_wblock(mwb, write_offset);
+
+	uint64_t start_ns = mem->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (! pwrite_all(fd, buf, MEM_WRITE_BLOCK_SIZE, write_offset)) {
 		cf_crash(AS_DRV_MEM, "%s: DEVICE FAILED write: errno %d (%s)",
