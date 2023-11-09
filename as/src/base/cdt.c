@@ -1201,6 +1201,8 @@ cdt_strip_indexes_from_particle(const as_particle *p, uint8_t *dest,
 
 			if (ext.type == 0) {
 				as_pack_map_header(&pk, ele_count - 1);
+				b = msgpack_parse(b, end, &count, &type, &has_nonstorage,
+						&not_compact);
 			}
 			else {
 				as_pack_map_header(&pk, ele_count);
