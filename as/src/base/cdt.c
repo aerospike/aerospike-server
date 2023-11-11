@@ -1722,32 +1722,9 @@ cdt_context_ctx_create_type_check(uint64_t ctx_type)
 	uint8_t masked_type = (uint8_t)ctx_type & AS_CDT_CTX_TYPE_MASK;
 	uint16_t cr_type = (uint16_t)ctx_type & AS_CDT_CTX_CREATE_MASK;
 
-	if ((masked_type & AS_CDT_CTX_LIST) != 0) {
-		switch (cr_type) {
-		case 0:
-		case AS_CDT_CTX_CREATE_LIST_UNORDERED:
-		case AS_CDT_CTX_CREATE_LIST_UNORDERED | AS_CDT_CTX_CREATE_PERSIST_INDEX:
-		case AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND:
-		case AS_CDT_CTX_CREATE_LIST_UNORDERED_UNBOUND | AS_CDT_CTX_CREATE_PERSIST_INDEX:
-		case AS_CDT_CTX_CREATE_LIST_ORDERED:
-		case AS_CDT_CTX_CREATE_LIST_ORDERED | AS_CDT_CTX_CREATE_PERSIST_INDEX:
+	if ((masked_type & AS_CDT_CTX_LIST) != 0 ||
+			(masked_type & AS_CDT_CTX_MAP) != 0) {
 		return true;
-		default:
-			break;
-		}
-	}
-	else if ((masked_type & AS_CDT_CTX_MAP) != 0) {
-		switch (cr_type) {
-		case 0:
-		case AS_CDT_CTX_CREATE_MAP_UNORDERED:
-		case AS_CDT_CTX_CREATE_MAP_K_ORDERED:
-		case AS_CDT_CTX_CREATE_MAP_KV_ORDERED:
-		case AS_CDT_CTX_CREATE_MAP_K_ORDERED | AS_CDT_CTX_CREATE_PERSIST_INDEX:
-		case AS_CDT_CTX_CREATE_MAP_KV_ORDERED | AS_CDT_CTX_CREATE_PERSIST_INDEX:
-		return true;
-		default:
-			break;
-		}
 	}
 
 	// Auto ctx type cannot have create flags.
