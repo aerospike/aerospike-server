@@ -1825,7 +1825,7 @@ cdt_context_count_create_sz(msgpack_in_vec *mv, uint32_t *sz, uint32_t param_cou
 
 		if ((ctx_type & AS_CDT_CTX_CREATE_PERSIST_INDEX) != 0) {
 			cf_warning(AS_PARTICLE, "cdt_context_count_create_sz() persist index not allowed for sub-context");
-			return -AS_ERR_OP_NOT_APPLICABLE;
+			return false;
 		}
 
 		if (! cdt_context_ctx_type_create_sz(mv, sz, ctx_type)) {
