@@ -1537,7 +1537,7 @@ add_geojson_from_msgpack(msgpack_in* element, as_sindex_bin* sbin)
 
 		if (! geo_region_cover(NULL, region, MAX_REGION_CELLS, outcells, NULL,
 				NULL, &ncells)) {
-			cf_warning(AS_PARTICLE, "geo_region_cover failed");
+			cf_warning(AS_SINDEX, "geo_region_cover failed");
 			geo_region_destroy(region);
 			return;
 		}
