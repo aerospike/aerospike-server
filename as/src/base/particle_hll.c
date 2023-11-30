@@ -309,8 +309,8 @@ static const hll_op_def hll_modify_op_table[] = {
 static const hll_op_def hll_read_op_table[] = {
 		HLL_READ_OP_ENTRY(AS_HLL_OP_COUNT, "hll_get_count", hll_read_op_count,
 				hll_read_prepare_noop, 0),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_GET_UNION, "hll_get_union", hll_read_op_union,
-				hll_read_prepare_noop, 1, hll_parse_hlls),
+		HLL_READ_OP_ENTRY(AS_HLL_OP_GET_UNION, "hll_get_union",
+				hll_read_op_union, hll_read_prepare_noop, 1, hll_parse_hlls),
 		HLL_READ_OP_ENTRY(AS_HLL_OP_UNION_COUNT, "hll_get_union_count",
 				hll_read_op_union_count, hll_read_prepare_noop, 1,
 				hll_parse_hlls),
@@ -961,14 +961,16 @@ hll_parse_hlls_intersect(hll_state* state, hll_op* op)
 
 		if (hll->n_minhash_bits != n_minhash_bits) {
 			cf_warning(AS_PARTICLE, "hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits are mismatched",
-					AS_ERR_PARAMETER, state->def->name, state->op_type, op->n_elements);
+					AS_ERR_PARAMETER, state->def->name, state->op_type,
+					op->n_elements);
 			return false;
 		}
 	}
 
 	if (n_minhash_bits == 0) {
 		cf_warning(AS_PARTICLE, "hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits = 0",
-				AS_ERR_PARAMETER, state->def->name, state->op_type, op->n_elements);
+				AS_ERR_PARAMETER, state->def->name, state->op_type,
+				op->n_elements);
 		return false;
 	}
 
