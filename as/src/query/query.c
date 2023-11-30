@@ -797,8 +797,7 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 
 		if (! geo_region_cover(ns, geo->region, MAX_REGION_CELLS, NULL, cellmin,
 				cellmax, &ncells)) {
-			geo_region_destroy(geo->region);
-			// geo_point_centers will have printed a warning.
+			cf_warning(AS_QUERY, "geo_region_cover failed");
 			return false;
 		}
 
