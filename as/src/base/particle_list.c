@@ -1149,6 +1149,10 @@ cdt_context_set_empty_list(cdt_context *ctx, uint8_t flags)
 static inline void
 cdt_context_use_static_list_if_notinuse(cdt_context *ctx, uint64_t flags)
 {
+	if (! cdt_context_is_toplvl(ctx)) {
+		flags &= ~AS_PACKED_PERSIST_INDEX; // silently ignore
+	}
+
 	if (! cdt_check_flags(flags, MSGPACK_TYPE_LIST)) {
 		flags = AS_PACKED_LIST_FLAG_NONE;
 	}
