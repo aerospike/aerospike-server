@@ -241,7 +241,7 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint32(db, "query-threads-limit", g_config.n_query_threads_limit);
 	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
 
-	if (g_secrets_cfg.configured) {
+	if (g_secrets_cfg.addr != NULL) {
 		cf_dyn_buf_append_string(db, "secrets-address-port=");
 		cf_dyn_buf_append_string(db, g_secrets_cfg.addr);
 		cf_dyn_buf_append_char(db, ':');
@@ -259,6 +259,7 @@ cfg_get_service(cf_dyn_buf* db)
 	}
 
 	info_append_string_safe(db, "secrets-tls-context", g_secrets_cfg.tls_context);
+	info_append_string_safe(db, "secrets-uds-path", g_secrets_cfg.uds_path);
 	info_append_uint32(db, "service-threads", g_config.n_service_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
