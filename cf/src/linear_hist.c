@@ -323,9 +323,9 @@ linear_hist_dump(linear_hist *h)
 		pos += bytes;
 
 		if ((n & 3) == 3) { // maximum of 4 printed columns per log line
-			 cf_debug(AS_NSUP, "%s", buf);
-			 pos = 0;
-			 buf[0] = '\0';
+			cf_debug(AS_NSUP, "%s", buf);
+			pos = 0;
+			buf[0] = '\0';
 		}
 
 		n++;
