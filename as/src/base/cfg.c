@@ -692,6 +692,7 @@ typedef enum {
 	CASE_MOD_LUA_USER_PATH,
 
 	// Security options:
+	CASE_SECURITY_DEFAULT_PASSWORD_FILE,
 	CASE_SECURITY_ENABLE_QUOTAS,
 	CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD,
 	CASE_SECURITY_SESSION_TTL,
@@ -1302,6 +1303,7 @@ const cfg_opt MOD_LUA_OPTS[] = {
 };
 
 const cfg_opt SECURITY_OPTS[] = {
+		{ "default-password-file",			CASE_SECURITY_DEFAULT_PASSWORD_FILE },
 		{ "enable-quotas",					CASE_SECURITY_ENABLE_QUOTAS },
 		{ "privilege-refresh-period",		CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD },
 		{ "session-ttl",					CASE_SECURITY_SESSION_TTL },
@@ -3840,6 +3842,9 @@ as_config_init(const char* config_file)
 		//
 		case SECURITY:
 			switch (cfg_find_tok(line.name_tok, SECURITY_OPTS, NUM_SECURITY_OPTS)) {
+			case CASE_SECURITY_DEFAULT_PASSWORD_FILE:
+				c->sec_cfg.default_password_file = cfg_strdup_no_checks(&line);
+				break;
 			case CASE_SECURITY_ENABLE_QUOTAS:
 				c->sec_cfg.quotas_enabled = cfg_bool(&line);
 				break;

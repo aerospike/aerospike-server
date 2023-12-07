@@ -53,6 +53,7 @@ typedef enum {
 // Security configuration.
 typedef struct as_sec_config_s {
 	bool				security_configured;			// indirect config
+	char*				default_password_file;
 	bool				quotas_enabled;
 	uint32_t			privilege_refresh_period;	// (seconds)
 	uint32_t			session_ttl;				// (seconds)
