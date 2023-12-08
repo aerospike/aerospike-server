@@ -4204,6 +4204,8 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "migrate_signals_active", ns->migrate_signals_active);
 	info_append_uint64(db, "migrate_signals_remaining", ns->migrate_signals_remaining);
 
+	info_append_uint64(db, "migrate_fresh_partitions", ns->migrate_fresh_partitions);
+
 	info_append_uint64(db, "appeals_tx_active", ns->appeals_tx_active);
 	info_append_uint64(db, "appeals_rx_active", ns->appeals_rx_active);
 

@@ -895,6 +895,7 @@ typedef struct as_namespace_s {
 	uint64_t		migrate_rx_partitions_remaining;
 	uint64_t		migrate_signals_active;
 	uint64_t		migrate_signals_remaining;
+	uint64_t		migrate_fresh_partitions;
 	uint64_t		appeals_tx_active; // relevant only for enterprise edition
 	uint64_t		appeals_rx_active; // relevant only for enterprise edition
 	uint64_t		appeals_tx_remaining; // relevant only for enterprise edition

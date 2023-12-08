@@ -837,7 +837,6 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	uint32_t ns_pending_lead_emigrations = 0;
 	uint32_t ns_pending_immigrations = 0;
 	uint32_t ns_pending_signals = 0;
-
 	uint32_t ns_fresh_partitions = 0;
 
 	for (uint32_t pid_group = 0; pid_group < NUM_PID_GROUPS; pid_group++) {
@@ -1022,6 +1021,8 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	ns->migrate_rx_partitions_remaining = ns_pending_immigrations;
 
 	ns->migrate_signals_remaining = ns_pending_signals;
+
+	ns->migrate_fresh_partitions = ns_fresh_partitions;
 }
 
 void
