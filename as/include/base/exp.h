@@ -1,7 +1,7 @@
 /*
  * exp.h
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2016-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -40,11 +40,9 @@
 //
 
 typedef struct as_exp_s {
-	uint8_t version;
 	uint32_t expected_type;
 	void** cleanup_stack;
 	uint32_t cleanup_stack_ix;
-	uint8_t* buf_cleanup;
 	uint32_t max_var_count;
 	uint8_t mem[];
 } as_exp;

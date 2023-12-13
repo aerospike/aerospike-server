@@ -1,7 +1,7 @@
 /*
  * exp.c
  *
- * Copyright (C) 2020 Aerospike, Inc.
+ * Copyright (C) 2020-2023 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike,),Inc. under one or more contributor
  * license agreements.
@@ -771,16 +771,11 @@ as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz)
 	cf_debug(AS_EXP, "as_exp_filter_build_base64 - buf_sz %u msg-dump:\n%*pH",
 			buf_sz_out, buf_sz_out, buf);
 
-	as_exp* exp = build_internal(buf, buf_sz_out, false);
+	as_exp* exp = build_internal(buf, buf_sz_out, true);
 
-	if (exp == NULL) {
-		cf_free(buf);
-		return NULL;
-	}
+	cf_free(buf);
 
-	exp->buf_cleanup = buf;
-
-	return check_filter_exp(exp);
+	return exp == NULL ? NULL : check_filter_exp(exp);
 }
 
 as_exp*
@@ -989,8 +984,7 @@ as_exp_destroy(as_exp* exp)
 			break;
 		}
 	}
-
-	cf_free(exp->buf_cleanup);
+	
 	cf_free(exp);
 }
 
@@ -1052,7 +1046,6 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire)
 	};
 
 	args.mem = args.exp->mem;
-	args.exp->version = 2;
 	args.exp->cleanup_stack = (void**)(args.mem + cleanup_offset);
 
 	if (cpy_wire) {
