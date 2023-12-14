@@ -155,9 +155,10 @@ as_storage_record_write_ssd(as_storage_rd* rd)
 	return rd->pickle != NULL || rd->n_bins != 0 ? ssd_write(rd) : 0;
 }
 
-void
-ssd_encrypt(drv_ssd *ssd, uint64_t off, as_flat_record *flat)
+uint8_t*
+ssd_encrypt_wblock(ssd_write_buf *swb, uint64_t off)
 {
+	return swb->buf;
 }
 
 void

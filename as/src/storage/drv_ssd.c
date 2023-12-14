@@ -336,6 +336,7 @@ swb_create(drv_ssd *ssd)
 	ssd_write_buf *swb = (ssd_write_buf*)cf_malloc(sizeof(ssd_write_buf));
 
 	swb->buf = cf_valloc(ssd->write_block_size);
+	swb->encrypted_buf = NULL;
 
 	swb->n_vacated = 0;
 	swb->vacated_capacity = VACATED_CAPACITY_STEP;
@@ -350,6 +351,11 @@ swb_destroy(ssd_write_buf *swb)
 {
 	cf_free(swb->vacated_wblocks);
 	cf_free(swb->buf);
+
+	if (swb->encrypted_buf != NULL) {
+		cf_free(swb->encrypted_buf);
+	}
+
 	cf_free(swb);
 }
 
@@ -653,8 +659,6 @@ defrag_move_record(drv_ssd *src_ssd, uint32_t src_wblock_id,
 	memcpy(swb->buf + swb->pos, (const uint8_t*)flat, write_size);
 
 	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id) + swb->pos;
-
-	ssd_encrypt(ssd, write_offset, (as_flat_record *)(swb->buf + swb->pos));
 
 	r->file_id = ssd->file_id;
 	r->rblock_id = OFFSET_TO_RBLOCK_ID(write_offset);
@@ -1185,8 +1189,6 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 		memcpy(read_buf, swb->buf + swb_offset, record_size);
 		swb_release(swb);
 
-		ssd_decrypt_whole(ssd, record_offset, r->n_rblocks, flat);
-
 		if (! sanity_check_flat(ssd, r, record_offset, flat)) {
 			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD failed read from buffer",
 					ns->name, ssd->name, &r->keyd);
@@ -1411,10 +1413,6 @@ as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 		memcpy(read_buf, swb->buf + swb_offset, record_size);
 		swb_release(swb);
 
-		if (! leave_encrypted) {
-			ssd_decrypt_whole(ssd, record_offset, r->n_rblocks, flat);
-		}
-
 		if (! sanity_check_flat(ssd, r, record_offset, flat)) {
 			cf_warning(AS_DRV_SSD, "{%s} read %s: digest %pD failed read from buffer",
 					ns->name, ssd->name, &r->keyd);
@@ -1496,9 +1494,12 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id);
 
+	// The only place we ever encrypt.
+	uint8_t *buf = ssd_encrypt_wblock(swb, write_offset);
+
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (! pwrite_all(fd, swb->buf, ssd->write_block_size, write_offset)) {
+	if (! pwrite_all(fd, buf, ssd->write_block_size, write_offset)) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->name, errno, cf_strerror(errno));
 	}
@@ -1517,9 +1518,11 @@ ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_shadow_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id);
 
+	uint8_t *buf = swb->encrypted_buf != NULL ? swb->encrypted_buf : swb->buf;
+
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (! pwrite_all(fd, swb->buf, ssd->write_block_size, write_offset)) {
+	if (! pwrite_all(fd, buf, ssd->write_block_size, write_offset)) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
 				ssd->shadow_name, errno, cf_strerror(errno));
 	}
@@ -1811,8 +1814,6 @@ ssd_buffer_bins(as_storage_rd *rd)
 	}
 
 	uint64_t write_offset = WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id) + swb_pos;
-
-	ssd_encrypt(ssd, write_offset, flat_in_swb);
 
 	if (rv != WRITE_IN_PLACE) {
 		r->file_id = ssd->file_id;

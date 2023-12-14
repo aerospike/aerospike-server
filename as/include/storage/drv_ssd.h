@@ -89,6 +89,7 @@ typedef struct {
 	uint32_t			wblock_id;
 	uint32_t			pos;
 	uint8_t				*buf;
+	uint8_t				*encrypted_buf;	// relevant for enterprise edition only
 } ssd_write_buf;
 
 
@@ -110,6 +111,7 @@ typedef struct ssd_wblock_state_s {
 typedef struct current_swb_s {
 	cf_mutex		lock;				// lock protects writes to swb
 	ssd_write_buf	*swb;				// swb currently being filled by writes
+	uint8_t			*encrypted_commits;	// relevant for enterprise edition only
 	uint64_t		n_wblocks_written;	// total number of swbs added to the swb_write_q by writes
 } current_swb;
 
@@ -243,7 +245,7 @@ void ssd_cold_start_transition_record(struct as_namespace_s *ns, const struct as
 void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 
 // Record encryption.
-void ssd_encrypt(drv_ssd *ssd, uint64_t off, struct as_flat_record_s *flat);
+uint8_t* ssd_encrypt_wblock(ssd_write_buf *swb, uint64_t off);
 void ssd_decrypt(drv_ssd *ssd, uint64_t off, struct as_flat_record_s *flat);
 void ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks, struct as_flat_record_s *flat);
 
