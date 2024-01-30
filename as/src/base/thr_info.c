@@ -713,12 +713,13 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 
 	fclose(fh);
 
+	static bool running = false;
 	static uint64_t prev_user = 0;
 	static uint64_t prev_nice = 0;
 	static uint64_t prev_kernel = 0;
 	static uint64_t prev_idle = 0;
 
-	if (prev_user != 0) {
+	if (running) {
 		uint32_t delta_user = (uint32_t)(user - prev_user);
 		uint32_t delta_nice = (uint32_t)(nice - prev_nice);
 		uint32_t delta_kernel = (uint32_t)(kernel - prev_kernel);
@@ -733,6 +734,7 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 				0 : delta_kernel * 100 * n_cpus / total;
 	}
 
+	running = true;
 	prev_user = user;
 	prev_nice = nice;
 	prev_kernel = kernel;
