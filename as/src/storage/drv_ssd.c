@@ -351,10 +351,7 @@ swb_destroy(ssd_write_buf *swb)
 {
 	cf_free(swb->vacated_wblocks);
 	cf_free(swb->buf);
-
-	if (swb->encrypted_buf != NULL) {
-		cf_free(swb->encrypted_buf);
-	}
+	// Note - encrypted_buf will have been freed.
 
 	cf_free(swb);
 }
@@ -367,6 +364,7 @@ swb_reset(ssd_write_buf *swb)
 	swb->flush_pos = 0;
 	swb->wblock_id = STORAGE_INVALID_WBLOCK;
 	swb->pos = 0;
+	// Note - encrypted_buf will have been freed and NULL'd.
 }
 
 #define swb_reserve(_swb) as_incr_uint32(&(_swb)->rc)
@@ -1553,6 +1551,12 @@ ssd_write_sanity_checks(drv_ssd *ssd, ssd_write_buf *swb)
 void
 ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb)
 {
+	// We're done with this (whether or not there's a post-write queue).
+	if (swb->encrypted_buf != NULL) {
+		cf_free(swb->encrypted_buf);
+		swb->encrypted_buf = NULL;
+	}
+
 	if (swb->use_post_write_q && ssd->ns->storage_post_write_queue != 0) {
 		// Transfer swb to post-write queue.
 		cf_queue_push(ssd->post_write_q, &swb);
