@@ -730,8 +730,10 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 		uint32_t total = delta_user + delta_nice + delta_kernel + delta_idle;
 		uint32_t n_cpus = cf_topo_count_cpus();
 
-		g_user_cpu_pct = (delta_user + delta_nice) * 100 * n_cpus / total;
-		g_kernel_cpu_pct = delta_kernel * 100 * n_cpus / total;
+		g_user_cpu_pct = total == 0 ?
+				0 : (delta_user + delta_nice) * 100 * n_cpus / total;
+		g_kernel_cpu_pct = total == 0 ?
+				0 : delta_kernel * 100 * n_cpus / total;
 	}
 
 	prev_user = user;
