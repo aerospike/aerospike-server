@@ -194,7 +194,8 @@ typedef struct cf_log_cache_hkey_s {
 
 #define MAX_ADJUSTED_STRING_SZ 2048 // trust adjusted format won't exceed this
 
-#define SYSLOG_TIME_SZ 15
+#define SYSLOG_TIME_SZ 16
+#define SYSLOG_TIME_LEN (SYSLOG_TIME_SZ - 1)
 
 
 //==========================================================
@@ -1017,14 +1018,14 @@ static void
 syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time,
 		const char* buf, size_t buf_sz)
 {
-	int priority = (sink->facility << 3) | sys_level;
+	int priority = sink->facility | sys_level;
 	size_t tag_len = strlen(sink->tag);
-	char dgram[1 + 11 + 1 + SYSLOG_TIME_SZ + 1 + tag_len + 2 + buf_sz + 1];
+	char dgram[1 + 11 + 1 + SYSLOG_TIME_LEN + 1 + tag_len + 2 + buf_sz + 1];
 
 	size_t pos = (size_t)sprintf(dgram, "<%d>", priority);
 
-	memcpy(dgram + pos, time, SYSLOG_TIME_SZ);
-	pos += SYSLOG_TIME_SZ;
+	memcpy(dgram + pos, time, SYSLOG_TIME_LEN);
+	pos += SYSLOG_TIME_LEN;
 
 	*(dgram + pos++) = ' ';
 
