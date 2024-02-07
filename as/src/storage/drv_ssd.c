@@ -1489,12 +1489,12 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 
 	as_fence_acq();
 
-	int fd = ssd_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id);
 
 	// The only place we ever encrypt.
 	uint8_t *buf = ssd_encrypt_wblock(swb, write_offset);
 
+	int fd = ssd_fd_get(ssd);
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (! pwrite_all(fd, buf, ssd->write_block_size, write_offset)) {
@@ -1513,11 +1513,76 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 void
 ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 {
-	int fd = ssd_shadow_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id);
 
 	uint8_t *buf = swb->encrypted_buf != NULL ? swb->encrypted_buf : swb->buf;
 
+	int fd = ssd_shadow_fd_get(ssd);
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
+
+	if (! pwrite_all(fd, buf, ssd->write_block_size, write_offset)) {
+		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
+				ssd->shadow_name, errno, cf_strerror(errno));
+	}
+
+	if (start_ns != 0) {
+		histogram_insert_data_point(ssd->hist_shadow_write, start_ns);
+	}
+
+	ssd_shadow_fd_put(ssd, fd);
+}
+
+
+off_t
+ssd_fill_flush_buf(drv_ssd *ssd, ssd_write_buf *swb, uint8_t *buf)
+{
+	// Clean the end of the buffer before flushing.
+	if (swb->pos < ssd->write_block_size) {
+		memset(&swb->buf[swb->pos], 0, ssd->write_block_size - swb->pos);
+	}
+
+	// Wait for all writers to finish.
+	while (swb->n_writers != 0) {
+		as_arch_pause();
+	}
+
+	as_fence_acq();
+
+	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(ssd, swb->wblock_id);
+
+	// The only place we ever encrypt.
+	uint8_t *swb_buf = ssd_encrypt_wblock(swb, write_offset);
+
+	// Save a copy to flush outside the lock.
+	memcpy(buf, swb_buf, ssd->write_block_size);
+
+	return write_offset;
+}
+
+
+void
+ssd_flush_buf(drv_ssd *ssd, const uint8_t *buf, off_t write_offset)
+{
+	int fd = ssd_fd_get(ssd);
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
+
+	if (! pwrite_all(fd, buf, ssd->write_block_size, write_offset)) {
+		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED write: errno %d (%s)",
+				ssd->name, errno, cf_strerror(errno));
+	}
+
+	if (start_ns != 0) {
+		histogram_insert_data_point(ssd->hist_write, start_ns);
+	}
+
+	ssd_fd_put(ssd, fd);
+}
+
+
+void
+ssd_shadow_flush_buf(drv_ssd *ssd, const uint8_t *buf, off_t write_offset)
+{
+	int fd = ssd_shadow_fd_get(ssd);
 	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (! pwrite_all(fd, buf, ssd->write_block_size, write_offset)) {
@@ -2112,19 +2177,35 @@ ssd_flush_current_swb(drv_ssd *ssd, uint8_t which, uint64_t *p_prev_n_writes)
 
 	ssd_write_buf *swb = cur_swb->swb;
 
+	static __thread uint8_t *buf = NULL;
+	off_t write_offset = 0;
+
 	if (swb && swb->dirty) {
+		if (buf == NULL) {
+			buf = cf_valloc(ssd->write_block_size);
+		}
+
 		swb->dirty = false;
 		swb->flush_pos = swb->pos;
 
-		// Flush it.
-		ssd_flush_swb(ssd, swb);
+		// Save a copy to flush outside lock.
+		write_offset = ssd_fill_flush_buf(ssd, swb, buf);
 
-		if (ssd->shadow_name) {
-			ssd_shadow_flush_swb(ssd, swb);
-		}
+		as_incr_uint32(&swb->n_writers);
 	}
 
 	cf_mutex_unlock(&cur_swb->lock);
+
+	if (write_offset != 0) {
+		// Flush it.
+		ssd_flush_buf(ssd, buf, write_offset);
+
+		if (ssd->shadow_name != NULL) {
+			ssd_shadow_flush_buf(ssd, buf, write_offset);
+		}
+
+		as_decr_uint32_rls(&swb->n_writers);
+	}
 }
 
 

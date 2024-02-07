@@ -185,6 +185,8 @@ static void prepare_for_first_write(mem_write_block* mwb);
 // Shadow utilities.
 static void shadow_fd_put(drv_mem* mem, int fd);
 static void shadow_flush_mwb(drv_mem* mem, mem_write_block* mwb);
+static off_t shadow_fill_flush_buf(drv_mem* mem, mem_write_block* mwb, uint8_t* buf);
+static void shadow_flush_buf(drv_mem* mem, const uint8_t* buf, off_t write_offset);
 
 
 //==========================================================
@@ -3238,15 +3240,31 @@ flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 
 	mem_write_block* mwb = cur_mwb->mwb;
 
+	static __thread uint8_t* buf = NULL;
+	off_t write_offset = 0;
+
 	if (mwb && mwb->dirty) {
+		if (buf == NULL) {
+			buf = cf_valloc(MEM_WRITE_BLOCK_SIZE);
+		}
+
 		memset(&mwb->base_addr[mwb->pos], 0, MEM_WRITE_BLOCK_SIZE - mwb->pos);
 		mem_wait_writers_done(mwb);
-		shadow_flush_mwb(mem, mwb);
 
 		mwb->dirty = false;
+
+		// Save a copy to flush outside lock.
+		write_offset = shadow_fill_flush_buf(mem, mwb, buf);
+		as_incr_uint32(&mwb->n_writers);
 	}
 
 	cf_mutex_unlock(&cur_mwb->lock);
+
+	if (write_offset != 0) {
+		// Flush it.
+		shadow_flush_buf(mem, buf, write_offset);
+		as_decr_uint32_rls(&mwb->n_writers);
+	}
 }
 
 static void
@@ -3280,7 +3298,6 @@ flush_defrag_mwb(drv_mem* mem, uint64_t* p_prev_n_defrag_writes)
 	if (mwb && mwb->n_vacated != 0) {
 		// May not need memset for memory-only, but do it anyway.
 		memset(&mwb->base_addr[mwb->pos], 0, MEM_WRITE_BLOCK_SIZE - mwb->pos);
-		mem_wait_writers_done(mwb);
 
 		if (mem->shadow_name != NULL) {
 			shadow_flush_mwb(mem, mwb);
@@ -3563,12 +3580,44 @@ shadow_fd_put(drv_mem* mem, int fd)
 static void
 shadow_flush_mwb(drv_mem* mem, mem_write_block* mwb)
 {
-	int fd = shadow_fd_get(mem);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(mwb->wblock_id);
 
 	// The only place we ever encrypt.
 	uint8_t* buf = encrypt_wblock(mwb, write_offset);
 
+	int fd = shadow_fd_get(mem);
+	uint64_t start_ns = mem->ns->storage_benchmarks_enabled ? cf_getns() : 0;
+
+	if (! pwrite_all(fd, buf, MEM_WRITE_BLOCK_SIZE, write_offset)) {
+		cf_crash(AS_DRV_MEM, "%s: DEVICE FAILED write: errno %d (%s)",
+				mem->shadow_name, errno, cf_strerror(errno));
+	}
+
+	if (start_ns != 0) {
+		histogram_insert_data_point(mem->hist_shadow_write, start_ns);
+	}
+
+	shadow_fd_put(mem, fd);
+}
+
+static off_t
+shadow_fill_flush_buf(drv_mem* mem, mem_write_block* mwb, uint8_t* buf)
+{
+	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(mwb->wblock_id);
+
+	// The only place we ever encrypt.
+	uint8_t* mwb_buf = encrypt_wblock(mwb, write_offset);
+
+	// Save a copy to flush outside the lock.
+	memcpy(buf, mwb_buf, MEM_WRITE_BLOCK_SIZE);
+
+	return write_offset;
+}
+
+static void
+shadow_flush_buf(drv_mem* mem, const uint8_t* buf, off_t write_offset)
+{
+	int fd = shadow_fd_get(mem);
 	uint64_t start_ns = mem->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (! pwrite_all(fd, buf, MEM_WRITE_BLOCK_SIZE, write_offset)) {
