@@ -1007,6 +1007,11 @@ as_batch_queue_task(as_transaction* btr)
 				break; // bad bytes from client - repeat set on first item
 			}
 
+			if (as_transaction_has_key(&tr)) {
+				cf_warning(AS_BATCH, "batch must not repeat key");
+				break;
+			}
+
 			// Row should use previous namespace and bin names.
 			data += BATCH_REPEAT_SIZE;
 			tr.msgp = prev_msgp;
