@@ -176,7 +176,8 @@ as_query_job_run(void* pv_job)
 				continue;
 			}
 
-			if (as_partition_reserve_query(_job->ns, pid, &rsv, false) != 0) {
+			if (as_partition_reserve_query(_job->ns, pid, &rsv,
+					_job->relax) != 0) {
 				// Null tree causes slice_fn to send partition-done error.
 				rsv = (as_partition_reservation){
 						.ns = _job->ns,

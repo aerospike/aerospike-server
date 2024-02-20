@@ -1483,6 +1483,15 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 		_job->is_short = true;
 		_job->do_inline = ns->inline_short_queries;
 	}
+	else {
+		_job->relax = (m->info2 & AS_MSG_INFO2_RELAX_AP_LONG_QUERY) != 0;
+
+		if (_job->relax && ns->cp) {
+			cf_warning(AS_QUERY, "basic query in SC can't use 'relax' policy");
+			cf_free(job);
+			return AS_ERR_PARAMETER;
+		}
+	}
 
 	as_query_job_init(_job, &basic_query_job_vtable, tr, ns);
 

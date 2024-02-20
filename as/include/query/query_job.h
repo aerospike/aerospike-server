@@ -125,6 +125,9 @@ typedef struct as_query_job_s {
 	// Partition reservations for short queries:
 	struct as_partition_reservation_s* query_rsvs;
 
+	// Policy to relax long queries:
+	bool relax;
+
 	// Query threading model:
 	bool is_short;
 	bool do_inline;

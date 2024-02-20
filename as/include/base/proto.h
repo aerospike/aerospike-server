@@ -228,7 +228,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO2_GENERATION_GT          (1 << 3) // apply write if new generation > old, good for restore
 #define AS_MSG_INFO2_DURABLE_DELETE         (1 << 4) // op resulting in record deletion leaves tombstone (enterprise only)
 #define AS_MSG_INFO2_CREATE_ONLY            (1 << 5) // write record only if it doesn't exist
-	// Bit 6 is unused.
+#define AS_MSG_INFO2_RELAX_AP_LONG_QUERY    (1 << 6) // AP long queries reserve partitions as long as they have data
 #define AS_MSG_INFO2_RESPOND_ALL_OPS        (1 << 7) // all bin ops (read, write, or modify) require a response, in request order
 
 // Bits in info3.
