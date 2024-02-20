@@ -437,14 +437,15 @@ as_partition_reserve_read_tr(as_namespace* ns, uint32_t pid, as_transaction* tr,
 }
 
 int
-as_partition_reserve_full(as_namespace* ns, uint32_t pid,
-		as_partition_reservation* rsv)
+as_partition_reserve_query(as_namespace* ns, uint32_t pid,
+		as_partition_reservation* rsv, bool relax)
 {
 	as_partition* p = &ns->partitions[pid];
 
 	cf_mutex_lock(&p->lock);
 
-	if (! as_partition_is_full(p)) {
+	if (! (as_partition_is_full(p) ||
+			(relax && as_partition_version_has_data(&p->version)))) {
 		cf_mutex_unlock(&p->lock);
 		return -1;
 	}
