@@ -176,7 +176,7 @@ as_query_job_run(void* pv_job)
 				continue;
 			}
 
-			if (as_partition_reserve_full(_job->ns, pid, &rsv) != 0) {
+			if (as_partition_reserve_query(_job->ns, pid, &rsv, false) != 0) {
 				// Null tree causes slice_fn to send partition-done error.
 				rsv = (as_partition_reservation){
 						.ns = _job->ns,
@@ -439,7 +439,7 @@ reserve_rsvs(as_query_job* _job)
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition_reservation* rsv = &ns->query_rsvs[pid];
 
-			if (as_partition_reserve_full(ns, pid, rsv) != 0) {
+			if (as_partition_reserve_query(ns, pid, rsv, true) != 0) {
 				// Null tree causes slice_fn to send partition-done error.
 				*rsv = (as_partition_reservation){
 						.ns = ns,
