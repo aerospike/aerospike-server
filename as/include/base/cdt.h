@@ -496,6 +496,8 @@ void cdt_context_unwind_list(cdt_context *ctx, cdt_ctx_list_stack_entry *p);
 uint8_t list_get_ext_flags(bool is_ordered, bool is_persist);
 
 // map
+bool map_is_key(const uint8_t *buf, uint32_t buf_sz);
+
 uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz);
 
 bool map_offset_index_check_and_fill(offset_index *offidx, uint32_t index);

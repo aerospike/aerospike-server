@@ -1219,6 +1219,37 @@ is_persist_kv(uint8_t flags)
 	return is_kv_ordered(flags) && flags_is_persist(flags);
 }
 
+bool
+map_is_key(const uint8_t *buf, uint32_t buf_sz)
+{
+	msgpack_in mp = {
+			.buf = (uint8_t *)buf,
+			.buf_sz = buf_sz
+	};
+
+	msgpack_type type = msgpack_peek_type(&mp);
+
+	switch (type) {
+	case MSGPACK_TYPE_INT:
+	case MSGPACK_TYPE_STRING:
+		return true;
+	case MSGPACK_TYPE_BYTES: {
+		uint32_t len;
+		const uint8_t *b = msgpack_get_bin(&mp, &len);
+
+		if (b == NULL || len == 0 || *b != AS_BYTES_BLOB) {
+			break;
+		}
+
+		return true;
+	}
+	default:
+		break;
+	}
+
+	return false;
+}
+
 uint32_t
 map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz)
 {
@@ -1852,7 +1883,7 @@ map_add(cdt_op_mem *com, cdt_payload *key, cdt_payload *value,
 	uint32_t v_sz = cdt_untrusted_get_size(value->ptr, value->sz, NULL, false);
 	uint32_t rewrite_sz = k_sz + v_sz;
 
-	if (k_sz == 0 || v_sz == 0) {
+	if (k_sz == 0 || v_sz == 0 || ! map_is_key(key->ptr, key->sz)) {
 		cf_warning(AS_PARTICLE, "map_add() invalid params");
 		return -AS_ERR_PARAMETER;
 	}
