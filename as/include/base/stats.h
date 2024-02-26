@@ -101,6 +101,8 @@ typedef struct as_stats_s {
 
 	histogram*		batch_index_hist;
 	bool			batch_index_hist_active; // automatically activated
+	histogram*		batch_rec_count_hist;
+	bool			batch_rec_count_hist_active; // automatically activated
 
 	histogram*		info_hist;
 

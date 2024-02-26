@@ -1048,6 +1048,10 @@ dump_global_histograms()
 		histogram_dump(g_stats.batch_index_hist);
 	}
 
+	if (g_stats.batch_rec_count_hist_active) {
+		histogram_dump(g_stats.batch_rec_count_hist);
+	}
+
 	if (g_config.info_hist_enabled) {
 		histogram_dump(g_stats.info_hist);
 	}

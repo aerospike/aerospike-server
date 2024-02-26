@@ -5275,6 +5275,7 @@ cfg_create_all_histograms()
 	histogram_scale scale = as_config_histogram_scale();
 
 	g_stats.batch_index_hist = histogram_create("batch-index", scale);
+	g_stats.batch_rec_count_hist = histogram_create("batch-rec-count", HIST_COUNT);
 
 	g_stats.info_hist = histogram_create("info", scale);
 

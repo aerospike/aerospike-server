@@ -965,6 +965,9 @@ as_batch_queue_task(as_transaction* btr)
 		}
 	}
 
+	g_stats.batch_rec_count_hist_active = true;
+	histogram_insert_raw(g_stats.batch_rec_count_hist, tran_count);
+
 	// Increment batch queue transaction count.
 	as_incr_uint32(&batch_queue->tran_count);
 	shared->response_queue = batch_queue->response_queue;
