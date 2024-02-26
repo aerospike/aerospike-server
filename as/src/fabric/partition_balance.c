@@ -197,12 +197,18 @@ as_partition_balance_init()
 
 			if (as_partition_version_has_data(&p->version)) {
 				as_partition_isolate_version(ns, p);
+				as_partition_auto_revive(ns, p);
 				n_stored++;
 			}
 		}
 
 		cf_info(AS_PARTITION, "{%s} %u partitions: found %u absent, %u stored",
 				ns->name, AS_PARTITIONS, AS_PARTITIONS - n_stored, n_stored);
+
+		if (ns->n_auto_revived_partitions != 0) {
+			cf_warning(AS_PARTITION, "{%s} %u partitions auto-revived",
+					ns->name, ns->n_auto_revived_partitions);
+		}
 	}
 
 	partition_balance_init();

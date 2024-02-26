@@ -724,6 +724,7 @@ typedef struct as_namespace_s {
 	//
 
 	bool			allow_ttl_without_nsup;
+	bool			auto_revive;
 	uint32_t		background_query_max_rps;
 	conflict_resolution_pol conflict_resolution_policy;
 	bool			conflict_resolve_writes;
@@ -849,6 +850,7 @@ typedef struct as_namespace_s {
 	uint64_t		n_unreplicated_records;
 	uint32_t		n_dead_partitions;
 	uint32_t		n_unavailable_partitions;
+	uint32_t		n_auto_revived_partitions;
 	bool			clock_skew_stop_writes;
 
 	// Expiration & eviction (nsup) stats.
@@ -1294,7 +1296,7 @@ typedef struct as_namespace_s {
 	uint32_t rack_ids[AS_CLUSTER_SZ]; // is observed-rack-ids in CP mode
 
 	// Quiescence - relevant only for enterprise edition.
-	uint32_t active_size;
+	uint32_t active_size; // number of nodes that are not quiesced
 	bool pending_quiesce;
 	bool is_quiesced;
 	bool quiesced[AS_CLUSTER_SZ];

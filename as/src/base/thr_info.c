@@ -4038,6 +4038,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "unreplicated_records", ns->n_unreplicated_records);
 	info_append_uint32(db, "dead_partitions", ns->n_dead_partitions);
 	info_append_uint32(db, "unavailable_partitions", ns->n_unavailable_partitions);
+	info_append_uint32(db, "auto_revived_partitions", ns->n_auto_revived_partitions);
 	info_append_bool(db, "clock_skew_stop_writes", ns->clock_skew_stop_writes);
 
 	// Expiration & eviction (nsup) stats.

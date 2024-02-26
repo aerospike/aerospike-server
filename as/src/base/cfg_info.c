@@ -376,6 +376,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	}
 
 	info_append_bool(db, "allow-ttl-without-nsup", ns->allow_ttl_without_nsup);
+	info_append_bool(db, "auto-revive", ns->auto_revive);
 	info_append_uint32(db, "background-query-max-rps", ns->background_query_max_rps);
 
 	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {

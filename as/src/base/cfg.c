@@ -442,6 +442,7 @@ typedef enum {
 
 	// Namespace options:
 	CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP,
+	CASE_NAMESPACE_AUTO_REVIVE,
 	CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES,
@@ -1023,6 +1024,7 @@ const cfg_opt NETWORK_TLS_OPTS[] = {
 
 const cfg_opt NAMESPACE_OPTS[] = {
 		{ "allow-ttl-without-nsup",			CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP },
+		{ "auto-revive",					CASE_NAMESPACE_AUTO_REVIVE },
 		{ "background-query-max-rps",		CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "conflict-resolve-writes",		CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES },
@@ -2828,6 +2830,10 @@ as_config_init(const char* config_file)
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_OPTS, NUM_NAMESPACE_OPTS)) {
 			case CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP:
 				ns->allow_ttl_without_nsup = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_AUTO_REVIVE:
+				cfg_enterprise_only(&line);
+				ns->auto_revive = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS:
 				ns->background_query_max_rps = cfg_u32(&line, 1, 1000000);
