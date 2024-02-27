@@ -5049,6 +5049,11 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 				if (type == MSGPACK_TYPE_MAP) {
 					as_pack_map_header(&pk, ele_count);
 					pe->ext_type = 0;
+
+					if (! map_is_key(next_b, tail_sz)) {
+						cf_warning(AS_PARTICLE, "map has invalid key type");
+						return 0;
+					}
 				}
 				else { // list
 					as_pack_list_header(&pk, ele_count);
