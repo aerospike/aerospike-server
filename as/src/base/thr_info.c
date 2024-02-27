@@ -953,6 +953,9 @@ run_info(void* unused)
 		as_file_handle* fd_h = it.fd_h;
 		as_proto* proto = it.proto;
 
+		cf_detail(AS_INFO_COMMAND, "client %s command%s '%.*s'", fd_h->client,
+				timeout ? " (timed out)" : "", (int)proto->sz, proto->body);
+
 		// Allocate an output stack buffer large enough to avoid resizing.
 		cf_dyn_buf_define_size(db, 128 * 1024);
 
