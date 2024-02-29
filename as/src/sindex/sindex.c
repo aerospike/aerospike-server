@@ -1366,14 +1366,14 @@ sbin_from_simple_bin(as_sindex* si, const as_bin* b, as_sindex_bin* sbin)
 		uint64_t* cells;
 		size_t ncells = as_bin_particle_geojson_cellids(b, &cells);
 
+		if (ncells == 0) {
+			// Empty coordinate arrays are "null objects".
+			return false;
+		}
+
 		for (size_t ndx = 0; ndx < ncells; ++ndx) {
 			add_value_to_sbin(sbin, (int64_t)cells[ndx]);
 		}
-
-		// FIXME - check whether UDFs can alter a geojson element to make it
-		// unparsable. (The as_val conversion doesn't currently handle errors.)
-		// if so, we can get zero n_values here.
-		cf_assert(sbin->n_values != 0, AS_SINDEX, "got 0 values");
 
 		return true;
 	}
