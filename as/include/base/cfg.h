@@ -70,7 +70,6 @@ struct as_namespace_s;
 #define MAX_FEATURE_KEY_FILES 32
 
 #define MAX_BATCH_THREADS 256
-#define MAX_TLS_SPECS 10
 
 typedef struct as_config_s {
 

@@ -3913,7 +3913,7 @@ channel_accept_connection(cf_socket* lsock)
 	cf_sock_cfg *cfg = lsock->cfg;
 
 	if (cfg->owner == CF_SOCK_OWNER_HEARTBEAT_TLS) {
-		tls_socket_prepare_server(g_config.hb_config.tls, &csock);
+		tls_socket_prepare_server(&csock, g_config.hb_config.tls);
 
 		if (tls_socket_accept_block(&csock,
 				config_connect_timeout_get()) != 1) {
@@ -4886,7 +4886,7 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 
 			if (as_endpoint_capability_is_supported(connected_endpoint,
 					AS_ENDPOINT_TLS_MASK)) {
-				tls_socket_prepare_client(g_config.hb_config.tls, sock);
+				tls_socket_prepare_client(sock, g_config.hb_config.tls);
 
 				if (tls_socket_connect_block(sock,
 						config_connect_timeout_get()) != 1) {

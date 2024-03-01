@@ -41,6 +41,7 @@
 #include "os.h"
 #include "secrets.h"
 #include "socket.h"
+#include "tls.h"
 #include "vault.h"
 
 #include "base/batch.h"
@@ -265,6 +266,7 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
 	info_append_bool(db, "stay-quiesced", g_config.stay_quiesced);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
+	info_append_uint32(db, "tls-refresh-period", tls_get_refresh_period());
 	info_append_uint64(db, "transaction-max-ms", g_config.transaction_max_ns / 1000000);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
 	info_append_string_safe(db, "vault-ca", g_vault_cfg.ca);
@@ -998,6 +1000,20 @@ cfg_set_service(const char* cmd)
 		cf_info(AS_INFO, "Changing value of ticker-interval from %d to %d ",
 				g_config.ticker_interval, val);
 		g_config.ticker_interval = val;
+	}
+	else if (as_info_parameter_get(cmd, "tls-refresh-period", v, &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "tls-refresh-period is enterprise-only");
+			return false;
+		}
+		uint32_t val;
+		if (cf_str_atoi_seconds(v, &val) != 0) {
+			cf_warning(AS_INFO, "tls-refresh-period must be an unsigned number with optional time unit (s, m, h, or d)");
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of tls-refresh-period from %u to %d ",
+				tls_get_refresh_period(), val);
+		tls_set_refresh_period(val);
 	}
 	else if (as_info_parameter_get(cmd, "transaction-max-ms", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0) {

@@ -26,8 +26,19 @@
 #include "tls.h"
 
 void
-tls_check_init()
+cf_tls_init(void)
 {
+}
+
+void
+cf_tls_start(void)
+{
+}
+
+char*
+cf_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which)
+{
+	return NULL;
 }
 
 void
@@ -92,13 +103,13 @@ tls_config_intra_context(cf_tls_spec *tspec, const char *which)
 }
 
 void
-tls_socket_prepare_server(cf_tls_info *info, cf_socket *sock)
+tls_socket_prepare_server(cf_socket* sock, cf_tls_info* info)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 }
 
 void
-tls_socket_prepare_client(cf_tls_info *info, cf_socket *sock)
+tls_socket_prepare_client(cf_socket* sock, cf_tls_info* info)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 }
@@ -163,3 +174,18 @@ tls_socket_pending(cf_socket *sock)
 	return 0;
 }
 
+void
+tls_init_change_check(cf_tls_spec* tspec)
+{
+}
+
+uint32_t
+tls_get_refresh_period()
+{
+	return 0;
+}
+
+void
+tls_set_refresh_period(uint32_t period)
+{
+}

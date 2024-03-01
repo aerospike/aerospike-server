@@ -22,7 +22,11 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #include "socket.h"
+
+#define MAX_TLS_SPECS 10
 
 typedef struct cf_tls_info_s cf_tls_info;
 
@@ -34,12 +38,13 @@ typedef struct cf_tls_spec_s {
 	char *cipher_suite;
 	char *key_file;
 	char *key_file_password;
-	char *pw_string;
 	char *name;
 	char *protocols;
 } cf_tls_spec;
 
-void tls_check_init();
+void cf_tls_init(void);
+void cf_tls_start(void);
+char* cf_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
 
 void tls_cleanup();
 void tls_thread_cleanup();
@@ -53,8 +58,8 @@ char *tls_read_password(const char *path);
 cf_tls_info *tls_config_server_context(cf_tls_spec *tspec, bool auth_client, uint32_t n_peer_names, char **peer_names);
 cf_tls_info *tls_config_intra_context(cf_tls_spec *tspec, const char *which);
 
-void tls_socket_prepare_server(cf_tls_info *info, cf_socket *sock);
-void tls_socket_prepare_client(cf_tls_info *info, cf_socket *sock);
+void tls_socket_prepare_server(cf_socket* sock, cf_tls_info* info);
+void tls_socket_prepare_client(cf_socket* sock, cf_tls_info* info);
 
 static inline bool tls_socket_needs_handshake(cf_socket *sock)
 {
@@ -75,3 +80,7 @@ int tls_socket_send(cf_socket *sock, void const *buf, size_t sz, int32_t flags,
 					uint64_t timeout_msec);
 
 int tls_socket_pending(cf_socket *sock);
+
+void tls_init_change_check(cf_tls_spec* tspec);
+uint32_t tls_get_refresh_period();
+void tls_set_refresh_period(uint32_t period);

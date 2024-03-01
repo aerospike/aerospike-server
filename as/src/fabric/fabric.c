@@ -1048,7 +1048,7 @@ fabric_node_connect(fabric_node *node, uint32_t ch)
 
 			if (as_endpoint_capability_is_supported(connected_endpoint,
 					AS_ENDPOINT_TLS_MASK)) {
-				tls_socket_prepare_client(g_fabric_tls, &sock);
+				tls_socket_prepare_client(&sock, g_fabric_tls);
 			}
 
 			break; // read success
@@ -2422,7 +2422,7 @@ run_fabric_accept(void *arg)
 				cf_sock_cfg *cfg = ssock->cfg;
 
 				if (cfg->owner == CF_SOCK_OWNER_FABRIC_TLS) {
-					tls_socket_prepare_server(g_fabric_tls, &fc->sock);
+					tls_socket_prepare_server(&fc->sock, g_fabric_tls);
 				}
 
 				uint32_t events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;

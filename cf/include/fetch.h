@@ -67,3 +67,11 @@ cf_fetch_validate_string(const char* path)
 
 	return true;
 }
+
+static inline bool
+cf_fetch_path_is_external(const char* path)
+{
+	path_type type = cf_fetch_path_type(path);
+
+	return type == PATH_TYPE_SECRETS || type == PATH_TYPE_VAULT;
+}

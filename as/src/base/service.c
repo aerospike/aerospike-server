@@ -454,7 +454,7 @@ run_accept(void* udata)
 			cf_socket_keep_alive(&csock, 60, 60, 2);
 
 			if (cfg->owner == CF_SOCK_OWNER_SERVICE_TLS) {
-				tls_socket_prepare_server(g_service_tls, &csock);
+				tls_socket_prepare_server(&csock, g_service_tls);
 			}
 
 			as_file_handle* fd_h = cf_rc_alloc(sizeof(as_file_handle));

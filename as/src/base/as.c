@@ -264,7 +264,7 @@ as_run(int argc, char **argv)
 	cf_thread_init();
 	as_signal_setup();
 	cf_fips_init();
-	tls_check_init();
+	cf_tls_init();
 
 	// Set all fields in the global runtime configuration instance. This parses
 	// the configuration file, and creates as_namespace objects. (Return value
@@ -403,6 +403,7 @@ as_run(int argc, char **argv)
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
+	cf_tls_start();				// starts tls certificate refresh thread
 	as_sindex_start();			// starts sindex GC threads
 	as_smd_start();				// enables receiving cluster state change events
 	as_health_start();			// starts before fabric and hb to capture them

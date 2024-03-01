@@ -126,7 +126,6 @@ static void cfg_add_ldap_role_query_pattern(char* pattern);
 static void cfg_create_all_histograms();
 static void cfg_init_serv_spec(cf_serv_spec* spec_p);
 static cf_tls_spec* cfg_create_tls_spec(as_config* cfg, char* name);
-static char* cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
 static void cfg_keep_cap(bool keep, bool* what, int32_t cap);
 static void cfg_best_practices_check(void);
 
@@ -304,6 +303,7 @@ typedef enum {
 	CASE_SERVICE_SINDEX_GC_PERIOD,
 	CASE_SERVICE_STAY_QUIESCED,
 	CASE_SERVICE_TICKER_INTERVAL,
+	CASE_SERVICE_TLS_REFRESH_PERIOD,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
 	CASE_SERVICE_USER,
@@ -863,6 +863,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
 		{ "stay-quiesced",					CASE_SERVICE_STAY_QUIESCED },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
+		{ "tls-refresh-period",				CASE_SERVICE_TLS_REFRESH_PERIOD },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
 		{ "user",							CASE_SERVICE_USER },
@@ -2310,6 +2311,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_TLS_REFRESH_PERIOD:
+				cfg_enterprise_only(&line);
+				tls_set_refresh_period(cfg_seconds_no_checks(&line));
 				break;
 			case CASE_SERVICE_TRANSACTION_MAX_MS:
 				c->transaction_max_ns = cfg_u64_no_checks(&line) * 1000000;
@@ -4310,30 +4315,6 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	cf_info(AS_CFG, "node-id %lx", c->self_node);
 
-	// Resolve TLS names and read key file passwords for all TLS
-	// configurations.
-
-	for (uint32_t i = 0; i < g_config.n_tls_specs; ++i) {
-		cf_tls_spec *tspec = &g_config.tls_specs[i];
-		char *old_name = tspec->name;
-
-		if (old_name == NULL) {
-			cf_crash_nostack(AS_CFG, "nameless TLS configuration section");
-		}
-
-		tspec->name = cfg_resolve_tls_name(old_name, g_config.cluster_name, NULL);
-
-		if (tspec->name == NULL) {
-			cf_crash_nostack(AS_CFG, "failed to resolve tls-name %s", old_name);
-		}
-
-		if (tspec->key_file_password == NULL) {
-			continue;
-		}
-
-		tspec->pw_string = tls_read_password(tspec->key_file_password);
-	}
-
 	// Populate access ports from configuration.
 
 	g_access.service.port = g_config.service.std_port != 0 ?
@@ -5324,43 +5305,10 @@ cfg_create_tls_spec(as_config* cfg, char* name)
 	cf_tls_spec* tls_spec = cfg->tls_specs + ind;
 	tls_spec->name = cf_strdup(name);
 	tls_spec->protocols = "TLSv1.2";
+
+	tls_init_change_check(tls_spec);
+
 	return tls_spec;
-}
-
-// TODO - should be split function or move to EE?
-static char*
-cfg_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which)
-{
-	bool expanded = false;
-
-	if (strcmp(tls_name, "<hostname>") == 0) {
-		char hostname[1024];
-		int rv = gethostname(hostname, sizeof(hostname));
-		if (rv != 0) {
-			cf_warning(AS_CFG, "trouble resolving hostname for tls-name: %s",
-					cf_strerror(errno));
-			return NULL;
-		}
-		hostname[sizeof(hostname)-1] = '\0'; // POSIX.1-2001
-		cf_free(tls_name);
-		tls_name = cf_strdup(hostname);
-		expanded = true;
-	}
-	else if (strcmp(tls_name, "<cluster-name>") == 0) {
-		if (strlen(cluster_name) == 0) {
-			cf_warning(AS_CFG, "can't resolve tls-name to non-existent cluster-name");
-			return NULL;
-		}
-		cf_free(tls_name);
-		tls_name = cf_strdup(cluster_name);
-		expanded = true;
-	}
-
-	if (expanded && which != NULL) {
-		cf_info(AS_CFG, "%s tls-name %s", which, tls_name);
-	}
-
-	return tls_name;
 }
 
 // TODO - already declared in header - should be split function?
@@ -5372,7 +5320,7 @@ cfg_link_tls(const char* which, char** our_name)
 		return NULL;
 	}
 
-	*our_name = cfg_resolve_tls_name(*our_name, g_config.cluster_name, which);
+	*our_name = cf_resolve_tls_name(*our_name, g_config.cluster_name, which);
 
 	if (*our_name == NULL) {
 		return NULL;
