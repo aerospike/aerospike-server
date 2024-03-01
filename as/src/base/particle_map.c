@@ -1230,6 +1230,7 @@ map_is_key(const uint8_t *buf, uint32_t buf_sz)
 	msgpack_type type = msgpack_peek_type(&mp);
 
 	switch (type) {
+	case MSGPACK_TYPE_NEGINT:
 	case MSGPACK_TYPE_INT:
 	case MSGPACK_TYPE_STRING:
 		return true;
