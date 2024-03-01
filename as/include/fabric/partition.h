@@ -213,8 +213,7 @@ void as_partition_reserve(struct as_namespace_s* ns, uint32_t pid, as_partition_
 int as_partition_reserve_replica(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node);
 int as_partition_reserve_read_tr(struct as_namespace_s* ns, uint32_t pid, struct as_transaction_s* tr, cf_node* node);
-int as_partition_reserve_full(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
-int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
+int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, bool relax);
 void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_reservation* src);
 
 void as_partition_release(as_partition_reservation* rsv);
