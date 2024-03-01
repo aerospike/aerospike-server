@@ -440,7 +440,7 @@ reserve_rsvs(as_query_job* _job)
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition_reservation* rsv = &ns->query_rsvs[pid];
 
-			if (as_partition_reserve_query(ns, pid, rsv, true) != 0) {
+			if (as_partition_reserve_query(ns, pid, rsv, ! ns->cp) != 0) {
 				// Null tree causes slice_fn to send partition-done error.
 				*rsv = (as_partition_reservation){
 						.ns = ns,
