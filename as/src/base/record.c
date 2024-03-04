@@ -322,13 +322,15 @@ as_record_replace_if_better(as_remote_record *rr)
 			return -result;
 		}
 
-		r->last_update_time = rr->last_update_time;
+		r->last_update_time = rr->last_update_time; // just for truncate check
 
 		// Don't write record if it would be truncated.
 		if (as_truncate_record_is_truncated(r, ns)) {
 			record_replace_failed(rr, &r_ref, NULL, is_create);
 			return AS_OK;
 		}
+
+		r->last_update_time = 0; // restore after check
 	}
 	// else - not bothering to check that sets match.
 
