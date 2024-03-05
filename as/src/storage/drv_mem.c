@@ -797,6 +797,8 @@ as_storage_device_stats_mem(const as_namespace* ns, uint32_t device_ix,
 	stats->used_sz = mem->inuse_size;
 	stats->n_free_wblocks = num_free_wblocks(mem);
 
+	stats->n_read_errors = 0; // not used
+
 	stats->write_q_sz = 0; // not used
 	stats->n_writes = 0;
 

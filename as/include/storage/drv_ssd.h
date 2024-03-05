@@ -153,6 +153,8 @@ typedef struct drv_ssd_s {
 
 	uint8_t			encryption_key[64];		// relevant for enterprise edition only
 
+	uint64_t		n_read_errors;		// total number of read errors
+
 	uint64_t		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
 	uint64_t		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
 

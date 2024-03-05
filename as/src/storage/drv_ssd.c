@@ -760,6 +760,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 				errno, cf_strerror(errno));
 		close(fd);
 		as_decr_uint32(&ssd->n_fds);
+		as_incr_uint64(&ssd->n_read_errors);
 		goto Finished;
 	}
 
@@ -1218,6 +1219,7 @@ ssd_read_record(as_storage_rd *rd, bool pickle_only)
 			close(fd);
 			as_decr_uint32(rd->read_page_cache ?
 					&ssd->n_cache_fds : &ssd->n_fds);
+			as_incr_uint64(&ssd->n_read_errors);
 			return -1;
 		}
 
@@ -1437,6 +1439,7 @@ as_storage_record_load_raw_ssd(as_storage_rd *rd, bool leave_encrypted)
 			close(fd);
 			as_decr_uint32(rd->read_page_cache ?
 					&ssd->n_cache_fds : &ssd->n_fds);
+			as_incr_uint64(&ssd->n_read_errors);
 			return false;
 		}
 
@@ -4201,6 +4204,8 @@ as_storage_device_stats_ssd(const struct as_namespace_s *ns, uint32_t device_ix,
 
 	stats->used_sz = ssd->inuse_size;
 	stats->n_free_wblocks = num_free_wblocks(ssd);
+
+	stats->n_read_errors = ssd->n_read_errors;
 
 	stats->write_q_sz = cf_queue_sz(ssd->swb_write_q);
 	stats->n_writes = 0;

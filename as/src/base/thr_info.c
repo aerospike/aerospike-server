@@ -4763,6 +4763,8 @@ add_data_device_stats(as_namespace* ns, cf_dyn_buf* db)
 		info_append_indexed_uint64(db, tag, i, "used_bytes", stats.used_sz);
 		info_append_indexed_uint32(db, tag, i, "free_wblocks", stats.n_free_wblocks);
 
+		info_append_indexed_uint64(db, tag, i, "read_errors", stats.n_read_errors);
+
 		info_append_indexed_uint32(db, tag, i, "write_q", stats.write_q_sz);
 		info_append_indexed_uint64(db, tag, i, "writes", stats.n_writes);
 
