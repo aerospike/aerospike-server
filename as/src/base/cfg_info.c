@@ -202,6 +202,7 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_string(db, "auto-pin", auto_pin_string());
 	info_append_uint32(db, "batch-index-threads", g_config.n_batch_index_threads);
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
+	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
@@ -753,6 +754,14 @@ cfg_set_service(const char* cmd)
 		cf_info(AS_INFO, "Changing value of batch-max-buffers-per-queue from %d to %d ",
 				g_config.batch_max_buffers_per_queue, val);
 		g_config.batch_max_buffers_per_queue = val;
+	}
+	else if (as_info_parameter_get(cmd, "batch-max-requests", v, &v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of batch-max-requests from %d to %d ",
+				g_config.batch_max_requests, val);
+		g_config.batch_max_requests = val;
 	}
 	else if (as_info_parameter_get(cmd, "batch-max-unused-buffers", v,
 			&v_len) == 0) {

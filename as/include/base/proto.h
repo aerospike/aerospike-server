@@ -132,7 +132,7 @@ struct as_storage_rd_s;
 
 // Batch.
 #define AS_ERR_BATCH_DISABLED           150
-#define AS_ERR_UNUSED_151               151 // was AS_ERR_BATCH_MAX_REQUESTS
+#define AS_ERR_BATCH_MAX_REQUESTS       151
 #define AS_ERR_BATCH_QUEUES_FULL        152
 
 // Geo.
