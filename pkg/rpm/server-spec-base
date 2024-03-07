@@ -7,6 +7,10 @@ Group: Application
 BuildArch: @ARCH@
 Vendor: Aerospike, Inc.
 
+Prefix: /opt
+Prefix: /etc
+Prefix: /usr
+
 %description
 The Aerospike distributed datastore allows fully scalable
 and reliable data storage with elastic server properties.
