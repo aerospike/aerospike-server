@@ -4972,10 +4972,16 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 					count--;
 					next_b = msgpack_parse(next_b, end, &temp_count, &next_type,
 							&has_nonstorage, &not_compact);
+					tail_sz = (uint32_t)(end - next_b);
 					ext.type &= AS_PACKED_MAP_FLAG_KV_ORDERED |
 							AS_PACKED_PERSIST_INDEX;
 					as_pack_map_header(&pk,
 							ele_count + (ext.type == 0 ? 0 : 1));
+
+					if (ele_count != 0 && ! map_is_key(next_b, tail_sz)) {
+						cf_warning(AS_PARTICLE, "map has invalid key type");
+						return 0;
+					}
 				}
 				else { // LIST
 					ext.type &= AS_PACKED_LIST_FLAG_ORDERED |
@@ -5050,7 +5056,7 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 					as_pack_map_header(&pk, ele_count);
 					pe->ext_type = 0;
 
-					if (! map_is_key(next_b, tail_sz)) {
+					if (ele_count != 0 && ! map_is_key(next_b, tail_sz)) {
 						cf_warning(AS_PARTICLE, "map has invalid key type");
 						return 0;
 					}
