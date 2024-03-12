@@ -1563,7 +1563,7 @@ cfg_set_namespace(const char* cmd)
 		}
 		if (val != 0) {
 			if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY &&
-					val > 128 * 1024 * 1024) { // PROTO_SIZE_MAX
+					val > 8 * 1024 * 1024) { // MEM_WRITE_BLOCK_SIZE
 				cf_warning(AS_INFO, "max-record-size can't be bigger than 128M");
 				return false;
 			}
