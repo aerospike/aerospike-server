@@ -3355,7 +3355,7 @@ as_config_init(const char* config_file)
 				ns->storage_compression_level = cfg_u32(&line, 1, 9);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_DATA_SIZE:
-				ns->storage_data_size = cfg_u64(&line, 1024 * 1024 * 1024, 256UL * 1024 * 1024 * 1024 * 1024);
+				ns->storage_data_size = cfg_u64(&line, 128 * 1024 * 1024, 256UL * 1024 * 1024 * 1024 * 1024);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_LWM_PCT:
 				ns->storage_defrag_lwm_pct = cfg_u32_no_checks(&line);
