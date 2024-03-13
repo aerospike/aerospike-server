@@ -4691,6 +4691,7 @@ list_param_parse(const cdt_payload *items, msgpack_in *mp, uint32_t *count_r)
 	return true;
 }
 
+
 //==========================================================
 // cdt_untrusted
 //
@@ -4773,7 +4774,18 @@ cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 		}
 
 		if (type == MSGPACK_TYPE_MAP) {
+			msgpack_type temp_type;
+			uint32_t temp_count = 1;
+
+			next_b = msgpack_parse(next_b, end, &temp_count, &temp_type,
+					&has_nonstorage, &not_compact);
+			count--; // meta-pair 2nd element skipped
 			ext.type &= AS_PACKED_PERSIST_INDEX | AS_PACKED_MAP_FLAG_KV_ORDERED;
+
+			if (next_b == NULL) {
+				cf_warning(AS_PARTICLE, "invalid msgpack");
+				return 0;
+			}
 
 			if (ext.type == 0) {
 				ret_sz += as_pack_map_header_get_size(ele_count - 1);
@@ -4781,6 +4793,7 @@ cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 			else {
 				ret_sz += as_pack_map_header_get_size(ele_count);
 				ret_sz += as_pack_ext_header_get_size(0);
+				ret_sz += as_pack_nil_size();
 			}
 		}
 		else { // LIST
@@ -4797,26 +4810,24 @@ cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 	}
 
 	if (flags_is_persist(top_flags)) {
-		if (*ptype == MSGPACK_TYPE_MAP) {
-			uint32_t content_sz = ret_sz -
-					as_pack_map_header_get_size(top_ele_count) -
-					as_pack_ext_header_get_size(0) - as_pack_nil_size();
-			uint32_t ext_content_sz = map_calc_ext_content_sz(top_flags,
-					top_ele_count, content_sz);
+		uint32_t content_sz = ret_sz - as_pack_ext_header_get_size(0);
+		uint32_t ext_content_sz;
 
-			ret_sz += as_pack_ext_header_get_size(ext_content_sz);
+		if (*ptype == MSGPACK_TYPE_MAP) {
+			content_sz -= as_pack_map_header_get_size(top_ele_count);
+			content_sz -= as_pack_nil_size();
+			ext_content_sz = map_calc_ext_content_sz(top_flags,
+					top_ele_count - 1, content_sz);
 		}
 		else { // LIST
-			uint32_t content_sz = ret_sz -
-					as_pack_list_header_get_size(top_ele_count) -
-					as_pack_ext_header_get_size(0);
-			uint32_t ext_content_sz = list_calc_ext_content_sz(top_flags,
-					top_ele_count, content_sz);
-
-			ret_sz += as_pack_ext_header_get_size(ext_content_sz);
+			content_sz -= as_pack_list_header_get_size(top_ele_count);
+			ext_content_sz = list_calc_ext_content_sz(top_flags,
+					top_ele_count - 1, content_sz);
 		}
 
 		ret_sz -= as_pack_ext_header_get_size(0);
+		ret_sz += as_pack_ext_header_get_size(ext_content_sz);
+		ret_sz += ext_content_sz;
 	}
 
 	return ret_sz;
