@@ -1,7 +1,7 @@
 /*
  * particle_list.c
  *
- * Copyright (C) 2015-2022 Aerospike, Inc.
+ * Copyright (C) 2015-2024 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -2680,10 +2680,23 @@ packed_list_insert(const packed_list *list, cdt_op_mem *com, int64_t index,
 	uint32_t payload_hdr_sz = 0;
 
 	if (payload_is_list) {
-		if (! msgpack_buf_get_list_ele_count(payload->ptr, payload->sz,
-				&param_count)) {
+		msgpack_in mp = {
+				.buf = payload->ptr,
+				.buf_sz = payload->sz
+		};
+
+		if (! msgpack_get_list_ele_count(&mp, &param_count)) {
 			cf_warning(AS_PARTICLE, "packed_list_insert() invalid payload, expected a list");
 			return -AS_ERR_PARAMETER;
+		}
+
+		if (param_count != 0 && msgpack_peek_is_ext(&mp)) {
+			if (msgpack_sz(&mp) == 0) {
+				cf_warning(AS_PARTICLE, "packed_list_insert() invalid payload metadata");
+				return -AS_ERR_PARAMETER;
+			}
+
+			param_count--;
 		}
 
 		if (param_count == 0) {
@@ -2692,12 +2705,7 @@ packed_list_insert(const packed_list *list, cdt_op_mem *com, int64_t index,
 					-AS_ERR_OP_NOT_APPLICABLE;
 		}
 
-		payload_hdr_sz = as_pack_list_header_get_size(param_count);
-
-		if (payload_hdr_sz > payload->sz) {
-			cf_warning(AS_PARTICLE, "packed_list_insert() invalid list header: payload->size=%d", payload->sz);
-			return -AS_ERR_PARAMETER;
-		}
+		payload_hdr_sz = mp.offset;
 	}
 
 	if (index > INT32_MAX || (index = calc_index(index, list->ele_count)) < 0) {
@@ -2916,9 +2924,23 @@ packed_list_add_items_ordered(const packed_list *list, cdt_op_mem *com,
 	cdt_result_data *result = &com->result;
 	uint32_t val_count;
 
-	if (! msgpack_buf_get_list_ele_count(items->ptr, items->sz, &val_count)) {
+	msgpack_in items_mp = {
+			.buf = items->ptr,
+			.buf_sz = items->sz
+	};
+
+	if (! msgpack_get_list_ele_count(&items_mp, &val_count)) {
 		cf_warning(AS_PARTICLE, "packed_list_add_items_ordered() invalid payload, expected a list");
 		return -AS_ERR_PARAMETER;
+	}
+
+	if (val_count != 0 && msgpack_peek_is_ext(&items_mp)) {
+		if (msgpack_sz(&items_mp) == 0) {
+			cf_warning(AS_PARTICLE, "packed_list_add_items_ordered() invalid payload metadata");
+			return -AS_ERR_PARAMETER;
+		}
+
+		val_count--;
 	}
 
 	if (val_count == 0) {
@@ -2927,13 +2949,9 @@ packed_list_add_items_ordered(const packed_list *list, cdt_op_mem *com,
 				-AS_ERR_OP_NOT_APPLICABLE;
 	}
 
-	uint32_t hdr_sz = as_pack_list_header_get_size(val_count);
+	uint32_t hdr_sz = items_mp.offset;
 
-	if (hdr_sz > items->sz) {
-		cf_warning(AS_PARTICLE, "packed_list_add_items_ordered() invalid list header: payload->size=%d", items->sz);
-		return -AS_ERR_PARAMETER;
-	}
-
+	// TODO - take advantage if parameter is of type ORDERED_LIST
 	// Sort items to add.
 	define_order_index(val_ord, val_count, com->alloc_idx);
 	define_offset_index(val_off, items->ptr + hdr_sz, items->sz - hdr_sz,
