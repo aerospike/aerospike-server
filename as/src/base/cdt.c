@@ -4796,18 +4796,20 @@ cdt_untrusted_get_size(const uint8_t *buf, uint32_t buf_sz, msgpack_type *ptype,
 					as_pack_map_header_get_size(top_ele_count) -
 					as_pack_ext_header_get_size(0) - as_pack_nil_size();
 			uint32_t ext_content_sz = map_calc_ext_content_sz(top_flags,
-					top_ele_count, content_sz);
+					top_ele_count - 1, content_sz);
 
 			ret_sz += as_pack_ext_header_get_size(ext_content_sz);
+			ret_sz += ext_content_sz;
 		}
 		else { // LIST
 			uint32_t content_sz = ret_sz -
 					as_pack_list_header_get_size(top_ele_count) -
 					as_pack_ext_header_get_size(0);
 			uint32_t ext_content_sz = list_calc_ext_content_sz(top_flags,
-					top_ele_count, content_sz);
+					top_ele_count - 1, content_sz);
 
 			ret_sz += as_pack_ext_header_get_size(ext_content_sz);
+			ret_sz += ext_content_sz;
 		}
 
 		ret_sz -= as_pack_ext_header_get_size(0);
