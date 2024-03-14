@@ -1449,9 +1449,6 @@ read_header(drv_mem* mem)
 	// If shadow shut down cleanly, cold start off mem if it's there.
 	// Note - before header_validate_cfg() which might write to header.
 	if (cold_start_shadow && (prefix->flags & DRV_HEADER_FLAG_TRUSTED) != 0) {
-		// Soon overwritten from header buffer, ok to 0 to compare with shadow.
-		((drv_header*)mem->mem_base_addr)->unique.pristine_offset = 0;
-
 		// If the mem header matches, we can use it for cold start.
 		if (memcmp(mem->mem_base_addr, header, sizeof(drv_header)) == 0) {
 			mem->cold_start_local = true;
@@ -1460,7 +1457,7 @@ read_header(drv_mem* mem)
 
 	header_validate_cfg(ns, mem, header);
 
-	if (header->unique.pristine_offset != 0 && // always 0 on shadow
+	if (header->unique.pristine_offset != 0 &&
 			(header->unique.pristine_offset < DRV_HEADER_SIZE ||
 					header->unique.pristine_offset > mem->file_size)) {
 		cf_crash(AS_DRV_MEM, "%s: bad pristine offset %lu", drv_name,
