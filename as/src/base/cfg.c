@@ -447,6 +447,7 @@ typedef enum {
 	CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES,
+	CASE_NAMESPACE_DEFAULT_READ_TOUCH_TTL_PCT,
 	CASE_NAMESPACE_DEFAULT_TTL,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
@@ -678,6 +679,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_256,
 
 	// Namespace set options:
+	CASE_NAMESPACE_SET_DEFAULT_READ_TOUCH_TTL_PCT,
 	CASE_NAMESPACE_SET_DEFAULT_TTL,
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_INDEX,
@@ -1034,6 +1036,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "background-query-max-rps",		CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "conflict-resolve-writes",		CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES },
+		{ "default-read-touch-ttl-pct",		CASE_NAMESPACE_DEFAULT_READ_TOUCH_TTL_PCT },
 		{ "default-ttl",					CASE_NAMESPACE_DEFAULT_TTL },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
@@ -1289,6 +1292,7 @@ const cfg_opt NAMESPACE_STORAGE_ENCRYPTION_OPTS[] = {
 };
 
 const cfg_opt NAMESPACE_SET_OPTS[] = {
+		{ "default-read-touch-ttl-pct",		CASE_NAMESPACE_SET_DEFAULT_READ_TOUCH_TTL_PCT },
 		{ "default-ttl",					CASE_NAMESPACE_SET_DEFAULT_TTL },
 		{ "disable-eviction",				CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "enable-index",					CASE_NAMESPACE_SET_ENABLE_INDEX },
@@ -2007,6 +2011,24 @@ cfg_seconds(const cfg_line* p_line, uint32_t min, uint32_t max)
 	}
 
 	return value;
+}
+
+static uint32_t
+cfg_pct_w_minus_1(const cfg_line* p_line)
+{
+	int32_t value;
+
+	if (cf_strtol_i32(p_line->val_tok_1, &value) != 0) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be a number, not %s",
+				p_line->num, p_line->name_tok, p_line->val_tok_1);
+	}
+
+	if (value > 100 || value < -1) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be between 0 and 100 or -1, not %s",
+				p_line->num, p_line->name_tok, p_line->val_tok_1);
+	}
+
+	return (uint32_t)value;
 }
 
 // Minimum & maximum port numbers:
@@ -2871,6 +2893,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES:
 				cfg_enterprise_only(&line);
 				ns->conflict_resolve_writes = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_DEFAULT_READ_TOUCH_TTL_PCT:
+				ns->default_read_touch_ttl_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
 				ns->default_ttl = cfg_seconds(&line, 0, MAX_ALLOWED_TTL);
@@ -3777,6 +3802,9 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE_SET:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SET_OPTS, NUM_NAMESPACE_SET_OPTS)) {
+			case CASE_NAMESPACE_SET_DEFAULT_READ_TOUCH_TTL_PCT:
+				p_set->default_read_touch_ttl_pct = cfg_pct_w_minus_1(&line);
+				break;
 			case CASE_NAMESPACE_SET_DEFAULT_TTL:
 				p_set->default_ttl = cfg_check_set_default_ttl(ns->name, p_set->name, cfg_seconds_no_checks(&line));
 				break;
@@ -4584,6 +4612,9 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		sprintf(hist_name, "{%s}-si-query-rec-count", ns->name);
 		ns->si_query_rec_count_hist = histogram_create(hist_name, HIST_COUNT);
+
+		sprintf(hist_name, "{%s}-read-touch", ns->name);
+		ns->read_touch_hist = histogram_create(hist_name, scale);
 
 		sprintf(hist_name, "{%s}-re-repl", ns->name);
 		ns->re_repl_hist = histogram_create(hist_name, scale);

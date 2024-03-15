@@ -104,6 +104,7 @@ void log_line_udf_sub(as_namespace* ns);
 void log_line_ops_sub(as_namespace* ns);
 void log_line_dup_res(as_namespace* ns);
 void log_line_retransmits(as_namespace* ns);
+void log_line_read_touch(as_namespace* ns);
 void log_line_re_repl(as_namespace* ns);
 void log_line_special_errors(as_namespace* ns);
 
@@ -211,6 +212,7 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_ops_sub(ns);
 		log_line_dup_res(ns);
 		log_line_retransmits(ns);
+		log_line_read_touch(ns);
 		log_line_re_repl(ns);
 		log_line_special_errors(ns);
 
@@ -998,6 +1000,27 @@ log_line_retransmits(as_namespace* ns)
 }
 
 void
+log_line_read_touch(as_namespace* ns)
+{
+	uint64_t n_tsvc_error = as_load_uint64(&ns->n_read_touch_tsvc_error);
+	uint64_t n_tsvc_timeout = as_load_uint64(&ns->n_read_touch_tsvc_timeout);
+	uint64_t n_read_touch_success = as_load_uint64(&ns->n_read_touch_success);
+	uint64_t n_read_touch_error = as_load_uint64(&ns->n_read_touch_error);
+	uint64_t n_read_touch_timeout = as_load_uint64(&ns->n_read_touch_timeout);
+	uint64_t n_read_touch_skip = as_load_uint64(&ns->n_read_touch_skip);
+
+	if ((n_tsvc_error | n_tsvc_timeout |
+			n_read_touch_success | n_read_touch_error | n_read_touch_timeout | n_read_touch_skip) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} read-touch: tsvc (%lu,%lu) all-triggers (%lu,%lu,%lu,%lu)",
+			ns->name,
+			n_tsvc_error, n_tsvc_timeout,
+			n_read_touch_success, n_read_touch_error, n_read_touch_timeout, n_read_touch_skip);
+}
+
+void
 log_line_re_repl(as_namespace* ns)
 {
 	uint64_t n_tsvc_error = as_load_uint64(&ns->n_re_repl_tsvc_error);
@@ -1179,6 +1202,10 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->ops_sub_master_hist);
 		histogram_dump(ns->ops_sub_repl_write_hist);
 		histogram_dump(ns->ops_sub_response_hist);
+	}
+
+	if (ns->read_touch_hist_active) {
+		histogram_dump(ns->read_touch_hist);
 	}
 
 	if (ns->re_repl_hist_active) {

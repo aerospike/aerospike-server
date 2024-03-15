@@ -55,6 +55,7 @@
 #include "transaction/proxy.h"
 #include "transaction/re_replicate.h"
 #include "transaction/read.h"
+#include "transaction/read_touch.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
@@ -296,6 +297,9 @@ as_tsvc_process_transaction(as_transaction *tr)
 			else if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
 				status = as_udf_start(tr);
 			}
+			else if (tr->origin == FROM_READ_TOUCH) {
+				status = as_read_touch_start(tr);
+			}
 			else if (tr->origin == FROM_RE_REPL) {
 				status = as_re_replicate_start(tr);
 			}
@@ -352,6 +356,10 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.iops_orig->done_cb(tr->from.iops_orig->udata,
 					AS_ERR_UNKNOWN);
 			tr->from.iops_orig = NULL; // pattern, not needed
+			break;
+		case FROM_READ_TOUCH:
+			as_incr_uint64(&ns->n_read_touch_tsvc_error);
+			tr->from.read_touch_active = NULL; // pattern, not needed
 			break;
 		case FROM_RE_REPL:
 			as_incr_uint64(&ns->n_re_repl_tsvc_error);

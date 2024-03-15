@@ -403,6 +403,10 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		}
 		UPDATE_ERROR_STATS(ops_sub);
 		break;
+	case FROM_READ_TOUCH:
+		tr->from.read_touch_active = NULL; // pattern, not needed
+		UPDATE_ERROR_STATS(read_touch);
+		break;
 	case FROM_RE_REPL:
 		if (tr->from.re_repl_orig_cb) {
 			tr->from.re_repl_orig_cb(tr);

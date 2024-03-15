@@ -30,6 +30,7 @@
 
 #include "node.h"
 
+#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/transaction.h"
@@ -78,5 +79,13 @@ bool
 partition_reserve_promote(const as_namespace* ns, const as_partition* p,
 		as_transaction* tr)
 {
+	if (as_transaction_is_restart_strict(tr)) {
+		return true;
+	}
+
+	if (g_config.self_node != p->working_master) {
+		tr->flags |= AS_TRANSACTION_FLAG_RSV_PROLE;
+	}
+
 	return false;
 }

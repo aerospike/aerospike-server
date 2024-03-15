@@ -170,6 +170,7 @@ typedef enum {
 	FROM_BATCH,
 	FROM_IUDF,
 	FROM_IOPS,
+	FROM_READ_TOUCH,
 	FROM_RE_REPL, // enterprise-only
 
 	FROM_UNDEF	= 0
@@ -200,6 +201,7 @@ typedef struct as_transaction_s {
 		struct as_batch_shared_s*	batch_shared;
 		struct iudf_origin_s*		iudf_orig;
 		struct iops_origin_s*		iops_orig;
+		void*						read_touch_active;
 		void (*re_repl_orig_cb) (struct as_transaction_s* tr);
 	} from;
 
@@ -236,14 +238,14 @@ typedef struct as_transaction_s {
 // 'from_flags' bits - set before queuing transaction head:
 #define FROM_FLAG_BATCH_SUB			0x0001
 #define FROM_FLAG_RESTART			0x0002 // only for detail logging
-#define FROM_FLAG_RESTART_STRICT	0x0004 // enterprise-only
+#define FROM_FLAG_RESTART_STRICT	0x0004
 
 // 'flags' bits - set in transaction body after queuing:
 #define AS_TRANSACTION_FLAG_IS_DELETE				0x01
 #define AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL	0x02
 #define AS_TRANSACTION_FLAG_XDR_TOMBSTONE			0x04 // enterprise-only
 #define AS_TRANSACTION_FLAG_MUST_PING				0x08 // enterprise-only
-#define AS_TRANSACTION_FLAG_RSV_PROLE				0x10 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_PROLE				0x10
 #define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE			0x20 // enterprise-only
 
 

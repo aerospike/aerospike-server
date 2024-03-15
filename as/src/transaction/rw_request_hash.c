@@ -207,7 +207,14 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 {
 	as_namespace* ns = tr->rsv.ns;
 
-	if (tr->origin == FROM_RE_REPL) {
+	if (tr->origin == FROM_READ_TOUCH) {
+		// If the key is in the hash already, we don't need to touch it. The
+		// result code set here is for internal use only.
+		tr->result_code = AS_ERR_KEY_BUSY;
+
+		return TRANS_DONE_SUCCESS;
+	}
+	else if (tr->origin == FROM_RE_REPL) {
 		// Always put this transaction at the head of the original rw_request's
 		// queue - it will be retried (first) when the original is complete.
 		rw_request_wait_q_push_head(rw0, tr);
@@ -264,6 +271,8 @@ from_tag(const as_transaction* tr)
 		return "bg-udf";
 	case FROM_IOPS:
 		return "bg-ops";
+	case FROM_READ_TOUCH:
+		return "read-touch";
 	case FROM_RE_REPL:
 		return "re-repl";
 	default:

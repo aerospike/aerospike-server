@@ -393,6 +393,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	}
 
 	info_append_bool(db, "conflict-resolve-writes", ns->conflict_resolve_writes);
+	info_append_uint32(db, "default-read-touch-ttl-pct", ns->default_read_touch_ttl_pct);
 	info_append_uint32(db, "default-ttl", ns->default_ttl);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
@@ -1291,6 +1292,14 @@ cfg_set_namespace(const char* cmd)
 		else {
 			return false;
 		}
+	}
+	else if (as_info_parameter_get(cmd, "default-read-touch-ttl-pct", v, &v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of default-read-touch-ttl-pct of ns %s from %u to %d ",
+				ns->name, ns->default_read_touch_ttl_pct, val);
+		ns->default_read_touch_ttl_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "default-ttl", v, &v_len) == 0) {
 		uint32_t val;
@@ -2333,7 +2342,22 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 	char v[1024];
 	int v_len = sizeof(v);
 
-	if (as_info_parameter_get(cmd, "default-ttl", v, &v_len) == 0) {
+	if (as_info_parameter_get(cmd, "default-read-touch-ttl-pct", v,
+			&v_len) == 0) {
+		int val;
+		if (cf_strtol_i32(v, &val) != 0) {
+			cf_warning(AS_INFO, "default-read-touch-ttl-pct must be a number");
+			return false;
+		}
+		if (val > 100 || val < -1) {
+			cf_warning(AS_INFO, "default-read-touch-ttl-pct must be 0 to 100 or -1");
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of default-read-touch-ttl-pct of ns %s set %s to %d",
+				ns->name, p_set->name, val);
+		p_set->default_read_touch_ttl_pct = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "default-ttl", v, &v_len) == 0) {
 		uint32_t val;
 		if (cf_str_atoi_seconds(v, &val) != 0) {
 			cf_warning(AS_INFO, "default-ttl must be -1, 0, or a number with optional time unit (s, m, h, or d)");

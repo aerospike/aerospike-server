@@ -2026,6 +2026,9 @@ cmd_latencies(char* name, char* params, cf_dyn_buf* db)
 			else if (strcmp(hist_name, "si-query") == 0) {
 				histogram_get_latencies(ns->si_query_hist, db);
 			}
+			else if (strcmp(hist_name, "read-touch") == 0) {
+				histogram_get_latencies(ns->read_touch_hist, db);
+			}
 			else if (strcmp(hist_name, "re-repl") == 0) {
 				histogram_get_latencies(ns->re_repl_hist, db);
 			}
@@ -4481,6 +4484,16 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "geo_region_query_cells", ns->geo_region_query_cells);
 	info_append_uint64(db, "geo_region_query_points", ns->geo_region_query_points);
 	info_append_uint64(db, "geo_region_query_falsepos", ns->geo_region_query_falsepos);
+
+	// Read-touch stats.
+
+	info_append_uint64(db, "read_touch_tsvc_error", ns->n_read_touch_tsvc_error);
+	info_append_uint64(db, "read_touch_tsvc_timeout", ns->n_read_touch_tsvc_timeout);
+
+	info_append_uint64(db, "read_touch_success", ns->n_read_touch_success);
+	info_append_uint64(db, "read_touch_error", ns->n_read_touch_error);
+	info_append_uint64(db, "read_touch_timeout", ns->n_read_touch_timeout);
+	info_append_uint64(db, "read_touch_skip", ns->n_read_touch_skip);
 
 	// Re-replication stats - relevant only for enterprise edition.
 

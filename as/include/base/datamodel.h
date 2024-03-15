@@ -731,6 +731,7 @@ typedef struct as_namespace_s {
 	bool			conflict_resolve_writes;
 	bool			cp; // relevant only for enterprise edition
 	bool			cp_allow_drops; // relevant only for enterprise edition
+	uint32_t		default_read_touch_ttl_pct;
 	uint32_t		default_ttl;
 	bool			cold_start_eviction_disabled;
 	bool			write_dup_res_disabled;
@@ -1171,6 +1172,16 @@ typedef struct as_namespace_s {
 	uint64_t		geo_region_query_points;	// number of valid points found
 	uint64_t		geo_region_query_falsepos;	// number of false positives found
 
+	// Read-touch stats.
+
+	uint64_t		n_read_touch_tsvc_error;
+	uint64_t		n_read_touch_tsvc_timeout;
+
+	uint64_t		n_read_touch_success;
+	uint64_t		n_read_touch_error;
+	uint64_t		n_read_touch_timeout;
+	uint64_t		n_read_touch_skip;
+
 	// Re-replication stats - relevant only for enterprise edition.
 
 	uint64_t		n_re_repl_tsvc_error;
@@ -1205,6 +1216,7 @@ typedef struct as_namespace_s {
 	histogram*		pi_query_rec_count_hist; // not tracked
 	histogram*		si_query_hist;
 	histogram*		si_query_rec_count_hist; // not tracked
+	histogram*		read_touch_hist;
 	histogram*		re_repl_hist; // relevant only for enterprise edition
 
 	bool			read_hist_active;
@@ -1217,6 +1229,7 @@ typedef struct as_namespace_s {
 	bool			pi_query_rec_count_hist_active;
 	bool			si_query_hist_active;
 	bool			si_query_rec_count_hist_active;
+	bool			read_touch_hist_active;
 	bool			re_repl_hist_active; // relevant only for enterprise edition
 
 	// Activate-by-config histograms.
@@ -1340,11 +1353,11 @@ typedef struct as_set_s {
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
 	uint32_t		n_sindexes;
 	uint32_t		default_ttl;		// can override namespace default_ttl
+	uint32_t		default_read_touch_ttl_pct; // can override namespace cfg
 	bool			eviction_disabled;	// don't evict anything in this set (note - expiration still works)
 	bool			index_enabled;
 	bool			index_populating;
 	bool			truncating;
-	uint32_t		unused;
 } as_set;
 
 COMPILER_ASSERT(sizeof(as_set) == 128);

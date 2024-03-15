@@ -49,6 +49,7 @@
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/proxy.h"
+#include "transaction/read_touch.h"
 #include "transaction/replica_ping.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
@@ -515,6 +516,12 @@ read_local(as_transaction* tr)
 	if (! as_record_is_live(r)) {
 		read_local_done(tr, &r_ref, NULL, AS_ERR_NOT_FOUND);
 		return TRANS_DONE_ERROR;
+	}
+
+	if (! as_read_touch_check(r, tr)) {
+		// Re-queued expecting a proxy to master.
+		as_record_done(&r_ref, ns);
+		return TRANS_WAITING;
 	}
 
 	as_exp* filter_exp = NULL;
