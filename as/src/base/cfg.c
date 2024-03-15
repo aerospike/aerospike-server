@@ -591,6 +591,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_MEMORY_FILE,
 	CASE_NAMESPACE_STORAGE_MEMORY_FILESIZE,
 	CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_MAX_MS,
+	CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_SIZE,
 	CASE_NAMESPACE_STORAGE_MEMORY_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_USED_PCT,
@@ -648,21 +649,23 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_FILE,
 	CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE,
 	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
+	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_SIZE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
-	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
+	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER,
 	CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN,
 	CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_USED_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
-	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE,
 	// Obsoleted:
 	CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY,
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
 	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
+	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
+	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE,
 
 	// Namespace storage compression options (value tokens):
 	CASE_NAMESPACE_STORAGE_COMPRESSION_NONE,
@@ -1191,6 +1194,7 @@ const cfg_opt NAMESPACE_STORAGE_MEMORY_OPTS[] = {
 		{ "file",							CASE_NAMESPACE_STORAGE_MEMORY_FILE },
 		{ "filesize",						CASE_NAMESPACE_STORAGE_MEMORY_FILESIZE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_MAX_MS },
+		{ "flush-size",						CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_SIZE },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_MEMORY_MAX_WRITE_CACHE },
 		{ "stop-writes-avail-pct",			CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_AVAIL_PCT },
 		{ "stop-writes-used-pct",			CASE_NAMESPACE_STORAGE_MEMORY_STOP_WRITES_USED_PCT },
@@ -1252,21 +1256,23 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "file",							CASE_NAMESPACE_STORAGE_DEVICE_FILE },
 		{ "filesize",						CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
+		{ "flush-size",						CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_SIZE },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
-		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
+		{ "post-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_CACHE },
 		{ "read-page-cache",				CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE },
 		{ "serialize-tomb-raider",			CASE_NAMESPACE_STORAGE_DEVICE_SERIALIZE_TOMB_RAIDER },
 		{ "sindex-startup-device-scan",		CASE_NAMESPACE_STORAGE_DEVICE_SINDEX_STARTUP_DEVICE_SCAN },
 		{ "stop-writes-avail-pct",			CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_AVAIL_PCT },
 		{ "stop-writes-used-pct",			CASE_NAMESPACE_STORAGE_DEVICE_STOP_WRITES_USED_PCT },
 		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
-		{ "write-block-size",				CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE },
 		// Obsoleted:
 		{ "data-in-memory",					CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY },
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
 		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
 		{ "max-used-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MAX_USED_PCT },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
+		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
+		{ "write-block-size",				CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -2923,7 +2929,7 @@ as_config_init(const char* config_file)
 				ns->inline_short_queries = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_MAX_RECORD_SIZE:
-				ns->max_record_size = cfg_u32_no_checks(&line);
+				ns->max_record_size = cfg_u32(&line, 0, WBLOCK_SZ);
 				break;
 			case CASE_NAMESPACE_MIGRATE_ORDER:
 				ns->migrate_order = cfg_u32(&line, 1, 10);
@@ -3097,14 +3103,13 @@ as_config_init(const char* config_file)
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
 				case CASE_NAMESPACE_STORAGE_MEMORY:
 					ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
-					ns->storage_post_write_queue = 0; // override non-0 default for info purposes
-					ns->storage_write_block_size = 8 * 1024 * 1024;
+					ns->storage_post_write_cache = 0; // override non-0 default for info purposes
 					cfg_begin_context(&state, NAMESPACE_STORAGE_MEMORY);
 					break;
 				case CASE_NAMESPACE_STORAGE_PMEM:
 					cfg_enterprise_only(&line);
 					ns->storage_type = AS_STORAGE_ENGINE_PMEM;
-					ns->storage_write_block_size = 8 * 1024 * 1024;
+					ns->storage_post_write_cache = 0; // override non-0 default for info purposes
 					cfg_begin_context(&state, NAMESPACE_STORAGE_PMEM);
 					break;
 				case CASE_NAMESPACE_STORAGE_DEVICE:
@@ -3154,17 +3159,6 @@ as_config_init(const char* config_file)
 				}
 				if (ns->default_ttl != 0 && ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure non-zero 'nsup-period' or 'allow-ttl-without-nsup' true if 'default-ttl' is non-zero", ns->name);
-				}
-				if (ns->max_record_size != 0) {
-					if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY && ns->max_record_size > 8 * 1024 * 1024) { // MEM_WRITE_BLOCK_SIZE
-						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 8M", ns->name);
-					}
-					if (ns->storage_type == AS_STORAGE_ENGINE_PMEM && ns->max_record_size > 8 * 1024 * 1024) { // PMEM_WRITE_BLOCK_SIZE
-						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 8M", ns->name);
-					}
-					if (ns->storage_type == AS_STORAGE_ENGINE_SSD && ns->max_record_size > ns->storage_write_block_size) {
-						cf_crash_nostack(AS_CFG, "{%s} 'max-record-size' can't be bigger than 'write-block-size'", ns->name);
-					}
 				}
 				if (ns->storage_type == AS_STORAGE_ENGINE_SSD || (ns->storage_commit_to_device && ns->n_storage_shadows != 0)) {
 					c->n_namespaces_not_inlined++;
@@ -3413,6 +3407,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
+				break;
+			case CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_SIZE:
+				ns->storage_flush_size = cfg_u32_power_of_2(&line, MIN_FLUSH_SIZE, MAX_FLUSH_SIZE);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
@@ -3699,11 +3696,14 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_SIZE:
+				ns->storage_flush_size = cfg_u32_power_of_2(&line, MIN_FLUSH_SIZE, MAX_FLUSH_SIZE);
+				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64(&line, DEFAULT_MAX_WRITE_CACHE, UINT64_MAX);
 				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
-				ns->storage_post_write_queue = cfg_u32(&line, 0, MAX_POST_WRITE_QUEUE);
+			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_CACHE:
+				ns->storage_post_write_cache = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_READ_PAGE_CACHE:
 				ns->storage_read_page_cache = cfg_bool(&line);
@@ -3725,9 +3725,6 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
 				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE:
-				ns->storage_write_block_size = cfg_u32_power_of_2(&line, MIN_WRITE_BLOCK_SIZE, MAX_WRITE_BLOCK_SIZE);
-				break;
 			// Obsoleted:
 			case CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY:
 				cfg_obsolete(&line, "please use 'storage-engine memory' to store data in memory");
@@ -3743,6 +3740,12 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT:
 				cfg_obsolete(&line, "please use 'stop-writes-avail-pct' instead");
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
+				cfg_obsolete(&line, "please use 'post-write-cache' and perhaps 'max-record-size'");
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE:
+				cfg_obsolete(&line, "please use 'flush-size' and 'post-write-cache' and perhaps 'max-record-size'");
 				break;
 			case CASE_CONTEXT_END:
 				if (ns->n_storage_devices == 0 && ns->n_storage_files == 0) {
@@ -4681,7 +4684,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		sprintf(hist_name, "{%s}-object-size-log2", ns->name);
 		ns->obj_size_log_hist = histogram_create(hist_name, HIST_SIZE);
 		sprintf(hist_name, "{%s}-object-size-linear", ns->name);
-		ns->obj_size_lin_hist = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, ns->storage_write_block_size, OBJ_SIZE_HIST_NUM_BUCKETS);
+		ns->obj_size_lin_hist = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, WBLOCK_SZ, OBJ_SIZE_HIST_NUM_BUCKETS);
 
 		sprintf(hist_name, "{%s}-evict", ns->name);
 		ns->evict_hist = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, ns->evict_hist_buckets);
@@ -5373,7 +5376,7 @@ cfg_best_practices_check(void)
 	}
 
 	uint64_t ns_mem = 0;
-	uint32_t margin = 8 * 1024 * 1024; // header size ... use write-block-size?
+	uint32_t margin = WBLOCK_SZ;
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];

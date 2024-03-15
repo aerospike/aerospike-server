@@ -1017,8 +1017,10 @@ collect_nsup_histograms(as_namespace* ns)
 
 	linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
+	uint32_t max_sz = as_load_uint32(&ns->max_record_size);
+
 	histogram_clear(ns->obj_size_log_hist);
-	linear_hist_clear(ns->obj_size_lin_hist, 0, ns->storage_write_block_size);
+	linear_hist_clear(ns->obj_size_lin_hist, 0, max_sz);
 
 	uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
 
@@ -1041,8 +1043,7 @@ collect_nsup_histograms(as_namespace* ns)
 
 		if (ns->set_obj_size_log_hists[set_id] != NULL) {
 			histogram_clear(ns->set_obj_size_log_hists[set_id]);
-			linear_hist_clear(ns->set_obj_size_lin_hists[set_id], 0,
-					ns->storage_write_block_size);
+			linear_hist_clear(ns->set_obj_size_lin_hists[set_id], 0, max_sz);
 		}
 		else {
 			char hist_name[HISTOGRAM_NAME_SIZE];
@@ -1055,8 +1056,7 @@ collect_nsup_histograms(as_namespace* ns)
 
 			sprintf(hist_name, "{%s}-%s-obj-size-linear", ns->name, set_name);
 			ns->set_obj_size_lin_hists[set_id] =
-					linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0,
-							ns->storage_write_block_size,
+					linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, max_sz,
 							OBJ_SIZE_HIST_NUM_BUCKETS);
 		}
 	}

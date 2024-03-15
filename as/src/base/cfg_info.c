@@ -521,6 +521,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_uint32(db, "storage-engine.evict-used-pct", ns->storage_evict_used_pct);
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint32(db, "storage-engine.flush-size", ns->storage_flush_size);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.stop-writes-avail-pct", ns->storage_stop_writes_avail_pct);
 		info_append_uint32(db, "storage-engine.stop-writes-used-pct", ns->storage_stop_writes_used_pct);
@@ -605,15 +606,15 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_uint32(db, "storage-engine.evict-used-pct", ns->storage_evict_used_pct);
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint32(db, "storage-engine.flush-size", ns->storage_flush_size);
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
-		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
+		info_append_uint64(db, "storage-engine.post-write-cache", ns->storage_post_write_cache);
 		info_append_bool(db, "storage-engine.read-page-cache", ns->storage_read_page_cache);
 		info_append_bool(db, "storage-engine.serialize-tomb-raider", ns->storage_serialize_tomb_raider);
 		info_append_bool(db, "storage-engine.sindex-startup-device-scan", ns->storage_sindex_startup_device_scan);
 		info_append_uint32(db, "storage-engine.stop-writes-avail-pct", ns->storage_stop_writes_avail_pct);
 		info_append_uint32(db, "storage-engine.stop-writes-used-pct", ns->storage_stop_writes_used_pct);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
-		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
 	}
 }
 
@@ -1587,22 +1588,9 @@ cfg_set_namespace(const char* cmd)
 		if (cf_str_atoi(v, &val) != 0 || val < 0) {
 			return false;
 		}
-		if (val != 0) {
-			if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY &&
-					val > 128 * 1024 * 1024) { // PROTO_SIZE_MAX
-				cf_warning(AS_INFO, "max-record-size can't be bigger than 128M");
-				return false;
-			}
-			if (ns->storage_type == AS_STORAGE_ENGINE_PMEM &&
-					val > 8 * 1024 * 1024) { // PMEM_WRITE_BLOCK_SIZE
-				cf_warning(AS_INFO, "max-record-size can't be bigger than 8M");
-				return false;
-			}
-			if (ns->storage_type == AS_STORAGE_ENGINE_SSD &&
-					val > ns->storage_write_block_size) {
-				cf_warning(AS_INFO, "max-record-size can't be bigger than write-block-size");
-				return false;
-			}
+		if (val != 0 && val > WBLOCK_SZ) {
+			cf_warning(AS_INFO, "max-record-size can't be bigger than 8M");
+			return false;
 		}
 		cf_info(AS_INFO, "Changing value of max-record-size of ns %s from %u to %d",
 				ns->name, ns->max_record_size, val);
@@ -2086,8 +2074,7 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->storage_defrag_lwm_pct, val);
 		uint32_t old_val = ns->storage_defrag_lwm_pct;
 		ns->storage_defrag_lwm_pct = val;
-		ns->defrag_lwm_size = (ns->storage_write_block_size *
-				ns->storage_defrag_lwm_pct) / 100;
+		ns->defrag_lwm_size = (WBLOCK_SZ * ns->storage_defrag_lwm_pct) / 100;
 		if (ns->storage_defrag_lwm_pct > old_val) {
 			as_storage_defrag_sweep(ns);
 		}
@@ -2145,6 +2132,27 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->storage_flush_max_us / 1000, val);
 		ns->storage_flush_max_us = (uint64_t)val * 1000;
 	}
+	else if (as_info_parameter_get(cmd, "flush-size", v, &v_len) == 0) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
+			cf_warning(AS_INFO, "ns %s, can't set flush-size if storage-engine pmem",
+					ns->name);
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0) {
+			cf_warning(AS_INFO, "ns %s, flush-size %s is not a number",
+					ns->name, v);
+			return false;
+		}
+		if (val < MIN_FLUSH_SIZE || val > MAX_FLUSH_SIZE ||
+				(val & (val - 1)) != 0) {
+			cf_warning(AS_INFO, "ns %s, flush-size %d must be a power of 2 between %u and %u",
+					ns->name, val, MIN_FLUSH_SIZE, MAX_FLUSH_SIZE);
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of flush-size of ns %s from %u to %d",
+				ns->name, ns->storage_flush_size, val);
+		ns->storage_flush_size = (uint32_t)val;
+	}
 	else if (as_info_parameter_get(cmd, "max-write-cache", v, &v_len) == 0) {
 		uint64_t val_u64;
 		if (cf_str_atoi_u64(v, &val_u64) != 0) {
@@ -2155,31 +2163,29 @@ cfg_set_namespace(const char* cmd)
 					DEFAULT_MAX_WRITE_CACHE / (1024 * 1024));
 			return false;
 		}
-		cf_info(AS_INFO, "Changing value of max-write-cache of ns %s from %lu to %lu ",
+		cf_info(AS_INFO, "Changing value of max-write-cache of ns %s from %lu to %lu",
 				ns->name, ns->storage_max_write_cache, val_u64);
 		ns->storage_max_write_cache = val_u64;
 		ns->storage_max_write_q = (uint32_t)(as_namespace_device_count(ns) *
-				ns->storage_max_write_cache / ns->storage_write_block_size);
+				ns->storage_max_write_cache / WBLOCK_SZ);
 	}
-	else if (as_info_parameter_get(cmd, "post-write-queue", v, &v_len) == 0) {
+	else if (as_info_parameter_get(cmd, "post-write-cache", v, &v_len) == 0) {
 		if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
-			cf_warning(AS_INFO, "ns %s, can't set post-write-queue if not storage-engine device",
+			cf_warning(AS_INFO, "ns %s, can't set post-write-cache if not storage-engine device",
 					ns->name);
 			return false;
 		}
-		if (cf_str_atoi(v, &val) != 0) {
-			cf_warning(AS_INFO, "ns %s, post-write-queue %s is not a number",
+		uint64_t val_u64;
+		if (cf_str_atoi_u64(v, &val_u64) != 0) {
+			cf_warning(AS_INFO, "ns %s, post-write-cache %s is not a number",
 					ns->name, v);
 			return false;
 		}
-		if ((uint32_t)val > MAX_POST_WRITE_QUEUE) {
-			cf_warning(AS_INFO, "ns %s, post-write-queue %u must be < %u",
-					ns->name, val, MAX_POST_WRITE_QUEUE);
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of post-write-queue of ns %s from %d to %d ",
-				ns->name, ns->storage_post_write_queue, val);
-		ns->storage_post_write_queue = (uint32_t)val;
+		cf_info(AS_INFO, "Changing value of post-write-cache of ns %s from %lu to %lu",
+				ns->name, ns->storage_post_write_cache, val_u64);
+		ns->storage_post_write_cache = val_u64;
+		ns->post_write_q_limit = (uint32_t)
+				(ns->storage_post_write_cache / WBLOCK_SZ);
 	}
 	else if (as_info_parameter_get(cmd, "read-page-cache", v, &v_len) == 0) {
 		if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {

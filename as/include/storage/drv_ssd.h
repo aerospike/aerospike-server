@@ -79,7 +79,6 @@ typedef struct vacated_wblock_s {
 typedef struct {
 	uint32_t			rc;
 	uint32_t			n_writers;	// number of concurrent writers
-	bool				dirty;		// written to since last flushed
 	bool				use_post_write_q;
 	uint32_t			flush_pos;	// pos on last flush
 	uint32_t			n_vacated;
@@ -112,7 +111,8 @@ typedef struct current_swb_s {
 	cf_mutex		lock;				// lock protects writes to swb
 	ssd_write_buf	*swb;				// swb currently being filled by writes
 	uint8_t			*encrypted_commits;	// relevant for enterprise edition only
-	uint64_t		n_wblocks_written;	// total number of swbs added to the swb_write_q by writes
+	uint64_t		n_wblock_writes;	// total number of swbs added to the swb_write_q by writes
+	uint64_t		n_wblock_partial_writes;	// total number of swbs "partial flushed" by writes
 } current_swb;
 
 
@@ -157,6 +157,7 @@ typedef struct drv_ssd_s {
 
 	uint64_t		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
 	uint64_t		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
+	uint64_t		n_defrag_wblock_partial_writes;	// total number of swbs "partial flushed" by defrag
 
 	uint64_t		n_wblock_defrag_io_skips;	// total number of wblocks empty on defrag_wblock_q pop
 	uint64_t		n_wblock_direct_frees;		// total number of wblocks freed by other than defrag
@@ -175,7 +176,6 @@ typedef struct drv_ssd_s {
 
 	uint64_t		inuse_size;			// number of bytes in actual use on this device
 
-	uint32_t		write_block_size;	// number of bytes to write at a time
 	uint32_t		first_wblock_id;	// wblock-id of first non-header wblock
 
 	uint32_t		pristine_wblock_id;	// minimum wblock-id of "pristine" region
@@ -191,6 +191,7 @@ typedef struct drv_ssd_s {
 	uint64_t		record_add_evicted_counter;		// records not inserted due to eviction
 	uint64_t		record_add_replace_counter;		// records reinserted
 	uint64_t		record_add_unique_counter;		// records inserted
+	uint64_t		record_add_unparsable_counter;	// unparsable records not inserted
 
 	cf_tid			write_tid;
 	cf_tid			shadow_tid;
@@ -282,32 +283,6 @@ bool write_uses_post_write_q(struct as_storage_rd_s *rd);
 
 // Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);
-
-
-//
-// Conversions between bytes/rblocks and wblocks.
-//
-
-// Convert byte offset to wblock_id.
-static inline uint32_t OFFSET_TO_WBLOCK_ID(drv_ssd *ssd, uint64_t offset) {
-	return (uint32_t)(offset / ssd->write_block_size);
-}
-
-// Convert wblock_id to byte offset.
-static inline uint64_t WBLOCK_ID_TO_OFFSET(drv_ssd *ssd, uint32_t wblock_id) {
-	return (uint64_t)wblock_id * ssd->write_block_size;
-}
-
-// Convert rblock_id to wblock_id.
-static inline uint32_t RBLOCK_ID_TO_WBLOCK_ID(drv_ssd *ssd, uint64_t rblock_id) {
-	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) / ssd->write_block_size);
-}
-
-// Convert rblock_id to 'pos' or 'indent' within wblock.
-static inline uint32_t RBLOCK_ID_TO_POS(drv_ssd *ssd, uint64_t rblock_id) {
-	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) & (ssd->write_block_size - 1));
-}
-
 
 //
 // Size rounding needed for direct IO.

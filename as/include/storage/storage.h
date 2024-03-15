@@ -68,13 +68,13 @@ typedef enum {
 #define AS_STORAGE_MAX_DEVICES 128 // maximum devices or files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024 * 1024 * 1024 * 1024) // 2Tb
 
-// Artificial limit on write-block-size, in case we ever move to an
-// SSD_HEADER_SIZE that's too big to be a write-block size limit.
-// MAX_WRITE_BLOCK_SIZE must be power of 2 and <= SSD_HEADER_SIZE.
-#define MAX_WRITE_BLOCK_SIZE (8 * 1024 * 1024)
+// Separate WBLOCK_SZ, in case we ever move to an SSD_HEADER_SIZE that's too big
+// to be a WBLOCK_SZ.
+// WBLOCK_SZ must be power of 2 and <= SSD_HEADER_SIZE.
+#define WBLOCK_SZ (8 * 1024 * 1024)
 
-// Artificial limit on write-block-size, must be power of 2 and >= RBLOCK_SIZE.
-#define MIN_WRITE_BLOCK_SIZE (1024 * 1)
+#define MIN_FLUSH_SIZE (4 * 1024)
+#define MAX_FLUSH_SIZE WBLOCK_SZ
 
 #define DEFAULT_MAX_WRITE_CACHE (64UL * 1024 * 1024)
 
@@ -92,8 +92,7 @@ typedef enum {
 
 #define N_CURRENT_SWBS	3
 
-#define DEFAULT_POST_WRITE_QUEUE 256
-#define MAX_POST_WRITE_QUEUE (8 * 1024)
+#define DEFAULT_POST_WRITE_CACHE (256UL * 1024 * 1024)
 
 typedef struct as_storage_rd_s {
 	struct as_index_s*		r;
@@ -148,10 +147,12 @@ typedef struct storage_device_stats_s {
 
 	uint32_t write_q_sz;
 	uint64_t n_writes;
+	uint64_t n_partial_writes;
 
 	uint32_t defrag_q_sz;
 	uint64_t n_defrag_reads;
 	uint64_t n_defrag_writes;
+	uint64_t n_defrag_partial_writes;
 
 	uint32_t shadow_write_q_sz;
 } storage_device_stats;

@@ -254,8 +254,8 @@ as_flat_unpack_remote_bins(as_remote_record* rr, as_bin* bins)
 	const uint8_t* flat_bins = rr->pickle + rr->meta_sz;
 	const uint8_t* end = rr->pickle + rr->pickle_sz;
 
-	if (! as_flat_decompress_buffer(&rr->cm, ns->storage_write_block_size,
-			&flat_bins, &end, NULL)) {
+	if (! as_flat_decompress_buffer(&rr->cm, WBLOCK_SZ, &flat_bins, &end,
+			NULL)) {
 		cf_warning(AS_FLAT, "failed record decompression");
 		return -AS_ERR_UNKNOWN;
 	}

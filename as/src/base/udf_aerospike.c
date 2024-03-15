@@ -462,11 +462,8 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 static uint8_t*
 get_particle_buf(udf_record* urecord, uint32_t size)
 {
-	as_namespace* ns = urecord->rd->ns;
-
 	if (urecord->particle_llb.head == NULL) {
-		cf_ll_buf_init_heap(&urecord->particle_llb,
-				ns->storage_write_block_size);
+		cf_ll_buf_init_heap(&urecord->particle_llb, WBLOCK_SZ);
 	}
 
 	uint8_t* buf;

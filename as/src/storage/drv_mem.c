@@ -51,6 +51,7 @@
 #include "cf_thread.h"
 #include "hardware.h"
 #include "hist.h"
+#include "linear_hist.h"
 #include "log.h"
 #include "os.h"
 #include "vmapx.h"
@@ -185,8 +186,7 @@ static void prepare_for_first_write(mem_write_block* mwb);
 // Shadow utilities.
 static void shadow_fd_put(drv_mem* mem, int fd);
 static void shadow_flush_mwb(drv_mem* mem, mem_write_block* mwb);
-static off_t shadow_fill_flush_buf(drv_mem* mem, mem_write_block* mwb, uint8_t* buf);
-static void shadow_flush_buf(drv_mem* mem, const uint8_t* buf, off_t write_offset);
+static void shadow_flush_buf(drv_mem* mem, const uint8_t* buf, off_t write_offset, uint64_t write_sz);
 
 
 //==========================================================
@@ -227,8 +227,7 @@ available_size(const drv_mem* mem)
 	// cold start eviction threshold check.
 
 	return mem->free_wblock_q != NULL ?
-			(uint64_t)num_free_wblocks(mem) * MEM_WRITE_BLOCK_SIZE :
-			mem->file_size;
+			(uint64_t)num_free_wblocks(mem) * WBLOCK_SZ : mem->file_size;
 }
 
 
@@ -258,12 +257,10 @@ as_storage_init_mem(as_namespace* ns)
 
 	// The queue limit is more efficient to work with.
 	ns->storage_max_write_q = (uint32_t)
-			(mems->n_mems * ns->storage_max_write_cache /
-					MEM_WRITE_BLOCK_SIZE);
+			(mems->n_mems * ns->storage_max_write_cache / WBLOCK_SZ);
 
 	// Minimize how often we recalculate this.
-	ns->defrag_lwm_size =
-			(MEM_WRITE_BLOCK_SIZE * ns->storage_defrag_lwm_pct) / 100;
+	ns->defrag_lwm_size = (WBLOCK_SZ * ns->storage_defrag_lwm_pct) / 100;
 
 	char histname[HISTOGRAM_NAME_SIZE];
 
@@ -273,7 +270,7 @@ as_storage_init_mem(as_namespace* ns)
 	snprintf(histname, sizeof(histname), "{%s}-device-write-size", ns->name);
 	ns->device_write_size_hist = histogram_create(histname, HIST_SIZE);
 
-	uint32_t first_wblock_id = DRV_HEADER_SIZE / MEM_WRITE_BLOCK_SIZE;
+	uint32_t first_wblock_id = DRV_HEADER_SIZE / WBLOCK_SZ;
 	histogram_scale scale = as_config_histogram_scale();
 
 	// Finish initializing drv_mem structures (non-zero-value members).
@@ -352,8 +349,8 @@ as_storage_load_ticker_mem(const as_namespace* ns)
 
 	for (int i = 0; i < mems->n_mems; i++) {
 		const drv_mem* mem = &mems->mems[i];
-		uint32_t pct = (uint32_t)((mem->sweep_wblock_id * 100UL) /
-				(mem->file_size / MEM_WRITE_BLOCK_SIZE));
+		uint32_t pct = (uint32_t)
+				((mem->sweep_wblock_id * 100UL) / (mem->file_size / WBLOCK_SZ));
 
 		pos += sprintf(buf + pos, "%u,", pct);
 	}
@@ -801,16 +798,19 @@ as_storage_device_stats_mem(const as_namespace* ns, uint32_t device_ix,
 
 	stats->write_q_sz = 0; // not used
 	stats->n_writes = 0;
+	stats->n_partial_writes = 0;
 
 	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-		stats->n_writes += mem->current_mwbs[c].n_wblocks_written;
+		stats->n_writes += mem->current_mwbs[c].n_wblock_writes;
+		stats->n_partial_writes += mem->current_mwbs[c].n_wblock_partial_writes;
 	}
 
 	stats->defrag_q_sz = cf_queue_sz(mem->defrag_wblock_q);
 	stats->n_defrag_reads = mem->n_defrag_wblock_reads;
 	stats->n_defrag_writes = mem->n_defrag_wblock_writes;
+	stats->n_defrag_partial_writes = mem->n_defrag_wblock_partial_writes;
 
-	stats->shadow_write_q_sz = mem->mwb_shadow_q ?
+	stats->shadow_write_q_sz = mem->mwb_shadow_q != NULL ?
 			cf_queue_sz(mem->mwb_shadow_q) : 0;
 }
 
@@ -835,84 +835,72 @@ void
 as_storage_dump_wb_summary_mem(const as_namespace* ns)
 {
 	drv_mems* mems = ns->storage_private;
-	uint32_t total_num_defraggable = 0;
-	uint32_t total_num_above_wm = 0;
-	uint64_t defraggable_sz = 0;
-	uint64_t non_defraggable_sz = 0;
 
-	// Note: This is a sparse array that could be more efficiently stored.
-	// (In addition, ranges of block sizes could be binned together to
-	// compress the histogram, rather than using one bin per block size.)
-	uint32_t* wb_hist = cf_calloc(1,
-			sizeof(uint32_t) * (MAX_WRITE_BLOCK_SIZE + 1));
+	uint32_t n_free = 0;
+	uint32_t n_reserved = 0;
+	uint32_t n_used = 0;
+	uint32_t n_defrag = 0;
+	uint32_t n_emptying = 0;
+
+	uint32_t n_zero_used_sz = 0;
+
+	linear_hist* h =
+			linear_hist_create("", LINEAR_HIST_SIZE, 0, WBLOCK_SZ, 100);
 
 	for (uint32_t d = 0; d < mems->n_mems; d++) {
 		drv_mem* mem = &mems->mems[d];
-		uint32_t num_free_blocks = 0;
-		uint32_t num_full_mwb = 0;
-		uint32_t num_full_blocks = 0;
-		uint32_t lwm_size = ns->defrag_lwm_size;
-		uint32_t num_defraggable = 0;
-		uint32_t num_above_wm = 0;
 
-		for (uint32_t i = 0; i < mem->n_wblocks; i++) {
+		for (uint32_t i = mem->first_wblock_id; i < mem->n_wblocks; i++) {
 			mem_wblock_state* wblock_state = &mem->wblock_state[i];
+
+			switch (wblock_state->state) {
+			case WBLOCK_STATE_FREE:
+				n_free++;
+				break;
+			case WBLOCK_STATE_RESERVED:
+				n_reserved++;
+				break;
+			case WBLOCK_STATE_USED:
+				n_used++;
+				break;
+			case WBLOCK_STATE_DEFRAG:
+				n_defrag++;
+				break;
+			case WBLOCK_STATE_EMPTYING:
+				n_emptying++;
+				break;
+			default:
+				cf_warning(AS_DRV_MEM, "bad wblock state %u",
+						wblock_state->state);
+				break;
+			}
+
 			uint32_t inuse_sz = as_load_uint32(&wblock_state->inuse_sz);
 
-			if (inuse_sz > MEM_WRITE_BLOCK_SIZE) {
-				cf_warning(AS_DRV_MEM, "wblock size (%u > %u) too large ~~ not counting in histogram",
-						inuse_sz, MEM_WRITE_BLOCK_SIZE);
-			}
-			else {
-				wb_hist[inuse_sz]++;
-			}
-
 			if (inuse_sz == 0) {
-				num_free_blocks++;
-			}
-			else if (inuse_sz == MEM_WRITE_BLOCK_SIZE) {
-				if (wblock_state->mwb != NULL) {
-					num_full_mwb++;
-				}
-				else {
-					num_full_blocks++;
-				}
-			}
-			else if (inuse_sz < lwm_size) {
-				defraggable_sz += inuse_sz;
-				num_defraggable++;
+				n_zero_used_sz++;
 			}
 			else {
-				non_defraggable_sz += inuse_sz;
-				num_above_wm++;
+				linear_hist_insert_data_point(h, inuse_sz);
 			}
 		}
-
-		total_num_defraggable += num_defraggable;
-		total_num_above_wm += num_above_wm;
-
-		cf_info(AS_DRV_MEM, "device %s free %u full %u fullmwb %u pfull %u defrag %u freeq %u",
-				mem->name, num_free_blocks, num_full_blocks, num_full_mwb,
-				num_above_wm, num_defraggable,
-				cf_queue_sz(mem->free_wblock_q));
 	}
 
-	cf_info(AS_DRV_MEM, "WBH: Storage histogram for namespace \"%s\":",
-			ns->name);
-	cf_info(AS_DRV_MEM, "WBH: Average wblock size of: defraggable blocks: %lu bytes; nondefraggable blocks: %lu bytes; all blocks: %lu bytes",
-			defraggable_sz / MAX(1, total_num_defraggable),
-			non_defraggable_sz / MAX(1, total_num_above_wm),
-			(defraggable_sz + non_defraggable_sz) /
-					MAX(1, (total_num_defraggable + total_num_above_wm)));
+	cf_info(AS_DRV_MEM, "WB: namespace %s", ns->name);
+	cf_info(AS_DRV_MEM, "WB: wblocks by state - free:%u reserved:%u used:%u defrag:%u emptying:%u",
+			n_free, n_reserved, n_used, n_defrag, n_emptying);
 
-	for (uint32_t i = 0; i < MAX_WRITE_BLOCK_SIZE; i++) {
-		if (wb_hist[i] > 0) {
-			cf_info(AS_DRV_MEM, "WBH: %u block%s of size %u bytes",
-					wb_hist[i], (wb_hist[i] != 1 ? "s" : ""), i);
-		}
-	}
+	cf_dyn_buf_define(db);
 
-	cf_free(wb_hist);
+	// Not bothering with more suitable linear_hist API ... use what's there.
+	linear_hist_save_info(h);
+	linear_hist_get_info(h, &db);
+
+	cf_info(AS_DRV_MEM, "WB: wblocks with zero used-sz - %u", n_zero_used_sz);
+	cf_info(AS_DRV_MEM, "WB: wblocks by (non-zero) used-sz - %s", db.buf);
+
+	cf_dyn_buf_free(&db);
+	linear_hist_destroy(h);
 }
 
 void
@@ -1089,12 +1077,11 @@ init_memory_only(as_namespace* ns)
 	}
 
 	size_t stripe_sz = ns->storage_data_size / n_stripes;
-	size_t unusable_size =
-			(stripe_sz - DRV_HEADER_SIZE) % MEM_WRITE_BLOCK_SIZE;
+	size_t unusable_size = (stripe_sz - DRV_HEADER_SIZE) % WBLOCK_SZ;
 
 	if (unusable_size != 0) {
 		cf_info(AS_DRV_MEM, "memory stripe size must be header size %u + multiple of %u, rounding down",
-				DRV_HEADER_SIZE, MEM_WRITE_BLOCK_SIZE);
+				DRV_HEADER_SIZE, WBLOCK_SZ);
 		stripe_sz -= unusable_size;
 	}
 
@@ -1126,12 +1113,11 @@ check_file_size(uint64_t file_size, const char* tag)
 	cf_assert(sizeof(off_t) > 4, AS_DRV_MEM, "this OS supports only 32-bit (4g) files - compile with 64 bit offsets");
 
 	if (file_size > DRV_HEADER_SIZE) {
-		off_t unusable_size =
-				(file_size - DRV_HEADER_SIZE) % MEM_WRITE_BLOCK_SIZE;
+		off_t unusable_size = (file_size - DRV_HEADER_SIZE) % WBLOCK_SZ;
 
 		if (unusable_size != 0) {
 			cf_info(AS_DRV_MEM, "%s size must be header size %u + multiple of %u, rounding down",
-					tag, DRV_HEADER_SIZE, MEM_WRITE_BLOCK_SIZE);
+					tag, DRV_HEADER_SIZE, WBLOCK_SZ);
 			file_size -= unusable_size;
 		}
 
@@ -1436,9 +1422,9 @@ read_header(drv_mem* mem)
 	}
 
 	if (prefix->write_block_size == 0 ||
-			MEM_WRITE_BLOCK_SIZE % prefix->write_block_size != 0) {
+			WBLOCK_SZ % prefix->write_block_size != 0) {
 		cf_crash(AS_DRV_MEM, "%s: can't change write-block-size from %u to %u",
-				drv_name, prefix->write_block_size, MEM_WRITE_BLOCK_SIZE);
+				drv_name, prefix->write_block_size, WBLOCK_SZ);
 	}
 
 	if (header->unique.device_id >= AS_STORAGE_MAX_DEVICES) {
@@ -1449,6 +1435,9 @@ read_header(drv_mem* mem)
 	// If shadow shut down cleanly, cold start off mem if it's there.
 	// Note - before header_validate_cfg() which might write to header.
 	if (cold_start_shadow && (prefix->flags & DRV_HEADER_FLAG_TRUSTED) != 0) {
+		// Note - we save pristine_offset to shadow for storage-engine memory -
+		// no need to tamper with it here.
+
 		// If the mem header matches, we can use it for cold start.
 		if (memcmp(mem->mem_base_addr, header, sizeof(drv_header)) == 0) {
 			mem->cold_start_local = true;
@@ -1464,7 +1453,7 @@ read_header(drv_mem* mem)
 				header->unique.pristine_offset);
 	}
 
-	prefix->write_block_size = MEM_WRITE_BLOCK_SIZE;
+	prefix->write_block_size = WBLOCK_SZ;
 
 	return header;
 }
@@ -1482,7 +1471,7 @@ init_header(as_namespace *ns, drv_mem *mem)
 	prefix->magic = DRV_HEADER_MAGIC;
 	prefix->version = DRV_VERSION;
 	strcpy(prefix->namespace, ns->name);
-	prefix->write_block_size = MEM_WRITE_BLOCK_SIZE;
+	prefix->write_block_size = WBLOCK_SZ;
 
 	header_init_cfg(ns, mem, header);
 
@@ -1492,10 +1481,10 @@ init_header(as_namespace *ns, drv_mem *mem)
 static void
 wblock_init(drv_mem* mem)
 {
-	uint32_t n_wblocks = (uint32_t)(mem->file_size / MEM_WRITE_BLOCK_SIZE);
+	uint32_t n_wblocks = (uint32_t)(mem->file_size / WBLOCK_SZ);
 
 	cf_info(AS_DRV_MEM, "%s has %u wblocks of size %u", mem->name, n_wblocks,
-			MEM_WRITE_BLOCK_SIZE);
+			WBLOCK_SZ);
 
 	mem->n_wblocks = n_wblocks;
 	mem->wblock_state = cf_malloc(n_wblocks * sizeof(mem_wblock_state));
@@ -1541,8 +1530,7 @@ init_pristine_wblock_id(drv_mem* mem, uint64_t offset)
 	}
 
 	// Round up, in case write-block-size was increased.
-	mem->pristine_wblock_id =
-			(offset + (MEM_WRITE_BLOCK_SIZE - 1)) / MEM_WRITE_BLOCK_SIZE;
+	mem->pristine_wblock_id = (offset + (WBLOCK_SZ - 1)) / WBLOCK_SZ;
 }
 
 static void
@@ -1775,10 +1763,11 @@ run_mem_cold_start(void* udata)
 
 	cold_start_sweep(mems, mem);
 
-	cf_info(AS_DRV_MEM, "device %s: read complete: UNIQUE %lu (REPLACED %lu) (OLDER %lu) (EXPIRED %lu) (EVICTED %lu) records",
+	cf_info(AS_DRV_MEM, "device %s: read complete: UNIQUE %lu (REPLACED %lu) (OLDER %lu) (EXPIRED %lu) (EVICTED %lu) (UNPARSABLE %lu) records",
 			mem->name, mem->record_add_unique_counter,
 			mem->record_add_replace_counter, mem->record_add_older_counter,
-			mem->record_add_expired_counter, mem->record_add_evicted_counter);
+			mem->record_add_expired_counter, mem->record_add_evicted_counter,
+			mem->record_add_unparsable_counter);
 
 	if (cf_rc_release(complete_rc) == 0) {
 		// All drives are done reading.
@@ -1821,10 +1810,9 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 		uint8_t* buf = mem->mem_base_addr + file_offset;
 
 		if (read_shadow) {
-			mem_mprotect(buf, MEM_WRITE_BLOCK_SIZE, PROT_READ | PROT_WRITE);
+			mem_mprotect(buf, WBLOCK_SZ, PROT_READ | PROT_WRITE);
 
-			if (! pread_all(fd, buf, MEM_WRITE_BLOCK_SIZE,
-					(off_t)file_offset)) {
+			if (! pread_all(fd, buf, WBLOCK_SZ, (off_t)file_offset)) {
 				cf_crash(AS_DRV_MEM, "%s: read failed: errno %d (%s)",
 						mem->shadow_name, errno, cf_strerror(errno));
 			}
@@ -1832,7 +1820,7 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 
 		uint32_t indent = 0; // current offset within wblock, in bytes
 
-		while (indent < MEM_WRITE_BLOCK_SIZE) {
+		while (indent < WBLOCK_SZ) {
 			as_flat_record* flat = (as_flat_record*)&buf[indent];
 
 			if (read_shadow) {
@@ -1865,8 +1853,7 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 			uint32_t record_size = N_RBLOCKS_TO_SIZE(flat->n_rblocks);
 			uint32_t next_indent = indent + record_size;
 
-			if (record_size < DRV_RECORD_MIN_SIZE ||
-					next_indent > MEM_WRITE_BLOCK_SIZE) {
+			if (record_size < DRV_RECORD_MIN_SIZE || next_indent > WBLOCK_SZ) {
 				cf_warning(AS_DRV_MEM, "%s: bad record size %u", mem->name,
 						record_size);
 				indent += RBLOCK_SIZE;
@@ -1880,17 +1867,17 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 			indent = next_indent;
 		}
 
-		file_offset += MEM_WRITE_BLOCK_SIZE;
+		file_offset += WBLOCK_SZ;
 		mem->sweep_wblock_id++;
 
 		if (read_shadow) {
-			mem_mprotect(buf, MEM_WRITE_BLOCK_SIZE, PROT_READ);
+			mem_mprotect(buf, WBLOCK_SZ, PROT_READ);
 		}
 	}
 
 	mem->pristine_wblock_id = mem->sweep_wblock_id - n_unused_wblocks;
 
-	mem->sweep_wblock_id = (uint32_t)(mem->file_size / MEM_WRITE_BLOCK_SIZE);
+	mem->sweep_wblock_id = (uint32_t)(mem->file_size / WBLOCK_SZ);
 
 	if (read_shadow) {
 		shadow_fd_put(mem, fd);
@@ -1920,19 +1907,22 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem,
 
 	if (! p_read) {
 		cf_warning(AS_DRV_MEM, "bad metadata for %pD", &flat->keyd);
+		mem->record_add_unparsable_counter++;
 		return;
 	}
 
 	if (opt_meta.void_time > ns->startup_max_void_time) {
 		cf_warning(AS_DRV_MEM, "bad void-time for %pD", &flat->keyd);
+		mem->record_add_unparsable_counter++;
 		return;
 	}
 
 	const uint8_t* cb_end = NULL;
 
-	if (! as_flat_decompress_buffer(&opt_meta.cm, MEM_WRITE_BLOCK_SIZE,
-			&p_read, &end, &cb_end)) {
+	if (! as_flat_decompress_buffer(&opt_meta.cm, WBLOCK_SZ, &p_read, &end,
+			&cb_end)) {
 		cf_warning(AS_DRV_MEM, "bad compressed data for %pD", &flat->keyd);
+		mem->record_add_unparsable_counter++;
 		return;
 	}
 
@@ -1941,11 +1931,13 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem,
 
 	if (exact_end == NULL) {
 		cf_warning(AS_DRV_MEM, "bad flat record %pD", &flat->keyd);
+		mem->record_add_unparsable_counter++;
 		return;
 	}
 
 	if (! drv_check_end_mark(cb_end == NULL ? exact_end : cb_end, flat)) {
 		cf_warning(AS_DRV_MEM, "bad end marker for %pD", &flat->keyd);
+		mem->record_add_unparsable_counter++;
 		return;
 	}
 
@@ -2129,7 +2121,7 @@ set_pristine_offset(drv_mems* mems)
 		drv_header* header = (drv_header*)&mem->mem_base_addr[0];
 
 		header->unique.pristine_offset =
-				(uint64_t)mem->pristine_wblock_id * MEM_WRITE_BLOCK_SIZE;
+				(uint64_t)mem->pristine_wblock_id * WBLOCK_SZ;
 
 		// Persisted offset is never used at cold start, but will be used on a
 		// warm restart after switching from storage-engine memory to device.
@@ -2356,12 +2348,11 @@ buffer_bins(as_storage_rd* rd)
 
 	if (rd->pickle == NULL) {
 		flat_sz = as_flat_record_size(rd);
-		limit_sz = ns->max_record_size == 0 ?
-				MEM_WRITE_BLOCK_SIZE : ns->max_record_size;
+		limit_sz = ns->max_record_size == 0 ? WBLOCK_SZ : ns->max_record_size;
 	}
 	else {
 		flat_sz = rd->orig_pickle_sz;
-		limit_sz = MEM_WRITE_BLOCK_SIZE;
+		limit_sz = WBLOCK_SZ;
 	}
 
 	uint32_t flat_w_mark_sz = flat_sz + END_MARK_SZ;
@@ -2375,8 +2366,8 @@ buffer_bins(as_storage_rd* rd)
 	as_flat_record* flat;
 
 	if (rd->pickle == NULL) {
-		flat = as_flat_compress_bins_and_pack_record(rd, MEM_WRITE_BLOCK_SIZE,
-				false, true, &flat_w_mark_sz);
+		flat = as_flat_compress_bins_and_pack_record(rd, WBLOCK_SZ, false, true,
+				&flat_w_mark_sz);
 		flat_sz = flat_w_mark_sz - END_MARK_SZ;
 	}
 	else {
@@ -2421,7 +2412,7 @@ buffer_bins(as_storage_rd* rd)
 
 	// Check if there's enough space in current buffer - if not, enqueue it to
 	// be flushed to device, and grab a new buffer.
-	if (write_sz > MEM_WRITE_BLOCK_SIZE - mwb->pos) {
+	if (write_sz > WBLOCK_SZ - mwb->pos) {
 		if (mem->shadow_name != NULL) {
 			// Enqueue the buffer, to be flushed to device.
 			push_wblock_to_shadow_q(mem, mwb);
@@ -2430,7 +2421,7 @@ buffer_bins(as_storage_rd* rd)
 			old_mwb = mwb; // stash for release outside lock
 		}
 
-		cur_mwb->n_wblocks_written++;
+		cur_mwb->n_wblock_writes++;
 
 		// Get the new buffer.
 		mwb = mwb_get(mem, false);
@@ -2455,7 +2446,6 @@ buffer_bins(as_storage_rd* rd)
 	mwb->pos += write_sz;
 
 	as_incr_uint32(&mwb->n_writers);
-	mwb->dirty = true;
 
 	cf_mutex_unlock(&cur_mwb->lock);
 	// May now write this record concurrently with others in this mwb.
@@ -2514,7 +2504,7 @@ buffer_bins(as_storage_rd* rd)
 	// Outside lock to not block other threads trying to write to new mwb.
 	if (old_mwb != NULL) {
 		mem_wait_writers_done(old_mwb);
-		mem_mprotect(old_mwb->base_addr, MEM_WRITE_BLOCK_SIZE, PROT_READ);
+		mem_mprotect(old_mwb->base_addr, WBLOCK_SZ, PROT_READ);
 		mwb_release(mem, old_mwb);
 	}
 
@@ -2540,10 +2530,6 @@ run_shadow(void* arg)
 
 		// Sanity checks (optional).
 		write_sanity_checks(mem, mwb);
-
-		memset(&mwb->base_addr[mwb->pos], 0, MEM_WRITE_BLOCK_SIZE - mwb->pos);
-		mem_wait_writers_done(mwb);
-		mem_mprotect(mwb->base_addr, MEM_WRITE_BLOCK_SIZE, PROT_READ);
 
 		// Flush to the shadow device.
 		shadow_flush_mwb(mem, mwb);
@@ -2602,7 +2588,7 @@ block_free(drv_mem* mem, uint64_t rblock_id, uint32_t n_rblocks, char* msg)
 			(int32_t)as_aaf_uint32(&p_wblock_state->inuse_sz, -(int32_t)size);
 
 	cf_assert(resulting_inuse_sz >= 0 &&
-			resulting_inuse_sz < (int64_t)MEM_WRITE_BLOCK_SIZE, AS_DRV_MEM,
+			resulting_inuse_sz < (int64_t)WBLOCK_SZ, AS_DRV_MEM,
 			"%s: %s: wblock %d %s, subtracted %d now %ld", mem->name, msg,
 			wblock_id, resulting_inuse_sz < 0 ? "over-freed" : "bad inuse_sz",
 			(int32_t)size, resulting_inuse_sz);
@@ -2730,7 +2716,7 @@ run_defrag(void* pv_data)
 
 		defrag_wblock(mem, wblock_id);
 
-		uint32_t sleep_us = ns->storage_defrag_sleep;
+		uint32_t sleep_us = as_load_uint32(&ns->storage_defrag_sleep);
 
 		if (sleep_us != 0) {
 			usleep(sleep_us);
@@ -2767,7 +2753,7 @@ defrag_wblock(drv_mem* mem, uint32_t wblock_id)
 
 	uint32_t indent = 0; // current offset within the wblock, in bytes
 
-	while (indent < MEM_WRITE_BLOCK_SIZE &&
+	while (indent < WBLOCK_SZ &&
 			as_load_uint32(&p_wblock_state->inuse_sz) != 0) {
 		const as_flat_record* flat = (const as_flat_record*)&mem_buf[indent];
 
@@ -2789,8 +2775,7 @@ defrag_wblock(drv_mem* mem, uint32_t wblock_id)
 		uint32_t record_size = N_RBLOCKS_TO_SIZE(flat->n_rblocks);
 		uint32_t next_indent = indent + record_size;
 
-		if (record_size < DRV_RECORD_MIN_SIZE ||
-				next_indent > MEM_WRITE_BLOCK_SIZE) {
+		if (record_size < DRV_RECORD_MIN_SIZE || next_indent > WBLOCK_SZ) {
 			cf_warning(AS_DRV_MEM, "%s: bad record size %u", mem->name,
 					record_size);
 			indent += RBLOCK_SIZE;
@@ -2907,20 +2892,19 @@ defrag_move_record(drv_mem* src_mem, uint32_t src_wblock_id,
 
 	// Check if there's enough space in defrag buffer - if not, enqueue it to be
 	// flushed to device, and grab a new buffer.
-	if (write_size > MEM_WRITE_BLOCK_SIZE - mwb->pos) {
+	if (write_size > WBLOCK_SZ - mwb->pos) {
 		if (mem->shadow_name != NULL) {
 			// Enqueue the buffer, to be flushed to device.
 			push_wblock_to_shadow_q(mem, mwb);
 		}
 		else {
-			memset(&mwb->base_addr[mwb->pos], 0,
-					MEM_WRITE_BLOCK_SIZE - mwb->pos);
-			mem_mprotect(mwb->base_addr, MEM_WRITE_BLOCK_SIZE, PROT_READ);
+			memset(&mwb->base_addr[mwb->pos], 0, WBLOCK_SZ - mwb->pos);
+			mem_mprotect(mwb->base_addr, WBLOCK_SZ, PROT_READ);
 			mwb_release_all_vacated_wblocks(mwb);
 			mwb_release(mem, mwb);
 		}
 
-		as_incr_uint64(&mem->n_defrag_wblock_writes);
+		mem->n_defrag_wblock_writes++;
 
 		// Get the new buffer.
 		while ((mwb = mwb_get(mem, true)) == NULL) {
@@ -3108,7 +3092,21 @@ log_stats(drv_mem* mem, uint64_t* p_prev_n_total_writes,
 	uint64_t n_total_writes = n_defrag_writes;
 
 	for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-		n_total_writes += mem->current_mwbs[c].n_wblocks_written;
+		n_total_writes += mem->current_mwbs[c].n_wblock_writes;
+	}
+
+	uint64_t n_defrag_partial_writes = 0;
+	uint64_t n_total_partial_writes = 0;
+
+	if (mem->shadow_name != NULL) {
+		n_defrag_partial_writes =
+					as_load_uint64(&mem->n_defrag_wblock_partial_writes);
+		n_total_partial_writes = n_defrag_partial_writes;
+
+		for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+			n_total_partial_writes +=
+					mem->current_mwbs[c].n_wblock_partial_writes;
+		}
 	}
 
 	uint64_t n_defrag_io_skips =
@@ -3148,11 +3146,15 @@ log_stats(drv_mem* mem, uint64_t* p_prev_n_total_writes,
 	}
 
 	char shadow_str[64];
+	char pf_str[128];
 
 	*shadow_str = 0;
+	*pf_str = 0;
 
 	if (mem->shadow_name != NULL) {
 		sprintf(shadow_str, " write-q %u", cf_queue_sz(mem->mwb_shadow_q));
+		sprintf(pf_str, " partial-writes %lu defrag-partial-writes %lu",
+				n_total_partial_writes, n_defrag_partial_writes);
 	}
 
 	uint32_t free_wblock_q_sz = cf_queue_sz(mem->free_wblock_q);
@@ -3168,11 +3170,12 @@ log_stats(drv_mem* mem, uint64_t* p_prev_n_total_writes,
 			n_defrag_writes, defrag_write_rate,
 			shadow_str, tomb_raider_str);
 
-	cf_detail(AS_DRV_MEM, "{%s} %s: free-wblocks (%u,%u) defrag-io-skips (%lu,%.1f) direct-frees (%lu,%.1f)",
+	cf_detail(AS_DRV_MEM, "{%s} %s: free-wblocks (%u,%u) defrag-io-skips (%lu,%.1f) direct-frees (%lu,%.1f)%s",
 			mem->ns->name, mem->name,
 			free_wblock_q_sz, n_pristine_wblocks,
 			n_defrag_io_skips, defrag_io_skip_rate,
-			n_direct_frees, direct_free_rate);
+			n_direct_frees, direct_free_rate,
+			pf_str);
 
 	*p_prev_n_total_writes = n_total_writes;
 	*p_prev_n_defrag_reads = n_defrag_reads;
@@ -3214,7 +3217,7 @@ static void
 flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 {
 	current_mwb* cur_mwb = &mem->current_mwbs[which];
-	uint64_t n_writes = as_load_uint64(&cur_mwb->n_wblocks_written);
+	uint64_t n_writes = as_load_uint64(&cur_mwb->n_wblock_writes);
 
 	// If there's an active write load, we don't need to flush.
 	if (n_writes != *p_prev_n_writes) {
@@ -3224,7 +3227,7 @@ flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 
 	cf_mutex_lock(&cur_mwb->lock);
 
-	n_writes = as_load_uint64(&cur_mwb->n_wblocks_written);
+	n_writes = as_load_uint64(&cur_mwb->n_wblock_writes);
 
 	// Must check under the lock, could be racing a current mwb just queued.
 	if (n_writes != *p_prev_n_writes) {
@@ -3239,21 +3242,20 @@ flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 
 	mem_write_block* mwb = cur_mwb->mwb;
 
-	static __thread uint8_t* buf = NULL;
-	off_t write_offset = 0;
+	uint64_t write_offset = 0;
+	size_t write_sz = 0;
+	uint8_t* buf = NULL;
 
-	if (mwb && mwb->dirty) {
-		if (buf == NULL) {
-			buf = cf_valloc(MEM_WRITE_BLOCK_SIZE);
-		}
-
-		memset(&mwb->base_addr[mwb->pos], 0, MEM_WRITE_BLOCK_SIZE - mwb->pos);
+	if (mwb != NULL && mwb->pos != mwb->flush_pos) {
 		mem_wait_writers_done(mwb);
 
-		mwb->dirty = false;
+		write_offset = WBLOCK_ID_TO_OFFSET(mwb->wblock_id) + mwb->flush_pos;
+		write_sz = mwb->pos - mwb->flush_pos;
 
-		// Save a copy to flush outside lock.
-		write_offset = shadow_fill_flush_buf(mem, mwb, buf);
+		buf = encrypt_wblock(mwb, write_offset) + mwb->flush_pos;
+
+		mwb->flush_pos = mwb->pos;
+
 		as_incr_uint32(&mwb->n_writers);
 	}
 
@@ -3261,8 +3263,10 @@ flush_current_mwb(drv_mem* mem, uint8_t which, uint64_t* p_prev_n_writes)
 
 	if (write_offset != 0) {
 		// Flush it.
-		shadow_flush_buf(mem, buf, write_offset);
+		shadow_flush_buf(mem, buf, write_offset, write_sz);
 		as_decr_uint32_rls(&mwb->n_writers);
+
+		cur_mwb->n_wblock_partial_writes++;
 	}
 }
 
@@ -3294,16 +3298,23 @@ flush_defrag_mwb(drv_mem* mem, uint64_t* p_prev_n_defrag_writes)
 
 	mem_write_block* mwb = mem->defrag_mwb;
 
-	if (mwb && mwb->n_vacated != 0) {
-		// May not need memset for memory-only, but do it anyway.
-		memset(&mwb->base_addr[mwb->pos], 0, MEM_WRITE_BLOCK_SIZE - mwb->pos);
-
+	if (mwb != NULL && mwb->n_vacated != 0) {
 		if (mem->shadow_name != NULL) {
-			shadow_flush_mwb(mem, mwb);
+			uint64_t write_offset = WBLOCK_ID_TO_OFFSET(mwb->wblock_id) +
+					mwb->flush_pos;
+			size_t write_sz = mwb->pos - mwb->flush_pos;
+
+			uint8_t* buf = encrypt_wblock(mwb, write_offset) + mwb->flush_pos;
+
+			mwb->flush_pos = mwb->pos;
+
+			shadow_flush_buf(mem, buf, write_offset, write_sz);
 		}
 
-		// The whole point - free source wblocks.
+		// The whole point - free source wblocks, sets n_vacated to 0.
 		mwb_release_all_vacated_wblocks(mwb);
+
+		mem->n_defrag_wblock_partial_writes++;
 	}
 
 	cf_mutex_unlock(&mem->defrag_lock);
@@ -3344,8 +3355,9 @@ defrag_sweep(drv_mem* mem)
 static mem_write_block*
 mwb_create(drv_mem* mem)
 {
-	mem_write_block* mwb =
-			(mem_write_block*)cf_malloc(sizeof(mem_write_block));
+	mem_write_block* mwb = (mem_write_block*)cf_malloc(sizeof(mem_write_block));
+
+	mwb->encrypted_buf = NULL;
 
 	mwb->n_vacated = 0;
 	mwb->vacated_capacity = VACATED_CAPACITY_STEP;
@@ -3359,15 +3371,18 @@ static void
 mwb_destroy(mem_write_block* mwb)
 {
 	cf_free(mwb->vacated_wblocks);
+	// Note - encrypted_buf will have been freed.
+
 	cf_free(mwb);
 }
 
 static void
 mwb_reset(mem_write_block* mwb)
 {
-	mwb->dirty = false;
+	mwb->flush_pos = 0;
 	mwb->wblock_id = STORAGE_INVALID_WBLOCK;
 	mwb->pos = 0;
+	// Note - encrypted_buf will have been freed and NULL'd.
 }
 
 // Not static - called by split function.
@@ -3423,7 +3438,7 @@ mwb_get(drv_mem* mem, bool use_reserve)
 	if (CF_QUEUE_OK != cf_queue_pop(mem->mwb_free_q, &mwb, CF_QUEUE_NOWAIT)) {
 		mwb = mwb_create(mem);
 		mwb->n_writers = 0;
-		mwb->dirty = false;
+		mwb->flush_pos = 0;
 		mwb->mem = mem;
 		mwb->wblock_id = STORAGE_INVALID_WBLOCK;
 		mwb->pos = 0;
@@ -3436,10 +3451,9 @@ mwb_get(drv_mem* mem, bool use_reserve)
 		return NULL;
 	}
 
-	mwb->base_addr = mem->mem_base_addr +
-			(uint64_t)mwb->wblock_id * MEM_WRITE_BLOCK_SIZE;
+	mwb->base_addr = mem->mem_base_addr + (uint64_t)mwb->wblock_id * WBLOCK_SZ;
 
-	mem_mprotect(mwb->base_addr, MEM_WRITE_BLOCK_SIZE, PROT_READ | PROT_WRITE);
+	mem_mprotect(mwb->base_addr, WBLOCK_SZ, PROT_READ | PROT_WRITE);
 
 	mem_wblock_state* p_wblock_state = &mem->wblock_state[mwb->wblock_id];
 
@@ -3539,7 +3553,7 @@ mem_mprotect(void* addr, size_t len, int prot)
 static void
 prepare_for_first_write(mem_write_block* mwb)
 {
-	memset(mwb->base_addr, 0, MEM_WRITE_BLOCK_SIZE);
+	memset(mwb->base_addr, 0, WBLOCK_SZ);
 
 	as_flat_record* first = (as_flat_record*)mwb->base_addr;
 
@@ -3579,53 +3593,56 @@ shadow_fd_put(drv_mem* mem, int fd)
 static void
 shadow_flush_mwb(drv_mem* mem, mem_write_block* mwb)
 {
-	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(mwb->wblock_id);
+	memset(&mwb->base_addr[mwb->pos], 0, WBLOCK_SZ - mwb->pos);
+	mem_wait_writers_done(mwb);
+	mem_mprotect(mwb->base_addr, WBLOCK_SZ, PROT_READ);
 
-	// The only place we ever encrypt.
+	uint64_t write_offset =
+			WBLOCK_ID_TO_OFFSET(mwb->wblock_id) + mwb->flush_pos;
+
 	uint8_t* buf = encrypt_wblock(mwb, write_offset);
 
-	int fd = shadow_fd_get(mem);
-	uint64_t start_ns = mem->ns->storage_benchmarks_enabled ? cf_getns() : 0;
-
-	if (! pwrite_all(fd, buf, MEM_WRITE_BLOCK_SIZE, write_offset)) {
-		cf_crash(AS_DRV_MEM, "%s: DEVICE FAILED write: errno %d (%s)",
-				mem->shadow_name, errno, cf_strerror(errno));
+	// Clean the end of the buffer before flushing.
+	if (mwb->encrypted_buf != NULL && mwb->pos < WBLOCK_SZ) {
+		memset(&mwb->encrypted_buf[mwb->pos], 0, WBLOCK_SZ - mwb->pos);
 	}
 
-	if (start_ns != 0) {
-		histogram_insert_data_point(mem->hist_shadow_write, start_ns);
+	shadow_flush_buf(mem, buf + mwb->flush_pos, write_offset,
+			WBLOCK_SZ - mwb->flush_pos);
+
+	if (mwb->encrypted_buf != NULL) {
+		cf_free(mwb->encrypted_buf);
+		mwb->encrypted_buf = NULL;
 	}
-
-	shadow_fd_put(mem, fd);
-}
-
-static off_t
-shadow_fill_flush_buf(drv_mem* mem, mem_write_block* mwb, uint8_t* buf)
-{
-	off_t write_offset = (off_t)WBLOCK_ID_TO_OFFSET(mwb->wblock_id);
-
-	// The only place we ever encrypt.
-	uint8_t* mwb_buf = encrypt_wblock(mwb, write_offset);
-
-	// Save a copy to flush outside the lock.
-	memcpy(buf, mwb_buf, MEM_WRITE_BLOCK_SIZE);
-
-	return write_offset;
 }
 
 static void
-shadow_flush_buf(drv_mem* mem, const uint8_t* buf, off_t write_offset)
+shadow_flush_buf(drv_mem* mem, const uint8_t* buf, off_t write_offset,
+		uint64_t write_sz)
 {
+	uint32_t flush_sz = as_load_uint32(&mem->ns->storage_flush_size);
+
+	uint64_t flush_offset = BYTES_DOWN_TO_FLUSH(flush_sz, write_offset);
+	uint64_t flush_end = BYTES_UP_TO_FLUSH(flush_sz, write_offset + write_sz);
+	const uint8_t* flush = buf - (write_offset - flush_offset);
+
 	int fd = shadow_fd_get(mem);
-	uint64_t start_ns = mem->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
-	if (! pwrite_all(fd, buf, MEM_WRITE_BLOCK_SIZE, write_offset)) {
-		cf_crash(AS_DRV_MEM, "%s: DEVICE FAILED write: errno %d (%s)",
-				mem->shadow_name, errno, cf_strerror(errno));
-	}
+	while (flush_offset < flush_end) {
+		uint64_t start_ns = mem->ns->storage_benchmarks_enabled ?
+				cf_getns() : 0;
 
-	if (start_ns != 0) {
-		histogram_insert_data_point(mem->hist_shadow_write, start_ns);
+		if (! pwrite_all(fd, flush, flush_sz, (off_t)flush_offset)) {
+			cf_crash(AS_DRV_MEM, "%s: DEVICE FAILED write: errno %d (%s)",
+					mem->shadow_name, errno, cf_strerror(errno));
+		}
+
+		if (start_ns != 0) {
+			histogram_insert_data_point(mem->hist_shadow_write, start_ns);
+		}
+
+		flush += flush_sz;
+		flush_offset += flush_sz;
 	}
 
 	shadow_fd_put(mem, fd);

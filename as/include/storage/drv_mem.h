@@ -75,7 +75,7 @@ typedef struct vacated_wblock_s {
 // Where records accumulate until flushed to device.
 typedef struct mem_write_block_s {
 	uint32_t			n_writers;	// number of concurrent writers
-	bool				dirty;		// written to since last flushed
+	uint32_t			flush_pos;	// pos on last flush
 	uint32_t			n_vacated;
 	uint32_t			vacated_capacity;
 	vacated_wblock*		vacated_wblocks;
@@ -84,6 +84,7 @@ typedef struct mem_write_block_s {
 	uint8_t*			base_addr;
 	uint32_t			first_dirty_pos;
 	uint32_t			pos;
+	uint8_t*			encrypted_buf;	// relevant for enterprise edition only
 } mem_write_block;
 
 // Per-wblock information.
@@ -100,7 +101,8 @@ typedef struct current_mwb_s {
 	cf_mutex		lock;				// lock protects writes to mwb
 	mem_write_block* mwb;				// mwb currently being filled by writes
 	uint8_t*		encrypted_commits;	// relevant for enterprise edition only
-	uint64_t		n_wblocks_written;	// total number of mwbs added to the mwb_write_q by writes
+	uint64_t		n_wblock_writes;	// total number of mwbs added to the mwb_write_q by writes
+	uint64_t		n_wblock_partial_writes;	// total number of mwbs "partial flushed" by writes
 } current_mwb;
 
 // Per-device information.
@@ -133,6 +135,7 @@ typedef struct drv_mem_s {
 
 	uint64_t		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
 	uint64_t		n_defrag_wblock_writes;	// total number of mwbs added to the mwb_write_q by defrag
+	uint64_t		n_defrag_wblock_partial_writes;	// total number of mwbs "partial flushed" by defrag
 
 	uint64_t		n_wblock_defrag_io_skips;	// total number of wblocks empty on defrag_wblock_q pop
 	uint64_t		n_wblock_direct_frees;		// total number of wblocks freed by other than defrag
@@ -165,6 +168,7 @@ typedef struct drv_mem_s {
 	uint64_t		record_add_evicted_counter;		// records not inserted due to eviction
 	uint64_t		record_add_replace_counter;		// records reinserted
 	uint64_t		record_add_unique_counter;		// records inserted
+	uint64_t		record_add_unparsable_counter;	// unparsable records not inserted
 
 	cf_tid			shadow_tid;
 
@@ -192,8 +196,6 @@ typedef struct drv_mems_s {
 	int n_mems;
 	drv_mem mems[];
 } drv_mems;
-
-#define MEM_WRITE_BLOCK_SIZE (8 * 1024 * 1024)
 
 
 //==========================================================
@@ -233,35 +235,7 @@ void mem_mprotect(void *addr, size_t len, int prot);
 int shadow_fd_get(drv_mem* mem);
 
 void decrypt_record(drv_mem* mem, uint64_t off, struct as_flat_record_s* flat);
-uint8_t* encrypt_wblock(const mem_write_block* mwb, uint64_t off);
-
-// Convert byte offset to wblock_id.
-static inline uint32_t
-OFFSET_TO_WBLOCK_ID(uint64_t offset)
-{
-	return (uint32_t)(offset / MEM_WRITE_BLOCK_SIZE);
-}
-
-// Convert wblock_id to byte offset.
-static inline uint64_t
-WBLOCK_ID_TO_OFFSET(uint32_t wblock_id)
-{
-	return (uint64_t)wblock_id * MEM_WRITE_BLOCK_SIZE;
-}
-
-// Convert rblock_id to wblock_id.
-static inline uint32_t
-RBLOCK_ID_TO_WBLOCK_ID(uint64_t rblock_id)
-{
-	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) / MEM_WRITE_BLOCK_SIZE);
-}
-
-// Convert rblock_id to 'pos' or 'indent' within wblock.
-static inline uint32_t
-RBLOCK_ID_TO_POS(uint64_t rblock_id)
-{
-	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) % MEM_WRITE_BLOCK_SIZE);
-}
+uint8_t* encrypt_wblock(mem_write_block* mwb, uint64_t off);
 
 // Round bytes down to a multiple of shadow's minimum IO operation size.
 static inline uint64_t

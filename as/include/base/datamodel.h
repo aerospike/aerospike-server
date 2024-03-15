@@ -650,6 +650,7 @@ typedef struct as_namespace_s {
 
 	uint64_t		drives_size; // usable size of all drives
 	uint32_t		storage_max_write_q; // storage_max_write_cache is converted to this
+	uint32_t	 	post_write_q_limit; // storage_post_write_cache is converted to this
 	uint32_t		n_wblocks_to_flush; // on write queues or shadow queues
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
 	uint32_t		defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
@@ -815,8 +816,9 @@ typedef struct as_namespace_s {
 	uint32_t		storage_evict_used_pct;
 	uint64_t		storage_filesize;
 	uint64_t		storage_flush_max_us;
+	uint32_t		storage_flush_size;
 	uint64_t		storage_max_write_cache;
-	uint32_t	 	storage_post_write_queue; // number of swbs/device held after writing to device
+	uint64_t		storage_post_write_cache;
 	bool			storage_read_page_cache;
 	bool			storage_serialize_tomb_raider; // relevant only for enterprise edition
 	bool			storage_sindex_startup_device_scan;
@@ -824,7 +826,6 @@ typedef struct as_namespace_s {
 	uint32_t		storage_stop_writes_used_pct;
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 	uint64_t		storage_data_size;
-	uint32_t		storage_write_block_size;
 
 	bool			geo2dsphere_within_strict;
 	uint16_t		geo2dsphere_within_min_level;

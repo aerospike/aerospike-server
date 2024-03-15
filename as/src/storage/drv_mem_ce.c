@@ -190,7 +190,7 @@ decrypt_record(drv_mem* mem, uint64_t off, as_flat_record* flat)
 }
 
 uint8_t*
-encrypt_wblock(const mem_write_block* mwb, uint64_t off)
+encrypt_wblock(mem_write_block* mwb, uint64_t off)
 {
 	return mwb->base_addr;
 }

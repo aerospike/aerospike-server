@@ -102,6 +102,7 @@ as_namespace_create(char *name)
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
 	ns->index_stage_size = 1024L * 1024L * 1024L; // 1G
+	ns->max_record_size = 1024 * 1024; // 1M
 	ns->migrate_order = 5;
 	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds
 	ns->migrate_sleep = 1;
@@ -125,13 +126,13 @@ as_namespace_create(char *name)
 
 	ns->storage_type = AS_STORAGE_ENGINE_UNDEFINED;
 
-	ns->storage_write_block_size = 1024 * 1024;
 	ns->storage_defrag_lwm_pct = 50; // defrag if occupancy of block is < 50%
 	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock
 	ns->storage_encryption = AS_ENCRYPTION_AES_128;
 	ns->storage_flush_max_us = 1000 * 1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
+	ns->storage_flush_size = 1024 * 1024; // 1M
 	ns->storage_max_write_cache = DEFAULT_MAX_WRITE_CACHE;
-	ns->storage_post_write_queue = DEFAULT_POST_WRITE_QUEUE; // number of wblocks per device used as post-write cache
+	ns->storage_post_write_cache = DEFAULT_POST_WRITE_CACHE; // bytes per device used as post-write cache
 	ns->storage_stop_writes_avail_pct = 5; // stop writes when < 5% disk is writable
 	ns->storage_stop_writes_used_pct = 70; // stop writes when > 70% disk is used
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read

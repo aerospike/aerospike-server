@@ -4741,6 +4741,8 @@ add_data_stripe_stats(as_namespace* ns, cf_dyn_buf* db)
 
 		if (ns->n_storage_shadows != 0) {
 			info_append_indexed_uint32(db, tag, i, "backing_write_q", stats.shadow_write_q_sz);
+			info_append_indexed_uint64(db, tag, i, "partial_writes", stats.n_partial_writes);
+			info_append_indexed_uint64(db, tag, i, "defrag_partial_writes", stats.n_defrag_partial_writes);
 
 			// Can't tell if this is local or remote - just try it.
 			info_append_indexed_int(db, tag, i, "age",
@@ -4767,10 +4769,12 @@ add_data_device_stats(as_namespace* ns, cf_dyn_buf* db)
 
 		info_append_indexed_uint32(db, tag, i, "write_q", stats.write_q_sz);
 		info_append_indexed_uint64(db, tag, i, "writes", stats.n_writes);
+		info_append_indexed_uint64(db, tag, i, "partial_writes", stats.n_partial_writes);
 
 		info_append_indexed_uint32(db, tag, i, "defrag_q", stats.defrag_q_sz);
 		info_append_indexed_uint64(db, tag, i, "defrag_reads", stats.n_defrag_reads);
 		info_append_indexed_uint64(db, tag, i, "defrag_writes", stats.n_defrag_writes);
+		info_append_indexed_uint64(db, tag, i, "defrag_partial_writes", stats.n_defrag_partial_writes);
 
 		if (ns->n_storage_shadows != 0) {
 			info_append_indexed_uint32(db, tag, i, "shadow_write_q", stats.shadow_write_q_sz);

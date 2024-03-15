@@ -38,6 +38,7 @@
 
 #include "fabric/partition.h"
 #include "storage/flat.h"
+#include "storage/storage.h"
 
 
 //==========================================================
@@ -189,6 +190,56 @@ static inline uint64_t
 RBLOCK_ID_TO_OFFSET(uint64_t rblock_id)
 {
 	return rblock_id << LOG_2_RBLOCK_SIZE;
+}
+
+//
+// Conversions between bytes/rblocks and wblocks.
+//
+
+// Convert byte offset to wblock_id.
+static inline uint32_t
+OFFSET_TO_WBLOCK_ID(uint64_t offset)
+{
+	return (uint32_t)(offset / WBLOCK_SZ);
+}
+
+// Convert wblock_id to byte offset.
+static inline uint64_t
+WBLOCK_ID_TO_OFFSET(uint32_t wblock_id)
+{
+	return (uint64_t)wblock_id * WBLOCK_SZ;
+}
+
+// Convert rblock_id to wblock_id.
+static inline uint32_t
+RBLOCK_ID_TO_WBLOCK_ID(uint64_t rblock_id)
+{
+	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) / WBLOCK_SZ);
+}
+
+// Convert rblock_id to 'pos' or 'indent' within wblock.
+static inline uint32_t
+RBLOCK_ID_TO_POS(uint64_t rblock_id)
+{
+	return (uint32_t)((rblock_id << LOG_2_RBLOCK_SIZE) % WBLOCK_SZ);
+}
+
+//
+// Round to flush quanta.
+//
+
+// Round bytes down to a multiple of flush size.
+static inline uint64_t
+BYTES_DOWN_TO_FLUSH(uint64_t flush_sz, uint64_t bytes)
+{
+	return bytes & -flush_sz;
+}
+
+// Round bytes up to a multiple of flush size.
+static inline uint64_t
+BYTES_UP_TO_FLUSH(uint64_t flush_sz, uint64_t bytes)
+{
+	return (bytes + (flush_sz - 1)) & -flush_sz;
 }
 
 //
