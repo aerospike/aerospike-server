@@ -518,7 +518,12 @@ read_local(as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
-	if (! as_read_touch_check(r, tr)) {
+	if ((result = as_read_touch_check(r, tr)) != 0) {
+		if (result < 0) {
+			read_local_done(tr, &r_ref, NULL, AS_ERR_PARAMETER);
+			return TRANS_DONE_ERROR;
+		}
+
 		// Re-queued expecting a proxy to master.
 		as_record_done(&r_ref, ns);
 		return TRANS_WAITING;

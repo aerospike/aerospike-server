@@ -133,26 +133,35 @@ rt_update_stats(as_namespace* ns, uint8_t result_code)
 // Public API.
 //
 
-bool
+// Returns:
+//  0: finish read, don't touch
+//  1: need touch but reading prole - re-queue read and force proxy to master
+// -1: bad input from client
+int
 as_read_touch_check(as_record* r, as_transaction* tr)
 {
 	if (r->void_time == 0) {
-		return true; // no need to touch
+		return 0; // no need to touch
 	}
 
 	as_namespace* ns = tr->rsv.ns;
 	uint32_t rt_ttl_pct = tr->msgp->msg.record_ttl;
 
 	if (rt_ttl_pct == NEVER_TOUCH) {
-		return true; // overrides config
+		return 0; // overrides config
 	}
 
 	if (rt_ttl_pct == USE_CONFIG_DEFAULT) {
 		rt_ttl_pct = default_rt_ttl_pct(ns, as_namespace_get_record_set(ns, r));
 
 		if (rt_ttl_pct == 0) {
-			return true;
+			return 0;
 		}
+	}
+	else if (rt_ttl_pct > 100) {
+		cf_warning(AS_RW, "{%s} bad read-touch-ttl-pct %u reading %pD",
+				ns->name, rt_ttl_pct, &r->keyd);
+		return -1;
 	}
 
 	uint32_t write_ttl = r->void_time - (r->last_update_time / 1000);
@@ -162,7 +171,7 @@ as_read_touch_check(as_record* r, as_transaction* tr)
 	uint32_t now = cf_clepoch_seconds();
 
 	if (now < threshold_void_time) {
-		return true;
+		return 0;
 	}
 	// else - need a touch.
 
@@ -171,12 +180,12 @@ as_read_touch_check(as_record* r, as_transaction* tr)
 	if ((tr->flags & AS_TRANSACTION_FLAG_RSV_PROLE) != 0) {
 		tr->from_flags |= FROM_FLAG_RESTART_STRICT;
 		retry_read(tr);
-		return false;
+		return 1;
 	}
 
 	rt_enqueue(ns, &r->keyd, write_ttl);
 
-	return true;
+	return 0;
 }
 
 transaction_status

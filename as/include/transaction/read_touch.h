@@ -26,8 +26,6 @@
 // Includes.
 //
 
-#include <stdbool.h>
-
 #include "base/transaction.h"
 
 
@@ -43,5 +41,5 @@ struct as_transaction_s;
 // Public API.
 //
 
-bool as_read_touch_check(struct as_index_s* r, struct as_transaction_s* tr);
+int as_read_touch_check(struct as_index_s* r, struct as_transaction_s* tr);
 transaction_status as_read_touch_start(struct as_transaction_s* tr);

@@ -4715,7 +4715,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		sprintf(hist_name, "{%s}-object-size-log2", ns->name);
 		ns->obj_size_log_hist = histogram_create(hist_name, HIST_SIZE);
 		sprintf(hist_name, "{%s}-object-size-linear", ns->name);
-		ns->obj_size_lin_hist = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, WBLOCK_SZ, OBJ_SIZE_HIST_NUM_BUCKETS);
+		ns->obj_size_lin_hist = linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, ns->max_record_size, OBJ_SIZE_HIST_NUM_BUCKETS);
 
 		sprintf(hist_name, "{%s}-evict", ns->name);
 		ns->evict_hist = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, ns->evict_hist_buckets);
