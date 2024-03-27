@@ -335,13 +335,16 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 	switch (type) {
 	case MSGPACK_TYPE_NIL:
 		strcpy(str->str, "nil");
-		return true;
+
+		return msgpack_sz(mp) != 0;
 	case MSGPACK_TYPE_FALSE:
 		strcpy(str->str, "false");
-		return true;
+
+		return msgpack_sz(mp) != 0;
 	case MSGPACK_TYPE_TRUE:
 		strcpy(str->str, "true");
-		return true;
+
+		return msgpack_sz(mp) != 0;
 	case MSGPACK_TYPE_NEGINT:
 	case MSGPACK_TYPE_INT: {
 		int64_t v;
@@ -445,10 +448,12 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 	}
 	case MSGPACK_TYPE_CMP_WILDCARD:
 		strcpy(str->str, "*");
-		return true;
+
+		return msgpack_sz(mp) != 0;
 	case MSGPACK_TYPE_CMP_INF:
 		strcpy(str->str, "inf");
-		return true;
+
+		return msgpack_sz(mp) != 0;
 	default:
 		break;
 	}
