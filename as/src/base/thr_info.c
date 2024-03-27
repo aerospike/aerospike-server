@@ -5049,7 +5049,7 @@ debug_record(char* params, cf_dyn_buf* db, bool all_data)
 	db_append_uint32(db, "rc", r->rc);
 	db_append_uint32(db, "tree-id", r->tree_id);
 	db_append_uint32(db, "color", r->color);
-	db_append_format(db, "keyd", "%pD", &r->keyd);
+	db_append_format(db, "keyd", "%D", &r->keyd); // not %pD (as used for logs)
 	db_append_uint64_x(db, "left", r->left_h);
 	db_append_uint64_x(db, "right", r->right_h);
 	db_append_uint32(db, "set-id", r->set_id_bits);
