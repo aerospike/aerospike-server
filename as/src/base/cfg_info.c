@@ -2142,6 +2142,12 @@ cfg_set_namespace(const char* cmd)
 		ns->storage_flush_max_us = (uint64_t)val * 1000;
 	}
 	else if (as_info_parameter_get(cmd, "flush-size", v, &v_len) == 0) {
+		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY &&
+				ns->n_storage_shadows == 0) {
+			cf_warning(AS_INFO, "ns %s, can't set flush-size if storage-engine memory with no backing",
+					ns->name);
+			return false;
+		}
 		if (ns->storage_type == AS_STORAGE_ENGINE_PMEM) {
 			cf_warning(AS_INFO, "ns %s, can't set flush-size if storage-engine pmem",
 					ns->name);

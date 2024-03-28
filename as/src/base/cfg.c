@@ -3139,6 +3139,7 @@ as_config_init(const char* config_file)
 					break;
 				case CASE_NAMESPACE_STORAGE_DEVICE:
 					ns->storage_type = AS_STORAGE_ENGINE_SSD;
+					ns->storage_flush_size = DEFAULT_FLUSH_SIZE;
 					cfg_begin_context(&state, NAMESPACE_STORAGE_DEVICE);
 					break;
 				case CASE_NOT_FOUND:
@@ -3461,6 +3462,12 @@ as_config_init(const char* config_file)
 				}
 				if (ns->n_storage_shadows != 0 && ns->storage_data_size != 0) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure 'data-size' if using storage backing", ns->name);
+				}
+				if (ns->n_storage_shadows == 0 && ns->storage_flush_size != 0) {
+					cf_crash_nostack(AS_CFG, "{%s} can't configure 'flush-size' if not using storage backing", ns->name);
+				}
+				if (ns->n_storage_shadows != 0 && ns->storage_flush_size == 0) {
+					ns->storage_flush_size = DEFAULT_FLUSH_SIZE; // set default if using storage backing
 				}
 				if (ns->n_storage_files != 0 && ns->storage_filesize == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);

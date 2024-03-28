@@ -130,7 +130,7 @@ as_namespace_create(char *name)
 	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock
 	ns->storage_encryption = AS_ENCRYPTION_AES_128;
 	ns->storage_flush_max_us = 1000 * 1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
-	ns->storage_flush_size = 1024 * 1024; // 1M
+	ns->storage_flush_size = 0; // will be set later to DEFAULT_FLUSH_SIZE (1M) if applicable and not explicitly configured
 	ns->storage_max_write_cache = DEFAULT_MAX_WRITE_CACHE;
 	ns->storage_post_write_cache = DEFAULT_POST_WRITE_CACHE; // bytes per device used as post-write cache
 	ns->storage_stop_writes_avail_pct = 5; // stop writes when < 5% disk is writable
