@@ -315,6 +315,8 @@ as_health_start()
 
 	as_exchange_register_listener(cluster_state_changed_fn, NULL);
 
+	g_health_enabled = g_config.health_check_enabled;
+
 	cf_info(AS_HEALTH, "starting health monitor thread");
 
 	cf_thread_create_detached(run_health, NULL);
