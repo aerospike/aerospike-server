@@ -2009,6 +2009,7 @@ as_storage_dump_wb_summary_ssd(const as_namespace* ns)
 	// Not bothering with more suitable linear_hist API ... use what's there.
 	linear_hist_save_info(h);
 	linear_hist_get_info(h, &db);
+	cf_dyn_buf_append_char(&db, '\0');
 
 	cf_info(AS_DRV_SSD, "WB: wblocks with zero used-sz - %u", n_zero_used_sz);
 	cf_info(AS_DRV_SSD, "WB: wblocks by (non-zero) used-sz - %s", db.buf);
