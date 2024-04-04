@@ -3475,10 +3475,10 @@ as_config_init(const char* config_file)
 				if (ns->n_storage_shadows == 0 && ns->storage_encryption_key_file != NULL) {
 					cf_crash_nostack(AS_CFG, "{%s} 'encryption-key-file' is only relevant if using storage backing", ns->name);
 				}
-				if (ns->storage_commit_to_device && ns->n_storage_shadows == 0)	{
+				if (ns->storage_commit_to_device && ns->n_storage_shadows == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} 'commit-to-device' guarantee is automatic if not using storage backing", ns->name);
 				}
-				if (ns->storage_commit_to_device && ns->storage_disable_odsync)	{
+				if (ns->storage_commit_to_device && ns->storage_disable_odsync) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);
 				}
 				if (ns->storage_compression_acceleration != 0 && ns->storage_compression != AS_COMPRESSION_LZ4) {
@@ -3610,7 +3610,7 @@ as_config_init(const char* config_file)
 				if (ns->storage_filesize == 0) {
 					cf_crash_nostack(AS_CFG, "{%s} must configure 'filesize' if using storage files", ns->name);
 				}
-				if (ns->storage_commit_to_device && ns->storage_disable_odsync)	{
+				if (ns->storage_commit_to_device && ns->storage_disable_odsync) {
 					cf_crash_nostack(AS_CFG, "{%s} can't configure both 'commit-to-device' and 'disable-odsync'", ns->name);
 				}
 				if (ns->storage_compression_acceleration != 0 && ns->storage_compression != AS_COMPRESSION_LZ4) {
