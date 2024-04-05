@@ -522,7 +522,11 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 		info_append_uint32(db, "storage-engine.evict-used-pct", ns->storage_evict_used_pct);
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
-		info_append_uint32(db, "storage-engine.flush-size", ns->storage_flush_size);
+
+		if (ns->n_storage_shadows != 0) {
+			info_append_uint32(db, "storage-engine.flush-size", ns->storage_flush_size);
+		}
+
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.stop-writes-avail-pct", ns->storage_stop_writes_avail_pct);
 		info_append_uint32(db, "storage-engine.stop-writes-used-pct", ns->storage_stop_writes_used_pct);
