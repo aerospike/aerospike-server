@@ -3308,9 +3308,11 @@ as_config_init(const char* config_file)
 		case NAMESPACE_STORAGE_MEMORY:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_MEMORY_OPTS, NUM_NAMESPACE_STORAGE_MEMORY_OPTS)) {
 			case CASE_NAMESPACE_STORAGE_MEMORY_COMMIT_TO_DEVICE:
+				cfg_enterprise_only(&line);
 				ns->storage_commit_to_device = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION:
+				cfg_enterprise_only(&line);
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_COMPRESSION_OPTS, NUM_NAMESPACE_STORAGE_COMPRESSION_OPTS)) {
 				case CASE_NAMESPACE_STORAGE_COMPRESSION_NONE:
 					ns->storage_compression = AS_COMPRESSION_NONE;
@@ -3331,9 +3333,11 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_ACCELERATION:
+				cfg_enterprise_only(&line);
 				ns->storage_compression_acceleration = cfg_u32(&line, 1, 65537);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_COMPRESSION_LEVEL:
+				cfg_enterprise_only(&line);
 				ns->storage_compression_level = cfg_u32(&line, 1, 9);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_DATA_SIZE:
@@ -3364,6 +3368,7 @@ as_config_init(const char* config_file)
 				ns->storage_benchmarks_enabled = true;
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION:
+				cfg_enterprise_only(&line);
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_ENCRYPTION_OPTS, NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS))
 				{
 				case CASE_NAMESPACE_STORAGE_ENCRYPTION_AES_128:
@@ -3379,9 +3384,11 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_KEY_FILE:
+				cfg_enterprise_only(&line);
 				ns->storage_encryption_key_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION_OLD_KEY_FILE:
+				cfg_enterprise_only(&line);
 				ns->storage_encryption_old_key_file = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_EVICT_USED_PCT:
@@ -3406,6 +3413,7 @@ as_config_init(const char* config_file)
 				ns->storage_stop_writes_used_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_TOMB_RAIDER_SLEEP:
+				cfg_enterprise_only(&line);
 				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
 				break;
 			// Obsoleted:
