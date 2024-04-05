@@ -3310,12 +3310,12 @@ flush_defrag_mwb(drv_mem* mem, uint64_t* p_prev_n_defrag_writes)
 			mwb->flush_pos = mwb->pos;
 
 			shadow_flush_buf(mem, buf, write_offset, write_sz);
+
+			mem->n_defrag_wblock_partial_writes++;
 		}
 
 		// The whole point - free source wblocks, sets n_vacated to 0.
 		mwb_release_all_vacated_wblocks(mwb);
-
-		mem->n_defrag_wblock_partial_writes++;
 	}
 
 	cf_mutex_unlock(&mem->defrag_lock);

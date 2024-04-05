@@ -2248,10 +2248,10 @@ ssd_flush_defrag_swb(drv_ssd *ssd, uint64_t *p_prev_n_defrag_writes)
 			ssd_shadow_flush_buf(ssd, buf, write_offset, write_sz);
 		}
 
+		ssd->n_defrag_wblock_partial_writes++;
+
 		// The whole point - free source wblocks, sets n_vacated to 0.
 		swb_release_all_vacated_wblocks(swb);
-
-		ssd->n_defrag_wblock_partial_writes++;
 	}
 
 	cf_mutex_unlock(&ssd->defrag_lock);
