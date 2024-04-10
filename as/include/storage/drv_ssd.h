@@ -125,7 +125,8 @@ typedef struct drv_ssd_s {
 	const char		*name;				// this device's name
 	const char		*shadow_name;		// this device's shadow's name, if any
 
-	uint32_t		running;
+	bool			running;
+	bool			running_shadow;
 
 	current_swb		current_swbs[N_CURRENT_SWBS];
 
