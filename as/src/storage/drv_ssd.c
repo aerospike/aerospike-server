@@ -1652,7 +1652,7 @@ run_write(void *arg)
 {
 	drv_ssd *ssd = (drv_ssd*)arg;
 
-	while (ssd->running) {
+	while (ssd->running || cf_queue_sz(ssd->swb_write_q) != 0) {
 		ssd_write_buf *swb;
 
 		if (CF_QUEUE_OK != cf_queue_pop(ssd->swb_write_q, &swb, 100)) {
@@ -1690,7 +1690,7 @@ run_shadow(void *arg)
 {
 	drv_ssd *ssd = (drv_ssd*)arg;
 
-	while (ssd->running) {
+	while (ssd->running_shadow || cf_queue_sz(ssd->swb_shadow_q) != 0) {
 		ssd_write_buf *swb;
 
 		if (CF_QUEUE_OK != cf_queue_pop(ssd->swb_shadow_q, &swb, 100)) {
@@ -3801,6 +3801,10 @@ as_storage_init_ssd(as_namespace *ns)
 
 		ssd->running = true;
 
+		if (ssd->shadow_name) {
+			ssd->running_shadow = true;
+		}
+
 		// Some (non-dynamic) config shortcuts:
 		ssd->first_wblock_id = first_wblock_id;
 
@@ -4297,7 +4301,7 @@ as_storage_shutdown_ssd(as_namespace *ns)
 		cf_mutex_lock(&ssd->defrag_lock);
 
 		// Flush defrag swb by pushing it to write-q.
-		if (ssd->defrag_swb) {
+		if (ssd->defrag_swb != NULL) {
 			push_wblock_to_write_q(ssd, ssd->defrag_swb);
 			ssd->defrag_swb = NULL;
 		}
@@ -4305,16 +4309,6 @@ as_storage_shutdown_ssd(as_namespace *ns)
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
-
-		while (cf_queue_sz(ssd->swb_write_q) != 0) {
-			usleep(1000);
-		}
-
-		if (ssd->shadow_name) {
-			while (cf_queue_sz(ssd->swb_shadow_q) != 0) {
-				usleep(1000);
-			}
-		}
 
 		ssd->running = false;
 	}
@@ -4324,7 +4318,14 @@ as_storage_shutdown_ssd(as_namespace *ns)
 
 		cf_thread_join(ssd->write_tid);
 
-		if (ssd->shadow_name) {
+		// At this point nothing more can be added to the shadow queue.
+		ssd->running_shadow = false;
+	}
+
+	for (int i = 0; i < ssds->n_ssds; i++) {
+		drv_ssd *ssd = &ssds->ssds[i];
+
+		if (ssd->shadow_name != NULL) {
 			cf_thread_join(ssd->shadow_tid);
 		}
 	}
