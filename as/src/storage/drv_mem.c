@@ -1756,7 +1756,14 @@ run_mem_cold_start(void* udata)
 
 	cf_free(lri);
 
-	cf_info(AS_DRV_MEM, "device %s: reading device to load index", mem->name);
+	if (mem->shadow_name != NULL && ! mem->cold_start_local) {
+		cf_info(AS_DRV_MEM, "device %s: reading backing device %s to load index",
+				mem->name, mem->shadow_name);
+	}
+	else {
+		cf_info(AS_DRV_MEM, "device %s: reading device to load index",
+				mem->name);
+	}
 
 	cold_start_sweep(mems, mem);
 

@@ -2923,7 +2923,14 @@ run_ssd_cold_start(void *udata)
 
 	cf_free(lri);
 
-	cf_info(AS_DRV_SSD, "device %s: reading device to load index", ssd->name);
+	if (ssd->shadow_name != NULL && ! ssd->cold_start_local) {
+		cf_info(AS_DRV_SSD, "device %s: reading shadow device %s to load index",
+				ssd->name, ssd->shadow_name);
+	}
+	else {
+		cf_info(AS_DRV_SSD, "device %s: reading device to load index",
+				ssd->name);
+	}
 
 	ssd_cold_start_sweep(ssds, ssd);
 
