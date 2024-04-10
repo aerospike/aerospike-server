@@ -112,7 +112,7 @@ typedef struct drv_mem_s {
 	const char*		name;				// this device's name
 	const char*		shadow_name;		// this device's shadow's name, if any
 
-	uint32_t		running;
+	bool			running_shadow;
 
 	current_mwb		current_mwbs[N_CURRENT_SWBS];
 

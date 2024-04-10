@@ -286,7 +286,9 @@ as_storage_init_mem(as_namespace* ns)
 
 		cf_mutex_init(&mem->defrag_lock);
 
-		mem->running = true;
+		if (mem->shadow_name != NULL) {
+			mem->running_shadow = true;
+		}
 
 		// Some (non-dynamic) config shortcuts:
 		mem->first_wblock_id = first_wblock_id;
@@ -456,13 +458,7 @@ as_storage_shutdown_mem(struct as_namespace_s* ns)
 	for (int i = 0; i < mems->n_mems; i++) {
 		drv_mem* mem = &mems->mems[i];
 
-		if (mem->shadow_name != NULL) {
-			while (cf_queue_sz(mem->mwb_shadow_q) != 0) {
-				usleep(1000);
-			}
-		}
-
-		mem->running = false;
+		mem->running_shadow = false;
 	}
 
 	for (int i = 0; i < mems->n_mems; i++) {
@@ -2522,7 +2518,7 @@ run_shadow(void* arg)
 {
 	drv_mem* mem = (drv_mem*)arg;
 
-	while (mem->running) {
+	while (mem->running_shadow || cf_queue_sz(mem->mwb_shadow_q) != 0) {
 		mem_write_block* mwb;
 
 		if (CF_QUEUE_OK != cf_queue_pop(mem->mwb_shadow_q, &mwb, 100)) {
