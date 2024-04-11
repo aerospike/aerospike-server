@@ -2409,8 +2409,8 @@ ssd_read_header(drv_ssd *ssd)
 					ssd->name, errno, cf_strerror(errno));
 		}
 
-		// Temporary buffer, ok to 0 to compare with shadow.
-		local_header->unique.pristine_offset = 0;
+		// Shadow value can be different - exclude from comparison.
+		local_header->unique.pristine_offset = header->unique.pristine_offset;
 
 		size_t sz = local_read_size < read_size ? local_read_size : read_size;
 
@@ -2425,7 +2425,7 @@ ssd_read_header(drv_ssd *ssd)
 
 	ssd_header_validate_cfg(ns, ssd, header);
 
-	if (header->unique.pristine_offset != 0 && // always 0 on shadow
+	if (header->unique.pristine_offset != 0 && // can be 0 on shadow
 			(header->unique.pristine_offset < DRV_HEADER_SIZE ||
 					header->unique.pristine_offset > ssd->file_size)) {
 		cf_crash(AS_DRV_SSD, "%s: bad pristine offset %lu", ssd_name,
