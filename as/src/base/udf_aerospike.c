@@ -58,7 +58,7 @@
 // Typedefs & constants.
 //
 
-#define CAPACITY_STEP (128UL * 1024)
+#define LLB_ROUND_SZ (128U * 1024)
 
 
 //==========================================================
@@ -463,7 +463,8 @@ static uint8_t*
 get_particle_buf(udf_record* urecord, uint32_t size)
 {
 	if (urecord->particle_llb.head == NULL) {
-		cf_ll_buf_init_heap(&urecord->particle_llb, WBLOCK_SZ);
+		cf_ll_buf_init_heap(&urecord->particle_llb,
+				(size + (LLB_ROUND_SZ - 1)) & -LLB_ROUND_SZ);
 	}
 
 	uint8_t* buf;
