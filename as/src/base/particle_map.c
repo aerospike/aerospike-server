@@ -949,6 +949,13 @@ map_subcontext_by_key(cdt_context *ctx, msgpack_in_vec *val)
 	uint8_t *new_key = cf_malloc(key.sz);
 
 	key.sz = cdt_untrusted_rewrite(new_key, key.ptr, key.sz, false);
+
+	if (key.sz == 0) {
+		cf_free(new_key);
+		rollback_alloc_rollback(alloc_idx);
+		return false;
+	}
+
 	key.ptr = new_key;
 
 	if (map_is_k_ordered(&map)) {
