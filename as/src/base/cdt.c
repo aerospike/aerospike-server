@@ -4902,7 +4902,7 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 		}
 
 		if (has_nonstorage || next_b == NULL) {
-			cf_warning(AS_PARTICLE, "invalid msgpack: has_nonstorage %d b %p sz %u i %u", has_nonstorage, b,
+			cf_detail(AS_PARTICLE, "untrusted_rewrite() has_nonstorage %d b %p sz %u i %u", has_nonstorage, b,
 					(uint32_t)(end - b), i);
 			return 0;
 		}
