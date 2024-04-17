@@ -745,11 +745,13 @@ typedef struct as_namespace_s {
 	bool			write_benchmarks_enabled;
 	bool			proxy_hist_enabled;
 	uint32_t		evict_hist_buckets;
+	uint32_t		evict_indexes_memory_pct;
 	uint32_t		evict_sys_memory_pct;
 	uint32_t		evict_tenths_pct;
 	bool			force_long_queries; // for debugging only
 	bool			ignore_migrate_fill_delay;
 	uint64_t		index_stage_size;
+	uint64_t		indexes_memory_budget;
 	bool			inline_short_queries;
 	uint32_t		max_record_size;
 	uint32_t		migrate_order;

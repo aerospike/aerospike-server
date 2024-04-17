@@ -4074,6 +4074,10 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	// Persistent memory block keys' namespace ID (enterprise only).
 	info_append_uint32(db, "xmem_id", ns->xmem_id);
 
+	// Combined indexes stats.
+
+	uint64_t ixs_memory_used = 0; // sum all RAM indexes
+
 	// Primary index stats.
 
 	uint64_t index_used = (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
@@ -4083,6 +4087,9 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	if (as_namespace_index_persisted(ns)) {
 		info_append_uint64(db, "index_mounts_used_pct",
 				index_used * 100 / ns->pi_mounts_budget);
+	}
+	else {
+		ixs_memory_used += index_used;
 	}
 
 	if (ns->pi_xmem_type == CF_XMEM_TYPE_PMEM) {
@@ -4112,6 +4119,8 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	info_append_uint64(db, "set_index_used_bytes", set_index_used);
 
+	ixs_memory_used += set_index_used;
+
 	// Secondary index stats.
 
 	uint64_t sindex_used = as_sindex_used_bytes(ns);
@@ -4121,6 +4130,9 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	if (as_namespace_sindex_persisted(ns)) {
 		info_append_uint64(db, "sindex_mounts_used_pct",
 				sindex_used * 100 / ns->si_mounts_budget);
+	}
+	else {
+		ixs_memory_used += sindex_used;
 	}
 
 	if (ns->si_xmem_type == CF_XMEM_TYPE_PMEM) {
@@ -4136,6 +4148,15 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	}
 	else if (ns->si_xmem_type == CF_XMEM_TYPE_FLASH) {
 		add_sindex_device_stats(ns, db);
+	}
+
+	// Combined indexes stats.
+
+	uint64_t ixs_memory_budget = as_load_uint64(&ns->indexes_memory_budget);
+
+	if (ixs_memory_budget != 0) {
+		info_append_uint64(db, "indexes_memory_used_pct",
+				ixs_memory_used * 100 / ixs_memory_budget);
 	}
 
 	// Storage stats.

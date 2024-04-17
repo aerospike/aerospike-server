@@ -666,6 +666,18 @@ eval_hwm_breached(as_namespace* ns)
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
 	uint64_t ixs_sz = index_mem_sz + set_index_sz + sindex_mem_sz;
 
+	uint64_t ixs_memory_budget = as_load_uint64(&ns->indexes_memory_budget);
+	uint32_t ixs_used_pct = 0;
+	char ixs_mem_tag[32];
+
+	if (ixs_memory_budget != 0) {
+		ixs_used_pct = (uint32_t)((ixs_sz * 100) / ixs_memory_budget);
+		sprintf(ixs_mem_tag, " used-pct:%u", ixs_used_pct);
+	}
+	else {
+		ixs_mem_tag[0] = '\0';
+	}
+
 	uint64_t data_used_sz = 0;
 
 	as_storage_stats(ns, NULL, &data_used_sz);
@@ -680,6 +692,12 @@ eval_hwm_breached(as_namespace* ns)
 	// Note - not >= since sys_memory_pct is rounded up, not down.
 	if (cfg_pct != 0 && sys_memory_pct > cfg_pct) {
 		at = stpcpy(at, "sys-memory & ");
+	}
+
+	cfg_pct = as_load_uint32(&ns->evict_indexes_memory_pct);
+
+	if (cfg_pct != 0 && ixs_used_pct >= cfg_pct) {
+		at = stpcpy(at, "indexes-memory & ");
 	}
 
 	cfg_pct = as_load_uint32(&ns->pi_evict_mounts_pct);
@@ -703,9 +721,9 @@ eval_hwm_breached(as_namespace* ns)
 	if (at != reasons) {
 		at[-3] = '\0'; // strip " & " off end
 
-		cf_warning(AS_NSUP, "{%s} breached eviction limit (%s), sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s, data used-pct:%u",
+		cf_warning(AS_NSUP, "{%s} breached eviction limit (%s), sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
 				ns->name, reasons, sys_memory_pct,
-				ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
+				ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz, ixs_mem_tag,
 				index_dev_tag,
 				sindex_dev_tag,
 				data_used_pct);
@@ -714,9 +732,9 @@ eval_hwm_breached(as_namespace* ns)
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} no eviction limit breached, sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s, data used-pct:%u",
+	cf_debug(AS_NSUP, "{%s} no eviction limit breached, sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
 			ns->name, sys_memory_pct,
-			ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
+			ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz, ixs_mem_tag,
 			index_dev_tag,
 			sindex_dev_tag,
 			data_used_pct);
@@ -923,6 +941,14 @@ eval_stop_writes(as_namespace* ns, bool cold_starting)
 	// Note - not >= since sys_memory_pct is rounded up, not down.
 	if (cfg_pct != 0 && sys_memory_pct > cfg_pct) {
 		at = stpcpy(at, "sys-memory & ");
+	}
+
+	// This budget serves double as a stop-writes trigger, as if there's a
+	// 'stop-writes-indexes-memory-pct' always set to 100.
+	uint64_t ixs_memory_budget = as_load_uint64(&ns->indexes_memory_budget);
+
+	if (ixs_memory_budget != 0 && ixs_sz > ixs_memory_budget) {
+		at = stpcpy(at, "indexes-memory & ");
 	}
 
 	// Note - configured value 0 automatically switches this off. Also, not <=

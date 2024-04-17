@@ -461,10 +461,12 @@ typedef enum {
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE,
 	CASE_NAMESPACE_ENABLE_HIST_PROXY,
 	CASE_NAMESPACE_EVICT_HIST_BUCKETS,
+	CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT,
 	CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
+	CASE_NAMESPACE_INDEXES_MEMORY_BUDGET,
 	CASE_NAMESPACE_INLINE_SHORT_QUERIES,
 	CASE_NAMESPACE_MAX_RECORD_SIZE,
 	CASE_NAMESPACE_MIGRATE_ORDER,
@@ -1050,10 +1052,12 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "enable-benchmarks-write",		CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE },
 		{ "enable-hist-proxy",				CASE_NAMESPACE_ENABLE_HIST_PROXY },
 		{ "evict-hist-buckets",				CASE_NAMESPACE_EVICT_HIST_BUCKETS },
+		{ "evict-indexes-memory-pct",		CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT },
 		{ "evict-sys-memory-pct",			CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT },
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "ignore-migrate-fill-delay",		CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
+		{ "indexes-memory-budget",			CASE_NAMESPACE_INDEXES_MEMORY_BUDGET },
 		{ "inline-short-queries",			CASE_NAMESPACE_INLINE_SHORT_QUERIES },
 		{ "max-record-size",				CASE_NAMESPACE_MAX_RECORD_SIZE },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
@@ -2937,6 +2941,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_EVICT_HIST_BUCKETS:
 				ns->evict_hist_buckets = cfg_u32(&line, 100, 10000000);
 				break;
+			case CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT:
+				ns->evict_indexes_memory_pct = cfg_u32(&line, 0, 100);
+				break;
 			case CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT:
 				ns->evict_sys_memory_pct = cfg_u32(&line, 0, 100);
 				break;
@@ -2949,6 +2956,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_INDEX_STAGE_SIZE:
 				ns->index_stage_size = cfg_u64_power_of_2(&line, CF_ARENAX_MIN_STAGE_SIZE, CF_ARENAX_MAX_STAGE_SIZE);
+				break;
+			case CASE_NAMESPACE_INDEXES_MEMORY_BUDGET:
+				ns->indexes_memory_budget = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_INLINE_SHORT_QUERIES:
 				ns->inline_short_queries = cfg_bool(&line);
@@ -5461,6 +5471,8 @@ cfg_best_practices_check(void)
 					ns->name, margin);
 		}
 
+		ns_mem += ns->indexes_memory_budget;
+
 		if (ns->storage_type == AS_STORAGE_ENGINE_MEMORY) {
 			if (ns->storage_data_size != 0) {
 				ns_mem += ns->storage_data_size;
@@ -5479,7 +5491,7 @@ cfg_best_practices_check(void)
 
 	if (ns_mem > sys_mem) {
 		check_failed(&g_bad_practices, "memory",
-				"data memory spec for all namespaces (%lu) exceeds system memory (%lu)",
+				"data & indexes memory spec for all namespaces (%lu) exceeds system memory (%lu)",
 				ns_mem, sys_mem);
 	}
 }

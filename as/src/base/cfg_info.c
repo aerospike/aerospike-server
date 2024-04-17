@@ -407,11 +407,13 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	info_append_bool(db, "enable-benchmarks-write", ns->write_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-proxy", ns->proxy_hist_enabled);
 	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
+	info_append_uint32(db, "evict-indexes-memory-pct", ns->evict_indexes_memory_pct);
 	info_append_uint32(db, "evict-sys-memory-pct", ns->evict_sys_memory_pct);
 	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
 	info_append_bool(db, "force-long-queries", ns->force_long_queries);
 	info_append_bool(db, "ignore-migrate-fill-delay", ns->ignore_migrate_fill_delay);
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
+	info_append_uint64(db, "indexes-memory-budget", ns->indexes_memory_budget);
 	info_append_bool(db, "inline-short-queries", ns->inline_short_queries);
 	info_append_uint32(db, "max-record-size", ns->max_record_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
@@ -1532,6 +1534,15 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->evict_hist_buckets, val);
 		ns->evict_hist_buckets = (uint32_t)val;
 	}
+	else if (as_info_parameter_get(cmd, "evict-indexes-memory-pct", v,
+			&v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of evict-indexes-memory-pct memory of ns %s from %u to %d ",
+				ns->name, ns->evict_sys_memory_pct, val);
+		ns->evict_indexes_memory_pct = (uint32_t)val;
+	}
 	else if (as_info_parameter_get(cmd, "evict-sys-memory-pct", v,
 			&v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
@@ -1580,6 +1591,16 @@ cfg_set_namespace(const char* cmd)
 		else {
 			return false;
 		}
+	}
+	else if (as_info_parameter_get(cmd, "indexes-memory-budget", v,
+			&v_len) == 0) {
+		uint64_t val;
+		if (cf_str_atoi_u64(v, &val) != 0) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of indexes-memory-budget of ns %s from %lu to %lu",
+				ns->name, ns->indexes_memory_budget, val);
+		ns->indexes_memory_budget = val;
 	}
 	else if (as_info_parameter_get(cmd, "inline-short-queries", v,
 			&v_len) == 0) {
@@ -1953,7 +1974,8 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->pi_evict_mounts_pct, val);
 		ns->pi_evict_mounts_pct = (uint32_t)val;
 	}
-	else if (as_info_parameter_get(cmd, "index-type.mounts-budget", v, &v_len) == 0) {
+	else if (as_info_parameter_get(cmd, "index-type.mounts-budget", v,
+			&v_len) == 0) {
 		if (! as_namespace_index_persisted(ns)) {
 			cf_warning(AS_INFO, "index-type.mounts-budget is not relevant for this index-type");
 			return false;
@@ -1986,7 +2008,8 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->si_evict_mounts_pct, val);
 		ns->si_evict_mounts_pct = (uint32_t)val;
 	}
-	else if (as_info_parameter_get(cmd, "sindex-type.mounts-budget", v, &v_len) == 0) {
+	else if (as_info_parameter_get(cmd, "sindex-type.mounts-budget", v,
+			&v_len) == 0) {
 		if (! as_namespace_sindex_persisted(ns)) {
 			cf_warning(AS_INFO, "sindex-type.mounts-budget is not relevant for this sindex-type");
 			return false;
