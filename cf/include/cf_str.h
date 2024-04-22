@@ -26,10 +26,10 @@
 
 // These functions convert a string to a number of different integer types, and
 // returns 0 on success.
-int cf_str_atoi(char *s, int *value);
-int cf_str_atoi_u32(char *s, uint32_t *value);
-int cf_str_atoi_u64(char *s, uint64_t *value);
-int cf_str_atoi_seconds(char *s, uint32_t *value);
+int cf_str_atoi(const char *s, int *value);
+int cf_str_atoi_u32(const char *s, uint32_t *value);
+int cf_str_atoi_u64(const char *s, uint64_t *value);
+int cf_str_atoi_seconds(const char *s, uint32_t *value);
 
 int cf_strtoul_x64(const char *s, uint64_t *value);
 int cf_strtoul_u32(const char *s, uint32_t *value);

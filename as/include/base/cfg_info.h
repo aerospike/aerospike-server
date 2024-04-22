@@ -33,7 +33,7 @@
 // Public API.
 //
 
-void as_cfg_info_cmd_config_get_with_params(char* name, char* params, cf_dyn_buf* db);
-int as_cfg_info_cmd_config_get(char* name, char* params, cf_dyn_buf* db);
-void as_cfg_info_namespace_config_get(char* context, cf_dyn_buf* db);
-int as_cfg_info_cmd_config_set(char* name, char* params, cf_dyn_buf* db);
+void as_cfg_info_cmd_config_get_with_params(const char* name, const char* params, cf_dyn_buf* db);
+void as_cfg_info_cmd_config_get(const char* name, const char* params, cf_dyn_buf* db);
+void as_cfg_info_namespace_config_get(const char* context, cf_dyn_buf* db);
+void as_cfg_info_cmd_config_set(const char* name, const char* params, cf_dyn_buf* db);

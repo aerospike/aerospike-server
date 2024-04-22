@@ -37,9 +37,8 @@
 void udf_cask_init(void);
 
 // Info commands.
-int udf_cask_info_clear_cache(char* name, char* params, cf_dyn_buf* out);
-int udf_cask_info_get(char* name, char* params, cf_dyn_buf* out);
-int udf_cask_info_list(char* name, cf_dyn_buf* out);
-int udf_cask_info_put(char* name, char* params, cf_dyn_buf* out);
-int udf_cask_info_remove(char* name, char* params, cf_dyn_buf* out);
-
+void udf_cask_info_clear_cache(const char* name, const char* params, cf_dyn_buf* out);
+void udf_cask_info_get(const char* name, const char* params, cf_dyn_buf* out);
+void udf_cask_info_list(const char* name, const char* params, cf_dyn_buf* out);
+void udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out);
+void udf_cask_info_remove(const char* name, const char* params, cf_dyn_buf* out);

@@ -116,18 +116,18 @@ typedef struct peer_s {
 
 	uint64_t	in_gen;			// generation of last incoming change
 
-	char		*serv;			// goes into "services"
-	char		*serv_alt;		// goes into "services-alternate"
+	char*		serv;			// goes into "services"
+	char*		serv_alt;		// goes into "services-alternate"
 
-	char		*clear_std;		// goes into "peers-clear-std"
-	char		*tls_std;		// goes into "peers-tls-std"
-	char		*clear_alt;		// goes into "peers-clear-alt"
-	char		*tls_alt;		// goes into "peers-tls-alt"
-	char		*tls_name;		// peer's TLS name
+	char*		clear_std;		// goes into "peers-clear-std"
+	char*		tls_std;		// goes into "peers-tls-std"
+	char*		clear_alt;		// goes into "peers-clear-alt"
+	char*		tls_alt;		// goes into "peers-tls-alt"
+	char*		tls_name;		// peer's TLS name
 } peer_t;
 
 // Maps the given peer_t to a field in the peer_t.
-typedef char **(*proj_t)(peer_t *p);
+typedef char** (*proj_t)(peer_t* p);
 
 typedef struct filter_s {
 	bool		tls;			// when set, include the TLS name
@@ -137,21 +137,20 @@ typedef struct filter_s {
 
 // Builds an info value in g_info. Reduces g_peers, applies the given filter,
 // and selects the peer_t field given by the projection function.
-typedef void (*build_t)(cf_dyn_buf *db, proj_t proj, const filter_t *filter);
+typedef void (*build_t)(cf_dyn_buf* db, proj_t proj, const filter_t* filter);
 
 // How to turn the peer_t entries (g_peers) into an info value (g_info).
 typedef struct peer_val_s {
-	const char	*key;			// info value's key name, e.g., "services"
+	const char*	key;			// info value's key name, e.g., "services"
 	proj_t		proj;			// projection function for the underlying
 								// field in peer_t
 	build_t		build;			// build function to update the info value
-	const filter_t
-				*filter;		// filter passed to the build function
+	const filter_t* filter;		// filter passed to the build function
 } peer_val_t;
 
 // How to turn our own services (g_local) into an info value (g_info).
 typedef struct local_val_s {
-	const char	*key;			// key identifier
+	const char*	key;			// key identifier
 	proj_t		proj;			// projection function that selects the
 								// corresponding field from g_local
 } local_val_t;
@@ -165,9 +164,9 @@ typedef struct field_proj_s {
 
 // Context for building an info value. Passed to the build function.
 typedef struct print_par_s {
-	cf_dyn_buf	*db;			// the buffer to print to
+	cf_dyn_buf*	db;			// the buffer to print to
 	proj_t		proj;			// the field to print
-	const char	*strip;			// what to strip from the end of the field
+	const char*	strip;			// what to strip from the end of the field
 	bool		tls;			// when set, includes the TLS name
 	bool		present;		// when set, excludes alumni
 	uint64_t	since;			// the base generation for a delta build
@@ -221,57 +220,57 @@ static const filter_t ALUMNI_TLS = {
 
 // Peer management.
 
-static char **proj_serv(peer_t *p);			// maps p to &p->serv
-static char **proj_serv_alt(peer_t *p);		// maps p to &p->serv_alt
-static char **proj_clear_std(peer_t *p);	// etc.
-static char **proj_tls_std(peer_t *p);
-static char **proj_clear_alt(peer_t *p);
-static char **proj_tls_alt(peer_t *p);
-static char **proj_tls_name(peer_t *p);
+static char** proj_serv(peer_t* p);			// maps p to &p->serv
+static char** proj_serv_alt(peer_t* p);		// maps p to &p->serv_alt
+static char** proj_clear_std(peer_t* p);	// etc.
+static char** proj_tls_std(peer_t* p);
+static char** proj_clear_alt(peer_t* p);
+static char** proj_tls_alt(peer_t* p);
+static char** proj_tls_name(peer_t* p);
 
-static peer_t *create_peer(cf_node node);
-static peer_t *find_peer(cf_node node);
-static void dump_peer(cf_node node, const peer_t *p);
-static void set_present(const cf_node *nodes, uint32_t n_nodes, bool present);
+static peer_t* create_peer(cf_node node);
+static peer_t* find_peer(cf_node node);
+static void dump_peer(cf_node node, const peer_t* p);
+static void set_present(const cf_node* nodes, uint32_t n_nodes, bool present);
 
-static int32_t purge_alumni_reduce(const void *key, void *data, void *udata);
+static int32_t purge_alumni_reduce(const void* key, void* data, void* udata);
 static void purge_alumni(void);
 
-static void handle_cluster_change(const as_exchange_cluster_changed_event *ev,
-		void *udata);
-static int32_t handle_fabric_message(cf_node node, msg *m, void *udata);
+static void handle_cluster_change(const as_exchange_cluster_changed_event* ev,
+		void* udata);
+static int32_t handle_fabric_message(cf_node node, msg* m, void* udata);
 
-static int32_t update_reduce(const void *key, void *data, void *udata);
-static void *run_update_thread(void *udata);
+static int32_t update_reduce(const void* key, void* data, void* udata);
+static void* run_update_thread(void* udata);
 static void wake_up(void);
 
 // Local node information.
 
-static char *print_list(const as_service_endpoint *endp, uint32_t limit,
+static char* print_list(const as_service_endpoint* endp, uint32_t limit,
 		char sep, bool legacy);
-static void enum_addrs(cf_addr_list *addrs);
-static void free_addrs(cf_addr_list *addrs);
+static void enum_addrs(cf_addr_list* addrs);
+static void free_addrs(cf_addr_list* addrs);
 static void populate_local(void);
 
 // Info value management.
 
-static void set_info_val(const char *key, const char *val);
-static void print_info_val(const char *key, cf_dyn_buf *db);
+static void set_info_val(const char* key, const char* val);
+static void print_info_val(const char* key, cf_dyn_buf* db);
 
-static int32_t build_peers_reduce(const void *key, void *data, void *udata);
-static void build_peers(cf_dyn_buf *db, proj_t proj, const filter_t *filter);
+static int32_t build_peers_reduce(const void* key, void* data, void* udata);
+static void build_peers(cf_dyn_buf* db, proj_t proj, const filter_t* filter);
 
-static int32_t build_services_reduce(const void *key, void *data, void *udata);
-static void build_services(cf_dyn_buf *db, proj_t proj, const filter_t *filter);
+static int32_t build_services_reduce(const void* key, void* data, void* udata);
+static void build_services(cf_dyn_buf* db, proj_t proj, const filter_t* filter);
 
-static void build_gen(cf_dyn_buf *db, proj_t proj, const filter_t *filter);
+static void build_gen(cf_dyn_buf* db, proj_t proj, const filter_t* filter);
 
 static void recalc(void);
 
 // Miscellaneous.
 
-static const char *op_str(uint32_t op);
-static char *strip_suff(const char *in, const char *suff, char *out);
+static const char* op_str(uint32_t op);
+static char* strip_suff(const char* in, const char* suff, char* out);
 
 
 //==========================================================
@@ -332,8 +331,8 @@ static pthread_rwlock_t g_info_lock = PTHREAD_RWLOCK_INITIALIZER;
 
 // These hash tables are created without locks.
 
-static cf_shash *g_peers;
-static cf_shash *g_info;
+static cf_shash* g_peers;
+static cf_shash* g_info;
 
 // "Peer" that holds our information.
 static peer_t g_local;
@@ -354,10 +353,10 @@ as_service_list_init(void)
 	// These hash tables are created without locks.
 
 	g_info = cf_shash_create(cf_shash_fn_zstr, HASH_STR_SZ,
-			sizeof(char *), 32, false);
+			sizeof(char*), 32, false);
 
 	g_peers = cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
-			sizeof(peer_t *), AS_CLUSTER_SZ, false);
+			sizeof(peer_t*), AS_CLUSTER_SZ, false);
 
 	cf_queue_init(&g_wake_up, sizeof(uint8_t), 1, true);
 
@@ -371,25 +370,26 @@ as_service_list_init(void)
 	cf_thread_create_detached(run_update_thread, NULL);
 }
 
-int32_t
-as_service_list_dynamic(char *key, cf_dyn_buf *db)
+void
+as_service_list_dynamic(const char* key, const char* params, cf_dyn_buf* db)
 {
+	(void)params;
+
 	cf_detail(AS_SERVICE_LIST, "handling info value %s", key);
 
 	if (strcmp(key, "services-alumni-reset") == 0) {
 		purge_alumni();
 		cf_dyn_buf_append_string(db, "ok");
-		return 0;
+		return;
 	}
 
 	print_info_val(key, db);
-	return 0;
 }
 
-int32_t
-as_service_list_command(char *key, char *par, cf_dyn_buf *db)
+void
+as_service_list_command(const char* key, const char* params, cf_dyn_buf* db)
 {
-	cf_detail(AS_SERVICE_LIST, "handling info command %s %s", key, par);
+	cf_detail(AS_SERVICE_LIST, "handling info command %s %s", key, params);
 
 	uint64_t since = 0;
 
@@ -397,13 +397,13 @@ as_service_list_command(char *key, char *par, cf_dyn_buf *db)
 	static const char prefix[] = "generation=";
 	static const size_t prefix_len = sizeof(prefix) - 1;
 
-	if (strncmp(par, prefix, prefix_len) == 0) {
-		since = strtoul(par + prefix_len, NULL, 10);
+	if (strncmp(params, prefix, prefix_len) == 0) {
+		since = strtoul(params + prefix_len, NULL, 10);
 	}
 
 	// Find the build and projection functions for the given key.
 
-	const peer_val_t *peer_val;
+	const peer_val_t* peer_val;
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(PEER_VALS); ++i) {
 		peer_val = PEER_VALS + i;
@@ -416,7 +416,7 @@ as_service_list_command(char *key, char *par, cf_dyn_buf *db)
 	// Build the info value directly into the given db, instead of
 	// storing it in g_info as recalc() does.
 
-	const filter_t *val_par = peer_val->filter;
+	const filter_t* val_par = peer_val->filter;
 	cf_mutex_lock(&g_peers_lock);
 
 	peer_val->build(db, peer_val->proj, &(filter_t){
@@ -424,7 +424,6 @@ as_service_list_command(char *key, char *par, cf_dyn_buf *db)
 	});
 
 	cf_mutex_unlock(&g_peers_lock);
-	return 0;
 }
 
 
@@ -432,53 +431,53 @@ as_service_list_command(char *key, char *par, cf_dyn_buf *db)
 // Local helpers - peer management.
 //
 
-static char **
-proj_serv(peer_t *p)
+static char**
+proj_serv(peer_t* p)
 {
 	return &p->serv;
 }
 
-static char **
-proj_serv_alt(peer_t *p)
+static char**
+proj_serv_alt(peer_t* p)
 {
 	return &p->serv_alt;
 }
 
-static char **
-proj_clear_std(peer_t *p)
+static char**
+proj_clear_std(peer_t* p)
 {
 	return &p->clear_std;
 }
 
-static char **
-proj_tls_std(peer_t *p)
+static char**
+proj_tls_std(peer_t* p)
 {
 	return &p->tls_std;
 }
 
-static char **
-proj_clear_alt(peer_t *p)
+static char**
+proj_clear_alt(peer_t* p)
 {
 	return &p->clear_alt;
 }
 
-static char **
-proj_tls_alt(peer_t *p)
+static char**
+proj_tls_alt(peer_t* p)
 {
 	return &p->tls_alt;
 }
 
-static char **
-proj_tls_name(peer_t *p)
+static char**
+proj_tls_name(peer_t* p)
 {
 	return &p->tls_name;
 }
 
-static peer_t *
+static peer_t*
 create_peer(cf_node node)
 {
 	cf_detail(AS_SERVICE_LIST, "new peer %lx", node);
-	peer_t *p = cf_calloc(1, sizeof(peer_t));
+	peer_t* p = cf_calloc(1, sizeof(peer_t));
 
 	p->present = false;
 
@@ -506,11 +505,11 @@ create_peer(cf_node node)
 	return p;
 }
 
-static peer_t *
+static peer_t*
 find_peer(cf_node node)
 {
 	cf_detail(AS_SERVICE_LIST, "finding peer %lx", node);
-	peer_t *p;
+	peer_t* p;
 	int32_t res = cf_shash_get(g_peers, &node, &p);
 
 	switch (res) {
@@ -527,7 +526,7 @@ find_peer(cf_node node)
 }
 
 static void
-dump_peer(cf_node node, const peer_t *p)
+dump_peer(cf_node node, const peer_t* p)
 {
 	cf_detail(AS_SERVICE_LIST, "--------------------- peer change %016lx",
 			node);
@@ -548,10 +547,10 @@ dump_peer(cf_node node, const peer_t *p)
 }
 
 static void
-set_present(const cf_node *nodes, uint32_t n_nodes, bool present)
+set_present(const cf_node* nodes, uint32_t n_nodes, bool present)
 {
 	for (uint32_t i = 0; i < n_nodes; ++i) {
-		peer_t *p = find_peer(nodes[i]);
+		peer_t* p = find_peer(nodes[i]);
 
 		p->present = present;
 
@@ -566,10 +565,10 @@ set_present(const cf_node *nodes, uint32_t n_nodes, bool present)
 }
 
 static int32_t
-purge_alumni_reduce(const void *key, void *data, void *udata)
+purge_alumni_reduce(const void* key, void* data, void* udata)
 {
-	cf_node node = *(const cf_node *)key;
-	peer_t *p = *(peer_t **)data;
+	cf_node node = *(const cf_node*)key;
+	peer_t* p = *(peer_t**)data;
 	(void)udata;
 
 	cf_detail(AS_SERVICE_LIST, "visiting node %lx", node);
@@ -611,7 +610,7 @@ purge_alumni(void)
 // The other peer_t fields are managed by handle_fabric_message().
 
 static void
-handle_cluster_change(const as_exchange_cluster_changed_event *ev, void *udata)
+handle_cluster_change(const as_exchange_cluster_changed_event* ev, void* udata)
 {
 	cf_detail(AS_SERVICE_LIST, "------------------ cluster change %016lx",
 			ev->cluster_key);
@@ -720,7 +719,7 @@ handle_cluster_change(const as_exchange_cluster_changed_event *ev, void *udata)
 // peer_t::present is managed by handle_cluster_change().
 
 static int32_t
-handle_fabric_message(cf_node node, msg *m, void *udata)
+handle_fabric_message(cf_node node, msg* m, void* udata)
 {
 	(void)udata;
 	cf_detail(AS_SERVICE_LIST, "------------------ fabric message %016lx",
@@ -750,7 +749,7 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 
 	cf_mutex_lock(&g_peers_lock);
 
-	peer_t *p = find_peer(node);
+	peer_t* p = find_peer(node);
 	bool change = false;
 
 	if (op == OP_ACK) {
@@ -813,8 +812,8 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 	// Populate peer_t from message fields.
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(FIELD_PROJS); ++i) {
-		char **to = FIELD_PROJS[i].proj(p);
-		char *old = *to;
+		char** to = FIELD_PROJS[i].proj(p);
+		char* old =* to;
 
 		// We follow the convention of the old code, which omits
 		// empty fields from the fabric message. So let's be prepared
@@ -860,11 +859,11 @@ handle_fabric_message(cf_node node, msg *m, void *udata)
 }
 
 static int32_t
-update_reduce(const void *key, void *data, void *udata)
+update_reduce(const void* key, void* data, void* udata)
 {
-	cf_node node = *(const cf_node *)key;
-	peer_t *p = *(peer_t **)data;
-	update_ctx_t *ctx = udata;
+	cf_node node = *(const cf_node*)key;
+	peer_t* p = *(peer_t**)data;
+	update_ctx_t* ctx = udata;
 
 	cf_detail(AS_SERVICE_LIST,
 			"updating %lx - present %d got_update %d got_ack %d", node,
@@ -918,7 +917,7 @@ update_reduce(const void *key, void *data, void *udata)
 
 	// Compose outgoing message.
 
-	msg *m = as_fabric_msg_get(M_TYPE_INFO);
+	msg* m = as_fabric_msg_get(M_TYPE_INFO);
 	msg_set_uint32(m, FIELD_OP, op);
 
 	// We don't support dynamically changing interface configurations any
@@ -929,13 +928,13 @@ update_reduce(const void *key, void *data, void *udata)
 	// Populate fields from g_local.
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(FIELD_PROJS); ++i) {
-		char **from = FIELD_PROJS[i].proj(&g_local);
+		char** from = FIELD_PROJS[i].proj(&g_local);
 
 		// We follow the convention of the old code, which omits empty fields
 		// from the fabric message.
 
 		if ((*from)[0] != 0) {
-			msg_set_str(m, FIELD_PROJS[i].field, *from, MSG_SET_COPY);
+			msg_set_str(m, FIELD_PROJS[i].field,* from, MSG_SET_COPY);
 		}
 	}
 
@@ -968,8 +967,8 @@ update_reduce(const void *key, void *data, void *udata)
 	return CF_SHASH_OK;
 }
 
-static void *
-run_update_thread(void *udata)
+static void*
+run_update_thread(void* udata)
 {
 	(void)udata;
 
@@ -1018,8 +1017,8 @@ wake_up(void)
 // Local helpers - local node information.
 //
 
-static char *
-print_list(const as_service_endpoint *endp, uint32_t limit, char sep,
+static char*
+print_list(const as_service_endpoint* endp, uint32_t limit, char sep,
 		bool legacy)
 {
 	cf_detail(AS_SERVICE_LIST, "printing list - count %u port %hu limit %u "
@@ -1064,14 +1063,14 @@ print_list(const as_service_endpoint *endp, uint32_t limit, char sep,
 		++n_out;
 	}
 
-	char *str = n_out > 0 ? cf_dyn_buf_strdup(&db) : NULL;
+	char* str = n_out > 0 ? cf_dyn_buf_strdup(&db) : NULL;
 
 	cf_dyn_buf_free(&db);
 	return str;
 }
 
 static void
-enum_addrs(cf_addr_list *addrs)
+enum_addrs(cf_addr_list* addrs)
 {
 	cf_ip_addr bin_addrs[CF_SOCK_CFG_MAX];
 	uint32_t n_bin_addrs = CF_SOCK_CFG_MAX;
@@ -1096,10 +1095,10 @@ enum_addrs(cf_addr_list *addrs)
 }
 
 static void
-free_addrs(cf_addr_list *addrs)
+free_addrs(cf_addr_list* addrs)
 {
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
-		cf_free((char *)addrs->addrs[i]);
+		cf_free((char*)addrs->addrs[i]);
 	}
 
 	addrs->n_addrs = 0;
@@ -1185,8 +1184,8 @@ populate_local(void)
 	cf_detail(AS_SERVICE_LIST, "populating info values");
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(LOCAL_VALS); ++i) {
-		const char *key = LOCAL_VALS[i].key;
-		const char *val = *(LOCAL_VALS[i].proj(&g_local));
+		const char* key = LOCAL_VALS[i].key;
+		const char* val = *(LOCAL_VALS[i].proj(&g_local));
 		set_info_val(key, val);
 	}
 
@@ -1199,7 +1198,7 @@ populate_local(void)
 //
 
 static void
-set_info_val(const char *key, const char *val)
+set_info_val(const char* key, const char* val)
 {
 	cf_detail(AS_SERVICE_LIST, "info val %s <- %s", key, val);
 
@@ -1208,7 +1207,7 @@ set_info_val(const char *key, const char *val)
 
 	// Remove existing value.
 
-	char *val_old;
+	char* val_old;
 	int32_t res = cf_shash_pop(g_info, hash_str, &val_old);
 
 	switch (res) {
@@ -1224,7 +1223,7 @@ set_info_val(const char *key, const char *val)
 
 	// Set new value.
 
-	char *val_dup = cf_strdup(val);
+	char* val_dup = cf_strdup(val);
 	res = cf_shash_put_unique(g_info, hash_str, &val_dup);
 
 	cf_assert(res == CF_SHASH_OK, AS_SERVICE_LIST,
@@ -1232,14 +1231,14 @@ set_info_val(const char *key, const char *val)
 }
 
 static void
-print_info_val(const char *key, cf_dyn_buf *db)
+print_info_val(const char* key, cf_dyn_buf* db)
 {
 	pthread_rwlock_rdlock(&g_info_lock);
 
 	char hash_str[HASH_STR_SZ] = { 0 };
 	strcpy(hash_str, key);
 
-	char *val;
+	char* val;
 	int32_t res = cf_shash_get(g_info, hash_str, &val);
 
 	cf_assert(res == CF_SHASH_OK, AS_SERVICE_LIST, "cf_shash_get() failed: %d",
@@ -1252,11 +1251,11 @@ print_info_val(const char *key, cf_dyn_buf *db)
 }
 
 static int32_t
-build_peers_reduce(const void *key, void *data, void *udata)
+build_peers_reduce(const void* key, void* data, void* udata)
 {
-	cf_node node = *(const cf_node *)key;
-	peer_t *p = *(peer_t **)data;
-	print_par_t *par = udata;
+	cf_node node = *(const cf_node*)key;
+	peer_t* p = *(peer_t**)data;
+	print_par_t* par = udata;
 
 	cf_detail(AS_SERVICE_LIST, "visiting node %lx", node);
 
@@ -1276,7 +1275,7 @@ build_peers_reduce(const void *key, void *data, void *udata)
 
 	// Read selected field from peer_t.
 
-	const char *field = *(par->proj(p));
+	const char* field = *(par->proj(p));
 
 	if (field[0] == 0) {
 		cf_detail(AS_SERVICE_LIST, "field empty");
@@ -1286,7 +1285,7 @@ build_peers_reduce(const void *key, void *data, void *udata)
 	// Append field value.
 
 	cf_detail(AS_SERVICE_LIST, "adding %s", field);
-	cf_dyn_buf *db = par->db;
+	cf_dyn_buf* db = par->db;
 
 	if (par->count > 0) {
 		cf_dyn_buf_append_char(db, ',');
@@ -1313,7 +1312,7 @@ build_peers_reduce(const void *key, void *data, void *udata)
 		cf_dyn_buf_append_char(db, '[');
 
 		char buff[strlen(field) + 1];
-		char *pref = strip_suff(field, par->strip, buff);
+		char* pref = strip_suff(field, par->strip, buff);
 		cf_detail(AS_SERVICE_LIST, "stripped %s", pref);
 		cf_dyn_buf_append_string(db, pref);
 
@@ -1338,7 +1337,7 @@ build_peers_reduce(const void *key, void *data, void *udata)
 }
 
 static void
-build_peers(cf_dyn_buf *db, proj_t proj, const filter_t *filter)
+build_peers(cf_dyn_buf* db, proj_t proj, const filter_t* filter)
 {
 	cf_dyn_buf_append_uint64(db, g_in_gen);
 	cf_dyn_buf_append_char(db, ',');
@@ -1364,11 +1363,11 @@ build_peers(cf_dyn_buf *db, proj_t proj, const filter_t *filter)
 }
 
 static int32_t
-build_services_reduce(const void *key, void *data, void *udata)
+build_services_reduce(const void* key, void* data, void* udata)
 {
-	cf_node node = *(const cf_node *)key;
-	peer_t *p = *(peer_t **)data;
-	print_par_t *par = udata;
+	cf_node node = *(const cf_node*)key;
+	peer_t* p = *(peer_t**)data;
+	print_par_t* par = udata;
 
 	cf_detail(AS_SERVICE_LIST, "visiting node %lx", node);
 
@@ -1381,7 +1380,7 @@ build_services_reduce(const void *key, void *data, void *udata)
 
 	// Read selected field from peer_t.
 
-	const char *field = *(par->proj(p));
+	const char* field = *(par->proj(p));
 
 	if (field[0] == 0) {
 		cf_detail(AS_SERVICE_LIST, "field empty");
@@ -1391,7 +1390,7 @@ build_services_reduce(const void *key, void *data, void *udata)
 	// Append field value.
 
 	cf_detail(AS_SERVICE_LIST, "adding %s", field);
-	cf_dyn_buf *db = par->db;
+	cf_dyn_buf* db = par->db;
 
 	if (par->count > 0) {
 		cf_dyn_buf_append_char(db, ';');
@@ -1404,7 +1403,7 @@ build_services_reduce(const void *key, void *data, void *udata)
 }
 
 static void
-build_services(cf_dyn_buf *db, proj_t proj, const filter_t *filter)
+build_services(cf_dyn_buf* db, proj_t proj, const filter_t* filter)
 {
 	print_par_t print_par = {
 		.db = db,
@@ -1420,7 +1419,7 @@ build_services(cf_dyn_buf *db, proj_t proj, const filter_t *filter)
 }
 
 static void
-build_gen(cf_dyn_buf *db, proj_t proj, const filter_t *filter)
+build_gen(cf_dyn_buf* db, proj_t proj, const filter_t* filter)
 {
 	(void)proj;
 	(void)filter;
@@ -1437,7 +1436,7 @@ recalc(void)
 	// Loop through all info values.
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(PEER_VALS); ++i) {
-		const peer_val_t *peer_val = PEER_VALS + i;
+		const peer_val_t* peer_val = PEER_VALS + i;
 
 		// Skip, if info value isn't refreshable.
 
@@ -1452,7 +1451,7 @@ recalc(void)
 		cf_dyn_buf_define(db);
 
 		peer_val->build(&db, peer_val->proj, peer_val->filter);
-		char *val = cf_dyn_buf_strdup(&db);
+		char* val = cf_dyn_buf_strdup(&db);
 
 		cf_dyn_buf_free(&db);
 
@@ -1475,7 +1474,7 @@ recalc(void)
 // Local helpers - miscellaneous.
 //
 
-static const char *
+static const char*
 op_str(uint32_t op)
 {
 	switch (op) {
@@ -1497,8 +1496,8 @@ op_str(uint32_t op)
 //
 // Used to strip the default port off "host:port" lists.
 
-static char *
-strip_suff(const char *in, const char *suff, char *out)
+static char*
+strip_suff(const char* in, const char* suff, char* out)
 {
 	size_t in_len = strlen(in);
 	size_t suff_len = strlen(suff);

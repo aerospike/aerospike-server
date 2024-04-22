@@ -50,10 +50,6 @@ struct as_proto_s;
 #define MIN_INFO_MAX_MS 500
 #define MAX_INFO_MAX_MS 10000
 
-typedef int (*as_info_get_tree_fn)(char* name, char* subtree, cf_dyn_buf* db);
-typedef int (*as_info_get_value_fn)(char* name, cf_dyn_buf* db);
-typedef int (*as_info_command_fn)(char* name, char* parameters, cf_dyn_buf* db);
-
 typedef struct as_info_transaction_s {
 	struct as_file_handle_s* fd_h;
 	struct as_proto_s* proto;
@@ -76,7 +72,7 @@ extern cf_dyn_buf g_bad_practices;
 void as_info_init();
 void as_info(as_info_transaction* it);
 int as_info_parameter_get(const char* param_str, const char* param, char* value, int* value_len);
-int as_info_buffer(uint8_t* req_buf, size_t req_buf_len, cf_dyn_buf* rsp);
+void as_info_buffer(uint8_t* req_buf, size_t req_buf_len, cf_dyn_buf* rsp);
 void as_info_set_num_info_threads(uint32_t n_threads);
 
 // Needed by heartbeat:

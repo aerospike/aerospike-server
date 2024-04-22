@@ -37,5 +37,5 @@
 
 void as_service_list_init(void);
 
-int32_t as_service_list_dynamic(char *key, cf_dyn_buf *db);
-int32_t as_service_list_command(char *key, char *par, cf_dyn_buf *db);
+void as_service_list_dynamic(const char* key, const char* params, cf_dyn_buf* db);
+void as_service_list_command(const char* key, const char* params, cf_dyn_buf* db);

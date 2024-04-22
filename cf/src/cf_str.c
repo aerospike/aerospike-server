@@ -35,7 +35,7 @@
 
 
 // return 0 on success, -1 on fail
-int cf_str_atoi(char *s, int *value)
+int cf_str_atoi(const char *s, int *value)
 {
 	int i = 0;
 	bool neg = false;
@@ -74,7 +74,7 @@ int cf_str_atoi(char *s, int *value)
 }
 
 // return 0 on success, -1 on fail
-int cf_str_atoi_u32(char *s, unsigned int *value)
+int cf_str_atoi_u32(const char *s, unsigned int *value)
 {
 	unsigned int i = 0;
 
@@ -109,7 +109,7 @@ int cf_str_atoi_u32(char *s, unsigned int *value)
 	return(0);
 }
 
-int cf_str_atoi_u64(char *s, uint64_t *value)
+int cf_str_atoi_u64(const char *s, uint64_t *value)
 {
 	uint64_t i = 0;
 
@@ -154,7 +154,7 @@ int cf_str_atoi_u64(char *s, uint64_t *value)
 	return(0);
 }
 
-int cf_str_atoi_seconds(char *s, uint32_t *value)
+int cf_str_atoi_seconds(const char *s, uint32_t *value)
 {
 	// Special case: accept -1.
 	if (*s == '-' && *(s + 1) == '1' && *(s + 2) == 0) {

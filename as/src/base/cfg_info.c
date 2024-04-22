@@ -77,14 +77,14 @@ static cf_mutex g_set_cfg_lock = CF_MUTEX_INIT;
 // Command config-get helpers.
 static void cfg_get_service(cf_dyn_buf* db);
 static void cfg_get_network(cf_dyn_buf* db);
-static void cfg_get_namespace(char* context, cf_dyn_buf* db);
+static void cfg_get_namespace(const char* context, cf_dyn_buf* db);
 
 // cfg_get_* helpers.
 static const char* auto_pin_string(void);
 static void append_addrs(cf_dyn_buf* db, const char* name, const cf_addr_list* list);
 
 // Command config-set helpers.
-static int cfg_set(char* name, char* cmd, cf_dyn_buf* db);
+static void cfg_set(const char* name, const char* cmd, cf_dyn_buf* db);
 static bool cfg_set_service(const char* cmd);
 static bool cfg_set_network(const char* cmd);
 static bool cfg_set_namespace(const char* cmd);
@@ -106,7 +106,8 @@ static bool any_benchmarks_enabled(void);
 //
 
 void
-as_cfg_info_cmd_config_get_with_params(char* name, char* params, cf_dyn_buf* db)
+as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
+		cf_dyn_buf* db)
 {
 	char context[1024];
 	int context_len = sizeof(context);
@@ -143,8 +144,8 @@ as_cfg_info_cmd_config_get_with_params(char* name, char* params, cf_dyn_buf* db)
 	}
 }
 
-int
-as_cfg_info_cmd_config_get(char* name, char* params, cf_dyn_buf* db)
+void
+as_cfg_info_cmd_config_get(const char* name, const char* params, cf_dyn_buf* db)
 {
 	if (params && *params != 0) {
 		cf_debug(AS_INFO, "config-get command received: params %s", params);
@@ -152,7 +153,7 @@ as_cfg_info_cmd_config_get(char* name, char* params, cf_dyn_buf* db)
 		as_cfg_info_cmd_config_get_with_params(name, params, db);
 		// Response may be an error string (without a semicolon).
 		cf_dyn_buf_chomp_char(db, ';');
-		return 0;
+		return;
 	}
 
 	cf_debug(AS_INFO, "config-get command received");
@@ -163,12 +164,10 @@ as_cfg_info_cmd_config_get(char* name, char* params, cf_dyn_buf* db)
 	as_security_get_config(db);
 
 	cf_dyn_buf_chomp(db);
-
-	return 0;
 }
 
 void
-as_cfg_info_namespace_config_get(char* context, cf_dyn_buf* db)
+as_cfg_info_namespace_config_get(const char* context, cf_dyn_buf* db)
 {
 	cfg_get_namespace(context, db);
 }
@@ -176,16 +175,14 @@ as_cfg_info_namespace_config_get(char* context, cf_dyn_buf* db)
 // config-set:context=service;variable=value;
 // config-set:context=network;variable=heartbeat.value;
 // config-set:context=namespace;id=test;variable=value;
-int
-as_cfg_info_cmd_config_set(char* name, char* params, cf_dyn_buf* db)
+void
+as_cfg_info_cmd_config_set(const char* name, const char* params, cf_dyn_buf* db)
 {
 	cf_mutex_lock(&g_set_cfg_lock);
 
-	int result = cfg_set(name, params, db);
+	cfg_set(name, params, db);
 
 	cf_mutex_unlock(&g_set_cfg_lock);
-
-	return result;
 }
 
 
@@ -369,7 +366,7 @@ cfg_get_network(cf_dyn_buf* db)
 }
 
 static void
-cfg_get_namespace(char* context, cf_dyn_buf* db)
+cfg_get_namespace(const char* context, cf_dyn_buf* db)
 {
 	as_namespace* ns = as_namespace_get_byname(context);
 
@@ -661,8 +658,8 @@ append_addrs(cf_dyn_buf* db, const char* name, const cf_addr_list* list)
 // Local helpers - command config-set helpers.
 //
 
-static int
-cfg_set(char* name, char* cmd, cf_dyn_buf* db)
+static void
+cfg_set(const char* name, const char* cmd, cf_dyn_buf* db)
 {
 	cf_debug(AS_INFO, "config-set command received: params %s", cmd);
 
@@ -671,60 +668,58 @@ cfg_set(char* name, char* cmd, cf_dyn_buf* db)
 
 	if (as_info_parameter_get(cmd, "context", context, &context_len) != 0) {
 		cf_dyn_buf_append_string(db, "error");
-		return 0;
+		return;
 	}
 
 	if (strcmp(context, "service") == 0) {
 		if (! cfg_set_service(cmd)) {
 			cf_dyn_buf_append_string(db, "error");
-			return 0;
+			return;
 		}
 	}
 	else if (strcmp(context, "network") == 0) {
 		if (! cfg_set_network(cmd)) {
 			cf_dyn_buf_append_string(db, "error");
-			return 0;
+			return;
 		}
 	}
 	else if (strcmp(context, "namespace") == 0) {
 		if (! cfg_set_namespace(cmd)) {
 			cf_dyn_buf_append_string(db, "error");
-			return 0;
+			return;
 		}
 	}
 	else if (strcmp(context, "security") == 0) {
 		if (as_error_enterprise_only()) {
 			cf_warning(AS_INFO, "security is enterprise-only");
 			cf_dyn_buf_append_string(db, "error");
-			return 0;
+			return;
 		}
 
 		if (! as_security_set_config(cmd)) {
 			cf_dyn_buf_append_string(db, "error");
-			return 0;
+			return;
 		}
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		if (as_error_enterprise_only()) {
 			cf_warning(AS_INFO, "XDR is enterprise-only");
 			cf_dyn_buf_append_string(db, "error");
-			return 0;
+			return;
 		}
 
 		if (! as_xdr_set_config(cmd)) {
 			cf_dyn_buf_append_string(db, "error");
-			return 0;
+			return;
 		}
 	}
 	else {
 		cf_dyn_buf_append_string(db, "error");
-		return 0;
+		return;
 	}
 
 	cf_info(AS_INFO, "config-set command completed: params %s", cmd);
 	cf_dyn_buf_append_string(db, "ok");
-
-	return 0;
 }
 
 static bool

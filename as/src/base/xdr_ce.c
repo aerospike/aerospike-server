@@ -141,20 +141,17 @@ as_xdr_get_stats(const char* cmd, cf_dyn_buf* db)
 {
 }
 
-int
-as_xdr_dc_state(char* name, char* cmd, cf_dyn_buf* db)
+void
+as_xdr_dc_state(const char* name, const char* cmd, cf_dyn_buf* db)
 {
-	return 0;
 }
 
-int
-as_xdr_get_filter(char* name, char* cmd, cf_dyn_buf* db)
+void
+as_xdr_get_filter(const char* name, const char* cmd, cf_dyn_buf* db)
 {
-	return 0;
 }
 
-int
-as_xdr_set_filter(char* name, char* cmd, cf_dyn_buf* db)
+void
+as_xdr_set_filter(const char* name, const char* cmd, cf_dyn_buf* db)
 {
-	return 0;
 }

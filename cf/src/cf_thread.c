@@ -220,8 +220,8 @@ cf_thread_get_stats(cf_thread_stats* stats)
 	stats->n_pool_active = g_n_pool_active;
 }
 
-int32_t
-cf_thread_traces(char* key, cf_dyn_buf* db)
+void
+cf_thread_traces(const char* key, cf_dyn_buf* db)
 {
 	(void)key;
 
@@ -242,8 +242,6 @@ cf_thread_traces(char* key, cf_dyn_buf* db)
 
 	cf_ll_reduce(&g_thread_list, true, print_traces_cb, db);
 	cf_dyn_buf_chomp(db);
-
-	return 0;
 }
 
 void

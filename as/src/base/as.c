@@ -73,6 +73,7 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/roster.h"
+#include "fabric/service_list.h"
 #include "fabric/skew_monitor.h"
 #include "query/query_manager.h"
 #include "sindex/sindex.h"
@@ -391,6 +392,7 @@ as_run(int argc, char **argv)
 	as_fabric_init();			// inter-node communications
 	as_exchange_init();			// initialize the cluster exchange subsystem
 	as_clustering_init();		// clustering-v5 start
+	as_service_list_init();		// service list handling
 	as_info_init();				// info transaction handling
 	as_migrate_init();			// move data between nodes
 	as_proxy_init();			// do work on behalf of others
