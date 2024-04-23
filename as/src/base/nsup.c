@@ -859,10 +859,12 @@ update_stats(as_namespace* ns, uint64_t n_0_void_time,
 			total_duration_ms);
 
 	uint64_t n_deleted_objects = n_expired_objects + n_evicted_objects;
-	uint64_t n_objects = as_load_uint64(&ns->n_objects);
 
-	ns->nsup_cycle_deleted_pct = n_deleted_objects >= n_objects ? 100.0 :
-			(double)n_deleted_objects * 100.0 / (double)n_objects;
+	// A good enough estimate for our purposes, and safer than the real thing.
+	uint64_t old_n_objects = as_load_uint64(&ns->n_objects) + n_deleted_objects;
+
+	ns->nsup_cycle_deleted_pct = n_deleted_objects == 0 ? 0 :
+			(double)n_deleted_objects * 100.0 / (double)old_n_objects;
 
 	if (total_duration_ms > TOO_LONG_MS &&
 			ns->nsup_cycle_deleted_pct > TOO_MUCH_DELETED_PCT) {
