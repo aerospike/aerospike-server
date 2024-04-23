@@ -400,6 +400,13 @@ as_service_list_command(const char* key, const char* params, cf_dyn_buf* db)
 	if (strncmp(params, prefix, prefix_len) == 0) {
 		since = strtoul(params + prefix_len, NULL, 10);
 	}
+	else {
+		// Prior to 7.1, these commands behaved differently depending on the
+		// presence of a colon. Going forward these commands use the non-colon
+		// behavior when 'generation' isn't in the params.
+		as_service_list_dynamic(key, params, db);
+		return;
+	}
 
 	// Find the build and projection functions for the given key.
 
