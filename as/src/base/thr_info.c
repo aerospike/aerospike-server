@@ -2116,7 +2116,8 @@ cmd_namespace(const char* name, const char* params, cf_dyn_buf* db)
 	as_namespace* ns = as_namespace_get_byname(params);
 
 	if (ns == NULL) {
-		info_respond_error(db, AS_ERR_NAMESPACE, "namespace not found");
+		// For now, no info_respond_error(), clients won't handle error.
+		cf_dyn_buf_append_string(db, "type=unknown");
 		return;
 	}
 
@@ -2639,7 +2640,8 @@ cmd_sets(const char* name, const char* params, cf_dyn_buf* db)
 		}
 
 		if (ns == NULL) {
-			info_respond_error(db, AS_ERR_NAMESPACE, "unknown namespace");
+			// For now, no info_respond_error(), clients won't handle error.
+			cf_dyn_buf_append_string(db, "ns_type=unknown");
 			return;
 		}
 	}
@@ -2686,7 +2688,8 @@ cmd_sindex(const char* name, const char* params, cf_dyn_buf* db)
 		}
 
 		if (ns == NULL) {
-			info_respond_error(db, AS_ERR_NAMESPACE, "namespace not found");
+			// For now, no info_respond_error(), clients won't handle error.
+			cf_dyn_buf_append_string(db, "ns_type=unknown");
 			return;
 		}
 	}
