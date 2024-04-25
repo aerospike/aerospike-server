@@ -113,7 +113,7 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 	int context_len = sizeof(context);
 
 	if (as_info_parameter_get(params, "context", context, &context_len) != 0) {
-		cf_dyn_buf_append_string(db, "Error::invalid get-config parameter");
+		cf_dyn_buf_append_string(db, "ERROR::invalid get-config parameter");
 		return;
 	}
 
@@ -127,7 +127,7 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 		context_len = sizeof(context);
 
 		if (as_info_parameter_get(params, "id", context, &context_len) != 0) {
-			cf_dyn_buf_append_string(db, "Error::invalid id");
+			cf_dyn_buf_append_string(db, "ERROR::invalid id");
 			return;
 		}
 
@@ -140,7 +140,7 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 		as_xdr_get_config(params, db);
 	}
 	else {
-		cf_dyn_buf_append_string(db, "Error::invalid context");
+		cf_dyn_buf_append_string(db, "ERROR::invalid context");
 	}
 }
 
