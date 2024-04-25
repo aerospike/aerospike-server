@@ -924,7 +924,7 @@ handle_cmds(char* buf, size_t buf_sz, const as_file_handle* fd_h,
 		cf_dyn_buf* db)
 {
 	char* end = buf + buf_sz;
-	char* name = buf;
+	char* at = buf;
 
 	for (char* c = buf; c < end; c++) {
 		if (*c != EOL) {
@@ -933,22 +933,24 @@ handle_cmds(char* buf, size_t buf_sz, const as_file_handle* fd_h,
 
 		*c = '\0'; // null terminate command
 
+		char* cmd_str = at;
+
 		// Return exact command string received from client.
-		cf_dyn_buf_append_string(db, name);
+		cf_dyn_buf_append_string(db, cmd_str);
 		cf_dyn_buf_append_char(db, SEP);
 
-		const as_info_cmd* cmd = parse_cmd(&name, db);
+		const as_info_cmd* cmd = parse_cmd(&at, db);
 
 		if (cmd != NULL) {
-			handle_cmd(cmd, name, fd_h, db);
+			handle_cmd(cmd, at, fd_h, db);
 		}
 		else {
-			cf_warning(AS_INFO, "received unparsable command - '%s'", name);
+			cf_warning(AS_INFO, "unrecognized command - '%s'", cmd_str);
 			info_respond_error(db, AS_ERR_PARAMETER, "unrecognized command");
 		}
 
 		cf_dyn_buf_append_char(db, EOL);
-		name = c + 1;
+		at = c + 1;
 	}
 }
 
