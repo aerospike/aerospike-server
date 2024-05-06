@@ -53,8 +53,10 @@
  * 11 - 6.0.0 - for AER-6487 (revived nodes) & AER-6513 (storage end mark).
  * 12 - 6.1.0.32 & 6.2.0.27 & 6.3.0.20 & 6.4.0.14 & 7.0.0.7 - for AER-6726
  *      (SC rack-aware quiesce bug can violate rack-aware).
+ * 13 - 6.1.0.34 & 6.3.0.22 & 6.4.0.16 & 7.0.0.9 - for AER-6738
+ *      (SC rack-aware replication-factor > n-racks bug can violate rack-aware).
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 12
+#define AS_EXCHANGE_COMPATIBILITY_ID 13
 
 /**
  * Number of quantum intervals in orphan state after which client transactions
