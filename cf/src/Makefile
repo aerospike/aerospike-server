@@ -71,6 +71,7 @@ SOURCES += vmapx.c
 ifneq ($(USE_EE),1)
   SOURCES += arenax_ce.c
   SOURCES += fips_ce.c
+  SOURCES += os_ce.c
   SOURCES += secrets_ce.c
   SOURCES += socket_ce.c
   SOURCES += tls_ce.c

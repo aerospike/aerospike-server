@@ -62,19 +62,6 @@ static void check_zone_reclaim_mode(cf_dyn_buf* db);
 
 
 //==========================================================
-// Inlines & macros.
-//
-
-#define check_failed(_db, _name, _msg, ...) \
-	do { \
-		cf_warning(CF_OS, "failed " _name " check - " _msg, ##__VA_ARGS__); \
-		cf_dyn_buf_append_string(_db, _name); \
-		cf_dyn_buf_append_char(_db, ','); \
-	} \
-	while (false)
-
-
-//==========================================================
 // Public API - file permissions.
 //
 
@@ -199,6 +186,8 @@ cf_os_best_practices_check(cf_dyn_buf* db, uint64_t max_alloc_sz)
 	check_thp(db);
 	check_swappiness(db);
 	check_zone_reclaim_mode(db);
+
+	cf_os_best_practices_check_ee(db);
 }
 
 
@@ -236,7 +225,7 @@ check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz)
 	switch (cf_os_read_int_from_file(path, (int64_t*)&min_free_kbytes)) {
 	case CF_OS_FILE_RES_OK:
 		if (min_free_kbytes < minimum_kb) {
-			check_failed(db, "min-free-kbytes",
+			os_check_failed(db, "min-free-kbytes",
 					"min_free_kbytes should be at least %lu", minimum_kb);
 		}
 		break;
@@ -257,7 +246,7 @@ check_swappiness(cf_dyn_buf* db)
 	switch (cf_os_read_int_from_file(path, &swappiness)) {
 	case CF_OS_FILE_RES_OK:
 		if (swappiness != 0) {
-			check_failed(db, "swappiness", "swappiness not set to 0");
+			os_check_failed(db, "swappiness", "swappiness not set to 0");
 		}
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
@@ -287,7 +276,7 @@ check_thp(cf_dyn_buf* db)
 			return;
 		}
 		if (strstr(buf, "[madvise]") == NULL) {
-			check_failed(db, "thp-enabled",
+			os_check_failed(db, "thp-enabled",
 					"THP enabled not set to either 'never' or 'madvise'");
 		}
 		break;
@@ -311,7 +300,7 @@ check_thp(cf_dyn_buf* db)
 		buf[limit] = '\0';
 		if (strstr(buf, "[never]") == NULL &&
 				strstr(buf, "[madvise]") == NULL) {
-			check_failed(db, "thp-defrag",
+			os_check_failed(db, "thp-defrag",
 					"THP defrag not set to either 'never' or 'madvise'");
 		}
 		break;
@@ -333,7 +322,7 @@ check_zone_reclaim_mode(cf_dyn_buf* db)
 	switch (cf_os_read_int_from_file(path, &mode)) {
 	case CF_OS_FILE_RES_OK:
 		if (mode != 0) {
-			check_failed(db, "zone-reclaim-mode",
+			os_check_failed(db, "zone-reclaim-mode",
 					"zone_reclaim_mode not set to 0");
 		}
 		break;
