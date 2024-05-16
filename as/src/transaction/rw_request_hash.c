@@ -110,6 +110,8 @@ static const char* from_tag(const as_transaction* tr);
 static void* run_retransmit(void* arg);
 static int retransmit_reduce_fn(const void* key, void* data, void* udata);
 static void update_retransmit_stats(const rw_request* rw);
+static void update_non_sub_retransmit_stats(const rw_request* rw);
+static void update_batch_sub_retransmit_stats(const rw_request* rw);
 
 static int rw_msg_cb(cf_node id, msg* m, void* udata);
 
@@ -355,72 +357,37 @@ static void
 update_retransmit_stats(const rw_request* rw)
 {
 	as_namespace* ns = rw->rsv.ns;
-	as_msg* m = &rw->msgp->msg;
-	bool is_dup_res = rw->repl_write_cb == NULL;
+	bool is_repl_write = rw->repl_write_cb != NULL;
 
 	// Note - only one retransmit thread, so no need for atomic increments.
 
 	switch (rw->origin) {
 	case FROM_PROXY:
 		if (rw_request_is_batch_sub(rw)) {
-			ns->n_retransmit_all_batch_sub_dup_res++;
+			update_batch_sub_retransmit_stats(rw);
 			break;
 		}
 		// No break.
-	case FROM_CLIENT: {
-			bool is_write = (m->info2 & AS_MSG_INFO2_WRITE) != 0;
-			bool is_delete = (m->info2 & AS_MSG_INFO2_DELETE) != 0;
-			bool is_udf = (rw->msg_fields & AS_MSG_FIELD_BIT_UDF_FILENAME) != 0;
-
-			if (is_dup_res) {
-				if (is_write) {
-					if (is_delete) {
-						ns->n_retransmit_all_delete_dup_res++;
-					}
-					else if (is_udf) {
-						ns->n_retransmit_all_udf_dup_res++;
-					}
-					else {
-						ns->n_retransmit_all_write_dup_res++;
-					}
-				}
-				else {
-					ns->n_retransmit_all_read_dup_res++;
-				}
-			}
-			else {
-				cf_assert(is_write, AS_RW, "read doing replica write");
-
-				if (is_delete) {
-					ns->n_retransmit_all_delete_repl_write++;
-				}
-				else if (is_udf) {
-					ns->n_retransmit_all_udf_repl_write++;
-				}
-				else {
-					ns->n_retransmit_all_write_repl_write++;
-				}
-			}
-		}
+	case FROM_CLIENT:
+		update_non_sub_retransmit_stats(rw);
 		break;
 	case FROM_BATCH:
-		// For now batch sub transactions are read-only.
-		ns->n_retransmit_all_batch_sub_dup_res++;
+		update_batch_sub_retransmit_stats(rw);
 		break;
 	case FROM_IUDF:
-		if (is_dup_res) {
-			ns->n_retransmit_udf_sub_dup_res++;
+		if (is_repl_write) {
+			ns->n_retransmit_udf_sub_repl_write++;
 		}
 		else {
-			ns->n_retransmit_udf_sub_repl_write++;
+			ns->n_retransmit_udf_sub_dup_res++;
 		}
 		break;
 	case FROM_IOPS:
-		if (is_dup_res) {
-			ns->n_retransmit_ops_sub_dup_res++;
+		if (is_repl_write) {
+			ns->n_retransmit_ops_sub_repl_write++;
 		}
 		else {
-			ns->n_retransmit_ops_sub_repl_write++;
+			ns->n_retransmit_ops_sub_dup_res++;
 		}
 		break;
 	case FROM_RE_REPL:
@@ -429,6 +396,104 @@ update_retransmit_stats(const rw_request* rw)
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
+	}
+}
+
+static void
+update_non_sub_retransmit_stats(const rw_request* rw)
+{
+	as_namespace* ns = rw->rsv.ns;
+	as_msg* m = &rw->msgp->msg;
+
+	bool is_repl_write = rw->repl_write_cb != NULL;
+	bool is_repl_ping = rw->repl_ping_cb != NULL;
+
+	bool is_write = (m->info2 & AS_MSG_INFO2_WRITE) != 0;
+	bool is_delete = (m->info2 & AS_MSG_INFO2_DELETE) != 0;
+	bool is_udf = (rw->msg_fields & AS_MSG_FIELD_BIT_UDF_FILENAME) != 0;
+
+	if (is_repl_write) {
+		cf_assert(is_write, AS_RW, "read doing replica write");
+
+		if (is_delete) {
+			ns->n_retransmit_all_delete_repl_write++;
+		}
+		else if (is_udf) {
+			ns->n_retransmit_all_udf_repl_write++;
+		}
+		else {
+			ns->n_retransmit_all_write_repl_write++;
+		}
+	}
+	else {
+		if (is_write) {
+			if (is_delete) {
+				ns->n_retransmit_all_delete_dup_res++;
+			}
+			else if (is_udf) {
+				ns->n_retransmit_all_udf_dup_res++;
+			}
+			else {
+				ns->n_retransmit_all_write_dup_res++;
+			}
+		}
+		else {
+			if (is_repl_ping) {
+				ns->n_retransmit_all_read_repl_ping++;
+			}
+			else {
+				ns->n_retransmit_all_read_dup_res++;
+			}
+		}
+	}
+}
+
+static void
+update_batch_sub_retransmit_stats(const rw_request* rw)
+{
+	as_namespace* ns = rw->rsv.ns;
+	as_msg* m = &rw->msgp->msg;
+
+	bool is_repl_write = rw->repl_write_cb != NULL;
+	bool is_repl_ping = rw->repl_ping_cb != NULL;
+
+	bool is_write = (m->info2 & AS_MSG_INFO2_WRITE) != 0;
+	bool is_delete = (m->info2 & AS_MSG_INFO2_DELETE) != 0;
+	bool is_udf = (rw->msg_fields & AS_MSG_FIELD_BIT_UDF_FILENAME) != 0;
+
+	if (is_repl_write) {
+		cf_assert(is_write, AS_RW, "read doing replica write");
+
+		if (is_delete) {
+			ns->n_retransmit_all_batch_sub_delete_repl_write++;
+		}
+		else if (is_udf) {
+			ns->n_retransmit_all_batch_sub_udf_repl_write++;
+		}
+		else {
+			ns->n_retransmit_all_batch_sub_write_repl_write++;
+		}
+	}
+	else {
+		if (is_write) {
+			if (is_delete) {
+				ns->n_retransmit_all_batch_sub_delete_dup_res++;
+			}
+			else if (is_udf) {
+				ns->n_retransmit_all_batch_sub_udf_dup_res++;
+			}
+			else {
+				ns->n_retransmit_all_batch_sub_write_dup_res++;
+			}
+		}
+		else {
+			if (is_repl_ping) {
+				ns->n_retransmit_all_batch_sub_read_repl_ping++;
+			}
+			else {
+				ns->n_retransmit_all_batch_sub_read_dup_res++;
+			}
+		}
 	}
 }
 
