@@ -965,38 +965,46 @@ log_line_retransmits(as_namespace* ns)
 	uint64_t n_migrate_record_retransmits = ns->migrate_record_retransmits;
 	uint64_t n_all_read_dup_res = ns->n_retransmit_all_read_dup_res;
 	uint64_t n_all_write_dup_res = ns->n_retransmit_all_write_dup_res;
-	uint64_t n_all_write_repl_write = ns->n_retransmit_all_write_repl_write;
 	uint64_t n_all_delete_dup_res = ns->n_retransmit_all_delete_dup_res;
-	uint64_t n_all_delete_repl_write = ns->n_retransmit_all_delete_repl_write;
 	uint64_t n_all_udf_dup_res = ns->n_retransmit_all_udf_dup_res;
-	uint64_t n_all_udf_repl_write = ns->n_retransmit_all_udf_repl_write;
-	uint64_t n_all_batch_sub_dup_res = ns->n_retransmit_all_batch_sub_dup_res;
+	uint64_t n_all_batch_sub_read_dup_res = ns->n_retransmit_all_batch_sub_read_dup_res;
+	uint64_t n_all_batch_sub_write_dup_res = ns->n_retransmit_all_batch_sub_write_dup_res;
+	uint64_t n_all_batch_sub_delete_dup_res = ns->n_retransmit_all_batch_sub_delete_dup_res;
+	uint64_t n_all_batch_sub_udf_dup_res = ns->n_retransmit_all_batch_sub_udf_dup_res;
 	uint64_t n_udf_sub_dup_res = ns->n_retransmit_udf_sub_dup_res;
-	uint64_t n_udf_sub_repl_write = ns->n_retransmit_udf_sub_repl_write;
 	uint64_t n_ops_sub_dup_res = ns->n_retransmit_ops_sub_dup_res;
+	uint64_t n_all_read_repl_ping = ns->n_retransmit_all_read_repl_ping;
+	uint64_t n_all_batch_sub_read_repl_ping = ns->n_retransmit_all_batch_sub_read_repl_ping;
+	uint64_t n_all_write_repl_write = ns->n_retransmit_all_write_repl_write;
+	uint64_t n_all_delete_repl_write = ns->n_retransmit_all_delete_repl_write;
+	uint64_t n_all_udf_repl_write = ns->n_retransmit_all_udf_repl_write;
+	uint64_t n_all_batch_sub_write_repl_write = ns->n_retransmit_all_batch_sub_write_repl_write;
+	uint64_t n_all_batch_sub_delete_repl_write = ns->n_retransmit_all_batch_sub_delete_repl_write;
+	uint64_t n_all_batch_sub_udf_repl_write = ns->n_retransmit_all_batch_sub_udf_repl_write;
+	uint64_t n_udf_sub_repl_write = ns->n_retransmit_udf_sub_repl_write;
 	uint64_t n_ops_sub_repl_write = ns->n_retransmit_ops_sub_repl_write;
 
 	if ((n_migrate_record_retransmits |
-			n_all_read_dup_res |
-			n_all_write_dup_res | n_all_write_repl_write |
-			n_all_delete_dup_res | n_all_delete_repl_write |
-			n_all_udf_dup_res | n_all_udf_repl_write |
-			n_all_batch_sub_dup_res |
-			n_udf_sub_dup_res | n_udf_sub_repl_write |
-			n_ops_sub_dup_res | n_ops_sub_repl_write) == 0) {
+			n_all_read_dup_res | n_all_write_dup_res | n_all_delete_dup_res | n_all_udf_dup_res |
+			n_all_batch_sub_read_dup_res | n_all_batch_sub_write_dup_res | n_all_batch_sub_delete_dup_res | n_all_batch_sub_udf_dup_res |
+			n_udf_sub_dup_res | n_ops_sub_dup_res |
+			n_all_read_repl_ping | n_all_batch_sub_read_repl_ping |
+			n_all_write_repl_write | n_all_delete_repl_write | n_all_udf_repl_write |
+			n_all_batch_sub_write_repl_write | n_all_batch_sub_delete_repl_write | n_all_batch_sub_udf_repl_write |
+			n_udf_sub_repl_write | n_ops_sub_repl_write) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} retransmits: migration %lu all-read %lu all-write (%lu,%lu) all-delete (%lu,%lu) all-udf (%lu,%lu) all-batch-sub %lu udf-sub (%lu,%lu) ops-sub (%lu,%lu)",
+	cf_info(AS_INFO, "{%s} retransmits: migration %lu dup-res (%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu) repl-ping (%lu,%lu) repl-write (%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu)",
 			ns->name,
 			n_migrate_record_retransmits,
-			n_all_read_dup_res,
-			n_all_write_dup_res, n_all_write_repl_write,
-			n_all_delete_dup_res, n_all_delete_repl_write,
-			n_all_udf_dup_res, n_all_udf_repl_write,
-			n_all_batch_sub_dup_res,
-			n_udf_sub_dup_res, n_udf_sub_repl_write,
-			n_ops_sub_dup_res, n_ops_sub_repl_write);
+			n_all_read_dup_res, n_all_write_dup_res, n_all_delete_dup_res, n_all_udf_dup_res,
+			n_all_batch_sub_read_dup_res, n_all_batch_sub_write_dup_res, n_all_batch_sub_delete_dup_res, n_all_batch_sub_udf_dup_res,
+			n_udf_sub_dup_res, n_ops_sub_dup_res,
+			n_all_read_repl_ping, n_all_batch_sub_read_repl_ping,
+			n_all_write_repl_write, n_all_delete_repl_write, n_all_udf_repl_write,
+			n_all_batch_sub_write_repl_write, n_all_batch_sub_delete_repl_write, n_all_batch_sub_udf_repl_write,
+			n_udf_sub_repl_write, n_ops_sub_repl_write);
 }
 
 void

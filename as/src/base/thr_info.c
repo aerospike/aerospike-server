@@ -4258,22 +4258,26 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
 	info_append_uint64(db, "retransmit_all_read_dup_res", ns->n_retransmit_all_read_dup_res);
-
 	info_append_uint64(db, "retransmit_all_write_dup_res", ns->n_retransmit_all_write_dup_res);
-	info_append_uint64(db, "retransmit_all_write_repl_write", ns->n_retransmit_all_write_repl_write);
-
 	info_append_uint64(db, "retransmit_all_delete_dup_res", ns->n_retransmit_all_delete_dup_res);
-	info_append_uint64(db, "retransmit_all_delete_repl_write", ns->n_retransmit_all_delete_repl_write);
-
 	info_append_uint64(db, "retransmit_all_udf_dup_res", ns->n_retransmit_all_udf_dup_res);
-	info_append_uint64(db, "retransmit_all_udf_repl_write", ns->n_retransmit_all_udf_repl_write);
-
-	info_append_uint64(db, "retransmit_all_batch_sub_dup_res", ns->n_retransmit_all_batch_sub_dup_res);
-
+	info_append_uint64(db, "retransmit_all_batch_sub_read_dup_res", ns->n_retransmit_all_batch_sub_read_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_write_dup_res", ns->n_retransmit_all_batch_sub_write_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_delete_dup_res", ns->n_retransmit_all_batch_sub_delete_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_udf_dup_res", ns->n_retransmit_all_batch_sub_udf_dup_res);
 	info_append_uint64(db, "retransmit_udf_sub_dup_res", ns->n_retransmit_udf_sub_dup_res);
-	info_append_uint64(db, "retransmit_udf_sub_repl_write", ns->n_retransmit_udf_sub_repl_write);
-
 	info_append_uint64(db, "retransmit_ops_sub_dup_res", ns->n_retransmit_ops_sub_dup_res);
+
+	info_append_uint64(db, "retransmit_all_read_repl_ping", ns->n_retransmit_all_read_repl_ping);
+	info_append_uint64(db, "retransmit_all_batch_sub_read_repl_ping", ns->n_retransmit_all_batch_sub_read_repl_ping);
+
+	info_append_uint64(db, "retransmit_all_write_repl_write", ns->n_retransmit_all_write_repl_write);
+	info_append_uint64(db, "retransmit_all_delete_repl_write", ns->n_retransmit_all_delete_repl_write);
+	info_append_uint64(db, "retransmit_all_udf_repl_write", ns->n_retransmit_all_udf_repl_write);
+	info_append_uint64(db, "retransmit_all_batch_sub_write_repl_write", ns->n_retransmit_all_batch_sub_write_repl_write);
+	info_append_uint64(db, "retransmit_all_batch_sub_delete_repl_write", ns->n_retransmit_all_batch_sub_delete_repl_write);
+	info_append_uint64(db, "retransmit_all_batch_sub_udf_repl_write", ns->n_retransmit_all_batch_sub_udf_repl_write);
+	info_append_uint64(db, "retransmit_udf_sub_repl_write", ns->n_retransmit_udf_sub_repl_write);
 	info_append_uint64(db, "retransmit_ops_sub_repl_write", ns->n_retransmit_ops_sub_repl_write);
 
 	// Primary index query (formerly scan) stats.
