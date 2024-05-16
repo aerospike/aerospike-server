@@ -1099,22 +1099,26 @@ typedef struct as_namespace_s {
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
 	uint64_t		n_retransmit_all_read_dup_res;
-
 	uint64_t		n_retransmit_all_write_dup_res;
-	uint64_t		n_retransmit_all_write_repl_write;
-
 	uint64_t		n_retransmit_all_delete_dup_res;
-	uint64_t		n_retransmit_all_delete_repl_write;
-
 	uint64_t		n_retransmit_all_udf_dup_res;
-	uint64_t		n_retransmit_all_udf_repl_write;
-
-	uint64_t		n_retransmit_all_batch_sub_dup_res;
-
+	uint64_t		n_retransmit_all_batch_sub_read_dup_res;
+	uint64_t		n_retransmit_all_batch_sub_write_dup_res;
+	uint64_t		n_retransmit_all_batch_sub_delete_dup_res;
+	uint64_t		n_retransmit_all_batch_sub_udf_dup_res;
 	uint64_t		n_retransmit_udf_sub_dup_res;
-	uint64_t		n_retransmit_udf_sub_repl_write;
-
 	uint64_t		n_retransmit_ops_sub_dup_res;
+
+	uint64_t		n_retransmit_all_read_repl_ping;
+	uint64_t		n_retransmit_all_batch_sub_read_repl_ping;
+
+	uint64_t		n_retransmit_all_write_repl_write;
+	uint64_t		n_retransmit_all_delete_repl_write;
+	uint64_t		n_retransmit_all_udf_repl_write;
+	uint64_t		n_retransmit_all_batch_sub_write_repl_write;
+	uint64_t		n_retransmit_all_batch_sub_delete_repl_write;
+	uint64_t		n_retransmit_all_batch_sub_udf_repl_write;
+	uint64_t		n_retransmit_udf_sub_repl_write;
 	uint64_t		n_retransmit_ops_sub_repl_write;
 
 	// Primary index query (formerly scan) stats.
