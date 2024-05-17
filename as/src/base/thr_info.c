@@ -4280,6 +4280,9 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "retransmit_udf_sub_repl_write", ns->n_retransmit_udf_sub_repl_write);
 	info_append_uint64(db, "retransmit_ops_sub_repl_write", ns->n_retransmit_ops_sub_repl_write);
 
+	// Deprecated stat for hotfix only.
+	info_append_uint64(db, "retransmit_all_batch_sub_dup_res", 0);
+
 	// Primary index query (formerly scan) stats.
 
 	info_append_uint64(db, "pi_query_short_basic_complete", ns->n_pi_query_short_basic_complete);
