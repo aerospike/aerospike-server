@@ -213,7 +213,7 @@ as_truncate_undo_cmd(const char* ns_name, const char* set_name, cf_dyn_buf* db)
 
 	// Broadcast the truncate-undo command to all nodes (including this one).
 	if (! as_smd_delete_blocking(AS_SMD_MODULE_TRUNCATE, smd_key, 0)) {
-		cf_warning(AS_INFO, "{%s} timeout during undo truncate", smd_key);
+		cf_warning(AS_TRUNCATE, "{%s} timeout during undo truncate", smd_key);
 		cf_dyn_buf_append_string(db, "ERROR::timeout");
 		return;
 	}
