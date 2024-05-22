@@ -19,9 +19,7 @@ under the terms of the Apache License, version 2.0, as stated in the file
 see individual files for details.
 
   - modules/common
-  - modules/lua-core
   - modules/mod-lua
-  - modules/telemetry
 
 ================================================================================
 

@@ -10,14 +10,6 @@ Aerospike is a distributed, scalable NoSQL database. It is architected with thre
 
 For more information on Aerospike, please visit: [`http://aerospike.com`](http://aerospike.com)
 
-## Telemetry Anonymized Data Collection
-
-The Aerospike Community Edition collects anonymized server performance statistics.
-Please see the
-[Aerospike Telemetery web page](http://aerospike.com/aerospike-telemetry) for more
-information.  The full Telemetry data collection agent source code may be found in the
-["telemetry" submodule](https://github.com/aerospike/aerospike-telemetry-agent/blob/master/README.md).
-
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
@@ -74,15 +66,6 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 
 * The Debian 11/12 and Ubuntu 20/22 requiresi `zlib1g-dev`.
 
-#### Python 3 or 2
-
-Running the Telemetry Agent requires either Python 3+ or Python 2.6+,
-at least one of which is generally available by default on most
-platforms. On some distros, such as Ubuntu 20+, it may be necessary to
-install the package `python`, while on other distros, such as Red Hat Enterprise Linux 8+,
-the package name includes the major (and/or minor) version number, e.g.,
-`python3` or `python2`.
-
 ### Submodules
 
 The Aerospike Database Server build depends upon the following submodules:
@@ -97,7 +80,6 @@ The Aerospike Database Server build depends upon the following submodules:
 | lua       | The Lua runtime |
 | mod-lua   | The Aerospike Lua Interface |
 | s2geometry | The S2 Spherical Geometry Library |
-| telemetry | The Aerospike Telemetry Agent (Community Edition only) |
 
 After the initial cloning of the `aerospike-server` repo., the
 submodules must be fetched for the first time using the following

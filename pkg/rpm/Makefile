@@ -35,11 +35,7 @@ dist:
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_ssd.conf
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_mesh.conf
 
-	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service.head $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
-  ifeq ($(EDITION),community)
-	cat $(DEPTH)/as/etc/aerospike.service.telemetry >> $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
-  endif
-	cat $(DEPTH)/as/etc/aerospike.service.tail >> $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
+	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.tmpfiles $(BUILD_ROOT)/etc/tmpfiles.d/aerospike.conf
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike
 	install -p -D -m 755 $(DEPTH)/as/etc/asd-systemd-helper $(BUILD_ROOT)/usr/bin/asd-systemd-helper
@@ -52,19 +48,6 @@ ifeq ($(EDITION),community)
 	install -pm 644 $(DEPTH)/LICENSE-APACHE $(OPT_AS)/doc
 else
 	install -pm 644 $(EEREPO)/LICENSE $(OPT_AS)/doc/LICENSE
-endif
-
-ifeq ($(EDITION),community)
-	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike_telemetry.service
-	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike_telemetry
-	install -d $(OPT_AS)/telemetry
-	install -d $(OPT_AS)/telemetry/phonehome
-	install -d $(OPT_AS)/telemetry/daemon
-	install -pm 644 $(DEPTH)/as/etc/telemetry.conf $(BUILD_ROOT)/etc/aerospike
-	install -pm 644 $(DEPTH)/modules/telemetry/README.md $(OPT_AS)/doc/TELEMETRY.md
-	install -pm 755 $(DEPTH)/modules/telemetry/telemetry.py $(OPT_AS)/telemetry
-	install -pm 644 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
-	install -pm 644 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
 endif
 
 	install -d $(OPT_AS)/data
@@ -99,10 +82,6 @@ ifeq ($(EDITION),federal)
 	cat $(EEREPO)/pkg/rpm/fips-files >> $(PKG)/rpm/aerospike.spec
 endif
 
-ifeq ($(EDITION),community)
-	cat $(PKG)/rpm/server-spec-telemetry >> $(PKG)/rpm/aerospike.spec
-	cat $(PKG)/rpm/server-spec-telemetry-systemd >> $(PKG)/rpm/aerospike.spec
-endif
 	cat $(PKG)/rpm/server-spec-scripts >> $(PKG)/rpm/aerospike.spec
 
 	sed -i 's/@RELEASE@/'$(OS)'/g' $(PKG)/rpm/aerospike.spec
