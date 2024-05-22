@@ -10,10 +10,6 @@
 	path = modules/jansson
 	url = https://github.com/aerospike/jansson.git
 	ignore = dirty
-[submodule "modules/telemetry"]
-	path = modules/telemetry
-	url = https://github.com/aerospike/aerospike-telemetry-agent.git
-	ignore = dirty
 [submodule "modules/jemalloc"]
 	path = modules/jemalloc
 	url = https://github.com/aerospike/jemalloc.git

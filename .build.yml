@@ -36,10 +36,8 @@ build:
       - make -j
       - make $PKG
       - make source
-      - cp -p modules/telemetry/{README,TELEMETRY}.md
     artifact:
       - pkg/packages/*
-      - modules/telemetry/TELEMETRY.md
   - name: enterprise
     environment:
       EEREPO: /work/source/$EEREPO
