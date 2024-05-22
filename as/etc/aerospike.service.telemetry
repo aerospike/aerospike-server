@@ -1,2 +1,0 @@
-ExecStartPre=-/bin/systemctl start aerospike_telemetry
-ExecStopPost=-/bin/systemctl stop aerospike_telemetry

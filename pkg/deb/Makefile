@@ -40,9 +40,6 @@ dist:
 	touch $(PKG)/deb/debian/control
 
 	install -pm 644 $(PKG)/deb/conffiles $(BUILD_ROOT)/DEBIAN
-ifeq ($(EDITION),community)
-	cat $(PKG)/deb/conffiles.telemetry >> $(BUILD_ROOT)/DEBIAN/conffiles
-endif
 	install -pm 755 $(PKG)/deb/postinst.server $(BUILD_ROOT)/DEBIAN/postinst
 
 	install -pm 755 $(BIN_DIR)/asd $(BUILD_ROOT)/usr/bin/asd
@@ -61,11 +58,7 @@ ifeq ($(EDITION),federal)
 	cat $(EEREPO)/pkg/deb/fips-files >> $(BUILD_ROOT)/DEBIAN/conffiles
 endif
 
-	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service.head $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
-  ifeq ($(EDITION),community)
-	cat $(DEPTH)/as/etc/aerospike.service.telemetry >> $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
-  endif
-	cat $(DEPTH)/as/etc/aerospike.service.tail >> $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
+	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.tmpfiles $(BUILD_ROOT)/etc/tmpfiles.d/aerospike.conf
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike
 	install -p -D -m 755 $(DEPTH)/as/etc/asd-systemd-helper $(BUILD_ROOT)/usr/bin/asd-systemd-helper
@@ -78,19 +71,6 @@ ifeq ($(EDITION),community)
 	install -pm 644 $(DEPTH)/LICENSE-APACHE $(OPT_AS)/doc
 else
 	install -pm 644 $(EEREPO)/LICENSE $(OPT_AS)/doc/LICENSE
-endif
-
-ifeq ($(EDITION),community)
-	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike_telemetry.service
-	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike_telemetry
-	install -d $(OPT_AS)/telemetry
-	install -d $(OPT_AS)/telemetry/phonehome
-	install -d $(OPT_AS)/telemetry/daemon
-	install -pm 644 $(DEPTH)/as/etc/telemetry.conf $(BUILD_ROOT)/etc/aerospike
-	install -pm 644 $(DEPTH)/modules/telemetry/README.md $(OPT_AS)/doc/TELEMETRY.md
-	install -pm 755 $(DEPTH)/modules/telemetry/telemetry.py $(OPT_AS)/telemetry
-	install -pm 644 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
-	install -pm 644 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
 endif
 
 	install -d $(OPT_AS)/data
