@@ -388,6 +388,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 
 	info_append_bool(db, "allow-ttl-without-nsup", ns->allow_ttl_without_nsup);
 	info_append_uint32(db, "background-query-max-rps", ns->background_query_max_rps);
+	info_append_bool(db, "check-single-bin", ns->check_single_bin); // CONVERT SINGLE-BIN
 
 	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
 		info_append_string(db, "conflict-resolution-policy", "generation");
@@ -400,6 +401,7 @@ cfg_get_namespace(char* context, cf_dyn_buf* db)
 	}
 
 	info_append_bool(db, "conflict-resolve-writes", ns->conflict_resolve_writes);
+	info_append_bool(db, "convert-single-bin", ns->convert_single_bin); // CONVERT SINGLE-BIN
 	info_append_uint32(db, "default-ttl", ns->default_ttl);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
@@ -1226,6 +1228,31 @@ cfg_set_namespace(const char* cmd)
 				ns->name, ns->background_query_max_rps, val);
 		ns->background_query_max_rps = (uint32_t)val;
 	}
+	// CONVERT SINGLE-BIN - dynamic only
+	else if (as_info_parameter_get(cmd, "check-single-bin", v, &v_len) == 0) {
+		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+			cf_warning(AS_INFO, "{%s} 'check-single-bin' cannot be set 'true'",
+					ns->name);
+		}
+		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+			if (ns->convert_single_bin) {
+				cf_warning(AS_INFO, "{%s} 'check-single-bin' cannot be set 'false' if 'convert-single-bin' is still set 'true'",
+						ns->name);
+				return false;
+			}
+			if (cf_get_seconds() < ns->check_single_bin_sec) {
+				cf_warning(AS_INFO, "{%s} 'check-single-bin' cannot be set 'false' until one minute after 'convert-single-bin' is set 'false'",
+						ns->name);
+				return false;
+			}
+			cf_info(AS_INFO, "Changing value of check-single-bin of ns %s from %s to %s",
+					ns->name, bool_val[ns->check_single_bin], v);
+			ns->check_single_bin = false;
+		}
+		else {
+			return false;
+		}
+	}
 	else if (as_info_parameter_get(cmd, "conflict-resolution-policy", v,
 			&v_len) == 0) {
 		if (ns->cp) {
@@ -1263,6 +1290,23 @@ cfg_set_namespace(const char* cmd)
 			cf_info(AS_INFO, "Changing value of conflict-resolve-writes of ns %s to %s",
 					ns->name, v);
 			ns->conflict_resolve_writes = false;
+		}
+		else {
+			return false;
+		}
+	}
+	// CONVERT SINGLE-BIN
+	else if (as_info_parameter_get(cmd, "convert-single-bin", v, &v_len) == 0) {
+		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+			cf_warning(AS_INFO, "{%s} 'convert-single-bin' cannot be set 'true' dynamically",
+					ns->name);
+			return false;
+		}
+		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+			cf_info(AS_INFO, "Changing value of convert-single-bin of ns %s from %s to %s",
+					ns->name, bool_val[ns->convert_single_bin], v);
+			ns->convert_single_bin = false;
+			ns->check_single_bin_sec = cf_get_seconds() + 60;
 		}
 		else {
 			return false;

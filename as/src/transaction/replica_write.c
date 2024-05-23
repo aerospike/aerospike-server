@@ -49,6 +49,7 @@
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/rw_request.h"
@@ -90,6 +91,15 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
 	if (rw->pickle != NULL) {
+		// CONVERT SINGLE-BIN
+		if (ns->convert_single_bin) {
+			rw->pickle_sz = as_flat_convert_to_single_bin(ns, &rw->pickle,
+					(uint32_t)rw->pickle_sz);
+		}
+		else if (ns->was_single_bin) {
+			msg_set_uint32(m, RW_FIELD_MULTI_BIN, 1);
+		}
+
 		msg_set_buf(m, RW_FIELD_RECORD, rw->pickle, rw->pickle_sz,
 				MSG_SET_HANDOFF_MALLOC);
 		rw->pickle = NULL; // make sure destructor doesn't free this
@@ -277,15 +287,30 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 
+	// CONVERT SINGLE-BIN
+	msg_get_uint32(m, RW_FIELD_MULTI_BIN, &rr.is_multi_bin);
+
 	if (! as_flat_unpack_remote_record_meta(ns, &rr)) {
 		cf_warning(AS_RW, "repl_write_handle_op: bad record");
 		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
+
+		// CONVERT SINGLE-BIN
+		if (rr.free_pickle) {
+			cf_free(rr.pickle);
+		}
+
 		return;
 	}
 
 	// Replica writes are the last thing cut off when storage is backed up.
 	if (as_storage_overloaded(ns, 192, "replica write")) {
 		send_repl_write_ack_w_digest(node, m, AS_ERR_DEVICE_OVERLOAD, rr.keyd);
+
+		// CONVERT SINGLE-BIN
+		if (rr.free_pickle) {
+			cf_free(rr.pickle);
+		}
+
 		return;
 	}
 
@@ -295,12 +320,23 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	if (result != AS_OK) {
 		send_repl_write_ack_w_digest(node, m, result, rr.keyd);
+
+		// CONVERT SINGLE-BIN
+		if (rr.free_pickle) {
+			cf_free(rr.pickle);
+		}
+
 		return;
 	}
 
 	rr.rsv = &rsv;
 
 	result = (uint32_t)as_record_replace_if_better(&rr);
+
+	// CONVERT SINGLE-BIN
+	if (rr.free_pickle) {
+		cf_free(rr.pickle);
+	}
 
 	as_partition_release(&rsv);
 	send_repl_write_ack_w_digest(node, m, result, rr.keyd);

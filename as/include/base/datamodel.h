@@ -519,6 +519,10 @@ typedef struct as_remote_record_s {
 	bool xdr_tombstone; // relevant only for enterprise edition
 	bool xdr_nsup_tombstone; // relevant only for enterprise edition
 	bool xdr_bin_cemetery; // relevant only for enterprise edition
+
+	// CONVERT SINGLE-BIN
+	bool free_pickle;
+	uint32_t is_multi_bin;
 } as_remote_record;
 
 int as_record_replace_if_better(as_remote_record *rr);
@@ -680,6 +684,8 @@ typedef struct as_namespace_s {
 	// Storage management.
 	//
 
+	bool			was_single_bin; // CONVERT SINGLE-BIN - helper flag
+
 	// This is typecast to (drv_ssds*) in storage code.
 	void*			storage_private;
 
@@ -761,8 +767,11 @@ typedef struct as_namespace_s {
 
 	bool			allow_ttl_without_nsup;
 	uint32_t		background_query_max_rps;
+	bool			check_single_bin; // CONVERT SINGLE-BIN - dynamic only
+	uint64_t		check_single_bin_sec; // CONVERT SINGLE-BIN - indirect config
 	conflict_resolution_pol conflict_resolution_policy;
 	bool			conflict_resolve_writes;
+	bool			convert_single_bin; // CONVERT SINGLE-BIN
 	bool			cp; // relevant only for enterprise edition
 	bool			cp_allow_drops; // relevant only for enterprise edition
 	uint32_t		default_ttl;

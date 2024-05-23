@@ -1032,6 +1032,12 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			continue;
 		}
 
+		// CONVERT SINGLE-BIN
+		if (ns->was_single_bin && op->name_sz != 0) {
+			cf_warning(AS_RW, "{%s} write_master: must use empty bin name with 'convert-single-bin' %pD", ns->name, &tr->keyd);
+			return AS_ERR_BIN_NAME;
+		}
+
 		if (op->name_sz >= AS_BIN_NAME_MAX_SZ) {
 			cf_warning(AS_RW, "{%s} write_master: bin name too long (%d) %pD", ns->name, op->name_sz, &tr->keyd);
 			return AS_ERR_BIN_NAME;
