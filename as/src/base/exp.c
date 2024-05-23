@@ -573,6 +573,7 @@ static void rt_value_get_geo(rt_value* val, geo_data* result);
 static bool get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin);
 
 // Runtime compare utilities.
+static as_exp_trilean cmp_nil(exp_op_code code, const rt_value* e0, const rt_value* e1);
 static as_exp_trilean cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1);
 static as_exp_trilean cmp_int(exp_op_code code, const rt_value* e0, const rt_value* e1);
 static as_exp_trilean cmp_float(exp_op_code code, const rt_value* e0, const rt_value* e1);
@@ -2890,7 +2891,7 @@ eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	switch (v0.type) {
 	case RT_NIL:
-		ret_val->r_trilean = AS_EXP_TRUE;
+		ret_val->r_trilean = cmp_nil(ob->code, &v0, &v1);
 		break;
 	case RT_TRILEAN:
 		ret_val->r_trilean = cmp_trilean(ob->code, &v0, &v1);
@@ -4533,6 +4534,25 @@ get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
 //==========================================================
 // Local helpers - runtime compare utilities.
 //
+
+static as_exp_trilean
+cmp_nil(exp_op_code code, const rt_value* e0, const rt_value* e1)
+{
+	switch (code) {
+	case EXP_CMP_EQ:
+	case EXP_CMP_GE:
+	case EXP_CMP_LE:
+		return AS_EXP_TRUE;
+	case EXP_CMP_NE:
+	case EXP_CMP_GT:
+	case EXP_CMP_LT:
+		return AS_EXP_FALSE;
+	default:
+		cf_crash(AS_EXP, "unexpected code %u", code);
+	}
+
+	return AS_EXP_UNK; // deadcode for eclipse
+}
 
 static as_exp_trilean
 cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1)
