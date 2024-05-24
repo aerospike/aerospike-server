@@ -614,9 +614,8 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 		return;
 	}
 
-	// For batch sub-transactions, make sure we flag them so they're not
-	// mistaken for multi-record transactions (which never proxy).
-	if (as_transaction_has_no_key_or_digest(&tr)) {
+	// Only batch sub-transactions are proxied without a digest msg-field.
+	if (! as_transaction_has_digest(&tr)) {
 		tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	}
 
