@@ -778,6 +778,14 @@ smd_item_to_def(const char* smd_key, const char* smd_value, as_sindex_def* def)
 		return false;
 	}
 
+	if (def->itype == AS_SINDEX_ITYPE_MAPKEYS &&
+			def->ktype != AS_PARTICLE_TYPE_INTEGER &&
+			def->ktype != AS_PARTICLE_TYPE_STRING &&
+			def->ktype != AS_PARTICLE_TYPE_BLOB) {
+		cf_warning(AS_SINDEX, "smd - bad ktype for itype 'mapkeys'");
+		return false;
+	}
+
 	// Handle sindex name (SMD value) if it's there.
 
 	if (smd_value != NULL) {

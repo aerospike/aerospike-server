@@ -2907,6 +2907,16 @@ cmd_sindex_create(const char* name, const char* params, cf_dyn_buf* db)
 		return;
 	}
 
+	if (itype == AS_SINDEX_ITYPE_MAPKEYS &&
+			ktype != AS_PARTICLE_TYPE_INTEGER &&
+			ktype != AS_PARTICLE_TYPE_STRING &&
+			ktype != AS_PARTICLE_TYPE_BLOB) {
+		cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s' for 'indextype' 'mapkeys'",
+				index_name_str, type_str);
+		info_respond_error(db, AS_ERR_PARAMETER, "bad 'indexdata' bin type for 'indextype' 'mapkeys' - must be one of 'numeric', 'string', 'blob'");
+		return;
+	}
+
 	cf_info(AS_INFO, "sindex-create: request received for %s:%s via info",
 			ns_str, index_name_str);
 
