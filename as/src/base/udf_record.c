@@ -343,6 +343,13 @@ udf_record_set(const as_rec* rec, const char* name, const as_val* value)
 
 	udf_record* urecord = (udf_record*)as_rec_source(rec);
 
+	// CONVERT SINGLE-BIN
+	if (urecord->rd->ns->was_single_bin && *name != 0) {
+		cf_warning(AS_UDF, "{%s} must use empty bin name with 'convert-single-bin'",
+				urecord->rd->ns->name);
+		return -1;
+	}
+
 	udf_record_cache_set(urecord, name, (as_val*)value, true);
 
 	return 0;

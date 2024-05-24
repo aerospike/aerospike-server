@@ -448,6 +448,7 @@ typedef enum {
 	CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES,
+	CASE_NAMESPACE_CONVERT_SINGLE_BIN, // CONVERT SINGLE-BIN
 	CASE_NAMESPACE_DEFAULT_TTL,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
@@ -986,6 +987,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "background-query-max-rps",		CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "conflict-resolve-writes",		CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES },
+		{ "convert-single-bin",				CASE_NAMESPACE_CONVERT_SINGLE_BIN }, // CONVERT SINGLE-BIN
 		{ "default-ttl",					CASE_NAMESPACE_DEFAULT_TTL },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
@@ -2772,6 +2774,14 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_CONFLICT_RESOLVE_WRITES:
 				cfg_enterprise_only(&line);
 				ns->conflict_resolve_writes = cfg_bool(&line);
+				break;
+			// CONVERT SINGLE-BIN
+			case CASE_NAMESPACE_CONVERT_SINGLE_BIN:
+				ns->convert_single_bin = cfg_bool(&line);
+				if (ns->convert_single_bin) {
+					ns->check_single_bin = true;
+					ns->was_single_bin = true;
+				}
 				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
 				ns->default_ttl = cfg_seconds(&line, 0, MAX_ALLOWED_TTL);

@@ -3311,6 +3311,12 @@ ssd_init_synchronous(drv_ssds *ssds)
 
 	// At least one device is not fresh. Check that all non-fresh devices match.
 
+	// CONVERT SINGLE-BIN
+	if (ns->convert_single_bin) {
+		cf_crash(AS_DRV_SSD, "{%s} all drives must be wiped to start up with 'convert-single-bin' configured 'true'",
+				ns->name);
+	}
+
 	bool fresh_drive = false;
 	bool non_commit_drive = false;
 	drv_prefix *prefix_first = &headers[first_used]->generic.prefix;

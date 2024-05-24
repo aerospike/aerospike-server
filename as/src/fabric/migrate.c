@@ -77,7 +77,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_CLUSTER_KEY, M_FT_UINT64 },
 		{ MIG_FIELD_UNUSED_9, M_FT_BUF },
 		{ MIG_FIELD_UNUSED_10, M_FT_UINT32 },
-		{ MIG_FIELD_UNUSED_11, M_FT_UINT32 },
+		{ MIG_FIELD_MULTI_BIN, M_FT_UINT32 }, // CONVERT SINGLE-BIN
 		{ MIG_FIELD_UNUSED_12, M_FT_BUF },
 		{ MIG_FIELD_INFO, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_14, M_FT_UINT64 },
@@ -888,6 +888,15 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	as_storage_record_open(ns, r, &rd);
 
 	if (as_storage_rd_load_pickle(&rd)) {
+		// CONVERT SINGLE-BIN
+		if (ns->convert_single_bin) {
+			rd.pickle_sz = as_flat_convert_to_single_bin(ns, &rd.pickle,
+					rd.pickle_sz);
+		}
+		else if (ns->was_single_bin) {
+			msg_set_uint32(m, MIG_FIELD_MULTI_BIN, 1);
+		}
+
 		msg_set_buf(m, MIG_FIELD_RECORD, rd.pickle, rd.pickle_sz,
 				MSG_SET_HANDOFF_MALLOC);
 	}
@@ -1363,10 +1372,19 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		return;
 	}
 
+	// CONVERT SINGLE-BIN
+	msg_get_uint32(m, MIG_FIELD_MULTI_BIN, &rr.is_multi_bin);
+
 	if (! as_flat_unpack_remote_record_meta(rr.rsv->ns, &rr)) {
 		cf_warning(AS_MIGRATE, "handle insert: got bad record");
 		immigration_release(immig);
 		as_fabric_msg_put(m);
+
+		// CONVERT SINGLE-BIN
+		if (rr.free_pickle) {
+			cf_free(rr.pickle);
+		}
+
 		return;
 	}
 
@@ -1377,6 +1395,11 @@ immigration_handle_insert_request(cf_node src, msg *m)
 	immigration_init_repl_state(&rr, info);
 
 	int rv = as_record_replace_if_better(&rr);
+
+	// CONVERT SINGLE-BIN
+	if (rr.free_pickle) {
+		cf_free(rr.pickle);
+	}
 
 	// If replace failed, don't ack - it will be retransmitted.
 	if (! (rv == AS_OK ||

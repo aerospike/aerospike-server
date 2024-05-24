@@ -148,3 +148,13 @@ flatten_bin_src_id(const as_bin* b, uint8_t* flags, uint8_t* at)
 {
 	return 0;
 }
+
+// CONVERT SINGLE-BIN
+uint8_t*
+recompress_converted_bin(const as_namespace* ns, const uint8_t* from,
+		as_flat_comp_meta* cm)
+{
+	cf_crash(AS_FLAT, "community edition called recompress_converted_bin()");
+
+	return NULL;
+}

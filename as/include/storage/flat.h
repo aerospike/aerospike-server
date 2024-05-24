@@ -175,6 +175,9 @@ int as_flat_unpack_remote_bins(struct as_remote_record_s* rr, struct as_bin_s* b
 int as_flat_unpack_bins(struct as_namespace_s* ns, const uint8_t* at, const uint8_t* end, uint16_t n_bins, struct as_bin_s* bins);
 const uint8_t* as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end, uint32_t n_bins);
 
+// CONVERT SINGLE-BIN
+uint32_t as_flat_convert_to_single_bin(const struct as_namespace_s* ns, uint8_t** pickle, uint32_t pickle_sz);
+
 uint32_t as_flat_orig_pickle_size(const struct as_remote_record_s* rr, uint32_t pickle_sz);
 bool as_flat_decompress_bins(const as_flat_comp_meta* cm, struct as_storage_rd_s* rd);
 bool as_flat_decompress_buffer(const as_flat_comp_meta* cm, uint32_t max_orig_sz, const uint8_t** at, const uint8_t** end, const uint8_t** cb_end);
@@ -235,6 +238,9 @@ const uint8_t* skip_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* 
 void flatten_bin_xdr_write(const struct as_bin_s* b, uint8_t* flags);
 uint32_t bin_src_id_flat_size(const struct as_bin_s* b);
 uint32_t flatten_bin_src_id(const struct as_bin_s* b, uint8_t* flags, uint8_t* at);
+
+// CONVERT SINGLE-BIN
+uint8_t* recompress_converted_bin(const struct as_namespace_s* ns, const uint8_t* from, as_flat_comp_meta* cm);
 
 static inline bool
 flat_extra_flags_used(const as_flat_extra_flags* extra_flags)

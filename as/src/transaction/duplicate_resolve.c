@@ -441,6 +441,15 @@ fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 
 	// Can't fail from here on - ok to add message fields.
 
+	// CONVERT SINGLE-BIN
+	if (rd->ns->convert_single_bin) {
+		rd->pickle_sz = as_flat_convert_to_single_bin(rd->ns, &rd->pickle,
+				rd->pickle_sz);
+	}
+	else if (rd->ns->was_single_bin) {
+		msg_set_uint32(m, RW_FIELD_MULTI_BIN, 1);
+	}
+
 	msg_set_buf(m, RW_FIELD_RECORD, rd->pickle, rd->pickle_sz,
 			MSG_SET_HANDOFF_MALLOC);
 
@@ -554,15 +563,29 @@ apply_winner(rw_request* rw)
 		cf_crash(AS_RW, "dup-res ack: no record"); // already parsed ok
 	}
 
+	// CONVERT SINGLE-BIN
+	msg_get_uint32(m, RW_FIELD_MULTI_BIN, &rr.is_multi_bin);
+
 	if (! as_flat_unpack_remote_record_meta(ns, &rr)) {
 		cf_warning(AS_RW, "dup-res ack: bad record %pD", &rw->keyd);
 		rw->result_code = AS_ERR_UNKNOWN;
+
+		// CONVERT SINGLE-BIN
+		if (rr.free_pickle) {
+			cf_free(rr.pickle);
+		}
+
 		return;
 	}
 
 	dup_res_init_repl_state(&rr, info);
 
 	rw->result_code = (uint8_t)as_record_replace_if_better(&rr);
+
+	// CONVERT SINGLE-BIN
+	if (rr.free_pickle) {
+		cf_free(rr.pickle);
+	}
 
 	// Duplicate resolution just treats these errors as successful no-ops:
 	if (rw->result_code == AS_ERR_RECORD_EXISTS ||

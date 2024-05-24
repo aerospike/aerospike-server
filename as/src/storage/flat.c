@@ -43,6 +43,14 @@
 
 
 //==========================================================
+// Forward declarations.
+//
+
+// CONVERT SINGLE-BIN
+static bool convert_from_single_bin(as_namespace* ns, as_remote_record* rr);
+
+
+//==========================================================
 // Inlines & macros.
 //
 
@@ -145,6 +153,15 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 	rr->keyd = &flat->keyd;
 	rr->generation = flat->generation;
 	rr->last_update_time = flat->last_update_time;
+
+	// CONVERT SINGLE-BIN
+	if (ns->check_single_bin && rr->is_multi_bin == 0 &&
+			! convert_from_single_bin(ns, rr)) {
+		return false;
+	}
+
+	// convert_from_single_bin() may change rr->pickle.
+	flat = (as_flat_record*)rr->pickle;
 
 	as_flat_opt_meta opt_meta = { { 0 } };
 
@@ -444,6 +461,177 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 	return at;
 }
 
+// CONVERT SINGLE-BIN
+uint32_t
+as_flat_convert_to_single_bin(const as_namespace* ns, uint8_t** p_pickle,
+		uint32_t pickle_sz)
+{
+	uint8_t* pickle = *p_pickle;
+	as_flat_record* flat = (as_flat_record*)pickle;
+
+	if (flat->has_bins == 0) {
+		return pickle_sz;
+	}
+
+	if (flat->generation == 0) {
+		cf_crash(AS_FLAT, "generation 0");
+		return 0;
+	}
+
+	const uint8_t* at = flat->data;
+	const uint8_t* end = pickle + pickle_sz;
+
+	if (flat->has_extra_flags == 1) {
+		if (at + sizeof(as_flat_extra_flags) > end) {
+			cf_crash(AS_FLAT, "incomplete extra flags");
+			return 0;
+		}
+
+		at += sizeof(as_flat_extra_flags);
+	}
+
+	if (flat->has_void_time == 1) {
+		if (at + sizeof(uint32_t) > end) {
+			cf_crash(AS_FLAT, "incomplete void-time");
+			return 0;
+		}
+
+		at += sizeof(uint32_t);
+	}
+
+	if (flat->has_set == 1) {
+		if (at >= end) {
+			cf_crash(AS_FLAT, "incomplete set name len");
+			return 0;
+		}
+
+		uint8_t set_name_len = *at++;
+
+		if (set_name_len == 0 || set_name_len >= AS_SET_NAME_MAX_SIZE) {
+			cf_crash(AS_FLAT, "bad set name len");
+			return 0;
+		}
+
+		at += set_name_len;
+	}
+
+	if (flat->has_key == 1) {
+		uint32_t key_size = uintvar_parse(&at, end);
+
+		if (key_size == 0) {
+			cf_crash(AS_FLAT, "bad key size");
+			return 0;
+		}
+
+		at += key_size;
+	}
+
+	const uint8_t* head_end = at;
+
+	uint32_t n_bins = uintvar_parse(&at, end);
+
+	if (n_bins != 1) {
+		cf_crash(AS_FLAT, "n-bins not 1");
+		return 0;
+	}
+
+	as_flat_comp_meta cm = { 0 };
+
+	if ((at = unflatten_compression_meta(flat, at, end, &cm)) == NULL) {
+		cf_crash(AS_FLAT, "bad compression metadata");
+		return 0;
+	}
+
+	// Pointing at bin.
+
+	if (flat->is_compressed == 0) {
+		if (at >= end) {
+			cf_crash(AS_FLAT, "incomplete record");
+			return 0;
+		}
+
+		if (*at++ != 0) { // better be empty bin name
+			cf_crash(AS_FLAT, "bin not nameless");
+			return 0;
+		}
+
+		// Now pointing at particle - move it back 2 bytes.
+
+		memmove((uint8_t*)head_end, at, end - at);
+
+		// *p_pickle does not change.
+		pickle_sz -= 2;
+		flat->n_rblocks = SIZE_TO_N_RBLOCKS(pickle_sz);
+
+		return pickle_sz;
+	}
+	// else - it's compressed.
+
+	// Decompress...
+
+	const uint8_t* flat_bins = at;
+	const uint8_t* decomp_end = NULL;
+
+	if (! as_flat_decompress_buffer(&cm, ns->storage_write_block_size,
+			&flat_bins, &decomp_end, NULL)) {
+		cf_crash(AS_FLAT, "failed record decompression");
+		return 0;
+	}
+
+	uint8_t* orig_bins = (uint8_t*)flat_bins; // thread local buffer
+
+	if (orig_bins[0] != 0) {
+		cf_crash(AS_FLAT, "compressed bin not nameless");
+		return 0;
+	}
+
+	cm.orig_sz--;
+	cm.comp_sz = 0;
+
+	memmove(orig_bins, orig_bins + 1, cm.orig_sz);
+
+	// Re-compress...
+
+	uint8_t* comp_bins = recompress_converted_bin(ns, orig_bins, &cm);
+
+	uint32_t head_sz = (uint32_t)(head_end - pickle);
+	uint32_t new_pickle_sz = head_sz;
+
+	if (comp_bins != NULL) {
+		new_pickle_sz +=
+				1 + uintvar_size(cm.orig_sz) + uintvar_size(cm.comp_sz) +
+				cm.comp_sz;
+	}
+	else {
+		new_pickle_sz += cm.orig_sz;
+	}
+
+	flat->n_rblocks = SIZE_TO_N_RBLOCKS(new_pickle_sz);
+
+	uint8_t* new_pickle = cf_malloc(new_pickle_sz);
+
+	memcpy(new_pickle, pickle, head_sz);
+
+	uint8_t* np = new_pickle + head_sz;
+
+	if (comp_bins != NULL) {
+		*np++ = (uint8_t)cm.method;
+		np = uintvar_pack(np, cm.orig_sz);
+		np = uintvar_pack(np, cm.comp_sz);
+
+		memcpy(np, comp_bins, cm.comp_sz);
+	}
+	else {
+		memcpy(np, orig_bins, cm.orig_sz);
+	}
+
+	*p_pickle = new_pickle;
+
+	cf_free(pickle);
+
+	return new_pickle_sz;
+}
+
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -595,4 +783,181 @@ flatten_bins(const as_storage_rd* rd, uint8_t* buf, uint32_t* sz)
 	if (sz != NULL) {
 		*sz = (uint32_t)(buf - start);
 	}
+}
+
+
+//==========================================================
+// Local helpers.
+//
+
+// CONVERT SINGLE-BIN
+static bool
+convert_from_single_bin(as_namespace* ns, as_remote_record* rr)
+{
+	as_flat_record* flat = (as_flat_record*)rr->pickle;
+
+	if (flat->has_bins == 0) {
+		return true;
+	}
+
+	if (flat->generation == 0) {
+		cf_warning(AS_FLAT, "generation 0");
+		return false;
+	}
+
+	const uint8_t* at = flat->data;
+	const uint8_t* end = rr->pickle + rr->pickle_sz;
+
+	if (flat->has_extra_flags == 1) {
+		if (at + sizeof(as_flat_extra_flags) > end) {
+			cf_warning(AS_FLAT, "incomplete extra flags");
+			return false;
+		}
+
+		as_flat_extra_flags extra_flags = *(as_flat_extra_flags*)at;
+
+		if (extra_flags.unused != 0) {
+			cf_warning(AS_FLAT, "unsupported extra storage fields");
+			return false;
+		}
+
+		at += sizeof(as_flat_extra_flags);
+	}
+
+	if (flat->has_void_time == 1) {
+		if (at + sizeof(uint32_t) > end) {
+			cf_warning(AS_FLAT, "incomplete void-time");
+			return false;
+		}
+
+		at += sizeof(uint32_t);
+	}
+
+	if (flat->has_set == 1) {
+		if (at >= end) {
+			cf_warning(AS_FLAT, "incomplete set name len");
+			return false;
+		}
+
+		uint8_t set_name_len = *at++;
+
+		if (set_name_len == 0 || set_name_len >= AS_SET_NAME_MAX_SIZE) {
+			cf_warning(AS_FLAT, "bad set name len %u", set_name_len);
+			return false;
+		}
+
+		at += set_name_len;
+	}
+
+	if (flat->has_key == 1) {
+		uint32_t key_size = uintvar_parse(&at, end);
+
+		if (key_size == 0) {
+			cf_warning(AS_FLAT, "bad key size");
+			return false;
+		}
+
+		at += key_size;
+	}
+
+	size_t head_sz = at - rr->pickle;
+
+	as_flat_comp_meta cm = { 0 };
+
+	if ((at = unflatten_compression_meta(flat, at, end, &cm)) == NULL) {
+		return false;
+	}
+
+	// Pointing at bin.
+
+	if (flat->is_compressed == 0) {
+		// Sanity check particle.
+		const uint8_t* check = as_particle_skip_flat(at, end);
+
+		if (check == NULL || check > end || check + RBLOCK_SIZE <= end) {
+			cf_warning(AS_FLAT, "bad single-bin particle");
+			return false;
+		}
+
+		rr->pickle_sz += 2;
+
+		uint8_t* new_pickle = cf_malloc(rr->pickle_sz);
+
+		memcpy(new_pickle, rr->pickle, head_sz);
+
+		new_pickle[head_sz++] = 1; // n_bins for multi-bin
+		new_pickle[head_sz++] = 0; // multi-bin nameless bin length
+
+		memcpy(new_pickle + head_sz, at, end - at);
+
+		rr->pickle = new_pickle;
+		rr->free_pickle = true;
+	}
+	else {
+		// Make sure we can insert an empty bin name.
+		if (cm.orig_sz + 1 > ns->storage_write_block_size) {
+			cf_warning(AS_FLAT, "{%s} record %pD will be too big", ns->name,
+					&flat->keyd);
+			return false;
+		}
+
+		// Decompress...
+
+		const uint8_t* flat_bins = at;
+		const uint8_t* decomp_end = NULL;
+
+		if (! as_flat_decompress_buffer(&cm, ns->storage_write_block_size,
+				&flat_bins, &decomp_end, NULL)) {
+			cf_warning(AS_FLAT, "failed record decompression");
+			return false;
+		}
+
+		uint8_t* orig_bins = (uint8_t*)flat_bins; // thread local buffer
+
+		memmove(orig_bins + 1, flat_bins, cm.orig_sz);
+
+		orig_bins[0] = 0; // multi-bin nameless bin length
+
+		cm.orig_sz++;
+		cm.comp_sz = 0;
+
+		// Re-compress...
+
+		uint8_t* comp_bins = recompress_converted_bin(ns, orig_bins, &cm);
+
+		if (comp_bins != NULL) {
+			rr->pickle_sz = head_sz + 1 +
+					1 + uintvar_size(cm.orig_sz) + uintvar_size(cm.comp_sz) +
+					cm.comp_sz;
+		}
+		else {
+			rr->pickle_sz = head_sz + 1 + cm.orig_sz;
+		}
+
+		uint8_t* new_pickle = cf_malloc(rr->pickle_sz);
+
+		memcpy(new_pickle, rr->pickle, head_sz);
+
+		uint8_t* np = new_pickle + head_sz;
+
+		*np++ = 1; // n_bins for multi-bin
+
+		if (comp_bins != NULL) {
+			*np++ = (uint8_t)cm.method;
+			np = uintvar_pack(np, cm.orig_sz);
+			np = uintvar_pack(np, cm.comp_sz);
+
+			memcpy(np, comp_bins, cm.comp_sz);
+		}
+		else {
+			memcpy(np, orig_bins, cm.orig_sz);
+		}
+
+		rr->pickle = new_pickle;
+		rr->free_pickle = true;
+	}
+
+	flat->n_rblocks = SIZE_TO_N_RBLOCKS(rr->pickle_sz);
+
+	return true;
 }

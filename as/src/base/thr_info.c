@@ -4049,6 +4049,9 @@ info_get_aggregated_namespace_stats(cf_dyn_buf* db)
 void
 info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 {
+	// CONVERT SINGLE-BIN
+	info_append_bool(db, "was_single_bin", ns->was_single_bin);
+
 	// Cluster size.
 
 	// Using ns_ prefix to avoid confusion with global cluster_size.
