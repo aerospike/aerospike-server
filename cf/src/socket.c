@@ -781,7 +781,7 @@ cf_socket_init_server(cf_serv_cfg *cfg, cf_sockets *socks)
 			usleep(5 * 1000 * 1000);
 		}
 
-		if (listen(sock->fd, 512) < 0) {
+		if (listen(sock->fd, 4096) < 0) {
 			cf_warning(CF_SOCKET, "Error while listening on %s: %d (%s)",
 					cf_sock_addr_print(&addr), errno, cf_strerror(errno));
 			goto cleanup2;
