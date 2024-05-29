@@ -170,6 +170,8 @@ typedef struct as_config_s {
 	uint32_t		fabric_recv_rearm_threshold;
 	uint32_t		n_fabric_send_threads;
 
+	uint32_t		fabric_stop_commit_one; // experimental dynamic-only
+
 	//--------------------------------------------
 	// network::info context.
 	//

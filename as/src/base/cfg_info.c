@@ -338,6 +338,11 @@ cfg_get_network(cf_dyn_buf* db)
 	info_append_uint32(db, "fabric.recv-rearm-threshold", g_config.fabric_recv_rearm_threshold);
 	info_append_uint32(db, "fabric.send-threads", g_config.n_fabric_send_threads);
 
+	// Experimental dynamic-only (hidden if not used):
+	if (g_config.fabric_stop_commit_one != 0) {
+		info_append_uint32(db, "fabric.stop-commit-one", g_config.fabric_stop_commit_one);
+	}
+
 	// Info:
 	append_addrs(db, "info.address", &g_config.info.bind);
 	info_append_uint32(db, "info.port", g_config.info.bind_port);
@@ -1124,6 +1129,14 @@ cfg_set_network(const char* cmd)
 			return false;
 		}
 		g_config.fabric_recv_rearm_threshold = (uint32_t)val;
+	}
+	// Experimental dynamic-only:
+	else if (as_info_parameter_get(cmd, "fabric.stop-commit-one", v,
+			&v_len) == 0) {
+		if (cf_str_atoi(v, &val) != 0 || val < 0) {
+			return false;
+		}
+		g_config.fabric_stop_commit_one = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "heartbeat.connect-timeout-ms", v,
 			&v_len) == 0) {

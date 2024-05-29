@@ -1333,7 +1333,8 @@ static bool
 fabric_node_is_overloaded(cf_node node_id, as_fabric_channel channel,
 		uint32_t margin)
 {
-	uint32_t threshold = FABRIC_MESSAGE_OVERLOAD_COUNT + margin;
+	uint32_t threshold = FABRIC_MESSAGE_OVERLOAD_COUNT + margin +
+			g_config.fabric_stop_commit_one; // experimental dynamic only
 	fabric_node *node = NULL;
 
 	if (cf_rchash_get(g_fabric.node_hash, &node_id, (void **)&node) ==
