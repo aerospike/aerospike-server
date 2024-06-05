@@ -6006,6 +6006,43 @@ map_order_index_set_sorted(order_index *ordidx, const offset_index *offsets,
 	order_index_sort(ordidx, offsets, ele_start, tot_ele_sz, sort_by);
 }
 
+bool
+map_order_index_has_dups(const order_index *ordidx, const offset_index *offidx)
+{
+	uint32_t ele_count = ordidx->_.ele_count;
+
+	if (ele_count <= 1) {
+		return false;
+	}
+
+	uint32_t idx = order_index_get(ordidx, 0);
+	uint32_t off = offset_index_get_const(offidx, idx);
+
+	msgpack_in prev = {
+			.buf = offidx->contents,
+			.buf_sz = offidx->content_sz,
+			.offset = off
+	};
+
+	msgpack_in mp = prev;
+
+	for (uint32_t i = 1; i < ele_count; i++) {
+		idx = order_index_get(ordidx, i);
+		off = offset_index_get_const(offidx, idx);
+		mp.offset = off;
+
+		msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
+
+		if (cmp != MSGPACK_CMP_LESS) {
+			return true;
+		}
+
+		prev.offset = off;
+	}
+
+	return false;
+}
+
 static void
 order_index_set_sorted_with_offsets(order_index *ordidx,
 		const offset_index *offsets, map_sort_by_t sort_by)
