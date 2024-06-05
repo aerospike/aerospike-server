@@ -502,6 +502,7 @@ uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t con
 
 bool map_offset_index_check_and_fill(offset_index *offidx, uint32_t index);
 void map_order_index_set_sorted(order_index *ordidx, const offset_index *offsets, const uint8_t *ele_start, uint32_t tot_ele_sz, map_sort_by_t sort_by);
+bool map_order_index_has_dups(const order_index *ordidx, const offset_index *offidx);
 
 bool map_subcontext_by_index(cdt_context *ctx, msgpack_in_vec *val);
 bool map_subcontext_by_rank(cdt_context *ctx, msgpack_in_vec *val);
