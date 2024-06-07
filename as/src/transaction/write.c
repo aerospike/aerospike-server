@@ -92,9 +92,9 @@ static void write_timeout_cb(rw_request* rw);
 static transaction_status write_master(rw_request* rw, as_transaction* tr);
 static void write_master_failed(as_transaction* tr, as_index_ref* r_ref, bool record_created, as_index_tree* tree, as_storage_rd* rd, int result_code);
 static int write_master_preprocessing(as_transaction* tr);
-static int write_master_policies(as_transaction* tr, bool* p_must_not_create, bool* p_record_level_replace, bool* p_must_fetch_data);
+static int write_master_policies(as_transaction* tr, bool* p_must_not_create, bool* p_is_replace);
 static bool check_msg_set_name(as_transaction* tr, const char* set_name);
-static int write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, bool must_fetch_data, bool record_level_replace, rw_request* rw, bool* is_delete);
+static int write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, bool is_replace, rw_request* rw, bool* is_delete);
 static int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd, cf_ll_buf* particles_llb, cf_dyn_buf* db);
 static int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd, as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins, as_bin* result_bins, uint32_t* p_n_result_bins, cf_ll_buf* particles_llb);
 
@@ -599,11 +599,9 @@ write_master(rw_request* rw, as_transaction* tr)
 	//
 
 	bool must_not_create;
-	bool record_level_replace;
-	bool must_fetch_data;
+	bool is_replace;
 
-	int result = write_master_policies(tr, &must_not_create,
-			&record_level_replace, &must_fetch_data);
+	int result = write_master_policies(tr, &must_not_create, &is_replace);
 
 	if (result != 0) {
 		write_master_failed(tr, 0, false, 0, 0, result);
@@ -830,8 +828,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	bool is_delete = false;
 
-	result = write_master_apply(tr, &r_ref, &rd, must_fetch_data,
-			record_level_replace, rw, &is_delete);
+	result = write_master_apply(tr, &r_ref, &rd, is_replace, rw, &is_delete);
 
 	if (result != 0) {
 		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
@@ -945,7 +942,7 @@ write_master_preprocessing(as_transaction* tr)
 
 static int
 write_master_policies(as_transaction* tr, bool* p_must_not_create,
-		bool* p_record_level_replace, bool* p_must_fetch_data)
+		bool* p_is_replace)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -968,11 +965,11 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) != 0 ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
-	bool record_level_replace =
+	bool is_replace =
 			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) != 0 ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
-	if (record_level_replace && forbid_replace(ns)) {
+	if (is_replace && forbid_replace(ns)) {
 		cf_warning(AS_RW, "{%s} write_master: can't replace record %pD if conflict resolving", ns->name, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
@@ -987,7 +984,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 
 	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
 		if (op->op == AS_MSG_OP_TOUCH) {
-			if (record_level_replace) {
+			if (is_replace) {
 				cf_warning(AS_RW, "{%s} write_master: touch op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
@@ -1003,19 +1000,19 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 
 		if (op->op == AS_MSG_OP_WRITE) {
 			if (op->particle_type == AS_PARTICLE_TYPE_NULL &&
-					record_level_replace) {
+					is_replace) {
 				cf_warning(AS_RW, "{%s} write_master: bin delete can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 		}
 		else if (OP_IS_MODIFY(op->op)) {
-			if (record_level_replace) {
+			if (is_replace) {
 				cf_warning(AS_RW, "{%s} write_master: modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
 		}
 		else if (op->op == AS_MSG_OP_DELETE_ALL) {
-			if (record_level_replace) {
+			if (is_replace) {
 				cf_warning(AS_RW, "{%s} write_master: delete-all op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
@@ -1042,7 +1039,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			generates_response_bin = true;
 		}
 		else if (op->op == AS_MSG_OP_BITS_MODIFY) {
-			if (record_level_replace) {
+			if (is_replace) {
 				cf_warning(AS_RW, "{%s} write_master: bits modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
@@ -1052,7 +1049,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			generates_response_bin = true;
 		}
 		else if (op->op == AS_MSG_OP_HLL_MODIFY) {
-			if (record_level_replace) {
+			if (is_replace) {
 				cf_warning(AS_RW, "{%s} write_master: hll modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
@@ -1064,7 +1061,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 			generates_response_bin = true;
 		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
-			if (record_level_replace) {
+			if (is_replace) {
 				cf_warning(AS_RW, "{%s} write_master: cdt modify op can't have record-level replace flag %pD", ns->name, &tr->keyd);
 				return AS_ERR_PARAMETER;
 			}
@@ -1097,10 +1094,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	}
 
 	*p_must_not_create = must_not_create;
-	*p_record_level_replace = record_level_replace;
-
-	// May modify this later to force fetch if there's a sindex.
-	*p_must_fetch_data = ! record_level_replace;
+	*p_is_replace = is_replace;
 
 	return 0;
 }
@@ -1136,8 +1130,7 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 
 static int
 write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
-		bool must_fetch_data, bool record_level_replace, rw_request* rw,
-		bool* is_delete)
+		bool is_replace, rw_request* rw, bool* is_delete)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1147,7 +1140,7 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	bool si_needs_bins = set_has_si && r->in_sindex == 1;
 
 	// For sindex, we must read existing record even if replacing.
-	rd->ignore_record_on_device = ! must_fetch_data && ! si_needs_bins;
+	rd->ignore_record_on_device = is_replace && ! si_needs_bins;
 
 	as_bin stack_bins[RECORD_MAX_BINS + m->n_ops];
 
@@ -1173,7 +1166,7 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		n_old_bins_saved = n_old_bins;
 
 		// If it's a replace, clear the new bins array.
-		if (record_level_replace) {
+		if (is_replace) {
 			rd->n_bins = 0;
 		}
 	}
