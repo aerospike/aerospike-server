@@ -5113,7 +5113,6 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 					define_order_index(ordidx, ele_count, alloc_idx);
 					define_offset_index(new_offidx, pe->new_contents, offset,
 							ele_count, alloc_idx);
-					uint8_t *sort_contents = cf_malloc(offset);
 
 					if (pe->type == MSGPACK_TYPE_LIST) {
 						// TODO - track list sorting
@@ -5144,7 +5143,14 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 						map_order_index_set_sorted(&ordidx, &new_offidx,
 								pe->new_contents, pe->offidx.content_sz,
 								MAP_SORT_BY_KEY);
+
+						if (map_order_index_has_dups(&ordidx, &new_offidx)) {
+							cf_warning(AS_PARTICLE, "map has duplicate keys");
+							return 0;
+						}
 					}
+
+					uint8_t *sort_contents = cf_malloc(offset);
 
 					wptr = order_index_write_eles(&ordidx, ele_count,
 							&new_offidx, sort_contents, &pe->offidx, false);
