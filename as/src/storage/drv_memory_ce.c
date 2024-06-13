@@ -23,6 +23,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "citrusleaf/alloc.h"
+
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "fabric/partition.h"
@@ -53,6 +55,10 @@ as_storage_record_write_memory(as_storage_rd* rd)
 				as_flat_record_size(rd) : rd->pickle_sz;
 
 		if (flat_sz > ns->max_record_size) {
+			if (rd->pickle != NULL) {
+				cf_free(rd->pickle);
+			}
+
 			return -AS_ERR_RECORD_TOO_BIG;
 		}
 	}
