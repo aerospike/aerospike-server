@@ -71,6 +71,8 @@
 #define DIGEST_HASH_BASE_BYTE		12
 // [12-19] for XDR connector affinity and [12-15] for tracing
 #define DIGEST_XDR_BASE_BYTE		12
+// [16-19] for XDR affinity
+#define DIGEST_RAND_BASE_BYTE		16
 
 
 /* Forward declarations */
