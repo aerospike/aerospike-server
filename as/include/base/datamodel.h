@@ -69,8 +69,8 @@
 #define DIGEST_STORAGE_BASE_BYTE	8
 // [12-15] for rw_request hash
 #define DIGEST_HASH_BASE_BYTE		12
-// [16-19] for pred-exp filter and XDR affinity
-#define DIGEST_RAND_BASE_BYTE		16
+// [12-19] for XDR connector affinity and [12-15] for tracing
+#define DIGEST_XDR_BASE_BYTE		12
 
 
 /* Forward declarations */
