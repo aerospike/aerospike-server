@@ -96,19 +96,6 @@ default_rt_ttl_pct(const as_namespace* ns, const as_set* p_set)
 }
 
 static inline void
-retry_read(as_transaction* tr)
-{
-	as_transaction rtr;
-
-	as_transaction_copy_head(&rtr, tr);
-	tr->from.any = NULL;
-	tr->msgp = NULL;
-
-	rtr.from_flags |= FROM_FLAG_RESTART;
-	as_service_enqueue_internal(&rtr);
-}
-
-static inline void
 rt_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
@@ -179,7 +166,7 @@ as_read_touch_check(as_record* r, as_transaction* tr)
 
 	if ((tr->flags & AS_TRANSACTION_FLAG_RSV_PROLE) != 0) {
 		tr->from_flags |= FROM_FLAG_RESTART_STRICT;
-		retry_read(tr);
+		retry_self(tr); // retry the read
 		return 1;
 	}
 
