@@ -53,8 +53,9 @@
  *      (SC rack-aware quiesce bug can violate rack-aware).
  * 13 - 6.1.0.34 & 6.3.0.22 & 6.4.0.16 & 7.0.0.9 - for AER-6738
  *      (SC rack-aware replication-factor > n-racks bug can violate rack-aware).
+ * 14 - 7.2.0 - for AER-6749 (AP quiesce + effective-replication-factor change).
  */
-#define AS_EXCHANGE_COMPATIBILITY_ID 13
+#define AS_EXCHANGE_COMPATIBILITY_ID 14
 
 /**
  * Number of quantum intervals in orphan state after which client transactions
