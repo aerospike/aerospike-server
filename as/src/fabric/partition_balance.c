@@ -808,7 +808,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 				ns->cluster_size, g_cluster_size);
 	}
 
-	if (as_exchange_min_compatibility_id() < 14) {
+	if (as_exchange_min_compatibility_id() < 15) {
 		set_replication_factor_ap_old(ns);
 	}
 
@@ -816,7 +816,7 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	set_active_size(ns);
 
 	// Figure out effective replication factor in the face of node failures.
-	if (as_exchange_min_compatibility_id() >= 14) {
+	if (as_exchange_min_compatibility_id() >= 15) {
 		set_replication_factor_ap(ns);
 	}
 
