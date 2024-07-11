@@ -405,7 +405,6 @@ cfg_get_namespace(const char* context, cf_dyn_buf* db)
 	info_append_bool(db, "enable-hist-proxy", ns->proxy_hist_enabled);
 	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
 	info_append_uint32(db, "evict-indexes-memory-pct", ns->evict_indexes_memory_pct);
-	info_append_uint32(db, "evict-sys-memory-pct", ns->evict_sys_memory_pct);
 	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
 	info_append_bool(db, "force-long-queries", ns->force_long_queries);
 	info_append_bool(db, "ignore-migrate-fill-delay", ns->ignore_migrate_fill_delay);
@@ -1535,17 +1534,8 @@ cfg_set_namespace(const char* cmd)
 			return false;
 		}
 		cf_info(AS_INFO, "Changing value of evict-indexes-memory-pct memory of ns %s from %u to %d ",
-				ns->name, ns->evict_sys_memory_pct, val);
+				ns->name, ns->evict_indexes_memory_pct, val);
 		ns->evict_indexes_memory_pct = (uint32_t)val;
-	}
-	else if (as_info_parameter_get(cmd, "evict-sys-memory-pct", v,
-			&v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > 100) {
-			return false;
-		}
-		cf_info(AS_INFO, "Changing value of evict-sys-memory-pct memory of ns %s from %u to %d ",
-				ns->name, ns->evict_sys_memory_pct, val);
-		ns->evict_sys_memory_pct = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "evict-tenths-pct", v, &v_len) == 0) {
 		cf_info(AS_INFO, "Changing value of evict-tenths-pct memory of ns %s from %d to %d ",

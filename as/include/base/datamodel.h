@@ -746,7 +746,6 @@ typedef struct as_namespace_s {
 	bool			proxy_hist_enabled;
 	uint32_t		evict_hist_buckets;
 	uint32_t		evict_indexes_memory_pct;
-	uint32_t		evict_sys_memory_pct;
 	uint32_t		evict_tenths_pct;
 	bool			force_long_queries; // for debugging only
 	bool			ignore_migrate_fill_delay;
