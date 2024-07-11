@@ -629,6 +629,7 @@ static bool
 eval_hwm_breached(as_namespace* ns)
 {
 	uint32_t sys_memory_pct = sys_mem_pct();
+	// No longer used as an eviction base, but still logging to minimize change.
 
 	uint64_t index_used_sz =
 			(ns->n_tombstones + ns->n_objects) * sizeof(as_index);
@@ -675,14 +676,7 @@ eval_hwm_breached(as_namespace* ns)
 	char reasons[128] = { 0 };
 	char* at = reasons;
 
-	uint32_t cfg_pct = as_load_uint32(&ns->evict_sys_memory_pct);
-
-	// Note - not >= since sys_memory_pct is rounded up, not down.
-	if (cfg_pct != 0 && sys_memory_pct > cfg_pct) {
-		at = stpcpy(at, "sys-memory & ");
-	}
-
-	cfg_pct = as_load_uint32(&ns->pi_evict_mounts_pct);
+	uint32_t cfg_pct = as_load_uint32(&ns->pi_evict_mounts_pct);
 
 	if (cfg_pct != 0 && index_dev_used_pct >= cfg_pct) {
 		at = stpcpy(at, "index-device & ");

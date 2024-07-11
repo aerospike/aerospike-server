@@ -2889,7 +2889,7 @@ as_config_init(const char* config_file)
 				ns->evict_hist_buckets = cfg_u32(&line, 100, 10000000);
 				break;
 			case CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT:
-				ns->evict_sys_memory_pct = cfg_u32(&line, 0, 100);
+				cf_warning(AS_CFG, "ignoring 'evict-sys-memory-pct' - please use storage context 'evict-used-pct'");
 				break;
 			case CASE_NAMESPACE_EVICT_TENTHS_PCT:
 				ns->evict_tenths_pct = cfg_u32_no_checks(&line);
@@ -3113,10 +3113,10 @@ as_config_init(const char* config_file)
 				cfg_obsolete(&line, "please use storage context 'evict-used-pct'");
 				break;
 			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
-				cfg_obsolete(&line, "please use 'evict-sys-memory-pct'");
+				cfg_obsolete(&line, "please use storage context 'evict-used-pct'");
 				break;
 			case CASE_NAMESPACE_MEMORY_SIZE:
-				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct' and 'evict-sys-memory-pct' for stop-writes & eviction");
+				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct' and storage context 'evict-used-pct' for stop-writes & eviction");
 				break;
 			case CASE_NAMESPACE_SINGLE_BIN:
 				cfg_obsolete(&line, "see documentation for converting to multi-bin");
