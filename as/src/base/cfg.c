@@ -3172,10 +3172,10 @@ as_config_init(const char* config_file)
 				cfg_obsolete(&line, "please use storage context 'evict-used-pct'");
 				break;
 			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
-				cfg_obsolete(&line, "please use 'evict-indexes-memory-pct' and 'evict-used-pct'");
+				cfg_obsolete(&line, "please use 'evict-indexes-memory-pct' and storage context 'evict-used-pct'");
 				break;
 			case CASE_NAMESPACE_MEMORY_SIZE:
-				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct', 'evict-indexes-memory-pct', and 'evict-used-pct' for stop-writes & eviction");
+				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct', 'evict-indexes-memory-pct', and storage context 'evict-used-pct' for stop-writes & eviction");
 				break;
 			case CASE_NAMESPACE_SINGLE_BIN:
 				cfg_obsolete(&line, "see documentation for converting to multi-bin");

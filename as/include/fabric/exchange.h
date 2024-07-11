@@ -54,7 +54,7 @@
  * 13 - 6.1.0.34 & 6.3.0.22 & 6.4.0.16 & 7.0.0.9 - for AER-6738
  *      (SC rack-aware replication-factor > n-racks bug can violate rack-aware).
  * 14 - 6.1.0.37 & 6.3.0.25 & 6.4.0.20 & 7.0.0.12 & 7.1.0.3 - for AER-6750
- *      (SC quiesce + exact half cluster availability bug)
+ *      (SC quiesce + exact half cluster availability bug).
  * 15 - 7.2.0 - for AER-6749 (AP quiesce + effective-replication-factor change).
  */
 #define AS_EXCHANGE_COMPATIBILITY_ID 15
