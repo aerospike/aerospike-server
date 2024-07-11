@@ -462,7 +462,6 @@ typedef enum {
 	CASE_NAMESPACE_ENABLE_HIST_PROXY,
 	CASE_NAMESPACE_EVICT_HIST_BUCKETS,
 	CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT,
-	CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY,
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
@@ -505,6 +504,7 @@ typedef enum {
 	CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISABLE_NSUP,
+	CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT,
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
 	CASE_NAMESPACE_MEMORY_SIZE,
@@ -1053,7 +1053,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "enable-hist-proxy",				CASE_NAMESPACE_ENABLE_HIST_PROXY },
 		{ "evict-hist-buckets",				CASE_NAMESPACE_EVICT_HIST_BUCKETS },
 		{ "evict-indexes-memory-pct",		CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT },
-		{ "evict-sys-memory-pct",			CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT },
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "ignore-migrate-fill-delay",		CASE_NAMESPACE_IGNORE_MIGRATE_FILL_DELAY },
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
@@ -1096,6 +1095,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "background-scan-max-rps",		CASE_NAMESPACE_BACKGROUND_SCAN_MAX_RPS },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disable-nsup",					CASE_NAMESPACE_DISABLE_NSUP },
+		{ "evict-sys-memory-pct",			CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT },
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
 		{ "memory-size",					CASE_NAMESPACE_MEMORY_SIZE },
@@ -2944,9 +2944,6 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_EVICT_INDEXES_MEMORY_PCT:
 				ns->evict_indexes_memory_pct = cfg_u32(&line, 0, 100);
 				break;
-			case CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT:
-				ns->evict_sys_memory_pct = cfg_u32(&line, 0, 100);
-				break;
 			case CASE_NAMESPACE_EVICT_TENTHS_PCT:
 				ns->evict_tenths_pct = cfg_u32_no_checks(&line);
 				break;
@@ -3168,14 +3165,17 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_DISABLE_NSUP:
 				cfg_obsolete(&line, "please set 'nsup-period' to 0 to disable nsup");
 				break;
+			case CASE_NAMESPACE_EVICT_SYS_MEMORY_PCT:
+				cfg_obsolete(&line, "please use 'evict-indexes-memory-pct' and 'evict-used-pct'");
+				break;
 			case CASE_NAMESPACE_HIGH_WATER_DISK_PCT:
 				cfg_obsolete(&line, "please use storage context 'evict-used-pct'");
 				break;
 			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
-				cfg_obsolete(&line, "please use 'evict-sys-memory-pct'");
+				cfg_obsolete(&line, "please use 'evict-indexes-memory-pct' and 'evict-used-pct'");
 				break;
 			case CASE_NAMESPACE_MEMORY_SIZE:
-				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct' and 'evict-sys-memory-pct' for stop-writes & eviction");
+				cfg_obsolete(&line, "please use 'stop-writes-sys-memory-pct', 'evict-indexes-memory-pct', and 'evict-used-pct' for stop-writes & eviction");
 				break;
 			case CASE_NAMESPACE_SINGLE_BIN:
 				cfg_obsolete(&line, "see documentation for converting to multi-bin");

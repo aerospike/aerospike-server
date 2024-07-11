@@ -628,8 +628,6 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 static bool
 eval_hwm_breached(as_namespace* ns)
 {
-	uint32_t sys_memory_pct = sys_mem_pct();
-
 	uint64_t index_used_sz =
 			(ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t index_mem_sz = 0;
@@ -687,14 +685,7 @@ eval_hwm_breached(as_namespace* ns)
 	char reasons[128] = { 0 };
 	char* at = reasons;
 
-	uint32_t cfg_pct = as_load_uint32(&ns->evict_sys_memory_pct);
-
-	// Note - not >= since sys_memory_pct is rounded up, not down.
-	if (cfg_pct != 0 && sys_memory_pct > cfg_pct) {
-		at = stpcpy(at, "sys-memory & ");
-	}
-
-	cfg_pct = as_load_uint32(&ns->evict_indexes_memory_pct);
+	uint32_t cfg_pct = as_load_uint32(&ns->evict_indexes_memory_pct);
 
 	if (cfg_pct != 0 && ixs_used_pct >= cfg_pct) {
 		at = stpcpy(at, "indexes-memory & ");
@@ -721,8 +712,8 @@ eval_hwm_breached(as_namespace* ns)
 	if (at != reasons) {
 		at[-3] = '\0'; // strip " & " off end
 
-		cf_warning(AS_NSUP, "{%s} breached eviction limit (%s), sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
-				ns->name, reasons, sys_memory_pct,
+		cf_warning(AS_NSUP, "{%s} breached eviction limit (%s), indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
+				ns->name, reasons,
 				ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz, ixs_mem_tag,
 				index_dev_tag,
 				sindex_dev_tag,
@@ -732,8 +723,8 @@ eval_hwm_breached(as_namespace* ns)
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} no eviction limit breached, sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
-			ns->name, sys_memory_pct,
+	cf_debug(AS_NSUP, "{%s} no eviction limit breached, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
+			ns->name,
 			ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz, ixs_mem_tag,
 			index_dev_tag,
 			sindex_dev_tag,
