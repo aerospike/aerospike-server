@@ -411,6 +411,7 @@ cfg_get_namespace(const char* context, cf_dyn_buf* db)
 	info_append_uint64(db, "index-stage-size", ns->index_stage_size);
 	info_append_uint64(db, "indexes-memory-budget", ns->indexes_memory_budget);
 	info_append_bool(db, "inline-short-queries", ns->inline_short_queries);
+	info_append_uint32(db, "master-rack", ns->cfg_master_rack);
 	info_append_uint32(db, "max-record-size", ns->max_record_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
@@ -1602,6 +1603,23 @@ cfg_set_namespace(const char* cmd)
 		else {
 			return false;
 		}
+	}
+	else if (as_info_parameter_get(cmd, "master-rack", v, &v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "master-rack is enterprise-only");
+			return false;
+		}
+		if (as_error_enterprise_feature_only("rack-aware")) {
+			cf_warning(AS_INFO, "{%s} feature key does not allow rack-aware",
+					ns->name);
+			return false;
+		}
+		if (cf_str_atoi(v, &val) != 0 || val < 0 || val > MAX_RACK_ID) {
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of master-rack of ns %s from %u to %d",
+				ns->name, ns->cfg_master_rack, val);
+		ns->cfg_master_rack = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "max-record-size", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0 || val < 0) {

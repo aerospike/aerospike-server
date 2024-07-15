@@ -4035,11 +4035,16 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	// Partition balance state.
 
+	as_exchange_info_lock();
+
 	info_append_bool(db, "pending_quiesce", ns->pending_quiesce);
 	info_append_bool(db, "effective_is_quiesced", ns->is_quiesced);
 	info_append_uint64(db, "nodes_quiesced", ns->cluster_size - ns->active_size);
 
 	info_append_bool(db, "effective_prefer_uniform_balance", ns->prefer_uniform_balance);
+	info_append_uint32(db, "effective_master_rack", ns->cp ? ns->roster_master_rack : ns->master_rack);
+
+	as_exchange_info_unlock();
 
 	// Migration stats.
 
@@ -4425,6 +4430,11 @@ namespace_roster_info(as_namespace* ns, cf_dyn_buf* db)
 		cf_dyn_buf_append_string(db, "null");
 	}
 	else {
+		if (ns->roster_master_rack != 0) {
+			cf_dyn_buf_append_format(db, "%c%u|", ROSTER_MASTER_RACK_TOK,
+					ns->roster_master_rack);
+		}
+
 		for (uint32_t n = 0; n < ns->roster_count; n++) {
 			cf_dyn_buf_append_uint64_x(db, ns->roster[n]);
 
@@ -4447,6 +4457,11 @@ namespace_roster_info(as_namespace* ns, cf_dyn_buf* db)
 		cf_dyn_buf_append_string(db, "null");
 	}
 	else {
+		if (ns->smd_roster_master_rack != 0) {
+			cf_dyn_buf_append_format(db, "%c%u|", ROSTER_MASTER_RACK_TOK,
+					ns->smd_roster_master_rack);
+		}
+
 		for (uint32_t n = 0; n < ns->smd_roster_count; n++) {
 			cf_dyn_buf_append_uint64_x(db, ns->smd_roster[n]);
 
@@ -4469,6 +4484,11 @@ namespace_roster_info(as_namespace* ns, cf_dyn_buf* db)
 		cf_dyn_buf_append_string(db, "null");
 	}
 	else {
+		if (ns->master_rack != 0) {
+			cf_dyn_buf_append_format(db, "%c%u|", ROSTER_MASTER_RACK_TOK,
+					ns->master_rack);
+		}
+
 		for (uint32_t n = 0; n < ns->observed_cluster_size; n++) {
 			cf_dyn_buf_append_uint64_x(db, ns->observed_succession[n]);
 

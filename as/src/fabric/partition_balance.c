@@ -822,6 +822,12 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 	uint32_t n_racks = rack_count(ns);
 
+	if (ns->master_rack != 0 && n_racks > ns->replication_factor) {
+		cf_warning(AS_PARTITION, "{%s} master-rack disallowed - replication-factor %u > n-racks %u",
+				ns->name, ns->replication_factor, n_racks);
+		ns->master_rack = 0;
+	}
+
 	// If a namespace is not on all nodes or is rack aware or uniform balance
 	// is preferred or nodes are quiesced, it can't use the global node sequence
 	// and index tables.
@@ -890,6 +896,12 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 					rack_aware_adjust_row(ns_node_seq, ns_sl_ix,
 							ns->replication_factor, ns->rack_ids,
 							ns->active_size, n_racks, 1);
+				}
+
+				if (ns->master_rack != 0) {
+					master_rack_adjust_row(ns_node_seq, ns_sl_ix,
+							ns->replication_factor, ns->rack_ids,
+							ns->master_rack);
 				}
 			}
 

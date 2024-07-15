@@ -51,3 +51,6 @@ void as_roster_set_nodes_cmd(const char* ns_name, const char* nodes, cf_dyn_buf*
 
 // In string lists, separate node-id and rack-id with this character.
 #define ROSTER_ID_PAIR_SEPARATOR '@'
+
+// In string lists, identifies master-rack - must be the first element.
+#define ROSTER_MASTER_RACK_TOK 'M'

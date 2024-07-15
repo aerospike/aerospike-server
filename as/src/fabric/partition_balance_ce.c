@@ -147,6 +147,14 @@ rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
 }
 
 void
+master_rack_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
+		uint32_t replication_factor, const uint32_t* rack_ids,
+		uint32_t master_rack)
+{
+	cf_crash(AS_PARTITION, "CE code called rack_aware_adjust_master_rack()");
+}
+
+void
 emig_lead_flags_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		const as_namespace* ns, uint32_t lead_flags[])
 {

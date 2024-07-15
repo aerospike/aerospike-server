@@ -181,7 +181,7 @@ cf_os_best_practices_checks(cf_dyn_buf* db, uint64_t max_alloc_sz)
 {
 	cf_os_best_practices_check("min-free-kbytes",
 			"/proc/sys/vm/min_free_kbytes",
-			(max_alloc_sz / 1024) + (100 * 1024), INT64_MAX, db);
+			((int64_t)max_alloc_sz / 1024) + (100 * 1024), INT64_MAX, db);
 	check_thp(db);
 	cf_os_best_practices_check("swappiness", "/proc/sys/vm/swappiness", 0, 0,
 			db);
