@@ -4752,7 +4752,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		ns->ttl_hist = linear_hist_create(hist_name, LINEAR_HIST_SECONDS, 0, 0, TTL_HIST_NUM_BUCKETS);
 	}
 
-	cf_os_best_practices_check(&g_bad_practices, max_alloc_sz);
+	cf_os_best_practices_checks(&g_bad_practices, max_alloc_sz);
 	cfg_best_practices_check();
 	cf_dyn_buf_chomp_char(&g_bad_practices, ',');
 

@@ -28,12 +28,15 @@
 
 #include "dynbuf.h"
 
+#include "warnings.h"
+
 
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
 void
-cf_os_best_practices_check_ee(cf_dyn_buf* db)
+cf_os_best_practices_checks_ee(cf_dyn_buf* db)
 {
+	(void)db;
 }

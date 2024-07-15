@@ -55,7 +55,7 @@ typedef enum {
 
 #define os_check_failed(_db, _name, _msg, ...) \
 	do { \
-		cf_warning(CF_OS, "failed " _name " check - " _msg, ##__VA_ARGS__); \
+		cf_warning(CF_OS, "failed %s check - " _msg, _name, ##__VA_ARGS__); \
 		cf_dyn_buf_append_string(_db, _name); \
 		cf_dyn_buf_append_char(_db, ','); \
 	} \
@@ -95,11 +95,12 @@ cf_os_file_res cf_os_read_int_from_file(const char* path, int64_t* val);
 // Public API - best practices.
 //
 
-void cf_os_best_practices_check(cf_dyn_buf* db, uint64_t max_alloc_sz);
+void cf_os_best_practices_checks(cf_dyn_buf* db, uint64_t max_alloc_sz);
+void cf_os_best_practices_check(const char* name, const char* path, int64_t min, int64_t max, cf_dyn_buf* db);
 
 
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
-void cf_os_best_practices_check_ee(cf_dyn_buf* db);
+void cf_os_best_practices_checks_ee(cf_dyn_buf* db);

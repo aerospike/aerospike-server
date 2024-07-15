@@ -55,10 +55,7 @@ static bool g_use_group_perms = false;
 
 static cf_os_file_res cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf, size_t* limit);
 
-static void check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz);
-static void check_swappiness(cf_dyn_buf* db);
 static void check_thp(cf_dyn_buf* db);
-static void check_zone_reclaim_mode(cf_dyn_buf* db);
 
 
 //==========================================================
@@ -180,14 +177,46 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 //
 
 void
-cf_os_best_practices_check(cf_dyn_buf* db, uint64_t max_alloc_sz)
+cf_os_best_practices_checks(cf_dyn_buf* db, uint64_t max_alloc_sz)
 {
-	check_min_free_kbytes(db, max_alloc_sz);
+	cf_os_best_practices_check("min-free-kbytes",
+			"/proc/sys/vm/min_free_kbytes",
+			(max_alloc_sz / 1024) + (100 * 1024), INT64_MAX, db);
 	check_thp(db);
-	check_swappiness(db);
-	check_zone_reclaim_mode(db);
+	cf_os_best_practices_check("swappiness", "/proc/sys/vm/swappiness", 0, 0,
+			db);
+	cf_os_best_practices_check("zone-reclaim-mode",
+			"/proc/sys/vm/zone_reclaim_mode", 0, 0, db);
+	cf_os_best_practices_check("somaxconn", "/proc/sys/net/core/somaxconn", 4096,
+			INT64_MAX, db);
 
-	cf_os_best_practices_check_ee(db);
+	cf_os_best_practices_checks_ee(db);
+}
+
+void
+cf_os_best_practices_check(const char* name, const char* path, int64_t min,
+		int64_t max, cf_dyn_buf* db)
+{
+	int64_t value;
+
+	switch (cf_os_read_int_from_file(path, &value)) {
+	case CF_OS_FILE_RES_OK:
+		if (min == max && value != min) {
+			os_check_failed(db, name, "%s not set to %ld", name, min);
+		}
+		else if (value < min) {
+			os_check_failed(db, name, "%s should be at least %ld", name, min);
+		}
+		else if (value > max) {
+			os_check_failed(db, name, "%s should be at most %ld", name, max);
+		}
+		break;
+	case CF_OS_FILE_RES_NOT_FOUND:
+		break;
+	case CF_OS_FILE_RES_ERROR:
+	default:
+		cf_crash_nostack(CF_OS, "error reading '%s'", path);
+	}
 }
 
 
@@ -214,48 +243,6 @@ cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf,
 //==========================================================
 // Local helpers - best practices.
 //
-
-static void
-check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz)
-{
-	static const char* path = "/proc/sys/vm/min_free_kbytes";
-	uint64_t minimum_kb = (max_alloc_sz / 1024) + (100 * 1024);
-	uint64_t min_free_kbytes;
-
-	switch (cf_os_read_int_from_file(path, (int64_t*)&min_free_kbytes)) {
-	case CF_OS_FILE_RES_OK:
-		if (min_free_kbytes < minimum_kb) {
-			os_check_failed(db, "min-free-kbytes",
-					"min_free_kbytes should be at least %lu", minimum_kb);
-		}
-		break;
-	case CF_OS_FILE_RES_NOT_FOUND:
-		break;
-	case CF_OS_FILE_RES_ERROR:
-	default:
-		cf_crash_nostack(CF_OS, "error reading '%s'", path);
-	}
-}
-
-static void
-check_swappiness(cf_dyn_buf* db)
-{
-	static const char* path = "/proc/sys/vm/swappiness";
-	int64_t swappiness;
-
-	switch (cf_os_read_int_from_file(path, &swappiness)) {
-	case CF_OS_FILE_RES_OK:
-		if (swappiness != 0) {
-			os_check_failed(db, "swappiness", "swappiness not set to 0");
-		}
-		break;
-	case CF_OS_FILE_RES_NOT_FOUND:
-		break;
-	case CF_OS_FILE_RES_ERROR:
-	default:
-		cf_crash_nostack(CF_OS, "error reading '%s'", path);
-	}
-}
 
 static void
 check_thp(cf_dyn_buf* db)
@@ -310,26 +297,5 @@ check_thp(cf_dyn_buf* db)
 	case CF_OS_FILE_RES_ERROR:
 	default:
 		cf_crash_nostack(CF_OS, "error reading '/sys/kernel/mm/{redhat_,}transparent_hugepage/defrag'");
-	}
-}
-
-static void
-check_zone_reclaim_mode(cf_dyn_buf* db)
-{
-	static const char* path = "/proc/sys/vm/zone_reclaim_mode";
-	int64_t mode;
-
-	switch (cf_os_read_int_from_file(path, &mode)) {
-	case CF_OS_FILE_RES_OK:
-		if (mode != 0) {
-			os_check_failed(db, "zone-reclaim-mode",
-					"zone_reclaim_mode not set to 0");
-		}
-		break;
-	case CF_OS_FILE_RES_NOT_FOUND:
-		break;
-	case CF_OS_FILE_RES_ERROR:
-	default:
-		cf_crash_nostack(CF_OS, "error reading '%s'", path);
 	}
 }
