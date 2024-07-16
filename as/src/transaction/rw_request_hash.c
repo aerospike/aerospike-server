@@ -390,8 +390,9 @@ update_retransmit_stats(const rw_request* rw)
 			ns->n_retransmit_ops_sub_dup_res++;
 		}
 		break;
+	case FROM_READ_TOUCH:
 	case FROM_RE_REPL:
-		// For now we don't report re-replication retransmit stats.
+		// For now we don't report retransmit stats for these.
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
