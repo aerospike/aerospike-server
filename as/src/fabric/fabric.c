@@ -1545,6 +1545,24 @@ fabric_connection_send_unassign(fabric_connection *fc)
 	as_decr_uint32(&fc->node->send_fc_count[fc->s_channel]);
 
 	cf_mutex_unlock(&g_fabric.send_lock);
+
+	if (! fc->started_via_connect) {
+		fabric_node *node = fc->node;
+		uint32_t ch = fc->pool->pool_id;
+		fabric_connection *move_fc;
+
+		cf_mutex_lock(&node->incoming_fc_lock);
+
+		if (cf_queue_pop(&node->incoming_overflow[ch], &move_fc,
+				CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
+			fabric_connection_send_assign(move_fc);
+		}
+		else {
+			node->incoming_count[ch]--;
+		}
+
+		cf_mutex_unlock(&node->incoming_fc_lock);
+	}
 }
 
 inline static void
@@ -1610,18 +1628,6 @@ fabric_connection_disconnect(fabric_connection *fc)
 				cf_mutex_unlock(&node->send_queue_lock[ch]);
 				fabric_connection_release(fc); // for delete from incoming_overflow
 				break;
-			}
-		}
-
-		if (! fc->started_via_connect) {
-			fabric_connection *move_fc;
-
-			if (cf_queue_pop(&node->incoming_overflow[ch], &move_fc,
-					CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
-				fabric_connection_send_assign(move_fc);
-			}
-			else {
-				node->incoming_count[ch]--;
 			}
 		}
 
