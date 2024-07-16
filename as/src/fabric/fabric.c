@@ -1618,17 +1618,20 @@ fabric_connection_disconnect(fabric_connection *fc)
 		cf_mutex_lock(&node->incoming_fc_lock);
 
 		if (fc_pool_remove(&node->send_idle_fc_pool[ch], fc)) {
+			cf_mutex_unlock(&node->incoming_fc_lock);
+			cf_mutex_unlock(&node->send_queue_lock[ch]);
 			fabric_connection_send_unassign(fc);
 			fabric_connection_release(fc); // for delete from send_idle_fc_queue
+			break;
 		}
-		else if (! fc->started_via_connect) {
-			if (cf_queue_delete(&node->incoming_overflow[ch], &fc, true) ==
-					CF_QUEUE_OK) {
-				cf_mutex_unlock(&node->incoming_fc_lock);
-				cf_mutex_unlock(&node->send_queue_lock[ch]);
-				fabric_connection_release(fc); // for delete from incoming_overflow
-				break;
-			}
+
+		if (! fc->started_via_connect &&
+				cf_queue_delete(&node->incoming_overflow[ch], &fc, true) ==
+						CF_QUEUE_OK) {
+			cf_mutex_unlock(&node->incoming_fc_lock);
+			cf_mutex_unlock(&node->send_queue_lock[ch]);
+			fabric_connection_release(fc); // for delete from incoming_overflow
+			break;
 		}
 
 		cf_mutex_unlock(&node->incoming_fc_lock);
