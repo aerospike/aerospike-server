@@ -184,7 +184,7 @@ void fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix
 void quiesce_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
 void uniform_adjust_row(cf_node* node_seq, uint32_t n_nodes, sl_ix_t* ns_sl_ix, uint32_t n_replicas, uint32_t* claims, const uint32_t* target_claims, const uint32_t* rack_ids, uint32_t n_racks);
 void rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t n_ids, uint32_t n_racks, uint32_t start_n);
-void master_rack_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t master_rack);
+void active_rack_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t active_rack);
 uint32_t find_self(const cf_node* ns_node_seq, const struct as_namespace_s* ns);
 int shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, int working_master_n, const as_partition_version* working_master_version);
 uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns, uint32_t working_master_n, uint32_t n_dupl);

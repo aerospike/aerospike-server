@@ -724,6 +724,8 @@ typedef struct as_namespace_s {
 	// Configuration.
 	//
 
+	uint32_t		cfg_active_rack; // relevant only for enterprise edition
+	uint32_t		active_rack; // indirect config - can become disabled if any other node reports a different value
 	bool			allow_ttl_without_nsup;
 	bool			auto_revive;
 	uint32_t		background_query_max_rps;
@@ -752,8 +754,6 @@ typedef struct as_namespace_s {
 	uint64_t		index_stage_size;
 	uint64_t		indexes_memory_budget;
 	bool			inline_short_queries;
-	uint32_t		cfg_master_rack; // relevant only for enterprise edition
-	uint32_t		master_rack; // indirect config - can become disabled if any other node reports a different value
 	uint32_t		max_record_size;
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
@@ -1328,12 +1328,12 @@ typedef struct as_namespace_s {
 
 	// Roster management - relevant only for enterprise edition.
 	uint32_t smd_roster_generation;
-	uint32_t smd_roster_master_rack;
+	uint32_t smd_roster_active_rack;
 	uint32_t smd_roster_count;
 	cf_node smd_roster[AS_CLUSTER_SZ];
 	uint32_t smd_roster_rack_ids[AS_CLUSTER_SZ];
 	uint32_t roster_generation;
-	uint32_t roster_master_rack;
+	uint32_t roster_active_rack;
 	uint32_t roster_count;
 	cf_node roster[AS_CLUSTER_SZ];
 	uint32_t roster_rack_ids[AS_CLUSTER_SZ];

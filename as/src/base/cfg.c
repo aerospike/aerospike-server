@@ -442,6 +442,7 @@ typedef enum {
 	CASE_NETWORK_TLS_PROTOCOLS,
 
 	// Namespace options:
+	CASE_NAMESPACE_ACTIVE_RACK,
 	CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP,
 	CASE_NAMESPACE_AUTO_REVIVE,
 	CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS,
@@ -467,7 +468,6 @@ typedef enum {
 	CASE_NAMESPACE_INDEX_STAGE_SIZE,
 	CASE_NAMESPACE_INDEXES_MEMORY_BUDGET,
 	CASE_NAMESPACE_INLINE_SHORT_QUERIES,
-	CASE_NAMESPACE_MASTER_RACK,
 	CASE_NAMESPACE_MAX_RECORD_SIZE,
 	CASE_NAMESPACE_MIGRATE_ORDER,
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
@@ -1034,6 +1034,7 @@ const cfg_opt NETWORK_TLS_OPTS[] = {
 };
 
 const cfg_opt NAMESPACE_OPTS[] = {
+		{ "active-rack",					CASE_NAMESPACE_ACTIVE_RACK },
 		{ "allow-ttl-without-nsup",			CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP },
 		{ "auto-revive",					CASE_NAMESPACE_AUTO_REVIVE },
 		{ "background-query-max-rps",		CASE_NAMESPACE_BACKGROUND_QUERY_MAX_RPS },
@@ -1059,7 +1060,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "index-stage-size",				CASE_NAMESPACE_INDEX_STAGE_SIZE },
 		{ "indexes-memory-budget",			CASE_NAMESPACE_INDEXES_MEMORY_BUDGET },
 		{ "inline-short-queries",			CASE_NAMESPACE_INLINE_SHORT_QUERIES },
-		{ "master-rack",					CASE_NAMESPACE_MASTER_RACK },
 		{ "max-record-size",				CASE_NAMESPACE_MAX_RECORD_SIZE },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
@@ -2872,6 +2872,10 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_OPTS, NUM_NAMESPACE_OPTS)) {
+			case CASE_NAMESPACE_ACTIVE_RACK:
+				cfg_enterprise_only(&line);
+				ns->cfg_active_rack = cfg_u32(&line, 0, MAX_RACK_ID);
+				break;
 			case CASE_NAMESPACE_ALLOW_TTL_WITHOUT_NSUP:
 				ns->allow_ttl_without_nsup = cfg_bool(&line);
 				break;
@@ -2961,10 +2965,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_INLINE_SHORT_QUERIES:
 				ns->inline_short_queries = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_MASTER_RACK:
-				cfg_enterprise_only(&line);
-				ns->cfg_master_rack = cfg_u32(&line, 0, MAX_RACK_ID);
 				break;
 			case CASE_NAMESPACE_MAX_RECORD_SIZE:
 				ns->max_record_size = cfg_u32(&line, 0, WBLOCK_SZ);

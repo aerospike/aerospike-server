@@ -147,11 +147,11 @@ rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
 }
 
 void
-master_rack_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
+active_rack_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
 		uint32_t replication_factor, const uint32_t* rack_ids,
-		uint32_t master_rack)
+		uint32_t active_rack)
 {
-	cf_crash(AS_PARTITION, "CE code called rack_aware_adjust_master_rack()");
+	cf_crash(AS_PARTITION, "CE code called active_rack_adjust_row()");
 }
 
 void

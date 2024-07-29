@@ -1,7 +1,7 @@
 /*
  * partition_balance.c
  *
- * Copyright (C) 2016-2021 Aerospike, Inc.
+ * Copyright (C) 2016-2024 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -822,10 +822,10 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 
 	uint32_t n_racks = rack_count(ns);
 
-	if (ns->master_rack != 0 && n_racks > ns->replication_factor) {
-		cf_warning(AS_PARTITION, "{%s} master-rack disallowed - replication-factor %u > n-racks %u",
+	if (ns->active_rack != 0 && n_racks > ns->replication_factor) {
+		cf_warning(AS_PARTITION, "{%s} active-rack disallowed - replication-factor %u > n-racks %u",
 				ns->name, ns->replication_factor, n_racks);
-		ns->master_rack = 0;
+		ns->active_rack = 0;
 	}
 
 	// If a namespace is not on all nodes or is rack aware or uniform balance
@@ -898,10 +898,10 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 							ns->active_size, n_racks, 1);
 				}
 
-				if (ns->master_rack != 0) {
-					master_rack_adjust_row(ns_node_seq, ns_sl_ix,
+				if (ns->active_rack != 0) {
+					active_rack_adjust_row(ns_node_seq, ns_sl_ix,
 							ns->replication_factor, ns->rack_ids,
-							ns->master_rack);
+							ns->active_rack);
 				}
 			}
 

@@ -199,9 +199,9 @@ typedef struct as_exchange_node_namespace_data_s
 	uint32_t rack_id;
 
 	/**
-	 * Sender's cfg master rack.
+	 * Sender's cfg active rack.
 	 */
-	uint32_t master_rack;
+	uint32_t active_rack;
 
 	/**
 	 * Sender's roster generation.
@@ -211,7 +211,7 @@ typedef struct as_exchange_node_namespace_data_s
 	/**
 	 * Sender's roster master generation.
 	 */
-	uint32_t roster_master_rack;
+	uint32_t roster_active_rack;
 
 	/**
 	 * Sender's roster count.
@@ -656,8 +656,8 @@ typedef enum
 	AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
 	AS_EXCHANGE_MSG_COMPATIBILITY_ID,
 	AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
-	AS_EXCHANGE_MSG_NS_MASTER_RACKS,
-	AS_EXCHANGE_MSG_NS_ROSTER_MASTER_RACKS,
+	AS_EXCHANGE_MSG_NS_ACTIVE_RACKS,
+	AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS,
 
 	NUM_EXCHANGE_MSG_FIELDS
 } as_exchange_msg_fields;
@@ -680,8 +680,8 @@ static const msg_template exchange_msg_template[] = {
 		{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK },
 		{ AS_EXCHANGE_MSG_COMPATIBILITY_ID, M_FT_UINT32 },
 		{ AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_MASTER_RACKS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_ROSTER_MASTER_RACKS, M_FT_MSGPACK }
+		{ AS_EXCHANGE_MSG_NS_ACTIVE_RACKS, M_FT_MSGPACK },
+		{ AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS, M_FT_MSGPACK }
 };
 
 COMPILER_ASSERT(sizeof(exchange_msg_template) / sizeof(msg_template) ==
@@ -1520,12 +1520,12 @@ exchange_msg_data_payload_set(msg* msg)
 	uint32_t rack_ids[ns_count];
 
 	bool have_roster = false;
-	bool have_master_rack = false;
-	bool have_roster_master_rack = false;
+	bool have_active_rack = false;
+	bool have_roster_active_rack = false;
 	bool have_roster_rack_ids = false;
-	uint32_t master_racks[ns_count];
+	uint32_t active_racks[ns_count];
 	uint32_t roster_generations[ns_count];
-	uint32_t roster_master_racks[ns_count];
+	uint32_t roster_active_racks[ns_count];
 	cf_vector_define(rosters, sizeof(msg_buf_ele), ns_count, 0);
 	cf_vector_define(rosters_rack_ids, sizeof(msg_buf_ele), ns_count, 0);
 
@@ -1571,16 +1571,16 @@ exchange_msg_data_payload_set(msg* msg)
 
 		rack_ids[ns_ix] = ns->rack_id;
 
-		if (ns->cfg_master_rack != 0) {
-			have_master_rack = true;
+		if (ns->cfg_active_rack != 0) {
+			have_active_rack = true;
 		}
 
 		if (ns->smd_roster_generation != 0) {
 			have_roster = true;
 
-			if (! have_roster_master_rack &&
-					ns->smd_roster_master_rack != 0) {
-				have_roster_master_rack = true;
+			if (! have_roster_active_rack &&
+					ns->smd_roster_active_rack != 0) {
+				have_roster_active_rack = true;
 			}
 
 			if (! have_roster_rack_ids) {
@@ -1593,9 +1593,9 @@ exchange_msg_data_payload_set(msg* msg)
 			}
 		}
 
-		master_racks[ns_ix] = ns->cfg_master_rack;
+		active_racks[ns_ix] = ns->cfg_active_rack;
 		roster_generations[ns_ix] = ns->smd_roster_generation;
-		roster_master_racks[ns_ix] = ns->smd_roster_master_rack;
+		roster_active_racks[ns_ix] = ns->smd_roster_active_rack;
 		cf_vector_append(&rosters, &rn_ele);
 		cf_vector_append(&rosters_rack_ids, &rri_ele);
 
@@ -1629,18 +1629,18 @@ exchange_msg_data_payload_set(msg* msg)
 	msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_RACK_IDS, rack_ids,
 			ns_count);
 
-	if (have_master_rack) {
-		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_MASTER_RACKS,
-				master_racks, ns_count);
+	if (have_active_rack) {
+		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_ACTIVE_RACKS,
+				active_racks, ns_count);
 	}
 
 	if (have_roster) {
 		msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS,
 				roster_generations, ns_count);
 
-		if (have_roster_master_rack) {
+		if (have_roster_active_rack) {
 			msg_msgpack_list_set_uint32(msg,
-					AS_EXCHANGE_MSG_NS_ROSTER_MASTER_RACKS, roster_master_racks,
+					AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS, roster_active_racks,
 					ns_count);
 		}
 
@@ -2571,20 +2571,20 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 
 	ns->rack_ids[sl_ix] = namespace_data->rack_id;
 
-	if (ns->master_rack == (uint32_t)-1) {
-		ns->master_rack = namespace_data->master_rack;
+	if (ns->active_rack == (uint32_t)-1) {
+		ns->active_rack = namespace_data->active_rack;
 	}
-	else if (ns->master_rack != namespace_data->master_rack) {
-		if (ns->master_rack != (uint32_t)-2) {
-			WARNING("{%s} has unmatched master-racks", ns->name);
+	else if (ns->active_rack != namespace_data->active_rack) {
+		if (ns->active_rack != (uint32_t)-2) {
+			WARNING("{%s} has unmatched active-racks", ns->name);
 		}
 
-		ns->master_rack = (uint32_t)-2;
+		ns->active_rack = (uint32_t)-2;
 	}
 
 	if (namespace_data->roster_generation > ns->roster_generation) {
 		ns->roster_generation = namespace_data->roster_generation;
-		ns->roster_master_rack = namespace_data->roster_master_rack;
+		ns->roster_active_rack = namespace_data->roster_active_rack;
 		ns->roster_count = namespace_data->roster_count;
 
 		memcpy(ns->roster, namespace_data->roster,
@@ -2737,10 +2737,10 @@ exchange_exchanging_pre_commit()
 		ns->is_quiesced = false;
 		memset(ns->quiesced, 0, sizeof(ns->quiesced));
 
-		ns->master_rack = (uint32_t)-1;
+		ns->active_rack = (uint32_t)-1;
 
 		ns->roster_generation = 0;
-		ns->roster_master_rack = 0;
+		ns->roster_active_rack = 0;
 		ns->roster_count = 0;
 		memset(ns->roster, 0, sizeof(ns->roster));
 		memset(ns->roster_rack_ids, 0, sizeof(ns->roster_rack_ids));
@@ -2792,8 +2792,8 @@ exchange_exchanging_pre_commit()
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
 
-		if (ns->master_rack == (uint32_t)-2) {
-			ns->master_rack = 0;
+		if (ns->active_rack == (uint32_t)-2) {
+			ns->active_rack = 0;
 		}
 
 		if (ns->eventual_regime != 0) {
@@ -2902,11 +2902,11 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 
 		uint32_t rack_ids[num_namespaces_sent];
 
-		uint32_t master_racks[num_namespaces_sent];
-		uint32_t roster_master_racks[num_namespaces_sent];
+		uint32_t active_racks[num_namespaces_sent];
+		uint32_t roster_active_racks[num_namespaces_sent];
 
-		memset(master_racks, 0, sizeof(master_racks));
-		memset(roster_master_racks, 0, sizeof(roster_master_racks));
+		memset(active_racks, 0, sizeof(active_racks));
+		memset(roster_active_racks, 0, sizeof(roster_active_racks));
 
 		uint32_t roster_generations[num_namespaces_sent];
 		cf_vector_define(rosters, sizeof(msg_buf_ele), num_namespaces_sent, 0);
@@ -2958,13 +2958,13 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			goto Exit;
 		}
 
-		uint32_t num_master_racks = num_namespaces_sent;
+		uint32_t num_active_racks = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_MASTER_RACKS)
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ACTIVE_RACKS)
 				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
-						AS_EXCHANGE_MSG_NS_MASTER_RACKS, master_racks,
-						&num_master_racks)) {
-			WARNING("received invalid master racks from node %"PRIx64,
+						AS_EXCHANGE_MSG_NS_ACTIVE_RACKS, active_racks,
+						&num_active_racks)) {
+			WARNING("received invalid active racks from node %"PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
@@ -2980,13 +2980,13 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			goto Exit;
 		}
 
-		uint32_t num_roster_master_racks = num_namespaces_sent;
+		uint32_t num_roster_active_racks = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_MASTER_RACKS)
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS)
 				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
-						AS_EXCHANGE_MSG_NS_ROSTER_MASTER_RACKS,
-						roster_master_racks, &num_roster_master_racks)) {
-			WARNING("received invalid roster master racks from node %"PRIx64,
+						AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS,
+						roster_active_racks, &num_roster_active_racks)) {
+			WARNING("received invalid roster active racks from node %"PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
@@ -3062,9 +3062,9 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			namespace_data->local_namespace = matching_namespace;
 			namespace_data->replication_factor = replication_factors[i];
 			namespace_data->rack_id = rack_ids[i];
-			namespace_data->master_rack = master_racks[i];
+			namespace_data->active_rack = active_racks[i];
 			namespace_data->roster_generation = roster_generations[i];
-			namespace_data->roster_master_rack = roster_master_racks[i];
+			namespace_data->roster_active_rack = roster_active_racks[i];
 			namespace_data->eventual_regime = eventual_regimes[i];
 			namespace_data->rebalance_regime = rebalance_regimes[i];
 			namespace_data->rebalance_flags = rebalance_flags[i];
