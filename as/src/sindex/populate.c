@@ -142,10 +142,10 @@ as_sindex_populate_startup(void)
 			continue;
 		}
 
-		if (ns->storage_type == AS_STORAGE_ENGINE_SSD || ! ns->cold_start) {
+		if (ns->storage_type != AS_STORAGE_ENGINE_MEMORY || ! ns->cold_start) {
 			populate_startup(ns);
 		}
-		// else - memory or pmem (cold restart) - already built sindex.
+		// else - memory (cold restart) - already built sindex.
 
 		mark_all_readable(ns);
 
