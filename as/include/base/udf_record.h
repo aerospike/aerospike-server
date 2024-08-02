@@ -36,6 +36,7 @@
 #include "dynbuf.h"
 
 #include "base/datamodel.h"
+#include "storage/storage.h"
 
 
 //==========================================================
@@ -69,7 +70,6 @@ typedef struct udf_record_s {
 	struct as_storage_rd_s* rd;
 
 	bool is_open;
-	bool is_loaded;
 	bool too_many_bins;
 	bool has_updates;
 
@@ -105,6 +105,18 @@ void udf_record_cache_reclaim(udf_record* urecord, uint32_t i);
 int udf_record_open(udf_record* urecord);
 void udf_record_close(udf_record* urecord);
 int udf_record_load(udf_record* urecord);
+
+static inline bool
+urecord_is_loaded(const udf_record* urecord)
+{
+	return urecord->rd->bins == urecord->stack_bins;
+}
+
+static inline void
+urecord_set_not_loaded(udf_record* urecord)
+{
+	urecord->rd->bins = NULL;
+}
 
 
 //==========================================================
