@@ -810,6 +810,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 	urecord.r_ref = &r_ref;
 	urecord.rd = &rd;
+	urecord_set_not_loaded(&urecord);
 
 	if (get_rv == 0) {
 		uint8_t open_rv = open_existing_record(&urecord);
@@ -1169,7 +1170,7 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 	if (urecord->is_open) {
 		as_index_ref* r_ref = urecord->r_ref;
 
-		if (urecord->is_loaded) {
+		if (urecord_is_loaded(urecord)) {
 			as_storage_rd* rd = urecord->rd;
 
 			if ((urecord->result_code != AS_OK || urecord->has_updates) &&
@@ -1220,7 +1221,7 @@ udf_master_done(udf_record* urecord, as_rec* urec, as_result* result,
 	as_namespace* ns = tr->rsv.ns;
 
 	if (urecord->is_open) {
-		if (urecord->is_loaded) {
+		if (urecord_is_loaded(urecord)) {
 			as_storage_record_close(urecord->rd);
 		}
 
