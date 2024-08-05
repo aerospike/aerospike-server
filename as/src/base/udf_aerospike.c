@@ -199,13 +199,11 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 		return 4;
 	}
 
-	// Sets rd->bins to urecord->stack_bins, i.e. "loaded".
 	as_storage_rd_load_bins(rd, urecord->stack_bins); // can't fail
 
 	int exec_rv = execute_updates(urecord);
 
 	if (exec_rv != 0) {
-		urecord_set_not_loaded(urecord);
 		as_storage_record_close(rd);
 		as_index_delete(tree, keyd);
 		as_record_done(r_ref, ns);
@@ -213,6 +211,7 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 	}
 
 	urecord->is_open = true;
+	urecord->is_loaded = true;
 
 	return 0;
 }
