@@ -291,14 +291,16 @@ udf_record_load(udf_record* urecord)
 {
 	cf_assert(urecord->is_open, AS_UDF, "loading unopened record");
 
+	as_storage_rd* rd = urecord->rd;
+
 	if (urecord->is_loaded) {
+		// E.g. record_matches_query() sets rd->bins to local stack - restore.
+		rd->bins = urecord->stack_bins;
 		return 0;
 	}
 
 	as_index_ref* r_ref = urecord->r_ref;
 	as_namespace* ns = urecord->tr->rsv.ns;
-
-	as_storage_rd* rd = urecord->rd;
 
 	as_storage_record_open(ns, r_ref->r, rd);
 
