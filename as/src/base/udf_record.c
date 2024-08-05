@@ -138,6 +138,7 @@ udf_record_init(udf_record* urecord)
 	urecord->rd = NULL;
 
 	urecord->is_open = false;
+	urecord->is_loaded = false;
 	urecord->too_many_bins = false;
 	urecord->has_updates = false;
 
@@ -273,9 +274,9 @@ udf_record_close(udf_record* urecord)
 		cf_assert(urecord->particle_llb.head == NULL, AS_UDF,
 				"unexpected - has particle buf");
 
-		if (urecord_is_loaded(urecord)) {
+		if (urecord->is_loaded) {
 			as_storage_record_close(urecord->rd);
-			urecord_set_not_loaded(urecord);
+			urecord->is_loaded = false;
 		}
 
 		as_record_done(urecord->r_ref, urecord->tr->rsv.ns);
@@ -290,7 +291,7 @@ udf_record_load(udf_record* urecord)
 {
 	cf_assert(urecord->is_open, AS_UDF, "loading unopened record");
 
-	if (urecord_is_loaded(urecord)) {
+	if (urecord->is_loaded) {
 		return 0;
 	}
 
@@ -301,22 +302,21 @@ udf_record_load(udf_record* urecord)
 
 	as_storage_record_open(ns, r_ref->r, rd);
 
-	// Sets rd->bins to urecord->stack_bins, i.e. "loaded".
 	if (as_storage_rd_load_bins(rd, urecord->stack_bins) < 0) {
-		urecord_set_not_loaded(urecord);
 		as_storage_record_close(rd);
 		return AS_ERR_UNKNOWN;
 	}
 
 	if (rd->n_bins > UDF_BIN_LIMIT) {
 		cf_warning(AS_UDF, "too many bins (%d) for UDF", rd->n_bins);
-		urecord_set_not_loaded(urecord);
 		as_storage_record_close(rd);
 		return AS_ERR_BIN_NAME;
 	}
 
 	as_storage_record_get_set_name(rd);
 	as_storage_rd_load_key(rd);
+
+	urecord->is_loaded = true;
 
 	return 0;
 }
