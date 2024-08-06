@@ -129,7 +129,9 @@ typedef struct as_partition_s {
 
 	uint64_t dup_res_cutoff_ms;
 
-	uint8_t align_2[16];
+	cf_node proxy_dst;
+
+	uint8_t align_2[8];
 	// @ 64-byte-aligned boundary.
 
 	bool immigrators[AS_CLUSTER_SZ];

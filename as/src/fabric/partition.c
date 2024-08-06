@@ -146,6 +146,7 @@ void
 as_partition_freeze(as_partition* p)
 {
 	p->working_master = (cf_node)0;
+	p->proxy_dst = (cf_node)0;
 
 	p->n_nodes = 0;
 	p->n_replicas = 0;
@@ -212,9 +213,13 @@ as_partition_proxyee_redirect(as_namespace* ns, uint32_t pid)
 
 	cf_node node = (cf_node)0;
 
-	if (g_config.self_node == p->replicas[0] &&
-			g_config.self_node != p->working_master) {
-		node = p->working_master;
+	if (g_config.self_node == p->replicas[0]) {
+		if (g_config.self_node != p->working_master) {
+			node = p->working_master;
+		}
+	}
+	else if (g_config.self_node != p->proxy_dst){
+		node = p->proxy_dst;
 	}
 
 	cf_mutex_unlock(&p->lock);
@@ -529,8 +534,8 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 	size_t db_sz = db->used_sz;
 
 	cf_dyn_buf_append_string(db, "namespace:partition:state:n_replicas:replica:"
-			"n_dupl:working_master:emigrates:lead_emigrates:immigrates:records:"
-			"tombstones:regime:version:final_version;");
+			"n_dupl:working_master:proxy_dst:emigrates:lead_emigrates:"
+			"immigrates:records:tombstones:regime:version:final_version;");
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
@@ -553,6 +558,8 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_uint32(db, p->n_dupl);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64_x(db, p->working_master);
+			cf_dyn_buf_append_char(db, ':');
+			cf_dyn_buf_append_uint64_x(db, p->proxy_dst);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint32(db, p->pending_emigrations);
 			cf_dyn_buf_append_char(db, ':');
@@ -687,7 +694,10 @@ find_best_node(const as_partition* p, bool is_read)
 		return g_config.self_node; // may read from prole that's got everything
 	}
 
-	return p->replicas[0]; // final master as a last resort
+	// TODO - paranoia - replace with warning & return p->replicas[0]?
+	cf_assert(p->proxy_dst != (cf_node)0, AS_PARTITION, "no proxy destination");
+
+	return p->proxy_dst;
 }
 
 static void
