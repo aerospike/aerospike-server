@@ -397,7 +397,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	as_record* r = r_ref.r;
 
 	if (r->void_time == 0) { // note - takes care of tombstones too
-		tr->result_code = AS_ERR_KEY_BUSY;
+		read_touch_master_done(tr, &r_ref, NULL, AS_ERR_KEY_BUSY);
 		return TRANS_DONE_ERROR;
 	}
 
