@@ -3353,10 +3353,7 @@ cmd_statistics(const char* name, const char* params, cf_dyn_buf* db)
 	info_append_uint64(db, "demarshal_error", g_stats.n_demarshal_error);
 	info_append_uint64(db, "early_tsvc_client_error", g_stats.n_tsvc_client_error);
 	info_append_uint64(db, "early_tsvc_from_proxy_error", g_stats.n_tsvc_from_proxy_error);
-	info_append_uint64(db, "early_tsvc_batch_sub_error", g_stats.n_tsvc_batch_sub_error);
 	info_append_uint64(db, "early_tsvc_from_proxy_batch_sub_error", g_stats.n_tsvc_from_proxy_batch_sub_error);
-	info_append_uint64(db, "early_tsvc_udf_sub_error", g_stats.n_tsvc_udf_sub_error);
-	info_append_uint64(db, "early_tsvc_ops_sub_error", g_stats.n_tsvc_ops_sub_error);
 
 	info_append_uint32(db, "long_queries_active", as_query_manager_get_active_job_count());
 

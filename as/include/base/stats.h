@@ -64,10 +64,10 @@ typedef struct as_stats_s {
 	uint64_t		n_demarshal_error;
 	uint64_t		n_tsvc_client_error;
 	uint64_t		n_tsvc_from_proxy_error;
-	uint64_t		n_tsvc_batch_sub_error;
+	uint64_t		n_tsvc_batch_sub_error; // satisfies a macro - can't happen
 	uint64_t		n_tsvc_from_proxy_batch_sub_error;
-	uint64_t		n_tsvc_udf_sub_error;
-	uint64_t		n_tsvc_ops_sub_error;
+	uint64_t		n_tsvc_udf_sub_error; // satisfies a macro - can't happen
+	uint64_t		n_tsvc_ops_sub_error; // satisfies a macro - can't happen
 	uint64_t		n_tsvc_read_touch_error; // satisfies a macro - can't happen
 	uint64_t		n_tsvc_re_repl_error; // satisfies a macro - can't happen
 

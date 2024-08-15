@@ -363,29 +363,20 @@ log_line_early_fail()
 	uint64_t n_demarshal = as_load_uint64(&g_stats.n_demarshal_error);
 	uint64_t n_tsvc_client = as_load_uint64(&g_stats.n_tsvc_client_error);
 	uint64_t n_tsvc_from_proxy = as_load_uint64(&g_stats.n_tsvc_from_proxy_error);
-	uint64_t n_tsvc_batch_sub = as_load_uint64(&g_stats.n_tsvc_batch_sub_error);
 	uint64_t n_tsvc_from_proxy_batch_sub = as_load_uint64(&g_stats.n_tsvc_from_proxy_batch_sub_error);
-	uint64_t n_tsvc_udf_sub = as_load_uint64(&g_stats.n_tsvc_udf_sub_error);
-	uint64_t n_tsvc_ops_sub = as_load_uint64(&g_stats.n_tsvc_ops_sub_error);
 
 	if ((n_demarshal |
 			n_tsvc_client |
 			n_tsvc_from_proxy |
-			n_tsvc_batch_sub |
-			n_tsvc_from_proxy_batch_sub |
-			n_tsvc_udf_sub |
-			n_tsvc_ops_sub) == 0) {
+			n_tsvc_from_proxy_batch_sub) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-from-proxy %lu tsvc-batch-sub %lu tsvc-from-proxy-batch-sub %lu tsvc-udf-sub %lu tsvc-ops-sub %lu",
+	cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-from-proxy %lu tsvc-from-proxy-batch-sub %lu",
 			n_demarshal,
 			n_tsvc_client,
 			n_tsvc_from_proxy,
-			n_tsvc_batch_sub,
-			n_tsvc_from_proxy_batch_sub,
-			n_tsvc_udf_sub,
-			n_tsvc_ops_sub);
+			n_tsvc_from_proxy_batch_sub);
 }
 
 void
