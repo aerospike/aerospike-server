@@ -44,6 +44,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/thr_info.h"
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
 #include "storage/storage.h"
@@ -555,7 +556,7 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 			linear_hist_get_info(ns->obj_size_lin_hist, db);
 		}
 		else {
-			cf_dyn_buf_append_string(db, "error-unknown-hist-name");
+			as_info_respond_error(db, AS_ERR_PARAMETER, "unknown hist name");
 		}
 
 		return;
@@ -564,7 +565,7 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 	uint16_t set_id = as_namespace_get_set_id(ns, set_name);
 
 	if (set_id == INVALID_SET_ID) {
-		cf_dyn_buf_append_string(db, "error-unknown-set-name");
+		as_info_respond_error(db, AS_ERR_PARAMETER, "unknown set name");
 		return;
 	}
 
@@ -593,7 +594,7 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 		}
 	}
 	else {
-		cf_dyn_buf_append_string(db, "error-unknown-hist-name");
+		as_info_respond_error(db, AS_ERR_PARAMETER, "unknown hist name");
 	}
 }
 

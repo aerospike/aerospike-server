@@ -3819,9 +3819,6 @@ as_exchange_info_get_succession(cf_dyn_buf* db)
 		cf_dyn_buf_chomp(db);
 	}
 
-	// Always succeeds.
-	cf_dyn_buf_append_string(db, "\nok");
-
 	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }
 

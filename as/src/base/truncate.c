@@ -46,8 +46,10 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/proto.h"
 #include "base/set_index.h"
 #include "base/smd.h"
+#include "base/thr_info.h"
 #include "sindex/gc.h"
 #include "transaction/rw_utils.h"
 
@@ -174,14 +176,15 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str,
 		if (lut == 0) {
 			cf_warning(AS_TRUNCATE, "command lut %s (%s) would truncate to 0",
 					lut_str, utc_sec);
-			cf_dyn_buf_append_string(db, "ERROR::would-truncate-to-0");
+			as_info_respond_error(db, AS_ERR_PARAMETER, "would truncate to 0");
 			return;
 		}
 
 		if (lut > now) {
 			cf_warning(AS_TRUNCATE, "command lut %s (%s) is in the future",
 					lut_str, utc_sec);
-			cf_dyn_buf_append_string(db, "ERROR::would-truncate-in-the-future");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"would truncate in the future");
 			return;
 		}
 
@@ -196,11 +199,11 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str,
 	// Broadcast the truncate command to all nodes (including this one).
 	if (! as_smd_set_blocking(AS_SMD_MODULE_TRUNCATE, smd_key, smd_value, 0)) {
 		cf_warning(AS_TRUNCATE, "timeout truncating %s to %lu", smd_key, lut);
-		cf_dyn_buf_append_string(db, "ERROR::timeout");
+		as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
 		return;
 	}
 
-	cf_dyn_buf_append_string(db, "ok");
+	as_info_respond_ok(db);
 }
 
 // SMD key is "ns-name|set-name" or "ns-name".
@@ -223,11 +226,11 @@ as_truncate_undo_cmd(const char* ns_name, const char* set_name, cf_dyn_buf* db)
 	// Broadcast the truncate-undo command to all nodes (including this one).
 	if (! as_smd_delete_blocking(AS_SMD_MODULE_TRUNCATE, smd_key, 0)) {
 		cf_warning(AS_TRUNCATE, "{%s} timeout during undo truncate", smd_key);
-		cf_dyn_buf_append_string(db, "ERROR::timeout");
+		as_info_respond_error(db, AS_ERR_UNKNOWN, "timeout");
 		return;
 	}
 
-	cf_dyn_buf_append_string(db, "ok");
+	as_info_respond_ok(db);
 }
 
 bool

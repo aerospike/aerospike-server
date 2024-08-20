@@ -31,6 +31,9 @@
 #include "dynbuf.h"
 #include "log.h"
 
+#include "base/proto.h"
+#include "base/thr_info.h"
+
 
 //==========================================================
 // Public API.
@@ -45,6 +48,5 @@ as_roster_init(void)
 void
 as_roster_set_nodes_cmd(const char* ns_name, const char* nodes, cf_dyn_buf* db)
 {
-	cf_warning(AS_ROSTER, "roster is an enterprise feature");
-	cf_dyn_buf_append_string(db, "ERROR::enterprise-only");
+	cf_crash(AS_ROSTER, "CE code called as_roster_set_nodes_cmd()");
 }

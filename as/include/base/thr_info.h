@@ -38,6 +38,7 @@
 //
 
 struct as_file_handle_s;
+struct as_namespace_s;
 struct as_proto_s;
 
 
@@ -56,6 +57,15 @@ typedef struct as_info_transaction_s {
 	uint64_t start_time;
 } as_info_transaction;
 
+typedef enum {
+	INFO_PARAM_OK             = 0,
+	INFO_PARAM_OK_NOT_FOUND   = 1,
+
+	INFO_PARAM_FAIL_NOT_FOUND = -1,
+	INFO_PARAM_FAIL_TOO_LONG  = -2,
+	INFO_PARAM_FAIL_REPLIED   = -3
+} info_param_result;
+
 
 //==========================================================
 // Globals.
@@ -71,9 +81,22 @@ extern cf_dyn_buf g_bad_practices;
 
 void as_info_init();
 void as_info(as_info_transaction* it);
-int as_info_parameter_get(const char* param_str, const char* param, char* value, int* value_len);
+info_param_result as_info_parameter_get(const char* param_str, const char* param, char* value, int* value_len);
+info_param_result as_info_param_get_namespace_id(const char* params, char* value, int* value_len);
+info_param_result as_info_param_get_namespace_ns(const char* params, char* value, int* value_len);
+info_param_result as_info_param_get_namespace(const char* params, char* value, int* value_len);
+
+bool as_info_required_param_is_ok(cf_dyn_buf* db, const char* param, const char* value, info_param_result result);
+info_param_result as_info_optional_param_is_ok(cf_dyn_buf* db, const char* param, const char* value, info_param_result result);
+bool info_param_required_local_namespace_is_ok(cf_dyn_buf* db, char* value, struct as_namespace_s** ns, info_param_result result);
+info_param_result info_param_optional_local_namespace_is_ok(cf_dyn_buf* db, char* value, struct as_namespace_s** ns, info_param_result result);
+
 void as_info_buffer(uint8_t* req_buf, size_t req_buf_len, cf_dyn_buf* rsp);
 void as_info_set_num_info_threads(uint32_t n_threads);
+
+void as_info_respond_error(cf_dyn_buf* db, int num, const char* message, ...);
+bool as_info_respond_enterprise_only(cf_dyn_buf* db);
+void as_info_respond_ok(cf_dyn_buf* db);
 
 // Needed by heartbeat:
 char* as_info_bind_to_string(const cf_serv_cfg* cfg, cf_sock_owner owner);

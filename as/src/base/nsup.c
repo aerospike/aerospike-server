@@ -48,6 +48,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/proto.h"
 #include "base/set_index.h"
 #include "base/smd.h"
 #include "base/thr_info.h"
@@ -235,11 +236,11 @@ as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
 		if (! as_smd_delete_blocking(AS_SMD_MODULE_EVICT, ns_name, 0)) {
 			cf_warning(AS_NSUP, "{%s} timeout deleting evict-void-time",
 					ns_name);
-			cf_dyn_buf_append_string(db, "ERROR::timeout");
+			as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
 			return;
 		}
 
-		cf_dyn_buf_append_string(db, "ok");
+		as_info_respond_ok(db);
 		return;
 	}
 
@@ -247,7 +248,7 @@ as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
 
 	if (ttl > MAX_ALLOWED_TTL) {
 		cf_warning(AS_NSUP, "{%s} command ttl %lu is too big", ns_name, ttl);
-		cf_dyn_buf_append_string(db, "ERROR::ttl-too-big");
+		as_info_respond_error(db, AS_ERR_PARAMETER, "ttl too big");
 		return;
 	}
 
@@ -264,11 +265,11 @@ as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
 	if (! as_smd_set_blocking(AS_SMD_MODULE_EVICT, ns_name, value, 0)) {
 		cf_warning(AS_NSUP, "{%s} timeout setting evict-ttl %lu evict-void-time %u",
 				ns_name, ttl, evict_void_time);
-		cf_dyn_buf_append_string(db, "ERROR::timeout");
+		as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
 		return;
 	}
 
-	cf_dyn_buf_append_string(db, "ok");
+	as_info_respond_ok(db);
 }
 
 bool

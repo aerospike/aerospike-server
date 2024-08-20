@@ -40,6 +40,7 @@
 
 #include "base/cfg.h"
 #include "base/proto.h"
+#include "base/thr_info.h"
 #include "fabric/partition.h"
 #include "query/query_job.h"
 
@@ -278,9 +279,7 @@ as_query_manager_get_job_info(uint64_t trid, cf_dyn_buf* db)
 	if (_job == NULL) {
 		cf_mutex_unlock(&g_mgr.lock);
 
-		cf_dyn_buf_append_string(db, "ERROR:");
-		cf_dyn_buf_append_uint32(db, AS_ERR_NOT_FOUND);
-		cf_dyn_buf_append_string(db, ":job not found");
+		as_info_respond_error(db, AS_ERR_NOT_FOUND, "job not found");
 
 		return;
 	}

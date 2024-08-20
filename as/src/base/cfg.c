@@ -1699,11 +1699,11 @@ cfg_strcpy(const cfg_line* p_line, char* p_str, size_t max_size)
 static bool
 cfg_bool(const cfg_line* p_line)
 {
-	if (strcasecmp(p_line->val_tok_1, "true") == 0 || strcasecmp(p_line->val_tok_1, "yes") == 0) {
+	if (strcasecmp(p_line->val_tok_1, "true") == 0) {
 		return true;
 	}
 
-	if (strcasecmp(p_line->val_tok_1, "false") == 0 || strcasecmp(p_line->val_tok_1, "no") == 0) {
+	if (strcasecmp(p_line->val_tok_1, "false") == 0) {
 		return false;
 	}
 

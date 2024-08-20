@@ -379,7 +379,7 @@ as_service_list_dynamic(const char* key, const char* params, cf_dyn_buf* db)
 
 	if (strcmp(key, "services-alumni-reset") == 0) {
 		purge_alumni();
-		cf_dyn_buf_append_string(db, "ok");
+		as_info_respond_ok(db);
 		return;
 	}
 

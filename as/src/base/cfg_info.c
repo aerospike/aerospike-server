@@ -47,6 +47,7 @@
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/proto.h"
 #include "base/security.h"
 #include "base/service.h"
 #include "base/set_index.h"
@@ -111,9 +112,10 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 {
 	char context[1024];
 	int context_len = sizeof(context);
+	info_param_result rv = as_info_parameter_get(params, "context", context,
+			&context_len);
 
-	if (as_info_parameter_get(params, "context", context, &context_len) != 0) {
-		cf_dyn_buf_append_string(db, "ERROR::invalid get-config parameter");
+	if (! as_info_required_param_is_ok(db, "context", context, rv)) {
 		return;
 	}
 
@@ -125,9 +127,9 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 	}
 	else if (strcmp(context, "namespace") == 0) {
 		context_len = sizeof(context);
+		rv = as_info_param_get_namespace_id(params, context, &context_len);
 
-		if (as_info_parameter_get(params, "id", context, &context_len) != 0) {
-			cf_dyn_buf_append_string(db, "ERROR::invalid id");
+		if (! as_info_required_param_is_ok(db, "namespace", context, rv)) {
 			return;
 		}
 
@@ -140,7 +142,7 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 		as_xdr_get_config(params, db);
 	}
 	else {
-		cf_dyn_buf_append_string(db, "ERROR::invalid context");
+		as_info_respond_error(db, AS_ERR_PARAMETER, "invalid context");
 	}
 }
 
@@ -371,7 +373,7 @@ cfg_get_namespace(const char* context, cf_dyn_buf* db)
 	as_namespace* ns = as_namespace_get_byname(context);
 
 	if (ns == NULL) {
-		cf_dyn_buf_append_string(db, "ERROR::namespace not found");
+		as_info_respond_error(db, AS_ERR_NAMESPACE, "namespace not found");
 		return;
 	}
 
@@ -665,61 +667,65 @@ cfg_set(const char* name, const char* cmd, cf_dyn_buf* db)
 
 	char context[1024];
 	int context_len = sizeof(context);
+	info_param_result rv = as_info_parameter_get(cmd, "context", context,
+			&context_len);
 
-	if (as_info_parameter_get(cmd, "context", context, &context_len) != 0) {
-		cf_dyn_buf_append_string(db, "error");
+	if (! as_info_required_param_is_ok(db, "context", context, rv)) {
 		return;
 	}
 
 	if (strcmp(context, "service") == 0) {
 		if (! cfg_set_service(cmd)) {
-			cf_dyn_buf_append_string(db, "error");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"invalid set-config parameter");
 			return;
 		}
 	}
 	else if (strcmp(context, "network") == 0) {
 		if (! cfg_set_network(cmd)) {
-			cf_dyn_buf_append_string(db, "error");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"invalid set-config parameter");
 			return;
 		}
 	}
 	else if (strcmp(context, "namespace") == 0) {
 		if (! cfg_set_namespace(cmd)) {
-			cf_dyn_buf_append_string(db, "error");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"invalid set-config parameter");
 			return;
 		}
 	}
 	else if (strcmp(context, "security") == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_info_respond_enterprise_only(db)) {
 			cf_warning(AS_INFO, "security is enterprise-only");
-			cf_dyn_buf_append_string(db, "error");
 			return;
 		}
 
 		if (! as_security_set_config(cmd)) {
-			cf_dyn_buf_append_string(db, "error");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"invalid set-config parameter");
 			return;
 		}
 	}
 	else if (strcmp(context, "xdr") == 0) {
-		if (as_error_enterprise_only()) {
+		if (as_info_respond_enterprise_only(db)) {
 			cf_warning(AS_INFO, "XDR is enterprise-only");
-			cf_dyn_buf_append_string(db, "error");
 			return;
 		}
 
 		if (! as_xdr_set_config(cmd)) {
-			cf_dyn_buf_append_string(db, "error");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"invalid set-config parameter");
 			return;
 		}
 	}
 	else {
-		cf_dyn_buf_append_string(db, "error");
+		as_info_respond_error(db, AS_ERR_PARAMETER, "invalid context");
 		return;
 	}
 
 	cf_info(AS_INFO, "config-set command completed: params %s", cmd);
-	cf_dyn_buf_append_string(db, "ok");
+	as_info_respond_ok(db);
 }
 
 static bool
@@ -730,10 +736,10 @@ cfg_set_service(const char* cmd)
 	int val;
 
 	if (as_info_parameter_get(cmd, "advertise-ipv6", v, &v_len) == 0) {
-		if (strcmp(v, "true") == 0 || strcmp(v, "yes") == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_socket_set_advertise_ipv6(true);
 		}
-		else if (strcmp(v, "false") == 0 || strcmp(v, "no") == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_socket_set_advertise_ipv6(false);
 		}
 		else {
@@ -784,7 +790,7 @@ cfg_set_service(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-fabric", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s",
 					v);
 			if (! g_config.fabric_benchmarks_enabled) {
@@ -792,7 +798,7 @@ cfg_set_service(const char* cmd)
 			}
 			g_config.fabric_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s",
 					v);
 			g_config.fabric_benchmarks_enabled = false;
@@ -804,11 +810,11 @@ cfg_set_service(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-health-check", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-health-check to %s", v);
 			g_config.health_check_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-health-check to %s", v);
 			g_config.health_check_enabled = false;
 		}
@@ -817,14 +823,14 @@ cfg_set_service(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "enable-hist-info", v, &v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-hist-info to %s", v);
 			if (! g_config.info_hist_enabled) {
 				histogram_clear(g_stats.info_hist);
 			}
 			g_config.info_hist_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-hist-info to %s", v);
 			g_config.info_hist_enabled = false;
 			histogram_clear(g_stats.info_hist);
@@ -865,11 +871,11 @@ cfg_set_service(const char* cmd)
 			cf_warning(AS_INFO, "microsecond-histograms can only be changed if all microbenchmark histograms are disabled");
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of microsecond-histograms to %s",
 					v);
 			g_config.microsecond_histograms = true;
-		} else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		} else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of microsecond-histograms to %s",
 					v);
 			g_config.microsecond_histograms = false;
@@ -1212,7 +1218,7 @@ cfg_set_namespace(const char* cmd)
 	int val;
 	char bool_val[2][6] = {"false", "true"};
 
-	if (as_info_parameter_get(cmd, "id", v, &v_len) != 0) {
+	if (as_info_param_get_namespace_id(cmd, v, &v_len) != 0) {
 		return false;
 	}
 
@@ -1246,12 +1252,12 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "allow-ttl-without-nsup", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of allow-ttl-without-nsup of ns %s from %s to %s",
 					ns->name, bool_val[ns->allow_ttl_without_nsup], v);
 			ns->allow_ttl_without_nsup = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of allow-ttl-without-nsup of ns %s from %s to %s",
 					ns->name, bool_val[ns->allow_ttl_without_nsup], v);
 			ns->allow_ttl_without_nsup = false;
@@ -1276,12 +1282,12 @@ cfg_set_namespace(const char* cmd)
 					ns->name);
 			return false;
 		}
-		if (strncmp(v, "generation", 10) == 0) {
+		if (strcmp(v, "generation") == 0) {
 			cf_info(AS_INFO, "Changing value of conflict-resolution-policy of ns %s from %d to %s",
 					ns->name, ns->conflict_resolution_policy, v);
 			ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 		}
-		else if (strncmp(v, "last-update-time", 16) == 0) {
+		else if (strcmp(v, "last-update-time") == 0) {
 			cf_info(AS_INFO, "Changing value of conflict-resolution-policy of ns %s from %d to %s",
 					ns->name, ns->conflict_resolution_policy, v);
 			ns->conflict_resolution_policy =
@@ -1297,12 +1303,12 @@ cfg_set_namespace(const char* cmd)
 			cf_warning(AS_INFO, "conflict-resolve-writes is enterprise-only");
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of conflict-resolve-writes of ns %s to %s",
 					ns->name, v);
 			ns->conflict_resolve_writes = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of conflict-resolve-writes of ns %s to %s",
 					ns->name, v);
 			ns->conflict_resolve_writes = false;
@@ -1345,12 +1351,12 @@ cfg_set_namespace(const char* cmd)
 					ns->name);
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of disable-write-dup-res of ns %s from %s to %s",
 					ns->name, bool_val[ns->write_dup_res_disabled], v);
 			ns->write_dup_res_disabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of disable-write-dup-res of ns %s from %s to %s",
 					ns->name, bool_val[ns->write_dup_res_disabled], v);
 			ns->write_dup_res_disabled = false;
@@ -1369,12 +1375,12 @@ cfg_set_namespace(const char* cmd)
 					ns->name);
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of disallow-expunge of ns %s from %s to %s",
 					ns->name, bool_val[ns->ap_disallow_drops], v);
 			ns->ap_disallow_drops = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of disallow-expunge of ns %s from %s to %s",
 					ns->name, bool_val[ns->ap_disallow_drops], v);
 			ns->ap_disallow_drops = false;
@@ -1385,12 +1391,12 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "disallow-null-setname", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of disallow-null-setname of ns %s from %s to %s",
 					ns->name, bool_val[ns->disallow_null_setname], v);
 			ns->disallow_null_setname = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of disallow-null-setname of ns %s from %s to %s",
 					ns->name, bool_val[ns->disallow_null_setname], v);
 			ns->disallow_null_setname = false;
@@ -1401,7 +1407,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-batch-sub", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-batch-sub of ns %s from %s to %s",
 					ns->name, bool_val[ns->batch_sub_benchmarks_enabled], v);
 			if (! ns->batch_sub_benchmarks_enabled) {
@@ -1409,7 +1415,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->batch_sub_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-batch-sub of ns %s from %s to %s",
 					ns->name, bool_val[ns->batch_sub_benchmarks_enabled], v);
 			ns->batch_sub_benchmarks_enabled = false;
@@ -1421,7 +1427,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-ops-sub", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-ops-sub of ns %s from %s to %s",
 					ns->name, bool_val[ns->ops_sub_benchmarks_enabled], v);
 			if (! ns->ops_sub_benchmarks_enabled) {
@@ -1429,7 +1435,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->ops_sub_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-ops-sub of ns %s from %s to %s",
 					ns->name, bool_val[ns->ops_sub_benchmarks_enabled], v);
 			ns->ops_sub_benchmarks_enabled = false;
@@ -1441,7 +1447,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-read", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-read of ns %s from %s to %s",
 					ns->name, bool_val[ns->read_benchmarks_enabled], v);
 			if (! ns->read_benchmarks_enabled) {
@@ -1449,7 +1455,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->read_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-read of ns %s from %s to %s",
 					ns->name, bool_val[ns->read_benchmarks_enabled], v);
 			ns->read_benchmarks_enabled = false;
@@ -1461,7 +1467,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-udf", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-udf of ns %s from %s to %s",
 					ns->name, bool_val[ns->udf_benchmarks_enabled], v);
 			if (! ns->udf_benchmarks_enabled) {
@@ -1469,7 +1475,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->udf_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-udf of ns %s from %s to %s",
 					ns->name, bool_val[ns->udf_benchmarks_enabled], v);
 			ns->udf_benchmarks_enabled = false;
@@ -1481,7 +1487,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-udf-sub", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-udf-sub of ns %s from %s to %s",
 					ns->name, bool_val[ns->udf_sub_benchmarks_enabled], v);
 			if (! ns->udf_sub_benchmarks_enabled) {
@@ -1489,7 +1495,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->udf_sub_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-udf-sub of ns %s from %s to %s",
 					ns->name, bool_val[ns->udf_sub_benchmarks_enabled], v);
 			ns->udf_sub_benchmarks_enabled = false;
@@ -1501,7 +1507,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-write", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-write of ns %s from %s to %s",
 					ns->name, bool_val[ns->write_benchmarks_enabled], v);
 			if (! ns->write_benchmarks_enabled) {
@@ -1509,7 +1515,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->write_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-write of ns %s from %s to %s",
 					ns->name, bool_val[ns->write_benchmarks_enabled], v);
 			ns->write_benchmarks_enabled = false;
@@ -1520,7 +1526,7 @@ cfg_set_namespace(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "enable-hist-proxy", v, &v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-hist-proxy of ns %s from %s to %s",
 					ns->name, bool_val[ns->proxy_hist_enabled], v);
 			if (! ns->proxy_hist_enabled) {
@@ -1528,7 +1534,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->proxy_hist_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-hist-proxy of ns %s from %s to %s",
 					ns->name, bool_val[ns->proxy_hist_enabled], v);
 			ns->proxy_hist_enabled = false;
@@ -1561,12 +1567,12 @@ cfg_set_namespace(const char* cmd)
 		ns->evict_tenths_pct = atoi(v);
 	}
 	else if (as_info_parameter_get(cmd, "force-long-queries", v, &v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of force-long-queries of ns %s to %s",
 					ns->name, v);
 			ns->force_long_queries = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of force-long-queries of ns %s to %s",
 					ns->name, v);
 			ns->force_long_queries = false;
@@ -1581,12 +1587,12 @@ cfg_set_namespace(const char* cmd)
 			cf_warning(AS_INFO, "ignore-migrate-fill-delay is enterprise-only");
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of ignore-migrate-fill-delay of ns %s to %s",
 					ns->name, v);
 			ns->ignore_migrate_fill_delay = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of ignore-migrate-fill-delay of ns %s to %s",
 					ns->name, v);
 			ns->ignore_migrate_fill_delay = false;
@@ -1607,12 +1613,12 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "inline-short-queries", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of inline-short-queries of ns %s to %s",
 					ns->name, v);
 			ns->inline_short_queries = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of inline-short-queries of ns %s to %s",
 					ns->name, v);
 			ns->inline_short_queries = false;
@@ -1690,12 +1696,12 @@ cfg_set_namespace(const char* cmd)
 			cf_warning(AS_INFO, "prefer-uniform-balance is enterprise-only");
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of prefer-uniform-balance of ns %s from %s to %s",
 					ns->name, bool_val[ns->cfg_prefer_uniform_balance], v);
 			ns->cfg_prefer_uniform_balance = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of prefer-uniform-balance of ns %s from %s to %s",
 					ns->name, bool_val[ns->cfg_prefer_uniform_balance], v);
 			ns->cfg_prefer_uniform_balance = false;
@@ -1753,12 +1759,12 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "reject-non-xdr-writes", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of reject-non-xdr-writes of ns %s from %s to %s",
 					ns->name, bool_val[ns->reject_non_xdr_writes], v);
 			ns->reject_non_xdr_writes = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of reject-non-xdr-writes of ns %s from %s to %s",
 					ns->name, bool_val[ns->reject_non_xdr_writes], v);
 			ns->reject_non_xdr_writes = false;
@@ -1768,12 +1774,12 @@ cfg_set_namespace(const char* cmd)
 		}
 	}
 	else if (as_info_parameter_get(cmd, "reject-xdr-writes", v, &v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of reject-xdr-writes of ns %s from %s to %s",
 					ns->name, bool_val[ns->reject_xdr_writes], v);
 			ns->reject_xdr_writes = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of reject-xdr-writes of ns %s from %s to %s",
 					ns->name, bool_val[ns->reject_xdr_writes], v);
 			ns->reject_xdr_writes = false;
@@ -1822,12 +1828,12 @@ cfg_set_namespace(const char* cmd)
 					ns->name);
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of strong-consistency-allow-expunge of ns %s from %s to %s",
 					ns->name, bool_val[ns->cp_allow_drops], v);
 			ns->cp_allow_drops = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of strong-consistency-allow-expunge of ns %s from %s to %s",
 					ns->name, bool_val[ns->cp_allow_drops], v);
 			ns->cp_allow_drops = false;
@@ -2037,12 +2043,12 @@ cfg_set_namespace(const char* cmd)
 					ns->name);
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of cache-replica-writes of ns %s to %s",
 					ns->name, v);
 			ns->storage_cache_replica_writes = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of cache-replica-writes of ns %s to %s",
 					ns->name, v);
 			ns->storage_cache_replica_writes = false;
@@ -2136,7 +2142,7 @@ cfg_set_namespace(const char* cmd)
 	}
 	else if (as_info_parameter_get(cmd, "enable-benchmarks-storage", v,
 			&v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-storage of ns %s from %s to %s",
 					ns->name, bool_val[ns->storage_benchmarks_enabled], v);
 			if (! ns->storage_benchmarks_enabled) {
@@ -2144,7 +2150,7 @@ cfg_set_namespace(const char* cmd)
 			}
 			ns->storage_benchmarks_enabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-benchmarks-storage of ns %s from %s to %s",
 					ns->name, bool_val[ns->storage_benchmarks_enabled], v);
 			ns->storage_benchmarks_enabled = false;
@@ -2238,12 +2244,12 @@ cfg_set_namespace(const char* cmd)
 					ns->name);
 			return false;
 		}
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of read-page-cache of ns %s from %s to %s",
 					ns->name, bool_val[ns->storage_read_page_cache], v);
 			ns->storage_read_page_cache = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of read-page-cache of ns %s from %s to %s",
 					ns->name, bool_val[ns->storage_read_page_cache], v);
 			ns->storage_read_page_cache = false;
@@ -2414,12 +2420,12 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 		p_set->default_ttl = val;
 	}
 	else if (as_info_parameter_get(cmd, "disable-eviction", v, &v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of disable-eviction of ns %s set %s to %s",
 					ns->name, p_set->name, v);
 			p_set->eviction_disabled = true;
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of disable-eviction of ns %s set %s to %s",
 					ns->name, p_set->name, v);
 			p_set->eviction_disabled = false;
@@ -2429,12 +2435,12 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 		}
 	}
 	else if (as_info_parameter_get(cmd, "enable-index", v, &v_len) == 0) {
-		if (strncmp(v, "true", 4) == 0 || strncmp(v, "yes", 3) == 0) {
+		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s",
 					ns->name, p_set->name, v);
 			as_set_index_enable(ns, p_set, set_id);
 		}
-		else if (strncmp(v, "false", 5) == 0 || strncmp(v, "no", 2) == 0) {
+		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s",
 					ns->name, p_set->name, v);
 			as_set_index_disable(ns, p_set, set_id);
