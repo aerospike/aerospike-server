@@ -787,6 +787,21 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		return UDF_OPTYPE_WAITING;
 	}
 
+	if (get_rv == 0) {
+		as_xdr_ship_status ship_status = as_xdr_ship_check(r, tr);
+
+		if (ship_status == XDR_SHIP_NEAR) {
+			as_record_done(&r_ref, ns);
+			return UDF_OPTYPE_WAITING;
+		}
+
+		if (ship_status == XDR_SHIP_FAR) {
+			as_record_done(&r_ref, ns);
+			tr->result_code = AS_ERR_XDR_KEY_BUSY;
+			return UDF_OPTYPE_NONE;
+		}
+	}
+
 	// Internal UDFs must not create records.
 	if (tr->origin == FROM_IUDF && (get_rv != 0 || ! as_record_is_live(r))) {
 		if (get_rv == 0) {

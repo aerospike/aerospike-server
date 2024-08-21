@@ -41,6 +41,7 @@
 #include "base/service.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "base/service.h"
 #include "sindex/sindex.h"
 #include "transaction/rw_request.h"
 
@@ -119,7 +120,7 @@ bool forbid_replace(const struct as_namespace_s* ns);
 void prepare_bin_metadata(const struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
 void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
-void advance_record_version(const struct as_transaction_s* tr, struct as_index_s* r);
+void advance_record_version(struct as_transaction_s* tr, struct as_index_s* r);
 void set_xdr_write(const struct as_transaction_s* tr, struct as_index_s* r);
 void touch_bin_metadata(struct as_storage_rd_s* rd);
 void transition_delete_metadata(struct as_transaction_s* tr, struct as_index_s* r, bool is_delete, bool is_bin_cemetery);

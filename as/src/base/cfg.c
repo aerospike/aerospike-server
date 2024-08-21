@@ -782,12 +782,14 @@ typedef enum {
 	CASE_XDR_DC_NAMESPACE_IGNORE_SET,
 	CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT,
 	CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE,
+	CASE_XDR_DC_NAMESPACE_RESTRICT_VERSION_SKIPPING,
 	CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS,
 	CASE_XDR_DC_NAMESPACE_SHIP_BIN,
 	CASE_XDR_DC_NAMESPACE_SHIP_BIN_LUTS,
 	CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES,
 	CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS,
 	CASE_XDR_DC_NAMESPACE_SHIP_SET,
+	CASE_XDR_DC_NAMESPACE_SKIP_VERSIONS_WITHIN,
 	CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT,
 	CASE_XDR_DC_NAMESPACE_WRITE_POLICY,
 
@@ -1416,12 +1418,14 @@ const cfg_opt XDR_DC_NAMESPACE_OPTS[] = {
 		{ "ignore-set",						CASE_XDR_DC_NAMESPACE_IGNORE_SET },
 		{ "max-throughput", 				CASE_XDR_DC_NAMESPACE_MAX_THROUGHPUT },
 		{ "remote-namespace", 				CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE },
+		{ "restrict-version-skipping",		CASE_XDR_DC_NAMESPACE_RESTRICT_VERSION_SKIPPING },
 		{ "sc-replication-wait-ms",			CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS },
 		{ "ship-bin",						CASE_XDR_DC_NAMESPACE_SHIP_BIN },
 		{ "ship-bin-luts",					CASE_XDR_DC_NAMESPACE_SHIP_BIN_LUTS },
 		{ "ship-nsup-deletes",				CASE_XDR_DC_NAMESPACE_SHIP_NSUP_DELETES },
 		{ "ship-only-specified-sets",		CASE_XDR_DC_NAMESPACE_SHIP_ONLY_SPECIFIED_SETS },
 		{ "ship-set",						CASE_XDR_DC_NAMESPACE_SHIP_SET },
+		{ "skip-versions-within",			CASE_XDR_DC_NAMESPACE_SKIP_VERSIONS_WITHIN },
 		{ "transaction-queue-limit",		CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT },
 		{ "write-policy",					CASE_XDR_DC_NAMESPACE_WRITE_POLICY },
 		{ "}",								CASE_CONTEXT_END }
@@ -4222,6 +4226,9 @@ as_config_init(const char* config_file)
 			case CASE_XDR_DC_NAMESPACE_REMOTE_NAMESPACE:
 				dc_ns_cfg->remote_namespace = cfg_strdup(&line, AS_ID_NAMESPACE_SZ);
 				break;
+			case CASE_XDR_DC_NAMESPACE_RESTRICT_VERSION_SKIPPING:
+				dc_ns_cfg->restrict_version_skipping = cfg_bool(&line);
+				break;
 			case CASE_XDR_DC_NAMESPACE_SC_REPLICATION_WAIT_MS:
 				dc_ns_cfg->sc_replication_wait_ms = cfg_u32(&line, AS_XDR_MIN_SC_REPLICATION_WAIT_MS, AS_XDR_MAX_SC_REPLICATION_WAIT_MS);
 				break;
@@ -4239,6 +4246,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DC_NAMESPACE_SHIP_SET:
 				cf_vector_append_ptr(dc_ns_cfg->shipped_sets, cfg_strdup(&line, AS_SET_NAME_MAX_SIZE));
+				break;
+			case CASE_XDR_DC_NAMESPACE_SKIP_VERSIONS_WITHIN:
+				dc_ns_cfg->skip_versions_within_ms = cfg_u32(&line, 0, AS_XDR_MAX_SKIP_VERSIONS_WITHIN) * 1000;
 				break;
 			case CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT:
 				dc_ns_cfg->transaction_queue_limit = cfg_u32_power_of_2(&line, AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT, AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT);

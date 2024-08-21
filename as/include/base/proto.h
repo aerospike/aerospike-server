@@ -90,6 +90,7 @@ struct as_storage_rd_s;
 #define AS_ERR_OP_NOT_APPLICABLE        26
 #define AS_ERR_FILTERED_OUT             27
 #define AS_ERR_LOST_CONFLICT            28
+#define AS_ERR_XDR_KEY_BUSY             32
 
 // Security. (Defined here to ensure no overlap with other result codes.)
 #define AS_SEC_OK_LAST                  50 // the last message

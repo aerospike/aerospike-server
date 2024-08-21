@@ -320,13 +320,13 @@ handle_msg_key(as_transaction* tr, as_storage_rd* rd)
 }
 
 void
-advance_record_version(const as_transaction* tr, as_record* r)
+advance_record_version(as_transaction* tr, as_record* r)
 {
 	// Shortcut pointers.
 	const as_msg* m = &tr->msgp->msg;
 	const as_namespace* ns = tr->rsv.ns;
 
-	uint64_t now = cf_clepoch_milliseconds();
+	uint64_t now = as_transaction_epoch_ms(tr);
 
 	switch (m->record_ttl) {
 	case TTL_USE_DEFAULT: {

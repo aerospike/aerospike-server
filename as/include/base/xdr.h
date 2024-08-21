@@ -64,6 +64,8 @@ struct as_transaction_s;
 #define AS_XDR_MIN_SC_REPLICATION_WAIT_MS 5
 #define AS_XDR_MAX_SC_REPLICATION_WAIT_MS 1000
 
+#define AS_XDR_MAX_SKIP_VERSIONS_WITHIN 3600
+
 #define AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT 1024
 #define AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT (1024 * 1024)
 
@@ -71,6 +73,12 @@ struct as_transaction_s;
 #define SHIPPING_UNSPECIFIED 0
 #define SHIPPING_ENABLED 1
 #define SHIPPING_DISABLED 2
+
+typedef enum {
+	XDR_SHIP_OK,
+	XDR_SHIP_NEAR,
+	XDR_SHIP_FAR
+} as_xdr_ship_status;
 
 typedef enum {
 	XDR_AUTH_NONE,
@@ -109,10 +117,12 @@ typedef struct as_xdr_dc_ns_cfg_s {
 	bool ignore_expunges;
 	uint32_t max_throughput;
 	char* remote_namespace;
+	bool restrict_version_skipping;
 	uint32_t sc_replication_wait_ms;
 	bool ship_bin_luts;
 	bool ship_nsup_deletes;
 	bool ship_only_specified_sets;
+	uint32_t skip_versions_within_ms;
 	uint32_t transaction_queue_limit;
 	as_xdr_write_policy write_policy;
 
@@ -183,6 +193,7 @@ as_xdr_dc_cfg* as_xdr_startup_create_dc(const char* name);
 as_xdr_dc_ns_cfg* as_xdr_startup_create_dc_ns_cfg(const char* ns_name);
 void as_xdr_startup_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port, char* tls_name);
 void as_xdr_link_tls(void);
+as_xdr_ship_status as_xdr_ship_check(const struct as_index_s* r, struct as_transaction_s* tr);
 void as_xdr_get_submit_info(const struct as_index_s* r, uint64_t prev_lut, as_xdr_submit_info* info);
 void as_xdr_submit(const struct as_namespace_s* ns, const as_xdr_submit_info* info);
 void as_xdr_ticker(uint64_t delta_time);

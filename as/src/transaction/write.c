@@ -728,6 +728,20 @@ write_master(rw_request* rw, as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
+	if (! record_created) {
+		as_xdr_ship_status ship_status = as_xdr_ship_check(r, tr);
+
+		if (ship_status == XDR_SHIP_NEAR) {
+			as_record_done(&r_ref, ns);
+			return TRANS_WAITING;
+		}
+
+		if (ship_status == XDR_SHIP_FAR) {
+			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_XDR_KEY_BUSY);
+			return TRANS_DONE_ERROR;
+		}
+	}
+
 	as_exp* filter_exp = NULL;
 
 	// Handle metadata filter if present.

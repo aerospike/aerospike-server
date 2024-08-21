@@ -311,6 +311,35 @@ cf_shash_get_vlock(cf_shash* h, const void* key, void** value_r,
 	return CF_SHASH_ERR_NOT_FOUND;
 }
 
+// Also returns value pointer instead of copy, but without lock.
+int
+cf_shash_get_p(cf_shash* h, const void* key, void** value_r)
+{
+	cf_assert(h != NULL && key != NULL && value_r != NULL, CF_MISC,
+			"bad param");
+
+	cf_assert(! h->thread_safe, CF_MISC,
+			"called cf_shash_get_p() for thread-safe hash");
+
+	uint32_t hash = cf_shash_calculate_hash(h, key);
+	cf_shash_ele* e = cf_shash_get_bucket(h, hash);
+
+	if (! e->in_use) {
+		return CF_SHASH_ERR_NOT_FOUND;
+	}
+
+	while (e != NULL && e->in_use) {
+		if (memcmp(ELE_KEY(h, e), key, h->key_size) == 0) {
+			*value_r = ELE_VALUE(h, e);
+			return CF_SHASH_OK;
+		}
+
+		e = e->next;
+	}
+
+	return CF_SHASH_ERR_NOT_FOUND;
+}
+
 int
 cf_shash_pop(cf_shash* h, const void* key, void* value)
 {

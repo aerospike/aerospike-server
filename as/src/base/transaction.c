@@ -83,6 +83,7 @@ as_transaction_init_body(as_transaction *tr)
 	tr->generation			= 0;
 	tr->void_time			= 0;
 	tr->last_update_time	= 0;
+	tr->epoch_ms			= 0;
 }
 
 void

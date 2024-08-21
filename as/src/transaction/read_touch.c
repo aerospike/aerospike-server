@@ -200,11 +200,13 @@ as_read_touch_start(as_transaction* tr)
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
-	status = read_touch_master(rw, tr);
-
-	if (status != TRANS_IN_PROGRESS) {
+	if ((status = read_touch_master(rw, tr)) != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey, rw);
-		rt_done(tr);
+
+		if (status != TRANS_WAITING) {
+			rt_done(tr);
+		}
+
 		return status;
 	}
 
@@ -294,7 +296,14 @@ rt_dup_res_cb(rw_request* rw)
 
 	transaction_status status = read_touch_master(rw, &tr);
 
-	if (status != TRANS_IN_PROGRESS) {
+	if (status == TRANS_WAITING) {
+		// Note - new tr now owns msgp, make sure rw destructor doesn't free it.
+		// Also, rw will release rsv - new tr will get a new one.
+		rw->msgp = NULL;
+		return true;
+	}
+
+	if (status == TRANS_DONE_ERROR) {
 		rt_done(&tr);
 		return true;
 	}
@@ -398,6 +407,18 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 
 	if (r->void_time == 0) { // note - takes care of tombstones too
 		read_touch_master_done(tr, &r_ref, NULL, AS_ERR_KEY_BUSY);
+		return TRANS_DONE_ERROR;
+	}
+
+	as_xdr_ship_status ship_status = as_xdr_ship_check(r, tr);
+
+	if (ship_status == XDR_SHIP_NEAR) {
+		as_record_done(&r_ref, ns);
+		return TRANS_WAITING;
+	}
+
+	if (ship_status == XDR_SHIP_FAR) {
+		read_touch_master_done(tr, &r_ref, NULL, AS_ERR_XDR_KEY_BUSY);
 		return TRANS_DONE_ERROR;
 	}
 

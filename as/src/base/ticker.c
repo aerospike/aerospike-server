@@ -1046,19 +1046,20 @@ void
 log_line_special_errors(as_namespace* ns)
 {
 	uint64_t n_fail_key_busy = as_load_uint64(&ns->n_fail_key_busy);
+	uint64_t n_fail_xdr_key_busy = as_load_uint64(&ns->n_fail_xdr_key_busy);
 	uint64_t n_fail_record_too_big = as_load_uint64(&ns->n_fail_record_too_big);
 	uint64_t n_fail_client_lost_conflict = as_load_uint64(&ns->n_fail_client_lost_conflict);
 	uint64_t n_fail_xdr_lost_conflict = as_load_uint64(&ns->n_fail_xdr_lost_conflict);
 
-	if ((n_fail_key_busy |
+	if ((n_fail_key_busy | n_fail_xdr_key_busy |
 			n_fail_record_too_big |
 			n_fail_client_lost_conflict | n_fail_xdr_lost_conflict) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} special-errors: key-busy %lu record-too-big %lu lost-conflict (%lu,%lu)",
+	cf_info(AS_INFO, "{%s} special-errors: key-busy (%lu,%lu) record-too-big %lu lost-conflict (%lu,%lu)",
 			ns->name,
-			n_fail_key_busy,
+			n_fail_key_busy, n_fail_xdr_key_busy,
 			n_fail_record_too_big,
 			n_fail_client_lost_conflict, n_fail_xdr_lost_conflict);
 }

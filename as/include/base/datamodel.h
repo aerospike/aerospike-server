@@ -1202,6 +1202,7 @@ typedef struct as_namespace_s {
 
 	uint64_t		n_fail_xdr_forbidden;
 	uint64_t		n_fail_key_busy;
+	uint64_t		n_fail_xdr_key_busy;
 	uint64_t		n_fail_generation;
 	uint64_t		n_fail_record_too_big;
 	uint64_t		n_fail_client_lost_conflict;

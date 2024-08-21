@@ -4478,6 +4478,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	info_append_uint64(db, "fail_xdr_forbidden", ns->n_fail_xdr_forbidden);
 	info_append_uint64(db, "fail_key_busy", ns->n_fail_key_busy);
+	info_append_uint64(db, "fail_xdr_key_busy", ns->n_fail_xdr_key_busy);
 	info_append_uint64(db, "fail_generation", ns->n_fail_generation);
 	info_append_uint64(db, "fail_record_too_big", ns->n_fail_record_too_big);
 	info_append_uint64(db, "fail_client_lost_conflict", ns->n_fail_client_lost_conflict);

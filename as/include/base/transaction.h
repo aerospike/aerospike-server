@@ -231,6 +231,9 @@ typedef struct as_transaction_s {
 	uint32_t	void_time;
 	uint64_t	last_update_time;
 
+	// "Short scope" items - not mirrored on rw_request.
+	uint64_t	epoch_ms;
+
 } as_transaction;
 
 #define AS_TRANSACTION_HEAD_SIZE (offsetof(as_transaction, rsv))
@@ -460,6 +463,16 @@ static inline bool
 as_transaction_is_short_query(const as_transaction *tr)
 {
 	return (tr->msgp->msg.info1 & AS_MSG_INFO1_SHORT_QUERY) != 0;
+}
+
+static inline uint64_t
+as_transaction_epoch_ms(as_transaction *tr)
+{
+	if (tr->epoch_ms == 0) {
+		tr->epoch_ms = cf_clepoch_milliseconds();
+	}
+
+	return tr->epoch_ms;
 }
 
 void as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig);

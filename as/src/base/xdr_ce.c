@@ -64,6 +64,12 @@ as_xdr_link_tls(void)
 {
 }
 
+as_xdr_ship_status
+as_xdr_ship_check(const as_record* r, as_transaction* tr)
+{
+	return XDR_SHIP_OK;
+}
+
 void
 as_xdr_get_submit_info(const as_record* r, uint64_t prev_lut,
 		as_xdr_submit_info* info)

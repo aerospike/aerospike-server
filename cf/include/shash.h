@@ -91,6 +91,7 @@ int cf_shash_put_unique(cf_shash* h, const void* key, const void* value);
 
 int cf_shash_get(cf_shash* h, const void* key, void* value);
 int cf_shash_get_vlock(cf_shash* h, const void* key, void** value_r, cf_mutex** vlock_r);
+int cf_shash_get_p(cf_shash* h, const void* key, void** value_r);
 
 int cf_shash_pop(cf_shash* h, const void* key, void* value);
 
