@@ -3055,11 +3055,13 @@ run_mem_maintenance(void* udata)
 		if (mem->shadow_name != NULL && ! ns->storage_commit_to_device) {
 			uint64_t flush_max_us = as_load_uint64(&ns->storage_flush_max_us);
 
-			for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
-				if (now >= prev_flush[c] + flush_max_us) {
-					flush_current_mwb(mem, c, &prev_n_writes_flush[c]);
-					prev_flush[c] = now;
-					next = next_time(now, flush_max_us, next);
+			if (flush_max_us != 0) {
+				for (uint8_t c = 0; c < N_CURRENT_SWBS; c++) {
+					if (now >= prev_flush[c] + flush_max_us) {
+						flush_current_mwb(mem, c, &prev_n_writes_flush[c]);
+						prev_flush[c] = now;
+						next = next_time(now, flush_max_us, next);
+					}
 				}
 			}
 		}
