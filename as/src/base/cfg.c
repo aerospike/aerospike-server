@@ -4248,7 +4248,7 @@ as_config_init(const char* config_file)
 				cf_vector_append_ptr(dc_ns_cfg->shipped_sets, cfg_strdup(&line, AS_SET_NAME_MAX_SIZE));
 				break;
 			case CASE_XDR_DC_NAMESPACE_SKIP_VERSIONS_WITHIN:
-				dc_ns_cfg->skip_versions_within_ms = cfg_u32(&line, 0, AS_XDR_MAX_SKIP_VERSIONS_WITHIN) * 1000;
+				dc_ns_cfg->skip_versions_within_ms = cfg_seconds(&line, 0, AS_XDR_MAX_SKIP_VERSIONS_WITHIN) * 1000;
 				break;
 			case CASE_XDR_DC_NAMESPACE_TRANSACTION_QUEUE_LIMIT:
 				dc_ns_cfg->transaction_queue_limit = cfg_u32_power_of_2(&line, AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT, AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT);
