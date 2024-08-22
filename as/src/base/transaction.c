@@ -119,6 +119,7 @@ as_transaction_init_from_rw(as_transaction *tr, rw_request *rw)
 	tr->generation = rw->generation;
 	tr->void_time = rw->void_time;
 	tr->last_update_time = rw->last_update_time;
+	tr->epoch_ms = 0;
 }
 
 void
