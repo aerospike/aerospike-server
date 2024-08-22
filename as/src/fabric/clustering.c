@@ -277,7 +277,7 @@ typedef struct as_paxos_proposed_value_s
 typedef enum
 {
 	/**
-	 * Acceptor is idel with no active paxos round.
+	 * Acceptor is idle with no active paxos round.
 	 */
 	AS_PAXOS_ACCEPTOR_STATE_IDLE,
 
@@ -1337,6 +1337,8 @@ if (((size) > STACK_ALLOC_LIMIT()) && buffer) {cf_free(buffer);}
 #define INFO(format, ...) cf_info(AS_CLUSTERING, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_CLUSTERING, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_CLUSTERING, format, ##__VA_ARGS__)
+
+#define TICKER_INFO(format, ...) cf_ticker_info(AS_CLUSTERING, format, ##__VA_ARGS__)
 
 #define ASSERT(expression, message, ...)				\
 if (!(expression)) {WARNING(message, ##__VA_ARGS__);}
@@ -4203,13 +4205,19 @@ paxos_proposer_promise_handle(as_clustering_internal_event* event)
 		goto Exit;
 	}
 
-	cf_vector_append_unique(&g_proposer.promises_received, &src_nodeid);
-
+	bool duplicate = ! cf_vector_append_unique(&g_proposer.promises_received,
+			&src_nodeid);
 	int promised_count = cf_vector_size(&g_proposer.promises_received);
 	int acceptor_count = cf_vector_size(&g_proposer.acceptors);
+	int quorum_count = 1 + (acceptor_count / 2);
+
+	if (duplicate) {
+		TICKER_INFO("received duplicate paxos promise - received %d of %d (quorum %d) - use 'dump-cluster' for more info",
+				promised_count, acceptor_count, quorum_count);
+	}
 
 	// Use majority quorum to move on.
-	if (promised_count >= 1 + (acceptor_count / 2)) {
+	if (promised_count >= quorum_count) {
 		// We have quorum number of promises. go ahead to the accept phase.
 		g_proposer.state = AS_PAXOS_PROPOSER_STATE_ACCEPT_SENT;
 		paxos_proposer_accept_send();
@@ -4367,10 +4375,15 @@ paxos_proposer_accepted_handle(as_clustering_internal_event* event)
 
 	CLUSTERING_LOCK();
 
-	cf_vector_append_unique(&g_proposer.accepted_received, &src_nodeid);
-
+	bool duplicate = ! cf_vector_append_unique(&g_proposer.accepted_received,
+			&src_nodeid);
 	int accepted_count = cf_vector_size(&g_proposer.accepted_received);
 	int acceptor_count = cf_vector_size(&g_proposer.acceptors);
+
+	if (duplicate) {
+		TICKER_INFO("received duplicate paxos accepted - received %d of %d - use 'dump-cluster' for more info",
+				accepted_count, acceptor_count);
+	}
 
 	// Use a simple quorum, all acceptors should accept for success.
 	if (accepted_count == acceptor_count) {
@@ -5363,6 +5376,7 @@ paxos_event_dispatch(as_clustering_internal_event* event)
 		break;
 	case AS_CLUSTERING_INTERNAL_EVENT_REGISTER_CLUSTER_SYNCED:
 		paxos_proposer_register_synched();
+		break;
 	default:	// Not of interest for paxos.
 		break;
 	}
@@ -7140,6 +7154,7 @@ clustering_quantum_interval_start_handle(as_clustering_internal_event* event)
 		break;
 	case AS_CLUSTERING_STATE_NON_PRINCIPAL:
 		clustering_non_principal_quantum_interval_start_handle();
+		break;
 	default:
 		break;
 	}
@@ -8131,7 +8146,7 @@ as_clustering_cf_node_array_event(cf_log_level severity,
 	nodes_per_line = MAX(1, nodes_per_line);
 
 	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
+	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1]; // For the NULL terminator.
 	int output_node_count = 0;
 
 	// Marks the start of the nodeid list in the log line buffer.

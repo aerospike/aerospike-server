@@ -144,9 +144,10 @@ cf_vector_append(cf_vector* v, const void* ele)
 	vector_unlock(v);
 }
 
-void
+bool
 cf_vector_append_unique(cf_vector* v, const void* ele)
 {
+	// Return true if 'ele' was appened, else return false.
 	vector_lock(v);
 
 	uint8_t* p = v->eles;
@@ -155,7 +156,7 @@ cf_vector_append_unique(cf_vector* v, const void* ele)
 	for (uint32_t i = 0; i < v->count; i++) {
 		if (memcmp(ele, p, ele_sz) == 0) {
 			vector_unlock(v);
-			return; // found - for now not distinguished from insert
+			return false;
 		}
 
 		p += ele_sz;
@@ -164,6 +165,8 @@ cf_vector_append_unique(cf_vector* v, const void* ele)
 	append_lockfree(v, ele);
 
 	vector_unlock(v);
+
+	return true;
 }
 
 int

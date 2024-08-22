@@ -26,6 +26,7 @@
 // Includes.
 //
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -64,7 +65,7 @@ void cf_vector_init_with_buf(cf_vector* v, uint32_t ele_sz, uint32_t capacity, u
 void cf_vector_destroy(cf_vector* v);
 
 void cf_vector_append(cf_vector* v, const void* ele);
-void cf_vector_append_unique(cf_vector* v, const void* ele);
+bool cf_vector_append_unique(cf_vector* v, const void* ele);
 int cf_vector_set(cf_vector* v, uint32_t ix, const void* ele);
 
 int cf_vector_get(const cf_vector* v, uint32_t ix, void* ele);

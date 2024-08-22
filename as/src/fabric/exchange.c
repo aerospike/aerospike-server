@@ -792,28 +792,8 @@ static pthread_mutex_t g_external_event_publisher_lock =
 #define INFO(format, ...) cf_info(AS_EXCHANGE, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_EXCHANGE, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_EXCHANGE, format, ##__VA_ARGS__)
-#define LOG(severity, format, ...)			\
-({											\
-	switch (severity) {						\
-	case CF_CRITICAL:						\
-		CRASH(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_WARNING:						\
-		WARNING(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_INFO:							\
-		INFO(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_DEBUG:							\
-		DEBUG(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_DETAIL:							\
-		DETAIL(format, ##__VA_ARGS__);		\
-		break;								\
-	default:								\
-		break;								\
-	}										\
-})
+
+#define TICKER_INFO(format, ...) cf_ticker_info(AS_EXCHANGE, format, ##__VA_ARGS__)
 
 /**
  * Size of the (per-namespace) self payload dynamic buffer.
@@ -2222,7 +2202,7 @@ exchange_self_is_principal()
  * Dump exchange state.
  */
 static void
-exchange_dump(cf_log_level severity, bool verbose)
+exchange_dump(bool verbose)
 {
 	EXCHANGE_LOCK();
 	cf_vector* node_vector = cf_vector_stack_create(cf_node);
@@ -2243,35 +2223,35 @@ exchange_dump(cf_log_level severity, bool verbose)
 		break;
 	}
 
-	LOG(severity, "EXG: state: %s", state_str);
+	INFO("EXG: state: %s", state_str);
 
 	if (g_exchange.state == AS_EXCHANGE_STATE_ORPHANED) {
-		LOG(severity, "EXG: client transactions blocked: %s",
+		INFO("EXG: client transactions blocked: %s",
 				g_exchange.orphan_state_are_transactions_blocked ?
 						"true" : "false");
-		LOG(severity, "EXG: orphan since: %"PRIu64"(millis)",
+		INFO("EXG: orphan since: %"PRIu64"(millis)",
 				cf_getms() - g_exchange.orphan_state_start_time);
 	}
 	else {
-		LOG(severity, "EXG: cluster key: %"PRIx64, g_exchange.cluster_key);
-		as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+		INFO("EXG: cluster key: %"PRIx64, g_exchange.cluster_key);
+		as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
 				"EXG: succession:", &g_exchange.succession_list);
 
 		if (verbose) {
 			vector_clear(node_vector);
 			exchange_nodes_find_send_unacked(node_vector);
-			as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+			as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
 					"EXG: send pending:", node_vector);
 
 			vector_clear(node_vector);
 			exchange_nodes_find_not_received(node_vector);
-			as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+			as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
 					"EXG: receive pending:", node_vector);
 
 			if (exchange_self_is_principal()) {
 				vector_clear(node_vector);
 				exchange_nodes_find_not_ready_to_commit(node_vector);
-				as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+				as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
 						"EXG: ready to commit pending:", node_vector);
 			}
 		}
@@ -3153,8 +3133,7 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 	}
 	else {
 		// Duplicate pinfo received. Ignore.
-		INFO("received duplicate exchange data from node %"PRIx64,
-				msg_event->msg_source);
+		TICKER_INFO("received duplicate exchange data - use 'dump-cluster' for more info");
 	}
 
 	// Send an acknowledgement.
@@ -3190,8 +3169,7 @@ exchange_exchanging_data_ack_msg_handle(as_exchange_event* msg_event)
 	}
 	else {
 		// Duplicate ack. Ignore.
-		DEBUG("received duplicate data ack from node %"PRIx64,
-				msg_event->msg_source);
+		TICKER_INFO("received duplicate data ack - use 'dump-cluster' for more info");
 	}
 
 	// We might have send and received all partition info. Check for completion.
@@ -3317,8 +3295,7 @@ exchange_ready_to_commit_rtc_msg_handle(as_exchange_event* msg_event)
 	}
 	else {
 		// Duplicate ready to commit received. Ignore.
-		INFO("received duplicate ready to commit message from node %"PRIx64,
-				msg_event->msg_source);
+		TICKER_INFO("received duplicate ready to commit message - use 'dump-cluster' for more info");
 	}
 
 	cf_vector* node_vector = cf_vector_stack_create(cf_node);
@@ -3757,7 +3734,7 @@ as_exchange_register_listener(as_exchange_cluster_changed_cb cb, void* udata)
 void
 as_exchange_dump(bool verbose)
 {
-	exchange_dump(CF_INFO, verbose);
+	exchange_dump(verbose);
 }
 
 /**
