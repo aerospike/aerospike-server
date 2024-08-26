@@ -41,7 +41,6 @@
 #include "base/service.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "base/service.h"
 #include "sindex/sindex.h"
 #include "transaction/rw_request.h"
 
@@ -135,19 +134,6 @@ void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void remove_from_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
 void remove_from_sindex_bins(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* bins, uint32_t n_bins);
-
-static inline void
-retry_self(as_transaction* tr)
-{
-	as_transaction rtr;
-
-	as_transaction_copy_head(&rtr, tr);
-	tr->from.any = NULL;
-	tr->msgp = NULL;
-
-	rtr.from_flags |= FROM_FLAG_RESTART;
-	as_service_enqueue_internal(&rtr);
-}
 
 static inline bool
 set_has_sindex(const as_record* r, as_namespace* ns)

@@ -37,6 +37,7 @@
 #include "socket.h"
 
 #include "base/proto.h"
+#include "base/service.h"
 #include "fabric/partition.h"
 
 struct as_namespace_s;
@@ -473,6 +474,19 @@ as_transaction_epoch_ms(as_transaction *tr)
 	}
 
 	return tr->epoch_ms;
+}
+
+static inline void
+as_transaction_retry_self(as_transaction* tr)
+{
+	as_transaction rtr;
+
+	as_transaction_copy_head(&rtr, tr);
+	tr->from.any = NULL;
+	tr->msgp = NULL;
+
+	rtr.from_flags |= FROM_FLAG_RESTART;
+	as_service_enqueue_internal(&rtr);
 }
 
 void as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig);

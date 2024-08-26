@@ -166,7 +166,7 @@ as_read_touch_check(as_record* r, as_transaction* tr)
 
 	if ((tr->flags & AS_TRANSACTION_FLAG_RSV_PROLE) != 0) {
 		tr->from_flags |= FROM_FLAG_RESTART_STRICT;
-		retry_self(tr); // retry the read
+		as_transaction_retry_self(tr); // retry the read
 		return 1;
 	}
 
