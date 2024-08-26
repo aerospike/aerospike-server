@@ -136,7 +136,7 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 		cfg_get_namespace(context, db);
 	}
 	else if (strcmp(context, "security") == 0) {
-		as_security_get_config(db);
+		as_security_get_config(db); // response empty if security not configured
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		as_xdr_get_config(params, db);
