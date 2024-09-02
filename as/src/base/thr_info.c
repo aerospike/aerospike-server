@@ -2618,7 +2618,7 @@ cmd_recluster(const char* name, const char* params, cf_dyn_buf* db)
 	}
 
 	if (rv == 1) {
-		cf_dyn_buf_append_string(db, "ignored-by-non-pricipal");
+		cf_dyn_buf_append_string(db, "ignored-by-non-principal");
 		return;
 	}
 
