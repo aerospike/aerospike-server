@@ -78,7 +78,7 @@ static cf_mutex g_set_cfg_lock = CF_MUTEX_INIT;
 // Command config-get helpers.
 static void cfg_get_service(cf_dyn_buf* db);
 static void cfg_get_network(cf_dyn_buf* db);
-static void cfg_get_namespace(const char* context, cf_dyn_buf* db);
+static void cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db);
 
 // cfg_get_* helpers.
 static const char* auto_pin_string(void);
@@ -88,7 +88,7 @@ static void append_addrs(cf_dyn_buf* db, const char* name, const cf_addr_list* l
 static void cfg_set(const char* name, const char* cmd, cf_dyn_buf* db);
 static bool cfg_set_service(const char* cmd);
 static bool cfg_set_network(const char* cmd);
-static bool cfg_set_namespace(const char* cmd);
+static bool cfg_set_namespace(const char* cmd, as_namespace* ns);
 static bool cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name, size_t set_name_len);
 
 // Histogram helpers.
@@ -129,11 +129,13 @@ as_cfg_info_cmd_config_get_with_params(const char* name, const char* params,
 		context_len = sizeof(context);
 		rv = as_info_param_get_namespace_id(params, context, &context_len);
 
-		if (! as_info_required_param_is_ok(db, "namespace", context, rv)) {
+		as_namespace* ns;
+
+		if (! info_param_required_local_namespace_is_ok(db, context, &ns, rv)) {
 			return;
 		}
 
-		cfg_get_namespace(context, db);
+		cfg_get_namespace(ns, db);
 	}
 	else if (strcmp(context, "security") == 0) {
 		as_security_get_config(db); // response empty if security not configured
@@ -169,9 +171,9 @@ as_cfg_info_cmd_config_get(const char* name, const char* params, cf_dyn_buf* db)
 }
 
 void
-as_cfg_info_namespace_config_get(const char* context, cf_dyn_buf* db)
+as_cfg_info_namespace_config_get(const as_namespace* ns, cf_dyn_buf* db)
 {
-	cfg_get_namespace(context, db);
+	cfg_get_namespace(ns, db);
 }
 
 // config-set:context=service;variable=value;
@@ -368,15 +370,8 @@ cfg_get_network(cf_dyn_buf* db)
 }
 
 static void
-cfg_get_namespace(const char* context, cf_dyn_buf* db)
+cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 {
-	as_namespace* ns = as_namespace_get_byname(context);
-
-	if (ns == NULL) {
-		as_info_respond_error(db, AS_ERR_NAMESPACE, "namespace not found");
-		return;
-	}
-
 	info_append_uint32(db, "active-rack", ns->cfg_active_rack);
 	info_append_bool(db, "allow-ttl-without-nsup", ns->allow_ttl_without_nsup);
 	info_append_bool(db, "auto-revive", ns->auto_revive);
@@ -689,7 +684,16 @@ cfg_set(const char* name, const char* cmd, cf_dyn_buf* db)
 		}
 	}
 	else if (strcmp(context, "namespace") == 0) {
-		if (! cfg_set_namespace(cmd)) {
+		context_len = sizeof(context);
+		rv = as_info_param_get_namespace_id(cmd, context, &context_len);
+
+		as_namespace* ns;
+
+		if (! info_param_required_local_namespace_is_ok(db, context, &ns, rv)) {
+			return;
+		}
+
+		if (! cfg_set_namespace(cmd, ns)) {
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"invalid set-config parameter");
 			return;
@@ -1211,22 +1215,12 @@ cfg_set_network(const char* cmd)
 }
 
 static bool
-cfg_set_namespace(const char* cmd)
+cfg_set_namespace(const char* cmd, as_namespace* ns)
 {
 	char v[1024];
 	int v_len = sizeof(v);
 	int val;
 	char bool_val[2][6] = {"false", "true"};
-
-	if (as_info_param_get_namespace_id(cmd, v, &v_len) != 0) {
-		return false;
-	}
-
-	as_namespace* ns = as_namespace_get_byname(v);
-
-	if (ns == NULL) {
-		return false;
-	}
 
 	v_len = sizeof(v);
 

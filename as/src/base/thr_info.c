@@ -598,35 +598,42 @@ as_info_required_param_is_ok(cf_dyn_buf* db, const char* param,
 {
 	result = as_info_optional_param_is_ok(db, param, value, result);
 
-	if (result == INFO_PARAM_OK_NOT_FOUND) {
-		cf_warning(AS_INFO, "missing '%s'", param);
-		as_info_respond_error(db, AS_ERR_PARAMETER, "missing '%s'", param);
-		return false;
+	if (result != INFO_PARAM_OK_NOT_FOUND) {
+		return result == INFO_PARAM_OK;
 	}
 
-	return result == INFO_PARAM_OK;
+	int err = strcmp("namespace", param) == 0 ?
+			AS_ERR_NAMESPACE : AS_ERR_PARAMETER;
+
+	cf_warning(AS_INFO, "missing '%s'", param);
+	as_info_respond_error(db, err, "missing '%s'", param);
+
+	return false;
 }
 
 info_param_result
 as_info_optional_param_is_ok(cf_dyn_buf* db, const char* param,
 		const char* value, info_param_result result)
 {
+	if (result == INFO_PARAM_FAIL_NOT_FOUND) {
+		return INFO_PARAM_OK_NOT_FOUND;
+	}
+
+	if (result == INFO_PARAM_OK && value[0] != '\0') {
+		return INFO_PARAM_OK;
+	}
+
+	int err = strcmp("namespace", param) == 0 ?
+			AS_ERR_NAMESPACE : AS_ERR_PARAMETER;
+
 	switch (result) {
 	case INFO_PARAM_OK:
-		if (value[0] == '\0') {
-			cf_warning(AS_INFO, "missing '%s' value", param);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "missing '%s' value",
-					param);
-			return INFO_PARAM_FAIL_REPLIED;
-		}
-
-		return INFO_PARAM_OK;
-	case INFO_PARAM_FAIL_NOT_FOUND:
-		return INFO_PARAM_OK_NOT_FOUND;
+		cf_warning(AS_INFO, "missing '%s' value", param);
+		as_info_respond_error(db, err, "missing '%s' value", param);
+		return INFO_PARAM_FAIL_REPLIED;
 	case INFO_PARAM_FAIL_TOO_LONG:
 		cf_warning(AS_INFO, "'%s' value too long", param);
-		as_info_respond_error(db, AS_ERR_PARAMETER, "'%s' value too long",
-				param);
+		as_info_respond_error(db, err, "'%s' value too long", param);
 		return INFO_PARAM_FAIL_REPLIED;
 	default:
 		cf_crash(AS_INFO, "unexpected result %d", result);
@@ -2316,7 +2323,7 @@ cmd_namespace(const char* name, const char* params, cf_dyn_buf* db)
 	}
 
 	info_get_namespace_info(ns, db);
-	as_cfg_info_namespace_config_get(ns->name, db);
+	as_cfg_info_namespace_config_get(ns, db);
 
 	cf_dyn_buf_chomp(db);
 }
@@ -4881,18 +4888,9 @@ debug_record(const char* params, cf_dyn_buf* db, bool all_data)
 	int ns_name_len = (int)sizeof(ns_name);
 	info_param_result ns_rv = as_info_param_get_namespace(params, ns_name,
 			&ns_name_len);
+	as_namespace* ns;
 
-	if (ns_rv != 0 || ns_name_len == 0) {
-		cf_warning(AS_INFO, "debug-record: missing or invalid namespace name");
-		as_info_respond_error(db, AS_ERR_NAMESPACE, "bad namespace name");
-		return;
-	}
-
-	as_namespace* ns = as_namespace_get_byname(ns_name);
-
-	if (ns == NULL) {
-		cf_warning(AS_INFO, "debug-record: namespace not found '%s'", ns_name);
-		as_info_respond_error(db, AS_ERR_NAMESPACE, "namespace not found");
+	if (! info_param_required_local_namespace_is_ok(db, ns_name, &ns, ns_rv)) {
 		return;
 	}
 
