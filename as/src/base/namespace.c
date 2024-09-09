@@ -545,7 +545,7 @@ void
 as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 		cf_dyn_buf *db)
 {
-	if (set_name == NULL || set_name[0] == 0) {
+	if (set_name[0] == '\0') {
 		if (strcmp(hist_name, "ttl") == 0) {
 			linear_hist_get_info(ns->ttl_hist, db);
 		}
