@@ -27,6 +27,7 @@
 #include "fabric/partition.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "node.h"
 
@@ -55,8 +56,8 @@ as_partition_auto_revive(as_namespace* ns, as_partition* p)
 }
 
 int
-as_partition_check_source(const as_namespace* ns, as_partition* p, cf_node src,
-		bool* from_replica)
+as_partition_check_source(const as_namespace* ns, as_partition* p,
+		uint32_t regime, cf_node src, bool* from_replica)
 {
 	return AS_OK;
 }

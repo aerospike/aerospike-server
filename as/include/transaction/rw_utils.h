@@ -239,6 +239,7 @@ void apply_if_tie(struct rw_request_s* rw);
 void dup_res_translate_result_code(struct rw_request_s* rw);
 void dup_res_init_repl_state(struct as_remote_record_s* rr, uint32_t info);
 
+void repl_write_add_regime(msg* m, const struct as_transaction_s* tr);
 void repl_write_init_repl_state(struct as_remote_record_s* rr, bool from_replica);
 conflict_resolution_pol repl_write_conflict_resolution_policy(const struct as_namespace_s* ns);
 bool repl_write_should_retransmit_replicas(struct rw_request_s* rw, uint32_t result_code);
