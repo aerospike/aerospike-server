@@ -192,9 +192,9 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	as_record* r = r_ref.r;
 
-	int result;
+	int result = as_partition_check_source(ns, rsv.p, 0, node, NULL);
 
-	if ((result = as_partition_check_source(ns, rsv.p, node, NULL)) != AS_OK) {
+	if (result != AS_OK) {
 		done_handle_request(&rsv, &r_ref, NULL);
 		send_dup_res_ack(node, m, result, 0);
 		return;

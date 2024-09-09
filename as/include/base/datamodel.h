@@ -526,6 +526,7 @@ typedef struct as_remote_record_s {
 	as_flat_comp_meta cm;
 	uint32_t meta_sz;
 
+	uint32_t regime; // relevant only for enterprise edition
 	uint8_t repl_state; // relevant only for enterprise edition
 	bool xdr_write; // relevant only for enterprise edition
 	bool xdr_tombstone; // relevant only for enterprise edition

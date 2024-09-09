@@ -278,8 +278,8 @@ as_record_replace_if_better(as_remote_record *rr)
 	if (rr->via == VIA_REPLICATION) {
 		bool from_replica;
 
-		if ((result = as_partition_check_source(ns, rr->rsv->p, rr->src,
-				&from_replica)) != AS_OK) {
+		if ((result = as_partition_check_source(ns, rr->rsv->p, rr->regime,
+				rr->src, &from_replica)) != AS_OK) {
 			record_replace_failed(rr, &r_ref, NULL, is_create);
 			return result;
 		}
