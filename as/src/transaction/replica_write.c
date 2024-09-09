@@ -100,6 +100,8 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 			msg_set_uint32(m, RW_FIELD_MULTI_BIN, 1);
 		}
 
+		repl_write_add_regime(m, tr);
+
 		msg_set_buf(m, RW_FIELD_RECORD, rw->pickle, rw->pickle_sz,
 				MSG_SET_HANDOFF_MALLOC);
 		rw->pickle = NULL; // make sure destructor doesn't free this
@@ -279,6 +281,8 @@ repl_write_handle_op(cf_node node, msg* m)
 	// else - flat record, including tombstone.
 
 	as_remote_record rr = { .via = VIA_REPLICATION, .src = node };
+
+	msg_get_uint32(m, RW_FIELD_REGIME, &rr.regime);
 
 	if (msg_get_buf(m, RW_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
 			MSG_GET_DIRECT) != 0) {

@@ -342,6 +342,11 @@ dup_res_init_repl_state(as_remote_record* rr, uint32_t info)
 
 
 void
+repl_write_add_regime(msg* m, const as_transaction* tr)
+{
+}
+
+void
 repl_write_init_repl_state(as_remote_record* rr, bool from_replica)
 {
 }
