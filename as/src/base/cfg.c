@@ -2928,22 +2928,22 @@ as_config_init(const char* config_file)
 				ns->disallow_null_setname = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB:
-				ns->batch_sub_benchmarks_enabled = true;
+				ns->batch_sub_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_OPS_SUB:
-				ns->ops_sub_benchmarks_enabled = true;
+				ns->ops_sub_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_READ:
-				ns->read_benchmarks_enabled = true;
+				ns->read_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF:
-				ns->udf_benchmarks_enabled = true;
+				ns->udf_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB:
-				ns->udf_sub_benchmarks_enabled = true;
+				ns->udf_sub_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE:
-				ns->write_benchmarks_enabled = true;
+				ns->write_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_ENABLE_HIST_PROXY:
 				ns->proxy_hist_enabled = cfg_bool(&line);
@@ -3423,7 +3423,7 @@ as_config_init(const char* config_file)
 				ns->storage_disable_odsync = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_ENABLE_BENCHMARKS_STORAGE:
-				ns->storage_benchmarks_enabled = true;
+				ns->storage_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_ENCRYPTION:
 				cfg_enterprise_only(&line);
@@ -3577,7 +3577,7 @@ as_config_init(const char* config_file)
 				ns->storage_disable_odsync = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_ENABLE_BENCHMARKS_STORAGE:
-				ns->storage_benchmarks_enabled = true;
+				ns->storage_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_ENCRYPTION:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_ENCRYPTION_OPTS, NUM_NAMESPACE_STORAGE_ENCRYPTION_OPTS))
@@ -3722,7 +3722,7 @@ as_config_init(const char* config_file)
 				ns->storage_disable_odsync = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE:
-				ns->storage_benchmarks_enabled = true;
+				ns->storage_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_ENCRYPTION:
 				cfg_enterprise_only(&line);
