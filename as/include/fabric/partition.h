@@ -193,7 +193,7 @@ void as_partition_create_set_index(struct as_namespace_s* ns, uint32_t pid, uint
 void as_partition_destroy_set_index(struct as_namespace_s* ns, uint32_t pid, uint16_t set_id);
 
 void as_partition_isolate_version(const struct as_namespace_s* ns, as_partition* p);
-int as_partition_check_source(const struct as_namespace_s* ns, as_partition* p, cf_node src, bool* from_replica);
+int as_partition_check_source(const struct as_namespace_s* ns, as_partition* p, uint32_t regime, cf_node src, bool* from_replica);
 void as_partition_freeze(as_partition* p);
 
 uint32_t as_partition_get_other_replicas(as_partition* p, cf_node* nv);
