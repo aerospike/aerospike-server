@@ -1885,13 +1885,14 @@ cmd_histogram(const char* name, const char* params, cf_dyn_buf* db)
 		return;
 	}
 
-	// get optional set field
-	char set_name_str[AS_SET_NAME_MAX_SIZE];
+	// Get optional set field - empty string is used.
+	char set_name_str[AS_SET_NAME_MAX_SIZE] = { 0 };
 	int set_name_str_len = sizeof(set_name_str);
 
 	rv = as_info_parameter_get(params, "set", set_name_str, &set_name_str_len);
+	rv = as_info_optional_param_is_ok(db, "set", set_name_str, rv);
 
-	if (! as_info_required_param_is_ok(db, "set", set_name_str, rv)) {
+	if (rv == INFO_PARAM_FAIL_REPLIED) {
 		return;
 	}
 
@@ -2432,23 +2433,13 @@ cmd_query_abort(const char* name, const char* params, cf_dyn_buf* db)
 
 	char trid_str[1 + 24 + 1]; // allow octal, decimal, hex
 	int trid_str_len = (int)sizeof(trid_str);
-
-	info_param_result rv = as_info_parameter_get(params, "trid", trid_str,
+	// Allow 'id' for backward compatibility of scan-abort. Remove in 6 months.
+	const char* aliases[] = { "trid", "id", NULL };
+	info_param_result rv = as_info_param_get_aliases(params, aliases, trid_str,
 			&trid_str_len);
 
-	rv = as_info_optional_param_is_ok(db, "trid", trid_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
+	if (! as_info_required_param_is_ok(db, "trid", trid_str, rv)) {
 		return;
-	}
-
-	// Allow 'id' for backward compatibility of scan-abort. Remove in 6 months.
-	if (rv == INFO_PARAM_OK_NOT_FOUND) {
-		rv = as_info_parameter_get(params, "id", trid_str, &trid_str_len);
-
-		if (! as_info_required_param_is_ok(db, "trid", trid_str, rv)) {
-			return;
-		}
 	}
 
 	uint64_t trid = 0;
@@ -3722,7 +3713,7 @@ cmd_truncate(const char* name, const char* params, cf_dyn_buf* db)
 	info_param_result lut_rv = as_info_parameter_get(params, "lut", lut_str,
 			&lut_str_len);
 
-	lut_rv = as_info_optional_param_is_ok(db, "lut", ns_name, lut_rv);
+	lut_rv = as_info_optional_param_is_ok(db, "lut", lut_str, lut_rv);
 
 	if (lut_rv == INFO_PARAM_FAIL_REPLIED) {
 		return;
