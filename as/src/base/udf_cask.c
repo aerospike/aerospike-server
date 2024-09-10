@@ -49,7 +49,6 @@
 #include "log.h"
 
 #include "base/cfg.h"
-#include "base/proto.h"
 #include "base/smd.h"
 #include "base/thr_info.h"
 
@@ -170,10 +169,11 @@ udf_cask_info_get(const char* name, const char* params, cf_dyn_buf* out)
 
 	char filename[MAX_FILE_NAME_SZ];
 	int filename_len = (int)sizeof(filename);
-	info_param_result rv = as_info_parameter_get(params, "filename", filename,
-			&filename_len);
 
-	if (! as_info_required_param_is_ok(out, "filename", filename, rv)) {
+	if (as_info_parameter_get(params, "filename", filename,
+			&filename_len) != 0) {
+		cf_warning(AS_UDF, "invalid or missing filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return;
 	}
 
@@ -210,13 +210,13 @@ udf_cask_info_get(const char* name, const char* params, cf_dyn_buf* out)
 	else {
 		switch (err) {
 		case 1:
-			as_info_respond_error(out, AS_ERR_NOT_FOUND, "not found");
+			cf_dyn_buf_append_string(out, "error=not_found");
 			break;
 		case 2:
-			as_info_respond_error(out, AS_ERR_UNKNOWN, "empty");
+			cf_dyn_buf_append_string(out, "error=empty");
 			break;
 		default:
-			as_info_respond_error(out, AS_ERR_UNKNOWN, "unknown error");
+			cf_dyn_buf_append_string(out, "error=unknown_error");
 			break;
 		}
 	}
@@ -255,10 +255,11 @@ udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out)
 
 	char filename[MAX_FILE_NAME_SZ];
 	int filename_len = (int)sizeof(filename);
-	info_param_result rv = as_info_parameter_get(params, "filename", filename,
-			&filename_len);
 
-	if (! as_info_required_param_is_ok(out, "filename", filename, rv)) {
+	if (as_info_parameter_get(params, "filename", filename,
+			&filename_len) != 0) {
+		cf_warning(AS_UDF, "invalid or missing filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return;
 	}
 
@@ -267,47 +268,40 @@ udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out)
 	if (dot == NULL || dot == filename || strlen(dot) == 1) {
 		// Invalid - no dot, OR dot at beginning, OR dot at end.
 		cf_warning(AS_UDF, "filename must have an extension");
-		as_info_respond_error(out, AS_ERR_PARAMETER, "invalid filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return;
 	}
 
 	char content_len[10 + 1];
 	int content_len_len = (int)sizeof(content_len);
 
-	rv = as_info_parameter_get(params, "content-len", content_len,
-			&content_len_len);
-
-	if (! as_info_required_param_is_ok(out, "content-len", content_len, rv)) {
+	if (as_info_parameter_get(params, "content-len", content_len,
+			&content_len_len) != 0) {
+		cf_warning(AS_UDF, "invalid or missing content-len");
+		cf_dyn_buf_append_string(out, "error=invalid_content_len");
 		return;
 	}
 
 	char udf_type[16];
 	int udf_type_len = (int)sizeof(udf_type);
 
-	rv = as_info_parameter_get(params, "udf-type", udf_type, &udf_type_len);
-	rv = as_info_optional_param_is_ok(out, "udf-type", udf_type, rv);
+	int pg = as_info_parameter_get(params, "udf-type", udf_type, &udf_type_len);
 
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK) {
-		if (! is_valid_udf_type(udf_type)) {
-			cf_warning(AS_UDF, "invalid udf-type '%s'", udf_type);
-			as_info_respond_error(out, AS_ERR_PARAMETER, "invalid udf-type");
-			return;
-		}
-	}
-	else {
+	if (pg == -1) {
 		// Default is LUA.
 		strcpy(udf_type, LUA_TYPE_STR);
+	}
+	else if (pg == -2 || ! is_valid_udf_type(udf_type)) {
+		cf_warning(AS_UDF, "invalid udf-type %s", udf_type);
+		cf_dyn_buf_append_string(out, "error=invalid_udf_type");
+		return;
 	}
 
 	uint32_t len32;
 
 	if (cf_str_atoi_u32(content_len, &len32) != 0 || len32 % 4 != 0) {
 		cf_warning(AS_UDF, "invalid content-len %s", udf_type);
-		as_info_respond_error(out, AS_ERR_PARAMETER, "invalid content len");
+		cf_dyn_buf_append_string(out, "error=invalid_content_len");
 		return;
 	}
 
@@ -316,15 +310,10 @@ udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out)
 	char* content = (char*)cf_malloc((size_t)sz32);
 	int i_content_len = (int)sz32;
 
-	rv = as_info_parameter_get(params, "content", content, &i_content_len);
-
-	if (! as_info_required_param_is_ok(out, "content", content, rv)) {
-		return;
-	}
-
-	if ((uint32_t)i_content_len != len32) {
+	if (as_info_parameter_get(params, "content", content,
+			&i_content_len) != 0 || (uint32_t)i_content_len != len32) {
 		cf_warning(AS_UDF, "invalid or missing content");
-		as_info_respond_error(out, AS_ERR_PARAMETER, "invalid content");
+		cf_dyn_buf_append_string(out, "error=invalid_content");
 		cf_free(content);
 		return;
 	}
@@ -334,8 +323,7 @@ udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out)
 
 	if (decoded_len > MAX_UDF_CONTENT_LENGTH) {
 		cf_warning(AS_UDF, "lua file size:%d > 1MB", decoded_len);
-		as_info_respond_error(out, AS_ERR_PARAMETER,
-				"invalid udf content len, >1M");
+		cf_dyn_buf_append_string(out, "error=invalid_udf_content_len,>1M");
 		cf_free(content);
 		return;
 	}
@@ -345,24 +333,23 @@ udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out)
 	if (! cf_b64_validate_and_decode(content, encoded_len,
 			(uint8_t*)decoded_str, &decoded_len) ) {
 		cf_warning(AS_UDF, "invalid base64 content");
-		as_info_respond_error(out, AS_ERR_PARAMETER, "invalid base64 content");
+		cf_dyn_buf_append_string(out, "error=invalid_base64_content");
 		cf_free(decoded_str);
 		cf_free(content);
 		return;
 	}
 
 	as_module_error err;
-
-	int validate_result = as_module_validate(&mod_lua, NULL, filename,
-			decoded_str, decoded_len, &err);
+	int rv = as_module_validate(&mod_lua, NULL, filename, decoded_str,
+			decoded_len, &err);
 
 	cf_free(decoded_str);
 
-	if (validate_result != 0) {
+	if (rv != 0) {
 		cf_warning(AS_UDF, "udf-put: compile error: [%s:%d] %s", err.file,
 				err.line, err.message);
 
-		as_info_respond_error(out, AS_ERR_PARAMETER, "compile error");
+		cf_dyn_buf_append_string(out, "error=compile_error");
 		cf_dyn_buf_append_string(out, ";file=");
 		cf_dyn_buf_append_string(out, err.file);
 		cf_dyn_buf_append_string(out, ";line=");
@@ -393,7 +380,7 @@ udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out)
 
 	if (e != 0) {
 		cf_warning(AS_UDF, "could not encode UDF object");
-		as_info_respond_error(out, AS_ERR_PARAMETER, "json error");
+		cf_dyn_buf_append_string(out, "error=json_error");
 		json_decref(udf_obj);
 		return;
 	}
@@ -412,7 +399,7 @@ udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out)
 	else {
 		cf_warning(AS_UDF, "UDF module %s/%s registration timed out",
 				g_config.mod_lua.user_path, filename);
-		as_info_respond_error(out, AS_ERR_TIMEOUT, "timeout");
+		cf_dyn_buf_append_string(out, "error=timeout");
 	}
 
 	cf_free(udf_obj_str);
@@ -428,10 +415,11 @@ udf_cask_info_remove(const char* name, const char* params, cf_dyn_buf* out)
 
 	char filename[MAX_FILE_NAME_SZ];
 	int filename_len = (int)sizeof(filename);
-	info_param_result rv = as_info_parameter_get(params, "filename", filename,
-			&filename_len);
 
-	if (! as_info_required_param_is_ok(out, "filename", filename, rv)) {
+	if (as_info_parameter_get(params, "filename", filename,
+			&filename_len) != 0) {
+		cf_warning(AS_UDF, "invalid or missing filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return;
 	}
 
@@ -441,7 +429,7 @@ udf_cask_info_remove(const char* name, const char* params, cf_dyn_buf* out)
 
 	if (! as_smd_delete_blocking(AS_SMD_MODULE_UDF, filename, 0)) {
 		cf_warning(AS_UDF, "UDF module %s remove timed out", file_path);
-		as_info_respond_error(out, AS_ERR_TIMEOUT, "timeout");
+		cf_dyn_buf_append_string(out, "error=timeout");
 		return;
 	}
 
