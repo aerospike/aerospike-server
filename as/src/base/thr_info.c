@@ -3702,7 +3702,7 @@ cmd_truncate(const char* name, const char* params, cf_dyn_buf* db)
 	info_param_result set_rv = as_info_parameter_get(params, "set", set_name,
 			&set_name_len);
 
-	if (! as_info_required_param_is_ok(db, "set", ns_name, set_rv)) {
+	if (! as_info_required_param_is_ok(db, "set", set_name, set_rv)) {
 		return;
 	}
 
@@ -3832,7 +3832,7 @@ cmd_truncate_undo(const char* name, const char* params, cf_dyn_buf* db)
 	info_param_result set_rv = as_info_parameter_get(params, "set", set_name,
 			&set_name_len);
 
-	if (! as_info_required_param_is_ok(db, "set", ns_name, set_rv)) {
+	if (! as_info_required_param_is_ok(db, "set", set_name, set_rv)) {
 		return;
 	}
 
