@@ -64,7 +64,8 @@ struct as_transaction_s;
 #define AS_XDR_MIN_SC_REPLICATION_WAIT_MS 5
 #define AS_XDR_MAX_SC_REPLICATION_WAIT_MS 1000
 
-#define AS_XDR_MAX_SKIP_VERSIONS_WITHIN 3600
+#define AS_XDR_MIN_SHIP_VERSIONS_INTERVAL 1
+#define AS_XDR_MAX_SHIP_VERSIONS_INTERVAL 3600
 
 #define AS_XDR_MIN_TRANSACTION_QUEUE_LIMIT 1024
 #define AS_XDR_MAX_TRANSACTION_QUEUE_LIMIT (1024 * 1024)
@@ -99,6 +100,12 @@ typedef enum {
 } as_xdr_bin_policy;
 
 typedef enum {
+	XDR_SHIP_VERSIONS_POLICY_LATEST,
+	XDR_SHIP_VERSIONS_POLICY_ALL,
+	XDR_SHIP_VERSIONS_POLICY_INTERVAL
+} as_xdr_ship_versions_policy;
+
+typedef enum {
 	XDR_WRITE_POLICY_AUTO, // TODO - is this mode worth the complication?
 	XDR_WRITE_POLICY_UPDATE,
 	XDR_WRITE_POLICY_REPLACE
@@ -117,12 +124,12 @@ typedef struct as_xdr_dc_ns_cfg_s {
 	bool ignore_expunges;
 	uint32_t max_throughput;
 	char* remote_namespace;
-	bool restrict_version_skipping;
 	uint32_t sc_replication_wait_ms;
 	bool ship_bin_luts;
 	bool ship_nsup_deletes;
 	bool ship_only_specified_sets;
-	uint32_t skip_versions_within_ms;
+	uint32_t ship_versions_interval_ms;
+	as_xdr_ship_versions_policy ship_versions_policy;
 	uint32_t transaction_queue_limit;
 	as_xdr_write_policy write_policy;
 

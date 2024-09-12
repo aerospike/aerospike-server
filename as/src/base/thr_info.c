@@ -1873,8 +1873,7 @@ cmd_histogram(const char* name, const char* params, cf_dyn_buf* db)
 			&value_str_len);
 	as_namespace* ns = NULL;
 
-	if (! info_param_required_local_namespace_is_ok(db, value_str, &ns,
-			rv)) {
+	if (! info_param_required_local_namespace_is_ok(db, value_str, &ns, rv)) {
 		return;
 	}
 
