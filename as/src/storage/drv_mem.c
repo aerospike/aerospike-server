@@ -509,8 +509,8 @@ as_storage_record_load_bins_mem(as_storage_rd* rd)
 		return 0; // no need to read device
 	}
 
-	// If record hasn't been read, read it - sets rd->block_bins and
-	// rd->block_n_bins.
+	// If record hasn't been read, read it - sets rd->flat_bins and
+	// rd->flat_n_bins.
 	if (! rd->flat && read_record(rd, false) != 0) {
 		cf_warning(AS_DRV_MEM, "load_bins: failed mem_read_record()");
 		return -AS_ERR_UNKNOWN;
