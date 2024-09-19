@@ -874,6 +874,8 @@ typedef struct as_namespace_s {
 	uint32_t		nsup_cycle_duration; // seconds taken for most recent nsup cycle
 	double			nsup_cycle_deleted_pct; // percentage of namespace expired/evicted for most recent nsup cycle
 
+	uint64_t		n_nsup_xdr_key_busy;
+
 	// Sindex GC stats.
 
 	uint64_t		n_sindex_gc_cleaned;
