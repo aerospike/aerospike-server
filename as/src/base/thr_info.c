@@ -3998,7 +3998,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "smd_evict_void_time", ns->smd_evict_void_time);
 	info_append_uint32(db, "nsup_cycle_duration", ns->nsup_cycle_duration);
 	info_append_format(db, "nsup_cycle_deleted_pct", "%.2f", ns->nsup_cycle_deleted_pct);
-	info_append_uint64(db, "n_nsup_xdr_key_busy", ns->n_nsup_xdr_key_busy);
+	info_append_uint64(db, "nsup_xdr_key_busy", ns->n_nsup_xdr_key_busy);
 
 	// Truncate stats.
 
