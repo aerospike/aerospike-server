@@ -129,7 +129,8 @@ typedef struct as_partition_s {
 
 	uint64_t dup_res_cutoff_ms;
 
-	uint8_t align_2[16];
+	cf_node proxy_dst;
+	uint8_t align_2[8];
 	// @ 64-byte-aligned boundary.
 
 	bool immigrators[AS_CLUSTER_SZ];
@@ -204,6 +205,7 @@ uint32_t as_partition_get_other_replicas(as_partition* p, cf_node* nv);
 
 cf_node as_partition_writable_node(struct as_namespace_s* ns, uint32_t pid);
 cf_node as_partition_proxyee_redirect(struct as_namespace_s* ns, uint32_t pid);
+cf_node as_partition_proxyer_redirect(struct as_namespace_s* ns, uint32_t pid, cf_node redirect_node);
 
 void as_partition_get_replicas_master_str(cf_dyn_buf* db);
 void as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime, uint32_t max_repls);

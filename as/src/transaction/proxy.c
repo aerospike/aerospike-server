@@ -504,18 +504,24 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 		return;
 	}
 
-	cf_node redirect_node;
+	cf_digest* keyd;
 
-	if (msg_get_uint64(m, PROXY_FIELD_REDIRECT, &redirect_node) == 0
-			&& redirect_node != g_config.self_node
-			&& redirect_node != (cf_node)0) {
-		// If this node was a "random" node, i.e. neither acting nor eventual
-		// master, it diverts to the eventual master (the best it can do.) The
-		// eventual master must inform this node about the acting master.
+	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
+			MSG_GET_DIRECT) != 0) {
+		cf_crash(AS_PROXY, "original msg get for digest failed");
+	}
 
+	cf_node redirect_node = (cf_node)0;
+
+	msg_get_uint64(m, PROXY_FIELD_REDIRECT, &redirect_node);
+
+	cf_node proxy_dst = as_partition_proxyer_redirect(pr->ns,
+			as_partition_getid(keyd), redirect_node);
+
+	if (proxy_dst != (cf_node)0) {
 		msg_incr_ref(pr->fab_msg);
 
-		if (as_fabric_send(redirect_node, pr->fab_msg, AS_FABRIC_CHANNEL_RW) !=
+		if (as_fabric_send(proxy_dst, pr->fab_msg, AS_FABRIC_CHANNEL_RW) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(pr->fab_msg);
 		}
@@ -524,16 +530,8 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 		return;
 	}
 
-	cf_digest* keyd;
-
-	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
-		cf_crash(AS_PROXY, "original msg get for digest failed");
-	}
-
 	cl_msg* msgp;
 
-	// TODO - inefficient! Should be a way to 'take' a buffer from msg.
 	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp, NULL,
 			MSG_GET_COPY_MALLOC) != 0) {
 		cf_crash(AS_PROXY, "original msg get for proto failed");
