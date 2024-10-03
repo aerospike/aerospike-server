@@ -504,13 +504,6 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 		return;
 	}
 
-	cf_digest* keyd;
-
-	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
-		cf_crash(AS_PROXY, "original msg get for digest failed");
-	}
-
 	cf_node redirect_node;
 
 	if (msg_get_uint64(m, PROXY_FIELD_REDIRECT, &redirect_node) == 0
@@ -519,9 +512,6 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 		// If this node was a "random" node, i.e. neither acting nor eventual
 		// master, it diverts to the eventual master (the best it can do.) The
 		// eventual master must inform this node about the acting master.
-
-		// Ok without partition lock.
-		pr->ns->partitions[as_partition_getid(keyd)].proxy_dst = redirect_node;
 
 		msg_incr_ref(pr->fab_msg);
 
@@ -532,6 +522,13 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 
 		cf_mutex_unlock(lock);
 		return;
+	}
+
+	cf_digest* keyd;
+
+	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
+			MSG_GET_DIRECT) != 0) {
+		cf_crash(AS_PROXY, "original msg get for digest failed");
 	}
 
 	cl_msg* msgp;

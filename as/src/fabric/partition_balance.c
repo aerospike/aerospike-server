@@ -1001,8 +1001,6 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 				p->working_master = ns_node_seq[working_master_n];
 			}
 
-			p->proxy_dst = ns_node_seq[working_master_n];
-
 			handle_version_change(p, ns, &orig_version);
 
 			ns_pending_emigrations += p->pending_emigrations;
@@ -1633,7 +1631,6 @@ emigrate_done_advance_non_master_version_ap(as_namespace* ns, as_partition* p,
 {
 	if ((tx_flags & TX_FLAGS_ACTING_MASTER) != 0) {
 		p->working_master = (cf_node)0;
-		p->proxy_dst = p->replicas[0];
 		p->n_dupl = 0;
 		p->version.master = 0;
 	}
