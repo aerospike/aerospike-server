@@ -471,6 +471,7 @@ typedef enum {
 	CASE_NAMESPACE_MAX_RECORD_SIZE,
 	CASE_NAMESPACE_MIGRATE_ORDER,
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
+	CASE_NAMESPACE_MIGRATE_SKIP_UNREADABLE,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
 	CASE_NAMESPACE_NSUP_HIST_PERIOD,
 	CASE_NAMESPACE_NSUP_PERIOD,
@@ -1062,6 +1063,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "max-record-size",				CASE_NAMESPACE_MAX_RECORD_SIZE },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
+		{ "migrate-skip-unreadable",		CASE_NAMESPACE_MIGRATE_SKIP_UNREADABLE },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
 		{ "nsup-hist-period",				CASE_NAMESPACE_NSUP_HIST_PERIOD },
 		{ "nsup-period",					CASE_NAMESPACE_NSUP_PERIOD },
@@ -2971,6 +2973,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS:
 				ns->migrate_retransmit_ms = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_MIGRATE_SKIP_UNREADABLE:
+				ns->migrate_skip_unreadable = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_MIGRATE_SLEEP:
 				ns->migrate_sleep = cfg_u32_no_checks(&line);

@@ -414,6 +414,7 @@ cfg_get_namespace(const char* context, cf_dyn_buf* db)
 	info_append_uint32(db, "max-record-size", ns->max_record_size);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
+	info_append_bool(db, "migrate-skip-unreadable", ns->migrate_skip_unreadable);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	info_append_uint32(db, "nsup-hist-period", ns->nsup_hist_period);
 	info_append_uint32(db, "nsup-period", ns->nsup_period);
@@ -1631,6 +1632,22 @@ cfg_set_namespace(const char* cmd)
 		cf_info(AS_INFO, "Changing value of migrate-retransmit-ms of ns %s from %u to %d",
 				ns->name, ns->migrate_retransmit_ms, val);
 		ns->migrate_retransmit_ms = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "migrate-skip-unreadable", v,
+			&v_len) == 0) {
+		if (strcmp(v, "true") == 0) {
+			cf_info(AS_INFO, "Changing value of migrate-skip-unreadable of ns %s to %s",
+					ns->name, v);
+			ns->migrate_skip_unreadable = true;
+		}
+		else if (strcmp(v, "false") == 0) {
+			cf_info(AS_INFO, "Changing value of migrate-skip-unreadable of ns %s to %s",
+					ns->name, v);
+			ns->migrate_skip_unreadable = false;
+		}
+		else {
+			return false;
+		}
 	}
 	else if (as_info_parameter_get(cmd, "migrate-sleep", v, &v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0) {
