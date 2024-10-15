@@ -758,6 +758,7 @@ typedef struct as_namespace_s {
 	uint32_t		max_record_size;
 	uint32_t		migrate_order;
 	uint32_t		migrate_retransmit_ms;
+	bool			migrate_skip_unreadable;
 	uint32_t		migrate_sleep;
 	uint32_t		nsup_hist_period;
 	uint32_t		nsup_period;
@@ -916,6 +917,7 @@ typedef struct as_namespace_s {
 	uint64_t		migrate_record_retransmits;
 	uint64_t		migrate_record_receives;
 	uint64_t		appeals_records_exonerated; // relevant only for enterprise edition
+	uint64_t		migrate_records_unreadable;
 
 	// From-client transaction stats.
 

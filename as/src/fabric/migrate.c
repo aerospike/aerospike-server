@@ -893,6 +893,13 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	}
 	else {
 		cf_warning(AS_MIGRATE, "unreadable digest %pD", &r->keyd);
+
+		if (ns->migrate_skip_unreadable) {
+			ns->migrate_records_unreadable++;
+			as_storage_record_close(&rd);
+			as_record_done(r_ref, ns);
+			return emig->cluster_key == as_exchange_cluster_key();
+		}
 	}
 
 	as_storage_record_close(&rd);
