@@ -4204,6 +4204,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "migrate_records_transmitted", ns->migrate_records_transmitted);
 	info_append_uint64(db, "migrate_record_retransmits", ns->migrate_record_retransmits);
 	info_append_uint64(db, "migrate_record_receives", ns->migrate_record_receives);
+	info_append_uint64(db, "migrate_records_unreadable", ns->migrate_records_unreadable);
 
 	info_append_uint64(db, "migrate_signals_active", ns->migrate_signals_active);
 	info_append_uint64(db, "migrate_signals_remaining", ns->migrate_signals_remaining);
