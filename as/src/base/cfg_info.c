@@ -1593,13 +1593,13 @@ cfg_set_namespace(const char* cmd)
 	else if (as_info_parameter_get(cmd, "migrate-skip-unreadable", v,
 			&v_len) == 0) {
 		if (strcmp(v, "true") == 0) {
-			cf_info(AS_INFO, "Changing value of migrate-skip-unreadable of ns %s to %s",
-					ns->name, v);
+			cf_info(AS_INFO, "Changing value of migrate-skip-unreadable of ns %s from %s to %s",
+					ns->name, bool_val[ns->migrate_skip_unreadable], v);
 			ns->migrate_skip_unreadable = true;
 		}
 		else if (strcmp(v, "false") == 0) {
-			cf_info(AS_INFO, "Changing value of migrate-skip-unreadable of ns %s to %s",
-					ns->name, v);
+			cf_info(AS_INFO, "Changing value of migrate-skip-unreadable of ns %s from %s to %s",
+					ns->name, bool_val[ns->migrate_skip_unreadable], v);
 			ns->migrate_skip_unreadable = false;
 		}
 		else {
