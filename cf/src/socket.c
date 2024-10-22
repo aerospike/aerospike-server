@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <arpa/inet.h>
 #include <asm/types.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -315,8 +316,11 @@ cf_ip_addr_is_dns_name(const char *string)
 		return false;
 	}
 
-	if (string[0] >= '0' && string[0] <= '9') {
-		return false;
+	uint8_t buf[sizeof(struct in6_addr)];
+
+	if (inet_pton(AF_INET, string, buf) == 1 ||
+			inet_pton(AF_INET6, string, buf) == 1) {
+		return false; // ipv4 or ipv6 address
 	}
 
 	int32_t n_labels = 0;
