@@ -315,12 +315,13 @@ cf_ip_addr_is_dns_name(const char *string)
 		return false;
 	}
 
-	uint8_t buf[sizeof(struct in6_addr)];
+	uint8_t dummy[4];
 
-	if (inet_pton(AF_INET, string, buf) == 1 ||
-			inet_pton(AF_INET6, string, buf) == 1) {
-		return false; // ipv4 or ipv6 address
+	if (inet_pton(AF_INET, string, dummy) == 1) {
+		return false; // ipv4 address
 	}
+
+	// Note - ipv6 address has no dots, returns false (n_labels always 1).
 
 	int32_t n_labels = 0;
 	int32_t i = 0;
