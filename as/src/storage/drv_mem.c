@@ -1211,7 +1211,7 @@ init_synchronous(drv_mems* mems)
 			headers[i]->unique.device_id = (uint32_t)i;
 		}
 
-		drv_adjust_versions(ns, mems->generic->pmeta);
+		drv_adjust_sc_version_flags(ns, mems->generic->pmeta, true, false);
 
 		flush_header(mems, headers);
 
@@ -1229,7 +1229,7 @@ init_synchronous(drv_mems* mems)
 
 	// At least one device is not fresh. Check that all non-fresh devices match.
 
-	bool fresh_drive = false;
+	uint32_t n_fresh_drives = 0;
 	bool non_commit_drive = false;
 	drv_prefix* prefix_first = &headers[first_used]->generic.prefix;
 
@@ -1246,7 +1246,7 @@ init_synchronous(drv_mems* mems)
 		if (prefix_i->random == 0) {
 			cf_info(AS_DRV_MEM, "{%s} device %s is empty", ns->name,
 					mem->name);
-			fresh_drive = true;
+			n_fresh_drives++;
 			continue;
 		}
 
@@ -1279,23 +1279,15 @@ init_synchronous(drv_mems* mems)
 	mems->generic = cf_valloc(ROUND_UP_GENERIC);
 	memcpy(mems->generic, &headers[first_used]->generic, ROUND_UP_GENERIC);
 
-	mems->generic->prefix.n_devices = n_mems; // may have added fresh drives
+	mems->generic->prefix.n_devices = n_mems; // may have added/removed drives
 	mems->generic->prefix.random = random;
 	mems->generic->prefix.flags &= ~DRV_HEADER_FLAG_TRUSTED;
 
 	flush_flags(mems);
 
-	if (fresh_drive || n_mems < prefix_first->n_devices) {
-		drv_adjust_versions(ns, mems->generic->pmeta);
-	}
-	else if (ns->dirty_restart && non_commit_drive) {
-		if (ns->auto_revive) {
-			drv_auto_revive(ns, mems->generic->pmeta);
-		}
-		else {
-			drv_adjust_versions(ns, mems->generic->pmeta);
-		}
-	}
+	drv_adjust_sc_version_flags(ns, mems->generic->pmeta,
+			n_mems < prefix_first->n_devices + n_fresh_drives,
+			ns->dirty_restart && non_commit_drive);
 
 	flush_header(mems, headers);
 	flush_final_cfg(ns);

@@ -3289,7 +3289,7 @@ ssd_init_synchronous(drv_ssds *ssds)
 			headers[i]->unique.device_id = (uint32_t)i;
 		}
 
-		drv_adjust_versions(ns, ssds->generic->pmeta);
+		drv_adjust_sc_version_flags(ns, ssds->generic->pmeta, true, false);
 
 		ssd_flush_header(ssds, headers);
 
@@ -3307,7 +3307,7 @@ ssd_init_synchronous(drv_ssds *ssds)
 
 	// At least one device is not fresh. Check that all non-fresh devices match.
 
-	bool fresh_drive = false;
+	uint32_t n_fresh_drives = 0;
 	bool non_commit_drive = false;
 	drv_prefix *prefix_first = &headers[first_used]->generic.prefix;
 
@@ -3323,7 +3323,7 @@ ssd_init_synchronous(drv_ssds *ssds)
 		// Skip fresh devices.
 		if (prefix_i->random == 0) {
 			cf_info(AS_DRV_SSD, "{%s} device %s is empty", ns->name, ssd->name);
-			fresh_drive = true;
+			n_fresh_drives++;
 			continue;
 		}
 
@@ -3356,21 +3356,13 @@ ssd_init_synchronous(drv_ssds *ssds)
 	ssds->generic = cf_valloc(ROUND_UP_GENERIC);
 	memcpy(ssds->generic, &headers[first_used]->generic, ROUND_UP_GENERIC);
 
-	ssds->generic->prefix.n_devices = n_ssds; // may have added fresh drives
+	ssds->generic->prefix.n_devices = n_ssds; // may have added/removed drives
 	ssds->generic->prefix.random = random;
 	ssds->generic->prefix.flags &= ~DRV_HEADER_FLAG_TRUSTED;
 
-	if (fresh_drive || n_ssds < prefix_first->n_devices) {
-		drv_adjust_versions(ns, ssds->generic->pmeta);
-	}
-	else if (ns->dirty_restart && non_commit_drive) {
-		if (ns->auto_revive) {
-			drv_auto_revive(ns, ssds->generic->pmeta);
-		}
-		else {
-			drv_adjust_versions(ns, ssds->generic->pmeta);
-		}
-	}
+	drv_adjust_sc_version_flags(ns, ssds->generic->pmeta,
+			n_ssds < prefix_first->n_devices + n_fresh_drives,
+			ns->dirty_restart && non_commit_drive);
 
 	ssd_flush_header(ssds, headers);
 	ssd_flush_final_cfg(ns);

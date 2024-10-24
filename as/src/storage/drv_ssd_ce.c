@@ -96,14 +96,8 @@ ssd_cold_start_drop_cenotaphs(as_namespace* ns)
 
 // TODO - move to drv_common_ce.c in 8.0!
 void
-drv_adjust_versions(as_namespace* ns, drv_pmeta* pmeta)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-// TODO - move to drv_common_ce.c in 8.0!
-void
-drv_auto_revive(as_namespace* ns, drv_pmeta* pmeta)
+drv_adjust_sc_version_flags(as_namespace* ns, drv_pmeta* pmeta,
+		bool wiped_drives, bool dirty)
 {
 	// Nothing to do - relevant for enterprise version only.
 }
