@@ -50,11 +50,6 @@ as_partition_isolate_version(const as_namespace* ns, as_partition* p)
 	}
 }
 
-void
-as_partition_auto_revive(as_namespace* ns, as_partition* p)
-{
-}
-
 int
 as_partition_check_source(const as_namespace* ns, as_partition* p,
 		uint32_t regime, cf_node src, bool* from_replica)

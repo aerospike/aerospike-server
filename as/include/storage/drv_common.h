@@ -168,6 +168,8 @@ COMPILER_ASSERT(offsetof(drv_header, generic.prefix) == 0);
 // Public API - shared code between storage engines.
 //
 
+void drv_adjust_versions(struct as_namespace_s* ns, drv_pmeta* pmeta);
+void drv_auto_revive(struct as_namespace_s* ns, drv_pmeta* pmeta);
 bool drv_is_set_evictable(const struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
 void drv_apply_opt_meta(struct as_index_s* r, struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
 bool pread_all(int fd, void* buf, size_t size, off_t offset);

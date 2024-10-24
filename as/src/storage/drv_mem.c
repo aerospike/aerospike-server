@@ -1211,7 +1211,7 @@ init_synchronous(drv_mems* mems)
 			headers[i]->unique.device_id = (uint32_t)i;
 		}
 
-		adjust_versions(ns, mems->generic->pmeta);
+		drv_adjust_versions(ns, mems->generic->pmeta);
 
 		flush_header(mems, headers);
 
@@ -1285,9 +1285,16 @@ init_synchronous(drv_mems* mems)
 
 	flush_flags(mems);
 
-	if (fresh_drive || n_mems < prefix_first->n_devices ||
-			(ns->dirty_restart && non_commit_drive)) {
-		adjust_versions(ns, mems->generic->pmeta);
+	if (fresh_drive || n_mems < prefix_first->n_devices) {
+		drv_adjust_versions(ns, mems->generic->pmeta);
+	}
+	else if (ns->dirty_restart && non_commit_drive) {
+		if (ns->auto_revive) {
+			drv_auto_revive(ns, mems->generic->pmeta);
+		}
+		else {
+			drv_adjust_versions(ns, mems->generic->pmeta);
+		}
 	}
 
 	flush_header(mems, headers);

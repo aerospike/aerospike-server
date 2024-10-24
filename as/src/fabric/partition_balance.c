@@ -195,7 +195,6 @@ as_partition_balance_init()
 			as_partition* p = &ns->partitions[pid];
 
 			as_storage_load_pmeta(ns, p);
-			as_partition_auto_revive(ns, p);
 
 			if (as_partition_version_has_data(&p->version)) {
 				as_partition_isolate_version(ns, p);
