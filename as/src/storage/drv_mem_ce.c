@@ -117,11 +117,6 @@ clear_encryption_keys(as_namespace* ns)
 }
 
 void
-adjust_versions(const as_namespace* ns, drv_pmeta* pmeta)
-{
-}
-
-void
 flush_final_cfg(as_namespace* ns)
 {
 }
