@@ -3289,7 +3289,7 @@ ssd_init_synchronous(drv_ssds *ssds)
 			headers[i]->unique.device_id = (uint32_t)i;
 		}
 
-		ssd_adjust_versions(ns, ssds->generic->pmeta);
+		drv_adjust_versions(ns, ssds->generic->pmeta);
 
 		ssd_flush_header(ssds, headers);
 
@@ -3360,9 +3360,16 @@ ssd_init_synchronous(drv_ssds *ssds)
 	ssds->generic->prefix.random = random;
 	ssds->generic->prefix.flags &= ~DRV_HEADER_FLAG_TRUSTED;
 
-	if (fresh_drive || n_ssds < prefix_first->n_devices ||
-			(ns->dirty_restart && non_commit_drive)) {
-		ssd_adjust_versions(ns, ssds->generic->pmeta);
+	if (fresh_drive || n_ssds < prefix_first->n_devices) {
+		drv_adjust_versions(ns, ssds->generic->pmeta);
+	}
+	else if (ns->dirty_restart && non_commit_drive) {
+		if (ns->auto_revive) {
+			drv_auto_revive(ns, ssds->generic->pmeta);
+		}
+		else {
+			drv_adjust_versions(ns, ssds->generic->pmeta);
+		}
 	}
 
 	ssd_flush_header(ssds, headers);
