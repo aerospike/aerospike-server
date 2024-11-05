@@ -230,6 +230,16 @@ available_size(const drv_mem* mem)
 			(uint64_t)num_free_wblocks(mem) * WBLOCK_SZ : mem->file_size;
 }
 
+static inline void
+release_old_mwb(drv_mem* mem, mem_write_block* old_mwb)
+{
+	if (old_mwb != NULL) {
+		mem_wait_writers_done(old_mwb);
+		mem_mprotect(old_mwb->base_addr, WBLOCK_SZ, PROT_READ);
+		mwb_release(mem, old_mwb);
+	}
+}
+
 
 //==========================================================
 // Public API.
@@ -2433,6 +2443,10 @@ buffer_bins(as_storage_rd* rd)
 		if (! mwb) {
 			cf_ticker_warning(AS_DRV_MEM, "{%s} out of space", ns->name);
 			cf_mutex_unlock(&cur_mwb->lock);
+
+			// Outside lock to not block other threads trying to write to new mwb.
+			release_old_mwb(mem, old_mwb);
+
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
@@ -2505,11 +2519,7 @@ buffer_bins(as_storage_rd* rd)
 	}
 
 	// Outside lock to not block other threads trying to write to new mwb.
-	if (old_mwb != NULL) {
-		mem_wait_writers_done(old_mwb);
-		mem_mprotect(old_mwb->base_addr, WBLOCK_SZ, PROT_READ);
-		mwb_release(mem, old_mwb);
-	}
+	release_old_mwb(mem, old_mwb);
 
 	return 0;
 }
