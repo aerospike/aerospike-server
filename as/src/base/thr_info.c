@@ -1934,61 +1934,42 @@ cmd_jem_stats(const char* name, const char* params, cf_dyn_buf* db)
 
 	cf_debug(AS_INFO, "jem_stats command received: params %s", params);
 
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-	char* file = NULL;
-	char* options = NULL;
-	char* sites = NULL;
-	info_param_result rv = as_info_parameter_get(params, "file", param_str,
-			&param_str_len);
+	char file_str[100] = { 0 };
+	int file_len = sizeof(file_str);
+	info_param_result rv = as_info_parameter_get(params, "file", file_str,
+			&file_len);
 
-	rv = as_info_optional_param_is_ok(db, "file", param_str, rv);
+	rv = as_info_optional_param_is_ok(db, "file", file_str, rv);
 
 	if (rv == INFO_PARAM_FAIL_REPLIED) {
 		return;
 	}
 
-	if (rv == INFO_PARAM_OK) {
-		file = cf_strdup(param_str);
-	}
+	char options_str[100] = { 0 };
+	int options_len = sizeof(options_str);
 
-	param_str_len = sizeof(param_str);
-	rv = as_info_parameter_get(params, "options", param_str, &param_str_len);
-	rv = as_info_optional_param_is_ok(db, "options", param_str, rv);
+	rv = as_info_parameter_get(params, "options", options_str, &options_len);
+	rv = as_info_optional_param_is_ok(db, "options", options_str, rv);
 
 	if (rv == INFO_PARAM_FAIL_REPLIED) {
 		return;
 	}
 
-	if (rv == INFO_PARAM_OK) {
-		options = cf_strdup(param_str);
-	}
+	char sites_str[100] = { 0 };
+	int sites_len = sizeof(options_str);
 
-	param_str_len = sizeof(param_str);
-	rv = as_info_parameter_get(params, "sites", param_str, &param_str_len);
-	rv = as_info_optional_param_is_ok(db, "sites", param_str, rv);
+	rv = as_info_parameter_get(params, "sites", sites_str, &sites_len);
+	rv = as_info_optional_param_is_ok(db, "sites", sites_str, rv);
 
 	if (rv == INFO_PARAM_FAIL_REPLIED) {
 		return;
 	}
 
-	if (rv == INFO_PARAM_OK) {
-		sites = cf_strdup(param_str);
-	}
+	cf_alloc_log_stats(*file_str != '\0' ? file_str : NULL,
+			*options_str != '\0' ? options_str : NULL);
 
-	cf_alloc_log_stats(file, options);
-
-	if (file) {
-		cf_free(file);
-	}
-
-	if (options) {
-		cf_free(options);
-	}
-
-	if (sites) {
-		cf_alloc_log_site_infos(sites);
-		cf_free(sites);
+	if (*sites_str != '\0') {
+		cf_alloc_log_site_infos(sites_str);
 	}
 
 	as_info_respond_ok(db);
