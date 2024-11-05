@@ -66,7 +66,8 @@ typedef enum {
 } as_storage_type;
 
 #define AS_STORAGE_MAX_DEVICES 128 // maximum devices or files per namespace
-#define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024 * 1024 * 1024 * 1024) // 2Tb
+#define AS_STORAGE_MIN_DEVICE_SIZE (128L * 1024 * 1024) // 128MiB (8 wblocks)
+#define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024 * 1024 * 1024 * 1024) // 2TiB
 
 // Separate WBLOCK_SZ, in case we ever move to an SSD_HEADER_SIZE that's too big
 // to be a WBLOCK_SZ.
