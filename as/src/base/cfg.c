@@ -3416,7 +3416,7 @@ as_config_init(const char* config_file)
 				ns->storage_compression_level = cfg_u32(&line, 1, 9);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_DATA_SIZE:
-				ns->storage_data_size = cfg_u64(&line, 128 * 1024 * 1024, 256UL * 1024 * 1024 * 1024 * 1024);
+				ns->storage_data_size = cfg_u64(&line, 256 * 1024 * 1024, 256UL * 1024 * 1024 * 1024 * 1024);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_DEFRAG_LWM_PCT:
 				ns->storage_defrag_lwm_pct = cfg_u32_no_checks(&line);
@@ -3473,7 +3473,7 @@ as_config_init(const char* config_file)
 				cfg_add_mem_shadow_file(ns, cfg_strdup_no_checks(&line));
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_FILESIZE:
-				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
+				ns->storage_filesize = cfg_u64(&line, AS_STORAGE_MIN_DEVICE_SIZE, AS_STORAGE_MAX_DEVICE_SIZE);
 				break;
 			case CASE_NAMESPACE_STORAGE_MEMORY_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
@@ -3624,7 +3624,7 @@ as_config_init(const char* config_file)
 				cfg_add_storage_file(ns, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_FILESIZE:
-				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
+				ns->storage_filesize = cfg_u64(&line, AS_STORAGE_MIN_DEVICE_SIZE, AS_STORAGE_MAX_DEVICE_SIZE);
 				break;
 			case CASE_NAMESPACE_STORAGE_PMEM_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
@@ -3771,7 +3771,7 @@ as_config_init(const char* config_file)
 				cfg_add_storage_file(ns, cfg_strdup_no_checks(&line), cfg_strdup_val2_no_checks(&line, false));
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FILESIZE:
-				ns->storage_filesize = cfg_u64(&line, 1024 * 1024, AS_STORAGE_MAX_DEVICE_SIZE);
+				ns->storage_filesize = cfg_u64(&line, AS_STORAGE_MIN_DEVICE_SIZE, AS_STORAGE_MAX_DEVICE_SIZE);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
 				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
