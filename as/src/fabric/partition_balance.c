@@ -614,10 +614,13 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 		return AS_MIGRATE_AGAIN;
 	}
 
+	bool swizzle = false;
+
 	// Not a replica and non-null version ...
 	if (! is_self_replica(p) && ! as_partition_version_is_null(&p->version)) {
 		// ...  and not quiesced - drop partition.
 		if (drop_superfluous_version(p, ns)) {
+			swizzle = true;
 			drop_trees(ns, p);
 			as_storage_save_pmeta(ns, p);
 		}
@@ -628,6 +631,10 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 	}
 
 	cf_mutex_unlock(&p->lock);
+
+	if (swizzle) {
+		as_query_job_release_rsvs(ns);
+	}
 
 	return AS_MIGRATE_OK;
 }
