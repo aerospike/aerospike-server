@@ -451,7 +451,7 @@ struct op_table_entry_s {
 		[__code].eval_param_count = __eval_param_count, \
 		[__code].r_type = __r_type,
 
-#define result_type_to_str(__type) (__type > 0 && __type < TYPE_END ? \
+#define result_type_to_str(__type) (__type >= 0 && __type < TYPE_END ? \
 		result_type_str[__type] : "invalid")
 
 static const uint8_t* EMPTY_STRING = (uint8_t*)"";
