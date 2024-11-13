@@ -805,6 +805,10 @@ as_batch_init()
 	// Default 'batch-index-threads' can't be set before call to cf_topo_init().
 	if (g_config.n_batch_index_threads == 0) {
 		g_config.n_batch_index_threads = cf_topo_count_cpus();
+
+		if (g_config.n_batch_index_threads > MAX_BATCH_THREADS) {
+			g_config.n_batch_index_threads = MAX_BATCH_THREADS;
+		}
 	}
 
 	cf_info(AS_BATCH, "starting %u batch-index-threads", g_config.n_batch_index_threads);
