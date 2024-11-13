@@ -3999,6 +3999,10 @@ as_config_post_process(as_config* c, const char* config_file)
 	if (c->n_service_threads == 0) {
 		c->n_service_threads = c->n_namespaces_not_inlined != 0 ?
 				n_cpus * 5 : n_cpus;
+
+		if (c->n_service_threads > MAX_SERVICE_THREADS) {
+			c->n_service_threads = MAX_SERVICE_THREADS;
+		}
 	}
 
 	// Setup performance metrics histograms.
