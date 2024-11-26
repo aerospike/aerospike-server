@@ -1131,6 +1131,25 @@ as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata)
 	return true;
 }
 
+bool
+as_bin_list_to_mp(const as_bin *b, msgpack_in *mp, uint32_t *count_r)
+{
+	packed_list list;
+
+	if (! packed_list_init_from_bin(&list, b)) {
+		return false;
+	}
+
+	*mp = (msgpack_in){
+			.buf = list.contents,
+			.buf_sz = list.content_sz
+	};
+
+	*count_r = list.ele_count;
+
+	return true;
+}
+
 //------------------------------------------------
 // cdt_context
 //

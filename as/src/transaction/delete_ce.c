@@ -55,14 +55,14 @@ delete_master(as_transaction* tr, rw_request* rw)
 
 	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) != 0) {
 		tr->result_code = AS_ERR_NOT_FOUND;
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Make sure the message set name (if it's there) is correct.
 	if (! set_name_check(tr, r_ref.r)) {
 		as_record_done(&r_ref, tr->rsv.ns);
 		tr->result_code = AS_ERR_PARAMETER;
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	return drop_master(tr, &r_ref, rw);

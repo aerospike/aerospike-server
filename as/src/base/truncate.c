@@ -46,11 +46,13 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/set_index.h"
 #include "base/smd.h"
 #include "base/thr_info.h"
 #include "sindex/gc.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
 
@@ -498,6 +500,11 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 		if (as_index_get_set_id(r) == cbi->set_id &&
 				r->last_update_time < cbi->lut) {
+			if (mrt_skip_cleanup(ns, tree, r_ref)) {
+				as_record_done(r_ref, ns);
+				return true;
+			}
+
 			cbi->n_deleted++;
 
 			if (ns->storage_type != AS_STORAGE_ENGINE_SSD ||
@@ -516,6 +523,12 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 		}
 
 		if (r->last_update_time < cbi->lut) {
+			if (mrt_skip_cleanup(ns, tree, r_ref) ||
+					as_mrt_monitor_is_monitor_record(ns, r)) {
+				as_record_done(r_ref, ns);
+				return true;
+			}
+
 			cbi->n_deleted++;
 
 			if (ns->storage_type != AS_STORAGE_ENGINE_SSD ||

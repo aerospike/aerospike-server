@@ -42,6 +42,7 @@
 #include "base/datamodel.h"
 #include "base/exp.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
@@ -140,10 +141,14 @@ int
 set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 {
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
-	size_t name_len = (size_t)as_msg_field_get_value_sz(f);
+	uint32_t name_len = as_msg_field_get_value_sz(f);
 
 	if (name_len == 0) {
 		return 0;
+	}
+
+	if (! as_mrt_monitor_check_set_name(ns, f->data, name_len)) {
+		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
 	// Given the name, find/assign the set-ID and write it in the as_index.

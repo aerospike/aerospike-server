@@ -92,13 +92,6 @@ as_record_is_live(const as_record* r)
 	return true;
 }
 
-int
-as_record_get_live(as_index_tree* tree, const cf_digest* keyd,
-		as_index_ref* r_ref, as_namespace* ns)
-{
-	return as_index_get_vlock(tree, keyd, r_ref);
-}
-
 void
 as_record_drop_stats(as_record* r, as_namespace* ns)
 {
@@ -109,18 +102,18 @@ as_record_drop_stats(as_record* r, as_namespace* ns)
 
 void
 as_record_transition_stats(as_record* r, as_namespace* ns,
-		const index_metadata* old)
+		const as_record* old_r)
 {
 }
 
 void
 as_record_transition_set_index(as_index_tree* tree, as_index_ref* r_ref,
-		as_namespace* ns, uint16_t n_bins, const index_metadata* old)
+		as_namespace* ns, uint16_t n_bins, const as_record* old_r)
 {
 	as_record* r = r_ref->r;
 
 	bool is_delete = n_bins == 0;
-	bool inserted = old->generation == 0;
+	bool inserted = old_r == NULL || old_r->generation == 0;
 
 	if (is_delete) {
 		as_set_index_delete(ns, tree, as_index_get_set_id(r), r_ref->r_h);

@@ -197,6 +197,10 @@ gc_ns_cycle(as_namespace* ns)
 		cf_assert(r->rc == 1, AS_SINDEX, "bad ref count %u", r->rc);
 
 		as_record_destroy(r, ns);
+
+		// MRT PARANOIA - can we encounter a provisional here?
+		cf_assert(r->orig_h == 0, AS_SINDEX, "unexpected provisional");
+
 		cf_arenax_free(ns->arena, ele.r_h, NULL);
 	}
 

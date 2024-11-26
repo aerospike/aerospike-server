@@ -50,6 +50,7 @@
 // Forward declarations.
 //
 
+struct as_flat_opt_meta_s;
 struct as_flat_record_s;
 struct as_index_ref_s;
 struct as_index_s;
@@ -62,15 +63,6 @@ struct drv_ssd_s;
 //==========================================================
 // Typedefs & constants.
 //
-
-//------------------------------------------------
-// A defragged wblock waiting to be freed.
-//
-typedef struct vacated_wblock_s {
-	uint32_t file_id;
-	uint32_t wblock_id;
-} vacated_wblock;
-
 
 //------------------------------------------------
 // Write buffer - where records accumulate until
@@ -99,7 +91,8 @@ typedef struct ssd_wblock_state_s {
 	uint32_t			inuse_sz;	// number of bytes currently used in the wblock
 	cf_mutex			LOCK;		// transactions, write_worker, and defrag all are interested in wblock_state
 	ssd_write_buf		*swb;		// pending writes for the wblock, also treated as a cache for reads
-	uint32_t			state;		// for now just a defrag flag
+	uint8_t				state;
+	bool				short_lived; // relevant for enterprise edition only
 	uint32_t			n_vac_dests; // number of wblocks into which this wblock defragged
 } ssd_wblock_state;
 
@@ -243,9 +236,13 @@ typedef struct ssd_load_records_info_s {
 // Warm restart.
 void ssd_resume_devices(drv_ssds *ssds);
 
-// Tomb raider.
+// Cold start.
+void ssd_cold_start_sweep_device(drv_ssds* ssds, drv_ssd* ssd);
+void ssd_cold_start_sweep(drv_ssds* ssds, drv_ssd* ssd);
+void ssd_cold_start_fill_orig(drv_ssd* ssd, const struct as_flat_record_s* flat, uint64_t rblock_id, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s *r_ref);
+void ssd_cold_start_record_create(struct as_namespace_s* ns, const struct as_flat_record_s* flat, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s* r_ref);
+void ssd_cold_start_record_update(drv_ssds* ssds, const struct as_flat_record_s* flat, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s* r_ref);
 void ssd_cold_start_adjust_cenotaph(struct as_namespace_s *ns, const struct as_flat_record_s *flat, uint32_t block_void_time, struct as_index_s *r);
-void ssd_cold_start_transition_record(struct as_namespace_s *ns, const struct as_flat_record_s *flat, const as_flat_opt_meta* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s *r_ref, bool is_create);
 void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 
 // Record encryption.
@@ -272,6 +269,7 @@ void ssd_clear_encryption_keys(struct as_namespace_s *ns);
 void ssd_flush_final_cfg(struct as_namespace_s *ns);
 void ssd_write_header(drv_ssd *ssd, uint8_t *header, uint8_t *from, size_t size);
 void ssd_prefetch_wblock(drv_ssd *ssd, uint64_t file_offset, uint8_t *read_buf);
+void ssd_block_free(drv_ssd *ssd, uint64_t rblock_id, uint32_t n_rblocks, char *msg);
 
 // Durability.
 void ssd_init_commit(drv_ssd *ssd);
@@ -279,8 +277,10 @@ uint64_t ssd_flush_max_us(const struct as_namespace_s *ns);
 void ssd_post_write(drv_ssd *ssd, ssd_write_buf *swb);
 int ssd_write_bins(struct as_storage_rd_s *rd);
 int ssd_buffer_bins(struct as_storage_rd_s *rd);
+void ssd_mrt_block_free_orig(drv_ssds* ssds, struct as_index_s* r);
+void ssd_mrt_rd_block_free_orig(drv_ssds* ssds, struct as_storage_rd_s* rd);
 ssd_write_buf *swb_get(drv_ssd *ssd, bool use_reserve);
-bool write_uses_post_write_q(struct as_storage_rd_s *rd);
+void ssd_set_wblock_flags(struct as_storage_rd_s *rd, ssd_write_buf *swb);
 
 // Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);

@@ -48,6 +48,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/set_index.h"
 #include "base/smd.h"
@@ -57,6 +58,7 @@
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
 #include "warnings.h"
@@ -455,7 +457,7 @@ run_expire(void* udata)
 
 		per_thread.rsv = &rsv;
 
-		as_index_reduce_live(rsv.tree, expire_reduce_cb, (void*)&per_thread);
+		as_index_reduce(rsv.tree, expire_reduce_cb, (void*)&per_thread);
 		as_partition_release(&rsv);
 	}
 
@@ -472,10 +474,20 @@ expire_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_namespace* ns = per_thread->ns;
 	uint32_t void_time = r_ref->r->void_time;
 
+	if (! as_record_is_live(r_ref->r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
 	if (void_time == 0) {
 		per_thread->n_0_void_time++;
 	}
 	else if (per_thread->now > void_time) {
+		if (mrt_skip_cleanup(ns, per_thread->rsv->tree, r_ref)) {
+			as_record_done(r_ref, ns);
+			return true;
+		}
+
 		if (drop_local(ns, per_thread->rsv, r_ref)) {
 			as_sindex_gc_record_throttle(ns);
 			per_thread->n_expired++;
@@ -575,7 +587,7 @@ run_evict(void* udata)
 
 		per_thread.rsv = &rsv;
 
-		as_index_reduce_live(rsv.tree, evict_reduce_cb, (void*)&per_thread);
+		as_index_reduce(rsv.tree, evict_reduce_cb, (void*)&per_thread);
 		as_partition_release(&rsv);
 	}
 
@@ -594,11 +606,21 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_namespace* ns = per_thread->ns;
 	uint32_t void_time = r->void_time;
 
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
 	if (void_time == 0) {
 		per_thread->n_0_void_time++;
 	}
 	else if (per_thread->sets_not_evicting[as_index_get_set_id(r)]) {
 		if (per_thread->now > void_time) {
+			if (mrt_skip_cleanup(ns, per_thread->rsv->tree, r_ref)) {
+				as_record_done(r_ref, ns);
+				return true;
+			}
+
 			if (drop_local(ns, per_thread->rsv, r_ref)) {
 				as_sindex_gc_record_throttle(ns);
 				per_thread->n_expired++;
@@ -608,6 +630,11 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 		}
 	}
 	else if (per_thread->evict_void_time > void_time) {
+		if (mrt_skip_cleanup(ns, per_thread->rsv->tree, r_ref)) {
+			as_record_done(r_ref, ns);
+			return true;
+		}
+
 		if (drop_local(ns, per_thread->rsv, r_ref)) {
 			as_sindex_gc_record_throttle(ns);
 			per_thread->n_evicted++;
@@ -817,7 +844,7 @@ run_prep_evict(void* udata)
 		as_partition_reservation rsv;
 		as_partition_reserve(per_thread->ns, pid, &rsv);
 
-		as_index_reduce_live(rsv.tree, prep_evict_reduce_cb, (void*)per_thread);
+		as_index_reduce(rsv.tree, prep_evict_reduce_cb, (void*)per_thread);
 		as_partition_release(&rsv);
 	}
 
@@ -829,14 +856,27 @@ prep_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	as_index* r = r_ref->r;
 	prep_evict_per_thread_info* per_thread = (prep_evict_per_thread_info*)udata;
+	as_namespace* ns = per_thread->ns;
 	uint32_t void_time = r->void_time;
+
+	// Note - also used by cold start evict!
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	// Note - also used by cold start evict!
+	if (is_mrt_provisional(r_ref->r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
 
 	if (void_time != 0 &&
 			! per_thread->sets_not_evicting[as_index_get_set_id(r)]) {
 		linear_hist_insert_data_point(per_thread->evict_hist, void_time);
 	}
 
-	as_record_done(r_ref, per_thread->ns);
+	as_record_done(r_ref, ns);
 
 	return true;
 }
@@ -1085,7 +1125,7 @@ collect_nsup_histograms(as_namespace* ns)
 		as_partition_reservation rsv;
 		as_partition_reserve(ns, pid, &rsv);
 
-		as_index_reduce_live(rsv.tree, nsup_histograms_reduce_cb, (void*)ns);
+		as_index_reduce(rsv.tree, nsup_histograms_reduce_cb, (void*)ns);
 		as_partition_release(&rsv);
 	}
 
@@ -1118,7 +1158,14 @@ nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 	linear_hist* set_ttl_hist = ns->set_ttl_hists[set_id];
 	uint32_t void_time = r->void_time;
 
-	linear_hist_insert_data_point(ns->ttl_hist, void_time);
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (! as_mrt_monitor_is_monitor_record(ns, r)) {
+		linear_hist_insert_data_point(ns->ttl_hist, void_time);
+	}
 
 	if (set_ttl_hist != NULL) {
 		linear_hist_insert_data_point(set_ttl_hist, void_time);
@@ -1260,7 +1307,7 @@ run_prep_cold_start_evict(void* udata)
 	while ((pid = as_faa_uint32(per_thread->p_pid, 1)) < AS_PARTITIONS) {
 		// Don't bother with partition reservations - it's startup. Otherwise,
 		// use the same reduce callback as at runtime.
-		as_index_reduce_live(per_thread->ns->partitions[pid].tree,
+		as_index_reduce(per_thread->ns->partitions[pid].tree,
 				prep_evict_reduce_cb, (void*)per_thread);
 	}
 
@@ -1323,7 +1370,7 @@ run_cold_start_evict(void* udata)
 		as_partition_reservation rsv = { .tree = ns->partitions[pid].tree };
 		per_thread.rsv = &rsv;
 
-		as_index_reduce_live(rsv.tree, cold_start_evict_reduce_cb, &per_thread);
+		as_index_reduce(rsv.tree, cold_start_evict_reduce_cb, &per_thread);
 	}
 
 	as_add_uint64(&overall->n_0_void_time, (int64_t)per_thread.n_0_void_time);
@@ -1339,6 +1386,11 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	evict_per_thread_info* per_thread = (evict_per_thread_info*)udata;
 	as_namespace* ns = per_thread->ns;
 	uint32_t void_time = r->void_time;
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
 
 	if (void_time == 0) {
 		per_thread->n_0_void_time++;

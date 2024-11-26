@@ -32,7 +32,6 @@
 #include <unistd.h>
 
 #include "base/datamodel.h"
-#include "base/index.h"
 #include "storage/flat.h"
 
 
@@ -55,20 +54,6 @@ drv_is_set_evictable(const as_namespace* ns, const as_flat_opt_meta* opt_meta)
 	}
 
 	return ! p_set->eviction_disabled;
-}
-
-void
-drv_apply_opt_meta(as_record* r, as_namespace* ns,
-		const as_flat_opt_meta* opt_meta)
-{
-	// Set record's set-id. (If it already has one, assume they're the same.)
-	if (as_index_get_set_id(r) == INVALID_SET_ID && opt_meta->set_name) {
-		as_index_set_set_w_len(r, ns, opt_meta->set_name,
-				opt_meta->set_name_len, false);
-	}
-
-	// Store or drop the key according to the props we read.
-	as_record_finalize_key(r, opt_meta->key, opt_meta->key_size);
 }
 
 bool

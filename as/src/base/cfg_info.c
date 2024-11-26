@@ -47,6 +47,7 @@
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/service.h"
@@ -391,6 +392,7 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "default-read-touch-ttl-pct", ns->default_read_touch_ttl_pct);
 	info_append_uint32(db, "default-ttl", ns->default_ttl);
 	info_append_bool(db, "disable-cold-start-eviction", ns->cold_start_eviction_disabled);
+	info_append_bool(db, "disable-mrt-writes", ns->mrt_writes_disabled);
 	info_append_bool(db, "disable-write-dup-res", ns->write_dup_res_disabled);
 	info_append_bool(db, "disallow-expunge", ns->ap_disallow_drops);
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
@@ -414,6 +416,7 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_bool(db, "migrate-skip-unreadable", ns->migrate_skip_unreadable);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
+	info_append_uint32(db, "mrt-duration", ns->mrt_duration);
 	info_append_uint32(db, "nsup-hist-period", ns->nsup_hist_period);
 	info_append_uint32(db, "nsup-period", ns->nsup_period);
 	info_append_uint32(db, "nsup-threads", ns->n_nsup_threads);
@@ -1339,6 +1342,31 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				ns->name, ns->default_ttl, val);
 		ns->default_ttl = val;
 	}
+	else if (as_info_parameter_get(cmd, "disable-mrt-writes", v,
+			&v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "disable-mrt-writes is enterprise-only");
+			return false;
+		}
+		if (! ns->cp) {
+			cf_warning(AS_INFO, "{%s} 'disable-mrt-writes' is only applicable with 'strong-consistency'",
+					ns->name);
+			return false;
+		}
+		if (strcmp(v, "true") == 0) {
+			cf_info(AS_INFO, "Changing value of disable-mrt-writes of ns %s from %s to %s",
+					ns->name, bool_val[ns->mrt_writes_disabled], v);
+			ns->mrt_writes_disabled = true;
+		}
+		else if (strcmp(v, "false") == 0) {
+			cf_info(AS_INFO, "Changing value of disable-mrt-writes of ns %s from %s to %s",
+					ns->name, bool_val[ns->mrt_writes_disabled], v);
+			ns->mrt_writes_disabled = false;
+		}
+		else {
+			return false;
+		}
+	}
 	else if (as_info_parameter_get(cmd, "disable-write-dup-res", v,
 			&v_len) == 0) {
 		if (ns->cp) {
@@ -1674,6 +1702,23 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 		cf_info(AS_INFO, "Changing value of migrate-sleep of ns %s from %u to %d",
 				ns->name, ns->migrate_sleep, val);
 		ns->migrate_sleep = (uint32_t)val;
+	}
+	else if (as_info_parameter_get(cmd, "mrt-duration", v, &v_len) == 0) {
+		if (! ns->cp) {
+			cf_warning(AS_INFO, "{%s} 'mrt-duration' is only applicable with 'strong-consistency'",
+					ns->name);
+			return false;
+		}
+		uint32_t val;
+		if (cf_str_atoi_seconds(v, &val) != 0 ||
+				val < MIN_MRT_DURATION || val > MAX_MRT_DURATION) {
+			cf_warning(AS_INFO, "{%s} mrt-duration must be in time units between %u and %u seconds",
+					ns->name, MIN_MRT_DURATION, MAX_MRT_DURATION);
+			return false;
+		}
+		cf_info(AS_INFO, "Changing value of mrt-duration of ns %s from %u to %u",
+				ns->name, ns->mrt_duration, val);
+		ns->mrt_duration = val;
 	}
 	else if (as_info_parameter_get(cmd, "nsup-hist-period", v, &v_len) == 0) {
 		uint32_t val;

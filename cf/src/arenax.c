@@ -174,6 +174,10 @@ cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle)
 
 	cf_mutex_lock(&arena->lock);
 
+	// OLD PARANOIA.
+	cf_assert(p_free_element->magic != FREE_MAGIC, CF_ARENAX,
+			"double freed arena element");
+
 	p_free_element->magic = FREE_MAGIC;
 	p_free_element->next_h = arena->free_h;
 	arena->free_h = h;

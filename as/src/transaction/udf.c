@@ -66,6 +66,7 @@
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/proxy.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
@@ -142,8 +143,8 @@ static void udf_master_done(udf_record* urecord, as_rec* urec, as_result* result
 static void update_lua_failure_stats(const as_transaction* tr, as_namespace* ns, const as_result* result);
 static void update_lua_success_stats(const as_transaction* tr, as_namespace* ns, udf_optype op);
 
-static void process_failure(as_transaction* tr, const as_result* result, cf_dyn_buf* db);
-static void process_response(as_transaction* tr, bool success, const as_val* val, cf_dyn_buf* db);
+static void process_failure(as_transaction* tr, bool had_updates, const as_result* result, cf_dyn_buf* db);
+static void process_response(as_transaction* tr, bool success, bool had_updates, const as_val* val, cf_dyn_buf* db);
 
 
 //==========================================================
@@ -351,21 +352,21 @@ as_udf_start(as_transaction* tr)
 	if (g_config.udf_execution_disabled) {
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_udf_response(tr, NULL);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_udf_response(tr, NULL);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Don't know if UDF is read or delete - check that we aren't backed up.
 	if (as_storage_overloaded(tr->rsv.ns, 0, "udf")) {
 		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_udf_response(tr, NULL);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Create rw_request and add to hash.
@@ -418,7 +419,7 @@ as_udf_start(as_transaction* tr)
 		finished_replicated(tr);
 		send_udf_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	// If we don't need to wait for replica write acks, fire and forget.
@@ -426,7 +427,7 @@ as_udf_start(as_transaction* tr)
 		start_udf_repl_write_forget(rw, tr);
 		send_udf_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	start_udf_repl_write(rw, tr);
@@ -536,7 +537,7 @@ udf_dup_res_cb(rw_request* rw)
 		return true;
 	}
 
-	if (status != TRANS_IN_PROGRESS) {
+	if (status == TRANS_DONE) {
 		send_udf_response(&tr, &rw->response_db);
 		return true;
 	}
@@ -617,6 +618,11 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 
 	clear_delete_response_metadata(tr);
 
+	// Note - responses that use this can use read or write semantics - they're
+	// "failures" before executing the UDF, either hard errors or 'filtered out'
+	// (never 'ok') which behave the same for reads & writes.
+	as_record_version v;
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (db != NULL && db->used_sz != 0) {
@@ -627,7 +633,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, NULL, NULL, 0, tr->rsv.ns,
-					as_transaction_trid(tr));
+					mrt_read_fill_version(&v, tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, udf, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
@@ -643,7 +649,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		else {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
-					0, tr->rsv.ns, as_transaction_trid(tr));
+					0, tr->rsv.ns, mrt_read_fill_version(&v, tr));
 		}
 		if (as_transaction_is_batch_sub(tr)) {
 			from_proxy_batch_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
@@ -658,7 +664,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->from_data.batch_index, (cl_msg*)db->buf, db->used_sz);
 		}
 		else {
-			as_batch_add_ack(tr);
+			as_batch_add_ack(tr, mrt_read_fill_version(&v, tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, batch_sub_udf_hist);
@@ -692,7 +698,7 @@ udf_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, rw_request_trid(rw));
+				0, rw->rsv.ns, NULL);
 		// Timeouts aren't included in histograms.
 		client_udf_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
@@ -740,7 +746,7 @@ udf_master(rw_request* rw, as_transaction* tr)
 	else if (! udf_def_init_from_msg(call.def, tr)) {
 		cf_warning(AS_UDF, "failed udf_def_init_from_msg");
 		tr->result_code = AS_ERR_PARAMETER;
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	udf_optype optype = udf_master_apply(&call, rw);
@@ -752,7 +758,7 @@ udf_master(rw_request* rw, as_transaction* tr)
 	if (optype == UDF_OPTYPE_READ || optype == UDF_OPTYPE_NONE) {
 		// UDF is done, no replica writes needed.
 		// TODO - linearized reads need to start replica ping here.
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	return optype == UDF_OPTYPE_WAITING ? TRANS_WAITING : TRANS_IN_PROGRESS;
@@ -776,8 +782,41 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 	as_record* r = r_ref.r; // only valid if get_rv == 0
 
+	int verify_rv = mrt_allow_read(tr, get_rv == 0 ? r : NULL);
+
+	if (verify_rv != 0) {
+		if (get_rv == 0) {
+			as_record_done(&r_ref, ns);
+		}
+
+		tr->result_code = (uint8_t)verify_rv;
+		return UDF_OPTYPE_NONE;
+	}
+
+	bool is_mrt = as_transaction_has_mrt_id(tr);
+
+	if (get_rv == 0) {
+		if ((r = read_r(ns, r, is_mrt)) == NULL) {
+			as_record_done(&r_ref, ns);
+			as_incr_uint64(&ns->n_fail_mrt_blocked);
+			tr->result_code = AS_ERR_MRT_BLOCKED; // not ideal for read UDF
+			return UDF_OPTYPE_NONE;
+		}
+
+		// Ok to pass substituted (orig) r on from here - as_record_done() will
+		// never encounter it with generation 0, since it can't be non-durably
+		// deleted in this transaction (non-MRT writes/deletes are forbidden).
+		r_ref.r = r;
+
+		// Set non-zero values - returns generation & void-time on errors - ok?
+		tr->generation = r->generation;
+		tr->void_time = r->void_time;
+		tr->last_update_time = r->last_update_time;
+	}
+
 	// If record is expired or truncated, pretend it was not found.
-	if (get_rv == 0 && as_record_is_doomed(r, ns)) {
+	if (get_rv == 0 &&
+			as_record_is_doomed(r, ns) && ! (is_mrt && is_mrt_provisional(r))) {
 		as_record_done(&r_ref, ns);
 		get_rv = -1;
 	}
@@ -787,7 +826,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		return UDF_OPTYPE_WAITING;
 	}
 
-	if (get_rv == 0) {
+	if (get_rv == 0 && ! is_mrt_original(r)) {
 		as_xdr_ship_status ship_status = as_xdr_ship_check(r, tr);
 
 		if (ship_status == XDR_SHIP_NEAR) {
@@ -894,6 +933,19 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	if (urecord.has_updates) {
 		// Can't use original r shortcut - only good if get_rv == 0.
 		as_record* safe_r = rd.r;
+
+		uint8_t mrt_rv = (uint8_t)mrt_allow_udf_write(tr, safe_r);
+
+		if (mrt_rv != AS_OK) {
+			udf_master_failed(&urecord, urec, &result, mrt_rv, db);
+			return UDF_OPTYPE_NONE;
+		}
+
+		// Add the MRT id, as appropriate.
+		if ((mrt_rv = (uint8_t)set_mrt_id_from_msg(&rd, tr)) != AS_OK) {
+			udf_master_failed(&urecord, urec, &result, mrt_rv, db);
+			return UDF_OPTYPE_NONE;
+		}
 
 		// Save for XDR submit.
 		uint64_t prev_lut = safe_r->last_update_time;
@@ -1111,9 +1163,8 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 	// Apply changes to metadata in as_index.
 	//
 
-	index_metadata old_metadata;
+	as_record old_r = *r;
 
-	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
 	set_xdr_write(tr, r);
 	transition_delete_metadata(tr, r, is_delete, is_delete && rd->n_bins != 0);
@@ -1124,31 +1175,37 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_detail(AS_UDF, "{%s} failed write %pD", ns->name, &tr->keyd);
-		unwind_index_metadata(&old_metadata, r);
+		unwind_index_metadata(&old_r, r);
 		return (uint8_t)(-result);
 	}
 
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(tr->rsv.tree, urecord->r_ref, ns, rd->n_bins,
-			&old_metadata);
+	as_record_transition_stats(r, ns, &old_r);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
-	// Success - adjust sindex, etc.
+	// Success - adjust set index and sindex, etc.
 	//
+
+	bool do_indexes = ! as_transaction_has_mrt_id(tr);
+
+	if (do_indexes) {
+		as_record_transition_set_index(tr->rsv.tree, urecord->r_ref, ns,
+				rd->n_bins, &old_r);
+
+		if (set_has_sindex(r, ns)) {
+			update_sindex(ns, urecord->r_ref, urecord->old_bins,
+					urecord->n_old_bins, rd->bins, rd->n_bins);
+		}
+		else {
+			// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+			as_index_clear_in_sindex(r);
+		}
+	}
+
+	finish_first_mrt(rd, &old_r, urecord->r_ref->puddle);
 
 	// Store or drop the key as appropriate.
 	as_record_finalize_key(r, rd->key, rd->key_size);
-
-	// Update sindex.
-	if (set_has_sindex(r, ns)) {
-		update_sindex(ns, urecord->r_ref, urecord->old_bins,
-				urecord->n_old_bins, rd->bins, rd->n_bins);
-	}
-	else {
-		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
-		as_index_clear_in_sindex(r);
-	}
 
 	tr->generation = r->generation;
 	tr->void_time = r->void_time;
@@ -1199,10 +1256,13 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 	}
 
 	switch (result_code) {
-	// FIXME - add generation check?
+	// TODO - add generation check?
 	case AS_ERR_RECORD_TOO_BIG:
 		cf_detail(AS_UDF, "{%s} record too big %pD", ns->name, &tr->keyd);
 		as_incr_uint64(&ns->n_fail_record_too_big);
+		break;
+	case AS_ERR_MRT_BLOCKED:
+		as_incr_uint64(&ns->n_fail_mrt_blocked);
 		break;
 	default:
 		// These either log warnings or aren't interesting enough to count.
@@ -1212,7 +1272,7 @@ udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result,
 	tr->result_code = result_code; // must set before process_failure()
 
 	if (result != NULL) {
-		process_failure(tr, result, db);
+		process_failure(tr, urecord->has_updates, result, db);
 		as_result_destroy(result);
 	}
 
@@ -1242,7 +1302,7 @@ udf_master_done(udf_record* urecord, as_rec* urec, as_result* result,
 		as_record_done(urecord->r_ref, ns);
 	}
 
-	process_response(tr, true, result->value, db);
+	process_response(tr, true, urecord->has_updates, result->value, db);
 
 	as_result_destroy(result);
 	as_rec_destroy(urec);
@@ -1378,10 +1438,11 @@ update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
 //
 
 static void
-process_failure(as_transaction* tr, const as_result* result, cf_dyn_buf* db)
+process_failure(as_transaction* tr, bool had_updates, const as_result* result,
+		cf_dyn_buf* db)
 {
 	if (result->is_success) { // yes - this can happen
-		process_response(tr, false, NULL, db);
+		process_response(tr, false, had_updates, NULL, db);
 		return;
 	}
 
@@ -1395,21 +1456,26 @@ process_failure(as_transaction* tr, const as_result* result, cf_dyn_buf* db)
 		as_string_init_wlen(&stack_s, (char*)UNEXPECTED, sizeof(UNEXPECTED) - 1,
 				false);
 
-		process_response(tr, false, as_string_toval(&stack_s), db);
+		process_response(tr, false, had_updates, as_string_toval(&stack_s), db);
 		return;
 	}
 
-	process_response(tr, false, val, db);
+	process_response(tr, false, had_updates, val, db);
 }
 
 static void
-process_response(as_transaction* tr, bool success, const as_val* val,
-		cf_dyn_buf* db)
+process_response(as_transaction* tr, bool success, bool had_updates,
+		const as_val* val, cf_dyn_buf* db)
 {
 	// No response for background (internal) UDF.
 	if (tr->origin == FROM_IUDF) {
 		return;
 	}
+
+	as_record_version stack_v;
+	as_record_version* v = had_updates ?
+			mrt_write_fill_version(&stack_v, tr) :
+			mrt_read_fill_version(&stack_v, tr);
 
 	size_t msg_sz = 0;
 
@@ -1419,8 +1485,7 @@ process_response(as_transaction* tr, bool success, const as_val* val,
 		// better off without it.)
 
 		db->buf = (uint8_t*)as_msg_make_no_val_response(tr->result_code,
-				tr->generation, tr->void_time, as_transaction_trid(tr),
-				&msg_sz);
+				tr->generation, tr->void_time, v, &msg_sz);
 	}
 	else {
 		// Note - this function quietly handles a null val. The response will
@@ -1428,8 +1493,7 @@ process_response(as_transaction* tr, bool success, const as_val* val,
 		// clients/apps handle.
 
 		db->buf = (uint8_t*)as_msg_make_val_response(success, val,
-				tr->result_code, tr->generation, tr->void_time,
-				as_transaction_trid(tr), &msg_sz);
+				tr->result_code, tr->generation, tr->void_time, v, &msg_sz);
 	}
 
 	db->is_stack = false;

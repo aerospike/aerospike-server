@@ -45,6 +45,7 @@
 #include "base/exp.h"
 #include "base/expop.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/set_index.h"
 #include "base/transaction.h"
@@ -56,6 +57,7 @@
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/proxy.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
@@ -70,8 +72,6 @@
 #define MAX_N_OPS (32 * 1024)
 
 COMPILER_ASSERT(RECORD_MAX_BINS + MAX_N_OPS < 64 * 1024);
-
-#define STACK_PARTICLES_SIZE (1024 * 1024)
 
 
 //==========================================================
@@ -90,12 +90,11 @@ static void send_write_response(as_transaction* tr, cf_dyn_buf* db);
 static void write_timeout_cb(rw_request* rw);
 
 static transaction_status write_master(rw_request* rw, as_transaction* tr);
-static void write_master_failed(as_transaction* tr, as_index_ref* r_ref, bool record_created, as_index_tree* tree, as_storage_rd* rd, int result_code);
+static void write_master_failed(as_transaction* tr, as_index_ref* r_ref, as_index_tree* tree, as_storage_rd* rd, int result_code);
 static int write_master_preprocessing(as_transaction* tr);
 static int write_master_policies(as_transaction* tr, bool* p_must_not_create, bool* p_is_replace);
 static bool check_msg_set_name(as_transaction* tr, const char* set_name);
 static int write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, bool is_replace, rw_request* rw, bool* is_delete);
-static int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd, cf_ll_buf* particles_llb, cf_dyn_buf* db);
 static int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd, as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins, as_bin* result_bins, uint32_t* p_n_result_bins, cf_ll_buf* particles_llb);
 
 
@@ -237,14 +236,14 @@ as_write_start(as_transaction* tr)
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_write_response(tr, NULL);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Check that we aren't backed up.
 	if (as_storage_overloaded(tr->rsv.ns, 0, "write")) {
 		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_write_response(tr, NULL);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Create rw_request and add to hash.
@@ -298,7 +297,7 @@ as_write_start(as_transaction* tr)
 		finished_replicated(tr);
 		send_write_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	// If we don't need to wait for replica write acks, fire and forget.
@@ -306,7 +305,7 @@ as_write_start(as_transaction* tr)
 		start_write_repl_write_forget(rw, tr);
 		send_write_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	start_write_repl_write(rw, tr);
@@ -387,7 +386,7 @@ write_dup_res_cb(rw_request* rw)
 		return true;
 	}
 
-	if (status == TRANS_DONE_ERROR) {
+	if (status == TRANS_DONE) {
 		send_write_response(&tr, NULL);
 		return true;
 	}
@@ -468,6 +467,10 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 
 	clear_delete_response_metadata(tr);
 
+	// Note - doesn't conflict with clear_delete_response_metadata() since we
+	// only flag as delete on success, where we don't return record version.
+	as_record_version v;
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (db && db->used_sz != 0) {
@@ -478,7 +481,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, NULL, NULL, 0, tr->rsv.ns,
-					as_transaction_trid(tr));
+					mrt_write_fill_version(&v, tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, write, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
@@ -495,7 +498,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		else {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
-					0, tr->rsv.ns, as_transaction_trid(tr));
+					0, tr->rsv.ns, mrt_write_fill_version(&v, tr));
 		}
 		if (as_transaction_is_batch_sub(tr)) {
 			from_proxy_batch_sub_write_update_stats(tr->rsv.ns,
@@ -512,7 +515,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->from_data.batch_index, (cl_msg*)db->buf, db->used_sz);
 		}
 		else {
-			as_batch_add_ack(tr);
+			as_batch_add_ack(tr, mrt_write_fill_version(&v, tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, batch_sub_write_hist);
@@ -522,6 +525,9 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		tr->from.iops_orig->done_cb(tr->from.iops_orig->udata, tr->result_code);
 		BENCHMARK_NEXT_DATA_POINT(tr, ops_sub, response);
 		ops_sub_write_update_stats(tr->rsv.ns, tr->result_code);
+		break;
+	case FROM_MONITOR_UPDATE:
+		// Nothing needed.
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
@@ -543,7 +549,7 @@ write_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, rw_request_trid(rw));
+				0, rw->rsv.ns, NULL);
 		// Timeouts aren't included in histograms.
 		client_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
 				as_msg_is_xdr(&rw->msgp->msg));
@@ -568,6 +574,9 @@ write_timeout_cb(rw_request* rw)
 		// Timeouts aren't included in histograms.
 		ops_sub_write_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
+	case FROM_MONITOR_UPDATE:
+		// Nothing needed.
+		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
@@ -591,7 +600,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	if (! write_master_preprocessing(tr)) {
 		// Failure cases all call write_master_failed().
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	//------------------------------------------------------
@@ -604,8 +613,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	int result = write_master_policies(tr, &must_not_create, &is_replace);
 
 	if (result != 0) {
-		write_master_failed(tr, 0, false, 0, 0, result);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, NULL, NULL, NULL, result);
+		return TRANS_DONE;
 	}
 
 	//------------------------------------------------------
@@ -619,22 +628,36 @@ write_master(rw_request* rw, as_transaction* tr)
 	as_namespace* ns = tr->rsv.ns;
 	as_index_tree* tree = tr->rsv.tree;
 
+	bool is_mrt = as_transaction_has_mrt_id(tr);
+
 	// Find or create as_index, populate as_index_ref, lock record.
-	as_index_ref r_ref;
+	as_index_ref r_ref = { 0 };
 	as_record* r = NULL;
 	bool record_created = false;
 
 	if (must_not_create) {
-		if (as_record_get(tree, &tr->keyd, &r_ref) != 0) {
-			write_master_failed(tr, 0, record_created, tree, 0, AS_ERR_NOT_FOUND);
-			return TRANS_DONE_ERROR;
-		}
+		int rv = as_record_get(tree, &tr->keyd, &r_ref);
 
 		r = r_ref.r;
 
-		if (as_record_is_doomed(r, ns)) {
-			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_NOT_FOUND);
-			return TRANS_DONE_ERROR;
+		if ((result = mrt_allow_write(tr, r)) != 0) {
+			write_master_failed(tr, &r_ref, tree, NULL, result);
+			return TRANS_DONE;
+		}
+
+		if (rv != 0) {
+			write_master_failed(tr, NULL, tree, NULL, AS_ERR_NOT_FOUND);
+			return TRANS_DONE;
+		}
+
+		// Set non-zero values - returns generation & void-time on errors - ok?
+		tr->generation = r->generation;
+		tr->void_time = r->void_time;
+		tr->last_update_time = r->last_update_time;
+
+		if (as_record_is_doomed(r, ns) && ! (is_mrt && is_mrt_provisional(r))) {
+			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_NOT_FOUND);
+			return TRANS_DONE;
 		}
 
 		if (repl_state_check(r, tr) < 0) {
@@ -643,8 +666,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		}
 
 		if (! as_record_is_live(r)) {
-			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_NOT_FOUND);
-			return TRANS_DONE_ERROR;
+			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_NOT_FOUND);
+			return TRANS_DONE;
 		}
 	}
 	else {
@@ -652,14 +675,25 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		if (rv < 0) {
 			cf_detail(AS_RW, "{%s} write_master: fail as_record_get_create() %pD", ns->name, &tr->keyd);
-			write_master_failed(tr, 0, record_created, tree, 0, AS_ERR_UNKNOWN);
-			return TRANS_DONE_ERROR;
+			write_master_failed(tr, NULL, tree, NULL, AS_ERR_UNKNOWN);
+			return TRANS_DONE;
 		}
 
 		r = r_ref.r;
-		record_created = rv == 1;
+		record_created = rv == 1; // also equivalent to r->generation == 0
 
-		bool is_doomed = as_record_is_doomed(r, ns);
+		if ((result = mrt_allow_write(tr, r)) != 0) {
+			write_master_failed(tr, &r_ref, tree, NULL, result);
+			return TRANS_DONE;
+		}
+
+		// Set non-zero values - returns generation & void-time on errors - ok?
+		tr->generation = r->generation;
+		tr->void_time = r->void_time;
+		tr->last_update_time = r->last_update_time;
+
+		bool is_doomed = as_record_is_doomed(r, ns) &&
+				! (is_mrt && is_mrt_provisional(r));
 
 		if (! record_created && ! is_doomed && repl_state_check(r, tr) < 0) {
 			as_record_done(&r_ref, ns);
@@ -677,14 +711,14 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Enforce record-level create-only existence policy.
 	if ((m->info2 & AS_MSG_INFO2_CREATE_ONLY) != 0 &&
 			! record_created && as_record_is_live(r)) {
-		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_RECORD_EXISTS);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_RECORD_EXISTS);
+		return TRANS_DONE;
 	}
 
 	// Check generation requirement, if any.
 	if (! generation_check(r, m, ns)) {
-		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_GENERATION);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_GENERATION);
+		return TRANS_DONE;
 	}
 
 	// If creating record, write set-ID into index.
@@ -694,18 +728,23 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		if (rv_set == -1) {
 			cf_warning(AS_RW, "{%s} write_master: set can't be added %pD", ns->name, &tr->keyd);
-			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_PARAMETER);
-			return TRANS_DONE_ERROR;
+			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_PARAMETER);
+			return TRANS_DONE;
 		}
 		else if (rv_set == -2) {
-			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_FORBIDDEN);
-			return TRANS_DONE_ERROR;
+			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
+			return TRANS_DONE;
+		}
+		else if (rv_set > 0) {
+			write_master_failed(tr, &r_ref, tree, NULL, rv_set);
+			return TRANS_DONE;
 		}
 
 		// Don't write record if it would be truncated.
-		if (as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
-			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_FORBIDDEN);
-			return TRANS_DONE_ERROR;
+		if (! is_mrt &&
+				as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
+			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
+			return TRANS_DONE;
 		}
 	}
 
@@ -714,8 +753,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Enforce set size limit, if any.
 	if (as_set_size_stop_writes(p_set)) {
 		cf_ticker_warning(AS_RW, "{%s|%s} at stop-writes-size - can't write", ns->name, p_set->name);
-		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_FORBIDDEN);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
+		return TRANS_DONE;
 	}
 
 	// Shortcut set name.
@@ -724,8 +763,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	// If record existed, check that as_msg set name matches.
 	if (! record_created && tr->origin != FROM_IOPS &&
 			! check_msg_set_name(tr, set_name)) {
-		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_PARAMETER);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_PARAMETER);
+		return TRANS_DONE;
 	}
 
 	if (! record_created) {
@@ -737,8 +776,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		}
 
 		if (ship_status == XDR_SHIP_FAR) {
-			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_ERR_XDR_KEY_BUSY);
-			return TRANS_DONE_ERROR;
+			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_XDR_KEY_BUSY);
+			return TRANS_DONE;
 		}
 	}
 
@@ -747,8 +786,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Handle metadata filter if present.
 	if (! record_created && as_record_is_live(r) &&
 			(result = handle_meta_filter(tr, r, &filter_exp)) != 0) {
-		write_master_failed(tr, &r_ref, false, tree, 0, result);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, NULL, result);
+		return TRANS_DONE;
 	}
 
 	//------------------------------------------------------
@@ -765,12 +804,23 @@ write_master(rw_request* rw, as_transaction* tr)
 		as_storage_record_open(ns, r, &rd);
 	}
 
+	// Add the MRT id, as appropriate.
+	if ((result = set_mrt_id_from_msg(&rd, tr)) != 0) {
+		write_master_failed(tr, &r_ref, tree, &rd, result);
+		return TRANS_DONE;
+	}
+
+	if ((result = as_mrt_monitor_write_check(tr, &rd)) != 0) {
+		write_master_failed(tr, &r_ref, tree, &rd, result);
+		return TRANS_DONE;
+	}
+
 	// Apply record bins filter if present.
 	if (filter_exp != NULL) {
 		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
 			destroy_filter_exp(tr, filter_exp);
-			write_master_failed(tr, &r_ref, false, tree, &rd, result);
-			return TRANS_DONE_ERROR;
+			write_master_failed(tr, &r_ref, tree, &rd, result);
+			return TRANS_DONE;
 		}
 
 		destroy_filter_exp(tr, filter_exp);
@@ -782,8 +832,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		if (origin->check_cb != NULL &&
 				! origin->check_cb(origin->udata, &rd)) {
-			write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_NOT_FOUND);
-			return TRANS_DONE_ERROR;
+			write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_NOT_FOUND);
+			return TRANS_DONE;
 		}
 	}
 
@@ -795,8 +845,8 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	// Deal with key storage as needed.
 	if ((result = handle_msg_key(tr, &rd)) != 0) {
-		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, &rd, result);
+		return TRANS_DONE;
 	}
 
 	// Convert message TTL special value if appropriate.
@@ -807,20 +857,21 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	if (! is_valid_ttl(m->record_ttl)) {
 		cf_warning(AS_RW, "write_master: invalid ttl %u", m->record_ttl);
-		write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_PARAMETER);
-		return false;
+		write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_PARAMETER);
+		return TRANS_DONE;
 	}
 
-	if (is_ttl_disallowed(m->record_ttl, ns, p_set)) {
+	if (is_ttl_disallowed(m->record_ttl, ns, p_set) &&
+			! as_mrt_monitor_is_monitor_record(ns, r)) {
 		cf_ticker_warning(AS_RW, "write_master: disallowed ttl with nsup-period 0");
-		write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_FORBIDDEN);
-		return false;
+		write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_FORBIDDEN);
+		return TRANS_DONE;
 	}
 
 	// Set up the nodes to which we'll write replicas.
 	if (! set_replica_destinations(tr, rw)) {
-		write_master_failed(tr, &r_ref, record_created, tree, &rd, AS_ERR_UNAVAILABLE);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, &rd, AS_ERR_UNAVAILABLE);
+		return TRANS_DONE;
 	}
 
 	// Fire and forget can overload the fabric send queues - check.
@@ -845,8 +896,8 @@ write_master(rw_request* rw, as_transaction* tr)
 	result = write_master_apply(tr, &r_ref, &rd, is_replace, rw, &is_delete);
 
 	if (result != 0) {
-		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
-		return TRANS_DONE_ERROR;
+		write_master_failed(tr, &r_ref, tree, &rd, result);
+		return TRANS_DONE;
 	}
 
 	//------------------------------------------------------
@@ -888,17 +939,16 @@ write_master(rw_request* rw, as_transaction* tr)
 
 static void
 write_master_failed(as_transaction* tr, as_index_ref* r_ref,
-		bool record_created, as_index_tree* tree, as_storage_rd* rd,
-		int result_code)
+		as_index_tree* tree, as_storage_rd* rd, int result_code)
 {
 	as_namespace* ns = tr->rsv.ns;
 
-	if (r_ref) {
-		if (rd) {
+	if (r_ref != NULL && r_ref->r != NULL) {
+		if (rd != NULL) {
 			as_storage_record_close(rd);
 		}
 
-		if (record_created) {
+		if (r_ref->r->generation == 0) { // was created
 			as_index_delete(tree, &tr->keyd);
 		}
 
@@ -912,6 +962,9 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 	case AS_ERR_RECORD_TOO_BIG:
 		cf_detail(AS_RW, "{%s} write_master: record too big %pD", ns->name, &tr->keyd);
 		as_incr_uint64(&ns->n_fail_record_too_big);
+		break;
+	case AS_ERR_MRT_BLOCKED:
+		as_incr_uint64(&ns->n_fail_mrt_blocked);
 		break;
 	default:
 		// These either log warnings or aren't interesting enough to count.
@@ -929,13 +982,13 @@ write_master_preprocessing(as_transaction* tr)
 
 	if (ns->clock_skew_stop_writes) {
 		// TODO - new error code?
-		write_master_failed(tr, 0, false, 0, 0, AS_ERR_FORBIDDEN);
+		write_master_failed(tr, NULL, NULL, NULL, AS_ERR_FORBIDDEN);
 		return false;
 	}
 
 	// ns->stop_writes is set by nsup if configured threshold is breached.
 	if (ns->stop_writes) {
-		write_master_failed(tr, 0, false, 0, 0, AS_ERR_OUT_OF_SPACE);
+		write_master_failed(tr, NULL, NULL, NULL, AS_ERR_OUT_OF_SPACE);
 		return false;
 	}
 
@@ -946,7 +999,7 @@ write_master_preprocessing(as_transaction* tr)
 
 		if (! f || as_msg_field_get_value_sz(f) == 0) {
 			cf_warning(AS_RW, "write_master: null/empty set name not allowed for namespace %s", ns->name);
-			write_master_failed(tr, 0, false, 0, 0, AS_ERR_PARAMETER);
+			write_master_failed(tr, NULL, NULL, NULL, AS_ERR_PARAMETER);
 			return false;
 		}
 	}
@@ -1150,8 +1203,15 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 	as_record* r = rd->r;
-	bool set_has_si = set_has_sindex(r, ns);
-	bool si_needs_bins = set_has_si && r->in_sindex == 1;
+
+	bool do_indexes = rd->mrt_id == 0;
+	bool set_has_si = false;
+	bool si_needs_bins = false;
+
+	if (do_indexes) {
+		set_has_si = set_has_sindex(r, ns);
+		si_needs_bins = set_has_si && r->in_sindex == 1;
+	}
 
 	// For sindex, we must read existing record even if replacing.
 	rd->ignore_record_on_device = is_replace && ! si_needs_bins;
@@ -1192,9 +1252,8 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 
 	prepare_bin_metadata(tr, rd);
 
-	index_metadata old_metadata;
+	as_record old_r = *r;
 
-	stash_index_metadata(r, &old_metadata);
 	advance_record_version(tr, r);
 	set_xdr_write(tr, r);
 
@@ -1208,7 +1267,7 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb,
 			&rw->response_db)) != 0) {
 		cf_ll_buf_free(&particles_llb);
-		unwind_index_metadata(&old_metadata, r);
+		unwind_index_metadata(&old_r, r);
 		return result;
 	}
 
@@ -1224,19 +1283,25 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 				(n_old_bins == 0 || ! as_record_is_live(r))) {
 			// Didn't exist or was bin cemetery (tombstone bit not yet updated).
 			cf_ll_buf_free(&particles_llb);
-			unwind_index_metadata(&old_metadata, r);
+			unwind_index_metadata(&old_r, r);
 			return AS_ERR_NOT_FOUND;
 		}
 
 		if ((result = validate_delete_durability(tr)) != AS_OK) {
 			cf_ll_buf_free(&particles_llb);
-			unwind_index_metadata(&old_metadata, r);
+			unwind_index_metadata(&old_r, r);
 			return result;
 		}
 	}
 
 	transition_delete_metadata(tr, r, *is_delete,
 			*is_delete && rd->n_bins != 0);
+
+	if ((result = as_mrt_monitor_check_writes_limit(rd)) != 0) {
+		cf_ll_buf_free(&particles_llb);
+		unwind_index_metadata(&old_r, r);
+		return result;
+	}
 
 	//------------------------------------------------------
 	// Write the record to storage.
@@ -1245,31 +1310,38 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_detail(AS_RW, "{%s} write_master: failed as_storage_record_write() %pD", ns->name, &tr->keyd);
 		cf_ll_buf_free(&particles_llb);
-		unwind_index_metadata(&old_metadata, r);
+		unwind_index_metadata(&old_r, r);
 		return -result;
 	}
 
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
-			&old_metadata);
+	as_mrt_monitor_update_hist(rd);
+
+	as_record_transition_stats(r, ns, &old_r);
 	pickle_all(rd, rw);
 
 	//------------------------------------------------------
-	// Success - adjust sindex, looking at old and new bins.
+	// Success - adjust set index and sindex.
 	//
 
-	if (set_has_si) {
-		update_sindex(ns, r_ref, old_bins, n_old_bins_saved, rd->bins,
-				rd->n_bins);
-	}
-	else {
-		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
-		as_index_clear_in_sindex(r);
+	if (do_indexes) {
+		as_record_transition_set_index(tr->rsv.tree, r_ref, ns, rd->n_bins,
+				&old_r);
+
+		if (set_has_si) {
+			update_sindex(ns, r_ref, old_bins, n_old_bins_saved, rd->bins,
+					rd->n_bins);
+		}
+		else {
+			// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+			as_index_clear_in_sindex(r);
+		}
 	}
 
 	//------------------------------------------------------
 	// Final changes to record data in as_index.
 	//
+
+	finish_first_mrt(rd, &old_r, r_ref->puddle);
 
 	// Accommodate a new stored key - wasn't needed for pickling and writing.
 	if (r->key_stored == 0 && rd->key) {
@@ -1281,7 +1353,8 @@ write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 	return 0;
 }
 
-static int
+// Not static - called by split function.
+int
 write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, cf_dyn_buf* db)
 {
@@ -1337,8 +1410,10 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 	size_t msg_sz = 0;
 	uint8_t* msgp = (uint8_t*)as_msg_make_response_msg(AS_OK, generation,
 			void_time, has_read_all_op ? NULL : ops, bins,
-			(uint16_t)n_response_bins, ns, NULL, &msg_sz,
-			as_transaction_trid(tr));
+			(uint16_t)n_response_bins, ns, NULL, &msg_sz, NULL,
+			as_mrt_monitor_compute_deadline(tr));
+	// Note - no record version - only for writes that don't touch.
+	// Note - deadline because monitor record create response will have op.
 
 	as_bin_destroy_all(result_bins, n_result_bins);
 

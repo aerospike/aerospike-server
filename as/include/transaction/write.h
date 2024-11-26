@@ -32,6 +32,8 @@
 
 #include "citrusleaf/alloc.h"
 
+#include "dynbuf.h"
+
 #include "base/exp.h"
 #include "base/transaction.h"
 
@@ -96,3 +98,10 @@ iops_origin_destroy(iops_origin* origin)
 		cf_free(origin->msgp);
 	}
 }
+
+
+//==========================================================
+// Private API - for enterprise separation only.
+//
+
+int write_master_bin_ops(struct as_transaction_s* tr, struct as_storage_rd_s* rd, cf_ll_buf* particles_llb, cf_dyn_buf* db);

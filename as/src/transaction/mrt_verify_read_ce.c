@@ -1,7 +1,7 @@
 /*
- * index_ce.c
+ * mrt_verify_read_ce.c
  *
- * Copyright (C) 2016-2020 Aerospike, Inc.
+ * Copyright (C) 2024 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,39 +24,46 @@
 // Includes.
 //
 
-#include "base/index.h"
+#include "transaction/mrt_verify_read.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-
-#include "citrusleaf/cf_digest.h"
+#include <stddef.h>
 
 #include "log.h"
 
-#include "base/datamodel.h"
+#include "base/batch.h"
+#include "base/proto.h"
+#include "base/transaction.h"
+#include "transaction/proxy.h"
 
 
 //==========================================================
 // Public API.
 //
 
-as_index_tree*
-as_index_tree_resume(as_index_tree_shared* shared, as_treex* xmem_trees,
-		uint32_t pid, as_index_tree_done_fn cb, void* udata)
+transaction_status
+as_mrt_verify_read_start(as_transaction* tr)
 {
-	cf_crash(AS_INDEX, "CE code called as_index_tree_resume()");
-	return NULL;
-}
+	cf_warning(AS_RW, "MRTs are enterprise only");
 
+	tr->result_code = AS_ERR_ENTERPRISE_ONLY;
 
-//==========================================================
-// Private API - for enterprise separation only.
-//
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
+				tr->generation, tr->void_time, NULL, NULL, 0, tr->rsv.ns, NULL);
+		break;
+	case FROM_PROXY:
+		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+				tr->result_code, tr->generation, tr->void_time, NULL, NULL, 0,
+				tr->rsv.ns, NULL);
+		break;
+	case FROM_BATCH:
+		as_batch_add_result(tr, 0, NULL, NULL, NULL);
+		break;
+	default:
+		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
 
-bool
-as_index_sprig_reduce_no_rc(as_index_sprig* isprig, const cf_digest* keyd,
-		as_index_reduce_fn cb, void* udata)
-{
-	cf_crash(AS_INDEX, "CE code called as_index_sprig_reduce_no_rc()");
-	return false;
+	return TRANS_DONE;
 }

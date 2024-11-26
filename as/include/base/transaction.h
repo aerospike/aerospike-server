@@ -40,8 +40,6 @@
 #include "base/service.h"
 #include "fabric/partition.h"
 
-struct as_namespace_s;
-
 
 #define SHARED_MSGP(trw) ( \
 		trw->origin == FROM_BATCH || \
@@ -150,10 +148,9 @@ void as_end_of_transaction_force_close(as_file_handle *proto_fd_h);
 //
 
 typedef enum {
-	TRANS_DONE_ERROR	= -1, // tsvc frees msgp & reservation, response was sent to origin
-	TRANS_DONE_SUCCESS	=  0, // tsvc frees msgp & reservation, response was sent to origin
-	TRANS_IN_PROGRESS	=  1, // tsvc leaves msgp & reservation alone, rw_request now owns them
-	TRANS_WAITING		=  2  // tsvc leaves msgp alone but frees reservation
+	TRANS_DONE			= 0, // tsvc frees msgp & reservation, response was sent to origin
+	TRANS_IN_PROGRESS	= 1, // tsvc leaves msgp & reservation alone, rw_request now owns them
+	TRANS_WAITING		= 2  // tsvc leaves msgp alone but frees reservation
 } transaction_status;
 
 // How to interpret the 'from' union.
@@ -173,13 +170,18 @@ typedef enum {
 	FROM_IOPS,
 	FROM_READ_TOUCH,
 	FROM_RE_REPL, // enterprise-only
+	FROM_MONITOR_ROLL, // enterprise-only
+	FROM_MONITOR_UPDATE, // enterprise-only
+	FROM_MONITOR_DELETE, // enterprise-only
 
 	FROM_UNDEF	= 0
 } transaction_origin;
 
 struct as_batch_shared_s;
+struct as_namespace_s;
 struct iudf_origin_s;
 struct iops_origin_s;
+struct monitor_roll_origin_s;
 
 typedef struct as_transaction_s {
 
@@ -202,8 +204,10 @@ typedef struct as_transaction_s {
 		struct as_batch_shared_s*	batch_shared;
 		struct iudf_origin_s*		iudf_orig;
 		struct iops_origin_s*		iops_orig;
-		void*						read_touch_active;
-		void (*re_repl_orig_cb) (struct as_transaction_s* tr);
+		struct monitor_roll_origin_s* monitor_roll_orig;
+
+		// Dummy used by various internal transactions with no origin struct:
+		void*						internal_origin;
 	} from;
 
 	union {
@@ -251,6 +255,8 @@ typedef struct as_transaction_s {
 #define AS_TRANSACTION_FLAG_MUST_PING				0x08 // enterprise-only
 #define AS_TRANSACTION_FLAG_RSV_PROLE				0x10
 #define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE			0x20 // enterprise-only
+#define AS_TRANSACTION_FLAG_WAS_MRT_PROV			0x40 // enterprise-only
+#define AS_TRANSACTION_FLAG_IS_MRT_MONITOR_CREATE	0x80 // enterprise-only
 
 
 void as_transaction_init_head(as_transaction *tr, const cf_digest *, cl_msg *);
@@ -382,6 +388,24 @@ as_transaction_has_predexp(const as_transaction *tr)
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_PREDEXP) != 0;
 }
 
+static inline bool
+as_transaction_has_record_version(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_RECORD_VERSION) != 0;
+}
+
+static inline bool
+as_transaction_has_mrt_id(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_MRT_ID) != 0;
+}
+
+static inline bool
+as_transaction_has_mrt_deadline(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_MRT_DEADLINE) != 0;
+}
+
 // For now it's not worth storing the trid in the as_transaction struct since we
 // only parse it from the msg once per transaction anyway.
 static inline uint64_t
@@ -458,6 +482,25 @@ static inline bool
 as_transaction_is_strict_read(const as_transaction *tr)
 {
 	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) == 0;
+}
+
+static inline bool
+as_transaction_is_mrt_verify_read(const as_transaction *tr)
+{
+	return (tr->msgp->msg.info4 & AS_MSG_INFO4_MRT_VERIFY_READ) != 0;
+}
+
+static inline bool
+as_transaction_is_mrt_roll(const as_transaction *tr)
+{
+	return (tr->msgp->msg.info4 &
+			(AS_MSG_INFO4_MRT_ROLL_FORWARD | AS_MSG_INFO4_MRT_ROLL_BACK)) != 0;
+}
+
+static inline bool
+as_msg_from_monitor(const as_msg* m)
+{
+	return (m->info4 & AS_MSG_INFO4_MRT_MONITOR_DRIVEN) != 0;
 }
 
 static inline bool

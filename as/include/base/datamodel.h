@@ -87,6 +87,7 @@ struct as_msg_s;
 struct as_msg_field_s;
 struct as_msg_op_s;
 struct as_namespace_s;
+struct as_record_version_s;
 struct as_set_s;
 struct as_sindex_s;
 struct as_sindex_arena_s;
@@ -428,16 +429,15 @@ bool as_record_is_binless(const as_record *r);
 bool as_record_is_live(const as_record *r);
 int as_record_get_create(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 int as_record_get(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref);
-int as_record_get_live(struct as_index_tree_s *tree, const cf_digest *keyd, struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 void as_record_rescue(struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 
 void as_record_destroy(as_record *r, struct as_namespace_s *ns);
 void as_record_done(struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 
 void as_record_drop_stats(as_record* r, struct as_namespace_s* ns);
-void as_record_transition_stats(as_record* r, struct as_namespace_s* ns, const struct index_metadata_s* old);
+void as_record_transition_stats(as_record* r, struct as_namespace_s* ns, const as_record* old_r);
 
-void as_record_transition_set_index(struct as_index_tree_s* tree, struct as_index_ref_s* r_ref, struct as_namespace_s* ns, uint16_t n_bins, const struct index_metadata_s* old);
+void as_record_transition_set_index(struct as_index_tree_s* tree, struct as_index_ref_s* r_ref, struct as_namespace_s* ns, uint16_t n_bins, const as_record* old_r);
 
 void as_record_finalize_key(as_record* r, const uint8_t* key, uint32_t key_size);
 int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
@@ -468,10 +468,10 @@ typedef struct as_remote_record_s {
 	uint64_t last_update_time;
 
 	const char *set_name;
-	size_t set_name_len;
+	uint32_t set_name_len;
 
 	const uint8_t *key;
-	size_t key_size;
+	uint32_t key_size;
 
 	uint16_t n_bins;
 	as_flat_comp_meta cm;
@@ -483,9 +483,15 @@ typedef struct as_remote_record_s {
 	bool xdr_tombstone; // relevant only for enterprise edition
 	bool xdr_nsup_tombstone; // relevant only for enterprise edition
 	bool xdr_bin_cemetery; // relevant only for enterprise edition
+
+	uint64_t mrt_id; // relevant only for enterprise edition
+	struct as_record_version_s* mrt_orig_v; // relevant only for enterprise edition
+	uint8_t *orig_pickle; // relevant only for enterprise edition
+	size_t orig_pickle_sz; // relevant only for enterprise edition
 } as_remote_record;
 
 int as_record_replace_if_better(as_remote_record *rr);
+int as_record_apply(as_remote_record* rr, struct as_index_ref_s* r_ref, struct as_storage_rd_s* rd);
 
 // For enterprise split only.
 int record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
@@ -496,9 +502,41 @@ uint32_t as_record_stored_size(const as_record* r); // TODO - eventually inline
 #define as_record_void_time_get() cf_clepoch_seconds()
 bool as_record_is_expired(const as_record *r); // TODO - eventually inline
 
+// TODO - split and include MRT logic?
 static inline bool
 as_record_is_doomed(const as_record *r, struct as_namespace_s *ns)
 {
+	// WRITES
+	// ------
+	// Expired
+	//                Ordinary write         MRT write
+	// r normal       new                    new
+	// r orig         -                      -
+	// r prov         -                      update (absurd)
+	//
+	// Truncated
+	//                Ordinary write         MRT write
+	// r normal       new                    new
+	// r orig         -                      -
+	// r prov         -                      update
+
+	// READS
+	// -----
+	// Expired
+	//                Ordinary read          MRT read
+	// r normal       NF                     NF*
+	// r orig         NF                     -
+	// r prov         -                      read (absurd)
+	//
+	// Truncated
+	//                Ordinary read          MRT read
+	// r normal       NF                     NF*
+	// r orig         NF                     -
+	// r prov         -                      read
+	//
+	// * Will return the doomed record's version - if this is GC'd before we
+	// read-verify, we will fail the MRT. For now, don't worry about this.
+
 	return as_record_is_expired(r) || as_truncate_record_is_truncated(r, ns);
 }
 
@@ -611,6 +649,9 @@ typedef struct as_namespace_s {
 	void*			stripes;
 	size_t			stripe_sz;
 
+	// Temporary list of "original" index refs to be freed during warm restart.
+	cf_queue*		origs_gc_q;
+
 	//--------------------------------------------
 	// Cold start.
 	//
@@ -631,6 +672,9 @@ typedef struct as_namespace_s {
 
 	// For sanity checking at startup (also used during warm restart).
 	uint32_t		startup_max_void_time;
+
+	cf_shash*		mrt_cold_start_hash; // relevant only for enterprise edition
+	bool			mrt_cold_start_2nd_pass; // relevant only for enterprise edition
 
 	//--------------------------------------------
 	// Memory management.
@@ -722,6 +766,14 @@ typedef struct as_namespace_s {
 	bool			xdr_ships_bin_luts; // at least one DC ships changed bin LUTs (changed bins plus src-id)
 
 	//--------------------------------------------
+	// MRTs.
+	//
+
+	cf_shash*		mrt_monitor_hash;
+	uint32_t		mrt_monitor_set_id;
+	uint64_t		mrt_start_lut;
+
+	//--------------------------------------------
 	// Configuration.
 	//
 
@@ -737,6 +789,7 @@ typedef struct as_namespace_s {
 	uint32_t		default_read_touch_ttl_pct;
 	uint32_t		default_ttl;
 	bool			cold_start_eviction_disabled;
+	bool			mrt_writes_disabled; // relevant only for enterprise edition
 	bool			write_dup_res_disabled;
 	bool			ap_disallow_drops;
 	bool			disallow_null_setname;
@@ -760,6 +813,7 @@ typedef struct as_namespace_s {
 	uint32_t		migrate_retransmit_ms;
 	bool			migrate_skip_unreadable;
 	uint32_t		migrate_sleep;
+	uint32_t		mrt_duration; // relevant only for enterprise edition
 	uint32_t		nsup_hist_period;
 	uint32_t		nsup_period;
 	uint32_t		n_nsup_threads;
@@ -851,6 +905,7 @@ typedef struct as_namespace_s {
 	uint64_t		n_xdr_tombstones; // subset of n_tombstones
 	uint64_t		n_durable_tombstones; // subset of n_tombstones
 	uint64_t		n_xdr_bin_cemeteries; // subset of n_tombstones
+	uint64_t		n_mrt_provisionals; // relevant only for enterprise edition
 
 	// Consistency info.
 
@@ -1203,6 +1258,32 @@ typedef struct as_namespace_s {
 	uint64_t		n_re_repl_error;
 	uint64_t		n_re_repl_timeout;
 
+	// MRT verify read stats - relevant only for enterprise edition.
+
+	uint64_t		n_mrt_verify_read_success;
+	uint64_t		n_mrt_verify_read_error;
+	uint64_t		n_mrt_verify_read_timeout;
+
+	// MRT roll forward/back stats - relevant only for enterprise edition.
+
+	uint64_t		n_mrt_roll_forward_success;
+	uint64_t		n_mrt_roll_forward_error;
+	uint64_t		n_mrt_roll_forward_timeout;
+
+	// Subset of n_mrt_roll_forward... above, respectively
+	uint64_t		n_mrt_monitor_roll_forward_success;
+	uint64_t		n_mrt_monitor_roll_forward_error;
+	uint64_t		n_mrt_monitor_roll_forward_timeout;
+
+	uint64_t		n_mrt_roll_back_success;
+	uint64_t		n_mrt_roll_back_error;
+	uint64_t		n_mrt_roll_back_timeout;
+
+	// Subset of n_mrt_roll_back... above, respectively
+	uint64_t		n_mrt_monitor_roll_back_success;
+	uint64_t		n_mrt_monitor_roll_back_error;
+	uint64_t		n_mrt_monitor_roll_back_timeout;
+
 	// Special errors that deserve their own counters:
 
 	uint64_t		n_fail_xdr_forbidden;
@@ -1212,6 +1293,8 @@ typedef struct as_namespace_s {
 	uint64_t		n_fail_record_too_big;
 	uint64_t		n_fail_client_lost_conflict;
 	uint64_t		n_fail_xdr_lost_conflict;
+	uint64_t		n_fail_mrt_blocked;
+	uint64_t		n_fail_mrt_version_mismatch;
 
 	// Special non-error counters:
 
@@ -1231,6 +1314,7 @@ typedef struct as_namespace_s {
 	histogram*		si_query_rec_count_hist; // not tracked
 	histogram*		read_touch_hist;
 	histogram*		re_repl_hist; // relevant only for enterprise edition
+	histogram*		writes_per_mrt_hist; // relevant only for enterprise edition, not tracked
 
 	bool			read_hist_active;
 	bool			write_hist_active;
@@ -1244,6 +1328,7 @@ typedef struct as_namespace_s {
 	bool			si_query_rec_count_hist_active;
 	bool			read_touch_hist_active;
 	bool			re_repl_hist_active; // relevant only for enterprise edition
+	bool			writes_per_mrt_hist_active; // relevant only for enterprise edition
 
 	// Activate-by-config histograms.
 

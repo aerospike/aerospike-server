@@ -162,19 +162,11 @@ prepare_bin_metadata(const as_transaction* tr, as_storage_rd* rd)
 }
 
 void
-stash_index_metadata(const as_record* r, index_metadata* old)
+unwind_index_metadata(const as_record* old_r, as_record* r)
 {
-	old->void_time = r->void_time;
-	old->last_update_time = r->last_update_time;
-	old->generation = r->generation;
-}
-
-void
-unwind_index_metadata(const index_metadata* old, as_record* r)
-{
-	r->void_time = old->void_time;
-	r->last_update_time = old->last_update_time;
-	r->generation = old->generation;
+	r->void_time = old_r->void_time;
+	r->last_update_time = old_r->last_update_time;
+	r->generation = old_r->generation;
 }
 
 void
@@ -313,6 +305,11 @@ repl_write_should_retransmit_replicas(rw_request* rw, uint32_t result_code)
 	default:
 		return false;
 	}
+}
+
+void
+repl_write_with_orig(rw_request* rw)
+{
 }
 
 void

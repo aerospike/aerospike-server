@@ -567,7 +567,7 @@ as_geojson_parse(const as_namespace *ns, const char *json, uint32_t jlen,
 	return true;
 }
 
-// FIXME - writing a cell-less particle on failure is overkill - we can/should
+// TODO - writing a cell-less particle on failure is overkill - we can/should
 // handle failure in the callers, and leave pp untouched here.
 bool
 as_geojson_to_particle(const char *json, uint32_t jlen, as_particle **pp)

@@ -69,7 +69,7 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_GENERATION, M_FT_UINT32 },
 		{ RW_FIELD_DIGEST, M_FT_BUF },
 		{ RW_FIELD_RECORD, M_FT_BUF },
-		{ RW_FIELD_UNUSED_7, M_FT_BUF },
+		{ RW_FIELD_ORIG_RECORD, M_FT_BUF },
 		{ RW_FIELD_UNUSED_8, M_FT_UINT64 },
 		{ RW_FIELD_UNUSED_9, M_FT_BUF },
 		{ RW_FIELD_TID, M_FT_UINT32 },
@@ -214,7 +214,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 		// result code set here is for internal use only.
 		tr->result_code = AS_ERR_KEY_BUSY;
 
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 	else if (tr->origin == FROM_RE_REPL) {
 		// Always put this transaction at the head of the original rw_request's
@@ -232,7 +232,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 		as_incr_uint64(&ns->n_fail_key_busy);
 		tr->result_code = AS_ERR_KEY_BUSY;
 
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 	else {
 		// Queue this transaction on the original rw_request - it will be
@@ -340,10 +340,14 @@ retransmit_reduce_fn(const void* key, void* data, void* udata)
 
 			if (rw->repl_write_cb != NULL) {
 				repl_write_reset_replicas(rw);
+				repl_write_with_orig(rw);
 			}
 
-			send_rw_messages(rw);
-			update_retransmit_stats(rw);
+			if (rw->xmit_ms != 0) {
+				send_rw_messages(rw);
+				update_retransmit_stats(rw);
+			}
+			// else - repl_write_w_orig() waiting for a lap.
 		}
 		// else - lost race against dup-res or repl-write callback.
 
@@ -392,6 +396,9 @@ update_retransmit_stats(const rw_request* rw)
 		break;
 	case FROM_READ_TOUCH:
 	case FROM_RE_REPL:
+	case FROM_MONITOR_ROLL:
+	case FROM_MONITOR_UPDATE:
+	case FROM_MONITOR_DELETE:
 		// For now we don't report retransmit stats for these.
 		break;
 	default:

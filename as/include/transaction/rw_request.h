@@ -51,10 +51,12 @@
 
 struct as_batch_shared_s;
 struct as_file_handle_s;
+struct as_namespace_s;
 struct as_transaction_s;
 struct cl_msg_s;
 struct iops_origin_s;
 struct iudf_origin_s;
+struct monitor_roll_origin_s;
 struct rw_request_s;
 struct rw_wait_ele_s;
 
@@ -84,9 +86,10 @@ typedef struct rw_request_s {
 		void*						any;
 		struct as_file_handle_s*	proto_fd_h;
 		cf_node						proxy_node;
+		struct as_batch_shared_s*	batch_shared;
 		struct iudf_origin_s*		iudf_orig;
 		struct iops_origin_s*		iops_orig;
-		struct as_batch_shared_s*	batch_shared;
+		struct monitor_roll_origin_s* monitor_roll_orig;
 	} from;
 
 	union {
@@ -136,6 +139,7 @@ typedef struct rw_request_s {
 	// alternatively, timeouts.
 	uint32_t			tid;
 	bool				dup_res_complete;
+	bool				repl_write_w_orig; // enterprise only
 	bool				repl_write_complete;
 	bool				repl_ping_complete;
 	dup_res_done_cb		dup_res_cb;
@@ -198,17 +202,4 @@ static inline bool
 rw_request_is_batch_sub(const rw_request* rw)
 {
 	return (rw->from_flags & FROM_FLAG_BATCH_SUB) != 0;
-}
-
-// See as_transaction_trid().
-static inline uint64_t
-rw_request_trid(const rw_request* rw)
-{
-	if ((rw->msg_fields & AS_MSG_FIELD_BIT_TRID) == 0) {
-		return 0;
-	}
-
-	as_msg_field *f = as_msg_field_get(&rw->msgp->msg, AS_MSG_FIELD_TYPE_TRID);
-
-	return cf_swap_from_be64(*(uint64_t*)f->data);
 }

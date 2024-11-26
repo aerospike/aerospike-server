@@ -56,6 +56,7 @@
 #include "base/health.h"
 #include "base/index.h"
 #include "base/json_init.h"
+#include "base/mrt_monitor.h"
 #include "base/nsup.h"
 #include "base/security.h"
 #include "base/service.h"
@@ -420,6 +421,7 @@ as_run(int argc, char **argv)
 	as_ticker_start();			// only after everything else is started
 
 	// Relevant for enterprise edition only.
+	as_mrt_monitor_start();
 	as_storage_start_tomb_raider();
 
 	// Log a service-ready message.

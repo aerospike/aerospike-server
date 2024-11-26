@@ -1801,7 +1801,7 @@ exchange_data_msg_send_pending_ack()
 		goto Exit;
 	}
 
-	// FIXME - temporary assert, until we're sure.
+	// OLD PARANOIA.
 	cf_assert(g_exchange.data_msg != NULL, AS_EXCHANGE, "payload not built");
 
 	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
@@ -2013,7 +2013,7 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 		return 0;
 	}
 
-	// FIXME - prepare for this to be optional some time in the future...
+	// TODO - prepare for this to be optional some time in the future...
 	if (!msg_msgpack_list_get_count(msg_event->msg,
 			AS_EXCHANGE_MSG_NS_RACK_IDS, &num_namespace_elements_sent)
 			|| num_namespaces_sent != num_namespace_elements_sent) {
@@ -2930,7 +2930,7 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 
 		uint32_t num_rack_ids = num_namespaces_sent;
 
-		// FIXME - prepare for this to be optional some time in the future...
+		// TODO - prepare for this to be optional some time in the future...
 		if (!msg_msgpack_list_get_uint32_array(msg_event->msg,
 				AS_EXCHANGE_MSG_NS_RACK_IDS, rack_ids, &num_rack_ids)) {
 			WARNING("received invalid cluster groups from node %"PRIx64,

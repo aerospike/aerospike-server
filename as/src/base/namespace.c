@@ -107,6 +107,7 @@ as_namespace_create(char *name)
 	ns->migrate_order = 5;
 	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds
 	ns->migrate_sleep = 1;
+	ns->mrt_duration = 0; // will be  set later to DEFAULT_MRT_DURATION (10 sec) if applicable and not explicitly configured
 	ns->nsup_hist_period = 60 * 60; // 1 hour
 	ns->n_nsup_threads = 1;
 	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition

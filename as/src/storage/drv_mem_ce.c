@@ -121,6 +121,32 @@ flush_final_cfg(as_namespace* ns)
 {
 }
 
+void
+cold_start_sweep_device(drv_mems* mems, drv_mem* mem)
+{
+	cold_start_sweep(mems, mem);
+}
+
+void
+cold_start_fill_orig(drv_mem* mem, const as_flat_record* flat,
+		uint64_t rblock_id, const as_flat_opt_meta* opt_meta,
+		as_index_tree* tree, as_index_ref* r_ref)
+{
+}
+
+void
+cold_start_record_update(drv_mems* mems, const as_flat_record* flat,
+		const as_flat_opt_meta* opt_meta, as_index_tree* tree,
+		as_index_ref* r_ref)
+{
+	as_index* r = r_ref->r;
+
+	cf_assert(r->rblock_id != 0, AS_DRV_MEM, "invalid rblock-id");
+
+	block_free(&mems->mems[r->file_id], r->rblock_id, r->n_rblocks,
+			"record-add");
+}
+
 conflict_resolution_pol
 cold_start_policy(const as_namespace* ns)
 {
@@ -149,20 +175,6 @@ cold_start_init_xdr_state(const as_flat_record* flat, as_record* r)
 }
 
 void
-cold_start_transition_record(as_namespace* ns, const as_flat_record* flat,
-		const as_flat_opt_meta* opt_meta, as_index_tree* tree,
-		as_index_ref* r_ref, bool is_create)
-{
-	index_metadata old_metadata = {
-			// Note - other members irrelevant.
-			.generation = is_create ? 0 : 1, // fake to transition set-index
-	};
-
-	as_record_transition_set_index(tree, r_ref, ns, opt_meta->n_bins,
-			&old_metadata);
-}
-
-void
 cold_start_drop_cenotaphs(as_namespace* ns)
 {
 }
@@ -177,6 +189,21 @@ int
 write_bins(as_storage_rd* rd)
 {
 	return buffer_bins(rd);
+}
+
+void
+set_wblock_flags(as_storage_rd* rd, mem_write_block* mwb)
+{
+}
+
+void
+mrt_block_free_orig(drv_mems* mems, as_record* r)
+{
+}
+
+void
+mrt_rd_block_free_orig(drv_mems* mems, as_storage_rd* rd)
+{
 }
 
 void

@@ -177,7 +177,7 @@ as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 		return AS_PARTICLE_TYPE_STRING;
 	case MSGPACK_TYPE_BYTES:
 		return AS_PARTICLE_TYPE_BLOB;
-	// FIXME - for now HLL cannot be in CDT.
+	// TODO - for now HLL cannot be in CDT.
 	case MSGPACK_TYPE_GEOJSON:
 		return AS_PARTICLE_TYPE_GEOJSON;
 	case MSGPACK_TYPE_LIST:
@@ -304,7 +304,7 @@ as_bin_particle_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const as
 			return (int)mem_size;
 		}
 
-		as_particle *old_particle = b->particle; // FIXME - not needed
+		as_particle *old_particle = b->particle; // CLEANUP? - not needed
 
 		// Instead of allocating, we use the stack buffer provided. (Note that
 		// embedded types like integer will overwrite this with the value.)
@@ -318,7 +318,7 @@ as_bin_particle_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const as
 			as_bin_state_set_from_type(b, op_type);
 		}
 		else {
-			b->particle = old_particle; // FIXME - just set NULL
+			b->particle = old_particle; // CLEANUP? - just set NULL
 		}
 
 		return result;

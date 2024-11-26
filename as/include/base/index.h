@@ -53,7 +53,7 @@ typedef struct as_index_s {
 	// offset: 3
 	uint8_t tree_id: 6;
 	uint8_t color: 1;
-	uint8_t : 1;
+	uint8_t is_orig: 1;
 
 	// offset: 4
 	cf_digest keyd;
@@ -92,8 +92,15 @@ typedef struct as_index_s {
 	uint8_t : 4;
 
 	// offset: 56
-	// These 8 bytes are currently unused.
-	void* dim;
+	// MRT-related members.
+	union {
+		struct {
+			uint64_t orig_h: 40;
+			uint64_t : 24;
+		} __attribute__ ((__packed__));
+
+		uint64_t mrt_id;
+	};
 
 	// final size: 64
 
@@ -127,9 +134,18 @@ as_index_release(as_index* index)
 	return rc;
 }
 
+// MRT PARANOIA - clear unused bits in an orig_r.
+static inline void
+clear_unused_orig_bits(as_index* orig_r)
+{
+	orig_r->rc = 0;
+	orig_r->color = 0;
+	orig_r->left_h = 0;
+	orig_r->right_h = 0;
+}
+
 // Fast way to clear the record portion of as_index.
 // Note - relies on current layout and size of as_index!
-// FIXME - won't be able to "rescue" with future sindex method - will go away.
 static inline void
 as_index_clear_record_info(as_index* index)
 {
@@ -198,8 +214,8 @@ as_index_set_set_id(as_index* index, uint16_t set_id)
 //
 
 static inline int
-as_index_set_set_w_len(as_index* index, as_namespace* ns,
-		const char* set_name, size_t len, bool apply_restrictions)
+as_index_set_set_w_len(as_index* index, as_namespace* ns, const char* set_name,
+		uint32_t len, bool apply_restrictions)
 {
 	uint16_t set_id;
 	int rv = as_namespace_set_set_w_len(ns, set_name, len, &set_id,
@@ -337,9 +353,6 @@ typedef bool (*as_index_reduce_fn) (as_index_ref* value, void* udata);
 
 bool as_index_reduce(as_index_tree* tree, as_index_reduce_fn cb, void* udata);
 bool as_index_reduce_from(as_index_tree* tree, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
-
-bool as_index_reduce_live(as_index_tree* tree, as_index_reduce_fn cb, void* udata);
-bool as_index_reduce_from_live(as_index_tree* tree, const cf_digest* keyd, as_index_reduce_fn cb, void* udata);
 
 int as_index_get_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);
 int as_index_get_insert_vlock(as_index_tree* tree, const cf_digest* keyd, as_index_ref* index_ref);

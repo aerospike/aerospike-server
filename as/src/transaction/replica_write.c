@@ -281,6 +281,9 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 
+	msg_get_buf(m, RW_FIELD_ORIG_RECORD, &rr.orig_pickle, &rr.orig_pickle_sz,
+			MSG_GET_DIRECT);
+
 	if (! as_flat_unpack_remote_record_meta(ns, &rr)) {
 		cf_warning(AS_RW, "repl_write_handle_op: bad record");
 		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
@@ -512,6 +515,9 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd)
 	if (as_record_get(tree, keyd, &r_ref) != 0) {
 		return; // not found is ok from master's perspective.
 	}
+
+	// MRT PARANOIA - can we encounter a provisional here?
+	cf_assert(r_ref.r->orig_h == 0, AS_RW, "unexpected - dropped provisional");
 
 	if (ns->storage_type != AS_STORAGE_ENGINE_SSD ||
 			ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {

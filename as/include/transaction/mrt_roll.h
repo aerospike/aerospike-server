@@ -1,7 +1,7 @@
 /*
- * re_replicate.h
+ * mrt_roll.h
  *
- * Copyright (C) 2017 Aerospike, Inc.
+ * Copyright (C) 2024 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -40,5 +40,6 @@ struct as_transaction_s;
 // Public API.
 //
 
-transaction_status as_re_replicate_start(struct as_transaction_s* tr);
-void as_re_replicate_abort(struct as_transaction_s* tr);
+transaction_status as_mrt_roll_start(struct as_transaction_s* tr);
+
+// build trigger toggle

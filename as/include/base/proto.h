@@ -47,6 +47,7 @@ struct as_bin_s;
 struct as_file_handle_s;
 struct as_index_s;
 struct as_namespace_s;
+struct as_record_version_s;
 struct as_storage_rd_s;
 
 
@@ -90,6 +91,9 @@ struct as_storage_rd_s;
 #define AS_ERR_OP_NOT_APPLICABLE        26
 #define AS_ERR_FILTERED_OUT             27
 #define AS_ERR_LOST_CONFLICT            28
+#define AS_ERR_UNUSED_29                29 // safe to recycle (never shipped)
+#define AS_ERR_UNUSED_30                30 // safe to recycle (never shipped)
+#define AS_ERR_UNUSED_31                31 // safe to recycle (never shipped)
 #define AS_ERR_XDR_KEY_BUSY             32
 
 // Security. (Defined here to ensure no overlap with other result codes.)
@@ -130,6 +134,14 @@ struct as_storage_rd_s;
 
 // UDF.
 #define AS_ERR_UDF_EXECUTION            100
+
+// MRT.
+#define AS_ERR_MRT_BLOCKED              120
+#define AS_ERR_MRT_VERSION_MISMATCH     121
+#define AS_ERR_MRT_EXPIRED              122
+#define AS_ERR_MRT_TOO_MANY_WRITES      123
+#define AS_ERR_MRT_COMMITTED            124
+#define AS_ERR_MRT_ABORTED              125
 
 // Batch.
 #define AS_ERR_BATCH_DISABLED           150
@@ -196,7 +208,7 @@ typedef struct as_msg_s {
 	uint8_t info1;
 	uint8_t info2;
 	uint8_t info3;
-	uint8_t unused;
+	uint8_t info4;
 	uint8_t result_code;
 	uint32_t generation;
 	uint32_t record_ttl;
@@ -255,6 +267,16 @@ typedef struct cl_msg_s {
 //   1      0     allow prole
 //   1      1     allow unavailable
 
+// Bits in info4.
+#define AS_MSG_INFO4_MRT_VERIFY_READ        (1 << 0)
+#define AS_MSG_INFO4_MRT_ROLL_FORWARD       (1 << 1)
+#define AS_MSG_INFO4_MRT_ROLL_BACK          (1 << 2)
+#define AS_MSG_INFO4_MRT_MONITOR_DRIVEN     (1 << 3)
+	// Bit 4 is unused.
+	// Bit 5 is unused.
+	// Bit 6 is unused.
+	// Bit 7 is unused.
+
 //------------------------------------------------
 // as_msg_field.
 //
@@ -269,10 +291,10 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_TYPE_NAMESPACE         0
 #define AS_MSG_FIELD_TYPE_SET               1
 #define AS_MSG_FIELD_TYPE_KEY               2
-	// 3 is unused.
+#define AS_MSG_FIELD_TYPE_RECORD_VERSION    3
 #define AS_MSG_FIELD_TYPE_DIGEST_RIPE       4
-	// 5 is unused.
-	// 6 is unused. Was old batch.
+#define AS_MSG_FIELD_TYPE_MRT_ID            5
+#define AS_MSG_FIELD_TYPE_MRT_DEADLINE      6 // was old batch
 #define AS_MSG_FIELD_TYPE_TRID              7
 	// 8 is unused. Was old scan options.
 #define AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT    9
@@ -305,25 +327,28 @@ typedef struct as_msg_field_s {
 #define AS_MSG_FIELD_BIT_NAMESPACE          (1 << 0)
 #define AS_MSG_FIELD_BIT_SET                (1 << 1)
 #define AS_MSG_FIELD_BIT_KEY                (1 << 2)
-#define AS_MSG_FIELD_BIT_DIGEST_RIPE        (1 << 3)
-#define AS_MSG_FIELD_BIT_TRID               (1 << 4)
-#define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 5)
-#define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 6)
-#define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 7)
-#define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 8)
-#define AS_MSG_FIELD_BIT_SAMPLE_MAX         (1 << 9)
-#define AS_MSG_FIELD_BIT_LUT                (1 << 10) // for XDR writes only
-#define AS_MSG_FIELD_BIT_BVAL_ARRAY         (1 << 11)
-#define AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 12)
-#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 13)
-#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 14)
-#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 15)
-#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 16)
-#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 17)
-#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 18)
-#define AS_MSG_FIELD_BIT_BATCH              (1 << 19)
-#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 20)
-#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 21)
+#define AS_MSG_FIELD_BIT_RECORD_VERSION     (1 << 3)
+#define AS_MSG_FIELD_BIT_DIGEST_RIPE        (1 << 4)
+#define AS_MSG_FIELD_BIT_MRT_ID             (1 << 5)
+#define AS_MSG_FIELD_BIT_MRT_DEADLINE       (1 << 6)
+#define AS_MSG_FIELD_BIT_TRID               (1 << 7)
+#define AS_MSG_FIELD_BIT_SOCKET_TIMEOUT     (1 << 8)
+#define AS_MSG_FIELD_BIT_RECS_PER_SEC       (1 << 9)
+#define AS_MSG_FIELD_BIT_PID_ARRAY          (1 << 10)
+#define AS_MSG_FIELD_BIT_DIGEST_ARRAY       (1 << 11)
+#define AS_MSG_FIELD_BIT_SAMPLE_MAX         (1 << 12)
+#define AS_MSG_FIELD_BIT_LUT                (1 << 13) // for XDR writes only
+#define AS_MSG_FIELD_BIT_BVAL_ARRAY         (1 << 14)
+#define AS_MSG_FIELD_BIT_INDEX_RANGE        (1 << 15)
+#define AS_MSG_FIELD_BIT_INDEX_TYPE         (1 << 16)
+#define AS_MSG_FIELD_BIT_UDF_FILENAME       (1 << 17)
+#define AS_MSG_FIELD_BIT_UDF_FUNCTION       (1 << 18)
+#define AS_MSG_FIELD_BIT_UDF_ARGLIST        (1 << 19)
+#define AS_MSG_FIELD_BIT_UDF_OP             (1 << 20)
+#define AS_MSG_FIELD_BIT_QUERY_BINLIST      (1 << 21)
+#define AS_MSG_FIELD_BIT_BATCH              (1 << 22)
+#define AS_MSG_FIELD_BIT_BATCH_WITH_SET     (1 << 23)
+#define AS_MSG_FIELD_BIT_PREDEXP            (1 << 24)
 
 //------------------------------------------------
 // as_msg_op.
@@ -683,7 +708,8 @@ cl_msg* as_msg_create_internal(const char* ns_name, uint8_t info1,
 cl_msg* as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint32_t void_time, as_msg_op** ops, struct as_bin_s** bins,
 		uint16_t bin_count, struct as_namespace_s* ns, cl_msg* msgp_in,
-		size_t* msg_sz_in, uint64_t trid);
+		size_t* msg_sz_in, struct as_record_version_s* v,
+		uint32_t mrt_deadline);
 int32_t as_msg_make_response_bufbuilder(cf_buf_builder** bb_r,
 		struct as_storage_rd_s* rd, bool no_bin_data,
 		const cf_vector* select_bins, bool send_bval, int64_t bval);
@@ -691,17 +717,17 @@ void as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid,
 		int result);
 void as_msg_fin_bufbuilder(cf_buf_builder** bb_r, int result);
 cl_msg* as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
-		uint32_t void_time, uint64_t trid, size_t *p_msg_sz);
+		uint32_t void_time, struct as_record_version_s* v, size_t* p_msg_sz);
 cl_msg* as_msg_make_val_response(bool success, const as_val* val,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
-		uint64_t trid, size_t* p_msg_sz);
+		struct as_record_version_s* v, size_t* p_msg_sz);
 void as_msg_make_val_response_bufbuilder(const as_val* val,
 		cf_buf_builder** bb_r, uint32_t val_sz, bool);
 
 int as_msg_send_reply(struct as_file_handle_s* fd_h, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_msg_op** ops,
 		struct as_bin_s** bins, uint16_t bin_count, struct as_namespace_s* ns,
-		uint64_t trid);
+		struct as_record_version_s* v);
 int as_msg_send_ops_reply(struct as_file_handle_s* fd_h, const cf_dyn_buf* db,
 		bool compress, as_proto_comp_stat* comp_stat);
 bool as_msg_send_fin(cf_socket* sock, uint32_t result_code);

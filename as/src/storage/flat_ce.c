@@ -110,6 +110,12 @@ set_remote_record_xdr_flags(const as_flat_record* flat,
 }
 
 void
+set_remote_record_mrt_flags(const as_flat_opt_meta* opt_meta,
+		as_remote_record* rr)
+{
+}
+
+void
 set_flat_xdr_state(const as_record* r, as_flat_record* flat)
 {
 	// Don't store junk bit - may upgrade to EE, or downgrade -> 4.9 -> 4.8-.
@@ -117,10 +123,47 @@ set_flat_xdr_state(const as_record* r, as_flat_record* flat)
 }
 
 as_flat_extra_flags
-get_flat_extra_flags(const as_record* r)
+get_flat_extra_flags(const as_storage_rd* rd)
 {
 	// So far all extra flags are enterprise-only.
 	return (as_flat_extra_flags){ 0 };
+}
+
+size_t
+size_mrt_id(const as_storage_rd* rd)
+{
+	return 0;
+}
+
+uint8_t*
+pack_mrt_id(uint8_t* at, const as_storage_rd* rd)
+{
+	return at;
+}
+
+const uint8_t*
+unpack_mrt_id(const uint8_t* at, const uint8_t* end, as_flat_opt_meta* opt_meta)
+{
+	return at;
+}
+
+size_t
+size_mrt_orig_v(const as_storage_rd* rd)
+{
+	return 0;
+}
+
+uint8_t*
+pack_mrt_orig_v(uint8_t* at, const as_storage_rd* rd)
+{
+	return at;
+}
+
+const uint8_t*
+unpack_mrt_orig_v(const uint8_t* at, const uint8_t* end,
+		as_flat_opt_meta* opt_meta)
+{
+	return at;
 }
 
 void

@@ -49,6 +49,7 @@
 #include "base/batch.h"
 #include "base/datamodel.h"
 #include "base/health.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/service.h"
 #include "base/stats.h"
@@ -56,6 +57,7 @@
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
+#include "storage/storage.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
@@ -65,20 +67,6 @@
 //==========================================================
 // Typedefs & constants.
 //
-
-typedef enum {
-	// These values go on the wire, so mind backward compatibility if changing.
-	PROXY_FIELD_OP,
-	PROXY_FIELD_TID,
-	PROXY_FIELD_DIGEST,
-	PROXY_FIELD_REDIRECT,
-	PROXY_FIELD_AS_PROTO, // request as_proto - currently contains only as_msg's
-	PROXY_FIELD_UNUSED_5,
-	PROXY_FIELD_UNUSED_6,
-	PROXY_FIELD_UNUSED_7,
-
-	NUM_PROXY_FIELDS
-} proxy_msg_field;
 
 #define PROXY_OP_REQUEST 1
 #define PROXY_OP_RESPONSE 2
@@ -109,6 +97,7 @@ typedef struct proxy_request_s {
 		void*				any;
 		as_file_handle*		proto_fd_h;
 		as_batch_shared*	batch_shared;
+		monitor_roll_origin* monitor_roll_orig;
 		// No need yet for other members of this union.
 	} from;
 
@@ -160,7 +149,7 @@ static int proxy_msg_cb(cf_node src, msg* m, void* udata);
 static inline void
 error_response(cf_node src, uint32_t tid, uint32_t error)
 {
-	as_proxy_send_response(src, tid, error, 0, 0, NULL, NULL, 0, NULL, 0);
+	as_proxy_send_response(src, tid, error, 0, 0, NULL, NULL, 0, NULL, NULL);
 }
 
 static inline void
@@ -234,6 +223,16 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 				"{%s} diverting batch-sub %pD from client %s to node %lx ",
 				ns->name, &tr->keyd,
 				as_batch_get_fd_h(tr->from.batch_shared)->client, dst);
+		break;
+	case FROM_MONITOR_ROLL:
+		cf_detail(AS_PROXY_DIVERT,
+				"{%s} diverting %pD from monitor to node %lx ",
+				ns->name, &tr->keyd, dst);
+		break;
+	case FROM_MONITOR_DELETE:
+		cf_detail(AS_PROXY_DIVERT,
+				"{%s} diverting monitor delete of %pD to node %lx ",
+				ns->name, &tr->keyd, dst);
 		break;
 	default:
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
@@ -327,7 +326,7 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 void
 as_proxy_send_response(cf_node dst, uint32_t proxy_tid, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_msg_op** ops, as_bin** bins,
-		uint16_t bin_count, as_namespace* ns, uint64_t trid)
+		uint16_t bin_count, as_namespace* ns, as_record_version* v)
 {
 	msg* m = as_fabric_msg_get(M_TYPE_PROXY);
 
@@ -336,7 +335,7 @@ as_proxy_send_response(cf_node dst, uint32_t proxy_tid, uint32_t result_code,
 
 	size_t msg_sz = 0;
 	uint8_t* msgp = (uint8_t*)as_msg_make_response_msg(result_code, generation,
-			void_time, ops, bins, bin_count, ns, 0, &msg_sz, trid);
+			void_time, ops, bins, bin_count, ns, 0, &msg_sz, v, 0);
 
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, msgp, msg_sz, MSG_SET_HANDOFF_MALLOC);
 
@@ -423,16 +422,24 @@ proxyer_handle_response(msg* m, uint32_t tid)
 	cf_assert(pr.from.any, AS_PROXY, "origin %u has null 'from'", pr.origin);
 
 	int result;
+	as_namespace* ns = pr.ns;
 
 	switch (pr.origin) {
 	case FROM_CLIENT:
 		result = proxyer_handle_client_response(m, &pr);
-		client_proxy_update_stats(pr.ns, result);
+		client_proxy_update_stats(ns, result);
 		break;
 	case FROM_BATCH:
 		result = proxyer_handle_batch_response(m, &pr);
-		batch_sub_proxy_update_stats(pr.ns, result);
+		batch_sub_proxy_update_stats(ns, result);
 		// Note - no worries about msgp, proxy divert copied it.
+		break;
+	case FROM_MONITOR_ROLL:
+		as_mrt_monitor_proxyer_roll_done(m, pr.fab_msg,
+				pr.from.monitor_roll_orig);
+		break;
+	case FROM_MONITOR_DELETE:
+		// Nothing needed.
 		break;
 	default:
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", pr.origin);
@@ -440,12 +447,11 @@ proxyer_handle_response(msg* m, uint32_t tid)
 	}
 
 	pr.from.any = NULL; // pattern, not needed
-
 	as_fabric_msg_put(pr.fab_msg);
 
 	// Note that this includes both origins.
-	if (pr.ns->proxy_hist_enabled) {
-		histogram_insert_data_point(pr.ns->proxy_hist, pr.start_time);
+	if (ns->proxy_hist_enabled) {
+		histogram_insert_data_point(ns->proxy_hist, pr.start_time);
 	}
 }
 
@@ -612,8 +618,9 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 		return;
 	}
 
-	// Only batch sub-transactions are proxied without a digest msg-field.
-	if (! as_transaction_has_digest(&tr)) {
+	// Batch sub-transactions & MRT monitor transactions are proxied without a
+	// digest msg-field.
+	if (! as_transaction_has_digest(&tr) && ! as_msg_from_monitor(&msgp->msg)) {
 		tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	}
 
@@ -662,18 +669,26 @@ proxy_timeout_reduce_fn(const void* key, void* data, void* udata)
 
 	cf_assert(pr->from.any, AS_PROXY, "origin %u has null 'from'", pr->origin);
 
+	as_namespace* ns = pr->ns;
+
 	switch (pr->origin) {
 	case FROM_CLIENT:
-		// TODO - when it becomes important enough, find a way to echo trid.
 		as_msg_send_reply(pr->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, pr->ns, 0);
-		client_proxy_update_stats(pr->ns, AS_ERR_TIMEOUT);
+				0, ns, NULL);
+		client_proxy_update_stats(ns, AS_ERR_TIMEOUT);
 		break;
 	case FROM_BATCH:
 		as_batch_add_error(pr->from.batch_shared, pr->batch_index,
 				AS_ERR_TIMEOUT);
 		// Note - no worries about msgp, proxy divert copied it.
-		batch_sub_proxy_update_stats(pr->ns, AS_ERR_TIMEOUT);
+		batch_sub_proxy_update_stats(ns, AS_ERR_TIMEOUT);
+		break;
+	case FROM_MONITOR_ROLL:
+		as_mrt_monitor_proxyer_roll_timeout(pr->fab_msg,
+				pr->from.monitor_roll_orig);
+		break;
+	case FROM_MONITOR_DELETE:
+		// Nothing needed.
 		break;
 	default:
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", pr->origin);

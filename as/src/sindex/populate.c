@@ -46,6 +46,7 @@
 #include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"
 #include "storage/storage.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
 #include "warnings.h"
@@ -142,10 +143,7 @@ as_sindex_populate_startup(void)
 			continue;
 		}
 
-		if (ns->storage_type != AS_STORAGE_ENGINE_MEMORY || ! ns->cold_start) {
-			populate_startup(ns);
-		}
-		// else - memory (cold restart) - already built sindex.
+		populate_startup(ns);
 
 		mark_all_readable(ns);
 
@@ -264,7 +262,7 @@ run_startup(void* udata)
 
 		cbi.tree = tree;
 
-		as_index_reduce_live(tree, startup_reduce_cb, &cbi);
+		as_index_reduce(tree, startup_reduce_cb, &cbi);
 	}
 
 	return NULL;
@@ -276,12 +274,22 @@ startup_reduce_cb(as_index_ref* r_ref, void* udata)
 	startup_cb_info* cbi = (startup_cb_info*)udata;
 	as_namespace* ns = cbi->ns;
 
+	as_record* r = read_r(ns, r_ref->r, false); // is not an MRT
+
+	if (r == NULL) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
 	if (++cbi->n_reduced == PROGRESS_RESOLUTION) {
 		cbi->n_reduced = 0;
 		as_add_uint64(&ns->si_n_recs_checked, PROGRESS_RESOLUTION);
 	}
-
-	as_index* r = r_ref->r;
 
 	if (! set_has_sindex(r, ns)) {
 		as_record_done(r_ref, ns);
@@ -299,7 +307,7 @@ startup_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_bin stack_bins[RECORD_MAX_BINS];
 
 	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
-		// FIXME - better to just cf_crash?
+		// TODO - better to just cf_crash?
 		cf_warning(AS_SINDEX, "{%s} populating sindexes - failed to read %pD",
 				ns->name, &r->keyd);
 		as_storage_record_close(&rd);
@@ -392,7 +400,7 @@ run_populate(void* udata)
 
 		if (! as_set_index_reduce(ns, tree, popi->si->set_id, NULL,
 				populate_reduce_cb, &cbi)) {
-			as_index_reduce_live(tree, populate_reduce_cb, &cbi);
+			as_index_reduce(tree, populate_reduce_cb, &cbi);
 		}
 
 		as_partition_release(&rsv);
@@ -419,6 +427,18 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 		return false;
 	}
 
+	as_record* r = read_r(ns, r_ref->r, false); // is not an MRT
+
+	if (r == NULL) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
 	if (++cbi->n_reduced == PROGRESS_RESOLUTION) {
 		cbi->n_reduced = 0;
 
@@ -428,8 +448,6 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 		si->populate_pct = (uint32_t)
 				(n > n_objects ? 100 : (n * 100) / n_objects);
 	}
-
-	as_index* r = r_ref->r;
 
 	// This also populates whole-namespace sindexes.
 	if (si->set_id != INVALID_SET_ID && si->set_id != as_index_get_set_id(r)) {

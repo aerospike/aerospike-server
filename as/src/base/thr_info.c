@@ -70,6 +70,7 @@
 #include "base/features.h"
 #include "base/health.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/nsup.h"
 #include "base/proto.h"
 #include "base/security.h"
@@ -282,6 +283,10 @@ static void add_data_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static void find_sindex_key(const cf_vector* items, void* udata);
 static void smd_show_cb(const cf_vector* items, void* udata);
 static void debug_record(const char* params, cf_dyn_buf* db, bool all_data);
+static void debug_dump_index(cf_dyn_buf* db, as_namespace* ns, as_record* r, bool is_orig);
+static void debug_dump_pickle(cf_dyn_buf* db, as_storage_rd* rd, bool is_orig);
+static void debug_dump_raw(cf_dyn_buf* db, as_storage_rd* rd, bool leave_encrypted, bool is_orig);
+static void debug_dump_parsed(cf_dyn_buf* db, as_storage_rd* rd, bool all_data, bool is_orig);
 
 
 //==========================================================
@@ -3946,6 +3951,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "tombstones", ns->n_tombstones);
 	info_append_uint64(db, "xdr_tombstones", ns->n_xdr_tombstones);
 	info_append_uint64(db, "xdr_bin_cemeteries", ns->n_xdr_bin_cemeteries);
+	info_append_uint64(db, "mrt_provisionals", ns->n_mrt_provisionals);
 
 	repl_stats mp;
 	as_partition_get_replica_stats(ns, &mp);
@@ -3989,6 +3995,10 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	// Sindex GC stats.
 
 	info_append_uint64(db, "sindex_gc_cleaned", ns->n_sindex_gc_cleaned);
+
+	// MRT monitor activity.
+
+	info_append_uint32(db, "mrt_monitors_active", as_mrt_monitor_n_active(ns));
 
 	// Persistent memory block keys' namespace ID (enterprise only).
 	info_append_uint32(db, "xmem_id", ns->xmem_id);
@@ -4454,6 +4464,32 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "re_repl_error", ns->n_re_repl_error);
 	info_append_uint64(db, "re_repl_timeout", ns->n_re_repl_timeout);
 
+	// MRT verify read stats - relevant only for enterprise edition.
+
+	info_append_uint64(db, "mrt_verify_read_success", ns->n_mrt_verify_read_success);
+	info_append_uint64(db, "mrt_verify_read_error", ns->n_mrt_verify_read_error);
+	info_append_uint64(db, "mrt_verify_read_timeout", ns->n_mrt_verify_read_timeout);
+
+	// MRT roll forward/back stats - relevant only for enterprise edition.
+
+	info_append_uint64(db, "mrt_roll_forward_success", ns->n_mrt_roll_forward_success);
+	info_append_uint64(db, "mrt_roll_forward_error", ns->n_mrt_roll_forward_error);
+	info_append_uint64(db, "mrt_roll_forward_timeout", ns->n_mrt_roll_forward_timeout);
+
+	// Subset of n_mrt_roll_forward... above, respectively
+	info_append_uint64(db, "mrt_monitor_roll_forward_success", ns->n_mrt_monitor_roll_forward_success);
+	info_append_uint64(db, "mrt_monitor_roll_forward_error", ns->n_mrt_monitor_roll_forward_error);
+	info_append_uint64(db, "mrt_monitor_roll_forward_timeout", ns->n_mrt_monitor_roll_forward_timeout);
+
+	info_append_uint64(db, "mrt_roll_back_success", ns->n_mrt_roll_back_success);
+	info_append_uint64(db, "mrt_roll_back_error", ns->n_mrt_roll_back_error);
+	info_append_uint64(db, "mrt_roll_back_timeout", ns->n_mrt_roll_back_timeout);
+
+	// Subset of n_mrt_roll_back... above, respectively
+	info_append_uint64(db, "mrt_monitor_roll_back_success", ns->n_mrt_monitor_roll_back_success);
+	info_append_uint64(db, "mrt_monitor_roll_back_error", ns->n_mrt_monitor_roll_back_error);
+	info_append_uint64(db, "mrt_monitor_roll_back_timeout", ns->n_mrt_monitor_roll_back_timeout);
+
 	// Special errors that deserve their own counters:
 
 	info_append_uint64(db, "fail_xdr_forbidden", ns->n_fail_xdr_forbidden);
@@ -4463,6 +4499,8 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "fail_record_too_big", ns->n_fail_record_too_big);
 	info_append_uint64(db, "fail_client_lost_conflict", ns->n_fail_client_lost_conflict);
 	info_append_uint64(db, "fail_xdr_lost_conflict", ns->n_fail_xdr_lost_conflict);
+	info_append_uint64(db, "fail_mrt_blocked", ns->n_fail_mrt_blocked);
+	info_append_uint64(db, "fail_mrt_version_mismatch", ns->n_fail_mrt_version_mismatch);
 
 	// Special non-error counters:
 
@@ -4965,12 +5003,63 @@ debug_record(const char* params, cf_dyn_buf* db, bool all_data)
 
 	as_index* r = r_ref.r;
 
-	// Start of index.
-	cf_dyn_buf_append_string(db, "index=");
+	debug_dump_index(db, ns, r, false);
+
+	as_storage_rd rd;
+
+	as_storage_record_open(ns, r, &rd);
+
+	if (as_pickle) {
+		debug_dump_pickle(db, &rd, false);
+	}
+	else if (as_raw) {
+		debug_dump_raw(db, &rd, leave_encrypted, false);
+	}
+	else {
+		debug_dump_parsed(db, &rd, all_data, false);
+	}
+
+	as_storage_record_close(&rd);
+
+	if (r->orig_h != 0) {
+		as_record* orig_r = cf_arenax_resolve(ns->arena, r->orig_h);
+
+		debug_dump_index(db, ns, orig_r, true);
+
+		if (orig_r->generation != 0) {
+			as_storage_rd orig_rd;
+
+			as_storage_record_open(ns, orig_r, &orig_rd);
+
+			if (as_pickle) {
+				debug_dump_pickle(db, &orig_rd, true);
+			}
+			else if (as_raw) {
+				debug_dump_raw(db, &orig_rd, leave_encrypted, true);
+			}
+			else {
+				debug_dump_parsed(db, &orig_rd, all_data, true);
+			}
+
+			as_storage_record_close(&orig_rd);
+		}
+	}
+
+	as_record_done(&r_ref, ns);
+	as_partition_release(&rsv);
+
+	cf_dyn_buf_chomp(db);
+}
+
+static void
+debug_dump_index(cf_dyn_buf* db, as_namespace* ns, as_record* r, bool is_orig)
+{
+	cf_dyn_buf_append_string(db, is_orig ? "orig-index=" : "index=");
 
 	db_append_uint32(db, "rc", r->rc);
 	db_append_uint32(db, "tree-id", r->tree_id);
 	db_append_uint32(db, "color", r->color);
+	db_append_uint32(db, "is-orig", r->is_orig);
 	db_append_format(db, "keyd", "%D", &r->keyd); // not %pD (as used for logs)
 	db_append_uint64_x(db, "left", r->left_h);
 	db_append_uint64_x(db, "right", r->right_h);
@@ -5010,55 +5099,56 @@ debug_record(const char* params, cf_dyn_buf* db, bool all_data)
 	db_append_uint32(db, "tombstone", r->tombstone);
 	db_append_uint32(db, "cenotaph", r->cenotaph);
 
-	info_append_uint64_x(db, "dim", (uint64_t)r->dim);
-	// End of index.
-
-	as_storage_rd rd;
-
-	as_storage_record_open(ns, r, &rd);
-
-	if (as_pickle) {
-		if (as_storage_record_load_pickle(&rd)) {
-			info_append_uint32(db, "pickle-size", rd.pickle_sz);
-			db_append_hex(db, "pickle", rd.pickle, rd.pickle_sz, ';');
-		}
-
-		as_storage_record_close(&rd);
-		as_record_done(&r_ref, ns);
-		as_partition_release(&rsv);
-
-		cf_dyn_buf_chomp(db);
-
-		return;
+	if (is_orig) {
+		info_append_uint64_x(db, "mrt-id", r->mrt_id);
 	}
-
-	if (as_raw) {
-		if (as_storage_record_load_raw(&rd, leave_encrypted)) {
-			const uint8_t* raw = (const uint8_t*)rd.flat;
-			uint32_t sz = (uint32_t)(rd.flat_end - raw);
-
-			info_append_uint32(db, "raw-size", sz);
-			db_append_hex(db, "raw-bytes", raw, sz, ';');
-		}
-
-		as_storage_record_close(&rd);
-		as_record_done(&r_ref, ns);
-		as_partition_release(&rsv);
-
-		cf_dyn_buf_chomp(db);
-
-		return;
+	else {
+		info_append_uint64_x(db, "orig-h", (uint64_t)r->orig_h);
 	}
+}
 
-	if (r->key_stored == 1 && as_storage_rd_load_key(&rd)) {
+static void
+debug_dump_pickle(cf_dyn_buf* db, as_storage_rd* rd, bool is_orig)
+{
+	if (as_storage_record_load_pickle(rd)) {
+		info_append_uint32(db, is_orig ? "orig-pickle-size" : "pickle-size",
+				rd->pickle_sz);
+		db_append_hex(db, is_orig ? "orig-pickle" : "pickle", rd->pickle,
+				rd->pickle_sz, ';');
+	}
+}
+
+static void
+debug_dump_raw(cf_dyn_buf* db, as_storage_rd* rd, bool leave_encrypted,
+		bool is_orig)
+{
+	if (as_storage_record_load_raw(rd, leave_encrypted)) {
+		const uint8_t* raw = (const uint8_t*)rd->flat;
+		uint32_t sz = (uint32_t)(rd->flat_end - raw);
+
+		info_append_uint32(db, is_orig ? "orig-raw-size" : "raw-size", sz);
+		db_append_hex(db, is_orig ? "orig-raw-bytes" : "raw-bytes", raw, sz,
+				';');
+	}
+}
+
+static void
+debug_dump_parsed(cf_dyn_buf* db, as_storage_rd* rd, bool all_data,
+		bool is_orig)
+{
+	// Note - for now, not parsing stored fields redundant with index.
+
+	as_record* r = rd->r;
+
+	if (r->key_stored == 1 && as_storage_rd_load_key(rd)) {
 		// Start of key.
-		cf_dyn_buf_append_string(db, "key=");
+		cf_dyn_buf_append_string(db, is_orig ? "orig-key=" : "key=");
 
-		uint8_t type = *rd.key;
-		const uint8_t* key = rd.key + 1;
-		uint32_t sz = rd.key_size - 1;
+		uint8_t type = *rd->key;
+		const uint8_t* key = rd->key + 1;
+		uint32_t sz = rd->key_size - 1;
 
-		db_append_uint32(db, "flat-size", rd.key_size);
+		db_append_uint32(db, "flat-size", rd->key_size);
 		db_append_uint32(db, "type", type);
 
 		if (all_data) {
@@ -5086,23 +5176,20 @@ debug_record(const char* params, cf_dyn_buf* db, bool all_data)
 
 	as_bin stack_bins[RECORD_MAX_BINS];
 
-	if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
-		as_record_done(&r_ref, ns);
-		as_partition_release(&rsv);
+	if (as_storage_rd_load_bins(rd, stack_bins) < 0) {
 		cf_warning(AS_INFO, "debug-record: failed to load bins");
-		cf_dyn_buf_chomp(db);
 		return;
 	}
 
-	info_append_uint32(db, "n-bins", rd.n_bins);
+	info_append_uint32(db, is_orig ? "orig-n-bins" : "n-bins", rd->n_bins);
 
 	// Start of bins.
-	if (rd.n_bins != 0) {
-		cf_dyn_buf_append_string(db, "bins=");
+	if (rd->n_bins != 0) {
+		cf_dyn_buf_append_string(db, is_orig ? "orig-bins=" : "bins=");
 	}
 
-	for (uint16_t i = 0; i < rd.n_bins; i++) {
-		as_bin* b = &rd.bins[i];
+	for (uint16_t i = 0; i < rd->n_bins; i++) {
+		as_bin* b = &rd->bins[i];
 
 		db_append_string_safe(db, "bin-name", b->name);
 		db_append_uint32(db, "xdr-write", b->xdr_write);
@@ -5156,9 +5243,6 @@ debug_record(const char* params, cf_dyn_buf* db, bool all_data)
 	}
 	// End of bins.
 
-	as_storage_record_close(&rd);
-	as_record_done(&r_ref, ns);
-	as_partition_release(&rsv);
-
 	cf_dyn_buf_chomp(db);
+	cf_dyn_buf_append_char(db, ';');
 }

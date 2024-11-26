@@ -46,6 +46,7 @@
 #include "sindex/gc.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
 
@@ -53,9 +54,7 @@
 // Forward declarations.
 //
 
-static void record_replace_failed(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd, bool is_create);
-
-static int record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd);
+static void record_replace_failed(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd);
 
 
 //==========================================================
@@ -117,6 +116,8 @@ as_record_done(as_index_ref* r_ref, as_namespace* ns)
 			cf_assert(r->in_sindex == 0, AS_RECORD, "bad in_sindex bit");
 
 			as_record_destroy(r, ns);
+
+			mrt_free_orig(ns->arena, r, r_ref->puddle);
 			cf_arenax_free(ns->arena, r_ref->r_h, r_ref->puddle);
 		}
 		else if (r->in_sindex == 1 && r->rc == 1) {
@@ -204,7 +205,7 @@ as_record_replace_if_better(as_remote_record* rr)
 		return AS_ERR_OUT_OF_SPACE;
 	}
 
-	bool is_create = rv == 1;
+	bool is_create = rv == 1; // also equivalent to r->generation == 0
 	as_index* r = r_ref.r;
 
 	int result;
@@ -216,7 +217,7 @@ as_record_replace_if_better(as_remote_record* rr)
 
 		if ((result = as_partition_check_source(ns, rr->rsv->p, rr->regime,
 				rr->src, &from_replica)) != AS_OK) {
-			record_replace_failed(rr, &r_ref, NULL, is_create);
+			record_replace_failed(rr, &r_ref, NULL);
 			return result;
 		}
 
@@ -225,7 +226,7 @@ as_record_replace_if_better(as_remote_record* rr)
 	}
 
 	if (! is_create && record_replace_check(r, ns) < 0) {
-		record_replace_failed(rr, &r_ref, NULL, is_create);
+		record_replace_failed(rr, &r_ref, NULL);
 		return AS_ERR_FORBIDDEN;
 	}
 
@@ -234,7 +235,7 @@ as_record_replace_if_better(as_remote_record* rr)
 			r->generation, r->last_update_time, (uint16_t)rr->generation,
 			rr->last_update_time)) <= 0) {
 		if (rr->via != VIA_REPLICATION || result < 0) {
-			record_replace_failed(rr, &r_ref, NULL, is_create);
+			record_replace_failed(rr, &r_ref, NULL);
 			return result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION;
 		}
 		// else - replica write, result == 0 - submit to XDR in case migration
@@ -244,7 +245,7 @@ as_record_replace_if_better(as_remote_record* rr)
 		as_xdr_submit_info submit_info;
 
 		as_xdr_get_submit_info(r, r->last_update_time, &submit_info);
-		record_replace_failed(rr, &r_ref, NULL, is_create);
+		record_replace_failed(rr, &r_ref, NULL);
 		as_xdr_submit(ns, &submit_info);
 
 		return AS_ERR_RECORD_EXISTS;
@@ -255,7 +256,7 @@ as_record_replace_if_better(as_remote_record* rr)
 	if (is_create) {
 		if (rr->set_name != NULL && (result = as_index_set_set_w_len(r, ns,
 				rr->set_name, rr->set_name_len, false)) < 0) {
-			record_replace_failed(rr, &r_ref, NULL, is_create);
+			record_replace_failed(rr, &r_ref, NULL);
 			return -result;
 		}
 
@@ -263,7 +264,7 @@ as_record_replace_if_better(as_remote_record* rr)
 
 		// Don't write record if it would be truncated.
 		if (as_truncate_record_is_truncated(r, ns)) {
-			record_replace_failed(rr, &r_ref, NULL, is_create);
+			record_replace_failed(rr, &r_ref, NULL);
 			return AS_OK;
 		}
 
@@ -279,10 +280,21 @@ as_record_replace_if_better(as_remote_record* rr)
 			ns->storage_type != AS_STORAGE_ENGINE_PMEM &&
 			as_exchange_min_compatibility_id() < 11) {
 		if (! as_flat_fix_padded_rr(rr)) {
-			record_replace_failed(rr, &r_ref, NULL, is_create);
+			record_replace_failed(rr, &r_ref, NULL);
 			return AS_OK;
 		}
 	}
+
+	if ((result = mrt_apply_original(rr, &r_ref)) != 0) {
+		record_replace_failed(rr, &r_ref, NULL);
+		return result;
+	}
+
+	is_create = r->generation == 0; // may be changed by mrt_apply_original()
+
+	// Note - if we fail the final apply below, we may unwind a dirty record to
+	// nothing, if above sets generation 0. (MRT create finds local record it
+	// beats and replaces in two steps.) This is ok.
 
 	as_storage_rd rd;
 
@@ -292,6 +304,9 @@ as_record_replace_if_better(as_remote_record* rr)
 	else {
 		as_storage_record_open(ns, r, &rd);
 	}
+
+	// Add the MRT id, as appropriate.
+	set_mrt_id(&rd, rr->mrt_id);
 
 	rd.pickle = rr->pickle;
 	rd.pickle_sz = (uint32_t)rr->pickle_sz;
@@ -303,7 +318,10 @@ as_record_replace_if_better(as_remote_record* rr)
 	// Save for XDR submit.
 	uint64_t prev_lut = r->last_update_time;
 
-	if (rr->via == VIA_REPLICATION) {
+	if (is_rr_mrt(rr) || is_rr_mrt_monitor_write(rr, as_index_get_set_id(r))) {
+		rd.which_current_swb = SWB_MRT_SHORT_LIVED;
+	}
+	else if (rr->via == VIA_REPLICATION) {
 		rd.which_current_swb = SWB_PROLE;
 	}
 	else if (rr->via == VIA_MIGRATION) {
@@ -311,8 +329,12 @@ as_record_replace_if_better(as_remote_record* rr)
 	}
 	// else - dup-res goes in SWB_MASTER.
 
-	if ((result = record_apply(rr, &r_ref, &rd)) != 0) {
-		record_replace_failed(rr, &r_ref, &rd, is_create);
+	result = ! is_mrt_provisional(r) || is_rr_mrt(rr) ?
+			as_record_apply(rr, &r_ref, &rd) :
+			mrt_apply_roll(rr, &r_ref, &rd);
+
+	if (result != 0) {
+		record_replace_failed(rr, &r_ref, &rd);
 		return result;
 	}
 
@@ -331,6 +353,79 @@ as_record_replace_if_better(as_remote_record* rr)
 	if (rr->via == VIA_REPLICATION) {
 		as_xdr_submit(ns, &submit_info);
 	}
+
+	return AS_OK;
+}
+
+int
+as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
+{
+	as_namespace* ns = rd->ns;
+	as_record* r = rd->r;
+
+	bool do_indexes = rr->mrt_id == 0;
+	bool set_has_si = false;
+	bool si_needs_bins = false;
+
+	if (do_indexes) {
+		set_has_si = set_has_sindex(r, ns);
+		si_needs_bins = set_has_si && r->in_sindex == 1;
+	}
+
+	int result;
+	as_bin old_bins[si_needs_bins ? RECORD_MAX_BINS : 0];
+
+	if (si_needs_bins) {
+		// TODO - don't need to load a bin cemetery for sindex - optimize?
+		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
+			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
+			return -result;
+		}
+	}
+
+	uint16_t n_new_bins = rr->n_bins;
+	as_bin new_bins[set_has_si ? n_new_bins : 0];
+
+	if (set_has_si && n_new_bins != 0 &&
+			(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
+		return -result;
+	}
+
+	// Apply changes to metadata in as_index needed for and writing.
+	as_record old_r = *r;
+
+	replace_index_metadata(rr, r);
+
+	// Write the record to storage. Note - here the pickle is directly stored -
+	// we will not use rd->bins and rd->n_bins at all to write.
+	if ((result = as_storage_record_write(rd)) < 0) {
+		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
+		unwind_index_metadata(&old_r, r);
+		return -result;
+	}
+
+	as_record_transition_stats(r, ns, &old_r);
+
+	// Success - adjust set index and sindex.
+	if (do_indexes) {
+		as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
+				&old_r);
+
+		if (set_has_si) {
+			update_sindex(ns, r_ref, rd->bins, rd->n_bins, new_bins,
+					n_new_bins);
+		}
+		else {
+			// Sindex drop will leave in_sindex bit. Good opportunity to clear.
+			as_index_clear_in_sindex(r);
+		}
+	}
+
+	finish_replace_mrt(rd, &old_r, r_ref->puddle);
+
+	// Now ok to store or drop key, as determined by message.
+	as_record_finalize_key(r, rr->key, rr->key_size);
 
 	return AS_OK;
 }
@@ -382,77 +477,15 @@ as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen,
 
 static void
 record_replace_failed(as_remote_record* rr, as_index_ref* r_ref,
-		as_storage_rd* rd, bool is_create)
+		as_storage_rd* rd)
 {
 	if (rd != NULL) {
 		as_storage_record_close(rd);
 	}
 
-	if (is_create) {
+	if (r_ref->r->generation == 0) { // was created
 		as_index_delete(rr->rsv->tree, rr->keyd);
 	}
 
 	as_record_done(r_ref, rr->rsv->ns);
-}
-
-static int
-record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
-{
-	as_namespace* ns = rd->ns;
-	as_record* r = rd->r;
-
-	int result;
-
-	bool set_has_si = set_has_sindex(r, ns);
-	bool si_needs_bins = set_has_si && r->in_sindex == 1;
-	as_bin old_bins[si_needs_bins ? RECORD_MAX_BINS : 0];
-
-	if (si_needs_bins) {
-		// TODO - don't need to load a bin cemetery for sindex - optimize?
-		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
-			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
-			return -result;
-		}
-	}
-
-	uint16_t n_new_bins = rr->n_bins;
-	as_bin new_bins[set_has_si ? n_new_bins : 0];
-
-	if (set_has_si && n_new_bins != 0 &&
-			(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
-		return -result;
-	}
-
-	// Apply changes to metadata in as_index needed for and writing.
-	index_metadata old_metadata;
-
-	stash_index_metadata(r, &old_metadata);
-	replace_index_metadata(rr, r);
-
-	// Write the record to storage. Note - here the pickle is directly stored -
-	// we will not use rd->bins and rd->n_bins at all to write.
-	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
-		unwind_index_metadata(&old_metadata, r);
-		return -result;
-	}
-
-	as_record_transition_stats(r, ns, &old_metadata);
-	as_record_transition_set_index(rr->rsv->tree, r_ref, ns, n_new_bins,
-			&old_metadata);
-
-	// Success - adjust sindex, looking at old and new bins.
-	if (set_has_si) {
-		update_sindex(ns, r_ref, rd->bins, rd->n_bins, new_bins, n_new_bins);
-	}
-	else {
-		// Sindex drop will leave in_sindex bit. Good opportunity to clear.
-		as_index_clear_in_sindex(r);
-	}
-
-	// Now ok to store or drop key, as determined by message.
-	as_record_finalize_key(r, rr->key, rr->key_size);
-
-	return AS_OK;
 }

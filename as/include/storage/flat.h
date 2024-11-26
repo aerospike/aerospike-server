@@ -42,6 +42,7 @@
 struct as_bin_s;
 struct as_index_s;
 struct as_namespace_s;
+struct as_record_version_s;
 struct as_remote_record_s;
 struct as_storage_rd_s;
 
@@ -86,7 +87,9 @@ typedef struct as_flat_extra_flags_s {
 	uint8_t xdr_tombstone: 1;
 	uint8_t xdr_nsup_tombstone: 1;
 	uint8_t xdr_bin_cemetery: 1;
-	uint8_t unused: 5;
+	uint8_t has_mrt_id: 1;
+	uint8_t has_mrt_orig: 1;
+	uint8_t unused: 3;
 } __attribute__ ((__packed__)) as_flat_extra_flags;
 
 COMPILER_ASSERT(sizeof(as_flat_extra_flags) == sizeof(uint8_t));
@@ -131,6 +134,8 @@ typedef struct ssd_comp_meta_s {
 // Per-record optional metadata container.
 typedef struct as_flat_opt_meta_s {
 	as_flat_extra_flags extra_flags;
+	uint64_t mrt_id;
+	struct as_record_version_s* mrt_orig_v;
 	uint32_t void_time;
 	uint32_t set_name_len;
 	const char* set_name;
@@ -145,7 +150,7 @@ typedef struct as_flat_opt_meta_s {
 
 // Remaining bits union with particle type:
 #define BIN_HAS_EXTRA_FLAGS		0x40 // not supported yet
-#define BIN_XDR_WRITE			0x20 // relevant only for enterprise edition
+#define BIN_XDR_WRITE			0x20
 #define BIN_UNKNOWN_FLAGS		(0x10 | 0x08 | 0x04)
 #define BIN_HAS_SRC_ID			0x02
 #define BIN_HAS_LUT				0x01
@@ -225,8 +230,17 @@ uint8_t* flatten_compression_meta(const as_flat_comp_meta* cm, as_flat_record* f
 const uint8_t* unflatten_compression_meta(const as_flat_record* flat, const uint8_t* at, const uint8_t* end, as_flat_comp_meta* cm);
 
 void set_remote_record_xdr_flags(const as_flat_record* flat, const as_flat_extra_flags* extra_flags, struct as_remote_record_s* rr);
+void set_remote_record_mrt_flags(const as_flat_opt_meta* opt_meta, struct as_remote_record_s* rr);
 void set_flat_xdr_state(const struct as_index_s* r, as_flat_record* flat);
-as_flat_extra_flags get_flat_extra_flags(const struct as_index_s* r);
+as_flat_extra_flags get_flat_extra_flags(const struct as_storage_rd_s* rd);
+
+size_t size_mrt_id(const struct as_storage_rd_s* rd);
+uint8_t* pack_mrt_id(uint8_t* at, const struct as_storage_rd_s* rd);
+const uint8_t* unpack_mrt_id(const uint8_t* at, const uint8_t* end, as_flat_opt_meta* opt_meta);
+
+size_t size_mrt_orig_v(const struct as_storage_rd_s* rd);
+uint8_t* pack_mrt_orig_v(uint8_t* at, const struct as_storage_rd_s* rd);
+const uint8_t* unpack_mrt_orig_v(const uint8_t* at, const uint8_t* end, as_flat_opt_meta* opt_meta);
 
 void unpack_bin_xdr_write(uint8_t flags, struct as_bin_s* b);
 const uint8_t* unpack_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* end, struct as_bin_s* b);

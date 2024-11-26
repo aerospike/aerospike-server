@@ -71,6 +71,7 @@
 #define HAS_EXTRA_INFO  0x2
 #define HAS_GENERATION  0x4
 #define HAS_RECORD_TTL  0x8
+#define HAS_INFO4       0x10
 
 //---------------------------------------------------------
 // TYPES
@@ -191,7 +192,7 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	m.msg.info1 = 0;
 	m.msg.info2 = 0;
 	m.msg.info3 = AS_MSG_INFO3_LAST;
-	m.msg.unused = 0;
+	m.msg.info4 = 0;
 	m.msg.result_code = result_code;
 	m.msg.generation = 0;
 	m.msg.record_ttl = 0;
@@ -317,7 +318,7 @@ as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared, as_batch_b
 	msg->info1 = 0;
 	msg->info2 = 0;
 	msg->info3 = AS_MSG_INFO3_LAST;
-	msg->unused = 0;
+	msg->info4 = 0;
 	msg->result_code = shared->result_code;
 	msg->generation = 0;
 	msg->record_ttl = 0;
@@ -1029,9 +1030,11 @@ as_batch_queue_task(as_transaction* btr)
 			as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 
 			bool has_extra_info = (in->repeat & HAS_EXTRA_INFO) != 0;
+			bool has_info4 = (in->repeat & HAS_INFO4) != 0;
 			bool has_generation = (in->repeat & HAS_GENERATION) != 0;
 			bool has_record_ttl = (in->repeat & HAS_RECORD_TTL) != 0;
 			uint32_t cl_msg_indent = (has_extra_info ? 2 : 0) +
+					(has_info4 ? 1 : 0) +
 					(has_generation ? sizeof(uint16_t) : 0) +
 					(has_record_ttl ? sizeof(uint32_t) : 0);
 
@@ -1064,7 +1067,7 @@ as_batch_queue_task(as_transaction* btr)
 						(AS_MSG_INFO3_SC_READ_RELAX | AS_MSG_INFO3_SC_READ_TYPE);
 			}
 
-			out->msg.unused = 0;
+			out->msg.info4 = has_info4 ? *data++ : 0;
 			out->msg.result_code = 0;
 
 			if (has_generation) {
@@ -1200,12 +1203,18 @@ TranEnd:
 
 void
 as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
-		as_msg_op** ops)
+		as_msg_op** ops, as_record_version* v)
 {
 	as_namespace* ns = tr->rsv.ns;
 
 	// Calculate size.
+	uint16_t n_fields = 0;
 	size_t size = sizeof(as_msg);
+
+	if (v != NULL) {
+		n_fields++;
+		size += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
 
 	for (uint16_t i = 0; i < n_bins; i++) {
 		as_bin* bin = bins[i];
@@ -1240,7 +1249,7 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 		m->info1 = 0;
 		m->info2 = 0;
 		m->info3 = 0;
-		m->unused = 0;
+		m->info4 = 0;
 		m->result_code = tr->result_code;
 		m->generation = plain_generation(tr->generation, ns);
 		m->record_ttl = tr->void_time;
@@ -1248,10 +1257,21 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 		// Overload transaction_ttl to store batch index.
 		m->transaction_ttl = tr->from_data.batch_index;
 
-		m->n_fields = 0;
+		m->n_fields = n_fields;
 		m->n_ops = n_bins;
 		as_msg_swap_header(m);
+
 		p += sizeof(as_msg);
+
+		if (v != NULL) {
+			as_msg_field *mf = (as_msg_field *)p;
+
+			mf->field_sz = 1 + sizeof(as_record_version);
+			mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
+			*(as_record_version *)mf->data = *v;
+			as_msg_swap_field(mf);
+			p += sizeof(as_msg_field) + sizeof(as_record_version);
+		}
 
 		for (uint16_t i = 0; i < n_bins; i++) {
 			as_bin* bin = bins[i];
@@ -1300,13 +1320,22 @@ as_batch_add_made_result(as_batch_shared* shared, uint32_t index, cl_msg* msgp,
 
 // TODO - could also re-do this with explicit params to cover errors?
 void
-as_batch_add_ack(as_transaction* tr)
+as_batch_add_ack(as_transaction* tr, as_record_version* v)
 {
+	// Calculate size.
+	uint16_t n_fields = 0;
+	size_t size = sizeof(as_msg);
+
+	if (v != NULL) {
+		n_fields++;
+		size += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
+
 	as_batch_shared* shared = tr->from.batch_shared;
 	as_batch_buffer* buffer;
 	bool complete;
-	uint8_t* data = as_batch_reserve(shared, sizeof(as_msg), tr->result_code,
-			&buffer, &complete);
+	uint8_t* data = as_batch_reserve(shared, size, tr->result_code, &buffer,
+			&complete);
 
 	if (data != NULL) {
 		as_msg* m = (as_msg*)data;
@@ -1314,15 +1343,27 @@ as_batch_add_ack(as_transaction* tr)
 		m->info1 = 0;
 		m->info2 = 0;
 		m->info3 = 0;
-		m->unused = 0;
+		m->info4 = 0;
 		m->result_code = tr->result_code;
 		m->generation = plain_generation(tr->generation, tr->rsv.ns);
 		m->record_ttl = tr->void_time;
 		// Overload transaction_ttl to store batch index.
 		m->transaction_ttl = tr->from_data.batch_index;
-		m->n_fields = 0;
+		m->n_fields = n_fields;
 		m->n_ops = 0;
 		as_msg_swap_header(m);
+
+		uint8_t* p = m->data;
+
+		if (v != NULL) {
+			as_msg_field *mf = (as_msg_field *)p;
+
+			mf->field_sz = 1 + sizeof(as_record_version);
+			mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
+			*(as_record_version *)mf->data = *v;
+			as_msg_swap_field(mf);
+//			p += sizeof(as_msg_field) + sizeof(as_record_version);
+		}
 	}
 
 	as_batch_transaction_end(shared, buffer, complete);
@@ -1342,7 +1383,7 @@ as_batch_add_error(as_batch_shared* shared, uint32_t index, int result_code)
 		m->info1 = 0;
 		m->info2 = 0;
 		m->info3 = 0;
-		m->unused = 0;
+		m->info4 = 0;
 		m->result_code = result_code;
 		m->generation = 0;
 		m->record_ttl = 0;

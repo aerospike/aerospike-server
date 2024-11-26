@@ -91,10 +91,17 @@ typedef enum {
 #define SWB_MASTER		0
 #define SWB_PROLE		1
 #define SWB_UNCACHED	2
+#define SWB_MRT_SHORT_LIVED	3
 
-#define N_CURRENT_SWBS	3
+#define N_CURRENT_SWBS	4
 
 #define DEFAULT_POST_WRITE_CACHE (256UL * 1024 * 1024)
+
+// For MRTs (for now).
+typedef struct as_record_version_s {
+	uint64_t last_update_time: 40;
+	uint64_t generation: 16;
+} __attribute__((__packed__)) as_record_version;
 
 typedef struct as_storage_rd_s {
 	struct as_index_s*		r;
@@ -139,6 +146,12 @@ typedef struct as_storage_rd_s {
 	uint32_t				pickle_sz;
 	uint32_t				orig_pickle_sz;
 	uint8_t*				pickle;
+
+	uint64_t				mrt_id; // relevant only for enterprise edition
+	as_record_version		mrt_orig_v; // relevant only for enterprise edition
+	bool					free_orig; // relevant only for enterprise edition
+	bool					is_mrt_keyds; // relevant only for enterprise edition
+	bool					is_mrt_fwd; // relevant only for enterprise edition
 } as_storage_rd;
 
 typedef struct storage_device_stats_s {

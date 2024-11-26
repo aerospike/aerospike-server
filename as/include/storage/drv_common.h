@@ -47,6 +47,8 @@
 
 struct as_flat_opt_meta_s;
 struct as_index_s;
+struct as_index_ref_s;
+struct as_index_tree_s;
 struct as_namespace_s;
 
 
@@ -152,6 +154,11 @@ COMPILER_ASSERT(offsetof(drv_header, generic.prefix) == 0);
 
 #define DRV_OFFSET_UNIQUE (offsetof(drv_header, unique))
 
+typedef struct vacated_wblock_s {
+	uint32_t file_id;
+	uint32_t wblock_id;
+} vacated_wblock;
+
 #define STORAGE_INVALID_WBLOCK 0xFFFFffff
 
 // Really just means "was set", doesn't fully validate...
@@ -169,8 +176,15 @@ COMPILER_ASSERT(offsetof(drv_header, generic.prefix) == 0);
 //
 
 void drv_adjust_sc_version_flags(struct as_namespace_s* ns, drv_pmeta* pmeta, bool wiped_drives, bool dirty);
+void drv_mrt_create_cold_start_hash(struct as_namespace_s* ns);
+bool drv_load_needs_2nd_pass(const struct as_namespace_s* ns);
+bool drv_mrt_2nd_pass_load_ticker(const struct as_namespace_s* ns, const char* pcts);
+void drv_cold_start_remove_from_set_index(struct as_namespace_s* ns, struct as_index_tree_s* tree, struct as_index_ref_s* r_ref);
+void drv_cold_start_record_create(struct as_namespace_s* ns, const struct as_flat_record_s* flat, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree, struct as_index_ref_s* r_ref);
 bool drv_is_set_evictable(const struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
-void drv_apply_opt_meta(struct as_index_s* r, struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
+bool drv_cold_start_sweeps_done(struct as_namespace_s* ns);
+struct as_index_s* drv_current_record(struct as_namespace_s* ns, struct as_index_s* r, int file_id, uint64_t rblock_id);
+
 bool pread_all(int fd, void* buf, size_t size, off_t offset);
 bool pwrite_all(int fd, const void* buf, size_t size, off_t offset);
 

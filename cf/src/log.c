@@ -111,6 +111,8 @@ static const char* context_strings[] = {
 		"info-port",
 		"key-busy",
 		"migrate",
+		"mrt-audit",
+		"mrt-monitor",
 		"namespace",
 		"nsup",
 		"particle",
@@ -254,7 +256,7 @@ static void adjust_format(const char* format, char* adjusted);
 static inline const char*
 level_tag(cf_log_level level)
 {
-	// FIXME - we wanted to manipulate CRITICAL?
+	// TODO - we wanted to manipulate CRITICAL?
 	return level_strings[level];
 }
 

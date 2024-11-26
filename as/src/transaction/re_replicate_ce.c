@@ -39,5 +39,11 @@ transaction_status
 as_re_replicate_start(as_transaction* tr)
 {
 	cf_crash(AS_RW, "CE code called as_re_replicate_start()");
-	return TRANS_DONE_ERROR;
+	return TRANS_DONE;
+}
+
+void
+as_re_replicate_abort(as_transaction* tr)
+{
+	cf_crash(AS_RW, "CE code called as_re_replicate_abort()");
 }

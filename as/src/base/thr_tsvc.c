@@ -52,6 +52,8 @@
 #include "query/query.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
+#include "transaction/mrt_roll.h"
+#include "transaction/mrt_verify_read.h"
 #include "transaction/proxy.h"
 #include "transaction/re_replicate.h"
 #include "transaction/read.h"
@@ -303,17 +305,24 @@ as_tsvc_process_transaction(as_transaction *tr)
 			else if (tr->origin == FROM_RE_REPL) {
 				status = as_re_replicate_start(tr);
 			}
+			else if (as_transaction_is_mrt_roll(tr)) {
+				status = as_mrt_roll_start(tr);
+			}
 			else {
 				status = as_write_start(tr);
 			}
 		}
 		else {
-			status = as_read_start(tr);
+			if (as_transaction_is_mrt_verify_read(tr)) {
+				status = as_mrt_verify_read_start(tr);
+			}
+			else {
+				status = as_read_start(tr);
+			}
 		}
 
 		switch (status) {
-		case TRANS_DONE_ERROR:
-		case TRANS_DONE_SUCCESS:
+		case TRANS_DONE:
 			// Done, response already sent - free msg & release reservation.
 			as_partition_release(&tr->rsv);
 			break;
@@ -337,6 +346,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 		switch (tr->origin) {
 		case FROM_CLIENT:
 		case FROM_BATCH:
+		case FROM_MONITOR_ROLL:
+		case FROM_MONITOR_DELETE:
 			as_proxy_divert(dest, tr, ns);
 			// CLIENT: fabric owns msgp, BATCH: it's shared, don't free it.
 			free_msgp = false;
@@ -359,12 +370,15 @@ as_tsvc_process_transaction(as_transaction *tr)
 			break;
 		case FROM_READ_TOUCH:
 			as_incr_uint64(&ns->n_read_touch_tsvc_error);
-			tr->from.read_touch_active = NULL; // pattern, not needed
+			tr->from.internal_origin = NULL; // pattern, not needed
 			break;
 		case FROM_RE_REPL:
 			as_incr_uint64(&ns->n_re_repl_tsvc_error);
-			tr->from.re_repl_orig_cb(tr);
-			tr->from.re_repl_orig_cb = NULL; // pattern, not needed
+			as_re_replicate_abort(tr);
+			tr->from.internal_origin = NULL; // pattern, not needed
+			break;
+		case FROM_MONITOR_UPDATE:
+			tr->from.internal_origin = NULL; // pattern, not needed
 			break;
 		default:
 			cf_crash(AS_TSVC, "unexpected transaction origin %u", tr->origin);

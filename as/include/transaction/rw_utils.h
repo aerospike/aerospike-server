@@ -68,24 +68,12 @@ struct rw_request_s;
 // Typedefs & constants.
 //
 
-typedef struct index_metadata_s {
-	uint32_t void_time;
-	uint64_t last_update_time;
-	uint16_t generation;
-
-	bool xdr_write; // relevant only for enterprise edition
-
-	bool tombstone; // relevant only for enterprise edition
-	bool cenotaph; // relevant only for enterprise edition
-	bool xdr_tombstone; // relevant only for enterprise edition
-	bool xdr_nsup_tombstone; // relevant only for enterprise edition
-	bool xdr_bin_cemetery; // relevant only for enterprise edition
-} index_metadata;
-
 typedef struct now_times_s {
 	uint64_t now_ns;
 	uint64_t now_ms;
 } now_times;
+
+#define STACK_PARTICLES_SIZE (1024 * 1024)
 
 
 //==========================================================
@@ -117,8 +105,7 @@ bool get_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 bool forbid_replace(const struct as_namespace_s* ns);
 void prepare_bin_metadata(const struct as_transaction_s* tr, struct as_storage_rd_s* rd);
-void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
-void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
+void unwind_index_metadata(const struct as_index_s* old_r, struct as_index_s* r);
 void advance_record_version(struct as_transaction_s* tr, struct as_index_s* r);
 void set_xdr_write(const struct as_transaction_s* tr, struct as_index_s* r);
 void touch_bin_metadata(struct as_storage_rd_s* rd);
@@ -161,7 +148,7 @@ respond_on_master_complete(as_transaction* tr)
 			(tr->flags & AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL) == 0;
 }
 
-// FIXME - switch p_n_bins to uint16_t*.
+// CLEANUP? - switch p_n_bins to uint16_t*.
 static inline void
 append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 {
@@ -243,6 +230,7 @@ void repl_write_add_regime(msg* m, const struct as_transaction_s* tr);
 void repl_write_init_repl_state(struct as_remote_record_s* rr, bool from_replica);
 conflict_resolution_pol repl_write_conflict_resolution_policy(const struct as_namespace_s* ns);
 bool repl_write_should_retransmit_replicas(struct rw_request_s* rw, uint32_t result_code);
+void repl_write_with_orig(struct rw_request_s* rw);
 void repl_write_send_confirmation(struct rw_request_s* rw);
 void repl_write_handle_confirmation(msg* m);
 

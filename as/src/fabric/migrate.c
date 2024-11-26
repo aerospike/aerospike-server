@@ -59,6 +59,7 @@
 #include "fabric/partition_balance.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
+#include "transaction/mrt_utils.h"
 
 
 //==========================================================
@@ -75,7 +76,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_UNUSED_6, M_FT_UINT32 },
 		{ MIG_FIELD_RECORD, M_FT_BUF },
 		{ MIG_FIELD_CLUSTER_KEY, M_FT_UINT64 },
-		{ MIG_FIELD_UNUSED_9, M_FT_BUF },
+		{ MIG_FIELD_ORIG_RECORD, M_FT_BUF },
 		{ MIG_FIELD_UNUSED_10, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_11, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_12, M_FT_BUF },
@@ -888,8 +889,22 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	as_storage_record_open(ns, r, &rd);
 
 	if (as_storage_record_load_pickle(&rd)) {
-		msg_set_buf(m, MIG_FIELD_RECORD, rd.pickle, rd.pickle_sz,
-				MSG_SET_HANDOFF_MALLOC);
+		uint8_t* orig_pickle = NULL;
+		uint32_t orig_pickle_sz = 0;
+
+		if (mrt_load_orig_pickle(ns, r, &orig_pickle, &orig_pickle_sz)) {
+			msg_set_buf(m, MIG_FIELD_RECORD, rd.pickle, rd.pickle_sz,
+					MSG_SET_HANDOFF_MALLOC);
+
+			if (orig_pickle != NULL) {
+				msg_set_buf(m, MIG_FIELD_ORIG_RECORD, orig_pickle,
+						orig_pickle_sz, MSG_SET_HANDOFF_MALLOC);
+			}
+		}
+		else {
+			cf_warning(AS_MIGRATE, "unreadable orig %pD", &r->keyd);
+			cf_free(rd.pickle);
+		}
 	}
 	else {
 		cf_warning(AS_MIGRATE, "unreadable digest %pD", &r->keyd);
@@ -1369,6 +1384,9 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		as_fabric_msg_put(m);
 		return;
 	}
+
+	msg_get_buf(m, MIG_FIELD_ORIG_RECORD, &rr.orig_pickle, &rr.orig_pickle_sz,
+			MSG_GET_DIRECT);
 
 	if (! as_flat_unpack_remote_record_meta(rr.rsv->ns, &rr)) {
 		cf_warning(AS_MIGRATE, "handle insert: got bad record");

@@ -115,7 +115,7 @@ const as_aerospike_hooks udf_aerospike_hooks = {
 static int
 udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 {
-	// FIXME - do the exact return values really matter?
+	// TODO - do the exact return values really matter?
 
 	(void)as;
 

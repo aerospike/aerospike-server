@@ -82,6 +82,8 @@ typedef enum {
 	AS_INFO_PORT,
 	AS_KEY_BUSY, // special detail context
 	AS_MIGRATE,
+	AS_MRT_AUDIT,
+	AS_MRT_MONITOR,
 	AS_NAMESPACE,
 	AS_NSUP,
 	AS_PARTICLE,
@@ -110,7 +112,7 @@ typedef enum {
 	CF_LOG_N_CONTEXTS
 } cf_log_context;
 
-// FIXME - reorder?
+// TODO - reorder?
 typedef enum {
 	CF_CRITICAL,
 	CF_WARNING,

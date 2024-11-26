@@ -48,6 +48,7 @@
 #include "fabric/partition.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
@@ -437,12 +438,25 @@ fill_ack_w_pickle(as_storage_rd* rd, msg* m)
 		return -AS_ERR_UNKNOWN;
 	}
 
+	uint8_t* orig_pickle = NULL;
+	uint32_t orig_pickle_sz = 0;
+
+	if (! mrt_load_orig_pickle(rd->ns, rd->r, &orig_pickle, &orig_pickle_sz)) {
+		cf_free(rd->pickle);
+		return -AS_ERR_UNKNOWN;
+	}
+
 	msg_preserve_fields(m, 2, RW_FIELD_NS_IX, RW_FIELD_TID);
 
 	// Can't fail from here on - ok to add message fields.
 
 	msg_set_buf(m, RW_FIELD_RECORD, rd->pickle, rd->pickle_sz,
 			MSG_SET_HANDOFF_MALLOC);
+
+	if (orig_pickle != NULL) {
+		msg_set_buf(m, RW_FIELD_ORIG_RECORD, orig_pickle, orig_pickle_sz,
+				MSG_SET_HANDOFF_MALLOC);
+	}
 
 	return AS_OK;
 }
@@ -553,6 +567,9 @@ apply_winner(rw_request* rw)
 			MSG_GET_DIRECT) != 0) {
 		cf_crash(AS_RW, "dup-res ack: no record"); // already parsed ok
 	}
+
+	msg_get_buf(m, RW_FIELD_ORIG_RECORD, &rr.orig_pickle, &rr.orig_pickle_sz,
+			MSG_GET_DIRECT);
 
 	if (! as_flat_unpack_remote_record_meta(ns, &rr)) {
 		cf_warning(AS_RW, "dup-res ack: bad record %pD", &rw->keyd);

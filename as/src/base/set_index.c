@@ -45,6 +45,8 @@
 #include "base/index.h"
 #include "fabric/partition.h"
 #include "sindex/gc.h"
+#include "transaction/mrt_utils.h"
+#include "transaction/rw_utils.h"
 
 //#include "warnings.h"
 
@@ -565,7 +567,7 @@ run_populate(void* udata)
 				.stree = stree
 		};
 
-		if (! as_index_reduce_live(rsv.tree, populate_reduce_cb, &cbi)) {
+		if (! as_index_reduce(rsv.tree, populate_reduce_cb, &cbi)) {
 			stree_release(stree);
 			as_partition_release(&rsv);
 			break;
@@ -582,23 +584,36 @@ static bool
 populate_reduce_cb(as_index_ref* r_ref, void* udata)
 {
 	populate_cb_info* cbi = (populate_cb_info*)udata;
+	as_namespace* ns = cbi->ns;
 
 	if (! cbi->p_set->index_enabled) {
-		as_record_done(r_ref, cbi->ns);
+		as_record_done(r_ref, ns);
 		return false;
 	}
 
-	if (as_index_get_set_id(r_ref->r) != cbi->set_id) {
-		as_record_done(r_ref, cbi->ns);
+	as_record* r = read_r(ns, r_ref->r, false); // is not an MRT
+
+	if (r == NULL) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (as_index_get_set_id(r) != cbi->set_id) {
+		as_record_done(r_ref, ns);
 		return true;
 	}
 
 	ssprig_info ssi;
 
-	ssi_from_keyd(cbi->tree, cbi->stree, &r_ref->r->keyd, &ssi);
+	ssi_from_keyd(cbi->tree, cbi->stree, &r->keyd, &ssi);
 	ssprig_insert(&ssi, r_ref->r_h);
 
-	as_record_done(r_ref, cbi->ns);
+	as_record_done(r_ref, ns);
 
 	return true;
 }
@@ -772,7 +787,7 @@ ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 		ele->me_h = t_h;
 		ele->me = t;
 
-		// FIXME - is this a bad idea given our index-ele size & arenas?
+		// TODO - is this a bad idea given our index-ele size & arenas?
 //		_mm_prefetch(t, _MM_HINT_NTA);
 
 		if ((cmp = ssprig_ele_cmp(ssi, t)) == 0) {
@@ -989,6 +1004,10 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 				if (ssri->destructor != NULL) {
 					ssri->destructor(r_ref.r, ns);
 				}
+
+				// MRT PARANOIA - can we encounter a provisional here?
+				cf_assert(r_ref.r->orig_h == 0, AS_INDEX,
+						"unexpected - dropped provisional");
 
 				cf_arenax_free(ssi->arena, r_ref.r_h, NULL);
 			}

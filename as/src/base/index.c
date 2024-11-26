@@ -48,6 +48,7 @@
 #include "base/stats.h"
 #include "sindex/gc.h"
 #include "sindex/sindex.h"
+#include "transaction/mrt_utils.h"
 
 
 //==========================================================
@@ -444,6 +445,10 @@ as_index_sprig_reduce(as_index_sprig* isprig, const cf_digest* keyd,
 					isprig->destructor(r_ref.r, ns);
 				}
 
+				// MRT PARANOIA - can we encounter a provisional here?
+				cf_assert(r_ref.r->orig_h == 0, AS_INDEX,
+						"unexpected - dropped provisional");
+
 				cf_arenax_free(isprig->arena, r_ref.r_h, NULL);
 			}
 			else if (r_ref.r->in_sindex == 1 && rc == 1) {
@@ -547,6 +552,7 @@ as_index_sprig_traverse_purge(as_index_sprig* isprig, cf_arenax_handle r_h)
 		isprig->destructor(r, isprig->destructor_udata);
 	}
 
+	mrt_free_orig(isprig->arena, r, isprig->puddle);
 	cf_arenax_free(isprig->arena, r_h, isprig->puddle);
 }
 

@@ -44,6 +44,7 @@
 #include "base/transaction.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
@@ -131,6 +132,13 @@ as_read_touch_check(as_record* r, as_transaction* tr)
 		return 0; // no need to touch
 	}
 
+	bool is_mrt = as_transaction_has_mrt_id(tr);
+
+	// Ignore provisional/dual records for both MRT and ordinary reads.
+	if ((is_mrt && is_mrt_provisional(r)) || (! is_mrt && is_mrt_original(r))) {
+		return 0;
+	}
+
 	as_namespace* ns = tr->rsv.ns;
 	uint32_t rt_ttl_pct = tr->msgp->msg.record_ttl;
 
@@ -187,10 +195,10 @@ as_read_touch_start(as_transaction* tr)
 
 	// If rw_request wasn't inserted in hash, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
-		cf_assert(status == TRANS_DONE_SUCCESS, AS_RW, "read-touch not ok");
+		cf_assert(status == TRANS_DONE, AS_RW, "read-touch not done");
 		rw_request_release(rw);
 		rt_done(tr);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 	// else - rw_request is now in hash, continue...
 
@@ -213,7 +221,7 @@ as_read_touch_start(as_transaction* tr)
 	if (rw->n_dest_nodes == 0) {
 		rw_request_hash_delete(&hkey, rw);
 		rt_done(tr);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	start_rt_repl_write(rw, tr);
@@ -240,7 +248,7 @@ rt_enqueue(as_namespace* ns, const cf_digest* keyd, uint32_t ttl)
 	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 
 	tr.origin = FROM_READ_TOUCH;
-	tr.from.read_touch_active = (void*)1; // anything so from.any is not NULL
+	tr.from.internal_origin = (void*)1; // anything so from.any is not NULL
 
 	// Do this last, to exclude the setup time in this function.
 	tr.start_time = cf_getns();
@@ -303,7 +311,7 @@ rt_dup_res_cb(rw_request* rw)
 		return true;
 	}
 
-	if (status == TRANS_DONE_ERROR) {
+	if (status == TRANS_DONE) {
 		rt_done(&tr);
 		return true;
 	}
@@ -392,7 +400,8 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	as_namespace* ns = tr->rsv.ns;
 
 	if (ns->clock_skew_stop_writes) {
-		return TRANS_DONE_ERROR;
+		tr->result_code = AS_ERR_FORBIDDEN;
+		return TRANS_DONE;
 	}
 
 	as_index_tree* tree = tr->rsv.tree;
@@ -400,14 +409,14 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 
 	if (as_record_get(tree, &tr->keyd, &r_ref) != 0) {
 		tr->result_code = AS_ERR_NOT_FOUND;
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	as_record* r = r_ref.r;
 
-	if (r->void_time == 0) { // note - takes care of tombstones too
+	if (r->void_time == 0 || is_mrt_provisional(r)) {
 		read_touch_master_done(tr, &r_ref, NULL, AS_ERR_KEY_BUSY);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	as_xdr_ship_status ship_status = as_xdr_ship_check(r, tr);
@@ -419,7 +428,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 
 	if (ship_status == XDR_SHIP_FAR) {
 		read_touch_master_done(tr, &r_ref, NULL, AS_ERR_XDR_KEY_BUSY);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	as_storage_rd rd;
@@ -429,7 +438,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	// Set up the nodes to which we'll write replicas.
 	if (! set_replica_destinations(tr, rw)) {
 		read_touch_master_done(tr, &r_ref, &rd, AS_ERR_UNAVAILABLE);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Will we need a pickle?
@@ -442,7 +451,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 
 	if (result < 0) {
 		read_touch_master_done(tr, &r_ref, &rd, -result);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Shortcut for set name storage.
@@ -451,7 +460,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	// Deal with key storage as needed.
 	if (r->key_stored == 1 && ! as_storage_rd_load_key(&rd)) {
 		read_touch_master_done(tr, &r_ref, &rd, AS_ERR_UNKNOWN);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	uint64_t old_last_update_time = r->last_update_time;
@@ -466,7 +475,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 		r->generation = old_generation;
 		r->void_time = old_void_time;
 		read_touch_master_done(tr, &r_ref, &rd, AS_ERR_KEY_BUSY);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	if ((result = as_storage_record_write(&rd)) < 0) {
@@ -474,7 +483,7 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 		r->generation = old_generation;
 		r->void_time = old_void_time;
 		read_touch_master_done(tr, &r_ref, &rd, -result);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	pickle_all(&rd, rw);

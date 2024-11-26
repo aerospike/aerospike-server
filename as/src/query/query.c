@@ -75,6 +75,7 @@
 #include "query/query_manager.h"
 #include "sindex/sindex.h"
 #include "sindex/sindex_tree.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
@@ -1653,8 +1654,8 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 		else {
 			if (! as_set_index_reduce(_job->ns, tree, _job->set_id, keyd,
 					basic_pi_query_job_reduce_cb, (void*)&slice)) {
-				as_index_reduce_from_live(tree, keyd,
-						basic_pi_query_job_reduce_cb, (void*)&slice);
+				as_index_reduce_from(tree, keyd, basic_pi_query_job_reduce_cb,
+						(void*)&slice);
 			}
 		}
 	}
@@ -1861,7 +1862,17 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		return false;
 	}
 
-	as_index* r = r_ref->r;
+	as_record* r = read_r(ns, r_ref->r, false); // is not an MRT
+
+	if (r == NULL) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
 
 	if (excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
@@ -2030,7 +2041,7 @@ static void aggr_query_job_init(aggr_query_job* job);
 static bool aggr_query_init(as_aggr_call* call, const as_transaction* tr);
 static bool aggr_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
 static bool aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
-static void aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r, cf_arenax_handle r_h);
+static void aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index_ref* r_ref);
 static as_stream_status aggr_query_ostream_write(void* udata, as_val* val);
 static bool aggr_query_pre_check(void* udata, udf_record* urecord);
 static void aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val, bool success);
@@ -2179,7 +2190,7 @@ aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	else {
 		if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
 				aggr_pi_query_job_reduce_cb, (void*)&slice)) {
-			as_index_reduce_live(rsv->tree, aggr_pi_query_job_reduce_cb,
+			as_index_reduce(rsv->tree, aggr_pi_query_job_reduce_cb,
 					(void*)&slice);
 		}
 	}
@@ -2328,7 +2339,17 @@ aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		return false;
 	}
 
-	as_index* r = r_ref->r;
+	as_record* r = read_r(ns, r_ref->r, false); // is not an MRT
+
+	if (r == NULL) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
 
 	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
@@ -2340,7 +2361,7 @@ aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		return true;
 	}
 
-	aggr_query_add_digest(ns, slice->ll, r, r_ref->r_h);
+	aggr_query_add_digest(ns, slice->ll, r_ref);
 
 	as_record_done(r_ref, ns);
 	as_incr_uint64(&_job->n_succeeded);
@@ -2351,8 +2372,7 @@ aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 }
 
 static void
-aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
-		cf_arenax_handle r_h)
+aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index_ref* r_ref)
 {
 	as_aggr_keys_ll_element* tail_e = (as_aggr_keys_ll_element*)ll->tail;
 	as_aggr_keys_arr* keys_arr;
@@ -2375,6 +2395,8 @@ aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
 		cf_ll_append(ll, (cf_ll_element*)tail_e);
 	}
 
+	as_record* r = r_ref->r; // (for MRT dual, this is tree r, with good rc)
+
 	// TODO - proper EE split.
 	if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		keys_arr->u.digests[keys_arr->num] = r->keyd;
@@ -2385,7 +2407,7 @@ aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index* r,
 		}
 
 		as_index_reserve(r);
-		keys_arr->u.handles[keys_arr->num] = (uint64_t)r_h;
+		keys_arr->u.handles[keys_arr->num] = (uint64_t)r_ref->r_h;
 	}
 
 	keys_arr->num++;
@@ -2615,7 +2637,7 @@ udf_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	else {
 		if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
 				udf_bg_pi_query_job_reduce_cb, (void*)_job)) {
-			as_index_reduce_live(rsv->tree, udf_bg_pi_query_job_reduce_cb,
+			as_index_reduce(rsv->tree, udf_bg_pi_query_job_reduce_cb,
 					(void*)_job);
 		}
 	}
@@ -2716,6 +2738,11 @@ udf_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	}
 
 	as_index* r = r_ref->r;
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
 
 	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
@@ -2961,7 +2988,7 @@ ops_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	else {
 		if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
 				ops_bg_pi_query_job_reduce_cb, (void*)_job)) {
-			as_index_reduce_live(rsv->tree, ops_bg_pi_query_job_reduce_cb,
+			as_index_reduce(rsv->tree, ops_bg_pi_query_job_reduce_cb,
 					(void*)_job);
 		}
 	}
@@ -3117,6 +3144,11 @@ ops_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	}
 
 	as_index* r = r_ref->r;
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
 
 	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);

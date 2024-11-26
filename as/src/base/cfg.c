@@ -67,6 +67,7 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/security_config.h"
 #include "base/service.h"
@@ -451,6 +452,7 @@ typedef enum {
 	CASE_NAMESPACE_DEFAULT_READ_TOUCH_TTL_PCT,
 	CASE_NAMESPACE_DEFAULT_TTL,
 	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION,
+	CASE_NAMESPACE_DISABLE_MRT_WRITES,
 	CASE_NAMESPACE_DISABLE_WRITE_DUP_RES,
 	CASE_NAMESPACE_DISALLOW_EXPUNGE,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
@@ -473,6 +475,7 @@ typedef enum {
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SKIP_UNREADABLE,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
+	CASE_NAMESPACE_MRT_DURATION,
 	CASE_NAMESPACE_NSUP_HIST_PERIOD,
 	CASE_NAMESPACE_NSUP_PERIOD,
 	CASE_NAMESPACE_NSUP_THREADS,
@@ -1051,6 +1054,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "default-read-touch-ttl-pct",		CASE_NAMESPACE_DEFAULT_READ_TOUCH_TTL_PCT },
 		{ "default-ttl",					CASE_NAMESPACE_DEFAULT_TTL },
 		{ "disable-cold-start-eviction",	CASE_NAMESPACE_DISABLE_COLD_START_EVICTION },
+		{ "disable-mrt-writes",				CASE_NAMESPACE_DISABLE_MRT_WRITES },
 		{ "disable-write-dup-res",			CASE_NAMESPACE_DISABLE_WRITE_DUP_RES },
 		{ "disallow-expunge",				CASE_NAMESPACE_DISALLOW_EXPUNGE },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
@@ -1073,6 +1077,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-skip-unreadable",		CASE_NAMESPACE_MIGRATE_SKIP_UNREADABLE },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
+		{ "mrt-duration",					CASE_NAMESPACE_MRT_DURATION },
 		{ "nsup-hist-period",				CASE_NAMESPACE_NSUP_HIST_PERIOD },
 		{ "nsup-period",					CASE_NAMESPACE_NSUP_PERIOD },
 		{ "nsup-threads",					CASE_NAMESPACE_NSUP_THREADS },
@@ -2931,6 +2936,10 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_DISABLE_COLD_START_EVICTION:
 				ns->cold_start_eviction_disabled = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_DISABLE_MRT_WRITES:
+				cfg_enterprise_only(&line);
+				ns->mrt_writes_disabled = cfg_bool(&line);
+				break;
 			case CASE_NAMESPACE_DISABLE_WRITE_DUP_RES:
 				ns->write_dup_res_disabled = cfg_bool(&line);
 				break;
@@ -2998,6 +3007,10 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_MIGRATE_SLEEP:
 				ns->migrate_sleep = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_MRT_DURATION:
+				cfg_enterprise_only(&line);
+				ns->mrt_duration = cfg_seconds(&line, MIN_MRT_DURATION, MAX_MRT_DURATION);
 				break;
 			case CASE_NAMESPACE_NSUP_HIST_PERIOD:
 				ns->nsup_hist_period = cfg_seconds_no_checks(&line);
@@ -4697,6 +4710,9 @@ as_config_post_process(as_config* c, const char* config_file)
 
 		sprintf(hist_name, "{%s}-re-repl", ns->name);
 		ns->re_repl_hist = histogram_create(hist_name, scale);
+
+		sprintf(hist_name, "{%s}-writes-per-mrt", ns->name);
+		ns->writes_per_mrt_hist = histogram_create(hist_name, HIST_COUNT);
 
 		// Activate-by-config histograms.
 

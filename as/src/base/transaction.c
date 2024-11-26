@@ -41,12 +41,14 @@
 
 #include "base/batch.h"
 #include "base/datamodel.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/service.h"
 #include "base/stats.h"
 #include "fabric/partition.h"
 #include "transaction/proxy.h"
+#include "transaction/re_replicate.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
@@ -152,8 +154,17 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_KEY:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_KEY;
 		break;
+	case AS_MSG_FIELD_TYPE_RECORD_VERSION:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_RECORD_VERSION;
+		break;
 	case AS_MSG_FIELD_TYPE_DIGEST_RIPE:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_DIGEST_RIPE;
+		break;
+	case AS_MSG_FIELD_TYPE_MRT_ID:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_MRT_ID;
+		break;
+	case AS_MSG_FIELD_TYPE_MRT_DEADLINE:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_MRT_DEADLINE;
 		break;
 	case AS_MSG_FIELD_TYPE_TRID:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_TRID;
@@ -332,7 +343,7 @@ as_transaction_init_iops(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
 void
 as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 {
-	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, 0);
+	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL);
 	tr->from.proto_fd_h = NULL;
 
 	cf_free(tr->msgp);
@@ -366,14 +377,14 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
-			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL);
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
 		UPDATE_ERROR_STATS(client);
 		break;
 	case FROM_PROXY:
 		if (tr->from.proxy_node != 0) {
-			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
+			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, NULL);
 			tr->from.proxy_node = 0; // pattern, not needed
 		}
 		if (as_transaction_is_batch_sub(tr)) {
@@ -406,15 +417,23 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		UPDATE_ERROR_STATS(ops_sub);
 		break;
 	case FROM_READ_TOUCH:
-		tr->from.read_touch_active = NULL; // pattern, not needed
+		tr->from.internal_origin = NULL; // pattern, not needed
 		UPDATE_ERROR_STATS(read_touch);
 		break;
 	case FROM_RE_REPL:
-		if (tr->from.re_repl_orig_cb) {
-			tr->from.re_repl_orig_cb(tr);
-			tr->from.re_repl_orig_cb = NULL; // pattern, not needed
-		}
+		as_re_replicate_abort(tr);
+		tr->from.internal_origin = NULL; // pattern, not needed
 		UPDATE_ERROR_STATS(re_repl);
+		break;
+	case FROM_MONITOR_ROLL:
+		as_mrt_monitor_roll_done(tr->from.monitor_roll_orig, &tr->keyd, error_code);
+		tr->from.monitor_roll_orig = NULL; // pattern, not needed
+		break;
+	case FROM_MONITOR_UPDATE:
+		tr->from.internal_origin = NULL; // pattern, not needed
+		break;
+	case FROM_MONITOR_DELETE:
+		tr->from.internal_origin = NULL; // pattern, not needed
 		break;
 	default:
 		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
@@ -435,7 +454,7 @@ as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
-			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL);
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
 		as_incr_uint64(&g_stats.n_tsvc_client_error);

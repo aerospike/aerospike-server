@@ -1847,7 +1847,7 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 	req.h.nlmsg_len = NLMSG_LENGTH(sizeof(req.m));
 	req.h.nlmsg_type = type;
 	req.h.nlmsg_flags = NLM_F_REQUEST | NLM_F_ROOT;
-	req.h.nlmsg_seq = as_aaf_uint32(&seq, 1); // FIXME - faa ok? (Start at 0?)
+	req.h.nlmsg_seq = as_aaf_uint32(&seq, 1); // TODO - faa ok? (Start at 0?)
 	req.m.rtgen_family = PF_UNSPEC;
 
 	struct sockaddr_nl rem;

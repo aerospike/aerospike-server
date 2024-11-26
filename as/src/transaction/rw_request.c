@@ -115,6 +115,7 @@ rw_request_create(cf_digest* keyd)
 
 	rw->tid = as_faa_uint32(&g_rw_tid, 1);
 	rw->dup_res_complete = false;
+	rw->repl_write_w_orig = false;
 	rw->repl_write_complete = false;
 	rw->repl_ping_complete = false;
 	rw->dup_res_cb = NULL;
@@ -184,7 +185,7 @@ rw_request_destroy(rw_request* rw)
 		as_transaction* tr = (as_transaction*)e->tr_head;
 
 		tr->from_flags |= FROM_FLAG_RESTART;
-		as_service_enqueue_internal(tr);
+		as_service_enqueue_internal_keyd(tr);
 
 		cf_free(e);
 		e = next;

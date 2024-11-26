@@ -66,6 +66,7 @@
 #include "storage/drv_common.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
 
@@ -133,7 +134,6 @@ static void start_defrag_threads(drv_mems* mems);
 
 // Cold start.
 static void* run_mem_cold_start(void* udata);
-static void cold_start_sweep(drv_mems* mems, drv_mem* mem);
 static void cold_start_add_record(drv_mems* mems, drv_mem* mem, const as_flat_record* flat, uint64_t rblock_id, uint32_t record_size);
 static bool prefer_existing_record(const as_namespace* ns, const as_flat_record* flat, uint32_t block_void_time, const as_index* r);
 
@@ -148,7 +148,6 @@ static bool sanity_check_flat(const drv_mem* mem, const as_record* r, uint64_t r
 // Write and recycle wblocks.
 static void* run_shadow(void* arg);
 static void write_sanity_checks(drv_mem* mem, mem_write_block* mwb);
-static void block_free(drv_mem* mem, uint64_t rblock_id, uint32_t n_rblocks, char* msg);
 static void push_wblock_to_defrag_q(drv_mem* mem, uint32_t wblock_id);
 static void push_wblock_to_free_q(drv_mem* mem, uint32_t wblock_id);
 
@@ -371,6 +370,10 @@ as_storage_load_ticker_mem(const as_namespace* ns)
 		buf[pos - 1] = '\0'; // chomp last comma
 	}
 
+	if (drv_mrt_2nd_pass_load_ticker(ns, buf)) {
+		return;
+	}
+
 	if (ns->n_tombstones == 0) {
 		cf_info(AS_DRV_MEM, "{%s} loaded: objects %lu device-pcts (%s)",
 				ns->name, ns->n_objects, buf);
@@ -500,6 +503,8 @@ as_storage_destroy_record_mem(as_namespace* ns, as_record* r)
 
 		r->rblock_id = 0;
 		r->n_rblocks = 0;
+
+		mrt_block_free_orig(mems, r);
 	}
 }
 
@@ -848,6 +853,8 @@ as_storage_dump_wb_summary_mem(const as_namespace* ns)
 	uint32_t n_defrag = 0;
 	uint32_t n_emptying = 0;
 
+	uint32_t n_short_lived = 0;
+
 	uint32_t n_zero_used_sz = 0;
 
 	linear_hist* h =
@@ -881,6 +888,10 @@ as_storage_dump_wb_summary_mem(const as_namespace* ns)
 				break;
 			}
 
+			if (wblock_state->short_lived) {
+				n_short_lived++;
+			}
+
 			uint32_t inuse_sz = as_load_uint32(&wblock_state->inuse_sz);
 
 			if (inuse_sz == 0) {
@@ -895,6 +906,10 @@ as_storage_dump_wb_summary_mem(const as_namespace* ns)
 	cf_info(AS_DRV_MEM, "WB: namespace %s", ns->name);
 	cf_info(AS_DRV_MEM, "WB: wblocks by state - free:%u reserved:%u used:%u defrag:%u emptying:%u",
 			n_free, n_reserved, n_used, n_defrag, n_emptying);
+
+	if (n_short_lived != 0) {
+		cf_info(AS_DRV_MEM, "WB: short-lived wblocks - %u", n_short_lived);
+	}
 
 	cf_dyn_buf_define(db);
 
@@ -1503,6 +1518,7 @@ wblock_init(drv_mem* mem)
 		cf_mutex_init(&p_wblock_state->LOCK);
 		p_wblock_state->mwb = NULL;
 		p_wblock_state->state = WBLOCK_STATE_FREE;
+		p_wblock_state->short_lived = false;
 		p_wblock_state->n_vac_dests = 0;
 	}
 }
@@ -1543,6 +1559,8 @@ static void
 start_loading_records(drv_mems* mems, cf_queue* complete_q)
 {
 	as_namespace* ns = mems->ns;
+
+	drv_mrt_create_cold_start_hash(ns);
 
 	ns->loading_records = true;
 
@@ -1626,10 +1644,14 @@ run_load_queues(void* pv_data)
 		uint32_t inuse_sz = mem->wblock_state[wblock_id].inuse_sz;
 
 		if (inuse_sz == 0) {
+			// Cold start may produce an empty short-lived wblock.
+			mem->wblock_state[wblock_id].short_lived = false;
+
 			// Faster than using push_wblock_to_free_q() here...
 			cf_queue_push(mem->free_wblock_q, &wblock_id);
 		}
-		else if (inuse_sz < lwm_size) {
+		else if (inuse_sz < lwm_size &&
+				! mem->wblock_state[wblock_id].short_lived) {
 			defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size], wblock_id);
 		}
 		else {
@@ -1765,37 +1787,24 @@ run_mem_cold_start(void* udata)
 
 	cf_free(lri);
 
-	if (mem->shadow_name != NULL && ! mem->cold_start_local) {
-		cf_info(AS_DRV_MEM, "device %s: reading backing device %s to load index",
-				mem->name, mem->shadow_name);
-	}
-	else {
-		cf_info(AS_DRV_MEM, "device %s: reading device to load index",
-				mem->name);
-	}
-
-	cold_start_sweep(mems, mem);
-
-	cf_info(AS_DRV_MEM, "device %s: read complete: UNIQUE %lu (REPLACED %lu) (OLDER %lu) (EXPIRED %lu) (EVICTED %lu) (UNPARSABLE %lu) records",
-			mem->name, mem->record_add_unique_counter,
-			mem->record_add_replace_counter, mem->record_add_older_counter,
-			mem->record_add_expired_counter, mem->record_add_evicted_counter,
-			mem->record_add_unparsable_counter);
+	cold_start_sweep_device(mems, mem);
 
 	if (cf_rc_release(complete_rc) == 0) {
 		// All drives are done reading.
 
 		as_namespace* ns = mems->ns;
 
-		ns->loading_records = false;
-		cold_start_drop_cenotaphs(ns);
+		if (drv_cold_start_sweeps_done(ns)) {
+			ns->loading_records = false;
+			cold_start_drop_cenotaphs(ns);
 
-		cf_mutex_destroy(&ns->cold_start_evict_lock);
+			cf_mutex_destroy(&ns->cold_start_evict_lock);
 
-		as_truncate_list_cenotaphs(ns);
-		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
+			as_truncate_list_cenotaphs(ns);
+			as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 
-		cold_start_set_unrepl_stat(ns);
+			cold_start_set_unrepl_stat(ns);
+		}
 
 		void* _t = NULL;
 
@@ -1806,9 +1815,19 @@ run_mem_cold_start(void* udata)
 	return NULL;
 }
 
-static void
+// Not static - called by split function.
+void
 cold_start_sweep(drv_mems* mems, drv_mem* mem)
 {
+	if (mem->shadow_name != NULL && ! mem->cold_start_local) {
+		cf_info(AS_DRV_MEM, "device %s: reading backing device %s to load index",
+				mem->name, mem->shadow_name);
+	}
+	else {
+		cf_info(AS_DRV_MEM, "device %s: reading device to load index",
+				mem->name);
+	}
+
 	bool read_shadow = mem->shadow_name != NULL && ! mem->cold_start_local;
 	int fd = read_shadow ? shadow_fd_get(mem) : -1;
 
@@ -1895,6 +1914,12 @@ cold_start_sweep(drv_mems* mems, drv_mem* mem)
 	if (read_shadow) {
 		shadow_fd_put(mem, fd);
 	}
+
+	cf_info(AS_DRV_MEM, "device %s: read complete: UNIQUE %lu (REPLACED %lu) (OLDER %lu) (EXPIRED %lu) (EVICTED %lu) (UNPARSABLE %lu) records",
+			mem->name, mem->record_add_unique_counter,
+			mem->record_add_replace_counter, mem->record_add_older_counter,
+			mem->record_add_expired_counter, mem->record_add_evicted_counter,
+			mem->record_add_unparsable_counter);
 }
 
 static void
@@ -1987,6 +2012,8 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem,
 	if (! is_create) {
 		// Record already existed. Ignore this one if existing record is newer.
 		if (prefer_existing_record(ns, flat, opt_meta.void_time, r)) {
+			cold_start_fill_orig(mem, flat, rblock_id, &opt_meta,
+					p_partition->tree, &r_ref);
 			cold_start_adjust_cenotaph(ns, flat, opt_meta.void_time, r);
 			as_record_done(&r_ref, ns);
 			mem->record_add_older_counter++;
@@ -1998,8 +2025,7 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem,
 	// Skip records that have expired.
 	if (opt_meta.void_time != 0 && ns->cold_start_now > opt_meta.void_time) {
 		if (! is_create) {
-			remove_from_sindex(ns, &r_ref);
-			as_set_index_delete_live(ns, p_partition->tree, r, r_ref.r_h);
+			drv_cold_start_remove_from_set_index(ns, p_partition->tree, &r_ref);
 		}
 
 		as_index_delete(p_partition->tree, &flat->keyd);
@@ -2012,8 +2038,7 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem,
 	if (opt_meta.void_time != 0 && ns->evict_void_time > opt_meta.void_time &&
 			drv_is_set_evictable(ns, &opt_meta)) {
 		if (! is_create) {
-			remove_from_sindex(ns, &r_ref);
-			as_set_index_delete_live(ns, p_partition->tree, r, r_ref.r_h);
+			drv_cold_start_remove_from_set_index(ns, p_partition->tree, &r_ref);
 		}
 
 		as_index_delete(p_partition->tree, &flat->keyd);
@@ -2024,37 +2049,27 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem,
 
 	// We'll keep the record we're now reading ...
 
-	// Sets set-id if creating, and adjusts key-stored bit.
-	drv_apply_opt_meta(r, ns, &opt_meta);
-
-	// Adjust sindex if applicable.
-	if (set_has_sindex(r, ns)) {
-		as_storage_rd rd;
-
-		if (is_create) {
-			as_storage_record_create(ns, r, &rd);
-		}
-		else {
-			as_storage_record_open(ns, r, &rd);
+	if (is_create) {
+		// Set record's set-id.
+		if (opt_meta.set_name != NULL) {
+			as_index_set_set_w_len(r, ns, opt_meta.set_name,
+					opt_meta.set_name_len, false);
 		}
 
-		as_bin stack_bins[RECORD_MAX_BINS]; // old bins
+		drv_cold_start_record_create(ns, flat, &opt_meta, p_partition->tree,
+				&r_ref);
 
-		if (as_storage_rd_load_bins(&rd, stack_bins) < 0) {
-			cf_crash(AS_DRV_MEM, "%pD - load bins failed", &r->keyd);
-		}
-
-		uint16_t n_new_bins = (uint16_t)opt_meta.n_bins;
-		as_bin new_bins[n_new_bins];
-
-		if (as_flat_unpack_bins(ns, p_read, end, n_new_bins, new_bins) < 0) {
-			cf_crash(AS_DRV_MEM, "%pD - unpack bins failed", &r->keyd);
-		}
-
-		update_sindex(ns, &r_ref, rd.bins, rd.n_bins, new_bins, n_new_bins);
-
-		as_storage_record_close(&rd);
+		mem->record_add_unique_counter++;
 	}
+	else {
+		cold_start_record_update(mems, flat, &opt_meta, p_partition->tree,
+				&r_ref);
+
+		mem->record_add_replace_counter++;
+	}
+
+	// Store or drop the key according to the props we read.
+	as_record_finalize_key(r, opt_meta.key, opt_meta.key_size);
 
 	// Set/reset the record's last-update-time, generation, and void-time.
 	r->last_update_time = flat->last_update_time;
@@ -2068,23 +2083,11 @@ cold_start_add_record(drv_mems* mems, drv_mem* mem,
 	cold_start_init_repl_state(ns, r);
 	cold_start_init_xdr_state(flat, r);
 
-	if (is_create) {
-		mem->record_add_unique_counter++;
-	}
-	else if (STORAGE_RBLOCK_IS_VALID(r->rblock_id)) {
-		// Replacing an existing record, undo its previous storage accounting.
-		block_free(&mems->mems[r->file_id], r->rblock_id, r->n_rblocks,
-				"record-add");
-		mem->record_add_replace_counter++;
-	}
-	else {
-		cf_warning(AS_DRV_MEM, "replacing record with invalid rblock-id");
-	}
-
-	cold_start_transition_record(ns, flat, &opt_meta, p_partition->tree, &r_ref,
-			is_create);
-
 	uint32_t wblock_id = RBLOCK_ID_TO_WBLOCK_ID(rblock_id);
+
+	if (is_mrt_provisional(r) || is_mrt_monitor_write(ns, r)) {
+		mem->wblock_state[wblock_id].short_lived = true;
+	}
 
 	mem->inuse_size += record_size;
 	mem->wblock_state[wblock_id].inuse_sz += record_size;
@@ -2342,7 +2345,13 @@ write_record(as_storage_rd* rd)
 	int rv = write_bins(rd);
 
 	if (rv == 0 && old_mem) {
-		block_free(old_mem, old_rblock_id, old_n_rblocks, "mem-write");
+		if (! is_first_mrt(rd)) {
+			block_free(old_mem, old_rblock_id, old_n_rblocks, "mem-write");
+		}
+	}
+
+	if (rv == 0) {
+		mrt_rd_block_free_orig(mems, rd);
 	}
 
 	return rv;
@@ -2416,6 +2425,8 @@ buffer_bins(as_storage_rd* rd)
 			return -AS_ERR_OUT_OF_SPACE;
 		}
 
+		set_wblock_flags(rd, mwb);
+
 		if (mem->shadow_name == NULL) {
 			prepare_for_first_write(mwb);
 		}
@@ -2449,6 +2460,8 @@ buffer_bins(as_storage_rd* rd)
 
 			return -AS_ERR_OUT_OF_SPACE;
 		}
+
+		set_wblock_flags(rd, mwb);
 
 		if (mem->shadow_name == NULL) {
 			prepare_for_first_write(mwb);
@@ -2571,9 +2584,8 @@ write_sanity_checks(drv_mem* mem, mem_write_block* mwb)
 			mwb->wblock_id, p_wblock_state->state);
 }
 
-// Reduce wblock's used size, if result is 0 put it in the "free" pool, if it's
-// below the defrag threshold put it in the defrag queue.
-static void
+// Not static - called by split function.
+void
 block_free(drv_mem* mem, uint64_t rblock_id, uint32_t n_rblocks, char* msg)
 {
 	// Determine which wblock we're reducing used size in.
@@ -2608,14 +2620,21 @@ block_free(drv_mem* mem, uint64_t rblock_id, uint32_t n_rblocks, char* msg)
 
 	if (p_wblock_state->state == WBLOCK_STATE_USED) {
 		if (resulting_inuse_sz == 0) {
+			p_wblock_state->short_lived = false;
+
 			as_incr_uint64(&mem->n_wblock_direct_frees);
 			push_wblock_to_free_q(mem, wblock_id);
 		}
 		else if (resulting_inuse_sz < mem->ns->defrag_lwm_size) {
-			push_wblock_to_defrag_q(mem, wblock_id);
+			if (! p_wblock_state->short_lived) {
+				push_wblock_to_defrag_q(mem, wblock_id);
+			}
 		}
 	}
 	else if (p_wblock_state->state == WBLOCK_STATE_EMPTYING) {
+		cf_assert(! p_wblock_state->short_lived, AS_DRV_MEM,
+				"short-lived wblock in emptying state");
+
 		if (resulting_inuse_sz == 0) {
 			push_wblock_to_free_q(mem, wblock_id);
 		}
@@ -2835,7 +2854,7 @@ record_defrag(drv_mem* mem, uint32_t wblock_id, const as_flat_record* flat,
 	if (found) {
 		as_index* r = r_ref.r;
 
-		if (r->file_id == mem->file_id && r->rblock_id == rblock_id) {
+		if ((r = drv_current_record(ns, r, mem->file_id, rblock_id)) != NULL) {
 			if (r->generation != flat->generation) {
 				cf_warning(AS_DRV_MEM, "device %s defrag: rblock_id %lu generation mismatch (%u:%u) %pD",
 						mem->name, rblock_id, r->generation, flat->generation,
@@ -2867,7 +2886,6 @@ record_defrag(drv_mem* mem, uint32_t wblock_id, const as_flat_record* flat,
 	return rv;
 }
 
-// FIXME - what really to do if n_rblocks on drive doesn't match index?
 static void
 defrag_move_record(drv_mem* src_mem, uint32_t src_wblock_id,
 		const as_flat_record* flat, as_index* r)
@@ -2971,6 +2989,10 @@ release_vacated_wblock(drv_mem* mem, uint32_t wblock_id,
 	cf_assert(p_wblock_state->state == WBLOCK_STATE_DEFRAG, AS_DRV_MEM,
 			"device %s: wblock-id %u state %u releasing vacation destination",
 			mem->name, wblock_id, p_wblock_state->state);
+
+	cf_assert(! p_wblock_state->short_lived, AS_DRV_MEM,
+			"device %s: wblock-id %u short-lived wblock in defrag state",
+			mem->name, wblock_id);
 
 	uint32_t n_vac_dests = as_aaf_uint32_rls(&p_wblock_state->n_vac_dests, -1);
 
@@ -3350,7 +3372,8 @@ defrag_sweep(drv_mem* mem)
 		cf_mutex_lock(&p_wblock_state->LOCK);
 
 		if (p_wblock_state->state == WBLOCK_STATE_USED &&
-				p_wblock_state->inuse_sz < mem->ns->defrag_lwm_size) {
+				p_wblock_state->inuse_sz < mem->ns->defrag_lwm_size &&
+				! p_wblock_state->short_lived) {
 			push_wblock_to_defrag_q(mem, wblock_id);
 			n_queued++;
 		}
@@ -3424,11 +3447,18 @@ mwb_release(drv_mem* mem, mem_write_block* mwb)
 	wblock_state->mwb = NULL;
 
 	if (wblock_state->inuse_sz == 0) {
+		wblock_state->short_lived = false;
+
 		as_incr_uint64(&mem->n_wblock_direct_frees);
 		push_wblock_to_free_q(mem, wblock_id);
 	}
 	else if (wblock_state->inuse_sz < mem->ns->defrag_lwm_size) {
-		push_wblock_to_defrag_q(mem, wblock_id);
+		if (! wblock_state->short_lived) {
+			push_wblock_to_defrag_q(mem, wblock_id);
+		}
+		else {
+			wblock_state->state = WBLOCK_STATE_USED;
+		}
 	}
 	else {
 		wblock_state->state = WBLOCK_STATE_USED;

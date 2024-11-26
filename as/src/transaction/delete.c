@@ -43,6 +43,7 @@
 #include "base/datamodel.h"
 #include "base/exp.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/set_index.h"
 #include "base/transaction.h"
@@ -52,6 +53,7 @@
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/proxy.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
@@ -209,7 +211,7 @@ as_delete_start(as_transaction* tr)
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_ERR_FORBIDDEN;
 		send_delete_response(tr);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	int result = validate_delete_durability(tr);
@@ -217,13 +219,13 @@ as_delete_start(as_transaction* tr)
 	if (result != AS_OK) {
 		tr->result_code = result;
 		send_delete_response(tr);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	if (delete_storage_overloaded(tr)) {
 		tr->result_code = AS_ERR_DEVICE_OVERLOAD;
 		send_delete_response(tr);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Create rw_request and add to hash.
@@ -272,7 +274,7 @@ as_delete_start(as_transaction* tr)
 		finished_replicated(tr);
 		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	// If we don't need to wait for replica write acks, fire and forget.
@@ -280,7 +282,7 @@ as_delete_start(as_transaction* tr)
 		start_delete_repl_write_forget(rw, tr);
 		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	start_delete_repl_write(rw, tr);
@@ -353,7 +355,7 @@ delete_dup_res_cb(rw_request* rw)
 		return true;
 	}
 
-	if (status == TRANS_DONE_ERROR) {
+	if (status == TRANS_DONE) {
 		send_delete_response(&tr);
 		return true;
 	}
@@ -429,17 +431,19 @@ send_delete_response(as_transaction* tr)
 	// Note - if tr was setup from rw, rw->from.any has been set null and
 	// informs timeout it lost the race.
 
+	as_record_version v;
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, 0, 0, NULL,
-				NULL, 0, tr->rsv.ns, as_transaction_trid(tr));
+				NULL, 0, tr->rsv.ns, mrt_write_fill_version(&v, tr));
 		client_delete_update_stats(tr->rsv.ns, tr->result_code,
 				as_transaction_is_xdr(tr));
 		break;
 	case FROM_PROXY:
 		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 				tr->result_code, 0, 0, NULL, NULL, 0, tr->rsv.ns,
-				as_transaction_trid(tr));
+				mrt_write_fill_version(&v, tr));
 		if (as_transaction_is_batch_sub(tr)) {
 			from_proxy_batch_sub_delete_update_stats(tr->rsv.ns,
 					tr->result_code);
@@ -453,8 +457,11 @@ send_delete_response(as_transaction* tr)
 		// TODO - maybe future generic add_ack() can take these as params?
 		tr->generation = 0;
 		tr->void_time = 0;
-		as_batch_add_ack(tr);
+		as_batch_add_ack(tr, mrt_write_fill_version(&v, tr));
 		batch_sub_delete_update_stats(tr->rsv.ns, tr->result_code);
+		break;
+	case FROM_MONITOR_DELETE:
+		// Nothing needed.
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
@@ -476,7 +483,7 @@ delete_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, rw_request_trid(rw));
+				0, rw->rsv.ns, NULL);
 		client_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
 				as_msg_is_xdr(&rw->msgp->msg));
 		break;
@@ -495,6 +502,9 @@ delete_timeout_cb(rw_request* rw)
 				AS_ERR_TIMEOUT);
 		// Timeouts aren't included in histograms.
 		batch_sub_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
+		break;
+	case FROM_MONITOR_DELETE:
+		// Nothing needed.
 		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
@@ -523,7 +533,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 		as_record_done(r_ref, ns);
 		as_incr_uint64(&ns->n_fail_generation);
 		tr->result_code = AS_ERR_GENERATION;
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Apply predexp metadata filter if present.
@@ -534,14 +544,14 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 	if (result != 0) {
 		as_record_done(r_ref, ns);
 		tr->result_code = result;
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Set up the nodes to which we'll write replicas.
 	if (! set_replica_destinations(tr, rw)) {
 		as_record_done(r_ref, ns);
 		tr->result_code = AS_ERR_UNAVAILABLE;
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Fire and forget can overload the fabric send queues - check.
@@ -564,7 +574,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 				as_storage_record_close(&rd);
 				as_record_done(r_ref, ns);
 				tr->result_code = result;
-				return TRANS_DONE_ERROR;
+				return TRANS_DONE;
 			}
 
 			destroy_filter_exp(tr, filter_exp);
@@ -577,7 +587,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
 			tr->result_code = AS_ERR_KEY_MISMATCH;
-			return TRANS_DONE_ERROR;
+			return TRANS_DONE;
 		}
 
 		as_storage_record_close(&rd);

@@ -40,7 +40,27 @@ struct as_bin_s;
 struct as_msg_op_s;
 struct as_namespace_s;
 struct as_proto_comp_stat_s;
+struct as_record_version_s;
 struct as_transaction_s;
+
+
+//==========================================================
+// Typedefs & constants.
+//
+
+typedef enum {
+	// These values go on the wire, so mind backward compatibility if changing.
+	PROXY_FIELD_OP,
+	PROXY_FIELD_TID,
+	PROXY_FIELD_DIGEST,
+	PROXY_FIELD_REDIRECT,
+	PROXY_FIELD_AS_PROTO, // request as_proto - currently contains only as_msg's
+	PROXY_FIELD_UNUSED_5,
+	PROXY_FIELD_UNUSED_6,
+	PROXY_FIELD_UNUSED_7,
+
+	NUM_PROXY_FIELDS
+} proxy_msg_field;
 
 
 //==========================================================
@@ -57,5 +77,5 @@ void as_proxy_return_to_sender(const struct as_transaction_s* tr, struct as_name
 void as_proxy_send_response(cf_node dst, uint32_t proxy_tid,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		struct as_msg_op_s** ops, struct as_bin_s** bins, uint16_t bin_count,
-		struct as_namespace_s* ns, uint64_t trid);
+		struct as_namespace_s* ns, struct as_record_version_s* v);
 void as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db, bool compress, struct as_proto_comp_stat_s* comp_stat);

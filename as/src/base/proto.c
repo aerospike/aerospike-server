@@ -143,7 +143,7 @@ as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
 	m->info1 = info1;
 	m->info2 = info2;
 	m->info3 = info3;
-	m->unused = 0;
+	m->info4 = 0;
 	m->result_code = 0;
 	m->generation = 0;
 	m->record_ttl = record_ttl;
@@ -175,14 +175,20 @@ as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
 cl_msg *
 as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		uint32_t void_time, as_msg_op **ops, as_bin **bins, uint16_t bin_count,
-		as_namespace *ns, cl_msg *msgp_in, size_t *msg_sz_in, uint64_t trid)
+		as_namespace *ns, cl_msg *msgp_in, size_t *msg_sz_in,
+		as_record_version *v, uint32_t mrt_deadline)
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
 
-	if (trid != 0) {
+	if (v != NULL) {
 		n_fields++;
-		msg_sz += sizeof(as_msg_field) + sizeof(trid);
+		msg_sz += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
+
+	if (mrt_deadline != 0) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + sizeof(uint32_t);
 	}
 
 	msg_sz += sizeof(as_msg_op) * bin_count;
@@ -228,7 +234,7 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 	m->info1 = 0;
 	m->info2 = 0;
 	m->info3 = 0;
-	m->unused = 0;
+	m->info4 = 0;
 	m->result_code = result_code;
 	m->generation = generation == 0 ? 0 : plain_generation(generation, ns);
 	m->record_ttl = void_time;
@@ -240,14 +246,24 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 
 	buf = m->data;
 
-	if (trid != 0) {
+	if (v != NULL) {
 		as_msg_field *mf = (as_msg_field *)buf;
 
-		mf->field_sz = 1 + sizeof(uint64_t);
-		mf->type = AS_MSG_FIELD_TYPE_TRID;
-		*(uint64_t *)mf->data = cf_swap_to_be64(trid);
+		mf->field_sz = 1 + sizeof(as_record_version);
+		mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
+		*(as_record_version *)mf->data = *v;
 		as_msg_swap_field(mf);
-		buf += sizeof(as_msg_field) + sizeof(uint64_t);
+		buf += sizeof(as_msg_field) + sizeof(as_record_version);
+	}
+
+	if (mrt_deadline != 0) {
+		as_msg_field *mf = (as_msg_field *)buf;
+
+		mf->field_sz = 1 + sizeof(uint32_t);
+		mf->type = AS_MSG_FIELD_TYPE_MRT_DEADLINE;
+		*(uint32_t *)mf->data = cf_swap_to_le32(mrt_deadline);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + sizeof(uint32_t);
 	}
 
 	for (uint16_t i = 0; i < bin_count; i++) {
@@ -379,7 +395,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	m->info1 = no_bin_data ? AS_MSG_INFO1_GET_NO_BINS : 0;
 	m->info2 = 0;
 	m->info3 = 0;
-	m->unused = 0;
+	m->info4 = 0;
 	m->result_code = AS_OK;
 	m->generation = plain_generation(r->generation, ns);
 	m->record_ttl = r->void_time;
@@ -533,14 +549,14 @@ as_msg_fin_bufbuilder(cf_buf_builder **bb_r, int result)
 
 cl_msg *
 as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
-		uint32_t void_time, uint64_t trid, size_t *p_msg_sz)
+		uint32_t void_time, as_record_version *v, size_t *p_msg_sz)
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
 
-	if (trid != 0) {
+	if (v != NULL) {
 		n_fields++;
-		msg_sz += sizeof(as_msg_field) + sizeof(trid);
+		msg_sz += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
 	uint8_t *buf = cf_malloc(msg_sz);
@@ -558,7 +574,7 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 	m->info1 = 0;
 	m->info2 = 0;
 	m->info3 = 0;
-	m->unused = 0;
+	m->info4 = 0;
 	m->result_code = result_code;
 	m->generation = generation;
 	m->record_ttl = void_time;
@@ -570,14 +586,14 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 
 	buf = m->data;
 
-	if (trid != 0) {
+	if (v != NULL) {
 		as_msg_field *mf = (as_msg_field *)buf;
 
-		mf->field_sz = 1 + sizeof(uint64_t);
-		mf->type = AS_MSG_FIELD_TYPE_TRID;
-		*(uint64_t *)mf->data = cf_swap_to_be64(trid);
+		mf->field_sz = 1 + sizeof(as_record_version);
+		mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
+		*(as_record_version *)mf->data = *v;
 		as_msg_swap_field(mf);
-		buf += sizeof(as_msg_field) + sizeof(uint64_t);
+		buf += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
 	*p_msg_sz = msg_sz;
@@ -587,7 +603,7 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 
 cl_msg *
 as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
-		uint32_t generation, uint32_t void_time, uint64_t trid,
+		uint32_t generation, uint32_t void_time, as_record_version *v,
 		size_t *p_msg_sz)
 {
 	const char *bin_name;
@@ -605,9 +621,9 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
 
-	if (trid != 0) {
+	if (v != NULL) {
 		n_fields++;
-		msg_sz += sizeof(as_msg_field) + sizeof(trid);
+		msg_sz += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
 	msg_sz += sizeof(as_msg_op) + bin_name_len +
@@ -628,7 +644,7 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 	m->info1 = 0;
 	m->info2 = 0;
 	m->info3 = 0;
-	m->unused = 0;
+	m->info4 = 0;
 	m->result_code = result_code;
 	m->generation = generation;
 	m->record_ttl = void_time;
@@ -640,14 +656,14 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 
 	buf = m->data;
 
-	if (trid != 0) {
+	if (v != NULL) {
 		as_msg_field *mf = (as_msg_field *)buf;
 
-		mf->field_sz = 1 + sizeof(uint64_t);
-		mf->type = AS_MSG_FIELD_TYPE_TRID;
-		*(uint64_t *)mf->data = cf_swap_to_be64(trid);
+		mf->field_sz = 1 + sizeof(as_record_version);
+		mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
+		*(as_record_version *)mf->data = *v;
 		as_msg_swap_field(mf);
-		buf += sizeof(as_msg_field) + sizeof(uint64_t);
+		buf += sizeof(as_msg_field) + sizeof(as_record_version);
 	}
 
 	as_msg_op *op = (as_msg_op *)buf;
@@ -698,7 +714,7 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 	m->info1 = 0;
 	m->info2 = 0;
 	m->info3 = 0;
-	m->unused = 0;
+	m->info4 = 0;
 	m->result_code = AS_OK;
 	m->generation = 0;
 	m->record_ttl = 0;
@@ -731,13 +747,13 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 int
 as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_msg_op **ops, as_bin **bins,
-		uint16_t bin_count, as_namespace *ns, uint64_t trid)
+		uint16_t bin_count, as_namespace *ns, as_record_version *v)
 {
 	uint8_t stack_buf[MSG_STACK_BUFFER_SZ];
 	size_t msg_sz = sizeof(stack_buf);
 	uint8_t *msgp = (uint8_t *)as_msg_make_response_msg(result_code, generation,
 			void_time, ops, bins, bin_count, ns, (cl_msg *)stack_buf, &msg_sz,
-			trid);
+			v, 0);
 
 	int rv = send_reply_buf(fd_h, msgp, msg_sz);
 
@@ -788,7 +804,7 @@ as_msg_send_fin_timeout(cf_socket *sock, uint32_t result_code, int32_t timeout)
 	m->info1 = 0;
 	m->info2 = 0;
 	m->info3 = AS_MSG_INFO3_LAST;
-	m->unused = 0;
+	m->info4 = 0;
 	m->result_code = result_code;
 	m->generation = 0;
 	m->record_ttl = 0;

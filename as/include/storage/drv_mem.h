@@ -65,13 +65,6 @@ struct drv_pmeta_s;
 // Typedefs & constants.
 //
 
-// FIXME - consolidate with definition in drv_ssd.h?!
-// A defragged wblock waiting to be freed.
-typedef struct vacated_wblock_s {
-	uint32_t file_id;
-	uint32_t wblock_id;
-} vacated_wblock;
-
 // Where records accumulate until flushed to device.
 typedef struct mem_write_block_s {
 	uint32_t			n_writers;	// number of concurrent writers
@@ -92,7 +85,8 @@ typedef struct mem_wblock_state_s {
 	uint32_t			inuse_sz;	// number of bytes currently used in the wblock
 	cf_mutex			LOCK;		// transactions, write_worker, and defrag all are interested in wblock_state
 	mem_write_block*	mwb;		// pending writes for the wblock, also treated as a cache for reads
-	uint32_t			state;		// for now just a defrag flag
+	uint8_t				state;
+	bool				short_lived; // relevant for enterprise edition only
 	uint32_t			n_vac_dests; // number of wblocks into which this wblock defragged
 } mem_wblock_state;
 
@@ -211,12 +205,16 @@ void clear_encryption_keys(struct as_namespace_s* ns);
 void adjust_versions(const struct as_namespace_s* ns, struct drv_pmeta_s* pmeta);
 void flush_final_cfg(struct as_namespace_s* ns);
 
+void cold_start_sweep_device(drv_mems* mems, drv_mem* mem);
+void cold_start_sweep(drv_mems* mems, drv_mem* mem);
+void cold_start_fill_orig(drv_mem* mem, const struct as_flat_record_s* flat, uint64_t rblock_id, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s *r_ref);
+void cold_start_record_create(struct as_namespace_s* ns, const struct as_flat_record_s* flat, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s* r_ref);
+void cold_start_record_update(drv_mems* mems, const struct as_flat_record_s* flat, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s *tree, struct as_index_ref_s* r_ref);
 conflict_resolution_pol cold_start_policy(const struct as_namespace_s* ns);
 void cold_start_adjust_cenotaph(const struct as_namespace_s* ns, const struct as_flat_record_s* flat, uint32_t block_void_time, struct as_index_s* r);
 void cold_start_init_repl_state(const struct as_namespace_s* ns, struct as_index_s* r);
 void cold_start_set_unrepl_stat(struct as_namespace_s* ns);
 void cold_start_init_xdr_state(const struct as_flat_record_s* flat, struct as_index_s* r);
-void cold_start_transition_record(struct as_namespace_s* ns, const struct as_flat_record_s* flat, const struct as_flat_opt_meta_s* opt_meta, struct as_index_tree_s* tree, struct as_index_ref_s* r_ref, bool is_create);
 void cold_start_drop_cenotaphs(struct as_namespace_s* ns);
 
 void resume_devices(drv_mems* mems);
@@ -224,6 +222,11 @@ void resume_devices(drv_mems* mems);
 int write_record(struct as_storage_rd_s* rd);
 int write_bins(struct as_storage_rd_s* rd);
 int buffer_bins(struct as_storage_rd_s* rd);
+void set_wblock_flags(struct as_storage_rd_s* rd, mem_write_block* mwb);
+void mrt_block_free_orig(drv_mems* mems, struct as_index_s* r);
+void mrt_rd_block_free_orig(drv_mems* mems, struct as_storage_rd_s* rd);
+
+void block_free(drv_mem* mem, uint64_t rblock_id, uint32_t n_rblocks, char* msg);
 
 void write_header(drv_mem* mem, const uint8_t* header, const uint8_t* from, size_t size);
 

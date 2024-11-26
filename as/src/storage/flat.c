@@ -119,6 +119,7 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 	}
 
 	set_remote_record_xdr_flags(flat, &opt_meta.extra_flags, rr);
+	set_remote_record_mrt_flags(&opt_meta, rr);
 
 	rr->void_time = opt_meta.void_time;
 	rr->set_name = opt_meta.set_name;
@@ -158,6 +159,14 @@ as_flat_unpack_record_meta(const as_flat_record* flat, const uint8_t* end,
 		}
 
 		at += sizeof(opt_meta->extra_flags);
+	}
+
+	if ((at = unpack_mrt_id(at, end, opt_meta)) == NULL) {
+		return NULL;
+	}
+
+	if ((at = unpack_mrt_orig_v(at, end, opt_meta)) == NULL) {
+		return NULL;
 	}
 
 	if (flat->has_void_time == 1) {
@@ -413,11 +422,14 @@ flat_record_overhead_size(const as_storage_rd* rd)
 	// Start with size of record header struct.
 	size_t size = sizeof(as_flat_record);
 
-	as_flat_extra_flags extra_flags = get_flat_extra_flags(r);
+	as_flat_extra_flags extra_flags = get_flat_extra_flags(rd);
 
 	if (flat_extra_flags_used(&extra_flags)) {
 		size += sizeof(as_flat_extra_flags);
 	}
+
+	size += size_mrt_id(rd);
+	size += size_mrt_orig_v(rd);
 
 	if (r->void_time != 0) {
 		size += sizeof(uint32_t);
@@ -457,7 +469,7 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 
 	uint8_t* at = flat->data;
 
-	as_flat_extra_flags extra_flags = get_flat_extra_flags(r);
+	as_flat_extra_flags extra_flags = get_flat_extra_flags(rd);
 
 	if (flat_extra_flags_used(&extra_flags)) {
 		flat->has_extra_flags = 1;
@@ -468,6 +480,9 @@ flatten_record_meta(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
 	else {
 		flat->has_extra_flags = 0;
 	}
+
+	at = pack_mrt_id(at, rd);
+	at = pack_mrt_orig_v(at, rd);
 
 	if (r->void_time != 0) {
 		*(uint32_t*)at = r->void_time;

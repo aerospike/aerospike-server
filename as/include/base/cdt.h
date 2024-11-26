@@ -326,6 +326,7 @@ void as_bin_set_empty_list(as_bin *b, uint8_t flags, rollback_alloc *alloc_buf);
 void as_bin_set_empty_map(as_bin *b, uint8_t flags, rollback_alloc *alloc_buf);
 
 bool as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata);
+bool as_bin_list_to_mp(const as_bin *b, msgpack_in *mp, uint32_t *count_r);
 bool as_bin_map_foreach(const as_bin *b, map_foreach_callback cb, void *udata);
 
 // cdt_strip

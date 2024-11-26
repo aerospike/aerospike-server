@@ -20,6 +20,7 @@ BASE_HEADERS += features.h
 BASE_HEADERS += health.h
 BASE_HEADERS += index.h
 BASE_HEADERS += json_init.h
+BASE_HEADERS += mrt_monitor.h
 BASE_HEADERS += nsup.h
 BASE_HEADERS += particle.h
 BASE_HEADERS += particle_blob.h
@@ -91,6 +92,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += features_ce.c
   BASE_SOURCES += index_ce.c
+  BASE_SOURCES += mrt_monitor_ce.c
   BASE_SOURCES += namespace_ce.c
   BASE_SOURCES += proto_ce.c
   BASE_SOURCES += record_ce.c
@@ -175,6 +177,7 @@ STORAGE_SOURCES += flat.c
 STORAGE_SOURCES += drv_common.c
 STORAGE_SOURCES += storage.c
 ifneq ($(USE_EE),1)
+  STORAGE_SOURCES += drv_common_ce.c
   STORAGE_SOURCES += drv_mem_ce.c
   STORAGE_SOURCES += drv_pmem_ce.c
   STORAGE_SOURCES += drv_ssd_ce.c
@@ -183,6 +186,8 @@ endif
 
 TRANSACTION_HEADERS += delete.h
 TRANSACTION_HEADERS += duplicate_resolve.h
+TRANSACTION_HEADERS += mrt_roll.h
+TRANSACTION_HEADERS += mrt_utils.h
 TRANSACTION_HEADERS += proxy.h
 TRANSACTION_HEADERS += re_replicate.h
 TRANSACTION_HEADERS += read.h
@@ -208,6 +213,9 @@ TRANSACTION_SOURCES += udf.c
 TRANSACTION_SOURCES += write.c
 ifneq ($(USE_EE),1)
   TRANSACTION_SOURCES += delete_ce.c
+  TRANSACTION_SOURCES += mrt_roll_ce.c
+  TRANSACTION_SOURCES += mrt_utils_ce.c
+  TRANSACTION_SOURCES += mrt_verify_read_ce.c
   TRANSACTION_SOURCES += re_replicate_ce.c
   TRANSACTION_SOURCES += replica_ping_ce.c
   TRANSACTION_SOURCES += rw_utils_ce.c

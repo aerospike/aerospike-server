@@ -48,6 +48,7 @@
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/proxy.h"
 #include "transaction/read_touch.h"
 #include "transaction/replica_ping.h"
@@ -191,7 +192,7 @@ as_read_start(as_transaction* tr)
 
 	if (! repl_ping_check(tr)) {
 		send_read_response(tr, NULL, NULL, 0, NULL);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	transaction_status status;
@@ -236,7 +237,7 @@ as_read_start(as_transaction* tr)
 			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_ERR_UNAVAILABLE;
 			send_read_response(tr, NULL, NULL, 0, NULL);
-			return TRANS_DONE_ERROR;
+			return TRANS_DONE;
 		}
 
 		start_repl_ping(rw, tr);
@@ -380,6 +381,8 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 	// Note - if tr was setup from rw, rw->from.any has been set null and
 	// informs timeout it lost the race.
 
+	as_record_version v;
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		BENCHMARK_NEXT_DATA_POINT(tr, read, local);
@@ -391,7 +394,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, ops, response_bins, n_bins,
-					tr->rsv.ns, as_transaction_trid(tr));
+					tr->rsv.ns, mrt_read_fill_version(&v, tr));
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, read, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, read_hist);
@@ -407,7 +410,8 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		else {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 					tr->result_code, tr->generation, tr->void_time, ops,
-					response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr));
+					response_bins, n_bins, tr->rsv.ns,
+					mrt_read_fill_version(&v, tr));
 		}
 		if (as_transaction_is_batch_sub(tr)) {
 			from_proxy_batch_sub_read_update_stats(tr->rsv.ns, tr->result_code);
@@ -418,7 +422,8 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		break;
 	case FROM_BATCH:
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, read_local);
-		as_batch_add_result(tr, n_bins, response_bins, ops);
+		as_batch_add_result(tr, n_bins, response_bins, ops,
+				mrt_read_fill_version(&v, tr));
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
 		HIST_ACTIVATE_INSERT_DATA_POINT(tr, batch_sub_read_hist);
 		batch_sub_read_update_stats(tr->rsv.ns, tr->result_code);
@@ -441,7 +446,7 @@ read_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(rw->from.proto_fd_h, AS_ERR_TIMEOUT, 0, 0, NULL, NULL,
-				0, rw->rsv.ns, rw_request_trid(rw));
+				0, rw->rsv.ns, NULL);
 		// Timeouts aren't included in histograms.
 		client_read_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		break;
@@ -477,34 +482,50 @@ read_local(as_transaction* tr)
 {
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
+	int result;
 
-	as_index_ref r_ref;
+	as_index_ref r_ref = { 0 };
+	int rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref);
 
-	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) != 0) {
-		read_local_done(tr, NULL, NULL, AS_ERR_NOT_FOUND);
-		return TRANS_DONE_ERROR;
+	if ((result = mrt_allow_read(tr, r_ref.r)) != 0) {
+		read_local_done(tr, &r_ref, NULL, result);
+		return TRANS_DONE;
 	}
 
-	as_record* r = r_ref.r;
+	if (rv != 0) {
+		read_local_done(tr, &r_ref, NULL, AS_ERR_NOT_FOUND);
+		return TRANS_DONE;
+	}
+
+	bool is_mrt = as_transaction_has_mrt_id(tr);
+	as_record* r = read_r(ns, r_ref.r, is_mrt);
+
+	if (r == NULL) {
+		read_local_done(tr, &r_ref, NULL, AS_ERR_NOT_FOUND);
+		return TRANS_DONE;
+	}
+
+	// Set non-zero values - returns generation & void-time on errors - ok?
+	tr->generation = r->generation;
+	tr->void_time = r->void_time;
+	tr->last_update_time = r->last_update_time;
 
 	// Make sure the message set name (if it's there) is correct.
 	if (! set_name_check(tr, r)) {
 		read_local_done(tr, &r_ref, NULL, AS_ERR_PARAMETER);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	// Check if it's an expired or truncated record.
-	if (as_record_is_doomed(r, ns)) {
+	if (as_record_is_doomed(r, ns) && ! (is_mrt && is_mrt_provisional(r))) {
 		read_local_done(tr, &r_ref, NULL, AS_ERR_NOT_FOUND);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
-	int result = repl_state_check(r, tr);
-
-	if (result != 0) {
+	if ((result = repl_state_check(r, tr)) != 0) {
 		if (result == -3) {
 			read_local_done(tr, &r_ref, NULL, AS_ERR_UNAVAILABLE);
-			return TRANS_DONE_ERROR;
+			return TRANS_DONE;
 		}
 
 		// No response sent to origin.
@@ -515,13 +536,13 @@ read_local(as_transaction* tr)
 	// Check if it's a tombstone.
 	if (! as_record_is_live(r)) {
 		read_local_done(tr, &r_ref, NULL, AS_ERR_NOT_FOUND);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	if ((result = as_read_touch_check(r, tr)) != 0) {
 		if (result < 0) {
 			read_local_done(tr, &r_ref, NULL, AS_ERR_PARAMETER);
-			return TRANS_DONE_ERROR;
+			return TRANS_DONE;
 		}
 
 		// Re-queued expecting a proxy to master.
@@ -534,7 +555,7 @@ read_local(as_transaction* tr)
 	// Handle metadata filter if present.
 	if ((result = handle_meta_filter(tr, r, &filter_exp)) != 0) {
 		read_local_done(tr, &r_ref, NULL, result);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	as_storage_rd rd;
@@ -549,7 +570,7 @@ read_local(as_transaction* tr)
 		if ((result = read_and_filter_bins(&rd, filter_exp)) != 0) {
 			destroy_filter_exp(tr, filter_exp);
 			read_local_done(tr, &r_ref, &rd, result);
-			return TRANS_DONE_ERROR;
+			return TRANS_DONE;
 		}
 
 		destroy_filter_exp(tr, filter_exp);
@@ -560,16 +581,12 @@ read_local(as_transaction* tr)
 	if (as_transaction_has_key(tr) &&
 			as_storage_rd_load_key(&rd) && ! check_msg_key(m, &rd)) {
 		read_local_done(tr, &r_ref, &rd, AS_ERR_KEY_MISMATCH);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	if ((m->info1 & AS_MSG_INFO1_GET_NO_BINS) != 0) {
-		tr->generation = r->generation;
-		tr->void_time = r->void_time;
-		tr->last_update_time = r->last_update_time;
-
 		read_local_done(tr, &r_ref, &rd, AS_OK);
-		return TRANS_DONE_SUCCESS;
+		return TRANS_DONE;
 	}
 
 	as_bin stack_bins[RECORD_MAX_BINS];
@@ -577,7 +594,7 @@ read_local(as_transaction* tr)
 	if ((result = as_storage_rd_load_bins(&rd, stack_bins)) < 0) {
 		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
 		read_local_done(tr, &r_ref, &rd, -result);
-		return TRANS_DONE_ERROR;
+		return TRANS_DONE;
 	}
 
 	uint32_t bin_count = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0 ?
@@ -606,7 +623,7 @@ read_local(as_transaction* tr)
 		if (m->n_ops == 0) {
 			cf_warning(AS_RW, "{%s} read_local: bin op(s) expected, none present %pD", ns->name, &tr->keyd);
 			read_local_done(tr, &r_ref, &rd, AS_ERR_PARAMETER);
-			return TRANS_DONE_ERROR;
+			return TRANS_DONE;
 		}
 
 		bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
@@ -619,7 +636,7 @@ read_local(as_transaction* tr)
 				cf_warning(AS_RW, "{%s} read_local: bad bin name %.*s (%u) %pD", ns->name, op->name_sz, op->name, op->name_sz, &tr->keyd);
 				as_bin_destroy_all(result_bins, n_result_bins);
 				read_local_done(tr, &r_ref, &rd, AS_ERR_BIN_NAME);
-				return TRANS_DONE_ERROR;
+				return TRANS_DONE;
 			}
 
 			if (op->op == AS_MSG_OP_READ) {
@@ -641,7 +658,7 @@ read_local(as_transaction* tr)
 						cf_detail(AS_RW, "{%s} read_local: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
-						return TRANS_DONE_ERROR;
+						return TRANS_DONE;
 					}
 
 					if (as_bin_is_used(rb)) {
@@ -670,7 +687,7 @@ read_local(as_transaction* tr)
 						cf_detail(AS_RW, "{%s} read_local: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
-						return TRANS_DONE_ERROR;
+						return TRANS_DONE;
 					}
 
 					if (as_bin_is_used(rb)) {
@@ -699,7 +716,7 @@ read_local(as_transaction* tr)
 						cf_detail(AS_RW, "{%s} read_local: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
-						return TRANS_DONE_ERROR;
+						return TRANS_DONE;
 					}
 
 					if (as_bin_is_used(rb)) {
@@ -727,7 +744,7 @@ read_local(as_transaction* tr)
 					cf_detail(AS_RW, "{%s} read_local: failed as_bin_exp_read_from_client() %pD", ns->name, &tr->keyd);
 					as_bin_destroy_all(result_bins, n_result_bins);
 					read_local_done(tr, &r_ref, &rd, -result);
-					return TRANS_DONE_ERROR;
+					return TRANS_DONE;
 				}
 
 				if (as_bin_is_used(rb)) {
@@ -744,7 +761,7 @@ read_local(as_transaction* tr)
 				cf_warning(AS_RW, "{%s} read_local: unexpected bin op %u %pD", ns->name, op->op, &tr->keyd);
 				as_bin_destroy_all(result_bins, n_result_bins);
 				read_local_done(tr, &r_ref, &rd, AS_ERR_PARAMETER);
-				return TRANS_DONE_ERROR;
+				return TRANS_DONE;
 			}
 		}
 	}
@@ -752,19 +769,18 @@ read_local(as_transaction* tr)
 	cf_dyn_buf_define_size(db, 16 * 1024);
 
 	if (tr->origin != FROM_BATCH) {
+		as_record_version v;
+
 		db.used_sz = db.alloc_sz;
 		db.buf = (uint8_t*)as_msg_make_response_msg(tr->result_code,
 				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
-				(cl_msg*)dyn_bufdb, &db.used_sz, as_transaction_trid(tr));
+				(cl_msg*)dyn_bufdb, &db.used_sz, mrt_read_fill_version(&v, tr),
+				0);
 
 		db.is_stack = db.buf == dyn_bufdb;
 		// Note - not bothering to correct alloc_sz if buf was allocated.
 	}
 	else {
-		tr->generation = r->generation;
-		tr->void_time = r->void_time;
-		tr->last_update_time = r->last_update_time;
-
 		// Since as_batch_add_result() constructs response directly in shared
 		// buffer to avoid extra copies, can't use db.
 		send_read_response(tr, p_ops, response_bins, n_bins, NULL);
@@ -782,19 +798,29 @@ read_local(as_transaction* tr)
 		tr->from.proto_fd_h = NULL;
 	}
 
-	return TRANS_DONE_SUCCESS;
+	return TRANS_DONE;
 }
 
 static void
 read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code)
 {
-	if (r_ref) {
-		if (rd) {
+	as_namespace* ns = tr->rsv.ns;
+
+	if (r_ref->r != NULL) {
+		if (rd != NULL) {
 			as_storage_record_close(rd);
 		}
 
-		as_record_done(r_ref, tr->rsv.ns);
+		as_record_done(r_ref, ns);
+	}
+
+	switch (result_code) {
+	case AS_ERR_MRT_BLOCKED:
+		as_incr_uint64(&ns->n_fail_mrt_blocked);
+		break;
+	default:
+		break;
 	}
 
 	tr->result_code = (uint8_t)result_code;

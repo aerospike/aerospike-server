@@ -1588,7 +1588,7 @@ handle_version_change(as_partition* p, struct as_namespace_s* ns,
 
 	if (as_partition_version_has_data(orig_version) &&
 			! as_partition_version_has_data(&p->version)) {
-		// FIXME - temporary paranoia.
+		// OLD PARANOIA.
 		cf_assert(p->tree, AS_PARTITION, "unexpected - null tree");
 		drop_trees(ns, p);
 	}

@@ -106,6 +106,8 @@ void log_line_dup_res(as_namespace* ns);
 void log_line_retransmits(as_namespace* ns);
 void log_line_read_touch(as_namespace* ns);
 void log_line_re_repl(as_namespace* ns);
+void log_line_mrt_finish(as_namespace* ns);
+void log_line_mrt_monitor_finish(as_namespace* ns);
 void log_line_special_errors(as_namespace* ns);
 
 void dump_global_histograms();
@@ -214,6 +216,8 @@ log_ticker_frame(uint64_t delta_time)
 		log_line_retransmits(ns);
 		log_line_read_touch(ns);
 		log_line_re_repl(ns);
+		log_line_mrt_finish(ns);
+		log_line_mrt_monitor_finish(ns);
 		log_line_special_errors(ns);
 
 		dump_namespace_histograms(ns);
@@ -1043,6 +1047,53 @@ log_line_re_repl(as_namespace* ns)
 }
 
 void
+log_line_mrt_finish(as_namespace* ns)
+{
+	uint64_t n_verify_read_success = as_load_uint64(&ns->n_mrt_verify_read_success);
+	uint64_t n_verify_read_error = as_load_uint64(&ns->n_mrt_verify_read_error);
+	uint64_t n_verify_read_timeout = as_load_uint64(&ns->n_mrt_verify_read_timeout);
+	uint64_t n_roll_forward_success = as_load_uint64(&ns->n_mrt_roll_forward_success);
+	uint64_t n_roll_forward_error = as_load_uint64(&ns->n_mrt_roll_forward_error);
+	uint64_t n_roll_forward_timeout = as_load_uint64(&ns->n_mrt_roll_forward_timeout);
+	uint64_t n_roll_back_success = as_load_uint64(&ns->n_mrt_roll_back_success);
+	uint64_t n_roll_back_error = as_load_uint64(&ns->n_mrt_roll_back_error);
+	uint64_t n_roll_back_timeout = as_load_uint64(&ns->n_mrt_roll_back_timeout);
+
+	if ((n_verify_read_success | n_verify_read_error | n_verify_read_timeout |
+			n_roll_forward_success | n_roll_forward_error | n_roll_forward_timeout |
+			n_roll_back_success | n_roll_back_error | n_roll_back_timeout) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} mrt-finish: verify-read (%lu,%lu,%lu) roll-forward (%lu,%lu,%lu) roll-back (%lu,%lu,%lu)",
+			ns->name,
+			n_verify_read_success, n_verify_read_error, n_verify_read_timeout,
+			n_roll_forward_success, n_roll_forward_error, n_roll_forward_timeout,
+			n_roll_back_success, n_roll_back_error, n_roll_back_timeout);
+}
+
+void
+log_line_mrt_monitor_finish(as_namespace* ns)
+{
+	uint64_t n_roll_forward_success = as_load_uint64(&ns->n_mrt_monitor_roll_forward_success);
+	uint64_t n_roll_forward_error = as_load_uint64(&ns->n_mrt_monitor_roll_forward_error);
+	uint64_t n_roll_forward_timeout = as_load_uint64(&ns->n_mrt_monitor_roll_forward_timeout);
+	uint64_t n_roll_back_success = as_load_uint64(&ns->n_mrt_monitor_roll_back_success);
+	uint64_t n_roll_back_error = as_load_uint64(&ns->n_mrt_monitor_roll_back_error);
+	uint64_t n_roll_back_timeout = as_load_uint64(&ns->n_mrt_monitor_roll_back_timeout);
+
+	if ((n_roll_forward_success | n_roll_forward_error | n_roll_forward_timeout |
+			n_roll_back_success | n_roll_back_error | n_roll_back_timeout) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} mrt-monitor-finish: roll-forward (%lu,%lu,%lu) roll-back (%lu,%lu,%lu)",
+			ns->name,
+			n_roll_forward_success, n_roll_forward_error, n_roll_forward_timeout,
+			n_roll_back_success, n_roll_back_error, n_roll_back_timeout);
+}
+
+void
 log_line_special_errors(as_namespace* ns)
 {
 	uint64_t n_fail_key_busy = as_load_uint64(&ns->n_fail_key_busy);
@@ -1210,6 +1261,10 @@ dump_namespace_histograms(as_namespace* ns)
 
 	if (ns->re_repl_hist_active) {
 		histogram_dump(ns->re_repl_hist);
+	}
+
+	if (ns->writes_per_mrt_hist_active) {
+		histogram_dump(ns->writes_per_mrt_hist);
 	}
 
 	if (ns->storage_benchmarks_enabled) {

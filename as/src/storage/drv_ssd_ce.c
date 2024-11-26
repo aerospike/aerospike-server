@@ -1,7 +1,7 @@
 /*
  * drv_ssd_ce.c
  *
- * Copyright (C) 2014-2020 Aerospike, Inc.
+ * Copyright (C) 2014-2024 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -68,6 +68,32 @@ ssd_flush_final_cfg(as_namespace* ns)
 }
 
 void
+ssd_cold_start_sweep_device(drv_ssds* ssds, drv_ssd* ssd)
+{
+	ssd_cold_start_sweep(ssds, ssd);
+}
+
+void
+ssd_cold_start_fill_orig(drv_ssd* ssd, const as_flat_record* flat,
+		uint64_t rblock_id, const as_flat_opt_meta* opt_meta,
+		as_index_tree* tree, as_index_ref* r_ref)
+{
+}
+
+void
+ssd_cold_start_record_update(drv_ssds* ssds, const as_flat_record* flat,
+		const as_flat_opt_meta* opt_meta, as_index_tree* tree,
+		as_index_ref* r_ref)
+{
+	as_index* r = r_ref->r;
+
+	cf_assert(r->rblock_id != 0, AS_DRV_SSD, "invalid rblock-id");
+
+	ssd_block_free(&ssds->ssds[r->file_id], r->rblock_id, r->n_rblocks,
+			"record-add");
+}
+
+void
 ssd_cold_start_adjust_cenotaph(as_namespace* ns, const as_flat_record* flat,
 		uint32_t block_void_time, as_record* r)
 {
@@ -75,29 +101,7 @@ ssd_cold_start_adjust_cenotaph(as_namespace* ns, const as_flat_record* flat,
 }
 
 void
-ssd_cold_start_transition_record(as_namespace* ns, const as_flat_record* flat,
-		const as_flat_opt_meta* opt_meta, as_index_tree* tree,
-		as_index_ref* r_ref, bool is_create)
-{
-	index_metadata old_metadata = {
-			// Note - other members irrelevant.
-			.generation = is_create ? 0 : 1, // fake to transition set-index
-	};
-
-	as_record_transition_set_index(tree, r_ref, ns, opt_meta->n_bins,
-			&old_metadata);
-}
-
-void
 ssd_cold_start_drop_cenotaphs(as_namespace* ns)
-{
-	// Nothing to do - relevant for enterprise version only.
-}
-
-// TODO - move to drv_common_ce.c in 8.0!
-void
-drv_adjust_sc_version_flags(as_namespace* ns, drv_pmeta* pmeta,
-		bool wiped_drives, bool dirty)
 {
 	// Nothing to do - relevant for enterprise version only.
 }
@@ -142,6 +146,24 @@ int
 ssd_write_bins(as_storage_rd *rd)
 {
 	return ssd_buffer_bins(rd);
+}
+
+void
+ssd_mrt_block_free_orig(drv_ssds* ssds, as_record* r)
+{
+}
+
+void
+ssd_mrt_rd_block_free_orig(drv_ssds* ssds, as_storage_rd* rd)
+{
+}
+
+void
+ssd_set_wblock_flags(as_storage_rd* rd, ssd_write_buf* swb)
+{
+	swb->use_post_write_q = rd->which_current_swb == SWB_MASTER ||
+				(rd->which_current_swb == SWB_PROLE &&
+						rd->ns->storage_cache_replica_writes);
 }
 
 void

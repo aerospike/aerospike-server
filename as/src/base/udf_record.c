@@ -48,6 +48,7 @@
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
+#include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 
@@ -247,13 +248,23 @@ udf_record_open(udf_record* urecord)
 
 	as_transaction* tr = urecord->tr;
 	as_index_ref* r_ref = urecord->r_ref;
-	as_namespace* ns = tr->rsv.ns;
 
-	if (as_record_get_live(tr->rsv.tree, &tr->keyd, r_ref, ns) != 0) {
+	if (as_record_get(tr->rsv.tree, &tr->keyd, r_ref) != 0) {
 		return -1;
 	}
 
-	as_index* r = r_ref->r;
+	as_namespace* ns = tr->rsv.ns;
+	as_record* r = read_r(ns, r_ref->r, false); // is not an MRT
+
+	if (r == NULL) {
+		as_record_done(r_ref, ns);
+		return -1;
+	}
+
+	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return -1;
+	}
 
 	if (as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
@@ -269,7 +280,7 @@ void
 udf_record_close(udf_record* urecord)
 {
 	if (urecord->is_open) {
-		// FIXME - development paranoia - remove eventually.
+		// OLD PARANOIA - remove eventually.
 		cf_assert(! urecord->has_updates, AS_UDF,
 				"unexpected - record has updates");
 		cf_assert(urecord->particle_llb.head == NULL, AS_UDF,

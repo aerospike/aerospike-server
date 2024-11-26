@@ -42,6 +42,7 @@
 #include "base/index.h"
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
+#include "storage/drv_common.h"
 
 
 //==========================================================
@@ -128,6 +129,31 @@ as_storage_load(void)
 				as_namespace* ns = g_config.namespaces[ns_ix];
 
 				if (ns->loading_records) {
+					as_storage_load_ticker_table[ns->storage_type](ns);
+				}
+			}
+		}
+	}
+
+	uint32_t n_2nd_pass = 0;
+
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		if (drv_load_needs_2nd_pass(ns)) {
+			as_storage_load_table[ns->storage_type](ns, &complete_q);
+			n_2nd_pass++;
+		}
+	}
+
+	for (uint32_t n_done = 0; n_done < n_2nd_pass; n_done++) {
+		void* _t;
+
+		while (cf_queue_pop(&complete_q, &_t, TICKER_INTERVAL) != CF_QUEUE_OK) {
+			for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+				as_namespace* ns = g_config.namespaces[ns_ix];
+
+				if (drv_load_needs_2nd_pass(ns) && ns->loading_records) {
 					as_storage_load_ticker_table[ns->storage_type](ns);
 				}
 			}
