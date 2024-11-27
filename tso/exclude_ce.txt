@@ -220,6 +220,7 @@ delete.c
 duplicate_resolve.c
 proxy.c
 re_replicate_ce.c
+read_touch.c
 read.c
 replica_ping_ce.c
 replica_write.c
