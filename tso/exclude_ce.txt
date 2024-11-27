@@ -193,12 +193,13 @@ sindex.c:as_sindex_update_by_sbin
 #
 
 drv_common.h
+drv_mem.h
 drv_ssd.h
 flat.h
 
 drv_common.c
-drv_memory_ce.c
-drv_memory.c
+drv_mem_ce.c
+drv_mem.c
 drv_pmem_ce.c
 drv_ssd.c
 drv_ssd_ce.c
