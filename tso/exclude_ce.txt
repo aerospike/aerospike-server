@@ -109,6 +109,7 @@ exp.c
 expop.c
 index_ce.c
 index.c
+mrt_monitor_ce.c
 namespace.c
 particle_blob.c
 particle_bool.c
@@ -197,6 +198,7 @@ drv_mem.h
 drv_ssd.h
 flat.h
 
+drv_common_ce.c
 drv_common.c
 drv_mem_ce.c
 drv_mem.c
@@ -219,6 +221,9 @@ write.h
 delete_ce.c
 delete.c
 duplicate_resolve.c
+mrt_roll_ce.c
+mrt_utils_ce.c
+mrt_verify_read_ce.c
 proxy.c
 re_replicate_ce.c
 read_touch.c
