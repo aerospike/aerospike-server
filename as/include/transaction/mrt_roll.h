@@ -41,5 +41,3 @@ struct as_transaction_s;
 //
 
 transaction_status as_mrt_roll_start(struct as_transaction_s* tr);
-
-// build trigger toggle
