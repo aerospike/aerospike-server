@@ -2234,24 +2234,24 @@ exchange_dump(bool verbose)
 	}
 	else {
 		INFO("EXG: cluster key: %"PRIx64, g_exchange.cluster_key);
-		as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
+		as_clustering_log_cf_node_vector(CF_INFO, AS_EXCHANGE,
 				"EXG: succession:", &g_exchange.succession_list);
 
 		if (verbose) {
 			vector_clear(node_vector);
 			exchange_nodes_find_send_unacked(node_vector);
-			as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
+			as_clustering_log_cf_node_vector(CF_INFO, AS_EXCHANGE,
 					"EXG: send pending:", node_vector);
 
 			vector_clear(node_vector);
 			exchange_nodes_find_not_received(node_vector);
-			as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
+			as_clustering_log_cf_node_vector(CF_INFO, AS_EXCHANGE,
 					"EXG: receive pending:", node_vector);
 
 			if (exchange_self_is_principal()) {
 				vector_clear(node_vector);
 				exchange_nodes_find_not_ready_to_commit(node_vector);
-				as_clustering_log_cf_node_vector(AS_INFO, AS_EXCHANGE,
+				as_clustering_log_cf_node_vector(CF_INFO, AS_EXCHANGE,
 						"EXG: ready to commit pending:", node_vector);
 			}
 		}
