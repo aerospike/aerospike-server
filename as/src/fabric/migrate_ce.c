@@ -75,6 +75,12 @@ emigration_pack_info(const emigration *emig, const as_record *r)
 	return 0;
 }
 
+bool
+emigration_is_replicated(const as_namespace *ns, const as_record *r)
+{
+	return true;
+}
+
 void
 emigration_handle_meta_batch_request(cf_node src, msg *m)
 {
