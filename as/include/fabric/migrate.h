@@ -206,6 +206,7 @@ void emigrate_fill_queue_init();
 void emigrate_queue_push(emigration *emig);
 bool should_emigrate_record(emigration *emig, struct as_index_ref_s *r_ref);
 uint32_t emigration_pack_info(const emigration *emig, const struct as_index_s *r);
+bool emigration_is_replicated(const struct as_namespace_s *ns, const struct as_index_s *r);
 
 // Migrate fabric message handling.
 void emigration_handle_meta_batch_request(cf_node src, msg *m);
