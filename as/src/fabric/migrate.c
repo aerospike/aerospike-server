@@ -949,7 +949,8 @@ emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 
 		if (as_record_get(ri_ctrl->emig->rsv.tree, &ri_ctrl->keyd,
 				&r_ref) == 0) {
-			if (r_ref.r->last_update_time != ri_ctrl->lut) {
+			if (r_ref.r->last_update_time != ri_ctrl->lut &&
+					emigration_is_replicated(ns, r_ref.r)) {
 				satisfied = true; // replication satisfied by recent update
 			}
 
