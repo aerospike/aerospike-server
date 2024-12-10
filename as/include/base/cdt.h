@@ -239,6 +239,12 @@ typedef enum {
 	MAP_SORT_BY_VALUE
 } map_sort_by_t;
 
+typedef enum {
+	LIST_CMP_EQUAL = 0,
+	LIST_CMP_NOT_EQUAL = 1,
+	LIST_CMP_ERROR = -1
+} list_cmp_t;
+
 typedef bool (*list_foreach_callback)(msgpack_in *element, void *udata);
 typedef bool (*map_foreach_callback)(msgpack_in *key, msgpack_in *value, void *udata);
 
@@ -328,6 +334,7 @@ void as_bin_set_empty_map(as_bin *b, uint8_t flags, rollback_alloc *alloc_buf);
 bool as_bin_list_foreach(const as_bin *b, list_foreach_callback cb, void *udata);
 bool as_bin_list_to_mp(const as_bin *b, msgpack_in *mp, uint32_t *count_r);
 bool as_bin_map_foreach(const as_bin *b, map_foreach_callback cb, void *udata);
+list_cmp_t as_bin_ordered_list_cmp_nondup(const as_bin *b, const uint8_t *buf, uint32_t sz);
 
 // cdt_strip
 uint32_t cdt_strip_indexes_from_particle(const as_particle *p, uint8_t *dest, msgpack_type expected_type);

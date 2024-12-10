@@ -279,6 +279,9 @@ static int packed_list_add_ordered(const packed_list *list, cdt_op_mem *com, con
 static int packed_list_add_items_ordered(const packed_list *list, cdt_op_mem *com, const cdt_payload *items, uint64_t mod_flags);
 static int packed_list_replace_ordered(const packed_list *list, cdt_op_mem *com, uint32_t index, const cdt_payload *value, uint64_t mod_flags);
 
+static bool packed_list_check_order(const packed_list *list, bool error_on_dup);
+static list_cmp_t packed_list_ordered_cmp_nondup(const packed_list *ordered, const packed_list *in, rollback_alloc *alloc_idx);
+
 // packed_list_op
 static void packed_list_op_init(packed_list_op *op, const packed_list *list);
 static bool packed_list_op_insert(packed_list_op *op, uint32_t index, uint32_t count, uint32_t insert_sz);
@@ -1148,6 +1151,31 @@ as_bin_list_to_mp(const as_bin *b, msgpack_in *mp, uint32_t *count_r)
 	*count_r = list.ele_count;
 
 	return true;
+}
+
+list_cmp_t
+as_bin_ordered_list_cmp_nondup(const as_bin *b, const uint8_t *buf, uint32_t sz)
+{
+	packed_list b_list;
+	packed_list mp_list;
+
+	if (! packed_list_init_from_bin(&b_list, b) ||
+			! flags_is_ordered(b_list.ext_flags) ||
+			! packed_list_init(&mp_list, buf, sz)) {
+		return LIST_CMP_ERROR;
+	}
+
+	if (mp_list.ele_count == 1 && b_list.ele_count != 1) {
+		return LIST_CMP_NOT_EQUAL;
+	}
+
+	define_rollback_alloc(alloc_idx, NULL, 2);
+	list_cmp_t ret = packed_list_ordered_cmp_nondup(&b_list, &mp_list,
+			alloc_idx);
+
+	rollback_alloc_rollback(alloc_idx);
+
+	return ret;
 }
 
 //------------------------------------------------
@@ -3219,6 +3247,110 @@ packed_list_replace_ordered(const packed_list *list, cdt_op_mem *com,
 	}
 
 	return AS_OK;
+}
+
+static bool
+packed_list_check_order(const packed_list *list, bool error_on_dup)
+{
+	if (list->ele_count <= 1) {
+		return true;
+	}
+
+	msgpack_in mp = {
+			.buf = list->contents,
+			.buf_sz = list->content_sz
+	};
+
+	msgpack_in prev = mp;
+
+	if (msgpack_sz(&mp) == 0) {
+		return false;
+	}
+
+	for (uint32_t i = 1; i < list->ele_count; i++) {
+		msgpack_cmp_type cmp = msgpack_cmp(&prev, &mp);
+
+		if ((cmp == MSGPACK_CMP_LESS) ||
+				(! error_on_dup && (cmp == MSGPACK_CMP_EQUAL))) {
+			continue;
+		}
+
+		return false;
+	}
+
+	return true;
+}
+
+static list_cmp_t
+packed_list_ordered_cmp_nondup(const packed_list *ordered,
+		const packed_list *in, rollback_alloc *alloc_idx)
+{
+	setup_list_must_have_full_offidx(full, in, alloc_idx);
+
+	if (! list_full_offset_index_fill_all(full->offidx)) {
+		return LIST_CMP_ERROR;
+	}
+
+	define_order_index(ordidx, in->ele_count, alloc_idx);
+
+	if (list_is_ordered(in)) {
+		if (! packed_list_check_order(in, true)) {
+			return LIST_CMP_ERROR;
+		}
+
+		if (ordered->ele_count != in->ele_count) {
+			return LIST_CMP_NOT_EQUAL;
+		}
+
+		for (uint32_t i = 0; i < in->ele_count; i++) {
+			order_index_set(&ordidx, i, i);
+		}
+	}
+	else if (list_order_index_sort(&ordidx, full->offidx,
+			AS_CDT_SORT_ASCENDING)) {
+		uint32_t rm_count;
+		uint32_t rm_sz;
+
+		if (! order_index_sorted_mark_dup_eles(&ordidx, full->offidx,
+				&rm_count, &rm_sz)) {
+			return LIST_CMP_ERROR;
+		}
+
+		if (ordered->ele_count != in->ele_count - rm_count) {
+			return LIST_CMP_NOT_EQUAL;
+		}
+	}
+	else {
+		return LIST_CMP_ERROR;
+	}
+
+	msgpack_in mp0 = {
+		.buf = ordered->contents,
+		.buf_sz = ordered->content_sz
+	};
+
+	msgpack_in mp1 = {
+		.buf = in->contents,
+		.buf_sz = in->content_sz
+	};
+
+	for (uint32_t i = 0; i < in->ele_count; i++) {
+		uint32_t idx = order_index_get(&ordidx, i);
+
+		if (idx == ordidx.max_idx) {
+			continue;
+		}
+
+		mp1.offset = offset_index_get_const(full->offidx, idx);
+
+		msgpack_cmp_type cmp = msgpack_cmp(&mp0, &mp1);
+
+		if (cmp != MSGPACK_CMP_EQUAL) {
+			return LIST_CMP_NOT_EQUAL;
+		}
+	}
+
+	return LIST_CMP_EQUAL;
 }
 
 //----------------------------------------------------------
