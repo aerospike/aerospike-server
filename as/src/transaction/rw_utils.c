@@ -128,9 +128,9 @@ set_name_check(const as_transaction* tr, const as_record* r)
 	if (set_name == NULL ||
 			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
 			set_name[msg_set_name_len] != 0) {
-		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u)", ns->name,
+		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
 				set_name == NULL ? "(null)" : set_name, msg_set_name_len,
-						f->data, msg_set_name_len);
+						f->data, msg_set_name_len, &tr->keyd);
 		return false;
 	}
 
@@ -153,6 +153,39 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 
 	// Given the name, find/assign the set-ID and write it in the as_index.
 	return as_index_set_set_w_len(r, ns, (const char*)f->data, name_len, true);
+}
+
+int
+set_name_check_on_update(const as_transaction* tr, const as_record* r)
+{
+	as_namespace* ns = tr->rsv.ns;
+	const char* set_name = as_index_get_set_name(r, ns);
+
+	as_msg_field* f = as_transaction_has_set(tr) ?
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
+
+	uint32_t msg_set_name_len = f != NULL ? as_msg_field_get_value_sz(f) : 0;
+
+	if (msg_set_name_len == 0) {
+		if (set_name == NULL) {
+			return AS_OK; // record not in a set
+		}
+
+		cf_warning(AS_RW, "{%s} set name mismatch %s (null) (0) %pD", ns->name,
+				set_name, &tr->keyd);
+		return AS_ERR_PARAMETER;
+	}
+
+	if (set_name == NULL ||
+			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
+			set_name[msg_set_name_len] != 0) {
+		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
+				set_name ? set_name : "(null)", msg_set_name_len,
+						(const char*)f->data, msg_set_name_len, &tr->keyd);
+		return AS_ERR_PARAMETER;
+	}
+
+	return AS_OK;
 }
 
 int

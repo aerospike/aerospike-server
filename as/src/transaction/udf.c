@@ -992,6 +992,12 @@ open_existing_record(udf_record* urecord)
 	as_storage_rd* rd = urecord->rd; // note - stack struct not opened!
 
 	int rv;
+
+	if (tr->origin != FROM_IUDF &&
+			(rv = set_name_check_on_update(tr, r)) != 0) {
+		return (uint8_t)rv;
+	}
+
 	as_exp* filter_exp = NULL;
 
 	// Handle metadata filter if present.

@@ -93,7 +93,6 @@ static transaction_status write_master(rw_request* rw, as_transaction* tr);
 static void write_master_failed(as_transaction* tr, as_index_ref* r_ref, as_index_tree* tree, as_storage_rd* rd, int result_code);
 static int write_master_preprocessing(as_transaction* tr);
 static int write_master_policies(as_transaction* tr, bool* p_must_not_create, bool* p_is_replace);
-static bool check_msg_set_name(as_transaction* tr, const char* set_name);
 static int write_master_apply(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, bool is_replace, rw_request* rw, bool* is_delete);
 static int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd, as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins, as_bin* result_bins, uint32_t* p_n_result_bins, cf_ll_buf* particles_llb);
 
@@ -748,6 +747,13 @@ write_master(rw_request* rw, as_transaction* tr)
 		}
 	}
 
+	// If record existed, check that as_msg set name matches.
+	if (! record_created && tr->origin != FROM_IOPS &&
+			(result = set_name_check_on_update(tr, r)) != 0) {
+		write_master_failed(tr, &r_ref, tree, NULL, result);
+		return TRANS_DONE;
+	}
+
 	as_set* p_set = as_namespace_get_record_set(ns, r);
 
 	// Enforce set size limit, if any.
@@ -759,13 +765,6 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	// Shortcut set name.
 	const char* set_name = p_set == NULL ? NULL : p_set->name;
-
-	// If record existed, check that as_msg set name matches.
-	if (! record_created && tr->origin != FROM_IOPS &&
-			! check_msg_set_name(tr, set_name)) {
-		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_PARAMETER);
-		return TRANS_DONE;
-	}
 
 	if (! record_created) {
 		as_xdr_ship_status ship_status = as_xdr_ship_check(r, tr);
@@ -1164,35 +1163,6 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	*p_is_replace = is_replace;
 
 	return 0;
-}
-
-static bool
-check_msg_set_name(as_transaction* tr, const char* set_name)
-{
-	as_msg_field* f = as_transaction_has_set(tr) ?
-			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
-
-	if (! f || as_msg_field_get_value_sz(f) == 0) {
-		if (set_name) {
-			cf_warning(AS_RW, "overwriting record in set '%s' but msg has no set name %pD",
-					set_name, &tr->keyd);
-		}
-
-		return true;
-	}
-
-	uint32_t msg_set_name_len = as_msg_field_get_value_sz(f);
-
-	if (! set_name ||
-			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
-			set_name[msg_set_name_len] != 0) {
-		cf_warning(AS_RW, "overwriting record in set '%s' but msg has different set name '%.*s' (%u) %pD",
-				set_name ? set_name : "(null)", msg_set_name_len,
-						(const char*)f->data, msg_set_name_len, &tr->keyd);
-		return false;
-	}
-
-	return true;
 }
 
 static int
