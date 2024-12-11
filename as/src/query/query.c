@@ -2395,6 +2395,7 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 		// (We'd like to return AS_STREAM_ERR from aggr_query_ostream_write()
 		// instead, but currently that has no effect.)
 		slice->job->ostream_failed = true;
+		return;
 	}
 
 	as_msg_make_val_response_bufbuilder(val, slice->bb_r, size, success);
