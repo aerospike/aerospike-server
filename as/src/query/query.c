@@ -2006,6 +2006,7 @@ typedef struct aggr_query_job_s {
 
 	// Derived class data:
 	as_aggr_call aggr_call;
+	bool ostream_failed; // TODO - hack for hotfix - replace eventually
 } aggr_query_job;
 
 static void aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
@@ -2206,6 +2207,16 @@ aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 				}
 			}
 
+			const as_val* v = (as_val*)as_string_new(rs, false);
+
+			aggr_query_add_val_response(&slice, v, false);
+			as_val_destroy(v);
+			cf_free(rs);
+			as_query_manager_abandon_job(_job, AS_ERR_UNKNOWN);
+		}
+		// TODO - hack for hotfix - replace eventually ...
+		else if (job->ostream_failed) {
+			char* rs = as_module_err_string(1); // TODO - anything better?
 			const as_val* v = (as_val*)as_string_new(rs, false);
 
 			aggr_query_add_val_response(&slice, v, false);
@@ -2426,6 +2437,15 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 		bool success)
 {
 	uint32_t size = as_particle_asval_client_value_size(val);
+
+	if (size > PROTO_SIZE_MAX - QUERY_CHUNK_LIMIT) {
+		cf_warning(AS_QUERY, "aggregation output too big (%u)", size);
+
+		// TODO - hack for hotfix - replace eventually ...
+		// (We'd like to return AS_STREAM_ERR from aggr_query_ostream_write()
+		// instead, but currently that has no effect.)
+		slice->job->ostream_failed = true;
+	}
 
 	as_msg_make_val_response_bufbuilder(val, slice->bb_r, size, success);
 
