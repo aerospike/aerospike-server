@@ -62,6 +62,12 @@ is_mrt_monitor_write(const as_namespace* ns, const as_record* r)
 	return false;
 }
 
+bool
+is_mrt_setless_tombstone(const as_namespace* ns, const as_record* r)
+{
+	return false;
+}
+
 void
 mrt_free_orig(cf_arenax* arena, as_record* r, cf_arenax_puddle* puddle)
 {

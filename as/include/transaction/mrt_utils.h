@@ -55,6 +55,7 @@ struct as_transaction_s;
 bool is_mrt_provisional(const struct as_index_s* r);
 bool is_mrt_original(const struct as_index_s* r);
 bool is_mrt_monitor_write(const struct as_namespace_s* ns, const struct as_index_s* r);
+bool is_mrt_setless_tombstone(const struct as_namespace_s* ns, const struct as_index_s* r);
 void mrt_free_orig(cf_arenax* arena, struct as_index_s* r, cf_arenax_puddle* puddle);
 
 int mrt_allow_read(struct as_transaction_s* tr, const struct as_index_s* r);

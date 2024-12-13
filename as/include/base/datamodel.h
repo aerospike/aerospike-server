@@ -434,6 +434,8 @@ void as_record_rescue(struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 void as_record_destroy(as_record *r, struct as_namespace_s *ns);
 void as_record_done(struct as_index_ref_s *r_ref, struct as_namespace_s *ns);
 
+int as_record_fix_setless_tombstone(as_record* r, struct as_namespace_s* ns, const char* set_name, uint32_t len);
+
 void as_record_drop_stats(as_record* r, struct as_namespace_s* ns);
 void as_record_transition_stats(as_record* r, struct as_namespace_s* ns, const as_record* old_r);
 
@@ -1299,6 +1301,7 @@ typedef struct as_namespace_s {
 	// Special non-error counters:
 
 	uint64_t		n_deleted_last_bin;
+	uint64_t		n_mrt_monitor_roll_tombstone_creates; // relevant only for enterprise edition
 
 	// One-way automatically activated histograms.
 

@@ -4505,6 +4505,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	// Special non-error counters:
 
 	info_append_uint64(db, "deleted_last_bin", ns->n_deleted_last_bin);
+	info_append_uint64(db, "mrt_monitor_roll_tombstone_creates", ns->n_mrt_monitor_roll_tombstone_creates);
 }
 
 static void

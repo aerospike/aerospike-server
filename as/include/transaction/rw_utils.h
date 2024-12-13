@@ -97,7 +97,7 @@ void finished_not_replicated(struct rw_request_s* rw);
 bool set_name_check(const struct as_transaction_s* tr, const struct as_index_s* r);
 bool generation_check(const struct as_index_s* r, const struct as_msg_s* m, const struct as_namespace_s* ns);
 int set_set_from_msg(struct as_index_s* r, struct as_namespace_s* ns, struct as_msg_s* m);
-int set_name_check_on_update(const struct as_transaction_s* tr, const struct as_index_s* r);
+int set_name_check_on_update(const struct as_transaction_s* tr, struct as_index_s* r);
 int handle_meta_filter(const struct as_transaction_s* tr, const struct as_index_s* r, struct as_exp_s** exp);
 void destroy_filter_exp(const struct as_transaction_s* tr, struct as_exp_s* exp);
 int read_and_filter_bins(struct as_storage_rd_s* rd, struct as_exp_s* exp);
