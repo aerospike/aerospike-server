@@ -329,24 +329,24 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 
 int
 as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len,
-		uint16_t *p_set_id, bool apply_restrictions)
+		uint16_t *p_set_id, bool apply_count_limit)
 {
 	as_set *p_set;
 
 	if (as_namespace_get_create_set_w_len(ns, set_name, len, &p_set,
 			p_set_id) != 0) {
-		return -1;
+		return AS_ERR_PARAMETER;
 	}
 
-	if (apply_restrictions && as_set_count_stop_writes(p_set)) {
+	if (apply_count_limit && as_set_count_stop_writes(p_set)) {
 		cf_ticker_warning(AS_NAMESPACE, "{%s|%s} at stop-writes-count - can't add record",
 				ns->name, p_set->name);
-		return -2;
+		return AS_ERR_FORBIDDEN;
 	}
 
 	as_incr_uint64(&p_set->n_objects);
 
-	return 0;
+	return AS_OK;
 }
 
 

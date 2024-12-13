@@ -722,20 +722,9 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	// If creating record, write set-ID into index.
 	if (record_created) {
-		int rv_set = as_transaction_has_set(tr) ?
-				set_set_from_msg(r, ns, m) : 0;
-
-		if (rv_set == -1) {
-			cf_warning(AS_RW, "{%s} write_master: set can't be added %pD", ns->name, &tr->keyd);
-			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_PARAMETER);
-			return TRANS_DONE;
-		}
-		else if (rv_set == -2) {
-			write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_FORBIDDEN);
-			return TRANS_DONE;
-		}
-		else if (rv_set > 0) {
-			write_master_failed(tr, &r_ref, tree, NULL, rv_set);
+		if (as_transaction_has_set(tr) &&
+				(result = set_set_from_msg(r, ns, m)) != AS_OK) {
+			write_master_failed(tr, &r_ref, tree, NULL, result);
 			return TRANS_DONE;
 		}
 

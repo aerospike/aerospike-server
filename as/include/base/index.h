@@ -215,18 +215,18 @@ as_index_set_set_id(as_index* index, uint16_t set_id)
 
 static inline int
 as_index_set_set_w_len(as_index* index, as_namespace* ns, const char* set_name,
-		uint32_t len, bool apply_restrictions)
+		uint32_t len, bool apply_count_limit)
 {
 	uint16_t set_id;
 	int rv = as_namespace_set_set_w_len(ns, set_name, len, &set_id,
-			apply_restrictions);
+			apply_count_limit);
 
-	if (rv != 0) {
+	if (rv != AS_OK) {
 		return rv;
 	}
 
 	as_index_set_set_id(index, set_id);
-	return 0;
+	return AS_OK;
 }
 
 static inline const char*

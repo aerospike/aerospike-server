@@ -255,9 +255,9 @@ as_record_replace_if_better(as_remote_record* rr)
 	// If creating record, write set-ID into index.
 	if (is_create) {
 		if (rr->set_name != NULL && (result = as_index_set_set_w_len(r, ns,
-				rr->set_name, rr->set_name_len, false)) < 0) {
+				rr->set_name, rr->set_name_len, false)) != 0) {
 			record_replace_failed(rr, &r_ref, NULL);
-			return -result;
+			return result;
 		}
 
 		r->last_update_time = rr->last_update_time; // just for truncate check

@@ -144,7 +144,7 @@ set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m)
 	uint32_t name_len = as_msg_field_get_value_sz(f);
 
 	if (name_len == 0) {
-		return 0;
+		return AS_OK;
 	}
 
 	if (! as_mrt_monitor_check_set_name(ns, f->data, name_len)) {

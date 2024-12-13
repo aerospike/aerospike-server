@@ -1509,7 +1509,7 @@ as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
 const char *as_namespace_get_set_name(const as_namespace *ns, uint16_t set_id);
 uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);
 uint16_t as_namespace_get_create_set_id(as_namespace *ns, const char *set_name);
-int as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions);
+int as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_count_limit);
 int as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, struct as_set_s **pp_set, uint16_t *p_set_id);
 struct as_set_s *as_namespace_get_set_by_name(as_namespace *ns, const char *set_name);
 struct as_set_s* as_namespace_get_set_by_id(const as_namespace* ns, uint16_t set_id);
