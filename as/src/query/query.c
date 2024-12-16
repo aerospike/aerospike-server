@@ -2356,8 +2356,11 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 		bool success)
 {
 	uint32_t size = as_particle_asval_client_value_size(val);
+	cf_buf_builder* bb = *slice->bb_r;
 
-	if (size > PROTO_SIZE_MAX - QUERY_CHUNK_LIMIT) {
+	// Note - 7 is name length of SUCCESS or FAILURE bin. TODO - clean up.
+	if (size + sizeof(as_msg) + sizeof(as_msg_op) + 7 + bb->used_sz >
+			PROTO_SIZE_MAX) {
 		cf_warning(AS_QUERY, "aggregation output too big (%u)", size);
 
 		// TODO - hack for hotfix - replace eventually ...
@@ -2368,8 +2371,8 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 	}
 
 	as_msg_make_val_response_bufbuilder(val, slice->bb_r, size, success);
+	bb = *slice->bb_r;
 
-	cf_buf_builder* bb = *slice->bb_r;
 	conn_query_job* conn_job = (conn_query_job*)slice->job;
 
 	// If we exceed the proto size limit, send accumulated data back to client
