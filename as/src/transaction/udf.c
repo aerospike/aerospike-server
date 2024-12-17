@@ -789,6 +789,10 @@ udf_master_apply(udf_call* call, rw_request* rw)
 			as_record_done(&r_ref, ns);
 		}
 
+		if (verify_rv == AS_ERR_MRT_BLOCKED) {
+			as_incr_uint64(&ns->n_fail_mrt_blocked);
+		}
+
 		tr->result_code = (uint8_t)verify_rv;
 		return UDF_OPTYPE_NONE;
 	}
