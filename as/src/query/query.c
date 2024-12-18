@@ -2461,8 +2461,9 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 	uint32_t size = as_particle_asval_client_value_size(val);
 	cf_buf_builder* bb = *slice->bb_r;
 
-	// Note - 7 is name length of SUCCESS or FAILURE bin. TODO - clean up.
-	if (size + sizeof(as_msg) + sizeof(as_msg_op) + 7 + bb->used_sz >
+	if (size == 0 ||
+			// 7 is name length of SUCCESS or FAILURE bin. TODO - clean up.
+			size + sizeof(as_msg) + sizeof(as_msg_op) + 7 + bb->used_sz >
 			PROTO_SIZE_MAX) {
 		cf_warning(AS_QUERY, "aggregation output too big (%u)", size);
 
