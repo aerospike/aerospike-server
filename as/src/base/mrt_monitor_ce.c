@@ -49,6 +49,18 @@ as_mrt_monitor_start(void)
 }
 
 bool
+as_mrt_monitor_is_monitor_set_id(const as_namespace* ns, uint32_t set_id)
+{
+	return false;
+}
+
+bool
+as_mrt_monitor_is_monitor_record(const as_namespace* ns, const as_record* r)
+{
+	return false;
+}
+
+bool
 as_mrt_monitor_check_set_name(const as_namespace* ns, const uint8_t* name,
 		uint32_t len)
 {
@@ -59,12 +71,6 @@ int
 as_mrt_monitor_write_check(as_transaction* tr, as_storage_rd* rd)
 {
 	return AS_OK;
-}
-
-bool
-as_mrt_monitor_is_monitor_record(const as_namespace* ns, const as_record* r)
-{
-	return false;
 }
 
 uint32_t

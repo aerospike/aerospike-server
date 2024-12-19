@@ -78,6 +78,8 @@ typedef enum {
 #define MAX_FLUSH_SIZE WBLOCK_SZ
 #define DEFAULT_FLUSH_SIZE (1024 * 1024)
 
+#define MIN_MAX_RECORD_SIZE 64
+
 #define DEFAULT_MAX_WRITE_CACHE (64UL * 1024 * 1024)
 
 typedef enum {

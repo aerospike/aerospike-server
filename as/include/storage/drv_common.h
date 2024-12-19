@@ -184,6 +184,7 @@ void drv_cold_start_record_create(struct as_namespace_s* ns, const struct as_fla
 bool drv_is_set_evictable(const struct as_namespace_s* ns, const struct as_flat_opt_meta_s* opt_meta);
 bool drv_cold_start_sweeps_done(struct as_namespace_s* ns);
 struct as_index_s* drv_current_record(struct as_namespace_s* ns, struct as_index_s* r, int file_id, uint64_t rblock_id);
+uint32_t drv_max_record_size(const struct as_namespace_s* ns, const struct as_index_s* r);
 
 bool pread_all(int fd, void* buf, size_t size, off_t offset);
 bool pwrite_all(int fd, const void* buf, size_t size, off_t offset);

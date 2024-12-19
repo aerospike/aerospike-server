@@ -99,3 +99,9 @@ drv_current_record(as_namespace* ns, as_record* r, int file_id,
 
 	return NULL;
 }
+
+uint32_t
+drv_max_record_size(const as_namespace* ns, const as_record* r)
+{
+	return ns->max_record_size;
+}

@@ -2370,7 +2370,7 @@ buffer_bins(as_storage_rd* rd)
 
 	if (rd->pickle == NULL) {
 		flat_sz = as_flat_record_size(rd);
-		limit_sz = ns->max_record_size == 0 ? WBLOCK_SZ : ns->max_record_size;
+		limit_sz = drv_max_record_size(ns, r);
 	}
 	else {
 		flat_sz = rd->orig_pickle_sz;

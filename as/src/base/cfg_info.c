@@ -1654,8 +1654,8 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 		if (cf_str_atoi(v, &val) != 0 || val < 0) {
 			return false;
 		}
-		if (val != 0 && val > WBLOCK_SZ) {
-			cf_warning(AS_INFO, "max-record-size can't be bigger than 8M");
+		if (val < MIN_MAX_RECORD_SIZE || val > WBLOCK_SZ) {
+			cf_warning(AS_INFO, "max-record-size must be between 64 (bytes) and 8M");
 			return false;
 		}
 		cf_info(AS_INFO, "Changing value of max-record-size of ns %s from %u to %d",

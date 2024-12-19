@@ -2994,7 +2994,7 @@ as_config_init(const char* config_file)
 				ns->inline_short_queries = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_MAX_RECORD_SIZE:
-				ns->max_record_size = cfg_u32(&line, 0, WBLOCK_SZ);
+				ns->max_record_size = cfg_u32(&line, MIN_MAX_RECORD_SIZE, WBLOCK_SZ);
 				break;
 			case CASE_NAMESPACE_MIGRATE_ORDER:
 				ns->migrate_order = cfg_u32(&line, 1, 10);
