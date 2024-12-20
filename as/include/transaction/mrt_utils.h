@@ -60,6 +60,7 @@ void mrt_free_orig(cf_arenax* arena, struct as_index_s* r, cf_arenax_puddle* pud
 
 int mrt_allow_read(struct as_transaction_s* tr, const struct as_index_s* r);
 int mrt_allow_write(struct as_transaction_s* tr, const struct as_index_s* r);
+bool mrt_write_on_locking_only(const struct as_transaction_s* tr, const struct as_index_s* r);
 int mrt_allow_udf_write(struct as_transaction_s* tr, const struct as_index_s* r);
 struct as_index_s* read_r(struct as_namespace_s* ns, struct as_index_s* r, bool is_mrt);
 

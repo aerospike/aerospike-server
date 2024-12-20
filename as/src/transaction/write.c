@@ -714,6 +714,12 @@ write_master(rw_request* rw, as_transaction* tr)
 		return TRANS_DONE;
 	}
 
+	// Check MRT locking requirement, if any.
+	if (! mrt_write_on_locking_only(tr, r)) {
+		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_MRT_ALREADY_LOCKED);
+		return TRANS_DONE;
+	}
+
 	// Check generation requirement, if any.
 	if (! generation_check(r, m, ns)) {
 		write_master_failed(tr, &r_ref, tree, NULL, AS_ERR_GENERATION);

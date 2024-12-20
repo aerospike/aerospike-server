@@ -142,6 +142,7 @@ struct as_storage_rd_s;
 #define AS_ERR_MRT_TOO_MANY_WRITES      123
 #define AS_ERR_MRT_COMMITTED            124
 #define AS_ERR_MRT_ABORTED              125
+#define AS_ERR_MRT_ALREADY_LOCKED       126
 
 // Batch.
 #define AS_ERR_BATCH_DISABLED           150
@@ -272,7 +273,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO4_MRT_ROLL_FORWARD       (1 << 1)
 #define AS_MSG_INFO4_MRT_ROLL_BACK          (1 << 2)
 #define AS_MSG_INFO4_MRT_MONITOR_DRIVEN     (1 << 3)
-	// Bit 4 is unused.
+#define AS_MSG_INFO4_MRT_ON_LOCKING_ONLY    (1 << 4)
 	// Bit 5 is unused.
 	// Bit 6 is unused.
 	// Bit 7 is unused.

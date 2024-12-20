@@ -95,6 +95,14 @@ mrt_allow_write(as_transaction* tr, const as_record* r)
 	return AS_OK;
 }
 
+bool
+mrt_write_on_locking_only(const as_transaction* tr, const as_record* r)
+{
+	// No checks - have already called mrt_allow_write().
+
+	return true;
+}
+
 int
 mrt_allow_udf_write(as_transaction* tr, const as_record* r)
 {
