@@ -2439,7 +2439,7 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 	uint32_t size = as_particle_asval_client_value_size(val);
 	cf_buf_builder* bb = *slice->bb_r;
 
-	if (size == 0 ||
+	if ((size == 0 && (val->type == AS_LIST || val->type == AS_MAP)) ||
 			// 7 is name length of SUCCESS or FAILURE bin. TODO - clean up.
 			size + sizeof(as_msg) + sizeof(as_msg_op) + 7 + bb->used_sz >
 			PROTO_SIZE_MAX) {
