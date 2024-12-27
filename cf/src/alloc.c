@@ -444,10 +444,10 @@ hook_quarantine_or_free(const void *ra, void *p, size_t jem_sz, int32_t flags)
 	volatile uint8_t *p2 = p;
 	uint64_t off = (((uint64_t)p + (PAGE_SZ - 1)) & -PAGE_SZ) - (uint64_t)p;
 
-	*p2 = *p2;
+	*p2 = *p2; // @suppress("Assignment to itself") for Eclipse
 
 	for (uint64_t k = off; k < jem_sz; k += PAGE_SZ) {
-		*(p2 + k) = *(p2 + k);
+		*(p2 + k) = *(p2 + k); // @suppress("Assignment to itself") for Eclipse
 	}
 
 	q->site_id = hook_get_site_id(ra);
