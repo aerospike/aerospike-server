@@ -256,8 +256,6 @@ as_migrate_emigrate(const pb_task *task)
 
 	as_partition_reserve(task->ns, task->pid, &emig->rsv);
 
-	emig->from_replica = is_self_replica(emig->rsv.p);
-
 	as_incr_uint64(&emig->rsv.ns->migrate_tx_instance_count);
 
 	emigrate_queue_push(emig);
@@ -878,7 +876,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT);
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 
-	uint32_t info = emigration_pack_info(emig, r);
+	uint32_t info = emigration_pack_info(ns, r);
 
 	if (info != 0) {
 		msg_set_uint32(m, MIG_FIELD_INFO, info);
