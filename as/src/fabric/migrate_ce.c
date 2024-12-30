@@ -70,7 +70,7 @@ should_emigrate_record(emigration *emig, as_index_ref *r_ref)
 }
 
 uint32_t
-emigration_pack_info(const emigration *emig, const as_record *r)
+emigration_pack_info(const as_namespace *ns, const as_record *r)
 {
 	return 0;
 }
