@@ -155,7 +155,6 @@ typedef struct emigration_s {
 	pb_task_type type;
 	uint32_t    tx_flags;
 	cf_atomic32 state;
-	bool        from_replica;
 	uint64_t    wait_until_ms;
 
 	cf_atomic32 bytes_emigrating;
@@ -206,7 +205,7 @@ void immigration_release(immigration *immig);
 void emigrate_fill_queue_init();
 void emigrate_queue_push(emigration *emig);
 bool should_emigrate_record(emigration *emig, struct as_index_ref_s *r_ref);
-uint32_t emigration_pack_info(const emigration *emig, const struct as_index_s *r);
+uint32_t emigration_pack_info(const struct as_namespace_s *ns, const struct as_index_s *r);
 bool emigration_is_replicated(const struct as_namespace_s *ns, const struct as_index_s *r);
 
 // Migrate fabric message handling.
