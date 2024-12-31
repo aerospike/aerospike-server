@@ -641,9 +641,7 @@ run_proxy_timeout(void* arg)
 		now.now_ns = cf_getns();
 		now.now_ms = now.now_ns / 1000000;
 
-		if (cf_shash_get_size(g_proxy_hash)) {
-			cf_shash_reduce(g_proxy_hash, proxy_timeout_reduce_fn, &now);
-		}
+		cf_shash_reduce(g_proxy_hash, proxy_timeout_reduce_fn, &now);
 
 		uint64_t lap_us = (cf_getns() - now.now_ns) / 1000;
 

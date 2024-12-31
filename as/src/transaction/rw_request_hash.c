@@ -297,9 +297,7 @@ run_retransmit(void* arg)
 		now.now_ns = cf_getns();
 		now.now_ms = now.now_ns / 1000000;
 
-		if (cf_rchash_get_size(g_rw_request_hash) != 0) {
-			cf_rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
-		}
+		cf_rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
 
 		uint64_t lap_us = (cf_getns() - now.now_ns) / 1000;
 

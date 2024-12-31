@@ -438,6 +438,10 @@ cf_shash_reduce(cf_shash* h, cf_shash_reduce_fn reduce_fn, void* udata)
 {
 	cf_assert(h != NULL && reduce_fn != NULL, CF_MISC, "bad param");
 
+	if (h->n_elements == 0) {
+		return CF_SHASH_OK;
+	}
+
 	uint8_t* bucket = (uint8_t*)h->table;
 
 	for (uint32_t i = 0; i < h->n_buckets; i++) {

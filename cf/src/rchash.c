@@ -375,6 +375,10 @@ cf_rchash_reduce(cf_rchash* h, cf_rchash_reduce_fn reduce_fn, void* udata)
 {
 	cf_assert(h != NULL && reduce_fn != NULL, CF_MISC, "bad param");
 
+	if (h->n_elements == 0) {
+		return CF_RCHASH_OK;
+	}
+
 	uint32_t key_size = h->key_size;
 
 	for (uint32_t i = 0; i < h->n_buckets; i++) {
