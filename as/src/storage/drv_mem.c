@@ -2745,8 +2745,10 @@ defrag_wblock(drv_mem* mem, uint32_t wblock_id)
 	cf_assert(p_wblock_state->n_vac_dests == 0, AS_DRV_MEM,
 			"n-vacations not 0 beginning defrag wblock");
 
-	// Make sure this can't decrement to 0 while defragging this wblock.
-	p_wblock_state->n_vac_dests = 1;
+	if (mem->shadow_name != NULL) {
+		// Make sure this can't decrement to 0 while defragging this wblock.
+		p_wblock_state->n_vac_dests = 1;
+	}
 
 	if (as_load_uint32(&p_wblock_state->inuse_sz) == 0) {
 		as_incr_uint64(&mem->n_wblock_defrag_io_skips);
@@ -2904,10 +2906,15 @@ defrag_move_record(drv_mem* src_mem, uint32_t src_wblock_id,
 			push_wblock_to_shadow_q(mem, mwb);
 		}
 		else {
+<<<<<<< HEAD
 			memset(&mwb->base_addr[mwb->pos], 0,
 					MEM_WRITE_BLOCK_SIZE - mwb->pos);
 			mem_mprotect(mwb->base_addr, MEM_WRITE_BLOCK_SIZE, PROT_READ);
 			mwb_release_all_vacated_wblocks(mwb);
+=======
+			memset(&mwb->base_addr[mwb->pos], 0, WBLOCK_SZ - mwb->pos);
+			mem_mprotect(mwb->base_addr, WBLOCK_SZ, PROT_READ);
+>>>>>>> 7189e55b4... AER-6788 - for memory-only, bypass defrag's vacated wblock callback infrastructure, since there is no flushing.
 			mwb_release(mem, mwb);
 		}
 
@@ -2941,8 +2948,10 @@ defrag_move_record(drv_mem* src_mem, uint32_t src_wblock_id,
 	as_add_uint32(&mem->wblock_state[mwb->wblock_id].inuse_sz,
 			(int32_t)write_size);
 
-	// If we just defragged into a new destination mwb, count it.
-	if (mwb_add_unique_vacated_wblock(mwb, src_mem->file_id, src_wblock_id)) {
+	if (mem->shadow_name != NULL &&
+			// If we just defragged into a new destination mwb, count it.
+			mwb_add_unique_vacated_wblock(mwb, src_mem->file_id,
+					src_wblock_id)) {
 		mem_wblock_state* p_wblock_state =
 				&src_mem->wblock_state[src_wblock_id];
 
@@ -2966,16 +2975,19 @@ release_vacated_wblock(drv_mem* mem, uint32_t wblock_id,
 			"device %s: wblock-id %u state %u releasing vacation destination",
 			mem->name, wblock_id, p_wblock_state->state);
 
-	uint32_t n_vac_dests = as_aaf_uint32_rls(&p_wblock_state->n_vac_dests, -1);
+	if (mem->shadow_name != NULL) {
+		uint32_t n_vac_dests =
+				as_aaf_uint32_rls(&p_wblock_state->n_vac_dests, -1);
 
-	cf_assert(n_vac_dests != (uint32_t)-1, AS_DRV_MEM,
-			"device %s: wblock-id %u vacation destinations underflow",
-			mem->name, wblock_id);
+		cf_assert(n_vac_dests != (uint32_t)-1, AS_DRV_MEM,
+				"device %s: wblock-id %u vacation destinations underflow",
+				mem->name, wblock_id);
 
-	if (n_vac_dests != 0) {
-		return;
+		if (n_vac_dests != 0) {
+			return;
+		}
+		// else - all wblocks we defragged into have been flushed.
 	}
-	// else - all wblocks we defragged into have been flushed.
 
 	as_fence_acq();
 
@@ -3065,14 +3077,14 @@ run_mem_maintenance(void* udata)
 			}
 		}
 
-		static const uint64_t DEFRAG_FLUSH_MAX_US = 3UL * 1000 * 1000; // 3 sec
+		if (mem->shadow_name != NULL) {
+			static const uint64_t DEFRAG_FLUSH_MAX_US = 3UL * 1000 * 1000;
 
-		// Note - call even for memory-only - no flush, but we still want
-		// callbacks to release vacated wblocks.
-		if (now >= prev_defrag_flush + DEFRAG_FLUSH_MAX_US) {
-			flush_defrag_mwb(mem, &prev_n_defrag_writes_flush);
-			prev_defrag_flush = now;
-			next = next_time(now, DEFRAG_FLUSH_MAX_US, next);
+			if (now >= prev_defrag_flush + DEFRAG_FLUSH_MAX_US) {
+				flush_defrag_mwb(mem, &prev_n_defrag_writes_flush);
+				prev_defrag_flush = now;
+				next = next_time(now, DEFRAG_FLUSH_MAX_US, next);
+			}
 		}
 
 		if (mem->defrag_sweep != 0) {
@@ -3271,6 +3283,7 @@ flush_defrag_mwb(drv_mem* mem, uint64_t* p_prev_n_defrag_writes)
 
 	mem_write_block* mwb = mem->defrag_mwb;
 
+<<<<<<< HEAD
 	if (mwb && mwb->n_vacated != 0) {
 		// May not need memset for memory-only, but do it anyway.
 		memset(&mwb->base_addr[mwb->pos], 0, MEM_WRITE_BLOCK_SIZE - mwb->pos);
@@ -3279,6 +3292,20 @@ flush_defrag_mwb(drv_mem* mem, uint64_t* p_prev_n_defrag_writes)
 		if (mem->shadow_name != NULL) {
 			shadow_flush_mwb(mem, mwb);
 		}
+=======
+	if (mwb != NULL && mwb->n_vacated != 0) {
+		uint64_t write_offset = WBLOCK_ID_TO_OFFSET(mwb->wblock_id) +
+				mwb->flush_pos;
+		size_t write_sz = mwb->pos - mwb->flush_pos;
+
+		uint8_t* buf = encrypt_wblock(mwb, write_offset) + mwb->flush_pos;
+
+		mwb->flush_pos = mwb->pos;
+
+		shadow_flush_buf(mem, buf, write_offset, write_sz);
+
+		mem->n_defrag_wblock_partial_writes++;
+>>>>>>> 7189e55b4... AER-6788 - for memory-only, bypass defrag's vacated wblock callback infrastructure, since there is no flushing.
 
 		// The whole point - free source wblocks.
 		mwb_release_all_vacated_wblocks(mwb);
@@ -3322,6 +3349,7 @@ defrag_sweep(drv_mem* mem)
 static mem_write_block*
 mwb_create(drv_mem* mem)
 {
+<<<<<<< HEAD
 	mem_write_block* mwb =
 			(mem_write_block*)cf_malloc(sizeof(mem_write_block));
 
@@ -3329,6 +3357,15 @@ mwb_create(drv_mem* mem)
 	mwb->vacated_capacity = VACATED_CAPACITY_STEP;
 	mwb->vacated_wblocks =
 			cf_malloc(sizeof(vacated_wblock) * mwb->vacated_capacity);
+=======
+	mem_write_block* mwb = cf_calloc(1, sizeof(mem_write_block));
+
+	if (mem->shadow_name != NULL) {
+		mwb->vacated_capacity = VACATED_CAPACITY_STEP;
+		mwb->vacated_wblocks =
+				cf_malloc(sizeof(vacated_wblock) * mwb->vacated_capacity);
+	}
+>>>>>>> 7189e55b4... AER-6788 - for memory-only, bypass defrag's vacated wblock callback infrastructure, since there is no flushing.
 
 	return mwb;
 }
@@ -3336,7 +3373,16 @@ mwb_create(drv_mem* mem)
 static void
 mwb_destroy(mem_write_block* mwb)
 {
+<<<<<<< HEAD
 	cf_free(mwb->vacated_wblocks);
+=======
+	if (mwb->vacated_wblocks != NULL) {
+		cf_free(mwb->vacated_wblocks);
+	}
+
+	// Note - encrypted_buf will have been freed.
+
+>>>>>>> 7189e55b4... AER-6788 - for memory-only, bypass defrag's vacated wblock callback infrastructure, since there is no flushing.
 	cf_free(mwb);
 }
 
