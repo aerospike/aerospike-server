@@ -837,84 +837,73 @@ void
 as_storage_dump_wb_summary_mem(const as_namespace* ns)
 {
 	drv_mems* mems = ns->storage_private;
-	uint32_t total_num_defraggable = 0;
-	uint32_t total_num_above_wm = 0;
-	uint64_t defraggable_sz = 0;
-	uint64_t non_defraggable_sz = 0;
 
-	// Note: This is a sparse array that could be more efficiently stored.
-	// (In addition, ranges of block sizes could be binned together to
-	// compress the histogram, rather than using one bin per block size.)
-	uint32_t* wb_hist = cf_calloc(1,
-			sizeof(uint32_t) * (MAX_WRITE_BLOCK_SIZE + 1));
+	uint32_t n_free = 0;
+	uint32_t n_reserved = 0;
+	uint32_t n_used = 0;
+	uint32_t n_defrag = 0;
+	uint32_t n_emptying = 0;
+
+	uint32_t n_zero_used_sz = 0;
+
+	linear_hist* h = linear_hist_create("", LINEAR_HIST_SIZE, 0,
+			MEM_WRITE_BLOCK_SIZE, 100);
 
 	for (uint32_t d = 0; d < mems->n_mems; d++) {
 		drv_mem* mem = &mems->mems[d];
-		uint32_t num_free_blocks = 0;
-		uint32_t num_full_mwb = 0;
-		uint32_t num_full_blocks = 0;
-		uint32_t lwm_size = ns->defrag_lwm_size;
-		uint32_t num_defraggable = 0;
-		uint32_t num_above_wm = 0;
 
-		for (uint32_t i = 0; i < mem->n_wblocks; i++) {
+		for (uint32_t i = mem->first_wblock_id; i < mem->n_wblocks; i++) {
 			mem_wblock_state* wblock_state = &mem->wblock_state[i];
+
+			switch (wblock_state->state) {
+			case WBLOCK_STATE_FREE:
+				n_free++;
+				break;
+			case WBLOCK_STATE_RESERVED:
+				n_reserved++;
+				break;
+			case WBLOCK_STATE_USED:
+				n_used++;
+				break;
+			case WBLOCK_STATE_DEFRAG:
+				n_defrag++;
+				break;
+			case WBLOCK_STATE_EMPTYING:
+				n_emptying++;
+				break;
+			default:
+				cf_warning(AS_DRV_MEM, "bad wblock state %u",
+						wblock_state->state);
+				break;
+			}
+
 			uint32_t inuse_sz = as_load_uint32(&wblock_state->inuse_sz);
 
-			if (inuse_sz > MEM_WRITE_BLOCK_SIZE) {
-				cf_warning(AS_DRV_MEM, "wblock size (%u > %u) too large ~~ not counting in histogram",
-						inuse_sz, MEM_WRITE_BLOCK_SIZE);
-			}
-			else {
-				wb_hist[inuse_sz]++;
-			}
-
 			if (inuse_sz == 0) {
-				num_free_blocks++;
-			}
-			else if (inuse_sz == MEM_WRITE_BLOCK_SIZE) {
-				if (wblock_state->mwb != NULL) {
-					num_full_mwb++;
-				}
-				else {
-					num_full_blocks++;
-				}
-			}
-			else if (inuse_sz < lwm_size) {
-				defraggable_sz += inuse_sz;
-				num_defraggable++;
+				n_zero_used_sz++;
 			}
 			else {
-				non_defraggable_sz += inuse_sz;
-				num_above_wm++;
+				linear_hist_insert_data_point(h, inuse_sz);
 			}
 		}
-
-		total_num_defraggable += num_defraggable;
-		total_num_above_wm += num_above_wm;
-
-		cf_info(AS_DRV_MEM, "device %s free %u full %u fullmwb %u pfull %u defrag %u freeq %u",
-				mem->name, num_free_blocks, num_full_blocks, num_full_mwb,
-				num_above_wm, num_defraggable,
-				cf_queue_sz(mem->free_wblock_q));
 	}
 
-	cf_info(AS_DRV_MEM, "WBH: Storage histogram for namespace \"%s\":",
-			ns->name);
-	cf_info(AS_DRV_MEM, "WBH: Average wblock size of: defraggable blocks: %lu bytes; nondefraggable blocks: %lu bytes; all blocks: %lu bytes",
-			defraggable_sz / MAX(1, total_num_defraggable),
-			non_defraggable_sz / MAX(1, total_num_above_wm),
-			(defraggable_sz + non_defraggable_sz) /
-					MAX(1, (total_num_defraggable + total_num_above_wm)));
+	cf_info(AS_DRV_MEM, "WB: namespace %s", ns->name);
+	cf_info(AS_DRV_MEM, "WB: wblocks by state - free:%u reserved:%u used:%u defrag:%u emptying:%u",
+			n_free, n_reserved, n_used, n_defrag, n_emptying);
 
-	for (uint32_t i = 0; i < MAX_WRITE_BLOCK_SIZE; i++) {
-		if (wb_hist[i] > 0) {
-			cf_info(AS_DRV_MEM, "WBH: %u block%s of size %u bytes",
-					wb_hist[i], (wb_hist[i] != 1 ? "s" : ""), i);
-		}
-	}
+	cf_dyn_buf_define(db);
 
-	cf_free(wb_hist);
+	// Not bothering with more suitable linear_hist API ... use what's there.
+	linear_hist_save_info(h);
+	linear_hist_get_info(h, &db);
+	cf_dyn_buf_append_char(&db, '\0');
+
+	cf_info(AS_DRV_MEM, "WB: wblocks with zero used-sz - %u", n_zero_used_sz);
+	cf_info(AS_DRV_MEM, "WB: wblocks by (non-zero) used-sz - %s", db.buf);
+
+	cf_dyn_buf_free(&db);
+	linear_hist_destroy(h);
 }
 
 void
