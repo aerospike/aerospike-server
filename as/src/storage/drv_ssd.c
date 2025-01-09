@@ -1914,83 +1914,58 @@ ssd_write(as_storage_rd *rd)
 void
 as_storage_dump_wb_summary_ssd(const as_namespace *ns)
 {
-	drv_ssds *ssds = ns->storage_private;
-	uint32_t total_num_defraggable = 0;
-	uint32_t total_num_above_wm = 0;
-	uint64_t defraggable_sz = 0;
-	uint64_t non_defraggable_sz = 0;
+	drv_ssds* ssds = ns->storage_private;
 
-	// Note: This is a sparse array that could be more efficiently stored.
-	// (In addition, ranges of block sizes could be binned together to
-	// compress the histogram, rather than using one bin per block size.)
-	uint32_t *wb_hist = cf_calloc(1, sizeof(uint32_t) * MAX_WRITE_BLOCK_SIZE);
+	uint32_t n_total = 0;
+	uint32_t n_defrag = 0;
+
+	uint32_t n_zero_used_sz = 0;
+
+	linear_hist* h = linear_hist_create("", LINEAR_HIST_SIZE, 0,
+			ns->storage_write_block_size, 100);
 
 	for (uint32_t d = 0; d < ssds->n_ssds; d++) {
-		drv_ssd *ssd = &ssds->ssds[d];
-		uint32_t num_free_blocks = 0;
-		uint32_t num_full_swb = 0;
-		uint32_t num_full_blocks = 0;
-		uint32_t lwm_size = ns->defrag_lwm_size;
-		uint32_t num_defraggable = 0;
-		uint32_t num_above_wm = 0;
+		drv_ssd* ssd = &ssds->ssds[d];
 
-		for (uint32_t i = 0; i < ssd->n_wblocks; i++) {
-			ssd_wblock_state *wblock_state = &ssd->wblock_state[i];
+		for (uint32_t i = ssd->first_wblock_id; i < ssd->n_wblocks; i++) {
+			ssd_wblock_state* wblock_state = &ssd->wblock_state[i];
+
+			n_total++;
+
+			if (wblock_state->state == WBLOCK_STATE_DEFRAG) {
+				n_defrag++;
+			}
+			else if (wblock_state->state != WBLOCK_STATE_NONE) {
+				cf_warning(AS_DRV_SSD, "bad wblock state %u",
+						wblock_state->state);
+			}
+
 			uint32_t inuse_sz = as_load_uint32(&wblock_state->inuse_sz);
 
-			if (inuse_sz > ssd->write_block_size) {
-				cf_warning(AS_DRV_SSD, "wblock size (%d > %d) too large ~~ not counting in histogram",
-						inuse_sz, ssd->write_block_size);
-			}
-			else {
-				wb_hist[inuse_sz]++;
-			}
-
 			if (inuse_sz == 0) {
-				num_free_blocks++;
-			}
-			else if (inuse_sz == ssd->write_block_size) {
-				if (wblock_state->swb != NULL) {
-					num_full_swb++;
-				}
-				else {
-					num_full_blocks++;
-				}
-			}
-			else if (inuse_sz < lwm_size) {
-				defraggable_sz += inuse_sz;
-				num_defraggable++;
+				n_zero_used_sz++;
 			}
 			else {
-				non_defraggable_sz += inuse_sz;
-				num_above_wm++;
+				linear_hist_insert_data_point(h, inuse_sz);
 			}
 		}
-
-		total_num_defraggable += num_defraggable;
-		total_num_above_wm += num_above_wm;
-
-		cf_info(AS_DRV_SSD, "device %s free %u full %u fullswb %u pfull %u defrag %u freeq %u",
-				ssd->name, num_free_blocks, num_full_blocks, num_full_swb,
-				num_above_wm, num_defraggable, cf_queue_sz(ssd->free_wblock_q));
 	}
 
-	cf_info(AS_DRV_SSD, "WBH: Storage histogram for namespace \"%s\":",
-			ns->name);
-	cf_info(AS_DRV_SSD, "WBH: Average wblock size of: defraggable blocks: %lu bytes; nondefraggable blocks: %lu bytes; all blocks: %lu bytes",
-			defraggable_sz / MAX(1, total_num_defraggable),
-			non_defraggable_sz / MAX(1, total_num_above_wm),
-			(defraggable_sz + non_defraggable_sz) /
-					MAX(1, (total_num_defraggable + total_num_above_wm)));
+	cf_info(AS_DRV_SSD, "WB: namespace %s", ns->name);
+	cf_info(AS_DRV_SSD, "WB: wblocks - total:%u defrag:%u", n_total, n_defrag);
 
-	for (uint32_t i = 0; i < MAX_WRITE_BLOCK_SIZE; i++) {
-		if (wb_hist[i] > 0) {
-			cf_info(AS_DRV_SSD, "WBH: %u block%s of size %u bytes",
-					wb_hist[i], (wb_hist[i] != 1 ? "s" : ""), i);
-		}
-	}
+	cf_dyn_buf_define(db);
 
-	cf_free(wb_hist);
+	// Not bothering with more suitable linear_hist API ... use what's there.
+	linear_hist_save_info(h);
+	linear_hist_get_info(h, &db);
+	cf_dyn_buf_append_char(&db, '\0');
+
+	cf_info(AS_DRV_SSD, "WB: wblocks with zero used-sz - %u", n_zero_used_sz);
+	cf_info(AS_DRV_SSD, "WB: wblocks by (non-zero) used-sz - %s", db.buf);
+
+	cf_dyn_buf_free(&db);
+	linear_hist_destroy(h);
 }
 
 
