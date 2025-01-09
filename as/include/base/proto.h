@@ -143,6 +143,7 @@ struct as_storage_rd_s;
 #define AS_ERR_MRT_COMMITTED            124
 #define AS_ERR_MRT_ABORTED              125
 #define AS_ERR_MRT_ALREADY_LOCKED       126
+#define AS_ERR_MRT_MONITOR_EXISTS       127
 
 // Batch.
 #define AS_ERR_BATCH_DISABLED           150
