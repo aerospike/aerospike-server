@@ -273,7 +273,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO4_MRT_VERIFY_READ        (1 << 0)
 #define AS_MSG_INFO4_MRT_ROLL_FORWARD       (1 << 1)
 #define AS_MSG_INFO4_MRT_ROLL_BACK          (1 << 2)
-#define AS_MSG_INFO4_MRT_MONITOR_DRIVEN     (1 << 3)
+#define AS_MSG_INFO4_MRT_MONITOR_DRIVEN     (1 << 3) // not for clients - internal only
 #define AS_MSG_INFO4_MRT_ON_LOCKING_ONLY    (1 << 4)
 	// Bit 5 is unused.
 	// Bit 6 is unused.
