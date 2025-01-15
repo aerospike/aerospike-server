@@ -63,6 +63,7 @@
 #include "base/exp.h"
 #include "base/expop.h"
 #include "base/index.h"
+#include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/service.h"
@@ -2769,6 +2770,12 @@ udf_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		return true;
 	}
 
+	if (_job->set_id == INVALID_SET_ID &&
+			as_mrt_monitor_is_monitor_record(ns, r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
 	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
 		return true;
@@ -3171,6 +3178,12 @@ ops_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	as_index* r = r_ref->r;
 
 	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (_job->set_id == INVALID_SET_ID &&
+			as_mrt_monitor_is_monitor_record(ns, r)) {
 		as_record_done(r_ref, ns);
 		return true;
 	}
