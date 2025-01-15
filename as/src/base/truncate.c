@@ -240,7 +240,8 @@ as_truncate_now_is_truncated(struct as_namespace_s* ns, uint16_t set_id)
 {
 	uint64_t now = cf_clepoch_milliseconds();
 
-	if (now < ns->truncate_lut) {
+	if (now < ns->truncate_lut &&
+			! as_mrt_monitor_is_monitor_set_id(ns, set_id)) {
 		return true;
 	}
 
