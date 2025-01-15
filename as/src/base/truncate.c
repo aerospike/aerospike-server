@@ -253,7 +253,8 @@ as_truncate_now_is_truncated(struct as_namespace_s* ns, uint16_t set_id)
 bool
 as_truncate_record_is_truncated(const as_record* r, as_namespace* ns)
 {
-	if (r->last_update_time < ns->truncate_lut) {
+	if (r->last_update_time < ns->truncate_lut &&
+			! as_mrt_monitor_is_monitor_record(ns, r)) {
 		return true;
 	}
 
