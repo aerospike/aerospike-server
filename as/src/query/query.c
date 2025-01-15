@@ -2332,7 +2332,7 @@ aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 
 	as_index* r = r_ref->r;
 
-	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
+	if (excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
 		return true;
 	}
@@ -2732,7 +2732,7 @@ udf_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 
 	as_index* r = r_ref->r;
 
-	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
+	if (excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
 		return true;
 	}
@@ -3133,7 +3133,7 @@ ops_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 
 	as_index* r = r_ref->r;
 
-	if (_job->si == NULL && excluded_set(r, _job->set_id)) {
+	if (excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
 		return true;
 	}
