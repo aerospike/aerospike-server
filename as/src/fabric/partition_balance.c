@@ -829,8 +829,8 @@ balance_namespace_ap(as_namespace* ns, cf_queue* mq)
 	uint32_t n_racks = rack_count(ns);
 
 	if (ns->active_rack != 0 && n_racks > ns->replication_factor) {
-		cf_warning(AS_PARTITION, "{%s} active-rack disallowed - replication-factor %u > n-racks %u",
-				ns->name, ns->replication_factor, n_racks);
+		cf_warning(AS_PARTITION, "{%s} active-rack disallowed - n-racks %u > replication-factor %u",
+				ns->name, n_racks, ns->replication_factor);
 		ns->active_rack = 0;
 	}
 
