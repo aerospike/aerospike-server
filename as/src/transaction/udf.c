@@ -821,6 +821,13 @@ udf_master_apply(udf_call* call, rw_request* rw)
 	// If record is expired or truncated, pretend it was not found.
 	if (get_rv == 0 &&
 			as_record_is_doomed(r, ns) && ! (is_mrt && is_mrt_provisional(r))) {
+		if (is_mrt_original(r)) {
+			as_record_done(&r_ref, ns);
+			as_incr_uint64(&ns->n_fail_mrt_blocked);
+			tr->result_code = AS_ERR_MRT_BLOCKED; // not ideal for read UDF
+			return UDF_OPTYPE_NONE;
+		}
+
 		as_record_done(&r_ref, ns);
 		get_rv = -1;
 	}
