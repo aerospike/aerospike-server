@@ -1,7 +1,7 @@
 /*
  * mrt_roll.h
  *
- * Copyright (C) 2024 Aerospike, Inc.
+ * Copyright (C) 2024-2025 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
