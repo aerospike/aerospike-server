@@ -3185,7 +3185,19 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 		return; // record not in index, move along
 	}
 
-	as_index* r = r_ref.r;
+	as_record* r = read_r(ns, r_ref.r, false); // is not an MRT
+
+	if (r == NULL) {
+		as_record_done(&r_ref, ns);
+		return; // provisional without original, not indexed
+	}
+
+	// From here, r may be the orig_r if flat is a provisional.
+
+	if (! as_record_is_live(r)) {
+		as_record_done(&r_ref, ns);
+		return; // tombstone, not indexed
+	}
 
 	if (r->file_id != ssd->file_id || r->rblock_id != rblock_id) {
 		as_record_done(&r_ref, ns);
@@ -3215,7 +3227,7 @@ si_startup_do_record(drv_ssds* ssds, drv_ssd* ssd, as_flat_record* flat,
 	}
 
 	// Skip records that have expired since resuming the index.
-	if (as_record_is_expired(r)) {
+	if (as_record_is_expired(r) && ! is_mrt_original(r)) {
 		// AER-6363 - use live for "six months" in case of tombstone with TTL.
 		as_set_index_delete_live(ns, p->tree, r, r_ref.r_h);
 		as_index_delete(p->tree, &flat->keyd);
