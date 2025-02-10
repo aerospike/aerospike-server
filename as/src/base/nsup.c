@@ -532,10 +532,12 @@ evict(as_namespace* ns)
 	evict_void_time = smd_evict_void_time;
 
 	if (now > evict_void_time) {
-		evict_void_time = now;
+		cf_info(AS_NSUP, "{%s} ignoring evict-void-time in the past - may remove using 'eviction-reset'",
+				ns->name);
 
-		cf_info(AS_NSUP, "{%s} now (%u) > evict-void-time - using now",
-				ns->name, now);
+		ns->evict_void_time = evict_void_time;
+
+		return false;
 	}
 
 	bool sets_not_evicting[AS_SET_MAX_COUNT + 1] = { false };
