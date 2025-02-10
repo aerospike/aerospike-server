@@ -295,8 +295,13 @@ udf_record_load(udf_record* urecord)
 	as_storage_rd* rd = urecord->rd;
 
 	if (urecord->is_loaded) {
+		if (rd->ns->single_bin && rd->ns->storage_data_in_memory) {
+			return 0; // rd->bins already set to bin embedded in index
+		}
+
 		// E.g. record_matches_query() sets rd->bins to local stack - restore.
 		rd->bins = urecord->stack_bins;
+
 		return 0;
 	}
 
