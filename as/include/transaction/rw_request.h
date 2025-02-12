@@ -178,7 +178,7 @@ typedef struct rw_request_s {
 // Public API.
 //
 
-rw_request* rw_request_create();
+rw_request* rw_request_create(cf_digest* keyd);
 void rw_request_destroy(rw_request* rw);
 void rw_request_wait_q_push(rw_request* rw, struct as_transaction_s* tr);
 void rw_request_wait_q_push_head(rw_request* rw, struct as_transaction_s* tr);
