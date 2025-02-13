@@ -1875,6 +1875,12 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 		return true;
 	}
 
+	if (_job->set_id == INVALID_SET_ID &&
+			as_mrt_monitor_is_monitor_record(ns, r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
 	if (excluded_set(r, _job->set_id)) {
 		as_record_done(r_ref, ns);
 		return true;
@@ -2359,6 +2365,12 @@ aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	}
 
 	if (! as_record_is_live(r)) {
+		as_record_done(r_ref, ns);
+		return true;
+	}
+
+	if (_job->set_id == INVALID_SET_ID &&
+			as_mrt_monitor_is_monitor_record(ns, r)) {
 		as_record_done(r_ref, ns);
 		return true;
 	}

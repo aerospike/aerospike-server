@@ -38,6 +38,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/mrt_monitor.h"
 #include "base/service.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
@@ -132,7 +133,8 @@ set_has_sindex(const as_record* r, as_namespace* ns)
 		return false;
 	}
 
-	if (ns->n_setless_sindexes != 0) {
+	if (ns->n_setless_sindexes != 0 &&
+			! as_mrt_monitor_is_monitor_record(ns, r)) {
 		return true;
 	}
 
