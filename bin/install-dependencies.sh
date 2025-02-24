@@ -57,7 +57,7 @@ function main() {
 	echo "Installing server dependencies, os=${OS}, runtime-only=${RUNTIME_ONLY}..."
 
 	case "$OS" in
-	'debian10' | 'debian11' | 'ubuntu20.04' | 'ubuntu22.04' )
+	'debian10' | 'debian11' | 'debian12' | 'ubuntu20.04' | 'ubuntu22.04' )
 		${SUDO} apt-get update
 		packages=(libssl-dev zlib1g-dev)  # # Common packages (build + Runtime)
 		# Add packages for build-only mode (i.e., runtime-only is not set)
