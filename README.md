@@ -47,24 +47,24 @@ the build environment, including:
 The C++ compiler is required for the Aerospike geospatial indexing
 feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
-* The required Red Hat Enterprise Linux 8/9 package to install is: `gcc-c++`.
+* The Red Hat Enterprise Linux 8/9 requires `gcc-c++`.
 
-* The required Debian 11/12 and Ubuntu 20/22 package to install is: `g++`.
+* The Debian 11/12 and Ubuntu 20/22/24 requires `g++`.
 
 #### OpenSSL
 
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
 (RIPEMD-160 & SHA-1) and pseudo-random number generation.
 
-* The Red Hat Enterprise Linux 8/9 OpenSSL package to install:  `openssl-devel`
+* The Red Hat Enterprise Linux 8/9 requires `openssl-devel`
 
-* The Debian 11/12 and Ubuntu 20/22 OpenSSL packages to install: `libssl-dev`.
+* The Debian 11/12 and Ubuntu 20/22/24 requires `libssl-dev`.
 
 #### Zlib
 
 * The Red Hat Enterprise Linux 8/9 requires `zlib-devel`
 
-* The Debian 11/12 and Ubuntu 20/22 requiresi `zlib1g-dev`.
+* The Debian 11/12 and Ubuntu 20/22/24 requiresi `zlib1g-dev`.
 
 ### Submodules
 
