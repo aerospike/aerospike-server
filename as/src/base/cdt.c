@@ -5343,7 +5343,7 @@ cdt_exp_display_name(as_cdt_optype op)
 {
 	const char* name = NULL;
 
-	if (op < n_cdt_exp_display_names) {
+	if ((uint32_t)op < n_cdt_exp_display_names) { // (uint32_t) cast because enum can be signed
 		name = cdt_exp_display_names[op];
 	}
 
