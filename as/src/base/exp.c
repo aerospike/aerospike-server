@@ -2392,7 +2392,7 @@ build_call(build_args* args)
 	op->type = (result_type)type64;
 	op->system_type = (call_system_type)system_type64;
 
-	if (op->type >= TYPE_END) {
+	if ((uint32_t)op->type >= TYPE_END) { // (uint32_t) cast because enum can be signed
 		cf_warning(AS_EXP, "build_call - error %u invalid type %u",
 				AS_ERR_PARAMETER, op->type);
 		return false;
