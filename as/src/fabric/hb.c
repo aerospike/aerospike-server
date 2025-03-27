@@ -3952,33 +3952,26 @@ channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len)
 	// required.
 	uint8_t* compressed_buffer = NULL;
 	size_t compressed_buffer_length = 0;
-	int parsed = AS_HB_CHANNEL_MSG_PARSE_FAIL;
-	void* uncompressed_buffer = NULL;
-	size_t uncompressed_buffer_length = 0;
 
 	if (msg_get_buf(msg, AS_HB_MSG_COMPRESSED_PAYLOAD, &compressed_buffer,
 			&compressed_buffer_length, MSG_GET_DIRECT) != 0) {
-		parsed = AS_HB_CHANNEL_MSG_PARSE_FAIL;
-		goto Exit;
+		return AS_HB_CHANNEL_MSG_PARSE_FAIL;
 	}
 
 	// Assume compression ratio of 3. We will expand the buffer if needed.
-	uncompressed_buffer_length = round_up_pow2(3 * compressed_buffer_length);
+	size_t guess_len = round_up_pow2(3 * compressed_buffer_length);
+	int parsed = AS_HB_CHANNEL_MSG_PARSE_FAIL;
 
 	// Keep trying till we allocate enough memory for the uncompressed buffer.
 	while (true) {
-		uncompressed_buffer = MSG_BUFF_ALLOC_OR_DIE(uncompressed_buffer_length,
-				"error allocating memory size %zu for decompressing message",
-				uncompressed_buffer_length);
+		const size_t uncompressed_buffer_length = guess_len;
+		void* uncompressed_buffer =
+				MSG_BUFF_ALLOC_OR_DIE(uncompressed_buffer_length,
+						"error allocating memory size %zu for decompressing message",
+						uncompressed_buffer_length);
 
-		int uncompress_rv = uncompress(uncompressed_buffer,
-				&uncompressed_buffer_length, compressed_buffer,
-				compressed_buffer_length);
-
-		if (uncompress_rv == Z_OK) {
-			// Decompression was successful.
-			break;
-		}
+		int uncompress_rv = uncompress(uncompressed_buffer, &guess_len,
+				compressed_buffer, compressed_buffer_length);
 
 		if (uncompress_rv == Z_BUF_ERROR) {
 			// The uncompressed buffer is not large enough. Free current buffer
@@ -3986,36 +3979,32 @@ channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len)
 			MSG_BUFF_FREE(uncompressed_buffer, uncompressed_buffer_length);
 
 			// Give uncompressed buffer more space.
-			uncompressed_buffer_length *= 2;
+			guess_len *= 2;
 			continue;
 		}
 
-		// Decompression failed. Clean up and exit.
-		parsed = AS_HB_CHANNEL_MSG_PARSE_FAIL;
-		goto Exit;
+		if (uncompress_rv == Z_OK) {
+			// Reset the message to prepare for parsing the uncompressed buffer.
+			// We have no issues losing the compressed buffer because we have an
+			// uncompressed copy.
+			msg_reset(msg);
+
+			// Parse the uncompressed buffer.
+			if (msg_parse(msg, uncompressed_buffer, guess_len)) {
+				parsed = AS_HB_CHANNEL_MSG_READ_SUCCESS;
+
+				// Copying the buffer content to ensure that the message and the buffer
+				// can have separate life cycles and we never get into races. The
+				// frequency of heartbeat messages is low enough to make this not matter
+				// much unless we have massive clusters.
+				msg_preserve_all_fields(msg);
+			}
+		}
+
+		MSG_BUFF_FREE(uncompressed_buffer, uncompressed_buffer_length);
+		break;
 	}
 
-	// Reset the message to prepare for parsing the uncompressed buffer. We have
-	// no issues losing the compressed buffer because we have an uncompressed
-	// copy.
-	msg_reset(msg);
-
-	// Parse the uncompressed buffer.
-	parsed =
-			msg_parse(msg, uncompressed_buffer, uncompressed_buffer_length) ?
-					AS_HB_CHANNEL_MSG_READ_SUCCESS :
-					AS_HB_CHANNEL_MSG_PARSE_FAIL;
-
-	if (parsed == AS_HB_CHANNEL_MSG_READ_SUCCESS) {
-		// Copying the buffer content to ensure that the message and the buffer
-		// can have separate life cycles and we never get into races. The
-		// frequency of heartbeat messages is low enough to make this not matter
-		// much unless we have massive clusters.
-		msg_preserve_all_fields(msg);
-	}
-
-Exit:
-	MSG_BUFF_FREE(uncompressed_buffer, uncompressed_buffer_length);
 	return parsed;
 }
 
@@ -4149,7 +4138,7 @@ channel_multicast_msg_read(cf_socket* socket, msg* msg)
 
 	as_hb_channel_msg_read_status rv = AS_HB_CHANNEL_MSG_READ_UNDEF;
 
-	int buffer_len = MAX(hb_mtu(), STACK_ALLOC_LIMIT);
+	const int buffer_len = MAX(hb_mtu(), STACK_ALLOC_LIMIT);
 	uint8_t* buffer = MSG_BUFF_ALLOC(buffer_len);
 
 	if (!buffer) {
@@ -4196,23 +4185,19 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 {
 	CHANNEL_LOCK();
 
-	uint32_t buffer_len = 0;
-	uint8_t* buffer = NULL;
-
 	as_hb_channel_msg_read_status rv = AS_HB_CHANNEL_MSG_READ_UNDEF;
 	uint8_t len_buff[MSG_WIRE_LENGTH_SIZE];
 
 	if (cf_socket_recv_all(socket, len_buff, MSG_WIRE_LENGTH_SIZE, 0,
-	MESH_RW_TIMEOUT) < 0) {
+			MESH_RW_TIMEOUT) < 0) {
 		WARNING("mesh size recv failed fd %d : %s", CSFD(socket),
 				cf_strerror(errno));
-		rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
-		goto Exit;
+		CHANNEL_UNLOCK();
+		return AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
 	}
 
-	buffer_len = ntohl(*((uint32_t*)len_buff)) + 6;
-
-	buffer = MSG_BUFF_ALLOC(buffer_len);
+	const uint32_t buffer_len = ntohl(*((uint32_t*)len_buff)) + 6;
+	uint8_t* buffer = MSG_BUFF_ALLOC(buffer_len);
 
 	if (!buffer) {
 		WARNING(
@@ -5268,8 +5253,6 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 static int
 channel_msg_unicast(cf_node dest, msg* msg)
 {
-	size_t buffer_len = 0;
-	uint8_t* buffer = NULL;
 	if (!hb_is_mesh()) {
 		// Can't send a unicast message in the multicast mode.
 		WARNING("ignoring sending unicast message in multicast mode");
@@ -5283,18 +5266,17 @@ channel_msg_unicast(cf_node dest, msg* msg)
 
 	if (channel_socket_get(dest, &connected_socket) != 0) {
 		DEBUG("failing message send to disconnected node %" PRIx64, dest);
-		rv = -1;
-		goto Exit;
+		CHANNEL_UNLOCK();
+		return rv;
 	}
 
 	// Read the message to a buffer.
 	int mtu = hb_mtu();
 	int wire_size = msg_get_wire_size(msg);
-	buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
-	buffer =
-			MSG_BUFF_ALLOC_OR_DIE(buffer_len,
-					"error allocating memory size %zu for sending message to node %" PRIx64,
-					buffer_len, dest);
+	const size_t buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
+	uint8_t* buffer = MSG_BUFF_ALLOC_OR_DIE(buffer_len,
+			"error allocating memory size %zu for sending message to node %" PRIx64,
+			buffer_len, dest);
 
 	size_t msg_size = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
 			buffer_len);
@@ -5302,7 +5284,6 @@ channel_msg_unicast(cf_node dest, msg* msg)
 	// Send over the buffer.
 	rv = channel_mesh_msg_send(connected_socket, buffer, msg_size);
 
-Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
 	CHANNEL_UNLOCK();
 	return rv;
@@ -5352,7 +5333,7 @@ channel_msg_broadcast(msg* msg)
 	// Read the message to a buffer.
 	int mtu = hb_mtu();
 	int wire_size = msg_get_wire_size(msg);
-	size_t buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
+	const size_t buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
 	uint8_t* buffer = MSG_BUFF_ALLOC_OR_DIE(buffer_len,
 			"error allocating memory size %zu for sending broadcast message",
 			buffer_len);
@@ -8839,7 +8820,7 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
 		return;
 	}
 
-	int graph_alloc_size = sizeof(uint8_t) * num_nodes * num_nodes;
+	const int graph_alloc_size = sizeof(uint8_t) * num_nodes * num_nodes;
 	void* graph_data = MSG_BUFF_ALLOC(graph_alloc_size);
 
 	if (!graph_data) {
