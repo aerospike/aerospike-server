@@ -5810,8 +5810,18 @@ register_paxos_acceptor_success_handle(
 
 	INFO("applied new cluster key %"PRIx64,
 			paxos_success_event->new_cluster_key);
-	log_cf_node_vector("applied new succession list",
-			&g_register.succession_list, CF_INFO);
+
+	cf_node new_principal = *((cf_node*)cf_vector_getp(&g_register.succession_list, 0));
+
+	if (new_principal == config_self_nodeid_get()) {
+		log_cf_node_vector("principal node - applied new succession list:",
+				&g_register.succession_list, CF_INFO);
+	}
+	else {
+		log_cf_node_vector("non-principal node - applied new succession list:",
+				&g_register.succession_list, CF_INFO);
+	}
+
 	INFO("applied cluster size %d",
 			cf_vector_size(&g_register.succession_list));
 
@@ -6369,7 +6379,7 @@ clustering_cluster_form()
 				0));
 		if (new_principal == config_self_nodeid_get()) {
 			log_cf_node_vector(
-					"principal node - forming new cluster with succession list:",
+					"principal node - proposing new cluster with succession list:",
 					new_succession_list, CF_INFO);
 
 			as_paxos_start_result result = paxos_proposer_proposal_start(
@@ -6921,6 +6931,17 @@ clustering_principal_quantum_interval_start_handle(
 	// Start a new paxos round.
 	log_cf_node_vector("current succession list", &g_register.succession_list,
 			CF_DEBUG);
+
+	cf_node new_principal = *((cf_node*)cf_vector_getp(new_succession_list, 0));
+
+	if (new_principal == config_self_nodeid_get()) {
+		log_cf_node_vector("principal node - proposing new succession list:",
+				new_succession_list, CF_INFO);
+	}
+	else {
+		log_cf_node_vector("non-principal node - proposing new succession list:",
+				new_succession_list, CF_INFO);
+	}
 
 	log_cf_node_vector("proposed succession list", new_succession_list,
 			CF_DEBUG);
@@ -7732,7 +7753,7 @@ clustering_cluster_reform()
 	vector_copy(succession_list, &g_register.succession_list);
 
 	log_cf_node_vector(
-			"recluster: principal node - reforming new cluster with succession list:",
+			"recluster: principal node - proposing new cluster with succession list:",
 			succession_list, CF_INFO);
 
 	as_paxos_start_result result = paxos_proposer_proposal_start(
