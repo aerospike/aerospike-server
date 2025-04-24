@@ -184,7 +184,7 @@ set_name_check_on_update(const as_transaction* tr, as_record* r)
 
 	if (is_mrt_setless_tombstone(ns, r)) {
 		return as_record_fix_setless_tombstone(r, ns, (const char*)f->data,
-				msg_set_name_len);
+				msg_set_name_len, true);
 	}
 
 	if (set_name == NULL ||

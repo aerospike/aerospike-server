@@ -94,7 +94,7 @@ as_record_is_live(const as_record* r)
 
 int
 as_record_fix_setless_tombstone(as_record* r, as_namespace* ns,
-		const char* set_name, uint32_t len)
+		const char* set_name, uint32_t len, bool apply_count_limit)
 {
 	cf_crash(AS_RECORD, "CE code called as_record_fix_setless_tombstone()");
 
