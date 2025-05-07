@@ -1194,14 +1194,36 @@ __asprintf_chk(char **res, int32_t flags, const char *form, ...)
 	return n;
 }
 
+// Helpers to make aligned allocations in the startup arena during startup.
+// jem_aligned_alloc() and jem_posix_memalign() don't allow to specify an arena.
+
+static void*
+aligned_alloc_helper(size_t align, size_t sz)
+{
+	int32_t flags = calc_alloc_flags(MALLOCX_ALIGN(align));
+
+	return jem_mallocx(sz, flags); // sz is never zero
+}
+
+static int32_t
+posix_memalign_helper(void **p, size_t align, size_t sz)
+{
+	*p = aligned_alloc_helper(align, sz);
+
+	if (*p == NULL) {
+		return ENOMEM;
+	}
+
+	return 0;
+}
+
 int32_t
 posix_memalign(void **p, size_t align, size_t sz)
 {
-	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
 	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
 
 	if (!want_debug_alloc()) {
-		return jem_posix_memalign(p, align, sz == 0 ? 1 : sz);
+		return posix_memalign_helper(p, align, sz == 0 ? 1 : sz);
 	}
 
 	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
@@ -1211,7 +1233,7 @@ posix_memalign(void **p, size_t align, size_t sz)
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
-	int32_t err = jem_posix_memalign(p, align, ext_sz);
+	int32_t err = posix_memalign_helper(p, align, ext_sz);
 
 	if (err != 0) {
 		return err;
@@ -1224,11 +1246,10 @@ posix_memalign(void **p, size_t align, size_t sz)
 void *
 aligned_alloc(size_t align, size_t sz)
 {
-	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
 	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
 
 	if (!want_debug_alloc()) {
-		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
+		return aligned_alloc_helper(align, sz == 0 ? 1 : sz);
 	}
 
 	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
@@ -1239,7 +1260,7 @@ aligned_alloc(size_t align, size_t sz)
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
-	void *p = jem_aligned_alloc(align, ext_sz);
+	void *p = aligned_alloc_helper(align, ext_sz);
 	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
 	return p;
@@ -1249,12 +1270,12 @@ static void *
 do_valloc(size_t sz)
 {
 	if (!want_debug_alloc()) {
-		return jem_aligned_alloc(PAGE_SZ, sz == 0 ? 1 : sz);
+		return aligned_alloc_helper(PAGE_SZ, sz == 0 ? 1 : sz);
 	}
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
-	void *p = jem_aligned_alloc(PAGE_SZ, ext_sz);
+	void *p = aligned_alloc_helper(PAGE_SZ, ext_sz);
 	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
 	if (g_poison) {
@@ -1267,8 +1288,6 @@ do_valloc(size_t sz)
 void *
 valloc(size_t sz)
 {
-	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
-
 	void *p = do_valloc(sz);
 	cf_assert(p, CF_ALLOC, "valloc failed sz %zu", sz);
 	return p;
@@ -1277,11 +1296,10 @@ valloc(size_t sz)
 void *
 memalign(size_t align, size_t sz)
 {
-	cf_assert(g_alloc_started, CF_ALLOC, "aligned allocation during startup");
 	cf_assert((align & (align - 1)) == 0, CF_ALLOC, "bad alignment");
 
 	if (!want_debug_alloc()) {
-		return jem_aligned_alloc(align, sz == 0 ? 1 : sz);
+		return aligned_alloc_helper(align, sz == 0 ? 1 : sz);
 	}
 
 	// When indentation is enabled, align to PAGE_SZ+ to mark as unindented.
@@ -1292,7 +1310,7 @@ memalign(size_t align, size_t sz)
 
 	size_t ext_sz = sz + sizeof(uint32_t);
 
-	void *p = jem_aligned_alloc(align, ext_sz);
+	void *p = aligned_alloc_helper(align, ext_sz);
 	hook_handle_alloc(__builtin_return_address(0), p, p, sz);
 
 	return p;
