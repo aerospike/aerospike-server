@@ -1,0 +1,15 @@
+name: Deploy to artifactory
+on:
+  workflow_dispatch:
+jobs:
+  deploy-release:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      models: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
