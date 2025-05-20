@@ -272,7 +272,7 @@ as_record_replace_if_better(as_remote_record* rr)
 	}
 	// else - not bothering to check that sets match.
 
-	if (is_mrt_setless_tombstone(ns, r)) {
+	if (rr->set_name_len != 0 && is_mrt_setless_tombstone(ns, r)) {
 		if ((result = as_record_fix_setless_tombstone(r, ns, rr->set_name, 
 				rr->set_name_len, false)) != 0) {
 			record_replace_failed(rr, &r_ref, NULL);
