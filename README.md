@@ -32,39 +32,32 @@ Building Aerospike requires the GCC 4.1 or later C compiler toolchain,
 with the standard GNU/Linux development tools and libraries installed in
 the build environment, including:
 
-* `autoconf`
-
-* `automake`
-
-* `cmake`
-
-* `libtool`
-
-* `make`
+- `autoconf`
+- `automake`
+- `cmake`
+- `libtool`
+- `make`
 
 #### C++
 
 The C++ compiler is required for the Aerospike geospatial indexing
 feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
-* The Red Hat Enterprise Linux 8/9 requires `gcc-c++`.
-
-* The Debian 11/12 and Ubuntu 20/22/24 requires `g++`.
+- The Red Hat Enterprise Linux 8/9 requires `gcc-c++`.
+- The Debian 11/12 and Ubuntu 20/22/24 requires `g++`.
 
 #### OpenSSL
 
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
 (RIPEMD-160 & SHA-1) and pseudo-random number generation.
 
-* The Red Hat Enterprise Linux 8/9 requires `openssl-devel`
-
-* The Debian 11/12 and Ubuntu 20/22/24 requires `libssl-dev`.
+- The Red Hat Enterprise Linux 8/9 requires `openssl-devel`
+- The Debian 11/12 and Ubuntu 20/22/24 requires `libssl-dev`.
 
 #### Zlib
 
-* The Red Hat Enterprise Linux 8/9 requires `zlib-devel`
-
-* The Debian 11/12 and Ubuntu 20/22/24 requiresi `zlib1g-dev`.
+- The Red Hat Enterprise Linux 8/9 requires `zlib-devel`
+- The Debian 11/12 and Ubuntu 20/22/24 requires `zlib1g-dev`.
 
 ### Submodules
 
@@ -87,38 +80,37 @@ command:
 
 	$ git submodule update --init
 
-*Note:*  As this project uses submodules, the source archive downloadable
-via GitHub's `Download ZIP` button will not build unless the correct
-revision of each submodule is first manually installed in the appropriate
-`modules` subdirectory.
+> [!IMPORTANT]
+> As this project uses submodules, the source archive downloadable
+> via GitHub's `Download ZIP` button will not build unless the correct
+> revision of each submodule is first manually installed in the appropriate
+> `modules` subdirectory.
 
 ## Building Aerospike
+
+> [!TIP]
+> Aerospike collects telemetry information about builds. To opt out, the
+> environment variable AEROSPIKE_TELEMETRY must be set to FALSE.
 
 ### Default Build
 
 	$ make          -- Perform the default build (no packaging.)
 
-*Note:* You can use the `-j` option with `make` to speed up the build
-on multiple CPU cores. For example, to run four parallel jobs:
+> [!TIP]
+> You can use the `-j` option with `make` to speed up the build
+> on multiple CPU cores. For example, to run four parallel jobs:
 
     $ make -j4
 
 ### Build Options
 
 	$ make deb      -- Build the Debian (Ubuntu) package.
-
 	$ make rpm      -- Build the Red Hat Package Manager (RPM) package.
-
 	$ make source   -- Package the source code as a compressed "tar" archive.
-
 	$ make clean    -- Delete any existing build products, excluding built packages.
-
 	$ make cleanpkg -- Delete built packages.
-
 	$ make cleanall -- Delete all existing build products, including built packages.
-
 	$ make cleangit -- Delete all files untracked by Git.  (Use with caution!)
-
 	$ make strip    -- Build a "strip(1)"ed version of the server executable.
 
 ### Overriding Default Build Options
@@ -131,7 +123,7 @@ on multiple CPU cores. For example, to run four parallel jobs:
 
 ## Configuring Aerospike
 
-Sample Aerospike configuration files are provided in `as/etc`.  The
+Sample Aerospike configuration files are provided in `as/etc`. The
 developer configuration file, `aerospike_dev.conf`, contains basic
 settings that should work out-of-the-box on most systems. The package
 example configuration files, `aerospike.conf`, and the Solid State Drive
@@ -140,9 +132,9 @@ as a system daemon.
 
 These sample files may be modified for specific use cases (e.g., setting
 network addresses, defining namespaces, and setting storage engine
-properties) and tuned for for maximum performance on a particular
-system.  Also, system resource limits may need to be increased to allow,
-e.g., a greater number of concurrent connections to the database.  See
+properties) and tuned for maximum performance on a particular system.
+Also, system resource limits may need to be increased to allow,
+e.g., a greater number of concurrent connections to the database. See
 "man limits.conf" for how to change the system's limit on a process'
 number of open file descriptors ("nofile".)
 
