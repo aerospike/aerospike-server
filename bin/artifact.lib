@@ -1,0 +1,77 @@
+#! /bin/env bash
+set -euo pipefail
+if [ -n "${DEBUG:-}" ]; then set -x; fi
+
+# Function to extract RPM metadata and distribution
+# this ended up being painful unlike for debs required parsing the name (because the distro is not named standard)
+get_rpm_metadata() {
+    local rpm="$1"
+    local filename="${rpm##*/}"  # Get just the filename without path
+    
+    # Extract distribution from filename first
+    # Example: aerospike-server-community-7.2.0.10-1.el9.x86_64
+    # We want to extract 'el9' from the filename
+    local dist="${filename%.*}"  # Remove the last part (x86_64)
+    dist="${dist%.*}"          # Remove the last part (el9)
+    dist="${dist##*.}"         # Get the distribution (el9)
+    
+    # Then get package metadata directly from the RPM file
+    local pkgname=$(rpm -qp --qf '%{NAME}' "$rpm")
+    local version=$(rpm -qp --qf '%{VERSION}' "$rpm")  # Just get VERSION without RELEASE
+    local arch=$(rpm -qp --qf '%{ARCH}' "$rpm")
+    
+    # Return the values in a way that can be captured
+    printf "%s\n%s\n%s\n%s\n" "$pkgname" "$version" "$arch" "$dist"
+}
+
+# Function to process RPM files
+process_rpm() {
+    local rpm="$1"
+    local dest_dir="$2"
+    
+    # Get metadata using the new function
+    local metadata=($(get_rpm_metadata "$rpm"))
+    local pkgname="${metadata[0]}"
+    local version="${metadata[1]}"
+    local arch="${metadata[2]}"
+    local dist="${metadata[3]}"
+    
+    # Create target directory: <dist>/<arch>/
+    # Example: el8/x86_64/
+    local target="$dest_dir/$dist/$arch"
+    echo "DEBUG: Creating directory structure:"
+    echo "  Distribution: $dist"
+    echo "  Architecture: $arch"
+    echo "  Target path: $target"
+    mkdir -p "$target"
+    echo "Copying RPM to: $target"
+    cp "$rpm" "$target/"
+}
+
+get_codename_for_deb() {
+  case "$1" in
+    *ubuntu20.04*) echo "focal" ;;
+    *ubuntu22.04*) echo "jammy" ;;
+    *ubuntu24.04*) echo "noble" ;;
+    *debian11*)    echo "bullseye" ;;
+    *debian12*)    echo "bookworm" ;;
+    *) echo "stable" ;;
+  esac
+}
+
+# Function to process DEB files
+process_deb() {
+    local deb="$1"
+    local dest_dir="$2"
+    local codename=$(get_codename_for_deb "$deb")
+    
+    # Get package metadata directly from the DEB file
+    local pkgname=$(dpkg-deb -f "$deb" Package)
+    local arch=$(dpkg-deb -f "$deb" Architecture)
+    
+    # Create target directory: pool/<codename>/<pkgname>/
+    local target="$dest_dir/pool/$codename/$pkgname"
+    mkdir -p "$target"
+    echo "Copying DEB to: $target"
+    cp "$deb" "$target/"
+}

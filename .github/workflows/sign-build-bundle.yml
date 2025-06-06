@@ -1,0 +1,250 @@
+name: Sign and Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version of the artifact to deploy'
+        required: true
+        default: '8.0.0.7'
+
+permissions:
+  id-token: write
+  contents: read
+env:
+    ORG: citrusleaf
+    JFROG_PROJECT: database
+    ARTIFACT_NAME: aerospike-server
+
+jobs:
+  download-artifact:
+    runs-on: ubuntu-22.04 # v24.04 is not supported by artifact signing action
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@f748a0599171a192a2668afee8d0497f7c1069df # v4.5.6
+        env:
+            JF_URL: https://aerospike.jfrog.io
+            JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+            oidc-provider-name: gh-citrusleaf
+            oidc-audience: citrusleaf
+      - name: Check JFrog Configuration 
+        run: |
+              jf c show
+              jf rt ping
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
+        with:
+            role-to-assume: arn:aws:iam::360255567471:role/sso/assumed/iac/AerospikeDownloadArtifactsAutomation
+            role-session-name: aerospike-download-artifacts
+            aws-region: us-west-1
+      - name: Download artifacts from QE server using AWS CLI directly
+        run: |
+            mkdir -p build-artifacts
+            # Leaving debug logs here commented out. Will be useful to uncomment when debugging location of binaries.            
+            # List each segment of the path to debug which exists
+            # echo "Listing root bucket:"
+            # aws s3 ls s3://aerospike-qe-build/
+            
+            # echo "Listing repository owner directory:"
+            # aws s3 ls s3://aerospike-qe-build/${{ env.ORG }}/
+            
+            # echo "Listing repository directory:" 
+            # aws s3 ls s3://aerospike-qe-build/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/
+            
+            # echo "Listing version directory:"
+            # aws s3 ls s3://aerospike-qe-build/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ github.event.inputs.version }}/
+            
+            echo "Listing build directory:"
+            aws s3 ls s3://aerospike-qe-build/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ github.event.inputs.version }}/build/
+
+            files_full=$(aws s3 ls s3://aerospike-qe-build/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ github.event.inputs.version }}/build/ --recursive)
+            echo "$files_full"
+            files=$(echo "$files_full" | awk '{print $4}' | grep -E -- 'deb$|rpm$')
+            for file in $files; do
+                echo "Downloading $file"
+                aws s3 cp s3://aerospike-qe-build/$file build-artifacts/ > /dev/null 2>&1 &
+            done
+            wait
+      - name: List downloaded files
+        run: |
+            find build-artifacts
+
+      - name: setup GPG
+        uses: aerospike/shared-workflows/.github/actions/setup-gpg@dda8173aca1f1e73f95267572a7d3849cd00f1b8 # v1.0.0
+        with:
+          gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
+          gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
+          gpg-key-pass: ${{ secrets.GPG_PASS }}
+      - name: install dpkg-sig
+        run: |
+          sudo apt-get update && sudo apt-get install dpkg-sig dpkg-dev -y
+  
+      - name: Take flat downloads and add directory structure
+        run: |
+          # Source the script to get access to the functions
+          source ./bin/artifact.lib
+          mkdir -p structured_release
+          # Process all RPMs
+          for rpm in ./build-artifacts/*.rpm; do
+              if [ -f "$rpm" ]; then
+                  echo "Processing RPM: $rpm"
+                  process_rpm "$rpm" "./structured_release"
+              fi
+          done
+
+          # Process all DEBs
+          for deb in ./build-artifacts/*.deb; do
+              if [ -f "$deb" ]; then
+                  echo "Processing DEB: $deb"
+                  process_deb "$deb" "./structured_release"
+              fi
+          done
+      - name: "Sign debs"
+        env: 
+            GPG_TTY: no-tty
+            HOME: /home/runner
+            GNUPGHOME: /home/runner/.gnupg
+
+        run: |
+            source ./bin/artifact.lib
+
+            cd structured_release
+            for deb in $(find . -name "*.deb"); do
+                echo "Signing $deb"
+    
+                # Sign the package
+                dpkg-sig --sign builder --gpg-options "--batch --pinentry-mode loopback --passphrase-file $GNUPGHOME/passphrase" $deb
+                # Verify the signature
+                dpkg-sig --verify $deb
+
+                # external gpg sign and checksum
+                gpg --batch --yes --detach-sign --armor --passphrase "${{ secrets.GPG_PASS }}" --local-user aerospike-inc --output $deb.asc $deb
+                shasum -a 256 $deb > $deb.sha256
+                cat $deb.asc 
+                cat $deb.sha256
+            done
+      - name: "Upload debs to JFrog"
+        run: |
+            source ./bin/artifact.lib
+
+            cd ./structured_release/
+            for deb in $(find . -name "*.deb"); do
+                # Get package metadata
+                pkgname=$(dpkg-deb -f "$deb" Package)
+                arch=$(dpkg-deb -f "$deb" Architecture)
+                codename=$(get_codename_for_deb "$deb")
+
+                # Upload the DEB
+                jf rt upload "$deb" "${{ env.JFROG_PROJECT }}-deb-dev-local" --flat=false \
+                --build-name="${{ env.ARTIFACT_NAME }}-deb" \
+                --build-number="${{ github.event.inputs.version }}" \
+                --project="${{ env.JFROG_PROJECT }}" \
+                --target-props "deb.distribution=$codename;deb.component=main;deb.architecture=$arch" --deb "$codename/main/$arch"
+                
+                # Upload signature and checksum
+                jf rt upload "$deb.asc" "${{ env.JFROG_PROJECT }}-deb-dev-local" --flat=false \
+                --build-name="${{ env.ARTIFACT_NAME }}-deb" \
+                --build-number="${{ github.event.inputs.version }}" \
+                --project="${{ env.JFROG_PROJECT }}"
+                
+                jf rt upload "$deb.sha256" "${{ env.JFROG_PROJECT }}-deb-dev-local" --flat=false \
+                --build-name="${{ env.ARTIFACT_NAME }}-deb" \
+                --build-number="${{ github.event.inputs.version }}" \
+                --project="${{ env.JFROG_PROJECT }}"        
+            done
+            jf rt build-collect-env "${{ env.ARTIFACT_NAME }}-deb" "${{ github.event.inputs.version }}" \
+            --project="${{ env.JFROG_PROJECT }}"
+            jf rt build-add-git "${{ env.ARTIFACT_NAME }}-deb" "${{ github.event.inputs.version }}" \
+            --project="${{ env.JFROG_PROJECT }}" 
+            jf rt build-add-dependencies "${{ env.ARTIFACT_NAME }}-deb" "${{ github.event.inputs.version }}" . \
+            --project="${{ env.JFROG_PROJECT }}"
+            jf rt build-publish "${{ env.ARTIFACT_NAME }}-deb" "${{ github.event.inputs.version }}" \
+            --project="${{ env.JFROG_PROJECT }}"
+            
+      - name: "Sign rpms"
+        env:
+          GPG_TTY: no-tty
+        run: |
+            set -x
+            cd structured_release
+            for rpm in $(find . -name "*.rpm"); do
+              echo "Signing $rpm"
+              rpm --addsign $rpm
+              rpm --checksig $rpm
+              gpg --batch --no-tty --yes --detach-sign --armor --passphrase "${{ secrets.GPG_PASS }}" --local-user aerospike-inc --output $rpm.asc $rpm
+              shasum -a 256 $rpm > $rpm.sha256
+              shasum -a 256 $rpm.asc > $rpm.asc.sha256
+            done
+  
+      - name: "Upload rpms to JFrog"
+        run: |
+            set -x 
+            source ./bin/artifact.lib
+            cd ./structured_release
+
+            for rpm in $(find . -name "*.rpm"); do
+                # Get metadata using the shared function
+                metadata=($(get_rpm_metadata "$rpm"))
+                pkgname="${metadata[0]}"
+                version="${metadata[1]}"
+                arch="${metadata[2]}"
+                dist="${metadata[3]}"
+                
+                # Upload the RPM
+                jf rt upload "$rpm" "${{ env.JFROG_PROJECT }}-rpm-dev-local" --flat=false \
+                  --build-name="${{ env.ARTIFACT_NAME }}-rpm" \
+                  --build-number="${{ github.event.inputs.version }}" \
+                  --project="${{ env.JFROG_PROJECT }}" \
+                  --target-props "rpm.distribution=$dist;rpm.component=main;rpm.architecture=$arch"
+                
+                # Upload signature and checksums
+                jf rt upload "$rpm.asc" "${{ env.JFROG_PROJECT }}-rpm-dev-local" --flat=false \
+                  --build-name="${{ env.ARTIFACT_NAME }}-rpm" \
+                  --build-number="${{ github.event.inputs.version }}" \
+                  --project="${{ env.JFROG_PROJECT }}"
+                
+                jf rt upload "$rpm.sha256" "${{ env.JFROG_PROJECT }}-rpm-dev-local" --flat=false \
+                  --build-name="${{ env.ARTIFACT_NAME }}-rpm" \
+                  --build-number="${{ github.event.inputs.version }}" \
+                  --project="${{ env.JFROG_PROJECT }}"
+                
+                jf rt upload "$rpm.asc.sha256" "${{ env.JFROG_PROJECT }}-rpm-dev-local" --flat=false \
+                  --build-name="${{ env.ARTIFACT_NAME }}-rpm" \
+                  --build-number="${{ github.event.inputs.version }}" \
+                  --project="${{ env.JFROG_PROJECT }}"
+            done
+
+            jf rt build-collect-env "${{ env.ARTIFACT_NAME }}-rpm" "${{ github.event.inputs.version }}" \
+            --project="${{ env.JFROG_PROJECT }}"
+            jf rt build-add-git "${{ env.ARTIFACT_NAME }}-rpm" "${{ github.event.inputs.version }}" \
+            --project="${{ env.JFROG_PROJECT }}"
+            jf rt build-add-dependencies "${{ env.ARTIFACT_NAME }}-rpm" "${{ github.event.inputs.version }}" . \
+            --project="${{ env.JFROG_PROJECT }}"
+            jf rt build-publish "${{ env.ARTIFACT_NAME }}-rpm" "${{ github.event.inputs.version }}" --project="${{ env.JFROG_PROJECT }}"
+                  
+      - name: Create release bundle
+        run: |
+          echo '{
+            "name": "${{ env.ARTIFACT_NAME }}-release-bundle",
+            "version": "${{ github.event.inputs.version }}",
+            "description": "Release for build version ${{ github.event.inputs.version }}",
+            "files": [
+              {
+                "project": "${{ env.JFROG_PROJECT }}",
+                "build": "${{ env.ARTIFACT_NAME }}-rpm/${{ github.event.inputs.version }}"
+              }, 
+              {
+                "project": "${{ env.JFROG_PROJECT }}",
+                "build": "${{ env.ARTIFACT_NAME }}-deb/${{ github.event.inputs.version }}"
+              }
+            ]
+          }' > release-bundle-spec.json
+          cat release-bundle-spec.json
+          jf release-bundle-create "${{ env.ARTIFACT_NAME }}" "${{ github.event.inputs.version }}" \
+            --spec release-bundle-spec.json --project="${{ env.JFROG_PROJECT }}" --signing-key="aerospike"
+        
