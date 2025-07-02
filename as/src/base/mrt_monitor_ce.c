@@ -44,7 +44,7 @@
 //
 
 void
-as_mrt_monitor_start(void)
+as_mrt_monitor_init(void)
 {
 }
 

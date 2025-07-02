@@ -71,7 +71,7 @@ typedef struct monitor_roll_origin_s {
 // Public API.
 //
 
-void as_mrt_monitor_start(void);
+void as_mrt_monitor_init(void);
 
 bool as_mrt_monitor_is_monitor_set_id(const struct as_namespace_s* ns, uint32_t set_id);
 bool as_mrt_monitor_is_monitor_record(const struct as_namespace_s* ns, const struct as_index_s* r);

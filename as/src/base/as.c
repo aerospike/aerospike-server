@@ -354,6 +354,9 @@ as_run(int argc, char **argv)
 	// initialized.
 	as_namespaces_init(cold_start_cmd, instance);
 
+	// Relevant for enterprise edition only.
+	as_mrt_monitor_init();
+
 	// Initialize the storage system. For warm restarts, this includes fully
 	// resuming persisted indexes.
 	as_storage_init();
@@ -421,7 +424,6 @@ as_run(int argc, char **argv)
 	as_ticker_start();			// only after everything else is started
 
 	// Relevant for enterprise edition only.
-	as_mrt_monitor_start();
 	as_storage_start_tomb_raider();
 
 	// Log a service-ready message.
