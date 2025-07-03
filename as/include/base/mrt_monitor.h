@@ -87,3 +87,4 @@ void as_mrt_monitor_proxyer_roll_done(msg* m, msg* fab_msg, monitor_roll_origin*
 void as_mrt_monitor_proxyer_roll_timeout(msg* fab_msg, monitor_roll_origin* roll_orig);
 
 uint32_t as_mrt_monitor_n_active(const struct as_namespace_s* ns);
+uint64_t as_mrt_monitor_n_present(const struct as_namespace_s* ns);

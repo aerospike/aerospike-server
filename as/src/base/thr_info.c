@@ -3998,6 +3998,7 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	// MRT monitor activity.
 
+	info_append_uint64(db, "mrt_monitors", as_mrt_monitor_n_present(ns));
 	info_append_uint32(db, "mrt_monitors_active", as_mrt_monitor_n_active(ns));
 
 	// Persistent memory block keys' namespace ID (enterprise only).
