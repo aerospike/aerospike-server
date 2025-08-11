@@ -179,6 +179,8 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 void
 cf_os_best_practices_checks(cf_dyn_buf* db, uint64_t max_alloc_sz)
 {
+	cf_os_best_practices_check("max-map-count", "/proc/sys/vm/max_map_count",
+		262144, INT64_MAX, db);
 	cf_os_best_practices_check("min-free-kbytes",
 			"/proc/sys/vm/min_free_kbytes",
 			((int64_t)max_alloc_sz / 1024) + (100 * 1024), INT64_MAX, db);
