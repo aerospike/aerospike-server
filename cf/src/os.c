@@ -55,6 +55,7 @@ static bool g_use_group_perms = false;
 
 static cf_os_file_res cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf, size_t* limit);
 
+static void check_max_map_count(cf_dyn_buf* db);
 static void check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz);
 static void check_swappiness(cf_dyn_buf* db);
 static void check_thp(cf_dyn_buf* db);
@@ -182,6 +183,7 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 void
 cf_os_best_practices_check(cf_dyn_buf* db, uint64_t max_alloc_sz)
 {
+	check_max_map_count(db);
 	check_min_free_kbytes(db, max_alloc_sz);
 	check_thp(db);
 	check_swappiness(db);
@@ -214,6 +216,27 @@ cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf,
 //==========================================================
 // Local helpers - best practices.
 //
+
+static void
+check_max_map_count(cf_dyn_buf* db)
+{
+	static const char* path = "/proc/sys/vm/max_map_count";
+	int64_t max_map_count;
+
+	switch (cf_os_read_int_from_file(path, &max_map_count)) {
+	case CF_OS_FILE_RES_OK:
+		if (max_map_count < 262144) {
+			os_check_failed(db, "max-map-count",
+					"max_map_count should be at least 262144");
+		}
+		break;
+	case CF_OS_FILE_RES_NOT_FOUND:
+		break;
+	case CF_OS_FILE_RES_ERROR:
+	default:
+		cf_crash_nostack(CF_OS, "error reading '%s'", path);
+	}
+}
 
 static void
 check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz)
