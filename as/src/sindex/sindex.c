@@ -1247,10 +1247,28 @@ parse_exp(const char* exp_b64, exp_def* e_def_r)
 		return false;
 	}
 
-	if ((exp->flags & AS_EXP_HAS_NON_DIGEST_META) != 0 ||
-			(exp->flags & AS_EXP_HAS_REC_KEY) != 0) {
-		cf_warning(AS_SINDEX, "SINDEX CREATE: invalid expression %s - has non-digest metadata or key",
+	bool unsupported_exp = false;
+
+	if ((exp->flags & AS_EXP_HAS_NON_DIGEST_META) != 0) {
+		unsupported_exp = true;
+		cf_warning(AS_SINDEX, "SINDEX CREATE: invalid expression %s - has non-digest metadata",
 				exp_b64);
+	}
+
+	if ((exp->flags & AS_EXP_HAS_REC_KEY) != 0) {
+		unsupported_exp = true;
+		cf_warning(AS_SINDEX, "SINDEX CREATE: invalid expression %s - has record key",
+				exp_b64);
+	}
+
+	if ((exp->flags & AS_EXP_HAS_DIGEST_MOD) == 0 &&
+			cf_vector_size(bin_names) == 0) {
+		unsupported_exp = true;
+		cf_warning(AS_SINDEX, "SINDEX CREATE: invalid expression %s - needs digest modifier or bins",
+				exp_b64);
+	}
+
+	if (unsupported_exp) {
 		as_exp_destroy(exp);
 		cf_free(buf);
 		cf_vector_destroy(bin_names);
