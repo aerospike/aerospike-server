@@ -856,6 +856,7 @@ typedef struct as_namespace_s {
 
 	bool			stop_writes;
 	bool			hwm_breached;
+	bool			memory_breached; // stop-writes-sys-memory-pct
 
 	uint64_t		non_expirable_objects;
 
