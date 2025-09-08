@@ -973,9 +973,11 @@ eval_stop_writes(as_namespace* ns, bool cold_starting)
 	char* at = reasons;
 
 	uint32_t cfg_pct = as_load_uint32(&ns->stop_writes_sys_memory_pct);
+	bool memory_breached = false;
 
 	// Note - not >= since sys_memory_pct is rounded up, not down.
 	if (cfg_pct != 0 && sys_memory_pct > cfg_pct) {
+		memory_breached = true;
 		at = stpcpy(at, "sys-memory & ");
 	}
 
@@ -984,8 +986,11 @@ eval_stop_writes(as_namespace* ns, bool cold_starting)
 	uint64_t ixs_memory_budget = as_load_uint64(&ns->indexes_memory_budget);
 
 	if (ixs_memory_budget != 0 && ixs_sz > ixs_memory_budget) {
+		memory_breached = true;
 		at = stpcpy(at, "indexes-memory & ");
 	}
+
+	ns->memory_breached = memory_breached;
 
 	// Note - configured value 0 automatically switches this off. Also, not <=
 	// because avail vs. used, though data_avail_pct is rounded down.

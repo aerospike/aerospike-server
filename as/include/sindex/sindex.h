@@ -115,6 +115,7 @@ typedef struct as_sindex_s {
 
 	bool readable; // false while building sindex
 	bool dropped;
+	bool error;
 	uint32_t n_jobs;
 
 	uint64_t keys_per_bval;

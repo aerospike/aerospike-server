@@ -613,7 +613,10 @@ as_sindex_list_str(const as_namespace* ns, bool b64, cf_dyn_buf* db)
 			}
 		}
 
-		if (si->readable) {
+		if (si->error) {
+			cf_dyn_buf_append_string(db, ":state=ERROR");
+		}
+		else if (si->readable) {
 			cf_dyn_buf_append_string(db, ":state=RW");
 		}
 		else {
