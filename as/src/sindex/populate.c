@@ -427,6 +427,15 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 		return false;
 	}
 
+	if (! as_namespace_sindex_persisted(ns) && ns->memory_breached) {
+		cf_warning(AS_SINDEX, "{%s} populating sindex %s - aborted due to memory limit breach",
+				ns->name, si->iname);
+		si->error = true; // an error, once set, can't be cleared until restart
+		*cbi->p_aborted = true;
+		as_record_done(r_ref, ns);
+		return false;
+	}
+
 	as_record* r = read_r(ns, r_ref->r, false); // is not an MRT
 
 	if (r == NULL) {
