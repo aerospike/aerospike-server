@@ -2639,6 +2639,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 	// If this isn't a partition we're interested in, skip this record.
 	if (! ssds->get_state_from_storage[pid]) {
+		ssd->record_add_unowned_counter++;
 		return;
 	}
 
@@ -2690,6 +2691,7 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 
 	// Ignore record if it was in a dropped tree.
 	if (flat->tree_id != p_partition->tree_id) {
+		ssd->record_add_dropped_counter++;
 		return;
 	}
 
@@ -2908,6 +2910,13 @@ ssd_cold_start_sweep(drv_ssds *ssds, drv_ssd *ssd)
 	}
 
 	cf_free(buf);
+
+	cf_info(AS_DRV_SSD, "device %s: read complete: UNIQUE %lu (REPLACED %lu) (OLDER %lu) (EXPIRED %lu) (EVICTED %lu) (UNOWNED %lu) (DROPPED %lu) (UNPARSABLE %lu) records",
+			ssd->name, ssd->record_add_unique_counter,
+			ssd->record_add_replace_counter, ssd->record_add_older_counter,
+			ssd->record_add_expired_counter, ssd->record_add_evicted_counter,
+			ssd->record_add_unowned_counter, ssd->record_add_dropped_counter,
+			ssd->record_add_unparsable_counter);
 }
 
 
