@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -1635,6 +1636,7 @@ cmd_dump_wb_summary(const char* name, const char* params, cf_dyn_buf* db)
 	// where <Namespace> is the name of an existing namespace.
 
 	as_namespace* ns;
+	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
 	info_param_result rv = as_info_param_get_namespace_ns(params, param_str,
@@ -1644,7 +1646,29 @@ cmd_dump_wb_summary(const char* name, const char* params, cf_dyn_buf* db)
 		return;
 	}
 
-	as_storage_dump_wb_summary(ns);
+	rv = as_info_optional_param_is_ok(db, "verbose", param_str, rv);
+
+	if (rv == INFO_PARAM_FAIL_REPLIED) {
+		return;
+	}
+
+	if (rv == INFO_PARAM_OK) {
+		if (strcmp(param_str, "true") == 0) {
+			verbose = true;
+		}
+		else if (strcmp(param_str, "false") == 0) {
+			verbose = false;
+		}
+		else {
+			cf_warning(AS_INFO, "the '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
+					name, param_str);
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"'verbose' may be either 'true' or 'false'");
+			return;
+		}
+	}
+
+	as_storage_dump_wb_summary(ns, verbose);
 	as_info_respond_ok(db);
 }
 

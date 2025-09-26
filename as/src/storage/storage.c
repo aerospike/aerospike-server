@@ -666,7 +666,7 @@ as_storage_ticker_stats(as_namespace* ns)
 // as_storage_dump_wb_summary
 //
 
-typedef void (*as_storage_dump_wb_summary_fn)(const as_namespace* ns);
+typedef void (*as_storage_dump_wb_summary_fn)(const as_namespace* ns, bool verbose);
 static const as_storage_dump_wb_summary_fn as_storage_dump_wb_summary_table[] = {
 	as_storage_dump_wb_summary_mem,
 	as_storage_dump_wb_summary_pmem,
@@ -674,11 +674,10 @@ static const as_storage_dump_wb_summary_fn as_storage_dump_wb_summary_table[] = 
 };
 
 void
-as_storage_dump_wb_summary(const as_namespace* ns)
+as_storage_dump_wb_summary(const as_namespace* ns, bool verbose)
 {
-	as_storage_dump_wb_summary_table[ns->storage_type](ns);
+	as_storage_dump_wb_summary_table[ns->storage_type](ns, verbose);
 }
-
 //--------------------------------------
 // as_storage_histogram_clear_all
 //
