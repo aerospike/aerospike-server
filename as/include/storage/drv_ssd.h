@@ -185,6 +185,8 @@ typedef struct drv_ssd_s {
 	uint64_t		record_add_evicted_counter;		// records not inserted due to eviction
 	uint64_t		record_add_replace_counter;		// records reinserted
 	uint64_t		record_add_unique_counter;		// records inserted
+	uint64_t		record_add_unowned_counter;		// records not inserted due to unowned partition
+	uint64_t		record_add_dropped_counter;		// records not inserted due to dropped tree
 	uint64_t		record_add_unparsable_counter;	// unparsable records not inserted
 
 	cf_tid			write_tid;
