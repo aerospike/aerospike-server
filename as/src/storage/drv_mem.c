@@ -843,7 +843,7 @@ as_storage_ticker_stats_mem(as_namespace* ns)
 }
 
 void
-as_storage_dump_wb_summary_mem(const as_namespace* ns)
+as_storage_dump_wb_summary_mem(const as_namespace* ns, bool verbose)
 {
 	drv_mems* mems = ns->storage_private;
 
@@ -852,6 +852,7 @@ as_storage_dump_wb_summary_mem(const as_namespace* ns)
 	uint32_t n_used = 0;
 	uint32_t n_defrag = 0;
 	uint32_t n_emptying = 0;
+	uint32_t n_pristine = 0;
 
 	uint32_t n_short_lived = 0;
 
@@ -860,26 +861,48 @@ as_storage_dump_wb_summary_mem(const as_namespace* ns)
 	linear_hist* h =
 			linear_hist_create("", LINEAR_HIST_SIZE, 0, WBLOCK_SZ, 100);
 
+
 	for (uint32_t d = 0; d < mems->n_mems; d++) {
 		drv_mem* mem = &mems->mems[d];
+
+		uint32_t d_free = 0;
+		uint32_t d_reserved = 0;
+		uint32_t d_used = 0;
+		uint32_t d_defrag = 0;
+		uint32_t d_emptying = 0;
+		uint32_t d_pristine = 0;
+		uint32_t d_short_lived = 0;
+		uint32_t d_zero_used_sz = 0;
 
 		for (uint32_t i = mem->first_wblock_id; i < mem->n_wblocks; i++) {
 			mem_wblock_state* wblock_state = &mem->wblock_state[i];
 
+			// Treat wblocks beyond pristine_wblock_id as pristine regardless of state.
+			if (i >= mem->pristine_wblock_id) {
+				d_pristine++;
+				n_pristine++;
+				continue;
+			}
+
 			switch (wblock_state->state) {
 			case WBLOCK_STATE_FREE:
+				d_free++;
 				n_free++;
 				break;
 			case WBLOCK_STATE_RESERVED:
+				d_reserved++;
 				n_reserved++;
 				break;
 			case WBLOCK_STATE_USED:
+				d_used++;
 				n_used++;
 				break;
 			case WBLOCK_STATE_DEFRAG:
+				d_defrag++;
 				n_defrag++;
 				break;
 			case WBLOCK_STATE_EMPTYING:
+				d_emptying++;
 				n_emptying++;
 				break;
 			default:
@@ -889,23 +912,36 @@ as_storage_dump_wb_summary_mem(const as_namespace* ns)
 			}
 
 			if (wblock_state->short_lived) {
+				d_short_lived++;
 				n_short_lived++;
 			}
 
 			uint32_t inuse_sz = as_load_uint32(&wblock_state->inuse_sz);
 
 			if (inuse_sz == 0) {
+				d_zero_used_sz++;
 				n_zero_used_sz++;
 			}
 			else {
 				linear_hist_insert_data_point(h, inuse_sz);
 			}
 		}
+
+		if (verbose) {
+			cf_info(AS_DRV_MEM, "WB: device %s: pristine:%u reserved:%u used:%u defrag:%u emptying:%u free:%u", mem->name,
+				d_pristine, d_reserved, d_used, d_defrag, d_emptying, d_free);
+
+			if (d_short_lived != 0) {
+				cf_info(AS_DRV_MEM, "WB: device %s: short-lived:%u", mem->name, d_short_lived);
+			}
+
+			cf_info(AS_DRV_MEM, "WB: device %s: zero-used-sz:%u", mem->name, d_zero_used_sz);
+		}
 	}
 
 	cf_info(AS_DRV_MEM, "WB: namespace %s", ns->name);
-	cf_info(AS_DRV_MEM, "WB: wblocks by state - free:%u reserved:%u used:%u defrag:%u emptying:%u",
-			n_free, n_reserved, n_used, n_defrag, n_emptying);
+	cf_info(AS_DRV_MEM, "WB: wblocks by state - pristine:%u reserved:%u used:%u defrag:%u emptying:%u free:%u",
+			n_pristine, n_reserved, n_used, n_defrag, n_emptying, n_free);
 
 	if (n_short_lived != 0) {
 		cf_info(AS_DRV_MEM, "WB: short-lived wblocks - %u", n_short_lived);

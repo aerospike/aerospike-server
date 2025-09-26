@@ -227,7 +227,7 @@ as_storage_ticker_stats_pmem(as_namespace* ns)
 }
 
 void
-as_storage_dump_wb_summary_pmem(const as_namespace* ns)
+as_storage_dump_wb_summary_pmem(const as_namespace* ns, bool verbose)
 {
 	pmem_crash_ce();
 }

@@ -225,7 +225,7 @@ void as_storage_flush_pmeta(struct as_namespace_s* ns, uint32_t start_pid, uint3
 void as_storage_stats(struct as_namespace_s* ns, uint32_t* avail_pct, uint64_t* used_bytes); // available percent is that of worst device
 void as_storage_device_stats(const struct as_namespace_s* ns, uint32_t device_ix, storage_device_stats* stats);
 void as_storage_ticker_stats(struct as_namespace_s* ns); // prints SSD histograms to the info ticker
-void as_storage_dump_wb_summary(const struct as_namespace_s* ns);
+void as_storage_dump_wb_summary(const struct as_namespace_s* ns, bool verbose);
 void as_storage_histogram_clear_all(struct as_namespace_s* ns); // clears all SSD histograms
 
 //------------------------------------------------
@@ -272,7 +272,7 @@ void as_storage_flush_pmeta_mem(struct as_namespace_s* ns, uint32_t start_pid, u
 void as_storage_stats_mem(struct as_namespace_s* ns, uint32_t* avail_pct, uint64_t* used_bytes);
 void as_storage_device_stats_mem(const struct as_namespace_s* ns, uint32_t device_ix, storage_device_stats* stats);
 void as_storage_ticker_stats_mem(struct as_namespace_s* ns);
-void as_storage_dump_wb_summary_mem(const struct as_namespace_s* ns);
+void as_storage_dump_wb_summary_mem(const struct as_namespace_s* ns, bool verbose);
 void as_storage_histogram_clear_mem(struct as_namespace_s* ns);
 
 //------------------------------------------------
@@ -312,7 +312,7 @@ void as_storage_flush_pmeta_ssd(struct as_namespace_s* ns, uint32_t start_pid, u
 void as_storage_stats_ssd(struct as_namespace_s* ns, uint32_t* avail_pct, uint64_t* used_bytes);
 void as_storage_device_stats_ssd(const struct as_namespace_s* ns, uint32_t device_ix, storage_device_stats* stats);
 void as_storage_ticker_stats_ssd(struct as_namespace_s* ns);
-void as_storage_dump_wb_summary_ssd(const struct as_namespace_s* ns);
+void as_storage_dump_wb_summary_ssd(const struct as_namespace_s* ns, bool verbose);
 void as_storage_histogram_clear_ssd(struct as_namespace_s* ns);
 
 //------------------------------------------------
@@ -351,5 +351,5 @@ void as_storage_flush_pmeta_pmem(struct as_namespace_s* ns, uint32_t start_pid, 
 void as_storage_stats_pmem(struct as_namespace_s* ns, uint32_t* avail_pct, uint64_t* used_bytes);
 void as_storage_device_stats_pmem(const struct as_namespace_s* ns, uint32_t device_ix, storage_device_stats* stats);
 void as_storage_ticker_stats_pmem(struct as_namespace_s* ns);
-void as_storage_dump_wb_summary_pmem(const struct as_namespace_s* ns);
+void as_storage_dump_wb_summary_pmem(const struct as_namespace_s* ns, bool verbose);
 void as_storage_histogram_clear_pmem(struct as_namespace_s* ns);
