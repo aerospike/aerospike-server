@@ -86,6 +86,35 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_GEOJSON]		= &geojson_vtable
 };
 
+static const char* particle_strings[] = {
+	"null",
+	"numeric",
+	"float",
+	"string",
+	"blob",
+	"unused",
+	"unused",
+	"blob",
+	"blob",
+	"blob",
+	"blob",
+	"blob",
+	"blob",
+	"unused",
+	"unused",
+	"unused",
+	"vector",
+	"bool",
+	"hll",
+	"map",
+	"list",
+	"unused",
+	"unused",
+	"geo2dsphere",
+};
+
+ARRAY_ASSERT(particle_strings, AS_PARTICLE_TYPE_MAX);
+
 
 //==========================================================
 // Local utilities.
@@ -201,6 +230,15 @@ as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 		cf_warning(AS_PARTICLE, "encountered bad msgpack_type %d", vtype);
 		return AS_PARTICLE_TYPE_BAD;
 	}
+}
+
+const char*
+as_particle_type_str(as_particle_type type)
+{
+	cf_assert(type > AS_PARTICLE_TYPE_NULL && type < AS_PARTICLE_TYPE_MAX,
+			AS_PARTICLE, "bad particle type %u", type);
+
+	return particle_strings[type];
 }
 
 uint32_t

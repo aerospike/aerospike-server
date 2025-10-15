@@ -3308,8 +3308,14 @@ cmd_sindex_create(as_info_cmd_args* args)
 				return;
 			}
 
-			if (! as_sindex_validate_exp(exp_b64)) {
-				as_info_respond_error(db, AS_ERR_PARAMETER, "bad 'exp'");
+			uint8_t exp_type = AS_PARTICLE_TYPE_BAD;
+
+			if (! as_sindex_validate_exp(exp_b64, &exp_type, db)) {
+				return;
+			}
+
+			if (! as_sindex_validate_exp_type(index_name_str, itype, ktype,
+					exp_type, db)) {
 				return;
 			}
 

@@ -182,6 +182,7 @@ is_embedded_particle_type(as_particle_type type)
 
 as_particle_type as_particle_type_from_asval(const as_val *val);
 as_particle_type as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size);
+const char* as_particle_type_str(as_particle_type type);
 
 uint32_t as_particle_size_from_asval(const as_val *val);
 

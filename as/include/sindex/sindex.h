@@ -173,7 +173,8 @@ void as_sindex_list_str(const struct as_namespace_s* ns, bool b64, cf_dyn_buf* d
 void as_sindex_build_smd_key(const char* ns_name, const char* set_name, const char* bin_name, const char* cdt_ctx, const char* exp, as_sindex_type itype, as_particle_type ktype, char* smd_key);
 int32_t as_sindex_cdt_ctx_b64_decode(const char* ctx_b64, uint32_t ctx_b64_len, uint8_t** buf_r);
 int32_t as_sindex_exp_b64_decode(const char* exp_b64, uint32_t exp_b64_len, uint8_t** buf_r);
-bool as_sindex_validate_exp(const char* exp_b64);
+bool as_sindex_validate_exp(const char* exp_b64, uint8_t* expected_type_r, cf_dyn_buf* db);
+bool as_sindex_validate_exp_type(const char* iname, as_sindex_type itype, as_particle_type ktype, uint8_t exp_type, cf_dyn_buf* db);
 
 static inline uint32_t
 as_sindex_n_sindexes(const as_namespace* ns)

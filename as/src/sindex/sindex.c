@@ -52,6 +52,7 @@
 #include "base/exp.h"
 #include "base/index.h"
 #include "base/smd.h"
+#include "base/thr_info.h"
 #include "geospatial/geospatial.h"
 #include "sindex/gc.h"
 #include "sindex/populate.h"
@@ -164,6 +165,7 @@ static as_particle_type ktype_from_smd_char(char c);
 static char ktype_to_smd_char(as_particle_type ktype);
 static as_sindex_type itype_from_smd_char(char c);
 static char itype_to_smd_char(as_sindex_type itype);
+static as_particle_type itype_to_exp_particle_type(as_sindex_type itype);
 
 static void* run_cardinality(void* udata);
 
@@ -721,15 +723,45 @@ as_sindex_exp_b64_decode(const char* exp_b64, uint32_t exp_b64_len,
 }
 
 bool
-as_sindex_validate_exp(const char* exp_b64)
+as_sindex_validate_exp(const char* exp_b64, uint8_t* exp_type_r,
+		cf_dyn_buf* db)
 {
 	exp_def e_def = { 0 };
 
 	if (! parse_exp(exp_b64, &e_def)) {
+		as_info_respond_error(db, AS_ERR_PARAMETER, "bad 'exp'");
 		return false;
 	}
 
+	*exp_type_r = e_def.exp->expected_type;
+
 	free_exp_def(&e_def);
+
+	return true;
+}
+
+bool
+as_sindex_validate_exp_type(const char* iname, as_sindex_type itype,
+		as_particle_type ktype, uint8_t exp_type, cf_dyn_buf* db)
+{
+	uint8_t expected_type = ktype;
+
+	if (itype != AS_SINDEX_ITYPE_DEFAULT) {
+		expected_type = itype_to_exp_particle_type(itype);
+	}
+
+	if (exp_type != expected_type) {
+		if (db != NULL) {
+			as_info_respond_error(db, AS_ERR_PARAMETER, "bad 'exp' - expression type '%s' does not match expected type '%s'",
+					as_particle_type_str(exp_type),
+					as_particle_type_str(expected_type));
+		}
+
+		cf_warning(AS_SINDEX, "sindex-create %s: bad 'exp' - expression type '%s' does not match expected type '%s'",
+				iname, as_particle_type_str(exp_type),
+				as_particle_type_str(expected_type));
+		return false;
+	}
 
 	return true;
 }
@@ -969,7 +1001,7 @@ smd_create(as_sindex_def* def, bool startup)
 
 	if (def->set_name[0] != '\0' && as_namespace_get_create_set_w_len(ns,
 			def->set_name, strlen(def->set_name), &p_set, &set_id) != 0) {
-		cf_warning(AS_SINDEX, "SINDEX CREATE : failed get-create set %s",
+		cf_warning(AS_SINDEX, "SINDEX CREATE: failed get-create set %s",
 				def->set_name);
 		SINDEX_GWUNLOCK();
 		return;
@@ -990,9 +1022,18 @@ smd_create(as_sindex_def* def, bool startup)
 			return;
 		}
 	}
-	else if (def->exp_b64 != NULL && ! parse_exp(def->exp_b64, &e_def)) {
+	else if (def->exp_b64 != NULL) {
+		if (! parse_exp(def->exp_b64, &e_def)) {
 			SINDEX_GWUNLOCK();
 			return;
+		}
+
+		if (! as_sindex_validate_exp_type(def->iname, def->itype, def->ktype,
+				e_def.exp->expected_type, NULL)) {
+			free_exp_def(&e_def);
+			SINDEX_GWUNLOCK();
+			return;
+		}
 	}
 
 	if ((cur_si = si_by_defn(ns, set_id, def->bin_name, def->ktype, def->itype,
@@ -1907,6 +1948,18 @@ itype_to_smd_char(as_sindex_type itype)
 	}
 
 	return '\0';
+}
+
+static as_particle_type
+itype_to_exp_particle_type(as_sindex_type itype)
+{
+	switch (itype) {
+	case AS_SINDEX_ITYPE_LIST: return AS_PARTICLE_TYPE_LIST;
+	case AS_SINDEX_ITYPE_MAPKEYS: return AS_PARTICLE_TYPE_MAP;
+	case AS_SINDEX_ITYPE_MAPVALUES: return AS_PARTICLE_TYPE_MAP;
+	default:
+		return AS_PARTICLE_TYPE_BAD;
+	}
 }
 
 
