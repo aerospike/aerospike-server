@@ -909,6 +909,24 @@ free(void *p_indent)
 	do_free(p_indent, __builtin_return_address(0));
 }
 
+static size_t
+do_malloc_usable_size(void *p_indent)
+{
+	if (p_indent == NULL) {
+		return 0;
+	}
+
+	const void *p = g_indent ? outdent(p_indent) : p_indent;
+	return jem_sallocx(p, 0);
+}
+
+size_t
+__attribute__ ((noinline))
+malloc_usable_size(void *p_indent)
+{
+	return do_malloc_usable_size(p_indent);
+}
+
 static int32_t
 calc_alloc_flags(int32_t flags)
 {
