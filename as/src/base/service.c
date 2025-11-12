@@ -978,14 +978,14 @@ release_file_handle(as_file_handle* proto_fd_h)
 		as_security_filter_destroy(proto_fd_h->security_filter);
 	}
 
-	cf_rc_free(proto_fd_h);
-
 	if (proto_fd_h->poll_data_type == CF_POLL_DATA_CLIENT_IO) {
 		as_incr_uint64_rls(&g_stats.proto_connections_closed);
 	}
 	else {
 		as_incr_uint64_rls(&g_stats.admin_connections_closed);
 	}
+
+	cf_rc_free(proto_fd_h);
 }
 
 static bool
