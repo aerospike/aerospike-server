@@ -777,7 +777,7 @@ log_write(cf_log_context context, cf_log_level level, const char* file_name,
 
 	adjust_format(format, adjusted);
 
-	pos += vsnprintf(buf + pos, MAX_LOG_STRING_LEN - (size_t)pos, adjusted,
+	pos += vsnprintf(buf + pos, MAX_LOG_STRING_SZ - (size_t)pos, adjusted,
 			argp);
 
 	if (pos > MAX_LOG_STRING_LEN) {
