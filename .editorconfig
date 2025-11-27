@@ -1,0 +1,33 @@
+root = true
+
+[*.{c,h,cc,cpp,hpp}]
+indent_style = tab
+indent_size = 4
+charset = utf-8
+end_of_line = lf
+insert_final_newline = false
+trim_trailing_whitespace = true
+
+[*.{sh,bash}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_size = 4
+indent_style = space
+
+[[bash]]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_size = 4
+indent_style = space
+
+[[shell]]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_size = 4
+indent_style = space
