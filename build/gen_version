@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 EDITION=${1:-community}
 BUILD_OS=${2:-unknown}
@@ -6,19 +6,30 @@ ARCH=${3:-unknown}
 EE_SHA=$4
 FIPS_SHA=$5
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 FEATURES=""
-VERSION="$(git describe --abbrev=7)"
+BRANCH="$(git branch -r --contains HEAD | grep -v HEAD | \
+    sed -e 's/origin\///' -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')"
+BUILD_TYPE=$(<$SCRIPT_DIR/../.STAGE)
+
+if [[ ( "$BRANCH" = 'master' || "$BRANCH" =~ 'hotfix/' ) && "$BUILD_TYPE" = 'release' ]]; then
+    VERSION="$(git describe --long | cut -d'-' -f1)"
+else
+    VERSION="$(git describe --abbrev=9)"
+fi
+
 CE_SHA="$(git rev-parse HEAD)"
 
 telemetry() {
-    # Check if AEROSPIKE_TELEMETRY is set to FALSE, if so, user has opted out.
+# Check if AEROSPIKE_TELEMETRY is set to FALSE, if so, user has opted out.
     if [ "${AEROSPIKE_TELEMETRY}" = "FALSE" ]; then
-      return 0
+        return 0
     fi
 
     # Check if curl is on the machine. Silently abort if no curl is found
     if ! command -v curl >/dev/null 2>&1; then
-      return 0
+        return 0
     fi
 
     # Construct the POST request
@@ -29,7 +40,7 @@ telemetry() {
     curl --connect-timeout 3 -X POST "${AEROSPIKE_BASE_URL}?${DATA}"
 }
 
-telemetry &> /dev/null
+telemetry &>/dev/null
 
 if [ $EDITION = enterprise -o $EDITION = federal ]; then
     FEATURES=";xdr"

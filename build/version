@@ -1,10 +1,21 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-rev=`git describe --abbrev=7`
-subbuild=`echo $rev | awk -F'-' '{print $2}'`
+scriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ "$subbuild" != "" ]
-then
-  rev=`echo $rev | awk -F'-' '{sb = $2; for (f = 3; f <= NF - 1; f++) {sb = sb"-"$f}; printf("%s-%s\n", $1, sb)}'`
+branch="$(git branch -r --contains HEAD | grep -v HEAD | \
+    sed -e 's/origin\///' -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')"
+buildType=$(<$scriptDir/../.STAGE)
+
+if [[ ( "$branch" = 'master' || "$branch" =~ 'hotfix/' ) && "$buildType" = 'release' ]]; then
+    rev="$(git describe --long | cut -d'-' -f1)"
+else
+    rev="$(git describe --abbrev=9)"
 fi
+
+subbuild=$(echo $rev | awk -F'-' '{print $2}')
+
+if [ "$subbuild" != "" ]; then
+    rev=$(echo $rev | awk -F'-' '{sb = $2; for (f = 3; f <= NF - 1; f++) {sb = sb"-"$f}; printf("%s-%s\n", $1, sb)}')
+fi
+
 echo $rev
