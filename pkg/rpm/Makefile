@@ -8,8 +8,9 @@ SOURCE_ROOT = $(PKG)/dist
 BUILD_ROOT = $(SOURCE_ROOT)/BUILD
 OPT_AS = $(BUILD_ROOT)/opt/aerospike
 
-REV = $(shell $(DEPTH)/build/version | sed 's/-/_/g')
-OS = $(shell $(DEPTH)/build/os_version)
+REV := $(shell $(DEPTH)/build/version | sed 's/-/_/g')
+OS := $(shell $(DEPTH)/build/os_version)
+BUILD_NUMBER := $(shell $(DEPTH)/build/build_number)
 
 CONF_VERSION = _systemd
 
@@ -62,6 +63,8 @@ package:
 	install -d $(SOURCE_ROOT)/RPMS/$(ARCH)
 
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/rpm/server-spec-base > $(PKG)/rpm/aerospike.spec
+	sed -i "s/^Release: [0-9]\+%{?dist}/Release: ${BUILD_NUMBER}%{?dist}/" $(PKG)/rpm/aerospike.spec
+
 ifeq ($(EDITION),federal)
 	cat $(EEREPO)/pkg/rpm/server-spec-fips >> $(PKG)/rpm/aerospike.spec
 endif
@@ -98,5 +101,5 @@ clean:
 	rm -rf $(SOURCE_ROOT)/*
 
 ifeq ($(USE_EE),1)
-  include $(AS_EE)/make_in/Makefile.rpm.in
+   include $(AS_EE)/make_in/Makefile.rpm.in
 endif

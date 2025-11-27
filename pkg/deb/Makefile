@@ -8,9 +8,10 @@ SOURCE_ROOT = $(PKG)/distrev
 BUILD_ROOT = $(SOURCE_ROOT)/BUILD
 OPT_AS = $(BUILD_ROOT)/opt/aerospike
 
-REV = $(shell $(DEPTH)/build/version)
-OS = $(shell $(DEPTH)/build/os_version)
-SIZE = $(shell du -k $(BIN_DIR)/asd | cut -f1)
+REV := $(shell $(DEPTH)/build/version)
+OS := $(shell $(DEPTH)/build/os_version)
+BUILD_NUMBER := $(shell $(DEPTH)/build/build_number)
+SIZE := $(shell du -k $(BIN_DIR)/asd | cut -f1)
 DEPS =
 
 comma:= ,
@@ -19,8 +20,8 @@ space:= $(empty) $(empty)
 
 CONF_VERSION = _systemd
 
-PKG_ARCH = $(shell dpkg-architecture -q DEB_BUILD_ARCH)
-DEB = $(PKG)/packages/aerospike-server-$(EDITION)_$(REV)-1$(OS)_$(PKG_ARCH).deb
+PKG_ARCH := $(shell dpkg-architecture -q DEB_BUILD_ARCH)
+DEB := $(PKG)/packages/aerospike-server-$(EDITION)_$(REV)-$(BUILD_NUMBER)$(OS)_$(PKG_ARCH).deb
 
 ifeq ($(USE_EE),1)
 all:	dist-ee package clean
