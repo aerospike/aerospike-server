@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+scriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+branch="$(git branch -r --contains HEAD | grep -v HEAD | \
+    sed -e 's/origin\///' -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')"
+
+buildType=$(<$scriptDir/../.STAGE)
+
+if [[ ( "$branch" = 'master' || "$branch" =~ 'hotfix/' ) && "$buildType" = 'release' ]]; 
+then
+    buildNumber=$(( $(git rev-list --first-parent --count $(git log --first-parent -1 --pretty=%H -- $scriptDir/../.STAGE)..HEAD) + 1 ))
+else
+    buildNumber=1
+fi
+
+echo $buildNumber
