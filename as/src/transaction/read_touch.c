@@ -464,10 +464,14 @@ read_touch_master(rw_request* rw, as_transaction* tr)
 	}
 
 	uint64_t old_last_update_time = r->last_update_time;
-	uint16_t old_generation = r->generation;
+	uint16_t old_generation = r->generation; // includes regime!
 	uint32_t old_void_time = r->void_time;
 
-	advance_record_version(tr, r);
+	uint64_t now = as_transaction_epoch_ms(tr);
+
+	as_record_advance_void_time(r, tr->msgp->msg.record_ttl, now, ns);
+	as_record_set_lut(r, tr->rsv.regime, now, ns);
+	// Don't increment generation - causes extraneous gen-check failures.
 
 	// If a write extended the void-time we don't need to touch.
 	if (old_void_time >= r->void_time) {

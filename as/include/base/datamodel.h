@@ -444,6 +444,8 @@ void as_record_transition_set_index(struct as_index_tree_s* tree, struct as_inde
 void as_record_finalize_key(as_record* r, const uint8_t* key, uint32_t key_size);
 int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
 
+void as_record_advance_void_time(as_record* r, uint32_t record_ttl, uint64_t now, const struct as_namespace_s* ns);
+
 static inline int
 resolve_last_update_time(uint64_t left, uint64_t right)
 {

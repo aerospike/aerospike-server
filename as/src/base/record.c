@@ -480,6 +480,49 @@ as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen,
 
 
 //==========================================================
+// Public API - conflict resolution.
+//
+
+void
+as_record_advance_void_time(as_record* r, uint32_t record_ttl, uint64_t now,
+	const as_namespace* ns)
+{
+		uint64_t void_time = r->void_time;
+
+		switch (record_ttl) {
+		case TTL_USE_DEFAULT: {
+				uint32_t default_ttl = effective_default_ttl(ns,
+						as_namespace_get_record_set(ns, r));
+
+				if (default_ttl != 0) {
+					// Set record void-time using default TTL value.
+					void_time = (now / 1000) + default_ttl;
+				}
+				else {
+					// Default TTL is "never expire".
+					void_time = 0;
+				}
+			}
+			break;
+		case TTL_NEVER_EXPIRE:
+			// Set record to "never expire".
+			void_time = 0;
+			break;
+		case TTL_DONT_UPDATE:
+			// Do not change record's void time.
+			break;
+		default:
+			// Apply non-special m->record_ttl directly. Have already checked
+			// m->record_ttl <= 10 years, so no overflow etc.
+			void_time = (now / 1000) + record_ttl;
+			break;
+		}
+
+		r->void_time = void_time;
+}
+
+
+//==========================================================
 // Local helpers.
 //
 
