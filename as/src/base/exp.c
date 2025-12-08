@@ -4065,6 +4065,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		b = &bin_arg.r_bin;
 		bin_arg.type = RT_BIN;
+		bin_arg.do_not_destroy = 0;
 		bin_arg.r_bin.particle = rt_alloc_mem(rt, (size_t)temp.r_bytes.sz +
 				sizeof(cdt_mem), NULL);
 
@@ -4085,8 +4086,10 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 		b = &bin_arg.r_bin;
 		bin_arg.type = RT_BIN;
+		bin_arg.do_not_destroy = 0;
 
 		if (! msgpack_to_bin(rt, &bin_arg.r_bin, &temp, NULL)) {
+			rt_value_destroy(&temp);
 			ret_val->type = RT_TRILEAN;
 			ret_val->r_trilean = AS_EXP_UNK;
 			call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
