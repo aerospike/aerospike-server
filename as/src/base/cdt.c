@@ -5149,6 +5149,7 @@ cdt_stack_untrusted_rewrite(cdt_stack *cs, uint8_t *dest, const uint8_t *src,
 
 						if (map_order_index_has_dups(&ordidx, &new_offidx)) {
 							cf_warning(AS_PARTICLE, "map has duplicate keys");
+							rollback_alloc_rollback(alloc_idx);
 							return 0;
 						}
 					}
