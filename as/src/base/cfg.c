@@ -5582,7 +5582,7 @@ cfg_best_practices_check(void)
 	}
 
 	if (c->admin.bind_port == 0 && c->tls_admin.bind_port == 0) {
-		check_failed(&g_bad_practices, "network", "admin section is not configured");
+		check_failed(&g_bad_practices, "admin-port", "admin section is not configured");
 	}
 
 	uint64_t ns_mem = 0;
