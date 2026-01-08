@@ -1,7 +1,7 @@
 /*
  * index.c
  *
- * Copyright (C) 2012-2021 Aerospike, Inc.
+ * Copyright (C) 2012-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
