@@ -175,6 +175,42 @@ jobs:
       gh-workflows-ref: "v2.0.2"
       dry-run: false
 
+  promote-to-test:
+    needs:
+      - setup
+      - create-release-bundle
+    runs-on: ubuntu-24.04
+    if: ${{ always() && needs.create-release-bundle.result == 'success' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@df199fb7be9f65074067a9eb93f12bb4c5547cf2  # v2.13.3
+        with:
+          egress-policy: audit
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@5b06f730cc5a6f55d78b30753f8583454b08c0aa # v4.8.1
+        env:
+          JF_URL: ${{ env.JFROG_URL }}
+          JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Promote release bundle to TEST
+        env:
+          JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
+          RELEASE_BUNDLE_NAME: aerospike-server
+          JF_SIGNING_KEY: aerospike
+          VERSION: ${{ needs.setup.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          echo "Promoting release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' to TEST environment..."
+          jf rbp \
+            --signing-key="${JF_SIGNING_KEY}" \
+            --project="${JFROG_PROJECT}" \
+            --sync=true \
+            "${RELEASE_BUNDLE_NAME}" "${VERSION}" TEST
+
   auto-retry:
     needs:
       - setup
@@ -193,27 +229,45 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Trigger rerun of this workflow
+      - name: Trigger rerun of failed jobs
         run: |
-          echo "Rerunning workflow (attempt ${{ github.run_attempt }} of 3)..."
+          echo "Rerunning failed jobs (attempt ${{ github.run_attempt }} of 3)..."
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/rerun"
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/rerun-failed-jobs"
 
   notify-slack:
     needs:
       - setup
-      - create-release-bundle
+      - promote-to-test
     runs-on: ubuntu-24.04
-    if: ${{ always() && needs.create-release-bundle.result == 'success' }}
+    if: ${{ always() && needs.promote-to-test.result == 'success' }}
     steps:
-      - name: Send Slack message
+      - name: Get current timestamp
+        id: timestamp
+        run: echo "time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack message to QE
         continue-on-error: true
-        uses: slackapi/slack-github-action@fcfb566f8b0aab22203f066d80ca1d7e4b5d05b3  # v2.1.0
+        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d  # v2.0.0
         with:
           method: chat.postMessage
-          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          token: ${{ secrets.QE_SLACK_BOT_TOKEN }}
           payload: |
-            channel: ${{ secrets.QE_SLACK_CHANNEL }}
-            text: "Server build id ${{ needs.setup.outputs.VERSION }} with package version ${{ needs.setup.outputs.RELEASE }} promoted to JFrog"
+            {
+              "channel": "${{ secrets.QE_SLACK_CHANNEL }}",
+              "text": "[${{ steps.timestamp.outputs.time }}] Server build id ${{ needs.setup.outputs.VERSION }} with package version ${{ needs.setup.outputs.RELEASE }} promoted to JFrog TEST environment"
+            }
+
+      - name: Send Slack message to CORE
+        continue-on-error: true
+        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d  # v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
+              "text": "[${{ steps.timestamp.outputs.time }}] Server build id ${{ needs.setup.outputs.VERSION }} with package version ${{ needs.setup.outputs.RELEASE }} promoted to JFrog TEST environment"
+            }
