@@ -1,0 +1,273 @@
+name: Sign, build, and deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of the artifact to deploy
+        required: true
+  push:
+    branches:
+      - master
+      - 'hotfix/*'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARTIFACT_NAME: aerospike-server
+  AWS_ROLE: arn:aws:iam::360255567471:role/sso/assumed/iac/AerospikeDownloadArtifactsAutomation
+  JFROG_PROJECT: database
+  JFROG_URL: https://aerospike.jfrog.io
+  ORG: citrusleaf
+  S3_BUCKET: aerospike-qe-build
+
+jobs:
+  setup:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || steps.set_env.outputs.version }}
+      STAGE:   ${{ steps.set_env.outputs.stage }}
+      COUNT:   ${{ steps.set_env.outputs.count }}
+      RELEASE: ${{ steps.set_env.outputs.release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: set env while artifacts being built
+        id: set_env
+        run: |
+          set -euo pipefail
+          version=$(git describe --tags --always --abbrev=9)
+          stage=$(source build/version stage)
+          count=$(source .github/bin/artifact_count.bash)
+          release=$(source build/version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "stage=$stage"     >> "$GITHUB_OUTPUT"
+          echo "count=$count"     >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "push" && "$stage" == "release" ]]; then
+            echo "Waiting for artifacts to be built before pulling them... (30 minutes)"
+            sleep 1800 # 30 minutes
+          fi
+
+  download-artifacts:
+    needs: setup
+    if: >
+        github.repository_owner == 'citrusleaf' &&
+        (
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'push' && needs.setup.outputs.STAGE == 'release')
+        )  
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.setup.outputs.VERSION }}
+      COUNT: ${{ needs.setup.outputs.COUNT }}
+      RELEASE: ${{ needs.setup.outputs.RELEASE }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@df199fb7be9f65074067a9eb93f12bb4c5547cf2 # v2.13.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install GNU parallel
+        run: sudo apt-get update && sudo apt-get install -y parallel
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE }}
+          role-session-name: aerospike-download-artifacts
+          aws-region: us-west-1
+
+      - name: Download artifacts from QE server (retry until complete)
+        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08  # v3.0.2
+        env:
+          GH_EVENT: ${{ github.event_name }}
+          S3_PATH: "s3://${{ env.S3_BUCKET }}/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ env.VERSION }}/build/"
+        with:
+          timeout_minutes: 30
+          max_attempts: 60
+          retry_on: error
+          retry_wait_seconds: 60
+          command: .github/bin/download_artifacts.bash
+
+      - name: List download files
+        run: find build-artifacts
+
+      - name: Upload packaged Artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
+          path: build-artifacts
+          overwrite: true
+          retention-days: 1
+
+  sign-artifacts:
+    needs:
+      - setup
+      - download-artifacts
+    # always() needed because upstream jobs use always()
+    if: ${{ always() && needs.setup.result == 'success' && needs.download-artifacts.result == 'success' }}
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v2.0.2
+    with:
+      gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
+      gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
+      gh-workflows-ref: "v2.0.2"
+    secrets:
+      gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
+      gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
+      gpg-key-pass: ${{ secrets.GPG_PASS }}
+
+  upload-artifacts-to-jfrog:
+    needs:
+      - setup
+      - download-artifacts
+      - sign-artifacts
+    # always() needed because upstream jobs use always()
+    if: ${{ always() && needs.sign-artifacts.result == 'success' }}
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v2.0.2
+    with:
+      jf-project: database
+      jf-build-name: "aerospike-server"
+      version: ${{ needs.setup.outputs.VERSION }}
+      oidc-provider-name: gh-citrusleaf
+      oidc-audience: citrusleaf
+      gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
+      gh-retention-days: 1
+      dry-run: false
+      jf-build-id: ${{ needs.setup.outputs.VERSION }}
+      jf-metadata-build-id: ${{ needs.setup.outputs.VERSION }}-metadata
+      gh-workflows-ref: "v2.0.2"
+
+  create-release-bundle:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    needs:
+      - setup
+      - download-artifacts
+      - sign-artifacts
+      - upload-artifacts-to-jfrog
+    # always() needed because upstream jobs use always()
+    if: ${{ always() && needs.setup.result == 'success' && needs.download-artifacts.result == 'success' && needs.sign-artifacts.result == 'success' && needs.upload-artifacts-to-jfrog.result == 'success' }}
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v2.0.2
+    with:
+      jf-project: "database"
+      jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
+      jf-bundle-name: "aerospike-server"
+      oidc-provider-name: gh-citrusleaf
+      oidc-audience: citrusleaf
+      version: ${{ needs.setup.outputs.VERSION }}
+      gh-workflows-ref: "v2.0.2"
+      dry-run: false
+
+  promote-to-test:
+    needs:
+      - setup
+      - create-release-bundle
+    runs-on: ubuntu-24.04
+    if: ${{ always() && needs.create-release-bundle.result == 'success' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@df199fb7be9f65074067a9eb93f12bb4c5547cf2  # v2.13.3
+        with:
+          egress-policy: audit
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@5b06f730cc5a6f55d78b30753f8583454b08c0aa # v4.8.1
+        env:
+          JF_URL: ${{ env.JFROG_URL }}
+          JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Promote release bundle to TEST
+        env:
+          JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
+          RELEASE_BUNDLE_NAME: aerospike-server
+          JF_SIGNING_KEY: aerospike
+          VERSION: ${{ needs.setup.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          echo "Promoting release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' to TEST environment..."
+          jf rbp \
+            --signing-key="${JF_SIGNING_KEY}" \
+            --project="${JFROG_PROJECT}" \
+            --sync=true \
+            "${RELEASE_BUNDLE_NAME}" "${VERSION}" TEST
+
+  auto-retry:
+    needs:
+      - setup
+      - download-artifacts
+      - sign-artifacts
+      - upload-artifacts-to-jfrog
+    runs-on: ubuntu-24.04
+    if: >-
+      ${{ always() && 
+          needs.setup.result == 'success' && 
+          (needs.download-artifacts.result == 'failure' || 
+           needs.sign-artifacts.result == 'failure' || 
+           needs.upload-artifacts-to-jfrog.result == 'failure') && 
+          github.run_attempt < 3 }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Trigger rerun of failed jobs
+        run: |
+          echo "Rerunning failed jobs (attempt ${{ github.run_attempt }} of 3)..."
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/rerun-failed-jobs"
+
+  notify-slack:
+    needs:
+      - setup
+      - promote-to-test
+    runs-on: ubuntu-24.04
+    if: ${{ always() && needs.promote-to-test.result == 'success' }}
+    steps:
+      - name: Get current timestamp
+        id: timestamp
+        run: echo "time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack message to QE
+        continue-on-error: true
+        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d  # v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.QE_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.QE_SLACK_CHANNEL }}",
+              "text": "[${{ steps.timestamp.outputs.time }}] Server build id ${{ needs.setup.outputs.VERSION }} with package version ${{ needs.setup.outputs.RELEASE }} promoted to JFrog TEST environment"
+            }
+
+      - name: Send Slack message to CORE
+        continue-on-error: true
+        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d  # v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
+              "text": "[${{ steps.timestamp.outputs.time }}] Server build id ${{ needs.setup.outputs.VERSION }} with package version ${{ needs.setup.outputs.RELEASE }} promoted to JFrog TEST environment"
+            }
