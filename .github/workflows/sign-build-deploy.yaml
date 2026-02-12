@@ -34,6 +34,11 @@ jobs:
       COUNT:   ${{ steps.set_env.outputs.count }}
       RELEASE: ${{ steps.set_env.outputs.release }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9 # v2.14.1
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
