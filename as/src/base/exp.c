@@ -5820,7 +5820,7 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 			cf_dyn_buf_append_format(db, "%s(", cdt_exp_display_name(op_code));
 
 			if (! cdt_msgpack_ctx_to_dynbuf(&mp_ctx, db)) {
-				cf_crash(AS_EXP, "unexpected");
+				cf_dyn_buf_append_string(db, "(ctx-error)]");
 			}
 
 			cf_dyn_buf_append_string(db, ", ");
