@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
 
-scriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Count commits since the most recent start tag (x.y.z.w-start) only
+# Only for master or hotfix/* branches; otherwise return 1
 
 branch="$(git branch --show-current)"
 
-if [[ -z "$branch"  ]]; then
-     branch="$(git branch -r --contains HEAD | grep -v HEAD | \
-         sed -e 's/origin\///' -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')"
+# If detached HEAD, try to find branch from remote
+if [[ -z "$branch" ]]; then
+    branch="$(git branch -r --contains HEAD | grep -v HEAD | head -1 |
+        sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 fi
 
-buildType=$(<$scriptDir/../.STAGE)
+# Only calculate build number for master or hotfix/* branches
+if [[ "$branch" != "master" && ! "$branch" =~ ^hotfix/ ]]; then
+    echo "1"
+    exit 0
+fi
 
-if [[ ( "$branch" = 'master' || "$branch" =~ 'hotfix/' ) && "$buildType" = 'release' ]]; 
-then
-    buildNumber=$(( $(git rev-list --first-parent --count $(git log --first-parent -1 --pretty=%H -- $scriptDir/../.STAGE)..HEAD) + 1 ))
+# Most recent start tag (x.y.z.w-start) on first-parent history; --abbrev=0 gives tag name only
+start_tag=$(git describe --first-parent --tags --match "*.*.*.*-start" --abbrev=0 2>/dev/null) || start_tag=""
+
+# Count commits from start tag
+if [[ -n "$start_tag" ]]; then
+    build_number=$(git rev-list --first-parent --count "${start_tag}..HEAD")
 else
-    buildNumber=1
+    build_number=1
 fi
 
-echo $buildNumber
+echo "$build_number"

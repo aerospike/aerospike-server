@@ -1,27 +1,20 @@
 #!/usr/bin/env bash
 
-scriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Get current branch
+branch="$(git branch --show-current)"
 
-branch="$(git branch -r --contains HEAD | grep -v HEAD |
-    sed -e 's/origin\///' -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')"
-buildType=$(<$scriptDir/../.STAGE)
+# If detached HEAD, try to find branch from remote
+if [[ -z "$branch" ]]; then
+    branch="$(git branch -r --contains HEAD | grep -v HEAD | head -1 |
+        sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+fi
 
-if [[ ("$branch" = 'master' || "$branch" =~ 'hotfix/') && "$buildType" = 'release' ]]; then
+# For master or hotfix/* branches, use only x.y.z.w part
+if [[ "$branch" == "master" || "$branch" =~ ^hotfix/ ]]; then
     rev="$(git describe --tags --always --long | cut -d'-' -f1)"
 else
+    # Other branches, use full git describe
     rev="$(git describe --tags --always --abbrev=9)"
 fi
 
-subbuild=$(echo $rev | awk -F'-' '{print $2}')
-
-if [ "$subbuild" != "" ]; then
-    rev=$(echo $rev | awk -F'-' '{sb = $2; for (f = 3; f <= NF - 1; f++) {sb = sb"-"$f}; printf("%s-%s\n", $1, sb)}')
-fi
-
-arg="${1:-}"
-
-if [[ "$arg" = "stage" ]]; then
-    echo "$buildType"
-else
-    echo "$rev"
-fi
+echo "$rev"

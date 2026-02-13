@@ -80,7 +80,7 @@ endif
 	install -d $(OPT_AS)/bin
 	install -pm 755 $(DEPTH)/tools/memacct/asparsemem $(OPT_AS)/bin
 
-	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/deb/server-64 > $(BUILD_ROOT)/DEBIAN/control
+	sed 's/@VERSION@-1/'$(REV)'-'$(BUILD_NUMBER)'/g' < $(PKG)/deb/server-64 > $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@EDITION@/'$(EDITION)'/g' $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@ARCH@/'$(PKG_ARCH)'/g' $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@SIZE@/'$(SIZE)'/g' $(BUILD_ROOT)/DEBIAN/control

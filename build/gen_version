@@ -9,13 +9,21 @@ FIPS_SHA=$5
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 FEATURES=""
-BRANCH="$(git branch -r --contains HEAD | grep -v HEAD |
-    sed -e 's/origin\///' -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')"
-BUILD_TYPE=$(<$SCRIPT_DIR/../.STAGE)
 
-if [[ ("$BRANCH" = 'master' || "$BRANCH" =~ 'hotfix/') && "$BUILD_TYPE" = 'release' ]]; then
+# Get current branch
+BRANCH="$(git branch --show-current)"
+
+# If detached HEAD, try to find branch from remote
+if [[ -z "$BRANCH" ]]; then
+    BRANCH="$(git branch -r --contains HEAD | grep -v HEAD | head -1 |
+        sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+fi
+
+# For master or hotfix/* branches, use only x.y.z.w part
+if [[ "$BRANCH" == "master" || "$BRANCH" =~ ^hotfix/ ]]; then
     VERSION="$(git describe --tags --always --long | cut -d'-' -f1)"
 else
+    # Other branches, use full git describe
     VERSION="$(git describe --tags --always --abbrev=9)"
 fi
 
