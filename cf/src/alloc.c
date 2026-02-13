@@ -916,8 +916,28 @@ do_malloc_usable_size(void *p_indent)
 		return 0;
 	}
 
+	int32_t arena = hook_get_arena(p_indent);
+
+	if (! want_debug_free(arena)) {
+		return jem_sallocx(p_indent, 0);
+	}
+
 	const void *p = g_indent ? outdent(p_indent) : p_indent;
-	return jem_sallocx(p, 0);
+	size_t jem_sz = jem_sallocx(p, 0);
+
+	if (g_debug) {
+		const uint8_t *data = (uint8_t *)p + jem_sz - sizeof(uint32_t);
+		const uint32_t *data32 = (uint32_t *)data;
+		uint32_t val = (*data32 - 1) * MULT_INV;
+		uint32_t delta = val & 0xffff;
+		const uint8_t *mark = data - delta;
+
+		return (uintptr_t)mark - (uintptr_t)p_indent;
+	}
+
+	uintptr_t indent_sz = (uintptr_t)p_indent - (uintptr_t)p;
+
+	return jem_sz - indent_sz;
 }
 
 size_t
@@ -925,6 +945,17 @@ __attribute__ ((noinline))
 malloc_usable_size(void *p_indent)
 {
 	return do_malloc_usable_size(p_indent);
+}
+
+void *
+__attribute__ ((noinline))
+reallocarray(void *ptr, size_t nmemb, size_t size)
+{
+	cf_crash(CF_ALLOC, "reallocarray() not supported");
+	(void)ptr;
+	(void)nmemb;
+	(void)size;
+	return NULL;
 }
 
 static int32_t
