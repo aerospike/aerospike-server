@@ -376,6 +376,10 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 
 		sprintf(str->str, "<list#%u>", ele_count);
 
+		if (msgpack_sz_rep(mp, ele_count) == 0) {
+			return false;
+		}
+
 		return true;
 	}
 	case MSGPACK_TYPE_MAP: {
@@ -386,6 +390,10 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 		}
 
 		sprintf(str->str, "<map#%u>", ele_count);
+
+		if (msgpack_sz_rep(mp, ele_count * 2) == 0) {
+			return false;
+		}
 
 		return true;
 	}
