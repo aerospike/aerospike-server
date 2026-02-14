@@ -30,7 +30,6 @@ jobs:
       contents: read
     outputs:
       VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || steps.set_env.outputs.version }}
-      STAGE:   ${{ steps.set_env.outputs.stage }}
       COUNT:   ${{ steps.set_env.outputs.count }}
       RELEASE: ${{ steps.set_env.outputs.release }}
     steps:
@@ -50,11 +49,17 @@ jobs:
         run: |
           set -euo pipefail
           version=$(git describe --tags --always --abbrev=9)
-          stage=$(source build/version stage)
+          # Derive stage from branch (no .STAGE file): master/hotfix = release
+          branch=$(git branch --show-current)
+          [[ -z "$branch" ]] && branch=$(git branch -r --contains HEAD | grep -v HEAD | head -1 | sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          if [[ "$branch" == "master" || "$branch" =~ ^hotfix/ ]]; then
+            stage="release"
+          else
+            stage="dev"
+          fi
           count=$(source .github/bin/artifact_count.bash)
           release=$(source build/version)
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "stage=$stage"     >> "$GITHUB_OUTPUT"
           echo "count=$count"     >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
           if [[ "${{ github.event_name }}" == "push" && "$stage" == "release" ]]; then
@@ -68,7 +73,7 @@ jobs:
         github.repository_owner == 'citrusleaf' &&
         (
           github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'push' && needs.setup.outputs.STAGE == 'release')
+          github.event_name == 'push'
         )  
     runs-on: ubuntu-24.04
     env:
