@@ -947,17 +947,6 @@ malloc_usable_size(void *p_indent)
 	return do_malloc_usable_size(p_indent);
 }
 
-void *
-__attribute__ ((noinline))
-reallocarray(void *ptr, size_t nmemb, size_t size)
-{
-	cf_crash(CF_ALLOC, "reallocarray() not supported");
-	(void)ptr;
-	(void)nmemb;
-	(void)size;
-	return NULL;
-}
-
 static int32_t
 calc_alloc_flags(int32_t flags)
 {
@@ -1040,7 +1029,12 @@ static void *
 do_callocx(size_t n, size_t sz, const void *ra)
 {
 	int32_t flags = calc_alloc_flags(MALLOCX_ZERO);
-	size_t tot_sz = n * sz;
+	size_t tot_sz;
+
+	if (__builtin_mul_overflow(n, sz, &tot_sz)) {
+		errno = ENOMEM;
+		return NULL;
+	}
 
 	if (!want_debug_alloc()) {
 		return jem_mallocx(tot_sz == 0 ? 1 : tot_sz, flags);
@@ -1150,6 +1144,25 @@ realloc(void *p_indent, size_t sz)
 			sz);
 
 	return p2_indent;
+}
+
+void *
+__attribute__ ((noinline))
+reallocarray(void *ptr, size_t nmemb, size_t size)
+{
+	size_t total;
+
+	if (__builtin_mul_overflow(nmemb, size, &total)) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	void *p2_indent = do_rallocx(ptr, total, __builtin_return_address(0));
+
+	cf_assert(p2_indent != NULL || total == 0, CF_ALLOC, "reallocarray failed total %zu",  
+			total);
+
+	return p2_indent; 
 }
 
 static char *
