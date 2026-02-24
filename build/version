@@ -13,8 +13,14 @@ fi
 if [[ "$branch" == "master" || "$branch" =~ ^hotfix/ ]]; then
     rev="$(git describe --tags --always --long | cut -d'-' -f1)"
 else
-    # Other branches, use full git describe
-    rev="$(git describe --tags --always --abbrev=9)"
+    # Other branches: prefer describe from start tag (x.y.z.w-start); fall back to nearest tag (e.g. GA) if no -start tag
+    rev="$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)"
+    if [[ "$rev" != *-*-* ]]; then
+        rev="$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)"
+    fi
+    if [[ -z "$rev" ]]; then
+        rev="$(git rev-parse --short=9 HEAD)"
+    fi
 fi
 
 echo "$rev"

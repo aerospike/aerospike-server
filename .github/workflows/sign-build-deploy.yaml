@@ -44,28 +44,22 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: set env while artifacts being built
+      - name: set env 
         id: set_env
         run: |
           set -euo pipefail
-          version=$(git describe --tags --always --abbrev=9)
-          # Derive stage from branch (no .STAGE file): master/hotfix = release
-          branch=$(git branch --show-current)
-          [[ -z "$branch" ]] && branch=$(git branch -r --contains HEAD | grep -v HEAD | head -1 | sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-          if [[ "$branch" == "master" || "$branch" =~ ^hotfix/ ]]; then
-            stage="release"
-          else
-            stage="dev"
+          version=$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)
+          if [[ "$version" != *-*-* ]]; then
+            version=$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)
+          fi
+          if [[ -z "$version" ]]; then
+            version=$(git rev-parse --short=9 HEAD)
           fi
           count=$(source .github/bin/artifact_count.bash)
           release=$(source build/version)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "count=$count"     >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
-          if [[ "${{ github.event_name }}" == "push" && "$stage" == "release" ]]; then
-            echo "Waiting for artifacts to be built before pulling them... (30 minutes)"
-            sleep 1800 # 30 minutes
-          fi
 
   download-artifacts:
     needs: setup
@@ -76,6 +70,8 @@ jobs:
           github.event_name == 'push'
         )  
     runs-on: ubuntu-24.04
+    outputs:
+      PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
     env:
       VERSION: ${{ needs.setup.outputs.VERSION }}
       COUNT: ${{ needs.setup.outputs.COUNT }}
@@ -95,6 +91,12 @@ jobs:
       - name: Install GNU parallel
         run: sudo apt-get update && sudo apt-get install -y parallel
 
+      - name: Wait for builds to complete (30 min)
+        if: github.event_name == 'push'
+        run: |
+          echo "Waiting 30 minutes for builds to complete before downloading artifacts..."
+          sleep 1800
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4
         with:
@@ -102,20 +104,36 @@ jobs:
           role-session-name: aerospike-download-artifacts
           aws-region: us-west-1
 
+      # AWS credentials from Configure step above last ~4 hour. Keep retries within that window so token does not expire; use "Re-run failed jobs" in Actions UI for a fresh token if this step fails.
       - name: Download artifacts from QE server (retry until complete)
         uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08  # v3.0.2
         env:
           GH_EVENT: ${{ github.event_name }}
           S3_PATH: "s3://${{ env.S3_BUCKET }}/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ env.VERSION }}/build/"
         with:
-          timeout_minutes: 30
-          max_attempts: 60
+          timeout_minutes: 240
+          max_attempts: 120
           retry_on: error
-          retry_wait_seconds: 60
-          command: .github/bin/download_artifacts.bash
+          retry_wait_seconds: 120
+          command: bash .github/bin/download_artifacts.bash
 
       - name: List download files
         run: find build-artifacts
+
+      - name: Extract package version from artifacts
+        id: extract_package_version
+        run: |
+          set -euo pipefail
+          # Prefer .deb: use dpkg-deb to get exact Version
+          deb=$(find build-artifacts -maxdepth 1 -name '*.deb' -print -quit)
+          if [[ -n "$deb" ]]; then
+            pkg_version=$(dpkg-deb -f "$deb" Version)
+          else
+            echo "Missing debian packages."
+            exit 1  
+          fi
+          echo "package_version=$pkg_version" >> "$GITHUB_OUTPUT"
+          echo "Extracted PACKAGE_VERSION: $pkg_version"
 
       - name: Upload packaged Artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
@@ -131,7 +149,7 @@ jobs:
       - download-artifacts
     # always() needed because upstream jobs use always()
     if: ${{ always() && needs.setup.result == 'success' && needs.download-artifacts.result == 'success' }}
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v2.0.2
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.0.0
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
@@ -148,7 +166,7 @@ jobs:
       - sign-artifacts
     # always() needed because upstream jobs use always()
     if: ${{ always() && needs.sign-artifacts.result == 'success' }}
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v2.0.2
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.0.0
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -174,7 +192,7 @@ jobs:
       - upload-artifacts-to-jfrog
     # always() needed because upstream jobs use always()
     if: ${{ always() && needs.setup.result == 'success' && needs.download-artifacts.result == 'success' && needs.sign-artifacts.result == 'success' && needs.upload-artifacts-to-jfrog.result == 'success' }}
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v2.0.2
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.0.0
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -221,43 +239,21 @@ jobs:
             --sync=true \
             "${RELEASE_BUNDLE_NAME}" "${VERSION}" TEST
 
-  auto-retry:
-    needs:
-      - setup
-      - download-artifacts
-      - sign-artifacts
-      - upload-artifacts-to-jfrog
-    runs-on: ubuntu-24.04
-    if: >-
-      ${{ always() && 
-          needs.setup.result == 'success' && 
-          (needs.download-artifacts.result == 'failure' || 
-           needs.sign-artifacts.result == 'failure' || 
-           needs.upload-artifacts-to-jfrog.result == 'failure') && 
-          github.run_attempt < 3 }}
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
-        with:
-          egress-policy: audit
-
-      - name: Trigger rerun of failed jobs
-        run: |
-          echo "Rerunning failed jobs (attempt ${{ github.run_attempt }} of 3)..."
-          curl -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/rerun-failed-jobs"
+  # Note: Automatic re-run from within the same workflow run is not supported by GitHub
+  # (API returns 403 "This workflow is already running"). Use "Re-run failed jobs" from the
+  # Actions UI after the run completes, or rely on step-level retries (e.g. download-artifacts).
+  # auto-retry job removed to avoid 403 errors.
 
   notify-slack:
     needs:
       - setup
+      - download-artifacts
       - promote-to-test
     runs-on: ubuntu-24.04
     if: ${{ always() && needs.promote-to-test.result == 'success' }}
+    env:
+      VERSION: ${{ needs.setup.outputs.VERSION }}
+      PACKAGE_VERSION: ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
@@ -277,7 +273,7 @@ jobs:
           payload: |
             {
               "channel": "${{ secrets.QE_SLACK_CHANNEL }}",
-              "text": "[${{ steps.timestamp.outputs.time }}] Server build id ${{ needs.setup.outputs.VERSION }} with package version ${{ needs.setup.outputs.RELEASE }} promoted to JFrog TEST environment"
+              "text": "[${{ steps.timestamp.outputs.time }}] Server Build Id ${{ env.VERSION }} Package Version ${{ env.PACKAGE_VERSION }} promoted to JFrog TEST"
             }
 
       - name: Send Slack message to CORE
@@ -289,5 +285,5 @@ jobs:
           payload: |
             {
               "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
-              "text": "[${{ steps.timestamp.outputs.time }}] Server build id ${{ needs.setup.outputs.VERSION }} with package version ${{ needs.setup.outputs.RELEASE }} promoted to JFrog TEST environment"
+              "text": "[${{ steps.timestamp.outputs.time }}] Server Build Id ${{ env.VERSION }} Package Version ${{ env.PACKAGE_VERSION }} promoted to JFrog TEST"
             }
