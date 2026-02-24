@@ -1,0 +1,156 @@
+name: build-and-test
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    branches: [master]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    if: ${{ github.repository_owner == 'citrusleaf' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            distro: ubuntu
+          - os: ubuntu-24.04
+            distro: el9
+            container: registry.access.redhat.com/ubi9/ubi-minimal
+
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@df199fb7be9f65074067a9eb93f12bb4c5547cf2 # v2.13.3
+        with:
+          egress-policy: audit
+
+      - name: Fetch app token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Install prereqs
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.distro }}" in
+            ubuntu)
+              if ! command -v git >/dev/null; then
+                sudo apt-get update
+                sudo apt-get install -y git ca-certificates
+              fi
+              ;;
+            el9)
+              # UBI minimal may only have microdnf
+              command -v dnf >/dev/null || microdnf install -y dnf
+              dnf -y install git ca-certificates libyaml-devel
+              ;;
+          esac
+
+          git --version
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Checkout aerospike-server
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: citrusleaf/aerospike-server
+          submodules: true
+          path: aerospike-server
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install required packages
+        run: |
+          cd "$GITHUB_WORKSPACE/aerospike-server"
+          ./bin/install-dependencies.sh
+
+      - name: Checkout aerospike-server-enterprise (master then PR branch) + submodules via HTTPS
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+
+          repo="citrusleaf/aerospike-server-enterprise"
+          path="aerospike-server-enterprise"
+
+          git clone "https://x-access-token:${TOKEN}@github.com/${repo}.git" "${path}"
+          cd "${path}"
+
+          git fetch --prune origin +refs/heads/*:refs/remotes/origin/*
+
+          if [[ -n "${REF:-}" ]] && git show-ref --verify --quiet "refs/remotes/origin/${REF}"; then
+            git checkout "${REF}"
+            echo "Checked out branch '${REF}'"
+          else
+            echo "Using default branch 'master'"
+          fi
+
+          git submodule sync --recursive
+
+          # Force SSH-style GitHub submodule URLs to HTTPS + token (no reliance on global gitconfig)
+          git -c "url.https://x-access-token:${TOKEN}@github.com/.insteadOf=git@github.com:" \
+            -c "url.https://x-access-token:${TOKEN}@github.com/.insteadOf=ssh://git@github.com/" \
+            -c "url.https://x-access-token:${TOKEN}@github.com/.insteadOf=git://github.com/" \
+            submodule update --init --recursive
+
+      - name: Build and package
+        working-directory: aerospike-server
+        run: |
+          set -euo pipefail
+          target="${{ matrix.distro == 'ubuntu' && 'deb+ee' || 'rpm+ee' }}"
+          make EEREPO="$GITHUB_WORKSPACE/aerospike-server-enterprise" "${target}"
+
+      - name: Install Aerospike
+        run: |
+          set -euo pipefail
+          pkg_dir="$GITHUB_WORKSPACE/aerospike-server/pkg/packages"
+
+          if [[ "${{ matrix.distro }}" == "ubuntu" ]]; then
+            sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
+          else
+            dnf -y install "$(find "$pkg_dir" -name '*.rpm' -print -quit)"
+          fi
+
+      - name: Set the feature key env var
+        run: |
+          set -euo pipefail
+          FEATUREKEY_ENCODED="$(base64 < aerospike-server-enterprise/etc/features.conf | tr -d '\n')"
+          echo "FEATUREKEY=$FEATUREKEY_ENCODED" >> "$GITHUB_ENV"
+
+      - name: Start Aerospike server
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u)":"$(id -g)" /opt/aerospike/usr/udf/lua || true
+          /usr/bin/asd \
+            --config-file aerospike-server/as/etc/gh-action.conf \
+            --cold-start &
+
+      - name: Checkout C client repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: aerospike/aerospike-client-c
+          submodules: recursive
+          path: aerospike-client-c
+
+      - name: Build and run the client tests
+        working-directory: aerospike-client-c
+        run: |
+          set -euo pipefail
+          make
+          make test
+
