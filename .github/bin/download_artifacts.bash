@@ -15,34 +15,32 @@ set -euo pipefail
 echo "Starting artifact download attempt..."
 mkdir -p build-artifacts
 
-# Determine expected artifact count - manually triggerd
+# List S3 once (key is last field so we handle human-readable size e.g. "2.9 MiB")
+aws s3 ls "$S3_PATH" --recursive >/tmp/s3-listing.txt || true
+grep -E '\.(deb|rpm)$' /tmp/s3-listing.txt | awk '{print $NF}' | grep -v '^[[:space:]]*$' >/tmp/artifact-list.txt
+completed=$(wc -l </tmp/artifact-list.txt | tr -d ' ')
+completed=$((completed + 0))
+
+# Determine expected artifact count
 if [ "$GH_EVENT" = "workflow_dispatch" ]; then
-    files=$(aws s3 ls "$S3_PATH" --recursive | awk '{print $4}' | grep -E 'deb$|rpm$' || true)
-    if [ -z "$files" ]; then
+    expected=$completed
+    if [ "$expected" -le 0 ]; then
         echo "ERROR: No artifacts found for version ${VERSION}" >&2
         exit 1
     fi
-    echo "$files" >/tmp/artifact-list.txt
-    expected=$(wc -l </tmp/artifact-list.txt)
 else
-    # Triggered automatically via commit or PR to special branches.
     expected=${COUNT:-0}
 fi
-# Error out if nothing to expect
 if [ "$expected" -le 0 ]; then
     echo "ERROR: Expected artifact count is $expected" >&2
     exit 1
 fi
 
 echo "Expecting $expected artifacts"
-
-# Download all artifacts
-files=$(aws s3 ls "$S3_PATH" --recursive | awk '{print $4}' | grep -E 'deb$|rpm$' || true)
-echo "$files" >/tmp/artifact-list.txt
-completed=$(wc -l </tmp/artifact-list.txt)
+echo "Have $completed / $expected artifacts on S3"
 
 if [ "$completed" -lt "$expected" ]; then
-    echo "Have $completed / $expected artifacts — failing to retry"
+    echo "Completed $completed / $expected artifacts — failing to retry"
     exit 1
 fi
 
@@ -52,7 +50,7 @@ cat /tmp/artifact-list.txt | parallel --will-cite -j 0 \
 
 # Count downloaded files
 actual=$(find build-artifacts -type f | grep -E 'deb$|rpm$' | wc -l)
-echo "Have $actual / $expected artifacts"
+echo "Downloaded $actual / $expected artifacts"
 
 if [ "$actual" -ne "$expected" ]; then
     echo "Not all artifacts downloaded — failing this attempt"
