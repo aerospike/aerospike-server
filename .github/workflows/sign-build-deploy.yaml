@@ -198,7 +198,7 @@ jobs:
           egress-policy: audit
 
       - name: Setup JFrog CLI
-        uses: jfrog/setup-jfrog-cli@5b06f730cc5a6f55d78b30753f8583454b08c0aa # v4.8.1
+        uses: step-security/setup-jfrog-cli@a6b41f8338bea0983ddff6bd4ede7d2dcd81e1fa # v4.8.1
         env:
           JF_URL: ${{ env.JFROG_URL }}
           JF_PROJECT: ${{ env.JFROG_PROJECT }}
@@ -239,6 +239,11 @@ jobs:
       actions: write
       contents: read
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
       - name: Trigger rerun of failed jobs
         run: |
           echo "Rerunning failed jobs (attempt ${{ github.run_attempt }} of 3)..."
@@ -254,13 +259,18 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ always() && needs.promote-to-test.result == 'success' }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
       - name: Get current timestamp
         id: timestamp
         run: echo "time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
 
       - name: Send Slack message to QE
         continue-on-error: true
-        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d  # v2.0.0
+        uses: step-security/slack-github-action@77483a1a06c0ce2933c1f2f144fb5a85db7f3e80 # v2.1.1
         with:
           method: chat.postMessage
           token: ${{ secrets.QE_SLACK_BOT_TOKEN }}
@@ -272,7 +282,7 @@ jobs:
 
       - name: Send Slack message to CORE
         continue-on-error: true
-        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d  # v2.0.0
+        uses: step-security/slack-github-action@77483a1a06c0ce2933c1f2f144fb5a85db7f3e80 # v2.1.1
         with:
           method: chat.postMessage
           token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
