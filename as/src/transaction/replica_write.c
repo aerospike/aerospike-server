@@ -414,8 +414,8 @@ repl_write_handle_ack(cf_node node, msg* m)
 	}
 
 	// Success for all replicas.
-	rw->repl_write_cb(rw);
 	repl_write_send_confirmation(rw);
+	rw->repl_write_cb(rw);
 
 	rw->repl_write_complete = true;
 
