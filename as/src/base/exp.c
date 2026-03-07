@@ -1272,7 +1272,7 @@ bool
 as_exp_display(const as_exp* exp, cf_dyn_buf *db)
 {
 	if (exp == NULL) {
-		cf_warning(AS_EXP, "as_exp_display - could not parse expressions");
+		cf_warning(AS_EXP, "as_exp_display - exp is NULL");
 		return false;
 	}
 
@@ -3079,7 +3079,16 @@ parse_op_call(op_call* op, build_args* args)
 		op->vecs[0].buf_sz = mp->offset - offset_start;
 	}
 	else if (op_code == AS_CDT_OP_SELECT) {
-		if (msgpack_sz_rep(mp, ele_count - 1) == 0) {
+		uint64_t flags;
+
+		if (ele_count < 3 || ele_count > 4 ||
+				msgpack_peek_type(mp) != MSGPACK_TYPE_LIST || // ctx
+				msgpack_sz(mp) == 0 || ! msgpack_get_uint64(mp, &flags)) {
+			return false;
+		}
+
+		if (ele_count == 4 && (msgpack_peek_type(mp) != MSGPACK_TYPE_LIST ||
+				msgpack_sz(mp) == 0)) { // mod_exp
 			return false;
 		}
 
@@ -5818,18 +5827,20 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 			}
 
 			cf_dyn_buf_append_format(db, "%s(", cdt_exp_display_name(op_code));
-
-			if (! cdt_msgpack_ctx_to_dynbuf(&mp_ctx, db)) {
-				cf_dyn_buf_append_string(db, "(ctx-error)]");
-			}
-
+			cdt_msgpack_ctx_to_dynbuf(&mp_ctx, db);
 			cf_dyn_buf_append_string(db, ", ");
 		}
 		else if (op_code == AS_CDT_OP_SELECT) {
+			msgpack_in mp_ctx = mp;
+
 			cf_dyn_buf_append_format(db, "%s(", cdt_exp_display_name(op_code));
 
 			if (! cdt_msgpack_ctx_to_dynbuf(&mp, db)) {
-				cf_crash(AS_EXP, "unexpected");
+				mp = mp_ctx;
+
+				if (msgpack_sz(&mp) == 0) {
+					cf_crash(AS_EXP, "unexpected");
+				}
 			}
 
 			uint64_t flags;
@@ -5845,7 +5856,7 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 				cf_dyn_buf_append_format(db, ", 0x%x, <mod_exp/%u>, ", (uint32_t)flags, mod_exp_sz);
 			}
 			else {
-				cf_dyn_buf_append_format(db, "0x%x", (uint32_t)flags);
+				cf_dyn_buf_append_format(db, ", 0x%x, ", (uint32_t)flags);
 			}
 		}
 		else {

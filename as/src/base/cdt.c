@@ -2477,7 +2477,6 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 	}
 	else {
 		for (uint32_t i = 0; i < ele_count; i++) {
-		cf_detail(AS_PARTICLE, ":%*si %u", level * 2, "", i);
 			uint32_t key_off = sel->mp_in.offset;
 			uint32_t key_sz = msgpack_sz(&sel->mp_in);
 			uint32_t value_off = sel->mp_in.offset;
@@ -3072,6 +3071,7 @@ cdt_process_state_select(cdt_process_state *state, cdt_op_mem *com)
 	cf_detail(AS_PARTICLE, "cdt_process_state_select([n_levels=%u], %s%s)",
 			n_levels, cdt_select_type_display_names[type],
 			(flags_i64 & SELECT_NO_FAIL) == 0 ? "" : "|NO_FAIL");
+
 	if (CF_DETAIL <= g_most_verbose_levels[AS_PARTICLE]) {
 		for (uint32_t i = 0; i < n_levels; i++) {
 			switch (stack[i].ctx_type & 0x0f) {
@@ -3088,7 +3088,14 @@ cdt_process_state_select(cdt_process_state *state, cdt_op_mem *com)
 				cf_dyn_buf db;
 
 				cf_dyn_buf_init_heap(&db, 1024);
-				as_exp_display(stack[i].exp, &db);
+
+				if (stack[i].exp == NULL) {
+					cf_dyn_buf_append_string(&db, "true");
+				}
+				else {
+					as_exp_display(stack[i].exp, &db);
+				}
+
 				cf_detail(AS_PARTICLE, "stack[%u]: ctx_type=0x%x exp=%.*s",
 						i, stack[i].ctx_type, (int)db.used_sz, db.buf);
 				break;
@@ -7261,24 +7268,33 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in *mp, cf_dyn_buf *db)
 			[AS_CDT_CTX_EXP] = "exp"
 	};
 
+	cf_dyn_buf_append_string(db, "[");
+
 	uint32_t ele_count;
 
-	if (! msgpack_get_list_ele_count(mp, &ele_count) || (ele_count & 1) != 0) {
+	if (! msgpack_get_list_ele_count(mp, &ele_count)) {
+		cf_dyn_buf_append_string(db, "(ctx-error-list-hdr)]");
 		return false;
 	}
 
-	cf_dyn_buf_append_string(db, "[");
+	if ((ele_count & 1) != 0) {
+		cf_dyn_buf_append_format(db, "(ctx-error-list-ele-count %u)]", ele_count);
+		return false;
+	}
 
 	for (uint32_t i = 0; i < ele_count / 2; i++) {
 		int64_t ctx_type;
 
 		if (! msgpack_get_int64(mp, &ctx_type)) {
+			cf_dyn_buf_append_string(db, "(ctx-error-type-not-int)]");
 			return false;
 		}
 
 		uint8_t table_i = (uint8_t)ctx_type & AS_CDT_CTX_BASE_MASK;
 
 		if (table_i >= AS_CDT_MAX_CTX) {
+			cf_detail(AS_PARTICLE, "cdt_msgpack_ctx_to_dynbuf() invalid table_i %u ctx_type 0x%lx i %u ele_count %u", table_i, ctx_type, i, ele_count);
+			cf_dyn_buf_append_string(db, "(ctx-error-invalid-type)]");
 			return false;
 		}
 
@@ -7298,6 +7314,8 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in *mp, cf_dyn_buf *db)
 		msgpack_display_str s;
 
 		if (! msgpack_display(mp, &s)) {
+			cf_detail(AS_PARTICLE, "cdt_msgpack_ctx_to_dynbuf() invalid display");
+			cf_dyn_buf_append_string(db, "(ctx-error-display)]");
 			return false;
 		}
 
