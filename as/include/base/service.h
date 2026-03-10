@@ -59,7 +59,7 @@ typedef struct as_service_access_s {
 
 #define MAX_SERVICE_THREADS 4096
 #define MIN_PROTO_FD_MAX 1024
-#define MAX_PROTO_FD_MAX (2 * 1024 * 1024)
+#define MAX_PROTO_FD_MAX INT32_MAX
 
 
 //==========================================================
