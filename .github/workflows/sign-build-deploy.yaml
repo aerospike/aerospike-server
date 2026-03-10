@@ -166,7 +166,7 @@ jobs:
       - sign-artifacts
     # always() needed because upstream jobs use always()
     if: ${{ always() && needs.sign-artifacts.result == 'success' }}
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.0.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.1.1
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
