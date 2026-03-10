@@ -1,6 +1,13 @@
+# schedule.interval only affects version updates (e.g. "new release available").
+# Security update PRs are opened as soon as GitHub detects a vulnerability;
+# they are not gated by this schedule.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: daily
+      interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
