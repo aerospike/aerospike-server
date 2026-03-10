@@ -113,7 +113,8 @@ as_query_manager_start_job(as_query_job* _job)
 	cf_mutex_lock(&g_mgr.lock);
 
 	if (g_n_query_threads >= g_config.n_query_threads_limit) {
-		cf_warning(AS_QUERY, "at query threads limit - can't start new query");
+		cf_ticker_warning(AS_QUERY, "query-threads-limit %u reached - can't start new query",
+				g_config.n_query_threads_limit);
 		cf_mutex_unlock(&g_mgr.lock);
 		return AS_ERR_FORBIDDEN;
 	}
