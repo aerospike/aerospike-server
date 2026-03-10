@@ -933,16 +933,17 @@ cfg_set_service(const char* cmd)
 		g_config.proto_fd_idle_ms = (uint32_t)val;
 	}
 	else if (as_info_parameter_get(cmd, "proto-fd-max", v, &v_len) == 0) {
-		if (cf_str_atoi(v, &val) != 0 || val < MIN_PROTO_FD_MAX ||
+		uint32_t val; // this can be any value up to INT32_MAX
+		if (cf_str_atoi_u32(v, &val) != 0 || val < MIN_PROTO_FD_MAX ||
 				val > MAX_PROTO_FD_MAX) {
-			cf_warning(AS_INFO, "invalid proto-fd-max %d", val);
+			cf_warning(AS_INFO, "invalid proto-fd-max %u", val);
 			return false;
 		}
 		uint32_t prev_val = g_config.n_proto_fd_max;
-		if (! as_service_set_proto_fd_max((uint32_t)val)) {
+		if (! as_service_set_proto_fd_max(val)) {
 			return false;
 		}
-		cf_info(AS_INFO, "Changing value of proto-fd-max from %u to %d ",
+		cf_info(AS_INFO, "Changing value of proto-fd-max from %u to %u ",
 				prev_val, val);
 	}
 	else if (as_info_parameter_get(cmd, "query-max-done", v, &v_len) == 0) {
