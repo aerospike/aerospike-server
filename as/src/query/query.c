@@ -1793,7 +1793,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	result = as_query_manager_start_job(_job);
 
 	if (result != AS_OK) {
-		cf_warning(AS_QUERY, "basic query job %lu failed to start (%d)",
+		cf_detail(AS_QUERY, "basic query job %lu failed to start (%d)",
 				_job->trid, result);
 		conn_query_job_destroy(conn_job);
 		as_query_job_destroy(_job);
@@ -2395,7 +2395,7 @@ aggr_query_job_start(as_transaction* tr, as_namespace* ns)
 			_job->rps, conn_job->fd_timeout, _job->client);
 
 	if ((result = as_query_manager_start_job(_job)) != AS_OK) {
-		cf_warning(AS_QUERY, "aggregation query job %lu failed to start (%d)",
+		cf_detail(AS_QUERY, "aggregation query job %lu failed to start (%d)",
 				_job->trid, result);
 		conn_query_job_destroy((conn_query_job*)job);
 		as_query_job_destroy(_job);
@@ -2892,7 +2892,7 @@ udf_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 			_job->client);
 
 	if ((result = as_query_manager_start_job(_job)) != AS_OK) {
-		cf_warning(AS_QUERY, "udf-bg query job %lu failed to start (%d)",
+		cf_detail(AS_QUERY, "udf-bg query job %lu failed to start (%d)",
 				_job->trid, result);
 		as_query_job_destroy(_job);
 		return result;
@@ -3260,7 +3260,7 @@ ops_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 			_job->client);
 
 	if ((result = as_query_manager_start_job(_job)) != AS_OK) {
-		cf_warning(AS_QUERY, "ops-bg query job %lu failed to start (%d)",
+		cf_detail(AS_QUERY, "ops-bg query job %lu failed to start (%d)",
 				_job->trid, result);
 		as_query_job_destroy(_job);
 		return result;
