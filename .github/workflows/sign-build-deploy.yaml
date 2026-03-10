@@ -192,7 +192,7 @@ jobs:
       - upload-artifacts-to-jfrog
     # always() needed because upstream jobs use always()
     if: ${{ always() && needs.setup.result == 'success' && needs.download-artifacts.result == 'success' && needs.sign-artifacts.result == 'success' && needs.upload-artifacts-to-jfrog.result == 'success' }}
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.0.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.1.1
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
