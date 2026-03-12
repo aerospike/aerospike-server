@@ -268,7 +268,7 @@ jobs:
         run: |
           set -euo pipefail
           cd pkg/docker
-          ./docker-build.sh -t ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }} -d ubuntu -u ../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local --no-cache
+          ./docker-build.sh -t ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local --no-cache
       - name: Test Docker images
         run: |
           set -euo pipefail
@@ -278,7 +278,7 @@ jobs:
         run: |
           set -euo pipefail
           cd pkg/docker
-          ./docker-build.sh -p ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }} -d ubuntu -u ../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local -T ${{ steps.timestamp.outputs.time }}
+          ./docker-build.sh -p ${{ needs.download-artifacts.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local -T ${{ steps.timestamp.outputs.time }}
 
   promote-to-test:
     needs: [setup, create-release-bundle, docker-deploy]
