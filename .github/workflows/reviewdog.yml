@@ -70,13 +70,14 @@ jobs:
           cond: ${{ github.event_name == 'pull_request' }}
           if_true: "github-pr-review"
           if_false: "github-check"
-      - uses: step-security/action-shfmt@51a443602d45eee5f745ffcb026154a33431cbc9 # v1.0.4
+      - uses: reviewdog/action-shfmt@d8f080930b9be5847b4f97e9f4122b81a82aaeac # v1.0.4
         with:
-          reporter: ${{ steps.reporter.outputs.value }}
-          shfmt_flags: ''
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          shfmt_flags: '-i 2 -ci'
           level: warning
           filter_mode: file
-          fail_level: any
+          fail_on_error: true
+          reviewdog_flags: -reporter=${{ steps.reporter.outputs.value }}
 
   # hadolint:
   #   name: runner / hadolint
