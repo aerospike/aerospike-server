@@ -10,30 +10,46 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 FEATURES=""
 
-# Get current branch
-BRANCH="$(git branch --show-current)"
-
-# If detached HEAD, try to find branch from remote
-if [[ -z "$BRANCH" ]]; then
-    BRANCH="$(git branch -r --contains HEAD | grep -v HEAD | head -1 |
-        sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-fi
-
-# For master or hotfix/* branches, use only x.y.z.w part
-if [[ "$BRANCH" == "master" || "$BRANCH" =~ ^hotfix/ ]]; then
-    VERSION="$(git describe --tags --always --long | cut -d'-' -f1)"
+# Use VERSION file from build system if present
+if [[ -f /work/VERSION ]]; then
+    VERSION="$(cat /work/VERSION)"
+    # Extract SHA and ref from EVENT file if available
+    if [[ -f /work/EVENT ]]; then
+        CE_SHA="$(grep -o '"after":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
+        [[ -z "$CE_SHA" ]] && CE_SHA="$(grep -o '"sha":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
+        REF="$(grep -o '"ref":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
+        # For master or hotfix branches, trim version to x.y.z.w
+        if [[ "$REF" == "refs/heads/master" || "$REF" =~ refs/heads/hotfix/ ]]; then
+            VERSION="$(echo "$VERSION" | cut -d'-' -f1)"
+        fi
+    fi
+    [[ -z "$CE_SHA" ]] && CE_SHA="unknown"
 else
-    # Other branches: prefer describe from start tag (x.y.z.w-start); fall back to nearest tag (e.g. GA) if no -start tag
-    VERSION="$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)"
-    if [[ "$VERSION" != *-*-* ]]; then
-        VERSION="$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)"
-    fi
-    if [[ -z "$VERSION" ]]; then
-        VERSION="$(git rev-parse --short=9 HEAD)"
-    fi
-fi
+    # Get current branch
+    BRANCH="$(git branch --show-current)"
 
-CE_SHA="$(git rev-parse HEAD)"
+    # If detached HEAD, try to find branch from remote
+    if [[ -z "$BRANCH" ]]; then
+        BRANCH="$(git branch -r --contains HEAD | grep -v HEAD | head -1 |
+            sed -e 's/origin\///' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    fi
+
+    # For master or hotfix/* branches, use only x.y.z.w part
+    if [[ "$BRANCH" == "master" || "$BRANCH" =~ ^hotfix/ ]]; then
+        VERSION="$(git describe --tags --always --long | cut -d'-' -f1)"
+    else
+        # Other branches: prefer describe from start tag (x.y.z.w-start); fall back to nearest tag (e.g. GA) if no -start tag
+        VERSION="$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)"
+        if [[ "$VERSION" != *-*-* ]]; then
+            VERSION="$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)"
+        fi
+        if [[ -z "$VERSION" ]]; then
+            VERSION="$(git rev-parse --short=9 HEAD)"
+        fi
+    fi
+
+    CE_SHA="$(git rev-parse HEAD)"
+fi
 
 telemetry() {
     # Check if AEROSPIKE_TELEMETRY is set to FALSE, if so, user has opted out.
