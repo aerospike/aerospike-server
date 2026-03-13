@@ -2424,7 +2424,8 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 		}
 
 		if (count32 == 0) {
-			if (ele_count != 0 && msgpack_sz_rep(&sel->mp_in, ele_count) == 0) {
+			if (ele_count != 0 &&
+					msgpack_sz_rep(&sel->mp_in, ele_count * 2) == 0) {
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
