@@ -159,13 +159,13 @@ typedef struct list_mem_static_s {
 	uint8_t		ext_flags;
 } __attribute__ ((__packed__)) list_mem_static;
 
-#define STATIC_ENTRY(__flags) { \
+#define STATIC_ENTRY(_flags) { \
 	.type = AS_PARTICLE_TYPE_LIST, \
 	.sz = 4, \
 	.list_hdr = 0x91, \
 	.ext_hdr = 0xC7, \
 	.ext_sz = 0, \
-	.ext_flags = __flags \
+	.ext_flags = _flags \
 }
 
 typedef enum {
@@ -195,20 +195,20 @@ typedef struct {
 	uint8_t mem_temp[];
 } __attribute__ ((__packed__)) list_vla_offidx_cast;
 
-#define define_packed_list_op(__name, __list_p) \
-		packed_list_op __name; \
-		packed_list_op_init(&__name, __list_p)
+#define define_packed_list_op(_name, _list_p) \
+		packed_list_op _name; \
+		packed_list_op_init(&_name, _list_p)
 
-#define list_full_offidx_p(__list_p) \
-		((offset_index *)(list_is_ordered(__list_p) ? &(__list_p)->offidx : &(__list_p)->full_offidx))
+#define list_full_offidx_p(_list_p) \
+		((offset_index *)(list_is_ordered(_list_p) ? &(_list_p)->offidx : &(_list_p)->full_offidx))
 
-#define setup_list_must_have_full_offidx(__name, __list_p) \
-		uint8_t __name ## __vlatemp[sizeof(offset_index *) + offset_index_vla_sz(list_full_offidx_p(__list_p))]; \
-		list_vla_offidx_cast *__name = (list_vla_offidx_cast *)__name ## __vlatemp; \
-		__name->offidx = list_full_offidx_p(__list_p); \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = { \
-				offset_index_is_valid(__name->offidx) ? NULL : __name->offidx }; \
-		offset_index_alloc_temp(list_full_offidx_p(__list_p), __name->mem_temp, &__d ## __name)
+#define setup_list_must_have_full_offidx(_name, _list_p) \
+		uint8_t _name ## _vlatemp[sizeof(offset_index *) + offset_index_vla_sz(list_full_offidx_p(_list_p))]; \
+		list_vla_offidx_cast *_name = (list_vla_offidx_cast *)_name ## _vlatemp; \
+		_name->offidx = list_full_offidx_p(_list_p); \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = { \
+				offset_index_is_valid(_name->offidx) ? NULL : _name->offidx }; \
+		offset_index_alloc_temp(list_full_offidx_p(_list_p), _name->mem_temp, &_d ## _name)
 
 
 //==========================================================
@@ -1030,6 +1030,34 @@ list_buf_fill_offidx(uint8_t *buf, uint32_t buf_sz, offset_index *offidx)
 	}
 	else {
 		packed_list_partial_offidx_update(&list);
+	}
+
+	return true;
+}
+
+bool
+list_buf_init_allidx(const uint8_t *buf, uint32_t buf_sz, offset_index *offidx,
+		order_index *ordidx, rollback_alloc *alloc, uint8_t *flags_r)
+{
+	packed_list list;
+
+	if (! packed_list_init(&list, buf, buf_sz)) {
+		return false;
+	}
+
+	*offidx = list.full_offidx;
+	order_index_init(ordidx, NULL, list.ele_count);
+
+	uint32_t offidx_sz = (offset_index_size(offidx) + 7) & ~7;
+	uint8_t *idxmem = rollback_alloc_reserve(alloc,
+			offidx_sz + order_index_size(ordidx));
+
+	offset_index_set_ptr(offidx, idxmem, offidx->contents);
+	offset_index_set_filled(offidx, 1);
+	order_index_set_ptr(ordidx, idxmem + offidx_sz);
+
+	if (flags_r != NULL) {
+		*flags_r = list.ext_flags;
 	}
 
 	return true;

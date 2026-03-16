@@ -145,9 +145,11 @@ typedef struct cf_log_sink_s cf_log_sink;
 // e.g.
 // COMPILER_ASSERT(sizeof(my_int_array) / sizeof(int) == MY_INT_ARRAY_SIZE);
 //
-#define CGLUE(a, b) a##b
-#define CVERIFY(expr, c) typedef char CGLUE(assert_failed_, c)[(expr) ? 1 : -1]
-#define COMPILER_ASSERT(expr) CVERIFY(expr, __COUNTER__)
+#ifdef __cplusplus
+#define COMPILER_ASSERT(expr) static_assert(expr, #expr)
+#else
+#define COMPILER_ASSERT(expr) _Static_assert(expr, #expr)
+#endif
 
 // Use ARRAY_ASSERT() as a shortcut of above example.
 #define ARRAY_ASSERT(array, count) \

@@ -555,10 +555,14 @@ typedef enum {
 
 typedef enum {
 	AS_CDT_CTX_INDEX = 0,
-	AS_CDT_CTX_RANK  = 1,
-	AS_CDT_CTX_KEY   = 2,
+	AS_CDT_CTX_RANK = 1,
+	AS_CDT_CTX_KEY = 2,
 	AS_CDT_CTX_VALUE = 3,
-	AS_CDT_CTX_EXP   = 4,
+	AS_CDT_CTX_EXP = 4,
+	AS_CDT_CTX_INDEX_LIST = 8, // TODO - TBD
+	AS_CDT_CTX_RANK_LIST = 9, // TODO - TBD
+	AS_CDT_CTX_KEY_LIST = 10,
+	AS_CDT_CTX_VALUE_LIST = 11, // TODO - future release
 	AS_CDT_MAX_CTX
 } as_cdt_subcontext;
 
@@ -566,6 +570,7 @@ typedef enum {
 #define AS_CDT_CTX_MAP 0x20
 
 #define AS_CDT_CTX_BASE_MASK 0x0f
+#define AS_CDT_CTX_CDT_TYPE_MASK 0x30
 #define AS_CDT_CTX_TYPE_MASK 0x3f
 #define AS_CDT_CTX_CREATE_MASK 0x1c0
 
@@ -578,6 +583,7 @@ typedef enum {
 #define AS_CDT_CTX_CREATE_MAP_KV_ORDERED 0xc0
 
 #define AS_CDT_CTX_CREATE_PERSIST_INDEX 0x100
+#define AS_CDT_CTX_AND 0x200
 
 typedef enum {
 	// List operations.

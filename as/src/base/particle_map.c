@@ -34,6 +34,7 @@
 #include "citrusleaf/cf_byte_order.h"
 
 #include "bits.h"
+#include "enhanced_alloc.h"
 #include "log.h"
 #include "msgpack_in.h"
 
@@ -189,13 +190,13 @@ typedef struct map_mem_static_s {
 	uint8_t		nil;
 } __attribute__ ((__packed__)) map_mem_static;
 
-#define STATIC_ENTRY(__flags) { \
+#define STATIC_ENTRY(_flags) { \
 		.type = AS_PARTICLE_TYPE_MAP, \
 		.sz = 5, \
 		.map_hdr = 0x81, \
 		.ext_hdr = 0xC7, \
 		.ext_sz = 0, \
-		.ext_flags = (__flags), \
+		.ext_flags = (_flags), \
 		.nil = 0xC0 \
 }
 
@@ -272,35 +273,35 @@ typedef struct {
 	uint8_t mem_temp[];
 } __attribute__ ((__packed__)) map_vla_offord_cast;
 
-#define setup_map_must_have_offidx(__name, __map_p) \
-		uint8_t __name ## __vlatemp[sizeof(offset_index *) + offset_index_vla_sz(&(__map_p)->offidx)]; \
-		map_vla_offidx_cast *__name = (map_vla_offidx_cast *)__name ## __vlatemp; \
-		__name->offidx = (offset_index *)&(__map_p)->offidx; \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = { \
-				offset_index_is_valid(__name->offidx) ? NULL : __name->offidx }; \
-		offset_index_alloc_temp(__name->offidx, __name->mem_temp, &__d ## __name)
+#define setup_map_must_have_offidx(_name, _map_p) \
+		uint8_t _name ## _vlatemp[sizeof(offset_index *) + offset_index_vla_sz(&(_map_p)->offidx)]; \
+		map_vla_offidx_cast *_name = (map_vla_offidx_cast *)_name ## _vlatemp; \
+		_name->offidx = (offset_index *)&(_map_p)->offidx; \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = { \
+				offset_index_is_valid(_name->offidx) ? NULL : _name->offidx }; \
+		offset_index_alloc_temp(_name->offidx, _name->mem_temp, &_d ## _name)
 
-#define setup_map_must_have_all_idx(__name, __map_p) \
-		uint8_t __name ## __vlatemp[sizeof(offset_index *) + sizeof(order_index *) + map_allidx_vla_sz(__map_p)]; \
-		map_vla_offord_cast *__name = (map_vla_offord_cast *)__name ## __vlatemp; \
-		__name->offidx = (offset_index *)&(__map_p)->offidx; \
-		__name->ordidx = (order_index *)&(__map_p)->ordidx; \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = {0}; \
-		map_allidx_alloc_temp(__map_p, __name->mem_temp, &__d ## __name)
+#define setup_map_must_have_all_idx(_name, _map_p) \
+		uint8_t _name ## _vlatemp[sizeof(offset_index *) + sizeof(order_index *) + map_allidx_vla_sz(_map_p)]; \
+		map_vla_offord_cast *_name = (map_vla_offord_cast *)_name ## _vlatemp; \
+		_name->offidx = (offset_index *)&(_map_p)->offidx; \
+		_name->ordidx = (order_index *)&(_map_p)->ordidx; \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = {0}; \
+		map_allidx_alloc_temp(_map_p, _name->mem_temp, &_d ## _name)
 
-#define define_map_msgpack_in(__name, __map_ptr) \
-		msgpack_in __name = { \
-				.buf = (__map_ptr)->contents, \
-				.buf_sz = (__map_ptr)->content_sz \
+#define define_map_msgpack_in(_name, _map_ptr) \
+		msgpack_in _name = { \
+				.buf = (_map_ptr)->contents, \
+				.buf_sz = (_map_ptr)->content_sz \
 		}
 
-#define define_packed_map_op(__name, __map_ptr) \
-		packed_map_op __name; \
-		packed_map_op_init(&__name, __map_ptr)
+#define define_packed_map_op(_name, _map_ptr) \
+		packed_map_op _name; \
+		packed_map_op_init(&_name, _map_ptr)
 
-#define define_map_packer(__name, __ele_count, __flags, __content_sz) \
-		map_packer __name; \
-		map_packer_init(&__name, __ele_count, __flags, __content_sz)
+#define define_map_packer(_name, _ele_count, _flags, _content_sz) \
+		map_packer _name; \
+		map_packer_init(&_name, _ele_count, _flags, _content_sz)
 
 
 //==========================================================
@@ -1355,6 +1356,81 @@ map_buf_adjust_ordidx(uint8_t *buf, uint32_t buf_sz, const uint8_t *old,
 
 		prev = mp;
 	}
+
+	return true;
+}
+
+bool
+map_buf_get_all_k_or_v(const uint8_t *buf, uint32_t buf_sz, cdt_result_data *rd)
+{
+	msgpack_in mp = {
+			.buf = buf,
+			.buf_sz = buf_sz
+	};
+
+	uint32_t ele_count;
+
+	if (! msgpack_get_map_ele_count(&mp, &ele_count)) {
+		return false;
+	}
+
+	if (ele_count != 0 && msgpack_peek_is_ext(&mp)) {
+		msgpack_ext ext;
+
+		if (! msgpack_get_ext(&mp, &ext) || msgpack_sz(&mp) == 0) {
+			return false;
+		}
+
+		ele_count--;
+	}
+
+	uint32_t content_sz = buf_sz - mp.offset;
+
+	if (ele_count > content_sz) { // underflow check
+		return false;
+	}
+
+	uint32_t max_select_sz = content_sz - ele_count;
+	define_list_builder(builder, rd->alloc, ele_count, max_select_sz);
+
+	if (ele_count == 0) {
+		cdt_container_builder_set_result(&builder, rd);
+		return true;
+	}
+
+	if (rd->type == RESULT_TYPE_VALUE) {
+		if (msgpack_sz(&mp) == 0) {
+			return false;
+		}
+	}
+
+	for (uint32_t i = 1; i < ele_count; i++) {
+		uint32_t ele_off = mp.offset;
+		uint32_t ele_sz = msgpack_sz(&mp);
+
+		if (ele_sz == 0) {
+			return false;
+		}
+
+		cdt_container_builder_add(&builder, mp.buf + ele_off, ele_sz);
+
+		if (msgpack_sz(&mp) == 0) {
+			return false;
+		}
+	}
+
+	if (ele_count != 0) {
+		uint32_t ele_off = mp.offset;
+		uint32_t ele_sz = msgpack_sz(&mp);
+
+		if (ele_sz == 0) {
+			return false;
+		}
+
+		cdt_container_builder_add(&builder, mp.buf + ele_off, ele_sz);
+	}
+
+	cdt_container_builder_set_result(&builder, rd);
 
 	return true;
 }

@@ -55,12 +55,16 @@ typedef struct rollback_alloc_s {
 	void *malloc_list[];
 } rollback_alloc;
 
-#define define_rollback_alloc(__name, __alloc_buf, __rollback_size) \
-		uint8_t __name ## __mem[sizeof(rollback_alloc) + sizeof(void *) * (__alloc_buf ? 0 : __rollback_size)]; \
-		rollback_alloc * const __name = (rollback_alloc *)__name ## __mem; \
-		__name->ll_buf = __alloc_buf; \
-		__name->malloc_list_sz = 0; \
-		__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size);
+#define define_rollback_alloc(_name, _alloc_buf, _rollback_size) \
+		uint8_t _name ## _mem[sizeof(rollback_alloc) + sizeof(void *) * (_alloc_buf ? 0 : _rollback_size)]; \
+		rollback_alloc * const _name = (rollback_alloc *)_name ## _mem; \
+		_name->ll_buf = _alloc_buf; \
+		_name->malloc_list_sz = 0; \
+		_name->malloc_list_cap = (_alloc_buf ? 0 : _rollback_size)
+
+#define DEFER_ROLLBACK_ALLOC(_name) \
+		DEFER_ATTR(_defer_rollback_alloc_internal) \
+		rollback_alloc * const DEFER_GLUE(_defer_rollback_alloc_, __LINE__) = (_name)
 
 typedef struct cdt_process_state_s {
 	as_cdt_optype type;
@@ -261,58 +265,62 @@ typedef struct {
 typedef bool (*list_foreach_callback)(msgpack_in *element, void *udata);
 typedef bool (*map_foreach_callback)(msgpack_in *key, msgpack_in *value, void *udata);
 
-#define define_offset_index(__name, __contents, __content_sz, __ele_count) \
-		offset_index __name; \
-		offset_index_init(&__name, NULL, __ele_count, __contents, __content_sz); \
-		uint8_t __name ## __vlatemp[1 + offset_index_vla_sz(&__name)]; \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = { &__name }; \
-		offset_index_alloc_temp(&__name, __name ## __vlatemp, &__d ## __name)
+#define define_offset_index(_name, _contents, _content_sz, _ele_count) \
+		offset_index _name; \
+		offset_index_init(&_name, NULL, _ele_count, _contents, _content_sz); \
+		uint8_t _name ## _vlatemp[1 + offset_index_vla_sz(&_name)]; \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = { &_name }; \
+		offset_index_alloc_temp(&_name, _name ## _vlatemp, &_d ## _name)
 
-// NULL if !__cond
-#define definep_cond_order_index2(__name, __max_idx, __alloc_count, __cond) \
-		uint8_t __name ## __vlatemp[(__cond) ? sizeof(order_index) + cdt_vla_sz(order_index_calc_size(__max_idx, __alloc_count)) : 1]; \
-		cdt_vla_ordidx_cast *__name ## _cast = (cdt_vla_ordidx_cast *)__name ## __vlatemp; \
-		order_index *__name = NULL; \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = { \
-				.ordidx = __cond ? &__name ## _cast->ordidx : NULL }; \
-		if (__cond) { \
-			__name = &__name ## _cast->ordidx; \
-			order_index_init2_temp(__name, __name ## __vlatemp + sizeof(order_index), &__d ## __name, __max_idx, __alloc_count); \
+// NULL if !_cond
+#define definep_cond_order_index2(_name, _max_idx, _alloc_count, _cond) \
+		uint8_t _name ## _vlatemp[(_cond) ? sizeof(order_index) + cdt_vla_sz(order_index_calc_size(_max_idx, _alloc_count)) : 1]; \
+		cdt_vla_ordidx_cast *_name ## _cast = (cdt_vla_ordidx_cast *)_name ## _vlatemp; \
+		order_index *_name = NULL; \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = { \
+				.ordidx = _cond ? &_name ## _cast->ordidx : NULL }; \
+		if (_cond) { \
+			_name = &_name ## _cast->ordidx; \
+			order_index_init2_temp(_name, _name ## _vlatemp + sizeof(order_index), &_d ## _name, _max_idx, _alloc_count); \
 		}
 
-#define define_order_index(__name, __ele_count) \
-		order_index __name; \
-		uint8_t __name ## __vlatemp[1 + cdt_vla_sz(order_index_calc_size(__ele_count, __ele_count))]; \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = { .ordidx = &__name }; \
-		order_index_init2_temp(&__name, __name ## __vlatemp, &__d ## __name, __ele_count, __ele_count)
+#define define_order_index(_name, _ele_count) \
+		order_index _name; \
+		uint8_t _name ## _vlatemp[1 + cdt_vla_sz(order_index_calc_size(_ele_count, _ele_count))]; \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = { .ordidx = &_name }; \
+		order_index_init2_temp(&_name, _name ## _vlatemp, &_d ## _name, _ele_count, _ele_count)
 
-#define define_order_index2(__name, __max_idx, __alloc_count) \
-		order_index __name; \
-		uint8_t __name ## __vlatemp[1 + cdt_vla_sz(order_index_calc_size(__max_idx, __alloc_count))]; \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = { .ordidx = &__name }; \
-		order_index_init2_temp(&__name, __name ## __vlatemp, &__d ## __name, __max_idx, __alloc_count)
+#define define_order_index2(_name, _max_idx, _alloc_count) \
+		order_index _name; \
+		uint8_t _name ## _vlatemp[1 + cdt_vla_sz(order_index_calc_size(_max_idx, _alloc_count))]; \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = { .ordidx = &_name }; \
+		order_index_init2_temp(&_name, _name ## _vlatemp, &_d ## _name, _max_idx, _alloc_count)
 
-#define define_int_list_builder(__name, __alloc, __count) \
-		cdt_container_builder __name; \
-		cdt_int_list_builder_start(&__name, __alloc, __count)
+#define define_int_list_builder(_name, _alloc, _count) \
+		cdt_container_builder _name; \
+		cdt_int_list_builder_start(&_name, _alloc, _count)
 
-#define define_cdt_idx_mask(__name, __ele_count, __alloc) \
-		uint64_t __name ## __vla[cdt_idx_vla_mask_count(__ele_count)]; \
-		uint64_t *__name = __name ## __vla; \
-		cdt_idx_mask_init_temp(&__name, __ele_count, __alloc)
+#define define_list_builder(_name, _alloc, _ele_count, _max_sz) \
+		cdt_container_builder _name; \
+		cdt_list_builder_start(&_name, _alloc, _ele_count, _max_sz)
 
-#define define_cond_cdt_idx_mask(__name, __ele_count, __cond, __alloc) \
-		uint64_t __name ## __vla[__cond ? cdt_idx_vla_mask_count(__ele_count) : 1]; \
-		uint64_t *__name = __name ## __vla; \
-		if (__cond) { \
-			cdt_idx_mask_init_temp(&__name, __ele_count, __alloc); \
+#define define_cdt_idx_mask(_name, _ele_count, _alloc) \
+		uint64_t _name ## _vla[cdt_idx_vla_mask_count(_ele_count)]; \
+		uint64_t *_name = _name ## _vla; \
+		cdt_idx_mask_init_temp(&_name, _ele_count, _alloc)
+
+#define define_cond_cdt_idx_mask(_name, _ele_count, _cond, _alloc) \
+		uint64_t _name ## _vla[_cond ? cdt_idx_vla_mask_count(_ele_count) : 1]; \
+		uint64_t *_name = _name ## _vla; \
+		if (_cond) { \
+			cdt_idx_mask_init_temp(&_name, _ele_count, _alloc); \
 		}
 
-#define define_build_order_heap_by_range(__name, __idx, __count, __ele_count, __udata, __cmp_fn, __success, __alloc) \
-		order_heap __name; \
-		uint8_t __name ## __vlatemp[1 + cdt_vla_sz(order_index_calc_size(__ele_count, __ele_count))]; \
-		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t __d ## __name = { .ordidx = &__name._ }; \
-		bool __name ## _success = order_heap_init_build_by_range_temp(&__name, __name ## __vlatemp, &__d ## __name, __idx, __count, __ele_count, __cmp_fn, __udata)
+#define define_build_order_heap_by_range(_name, _idx, _count, _ele_count, _udata, _cmp_fn, _success, _alloc) \
+		order_heap _name; \
+		uint8_t _name ## _vlatemp[1 + cdt_vla_sz(order_index_calc_size(_ele_count, _ele_count))]; \
+		DEFER_ATTR(cdt_idx_defer_renull_free_fn) cdt_idx_defer_t _d ## _name = { .ordidx = &_name._ }; \
+		bool _name ## _ ## _success = order_heap_init_build_by_range_temp(&_name, _name ## _vlatemp, &_d ## _name, _idx, _count, _ele_count, _cmp_fn, _udata)
 
 #define VA_NARGS_SEQ 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 #define VA_NARGS_EXTRACT_N(_9, _8, _7, _6, _5, _4, _3, _2, _1, _0, N, ...) N
@@ -517,6 +525,7 @@ void cdt_idx_mask_print(const uint64_t *mask, uint32_t ele_count, const char *na
 // list
 bool list_buf_check_and_order(uint8_t *buf, uint32_t buf_sz);
 bool list_buf_fill_offidx(uint8_t *buf, uint32_t buf_sz, offset_index *offidx);
+bool list_buf_init_allidx(const uint8_t *buf, uint32_t buf_sz, offset_index *offidx, order_index *ordidx, rollback_alloc *alloc, uint8_t *flags_r);
 
 uint32_t list_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz);
 void list_partial_offset_index_init(offset_index *offidx, uint8_t *idx_mem_ptr, uint32_t ele_count, const uint8_t *contents, uint32_t content_sz);
@@ -540,6 +549,7 @@ uint8_t list_get_ext_flags(bool is_ordered, bool is_persist);
 bool map_is_key(const uint8_t *buf, uint32_t buf_sz);
 bool map_buf_fill_offidx(uint8_t *buf, uint32_t buf_sz, offset_index *offidx, order_index *ordidx);
 bool map_buf_adjust_ordidx(uint8_t *buf, uint32_t buf_sz, const uint8_t *old, uint32_t old_sz);
+bool map_buf_get_all_k_or_v(const uint8_t *buf, uint32_t buf_sz, cdt_result_data *rd);
 
 uint32_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_sz);
 
@@ -781,4 +791,11 @@ cdt_hdr_delta_sz(uint32_t ele_count, int32_t delta_count)
 {
 	return as_pack_list_header_get_size(ele_count + delta_count) -
 			as_pack_list_header_get_size(ele_count);
+}
+
+static inline void
+_defer_rollback_alloc_internal(rollback_alloc * const *p)
+{
+	rollback_alloc *alloc = *p;
+	rollback_alloc_rollback(alloc);
 }

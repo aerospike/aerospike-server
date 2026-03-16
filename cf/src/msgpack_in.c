@@ -1,7 +1,7 @@
 /*
  * msgpack_in.c
  *
- * Copyright (C) 2019-2022 Aerospike, Inc.
+ * Copyright (C) 2019-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -83,22 +83,22 @@ static inline msgpack_cmp_type msgpack_cmp_internal(parse_meta *meta0, parse_met
 // Inlines & macros.
 //
 
-#define MSGPACK_CMP_RETURN(__p0, __p1) \
-	if ((__p0) > (__p1)) { \
+#define MSGPACK_CMP_RETURN(_p0, _p1) \
+	if ((_p0) > (_p1)) { \
 		return MSGPACK_CMP_GREATER; \
 	} \
-	else if ((__p0) < (__p1)) { \
+	else if ((_p0) < (_p1)) { \
 		return MSGPACK_CMP_LESS; \
 	}
 
-#define SZ_PARSE_BUF_CHECK(__buf, __end, __sz) \
-	if ((__buf) + (__sz) > (__end)) { \
+#define SZ_PARSE_BUF_CHECK(_buf, _end, _sz) \
+	if ((_buf) + (_sz) > (_end)) { \
 		return NULL; \
 	}
 
-#define CMP_PARSE_BUF_CHECK(__m, __sz) \
-	if ((__m)->buf + (__sz) > (__m)->end) { \
-		(__m)->buf = NULL; \
+#define CMP_PARSE_BUF_CHECK(_m, _sz) \
+	if ((_m)->buf + (_sz) > (_m)->end) { \
+		(_m)->buf = NULL; \
 		return; \
 	}
 
@@ -133,7 +133,12 @@ msgpack_sz_vec(msgpack_in_vec *mv)
 	if (buf > end) {
 		mv->vecs[i].offset = mv->vecs[i].buf_sz;
 		i++;
-		mv->vecs[i].offset += (uint32_t)(buf - end);
+
+		if (i == mv->n_vecs) {
+			return 0;
+		}
+
+		mv->vecs[i].offset = (uint32_t)(buf - end);
 
 		if (mv->vecs[i].offset > mv->vecs[i].buf_sz) {
 			return 0;

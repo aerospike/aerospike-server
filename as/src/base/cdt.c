@@ -69,6 +69,8 @@ typedef struct {
 		int64_t index;
 	};
 
+	as_exp *and_exp;
+	bool has_and; // already folded AND into entry
 	uint32_t hdr_offset;
 	uint32_t ele_count;
 	uint32_t ctx_type;
@@ -431,7 +433,7 @@ static bool include_list_entry(select_ctx *sel, select_stack_entry *entry, uint3
 static bool cdt_select_list(select_ctx *sel, uint32_t level);
 static bool cdt_select_map(select_ctx *sel, uint32_t level);
 static bool cdt_select_level(select_ctx *sel, uint32_t level);
-static int select_stack_init(select_stack_entry *stack, uint32_t n, msgpack_in_vec *mv);
+static int select_stack_init(select_stack_entry *stack, uint32_t *n, msgpack_in_vec *mv);
 static void select_stack_destroy(select_stack_entry *sel, uint32_t n);
 static void cdt_select_destroy_stack(select_ctx *sel);
 
@@ -2107,15 +2109,15 @@ cdt_select_list(select_ctx *sel, uint32_t level)
 		sel->out.offset++; // guess a header size of 1, adjust later if greater
 	}
 
-	uint8_t cdt_type = entry->ctx_type & 0xf0;
+	uint8_t cdt_type = entry->ctx_type & AS_CDT_CTX_CDT_TYPE_MASK;
 
-	if (cdt_type != 0 && cdt_type != 0x10) {
+	if (cdt_type != 0 && cdt_type != AS_CDT_CTX_LIST) {
 		cf_warning(AS_PARTICLE, "cdt_select_list() invalid ctx_type 0x%u", entry->ctx_type);
 		sel->ret_code = -AS_ERR_PARAMETER;
 		return false;
 	}
 
-	uint8_t by_type = entry->ctx_type & 0x0f;
+	uint8_t by_type = entry->ctx_type & AS_CDT_CTX_BASE_MASK;
 
 	if (by_type == AS_CDT_CTX_INDEX) {
 		uint32_t idx;
@@ -2138,12 +2140,30 @@ cdt_select_list(select_ctx *sel, uint32_t level)
 				return false;
 			}
 
-			if (! include_list_entry(sel, entry, level, vars_bi_table, idx)) {
-				return false;
+			as_exp_trilean tri = AS_EXP_TRUE;
+
+			if (entry->and_exp != NULL) {
+				mp_value.offset = sel->mp_in.offset;
+				pk.offset = 0;
+				as_pack_uint64(&pk, idx);
+				mp_index.offset = 0;
+				sel->exp_ctx.vars_table = vars_bi_table;
+				tri = as_exp_matches_metadata(entry->and_exp, &sel->exp_ctx);
 			}
 
-			if (ele_count - idx > 1 &&
-					msgpack_sz_rep(&sel->mp_in, ele_count - idx - 1) == 0) {
+			if (tri == AS_EXP_TRUE) {
+				if (! include_list_entry(sel, entry, level,	vars_bi_table,
+						idx)) {
+					return false;
+				}
+
+				if (ele_count - idx > 1 &&
+						msgpack_sz_rep(&sel->mp_in, ele_count - idx - 1) == 0) {
+					sel->ret_code = -AS_ERR_UNKNOWN;
+					return false;
+				}
+			}
+			else if (msgpack_sz_rep(&sel->mp_in, ele_count - idx) == 0) {
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
 			}
@@ -2195,7 +2215,18 @@ cdt_select_list(select_ctx *sel, uint32_t level)
 			mp_value.offset = off;
 			rollback_alloc_rollback(alloc);
 
-			if (! include_list_entry(sel, entry, level, vars_bi_table, idx)) {
+			as_exp_trilean tri = AS_EXP_TRUE;
+
+			if (entry->and_exp != NULL) {
+				pk.offset = 0;
+				as_pack_uint64(&pk, idx);
+				mp_index.offset = 0;
+				sel->exp_ctx.vars_table = vars_bi_table;
+				tri = as_exp_matches_metadata(entry->and_exp, &sel->exp_ctx);
+			}
+
+			if (tri == AS_EXP_TRUE && ! include_list_entry(
+					sel, entry, level, vars_bi_table, idx)) {
 				return false;
 			}
 
@@ -2244,6 +2275,14 @@ cdt_select_list(select_ctx *sel, uint32_t level)
 			}
 			else {
 				tri = AS_EXP_UNK;
+			}
+
+			if (tri == AS_EXP_TRUE && entry->and_exp != NULL) {
+				pk.offset = 0;
+				as_pack_uint64(&pk, i);
+				mp_index.offset = 0;
+				sel->exp_ctx.vars_table = vars_bi_table;
+				tri = as_exp_matches_metadata(entry->and_exp, &sel->exp_ctx);
 			}
 
 			if (tri == AS_EXP_UNK) {
@@ -2411,7 +2450,6 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 		sel->out.offset++; // guess a header size of 1, adjust later if greater
 	}
 
-	bool key_found = false;
 	uint8_t by_type = entry->ctx_type & 0x0f;
 
 	if (by_type == AS_CDT_CTX_INDEX || by_type == AS_CDT_CTX_RANK) {
@@ -2435,6 +2473,7 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 			offset_index offidx;
 			uint32_t start_off = sel->mp_in.offset;
 
+			DEFER_ROLLBACK_ALLOC(alloc);
 			offset_index_ensure_from_ext_mp(&offidx, ele_count, &ext,
 					&sel->mp_in, true, alloc);
 
@@ -2467,9 +2506,16 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 			cf_assert(sz != 0, AS_PARTICLE, "invalid msgpack");
 
 			mp_value.offset = sel->mp_in.offset;
-			rollback_alloc_rollback(alloc);
 
-			if (! include_map_entry(sel, entry, level, vars_bi_table)) {
+			as_exp_trilean tri = AS_EXP_TRUE;
+
+			if (entry->and_exp != NULL) {
+				sel->exp_ctx.vars_table = vars_bi_table;
+				tri = as_exp_matches_metadata(entry->and_exp, &sel->exp_ctx);
+			}
+
+			if (tri == AS_EXP_TRUE &&
+					! include_map_entry(sel, entry, level, vars_bi_table)) {
 				return false;
 			}
 
@@ -2477,6 +2523,62 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 		}
 	}
 	else {
+		bool found_all = false;
+		define_rollback_alloc(alloc, NULL, 1);
+		DEFER_ROLLBACK_ALLOC(alloc);
+
+		struct {
+			offset_index offidx;
+			order_index ordidx;
+			msgpack_in mp;
+			msgpack_in mp_key;
+			uint32_t rank;
+			uint32_t ele_count;
+			bool check_order;
+			bool unordered;
+		} kl; // for AS_CDT_CTX_KEY_LIST
+
+		if (by_type == AS_CDT_CTX_KEY_LIST) {
+			uint8_t flags;
+
+			if (! list_buf_init_allidx(entry->value.ptr, entry->value.sz,
+					&kl.offidx, &kl.ordidx, alloc, &flags)) {
+				cf_detail(AS_PARTICLE, "cdt_select_map(%u) invalid key list", level);
+				sel->ret_code = -AS_ERR_PARAMETER;
+				return false;
+			}
+
+			if (! list_full_offset_index_fill_all(&kl.offidx)) {
+				cf_warning(AS_PARTICLE, "cdt_select_map(%u) invalid key list", level);
+				sel->ret_code = -AS_ERR_PARAMETER;
+				return false;
+			}
+
+			if (list_flags_is_ordered(flags)) {
+				order_index_init_values(&kl.ordidx);
+
+				if (! order_index_check_order(&kl.ordidx, &kl.offidx)) {
+					cf_warning(AS_PARTICLE, "cdt_select_map(%u) key list not ordered", level);
+					sel->ret_code = -AS_ERR_PARAMETER;
+					return false;
+				}
+			}
+			else {
+				list_order_index_sort(&kl.ordidx, &kl.offidx,
+						AS_CDT_SORT_ASCENDING);
+			}
+
+			kl.mp = (msgpack_in) {
+				.buf = kl.offidx.contents,
+				.buf_sz = kl.offidx.content_sz
+			};
+
+			kl.rank = 0;
+			kl.ele_count = kl.offidx._.ele_count;
+			kl.check_order = ! map_flags_is_ordered(ext.type);
+			kl.unordered = false; // optimistic assumption
+		}
+
 		for (uint32_t i = 0; i < ele_count; i++) {
 			uint32_t key_off = sel->mp_in.offset;
 			uint32_t key_sz = msgpack_sz(&sel->mp_in);
@@ -2490,7 +2592,7 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 				return false;
 			}
 
-			if (key_found) {
+			if (found_all) {
 				tri = AS_EXP_FALSE;
 			}
 			else if (by_type == AS_CDT_CTX_EXP) {
@@ -2514,7 +2616,7 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 				if (by_type == AS_CDT_CTX_KEY) {
 					if ((cmp = msgpack_cmp_peek(&mp_key, &mp_entry)) ==
 							MSGPACK_CMP_EQUAL) {
-						key_found = true;
+						found_all = true;
 					}
 				}
 				else {
@@ -2535,8 +2637,67 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 					break;
 				}
 			}
+			else if (by_type == AS_CDT_CTX_KEY_LIST) {
+				tri = AS_EXP_FALSE;
+
+				if (kl.check_order) {
+					kl.mp_key = mp_key;
+				}
+
+				if (kl.unordered) {
+					order_index_find find = {
+						.count = kl.ele_count,
+						.target = kl.ele_count + 1
+					};
+
+					cdt_payload value = {
+						.ptr = mp_key.buf + mp_key.offset,
+						.sz = mp_key.buf_sz - mp_key.offset
+					};
+
+					order_index_find_rank_by_value(&kl.ordidx, &value,
+							&kl.offidx, &find, false);
+
+					if (find.found) {
+						tri = AS_EXP_TRUE;
+					}
+				}
+
+				while (kl.rank < kl.ele_count) {
+					uint32_t idx = order_index_get(&kl.ordidx, kl.rank);
+					uint32_t off = offset_index_get_const(&kl.offidx, idx);
+
+					kl.mp.offset = off;
+
+					msgpack_cmp_type cmp = msgpack_cmp_peek(&mp_key, &kl.mp);
+
+					if (cmp == MSGPACK_CMP_EQUAL) {
+						kl.rank++;
+						tri = AS_EXP_TRUE;
+						break;
+					}
+					else if (cmp == MSGPACK_CMP_ERROR ||
+							cmp == MSGPACK_CMP_END) {
+						sel->ret_code = -AS_ERR_UNKNOWN;
+						return false;
+					}
+					else if (cmp == MSGPACK_CMP_GREATER) {
+						kl.rank++;
+					}
+					else {
+						break;
+					}
+				}
+			}
 			else {
 				tri = AS_EXP_UNK;
+			}
+
+			if (tri == AS_EXP_TRUE && entry->and_exp != NULL) {
+				mp_key.offset = key_off;
+				mp_value.offset = value_off;
+				sel->exp_ctx.vars_table = vars_bi_table;
+				tri = as_exp_matches_metadata(entry->and_exp, &sel->exp_ctx);
 			}
 
 			if (tri == AS_EXP_UNK) {
@@ -2560,6 +2721,15 @@ cdt_select_map(select_ctx *sel, uint32_t level)
 			else if (msgpack_sz(&sel->mp_in) == 0) {
 				sel->ret_code = -AS_ERR_UNKNOWN;
 				return false;
+			}
+
+			if (by_type == AS_CDT_CTX_KEY_LIST && kl.check_order &&
+					i < ele_count - 1 &&
+					msgpack_cmp_peek(&kl.mp_key, &sel->mp_in) !=
+							MSGPACK_CMP_LESS) {
+				kl.rank = kl.ele_count;
+				kl.check_order = false;
+				kl.unordered = true;
 			}
 		}
 	}
@@ -2858,22 +3028,55 @@ cdt_select_select(select_ctx *sel)
 }
 
 static int
-select_stack_init(select_stack_entry *stack, uint32_t n, msgpack_in_vec *mv)
+select_stack_init(select_stack_entry *stack, uint32_t *n, msgpack_in_vec *mv)
 {
-	uint32_t i;
+	uint32_t n_pairs = *n;
+	uint32_t i = 0;
 	int ret = AS_OK;
 
-	for (i = 0; i < n; i++) {
+	for (uint32_t j = 0; j < n_pairs; j++, i++) {
 		uint64_t ctx_type;
 
 		if (! msgpack_get_uint64_vec(mv, &ctx_type)) {
-			cf_warning(AS_PARTICLE, "cdt_select_stack_init() param %u expected int", i);
+			cf_warning(AS_PARTICLE, "cdt_select_stack_init() pair %u expected int", j);
 			ret = -AS_ERR_PARAMETER;
 			break;
 		}
 
-		stack[i].ctx_type = (uint32_t)ctx_type;
-		stack[i].ele_count = 0;
+		bool is_and = (ctx_type & AS_CDT_CTX_AND) != 0;
+
+		if (is_and) {
+			if (ctx_type != (AS_CDT_CTX_AND | AS_CDT_CTX_EXP)) {
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() AND invalid ctx type 0x%lx at pair %u", ctx_type, j);
+				ret = -AS_ERR_PARAMETER;
+				break;
+			}
+
+			if (i == 0) {
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() AND at pair %u has no preceding entry", j);
+				ret = -AS_ERR_PARAMETER;
+				break;
+			}
+
+			i--;
+
+			if (stack[i].and_exp != NULL || stack[i].has_and) {
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() duplicate AND at pair %u", j);
+				ret = -AS_ERR_PARAMETER;
+				break;
+			}
+
+			if ((stack[i].ctx_type & AS_CDT_CTX_BASE_MASK) == AS_CDT_CTX_EXP) {
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() AND on EXP base at pair %u", j);
+				ret = -AS_ERR_PARAMETER;
+				break;
+			}
+
+			stack[i].has_and = true;
+		}
+		else {
+			stack[i] = (select_stack_entry){ .ctx_type = (uint32_t)ctx_type };
+		}
 
 		uint32_t buf_sz;
 		const uint8_t *buf;
@@ -2883,7 +3086,7 @@ select_stack_init(select_stack_entry *stack, uint32_t n, msgpack_in_vec *mv)
 		case AS_CDT_CTX_INDEX:
 		case AS_CDT_CTX_RANK:
 			if (! msgpack_get_int64_vec(mv, &index)) {
-				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid index at level %u", i);
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid index at pair %u", j);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -2892,10 +3095,11 @@ select_stack_init(select_stack_entry *stack, uint32_t n, msgpack_in_vec *mv)
 			break;
 		case AS_CDT_CTX_KEY:
 		case AS_CDT_CTX_VALUE:
+		case AS_CDT_CTX_KEY_LIST:
 			buf = msgpack_get_ele_vec(mv, &buf_sz);
 
 			if (buf == NULL) {
-				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid key at level %u", i);
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid key at pair %u", j);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
@@ -2907,36 +3111,35 @@ select_stack_init(select_stack_entry *stack, uint32_t n, msgpack_in_vec *mv)
 			buf = msgpack_get_ele_vec(mv, &buf_sz);
 
 			if (buf == NULL) {
-				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid expression at level %u", i);
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid expression at pair %u", j);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
 
+			as_exp **exp = is_and ? &stack[i].and_exp : &stack[i].exp;
 			msgpack_type type = msgpack_buf_peek_type(buf, buf_sz);
 
 			switch (type) {
 			case MSGPACK_TYPE_LIST:
-				stack[i].exp = as_exp_build_buf(buf, buf_sz, false, NULL);
+				*exp = as_exp_build_buf(buf, buf_sz, false, NULL);
 
-				if (stack[i].exp == NULL) {
-					cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid expression at level %u", i);
+				if (*exp == NULL) {
+					cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid expression at pair %u", j);
 					ret = -AS_ERR_PARAMETER;
-					break;
 				}
 
 				break;
 			case MSGPACK_TYPE_TRUE:
-				stack[i].exp = NULL;
 				break;
 			default:
-				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid expression at level %u", i);
+				cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid expression at pair %u", j);
 				ret = -AS_ERR_PARAMETER;
 				break;
 			}
 
 			break;
 		default:
-			cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid ctx type 0x%lx at level %u", ctx_type, i);
+			cf_warning(AS_PARTICLE, "cdt_select_stack_init() invalid ctx type 0x%lx at pair %u", ctx_type, j);
 			ret = -AS_ERR_PARAMETER;
 			break;
 		}
@@ -2950,6 +3153,7 @@ select_stack_init(select_stack_entry *stack, uint32_t n, msgpack_in_vec *mv)
 		select_stack_destroy(stack, i);
 	}
 
+	*n = i;
 	return ret;
 }
 
@@ -2957,14 +3161,13 @@ static void
 select_stack_destroy(select_stack_entry *stack, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++) {
-		switch (stack[i].ctx_type & 0x0f) {
-		case AS_CDT_CTX_EXP:
-			if (stack[i].exp != NULL) {
-				as_exp_destroy(stack[i].exp);
-			}
-			break;
-		default:
-			break;
+		if ((stack[i].ctx_type & 0x0f) == AS_CDT_CTX_EXP &&
+				stack[i].exp != NULL) {
+			as_exp_destroy(stack[i].exp);
+		}
+
+		if (stack[i].and_exp != NULL) {
+			as_exp_destroy(stack[i].and_exp);
 		}
 	}
 }
@@ -3011,7 +3214,7 @@ cdt_process_state_select(cdt_process_state *state, cdt_op_mem *com)
 
 	select_stack_entry stack[n_levels];
 
-	com->ret_code = select_stack_init(stack, n_levels, state->mv);
+	com->ret_code = select_stack_init(stack, &n_levels, state->mv);
 
 	if (com->ret_code != AS_OK) {
 		cf_info(AS_PARTICLE, "cdt_process_state_select() stack init failed: ret_code=%d", com->ret_code);
@@ -3104,6 +3307,17 @@ cdt_process_state_select(cdt_process_state *state, cdt_op_mem *com)
 			default:
 				cf_detail(AS_PARTICLE, "stack[%u]: ctx_type=0x%x", i, stack[i].ctx_type);
 				break;
+			}
+
+			if (stack[i].and_exp != NULL) {
+				DEFER_ATTR(cf_dyn_buf_free)
+				cf_dyn_buf db;
+
+				cf_dyn_buf_init_heap(&db, 1024);
+				as_exp_display(stack[i].and_exp, &db);
+
+				cf_detail(AS_PARTICLE, "stack[%u]: and_exp=%.*s",
+						i, (int)db.used_sz, db.buf);
 			}
 		}
 
@@ -5847,7 +6061,7 @@ order_index_find_rank_by_value(const order_index *ordidx,
 	};
 
 	while (true) {
-		uint32_t idx = ordidx ? order_index_get(ordidx, rank) : rank;
+		uint32_t idx = (ordidx != NULL) ? order_index_get(ordidx, rank) : rank;
 
 		mp_buf.offset = offset_index_get_const(full_offidx, idx);
 
@@ -7266,7 +7480,11 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in *mp, cf_dyn_buf *db)
 			[AS_CDT_CTX_RANK] = "rank",
 			[AS_CDT_CTX_KEY] = "key",
 			[AS_CDT_CTX_VALUE] = "value",
-			[AS_CDT_CTX_EXP] = "exp"
+			[AS_CDT_CTX_EXP] = "exp",
+			[AS_CDT_CTX_INDEX_LIST] = "index_list",
+			[AS_CDT_CTX_RANK_LIST] = "rank_list",
+			[AS_CDT_CTX_KEY_LIST] = "key_list",
+			[AS_CDT_CTX_VALUE_LIST] = "value_list"
 	};
 
 	cf_dyn_buf_append_string(db, "[");
