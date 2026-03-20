@@ -2696,6 +2696,35 @@ prefer_existing_record(const as_namespace* ns, const as_flat_record* flat,
 			(block_void_time != 0 && block_void_time <= r->void_time);
 }
 
+static inline const uint8_t*
+drv_find_and_check_end_mark_ptr(const as_flat_record* flat, uint32_t record_size)
+{
+	const uint8_t* rec = (const uint8_t*)flat;
+	const uint8_t* last_rblock_start = rec + record_size - RBLOCK_SIZE;
+	const uint8_t* scan_start = last_rblock_start - (END_MARK_SZ - 1);
+	const uint8_t* scan_stop = rec + record_size - END_MARK_SZ;
+	uint32_t expected = drv_make_end_mark(flat);
+
+	// Search from tail backward to prefer the rightmost plausible match.
+	const uint8_t* p = scan_stop;
+	while (true) {
+		uint32_t v;
+
+		memcpy(&v, p, sizeof(v)); // safe for unaligned
+
+		if (v == expected) {
+			return p;
+		}
+
+		if (p == scan_start) {
+			break;
+		}
+
+		p--;
+	}
+
+	return NULL;
+}
 
 // Add a record just read from drive to the index, if all is well.
 void
@@ -2745,13 +2774,27 @@ ssd_cold_start_add_record(drv_ssds* ssds, drv_ssd* ssd,
 			opt_meta.n_bins);
 
 	if (exact_end == NULL) {
-		cf_warning(AS_DRV_SSD, "bad flat record %pD", &flat->keyd);
+		uint32_t flush_sz = as_load_uint32(&ns->storage_flush_size);
+		uint64_t start_offset = RBLOCK_ID_TO_OFFSET(rblock_id);
+		uint64_t end_inclusive = start_offset + record_size - 1;
+		bool spans_flush = BYTES_DOWN_TO_FLUSH(flush_sz, start_offset) !=
+				BYTES_DOWN_TO_FLUSH(flush_sz, end_inclusive);
+
+		const uint8_t* end_mark_ptr = drv_find_and_check_end_mark_ptr(flat, record_size);
+
+		cf_warning(AS_DRV_SSD, "bad flat record %pD straddle-flush-boundary: %s end-marker: %s start %lu end %lu flush %u", &flat->keyd, spans_flush ? "yes" : "no", end_mark_ptr == NULL ? "bad" : "good", start_offset, end_inclusive, flush_sz);
 		ssd->record_add_unparsable_counter++;
 		return;
 	}
 
 	if (! drv_check_end_mark(cb_end == NULL ? exact_end : cb_end, flat)) {
-		cf_warning(AS_DRV_SSD, "bad end marker for %pD", &flat->keyd);
+		uint32_t flush_sz = as_load_uint32(&ns->storage_flush_size);
+		uint64_t start_offset = RBLOCK_ID_TO_OFFSET(rblock_id);
+		uint64_t end_inclusive = start_offset + record_size - 1;
+		bool spans_flush = BYTES_DOWN_TO_FLUSH(flush_sz, start_offset) !=
+				BYTES_DOWN_TO_FLUSH(flush_sz, end_inclusive);
+
+		cf_warning(AS_DRV_SSD, "bad end marker for %pD straddle-flush-boundary: %s start %lu end %lu flush %u", &flat->keyd, spans_flush ? "yes" : "no", start_offset, end_inclusive, flush_sz);
 		ssd->record_add_unparsable_counter++;
 		return;
 	}
