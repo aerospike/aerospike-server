@@ -279,6 +279,7 @@ namespace cfg_handlers
 		{"/batch-max-buffers-per-queue", offsetof(as_config, batch_max_buffers_per_queue), apply_uint32_field, UnitType::SIZE_U32},
 		{"/batch-max-requests", offsetof(as_config, batch_max_requests), apply_uint32_field, UnitType::SIZE_U32},
 		{"/batch-max-unused-buffers", offsetof(as_config, batch_max_unused_buffers), apply_uint32_field, UnitType::SIZE_U32},
+		{"/cgroup-mem-tracking", offsetof(as_config, cgroup_mem_tracking), apply_bool_field},
 		{"/cluster-name", NO_OFFSET, handle_cluster_name},
 		{"/debug-allocations", offsetof(as_config, debug_allocations), apply_bool_field},
 		{"/disable-udf-execution", offsetof(as_config, udf_execution_disabled), apply_bool_field},

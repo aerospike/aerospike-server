@@ -42,6 +42,7 @@
 #include "linear_hist.h"
 #include "log.h"
 #include "node.h"
+#include "os.h"
 #include "vector.h"
 #include "vmapx.h"
 
@@ -1033,8 +1034,9 @@ sys_mem_pct(void)
 	uint32_t free_mem_pct;
 	uint64_t thp_mem_kbytes;
 
-	sys_mem_info(&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
-
+	// TODO - the `cgroup_mem_tracking` should be false by default until 9.0.
+	get_mem_info(g_config.cgroup_mem_tracking,
+		&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
 	return 100 - free_mem_pct;
 }
 

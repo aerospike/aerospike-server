@@ -125,7 +125,7 @@ typedef struct as_config_s {
 	uid_t			uid;
 	// Note - vault config is a cf global, so can't be here.
 	char*			work_directory;
-
+	bool			cgroup_mem_tracking;
 	//--------------------------------------------
 	// network::service context.
 	//

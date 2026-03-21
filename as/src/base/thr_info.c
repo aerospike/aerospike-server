@@ -880,89 +880,6 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 	}
 }
 
-// TODO: This function should move elsewhere.
-void
-sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
-		uint64_t* thp_mem_kbytes)
-{
-	*free_mem_kbytes = 0;
-	*free_mem_pct = 0;
-	*thp_mem_kbytes = 0;
-
-	int32_t fd = open("/proc/meminfo", O_RDONLY);
-
-	if (fd < 0) {
-		cf_warning(AS_INFO, "failed to open /proc/meminfo: %d", errno);
-		return;
-	}
-
-	char buf[4096] = { 0 };
-	size_t limit = sizeof(buf);
-	size_t total = 0;
-
-	while (total < limit) {
-		ssize_t len = read(fd, buf + total, limit - total);
-
-		if (len < 0) {
-			cf_warning(AS_INFO, "couldn't read /proc/meminfo: %d", errno);
-			close(fd);
-			return;
-		}
-
-		if (len == 0) {
-			break; // EOF
-		}
-
-		total += (size_t)len;
-	}
-
-	close(fd);
-
-	if (total == limit) {
-		cf_warning(AS_INFO, "/proc/meminfo exceeds %zu bytes", limit);
-		return;
-	}
-
-	uint64_t mem_total = 0;
-	uint64_t mem_available = 0;
-	uint64_t anon_huge_pages = 0;
-
-	char* cur = buf;
-	char* save_ptr = NULL;
-
-	// We split each line into two fields separated by ':'. strtoul() will
-	// safely ignore the spaces and 'kB' (if present).
-	while (true) {
-		char* name_tok = strtok_r(cur, ":", &save_ptr);
-
-		if (name_tok == NULL) {
-			break; // no more lines
-		}
-
-		cur = NULL; // all except first name_tok use NULL
-
-		char* value_tok = strtok_r(NULL, "\r\n", &save_ptr);
-
-		if (value_tok == NULL) {
-			cf_warning(AS_INFO, "/proc/meminfo line missing value token");
-			return;
-		}
-
-		if (strcmp(name_tok, "MemTotal") == 0) {
-			mem_total = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "MemAvailable") == 0) {
-			mem_available = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "AnonHugePages") == 0) {
-			anon_huge_pages = strtoul(value_tok, NULL, 0);
-		}
-	}
-
-	*free_mem_kbytes = mem_available;
-	*free_mem_pct = mem_total == 0 ? 0 : (mem_available * 100) / mem_total;
-	*thp_mem_kbytes = anon_huge_pages;
-}
 
 void
 as_info_warn_deprecated(const char* msg)
@@ -3781,9 +3698,23 @@ cmd_statistics(as_info_cmd_args* args)
 	uint32_t free_mem_pct;
 	uint64_t thp_mem_kbytes;
 
-	sys_mem_info(&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
+	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
+
+	uint64_t host_free_mem_kbytes;
+	uint32_t host_free_mem_pct;
+
+	if (g_config.cgroup_mem_tracking) {
+		get_mem_info(false, &host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
+	}
+	else {
+		host_free_mem_kbytes = free_mem_kbytes;
+		host_free_mem_pct = free_mem_pct;
+	}
+
 	info_append_uint64(db, "system_free_mem_kbytes", free_mem_kbytes);
 	info_append_int(db, "system_free_mem_pct", free_mem_pct);
+	info_append_uint64(db, "host_free_mem_kbytes", host_free_mem_kbytes);
+	info_append_int(db, "host_free_mem_pct", host_free_mem_pct);
 	info_append_uint64(db, "system_thp_mem_kbytes", thp_mem_kbytes);
 
 	info_append_uint32(db, "process_cpu_pct", g_process_cpu_pct);

@@ -367,6 +367,13 @@
           "dynamic": false,
           "enterpriseOnly": false
         },
+        "cgroup-mem-tracking": {
+          "type": "boolean",
+          "default": false,
+          "description": "",
+          "dynamic": false,
+          "enterpriseOnly": false
+        },
         "disable-udf-execution": {
           "type": "boolean",
           "default": false,

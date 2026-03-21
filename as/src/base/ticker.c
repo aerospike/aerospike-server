@@ -43,6 +43,7 @@
 #include "dynbuf.h"
 #include "hist.h"
 #include "log.h"
+#include "os.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -262,13 +263,29 @@ log_line_system()
 	uint32_t free_mem_pct;
 	uint64_t thp_mem_kbytes;
 
-	sys_mem_info(&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
+	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
 
-	cf_info(AS_INFO, "   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d thp-mem-kbytes %lu",
-			user_pct + kernel_pct, user_pct, kernel_pct,
-			free_mem_kbytes,
-			free_mem_pct,
-			thp_mem_kbytes);
+	uint64_t host_free_mem_kbytes;
+	uint32_t host_free_mem_pct;
+
+	if (g_config.cgroup_mem_tracking) {
+		get_mem_info(false, &host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
+	}
+	else {
+		host_free_mem_kbytes = free_mem_kbytes;
+		host_free_mem_pct = free_mem_pct;
+	}
+
+	cf_info(AS_INFO, "   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d thp-mem-kbytes %lu host-free-mem-kbytes %lu host-free-mem-pct %d",
+		user_pct + kernel_pct,
+		user_pct,
+		kernel_pct,
+		free_mem_kbytes,
+		free_mem_pct,
+		thp_mem_kbytes,
+		host_free_mem_kbytes,
+		host_free_mem_pct);
+
 }
 
 void

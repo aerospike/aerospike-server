@@ -45,6 +45,9 @@ typedef enum {
 	CF_OS_FILE_RES_ERROR
 } cf_os_file_res;
 
+typedef cf_os_file_res (*cf_os_test_read_file_fn)(const char* path, void* buf,
+		size_t* limit);
+
 #define CF_OS_OPEN_MODE_USR (S_IRUSR | S_IWUSR)
 #define CF_OS_OPEN_MODE_GRP (CF_OS_OPEN_MODE_USR | S_IRGRP | S_IWGRP)
 
@@ -82,6 +85,15 @@ cf_os_log_perms(void)
 	return cf_os_base_perms() | S_IRGRP | S_IROTH;
 }
 
+//==========================================================
+// Public API - get system memory info.
+
+
+void
+get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
+		uint64_t* thp_mem_kbytes);
+
+void cf_os_set_mem_read_file_fn_for_test(cf_os_test_read_file_fn fn);
 
 //==========================================================
 // Public API - read system files.
