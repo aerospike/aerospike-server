@@ -70,8 +70,6 @@
 // Typedefs & constants.
 //
 
-#define MAX_N_OPS (32 * 1024)
-
 COMPILER_ASSERT(RECORD_MAX_BINS + MAX_N_OPS < 64 * 1024);
 
 
@@ -1542,26 +1540,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				}
 			}
 		}
-		else if (op->op == AS_MSG_OP_READ) {
-			as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
-
-			if (b) {
-				ops[*p_n_response_bins] = op;
-
-				if (as_masking_apply(rd->mask_ctx,
-						&result_bins[(*p_n_result_bins)], b)) {
-					response_bins[(*p_n_response_bins)++] =
-							result_bins[(*p_n_result_bins)++];
-				}
-				else {
-					response_bins[(*p_n_response_bins)++] = *b;
-				}
-			}
-			else if (respond_all_ops) {
-				ops[*p_n_response_bins] = op;
-				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
-			}
-		}
 		else if (op->op == AS_MSG_OP_BITS_MODIFY) {
 			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
@@ -1579,27 +1557,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			// empty. In this case it must be last in rd->bins - remove it.
 			if (as_bin_is_unused(b)) {
 				rd->n_bins--;
-			}
-		}
-		else if (op->op == AS_MSG_OP_BITS_READ) {
-			as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
-
-			if (b) {
-				as_bin result_bin;
-				as_bin_set_empty(&result_bin);
-
-				if ((result = as_bin_bits_read_from_client(b, op, &result_bin)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				ops[*p_n_response_bins] = op;
-				response_bins[(*p_n_response_bins)++] = result_bin;
-				append_bin_to_destroy(&result_bin, result_bins, p_n_result_bins);
-			}
-			else if (respond_all_ops) {
-				ops[*p_n_response_bins] = op;
-				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
 			}
 		}
 		else if (op->op == AS_MSG_OP_HLL_MODIFY) {
@@ -1625,27 +1582,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				rd->n_bins--;
 			}
 		}
-		else if (op->op == AS_MSG_OP_HLL_READ) {
-			as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
-
-			if (b) {
-				as_bin result_bin;
-				as_bin_set_empty(&result_bin);
-
-				if ((result = as_bin_hll_read_from_client(b, op, &result_bin)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				ops[*p_n_response_bins] = op;
-				response_bins[(*p_n_response_bins)++] = result_bin;
-				append_bin_to_destroy(&result_bin, result_bins, p_n_result_bins);
-			}
-			else if (respond_all_ops) {
-				ops[*p_n_response_bins] = op;
-				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
-			}
-		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
 			as_bin* b = as_bin_get_or_create_w_len(rd, op->name, op->name_sz);
 
@@ -1667,27 +1603,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			// empty. In this case it must be last in rd->bins - remove it.
 			if (as_bin_is_unused(b)) {
 				rd->n_bins--;
-			}
-		}
-		else if (op->op == AS_MSG_OP_CDT_READ) {
-			as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
-
-			if (b) {
-				as_bin result_bin;
-				as_bin_set_empty(&result_bin);
-
-				if ((result = as_bin_cdt_read_from_client(b, op, &result_bin)) < 0) {
-					cf_detail(AS_RW, "{%s} write_master: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
-					return -result;
-				}
-
-				ops[*p_n_response_bins] = op;
-				response_bins[(*p_n_response_bins)++] = result_bin;
-				append_bin_to_destroy(&result_bin, result_bins, p_n_result_bins);
-			}
-			else if (respond_all_ops) {
-				ops[*p_n_response_bins] = op;
-				as_bin_set_empty(&response_bins[(*p_n_response_bins)++]);
 			}
 		}
 		else if (op->op == AS_MSG_OP_EXP_MODIFY) {
@@ -1726,20 +1641,37 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				}
 			}
 		}
-		else if (op->op == AS_MSG_OP_EXP_READ) {
-			const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
+		else if (OP_IS_READ(op->op)) {
+			as_bin* result_bin = NULL;
 
-			as_bin result_bin;
-			as_bin_set_empty(&result_bin);
+			int error_code;
 
-			if ((result = as_bin_exp_read_from_client(&exp_ctx, op, &result_bin)) < 0) {
-				cf_detail(AS_RW, "{%s} write_master: failed as_bin_exp_read_from_client() %pD", ns->name, &tr->keyd);
-				return -result;
+			read_op_result read_result = process_bin_read_op(rd, op,
+					respond_all_ops, result_bins, p_n_result_bins, &result_bin,
+					&error_code);
+
+			if (read_result == READ_OP_RESULT_ERROR) {
+				return -error_code;
 			}
+			else if (read_result == READ_OP_RESULT_SUCCESS) {
+				// TODO: handle it in process_bin_read_op()?
+				bool add_response =
+						respond_all_ops || result_bin != NULL ||
+						(op->op != AS_MSG_OP_READ);
 
-			ops[*p_n_response_bins] = op;
-			response_bins[(*p_n_response_bins)++] = result_bin;
-			append_bin_to_destroy(&result_bin, result_bins, p_n_result_bins);
+				if (add_response) {
+					ops[*p_n_response_bins] = op;
+
+					if (result_bin == NULL) {
+						as_bin_set_empty(&response_bins[(*p_n_response_bins)]);
+					}
+					else {
+						response_bins[(*p_n_response_bins)] = *result_bin;
+					}
+
+					(*p_n_response_bins)++;
+				}
+			}
 		}
 		else {
 			cf_warning(AS_RW, "{%s} write_master: unknown bin op %u %pD", ns->name, op->op, &tr->keyd);

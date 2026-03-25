@@ -42,6 +42,7 @@
 #include "base/datamodel.h"
 #include "base/exp.h"
 #include "base/index.h"
+#include "base/masking.h"
 #include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/transaction.h"
@@ -402,6 +403,171 @@ advance_record_version(as_transaction* tr, as_record* r)
 	as_record_advance_void_time(r, m->record_ttl, now, ns);
 	as_record_set_lut(r, tr->rsv.regime, now, ns);
 	as_record_increment_generation(r, ns);
+}
+
+read_op_result
+process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
+		as_bin* result_bins, uint32_t* p_n_result_bins, as_bin** result_bin_r,
+		int* error_code)
+{
+	as_namespace* ns = rd->ns;
+	*error_code = 0;
+
+	switch (op->op) {
+	case AS_MSG_OP_READ:
+	{
+		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
+
+		if (b) {
+			as_bin* masked_bin = &result_bins[*p_n_result_bins];
+
+			if (as_masking_apply(rd->mask_ctx, masked_bin, b)) {
+				(*p_n_result_bins)++;
+				*result_bin_r = masked_bin;
+			}
+			else {
+				*result_bin_r = b;
+			}
+
+			return READ_OP_RESULT_SUCCESS;
+		}
+		else if (respond_all_ops) {
+			*result_bin_r = NULL;
+			return READ_OP_RESULT_SUCCESS;
+		}
+
+		return READ_OP_RESULT_NOT_FOUND;
+	}
+	case AS_MSG_OP_BITS_READ:
+	{
+		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
+
+		if (b) {
+			as_bin* rb = &result_bins[*p_n_result_bins];
+			as_bin_set_empty(rb);
+
+			*error_code = as_bin_bits_read_from_client(b, op, rb);
+
+			if (*error_code < 0) {
+				cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_bits_read_from_client() %pD",
+						ns->name, &rd->r->keyd);
+				return READ_OP_RESULT_ERROR;
+			}
+
+			if (as_bin_is_used(rb)) {
+				(*p_n_result_bins)++;
+				*result_bin_r = rb;
+			}
+			else {
+				*result_bin_r = NULL;
+			}
+
+			return READ_OP_RESULT_SUCCESS;
+		}
+		else if (respond_all_ops) {
+			*result_bin_r = NULL;
+			return READ_OP_RESULT_SUCCESS;
+		}
+
+		return READ_OP_RESULT_NOT_FOUND;
+	}
+	case AS_MSG_OP_HLL_READ:
+	{
+		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
+
+		if (b) {
+			as_bin* rb = &result_bins[*p_n_result_bins];
+			as_bin_set_empty(rb);
+
+			*error_code = as_bin_hll_read_from_client(b, op, rb);
+
+			if (*error_code < 0) {
+				cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_hll_read_from_client() %pD",
+						ns->name, &rd->r->keyd);
+				return READ_OP_RESULT_ERROR;
+			}
+
+			if (as_bin_is_used(rb)) {
+				(*p_n_result_bins)++;
+				*result_bin_r = rb;
+			}
+			else {
+				*result_bin_r = NULL;
+			}
+
+			return READ_OP_RESULT_SUCCESS;
+		}
+		else if (respond_all_ops) {
+			*result_bin_r = NULL;
+			return READ_OP_RESULT_SUCCESS;
+		}
+
+		return READ_OP_RESULT_NOT_FOUND;
+	}
+	case AS_MSG_OP_CDT_READ:
+	{
+		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
+
+		if (b) {
+			as_bin* rb = &result_bins[*p_n_result_bins];
+			as_bin_set_empty(rb);
+
+			*error_code = as_bin_cdt_read_from_client(b, op, rb);
+
+			if (*error_code < 0) {
+				cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_cdt_read_from_client() %pD",
+						ns->name, &rd->r->keyd);
+				return READ_OP_RESULT_ERROR;
+			}
+
+			if (as_bin_is_used(rb)) {
+				(*p_n_result_bins)++;
+				*result_bin_r = rb;
+			}
+			else {
+				*result_bin_r = NULL;
+			}
+
+			return READ_OP_RESULT_SUCCESS;
+		}
+		else if (respond_all_ops) {
+			*result_bin_r = NULL;
+			return READ_OP_RESULT_SUCCESS;
+		}
+
+		return READ_OP_RESULT_NOT_FOUND;
+	}
+	case AS_MSG_OP_EXP_READ:
+	{
+		const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
+
+		as_bin* rb = &result_bins[*p_n_result_bins];
+
+		as_bin_set_empty(rb);
+		*error_code = as_bin_exp_read_from_client(&exp_ctx, op, rb);
+
+		if (*error_code < 0) {
+			cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_exp_read_from_client() %pD",
+					ns->name, &rd->r->keyd);
+			return READ_OP_RESULT_ERROR;
+		}
+
+		if (as_bin_is_used(rb)) {
+			(*p_n_result_bins)++;
+			*result_bin_r = rb;
+		}
+		else {
+			*result_bin_r = NULL;
+		}
+
+		return READ_OP_RESULT_SUCCESS;
+	}
+	default:
+		cf_warning(AS_RW, "{%s} process_bin_read_op: unsupported read op %u %pD",
+				ns->name, op->op, &rd->r->keyd);
+		*error_code = -AS_ERR_PARAMETER;
+		return READ_OP_RESULT_ERROR;
+	}
 }
 
 void

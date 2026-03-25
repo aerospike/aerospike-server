@@ -1640,6 +1640,7 @@ typedef struct basic_query_job_s {
 	uint64_t sample_count;
 	as_exp* filter_exp;
 	cf_vector* bin_names;
+	cl_msg* msgp;
 } basic_query_job;
 
 static void basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
@@ -1660,10 +1661,13 @@ typedef struct basic_query_slice_s {
 } basic_query_slice;
 
 static void basic_query_job_init(basic_query_job* job);
-static bool basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns, cf_vector** bin_names);
+static bool basic_query_get_ops(const as_transaction* tr, const char* ns_name, cl_msg** msgp, cf_vector** bin_names);
 static bool basic_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
 static bool basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
 static bool basic_query_filter_meta(const basic_query_job* job, const as_record* r, as_exp** exp);
+
+static bool apply_ops_make_response(cf_buf_builder** bb_r, as_storage_rd* rd, cl_msg* msgp, bool send_bval, int64_t bval);
+static bool build_ops_response_msg(cf_buf_builder** bb_r, as_storage_rd* rd, as_msg_op** ops, as_bin** response_bins, uint32_t n_response_bins, bool send_bval, int64_t bval);
 
 //----------------------------------------------------------
 // basic_query_job public API.
@@ -1752,7 +1756,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	basic_query_job_init(job);
 
 	if (! get_query_sample_max(tr, &job->sample_max) ||
-			! basic_query_get_bin_names(tr, ns, &job->bin_names) ||
+			! basic_query_get_ops(tr, ns->name, &job->msgp, &job->bin_names) ||
 			! get_query_filter_exp(tr, &job->filter_exp)) {
 		cf_warning(AS_QUERY, "basic query job failed msg field processing");
 		conn_query_job_destroy(conn_job);
@@ -1761,6 +1765,13 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 	}
 
 	job->no_bin_data = (m->info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
+
+	if (job->no_bin_data != 0 && job->msgp != NULL) {
+		cf_warning(AS_QUERY, "basic query job no bin data and projection ops are both set");
+		conn_query_job_destroy(conn_job);
+		as_query_job_destroy(_job);
+		return AS_ERR_PARAMETER;
+	}
 
 	int result = as_security_check_rps(tr->from.proto_fd_h, _job->rps,
 			PERM_QUERY, false, &_job->rps_udata);
@@ -1965,6 +1976,10 @@ basic_query_job_destroy(as_query_job* _job)
 	}
 
 	as_exp_destroy(job->filter_exp);
+
+	if (job->msgp != NULL) {
+		cf_free(job->msgp);
+	}
 }
 
 static void
@@ -1987,8 +2002,8 @@ basic_query_job_init(basic_query_job* job)
 }
 
 static bool
-basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
-		cf_vector** bin_names)
+basic_query_get_ops(const as_transaction* tr, const char* ns_name,
+		cl_msg** msgp, cf_vector** bin_names)
 {
 	bool has_binlist = as_transaction_has_query_binlist(tr);
 	const as_msg* m = &tr->msgp->msg;
@@ -2002,7 +2017,6 @@ basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
 	if (! has_binlist && ! has_ops) {
 		return true;
 	}
-	// else - bin selection requested.
 
 	// TODO - temporary - won't need bin-list support after January 2023.
 	if (has_binlist) {
@@ -2036,34 +2050,37 @@ basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
 
 		return true;
 	}
-	// else - has ops
-
-	*bin_names = cf_vector_create(AS_BIN_NAME_MAX_SZ, m->n_ops, 0);
+	// else - projection ops requested.
 
 	as_msg_op* op = NULL;
-	uint16_t n = 0;
+	as_msg_op* first = NULL;
+	uint16_t i = 0;
+	size_t total_ops_sz = 0;
 
-	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
+	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
 		if (! as_bin_name_check(op->name, op->name_sz)) {
-			cf_warning(AS_QUERY, "ignoring bad bin name %.*s (%u)", op->name_sz,
+			cf_warning(AS_QUERY, "bad bin name %.*s (%u)", op->name_sz,
 					op->name, op->name_sz);
-			continue;
+			return false;
 		}
 
-		if (op->op != AS_MSG_OP_READ) {
-			char msg[100];
-			snprintf(msg, sizeof(msg), "queries should only provide read bin ops - not %u",
+		if (! OP_IS_READ(op->op)) {
+			cf_warning(AS_QUERY, "queries should only provide read ops - not %u",
 				op->op);
-			as_info_warn_deprecated(msg);
+			return false;
 		}
 
-		char bin_name[AS_BIN_NAME_MAX_SZ];
+		if (first == NULL) {
+			first = op;
+		}
 
-		memcpy(bin_name, op->name, op->name_sz);
-		bin_name[op->name_sz] = '\0';
-
-		cf_vector_append(*bin_names, bin_name);
+		total_ops_sz += sizeof(op->op_sz) + op->op_sz;
 	}
+
+	uint8_t info2 = m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS;
+
+	*msgp = as_msg_create_internal(ns_name, AS_MSG_INFO1_READ, info2, 0,
+			0, m->n_ops, (uint8_t*)first, total_ops_sz);
 
 	return true;
 }
@@ -2173,7 +2190,8 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	}
 	else {
 		as_bin stack_bins[RECORD_MAX_BINS];
-		int result = (job->bin_names ?
+
+		int result = (job->msgp != NULL || job->bin_names != NULL ?
 				as_storage_rd_lazy_load_bins(&rd, stack_bins) :
 				as_storage_rd_load_bins(&rd, stack_bins));
 
@@ -2185,8 +2203,23 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 			return true;
 		}
 
-		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false, job->bin_names,
-				_job->si != NULL, bval);
+		if (job->msgp != NULL) {
+			bool rv = apply_ops_make_response(slice->bb_r, &rd, job->msgp,
+					_job->si != NULL, bval);
+
+			if (! rv) {
+				cf_warning(AS_QUERY, "job %lu - apply_ops_make_response failed",
+						_job->trid);
+				as_storage_record_close(&rd);
+				as_record_done(r_ref, ns);
+				as_incr_uint64(&_job->n_failed);
+				return true;
+			}
+		}
+		else {
+			as_msg_make_response_bufbuilder(slice->bb_r, &rd, false,
+					job->bin_names, _job->si != NULL, bval);
+		}
 	}
 
 	as_storage_record_close(&rd);
@@ -2240,6 +2273,201 @@ basic_query_filter_meta(const basic_query_job* job, const as_record* r,
 	*exp = NULL;
 
 	return tv == AS_EXP_TRUE;
+}
+
+static bool
+build_ops_response_msg(cf_buf_builder** bb_r, as_storage_rd* rd,
+		as_msg_op** ops, as_bin** response_bins, uint32_t n_response_bins,
+		bool send_bval, int64_t bval)
+{
+	as_namespace* ns = rd->ns;
+	as_record* r = rd->r;
+	cf_digest* keyd = &r->keyd;
+	size_t ns_len = strlen(ns->name);
+	const char* set_name = as_index_get_set_name(r, ns);
+	size_t set_name_len = set_name ? strlen(set_name) : 0;
+
+	const uint8_t* key = NULL;
+	uint32_t key_size = 0;
+
+	if (r->key_stored == 1) {
+		if (! as_storage_rd_load_key(rd)) {
+			cf_warning(AS_QUERY, "{%s} build_ops_response_msg: can't get key %pD",
+					ns->name, keyd);
+			return false;
+		}
+
+		key = rd->key;
+		key_size = rd->key_size;
+	}
+
+	uint16_t n_fields = 2;
+	size_t msg_sz = sizeof(as_msg) +
+			sizeof(as_msg_field) + ns_len +
+			sizeof(as_msg_field) + sizeof(cf_digest);
+
+	if (set_name) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + set_name_len;
+	}
+
+	if (key) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + key_size;
+	}
+
+	if (send_bval) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + sizeof(bval);
+	}
+
+	msg_sz += sizeof(as_msg_op) * n_response_bins;
+
+	for (uint32_t i = 0; i < n_response_bins; i++) {
+		msg_sz += ops[i]->name_sz;
+
+		if (response_bins[i]) {
+			msg_sz += as_bin_particle_client_value_size(response_bins[i]);
+		}
+	}
+
+	uint8_t* buf;
+	cf_buf_builder_reserve(bb_r, (int)msg_sz, &buf);
+
+	as_msg* m = (as_msg*)buf;
+	m->header_sz = sizeof(as_msg);
+	m->info1 = 0;
+	m->info2 = 0;
+	m->info3 = 0;
+	m->info4 = 0;
+	m->result_code = AS_OK;
+	m->generation = plain_generation(r->generation, ns);
+	m->record_ttl = r->void_time;
+	m->transaction_ttl = 0;
+	m->n_fields = n_fields;
+	m->n_ops = n_response_bins;
+
+	as_msg_swap_header(m);
+
+	buf = m->data;
+
+	as_msg_field* mf = (as_msg_field*)buf;
+	mf->field_sz = ns_len + 1;
+	mf->type = AS_MSG_FIELD_TYPE_NAMESPACE;
+	memcpy(mf->data, ns->name, ns_len);
+	as_msg_swap_field(mf);
+	buf += sizeof(as_msg_field) + ns_len;
+
+	mf = (as_msg_field*)buf;
+	mf->field_sz = sizeof(cf_digest) + 1;
+	mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
+	memcpy(mf->data, &r->keyd, sizeof(cf_digest));
+	as_msg_swap_field(mf);
+	buf += sizeof(as_msg_field) + sizeof(cf_digest);
+
+	if (set_name) {
+		mf = (as_msg_field*)buf;
+		mf->field_sz = set_name_len + 1;
+		mf->type = AS_MSG_FIELD_TYPE_SET;
+		memcpy(mf->data, set_name, set_name_len);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + set_name_len;
+	}
+
+	if (key) {
+		mf = (as_msg_field*)buf;
+		mf->field_sz = key_size + 1;
+		mf->type = AS_MSG_FIELD_TYPE_KEY;
+		memcpy(mf->data, key, key_size);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + key_size;
+	}
+
+	if (send_bval) {
+		mf = (as_msg_field *)buf;
+		mf->field_sz = sizeof(bval) + 1;
+		mf->type = AS_MSG_FIELD_TYPE_BVAL_ARRAY;
+		*(uint64_t*)mf->data = cf_swap_to_le64((uint64_t)bval);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + sizeof(bval);
+	}
+
+	for (uint32_t i = 0; i < n_response_bins; i++) {
+		as_msg_op* op = (as_msg_op*)buf;
+
+		op->has_lut = 0;
+		op->unused_flags = 0;
+
+		op->op = ops[i]->op;
+		op->name_sz = ops[i]->name_sz;
+		memcpy(op->name, ops[i]->name, op->name_sz);
+		op->op_sz = OP_FIXED_SZ + op->name_sz;
+
+		buf += sizeof(as_msg_op) + op->name_sz;
+		buf += as_bin_particle_to_client(response_bins[i], op);
+
+		as_msg_swap_op(op);
+	}
+
+	return true;
+}
+
+static bool
+apply_ops_make_response(cf_buf_builder** bb_r, as_storage_rd* rd,
+		cl_msg* msgp, bool send_bval, int64_t bval)
+{
+	as_msg* m = &msgp->msg;
+	as_msg_op* op = NULL;
+	uint16_t n_ops = m->n_ops;
+	uint16_t i = 0;
+	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
+
+	if (n_ops > MAX_N_OPS) {
+		cf_warning(AS_QUERY, "{%s} apply_ops_make_response: bad number of ops %u, can't exceed %u bin ops %pD",
+				rd->ns->name, n_ops, MAX_N_OPS, &rd->r->keyd);
+		return false;
+	}
+
+	as_msg_op* ops[n_ops];
+	as_bin* response_bins[n_ops];
+	uint32_t n_response_bins = 0;
+
+	as_bin result_bins[n_ops];
+	uint32_t n_result_bins = 0;
+
+	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
+		as_bin bin;
+		as_bin* result_bin = &bin;
+		int error_code;
+
+		read_op_result read_result = process_bin_read_op(rd, op,
+				respond_all_ops, result_bins, &n_result_bins, &result_bin,
+				&error_code);
+
+		if (read_result == READ_OP_RESULT_ERROR) {
+			// TODO: handle error code - add stats?
+			as_bin_destroy_all(result_bins, n_result_bins);
+			return false;
+		}
+		else if (read_result == READ_OP_RESULT_SUCCESS) {
+			if (respond_all_ops || result_bin != NULL) {
+				ops[n_response_bins] = op;
+				response_bins[n_response_bins++] = result_bin;
+			}
+		}
+	}
+
+	if (n_response_bins > 0) {
+		if (! build_ops_response_msg(bb_r, rd, ops, response_bins,
+				n_response_bins, send_bval, bval)) {
+			as_bin_destroy_all(result_bins, n_result_bins);
+			return false;
+		}
+	}
+
+	as_bin_destroy_all(result_bins, n_result_bins);
+
+	return true;
 }
 
 
@@ -3114,7 +3342,6 @@ udf_bg_query_tr_complete(void* udata, int result)
 
 	as_decr_uint32_rls(&job->n_active_tr);
 }
-
 
 
 //==============================================================================

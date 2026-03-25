@@ -74,7 +74,14 @@ typedef struct now_times_s {
 	uint64_t now_ms;
 } now_times;
 
+typedef enum {
+	READ_OP_RESULT_SUCCESS = 0,
+	READ_OP_RESULT_ERROR = -1,
+	READ_OP_RESULT_NOT_FOUND = 1
+} read_op_result;
+
 #define STACK_PARTICLES_SIZE (1024 * 1024)
+#define MAX_N_OPS (32 * 1024)
 
 
 //==========================================================
@@ -119,6 +126,7 @@ void delete_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64
 void udf_delete_bin(struct as_storage_rd_s* rd, const char* name);
 void write_resolved_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, struct as_bin_s* b);
 void delete_all_bins(struct as_storage_rd_s* rd);
+read_op_result process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops, as_bin* result_bins, uint32_t* p_n_result_bins, as_bin** result_bin_r, int* error_code);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
 void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
 void remove_from_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
