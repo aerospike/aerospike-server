@@ -653,7 +653,7 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "enable-index=");
-	cf_dyn_buf_append_bool(db, p_set->index_enabled);
+	cf_dyn_buf_append_bool(db, p_set->index_enabled != AS_SET_INDEX_NONE);
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "stop-writes-count=");

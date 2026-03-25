@@ -68,17 +68,6 @@
 
 #define TOK_CHAR_DELIMITER '|'
 
-typedef struct as_sindex_def_s {
-	as_namespace* ns;
-	char iname[INAME_MAX_SZ];
-	char set_name[AS_SET_NAME_MAX_SIZE];
-	char bin_name[AS_BIN_NAME_MAX_SZ];
-	as_particle_type ktype;
-	as_sindex_type itype;
-	char* ctx_b64;
-	char* exp_b64;
-} as_sindex_def;
-
 typedef struct exp_def_s {
 	as_exp* exp; // built exp points to buf
 	uint8_t* buf;
@@ -86,26 +75,7 @@ typedef struct exp_def_s {
 	cf_vector* bins_info;
 } exp_def;
 
-typedef struct defn_hash_key_s {
-	uint16_t set_id;
-	char bin_name[AS_BIN_NAME_MAX_SZ]; // will be hash of exp for SI on exp
-} defn_hash_key;
-
-typedef struct defn_hash_ele_s {
-	cf_ll_element ele;
-	as_sindex* si;
-} defn_hash_ele;
-
 typedef bool (*add_ktype_from_msgpack_fn)(msgpack_in* val, as_sindex_bin* sbin);
-
-static const char* sindex_itypes[] = {
-		"default",
-		"list",
-		"mapkeys",
-		"mapvalues"
-};
-
-ARRAY_ASSERT(sindex_itypes, AS_SINDEX_N_ITYPES);
 
 #define CARDINALITY_PERIOD 3600
 
@@ -114,36 +84,16 @@ ARRAY_ASSERT(sindex_itypes, AS_SINDEX_N_ITYPES);
 // Globals.
 //
 
-pthread_rwlock_t g_sindex_rwlock = PTHREAD_RWLOCK_INITIALIZER;
-
 
 //==========================================================
 // Forward declarations.
 //
 
-static void as_sindex_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type);
-static bool smd_item_to_def(const char* smd_key, const char* smd_value, as_sindex_def* def);
-static void smd_create(as_sindex_def* def, bool startup);
-static void smd_drop(as_sindex_def* def);
-static void rename_sindex(as_sindex* si, const char* iname);
-static void add_sindex(as_sindex* si);
-static void delete_sindex(as_sindex* si);
 static bool parse_exp(const char* exp_b64, exp_def* e_def_r);
 static void free_exp_def(exp_def* e_def);
 
-static uint32_t defn_hash_fn(const void* key);
-static void defn_hash_generate_key(const char* bin_name, const uint8_t* exp_buf, uint32_t exp_buf_sz, defn_hash_key* key);
-static void defn_hash_put(as_sindex* si);
-static void defn_hash_delete(as_sindex* si);
-static void defn_hash_destroy_cb(cf_ll_element* ele);
-
 static uint32_t populate_sbins(as_namespace* ns, uint16_t set_id, const as_bin* b, as_sindex_bin* sbins, as_sindex_op op);
 static uint32_t populate_sbin_si(as_sindex* si, const as_bin* b, as_sindex_bin* sbin, as_sindex_op op);
-
-static cf_ll* si_list_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name, const uint8_t* exp_buf, uint32_t exp_buf_sz);
-static as_sindex* si_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name, as_particle_type ktype, as_sindex_type itype, const uint8_t* exp_buf, uint32_t exp_buf_sz, const uint8_t* ctx_buf, uint32_t ctx_buf_sz);
-static as_sindex* si_by_iname(const as_namespace* ns, const char* iname);
-static bool compare_buf(const uint8_t* buf1, uint32_t buf1_sz, const uint8_t* buf2, uint32_t buf2_sz);
 
 static bool sbin_from_bin(as_sindex* si, const as_bin* b, as_sindex_bin* sbin);
 static bool sbin_from_simple_bin(as_sindex* si, const as_bin* b, as_sindex_bin* sbin);
@@ -162,10 +112,6 @@ static void add_geojson_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 
 static char const* ktype_str(as_particle_type ktype);
 const char* sindex_particle_type_str(as_particle_type type);
-static as_particle_type ktype_from_smd_char(char c);
-static char ktype_to_smd_char(as_particle_type ktype);
-static as_sindex_type itype_from_smd_char(char c);
-static char itype_to_smd_char(as_sindex_type itype);
 static as_particle_type itype_to_exp_particle_type(as_sindex_type itype);
 
 static void* run_cardinality(void* udata);
@@ -198,18 +144,6 @@ add_keytype_from_msgpack(as_particle_type ktype, msgpack_in* element,
 }
 
 static inline void
-as_sindex_def_free(as_sindex_def* def)
-{
-	if (def->ctx_b64 != NULL) {
-		cf_free(def->ctx_b64);
-	}
-
-	if (def->exp_b64 != NULL) {
-		cf_free(def->exp_b64);
-	}
-}
-
-static inline void
 init_sbin(as_sindex_bin* sbin, as_sindex_op op, as_sindex* si)
 {
 	*sbin = (as_sindex_bin){ .si = si, .op = op };
@@ -233,28 +167,8 @@ as_sindex_init(void)
 {
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
-
-		ns->sindex_defn_hash = cf_shash_create(defn_hash_fn,
-				sizeof(defn_hash_key), sizeof(cf_ll*), MAX_N_SINDEXES, false);
-
-		ns->sindex_iname_hash = cf_shash_create(cf_shash_fn_zstr,
-				INAME_MAX_SZ, sizeof(as_sindex*), MAX_N_SINDEXES, false);
-
 		as_sindex_gc_ns_init(ns);
 	}
-
-	pthread_rwlockattr_t rwattr;
-
-	pthread_rwlockattr_init(&rwattr);
-	pthread_rwlockattr_setkind_np(&rwattr,
-			PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-
-	pthread_rwlock_init(&g_sindex_rwlock, &rwattr);
-
-	as_smd_module_load(AS_SMD_MODULE_SINDEX, as_sindex_smd_accept_cb, NULL,
-			NULL);
-
-	as_sindex_resume_check();
 }
 
 void
@@ -430,11 +344,11 @@ as_sindex_lookup_by_defn(const as_namespace* ns, uint16_t set_id,
 {
 	SINDEX_GRLOCK();
 
-	as_sindex* si = si_by_defn(ns, set_id, bin_name, ktype, itype, exp_buf,
+	as_sindex* si = as_si_by_defn(ns, set_id, bin_name, ktype, itype, exp_buf,
 			exp_buf_sz, ctx_buf, ctx_buf_sz);
 
 	if (si == NULL && set_id != INVALID_SET_ID) {
-		si = si_by_defn(ns, INVALID_SET_ID, bin_name, ktype, itype, exp_buf,
+		si = as_si_by_defn(ns, INVALID_SET_ID, bin_name, ktype, itype, exp_buf,
 				exp_buf_sz, ctx_buf, ctx_buf_sz);
 	}
 
@@ -455,7 +369,7 @@ as_sindex_lookup_by_iname(const as_namespace* ns, const char* iname)
 {
 	SINDEX_GRLOCK();
 
-	as_sindex* si = si_by_iname(ns, iname);
+	as_sindex* si = as_si_by_iname(ns, iname);
 
 	if (si == NULL || si->dropped) {
 		SINDEX_GRUNLOCK();
@@ -500,66 +414,27 @@ as_sindex_ktype_from_string(const char* ktype_str)
 
 as_sindex_type
 as_sindex_itype_from_string(const char* itype_str) {
-	if (strcasecmp(itype_str, sindex_itypes[AS_SINDEX_ITYPE_DEFAULT]) == 0) {
+	if (strcasecmp(itype_str, as_sindex_type_names[AS_SINDEX_ITYPE_DEFAULT]) == 0) {
 		return AS_SINDEX_ITYPE_DEFAULT;
 	}
 
-	if (strcasecmp(itype_str, sindex_itypes[AS_SINDEX_ITYPE_LIST]) == 0) {
+	if (strcasecmp(itype_str, as_sindex_type_names[AS_SINDEX_ITYPE_LIST]) == 0) {
 		return AS_SINDEX_ITYPE_LIST;
 	}
 
-	if (strcasecmp(itype_str, sindex_itypes[AS_SINDEX_ITYPE_MAPKEYS]) == 0) {
+	if (strcasecmp(itype_str, as_sindex_type_names[AS_SINDEX_ITYPE_MAPKEYS]) == 0) {
 		return AS_SINDEX_ITYPE_MAPKEYS;
 	}
 
-	if (strcasecmp(itype_str, sindex_itypes[AS_SINDEX_ITYPE_MAPVALUES]) == 0) {
+	if (strcasecmp(itype_str, as_sindex_type_names[AS_SINDEX_ITYPE_MAPVALUES]) == 0) {
 		return AS_SINDEX_ITYPE_MAPVALUES;
 	}
 
-	return AS_SINDEX_N_ITYPES;
-}
-
-bool
-as_sindex_exists(const as_namespace* ns, const char* iname)
-{
-	SINDEX_GRLOCK();
-
-	bool exists = si_by_iname(ns, iname) != NULL;
-
-	SINDEX_GRUNLOCK();
-
-	return exists;
-}
-
-bool
-as_sindex_stats_str(as_namespace* ns, char* iname, cf_dyn_buf* db)
-{
-	SINDEX_GRLOCK();
-
-	as_sindex* si = si_by_iname(ns, iname);
-
-	if (si == NULL) {
-		cf_warning(AS_SINDEX, "SINDEX STAT : sindex %s not found", iname);
-		SINDEX_GRUNLOCK();
-		return false;
+	if (strcasecmp(itype_str, as_sindex_type_names[AS_SINDEX_ITYPE_SET]) == 0) {
+		return AS_SINDEX_ITYPE_SET;
 	}
 
-	info_append_uint64(db, "entries", as_sindex_tree_n_keys(si));
-	info_append_uint64(db, "used_bytes", as_sindex_tree_mem_size(si));
-
-	info_append_uint64(db, "entries_per_bval", si->keys_per_bval);
-	info_append_uint64(db, "entries_per_rec", si->keys_per_rec);
-
-	info_append_uint32(db, "load_pct", si->populate_pct);
-	info_append_uint64(db, "load_time", si->load_time);
-
-	info_append_uint64(db, "stat_gc_recs", si->n_gc_cleaned);
-
-	cf_dyn_buf_chomp(db);
-
-	SINDEX_GRUNLOCK();
-
-	return true;
+	return AS_SINDEX_N_ITYPES;
 }
 
 void
@@ -587,7 +462,7 @@ as_sindex_list_str(const as_namespace* ns, bool b64, cf_dyn_buf* db)
 		cf_dyn_buf_append_string(db, ":type=");
 		cf_dyn_buf_append_string(db, ktype_str(si->ktype));
 		cf_dyn_buf_append_string(db, ":indextype=");
-		cf_dyn_buf_append_string(db, sindex_itypes[si->itype]);
+		cf_dyn_buf_append_string(db, as_sindex_type_names[si->itype]);
 		cf_dyn_buf_append_string(db, ":context=");
 
 		if (si->ctx_buf == NULL) {
@@ -632,27 +507,20 @@ as_sindex_list_str(const as_namespace* ns, bool b64, cf_dyn_buf* db)
 	SINDEX_GRUNLOCK();
 }
 
-void
-as_sindex_build_smd_key(const char* ns_name, const char* set_name,
-		const char* bin_name, const char* cdt_ctx, const char* exp,
-		as_sindex_type itype, as_particle_type ktype, char* smd_key)
+bool
+as_sindex_stats_str(const as_sindex* si, cf_dyn_buf* db)
 {
-	// ns-name|<set-name>|bin-name|itype|ktype
-	// ns-name|<set-name>|bin-name|c<base64>|itype|ktype
-	// ns-name|<set-name>||e<base64>|itype|ktype
+	info_append_uint64(db, "entries", as_sindex_tree_n_keys(si));
+	info_append_uint64(db, "used_bytes", as_sindex_tree_mem_size(si));
+	info_append_uint64(db, "entries_per_bval", si->keys_per_bval);
+	info_append_uint64(db, "entries_per_rec", si->keys_per_rec);
+	info_append_uint32(db, "load_pct", si->populate_pct);
+	info_append_uint64(db, "load_time", si->load_time);
+	info_append_uint64(db, "stat_gc_recs", si->n_gc_cleaned);
+	
+	cf_dyn_buf_chomp(db);
 
-	sprintf(smd_key, "%s|%s|%s%s%s|%c|%c",
-			ns_name,
-			set_name != NULL ? set_name : "",
-			// "" is illegal as a bin-name for si's & XDR bin shipping.
-			bin_name != NULL ? bin_name : "",
-			// 'e' prefix makes node reject entries with exp on downgrade.
-			// 'c' prefix makes node reject entries with ctx on downgrade.
-			exp != NULL ? "|e" : cdt_ctx != NULL ? "|c" : "",
-			exp != NULL ? exp : cdt_ctx != NULL ? cdt_ctx : "",
-			// |e and |c can't conflict with itype.
-			itype_to_smd_char(itype),
-			ktype_to_smd_char(ktype));
+	return true;
 }
 
 int32_t
@@ -750,7 +618,7 @@ as_sindex_validate_exp_type(const char* iname, as_sindex_type itype,
 	if (itype != AS_SINDEX_ITYPE_DEFAULT) {
 		expected_type = itype_to_exp_particle_type(itype);
 	}
-
+	
 	if (exp_type != expected_type) {
 		if (db != NULL) {
 			as_info_respond_error(db, AS_ERR_PARAMETER, "bad 'exp' - expression type '%s' does not match expected type '%s'",
@@ -767,230 +635,19 @@ as_sindex_validate_exp_type(const char* iname, as_sindex_type itype,
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - create, delete, rename sindexes.
 //
 
-static void
-as_sindex_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
-{
-	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
-		const as_smd_item* item = cf_vector_get_ptr(items, i);
-		as_sindex_def def = { 0 };
-
-		if (! smd_item_to_def(item->key, item->value, &def)) {
-			continue;
-		}
-
-		if (item->value != NULL) {
-			smd_create(&def, accept_type == AS_SMD_ACCEPT_OPT_START);
-		}
-		else {
-			smd_drop(&def);
-		}
-
-		as_sindex_def_free(&def);
-	}
-}
-
-static bool
-smd_item_to_def(const char* smd_key, const char* smd_value, as_sindex_def* def)
-{
-	// ns-name|<set-name>|bin-name|itype|ktype
-	// ns-name|<set-name>|bin-name|c<cdt-context>|itype|ktype
-	// ns-name|<set-name>||e<exp-b64>|itype|ktype
-
-	const char* read = smd_key;
-	const char* tok = strchr(read, TOK_CHAR_DELIMITER);
-
-	if (! tok) {
-		cf_warning(AS_SINDEX, "smd - namespace name missing delimiter");
-		return false;
-	}
-
-	uint32_t ns_name_len = (uint32_t)(tok - read);
-
-	def->ns = as_namespace_get_bybuf((const uint8_t*)read, ns_name_len);
-
-	if (def->ns == NULL) { // normal if namespace is not on this node
-		cf_detail(AS_SINDEX, "skipping invalid namespace %.*s", ns_name_len,
-				read);
-		return false;
-	}
-
-	read = tok + 1;
-	tok = strchr(read, TOK_CHAR_DELIMITER);
-
-	if (tok == NULL) {
-		cf_warning(AS_SINDEX, "smd - set name missing delimiter");
-		return false;
-	}
-
-	uint32_t set_name_len = (uint32_t)(tok - read);
-
-	if (set_name_len >= AS_SET_NAME_MAX_SIZE) {
-		cf_warning(AS_SINDEX, "smd - set name too long");
-		return false;
-	}
-
-	if (set_name_len != 0) {
-		memcpy(def->set_name, read, set_name_len);
-		def->set_name[set_name_len] = 0;
-	}
-	// else - set_name remains empty - ok.
-
-	read = tok + 1;
-	tok = strchr(read, TOK_CHAR_DELIMITER);
-
-	if (tok == NULL) {
-		cf_warning(AS_SINDEX, "smd - bin name missing delimiter");
-		return false;
-	}
-
-	uint32_t bin_name_len = (uint32_t)(tok - read);
-
-	memcpy(def->bin_name, read, bin_name_len);
-	def->bin_name[bin_name_len] = 0;
-
-	read = tok + 1;
-	tok = strchr(read, TOK_CHAR_DELIMITER);
-
-	const char* ctx_start = NULL;
-	uint32_t ctx_len = 0;
-	const char* exp_start = NULL;
-	uint32_t exp_len = 0;
-
-	if (*read == 'c') {
-		if (tok == NULL) {
-			cf_warning(AS_SINDEX, "smd - context missing delimiter");
-			return false;
-		}
-
-		ctx_start = read + 1;
-		ctx_len = (uint32_t)(tok - ctx_start);
-
-		if (ctx_len >= CTX_B64_MAX_SZ) {
-			cf_warning(AS_SINDEX, "smd - context too long");
-			return false;
-		}
-
-		// Skip context parsing for now to avoid malloc (parsed at the end).
-		read = tok + 1;
-		tok = strchr(read, TOK_CHAR_DELIMITER);
-	}
-	else if (*read == 'e') {
-		if (bin_name_len != 0) {
-			cf_warning(AS_SINDEX, "smd - both bin name and expression specified");
-			return false;
-		}
-
-		if (tok == NULL) {
-			cf_warning(AS_SINDEX, "smd - expression missing delimiter");
-			return false;
-		}
-
-		exp_start = read + 1;
-		exp_len = (uint32_t)(tok - exp_start);
-
-		if (exp_len >= EXP_B64_MAX_SZ) {
-			cf_warning(AS_SINDEX, "smd - expression too long");
-			return false;
-		}
-
-		// Skip expression parsing for now to avoid malloc (parsed at the end).
-		read = tok + 1;
-		tok = strchr(read, TOK_CHAR_DELIMITER);
-	}
-
-	// Validate bin name only if it is a non-expression sindex.
-	if (exp_start == NULL &&
-			(bin_name_len == 0 || bin_name_len >= AS_BIN_NAME_MAX_SZ)) {
-		cf_warning(AS_SINDEX, "smd - bad bin name");
-		return false;
-	}
-
-	if (tok == NULL) {
-		cf_warning(AS_SINDEX, "smd - itype missing delimiter");
-		return false;
-	}
-
-	if (tok - read != 1) {
-		cf_warning(AS_SINDEX, "smd - itype not single char");
-		return false;
-	}
-
-	def->itype = itype_from_smd_char(*read);
-
-	if (def->itype == AS_SINDEX_N_ITYPES) {
-		cf_warning(AS_SINDEX, "smd - bad itype");
-		return false;
-	}
-
-	read = tok + 1;
-
-	if (*(read + 1) != '\0') {
-		cf_warning(AS_SINDEX, "smd - ktype not single char");
-		return false;
-	}
-
-	def->ktype = ktype_from_smd_char(*read);
-
-	if (def->ktype == AS_PARTICLE_TYPE_BAD) {
-		cf_warning(AS_SINDEX, "smd - bad ktype");
-		return false;
-	}
-
-	if (def->itype == AS_SINDEX_ITYPE_MAPKEYS &&
-			def->ktype != AS_PARTICLE_TYPE_INTEGER &&
-			def->ktype != AS_PARTICLE_TYPE_STRING &&
-			def->ktype != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_SINDEX, "smd - bad ktype for itype 'mapkeys'");
-		return false;
-	}
-
-	// Handle sindex name (SMD value) if it's there.
-
-	if (smd_value != NULL) {
-		if (strlen(smd_value) >= INAME_MAX_SZ) {
-			cf_warning(AS_SINDEX, "smd - iname too long");
-			return false;
-		}
-
-		strcpy(def->iname, smd_value);
-	}
-
-	if (ctx_start != NULL) {
-		char* ctx_b64 = cf_malloc(ctx_len + 1);
-
-		memcpy(ctx_b64, ctx_start, ctx_len);
-		ctx_b64[ctx_len] = '\0';
-
-		def->ctx_b64 = ctx_b64;
-	}
-	else if (exp_start != NULL) {
-		char* exp_b64 = cf_malloc(exp_len + 1);
-
-		memcpy(exp_b64, exp_start, exp_len);
-		exp_b64[exp_len] = '\0';
-
-		def->exp_b64 = exp_b64;
-	}
-
-	return true;
-}
-
-static void
-smd_create(as_sindex_def* def, bool startup)
+void
+smd_sindex_create(as_sindex_def* def, bool startup)
 {
 	SINDEX_GWLOCK();
 
 	as_namespace* ns = def->ns;
-
-	as_sindex* cur_si = si_by_iname(ns, def->iname);
+	as_sindex* cur_si = as_si_by_iname(ns, def->iname);
 
 	if (cur_si != NULL) {
-		// For now, no special treatment if definition matches.
 		cf_warning(AS_SINDEX, "SINDEX CREATE: iname already in use - ignoring %s",
 				def->iname);
 		SINDEX_GWUNLOCK();
@@ -1037,12 +694,12 @@ smd_create(as_sindex_def* def, bool startup)
 		}
 	}
 
-	if ((cur_si = si_by_defn(ns, set_id, def->bin_name, def->ktype, def->itype,
+	if ((cur_si = as_si_by_defn(ns, set_id, def->bin_name, def->ktype, def->itype,
 			e_def.buf, (uint32_t)e_def.buf_sz, ctx_buf, (uint32_t)ctx_buf_sz))
 			!= NULL) {
 		cf_info(AS_SINDEX, "SINDEX CREATE: renaming %s to %s", cur_si->iname,
 				def->iname);
-		rename_sindex(cur_si, def->iname);
+		as_rename_sindex(cur_si, def->iname);
 		SINDEX_GWUNLOCK();
 
 		if (ctx_buf != NULL) {
@@ -1104,7 +761,7 @@ smd_create(as_sindex_def* def, bool startup)
 		as_sindex_tree_resume(si);
 	}
 
-	add_sindex(si);
+	as_add_sindex(si);
 
 	if (def->set_name[0] == '\0') {
 		ns->n_setless_sindexes++;
@@ -1136,8 +793,8 @@ smd_create(as_sindex_def* def, bool startup)
 	SINDEX_GWUNLOCK();
 }
 
-static void
-smd_drop(as_sindex_def* def)
+void
+smd_sindex_drop(as_sindex_def* def)
 {
 	SINDEX_GWLOCK();
 
@@ -1183,7 +840,7 @@ smd_drop(as_sindex_def* def)
 		}
 	}
 
-	as_sindex* si = si_by_defn(ns, set_id, def->bin_name, def->ktype,
+	as_sindex* si = as_si_by_defn(ns, set_id, def->bin_name, def->ktype,
 			def->itype, exp_buf, (uint32_t)exp_buf_sz, ctx_buf,
 			(uint32_t)ctx_buf_sz);
 
@@ -1223,7 +880,7 @@ smd_drop(as_sindex_def* def)
 
 	drop_from_sindexes(si); // must precede bin_bitmap_clear()
 
-	delete_sindex(si);
+	as_delete_sindex(si);
 
 	if (def->set_name[0] == '\0') {
 		ns->n_setless_sindexes--;
@@ -1238,35 +895,6 @@ smd_drop(as_sindex_def* def)
 
 	// Release original rc-alloc ref-count.
 	as_sindex_release(si);
-}
-
-static void
-rename_sindex(as_sindex* si, const char* iname)
-{
-	as_namespace* ns = si->ns;
-
-	cf_shash_delete(ns->sindex_iname_hash, si->iname);
-	cf_shash_put(ns->sindex_iname_hash, iname, &si);
-
-	memcpy(si->iname, iname, INAME_MAX_SZ); // keep iname 0-padded
-}
-
-static void
-add_sindex(as_sindex* si)
-{
-	as_namespace* ns = si->ns;
-
-	defn_hash_put(si);
-	cf_shash_put(ns->sindex_iname_hash, si->iname, &si);
-}
-
-static void
-delete_sindex(as_sindex* si)
-{
-	as_namespace* ns = si->ns;
-
-	defn_hash_delete(si);
-	cf_shash_delete(ns->sindex_iname_hash, si->iname);
 }
 
 static bool
@@ -1352,91 +980,6 @@ free_exp_def(exp_def* e_def)
 // Local helpers - set+(bin-name or exp) hash.
 //
 
-static uint32_t
-defn_hash_fn(const void* key)
-{
-	return cf_wyhash32((const uint8_t*)key, sizeof(defn_hash_key));
-}
-
-static void
-defn_hash_generate_key(const char* bin_name, const uint8_t* exp_buf,
-		uint32_t exp_buf_sz, defn_hash_key* key)
-{
-	if (bin_name[0] != '\0') {
-		strcpy(key->bin_name, bin_name);
-	}
-	else {
-		uint64_t hash = cf_wyhash64(exp_buf, exp_buf_sz);
-		memcpy(key->bin_name, &hash, sizeof(hash));
-		key->bin_name[AS_BIN_NAME_MAX_SZ - 1] = 'e'; // unique identity for exp
-	}
-}
-
-static void
-defn_hash_put(as_sindex* si)
-{
-	as_namespace* ns = si->ns;
-
-	defn_hash_key key = { .set_id = si->set_id };
-
-	defn_hash_generate_key(si->bin_name, si->exp_buf, si->exp_buf_sz, &key);
-
-	cf_ll* si_ll = NULL;
-
-	int rv = cf_shash_get(ns->sindex_defn_hash, &key, &si_ll);
-
-	if (rv == CF_SHASH_ERR_NOT_FOUND) {
-		si_ll = cf_malloc(sizeof(cf_ll));
-		cf_ll_init(si_ll, defn_hash_destroy_cb, false);
-		cf_shash_put(ns->sindex_defn_hash, &key, &si_ll);
-	}
-
-	defn_hash_ele* ele = cf_malloc(sizeof(defn_hash_ele));
-
-	ele->si = si;
-	cf_ll_append(si_ll, (cf_ll_element*)ele);
-}
-
-static void
-defn_hash_delete(as_sindex* si)
-{
-	as_namespace* ns = si->ns;
-
-	defn_hash_key key = { .set_id = si->set_id };
-
-	defn_hash_generate_key(si->bin_name, si->exp_buf, si->exp_buf_sz, &key);
-
-	cf_ll* si_ll = NULL;
-
-	cf_shash_get(ns->sindex_defn_hash, &key, &si_ll);
-
-	cf_ll_element* ele = cf_ll_get_head(si_ll);
-
-	while (ele != NULL) {
-		defn_hash_ele* prop_ele = (defn_hash_ele*)ele;
-
-		if (prop_ele->si == si) {
-			cf_ll_delete(si_ll, ele);
-
-			// If the list size becomes 0, delete the entry from the hash.
-			if (cf_ll_size(si_ll) == 0) {
-				cf_shash_delete(ns->sindex_defn_hash, &key);
-			}
-
-			return;
-		}
-
-		ele = ele->next;
-	}
-}
-
-static void
-defn_hash_destroy_cb(cf_ll_element* ele)
-{
-	cf_free(ele);
-}
-
-
 //==========================================================
 // Local helpers - populate sbin.
 //
@@ -1445,7 +988,7 @@ static uint32_t
 populate_sbins(as_namespace* ns, uint16_t set_id, const as_bin* b,
 		as_sindex_bin* sbins, as_sindex_op op)
 {
-	cf_ll* si_ll = si_list_by_defn(ns, set_id, b->name, NULL, 0);
+	cf_ll* si_ll = as_si_list_by_defn(ns, set_id, b->name, NULL, 0);
 
 	if (si_ll == NULL) {
 		return 0;
@@ -1487,88 +1030,6 @@ populate_sbin_si(as_sindex* si, const as_bin* b, as_sindex_bin* sbin,
 //==========================================================
 // Local helpers - sindex lookup.
 //
-
-static cf_ll*
-si_list_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name,
-		const uint8_t* exp_buf, uint32_t exp_buf_sz)
-{
-	defn_hash_key key = { .set_id = set_id };
-
-	defn_hash_generate_key(bin_name, exp_buf, exp_buf_sz, &key);
-
-	cf_ll* si_ll = NULL;
-
-	cf_shash_get(ns->sindex_defn_hash, &key, &si_ll);
-
-	return si_ll;
-}
-
-static as_sindex*
-si_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name,
-		as_particle_type ktype, as_sindex_type itype, const uint8_t* exp_buf,
-		uint32_t exp_buf_sz, const uint8_t* ctx_buf, uint32_t ctx_buf_sz)
-{
-	cf_ll* si_ll = si_list_by_defn(ns, set_id, bin_name, exp_buf, exp_buf_sz);
-
-	if (si_ll == NULL) {
-		return NULL;
-	}
-
-	cf_ll_element* ele = cf_ll_get_head(si_ll);
-
-	while (ele != NULL) {
-		defn_hash_ele* prop_ele = (defn_hash_ele*)ele;
-		as_sindex* si = prop_ele->si;
-
-		if (si->ktype == ktype && si->itype == itype &&
-				compare_buf(si->exp_buf, si->exp_buf_sz, exp_buf, exp_buf_sz) &&
-				compare_buf(si->ctx_buf, si->ctx_buf_sz, ctx_buf, ctx_buf_sz)) {
-			return si;
-		}
-
-		ele = ele->next;
-	}
-
-	return NULL;
-}
-
-static as_sindex*
-si_by_iname(const as_namespace* ns, const char* iname)
-{
-	size_t iname_len = strlen(iname);
-
-	if (iname_len == 0 || iname_len >= INAME_MAX_SZ) {
-		cf_warning(AS_SINDEX, "bad index name size %zu", iname_len);
-		return false;
-	}
-
-	char padded_iname[INAME_MAX_SZ] = { 0 };
-
-	strcpy(padded_iname, iname);
-
-	as_sindex* si = NULL;
-
-	cf_shash_get(ns->sindex_iname_hash, padded_iname, &si);
-
-	return si;
-}
-
-static bool
-compare_buf(const uint8_t* buf1, uint32_t buf1_sz,
-		const uint8_t* buf2, uint32_t buf2_sz)
-{
-	if (buf1 == NULL && buf2 == NULL) {
-		return true;
-	}
-
-	if (buf1 != NULL && buf2 != NULL && buf1_sz == buf2_sz &&
-			memcmp(buf1, buf2, buf2_sz) == 0) {
-		return true;
-	}
-
-	return false;
-}
-
 
 //==========================================================
 // Local helpers - sbins from bins.
@@ -1900,65 +1361,6 @@ sindex_particle_type_str(as_particle_type type)
 	}
 
 	return as_particle_type_str(type);
-}
-
-static as_particle_type
-ktype_from_smd_char(char c)
-{
-	switch (c) {
-	case 'I': return AS_PARTICLE_TYPE_INTEGER;
-	case 'S': return AS_PARTICLE_TYPE_STRING;
-	case 'B': return AS_PARTICLE_TYPE_BLOB;
-	case 'G': return AS_PARTICLE_TYPE_GEOJSON;
-	default:
-		cf_warning(AS_SINDEX, "invalid smd ktype %c", c);
-		return AS_PARTICLE_TYPE_BAD;
-	}
-}
-
-static char
-ktype_to_smd_char(as_particle_type ktype)
-{
-	switch (ktype) {
-	case AS_PARTICLE_TYPE_INTEGER: return 'I';
-	case AS_PARTICLE_TYPE_STRING: return 'S';
-	case AS_PARTICLE_TYPE_BLOB: return 'B';
-	case AS_PARTICLE_TYPE_GEOJSON: return 'G';
-	default:
-		cf_crash(AS_SINDEX, "invalid ktype %d", ktype);
-	}
-
-	return '\0';
-}
-
-static as_sindex_type
-itype_from_smd_char(char c)
-{
-	switch (c) {
-	case '.': return AS_SINDEX_ITYPE_DEFAULT;
-	case 'L': return AS_SINDEX_ITYPE_LIST;
-	case 'K': return AS_SINDEX_ITYPE_MAPKEYS;
-	case 'V': return AS_SINDEX_ITYPE_MAPVALUES;
-	default:
-		cf_warning(AS_SINDEX, "invalid smd type %c", c);
-		return AS_SINDEX_N_ITYPES; // since there's no named illegal value
-	}
-}
-
-// 'c' (context) and 'e' (expression) are reserved in the smd key.
-static char
-itype_to_smd_char(as_sindex_type itype)
-{
-	switch (itype) {
-	case AS_SINDEX_ITYPE_DEFAULT: return '.';
-	case AS_SINDEX_ITYPE_LIST: return 'L';
-	case AS_SINDEX_ITYPE_MAPKEYS: return 'K';
-	case AS_SINDEX_ITYPE_MAPVALUES: return 'V';
-	default:
-		cf_crash(AS_SINDEX, "invalid type %d", itype);
-	}
-
-	return '\0';
 }
 
 static as_particle_type

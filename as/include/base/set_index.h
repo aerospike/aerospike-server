@@ -35,6 +35,7 @@
 #include "cf_mutex.h"
 
 #include "base/index.h"
+#include "sindex/sindex_manager.h"
 
 
 //==========================================================
@@ -77,6 +78,8 @@ typedef struct uarena_s {
 // Minimum set sprigs - we're sharing the primary index tree's sprig locks.
 #define N_SET_SPRIGS NUM_LOCK_PAIRS
 
+#define SET_INDEX_DUMMY_BIN_NAME "<ERO~SET_IX>"
+
 typedef struct as_set_index_tree_s {
 	uarena ua;
 	uarena_handle roots[N_SET_SPRIGS];
@@ -111,13 +114,12 @@ typedef struct ssprig_reduce_info_s {
 	cf_mutex* olock;
 } ssprig_reduce_info;
 
-
 //==========================================================
 // Public API.
 //
 
 // Startup.
-void as_set_index_init(void);
+void as_set_index_start(void);
 
 // Set-index tree lifecycle.
 void as_set_index_create_all(struct as_namespace_s* ns, struct as_index_tree_s* tree);
@@ -133,11 +135,15 @@ void as_set_index_delete(struct as_namespace_s* ns, struct as_index_tree_s* tree
 void as_set_index_delete_live(struct as_namespace_s* ns, struct as_index_tree_s* tree, struct as_index_s* r, uint64_t r_h);
 bool as_set_index_reduce(struct as_namespace_s* ns, struct as_index_tree_s* tree, uint16_t set_id, cf_digest* keyd, as_index_reduce_fn cb, void* udata);
 
-// Info & stats.
-void as_set_index_enable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
-void as_set_index_disable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
-uint64_t as_set_index_used_bytes(const struct as_namespace_s* ns);
+// Smd
+void smd_set_index_create(as_sindex_def* def);
+void smd_set_index_drop(as_sindex_def* def);
 
+// Info & stats.
+bool as_set_index_enable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id, as_set_index_mode new_way);
+bool as_set_index_disable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id, as_set_index_mode new_way);
+bool as_set_index_stats_str(const struct as_namespace_s* ns, const struct as_set_s* p_set, cf_dyn_buf* db);
+uint64_t as_set_index_used_bytes(const struct as_namespace_s* ns);
 
 //==========================================================
 // Private API - enterprise separation only.

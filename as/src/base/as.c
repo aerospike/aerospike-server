@@ -62,7 +62,6 @@
 #include "base/nsup.h"
 #include "base/security.h"
 #include "base/service.h"
-#include "base/set_index.h"
 #include "base/smd.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
@@ -78,6 +77,7 @@
 #include "fabric/service_list.h"
 #include "fabric/skew_monitor.h"
 #include "query/query_manager.h"
+#include "sindex/sindex_manager.h"
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
@@ -390,7 +390,7 @@ as_run(int argc, char **argv)
 	as_namespaces_setup(cold_start_cmd, instance);
 
 	// These load SMD involving sets/bins, needed during storage init/load.
-	as_sindex_init();
+	as_sindex_manager_init();
 	as_truncate_init();
 
 	// Initialize namespaces. Partition structures and index tree structures are
@@ -448,14 +448,13 @@ as_run(int argc, char **argv)
 	as_query_manager_init();	// query transaction handling
 	as_udf_init();				// user-defined functions
 	as_batch_init();			// batch transaction handling
-	as_set_index_init();		// dynamic set-index population
 
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
+	as_sindex_manager_start();	// sindex gc and set-index population threads
 	cf_tls_start();				// starts tls certificate refresh thread
 	as_security_start();		// starts security threads
-	as_sindex_start();			// starts sindex GC threads
 	as_smd_start();				// enables receiving cluster state change events
 	as_health_start();			// starts before fabric and hb to capture them
 	as_fabric_start();			// may send & receive fabric messages

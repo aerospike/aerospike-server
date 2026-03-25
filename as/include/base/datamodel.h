@@ -757,6 +757,7 @@ typedef struct as_namespace_s {
 	uint64_t		si_n_recs_checked; // used only by startup ticker
 
 	uint32_t		n_setless_sindexes;
+	uint32_t		n_sindexes;
 	cf_shash*		sindex_defn_hash;
 	cf_shash*		sindex_iname_hash;
 
@@ -1457,6 +1458,12 @@ typedef struct as_namespace_s {
 
 #define INVALID_SET_ID 0
 
+typedef enum {
+	AS_SET_INDEX_NONE,			// no set index
+	AS_SET_INDEX_CONFIG,		// set index enabled via set-config/static conf
+	AS_SET_INDEX_SMD			// set index enabled via sindex-create
+} as_set_index_mode;
+
 // as_set flag bits
 #define AS_SET_FLAG_TRUNCATING         0x01
 #define AS_SET_FLAG_HAS_MASKING_RULES  0x02
@@ -1476,7 +1483,7 @@ typedef struct as_set_s {
 	uint32_t		default_ttl;		// can override namespace default_ttl
 	uint32_t		default_read_touch_ttl_pct; // can override namespace cfg
 	bool			eviction_disabled;	// don't evict anything in this set (note - expiration still works)
-	bool			index_enabled;
+	uint8_t			index_enabled;		// protected by g_balance_lock (smd vs set-config race)
 	bool			index_populating;
 	uint8_t			flags;				// Packed flags (2 bits used)
 } as_set;

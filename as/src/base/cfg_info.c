@@ -2538,12 +2538,16 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s",
 					ns->name, p_set->name, v);
-			as_set_index_enable(ns, p_set, set_id);
+			if (! as_set_index_enable(ns, p_set, set_id, AS_SET_INDEX_CONFIG)) {
+				return false;
+			}
 		}
 		else if (strcmp(v, "false") == 0) {
 			cf_info(AS_INFO, "Changing value of enable-index of ns %s set %s to %s",
 					ns->name, p_set->name, v);
-			as_set_index_disable(ns, p_set, set_id);
+			if (! as_set_index_disable(ns, p_set, set_id, AS_SET_INDEX_CONFIG)) {
+				return false;
+			}
 		}
 		else {
 			return false;

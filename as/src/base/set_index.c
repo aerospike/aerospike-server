@@ -36,15 +36,18 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "arenax.h"
+#include "dynbuf.h"
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "log.h"
+#include "shash.h"
 #include "vmapx.h"
 
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "fabric/partition.h"
 #include "sindex/gc.h"
+#include "sindex/sindex_manager.h"
 #include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
@@ -160,7 +163,7 @@ uarena_set_handle(uarena_handle* h, uint32_t stage_id, uint32_t ele_id)
 //
 
 void
-as_set_index_init(void)
+as_set_index_start(void)
 {
 	cf_queue_init(&g_populate_q, sizeof(populate_info), 4, true);
 
@@ -194,7 +197,7 @@ as_set_index_destroy_all(as_index_tree* tree)
 		if (stree != NULL) {
 			// TODO - paranoia - remove or simplify eventually.
 			uint32_t rc = cf_rc_count(stree);
-			cf_assert(rc == 1, AS_INDEX, "bad stree rc %u id %u", rc, set_id);
+			cf_assert(rc == 1, AS_SINDEX, "bad stree rc %u id %u", rc, set_id);
 
 			stree_destroy(stree); // ok to directly destroy stree
 		}
@@ -259,7 +262,7 @@ as_set_index_insert(as_namespace* ns, as_index_tree* tree, uint16_t set_id,
 	ssi_from_keyd(tree, stree, &r->keyd, &ssi);
 
 	if (! ssprig_insert(&ssi, r_h)) {
-		cf_warning(AS_INDEX, "insert found existing element - unexpected");
+		cf_warning(AS_SINDEX, "insert found existing element - unexpected");
 	}
 
 	stree_release(stree);
@@ -355,21 +358,158 @@ as_set_index_reduce(as_namespace* ns, as_index_tree* tree, uint16_t set_id,
 //
 
 void
-as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
+smd_set_index_create(as_sindex_def* def)
 {
-	if (p_set->index_enabled) {
+	SINDEX_GWLOCK();
+
+	as_namespace* ns = def->ns;
+	as_sindex* cur_si = as_si_by_iname(ns, def->iname);
+
+	if (cur_si != NULL) {
+		cf_warning(AS_SINDEX, "SINDEX CREATE: iname already in use - ignoring %s",
+				def->iname);
+		SINDEX_GWUNLOCK();
 		return;
 	}
 
+	as_set* p_set = NULL;
+	uint16_t set_id = INVALID_SET_ID;
+
+	if (def->set_name[0] != '\0' && as_namespace_get_create_set_w_len(ns,
+		def->set_name, strlen(def->set_name), &p_set, &set_id) != 0) {
+		cf_warning(AS_SINDEX, "SINDEX CREATE: failed get-create set %s",
+			def->set_name);
+		SINDEX_GWUNLOCK();
+		return;
+	}
+
+	if ((cur_si = as_si_by_defn(ns, set_id, def->bin_name, def->ktype, def->itype,
+		NULL, 0, NULL, 0))
+		!= NULL) {
+		cf_info(AS_SINDEX, "SINDEX CREATE: renaming %s to %s", cur_si->iname,
+			def->iname);
+		as_rename_sindex(cur_si, def->iname);
+		SINDEX_GWUNLOCK();
+		return;
+	}
+
+	cf_info(AS_SINDEX, "SINDEX CREATE: request received for %s:%s via smd",
+		ns->name, def->iname);
+
+	// Not cf_rc_malloc - si does not protect set index (set_tree does it). 
+	as_sindex* si = cf_malloc(sizeof(as_sindex));
+
+	memset(si, 0, sizeof(as_sindex));
+
+	si->ns = ns;
+	si->set_id = set_id;
+	strcpy(si->set_name, def->set_name);
+	strcpy(si->iname, def->iname);
+	strcpy(si->bin_name, def->bin_name);
+
+	si->ktype = def->ktype;
+	si->itype = def->itype;
+
+	as_add_sindex(si);
+
+	SINDEX_GWUNLOCK();
+
+	bool rv = as_set_index_enable(ns, p_set, set_id, AS_SET_INDEX_SMD);
+	
+	cf_assert(rv, AS_SINDEX, "SINDEX CREATE: failed to enable set index %s:%s", 
+			ns->name, def->iname);
+}
+
+void
+smd_set_index_drop(as_sindex_def* def)
+{
+	SINDEX_GWLOCK();
+
+	as_namespace* ns = def->ns;
+	uint16_t set_id = as_namespace_get_set_id(ns, def->set_name);
+
+	if (def->set_name[0] != '\0' && set_id == INVALID_SET_ID) {
+		cf_warning(AS_SINDEX, "SINDEX DROP: set '%s' not found", def->set_name);
+		SINDEX_GWUNLOCK();
+		return;
+	}
+
+	as_set* p_set = as_namespace_get_set_by_id(ns, set_id);
+
+	if (p_set->index_enabled == AS_SET_INDEX_NONE) {
+		cf_info(AS_SINDEX, "SINDEX DROP: already disabled for %s:%s",
+				ns->name, def->set_name);
+		SINDEX_GWUNLOCK();
+		return;
+	}
+
+	as_sindex* si = as_si_by_defn(ns, set_id, def->bin_name, def->ktype,
+			def->itype, NULL, 0, NULL, 0);
+
+	if (si == NULL) {
+		cf_warning(AS_SINDEX, "SINDEX DROP: si not found");
+		SINDEX_GWUNLOCK();
+		return;
+	}
+
+	cf_info(AS_SINDEX, "SINDEX DROP: request received for %s:%s via smd",
+		ns->name, def->set_name);
+
+	as_delete_sindex(si);
+	cf_free(si); // not cf_rc_malloc - can free immediately
+
+	SINDEX_GWUNLOCK();
+
+	// Safe to call it outside global lock.
+	as_set_index_disable(ns, p_set, set_id, AS_SET_INDEX_SMD);
+}
+
+bool
+as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id,
+		as_set_index_mode new_way)
+{
+	// TODO:- (daud) use g_balance_lock to protect p_set->index_enabled from
+	// race between SMD and set-config. This is temporary until we remove
+	// set-config command for set-index. In the future, when only SMD is allowed
+	// there is no race for p_set->index_enabled.
+
 	// Ensure either rebalance or this call creates the strees.
 	cf_mutex_lock(&g_balance_lock);
+
+ 	as_set_index_mode curr_way = (as_set_index_mode)p_set->index_enabled;
+
+	if (curr_way != AS_SET_INDEX_NONE) {
+		char* curr_way_str = curr_way == AS_SET_INDEX_SMD ? "smd" : "config";
+		char* new_way_str = new_way == AS_SET_INDEX_SMD ? "smd" : "config";
+
+		if (curr_way == AS_SET_INDEX_CONFIG && new_way == AS_SET_INDEX_SMD) {
+			cf_info(AS_SINDEX, "changing creation mode of set index for %s:%s from %s to %s",
+					ns->name, p_set->name, curr_way_str, new_way_str);
+			p_set->index_enabled = AS_SET_INDEX_SMD;
+			cf_mutex_unlock(&g_balance_lock);
+			return true;
+		}
+
+		if (curr_way == AS_SET_INDEX_SMD && new_way == AS_SET_INDEX_CONFIG) {
+			cf_warning(AS_SINDEX, "set index enabled via %s for %s:%s - cannot enable via %s",
+					curr_way_str, ns->name, p_set->name, new_way_str);
+			cf_mutex_unlock(&g_balance_lock);
+			return false;
+		}
+
+		cf_info(AS_SINDEX, "set index already enabled via %s for %s:%s", 
+				curr_way_str, ns->name, p_set->name);
+		cf_mutex_unlock(&g_balance_lock);
+		return true;
+	}
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition_create_set_index(ns, pid, set_id);
 	}
 
 	p_set->index_populating = true;
-	as_store_bool_rls(&p_set->index_enabled, true);
+
+	as_store_uint8(&p_set->index_enabled, (uint8_t)new_way);
 
 	cf_mutex_unlock(&g_balance_lock);
 
@@ -378,10 +518,10 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 	if (p_set->n_objects == 0) {
 		p_set->index_populating = false;
 
-		cf_info(AS_INDEX, "{%s|%s} done populating set-index (0 ms)", ns->name,
+		cf_info(AS_SINDEX, "{%s|%s} done populating set-index (0 ms)", ns->name,
 				p_set->name);
 
-		return;
+		return true;
 	}
 
 	populate_info popi = {
@@ -391,19 +531,42 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 	};
 
 	cf_queue_push(&g_populate_q, &popi);
+
+	return true;
 }
 
-void
-as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id)
+bool
+as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id,
+		as_set_index_mode new_way)
 {
-	if (! p_set->index_enabled) {
-		return;
-	}
+	// TODO:- (daud) use g_balance_lock to protect p_set->index_enabled from
+	// race between SMD and set-config. This is temporary until we remove
+	// set-config command for set-index. In the future, when only SMD is allowed
+	// there is no race for p_set->index_enabled.
 
 	// Ensure rebalance won't set NULL strees - destroy assumes they're not.
 	cf_mutex_lock(&g_balance_lock);
 
-	p_set->index_enabled = false;
+	as_set_index_mode curr_way = (as_set_index_mode)p_set->index_enabled;
+
+	if (curr_way == AS_SET_INDEX_NONE) {
+		cf_warning(AS_SINDEX, "set index already disabled for %s:%s",
+				ns->name, p_set->name);
+		cf_mutex_unlock(&g_balance_lock);
+		return true;
+	}
+		
+	char* curr_way_str = curr_way == AS_SET_INDEX_SMD ? "smd" : "config";
+	char* new_way_str = new_way == AS_SET_INDEX_SMD ? "smd" : "config";
+
+	if (curr_way != new_way) {
+		cf_warning(AS_SINDEX, "set index enabled via %s for %s:%s - cannot disable via %s",
+			curr_way_str, ns->name, p_set->name, new_way_str);
+		cf_mutex_unlock(&g_balance_lock);
+		return false;
+	}
+
+	p_set->index_enabled = AS_SET_INDEX_NONE;	
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition_destroy_set_index(ns, pid, set_id);
@@ -418,6 +581,21 @@ as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 	while (p_set->index_populating) {
 		usleep(100);
 	}
+
+	return true;
+}
+
+bool
+as_set_index_stats_str(const as_namespace* ns, const as_set* p_set, 
+		cf_dyn_buf* db)
+{
+	info_append_uint64(db, "entries", p_set->n_objects);
+	info_append_uint64(db, "used_bytes", as_set_index_used_bytes(ns));
+	info_append_uint32(db, "load_pct", p_set->index_populating ? 0 : 100);
+
+	cf_dyn_buf_chomp(db);
+
+	return true;
 }
 
 uint64_t
@@ -431,10 +609,10 @@ as_set_index_used_bytes(const as_namespace* ns)
 
 		if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_ix, (void**)&p_set) !=
 				CF_VMAPX_OK) {
-			cf_crash(AS_INDEX, "failed to get set index %u from vmap", set_ix);
+			cf_crash(AS_SINDEX, "failed to get set index %u from vmap", set_ix);
 		}
 
-		if (p_set->index_enabled) {
+		if (p_set->index_enabled != AS_SET_INDEX_NONE) {
 			n_objects += p_set->n_objects;
 		}
 	}
@@ -459,12 +637,12 @@ is_set_indexed(const as_namespace* ns, uint16_t set_id)
 
 	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_ix, (void**)&p_set) !=
 			CF_VMAPX_OK) {
-		cf_crash(AS_INDEX, "failed to get set index %u from vmap", set_ix);
+		cf_crash(AS_SINDEX, "failed to get set index %u from vmap", set_ix);
 	}
 
 	as_fence_seq();
 
-	return p_set->index_enabled;
+	return p_set->index_enabled != AS_SET_INDEX_NONE;
 }
 
 static inline bool
@@ -479,10 +657,11 @@ is_set_populated(const as_namespace* ns, uint16_t set_id)
 
 	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_ix, (void**)&p_set) !=
 			CF_VMAPX_OK) {
-		cf_crash(AS_INDEX, "failed to get set index %u from vmap", set_ix);
+		cf_crash(AS_SINDEX, "failed to get set index %u from vmap", set_ix);
 	}
 
-	return as_load_bool_acq(&p_set->index_enabled) && ! p_set->index_populating;
+	return as_load_uint8_acq(&p_set->index_enabled) 
+			&& ! p_set->index_populating;
 }
 
 
@@ -511,7 +690,7 @@ run_populate_q(void* udata)
 
 		cf_queue_pop(&g_populate_q, &popi, CF_QUEUE_FOREVER);
 
-		cf_info(AS_INDEX, "{%s|%s} start populating set-index ...",
+		cf_info(AS_SINDEX, "{%s|%s} start populating set-index ...",
 				popi.ns->name, popi.p_set->name);
 
 		uint64_t start_ms = cf_getms();
@@ -528,7 +707,7 @@ run_populate_q(void* udata)
 
 		popi.p_set->index_populating = false;
 
-		cf_info(AS_INDEX, "{%s|%s} done populating set-index (%lu ms)",
+		cf_info(AS_SINDEX, "{%s|%s} done populating set-index (%lu ms)",
 				popi.ns->name, popi.p_set->name, cf_getms() - start_ms);
 	}
 
@@ -586,7 +765,7 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 	populate_cb_info* cbi = (populate_cb_info*)udata;
 	as_namespace* ns = cbi->ns;
 
-	if (! cbi->p_set->index_enabled) {
+	if (cbi->p_set->index_enabled == AS_SET_INDEX_NONE) {
 		as_record_done(r_ref, ns);
 		return false;
 	}
@@ -1006,7 +1185,7 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 				}
 
 				// MRT PARANOIA - can we encounter a provisional here?
-				cf_assert(r_ref.r->orig_h == 0, AS_INDEX,
+				cf_assert(r_ref.r->orig_h == 0, AS_SINDEX,
 						"unexpected - dropped provisional");
 
 				cf_arenax_free(ssi->arena, r_ref.r_h, NULL);

@@ -3975,7 +3975,7 @@ as_config_init(const char* config_file)
 				p_set->eviction_disabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_SET_ENABLE_INDEX:
-				p_set->index_enabled = cfg_bool(&line);
+				p_set->index_enabled = (uint8_t)(cfg_bool(&line) ? AS_SET_INDEX_CONFIG : AS_SET_INDEX_NONE);
 				break;
 			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
 				p_set->stop_writes_count = cfg_u64_no_checks(&line);

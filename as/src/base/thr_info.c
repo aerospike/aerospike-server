@@ -97,6 +97,7 @@
 #include "fabric/service_list.h"
 #include "fabric/skew_monitor.h"
 #include "query/query_manager.h"
+#include "sindex/sindex_manager.h"
 #include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
@@ -131,17 +132,6 @@ typedef struct rack_node_s {
 	uint32_t rack_id;
 	cf_node node;
 } rack_node;
-
-typedef struct find_sindex_key_udata_s {
-	const char* ns_name;
-	const char* index_name;
-	const char* smd_key;
-	char* found_key; // only when unique
-	uint32_t n_name_matches;
-	uint32_t n_indexes;
-	bool has_smd_key;
-} find_sindex_key_udata;
-
 
 //==========================================================
 // Globals.
@@ -281,14 +271,12 @@ static void add_sindex_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static int32_t oldest_nvme_age(const char* path);
 static void add_data_stripe_stats(as_namespace* ns, cf_dyn_buf* db);
 static void add_data_device_stats(as_namespace* ns, cf_dyn_buf* db);
-static void find_sindex_key(const cf_vector* items, void* udata);
 static void smd_show_cb(const cf_vector* items, void* udata);
 static void debug_record(const char* params, cf_dyn_buf* db, bool all_data, as_file_handle* fd_h);
 static void debug_dump_index(cf_dyn_buf* db, as_namespace* ns, as_record* r, bool is_orig);
 static void debug_dump_pickle(cf_dyn_buf* db, as_storage_rd* rd, bool is_orig);
 static void debug_dump_raw(cf_dyn_buf* db, as_storage_rd* rd, bool leave_encrypted, bool is_orig);
 static void debug_dump_parsed(cf_dyn_buf* db, as_storage_rd* rd, bool all_data, bool is_orig);
-
 
 //==========================================================
 // Inlines & macros.
@@ -3036,7 +3024,7 @@ cmd_sindex(as_info_cmd_args* args)
 		as_sindex_list_str(ns, false, db);
 		cf_dyn_buf_chomp_char(db, ';');
 	}
-	else if (! as_sindex_stats_str(ns, index_name, db)) {
+	else if (! as_sindex_manager_stats_str(ns, index_name, db)) {
 		cf_warning(AS_INFO, "failed to get statistics for index %s: not found",
 				index_name);
 		as_info_respond_error(db, AS_ERR_SINDEX_NOT_FOUND, "no index");
@@ -3046,512 +3034,38 @@ cmd_sindex(as_info_cmd_args* args)
 static void
 cmd_sindex_create(as_info_cmd_args* args)
 {
+	// Secondary index command format:
 	// Old command format:
 	// sindex-create:ns=usermap;set=demo;indexname=um_age;indextype=list;indexdata=age,numeric
 	// sindex-create:ns=usermap;set=demo;indexname=um_state;indexdata=state,string
 	// sindex-create:ns=usermap;set=demo;indexname=um_highscore;context=<base64-cdt-ctx>;indexdata=scores,numeric
-
+	
 	// New command format:
 	// sindex-create:ns=usermap;set=demo;indexname=um_highscore;*context=<base64-cdt-ctx>;exp=<base64-exp>;indextype=list;type=numeric;*bin=scores
 	// * - mutually exclusive with expression
 
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-	char index_name_str[INAME_MAX_SZ];
-	int index_name_len = sizeof(index_name_str);
-	info_param_result rv = as_info_parameter_get(params, "indexname",
-			index_name_str, &index_name_len);
+	// Set index command format:
+	// sindex-create:ns=usermap;set=demo;indextype=set;indexname=um_state
 
-	if (! as_info_required_param_is_ok(db, "indexname", index_name_str, rv)) {
-		return;
-	}
-
-	char ns_str[AS_ID_NAMESPACE_SZ];
-	int ns_len = sizeof(ns_str);
-
-	rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-
-	if (! as_info_required_param_is_ok(db, "namespace", ns_str, rv)) {
-		return;
-	}
-
-	char set_str[AS_SET_NAME_MAX_SIZE];
-	char* p_set_str = NULL;
-	int set_len = sizeof(set_str);
-
-	rv = as_info_parameter_get(params, "set", set_str, &set_len);
-	rv = as_info_optional_param_is_ok(db, "set", set_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK) {
-		p_set_str = set_str;
-	}
-
-	char ctx_b64[CTX_B64_MAX_SZ];
-	int ctx_b64_len = sizeof(ctx_b64);
-	const char* p_cdt_ctx = NULL;
-
-	rv = as_info_parameter_get(params, "context", ctx_b64, &ctx_b64_len);
-	rv = as_info_optional_param_is_ok(db, "context", ctx_b64, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK) {
-		uint8_t* buf;
-		int32_t buf_sz = as_sindex_cdt_ctx_b64_decode(ctx_b64, ctx_b64_len,
-				&buf);
-
-		if (buf_sz > 0) {
-			cf_free(buf);
-		}
-		else if (buf_sz < 0) {
-			switch (buf_sz) {
-			case -1:
-				cf_warning(AS_INFO, "sindex-create %s: 'context' invalid base64",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"'context' invalid base64");
-				return;
-			case -2:
-				cf_warning(AS_INFO, "sindex-create %s: 'context' invalid cdt context",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"'context' invalid cdt context");
-				return;
-			case -3:
-				cf_warning(AS_INFO, "sindex-create %s: 'context' not normalized msgpack",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"'context' not normalized msgpack");
-				return;
-			default:
-				cf_crash(AS_INFO, "unreachable");
-			}
-		}
-
-		p_cdt_ctx = ctx_b64;
-	}
-
-	char indextype_str[INDEXTYPE_MAX_SZ];
-	int indtype_len = sizeof(indextype_str);
-	as_sindex_type itype;
-
-	rv = as_info_parameter_get(params, "indextype", indextype_str,
-			&indtype_len);
-	rv = as_info_optional_param_is_ok(db, "indextype", indextype_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK_NOT_FOUND) {
-		// If not specified, the index type is DEFAULT.
-		itype = AS_SINDEX_ITYPE_DEFAULT;
-	}
-	else {
-		itype = as_sindex_itype_from_string(indextype_str);
-
-		if (itype == AS_SINDEX_N_ITYPES) {
-			cf_warning(AS_INFO, "sindex-create %s: bad 'indextype' '%s'",
-					index_name_str, indextype_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad 'indextype' - must be one of 'default', 'list', 'mapkeys', 'mapvalues'");
-			return;
-		}
-	}
-
-	char bin_name[AS_BIN_NAME_MAX_SZ] = { 0 };
-	int bin_name_len = sizeof(bin_name);
-	const char* p_bin_name = NULL;
-	char exp_b64[EXP_B64_MAX_SZ] = { 0 };
-	int exp_b64_len = sizeof(exp_b64);
-	const char* p_exp = NULL;
-	char indexdata_str[INDEXDATA_MAX_SZ] = { 0 };
-	int indexdata_len = sizeof(indexdata_str);
-	char ktype_str[KTYPE_MAX_SZ] = { 0 };
-	int ktype_len = sizeof(ktype_str);
-	char* p_ktype_str = NULL;
-	as_particle_type ktype;
-
-	info_param_result indexdata_rv = as_info_parameter_get(params, "indexdata",
-			indexdata_str, &indexdata_len);
-	indexdata_rv = as_info_optional_param_is_ok(db, "indexdata", indexdata_str,
-			indexdata_rv);
-
-	if (indexdata_rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	info_param_result type_rv = as_info_parameter_get(params, "type", ktype_str,
-			&ktype_len);
-	type_rv = as_info_optional_param_is_ok(db, "type", ktype_str, type_rv);
-
-	if (type_rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (indexdata_rv == INFO_PARAM_OK_NOT_FOUND &&
-			type_rv == INFO_PARAM_OK_NOT_FOUND) {
-		cf_warning(AS_INFO, "sindex-create %s: both 'indexdata' and 'type' are missing",
-				index_name_str);
-		as_info_respond_error(db, AS_ERR_PARAMETER, "both 'indexdata' and 'type' are missing");
-		return;
-	}
-
-	if (indexdata_rv == INFO_PARAM_OK && type_rv == INFO_PARAM_OK) {
-		cf_warning(AS_INFO, "sindex-create %s: both 'indexdata' and 'type' are specified",
-				index_name_str);
-		as_info_respond_error(db, AS_ERR_PARAMETER, "both 'indexdata' and 'type' are specified");
-		return;
-	}
-
-	if (type_rv == INFO_PARAM_OK) {
-		// New protocol - type=<type>[;bin=<name>][;exp=<base64-exp>]
-		ktype = as_sindex_ktype_from_string(ktype_str);
-
-		if (ktype == AS_PARTICLE_TYPE_BAD) {
-			cf_warning(AS_INFO, "sindex-create %s: bad 'type' '%s'",
-					index_name_str, ktype_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad 'type' - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
-			return;
-		}
-
-		p_ktype_str = ktype_str;
-
-		rv = as_info_parameter_get(params, "bin", bin_name, &bin_name_len);
-
-		uint32_t bin_rv = as_info_optional_param_is_ok(db, "bin", bin_name, rv);
-
-		if (bin_rv == INFO_PARAM_FAIL_REPLIED) {
-			return;
-		}
-
-		if (bin_rv == INFO_PARAM_OK) {
-			p_bin_name = bin_name;
-		}
-
-		rv = as_info_parameter_get(params, "exp", exp_b64, &exp_b64_len);
-
-		uint32_t exp_rv = as_info_optional_param_is_ok(db, "exp", exp_b64, rv);
-
-		if (exp_rv == INFO_PARAM_FAIL_REPLIED) {
-			return;
-		}
-
-		if (bin_rv == INFO_PARAM_OK && exp_rv == INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create %s: both 'bin' and 'exp' are specified",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "both 'bin' and 'exp' are specified");
-			return;
-		}
-
-		if (bin_rv == INFO_PARAM_OK_NOT_FOUND &&
-				exp_rv == INFO_PARAM_OK_NOT_FOUND) {
-			cf_warning(AS_INFO, "sindex-create %s: both 'bin' and 'exp' are missing",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "both 'bin' and 'exp' are missing");
-			return;
-		}
-
-		if (exp_rv == INFO_PARAM_OK) {
-			if (p_cdt_ctx != NULL) {
-				cf_warning(AS_INFO, "sindex-create %s: both 'context' and 'exp' are specified",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER, "both 'context' and 'exp' are specified");
-				return;
-			}
-
-			uint8_t exp_type = AS_PARTICLE_TYPE_BAD;
-
-			if (! as_sindex_validate_exp(exp_b64, &exp_type, db)) {
-				return;
-			}
-
-			if (! as_sindex_validate_exp_type(index_name_str, itype, ktype,
-					exp_type, db)) {
-				return;
-			}
-
-			p_exp = exp_b64;
-		}
-	}
-	else {
-		// Old protocol - indexdata=bin-name,keytype
-
-		as_info_warn_deprecated("'indexdata' parameter of 'sindex-create' info command is deprecated - use 'bin' and 'type' instead");
-
-		p_bin_name = indexdata_str;
-
-		p_ktype_str = strchr(indexdata_str, ',');
-
-		if (p_ktype_str == NULL) {
-			cf_warning(AS_INFO, "sindex-create %s: 'indexdata' missing bin type",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"'indexdata' missing bin type");
-			return;
-		}
-
-		*p_ktype_str++ = '\0';
-
-		if (p_bin_name[0] == '\0') {
-			cf_warning(AS_INFO, "sindex-create %s: 'indexdata' missing bin name",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"'indexdata' missing bin name");
-			return;
-		}
-
-		if (strlen(p_bin_name) >= AS_BIN_NAME_MAX_SZ) {
-			cf_warning(AS_INFO, "sindex-create %s: 'indexdata' bin name too long",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"'indexdata' bin name too long");
-			return;
-		}
-
-		ktype = as_sindex_ktype_from_string(p_ktype_str);
-
-		if (ktype == AS_PARTICLE_TYPE_BAD) {
-			cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s'",
-					index_name_str, p_ktype_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad 'indexdata' bin type - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
-			return;
-		}
-	}
-
-	if (itype == AS_SINDEX_ITYPE_MAPKEYS &&
-			ktype != AS_PARTICLE_TYPE_INTEGER &&
-			ktype != AS_PARTICLE_TYPE_STRING &&
-			ktype != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s' for 'indextype' 'mapkeys'",
-				index_name_str, p_ktype_str);
-		as_info_respond_error(db, AS_ERR_PARAMETER,
-				"bad 'indexdata' bin type for 'indextype' 'mapkeys' - must be one of 'numeric', 'string', 'blob'");
-		return;
-	}
-
-	cf_info(AS_INFO, "sindex-create: request received for %s:%s via info",
-			ns_str, index_name_str);
-
-	char smd_key[SINDEX_SMD_KEY_MAX_SZ];
-
-	as_sindex_build_smd_key(ns_str, p_set_str, p_bin_name, p_cdt_ctx, p_exp,
-			itype, ktype, smd_key);
-
-	find_sindex_key_udata fsk = {
-			.ns_name = ns_str,
-			.index_name = index_name_str,
-			.smd_key = smd_key
-	};
-
-	as_smd_get_all(AS_SMD_MODULE_SINDEX, find_sindex_key, &fsk);
-
-	if (fsk.found_key != NULL) {
-		if (strcmp(fsk.found_key, smd_key) != 0) {
-			cf_free(fsk.found_key);
-			cf_warning(AS_INFO, "sindex-create %s:%s: 'indexname' already exists with different definition",
-					ns_str, index_name_str);
-			as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
-					"'indexname' already exists with different definition");
-			return;
-		}
-
-		cf_free(fsk.found_key);
-		cf_info(AS_INFO, "sindex-create %s:%s: 'indexname' and defintion already exists",
-				ns_str, index_name_str);
-		as_info_respond_ok(db);
-		return;
-	}
-
-	if (fsk.n_name_matches > 1) {
-		cf_warning(AS_INFO, "sindex-create %s:%s: 'indexname' already exists with %u definitions - rename(s) required",
-				ns_str, index_name_str, fsk.n_name_matches);
-		as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
-				"'indexname' already exists with multiple definitions");
-		return;
-	}
-
-	if (! fsk.has_smd_key && fsk.n_indexes >= MAX_N_SINDEXES) {
-		cf_warning(AS_INFO, "sindex-create %s:%s: already at sindex definition limit",
-				ns_str, index_name_str);
-		as_info_respond_error(db, AS_ERR_SINDEX_MAX_COUNT,
-				"already at sindex definition limit");
-		return;
-	}
-
-	if (! as_smd_set_blocking(AS_SMD_MODULE_SINDEX, smd_key, index_name_str,
-			0)) {
-		cf_warning(AS_INFO, "sindex-create: timeout while creating %s:%s in SMD",
-				ns_str, index_name_str);
-		as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
-		return;
-	}
-
-	as_info_respond_ok(db);
+	as_sindex_manager_sindex_create(args);
 }
 
 static void
 cmd_sindex_delete(as_info_cmd_args* args)
 {
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-
-	// Command format:
-	// sindex-delete:ns=usermap;set=demo;indexname=um_state
-
-	char index_name_str[INAME_MAX_SZ];
-	int index_name_len = sizeof(index_name_str);
-	info_param_result rv = as_info_parameter_get(params, "indexname", index_name_str,
-			&index_name_len);
-
-	rv = as_info_required_param_is_ok(db, "indexname", index_name_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	char ns_str[AS_ID_NAMESPACE_SZ];
-	int ns_len = sizeof(ns_str);
-
-	rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-
-	if (! as_info_required_param_is_ok(db, "namespace", ns_str, rv)) {
-		return;
-	}
-
-	cf_info(AS_INFO, "sindex-delete: request received for %s:%s via info",
-			ns_str, index_name_str);
-
-	find_sindex_key_udata fsk = {
-			.ns_name = ns_str,
-			.index_name = index_name_str
-	};
-
-	as_smd_get_all(AS_SMD_MODULE_SINDEX, find_sindex_key, &fsk);
-
-	if (fsk.found_key == NULL) {
-		if (fsk.n_name_matches == 0) {
-			cf_info(AS_INFO, "sindex-delete: 'indexname' %s not found",
-					fsk.index_name);
-			as_info_respond_ok(db);
-			return;
-		}
-
-		cf_warning(AS_INFO, "sindex-delete: 'indexname' %s not unique - found %u matches - rename(s) required",
-				fsk.index_name, fsk.n_name_matches);
-		as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
-				"'indexname' is not unique");
-		return;
-	}
-
-	if (! as_smd_delete_blocking(AS_SMD_MODULE_SINDEX, fsk.found_key, 0)) {
-		cf_free(fsk.found_key);
-		cf_warning(AS_INFO, "sindex-delete: timeout while dropping %s:%s in SMD",
-				ns_str, index_name_str);
-		as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
-		return;
-	}
-
-	cf_free(fsk.found_key);
-
-	as_info_respond_ok(db);
+	as_sindex_manager_sindex_delete(args);
 }
 
 static void
 cmd_sindex_exists(as_info_cmd_args* args)
 {
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-
-	// Command format:
-	// sindex-exists:ns=usermap;indexname=um_state
-
-	char index_name_str[INAME_MAX_SZ];
-	int index_name_len = sizeof(index_name_str);
-	int rv = as_info_parameter_get(params, "indexname", index_name_str,
-			&index_name_len);
-
-	rv = as_info_required_param_is_ok(db, "indexname", index_name_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	char ns_str[AS_ID_NAMESPACE_SZ];
-	int ns_len = sizeof(ns_str);
-	as_namespace* ns = NULL;
-
-	rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-
-	if (! info_param_required_local_namespace_is_ok(db, ns_str, &ns, rv)) {
-		return;
-	}
-
-	cf_dyn_buf_append_string(db, as_sindex_exists(ns, index_name_str) ?
-			"true" : "false");
+	as_sindex_manager_sindex_exists(args);
 }
 
 static void
 cmd_sindex_list(as_info_cmd_args* args)
 {
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-
-	char ns_str[128];
-	int ns_len = sizeof(ns_str);
-	info_param_result rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-	as_namespace* ns = NULL;
-
-	rv = info_param_optional_local_namespace_is_ok(db, ns_str, &ns, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	char b64_str[6];
-	int b64_len = sizeof(b64_str);
-	bool b64 = false;
-
-	rv = as_info_parameter_get(params, "b64", b64_str, &b64_len);
-	rv = as_info_optional_param_is_ok(db, "b64", b64_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK) {
-		if (strcmp(b64_str, "true") == 0) {
-			b64 = true;
-		}
-		else if (strcmp(b64_str, "false") == 0) {
-			b64 = false;
-		}
-		else {
-			cf_warning(AS_INFO, "b64 value invalid");
-			as_info_respond_error(db, AS_ERR_PARAMETER, "bad b64");
-			return;
-		}
-	}
-
-	if (ns == NULL) {
-		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-			as_sindex_list_str(g_config.namespaces[ns_ix], b64, db);
-		}
-
-		cf_dyn_buf_chomp_char(db, ';');
-	}
-	else {
-		as_sindex_list_str(ns, b64, db);
-		cf_dyn_buf_chomp_char(db, ';');
-	}
+	as_sindex_manager_list_str(args);
 }
 
 static void
@@ -3584,7 +3098,7 @@ cmd_sindex_stat(as_info_cmd_args* args)
 	cf_info(AS_INFO, "sindex-stat - received request on index %s - namespace %s",
 			index_name_str, ns_str);
 
-	if (! as_sindex_stats_str(ns, index_name_str, db))  {
+	if (! as_sindex_manager_stats_str(ns, index_name_str, db))  {
 		cf_warning(AS_INFO, "index %s not found for ns %s",
 				index_name_str, ns->name);
 		as_info_respond_error(db, AS_ERR_SINDEX_NOT_FOUND, "no index");
@@ -5189,61 +4703,6 @@ add_data_device_stats(as_namespace* ns, cf_dyn_buf* db)
 				oldest_nvme_age(ns->storage_devices[i]));
 
 		// Note - no shadow ages since they're likely remote.
-	}
-}
-
-static void
-find_sindex_key(const cf_vector* items, void* udata)
-{
-	find_sindex_key_udata* fsk = (find_sindex_key_udata*)udata;
-	uint32_t ns_name_len = strlen(fsk->ns_name);
-
-	fsk->found_key = NULL;
-	fsk->n_name_matches = 0;
-	fsk->n_indexes = 0;
-	fsk->has_smd_key = false;
-
-	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
-		as_smd_item* item = cf_vector_get_ptr(items, i);
-
-		if (item->value == NULL) {
-			continue; // ignore tombstones
-		}
-
-		const char* smd_ns_name_end = strchr(item->key, '|');
-
-		if (smd_ns_name_end == NULL) {
-			cf_warning(AS_INFO, "unexpected sindex key format '%s'", item->key);
-			continue;
-		}
-
-		uint32_t smd_ns_name_len = smd_ns_name_end - item->key;
-
-		if (smd_ns_name_len != ns_name_len ||
-				memcmp(item->key, fsk->ns_name, ns_name_len) != 0) {
-			continue;
-		}
-
-		fsk->n_indexes++;
-
-		if (fsk->smd_key != NULL && strcmp(fsk->smd_key, item->key) == 0) {
-			fsk->has_smd_key = true;
-			fsk->smd_key = NULL; // can only be one
-		}
-
-		if (strcmp(fsk->index_name, item->value) != 0) {
-			continue;
-		}
-
-		fsk->n_name_matches++;
-
-		if (fsk->n_name_matches == 1) {
-			fsk->found_key = strdup(item->key);
-		}
-		else {
-			cf_free(fsk->found_key); // only return when unique
-			fsk->found_key = NULL;
-		}
 	}
 }
 

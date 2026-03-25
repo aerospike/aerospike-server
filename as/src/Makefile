@@ -158,12 +158,14 @@ QUERY_SOURCES += query_manager.c
 SINDEX_HEADERS += gc.h
 SINDEX_HEADERS += populate.h
 SINDEX_HEADERS += sindex.h
+SINDEX_HEADERS += sindex_manager.h
 SINDEX_HEADERS += sindex_arena.h
 SINDEX_HEADERS += sindex_tree.h
 
 SINDEX_SOURCES += gc.c
 SINDEX_SOURCES += populate.c
 SINDEX_SOURCES += sindex.c
+SINDEX_SOURCES += sindex_manager.c
 SINDEX_SOURCES += sindex_arena.c
 SINDEX_SOURCES += sindex_tree.c
 ifneq ($(USE_EE),1)
