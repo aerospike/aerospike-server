@@ -371,7 +371,7 @@
           "type": "boolean",
           "default": false,
           "description": "",
-          "dynamic": false,
+          "dynamic": true,
           "enterpriseOnly": false
         },
         "disable-udf-execution": {

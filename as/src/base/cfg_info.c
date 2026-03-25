@@ -222,6 +222,7 @@ cfg_get_service(cf_dyn_buf* db)
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
+	info_append_bool(db, "cgroup-mem-tracking", g_config.cgroup_mem_tracking);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	as_config_cluster_name_get(cluster_name);
@@ -815,6 +816,25 @@ cfg_set_service(const char* cmd)
 		cf_info(AS_INFO, "Changing value of batch-max-unused-buffers from %d to %d ",
 				g_config.batch_max_unused_buffers, val);
 		g_config.batch_max_unused_buffers = val;
+	}
+	else if (as_info_parameter_get(cmd, "cgroup-mem-tracking", v, &v_len) == 0) {
+		const char *current = g_config.cgroup_mem_tracking ? "true" : "false";
+		if (strcmp(v, current) == 0) {
+			cf_info(AS_INFO, "Value of cgroup-mem-tracking is already %s",v);
+		} else {
+			if (strcmp(v, "true") == 0) {
+				cf_info(AS_INFO, "Changing value of cgroup-mem-tracking from false to %s", v);
+				g_config.cgroup_mem_tracking = true;
+			}
+			else if (strcmp(v, "false") == 0) {
+				cf_info(AS_INFO, "Changing value of cgroup-mem-tracking from true to %s",  v);
+				g_config.cgroup_mem_tracking = false;
+			}
+			else {
+				cf_warning(AS_INFO, "bad cgroup-mem-tracking value '%s' - ignoring", v);
+				return false;
+			}
+		}
 	}
 	else if (as_info_parameter_get(cmd, "cluster-name", v, &v_len) == 0) {
 		if (! as_config_cluster_name_set(v)) {

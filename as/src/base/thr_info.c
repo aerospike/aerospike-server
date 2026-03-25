@@ -3212,18 +3212,10 @@ cmd_statistics(as_info_cmd_args* args)
 	uint32_t free_mem_pct;
 	uint64_t thp_mem_kbytes;
 
-	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
-
 	uint64_t host_free_mem_kbytes;
 	uint32_t host_free_mem_pct;
 
-	if (g_config.cgroup_mem_tracking) {
-		get_mem_info(false, &host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
-	}
-	else {
-		host_free_mem_kbytes = free_mem_kbytes;
-		host_free_mem_pct = free_mem_pct;
-	}
+	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct, &host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
 
 	info_append_uint64(db, "system_free_mem_kbytes", free_mem_kbytes);
 	info_append_int(db, "system_free_mem_pct", free_mem_pct);

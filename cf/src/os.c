@@ -455,7 +455,7 @@ find_cgroup_path_v2(char *pth_buf, size_t buf_len, const char *mount_root)
 				return true;
 			}
 
-			cf_debug(CF_OS, "cgroup v2 path %s is outside mount root %s",
+			cf_detail(CF_OS, "cgroup v2 path %s is outside mount root %s",
 					full_path, mount_root);
 			return false;
 		}
@@ -558,10 +558,10 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 	int version = find_cgroup_path("memory", mount_path, sizeof(mount_path),
 			mount_root, sizeof(mount_root));
 
-	cf_debug(CF_OS, "cgroup version: %d", version);
+	cf_detail(CF_OS, "cgroup version: %d", version);
 
 	if (version == 0) {
-		cf_debug(CF_OS, "no cgroup path found for memory");
+		cf_detail(CF_OS, "no cgroup path found for memory");
 	}
 
 	if (version == 2) {
@@ -572,7 +572,7 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 
 			if (find_smallest_cgroup_limit_v2(mount_path, cgroup_path,
 					&smallest_limit, base_path, sizeof(base_path))) {
-				cf_debug(CF_OS, "smallest cgroup v2 limit %lu found at %s",
+				cf_detail(CF_OS, "smallest cgroup v2 limit %lu found at %s",
 						smallest_limit, base_path);
 			}
 			else if (strcmp(cgroup_path, "/") == 0) {
@@ -606,8 +606,8 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 	*free_mem_kbytes = 0;
 	*free_mem_pct = 0;
 
-	cf_debug(CF_OS, "nested_limit_pth: %s", nested_limit_pth);
-	cf_debug(CF_OS, "nested_used_pth: %s", nested_used_pth);
+	cf_detail(CF_OS, "nested_limit_pth: %s", nested_limit_pth);
+	cf_detail(CF_OS, "nested_used_pth: %s", nested_used_pth);
 
 	char cg_limit[64] = {0};
 	char cg_used[64] = {0};
@@ -715,30 +715,32 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 // Public API - get memory info
 
 void
-get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
-		uint64_t* thp_mem_kbytes)
+get_mem_info(bool cgroup_mode,
+	uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
+	uint64_t* host_free_mem_kbytes, uint32_t* host_free_mem_pct,
+	uint64_t* thp_mem_kbytes)
 {
-	uint64_t host_free_mem_kbytes = 0;
-	uint32_t host_free_mem_pct = 0;
 	uint64_t host_thp_kbytes = 0;
 
-	sys_mem_info(&host_free_mem_kbytes,
-		&host_free_mem_pct, &host_thp_kbytes);
+	sys_mem_info(host_free_mem_kbytes, host_free_mem_pct, &host_thp_kbytes);
 
 	uint64_t cgroup_free_mem_kbytes = 0;
 	uint32_t cgroup_free_mem_pct = 0;
 
-	bool cgroup_usable = cgroup_mem_info(host_free_mem_kbytes,
+	bool cgroup_usable = cgroup_mem_info(*host_free_mem_kbytes,
 		&cgroup_free_mem_kbytes, &cgroup_free_mem_pct);
 
+	if (cgroup_mode && ! cgroup_usable) {
+		cf_detail(CF_OS, "cgroup-mem-tracking enabled but no usable cgroup found, falling back to host memory tracking");
+	}
 	if (cgroup_mode && cgroup_usable) {
 		*free_mem_kbytes = cgroup_free_mem_kbytes;
 		*free_mem_pct = cgroup_free_mem_pct;
 		*thp_mem_kbytes = host_thp_kbytes;
 	}
 	else {
-		*free_mem_kbytes = host_free_mem_kbytes;
-		*free_mem_pct = host_free_mem_pct;
+		*free_mem_kbytes = *host_free_mem_kbytes;
+		*free_mem_pct = *host_free_mem_pct;
 		*thp_mem_kbytes = host_thp_kbytes;
 	}
 }

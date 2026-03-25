@@ -1033,10 +1033,12 @@ sys_mem_pct(void)
 	uint64_t free_mem_kbytes;
 	uint32_t free_mem_pct;
 	uint64_t thp_mem_kbytes;
+	uint64_t host_free_mem_kbytes;
+	uint32_t host_free_mem_pct;
 
 	// TODO - the `cgroup_mem_tracking` should be false by default until 9.0.
 	get_mem_info(g_config.cgroup_mem_tracking,
-		&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
+		&free_mem_kbytes, &free_mem_pct, &host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
 	return 100 - free_mem_pct;
 }
 

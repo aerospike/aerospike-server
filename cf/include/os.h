@@ -90,8 +90,10 @@ cf_os_log_perms(void)
 
 
 void
-get_mem_info(bool cgroup_mode, uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
-		uint64_t* thp_mem_kbytes);
+get_mem_info(bool cgroup_mode,
+	uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
+	uint64_t* host_free_mem_kbytes, uint32_t* host_free_mem_pct,
+	uint64_t* thp_mem_kbytes);
 
 void cf_os_set_mem_read_file_fn_for_test(cf_os_test_read_file_fn fn);
 
