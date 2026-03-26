@@ -487,6 +487,7 @@ typedef enum {
 	CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE,
 	CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE,
 	CASE_NAMESPACE_TOMB_RAIDER_PERIOD,
+	CASE_NAMESPACE_TOMB_RAIDER_UNMARK_THREADS,
 	CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT,
 	CASE_NAMESPACE_TRUNCATE_THREADS,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
@@ -1100,6 +1101,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "strong-consistency-allow-expunge", CASE_NAMESPACE_STRONG_CONSISTENCY_ALLOW_EXPUNGE },
 		{ "tomb-raider-eligible-age",		CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE },
 		{ "tomb-raider-period",				CASE_NAMESPACE_TOMB_RAIDER_PERIOD },
+		{ "tomb-raider-unmark-threads",		CASE_NAMESPACE_TOMB_RAIDER_UNMARK_THREADS },
 		{ "transaction-pending-limit",		CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT },
 		{ "truncate-threads",				CASE_NAMESPACE_TRUNCATE_THREADS },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
@@ -3177,6 +3179,10 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_TOMB_RAIDER_PERIOD:
 				cfg_enterprise_only(&line);
 				ns->tomb_raider_period = cfg_seconds_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_TOMB_RAIDER_UNMARK_THREADS:
+				cfg_enterprise_only(&line);
+				ns->n_tomb_raider_unmark_threads = cfg_u32(&line, 0, AS_STORAGE_MAX_DEVICES);
 				break;
 			case CASE_NAMESPACE_TRANSACTION_PENDING_LIMIT:
 				ns->transaction_pending_limit = cfg_u32_no_checks(&line);

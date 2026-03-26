@@ -462,6 +462,7 @@ cfg_get_namespace(const as_namespace* ns, cf_dyn_buf* db)
 	info_append_bool(db, "strong-consistency-allow-expunge", ns->cp_allow_drops);
 	info_append_uint32(db, "tomb-raider-eligible-age", ns->tomb_raider_eligible_age);
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
+	info_append_uint32(db, "tomb-raider-unmark-threads", ns->n_tomb_raider_unmark_threads);
 	info_append_uint32(db, "transaction-pending-limit", ns->transaction_pending_limit);
 	info_append_uint32(db, "truncate-threads", ns->n_truncate_threads);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
@@ -1991,6 +1992,34 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 				ns->name, ns->tomb_raider_period, val);
 		ns->tomb_raider_period = val;
 	}
+	else if (as_info_parameter_get(cmd, "tomb-raider-unmark-threads", v,
+			&v_len) == 0) {
+		if (as_error_enterprise_only()) {
+			cf_warning(AS_INFO, "tomb-raider-unmark-threads is enterprise-only");
+			return false;
+		}
+		uint32_t val;
+		if (cf_str_atoi_u32(v, &val) != 0) {
+			cf_warning(AS_INFO, "{%s} tomb-raider-unmark-threads must be a non-negative integer", ns->name);
+			return false;
+		}
+		if (val > AS_STORAGE_MAX_DEVICES) {
+			cf_warning(AS_INFO, "{%s} tomb-raider-unmark-threads %u exceeds maximum %u", ns->name, val, AS_STORAGE_MAX_DEVICES);
+			return false;
+		}
+		// Warn if value exceeds device count, then lower to n_devices
+		// so stored config reflects use.
+		uint32_t n_devices = ns->n_storage_stripes != 0 ?
+			ns->n_storage_stripes : as_namespace_device_count(ns);
+		if (n_devices != 0 && val != 0 && val > n_devices) {
+			cf_warning(AS_INFO, "{%s} tomb-raider-unmark-threads (%u) exceeds number of devices (%u); will use %u threads",
+					ns->name, val, n_devices, n_devices);
+			val = n_devices;
+		}
+		cf_info(AS_INFO, "Changing value of tomb-raider-unmark-threads of ns %s from %u to %u",
+				ns->name, ns->n_tomb_raider_unmark_threads, val);
+		as_store_uint32(&ns->n_tomb_raider_unmark_threads, val);
+	}
 	else if (as_info_parameter_get(cmd, "transaction-pending-limit", v,
 			&v_len) == 0) {
 		if (cf_str_atoi(v, &val) != 0) {
@@ -2418,7 +2447,7 @@ cfg_set_namespace(const char* cmd, as_namespace* ns)
 		}
 		cf_info(AS_INFO, "Changing value of tomb-raider-sleep of ns %s from %u to %d",
 				ns->name, ns->storage_tomb_raider_sleep, val);
-		ns->storage_tomb_raider_sleep = (uint32_t)val;
+		as_store_uint32(&ns->storage_tomb_raider_sleep, (uint32_t)val);
 	}
 
 	//------------------------------------------------------

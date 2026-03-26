@@ -126,6 +126,7 @@ as_namespace_create(const char *name)
 	ns->xdr_bin_tombstone_ttl_ms = 60 * 60 * 24 * 1000UL; // 1 day
 	ns->xdr_tomb_raider_period = 2 * 60; // 2 minutes
 	ns->n_xdr_tomb_raider_threads = 1;
+	ns->n_tomb_raider_unmark_threads = 0; // 0 means use one thread per device (default behavior)
 
 	ns->storage_type = AS_STORAGE_ENGINE_UNDEFINED;
 

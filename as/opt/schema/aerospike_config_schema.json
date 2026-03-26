@@ -2336,6 +2336,15 @@
               "dynamic": true,
               "enterpriseOnly": true
             },
+            "tomb-raider-unmark-threads": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 128,
+              "description": "Maximum number of threads for the tomb raider unmark phase. If set to 0, one thread per device is used.",
+              "dynamic": true,
+              "enterpriseOnly": true
+            },
             "transaction-pending-limit": {
               "type": "integer",
               "default": 20,

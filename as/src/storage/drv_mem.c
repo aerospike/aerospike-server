@@ -260,6 +260,13 @@ as_storage_init_mem(as_namespace* ns)
 
 	drv_mems* mems = (drv_mems*)ns->storage_private;
 
+	if (ns->n_tomb_raider_unmark_threads != 0 &&
+			ns->n_tomb_raider_unmark_threads > (uint32_t)mems->n_mems) {
+		cf_warning(AS_DRV_MEM, "{%s} tomb-raider-unmark-threads (%u) exceeds number of memory stripes (%d), lowering to %d",
+				ns->name, ns->n_tomb_raider_unmark_threads, mems->n_mems, mems->n_mems);
+		ns->n_tomb_raider_unmark_threads = (uint32_t)mems->n_mems;
+	}
+
 	g_unique_data_size += ns->drives_size / (2 * ns->cfg_replication_factor);
 
 	cf_mutex_init(&mems->flush_lock);

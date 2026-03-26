@@ -484,6 +484,7 @@ namespace cfg_handlers
 		{"/strong-consistency-allow-expunge", offsetof(as_namespace, cp_allow_drops), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
 		{"/tomb-raider-eligible-age", offsetof(as_namespace, tomb_raider_eligible_age), apply_uint32_field, EnterpriseOnly{}, UnitType::TIME_DURATION}, // enterprise-only
 		{"/tomb-raider-period", offsetof(as_namespace, tomb_raider_period), apply_uint32_field, EnterpriseOnly{}, UnitType::TIME_DURATION}, // enterprise-only
+		{"/tomb-raider-unmark-threads", offsetof(as_namespace, n_tomb_raider_unmark_threads), apply_uint32_field, EnterpriseOnly{}}, // enterprise-only
 		{"/transaction-pending-limit", offsetof(as_namespace, transaction_pending_limit), apply_uint32_field},
 		{"/truncate-threads", offsetof(as_namespace, n_truncate_threads), apply_uint32_field},
 		{"/write-commit-level-override", offsetof(as_namespace, write_commit_level), handle_namespace_write_commit_level_override},
