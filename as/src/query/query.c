@@ -1755,19 +1755,13 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 
 	basic_query_job_init(job);
 
-	if (! get_query_sample_max(tr, &job->sample_max) ||
-			! basic_query_get_ops(tr, ns->name, &job->msgp, &job->bin_names) ||
-			! get_query_filter_exp(tr, &job->filter_exp)) {
-		cf_warning(AS_QUERY, "basic query job failed msg field processing");
-		conn_query_job_destroy(conn_job);
-		as_query_job_destroy(_job);
-		return AS_ERR_PARAMETER;
-	}
-
 	job->no_bin_data = (m->info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
 
-	if (job->no_bin_data != 0 && job->msgp != NULL) {
-		cf_warning(AS_QUERY, "basic query job no bin data and projection ops are both set");
+	if (! get_query_sample_max(tr, &job->sample_max) ||
+			(! job->no_bin_data && // if no bin data, don't get ops
+				! basic_query_get_ops(tr, ns->name, &job->msgp, &job->bin_names)) ||
+			! get_query_filter_exp(tr, &job->filter_exp)) {
+		cf_warning(AS_QUERY, "basic query job failed msg field processing");
 		conn_query_job_destroy(conn_job);
 		as_query_job_destroy(_job);
 		return AS_ERR_PARAMETER;
