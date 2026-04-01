@@ -1653,6 +1653,28 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 						mp->offset);
 				return false;
 			}
+			else if (call_op_code == AS_CDT_OP_SELECT) {
+				uint64_t flags;
+
+				if (param_count < 3 || param_count > 4 ||
+						msgpack_peek_type(mp) != MSGPACK_TYPE_LIST ||
+						msgpack_sz(mp) == 0 || // skip context
+						! msgpack_get_uint64(mp, &flags)) {
+					cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				if (param_count == 4 &&
+						(msgpack_peek_type(mp) != MSGPACK_TYPE_LIST ||
+								msgpack_sz(mp) == 0)) { // mod_exp
+					cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				param_count = 0; // already parsed
+			}
 
 			for (uint32_t i = 1; i < param_count; i++) {
 				// TODO - Skip allocating space until we reach the first list.
