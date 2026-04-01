@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            distro: ubuntu
+            distro: ubuntu24.04
           - os: ubuntu-24.04
             distro: el9
             container: registry.access.redhat.com/ubi9/ubi-minimal
@@ -31,13 +31,13 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
         with:
           egress-policy: audit
 
       - name: Fetch app token
         id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         with:
           app-id: ${{ vars.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -48,7 +48,7 @@ jobs:
           set -euo pipefail
 
           case "${{ matrix.distro }}" in
-            ubuntu)
+            ubuntu*)
               if ! command -v git >/dev/null; then
                 sudo apt-get update
                 sudo apt-get install -y git ca-certificates
@@ -75,8 +75,7 @@ jobs:
 
       - name: Install required packages
         run: |
-          cd "$GITHUB_WORKSPACE/aerospike-server"
-          ./bin/install-dependencies.sh
+          bash "$GITHUB_WORKSPACE/aerospike-server/.github/bin/install_deps.bash" "${{ matrix.distro }}"
 
       - name: Checkout aerospike-server-enterprise (master then PR branch) + submodules via HTTPS
         env:
@@ -112,7 +111,7 @@ jobs:
         working-directory: aerospike-server
         run: |
           set -euo pipefail
-          target="${{ matrix.distro == 'ubuntu' && 'deb+ee' || 'rpm+ee' }}"
+          target="${{ startsWith(matrix.distro, 'ubuntu') && 'deb+ee' || 'rpm+ee' }}"
           make EEREPO="$GITHUB_WORKSPACE/aerospike-server-enterprise" "${target}"
 
       - name: Run unit tests
@@ -126,7 +125,7 @@ jobs:
           set -euo pipefail
           pkg_dir="$GITHUB_WORKSPACE/aerospike-server/pkg/packages"
 
-          if [[ "${{ matrix.distro }}" == "ubuntu" ]]; then
+          if [[ "${{ matrix.distro }}" == ubuntu* ]]; then
             sudo dpkg -i "$(find "$pkg_dir" -name '*.deb' -print -quit)"
           else
             dnf -y install "$(find "$pkg_dir" -name '*.rpm' -print -quit)"

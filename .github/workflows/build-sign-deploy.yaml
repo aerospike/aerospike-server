@@ -1,0 +1,699 @@
+name: Build, sign, and deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of the artifact to deploy
+        required: true
+      ext:
+        description: "Package name suffix appended to edition (e.g. TEST). Leave empty for production builds."
+        required: false
+        default: ""
+  push:
+    branches:
+      - master
+      - 'hotfix/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ARTIFACT_NAME: aerospike-server
+  AWS_ROLE: arn:aws:iam::360255567471:role/sso/assumed/iac/AerospikeDownloadArtifactsAutomation
+  JFROG_PROJECT: database
+  JFROG_URL: https://aerospike.jfrog.io
+  ORG: citrusleaf
+  S3_BUCKET: aerospike-qe-build
+
+jobs:
+  setup:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || steps.set_env.outputs.version }}
+      BUNDLE_VERSION: ${{ steps.set_env.outputs.bundle_version }}
+      COUNT:   ${{ steps.set_env.outputs.count }}
+      RELEASE: ${{ steps.set_env.outputs.release }}
+      DISTROS: ${{ steps.distros.outputs.distros }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: set env 
+        id: set_env
+        env:
+          INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
+        run: |
+          set -euo pipefail
+          version=$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)
+          if [[ "$version" != *-*-* ]]; then
+            version=$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)
+          fi
+          if [[ -z "$version" ]]; then
+            version=$(git rev-parse --short=9 HEAD)
+          fi
+          if [[ -n "${INPUT_VERSION:-}" ]]; then
+            version="$INPUT_VERSION"
+          fi
+          count=$(source .github/bin/artifact_count.bash)
+          release=$(source build/version)
+          if [[ ! "$GITHUB_REF_NAME" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
+            echo "ERROR: GITHUB_REF_NAME contains unsafe characters: '$GITHUB_REF_NAME'" >&2
+            exit 1
+          fi
+          branch_prefix="${GITHUB_REF_NAME//\//-}"
+          bundle_version="${branch_prefix}-${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "bundle_version=$bundle_version" >> "$GITHUB_OUTPUT"
+          echo "count=$count"     >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Set distro list
+        id: distros
+        run: |
+          echo 'distros=["amzn2023","debian12","debian13","el10","el8","el9","ubuntu22.04","ubuntu24.04"]' >> "$GITHUB_OUTPUT"
+
+  build-artifacts:
+    needs: setup
+    if: github.repository_owner == 'citrusleaf' && github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [ubuntu-24.04, ubuntu-24.04-arm]
+        distro: ${{ fromJson(needs.setup.outputs.DISTROS) }}
+
+    runs-on: ${{ matrix.host }}
+    # Pinned base images for reproducible builds; update periodically for security and toolchain updates.
+    # Pinned base images; el8 works with OpenSSL 1.1 or 3 via enterprise tls_ee compat (TLS_GET_PEER_CERT).
+    container: >-
+      ${{ matrix.distro == 'ubuntu24.04' && 'ubuntu:24.04' ||
+        matrix.distro == 'ubuntu22.04' && 'ubuntu:22.04' ||
+        matrix.distro == 'ubuntu20.04' && 'ubuntu:20.04' ||
+        matrix.distro == 'el8' && 'registry.access.redhat.com/ubi8/ubi-minimal:8.10' ||
+        matrix.distro == 'el9' && 'registry.access.redhat.com/ubi9/ubi-minimal:9.4' ||
+        matrix.distro == 'el10' && 'redhat/ubi10:10.0' ||
+        matrix.distro == 'debian11' && 'debian:bullseye-20241223-slim' ||
+        matrix.distro == 'debian12' && 'debian:bookworm-20241223-slim' ||
+        matrix.distro == 'debian13' && 'debian:trixie-20241223-slim' ||
+        matrix.distro == 'amzn2023' && 'amazonlinux:2023.4.20240401.1' }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Fetch app token
+        id: app-token
+        # v3 line is Node24-ready; requires modern runner (GH-hosted Ubuntu runners satisfy this).
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Install prereqs
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.distro }}" in
+            ubuntu*|debian*)
+              apt-get update && apt-get install -y git ca-certificates
+              ;;
+            el*|amzn*)
+              command -v dnf >/dev/null || microdnf install -y dnf
+              dnf -y install git ca-certificates libyaml-devel
+              if [[ "${{ matrix.distro }}" == "el8" ]]; then
+                dnf -y install perl-IPC-Cmd perl-Time-Piece python3
+              fi
+              ;;
+          esac
+
+          git --version
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Checkout aerospike-server
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: citrusleaf/aerospike-server
+          submodules: true
+          path: aerospike-server
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install required packages
+        run: |
+          bash "$GITHUB_WORKSPACE/aerospike-server/.github/bin/install_deps.bash" "${{ matrix.distro }}"
+
+      - name: Configure git credential rewriting
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          dest="https://x-access-token:${TOKEN}@github.com/"
+          git config --global "url.${dest}.insteadOf" "https://github.com/"
+          git config --global --add "url.${dest}.insteadOf" "git@github.com:"
+          git config --global --add "url.${dest}.insteadOf" "ssh://git@github.com/"
+          git config --global --add "url.${dest}.insteadOf" "git://github.com/"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/aerospike-server"
+
+      - name: Checkout aerospike-server-enterprise
+        env:
+          REF: ${{ github.head_ref || github.ref_name }}
+        run: >
+          bash aerospike-server/.github/bin/checkout_private_repo.bash
+          citrusleaf/aerospike-server-enterprise
+          aerospike-server/modules/ee
+          "$REF"
+
+      - name: Checkout aerospike-server-fips
+        env:
+          REF: ${{ github.head_ref || github.ref_name }}
+        run: >
+          bash aerospike-server/.github/bin/checkout_private_repo.bash
+          citrusleaf/aerospike-server-fips
+          aerospike-server/modules/fips
+          "$REF"
+
+      - name: Remove git credential rewriting
+        if: always()
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config --global --unset-all \
+            "url.https://x-access-token:${TOKEN}@github.com/.insteadOf" || true
+
+      - name: Build and package
+        working-directory: aerospike-server
+        env:
+          DISTRO: ${{ matrix.distro }}
+          HOST: ${{ matrix.host }}
+          EXT: ${{ github.event_name == 'push' && 'TEST' || github.event.inputs.ext }}
+        run: |
+          if [[ "${{ matrix.host }}" == *arm* ]]; then
+            bash .github/bin/build_edition.bash -e community -e enterprise
+          else
+            bash .github/bin/build_edition.bash
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}-${{ matrix.distro }}-${{ contains(matrix.host, 'arm') && 'aarch64' || 'x86_64' }}
+          path: |
+            aerospike-server/pkg/packages/*.deb
+            aerospike-server/pkg/packages/*.rpm
+          retention-days: 1
+
+  organize-built-artifacts:
+    needs: [build-artifacts, setup]
+    if: ${{ always() && needs.build-artifacts.result == 'success' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout (for extract_version.bash)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/bin/extract_version.bash
+          sparse-checkout-cone-mode: false
+
+      - name: Download All Matrix Artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: build-artifacts
+          pattern: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}*
+          merge-multiple: true
+
+      - name: List download files
+        run: find build-artifacts
+
+      - name: Extract package version from artifacts
+        id: extract_package_version
+        run: |
+          set -euo pipefail
+          pkg_version=$(bash .github/bin/extract_version.bash build-artifacts)
+          echo "package_version=$pkg_version" >> "$GITHUB_OUTPUT"
+          echo "Extracted PACKAGE_VERSION: $pkg_version"
+
+      - name: Upload packaged Artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
+          path: |
+            build-artifacts/**/*.deb
+            build-artifacts/**/*.rpm
+          overwrite: true
+          retention-days: 1
+
+  download-s3-artifacts:
+    needs: setup
+    if: >
+        github.repository_owner == 'citrusleaf' &&
+        github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
+      FULL_PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
+    env:
+      VERSION: ${{ needs.setup.outputs.VERSION }}
+      COUNT: ${{ needs.setup.outputs.COUNT }}
+      RELEASE: ${{ needs.setup.outputs.RELEASE }}
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install GNU parallel
+        run: sudo apt-get update && sudo apt-get install -y parallel
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
+        with:
+          role-to-assume: ${{ env.AWS_ROLE }}
+          role-session-name: aerospike-download-artifacts
+          aws-region: us-west-1
+
+      # AWS credentials from Configure step above last ~4 hour. Keep retries within that window so token does not expire; use "Re-run failed jobs" in Actions UI for a fresh token if this step fails.
+      - name: Download artifacts from QE server (retry until complete)
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60  # v4.0.0
+        env:
+          GH_EVENT: ${{ github.event_name }}
+          S3_PATH: "s3://${{ env.S3_BUCKET }}/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ env.VERSION }}/build/"
+        with:
+          timeout_minutes: 240
+          max_attempts: 120
+          retry_on: error
+          retry_wait_seconds: 120
+          command: bash .github/bin/download_artifacts.bash
+
+      - name: List download files
+        run: find build-artifacts
+
+      - name: Extract package version from artifacts
+        id: extract_package_version
+        run: |
+          set -euo pipefail
+          pkg_version=$(bash .github/bin/extract_version.bash build-artifacts)
+          echo "package_version=$pkg_version" >> "$GITHUB_OUTPUT"
+          echo "Extracted PACKAGE_VERSION: $pkg_version"
+
+      - name: Upload packaged Artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
+          path: |
+            build-artifacts/**/*.deb
+            build-artifacts/**/*.rpm
+          overwrite: true
+          retention-days: 1
+
+  # Gate job so deploy chain does not depend on a skipped job (e.g. download-s3-artifacts on push).
+  artifacts-ready:
+    needs: [organize-built-artifacts, download-s3-artifacts]
+    if: always() && (needs.organize-built-artifacts.result == 'success' || needs.download-s3-artifacts.result == 'success')
+    runs-on: ubuntu-24.04
+    outputs:
+      PACKAGE_VERSION: ${{ steps.pkg_version.outputs.package_version }}
+    steps:
+      - name: Set PACKAGE_VERSION from whichever job produced artifacts
+        id: pkg_version
+        run: |
+          if [[ "${{ needs.organize-built-artifacts.result }}" == "success" ]]; then
+            echo "package_version=${{ needs.organize-built-artifacts.outputs.PACKAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "package_version=${{ needs.download-s3-artifacts.outputs.PACKAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Gate
+        run: echo "Artifacts ready for sign/deploy"
+
+  sign-artifacts:
+    needs: [setup, artifacts-ready]
+    if: always() && needs.artifacts-ready.result == 'success'
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.1.1
+    with:
+      gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}      
+      gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}      
+      gh-workflows-ref: "v3.1.1"
+    secrets:
+      gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
+      gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
+      gpg-key-pass: ${{ secrets.GPG_PASS }}
+
+  upload-artifacts-to-jfrog:
+    needs: [setup, sign-artifacts]
+    if: always() && needs.sign-artifacts.result == 'success'
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.1.1
+    with:
+      jf-project: database
+      jf-build-name: "aerospike-server"
+      version: ${{ needs.setup.outputs.VERSION }}
+      oidc-provider-name: gh-citrusleaf
+      oidc-audience: citrusleaf
+      gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}      
+      gh-retention-days: 1
+      dry-run: false
+      jf-build-id: ${{ needs.setup.outputs.VERSION }}
+      jf-metadata-build-id: ${{ needs.setup.outputs.VERSION }}-metadata
+      gh-workflows-ref: "v3.1.1"
+
+  create-release-bundle:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    needs: [setup, sign-artifacts, upload-artifacts-to-jfrog]
+    if: always() && needs.upload-artifacts-to-jfrog.result == 'success'
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.1.1
+    with:
+      jf-project: "database"
+      jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
+      jf-bundle-name: "aerospike-server"
+      oidc-provider-name: gh-citrusleaf
+      oidc-audience: citrusleaf
+      version: ${{ needs.setup.outputs.BUNDLE_VERSION }}
+      gh-workflows-ref: "v3.1.1"
+      dry-run: false
+
+  docker-deploy:
+    needs: [setup, artifacts-ready, sign-artifacts, upload-artifacts-to-jfrog, create-release-bundle]
+    if: always() && needs.create-release-bundle.result == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      time: ${{ steps.timestamp.outputs.time }}
+      time_display: ${{ steps.timestamp.outputs.time_display }}
+      snyk_warning: ${{ steps.snyk_scan.outputs.warning }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: signed-artifacts-${{ needs.setup.outputs.VERSION }}          
+          path: ./signed-artifacts
+
+      - name: Install JFrog CLI
+        id: jf
+        uses: step-security/setup-jfrog-cli@893a92f96c7727242adf0e603c77b1f2a22390e1 # v4.9.1
+        env:
+          JF_URL: https://artifact.aerospike.io
+          JF_PROJECT: database
+        with:
+          version: 2.78.8
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Docker login to Artifactory
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: artifact.aerospike.io
+          username: ${{ steps.jf.outputs.oidc-user }}
+          password: ${{ steps.jf.outputs.oidc-token }}
+
+      - name: Checkout aerospike-server.docker repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: aerospike/aerospike-server.docker
+          path: pkg/docker
+          ref: 8bd6f9a02af93c940b2fc86dde12c67693b247ea
+          fetch-depth: 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Get current timestamp
+        id: timestamp
+        run: |
+          ts_epoch=$(date -u +%s)
+          echo "time=$(date -u -d "@${ts_epoch}" '+%Y%m%d%H%M%S')" >> "$GITHUB_OUTPUT"
+          echo "time_display=$(date -u -d "@${ts_epoch}" '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        run: |
+          set -euo pipefail
+          cd pkg/docker
+          ./docker-build.sh -t ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local --no-cache
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Test Docker images
+        run: |
+          set -euo pipefail
+          cd pkg/docker
+          ./test.sh ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }} -d ubuntu -a amd64 arm64 -c
+
+      - name: Scan for high/critical container vulnerabilities
+        id: snyk_scan
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set -euo pipefail
+          pkg_version="${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}"
+          registry="artifact.aerospike.io/database-docker-dev-local"
+          warning=""
+          for image_name in aerospike-server-enterprise aerospike-server-federal aerospike-server; do
+            image="${registry}/${image_name}:${pkg_version}-amd64"
+            case "$image_name" in
+              aerospike-server-enterprise) edition="enterprise" ;;
+              aerospike-server-federal)    edition="federal" ;;
+              aerospike-server)            edition="community" ;;
+            esac
+            dockerfile=$(find pkg/docker/releases -path "*/${edition}/*/Dockerfile" -print -quit 2>/dev/null || true)
+            if docker image inspect "$image" >/dev/null 2>&1; then
+              echo "Scanning ${image_name} for high/critical vulnerabilities..."
+              snyk_args=("$image" --severity-threshold=high)
+              [[ -n "$dockerfile" ]] && snyk_args+=(--file="$dockerfile")
+              if ! snyk container test "${snyk_args[@]}"; then
+                warning="${warning}:rotating_light: *${image_name}*: high/critical vulnerabilities detected"$'\n'
+              else
+                echo "  ${image_name}: clean"
+              fi
+            fi
+          done
+          delimiter="WARN_$(date +%s)"
+          echo "warning<<${delimiter}" >> "$GITHUB_OUTPUT"
+          printf '%s' "$warning" >> "$GITHUB_OUTPUT"
+          echo >> "$GITHUB_OUTPUT"
+          echo "${delimiter}" >> "$GITHUB_OUTPUT"
+
+      - name: Push Docker image
+        run: |
+          set -euo pipefail
+          cd pkg/docker
+          ./docker-build.sh -p ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local -T ${{ steps.timestamp.outputs.time }}
+
+  promote-to-test:
+    needs: [setup, create-release-bundle, docker-deploy]
+    if: always() && needs.docker-deploy.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594  # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Setup JFrog CLI
+        uses: step-security/setup-jfrog-cli@893a92f96c7727242adf0e603c77b1f2a22390e1 # v4.9.1
+        env:
+          JF_URL: ${{ env.JFROG_URL }}
+          JF_PROJECT: ${{ env.JFROG_PROJECT }}
+        with:
+          oidc-provider-name: database-gh-citrusleaf
+          oidc-audience: database-gh-citrusleaf
+
+      - name: Promote release bundle to TEST
+        env:
+          JFROG_PROJECT: ${{ env.JFROG_PROJECT }}
+          RELEASE_BUNDLE_NAME: aerospike-server
+          JF_SIGNING_KEY: aerospike
+          VERSION: ${{ needs.setup.outputs.BUNDLE_VERSION }}
+        run: |
+          set -euo pipefail
+          # Check if already promoted to TEST
+          status=$(jf rt curl -s -XGET "/lifecycle/api/v2/promotion/records/${RELEASE_BUNDLE_NAME}/${VERSION}?project=${JFROG_PROJECT}" | jq -r '.promotions[]? | select(.environment == "TEST") | .status' 2>/dev/null || true)
+          if [[ "$status" == "COMPLETED" ]]; then
+            echo "Release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' is already promoted to TEST — skipping."
+            exit 0
+          fi
+          echo "Promoting release bundle '${RELEASE_BUNDLE_NAME}:${VERSION}' to TEST environment..."
+          jf rbp \
+            --signing-key="${JF_SIGNING_KEY}" \
+            --project="${JFROG_PROJECT}" \
+            --sync=true \
+            "${RELEASE_BUNDLE_NAME}" "${VERSION}" TEST
+
+  notify-slack:
+    needs: [setup, artifacts-ready, docker-deploy, promote-to-test]
+    if: always() && needs.promote-to-test.result == 'success'
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.setup.outputs.VERSION }}
+      BUNDLE_VERSION: ${{ needs.setup.outputs.BUNDLE_VERSION }}
+      PACKAGE_VERSION: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
+      FULL_PACKAGE_VERSION: ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}
+      BRANCH: ${{ github.ref_name }}
+      TIME: ${{ needs.docker-deploy.outputs.time }}
+      TIME_DISPLAY: ${{ needs.docker-deploy.outputs.time_display }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Set Slack message text
+        id: slack_text
+        env:
+          SLACK_TITLE: ${{ env.VERSION }} promoted to JFrog TEST
+          SLACK_MSG: |
+            *Time:* ${{ env.TIME_DISPLAY }}
+            *Branch:* ${{ env.BRANCH }}
+            *Build Id:* ${{ env.VERSION }}
+            *Package Version:* ${{ env.FULL_PACKAGE_VERSION }}
+            *Bundle Version:* ${{ env.BUNDLE_VERSION }}
+        run: |
+          set -euo pipefail
+          delimiter="SLACK_$(date +%s)"
+          echo "title<<${delimiter}" >> "$GITHUB_OUTPUT"
+          echo "$SLACK_TITLE" >> "$GITHUB_OUTPUT"
+          echo "${delimiter}" >> "$GITHUB_OUTPUT"
+          echo "body<<${delimiter}" >> "$GITHUB_OUTPUT"
+          echo "$SLACK_MSG" >> "$GITHUB_OUTPUT"
+          echo "${delimiter}" >> "$GITHUB_OUTPUT"
+          # Slack linkifies URLs in mrkdwn (including fenced code). plain_text sections do not auto-link;
+          # one block per docker pull keeps each command on its own line.
+          uid="$(date +%s)_$$"
+          reg='artifact.aerospike.io/database-docker-dev-local'
+          pv="${PACKAGE_VERSION}"
+          ts="${TIME}"
+
+          hd="DH_${uid}"
+          {
+            echo "docker_heading<<${hd}"
+            printf '%s\n' '*Docker images:*'
+            echo "${hd}"
+          } >> "$GITHUB_OUTPUT"
+
+          d1="DP1_${uid}"
+          {
+            echo "docker_pull_1<<${d1}"
+            printf 'docker pull %s/aerospike-server-enterprise:%s-%s\n' "$reg" "$pv" "$ts"
+            echo "${d1}"
+          } >> "$GITHUB_OUTPUT"
+          d2="DP2_${uid}"
+          {
+            echo "docker_pull_2<<${d2}"
+            printf 'docker pull %s/aerospike-server-federal:%s-%s\n' "$reg" "$pv" "$ts"
+            echo "${d2}"
+          } >> "$GITHUB_OUTPUT"
+          d3="DP3_${uid}"
+          {
+            echo "docker_pull_3<<${d3}"
+            printf 'docker pull %s/aerospike-server:%s-%s\n' "$reg" "$pv" "$ts"
+            echo "${d3}"
+          } >> "$GITHUB_OUTPUT"
+          dwf="SLACK_WF_$(date +%s)"
+          {
+            echo "workflow_mrk<<${dwf}"
+            echo "<${RUN_URL}|Workflow run>"
+            echo "${dwf}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack message to QE
+        continue-on-error: true
+        uses: step-security/slack-github-action@77483a1a06c0ce2933c1f2f144fb5a85db7f3e80 # v2.1.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.QE_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.QE_SLACK_CHANNEL }}",
+              "text": ${{ toJSON(steps.slack_text.outputs.title) }},
+              "blocks": [
+                { "type": "header", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.title) }}, "emoji": true } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.body) }} } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.docker_heading) }} } },
+                { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_1) }}, "emoji": false } },
+                { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_2) }}, "emoji": false } },
+                { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_3) }}, "emoji": false } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.workflow_mrk) }} } }
+              ]
+            }
+
+      - name: Build CORE message with Snyk warnings
+        id: core_text
+        env:
+          BASE_BODY: ${{ steps.slack_text.outputs.body }}
+          SNYK_WARNING: ${{ needs.docker-deploy.outputs.snyk_warning }}
+        run: |
+          delimiter="CORE_$(date +%s)"
+          echo "body<<${delimiter}" >> "$GITHUB_OUTPUT"
+          echo "$BASE_BODY" >> "$GITHUB_OUTPUT"
+          if [[ -n "${SNYK_WARNING}" ]]; then
+            echo "" >> "$GITHUB_OUTPUT"
+            echo ":rotating_light: *Snyk Container Scan — High/Critical Vulnerabilities*" >> "$GITHUB_OUTPUT"
+            echo "$SNYK_WARNING" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${delimiter}" >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack message to CORE
+        continue-on-error: true
+        uses: step-security/slack-github-action@77483a1a06c0ce2933c1f2f144fb5a85db7f3e80 # v2.1.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ secrets.DB_SLACK_CHANNEL }}",
+              "text": ${{ toJSON(steps.slack_text.outputs.title) }},
+              "blocks": [
+                { "type": "header", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.title) }}, "emoji": true } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.core_text.outputs.body) }} } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.docker_heading) }} } },
+                { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_1) }}, "emoji": false } },
+                { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_2) }}, "emoji": false } },
+                { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_3) }}, "emoji": false } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.workflow_mrk) }} } }
+              ]
+            }
