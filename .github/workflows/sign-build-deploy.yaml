@@ -35,7 +35,7 @@ jobs:
       RELEASE: ${{ steps.set_env.outputs.release }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
         with:
           egress-policy: audit
 
@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
         with:
           egress-policy: audit
 
@@ -116,7 +116,7 @@ jobs:
 
       # AWS credentials from Configure step above last ~4 hour. Keep retries within that window so token does not expire; use "Re-run failed jobs" in Actions UI for a fresh token if this step fails.
       - name: Download artifacts from QE server (retry until complete)
-        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08  # v3.0.2
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60  # v4.0.0
         env:
           GH_EVENT: ${{ github.event_name }}
           S3_PATH: "s3://${{ env.S3_BUCKET }}/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ env.VERSION }}/build/"
@@ -208,7 +208,7 @@ jobs:
       time_display: ${{ steps.timestamp.outputs.time_display }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc  # v2.15.1
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594  # v2.16.0
         with:
           egress-policy: audit
 
@@ -285,7 +285,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc  # v2.15.1
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594  # v2.16.0
         with:
           egress-policy: audit
 
@@ -337,7 +337,7 @@ jobs:
         artifact.aerospike.io/database-docker-dev-local/aerospike-server:${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}-${{ needs.docker-deploy.outputs.time }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
         with:
           egress-policy: audit
 
