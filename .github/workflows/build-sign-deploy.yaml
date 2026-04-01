@@ -77,7 +77,7 @@ jobs:
             exit 1
           fi
           branch_prefix="${GITHUB_REF_NAME//\//-}"
-          bundle_version="${branch_prefix}-${version}"
+          bundle_version="TEST-${branch_prefix}-${version}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "bundle_version=$bundle_version" >> "$GITHUB_OUTPUT"
           echo "count=$count"     >> "$GITHUB_OUTPUT"
