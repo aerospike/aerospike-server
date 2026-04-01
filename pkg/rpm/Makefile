@@ -8,6 +8,8 @@ SOURCE_ROOT = $(PKG)/dist
 BUILD_ROOT = $(SOURCE_ROOT)/BUILD
 OPT_AS = $(BUILD_ROOT)/opt/aerospike
 
+EXT ?=
+EXT_SUFFIX := $(if $(EXT),-$(EXT),)
 REV := $(shell $(DEPTH)/build/version | sed 's/-/_/g')
 OS := $(shell $(DEPTH)/build/os_version)
 BUILD_NUMBER := $(shell $(DEPTH)/build/build_number)
@@ -88,7 +90,7 @@ endif
 	cat $(PKG)/rpm/server-spec-scripts >> $(PKG)/rpm/aerospike.spec
 
 	sed -i 's/@RELEASE@/'$(OS)'/g' $(PKG)/rpm/aerospike.spec
-	sed -i 's/@EDITION@/'$(EDITION)'/g' $(PKG)/rpm/aerospike.spec
+	sed -i 's/@EDITION@/'$(EDITION)$(EXT_SUFFIX)'/g' $(PKG)/rpm/aerospike.spec
 	sed -i 's/@ARCH@/'$(ARCH)'/g' $(PKG)/rpm/aerospike.spec
 
 	sed -i '1i Requires(pre): /usr/sbin/useradd' $(PKG)/rpm/aerospike.spec
