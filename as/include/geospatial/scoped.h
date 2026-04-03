@@ -19,8 +19,7 @@
 #ifndef scoped_h__
 #define scoped_h__
 
-template <typename T>
-class Scoped
+template <typename T> class Scoped
 {
 public:
 	/// A deletion function.
@@ -34,11 +33,9 @@ public:
 	/// @param[in] i_nil Nil value.
 	/// @param[in] i_del Deletion functor.
 	///
-	Scoped(T const & i_nil, Del i_del)
-		: m_val(i_nil)
-		, m_nil(i_nil)
-		, m_del(i_del)
-	{}
+	Scoped(T const& i_nil, Del i_del) : m_val(i_nil), m_nil(i_nil), m_del(i_del)
+	{
+	}
 
 	/// Contructor from value.
 	///
@@ -49,12 +46,10 @@ public:
 	/// @param[in] i_nil Nil value.
 	/// @param[in] i_del Deletion functor.
 	///
-	Scoped(T const & i_val, T const & i_nil, Del i_del)
-		: m_val(i_val)
-		, m_nil(i_nil)
-		, m_del(i_del)
-	{}
-
+	Scoped(T const& i_val, T const& i_nil, Del i_del)
+		: m_val(i_val), m_nil(i_nil), m_del(i_del)
+	{
+	}
 
 	/// Destructor, calls deletion function on non-nil values.
 	///
@@ -71,7 +66,7 @@ public:
 	///
 	/// @param[in] i_val The right-hand-side is the new value.
 	///
-	inline Scoped & operator=(T const & i_val)
+	inline Scoped& operator=(T const& i_val)
 	{
 		// Delete any pre-existing value.
 		if (m_val != m_nil)
@@ -99,9 +94,9 @@ public:
 	}
 
 private:
-	T			m_val;
-	T			m_nil;
-	Del			m_del;
+	T m_val;
+	T m_nil;
+	Del m_del;
 };
 
 #endif // scoped_h__

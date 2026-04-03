@@ -126,31 +126,25 @@ static uint64_t g_prev_wall_clock;
 #define INFO(format, ...) cf_info(AS_HLC, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_HLC, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_HLC, format, ##__VA_ARGS__)
-#define ASSERT(expression, message, ...)				\
-if (!(expression)) {WARNING(message, __VA_ARGS__);}
+#define ASSERT(expression, message, ...)                                       \
+	if (! (expression)) {                                                      \
+		WARNING(message, __VA_ARGS__);                                         \
+	}
 
 /*
  * ----------------------------------------------------------------------------
  * Forward declarations.
  * ----------------------------------------------------------------------------
  */
-static cf_clock
-hlc_wall_clock_get();
-static bool
-hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
+static cf_clock hlc_wall_clock_get();
+static bool hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
 		cf_node source);
-static cf_clock
-hlc_physical_ts_get(as_hlc_timestamp hlc_ts);
-static uint16_t
-hlc_logical_ts_get(as_hlc_timestamp hlc_ts);
-static void
-hlc_physical_ts_set(as_hlc_timestamp* hlc_ts, cf_clock physical_ts);
-static void
-hlc_physical_ts_on_set(cf_clock physical_ts, cf_clock wall_clock_now);
-static void
-hlc_logical_ts_set(as_hlc_timestamp* hlc_ts, uint16_t logical_ts);
-static void
-hlc_logical_ts_incr(uint16_t* logical_ts, cf_clock* physical_ts,
+static cf_clock hlc_physical_ts_get(as_hlc_timestamp hlc_ts);
+static uint16_t hlc_logical_ts_get(as_hlc_timestamp hlc_ts);
+static void hlc_physical_ts_set(as_hlc_timestamp* hlc_ts, cf_clock physical_ts);
+static void hlc_physical_ts_on_set(cf_clock physical_ts, cf_clock wall_clock_now);
+static void hlc_logical_ts_set(as_hlc_timestamp* hlc_ts, uint16_t logical_ts);
+static void hlc_logical_ts_incr(uint16_t* logical_ts, cf_clock* physical_ts,
 		cf_clock wall_clock_now);
 
 /*
@@ -252,18 +246,17 @@ as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
 
 		cf_clock wall_clock_physical_ts = hlc_wall_clock_get();
 
-		cf_clock new_hlc_physical_ts = MAX(
-				MAX(current_hlc_physical_ts, send_ts_physical_ts),
-				wall_clock_physical_ts);
+		cf_clock new_hlc_physical_ts =
+				MAX(MAX(current_hlc_physical_ts, send_ts_physical_ts),
+						wall_clock_physical_ts);
 		uint16_t new_hlc_logical_ts = 0;
 
-		if (new_hlc_physical_ts == current_hlc_physical_ts
-				&& new_hlc_physical_ts == send_ts_physical_ts) {
+		if (new_hlc_physical_ts == current_hlc_physical_ts &&
+				new_hlc_physical_ts == send_ts_physical_ts) {
 			// There is no change in the physical components of peer and local
 			// hlc clocks. Set logical component to max of the two values and
 			// increment.
-			new_hlc_logical_ts = MAX(current_hlc_logical_ts,
-					send_ts_logical_ts);
+			new_hlc_logical_ts = MAX(current_hlc_logical_ts, send_ts_logical_ts);
 			hlc_logical_ts_incr(&new_hlc_logical_ts, &new_hlc_physical_ts,
 					wall_clock_physical_ts);
 		}
@@ -297,7 +290,8 @@ as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
 
 		if (hlc_ts_set(current_hlc_ts, new_hlc_ts, source)) {
 			hlc_physical_ts_on_set(new_hlc_physical_ts, wall_clock_physical_ts);
-			DETAIL("message received from node %" PRIx64 " with HLC %" PRIu64 " - changed HLC value from %" PRIu64 " to %" PRIu64,
+			DETAIL("message received from node %" PRIx64 " with HLC %" PRIu64
+				   " - changed HLC value from %" PRIu64 " to %" PRIu64,
 					source, send_ts, current_hlc_ts, new_hlc_ts);
 			if (msg_ts) {
 				msg_ts->send_ts = send_ts;
@@ -368,8 +362,7 @@ as_hlc_send_timestamp_order(as_hlc_timestamp local_ts,
 	cf_clock local_physical_ts = hlc_physical_ts_get(local_ts);
 	cf_clock recv_physical_ts = hlc_physical_ts_get(msg_ts->recv_ts);
 
-	if ((recv_physical_ts - local_physical_ts)
-			< g_config.fabric_latency_max_ms) {
+	if ((recv_physical_ts - local_physical_ts) < g_config.fabric_latency_max_ms) {
 		// Consider the max network delay worth of time to also be part of the
 		// uncertainty window.
 		return AS_HLC_ORDER_INDETERMINATE;
@@ -428,7 +421,8 @@ as_hlc_dump(bool verbose)
 	cf_clock current_hlc_physical_ts = hlc_physical_ts_get(now);
 	uint16_t current_hlc_logical_ts = hlc_logical_ts_get(now);
 
-	INFO("HLC Ts:%" PRIu64 " HLC Physical Ts:%" PRIu64 " HLC Logical Ts:%d Wall Clock:%" PRIu64,
+	INFO("HLC Ts:%" PRIu64 " HLC Physical Ts:%" PRIu64
+		 " HLC Logical Ts:%d Wall Clock:%" PRIu64,
 			now, current_hlc_physical_ts, current_hlc_logical_ts,
 			hlc_wall_clock_get());
 }
@@ -511,9 +505,9 @@ hlc_logical_ts_incr(uint16_t* logical_ts, cf_clock* physical_ts,
 	}
 	cf_clock physical_component_diff = *physical_ts - g_prev_physical_component;
 	uint64_t prev_wall_clock = as_load_uint64(&g_prev_wall_clock);
-	cf_clock wall_clock_diff =
-			(wall_clock_now > prev_wall_clock) ?
-					wall_clock_now - prev_wall_clock : 0;
+	cf_clock wall_clock_diff = (wall_clock_now > prev_wall_clock)
+			? wall_clock_now - prev_wall_clock
+			: 0;
 	if (physical_component_diff < wall_clock_diff) {
 		*physical_ts += wall_clock_diff - physical_component_diff;
 	}
@@ -541,14 +535,15 @@ hlc_logical_ts_set(as_hlc_timestamp* hlc_ts, uint16_t logical_ts)
  * @return true on successful set, false on failure to do an atomic set.
  */
 static bool
-hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value,
-		cf_node source)
+hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value, cf_node source)
 {
 	// Default to ck atomic check and set.
-	cf_clock jump = hlc_physical_ts_get(new_value)
-			- hlc_physical_ts_get(old_value);
+	cf_clock jump =
+			hlc_physical_ts_get(new_value) - hlc_physical_ts_get(old_value);
 	if (jump > HLC_JUMP_WARN && old_value > 0) {
-		INFO("HLC jumped by %"PRIu64" ms cause:%"PRIx64" old:%"PRIu64" new:%"PRIu64, jump, source, old_value, new_value);
+		INFO("HLC jumped by %" PRIu64 " ms cause:%" PRIx64 " old:%" PRIu64
+			 " new:%" PRIu64,
+				jump, source, old_value, new_value);
 	}
 	return as_cas_uint64(&g_now, old_value, new_value);
 }

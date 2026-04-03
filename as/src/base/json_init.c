@@ -20,9 +20,11 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#include "jansson.h"
-#include "citrusleaf/alloc.h"
 #include "base/json_init.h"
+
+#include "citrusleaf/alloc.h"
+
+#include "jansson.h"
 
 /* SYNOPSIS
  *  This module handles initialization of the Jansson JSON API by
@@ -40,7 +42,8 @@
 /*
  *  Wrapper function to call the CF malloc() function.
  */
-static void *as_json_malloc(size_t size)
+static void*
+as_json_malloc(size_t size)
 {
 	return cf_malloc(size);
 }
@@ -48,7 +51,8 @@ static void *as_json_malloc(size_t size)
 /*
  *  Wrapper function to call the CF free() function.
  */
-static void as_json_free(void *ptr)
+static void
+as_json_free(void* ptr)
 {
 	cf_free(ptr);
 }
@@ -56,7 +60,8 @@ static void as_json_free(void *ptr)
 /*
  *  Initialize the JSON module by setting the memory allocation functions.
  */
-void as_json_init()
+void
+as_json_init()
 {
 	json_set_alloc_funcs(as_json_malloc, as_json_free);
 }

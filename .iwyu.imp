@@ -1,0 +1,50 @@
+# Aerospike IWYU mapping file
+# Usage: iwyu_tool -p . -- -Xiwyu --mapping_file=.iwyu.imp
+
+[
+  # Our alloc.h is the canonical header for cf_malloc/cf_free
+  { include: ["\"enhanced_alloc.h\"", "private", "\"citrusleaf/alloc.h\"", "public"] },
+  { include: ["<malloc.h>", "private", "\"citrusleaf/alloc.h\"", "public"] },
+
+  # Use portable as_atomic.h, not gcc-specific
+  { include: ["\"aerospike/as_atomic_gcc.h\"", "private", "\"aerospike/as_atomic.h\"", "public"] },
+
+  # Forward declarations - don't need full includes for pointers
+  { symbol: ["as_namespace", "private", "\"base/datamodel.h\"", "public"] },
+  { symbol: ["as_transaction", "private", "\"base/transaction.h\"", "public"] },
+  { symbol: ["as_record", "private", "\"base/datamodel.h\"", "public"] },
+  { symbol: ["as_index", "private", "\"base/index.h\"", "public"] },
+
+  # System header mappings - use public headers, not internal glibc headers
+  { include: ["<bits/types/struct_timeval.h>", "private", "<sys/time.h>", "public"] },
+  { include: ["<bits/socket.h>", "private", "<sys/socket.h>", "public"] },
+  { include: ["<bits/types/struct_shmid_ds.h>", "private", "<sys/shm.h>", "public"] },
+  { include: ["<bits/shm.h>", "private", "<sys/shm.h>", "public"] },
+  { include: ["<bits/ipc.h>", "private", "<sys/ipc.h>", "public"] },
+  { include: ["<bits/types/struct_itimerspec.h>", "private", "<time.h>", "public"] },
+  { include: ["<bits/types/struct_timespec.h>", "private", "<time.h>", "public"] },
+  { include: ["<bits/types/time_t.h>", "private", "<time.h>", "public"] },
+  { include: ["<bits/stdint-uintn.h>", "private", "<stdint.h>", "public"] },
+  { include: ["<bits/stdint-intn.h>", "private", "<stdint.h>", "public"] },
+
+  # Syscall headers and symbols
+  { include: ["<asm/unistd.h>", "private", "<sys/syscall.h>", "public"] },
+  { include: ["<asm/unistd_64.h>", "private", "<sys/syscall.h>", "public"] },
+  { include: ["<syscall.h>", "private", "<sys/syscall.h>", "public"] },
+  { symbol: ["__NR_set_mempolicy", "private", "<sys/syscall.h>", "public"] },
+  { symbol: ["__NR_migrate_pages", "private", "<sys/syscall.h>", "public"] },
+  { symbol: ["SYS_gettid", "private", "<sys/syscall.h>", "public"] },
+  { symbol: ["syscall", "private", "<sys/syscall.h>", "public"] },
+
+  # OpenSSL - crypto.h provides many symbols that provider.h uses
+  { include: ["<openssl/provider.h>", "private", "<openssl/crypto.h>", "public"] },
+  { symbol: ["OSSL_PROVIDER_available", "private", "<openssl/crypto.h>", "public"] },
+  { symbol: ["OSSL_PROVIDER_load", "private", "<openssl/crypto.h>", "public"] },
+
+  # More internal glibc headers
+  { include: ["<asm/ioctl.h>", "private", "<sys/ioctl.h>", "public"] },
+  { include: ["<bits/mman-linux.h>", "private", "<sys/mman.h>", "public"] },
+  { include: ["<bits/mman.h>", "private", "<sys/mman.h>", "public"] },
+  { include: ["<bits/statfs.h>", "private", "<sys/statfs.h>", "public"] },
+
+]

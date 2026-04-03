@@ -23,18 +23,17 @@
 //==========================================================
 // Includes.
 //
-#include "base/cfg_tree_handlers.hpp"
 #include "base/cfg_tree.hpp"
 
-#include "nlohmann/json.hpp"
-#include "nlohmann/json-schema.hpp"
-
-#include <string>
-#include <fstream>
-#include <cctype> // For std::tolower
-#include <limits> // For std::numeric_limits
 #include <algorithm> // For std::transform
+#include <cctype> // For std::tolower
+#include <fstream>
+#include <limits> // For std::numeric_limits
+#include <string>
 
+#include "base/cfg_tree_handlers.hpp"
+#include "nlohmann/json-schema.hpp"
+#include "nlohmann/json.hpp"
 
 // TODO: vault.h has the 'namespace' field which conflicts with C++ keyword
 // Need to find a proper solution for this
@@ -65,8 +64,8 @@ using json_validator = nlohmann::json_schema::json_validator;
 // Public API.
 //
 
-CFGTree::CFGTree(const std::string& config_file,
-		const std::string& schema_file, cfg_format format)
+CFGTree::CFGTree(const std::string& config_file, const std::string& schema_file,
+		cfg_format format)
 {
 	this->config_file = config_file;
 	this->schema_file = schema_file;
@@ -74,11 +73,11 @@ CFGTree::CFGTree(const std::string& config_file,
 	load_schema();
 
 	switch (format) {
-		case cfg_format::YAML:
-			parse_yaml_data();
-			break;
-		default:
-			throw std::invalid_argument("Invalid configuration file format");
+	case cfg_format::YAML:
+		parse_yaml_data();
+		break;
+	default:
+		throw std::invalid_argument("Invalid configuration file format");
 	}
 
 	// Apply schema defaults after parsing to fill in missing optional fields
@@ -87,9 +86,7 @@ CFGTree::CFGTree(const std::string& config_file,
 	// apply_schema_defaults();
 }
 
-CFGTree::~CFGTree()
-{
-}
+CFGTree::~CFGTree() {}
 
 // TODO: re-enable this when we have delt with the default patch
 // producing every possible field in the schema.
@@ -220,14 +217,14 @@ read_file(const std::string& path)
 {
 	std::ifstream file(path);
 
-	if (!file.is_open()) {
+	if (! file.is_open()) {
 		throw std::runtime_error("Failed to open file: " + path);
 	}
 
 	std::ostringstream ss;
 	ss << file.rdbuf();
 
-	if (file.fail() && !file.eof()) {
+	if (file.fail() && ! file.eof()) {
 		throw std::runtime_error("Failed to read file: " + path);
 	}
 
@@ -273,7 +270,8 @@ convert_yaml_to_json(const YAML::Node& node)
 				return json(bool_val);
 			}
 		}
-		catch (const YAML::BadConversion&) {}
+		catch (const YAML::BadConversion&) {
+		}
 
 		// Try integer
 		std::string scalar_str = node.Scalar();
@@ -294,7 +292,8 @@ convert_yaml_to_json(const YAML::Node& node)
 					return json(int_val);
 				}
 			}
-			catch (const YAML::BadConversion&) {}
+			catch (const YAML::BadConversion&) {
+			}
 		}
 
 		// Try floating point
@@ -308,7 +307,8 @@ convert_yaml_to_json(const YAML::Node& node)
 				return json(double_val);
 			}
 		}
-		catch (const YAML::BadConversion&) {}
+		catch (const YAML::BadConversion&) {
+		}
 
 		// Default to string
 		return json(node.Scalar());
@@ -327,11 +327,10 @@ convert_yaml_to_json(const YAML::Node& node)
 
 		for (const auto& item : node) {
 			if (json_object.contains(item.first.Scalar())) {
-				throw std::runtime_error("Duplicate key: " +
-						item.first.Scalar());
+				throw std::runtime_error("Duplicate key: " + item.first.Scalar());
 			}
 
-			if (!item.first.IsScalar()) {
+			if (! item.first.IsScalar()) {
 				throw std::runtime_error("Invalid key type: " +
 						std::to_string(item.first.Type()));
 			}

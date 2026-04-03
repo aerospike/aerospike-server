@@ -35,7 +35,6 @@
 #include "log.h"
 #include "xmem.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -74,7 +73,7 @@ typedef enum {
 #define CF_ARENAX_STASH_LEN 512
 
 typedef struct cf_arenax_chunk_s {
-	uint64_t base_h: 40;
+	uint64_t base_h : 40;
 } __attribute__((packed)) cf_arenax_chunk;
 
 typedef struct cf_arenax_stash_s {
@@ -86,57 +85,56 @@ typedef struct cf_arenax_stash_s {
 // Caution - changing this struct could break warm restart.
 typedef struct cf_arenax_s {
 	// Configuration (passed in constructors).
-	cf_xmem_type		xmem_type;
-	const void*			xmem_type_cfg;
-	key_t				key_base;
-	uint32_t			element_size;
-	uint32_t			stage_capacity; // derived
-	uint32_t			unused_1;
-	uint32_t			unused_2;
-	size_t				stage_size;
+	cf_xmem_type xmem_type;
+	const void* xmem_type_cfg;
+	key_t key_base;
+	uint32_t element_size;
+	uint32_t stage_capacity; // derived
+	uint32_t unused_1;
+	uint32_t unused_2;
+	size_t stage_size;
 
 	// Free-element lists (non-chunked allocations).
-	cf_arenax_stash*	stash;
+	cf_arenax_stash* stash;
 
 	// Where to end-allocate.
-	uint32_t			at_stage_id;
-	uint32_t			at_element_id;
+	uint32_t at_stage_id;
+	uint32_t at_element_id;
 
 	// Thread safety.
-	cf_mutex			lock;
+	cf_mutex lock;
 
 	// Pad to maintain warm restart compatibility (lock was pthread mutex).
-	uint8_t				pad[36];
+	uint8_t pad[36];
 
 	// Current stages.
-	uint32_t			stage_count;
-	uint8_t*			stages[CF_ARENAX_MAX_STAGES];
+	uint32_t stage_count;
+	uint8_t* stages[CF_ARENAX_MAX_STAGES];
 
 	// Flash index related members at end to avoid full warm restart converter.
 
-	uint32_t			chunk_count; // is 1 for non-flash indexes
-	uint64_t			alloc_sz; // stats only - size of all allocated chunks
+	uint32_t chunk_count; // is 1 for non-flash indexes
+	uint64_t alloc_sz; // stats only - size of all allocated chunks
 
 	// Arena pool (free chunked allocations).
-	size_t				pool_len;
-	cf_arenax_chunk*	pool_buf;
-	size_t				pool_i;
+	size_t pool_len;
+	cf_arenax_chunk* pool_buf;
+	size_t pool_i;
 } cf_arenax;
 
 COMPILER_ASSERT(sizeof(cf_arenax) == 152 + (8 * CF_ARENAX_MAX_STAGES));
 
 typedef struct free_element_s {
-	uint32_t			magic;
-	uint8_t				pad[52]; // so next_h overwrites least critical member
-	cf_arenax_handle	next_h;
+	uint32_t magic;
+	uint8_t pad[52]; // so next_h overwrites least critical member
+	cf_arenax_handle next_h;
 } free_element;
 
 #define FREE_MAGIC 0xff1234ff
 
 typedef struct cf_arenax_puddle_s {
-	uint64_t free_h: 40;
+	uint64_t free_h : 40;
 } __attribute__((packed)) cf_arenax_puddle;
-
 
 //==========================================================
 // Public API.
@@ -149,12 +147,14 @@ void cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 		uint32_t chunk_count, size_t stage_size);
 
 cf_arenax_handle cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle);
-void cf_arenax_free(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle);
+void cf_arenax_free(cf_arenax* arena, cf_arenax_handle h,
+		cf_arenax_puddle* puddle);
 
 bool cf_arenax_is_stage_address(cf_arenax* arena, const void* address);
 
 bool cf_arenax_want_prefetch(cf_arenax* arena);
-void cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles, uint32_t n_puddles);
+void cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles,
+		uint32_t n_puddles);
 
 // Convert cf_arenax_handle to memory address.
 static inline void*
@@ -164,14 +164,12 @@ cf_arenax_resolve(const cf_arenax* arena, cf_arenax_handle h)
 			((h & ELEMENT_ID_MASK) * arena->element_size);
 }
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
 static inline void
-cf_arenax_set_handle(cf_arenax_handle* h, uint32_t stage_id,
-		uint32_t element_id)
+cf_arenax_set_handle(cf_arenax_handle* h, uint32_t stage_id, uint32_t element_id)
 {
 	*h = ((uint64_t)stage_id << ELEMENT_ID_NUM_BITS) | element_id;
 }
@@ -186,5 +184,7 @@ cf_arenax_expand_handle(uint32_t* stage_id, uint32_t* element_id,
 
 cf_arenax_err cf_arenax_add_stage(cf_arenax* arena);
 
-cf_arenax_handle cf_arenax_alloc_chunked(cf_arenax* arena, cf_arenax_puddle* puddle);
-void cf_arenax_free_chunked(cf_arenax* arena, cf_arenax_handle h, cf_arenax_puddle* puddle);
+cf_arenax_handle cf_arenax_alloc_chunked(cf_arenax* arena,
+		cf_arenax_puddle* puddle);
+void cf_arenax_free_chunked(cf_arenax* arena, cf_arenax_handle h,
+		cf_arenax_puddle* puddle);

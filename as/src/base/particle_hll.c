@@ -48,7 +48,6 @@
 
 //#include "warnings.h" // generates warnings we're living with for now
 
-
 //==========================================================
 // HLL particle interface - function declarations.
 //
@@ -57,16 +56,22 @@
 // functions. Here are the differences...
 
 // Handle "wire" format.
-static int32_t hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-static int hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-static int hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-static int hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-static int hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+static int32_t hll_concat_size_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+static int hll_append_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+static int hll_prepend_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+static int hll_incr_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+static int hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
 
 //==========================================================
 // HLL particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable hll_vtable = {
 		blob_destruct,
 		blob_size,
@@ -94,7 +99,7 @@ const as_particle_vtable hll_vtable = {
 		blob_flat_size,
 		blob_to_flat
 };
-
+// clang-format on
 
 //==========================================================
 // Typedefs & constants.
@@ -105,7 +110,7 @@ typedef struct hll_mem_s {
 	uint8_t type;
 	uint32_t sz;
 	uint8_t data[];
-} __attribute__ ((__packed__)) hll_mem;
+} __attribute__((__packed__)) hll_mem;
 
 typedef struct hll_s {
 	uint8_t flags;
@@ -113,7 +118,7 @@ typedef struct hll_s {
 	uint8_t n_minhash_bits; // r in https://arxiv.org/pdf/1710.08436.pdf
 	uint64_t cache;
 	uint8_t registers[];
-} __attribute__ ((__packed__)) hll_t;
+} __attribute__((__packed__)) hll_t;
 
 #define MIN_INDEX_BITS 4
 #define MAX_INDEX_BITS 16
@@ -139,10 +144,11 @@ typedef struct hll_op_s {
 
 struct hll_state_s;
 
-typedef bool (*hll_parse_fn) (struct hll_state_s* state, hll_op* op);
-typedef void (*hll_modify_fn) (const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb);
-typedef void (*hll_read_fn) (const hll_op* op, const hll_t* hll, as_bin* rb);
-typedef int32_t (*hll_prepare_op_fn) (hll_op* op, const as_particle* old_p);
+typedef bool (*hll_parse_fn)(struct hll_state_s* state, hll_op* op);
+typedef void (*hll_modify_fn)(const hll_op* op, hll_t* to, const hll_t* from,
+		as_bin* rb);
+typedef void (*hll_read_fn)(const hll_op* op, const hll_t* hll, as_bin* rb);
+typedef int32_t (*hll_prepare_op_fn)(hll_op* op, const as_particle* old_p);
 
 typedef struct hll_op_def_s {
 	const hll_prepare_op_fn prepare;
@@ -167,15 +173,16 @@ typedef struct hll_state_s {
 	hll_op_def* def;
 } hll_state;
 
-
 //==========================================================
 // Forward declarations.
 //
 
 void hll_op_destroy(hll_op* op);
 
-static bool hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read);
-static int hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb);
+static bool hll_state_init(hll_state* state, const uint8_t* bin_name,
+		uint8_t bin_name_sz, msgpack_in_vec* mv, bool is_read);
+static int hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb,
+		as_bin* rb);
 static int hll_read(hll_state* state, const as_bin* b, as_bin* rb);
 static int32_t hll_verify_bin(const as_bin* b);
 static bool hll_parse_op(hll_state* state, hll_op* op);
@@ -195,24 +202,37 @@ static int32_t hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p);
 static int32_t hll_read_prepare_noop(hll_op* op, const as_particle* old_p);
 static int32_t hll_read_prepare_intersect(hll_op* op, const as_particle* old_p);
 
-static void hll_modify_execute_op(const hll_state* state, const hll_op* op, const as_particle* old_p, as_particle* new_p, uint32_t new_size, as_bin* rb);
-static void hll_read_execute_op(const hll_state* state, const hll_op* op, const as_particle* p, as_bin* rb);
+static void hll_modify_execute_op(const hll_state* state, const hll_op* op,
+		const as_particle* old_p, as_particle* new_p, uint32_t new_size,
+		as_bin* rb);
+static void hll_read_execute_op(const hll_state* state, const hll_op* op,
+		const as_particle* p, as_bin* rb);
 
-static void hll_modify_op_init(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb);
-static void hll_modify_op_add(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb);
-static void hll_modify_op_union(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb);
-static void hll_modify_op_count(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb);
-static void hll_modify_op_fold(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb);
+static void hll_modify_op_init(const hll_op* op, hll_t* to, const hll_t* from,
+		as_bin* rb);
+static void hll_modify_op_add(const hll_op* op, hll_t* to, const hll_t* from,
+		as_bin* rb);
+static void hll_modify_op_union(const hll_op* op, hll_t* to, const hll_t* from,
+		as_bin* rb);
+static void hll_modify_op_count(const hll_op* op, hll_t* to, const hll_t* from,
+		as_bin* rb);
+static void hll_modify_op_fold(const hll_op* op, hll_t* to, const hll_t* from,
+		as_bin* rb);
 
 static void hll_read_op_count(const hll_op* op, const hll_t* from, as_bin* rb);
 static void hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb);
-static void hll_read_op_union_count(const hll_op* op, const hll_t* from, as_bin* rb);
-static void hll_read_op_intersect_count(const hll_op* op, const hll_t* from, as_bin* rb);
-static void hll_read_op_similarity(const hll_op* op, const hll_t* from, as_bin* rb);
+static void hll_read_op_union_count(const hll_op* op, const hll_t* from,
+		as_bin* rb);
+static void hll_read_op_intersect_count(const hll_op* op, const hll_t* from,
+		as_bin* rb);
+static void hll_read_op_similarity(const hll_op* op, const hll_t* from,
+		as_bin* rb);
 static void hll_read_op_describe(const hll_op* op, const hll_t* from, as_bin* rb);
-static void hll_read_op_may_contain_all(const hll_op* op, const hll_t* from, as_bin* rb);
+static void hll_read_op_may_contain_all(const hll_op* op, const hll_t* from,
+		as_bin* rb);
 
-static bool validate_n_combined_bits(uint64_t n_index_bits, uint64_t n_minhash_bits);
+static bool validate_n_combined_bits(uint64_t n_index_bits,
+		uint64_t n_minhash_bits);
 static bool validate_n_index_bits(uint64_t n_index_bits);
 static bool validate_n_minhash_bits(uint64_t n_minhash_bits);
 
@@ -222,15 +242,19 @@ static void hmh_init(hll_t* hmh, uint8_t n_index_bits, uint8_t n_minhash_bits);
 static bool hmh_add(hll_t* hmh, size_t buf_sz, const uint8_t* buf);
 static void hmh_estimate_cardinality_update_cache(hll_t* hmh);
 static uint64_t hmh_estimate_cardinality(const hll_t* hmh);
-static uint64_t hmh_estimate_union_cardinality(uint32_t n_hmhs, const hll_t** hmhs);
-static void hmh_compatible_template(uint32_t n_hmhs, const hll_t** hmhs, hll_t* template);
+static uint64_t hmh_estimate_union_cardinality(uint32_t n_hmhs,
+		const hll_t** hmhs);
+static void hmh_compatible_template(uint32_t n_hmhs, const hll_t** hmhs,
+		hll_t* template);
 static void hmh_union(hll_t* hmhunion, const hll_t* hmh);
-static uint64_t hmh_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs);
+static uint64_t hmh_estimate_intersect_cardinality(uint32_t n_hmhs,
+		const hll_t** hmhs);
 static double hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs);
 static bool hmh_may_contain(const hll_t* hmh, size_t buf_sz, const uint8_t* buf);
 
 static uint32_t registers_sz(uint8_t n_index_bits, uint8_t n_minhash_bits);
-static void hmh_hash(const hll_t* hmh, const uint8_t* element, size_t value_sz, uint16_t* register_ix, uint64_t* value);
+static void hmh_hash(const hll_t* hmh, const uint8_t* element, size_t value_sz,
+		uint16_t* register_ix, uint64_t* value);
 static uint64_t get_register(const hll_t* hmh, uint32_t r);
 static void set_register(hll_t* hmh, uint32_t r, uint64_t value);
 static uint8_t unpack_register_hll_val(const hll_t* hmh, uint64_t value);
@@ -238,91 +262,87 @@ static double hmh_tau(double val);
 static double hmh_sigma(double val);
 static double hmh_alpha(const hll_t* hmh);
 static void hll_union(hll_t* hllunion, const hll_t* hmh);
-static uint64_t hll_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs);
+static uint64_t hll_estimate_intersect_cardinality(uint32_t n_hmhs,
+		const hll_t** hmhs);
 static bool hmh_has_data(const hll_t* hmh);
 static void hmh_intersect_one(hll_t* intersect_hmh, const hll_t* hmh);
 static uint32_t hmh_n_used_registers(const hll_t* hmh);
-static double hmh_jaccard_estimate_collisions(const hll_t* template, uint64_t card0, uint64_t card1);
+static double hmh_jaccard_estimate_collisions(const hll_t* template,
+		uint64_t card0, uint64_t card1);
 static double hll_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs);
-
 
 //==========================================================
 // Inlines & macros.
 //
 
-#define INIT_MV_FROM_MSG(_msg_op) \
-	msgpack_vec vecs = { \
-			.buf = as_msg_op_get_value_p(_msg_op), \
-			.buf_sz = as_msg_op_get_value_sz(_msg_op) \
-	}; \
-	msgpack_in_vec mv = { \
-			.n_vecs = 1, \
-			.vecs = &vecs \
+#define INIT_MV_FROM_MSG(_msg_op)                                              \
+	msgpack_vec vecs = { .buf = as_msg_op_get_value_p(_msg_op),                \
+		.buf_sz = as_msg_op_get_value_sz(_msg_op) };                           \
+	msgpack_in_vec mv = { .n_vecs = 1, .vecs = &vecs }
+
+#define HLL_MODIFY_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _flags, _min_args,   \
+		_max_args, ...)                                                        \
+	[_op].name = _name, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn,    \
+	[_op].bad_flags = ~((uint64_t)(_flags)), [_op].min_args = _min_args,       \
+	[_op].max_args = _max_args, [_op].args = (hll_parse_fn[])                  \
+	{                                                                          \
+		__VA_ARGS__                                                            \
 	}
 
-#define HLL_MODIFY_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _flags, _min_args, \
-		_max_args, ...) \
-	[_op].name = _name, [_op].prepare = _prep_fn, [_op].fn.modify = _op_fn, \
-	[_op].bad_flags = ~((uint64_t)(_flags)), [_op].min_args = _min_args, \
-	[_op].max_args = _max_args, [_op].args = (hll_parse_fn[]){__VA_ARGS__}
-
-#define HLL_READ_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _n_args, ...) \
-	[_op].name = _name, [_op].prepare = _prep_fn, \
-	[_op].fn.read = _op_fn, [_op].bad_flags = ~((uint64_t)(0)), \
-	[_op].min_args = _n_args, [_op].max_args = _n_args, \
-	[_op].args = (hll_parse_fn[]){__VA_ARGS__}
-
+#define HLL_READ_OP_ENTRY(_op, _name, _op_fn, _prep_fn, _n_args, ...)          \
+	[_op].name = _name, [_op].prepare = _prep_fn, [_op].fn.read = _op_fn,      \
+	[_op].bad_flags = ~((uint64_t)(0)), [_op].min_args = _n_args,              \
+	[_op].max_args = _n_args, [_op].args = (hll_parse_fn[])                    \
+	{                                                                          \
+		__VA_ARGS__                                                            \
+	}
 
 //==========================================================
 // Op tables.
 //
 
 static const hll_op_def hll_modify_op_table[] = {
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_INIT, "hll_init", hll_modify_op_init,
-				hll_modify_prepare_init_op,
-				(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_UPDATE_ONLY |
-						AS_HLL_FLAG_NO_FAIL),
-				0, 3, hll_parse_n_index_bits, hll_parse_n_minhash_bits,
-				hll_parse_flags),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_ADD, "hll_add", hll_modify_op_add,
-				hll_modify_prepare_add_op,
-				(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_NO_FAIL),
-				1, 4, hll_parse_elements, hll_parse_n_index_bits,
-				hll_parse_n_minhash_bits, hll_parse_flags),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UNION, "hll_set_union",
-				hll_modify_op_union, hll_modify_prepare_union_op,
-				(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_UPDATE_ONLY |
-						AS_HLL_FLAG_ALLOW_FOLD | AS_HLL_FLAG_NO_FAIL),
-				1, 2, hll_parse_hlls, hll_parse_flags),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UPDATE_COUNT, "hll_refresh_count",
-				hll_modify_op_count, hll_modify_prepare_count_op,
-				(0), 0, 0),
-		HLL_MODIFY_OP_ENTRY(AS_HLL_OP_FOLD, "hll_fold", hll_modify_op_fold,
-				hll_modify_prepare_fold_op,
-				(0), 1, 1, hll_parse_n_index_bits)
+	HLL_MODIFY_OP_ENTRY(AS_HLL_OP_INIT, "hll_init", hll_modify_op_init,
+			hll_modify_prepare_init_op,
+			(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_UPDATE_ONLY |
+					AS_HLL_FLAG_NO_FAIL),
+			0, 3, hll_parse_n_index_bits, hll_parse_n_minhash_bits,
+			hll_parse_flags),
+	HLL_MODIFY_OP_ENTRY(AS_HLL_OP_ADD, "hll_add", hll_modify_op_add,
+			hll_modify_prepare_add_op,
+			(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_NO_FAIL), 1, 4,
+			hll_parse_elements, hll_parse_n_index_bits,
+			hll_parse_n_minhash_bits, hll_parse_flags),
+	HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UNION, "hll_set_union", hll_modify_op_union,
+			hll_modify_prepare_union_op,
+			(AS_HLL_FLAG_CREATE_ONLY | AS_HLL_FLAG_UPDATE_ONLY |
+					AS_HLL_FLAG_ALLOW_FOLD | AS_HLL_FLAG_NO_FAIL),
+			1, 2, hll_parse_hlls, hll_parse_flags),
+	HLL_MODIFY_OP_ENTRY(AS_HLL_OP_UPDATE_COUNT, "hll_refresh_count",
+			hll_modify_op_count, hll_modify_prepare_count_op, (0), 0, 0),
+	HLL_MODIFY_OP_ENTRY(AS_HLL_OP_FOLD, "hll_fold", hll_modify_op_fold,
+			hll_modify_prepare_fold_op, (0), 1, 1, hll_parse_n_index_bits)
 };
 
 static const hll_op_def hll_read_op_table[] = {
-		HLL_READ_OP_ENTRY(AS_HLL_OP_COUNT, "hll_get_count", hll_read_op_count,
-				hll_read_prepare_noop, 0),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_GET_UNION, "hll_get_union",
-				hll_read_op_union, hll_read_prepare_noop, 1, hll_parse_hlls),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_UNION_COUNT, "hll_get_union_count",
-				hll_read_op_union_count, hll_read_prepare_noop, 1,
-				hll_parse_hlls),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_INTERSECT_COUNT, "hll_get_intersect_count",
-				hll_read_op_intersect_count, hll_read_prepare_intersect,
-				1, hll_parse_hlls_intersect),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_SIMILARITY, "hll_get_similarity",
-				hll_read_op_similarity, hll_read_prepare_intersect, 1,
-				hll_parse_hlls_intersect),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, "hll_describe",
-				hll_read_op_describe, hll_read_prepare_noop, 0),
-		HLL_READ_OP_ENTRY(AS_HLL_OP_MAY_CONTAIN, "hll_may_contain",
-				hll_read_op_may_contain_all, hll_read_prepare_noop, 1,
-				hll_parse_elements)
+	HLL_READ_OP_ENTRY(AS_HLL_OP_COUNT, "hll_get_count", hll_read_op_count,
+			hll_read_prepare_noop, 0),
+	HLL_READ_OP_ENTRY(AS_HLL_OP_GET_UNION, "hll_get_union", hll_read_op_union,
+			hll_read_prepare_noop, 1, hll_parse_hlls),
+	HLL_READ_OP_ENTRY(AS_HLL_OP_UNION_COUNT, "hll_get_union_count",
+			hll_read_op_union_count, hll_read_prepare_noop, 1, hll_parse_hlls),
+	HLL_READ_OP_ENTRY(AS_HLL_OP_INTERSECT_COUNT, "hll_get_intersect_count",
+			hll_read_op_intersect_count, hll_read_prepare_intersect, 1,
+			hll_parse_hlls_intersect),
+	HLL_READ_OP_ENTRY(AS_HLL_OP_SIMILARITY, "hll_get_similarity",
+			hll_read_op_similarity, hll_read_prepare_intersect, 1,
+			hll_parse_hlls_intersect),
+	HLL_READ_OP_ENTRY(AS_HLL_OP_DESCRIBE, "hll_describe", hll_read_op_describe,
+			hll_read_prepare_noop, 0),
+	HLL_READ_OP_ENTRY(AS_HLL_OP_MAY_CONTAIN, "hll_may_contain",
+			hll_read_op_may_contain_all, hll_read_prepare_noop, 1,
+			hll_parse_elements)
 };
-
 
 //==========================================================
 // HLL particle interface - function definitions.
@@ -336,8 +356,8 @@ static const hll_op_def hll_read_op_table[] = {
 //
 
 static int32_t
-hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
-		uint32_t value_size, as_particle **pp)
+hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	(void)wire_type;
 	(void)wire_value;
@@ -350,8 +370,8 @@ hll_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 }
 
 static int
-hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
-		uint32_t value_size, as_particle **pp)
+hll_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	(void)wire_type;
 	(void)wire_value;
@@ -364,8 +384,8 @@ hll_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 }
 
 static int
-hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
-		uint32_t value_size, as_particle **pp)
+hll_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	(void)wire_type;
 	(void)wire_value;
@@ -378,8 +398,8 @@ hll_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
 }
 
 static int
-hll_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value,
-		uint32_t value_size, as_particle **pp)
+hll_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	(void)wire_type;
 	(void)wire_value;
@@ -397,9 +417,11 @@ hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 {
 	const hll_t* hll = (const hll_t*)wire_value;
 
-	if (! (hll->flags == 0 && validate_n_combined_bits(hll->n_index_bits,
-			hll->n_minhash_bits) && verify_hll_sz(hll, value_size))) {
-		cf_warning(AS_PARTICLE, "bad hll - error %u flags %x n_index_bits %u n_minhash_bits %u sz %u",
+	if (! (hll->flags == 0 &&
+				validate_n_combined_bits(hll->n_index_bits, hll->n_minhash_bits) &&
+				verify_hll_sz(hll, value_size))) {
+		cf_warning(AS_PARTICLE,
+				"bad hll - error %u flags %x n_index_bits %u n_minhash_bits %u sz %u",
 				hll->flags, AS_ERR_PARAMETER, hll->n_index_bits,
 				hll->n_minhash_bits, value_size);
 		return -AS_ERR_PARAMETER;
@@ -413,7 +435,6 @@ hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
 
 	return AS_OK;
 }
-
 
 //==========================================================
 // as_bin particle functions specific to HLL.
@@ -447,12 +468,11 @@ as_bin_hll_read_tr(const as_bin* b, const as_msg_op* msg_op, as_bin* rb)
 }
 
 int
-as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
+as_bin_hll_modify_exp(as_bin* b, struct msgpack_in_vec_s* mv, as_bin* rb)
 {
 	hll_state state = { 0 };
 
-	if (! hll_state_init(&state, (const uint8_t*)"::write-exp::", 13,
-			mv, false)) {
+	if (! hll_state_init(&state, (const uint8_t*)"::write-exp::", 13, mv, false)) {
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -460,12 +480,11 @@ as_bin_hll_modify_exp(as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
 }
 
 int
-as_bin_hll_read_exp(const as_bin *b, struct msgpack_in_vec_s* mv, as_bin *rb)
+as_bin_hll_read_exp(const as_bin* b, struct msgpack_in_vec_s* mv, as_bin* rb)
 {
 	hll_state state = { 0 };
 
-	if (! hll_state_init(&state, (const uint8_t*)"::read-exp::", 12,
-			mv, true)) {
+	if (! hll_state_init(&state, (const uint8_t*)"::read-exp::", 12, mv, true)) {
 		return -AS_ERR_PARAMETER;
 	}
 
@@ -478,8 +497,7 @@ as_hll_op_name(uint32_t op_code, bool is_modify)
 	const char* name = "INVALID_BITS_OP";
 
 	if (is_modify) {
-		if (op_code >= AS_HLL_MODIFY_OP_START &&
-				op_code < AS_HLL_MODIFY_OP_END) {
+		if (op_code >= AS_HLL_MODIFY_OP_START && op_code < AS_HLL_MODIFY_OP_END) {
 			name = hll_modify_op_table[op_code].name;
 		}
 	}
@@ -489,7 +507,6 @@ as_hll_op_name(uint32_t op_code, bool is_modify)
 
 	return name;
 }
-
 
 //==========================================================
 // Local helpers - cleanup.
@@ -502,7 +519,6 @@ hll_op_destroy(hll_op* op)
 		cf_free(op->elements);
 	}
 }
-
 
 //==========================================================
 // Local helpers - hll parsing.
@@ -518,7 +534,8 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 
 	if (! msgpack_get_list_ele_count_vec(state->mv, &ele_count) ||
 			ele_count == 0) {
-		cf_warning(AS_PARTICLE, "hll_state_init_trans - error %u bin %.*s insufficient args (%u) or unable to parse args",
+		cf_warning(AS_PARTICLE,
+				"hll_state_init_trans - error %u bin %.*s insufficient args (%u) or unable to parse args",
 				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, ele_count);
 		return false;
 	}
@@ -528,7 +545,8 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	uint64_t type64;
 
 	if (! msgpack_get_uint64_vec(state->mv, &type64)) {
-		cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s unable to parse op",
+		cf_warning(AS_PARTICLE,
+				"hll_state_init - error %u bin %.*s unable to parse op",
 				AS_ERR_PARAMETER, (int)bin_name_sz, bin_name);
 		return false;
 	}
@@ -537,10 +555,10 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 
 	if (is_read) {
 		if (! (state->op_type >= AS_HLL_READ_OP_START &&
-				state->op_type < AS_HLL_READ_OP_END)) {
-			cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s op %u expected read op",
-					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
-					state->op_type);
+					state->op_type < AS_HLL_READ_OP_END)) {
+			cf_warning(AS_PARTICLE,
+					"hll_state_init - error %u bin %.*s op %u expected read op",
+					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, state->op_type);
 			return false;
 		}
 
@@ -548,10 +566,10 @@ hll_state_init(hll_state* state, const uint8_t* bin_name, uint8_t bin_name_sz,
 	}
 	else {
 		if (! (state->op_type >= AS_HLL_MODIFY_OP_START &&
-				state->op_type < AS_HLL_MODIFY_OP_END)) {
-			cf_warning(AS_PARTICLE, "hll_state_init - error %u bin %.*s op %u expected modify op",
-					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name,
-					state->op_type);
+					state->op_type < AS_HLL_MODIFY_OP_END)) {
+			cf_warning(AS_PARTICLE,
+					"hll_state_init - error %u bin %.*s op %u expected modify op",
+					AS_ERR_PARAMETER, (int)bin_name_sz, bin_name, state->op_type);
 			return false;
 		}
 
@@ -589,7 +607,8 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 				return AS_OK;
 			}
 
-			cf_detail(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would update",
+			cf_detail(AS_PARTICLE,
+					"as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would update",
 					AS_ERR_BIN_EXISTS, state->def->name, state->op_type,
 					(int)state->bin_name_sz, state->bin_name);
 			hll_op_destroy(&op);
@@ -606,7 +625,8 @@ hll_modify(hll_state* state, as_bin* b, cf_ll_buf* particles_llb, as_bin* rb)
 				return AS_OK;
 			}
 
-			cf_detail(AS_PARTICLE, "as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would create",
+			cf_detail(AS_PARTICLE,
+					"as_bin_hll_modify - error %u operation %s (%u) on bin %.*s would create",
 					AS_ERR_BIN_NOT_FOUND, state->def->name, state->op_type,
 					(int)state->bin_name_sz, state->bin_name);
 			hll_op_destroy(&op);
@@ -689,14 +709,17 @@ hll_verify_bin(const as_bin* b)
 	uint8_t type = as_bin_get_particle_type(b);
 
 	if (type != AS_PARTICLE_TYPE_HLL) {
-		cf_warning(AS_PARTICLE, "hll_verify_bin - error %u bin is not hll (%u) found %u",
+		cf_warning(AS_PARTICLE,
+				"hll_verify_bin - error %u bin is not hll (%u) found %u",
 				AS_ERR_INCOMPATIBLE_TYPE, AS_PARTICLE_TYPE_HLL, type);
 		return -AS_ERR_INCOMPATIBLE_TYPE;
 	}
 
-	if (! (hll->flags == 0 && validate_n_combined_bits(hll->n_index_bits,
-			hll->n_minhash_bits) && verify_hll_sz(hll, bmem->sz))) {
-		cf_warning(AS_PARTICLE, "hll_verify_bin - error %u found invalid hll flags %x n_index_bits %u n_minhash_bits %u sz %u",
+	if (! (hll->flags == 0 &&
+				validate_n_combined_bits(hll->n_index_bits, hll->n_minhash_bits) &&
+				verify_hll_sz(hll, bmem->sz))) {
+		cf_warning(AS_PARTICLE,
+				"hll_verify_bin - error %u found invalid hll flags %x n_index_bits %u n_minhash_bits %u sz %u",
 				AS_ERR_UNKNOWN, hll->flags, hll->n_index_bits,
 				hll->n_minhash_bits, bmem->sz);
 		return -AS_ERR_UNKNOWN;
@@ -711,7 +734,8 @@ hll_parse_op(hll_state* state, hll_op* op)
 	hll_op_def* def = state->def;
 
 	if (state->n_args < def->min_args || state->n_args > def->max_args) {
-		cf_warning(AS_PARTICLE, "hll_parse_op - error %u op %s (%u) unexpected number of args %u for op %s",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_op - error %u op %s (%u) unexpected number of args %u for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->n_args, state->def->name);
 		return false;
@@ -732,15 +756,16 @@ hll_parse_n_index_bits(hll_state* state, hll_op* op)
 	int64_t n_index_bits;
 
 	if (! msgpack_get_int64_vec(state->mv, &n_index_bits)) {
-		cf_warning(AS_PARTICLE, "hll_parse_n_index_bits - error %u op %s (%u) unable to parse n_index_bits",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_n_index_bits - error %u op %s (%u) unable to parse n_index_bits",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
 
 	if (n_index_bits != -1 && ! validate_n_index_bits((uint64_t)n_index_bits)) {
-		cf_warning(AS_PARTICLE, "hll_parse_n_index_bits - error %u op %s (%u) n_index_bits (%ld) is out of range",
-				AS_ERR_PARAMETER, state->def->name, state->op_type,
-				n_index_bits);
+		cf_warning(AS_PARTICLE,
+				"hll_parse_n_index_bits - error %u op %s (%u) n_index_bits (%ld) is out of range",
+				AS_ERR_PARAMETER, state->def->name, state->op_type, n_index_bits);
 		return false;
 	}
 
@@ -755,7 +780,8 @@ hll_parse_n_minhash_bits(hll_state* state, hll_op* op)
 	int64_t n_minhash_bits;
 
 	if (! msgpack_get_int64_vec(state->mv, &n_minhash_bits)) {
-		cf_warning(AS_PARTICLE, "hll_parse_n_minhash_bits - error %u op %s (%u) unable to parse n_minhash_bits for op %s",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_n_minhash_bits - error %u op %s (%u) unable to parse n_minhash_bits for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->def->name);
 		return false;
@@ -768,15 +794,18 @@ hll_parse_n_minhash_bits(hll_state* state, hll_op* op)
 	}
 
 	if (! validate_n_minhash_bits((uint64_t)n_minhash_bits)) {
-		cf_warning(AS_PARTICLE, "hll_parse_n_minhash_bits - error %u op %s (%u) n_minhash_bits (%ld) is out of range",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_n_minhash_bits - error %u op %s (%u) n_minhash_bits (%ld) is out of range",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				n_minhash_bits);
 		return false;
 	}
 
-	if (op->n_index_bits != 0xFF && ! validate_n_combined_bits(
-			op->n_index_bits, (uint64_t)n_minhash_bits)) {
-		cf_warning(AS_PARTICLE, "hll_parse_n_minhash_bits - error %u op %s (%u) n_index_bits (%u) and n_minhash_bits (%ld) must be less than or equal to %u",
+	if (op->n_index_bits != 0xFF &&
+			! validate_n_combined_bits(op->n_index_bits,
+					(uint64_t)n_minhash_bits)) {
+		cf_warning(AS_PARTICLE,
+				"hll_parse_n_minhash_bits - error %u op %s (%u) n_index_bits (%u) and n_minhash_bits (%ld) must be less than or equal to %u",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				op->n_index_bits, n_minhash_bits, MAX_INDEX_AND_MINHASH_BITS);
 		return false;
@@ -791,14 +820,16 @@ static bool
 hll_parse_flags(hll_state* state, hll_op* op)
 {
 	if (! msgpack_get_uint64_vec(state->mv, &op->flags)) {
-		cf_warning(AS_PARTICLE, "hll_parse_flags - error %u op %s (%u) unable to parse flags for op %s",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_flags - error %u op %s (%u) unable to parse flags for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				state->def->name);
 		return false;
 	}
 
 	if ((op->flags & state->def->bad_flags) != 0) {
-		cf_warning(AS_PARTICLE, "hll_parse_flags - error %u op %s (%u) invalid flags (0x%lx) for op %s",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_flags - error %u op %s (%u) invalid flags (0x%lx) for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags,
 				state->def->name);
 		return false;
@@ -806,7 +837,8 @@ hll_parse_flags(hll_state* state, hll_op* op)
 
 	if ((op->flags & AS_HLL_FLAG_CREATE_ONLY) != 0 &&
 			(op->flags & AS_HLL_FLAG_UPDATE_ONLY) != 0) {
-		cf_warning(AS_PARTICLE, "hll_parse_flags - error %u op %s (%u) invalid flags combination (0x%lx) for op %s",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_flags - error %u op %s (%u) invalid flags combination (0x%lx) for op %s",
 				AS_ERR_PARAMETER, state->def->name, state->op_type, op->flags,
 				state->def->name);
 		return false;
@@ -820,7 +852,8 @@ hll_parse_elements(hll_state* state, hll_op* op)
 {
 	if (! msgpack_get_list_ele_count_vec(state->mv, &op->n_elements) ||
 			op->n_elements == 0) {
-		cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) not enough elements or unable to parse elements",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_elements - error %u op %s (%u) not enough elements or unable to parse elements",
 				AS_ERR_PARAMETER, state->def->name, state->op_type);
 		return false;
 	}
@@ -828,20 +861,23 @@ hll_parse_elements(hll_state* state, hll_op* op)
 	op->elements = cf_malloc(sizeof(element_buf) * op->n_elements);
 
 	for (uint32_t i = 0; i < op->n_elements; i++) {
-		element_buf* e = &op->elements[i]; // TODO - make array of 2 vectors for vectorized input
+		element_buf* e =
+				&op->elements[i]; // TODO - make array of 2 vectors for vectorized input
 		msgpack_type t = msgpack_peek_type_vec(state->mv);
 
 		switch (t) {
 		case MSGPACK_TYPE_LIST:
 		case MSGPACK_TYPE_MAP:
-			cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) element (%u) is either a list or map which are unsupported (%u)",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_elements - error %u op %s (%u) element (%u) is either a list or map which are unsupported (%u)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i, t);
 			return false;
 		default:
 			e->buf = msgpack_get_ele_vec(state->mv, &e->sz);
 
 			if (e->buf == NULL) {
-				cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) unable to parse element (%u)",
+				cf_warning(AS_PARTICLE,
+						"hll_parse_elements - error %u op %s (%u) unable to parse element (%u)",
 						AS_ERR_PARAMETER, state->def->name, state->op_type, i);
 				return false;
 			}
@@ -850,7 +886,8 @@ hll_parse_elements(hll_state* state, hll_op* op)
 			e->sz = msgpack_compactify((uint8_t*)e->buf, e->sz, NULL);
 
 			if (e->sz == 0) {
-				cf_warning(AS_PARTICLE, "hll_parse_elements - error %u op %s (%u) unable to normalize element (%u)",
+				cf_warning(AS_PARTICLE,
+						"hll_parse_elements - error %u op %s (%u) unable to normalize element (%u)",
 						AS_ERR_PARAMETER, state->def->name, state->op_type, i);
 				return false;
 			}
@@ -868,7 +905,8 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 	if (t == MSGPACK_TYPE_LIST) {
 		if (! msgpack_get_list_ele_count_vec(state->mv, &op->n_elements) ||
 				op->n_elements == 0) {
-			cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) not enough elements or unable to parse elements",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_hlls - error %u op %s (%u) not enough elements or unable to parse elements",
 					AS_ERR_PARAMETER, state->def->name, state->op_type);
 			return false;
 		}
@@ -886,7 +924,8 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 
 		// AS msgpack has a one byte blob type field which we ignore here.
 		if (e->buf == NULL || e->sz < sizeof(hll_t) + 1) {
-			cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) hll (%u) has a bad pointer %p or size (%u) minimum size (%zu)",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_hlls - error %u op %s (%u) hll (%u) has a bad pointer %p or size (%u) minimum size (%zu)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i,
 					e->buf, e->sz, sizeof(hll_t));
 			return false;
@@ -898,31 +937,35 @@ hll_parse_hlls(hll_state* state, hll_op* op)
 		hll_t* hll = (hll_t*)e->buf;
 
 		if (hll->flags != 0) {
-			cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) hll (%u) contains unknown flags (%x)",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_hlls - error %u op %s (%u) hll (%u) contains unknown flags (%x)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i,
 					hll->flags);
 			return false;
 		}
 
 		if (! validate_n_index_bits((uint64_t)hll->n_index_bits)) {
-			cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) n_index_bits (%u) out of range",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_hlls - error %u op %s (%u) n_index_bits (%u) out of range",
 					AS_ERR_PARAMETER, state->def->name, state->op_type,
 					hll->n_index_bits);
 			return false;
 		}
 
 		if (! validate_n_minhash_bits((uint64_t)hll->n_minhash_bits)) {
-			cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) n_minhash_bits (%u) out of range",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_hlls - error %u op %s (%u) n_minhash_bits (%u) out of range",
 					AS_ERR_PARAMETER, state->def->name, state->op_type,
 					hll->n_minhash_bits);
 			return false;
 		}
 
-		uint32_t expected_sz = hmh_required_sz(hll->n_index_bits,
-				hll->n_minhash_bits);
+		uint32_t expected_sz =
+				hmh_required_sz(hll->n_index_bits, hll->n_minhash_bits);
 
 		if (e->sz != expected_sz) {
-			cf_warning(AS_PARTICLE, "hll_parse_hlls - error %u op %s (%u) hll (%u) has a bad size (%u) expected (%u)",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_hlls - error %u op %s (%u) hll (%u) has a bad size (%u) expected (%u)",
 					AS_ERR_PARAMETER, state->def->name, state->op_type, i,
 					e->sz, expected_sz);
 			return false;
@@ -952,7 +995,8 @@ hll_parse_hlls_intersect(hll_state* state, hll_op* op)
 		hll_t* hll = (hll_t*)e->buf;
 
 		if (hll->n_minhash_bits != n_minhash_bits) {
-			cf_warning(AS_PARTICLE, "hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits are mismatched",
+			cf_warning(AS_PARTICLE,
+					"hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits are mismatched",
 					AS_ERR_PARAMETER, state->def->name, state->op_type,
 					op->n_elements);
 			return false;
@@ -960,7 +1004,8 @@ hll_parse_hlls_intersect(hll_state* state, hll_op* op)
 	}
 
 	if (n_minhash_bits == 0) {
-		cf_warning(AS_PARTICLE, "hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits = 0",
+		cf_warning(AS_PARTICLE,
+				"hll_parse_hlls_intersect - error %u op %s (%u) can't do intersect or similarity with (%u) > 2 HLLs when n_minhash_bits = 0",
 				AS_ERR_PARAMETER, state->def->name, state->op_type,
 				op->n_elements);
 		return false;
@@ -968,7 +1013,6 @@ hll_parse_hlls_intersect(hll_state* state, hll_op* op)
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - prepare modify ops.
@@ -979,7 +1023,8 @@ hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p)
 {
 	if (old_p == NULL) { // creating new HLL
 		if (op->n_index_bits == 0xFF) {
-			cf_warning(AS_PARTICLE, "hll_modify_prepare_init_op - error %u cannot create when n_index_bits is unset",
+			cf_warning(AS_PARTICLE,
+					"hll_modify_prepare_init_op - error %u cannot create when n_index_bits is unset",
 					AS_ERR_OP_NOT_APPLICABLE);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
@@ -1002,7 +1047,8 @@ hll_modify_prepare_init_op(hll_op* op, const as_particle* old_p)
 	}
 
 	if (! validate_n_combined_bits(op->n_index_bits, op->n_minhash_bits)) {
-		cf_warning(AS_PARTICLE, "hll_modify_prepare_init_op - error %u init on results in an invalid bit configuration (%u,%u)",
+		cf_warning(AS_PARTICLE,
+				"hll_modify_prepare_init_op - error %u init on results in an invalid bit configuration (%u,%u)",
 				AS_ERR_OP_NOT_APPLICABLE, op->n_index_bits, op->n_minhash_bits);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -1015,7 +1061,8 @@ hll_modify_prepare_add_op(hll_op* op, const as_particle* old_p)
 {
 	if (old_p == NULL) { // creating new HLL
 		if (op->n_index_bits == 0xFF) {
-			cf_warning(AS_PARTICLE, "hll_modify_prepare_add_op - error %u cannot create when n_index_bits is unset",
+			cf_warning(AS_PARTICLE,
+					"hll_modify_prepare_add_op - error %u cannot create when n_index_bits is unset",
 					AS_ERR_OP_NOT_APPLICABLE);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
@@ -1069,14 +1116,16 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 
 	if ((op->flags & AS_HLL_FLAG_ALLOW_FOLD) == 0) {
 		if (old_hll->n_index_bits > min_n_index_bits) {
-			cf_warning(AS_PARTICLE, "hll_modify_prepare_union_op - error %u cannot reduce n_index_bits",
+			cf_warning(AS_PARTICLE,
+					"hll_modify_prepare_union_op - error %u cannot reduce n_index_bits",
 					AS_ERR_OP_NOT_APPLICABLE);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
 
 		if (old_hll->n_minhash_bits != 0 &&
 				old_hll->n_minhash_bits != min_n_minhash_bits) {
-			cf_warning(AS_PARTICLE, "hll_modify_prepare_union_op - error %u cannot reduce n_minhash_bits to zero",
+			cf_warning(AS_PARTICLE,
+					"hll_modify_prepare_union_op - error %u cannot reduce n_minhash_bits to zero",
 					AS_ERR_OP_NOT_APPLICABLE);
 			return -AS_ERR_OP_NOT_APPLICABLE;
 		}
@@ -1085,10 +1134,12 @@ hll_modify_prepare_union_op(hll_op* op, const as_particle* old_p)
 		op->n_minhash_bits = old_hll->n_minhash_bits;
 	}
 	else { // allow_fold
-		op->n_index_bits = old_hll->n_index_bits < min_n_index_bits ?
-				old_hll->n_index_bits : min_n_index_bits;
-		op->n_minhash_bits = old_hll->n_minhash_bits != min_n_minhash_bits ?
-				0 : min_n_minhash_bits;
+		op->n_index_bits = old_hll->n_index_bits < min_n_index_bits
+				? old_hll->n_index_bits
+				: min_n_index_bits;
+		op->n_minhash_bits = old_hll->n_minhash_bits != min_n_minhash_bits
+				? 0
+				: min_n_minhash_bits;
 	}
 
 	return AS_OK;
@@ -1098,7 +1149,8 @@ static int32_t
 hll_modify_prepare_count_op(hll_op* op, const as_particle* old_p)
 {
 	if (old_p == NULL) { // Creating new HLL.
-		cf_warning(AS_PARTICLE, "hll_modify_prepare_count_op - error %u cannot create bin with count op",
+		cf_warning(AS_PARTICLE,
+				"hll_modify_prepare_count_op - error %u cannot create bin with count op",
 				AS_ERR_BIN_NOT_FOUND);
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
@@ -1115,7 +1167,8 @@ static int32_t
 hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 {
 	if (old_p == NULL) { // Creating new HLL.
-		cf_warning(AS_PARTICLE, "hll_modify_prepare_fold_op - error %u cannot create bin with fold op",
+		cf_warning(AS_PARTICLE,
+				"hll_modify_prepare_fold_op - error %u cannot create bin with fold op",
 				AS_ERR_BIN_NOT_FOUND);
 		return -AS_ERR_BIN_NOT_FOUND;
 	}
@@ -1123,13 +1176,15 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 	hll_t* old_hll = (hll_t*)((hll_mem*)old_p)->data;
 
 	if (old_hll->n_minhash_bits > 0) {
-		cf_warning(AS_PARTICLE, "hll_modify_prepare_fold_op - error %u cannot fold an HLL containing minhash bits",
+		cf_warning(AS_PARTICLE,
+				"hll_modify_prepare_fold_op - error %u cannot fold an HLL containing minhash bits",
 				AS_ERR_OP_NOT_APPLICABLE);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	if (old_hll->n_index_bits < op->n_index_bits) {
-		cf_warning(AS_PARTICLE, "hll_modify_prepare_fold_op - error %u existing HLL has less or equal n_index_bits (%u) than (%u)",
+		cf_warning(AS_PARTICLE,
+				"hll_modify_prepare_fold_op - error %u existing HLL has less or equal n_index_bits (%u) than (%u)",
 				AS_ERR_OP_NOT_APPLICABLE, old_hll->n_index_bits,
 				op->n_index_bits);
 		return -AS_ERR_OP_NOT_APPLICABLE;
@@ -1139,7 +1194,6 @@ hll_modify_prepare_fold_op(hll_op* op, const as_particle* old_p)
 
 	return AS_OK;
 }
-
 
 //==========================================================
 // Local helpers - prepare read ops.
@@ -1163,16 +1217,17 @@ hll_read_prepare_intersect(hll_op* op, const as_particle* old_p)
 	uint32_t n_minhash_bits = hll0->n_minhash_bits;
 
 	// Parse verified if more than 2 HLLs, all have the same n_minhash_bits.
-	if (op->n_elements > 2 && (old_hll->n_minhash_bits == 0 ||
-			old_hll->n_minhash_bits != n_minhash_bits)) {
-		cf_warning(AS_PARTICLE, "hll_read_prepare - error %u received %u HLLs - cannot intersect > 2 HLLs with the local HLL when n_minhash_bits do not match",
+	if (op->n_elements > 2 &&
+			(old_hll->n_minhash_bits == 0 ||
+					old_hll->n_minhash_bits != n_minhash_bits)) {
+		cf_warning(AS_PARTICLE,
+				"hll_read_prepare - error %u received %u HLLs - cannot intersect > 2 HLLs with the local HLL when n_minhash_bits do not match",
 				AS_ERR_OP_NOT_APPLICABLE, op->n_elements);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 
 	return AS_OK;
 }
-
 
 //==========================================================
 // Local helpers - execute ops.
@@ -1191,9 +1246,9 @@ hll_modify_execute_op(const hll_state* state, const hll_op* op,
 	((hll_mem*)new_p)->sz = new_size;
 	((hll_mem*)new_p)->type = AS_PARTICLE_TYPE_HLL;
 
-	cf_assert(verify_hll_sz(new_hll, new_size), AS_PARTICLE, "result corrupt - op-type %u desc (%u,%u) expected-desc (%u,%u) sz %u expected-sz %u",
-			state->op_type,
-			new_hll->n_index_bits, new_hll->n_minhash_bits,
+	cf_assert(verify_hll_sz(new_hll, new_size), AS_PARTICLE,
+			"result corrupt - op-type %u desc (%u,%u) expected-desc (%u,%u) sz %u expected-sz %u",
+			state->op_type, new_hll->n_index_bits, new_hll->n_minhash_bits,
 			op->n_index_bits, op->n_minhash_bits,
 			hmh_required_sz(new_hll->n_index_bits, new_hll->n_minhash_bits),
 			new_size);
@@ -1206,11 +1261,9 @@ hll_read_execute_op(const hll_state* state, const hll_op* op,
 	state->def->fn.read(op, (const hll_t*)((const hll_mem*)p)->data, rb);
 }
 
-
 //==========================================================
 // Local helpers - hll modify ops.
 //
-
 
 static void
 hll_modify_op_init(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb)
@@ -1231,8 +1284,8 @@ hll_modify_op_add(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb)
 		hmh_init(to, op->n_index_bits, op->n_minhash_bits);
 	}
 	else {
-		memcpy(to, from, hmh_required_sz(from->n_index_bits,
-				from->n_minhash_bits));
+		memcpy(to, from,
+				hmh_required_sz(from->n_index_bits, from->n_minhash_bits));
 	}
 
 	uint64_t n_added = 0;
@@ -1278,8 +1331,7 @@ hll_modify_op_count(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb)
 {
 	(void)op;
 
-	memcpy(to, from, hmh_required_sz(from->n_index_bits,
-			from->n_minhash_bits));
+	memcpy(to, from, hmh_required_sz(from->n_index_bits, from->n_minhash_bits));
 
 	hmh_estimate_cardinality_update_cache(to);
 
@@ -1301,7 +1353,6 @@ hll_modify_op_fold(const hll_op* op, hll_t* to, const hll_t* from, as_bin* rb)
 	hmh_init(to, op->n_index_bits, 0);
 	hmh_union(to, from);
 }
-
 
 //==========================================================
 // Local helpers - hll read ops.
@@ -1334,8 +1385,8 @@ hll_read_op_union(const hll_op* op, const hll_t* from, as_bin* rb)
 
 	hmh_compatible_template(n_hmhs, hmhs, &template);
 
-	uint32_t answer_sz = hmh_required_sz(template.n_index_bits,
-			template.n_minhash_bits);
+	uint32_t answer_sz =
+			hmh_required_sz(template.n_index_bits, template.n_minhash_bits);
 	size_t alloc_size = sizeof(hll_mem) + answer_sz;
 	hll_mem* answer = cf_malloc(alloc_size);
 	hll_t* union_hmh = (hll_t*)answer->data;
@@ -1403,7 +1454,7 @@ hll_read_op_similarity(const hll_op* op, const hll_t* from, as_bin* rb)
 	double similarity = hmh_estimate_similarity(n_hmhs, hmhs);
 
 	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_FLOAT);
-	*((double *)(&rb->particle)) = similarity;
+	*((double*)(&rb->particle)) = similarity;
 }
 
 static void
@@ -1412,7 +1463,7 @@ hll_read_op_describe(const hll_op* op, const hll_t* from, as_bin* rb)
 	(void)op;
 
 	define_rollback_alloc(alloc, NULL, 1);
-	cdt_result_data rd = { .result=rb, .alloc=alloc };
+	cdt_result_data rd = { .result = rb, .alloc = alloc };
 
 	result_data_set_list_int2x(&rd, from->n_index_bits, from->n_minhash_bits);
 }
@@ -1437,7 +1488,6 @@ hll_read_op_may_contain_all(const hll_op* op, const hll_t* from, as_bin* rb)
 	as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
 }
 
-
 //==========================================================
 // Local helpers - hll validation.
 //
@@ -1459,10 +1509,10 @@ validate_n_index_bits(uint64_t n_index_bits)
 static bool
 validate_n_minhash_bits(uint64_t n_minhash_bits)
 {
-	return n_minhash_bits == 0 || (n_minhash_bits >= MIN_MINHASH_BITS &&
-			n_minhash_bits <= MAX_MINHASH_BITS);
+	return n_minhash_bits == 0 ||
+			(n_minhash_bits >= MIN_MINHASH_BITS &&
+					n_minhash_bits <= MAX_MINHASH_BITS);
 }
-
 
 //==========================================================
 // Local helpers - hmh lib.
@@ -1474,7 +1524,8 @@ verify_hll_sz(const hll_t* hmh, uint32_t expected_sz)
 	uint32_t sz = hmh_required_sz(hmh->n_index_bits, hmh->n_minhash_bits);
 
 	if (sz != expected_sz) {
-		cf_warning(AS_PARTICLE, "verify_hll_sz - bad hll particle - description (%u,%u) sz %u expected-sz %u",
+		cf_warning(AS_PARTICLE,
+				"verify_hll_sz - bad hll particle - description (%u,%u) sz %u expected-sz %u",
 				hmh->n_index_bits, hmh->n_minhash_bits, sz, expected_sz);
 		return false;
 	}
@@ -1545,7 +1596,7 @@ hmh_estimate_cardinality(const hll_t* hmh)
 	}
 
 	uint32_t n_registers = (uint32_t)1 << hmh->n_index_bits;
-	uint32_t c[HLL_MAX_VALUE + 1] = {0}; // q_bits + 1
+	uint32_t c[HLL_MAX_VALUE + 1] = { 0 }; // q_bits + 1
 
 	for (uint32_t r = 0; r < n_registers; r++) {
 		c[unpack_register_hll_val(hmh, get_register(hmh, r))]++;
@@ -1568,8 +1619,7 @@ hmh_estimate_union_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 {
 	hll_t template;
 	hmh_compatible_template(n_hmhs, hmhs, &template);
-	uint32_t sz = hmh_required_sz(template.n_index_bits,
-			template.n_minhash_bits);
+	uint32_t sz = hmh_required_sz(template.n_index_bits, template.n_minhash_bits);
 	uint8_t buf[sz];
 	hll_t* hmhunion = (hll_t*)buf;
 
@@ -1603,10 +1653,8 @@ hmh_compatible_template(uint32_t n_hmhs, const hll_t** hmhs, hll_t* template)
 		}
 	}
 
-	*template = (hll_t){
-		.n_index_bits = index_bits,
-		.n_minhash_bits = (uint8_t)minhash_bits
-	};
+	*template = (hll_t){ .n_index_bits = index_bits,
+		.n_minhash_bits = (uint8_t)minhash_bits };
 }
 
 static void
@@ -1622,7 +1670,7 @@ hmh_union(hll_t* hmhunion, const hll_t* hmh)
 	uint32_t n_registers = (uint32_t)1 << hmhunion->n_index_bits;
 	uint32_t register_mask = n_registers - 1;
 
-	for (uint32_t r = 0; r < max_registers; r++ ) {
+	for (uint32_t r = 0; r < max_registers; r++) {
 		uint32_t union_r = r & register_mask;
 		uint64_t v0 = get_register(hmhunion, union_r);
 		uint64_t v1 = get_register(hmh, r);
@@ -1692,8 +1740,7 @@ hmh_estimate_similarity(uint32_t n_hmhs, const hll_t** hmhs)
 		return one_has_data ? 0.0 : NAN;
 	}
 
-	uint32_t sz = hmh_required_sz(template.n_index_bits,
-			template.n_minhash_bits);
+	uint32_t sz = hmh_required_sz(template.n_index_bits, template.n_minhash_bits);
 	uint8_t agg_buf[sz];
 	hll_t* agg_hmh = (hll_t*)agg_buf;
 
@@ -1746,7 +1793,6 @@ hmh_may_contain(const hll_t* hmh, size_t buf_sz, const uint8_t* buf)
 	return check_value <= cur_value;
 }
 
-
 //==========================================================
 // Local helpers - hmh lib helpers.
 //
@@ -1754,8 +1800,9 @@ hmh_may_contain(const hll_t* hmh, size_t buf_sz, const uint8_t* buf)
 static uint32_t
 registers_sz(uint8_t n_index_bits, uint8_t n_minhash_bits)
 {
-	return (((uint32_t)HLL_BITS + n_minhash_bits) *
-			((uint32_t)1 << n_index_bits) + 7) / 8;
+	return (((uint32_t)HLL_BITS + n_minhash_bits) * ((uint32_t)1 << n_index_bits) +
+				   7) /
+			8;
 }
 
 static void
@@ -1780,7 +1827,8 @@ hmh_hash(const hll_t* hmh, const uint8_t* element, size_t value_sz,
 }
 
 static uint64_t
-get_register(const hll_t* hmh, uint32_t r) {
+get_register(const hll_t* hmh, uint32_t r)
+{
 	uint32_t n_bits = (uint32_t)HLL_BITS + hmh->n_minhash_bits;
 	uint32_t bit_offset = n_bits * r;
 	uint32_t byte_offset = bit_offset / 8;
@@ -1805,7 +1853,8 @@ get_register(const hll_t* hmh, uint32_t r) {
 }
 
 static void
-set_register(hll_t* hmh, uint32_t r, uint64_t value) {
+set_register(hll_t* hmh, uint32_t r, uint64_t value)
+{
 	uint32_t n_bits = (uint32_t)HLL_BITS + hmh->n_minhash_bits;
 	uint32_t bit_offset = n_bits * r;
 	uint32_t byte_offset = bit_offset / 8;
@@ -1903,10 +1952,10 @@ hll_union(hll_t* hllunion, const hll_t* hmh)
 	uint32_t max_registers = (uint32_t)1 << hmh->n_index_bits;
 	uint32_t register_mask = n_registers - 1;
 
-	for (uint32_t r = 0; r < max_registers; r++ ) {
+	for (uint32_t r = 0; r < max_registers; r++) {
 		uint32_t union_r = r & register_mask;
-		uint8_t v0 = unpack_register_hll_val(hllunion, get_register(hllunion,
-				union_r));
+		uint8_t v0 = unpack_register_hll_val(hllunion,
+				get_register(hllunion, union_r));
 		uint8_t v1 = unpack_register_hll_val(hmh, get_register(hmh, r));
 
 		if (v0 < v1) {
@@ -1925,7 +1974,8 @@ hll_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 		uint64_t c = hmh_estimate_cardinality(hmhs[i]);
 
 		if (sum_hmhs + c < sum_hmhs) {
-			cf_warning(AS_PARTICLE, "intersection cardinality estimate wrapped (%lu) plus (%lu)",
+			cf_warning(AS_PARTICLE,
+					"intersection cardinality estimate wrapped (%lu) plus (%lu)",
 					sum_hmhs, c);
 			sum_hmhs = UINT64_MAX;
 			break;
@@ -1950,7 +2000,8 @@ hll_estimate_intersect_cardinality(uint32_t n_hmhs, const hll_t** hmhs)
 }
 
 static bool
-hmh_has_data(const hll_t* hmh) {
+hmh_has_data(const hll_t* hmh)
+{
 	uint32_t n_dwords = ((uint32_t)1 << hmh->n_index_bits) / 8;
 	uint64_t* dwords = (uint64_t*)hmh->registers;
 
@@ -1971,7 +2022,7 @@ hmh_intersect_one(hll_t* intersect_hmh, const hll_t* hmh)
 	uint32_t max_registers = (uint32_t)1 << hmh->n_index_bits;
 	uint32_t register_mask = n_registers - 1;
 
-	for (uint32_t r = 0; r < max_registers; r++ ) {
+	for (uint32_t r = 0; r < max_registers; r++) {
 		uint32_t small_r = r & register_mask;
 		uint64_t v0 = get_register(intersect_hmh, small_r);
 		uint64_t v1 = get_register(hmh, r);
@@ -1986,7 +2037,7 @@ hmh_n_used_registers(const hll_t* hmh)
 	uint32_t n_registers = (uint32_t)1 << hmh->n_index_bits;
 	uint32_t count = 0;
 
-	for (uint32_t r = 0; r < n_registers; r++ ) {
+	for (uint32_t r = 0; r < n_registers; r++) {
 		if (get_register(hmh, r)) {
 			count++;
 		}

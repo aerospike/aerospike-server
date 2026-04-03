@@ -33,14 +33,13 @@
 
 #include "fabric/partition_balance.h"
 
-
 //==========================================================
 // Public API.
 //
 
 void as_roster_init(void);
-void as_roster_set_nodes_cmd(const char* ns_name, const char* nodes, cf_dyn_buf* db);
-
+void as_roster_set_nodes_cmd(const char* ns_name, const char* nodes,
+		cf_dyn_buf* db);
 
 //==========================================================
 // Inlines & macros.

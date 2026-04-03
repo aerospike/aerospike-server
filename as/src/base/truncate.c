@@ -55,7 +55,6 @@
 #include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -86,19 +85,20 @@ typedef struct truncate_reduce_cb_info_s {
 // Detect excessive clock skew for warning purposes only.
 static const uint64_t WARN_CLOCK_SKEW_MS = 1000UL * 5;
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static bool truncate_smd_conflict_cb(const as_smd_item* existing_item, const as_smd_item* new_item);
-static void truncate_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type);
+static bool truncate_smd_conflict_cb(const as_smd_item* existing_item,
+		const as_smd_item* new_item);
+static void truncate_smd_accept_cb(const cf_vector* items,
+		as_smd_accept_type accept_type);
 
-static void truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut);
+static void truncate_action_do(as_namespace* ns, const char* set_name,
+		uint64_t lut);
 static void truncate_action_undo(as_namespace* ns, const char* set_name);
 static void* run_truncate(void* arg);
 static bool truncate_reduce_cb(as_index_ref* r_ref, void* udata);
-
 
 //==========================================================
 // Inlines & macros.
@@ -109,7 +109,6 @@ lut_from_smd(const as_smd_item* item)
 {
 	return strtoul(item->value, NULL, 10);
 }
-
 
 //==========================================================
 // Public API.
@@ -240,8 +239,7 @@ as_truncate_now_is_truncated(struct as_namespace_s* ns, uint16_t set_id)
 {
 	uint64_t now = cf_clepoch_milliseconds();
 
-	if (now < ns->truncate_lut &&
-			! as_mrt_monitor_is_monitor_set_id(ns, set_id)) {
+	if (now < ns->truncate_lut && ! as_mrt_monitor_is_monitor_set_id(ns, set_id)) {
 		return true;
 	}
 
@@ -262,7 +260,6 @@ as_truncate_record_is_truncated(const as_record* r, as_namespace* ns)
 
 	return p_set != NULL ? r->last_update_time < p_set->truncate_lut : false;
 }
-
 
 //==========================================================
 // Local helpers - SMD callbacks.
@@ -309,7 +306,6 @@ truncate_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 		}
 	}
 }
-
 
 //==========================================================
 // Local helpers - SMD callbacks' helpers.
@@ -370,14 +366,12 @@ truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 
 	truncate_job* jobi = cf_malloc(sizeof(truncate_job));
 
-	*jobi = (truncate_job){
-			.ns = ns,
-			.p_set = p_set,
-			.set_id = set_id,
-			.use_set_index = p_set != NULL ? p_set->n_tombstones == 0 : false,
-			.lut = lut,
-			.n_threads = n_threads
-	};
+	*jobi = (truncate_job){ .ns = ns,
+		.p_set = p_set,
+		.set_id = set_id,
+		.use_set_index = p_set != NULL ? p_set->n_tombstones == 0 : false,
+		.lut = lut,
+		.n_threads = n_threads };
 
 	for (uint32_t i = 0; i < n_threads; i++) {
 		cf_thread_create_transient(run_truncate, jobi);
@@ -420,10 +414,7 @@ run_truncate(void* arg)
 	uint64_t lut = jobi->lut;
 
 	truncate_reduce_cb_info cbi = {
-			.ns = ns,
-			.p_set = jobi->p_set,
-			.set_id = jobi->set_id,
-			.lut = lut
+		.ns = ns, .p_set = jobi->p_set, .set_id = jobi->set_id, .lut = lut
 	};
 
 	uint32_t pid;
@@ -442,8 +433,9 @@ run_truncate(void* arg)
 		cbi.tree = tree;
 		cbi.n_deleted = 0;
 
-		if (! (jobi->use_set_index && as_set_index_reduce(ns, tree,
-				jobi->set_id, NULL, truncate_reduce_cb, (void*)&cbi))) {
+		if (! (jobi->use_set_index &&
+					as_set_index_reduce(ns, tree, jobi->set_id, NULL,
+							truncate_reduce_cb, (void*)&cbi))) {
 			as_index_reduce(tree, truncate_reduce_cb, (void*)&cbi);
 		}
 
@@ -461,7 +453,8 @@ run_truncate(void* arg)
 				p_set->flags &= ~AS_SET_FLAG_TRUNCATING;
 			}
 			else {
-				cf_info(AS_TRUNCATE, "{%s|%s} abandoned truncate to %lu deleted %lu - truncate-lut is now %lu",
+				cf_info(AS_TRUNCATE,
+						"{%s|%s} abandoned truncate to %lu deleted %lu - truncate-lut is now %lu",
 						ns->name, p_set->name, lut, jobi->n_deleted,
 						p_set->truncate_lut);
 			}
@@ -474,7 +467,8 @@ run_truncate(void* arg)
 				ns->truncating = false;
 			}
 			else {
-				cf_info(AS_TRUNCATE, "{%s} abandoned truncate to %lu deleted %lu - truncate-lut is now %lu",
+				cf_info(AS_TRUNCATE,
+						"{%s} abandoned truncate to %lu deleted %lu - truncate-lut is now %lu",
 						ns->name, lut, jobi->n_deleted, ns->truncate_lut);
 			}
 		}

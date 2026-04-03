@@ -26,12 +26,11 @@
 
 #include "base/features.h"
 
-
 //==========================================================
 // Public API.
 //
 
-const char *
+const char*
 as_features_info()
 {
 	return "null";

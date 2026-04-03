@@ -32,7 +32,6 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -40,13 +39,11 @@
 struct as_index_s;
 struct as_namespace_s;
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 #define MAX_TRUNCATE_THREADS 128
-
 
 //==========================================================
 // Public API.
@@ -54,23 +51,27 @@ struct as_namespace_s;
 
 void as_truncate_init(void);
 void as_truncate_list_cenotaphs(struct as_namespace_s* ns);
-bool as_truncate_lut_is_truncated(uint64_t rec_lut, struct as_namespace_s* ns, const char* set_name, uint32_t set_name_len);
+bool as_truncate_lut_is_truncated(uint64_t rec_lut, struct as_namespace_s* ns,
+		const char* set_name, uint32_t set_name_len);
 void as_truncate_done_startup(struct as_namespace_s* ns);
-void as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str, cf_dyn_buf* db);
-void as_truncate_undo_cmd(const char* ns_name, const char* set_name, cf_dyn_buf* db);
+void as_truncate_cmd(const char* ns_name, const char* set_name,
+		const char* lut_str, cf_dyn_buf* db);
+void as_truncate_undo_cmd(const char* ns_name, const char* set_name,
+		cf_dyn_buf* db);
 bool as_truncate_now_is_truncated(struct as_namespace_s* ns, uint16_t set_id);
-bool as_truncate_record_is_truncated(const struct as_index_s* r, struct as_namespace_s* ns);
-
+bool as_truncate_record_is_truncated(const struct as_index_s* r,
+		struct as_namespace_s* ns);
 
 //==========================================================
 // For enterprise separation only.
 //
 
 typedef struct truncate_hval_s {
-	uint64_t cenotaph:1;
-	uint64_t unused:23;
-	uint64_t lut:40;
+	uint64_t cenotaph : 1;
+	uint64_t unused : 23;
+	uint64_t lut : 40;
 } truncate_hval;
 
 void truncate_startup_hash_init(struct as_namespace_s* ns);
-void truncate_action_startup(struct as_namespace_s* ns, const char* set_name, uint64_t lut);
+void truncate_action_startup(struct as_namespace_s* ns, const char* set_name,
+		uint64_t lut);

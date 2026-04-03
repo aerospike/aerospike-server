@@ -37,14 +37,12 @@
 #include "log.h"
 #include "socket.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static void resize_queue(cf_epoll_queue* q);
 static void unwrap_queue(cf_epoll_queue* q);
-
 
 //==========================================================
 // Inlines & macros.
@@ -53,7 +51,6 @@ static void unwrap_queue(cf_epoll_queue* q);
 #define Q_N_ELES(_q) (_q->write_pos - _q->read_pos)
 #define Q_ELE_PTR(_q, _i) (&_q->eles[(_i % _q->capacity) * _q->ele_sz])
 #define Q_EMPTY(_q) (_q->write_pos == _q->read_pos)
-
 
 //==========================================================
 // Public API.
@@ -67,8 +64,7 @@ cf_epoll_queue_init(cf_epoll_queue* q, uint32_t ele_sz, uint32_t capacity)
 	q->event_fd = eventfd(0, EFD_NONBLOCK);
 
 	if (q->event_fd < 0) {
-		cf_crash(CF_MISC, "eventfd() failed: %d (%s)", errno,
-				cf_strerror(errno));
+		cf_crash(CF_MISC, "eventfd() failed: %d (%s)", errno, cf_strerror(errno));
 	}
 
 	q->read_pos = 0;
@@ -132,7 +128,6 @@ cf_epoll_queue_pop(cf_epoll_queue* q, void* ele)
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers.

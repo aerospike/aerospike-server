@@ -41,7 +41,6 @@
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -53,7 +52,6 @@ struct as_remote_record_s;
 struct meta_in_q_s;
 struct meta_out_q_s;
 struct pb_task_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -67,21 +65,19 @@ struct pb_task_s;
 // Maximum permissible number of migrate xmit threads.
 #define MAX_NUM_MIGRATE_XMIT_THREADS 100
 
-#define TX_FLAGS_NONE           ((uint32_t) 0x0)
-#define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
-#define TX_FLAGS_LEAD           ((uint32_t) 0x2)
-#define TX_FLAGS_CONTINGENT     ((uint32_t) 0x4)
-
+#define TX_FLAGS_NONE ((uint32_t)0x0)
+#define TX_FLAGS_ACTING_MASTER ((uint32_t)0x1)
+#define TX_FLAGS_LEAD ((uint32_t)0x2)
+#define TX_FLAGS_CONTINGENT ((uint32_t)0x4)
 
 //==========================================================
 // Public API.
 //
 
 void as_migrate_init();
-void as_migrate_emigrate(const struct pb_task_s *task);
+void as_migrate_emigrate(const struct pb_task_s* task);
 void as_migrate_set_num_xmit_threads(uint32_t n_threads);
 void as_migrate_dump(bool verbose);
-
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -139,47 +135,47 @@ typedef enum {
 #define OPERATION_ALL_DONE 13
 #define OPERATION_ALL_DONE_ACK 14
 
-#define MIG_INFO_UNUSED_1       0x0001
-#define MIG_INFO_UNUSED_2       0x0002
-#define MIG_INFO_UNREPLICATED   0x0004 // enterprise only
+#define MIG_INFO_UNUSED_1 0x0001
+#define MIG_INFO_UNUSED_2 0x0002
+#define MIG_INFO_UNREPLICATED 0x0004 // enterprise only
 
 #define MIG_FEATURE_MERGE 0x00000001U
 #define MIG_FEATURES_SEEN 0x80000000U // needed for backward compatibility
 extern const uint32_t MY_MIG_FEATURES;
 
 typedef struct emigration_s {
-	cf_node     dest;
-	uint64_t    cluster_key;
-	uint32_t    id;
+	cf_node dest;
+	uint64_t cluster_key;
+	uint32_t id;
 	pb_task_type type;
-	uint32_t    tx_flags;
-	uint32_t    state;
-	uint64_t    wait_until_ms;
+	uint32_t tx_flags;
+	uint32_t state;
+	uint64_t wait_until_ms;
 
-	uint32_t    bytes_emigrating;
-	cf_shash    *reinsert_hash;
-	uint64_t    insert_id;
-	cf_queue    *ctrl_q;
-	struct meta_in_q_s *meta_q;
+	uint32_t bytes_emigrating;
+	cf_shash* reinsert_hash;
+	uint64_t insert_id;
+	cf_queue* ctrl_q;
+	struct meta_in_q_s* meta_q;
 
 	as_partition_reservation rsv;
 } emigration;
 
 typedef struct immigration_s {
-	cf_node          src;
-	uint64_t         cluster_key;
-	uint32_t         pid;
+	cf_node src;
+	uint64_t cluster_key;
+	uint32_t pid;
 
-	uint32_t         done_recv;      // flag - 0 if not yet received, atomic counter for receives
-	uint64_t         start_recv_ms;  // time the first START event was received
-	uint64_t         done_recv_ms;   // time the first DONE event was received
+	uint32_t done_recv; // flag - 0 if not yet received, atomic counter for receives
+	uint64_t start_recv_ms; // time the first START event was received
+	uint64_t done_recv_ms; // time the first DONE event was received
 
-	uint32_t         emig_id;
-	struct meta_out_q_s *meta_q;
+	uint32_t emig_id;
+	struct meta_out_q_s* meta_q;
 
 	as_migrate_result start_result;
-	uint32_t        features;
-	struct as_namespace_s *ns; // for statistics only
+	uint32_t features;
+	struct as_namespace_s* ns; // for statistics only
 
 	as_partition_reservation rsv;
 } immigration;
@@ -189,28 +185,29 @@ typedef struct immigration_hkey_s {
 	uint32_t emig_id;
 } __attribute__((__packed__)) immigration_hkey;
 
-
 // Globals.
-extern cf_rchash *g_emigration_hash;
-extern cf_rchash *g_immigration_hash;
+extern cf_rchash* g_emigration_hash;
+extern cf_rchash* g_immigration_hash;
 extern cf_queue g_emigration_q;
 
-
 // Emigration, immigration, & pickled record destructors.
-void emigration_release(emigration *emig);
-void immigration_release(immigration *immig);
+void emigration_release(emigration* emig);
+void immigration_release(immigration* immig);
 
 // Emigration.
 void emigrate_fill_queue_init();
-void emigrate_queue_push(emigration *emig);
-bool should_emigrate_record(emigration *emig, struct as_index_ref_s *r_ref);
-uint32_t emigration_pack_info(const struct as_namespace_s *ns, const struct as_index_s *r);
-bool emigration_is_replicated(const struct as_namespace_s *ns, const struct as_index_s *r);
+void emigrate_queue_push(emigration* emig);
+bool should_emigrate_record(emigration* emig, struct as_index_ref_s* r_ref);
+uint32_t emigration_pack_info(const struct as_namespace_s* ns,
+		const struct as_index_s* r);
+bool emigration_is_replicated(const struct as_namespace_s* ns,
+		const struct as_index_s* r);
 
 // Migrate fabric message handling.
-void emigration_handle_meta_batch_request(cf_node src, msg *m);
+void emigration_handle_meta_batch_request(cf_node src, msg* m);
 void immigration_init_repl_state(struct as_remote_record_s* rr, uint32_t info);
-void immigration_handle_meta_batch_ack(cf_node src, msg *m);
+void immigration_handle_meta_batch_ack(cf_node src, msg* m);
 
 // Meta sender.
-bool immigration_start_meta_sender(immigration *immig, uint32_t emig_features, uint64_t emig_n_recs);
+bool immigration_start_meta_sender(immigration* immig, uint32_t emig_features,
+		uint64_t emig_n_recs);

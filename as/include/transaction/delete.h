@@ -30,7 +30,6 @@
 
 #include "base/transaction.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -41,19 +40,20 @@ struct as_transaction_s;
 struct as_namespace_s;
 struct rw_request_s;
 
-
 //==========================================================
 // Public API.
 //
 
 transaction_status as_delete_start(struct as_transaction_s* tr);
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
 bool delete_storage_overloaded(struct as_transaction_s* tr);
-transaction_status delete_master(struct as_transaction_s* tr, struct rw_request_s* rw);
-transaction_status drop_master(struct as_transaction_s* tr, struct as_index_ref_s* r_ref, struct rw_request_s* rw);
-bool drop_local(struct as_namespace_s* ns, struct as_partition_reservation_s* rsv, struct as_index_ref_s* r_ref);
+transaction_status delete_master(struct as_transaction_s* tr,
+		struct rw_request_s* rw);
+transaction_status drop_master(struct as_transaction_s* tr,
+		struct as_index_ref_s* r_ref, struct rw_request_s* rw);
+bool drop_local(struct as_namespace_s* ns,
+		struct as_partition_reservation_s* rsv, struct as_index_ref_s* r_ref);

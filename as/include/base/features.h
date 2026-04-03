@@ -22,9 +22,8 @@
 
 #pragma once
 
-
 //==========================================================
 // Public API.
 //
 
-const char *as_features_info();
+const char* as_features_info();

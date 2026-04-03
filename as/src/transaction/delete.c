@@ -61,30 +61,29 @@
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static void delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
+static void delete_dup_res_start_cb(rw_request* rw, as_transaction* tr,
+		as_record* r);
 static void start_delete_repl_write(rw_request* rw, as_transaction* tr);
 static void start_delete_repl_write_forget(rw_request* rw, as_transaction* tr);
 static bool delete_dup_res_cb(rw_request* rw);
 static void delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
-static void delete_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr);
+static void delete_repl_write_forget_after_dup_res(rw_request* rw,
+		as_transaction* tr);
 static void delete_repl_write_cb(rw_request* rw);
 
 static void send_delete_response(as_transaction* tr);
 static void delete_timeout_cb(rw_request* rw);
-
 
 //==========================================================
 // Inlines & macros.
 //
 
 static inline void
-client_delete_update_stats(as_namespace* ns, uint8_t result_code,
-		bool is_xdr_op)
+client_delete_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 {
 	switch (result_code) {
 	case AS_OK:
@@ -200,7 +199,6 @@ from_proxy_batch_sub_delete_update_stats(as_namespace* ns, uint8_t result_code)
 	}
 }
 
-
 //==========================================================
 // Public API.
 //
@@ -291,7 +289,6 @@ as_delete_start(as_transaction* tr)
 	// Started replica write.
 	return TRANS_IN_PROGRESS;
 }
-
 
 //==========================================================
 // Local helpers - transaction flow.
@@ -415,7 +412,6 @@ delete_repl_write_cb(rw_request* rw)
 	// Finished transaction - rw_request cleans up reservation and msgp!
 }
 
-
 //==========================================================
 // Local helpers - transaction end.
 //
@@ -447,8 +443,7 @@ send_delete_response(as_transaction* tr)
 				tr->rsv.ns, mrt_write_fill_version(&v, tr));
 		proxy_origin_destroy(tr->from.proxy_orig);
 		if (as_transaction_is_batch_sub(tr)) {
-			from_proxy_batch_sub_delete_update_stats(tr->rsv.ns,
-					tr->result_code);
+			from_proxy_batch_sub_delete_update_stats(tr->rsv.ns, tr->result_code);
 		}
 		else {
 			from_proxy_delete_update_stats(tr->rsv.ns, tr->result_code,
@@ -491,8 +486,7 @@ delete_timeout_cb(rw_request* rw)
 		break;
 	case FROM_PROXY:
 		if (rw_request_is_batch_sub(rw)) {
-			from_proxy_batch_sub_delete_update_stats(rw->rsv.ns,
-					AS_ERR_TIMEOUT);
+			from_proxy_batch_sub_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		}
 		else {
 			from_proxy_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
@@ -515,7 +509,6 @@ delete_timeout_cb(rw_request* rw)
 
 	rw->from.any = NULL; // inform other callback it lost the race
 }
-
 
 //==========================================================
 // Local helpers - delete master.
@@ -588,8 +581,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 		// Check the key if required.
 		// Note - for data-not-in-memory a key check is expensive!
-		if (check_key && as_storage_rd_load_key(&rd) &&
-				! check_msg_key(m, &rd)) {
+		if (check_key && as_storage_rd_load_key(&rd) && ! check_msg_key(m, &rd)) {
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
 			tr->result_code = AS_ERR_KEY_MISMATCH;
@@ -601,7 +593,9 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 			result = as_storage_rd_load_bins(&rd, stack_bins);
 
 			if (result < 0) {
-				cf_warning(AS_RW, "{%s} drop_master: failed as_storage_rd_load_bins(%pD) ", ns->name, &tr->keyd);
+				cf_warning(AS_RW,
+						"{%s} drop_master: failed as_storage_rd_load_bins(%pD) ",
+						ns->name, &tr->keyd);
 				as_storage_record_close(&rd);
 				as_record_done(r_ref, ns);
 				tr->result_code = -result;
@@ -614,7 +608,8 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 					as_storage_record_close(&rd);
 					as_record_done(r_ref, ns);
 					tr->result_code = as_masking_log_violation(tr, "delete",
-							"masking: blocked deleting masked bin", b->name, strlen(b->name));
+							"masking: blocked deleting masked bin", b->name,
+							strlen(b->name));
 					return TRANS_DONE;
 				}
 			}

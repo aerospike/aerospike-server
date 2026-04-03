@@ -26,28 +26,28 @@
 
 // These functions convert a string to a number of different integer types, and
 // returns 0 on success.
-int cf_str_atoi(const char *s, int *value);
-int cf_str_atoi_u32(const char *s, uint32_t *value);
-int cf_str_atoi_u64(const char *s, uint64_t *value);
-int cf_str_atoi_seconds(const char *s, uint32_t *value);
-int cf_str_atoi_iec(const char *s, uint64_t *value);
-int cf_str_atoi_si(const char *s, uint64_t *value);
-int cf_str_atoi_size(const char *s, uint64_t *value);
+int cf_str_atoi(const char* s, int* value);
+int cf_str_atoi_u32(const char* s, uint32_t* value);
+int cf_str_atoi_u64(const char* s, uint64_t* value);
+int cf_str_atoi_seconds(const char* s, uint32_t* value);
+int cf_str_atoi_iec(const char* s, uint64_t* value);
+int cf_str_atoi_si(const char* s, uint64_t* value);
+int cf_str_atoi_size(const char* s, uint64_t* value);
 
-int cf_strtoul_x64(const char *s, uint64_t *value);
-int cf_strtoul_u32(const char *s, uint32_t *value);
-int cf_strtoul_u64(const char *s, uint64_t *value);
-int cf_strtoul_u64_raw(const char *s, uint64_t *value);
-int cf_strtol_i32(const char *s, int32_t *value);
+int cf_strtoul_x64(const char* s, uint64_t* value);
+int cf_strtoul_u32(const char* s, uint32_t* value);
+int cf_strtoul_u64(const char* s, uint64_t* value);
+int cf_strtoul_u64_raw(const char* s, uint64_t* value);
+int cf_strtol_i32(const char* s, int32_t* value);
 
-static inline const char *
-cf_str_safe_as_empty(const char *s)
+static inline const char*
+cf_str_safe_as_empty(const char* s)
 {
 	return s ? s : "";
 }
 
-static inline const char *
-cf_str_safe_as_null(const char *s)
+static inline const char*
+cf_str_safe_as_null(const char* s)
 {
 	return s ? s : "null";
 }

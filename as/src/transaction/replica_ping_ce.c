@@ -37,7 +37,6 @@
 #include "fabric/fabric.h"
 #include "transaction/rw_request.h"
 
-
 //==========================================================
 // Public API.
 //

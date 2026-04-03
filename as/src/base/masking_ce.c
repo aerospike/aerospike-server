@@ -36,13 +36,11 @@
 #include "base/proto.h"
 #include "base/transaction.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_file_handle_s;
-
 
 //==========================================================
 // Public API.

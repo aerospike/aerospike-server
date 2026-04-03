@@ -34,7 +34,6 @@
 #include "base/proto.h"
 #include "base/thr_info.h"
 
-
 //==========================================================
 // Public API.
 //

@@ -56,11 +56,11 @@
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
+// clang-format off
 const msg_template rw_mt[] = {
 		{ RW_FIELD_OP, M_FT_UINT32 },
 		{ RW_FIELD_RESULT, M_FT_UINT32 },
@@ -83,6 +83,7 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_UNUSED_18, M_FT_BUF },
 		{ RW_FIELD_REGIME, M_FT_UINT32 }
 };
+// clang-format on
 
 COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 
@@ -90,13 +91,11 @@ COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 
 #define RETRANSMIT_PERIOD_US (5 * 1000) // 5 ms
 
-
 //==========================================================
 // Globals.
 //
 
 static cf_rchash* g_rw_request_hash = NULL;
-
 
 //==========================================================
 // Forward declarations.
@@ -114,7 +113,6 @@ static void update_non_sub_retransmit_stats(const rw_request* rw);
 static void update_batch_sub_retransmit_stats(const rw_request* rw);
 
 static int rw_msg_cb(cf_node id, msg* m, void* udata);
-
 
 //==========================================================
 // Public API.
@@ -139,16 +137,14 @@ rw_request_hash_count()
 }
 
 transaction_status
-rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
-		as_transaction* tr)
+rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw, as_transaction* tr)
 {
 	while (cf_rchash_put_unique(g_rw_request_hash, hkey, rw) != CF_RCHASH_OK) {
 		// rw_request with this digest already in hash - get it.
 
 		rw_request* rw0;
 
-		if (cf_rchash_get(g_rw_request_hash, hkey, (void**)&rw0) !=
-				CF_RCHASH_OK) {
+		if (cf_rchash_get(g_rw_request_hash, hkey, (void**)&rw0) != CF_RCHASH_OK) {
 			// But now it's gone - try insertion again immediately.
 			continue;
 		}
@@ -190,7 +186,6 @@ rw_request_hash_dump()
 	cf_info(AS_RW, "rw_request_hash dump not yet implemented");
 	// TODO - implement something, or deprecate.
 }
-
 
 //==========================================================
 // Local helpers - hash insertion.
@@ -247,16 +242,20 @@ static const char*
 action_tag(const as_transaction* tr)
 {
 	if (as_transaction_is_batch_sub(tr)) {
-		return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) == 0 ?
-				"batch-sub-read" : (as_transaction_is_delete(tr) ?
-						"batch-sub-delete" : (as_transaction_is_udf(tr) ?
-								"batch-sub-udf" : "batch-sub-write"));
+		return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) == 0
+				? "batch-sub-read"
+				: (as_transaction_is_delete(tr)
+								  ? "batch-sub-delete"
+								  : (as_transaction_is_udf(tr)
+													? "batch-sub-udf"
+													: "batch-sub-write"));
 	}
 
-	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) == 0 ?
-			"read" : (as_transaction_is_delete(tr) ?
-					"delete" : (as_transaction_is_udf(tr) ?
-							"udf" : "write"));
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) == 0
+			? "read"
+			: (as_transaction_is_delete(tr)
+							  ? "delete"
+							  : (as_transaction_is_udf(tr) ? "udf" : "write"));
 }
 
 static const char*
@@ -282,7 +281,6 @@ from_tag(const as_transaction* tr)
 		return NULL;
 	}
 }
-
 
 //==========================================================
 // Local helpers - retransmit.
@@ -502,7 +500,6 @@ update_batch_sub_retransmit_stats(const rw_request* rw)
 		}
 	}
 }
-
 
 //==========================================================
 // Local helpers - handle RW fabric messages.

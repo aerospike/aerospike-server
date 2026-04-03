@@ -51,7 +51,6 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -60,13 +59,11 @@
 #define SLEEP_CAP (1000L * 10) // don't sleep more than 10 ms
 #define STREAK_MAX (1000L * 200) // spawn up to one thread per 200 ms
 
-
 //==========================================================
 // Globals.
 //
 
 static uint32_t g_query_job_trid = 0;
-
 
 //==========================================================
 // Forward declarations.
@@ -78,7 +75,6 @@ static void finish(as_query_job* _job);
 static void range_free(as_query_range* range, bool geo);
 static void si_def_free(as_query_sindex_def* si_def);
 static uint32_t throttle_sleep(as_query_job* _job, uint64_t count, uint64_t now);
-
 
 //==========================================================
 // Inlines & macros.
@@ -120,7 +116,6 @@ result_str(int result)
 		return "abandoned-?";
 	}
 }
-
 
 //==========================================================
 // Public API.
@@ -183,13 +178,11 @@ as_query_job_run(void* pv_job)
 				continue;
 			}
 
-			if (as_partition_reserve_query(_job->ns, pid, &rsv,
-					_job->relax) != 0) {
+			if (as_partition_reserve_query(_job->ns, pid, &rsv, _job->relax) !=
+					0) {
 				// Null tree causes slice_fn to send partition-done error.
-				rsv = (as_partition_reservation){
-						.ns = _job->ns,
-						.p = &_job->ns->partitions[pid]
-				};
+				rsv = (as_partition_reservation){ .ns = _job->ns,
+					.p = &_job->ns->partitions[pid] };
 
 				_job->vtable.slice_fn(_job, &rsv, &bb);
 				continue;
@@ -271,7 +264,7 @@ as_query_job_throttle(as_query_job* _job)
 	count = as_aaf_uint64(&_job->n_throttled, 1);
 	now = cf_getus();
 
-	uint32_t sleep_us =  throttle_sleep(_job, count, now);
+	uint32_t sleep_us = throttle_sleep(_job, count, now);
 
 	if (sleep_us != 0) {
 		return sleep_us;
@@ -333,8 +326,7 @@ as_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 	bool done = _job->finish_ns != 0;
 	uint64_t since_start_ns = now - _job->start_ns;
 	uint64_t since_finish_ns = done ? now - _job->finish_ns : 0;
-	uint64_t active_ns = done ?
-			_job->finish_ns - _job->start_ns : since_start_ns;
+	uint64_t active_ns = done ? _job->finish_ns - _job->start_ns : since_start_ns;
 
 	cf_dyn_buf_append_string(db, "trid=");
 	cf_dyn_buf_append_uint64(db, _job->trid);
@@ -431,7 +423,6 @@ as_query_job_release_rsvs(as_namespace* ns)
 	}
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -452,10 +443,8 @@ reserve_rsvs(as_query_job* _job)
 
 			if (as_partition_reserve_query(ns, pid, rsv, ! ns->cp) != 0) {
 				// Null tree causes slice_fn to send partition-done error.
-				*rsv = (as_partition_reservation){
-						.ns = ns,
-						.p = &ns->partitions[pid]
-				};
+				*rsv = (as_partition_reservation){ .ns = ns,
+					.p = &ns->partitions[pid] };
 			}
 		}
 	}

@@ -47,13 +47,11 @@
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_namespace_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -82,62 +80,62 @@ typedef struct as_config_s {
 
 	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
 	cf_topo_auto_pin auto_pin;
-	uint32_t		n_batch_index_threads;
-	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
-	uint32_t		batch_max_requests; // maximum number of requests allowed in a single batch
-	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
-	char			cluster_name[AS_CLUSTER_NAME_SZ];
+	uint32_t n_batch_index_threads;
+	uint32_t batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
+	uint32_t batch_max_requests; // maximum number of requests allowed in a single batch
+	uint32_t batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
+	char cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
-	bool			debug_allocations; // instrument the memory allocation API
-	bool			udf_execution_disabled;
-	bool			fabric_benchmarks_enabled;
-	bool			health_check_enabled;
-	bool			info_hist_enabled;
-	bool			enforce_best_practices;
-	const char*		feature_key_files[MAX_FEATURE_KEY_FILES];
-	uint32_t		n_feature_key_files; // indirect config
-	gid_t			gid;
-	bool			indent_allocations; // pointer indentation for better double-free detection
-	uint64_t		info_max_ns;
-	uint32_t		n_info_threads;
-	bool			keep_caps_ssd_health;
+	bool debug_allocations; // instrument the memory allocation API
+	bool udf_execution_disabled;
+	bool fabric_benchmarks_enabled;
+	bool health_check_enabled;
+	bool info_hist_enabled;
+	bool enforce_best_practices;
+	const char* feature_key_files[MAX_FEATURE_KEY_FILES];
+	uint32_t n_feature_key_files; // indirect config
+	gid_t gid;
+	bool indent_allocations; // pointer indentation for better double-free detection
+	uint64_t info_max_ns;
+	uint32_t n_info_threads;
+	bool keep_caps_ssd_health;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
-	bool			microsecond_histograms;
-	uint32_t		migrate_fill_delay; // enterprise-only
-	uint32_t		migrate_max_num_incoming;
-	uint32_t		n_migrate_threads;
-	char*			node_id_interface;
-	char*			pidfile;
-	bool			poison_allocations; // initialize with junk - for internal use only
-	uint32_t		proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
-	uint32_t		n_proto_fd_max;
-	uint32_t		quarantine_allocations; // delay free() for better use-after-free detection
-	uint32_t		query_max_done; // maximum number of finished queries kept for monitoring
-	uint32_t		n_query_threads_limit;
-	bool			run_as_daemon;
-	uint32_t		n_service_threads;
-	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
-	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc
-	bool			stay_quiesced; // enterprise-only
-	uint32_t		ticker_interval;
-	uint64_t		transaction_max_ns;
-	uint32_t		transaction_retry_ms;
-	uid_t			uid;
+	bool microsecond_histograms;
+	uint32_t migrate_fill_delay; // enterprise-only
+	uint32_t migrate_max_num_incoming;
+	uint32_t n_migrate_threads;
+	char* node_id_interface;
+	char* pidfile;
+	bool poison_allocations; // initialize with junk - for internal use only
+	uint32_t proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
+	uint32_t n_proto_fd_max;
+	uint32_t quarantine_allocations; // delay free() for better use-after-free detection
+	uint32_t query_max_done; // maximum number of finished queries kept for monitoring
+	uint32_t n_query_threads_limit;
+	bool run_as_daemon;
+	uint32_t n_service_threads;
+	uint32_t sindex_builder_threads; // secondary index builder thread pool size
+	uint32_t sindex_gc_period; // same as nsup_period for sindex gc
+	bool stay_quiesced; // enterprise-only
+	uint32_t ticker_interval;
+	uint64_t transaction_max_ns;
+	uint32_t transaction_retry_ms;
+	uid_t uid;
 	// Note - vault config is a cf global, so can't be here.
-	char*			work_directory;
-	bool			cgroup_mem_tracking;
+	char* work_directory;
+	bool cgroup_mem_tracking;
 	//--------------------------------------------
 	// network::service context.
 	//
 
 	// Normally visible, in canonical configuration file order:
 
-	cf_serv_spec	service; // client service
+	cf_serv_spec service; // client service
 
 	// Normally hidden:
 
-	bool			service_localhost_disabled;
-	cf_serv_spec	tls_service; // TLS client service
+	bool service_localhost_disabled;
+	cf_serv_spec tls_service; // TLS client service
 
 	//--------------------------------------------
 	// network::admin context.
@@ -145,21 +143,21 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	cf_serv_spec	admin; // admin client service
+	cf_serv_spec admin; // admin client service
 
 	// Normally hidden:
 
-	cf_serv_spec	tls_admin; // TLS admin client service
-	bool			admin_localhost_disabled;
+	cf_serv_spec tls_admin; // TLS admin client service
+	bool admin_localhost_disabled;
 
 	//--------------------------------------------
 	// network::heartbeat context.
 	//
 
-	cf_serv_spec	hb_serv_spec; // literal binding address spec parsed from config
-	cf_serv_spec	hb_tls_serv_spec; // literal binding address spec for TLS parsed from config
-	cf_addr_list	hb_multicast_groups; // literal multicast groups parsed from config
-	as_hb_config	hb_config;
+	cf_serv_spec hb_serv_spec; // literal binding address spec parsed from config
+	cf_serv_spec hb_tls_serv_spec; // literal binding address spec for TLS parsed from config
+	cf_addr_list hb_multicast_groups; // literal multicast groups parsed from config
+	as_hb_config hb_config;
 
 	//--------------------------------------------
 	// network::fabric context.
@@ -167,39 +165,38 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	cf_serv_spec	fabric; // fabric service
-	cf_serv_spec	tls_fabric; // TLS fabric service
+	cf_serv_spec fabric; // fabric service
+	cf_serv_spec tls_fabric; // TLS fabric service
 
 	//--------------------------------------------
 	// network::info context - obsolete.
 	//
 
-	bool			has_info_section;
+	bool has_info_section;
 
 	// Normally hidden:
 
-	uint32_t		n_fabric_channel_fds[AS_FABRIC_N_CHANNELS];
-	uint32_t		n_fabric_channel_recv_pools[AS_FABRIC_N_CHANNELS];
-	uint32_t		n_fabric_channel_recv_threads[AS_FABRIC_N_CHANNELS];
-	bool			fabric_keepalive_enabled;
-	uint32_t		fabric_keepalive_intvl;
-	uint32_t		fabric_keepalive_probes;
-	uint32_t		fabric_keepalive_time;
-	uint32_t		fabric_latency_max_ms; // time window for ordering
-	uint32_t		fabric_recv_rearm_threshold;
-	uint32_t		n_fabric_send_threads;
+	uint32_t n_fabric_channel_fds[AS_FABRIC_N_CHANNELS];
+	uint32_t n_fabric_channel_recv_pools[AS_FABRIC_N_CHANNELS];
+	uint32_t n_fabric_channel_recv_threads[AS_FABRIC_N_CHANNELS];
+	bool fabric_keepalive_enabled;
+	uint32_t fabric_keepalive_intvl;
+	uint32_t fabric_keepalive_probes;
+	uint32_t fabric_keepalive_time;
+	uint32_t fabric_latency_max_ms; // time window for ordering
+	uint32_t fabric_recv_rearm_threshold;
+	uint32_t n_fabric_send_threads;
 
 	//--------------------------------------------
 	// Remaining configuration top-level contexts.
 	//
 
-	mod_lua_config	mod_lua;
-	as_sec_config	sec_cfg;
-	as_xdr_config	xdr_cfg; // TODO - Forcing cfg.h to include xdr.h. Consider *.
+	mod_lua_config mod_lua;
+	as_sec_config sec_cfg;
+	as_xdr_config xdr_cfg; // TODO - Forcing cfg.h to include xdr.h. Consider *.
 
-	uint32_t		n_tls_specs;
-	cf_tls_spec		tls_specs[MAX_TLS_SPECS];
-
+	uint32_t n_tls_specs;
+	cf_tls_spec tls_specs[MAX_TLS_SPECS];
 
 	//======================================================
 	// Not (directly) configuration. Many should probably be
@@ -207,24 +204,24 @@ typedef struct as_config_s {
 	//
 
 	// Global variable that just shouldn't be here.
-	cf_node			self_node;
+	cf_node self_node;
 
 	// Namespaces.
 	struct as_namespace_s* namespaces[AS_NAMESPACE_SZ];
-	uint32_t		n_namespaces;
+	uint32_t n_namespaces;
 
 	// To speed up transaction enqueue's determination of whether to "inline":
-	uint32_t		n_namespaces_inlined;
-	uint32_t		n_namespaces_not_inlined;
+	uint32_t n_namespaces_inlined;
+	uint32_t n_namespaces_not_inlined;
 
 } as_config;
-
 
 //==========================================================
 // Public API.
 //
 
-as_config* as_config_init_yaml(const char* config_file, const char* schema_file); // experimental
+as_config* as_config_init_yaml(const char* config_file,
+		const char* schema_file); // experimental
 as_config* as_config_init(const char* config_file);
 void as_config_post_process(as_config* c, const char* config_file);
 
@@ -248,8 +245,10 @@ void cfg_add_secrets_addr_port(char* addr, char* port, char* tls_name);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_pi_xmem_mount(as_namespace* ns, const char* mount);
 void cfg_add_si_xmem_mount(as_namespace* ns, const char* mount);
-void cfg_add_storage_file(as_namespace* ns, const char* file_name, const char* shadow_name);
-void cfg_add_storage_device(as_namespace* ns, const char* device_name, const char* shadow_name);
+void cfg_add_storage_file(as_namespace* ns, const char* file_name,
+		const char* shadow_name);
+void cfg_add_storage_device(as_namespace* ns, const char* device_name,
+		const char* shadow_name);
 
 void as_config_init_namespace(struct as_namespace_s* ns);
 
@@ -262,8 +261,8 @@ extern as_config g_config;
 static inline histogram_scale
 as_config_histogram_scale(void)
 {
-	return g_config.microsecond_histograms ?
-			HIST_MICROSECONDS : HIST_MILLISECONDS;
+	return g_config.microsecond_histograms ? HIST_MICROSECONDS
+										   : HIST_MILLISECONDS;
 }
 
 static inline bool
@@ -280,18 +279,17 @@ as_config_is_numa_pinned(void)
 			g_config.auto_pin == CF_TOPO_AUTO_PIN_ADQ;
 }
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
 // Parsed configuration file line.
 typedef struct cfg_line_s {
-	int		num;
-	char*	name_tok;
-	char*	val_tok_1;
-	char*	val_tok_2;
-	char*	val_tok_3;
+	int num;
+	char* name_tok;
+	char* val_tok_1;
+	char* val_tok_2;
+	char* val_tok_3;
 } cfg_line;
 
 void cfg_enterprise_only(const cfg_line* p_line);

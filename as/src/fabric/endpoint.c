@@ -38,8 +38,7 @@
 /*----------------------------------------------------------------------------
  * Private internal data structures.
  *----------------------------------------------------------------------------*/
-typedef struct as_endpoint_collect_udata_s
-{
+typedef struct as_endpoint_collect_udata_s {
 	/**
 	 * Collected endpoint pointers.
 	 */
@@ -51,8 +50,7 @@ typedef struct as_endpoint_collect_udata_s
 	uint32_t collected_count;
 } as_endpoint_collect_udata;
 
-typedef struct as_endpoint_to_string_udata_s
-{
+typedef struct as_endpoint_to_string_udata_s {
 	/**
 	 * Current write pointer.
 	 */
@@ -79,8 +77,7 @@ typedef struct as_endpoint_to_string_udata_s
 	uint8_t capability_mask;
 } as_endpoint_to_string_udata;
 
-typedef struct as_endpoint_list_overlap_udata_s
-{
+typedef struct as_endpoint_list_overlap_udata_s {
 	/**
 	 * Indicates if there was an overlap.
 	 */
@@ -97,8 +94,7 @@ typedef struct as_endpoint_list_overlap_udata_s
 	const as_endpoint_list* other;
 } as_endpoint_list_overlap_udata;
 
-typedef struct as_endpoint_list_endpoint_find_udata_s
-{
+typedef struct as_endpoint_list_endpoint_find_udata_s {
 	/**
 	 * Indicates if there was an overlap.
 	 */
@@ -126,11 +122,14 @@ static void endpoint_collect_iterate_fn(const as_endpoint* endpoint, void* udata
 static void endpoint_to_string_iterate(const as_endpoint* endpoint, void* udata);
 static uint8_t endpoint_addr_type_from_cf_ip_addr(const cf_ip_addr* addr);
 static void endpoint_from_sock_cfg(const cf_sock_cfg* src, as_endpoint* endpoint);
-static void endpoint_list_overlap_iterate(const as_endpoint* endpoint, void* udata);
+static void endpoint_list_overlap_iterate(const as_endpoint* endpoint,
+		void* udata);
 static void endpoint_list_find_iterate(const as_endpoint* endpoint, void* udata);
 
-static bool endpoints_are_equal(const as_endpoint* endpoint1, const as_endpoint* endpoint2, const bool ignore_capabilities);
-static void endpoints_preference_sort(const as_endpoint* endpoints[], size_t n_endpoints);
+static bool endpoints_are_equal(const as_endpoint* endpoint1,
+		const as_endpoint* endpoint2, const bool ignore_capabilities);
+static void endpoints_preference_sort(const as_endpoint* endpoints[],
+		size_t n_endpoints);
 
 /*----------------------------------------------------------------------------
  * Public API.
@@ -180,15 +179,15 @@ as_endpoint_capability_disable(as_endpoint* endpoint, uint8_t capability_mask)
 int
 as_endpoint_connect(const as_endpoint* endpoint, int32_t timeout, cf_socket* sock)
 {
-	if (!endpoint_addr_type_is_valid(endpoint->addr_type)) {
+	if (! endpoint_addr_type_is_valid(endpoint->addr_type)) {
 		return -1;
 	}
 
 	cf_sock_cfg cfg;
 	cf_sock_cfg_init(&cfg, CF_SOCK_OWNER_INVALID);
 	cfg.port = endpoint->port;
-	if (cf_ip_addr_from_binary(endpoint->addr, endpoint_addr_binary_size(endpoint->addr_type),
-		&cfg.addr) <= 0) {
+	if (cf_ip_addr_from_binary(endpoint->addr,
+				endpoint_addr_binary_size(endpoint->addr_type), &cfg.addr) <= 0) {
 		return -1;
 	}
 
@@ -213,7 +212,8 @@ as_endpoint_connect(const as_endpoint* endpoint, int32_t timeout, cf_socket* soc
  */
 const as_endpoint*
 as_endpoint_connect_any(const as_endpoint_list* endpoint_list,
-	as_endpoint_filter_fn filter_fn, void* filter_udata, int32_t timeout, cf_socket* sock)
+		as_endpoint_filter_fn filter_fn, void* filter_udata, int32_t timeout,
+		cf_socket* sock)
 {
 	if (endpoint_list->n_endpoints == 0) {
 		return NULL;
@@ -227,7 +227,8 @@ as_endpoint_connect_any(const as_endpoint_list* endpoint_list,
 	collect_udata.collected_count = 0;
 
 	// Collect all endpoints in a pointer array.
-	as_endpoint_list_iterate(endpoint_list, endpoint_collect_iterate_fn, &collect_udata);
+	as_endpoint_list_iterate(endpoint_list, endpoint_collect_iterate_fn,
+			&collect_udata);
 
 	// Sort by descending preference.
 	endpoints_preference_sort(ordered_endpoints, endpoint_list->n_endpoints);
@@ -235,7 +236,7 @@ as_endpoint_connect_any(const as_endpoint_list* endpoint_list,
 	// TODO: Timeout individual connect or have the caller adjust based on
 	// number of endpoints
 	for (uint8_t i = 0; i < endpoint_list->n_endpoints; i++) {
-		if (filter_fn && !(filter_fn)(ordered_endpoints[i], filter_udata)) {
+		if (filter_fn && ! (filter_fn)(ordered_endpoints[i], filter_udata)) {
 			continue;
 		}
 
@@ -285,9 +286,11 @@ int
 as_endpoint_to_sock_addr(const as_endpoint* endpoint, cf_sock_addr* sock_addr)
 {
 	sock_addr->port = endpoint->port;
-	return
-		cf_ip_addr_from_binary(endpoint->addr, endpoint_addr_binary_size(endpoint->addr_type),
-			&sock_addr->addr) > 0 ? 0 : -1;
+	return cf_ip_addr_from_binary(endpoint->addr,
+				   endpoint_addr_binary_size(endpoint->addr_type),
+				   &sock_addr->addr) > 0
+			? 0
+			: -1;
 }
 
 /**
@@ -295,7 +298,8 @@ as_endpoint_to_sock_addr(const as_endpoint* endpoint, cf_sock_addr* sock_addr)
  * @return true if the endpoint supports the input capability.
  */
 bool
-as_endpoint_capability_is_supported(const as_endpoint* endpoint, uint8_t capability_mask)
+as_endpoint_capability_is_supported(const as_endpoint* endpoint,
+		uint8_t capability_mask)
 {
 	return (endpoint->capabilities & capability_mask) > 0;
 }
@@ -321,15 +325,16 @@ as_endpoint_list_sizeof(const as_endpoint_list* endpoint_list, size_t* size)
  * @return 0 on successful size calculation, -1 otherwise.
  */
 int
-as_endpoint_list_nsizeof(const as_endpoint_list* endpoint_list, size_t* size, size_t size_max)
+as_endpoint_list_nsizeof(const as_endpoint_list* endpoint_list, size_t* size,
+		size_t size_max)
 {
-	if (!endpoint_list) {
+	if (! endpoint_list) {
 		return 0;
 	}
 
 	*size = sizeof(as_endpoint_list);
 
-	uint8_t* endpoint_ptr = (uint8_t*) endpoint_list->endpoints;
+	uint8_t* endpoint_ptr = (uint8_t*)endpoint_list->endpoints;
 	for (int i = 0; i < endpoint_list->n_endpoints; i++) {
 		size_t endpoint_size = as_endpoint_sizeof((as_endpoint*)endpoint_ptr);
 		if (endpoint_size == 0) {
@@ -361,19 +366,19 @@ as_endpoint_list_nsizeof(const as_endpoint_list* endpoint_list, size_t* size, si
  */
 void
 as_endpoint_list_iterate(const as_endpoint_list* endpoint_list,
-	const as_endpoint_iterate_fn iterate_fn, void* udata)
+		const as_endpoint_iterate_fn iterate_fn, void* udata)
 {
-	if(!endpoint_list) {
+	if (! endpoint_list) {
 		return;
 	}
 
-	uint8_t* endpoint_ptr = (uint8_t*) endpoint_list->endpoints;
+	uint8_t* endpoint_ptr = (uint8_t*)endpoint_list->endpoints;
 
 	for (int i = 0; i < endpoint_list->n_endpoints; i++) {
 		if (iterate_fn) {
-			(iterate_fn)((as_endpoint*) endpoint_ptr, udata);
+			(iterate_fn)((as_endpoint*)endpoint_ptr, udata);
 		}
-		endpoint_ptr += as_endpoint_sizeof((as_endpoint*) endpoint_ptr);
+		endpoint_ptr += as_endpoint_sizeof((as_endpoint*)endpoint_ptr);
 	}
 }
 
@@ -384,13 +389,14 @@ as_endpoint_list_iterate(const as_endpoint_list* endpoint_list,
  * @param endpoint_list destination endpoint list.
  */
 void
-as_endpoint_list_from_serv_cfg_fill(const cf_serv_cfg* serv_cfg, as_endpoint_list* endpoint_list)
+as_endpoint_list_from_serv_cfg_fill(const cf_serv_cfg* serv_cfg,
+		as_endpoint_list* endpoint_list)
 {
 	endpoint_list->n_endpoints = serv_cfg->n_cfgs;
 
-	uint8_t* endpoint_ptr = (uint8_t*) &endpoint_list->endpoints[0];
+	uint8_t* endpoint_ptr = (uint8_t*)&endpoint_list->endpoints[0];
 	for (int i = 0; i < serv_cfg->n_cfgs; i++) {
-		as_endpoint* endpoint = (as_endpoint*) endpoint_ptr;
+		as_endpoint* endpoint = (as_endpoint*)endpoint_ptr;
 		endpoint_from_sock_cfg(&serv_cfg->cfgs[i], endpoint);
 		endpoint_ptr += as_endpoint_sizeof(endpoint);
 	}
@@ -408,10 +414,10 @@ as_endpoint_list_from_serv_cfg(const cf_serv_cfg* serv_cfg)
 	size_t result_size = sizeof(as_endpoint_list);
 	for (int i = 0; i < serv_cfg->n_cfgs; i++) {
 		result_size += endpoint_sizeof_by_addr_type(
-			endpoint_addr_type_from_cf_ip_addr(&serv_cfg->cfgs[i].addr));
+				endpoint_addr_type_from_cf_ip_addr(&serv_cfg->cfgs[i].addr));
 	}
 
-	as_endpoint_list* endpoint_list = (as_endpoint_list*) cf_malloc(result_size);
+	as_endpoint_list* endpoint_list = (as_endpoint_list*)cf_malloc(result_size);
 
 	as_endpoint_list_from_serv_cfg_fill(serv_cfg, endpoint_list);
 
@@ -425,13 +431,14 @@ as_endpoint_list_from_serv_cfg(const cf_serv_cfg* serv_cfg)
  * @return true iff the lists are equals, false otherwise.
  */
 bool
-as_endpoint_lists_are_equal(const as_endpoint_list* list1, const as_endpoint_list* list2)
+as_endpoint_lists_are_equal(const as_endpoint_list* list1,
+		const as_endpoint_list* list2)
 {
 	if (list1 == list2) {
 		return true;
 	}
 
-	if (!list1 || !list2) {
+	if (! list1 || ! list2) {
 		return false;
 	}
 
@@ -461,14 +468,14 @@ as_endpoint_lists_are_equal(const as_endpoint_list* list1, const as_endpoint_lis
  * @return true iff the lists are overlap, false otherwise.
  */
 bool
-as_endpoint_lists_are_overlapping(const as_endpoint_list* list1, const as_endpoint_list* list2,
-	bool ignore_capabilities)
+as_endpoint_lists_are_overlapping(const as_endpoint_list* list1,
+		const as_endpoint_list* list2, bool ignore_capabilities)
 {
 	if (list1 == list2) {
 		return true;
 	}
 
-	if (!list1 || !list2) {
+	if (! list1 || ! list2) {
 		return false;
 	}
 
@@ -509,11 +516,11 @@ as_endpoint_list_to_string(const as_endpoint_list* endpoint_list, char* buffer,
  * end output to strings)
  */
 int
-as_endpoint_list_to_string_match_capabilities(
-		const as_endpoint_list* endpoint_list, char* buffer,
-		size_t buffer_capacity, uint8_t capability_mask, uint8_t capabilities)
+as_endpoint_list_to_string_match_capabilities(const as_endpoint_list* endpoint_list,
+		char* buffer, size_t buffer_capacity, uint8_t capability_mask,
+		uint8_t capabilities)
 {
-	if (!endpoint_list) {
+	if (! endpoint_list) {
 		buffer[0] = 0;
 		return 0;
 	}
@@ -577,7 +584,6 @@ as_endpoint_list_info(const as_endpoint_list* endpoint_list, cf_dyn_buf* db)
 	if (endpoint_list_str[0] != '\0') {
 		cf_dyn_buf_append_string(db, endpoint_list_str);
 	}
-
 }
 
 /*----------------------------------------------------------------------------
@@ -589,7 +595,8 @@ as_endpoint_list_info(const as_endpoint_list* endpoint_list, cf_dyn_buf* db)
 static bool
 endpoint_addr_type_is_valid(uint8_t type)
 {
-	return type > AS_ENDPOINT_ADDR_TYPE_UNDEF && type < AS_ENDPOINT_ADDR_TYPE_SENTINEL;
+	return type > AS_ENDPOINT_ADDR_TYPE_UNDEF &&
+			type < AS_ENDPOINT_ADDR_TYPE_SENTINEL;
 }
 
 /**
@@ -617,7 +624,8 @@ endpoint_sizeof_by_addr_type(uint8_t addr_type)
 static uint8_t
 endpoint_addr_type_from_cf_ip_addr(const cf_ip_addr* addr)
 {
-	return cf_ip_addr_is_legacy(addr) ? AS_ENDPOINT_ADDR_TYPE_IPv4 : AS_ENDPOINT_ADDR_TYPE_IPv6;
+	return cf_ip_addr_is_legacy(addr) ? AS_ENDPOINT_ADDR_TYPE_IPv4
+									  : AS_ENDPOINT_ADDR_TYPE_IPv6;
 }
 
 /**
@@ -635,17 +643,19 @@ endpoint_allocate(uint8_t addr_type)
 static void
 endpoint_from_sock_cfg(const cf_sock_cfg* src, as_endpoint* endpoint)
 {
-	endpoint->addr_type =
-		cf_ip_addr_is_legacy(&src->addr) ? AS_ENDPOINT_ADDR_TYPE_IPv4 : AS_ENDPOINT_ADDR_TYPE_IPv6;
+	endpoint->addr_type = cf_ip_addr_is_legacy(&src->addr)
+			? AS_ENDPOINT_ADDR_TYPE_IPv4
+			: AS_ENDPOINT_ADDR_TYPE_IPv6;
 	endpoint->port = src->port;
 
 	// We will have allocated correct binary size.
-	CF_IGNORE_ERROR(
-		cf_ip_addr_to_binary(&src->addr, endpoint->addr,
+	CF_IGNORE_ERROR(cf_ip_addr_to_binary(&src->addr, endpoint->addr,
 			endpoint_addr_binary_size(endpoint->addr_type)));
 
 	endpoint->capabilities = (src->owner == CF_SOCK_OWNER_HEARTBEAT_TLS ||
-		src->owner == CF_SOCK_OWNER_FABRIC_TLS) ? AS_ENDPOINT_TLS_MASK : 0;
+									 src->owner == CF_SOCK_OWNER_FABRIC_TLS)
+			? AS_ENDPOINT_TLS_MASK
+			: 0;
 }
 
 /**
@@ -694,9 +704,11 @@ endpoint_preference_compare(const void* e1, const void* e2, void* arg)
 	int tie_breaker = *((int*)arg);
 
 	// Prefer TLS over clear text.
-	bool endpoint1_is_tls = as_endpoint_capability_is_supported(endpoint1, AS_ENDPOINT_TLS_MASK);
+	bool endpoint1_is_tls =
+			as_endpoint_capability_is_supported(endpoint1, AS_ENDPOINT_TLS_MASK);
 
-	bool endpoint2_is_tls = as_endpoint_capability_is_supported(endpoint2, AS_ENDPOINT_TLS_MASK);
+	bool endpoint2_is_tls =
+			as_endpoint_capability_is_supported(endpoint2, AS_ENDPOINT_TLS_MASK);
 
 	if (endpoint1_is_tls != endpoint2_is_tls) {
 		return endpoint1_is_tls ? -1 : 1;
@@ -712,7 +724,7 @@ endpoint_preference_compare(const void* e1, const void* e2, void* arg)
 
 	// Used tie breaker parameter to salt the hashes for load balancing.
 	return endpoint_sort_hash(endpoint1, tie_breaker) -
-		endpoint_sort_hash(endpoint2, tie_breaker);
+			endpoint_sort_hash(endpoint2, tie_breaker);
 }
 
 /**
@@ -726,7 +738,7 @@ endpoints_preference_sort(const as_endpoint* endpoints[], size_t n_endpoints)
 	int tie_breaker = rand();
 
 	qsort_r(endpoints, n_endpoints, sizeof(as_endpoint*),
-		endpoint_preference_compare, &tie_breaker);
+			endpoint_preference_compare, &tie_breaker);
 }
 
 /**
@@ -735,7 +747,7 @@ endpoints_preference_sort(const as_endpoint* endpoints[], size_t n_endpoints)
 static void
 endpoint_collect_iterate_fn(const as_endpoint* endpoint, void* udata)
 {
-	as_endpoint_collect_udata* endpoints_data = (as_endpoint_collect_udata*) udata;
+	as_endpoint_collect_udata* endpoints_data = (as_endpoint_collect_udata*)udata;
 	endpoints_data->endpoints[endpoints_data->collected_count++] = endpoint;
 }
 
@@ -748,8 +760,8 @@ endpoint_to_string_iterate(const as_endpoint* endpoint, void* udata)
 	as_endpoint_to_string_udata* to_string_data =
 			(as_endpoint_to_string_udata*)udata;
 
-	if ((endpoint->capabilities & to_string_data->capability_mask)
-			!= (to_string_data->capabilities & to_string_data->capability_mask)) {
+	if ((endpoint->capabilities & to_string_data->capability_mask) !=
+			(to_string_data->capabilities & to_string_data->capability_mask)) {
 		// skip as the capabilities do not match
 		to_string_data->endpoints_converted++;
 		return;
@@ -761,8 +773,8 @@ endpoint_to_string_iterate(const as_endpoint* endpoint, void* udata)
 
 	cf_sock_addr temp_addr;
 	if (cf_ip_addr_from_binary(endpoint->addr,
-			endpoint_addr_binary_size(endpoint->addr_type), &temp_addr.addr)
-			<= 0) {
+				endpoint_addr_binary_size(endpoint->addr_type),
+				&temp_addr.addr) <= 0) {
 		return;
 	}
 
@@ -816,23 +828,23 @@ endpoint_to_string_iterate(const as_endpoint* endpoint, void* udata)
  */
 static bool
 endpoints_are_equal(const as_endpoint* endpoint1, const as_endpoint* endpoint2,
-	bool ignore_capabilities)
+		bool ignore_capabilities)
 {
 	if (endpoint1 == endpoint2) {
 		return true;
 	}
 
-	if (!endpoint1 || !endpoint2) {
+	if (! endpoint1 || ! endpoint2) {
 		return false;
 	}
 
 	size_t size1 = as_endpoint_sizeof(endpoint1);
-	if (!size1) {
+	if (! size1) {
 		return false;
 	}
 
 	size_t size2 = as_endpoint_sizeof(endpoint2);
-	if (!size2) {
+	if (! size2) {
 		return false;
 	}
 
@@ -840,9 +852,12 @@ endpoints_are_equal(const as_endpoint* endpoint1, const as_endpoint* endpoint2,
 		return false;
 	}
 
-	return (ignore_capabilities || endpoint1->capabilities == endpoint2->capabilities)
-		&& endpoint1->port == endpoint2->port && endpoint1->addr_type == endpoint2->addr_type
-		&& memcmp(endpoint1->addr, endpoint2->addr, endpoint_addr_binary_size(endpoint1->addr_type)) == 0;
+	return (ignore_capabilities ||
+				   endpoint1->capabilities == endpoint2->capabilities) &&
+			endpoint1->port == endpoint2->port &&
+			endpoint1->addr_type == endpoint2->addr_type &&
+			memcmp(endpoint1->addr, endpoint2->addr,
+					endpoint_addr_binary_size(endpoint1->addr_type)) == 0;
 }
 
 /**
@@ -851,13 +866,15 @@ endpoints_are_equal(const as_endpoint* endpoint1, const as_endpoint* endpoint2,
 static void
 endpoint_list_overlap_iterate(const as_endpoint* endpoint, void* udata)
 {
-	as_endpoint_list_overlap_udata* overlap_udata = (as_endpoint_list_overlap_udata*) udata;
+	as_endpoint_list_overlap_udata* overlap_udata =
+			(as_endpoint_list_overlap_udata*)udata;
 	as_endpoint_list_endpoint_find_udata find_udata;
 	find_udata.match_found = false;
 	find_udata.ignore_capabilities = overlap_udata->ignore_capabilities;
 	find_udata.to_find = endpoint;
 
-	as_endpoint_list_iterate(overlap_udata->other, endpoint_list_find_iterate, &find_udata);
+	as_endpoint_list_iterate(overlap_udata->other, endpoint_list_find_iterate,
+			&find_udata);
 
 	overlap_udata->overlapped |= find_udata.match_found;
 }
@@ -868,13 +885,14 @@ endpoint_list_overlap_iterate(const as_endpoint* endpoint, void* udata)
 static void
 endpoint_list_find_iterate(const as_endpoint* endpoint, void* udata)
 {
-	as_endpoint_list_endpoint_find_udata* find_udata = (as_endpoint_list_endpoint_find_udata*) udata;
+	as_endpoint_list_endpoint_find_udata* find_udata =
+			(as_endpoint_list_endpoint_find_udata*)udata;
 
 	const as_endpoint* to_find = find_udata->to_find;
-	if (!to_find) {
+	if (! to_find) {
 		return;
 	}
 
 	find_udata->match_found |= endpoints_are_equal(endpoint, to_find,
-		find_udata->ignore_capabilities);
+			find_udata->ignore_capabilities);
 }

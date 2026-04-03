@@ -31,7 +31,6 @@
 #include "dynbuf.h"
 struct as_info_cmd_args_s;
 
-
 //==========================================================
 // Public API.
 //

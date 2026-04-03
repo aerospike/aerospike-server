@@ -20,7 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -36,7 +35,6 @@
 #include "base/particle_integer.h"
 #include "base/proto.h"
 
-
 //==========================================================
 // BOOL particle interface - function declarations.
 //
@@ -45,8 +43,10 @@
 // functions. Here are the differences...
 
 // Handle "wire" format.
-int bool_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
-int bool_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int bool_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
+int bool_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
 uint32_t bool_wire_size(const as_particle* p);
 uint32_t bool_to_wire(const as_particle* p, uint8_t* wire);
 
@@ -57,19 +57,21 @@ uint32_t bool_asval_wire_size(const as_val* val);
 uint32_t bool_asval_to_wire(const as_val* val, uint8_t* wire);
 
 // Handle msgpack translation.
-void bool_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp);
+void bool_from_msgpack(const uint8_t* packed, uint32_t packed_size,
+		as_particle** pp);
 
 // Handle on-device "flat" format.
 const uint8_t* bool_skip_flat(const uint8_t* flat, const uint8_t* end);
-const uint8_t* bool_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp);
+const uint8_t* bool_from_flat(const uint8_t* flat, const uint8_t* end,
+		as_particle** pp);
 uint32_t bool_flat_size(const as_particle* p);
 uint32_t bool_to_flat(const as_particle* p, uint8_t* flat);
-
 
 //==========================================================
 // BOOL particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable bool_vtable = {
 		integer_destruct,
 		integer_size,
@@ -97,17 +99,16 @@ const as_particle_vtable bool_vtable = {
 		bool_flat_size,
 		bool_to_flat
 };
-
+// clang-format on
 
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef struct bool_flat_s {
-	uint8_t		type;
-	uint8_t		i;
-} __attribute__ ((__packed__)) bool_flat;
-
+	uint8_t type;
+	uint8_t i;
+} __attribute__((__packed__)) bool_flat;
 
 //==========================================================
 // BOOL particle interface - function definitions.
@@ -173,8 +174,8 @@ bool_to_wire(const as_particle* p, uint8_t* wire)
 void
 bool_from_asval(const as_val* val, as_particle** pp)
 {
-	*pp = (as_particle*)(uint64_t)
-			(as_boolean_get(as_boolean_fromval(val)) ? 1 : 0);
+	*pp = (as_particle*)(uint64_t)(as_boolean_get(as_boolean_fromval(val)) ? 1
+																		   : 0);
 }
 
 as_val*
@@ -269,7 +270,6 @@ bool_to_flat(const as_particle* p, uint8_t* flat)
 
 	return bool_flat_size(p);
 }
-
 
 //==========================================================
 // as_bin particle functions specific to BOOL.

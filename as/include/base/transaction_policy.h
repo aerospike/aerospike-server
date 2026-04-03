@@ -52,7 +52,6 @@ typedef enum {
 	AS_WRITE_COMMIT_LEVEL_MASTER,
 } as_write_commit_level;
 
-
 //==========================================================
 // Public API - macros.
 //
@@ -61,50 +60,56 @@ typedef enum {
 // Extract levels from an as_msg.
 //
 
-#define PROTO_CONSISTENCY_LEVEL(asmsg) \
-	(((asmsg).info1 & AS_MSG_INFO1_CONSISTENCY_LEVEL_ALL) == 0 ? \
-		AS_READ_CONSISTENCY_LEVEL_ONE : AS_READ_CONSISTENCY_LEVEL_ALL)
+#define PROTO_CONSISTENCY_LEVEL(asmsg)                                         \
+	(((asmsg).info1 & AS_MSG_INFO1_CONSISTENCY_LEVEL_ALL) == 0                 \
+					? AS_READ_CONSISTENCY_LEVEL_ONE                            \
+					: AS_READ_CONSISTENCY_LEVEL_ALL)
 
-#define PROTO_COMMIT_LEVEL(asmsg) \
-	(((asmsg).info3 & AS_MSG_INFO3_COMMIT_LEVEL_MASTER) == 0 ? \
-		AS_WRITE_COMMIT_LEVEL_ALL : AS_WRITE_COMMIT_LEVEL_MASTER)
+#define PROTO_COMMIT_LEVEL(asmsg)                                              \
+	(((asmsg).info3 & AS_MSG_INFO3_COMMIT_LEVEL_MASTER) == 0                   \
+					? AS_WRITE_COMMIT_LEVEL_ALL                                \
+					: AS_WRITE_COMMIT_LEVEL_MASTER)
 
 //------------------------------------------------
 // Get levels for a transaction with reservation.
 //
 
 // Determine read consistency level for a transaction based on everything.
-#define TR_READ_CONSISTENCY_LEVEL(tr) \
-	(tr->rsv.ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_PROTO ? \
-		PROTO_CONSISTENCY_LEVEL(tr->msgp->msg) : \
-		tr->rsv.ns->read_consistency_level)
+#define TR_READ_CONSISTENCY_LEVEL(tr)                                          \
+	(tr->rsv.ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_PROTO     \
+					? PROTO_CONSISTENCY_LEVEL(tr->msgp->msg)                   \
+					: tr->rsv.ns->read_consistency_level)
 
 // Determine write commit level for a transaction based on everything.
-#define TR_WRITE_COMMIT_LEVEL(tr) \
-	(tr->rsv.ns->write_commit_level == AS_WRITE_COMMIT_LEVEL_PROTO ? \
-		PROTO_COMMIT_LEVEL(tr->msgp->msg) : \
-		tr->rsv.ns->write_commit_level)
+#define TR_WRITE_COMMIT_LEVEL(tr)                                              \
+	(tr->rsv.ns->write_commit_level == AS_WRITE_COMMIT_LEVEL_PROTO             \
+					? PROTO_COMMIT_LEVEL(tr->msgp->msg)                        \
+					: tr->rsv.ns->write_commit_level)
 
 //------------------------------------------------
 // Get levels without need of reservation.
 //
 
 // Same as above, for use before tr->rsv has been made.
-#define READ_CONSISTENCY_LEVEL(ns, asmsg) \
-	(ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_PROTO ? \
-		PROTO_CONSISTENCY_LEVEL(asmsg) : \
-		ns->read_consistency_level)
+#define READ_CONSISTENCY_LEVEL(ns, asmsg)                                      \
+	(ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_PROTO             \
+					? PROTO_CONSISTENCY_LEVEL(asmsg)                           \
+					: ns->read_consistency_level)
 
 //------------------------------------------------
 // Get config override values' names.
 //
 
-#define NS_READ_CONSISTENCY_LEVEL_NAME() \
-	(ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_PROTO ? \
-		"off" : (ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_ONE ? \
-			"one" : "all"))
+#define NS_READ_CONSISTENCY_LEVEL_NAME()                                           \
+	(ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_PROTO                 \
+					? "off"                                                        \
+					: (ns->read_consistency_level == AS_READ_CONSISTENCY_LEVEL_ONE \
+									  ? "one"                                      \
+									  : "all"))
 
-#define NS_WRITE_COMMIT_LEVEL_NAME() \
-	(ns->write_commit_level == AS_WRITE_COMMIT_LEVEL_PROTO ? \
-		"off" : (ns->write_commit_level == AS_WRITE_COMMIT_LEVEL_ALL ? \
-			"all" : "master"))
+#define NS_WRITE_COMMIT_LEVEL_NAME()                                           \
+	(ns->write_commit_level == AS_WRITE_COMMIT_LEVEL_PROTO                     \
+					? "off"                                                    \
+					: (ns->write_commit_level == AS_WRITE_COMMIT_LEVEL_ALL     \
+									  ? "all"                                  \
+									  : "master"))

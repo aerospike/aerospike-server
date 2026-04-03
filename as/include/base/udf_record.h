@@ -38,7 +38,6 @@
 #include "base/datamodel.h"
 #include "base/masking.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -46,7 +45,6 @@
 struct as_index_ref_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -88,7 +86,6 @@ typedef struct udf_record_s {
 	udf_record_bin updates[UDF_UPDATE_LIMIT]; // cached bin (as_val) values
 } udf_record;
 
-
 //==========================================================
 // Public API.
 //
@@ -96,13 +93,13 @@ typedef struct udf_record_s {
 void udf_record_init(udf_record* urecord);
 
 void udf_record_cache_free(udf_record* urecord);
-void udf_record_cache_set(udf_record* urecord, const char* name, as_val* value, bool dirty);
+void udf_record_cache_set(udf_record* urecord, const char* name, as_val* value,
+		bool dirty);
 void udf_record_cache_reclaim(udf_record* urecord, uint32_t i);
 
 int udf_record_open(udf_record* urecord);
 void udf_record_close(udf_record* urecord);
 int udf_record_load(udf_record* urecord);
-
 
 //==========================================================
 // Public API - rec hooks.

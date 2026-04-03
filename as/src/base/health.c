@@ -48,7 +48,6 @@
 #include "fabric/exchange.h"
 #include "storage/storage.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -135,7 +134,6 @@ static const stat_spec ns_stat_spec[] = {
 	{ false, true, 30, 0, "replication_latency" } // AS_HEALTH_NS_REPL_LAT
 };
 
-
 //==========================================================
 // Globals.
 //
@@ -150,23 +148,27 @@ static cf_mutex g_outlier_lock = CF_MUTEX_INIT;
 static cf_vector* g_outliers;
 static cf_shash* g_stats;
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static int32_t clear_data_reduce_fn(const void* key, void* data, void* udata);
-static void cluster_state_changed_fn(const as_exchange_cluster_changed_event* event, void* udata);
+static void cluster_state_changed_fn(const as_exchange_cluster_changed_event* event,
+		void* udata);
 static int compare_stats(const void* o1, const void* o2);
-static void compute_local_stats_mov_avg (local_all_mov_avg* lma);
-static void compute_node_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs, cf_node node);
-static void compute_ns_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs, cf_node node);
+static void compute_local_stats_mov_avg(local_all_mov_avg* lma);
+static void compute_node_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs,
+		cf_node node);
+static void compute_ns_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs,
+		cf_node node);
 static void create_local_stats();
 static peer_stats* create_node(cf_node node);
 static void find_outliers_from_local_stats(local_all_mov_avg* lma);
 static void find_outliers_from_stats(cluster_all_mov_avg* cs);
-static void find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold, const char* reason, uint32_t ns_ix);
-static int32_t mark_cl_membership_reduce_fn(const void* key, void* data, void* udata);
+static void find_outlier_per_stat(mov_avg* ma, uint32_t n_entries,
+		uint32_t threshold, const char* reason, uint32_t ns_ix);
+static int32_t mark_cl_membership_reduce_fn(const void* key, void* data,
+		void* udata);
 static void print_local_stats(cf_dyn_buf* db);
 static void print_node_stats(peer_stats* ps, cf_dyn_buf* db, cf_node node);
 static void print_ns_stats(peer_stats* ps, cf_dyn_buf* db, cf_node node);
@@ -177,7 +179,6 @@ static void shift_window_local_stat();
 static void shift_window_node_stat(peer_stats* ps);
 static void shift_window_ns_stat(peer_stats* ps);
 static int32_t update_mov_avg_reduce_fn(const void* key, void* data, void* udata);
-
 
 //==========================================================
 // Inlines & macros.
@@ -237,9 +238,8 @@ compute_mov_avg_latency(bucket* buckets, uint32_t n_buckets)
 static inline double
 compute_mov_avg(bucket* buckets, uint32_t n_buckets, bool is_counter)
 {
-	return is_counter ?
-			compute_mov_avg_count(buckets, n_buckets) :
-			compute_mov_avg_latency(buckets, n_buckets);
+	return is_counter ? compute_mov_avg_count(buckets, n_buckets)
+					  : compute_mov_avg_latency(buckets, n_buckets);
 }
 
 static inline uint32_t
@@ -251,10 +251,8 @@ find_median_index(uint32_t from, uint32_t to)
 static inline bool
 is_node_active(peer_stats* ps)
 {
-	return ps->is_in_cluster ||
-			cf_get_seconds() - ps->last_sample < MAX_IDLE_SEC;
+	return ps->is_in_cluster || cf_get_seconds() - ps->last_sample < MAX_IDLE_SEC;
 }
-
 
 //==========================================================
 // Public API.
@@ -351,8 +349,8 @@ health_add_node_counter(cf_node node, as_health_node_stat_type type)
 }
 
 void
-health_add_ns_latency(cf_node node, uint32_t ns_ix,
-		as_health_ns_stat_type type, uint64_t start_us)
+health_add_ns_latency(cf_node node, uint32_t ns_ix, as_health_ns_stat_type type,
+		uint64_t start_us)
 {
 	uint64_t delta_us = cf_getus() - start_us;
 	peer_stats* ps = NULL;
@@ -363,7 +361,6 @@ health_add_ns_latency(cf_node node, uint32_t ns_ix,
 
 	add_latency_sample(&ps->ns_stats[ns_ix][type], delta_us);
 }
-
 
 //==========================================================
 // Local helpers.
@@ -426,7 +423,8 @@ compute_local_stats_mov_avg(local_all_mov_avg* lma)
 			dma->value = compute_mov_avg(hs->buckets, spec->n_buckets,
 					spec->is_counter);
 
-			cf_detail(AS_HEALTH, "moving average: device %s value %f current bucket %lu",
+			cf_detail(AS_HEALTH,
+					"moving average: device %s value %f current bucket %lu",
 					device_name, dma->value,
 					hs->buckets[hs->cur_bucket].sample_sum);
 		}
@@ -460,11 +458,12 @@ compute_node_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs, cf_node node)
 		mov_avg* nma = &cs->cl_node_stats[type].nma_array[node_index];
 
 		nma->id = hs->id;
-		nma->value = compute_mov_avg(hs->buckets, spec->n_buckets,
-				spec->is_counter);
+		nma->value =
+				compute_mov_avg(hs->buckets, spec->n_buckets, spec->is_counter);
 		cs->cl_node_stats[type].n_nodes++;
 
-		cf_detail(AS_HEALTH, "moving average/sum: node %lx type %u value %f current-bucket %lu",
+		cf_detail(AS_HEALTH,
+				"moving average/sum: node %lx type %u value %f current-bucket %lu",
 				node, type, nma->value, hs->buckets[hs->cur_bucket].sample_sum);
 	}
 }
@@ -501,7 +500,8 @@ compute_ns_mov_avg(peer_stats* ps, cluster_all_mov_avg* cs, cf_node node)
 					spec->is_counter);
 			cs->cl_ns_stats[ns_ix][type].n_nodes++;
 
-			cf_detail(AS_HEALTH, "moving average/sum: node %lx ns-ix %u type %u value %f current-bucket %lu",
+			cf_detail(AS_HEALTH,
+					"moving average/sum: node %lx ns-ix %u type %u value %f current-bucket %lu",
 					node, ns_ix, type, nma->value,
 					hs->buckets[hs->cur_bucket].sample_sum);
 		}
@@ -580,8 +580,7 @@ find_outliers_from_local_stats(local_all_mov_avg* lma)
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		uint32_t n_devices = num_read_devices(g_config.namespaces[ns_ix]);
 		mov_avg* dma = lma->device_mov_avg[ns_ix];
-		const stat_spec* spec =
-				&local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
+		const stat_spec* spec = &local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
 
 		find_outlier_per_stat(dma, n_devices, spec->threshold, spec->stat_str,
 				ns_ix);
@@ -634,17 +633,15 @@ find_outlier_per_stat(mov_avg* ma, uint32_t n_entries, uint32_t threshold,
 
 	for (uint32_t i = 0; i < n_entries; i++) {
 		double mov_avg = ma[i].value;
-		uint32_t confidence_pct = (uint32_t)
-				(((mov_avg - q2) * 100 / mov_avg) + 0.5);
+		uint32_t confidence_pct =
+				(uint32_t)(((mov_avg - q2) * 100 / mov_avg) + 0.5);
 
 		if (mov_avg > upper_bound && mov_avg > threshold &&
 				confidence_pct >= MIN_CONFIDENCE_PCT) {
-			outlier outlier = {
-					.confidence_pct = confidence_pct,
-					.id = ma[i].id,
-					.ns_ix = ns_ix,
-					.reason = reason
-			};
+			outlier outlier = { .confidence_pct = confidence_pct,
+				.id = ma[i].id,
+				.ns_ix = ns_ix,
+				.reason = reason };
 
 			cf_vector_append(g_outliers, &outlier);
 		}
@@ -659,8 +656,8 @@ mark_cl_membership_reduce_fn(const void* key, void* data, void* udata)
 	as_exchange_cluster_changed_event* event =
 			(as_exchange_cluster_changed_event*)udata;
 
-	ps->is_in_cluster = contains_node(event->succession, event->cluster_size,
-			*node);
+	ps->is_in_cluster =
+			contains_node(event->succession, event->cluster_size, *node);
 
 	return CF_SHASH_OK;
 }
@@ -672,8 +669,7 @@ print_local_stats(cf_dyn_buf* db)
 		as_namespace* ns = g_config.namespaces[ns_ix];
 		health_stat* device_stats = g_local_stats.device_read_lat[ns_ix];
 		uint32_t n_devices = num_read_devices(ns);
-		const stat_spec* spec =
-				&local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
+		const stat_spec* spec = &local_stat_spec[AS_HEALTH_LOCAL_DEVICE_READ_LAT];
 
 		for (uint32_t d_id = 0; d_id < n_devices; d_id++) {
 			health_stat* hs = &device_stats[d_id];
@@ -713,8 +709,8 @@ print_node_stats(peer_stats* ps, cf_dyn_buf* db, cf_node node)
 		}
 
 		health_stat* hs = &ps->node_stats[type];
-		double mov_avg = compute_mov_avg(hs->buckets, spec->n_buckets,
-				spec->is_counter);
+		double mov_avg =
+				compute_mov_avg(hs->buckets, spec->n_buckets, spec->is_counter);
 
 		cf_dyn_buf_append_string(db, "stat=");
 		cf_dyn_buf_append_string(db, spec->stat_str);
@@ -860,7 +856,8 @@ run_health()
 						cur.id, cur.confidence_pct, cur.reason);
 			}
 			else {
-				cf_info(AS_HEALTH, "outlier %s: namespace %s confidence-pct %u reason %s",
+				cf_info(AS_HEALTH,
+						"outlier %s: namespace %s confidence-pct %u reason %s",
 						cur.id, g_config.namespaces[cur.ns_ix]->name,
 						cur.confidence_pct, cur.reason);
 			}
@@ -916,7 +913,7 @@ shift_window_node_stat(peer_stats* ps)
 static void
 shift_window_ns_stat(peer_stats* ps)
 {
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++ ) {
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		for (uint32_t type = 0; type < AS_HEALTH_NS_TYPE_MAX; type++) {
 			health_stat* stat = &ps->ns_stats[ns_ix][type];
 			uint32_t index = stat->cur_bucket;

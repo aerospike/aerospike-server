@@ -31,23 +31,21 @@
 #include <string.h>
 
 #include "citrusleaf/alloc.h"
-#include "base/proto.h"
-#include "base/smd.h"
-#include "base/set_index.h"
-#include "base/thr_info.h"
 
-#include "sindex/sindex.h"
-
-#include "shash.h"
 #include "dynbuf.h"
 #include "log.h"
+#include "shash.h"
 #include "vector.h"
 
+#include "base/proto.h"
+#include "base/set_index.h"
+#include "base/smd.h"
+#include "base/thr_info.h"
+#include "sindex/sindex.h"
 
 //==========================================================
 // Typedefs & constants.
 //
-
 
 //==========================================================
 // Globals.
@@ -57,7 +55,6 @@
 
 pthread_rwlock_t g_sindex_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -66,11 +63,15 @@ static void find_sindex_key(const cf_vector* items, void* udata);
 static void defn_hash_put(as_sindex* si);
 static void defn_hash_delete(as_sindex* si);
 static void defn_hash_destroy_cb(cf_ll_element* ele);
-static bool compare_buf(const uint8_t* buf1, uint32_t buf1_sz, const uint8_t* buf2, uint32_t buf2_sz);
-static void defn_hash_generate_key(const char* bin_name, const uint8_t* exp_buf, uint32_t exp_buf_sz, defn_hash_key* key);
+static bool compare_buf(const uint8_t* buf1, uint32_t buf1_sz,
+		const uint8_t* buf2, uint32_t buf2_sz);
+static void defn_hash_generate_key(const char* bin_name, const uint8_t* exp_buf,
+		uint32_t exp_buf_sz, defn_hash_key* key);
 static uint32_t defn_hash_fn(const void* key);
 static void def_free(as_sindex_def* def);
-static void build_smd_key(const char* ns_name, const char* set_name, const char* bin_name, const char* cdt_ctx, const char* exp, as_sindex_type itype, as_particle_type ktype, char* smd_key);
+static void build_smd_key(const char* ns_name, const char* set_name,
+		const char* bin_name, const char* cdt_ctx, const char* exp,
+		as_sindex_type itype, as_particle_type ktype, char* smd_key);
 static as_sindex_type itype_from_smd_char(char c);
 static as_particle_type ktype_from_smd_char(char c);
 static char itype_to_smd_char(as_sindex_type itype);
@@ -79,7 +80,6 @@ static inline bool is_set_index_smd_key(const char* smd_key);
 static void sindex_list(as_info_cmd_args* args);
 static void set_index_list(as_info_cmd_args* args);
 static bool sindex_exists(const as_namespace* ns, const char* iname);
-
 
 //==========================================================
 // Public API.
@@ -90,15 +90,15 @@ as_sindex_manager_init(void)
 {
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
-		
-		ns->sindex_defn_hash = cf_shash_create(defn_hash_fn,
-				sizeof(defn_hash_key), sizeof(cf_ll*), 256 , false);
 
-		ns->sindex_iname_hash = cf_shash_create(cf_shash_fn_zstr,
-				INAME_MAX_SZ, sizeof(as_sindex*), 256, false);
+		ns->sindex_defn_hash = cf_shash_create(defn_hash_fn,
+				sizeof(defn_hash_key), sizeof(cf_ll*), 256, false);
+
+		ns->sindex_iname_hash = cf_shash_create(cf_shash_fn_zstr, INAME_MAX_SZ,
+				sizeof(as_sindex*), 256, false);
 		ns->n_sindexes = 0;
 	}
-	
+
 	as_sindex_init();
 
 	pthread_rwlockattr_t rwattr;
@@ -110,17 +110,17 @@ as_sindex_manager_init(void)
 	pthread_rwlock_init(&g_sindex_rwlock, &rwattr);
 
 	// Register the unified SMD callback for both secondary and set indexes
-	as_smd_module_load(AS_SMD_MODULE_SINDEX, as_sindex_manager_smd_accept_cb, 
-			NULL,NULL);
-	
+	as_smd_module_load(AS_SMD_MODULE_SINDEX, as_sindex_manager_smd_accept_cb,
+			NULL, NULL);
+
 	as_sindex_resume_check();
 }
 
 void
 as_sindex_manager_start(void)
 {
-	as_set_index_start();   // starts set-index population
-	as_sindex_start();     	// starts sindex GC threads
+	as_set_index_start(); // starts set-index population
+	as_sindex_start(); // starts sindex GC threads
 }
 
 // TODO:- (daud) carve out parse functions for set index and secondary index.
@@ -168,70 +168,82 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 		// Set index: reject sindex-only params; require set.
 		char ctx_b64[CTX_B64_MAX_SZ];
 		int ctx_b64_len = sizeof(ctx_b64);
-		if (as_info_parameter_get(params, "context", ctx_b64, &ctx_b64_len) == 
+		if (as_info_parameter_get(params, "context", ctx_b64, &ctx_b64_len) ==
 				INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create: context parameter is not supported for set index");
-			as_info_respond_error(db, AS_ERR_PARAMETER, "context parameter is not supported for set index");
+			cf_warning(AS_INFO,
+					"sindex-create: context parameter is not supported for set index");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"context parameter is not supported for set index");
 			return;
 		}
 
 		char indexdata_str[INDEXDATA_MAX_SZ];
 		int indexdata_len = sizeof(indexdata_str);
-		if (as_info_parameter_get(params, "indexdata", 
-					indexdata_str, &indexdata_len) == INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create: indexdata parameter is not supported for set index");
-			as_info_respond_error(db, AS_ERR_PARAMETER, "indexdata parameter is not supported for set index");
+		if (as_info_parameter_get(params, "indexdata", indexdata_str,
+					&indexdata_len) == INFO_PARAM_OK) {
+			cf_warning(AS_INFO,
+					"sindex-create: indexdata parameter is not supported for set index");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"indexdata parameter is not supported for set index");
 			return;
 		}
 
 		char ktype_str[KTYPE_MAX_SZ];
 		int ktype_len = sizeof(ktype_str);
-		if (as_info_parameter_get(params, "type", ktype_str, &ktype_len) == 
+		if (as_info_parameter_get(params, "type", ktype_str, &ktype_len) ==
 				INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create: type parameter is not supported for set index");
-			as_info_respond_error(db, AS_ERR_PARAMETER, "type parameter is not supported for set index");
+			cf_warning(AS_INFO,
+					"sindex-create: type parameter is not supported for set index");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"type parameter is not supported for set index");
 			return;
 		}
 
 		char bin_name[AS_BIN_NAME_MAX_SZ];
 		int bin_name_len = sizeof(bin_name);
-		if (as_info_parameter_get(params, "bin", bin_name, &bin_name_len) == 
+		if (as_info_parameter_get(params, "bin", bin_name, &bin_name_len) ==
 				INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create: bin parameter is not supported for set index");
-			as_info_respond_error(db, AS_ERR_PARAMETER, "bin parameter is not supported for set index");
+			cf_warning(AS_INFO,
+					"sindex-create: bin parameter is not supported for set index");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"bin parameter is not supported for set index");
 			return;
 		}
 
 		char exp_b64[EXP_B64_MAX_SZ];
 		int exp_b64_len = sizeof(exp_b64);
-		if (as_info_parameter_get(params, "exp", exp_b64, &exp_b64_len) == 
+		if (as_info_parameter_get(params, "exp", exp_b64, &exp_b64_len) ==
 				INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create: exp parameter is not supported for set index");
-			as_info_respond_error(db, AS_ERR_PARAMETER, "exp parameter is not supported for set index");
+			cf_warning(AS_INFO,
+					"sindex-create: exp parameter is not supported for set index");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"exp parameter is not supported for set index");
 			return;
 		}
-		
+
 		set_len = sizeof(set_str);
 		rv = as_info_parameter_get(params, "set", set_str, &set_len);
 		if (! as_info_required_param_is_ok(db, "set", set_str, rv)) {
 			return;
 		}
-	
+
 		as_namespace* ns = as_namespace_get_byname(ns_str);
 		if (ns == NULL) {
-			cf_warning(AS_INFO, "sindex-create: namespace '%s' not found", 
-						ns_str);
+			cf_warning(AS_INFO, "sindex-create: namespace '%s' not found",
+					ns_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER, "namespace not found");
 			return;
 		}
 
 		as_set* p_set = NULL;
 		uint16_t set_id = INVALID_SET_ID;
-		if (as_namespace_get_create_set_w_len(ns, set_str, strlen(set_str), 
-				&p_set, &set_id) != 0) {
-			cf_warning(AS_INFO, "sindex-create: failed to get/create set '%s' in namespace '%s'", 
-						set_str, ns_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "failed to get/create set");
+		if (as_namespace_get_create_set_w_len(ns, set_str, strlen(set_str),
+					&p_set, &set_id) != 0) {
+			cf_warning(AS_INFO,
+					"sindex-create: failed to get/create set '%s' in namespace '%s'",
+					set_str, ns_str);
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"failed to get/create set");
 			return;
 		}
 
@@ -265,8 +277,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 
 		if (rv == INFO_PARAM_OK) {
 			uint8_t* buf;
-			int32_t buf_sz = as_sindex_cdt_ctx_b64_decode(ctx_b64, ctx_b64_len,
-					&buf);
+			int32_t buf_sz =
+					as_sindex_cdt_ctx_b64_decode(ctx_b64, ctx_b64_len, &buf);
 
 			if (buf_sz > 0) {
 				cf_free(buf);
@@ -274,19 +286,22 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 			else if (buf_sz < 0) {
 				switch (buf_sz) {
 				case -1:
-					cf_warning(AS_INFO, "sindex-create %s: 'context' invalid base64",
+					cf_warning(AS_INFO,
+							"sindex-create %s: 'context' invalid base64",
 							idx_name_str);
 					as_info_respond_error(db, AS_ERR_PARAMETER,
 							"'context' invalid base64");
 					return;
 				case -2:
-					cf_warning(AS_INFO, "sindex-create %s: 'context' invalid cdt context",
+					cf_warning(AS_INFO,
+							"sindex-create %s: 'context' invalid cdt context",
 							idx_name_str);
 					as_info_respond_error(db, AS_ERR_PARAMETER,
 							"'context' invalid cdt context");
 					return;
 				case -3:
-					cf_warning(AS_INFO, "sindex-create %s: 'context' not normalized msgpack",
+					cf_warning(AS_INFO,
+							"sindex-create %s: 'context' not normalized msgpack",
 							idx_name_str);
 					as_info_respond_error(db, AS_ERR_PARAMETER,
 							"'context' not normalized msgpack");
@@ -301,8 +316,7 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 
 		int indtype_len = sizeof(itype_str);
 
-		rv = as_info_parameter_get(params, "indextype", itype_str,
-				&indtype_len);
+		rv = as_info_parameter_get(params, "indextype", itype_str, &indtype_len);
 		rv = as_info_optional_param_is_ok(db, "indextype", itype_str, rv);
 
 		if (rv == INFO_PARAM_FAIL_REPLIED) {
@@ -337,17 +351,17 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 		int ktype_len = sizeof(ktype_str);
 		char* p_ktype_str = NULL;
 
-		info_param_result indexdata_rv = as_info_parameter_get(params, "indexdata",
-				indexdata_str, &indexdata_len);
-		indexdata_rv = as_info_optional_param_is_ok(db, "indexdata", 
-					indexdata_str, indexdata_rv);
+		info_param_result indexdata_rv = as_info_parameter_get(params,
+				"indexdata", indexdata_str, &indexdata_len);
+		indexdata_rv = as_info_optional_param_is_ok(db, "indexdata",
+				indexdata_str, indexdata_rv);
 
 		if (indexdata_rv == INFO_PARAM_FAIL_REPLIED) {
 			return;
 		}
 
-		info_param_result type_rv = as_info_parameter_get(params, "type", 
-				ktype_str, &ktype_len);
+		info_param_result type_rv =
+				as_info_parameter_get(params, "type", ktype_str, &ktype_len);
 		type_rv = as_info_optional_param_is_ok(db, "type", ktype_str, type_rv);
 
 		if (type_rv == INFO_PARAM_FAIL_REPLIED) {
@@ -356,16 +370,20 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 
 		if (indexdata_rv == INFO_PARAM_OK_NOT_FOUND &&
 				type_rv == INFO_PARAM_OK_NOT_FOUND) {
-			cf_warning(AS_INFO, "sindex-create %s: both 'indexdata' and 'type' are missing",
+			cf_warning(AS_INFO,
+					"sindex-create %s: both 'indexdata' and 'type' are missing",
 					idx_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "both 'indexdata' and 'type' are missing");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"both 'indexdata' and 'type' are missing");
 			return;
 		}
 
 		if (indexdata_rv == INFO_PARAM_OK && type_rv == INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create %s: both 'indexdata' and 'type' are specified",
+			cf_warning(AS_INFO,
+					"sindex-create %s: both 'indexdata' and 'type' are specified",
 					idx_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "both 'indexdata' and 'type' are specified");
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"both 'indexdata' and 'type' are specified");
 			return;
 		}
 
@@ -385,8 +403,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 
 			rv = as_info_parameter_get(params, "bin", bin_name, &bin_name_len);
 
-			uint32_t bin_rv = as_info_optional_param_is_ok(db, "bin", bin_name, 
-						rv);
+			uint32_t bin_rv =
+					as_info_optional_param_is_ok(db, "bin", bin_name, rv);
 
 			if (bin_rv == INFO_PARAM_FAIL_REPLIED) {
 				return;
@@ -398,33 +416,39 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 
 			rv = as_info_parameter_get(params, "exp", exp_b64, &exp_b64_len);
 
-			uint32_t exp_rv = as_info_optional_param_is_ok(db, "exp", exp_b64, 
-						rv);
+			uint32_t exp_rv =
+					as_info_optional_param_is_ok(db, "exp", exp_b64, rv);
 
 			if (exp_rv == INFO_PARAM_FAIL_REPLIED) {
 				return;
 			}
 
 			if (bin_rv == INFO_PARAM_OK && exp_rv == INFO_PARAM_OK) {
-				cf_warning(AS_INFO, "sindex-create %s: both 'bin' and 'exp' are specified",
+				cf_warning(AS_INFO,
+						"sindex-create %s: both 'bin' and 'exp' are specified",
 						idx_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER, "both 'bin' and 'exp' are specified");
+				as_info_respond_error(db, AS_ERR_PARAMETER,
+						"both 'bin' and 'exp' are specified");
 				return;
 			}
 
 			if (bin_rv == INFO_PARAM_OK_NOT_FOUND &&
 					exp_rv == INFO_PARAM_OK_NOT_FOUND) {
-				cf_warning(AS_INFO, "sindex-create %s: both 'bin' and 'exp' are missing",
+				cf_warning(AS_INFO,
+						"sindex-create %s: both 'bin' and 'exp' are missing",
 						idx_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER, "both 'bin' and 'exp' are missing");
+				as_info_respond_error(db, AS_ERR_PARAMETER,
+						"both 'bin' and 'exp' are missing");
 				return;
 			}
 
 			if (exp_rv == INFO_PARAM_OK) {
 				if (p_cdt_ctx != NULL) {
-					cf_warning(AS_INFO, "sindex-create %s: both 'context' and 'exp' are specified",
+					cf_warning(AS_INFO,
+							"sindex-create %s: both 'context' and 'exp' are specified",
 							idx_name_str);
-					as_info_respond_error(db, AS_ERR_PARAMETER, "both 'context' and 'exp' are specified");
+					as_info_respond_error(db, AS_ERR_PARAMETER,
+							"both 'context' and 'exp' are specified");
 					return;
 				}
 
@@ -435,7 +459,7 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 				}
 
 				if (! as_sindex_validate_exp_type(idx_name_str, itype, ktype,
-						exp_type, db)) {
+							exp_type, db)) {
 					return;
 				}
 
@@ -445,14 +469,16 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 		else {
 			// Old protocol - indexdata=bin-name,keytype
 
-			as_info_warn_deprecated("'indexdata' parameter of 'sindex-create' info command is deprecated - use 'bin' and 'type' instead");
+			as_info_warn_deprecated(
+					"'indexdata' parameter of 'sindex-create' info command is deprecated - use 'bin' and 'type' instead");
 
 			p_bin_name = indexdata_str;
 
 			p_ktype_str = strchr(indexdata_str, ',');
 
 			if (p_ktype_str == NULL) {
-				cf_warning(AS_INFO, "sindex-create %s: 'indexdata' missing bin type",
+				cf_warning(AS_INFO,
+						"sindex-create %s: 'indexdata' missing bin type",
 						idx_name_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER,
 						"'indexdata' missing bin type");
@@ -462,7 +488,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 			*p_ktype_str++ = '\0';
 
 			if (p_bin_name[0] == '\0') {
-				cf_warning(AS_INFO, "sindex-create %s: 'indexdata' missing bin name",
+				cf_warning(AS_INFO,
+						"sindex-create %s: 'indexdata' missing bin name",
 						idx_name_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER,
 						"'indexdata' missing bin name");
@@ -470,7 +497,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 			}
 
 			if (strlen(p_bin_name) >= AS_BIN_NAME_MAX_SZ) {
-				cf_warning(AS_INFO, "sindex-create %s: 'indexdata' bin name too long",
+				cf_warning(AS_INFO,
+						"sindex-create %s: 'indexdata' bin name too long",
 						idx_name_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER,
 						"'indexdata' bin name too long");
@@ -480,7 +508,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 			ktype = as_sindex_ktype_from_string(p_ktype_str);
 
 			if (ktype == AS_PARTICLE_TYPE_BAD) {
-				cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s'",
+				cf_warning(AS_INFO,
+						"sindex-create %s: bad 'indexdata' bin type '%s'",
 						idx_name_str, p_ktype_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER,
 						"bad 'indexdata' bin type - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
@@ -492,7 +521,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 				ktype != AS_PARTICLE_TYPE_INTEGER &&
 				ktype != AS_PARTICLE_TYPE_STRING &&
 				ktype != AS_PARTICLE_TYPE_BLOB) {
-			cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s' for 'indextype' 'mapkeys'",
+			cf_warning(AS_INFO,
+					"sindex-create %s: bad 'indexdata' bin type '%s' for 'indextype' 'mapkeys'",
 					idx_name_str, p_ktype_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"bad 'indexdata' bin type for 'indextype' 'mapkeys' - must be one of 'numeric', 'string', 'blob'");
@@ -505,16 +535,14 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 		exp_arg = p_exp;
 	}
 
-	build_smd_key(ns_str, set_name, bin_name_arg, cdt_ctx_arg,
-			exp_arg, itype, ktype, smd_key);
+	build_smd_key(ns_str, set_name, bin_name_arg, cdt_ctx_arg, exp_arg, itype,
+			ktype, smd_key);
 
 	cf_info(AS_INFO, "sindex-create: request received for %s:%s via info",
 			ns_str, idx_name_str);
 
 	find_sindex_key_udata fsk = {
-			.ns_name = ns_str,
-			.index_name = idx_name_str,
-			.smd_key = smd_key
+		.ns_name = ns_str, .index_name = idx_name_str, .smd_key = smd_key
 	};
 
 	as_smd_get_all(AS_SMD_MODULE_SINDEX, find_sindex_key, &fsk);
@@ -522,7 +550,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 	if (fsk.found_key != NULL) {
 		if (strcmp(fsk.found_key, smd_key) != 0) {
 			cf_free(fsk.found_key);
-			cf_warning(AS_INFO, "sindex-create %s:%s: 'indexname' already exists with different definition",
+			cf_warning(AS_INFO,
+					"sindex-create %s:%s: 'indexname' already exists with different definition",
 					ns_str, idx_name_str);
 			as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
 					"'indexname' already exists with different definition");
@@ -530,14 +559,16 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 		}
 
 		cf_free(fsk.found_key);
-		cf_info(AS_INFO, "sindex-create %s:%s: 'indexname' and defintion already exists",
+		cf_info(AS_INFO,
+				"sindex-create %s:%s: 'indexname' and defintion already exists",
 				ns_str, idx_name_str);
 		as_info_respond_ok(db);
 		return;
 	}
 
 	if (fsk.n_name_matches > 1) {
-		cf_warning(AS_INFO, "sindex-create %s:%s: 'indexname' already exists with %u definitions - rename(s) required",
+		cf_warning(AS_INFO,
+				"sindex-create %s:%s: 'indexname' already exists with %u definitions - rename(s) required",
 				ns_str, idx_name_str, fsk.n_name_matches);
 		as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
 				"'indexname' already exists with multiple definitions");
@@ -546,7 +577,8 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 
 	// Allow index renaming even if there are MAX_N_SINDEXES sindexes.
 	if (! is_set_ix && ! fsk.has_smd_key && fsk.n_sindexes >= MAX_N_SINDEXES) {
-		cf_warning(AS_INFO, "sindex-create %s:%s: already at sindex definition limit",
+		cf_warning(AS_INFO,
+				"sindex-create %s:%s: already at sindex definition limit",
 				ns_str, idx_name_str);
 		as_info_respond_error(db, AS_ERR_SINDEX_MAX_COUNT,
 				"already at sindex definition limit");
@@ -574,8 +606,8 @@ as_sindex_manager_sindex_delete(as_info_cmd_args* args)
 
 	char index_name_str[INAME_MAX_SZ];
 	int index_name_len = sizeof(index_name_str);
-	info_param_result rv = as_info_parameter_get(params, "indexname", 
-			index_name_str,	&index_name_len);
+	info_param_result rv = as_info_parameter_get(params, "indexname",
+			index_name_str, &index_name_len);
 
 	rv = as_info_required_param_is_ok(db, "indexname", index_name_str, rv);
 
@@ -595,10 +627,8 @@ as_sindex_manager_sindex_delete(as_info_cmd_args* args)
 	cf_info(AS_INFO, "sindex-delete: request received for %s:%s via info",
 			ns_str, index_name_str);
 
-	find_sindex_key_udata fsk = {
-			.ns_name = ns_str,
-			.index_name = index_name_str
-	};
+	find_sindex_key_udata fsk = { .ns_name = ns_str,
+		.index_name = index_name_str };
 
 	as_smd_get_all(AS_SMD_MODULE_SINDEX, find_sindex_key, &fsk);
 
@@ -610,7 +640,8 @@ as_sindex_manager_sindex_delete(as_info_cmd_args* args)
 			return;
 		}
 
-		cf_warning(AS_INFO, "sindex-delete: 'indexname' %s not unique - found %u matches - rename(s) required",
+		cf_warning(AS_INFO,
+				"sindex-delete: 'indexname' %s not unique - found %u matches - rename(s) required",
 				fsk.index_name, fsk.n_name_matches);
 		as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
 				"'indexname' is not unique");
@@ -654,7 +685,7 @@ as_sindex_manager_sindex_exists(struct as_info_cmd_args_s* args)
 
 	char index_name_str[INAME_MAX_SZ];
 	int index_name_len = sizeof(index_name_str);
-	info_param_result rv = as_info_parameter_get(params, "indexname", 
+	info_param_result rv = as_info_parameter_get(params, "indexname",
 			index_name_str, &index_name_len);
 
 	rv = as_info_required_param_is_ok(db, "indexname", index_name_str, rv);
@@ -673,8 +704,8 @@ as_sindex_manager_sindex_exists(struct as_info_cmd_args_s* args)
 		return;
 	}
 
-	cf_dyn_buf_append_string(db, sindex_exists(ns, index_name_str) ?
-			"true" : "false");
+	cf_dyn_buf_append_string(db,
+			sindex_exists(ns, index_name_str) ? "true" : "false");
 }
 
 bool
@@ -701,7 +732,7 @@ as_sindex_manager_stats_str(as_namespace* ns, char* iname, cf_dyn_buf* db)
 	SINDEX_GRUNLOCK();
 
 	as_set* p_set = as_namespace_get_set_by_id(ns, set_id);
-	
+
 	return as_set_index_stats_str(ns, p_set, db);
 }
 
@@ -713,8 +744,8 @@ sindex_list(as_info_cmd_args* args)
 
 	char ns_str[128];
 	int ns_len = sizeof(ns_str);
-	info_param_result rv = as_info_param_get_namespace_ns(params, ns_str, 
-			&ns_len);
+	info_param_result rv =
+			as_info_param_get_namespace_ns(params, ns_str, &ns_len);
 	as_namespace* ns = NULL;
 
 	rv = info_param_optional_local_namespace_is_ok(db, ns_str, &ns, rv);
@@ -804,8 +835,8 @@ set_index_list(as_info_cmd_args* args)
 
 	char ns_str[128];
 	int ns_len = sizeof(ns_str);
-	info_param_result rv = as_info_param_get_namespace_ns(params, ns_str, 
-			&ns_len);
+	info_param_result rv =
+			as_info_param_get_namespace_ns(params, ns_str, &ns_len);
 	as_namespace* ns = NULL;
 
 	rv = info_param_optional_local_namespace_is_ok(db, ns_str, &ns, rv);
@@ -836,7 +867,7 @@ as_sindex_manager_list_str(struct as_info_cmd_args_s* args)
 }
 
 void
-as_sindex_manager_handle_smd_item(const as_smd_item* item, 
+as_sindex_manager_handle_smd_item(const as_smd_item* item,
 		as_smd_accept_type accept_type)
 {
 	as_sindex_def def = { 0 };
@@ -846,8 +877,8 @@ as_sindex_manager_handle_smd_item(const as_smd_item* item,
 	}
 
 	if (item->value != NULL) {
-		as_sindex_manager_smd_create(&def, accept_type == 
-				AS_SMD_ACCEPT_OPT_START);
+		as_sindex_manager_smd_create(&def,
+				accept_type == AS_SMD_ACCEPT_OPT_START);
 	}
 	else {
 		as_sindex_manager_smd_drop(&def);
@@ -857,7 +888,7 @@ as_sindex_manager_handle_smd_item(const as_smd_item* item,
 }
 
 void
-as_sindex_manager_smd_accept_cb(const cf_vector* items, 
+as_sindex_manager_smd_accept_cb(const cf_vector* items,
 		as_smd_accept_type accept_type)
 {
 	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
@@ -890,7 +921,7 @@ as_sindex_manager_smd_drop(as_sindex_def* def)
 }
 
 bool
-as_sindex_manager_smd_item_to_def(const char* smd_key, const char* smd_value, 
+as_sindex_manager_smd_item_to_def(const char* smd_key, const char* smd_value,
 		as_sindex_def* def)
 {
 	const char* read = smd_key;
@@ -905,7 +936,7 @@ as_sindex_manager_smd_item_to_def(const char* smd_key, const char* smd_value,
 	def->ns = as_namespace_get_bybuf((const uint8_t*)read, ns_name_len);
 
 	if (def->ns == NULL) {
-		cf_detail(AS_SINDEX, "skipping invalid namespace %.*s", ns_name_len, 
+		cf_detail(AS_SINDEX, "skipping invalid namespace %.*s", ns_name_len,
 				read);
 		return false;
 	}
@@ -984,7 +1015,8 @@ as_sindex_manager_smd_item_to_def(const char* smd_key, const char* smd_value,
 		}
 		else if (*read == 'e') {
 			if (bin_name_len != 0) {
-				cf_warning(AS_SINDEX, "smd - both bin name and expression specified");
+				cf_warning(AS_SINDEX,
+						"smd - both bin name and expression specified");
 				return false;
 			}
 
@@ -1069,7 +1101,7 @@ as_sindex_manager_smd_item_to_def(const char* smd_key, const char* smd_value,
 			cf_warning(AS_SINDEX, "smd - iname too long");
 			return false;
 		}
-		
+
 		strcpy(def->iname, smd_value);
 	}
 
@@ -1163,8 +1195,8 @@ as_si_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name,
 }
 
 cf_ll*
-as_si_list_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name,
-		const uint8_t* exp_buf, uint32_t exp_buf_sz)
+as_si_list_by_defn(const as_namespace* ns, uint16_t set_id,
+		const char* bin_name, const uint8_t* exp_buf, uint32_t exp_buf_sz)
 {
 	defn_hash_key key = { .set_id = set_id };
 
@@ -1176,7 +1208,6 @@ as_si_list_by_defn(const as_namespace* ns, uint16_t set_id, const char* bin_name
 
 	return si_ll;
 }
-
 
 //==========================================================
 // Local helpers.
@@ -1310,8 +1341,8 @@ defn_hash_destroy_cb(cf_ll_element* ele)
 }
 
 static bool
-compare_buf(const uint8_t* buf1, uint32_t buf1_sz,
-		const uint8_t* buf2, uint32_t buf2_sz)
+compare_buf(const uint8_t* buf1, uint32_t buf1_sz, const uint8_t* buf2,
+		uint32_t buf2_sz)
 {
 	if (buf1 == NULL && buf2 == NULL) {
 		return true;
@@ -1358,34 +1389,36 @@ def_free(as_sindex_def* def)
 }
 
 static void
-build_smd_key(const char* ns_name, const char* set_name,
-		const char* bin_name, const char* cdt_ctx, const char* exp,
-		as_sindex_type itype, as_particle_type ktype, char* smd_key)
+build_smd_key(const char* ns_name, const char* set_name, const char* bin_name,
+		const char* cdt_ctx, const char* exp, as_sindex_type itype,
+		as_particle_type ktype, char* smd_key)
 {
 	if (itype == AS_SINDEX_ITYPE_SET) {
-		// For set index: 
+		// For set index:
 		// ns|set|S
 
-		sprintf(smd_key, "%s|%s|%c", ns_name,
-				set_name != NULL ? set_name : "",
+		sprintf(smd_key, "%s|%s|%c", ns_name, set_name != NULL ? set_name : "",
 				itype_to_smd_char(itype));
-	} else {
+	}
+	else {
 		// ns-name|<set-name>|bin-name|itype|ktype
 		// ns-name|<set-name>|bin-name|c<base64>|itype|ktype
 		// ns-name|<set-name>||e<base64>|itype|ktype
 
-		sprintf(smd_key, "%s|%s|%s%s%s|%c|%c",
-			ns_name,
-			set_name != NULL ? set_name : "",
-			// "" is illegal as a bin-name for si's & XDR bin shipping.
-			bin_name != NULL ? bin_name : "",
-			// 'e' prefix makes node reject entries with exp on downgrade.
-			// 'c' prefix makes node reject entries with ctx on downgrade.
-			exp != NULL ? "|e" : cdt_ctx != NULL ? "|c" : "",
-			exp != NULL ? exp : cdt_ctx != NULL ? cdt_ctx : "",
-			// |e and |c can't conflict with itype.
-			itype_to_smd_char(itype),
-			ktype_to_smd_char(ktype));
+		sprintf(smd_key, "%s|%s|%s%s%s|%c|%c", ns_name,
+				set_name != NULL ? set_name : "",
+				// "" is illegal as a bin-name for si's & XDR bin shipping.
+				bin_name != NULL ? bin_name : "",
+				// 'e' prefix makes node reject entries with exp on downgrade.
+				// 'c' prefix makes node reject entries with ctx on downgrade.
+				exp != NULL				  ? "|e"
+						: cdt_ctx != NULL ? "|c"
+										  : "",
+				exp != NULL				  ? exp
+						: cdt_ctx != NULL ? cdt_ctx
+										  : "",
+				// |e and |c can't conflict with itype.
+				itype_to_smd_char(itype), ktype_to_smd_char(ktype));
 	}
 }
 
@@ -1393,11 +1426,16 @@ static as_sindex_type
 itype_from_smd_char(char c)
 {
 	switch (c) {
-	case '.': return AS_SINDEX_ITYPE_DEFAULT;
-	case 'L': return AS_SINDEX_ITYPE_LIST;
-	case 'K': return AS_SINDEX_ITYPE_MAPKEYS;
-	case 'V': return AS_SINDEX_ITYPE_MAPVALUES;
-	case 'S': return AS_SINDEX_ITYPE_SET;
+	case '.':
+		return AS_SINDEX_ITYPE_DEFAULT;
+	case 'L':
+		return AS_SINDEX_ITYPE_LIST;
+	case 'K':
+		return AS_SINDEX_ITYPE_MAPKEYS;
+	case 'V':
+		return AS_SINDEX_ITYPE_MAPVALUES;
+	case 'S':
+		return AS_SINDEX_ITYPE_SET;
 	default:
 		cf_warning(AS_SINDEX, "invalid smd type %c", c);
 		return AS_SINDEX_N_ITYPES;
@@ -1408,26 +1446,34 @@ static as_particle_type
 ktype_from_smd_char(char c)
 {
 	switch (c) {
-	case 'I': return AS_PARTICLE_TYPE_INTEGER;
-	case 'S': return AS_PARTICLE_TYPE_STRING;
-	case 'B': return AS_PARTICLE_TYPE_BLOB;
-	case 'G': return AS_PARTICLE_TYPE_GEOJSON;
+	case 'I':
+		return AS_PARTICLE_TYPE_INTEGER;
+	case 'S':
+		return AS_PARTICLE_TYPE_STRING;
+	case 'B':
+		return AS_PARTICLE_TYPE_BLOB;
+	case 'G':
+		return AS_PARTICLE_TYPE_GEOJSON;
 	default:
 		cf_warning(AS_SINDEX, "invalid smd ktype %c", c);
 		return AS_PARTICLE_TYPE_BAD;
 	}
 }
 
-
 static char
 itype_to_smd_char(as_sindex_type itype)
 {
 	switch (itype) {
-	case AS_SINDEX_ITYPE_DEFAULT: return '.';
-	case AS_SINDEX_ITYPE_LIST: return 'L';
-	case AS_SINDEX_ITYPE_MAPKEYS: return 'K';
-	case AS_SINDEX_ITYPE_MAPVALUES: return 'V';
-	case AS_SINDEX_ITYPE_SET: return 'S';
+	case AS_SINDEX_ITYPE_DEFAULT:
+		return '.';
+	case AS_SINDEX_ITYPE_LIST:
+		return 'L';
+	case AS_SINDEX_ITYPE_MAPKEYS:
+		return 'K';
+	case AS_SINDEX_ITYPE_MAPVALUES:
+		return 'V';
+	case AS_SINDEX_ITYPE_SET:
+		return 'S';
 	default:
 		cf_crash(AS_SINDEX, "invalid type %d", itype);
 	}
@@ -1438,10 +1484,14 @@ static char
 ktype_to_smd_char(as_particle_type ktype)
 {
 	switch (ktype) {
-	case AS_PARTICLE_TYPE_INTEGER: return 'I';
-	case AS_PARTICLE_TYPE_STRING: return 'S';
-	case AS_PARTICLE_TYPE_BLOB: return 'B';
-	case AS_PARTICLE_TYPE_GEOJSON: return 'G';
+	case AS_PARTICLE_TYPE_INTEGER:
+		return 'I';
+	case AS_PARTICLE_TYPE_STRING:
+		return 'S';
+	case AS_PARTICLE_TYPE_BLOB:
+		return 'B';
+	case AS_PARTICLE_TYPE_GEOJSON:
+		return 'G';
 	default:
 		cf_crash(AS_SINDEX, "invalid ktype %d", ktype);
 	}

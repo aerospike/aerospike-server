@@ -43,7 +43,6 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -51,17 +50,14 @@
 typedef void (*action_t)(int sig, siginfo_t* info, void* ctx);
 
 // Use our own - sys_siglist[] deprecated in glibc 2.31.
-static const char* const signal_str[] = {
-	[SIGINT] = "INT",
+static const char* const signal_str[] = { [SIGINT] = "INT",
 	[SIGQUIT] = "QUIT",
 	[SIGILL] = "ILL",
 	[SIGABRT] = "ABRT",
 	[SIGBUS] = "BUS",
 	[SIGFPE] = "FPE",
 	[SIGUSR1] = "USR1",
-	[SIGSEGV] = "SEGV"
-};
-
+	[SIGSEGV] = "SEGV" };
 
 //==========================================================
 // Globals.
@@ -70,7 +66,6 @@ static const char* const signal_str[] = {
 // The mutex that the main function deadlocks on after starting the service.
 extern pthread_mutex_t g_main_deadlock;
 extern bool g_startup_complete;
-
 
 //==========================================================
 // Forward declarations.
@@ -89,7 +84,6 @@ static void log_siginfo(const siginfo_t* info);
 static const char* siginfo_code_str(const siginfo_t* info);
 static void log_stack_trace(void* ctx);
 static void log_memory(void* ctx);
-
 
 //==========================================================
 // Public API.
@@ -116,7 +110,6 @@ as_signal_setup(void)
 	// write() call will return with a normal error which we can handle.
 	set_handler(SIGPIPE, SIG_IGN);
 }
-
 
 //==========================================================
 // Local helpers - set signal handlers.
@@ -155,7 +148,6 @@ set_handler(int sig_num, sighandler_t hand)
 		_exit(1);
 	}
 }
-
 
 //==========================================================
 // Local helpers - signal handlers.
@@ -236,7 +228,6 @@ sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 	pthread_mutex_unlock(&g_main_deadlock);
 }
 
-
 //==========================================================
 // Local helpers - logging.
 //
@@ -244,7 +235,8 @@ sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 static void
 log_abort(int sig_num)
 {
-	cf_log_version(CF_WARNING, AS_AS, "SIG%s received, aborting", signal_str[sig_num]);
+	cf_log_version(CF_WARNING, AS_AS, "SIG%s received, aborting",
+			signal_str[sig_num]);
 }
 
 static void
@@ -264,8 +256,8 @@ log_siginfo(const siginfo_t* info)
 		at += sprintf(at, " si_uid %d si_pid %u", info->si_uid, info->si_pid);
 	}
 
-	if (info->si_signo == SIGBUS && (info->si_code == BUS_MCEERR_AR ||
-			info->si_code == BUS_MCEERR_AO)) {
+	if (info->si_signo == SIGBUS &&
+			(info->si_code == BUS_MCEERR_AR || info->si_code == BUS_MCEERR_AO)) {
 		at += sprintf(at, " si_addr_lsb 0x%04x", info->si_addr_lsb);
 	}
 
@@ -283,29 +275,24 @@ siginfo_code_str(const siginfo_t* info)
 	// Strings placed corresponding to the numeric value of the constant. See:
 	// https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/siginfo.h
 	static const char* const cs_all[] = { "SI_USER", "SI_QUEUE", "SI_TIMER",
-			"SI_MESGQ", "SI_ASYNCIO", "SI_SIGIO", "SI_TKILL" };
+		"SI_MESGQ", "SI_ASYNCIO", "SI_SIGIO", "SI_TKILL" };
 	static const char* const cs_ill[] = { 0, "ILL_ILLOPC", "ILL_ILLOPN",
-			"ILL_ILLADR", "ILL_ILLTRP", "ILL_PRVOPC", "ILL_COPROC",
-			"ILL_BADSTK", "ILL_BADIADDR" };
+		"ILL_ILLADR", "ILL_ILLTRP", "ILL_PRVOPC", "ILL_COPROC", "ILL_BADSTK",
+		"ILL_BADIADDR" };
 	static const char* const cs_bus[] = { 0, "BUS_ADRALN", "BUS_ADRERR",
-			"BUS_OBJERR", "BUS_MCEERR_AR", "BUS_MCEERR_AO" };
+		"BUS_OBJERR", "BUS_MCEERR_AR", "BUS_MCEERR_AO" };
 	static const char* const cs_fpe[] = { 0, "FPE_INTDIV", "FPE_INTOVF",
-			"FPE_FLTDIV", "FPE_FLTOVF", "FPE_FLTUND", "FPE_FLTRES",
-			"FPE_FLTINV", "FPE_FLTSUB" };
+		"FPE_FLTDIV", "FPE_FLTOVF", "FPE_FLTUND", "FPE_FLTRES", "FPE_FLTINV",
+		"FPE_FLTSUB" };
 	static const char* const cs_segv[] = { 0, "SEGV_MAPERR", "SEGV_ACCERR",
-			"SEGV_BNDERR", "SEGV_PKUERR" };
+		"SEGV_BNDERR", "SEGV_PKUERR" };
 	static const char* const* sig_cs[] = {
-			[SIGILL] = cs_ill,
-			[SIGBUS] = cs_bus,
-			[SIGFPE] = cs_fpe,
-			[SIGSEGV] = cs_segv
+		[SIGILL] = cs_ill, [SIGBUS] = cs_bus, [SIGFPE] = cs_fpe, [SIGSEGV] = cs_segv
 	};
-	static const int32_t cs_len[] = {
-			[SIGILL] = sizeof(cs_ill) / sizeof(char*),
-			[SIGBUS] = sizeof(cs_bus) / sizeof(char*),
-			[SIGFPE] = sizeof(cs_fpe) / sizeof(char*),
-			[SIGSEGV] = sizeof(cs_segv) / sizeof(char*)
-	};
+	static const int32_t cs_len[] = { [SIGILL] = sizeof(cs_ill) / sizeof(char*),
+		[SIGBUS] = sizeof(cs_bus) / sizeof(char*),
+		[SIGFPE] = sizeof(cs_fpe) / sizeof(char*),
+		[SIGSEGV] = sizeof(cs_segv) / sizeof(char*) };
 
 	if (info->si_code == SI_KERNEL) {
 		return "SI_KERNEL";
@@ -314,8 +301,8 @@ siginfo_code_str(const siginfo_t* info)
 	if (info->si_code <= 0) {
 		int32_t code = -info->si_code;
 
-		return code < (int32_t)(sizeof(cs_all) / sizeof(char*)) ?
-				cs_all[code] : "(unimpl)";
+		return code < (int32_t)(sizeof(cs_all) / sizeof(char*)) ? cs_all[code]
+																: "(unimpl)";
 	}
 
 	if (info->si_signo == SIGILL || info->si_signo == SIGBUS ||
@@ -342,14 +329,14 @@ log_stack_trace(void* ctx)
 	uint64_t* gregs = (uint64_t*)&mc->gregs[0];
 
 	sprintf(reg_str,
-		"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx "
-		"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx "
-		"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx",
-		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
-		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
-		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
-		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15],
-		gregs[REG_RIP]);
+			"rax %016lx rbx %016lx rcx %016lx rdx %016lx rsi %016lx rdi %016lx "
+			"rbp %016lx rsp %016lx r8 %016lx r9 %016lx r10 %016lx r11 %016lx "
+			"r12 %016lx r13 %016lx r14 %016lx r15 %016lx rip %016lx",
+			gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
+			gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
+			gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
+			gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15],
+			gregs[REG_RIP]);
 #elif defined __aarch64__
 	uint64_t fault = (uint64_t)mc->fault_address;
 	uint64_t* regs = (uint64_t*)&mc->regs[0];
@@ -399,29 +386,24 @@ log_memory(void* ctx)
 #if defined __x86_64__
 	uint64_t* gregs = (uint64_t*)&mc->gregs[0];
 
-	static const char* names[16] = {
-		"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9",
-		"r10", "r11", "r12", "r13", "r14", "r15"
-	};
+	static const char* names[16] = { "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+		"rbp", "rsp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15" };
 
-	uint64_t values[16] = {
-		gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX], gregs[REG_RDX],
-		gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP], gregs[REG_RSP],
-		gregs[REG_R8], gregs[REG_R9], gregs[REG_R10], gregs[REG_R11],
-		gregs[REG_R12], gregs[REG_R13], gregs[REG_R14], gregs[REG_R15]
-	};
+	uint64_t values[16] = { gregs[REG_RAX], gregs[REG_RBX], gregs[REG_RCX],
+		gregs[REG_RDX], gregs[REG_RSI], gregs[REG_RDI], gregs[REG_RBP],
+		gregs[REG_RSP], gregs[REG_R8], gregs[REG_R9], gregs[REG_R10],
+		gregs[REG_R11], gregs[REG_R12], gregs[REG_R13], gregs[REG_R14],
+		gregs[REG_R15] };
 
 	uint32_t n_regs = 16;
 #elif defined __aarch64__
 	uint64_t* regs = (uint64_t*)&mc->regs[0];
 	uint64_t sp = (uint64_t)mc->sp;
 
-	static const char* names[32] = {
-		"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10",
-		"x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20",
-		"x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30",
-		"x31"
-	};
+	static const char* names[32] = { "x0", "x1", "x2", "x3", "x4", "x5", "x6",
+		"x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16",
+		"x17", "x18", "x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26",
+		"x27", "x28", "x29", "x30", "x31" };
 
 	uint64_t values[32];
 
@@ -455,6 +437,6 @@ log_memory(void* ctx)
 		}
 
 		cf_warning(AS_AS, "stacktrace: memory %s 0x%lx%s", names[i],
-			(uint64_t)p, buf);
+				(uint64_t)p, buf);
 	}
 }

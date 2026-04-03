@@ -54,7 +54,6 @@
 #include "transaction/udf.h"
 #include "transaction/write.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -69,14 +68,14 @@ typedef struct bins_old_new_s {
 	uint16_t n_new_bins;
 } bins_old_new;
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static uint32_t eval_and_populate_sbin(as_exp_ctx* ctx, as_sindex* si, as_sindex_bin* sbins, as_sindex_op op);
-static uint32_t update_sindex_exp(bins_old_new* old_new, as_bin** match_bins, uint32_t n_match_bins,  as_sindex_bin* sbins, bool* record_in_sindex_r);
-
+static uint32_t eval_and_populate_sbin(as_exp_ctx* ctx, as_sindex* si,
+		as_sindex_bin* sbins, as_sindex_op op);
+static uint32_t update_sindex_exp(bins_old_new* old_new, as_bin** match_bins,
+		uint32_t n_match_bins, as_sindex_bin* sbins, bool* record_in_sindex_r);
 
 //==========================================================
 // Public API.
@@ -113,7 +112,7 @@ send_rw_messages(rw_request* rw)
 		msg_incr_ref(rw->dest_msg);
 
 		if (as_fabric_send(rw->dest_nodes[i], rw->dest_msg,
-				AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
+					AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(rw->dest_msg);
 			rw->xmit_ms = 0; // force a retransmit on next cycle
 		}
@@ -127,7 +126,7 @@ send_rw_messages_forget(rw_request* rw)
 		msg_incr_ref(rw->dest_msg);
 
 		if (as_fabric_send(rw->dest_nodes[i], rw->dest_msg,
-				AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
+					AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(rw->dest_msg);
 		}
 	}
@@ -160,7 +159,7 @@ set_name_check(const as_transaction* tr, const as_record* r)
 			set_name[msg_set_name_len] != 0) {
 		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
 				set_name == NULL ? "(null)" : set_name, msg_set_name_len,
-						f->data, msg_set_name_len, &tr->keyd);
+				f->data, msg_set_name_len, &tr->keyd);
 		return false;
 	}
 
@@ -191,8 +190,9 @@ set_name_check_on_update(const as_transaction* tr, as_record* r)
 	as_namespace* ns = tr->rsv.ns;
 	const char* set_name = as_index_get_set_name(r, ns);
 
-	as_msg_field* f = as_transaction_has_set(tr) ?
-			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
+	as_msg_field* f = as_transaction_has_set(tr)
+			? as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET)
+			: NULL;
 
 	uint32_t msg_set_name_len = f != NULL ? as_msg_field_get_value_sz(f) : 0;
 
@@ -216,7 +216,7 @@ set_name_check_on_update(const as_transaction* tr, as_record* r)
 			set_name[msg_set_name_len] != 0) {
 		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
 				set_name ? set_name : "(null)", msg_set_name_len,
-						(const char*)f->data, msg_set_name_len, &tr->keyd);
+				(const char*)f->data, msg_set_name_len, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -229,8 +229,8 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 	switch (tr->origin) {
 	case FROM_BATCH:
 		if (as_transaction_has_predexp(tr)) {
-			as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-					AS_MSG_FIELD_TYPE_PREDEXP);
+			as_msg_field* f =
+					as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 			if ((*exp = as_exp_filter_build(f, false)) == NULL) {
 				return AS_ERR_PARAMETER;
 			}
@@ -250,8 +250,8 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 			*exp = NULL;
 			return AS_OK;
 		}
-		as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-				AS_MSG_FIELD_TYPE_PREDEXP);
+		as_msg_field* f =
+				as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 		if ((*exp = as_exp_filter_build(f, false)) == NULL) {
 			return AS_ERR_PARAMETER;
 		}
@@ -414,8 +414,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 	*error_code = 0;
 
 	switch (op->op) {
-	case AS_MSG_OP_READ:
-	{
+	case AS_MSG_OP_READ: {
 		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
 
 		if (b) {
@@ -438,8 +437,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 
 		return READ_OP_RESULT_NOT_FOUND;
 	}
-	case AS_MSG_OP_BITS_READ:
-	{
+	case AS_MSG_OP_BITS_READ: {
 		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
 
 		if (b) {
@@ -449,7 +447,8 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			*error_code = as_bin_bits_read_from_client(b, op, rb);
 
 			if (*error_code < 0) {
-				cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_bits_read_from_client() %pD",
+				cf_detail(AS_RW,
+						"{%s} process_bin_read_op: failed as_bin_bits_read_from_client() %pD",
 						ns->name, &rd->r->keyd);
 				return READ_OP_RESULT_ERROR;
 			}
@@ -471,8 +470,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 
 		return READ_OP_RESULT_NOT_FOUND;
 	}
-	case AS_MSG_OP_HLL_READ:
-	{
+	case AS_MSG_OP_HLL_READ: {
 		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
 
 		if (b) {
@@ -482,7 +480,8 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			*error_code = as_bin_hll_read_from_client(b, op, rb);
 
 			if (*error_code < 0) {
-				cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_hll_read_from_client() %pD",
+				cf_detail(AS_RW,
+						"{%s} process_bin_read_op: failed as_bin_hll_read_from_client() %pD",
 						ns->name, &rd->r->keyd);
 				return READ_OP_RESULT_ERROR;
 			}
@@ -504,8 +503,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 
 		return READ_OP_RESULT_NOT_FOUND;
 	}
-	case AS_MSG_OP_CDT_READ:
-	{
+	case AS_MSG_OP_CDT_READ: {
 		as_bin* b = as_bin_get_live_w_len(rd, op->name, op->name_sz);
 
 		if (b) {
@@ -515,7 +513,8 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 			*error_code = as_bin_cdt_read_from_client(b, op, rb);
 
 			if (*error_code < 0) {
-				cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_cdt_read_from_client() %pD",
+				cf_detail(AS_RW,
+						"{%s} process_bin_read_op: failed as_bin_cdt_read_from_client() %pD",
 						ns->name, &rd->r->keyd);
 				return READ_OP_RESULT_ERROR;
 			}
@@ -537,8 +536,7 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 
 		return READ_OP_RESULT_NOT_FOUND;
 	}
-	case AS_MSG_OP_EXP_READ:
-	{
+	case AS_MSG_OP_EXP_READ: {
 		const as_exp_ctx exp_ctx = { .ns = ns, .rd = rd, .r = rd->r };
 
 		as_bin* rb = &result_bins[*p_n_result_bins];
@@ -547,7 +545,8 @@ process_bin_read_op(as_storage_rd* rd, as_msg_op* op, bool respond_all_ops,
 		*error_code = as_bin_exp_read_from_client(&exp_ctx, op, rb);
 
 		if (*error_code < 0) {
-			cf_detail(AS_RW, "{%s} process_bin_read_op: failed as_bin_exp_read_from_client() %pD",
+			cf_detail(AS_RW,
+					"{%s} process_bin_read_op: failed as_bin_exp_read_from_client() %pD",
 					ns->name, &rd->r->keyd);
 			return READ_OP_RESULT_ERROR;
 		}
@@ -639,7 +638,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 
 		if (found) {
 			if (as_bin_get_particle_type(b_old) !=
-					as_bin_get_particle_type(b_new) ||
+							as_bin_get_particle_type(b_new) ||
 					b_old->particle != b_new->particle) {
 				n_populated += as_sindex_populate_sbins(ns, set_id, b_old,
 						&sbins[n_populated], AS_SINDEX_OP_DELETE);
@@ -695,14 +694,12 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 		n_populated += n;
 	}
 
-	bins_old_new old_new = {
-			.ns = ns,
-			.r = r,
-			.old_bins = old_bins,
-			.n_old_bins = n_old_bins,
-			.new_bins = new_bins,
-			.n_new_bins = n_new_bins
-	};
+	bins_old_new old_new = { .ns = ns,
+		.r = r,
+		.old_bins = old_bins,
+		.n_old_bins = n_old_bins,
+		.new_bins = new_bins,
+		.n_new_bins = n_new_bins };
 
 	n_populated += update_sindex_exp(&old_new, changed_bins, n_changed_bins,
 			&sbins[n_populated], &record_in_sindex);
@@ -801,10 +798,7 @@ remove_from_sindex_bins(as_namespace* ns, as_index_ref* r_ref, as_bin* bins,
 	}
 
 	bins_old_new old_new = {
-			.ns = ns,
-			.r = r,
-			.old_bins = bins,
-			.n_old_bins = n_bins
+		.ns = ns, .r = r, .old_bins = bins, .n_old_bins = n_bins
 	};
 
 	n_populated += update_sindex_exp(&old_new, changed_bins, n_changed_bins,
@@ -820,7 +814,6 @@ remove_from_sindex_bins(as_namespace* ns, as_index_ref* r_ref, as_bin* bins,
 	// Unmark record for sindex after deletion.
 	as_index_clear_in_sindex(r);
 }
-
 
 //==========================================================
 // Local helpers.
@@ -858,24 +851,12 @@ update_sindex_exp(bins_old_new* old_new, as_bin** match_bins,
 	as_record* r = old_new->r;
 
 	// Fake eval_rd for exp evaluation.
-	as_storage_rd eval_old_rd = {
-			.bins = old_new->old_bins,
-			.n_bins = old_new->n_old_bins
-	};
-	as_exp_ctx ctx_old_rd = {
-			.ns = ns,
-			.r = r,
-			.rd = &eval_old_rd
-	};
-	as_storage_rd eval_new_rd = {
-			.bins = old_new->new_bins,
-			.n_bins = old_new->n_new_bins
-	};
-	as_exp_ctx ctx_new_rd = {
-			.ns = ns,
-			.r = r,
-			.rd = &eval_new_rd
-	};
+	as_storage_rd eval_old_rd = { .bins = old_new->old_bins,
+		.n_bins = old_new->n_old_bins };
+	as_exp_ctx ctx_old_rd = { .ns = ns, .r = r, .rd = &eval_old_rd };
+	as_storage_rd eval_new_rd = { .bins = old_new->new_bins,
+		.n_bins = old_new->n_new_bins };
+	as_exp_ctx ctx_new_rd = { .ns = ns, .r = r, .rd = &eval_new_rd };
 	uint32_t n_populated = 0;
 
 	for (uint32_t si_ix = 0; si_ix < MAX_N_SINDEXES; si_ix++) {
@@ -901,7 +882,8 @@ update_sindex_exp(bins_old_new* old_new, as_bin** match_bins,
 		}
 
 		for (uint32_t b_ix = 0; b_ix < exp_bcount && ! matched; b_ix++) {
-			as_bin_info* exp_bin_info = (as_bin_info*)cf_vector_getp(exp_binfos, b_ix);
+			as_bin_info* exp_bin_info =
+					(as_bin_info*)cf_vector_getp(exp_binfos, b_ix);
 
 			for (uint32_t c_ix = 0; c_ix < n_match_bins; c_ix++) {
 				if (strcmp(match_bins[c_ix]->name, exp_bin_info->name) == 0) {
@@ -924,14 +906,10 @@ update_sindex_exp(bins_old_new* old_new, as_bin** match_bins,
 
 			as_sindex_bin dummy_sbin;
 
-			as_exp_ctx dummy_ctx = {
-				.ns = ns,
-				.r = old_new->r,
-				.rd = NULL
-			};
+			as_exp_ctx dummy_ctx = { .ns = ns, .r = old_new->r, .rd = NULL };
 
-			uint32_t n = eval_and_populate_sbin(&dummy_ctx, si,
-					&dummy_sbin, AS_SINDEX_OP_INSERT);
+			uint32_t n = eval_and_populate_sbin(&dummy_ctx, si, &dummy_sbin,
+					AS_SINDEX_OP_INSERT);
 
 			if (n != 0) {
 				*record_in_sindex_r = true;

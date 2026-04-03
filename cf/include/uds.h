@@ -30,7 +30,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -39,11 +38,11 @@ typedef struct cf_uds_s {
 	int32_t fd;
 } cf_uds;
 
-
 //==========================================================
 // Public API.
 //
 
 bool cf_uds_connect(const char* path, cf_uds* sock);
-int32_t cf_uds_send_all(cf_uds* sock, const void* buf, size_t size, int32_t flags);
+int32_t cf_uds_send_all(cf_uds* sock, const void* buf, size_t size,
+		int32_t flags);
 int32_t cf_uds_recv_all(cf_uds* sock, void* buf, size_t size, int32_t flags);

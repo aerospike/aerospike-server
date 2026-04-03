@@ -35,7 +35,6 @@
 #include "base/transaction.h"
 #include "transaction/proxy.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -49,8 +48,8 @@ as_mrt_verify_read_start(as_transaction* tr)
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
-				tr->generation, tr->void_time, NULL, NULL, 0, tr->rsv.ns, NULL);
+		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
+				tr->void_time, NULL, NULL, 0, tr->rsv.ns, NULL);
 		break;
 	case FROM_PROXY:
 		as_proxy_send_response(tr->from.proxy_orig->node,

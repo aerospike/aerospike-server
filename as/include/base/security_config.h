@@ -25,7 +25,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -52,43 +51,42 @@ typedef enum {
 
 // Security configuration.
 typedef struct as_sec_config_s {
-	bool				security_configured;			// indirect config
-	char*				default_password_file;
-	bool				quotas_enabled;
-	uint32_t			privilege_refresh_period;	// (seconds)
-	uint32_t			session_ttl;				// (seconds)
-	uint32_t			tps_weight;
+	bool security_configured; // indirect config
+	char* default_password_file;
+	bool quotas_enabled;
+	uint32_t privilege_refresh_period; // (seconds)
+	uint32_t session_ttl; // (seconds)
+	uint32_t tps_weight;
 
 	// LDAP scope configuration.
-	bool				ldap_configured;				// indirect config
-	bool 				ldap_tls_disabled;
-	uint32_t			n_ldap_login_threads;
-	uint32_t			ldap_polling_period;		// (seconds)
-	char*				ldap_query_base_dn;
-	char*				ldap_query_user_dn;
-	char*				ldap_query_user_password_file;
-	char* 				ldap_role_query_base_dn;
-	char*				ldap_role_query_patterns[MAX_ROLE_QUERY_PATTERNS + 1];
-	bool				ldap_role_query_search_ou;
-	char*				ldap_server;
-	char*				ldap_tls_ca_file;			// set unless tls disabled
-	as_sec_ldap_evp_md	ldap_token_hash_method;
-	char*				ldap_user_dn_pattern;
-	char*				ldap_user_query_pattern;
+	bool ldap_configured; // indirect config
+	bool ldap_tls_disabled;
+	uint32_t n_ldap_login_threads;
+	uint32_t ldap_polling_period; // (seconds)
+	char* ldap_query_base_dn;
+	char* ldap_query_user_dn;
+	char* ldap_query_user_password_file;
+	char* ldap_role_query_base_dn;
+	char* ldap_role_query_patterns[MAX_ROLE_QUERY_PATTERNS + 1];
+	bool ldap_role_query_search_ou;
+	char* ldap_server;
+	char* ldap_tls_ca_file; // set unless tls disabled
+	as_sec_ldap_evp_md ldap_token_hash_method;
+	char* ldap_user_dn_pattern;
+	char* ldap_user_query_pattern;
 
 	// log scope configuration.
-	as_sec_report		report;
+	as_sec_report report;
 } as_sec_config;
 
-#define PRIVILEGE_REFRESH_PERIOD_MIN	10
-#define PRIVILEGE_REFRESH_PERIOD_MAX	(60 * 60 * 24)
-#define TPS_WEIGHT_MIN					2
-#define TPS_WEIGHT_MAX					20
+#define PRIVILEGE_REFRESH_PERIOD_MIN 10
+#define PRIVILEGE_REFRESH_PERIOD_MAX (60 * 60 * 24)
+#define TPS_WEIGHT_MIN 2
+#define TPS_WEIGHT_MAX 20
 
-#define LDAP_POLLING_PERIOD_MAX			(60 * 60 * 24)
-#define SECURITY_SESSION_TTL_MIN		120
-#define SECURITY_SESSION_TTL_MAX		(60 * 60 * 24 * 10)
-
+#define LDAP_POLLING_PERIOD_MAX (60 * 60 * 24)
+#define SECURITY_SESSION_TTL_MIN 120
+#define SECURITY_SESSION_TTL_MAX (60 * 60 * 24 * 10)
 
 //==========================================================
 // Public API.

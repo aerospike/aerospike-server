@@ -47,17 +47,15 @@
 
 //#include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef struct rlist_ele_s {
-	cf_arenax_handle r_h: 40;
-} __attribute__ ((__packed__)) rlist_ele;
+	cf_arenax_handle r_h : 40;
+} __attribute__((__packed__)) rlist_ele;
 
 #define THROTTLE_THRESHOLD (64 * 1024 * 1024)
-
 
 //==========================================================
 // Forward declarations.
@@ -65,7 +63,6 @@ typedef struct rlist_ele_s {
 
 static void gc_ns_cycle(as_namespace* ns);
 static void gc_ns(as_namespace* ns);
-
 
 //==========================================================
 // Public API.
@@ -161,7 +158,6 @@ as_sindex_gc_tree(as_namespace* ns, as_index_tree* tree)
 
 	cf_mutex_unlock(&ns->si_gc_list_mutex);
 }
-
 
 //==========================================================
 // Local helpers.

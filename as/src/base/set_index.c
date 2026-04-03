@@ -36,9 +36,9 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "arenax.h"
-#include "dynbuf.h"
 #include "cf_mutex.h"
 #include "cf_thread.h"
+#include "dynbuf.h"
 #include "log.h"
 #include "shash.h"
 #include "vmapx.h"
@@ -52,7 +52,6 @@
 #include "transaction/rw_utils.h"
 
 //#include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -89,7 +88,6 @@ typedef struct populate_cb_info_s {
 #define STAGE_CAPACITY (1 << ELE_ID_N_BITS) // 256
 #define STAGE_SIZE (STAGE_CAPACITY * ELE_SIZE) // 4K
 
-
 //==========================================================
 // Globals.
 //
@@ -97,7 +95,6 @@ typedef struct populate_cb_info_s {
 cf_mutex g_balance_lock = CF_MUTEX_INIT;
 
 static cf_queue g_populate_q;
-
 
 //==========================================================
 // Forward declarations.
@@ -113,20 +110,28 @@ static bool populate_reduce_cb(as_index_ref* r_ref, void* udata);
 
 static inline as_set_index_tree* stree_create(void);
 static inline void stree_destroy(as_set_index_tree* stree);
-static inline as_set_index_tree* stree_reserve(as_index_tree* tree, uint16_t set_id);
+static inline as_set_index_tree* stree_reserve(as_index_tree* tree,
+		uint16_t set_id);
 static inline void stree_release(as_set_index_tree* stree);
 
-static inline void ssi_from_keyd(as_index_tree* tree, as_set_index_tree* stree, const cf_digest* keyd, ssprig_info* ssi);
+static inline void ssi_from_keyd(as_index_tree* tree, as_set_index_tree* stree,
+		const cf_digest* keyd, ssprig_info* ssi);
 static inline uint32_t ssprig_i_from_keyd(const cf_digest* keyd);
 static inline uint32_t stub_from_keyd(const cf_digest* keyd);
-static inline void ssri_from_ssprig_i(as_index_tree* tree, as_set_index_tree* stree, const cf_digest* keyd, uint32_t keyd_stub, uint32_t ssprig_i, ssprig_reduce_info* ssri);
+static inline void ssri_from_ssprig_i(as_index_tree* tree,
+		as_set_index_tree* stree, const cf_digest* keyd, uint32_t keyd_stub,
+		uint32_t ssprig_i, ssprig_reduce_info* ssri);
 
 static void ssprig_delete(ssprig_info* ssi);
-static bool ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata);
-static void ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h, as_index_ph_array* ph_a);
+static bool ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb,
+		void* udata);
+static void ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h,
+		as_index_ph_array* ph_a);
 
-static void insert_rebalance(ssprig_info* ssi, index_ele* root_parent, stack_ele* ele);
-static void delete_rebalance(ssprig_info* ssi, index_ele* root_parent, stack_ele* ele);
+static void insert_rebalance(ssprig_info* ssi, index_ele* root_parent,
+		stack_ele* ele);
+static void delete_rebalance(ssprig_info* ssi, index_ele* root_parent,
+		stack_ele* ele);
 static void rotate_left(stack_ele* a, stack_ele* b);
 static void rotate_right(stack_ele* a, stack_ele* b);
 
@@ -139,7 +144,6 @@ static void uarena_destroy(uarena* ua);
 static void uarena_add_stage(uarena* ua);
 static uarena_handle uarena_alloc(uarena* ua);
 static void uarena_free(uarena* ua, uarena_handle h);
-
 
 //==========================================================
 // Inlines & macros.
@@ -157,7 +161,6 @@ uarena_set_handle(uarena_handle* h, uint32_t stage_id, uint32_t ele_id)
 	*h = (stage_id << ELE_ID_N_BITS) | ele_id;
 }
 
-
 //==========================================================
 // Public API - startup.
 //
@@ -169,7 +172,6 @@ as_set_index_start(void)
 
 	cf_thread_create_detached(run_populate_q, NULL);
 }
-
 
 //==========================================================
 // Public API - set-index tree lifecycle.
@@ -236,7 +238,6 @@ as_set_index_balance_unlock(void)
 {
 	cf_mutex_unlock(&g_balance_lock);
 }
-
 
 //==========================================================
 // Public API - transactions.
@@ -352,7 +353,6 @@ as_set_index_reduce(as_namespace* ns, as_index_tree* tree, uint16_t set_id,
 	return true;
 }
 
-
 //==========================================================
 // Public API - info & stats.
 //
@@ -366,8 +366,8 @@ smd_set_index_create(as_sindex_def* def)
 	as_sindex* cur_si = as_si_by_iname(ns, def->iname);
 
 	if (cur_si != NULL) {
-		cf_warning(AS_SINDEX, "SINDEX CREATE: iname already in use - ignoring %s",
-				def->iname);
+		cf_warning(AS_SINDEX,
+				"SINDEX CREATE: iname already in use - ignoring %s", def->iname);
 		SINDEX_GWUNLOCK();
 		return;
 	}
@@ -375,28 +375,28 @@ smd_set_index_create(as_sindex_def* def)
 	as_set* p_set = NULL;
 	uint16_t set_id = INVALID_SET_ID;
 
-	if (def->set_name[0] != '\0' && as_namespace_get_create_set_w_len(ns,
-		def->set_name, strlen(def->set_name), &p_set, &set_id) != 0) {
+	if (def->set_name[0] != '\0' &&
+			as_namespace_get_create_set_w_len(ns, def->set_name,
+					strlen(def->set_name), &p_set, &set_id) != 0) {
 		cf_warning(AS_SINDEX, "SINDEX CREATE: failed get-create set %s",
-			def->set_name);
+				def->set_name);
 		SINDEX_GWUNLOCK();
 		return;
 	}
 
-	if ((cur_si = as_si_by_defn(ns, set_id, def->bin_name, def->ktype, def->itype,
-		NULL, 0, NULL, 0))
-		!= NULL) {
+	if ((cur_si = as_si_by_defn(ns, set_id, def->bin_name, def->ktype,
+				 def->itype, NULL, 0, NULL, 0)) != NULL) {
 		cf_info(AS_SINDEX, "SINDEX CREATE: renaming %s to %s", cur_si->iname,
-			def->iname);
+				def->iname);
 		as_rename_sindex(cur_si, def->iname);
 		SINDEX_GWUNLOCK();
 		return;
 	}
 
 	cf_info(AS_SINDEX, "SINDEX CREATE: request received for %s:%s via smd",
-		ns->name, def->iname);
+			ns->name, def->iname);
 
-	// Not cf_rc_malloc - si does not protect set index (set_tree does it). 
+	// Not cf_rc_malloc - si does not protect set index (set_tree does it).
 	as_sindex* si = cf_malloc(sizeof(as_sindex));
 
 	memset(si, 0, sizeof(as_sindex));
@@ -415,8 +415,8 @@ smd_set_index_create(as_sindex_def* def)
 	SINDEX_GWUNLOCK();
 
 	bool rv = as_set_index_enable(ns, p_set, set_id, AS_SET_INDEX_SMD);
-	
-	cf_assert(rv, AS_SINDEX, "SINDEX CREATE: failed to enable set index %s:%s", 
+
+	cf_assert(rv, AS_SINDEX, "SINDEX CREATE: failed to enable set index %s:%s",
 			ns->name, def->iname);
 }
 
@@ -437,8 +437,8 @@ smd_set_index_drop(as_sindex_def* def)
 	as_set* p_set = as_namespace_get_set_by_id(ns, set_id);
 
 	if (p_set->index_enabled == AS_SET_INDEX_NONE) {
-		cf_info(AS_SINDEX, "SINDEX DROP: already disabled for %s:%s",
-				ns->name, def->set_name);
+		cf_info(AS_SINDEX, "SINDEX DROP: already disabled for %s:%s", ns->name,
+				def->set_name);
 		SINDEX_GWUNLOCK();
 		return;
 	}
@@ -453,7 +453,7 @@ smd_set_index_drop(as_sindex_def* def)
 	}
 
 	cf_info(AS_SINDEX, "SINDEX DROP: request received for %s:%s via smd",
-		ns->name, def->set_name);
+			ns->name, def->set_name);
 
 	as_delete_sindex(si);
 	cf_free(si); // not cf_rc_malloc - can free immediately
@@ -476,14 +476,15 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id,
 	// Ensure either rebalance or this call creates the strees.
 	cf_mutex_lock(&g_balance_lock);
 
- 	as_set_index_mode curr_way = (as_set_index_mode)p_set->index_enabled;
+	as_set_index_mode curr_way = (as_set_index_mode)p_set->index_enabled;
 
 	if (curr_way != AS_SET_INDEX_NONE) {
 		char* curr_way_str = curr_way == AS_SET_INDEX_SMD ? "smd" : "config";
 		char* new_way_str = new_way == AS_SET_INDEX_SMD ? "smd" : "config";
 
 		if (curr_way == AS_SET_INDEX_CONFIG && new_way == AS_SET_INDEX_SMD) {
-			cf_info(AS_SINDEX, "changing creation mode of set index for %s:%s from %s to %s",
+			cf_info(AS_SINDEX,
+					"changing creation mode of set index for %s:%s from %s to %s",
 					ns->name, p_set->name, curr_way_str, new_way_str);
 			p_set->index_enabled = AS_SET_INDEX_SMD;
 			cf_mutex_unlock(&g_balance_lock);
@@ -491,13 +492,14 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id,
 		}
 
 		if (curr_way == AS_SET_INDEX_SMD && new_way == AS_SET_INDEX_CONFIG) {
-			cf_warning(AS_SINDEX, "set index enabled via %s for %s:%s - cannot enable via %s",
+			cf_warning(AS_SINDEX,
+					"set index enabled via %s for %s:%s - cannot enable via %s",
 					curr_way_str, ns->name, p_set->name, new_way_str);
 			cf_mutex_unlock(&g_balance_lock);
 			return false;
 		}
 
-		cf_info(AS_SINDEX, "set index already enabled via %s for %s:%s", 
+		cf_info(AS_SINDEX, "set index already enabled via %s for %s:%s",
 				curr_way_str, ns->name, p_set->name);
 		cf_mutex_unlock(&g_balance_lock);
 		return true;
@@ -524,11 +526,7 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id,
 		return true;
 	}
 
-	populate_info popi = {
-			.ns = ns,
-			.p_set = p_set,
-			.set_id = set_id
-	};
+	populate_info popi = { .ns = ns, .p_set = p_set, .set_id = set_id };
 
 	cf_queue_push(&g_populate_q, &popi);
 
@@ -550,23 +548,24 @@ as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id,
 	as_set_index_mode curr_way = (as_set_index_mode)p_set->index_enabled;
 
 	if (curr_way == AS_SET_INDEX_NONE) {
-		cf_warning(AS_SINDEX, "set index already disabled for %s:%s",
-				ns->name, p_set->name);
+		cf_warning(AS_SINDEX, "set index already disabled for %s:%s", ns->name,
+				p_set->name);
 		cf_mutex_unlock(&g_balance_lock);
 		return true;
 	}
-		
+
 	char* curr_way_str = curr_way == AS_SET_INDEX_SMD ? "smd" : "config";
 	char* new_way_str = new_way == AS_SET_INDEX_SMD ? "smd" : "config";
 
 	if (curr_way != new_way) {
-		cf_warning(AS_SINDEX, "set index enabled via %s for %s:%s - cannot disable via %s",
-			curr_way_str, ns->name, p_set->name, new_way_str);
+		cf_warning(AS_SINDEX,
+				"set index enabled via %s for %s:%s - cannot disable via %s",
+				curr_way_str, ns->name, p_set->name, new_way_str);
 		cf_mutex_unlock(&g_balance_lock);
 		return false;
 	}
 
-	p_set->index_enabled = AS_SET_INDEX_NONE;	
+	p_set->index_enabled = AS_SET_INDEX_NONE;
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition_destroy_set_index(ns, pid, set_id);
@@ -586,8 +585,7 @@ as_set_index_disable(as_namespace* ns, as_set* p_set, uint16_t set_id,
 }
 
 bool
-as_set_index_stats_str(const as_namespace* ns, const as_set* p_set, 
-		cf_dyn_buf* db)
+as_set_index_stats_str(const as_namespace* ns, const as_set* p_set, cf_dyn_buf* db)
 {
 	info_append_uint64(db, "entries", p_set->n_objects);
 	info_append_uint64(db, "used_bytes", as_set_index_used_bytes(ns));
@@ -619,7 +617,6 @@ as_set_index_used_bytes(const as_namespace* ns)
 
 	return n_objects * sizeof(index_ele);
 }
-
 
 //==========================================================
 // Local helpers - configuration.
@@ -660,10 +657,8 @@ is_set_populated(const as_namespace* ns, uint16_t set_id)
 		cf_crash(AS_SINDEX, "failed to get set index %u from vmap", set_ix);
 	}
 
-	return as_load_uint8_acq(&p_set->index_enabled) 
-			&& ! p_set->index_populating;
+	return as_load_uint8_acq(&p_set->index_enabled) && ! p_set->index_populating;
 }
-
 
 //==========================================================
 // Local helpers - population.
@@ -738,13 +733,11 @@ run_populate(void* udata)
 			break;
 		}
 
-		populate_cb_info cbi = {
-				.ns = popi->ns,
-				.p_set = popi->p_set,
-				.set_id = popi->set_id,
-				.tree = rsv.tree,
-				.stree = stree
-		};
+		populate_cb_info cbi = { .ns = popi->ns,
+			.p_set = popi->p_set,
+			.set_id = popi->set_id,
+			.tree = rsv.tree,
+			.stree = stree };
 
 		if (! as_index_reduce(rsv.tree, populate_reduce_cb, &cbi)) {
 			stree_release(stree);
@@ -797,7 +790,6 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - as_set_index_tree lifecycle.
 //
@@ -844,7 +836,6 @@ stree_release(as_set_index_tree* stree)
 	}
 }
 
-
 //==========================================================
 // Local helpers - sprig parameter utilities.
 //
@@ -859,8 +850,7 @@ ssi_from_keyd(as_index_tree* tree, as_set_index_tree* stree,
 	uint32_t bits = (((uint32_t)keyd->digest[1] & 0xF0) << 23) |
 			((uint32_t)keyd->digest[2] << 19) |
 			((uint32_t)keyd->digest[3] << 11) |
-			((uint32_t)keyd->digest[4] << 3) |
-			((uint32_t)keyd->digest[5] >> 5);
+			((uint32_t)keyd->digest[4] << 3) | ((uint32_t)keyd->digest[5] >> 5);
 
 	uint32_t ssprig_i = bits >> 23;
 
@@ -877,8 +867,7 @@ ssprig_i_from_keyd(const cf_digest* keyd)
 	// Get the 8 most significant non-pid bits in the digest. Note - this is
 	// hardwired around the way we currently extract the 12-bit partition-ID
 	// from the digest.
-	return ((uint32_t)keyd->digest[1] & 0xF0) |
-			((uint32_t)keyd->digest[2] >> 4);
+	return ((uint32_t)keyd->digest[1] & 0xF0) | ((uint32_t)keyd->digest[2] >> 4);
 }
 
 static inline uint32_t
@@ -889,8 +878,7 @@ stub_from_keyd(const cf_digest* keyd)
 	// from the digest.
 	return (((uint32_t)keyd->digest[2] & 0x0F) << 19) |
 			((uint32_t)keyd->digest[3] << 11) |
-			((uint32_t)keyd->digest[4] << 3) |
-			((uint32_t)keyd->digest[5] >> 5);
+			((uint32_t)keyd->digest[4] << 3) | ((uint32_t)keyd->digest[5] >> 5);
 }
 
 static inline void
@@ -911,7 +899,6 @@ ssri_from_ssprig_i(as_index_tree* tree, as_set_index_tree* stree,
 	ssri->olock = &(tree_locks(tree) + ssprig_i)->lock;
 }
 
-
 //==========================================================
 // Local helpers - red-black sprigs.
 //
@@ -925,13 +912,11 @@ ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 		uarena_handle n_h = uarena_alloc(ssi->ua);
 		index_ele* n = UA_RESOLVE(n_h);
 
-		*n = (index_ele){
-				.key_r_h = key_r_h,
-				.keyd_stub = ssi->keyd_stub,
-				.color = BLACK,
-				.left_h = SENTINEL_H,
-				.right_h = SENTINEL_H
-		};
+		*n = (index_ele){ .key_r_h = key_r_h,
+			.keyd_stub = ssi->keyd_stub,
+			.color = BLACK,
+			.left_h = SENTINEL_H,
+			.right_h = SENTINEL_H };
 
 		*ssi->root = n_h;
 
@@ -967,7 +952,7 @@ ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 		ele->me = t;
 
 		// TODO - is this a bad idea given our index-ele size & arenas?
-//		_mm_prefetch(t, _MM_HINT_NTA);
+		//		_mm_prefetch(t, _MM_HINT_NTA);
 
 		if ((cmp = ssprig_ele_cmp(ssi, t)) == 0) {
 			return false; // element already exists
@@ -985,13 +970,11 @@ ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 	uarena_handle n_h = uarena_alloc(ssi->ua);
 	index_ele* n = UA_RESOLVE(n_h);
 
-	*n = (index_ele){
-			.key_r_h = key_r_h,
-			.keyd_stub = ssi->keyd_stub,
-			.color = RED,
-			.left_h = SENTINEL_H,
-			.right_h = SENTINEL_H
-	};
+	*n = (index_ele){ .key_r_h = key_r_h,
+		.keyd_stub = ssi->keyd_stub,
+		.color = RED,
+		.left_h = SENTINEL_H,
+		.right_h = SENTINEL_H };
 
 	// Insert the new element n under parent ele.
 	if (ele->me == &root_parent || 0 < cmp) {
@@ -1047,7 +1030,7 @@ ssprig_delete(ssprig_info* ssi)
 		ele->me_h = r_h;
 		ele->me = r;
 
-//		_mm_prefetch(r, _MM_HINT_NTA);
+		//		_mm_prefetch(r, _MM_HINT_NTA);
 
 		int cmp = ssprig_ele_cmp(ssi, r);
 
@@ -1151,9 +1134,7 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 
 	as_index_ph stack_phs[MAX_STACK_PHS];
 	as_index_ph_array ph_a = {
-			.is_stack = true,
-			.capacity = MAX_STACK_PHS,
-			.phs = stack_phs
+		.is_stack = true, .capacity = MAX_STACK_PHS, .phs = stack_phs
 	};
 
 	// Traverse just fills array, then we make callbacks afterwards.
@@ -1165,11 +1146,7 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 
 	for (uint32_t i = 0; i < ph_a.n_used; i++) {
 		as_index_ph* ph = &ph_a.phs[i];
-		as_index_ref r_ref = {
-				.r = ph->r,
-				.r_h = ph->r_h,
-				.olock = ssri->olock
-		};
+		as_index_ref r_ref = { .r = ph->r, .r_h = ph->r_h, .olock = ssri->olock };
 
 		cf_mutex_lock(r_ref.olock);
 
@@ -1252,7 +1229,6 @@ ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h,
 
 	ssprig_traverse(ssri, r->right_h, ph_a);
 }
-
 
 //==========================================================
 // Local helpers - red-black sprig utilities.
@@ -1560,7 +1536,6 @@ rotate_right(stack_ele* a, stack_ele* b)
 	b->me->right_h = a->me_h;
 	a->parent = b;
 }
-
 
 //==========================================================
 // uarena API.

@@ -65,7 +65,6 @@
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -115,7 +114,6 @@ void log_line_special_errors(as_namespace* ns);
 void dump_global_histograms();
 void dump_namespace_histograms(as_namespace* ns);
 
-
 //==========================================================
 // Public API.
 //
@@ -125,7 +123,6 @@ as_ticker_start()
 {
 	cf_thread_create_detached(run_ticker, NULL);
 }
-
 
 //==========================================================
 // Local helpers.
@@ -170,9 +167,7 @@ log_ticker_frame(uint64_t delta_time)
 	as_config_cluster_name_get(cluster_name);
 
 	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u CLUSTER-NAME %s",
-			g_config.self_node,
-			as_exchange_cluster_size(),
-			cluster_name);
+			g_config.self_node, as_exchange_cluster_size(), cluster_name);
 
 	log_line_clock();
 	log_line_system();
@@ -240,12 +235,10 @@ log_line_clock()
 		cf_dyn_buf_append_char(&outliers_db, 0);
 
 		cf_info(AS_INFO, "   cluster-clock: skew-ms %lu outliers (%s)",
-				as_skew_monitor_skew(),
-				outliers_db.buf);
+				as_skew_monitor_skew(), outliers_db.buf);
 	}
 	else {
-		cf_info(AS_INFO, "   cluster-clock: skew-ms %lu",
-				as_skew_monitor_skew());
+		cf_info(AS_INFO, "   cluster-clock: skew-ms %lu", as_skew_monitor_skew());
 	}
 
 	cf_dyn_buf_free(&outliers_db);
@@ -266,18 +259,14 @@ log_line_system()
 	uint64_t host_free_mem_kbytes;
 	uint32_t host_free_mem_pct;
 
-	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct, &host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
+	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct,
+			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
 
-	cf_info(AS_INFO, "   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d thp-mem-kbytes %lu host-free-mem-kbytes %lu host-free-mem-pct %d",
-		user_pct + kernel_pct,
-		user_pct,
-		kernel_pct,
-		free_mem_kbytes,
-		free_mem_pct,
-		thp_mem_kbytes,
-		host_free_mem_kbytes,
-		host_free_mem_pct);
-
+	cf_info(AS_INFO,
+			"   system: total-cpu-pct %u user-cpu-pct %u kernel-cpu-pct %u free-mem-kbytes %lu free-mem-pct %d thp-mem-kbytes %lu host-free-mem-kbytes %lu host-free-mem-pct %d",
+			user_pct + kernel_pct, user_pct, kernel_pct, free_mem_kbytes,
+			free_mem_pct, thp_mem_kbytes, host_free_mem_kbytes,
+			host_free_mem_pct);
 }
 
 void
@@ -295,21 +284,20 @@ log_line_process()
 	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
 			&efficiency_pct, NULL);
 
-	cf_info(AS_INFO, "   process: cpu-pct %u threads (%u,%u,%u,%u) heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
-			process_cpu(),
-			ts.n_joinable, ts.n_detached, ts.n_pool_total, ts.n_pool_active,
-			allocated_kbytes, active_kbytes, mapped_kbytes,
+	cf_info(AS_INFO,
+			"   process: cpu-pct %u threads (%u,%u,%u,%u) heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
+			process_cpu(), ts.n_joinable, ts.n_detached, ts.n_pool_total,
+			ts.n_pool_active, allocated_kbytes, active_kbytes, mapped_kbytes,
 			efficiency_pct);
 }
 
 void
 log_line_in_progress()
 {
-	cf_info(AS_INFO, "   in-progress: info-q %u rw-hash %u proxy-hash %u tree-gc-q %u long-queries %u",
-			as_info_queue_get_size(),
-			rw_request_hash_count(),
-			as_proxy_hash_count(),
-			as_index_tree_gc_queue_size(),
+	cf_info(AS_INFO,
+			"   in-progress: info-q %u rw-hash %u proxy-hash %u tree-gc-q %u long-queries %u",
+			as_info_queue_get_size(), rw_request_hash_count(),
+			as_proxy_hash_count(), as_index_tree_gc_queue_size(),
 			as_query_manager_get_active_job_count());
 }
 
@@ -317,30 +305,40 @@ void
 log_line_fds()
 {
 	// Read closed before opened.
-	uint64_t n_proto_fds_closed = as_load_uint64(&g_stats.proto_connections_closed);
-	uint64_t n_hb_fds_closed = as_load_uint64(&g_stats.heartbeat_connections_closed);
-	uint64_t n_fabric_fds_closed = as_load_uint64(&g_stats.fabric_connections_closed);
+	uint64_t n_proto_fds_closed =
+			as_load_uint64(&g_stats.proto_connections_closed);
+	uint64_t n_hb_fds_closed =
+			as_load_uint64(&g_stats.heartbeat_connections_closed);
+	uint64_t n_fabric_fds_closed =
+			as_load_uint64(&g_stats.fabric_connections_closed);
 	// TODO - ARM TSO plugin - will need barrier.
-	uint64_t n_proto_fds_opened = as_load_uint64(&g_stats.proto_connections_opened);
-	uint64_t n_hb_fds_opened = as_load_uint64(&g_stats.heartbeat_connections_opened);
-	uint64_t n_fabric_fds_opened = as_load_uint64(&g_stats.fabric_connections_opened);
+	uint64_t n_proto_fds_opened =
+			as_load_uint64(&g_stats.proto_connections_opened);
+	uint64_t n_hb_fds_opened =
+			as_load_uint64(&g_stats.heartbeat_connections_opened);
+	uint64_t n_fabric_fds_opened =
+			as_load_uint64(&g_stats.fabric_connections_opened);
 
 	uint64_t n_proto_fds_open = n_proto_fds_opened - n_proto_fds_closed;
 	uint64_t n_hb_fds_open = n_hb_fds_opened - n_hb_fds_closed;
 	uint64_t n_fabric_fds_open = n_fabric_fds_opened - n_fabric_fds_closed;
 
 	if (g_admin_bind.n_cfgs == 0) {
-		cf_info(AS_INFO, "   fds: proto (%lu,%lu,%lu) heartbeat (%lu,%lu,%lu) fabric (%lu,%lu,%lu)",
+		cf_info(AS_INFO,
+				"   fds: proto (%lu,%lu,%lu) heartbeat (%lu,%lu,%lu) fabric (%lu,%lu,%lu)",
 				n_proto_fds_open, n_proto_fds_opened, n_proto_fds_closed,
 				n_hb_fds_open, n_hb_fds_opened, n_hb_fds_closed,
 				n_fabric_fds_open, n_fabric_fds_opened, n_fabric_fds_closed);
 	}
 	else {
-		uint64_t n_admin_fds_closed = as_load_uint64(&g_stats.admin_connections_closed);
-		uint64_t n_admin_fds_opened = as_load_uint64(&g_stats.admin_connections_opened);
+		uint64_t n_admin_fds_closed =
+				as_load_uint64(&g_stats.admin_connections_closed);
+		uint64_t n_admin_fds_opened =
+				as_load_uint64(&g_stats.admin_connections_opened);
 		uint64_t n_admin_fds_open = n_admin_fds_opened - n_admin_fds_closed;
 
-		cf_info(AS_INFO, "   fds: proto (%lu,%lu,%lu) heartbeat (%lu,%lu,%lu) fabric (%lu,%lu,%lu) admin (%lu,%lu,%lu)",
+		cf_info(AS_INFO,
+				"   fds: proto (%lu,%lu,%lu) heartbeat (%lu,%lu,%lu) fabric (%lu,%lu,%lu) admin (%lu,%lu,%lu)",
 				n_proto_fds_open, n_proto_fds_opened, n_proto_fds_closed,
 				n_hb_fds_open, n_hb_fds_opened, n_hb_fds_closed,
 				n_fabric_fds_open, n_fabric_fds_opened, n_fabric_fds_closed,
@@ -377,7 +375,8 @@ log_fabric_rate(uint64_t delta_time)
 	g_stats.fabric_rw_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_RW] / dt_sec;
 	g_stats.fabric_rw_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_RW] / dt_sec;
 
-	cf_info(AS_INFO, "   fabric-bytes-per-second: bulk (%lu,%lu) ctrl (%lu,%lu) meta (%lu,%lu) rw (%lu,%lu)",
+	cf_info(AS_INFO,
+			"   fabric-bytes-per-second: bulk (%lu,%lu) ctrl (%lu,%lu) meta (%lu,%lu) rw (%lu,%lu)",
 			g_stats.fabric_bulk_s_rate, g_stats.fabric_bulk_r_rate,
 			g_stats.fabric_ctrl_s_rate, g_stats.fabric_ctrl_r_rate,
 			g_stats.fabric_meta_s_rate, g_stats.fabric_meta_r_rate,
@@ -390,19 +389,17 @@ log_line_early_fail()
 	uint64_t n_demarshal = as_load_uint64(&g_stats.n_demarshal_error);
 	uint64_t n_tsvc_client = as_load_uint64(&g_stats.n_tsvc_client_error);
 	uint64_t n_tsvc_from_proxy = as_load_uint64(&g_stats.n_tsvc_from_proxy_error);
-	uint64_t n_tsvc_from_proxy_batch_sub = as_load_uint64(&g_stats.n_tsvc_from_proxy_batch_sub_error);
+	uint64_t n_tsvc_from_proxy_batch_sub =
+			as_load_uint64(&g_stats.n_tsvc_from_proxy_batch_sub_error);
 
-	if ((n_demarshal |
-			n_tsvc_client |
-			n_tsvc_from_proxy |
-			n_tsvc_from_proxy_batch_sub) == 0) {
+	if ((n_demarshal | n_tsvc_client | n_tsvc_from_proxy |
+				n_tsvc_from_proxy_batch_sub) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-from-proxy %lu tsvc-from-proxy-batch-sub %lu",
-			n_demarshal,
-			n_tsvc_client,
-			n_tsvc_from_proxy,
+	cf_info(AS_INFO,
+			"   early-fail: demarshal %lu tsvc-client %lu tsvc-from-proxy %lu tsvc-from-proxy-batch-sub %lu",
+			n_demarshal, n_tsvc_client, n_tsvc_from_proxy,
 			n_tsvc_from_proxy_batch_sub);
 }
 
@@ -419,8 +416,7 @@ log_line_batch_index()
 	}
 
 	cf_info(AS_INFO, "   batch-index: batches (%lu,%lu,%lu) delays %lu",
-			n_complete, n_error, n_timeout,
-			n_delay);
+			n_complete, n_error, n_timeout, n_delay);
 }
 
 void
@@ -428,33 +424,24 @@ log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp)
 {
 	// TODO - show if all 0's ???
 	cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu non-replica %lu",
-			ns->name,
-			n_objects,
-			mp->n_master_objects,
-			mp->n_prole_objects,
+			ns->name, n_objects, mp->n_master_objects, mp->n_prole_objects,
 			mp->n_non_replica_objects);
 }
 
 void
 log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 {
-	if ((n_tombstones |
-			ns->n_xdr_tombstones |
-			ns->n_xdr_bin_cemeteries |
-			mp->n_master_tombstones |
-			mp->n_prole_tombstones |
-			mp->n_non_replica_tombstones) == 0) {
+	if ((n_tombstones | ns->n_xdr_tombstones | ns->n_xdr_bin_cemeteries |
+				mp->n_master_tombstones | mp->n_prole_tombstones |
+				mp->n_non_replica_tombstones) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} tombstones: all %lu xdr (%lu,%lu) master %lu prole %lu non-replica %lu",
-			ns->name,
-			n_tombstones,
-			ns->n_xdr_tombstones,
-			ns->n_xdr_bin_cemeteries,
-			mp->n_master_tombstones,
-			mp->n_prole_tombstones,
-			mp->n_non_replica_tombstones);
+	cf_info(AS_INFO,
+			"{%s} tombstones: all %lu xdr (%lu,%lu) master %lu prole %lu non-replica %lu",
+			ns->name, n_tombstones, ns->n_xdr_tombstones,
+			ns->n_xdr_bin_cemeteries, mp->n_master_tombstones,
+			mp->n_prole_tombstones, mp->n_non_replica_tombstones);
 }
 
 void
@@ -466,8 +453,7 @@ log_line_appeals(as_namespace* ns)
 
 	if (remaining_tx != 0 || active_tx != 0 || active_rx != 0) {
 		cf_info(AS_INFO, "{%s} appeals: remaining-tx %lu active (%lu,%lu)",
-				ns->name,
-				remaining_tx, active_tx, active_rx);
+				ns->name, remaining_tx, active_tx, active_rx);
 	}
 }
 
@@ -484,10 +470,11 @@ log_line_migrations(as_namespace* ns)
 	if (initial != 0 && remaining != 0) {
 		float complete_pct = (1 - ((float)remaining / (float)initial)) * 100;
 
-		cf_info(AS_INFO, "{%s} migrations: remaining (%lu,%lu,%lu) active (%lu,%lu,%lu) complete-pct %.2f",
-				ns->name,
-				remaining_tx, remaining_rx, ns->migrate_signals_remaining,
-				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active, ns->migrate_signals_active,
+		cf_info(AS_INFO,
+				"{%s} migrations: remaining (%lu,%lu,%lu) active (%lu,%lu,%lu) complete-pct %.2f",
+				ns->name, remaining_tx, remaining_rx,
+				ns->migrate_signals_remaining, ns->migrate_tx_partitions_active,
+				ns->migrate_rx_partitions_active, ns->migrate_signals_active,
 				complete_pct);
 	}
 	else {
@@ -504,26 +491,19 @@ log_line_index_usage(as_namespace* ns, uint64_t n_records)
 		uint64_t used_pct = used_sz * 100 / ns->pi_mounts_budget;
 
 		cf_info(AS_INFO, "{%s} index-usage: used-bytes %lu used-pct %lu",
-				ns->name,
-				used_sz,
-				used_pct);
+				ns->name, used_sz, used_pct);
 	}
 	else if (ns->pi_xmem_type == CF_XMEM_TYPE_FLASH) {
 		uint64_t used_pct = used_sz * 100 / ns->pi_mounts_budget;
 		uint64_t alloc_sz = as_load_uint64(&ns->arena->alloc_sz);
 		uint64_t alloc_pct = alloc_sz * 100 / ns->pi_mounts_budget;
 
-		cf_info(AS_INFO, "{%s} index-usage: used-bytes %lu used-pct %lu alloc-bytes %lu alloc-pct %lu",
-				ns->name,
-				used_sz,
-				used_pct,
-				alloc_sz,
-				alloc_pct);
+		cf_info(AS_INFO,
+				"{%s} index-usage: used-bytes %lu used-pct %lu alloc-bytes %lu alloc-pct %lu",
+				ns->name, used_sz, used_pct, alloc_sz, alloc_pct);
 	}
 	else { // CE (RAM) or CF_XMEM_TYPE_SHMEM
-		cf_info(AS_INFO, "{%s} index-usage: used-bytes %lu",
-				ns->name,
-				used_sz);
+		cf_info(AS_INFO, "{%s} index-usage: used-bytes %lu", ns->name, used_sz);
 	}
 }
 
@@ -536,9 +516,7 @@ log_line_set_index_usage(as_namespace* ns)
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} set-index-usage: used-bytes %lu",
-			ns->name,
-			used_sz);
+	cf_info(AS_INFO, "{%s} set-index-usage: used-bytes %lu", ns->name, used_sz);
 }
 
 void
@@ -554,14 +532,10 @@ log_line_sindex_usage(as_namespace* ns)
 		uint64_t used_pct = used_sz * 100 / ns->si_mounts_budget;
 
 		cf_info(AS_INFO, "{%s} sindex-usage: used-bytes %lu used-pct %lu",
-				ns->name,
-				used_sz,
-				used_pct);
+				ns->name, used_sz, used_pct);
 	}
 	else { // CE (RAM) or CF_XMEM_TYPE_SHMEM
-		cf_info(AS_INFO, "{%s} sindex-usage: used-bytes %lu",
-				ns->name,
-				used_sz);
+		cf_info(AS_INFO, "{%s} sindex-usage: used-bytes %lu", ns->name, used_sz);
 	}
 }
 
@@ -579,21 +553,16 @@ log_line_data_usage(as_namespace* ns)
 		ns->n_reads_from_device = 0;
 		ns->n_reads_from_cache = 0;
 
-		ns->cache_read_pct =
-				(float)(100 * n_reads_from_cache) /
+		ns->cache_read_pct = (float)(100 * n_reads_from_cache) /
 				(float)(n_total_reads == 0 ? 1 : n_total_reads);
 
-		cf_info(AS_INFO, "{%s} data-usage: used-bytes %lu avail-pct %u cache-read-pct %.2f",
-				ns->name,
-				used_bytes,
-				avail_pct,
-				ns->cache_read_pct);
+		cf_info(AS_INFO,
+				"{%s} data-usage: used-bytes %lu avail-pct %u cache-read-pct %.2f",
+				ns->name, used_bytes, avail_pct, ns->cache_read_pct);
 	}
 	else { // memory or pmem
 		cf_info(AS_INFO, "{%s} data-usage: used-bytes %lu avail-pct %u",
-				ns->name,
-				used_bytes,
-				avail_pct);
+				ns->name, used_bytes, avail_pct);
 	}
 }
 
@@ -609,44 +578,53 @@ log_line_client(as_namespace* ns)
 	uint64_t n_read_error = as_load_uint64(&ns->n_client_read_error);
 	uint64_t n_read_timeout = as_load_uint64(&ns->n_client_read_timeout);
 	uint64_t n_read_not_found = as_load_uint64(&ns->n_client_read_not_found);
-	uint64_t n_read_filtered_out = as_load_uint64(&ns->n_client_read_filtered_out);
+	uint64_t n_read_filtered_out =
+			as_load_uint64(&ns->n_client_read_filtered_out);
 	uint64_t n_write_success = as_load_uint64(&ns->n_client_write_success);
 	uint64_t n_write_error = as_load_uint64(&ns->n_client_write_error);
 	uint64_t n_write_timeout = as_load_uint64(&ns->n_client_write_timeout);
-	uint64_t n_write_filtered_out = as_load_uint64(&ns->n_client_write_filtered_out);
+	uint64_t n_write_filtered_out =
+			as_load_uint64(&ns->n_client_write_filtered_out);
 	uint64_t n_delete_success = as_load_uint64(&ns->n_client_delete_success);
 	uint64_t n_delete_error = as_load_uint64(&ns->n_client_delete_error);
 	uint64_t n_delete_timeout = as_load_uint64(&ns->n_client_delete_timeout);
 	uint64_t n_delete_not_found = as_load_uint64(&ns->n_client_delete_not_found);
-	uint64_t n_delete_filtered_out = as_load_uint64(&ns->n_client_delete_filtered_out);
+	uint64_t n_delete_filtered_out =
+			as_load_uint64(&ns->n_client_delete_filtered_out);
 	uint64_t n_udf_complete = as_load_uint64(&ns->n_client_udf_complete);
 	uint64_t n_udf_error = as_load_uint64(&ns->n_client_udf_error);
 	uint64_t n_udf_timeout = as_load_uint64(&ns->n_client_udf_timeout);
 	uint64_t n_udf_filtered_out = as_load_uint64(&ns->n_client_udf_filtered_out);
-	uint64_t n_lang_read_success = as_load_uint64(&ns->n_client_lang_read_success);
-	uint64_t n_lang_write_success = as_load_uint64(&ns->n_client_lang_write_success);
-	uint64_t n_lang_delete_success = as_load_uint64(&ns->n_client_lang_delete_success);
+	uint64_t n_lang_read_success =
+			as_load_uint64(&ns->n_client_lang_read_success);
+	uint64_t n_lang_write_success =
+			as_load_uint64(&ns->n_client_lang_write_success);
+	uint64_t n_lang_delete_success =
+			as_load_uint64(&ns->n_client_lang_delete_success);
 	uint64_t n_lang_error = as_load_uint64(&ns->n_client_lang_error);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_proxy_complete | n_proxy_error | n_proxy_timeout |
-			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out |
-			n_write_success | n_write_error | n_write_timeout | n_write_filtered_out |
-			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
-			n_udf_complete | n_udf_error | n_udf_timeout | n_udf_filtered_out |
-			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_proxy_complete | n_proxy_error |
+				n_proxy_timeout | n_read_success | n_read_error |
+				n_read_timeout | n_read_not_found | n_read_filtered_out |
+				n_write_success | n_write_error | n_write_timeout |
+				n_write_filtered_out | n_delete_success | n_delete_error |
+				n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
+				n_udf_complete | n_udf_error | n_udf_timeout |
+				n_udf_filtered_out | n_lang_read_success | n_lang_write_success |
+				n_lang_delete_success | n_lang_error) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} client: tsvc (%lu,%lu) proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_proxy_complete, n_proxy_error, n_proxy_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
+	cf_info(AS_INFO,
+			"{%s} client: tsvc (%lu,%lu) proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_proxy_complete,
+			n_proxy_error, n_proxy_timeout, n_read_success, n_read_error,
+			n_read_timeout, n_read_not_found, n_read_filtered_out,
 			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
-			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
+			n_delete_success, n_delete_error, n_delete_timeout,
+			n_delete_not_found, n_delete_filtered_out, n_udf_complete,
+			n_udf_error, n_udf_timeout, n_udf_filtered_out, n_lang_read_success,
+			n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
@@ -658,17 +636,19 @@ log_line_xdr_client(as_namespace* ns)
 	uint64_t n_delete_success = as_load_uint64(&ns->n_xdr_client_delete_success);
 	uint64_t n_delete_error = as_load_uint64(&ns->n_xdr_client_delete_error);
 	uint64_t n_delete_timeout = as_load_uint64(&ns->n_xdr_client_delete_timeout);
-	uint64_t n_delete_not_found = as_load_uint64(&ns->n_xdr_client_delete_not_found);
+	uint64_t n_delete_not_found =
+			as_load_uint64(&ns->n_xdr_client_delete_not_found);
 
-	if ((n_write_success | n_write_error | n_write_timeout |
-			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found) == 0) {
+	if ((n_write_success | n_write_error | n_write_timeout | n_delete_success |
+				n_delete_error | n_delete_timeout | n_delete_not_found) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} xdr-client: write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_write_success, n_write_error, n_write_timeout,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found);
+	cf_info(AS_INFO,
+			"{%s} xdr-client: write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu)",
+			ns->name, n_write_success, n_write_error, n_write_timeout,
+			n_delete_success, n_delete_error, n_delete_timeout,
+			n_delete_not_found);
 }
 
 void
@@ -680,64 +660,81 @@ log_line_from_proxy(as_namespace* ns)
 	uint64_t n_read_error = as_load_uint64(&ns->n_from_proxy_read_error);
 	uint64_t n_read_timeout = as_load_uint64(&ns->n_from_proxy_read_timeout);
 	uint64_t n_read_not_found = as_load_uint64(&ns->n_from_proxy_read_not_found);
-	uint64_t n_read_filtered_out = as_load_uint64(&ns->n_from_proxy_read_filtered_out);
+	uint64_t n_read_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_read_filtered_out);
 	uint64_t n_write_success = as_load_uint64(&ns->n_from_proxy_write_success);
 	uint64_t n_write_error = as_load_uint64(&ns->n_from_proxy_write_error);
 	uint64_t n_write_timeout = as_load_uint64(&ns->n_from_proxy_write_timeout);
-	uint64_t n_write_filtered_out = as_load_uint64(&ns->n_from_proxy_write_filtered_out);
+	uint64_t n_write_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_write_filtered_out);
 	uint64_t n_delete_success = as_load_uint64(&ns->n_from_proxy_delete_success);
 	uint64_t n_delete_error = as_load_uint64(&ns->n_from_proxy_delete_error);
 	uint64_t n_delete_timeout = as_load_uint64(&ns->n_from_proxy_delete_timeout);
-	uint64_t n_delete_not_found = as_load_uint64(&ns->n_from_proxy_delete_not_found);
-	uint64_t n_delete_filtered_out = as_load_uint64(&ns->n_from_proxy_delete_filtered_out);
+	uint64_t n_delete_not_found =
+			as_load_uint64(&ns->n_from_proxy_delete_not_found);
+	uint64_t n_delete_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_delete_filtered_out);
 	uint64_t n_udf_complete = as_load_uint64(&ns->n_from_proxy_udf_complete);
 	uint64_t n_udf_error = as_load_uint64(&ns->n_from_proxy_udf_error);
 	uint64_t n_udf_timeout = as_load_uint64(&ns->n_from_proxy_udf_timeout);
-	uint64_t n_udf_filtered_out = as_load_uint64(&ns->n_from_proxy_udf_filtered_out);
-	uint64_t n_lang_read_success = as_load_uint64(&ns->n_from_proxy_lang_read_success);
-	uint64_t n_lang_write_success = as_load_uint64(&ns->n_from_proxy_lang_write_success);
-	uint64_t n_lang_delete_success = as_load_uint64(&ns->n_from_proxy_lang_delete_success);
+	uint64_t n_udf_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_udf_filtered_out);
+	uint64_t n_lang_read_success =
+			as_load_uint64(&ns->n_from_proxy_lang_read_success);
+	uint64_t n_lang_write_success =
+			as_load_uint64(&ns->n_from_proxy_lang_write_success);
+	uint64_t n_lang_delete_success =
+			as_load_uint64(&ns->n_from_proxy_lang_delete_success);
 	uint64_t n_lang_error = as_load_uint64(&ns->n_from_proxy_lang_error);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out |
-			n_write_success | n_write_error | n_write_timeout | n_write_filtered_out |
-			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
-			n_udf_complete | n_udf_error | n_udf_timeout | n_udf_filtered_out |
-			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_read_success | n_read_error |
+				n_read_timeout | n_read_not_found | n_read_filtered_out |
+				n_write_success | n_write_error | n_write_timeout |
+				n_write_filtered_out | n_delete_success | n_delete_error |
+				n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
+				n_udf_complete | n_udf_error | n_udf_timeout |
+				n_udf_filtered_out | n_lang_read_success | n_lang_write_success |
+				n_lang_delete_success | n_lang_error) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} from-proxy: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
+	cf_info(AS_INFO,
+			"{%s} from-proxy: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_read_success,
+			n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
 			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
-			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
+			n_delete_success, n_delete_error, n_delete_timeout,
+			n_delete_not_found, n_delete_filtered_out, n_udf_complete,
+			n_udf_error, n_udf_timeout, n_udf_filtered_out, n_lang_read_success,
+			n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
 log_line_xdr_from_proxy(as_namespace* ns)
 {
-	uint64_t n_write_success = as_load_uint64(&ns->n_xdr_from_proxy_write_success);
+	uint64_t n_write_success =
+			as_load_uint64(&ns->n_xdr_from_proxy_write_success);
 	uint64_t n_write_error = as_load_uint64(&ns->n_xdr_from_proxy_write_error);
-	uint64_t n_write_timeout = as_load_uint64(&ns->n_xdr_from_proxy_write_timeout);
-	uint64_t n_delete_success = as_load_uint64(&ns->n_xdr_from_proxy_delete_success);
+	uint64_t n_write_timeout =
+			as_load_uint64(&ns->n_xdr_from_proxy_write_timeout);
+	uint64_t n_delete_success =
+			as_load_uint64(&ns->n_xdr_from_proxy_delete_success);
 	uint64_t n_delete_error = as_load_uint64(&ns->n_xdr_from_proxy_delete_error);
-	uint64_t n_delete_timeout = as_load_uint64(&ns->n_xdr_from_proxy_delete_timeout);
-	uint64_t n_delete_not_found = as_load_uint64(&ns->n_xdr_from_proxy_delete_not_found);
+	uint64_t n_delete_timeout =
+			as_load_uint64(&ns->n_xdr_from_proxy_delete_timeout);
+	uint64_t n_delete_not_found =
+			as_load_uint64(&ns->n_xdr_from_proxy_delete_not_found);
 
-	if ((n_write_success | n_write_error | n_write_timeout |
-			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found) == 0) {
+	if ((n_write_success | n_write_error | n_write_timeout | n_delete_success |
+				n_delete_error | n_delete_timeout | n_delete_not_found) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} xdr-from-proxy: write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_write_success, n_write_error, n_write_timeout,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found);
+	cf_info(AS_INFO,
+			"{%s} xdr-from-proxy: write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu)",
+			ns->name, n_write_success, n_write_error, n_write_timeout,
+			n_delete_success, n_delete_error, n_delete_timeout,
+			n_delete_not_found);
 }
 
 void
@@ -752,102 +749,145 @@ log_line_batch_sub(as_namespace* ns)
 	uint64_t n_read_error = as_load_uint64(&ns->n_batch_sub_read_error);
 	uint64_t n_read_timeout = as_load_uint64(&ns->n_batch_sub_read_timeout);
 	uint64_t n_read_not_found = as_load_uint64(&ns->n_batch_sub_read_not_found);
-	uint64_t n_read_filtered_out = as_load_uint64(&ns->n_batch_sub_read_filtered_out);
+	uint64_t n_read_filtered_out =
+			as_load_uint64(&ns->n_batch_sub_read_filtered_out);
 	uint64_t n_write_success = as_load_uint64(&ns->n_batch_sub_write_success);
 	uint64_t n_write_error = as_load_uint64(&ns->n_batch_sub_write_error);
 	uint64_t n_write_timeout = as_load_uint64(&ns->n_batch_sub_write_timeout);
-	uint64_t n_write_filtered_out = as_load_uint64(&ns->n_batch_sub_write_filtered_out);
+	uint64_t n_write_filtered_out =
+			as_load_uint64(&ns->n_batch_sub_write_filtered_out);
 	uint64_t n_delete_success = as_load_uint64(&ns->n_batch_sub_delete_success);
 	uint64_t n_delete_error = as_load_uint64(&ns->n_batch_sub_delete_error);
 	uint64_t n_delete_timeout = as_load_uint64(&ns->n_batch_sub_delete_timeout);
-	uint64_t n_delete_not_found = as_load_uint64(&ns->n_batch_sub_delete_not_found);
-	uint64_t n_delete_filtered_out = as_load_uint64(&ns->n_batch_sub_delete_filtered_out);
+	uint64_t n_delete_not_found =
+			as_load_uint64(&ns->n_batch_sub_delete_not_found);
+	uint64_t n_delete_filtered_out =
+			as_load_uint64(&ns->n_batch_sub_delete_filtered_out);
 	uint64_t n_udf_complete = as_load_uint64(&ns->n_batch_sub_udf_complete);
 	uint64_t n_udf_error = as_load_uint64(&ns->n_batch_sub_udf_error);
 	uint64_t n_udf_timeout = as_load_uint64(&ns->n_batch_sub_udf_timeout);
-	uint64_t n_udf_filtered_out = as_load_uint64(&ns->n_batch_sub_udf_filtered_out);
-	uint64_t n_lang_read_success = as_load_uint64(&ns->n_batch_sub_lang_read_success);
-	uint64_t n_lang_write_success = as_load_uint64(&ns->n_batch_sub_lang_write_success);
-	uint64_t n_lang_delete_success = as_load_uint64(&ns->n_batch_sub_lang_delete_success);
+	uint64_t n_udf_filtered_out =
+			as_load_uint64(&ns->n_batch_sub_udf_filtered_out);
+	uint64_t n_lang_read_success =
+			as_load_uint64(&ns->n_batch_sub_lang_read_success);
+	uint64_t n_lang_write_success =
+			as_load_uint64(&ns->n_batch_sub_lang_write_success);
+	uint64_t n_lang_delete_success =
+			as_load_uint64(&ns->n_batch_sub_lang_delete_success);
 	uint64_t n_lang_error = as_load_uint64(&ns->n_batch_sub_lang_error);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_proxy_complete | n_proxy_error | n_proxy_timeout |
-			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out |
-			n_write_success | n_write_error | n_write_timeout | n_write_filtered_out |
-			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
-			n_udf_complete | n_udf_error | n_udf_timeout | n_udf_filtered_out |
-			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_proxy_complete | n_proxy_error |
+				n_proxy_timeout | n_read_success | n_read_error |
+				n_read_timeout | n_read_not_found | n_read_filtered_out |
+				n_write_success | n_write_error | n_write_timeout |
+				n_write_filtered_out | n_delete_success | n_delete_error |
+				n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
+				n_udf_complete | n_udf_error | n_udf_timeout |
+				n_udf_filtered_out | n_lang_read_success | n_lang_write_success |
+				n_lang_delete_success | n_lang_error) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} batch-sub: tsvc (%lu,%lu) proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_proxy_complete, n_proxy_error, n_proxy_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
+	cf_info(AS_INFO,
+			"{%s} batch-sub: tsvc (%lu,%lu) proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_proxy_complete,
+			n_proxy_error, n_proxy_timeout, n_read_success, n_read_error,
+			n_read_timeout, n_read_not_found, n_read_filtered_out,
 			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
-			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
+			n_delete_success, n_delete_error, n_delete_timeout,
+			n_delete_not_found, n_delete_filtered_out, n_udf_complete,
+			n_udf_error, n_udf_timeout, n_udf_filtered_out, n_lang_read_success,
+			n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
 log_line_from_proxy_batch_sub(as_namespace* ns)
 {
-	uint64_t n_tsvc_error = as_load_uint64(&ns->n_from_proxy_batch_sub_tsvc_error);
-	uint64_t n_tsvc_timeout = as_load_uint64(&ns->n_from_proxy_batch_sub_tsvc_timeout);
-	uint64_t n_read_success = as_load_uint64(&ns->n_from_proxy_batch_sub_read_success);
-	uint64_t n_read_error = as_load_uint64(&ns->n_from_proxy_batch_sub_read_error);
-	uint64_t n_read_timeout = as_load_uint64(&ns->n_from_proxy_batch_sub_read_timeout);
-	uint64_t n_read_not_found = as_load_uint64(&ns->n_from_proxy_batch_sub_read_not_found);
-	uint64_t n_read_filtered_out = as_load_uint64(&ns->n_from_proxy_batch_sub_read_filtered_out);
-	uint64_t n_write_success = as_load_uint64(&ns->n_from_proxy_batch_sub_write_success);
-	uint64_t n_write_error = as_load_uint64(&ns->n_from_proxy_batch_sub_write_error);
-	uint64_t n_write_timeout = as_load_uint64(&ns->n_from_proxy_batch_sub_write_timeout);
-	uint64_t n_write_filtered_out = as_load_uint64(&ns->n_from_proxy_batch_sub_write_filtered_out);
-	uint64_t n_delete_success = as_load_uint64(&ns->n_from_proxy_batch_sub_delete_success);
-	uint64_t n_delete_error = as_load_uint64(&ns->n_from_proxy_batch_sub_delete_error);
-	uint64_t n_delete_timeout = as_load_uint64(&ns->n_from_proxy_batch_sub_delete_timeout);
-	uint64_t n_delete_not_found = as_load_uint64(&ns->n_from_proxy_batch_sub_delete_not_found);
-	uint64_t n_delete_filtered_out = as_load_uint64(&ns->n_from_proxy_batch_sub_delete_filtered_out);
-	uint64_t n_udf_complete = as_load_uint64(&ns->n_from_proxy_batch_sub_udf_complete);
+	uint64_t n_tsvc_error =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_tsvc_error);
+	uint64_t n_tsvc_timeout =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_tsvc_timeout);
+	uint64_t n_read_success =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_read_success);
+	uint64_t n_read_error =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_read_error);
+	uint64_t n_read_timeout =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_read_timeout);
+	uint64_t n_read_not_found =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_read_not_found);
+	uint64_t n_read_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_read_filtered_out);
+	uint64_t n_write_success =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_write_success);
+	uint64_t n_write_error =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_write_error);
+	uint64_t n_write_timeout =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_write_timeout);
+	uint64_t n_write_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_write_filtered_out);
+	uint64_t n_delete_success =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_delete_success);
+	uint64_t n_delete_error =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_delete_error);
+	uint64_t n_delete_timeout =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_delete_timeout);
+	uint64_t n_delete_not_found =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_delete_not_found);
+	uint64_t n_delete_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_delete_filtered_out);
+	uint64_t n_udf_complete =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_udf_complete);
 	uint64_t n_udf_error = as_load_uint64(&ns->n_from_proxy_batch_sub_udf_error);
-	uint64_t n_udf_timeout = as_load_uint64(&ns->n_from_proxy_batch_sub_udf_timeout);
-	uint64_t n_udf_filtered_out = as_load_uint64(&ns->n_from_proxy_batch_sub_udf_filtered_out);
-	uint64_t n_lang_read_success = as_load_uint64(&ns->n_from_proxy_batch_sub_lang_read_success);
-	uint64_t n_lang_write_success = as_load_uint64(&ns->n_from_proxy_batch_sub_lang_write_success);
-	uint64_t n_lang_delete_success = as_load_uint64(&ns->n_from_proxy_batch_sub_lang_delete_success);
-	uint64_t n_lang_error = as_load_uint64(&ns->n_from_proxy_batch_sub_lang_error);
+	uint64_t n_udf_timeout =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_udf_timeout);
+	uint64_t n_udf_filtered_out =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_udf_filtered_out);
+	uint64_t n_lang_read_success =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_lang_read_success);
+	uint64_t n_lang_write_success =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_lang_write_success);
+	uint64_t n_lang_delete_success =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_lang_delete_success);
+	uint64_t n_lang_error =
+			as_load_uint64(&ns->n_from_proxy_batch_sub_lang_error);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_read_success | n_read_error | n_read_timeout | n_read_not_found | n_read_filtered_out |
-			n_write_success | n_write_error | n_write_timeout | n_write_filtered_out |
-			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
-			n_udf_complete | n_udf_error | n_udf_timeout | n_udf_filtered_out |
-			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_read_success | n_read_error |
+				n_read_timeout | n_read_not_found | n_read_filtered_out |
+				n_write_success | n_write_error | n_write_timeout |
+				n_write_filtered_out | n_delete_success | n_delete_error |
+				n_delete_timeout | n_delete_not_found | n_delete_filtered_out |
+				n_udf_complete | n_udf_error | n_udf_timeout |
+				n_udf_filtered_out | n_lang_read_success | n_lang_write_success |
+				n_lang_delete_success | n_lang_error) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} from-proxy-batch-sub: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_read_success, n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
+	cf_info(AS_INFO,
+			"{%s} from-proxy-batch-sub: tsvc (%lu,%lu) read (%lu,%lu,%lu,%lu,%lu) write (%lu,%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_read_success,
+			n_read_error, n_read_timeout, n_read_not_found, n_read_filtered_out,
 			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out,
-			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found, n_delete_filtered_out,
-			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
+			n_delete_success, n_delete_error, n_delete_timeout,
+			n_delete_not_found, n_delete_filtered_out, n_udf_complete,
+			n_udf_error, n_udf_timeout, n_udf_filtered_out, n_lang_read_success,
+			n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
 log_line_pi_query(as_namespace* ns)
 {
-	uint64_t n_short_basic_complete = as_load_uint64(&ns->n_pi_query_short_basic_complete);
-	uint64_t n_short_basic_error = as_load_uint64(&ns->n_pi_query_short_basic_error);
-	uint64_t n_short_basic_timeout = as_load_uint64(&ns->n_pi_query_short_basic_timeout);
-	uint64_t n_long_basic_complete = as_load_uint64(&ns->n_pi_query_long_basic_complete);
-	uint64_t n_long_basic_error = as_load_uint64(&ns->n_pi_query_long_basic_error);
-	uint64_t n_long_basic_abort = as_load_uint64(&ns->n_pi_query_long_basic_abort);
+	uint64_t n_short_basic_complete =
+			as_load_uint64(&ns->n_pi_query_short_basic_complete);
+	uint64_t n_short_basic_error =
+			as_load_uint64(&ns->n_pi_query_short_basic_error);
+	uint64_t n_short_basic_timeout =
+			as_load_uint64(&ns->n_pi_query_short_basic_timeout);
+	uint64_t n_long_basic_complete =
+			as_load_uint64(&ns->n_pi_query_long_basic_complete);
+	uint64_t n_long_basic_error =
+			as_load_uint64(&ns->n_pi_query_long_basic_error);
+	uint64_t n_long_basic_abort =
+			as_load_uint64(&ns->n_pi_query_long_basic_abort);
 	uint64_t n_aggr_complete = as_load_uint64(&ns->n_pi_query_aggr_complete);
 	uint64_t n_aggr_error = as_load_uint64(&ns->n_pi_query_aggr_error);
 	uint64_t n_aggr_abort = as_load_uint64(&ns->n_pi_query_aggr_abort);
@@ -859,18 +899,18 @@ log_line_pi_query(as_namespace* ns)
 	uint64_t n_ops_bg_abort = as_load_uint64(&ns->n_pi_query_ops_bg_abort);
 
 	if ((n_short_basic_complete | n_short_basic_error | n_short_basic_timeout |
-			n_long_basic_complete | n_long_basic_error | n_long_basic_abort |
-			n_aggr_complete | n_aggr_error | n_aggr_abort |
-			n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort |
-			n_ops_bg_complete | n_ops_bg_error | n_ops_bg_abort) == 0) {
+				n_long_basic_complete | n_long_basic_error | n_long_basic_abort |
+				n_aggr_complete | n_aggr_error | n_aggr_abort |
+				n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort |
+				n_ops_bg_complete | n_ops_bg_error | n_ops_bg_abort) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} pi-query: short-basic (%lu,%lu,%lu) long-basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
-			ns->name,
-			n_short_basic_complete, n_short_basic_error, n_short_basic_timeout,
-			n_long_basic_complete, n_long_basic_error, n_long_basic_abort,
-			n_aggr_complete, n_aggr_error, n_aggr_abort,
+	cf_info(AS_INFO,
+			"{%s} pi-query: short-basic (%lu,%lu,%lu) long-basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
+			ns->name, n_short_basic_complete, n_short_basic_error,
+			n_short_basic_timeout, n_long_basic_complete, n_long_basic_error,
+			n_long_basic_abort, n_aggr_complete, n_aggr_error, n_aggr_abort,
 			n_udf_bg_complete, n_udf_bg_error, n_udf_bg_abort,
 			n_ops_bg_complete, n_ops_bg_error, n_ops_bg_abort);
 }
@@ -878,12 +918,18 @@ log_line_pi_query(as_namespace* ns)
 void
 log_line_si_query(as_namespace* ns)
 {
-	uint64_t n_short_basic_complete = as_load_uint64(&ns->n_si_query_short_basic_complete);
-	uint64_t n_short_basic_error = as_load_uint64(&ns->n_si_query_short_basic_error);
-	uint64_t n_short_basic_timeout = as_load_uint64(&ns->n_si_query_short_basic_timeout);
-	uint64_t n_long_basic_complete = as_load_uint64(&ns->n_si_query_long_basic_complete);
-	uint64_t n_long_basic_error = as_load_uint64(&ns->n_si_query_long_basic_error);
-	uint64_t n_long_basic_abort = as_load_uint64(&ns->n_si_query_long_basic_abort);
+	uint64_t n_short_basic_complete =
+			as_load_uint64(&ns->n_si_query_short_basic_complete);
+	uint64_t n_short_basic_error =
+			as_load_uint64(&ns->n_si_query_short_basic_error);
+	uint64_t n_short_basic_timeout =
+			as_load_uint64(&ns->n_si_query_short_basic_timeout);
+	uint64_t n_long_basic_complete =
+			as_load_uint64(&ns->n_si_query_long_basic_complete);
+	uint64_t n_long_basic_error =
+			as_load_uint64(&ns->n_si_query_long_basic_error);
+	uint64_t n_long_basic_abort =
+			as_load_uint64(&ns->n_si_query_long_basic_abort);
 	uint64_t n_aggr_complete = as_load_uint64(&ns->n_si_query_aggr_complete);
 	uint64_t n_aggr_error = as_load_uint64(&ns->n_si_query_aggr_error);
 	uint64_t n_aggr_abort = as_load_uint64(&ns->n_si_query_aggr_abort);
@@ -895,18 +941,18 @@ log_line_si_query(as_namespace* ns)
 	uint64_t n_ops_bg_abort = as_load_uint64(&ns->n_si_query_ops_bg_abort);
 
 	if ((n_short_basic_complete | n_short_basic_error | n_short_basic_timeout |
-			n_long_basic_complete | n_long_basic_error | n_long_basic_abort |
-			n_aggr_complete | n_aggr_error | n_aggr_abort |
-			n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort |
-			n_ops_bg_complete | n_ops_bg_error | n_ops_bg_abort) == 0) {
+				n_long_basic_complete | n_long_basic_error | n_long_basic_abort |
+				n_aggr_complete | n_aggr_error | n_aggr_abort |
+				n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort |
+				n_ops_bg_complete | n_ops_bg_error | n_ops_bg_abort) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} si-query: short-basic (%lu,%lu,%lu) long-basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
-			ns->name,
-			n_short_basic_complete, n_short_basic_error, n_short_basic_timeout,
-			n_long_basic_complete, n_long_basic_error, n_long_basic_abort,
-			n_aggr_complete, n_aggr_error, n_aggr_abort,
+	cf_info(AS_INFO,
+			"{%s} si-query: short-basic (%lu,%lu,%lu) long-basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu) ops-bg (%lu,%lu,%lu)",
+			ns->name, n_short_basic_complete, n_short_basic_error,
+			n_short_basic_timeout, n_long_basic_complete, n_long_basic_error,
+			n_long_basic_abort, n_aggr_complete, n_aggr_error, n_aggr_abort,
 			n_udf_bg_complete, n_udf_bg_error, n_udf_bg_abort,
 			n_ops_bg_complete, n_ops_bg_error, n_ops_bg_abort);
 }
@@ -920,22 +966,26 @@ log_line_udf_sub(as_namespace* ns)
 	uint64_t n_udf_error = as_load_uint64(&ns->n_udf_sub_udf_error);
 	uint64_t n_udf_timeout = as_load_uint64(&ns->n_udf_sub_udf_timeout);
 	uint64_t n_udf_filtered_out = as_load_uint64(&ns->n_udf_sub_udf_filtered_out);
-	uint64_t n_lang_read_success = as_load_uint64(&ns->n_udf_sub_lang_read_success);
-	uint64_t n_lang_write_success = as_load_uint64(&ns->n_udf_sub_lang_write_success);
-	uint64_t n_lang_delete_success = as_load_uint64(&ns->n_udf_sub_lang_delete_success);
+	uint64_t n_lang_read_success =
+			as_load_uint64(&ns->n_udf_sub_lang_read_success);
+	uint64_t n_lang_write_success =
+			as_load_uint64(&ns->n_udf_sub_lang_write_success);
+	uint64_t n_lang_delete_success =
+			as_load_uint64(&ns->n_udf_sub_lang_delete_success);
 	uint64_t n_lang_error = as_load_uint64(&ns->n_udf_sub_lang_error);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_udf_complete | n_udf_error | n_udf_timeout | n_udf_filtered_out |
-			n_lang_read_success | n_lang_write_success | n_lang_delete_success | n_lang_error) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_udf_complete | n_udf_error |
+				n_udf_timeout | n_udf_filtered_out | n_lang_read_success |
+				n_lang_write_success | n_lang_delete_success | n_lang_error) ==
+			0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} udf-sub: tsvc (%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_udf_complete, n_udf_error, n_udf_timeout, n_udf_filtered_out,
-			n_lang_read_success, n_lang_write_success, n_lang_delete_success, n_lang_error);
+	cf_info(AS_INFO,
+			"{%s} udf-sub: tsvc (%lu,%lu) udf (%lu,%lu,%lu,%lu) lang (%lu,%lu,%lu,%lu)",
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_udf_complete, n_udf_error,
+			n_udf_timeout, n_udf_filtered_out, n_lang_read_success,
+			n_lang_write_success, n_lang_delete_success, n_lang_error);
 }
 
 void
@@ -946,17 +996,17 @@ log_line_ops_sub(as_namespace* ns)
 	uint64_t n_write_success = as_load_uint64(&ns->n_ops_sub_write_success);
 	uint64_t n_write_error = as_load_uint64(&ns->n_ops_sub_write_error);
 	uint64_t n_write_timeout = as_load_uint64(&ns->n_ops_sub_write_timeout);
-	uint64_t n_write_filtered_out = as_load_uint64(&ns->n_ops_sub_write_filtered_out);
+	uint64_t n_write_filtered_out =
+			as_load_uint64(&ns->n_ops_sub_write_filtered_out);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_write_success | n_write_error | n_write_timeout | n_write_filtered_out) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_write_success | n_write_error |
+				n_write_timeout | n_write_filtered_out) == 0) {
 		return;
 	}
 
 	cf_info(AS_INFO, "{%s} ops-sub: tsvc (%lu,%lu) write (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_write_success, n_write_error, n_write_timeout, n_write_filtered_out);
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_write_success,
+			n_write_error, n_write_timeout, n_write_filtered_out);
 }
 
 void
@@ -966,14 +1016,11 @@ log_line_dup_res(as_namespace* ns)
 	uint64_t n_respond_read = as_load_uint64(&ns->n_dup_res_respond_read);
 	uint64_t n_respond_no_read = as_load_uint64(&ns->n_dup_res_respond_no_read);
 
-	if ((n_ask |
-			n_respond_read | n_respond_no_read) == 0) {
+	if ((n_ask | n_respond_read | n_respond_no_read) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} dup-res: ask %lu respond (%lu,%lu)",
-			ns->name,
-			n_ask,
+	cf_info(AS_INFO, "{%s} dup-res: ask %lu respond (%lu,%lu)", ns->name, n_ask,
 			n_respond_read, n_respond_no_read);
 }
 
@@ -985,44 +1032,56 @@ log_line_retransmits(as_namespace* ns)
 	uint64_t n_all_write_dup_res = ns->n_retransmit_all_write_dup_res;
 	uint64_t n_all_delete_dup_res = ns->n_retransmit_all_delete_dup_res;
 	uint64_t n_all_udf_dup_res = ns->n_retransmit_all_udf_dup_res;
-	uint64_t n_all_batch_sub_read_dup_res = ns->n_retransmit_all_batch_sub_read_dup_res;
-	uint64_t n_all_batch_sub_write_dup_res = ns->n_retransmit_all_batch_sub_write_dup_res;
-	uint64_t n_all_batch_sub_delete_dup_res = ns->n_retransmit_all_batch_sub_delete_dup_res;
-	uint64_t n_all_batch_sub_udf_dup_res = ns->n_retransmit_all_batch_sub_udf_dup_res;
+	uint64_t n_all_batch_sub_read_dup_res =
+			ns->n_retransmit_all_batch_sub_read_dup_res;
+	uint64_t n_all_batch_sub_write_dup_res =
+			ns->n_retransmit_all_batch_sub_write_dup_res;
+	uint64_t n_all_batch_sub_delete_dup_res =
+			ns->n_retransmit_all_batch_sub_delete_dup_res;
+	uint64_t n_all_batch_sub_udf_dup_res =
+			ns->n_retransmit_all_batch_sub_udf_dup_res;
 	uint64_t n_udf_sub_dup_res = ns->n_retransmit_udf_sub_dup_res;
 	uint64_t n_ops_sub_dup_res = ns->n_retransmit_ops_sub_dup_res;
 	uint64_t n_all_read_repl_ping = ns->n_retransmit_all_read_repl_ping;
-	uint64_t n_all_batch_sub_read_repl_ping = ns->n_retransmit_all_batch_sub_read_repl_ping;
+	uint64_t n_all_batch_sub_read_repl_ping =
+			ns->n_retransmit_all_batch_sub_read_repl_ping;
 	uint64_t n_all_write_repl_write = ns->n_retransmit_all_write_repl_write;
 	uint64_t n_all_delete_repl_write = ns->n_retransmit_all_delete_repl_write;
 	uint64_t n_all_udf_repl_write = ns->n_retransmit_all_udf_repl_write;
-	uint64_t n_all_batch_sub_write_repl_write = ns->n_retransmit_all_batch_sub_write_repl_write;
-	uint64_t n_all_batch_sub_delete_repl_write = ns->n_retransmit_all_batch_sub_delete_repl_write;
-	uint64_t n_all_batch_sub_udf_repl_write = ns->n_retransmit_all_batch_sub_udf_repl_write;
+	uint64_t n_all_batch_sub_write_repl_write =
+			ns->n_retransmit_all_batch_sub_write_repl_write;
+	uint64_t n_all_batch_sub_delete_repl_write =
+			ns->n_retransmit_all_batch_sub_delete_repl_write;
+	uint64_t n_all_batch_sub_udf_repl_write =
+			ns->n_retransmit_all_batch_sub_udf_repl_write;
 	uint64_t n_udf_sub_repl_write = ns->n_retransmit_udf_sub_repl_write;
 	uint64_t n_ops_sub_repl_write = ns->n_retransmit_ops_sub_repl_write;
 
-	if ((n_migrate_record_retransmits |
-			n_all_read_dup_res | n_all_write_dup_res | n_all_delete_dup_res | n_all_udf_dup_res |
-			n_all_batch_sub_read_dup_res | n_all_batch_sub_write_dup_res | n_all_batch_sub_delete_dup_res | n_all_batch_sub_udf_dup_res |
-			n_udf_sub_dup_res | n_ops_sub_dup_res |
-			n_all_read_repl_ping | n_all_batch_sub_read_repl_ping |
-			n_all_write_repl_write | n_all_delete_repl_write | n_all_udf_repl_write |
-			n_all_batch_sub_write_repl_write | n_all_batch_sub_delete_repl_write | n_all_batch_sub_udf_repl_write |
-			n_udf_sub_repl_write | n_ops_sub_repl_write) == 0) {
+	if ((n_migrate_record_retransmits | n_all_read_dup_res |
+				n_all_write_dup_res | n_all_delete_dup_res | n_all_udf_dup_res |
+				n_all_batch_sub_read_dup_res | n_all_batch_sub_write_dup_res |
+				n_all_batch_sub_delete_dup_res | n_all_batch_sub_udf_dup_res |
+				n_udf_sub_dup_res | n_ops_sub_dup_res | n_all_read_repl_ping |
+				n_all_batch_sub_read_repl_ping | n_all_write_repl_write |
+				n_all_delete_repl_write | n_all_udf_repl_write |
+				n_all_batch_sub_write_repl_write |
+				n_all_batch_sub_delete_repl_write | n_all_batch_sub_udf_repl_write |
+				n_udf_sub_repl_write | n_ops_sub_repl_write) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} retransmits: migration %lu dup-res (%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu) repl-ping (%lu,%lu) repl-write (%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_migrate_record_retransmits,
-			n_all_read_dup_res, n_all_write_dup_res, n_all_delete_dup_res, n_all_udf_dup_res,
-			n_all_batch_sub_read_dup_res, n_all_batch_sub_write_dup_res, n_all_batch_sub_delete_dup_res, n_all_batch_sub_udf_dup_res,
-			n_udf_sub_dup_res, n_ops_sub_dup_res,
-			n_all_read_repl_ping, n_all_batch_sub_read_repl_ping,
-			n_all_write_repl_write, n_all_delete_repl_write, n_all_udf_repl_write,
-			n_all_batch_sub_write_repl_write, n_all_batch_sub_delete_repl_write, n_all_batch_sub_udf_repl_write,
-			n_udf_sub_repl_write, n_ops_sub_repl_write);
+	cf_info(AS_INFO,
+			"{%s} retransmits: migration %lu dup-res (%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu) repl-ping (%lu,%lu) repl-write (%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu)",
+			ns->name, n_migrate_record_retransmits, n_all_read_dup_res,
+			n_all_write_dup_res, n_all_delete_dup_res, n_all_udf_dup_res,
+			n_all_batch_sub_read_dup_res, n_all_batch_sub_write_dup_res,
+			n_all_batch_sub_delete_dup_res, n_all_batch_sub_udf_dup_res,
+			n_udf_sub_dup_res, n_ops_sub_dup_res, n_all_read_repl_ping,
+			n_all_batch_sub_read_repl_ping, n_all_write_repl_write,
+			n_all_delete_repl_write, n_all_udf_repl_write,
+			n_all_batch_sub_write_repl_write, n_all_batch_sub_delete_repl_write,
+			n_all_batch_sub_udf_repl_write, n_udf_sub_repl_write,
+			n_ops_sub_repl_write);
 }
 
 void
@@ -1035,15 +1094,15 @@ log_line_read_touch(as_namespace* ns)
 	uint64_t n_read_touch_timeout = as_load_uint64(&ns->n_read_touch_timeout);
 	uint64_t n_read_touch_skip = as_load_uint64(&ns->n_read_touch_skip);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_read_touch_success | n_read_touch_error | n_read_touch_timeout | n_read_touch_skip) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_read_touch_success | n_read_touch_error |
+				n_read_touch_timeout | n_read_touch_skip) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} read-touch: tsvc (%lu,%lu) all-triggers (%lu,%lu,%lu,%lu)",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_read_touch_success, n_read_touch_error, n_read_touch_timeout, n_read_touch_skip);
+	cf_info(AS_INFO,
+			"{%s} read-touch: tsvc (%lu,%lu) all-triggers (%lu,%lu,%lu,%lu)",
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_read_touch_success,
+			n_read_touch_error, n_read_touch_timeout, n_read_touch_skip);
 }
 
 void
@@ -1056,64 +1115,76 @@ log_line_re_repl(as_namespace* ns)
 	uint64_t n_re_repl_timeout = as_load_uint64(&ns->n_re_repl_timeout);
 	uint64_t n_unreplicated_records = as_load_uint64(&ns->n_unreplicated_records);
 
-	if ((n_tsvc_error | n_tsvc_timeout |
-			n_re_repl_success | n_re_repl_error | n_re_repl_timeout |
-			n_unreplicated_records) == 0) {
+	if ((n_tsvc_error | n_tsvc_timeout | n_re_repl_success | n_re_repl_error |
+				n_re_repl_timeout | n_unreplicated_records) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} re-repl: tsvc (%lu,%lu) all-triggers (%lu,%lu,%lu) unreplicated-records %lu",
-			ns->name,
-			n_tsvc_error, n_tsvc_timeout,
-			n_re_repl_success, n_re_repl_error, n_re_repl_timeout,
-			n_unreplicated_records);
+	cf_info(AS_INFO,
+			"{%s} re-repl: tsvc (%lu,%lu) all-triggers (%lu,%lu,%lu) unreplicated-records %lu",
+			ns->name, n_tsvc_error, n_tsvc_timeout, n_re_repl_success,
+			n_re_repl_error, n_re_repl_timeout, n_unreplicated_records);
 }
 
 void
 log_line_mrt_finish(as_namespace* ns)
 {
-	uint64_t n_verify_read_success = as_load_uint64(&ns->n_mrt_verify_read_success);
+	uint64_t n_verify_read_success =
+			as_load_uint64(&ns->n_mrt_verify_read_success);
 	uint64_t n_verify_read_error = as_load_uint64(&ns->n_mrt_verify_read_error);
-	uint64_t n_verify_read_timeout = as_load_uint64(&ns->n_mrt_verify_read_timeout);
-	uint64_t n_roll_forward_success = as_load_uint64(&ns->n_mrt_roll_forward_success);
+	uint64_t n_verify_read_timeout =
+			as_load_uint64(&ns->n_mrt_verify_read_timeout);
+	uint64_t n_roll_forward_success =
+			as_load_uint64(&ns->n_mrt_roll_forward_success);
 	uint64_t n_roll_forward_error = as_load_uint64(&ns->n_mrt_roll_forward_error);
-	uint64_t n_roll_forward_timeout = as_load_uint64(&ns->n_mrt_roll_forward_timeout);
+	uint64_t n_roll_forward_timeout =
+			as_load_uint64(&ns->n_mrt_roll_forward_timeout);
 	uint64_t n_roll_back_success = as_load_uint64(&ns->n_mrt_roll_back_success);
 	uint64_t n_roll_back_error = as_load_uint64(&ns->n_mrt_roll_back_error);
 	uint64_t n_roll_back_timeout = as_load_uint64(&ns->n_mrt_roll_back_timeout);
 
 	if ((n_verify_read_success | n_verify_read_error | n_verify_read_timeout |
-			n_roll_forward_success | n_roll_forward_error | n_roll_forward_timeout |
-			n_roll_back_success | n_roll_back_error | n_roll_back_timeout) == 0) {
+				n_roll_forward_success | n_roll_forward_error |
+				n_roll_forward_timeout | n_roll_back_success |
+				n_roll_back_error | n_roll_back_timeout) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} mrt-finish: verify-read (%lu,%lu,%lu) roll-forward (%lu,%lu,%lu) roll-back (%lu,%lu,%lu)",
-			ns->name,
-			n_verify_read_success, n_verify_read_error, n_verify_read_timeout,
-			n_roll_forward_success, n_roll_forward_error, n_roll_forward_timeout,
-			n_roll_back_success, n_roll_back_error, n_roll_back_timeout);
+	cf_info(AS_INFO,
+			"{%s} mrt-finish: verify-read (%lu,%lu,%lu) roll-forward (%lu,%lu,%lu) roll-back (%lu,%lu,%lu)",
+			ns->name, n_verify_read_success, n_verify_read_error,
+			n_verify_read_timeout, n_roll_forward_success, n_roll_forward_error,
+			n_roll_forward_timeout, n_roll_back_success, n_roll_back_error,
+			n_roll_back_timeout);
 }
 
 void
 log_line_mrt_monitor_finish(as_namespace* ns)
 {
-	uint64_t n_roll_forward_success = as_load_uint64(&ns->n_mrt_monitor_roll_forward_success);
-	uint64_t n_roll_forward_error = as_load_uint64(&ns->n_mrt_monitor_roll_forward_error);
-	uint64_t n_roll_forward_timeout = as_load_uint64(&ns->n_mrt_monitor_roll_forward_timeout);
-	uint64_t n_roll_back_success = as_load_uint64(&ns->n_mrt_monitor_roll_back_success);
-	uint64_t n_roll_back_error = as_load_uint64(&ns->n_mrt_monitor_roll_back_error);
-	uint64_t n_roll_back_timeout = as_load_uint64(&ns->n_mrt_monitor_roll_back_timeout);
+	uint64_t n_roll_forward_success =
+			as_load_uint64(&ns->n_mrt_monitor_roll_forward_success);
+	uint64_t n_roll_forward_error =
+			as_load_uint64(&ns->n_mrt_monitor_roll_forward_error);
+	uint64_t n_roll_forward_timeout =
+			as_load_uint64(&ns->n_mrt_monitor_roll_forward_timeout);
+	uint64_t n_roll_back_success =
+			as_load_uint64(&ns->n_mrt_monitor_roll_back_success);
+	uint64_t n_roll_back_error =
+			as_load_uint64(&ns->n_mrt_monitor_roll_back_error);
+	uint64_t n_roll_back_timeout =
+			as_load_uint64(&ns->n_mrt_monitor_roll_back_timeout);
 
-	if ((n_roll_forward_success | n_roll_forward_error | n_roll_forward_timeout |
-			n_roll_back_success | n_roll_back_error | n_roll_back_timeout) == 0) {
+	if ((n_roll_forward_success | n_roll_forward_error |
+				n_roll_forward_timeout | n_roll_back_success |
+				n_roll_back_error | n_roll_back_timeout) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} mrt-monitor-finish: roll-forward (%lu,%lu,%lu) roll-back (%lu,%lu,%lu)",
-			ns->name,
-			n_roll_forward_success, n_roll_forward_error, n_roll_forward_timeout,
-			n_roll_back_success, n_roll_back_error, n_roll_back_timeout);
+	cf_info(AS_INFO,
+			"{%s} mrt-monitor-finish: roll-forward (%lu,%lu,%lu) roll-back (%lu,%lu,%lu)",
+			ns->name, n_roll_forward_success, n_roll_forward_error,
+			n_roll_forward_timeout, n_roll_back_success, n_roll_back_error,
+			n_roll_back_timeout);
 }
 
 void
@@ -1122,19 +1193,19 @@ log_line_special_errors(as_namespace* ns)
 	uint64_t n_fail_key_busy = as_load_uint64(&ns->n_fail_key_busy);
 	uint64_t n_fail_xdr_key_busy = as_load_uint64(&ns->n_fail_xdr_key_busy);
 	uint64_t n_fail_record_too_big = as_load_uint64(&ns->n_fail_record_too_big);
-	uint64_t n_fail_client_lost_conflict = as_load_uint64(&ns->n_fail_client_lost_conflict);
-	uint64_t n_fail_xdr_lost_conflict = as_load_uint64(&ns->n_fail_xdr_lost_conflict);
+	uint64_t n_fail_client_lost_conflict =
+			as_load_uint64(&ns->n_fail_client_lost_conflict);
+	uint64_t n_fail_xdr_lost_conflict =
+			as_load_uint64(&ns->n_fail_xdr_lost_conflict);
 
-	if ((n_fail_key_busy | n_fail_xdr_key_busy |
-			n_fail_record_too_big |
-			n_fail_client_lost_conflict | n_fail_xdr_lost_conflict) == 0) {
+	if ((n_fail_key_busy | n_fail_xdr_key_busy | n_fail_record_too_big |
+				n_fail_client_lost_conflict | n_fail_xdr_lost_conflict) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} special-errors: key-busy (%lu,%lu) record-too-big %lu lost-conflict (%lu,%lu)",
-			ns->name,
-			n_fail_key_busy, n_fail_xdr_key_busy,
-			n_fail_record_too_big,
+	cf_info(AS_INFO,
+			"{%s} special-errors: key-busy (%lu,%lu) record-too-big %lu lost-conflict (%lu,%lu)",
+			ns->name, n_fail_key_busy, n_fail_xdr_key_busy, n_fail_record_too_big,
 			n_fail_client_lost_conflict, n_fail_xdr_lost_conflict);
 }
 

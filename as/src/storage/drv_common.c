@@ -34,7 +34,6 @@
 #include "base/datamodel.h"
 #include "storage/flat.h"
 
-
 //==========================================================
 // Public API - shared code between storage engines.
 //
@@ -46,10 +45,10 @@ drv_is_set_evictable(const as_namespace* ns, const as_flat_opt_meta* opt_meta)
 		return true;
 	}
 
-	as_set *p_set;
+	as_set* p_set;
 
 	if (cf_vmapx_get_by_name_w_len(ns->p_sets_vmap, opt_meta->set_name,
-			opt_meta->set_name_len, (void**)&p_set) != CF_VMAPX_OK) {
+				opt_meta->set_name_len, (void**)&p_set) != CF_VMAPX_OK) {
 		return true;
 	}
 

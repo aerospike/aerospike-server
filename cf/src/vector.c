@@ -37,7 +37,6 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -46,14 +45,12 @@
 #define VECTOR_FLAG_FREE_SELF 0x10
 #define VECTOR_FLAG_FREE_ELES 0x20
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static void append_lockfree(cf_vector* v, const void* ele);
 static void increase_capacity(cf_vector* v, uint32_t new_capacity);
-
 
 //==========================================================
 // Inlines & macros.
@@ -74,7 +71,6 @@ vector_unlock(const cf_vector* v)
 		cf_mutex_unlock(&((cf_vector*)v)->lock);
 	}
 }
-
 
 //==========================================================
 // Public API.
@@ -253,9 +249,8 @@ cf_vector_delete(cf_vector* v, uint32_t ix)
 	}
 
 	if (ix != v->count - 1) {
-		memmove(v->eles + (ix * v->ele_sz),
-				v->eles + ((ix + 1) * v->ele_sz),
-				(v->count - (ix + 1)) * v->ele_sz );
+		memmove(v->eles + (ix * v->ele_sz), v->eles + ((ix + 1) * v->ele_sz),
+				(v->count - (ix + 1)) * v->ele_sz);
 	}
 
 	v->count--;
@@ -282,9 +277,8 @@ cf_vector_delete_range(cf_vector* v, uint32_t start, uint32_t end)
 
 	// Copy down if not at end.
 	if (end != v->count) {
-		memmove(v->eles + (start * v->ele_sz),
-				v->eles + ((end) * v->ele_sz),
-				(v->count - end) * v->ele_sz );
+		memmove(v->eles + (start * v->ele_sz), v->eles + ((end)*v->ele_sz),
+				(v->count - end) * v->ele_sz);
 	}
 
 	v->count -= end - start;
@@ -307,7 +301,6 @@ cf_vector_clear(cf_vector* v)
 
 	vector_unlock(v);
 }
-
 
 //==========================================================
 // Local helpers.
