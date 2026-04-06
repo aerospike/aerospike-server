@@ -610,9 +610,9 @@ valgrind_check(void)
 		cf_crash_nostack(CF_ALLOC, "Valgrind redirected malloc() to glibc; please run Valgrind with --soname-synonyms=somalloc=nouserintercepts");
 	}
 
-	for (uint32_t i = 0; i < tries; ++i) {
-		free(p1[tries]);
-		cf_free(p2[tries]);
+	for (uint32_t i = 0; i <= tries; ++i) {
+		free(p1[i]);
+		cf_free(p2[i]);
 	}
 }
 
