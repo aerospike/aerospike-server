@@ -44,7 +44,7 @@ jobs:
       DISTROS: ${{ steps.distros.outputs.distros }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -114,7 +114,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -228,7 +228,7 @@ jobs:
       PACKAGE_VERSION: ${{ steps.extract_package_version.outputs.package_version }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -239,7 +239,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Download All Matrix Artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: build-artifacts
           pattern: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}*
@@ -282,7 +282,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -357,7 +357,7 @@ jobs:
   sign-artifacts:
     needs: [setup, artifacts-ready]
     if: always() && needs.artifacts-ready.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.1.1
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.2.0
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}      
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}      
@@ -370,7 +370,7 @@ jobs:
   upload-artifacts-to-jfrog:
     needs: [setup, sign-artifacts]
     if: always() && needs.sign-artifacts.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.1.1
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.2.0
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -391,7 +391,7 @@ jobs:
       attestations: write
     needs: [setup, sign-artifacts, upload-artifacts-to-jfrog]
     if: always() && needs.upload-artifacts-to-jfrog.result == 'success'
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.1.1
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.2.0
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -412,7 +412,7 @@ jobs:
       snyk_warning: ${{ steps.snyk_scan.outputs.warning }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -423,7 +423,7 @@ jobs:
           fetch-tags: true
 
       - name: Download artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: signed-artifacts-${{ needs.setup.outputs.VERSION }}          
           path: ./signed-artifacts
@@ -529,7 +529,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594  # v2.16.0
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d  # v2.16.1
         with:
           egress-policy: audit
 
@@ -578,7 +578,7 @@ jobs:
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
