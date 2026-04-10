@@ -1729,6 +1729,7 @@ basic_query_get_bin_ids(const as_transaction* tr, as_namespace* ns,
 			uint16_t id;
 
 			if (! as_bin_get_id_w_len(ns, (const char*)data, len, &id)) {
+				data += len;
 				continue;
 			}
 
