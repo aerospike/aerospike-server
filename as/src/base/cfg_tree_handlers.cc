@@ -644,7 +644,7 @@ static void apply_namespace_set(const std::string& name,
 		{"/default-read-touch-ttl-pct", offsetof(as_set, default_read_touch_ttl_pct), apply_pct_w_minus_1_field},
 		{"/default-ttl", offsetof(as_set, default_ttl), apply_uint32_field, UnitType::TIME_DURATION},
 		{"/disable-eviction", offsetof(as_set, eviction_disabled), apply_bool_field},
-		{"/enable-index", offsetof(as_set, index_enabled), apply_bool_field},
+		{"/enable-index", offsetof(as_set, index_enabled), apply_bool_field, Deprecated{"'enable-index' is deprecated - use 'sindex-create' and 'sindex-delete' info commands instead - see https://aerospike.com/docs/database/release/8-1-2-0/"}},
 		{"/stop-writes-count", offsetof(as_set, stop_writes_count), apply_uint64_field, UnitType::SIZE_U64},
 		{"/stop-writes-size", offsetof(as_set, stop_writes_size), apply_uint64_field, UnitType::SIZE_U64},
 	};
