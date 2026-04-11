@@ -61,6 +61,7 @@
 // Typedefs & constants.
 //
 
+// clang-format off
 const msg_template rw_mt[] = {
 		{ RW_FIELD_OP, M_FT_UINT32 },
 		{ RW_FIELD_RESULT, M_FT_UINT32 },
@@ -83,6 +84,7 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_UNUSED_18, M_FT_BUF },
 		{ RW_FIELD_REGIME, M_FT_UINT32 }
 };
+// clang-format on
 
 COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 

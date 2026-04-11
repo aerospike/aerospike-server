@@ -70,6 +70,7 @@ uint32_t bool_to_flat(const as_particle* p, uint8_t* flat);
 // BOOL particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable bool_vtable = {
 		integer_destruct,
 		integer_size,
@@ -97,6 +98,7 @@ const as_particle_vtable bool_vtable = {
 		bool_flat_size,
 		bool_to_flat
 };
+// clang-format on
 
 
 //==========================================================

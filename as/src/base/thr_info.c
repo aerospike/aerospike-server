@@ -336,6 +336,7 @@ info_respond_error(cf_dyn_buf* db, int num, const char* message, ...)
 // Command function table.
 //
 
+// clang-format off
 static const as_info_cmd SPECS[] = {
 	// Set up commands in summary (order is important for summary commands).
 	{ .name="features",                .fn=cmd_features,                .in_summary=true },
@@ -453,6 +454,7 @@ static const as_info_cmd SPECS[] = {
 	{ .name="xdr-get-filter",          .fn=as_xdr_get_filter,           .client_only=false, .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="xdr-set-filter",          .fn=as_xdr_set_filter,           .client_only=false, .ee_only=true,  .perm=PERM_XDR_SET_FILTER }
 };
+// clang-format on
 
 static const uint32_t N_SPECS = sizeof(SPECS) / sizeof(SPECS[0]);
 

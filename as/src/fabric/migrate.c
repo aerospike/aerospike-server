@@ -65,6 +65,7 @@
 // Typedefs & constants.
 //
 
+// clang-format off
 const msg_template migrate_mt[] = {
 		{ MIG_FIELD_OP, M_FT_UINT32 },
 		{ MIG_FIELD_UNUSED_1, M_FT_UINT32 },
@@ -97,6 +98,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_UNUSED_28, M_FT_UINT32 },
 		{ MIG_FIELD_EMIG_INSERT_ID, M_FT_UINT64 }
 };
+// clang-format on
 
 COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 

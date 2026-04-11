@@ -440,16 +440,18 @@ struct op_table_entry_s {
 	const char* name;
 };
 
-#define OP_TABLE_ENTRY(__code, __name, __size_name, __build_name, __eval_name, __display_name, __static_param_count, __eval_param_count, __r_type) \
-		[__code].code = __code, \
-		[__code].name = __name, \
-		[__code].size = (uint32_t)sizeof(__size_name), \
-		[__code].build_cb = __build_name, \
-		[__code].eval_cb = __eval_name, \
-		[__code].display_cb = __display_name, \
-		[__code].static_param_count = __static_param_count, \
-		[__code].eval_param_count = __eval_param_count, \
-		[__code].r_type = __r_type,
+// clang-format off
+#define OP_TABLE_ENTRY(_code, _name, _size_name, _build_name, _eval_name, _display_name, _static_param_count, _eval_param_count, _r_type) \
+		[_code].code = _code, \
+		[_code].name = _name, \
+		[_code].size = (uint32_t)sizeof(_size_name), \
+		[_code].build_cb = _build_name, \
+		[_code].eval_cb = _eval_name, \
+		[_code].display_cb = _display_name, \
+		[_code].static_param_count = _static_param_count, \
+		[_code].eval_param_count = _eval_param_count, \
+		[_code].r_type = _r_type,
+// clang-format on
 
 #define result_type_to_str(__type) (__type >= 0 && __type < TYPE_END ? \
 		result_type_str[__type] : "invalid")
@@ -665,6 +667,7 @@ rt_value_keep_do_not_destroy(const rt_value* bin_arg, const as_bin* b)
 // Op table.
 //
 
+// clang-format off
 static const op_table_entry op_table[] = {
 		OP_TABLE_ENTRY(EXP_UNK, "unknown", op_base_mem, build_default, eval_unknown, display_0_args, 0, 0, TYPE_TRILEAN)
 
@@ -748,6 +751,7 @@ static const op_table_entry op_table[] = {
 
 		OP_TABLE_ENTRY(VOP_COND_CASE, "case", op_base_mem, NULL, NULL, display_case, 0, 0, TYPE_END)
 };
+// clang-format on
 
 
 //==========================================================

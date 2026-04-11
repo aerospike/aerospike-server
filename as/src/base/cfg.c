@@ -817,6 +817,7 @@ typedef struct cfg_opt_s {
 	cfg_case_id	case_id;
 } cfg_opt;
 
+// clang-format off
 const cfg_opt GLOBAL_OPTS[] = {
 		{ "service",						CASE_SERVICE_BEGIN },
 		{ "logging",						CASE_LOGGING_BEGIN },
@@ -1484,6 +1485,7 @@ const int NUM_XDR_DC_NAMESPACE_OPTS					= sizeof(XDR_DC_NAMESPACE_OPTS) / sizeof
 const int NUM_XDR_DC_AUTH_MODE_OPTS					= sizeof(XDR_DC_AUTH_MODE_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_NAMESPACE_BIN_POLICY_OPTS		= sizeof(XDR_DC_NAMESPACE_BIN_POLICY_OPTS) / sizeof(cfg_opt);
 const int NUM_XDR_DC_NAMESPACE_WRITE_POLICY_OPTS	= sizeof(XDR_DC_NAMESPACE_WRITE_POLICY_OPTS) / sizeof(cfg_opt);
+// clang-format on
 
 
 //==========================================================
@@ -1503,6 +1505,7 @@ const int NUM_XDR_DC_NAMESPACE_WRITE_POLICY_OPTS	= sizeof(XDR_DC_NAMESPACE_WRITE
 // Parsing state (context) tracking & switching.
 //
 
+// clang-format off
 typedef enum {
 	GLOBAL,
 	SERVICE,
@@ -1527,6 +1530,7 @@ const char* CFG_PARSER_STATES[] = {
 		"SECURITY", "SECURITY_LDAP", "SECURITY_LOG",
 		"XDR", "XDR_DC", "XDR_DC_NAMESPACE"
 };
+// clang-format on
 
 #define MAX_STACK_DEPTH 8
 

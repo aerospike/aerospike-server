@@ -51,6 +51,7 @@
 // BLOB particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable blob_vtable = {
 		blob_destruct,
 		blob_size,
@@ -78,6 +79,7 @@ const as_particle_vtable blob_vtable = {
 		blob_flat_size,
 		blob_to_flat
 };
+// clang-format on
 
 
 //==========================================================

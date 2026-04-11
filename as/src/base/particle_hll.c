@@ -67,6 +67,7 @@ static int hll_from_wire(as_particle_type wire_type, const uint8_t* wire_value, 
 // HLL particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable hll_vtable = {
 		blob_destruct,
 		blob_size,
@@ -94,6 +95,7 @@ const as_particle_vtable hll_vtable = {
 		blob_flat_size,
 		blob_to_flat
 };
+// clang-format on
 
 
 //==========================================================
