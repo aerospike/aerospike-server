@@ -29,9 +29,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
@@ -46,10 +50,8 @@
 #include "fabric/partition.h"
 #include "sindex/gc.h"
 #include "transaction/mrt_utils.h"
-#include "transaction/rw_utils.h"
 
 //#include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -86,7 +88,6 @@ typedef struct populate_cb_info_s {
 #define STAGE_CAPACITY (1 << ELE_ID_N_BITS) // 256
 #define STAGE_SIZE (STAGE_CAPACITY * ELE_SIZE) // 4K
 
-
 //==========================================================
 // Globals.
 //
@@ -94,7 +95,6 @@ typedef struct populate_cb_info_s {
 cf_mutex g_balance_lock = CF_MUTEX_INIT;
 
 static cf_queue g_populate_q;
-
 
 //==========================================================
 // Forward declarations.
@@ -110,20 +110,28 @@ static bool populate_reduce_cb(as_index_ref* r_ref, void* udata);
 
 static inline as_set_index_tree* stree_create(void);
 static inline void stree_destroy(as_set_index_tree* stree);
-static inline as_set_index_tree* stree_reserve(as_index_tree* tree, uint16_t set_id);
+static inline as_set_index_tree* stree_reserve(as_index_tree* tree,
+		uint16_t set_id);
 static inline void stree_release(as_set_index_tree* stree);
 
-static inline void ssi_from_keyd(as_index_tree* tree, as_set_index_tree* stree, const cf_digest* keyd, ssprig_info* ssi);
+static inline void ssi_from_keyd(as_index_tree* tree, as_set_index_tree* stree,
+		const cf_digest* keyd, ssprig_info* ssi);
 static inline uint32_t ssprig_i_from_keyd(const cf_digest* keyd);
 static inline uint32_t stub_from_keyd(const cf_digest* keyd);
-static inline void ssri_from_ssprig_i(as_index_tree* tree, as_set_index_tree* stree, const cf_digest* keyd, uint32_t keyd_stub, uint32_t ssprig_i, ssprig_reduce_info* ssri);
+static inline void ssri_from_ssprig_i(as_index_tree* tree,
+		as_set_index_tree* stree, const cf_digest* keyd, uint32_t keyd_stub,
+		uint32_t ssprig_i, ssprig_reduce_info* ssri);
 
 static void ssprig_delete(ssprig_info* ssi);
-static bool ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata);
-static void ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h, as_index_ph_array* ph_a);
+static bool ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb,
+		void* udata);
+static void ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h,
+		as_index_ph_array* ph_a);
 
-static void insert_rebalance(ssprig_info* ssi, index_ele* root_parent, stack_ele* ele);
-static void delete_rebalance(ssprig_info* ssi, index_ele* root_parent, stack_ele* ele);
+static void insert_rebalance(ssprig_info* ssi, index_ele* root_parent,
+		stack_ele* ele);
+static void delete_rebalance(ssprig_info* ssi, index_ele* root_parent,
+		stack_ele* ele);
 static void rotate_left(stack_ele* a, stack_ele* b);
 static void rotate_right(stack_ele* a, stack_ele* b);
 
@@ -136,7 +144,6 @@ static void uarena_destroy(uarena* ua);
 static void uarena_add_stage(uarena* ua);
 static uarena_handle uarena_alloc(uarena* ua);
 static void uarena_free(uarena* ua, uarena_handle h);
-
 
 //==========================================================
 // Inlines & macros.
@@ -154,7 +161,6 @@ uarena_set_handle(uarena_handle* h, uint32_t stage_id, uint32_t ele_id)
 	*h = (stage_id << ELE_ID_N_BITS) | ele_id;
 }
 
-
 //==========================================================
 // Public API - startup.
 //
@@ -166,7 +172,6 @@ as_set_index_init(void)
 
 	cf_thread_create_detached(run_populate_q, NULL);
 }
-
 
 //==========================================================
 // Public API - set-index tree lifecycle.
@@ -233,7 +238,6 @@ as_set_index_balance_unlock(void)
 {
 	cf_mutex_unlock(&g_balance_lock);
 }
-
 
 //==========================================================
 // Public API - transactions.
@@ -349,7 +353,6 @@ as_set_index_reduce(as_namespace* ns, as_index_tree* tree, uint16_t set_id,
 	return true;
 }
 
-
 //==========================================================
 // Public API - info & stats.
 //
@@ -384,11 +387,7 @@ as_set_index_enable(as_namespace* ns, as_set* p_set, uint16_t set_id)
 		return;
 	}
 
-	populate_info popi = {
-			.ns = ns,
-			.p_set = p_set,
-			.set_id = set_id
-	};
+	populate_info popi = { .ns = ns, .p_set = p_set, .set_id = set_id };
 
 	cf_queue_push(&g_populate_q, &popi);
 }
@@ -442,7 +441,6 @@ as_set_index_used_bytes(const as_namespace* ns)
 	return n_objects * sizeof(index_ele);
 }
 
-
 //==========================================================
 // Local helpers - configuration.
 //
@@ -484,7 +482,6 @@ is_set_populated(const as_namespace* ns, uint16_t set_id)
 
 	return as_load_bool_acq(&p_set->index_enabled) && ! p_set->index_populating;
 }
-
 
 //==========================================================
 // Local helpers - population.
@@ -559,13 +556,11 @@ run_populate(void* udata)
 			break;
 		}
 
-		populate_cb_info cbi = {
-				.ns = popi->ns,
-				.p_set = popi->p_set,
-				.set_id = popi->set_id,
-				.tree = rsv.tree,
-				.stree = stree
-		};
+		populate_cb_info cbi = { .ns = popi->ns,
+			.p_set = popi->p_set,
+			.set_id = popi->set_id,
+			.tree = rsv.tree,
+			.stree = stree };
 
 		if (! as_index_reduce(rsv.tree, populate_reduce_cb, &cbi)) {
 			stree_release(stree);
@@ -618,7 +613,6 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - as_set_index_tree lifecycle.
 //
@@ -665,7 +659,6 @@ stree_release(as_set_index_tree* stree)
 	}
 }
 
-
 //==========================================================
 // Local helpers - sprig parameter utilities.
 //
@@ -680,8 +673,7 @@ ssi_from_keyd(as_index_tree* tree, as_set_index_tree* stree,
 	uint32_t bits = (((uint32_t)keyd->digest[1] & 0xF0) << 23) |
 			((uint32_t)keyd->digest[2] << 19) |
 			((uint32_t)keyd->digest[3] << 11) |
-			((uint32_t)keyd->digest[4] << 3) |
-			((uint32_t)keyd->digest[5] >> 5);
+			((uint32_t)keyd->digest[4] << 3) | ((uint32_t)keyd->digest[5] >> 5);
 
 	uint32_t ssprig_i = bits >> 23;
 
@@ -698,8 +690,7 @@ ssprig_i_from_keyd(const cf_digest* keyd)
 	// Get the 8 most significant non-pid bits in the digest. Note - this is
 	// hardwired around the way we currently extract the 12-bit partition-ID
 	// from the digest.
-	return ((uint32_t)keyd->digest[1] & 0xF0) |
-			((uint32_t)keyd->digest[2] >> 4);
+	return ((uint32_t)keyd->digest[1] & 0xF0) | ((uint32_t)keyd->digest[2] >> 4);
 }
 
 static inline uint32_t
@@ -710,8 +701,7 @@ stub_from_keyd(const cf_digest* keyd)
 	// from the digest.
 	return (((uint32_t)keyd->digest[2] & 0x0F) << 19) |
 			((uint32_t)keyd->digest[3] << 11) |
-			((uint32_t)keyd->digest[4] << 3) |
-			((uint32_t)keyd->digest[5] >> 5);
+			((uint32_t)keyd->digest[4] << 3) | ((uint32_t)keyd->digest[5] >> 5);
 }
 
 static inline void
@@ -732,7 +722,6 @@ ssri_from_ssprig_i(as_index_tree* tree, as_set_index_tree* stree,
 	ssri->olock = &(tree_locks(tree) + ssprig_i)->lock;
 }
 
-
 //==========================================================
 // Local helpers - red-black sprigs.
 //
@@ -746,13 +735,11 @@ ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 		uarena_handle n_h = uarena_alloc(ssi->ua);
 		index_ele* n = UA_RESOLVE(n_h);
 
-		*n = (index_ele){
-				.key_r_h = key_r_h,
-				.keyd_stub = ssi->keyd_stub,
-				.color = BLACK,
-				.left_h = SENTINEL_H,
-				.right_h = SENTINEL_H
-		};
+		*n = (index_ele){ .key_r_h = key_r_h,
+			.keyd_stub = ssi->keyd_stub,
+			.color = BLACK,
+			.left_h = SENTINEL_H,
+			.right_h = SENTINEL_H };
 
 		*ssi->root = n_h;
 
@@ -788,7 +775,7 @@ ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 		ele->me = t;
 
 		// TODO - is this a bad idea given our index-ele size & arenas?
-//		_mm_prefetch(t, _MM_HINT_NTA);
+		//		_mm_prefetch(t, _MM_HINT_NTA);
 
 		if ((cmp = ssprig_ele_cmp(ssi, t)) == 0) {
 			return false; // element already exists
@@ -806,13 +793,11 @@ ssprig_insert(ssprig_info* ssi, uint64_t key_r_h)
 	uarena_handle n_h = uarena_alloc(ssi->ua);
 	index_ele* n = UA_RESOLVE(n_h);
 
-	*n = (index_ele){
-			.key_r_h = key_r_h,
-			.keyd_stub = ssi->keyd_stub,
-			.color = RED,
-			.left_h = SENTINEL_H,
-			.right_h = SENTINEL_H
-	};
+	*n = (index_ele){ .key_r_h = key_r_h,
+		.keyd_stub = ssi->keyd_stub,
+		.color = RED,
+		.left_h = SENTINEL_H,
+		.right_h = SENTINEL_H };
 
 	// Insert the new element n under parent ele.
 	if (ele->me == &root_parent || 0 < cmp) {
@@ -868,7 +853,7 @@ ssprig_delete(ssprig_info* ssi)
 		ele->me_h = r_h;
 		ele->me = r;
 
-//		_mm_prefetch(r, _MM_HINT_NTA);
+		//		_mm_prefetch(r, _MM_HINT_NTA);
 
 		int cmp = ssprig_ele_cmp(ssi, r);
 
@@ -972,9 +957,7 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 
 	as_index_ph stack_phs[MAX_STACK_PHS];
 	as_index_ph_array ph_a = {
-			.is_stack = true,
-			.capacity = MAX_STACK_PHS,
-			.phs = stack_phs
+		.is_stack = true, .capacity = MAX_STACK_PHS, .phs = stack_phs
 	};
 
 	// Traverse just fills array, then we make callbacks afterwards.
@@ -986,11 +969,7 @@ ssprig_reduce(ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata)
 
 	for (uint32_t i = 0; i < ph_a.n_used; i++) {
 		as_index_ph* ph = &ph_a.phs[i];
-		as_index_ref r_ref = {
-				.r = ph->r,
-				.r_h = ph->r_h,
-				.olock = ssri->olock
-		};
+		as_index_ref r_ref = { .r = ph->r, .r_h = ph->r_h, .olock = ssri->olock };
 
 		cf_mutex_lock(r_ref.olock);
 
@@ -1073,7 +1052,6 @@ ssprig_traverse(ssprig_reduce_info* ssri, uarena_handle r_h,
 
 	ssprig_traverse(ssri, r->right_h, ph_a);
 }
-
 
 //==========================================================
 // Local helpers - red-black sprig utilities.
@@ -1381,7 +1359,6 @@ rotate_right(stack_ele* a, stack_ele* b)
 	b->me->right_h = a->me_h;
 	a->parent = b;
 }
-
 
 //==========================================================
 // uarena API.

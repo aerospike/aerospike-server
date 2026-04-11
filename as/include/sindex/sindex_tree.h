@@ -36,7 +36,6 @@
 
 #include "sindex/sindex_arena.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -48,12 +47,12 @@ struct as_sindex_s;
 struct as_sindex_arena_s;
 struct si_btree_node_s;
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
-typedef bool (*as_sindex_reduce_fn)(struct as_index_ref_s* value, int64_t bval, void* udata);
+typedef bool (*as_sindex_reduce_fn)(struct as_index_ref_s* value, int64_t bval,
+		void* udata);
 
 // In header for enterprise separation only - not public.
 
@@ -85,8 +84,8 @@ typedef struct si_btree_node_s {
 typedef struct si_btree_key_s {
 	int64_t bval;
 	uint8_t keyd_stub;
-	uint64_t r_h: 40; // primary index arena handle
-} __attribute__ ((__packed__)) si_btree_key;
+	uint64_t r_h : 40; // primary index arena handle
+} __attribute__((__packed__)) si_btree_key;
 
 typedef struct search_key_s {
 	int64_t bval;
@@ -96,7 +95,6 @@ typedef struct search_key_s {
 } search_key;
 
 typedef bool (*si_btree_reduce_fn)(const si_btree_key* key, void* udata);
-
 
 //==========================================================
 // Public API.
@@ -111,21 +109,29 @@ uint64_t as_sindex_tree_mem_size(const struct as_sindex_s* si);
 
 void as_sindex_tree_gc(struct as_sindex_s* si);
 
-bool as_sindex_tree_put(struct as_sindex_s* si, int64_t bval, cf_arenax_handle r_h);
-bool as_sindex_tree_delete(struct as_sindex_s* si, int64_t bval, cf_arenax_handle r_h);
-void as_sindex_tree_query(struct as_sindex_s* si, const struct as_query_range_s* range, struct as_partition_reservation_s* rsv, int64_t bval, cf_digest* keyd, as_sindex_reduce_fn cb, void* udata);
+bool as_sindex_tree_put(struct as_sindex_s* si, int64_t bval,
+		cf_arenax_handle r_h);
+bool as_sindex_tree_delete(struct as_sindex_s* si, int64_t bval,
+		cf_arenax_handle r_h);
+void as_sindex_tree_query(struct as_sindex_s* si,
+		const struct as_query_range_s* range,
+		struct as_partition_reservation_s* rsv, int64_t bval, cf_digest* keyd,
+		as_sindex_reduce_fn cb, void* udata);
 
 void as_sindex_tree_collect_cardinality(struct as_sindex_s* si);
-
 
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
-void query_reduce_no_rc(struct as_sindex_s* si, struct as_partition_reservation_s* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
+void query_reduce_no_rc(struct as_sindex_s* si,
+		struct as_partition_reservation_s* rsv, int64_t start_bval,
+		int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup,
+		as_sindex_reduce_fn cb, void* udata);
 
 bool si_btree_delete(si_btree* bt, const si_btree_key* key);
-void si_btree_reduce(si_btree* bt, const search_key* start_skey, const search_key* end_skey, si_btree_reduce_fn cb, void* udata);
+void si_btree_reduce(si_btree* bt, const search_key* start_skey,
+		const search_key* end_skey, si_btree_reduce_fn cb, void* udata);
 
 static inline uint8_t
 get_keyd_stub(const cf_digest* keyd)

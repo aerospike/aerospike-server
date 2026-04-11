@@ -25,7 +25,7 @@
 //
 
 #include "arenax.h"
- 
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,21 +38,14 @@
 #include "log.h"
 #include "xmem.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 // Must be in-sync with cf_arenax_err:
-const char* ARENAX_ERR_STRINGS[] = {
-	"ok",
-	"bad parameter",
-	"error creating stage",
-	"error attaching stage",
-	"error detaching stage",
-	"unknown error"
-};
-
+const char* ARENAX_ERR_STRINGS[] = { "ok", "bad parameter",
+	"error creating stage", "error attaching stage", "error detaching stage",
+	"unknown error" };
 
 //==========================================================
 // Public API.
@@ -94,8 +87,7 @@ cf_arenax_init(cf_arenax* arena, cf_xmem_type xmem_type,
 	}
 	else {
 		arena->pool_len = arena->stage_capacity;
-		arena->pool_buf =
-				cf_malloc(arena->pool_len * sizeof(cf_arenax_chunk));
+		arena->pool_buf = cf_malloc(arena->pool_len * sizeof(cf_arenax_chunk));
 	}
 
 	arena->pool_i = 0;

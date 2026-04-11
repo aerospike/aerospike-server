@@ -17,7 +17,7 @@
  */
 
 #ifndef __throwstream_h
-#define __throwstream_h		1
+#define __throwstream_h 1
 
 #include <iostream>
 #include <sstream>
@@ -25,11 +25,11 @@
 // The throwstream macro assembles the string argument to the
 // exception constructor from an iostream.
 //
-#define throwstream(__except, __msg)				\
-	do {											\
-		std::ostringstream __ostrm;					\
-		__ostrm << __msg;							\
-		throw __except(__ostrm.str().c_str());		\
+#define throwstream(__except, __msg)                                           \
+	do {                                                                       \
+		std::ostringstream __ostrm;                                            \
+		__ostrm << __msg;                                                      \
+		throw __except (__ostrm.str().c_str());                                \
 	} while (false)
 
 #endif // __throwstream_h

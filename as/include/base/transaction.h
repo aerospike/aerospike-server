@@ -20,7 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-
 #pragma once
 
 #include <stdbool.h>
@@ -40,117 +39,127 @@
 #include "base/service.h"
 #include "fabric/partition.h"
 
+#define SHARED_MSGP(trw)                                                       \
+	(trw->origin == FROM_BATCH || trw->origin == FROM_IUDF ||                  \
+			trw->origin == FROM_IOPS)
 
-#define SHARED_MSGP(trw) ( \
-		trw->origin == FROM_BATCH || \
-		trw->origin == FROM_IUDF || \
-		trw->origin == FROM_IOPS)
-
-#define IS_DROP(trw) \
-		((trw->flags & AS_TRANSACTION_FLAG_IS_DELETE) != 0 && \
-				(trw->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE) == 0)
-
+#define IS_DROP(trw)                                                           \
+	((trw->flags & AS_TRANSACTION_FLAG_IS_DELETE) != 0 &&                      \
+			(trw->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE) == 0)
 
 //==========================================================
 // Histogram macros.
 //
 
-#define G_HIST_INSERT_DATA_POINT(name, start_time) \
-{ \
-	if (g_config.name##_enabled) { \
-		histogram_insert_data_point(g_stats.name, start_time); \
-	} \
-}
+#define G_HIST_INSERT_DATA_POINT(name, start_time)                             \
+	{                                                                          \
+		if (g_config.name##_enabled) {                                         \
+			histogram_insert_data_point(g_stats.name, start_time);             \
+		}                                                                      \
+	}
 
-#define G_HIST_ACTIVATE_INSERT_DATA_POINT(name, start_time) \
-{ \
-	g_stats.name##_active = true; \
-	histogram_insert_data_point(g_stats.name, start_time); \
-}
+#define G_HIST_ACTIVATE_INSERT_DATA_POINT(name, start_time)                    \
+	{                                                                          \
+		g_stats.name##_active = true;                                          \
+		histogram_insert_data_point(g_stats.name, start_time);                 \
+	}
 
-#define HIST_ACTIVATE_INSERT_DATA_POINT(trw, name) \
-{ \
-	trw->rsv.ns->name##_active = true; \
-	histogram_insert_data_point(trw->rsv.ns->name, trw->start_time); \
-}
+#define HIST_ACTIVATE_INSERT_DATA_POINT(trw, name)                             \
+	{                                                                          \
+		trw->rsv.ns->name##_active = true;                                     \
+		histogram_insert_data_point(trw->rsv.ns->name, trw->start_time);       \
+	}
 
-#define BENCHMARK_START(tr, name, orig) \
-{ \
-	if (tr->rsv.ns->name##_benchmarks_enabled && tr->origin == orig) { \
-		if ((tr->from_flags & FROM_FLAG_RESTART) != 0) { \
-			if (tr->benchmark_time != 0) { \
-				tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_restart_hist, tr->benchmark_time); \
-			} \
-		} \
-		else { \
-			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_start_hist, tr->start_time); \
-		} \
-	} \
-}
+#define BENCHMARK_START(tr, name, orig)                                                  \
+	{                                                                                    \
+		if (tr->rsv.ns->name##_benchmarks_enabled && tr->origin == orig) {               \
+			if ((tr->from_flags & FROM_FLAG_RESTART) != 0) {                             \
+				if (tr->benchmark_time != 0) {                                           \
+					tr->benchmark_time =                                                 \
+							histogram_insert_data_point(tr->rsv.ns->name##_restart_hist, \
+									tr->benchmark_time);                                 \
+				}                                                                        \
+			}                                                                            \
+			else {                                                                       \
+				tr->benchmark_time =                                                     \
+						histogram_insert_data_point(tr->rsv.ns->name##_start_hist,       \
+								tr->start_time);                                         \
+			}                                                                            \
+		}                                                                                \
+	}
 
-#define BENCHMARK_START_FROM_BATCH(tr) \
-{ \
-	if (tr->rsv.ns->batch_sub_benchmarks_enabled && tr->origin == FROM_BATCH && tr->benchmark_time != 0) { \
-		if ((tr->from_flags & FROM_FLAG_RESTART) != 0) { \
-			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->batch_sub_restart_hist, tr->benchmark_time); \
-		} \
-		else { \
-			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->batch_sub_start_hist, tr->benchmark_time); \
-		} \
-	} \
-}
+#define BENCHMARK_START_FROM_BATCH(tr)                                                  \
+	{                                                                                   \
+		if (tr->rsv.ns->batch_sub_benchmarks_enabled &&                                 \
+				tr->origin == FROM_BATCH && tr->benchmark_time != 0) {                  \
+			if ((tr->from_flags & FROM_FLAG_RESTART) != 0) {                            \
+				tr->benchmark_time =                                                    \
+						histogram_insert_data_point(tr->rsv.ns->batch_sub_restart_hist, \
+								tr->benchmark_time);                                    \
+			}                                                                           \
+			else {                                                                      \
+				tr->benchmark_time =                                                    \
+						histogram_insert_data_point(tr->rsv.ns->batch_sub_start_hist,   \
+								tr->benchmark_time);                                    \
+			}                                                                           \
+		}                                                                               \
+	}
 
-#define BENCHMARK_NEXT_DATA_POINT(trw, name, tok) \
-{ \
-	if (trw->rsv.ns->name##_benchmarks_enabled && trw->benchmark_time != 0) { \
-		trw->benchmark_time = histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, trw->benchmark_time); \
-	} \
-}
+#define BENCHMARK_NEXT_DATA_POINT(trw, name, tok)                                 \
+	{                                                                             \
+		if (trw->rsv.ns->name##_benchmarks_enabled && trw->benchmark_time != 0) { \
+			trw->benchmark_time =                                                 \
+					histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, \
+							trw->benchmark_time);                                 \
+		}                                                                         \
+	}
 
-#define BENCHMARK_NEXT_DATA_POINT_FROM(trw, name, orig, tok) \
-{ \
-	if (trw->rsv.ns->name##_benchmarks_enabled && trw->origin == orig && trw->benchmark_time != 0) { \
-		trw->benchmark_time = histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, trw->benchmark_time); \
-	} \
-}
-
+#define BENCHMARK_NEXT_DATA_POINT_FROM(trw, name, orig, tok)                      \
+	{                                                                             \
+		if (trw->rsv.ns->name##_benchmarks_enabled && trw->origin == orig &&      \
+				trw->benchmark_time != 0) {                                       \
+			trw->benchmark_time =                                                 \
+					histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, \
+							trw->benchmark_time);                                 \
+		}                                                                         \
+	}
 
 //==========================================================
 // Client socket information - as_file_handle.
 //
 
 typedef struct as_file_handle_s {
-	uint8_t		poll_data_type;	// one of CF_POLL_DATA_* - must be first
+	uint8_t poll_data_type; // one of CF_POLL_DATA_* - must be first
 
-	char		client[63];		// client identifier (currently ip-addr:port)
-	uint64_t	last_used;		// last nanoseconds we read or wrote
-	cf_socket	sock;			// our client socket
-	cf_poll		poll;			// our epoll instance
-	uint32_t	in_transaction;	// don't reap or transfer during transaction
-	bool		move_me;		// redistribute to another service thread
-	bool		reap_me;		// force reaping (overrides in_transaction)
-	bool		is_xdr;			// XDR client connection
-	as_proto	proto_hdr;		// space for header when reading it from socket
-	as_proto	*proto;			// complete request message
-	uint64_t	proto_unread;	// bytes not yet read from socket
-	void		*security_filter;
+	char client[63]; // client identifier (currently ip-addr:port)
+	uint64_t last_used; // last nanoseconds we read or wrote
+	cf_socket sock; // our client socket
+	cf_poll poll; // our epoll instance
+	uint32_t in_transaction; // don't reap or transfer during transaction
+	bool move_me; // redistribute to another service thread
+	bool reap_me; // force reaping (overrides in_transaction)
+	bool is_xdr; // XDR client connection
+	as_proto proto_hdr; // space for header when reading it from socket
+	as_proto* proto; // complete request message
+	uint64_t proto_unread; // bytes not yet read from socket
+	void* security_filter;
 } as_file_handle;
 
 // Helpers to release transaction file handles.
-void as_release_file_handle(as_file_handle *proto_fd_h);
-void as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close);
-void as_end_of_transaction_ok(as_file_handle *proto_fd_h);
-void as_end_of_transaction_force_close(as_file_handle *proto_fd_h);
-
+void as_release_file_handle(as_file_handle* proto_fd_h);
+void as_end_of_transaction(as_file_handle* proto_fd_h, bool force_close);
+void as_end_of_transaction_ok(as_file_handle* proto_fd_h);
+void as_end_of_transaction_force_close(as_file_handle* proto_fd_h);
 
 //==========================================================
 // Transaction.
 //
 
 typedef enum {
-	TRANS_DONE			= 0, // tsvc frees msgp & reservation, response was sent to origin
-	TRANS_IN_PROGRESS	= 1, // tsvc leaves msgp & reservation alone, rw_request now owns them
-	TRANS_WAITING		= 2  // tsvc leaves msgp alone but frees reservation
+	TRANS_DONE = 0, // tsvc frees msgp & reservation, response was sent to origin
+	TRANS_IN_PROGRESS =
+			1, // tsvc leaves msgp & reservation alone, rw_request now owns them
+	TRANS_WAITING = 2 // tsvc leaves msgp alone but frees reservation
 } transaction_status;
 
 // How to interpret the 'from' union.
@@ -161,7 +170,7 @@ typedef enum {
 //
 typedef enum {
 	// External, comes through service or fabric:
-	FROM_CLIENT	= 1,
+	FROM_CLIENT = 1,
 	FROM_PROXY,
 
 	// Internal, generated on local node:
@@ -174,7 +183,7 @@ typedef enum {
 	FROM_MONITOR_UPDATE, // enterprise-only
 	FROM_MONITOR_DELETE, // enterprise-only
 
-	FROM_UNDEF	= 0
+	FROM_UNDEF = 0
 } transaction_origin;
 
 struct as_batch_shared_s;
@@ -189,25 +198,25 @@ typedef struct as_transaction_s {
 	// transaction 'head' - copied onto queue.
 	//
 
-	cl_msg*		msgp;
-	uint32_t	msg_fields;
+	cl_msg* msgp;
+	uint32_t msg_fields;
 
-	uint8_t		origin;
-	uint8_t		from_flags;
+	uint8_t origin;
+	uint8_t from_flags;
 
 	// 2 spare bytes.
 
 	union {
-		void*						any;
-		as_file_handle*				proto_fd_h;
-		cf_node						proxy_node;
-		struct as_batch_shared_s*	batch_shared;
-		struct iudf_origin_s*		iudf_orig;
-		struct iops_origin_s*		iops_orig;
+		void* any;
+		as_file_handle* proto_fd_h;
+		cf_node proxy_node;
+		struct as_batch_shared_s* batch_shared;
+		struct iudf_origin_s* iudf_orig;
+		struct iops_origin_s* iops_orig;
 		struct monitor_roll_origin_s* monitor_roll_orig;
 
 		// Dummy used by various internal transactions with no origin struct:
-		void*						internal_origin;
+		void* internal_origin;
 	} from;
 
 	union {
@@ -216,10 +225,10 @@ typedef struct as_transaction_s {
 		uint32_t batch_index;
 	} from_data;
 
-	cf_digest	keyd; // only batch sub-transactions require this on queue
+	cf_digest keyd; // only batch sub-transactions require this on queue
 
-	uint64_t	start_time;
-	uint64_t	benchmark_time;
+	uint64_t start_time;
+	uint64_t benchmark_time;
 
 	//<><><><><><><><><><><> 64 bytes <><><><><><><><><><><>
 
@@ -229,179 +238,179 @@ typedef struct as_transaction_s {
 
 	as_partition_reservation rsv;
 
-	uint64_t	end_time;
-	uint8_t		result_code;
-	uint8_t		flags;
-	uint16_t	generation;
-	uint32_t	void_time;
-	uint64_t	last_update_time;
+	uint64_t end_time;
+	uint8_t result_code;
+	uint8_t flags;
+	uint16_t generation;
+	uint32_t void_time;
+	uint64_t last_update_time;
 
 	// "Short scope" items - not mirrored on rw_request.
-	uint64_t	epoch_ms;
+	uint64_t epoch_ms;
 
 } as_transaction;
 
 #define AS_TRANSACTION_HEAD_SIZE (offsetof(as_transaction, rsv))
 
 // 'from_flags' bits - set before queuing transaction head:
-#define FROM_FLAG_BATCH_SUB			0x0001
-#define FROM_FLAG_RESTART			0x0002 // only for detail logging
-#define FROM_FLAG_RESTART_STRICT	0x0004
+#define FROM_FLAG_BATCH_SUB 0x0001
+#define FROM_FLAG_RESTART 0x0002 // only for detail logging
+#define FROM_FLAG_RESTART_STRICT 0x0004
 
 // 'flags' bits - set in transaction body after queuing:
-#define AS_TRANSACTION_FLAG_IS_DELETE				0x01
-#define AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL	0x02
-#define AS_TRANSACTION_FLAG_XDR_TOMBSTONE			0x04 // enterprise-only
-#define AS_TRANSACTION_FLAG_MUST_PING				0x08 // enterprise-only
-#define AS_TRANSACTION_FLAG_RSV_PROLE				0x10
-#define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE			0x20 // enterprise-only
-#define AS_TRANSACTION_FLAG_WAS_MRT_PROV			0x40 // enterprise-only
-#define AS_TRANSACTION_FLAG_IS_MRT_MONITOR_CREATE	0x80 // enterprise-only
+#define AS_TRANSACTION_FLAG_IS_DELETE 0x01
+#define AS_TRANSACTION_FLAG_SWITCH_TO_COMMIT_ALL 0x02
+#define AS_TRANSACTION_FLAG_XDR_TOMBSTONE 0x04 // enterprise-only
+#define AS_TRANSACTION_FLAG_MUST_PING 0x08 // enterprise-only
+#define AS_TRANSACTION_FLAG_RSV_PROLE 0x10
+#define AS_TRANSACTION_FLAG_RSV_UNAVAILABLE 0x20 // enterprise-only
+#define AS_TRANSACTION_FLAG_WAS_MRT_PROV 0x40 // enterprise-only
+#define AS_TRANSACTION_FLAG_IS_MRT_MONITOR_CREATE 0x80 // enterprise-only
 
+void as_transaction_init_head(as_transaction* tr, const cf_digest*, cl_msg*);
+void as_transaction_init_body(as_transaction* tr);
 
-void as_transaction_init_head(as_transaction *tr, const cf_digest *, cl_msg *);
-void as_transaction_init_body(as_transaction *tr);
-
-void as_transaction_copy_head(as_transaction *to, const as_transaction *from);
+void as_transaction_copy_head(as_transaction* to, const as_transaction* from);
 
 struct rw_request_s;
 
-void as_transaction_init_from_rw(as_transaction *tr, struct rw_request_s *rw);
-void as_transaction_init_head_from_rw(as_transaction *tr, struct rw_request_s *rw);
+void as_transaction_init_from_rw(as_transaction* tr, struct rw_request_s* rw);
+void as_transaction_init_head_from_rw(as_transaction* tr,
+		struct rw_request_s* rw);
 
-bool as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type);
-bool as_transaction_prepare(as_transaction *tr, bool swap);
+bool as_transaction_set_msg_field_flag(as_transaction* tr, uint8_t type);
+bool as_transaction_prepare(as_transaction* tr, bool swap);
 
 static inline bool
-as_transaction_is_restart(const as_transaction *tr)
+as_transaction_is_restart(const as_transaction* tr)
 {
 	return (tr->from_flags & FROM_FLAG_RESTART) != 0;
 }
 
 static inline bool
-as_transaction_is_batch_sub(const as_transaction *tr)
+as_transaction_is_batch_sub(const as_transaction* tr)
 {
 	return (tr->from_flags & FROM_FLAG_BATCH_SUB) != 0;
 }
 
 static inline bool
-as_transaction_is_restart_strict(const as_transaction *tr)
+as_transaction_is_restart_strict(const as_transaction* tr)
 {
 	return (tr->from_flags & FROM_FLAG_RESTART_STRICT) != 0;
 }
 
 static inline bool
-as_transaction_has_set(const as_transaction *tr)
+as_transaction_has_set(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_SET) != 0;
 }
 
 static inline bool
-as_transaction_has_key(const as_transaction *tr)
+as_transaction_has_key(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_KEY) != 0;
 }
 
 static inline bool
-as_transaction_has_digest(const as_transaction *tr)
+as_transaction_has_digest(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_DIGEST_RIPE) != 0;
 }
 
 static inline bool
-as_transaction_is_query(const as_transaction *tr)
+as_transaction_is_query(const as_transaction* tr)
 {
 	return tr->origin == FROM_CLIENT &&
 			(tr->msg_fields & AS_MSG_FIELD_BIT_DIGEST_RIPE) == 0;
 }
 
 static inline bool
-as_transaction_has_pids(const as_transaction *tr)
+as_transaction_has_pids(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_PID_ARRAY) != 0;
 }
 
 static inline bool
-as_transaction_has_digests(const as_transaction *tr)
+as_transaction_has_digests(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_DIGEST_ARRAY) != 0;
 }
 
 static inline bool
-as_transaction_has_where_clause(const as_transaction *tr)
+as_transaction_has_where_clause(const as_transaction* tr)
 {
 	// Assumes we're already multi-record.
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_INDEX_RANGE) != 0;
 }
 
 static inline bool
-as_transaction_has_index_type(const as_transaction *tr)
+as_transaction_has_index_type(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_INDEX_TYPE) != 0;
 }
 
 static inline bool
-as_transaction_is_udf(const as_transaction *tr)
+as_transaction_is_udf(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_UDF_FILENAME) != 0;
 }
 
 static inline bool
-as_transaction_has_udf_op(const as_transaction *tr)
+as_transaction_has_udf_op(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_UDF_OP) != 0;
 }
 
 static inline bool
-as_transaction_has_query_binlist(const as_transaction *tr)
+as_transaction_has_query_binlist(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_QUERY_BINLIST) != 0;
 }
 
 static inline bool
-as_transaction_has_socket_timeout(const as_transaction *tr)
+as_transaction_has_socket_timeout(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_SOCKET_TIMEOUT) != 0;
 }
 
 static inline bool
-as_transaction_has_recs_per_sec(const as_transaction *tr)
+as_transaction_has_recs_per_sec(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_RECS_PER_SEC) != 0;
 }
 
 static inline bool
-as_transaction_has_sample_max(const as_transaction *tr)
+as_transaction_has_sample_max(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_SAMPLE_MAX) != 0;
 }
 
 static inline bool
-as_transaction_has_bval_array(const as_transaction *tr)
+as_transaction_has_bval_array(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_BVAL_ARRAY) != 0;
 }
 
 static inline bool
-as_transaction_has_predexp(const as_transaction *tr)
+as_transaction_has_predexp(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_PREDEXP) != 0;
 }
 
 static inline bool
-as_transaction_has_record_version(const as_transaction *tr)
+as_transaction_has_record_version(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_RECORD_VERSION) != 0;
 }
 
 static inline bool
-as_transaction_has_mrt_id(const as_transaction *tr)
+as_transaction_has_mrt_id(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_MRT_ID) != 0;
 }
 
 static inline bool
-as_transaction_has_mrt_deadline(const as_transaction *tr)
+as_transaction_has_mrt_deadline(const as_transaction* tr)
 {
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_MRT_DEADLINE) != 0;
 }
@@ -409,92 +418,93 @@ as_transaction_has_mrt_deadline(const as_transaction *tr)
 // For now it's not worth storing the trid in the as_transaction struct since we
 // only parse it from the msg once per transaction anyway.
 static inline uint64_t
-as_transaction_trid(const as_transaction *tr)
+as_transaction_trid(const as_transaction* tr)
 {
 	if ((tr->msg_fields & AS_MSG_FIELD_BIT_TRID) == 0) {
 		return 0;
 	}
 
-	as_msg_field *f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_TRID);
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_TRID);
 
 	return cf_swap_from_be64(*(uint64_t*)f->data);
 }
 
 static inline uint64_t
-as_transaction_xdr_lut(const as_transaction *tr)
+as_transaction_xdr_lut(const as_transaction* tr)
 {
 	if ((tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) == 0 ||
 			(tr->msg_fields & AS_MSG_FIELD_BIT_LUT) == 0) {
 		return 0;
 	}
 
-	as_msg_field *f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_LUT);
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_LUT);
 
 	return cf_swap_from_be64(*(uint64_t*)f->data);
 }
 
 static inline bool
-as_transaction_compress_response(const as_transaction *tr)
+as_transaction_compress_response(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info1 & AS_MSG_INFO1_COMPRESS_RESPONSE) != 0;
 }
 
 static inline bool
-as_transaction_is_delete(const as_transaction *tr)
+as_transaction_is_delete(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0;
 }
 
 static inline bool
-as_transaction_is_durable_delete(const as_transaction *tr)
+as_transaction_is_durable_delete(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE) != 0;
 }
 
 // TODO - where should this go?
 static inline bool
-as_msg_is_xdr(const as_msg *m)
+as_msg_is_xdr(const as_msg* m)
 {
 	return (m->info1 & AS_MSG_INFO1_XDR) != 0;
 }
 
 static inline bool
-as_transaction_is_xdr(const as_transaction *tr)
+as_transaction_is_xdr(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0;
 }
 
 static inline bool
-as_transaction_is_linearized_read(const as_transaction *tr)
+as_transaction_is_linearized_read(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) == 0 &&
 			(tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_TYPE) != 0;
 }
 
 static inline bool
-as_transaction_is_allow_unavailable_read(const as_transaction *tr)
+as_transaction_is_allow_unavailable_read(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) != 0 &&
 			(tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_TYPE) != 0;
 }
 
 static inline bool
-as_transaction_is_strict_read(const as_transaction *tr)
+as_transaction_is_strict_read(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info3 & AS_MSG_INFO3_SC_READ_RELAX) == 0;
 }
 
 static inline bool
-as_transaction_is_mrt_verify_read(const as_transaction *tr)
+as_transaction_is_mrt_verify_read(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info4 & AS_MSG_INFO4_MRT_VERIFY_READ) != 0;
 }
 
 static inline bool
-as_transaction_is_mrt_roll(const as_transaction *tr)
+as_transaction_is_mrt_roll(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info4 &
-			(AS_MSG_INFO4_MRT_ROLL_FORWARD | AS_MSG_INFO4_MRT_ROLL_BACK)) != 0;
+				   (AS_MSG_INFO4_MRT_ROLL_FORWARD | AS_MSG_INFO4_MRT_ROLL_BACK)) !=
+			0;
 }
 
 static inline bool
@@ -504,13 +514,13 @@ as_msg_from_monitor(const as_msg* m)
 }
 
 static inline bool
-as_transaction_is_short_query(const as_transaction *tr)
+as_transaction_is_short_query(const as_transaction* tr)
 {
 	return (tr->msgp->msg.info1 & AS_MSG_INFO1_SHORT_QUERY) != 0;
 }
 
 static inline uint64_t
-as_transaction_epoch_ms(as_transaction *tr)
+as_transaction_epoch_ms(as_transaction* tr)
 {
 	if (tr->epoch_ms == 0) {
 		tr->epoch_ms = cf_clepoch_milliseconds();
@@ -532,9 +542,12 @@ as_transaction_retry_self(as_transaction* tr)
 	as_service_enqueue_internal(&rtr);
 }
 
-void as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig);
-void as_transaction_init_iops(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iops_origin_s* iops_orig);
+void as_transaction_init_iudf(as_transaction* tr, struct as_namespace_s* ns,
+		cf_digest* keyd, struct iudf_origin_s* iudf_orig);
+void as_transaction_init_iops(as_transaction* tr, struct as_namespace_s* ns,
+		cf_digest* keyd, struct iops_origin_s* iops_orig);
 
-void as_transaction_demarshal_error(as_transaction *tr, uint32_t error_code);
-void as_transaction_error(as_transaction *tr, struct as_namespace_s *ns, uint32_t error_code);
-void as_multi_rec_transaction_error(as_transaction *tr, uint32_t error_code);
+void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
+void as_transaction_error(as_transaction* tr, struct as_namespace_s* ns,
+		uint32_t error_code);
+void as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code);

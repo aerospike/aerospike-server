@@ -20,54 +20,59 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#include "base/udf_arglist.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "aerospike/as_iterator.h"
 #include "aerospike/as_list.h"
 #include "aerospike/as_list_iterator.h"
-#include "aerospike/as_msgpack.h"
-
-#include "base/proto.h"
-#include "base/udf_arglist.h"
+#include "aerospike/as_val.h"
 
 /******************************************************************************
  * STATIC FUNCTIONS
  ******************************************************************************/
 
-static bool udf_arglist_foreach(const as_list *, as_list_foreach_callback, void *);
-static as_val *udf_arglist_get(const as_list *, const uint32_t idx);
+static bool udf_arglist_foreach(const as_list*, as_list_foreach_callback, void*);
+static as_val* udf_arglist_get(const as_list*, const uint32_t idx);
 
 /******************************************************************************
  * VARIABLES
  ******************************************************************************/
 
-const as_list_hooks udf_arglist_hooks = {
-	.destroy		= NULL,
-	.hashcode		= NULL,
-	.size			= NULL,
-	.append			= NULL,
-	.prepend		= NULL,
-	.get			= udf_arglist_get,
-	.set			= NULL,
-	.head			= NULL,
-	.tail			= NULL,
-	.drop			= NULL,
-	.take			= NULL,
-	.foreach		= udf_arglist_foreach,
-	.iterator_init	= NULL,
-	.iterator_new	= NULL
-};
+const as_list_hooks udf_arglist_hooks = { .destroy = NULL,
+	.hashcode = NULL,
+	.size = NULL,
+	.append = NULL,
+	.prepend = NULL,
+	.get = udf_arglist_get,
+	.set = NULL,
+	.head = NULL,
+	.tail = NULL,
+	.drop = NULL,
+	.take = NULL,
+	.foreach = udf_arglist_foreach,
+	.iterator_init = NULL,
+	.iterator_new = NULL };
 
 /******************************************************************************
  * FUNCTIONS
  ******************************************************************************/
 
-static bool udf_arglist_foreach(const as_list * l, as_list_foreach_callback callback, void * context) {
+static bool
+udf_arglist_foreach(const as_list* l, as_list_foreach_callback callback,
+		void* context)
+{
 	if (l) {
 		as_list_iterator list_iter;
-		as_iterator* iter = (as_iterator*) &list_iter;
+		as_iterator* iter = (as_iterator*)&list_iter;
 		as_list_iterator_init(&list_iter, l);
 
 		while (as_iterator_has_next(iter)) {
 			const as_val* v = as_iterator_next(iter);
-			callback((as_val *) v, context);
+			callback((as_val*)v, context);
 		}
 		as_iterator_destroy(iter);
 	}
@@ -75,7 +80,8 @@ static bool udf_arglist_foreach(const as_list * l, as_list_foreach_callback call
 	return true;
 }
 
-static as_val *udf_arglist_get(const as_list * l, const uint32_t idx) {
+static as_val*
+udf_arglist_get(const as_list* l, const uint32_t idx)
+{
 	return as_list_get(l, idx);
 }
-

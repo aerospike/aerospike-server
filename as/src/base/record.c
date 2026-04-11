@@ -27,35 +27,33 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "aerospike/as_atomic.h"
-#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "arenax.h"
+#include "cf_mutex.h"
 #include "log.h"
 
-#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/truncate.h"
 #include "base/xdr.h"
 #include "fabric/exchange.h" // for compatibility-id only
+#include "fabric/partition.h"
 #include "sindex/gc.h"
 #include "storage/flat.h"
 #include "storage/storage.h"
 #include "transaction/mrt_utils.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static void record_replace_failed(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd);
-
+static void record_replace_failed(as_remote_record* rr, as_index_ref* r_ref,
+		as_storage_rd* rd);
 
 //==========================================================
 // Inlines & macros.
@@ -64,7 +62,7 @@ static void record_replace_failed(as_remote_record* rr, as_index_ref* r_ref, as_
 static inline int
 resolve_generation_direct(uint16_t left, uint16_t right)
 {
-	return left == right ? 0 : (right > left  ? 1 : -1);
+	return left == right ? 0 : (right > left ? 1 : -1);
 }
 
 static inline int
@@ -72,7 +70,6 @@ resolve_generation(uint16_t left, uint16_t right)
 {
 	return left == right ? 0 : (as_gen_less_than(left, right) ? 1 : -1);
 }
-
 
 //==========================================================
 // Public API - record lock lifecycle.
@@ -127,7 +124,6 @@ as_record_done(as_index_ref* r_ref, as_namespace* ns)
 
 	cf_mutex_unlock(r_ref->olock);
 }
-
 
 //==========================================================
 // Public API - record lifecycle utilities.
@@ -186,7 +182,6 @@ as_record_finalize_key(as_record* r, const uint8_t* key, uint32_t key_size)
 	}
 }
 
-
 //==========================================================
 // Public API - pickled record utilities.
 //
@@ -216,7 +211,7 @@ as_record_replace_if_better(as_remote_record* rr)
 		bool from_replica;
 
 		if ((result = as_partition_check_source(ns, rr->rsv->p, rr->regime,
-				rr->src, &from_replica)) != AS_OK) {
+					 rr->src, &from_replica)) != AS_OK) {
 			record_replace_failed(rr, &r_ref, NULL);
 			return result;
 		}
@@ -231,9 +226,10 @@ as_record_replace_if_better(as_remote_record* rr)
 	}
 
 	// If local record is better, no-op or fail.
-	if (! is_create && (result = as_record_resolve_conflict(policy,
-			r->generation, r->last_update_time, (uint16_t)rr->generation,
-			rr->last_update_time)) <= 0) {
+	if (! is_create &&
+			(result = as_record_resolve_conflict(policy, r->generation,
+					 r->last_update_time, (uint16_t)rr->generation,
+					 rr->last_update_time)) <= 0) {
 		if (rr->via != VIA_REPLICATION || result < 0) {
 			record_replace_failed(rr, &r_ref, NULL);
 			return result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION;
@@ -254,8 +250,9 @@ as_record_replace_if_better(as_remote_record* rr)
 
 	// If creating record, write set-ID into index.
 	if (is_create) {
-		if (rr->set_name != NULL && (result = as_index_set_set_w_len(r, ns,
-				rr->set_name, rr->set_name_len, false)) != 0) {
+		if (rr->set_name != NULL &&
+				(result = as_index_set_set_w_len(r, ns, rr->set_name,
+						 rr->set_name_len, false)) != 0) {
 			record_replace_failed(rr, &r_ref, NULL);
 			return result;
 		}
@@ -273,8 +270,8 @@ as_record_replace_if_better(as_remote_record* rr)
 	// else - not bothering to check that sets match.
 
 	if (rr->set_name_len != 0 && is_mrt_setless_tombstone(ns, r)) {
-		if ((result = as_record_fix_setless_tombstone(r, ns, rr->set_name, 
-				rr->set_name_len, false)) != 0) {
+		if ((result = as_record_fix_setless_tombstone(r, ns, rr->set_name,
+					 rr->set_name_len, false)) != 0) {
 			record_replace_failed(rr, &r_ref, NULL);
 			return result;
 		}
@@ -284,8 +281,7 @@ as_record_replace_if_better(as_remote_record* rr)
 	// Note - including AS_STORAGE_ENGINE_MEMORY now: it needs exact sizes since
 	// it uses an end mark, and even though old memory pickles would not have
 	// been padded, let's cover switching from SSD to MEMORY during upgrade.
-	if (rr->via != VIA_REPLICATION &&
-			ns->storage_type != AS_STORAGE_ENGINE_PMEM &&
+	if (rr->via != VIA_REPLICATION && ns->storage_type != AS_STORAGE_ENGINE_PMEM &&
 			as_exchange_min_compatibility_id() < 11) {
 		if (! as_flat_fix_padded_rr(rr)) {
 			record_replace_failed(rr, &r_ref, NULL);
@@ -337,9 +333,9 @@ as_record_replace_if_better(as_remote_record* rr)
 	}
 	// else - dup-res goes in SWB_MASTER.
 
-	result = ! is_mrt_provisional(r) || is_rr_mrt(rr) ?
-			as_record_apply(rr, &r_ref, &rd) :
-			mrt_apply_roll(rr, &r_ref, &rd);
+	result = ! is_mrt_provisional(r) || is_rr_mrt(rr)
+			? as_record_apply(rr, &r_ref, &rd)
+			: mrt_apply_roll(rr, &r_ref, &rd);
 
 	if (result != 0) {
 		record_replace_failed(rr, &r_ref, &rd);
@@ -386,7 +382,8 @@ as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 	if (si_needs_bins) {
 		// TODO - don't need to load a bin cemetery for sindex - optimize?
 		if ((result = as_storage_rd_load_bins(rd, old_bins)) < 0) {
-			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD", ns->name, rr->keyd);
+			cf_warning(AS_RECORD, "{%s} record replace: failed load bins %pD",
+					ns->name, rr->keyd);
 			return -result;
 		}
 	}
@@ -396,7 +393,8 @@ as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 
 	if (set_has_si && n_new_bins != 0 &&
 			(result = as_flat_unpack_remote_bins(rr, new_bins)) != 0) {
-		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD", ns->name, rr->keyd);
+		cf_warning(AS_RECORD, "{%s} record replace: failed unpickle bins %pD",
+				ns->name, rr->keyd);
 		return -result;
 	}
 
@@ -408,7 +406,8 @@ as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 	// Write the record to storage. Note - here the pickle is directly stored -
 	// we will not use rd->bins and rd->n_bins at all to write.
 	if ((result = as_storage_record_write(rd)) < 0) {
-		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name, rr->keyd);
+		cf_detail(AS_RECORD, "{%s} record replace: failed write %pD", ns->name,
+				rr->keyd);
 		unwind_index_metadata(&old_r, r);
 		return -result;
 	}
@@ -421,8 +420,7 @@ as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 				&old_r);
 
 		if (set_has_si) {
-			update_sindex(ns, r_ref, rd->bins, rd->n_bins, new_bins,
-					n_new_bins);
+			update_sindex(ns, r_ref, rd->bins, rd->n_bins, new_bins, n_new_bins);
 		}
 		else {
 			// Sindex drop will leave in_sindex bit. Good opportunity to clear.
@@ -437,7 +435,6 @@ as_record_apply(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 
 	return AS_OK;
 }
-
 
 //==========================================================
 // Public API - conflict resolution.
@@ -478,57 +475,53 @@ as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen,
 	return result;
 }
 
-
 //==========================================================
 // Public API - conflict resolution.
 //
 
 void
 as_record_advance_void_time(as_record* r, uint32_t record_ttl, uint64_t now,
-	const as_namespace* ns)
+		const as_namespace* ns)
 {
-		uint64_t void_time = r->void_time;
+	uint64_t void_time = r->void_time;
 
-		switch (record_ttl) {
-		case TTL_USE_DEFAULT: {
-				uint32_t default_ttl = effective_default_ttl(ns,
-						as_namespace_get_record_set(ns, r));
+	switch (record_ttl) {
+	case TTL_USE_DEFAULT: {
+		uint32_t default_ttl =
+				effective_default_ttl(ns, as_namespace_get_record_set(ns, r));
 
-				if (default_ttl != 0) {
-					// Set record void-time using default TTL value.
-					void_time = (now / 1000) + default_ttl;
-				}
-				else {
-					// Default TTL is "never expire".
-					void_time = 0;
-				}
-			}
-			break;
-		case TTL_NEVER_EXPIRE:
-			// Set record to "never expire".
-			void_time = 0;
-			break;
-		case TTL_DONT_UPDATE:
-			// Do not change record's void time.
-			break;
-		default:
-			// Apply non-special m->record_ttl directly. Have already checked
-			// m->record_ttl <= 10 years, so no overflow etc.
-			void_time = (now / 1000) + record_ttl;
-			break;
+		if (default_ttl != 0) {
+			// Set record void-time using default TTL value.
+			void_time = (now / 1000) + default_ttl;
 		}
+		else {
+			// Default TTL is "never expire".
+			void_time = 0;
+		}
+	} break;
+	case TTL_NEVER_EXPIRE:
+		// Set record to "never expire".
+		void_time = 0;
+		break;
+	case TTL_DONT_UPDATE:
+		// Do not change record's void time.
+		break;
+	default:
+		// Apply non-special m->record_ttl directly. Have already checked
+		// m->record_ttl <= 10 years, so no overflow etc.
+		void_time = (now / 1000) + record_ttl;
+		break;
+	}
 
-		r->void_time = void_time;
+	r->void_time = void_time;
 }
-
 
 //==========================================================
 // Local helpers.
 //
 
 static void
-record_replace_failed(as_remote_record* rr, as_index_ref* r_ref,
-		as_storage_rd* rd)
+record_replace_failed(as_remote_record* rr, as_index_ref* r_ref, as_storage_rd* rd)
 {
 	if (rd != NULL) {
 		as_storage_record_close(rd);

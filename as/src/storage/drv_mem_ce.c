@@ -42,7 +42,6 @@
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Inlines & macros.
 //
@@ -56,7 +55,6 @@ stripe_name(int ix)
 
 	return str;
 }
-
 
 //==========================================================
 // Public API.
@@ -73,7 +71,6 @@ as_storage_record_write_mem(as_storage_rd* rd)
 	// No-op for drops, caller will drop record.
 	return rd->pickle != NULL || rd->n_bins != 0 ? write_record(rd) : 0;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -97,7 +94,8 @@ void
 header_validate_cfg(const as_namespace* ns, drv_mem* mem, drv_header* header)
 {
 	if ((header->generic.prefix.flags & DRV_HEADER_FLAG_SINGLE_BIN) != 0) {
-		cf_crash(AS_DRV_MEM, "device has 'single-bin' data but 'single-bin' is no longer supported");
+		cf_crash(AS_DRV_MEM,
+				"device has 'single-bin' data but 'single-bin' is no longer supported");
 	}
 }
 
@@ -143,8 +141,7 @@ cold_start_record_update(drv_mems* mems, const as_flat_record* flat,
 
 	cf_assert(r->rblock_id != 0, AS_DRV_MEM, "invalid rblock-id");
 
-	block_free(&mems->mems[r->file_id], r->rblock_id, r->n_rblocks,
-			"record-add");
+	block_free(&mems->mems[r->file_id], r->rblock_id, r->n_rblocks, "record-add");
 }
 
 conflict_resolution_pol

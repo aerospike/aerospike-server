@@ -28,7 +28,6 @@
 
 #include <stdint.h>
 
-
 //==========================================================
 // Public API - qsort() comparators.
 //

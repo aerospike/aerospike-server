@@ -34,13 +34,11 @@
 #include "cf_mutex.h"
 #include "dynbuf.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_query_job_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -52,13 +50,11 @@ typedef struct as_query_manager_s {
 	cf_queue* finished_jobs;
 } as_query_manager;
 
-
 //==========================================================
 // Globals.
 //
 
 extern uint32_t g_n_query_threads;
-
 
 //==========================================================
 // Public API.

@@ -31,11 +31,10 @@
 #include <printf.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <strings.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -55,7 +54,6 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -63,7 +61,7 @@
 struct cf_log_sink_s {
 	const char* path;
 	int fd;
-	int facility;    // for syslog only
+	int facility; // for syslog only
 	const char* tag; // for syslog only
 	cf_log_level levels[CF_LOG_N_CONTEXTS];
 };
@@ -202,7 +200,6 @@ typedef struct cf_log_cache_hkey_s {
 #define SYSLOG_TIME_SZ 16
 #define SYSLOG_TIME_LEN (SYSLOG_TIME_SZ - 1)
 
-
 //==========================================================
 // Globals.
 //
@@ -221,35 +218,41 @@ static uint32_t g_n_sinks = 0;
 static cf_log_sink g_sinks[MAX_SINKS];
 static bool g_use_syslog = false;
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static void set_most_verbose_level(cf_log_context context, cf_log_level level);
-static uint32_t cache_hash_fn(const void *key);
+static uint32_t cache_hash_fn(const void* key);
 static bool get_context(const char* context_str, cf_log_context* context);
 static bool get_level(const char* level_str, cf_log_level* level);
 static void update_most_verbose_level(cf_log_context context);
-static void log_write(cf_log_context context, cf_log_level level, const char* file_name, int line, const char* format, va_list argp);
+static void log_write(cf_log_context context, cf_log_level level,
+		const char* file_name, int line, const char* format, va_list argp);
 static uint32_t get_log_fds(cf_log_context context, cf_log_level level, int* fds);
 static int sprintf_now(char* buf);
 static bool write_all(int fd, const char* buf, size_t sz);
 static int32_t syslog_socket(const char* path);
-static void syslog_write(cf_log_context context, cf_log_level level, const char* file_name, int line, const char* format, va_list argp);
-static uint32_t get_syslog_sinks(cf_log_context context, cf_log_level level, cf_log_sink** sinks);
+static void syslog_write(cf_log_context context, cf_log_level level,
+		const char* file_name, int line, const char* format, va_list argp);
+static uint32_t get_syslog_sinks(cf_log_context context, cf_log_level level,
+		cf_log_sink** sinks);
 static void syslog_sprintf_now(char* buf);
 static int syslog_level(cf_log_level level);
-static void syslog_write_sink(cf_log_sink* sink, int sys_level, const char* time, const char* buf, size_t buf_sz);
+static void syslog_write_sink(cf_log_sink* sink, int sys_level,
+		const char* time, const char* buf, size_t buf_sz);
 static int cache_reduce_fn(const void* key, void* data, void* udata);
 
 static void register_custom_conversions(void);
-static int digest_fn(FILE* stream, const struct printf_info* info, const void* const* args);
-static int digest_arginfo_fn(const struct printf_info* info, size_t n, int* argtypes, int* size);
-static int hex_fn(FILE* stream, const struct printf_info* info, const void* const* args);
-static int hex_arginfo_fn(const struct printf_info* info, size_t n, int* argtypes, int* size);
+static int digest_fn(FILE* stream, const struct printf_info* info,
+		const void* const* args);
+static int digest_arginfo_fn(const struct printf_info* info, size_t n,
+		int* argtypes, int* size);
+static int hex_fn(FILE* stream, const struct printf_info* info,
+		const void* const* args);
+static int hex_arginfo_fn(const struct printf_info* info, size_t n,
+		int* argtypes, int* size);
 static void adjust_format(const char* format, char* adjusted);
-
 
 //==========================================================
 // Inlines & macros.
@@ -261,7 +264,6 @@ level_tag(cf_log_level level)
 	// TODO - we wanted to manipulate CRITICAL?
 	return level_strings[level];
 }
-
 
 //==========================================================
 // Public API - config wrappers.
@@ -290,7 +292,6 @@ cf_log_is_using_millis(void)
 {
 	return g_use_millis;
 }
-
 
 //==========================================================
 // Public API - manage logging.
@@ -573,7 +574,6 @@ cf_log_rotate(void)
 	}
 }
 
-
 //==========================================================
 // Public API - write to log.
 //
@@ -618,7 +618,6 @@ cf_log_write_no_return(int sig, cf_log_context context, const char* file_name,
 	}
 }
 
-
 //==========================================================
 // Public API - ticker logging.
 //
@@ -628,11 +627,11 @@ cf_log_write_cache(cf_log_context context, cf_log_level level,
 		const char* file_name, int line, const char* format, ...)
 {
 	cf_log_cache_hkey key = {
-			.line = line,
-			.context = context,
-			.file_name = file_name,
-			.level = level,
-			.msg = { 0 } // must pad hash keys
+		.line = line,
+		.context = context,
+		.file_name = file_name,
+		.level = level,
+		.msg = { 0 } // must pad hash keys
 	};
 
 	va_list argp;
@@ -676,7 +675,6 @@ cf_log_dump_cache(void)
 	cf_shash_reduce(g_ticker_hash, cache_reduce_fn, NULL);
 }
 
-
 //==========================================================
 // Public API - stack trace.
 //
@@ -695,7 +693,6 @@ cf_log_stack_trace(void)
 	}
 }
 
-
 //==========================================================
 // Local helpers - logging.
 //
@@ -713,7 +710,7 @@ set_most_verbose_level(cf_log_context context, cf_log_level level)
 }
 
 static uint32_t
-cache_hash_fn(const void *key)
+cache_hash_fn(const void* key)
 {
 	return (uint32_t)((const cf_log_cache_hkey*)key)->line +
 			*(uint32_t*)((const cf_log_cache_hkey*)key)->msg;
@@ -781,8 +778,7 @@ log_write(cf_log_context context, cf_log_level level, const char* file_name,
 
 	adjust_format(format, adjusted);
 
-	pos += vsnprintf(buf + pos, MAX_LOG_STRING_SZ - (size_t)pos, adjusted,
-			argp);
+	pos += vsnprintf(buf + pos, MAX_LOG_STRING_SZ - (size_t)pos, adjusted, argp);
 
 	if (pos > MAX_LOG_STRING_LEN) {
 		pos = MAX_LOG_STRING_LEN;
@@ -938,8 +934,7 @@ syslog_write(cf_log_context context, cf_log_level level, const char* file_name,
 
 	adjust_format(format, adjusted);
 
-	pos += vsnprintf(buf + pos, MAX_LOG_STRING_LEN - (size_t)pos, adjusted,
-			argp);
+	pos += vsnprintf(buf + pos, MAX_LOG_STRING_LEN - (size_t)pos, adjusted, argp);
 
 	if (pos > MAX_LOG_STRING_LEN) {
 		pos = MAX_LOG_STRING_LEN;
@@ -953,8 +948,7 @@ syslog_write(cf_log_context context, cf_log_level level, const char* file_name,
 }
 
 static uint32_t
-get_syslog_sinks(cf_log_context context, cf_log_level level,
-		cf_log_sink** sinks)
+get_syslog_sinks(cf_log_context context, cf_log_level level, cf_log_sink** sinks)
 {
 	if (! g_use_syslog || ! g_sinks_activated) {
 		return 0;
@@ -1093,7 +1087,6 @@ cache_reduce_fn(const void* key, void* data, void* udata)
 	return CF_SHASH_OK;
 }
 
-
 //==========================================================
 // Local helpers - custom conversions.
 //
@@ -1115,9 +1108,9 @@ digest_fn(FILE* stream, const struct printf_info* info, const void* const* args)
 	return fprintf(stream,
 			"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
 			"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
-			d->digest[0],  d->digest[1],  d->digest[2],  d->digest[3],
-			d->digest[4],  d->digest[5],  d->digest[6],  d->digest[7],
-			d->digest[8],  d->digest[9],  d->digest[10], d->digest[11],
+			d->digest[0], d->digest[1], d->digest[2], d->digest[3],
+			d->digest[4], d->digest[5], d->digest[6], d->digest[7],
+			d->digest[8], d->digest[9], d->digest[10], d->digest[11],
 			d->digest[12], d->digest[13], d->digest[14], d->digest[15],
 			d->digest[16], d->digest[17], d->digest[18], d->digest[19]);
 }
@@ -1179,8 +1172,7 @@ hex_fn(FILE* stream, const struct printf_info* info, const void* const* args)
 }
 
 static int
-hex_arginfo_fn(const struct printf_info* info, size_t n, int* argtypes,
-		int* size)
+hex_arginfo_fn(const struct printf_info* info, size_t n, int* argtypes, int* size)
 {
 	(void)info;
 

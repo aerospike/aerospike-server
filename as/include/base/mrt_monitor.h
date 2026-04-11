@@ -33,7 +33,6 @@
 
 #include "msg.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -43,7 +42,6 @@ struct as_namespace_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
 struct keyd_tracker_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -66,25 +64,31 @@ typedef struct monitor_roll_origin_s {
 
 #define MAX_MONITOR_RECORD_SZ (90 * 1024)
 
-
 //==========================================================
 // Public API.
 //
 
 void as_mrt_monitor_init(void);
 
-bool as_mrt_monitor_is_monitor_set_id(const struct as_namespace_s* ns, uint32_t set_id);
-bool as_mrt_monitor_is_monitor_record(const struct as_namespace_s* ns, const struct as_index_s* r);
+bool as_mrt_monitor_is_monitor_set_id(const struct as_namespace_s* ns,
+		uint32_t set_id);
+bool as_mrt_monitor_is_monitor_record(const struct as_namespace_s* ns,
+		const struct as_index_s* r);
 
-bool as_mrt_monitor_check_set_name(const struct as_namespace_s* ns, const uint8_t* name, uint32_t len);
-int as_mrt_monitor_write_check(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
+bool as_mrt_monitor_check_set_name(const struct as_namespace_s* ns,
+		const uint8_t* name, uint32_t len);
+int as_mrt_monitor_write_check(struct as_transaction_s* tr,
+		struct as_storage_rd_s* rd);
 uint32_t as_mrt_monitor_compute_deadline(const struct as_transaction_s* tr);
 int as_mrt_monitor_check_writes_limit(struct as_storage_rd_s* rd);
 void as_mrt_monitor_update_hist(struct as_storage_rd_s* rd);
 
-void as_mrt_monitor_roll_done(monitor_roll_origin* roll_orig, const cf_digest* keyd, uint8_t result);
-void as_mrt_monitor_proxyer_roll_done(msg* m, msg* fab_msg, monitor_roll_origin* roll_orig);
-void as_mrt_monitor_proxyer_roll_timeout(msg* fab_msg, monitor_roll_origin* roll_orig);
+void as_mrt_monitor_roll_done(monitor_roll_origin* roll_orig,
+		const cf_digest* keyd, uint8_t result);
+void as_mrt_monitor_proxyer_roll_done(msg* m, msg* fab_msg,
+		monitor_roll_origin* roll_orig);
+void as_mrt_monitor_proxyer_roll_timeout(msg* fab_msg,
+		monitor_roll_origin* roll_orig);
 
 uint32_t as_mrt_monitor_n_active(const struct as_namespace_s* ns);
 uint64_t as_mrt_monitor_n_present(const struct as_namespace_s* ns);

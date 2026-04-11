@@ -33,7 +33,8 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
-
+#include "base/proto.h"
+#include "storage/storage.h"
 
 //==========================================================
 // Typedefs & constants.
@@ -59,7 +60,6 @@ typedef enum {
 	AS_EXP_UNK = 2
 } as_exp_trilean;
 
-
 //==========================================================
 // Public API.
 //
@@ -67,8 +67,10 @@ typedef enum {
 as_exp* as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz);
 as_exp* as_exp_filter_build(const as_msg_field* msg, bool cpy_instr);
 as_exp* as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire);
-bool as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb, cf_ll_buf* particles_llb);
-as_exp_trilean as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx);
+bool as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
+		cf_ll_buf* particles_llb);
+as_exp_trilean as_exp_matches_metadata(const as_exp* predexp,
+		const as_exp_ctx* ctx);
 bool as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx);
 bool as_exp_display(const as_exp* exp, cf_dyn_buf* db);
 void as_exp_destroy(as_exp* exp);
