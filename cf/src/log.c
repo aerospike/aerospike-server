@@ -70,6 +70,7 @@ struct cf_log_sink_s {
 
 #define MAX_SINKS 8
 
+// clang-format off
 static const char* context_strings[] = {
 		"misc",
 
@@ -178,6 +179,7 @@ static const facility_code facility_codes[] = {
 		{ "local6", LOG_LOCAL6 },
 		{ "local7", LOG_LOCAL7 }
 };
+// clang-format on
 
 #define N_FACILITY_CODES (sizeof(facility_codes) / sizeof(facility_code))
 

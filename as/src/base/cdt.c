@@ -50,6 +50,7 @@
 
 #define CDT_OP_ENTRY(op, type, ...) [op].name = # op, [op].args = (const as_cdt_paramtype[]){VA_REST(__VA_ARGS__, 0)}, [op].count = VA_NARGS(__VA_ARGS__) - 1, [op].opt_args = VA_FIRST(__VA_ARGS__)
 
+// clang-format off
 const cdt_op_table_entry cdt_op_table[] = {
 
 	//============================================
@@ -180,6 +181,7 @@ const cdt_op_table_entry cdt_op_table[] = {
 	CDT_OP_ENTRY(AS_CDT_OP_MAP_GET_BY_VALUE_REL_RANK_RANGE,	AS_OPERATOR_MAP_READ, 1, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
 
 };
+// clang-format on
 
 static const size_t cdt_op_table_size = sizeof(cdt_op_table) / sizeof(cdt_op_table_entry);
 
@@ -214,6 +216,7 @@ typedef struct {
 	bool has_toplvl;
 } cdt_stack;
 
+// clang-format off
 static const char* cdt_exp_display_names[] = {
 		[AS_CDT_OP_LIST_APPEND] = "list_append",
 		[AS_CDT_OP_LIST_APPEND_ITEMS] = "list_append_items",
@@ -276,6 +279,7 @@ static const char* cdt_exp_display_names[] = {
 
 static const size_t n_cdt_exp_display_names = sizeof(cdt_exp_display_names) / sizeof(char*);
 
+// clang-format on
 
 //==========================================================
 // Forward declares.

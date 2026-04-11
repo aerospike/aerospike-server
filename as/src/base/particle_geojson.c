@@ -72,6 +72,7 @@ void geojson_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_partic
 // GEOJSON particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable geojson_vtable = {
 		blob_destruct,
 		blob_size,
@@ -99,6 +100,7 @@ const as_particle_vtable geojson_vtable = {
 		blob_flat_size,
 		blob_to_flat
 };
+// clang-format on
 
 
 //==========================================================

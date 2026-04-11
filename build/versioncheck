@@ -1,7 +1,6 @@
 #!/bin/sh
 
-checkversion()
-{
+checkversion() {
     if [ "$#" -ne 2 ]; then
         echo "versioncheck expects 2 arguments - version and min_version"
         echo "Example:"
@@ -26,16 +25,14 @@ checkversion()
     fi
 }
 
-checkit()
-{
+checkit() {
     if [ "$(checkversion $1 $2)" != "$3" ]; then
         echo "FAIL: $2 <= $1 expected $3"
-        exit 1;
+        exit 1
     fi
 }
 
-test()
-{
+test() {
     if [ "$1" != "--test" ]; then
         return
     fi
