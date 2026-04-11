@@ -1802,6 +1802,7 @@ basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
 			if (! as_bin_name_check(data, len)) {
 				cf_warning(AS_QUERY, "ignoring bad bin name %.*s (%u)", len,
 						data, len);
+				data += len;
 				continue;
 			}
 
