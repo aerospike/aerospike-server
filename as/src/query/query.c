@@ -2034,6 +2034,7 @@ basic_query_get_ops(const as_transaction* tr, const char* ns_name,
 			if (! as_bin_name_check(data, len)) {
 				cf_warning(AS_QUERY, "ignoring bad bin name %.*s (%u)", len,
 						data, len);
+				data += len;
 				continue;
 			}
 
