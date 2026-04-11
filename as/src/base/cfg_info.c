@@ -2878,7 +2878,7 @@ cfg_set_set(const char* cmd, as_namespace* ns, const char* set_name,
 	}
 	else if (as_info_parameter_get(cmd, "enable-index", v, &v_len) == 0) {
 		as_info_warn_deprecated(
-				"'enable-index' is deprecated - use 'sindex-create' and 'sindex-delete' info commands instead - see https://aerospike.com/docs/database/release/8-1-2-0/");
+				"'enable-index' is deprecated - use 'sindex-create' and 'sindex-delete' info commands instead - see https://aerospike.com/docs/database/release/8-1-2/");
 		if (strcmp(v, "true") == 0) {
 			cf_info(AS_INFO,
 					"Changing value of enable-index of ns %s set %s to %s",

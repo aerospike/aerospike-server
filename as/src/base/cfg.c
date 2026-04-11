@@ -4205,7 +4205,7 @@ as_config_init(const char* config_file)
 						(uint8_t)(cfg_bool(&line) ? AS_SET_INDEX_CONFIG
 												  : AS_SET_INDEX_NONE);
 				as_info_warn_deprecated(
-						"'enable-index' is deprecated - use 'sindex-create' and 'sindex-delete' info commands instead - see https://aerospike.com/docs/database/release/8-1-2-0/");
+						"'enable-index' is deprecated - use 'sindex-create' and 'sindex-delete' info commands instead - see https://aerospike.com/docs/database/release/8-1-2/");
 				break;
 			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
 				p_set->stop_writes_count = cfg_u64_no_checks(&line);
