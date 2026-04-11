@@ -79,6 +79,7 @@ void list_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle 
 // LIST particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable list_vtable = {
 		list_destruct,
 		list_size,
@@ -106,6 +107,7 @@ const as_particle_vtable list_vtable = {
 		blob_flat_size,
 		blob_to_flat
 };
+// clang-format on
 
 
 //==========================================================

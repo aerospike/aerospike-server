@@ -45,6 +45,7 @@ struct as_transaction_s;
 // Typedefs & constants.
 //
 
+// clang-format off
 // Security permissions.
 typedef enum {
 	PERM_NONE			= 0,
@@ -77,6 +78,7 @@ typedef enum {
 	// Database users and roles management.
 	PERM_USER_ADMIN		= 0x100000000000
 } as_sec_perm;
+// clang-format on
 
 // Current security message version.
 #define AS_SEC_MSG_SCHEME 0

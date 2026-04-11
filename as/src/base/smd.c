@@ -93,6 +93,7 @@ typedef enum {
 	NUM_SMD_FIELDS
 } smd_msg_fields;
 
+// clang-format off
 static const msg_template smd_mt[] = {
 		{ SMD_MSG_TID, M_FT_UINT64 },
 		{ SMD_MSG_VERSION, M_FT_UINT32 },
@@ -123,6 +124,7 @@ static const msg_template smd_mt[] = {
 };
 
 COMPILER_ASSERT(sizeof(smd_mt) / sizeof(msg_template) == NUM_SMD_FIELDS);
+// clang-format on
 
 #define SMD_MSG_SCRATCH_SIZE 64 // TODO - rethink... could be smaller?
 

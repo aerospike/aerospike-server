@@ -60,6 +60,7 @@ struct as_storage_rd_s;
 // be <= 255, to fit in one byte.
 //
 
+// clang-format off
 // Generic.
 #define AS_OK                           0
 #define AS_ERR_UNKNOWN                  1
@@ -657,6 +658,7 @@ typedef enum {
 	AS_EXP_FLAG_POLICY_NO_FAIL  = 1 << 3,
 	AS_EXP_FLAG_EVAL_NO_FAIL    = 1 << 4
 } as_exp_flags;
+// clang-format on
 
 
 //==========================================================

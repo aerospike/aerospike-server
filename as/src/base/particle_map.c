@@ -78,6 +78,7 @@ void map_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle *
 // MAP particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable map_vtable = {
 		map_destruct,
 		map_size,
@@ -105,6 +106,7 @@ const as_particle_vtable map_vtable = {
 		blob_flat_size,
 		blob_to_flat
 };
+// clang-format on
 
 
 //==========================================================

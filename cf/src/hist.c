@@ -78,6 +78,7 @@ struct histogram_s {
 // e.g. units=bytes:[128K-256K)=12345:[256K-512K)=54321 ... \0
 #define SNAPSHOT_SIZE (5 + 1 + 5 + 1 + (N_BUCKETS * (1 + 11 + 1 + 20)) + 1)
 
+// clang-format off
 static const char* SNAPSHOT_TAGS[] = {
 		"0",
 		"1",  "2",  "4",  "8",  "16",  "32",  "64",  "128",  "256",  "512",
@@ -121,6 +122,7 @@ static const char BYTE_MSB[] = {
 		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
 		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8
 };
+// clang-format on
 
 
 //==========================================================

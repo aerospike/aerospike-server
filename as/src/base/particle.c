@@ -64,6 +64,7 @@ extern const as_particle_vtable map_vtable;
 extern const as_particle_vtable list_vtable;
 extern const as_particle_vtable geojson_vtable;
 
+// clang-format off
 // Array of particle vtable pointers.
 const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_NULL]			= NULL,
@@ -84,6 +85,7 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_LIST]			= &list_vtable,
 		[AS_PARTICLE_TYPE_GEOJSON]		= &geojson_vtable
 };
+// clang-format on
 
 
 //==========================================================

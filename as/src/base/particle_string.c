@@ -53,6 +53,7 @@ uint32_t string_asval_to_wire(const as_val *val, uint8_t *wire);
 // STRING particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable string_vtable = {
 		blob_destruct,
 		blob_size,
@@ -80,6 +81,7 @@ const as_particle_vtable string_vtable = {
 		blob_flat_size,
 		blob_to_flat
 };
+// clang-format on
 
 
 //==========================================================
