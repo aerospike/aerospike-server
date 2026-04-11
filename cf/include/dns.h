@@ -25,8 +25,8 @@
 #include <limits.h>
 #include <netdb.h>
 #include <stdbool.h>
-#include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 
 #include "log.h"
 
@@ -45,11 +45,13 @@ typedef struct addrinfo addrinfo;
  * zero.
  * @param udata udata passed to the asynchronous resolve function.
  */
-typedef void (*cf_dns_resolve_cb)(const int status, const char* hostname, addrinfo* addrs, void* udata);
+typedef void (*cf_dns_resolve_cb)(const int status, const char* hostname,
+		addrinfo* addrs, void* udata);
 
 void cf_dns_init();
-void cf_dns_resolve_a(const char* hostname, addrinfo* hints, cf_dns_resolve_cb cb,
-		void* udata);
-CF_MUST_CHECK int cf_dns_resolve(const char* hostname, addrinfo* hints, addrinfo** addrs);
+void cf_dns_resolve_a(const char* hostname, addrinfo* hints,
+		cf_dns_resolve_cb cb, void* udata);
+CF_MUST_CHECK int cf_dns_resolve(const char* hostname, addrinfo* hints,
+		addrinfo** addrs);
 const char* cf_dns_strerror(int errcode);
 void cf_dns_free(addrinfo* addrs);

@@ -23,9 +23,14 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
+#include "citrusleaf/cf_clock.h"
+
+#include "dynbuf.h"
 #include "msg.h"
+#include "node.h"
 #include "socket.h"
 #include "tls.h"
 #include "vector.h"
@@ -57,8 +62,7 @@
 /**
  * Heartbeat modes.
  */
-typedef enum as_hb_mode_enum
-{
+typedef enum as_hb_mode_enum {
 	AS_HB_MODE_UNDEF,
 	AS_HB_MODE_MULTICAST,
 	AS_HB_MODE_MESH
@@ -67,8 +71,7 @@ typedef enum as_hb_mode_enum
 /**
  * Heartbeat protocol versions.
  */
-typedef enum as_hb_protocol_enum
-{
+typedef enum as_hb_protocol_enum {
 	AS_HB_PROTOCOL_UNDEF,
 	AS_HB_PROTOCOL_NONE,
 	AS_HB_PROTOCOL_RESET,
@@ -78,8 +81,7 @@ typedef enum as_hb_protocol_enum
 /**
  * Events published by the heartbeat subsystem.
  */
-typedef enum
-{
+typedef enum {
 	AS_HB_NODE_ARRIVE,
 	AS_HB_NODE_DEPART,
 	AS_HB_NODE_ADJACENCY_CHANGED,
@@ -91,8 +93,7 @@ typedef enum
  * The heartbeat outgoing message buffer will be populated and parsed in the
  * order of this enum.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * The heartbeat subsystem itself.
 	 */
@@ -121,8 +122,7 @@ typedef enum
  * The fields in the heartbeat message.
  * New field additions only at the end.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * HB protocol identifier.
 	 */
@@ -196,8 +196,7 @@ typedef enum
 /**
  * Heartbeat subsystem configuration.
  */
-typedef struct as_hb_config_s
-{
+typedef struct as_hb_config_s {
 	/**
 	 * Mode of operation. Mesh or Multicast for now.
 	 */
@@ -263,8 +262,7 @@ typedef struct as_hb_config_s
 /**
  * Heartbeat published event structure.
  */
-typedef struct as_hb_event_node_s
-{
+typedef struct as_hb_event_node_s {
 	/**
 	 * The type of the event.
 	 */
@@ -296,8 +294,7 @@ typedef void (*as_hb_plugin_set_data_fn)(msg* hb_message);
 /**
  * Data stored for an adjacent node for a plugin.
  */
-typedef struct as_hb_plugin_node_data_s
-{
+typedef struct as_hb_plugin_node_data_s {
 	/**
 	 * Heap allocated node specific data blob for this plugin.
 	 */
@@ -336,7 +333,9 @@ typedef struct as_hb_plugin_node_data_s
  * from the source.
  * @param plugin_data (output) plugin data structure to output parsed data.
  */
-typedef void (*as_hb_plugin_parse_data_fn)(msg* hb_message, cf_node source, as_hb_plugin_node_data* plugin_data_prev, as_hb_plugin_node_data* plugin_data);
+typedef void (*as_hb_plugin_parse_data_fn)(msg* hb_message, cf_node source,
+		as_hb_plugin_node_data* plugin_data_prev,
+		as_hb_plugin_node_data* plugin_data);
 
 /**
  * A listener for detecting changes to this plugin's data for a particular node.
@@ -351,8 +350,7 @@ typedef void (*as_hb_plugin_data_changed_fn)(cf_node nodeid);
  * A plugin allows a module to pushing and read data with heartbeat pulse
  * messages.
  */
-typedef struct as_hb_plugin_s
-{
+typedef struct as_hb_plugin_s {
 	/**
 	 * The plugin id.
 	 */
@@ -404,7 +402,8 @@ bool as_hb_self_is_duplicate();
 
 bool as_hb_node_is_adjacent(cf_node nodeid);
 
-typedef void (*as_hb_event_fn)(int nevents, as_hb_event_node* events, void* udata);
+typedef void (*as_hb_event_fn)(int nevents, as_hb_event_node* events,
+		void* udata);
 
 void as_hb_register_listener(as_hb_event_fn event_callback, void* udata);
 
@@ -446,13 +445,19 @@ void as_hb_config_validate();
 
 void as_hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict);
 
-int as_hb_plugin_data_get(cf_node nodeid, as_hb_plugin_id plugin, as_hb_plugin_node_data* plugin_data, as_hlc_msg_timestamp* msg_hlc_ts, cf_clock* recv_monotonic_ts);
+int as_hb_plugin_data_get(cf_node nodeid, as_hb_plugin_id plugin,
+		as_hb_plugin_node_data* plugin_data, as_hlc_msg_timestamp* msg_hlc_ts,
+		cf_clock* recv_monotonic_ts);
 
-typedef void (*as_hb_plugin_data_iterate_fn)(cf_node nodeid, void* plugin_data, size_t plugin_data_size, cf_clock recv_monotonic_ts, as_hlc_msg_timestamp* msg_hlc_ts, void* udata);
+typedef void (*as_hb_plugin_data_iterate_fn)(cf_node nodeid, void* plugin_data,
+		size_t plugin_data_size, cf_clock recv_monotonic_ts,
+		as_hlc_msg_timestamp* msg_hlc_ts, void* udata);
 
-void as_hb_plugin_data_iterate(cf_vector* nodes, as_hb_plugin_id plugin, as_hb_plugin_data_iterate_fn iterate_fn, void* udata);
+void as_hb_plugin_data_iterate(cf_vector* nodes, as_hb_plugin_id plugin,
+		as_hb_plugin_data_iterate_fn iterate_fn, void* udata);
 
-void as_hb_plugin_data_iterate_all(as_hb_plugin_id plugin, as_hb_plugin_data_iterate_fn iterate_fn, void* udata);
+void as_hb_plugin_data_iterate_all(as_hb_plugin_id plugin,
+		as_hb_plugin_data_iterate_fn iterate_fn, void* udata);
 
 /*
  * -----------------------------------------------------------------
@@ -464,7 +469,8 @@ void as_hb_info_config_get(cf_dyn_buf* db);
 
 void as_hb_info_endpoints_get(cf_dyn_buf* db);
 
-void as_hb_info_listen_addr_get(as_hb_mode* mode, char* addr_port, size_t addr_port_capacity);
+void as_hb_info_listen_addr_get(as_hb_mode* mode, char* addr_port,
+		size_t addr_port_capacity);
 
 void as_hb_info_duplicates_get(cf_dyn_buf* db);
 

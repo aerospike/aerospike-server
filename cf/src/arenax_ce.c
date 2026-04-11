@@ -33,7 +33,6 @@
 
 #include "log.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -45,11 +44,9 @@ cf_arenax_want_prefetch(cf_arenax* arena)
 }
 
 void
-cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles,
-		uint32_t n_puddles)
+cf_arenax_reclaim(cf_arenax* arena, cf_arenax_puddle* puddles, uint32_t n_puddles)
 {
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -68,8 +65,7 @@ cf_arenax_add_stage(cf_arenax* arena)
 	uint8_t* p_stage = (uint8_t*)cf_try_malloc(arena->stage_size);
 
 	if (! p_stage) {
-		cf_ticker_warning(CF_ARENAX,
-				"could not allocate %zu-byte arena stage %u",
+		cf_ticker_warning(CF_ARENAX, "could not allocate %zu-byte arena stage %u",
 				arena->stage_size, arena->stage_count);
 		return CF_ARENAX_ERR_STAGE_CREATE;
 	}

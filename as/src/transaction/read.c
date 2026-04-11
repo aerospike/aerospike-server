@@ -30,22 +30,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_clock.h"
+#include "aerospike/as_atomic.h"
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
 #include "log.h"
 
 #include "base/batch.h"
-#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/proxy.h"
@@ -55,23 +52,24 @@
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static void read_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
+static void read_dup_res_start_cb(rw_request* rw, as_transaction* tr,
+		as_record* r);
 static void start_repl_ping(rw_request* rw, as_transaction* tr);
 static bool read_dup_res_cb(rw_request* rw);
 static void repl_ping_after_dup_res(rw_request* rw, as_transaction* tr);
 static void repl_ping_cb(rw_request* rw);
 
-static void send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins, uint16_t n_bins, cf_dyn_buf* db);
+static void send_read_response(as_transaction* tr, as_msg_op** ops,
+		as_bin** response_bins, uint16_t n_bins, cf_dyn_buf* db);
 static void read_timeout_cb(rw_request* rw);
 
 static transaction_status read_local(as_transaction* tr);
-static void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, int result_code);
-
+static void read_local_done(as_transaction* tr, as_index_ref* r_ref,
+		as_storage_rd* rd, int result_code);
 
 //==========================================================
 // Inlines & macros.
@@ -85,7 +83,7 @@ read_must_duplicate_resolve(const as_transaction* tr)
 }
 
 static inline bool
-read_must_ping(const as_transaction *tr)
+read_must_ping(const as_transaction* tr)
 {
 	return (tr->flags & AS_TRANSACTION_FLAG_MUST_PING) != 0;
 }
@@ -178,7 +176,6 @@ from_proxy_batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 	}
 }
 
-
 //==========================================================
 // Public API.
 //
@@ -225,8 +222,7 @@ as_read_start(as_transaction* tr)
 	// else - rw_request is now in hash, continue...
 
 	// If there are duplicates to resolve, start doing so.
-	if (must_duplicate_resolve &&
-			dup_res_start(rw, tr, read_dup_res_start_cb)) {
+	if (must_duplicate_resolve && dup_res_start(rw, tr, read_dup_res_start_cb)) {
 		return TRANS_IN_PROGRESS; // started duplicate resolution
 	}
 
@@ -252,7 +248,6 @@ as_read_start(as_transaction* tr)
 
 	return status;
 }
-
 
 //==========================================================
 // Local helpers - transaction flow.
@@ -362,7 +357,6 @@ repl_ping_cb(rw_request* rw)
 	}
 }
 
-
 //==========================================================
 // Local helpers - transaction end.
 //
@@ -467,7 +461,6 @@ read_timeout_cb(rw_request* rw)
 	rw->from.any = NULL; // inform other callback it lost the race
 }
 
-
 //==========================================================
 // Local helpers - read local.
 //
@@ -557,8 +550,8 @@ read_local(as_transaction* tr)
 
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
-	if (as_transaction_has_key(tr) &&
-			as_storage_rd_load_key(&rd) && ! check_msg_key(m, &rd)) {
+	if (as_transaction_has_key(tr) && as_storage_rd_load_key(&rd) &&
+			! check_msg_key(m, &rd)) {
 		read_local_done(tr, &r_ref, &rd, AS_ERR_KEY_MISMATCH);
 		return TRANS_DONE_ERROR;
 	}
@@ -575,13 +568,14 @@ read_local(as_transaction* tr)
 	as_bin stack_bins[RECORD_MAX_BINS];
 
 	if ((result = as_storage_rd_load_bins(&rd, stack_bins)) < 0) {
-		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_bins() %pD", ns->name, &tr->keyd);
+		cf_warning(AS_RW, "{%s} read_local: failed as_storage_rd_load_bins() %pD",
+				ns->name, &tr->keyd);
 		read_local_done(tr, &r_ref, &rd, -result);
 		return TRANS_DONE_ERROR;
 	}
 
-	uint32_t bin_count = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0 ?
-			rd.n_bins : m->n_ops;
+	uint32_t bin_count = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0 ? rd.n_bins
+																: m->n_ops;
 
 	as_msg_op* ops[bin_count];
 	as_msg_op** p_ops = ops;
@@ -604,7 +598,9 @@ read_local(as_transaction* tr)
 	}
 	else {
 		if (m->n_ops == 0) {
-			cf_warning(AS_RW, "{%s} read_local: bin op(s) expected, none present %pD", ns->name, &tr->keyd);
+			cf_warning(AS_RW,
+					"{%s} read_local: bin op(s) expected, none present %pD",
+					ns->name, &tr->keyd);
 			read_local_done(tr, &r_ref, &rd, AS_ERR_PARAMETER);
 			return TRANS_DONE_ERROR;
 		}
@@ -616,7 +612,8 @@ read_local(as_transaction* tr)
 
 		while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
 			if (! as_bin_name_check(op->name, op->name_sz)) {
-				cf_warning(AS_RW, "{%s} read_local: bad bin name %.*s (%u) %pD", ns->name, op->name_sz, op->name, op->name_sz, &tr->keyd);
+				cf_warning(AS_RW, "{%s} read_local: bad bin name %.*s (%u) %pD",
+						ns->name, op->name_sz, op->name, op->name_sz, &tr->keyd);
 				as_bin_destroy_all(result_bins, n_result_bins);
 				read_local_done(tr, &r_ref, &rd, AS_ERR_BIN_NAME);
 				return TRANS_DONE_ERROR;
@@ -638,7 +635,9 @@ read_local(as_transaction* tr)
 					as_bin_set_empty(rb);
 
 					if ((result = as_bin_bits_read_from_client(b, op, rb)) < 0) {
-						cf_detail(AS_RW, "{%s} read_local: failed as_bin_bits_read_from_client() %pD", ns->name, &tr->keyd);
+						cf_detail(AS_RW,
+								"{%s} read_local: failed as_bin_bits_read_from_client() %pD",
+								ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
@@ -667,7 +666,9 @@ read_local(as_transaction* tr)
 					as_bin_set_empty(rb);
 
 					if ((result = as_bin_hll_read_from_client(b, op, rb)) < 0) {
-						cf_detail(AS_RW, "{%s} read_local: failed as_bin_hll_read_from_client() %pD", ns->name, &tr->keyd);
+						cf_detail(AS_RW,
+								"{%s} read_local: failed as_bin_hll_read_from_client() %pD",
+								ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
@@ -696,7 +697,9 @@ read_local(as_transaction* tr)
 					as_bin_set_empty(rb);
 
 					if ((result = as_bin_cdt_read_from_client(b, op, rb)) < 0) {
-						cf_detail(AS_RW, "{%s} read_local: failed as_bin_cdt_read_from_client() %pD", ns->name, &tr->keyd);
+						cf_detail(AS_RW,
+								"{%s} read_local: failed as_bin_cdt_read_from_client() %pD",
+								ns->name, &tr->keyd);
 						as_bin_destroy_all(result_bins, n_result_bins);
 						read_local_done(tr, &r_ref, &rd, -result);
 						return TRANS_DONE_ERROR;
@@ -724,7 +727,9 @@ read_local(as_transaction* tr)
 				as_bin_set_empty(rb);
 
 				if ((result = as_bin_exp_read_from_client(&exp_ctx, op, rb)) < 0) {
-					cf_detail(AS_RW, "{%s} read_local: failed as_bin_exp_read_from_client() %pD", ns->name, &tr->keyd);
+					cf_detail(AS_RW,
+							"{%s} read_local: failed as_bin_exp_read_from_client() %pD",
+							ns->name, &tr->keyd);
 					as_bin_destroy_all(result_bins, n_result_bins);
 					read_local_done(tr, &r_ref, &rd, -result);
 					return TRANS_DONE_ERROR;
@@ -741,7 +746,8 @@ read_local(as_transaction* tr)
 				}
 			}
 			else {
-				cf_warning(AS_RW, "{%s} read_local: unexpected bin op %u %pD", ns->name, op->op, &tr->keyd);
+				cf_warning(AS_RW, "{%s} read_local: unexpected bin op %u %pD",
+						ns->name, op->op, &tr->keyd);
 				as_bin_destroy_all(result_bins, n_result_bins);
 				read_local_done(tr, &r_ref, &rd, AS_ERR_PARAMETER);
 				return TRANS_DONE_ERROR;

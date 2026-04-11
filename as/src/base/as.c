@@ -34,11 +34,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syscall.h>
-#include <unistd.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
+#include "aerospike/mod_lua_config.h"
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 
 #include "cf_thread.h"
 #include "daemon.h"
@@ -61,7 +62,6 @@
 #include "base/service.h"
 #include "base/set_index.h"
 #include "base/smd.h"
-#include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_info_port.h"
 #include "base/ticker.h"
@@ -82,7 +82,6 @@
 #include "transaction/rw_request_hash.h"
 #include "transaction/udf.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -92,17 +91,14 @@ extern const char aerospike_build_type[];
 extern const char aerospike_build_id[];
 
 // Command line options for the Aerospike server.
-static const struct option CMD_OPTS[] = {
-		{ "help", no_argument, NULL, 'h' },
-		{ "version", no_argument, NULL, 'v' },
-		{ "config-file", required_argument, NULL, 'f' },
-		{ "foreground", no_argument, NULL, 'd' },
-		{ "fgdaemon", no_argument, NULL, 'F' },
-		{ "early-verbose", no_argument, NULL, 'e' },
-		{ "cold-start", no_argument, NULL, 'c' },
-		{ "instance", required_argument, NULL, 'n' },
-		{ NULL, 0, NULL, 0 }
-};
+static const struct option CMD_OPTS[] = { { "help", no_argument, NULL, 'h' },
+	{ "version", no_argument, NULL, 'v' },
+	{ "config-file", required_argument, NULL, 'f' },
+	{ "foreground", no_argument, NULL, 'd' },
+	{ "fgdaemon", no_argument, NULL, 'F' },
+	{ "early-verbose", no_argument, NULL, 'e' },
+	{ "cold-start", no_argument, NULL, 'c' },
+	{ "instance", required_argument, NULL, 'n' }, { NULL, 0, NULL, 0 } };
 
 static const char HELP[] =
 		"\n"
@@ -147,28 +143,24 @@ static const char HELP[] =
 		"\n"
 		"(Enterprise edition only.) If running multiple instances of Aerospike on one\n"
 		"machine (not recommended), each instance must be uniquely designated via this\n"
-		"option.\n"
-		;
+		"option.\n";
 
-static const char USAGE[] =
-		"\n"
-		"asd informative command-line options:\n"
-		"[--help]\n"
-		"[--version]\n"
-		"\n"
-		"asd runtime command-line options:\n"
-		"[--config-file <file>] "
-		"[--foreground] "
-		"[--fgdaemon] "
-		"[--early-verbose] "
-		"[--cold-start] "
-		"[--instance <0-15>]\n"
-		;
+static const char USAGE[] = "\n"
+							"asd informative command-line options:\n"
+							"[--help]\n"
+							"[--version]\n"
+							"\n"
+							"asd runtime command-line options:\n"
+							"[--config-file <file>] "
+							"[--foreground] "
+							"[--fgdaemon] "
+							"[--early-verbose] "
+							"[--cold-start] "
+							"[--instance <0-15>]\n";
 
 static const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
 
 static const char SMD_DIR_NAME[] = "/smd";
-
 
 //==========================================================
 // Globals.
@@ -180,7 +172,6 @@ pthread_mutex_t g_main_deadlock = PTHREAD_MUTEX_INITIALIZER;
 bool g_startup_complete = false;
 bool g_shutdown_started = false;
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -188,23 +179,22 @@ bool g_shutdown_started = false;
 // signal.c doesn't have header file.
 extern void as_signal_setup(void);
 
-static void write_pidfile(char *pidfile);
-static void validate_directory(const char *path, const char *log_tag);
+static void write_pidfile(char* pidfile);
+static void validate_directory(const char* path, const char* log_tag);
 static void validate_smd_directory(void);
-
 
 //==========================================================
 // Public API - Aerospike server entry point.
 //
 
 int
-as_run(int argc, char **argv)
+as_run(int argc, char** argv)
 {
 	g_start_sec = cf_get_seconds();
 
 	int opt;
 	int opt_i;
-	const char *config_file = DEFAULT_CONFIG_FILE;
+	const char* config_file = DEFAULT_CONFIG_FILE;
 	bool run_in_foreground = false;
 	bool new_style_daemon = false;
 	bool early_verbose = false;
@@ -270,7 +260,7 @@ as_run(int argc, char **argv)
 	// Set all fields in the global runtime configuration instance. This parses
 	// the configuration file, and creates as_namespace objects. (Return value
 	// is a shortcut pointer to the global runtime configuration instance.)
-	as_config *c = as_config_init(config_file);
+	as_config* c = as_config_init(config_file);
 
 	// Detect NUMA topology and, if requested, prepare for CPU and NUMA pinning.
 	cf_topo_config(c->auto_pin, (cf_topo_numa_node_index)instance,
@@ -335,11 +325,11 @@ as_run(int argc, char **argv)
 	// starting worker threads, etc. (But no communication with other server
 	// nodes or clients yet.)
 
-	as_json_init();				// Jansson JSON API used by System Metadata
-	as_index_tree_gc_init();	// thread to purge dropped index trees
-	as_nsup_init();				// load previous evict-void-time(s)
-	as_xdr_init();				// load persisted last-ship-time(s)
-	as_roster_init();			// load roster-related SMD
+	as_json_init(); // Jansson JSON API used by System Metadata
+	as_index_tree_gc_init(); // thread to purge dropped index trees
+	as_nsup_init(); // load previous evict-void-time(s)
+	as_xdr_init(); // load persisted last-ship-time(s)
+	as_roster_init(); // load roster-related SMD
 
 	// Set up namespaces. Each namespace decides here whether it will do a warm
 	// or cold start. Index arenas, set and bin name vmaps are initialized.
@@ -384,40 +374,40 @@ as_run(int argc, char **argv)
 
 	cf_info(AS_AS, "initializing services...");
 
-	cf_dns_init();				// DNS resolver
-	as_security_init();			// security features
-	as_service_init();			// server may process internal transactions
-	as_hb_init();				// inter-node heartbeat
-	as_skew_monitor_init();		// clock skew monitor
-	as_fabric_init();			// inter-node communications
-	as_exchange_init();			// initialize the cluster exchange subsystem
-	as_clustering_init();		// clustering-v5 start
-	as_service_list_init();		// service list handling
-	as_info_init();				// info transaction handling
-	as_migrate_init();			// move data between nodes
-	as_proxy_init();			// do work on behalf of others
-	as_rw_init();				// read & write service
-	as_query_manager_init();	// query transaction handling
-	as_udf_init();				// user-defined functions
-	as_batch_init();			// batch transaction handling
-	as_set_index_init();		// dynamic set-index population
+	cf_dns_init(); // DNS resolver
+	as_security_init(); // security features
+	as_service_init(); // server may process internal transactions
+	as_hb_init(); // inter-node heartbeat
+	as_skew_monitor_init(); // clock skew monitor
+	as_fabric_init(); // inter-node communications
+	as_exchange_init(); // initialize the cluster exchange subsystem
+	as_clustering_init(); // clustering-v5 start
+	as_service_list_init(); // service list handling
+	as_info_init(); // info transaction handling
+	as_migrate_init(); // move data between nodes
+	as_proxy_init(); // do work on behalf of others
+	as_rw_init(); // read & write service
+	as_query_manager_init(); // query transaction handling
+	as_udf_init(); // user-defined functions
+	as_batch_init(); // batch transaction handling
+	as_set_index_init(); // dynamic set-index population
 
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
-	cf_tls_start();				// starts tls certificate refresh thread
-	as_sindex_start();			// starts sindex GC threads
-	as_smd_start();				// enables receiving cluster state change events
-	as_health_start();			// starts before fabric and hb to capture them
-	as_fabric_start();			// may send & receive fabric messages
-	as_xdr_start();				// XDR should start before it joins other nodes
-	as_hb_start();				// start inter-node heartbeat
-	as_exchange_start();		// start the cluster exchange subsystem
-	as_clustering_start();		// clustering-v5 start
-	as_nsup_start();			// may send evict-void-time(s) to other nodes
-	as_service_start();			// server will now receive client transactions
-	as_info_port_start();		// server will now receive info transactions
-	as_ticker_start();			// only after everything else is started
+	cf_tls_start(); // starts tls certificate refresh thread
+	as_sindex_start(); // starts sindex GC threads
+	as_smd_start(); // enables receiving cluster state change events
+	as_health_start(); // starts before fabric and hb to capture them
+	as_fabric_start(); // may send & receive fabric messages
+	as_xdr_start(); // XDR should start before it joins other nodes
+	as_hb_start(); // start inter-node heartbeat
+	as_exchange_start(); // start the cluster exchange subsystem
+	as_clustering_start(); // clustering-v5 start
+	as_nsup_start(); // may send evict-void-time(s) to other nodes
+	as_service_start(); // server will now receive client transactions
+	as_info_port_start(); // server will now receive info transactions
+	as_ticker_start(); // only after everything else is started
 
 	// Relevant for enterprise edition only.
 	as_storage_start_tomb_raider();
@@ -479,13 +469,12 @@ as_run(int argc, char **argv)
 	return 0;
 }
 
-
 //==========================================================
 // Local helpers.
 //
 
 static void
-write_pidfile(char *pidfile)
+write_pidfile(char* pidfile)
 {
 	if (pidfile == NULL) {
 		// If there's no pid file specified in the config file, just move on.
@@ -517,7 +506,7 @@ write_pidfile(char *pidfile)
 }
 
 static void
-validate_directory(const char *path, const char *log_tag)
+validate_directory(const char* path, const char* log_tag)
 {
 	struct stat buf;
 
@@ -526,7 +515,8 @@ validate_directory(const char *path, const char *log_tag)
 				log_tag, path, cf_strerror(errno));
 	}
 	else if (! S_ISDIR(buf.st_mode)) {
-		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: Not a directory",
+		cf_crash_nostack(AS_AS,
+				"%s directory '%s' is not set up properly: Not a directory",
 				log_tag, path);
 	}
 }

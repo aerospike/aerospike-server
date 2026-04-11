@@ -43,14 +43,11 @@
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/security.h"
-#include "base/stats.h"
 #include "base/transaction.h"
-#include "base/transaction_policy.h"
 #include "base/xdr.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
 #include "query/query.h"
-#include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/proxy.h"
 #include "transaction/re_replicate.h"
@@ -60,37 +57,37 @@
 #include "transaction/udf.h"
 #include "transaction/write.h"
 
-
 //==========================================================
 // Inlines & macros.
 //
 
 static inline bool
-should_security_check_data_op(const as_transaction *tr)
+should_security_check_data_op(const as_transaction* tr)
 {
 	return tr->origin == FROM_CLIENT || tr->origin == FROM_BATCH;
 }
 
 static inline as_sec_perm
-query_perm(const as_transaction *tr)
+query_perm(const as_transaction* tr)
 {
 	if (as_transaction_is_udf(tr)) {
 		return PERM_UDF_QUERY;
 	}
 
-	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ?
-			PERM_OPS_QUERY : PERM_QUERY;
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ? PERM_OPS_QUERY
+														   : PERM_QUERY;
 }
 
 static inline const char*
-write_type_tag(const as_transaction *tr)
+write_type_tag(const as_transaction* tr)
 {
-	return as_transaction_is_delete(tr) ? "delete" :
-			(as_transaction_is_udf(tr) ? "udf" : "write");
+	return as_transaction_is_delete(tr)
+			? "delete"
+			: (as_transaction_is_udf(tr) ? "udf" : "write");
 }
 
 static inline void
-detail_unique(const as_transaction *tr, bool is_write)
+detail_unique(const as_transaction* tr, bool is_write)
 {
 	if (as_transaction_is_restart(tr)) {
 		return;
@@ -102,13 +99,11 @@ detail_unique(const as_transaction *tr, bool is_write)
 				is_write ? write_type_tag(tr) : "read");
 	}
 	else if (tr->origin == FROM_BATCH) {
-		cf_detail(AS_BATCH_SUB, "{%s} digest %pD client %s %s",
-				tr->rsv.ns->name, &tr->keyd,
-				as_batch_get_fd_h(tr->from.batch_shared)->client,
+		cf_detail(AS_BATCH_SUB, "{%s} digest %pD client %s %s", tr->rsv.ns->name,
+				&tr->keyd, as_batch_get_fd_h(tr->from.batch_shared)->client,
 				is_write ? write_type_tag(tr) : "read");
 	}
 }
-
 
 //==========================================================
 // Public API.
@@ -116,7 +111,7 @@ detail_unique(const as_transaction *tr, bool is_write)
 
 // Handle the transaction, including proxy to another node if necessary.
 void
-as_tsvc_process_transaction(as_transaction *tr)
+as_tsvc_process_transaction(as_transaction* tr)
 {
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
 		as_xdr_read(tr);
@@ -125,8 +120,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	int rv;
 	bool free_msgp = true;
-	cl_msg *msgp = tr->msgp;
-	as_msg *m = &msgp->msg;
+	cl_msg* msgp = tr->msgp;
+	as_msg* m = &msgp->msg;
 
 	as_transaction_init_body(tr);
 
@@ -142,7 +137,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 	}
 
 	// All transactions must have a namespace.
-	as_msg_field *nf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
+	as_msg_field* nf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
 
 	if (! nf) {
 		cf_warning(AS_TSVC, "no namespace in protocol request");
@@ -150,12 +145,13 @@ as_tsvc_process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
-	as_namespace *ns = as_namespace_get_bymsgfield(nf);
+	as_namespace* ns = as_namespace_get_bymsgfield(nf);
 
 	if (! ns) {
 		uint32_t ns_sz = as_msg_field_get_value_sz(nf);
 
-		cf_warning(AS_TSVC, "unknown namespace %.*s (%u) in protocol request - check configuration file",
+		cf_warning(AS_TSVC,
+				"unknown namespace %.*s (%u) in protocol request - check configuration file",
 				ns_sz, nf->data, ns_sz);
 
 		as_transaction_error(tr, NULL, AS_ERR_NAMESPACE);
@@ -169,7 +165,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 			tr->from.proxy_node = 0; // pattern, not needed
 		}
 		else {
-			cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
+			cf_debug(AS_TSVC,
+					"rejecting transaction - initial partition balance unresolved");
 			as_transaction_error(tr, NULL, AS_ERR_UNAVAILABLE);
 			// Note that we forfeited namespace info above so query doesn't get
 			// counted as single-record error.
@@ -204,8 +201,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 	// Calculate end_time based on message transaction TTL. May be recalculating
 	// for re-queued transactions, but nice if end_time not copied on/off queue.
 	if (m->transaction_ttl != 0) {
-		tr->end_time = tr->start_time +
-				((uint64_t)m->transaction_ttl * 1000000);
+		tr->end_time = tr->start_time + ((uint64_t)m->transaction_ttl * 1000000);
 	}
 	else {
 		// Incorporate g_config.transaction_max_ns if appropriate.
@@ -222,7 +218,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 	// Copy digest if not already in tr.
 	if (as_transaction_has_digest(tr)) {
-		as_msg_field *df = as_msg_field_get(m, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
+		as_msg_field* df = as_msg_field_get(m, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 		uint32_t digest_sz = as_msg_field_get_value_sz(df);
 
 		if (digest_sz != sizeof(cf_digest)) {
@@ -231,7 +227,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 			goto Cleanup;
 		}
 
-		tr->keyd = *(cf_digest *)df->data;
+		tr->keyd = *(cf_digest*)df->data;
 	}
 	// else - batch sub-transactions & all internal transactions have no digest
 	// in the message - digest is already in tr.
@@ -291,8 +287,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 
 		if (is_write) {
 			if (as_transaction_is_delete(tr)) {
-				status = convert_to_write(tr, &msgp) ?
-						as_write_start(tr) : as_delete_start(tr);
+				status = convert_to_write(tr, &msgp) ? as_write_start(tr)
+													 : as_delete_start(tr);
 			}
 			else if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
 				status = as_udf_start(tr);

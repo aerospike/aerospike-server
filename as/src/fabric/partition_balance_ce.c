@@ -36,9 +36,8 @@
 #include "node.h"
 
 #include "base/datamodel.h"
-#include "fabric/partition.h"
 #include "fabric/migrate.h"
-
+#include "fabric/partition.h"
 
 //==========================================================
 // Public API.
@@ -64,7 +63,8 @@ as_partition_balance_protect_roster_set(as_namespace* ns)
 void
 as_partition_balance_effective_rack_ids(cf_dyn_buf* db)
 {
-	cf_crash(AS_PARTITION, "CE code called as_partition_balance_effective_rack_ids()");
+	cf_crash(AS_PARTITION,
+			"CE code called as_partition_balance_effective_rack_ids()");
 }
 
 bool
@@ -73,7 +73,6 @@ as_partition_pre_emigrate_done(as_namespace* ns, uint32_t pid,
 {
 	return true;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

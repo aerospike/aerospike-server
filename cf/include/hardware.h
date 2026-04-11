@@ -22,11 +22,10 @@
 
 #pragma once
 
+#include <socket.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include <socket.h>
 
 #include "arenax.h"
 
@@ -44,11 +43,11 @@ typedef uint16_t cf_topo_core_index;
 typedef uint16_t cf_topo_cpu_index;
 typedef uint32_t cf_topo_napi_id;
 
-#define CF_TOPO_INVALID_INDEX ((cf_topo_numa_node_index)-1)
+#define CF_TOPO_INVALID_INDEX ((cf_topo_numa_node_index) - 1)
 
-void cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
-		const cf_addr_list *addrs);
-void cf_topo_force_map_memory(const uint8_t *from, size_t size);
+void cf_topo_config(cf_topo_auto_pin auto_pin,
+		cf_topo_numa_node_index a_numa_node, const cf_addr_list* addrs);
+void cf_topo_force_map_memory(const uint8_t* from, size_t size);
 void cf_topo_migrate_memory(void);
 void cf_topo_info(void);
 
@@ -56,8 +55,8 @@ uint16_t cf_topo_count_cores(void);
 uint16_t cf_topo_count_cpus(void);
 
 cf_topo_cpu_index cf_topo_current_cpu(void);
-cf_topo_cpu_index cf_topo_socket_cpu(const cf_socket *sock);
-cf_topo_napi_id cf_topo_socket_napi_id(const cf_socket *sock);
+cf_topo_cpu_index cf_topo_socket_cpu(const cf_socket* sock);
+cf_topo_napi_id cf_topo_socket_napi_id(const cf_socket* sock);
 
 void cf_topo_pin_to_core(cf_topo_core_index i_core);
 void cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu);
@@ -65,19 +64,19 @@ void cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu);
 #define CF_STORAGE_MAX_PHYS 100
 
 typedef struct cf_storage_device_s {
-	char *dev_path;
+	char* dev_path;
 	uint32_t n_phys;
 
 	struct {
-		char *dev_path;
+		char* dev_path;
 		cf_topo_numa_node_index numa_node;
 		int32_t nvme_age;
 	} phys[CF_STORAGE_MAX_PHYS];
 } cf_storage_device_info;
 
-cf_storage_device_info *cf_storage_get_device_info(const char *path);
-int64_t cf_storage_file_system_size(const char *path);
-bool cf_storage_is_root_fs(const char *path);
+cf_storage_device_info* cf_storage_get_device_info(const char* path);
+int64_t cf_storage_file_system_size(const char* path);
+bool cf_storage_is_root_fs(const char* path);
 
 typedef struct cf_page_cache_stats_s {
 	size_t resident;
@@ -85,6 +84,6 @@ typedef struct cf_page_cache_stats_s {
 } cf_page_cache_stats;
 
 void cf_page_cache_dirty_limits(void);
-bool cf_page_cache_get_stats(cf_arenax *arena, cf_page_cache_stats *stats);
+bool cf_page_cache_get_stats(cf_arenax* arena, cf_page_cache_stats* stats);
 
-bool cf_mount_is_local(const char *path);
+bool cf_mount_is_local(const char* path);

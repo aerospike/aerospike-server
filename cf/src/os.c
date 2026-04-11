@@ -31,8 +31,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -41,26 +41,24 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Globals.
 //
 
 static bool g_use_group_perms = false;
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static cf_os_file_res cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf, size_t* limit);
+static cf_os_file_res cf_os_read_any_file(const char** paths, uint32_t n_paths,
+		void* buf, size_t* limit);
 
 static void check_max_map_count(cf_dyn_buf* db);
 static void check_min_free_kbytes(cf_dyn_buf* db, uint64_t max_alloc_sz);
 static void check_swappiness(cf_dyn_buf* db);
 static void check_thp(cf_dyn_buf* db);
 static void check_zone_reclaim_mode(cf_dyn_buf* db);
-
 
 //==========================================================
 // Public API - file permissions.
@@ -84,7 +82,6 @@ cf_os_is_using_group_perms(void)
 {
 	return g_use_group_perms;
 }
-
 
 //==========================================================
 // Public API - read system files.
@@ -115,7 +112,7 @@ cf_os_read_file(const char* path, void* buf, size_t* limit)
 		cf_detail(CF_OS, "reading %zd byte(s) at offset %zu", *limit - total,
 				total);
 
-		ssize_t len = read(fd, (uint8_t *)buf + total, *limit - total);
+		ssize_t len = read(fd, (uint8_t*)buf + total, *limit - total);
 
 		CF_NEVER_FAILS(len);
 
@@ -162,7 +159,7 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 
 	cf_detail(CF_OS, "parsing value \"%s\"", buf);
 
-	char *end;
+	char* end;
 	int64_t x = strtol(buf, &end, 10);
 
 	if (*end != '\0') {
@@ -174,7 +171,6 @@ cf_os_read_int_from_file(const char* path, int64_t* val)
 
 	return CF_OS_FILE_RES_OK;
 }
-
 
 //==========================================================
 // Public API - best practices.
@@ -192,14 +188,12 @@ cf_os_best_practices_check(cf_dyn_buf* db, uint64_t max_alloc_sz)
 	cf_os_best_practices_check_ee(db);
 }
 
-
 //==========================================================
 // Local helpers - read system files.
 //
 
 cf_os_file_res
-cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf,
-		size_t* limit)
+cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf, size_t* limit)
 {
 	for (uint32_t i = 0; i < n_paths; i++) {
 		cf_os_file_res res = cf_os_read_file(paths[i], buf, limit);
@@ -211,7 +205,6 @@ cf_os_read_any_file(const char** paths, uint32_t n_paths, void* buf,
 
 	return CF_OS_FILE_RES_NOT_FOUND;
 }
-
 
 //==========================================================
 // Local helpers - best practices.
@@ -284,8 +277,8 @@ static void
 check_thp(cf_dyn_buf* db)
 {
 	static const char* enabled_paths[] = {
-			"/sys/kernel/mm/transparent_hugepage/enabled",
-			"/sys/kernel/mm/redhat_transparent_hugepage/enabled"
+		"/sys/kernel/mm/transparent_hugepage/enabled",
+		"/sys/kernel/mm/redhat_transparent_hugepage/enabled"
 	};
 	uint32_t n_enabled_paths = sizeof(enabled_paths) / sizeof(char*);
 
@@ -304,16 +297,18 @@ check_thp(cf_dyn_buf* db)
 		}
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
-		cf_detail(CF_OS, "unable to find '/sys/kernel/mm/{redhat_,}transparent_hugepage/enabled'");
+		cf_detail(CF_OS,
+				"unable to find '/sys/kernel/mm/{redhat_,}transparent_hugepage/enabled'");
 		break;
 	case CF_OS_FILE_RES_ERROR:
 	default:
-		cf_crash_nostack(CF_OS, "error reading '/sys/kernel/mm/{redhat_,}transparent_hugepage/enabled'");
+		cf_crash_nostack(CF_OS,
+				"error reading '/sys/kernel/mm/{redhat_,}transparent_hugepage/enabled'");
 	}
 
 	static const char* defrag_paths[] = {
-			"/sys/kernel/mm/transparent_hugepage/defrag",
-			"/sys/kernel/mm/redhat_transparent_hugepage/defrag"
+		"/sys/kernel/mm/transparent_hugepage/defrag",
+		"/sys/kernel/mm/redhat_transparent_hugepage/defrag"
 	};
 	uint32_t n_defrag_paths = sizeof(defrag_paths) / sizeof(char*);
 	limit = sizeof(buf) - 1;
@@ -321,18 +316,19 @@ check_thp(cf_dyn_buf* db)
 	switch (cf_os_read_any_file(defrag_paths, n_defrag_paths, buf, &limit)) {
 	case CF_OS_FILE_RES_OK:
 		buf[limit] = '\0';
-		if (strstr(buf, "[never]") == NULL &&
-				strstr(buf, "[madvise]") == NULL) {
+		if (strstr(buf, "[never]") == NULL && strstr(buf, "[madvise]") == NULL) {
 			os_check_failed(db, "thp-defrag",
 					"THP defrag not set to either 'never' or 'madvise'");
 		}
 		break;
 	case CF_OS_FILE_RES_NOT_FOUND:
-		cf_detail(CF_OS, "unable to find '/sys/kernel/mm/{redhat_,}transparent_hugepage/defrag'");
+		cf_detail(CF_OS,
+				"unable to find '/sys/kernel/mm/{redhat_,}transparent_hugepage/defrag'");
 		break;
 	case CF_OS_FILE_RES_ERROR:
 	default:
-		cf_crash_nostack(CF_OS, "error reading '/sys/kernel/mm/{redhat_,}transparent_hugepage/defrag'");
+		cf_crash_nostack(CF_OS,
+				"error reading '/sys/kernel/mm/{redhat_,}transparent_hugepage/defrag'");
 	}
 }
 

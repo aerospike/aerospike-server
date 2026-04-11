@@ -30,7 +30,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -45,7 +44,6 @@ typedef struct cf_vault_config_s {
 	char* token_file;
 	const char* url;
 } cf_vault_config;
-
 
 //==========================================================
 // Public API.

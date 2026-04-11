@@ -33,8 +33,8 @@
 #include "citrusleaf/alloc.h"
 
 #include "base/exp.h"
+#include "base/proto.h"
 #include "base/transaction.h"
-
 
 //==========================================================
 // Forward declarations.
@@ -44,7 +44,6 @@ struct as_exp_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
 struct cl_msg_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -66,7 +65,6 @@ typedef struct iops_origin_s {
 	iops_done_cb done_cb;
 	void* udata;
 } iops_origin;
-
 
 //==========================================================
 // Public API.

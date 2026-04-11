@@ -29,13 +29,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
 
 #include "bits.h"
-
 
 //==========================================================
 // Inlines & macros.
@@ -60,7 +58,6 @@ uint32_up_to_pow2(uint32_t x)
 
 #define POOL_MOD(_ix) (_ix & pool->cap_minus_1)
 
-
 //==========================================================
 // Public API - cf_pool_int32.
 //
@@ -70,12 +67,10 @@ cf_pool_int32_init(cf_pool_int32* pool, uint32_t capacity, int32_t empty_val)
 {
 	uint32_t round_capacity = uint32_up_to_pow2(capacity);
 
-	*pool = (cf_pool_int32){
-			.capacity = round_capacity,
-			.cap_minus_1 = round_capacity - 1,
-			.empty_val = empty_val,
-			.data = cf_malloc(sizeof(int32_t) * round_capacity)
-	};
+	*pool = (cf_pool_int32){ .capacity = round_capacity,
+		.cap_minus_1 = round_capacity - 1,
+		.empty_val = empty_val,
+		.data = cf_malloc(sizeof(int32_t) * round_capacity) };
 
 	for (uint32_t ix = 0; ix < round_capacity; ix++) {
 		pool->data[ix] = empty_val;
@@ -141,7 +136,6 @@ cf_pool_int32_push(cf_pool_int32* pool, int32_t val)
 	as_faa_rls(&pool->count, 1);
 }
 
-
 //==========================================================
 // Public API - cf_pool_ptr.
 //
@@ -151,11 +145,9 @@ cf_pool_ptr_init(cf_pool_ptr* pool, uint32_t capacity)
 {
 	uint32_t round_capacity = uint32_up_to_pow2(capacity);
 
-	*pool = (cf_pool_ptr){
-			.capacity = round_capacity,
-			.cap_minus_1 = round_capacity - 1,
-			.data = cf_calloc(round_capacity, sizeof(void*))
-	};
+	*pool = (cf_pool_ptr){ .capacity = round_capacity,
+		.cap_minus_1 = round_capacity - 1,
+		.data = cf_calloc(round_capacity, sizeof(void*)) };
 }
 
 void

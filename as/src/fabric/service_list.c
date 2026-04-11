@@ -26,20 +26,19 @@
 
 #include "fabric/service_list.h"
 
-#include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <unistd.h>
 
-#include <sys/time.h>
+#include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_queue.h"
 
 #include "cf_mutex.h"
-#include "cf_str.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
 #include "log.h"
@@ -49,22 +48,12 @@
 #include "socket.h"
 
 #include "base/cfg.h"
-#include "base/security.h"
 #include "base/service.h"
-#include "base/thr_info.h"
-
-#include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_hash_math.h"
-#include "citrusleaf/cf_queue.h"
-
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
-#include "fabric/hb.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -89,9 +78,9 @@ typedef enum {
 	NUM_FIELDS
 } services_msg_field;
 
-#define OP_UPDATE		0
-#define OP_ACK			1
-#define OP_UPDATE_REQ	2
+#define OP_UPDATE 0
+#define OP_ACK 1
+#define OP_UPDATE_REQ 2
 
 // got_update  |  got_ack  |  Action on update thread
 // ------------+-----------+------------------------------------------------
@@ -108,31 +97,31 @@ typedef enum {
 //             |           |  We know each other.
 
 typedef struct peer_s {
-	bool		present;		// peer is a current peer (vs. an alumnus)
+	bool present; // peer is a current peer (vs. an alumnus)
 
-	bool		got_update;		// we saw an update from this peer
-	bool		got_ack;		// we saw an acknowledgment from this peer
-	uint64_t	retrans_at_ms;	// time of next retransmission for this peer
+	bool got_update; // we saw an update from this peer
+	bool got_ack; // we saw an acknowledgment from this peer
+	uint64_t retrans_at_ms; // time of next retransmission for this peer
 
-	uint64_t	in_gen;			// generation of last incoming change
+	uint64_t in_gen; // generation of last incoming change
 
-	char*		serv;			// goes into "services"
-	char*		serv_alt;		// goes into "services-alternate"
+	char* serv; // goes into "services"
+	char* serv_alt; // goes into "services-alternate"
 
-	char*		clear_std;		// goes into "peers-clear-std"
-	char*		tls_std;		// goes into "peers-tls-std"
-	char*		clear_alt;		// goes into "peers-clear-alt"
-	char*		tls_alt;		// goes into "peers-tls-alt"
-	char*		tls_name;		// peer's TLS name
+	char* clear_std; // goes into "peers-clear-std"
+	char* tls_std; // goes into "peers-tls-std"
+	char* clear_alt; // goes into "peers-clear-alt"
+	char* tls_alt; // goes into "peers-tls-alt"
+	char* tls_name; // peer's TLS name
 } peer_t;
 
 // Maps the given peer_t to a field in the peer_t.
 typedef char** (*proj_t)(peer_t* p);
 
 typedef struct filter_s {
-	bool		tls;			// when set, include the TLS name
-	bool		present;		// when set, exclude alumni
-	uint64_t	since;			// base generation for a delta build
+	bool tls; // when set, include the TLS name
+	bool present; // when set, exclude alumni
+	uint64_t since; // base generation for a delta build
 } filter_t;
 
 // Builds an info value in g_info. Reduces g_peers, applies the given filter,
@@ -141,78 +130,63 @@ typedef void (*build_t)(cf_dyn_buf* db, proj_t proj, const filter_t* filter);
 
 // How to turn the peer_t entries (g_peers) into an info value (g_info).
 typedef struct peer_val_s {
-	const char*	key;			// info value's key name, e.g., "services"
-	proj_t		proj;			// projection function for the underlying
-								// field in peer_t
-	build_t		build;			// build function to update the info value
-	const filter_t* filter;		// filter passed to the build function
+	const char* key; // info value's key name, e.g., "services"
+	proj_t proj; // projection function for the underlying
+			// field in peer_t
+	build_t build; // build function to update the info value
+	const filter_t* filter; // filter passed to the build function
 } peer_val_t;
 
 // How to turn our own services (g_local) into an info value (g_info).
 typedef struct local_val_s {
-	const char*	key;			// key identifier
-	proj_t		proj;			// projection function that selects the
-								// corresponding field from g_local
+	const char* key; // key identifier
+	proj_t proj; // projection function that selects the
+			// corresponding field from g_local
 } local_val_t;
 
 // Links fabric message fields to their peer_t fields.
 typedef struct field_proj_s {
-	int32_t		field;			// message field identifier (FIELD_*)
-	proj_t		proj;			// projection function that selects the
-								// corresponding field from a given peer_t
+	int32_t field; // message field identifier (FIELD_*)
+	proj_t proj; // projection function that selects the
+			// corresponding field from a given peer_t
 } field_proj_t;
 
 // Context for building an info value. Passed to the build function.
 typedef struct print_par_s {
-	cf_dyn_buf*	db;			// the buffer to print to
-	proj_t		proj;			// the field to print
-	const char*	strip;			// what to strip from the end of the field
-	bool		tls;			// when set, includes the TLS name
-	bool		present;		// when set, excludes alumni
-	uint64_t	since;			// the base generation for a delta build
-	uint32_t	count;			// the number of already printed fields
+	cf_dyn_buf* db; // the buffer to print to
+	proj_t proj; // the field to print
+	const char* strip; // what to strip from the end of the field
+	bool tls; // when set, includes the TLS name
+	bool present; // when set, excludes alumni
+	uint64_t since; // the base generation for a delta build
+	uint32_t count; // the number of already printed fields
 } print_par_t;
 
 // Context for the update thread's g_peers reduce.
 typedef struct update_ctx_s {
-	uint64_t	now_ms;			// current time
-	uint64_t	retrans_at_ms;	// minimum of retransmission times, across all
-								// peer_t entries in g_peers
+	uint64_t now_ms; // current time
+	uint64_t retrans_at_ms; // minimum of retransmission times, across all
+			// peer_t entries in g_peers
 } update_ctx_t;
 
-static const msg_template MSG_TEMP[] = {
-	{ FIELD_OP,			M_FT_UINT32	},
-	{ FIELD_GEN,		M_FT_UINT32	},
-	{ FIELD_SERV,		M_FT_STR	},
-	{ FIELD_SERV_ALT,	M_FT_STR	},
-	{ FIELD_CLEAR_STD,	M_FT_STR	},
-	{ FIELD_TLS_STD,	M_FT_STR	},
-	{ FIELD_CLEAR_ALT,	M_FT_STR	},
-	{ FIELD_TLS_ALT,	M_FT_STR	},
-	{ FIELD_TLS_NAME,	M_FT_STR	}
-};
+static const msg_template MSG_TEMP[] = { { FIELD_OP, M_FT_UINT32 },
+	{ FIELD_GEN, M_FT_UINT32 }, { FIELD_SERV, M_FT_STR },
+	{ FIELD_SERV_ALT, M_FT_STR }, { FIELD_CLEAR_STD, M_FT_STR },
+	{ FIELD_TLS_STD, M_FT_STR }, { FIELD_CLEAR_ALT, M_FT_STR },
+	{ FIELD_TLS_ALT, M_FT_STR }, { FIELD_TLS_NAME, M_FT_STR } };
 
 COMPILER_ASSERT(sizeof(MSG_TEMP) / sizeof(msg_template) == NUM_FIELDS);
 
 #define SCRATCH_SZ 512
 #define RETRANS_INTERVAL_MS 1000
 
-static const filter_t PEERS_CLEAR = {
-	.tls = false,	.present = true,	.since = 0
-};
+static const filter_t PEERS_CLEAR = { .tls = false, .present = true, .since = 0 };
 
-static const filter_t PEERS_TLS = {
-	.tls = true,	.present = true,	.since = 0
-};
+static const filter_t PEERS_TLS = { .tls = true, .present = true, .since = 0 };
 
-static const filter_t ALUMNI_CLEAR = {
-	.tls = false,	.present = false,	.since = 0
-};
+static const filter_t ALUMNI_CLEAR = { .tls = false, .present = false, .since = 0 };
 
-static const filter_t ALUMNI_TLS = {
-	.tls = true,	.present = false,	.since = 0
-};
-
+static const filter_t ALUMNI_TLS = { .tls = true, .present = false, .since = 0 };
 
 //==========================================================
 // Forward declarations.
@@ -220,9 +194,9 @@ static const filter_t ALUMNI_TLS = {
 
 // Peer management.
 
-static char** proj_serv(peer_t* p);			// maps p to &p->serv
-static char** proj_serv_alt(peer_t* p);		// maps p to &p->serv_alt
-static char** proj_clear_std(peer_t* p);	// etc.
+static char** proj_serv(peer_t* p); // maps p to &p->serv
+static char** proj_serv_alt(peer_t* p); // maps p to &p->serv_alt
+static char** proj_clear_std(peer_t* p); // etc.
 static char** proj_tls_std(peer_t* p);
 static char** proj_clear_alt(peer_t* p);
 static char** proj_tls_alt(peer_t* p);
@@ -272,50 +246,38 @@ static void recalc(void);
 static const char* op_str(uint32_t op);
 static char* strip_suff(const char* in, const char* suff, char* out);
 
-
 //==========================================================
 // Inlines & macros.
 //
 
 #define ARRAY_COUNT(_a) (sizeof(_a) / (sizeof((_a)[0])))
 
-
 //==========================================================
 // Function tables.
 //
 
 static const peer_val_t PEER_VALS[] = {
-//	key						proj			build			filter
-	{ "peers-generation",	NULL,			build_gen,		NULL			},
-	{ "peers-clear-std",	proj_clear_std,	build_peers,	&PEERS_CLEAR	},
-	{ "peers-clear-alt",	proj_clear_alt,	build_peers,	&PEERS_CLEAR	},
-	{ "peers-tls-std",		proj_tls_std,	build_peers,	&PEERS_TLS		},
-	{ "peers-tls-alt",		proj_tls_alt,	build_peers,	&PEERS_TLS		},
-	{ "alumni-clear-std",	proj_clear_std,	build_peers,	&ALUMNI_CLEAR	},
-	{ "alumni-tls-std",		proj_tls_std,	build_peers,	&ALUMNI_TLS		},
-	{ "services",			proj_serv,		build_services,	&PEERS_CLEAR	},
-	{ "services-alternate",	proj_serv_alt,	build_services,	&PEERS_CLEAR	},
-	{ "services-alumni",	proj_serv,		build_services,	&ALUMNI_CLEAR	}
+	//	key						proj			build			filter
+	{ "peers-generation", NULL, build_gen, NULL },
+	{ "peers-clear-std", proj_clear_std, build_peers, &PEERS_CLEAR },
+	{ "peers-clear-alt", proj_clear_alt, build_peers, &PEERS_CLEAR },
+	{ "peers-tls-std", proj_tls_std, build_peers, &PEERS_TLS },
+	{ "peers-tls-alt", proj_tls_alt, build_peers, &PEERS_TLS },
+	{ "alumni-clear-std", proj_clear_std, build_peers, &ALUMNI_CLEAR },
+	{ "alumni-tls-std", proj_tls_std, build_peers, &ALUMNI_TLS },
+	{ "services", proj_serv, build_services, &PEERS_CLEAR },
+	{ "services-alternate", proj_serv_alt, build_services, &PEERS_CLEAR },
+	{ "services-alumni", proj_serv, build_services, &ALUMNI_CLEAR }
 };
 
-static const local_val_t LOCAL_VALS[] = {
-	{ "service-clear-std",	proj_clear_std	},
-	{ "service-clear-alt",	proj_clear_alt	},
-	{ "service-tls-std",	proj_tls_std	},
-	{ "service-tls-alt",	proj_tls_alt	},
-	{ "service",			proj_serv		}
-};
+static const local_val_t LOCAL_VALS[] = { { "service-clear-std", proj_clear_std },
+	{ "service-clear-alt", proj_clear_alt }, { "service-tls-std", proj_tls_std },
+	{ "service-tls-alt", proj_tls_alt }, { "service", proj_serv } };
 
-static const field_proj_t FIELD_PROJS[] = {
-	{ FIELD_CLEAR_STD,	proj_clear_std	},
-	{ FIELD_CLEAR_ALT,	proj_clear_alt	},
-	{ FIELD_TLS_STD,	proj_tls_std	},
-	{ FIELD_TLS_ALT,	proj_tls_alt	},
-	{ FIELD_TLS_NAME,	proj_tls_name	},
-	{ FIELD_SERV,		proj_serv		},
-	{ FIELD_SERV_ALT,	proj_serv_alt	}
-};
-
+static const field_proj_t FIELD_PROJS[] = { { FIELD_CLEAR_STD, proj_clear_std },
+	{ FIELD_CLEAR_ALT, proj_clear_alt }, { FIELD_TLS_STD, proj_tls_std },
+	{ FIELD_TLS_ALT, proj_tls_alt }, { FIELD_TLS_NAME, proj_tls_name },
+	{ FIELD_SERV, proj_serv }, { FIELD_SERV_ALT, proj_serv_alt } };
 
 //==========================================================
 // Globals.
@@ -340,7 +302,6 @@ static peer_t g_local;
 // Signals the update thread.
 static cf_queue g_wake_up;
 
-
 //==========================================================
 // Public API.
 //
@@ -352,8 +313,8 @@ as_service_list_init(void)
 
 	// These hash tables are created without locks.
 
-	g_info = cf_shash_create(cf_shash_fn_zstr, HASH_STR_SZ,
-			sizeof(char*), 32, false);
+	g_info = cf_shash_create(cf_shash_fn_zstr, HASH_STR_SZ, sizeof(char*), 32,
+			false);
 
 	g_peers = cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
 			sizeof(peer_t*), AS_CLUSTER_SZ, false);
@@ -426,13 +387,11 @@ as_service_list_command(const char* key, const char* params, cf_dyn_buf* db)
 	const filter_t* val_par = peer_val->filter;
 	cf_mutex_lock(&g_peers_lock);
 
-	peer_val->build(db, peer_val->proj, &(filter_t){
-		.tls = val_par->tls, .present = false, .since = since
-	});
+	peer_val->build(db, peer_val->proj,
+			&(filter_t){ .tls = val_par->tls, .present = false, .since = since });
 
 	cf_mutex_unlock(&g_peers_lock);
 }
-
 
 //==========================================================
 // Local helpers - peer management.
@@ -535,8 +494,7 @@ find_peer(cf_node node)
 static void
 dump_peer(cf_node node, const peer_t* p)
 {
-	cf_detail(AS_SERVICE_LIST, "--------------------- peer change %016lx",
-			node);
+	cf_detail(AS_SERVICE_LIST, "--------------------- peer change %016lx", node);
 
 	cf_detail(AS_SERVICE_LIST, "present       %d", (int32_t)p->present);
 	cf_detail(AS_SERVICE_LIST, "got_update    %d", (int32_t)p->got_update);
@@ -729,8 +687,7 @@ static int32_t
 handle_fabric_message(cf_node node, msg* m, void* udata)
 {
 	(void)udata;
-	cf_detail(AS_SERVICE_LIST, "------------------ fabric message %016lx",
-			node);
+	cf_detail(AS_SERVICE_LIST, "------------------ fabric message %016lx", node);
 
 	// Get operation and generation.
 
@@ -764,7 +721,7 @@ handle_fabric_message(cf_node node, msg* m, void* udata)
 
 		// Set peer_t::ack.
 
-		change = change || !p->got_ack;
+		change = change || ! p->got_ack;
 		p->got_ack = true;
 
 		if (p->present && p->got_update) {
@@ -808,7 +765,7 @@ handle_fabric_message(cf_node node, msg* m, void* udata)
 
 	// Set peer_t::update.
 
-	change = change || !p->got_update;
+	change = change || ! p->got_update;
 	p->got_update = true;
 
 	if (p->present && p->got_ack) {
@@ -820,7 +777,7 @@ handle_fabric_message(cf_node node, msg* m, void* udata)
 
 	for (uint32_t i = 0; i < ARRAY_COUNT(FIELD_PROJS); ++i) {
 		char** to = FIELD_PROJS[i].proj(p);
-		char* old =* to;
+		char* old = *to;
 
 		// We follow the convention of the old code, which omits
 		// empty fields from the fabric message. So let's be prepared
@@ -878,7 +835,7 @@ update_reduce(const void* key, void* data, void* udata)
 
 	// If it's an alumnus, don't update.
 
-	if (!p->present) {
+	if (! p->present) {
 		cf_detail(AS_SERVICE_LIST, "skipping alumnus");
 		return CF_SHASH_OK;
 	}
@@ -902,8 +859,7 @@ update_reduce(const void* key, void* data, void* udata)
 		if (ctx->now_ms < p->retrans_at_ms) {
 			cf_detail(AS_SERVICE_LIST, "not yet");
 
-			if (ctx->retrans_at_ms == 0 ||
-					p->retrans_at_ms < ctx->retrans_at_ms) {
+			if (ctx->retrans_at_ms == 0 || p->retrans_at_ms < ctx->retrans_at_ms) {
 				ctx->retrans_at_ms = p->retrans_at_ms;
 			}
 
@@ -941,7 +897,7 @@ update_reduce(const void* key, void* data, void* udata)
 		// from the fabric message.
 
 		if ((*from)[0] != 0) {
-			msg_set_str(m, FIELD_PROJS[i].field,* from, MSG_SET_COPY);
+			msg_set_str(m, FIELD_PROJS[i].field, *from, MSG_SET_COPY);
 		}
 	}
 
@@ -980,9 +936,7 @@ run_update_thread(void* udata)
 	(void)udata;
 
 	while (true) {
-		update_ctx_t ctx = {
-			.now_ms = cf_getms(), .retrans_at_ms = 0
-		};
+		update_ctx_t ctx = { .now_ms = cf_getms(), .retrans_at_ms = 0 };
 
 		cf_mutex_lock(&g_peers_lock);
 
@@ -1019,18 +973,17 @@ wake_up(void)
 	cf_queue_push(&g_wake_up, &dummy);
 }
 
-
 //==========================================================
 // Local helpers - local node information.
 //
 
 static char*
-print_list(const as_service_endpoint* endp, uint32_t limit, char sep,
-		bool legacy)
+print_list(const as_service_endpoint* endp, uint32_t limit, char sep, bool legacy)
 {
-	cf_detail(AS_SERVICE_LIST, "printing list - count %u port %hu limit %u "
-			"legacy %d", endp->addrs.n_addrs, endp->port, limit,
-			(int32_t)legacy);
+	cf_detail(AS_SERVICE_LIST,
+			"printing list - count %u port %hu limit %u "
+			"legacy %d",
+			endp->addrs.n_addrs, endp->port, limit, (int32_t)legacy);
 
 	if (endp->port == 0) {
 		cf_detail(AS_SERVICE_LIST, "service inactive");
@@ -1042,11 +995,11 @@ print_list(const as_service_endpoint* endp, uint32_t limit, char sep,
 	cf_dyn_buf_define(db);
 	uint32_t n_out = 0;
 
-	for (uint32_t i = 0; i < endp->addrs.n_addrs &&
-			(limit == 0 || n_out < limit); ++i) {
+	for (uint32_t i = 0;
+			i < endp->addrs.n_addrs && (limit == 0 || n_out < limit); ++i) {
 		cf_detail(AS_SERVICE_LIST, "adding %s", endp->addrs.addrs[i]);
 
-		if (legacy && !cf_ip_addr_str_is_legacy(endp->addrs.addrs[i])) {
+		if (legacy && ! cf_ip_addr_str_is_legacy(endp->addrs.addrs[i])) {
 			cf_detail(AS_SERVICE_LIST, "skipping non-legacy");
 			continue;
 		}
@@ -1199,7 +1152,6 @@ populate_local(void)
 	dump_peer(0, &g_local);
 }
 
-
 //==========================================================
 // Local helpers - info value management.
 //
@@ -1251,7 +1203,7 @@ print_info_val(const char* key, cf_dyn_buf* db)
 	cf_assert(res == CF_SHASH_OK, AS_SERVICE_LIST, "cf_shash_get() failed: %d",
 			res);
 
-	cf_dyn_buf_append_string(db,  val);
+	cf_dyn_buf_append_string(db, val);
 	cf_detail(AS_SERVICE_LIST, "info val %s -> %s", key, val);
 
 	pthread_rwlock_unlock(&g_info_lock);
@@ -1268,7 +1220,7 @@ build_peers_reduce(const void* key, void* data, void* udata)
 
 	// Skip alumnus, if alumni excluded.
 
-	if (par->present && !p->present) {
+	if (par->present && ! p->present) {
 		cf_detail(AS_SERVICE_LIST, "node absent");
 		return CF_SHASH_OK;
 	}
@@ -1354,15 +1306,13 @@ build_peers(cf_dyn_buf* db, proj_t proj, const filter_t* filter)
 
 	cf_dyn_buf_append_char(db, '[');
 
-	print_par_t print_par = {
-		.db = db,
+	print_par_t print_par = { .db = db,
 		.proj = proj,
 		.strip = ":" DEFAULT_PORT,
 		.tls = filter->tls,
 		.present = filter->present,
 		.since = filter->since,
-		.count = 0
-	};
+		.count = 0 };
 
 	cf_shash_reduce(g_peers, build_peers_reduce, &print_par);
 
@@ -1380,7 +1330,7 @@ build_services_reduce(const void* key, void* data, void* udata)
 
 	// Skip alumnus, if alumni excluded.
 
-	if (par->present && !p->present) {
+	if (par->present && ! p->present) {
 		cf_detail(AS_SERVICE_LIST, "node absent");
 		return CF_SHASH_OK;
 	}
@@ -1412,15 +1362,13 @@ build_services_reduce(const void* key, void* data, void* udata)
 static void
 build_services(cf_dyn_buf* db, proj_t proj, const filter_t* filter)
 {
-	print_par_t print_par = {
-		.db = db,
+	print_par_t print_par = { .db = db,
 		.proj = proj,
 		.strip = NULL,
 		.tls = false,
 		.present = filter->present,
 		.since = 0,
-		.count = 0
-	};
+		.count = 0 };
 
 	cf_shash_reduce(g_peers, build_services_reduce, &print_par);
 }
@@ -1475,7 +1423,6 @@ recalc(void)
 
 	pthread_rwlock_unlock(&g_info_lock);
 }
-
 
 //==========================================================
 // Local helpers - miscellaneous.

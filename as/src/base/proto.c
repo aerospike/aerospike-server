@@ -31,15 +31,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <unistd.h>
+#include <sys/socket.h>
 
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_digest.h"
-#include "citrusleaf/cf_queue.h"
 
-#include "cf_thread.h"
 #include "dynbuf.h"
 #include "log.h"
 #include "socket.h"
@@ -47,10 +45,8 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -61,32 +57,31 @@
 static const char SUCCESS_BIN_NAME[] = "SUCCESS";
 static const char FAILURE_BIN_NAME[] = "FAILURE";
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static int send_reply_buf(as_file_handle *fd_h, const uint8_t *msgp, size_t msg_sz);
-
+static int send_reply_buf(as_file_handle* fd_h, const uint8_t* msgp,
+		size_t msg_sz);
 
 //==========================================================
 // Public API - byte swapping.
 //
 
 void
-as_proto_swap(as_proto *proto)
+as_proto_swap(as_proto* proto)
 {
 	uint8_t version = proto->version;
 	uint8_t type = proto->type;
 
 	proto->version = proto->type = 0;
-	proto->sz = cf_swap_from_be64(*(uint64_t *)proto);
+	proto->sz = cf_swap_from_be64(*(uint64_t*)proto);
 	proto->version = version;
 	proto->type = type;
 }
 
 void
-as_msg_swap_header(as_msg *m)
+as_msg_swap_header(as_msg* m)
 {
 	m->generation = cf_swap_from_be32(m->generation);
 	m->record_ttl = cf_swap_from_be32(m->record_ttl);
@@ -96,23 +91,22 @@ as_msg_swap_header(as_msg *m)
 }
 
 void
-as_msg_swap_field(as_msg_field *mf)
+as_msg_swap_field(as_msg_field* mf)
 {
 	mf->field_sz = cf_swap_from_be32(mf->field_sz);
 }
 
 void
-as_msg_swap_op(as_msg_op *op)
+as_msg_swap_op(as_msg_op* op)
 {
 	op->op_sz = cf_swap_from_be32(op->op_sz);
 
 	if (op->has_lut == 1) {
-		uint64_t *lut = (uint64_t *)(op->name + op->name_sz);
+		uint64_t* lut = (uint64_t*)(op->name + op->name_sz);
 
 		*lut = cf_swap_from_be64(*lut);
 	}
 }
-
 
 //==========================================================
 // Public API - generating internal transactions.
@@ -120,24 +114,22 @@ as_msg_swap_op(as_msg_op *op)
 
 // Allocates cl_msg returned - caller must free it. Everything is host-ordered.
 // Will add more parameters (e.g. for set name) only as they become necessary.
-cl_msg *
-as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
-		uint8_t info3, uint32_t record_ttl, uint16_t n_ops, uint8_t *ops,
+cl_msg*
+as_msg_create_internal(const char* ns_name, uint8_t info1, uint8_t info2,
+		uint8_t info3, uint32_t record_ttl, uint16_t n_ops, uint8_t* ops,
 		size_t ops_sz)
 {
 	size_t ns_name_len = strlen(ns_name);
 
-	size_t msg_sz = sizeof(cl_msg) +
-			sizeof(as_msg_field) + ns_name_len +
-			ops_sz;
+	size_t msg_sz = sizeof(cl_msg) + sizeof(as_msg_field) + ns_name_len + ops_sz;
 
-	cl_msg *msgp = (cl_msg *)cf_malloc(msg_sz);
+	cl_msg* msgp = (cl_msg*)cf_malloc(msg_sz);
 
 	msgp->proto.version = PROTO_VERSION;
 	msgp->proto.type = PROTO_TYPE_AS_MSG;
 	msgp->proto.sz = msg_sz - sizeof(as_proto);
 
-	as_msg *m = &msgp->msg;
+	as_msg* m = &msgp->msg;
 
 	m->header_sz = sizeof(as_msg);
 	m->info1 = info1;
@@ -151,14 +143,14 @@ as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
 	m->n_fields = 1;
 	m->n_ops = n_ops;
 
-	as_msg_field *mf = (as_msg_field *)(m->data);
+	as_msg_field* mf = (as_msg_field*)(m->data);
 
 	mf->type = AS_MSG_FIELD_TYPE_NAMESPACE;
 	mf->field_sz = (uint32_t)ns_name_len + 1;
 	memcpy(mf->data, ns_name, ns_name_len);
 
 	if (ops != NULL) {
-		uint8_t *msg_ops = (uint8_t *)as_msg_field_get_next(mf);
+		uint8_t* msg_ops = (uint8_t*)as_msg_field_get_next(mf);
 
 		memcpy(msg_ops, ops, ops_sz);
 	}
@@ -166,16 +158,15 @@ as_msg_create_internal(const char *ns_name, uint8_t info1, uint8_t info2,
 	return msgp;
 }
 
-
 //==========================================================
 // Public API - packing responses.
 //
 
 // Allocates cl_msg returned - caller must free it.
-cl_msg *
+cl_msg*
 as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
-		uint32_t void_time, as_msg_op **ops, as_bin **bins, uint16_t bin_count,
-		as_namespace *ns, cl_msg *msgp_in, size_t *msg_sz_in, uint64_t trid)
+		uint32_t void_time, as_msg_op** ops, as_bin** bins, uint16_t bin_count,
+		as_namespace* ns, cl_msg* msgp_in, size_t* msg_sz_in, uint64_t trid)
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
@@ -203,18 +194,18 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 		}
 	}
 
-	uint8_t *buf;
+	uint8_t* buf;
 
 	if (! msgp_in || *msg_sz_in < msg_sz) {
 		buf = cf_malloc(msg_sz);
 	}
 	else {
-		buf = (uint8_t *)msgp_in;
+		buf = (uint8_t*)msgp_in;
 	}
 
 	*msg_sz_in = msg_sz;
 
-	cl_msg *msgp = (cl_msg *)buf;
+	cl_msg* msgp = (cl_msg*)buf;
 
 	msgp->proto.version = PROTO_VERSION;
 	msgp->proto.type = PROTO_TYPE_AS_MSG;
@@ -222,7 +213,7 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 
 	as_proto_swap(&msgp->proto);
 
-	as_msg *m = &msgp->msg;
+	as_msg* m = &msgp->msg;
 
 	m->header_sz = sizeof(as_msg);
 	m->info1 = 0;
@@ -241,17 +232,17 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 	buf = m->data;
 
 	if (trid != 0) {
-		as_msg_field *mf = (as_msg_field *)buf;
+		as_msg_field* mf = (as_msg_field*)buf;
 
 		mf->field_sz = 1 + sizeof(uint64_t);
 		mf->type = AS_MSG_FIELD_TYPE_TRID;
-		*(uint64_t *)mf->data = cf_swap_to_be64(trid);
+		*(uint64_t*)mf->data = cf_swap_to_be64(trid);
 		as_msg_swap_field(mf);
 		buf += sizeof(as_msg_field) + sizeof(uint64_t);
 	}
 
 	for (uint16_t i = 0; i < bin_count; i++) {
-		as_msg_op *op = (as_msg_op *)buf;
+		as_msg_op* op = (as_msg_op*)buf;
 
 		op->has_lut = 0;
 		op->unused_flags = 0;
@@ -279,15 +270,15 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 
 // Pass NULL bb_r for sizing only. Return value is size if >= 0, error if < 0.
 int32_t
-as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
-		bool no_bin_data, const cf_vector *select_bins, bool send_bval,
+as_msg_make_response_bufbuilder(cf_buf_builder** bb_r, as_storage_rd* rd,
+		bool no_bin_data, const cf_vector* select_bins, bool send_bval,
 		int64_t bval)
 {
-	as_namespace *ns = rd->ns;
-	as_record *r = rd->r;
+	as_namespace* ns = rd->ns;
+	as_record* r = rd->r;
 
 	size_t ns_len = strlen(ns->name);
-	const char *set_name = as_index_get_set_name(r, ns);
+	const char* set_name = as_index_get_set_name(r, ns);
 	size_t set_name_len = set_name ? strlen(set_name) : 0;
 
 	const uint8_t* key = NULL;
@@ -304,8 +295,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	}
 
 	uint16_t n_fields = 2; // always add namespace and digest
-	size_t msg_sz = sizeof(as_msg) +
-			sizeof(as_msg_field) + ns_len +
+	size_t msg_sz = sizeof(as_msg) + sizeof(as_msg_field) + ns_len +
 			sizeof(as_msg_field) + sizeof(cf_digest);
 
 	if (set_name) {
@@ -334,7 +324,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 				const char* bin_name =
 						(const char*)cf_vector_getp((cf_vector*)select_bins, i);
 
-				as_bin *b = as_bin_get_live(rd, bin_name);
+				as_bin* b = as_bin_get_live(rd, bin_name);
 
 				if (! b) {
 					continue;
@@ -354,7 +344,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 		}
 		else {
 			for (uint16_t i = 0; i < rd->n_bins; i++) {
-				as_bin *b = &rd->bins[i];
+				as_bin* b = &rd->bins[i];
 
 				if (as_bin_is_tombstone(b)) {
 					continue;
@@ -369,11 +359,11 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 		}
 	}
 
-	uint8_t *buf;
+	uint8_t* buf;
 
 	cf_buf_builder_reserve(bb_r, (int)msg_sz, &buf);
 
-	as_msg *m = (as_msg *)buf;
+	as_msg* m = (as_msg*)buf;
 
 	m->header_sz = sizeof(as_msg);
 	m->info1 = no_bin_data ? AS_MSG_INFO1_GET_NO_BINS : 0;
@@ -397,7 +387,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 
 	buf = m->data;
 
-	as_msg_field *mf = (as_msg_field *)buf;
+	as_msg_field* mf = (as_msg_field*)buf;
 
 	mf->field_sz = ns_len + 1;
 	mf->type = AS_MSG_FIELD_TYPE_NAMESPACE;
@@ -405,7 +395,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	as_msg_swap_field(mf);
 	buf += sizeof(as_msg_field) + ns_len;
 
-	mf = (as_msg_field *)buf;
+	mf = (as_msg_field*)buf;
 	mf->field_sz = sizeof(cf_digest) + 1;
 	mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
 	memcpy(mf->data, &r->keyd, sizeof(cf_digest));
@@ -413,7 +403,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	buf += sizeof(as_msg_field) + sizeof(cf_digest);
 
 	if (set_name) {
-		mf = (as_msg_field *)buf;
+		mf = (as_msg_field*)buf;
 		mf->field_sz = set_name_len + 1;
 		mf->type = AS_MSG_FIELD_TYPE_SET;
 		memcpy(mf->data, set_name, set_name_len);
@@ -422,7 +412,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	}
 
 	if (key) {
-		mf = (as_msg_field *)buf;
+		mf = (as_msg_field*)buf;
 		mf->field_sz = key_size + 1;
 		mf->type = AS_MSG_FIELD_TYPE_KEY;
 		memcpy(mf->data, key, key_size);
@@ -431,7 +421,7 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	}
 
 	if (send_bval) {
-		mf = (as_msg_field *)buf;
+		mf = (as_msg_field*)buf;
 		mf->field_sz = sizeof(bval) + 1;
 		mf->type = AS_MSG_FIELD_TYPE_BVAL_ARRAY;
 		*(uint64_t*)mf->data = cf_swap_to_le64((uint64_t)bval);
@@ -448,13 +438,13 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 			const char* bin_name =
 					(const char*)cf_vector_getp((cf_vector*)select_bins, i);
 
-			as_bin *b = as_bin_get_live(rd, bin_name);
+			as_bin* b = as_bin_get_live(rd, bin_name);
 
 			if (! b) {
 				continue;
 			}
 
-			as_msg_op *op = (as_msg_op *)buf;
+			as_msg_op* op = (as_msg_op*)buf;
 
 			op->op = AS_MSG_OP_READ;
 			op->has_lut = 0;
@@ -470,13 +460,13 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 	}
 	else {
 		for (uint16_t i = 0; i < rd->n_bins; i++) {
-			as_bin *b = &rd->bins[i];
+			as_bin* b = &rd->bins[i];
 
 			if (as_bin_is_tombstone(b)) {
 				continue;
 			}
 
-			as_msg_op *op = (as_msg_op *)buf;
+			as_msg_op* op = (as_msg_op*)buf;
 
 			op->op = AS_MSG_OP_READ;
 			op->has_lut = 0;
@@ -495,45 +485,43 @@ as_msg_make_response_bufbuilder(cf_buf_builder **bb_r, as_storage_rd *rd,
 }
 
 void
-as_msg_pid_done_bufbuilder(cf_buf_builder **bb_r, uint32_t pid, int result)
+as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid, int result)
 {
-	uint8_t *buf;
+	uint8_t* buf;
 
 	cf_buf_builder_reserve(bb_r, (int)sizeof(as_msg), &buf);
 
-	as_msg *m = (as_msg *)buf;
+	as_msg* m = (as_msg*)buf;
 
 	*m = (as_msg){
-			.header_sz = sizeof(as_msg),
-			.info3 = AS_MSG_INFO3_PARTITION_DONE,
-			.result_code = result,
-			.generation = pid // HACK - more efficient than separate field
+		.header_sz = sizeof(as_msg),
+		.info3 = AS_MSG_INFO3_PARTITION_DONE,
+		.result_code = result,
+		.generation = pid // HACK - more efficient than separate field
 	};
 
 	as_msg_swap_header(m);
 }
 
 void
-as_msg_fin_bufbuilder(cf_buf_builder **bb_r, int result)
+as_msg_fin_bufbuilder(cf_buf_builder** bb_r, int result)
 {
-	uint8_t *buf;
+	uint8_t* buf;
 
 	cf_buf_builder_reserve(bb_r, (int)sizeof(as_msg), &buf);
 
-	as_msg *m = (as_msg *)buf;
+	as_msg* m = (as_msg*)buf;
 
-	*m = (as_msg){
-			.header_sz = sizeof(as_msg),
-			.info3 = AS_MSG_INFO3_LAST,
-			.result_code = result
-	};
+	*m = (as_msg){ .header_sz = sizeof(as_msg),
+		.info3 = AS_MSG_INFO3_LAST,
+		.result_code = result };
 
 	as_msg_swap_header(m);
 }
 
-cl_msg *
+cl_msg*
 as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
-		uint32_t void_time, uint64_t trid, size_t *p_msg_sz)
+		uint32_t void_time, uint64_t trid, size_t* p_msg_sz)
 {
 	uint16_t n_fields = 0;
 	size_t msg_sz = sizeof(cl_msg);
@@ -543,8 +531,8 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 		msg_sz += sizeof(as_msg_field) + sizeof(trid);
 	}
 
-	uint8_t *buf = cf_malloc(msg_sz);
-	cl_msg *msgp = (cl_msg *)buf;
+	uint8_t* buf = cf_malloc(msg_sz);
+	cl_msg* msgp = (cl_msg*)buf;
 
 	msgp->proto.version = PROTO_VERSION;
 	msgp->proto.type = PROTO_TYPE_AS_MSG;
@@ -552,7 +540,7 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 
 	as_proto_swap(&msgp->proto);
 
-	as_msg *m = &msgp->msg;
+	as_msg* m = &msgp->msg;
 
 	m->header_sz = sizeof(as_msg);
 	m->info1 = 0;
@@ -571,11 +559,11 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 	buf = m->data;
 
 	if (trid != 0) {
-		as_msg_field *mf = (as_msg_field *)buf;
+		as_msg_field* mf = (as_msg_field*)buf;
 
 		mf->field_sz = 1 + sizeof(uint64_t);
 		mf->type = AS_MSG_FIELD_TYPE_TRID;
-		*(uint64_t *)mf->data = cf_swap_to_be64(trid);
+		*(uint64_t*)mf->data = cf_swap_to_be64(trid);
 		as_msg_swap_field(mf);
 		buf += sizeof(as_msg_field) + sizeof(uint64_t);
 	}
@@ -585,12 +573,11 @@ as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
 	return msgp;
 }
 
-cl_msg *
-as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
-		uint32_t generation, uint32_t void_time, uint64_t trid,
-		size_t *p_msg_sz)
+cl_msg*
+as_msg_make_val_response(bool success, const as_val* val, uint32_t result_code,
+		uint32_t generation, uint32_t void_time, uint64_t trid, size_t* p_msg_sz)
 {
-	const char *bin_name;
+	const char* bin_name;
 	size_t bin_name_len;
 
 	if (success) {
@@ -613,8 +600,8 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 	msg_sz += sizeof(as_msg_op) + bin_name_len +
 			as_particle_asval_client_value_size(val);
 
-	uint8_t *buf = cf_malloc(msg_sz);
-	cl_msg *msgp = (cl_msg *)buf;
+	uint8_t* buf = cf_malloc(msg_sz);
+	cl_msg* msgp = (cl_msg*)buf;
 
 	msgp->proto.version = PROTO_VERSION;
 	msgp->proto.type = PROTO_TYPE_AS_MSG;
@@ -622,7 +609,7 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 
 	as_proto_swap(&msgp->proto);
 
-	as_msg *m = &msgp->msg;
+	as_msg* m = &msgp->msg;
 
 	m->header_sz = sizeof(as_msg);
 	m->info1 = 0;
@@ -641,16 +628,16 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 	buf = m->data;
 
 	if (trid != 0) {
-		as_msg_field *mf = (as_msg_field *)buf;
+		as_msg_field* mf = (as_msg_field*)buf;
 
 		mf->field_sz = 1 + sizeof(uint64_t);
 		mf->type = AS_MSG_FIELD_TYPE_TRID;
-		*(uint64_t *)mf->data = cf_swap_to_be64(trid);
+		*(uint64_t*)mf->data = cf_swap_to_be64(trid);
 		as_msg_swap_field(mf);
 		buf += sizeof(as_msg_field) + sizeof(uint64_t);
 	}
 
-	as_msg_op *op = (as_msg_op *)buf;
+	as_msg_op* op = (as_msg_op*)buf;
 
 	op->op = AS_MSG_OP_READ;
 	op->name_sz = (uint8_t)bin_name_len;
@@ -671,10 +658,10 @@ as_msg_make_val_response(bool success, const as_val *val, uint32_t result_code,
 // Caller-provided val_sz must be the result of calling
 // as_particle_asval_client_value_size() for same val.
 void
-as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
+as_msg_make_val_response_bufbuilder(const as_val* val, cf_buf_builder** bb_r,
 		uint32_t val_sz, bool success)
 {
-	const char *bin_name;
+	const char* bin_name;
 	size_t bin_name_len;
 
 	if (success) {
@@ -688,11 +675,11 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 
 	size_t msg_sz = sizeof(as_msg) + sizeof(as_msg_op) + bin_name_len + val_sz;
 
-	uint8_t *buf;
+	uint8_t* buf;
 
 	cf_buf_builder_reserve(bb_r, (int)msg_sz, &buf);
 
-	as_msg *m = (as_msg *)buf;
+	as_msg* m = (as_msg*)buf;
 
 	m->header_sz = sizeof(as_msg);
 	m->info1 = 0;
@@ -708,7 +695,7 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 
 	as_msg_swap_header(m);
 
-	as_msg_op *op = (as_msg_op *)m->data;
+	as_msg_op* op = (as_msg_op*)m->data;
 
 	op->op = AS_MSG_OP_READ;
 	op->name_sz = (uint8_t)bin_name_len;
@@ -722,21 +709,20 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r,
 	as_msg_swap_op(op);
 }
 
-
 //==========================================================
 // Public API - sending responses to client.
 //
 
 // Make an individual transaction response and send it.
 int
-as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code,
-		uint32_t generation, uint32_t void_time, as_msg_op **ops, as_bin **bins,
-		uint16_t bin_count, as_namespace *ns, uint64_t trid)
+as_msg_send_reply(as_file_handle* fd_h, uint32_t result_code,
+		uint32_t generation, uint32_t void_time, as_msg_op** ops, as_bin** bins,
+		uint16_t bin_count, as_namespace* ns, uint64_t trid)
 {
 	uint8_t stack_buf[MSG_STACK_BUFFER_SZ];
 	size_t msg_sz = sizeof(stack_buf);
-	uint8_t *msgp = (uint8_t *)as_msg_make_response_msg(result_code, generation,
-			void_time, ops, bins, bin_count, ns, (cl_msg *)stack_buf, &msg_sz,
+	uint8_t* msgp = (uint8_t*)as_msg_make_response_msg(result_code, generation,
+			void_time, ops, bins, bin_count, ns, (cl_msg*)stack_buf, &msg_sz,
 			trid);
 
 	int rv = send_reply_buf(fd_h, msgp, msg_sz);
@@ -750,29 +736,29 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code,
 
 // Send a pre-made response saved in a dyn-buf.
 int
-as_msg_send_ops_reply(as_file_handle *fd_h, const cf_dyn_buf *db, bool compress,
-		as_proto_comp_stat *comp_stat)
+as_msg_send_ops_reply(as_file_handle* fd_h, const cf_dyn_buf* db, bool compress,
+		as_proto_comp_stat* comp_stat)
 {
 	if (! compress) {
 		return send_reply_buf(fd_h, db->buf, db->used_sz);
 	}
 
 	size_t msg_sz = db->used_sz;
-	const uint8_t *msgp = as_proto_compress(db->buf, &msg_sz, comp_stat);
+	const uint8_t* msgp = as_proto_compress(db->buf, &msg_sz, comp_stat);
 
 	return send_reply_buf(fd_h, msgp, msg_sz);
 }
 
 // Send a blocking "fin" message with default timeout.
 bool
-as_msg_send_fin(cf_socket *sock, uint32_t result_code)
+as_msg_send_fin(cf_socket* sock, uint32_t result_code)
 {
 	return as_msg_send_fin_timeout(sock, result_code, CF_SOCKET_TIMEOUT) != 0;
 }
 
 // Send a blocking "fin" message with a specified timeout.
 size_t
-as_msg_send_fin_timeout(cf_socket *sock, uint32_t result_code, int32_t timeout)
+as_msg_send_fin_timeout(cf_socket* sock, uint32_t result_code, int32_t timeout)
 {
 	cl_msg msgp;
 
@@ -782,7 +768,7 @@ as_msg_send_fin_timeout(cf_socket *sock, uint32_t result_code, int32_t timeout)
 
 	as_proto_swap(&msgp.proto);
 
-	as_msg *m = &msgp.msg;
+	as_msg* m = &msgp.msg;
 
 	m->header_sz = sizeof(as_msg);
 	m->info1 = 0;
@@ -799,7 +785,7 @@ as_msg_send_fin_timeout(cf_socket *sock, uint32_t result_code, int32_t timeout)
 	as_msg_swap_header(m);
 
 	if (cf_socket_send_all(sock, (uint8_t*)&msgp, sizeof(msgp), MSG_NOSIGNAL,
-			timeout) < 0) {
+				timeout) < 0) {
 		cf_warning(AS_PROTO, "send error - fd %d %s", CSFD(sock),
 				cf_strerror(errno));
 		return 0;
@@ -808,18 +794,17 @@ as_msg_send_fin_timeout(cf_socket *sock, uint32_t result_code, int32_t timeout)
 	return sizeof(cl_msg);
 }
 
-
 //==========================================================
 // Local helpers.
 //
 
 static int
-send_reply_buf(as_file_handle *fd_h, const uint8_t *msgp, size_t msg_sz)
+send_reply_buf(as_file_handle* fd_h, const uint8_t* msgp, size_t msg_sz)
 {
 	cf_assert(cf_socket_exists(&fd_h->sock), AS_PROTO, "fd is invalid");
 
 	if (cf_socket_send_all(&fd_h->sock, msgp, msg_sz, MSG_NOSIGNAL,
-			CF_SOCKET_TIMEOUT) < 0) {
+				CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu errno %d",
 				CSFD(&fd_h->sock), msg_sz, errno);

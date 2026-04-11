@@ -28,9 +28,8 @@
 
 struct as_transaction_s;
 
-
 //==========================================================
 // Public API.
 //
 
-void as_tsvc_process_transaction(struct as_transaction_s *tr);
+void as_tsvc_process_transaction(struct as_transaction_s* tr);

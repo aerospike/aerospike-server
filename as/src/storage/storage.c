@@ -43,13 +43,11 @@
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
 
-
 //==========================================================
 // Globals.
 //
 
 uint64_t g_unique_data_size = 0;
-
 
 //==========================================================
 // Generic "base class" functions that call through
@@ -61,11 +59,8 @@ uint64_t g_unique_data_size = 0;
 //
 
 typedef void (*as_storage_init_fn)(as_namespace* ns);
-static const as_storage_init_fn as_storage_init_table[] = {
-	as_storage_init_mem,
-	as_storage_init_pmem,
-	as_storage_init_ssd
-};
+static const as_storage_init_fn as_storage_init_table[] = { as_storage_init_mem,
+	as_storage_init_pmem, as_storage_init_ssd };
 
 void
 as_storage_init(void)
@@ -88,16 +83,12 @@ as_storage_init(void)
 //
 
 typedef void (*as_storage_load_fn)(as_namespace* ns, cf_queue* complete_q);
-static const as_storage_load_fn as_storage_load_table[] = {
-	as_storage_load_mem,
-	as_storage_load_pmem,
-	as_storage_load_ssd
-};
+static const as_storage_load_fn as_storage_load_table[] = { as_storage_load_mem,
+	as_storage_load_pmem, as_storage_load_ssd };
 
 typedef void (*as_storage_load_ticker_fn)(const as_namespace* ns);
 static const as_storage_load_ticker_fn as_storage_load_ticker_table[] = {
-	as_storage_load_ticker_mem,
-	as_storage_load_ticker_pmem,
+	as_storage_load_ticker_mem, as_storage_load_ticker_pmem,
 	as_storage_load_ticker_ssd
 };
 
@@ -143,15 +134,12 @@ as_storage_load(void)
 
 typedef void (*as_storage_activate_fn)(as_namespace* ns);
 static const as_storage_activate_fn as_storage_activate_table[] = {
-	as_storage_activate_mem,
-	as_storage_activate_pmem,
-	as_storage_activate_ssd
+	as_storage_activate_mem, as_storage_activate_pmem, as_storage_activate_ssd
 };
 
 typedef bool (*as_storage_wait_for_defrag_fn)(as_namespace* ns);
 static const as_storage_wait_for_defrag_fn as_storage_wait_for_defrag_table[] = {
-	as_storage_wait_for_defrag_mem,
-	as_storage_wait_for_defrag_pmem,
+	as_storage_wait_for_defrag_mem, as_storage_wait_for_defrag_pmem,
 	as_storage_wait_for_defrag_ssd
 };
 
@@ -189,8 +177,7 @@ as_storage_activate(void)
 
 typedef void (*as_storage_start_tomb_raider_fn)(as_namespace* ns);
 static const as_storage_start_tomb_raider_fn as_storage_start_tomb_raider_table[] = {
-	as_storage_start_tomb_raider_mem,
-	as_storage_start_tomb_raider_pmem,
+	as_storage_start_tomb_raider_mem, as_storage_start_tomb_raider_pmem,
 	as_storage_start_tomb_raider_ssd
 };
 
@@ -210,9 +197,7 @@ as_storage_start_tomb_raider(void)
 
 typedef void (*as_storage_shutdown_fn)(as_namespace* ns);
 static const as_storage_shutdown_fn as_storage_shutdown_table[] = {
-	as_storage_shutdown_mem,
-	as_storage_shutdown_pmem,
-	as_storage_shutdown_ssd
+	as_storage_shutdown_mem, as_storage_shutdown_pmem, as_storage_shutdown_ssd
 };
 
 bool
@@ -259,8 +244,7 @@ as_storage_shutdown(uint32_t instance)
 
 typedef void (*as_storage_destroy_record_fn)(as_namespace* ns, as_record* r);
 static const as_storage_destroy_record_fn as_storage_destroy_record_table[] = {
-	as_storage_destroy_record_mem,
-	as_storage_destroy_record_pmem,
+	as_storage_destroy_record_mem, as_storage_destroy_record_pmem,
 	as_storage_destroy_record_ssd
 };
 
@@ -278,11 +262,7 @@ as_storage_destroy_record(as_namespace* ns, as_record* r)
 void
 as_storage_record_create(as_namespace* ns, as_record* r, as_storage_rd* rd)
 {
-	*rd = (as_storage_rd){
-			.r = r,
-			.ns = ns,
-			.which_current_swb = SWB_MASTER
-	};
+	*rd = (as_storage_rd){ .r = r, .ns = ns, .which_current_swb = SWB_MASTER };
 
 	// Ancient paranoia...
 	cf_assert(r->rblock_id == 0, AS_STORAGE, "uninitialized rblock-id");
@@ -294,8 +274,7 @@ as_storage_record_create(as_namespace* ns, as_record* r, as_storage_rd* rd)
 
 typedef void (*as_storage_record_open_fn)(as_storage_rd* rd);
 static const as_storage_record_open_fn as_storage_record_open_table[] = {
-	as_storage_record_open_mem,
-	as_storage_record_open_pmem,
+	as_storage_record_open_mem, as_storage_record_open_pmem,
 	as_storage_record_open_ssd
 };
 
@@ -303,10 +282,7 @@ void
 as_storage_record_open(as_namespace* ns, as_record* r, as_storage_rd* rd)
 {
 	*rd = (as_storage_rd){
-			.r = r,
-			.ns = ns,
-			.record_on_device = true,
-			.which_current_swb = SWB_MASTER
+		.r = r, .ns = ns, .record_on_device = true, .which_current_swb = SWB_MASTER
 	};
 
 	// Sets the device (union) pointer.
@@ -334,8 +310,7 @@ as_storage_record_close(as_storage_rd* rd)
 
 typedef int (*as_storage_record_load_bins_fn)(as_storage_rd* rd);
 static const as_storage_record_load_bins_fn as_storage_record_load_bins_table[] = {
-	as_storage_record_load_bins_mem,
-	as_storage_record_load_bins_pmem,
+	as_storage_record_load_bins_mem, as_storage_record_load_bins_pmem,
 	as_storage_record_load_bins_ssd
 };
 
@@ -351,8 +326,7 @@ as_storage_record_load_bins(as_storage_rd* rd)
 
 typedef bool (*as_storage_record_load_key_fn)(as_storage_rd* rd);
 static const as_storage_record_load_key_fn as_storage_record_load_key_table[] = {
-	as_storage_record_load_key_mem,
-	as_storage_record_load_key_pmem,
+	as_storage_record_load_key_mem, as_storage_record_load_key_pmem,
 	as_storage_record_load_key_ssd
 };
 
@@ -368,8 +342,7 @@ as_storage_record_load_key(as_storage_rd* rd)
 
 typedef bool (*as_storage_record_load_pickle_fn)(as_storage_rd* rd);
 static const as_storage_record_load_pickle_fn as_storage_record_load_pickle_table[] = {
-	as_storage_record_load_pickle_mem,
-	as_storage_record_load_pickle_pmem,
+	as_storage_record_load_pickle_mem, as_storage_record_load_pickle_pmem,
 	as_storage_record_load_pickle_ssd
 };
 
@@ -383,17 +356,18 @@ as_storage_record_load_pickle(as_storage_rd* rd)
 // as_storage_record_load_raw
 //
 
-typedef bool (*as_storage_record_load_raw_fn)(as_storage_rd* rd, bool leave_encrypted);
+typedef bool (*as_storage_record_load_raw_fn)(as_storage_rd* rd,
+		bool leave_encrypted);
 static const as_storage_record_load_raw_fn as_storage_record_load_raw_table[] = {
-	as_storage_record_load_raw_mem,
-	as_storage_record_load_raw_pmem,
+	as_storage_record_load_raw_mem, as_storage_record_load_raw_pmem,
 	as_storage_record_load_raw_ssd
 };
 
 bool
 as_storage_record_load_raw(as_storage_rd* rd, bool leave_encrypted)
 {
-	return as_storage_record_load_raw_table[rd->ns->storage_type](rd, leave_encrypted);
+	return as_storage_record_load_raw_table[rd->ns->storage_type](rd,
+			leave_encrypted);
 }
 
 //--------------------------------------
@@ -402,8 +376,7 @@ as_storage_record_load_raw(as_storage_rd* rd, bool leave_encrypted)
 
 typedef int (*as_storage_record_write_fn)(as_storage_rd* rd);
 static const as_storage_record_write_fn as_storage_record_write_table[] = {
-	as_storage_record_write_mem,
-	as_storage_record_write_pmem,
+	as_storage_record_write_mem, as_storage_record_write_pmem,
 	as_storage_record_write_ssd
 };
 
@@ -424,8 +397,9 @@ as_storage_overloaded(const as_namespace* ns, uint32_t margin, const char* tag)
 	uint32_t limit = ns->storage_max_write_q + margin;
 
 	if (ns->n_wblocks_to_flush > limit) {
-		cf_ticker_warning(AS_STORAGE, "{%s} %s fail: queue too deep: exceeds max %u",
-				ns->name, tag, limit);
+		cf_ticker_warning(AS_STORAGE,
+				"{%s} %s fail: queue too deep: exceeds max %u", ns->name, tag,
+				limit);
 		return true;
 	}
 
@@ -438,8 +412,7 @@ as_storage_overloaded(const as_namespace* ns, uint32_t margin, const char* tag)
 
 typedef void (*as_storage_defrag_sweep_fn)(as_namespace* ns);
 static const as_storage_defrag_sweep_fn as_storage_defrag_sweep_table[] = {
-	as_storage_defrag_sweep_mem,
-	as_storage_defrag_sweep_pmem,
+	as_storage_defrag_sweep_mem, as_storage_defrag_sweep_pmem,
 	as_storage_defrag_sweep_ssd
 };
 
@@ -455,8 +428,7 @@ as_storage_defrag_sweep(as_namespace* ns)
 
 typedef void (*as_storage_load_regime_fn)(as_namespace* ns);
 static const as_storage_load_regime_fn as_storage_load_regime_table[] = {
-	as_storage_load_regime_mem,
-	as_storage_load_regime_pmem,
+	as_storage_load_regime_mem, as_storage_load_regime_pmem,
 	as_storage_load_regime_ssd
 };
 
@@ -472,8 +444,7 @@ as_storage_load_regime(as_namespace* ns)
 
 typedef void (*as_storage_save_regime_fn)(as_namespace* ns);
 static const as_storage_save_regime_fn as_storage_save_regime_table[] = {
-	as_storage_save_regime_mem,
-	as_storage_save_regime_pmem,
+	as_storage_save_regime_mem, as_storage_save_regime_pmem,
 	as_storage_save_regime_ssd
 };
 
@@ -488,11 +459,12 @@ as_storage_save_regime(as_namespace* ns)
 //
 
 typedef void (*as_storage_load_roster_generation_fn)(as_namespace* ns);
-static const as_storage_load_roster_generation_fn as_storage_load_roster_generation_table[] = {
-	as_storage_load_roster_generation_mem,
-	as_storage_load_roster_generation_pmem,
-	as_storage_load_roster_generation_ssd
-};
+static const as_storage_load_roster_generation_fn
+		as_storage_load_roster_generation_table[] = {
+			as_storage_load_roster_generation_mem,
+			as_storage_load_roster_generation_pmem,
+			as_storage_load_roster_generation_ssd
+		};
 
 void
 as_storage_load_roster_generation(as_namespace* ns)
@@ -505,11 +477,12 @@ as_storage_load_roster_generation(as_namespace* ns)
 //
 
 typedef void (*as_storage_save_roster_generation_fn)(as_namespace* ns);
-static const as_storage_save_roster_generation_fn as_storage_save_roster_generation_table[] = {
-	as_storage_save_roster_generation_mem,
-	as_storage_save_roster_generation_pmem,
-	as_storage_save_roster_generation_ssd
-};
+static const as_storage_save_roster_generation_fn
+		as_storage_save_roster_generation_table[] = {
+			as_storage_save_roster_generation_mem,
+			as_storage_save_roster_generation_pmem,
+			as_storage_save_roster_generation_ssd
+		};
 
 void
 as_storage_save_roster_generation(as_namespace* ns)
@@ -523,9 +496,7 @@ as_storage_save_roster_generation(as_namespace* ns)
 
 typedef void (*as_storage_load_pmeta_fn)(as_namespace* ns, as_partition* p);
 static const as_storage_load_pmeta_fn as_storage_load_pmeta_table[] = {
-	as_storage_load_pmeta_mem,
-	as_storage_load_pmeta_pmem,
-	as_storage_load_pmeta_ssd
+	as_storage_load_pmeta_mem, as_storage_load_pmeta_pmem, as_storage_load_pmeta_ssd
 };
 
 void
@@ -540,9 +511,7 @@ as_storage_load_pmeta(as_namespace* ns, as_partition* p)
 
 typedef void (*as_storage_save_pmeta_fn)(as_namespace* ns, const as_partition* p);
 static const as_storage_save_pmeta_fn as_storage_save_pmeta_table[] = {
-	as_storage_save_pmeta_mem,
-	as_storage_save_pmeta_pmem,
-	as_storage_save_pmeta_ssd
+	as_storage_save_pmeta_mem, as_storage_save_pmeta_pmem, as_storage_save_pmeta_ssd
 };
 
 void
@@ -555,10 +524,10 @@ as_storage_save_pmeta(as_namespace* ns, const as_partition* p)
 // as_storage_cache_pmeta
 //
 
-typedef void (*as_storage_cache_pmeta_fn)(as_namespace* ns, const as_partition* p);
+typedef void (*as_storage_cache_pmeta_fn)(as_namespace* ns,
+		const as_partition* p);
 static const as_storage_cache_pmeta_fn as_storage_cache_pmeta_table[] = {
-	as_storage_cache_pmeta_mem,
-	as_storage_cache_pmeta_pmem,
+	as_storage_cache_pmeta_mem, as_storage_cache_pmeta_pmem,
 	as_storage_cache_pmeta_ssd
 };
 
@@ -572,10 +541,10 @@ as_storage_cache_pmeta(as_namespace* ns, const as_partition* p)
 // as_storage_flush_pmeta
 //
 
-typedef void (*as_storage_flush_pmeta_fn)(as_namespace* ns, uint32_t start_pid, uint32_t n_partitions);
+typedef void (*as_storage_flush_pmeta_fn)(as_namespace* ns, uint32_t start_pid,
+		uint32_t n_partitions);
 static const as_storage_flush_pmeta_fn as_storage_flush_pmeta_table[] = {
-	as_storage_flush_pmeta_mem,
-	as_storage_flush_pmeta_pmem,
+	as_storage_flush_pmeta_mem, as_storage_flush_pmeta_pmem,
 	as_storage_flush_pmeta_ssd
 };
 
@@ -589,11 +558,10 @@ as_storage_flush_pmeta(as_namespace* ns, uint32_t start_pid, uint32_t n_partitio
 // as_storage_stats
 //
 
-typedef void (*as_storage_stats_fn)(as_namespace* ns, uint32_t* avail_pct, uint64_t* used_bytes);
+typedef void (*as_storage_stats_fn)(as_namespace* ns, uint32_t* avail_pct,
+		uint64_t* used_bytes);
 static const as_storage_stats_fn as_storage_stats_table[] = {
-	as_storage_stats_mem,
-	as_storage_stats_pmem,
-	as_storage_stats_ssd
+	as_storage_stats_mem, as_storage_stats_pmem, as_storage_stats_ssd
 };
 
 void
@@ -606,15 +574,16 @@ as_storage_stats(as_namespace* ns, uint32_t* avail_pct, uint64_t* used_bytes)
 // as_storage_device_stats
 //
 
-typedef void (*as_storage_device_stats_fn)(const as_namespace* ns, uint32_t device_ix, storage_device_stats* stats);
+typedef void (*as_storage_device_stats_fn)(const as_namespace* ns,
+		uint32_t device_ix, storage_device_stats* stats);
 static const as_storage_device_stats_fn as_storage_device_stats_table[] = {
-	as_storage_device_stats_mem,
-	as_storage_device_stats_pmem,
+	as_storage_device_stats_mem, as_storage_device_stats_pmem,
 	as_storage_device_stats_ssd
 };
 
 void
-as_storage_device_stats(const as_namespace* ns, uint32_t device_ix, storage_device_stats* stats)
+as_storage_device_stats(const as_namespace* ns, uint32_t device_ix,
+		storage_device_stats* stats)
 {
 	as_storage_device_stats_table[ns->storage_type](ns, device_ix, stats);
 }
@@ -625,8 +594,7 @@ as_storage_device_stats(const as_namespace* ns, uint32_t device_ix, storage_devi
 
 typedef void (*as_storage_ticker_stats_fn)(as_namespace* ns);
 static const as_storage_ticker_stats_fn as_storage_ticker_stats_table[] = {
-	as_storage_ticker_stats_mem,
-	as_storage_ticker_stats_pmem,
+	as_storage_ticker_stats_mem, as_storage_ticker_stats_pmem,
 	as_storage_ticker_stats_ssd
 };
 
@@ -642,8 +610,7 @@ as_storage_ticker_stats(as_namespace* ns)
 
 typedef void (*as_storage_dump_wb_summary_fn)(const as_namespace* ns);
 static const as_storage_dump_wb_summary_fn as_storage_dump_wb_summary_table[] = {
-	as_storage_dump_wb_summary_mem,
-	as_storage_dump_wb_summary_pmem,
+	as_storage_dump_wb_summary_mem, as_storage_dump_wb_summary_pmem,
 	as_storage_dump_wb_summary_ssd
 };
 
@@ -659,8 +626,7 @@ as_storage_dump_wb_summary(const as_namespace* ns)
 
 typedef void (*as_storage_histogram_clear_fn)(as_namespace* ns);
 static const as_storage_histogram_clear_fn as_storage_histogram_clear_table[] = {
-	as_storage_histogram_clear_mem,
-	as_storage_histogram_clear_pmem,
+	as_storage_histogram_clear_mem, as_storage_histogram_clear_pmem,
 	as_storage_histogram_clear_ssd
 };
 
@@ -669,7 +635,6 @@ as_storage_histogram_clear_all(as_namespace* ns)
 {
 	as_storage_histogram_clear_table[ns->storage_type](ns);
 }
-
 
 //==========================================================
 // Generic functions that don't use "v-tables".

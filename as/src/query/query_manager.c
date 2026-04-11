@@ -27,6 +27,7 @@
 #include "query/query_manager.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "aerospike/as_atomic.h"
@@ -39,12 +40,12 @@
 #include "log.h"
 
 #include "base/cfg.h"
+#include "base/datamodel.h"
 #include "base/proto.h"
 #include "fabric/partition.h"
 #include "query/query_job.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -60,7 +61,6 @@ typedef struct info_item_s {
 	as_query_job** p_job;
 } info_item;
 
-
 //==========================================================
 // Globals.
 //
@@ -68,7 +68,6 @@ typedef struct info_item_s {
 uint32_t g_n_query_threads = 0;
 
 static as_query_manager g_mgr;
-
 
 //==========================================================
 // Forward declarations.
@@ -83,7 +82,6 @@ static as_query_job* find_active(uint64_t trid);
 static as_query_job* remove_active(uint64_t trid);
 static as_query_job* find_job(cf_queue* jobs, uint64_t trid, bool remove_job);
 static int find_cb(void* buf, void* udata);
-
 
 //==========================================================
 // Public API.
@@ -113,7 +111,8 @@ as_query_manager_start_job(as_query_job* _job)
 	cf_mutex_lock(&g_mgr.lock);
 
 	if (g_n_query_threads >= g_config.n_query_threads_limit) {
-		cf_ticker_warning(AS_QUERY, "query-threads-limit %u reached - can't start new query",
+		cf_ticker_warning(AS_QUERY,
+				"query-threads-limit %u reached - can't start new query",
 				g_config.n_query_threads_limit);
 		cf_mutex_unlock(&g_mgr.lock);
 		return AS_ERR_FORBIDDEN;
@@ -124,8 +123,7 @@ as_query_manager_start_job(as_query_job* _job)
 
 		// Make sure trid is unique.
 		if (find_any(_job->trid)) {
-			cf_warning(AS_QUERY, "job with trid %lu already active",
-					_job->trid);
+			cf_warning(AS_QUERY, "job with trid %lu already active", _job->trid);
 			cf_mutex_unlock(&g_mgr.lock);
 			return AS_ERR_PARAMETER;
 		}
@@ -144,7 +142,7 @@ void
 as_query_manager_add_job_thread(as_query_job* _job)
 {
 	if ((_job->n_pids_requested != 0 &&
-			_job->n_threads >= (uint32_t)_job->n_pids_requested) ||
+				_job->n_threads >= (uint32_t)_job->n_pids_requested) ||
 			_job->n_threads >= _job->ns->n_single_query_threads) {
 		return;
 	}
@@ -161,8 +159,9 @@ as_query_manager_add_job_thread(as_query_job* _job)
 void
 as_query_manager_add_max_job_threads(as_query_job* _job)
 {
-	uint32_t n_pids = _job->n_pids_requested == 0 ?
-			AS_PARTITIONS : (uint32_t)_job->n_pids_requested;
+	uint32_t n_pids = _job->n_pids_requested == 0
+			? AS_PARTITIONS
+			: (uint32_t)_job->n_pids_requested;
 
 	if (_job->n_threads >= n_pids) {
 		return;
@@ -296,8 +295,8 @@ as_query_manager_get_all_jobs_info(cf_dyn_buf* db)
 {
 	cf_mutex_lock(&g_mgr.lock);
 
-	uint32_t n_jobs = cf_queue_sz(g_mgr.active_jobs) +
-			cf_queue_sz(g_mgr.finished_jobs);
+	uint32_t n_jobs =
+			cf_queue_sz(g_mgr.active_jobs) + cf_queue_sz(g_mgr.finished_jobs);
 
 	if (n_jobs == 0) {
 		cf_mutex_unlock(&g_mgr.lock);
@@ -328,7 +327,6 @@ as_query_manager_get_active_job_count(void)
 {
 	return cf_queue_sz(g_mgr.active_jobs);
 }
-
 
 //==========================================================
 // Local helpers.

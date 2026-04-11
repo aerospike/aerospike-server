@@ -35,8 +35,8 @@
 
 #include "log.h"
 
+#include "fabric/partition.h"
 #include "transaction/udf.h"
-
 
 //==========================================================
 // Forward declarations.
@@ -49,7 +49,6 @@ struct as_result_s;
 struct as_val_s;
 struct udf_record_s;
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -57,8 +56,8 @@ struct udf_record_s;
 #define AS_AGGR_KEYS_PER_ARR 204
 
 typedef struct {
-	as_stream_status (*ostream_write) (void*, struct as_val_s*);
-	bool (*pre_check) (void*, struct udf_record_s*);
+	as_stream_status (*ostream_write)(void*, struct as_val_s*);
+	bool (*pre_check)(void*, struct udf_record_s*);
 } as_aggr_hooks;
 
 typedef struct {
@@ -86,12 +85,13 @@ typedef struct as_aggr_release_udata_s {
 	struct as_index_tree_s* tree;
 } as_aggr_release_udata;
 
-
 //==========================================================
 // Public API.
 //
 
-int as_aggr_process(struct as_namespace_s* ns, as_partition_reservation* rsv, as_aggr_call* ag_call, cf_ll* ap_recl, void* udata, struct as_result_s* ap_res);
+int as_aggr_process(struct as_namespace_s* ns, as_partition_reservation* rsv,
+		as_aggr_call* ag_call, cf_ll* ap_recl, void* udata,
+		struct as_result_s* ap_res);
 
 int as_aggr_keys_release_cb(cf_ll_element* ele, void* udata);
 void as_aggr_keys_destroy_cb(cf_ll_element* ele);

@@ -33,10 +33,9 @@
 
 #include "aerospike/as_aerospike.h"
 #include "aerospike/as_rec.h"
-#include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
-#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
 #include "log.h"
@@ -53,13 +52,11 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 #define LLB_ROUND_SZ (128U * 1024)
-
 
 //==========================================================
 // Forward declarations.
@@ -69,15 +66,16 @@ static int udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec);
 static int udf_aerospike_rec_update(const as_aerospike* as, const as_rec* rec);
 static int udf_aerospike_rec_exists(const as_aerospike* as, const as_rec* rec);
 static int udf_aerospike_rec_remove(const as_aerospike* as, const as_rec* rec);
-static int udf_aerospike_log(const as_aerospike* as, const char* file, const int line, const int level, const char* message);
+static int udf_aerospike_log(const as_aerospike* as, const char* file,
+		const int line, const int level, const char* message);
 static cf_clock udf_aerospike_get_current_time(const as_aerospike* as);
 
 static int execute_updates(udf_record* urecord);
 static void prepare_for_write(udf_record* urecord);
 static void execute_failed(udf_record* urecord, int result_code);
-static int execute_set_bin(udf_record* urecord, const char* name, const as_val* val);
+static int execute_set_bin(udf_record* urecord, const char* name,
+		const as_val* val);
 static uint8_t* get_particle_buf(udf_record* urecord, uint32_t size);
-
 
 //==========================================================
 // Inlines & macros.
@@ -90,20 +88,18 @@ param_check(const as_rec* rec)
 	cf_assert(as_rec_source(rec) != NULL, AS_UDF, "null udf_record object");
 }
 
-
 //==========================================================
 // Public API - aerospike: hooks.
 //
 
 const as_aerospike_hooks udf_aerospike_hooks = {
-		.rec_create         = udf_aerospike_rec_create,
-		.rec_update         = udf_aerospike_rec_update,
-		.rec_exists         = udf_aerospike_rec_exists,
-		.rec_remove         = udf_aerospike_rec_remove,
-		.log                = udf_aerospike_log,
-		.get_current_time   = udf_aerospike_get_current_time,
+	.rec_create = udf_aerospike_rec_create,
+	.rec_update = udf_aerospike_rec_update,
+	.rec_exists = udf_aerospike_rec_exists,
+	.rec_remove = udf_aerospike_rec_remove,
+	.log = udf_aerospike_log,
+	.get_current_time = udf_aerospike_get_current_time,
 };
-
 
 //==========================================================
 // Public API - implementation of aerospike: hooks.
@@ -167,8 +163,9 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 	}
 	// else - record created or rescued.
 
-	int rv_set = as_transaction_has_set(tr) ?
-			set_set_from_msg(r, ns, &tr->msgp->msg) : 0;
+	int rv_set = as_transaction_has_set(tr)
+			? set_set_from_msg(r, ns, &tr->msgp->msg)
+			: 0;
 
 	if (rv_set != 0) {
 		as_index_delete(tree, keyd);
@@ -313,7 +310,6 @@ udf_aerospike_get_current_time(const as_aerospike* as)
 	return cf_clock_getabsolute();
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -421,8 +417,7 @@ execute_failed(udf_record* urecord, int result_code)
 	as_storage_rd* rd = urecord->rd;
 
 	if (urecord->n_old_bins != 0) {
-		memcpy(rd->bins, urecord->old_bins,
-				urecord->n_old_bins * sizeof(as_bin));
+		memcpy(rd->bins, urecord->old_bins, urecord->n_old_bins * sizeof(as_bin));
 	}
 
 	rd->n_bins = (uint16_t)urecord->n_old_bins;

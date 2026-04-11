@@ -31,7 +31,6 @@
 
 #include "cf_mutex.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -67,7 +66,6 @@ typedef struct cf_shash_s {
 	cf_mutex* bucket_locks;
 } cf_shash;
 
-
 //==========================================================
 // Public API - useful hash functions.
 //
@@ -77,12 +75,12 @@ uint32_t cf_shash_fn_u32(const void* key);
 uint32_t cf_shash_fn_ptr(const void* key);
 uint32_t cf_shash_fn_zstr(const void* key);
 
-
 //==========================================================
 // Public API.
 //
 
-cf_shash* cf_shash_create(cf_shash_hash_fn h_fn, uint32_t key_size, uint32_t value_size, uint32_t n_buckets, bool thread_safe);
+cf_shash* cf_shash_create(cf_shash_hash_fn h_fn, uint32_t key_size,
+		uint32_t value_size, uint32_t n_buckets, bool thread_safe);
 void cf_shash_destroy(cf_shash* h);
 uint32_t cf_shash_get_size(const cf_shash* h);
 
@@ -90,7 +88,8 @@ void cf_shash_put(cf_shash* h, const void* key, const void* value);
 int cf_shash_put_unique(cf_shash* h, const void* key, const void* value);
 
 int cf_shash_get(cf_shash* h, const void* key, void* value);
-int cf_shash_get_vlock(cf_shash* h, const void* key, void** value_r, cf_mutex** vlock_r);
+int cf_shash_get_vlock(cf_shash* h, const void* key, void** value_r,
+		cf_mutex** vlock_r);
 
 int cf_shash_pop(cf_shash* h, const void* key, void* value);
 

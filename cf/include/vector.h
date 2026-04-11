@@ -31,13 +31,12 @@
 
 #include "cf_mutex.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 // Public flags.
-#define VECTOR_FLAG_BIGLOCK  0x01
+#define VECTOR_FLAG_BIGLOCK 0x01
 #define VECTOR_FLAG_INITZERO 0x02 // vector elements start cleared to 0
 
 // Return this to delete element during reduce.
@@ -53,14 +52,15 @@ typedef struct cf_vector_s {
 	cf_mutex lock; // mutable
 } cf_vector;
 
-
 //==========================================================
 // Public API.
 //
 
 cf_vector* cf_vector_create(uint32_t ele_sz, uint32_t capacity, uint32_t flags);
-void cf_vector_init(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint32_t flags);
-void cf_vector_init_with_buf(cf_vector* v, uint32_t ele_sz, uint32_t capacity, uint8_t* buf, uint32_t flags);
+void cf_vector_init(cf_vector* v, uint32_t ele_sz, uint32_t capacity,
+		uint32_t flags);
+void cf_vector_init_with_buf(cf_vector* v, uint32_t ele_sz, uint32_t capacity,
+		uint8_t* buf, uint32_t flags);
 void cf_vector_destroy(cf_vector* v);
 
 void cf_vector_append(cf_vector* v, const void* ele);
@@ -75,7 +75,6 @@ int cf_vector_pop(cf_vector* v, void* ele);
 int cf_vector_delete(cf_vector* v, uint32_t ele);
 int cf_vector_delete_range(cf_vector* v, uint32_t start, uint32_t end);
 void cf_vector_clear(cf_vector* v);
-
 
 //==========================================================
 // Public API - access members.
@@ -106,7 +105,6 @@ cf_vector_size(const cf_vector* v)
 	return v->count;
 }
 
-
 //==========================================================
 // Public API - wrappers for vector of pointers.
 //
@@ -133,12 +131,11 @@ cf_vector_get_ptr(const cf_vector* v, uint32_t ix)
 	return p;
 }
 
-
 //==========================================================
 // Public API - stack vector initialization.
 //
 
-#define cf_vector_define(_v, _ele_sz, _ele_cnt, _flags) \
-		cf_vector _v; \
-		uint8_t _v ## __mem[(_ele_sz) * (_ele_cnt)]; \
-		cf_vector_init_with_buf(&_v, _ele_sz, _ele_cnt, _v ## __mem, _flags);
+#define cf_vector_define(_v, _ele_sz, _ele_cnt, _flags)                        \
+	cf_vector _v;                                                              \
+	uint8_t _v##__mem[(_ele_sz) * (_ele_cnt)];                                 \
+	cf_vector_init_with_buf(&_v, _ele_sz, _ele_cnt, _v##__mem, _flags);
