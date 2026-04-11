@@ -36,11 +36,11 @@
 
 #include "cf_mutex.h"
 #include "dynbuf.h"
+#include "log.h"
 #include "node.h"
 
 #include "base/cfg.h"
 #include "fabric/hb.h"
-
 
 //==========================================================
 // Forward declarations.
@@ -49,7 +49,6 @@
 struct as_index_tree_s;
 struct as_namespace_s;
 struct as_transaction_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -63,13 +62,13 @@ struct as_transaction_s;
 #define AS_PARTITION_N_FAMILIES VERSION_FAMILY_UNIQUE
 
 typedef struct as_partition_version_s {
-	uint64_t ckey:48;
-	uint64_t family:VERSION_FAMILY_BITS;
-	uint64_t unused:8;
-	uint64_t revived:1; // enterprise only
-	uint64_t master:1;
-	uint64_t subset:1;
-	uint64_t evade:1;
+	uint64_t ckey : 48;
+	uint64_t family : VERSION_FAMILY_BITS;
+	uint64_t unused : 8;
+	uint64_t revived : 1; // enterprise only
+	uint64_t master : 1;
+	uint64_t subset : 1;
+	uint64_t evade : 1;
 } as_partition_version;
 
 COMPILER_ASSERT(sizeof(as_partition_version) == sizeof(uint64_t));
@@ -184,7 +183,6 @@ typedef enum {
 
 COMPILER_ASSERT(MAX_NUM_TREE_IDS <= 64); // must fit in 64-bit map
 
-
 //==========================================================
 // Public API.
 //
@@ -193,30 +191,43 @@ void as_partition_init(struct as_namespace_s* ns, uint32_t pid);
 void as_partition_tree_shutdown(struct as_namespace_s* ns, uint32_t pid);
 void as_partition_shutdown(struct as_namespace_s* ns, uint32_t pid);
 
-void as_partition_create_set_index(struct as_namespace_s* ns, uint32_t pid, uint16_t set_id);
-void as_partition_destroy_set_index(struct as_namespace_s* ns, uint32_t pid, uint16_t set_id);
+void as_partition_create_set_index(struct as_namespace_s* ns, uint32_t pid,
+		uint16_t set_id);
+void as_partition_destroy_set_index(struct as_namespace_s* ns, uint32_t pid,
+		uint16_t set_id);
 
-void as_partition_isolate_version(const struct as_namespace_s* ns, as_partition* p);
-int as_partition_check_source(const struct as_namespace_s* ns, as_partition* p, uint32_t regime, cf_node src, bool* from_replica);
+void as_partition_isolate_version(const struct as_namespace_s* ns,
+		as_partition* p);
+int as_partition_check_source(const struct as_namespace_s* ns, as_partition* p,
+		uint32_t regime, cf_node src, bool* from_replica);
 void as_partition_freeze(as_partition* p);
 
 uint32_t as_partition_get_other_replicas(as_partition* p, cf_node* nv);
 
 cf_node as_partition_writable_node(struct as_namespace_s* ns, uint32_t pid);
 cf_node as_partition_proxyee_redirect(struct as_namespace_s* ns, uint32_t pid);
-cf_node as_partition_proxyer_redirect(struct as_namespace_s* ns, uint32_t pid, cf_node redirect_node);
+cf_node as_partition_proxyer_redirect(struct as_namespace_s* ns, uint32_t pid,
+		cf_node redirect_node);
 
 void as_partition_get_replicas_master_str(cf_dyn_buf* db);
-void as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime, uint32_t max_repls);
+void as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime,
+		uint32_t max_repls);
 
-void as_partition_get_replica_stats(struct as_namespace_s* ns, repl_stats* p_stats);
+void as_partition_get_replica_stats(struct as_namespace_s* ns,
+		repl_stats* p_stats);
 
-void as_partition_reserve(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
-int as_partition_reserve_replica(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
-int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node);
-int as_partition_reserve_read_tr(struct as_namespace_s* ns, uint32_t pid, struct as_transaction_s* tr, cf_node* node);
-int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, bool relax);
-void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_reservation* src);
+void as_partition_reserve(struct as_namespace_s* ns, uint32_t pid,
+		as_partition_reservation* rsv);
+int as_partition_reserve_replica(struct as_namespace_s* ns, uint32_t pid,
+		as_partition_reservation* rsv);
+int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid,
+		as_partition_reservation* rsv, cf_node* node);
+int as_partition_reserve_read_tr(struct as_namespace_s* ns, uint32_t pid,
+		struct as_transaction_s* tr, cf_node* node);
+int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid,
+		as_partition_reservation* rsv, bool relax);
+void as_partition_reservation_copy(as_partition_reservation* dst,
+		as_partition_reservation* src);
 
 void as_partition_release(as_partition_reservation* rsv);
 
@@ -239,11 +250,9 @@ as_partition_version_as_string(const as_partition_version* version)
 	}
 	else {
 		sprintf(str.s, "%012lx.%X.%c%c%c", (uint64_t)version->ckey,
-				(uint32_t)version->family,
-				version->master == 0 ? '-' : 'm',
+				(uint32_t)version->family, version->master == 0 ? '-' : 'm',
 				version->subset == 0 ? 'p' : 's',
-				version->evade == 0 ?
-						(version->revived == 0 ? '-' : 'r') : 'e');
+				version->evade == 0 ? (version->revived == 0 ? '-' : 'r') : 'e');
 	}
 
 	return str;
@@ -262,7 +271,8 @@ as_partition_version_has_data(const as_partition_version* version)
 }
 
 static inline bool
-as_partition_version_same(const as_partition_version* v1, const as_partition_version* v2)
+as_partition_version_same(const as_partition_version* v1,
+		const as_partition_version* v2)
 {
 	return *(uint64_t*)v1 == *(uint64_t*)v2;
 }
@@ -295,22 +305,22 @@ static inline bool
 as_partition_is_full(const as_partition* p)
 {
 	// Any replica without pending immigrations is full ...
-	return p->pending_immigrations == 0 && (is_self_replica(p) ||
-			// Also a non-replica acting master when there are no duplicates.
-			(p->working_master == g_config.self_node && p->n_dupl == 0));
+	return p->pending_immigrations == 0 &&
+			(is_self_replica(p) ||
+					// Also a non-replica acting master when there are no duplicates.
+					(p->working_master == g_config.self_node && p->n_dupl == 0));
 }
 
 #define AS_PARTITION_ID_UNDEF ((uint16_t)0xFFFF)
 
-#define AS_PARTITION_RESERVATION_INIT(__rsv) \
-	__rsv.ns = NULL; \
-	__rsv.p = NULL; \
-	__rsv.tree = NULL; \
-	__rsv.regime = 0; \
+#define AS_PARTITION_RESERVATION_INIT(__rsv)                                   \
+	__rsv.ns = NULL;                                                           \
+	__rsv.p = NULL;                                                            \
+	__rsv.tree = NULL;                                                         \
+	__rsv.regime = 0;                                                          \
 	__rsv.n_dupl = 0;
 
 #define VERSION_AS_STRING(v_ptr) (as_partition_version_as_string(v_ptr).s)
-
 
 //==========================================================
 // Public API - client view replica maps.
@@ -320,10 +330,11 @@ void client_replica_maps_create(struct as_namespace_s* ns);
 void client_replica_maps_clear(struct as_namespace_s* ns);
 bool client_replica_maps_update(struct as_namespace_s* ns, uint32_t pid);
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
-int partition_reserve_unavailable(const struct as_namespace_s* ns, const as_partition* p, struct as_transaction_s* tr, cf_node* node);
-bool partition_reserve_promote(const struct as_namespace_s* ns, const as_partition* p, struct as_transaction_s* tr);
+int partition_reserve_unavailable(const struct as_namespace_s* ns,
+		const as_partition* p, struct as_transaction_s* tr, cf_node* node);
+bool partition_reserve_promote(const struct as_namespace_s* ns,
+		const as_partition* p, struct as_transaction_s* tr);

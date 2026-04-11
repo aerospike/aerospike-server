@@ -20,7 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-
 //==========================================================
 // Includes.
 //
@@ -32,33 +31,32 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_bytes.h"
+#include "aerospike/as_integer.h"
 #include "aerospike/as_rec.h"
+#include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
-#include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
 #include "log.h"
 
-#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
-#include "transaction/rw_utils.h"
-#include "transaction/udf.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Forward declarations.
 //
 
-static int udf_record_set(const as_rec* rec, const char* name, const as_val* value);
+static int udf_record_set(const as_rec* rec, const char* name,
+		const as_val* value);
 static int udf_record_set_ttl(const as_rec* rec, uint32_t ttl);
 static int udf_record_drop_key(const as_rec* rec);
 static as_val* udf_record_get(const as_rec* rec, const char* name);
@@ -72,12 +70,12 @@ static uint32_t udf_record_size(const as_rec* rec);
 static uint32_t udf_record_memory_size(const as_rec* rec);
 static uint32_t udf_record_device_size(const as_rec* rec);
 static uint16_t udf_record_numbins(const as_rec* rec);
-static int udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb, void* udata);
+static int udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
+		void* udata);
 
 static bool param_check_w_bin(const as_rec* rec, const char* name);
 static as_val* udf_record_cache_get(udf_record* urecord, const char* name);
 static as_val* as_val_from_flat_key(const uint8_t* flat_key, uint32_t size);
-
 
 //==========================================================
 // Inlines & macros.
@@ -90,44 +88,38 @@ param_check(const as_rec* rec)
 	cf_assert(as_rec_source(rec) != NULL, AS_UDF, "null udf_record object");
 }
 
-
 //==========================================================
 // Public API - rec hooks.
 //
 
-const as_rec_hooks udf_record_hooks = {
-		.set                = udf_record_set,
-		.set_ttl            = udf_record_set_ttl,
-		.drop_key           = udf_record_drop_key,
-		.get                = udf_record_get,
-		.setname            = udf_record_setname,
-		.key                = udf_record_key,
-		.digest             = udf_record_digest,
-		.last_update_time   = udf_record_last_update_time,
-		.gen                = udf_record_gen,
-		.ttl                = udf_record_ttl,
-		.size               = udf_record_size,
-		.memory_size        = udf_record_memory_size,
-		.device_size        = udf_record_device_size,
-		.numbins            = udf_record_numbins,
-		.bin_names          = udf_record_bin_names
-};
+const as_rec_hooks udf_record_hooks = { .set = udf_record_set,
+	.set_ttl = udf_record_set_ttl,
+	.drop_key = udf_record_drop_key,
+	.get = udf_record_get,
+	.setname = udf_record_setname,
+	.key = udf_record_key,
+	.digest = udf_record_digest,
+	.last_update_time = udf_record_last_update_time,
+	.gen = udf_record_gen,
+	.ttl = udf_record_ttl,
+	.size = udf_record_size,
+	.memory_size = udf_record_memory_size,
+	.device_size = udf_record_device_size,
+	.numbins = udf_record_numbins,
+	.bin_names = udf_record_bin_names };
 
-const as_rec_hooks as_aggr_record_hooks = {
-		.get                = udf_record_get,
-		.setname            = udf_record_setname,
-		.key                = udf_record_key,
-		.digest             = udf_record_digest,
-		.last_update_time   = udf_record_last_update_time,
-		.gen                = udf_record_gen,
-		.ttl                = udf_record_ttl,
-		.size               = udf_record_size,
-		.memory_size        = udf_record_memory_size,
-		.device_size        = udf_record_device_size,
-		.numbins            = udf_record_numbins,
-		.bin_names          = udf_record_bin_names
-};
-
+const as_rec_hooks as_aggr_record_hooks = { .get = udf_record_get,
+	.setname = udf_record_setname,
+	.key = udf_record_key,
+	.digest = udf_record_digest,
+	.last_update_time = udf_record_last_update_time,
+	.gen = udf_record_gen,
+	.ttl = udf_record_ttl,
+	.size = udf_record_size,
+	.memory_size = udf_record_memory_size,
+	.device_size = udf_record_device_size,
+	.numbins = udf_record_numbins,
+	.bin_names = udf_record_bin_names };
 
 //==========================================================
 // Public API.
@@ -323,7 +315,6 @@ udf_record_load(udf_record* urecord)
 
 	return 0;
 }
-
 
 //==========================================================
 // Public API - implementation of rec hooks.
@@ -593,8 +584,9 @@ udf_record_memory_size(const as_rec* rec)
 		return 0;
 	}
 
-	return urecord->tr->rsv.ns->storage_type == AS_STORAGE_ENGINE_MEMORY ?
-			as_record_stored_size(urecord->r_ref->r) : 0;
+	return urecord->tr->rsv.ns->storage_type == AS_STORAGE_ENGINE_MEMORY
+			? as_record_stored_size(urecord->r_ref->r)
+			: 0;
 }
 
 //------------------------------------------------
@@ -613,8 +605,9 @@ udf_record_device_size(const as_rec* rec)
 		return 0;
 	}
 
-	return as_namespace_is_memory_only(urecord->tr->rsv.ns) ?
-			0 : as_record_stored_size(urecord->r_ref->r);
+	return as_namespace_is_memory_only(urecord->tr->rsv.ns)
+			? 0
+			: as_record_stored_size(urecord->r_ref->r);
 }
 
 //------------------------------------------------
@@ -659,8 +652,7 @@ udf_record_numbins(const as_rec* rec)
 // end
 //
 static int
-udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
-		void* udata)
+udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb, void* udata)
 {
 	param_check(rec);
 
@@ -696,7 +688,6 @@ udf_record_bin_names(const as_rec* rec, as_rec_bin_names_callback cb,
 	return 0;
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -709,10 +700,10 @@ param_check_w_bin(const as_rec* rec, const char* name)
 	cf_assert(name != NULL, AS_UDF, "null bin name");
 
 	// Note - empty bin name ok for now - single-bin "soft landing".
-//	if (*name == 0) {
-//		cf_warning(AS_UDF, "empty bin name");
-//		return false;
-//	}
+	//	if (*name == 0) {
+	//		cf_warning(AS_UDF, "empty bin name");
+	//		return false;
+	//	}
 
 	if (strlen(name) >= AS_BIN_NAME_MAX_SZ) {
 		cf_warning(AS_UDF, "bin name %s too big", name);
@@ -752,10 +743,8 @@ as_val_from_flat_key(const uint8_t* flat_key, uint32_t size)
 			return NULL;
 		}
 		// Flat integer keys are in big-endian order.
-		return (as_val*)
-				as_integer_new((int64_t)cf_swap_from_be64(*(uint64_t*)key));
-	case AS_PARTICLE_TYPE_STRING:
-	{
+		return (as_val*)as_integer_new((int64_t)cf_swap_from_be64(*(uint64_t*)key));
+	case AS_PARTICLE_TYPE_STRING: {
 		// Key length is size - 1, then +1 for null-termination.
 		char* buf = cf_malloc(size);
 		uint32_t len = size - 1;
@@ -765,8 +754,7 @@ as_val_from_flat_key(const uint8_t* flat_key, uint32_t size)
 
 		return (as_val*)as_string_new(buf, true);
 	}
-	case AS_PARTICLE_TYPE_BLOB:
-	{
+	case AS_PARTICLE_TYPE_BLOB: {
 		uint32_t blob_size = size - 1;
 		uint8_t* buf = cf_malloc(blob_size);
 

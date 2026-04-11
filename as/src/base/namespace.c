@@ -45,41 +45,39 @@
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/thr_info.h"
+#include "base/transaction_policy.h"
 #include "fabric/partition.h"
-#include "sindex/sindex.h"
 #include "storage/storage.h"
-
 
 //==========================================================
 // Forward declarations.
 //
 
-static void append_set_props(as_set *p_set, cf_dyn_buf *db);
-
+static void append_set_props(as_set* p_set, cf_dyn_buf* db);
 
 //==========================================================
 // Public API.
 //
 
-as_namespace *
-as_namespace_create(char *name)
+as_namespace*
+as_namespace_create(char* name)
 {
-	cf_assert_nostack(strlen(name) < AS_ID_NAMESPACE_SZ,
-			AS_NAMESPACE, "{%s} namespace name too long (max length is %u)",
-			name, AS_ID_NAMESPACE_SZ - 1);
+	cf_assert_nostack(strlen(name) < AS_ID_NAMESPACE_SZ, AS_NAMESPACE,
+			"{%s} namespace name too long (max length is %u)", name,
+			AS_ID_NAMESPACE_SZ - 1);
 
-	cf_assert_nostack(g_config.n_namespaces < AS_NAMESPACE_SZ,
-			AS_NAMESPACE, "too many namespaces (max is %u)", AS_NAMESPACE_SZ);
+	cf_assert_nostack(g_config.n_namespaces < AS_NAMESPACE_SZ, AS_NAMESPACE,
+			"too many namespaces (max is %u)", AS_NAMESPACE_SZ);
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace *ns = g_config.namespaces[ns_ix];
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		if (strcmp(ns->name, name) == 0) {
 			cf_crash_nostack(AS_NAMESPACE, "{%s} duplicate namespace", name);
 		}
 	}
 
-	as_namespace *ns = cf_malloc(sizeof(as_namespace));
+	as_namespace* ns = cf_malloc(sizeof(as_namespace));
 
 	g_config.namespaces[g_config.n_namespaces] = ns;
 
@@ -99,8 +97,10 @@ as_namespace_create(char *name)
 	ns->si_xmem_type = CF_XMEM_TYPE_MEM;
 
 	ns->background_query_max_rps = 10000; // internal write generation limit
-	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
-	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
+	ns->conflict_resolution_policy =
+			AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF;
+	ns->evict_hist_buckets =
+			10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
 	ns->index_stage_size = 1024L * 1024L * 1024L; // 1G
 	ns->max_record_size = 1024 * 1024; // 1M
@@ -109,13 +109,16 @@ as_namespace_create(char *name)
 	ns->migrate_sleep = 1;
 	ns->nsup_hist_period = 60 * 60; // 1 hour
 	ns->n_nsup_threads = 1;
-	ns->tree_shared.n_sprigs = NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
+	ns->tree_shared.n_sprigs =
+			NUM_LOCK_PAIRS; // can't be less than number of lock pairs, 256 per partition
 	ns->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_PROTO;
 	ns->cfg_replication_factor = 2;
 	ns->replication_factor = 0; // gets set on rebalance
 	ns->sindex_stage_size = 1024L * 1024L * 1024L; // 1G
-	ns->n_single_query_threads = 4; // maximum number of threads a single query may run
-	ns->stop_writes_sys_memory_pct = 90; // stop writes when 90% of system memory is used
+	ns->n_single_query_threads =
+			4; // maximum number of threads a single query may run
+	ns->stop_writes_sys_memory_pct =
+			90; // stop writes when 90% of system memory is used
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
 	ns->transaction_pending_limit = 20;
@@ -128,22 +131,27 @@ as_namespace_create(char *name)
 	ns->storage_type = AS_STORAGE_ENGINE_UNDEFINED;
 
 	ns->storage_defrag_lwm_pct = 50; // defrag if occupancy of block is < 50%
-	ns->storage_defrag_sleep = 1000; // sleep this many microseconds between each wblock
+	ns->storage_defrag_sleep =
+			1000; // sleep this many microseconds between each wblock
 	ns->storage_encryption = AS_ENCRYPTION_AES_128;
-	ns->storage_flush_max_us = 1000 * 1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
-	ns->storage_flush_size = 0; // will be set later to DEFAULT_FLUSH_SIZE (1M) if applicable and not explicitly configured
+	ns->storage_flush_max_us = 1000 *
+			1000; // wait this many microseconds before flushing inactive current write buffer (0 = never)
+	ns->storage_flush_size =
+			0; // will be set later to DEFAULT_FLUSH_SIZE (1M) if applicable and not explicitly configured
 	ns->storage_max_write_cache = DEFAULT_MAX_WRITE_CACHE;
-	ns->storage_post_write_cache = DEFAULT_POST_WRITE_CACHE; // bytes per device used as post-write cache
+	ns->storage_post_write_cache =
+			DEFAULT_POST_WRITE_CACHE; // bytes per device used as post-write cache
 	ns->storage_stop_writes_avail_pct = 5; // stop writes when < 5% disk is writable
 	ns->storage_stop_writes_used_pct = 70; // stop writes when > 70% disk is used
-	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
+	ns->storage_tomb_raider_sleep =
+			1000; // sleep this many microseconds between each device read
 
 	ns->geo2dsphere_within_strict = true;
 	ns->geo2dsphere_within_min_level = 1;
 	ns->geo2dsphere_within_max_level = 20;
 	ns->geo2dsphere_within_max_cells = 12;
 	ns->geo2dsphere_within_level_mod = 1;
-	ns->geo2dsphere_within_earth_radius_meters = 6371000;  // Wikipedia, mean
+	ns->geo2dsphere_within_earth_radius_meters = 6371000; // Wikipedia, mean
 
 	// Special defaults that differ between CE and EE.
 	as_config_init_namespace(ns);
@@ -151,12 +159,11 @@ as_namespace_create(char *name)
 	return ns;
 }
 
-
 void
 as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 {
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace *ns = g_config.namespaces[ns_ix];
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		// Done with temporary sets configuration array.
 		if (ns->sets_cfg_array) {
@@ -171,9 +178,8 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 	}
 }
 
-
 bool
-as_namespace_configure_sets(as_namespace *ns)
+as_namespace_configure_sets(as_namespace* ns)
 {
 	for (uint32_t i = 0; i < ns->sets_cfg_count; i++) {
 		uint32_t idx;
@@ -184,7 +190,7 @@ as_namespace_configure_sets(as_namespace *ns)
 			as_set* p_set = NULL;
 
 			if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx,
-					(void**)&p_set)) != CF_VMAPX_OK) {
+						 (void**)&p_set)) != CF_VMAPX_OK) {
 				// Should be impossible - just verified idx.
 				cf_crash(AS_NAMESPACE, "vmap error %d", result);
 			}
@@ -208,12 +214,11 @@ as_namespace_configure_sets(as_namespace *ns)
 	return true;
 }
 
-
-as_namespace *
-as_namespace_get_byname(const char *name)
+as_namespace*
+as_namespace_get_byname(const char* name)
 {
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace *ns = g_config.namespaces[ns_ix];
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		if (strcmp(ns->name, name) == 0) {
 			return ns;
@@ -223,16 +228,15 @@ as_namespace_get_byname(const char *name)
 	return NULL;
 }
 
-
-as_namespace *
-as_namespace_get_bybuf(const uint8_t *buf, size_t len)
+as_namespace*
+as_namespace_get_bybuf(const uint8_t* buf, size_t len)
 {
 	if (len >= AS_ID_NAMESPACE_SZ) {
 		return NULL;
 	}
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace *ns = g_config.namespaces[ns_ix];
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		if (memcmp(buf, ns->name, len) == 0 && ns->name[len] == 0) {
 			return ns;
@@ -242,16 +246,14 @@ as_namespace_get_bybuf(const uint8_t *buf, size_t len)
 	return NULL;
 }
 
-
-as_namespace *
-as_namespace_get_bymsgfield(as_msg_field *fp)
+as_namespace*
+as_namespace_get_bymsgfield(as_msg_field* fp)
 {
 	return as_namespace_get_bybuf(fp->data, as_msg_field_get_value_sz(fp));
 }
 
-
-const char *
-as_namespace_get_set_name(const as_namespace *ns, uint16_t set_id)
+const char*
+as_namespace_get_set_name(const as_namespace* ns, uint16_t set_id)
 {
 	// Note that set_id is 1-based, but cf_vmap index is 0-based.
 	// (This is because 0 in the index structure means 'no set'.)
@@ -260,26 +262,27 @@ as_namespace_get_set_name(const as_namespace *ns, uint16_t set_id)
 		return NULL;
 	}
 
-	as_set *p_set;
+	as_set* p_set;
 
 	return cf_vmapx_get_by_index(ns->p_sets_vmap, (uint32_t)set_id - 1,
-			(void**)&p_set) == CF_VMAPX_OK ? p_set->name : NULL;
+				   (void**)&p_set) == CF_VMAPX_OK
+			? p_set->name
+			: NULL;
 }
 
-
 uint16_t
-as_namespace_get_set_id(as_namespace *ns, const char *set_name)
+as_namespace_get_set_id(as_namespace* ns, const char* set_name)
 {
 	uint32_t idx;
 
-	return cf_vmapx_get_index(ns->p_sets_vmap, set_name, &idx) == CF_VMAPX_OK ?
-			(uint16_t)(idx + 1) : INVALID_SET_ID;
+	return cf_vmapx_get_index(ns->p_sets_vmap, set_name, &idx) == CF_VMAPX_OK
+			? (uint16_t)(idx + 1)
+			: INVALID_SET_ID;
 }
-
 
 // At the moment this is only used by the enterprise security & xdr features.
 uint16_t
-as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
+as_namespace_get_create_set_id(as_namespace* ns, const char* set_name)
 {
 	if (! set_name) {
 		// Should be impossible.
@@ -325,21 +328,21 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 	return INVALID_SET_ID;
 }
 
-
 int
-as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len,
-		uint16_t *p_set_id, bool apply_restrictions)
+as_namespace_set_set_w_len(as_namespace* ns, const char* set_name, size_t len,
+		uint16_t* p_set_id, bool apply_restrictions)
 {
-	as_set *p_set;
+	as_set* p_set;
 
-	if (as_namespace_get_create_set_w_len(ns, set_name, len, &p_set,
-			p_set_id) != 0) {
+	if (as_namespace_get_create_set_w_len(ns, set_name, len, &p_set, p_set_id) !=
+			0) {
 		return -1;
 	}
 
 	if (apply_restrictions && as_set_count_stop_writes(p_set)) {
-		cf_ticker_warning(AS_NAMESPACE, "{%s|%s} at stop-writes-count - can't add record",
-				ns->name, p_set->name);
+		cf_ticker_warning(AS_NAMESPACE,
+				"{%s|%s} at stop-writes-count - can't add record", ns->name,
+				p_set->name);
 		return -2;
 	}
 
@@ -348,17 +351,16 @@ as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len,
 	return 0;
 }
 
-
 int
-as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
-		size_t len, as_set **pp_set, uint16_t *p_set_id)
+as_namespace_get_create_set_w_len(as_namespace* ns, const char* set_name,
+		size_t len, as_set** pp_set, uint16_t* p_set_id)
 {
 	cf_assert(set_name, AS_NAMESPACE, "null set name");
 	cf_assert(len != 0, AS_NAMESPACE, "empty set name");
 
 	uint32_t idx;
-	cf_vmapx_err result = cf_vmapx_get_index_w_len(ns->p_sets_vmap, set_name,
-			len, &idx);
+	cf_vmapx_err result =
+			cf_vmapx_get_index_w_len(ns->p_sets_vmap, set_name, len, &idx);
 
 	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
 		// Special case handling for name too long.
@@ -372,8 +374,7 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 			return -1;
 		}
 
-		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, set_name, len,
-				&idx);
+		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, set_name, len, &idx);
 
 		// Since this function can be called via many functions simultaneously.
 		// Need to handle race, So handle CF_VMAPX_ERR_NAME_EXISTS.
@@ -395,7 +396,7 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 
 	if (pp_set) {
 		if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx,
-				(void**)pp_set)) != CF_VMAPX_OK) {
+					 (void**)pp_set)) != CF_VMAPX_OK) {
 			// Should be impossible - just verified idx.
 			cf_warning(AS_NAMESPACE, "unexpected error %d", result);
 			return -1;
@@ -409,9 +410,8 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 	return 0;
 }
 
-
-as_set *
-as_namespace_get_set_by_name(as_namespace *ns, const char *set_name)
+as_set*
+as_namespace_get_set_by_name(as_namespace* ns, const char* set_name)
 {
 	uint32_t idx;
 
@@ -419,7 +419,7 @@ as_namespace_get_set_by_name(as_namespace *ns, const char *set_name)
 		return NULL;
 	}
 
-	as_set *p_set;
+	as_set* p_set;
 
 	if (cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set) !=
 			CF_VMAPX_OK) {
@@ -430,15 +430,14 @@ as_namespace_get_set_by_name(as_namespace *ns, const char *set_name)
 	return p_set;
 }
 
-
-as_set *
-as_namespace_get_set_by_id(const as_namespace *ns, uint16_t set_id)
+as_set*
+as_namespace_get_set_by_id(const as_namespace* ns, uint16_t set_id)
 {
 	if (set_id == INVALID_SET_ID) {
 		return NULL;
 	}
 
-	as_set *p_set;
+	as_set* p_set;
 
 	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) !=
 			CF_VMAPX_OK) {
@@ -450,19 +449,16 @@ as_namespace_get_set_by_id(const as_namespace *ns, uint16_t set_id)
 	return p_set;
 }
 
-
-as_set *
-as_namespace_get_record_set(const as_namespace *ns, const as_record *r)
+as_set*
+as_namespace_get_record_set(const as_namespace* ns, const as_record* r)
 {
 	return as_namespace_get_set_by_id(ns, as_index_get_set_id(r));
 }
 
-
 void
-as_namespace_get_set_info(as_namespace *ns, const char *set_name,
-		cf_dyn_buf *db)
+as_namespace_get_set_info(as_namespace* ns, const char* set_name, cf_dyn_buf* db)
 {
-	as_set *p_set;
+	as_set* p_set;
 
 	if (set_name) {
 		if (cf_vmapx_get_by_name(ns->p_sets_vmap, set_name, (void**)&p_set) ==
@@ -487,16 +483,15 @@ as_namespace_get_set_info(as_namespace *ns, const char *set_name,
 	}
 }
 
-
 void
-as_namespace_adjust_set_data_used_bytes(as_namespace *ns, uint16_t set_id,
+as_namespace_adjust_set_data_used_bytes(as_namespace* ns, uint16_t set_id,
 		int64_t delta_bytes)
 {
 	if (set_id == INVALID_SET_ID) {
 		return;
 	}
 
-	as_set *p_set;
+	as_set* p_set;
 
 	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) !=
 			CF_VMAPX_OK) {
@@ -511,15 +506,14 @@ as_namespace_adjust_set_data_used_bytes(as_namespace *ns, uint16_t set_id,
 			ns->name, set_id, (int64_t)n_bytes, delta_bytes);
 }
 
-
 void
-as_namespace_release_set_id(as_namespace *ns, uint16_t set_id)
+as_namespace_release_set_id(as_namespace* ns, uint16_t set_id)
 {
 	if (set_id == INVALID_SET_ID) {
 		return;
 	}
 
-	as_set *p_set;
+	as_set* p_set;
 
 	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) !=
 			CF_VMAPX_OK) {
@@ -532,7 +526,6 @@ as_namespace_release_set_id(as_namespace *ns, uint16_t set_id)
 			"{%s} set-id %u - n_objects underflow", ns->name, set_id);
 }
 
-
 // e.g. for ttl:
 // units=seconds:hist-width=2582800:bucket-width=25828:buckets=0,0,0 ...
 //
@@ -542,8 +535,8 @@ as_namespace_release_set_id(as_namespace *ns, uint16_t set_id)
 // e.g. for object-size:
 // units=bytes:[64-128)=16000:[128-256)=8000 ...
 void
-as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
-		cf_dyn_buf *db)
+as_namespace_get_hist_info(as_namespace* ns, char* set_name, char* hist_name,
+		cf_dyn_buf* db)
 {
 	if (set_name[0] == '\0') {
 		if (strcmp(hist_name, "ttl") == 0) {
@@ -598,13 +591,12 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 	}
 }
 
-
 //==========================================================
 // Local helpers.
 //
 
 static void
-append_set_props(as_set *p_set, cf_dyn_buf *db)
+append_set_props(as_set* p_set, cf_dyn_buf* db)
 {
 	// Statistics:
 

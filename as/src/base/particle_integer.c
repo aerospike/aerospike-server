@@ -20,7 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-
 #include "base/particle_integer.h"
 
 #include <stddef.h>
@@ -37,16 +36,15 @@
 #include "base/particle.h"
 #include "base/proto.h"
 
-
 // Some INTEGER particle interface function declarations are in
 // particle_integer.h since INTEGER functions are used by other particles.
 
 // Handle on-device "flat" format.
-const uint8_t *integer_skip_flat(const uint8_t *flat, const uint8_t *end);
-const uint8_t *integer_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
-uint32_t integer_flat_size(const as_particle *p);
-uint32_t integer_to_flat(const as_particle *p, uint8_t *flat);
-
+const uint8_t* integer_skip_flat(const uint8_t* flat, const uint8_t* end);
+const uint8_t* integer_from_flat(const uint8_t* flat, const uint8_t* end,
+		as_particle** pp);
+uint32_t integer_flat_size(const as_particle* p);
+uint32_t integer_to_flat(const as_particle* p, uint8_t* flat);
 
 //==========================================================
 // INTEGER particle interface - vtable.
@@ -82,22 +80,20 @@ const as_particle_vtable integer_vtable = {
 };
 // clang-format on
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef struct integer_mem_s {
-	uint8_t		do_not_use;	// already know it's an int type
-	uint64_t	i;
-} __attribute__ ((__packed__)) integer_mem;
+	uint8_t do_not_use; // already know it's an int type
+	uint64_t i;
+} __attribute__((__packed__)) integer_mem;
 
 typedef struct integer_flat_s {
-	uint8_t		type;
-	uint8_t		size;
-	uint8_t		data[];
-} __attribute__ ((__packed__)) integer_flat;
-
+	uint8_t type;
+	uint8_t size;
+	uint8_t data[];
+} __attribute__((__packed__)) integer_flat;
 
 //==========================================================
 // INTEGER particle interface - function definitions.
@@ -108,13 +104,13 @@ typedef struct integer_flat_s {
 //
 
 void
-integer_destruct(as_particle *p)
+integer_destruct(as_particle* p)
 {
 	// Nothing to do - integer values live in the as_bin.
 }
 
 uint32_t
-integer_size(const as_particle *p)
+integer_size(const as_particle* p)
 {
 	// Integer values live in the as_bin instead of a pointer.
 	return 0;
@@ -125,28 +121,32 @@ integer_size(const as_particle *p)
 //
 
 int32_t
-integer_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
+integer_concat_size_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "concat size for integer/float/bool");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
-integer_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
+integer_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "append to integer/float/bool");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
-integer_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
+integer_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	cf_warning(AS_PARTICLE, "prepend to integer/float/bool");
 	return -AS_ERR_INCOMPATIBLE_TYPE;
 }
 
 int
-integer_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
+integer_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	if (wire_type != AS_PARTICLE_TYPE_INTEGER) {
 		cf_warning(AS_PARTICLE, "increment with non integer type %u", wire_type);
@@ -157,21 +157,21 @@ integer_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, ui
 
 	switch (value_size) {
 	case 8:
-		i = cf_swap_from_be64(*(uint64_t *)wire_value);
+		i = cf_swap_from_be64(*(uint64_t*)wire_value);
 		break;
 	case 4:
-		i = (uint64_t)cf_swap_from_be32(*(uint32_t *)wire_value);
+		i = (uint64_t)cf_swap_from_be32(*(uint32_t*)wire_value);
 		break;
 	case 2:
-		i = (uint64_t)cf_swap_from_be16(*(uint16_t *)wire_value);
+		i = (uint64_t)cf_swap_from_be16(*(uint16_t*)wire_value);
 		break;
 	case 1:
 		i = (uint64_t)*wire_value;
 		break;
 	case 16: // memcache increment - it's special
-		i = cf_swap_from_be64(*(uint64_t *)wire_value);
+		i = cf_swap_from_be64(*(uint64_t*)wire_value);
 		// For memcache, decrements floor at 0.
-		if ((int64_t)i < 0 && *(uint64_t *)pp + i > *(uint64_t *)pp) {
+		if ((int64_t)i < 0 && *(uint64_t*)pp + i > *(uint64_t*)pp) {
 			*pp = 0;
 			return 0;
 		}
@@ -181,32 +181,33 @@ integer_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, ui
 		return -AS_ERR_PARAMETER;
 	}
 
-	(*(uint64_t *)pp) += i;
+	(*(uint64_t*)pp) += i;
 
 	return 0;
 }
 
 int32_t
-integer_size_from_wire(const uint8_t *wire_value, uint32_t value_size)
+integer_size_from_wire(const uint8_t* wire_value, uint32_t value_size)
 {
 	// Integer values live in the as_bin instead of a pointer.
 	return 0;
 }
 
 int
-integer_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
+integer_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	uint64_t i;
 
 	switch (value_size) {
 	case 8:
-		i = cf_swap_from_be64(*(uint64_t *)wire_value);
+		i = cf_swap_from_be64(*(uint64_t*)wire_value);
 		break;
 	case 4:
-		i = (uint64_t)cf_swap_from_be32(*(uint32_t *)wire_value);
+		i = (uint64_t)cf_swap_from_be32(*(uint32_t*)wire_value);
 		break;
 	case 2:
-		i = (uint64_t)cf_swap_from_be16(*(uint16_t *)wire_value);
+		i = (uint64_t)cf_swap_from_be16(*(uint16_t*)wire_value);
 		break;
 	case 1:
 		i = (uint64_t)*wire_value;
@@ -216,21 +217,21 @@ integer_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_
 		return -AS_ERR_PARAMETER;
 	}
 
-	*pp = (as_particle *)i;
+	*pp = (as_particle*)i;
 
 	return 0;
 }
 
 uint32_t
-integer_wire_size(const as_particle *p)
+integer_wire_size(const as_particle* p)
 {
 	return (uint32_t)sizeof(uint64_t);
 }
 
 uint32_t
-integer_to_wire(const as_particle *p, uint8_t *wire)
+integer_to_wire(const as_particle* p, uint8_t* wire)
 {
-	*(uint64_t *)wire = cf_swap_to_be64((uint64_t)p);
+	*(uint64_t*)wire = cf_swap_to_be64((uint64_t)p);
 
 	return (uint32_t)sizeof(uint64_t);
 }
@@ -240,36 +241,36 @@ integer_to_wire(const as_particle *p, uint8_t *wire)
 //
 
 uint32_t
-integer_size_from_asval(const as_val *val)
+integer_size_from_asval(const as_val* val)
 {
 	// Integer values live in the as_bin instead of a pointer.
 	return 0;
 }
 
 void
-integer_from_asval(const as_val *val, as_particle **pp)
+integer_from_asval(const as_val* val, as_particle** pp)
 {
-	*pp = (as_particle *)as_integer_get(as_integer_fromval(val));
+	*pp = (as_particle*)as_integer_get(as_integer_fromval(val));
 }
 
-as_val *
-integer_to_asval(const as_particle *p)
+as_val*
+integer_to_asval(const as_particle* p)
 {
-	return (as_val *)as_integer_new((uint64_t)p);
+	return (as_val*)as_integer_new((uint64_t)p);
 }
 
 uint32_t
-integer_asval_wire_size(const as_val *val)
+integer_asval_wire_size(const as_val* val)
 {
 	return (uint32_t)sizeof(uint64_t);
 }
 
 uint32_t
-integer_asval_to_wire(const as_val *val, uint8_t *wire)
+integer_asval_to_wire(const as_val* val, uint8_t* wire)
 {
 	int64_t i = as_integer_get(as_integer_fromval(val));
 
-	*(uint64_t *)wire = cf_swap_to_be64((uint64_t)i);
+	*(uint64_t*)wire = cf_swap_to_be64((uint64_t)i);
 
 	return (uint32_t)sizeof(uint64_t);
 }
@@ -279,55 +280,51 @@ integer_asval_to_wire(const as_val *val, uint8_t *wire)
 //
 
 uint32_t
-integer_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
+integer_size_from_msgpack(const uint8_t* packed, uint32_t packed_size)
 {
 	// Integer values live in the as_bin instead of a pointer.
 	return 0;
 }
 
 void
-integer_from_msgpack(const uint8_t *packed, uint32_t packed_size,
-		as_particle **pp)
+integer_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp)
 {
 	int64_t i;
-	msgpack_in mp = {
-			.buf = packed,
-			.buf_sz = packed_size
-	};
+	msgpack_in mp = { .buf = packed, .buf_sz = packed_size };
 
 	if (! msgpack_get_int64(&mp, &i)) {
 		cf_crash(AS_PARTICLE, "invalid msgpack\n%*pH", mp.buf_sz, mp.buf);
 	}
 
-	*pp = (as_particle *)i;
+	*pp = (as_particle*)i;
 }
 
 //------------------------------------------------
 // Handle on-device "flat" format.
 //
 
-const uint8_t *
-integer_skip_flat(const uint8_t *flat, const uint8_t *end)
+const uint8_t*
+integer_skip_flat(const uint8_t* flat, const uint8_t* end)
 {
 	if (flat + sizeof(integer_flat) > end) {
 		cf_warning(AS_PARTICLE, "incomplete flat integer");
 		return NULL;
 	}
 
-	integer_flat *p_int_flat = (integer_flat *)flat;
+	integer_flat* p_int_flat = (integer_flat*)flat;
 
 	return flat + sizeof(integer_flat) + p_int_flat->size;
 }
 
-const uint8_t *
-integer_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
+const uint8_t*
+integer_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp)
 {
 	if (flat + sizeof(integer_flat) > end) {
 		cf_warning(AS_PARTICLE, "incomplete flat integer");
 		return NULL;
 	}
 
-	const integer_flat *p_int_flat = (const integer_flat *)flat;
+	const integer_flat* p_int_flat = (const integer_flat*)flat;
 	// Type is correct, since we got here - no need to check against end.
 
 	flat += sizeof(integer_flat) + p_int_flat->size;
@@ -341,16 +338,16 @@ integer_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 
 	switch (p_int_flat->size) {
 	case 8:
-		i = *(uint64_t *)p_int_flat->data;
+		i = *(uint64_t*)p_int_flat->data;
 		break;
 	case 4:
-		i = *(uint32_t *)p_int_flat->data;
+		i = *(uint32_t*)p_int_flat->data;
 		break;
 	case 2:
-		i = *(uint16_t *)p_int_flat->data;
+		i = *(uint16_t*)p_int_flat->data;
 		break;
 	case 1:
-		i = *(uint8_t *)p_int_flat->data;
+		i = *(uint8_t*)p_int_flat->data;
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "invalid flat integer size");
@@ -359,13 +356,13 @@ integer_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 
 	// Integer values live in an as_bin instead of a pointer. Also, flat
 	// integers are host order, so no byte swap.
-	*pp = (as_particle *)i;
+	*pp = (as_particle*)i;
 
 	return flat;
 }
 
 uint32_t
-integer_flat_size(const as_particle *p)
+integer_flat_size(const as_particle* p)
 {
 	uint64_t i = (uint64_t)p;
 
@@ -385,9 +382,9 @@ integer_flat_size(const as_particle *p)
 }
 
 uint32_t
-integer_to_flat(const as_particle *p, uint8_t *flat)
+integer_to_flat(const as_particle* p, uint8_t* flat)
 {
-	integer_flat *p_int_flat = (integer_flat *)flat;
+	integer_flat* p_int_flat = (integer_flat*)flat;
 
 	// Already wrote the type.
 
@@ -395,38 +392,37 @@ integer_to_flat(const as_particle *p, uint8_t *flat)
 
 	if ((i & ~0xFFFFffffL) != 0) {
 		p_int_flat->size = 8;
-		*(uint64_t *)p_int_flat->data = i;
+		*(uint64_t*)p_int_flat->data = i;
 	}
 	else if ((i & ~0xFFFFL) != 0) {
 		p_int_flat->size = 4;
-		*(uint32_t *)p_int_flat->data = (uint32_t)i;
+		*(uint32_t*)p_int_flat->data = (uint32_t)i;
 	}
 	else if ((i & ~0xFFL) != 0) {
 		p_int_flat->size = 2;
-		*(uint16_t *)p_int_flat->data = (uint16_t)i;
+		*(uint16_t*)p_int_flat->data = (uint16_t)i;
 	}
 	else {
 		p_int_flat->size = 1;
-		*(uint8_t *)p_int_flat->data = (uint8_t)i;
+		*(uint8_t*)p_int_flat->data = (uint8_t)i;
 	}
 
 	return (uint32_t)(sizeof(integer_flat) + p_int_flat->size);
 }
-
 
 //==========================================================
 // as_bin particle functions specific to INTEGER.
 //
 
 int64_t
-as_bin_particle_integer_value(const as_bin *b)
+as_bin_particle_integer_value(const as_bin* b)
 {
 	// Caller must ensure this is called only for INTEGER particles.
 	return (int64_t)b->particle;
 }
 
 void
-as_bin_particle_integer_set(as_bin *b, int64_t i)
+as_bin_particle_integer_set(as_bin* b, int64_t i)
 {
-	b->particle = (as_particle *)i;
+	b->particle = (as_particle*)i;
 }

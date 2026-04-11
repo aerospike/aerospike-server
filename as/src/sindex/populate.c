@@ -50,7 +50,6 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -88,7 +87,6 @@ typedef struct populate_cb_info_s {
 	uint32_t n_reduced;
 } populate_cb_info;
 
-
 //==========================================================
 // Globals.
 //
@@ -97,7 +95,6 @@ static cf_queue* g_ticker_done_q; // re-used by serialized namespaces
 
 static cf_queue g_add_sindex_q;
 static cf_queue g_destroy_sindex_q;
-
 
 //==========================================================
 // Forward declarations.
@@ -116,11 +113,9 @@ static bool populate_reduce_cb(as_index_ref* r_ref, void* udata);
 static void* run_add_sindex(void* udata);
 static void* run_destroy_sindex(void* udata);
 
-
 //==========================================================
 // Inlines & macros.
 //
-
 
 //==========================================================
 // Public API.
@@ -173,7 +168,6 @@ as_sindex_populate_destroy(as_sindex* si)
 {
 	cf_queue_push(&g_destroy_sindex_q, &si);
 }
-
 
 //==========================================================
 // Local helpers - startup.
@@ -234,10 +228,12 @@ run_ticker(void* udata)
 	while (cf_queue_pop(g_ticker_done_q, &x, TICKER_INTERVAL) != CF_QUEUE_OK) {
 		uint64_t n_recs_checked = as_load_uint64(&ns->si_n_recs_checked);
 		uint64_t n_objects = as_load_uint64(&ns->n_objects);
-		double pct = n_objects == 0 ?
-				100.0 : (double)(n_recs_checked * 100) / (double)n_objects;
+		double pct = n_objects == 0
+				? 100.0
+				: (double)(n_recs_checked * 100) / (double)n_objects;
 
-		cf_info(AS_SINDEX, "{%s} sindex-populate: mem-used %lu objects-scanned %lu progress-pct %.3f",
+		cf_info(AS_SINDEX,
+				"{%s} sindex-populate: mem-used %lu objects-scanned %lu progress-pct %.3f",
 				ns->name, as_sindex_used_bytes(ns), n_recs_checked, pct);
 	}
 
@@ -315,7 +311,6 @@ startup_reduce_cb(as_index_ref* r_ref, void* udata)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - runtime job.
 //
@@ -364,12 +359,10 @@ run_populate(void* udata)
 	populate_info* popi = (populate_info*)udata;
 	as_namespace* ns = popi->ns;
 
-	populate_cb_info cbi = {
-			.ns = ns,
-			.si = popi->si,
-			.p_n_total_reduced = &popi->n_total_reduced,
-			.p_aborted = &popi->aborted
-	};
+	populate_cb_info cbi = { .ns = ns,
+		.si = popi->si,
+		.p_n_total_reduced = &popi->n_total_reduced,
+		.p_aborted = &popi->aborted };
 
 	uint32_t pid;
 
@@ -391,7 +384,7 @@ run_populate(void* udata)
 		cbi.tree = tree;
 
 		if (! as_set_index_reduce(ns, tree, popi->si->set_id, NULL,
-				populate_reduce_cb, &cbi)) {
+					populate_reduce_cb, &cbi)) {
 			as_index_reduce_live(tree, populate_reduce_cb, &cbi);
 		}
 
@@ -420,7 +413,8 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	if (! as_namespace_sindex_persisted(ns) && ns->memory_breached) {
-		cf_warning(AS_SINDEX, "{%s} populating sindex %s - aborted due to memory limit breach",
+		cf_warning(AS_SINDEX,
+				"{%s} populating sindex %s - aborted due to memory limit breach",
 				ns->name, si->iname);
 		si->error = true; // an error, once set, can't be cleared until restart
 		*cbi->p_aborted = true;
@@ -434,8 +428,8 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 		uint64_t n = as_aaf_uint64(cbi->p_n_total_reduced, PROGRESS_RESOLUTION);
 		uint64_t n_objects = as_load_uint64(&ns->n_objects);
 
-		si->populate_pct = (uint32_t)
-				(n > n_objects ? 100 : (n * 100) / n_objects);
+		si->populate_pct =
+				(uint32_t)(n > n_objects ? 100 : (n * 100) / n_objects);
 	}
 
 	as_index* r = r_ref->r;
@@ -471,7 +465,6 @@ populate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - runtime lifecycle.

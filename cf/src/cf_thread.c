@@ -29,6 +29,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -45,7 +46,6 @@
 #include "trace.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -80,7 +80,6 @@ typedef struct sys_tid_run_fn_s {
 	cf_thread_run_fn run;
 } sys_tid_run_fn;
 
-
 //==========================================================
 // Globals.
 //
@@ -109,7 +108,6 @@ static __thread uint32_t g_n_allocs = 0;
 static __thread thread_exit* g_exits = NULL;
 static __thread uint32_t g_n_exits = 0;
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -125,7 +123,6 @@ static int32_t collect_traces_cb(cf_ll_element* ele, void* udata);
 static int32_t print_traces_cb(cf_ll_element* ele, void* udata);
 static int32_t get_run_fn_cb(cf_ll_element* ele, void* udata);
 static void cleanup(void);
-
 
 //==========================================================
 // Public API.
@@ -251,17 +248,15 @@ cf_thread_traces_action(int32_t sig_num, siginfo_t* info, void* ctx)
 	(void)info;
 	(void)ctx;
 
-	g_thread_info->n_addrs = (uint32_t)cf_backtrace(g_thread_info->addrs,
-			MAX_BACKTRACE_DEPTH);
+	g_thread_info->n_addrs =
+			(uint32_t)cf_backtrace(g_thread_info->addrs, MAX_BACKTRACE_DEPTH);
 	as_incr_uint32(&g_traces_done);
 }
 
-cf_thread_run_fn 
+cf_thread_run_fn
 cf_thread_get_run_fn(pid_t sys_tid)
 {
-	sys_tid_run_fn ctx = {
-		.sys_tid = sys_tid
-	};
+	sys_tid_run_fn ctx = { .sys_tid = sys_tid };
 
 	cf_ll_reduce(&g_thread_list, true, get_run_fn_cb, &ctx);
 
@@ -329,7 +324,6 @@ cf_thread_remove_exit(cf_thread_exit_fn cb)
 		}
 	}
 }
-
 
 //==========================================================
 // Local helpers.

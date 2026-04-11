@@ -35,7 +35,6 @@
 
 #include "base/datamodel.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -60,7 +59,6 @@ as_index_reduce_from_live(as_index_tree* tree, const cf_digest* keyd,
 {
 	return as_index_reduce_from(tree, keyd, cb, udata);
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

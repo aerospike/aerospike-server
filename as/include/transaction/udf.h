@@ -37,7 +37,6 @@
 #include "base/exp.h"
 #include "base/transaction.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -46,7 +45,6 @@ struct as_exp_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
 struct cl_msg_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -72,7 +70,6 @@ typedef struct iudf_origin_s {
 	iudf_done_cb done_cb;
 	void* udata;
 } iudf_origin;
-
 
 //==========================================================
 // Public API.

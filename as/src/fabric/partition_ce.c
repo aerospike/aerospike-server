@@ -36,7 +36,6 @@
 #include "base/proto.h"
 #include "base/transaction.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -56,7 +55,6 @@ as_partition_check_source(const as_namespace* ns, as_partition* p,
 {
 	return AS_OK;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

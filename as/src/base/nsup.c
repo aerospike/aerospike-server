@@ -31,17 +31,19 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_clock.h"
 
+#include "cf_mutex.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
 #include "hardware.h"
+#include "hist.h"
 #include "linear_hist.h"
 #include "log.h"
-#include "node.h"
 #include "vector.h"
 #include "vmapx.h"
 
@@ -60,7 +62,6 @@
 #include "transaction/rw_utils.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -126,13 +127,14 @@ typedef struct prep_evict_per_thread_info_s {
 #define EVAL_WRITE_STATE_FREQUENCY 1024
 #define COLD_START_HIST_MIN_BUCKETS 100000 // histogram memory is transient
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static bool nsup_smd_conflict_cb(const as_smd_item* existing_item, const as_smd_item* new_item);
-static void nsup_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type);
+static bool nsup_smd_conflict_cb(const as_smd_item* existing_item,
+		const as_smd_item* new_item);
+static void nsup_smd_accept_cb(const cf_vector* items,
+		as_smd_accept_type accept_type);
 
 static void* run_expire_or_evict(void* udata);
 
@@ -149,7 +151,9 @@ static uint32_t find_evict_void_time(as_namespace* ns, uint32_t now);
 static void* run_prep_evict(void* udata);
 static bool prep_evict_reduce_cb(as_index_ref* r_ref, void* udata);
 
-static void update_stats(as_namespace* ns, uint64_t n_0_void_time, uint64_t n_expired_objects, uint64_t n_evicted_objects, uint64_t start_ms);
+static void update_stats(as_namespace* ns, uint64_t n_0_void_time,
+		uint64_t n_expired_objects, uint64_t n_evicted_objects,
+		uint64_t start_ms);
 
 static void* run_stop_writes(void* udata);
 static bool eval_stop_writes(as_namespace* ns, bool cold_starting);
@@ -169,7 +173,6 @@ static bool sets_protected(as_namespace* ns);
 static void init_sets_not_evicting(as_namespace* ns, bool sets_not_evicting[]);
 static uint32_t get_ttl_range(as_namespace* ns, uint32_t now);
 
-
 //==========================================================
 // Inlines & macros.
 //
@@ -179,7 +182,6 @@ evict_void_time_from_smd(const as_smd_item* item)
 {
 	return (uint32_t)strtoul(item->value, NULL, 10); // TODO - sanity check?
 }
-
 
 //==========================================================
 // Public API.
@@ -228,14 +230,13 @@ as_nsup_handle_clock_skew(as_namespace* ns, uint64_t skew_ms)
 
 void
 as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
-		cf_dyn_buf *db)
+		cf_dyn_buf* db)
 {
 	if (ttl_str == NULL) {
 		cf_info(AS_NSUP, "{%s} got command to delete evict-void-time", ns_name);
 
 		if (! as_smd_delete_blocking(AS_SMD_MODULE_EVICT, ns_name, 0)) {
-			cf_warning(AS_NSUP, "{%s} timeout deleting evict-void-time",
-					ns_name);
+			cf_warning(AS_NSUP, "{%s} timeout deleting evict-void-time", ns_name);
 			as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
 			return;
 		}
@@ -263,7 +264,8 @@ as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
 	sprintf(value, "%u", evict_void_time);
 
 	if (! as_smd_set_blocking(AS_SMD_MODULE_EVICT, ns_name, value, 0)) {
-		cf_warning(AS_NSUP, "{%s} timeout setting evict-ttl %lu evict-void-time %u",
+		cf_warning(AS_NSUP,
+				"{%s} timeout setting evict-ttl %lu evict-void-time %u",
 				ns_name, ttl, evict_void_time);
 		as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
 		return;
@@ -284,14 +286,12 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	return result;
 }
 
-
 //==========================================================
 // Local helpers - SMD callbacks.
 //
 
 static bool
-nsup_smd_conflict_cb(const as_smd_item* existing_item,
-		const as_smd_item* new_item)
+nsup_smd_conflict_cb(const as_smd_item* existing_item, const as_smd_item* new_item)
 {
 	return evict_void_time_from_smd(new_item) >
 			evict_void_time_from_smd(existing_item);
@@ -328,7 +328,6 @@ nsup_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 		}
 	}
 }
-
 
 //==========================================================
 // Local helpers - expiration/eviction control loop.
@@ -373,8 +372,9 @@ run_expire_or_evict(void* udata)
 							ns->name, evict_void_time);
 
 					if (! as_smd_delete_blocking(AS_SMD_MODULE_EVICT, ns->name,
-							EVICT_SMD_TIMEOUT)) {
-						cf_warning(AS_NSUP, "{%s} timeout deleting evict-void-time",
+								EVICT_SMD_TIMEOUT)) {
+						cf_warning(AS_NSUP,
+								"{%s} timeout deleting evict-void-time",
 								ns->name);
 					}
 				}
@@ -384,7 +384,7 @@ run_expire_or_evict(void* udata)
 				sprintf(value, "%u", evict_void_time);
 
 				if (! as_smd_set_blocking(AS_SMD_MODULE_EVICT, ns->name, value,
-						EVICT_SMD_TIMEOUT)) {
+							EVICT_SMD_TIMEOUT)) {
 					cf_warning(AS_NSUP, "{%s} timeout setting evict-void-time %u",
 							ns->name, evict_void_time);
 				}
@@ -405,7 +405,6 @@ run_expire_or_evict(void* udata)
 	return NULL;
 }
 
-
 //==========================================================
 // Local helpers - expire.
 //
@@ -420,10 +419,7 @@ expire(as_namespace* ns)
 
 	cf_tid tids[n_threads];
 
-	expire_overall_info overall = {
-			.ns = ns,
-			.now = as_record_void_time_get()
-	};
+	expire_overall_info overall = { .ns = ns, .now = as_record_void_time_get() };
 
 	for (uint32_t i = 0; i < n_threads; i++) {
 		tids[i] = cf_thread_create_joinable(run_expire, (void*)&overall);
@@ -442,10 +438,7 @@ run_expire(void* udata)
 	expire_overall_info* overall = (expire_overall_info*)udata;
 	as_namespace* ns = overall->ns;
 
-	expire_per_thread_info per_thread = {
-			.ns = ns,
-			.now = overall->now
-	};
+	expire_per_thread_info per_thread = { .ns = ns, .now = overall->now };
 
 	uint32_t pid;
 
@@ -489,7 +482,6 @@ expire_reduce_cb(as_index_ref* r_ref, void* udata)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - evict.
 //
@@ -513,14 +505,16 @@ evict(as_namespace* ns)
 	// another node, and/or taken very long to calculate/transmit.
 	ns->evict_ttl = (int32_t)(smd_evict_void_time - now);
 
-	cf_info(AS_NSUP, "{%s} nsup-start: evict-threads %u evict-ttl %d evict-void-time (%u,%u)",
+	cf_info(AS_NSUP,
+			"{%s} nsup-start: evict-threads %u evict-ttl %d evict-void-time (%u,%u)",
 			ns->name, n_threads, ns->evict_ttl, evict_void_time,
 			smd_evict_void_time);
 
 	evict_void_time = smd_evict_void_time;
 
 	if (now > evict_void_time) {
-		cf_info(AS_NSUP, "{%s} ignoring evict-void-time in the past - may remove using 'eviction-reset'",
+		cf_info(AS_NSUP,
+				"{%s} ignoring evict-void-time in the past - may remove using 'eviction-reset'",
 				ns->name);
 
 		ns->evict_void_time = evict_void_time;
@@ -533,12 +527,10 @@ evict(as_namespace* ns)
 
 	cf_tid tids[n_threads];
 
-	evict_overall_info overall = {
-			.ns = ns,
-			.now = now,
-			.evict_void_time = evict_void_time,
-			.sets_not_evicting = (const bool*)sets_not_evicting
-	};
+	evict_overall_info overall = { .ns = ns,
+		.now = now,
+		.evict_void_time = evict_void_time,
+		.sets_not_evicting = (const bool*)sets_not_evicting };
 
 	for (uint32_t i = 0; i < n_threads; i++) {
 		tids[i] = cf_thread_create_joinable(run_evict, (void*)&overall);
@@ -562,12 +554,10 @@ run_evict(void* udata)
 	evict_overall_info* overall = (evict_overall_info*)udata;
 	as_namespace* ns = overall->ns;
 
-	evict_per_thread_info per_thread = {
-			.ns = ns,
-			.now = overall->now,
-			.evict_void_time = overall->evict_void_time,
-			.sets_not_evicting = overall->sets_not_evicting
-	};
+	evict_per_thread_info per_thread = { .ns = ns,
+		.now = overall->now,
+		.evict_void_time = overall->evict_void_time,
+		.sets_not_evicting = overall->sets_not_evicting };
 
 	uint32_t pid;
 
@@ -622,7 +612,6 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - initiate eviction.
@@ -715,23 +704,20 @@ eval_hwm_breached(as_namespace* ns)
 	if (at != reasons) {
 		at[-3] = '\0'; // strip " & " off end
 
-		cf_warning(AS_NSUP, "{%s} breached eviction limit (%s), indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
-				ns->name, reasons,
-				ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz, ixs_mem_tag,
-				index_dev_tag,
-				sindex_dev_tag,
+		cf_warning(AS_NSUP,
+				"{%s} breached eviction limit (%s), indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
+				ns->name, reasons, ixs_sz, index_mem_sz, set_index_sz,
+				sindex_mem_sz, ixs_mem_tag, index_dev_tag, sindex_dev_tag,
 				data_used_pct);
 
 		ns->hwm_breached = true;
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} no eviction limit breached, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
-			ns->name,
-			ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz, ixs_mem_tag,
-			index_dev_tag,
-			sindex_dev_tag,
-			data_used_pct);
+	cf_debug(AS_NSUP,
+			"{%s} no eviction limit breached, indexes-memory sz:%lu (%lu + %lu + %lu)%s%s%s, data used-pct:%u",
+			ns->name, ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
+			ixs_mem_tag, index_dev_tag, sindex_dev_tag, data_used_pct);
 
 	ns->hwm_breached = false;
 
@@ -784,7 +770,8 @@ find_evict_void_time(as_namespace* ns, uint32_t now)
 					ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} would evict all %lu records eligible - not evicting!",
+			cf_warning(AS_NSUP,
+					"{%s} would evict all %lu records eligible - not evicting!",
 					ns->name, subtotal);
 		}
 
@@ -792,7 +779,8 @@ find_evict_void_time(as_namespace* ns, uint32_t now)
 	}
 
 	if (subtotal == 0) {
-		cf_warning(AS_NSUP, "{%s} no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
+		cf_warning(AS_NSUP,
+				"{%s} no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
 				ns->name, evict_void_time, threshold.bucket_index,
 				threshold.bucket_width, threshold.bucket_count,
 				threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
@@ -803,7 +791,8 @@ find_evict_void_time(as_namespace* ns, uint32_t now)
 		return evict_void_time == now ? now : 0;
 	}
 
-	cf_info(AS_NSUP, "{%s} found %lu records eligible for eviction at evict-ttl %u - submitting evict-void-time %u",
+	cf_info(AS_NSUP,
+			"{%s} found %lu records eligible for eviction at evict-ttl %u - submitting evict-void-time %u",
 			ns->name, subtotal, evict_void_time - now, evict_void_time);
 
 	return evict_void_time;
@@ -843,15 +832,13 @@ prep_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - expiration/eviction ticker.
 //
 
 static void
 update_stats(as_namespace* ns, uint64_t n_0_void_time,
-		uint64_t n_expired_objects, uint64_t n_evicted_objects,
-		uint64_t start_ms)
+		uint64_t n_expired_objects, uint64_t n_evicted_objects, uint64_t start_ms)
 {
 	ns->non_expirable_objects = n_0_void_time;
 
@@ -862,12 +849,10 @@ update_stats(as_namespace* ns, uint64_t n_0_void_time,
 
 	ns->nsup_cycle_duration = (uint32_t)(total_duration_ms / 1000);
 
-	cf_info(AS_NSUP, "{%s} nsup-done: non-expirable %lu expired (%lu,%lu) evicted (%lu,%lu) evict-ttl %d total-ms %lu",
-			ns->name,
-			n_0_void_time,
-			ns->n_expired_objects, n_expired_objects,
-			ns->n_evicted_objects, n_evicted_objects,
-			ns->evict_ttl,
+	cf_info(AS_NSUP,
+			"{%s} nsup-done: non-expirable %lu expired (%lu,%lu) evicted (%lu,%lu) evict-ttl %d total-ms %lu",
+			ns->name, n_0_void_time, ns->n_expired_objects, n_expired_objects,
+			ns->n_evicted_objects, n_evicted_objects, ns->evict_ttl,
 			total_duration_ms);
 
 	uint64_t n_deleted_objects = n_expired_objects + n_evicted_objects;
@@ -875,16 +860,17 @@ update_stats(as_namespace* ns, uint64_t n_0_void_time,
 	// A good enough estimate for our purposes, and safer than the real thing.
 	uint64_t old_n_objects = as_load_uint64(&ns->n_objects) + n_deleted_objects;
 
-	ns->nsup_cycle_deleted_pct = n_deleted_objects == 0 ? 0 :
-			(double)n_deleted_objects * 100.0 / (double)old_n_objects;
+	ns->nsup_cycle_deleted_pct = n_deleted_objects == 0
+			? 0
+			: (double)n_deleted_objects * 100.0 / (double)old_n_objects;
 
 	if (total_duration_ms > TOO_LONG_MS &&
 			ns->nsup_cycle_deleted_pct > TOO_MUCH_DELETED_PCT) {
-		cf_warning(AS_NSUP, "{%s} nsup deleted %.2f%% of namespace - configure more nsup threads?",
+		cf_warning(AS_NSUP,
+				"{%s} nsup deleted %.2f%% of namespace - configure more nsup threads?",
 				ns->name, ns->nsup_cycle_deleted_pct);
 	}
 }
-
 
 //==========================================================
 // Local helpers - stop writes.
@@ -912,12 +898,13 @@ eval_stop_writes(as_namespace* ns, bool cold_starting)
 	uint32_t sys_memory_pct = sys_mem_pct();
 
 	// Note that persisted index is not counted against stop-writes.
-	uint64_t index_mem_sz = as_namespace_index_persisted(ns) ?
-			0 : (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
+	uint64_t index_mem_sz = as_namespace_index_persisted(ns)
+			? 0
+			: (ns->n_tombstones + ns->n_objects) * sizeof(as_index);
 	uint64_t set_index_sz = as_set_index_used_bytes(ns);
 	// Note that persisted sindex is not counted against stop-writes.
-	uint64_t sindex_mem_sz = as_namespace_sindex_persisted(ns) ?
-			0 : as_sindex_used_bytes(ns);
+	uint64_t sindex_mem_sz =
+			as_namespace_sindex_persisted(ns) ? 0 : as_sindex_used_bytes(ns);
 	uint64_t ixs_sz = index_mem_sz + set_index_sz + sindex_mem_sz;
 
 	// Note that device storage limits are ignored during cold start
@@ -967,19 +954,19 @@ eval_stop_writes(as_namespace* ns, bool cold_starting)
 	if (at != reasons) {
 		at[-3] = '\0'; // strip " & " off end
 
-		cf_warning(AS_NSUP, "{%s} breached stop-writes limit (%s), sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu), data avail-pct:%u used-pct:%u",
-				ns->name, reasons, sys_memory_pct,
-				ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
-				data_avail_pct, data_used_pct);
+		cf_warning(AS_NSUP,
+				"{%s} breached stop-writes limit (%s), sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu), data avail-pct:%u used-pct:%u",
+				ns->name, reasons, sys_memory_pct, ixs_sz, index_mem_sz,
+				set_index_sz, sindex_mem_sz, data_avail_pct, data_used_pct);
 
 		ns->stop_writes = true;
 		return true;
 	}
 
-	cf_debug(AS_NSUP, "{%s} stop-writes limit not breached, sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu), data avail-pct:%u used-pct:%u",
-			ns->name, sys_memory_pct,
-			ixs_sz, index_mem_sz, set_index_sz, sindex_mem_sz,
-			data_avail_pct, data_used_pct);
+	cf_debug(AS_NSUP,
+			"{%s} stop-writes limit not breached, sys-memory pct:%u, indexes-memory sz:%lu (%lu + %lu + %lu), data avail-pct:%u used-pct:%u",
+			ns->name, sys_memory_pct, ixs_sz, index_mem_sz, set_index_sz,
+			sindex_mem_sz, data_avail_pct, data_used_pct);
 
 	ns->stop_writes = false;
 
@@ -997,7 +984,6 @@ sys_mem_pct(void)
 
 	return 100 - free_mem_pct;
 }
-
 
 //==========================================================
 // Local helpers - background histograms.
@@ -1063,9 +1049,8 @@ collect_nsup_histograms(as_namespace* ns)
 					as_namespace_get_set_name(ns, (uint16_t)set_id);
 
 			sprintf(hist_name, "{%s}-%s-ttl", ns->name, set_name);
-			ns->set_ttl_hists[set_id] =
-					linear_hist_create(hist_name, LINEAR_HIST_SECONDS, now,
-							ttl_range, TTL_HIST_NUM_BUCKETS);
+			ns->set_ttl_hists[set_id] = linear_hist_create(hist_name,
+					LINEAR_HIST_SECONDS, now, ttl_range, TTL_HIST_NUM_BUCKETS);
 		}
 
 		if (ns->set_obj_size_log_hists[set_id] != NULL) {
@@ -1082,9 +1067,8 @@ collect_nsup_histograms(as_namespace* ns)
 					histogram_create(hist_name, HIST_SIZE);
 
 			sprintf(hist_name, "{%s}-%s-obj-size-linear", ns->name, set_name);
-			ns->set_obj_size_lin_hists[set_id] =
-					linear_hist_create(hist_name, LINEAR_HIST_SIZE, 0, max_sz,
-							OBJ_SIZE_HIST_NUM_BUCKETS);
+			ns->set_obj_size_lin_hists[set_id] = linear_hist_create(hist_name,
+					LINEAR_HIST_SIZE, 0, max_sz, OBJ_SIZE_HIST_NUM_BUCKETS);
 		}
 	}
 
@@ -1112,8 +1096,7 @@ collect_nsup_histograms(as_namespace* ns)
 		linear_hist_save_info(ns->set_obj_size_lin_hists[set_id]);
 	}
 
-	cf_info(AS_NSUP, "{%s} ... done collecting ttl & object size info",
-			ns->name);
+	cf_info(AS_NSUP, "{%s} ... done collecting ttl & object size info", ns->name);
 }
 
 static bool
@@ -1149,7 +1132,6 @@ nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - cold start eviction.
 //
@@ -1184,8 +1166,9 @@ cold_start_evict(as_namespace* ns)
 	cf_info(AS_NSUP, "{%s} cold start building evict histogram ...", ns->name);
 
 	uint32_t ttl_range = get_ttl_range(ns, now);
-	uint32_t n_buckets = ns->evict_hist_buckets > COLD_START_HIST_MIN_BUCKETS ?
-			ns->evict_hist_buckets : COLD_START_HIST_MIN_BUCKETS;
+	uint32_t n_buckets = ns->evict_hist_buckets > COLD_START_HIST_MIN_BUCKETS
+			? ns->evict_hist_buckets
+			: COLD_START_HIST_MIN_BUCKETS;
 
 	bool sets_not_evicting[AS_SET_MAX_COUNT + 1] = { false };
 	init_sets_not_evicting(ns, sets_not_evicting);
@@ -1231,25 +1214,26 @@ cold_start_evict(as_namespace* ns)
 		return true;
 	}
 
-	cf_info(AS_NSUP, "{%s} cold start found %lu records eligible for eviction at evict-ttl %u",
+	cf_info(AS_NSUP,
+			"{%s} cold start found %lu records eligible for eviction at evict-ttl %u",
 			ns->name, n_evictable, ns->evict_void_time - now);
 
 	evict_overall_info overall = {
-			.ns = ns,
-			.sets_not_evicting = sets_not_evicting
-			// Note - .now and .expired not needed at startup.
+		.ns = ns, .sets_not_evicting = sets_not_evicting
+		// Note - .now and .expired not needed at startup.
 	};
 
 	for (uint32_t n = 0; n < n_cpus; n++) {
-		tids[n] = cf_thread_create_joinable(run_cold_start_evict,
-				(void*)&overall);
+		tids[n] =
+				cf_thread_create_joinable(run_cold_start_evict, (void*)&overall);
 	}
 
 	for (uint32_t n = 0; n < n_cpus; n++) {
 		cf_thread_join(tids[n]);
 	}
 
-	cf_info(AS_NSUP, "{%s} cold start evicted %lu records, found %lu 0-void-time records",
+	cf_info(AS_NSUP,
+			"{%s} cold start evicted %lu records, found %lu 0-void-time records",
 			ns->name, overall.n_evicted, overall.n_0_void_time);
 
 	return true;
@@ -1278,16 +1262,19 @@ static uint64_t
 set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 {
 	linear_hist_threshold threshold;
-	uint64_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &threshold);
+	uint64_t subtotal = linear_hist_get_threshold_for_fraction(hist,
+			ns->evict_tenths_pct, &threshold);
 	uint32_t evict_void_time = threshold.value;
 
 	if (evict_void_time == 0xFFFFffff) { // looped past all buckets
 		if (subtotal == 0) {
-			cf_warning(AS_NSUP, "{%s} cold start found no records eligible for eviction",
+			cf_warning(AS_NSUP,
+					"{%s} cold start found no records eligible for eviction",
 					ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} cold start would evict all %lu records eligible - not evicting!",
+			cf_warning(AS_NSUP,
+					"{%s} cold start would evict all %lu records eligible - not evicting!",
 					ns->name, subtotal);
 		}
 
@@ -1295,7 +1282,8 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 	}
 
 	if (subtotal == 0) {
-		cf_warning(AS_NSUP, "{%s} cold start found no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
+		cf_warning(AS_NSUP,
+				"{%s} cold start found no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
 				ns->name, evict_void_time, threshold.bucket_index,
 				threshold.bucket_width, threshold.bucket_count,
 				threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
@@ -1318,10 +1306,8 @@ run_cold_start_evict(void* udata)
 
 	as_namespace* ns = overall->ns;
 
-	evict_per_thread_info per_thread = {
-			.ns = ns,
-			.sets_not_evicting = overall->sets_not_evicting
-	};
+	evict_per_thread_info per_thread = { .ns = ns,
+		.sets_not_evicting = overall->sets_not_evicting };
 
 	uint32_t pid;
 
@@ -1366,7 +1352,6 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - generic.

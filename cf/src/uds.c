@@ -32,13 +32,13 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 #include "log.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Public API.
@@ -67,8 +67,8 @@ cf_uds_connect(const char* path, cf_uds* sock)
 	}
 
 	if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-		cf_ticker_warning(CF_SOCKET, "error while connect to %s: %d (%s)",
-				path, errno, cf_strerror(errno));
+		cf_ticker_warning(CF_SOCKET, "error while connect to %s: %d (%s)", path,
+				errno, cf_strerror(errno));
 		close(fd);
 		return false;
 	}
@@ -115,7 +115,8 @@ cf_uds_recv_all(cf_uds* sock, void* buf, size_t size, int32_t flags)
 		}
 
 		if (recv_sz == 0) {
-			cf_warning(CF_SOCKET, "connection closed before receiving complete buffer");
+			cf_warning(CF_SOCKET,
+					"connection closed before receiving complete buffer");
 			return -1;
 		}
 

@@ -31,25 +31,19 @@
 #include <stdint.h>
 
 #include "aerospike/as_atomic.h"
-#include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
-#include "dynbuf.h"
 #include "log.h"
+#include "xmem.h"
 
 #include "base/batch.h"
-#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/set_index.h"
 #include "base/transaction.h"
-#include "base/transaction_policy.h"
 #include "fabric/fabric.h"
-#include "fabric/partition.h"
-#include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/proxy.h"
@@ -58,30 +52,29 @@
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static void delete_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
+static void delete_dup_res_start_cb(rw_request* rw, as_transaction* tr,
+		as_record* r);
 static void start_delete_repl_write(rw_request* rw, as_transaction* tr);
 static void start_delete_repl_write_forget(rw_request* rw, as_transaction* tr);
 static bool delete_dup_res_cb(rw_request* rw);
 static void delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
-static void delete_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr);
+static void delete_repl_write_forget_after_dup_res(rw_request* rw,
+		as_transaction* tr);
 static void delete_repl_write_cb(rw_request* rw);
 
 static void send_delete_response(as_transaction* tr);
 static void delete_timeout_cb(rw_request* rw);
-
 
 //==========================================================
 // Inlines & macros.
 //
 
 static inline void
-client_delete_update_stats(as_namespace* ns, uint8_t result_code,
-		bool is_xdr_op)
+client_delete_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 {
 	switch (result_code) {
 	case AS_OK:
@@ -197,7 +190,6 @@ from_proxy_batch_sub_delete_update_stats(as_namespace* ns, uint8_t result_code)
 	}
 }
 
-
 //==========================================================
 // Public API.
 //
@@ -288,7 +280,6 @@ as_delete_start(as_transaction* tr)
 	// Started replica write.
 	return TRANS_IN_PROGRESS;
 }
-
 
 //==========================================================
 // Local helpers - transaction flow.
@@ -412,7 +403,6 @@ delete_repl_write_cb(rw_request* rw)
 	// Finished transaction - rw_request cleans up reservation and msgp!
 }
 
-
 //==========================================================
 // Local helpers - transaction end.
 //
@@ -441,8 +431,7 @@ send_delete_response(as_transaction* tr)
 				tr->result_code, 0, 0, NULL, NULL, 0, tr->rsv.ns,
 				as_transaction_trid(tr));
 		if (as_transaction_is_batch_sub(tr)) {
-			from_proxy_batch_sub_delete_update_stats(tr->rsv.ns,
-					tr->result_code);
+			from_proxy_batch_sub_delete_update_stats(tr->rsv.ns, tr->result_code);
 		}
 		else {
 			from_proxy_delete_update_stats(tr->rsv.ns, tr->result_code,
@@ -482,8 +471,7 @@ delete_timeout_cb(rw_request* rw)
 		break;
 	case FROM_PROXY:
 		if (rw_request_is_batch_sub(rw)) {
-			from_proxy_batch_sub_delete_update_stats(rw->rsv.ns,
-					AS_ERR_TIMEOUT);
+			from_proxy_batch_sub_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT);
 		}
 		else {
 			from_proxy_delete_update_stats(rw->rsv.ns, AS_ERR_TIMEOUT,
@@ -503,7 +491,6 @@ delete_timeout_cb(rw_request* rw)
 
 	rw->from.any = NULL; // inform other callback it lost the race
 }
-
 
 //==========================================================
 // Local helpers - delete master.
@@ -572,8 +559,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 		// Check the key if required.
 		// Note - for data-not-in-memory a key check is expensive!
-		if (check_key && as_storage_rd_load_key(&rd) &&
-				! check_msg_key(m, &rd)) {
+		if (check_key && as_storage_rd_load_key(&rd) && ! check_msg_key(m, &rd)) {
 			as_storage_record_close(&rd);
 			as_record_done(r_ref, ns);
 			tr->result_code = AS_ERR_KEY_MISMATCH;

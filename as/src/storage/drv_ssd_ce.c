@@ -35,7 +35,6 @@
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
-
 void
 ssd_resume_devices(drv_ssds* ssds)
 {
@@ -49,11 +48,11 @@ ssd_header_init_cfg(const as_namespace* ns, drv_ssd* ssd, drv_header* header)
 }
 
 void
-ssd_header_validate_cfg(const as_namespace* ns, drv_ssd* ssd,
-		drv_header* header)
+ssd_header_validate_cfg(const as_namespace* ns, drv_ssd* ssd, drv_header* header)
 {
 	if ((header->generic.prefix.flags & DRV_HEADER_FLAG_SINGLE_BIN) != 0) {
-		cf_crash(AS_DRV_SSD, "device has 'single-bin' data but 'single-bin' is no longer supported");
+		cf_crash(AS_DRV_SSD,
+				"device has 'single-bin' data but 'single-bin' is no longer supported");
 	}
 }
 
@@ -80,8 +79,8 @@ ssd_cold_start_transition_record(as_namespace* ns, const as_flat_record* flat,
 		as_index_ref* r_ref, bool is_create)
 {
 	index_metadata old_metadata = {
-			// Note - other members irrelevant.
-			.generation = is_create ? 0 : 1, // fake to transition set-index
+		// Note - other members irrelevant.
+		.generation = is_create ? 0 : 1, // fake to transition set-index
 	};
 
 	as_record_transition_set_index(tree, r_ref, ns, opt_meta->n_bins,
@@ -103,7 +102,7 @@ drv_adjust_sc_version_flags(as_namespace* ns, drv_pmeta* pmeta,
 }
 
 conflict_resolution_pol
-ssd_cold_start_policy(const as_namespace *ns)
+ssd_cold_start_policy(const as_namespace* ns)
 {
 	return AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
 }
@@ -127,19 +126,19 @@ ssd_cold_start_init_xdr_state(const as_flat_record* flat, as_record* r)
 }
 
 void
-ssd_init_commit(drv_ssd *ssd)
+ssd_init_commit(drv_ssd* ssd)
 {
 	// Nothing to do - relevant for enterprise version only.
 }
 
 uint64_t
-ssd_flush_max_us(const as_namespace *ns)
+ssd_flush_max_us(const as_namespace* ns)
 {
 	return ns->storage_flush_max_us;
 }
 
 int
-ssd_write_bins(as_storage_rd *rd)
+ssd_write_bins(as_storage_rd* rd)
 {
 	return ssd_buffer_bins(rd);
 }
@@ -158,24 +157,24 @@ as_storage_record_write_ssd(as_storage_rd* rd)
 }
 
 uint8_t*
-ssd_encrypt_wblock(ssd_write_buf *swb, uint64_t off)
+ssd_encrypt_wblock(ssd_write_buf* swb, uint64_t off)
 {
 	return swb->buf;
 }
 
 void
-ssd_decrypt(drv_ssd *ssd, uint64_t off, as_flat_record *flat)
+ssd_decrypt(drv_ssd* ssd, uint64_t off, as_flat_record* flat)
 {
 }
 
 void
-ssd_decrypt_whole(drv_ssd *ssd, uint64_t off, uint32_t n_rblocks,
-		as_flat_record *flat)
+ssd_decrypt_whole(drv_ssd* ssd, uint64_t off, uint32_t n_rblocks,
+		as_flat_record* flat)
 {
 }
 
 void
-ssd_prefetch_wblock(drv_ssd *ssd, uint64_t file_offset, uint8_t *read_buf)
+ssd_prefetch_wblock(drv_ssd* ssd, uint64_t file_offset, uint8_t* read_buf)
 {
 	// Should not get here - for enterprise version only.
 	cf_crash(AS_DRV_SSD, "community edition called ssd_prefetch_wblock()");

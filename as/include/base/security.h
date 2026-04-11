@@ -31,7 +31,6 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -39,7 +38,6 @@
 struct as_file_handle_s;
 struct as_namespace_s;
 struct as_transaction_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -85,16 +83,15 @@ typedef enum {
 
 // Security protocol message container.
 typedef struct as_sec_msg_s {
-	uint8_t		scheme;		// security scheme/version
-	uint8_t		result;		// result code (only for responses, except MORE)
-	uint8_t		command;	// security command (only for requests)
-	uint8_t		n_fields;	// number of fields in this message
+	uint8_t scheme; // security scheme/version
+	uint8_t result; // result code (only for responses, except MORE)
+	uint8_t command; // security command (only for requests)
+	uint8_t n_fields; // number of fields in this message
 
-	uint8_t		unused[12];	// reserved bytes round as_sec_msg size to 16 bytes
+	uint8_t unused[12]; // reserved bytes round as_sec_msg size to 16 bytes
 
-	uint8_t		fields[];	// the fields (name/value pairs)
-} __attribute__ ((__packed__)) as_sec_msg;
-
+	uint8_t fields[]; // the fields (name/value pairs)
+} __attribute__((__packed__)) as_sec_msg;
 
 //==========================================================
 // Public API.
@@ -102,13 +99,17 @@ typedef struct as_sec_msg_s {
 
 void as_security_init(void);
 uint8_t as_security_check_auth(const struct as_file_handle_s* fd_h);
-uint8_t as_security_check_info_cmd(const struct as_file_handle_s* fd_h, const char* cmd, const char* params, as_sec_perm perm);
-bool as_security_check_data_op(struct as_transaction_s* tr, struct as_namespace_s* ns, as_sec_perm perm);
-int as_security_check_rps(struct as_file_handle_s* fd_h, uint32_t rps, as_sec_perm perm, bool is_write, void** udata);
+uint8_t as_security_check_info_cmd(const struct as_file_handle_s* fd_h,
+		const char* cmd, const char* params, as_sec_perm perm);
+bool as_security_check_data_op(struct as_transaction_s* tr,
+		struct as_namespace_s* ns, as_sec_perm perm);
+int as_security_check_rps(struct as_file_handle_s* fd_h, uint32_t rps,
+		as_sec_perm perm, bool is_write, void** udata);
 void as_security_done_rps(void* udata, uint32_t rps, bool is_write);
 void* as_security_filter_create(void);
 void as_security_filter_destroy(void* pv_filter);
-void as_security_log(const struct as_file_handle_s* fd_h, uint8_t result, as_sec_perm perm, const char* action, const char* detail);
+void as_security_log(const struct as_file_handle_s* fd_h, uint8_t result,
+		as_sec_perm perm, const char* action, const char* detail);
 bool as_security_should_refresh(void);
 void as_security_refresh(struct as_file_handle_s* fd_h);
 void as_security_transact(struct as_transaction_s* tr);

@@ -38,7 +38,6 @@
 #include "socket.h"
 #include "vector.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -48,7 +47,6 @@ struct as_file_handle_s;
 struct as_index_s;
 struct as_namespace_s;
 struct as_storage_rd_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -660,7 +658,6 @@ typedef enum {
 } as_exp_flags;
 // clang-format on
 
-
 //==========================================================
 // Public API.
 //
@@ -689,11 +686,10 @@ cl_msg* as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 int32_t as_msg_make_response_bufbuilder(cf_buf_builder** bb_r,
 		struct as_storage_rd_s* rd, bool no_bin_data,
 		const cf_vector* select_bins, bool send_bval, int64_t bval);
-void as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid,
-		int result);
+void as_msg_pid_done_bufbuilder(cf_buf_builder** bb_r, uint32_t pid, int result);
 void as_msg_fin_bufbuilder(cf_buf_builder** bb_r, int result);
 cl_msg* as_msg_make_no_val_response(uint32_t result_code, uint32_t generation,
-		uint32_t void_time, uint64_t trid, size_t *p_msg_sz);
+		uint32_t void_time, uint64_t trid, size_t* p_msg_sz);
 cl_msg* as_msg_make_val_response(bool success, const as_val* val,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		uint64_t trid, size_t* p_msg_sz);
@@ -792,8 +788,9 @@ static inline uint8_t*
 as_msg_op_skip(as_msg_op* op)
 {
 	// At least 4 bytes always follow op_sz.
-	return OP_FIXED_SZ + op->name_sz + as_msg_op_meta_sz(op) > op->op_sz ?
-			NULL : (uint8_t*)as_msg_op_get_next(op);
+	return OP_FIXED_SZ + op->name_sz + as_msg_op_meta_sz(op) > op->op_sz
+			? NULL
+			: (uint8_t*)as_msg_op_get_next(op);
 }
 
 static inline as_msg_op*
@@ -826,18 +823,13 @@ as_msg_op_iterate(const as_msg* msg, as_msg_op* current, uint16_t* n)
 	return as_msg_op_get_next(current);
 }
 
-#define OP_IS_READ(op) ( \
-		(op) == AS_MSG_OP_READ || \
-		(op) == AS_MSG_OP_CDT_READ || \
-		(op) == AS_MSG_OP_BITS_READ || \
-		(op) == AS_MSG_OP_HLL_READ || \
-		(op) == AS_MSG_OP_EXP_READ \
-	)
+#define OP_IS_READ(op)                                                         \
+	((op) == AS_MSG_OP_READ || (op) == AS_MSG_OP_CDT_READ ||                   \
+			(op) == AS_MSG_OP_BITS_READ || (op) == AS_MSG_OP_HLL_READ ||       \
+			(op) == AS_MSG_OP_EXP_READ)
 
-#define OP_IS_MODIFY(op) ( \
-		(op) == AS_MSG_OP_INCR || \
-		(op) == AS_MSG_OP_APPEND || \
-		(op) == AS_MSG_OP_PREPEND \
-	)
+#define OP_IS_MODIFY(op)                                                       \
+	((op) == AS_MSG_OP_INCR || (op) == AS_MSG_OP_APPEND ||                     \
+			(op) == AS_MSG_OP_PREPEND)
 
 #define IS_CDT_LIST_OP(op) ((op) < AS_CDT_OP_MAP_SET_TYPE)

@@ -42,7 +42,6 @@
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Inlines & macros.
 //
@@ -56,7 +55,6 @@ stripe_name(int ix)
 
 	return str;
 }
-
 
 //==========================================================
 // Public API.
@@ -73,7 +71,6 @@ as_storage_record_write_mem(as_storage_rd* rd)
 	// No-op for drops, caller will drop record.
 	return rd->pickle != NULL || rd->n_bins != 0 ? write_record(rd) : 0;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -97,7 +94,8 @@ void
 header_validate_cfg(const as_namespace* ns, drv_mem* mem, drv_header* header)
 {
 	if ((header->generic.prefix.flags & DRV_HEADER_FLAG_SINGLE_BIN) != 0) {
-		cf_crash(AS_DRV_MEM, "device has 'single-bin' data but 'single-bin' is no longer supported");
+		cf_crash(AS_DRV_MEM,
+				"device has 'single-bin' data but 'single-bin' is no longer supported");
 	}
 }
 
@@ -154,8 +152,8 @@ cold_start_transition_record(as_namespace* ns, const as_flat_record* flat,
 		as_index_ref* r_ref, bool is_create)
 {
 	index_metadata old_metadata = {
-			// Note - other members irrelevant.
-			.generation = is_create ? 0 : 1, // fake to transition set-index
+		// Note - other members irrelevant.
+		.generation = is_create ? 0 : 1, // fake to transition set-index
 	};
 
 	as_record_transition_set_index(tree, r_ref, ns, opt_meta->n_bins,

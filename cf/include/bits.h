@@ -33,7 +33,6 @@
 
 #include "aerospike/as_arch.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -123,8 +122,8 @@ uintvar_size(uint32_t val)
 	return 5;
 }
 
-static inline uint8_t *
-uintvar_pack(uint8_t *buf, uint32_t val)
+static inline uint8_t*
+uintvar_pack(uint8_t* buf, uint32_t val)
 {
 	if ((val & 0xFFFFff80) == 0) { // one byte only - most common
 		*buf++ = (uint8_t)val;

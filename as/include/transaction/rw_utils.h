@@ -27,6 +27,7 @@
 //
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "aerospike/as_arch.h"
@@ -38,12 +39,12 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/proto.h"
 #include "base/service.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "sindex/sindex.h"
 #include "transaction/rw_request.h"
-
 
 //==========================================================
 // Forward declarations.
@@ -62,7 +63,6 @@ struct as_storage_rd_s;
 struct as_transaction_s;
 struct cl_msg_s;
 struct rw_request_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -87,13 +87,13 @@ typedef struct now_times_s {
 	uint64_t now_ms;
 } now_times;
 
-
 //==========================================================
 // Public API.
 //
 
 bool convert_to_write(struct as_transaction_s* tr, struct cl_msg_s** p_msgp);
-void convert_batched_to_write(const struct as_namespace_s* ns, struct as_transaction_s* tr, void** p_extra_msgps);
+void convert_batched_to_write(const struct as_namespace_s* ns,
+		struct as_transaction_s* tr, void** p_extra_msgps);
 void destroy_batch_extra_msgps(void* extra_msgps);
 int validate_delete_durability(struct as_transaction_s* tr);
 bool xdr_allows_write(struct as_transaction_s* tr);
@@ -102,38 +102,53 @@ void send_rw_messages_forget(struct rw_request_s* rw);
 int repl_state_check(struct as_index_s* r, struct as_transaction_s* tr);
 void will_replicate(struct as_index_s* r, struct as_namespace_s* ns);
 bool write_is_full_drop(const struct as_transaction_s* tr);
-bool sufficient_replica_destinations(const struct as_namespace_s* ns, uint32_t n_dests);
-bool set_replica_destinations(struct as_transaction_s* tr, struct rw_request_s* rw);
+bool sufficient_replica_destinations(const struct as_namespace_s* ns,
+		uint32_t n_dests);
+bool set_replica_destinations(struct as_transaction_s* tr,
+		struct rw_request_s* rw);
 void finished_replicated(struct as_transaction_s* tr);
 void finished_not_replicated(struct rw_request_s* rw);
-bool set_name_check(const struct as_transaction_s* tr, const struct as_index_s* r);
-bool generation_check(const struct as_index_s* r, const struct as_msg_s* m, const struct as_namespace_s* ns);
-int set_set_from_msg(struct as_index_s* r, struct as_namespace_s* ns, struct as_msg_s* m);
-int handle_meta_filter(const struct as_transaction_s* tr, const struct as_index_s* r, struct as_exp_s** exp);
+bool set_name_check(const struct as_transaction_s* tr,
+		const struct as_index_s* r);
+bool generation_check(const struct as_index_s* r, const struct as_msg_s* m,
+		const struct as_namespace_s* ns);
+int set_set_from_msg(struct as_index_s* r, struct as_namespace_s* ns,
+		struct as_msg_s* m);
+int handle_meta_filter(const struct as_transaction_s* tr,
+		const struct as_index_s* r, struct as_exp_s** exp);
 void destroy_filter_exp(const struct as_transaction_s* tr, struct as_exp_s* exp);
 int read_and_filter_bins(struct as_storage_rd_s* rd, struct as_exp_s* exp);
 bool check_msg_key(struct as_msg_s* m, struct as_storage_rd_s* rd);
 bool get_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 int handle_msg_key(struct as_transaction_s* tr, struct as_storage_rd_s* rd);
 bool forbid_replace(const struct as_namespace_s* ns);
-void prepare_bin_metadata(const struct as_transaction_s* tr, struct as_storage_rd_s* rd);
+void prepare_bin_metadata(const struct as_transaction_s* tr,
+		struct as_storage_rd_s* rd);
 void stash_index_metadata(const struct as_index_s* r, index_metadata* old);
 void unwind_index_metadata(const index_metadata* old, struct as_index_s* r);
 void advance_record_version(struct as_transaction_s* tr, struct as_index_s* r);
 void set_xdr_write(const struct as_transaction_s* tr, struct as_index_s* r);
 void touch_bin_metadata(struct as_storage_rd_s* rd);
-void transition_delete_metadata(struct as_transaction_s* tr, struct as_index_s* r, bool is_delete, bool is_bin_cemetery);
-bool forbid_resolve(const struct as_transaction_s* tr, const struct as_storage_rd_s* rd, uint64_t msg_lut);
-bool resolve_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, uint16_t n_ops, uint16_t* n_won, int* result);
+void transition_delete_metadata(struct as_transaction_s* tr,
+		struct as_index_s* r, bool is_delete, bool is_bin_cemetery);
+bool forbid_resolve(const struct as_transaction_s* tr,
+		const struct as_storage_rd_s* rd, uint64_t msg_lut);
+bool resolve_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op,
+		uint64_t msg_lut, uint16_t n_ops, uint16_t* n_won, int* result);
 bool udf_resolve_bin(struct as_storage_rd_s* rd, const char* name);
-void delete_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut);
+void delete_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op,
+		uint64_t msg_lut);
 void udf_delete_bin(struct as_storage_rd_s* rd, const char* name);
-void write_resolved_bin(struct as_storage_rd_s* rd, const struct as_msg_op_s* op, uint64_t msg_lut, struct as_bin_s* b);
+void write_resolved_bin(struct as_storage_rd_s* rd,
+		const struct as_msg_op_s* op, uint64_t msg_lut, struct as_bin_s* b);
 void delete_all_bins(struct as_storage_rd_s* rd);
 void pickle_all(struct as_storage_rd_s* rd, struct rw_request_s* rw);
-void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* old_bins, uint32_t n_old_bins, struct as_bin_s* new_bins, uint32_t n_new_bins);
+void update_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref,
+		struct as_bin_s* old_bins, uint32_t n_old_bins,
+		struct as_bin_s* new_bins, uint32_t n_new_bins);
 void remove_from_sindex(struct as_namespace_s* ns, struct as_index_ref_s* r_ref);
-void remove_from_sindex_bins(struct as_namespace_s* ns, struct as_index_ref_s* r_ref, struct as_bin_s* bins, uint32_t n_bins);
+void remove_from_sindex_bins(struct as_namespace_s* ns,
+		struct as_index_ref_s* r_ref, struct as_bin_s* bins, uint32_t n_bins);
 
 static inline bool
 set_has_sindex(const as_record* r, as_namespace* ns)
@@ -184,8 +199,8 @@ is_valid_ttl(uint32_t ttl)
 {
 	// Note - for now, ttl must be as_msg record_ttl.
 	// Note - ttl <= MAX_ALLOWED_TTL includes ttl == TTL_USE_DEFAULT.
-	return ttl <= MAX_ALLOWED_TTL ||
-			ttl == TTL_NEVER_EXPIRE || ttl == TTL_DONT_UPDATE;
+	return ttl <= MAX_ALLOWED_TTL || ttl == TTL_NEVER_EXPIRE ||
+			ttl == TTL_DONT_UPDATE;
 }
 
 static inline uint32_t
@@ -199,9 +214,9 @@ effective_default_ttl(const as_namespace* ns, const as_set* p_set)
 
 	uint32_t set_default_ttl = as_load_uint32(&p_set->default_ttl);
 
-	return set_default_ttl == 0 ?
-			ns->default_ttl :
-			(set_default_ttl == TTL_NEVER_EXPIRE ? 0 : set_default_ttl);
+	return set_default_ttl == 0
+			? ns->default_ttl
+			: (set_default_ttl == TTL_NEVER_EXPIRE ? 0 : set_default_ttl);
 }
 
 static inline bool
@@ -209,8 +224,8 @@ is_ttl_disallowed(uint32_t ttl, const as_namespace* ns, const as_set* p_set)
 {
 	// Note: Excludes TTL_NEVER_EXPIRE and TTL_DONT_UPDATE.
 	return ((int32_t)ttl > 0 ||
-			(ttl == TTL_USE_DEFAULT &&
-					effective_default_ttl(ns, p_set) != 0)) &&
+				   (ttl == TTL_USE_DEFAULT &&
+						   effective_default_ttl(ns, p_set) != 0)) &&
 			ns->nsup_period == 0 && ! ns->allow_ttl_without_nsup;
 }
 
@@ -225,24 +240,28 @@ clear_delete_response_metadata(as_transaction* tr)
 	}
 }
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
 void write_delete_record(struct as_index_s* r, struct as_index_tree_s* tree);
 
-uint32_t dup_res_pack_repl_state_info(const struct as_index_s* r, const struct as_namespace_s* ns);
-bool dup_res_should_retry_transaction(struct rw_request_s* rw, uint32_t result_code);
-void dup_res_handle_tie(struct rw_request_s* rw, const msg* m, uint32_t result_code);
+uint32_t dup_res_pack_repl_state_info(const struct as_index_s* r,
+		const struct as_namespace_s* ns);
+bool dup_res_should_retry_transaction(struct rw_request_s* rw,
+		uint32_t result_code);
+void dup_res_handle_tie(struct rw_request_s* rw, const msg* m,
+		uint32_t result_code);
 void apply_if_tie(struct rw_request_s* rw);
 void dup_res_translate_result_code(struct rw_request_s* rw);
 void dup_res_init_repl_state(struct as_remote_record_s* rr, uint32_t info);
 
 void repl_write_add_regime(msg* m, const struct as_transaction_s* tr);
 void repl_write_init_repl_state(struct as_remote_record_s* rr, bool from_replica);
-conflict_resolution_pol repl_write_conflict_resolution_policy(const struct as_namespace_s* ns);
-bool repl_write_should_retransmit_replicas(struct rw_request_s* rw, uint32_t result_code);
+conflict_resolution_pol
+repl_write_conflict_resolution_policy(const struct as_namespace_s* ns);
+bool repl_write_should_retransmit_replicas(struct rw_request_s* rw,
+		uint32_t result_code);
 void repl_write_send_confirmation(struct rw_request_s* rw);
 void repl_write_handle_confirmation(msg* m);
 

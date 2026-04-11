@@ -30,7 +30,6 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -51,26 +50,29 @@ typedef struct linear_hist_threshold_s {
 	uint64_t target_count;
 } linear_hist_threshold;
 
-
 //==========================================================
 // Public API.
 //
 
 // These must all be called from the same thread!
 
-linear_hist *linear_hist_create(const char *name, linear_hist_scale scale, uint32_t start, uint32_t max_offset, uint32_t num_buckets);
-void linear_hist_destroy(linear_hist *h);
-void linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset, uint32_t num_buckets);
-void linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset);
+linear_hist* linear_hist_create(const char* name, linear_hist_scale scale,
+		uint32_t start, uint32_t max_offset, uint32_t num_buckets);
+void linear_hist_destroy(linear_hist* h);
+void linear_hist_reset(linear_hist* h, uint32_t start, uint32_t max_offset,
+		uint32_t num_buckets);
+void linear_hist_clear(linear_hist* h, uint32_t start, uint32_t max_offset);
 
-uint64_t linear_hist_get_total(linear_hist *h);
-void linear_hist_merge(linear_hist *h1, linear_hist *h2);
-void linear_hist_insert_data_point(linear_hist *h, uint32_t point);
-uint64_t linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct, linear_hist_threshold *p_threshold);
-uint64_t linear_hist_get_threshold_for_subtotal(linear_hist *h, uint64_t subtotal, linear_hist_threshold *p_threshold);
+uint64_t linear_hist_get_total(linear_hist* h);
+void linear_hist_merge(linear_hist* h1, linear_hist* h2);
+void linear_hist_insert_data_point(linear_hist* h, uint32_t point);
+uint64_t linear_hist_get_threshold_for_fraction(linear_hist* h,
+		uint32_t tenths_pct, linear_hist_threshold* p_threshold);
+uint64_t linear_hist_get_threshold_for_subtotal(linear_hist* h,
+		uint64_t subtotal, linear_hist_threshold* p_threshold);
 
-void linear_hist_dump(linear_hist *h);
-void linear_hist_save_info(linear_hist *h);
+void linear_hist_dump(linear_hist* h);
+void linear_hist_save_info(linear_hist* h);
 
 // This call is thread-safe.
-void linear_hist_get_info(linear_hist *h, cf_dyn_buf *db);
+void linear_hist_get_info(linear_hist* h, cf_dyn_buf* db);

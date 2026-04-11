@@ -32,7 +32,6 @@
 #include "dynbuf.h"
 #include "node.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -56,7 +55,6 @@ typedef enum {
 	AS_HEALTH_NS_TYPE_MAX
 } as_health_ns_stat_type;
 
-
 //==========================================================
 // Globals.
 //
@@ -65,7 +63,6 @@ extern bool g_health_enabled;
 
 extern __thread uint64_t g_device_read_counter;
 extern __thread uint64_t g_replica_write_counter;
-
 
 //==========================================================
 // Public API.
@@ -78,7 +75,8 @@ void as_health_start();
 // Not called directly - called by inline wrappers below.
 void health_add_device_latency(uint32_t ns_ix, uint32_t d_id, uint64_t start_us);
 void health_add_node_counter(cf_node node, as_health_node_stat_type stat_type);
-void health_add_ns_latency(cf_node node, uint32_t ns_ix, as_health_ns_stat_type stat_type, uint64_t start_us);
+void health_add_ns_latency(cf_node node, uint32_t ns_ix,
+		as_health_ns_stat_type stat_type, uint64_t start_us);
 
 static inline bool
 as_health_sample_device_read()
