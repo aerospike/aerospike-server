@@ -35,26 +35,44 @@
 //
 
 typedef struct cf_pool_int32_s {
+	// Read-only after init — cache line 0.
 	uint32_t capacity;
 	uint32_t cap_minus_1;
+	int32_t  empty_val;
+	uint8_t  _pad0[52]; // 4 + 4 + 4 = 12 bytes used; pad to 64
 
+	// Written only by pop() — cache line 1.
 	uint32_t read_ix;
+	uint8_t  _pad1[60]; // 4 + 60 = 64 bytes
+
+	// Written only by push() — cache line 2.
 	uint32_t write_ix;
+	uint8_t  _pad2[60]; // 4 + 60 = 64 bytes
 
-	int32_t count;
+	// Written by both pop() and push() — cache line 3.
+	int32_t  count;
+	uint8_t  _pad3[60]; // 4 + 60 = 64 bytes
 
-	int32_t empty_val;
 	int32_t* data;
 } cf_pool_int32;
 
 typedef struct cf_pool_ptr_s {
+	// Read-only after init — cache line 0.
 	uint32_t capacity;
 	uint32_t cap_minus_1;
+	uint8_t  _pad0[56]; // 4 + 4 = 8 bytes used; pad to 64
 
+	// Written only by pop() — cache line 1.
 	uint32_t read_ix;
-	uint32_t write_ix;
+	uint8_t  _pad1[60]; // 4 + 60 = 64 bytes
 
-	int32_t count;
+	// Written only by push() — cache line 2.
+	uint32_t write_ix;
+	uint8_t  _pad2[60]; // 4 + 60 = 64 bytes
+
+	// Written by both pop() and push() — cache line 3.
+	int32_t  count;
+	uint8_t  _pad3[60]; // 4 + 60 = 64 bytes
 
 	void** data;
 } cf_pool_ptr;

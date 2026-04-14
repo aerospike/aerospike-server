@@ -638,10 +638,13 @@ cf_shash_delete_or_pop(cf_shash* h, const void* key, void* value)
 		else if (e->next == NULL) {
 			e->in_use = false;
 		}
-		// If at head with a next, copy next into head and free next.
+		// If at head with a next, copy next's data into head and free next.
 		else {
-			free_e = e->next;
-			memcpy(e, e->next, h->ele_size);
+			cf_shash_ele* e_next = e->next;
+			e->next = e_next->next;
+			// e->in_use is already true and stays true
+			memcpy(e->data, e_next->data, h->key_size + h->value_size);
+			free_e = e_next;
 		}
 
 		cf_shash_size_decr(h);

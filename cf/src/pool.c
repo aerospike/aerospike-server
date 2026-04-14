@@ -119,6 +119,8 @@ cf_pool_int32_pop(cf_pool_int32* pool)
 				break;
 			}
 		}
+
+		as_arch_pause();
 	}
 
 	return val;
@@ -136,6 +138,8 @@ cf_pool_int32_push(cf_pool_int32* pool, int32_t val)
 				as_cas_rlx(&pool->data[ix], &empty, val)) {
 			break;
 		}
+
+		as_arch_pause();
 	}
 
 	as_faa_rls(&pool->count, 1);
@@ -195,6 +199,8 @@ cf_pool_ptr_pop(cf_pool_ptr* pool)
 				break;
 			}
 		}
+
+		as_arch_pause();
 	}
 
 	return val;
@@ -211,6 +217,8 @@ cf_pool_ptr_push(cf_pool_ptr* pool, void* val)
 		if (pool->data[ix] == NULL && as_cas_rlx(&pool->data[ix], &n, val)) {
 			break;
 		}
+
+		as_arch_pause();
 	}
 
 	as_faa_rls(&pool->count, 1);

@@ -134,7 +134,7 @@ cf_arenax_alloc(cf_arenax* arena, cf_arenax_puddle* puddle)
 		return cf_arenax_alloc_chunked(arena, puddle);
 	}
 
-	static uint32_t rr = 0;
+	static __thread uint32_t rr = 0;
 	cf_arenax_stash* stash = &arena->stash[rr++ % CF_ARENAX_N_STASHES];
 
 	cf_mutex_lock(&stash->lock);

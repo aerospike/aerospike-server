@@ -80,6 +80,7 @@ typedef struct cf_arenax_chunk_s {
 typedef struct cf_arenax_stash_s {
 	cf_mutex lock;
 	cf_arenax_handle free_h;
+	uint8_t _pad[52]; // 4 + 8 + 52 = 64 bytes — one cache line per stash
 } cf_arenax_stash;
 
 // DO NOT access this member data directly - use the API!
