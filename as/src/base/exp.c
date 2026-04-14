@@ -1371,7 +1371,7 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 
 	if (msgpack_buf_get_list_ele_count(mp.buf, mp.buf_sz, &top_count) &&
 			top_count == 0) {
-		cf_warning(AS_EXP, "build_internal - invalid expression or empty list");
+		cf_warning(AS_EXP, "build_internal - empty list");
 		return NULL;
 	}
 
@@ -3232,9 +3232,7 @@ parse_op_call(op_call* op, build_args* args)
 			return false;
 		}
 
-		if (ele_count == 4 &&
-				(msgpack_peek_type(mp) != MSGPACK_TYPE_LIST ||
-						msgpack_sz(mp) == 0)) { // mod_exp
+		if (ele_count == 4 && msgpack_sz(mp) == 0) { // mod_exp
 			return false;
 		}
 
