@@ -1685,9 +1685,7 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 					return false;
 				}
 
-				if (param_count == 4 &&
-						(msgpack_peek_type(mp) != MSGPACK_TYPE_LIST ||
-								msgpack_sz(mp) == 0)) { // mod_exp
+				if (param_count == 4 && msgpack_sz(mp) == 0) { // mod_exp
 					cf_warning(AS_EXP,
 							"build_count_sz - invalid instruction at offset %u",
 							mp->offset);
