@@ -33,7 +33,6 @@
 
 #include "transaction/rw_request.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -41,14 +40,15 @@
 struct as_transaction_s;
 struct rw_request_s;
 
-
 //==========================================================
 // Public API.
 //
 
 bool repl_ping_check(struct as_transaction_s* tr);
 void repl_ping_make_message(struct rw_request_s* rw, struct as_transaction_s* tr);
-void repl_ping_setup_rw(struct rw_request_s* rw, struct as_transaction_s* tr, repl_ping_done_cb repl_ping_cb, timeout_done_cb timeout_cb);
-void repl_ping_reset_rw(struct rw_request_s* rw, struct as_transaction_s* tr, repl_ping_done_cb cb);
+void repl_ping_setup_rw(struct rw_request_s* rw, struct as_transaction_s* tr,
+		repl_ping_done_cb repl_ping_cb, timeout_done_cb timeout_cb);
+void repl_ping_reset_rw(struct rw_request_s* rw, struct as_transaction_s* tr,
+		repl_ping_done_cb cb);
 void repl_ping_handle_op(cf_node node, msg* m);
 void repl_ping_handle_ack(cf_node node, msg* m);

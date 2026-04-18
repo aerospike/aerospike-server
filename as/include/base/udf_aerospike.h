@@ -28,7 +28,6 @@
 
 #include "aerospike/as_aerospike.h"
 
-
 //==========================================================
 // Public API - aerospike: hooks.
 //

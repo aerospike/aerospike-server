@@ -39,24 +39,22 @@
 #include "base/proto.h"
 #include "transaction/write.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
-#define INVALID_MODIFY_FLAGS ~(uint64_t)(\
-	AS_EXP_FLAG_CREATE_ONLY | AS_EXP_FLAG_UPDATE_ONLY | \
-	AS_EXP_FLAG_ALLOW_DELETE | AS_EXP_FLAG_POLICY_NO_FAIL | \
-	AS_EXP_FLAG_EVAL_NO_FAIL)
+#define INVALID_MODIFY_FLAGS                                                   \
+	~(uint64_t)(AS_EXP_FLAG_CREATE_ONLY | AS_EXP_FLAG_UPDATE_ONLY |            \
+			AS_EXP_FLAG_ALLOW_DELETE | AS_EXP_FLAG_POLICY_NO_FAIL |            \
+			AS_EXP_FLAG_EVAL_NO_FAIL)
 #define INVALID_READ_FLAGS ~(uint64_t)(AS_EXP_FLAG_EVAL_NO_FAIL)
-
 
 //==========================================================
 // Forward declarations.
 //
 
-static int eval_op(as_exp* exp, const as_exp_ctx* ctx, uint64_t flags, as_bin* rb, cf_ll_buf* particles_llb);
-
+static int eval_op(as_exp* exp, const as_exp_ctx* ctx, uint64_t flags,
+		as_bin* rb, cf_ll_buf* particles_llb);
 
 //==========================================================
 // Inlines & macros.
@@ -70,7 +68,6 @@ exp_destroy_if(const iops_expop* expop, as_exp* exp)
 	}
 }
 
-
 //==========================================================
 // Public API.
 //
@@ -79,16 +76,15 @@ bool
 as_exp_op_parse(const as_msg_op* msg_op, as_exp** exp, uint64_t* flags,
 		bool is_modify, bool cpy_wire)
 {
-	msgpack_in mp = {
-			.buf = as_msg_op_get_value_p(msg_op),
-			.buf_sz = as_msg_op_get_value_sz(msg_op)
-	};
+	msgpack_in mp = { .buf = as_msg_op_get_value_p(msg_op),
+		.buf_sz = as_msg_op_get_value_sz(msg_op) };
 
 	uint32_t ele_count = 0;
 
 	if (! msgpack_get_list_ele_count(&mp, &ele_count) || ele_count == 0 ||
 			ele_count > 2) {
-		cf_warning(AS_PARTICLE, "parse_op - error %u received invalid expression op ele_count %u",
+		cf_warning(AS_PARTICLE,
+				"parse_op - error %u received invalid expression op ele_count %u",
 				AS_ERR_PARAMETER, ele_count);
 		return false;
 	}
@@ -97,7 +93,8 @@ as_exp_op_parse(const as_msg_op* msg_op, as_exp** exp, uint64_t* flags,
 	const uint8_t* exp_buf = msgpack_get_ele(&mp, &exp_buf_sz);
 
 	if (exp_buf == NULL) {
-		cf_warning(AS_PARTICLE, "parse_op - error %u received invalid expression size %u",
+		cf_warning(AS_PARTICLE,
+				"parse_op - error %u received invalid expression size %u",
 				AS_ERR_PARAMETER, exp_buf_sz);
 		return false;
 	}
@@ -107,14 +104,16 @@ as_exp_op_parse(const as_msg_op* msg_op, as_exp** exp, uint64_t* flags,
 	if (msgpack_get_uint64(&mp, flags)) {
 		if (is_modify) {
 			if (*flags & INVALID_MODIFY_FLAGS) {
-				cf_warning(AS_PARTICLE, "parse_op - error %u received invalid modify flags %lx",
+				cf_warning(AS_PARTICLE,
+						"parse_op - error %u received invalid modify flags %lx",
 						AS_ERR_PARAMETER, *flags);
 				return false;
 			}
 		}
 		else {
 			if (*flags & INVALID_READ_FLAGS) {
-				cf_warning(AS_PARTICLE, "parse_op - error %u received invalid read flags %lx",
+				cf_warning(AS_PARTICLE,
+						"parse_op - error %u received invalid read flags %lx",
 						AS_ERR_PARAMETER, *flags);
 				return false;
 			}
@@ -124,7 +123,8 @@ as_exp_op_parse(const as_msg_op* msg_op, as_exp** exp, uint64_t* flags,
 	*exp = as_exp_build_buf(exp_buf, exp_buf_sz, cpy_wire);
 
 	if (*exp == NULL) {
-		cf_warning(AS_PARTICLE, "parse_op - error %u unable to build expression op",
+		cf_warning(AS_PARTICLE,
+				"parse_op - error %u unable to build expression op",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -156,7 +156,8 @@ as_exp_modify_tr(const as_exp_ctx* ctx, as_bin* b, const as_msg_op* msg_op,
 				return AS_OK;
 			}
 
-			cf_detail(AS_PARTICLE, "as_exp_modify_tr - error %u bin %.*s would update",
+			cf_detail(AS_PARTICLE,
+					"as_exp_modify_tr - error %u bin %.*s would update",
 					AS_ERR_BIN_EXISTS, (int)msg_op->name_sz, msg_op->name);
 			exp_destroy_if(expop, exp);
 			return -AS_ERR_BIN_EXISTS;
@@ -170,7 +171,8 @@ as_exp_modify_tr(const as_exp_ctx* ctx, as_bin* b, const as_msg_op* msg_op,
 				return AS_OK;
 			}
 
-			cf_detail(AS_PARTICLE, "as_bin_exp_modify_tr - error %u bin %.*s would create",
+			cf_detail(AS_PARTICLE,
+					"as_bin_exp_modify_tr - error %u bin %.*s would create",
 					AS_ERR_BIN_NOT_FOUND, (int)msg_op->name_sz, msg_op->name);
 			exp_destroy_if(expop, exp);
 			return -AS_ERR_BIN_NOT_FOUND;
@@ -198,7 +200,8 @@ as_exp_modify_tr(const as_exp_ctx* ctx, as_bin* b, const as_msg_op* msg_op,
 			return AS_OK;
 		}
 
-		cf_detail(AS_PARTICLE, "as_bin_exp_modify_tr - error %u bin %.*s would delete",
+		cf_detail(AS_PARTICLE,
+				"as_bin_exp_modify_tr - error %u bin %.*s would delete",
 				AS_ERR_OP_NOT_APPLICABLE, (int)msg_op->name_sz, msg_op->name);
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
@@ -223,7 +226,6 @@ as_exp_read_tr(const as_exp_ctx* ctx, const as_msg_op* msg_op, as_bin* rb)
 	return rv;
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -239,7 +241,8 @@ eval_op(as_exp* exp, const as_exp_ctx* ctx, uint64_t flags, as_bin* rb,
 			return AS_OK;
 		}
 
-		cf_detail(AS_PARTICLE, "eval_op - expression failed to evaluate to a bin type");
+		cf_detail(AS_PARTICLE,
+				"eval_op - expression failed to evaluate to a bin type");
 		return -AS_ERR_OP_NOT_APPLICABLE;
 	}
 

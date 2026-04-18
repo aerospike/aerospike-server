@@ -30,7 +30,6 @@ struct as_index_ref_s;
 struct as_index_tree_s;
 struct as_namespace_s;
 
-
 //==========================================================
 // Public API.
 //

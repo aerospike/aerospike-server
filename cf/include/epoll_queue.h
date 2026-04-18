@@ -29,7 +29,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -46,7 +45,6 @@ typedef struct cf_epoll_queue_s {
 	uint32_t ele_sz;
 	uint8_t* eles;
 } cf_epoll_queue;
-
 
 //==========================================================
 // Public API.

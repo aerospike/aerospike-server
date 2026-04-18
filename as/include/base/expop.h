@@ -31,7 +31,6 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -42,11 +41,14 @@ struct as_exp_ctx_s;
 struct as_msg_op_s;
 struct iops_expop_s;
 
-
 //==========================================================
 // Public API.
 //
 
-bool as_exp_op_parse(const struct as_msg_op_s* msg_op, struct as_exp_s** exp, uint64_t* flags, bool is_modify, bool cpy_wire);
-int as_exp_modify_tr(const struct as_exp_ctx_s* ctx, struct as_bin_s* b, const struct as_msg_op_s* msg_op, cf_ll_buf* particles_llb, const struct iops_expop_s* expop);
-int as_exp_read_tr(const struct as_exp_ctx_s* ctx, const struct as_msg_op_s* msg_op, struct as_bin_s* rb);
+bool as_exp_op_parse(const struct as_msg_op_s* msg_op, struct as_exp_s** exp,
+		uint64_t* flags, bool is_modify, bool cpy_wire);
+int as_exp_modify_tr(const struct as_exp_ctx_s* ctx, struct as_bin_s* b,
+		const struct as_msg_op_s* msg_op, cf_ll_buf* particles_llb,
+		const struct iops_expop_s* expop);
+int as_exp_read_tr(const struct as_exp_ctx_s* ctx,
+		const struct as_msg_op_s* msg_op, struct as_bin_s* rb);

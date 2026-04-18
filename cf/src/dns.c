@@ -22,7 +22,8 @@
 
 #include "dns.h"
 
-#include <errno.h>
+#include <stdbool.h>
+#include <string.h>
 
 #include "citrusleaf/cf_queue.h"
 
@@ -58,8 +59,7 @@
 /**
  * Internal representation of a resolve request.
  */
-typedef struct cf_dns_resolve_req_s
-{
+typedef struct cf_dns_resolve_req_s {
 	/**
 	 * The hostname to resolve.
 	 */
@@ -103,7 +103,7 @@ cf_dns_resolve_worker(void* arg)
 	cf_dns_resolve_req req = { { 0 } };
 
 	while (cf_queue_pop(&g_req_queue, &req, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
-		addrinfo *addrs = NULL;
+		addrinfo* addrs = NULL;
 		int status = getaddrinfo(req.hostname, NULL, &req.hints, &addrs);
 		req.cb(status, req.hostname, addrs, req.udata);
 	}

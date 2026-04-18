@@ -33,7 +33,6 @@
 #include "cf_mutex.h"
 #include "xmem.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -84,12 +83,13 @@ typedef struct si_arena_free_ele_s {
 
 #define SI_FREE_MAGIC 0xf7f7fefefefef7f7UL
 
-
 //==========================================================
 // Public API.
 //
 
-void as_sindex_arena_init(as_sindex_arena* arena, cf_xmem_type xmem_type, const void* xmem_type_cfg, key_t key_base, uint32_t ele_sz, size_t stage_sz);
+void as_sindex_arena_init(as_sindex_arena* arena, cf_xmem_type xmem_type,
+		const void* xmem_type_cfg, key_t key_base, uint32_t ele_sz,
+		size_t stage_sz);
 
 si_arena_handle as_sindex_arena_alloc(as_sindex_arena* arena);
 void as_sindex_arena_free(as_sindex_arena* arena, si_arena_handle h);
@@ -100,7 +100,6 @@ as_sindex_arena_resolve(as_sindex_arena* arena, si_arena_handle h)
 	return arena->stages[h >> SI_ELE_ID_N_BITS] +
 			((h & SI_ELE_ID_MASK) * arena->ele_sz);
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

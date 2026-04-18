@@ -22,7 +22,6 @@
 
 #pragma once
 
-
 //==========================================================
 // Includes.
 //
@@ -30,18 +29,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef struct cf_mutex_s {
 	uint32_t u32;
-} cf_mutex __attribute__ ((aligned(4)));
+} cf_mutex __attribute__((aligned(4)));
 
 typedef struct cf_condition_s {
 	uint32_t seq;
-} cf_condition __attribute__ ((aligned(4)));
+} cf_condition __attribute__((aligned(4)));
 
 #define CF_MUTEX_INIT { 0 }
 #define cf_mutex_init(__m) (__m)->u32 = 0
@@ -50,7 +48,6 @@ typedef struct cf_condition_s {
 #define CF_CONDITION_INIT { 0 }
 #define cf_condition_init(__m) (__m)->seq = 0
 #define cf_condition_destroy(__m) ((void)__m) // no-op
-
 
 //==========================================================
 // Public API.

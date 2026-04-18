@@ -28,7 +28,6 @@
 
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -38,7 +37,6 @@
 // We assume this is big enough (for max path length, max identifier length,
 // line number, overhead).
 #define SYM_STR_MAX_SZ (8 * 1024)
-
 
 //==========================================================
 // Public API.

@@ -20,17 +20,15 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-
 //==========================================================
 // Includes.
 //
 
 #include <cf_mutex.h>
-
 #include <linux/futex.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -39,13 +37,11 @@
 
 #include "log.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 #define FUTEX_SPIN_MAX 100
-
 
 //==========================================================
 // Inlines & macros.
@@ -57,9 +53,8 @@ sys_futex(void* uaddr, int op, int val)
 	syscall(SYS_futex, uaddr, op, val, NULL, NULL, 0);
 }
 
-#define unlikely(__expr) __builtin_expect(!! (__expr), 0)
-#define likely(__expr) __builtin_expect(!! (__expr), 1)
-
+#define unlikely(__expr) __builtin_expect(! ! (__expr), 0)
+#define likely(__expr) __builtin_expect(! ! (__expr), 1)
 
 //==========================================================
 // Public API - cf_mutex.
@@ -173,7 +168,6 @@ cf_mutex_unlock_spin(cf_mutex* m)
 		cf_crash(CF_MISC, "cf_mutex_unlock_spin() on already unlocked mutex");
 	}
 }
-
 
 //==========================================================
 // Public API - cf_condition.

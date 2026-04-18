@@ -32,7 +32,6 @@
 
 #include "citrusleaf/alloc.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -44,7 +43,6 @@ typedef enum {
 	PATH_TYPE_SECRETS,
 	PATH_TYPE_VAULT
 } path_type;
-
 
 //==========================================================
 // Public API.

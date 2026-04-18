@@ -33,13 +33,11 @@
 
 #include "base/datamodel.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 void post_process_namespace(as_namespace* ns);
-
 
 //==========================================================
 // Public API.
@@ -65,7 +63,6 @@ as_error_enterprise_feature_only(const char* name)
 	return true;
 }
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
@@ -73,10 +70,9 @@ as_error_enterprise_feature_only(const char* name)
 void
 cfg_enterprise_only(const cfg_line* p_line)
 {
-	cf_crash_nostack(AS_CFG, "line %d :: '%s' is enterprise-only",
-			p_line->num, p_line->name_tok);
+	cf_crash_nostack(AS_CFG, "line %d :: '%s' is enterprise-only", p_line->num,
+			p_line->name_tok);
 }
-
 
 void
 cfg_post_process()
@@ -87,7 +83,6 @@ cfg_post_process()
 		post_process_namespace(g_config.namespaces[ns_ix]);
 	}
 }
-
 
 //==========================================================
 // Local helpers.

@@ -27,11 +27,11 @@
 //
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "dynbuf.h"
 #include "vector.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -62,26 +62,30 @@ typedef enum {
 	AS_SMD_ACCEPT_OPT_SET
 } as_smd_accept_type;
 
-typedef void (*as_smd_accept_fn)(const cf_vector* items, as_smd_accept_type accept_type);
+typedef void (*as_smd_accept_fn)(const cf_vector* items,
+		as_smd_accept_type accept_type);
 // Return false to choose item0, true to choose item1.
-typedef bool (*as_smd_conflict_fn)(const as_smd_item* item0, const as_smd_item* item1);
+typedef bool (*as_smd_conflict_fn)(const as_smd_item* item0,
+		const as_smd_item* item1);
 typedef void (*as_smd_get_all_fn)(const cf_vector* items, void* udata);
 typedef void (*as_smd_set_fn)(bool result, void* udata);
 
 // Used by many SMD modules to format keys.
 #define TOK_DELIMITER ('|')
 
-
 //==========================================================
 // Public API.
 //
 
-void as_smd_module_load(as_smd_id id, as_smd_accept_fn accept_cb, as_smd_conflict_fn conflict_cb, const cf_vector* default_items);
+void as_smd_module_load(as_smd_id id, as_smd_accept_fn accept_cb,
+		as_smd_conflict_fn conflict_cb, const cf_vector* default_items);
 void as_smd_start(void);
 void as_smd_shutdown(void);
 // timeout 0 is default timeout in msec.
-void as_smd_set(as_smd_id id, const char* key, const char* value, as_smd_set_fn set_cb, void* udata, uint64_t timeout);
-bool as_smd_set_blocking(as_smd_id id, const char* key, const char* value, uint64_t timeout);
+void as_smd_set(as_smd_id id, const char* key, const char* value,
+		as_smd_set_fn set_cb, void* udata, uint64_t timeout);
+bool as_smd_set_blocking(as_smd_id id, const char* key, const char* value,
+		uint64_t timeout);
 void as_smd_get_all(as_smd_id id, as_smd_get_all_fn cb, void* udata);
 void as_smd_get_info(cf_dyn_buf* db);
 
@@ -92,7 +96,8 @@ as_smd_set_and_forget(as_smd_id id, const char* key, const char* value)
 }
 
 static inline void
-as_smd_delete(as_smd_id id, const char* key, as_smd_set_fn set_cb, void* udata, uint64_t timeout)
+as_smd_delete(as_smd_id id, const char* key, as_smd_set_fn set_cb, void* udata,
+		uint64_t timeout)
 {
 	as_smd_set(id, key, NULL, set_cb, udata, timeout);
 }

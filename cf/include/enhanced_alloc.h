@@ -32,7 +32,6 @@
 #include <stdint.h>
 #include <string.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -42,56 +41,56 @@ typedef struct cf_rc_header_s {
 	uint32_t sz;
 } cf_rc_header;
 
-
 //==========================================================
 // Public API - arena management and stats.
 //
 
 void cf_alloc_init(void);
-void cf_alloc_set_debug(bool debug_allocations, bool indent_allocations, bool poison_allocations, uint32_t quarantine_allocations);
+void cf_alloc_set_debug(bool debug_allocations, bool indent_allocations,
+		bool poison_allocations, uint32_t quarantine_allocations);
 
-void cf_alloc_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *mapped_kbytes, double *efficiency_pct, uint32_t *site_count);
-void cf_alloc_log_stats(const char *file, const char *opts);
-void cf_alloc_log_site_infos(const char *file);
-
+void cf_alloc_heap_stats(size_t* allocated_kbytes, size_t* active_kbytes,
+		size_t* mapped_kbytes, double* efficiency_pct, uint32_t* site_count);
+void cf_alloc_log_stats(const char* file, const char* opts);
+void cf_alloc_log_site_infos(const char* file);
 
 //==========================================================
 // Public API - ordinary allocation.
 //
 
 // Don't call these directly - use wrappers below.
-void *cf_alloc_try_malloc(size_t sz);
+void* cf_alloc_try_malloc(size_t sz);
 
-#define cf_try_malloc(_sz)       cf_alloc_try_malloc(_sz)
-#define cf_malloc(_sz)           malloc(_sz)
-#define cf_calloc(_n, _sz)       calloc(_n, _sz)
-#define cf_realloc(_p, _sz)      realloc(_p, _sz)
-#define cf_valloc(_sz)           valloc(_sz)
+#define cf_try_malloc(_sz) cf_alloc_try_malloc(_sz)
+#define cf_malloc(_sz) malloc(_sz)
+#define cf_calloc(_n, _sz) calloc(_n, _sz)
+#define cf_realloc(_p, _sz) realloc(_p, _sz)
+#define cf_valloc(_sz) valloc(_sz)
 
-#define cf_strdup(_s)            strdup(_s)
-#define cf_strndup(_s, _n)       strndup(_s, _n)
+#define cf_strdup(_s) strdup(_s)
+#define cf_strndup(_s, _n) strndup(_s, _n)
 
-#define cf_asprintf(_s, _f, ...) ({ \
-	int32_t _n = asprintf(_s, _f, __VA_ARGS__); \
-	_n; \
-})
+#define cf_asprintf(_s, _f, ...)                                               \
+	({                                                                         \
+		int32_t _n = asprintf(_s, _f, __VA_ARGS__);                            \
+		_n;                                                                    \
+	})
 
-#define cf_free(_p)              free(_p)
+#define cf_free(_p) free(_p)
 
 void cf_validate_pointer(const void* p_indent);
-void cf_trim_region_to_mapped(void **p, size_t *sz);
+void cf_trim_region_to_mapped(void** p, size_t* sz);
 
 extern bool g_alloc_started;
-
 
 //==========================================================
 // Public API - reference-counted allocation.
 //
 
-void *cf_rc_alloc(size_t sz);
-void cf_rc_free(void *p);
+void* cf_rc_alloc(size_t sz);
+void cf_rc_free(void* p);
 
-uint32_t cf_rc_count(const void *p);
-uint32_t cf_rc_reserve(void *p);
-uint32_t cf_rc_release(void *p);
-uint32_t cf_rc_releaseandfree(void *p);
+uint32_t cf_rc_count(const void* p);
+uint32_t cf_rc_reserve(void* p);
+uint32_t cf_rc_release(void* p);
+uint32_t cf_rc_releaseandfree(void* p);

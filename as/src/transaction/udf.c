@@ -26,20 +26,25 @@
 
 #include "transaction/udf.h"
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "aerospike/as_aerospike.h"
 #include "aerospike/as_atomic.h"
-#include "aerospike/as_buffer.h"
-#include "aerospike/as_log.h"
 #include "aerospike/as_list.h"
+#include "aerospike/as_log.h"
 #include "aerospike/as_module.h"
 #include "aerospike/as_msgpack.h"
-#include "aerospike/as_serializer.h"
-#include "aerospike/as_types.h"
+#include "aerospike/as_rec.h"
+#include "aerospike/as_result.h"
+#include "aerospike/as_string.h"
+#include "aerospike/as_timer.h"
 #include "aerospike/as_udf_context.h"
+#include "aerospike/as_val.h"
 #include "aerospike/mod_lua.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
@@ -55,15 +60,11 @@
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/transaction.h"
-#include "base/transaction_policy.h"
 #include "base/udf_aerospike.h"
-#include "base/udf_arglist.h"
 #include "base/udf_cask.h"
 #include "base/udf_record.h"
 #include "base/xdr.h"
 #include "fabric/fabric.h"
-#include "fabric/partition.h"
-#include "sindex/sindex.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/proxy.h"
@@ -73,7 +74,6 @@
 #include "transaction/rw_utils.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -92,14 +92,11 @@ typedef struct udf_call_s {
 	as_transaction* tr;
 } udf_call;
 
-static const cf_log_level as_log_level_map[] = {
-	[AS_LOG_LEVEL_ERROR] = CF_WARNING,
+static const cf_log_level as_log_level_map[] = { [AS_LOG_LEVEL_ERROR] = CF_WARNING,
 	[AS_LOG_LEVEL_WARN] = CF_WARNING,
 	[AS_LOG_LEVEL_INFO] = CF_INFO,
 	[AS_LOG_LEVEL_DEBUG] = CF_DEBUG,
-	[AS_LOG_LEVEL_TRACE] = CF_DETAIL
-};
-
+	[AS_LOG_LEVEL_TRACE] = CF_DETAIL };
 
 //==========================================================
 // Globals.
@@ -110,19 +107,21 @@ static as_aerospike g_as_aerospike;
 // Deadline per UDF.
 static __thread uint64_t g_end_ns;
 
-
 //==========================================================
 // Forward declarations.
 //
 
-static bool log_callback(as_log_level level, const char* func, const char* file, uint32_t line, const char* fmt, ...);
+static bool log_callback(as_log_level level, const char* func, const char* file,
+		uint32_t line, const char* fmt, ...);
 
-static void udf_dup_res_start_cb(rw_request* rw, as_transaction* tr, as_record* r);
+static void udf_dup_res_start_cb(rw_request* rw, as_transaction* tr,
+		as_record* r);
 static void start_udf_repl_write(rw_request* rw, as_transaction* tr);
 static void start_udf_repl_write_forget(rw_request* rw, as_transaction* tr);
 static bool udf_dup_res_cb(rw_request* rw);
 static void udf_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
-static void udf_repl_write_forget_after_dup_res(rw_request* rw, as_transaction* tr);
+static void udf_repl_write_forget_after_dup_res(rw_request* rw,
+		as_transaction* tr);
 static void udf_repl_write_cb(rw_request* rw);
 
 static void send_udf_response(as_transaction* tr, cf_dyn_buf* db);
@@ -136,15 +135,20 @@ static bool udf_timer_timedout(const as_timer* timer);
 static uint64_t udf_timer_timeslice(const as_timer* timer);
 static uint8_t udf_master_write(udf_record* urecord, rw_request* rw);
 
-static void udf_master_failed(udf_record* urecord, as_rec* urec, as_result* result, uint8_t result_code, cf_dyn_buf* db);
-static void udf_master_done(udf_record* urecord, as_rec* urec, as_result* result, cf_dyn_buf* db);
+static void udf_master_failed(udf_record* urecord, as_rec* urec,
+		as_result* result, uint8_t result_code, cf_dyn_buf* db);
+static void udf_master_done(udf_record* urecord, as_rec* urec,
+		as_result* result, cf_dyn_buf* db);
 
-static void update_lua_failure_stats(const as_transaction* tr, as_namespace* ns, const as_result* result);
-static void update_lua_success_stats(const as_transaction* tr, as_namespace* ns, udf_optype op);
+static void update_lua_failure_stats(const as_transaction* tr, as_namespace* ns,
+		const as_result* result);
+static void update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
+		udf_optype op);
 
-static void process_failure(as_transaction* tr, const as_result* result, cf_dyn_buf* db);
-static void process_response(as_transaction* tr, bool success, const as_val* val, cf_dyn_buf* db);
-
+static void process_failure(as_transaction* tr, const as_result* result,
+		cf_dyn_buf* db);
+static void process_response(as_transaction* tr, bool success,
+		const as_val* val, cf_dyn_buf* db);
 
 //==========================================================
 // Inlines & macros.
@@ -248,16 +252,13 @@ udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 static inline bool
 has_forbidden_policy(const as_msg* m)
 {
-	return	(m->info2 & (
-					AS_MSG_INFO2_GENERATION |
-					AS_MSG_INFO2_GENERATION_GT |
-					AS_MSG_INFO2_CREATE_ONLY)) != 0 ||
-			(m->info3 & (
-					AS_MSG_INFO3_UPDATE_ONLY |
-					AS_MSG_INFO3_CREATE_OR_REPLACE |
-					AS_MSG_INFO3_REPLACE_ONLY)) != 0;
+	return (m->info2 &
+				   (AS_MSG_INFO2_GENERATION | AS_MSG_INFO2_GENERATION_GT |
+						   AS_MSG_INFO2_CREATE_ONLY)) != 0 ||
+			(m->info3 &
+					(AS_MSG_INFO3_UPDATE_ONLY | AS_MSG_INFO3_CREATE_OR_REPLACE |
+							AS_MSG_INFO3_REPLACE_ONLY)) != 0;
 }
-
 
 //==========================================================
 // Public API.
@@ -279,15 +280,13 @@ udf_def_init_from_msg(udf_def* def, const as_transaction* tr)
 	def->arglist = NULL;
 
 	as_msg* m = &tr->msgp->msg;
-	as_msg_field* filename =
-			as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_FILENAME);
+	as_msg_field* filename = as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_FILENAME);
 
 	if (filename == NULL) {
 		return false;
 	}
 
-	as_msg_field* function =
-			as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
+	as_msg_field* function = as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
 
 	if (function == NULL) {
 		return false;
@@ -332,8 +331,9 @@ udf_def_init_from_msg(udf_def* def, const as_transaction* tr)
 		}
 	}
 
-	as_msg_field* op = as_transaction_has_udf_op(tr) ?
-			as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_OP) : NULL;
+	as_msg_field* op = as_transaction_has_udf_op(tr)
+			? as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_OP)
+			: NULL;
 
 	def->type = (uint8_t)(op != NULL ? *op->data : AS_UDF_OP_KVS);
 
@@ -435,7 +435,6 @@ as_udf_start(as_transaction* tr)
 	return TRANS_IN_PROGRESS;
 }
 
-
 //==========================================================
 // Local helpers - initialization.
 //
@@ -463,7 +462,6 @@ log_callback(as_log_level level, const char* func, const char* file,
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - transaction flow.
@@ -598,7 +596,6 @@ udf_repl_write_cb(rw_request* rw)
 	// Finished transaction - rw_request cleans up reservation and msgp!
 }
 
-
 //==========================================================
 // Local helpers - transaction end.
 //
@@ -722,7 +719,6 @@ udf_timeout_cb(rw_request* rw)
 
 	rw->from.any = NULL; // inform other callback it lost the race
 }
-
 
 //==========================================================
 // Local helpers - apply UDF on master.
@@ -1013,8 +1009,7 @@ udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 	as_timer timer;
 
 	static const as_timer_hooks udf_timer_hooks = {
-		.timedout = udf_timer_timedout,
-		.timeslice = udf_timer_timeslice
+		.timedout = udf_timer_timedout, .timeslice = udf_timer_timeslice
 	};
 
 	as_timer_init(&timer, NULL, &udf_timer_hooks);
@@ -1086,8 +1081,7 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 		return AS_ERR_PARAMETER;
 	}
 
-	if (is_ttl_disallowed(m->record_ttl, ns,
-			as_namespace_get_record_set(ns, r))) {
+	if (is_ttl_disallowed(m->record_ttl, ns, as_namespace_get_record_set(ns, r))) {
 		cf_ticker_warning(AS_UDF, "disallowed ttl with nsup-period 0");
 		return AS_ERR_FORBIDDEN;
 	}
@@ -1168,7 +1162,6 @@ udf_master_write(udf_record* urecord, rw_request* rw)
 
 	return AS_OK;
 }
-
 
 //==========================================================
 // Local helpers - cleanup after applying UDF.
@@ -1254,7 +1247,6 @@ udf_master_done(udf_record* urecord, as_rec* urec, as_result* result,
 	udf_record_cache_free(urecord);
 }
 
-
 //==========================================================
 // Local helpers - statistics.
 //
@@ -1269,8 +1261,8 @@ update_lua_failure_stats(const as_transaction* tr, as_namespace* ns,
 		val_str = as_val_tostring(result->value);
 	}
 
-	cf_warning(AS_UDF, "lua-error: result %s", val_str != NULL ?
-			val_str : "<unexpected>");
+	cf_warning(AS_UDF, "lua-error: result %s",
+			val_str != NULL ? val_str : "<unexpected>");
 
 	if (val_str != NULL) {
 		cf_free(val_str);
@@ -1301,8 +1293,7 @@ update_lua_failure_stats(const as_transaction* tr, as_namespace* ns,
 }
 
 static void
-update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
-		udf_optype op)
+update_lua_success_stats(const as_transaction* tr, as_namespace* ns, udf_optype op)
 {
 	switch (tr->origin) {
 	case FROM_CLIENT:
@@ -1322,12 +1313,10 @@ update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
 				as_incr_uint64(&ns->n_from_proxy_batch_sub_lang_read_success);
 			}
 			else if (op == UDF_OPTYPE_DELETE) {
-				as_incr_uint64(
-						&ns->n_from_proxy_batch_sub_lang_delete_success);
+				as_incr_uint64(&ns->n_from_proxy_batch_sub_lang_delete_success);
 			}
 			else if (op == UDF_OPTYPE_WRITE) {
-				as_incr_uint64(
-						&ns->n_from_proxy_batch_sub_lang_write_success);
+				as_incr_uint64(&ns->n_from_proxy_batch_sub_lang_write_success);
 			}
 		}
 		else {
@@ -1371,7 +1360,6 @@ update_lua_success_stats(const as_transaction* tr, as_namespace* ns,
 		break;
 	}
 }
-
 
 //==========================================================
 // Local helpers - construct response to be sent to origin.
@@ -1419,8 +1407,7 @@ process_response(as_transaction* tr, bool success, const as_val* val,
 		// better off without it.)
 
 		db->buf = (uint8_t*)as_msg_make_no_val_response(tr->result_code,
-				tr->generation, tr->void_time, as_transaction_trid(tr),
-				&msg_sz);
+				tr->generation, tr->void_time, as_transaction_trid(tr), &msg_sz);
 	}
 	else {
 		// Note - this function quietly handles a null val. The response will

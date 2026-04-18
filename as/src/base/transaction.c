@@ -28,8 +28,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
-#include <unistd.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
@@ -48,64 +46,61 @@
 #include "fabric/partition.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request.h"
-#include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
 
-
 void
-as_transaction_init_head(as_transaction *tr, const cf_digest *keyd,
-		cl_msg *msgp)
+as_transaction_init_head(as_transaction* tr, const cf_digest* keyd, cl_msg* msgp)
 {
-	tr->msgp				= msgp;
-	tr->msg_fields			= 0;
+	tr->msgp = msgp;
+	tr->msg_fields = 0;
 
-	tr->origin				= 0;
-	tr->from_flags			= 0;
+	tr->origin = 0;
+	tr->from_flags = 0;
 
-	tr->from.any			= NULL;
-	tr->from_data.any		= 0;
+	tr->from.any = NULL;
+	tr->from_data.any = 0;
 
-	tr->keyd				= keyd ? *keyd : cf_digest_zero;
+	tr->keyd = keyd ? *keyd : cf_digest_zero;
 
-	tr->start_time			= 0;
-	tr->benchmark_time		= 0;
+	tr->start_time = 0;
+	tr->benchmark_time = 0;
 }
 
 void
-as_transaction_init_body(as_transaction *tr)
+as_transaction_init_body(as_transaction* tr)
 {
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 
-	tr->end_time			= 0;
-	tr->result_code			= AS_OK;
-	tr->flags				= 0;
-	tr->generation			= 0;
-	tr->void_time			= 0;
-	tr->last_update_time	= 0;
-	tr->epoch_ms			= 0;
+	tr->end_time = 0;
+	tr->result_code = AS_OK;
+	tr->flags = 0;
+	tr->generation = 0;
+	tr->void_time = 0;
+	tr->last_update_time = 0;
+	tr->epoch_ms = 0;
 }
 
 void
-as_transaction_copy_head(as_transaction *to, const as_transaction *from)
+as_transaction_copy_head(as_transaction* to, const as_transaction* from)
 {
-	to->msgp				= from->msgp;
-	to->msg_fields			= from->msg_fields;
+	to->msgp = from->msgp;
+	to->msg_fields = from->msg_fields;
 
-	to->origin				= from->origin;
-	to->from_flags			= from->from_flags;
+	to->origin = from->origin;
+	to->from_flags = from->from_flags;
 
-	to->from.any			= from->from.any;
-	to->from_data.any		= from->from_data.any;
+	to->from.any = from->from.any;
+	to->from_data.any = from->from_data.any;
 
-	to->keyd				= from->keyd;
+	to->keyd = from->keyd;
 
-	to->start_time			= from->start_time;
-	to->benchmark_time		= from->benchmark_time;
+	to->start_time = from->start_time;
+	to->benchmark_time = from->benchmark_time;
 }
 
 void
-as_transaction_init_from_rw(as_transaction *tr, rw_request *rw)
+as_transaction_init_from_rw(as_transaction* tr, rw_request* rw)
 {
 	as_transaction_init_head_from_rw(tr, rw);
 	// Note - we don't clear rw->msgp, destructor will free it.
@@ -123,24 +118,24 @@ as_transaction_init_from_rw(as_transaction *tr, rw_request *rw)
 }
 
 void
-as_transaction_init_head_from_rw(as_transaction *tr, rw_request *rw)
+as_transaction_init_head_from_rw(as_transaction* tr, rw_request* rw)
 {
-	tr->msgp				= rw->msgp;
-	tr->msg_fields			= rw->msg_fields;
-	tr->origin				= rw->origin;
-	tr->from_flags			= rw->from_flags;
-	tr->from.any			= rw->from.any;
-	tr->from_data.any		= rw->from_data.any;
-	tr->keyd				= rw->keyd;
-	tr->start_time			= rw->start_time;
-	tr->benchmark_time		= rw->benchmark_time;
+	tr->msgp = rw->msgp;
+	tr->msg_fields = rw->msg_fields;
+	tr->origin = rw->origin;
+	tr->from_flags = rw->from_flags;
+	tr->from.any = rw->from.any;
+	tr->from_data.any = rw->from_data.any;
+	tr->keyd = rw->keyd;
+	tr->start_time = rw->start_time;
+	tr->benchmark_time = rw->benchmark_time;
 
 	rw->from.any = NULL;
 	// Note - we don't clear rw->msgp, destructor will free it.
 }
 
 bool
-as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
+as_transaction_set_msg_field_flag(as_transaction* tr, uint8_t type)
 {
 	switch (type) {
 	case AS_MSG_FIELD_TYPE_NAMESPACE:
@@ -217,7 +212,7 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 }
 
 bool
-as_transaction_prepare(as_transaction *tr, bool swap)
+as_transaction_prepare(as_transaction* tr, bool swap)
 {
 	uint64_t size = tr->msgp->proto.sz;
 
@@ -227,7 +222,7 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 	}
 
 	// The proto data is not smaller than an as_msg - safe to swap header.
-	as_msg *m = &tr->msgp->msg;
+	as_msg* m = &tr->msgp->msg;
 
 	if (swap) {
 		as_msg_swap_header(m);
@@ -297,7 +292,7 @@ as_transaction_prepare(as_transaction *tr, bool swap)
 // with namespace but no digest, and no set for now since these transactions
 // won't get security checked, and can't create a record.
 void
-as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
+as_transaction_init_iudf(as_transaction* tr, as_namespace* ns, cf_digest* keyd,
 		iudf_origin* iudf_orig)
 {
 	// Note - digest is on transaction head before it's enqueued.
@@ -315,7 +310,7 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
 // message with namespace but no digest, and no set for now since these
 // transactions won't get security checked, and can't create a record.
 void
-as_transaction_init_iops(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
+as_transaction_init_iops(as_transaction* tr, as_namespace* ns, cf_digest* keyd,
 		iops_origin* iops_orig)
 {
 	// Note - digest is on transaction head before it's enqueued.
@@ -332,7 +327,8 @@ as_transaction_init_iops(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
 void
 as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 {
-	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, 0);
+	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0,
+			NULL, 0);
 	tr->from.proto_fd_h = NULL;
 
 	cf_free(tr->msgp);
@@ -341,17 +337,17 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 	as_incr_uint64(&g_stats.n_demarshal_error);
 }
 
-#define UPDATE_ERROR_STATS(name) \
-	if (ns) { \
-		if (error_code == AS_ERR_TIMEOUT) { \
-			as_incr_uint64(&ns->n_##name##_tsvc_timeout); \
-		} \
-		else { \
-			as_incr_uint64(&ns->n_##name##_tsvc_error); \
-		} \
-	} \
-	else { \
-		as_incr_uint64(&g_stats.n_tsvc_##name##_error); \
+#define UPDATE_ERROR_STATS(name)                                               \
+	if (ns) {                                                                  \
+		if (error_code == AS_ERR_TIMEOUT) {                                    \
+			as_incr_uint64(&ns->n_##name##_tsvc_timeout);                      \
+		}                                                                      \
+		else {                                                                 \
+			as_incr_uint64(&ns->n_##name##_tsvc_error);                        \
+		}                                                                      \
+	}                                                                          \
+	else {                                                                     \
+		as_incr_uint64(&g_stats.n_tsvc_##name##_error);                        \
 	}
 
 void
@@ -366,14 +362,17 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
-			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL,
+					0, NULL, as_transaction_trid(tr));
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
 		UPDATE_ERROR_STATS(client);
 		break;
 	case FROM_PROXY:
 		if (tr->from.proxy_node != 0) {
-			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
+			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+					error_code, 0, 0, NULL, NULL, 0, NULL,
+					as_transaction_trid(tr));
 			tr->from.proxy_node = 0; // pattern, not needed
 		}
 		if (as_transaction_is_batch_sub(tr)) {
@@ -385,7 +384,8 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		break;
 	case FROM_BATCH:
 		if (tr->from.batch_shared) {
-			as_batch_add_error(tr->from.batch_shared, tr->from_data.batch_index, error_code);
+			as_batch_add_error(tr->from.batch_shared, tr->from_data.batch_index,
+					error_code);
 			tr->from.batch_shared = NULL; // pattern, not needed
 			tr->msgp = NULL; // pattern, not needed
 		}
@@ -435,7 +435,8 @@ as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
-			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr));
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL,
+					0, NULL, as_transaction_trid(tr));
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
 		as_incr_uint64(&g_stats.n_tsvc_client_error);
@@ -448,7 +449,7 @@ as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
 
 // Helper to release transaction file handles.
 void
-as_release_file_handle(as_file_handle *proto_fd_h)
+as_release_file_handle(as_file_handle* proto_fd_h)
 {
 	if (cf_rc_release(proto_fd_h) != 0) {
 		return;
@@ -471,7 +472,7 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 }
 
 void
-as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
+as_end_of_transaction(as_file_handle* proto_fd_h, bool force_close)
 {
 	if (force_close) {
 		cf_socket_shutdown(&proto_fd_h->sock);
@@ -485,13 +486,13 @@ as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 }
 
 void
-as_end_of_transaction_ok(as_file_handle *proto_fd_h)
+as_end_of_transaction_ok(as_file_handle* proto_fd_h)
 {
 	as_end_of_transaction(proto_fd_h, false);
 }
 
 void
-as_end_of_transaction_force_close(as_file_handle *proto_fd_h)
+as_end_of_transaction_force_close(as_file_handle* proto_fd_h)
 {
 	as_end_of_transaction(proto_fd_h, true);
 }

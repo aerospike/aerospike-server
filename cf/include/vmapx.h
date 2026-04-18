@@ -32,7 +32,6 @@
 #include "cf_mutex.h"
 #include "log.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -43,24 +42,24 @@ typedef struct vhash_s vhash;
 // Caution - changing this struct could break warm restart.
 typedef struct cf_vmapx_s {
 	// Vector-related.
-	uint32_t			value_size;
-	uint32_t			max_count;
-	volatile uint32_t	count;
+	uint32_t value_size;
+	uint32_t max_count;
+	volatile uint32_t count;
 
 	// Hash-related.
-	uint32_t			key_size;
-	vhash*				hash;
+	uint32_t key_size;
+	vhash* hash;
 
 	// Generic.
-	cf_mutex			write_lock;
+	cf_mutex write_lock;
 
 	// Pad to 64 bytes.
-	uint8_t				pad[36];
+	uint8_t pad[36];
 
 	//<><><><><><><><><><><> 64 bytes <><><><><><><><><><><>
 
 	// Vector data.
-	uint8_t				values[];
+	uint8_t values[];
 } cf_vmapx;
 
 COMPILER_ASSERT(offsetof(cf_vmapx, values) == 64);
@@ -74,28 +73,34 @@ typedef enum {
 	CF_VMAPX_ERR_UNKNOWN
 } cf_vmapx_err;
 
-
 //==========================================================
 // Public API.
 //
 
 size_t cf_vmapx_sizeof(uint32_t value_size, uint32_t max_count);
 
-void cf_vmapx_init(cf_vmapx* vmap, uint32_t value_size, uint32_t max_count, uint32_t hash_size, uint32_t max_name_size);
+void cf_vmapx_init(cf_vmapx* vmap, uint32_t value_size, uint32_t max_count,
+		uint32_t hash_size, uint32_t max_name_size);
 void cf_vmapx_release(cf_vmapx* vmap);
 
 uint32_t cf_vmapx_count(const cf_vmapx* vmap);
 
-cf_vmapx_err cf_vmapx_get_by_index(const cf_vmapx* vmap, uint32_t index, void** pp_value);
-cf_vmapx_err cf_vmapx_get_by_name(const cf_vmapx* vmap, const char* name, void** pp_value);
-cf_vmapx_err cf_vmapx_get_by_name_w_len(const cf_vmapx* vmap, const char* name, size_t name_len, void** pp_value);
+cf_vmapx_err cf_vmapx_get_by_index(const cf_vmapx* vmap, uint32_t index,
+		void** pp_value);
+cf_vmapx_err cf_vmapx_get_by_name(const cf_vmapx* vmap, const char* name,
+		void** pp_value);
+cf_vmapx_err cf_vmapx_get_by_name_w_len(const cf_vmapx* vmap, const char* name,
+		size_t name_len, void** pp_value);
 
-cf_vmapx_err cf_vmapx_get_index(const cf_vmapx* vmap, const char* name, uint32_t* p_index);
-cf_vmapx_err cf_vmapx_get_index_w_len(const cf_vmapx* vmap, const char* name, size_t name_len, uint32_t* p_index);
+cf_vmapx_err cf_vmapx_get_index(const cf_vmapx* vmap, const char* name,
+		uint32_t* p_index);
+cf_vmapx_err cf_vmapx_get_index_w_len(const cf_vmapx* vmap, const char* name,
+		size_t name_len, uint32_t* p_index);
 
-cf_vmapx_err cf_vmapx_put_unique(cf_vmapx* vmap, const char* name, uint32_t* p_index);
-cf_vmapx_err cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name, size_t name_len, uint32_t* p_index);
-
+cf_vmapx_err cf_vmapx_put_unique(cf_vmapx* vmap, const char* name,
+		uint32_t* p_index);
+cf_vmapx_err cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name,
+		size_t name_len, uint32_t* p_index);
 
 //==========================================================
 // Private API - for enterprise separation only.

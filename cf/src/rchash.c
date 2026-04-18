@@ -37,7 +37,6 @@
 #include "cf_mutex.h"
 #include "log.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -47,7 +46,6 @@ typedef struct cf_rchash_ele_s {
 	void* object; // this is a reference counted object
 	uint8_t key[];
 } cf_rchash_ele;
-
 
 //==========================================================
 // Forward declarations.
@@ -59,11 +57,11 @@ static inline uint32_t cf_rchash_calculate_hash(cf_rchash* h, const void* key);
 static inline cf_mutex* cf_rchash_lock(cf_rchash* h, uint32_t i);
 static inline void cf_rchash_unlock(cf_mutex* l);
 static inline cf_rchash_ele* cf_rchash_get_bucket(cf_rchash* h, uint32_t i);
-static inline void cf_rchash_fill_element(cf_rchash_ele* e, cf_rchash* h, const void* key, void* object);
+static inline void cf_rchash_fill_element(cf_rchash_ele* e, cf_rchash* h,
+		const void* key, void* object);
 static inline void cf_rchash_size_incr(cf_rchash* h);
 static inline void cf_rchash_size_decr(cf_rchash* h);
 static inline void cf_rchash_release_object(cf_rchash* h, void* object);
-
 
 //==========================================================
 // Public API - useful hash functions.
@@ -84,7 +82,6 @@ cf_rchash_fn_zstr(const void* key)
 {
 	return cf_wyhash32((const uint8_t*)key, strlen(key));
 }
-
 
 //==========================================================
 // Public API.
@@ -433,7 +430,6 @@ cf_rchash_reduce(cf_rchash* h, cf_rchash_reduce_fn reduce_fn, void* udata)
 
 	return CF_RCHASH_OK;
 }
-
 
 //==========================================================
 // Local helpers - generic utilities.

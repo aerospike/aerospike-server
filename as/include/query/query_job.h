@@ -30,11 +30,12 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "citrusleaf/cf_digest.h"
+
 #include "dynbuf.h"
 
 #include "base/datamodel.h"
 #include "sindex/sindex.h"
-
 
 //==========================================================
 // Forward declarations.
@@ -45,23 +46,22 @@ struct as_partition_reservation_s;
 struct as_query_job_s;
 struct as_transaction_s;
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 // These result codes can't make it back to the client, but show in monitor:
-#define AS_QUERY_RESPONSE_ERROR   (-1)
+#define AS_QUERY_RESPONSE_ERROR (-1)
 #define AS_QUERY_RESPONSE_TIMEOUT (-2)
 
 typedef struct as_query_range_start_end_s {
 	int64_t start;
-	int64_t end;  // -1 means infinity
+	int64_t end; // -1 means infinity
 } as_query_range_start_end;
 
 typedef struct as_query_geo_range_s {
-	uint64_t cellid;  // target of regions-containing-point query
-	geo_region_t region;  // target of points-in-region query
+	uint64_t cellid; // target of regions-containing-point query
+	geo_region_t region; // target of points-in-region query
 	as_query_range_start_end* r;
 	uint8_t num_r;
 } as_query_geo_range;
@@ -85,7 +85,8 @@ typedef struct as_query_range_s {
 	uint32_t ctx_buf_sz;
 } as_query_range;
 
-typedef void (*as_query_slice_fn)(struct as_query_job_s* _job, struct as_partition_reservation_s* rsv, cf_buf_builder** bb_r);
+typedef void (*as_query_slice_fn)(struct as_query_job_s* _job,
+		struct as_partition_reservation_s* rsv, cf_buf_builder** bb_r);
 typedef void (*as_query_finish_fn)(struct as_query_job_s* _job);
 typedef void (*as_query_destroy_fn)(struct as_query_job_s* _job);
 typedef void (*as_query_info_fn)(struct as_query_job_s* _job, cf_dyn_buf* db);
@@ -162,12 +163,12 @@ typedef struct as_query_job_s {
 	uint64_t n_failed;
 } as_query_job;
 
-
 //==========================================================
 // Public API.
 //
 
-void as_query_job_init(as_query_job* _job, const as_query_vtable* vtable, const struct as_transaction_s* tr, struct as_namespace_s* ns);
+void as_query_job_init(as_query_job* _job, const as_query_vtable* vtable,
+		const struct as_transaction_s* tr, struct as_namespace_s* ns);
 void* as_query_job_run(void* pv_job);
 uint32_t as_query_job_throttle(as_query_job* _job);
 void as_query_job_destroy(as_query_job* _job);

@@ -24,19 +24,13 @@
 // Includes.
 //
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "citrusleaf/alloc.h"
-
-#include "log.h"
-
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "storage/storage.h"
-
 
 //==========================================================
 // Public API.

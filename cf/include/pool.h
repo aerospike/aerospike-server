@@ -29,7 +29,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -59,17 +58,16 @@ typedef struct cf_pool_ptr_s {
 	void** data;
 } cf_pool_ptr;
 
-
 //==========================================================
 // Public API - cf_pool_int32.
 //
 
-void cf_pool_int32_init(cf_pool_int32* pool, uint32_t capacity, int32_t empty_val);
+void cf_pool_int32_init(cf_pool_int32* pool, uint32_t capacity,
+		int32_t empty_val);
 void cf_pool_int32_destroy(cf_pool_int32* pool);
 
 int32_t cf_pool_int32_pop(cf_pool_int32* pool);
 void cf_pool_int32_push(cf_pool_int32* pool, int32_t val);
-
 
 //==========================================================
 // Public API - cf_pool_ptr.
