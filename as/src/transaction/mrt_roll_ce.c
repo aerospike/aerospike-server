@@ -35,7 +35,6 @@
 #include "base/transaction.h"
 #include "transaction/proxy.h"
 
-
 //==========================================================
 // Public API.
 //

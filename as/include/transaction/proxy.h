@@ -46,14 +46,13 @@ struct as_proto_comp_stat_s;
 struct as_record_version_s;
 struct as_transaction_s;
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef struct proxy_origin_s {
-	cf_node		node;		// The proxy node that sent the request
-	char		username[MAX_USER_SIZE];
+	cf_node node; // The proxy node that sent the request
+	char username[MAX_USER_SIZE];
 } proxy_origin;
 
 static inline void
@@ -77,7 +76,6 @@ typedef enum {
 	NUM_PROXY_FIELDS
 } proxy_msg_field;
 
-
 //==========================================================
 // Public API.
 //
@@ -86,11 +84,14 @@ void as_proxy_init();
 
 uint32_t as_proxy_hash_count();
 
-void as_proxy_divert(cf_node dst, struct as_transaction_s* tr, struct as_namespace_s* ns);
-void as_proxy_return_to_sender(const struct as_transaction_s* tr, struct as_namespace_s* ns);
+void as_proxy_divert(cf_node dst, struct as_transaction_s* tr,
+		struct as_namespace_s* ns);
+void as_proxy_return_to_sender(const struct as_transaction_s* tr,
+		struct as_namespace_s* ns);
 
 void as_proxy_send_response(cf_node dst, uint32_t proxy_tid,
 		uint32_t result_code, uint32_t generation, uint32_t void_time,
 		struct as_msg_op_s** ops, struct as_bin_s** bins, uint16_t bin_count,
 		struct as_namespace_s* ns, struct as_record_version_s* v);
-void as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db, bool compress, struct as_proto_comp_stat_s* comp_stat);
+void as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db,
+		bool compress, struct as_proto_comp_stat_s* comp_stat);

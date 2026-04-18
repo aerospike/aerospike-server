@@ -47,18 +47,20 @@
 #include "base/transaction.h"
 #include "fabric/partition_balance.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static cf_node find_best_node(const as_partition* p, bool is_read);
-static void accumulate_replica_stats(const as_partition* p, uint64_t* p_n_objects, uint64_t* p_n_tombstones);
-static void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
+static void accumulate_replica_stats(const as_partition* p,
+		uint64_t* p_n_objects, uint64_t* p_n_tombstones);
+static void partition_reserve_lockfree(as_partition* p, as_namespace* ns,
+		as_partition_reservation* rsv);
 static char partition_descriptor(const as_partition* p);
-static int partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid);
-static bool should_working_master_own(const as_namespace* ns, uint32_t pid, uint32_t repl_ix);
-
+static int partition_get_replica_self_lockfree(const as_namespace* ns,
+		uint32_t pid);
+static bool should_working_master_own(const as_namespace* ns, uint32_t pid,
+		uint32_t repl_ix);
 
 //==========================================================
 // Public API.
@@ -308,8 +310,7 @@ as_partition_get_replicas_all_str(cf_dyn_buf* db, bool include_regime,
 
 		for (uint32_t repl_ix = 0; repl_ix < repl_factor; repl_ix++) {
 			cf_dyn_buf_append_char(db, ',');
-			cf_dyn_buf_append_buf(db,
-					(uint8_t*)&ns->replica_maps[repl_ix].b64map,
+			cf_dyn_buf_append_buf(db, (uint8_t*)&ns->replica_maps[repl_ix].b64map,
 					sizeof(ns->replica_maps[repl_ix].b64map));
 		}
 
@@ -332,18 +333,15 @@ as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 		cf_mutex_lock(&p->lock);
 
 		if (g_config.self_node == p->working_master) {
-			accumulate_replica_stats(p,
-					&p_stats->n_master_objects,
+			accumulate_replica_stats(p, &p_stats->n_master_objects,
 					&p_stats->n_master_tombstones);
 		}
 		else if (find_self_in_replicas(p) >= 0) { // -1 if not
-			accumulate_replica_stats(p,
-					&p_stats->n_prole_objects,
+			accumulate_replica_stats(p, &p_stats->n_prole_objects,
 					&p_stats->n_prole_tombstones);
 		}
 		else {
-			accumulate_replica_stats(p,
-					&p_stats->n_non_replica_objects,
+			accumulate_replica_stats(p, &p_stats->n_non_replica_objects,
 					&p_stats->n_non_replica_tombstones);
 		}
 
@@ -353,8 +351,7 @@ as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 
 // TODO - what if partition is unavailable?
 void
-as_partition_reserve(as_namespace* ns, uint32_t pid,
-		as_partition_reservation* rsv)
+as_partition_reserve(as_namespace* ns, uint32_t pid, as_partition_reservation* rsv)
 {
 	as_partition* p = &ns->partitions[pid];
 
@@ -450,8 +447,7 @@ as_partition_reserve_read_tr(as_namespace* ns, uint32_t pid, as_transaction* tr,
 		return result;
 	}
 
-	cf_node best_node = find_best_node(p,
-			! partition_reserve_promote(ns, p, tr));
+	cf_node best_node = find_best_node(p, ! partition_reserve_promote(ns, p, tr));
 
 	if (node) {
 		*node = best_node;
@@ -479,7 +475,7 @@ as_partition_reserve_query(as_namespace* ns, uint32_t pid,
 	cf_mutex_lock(&p->lock);
 
 	if (! (as_partition_is_full(p) ||
-			(relax && as_partition_version_has_data(&p->version)))) {
+				(relax && as_partition_version_has_data(&p->version)))) {
 		cf_mutex_unlock(&p->lock);
 		return -1;
 	}
@@ -562,7 +558,8 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 {
 	size_t db_sz = db->used_sz;
 
-	cf_dyn_buf_append_string(db, "namespace:partition:state:n_replicas:replica:"
+	cf_dyn_buf_append_string(db,
+			"namespace:partition:state:n_replicas:replica:"
 			"succession:n_dupl:working_master:proxy_dst:emigrates:lead_emigrates:"
 			"immigrates:records:tombstones:regime:tree_id:version:final_version;");
 
@@ -620,7 +617,6 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 		cf_dyn_buf_chomp(db); // take back the final ';'
 	}
 }
-
 
 //==========================================================
 // Public API - client view replica maps.
@@ -707,7 +703,6 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 	return changed;
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -722,8 +717,7 @@ find_best_node(const as_partition* p, bool is_read)
 		return p->working_master;
 	}
 
-	if (is_read && p->pending_immigrations == 0 &&
-			find_self_in_replicas(p) > 0) {
+	if (is_read && p->pending_immigrations == 0 && find_self_in_replicas(p) > 0) {
 		return g_config.self_node; // may read from prole that's got everything
 	}
 
@@ -797,8 +791,7 @@ partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid)
 }
 
 static bool
-should_working_master_own(const as_namespace* ns, uint32_t pid,
-		uint32_t repl_ix)
+should_working_master_own(const as_namespace* ns, uint32_t pid, uint32_t repl_ix)
 {
 	const as_partition* p = &ns->partitions[pid];
 

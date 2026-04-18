@@ -26,18 +26,18 @@
 
 #include "base/thr_info.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <limits.h>
+#include <malloc.h>
+#include <mcheck.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
-#include <limits.h>
-#include <malloc.h>
-#include <mcheck.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <time.h>
@@ -69,10 +69,10 @@
 #include "base/cfg.h"
 #include "base/cfg_info.h"
 #include "base/datamodel.h"
-#include "base/masking.h"
 #include "base/features.h"
 #include "base/health.h"
 #include "base/index.h"
+#include "base/masking.h"
 #include "base/mrt_monitor.h"
 #include "base/nsup.h"
 #include "base/proto.h"
@@ -98,10 +98,10 @@
 #include "fabric/skew_monitor.h"
 #include "query/query_manager.h"
 #include "sindex/sindex.h"
+#include "sindex/sindex_manager.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -132,17 +132,6 @@ typedef struct rack_node_s {
 	cf_node node;
 } rack_node;
 
-typedef struct find_sindex_key_udata_s {
-	const char* ns_name;
-	const char* index_name;
-	const char* smd_key;
-	char* found_key; // only when unique
-	uint32_t n_name_matches;
-	uint32_t n_indexes;
-	bool has_smd_key;
-} find_sindex_key_udata;
-
-
 //==========================================================
 // Globals.
 //
@@ -164,7 +153,6 @@ static uint32_t g_process_cpu_pct = 0;
 static uint32_t g_user_cpu_pct = 0;
 static uint32_t g_kernel_cpu_pct = 0;
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -172,12 +160,15 @@ static uint32_t g_kernel_cpu_pct = 0;
 // Info execution.
 static void* run_info(void* arg);
 static bool authenticate(const as_file_handle* fd_h, cf_dyn_buf* db);
-static void append_security_error(cf_dyn_buf* db, uint32_t result, as_sec_perm perm);
+static void append_security_error(cf_dyn_buf* db, uint32_t result,
+		as_sec_perm perm);
 static void info_summary(cf_dyn_buf* db);
-static void handle_cmds(char* buf, size_t buf_sz, as_file_handle* fd_h, cf_dyn_buf* db);
+static void handle_cmds(char* buf, size_t buf_sz, as_file_handle* fd_h,
+		cf_dyn_buf* db);
 static const as_info_cmd* parse_cmd(char** cmd_str_p, cf_dyn_buf* db);
 static const as_info_cmd* find_cmd(const char* name, size_t name_len);
-static void handle_cmd(const as_info_cmd* cmd, const char* params, as_file_handle* fd_h, cf_dyn_buf* db);
+static void handle_cmd(const as_info_cmd* cmd, const char* params,
+		as_file_handle* fd_h, cf_dyn_buf* db);
 
 // Info commands.
 static void cmd_best_practices(as_info_cmd_args* args);
@@ -274,21 +265,25 @@ static cf_ip_port bind_to_port(cf_serv_cfg* cfg, cf_sock_owner owner);
 static char* access_to_string(cf_addr_list* addrs);
 static void info_get_aggregated_namespace_stats(cf_dyn_buf* db);
 static void info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db);
-static void namespace_rack_info(as_namespace* ns, cf_dyn_buf* db, uint32_t* rack_ids, uint32_t n_nodes, cf_node node_seq[], const char* tag);
+static void namespace_rack_info(as_namespace* ns, cf_dyn_buf* db,
+		uint32_t* rack_ids, uint32_t n_nodes, cf_node node_seq[],
+		const char* tag);
 static void namespace_roster_info(as_namespace* ns, cf_dyn_buf* db);
 static void add_index_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static void add_sindex_device_stats(as_namespace* ns, cf_dyn_buf* db);
 static int32_t oldest_nvme_age(const char* path);
 static void add_data_stripe_stats(as_namespace* ns, cf_dyn_buf* db);
 static void add_data_device_stats(as_namespace* ns, cf_dyn_buf* db);
-static void find_sindex_key(const cf_vector* items, void* udata);
 static void smd_show_cb(const cf_vector* items, void* udata);
-static void debug_record(const char* params, cf_dyn_buf* db, bool all_data, as_file_handle* fd_h);
-static void debug_dump_index(cf_dyn_buf* db, as_namespace* ns, as_record* r, bool is_orig);
+static void debug_record(const char* params, cf_dyn_buf* db, bool all_data,
+		as_file_handle* fd_h);
+static void debug_dump_index(cf_dyn_buf* db, as_namespace* ns, as_record* r,
+		bool is_orig);
 static void debug_dump_pickle(cf_dyn_buf* db, as_storage_rd* rd, bool is_orig);
-static void debug_dump_raw(cf_dyn_buf* db, as_storage_rd* rd, bool leave_encrypted, bool is_orig);
-static void debug_dump_parsed(cf_dyn_buf* db, as_storage_rd* rd, bool all_data, bool is_orig);
-
+static void debug_dump_raw(cf_dyn_buf* db, as_storage_rd* rd,
+		bool leave_encrypted, bool is_orig);
+static void debug_dump_parsed(cf_dyn_buf* db, as_storage_rd* rd, bool all_data,
+		bool is_orig);
 
 //==========================================================
 // Inlines & macros.
@@ -315,7 +310,8 @@ compare_rack_nodes(const void* pa, const void* pb)
 
 static inline info_param_result
 as_info_param_get_aliases(const char* params, const char* aliases[],
-		char* value, int* value_len) {
+		char* value, int* value_len)
+{
 	info_param_result rv;
 
 	for (const char** select = aliases; *select != NULL; select++) {
@@ -324,8 +320,9 @@ as_info_param_get_aliases(const char* params, const char* aliases[],
 			if (select != aliases) {
 				char msg[256];
 
-				snprintf(msg, sizeof(msg), "info parameter '%s' is deprecated - use '%s' instead",
-					*select, *aliases);
+				snprintf(msg, sizeof(msg),
+						"info parameter '%s' is deprecated - use '%s' instead",
+						*select, *aliases);
 				as_info_warn_deprecated(msg);
 			}
 
@@ -337,8 +334,7 @@ as_info_param_get_aliases(const char* params, const char* aliases[],
 }
 
 static inline void
-info_respond_error_argp(cf_dyn_buf* db, int num, const char* message,
-		va_list argp)
+info_respond_error_argp(cf_dyn_buf* db, int num, const char* message, va_list argp)
 {
 	cf_dyn_buf_append_string(db, "ERROR:");
 
@@ -350,11 +346,11 @@ info_respond_error_argp(cf_dyn_buf* db, int num, const char* message,
 	cf_dyn_buf_append_format_va(db, message, argp);
 }
 
-
 //==========================================================
 // Command function table.
 //
 
+// clang-format off
 static const as_info_cmd SPECS[] = {
 	// Set up commands in summary (order is important for summary commands).
 	{ .name="features",                .fn=cmd_features,                .in_summary=true },
@@ -482,9 +478,9 @@ static const as_info_cmd SPECS[] = {
 	{ .name="xdr-get-filter",          .fn=as_xdr_get_filter,           .client_only=false, .ee_only=true,  .perm=PERM_NONE           },
 	{ .name="xdr-set-filter",          .fn=as_xdr_set_filter,           .client_only=false, .ee_only=true,  .perm=PERM_XDR_SET_FILTER }
 };
+// clang-format on
 
 static const uint32_t N_SPECS = sizeof(SPECS) / sizeof(SPECS[0]);
-
 
 //==========================================================
 // Public API.
@@ -504,10 +500,11 @@ as_info_init()
 		char key[CMD_NAME_MAX_LEN] = { 0 };
 		uint32_t name_len = strlen(cur->name);
 
-		cf_assert(name_len < CMD_NAME_MAX_LEN, AS_INFO, "cmd name '%s' len exceeds %u",
-				cur->name, CMD_NAME_MAX_LEN);
+		cf_assert(name_len < CMD_NAME_MAX_LEN, AS_INFO,
+				"cmd name '%s' len exceeds %u", cur->name, CMD_NAME_MAX_LEN);
 
-		cf_assert(cur->perm == PERM_NONE || ! cur->in_summary || ! cur->client_only,
+		cf_assert(cur->perm == PERM_NONE || ! cur->in_summary ||
+						! cur->client_only,
 				AS_INFO, "cmd name '%s' in summary with illegal permission",
 				cur->name);
 
@@ -519,7 +516,8 @@ as_info_init()
 
 		if (prior != NULL) {
 			if (! prior->in_summary) {
-				cf_assert(strcmp(prior->name, cur->name) < 0, AS_INFO, "specs not sorted or name not unique - '%s' >= '%s'",
+				cf_assert(strcmp(prior->name, cur->name) < 0, AS_INFO,
+						"specs not sorted or name not unique - '%s' >= '%s'",
 						prior->name, cur->name);
 			}
 		}
@@ -622,8 +620,8 @@ as_info_required_param_is_ok(cf_dyn_buf* db, const char* param,
 		return result == INFO_PARAM_OK;
 	}
 
-	int err = strcmp("namespace", param) == 0 ?
-			AS_ERR_NAMESPACE : AS_ERR_PARAMETER;
+	int err = strcmp("namespace", param) == 0 ? AS_ERR_NAMESPACE
+											  : AS_ERR_PARAMETER;
 
 	cf_warning(AS_INFO, "missing '%s'", param);
 	as_info_respond_error(db, err, "missing '%s'", param);
@@ -643,8 +641,8 @@ as_info_optional_param_is_ok(cf_dyn_buf* db, const char* param,
 		return INFO_PARAM_OK;
 	}
 
-	int err = strcmp("namespace", param) == 0 ?
-			AS_ERR_NAMESPACE : AS_ERR_PARAMETER;
+	int err = strcmp("namespace", param) == 0 ? AS_ERR_NAMESPACE
+											  : AS_ERR_PARAMETER;
 
 	switch (result) {
 	case INFO_PARAM_OK:
@@ -859,10 +857,10 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 		uint32_t total = delta_user + delta_nice + delta_kernel + delta_idle;
 		uint32_t n_cpus = cf_topo_count_cpus();
 
-		g_user_cpu_pct = total == 0 ?
-				0 : (delta_user + delta_nice) * 100 * n_cpus / total;
-		g_kernel_cpu_pct = total == 0 ?
-				0 : delta_kernel * 100 * n_cpus / total;
+		g_user_cpu_pct = total == 0
+				? 0
+				: (delta_user + delta_nice) * 100 * n_cpus / total;
+		g_kernel_cpu_pct = total == 0 ? 0 : delta_kernel * 100 * n_cpus / total;
 	}
 
 	running = true;
@@ -880,90 +878,6 @@ sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct)
 	}
 }
 
-// TODO: This function should move elsewhere.
-void
-sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
-		uint64_t* thp_mem_kbytes)
-{
-	*free_mem_kbytes = 0;
-	*free_mem_pct = 0;
-	*thp_mem_kbytes = 0;
-
-	int32_t fd = open("/proc/meminfo", O_RDONLY);
-
-	if (fd < 0) {
-		cf_warning(AS_INFO, "failed to open /proc/meminfo: %d", errno);
-		return;
-	}
-
-	char buf[4096] = { 0 };
-	size_t limit = sizeof(buf);
-	size_t total = 0;
-
-	while (total < limit) {
-		ssize_t len = read(fd, buf + total, limit - total);
-
-		if (len < 0) {
-			cf_warning(AS_INFO, "couldn't read /proc/meminfo: %d", errno);
-			close(fd);
-			return;
-		}
-
-		if (len == 0) {
-			break; // EOF
-		}
-
-		total += (size_t)len;
-	}
-
-	close(fd);
-
-	if (total == limit) {
-		cf_warning(AS_INFO, "/proc/meminfo exceeds %zu bytes", limit);
-		return;
-	}
-
-	uint64_t mem_total = 0;
-	uint64_t mem_available = 0;
-	uint64_t anon_huge_pages = 0;
-
-	char* cur = buf;
-	char* save_ptr = NULL;
-
-	// We split each line into two fields separated by ':'. strtoul() will
-	// safely ignore the spaces and 'kB' (if present).
-	while (true) {
-		char* name_tok = strtok_r(cur, ":", &save_ptr);
-
-		if (name_tok == NULL) {
-			break; // no more lines
-		}
-
-		cur = NULL; // all except first name_tok use NULL
-
-		char* value_tok = strtok_r(NULL, "\r\n", &save_ptr);
-
-		if (value_tok == NULL) {
-			cf_warning(AS_INFO, "/proc/meminfo line missing value token");
-			return;
-		}
-
-		if (strcmp(name_tok, "MemTotal") == 0) {
-			mem_total = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "MemAvailable") == 0) {
-			mem_available = strtoul(value_tok, NULL, 0);
-		}
-		else if (strcmp(name_tok, "AnonHugePages") == 0) {
-			anon_huge_pages = strtoul(value_tok, NULL, 0);
-		}
-	}
-
-	*free_mem_kbytes = mem_available;
-	*free_mem_pct = mem_total == 0 ? 0 : (mem_available * 100) / mem_total;
-	*thp_mem_kbytes = anon_huge_pages;
-}
-
 void
 as_info_warn_deprecated(const char* msg)
 {
@@ -971,7 +885,6 @@ as_info_warn_deprecated(const char* msg)
 	// TODO: This should be a warning, not an info - but not on initial release.
 	cf_ticker_info(AS_DEPRECATION, "%s", msg);
 }
-
 
 //==========================================================
 // Local helpers - info execution.
@@ -1020,16 +933,14 @@ run_info(void* arg)
 		// Write response header into reserved space.
 		as_proto* header = (as_proto*)db.buf;
 
-		*header = (as_proto){
-				.version = PROTO_VERSION,
-				.type = PROTO_TYPE_INFO,
-				.sz = db.used_sz - sizeof(as_proto)
-		};
+		*header = (as_proto){ .version = PROTO_VERSION,
+			.type = PROTO_TYPE_INFO,
+			.sz = db.used_sz - sizeof(as_proto) };
 
 		as_proto_swap(header);
 
-		if (cf_socket_send_all(&fd_h->sock, db.buf, db.used_sz,
-				MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) == 0) {
+		if (cf_socket_send_all(&fd_h->sock, db.buf, db.used_sz, MSG_NOSIGNAL,
+					CF_SOCKET_TIMEOUT) == 0) {
 			as_end_of_transaction_ok(fd_h);
 		}
 		else {
@@ -1185,8 +1096,8 @@ handle_cmd(const as_info_cmd* cmd, const char* params, as_file_handle* fd_h,
 
 	// Already authenticated so ignore PERM_NONE.
 	if (perm != PERM_NONE) {
-		uint8_t result = as_security_check_info_cmd(fd_h, cmd->name, params,
-				perm);
+		uint8_t result =
+				as_security_check_info_cmd(fd_h, cmd->name, params, perm);
 
 		as_security_log(fd_h, result, perm, cmd->name, params);
 
@@ -1222,7 +1133,6 @@ append_security_error(cf_dyn_buf* db, uint32_t result, as_sec_perm perm)
 	as_info_respond_error(db, result, "unexpected security result");
 }
 
-
 //==========================================================
 // Local helpers - info commands.
 //
@@ -1253,7 +1163,8 @@ cmd_build(as_info_cmd_args* args)
 static void
 cmd_build_arch(as_info_cmd_args* args)
 {
-	as_info_warn_deprecated("'build_arch' info command is deprecated - use 'release' instead");
+	as_info_warn_deprecated(
+			"'build_arch' info command is deprecated - use 'release' instead");
 
 	cf_dyn_buf* db = args->db;
 
@@ -1263,7 +1174,8 @@ cmd_build_arch(as_info_cmd_args* args)
 static void
 cmd_build_ee_sha(as_info_cmd_args* args)
 {
-	as_info_warn_deprecated("'build_ee_sha' info command is deprecated - use 'release' instead");
+	as_info_warn_deprecated(
+			"'build_ee_sha' info command is deprecated - use 'release' instead");
 
 	cf_dyn_buf* db = args->db;
 
@@ -1273,7 +1185,8 @@ cmd_build_ee_sha(as_info_cmd_args* args)
 static void
 cmd_build_os(as_info_cmd_args* args)
 {
-	as_info_warn_deprecated("'build_os' info command is deprecated - use 'release' instead");
+	as_info_warn_deprecated(
+			"'build_os' info command is deprecated - use 'release' instead");
 
 	cf_dyn_buf* db = args->db;
 
@@ -1283,7 +1196,8 @@ cmd_build_os(as_info_cmd_args* args)
 static void
 cmd_build_sha(as_info_cmd_args* args)
 {
-	as_info_warn_deprecated("'build_sha' info command is deprecated - use 'release' instead");
+	as_info_warn_deprecated(
+			"'build_sha' info command is deprecated - use 'release' instead");
 
 	cf_dyn_buf* db = args->db;
 
@@ -1293,7 +1207,8 @@ cmd_build_sha(as_info_cmd_args* args)
 static void
 cmd_build_time(as_info_cmd_args* args)
 {
-	as_info_warn_deprecated("'build_time' info command is deprecated - see https://aerospike.com/docs/database/release/8-1-1/");
+	as_info_warn_deprecated(
+			"'build_time' info command is deprecated - see https://aerospike.com/docs/database/release/8-1-1/");
 
 	cf_dyn_buf* db = args->db;
 
@@ -1330,8 +1245,8 @@ cmd_cluster_stable(as_info_cmd_args* args)
 
 	char size_str[4]; // max cluster size is 256
 	int size_str_len = (int)sizeof(size_str);
-	info_param_result rv = as_info_parameter_get(params, "size", size_str,
-			&size_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "size", size_str, &size_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "size", size_str, rv);
 
@@ -1378,8 +1293,7 @@ cmd_cluster_stable(as_info_cmd_args* args)
 		}
 		else {
 			cf_warning(AS_INFO, "ignore-migrations value invalid");
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad ignore migrations");
+			as_info_respond_error(db, AS_ERR_PARAMETER, "bad ignore migrations");
 			return;
 		}
 	}
@@ -1409,9 +1323,9 @@ cmd_cluster_stable(as_info_cmd_args* args)
 			ns = namespaces[ns_ix];
 
 			if (ns->migrate_tx_partitions_remaining +
-					ns->migrate_rx_partitions_remaining +
-					ns->n_unavailable_partitions +
-					ns->n_dead_partitions != 0) {
+							ns->migrate_rx_partitions_remaining +
+							ns->n_unavailable_partitions + ns->n_dead_partitions !=
+					0) {
 				as_info_respond_error(db, AS_ERR_CLUSTER_KEY_MISMATCH,
 						"unstable cluster");
 				return;
@@ -1474,7 +1388,8 @@ cmd_digests(as_info_cmd_args* args)
 {
 	cf_dyn_buf* db = args->db;
 
-	as_info_warn_deprecated("'digests' info command is deprecated - see https://aerospike.com/docs/database/release/8-1/");
+	as_info_warn_deprecated(
+			"'digests' info command is deprecated - see https://aerospike.com/docs/database/release/8-1/");
 	cf_dyn_buf_append_string(db, "RIPEMD160");
 }
 
@@ -1493,8 +1408,8 @@ cmd_dump_cluster(as_info_cmd_args* args)
 	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	info_param_result rv  = as_info_parameter_get(params, "verbose", param_str,
-			&param_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "verbose", param_str, &param_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "verbose", param_str, rv);
 
@@ -1510,7 +1425,8 @@ cmd_dump_cluster(as_info_cmd_args* args)
 			verbose = false;
 		}
 		else {
-			cf_warning(AS_INFO, "The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
+			cf_warning(AS_INFO,
+					"The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
 					name, param_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"'verbose' may be either 'true' or 'false'");
@@ -1538,8 +1454,8 @@ cmd_dump_fabric(as_info_cmd_args* args)
 	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	info_param_result rv = as_info_parameter_get(params, "verbose", param_str,
-			&param_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "verbose", param_str, &param_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "verbose", param_str, rv);
 
@@ -1555,7 +1471,8 @@ cmd_dump_fabric(as_info_cmd_args* args)
 			verbose = false;
 		}
 		else {
-			cf_warning(AS_INFO, "The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
+			cf_warning(AS_INFO,
+					"The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
 					name, param_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"'verbose' may be either 'true' or 'false'");
@@ -1581,8 +1498,8 @@ cmd_dump_hb(as_info_cmd_args* args)
 	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	info_param_result rv = as_info_parameter_get(params, "verbose", param_str,
-			&param_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "verbose", param_str, &param_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "verbose", param_str, rv);
 
@@ -1598,7 +1515,8 @@ cmd_dump_hb(as_info_cmd_args* args)
 			verbose = false;
 		}
 		else {
-			cf_warning(AS_INFO, "The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
+			cf_warning(AS_INFO,
+					"The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
 					name, param_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"'verbose' may be either 'true' or 'false'");
@@ -1625,8 +1543,8 @@ cmd_dump_hlc(as_info_cmd_args* args)
 	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	info_param_result rv = as_info_parameter_get(params, "verbose", param_str,
-			&param_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "verbose", param_str, &param_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "verbose", param_str, rv);
 
@@ -1642,7 +1560,8 @@ cmd_dump_hlc(as_info_cmd_args* args)
 			verbose = false;
 		}
 		else {
-			cf_warning(AS_INFO, "The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
+			cf_warning(AS_INFO,
+					"The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
 					name, param_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"'verbose' may be either 'true' or 'false'");
@@ -1668,8 +1587,8 @@ cmd_dump_migrates(as_info_cmd_args* args)
 	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	info_param_result rv = as_info_parameter_get(params, "verbose", param_str,
-			&param_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "verbose", param_str, &param_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "verbose", param_str, rv);
 
@@ -1685,7 +1604,8 @@ cmd_dump_migrates(as_info_cmd_args* args)
 			verbose = false;
 		}
 		else {
-			cf_warning(AS_INFO, "The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
+			cf_warning(AS_INFO,
+					"The '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
 					name, param_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"'verbose' may be either 'true' or 'false'");
@@ -1734,8 +1654,8 @@ cmd_dump_wb_summary(as_info_cmd_args* args)
 	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	info_param_result rv = as_info_param_get_namespace_ns(params, param_str,
-			&param_str_len);
+	info_param_result rv =
+			as_info_param_get_namespace_ns(params, param_str, &param_str_len);
 
 	if (! info_param_required_local_namespace_is_ok(db, param_str, &ns, rv)) {
 		return;
@@ -1755,7 +1675,8 @@ cmd_dump_wb_summary(as_info_cmd_args* args)
 			verbose = false;
 		}
 		else {
-			cf_warning(AS_INFO, "the '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
+			cf_warning(AS_INFO,
+					"the '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
 					name, param_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"'verbose' may be either 'true' or 'false'");
@@ -1785,8 +1706,7 @@ cmd_endpoints(as_info_cmd_args* args)
 	cf_ip_port port = bind_to_port(&g_service_bind, CF_SOCK_OWNER_SERVICE);
 	info_append_int(db, "service.port", port);
 
-	char* string = as_info_bind_to_string(&g_service_bind,
-			CF_SOCK_OWNER_SERVICE);
+	char* string = as_info_bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE);
 
 	info_append_string(db, "service.addresses", string);
 	cf_free(string);
@@ -1797,7 +1717,8 @@ cmd_endpoints(as_info_cmd_args* args)
 	info_append_string(db, "service.access-addresses", string);
 	cf_free(string);
 
-	info_append_int(db, "service.alternate-access-port", g_access.alt_service.port);
+	info_append_int(db, "service.alternate-access-port",
+			g_access.alt_service.port);
 
 	string = access_to_string(&g_access.alt_service.addrs);
 	info_append_string(db, "service.alternate-access-addresses", string);
@@ -1872,8 +1793,8 @@ cmd_eviction_reset(as_info_cmd_args* args)
 
 	char ns_name[AS_ID_NAMESPACE_SZ];
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result ns_rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result ns_rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 
 	if (! as_info_required_param_is_ok(db, "namespace", ns_name, ns_rv)) {
 		return;
@@ -1883,8 +1804,8 @@ cmd_eviction_reset(as_info_cmd_args* args)
 
 	char ttl_str[12]; // allow decimal, hex or octal in C constant format
 	int ttl_str_len = (int)sizeof(ttl_str);
-	info_param_result ttl_rv = as_info_parameter_get(params, "ttl", ttl_str,
-			&ttl_str_len);
+	info_param_result ttl_rv =
+			as_info_parameter_get(params, "ttl", ttl_str, &ttl_str_len);
 
 	ttl_rv = as_info_optional_param_is_ok(db, "ttl", ttl_str, ttl_rv);
 
@@ -1894,8 +1815,8 @@ cmd_eviction_reset(as_info_cmd_args* args)
 
 	// Issue the eviction-reset command.
 
-	as_nsup_eviction_reset_cmd(ns_name, ttl_rv == INFO_PARAM_OK ?
-			ttl_str : NULL, db);
+	as_nsup_eviction_reset_cmd(ns_name,
+			ttl_rv == INFO_PARAM_OK ? ttl_str : NULL, db);
 }
 
 static void
@@ -1908,7 +1829,8 @@ cmd_features(as_info_cmd_args* args)
 		args->fd_h->called_features = true;
 	}
 
-	as_info_warn_deprecated("'features' info command is deprecated - see https://aerospike.com/docs/database/release/8-1/");
+	as_info_warn_deprecated(
+			"'features' info command is deprecated - see https://aerospike.com/docs/database/release/8-1/");
 
 	cf_dyn_buf_append_string(db,
 			"batch-any;batch-index;blob-bits;"
@@ -1920,8 +1842,7 @@ cmd_features(as_info_cmd_args* args)
 			"query-show;"
 			"relaxed-sc;replicas;replicas-all;replicas-master;replicas-max;"
 			"truncate-namespace;"
-			"udf"
-			);
+			"udf");
 	cf_dyn_buf_append_string(db, aerospike_build_features);
 }
 
@@ -1950,8 +1871,8 @@ cmd_get_stats(as_info_cmd_args* args)
 
 	char context[1024];
 	int context_len = sizeof(context);
-	info_param_result rv = as_info_parameter_get(params, "context", context,
-			&context_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "context", context, &context_len);
 
 	if (! as_info_required_param_is_ok(db, "context", context, rv)) {
 		return;
@@ -1974,7 +1895,8 @@ cmd_hb_addr(as_info_cmd_args* args)
 	as_hb_mode hb_mode;
 	char addr_port_str[1024];
 
-	as_info_warn_deprecated("'mesh' and 'mcast' info commands are deprecated - use 'get-config' instead");
+	as_info_warn_deprecated(
+			"'mesh' and 'mcast' info commands are deprecated - use 'get-config' instead");
 
 	as_hb_info_listen_addr_get(&hb_mode, addr_port_str, sizeof(addr_port_str));
 
@@ -1986,8 +1908,7 @@ cmd_hb_addr(as_info_cmd_args* args)
 		}
 	}
 	else if (strcmp(name, "mcast") != 0) {
-		as_info_respond_error(db, AS_ERR_PARAMETER,
-				"heartbeat is in mesh mode");
+		as_info_respond_error(db, AS_ERR_PARAMETER, "heartbeat is in mesh mode");
 		return;
 	}
 
@@ -2039,9 +1960,9 @@ cmd_histogram(as_info_cmd_args* args)
 	cf_dyn_buf* db = args->db;
 
 	char value_str[128];
-	int  value_str_len = sizeof(value_str);
-	info_param_result rv = as_info_param_get_namespace(params, value_str,
-			&value_str_len);
+	int value_str_len = sizeof(value_str);
+	info_param_result rv =
+			as_info_param_get_namespace(params, value_str, &value_str_len);
 	as_namespace* ns = NULL;
 
 	if (! info_param_required_local_namespace_is_ok(db, value_str, &ns, rv)) {
@@ -2112,8 +2033,8 @@ cmd_jem_stats(as_info_cmd_args* args)
 
 	char file_str[100] = { 0 };
 	int file_len = sizeof(file_str);
-	info_param_result rv = as_info_parameter_get(params, "file", file_str,
-			&file_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "file", file_str, &file_len);
 
 	rv = as_info_optional_param_is_ok(db, "file", file_str, rv);
 
@@ -2170,9 +2091,9 @@ cmd_latencies(as_info_cmd_args* args)
 	cf_debug(AS_INFO, "%s command received: params %s", name, params);
 
 	char value_str[100];
-	int  value_str_len = sizeof(value_str);
-	info_param_result rv = as_info_parameter_get(params, "hist", value_str,
-			&value_str_len);
+	int value_str_len = sizeof(value_str);
+	info_param_result rv =
+			as_info_parameter_get(params, "hist", value_str, &value_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "hist", value_str, rv);
 
@@ -2208,32 +2129,56 @@ cmd_latencies(as_info_cmd_args* args)
 			histogram_get_latencies(g_stats.info_hist, db);
 		}
 		else if (strcmp(value_str, "benchmarks-fabric") == 0) {
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK], db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK], db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK], db);
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL], db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL], db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL], db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL], db);
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META], db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META], db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META], db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META], db);
-			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW], db);
-			histogram_get_latencies(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW], db);
-			histogram_get_latencies(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW], db);
-			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW], db);
+			histogram_get_latencies(
+					g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], db);
+			histogram_get_latencies(
+					g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK],
+					db);
+			histogram_get_latencies(
+					g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK],
+					db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK],
+					db);
+			histogram_get_latencies(
+					g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL], db);
+			histogram_get_latencies(
+					g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL],
+					db);
+			histogram_get_latencies(
+					g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL],
+					db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL],
+					db);
+			histogram_get_latencies(
+					g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META], db);
+			histogram_get_latencies(
+					g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META],
+					db);
+			histogram_get_latencies(
+					g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META],
+					db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META],
+					db);
+			histogram_get_latencies(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW],
+					db);
+			histogram_get_latencies(
+					g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW], db);
+			histogram_get_latencies(
+					g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW], db);
+			histogram_get_latencies(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW],
+					db);
 		}
 		else if (*value_str == '{') {
 			// Named namespace-scoped histogram - parse '{namespace}-' prefix.
 
 			char* ns_name = value_str + 1;
 			char* ns_name_end = strchr(ns_name, '}');
-			as_namespace* ns = as_namespace_get_bybuf((uint8_t*)ns_name, ns_name_end - ns_name);
+			as_namespace* ns = as_namespace_get_bybuf((uint8_t*)ns_name,
+					ns_name_end - ns_name);
 
 			if (ns == NULL) {
-				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
+				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name,
+						value_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER, "bad hist name");
 				return;
 			}
@@ -2241,7 +2186,8 @@ cmd_latencies(as_info_cmd_args* args)
 			char* hist_name = ns_name_end + 1;
 
 			if (*hist_name++ != '-') {
-				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
+				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name,
+						value_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER, "bad hist name");
 				return;
 			}
@@ -2332,13 +2278,15 @@ cmd_latencies(as_info_cmd_args* args)
 				histogram_get_latencies(ns->ops_sub_response_hist, db);
 			}
 			else {
-				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
+				cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name,
+						value_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER, "bad hist name");
 				return;
 			}
 		}
 		else {
-			cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name, value_str);
+			cf_info(AS_INFO, "%s command: unrecognized histogram: %s", name,
+					value_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER, "bad hist name");
 			return;
 		}
@@ -2538,7 +2486,8 @@ cmd_objects(as_info_cmd_args* args)
 {
 	cf_dyn_buf* db = args->db;
 
-	as_info_warn_deprecated("'objects' info command is deprecated - use 'statistics' instead");
+	as_info_warn_deprecated(
+			"'objects' info command is deprecated - use 'statistics' instead");
 
 	uint64_t objects = 0;
 
@@ -2571,7 +2520,8 @@ cmd_partitions(as_info_cmd_args* args)
 {
 	cf_dyn_buf* db = args->db;
 
-	as_info_warn_deprecated("'partitions' info command is deprecated - see https://aerospike.com/docs/database/release/8-1/");
+	as_info_warn_deprecated(
+			"'partitions' info command is deprecated - see https://aerospike.com/docs/database/release/8-1/");
 	cf_dyn_buf_append_uint32(db, AS_PARTITIONS);
 }
 
@@ -2588,8 +2538,8 @@ cmd_physical_devices(as_info_cmd_args* args)
 
 	char path_str[1024];
 	int path_str_len = (int)sizeof(path_str);
-	info_param_result rv = as_info_parameter_get(params, "path", path_str,
-			&path_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "path", path_str, &path_str_len);
 
 	if (! as_info_required_param_is_ok(db, "path", path_str, rv)) {
 		return;
@@ -2640,8 +2590,8 @@ cmd_query_abort(as_info_cmd_args* args)
 	int id_str_len = (int)sizeof(id_str);
 	// Allow 'trid' for backward compatibility of scan-abort. Remove in 6 months.
 	const char* aliases[] = { "id", "trid", NULL };
-	info_param_result rv = as_info_param_get_aliases(params, aliases, id_str,
-			&id_str_len);
+	info_param_result rv =
+			as_info_param_get_aliases(params, aliases, id_str, &id_str_len);
 
 	if (! as_info_required_param_is_ok(db, "id", id_str, rv)) {
 		return;
@@ -2676,8 +2626,8 @@ cmd_query_show(as_info_cmd_args* args)
 	int id_str_len = (int)sizeof(id_str);
 	// Allow 'trid' for backward compatibility of scan-abort. Remove in 6 months.
 	const char* aliases[] = { "id", "trid", NULL };
-	info_param_result rv = as_info_param_get_aliases(params, aliases, id_str,
-			&id_str_len);
+	info_param_result rv =
+			as_info_param_get_aliases(params, aliases, id_str, &id_str_len);
 
 	rv = as_info_optional_param_is_ok(db, "id", id_str, rv);
 
@@ -2709,8 +2659,7 @@ cmd_quiesce(as_info_cmd_args* args)
 	// Command format: quiesce:
 
 	if (g_config.stay_quiesced) {
-		as_info_respond_error(db, AS_ERR_FORBIDDEN,
-				"permanently quiesced");
+		as_info_respond_error(db, AS_ERR_FORBIDDEN, "permanently quiesced");
 		return;
 	}
 
@@ -2762,8 +2711,8 @@ cmd_racks(as_info_cmd_args* args)
 
 	char param_str[AS_ID_NAMESPACE_SZ] = { 0 };
 	int param_str_len = (int)sizeof(param_str);
-	info_param_result rv = as_info_param_get_namespace(params, param_str,
-			&param_str_len);
+	info_param_result rv =
+			as_info_param_get_namespace(params, param_str, &param_str_len);
 	as_namespace* ns = NULL;
 
 	rv = info_param_optional_local_namespace_is_ok(db, param_str, &ns, rv);
@@ -2878,7 +2827,8 @@ cmd_replicas_all(as_info_cmd_args* args)
 {
 	cf_dyn_buf* db = args->db;
 
-	as_info_warn_deprecated("'replicas-all' info command is deprecated - use 'replicas' instead or upgrade your client");
+	as_info_warn_deprecated(
+			"'replicas-all' info command is deprecated - use 'replicas' instead or upgrade your client");
 	as_partition_get_replicas_all_str(db, false, 0);
 }
 
@@ -2887,7 +2837,8 @@ cmd_replicas_master(as_info_cmd_args* args)
 {
 	cf_dyn_buf* db = args->db;
 
-	as_info_warn_deprecated("'replicas-master' info command is deprecated - use 'replicas' instead or upgrade your client");
+	as_info_warn_deprecated(
+			"'replicas-master' info command is deprecated - use 'replicas' instead or upgrade your client");
 	as_partition_get_replicas_master_str(db);
 }
 
@@ -2901,8 +2852,8 @@ cmd_revive(as_info_cmd_args* args)
 
 	char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 	as_namespace* ns = NULL;
 
 	rv = info_param_optional_local_namespace_is_ok(db, ns_name, &ns, rv);
@@ -2949,8 +2900,8 @@ cmd_roster(as_info_cmd_args* args)
 
 	char ns_name[AS_ID_NAMESPACE_SZ] = { 0 };
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 	as_namespace* ns = NULL;
 
 	rv = info_param_optional_local_namespace_is_ok(db, ns_name, &ns, rv);
@@ -3002,7 +2953,7 @@ cmd_roster_set(as_info_cmd_args* args)
 
 	// Get the nodes list.
 
-	char nodes[AS_CLUSTER_SZ*  ROSTER_STRING_ELE_LEN];
+	char nodes[AS_CLUSTER_SZ * ROSTER_STRING_ELE_LEN];
 	int nodes_len = (int)sizeof(nodes);
 	int nodes_rv = as_info_parameter_get(params, "nodes", nodes, &nodes_len);
 
@@ -3079,7 +3030,8 @@ cmd_sindex(as_info_cmd_args* args)
 	// format w namespace & index name is:
 	//    prop1=val1;prop2=val2;...;propn=valn
 
-	as_info_warn_deprecated("'sindex' info command is deprecated - use 'sindex-list' instead");
+	as_info_warn_deprecated(
+			"'sindex' info command is deprecated - use 'sindex-list' instead");
 
 	char* index_name = NULL;
 	as_namespace* ns = NULL;
@@ -3119,7 +3071,7 @@ cmd_sindex(as_info_cmd_args* args)
 		as_sindex_list_str(ns, false, db);
 		cf_dyn_buf_chomp_char(db, ';');
 	}
-	else if (! as_sindex_stats_str(ns, index_name, db)) {
+	else if (! as_sindex_manager_stats_str(ns, index_name, db)) {
 		cf_warning(AS_INFO, "failed to get statistics for index %s: not found",
 				index_name);
 		as_info_respond_error(db, AS_ERR_SINDEX_NOT_FOUND, "no index");
@@ -3129,6 +3081,7 @@ cmd_sindex(as_info_cmd_args* args)
 static void
 cmd_sindex_create(as_info_cmd_args* args)
 {
+	// Secondary index command format:
 	// Old command format:
 	// sindex-create:ns=usermap;set=demo;indexname=um_age;indextype=list;indexdata=age,numeric
 	// sindex-create:ns=usermap;set=demo;indexname=um_state;indexdata=state,string
@@ -3138,503 +3091,28 @@ cmd_sindex_create(as_info_cmd_args* args)
 	// sindex-create:ns=usermap;set=demo;indexname=um_highscore;*context=<base64-cdt-ctx>;exp=<base64-exp>;indextype=list;type=numeric;*bin=scores
 	// * - mutually exclusive with expression
 
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-	char index_name_str[INAME_MAX_SZ];
-	int index_name_len = sizeof(index_name_str);
-	info_param_result rv = as_info_parameter_get(params, "indexname",
-			index_name_str, &index_name_len);
+	// Set index command format:
+	// sindex-create:ns=usermap;set=demo;indextype=set;indexname=um_state
 
-	if (! as_info_required_param_is_ok(db, "indexname", index_name_str, rv)) {
-		return;
-	}
-
-	char ns_str[AS_ID_NAMESPACE_SZ];
-	int ns_len = sizeof(ns_str);
-
-	rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-
-	if (! as_info_required_param_is_ok(db, "namespace", ns_str, rv)) {
-		return;
-	}
-
-	char set_str[AS_SET_NAME_MAX_SIZE];
-	char* p_set_str = NULL;
-	int set_len = sizeof(set_str);
-
-	rv = as_info_parameter_get(params, "set", set_str, &set_len);
-	rv = as_info_optional_param_is_ok(db, "set", set_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK) {
-		p_set_str = set_str;
-	}
-
-	char ctx_b64[CTX_B64_MAX_SZ];
-	int ctx_b64_len = sizeof(ctx_b64);
-	const char* p_cdt_ctx = NULL;
-
-	rv = as_info_parameter_get(params, "context", ctx_b64, &ctx_b64_len);
-	rv = as_info_optional_param_is_ok(db, "context", ctx_b64, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK) {
-		uint8_t* buf;
-		int32_t buf_sz = as_sindex_cdt_ctx_b64_decode(ctx_b64, ctx_b64_len,
-				&buf);
-
-		if (buf_sz > 0) {
-			cf_free(buf);
-		}
-		else if (buf_sz < 0) {
-			switch (buf_sz) {
-			case -1:
-				cf_warning(AS_INFO, "sindex-create %s: 'context' invalid base64",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"'context' invalid base64");
-				return;
-			case -2:
-				cf_warning(AS_INFO, "sindex-create %s: 'context' invalid cdt context",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"'context' invalid cdt context");
-				return;
-			case -3:
-				cf_warning(AS_INFO, "sindex-create %s: 'context' not normalized msgpack",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"'context' not normalized msgpack");
-				return;
-			default:
-				cf_crash(AS_INFO, "unreachable");
-			}
-		}
-
-		p_cdt_ctx = ctx_b64;
-	}
-
-	char indextype_str[INDEXTYPE_MAX_SZ];
-	int indtype_len = sizeof(indextype_str);
-	as_sindex_type itype;
-
-	rv = as_info_parameter_get(params, "indextype", indextype_str,
-			&indtype_len);
-	rv = as_info_optional_param_is_ok(db, "indextype", indextype_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK_NOT_FOUND) {
-		// If not specified, the index type is DEFAULT.
-		itype = AS_SINDEX_ITYPE_DEFAULT;
-	}
-	else {
-		itype = as_sindex_itype_from_string(indextype_str);
-
-		if (itype == AS_SINDEX_N_ITYPES) {
-			cf_warning(AS_INFO, "sindex-create %s: bad 'indextype' '%s'",
-					index_name_str, indextype_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad 'indextype' - must be one of 'default', 'list', 'mapkeys', 'mapvalues'");
-			return;
-		}
-	}
-
-	char bin_name[AS_BIN_NAME_MAX_SZ] = { 0 };
-	int bin_name_len = sizeof(bin_name);
-	const char* p_bin_name = NULL;
-	char exp_b64[EXP_B64_MAX_SZ] = { 0 };
-	int exp_b64_len = sizeof(exp_b64);
-	const char* p_exp = NULL;
-	char indexdata_str[INDEXDATA_MAX_SZ] = { 0 };
-	int indexdata_len = sizeof(indexdata_str);
-	char ktype_str[KTYPE_MAX_SZ] = { 0 };
-	int ktype_len = sizeof(ktype_str);
-	char* p_ktype_str = NULL;
-	as_particle_type ktype;
-
-	info_param_result indexdata_rv = as_info_parameter_get(params, "indexdata",
-			indexdata_str, &indexdata_len);
-	indexdata_rv = as_info_optional_param_is_ok(db, "indexdata", indexdata_str,
-			indexdata_rv);
-
-	if (indexdata_rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	info_param_result type_rv = as_info_parameter_get(params, "type", ktype_str,
-			&ktype_len);
-	type_rv = as_info_optional_param_is_ok(db, "type", ktype_str, type_rv);
-
-	if (type_rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (indexdata_rv == INFO_PARAM_OK_NOT_FOUND &&
-			type_rv == INFO_PARAM_OK_NOT_FOUND) {
-		cf_warning(AS_INFO, "sindex-create %s: both 'indexdata' and 'type' are missing",
-				index_name_str);
-		as_info_respond_error(db, AS_ERR_PARAMETER, "both 'indexdata' and 'type' are missing");
-		return;
-	}
-
-	if (indexdata_rv == INFO_PARAM_OK && type_rv == INFO_PARAM_OK) {
-		cf_warning(AS_INFO, "sindex-create %s: both 'indexdata' and 'type' are specified",
-				index_name_str);
-		as_info_respond_error(db, AS_ERR_PARAMETER, "both 'indexdata' and 'type' are specified");
-		return;
-	}
-
-	if (type_rv == INFO_PARAM_OK) {
-		// New protocol - type=<type>[;bin=<name>][;exp=<base64-exp>]
-		ktype = as_sindex_ktype_from_string(ktype_str);
-
-		if (ktype == AS_PARTICLE_TYPE_BAD) {
-			cf_warning(AS_INFO, "sindex-create %s: bad 'type' '%s'",
-					index_name_str, ktype_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad 'type' - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
-			return;
-		}
-
-		p_ktype_str = ktype_str;
-
-		rv = as_info_parameter_get(params, "bin", bin_name, &bin_name_len);
-
-		uint32_t bin_rv = as_info_optional_param_is_ok(db, "bin", bin_name, rv);
-
-		if (bin_rv == INFO_PARAM_FAIL_REPLIED) {
-			return;
-		}
-
-		if (bin_rv == INFO_PARAM_OK) {
-			p_bin_name = bin_name;
-		}
-
-		rv = as_info_parameter_get(params, "exp", exp_b64, &exp_b64_len);
-
-		uint32_t exp_rv = as_info_optional_param_is_ok(db, "exp", exp_b64, rv);
-
-		if (exp_rv == INFO_PARAM_FAIL_REPLIED) {
-			return;
-		}
-
-		if (bin_rv == INFO_PARAM_OK && exp_rv == INFO_PARAM_OK) {
-			cf_warning(AS_INFO, "sindex-create %s: both 'bin' and 'exp' are specified",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "both 'bin' and 'exp' are specified");
-			return;
-		}
-
-		if (bin_rv == INFO_PARAM_OK_NOT_FOUND &&
-				exp_rv == INFO_PARAM_OK_NOT_FOUND) {
-			cf_warning(AS_INFO, "sindex-create %s: both 'bin' and 'exp' are missing",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER, "both 'bin' and 'exp' are missing");
-			return;
-		}
-
-		if (exp_rv == INFO_PARAM_OK) {
-			if (p_cdt_ctx != NULL) {
-				cf_warning(AS_INFO, "sindex-create %s: both 'context' and 'exp' are specified",
-						index_name_str);
-				as_info_respond_error(db, AS_ERR_PARAMETER, "both 'context' and 'exp' are specified");
-				return;
-			}
-
-			uint8_t exp_type = AS_PARTICLE_TYPE_BAD;
-
-			if (! as_sindex_validate_exp(exp_b64, &exp_type, db)) {
-				return;
-			}
-
-			if (! as_sindex_validate_exp_type(index_name_str, itype, ktype,
-					exp_type, db)) {
-				return;
-			}
-
-			p_exp = exp_b64;
-		}
-	}
-	else {
-		// Old protocol - indexdata=bin-name,keytype
-
-		as_info_warn_deprecated("'indexdata' parameter of 'sindex-create' info command is deprecated - use 'bin' and 'type' instead");
-
-		p_bin_name = indexdata_str;
-
-		p_ktype_str = strchr(indexdata_str, ',');
-
-		if (p_ktype_str == NULL) {
-			cf_warning(AS_INFO, "sindex-create %s: 'indexdata' missing bin type",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"'indexdata' missing bin type");
-			return;
-		}
-
-		*p_ktype_str++ = '\0';
-
-		if (p_bin_name[0] == '\0') {
-			cf_warning(AS_INFO, "sindex-create %s: 'indexdata' missing bin name",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"'indexdata' missing bin name");
-			return;
-		}
-
-		if (strlen(p_bin_name) >= AS_BIN_NAME_MAX_SZ) {
-			cf_warning(AS_INFO, "sindex-create %s: 'indexdata' bin name too long",
-					index_name_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"'indexdata' bin name too long");
-			return;
-		}
-
-		ktype = as_sindex_ktype_from_string(p_ktype_str);
-
-		if (ktype == AS_PARTICLE_TYPE_BAD) {
-			cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s'",
-					index_name_str, p_ktype_str);
-			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad 'indexdata' bin type - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
-			return;
-		}
-	}
-
-	if (itype == AS_SINDEX_ITYPE_MAPKEYS &&
-			ktype != AS_PARTICLE_TYPE_INTEGER &&
-			ktype != AS_PARTICLE_TYPE_STRING &&
-			ktype != AS_PARTICLE_TYPE_BLOB) {
-		cf_warning(AS_INFO, "sindex-create %s: bad 'indexdata' bin type '%s' for 'indextype' 'mapkeys'",
-				index_name_str, p_ktype_str);
-		as_info_respond_error(db, AS_ERR_PARAMETER,
-				"bad 'indexdata' bin type for 'indextype' 'mapkeys' - must be one of 'numeric', 'string', 'blob'");
-		return;
-	}
-
-	cf_info(AS_INFO, "sindex-create: request received for %s:%s via info",
-			ns_str, index_name_str);
-
-	char smd_key[SINDEX_SMD_KEY_MAX_SZ];
-
-	as_sindex_build_smd_key(ns_str, p_set_str, p_bin_name, p_cdt_ctx, p_exp,
-			itype, ktype, smd_key);
-
-	find_sindex_key_udata fsk = {
-			.ns_name = ns_str,
-			.index_name = index_name_str,
-			.smd_key = smd_key
-	};
-
-	as_smd_get_all(AS_SMD_MODULE_SINDEX, find_sindex_key, &fsk);
-
-	if (fsk.found_key != NULL) {
-		if (strcmp(fsk.found_key, smd_key) != 0) {
-			cf_free(fsk.found_key);
-			cf_warning(AS_INFO, "sindex-create %s:%s: 'indexname' already exists with different definition",
-					ns_str, index_name_str);
-			as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
-					"'indexname' already exists with different definition");
-			return;
-		}
-
-		cf_free(fsk.found_key);
-		cf_info(AS_INFO, "sindex-create %s:%s: 'indexname' and defintion already exists",
-				ns_str, index_name_str);
-		as_info_respond_ok(db);
-		return;
-	}
-
-	if (fsk.n_name_matches > 1) {
-		cf_warning(AS_INFO, "sindex-create %s:%s: 'indexname' already exists with %u definitions - rename(s) required",
-				ns_str, index_name_str, fsk.n_name_matches);
-		as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
-				"'indexname' already exists with multiple definitions");
-		return;
-	}
-
-	if (! fsk.has_smd_key && fsk.n_indexes >= MAX_N_SINDEXES) {
-		cf_warning(AS_INFO, "sindex-create %s:%s: already at sindex definition limit",
-				ns_str, index_name_str);
-		as_info_respond_error(db, AS_ERR_SINDEX_MAX_COUNT,
-				"already at sindex definition limit");
-		return;
-	}
-
-	if (! as_smd_set_blocking(AS_SMD_MODULE_SINDEX, smd_key, index_name_str,
-			0)) {
-		cf_warning(AS_INFO, "sindex-create: timeout while creating %s:%s in SMD",
-				ns_str, index_name_str);
-		as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
-		return;
-	}
-
-	as_info_respond_ok(db);
+	as_sindex_manager_sindex_create(args);
 }
 
 static void
 cmd_sindex_delete(as_info_cmd_args* args)
 {
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-
-	// Command format:
-	// sindex-delete:ns=usermap;set=demo;indexname=um_state
-
-	char index_name_str[INAME_MAX_SZ];
-	int index_name_len = sizeof(index_name_str);
-	info_param_result rv = as_info_parameter_get(params, "indexname", index_name_str,
-			&index_name_len);
-
-	rv = as_info_required_param_is_ok(db, "indexname", index_name_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	char ns_str[AS_ID_NAMESPACE_SZ];
-	int ns_len = sizeof(ns_str);
-
-	rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-
-	if (! as_info_required_param_is_ok(db, "namespace", ns_str, rv)) {
-		return;
-	}
-
-	cf_info(AS_INFO, "sindex-delete: request received for %s:%s via info",
-			ns_str, index_name_str);
-
-	find_sindex_key_udata fsk = {
-			.ns_name = ns_str,
-			.index_name = index_name_str
-	};
-
-	as_smd_get_all(AS_SMD_MODULE_SINDEX, find_sindex_key, &fsk);
-
-	if (fsk.found_key == NULL) {
-		if (fsk.n_name_matches == 0) {
-			cf_info(AS_INFO, "sindex-delete: 'indexname' %s not found",
-					fsk.index_name);
-			as_info_respond_ok(db);
-			return;
-		}
-
-		cf_warning(AS_INFO, "sindex-delete: 'indexname' %s not unique - found %u matches - rename(s) required",
-				fsk.index_name, fsk.n_name_matches);
-		as_info_respond_error(db, AS_ERR_SINDEX_FOUND,
-				"'indexname' is not unique");
-		return;
-	}
-
-	if (! as_smd_delete_blocking(AS_SMD_MODULE_SINDEX, fsk.found_key, 0)) {
-		cf_free(fsk.found_key);
-		cf_warning(AS_INFO, "sindex-delete: timeout while dropping %s:%s in SMD",
-				ns_str, index_name_str);
-		as_info_respond_error(db, AS_ERR_TIMEOUT, "timeout");
-		return;
-	}
-
-	cf_free(fsk.found_key);
-
-	as_info_respond_ok(db);
+	as_sindex_manager_sindex_delete(args);
 }
 
 static void
 cmd_sindex_exists(as_info_cmd_args* args)
 {
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-
-	// Command format:
-	// sindex-exists:ns=usermap;indexname=um_state
-
-	char index_name_str[INAME_MAX_SZ];
-	int index_name_len = sizeof(index_name_str);
-	int rv = as_info_parameter_get(params, "indexname", index_name_str,
-			&index_name_len);
-
-	rv = as_info_required_param_is_ok(db, "indexname", index_name_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	char ns_str[AS_ID_NAMESPACE_SZ];
-	int ns_len = sizeof(ns_str);
-	as_namespace* ns = NULL;
-
-	rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-
-	if (! info_param_required_local_namespace_is_ok(db, ns_str, &ns, rv)) {
-		return;
-	}
-
-	cf_dyn_buf_append_string(db, as_sindex_exists(ns, index_name_str) ?
-			"true" : "false");
+	as_sindex_manager_sindex_exists(args);
 }
 
 static void
 cmd_sindex_list(as_info_cmd_args* args)
 {
-	const char* params = args->params;
-	cf_dyn_buf* db = args->db;
-
-	char ns_str[128];
-	int ns_len = sizeof(ns_str);
-	info_param_result rv = as_info_param_get_namespace_ns(params, ns_str, &ns_len);
-	as_namespace* ns = NULL;
-
-	rv = info_param_optional_local_namespace_is_ok(db, ns_str, &ns, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	char b64_str[6];
-	int b64_len = sizeof(b64_str);
-	bool b64 = false;
-
-	rv = as_info_parameter_get(params, "b64", b64_str, &b64_len);
-	rv = as_info_optional_param_is_ok(db, "b64", b64_str, rv);
-
-	if (rv == INFO_PARAM_FAIL_REPLIED) {
-		return;
-	}
-
-	if (rv == INFO_PARAM_OK) {
-		if (strcmp(b64_str, "true") == 0) {
-			b64 = true;
-		}
-		else if (strcmp(b64_str, "false") == 0) {
-			b64 = false;
-		}
-		else {
-			cf_warning(AS_INFO, "b64 value invalid");
-			as_info_respond_error(db, AS_ERR_PARAMETER, "bad b64");
-			return;
-		}
-	}
-
-	if (ns == NULL) {
-		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-			as_sindex_list_str(g_config.namespaces[ns_ix], b64, db);
-		}
-
-		cf_dyn_buf_chomp_char(db, ';');
-	}
-	else {
-		as_sindex_list_str(ns, b64, db);
-		cf_dyn_buf_chomp_char(db, ';');
-	}
+	as_sindex_manager_list_str(args);
 }
 
 static void
@@ -3645,9 +3123,9 @@ cmd_sindex_stat(as_info_cmd_args* args)
 
 	// get indexname
 	char index_name_str[INAME_MAX_SZ];
-	int  index_len = sizeof(index_name_str);
-	info_param_result rv = as_info_parameter_get(params, "indexname", index_name_str,
-			&index_len);
+	int index_len = sizeof(index_name_str);
+	info_param_result rv = as_info_parameter_get(params, "indexname",
+			index_name_str, &index_len);
 	rv = as_info_required_param_is_ok(db, "indexname", index_name_str, rv);
 
 	if (rv == INFO_PARAM_FAIL_REPLIED) {
@@ -3667,9 +3145,9 @@ cmd_sindex_stat(as_info_cmd_args* args)
 	cf_info(AS_INFO, "sindex-stat - received request on index %s - namespace %s",
 			index_name_str, ns_str);
 
-	if (! as_sindex_stats_str(ns, index_name_str, db))  {
-		cf_warning(AS_INFO, "index %s not found for ns %s",
-				index_name_str, ns->name);
+	if (! as_sindex_manager_stats_str(ns, index_name_str, db)) {
+		cf_warning(AS_INFO, "index %s not found for ns %s", index_name_str,
+				ns->name);
 		as_info_respond_error(db, AS_ERR_SINDEX_NOT_FOUND, "no index");
 	}
 }
@@ -3693,8 +3171,8 @@ cmd_smd_show(as_info_cmd_args* args)
 
 	char module_str[8 + 1];
 	int module_len = sizeof(module_str);
-	info_param_result rv = as_info_parameter_get(params, "module", module_str,
-			&module_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "module", module_str, &module_len);
 
 	if (! as_info_required_param_is_ok(db, "module", module_str, rv)) {
 		return;
@@ -3703,39 +3181,38 @@ cmd_smd_show(as_info_cmd_args* args)
 	if (strcasecmp(module_str, "evict") == 0) {
 		as_smd_get_all(AS_SMD_MODULE_EVICT, smd_show_cb, db);
 	}
-	else if(strcasecmp(module_str, "roster") == 0) {
+	else if (strcasecmp(module_str, "roster") == 0) {
 		if (as_info_respond_enterprise_only(db)) {
 			return;
 		}
 
 		as_smd_get_all(AS_SMD_MODULE_ROSTER, smd_show_cb, db);
 	}
-	else if(strcasecmp(module_str, "security") == 0) {
+	else if (strcasecmp(module_str, "security") == 0) {
 		if (as_info_respond_enterprise_only(db)) {
 			return;
 		}
 
 		cf_warning(AS_INFO, "smd-show: security module forbidden");
-		as_info_respond_error(db, AS_ERR_FORBIDDEN,
-				"security module forbidden");
+		as_info_respond_error(db, AS_ERR_FORBIDDEN, "security module forbidden");
 	}
-	else if(strcasecmp(module_str, "sindex") == 0) {
+	else if (strcasecmp(module_str, "sindex") == 0) {
 		as_smd_get_all(AS_SMD_MODULE_SINDEX, smd_show_cb, db);
 	}
-	else if(strcasecmp(module_str, "truncate") == 0) {
+	else if (strcasecmp(module_str, "truncate") == 0) {
 		as_smd_get_all(AS_SMD_MODULE_TRUNCATE, smd_show_cb, db);
 	}
-	else if(strcasecmp(module_str, "UDF") == 0) {
+	else if (strcasecmp(module_str, "UDF") == 0) {
 		as_smd_get_all(AS_SMD_MODULE_UDF, smd_show_cb, db);
 	}
-	else if(strcasecmp(module_str, "XDR") == 0) {
+	else if (strcasecmp(module_str, "XDR") == 0) {
 		if (as_info_respond_enterprise_only(db)) {
 			return;
 		}
 
 		as_smd_get_all(AS_SMD_MODULE_XDR, smd_show_cb, db);
 	}
-	else if(strcasecmp(module_str, "masking") == 0) {
+	else if (strcasecmp(module_str, "masking") == 0) {
 		if (as_info_respond_enterprise_only(db)) {
 			return;
 		}
@@ -3746,7 +3223,6 @@ cmd_smd_show(as_info_cmd_args* args)
 		cf_warning(AS_INFO, "smd-show: unknown 'module' %s", module_str);
 		as_info_respond_error(db, AS_ERR_PARAMETER, "unknown 'module'");
 	}
-
 }
 
 static void
@@ -3759,12 +3235,17 @@ cmd_statistics(as_info_cmd_args* args)
 	info_append_bool(db, "failed_best_practices", g_bad_practices.used_sz != 0);
 
 	as_exchange_cluster_info(db);
-	info_append_uint32(db, "cluster_min_compatibility_id", as_exchange_min_compatibility_id()); // not in ticker
-	info_append_uint32(db, "cluster_max_compatibility_id", as_exchange_max_compatibility_id()); // not in ticker
-	info_append_bool(db, "cluster_integrity", as_clustering_has_integrity()); // not in ticker
-	info_append_bool(db, "cluster_is_member", ! as_clustering_is_orphan()); // not in ticker
+	info_append_uint32(db, "cluster_min_compatibility_id",
+			as_exchange_min_compatibility_id()); // not in ticker
+	info_append_uint32(db, "cluster_max_compatibility_id",
+			as_exchange_max_compatibility_id()); // not in ticker
+	info_append_bool(db, "cluster_integrity",
+			as_clustering_has_integrity()); // not in ticker
+	info_append_bool(db, "cluster_is_member",
+			! as_clustering_is_orphan()); // not in ticker
 	as_hb_info_duplicates_get(db); // not in ticker
-	info_append_uint32(db, "cluster_clock_skew_stop_writes_sec", clock_skew_stop_writes_sec()); // not in ticker
+	info_append_uint32(db, "cluster_clock_skew_stop_writes_sec",
+			clock_skew_stop_writes_sec()); // not in ticker
 	info_append_uint64(db, "cluster_clock_skew_ms", as_skew_monitor_skew());
 	as_skew_monitor_info(db);
 
@@ -3781,9 +3262,16 @@ cmd_statistics(as_info_cmd_args* args)
 	uint32_t free_mem_pct;
 	uint64_t thp_mem_kbytes;
 
-	sys_mem_info(&free_mem_kbytes, &free_mem_pct, &thp_mem_kbytes);
+	uint64_t host_free_mem_kbytes;
+	uint32_t host_free_mem_pct;
+
+	get_mem_info(g_config.cgroup_mem_tracking, &free_mem_kbytes, &free_mem_pct,
+			&host_free_mem_kbytes, &host_free_mem_pct, &thp_mem_kbytes);
+
 	info_append_uint64(db, "system_free_mem_kbytes", free_mem_kbytes);
 	info_append_int(db, "system_free_mem_pct", free_mem_pct);
+	info_append_uint64(db, "host_free_mem_kbytes", host_free_mem_kbytes);
+	info_append_int(db, "host_free_mem_pct", host_free_mem_pct);
 	info_append_uint64(db, "system_thp_mem_kbytes", thp_mem_kbytes);
 
 	info_append_uint32(db, "process_cpu_pct", g_process_cpu_pct);
@@ -3802,8 +3290,8 @@ cmd_statistics(as_info_cmd_args* args)
 	double efficiency_pct;
 	uint32_t site_count;
 
-	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes, &efficiency_pct,
-			&site_count);
+	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
+			&efficiency_pct, &site_count);
 	info_append_uint64(db, "heap_allocated_kbytes", allocated_kbytes);
 	info_append_uint64(db, "heap_active_kbytes", active_kbytes);
 	info_append_uint64(db, "heap_mapped_kbytes", mapped_kbytes);
@@ -3818,15 +3306,23 @@ cmd_statistics(as_info_cmd_args* args)
 	info_append_uint32(db, "tree_gc_queue", as_index_tree_gc_queue_size());
 
 	// Read closed before opened.
-	uint64_t n_proto_fds_closed = as_load_uint64(&g_stats.proto_connections_closed);
-	uint64_t n_admin_fds_closed = as_load_uint64(&g_stats.admin_connections_closed);
-	uint64_t n_hb_fds_closed = as_load_uint64(&g_stats.heartbeat_connections_closed);
-	uint64_t n_fabric_fds_closed = as_load_uint64(&g_stats.fabric_connections_closed);
+	uint64_t n_proto_fds_closed =
+			as_load_uint64(&g_stats.proto_connections_closed);
+	uint64_t n_admin_fds_closed =
+			as_load_uint64(&g_stats.admin_connections_closed);
+	uint64_t n_hb_fds_closed =
+			as_load_uint64(&g_stats.heartbeat_connections_closed);
+	uint64_t n_fabric_fds_closed =
+			as_load_uint64(&g_stats.fabric_connections_closed);
 	// TODO - ARM TSO plugin - will need barrier.
-	uint64_t n_proto_fds_opened = as_load_uint64(&g_stats.proto_connections_opened);
-	uint64_t n_admin_fds_opened = as_load_uint64(&g_stats.admin_connections_opened);
-	uint64_t n_hb_fds_opened = as_load_uint64(&g_stats.heartbeat_connections_opened);
-	uint64_t n_fabric_fds_opened = as_load_uint64(&g_stats.fabric_connections_opened);
+	uint64_t n_proto_fds_opened =
+			as_load_uint64(&g_stats.proto_connections_opened);
+	uint64_t n_admin_fds_opened =
+			as_load_uint64(&g_stats.admin_connections_opened);
+	uint64_t n_hb_fds_opened =
+			as_load_uint64(&g_stats.heartbeat_connections_opened);
+	uint64_t n_fabric_fds_opened =
+			as_load_uint64(&g_stats.fabric_connections_opened);
 
 	uint64_t n_proto_fds_open = n_proto_fds_opened - n_proto_fds_closed;
 	uint64_t n_admin_fds_open = n_admin_fds_opened - n_admin_fds_closed;
@@ -3846,8 +3342,10 @@ cmd_statistics(as_info_cmd_args* args)
 	info_append_uint64(db, "fabric_connections_opened", n_fabric_fds_opened);
 	info_append_uint64(db, "fabric_connections_closed", n_fabric_fds_closed);
 
-	info_append_uint64(db, "heartbeat_received_self", g_stats.heartbeat_received_self);
-	info_append_uint64(db, "heartbeat_received_foreign", g_stats.heartbeat_received_foreign);
+	info_append_uint64(db, "heartbeat_received_self",
+			g_stats.heartbeat_received_self);
+	info_append_uint64(db, "heartbeat_received_foreign",
+			g_stats.heartbeat_received_foreign);
 
 	info_append_uint64(db, "reaped_fds", g_stats.reaper_count); // not in ticker
 
@@ -3855,13 +3353,18 @@ cmd_statistics(as_info_cmd_args* args)
 	info_append_uint64(db, "info_timeout", g_stats.info_timeout); // not in ticker
 
 	info_append_uint64(db, "demarshal_error", g_stats.n_demarshal_error);
-	info_append_uint64(db, "early_tsvc_client_error", g_stats.n_tsvc_client_error);
-	info_append_uint64(db, "early_tsvc_from_proxy_error", g_stats.n_tsvc_from_proxy_error);
-	info_append_uint64(db, "early_tsvc_from_proxy_batch_sub_error", g_stats.n_tsvc_from_proxy_batch_sub_error);
+	info_append_uint64(db, "early_tsvc_client_error",
+			g_stats.n_tsvc_client_error);
+	info_append_uint64(db, "early_tsvc_from_proxy_error",
+			g_stats.n_tsvc_from_proxy_error);
+	info_append_uint64(db, "early_tsvc_from_proxy_batch_sub_error",
+			g_stats.n_tsvc_from_proxy_batch_sub_error);
 
-	info_append_uint32(db, "long_queries_active", as_query_manager_get_active_job_count());
+	info_append_uint32(db, "long_queries_active",
+			as_query_manager_get_active_job_count());
 
-	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
+	info_append_uint64(db, "batch_index_initiate",
+			g_stats.batch_index_initiate); // not in ticker
 
 	cf_dyn_buf_append_string(db, "batch_index_queue=");
 	as_batch_queues_info(db); // not in ticker
@@ -3874,16 +3377,24 @@ cmd_statistics(as_info_cmd_args* args)
 
 	// Everything below is not in ticker...
 
-	info_append_uint32(db, "batch_index_unused_buffers", as_batch_unused_buffers());
-	info_append_uint64(db, "batch_index_huge_buffers", g_stats.batch_index_huge_buffers);
-	info_append_uint64(db, "batch_index_created_buffers", g_stats.batch_index_created_buffers);
-	info_append_uint64(db, "batch_index_destroyed_buffers", g_stats.batch_index_destroyed_buffers);
+	info_append_uint32(db, "batch_index_unused_buffers",
+			as_batch_unused_buffers());
+	info_append_uint64(db, "batch_index_huge_buffers",
+			g_stats.batch_index_huge_buffers);
+	info_append_uint64(db, "batch_index_created_buffers",
+			g_stats.batch_index_created_buffers);
+	info_append_uint64(db, "batch_index_destroyed_buffers",
+			g_stats.batch_index_destroyed_buffers);
 
 	double batch_orig_sz = as_load_double(&g_stats.batch_comp_stat.avg_orig_sz);
-	double batch_ratio = batch_orig_sz > 0.0 ? g_stats.batch_comp_stat.avg_comp_sz / batch_orig_sz : 1.0;
+	double batch_ratio = batch_orig_sz > 0.0
+			? g_stats.batch_comp_stat.avg_comp_sz / batch_orig_sz
+			: 1.0;
 
-	info_append_format(db, "batch_index_proto_uncompressed_pct", "%.3f", g_stats.batch_comp_stat.uncomp_pct);
-	info_append_format(db, "batch_index_proto_compression_ratio", "%.3f", batch_ratio);
+	info_append_format(db, "batch_index_proto_uncompressed_pct", "%.3f",
+			g_stats.batch_comp_stat.uncomp_pct);
+	info_append_format(db, "batch_index_proto_compression_ratio", "%.3f",
+			batch_ratio);
 
 	char paxos_principal[16 + 1];
 	sprintf(paxos_principal, "%lX", as_exchange_principal());
@@ -3891,8 +3402,10 @@ cmd_statistics(as_info_cmd_args* args)
 
 	info_append_uint64(db, "time_since_rebalance", now_sec - g_rebalance_sec);
 
-	info_append_bool(db, "migrate_allowed", as_partition_balance_are_migrations_allowed());
-	info_append_uint64(db, "migrate_partitions_remaining", as_partition_balance_remaining_migrations());
+	info_append_bool(db, "migrate_allowed",
+			as_partition_balance_are_migrations_allowed());
+	info_append_uint64(db, "migrate_partitions_remaining",
+			as_partition_balance_remaining_migrations());
 
 	info_append_uint64(db, "fabric_bulk_send_rate", g_stats.fabric_bulk_s_rate);
 	info_append_uint64(db, "fabric_bulk_recv_rate", g_stats.fabric_bulk_r_rate);
@@ -3938,17 +3451,17 @@ cmd_tip(as_info_cmd_args* args)
 	cf_debug(AS_INFO, "tip command received: params %s", params);
 
 	char host_str[DNS_NAME_MAX_SIZE];
-	int  host_str_len = sizeof(host_str);
+	int host_str_len = sizeof(host_str);
 
-	info_param_result rv = as_info_parameter_get(params, "host", host_str,
-			&host_str_len);
+	info_param_result rv =
+			as_info_parameter_get(params, "host", host_str, &host_str_len);
 
 	if (! as_info_required_param_is_ok(db, "host", host_str, rv)) {
 		return;
 	}
 
 	char port_str[50];
-	int  port_str_len = sizeof(port_str);
+	int port_str_len = sizeof(port_str);
 
 	rv = as_info_parameter_get(params, "port", port_str, &port_str_len);
 
@@ -3957,7 +3470,7 @@ cmd_tip(as_info_cmd_args* args)
 	}
 
 	char tls_str[50];
-	int  tls_str_len = sizeof(tls_str);
+	int tls_str_len = sizeof(tls_str);
 
 	rv = as_info_parameter_get(params, "tls", tls_str, &tls_str_len);
 	rv = as_info_optional_param_is_ok(db, "tls", tls_str, rv);
@@ -3975,8 +3488,7 @@ cmd_tip(as_info_cmd_args* args)
 	if (cf_str_atoi(port_str, &port) != 0) {
 		cf_warning(AS_INFO, "tip command: port must be an integer in: %s",
 				port_str);
-		as_info_respond_error(db, AS_ERR_PARAMETER,
-				"'port' must be an integer");
+		as_info_respond_error(db, AS_ERR_PARAMETER, "'port' must be an integer");
 		return;
 	}
 
@@ -3988,7 +3500,8 @@ cmd_tip(as_info_cmd_args* args)
 		tls = false;
 	}
 	else {
-		cf_warning(AS_INFO, "The '%s:' command argument 'tls' value must be one of {'true', 'false'}, not '%s'",
+		cf_warning(AS_INFO,
+				"The '%s:' command argument 'tls' value must be one of {'true', 'false'}, not '%s'",
 				name, tls_str);
 		as_info_respond_error(db, AS_ERR_PARAMETER,
 				"'tls' must be either 'true' or 'false'");
@@ -4024,8 +3537,7 @@ cmd_tip_clear(as_info_cmd_args* args)
 	info_param_result rv = as_info_parameter_get(params, "host-port-list",
 			host_port_list, &host_port_list_len);
 
-	if (! as_info_required_param_is_ok(db, "host-port-list", host_port_list,
-			rv)) {
+	if (! as_info_required_param_is_ok(db, "host-port-list", host_port_list, rv)) {
 		return;
 	}
 
@@ -4046,8 +3558,8 @@ cmd_tip_clear(as_info_cmd_args* args)
 		char* host = strtok_r(host_port, host_port_delim, &host_port_save_ptr);
 
 		if (host == NULL) {
-			cf_warning(AS_INFO, "tip clear command: invalid host:port string: %s",
-					host_port);
+			cf_warning(AS_INFO,
+					"tip clear command: invalid host:port string: %s", host_port);
 			success = false;
 			break;
 		}
@@ -4060,7 +3572,8 @@ cmd_tip_clear(as_info_cmd_args* args)
 		}
 
 		if (port_str == NULL || cf_str_atoi(port_str, &port) != 0) {
-			cf_warning(AS_INFO, "tip clear command: port must be an integer in: %s",
+			cf_warning(AS_INFO,
+					"tip clear command: port must be an integer in: %s",
 					port_str);
 			success = false;
 			break;
@@ -4104,8 +3617,8 @@ cmd_truncate(as_info_cmd_args* args)
 
 	char ns_name[AS_ID_NAMESPACE_SZ];
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result ns_rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result ns_rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 
 	if (! as_info_required_param_is_ok(db, "namespace", ns_name, ns_rv)) {
 		return;
@@ -4115,8 +3628,8 @@ cmd_truncate(as_info_cmd_args* args)
 
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	int set_name_len = (int)sizeof(set_name);
-	info_param_result set_rv = as_info_parameter_get(params, "set", set_name,
-			&set_name_len);
+	info_param_result set_rv =
+			as_info_parameter_get(params, "set", set_name, &set_name_len);
 
 	if (! as_info_required_param_is_ok(db, "set", set_name, set_rv)) {
 		return;
@@ -4126,8 +3639,8 @@ cmd_truncate(as_info_cmd_args* args)
 
 	char lut_str[24]; // allow decimal, hex or octal in C constant format
 	int lut_str_len = (int)sizeof(lut_str);
-	info_param_result lut_rv = as_info_parameter_get(params, "lut", lut_str,
-			&lut_str_len);
+	info_param_result lut_rv =
+			as_info_parameter_get(params, "lut", lut_str, &lut_str_len);
 
 	lut_rv = as_info_optional_param_is_ok(db, "lut", lut_str, lut_rv);
 
@@ -4154,8 +3667,8 @@ cmd_truncate_namespace(as_info_cmd_args* args)
 
 	char ns_name[AS_ID_NAMESPACE_SZ];
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result ns_rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result ns_rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 
 	if (! as_info_required_param_is_ok(db, "namespace", ns_name, ns_rv)) {
 		return;
@@ -4165,11 +3678,12 @@ cmd_truncate_namespace(as_info_cmd_args* args)
 
 	char set_name[1]; // just checking for existence
 	int set_name_len = (int)sizeof(set_name);
-	info_param_result set_rv = as_info_parameter_get(params, "set", set_name,
-			&set_name_len);
+	info_param_result set_rv =
+			as_info_parameter_get(params, "set", set_name, &set_name_len);
 
 	if (set_rv != INFO_PARAM_FAIL_NOT_FOUND) {
-		cf_warning(AS_INFO, "truncate-namespace command: unexpected set name in command");
+		cf_warning(AS_INFO,
+				"truncate-namespace command: unexpected set name in command");
 		as_info_respond_error(db, AS_ERR_PARAMETER, "unexpected set name");
 		return;
 	}
@@ -4178,8 +3692,8 @@ cmd_truncate_namespace(as_info_cmd_args* args)
 
 	char lut_str[24]; // allow decimal, hex or octal in C constant format
 	int lut_str_len = (int)sizeof(lut_str);
-	info_param_result lut_rv = as_info_parameter_get(params, "lut", lut_str,
-			&lut_str_len);
+	info_param_result lut_rv =
+			as_info_parameter_get(params, "lut", lut_str, &lut_str_len);
 
 	lut_rv = as_info_optional_param_is_ok(db, "lut", lut_str, lut_rv);
 
@@ -4189,8 +3703,7 @@ cmd_truncate_namespace(as_info_cmd_args* args)
 
 	// Issue the truncate command.
 
-	as_truncate_cmd(ns_name, NULL, lut_rv == INFO_PARAM_OK ? lut_str : NULL,
-			db);
+	as_truncate_cmd(ns_name, NULL, lut_rv == INFO_PARAM_OK ? lut_str : NULL, db);
 }
 
 static void
@@ -4205,8 +3718,8 @@ cmd_truncate_namespace_undo(as_info_cmd_args* args)
 
 	char ns_name[AS_ID_NAMESPACE_SZ];
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result ns_rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result ns_rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 
 	if (! as_info_required_param_is_ok(db, "namespace", ns_name, ns_rv)) {
 		return;
@@ -4216,11 +3729,12 @@ cmd_truncate_namespace_undo(as_info_cmd_args* args)
 
 	char set_name[1]; // just checking for existence
 	int set_name_len = (int)sizeof(set_name);
-	info_param_result set_rv = as_info_parameter_get(params, "set", set_name,
-			&set_name_len);
+	info_param_result set_rv =
+			as_info_parameter_get(params, "set", set_name, &set_name_len);
 
 	if (set_rv != INFO_PARAM_FAIL_NOT_FOUND) {
-		cf_warning(AS_INFO, "truncate-namespace-undo command: unexpected set name in command");
+		cf_warning(AS_INFO,
+				"truncate-namespace-undo command: unexpected set name in command");
 		as_info_respond_error(db, AS_ERR_PARAMETER, "unexpected set name");
 		return;
 	}
@@ -4242,8 +3756,8 @@ cmd_truncate_undo(as_info_cmd_args* args)
 
 	char ns_name[AS_ID_NAMESPACE_SZ];
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result ns_rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result ns_rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 
 	if (! as_info_required_param_is_ok(db, "namespace", ns_name, ns_rv)) {
 		return;
@@ -4253,8 +3767,8 @@ cmd_truncate_undo(as_info_cmd_args* args)
 
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	int set_name_len = (int)sizeof(set_name);
-	info_param_result set_rv = as_info_parameter_get(params, "set", set_name,
-			&set_name_len);
+	info_param_result set_rv =
+			as_info_parameter_get(params, "set", set_name, &set_name_len);
 
 	if (! as_info_required_param_is_ok(db, "set", set_name, set_rv)) {
 		return;
@@ -4285,7 +3799,8 @@ cmd_user_agent_set(as_info_cmd_args* args)
 	char buf64[sizeof(ua->b64data)] = { 0 };
 	int buf64_sz = sizeof(buf64);
 
-	info_param_result rv = as_info_parameter_get(params, "value", buf64, &buf64_sz);
+	info_param_result rv =
+			as_info_parameter_get(params, "value", buf64, &buf64_sz);
 
 	if (! as_info_required_param_is_ok(db, "value", buf64, rv)) {
 		return;
@@ -4319,8 +3834,8 @@ cmd_version(as_info_cmd_args* args)
 
 	cf_dyn_buf* db = args->db;
 
-	cf_dyn_buf_append_format(db, "%s build %s",
-			aerospike_build_type, aerospike_build_id);
+	cf_dyn_buf_append_format(db, "%s build %s", aerospike_build_type,
+			aerospike_build_id);
 }
 
 static void
@@ -4344,7 +3859,6 @@ cmd_release(as_info_cmd_args* args)
 
 	cf_dyn_buf_chomp_char(db, ';');
 }
-
 
 //==========================================================
 // Local helpers - Info command helpers.
@@ -4461,7 +3975,8 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	// Using ns_ prefix to avoid confusion with global cluster_size.
 	info_append_uint32(db, "ns_cluster_size", ns->cluster_size);
 
-	info_append_uint32(db, "effective_replication_factor", ns->replication_factor);
+	info_append_uint32(db, "effective_replication_factor",
+			ns->replication_factor);
 
 	// Object counts.
 
@@ -4485,8 +4000,10 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	info_append_uint64(db, "unreplicated_records", ns->n_unreplicated_records);
 	info_append_uint32(db, "dead_partitions", ns->n_dead_partitions);
-	info_append_uint32(db, "unavailable_partitions", ns->n_unavailable_partitions);
-	info_append_uint32(db, "auto_revived_partitions", ns->n_auto_revived_partitions);
+	info_append_uint32(db, "unavailable_partitions",
+			ns->n_unavailable_partitions);
+	info_append_uint32(db, "auto_revived_partitions",
+			ns->n_auto_revived_partitions);
 	info_append_bool(db, "clock_skew_stop_writes", ns->clock_skew_stop_writes);
 
 	// Expiration & eviction (nsup) stats.
@@ -4502,7 +4019,8 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint32(db, "evict_void_time", ns->evict_void_time);
 	info_append_uint32(db, "smd_evict_void_time", ns->smd_evict_void_time);
 	info_append_uint32(db, "nsup_cycle_duration", ns->nsup_cycle_duration);
-	info_append_format(db, "nsup_cycle_deleted_pct", "%.2f", ns->nsup_cycle_deleted_pct);
+	info_append_format(db, "nsup_cycle_deleted_pct", "%.2f",
+			ns->nsup_cycle_deleted_pct);
 	info_append_uint64(db, "nsup_xdr_key_busy", ns->n_nsup_xdr_key_busy);
 
 	// Truncate stats.
@@ -4640,15 +4158,22 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	// Proto compression stats.
 
 	double record_orig_sz = as_load_double(&ns->record_comp_stat.avg_orig_sz);
-	double record_ratio = record_orig_sz > 0.0 ? ns->record_comp_stat.avg_comp_sz / record_orig_sz : 1.0;
+	double record_ratio = record_orig_sz > 0.0
+			? ns->record_comp_stat.avg_comp_sz / record_orig_sz
+			: 1.0;
 
-	info_append_format(db, "record_proto_uncompressed_pct", "%.3f", ns->record_comp_stat.uncomp_pct);
-	info_append_format(db, "record_proto_compression_ratio", "%.3f", record_ratio);
+	info_append_format(db, "record_proto_uncompressed_pct", "%.3f",
+			ns->record_comp_stat.uncomp_pct);
+	info_append_format(db, "record_proto_compression_ratio", "%.3f",
+			record_ratio);
 
 	double query_orig_sz = as_load_double(&ns->query_comp_stat.avg_orig_sz);
-	double query_ratio = query_orig_sz > 0.0 ? ns->query_comp_stat.avg_comp_sz / query_orig_sz : 1.0;
+	double query_ratio = query_orig_sz > 0.0
+			? ns->query_comp_stat.avg_comp_sz / query_orig_sz
+			: 1.0;
 
-	info_append_format(db, "query_proto_uncompressed_pct", "%.3f", ns->query_comp_stat.uncomp_pct);
+	info_append_format(db, "query_proto_uncompressed_pct", "%.3f",
+			ns->query_comp_stat.uncomp_pct);
 	info_append_format(db, "query_proto_compression_ratio", "%.3f", query_ratio);
 
 	// Partition balance state.
@@ -4659,45 +4184,63 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_bool(db, "effective_is_quiesced", ns->is_quiesced);
 	info_append_uint64(db, "nodes_quiesced", ns->cluster_size - ns->active_size);
 
-	info_append_bool(db, "effective_prefer_uniform_balance", ns->prefer_uniform_balance);
-	info_append_uint32(db, "effective_active_rack", ns->cp ? ns->roster_active_rack : ns->active_rack);
+	info_append_bool(db, "effective_prefer_uniform_balance",
+			ns->prefer_uniform_balance);
+	info_append_uint32(db, "effective_active_rack",
+			ns->cp ? ns->roster_active_rack : ns->active_rack);
 
 	as_exchange_info_unlock();
 
 	// Migration stats.
 
-	info_append_uint64(db, "migrate_tx_partitions_imbalance", ns->migrate_tx_partitions_imbalance);
+	info_append_uint64(db, "migrate_tx_partitions_imbalance",
+			ns->migrate_tx_partitions_imbalance);
 
 	info_append_uint64(db, "migrate_tx_instances", ns->migrate_tx_instance_count);
 	info_append_uint64(db, "migrate_rx_instances", ns->migrate_rx_instance_count);
 
-	info_append_uint64(db, "migrate_tx_partitions_active", ns->migrate_tx_partitions_active);
-	info_append_uint64(db, "migrate_rx_partitions_active", ns->migrate_rx_partitions_active);
+	info_append_uint64(db, "migrate_tx_partitions_active",
+			ns->migrate_tx_partitions_active);
+	info_append_uint64(db, "migrate_rx_partitions_active",
+			ns->migrate_rx_partitions_active);
 
-	info_append_uint64(db, "migrate_tx_partitions_initial", ns->migrate_tx_partitions_initial);
-	info_append_uint64(db, "migrate_tx_partitions_remaining", ns->migrate_tx_partitions_remaining);
-	info_append_uint64(db, "migrate_tx_partitions_lead_remaining", ns->migrate_tx_partitions_lead_remaining);
+	info_append_uint64(db, "migrate_tx_partitions_initial",
+			ns->migrate_tx_partitions_initial);
+	info_append_uint64(db, "migrate_tx_partitions_remaining",
+			ns->migrate_tx_partitions_remaining);
+	info_append_uint64(db, "migrate_tx_partitions_lead_remaining",
+			ns->migrate_tx_partitions_lead_remaining);
 
-	info_append_uint64(db, "migrate_rx_partitions_initial", ns->migrate_rx_partitions_initial);
-	info_append_uint64(db, "migrate_rx_partitions_remaining", ns->migrate_rx_partitions_remaining);
+	info_append_uint64(db, "migrate_rx_partitions_initial",
+			ns->migrate_rx_partitions_initial);
+	info_append_uint64(db, "migrate_rx_partitions_remaining",
+			ns->migrate_rx_partitions_remaining);
 
-	info_append_uint64(db, "migrate_records_skipped", ns->migrate_records_skipped);
-	info_append_uint64(db, "migrate_records_transmitted", ns->migrate_records_transmitted);
-	info_append_uint64(db, "migrate_record_retransmits", ns->migrate_record_retransmits);
-	info_append_uint64(db, "migrate_record_receives", ns->migrate_record_receives);
-	info_append_uint64(db, "migrate_records_unreadable", ns->migrate_records_unreadable);
+	info_append_uint64(db, "migrate_records_skipped",
+			ns->migrate_records_skipped);
+	info_append_uint64(db, "migrate_records_transmitted",
+			ns->migrate_records_transmitted);
+	info_append_uint64(db, "migrate_record_retransmits",
+			ns->migrate_record_retransmits);
+	info_append_uint64(db, "migrate_record_receives",
+			ns->migrate_record_receives);
+	info_append_uint64(db, "migrate_records_unreadable",
+			ns->migrate_records_unreadable);
 
 	info_append_uint64(db, "migrate_signals_active", ns->migrate_signals_active);
-	info_append_uint64(db, "migrate_signals_remaining", ns->migrate_signals_remaining);
+	info_append_uint64(db, "migrate_signals_remaining",
+			ns->migrate_signals_remaining);
 
-	info_append_uint64(db, "migrate_fresh_partitions", ns->migrate_fresh_partitions);
+	info_append_uint64(db, "migrate_fresh_partitions",
+			ns->migrate_fresh_partitions);
 
 	info_append_uint64(db, "appeals_tx_active", ns->appeals_tx_active);
 	info_append_uint64(db, "appeals_rx_active", ns->appeals_rx_active);
 
 	info_append_uint64(db, "appeals_tx_remaining", ns->appeals_tx_remaining);
 
-	info_append_uint64(db, "appeals_records_exonerated", ns->appeals_records_exonerated);
+	info_append_uint64(db, "appeals_records_exonerated",
+			ns->appeals_records_exonerated);
 
 	// From-client transaction stats.
 
@@ -4712,150 +4255,236 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "client_read_error", ns->n_client_read_error);
 	info_append_uint64(db, "client_read_timeout", ns->n_client_read_timeout);
 	info_append_uint64(db, "client_read_not_found", ns->n_client_read_not_found);
-	info_append_uint64(db, "client_read_filtered_out", ns->n_client_read_filtered_out);
+	info_append_uint64(db, "client_read_filtered_out",
+			ns->n_client_read_filtered_out);
 
 	info_append_uint64(db, "client_write_success", ns->n_client_write_success);
 	info_append_uint64(db, "client_write_error", ns->n_client_write_error);
 	info_append_uint64(db, "client_write_timeout", ns->n_client_write_timeout);
-	info_append_uint64(db, "client_write_filtered_out", ns->n_client_write_filtered_out);
+	info_append_uint64(db, "client_write_filtered_out",
+			ns->n_client_write_filtered_out);
 
 	// Subset of n_client_write_... above, respectively.
-	info_append_uint64(db, "xdr_client_write_success", ns->n_xdr_client_write_success);
-	info_append_uint64(db, "xdr_client_write_error", ns->n_xdr_client_write_error);
-	info_append_uint64(db, "xdr_client_write_timeout", ns->n_xdr_client_write_timeout);
+	info_append_uint64(db, "xdr_client_write_success",
+			ns->n_xdr_client_write_success);
+	info_append_uint64(db, "xdr_client_write_error",
+			ns->n_xdr_client_write_error);
+	info_append_uint64(db, "xdr_client_write_timeout",
+			ns->n_xdr_client_write_timeout);
 
 	info_append_uint64(db, "client_delete_success", ns->n_client_delete_success);
 	info_append_uint64(db, "client_delete_error", ns->n_client_delete_error);
 	info_append_uint64(db, "client_delete_timeout", ns->n_client_delete_timeout);
-	info_append_uint64(db, "client_delete_not_found", ns->n_client_delete_not_found);
-	info_append_uint64(db, "client_delete_filtered_out", ns->n_client_delete_filtered_out);
+	info_append_uint64(db, "client_delete_not_found",
+			ns->n_client_delete_not_found);
+	info_append_uint64(db, "client_delete_filtered_out",
+			ns->n_client_delete_filtered_out);
 
 	// Subset of n_client_delete_... above, respectively.
-	info_append_uint64(db, "xdr_client_delete_success", ns->n_xdr_client_delete_success);
-	info_append_uint64(db, "xdr_client_delete_error", ns->n_xdr_client_delete_error);
-	info_append_uint64(db, "xdr_client_delete_timeout", ns->n_xdr_client_delete_timeout);
-	info_append_uint64(db, "xdr_client_delete_not_found", ns->n_xdr_client_delete_not_found);
+	info_append_uint64(db, "xdr_client_delete_success",
+			ns->n_xdr_client_delete_success);
+	info_append_uint64(db, "xdr_client_delete_error",
+			ns->n_xdr_client_delete_error);
+	info_append_uint64(db, "xdr_client_delete_timeout",
+			ns->n_xdr_client_delete_timeout);
+	info_append_uint64(db, "xdr_client_delete_not_found",
+			ns->n_xdr_client_delete_not_found);
 
 	info_append_uint64(db, "client_udf_complete", ns->n_client_udf_complete);
 	info_append_uint64(db, "client_udf_error", ns->n_client_udf_error);
 	info_append_uint64(db, "client_udf_timeout", ns->n_client_udf_timeout);
-	info_append_uint64(db, "client_udf_filtered_out", ns->n_client_udf_filtered_out);
+	info_append_uint64(db, "client_udf_filtered_out",
+			ns->n_client_udf_filtered_out);
 
-	info_append_uint64(db, "client_lang_read_success", ns->n_client_lang_read_success);
-	info_append_uint64(db, "client_lang_write_success", ns->n_client_lang_write_success);
-	info_append_uint64(db, "client_lang_delete_success", ns->n_client_lang_delete_success);
+	info_append_uint64(db, "client_lang_read_success",
+			ns->n_client_lang_read_success);
+	info_append_uint64(db, "client_lang_write_success",
+			ns->n_client_lang_write_success);
+	info_append_uint64(db, "client_lang_delete_success",
+			ns->n_client_lang_delete_success);
 	info_append_uint64(db, "client_lang_error", ns->n_client_lang_error);
 
 	// From-proxy transaction stats.
 
 	info_append_uint64(db, "from_proxy_tsvc_error", ns->n_from_proxy_tsvc_error);
-	info_append_uint64(db, "from_proxy_tsvc_timeout", ns->n_from_proxy_tsvc_timeout);
+	info_append_uint64(db, "from_proxy_tsvc_timeout",
+			ns->n_from_proxy_tsvc_timeout);
 
-	info_append_uint64(db, "from_proxy_read_success", ns->n_from_proxy_read_success);
+	info_append_uint64(db, "from_proxy_read_success",
+			ns->n_from_proxy_read_success);
 	info_append_uint64(db, "from_proxy_read_error", ns->n_from_proxy_read_error);
-	info_append_uint64(db, "from_proxy_read_timeout", ns->n_from_proxy_read_timeout);
-	info_append_uint64(db, "from_proxy_read_not_found", ns->n_from_proxy_read_not_found);
-	info_append_uint64(db, "from_proxy_read_filtered_out", ns->n_from_proxy_read_filtered_out);
+	info_append_uint64(db, "from_proxy_read_timeout",
+			ns->n_from_proxy_read_timeout);
+	info_append_uint64(db, "from_proxy_read_not_found",
+			ns->n_from_proxy_read_not_found);
+	info_append_uint64(db, "from_proxy_read_filtered_out",
+			ns->n_from_proxy_read_filtered_out);
 
-	info_append_uint64(db, "from_proxy_write_success", ns->n_from_proxy_write_success);
-	info_append_uint64(db, "from_proxy_write_error", ns->n_from_proxy_write_error);
-	info_append_uint64(db, "from_proxy_write_timeout", ns->n_from_proxy_write_timeout);
-	info_append_uint64(db, "from_proxy_write_filtered_out", ns->n_from_proxy_write_filtered_out);
+	info_append_uint64(db, "from_proxy_write_success",
+			ns->n_from_proxy_write_success);
+	info_append_uint64(db, "from_proxy_write_error",
+			ns->n_from_proxy_write_error);
+	info_append_uint64(db, "from_proxy_write_timeout",
+			ns->n_from_proxy_write_timeout);
+	info_append_uint64(db, "from_proxy_write_filtered_out",
+			ns->n_from_proxy_write_filtered_out);
 
 	// Subset of n_from_proxy_write_... above, respectively.
-	info_append_uint64(db, "xdr_from_proxy_write_success", ns->n_xdr_from_proxy_write_success);
-	info_append_uint64(db, "xdr_from_proxy_write_error", ns->n_xdr_from_proxy_write_error);
-	info_append_uint64(db, "xdr_from_proxy_write_timeout", ns->n_xdr_from_proxy_write_timeout);
+	info_append_uint64(db, "xdr_from_proxy_write_success",
+			ns->n_xdr_from_proxy_write_success);
+	info_append_uint64(db, "xdr_from_proxy_write_error",
+			ns->n_xdr_from_proxy_write_error);
+	info_append_uint64(db, "xdr_from_proxy_write_timeout",
+			ns->n_xdr_from_proxy_write_timeout);
 
-	info_append_uint64(db, "from_proxy_delete_success", ns->n_from_proxy_delete_success);
-	info_append_uint64(db, "from_proxy_delete_error", ns->n_from_proxy_delete_error);
-	info_append_uint64(db, "from_proxy_delete_timeout", ns->n_from_proxy_delete_timeout);
-	info_append_uint64(db, "from_proxy_delete_not_found", ns->n_from_proxy_delete_not_found);
-	info_append_uint64(db, "from_proxy_delete_filtered_out", ns->n_from_proxy_delete_filtered_out);
+	info_append_uint64(db, "from_proxy_delete_success",
+			ns->n_from_proxy_delete_success);
+	info_append_uint64(db, "from_proxy_delete_error",
+			ns->n_from_proxy_delete_error);
+	info_append_uint64(db, "from_proxy_delete_timeout",
+			ns->n_from_proxy_delete_timeout);
+	info_append_uint64(db, "from_proxy_delete_not_found",
+			ns->n_from_proxy_delete_not_found);
+	info_append_uint64(db, "from_proxy_delete_filtered_out",
+			ns->n_from_proxy_delete_filtered_out);
 
 	// Subset of n_from_proxy_delete_... above, respectively.
-	info_append_uint64(db, "xdr_from_proxy_delete_success", ns->n_xdr_from_proxy_delete_success);
-	info_append_uint64(db, "xdr_from_proxy_delete_error", ns->n_xdr_from_proxy_delete_error);
-	info_append_uint64(db, "xdr_from_proxy_delete_timeout", ns->n_xdr_from_proxy_delete_timeout);
-	info_append_uint64(db, "xdr_from_proxy_delete_not_found", ns->n_xdr_from_proxy_delete_not_found);
+	info_append_uint64(db, "xdr_from_proxy_delete_success",
+			ns->n_xdr_from_proxy_delete_success);
+	info_append_uint64(db, "xdr_from_proxy_delete_error",
+			ns->n_xdr_from_proxy_delete_error);
+	info_append_uint64(db, "xdr_from_proxy_delete_timeout",
+			ns->n_xdr_from_proxy_delete_timeout);
+	info_append_uint64(db, "xdr_from_proxy_delete_not_found",
+			ns->n_xdr_from_proxy_delete_not_found);
 
-	info_append_uint64(db, "from_proxy_udf_complete", ns->n_from_proxy_udf_complete);
+	info_append_uint64(db, "from_proxy_udf_complete",
+			ns->n_from_proxy_udf_complete);
 	info_append_uint64(db, "from_proxy_udf_error", ns->n_from_proxy_udf_error);
-	info_append_uint64(db, "from_proxy_udf_timeout", ns->n_from_proxy_udf_timeout);
-	info_append_uint64(db, "from_proxy_udf_filtered_out", ns->n_from_proxy_udf_filtered_out);
+	info_append_uint64(db, "from_proxy_udf_timeout",
+			ns->n_from_proxy_udf_timeout);
+	info_append_uint64(db, "from_proxy_udf_filtered_out",
+			ns->n_from_proxy_udf_filtered_out);
 
-	info_append_uint64(db, "from_proxy_lang_read_success", ns->n_from_proxy_lang_read_success);
-	info_append_uint64(db, "from_proxy_lang_write_success", ns->n_from_proxy_lang_write_success);
-	info_append_uint64(db, "from_proxy_lang_delete_success", ns->n_from_proxy_lang_delete_success);
+	info_append_uint64(db, "from_proxy_lang_read_success",
+			ns->n_from_proxy_lang_read_success);
+	info_append_uint64(db, "from_proxy_lang_write_success",
+			ns->n_from_proxy_lang_write_success);
+	info_append_uint64(db, "from_proxy_lang_delete_success",
+			ns->n_from_proxy_lang_delete_success);
 	info_append_uint64(db, "from_proxy_lang_error", ns->n_from_proxy_lang_error);
 
 	// Batch sub-transaction stats.
 
 	info_append_uint64(db, "batch_sub_tsvc_error", ns->n_batch_sub_tsvc_error);
-	info_append_uint64(db, "batch_sub_tsvc_timeout", ns->n_batch_sub_tsvc_timeout);
+	info_append_uint64(db, "batch_sub_tsvc_timeout",
+			ns->n_batch_sub_tsvc_timeout);
 
-	info_append_uint64(db, "batch_sub_proxy_complete", ns->n_batch_sub_proxy_complete);
+	info_append_uint64(db, "batch_sub_proxy_complete",
+			ns->n_batch_sub_proxy_complete);
 	info_append_uint64(db, "batch_sub_proxy_error", ns->n_batch_sub_proxy_error);
-	info_append_uint64(db, "batch_sub_proxy_timeout", ns->n_batch_sub_proxy_timeout);
+	info_append_uint64(db, "batch_sub_proxy_timeout",
+			ns->n_batch_sub_proxy_timeout);
 
-	info_append_uint64(db, "batch_sub_read_success", ns->n_batch_sub_read_success);
+	info_append_uint64(db, "batch_sub_read_success",
+			ns->n_batch_sub_read_success);
 	info_append_uint64(db, "batch_sub_read_error", ns->n_batch_sub_read_error);
-	info_append_uint64(db, "batch_sub_read_timeout", ns->n_batch_sub_read_timeout);
-	info_append_uint64(db, "batch_sub_read_not_found", ns->n_batch_sub_read_not_found);
-	info_append_uint64(db, "batch_sub_read_filtered_out", ns->n_batch_sub_read_filtered_out);
+	info_append_uint64(db, "batch_sub_read_timeout",
+			ns->n_batch_sub_read_timeout);
+	info_append_uint64(db, "batch_sub_read_not_found",
+			ns->n_batch_sub_read_not_found);
+	info_append_uint64(db, "batch_sub_read_filtered_out",
+			ns->n_batch_sub_read_filtered_out);
 
-	info_append_uint64(db, "batch_sub_write_success", ns->n_batch_sub_write_success);
+	info_append_uint64(db, "batch_sub_write_success",
+			ns->n_batch_sub_write_success);
 	info_append_uint64(db, "batch_sub_write_error", ns->n_batch_sub_write_error);
-	info_append_uint64(db, "batch_sub_write_timeout", ns->n_batch_sub_write_timeout);
-	info_append_uint64(db, "batch_sub_write_filtered_out", ns->n_batch_sub_write_filtered_out);
+	info_append_uint64(db, "batch_sub_write_timeout",
+			ns->n_batch_sub_write_timeout);
+	info_append_uint64(db, "batch_sub_write_filtered_out",
+			ns->n_batch_sub_write_filtered_out);
 
-	info_append_uint64(db, "batch_sub_delete_success", ns->n_batch_sub_delete_success);
-	info_append_uint64(db, "batch_sub_delete_error", ns->n_batch_sub_delete_error);
-	info_append_uint64(db, "batch_sub_delete_timeout", ns->n_batch_sub_delete_timeout);
-	info_append_uint64(db, "batch_sub_delete_not_found", ns->n_batch_sub_delete_not_found);
-	info_append_uint64(db, "batch_sub_delete_filtered_out", ns->n_batch_sub_delete_filtered_out);
+	info_append_uint64(db, "batch_sub_delete_success",
+			ns->n_batch_sub_delete_success);
+	info_append_uint64(db, "batch_sub_delete_error",
+			ns->n_batch_sub_delete_error);
+	info_append_uint64(db, "batch_sub_delete_timeout",
+			ns->n_batch_sub_delete_timeout);
+	info_append_uint64(db, "batch_sub_delete_not_found",
+			ns->n_batch_sub_delete_not_found);
+	info_append_uint64(db, "batch_sub_delete_filtered_out",
+			ns->n_batch_sub_delete_filtered_out);
 
-	info_append_uint64(db, "batch_sub_udf_complete", ns->n_batch_sub_udf_complete);
+	info_append_uint64(db, "batch_sub_udf_complete",
+			ns->n_batch_sub_udf_complete);
 	info_append_uint64(db, "batch_sub_udf_error", ns->n_batch_sub_udf_error);
 	info_append_uint64(db, "batch_sub_udf_timeout", ns->n_batch_sub_udf_timeout);
-	info_append_uint64(db, "batch_sub_udf_filtered_out", ns->n_batch_sub_udf_filtered_out);
+	info_append_uint64(db, "batch_sub_udf_filtered_out",
+			ns->n_batch_sub_udf_filtered_out);
 
-	info_append_uint64(db, "batch_sub_lang_read_success", ns->n_batch_sub_lang_read_success);
-	info_append_uint64(db, "batch_sub_lang_write_success", ns->n_batch_sub_lang_write_success);
-	info_append_uint64(db, "batch_sub_lang_delete_success", ns->n_batch_sub_lang_delete_success);
+	info_append_uint64(db, "batch_sub_lang_read_success",
+			ns->n_batch_sub_lang_read_success);
+	info_append_uint64(db, "batch_sub_lang_write_success",
+			ns->n_batch_sub_lang_write_success);
+	info_append_uint64(db, "batch_sub_lang_delete_success",
+			ns->n_batch_sub_lang_delete_success);
 	info_append_uint64(db, "batch_sub_lang_error", ns->n_batch_sub_lang_error);
 
 	// From-proxy batch sub-transaction stats.
 
-	info_append_uint64(db, "from_proxy_batch_sub_tsvc_error", ns->n_from_proxy_batch_sub_tsvc_error);
-	info_append_uint64(db, "from_proxy_batch_sub_tsvc_timeout", ns->n_from_proxy_batch_sub_tsvc_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_tsvc_error",
+			ns->n_from_proxy_batch_sub_tsvc_error);
+	info_append_uint64(db, "from_proxy_batch_sub_tsvc_timeout",
+			ns->n_from_proxy_batch_sub_tsvc_timeout);
 
-	info_append_uint64(db, "from_proxy_batch_sub_read_success", ns->n_from_proxy_batch_sub_read_success);
-	info_append_uint64(db, "from_proxy_batch_sub_read_error", ns->n_from_proxy_batch_sub_read_error);
-	info_append_uint64(db, "from_proxy_batch_sub_read_timeout", ns->n_from_proxy_batch_sub_read_timeout);
-	info_append_uint64(db, "from_proxy_batch_sub_read_not_found", ns->n_from_proxy_batch_sub_read_not_found);
-	info_append_uint64(db, "from_proxy_batch_sub_read_filtered_out", ns->n_from_proxy_batch_sub_read_filtered_out);
+	info_append_uint64(db, "from_proxy_batch_sub_read_success",
+			ns->n_from_proxy_batch_sub_read_success);
+	info_append_uint64(db, "from_proxy_batch_sub_read_error",
+			ns->n_from_proxy_batch_sub_read_error);
+	info_append_uint64(db, "from_proxy_batch_sub_read_timeout",
+			ns->n_from_proxy_batch_sub_read_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_read_not_found",
+			ns->n_from_proxy_batch_sub_read_not_found);
+	info_append_uint64(db, "from_proxy_batch_sub_read_filtered_out",
+			ns->n_from_proxy_batch_sub_read_filtered_out);
 
-	info_append_uint64(db, "from_proxy_batch_sub_write_success", ns->n_from_proxy_batch_sub_write_success);
-	info_append_uint64(db, "from_proxy_batch_sub_write_error", ns->n_from_proxy_batch_sub_write_error);
-	info_append_uint64(db, "from_proxy_batch_sub_write_timeout", ns->n_from_proxy_batch_sub_write_timeout);
-	info_append_uint64(db, "from_proxy_batch_sub_write_filtered_out", ns->n_from_proxy_batch_sub_write_filtered_out);
+	info_append_uint64(db, "from_proxy_batch_sub_write_success",
+			ns->n_from_proxy_batch_sub_write_success);
+	info_append_uint64(db, "from_proxy_batch_sub_write_error",
+			ns->n_from_proxy_batch_sub_write_error);
+	info_append_uint64(db, "from_proxy_batch_sub_write_timeout",
+			ns->n_from_proxy_batch_sub_write_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_write_filtered_out",
+			ns->n_from_proxy_batch_sub_write_filtered_out);
 
-	info_append_uint64(db, "from_proxy_batch_sub_delete_success", ns->n_from_proxy_batch_sub_delete_success);
-	info_append_uint64(db, "from_proxy_batch_sub_delete_error", ns->n_from_proxy_batch_sub_delete_error);
-	info_append_uint64(db, "from_proxy_batch_sub_delete_timeout", ns->n_from_proxy_batch_sub_delete_timeout);
-	info_append_uint64(db, "from_proxy_batch_sub_delete_not_found", ns->n_from_proxy_batch_sub_delete_not_found);
-	info_append_uint64(db, "from_proxy_batch_sub_delete_filtered_out", ns->n_from_proxy_batch_sub_delete_filtered_out);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_success",
+			ns->n_from_proxy_batch_sub_delete_success);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_error",
+			ns->n_from_proxy_batch_sub_delete_error);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_timeout",
+			ns->n_from_proxy_batch_sub_delete_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_not_found",
+			ns->n_from_proxy_batch_sub_delete_not_found);
+	info_append_uint64(db, "from_proxy_batch_sub_delete_filtered_out",
+			ns->n_from_proxy_batch_sub_delete_filtered_out);
 
-	info_append_uint64(db, "from_proxy_batch_sub_udf_complete", ns->n_from_proxy_batch_sub_udf_complete);
-	info_append_uint64(db, "from_proxy_batch_sub_udf_error", ns->n_from_proxy_batch_sub_udf_error);
-	info_append_uint64(db, "from_proxy_batch_sub_udf_timeout", ns->n_from_proxy_batch_sub_udf_timeout);
-	info_append_uint64(db, "from_proxy_batch_sub_udf_filtered_out", ns->n_from_proxy_batch_sub_udf_filtered_out);
+	info_append_uint64(db, "from_proxy_batch_sub_udf_complete",
+			ns->n_from_proxy_batch_sub_udf_complete);
+	info_append_uint64(db, "from_proxy_batch_sub_udf_error",
+			ns->n_from_proxy_batch_sub_udf_error);
+	info_append_uint64(db, "from_proxy_batch_sub_udf_timeout",
+			ns->n_from_proxy_batch_sub_udf_timeout);
+	info_append_uint64(db, "from_proxy_batch_sub_udf_filtered_out",
+			ns->n_from_proxy_batch_sub_udf_filtered_out);
 
-	info_append_uint64(db, "from_proxy_batch_sub_lang_read_success", ns->n_from_proxy_batch_sub_lang_read_success);
-	info_append_uint64(db, "from_proxy_batch_sub_lang_write_success", ns->n_from_proxy_batch_sub_lang_write_success);
-	info_append_uint64(db, "from_proxy_batch_sub_lang_delete_success", ns->n_from_proxy_batch_sub_lang_delete_success);
-	info_append_uint64(db, "from_proxy_batch_sub_lang_error", ns->n_from_proxy_batch_sub_lang_error);
+	info_append_uint64(db, "from_proxy_batch_sub_lang_read_success",
+			ns->n_from_proxy_batch_sub_lang_read_success);
+	info_append_uint64(db, "from_proxy_batch_sub_lang_write_success",
+			ns->n_from_proxy_batch_sub_lang_write_success);
+	info_append_uint64(db, "from_proxy_batch_sub_lang_delete_success",
+			ns->n_from_proxy_batch_sub_lang_delete_success);
+	info_append_uint64(db, "from_proxy_batch_sub_lang_error",
+			ns->n_from_proxy_batch_sub_lang_error);
 
 	// Internal-UDF sub-transaction stats.
 
@@ -4865,11 +4494,15 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "udf_sub_udf_complete", ns->n_udf_sub_udf_complete);
 	info_append_uint64(db, "udf_sub_udf_error", ns->n_udf_sub_udf_error);
 	info_append_uint64(db, "udf_sub_udf_timeout", ns->n_udf_sub_udf_timeout);
-	info_append_uint64(db, "udf_sub_udf_filtered_out", ns->n_udf_sub_udf_filtered_out);
+	info_append_uint64(db, "udf_sub_udf_filtered_out",
+			ns->n_udf_sub_udf_filtered_out);
 
-	info_append_uint64(db, "udf_sub_lang_read_success", ns->n_udf_sub_lang_read_success);
-	info_append_uint64(db, "udf_sub_lang_write_success", ns->n_udf_sub_lang_write_success);
-	info_append_uint64(db, "udf_sub_lang_delete_success", ns->n_udf_sub_lang_delete_success);
+	info_append_uint64(db, "udf_sub_lang_read_success",
+			ns->n_udf_sub_lang_read_success);
+	info_append_uint64(db, "udf_sub_lang_write_success",
+			ns->n_udf_sub_lang_write_success);
+	info_append_uint64(db, "udf_sub_lang_delete_success",
+			ns->n_udf_sub_lang_delete_success);
 	info_append_uint64(db, "udf_sub_lang_error", ns->n_udf_sub_lang_error);
 
 	// Internal-ops sub-transaction stats.
@@ -4880,94 +4513,137 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "ops_sub_write_success", ns->n_ops_sub_write_success);
 	info_append_uint64(db, "ops_sub_write_error", ns->n_ops_sub_write_error);
 	info_append_uint64(db, "ops_sub_write_timeout", ns->n_ops_sub_write_timeout);
-	info_append_uint64(db, "ops_sub_write_filtered_out", ns->n_ops_sub_write_filtered_out);
+	info_append_uint64(db, "ops_sub_write_filtered_out",
+			ns->n_ops_sub_write_filtered_out);
 
 	// Duplicate resolution stats.
 
 	info_append_uint64(db, "dup_res_ask", ns->n_dup_res_ask);
 
 	info_append_uint64(db, "dup_res_respond_read", ns->n_dup_res_respond_read);
-	info_append_uint64(db, "dup_res_respond_no_read", ns->n_dup_res_respond_no_read);
+	info_append_uint64(db, "dup_res_respond_no_read",
+			ns->n_dup_res_respond_no_read);
 
 	// Transaction retransmit stats - 'all' means both client & proxy origins.
 
-	info_append_uint64(db, "retransmit_all_read_dup_res", ns->n_retransmit_all_read_dup_res);
-	info_append_uint64(db, "retransmit_all_write_dup_res", ns->n_retransmit_all_write_dup_res);
-	info_append_uint64(db, "retransmit_all_delete_dup_res", ns->n_retransmit_all_delete_dup_res);
-	info_append_uint64(db, "retransmit_all_udf_dup_res", ns->n_retransmit_all_udf_dup_res);
-	info_append_uint64(db, "retransmit_all_batch_sub_read_dup_res", ns->n_retransmit_all_batch_sub_read_dup_res);
-	info_append_uint64(db, "retransmit_all_batch_sub_write_dup_res", ns->n_retransmit_all_batch_sub_write_dup_res);
-	info_append_uint64(db, "retransmit_all_batch_sub_delete_dup_res", ns->n_retransmit_all_batch_sub_delete_dup_res);
-	info_append_uint64(db, "retransmit_all_batch_sub_udf_dup_res", ns->n_retransmit_all_batch_sub_udf_dup_res);
-	info_append_uint64(db, "retransmit_udf_sub_dup_res", ns->n_retransmit_udf_sub_dup_res);
-	info_append_uint64(db, "retransmit_ops_sub_dup_res", ns->n_retransmit_ops_sub_dup_res);
+	info_append_uint64(db, "retransmit_all_read_dup_res",
+			ns->n_retransmit_all_read_dup_res);
+	info_append_uint64(db, "retransmit_all_write_dup_res",
+			ns->n_retransmit_all_write_dup_res);
+	info_append_uint64(db, "retransmit_all_delete_dup_res",
+			ns->n_retransmit_all_delete_dup_res);
+	info_append_uint64(db, "retransmit_all_udf_dup_res",
+			ns->n_retransmit_all_udf_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_read_dup_res",
+			ns->n_retransmit_all_batch_sub_read_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_write_dup_res",
+			ns->n_retransmit_all_batch_sub_write_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_delete_dup_res",
+			ns->n_retransmit_all_batch_sub_delete_dup_res);
+	info_append_uint64(db, "retransmit_all_batch_sub_udf_dup_res",
+			ns->n_retransmit_all_batch_sub_udf_dup_res);
+	info_append_uint64(db, "retransmit_udf_sub_dup_res",
+			ns->n_retransmit_udf_sub_dup_res);
+	info_append_uint64(db, "retransmit_ops_sub_dup_res",
+			ns->n_retransmit_ops_sub_dup_res);
 
-	info_append_uint64(db, "retransmit_all_read_repl_ping", ns->n_retransmit_all_read_repl_ping);
-	info_append_uint64(db, "retransmit_all_batch_sub_read_repl_ping", ns->n_retransmit_all_batch_sub_read_repl_ping);
+	info_append_uint64(db, "retransmit_all_read_repl_ping",
+			ns->n_retransmit_all_read_repl_ping);
+	info_append_uint64(db, "retransmit_all_batch_sub_read_repl_ping",
+			ns->n_retransmit_all_batch_sub_read_repl_ping);
 
-	info_append_uint64(db, "retransmit_all_write_repl_write", ns->n_retransmit_all_write_repl_write);
-	info_append_uint64(db, "retransmit_all_delete_repl_write", ns->n_retransmit_all_delete_repl_write);
-	info_append_uint64(db, "retransmit_all_udf_repl_write", ns->n_retransmit_all_udf_repl_write);
-	info_append_uint64(db, "retransmit_all_batch_sub_write_repl_write", ns->n_retransmit_all_batch_sub_write_repl_write);
-	info_append_uint64(db, "retransmit_all_batch_sub_delete_repl_write", ns->n_retransmit_all_batch_sub_delete_repl_write);
-	info_append_uint64(db, "retransmit_all_batch_sub_udf_repl_write", ns->n_retransmit_all_batch_sub_udf_repl_write);
-	info_append_uint64(db, "retransmit_udf_sub_repl_write", ns->n_retransmit_udf_sub_repl_write);
-	info_append_uint64(db, "retransmit_ops_sub_repl_write", ns->n_retransmit_ops_sub_repl_write);
+	info_append_uint64(db, "retransmit_all_write_repl_write",
+			ns->n_retransmit_all_write_repl_write);
+	info_append_uint64(db, "retransmit_all_delete_repl_write",
+			ns->n_retransmit_all_delete_repl_write);
+	info_append_uint64(db, "retransmit_all_udf_repl_write",
+			ns->n_retransmit_all_udf_repl_write);
+	info_append_uint64(db, "retransmit_all_batch_sub_write_repl_write",
+			ns->n_retransmit_all_batch_sub_write_repl_write);
+	info_append_uint64(db, "retransmit_all_batch_sub_delete_repl_write",
+			ns->n_retransmit_all_batch_sub_delete_repl_write);
+	info_append_uint64(db, "retransmit_all_batch_sub_udf_repl_write",
+			ns->n_retransmit_all_batch_sub_udf_repl_write);
+	info_append_uint64(db, "retransmit_udf_sub_repl_write",
+			ns->n_retransmit_udf_sub_repl_write);
+	info_append_uint64(db, "retransmit_ops_sub_repl_write",
+			ns->n_retransmit_ops_sub_repl_write);
 
 	// Primary index query (formerly scan) stats.
 
-	info_append_uint64(db, "pi_query_short_basic_complete", ns->n_pi_query_short_basic_complete);
-	info_append_uint64(db, "pi_query_short_basic_error", ns->n_pi_query_short_basic_error);
-	info_append_uint64(db, "pi_query_short_basic_timeout", ns->n_pi_query_short_basic_timeout);
+	info_append_uint64(db, "pi_query_short_basic_complete",
+			ns->n_pi_query_short_basic_complete);
+	info_append_uint64(db, "pi_query_short_basic_error",
+			ns->n_pi_query_short_basic_error);
+	info_append_uint64(db, "pi_query_short_basic_timeout",
+			ns->n_pi_query_short_basic_timeout);
 
-	info_append_uint64(db, "pi_query_long_basic_complete", ns->n_pi_query_long_basic_complete);
-	info_append_uint64(db, "pi_query_long_basic_error", ns->n_pi_query_long_basic_error);
-	info_append_uint64(db, "pi_query_long_basic_abort", ns->n_pi_query_long_basic_abort);
+	info_append_uint64(db, "pi_query_long_basic_complete",
+			ns->n_pi_query_long_basic_complete);
+	info_append_uint64(db, "pi_query_long_basic_error",
+			ns->n_pi_query_long_basic_error);
+	info_append_uint64(db, "pi_query_long_basic_abort",
+			ns->n_pi_query_long_basic_abort);
 
-	info_append_uint64(db, "pi_query_aggr_complete", ns->n_pi_query_aggr_complete);
+	info_append_uint64(db, "pi_query_aggr_complete",
+			ns->n_pi_query_aggr_complete);
 	info_append_uint64(db, "pi_query_aggr_error", ns->n_pi_query_aggr_error);
 	info_append_uint64(db, "pi_query_aggr_abort", ns->n_pi_query_aggr_abort);
 
-	info_append_uint64(db, "pi_query_udf_bg_complete", ns->n_pi_query_udf_bg_complete);
+	info_append_uint64(db, "pi_query_udf_bg_complete",
+			ns->n_pi_query_udf_bg_complete);
 	info_append_uint64(db, "pi_query_udf_bg_error", ns->n_pi_query_udf_bg_error);
 	info_append_uint64(db, "pi_query_udf_bg_abort", ns->n_pi_query_udf_bg_abort);
 
-	info_append_uint64(db, "pi_query_ops_bg_complete", ns->n_pi_query_ops_bg_complete);
+	info_append_uint64(db, "pi_query_ops_bg_complete",
+			ns->n_pi_query_ops_bg_complete);
 	info_append_uint64(db, "pi_query_ops_bg_error", ns->n_pi_query_ops_bg_error);
 	info_append_uint64(db, "pi_query_ops_bg_abort", ns->n_pi_query_ops_bg_abort);
 
 	// Secondary index query stats.
 
-	info_append_uint64(db, "si_query_short_basic_complete", ns->n_si_query_short_basic_complete);
-	info_append_uint64(db, "si_query_short_basic_error", ns->n_si_query_short_basic_error);
-	info_append_uint64(db, "si_query_short_basic_timeout", ns->n_si_query_short_basic_timeout);
+	info_append_uint64(db, "si_query_short_basic_complete",
+			ns->n_si_query_short_basic_complete);
+	info_append_uint64(db, "si_query_short_basic_error",
+			ns->n_si_query_short_basic_error);
+	info_append_uint64(db, "si_query_short_basic_timeout",
+			ns->n_si_query_short_basic_timeout);
 
-	info_append_uint64(db, "si_query_long_basic_complete", ns->n_si_query_long_basic_complete);
-	info_append_uint64(db, "si_query_long_basic_error", ns->n_si_query_long_basic_error);
-	info_append_uint64(db, "si_query_long_basic_abort", ns->n_si_query_long_basic_abort);
+	info_append_uint64(db, "si_query_long_basic_complete",
+			ns->n_si_query_long_basic_complete);
+	info_append_uint64(db, "si_query_long_basic_error",
+			ns->n_si_query_long_basic_error);
+	info_append_uint64(db, "si_query_long_basic_abort",
+			ns->n_si_query_long_basic_abort);
 
-	info_append_uint64(db, "si_query_aggr_complete", ns->n_si_query_aggr_complete);
+	info_append_uint64(db, "si_query_aggr_complete",
+			ns->n_si_query_aggr_complete);
 	info_append_uint64(db, "si_query_aggr_error", ns->n_si_query_aggr_error);
 	info_append_uint64(db, "si_query_aggr_abort", ns->n_si_query_aggr_abort);
 
-	info_append_uint64(db, "si_query_udf_bg_complete", ns->n_si_query_udf_bg_complete);
+	info_append_uint64(db, "si_query_udf_bg_complete",
+			ns->n_si_query_udf_bg_complete);
 	info_append_uint64(db, "si_query_udf_bg_error", ns->n_si_query_udf_bg_error);
 	info_append_uint64(db, "si_query_udf_bg_abort", ns->n_si_query_udf_bg_abort);
 
-	info_append_uint64(db, "si_query_ops_bg_complete", ns->n_si_query_ops_bg_complete);
+	info_append_uint64(db, "si_query_ops_bg_complete",
+			ns->n_si_query_ops_bg_complete);
 	info_append_uint64(db, "si_query_ops_bg_error", ns->n_si_query_ops_bg_error);
 	info_append_uint64(db, "si_query_ops_bg_abort", ns->n_si_query_ops_bg_abort);
 
 	// Geospatial query stats:
 	info_append_uint64(db, "geo_region_query_reqs", ns->geo_region_query_count);
 	info_append_uint64(db, "geo_region_query_cells", ns->geo_region_query_cells);
-	info_append_uint64(db, "geo_region_query_points", ns->geo_region_query_points);
-	info_append_uint64(db, "geo_region_query_falsepos", ns->geo_region_query_falsepos);
+	info_append_uint64(db, "geo_region_query_points",
+			ns->geo_region_query_points);
+	info_append_uint64(db, "geo_region_query_falsepos",
+			ns->geo_region_query_falsepos);
 
 	// Read-touch stats.
 
 	info_append_uint64(db, "read_touch_tsvc_error", ns->n_read_touch_tsvc_error);
-	info_append_uint64(db, "read_touch_tsvc_timeout", ns->n_read_touch_tsvc_timeout);
+	info_append_uint64(db, "read_touch_tsvc_timeout",
+			ns->n_read_touch_tsvc_timeout);
 
 	info_append_uint64(db, "read_touch_success", ns->n_read_touch_success);
 	info_append_uint64(db, "read_touch_error", ns->n_read_touch_error);
@@ -4985,29 +4661,40 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 
 	// MRT verify read stats - relevant only for enterprise edition.
 
-	info_append_uint64(db, "mrt_verify_read_success", ns->n_mrt_verify_read_success);
+	info_append_uint64(db, "mrt_verify_read_success",
+			ns->n_mrt_verify_read_success);
 	info_append_uint64(db, "mrt_verify_read_error", ns->n_mrt_verify_read_error);
-	info_append_uint64(db, "mrt_verify_read_timeout", ns->n_mrt_verify_read_timeout);
+	info_append_uint64(db, "mrt_verify_read_timeout",
+			ns->n_mrt_verify_read_timeout);
 
 	// MRT roll forward/back stats - relevant only for enterprise edition.
 
-	info_append_uint64(db, "mrt_roll_forward_success", ns->n_mrt_roll_forward_success);
-	info_append_uint64(db, "mrt_roll_forward_error", ns->n_mrt_roll_forward_error);
-	info_append_uint64(db, "mrt_roll_forward_timeout", ns->n_mrt_roll_forward_timeout);
+	info_append_uint64(db, "mrt_roll_forward_success",
+			ns->n_mrt_roll_forward_success);
+	info_append_uint64(db, "mrt_roll_forward_error",
+			ns->n_mrt_roll_forward_error);
+	info_append_uint64(db, "mrt_roll_forward_timeout",
+			ns->n_mrt_roll_forward_timeout);
 
 	// Subset of n_mrt_roll_forward... above, respectively
-	info_append_uint64(db, "mrt_monitor_roll_forward_success", ns->n_mrt_monitor_roll_forward_success);
-	info_append_uint64(db, "mrt_monitor_roll_forward_error", ns->n_mrt_monitor_roll_forward_error);
-	info_append_uint64(db, "mrt_monitor_roll_forward_timeout", ns->n_mrt_monitor_roll_forward_timeout);
+	info_append_uint64(db, "mrt_monitor_roll_forward_success",
+			ns->n_mrt_monitor_roll_forward_success);
+	info_append_uint64(db, "mrt_monitor_roll_forward_error",
+			ns->n_mrt_monitor_roll_forward_error);
+	info_append_uint64(db, "mrt_monitor_roll_forward_timeout",
+			ns->n_mrt_monitor_roll_forward_timeout);
 
 	info_append_uint64(db, "mrt_roll_back_success", ns->n_mrt_roll_back_success);
 	info_append_uint64(db, "mrt_roll_back_error", ns->n_mrt_roll_back_error);
 	info_append_uint64(db, "mrt_roll_back_timeout", ns->n_mrt_roll_back_timeout);
 
 	// Subset of n_mrt_roll_back... above, respectively
-	info_append_uint64(db, "mrt_monitor_roll_back_success", ns->n_mrt_monitor_roll_back_success);
-	info_append_uint64(db, "mrt_monitor_roll_back_error", ns->n_mrt_monitor_roll_back_error);
-	info_append_uint64(db, "mrt_monitor_roll_back_timeout", ns->n_mrt_monitor_roll_back_timeout);
+	info_append_uint64(db, "mrt_monitor_roll_back_success",
+			ns->n_mrt_monitor_roll_back_success);
+	info_append_uint64(db, "mrt_monitor_roll_back_error",
+			ns->n_mrt_monitor_roll_back_error);
+	info_append_uint64(db, "mrt_monitor_roll_back_timeout",
+			ns->n_mrt_monitor_roll_back_timeout);
 
 	// Special errors that deserve their own counters:
 
@@ -5016,17 +4703,23 @@ info_get_namespace_info(as_namespace* ns, cf_dyn_buf* db)
 	info_append_uint64(db, "fail_xdr_key_busy", ns->n_fail_xdr_key_busy);
 	info_append_uint64(db, "fail_generation", ns->n_fail_generation);
 	info_append_uint64(db, "fail_record_too_big", ns->n_fail_record_too_big);
-	info_append_uint64(db, "fail_client_lost_conflict", ns->n_fail_client_lost_conflict);
-	info_append_uint64(db, "fail_xdr_lost_conflict", ns->n_fail_xdr_lost_conflict);
+	info_append_uint64(db, "fail_client_lost_conflict",
+			ns->n_fail_client_lost_conflict);
+	info_append_uint64(db, "fail_xdr_lost_conflict",
+			ns->n_fail_xdr_lost_conflict);
 	info_append_uint64(db, "fail_mrt_blocked", ns->n_fail_mrt_blocked);
-	info_append_uint64(db, "fail_mrt_version_mismatch", ns->n_fail_mrt_version_mismatch);
+	info_append_uint64(db, "fail_mrt_version_mismatch",
+			ns->n_fail_mrt_version_mismatch);
 
 	// Special non-error counters:
 
 	info_append_uint64(db, "deleted_last_bin", ns->n_deleted_last_bin);
-	info_append_uint64(db, "mrt_monitor_roll_tombstone_creates", ns->n_mrt_monitor_roll_tombstone_creates);
-	info_append_uint64(db, "ttl_reductions_ignored", ns->n_ttl_reductions_ignored);
-	info_append_uint64(db, "ttl_reductions_applied", ns->n_ttl_reductions_applied);
+	info_append_uint64(db, "mrt_monitor_roll_tombstone_creates",
+			ns->n_mrt_monitor_roll_tombstone_creates);
+	info_append_uint64(db, "ttl_reductions_ignored",
+			ns->n_ttl_reductions_ignored);
+	info_append_uint64(db, "ttl_reductions_applied",
+			ns->n_ttl_reductions_applied);
 }
 
 static void
@@ -5205,18 +4898,24 @@ add_data_stripe_stats(as_namespace* ns, cf_dyn_buf* db)
 		as_storage_device_stats(ns, i, &stats);
 
 		info_append_indexed_uint64(db, tag, i, "used_bytes", stats.used_sz);
-		info_append_indexed_uint32(db, tag, i, "free_wblocks", stats.n_free_wblocks);
+		info_append_indexed_uint32(db, tag, i, "free_wblocks",
+				stats.n_free_wblocks);
 
 		info_append_indexed_uint64(db, tag, i, "writes", stats.n_writes);
 
 		info_append_indexed_uint32(db, tag, i, "defrag_q", stats.defrag_q_sz);
-		info_append_indexed_uint64(db, tag, i, "defrag_reads", stats.n_defrag_reads);
-		info_append_indexed_uint64(db, tag, i, "defrag_writes", stats.n_defrag_writes);
+		info_append_indexed_uint64(db, tag, i, "defrag_reads",
+				stats.n_defrag_reads);
+		info_append_indexed_uint64(db, tag, i, "defrag_writes",
+				stats.n_defrag_writes);
 
 		if (ns->n_storage_shadows != 0) {
-			info_append_indexed_uint32(db, tag, i, "backing_write_q", stats.shadow_write_q_sz);
-			info_append_indexed_uint64(db, tag, i, "partial_writes", stats.n_partial_writes);
-			info_append_indexed_uint64(db, tag, i, "defrag_partial_writes", stats.n_defrag_partial_writes);
+			info_append_indexed_uint32(db, tag, i, "backing_write_q",
+					stats.shadow_write_q_sz);
+			info_append_indexed_uint64(db, tag, i, "partial_writes",
+					stats.n_partial_writes);
+			info_append_indexed_uint64(db, tag, i, "defrag_partial_writes",
+					stats.n_defrag_partial_writes);
 
 			// Can't tell if this is local or remote - just try it.
 			info_append_indexed_int(db, tag, i, "age",
@@ -5229,90 +4928,42 @@ static void
 add_data_device_stats(as_namespace* ns, cf_dyn_buf* db)
 {
 	uint32_t n = as_namespace_device_count(ns);
-	const char* tag = ns->n_storage_devices != 0 ?
-			"storage-engine.device" : "storage-engine.file";
+	const char* tag = ns->n_storage_devices != 0 ? "storage-engine.device"
+												 : "storage-engine.file";
 
 	for (uint32_t i = 0; i < n; i++) {
 		storage_device_stats stats;
 		as_storage_device_stats(ns, i, &stats);
 
 		info_append_indexed_uint64(db, tag, i, "used_bytes", stats.used_sz);
-		info_append_indexed_uint32(db, tag, i, "free_wblocks", stats.n_free_wblocks);
+		info_append_indexed_uint32(db, tag, i, "free_wblocks",
+				stats.n_free_wblocks);
 
-		info_append_indexed_uint64(db, tag, i, "read_errors", stats.n_read_errors);
+		info_append_indexed_uint64(db, tag, i, "read_errors",
+				stats.n_read_errors);
 
 		info_append_indexed_uint32(db, tag, i, "write_q", stats.write_q_sz);
 		info_append_indexed_uint64(db, tag, i, "writes", stats.n_writes);
-		info_append_indexed_uint64(db, tag, i, "partial_writes", stats.n_partial_writes);
+		info_append_indexed_uint64(db, tag, i, "partial_writes",
+				stats.n_partial_writes);
 
 		info_append_indexed_uint32(db, tag, i, "defrag_q", stats.defrag_q_sz);
-		info_append_indexed_uint64(db, tag, i, "defrag_reads", stats.n_defrag_reads);
-		info_append_indexed_uint64(db, tag, i, "defrag_writes", stats.n_defrag_writes);
-		info_append_indexed_uint64(db, tag, i, "defrag_partial_writes", stats.n_defrag_partial_writes);
+		info_append_indexed_uint64(db, tag, i, "defrag_reads",
+				stats.n_defrag_reads);
+		info_append_indexed_uint64(db, tag, i, "defrag_writes",
+				stats.n_defrag_writes);
+		info_append_indexed_uint64(db, tag, i, "defrag_partial_writes",
+				stats.n_defrag_partial_writes);
 
 		if (ns->n_storage_shadows != 0) {
-			info_append_indexed_uint32(db, tag, i, "shadow_write_q", stats.shadow_write_q_sz);
+			info_append_indexed_uint32(db, tag, i, "shadow_write_q",
+					stats.shadow_write_q_sz);
 		}
 
 		info_append_indexed_int(db, tag, i, "age",
 				oldest_nvme_age(ns->storage_devices[i]));
 
 		// Note - no shadow ages since they're likely remote.
-	}
-}
-
-static void
-find_sindex_key(const cf_vector* items, void* udata)
-{
-	find_sindex_key_udata* fsk = (find_sindex_key_udata*)udata;
-	uint32_t ns_name_len = strlen(fsk->ns_name);
-
-	fsk->found_key = NULL;
-	fsk->n_name_matches = 0;
-	fsk->n_indexes = 0;
-	fsk->has_smd_key = false;
-
-	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
-		as_smd_item* item = cf_vector_get_ptr(items, i);
-
-		if (item->value == NULL) {
-			continue; // ignore tombstones
-		}
-
-		const char* smd_ns_name_end = strchr(item->key, '|');
-
-		if (smd_ns_name_end == NULL) {
-			cf_warning(AS_INFO, "unexpected sindex key format '%s'", item->key);
-			continue;
-		}
-
-		uint32_t smd_ns_name_len = smd_ns_name_end - item->key;
-
-		if (smd_ns_name_len != ns_name_len ||
-				memcmp(item->key, fsk->ns_name, ns_name_len) != 0) {
-			continue;
-		}
-
-		fsk->n_indexes++;
-
-		if (fsk->smd_key != NULL && strcmp(fsk->smd_key, item->key) == 0) {
-			fsk->has_smd_key = true;
-			fsk->smd_key = NULL; // can only be one
-		}
-
-		if (strcmp(fsk->index_name, item->value) != 0) {
-			continue;
-		}
-
-		fsk->n_name_matches++;
-
-		if (fsk->n_name_matches == 1) {
-			fsk->found_key = strdup(item->key);
-		}
-		else {
-			cf_free(fsk->found_key); // only return when unique
-			fsk->found_key = NULL;
-		}
 	}
 }
 
@@ -5413,14 +5064,15 @@ db_append_hex(cf_dyn_buf* db, const char* name, const uint8_t* buf, uint32_t sz,
 }
 
 static void
-debug_record(const char* params, cf_dyn_buf* db, bool all_data, as_file_handle* fd_h)
+debug_record(const char* params, cf_dyn_buf* db, bool all_data,
+		as_file_handle* fd_h)
 {
 	// Get the namespace name.
 
 	char ns_name[AS_ID_NAMESPACE_SZ];
 	int ns_name_len = (int)sizeof(ns_name);
-	info_param_result ns_rv = as_info_param_get_namespace(params, ns_name,
-			&ns_name_len);
+	info_param_result ns_rv =
+			as_info_param_get_namespace(params, ns_name, &ns_name_len);
 	as_namespace* ns;
 
 	if (! info_param_required_local_namespace_is_ok(db, ns_name, &ns, ns_rv)) {
@@ -5431,8 +5083,8 @@ debug_record(const char* params, cf_dyn_buf* db, bool all_data, as_file_handle* 
 
 	char keyd_str[(CF_DIGEST_KEY_SZ * 2) + 1];
 	int keyd_str_len = (int)sizeof(keyd_str);
-	info_param_result keyd_rv = as_info_parameter_get(params, "keyd", keyd_str,
-			&keyd_str_len);
+	info_param_result keyd_rv =
+			as_info_parameter_get(params, "keyd", keyd_str, &keyd_str_len);
 
 	if (! as_info_required_param_is_ok(db, "keyd", keyd_str, keyd_rv)) {
 		return;
@@ -5473,8 +5125,8 @@ debug_record(const char* params, cf_dyn_buf* db, bool all_data, as_file_handle* 
 	if (all_data) {
 		char mode[AS_ID_NAMESPACE_SZ];
 		int mode_len = (int)sizeof(mode);
-		info_param_result mode_rv = as_info_parameter_get(params, "mode", mode,
-				&mode_len);
+		info_param_result mode_rv =
+				as_info_parameter_get(params, "mode", mode, &mode_len);
 
 		mode_rv = as_info_optional_param_is_ok(db, "mode", mode, mode_rv);
 
@@ -5619,13 +5271,14 @@ debug_dump_index(cf_dyn_buf* db, as_namespace* ns, as_record* r, bool is_orig)
 	db_append_uint64(db, "n-rblocks", r->n_rblocks);
 	db_append_uint64(db, "file-id", r->file_id);
 
-	uint32_t n_devices = ns->n_storage_stripes != 0 ?
-			ns->n_storage_stripes : as_namespace_device_count(ns);
+	uint32_t n_devices = ns->n_storage_stripes != 0
+			? ns->n_storage_stripes
+			: as_namespace_device_count(ns);
 
 	if (n_devices != 0 && r->file_id < n_devices) {
-		const char* tag = ns->n_storage_stripes != 0 ?
-				"stripe-name" : (ns->n_storage_devices != 0 ?
-						"device-name" : "file-name");
+		const char* tag = ns->n_storage_stripes != 0
+				? "stripe-name"
+				: (ns->n_storage_devices != 0 ? "device-name" : "file-name");
 
 		db_append_string_safe(db, tag, ns->storage_devices[r->file_id]);
 	}
@@ -5663,14 +5316,12 @@ debug_dump_raw(cf_dyn_buf* db, as_storage_rd* rd, bool leave_encrypted,
 		uint32_t sz = (uint32_t)(rd->flat_end - raw);
 
 		info_append_uint32(db, is_orig ? "orig-raw-size" : "raw-size", sz);
-		db_append_hex(db, is_orig ? "orig-raw-bytes" : "raw-bytes", raw, sz,
-				';');
+		db_append_hex(db, is_orig ? "orig-raw-bytes" : "raw-bytes", raw, sz, ';');
 	}
 }
 
 static void
-debug_dump_parsed(cf_dyn_buf* db, as_storage_rd* rd, bool all_data,
-		bool is_orig)
+debug_dump_parsed(cf_dyn_buf* db, as_storage_rd* rd, bool all_data, bool is_orig)
 {
 	// Note - for now, not parsing stored fields redundant with index.
 

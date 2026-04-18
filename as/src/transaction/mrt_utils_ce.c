@@ -39,7 +39,6 @@
 #include "base/transaction.h"
 #include "storage/storage.h"
 
-
 //==========================================================
 // Public API.
 //

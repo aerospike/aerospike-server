@@ -33,7 +33,6 @@
 #include "base/proto.h"
 #include "fabric/fabric.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -41,83 +40,82 @@
 typedef struct as_stats_s {
 
 	// Connection stats.
-	uint64_t		proto_connections_opened; // not just a statistic
-	uint64_t		proto_connections_closed; // not just a statistic
-	uint64_t		admin_connections_opened; // not just a statistic
-	uint64_t		admin_connections_closed; // not just a statistic
-	uint64_t		heartbeat_connections_opened;
-	uint64_t		heartbeat_connections_closed;
-	uint64_t		fabric_connections_opened;
-	uint64_t		fabric_connections_closed;
+	uint64_t proto_connections_opened; // not just a statistic
+	uint64_t proto_connections_closed; // not just a statistic
+	uint64_t admin_connections_opened; // not just a statistic
+	uint64_t admin_connections_closed; // not just a statistic
+	uint64_t heartbeat_connections_opened;
+	uint64_t heartbeat_connections_closed;
+	uint64_t fabric_connections_opened;
+	uint64_t fabric_connections_closed;
 
 	// Heartbeat stats.
-	uint64_t		heartbeat_received_self;
-	uint64_t		heartbeat_received_foreign;
+	uint64_t heartbeat_received_self;
+	uint64_t heartbeat_received_foreign;
 
 	// Demarshal stats.
-	uint64_t		reaper_count; // not in ticker - incremented only in reaper thread
+	uint64_t reaper_count; // not in ticker - incremented only in reaper thread
 
 	// Info stats.
-	uint64_t		info_complete;
-	uint64_t		info_timeout;
+	uint64_t info_complete;
+	uint64_t info_timeout;
 
 	// Early transaction errors.
-	uint64_t		n_demarshal_error;
-	uint64_t		n_tsvc_client_error;
-	uint64_t		n_tsvc_from_proxy_error;
-	uint64_t		n_tsvc_batch_sub_error; // satisfies a macro - can't happen
-	uint64_t		n_tsvc_from_proxy_batch_sub_error;
-	uint64_t		n_tsvc_udf_sub_error; // satisfies a macro - can't happen
-	uint64_t		n_tsvc_ops_sub_error; // satisfies a macro - can't happen
-	uint64_t		n_tsvc_read_touch_error; // satisfies a macro - can't happen
-	uint64_t		n_tsvc_re_repl_error; // satisfies a macro - can't happen
+	uint64_t n_demarshal_error;
+	uint64_t n_tsvc_client_error;
+	uint64_t n_tsvc_from_proxy_error;
+	uint64_t n_tsvc_batch_sub_error; // satisfies a macro - can't happen
+	uint64_t n_tsvc_from_proxy_batch_sub_error;
+	uint64_t n_tsvc_udf_sub_error; // satisfies a macro - can't happen
+	uint64_t n_tsvc_ops_sub_error; // satisfies a macro - can't happen
+	uint64_t n_tsvc_read_touch_error; // satisfies a macro - can't happen
+	uint64_t n_tsvc_re_repl_error; // satisfies a macro - can't happen
 
 	// Batch-index stats.
-	uint64_t		batch_index_initiate; // not in ticker - not just a statistic
-	uint64_t		batch_index_complete;
-	uint64_t		batch_index_errors;
-	uint64_t		batch_index_timeout;
-	uint64_t		batch_index_delay;
+	uint64_t batch_index_initiate; // not in ticker - not just a statistic
+	uint64_t batch_index_complete;
+	uint64_t batch_index_errors;
+	uint64_t batch_index_timeout;
+	uint64_t batch_index_delay;
 
 	// Batch-index buffer stats.
-	uint64_t		batch_index_huge_buffers; // not in ticker
-	uint64_t		batch_index_created_buffers; // not in ticker
-	uint64_t		batch_index_destroyed_buffers; // not in ticker
+	uint64_t batch_index_huge_buffers; // not in ticker
+	uint64_t batch_index_created_buffers; // not in ticker
+	uint64_t batch_index_destroyed_buffers; // not in ticker
 
 	// Batch-index proto compression stats.
 	as_proto_comp_stat batch_comp_stat; // relevant only for enterprise edition
 
 	// Fabric stats.
-	uint64_t		fabric_bulk_s_rate;
-	uint64_t		fabric_bulk_r_rate;
-	uint64_t		fabric_ctrl_s_rate;
-	uint64_t		fabric_ctrl_r_rate;
-	uint64_t		fabric_meta_s_rate;
-	uint64_t		fabric_meta_r_rate;
-	uint64_t		fabric_rw_s_rate;
-	uint64_t		fabric_rw_r_rate;
+	uint64_t fabric_bulk_s_rate;
+	uint64_t fabric_bulk_r_rate;
+	uint64_t fabric_ctrl_s_rate;
+	uint64_t fabric_ctrl_r_rate;
+	uint64_t fabric_meta_s_rate;
+	uint64_t fabric_meta_r_rate;
+	uint64_t fabric_rw_s_rate;
+	uint64_t fabric_rw_r_rate;
 
 	// Deprecated feature usage stats.
-	uint64_t		n_deprecated_requests;
+	uint64_t n_deprecated_requests;
 
 	//--------------------------------------------
 	// Histograms.
 	//
 
-	histogram*		batch_index_hist;
-	bool			batch_index_hist_active; // automatically activated
-	histogram*		batch_rec_count_hist;
-	bool			batch_rec_count_hist_active; // automatically activated
+	histogram* batch_index_hist;
+	bool batch_index_hist_active; // automatically activated
+	histogram* batch_rec_count_hist;
+	bool batch_rec_count_hist_active; // automatically activated
 
-	histogram*		info_hist;
+	histogram* info_hist;
 
-	histogram*		fabric_send_init_hists[AS_FABRIC_N_CHANNELS];
-	histogram*		fabric_send_fragment_hists[AS_FABRIC_N_CHANNELS];
-	histogram*		fabric_recv_fragment_hists[AS_FABRIC_N_CHANNELS];
-	histogram*		fabric_recv_cb_hists[AS_FABRIC_N_CHANNELS];
+	histogram* fabric_send_init_hists[AS_FABRIC_N_CHANNELS];
+	histogram* fabric_send_fragment_hists[AS_FABRIC_N_CHANNELS];
+	histogram* fabric_recv_fragment_hists[AS_FABRIC_N_CHANNELS];
+	histogram* fabric_recv_cb_hists[AS_FABRIC_N_CHANNELS];
 
 } as_stats;
-
 
 //==========================================================
 // Public API.

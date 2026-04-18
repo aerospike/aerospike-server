@@ -28,7 +28,6 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -36,12 +35,12 @@
 struct as_info_cmd_args_s;
 struct as_namespace_s;
 
-
 //==========================================================
 // Public API.
 //
 
 void as_cfg_info_cmd_get_config_with_params(struct as_info_cmd_args_s* args);
 void as_cfg_info_cmd_get_config(struct as_info_cmd_args_s* args);
-void as_cfg_info_namespace_get_config(const struct as_namespace_s* ns, cf_dyn_buf* db);
+void as_cfg_info_namespace_get_config(const struct as_namespace_s* ns,
+		cf_dyn_buf* db);
 void as_cfg_info_cmd_set_config(struct as_info_cmd_args_s* args);

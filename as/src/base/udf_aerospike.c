@@ -42,8 +42,8 @@
 #include "log.h"
 
 #include "base/datamodel.h"
-#include "base/masking.h"
 #include "base/index.h"
+#include "base/masking.h"
 #include "base/proto.h"
 #include "base/set_index.h"
 #include "base/transaction.h"
@@ -54,13 +54,11 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 #define LLB_ROUND_SZ (128U * 1024)
-
 
 //==========================================================
 // Forward declarations.
@@ -70,15 +68,16 @@ static int udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec);
 static int udf_aerospike_rec_update(const as_aerospike* as, const as_rec* rec);
 static int udf_aerospike_rec_exists(const as_aerospike* as, const as_rec* rec);
 static int udf_aerospike_rec_remove(const as_aerospike* as, const as_rec* rec);
-static int udf_aerospike_log(const as_aerospike* as, const char* file, const int line, const int level, const char* message);
+static int udf_aerospike_log(const as_aerospike* as, const char* file,
+		const int line, const int level, const char* message);
 static cf_clock udf_aerospike_get_current_time(const as_aerospike* as);
 
 static int execute_updates(udf_record* urecord);
 static void prepare_for_write(udf_record* urecord);
 static void execute_failed(udf_record* urecord, int result_code);
-static int execute_set_bin(udf_record* urecord, const char* name, const as_val* val);
+static int execute_set_bin(udf_record* urecord, const char* name,
+		const as_val* val);
 static uint8_t* get_particle_buf(udf_record* urecord, uint32_t size);
-
 
 //==========================================================
 // Inlines & macros.
@@ -91,20 +90,18 @@ param_check(const as_rec* rec)
 	cf_assert(as_rec_source(rec) != NULL, AS_UDF, "null udf_record object");
 }
 
-
 //==========================================================
 // Public API - aerospike: hooks.
 //
 
 const as_aerospike_hooks udf_aerospike_hooks = {
-		.rec_create         = udf_aerospike_rec_create,
-		.rec_update         = udf_aerospike_rec_update,
-		.rec_exists         = udf_aerospike_rec_exists,
-		.rec_remove         = udf_aerospike_rec_remove,
-		.log                = udf_aerospike_log,
-		.get_current_time   = udf_aerospike_get_current_time,
+	.rec_create = udf_aerospike_rec_create,
+	.rec_update = udf_aerospike_rec_update,
+	.rec_exists = udf_aerospike_rec_exists,
+	.rec_remove = udf_aerospike_rec_remove,
+	.log = udf_aerospike_log,
+	.get_current_time = udf_aerospike_get_current_time,
 };
-
 
 //==========================================================
 // Public API - implementation of aerospike: hooks.
@@ -168,8 +165,9 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 	}
 	// else - record created or rescued.
 
-	int rv_set = as_transaction_has_set(tr) ?
-			set_set_from_msg(r, ns, &tr->msgp->msg) : 0;
+	int rv_set = as_transaction_has_set(tr)
+			? set_set_from_msg(r, ns, &tr->msgp->msg)
+			: 0;
 
 	if (rv_set != 0) {
 		as_index_delete(tree, keyd);
@@ -202,7 +200,8 @@ udf_aerospike_rec_create(const as_aerospike* as, const as_rec* rec)
 
 	if (as_masking_ctx_init(NULL, rd->ns->name, rd->p_set, NULL, urecord->tr)) {
 		rd->mask_ctx = cf_malloc(sizeof(as_masking_ctx));
-		as_masking_ctx_init(rd->mask_ctx, rd->ns->name, rd->p_set, NULL, urecord->tr);
+		as_masking_ctx_init(rd->mask_ctx, rd->ns->name, rd->p_set, NULL,
+				urecord->tr);
 	}
 
 	int exec_rv = execute_updates(urecord);
@@ -324,7 +323,6 @@ udf_aerospike_get_current_time(const as_aerospike* as)
 	return cf_clock_getabsolute();
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -432,8 +430,7 @@ execute_failed(udf_record* urecord, int result_code)
 	as_storage_rd* rd = urecord->rd;
 
 	if (urecord->n_old_bins != 0) {
-		memcpy(rd->bins, urecord->old_bins,
-				urecord->n_old_bins * sizeof(as_bin));
+		memcpy(rd->bins, urecord->old_bins, urecord->n_old_bins * sizeof(as_bin));
 	}
 
 	rd->n_bins = (uint16_t)urecord->n_old_bins;
@@ -474,7 +471,9 @@ execute_set_bin(udf_record* urecord, const char* name, const as_val* val)
 	as_bin_particle_from_asval(b, buf, val);
 
 	if (as_masking_type_mismatch(rd->mask_ctx, b)) {
-		cf_warning(AS_UDF, "udf would create masked bin with type that does not match rule, bin: %s", name);
+		cf_warning(AS_UDF,
+				"udf would create masked bin with type that does not match rule, bin: %s",
+				name);
 		return AS_ERR_INCOMPATIBLE_TYPE;
 	}
 

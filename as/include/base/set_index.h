@@ -35,7 +35,7 @@
 #include "cf_mutex.h"
 
 #include "base/index.h"
-
+#include "sindex/sindex_manager.h"
 
 //==========================================================
 // Forward declarations.
@@ -45,7 +45,6 @@ struct as_index_s;
 struct as_index_tree_s;
 struct as_namespace_s;
 struct as_set_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -77,6 +76,8 @@ typedef struct uarena_s {
 // Minimum set sprigs - we're sharing the primary index tree's sprig locks.
 #define N_SET_SPRIGS NUM_LOCK_PAIRS
 
+#define SET_INDEX_DUMMY_BIN_NAME "<ERO~SET_IX>"
+
 typedef struct as_set_index_tree_s {
 	uarena ua;
 	uarena_handle roots[N_SET_SPRIGS];
@@ -84,15 +85,15 @@ typedef struct as_set_index_tree_s {
 
 typedef struct index_ele_s {
 	// Key - primary index arena handle.
-	uint64_t key_r_h: 40;
+	uint64_t key_r_h : 40;
 
-	uint64_t keyd_stub: 23;
-	uint64_t color: 1;
+	uint64_t keyd_stub : 23;
+	uint64_t color : 1;
 
 	// Children - micro-arena handles.
 	uarena_handle left_h;
 	uarena_handle right_h;
-} __attribute__ ((__packed__)) index_ele;
+} __attribute__((__packed__)) index_ele;
 
 COMPILER_ASSERT(sizeof(index_ele) == ELE_SIZE);
 
@@ -111,16 +112,16 @@ typedef struct ssprig_reduce_info_s {
 	cf_mutex* olock;
 } ssprig_reduce_info;
 
-
 //==========================================================
 // Public API.
 //
 
 // Startup.
-void as_set_index_init(void);
+void as_set_index_start(void);
 
 // Set-index tree lifecycle.
-void as_set_index_create_all(struct as_namespace_s* ns, struct as_index_tree_s* tree);
+void as_set_index_create_all(struct as_namespace_s* ns,
+		struct as_index_tree_s* tree);
 void as_set_index_destroy_all(struct as_index_tree_s* tree);
 void as_set_index_tree_create(struct as_index_tree_s* tree, uint16_t set_id);
 void as_set_index_tree_destroy(struct as_index_tree_s* tree, uint16_t set_id);
@@ -128,23 +129,35 @@ void as_set_index_balance_lock(void);
 void as_set_index_balance_unlock(void);
 
 // Transactions.
-void as_set_index_insert(struct as_namespace_s* ns, struct as_index_tree_s* tree, uint16_t set_id, uint64_t r_h);
-void as_set_index_delete(struct as_namespace_s* ns, struct as_index_tree_s* tree, uint16_t set_id, uint64_t r_h);
-void as_set_index_delete_live(struct as_namespace_s* ns, struct as_index_tree_s* tree, struct as_index_s* r, uint64_t r_h);
-bool as_set_index_reduce(struct as_namespace_s* ns, struct as_index_tree_s* tree, uint16_t set_id, cf_digest* keyd, as_index_reduce_fn cb, void* udata);
+void as_set_index_insert(struct as_namespace_s* ns,
+		struct as_index_tree_s* tree, uint16_t set_id, uint64_t r_h);
+void as_set_index_delete(struct as_namespace_s* ns,
+		struct as_index_tree_s* tree, uint16_t set_id, uint64_t r_h);
+void as_set_index_delete_live(struct as_namespace_s* ns,
+		struct as_index_tree_s* tree, struct as_index_s* r, uint64_t r_h);
+bool as_set_index_reduce(struct as_namespace_s* ns, struct as_index_tree_s* tree,
+		uint16_t set_id, cf_digest* keyd, as_index_reduce_fn cb, void* udata);
+
+// Smd
+void smd_set_index_create(as_sindex_def* def);
+void smd_set_index_drop(as_sindex_def* def);
 
 // Info & stats.
-void as_set_index_enable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
-void as_set_index_disable(struct as_namespace_s* ns, struct as_set_s* p_set, uint16_t set_id);
+bool as_set_index_enable(struct as_namespace_s* ns, struct as_set_s* p_set,
+		uint16_t set_id, as_set_index_mode new_way);
+bool as_set_index_disable(struct as_namespace_s* ns, struct as_set_s* p_set,
+		uint16_t set_id, as_set_index_mode new_way);
+bool as_set_index_stats_str(const struct as_namespace_s* ns,
+		const struct as_set_s* p_set, cf_dyn_buf* db);
 uint64_t as_set_index_used_bytes(const struct as_namespace_s* ns);
-
 
 //==========================================================
 // Private API - enterprise separation only.
 //
 
 bool ssprig_insert(ssprig_info* ssi, uint64_t key_r_h);
-bool ssprig_reduce_no_rc(struct as_index_tree_s* tree, ssprig_reduce_info* ssri, as_index_reduce_fn cb, void* udata);
+bool ssprig_reduce_no_rc(struct as_index_tree_s* tree, ssprig_reduce_info* ssri,
+		as_index_reduce_fn cb, void* udata);
 
 static inline int
 ssprig_ele_cmp(const ssprig_info* ssi, const index_ele* e)

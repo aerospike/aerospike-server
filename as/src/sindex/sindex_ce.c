@@ -33,7 +33,6 @@
 
 #include "base/datamodel.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -47,7 +46,6 @@ void
 as_sindex_shutdown(as_namespace* ns)
 {
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

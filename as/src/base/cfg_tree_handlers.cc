@@ -36,20 +36,18 @@
 #include "nlohmann/json.hpp"
 
 extern "C" {
+#include "cf_str.h"
 #include "log.h"
 #include "os.h"
+#include "secrets.h"
 #include "socket.h"
 #include "tls.h"
-
-#include "cf_str.h"
-#include "secrets.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/security_config.h"
 #include "base/thr_info.h"
 }
-
 
 //==========================================================
 // Typedefs & constants.
@@ -63,204 +61,305 @@ using json = nlohmann::json;
 
 namespace cfg_handlers
 {
-	//==========================================================
-	// Forward declerations.
-	//
+//==========================================================
+// Forward declerations.
+//
 
-	struct FieldDescriptor;
+struct FieldDescriptor;
 
-	using FieldHandler = std::function<void(void* target, const FieldDescriptor& desc, const nlohmann::json& value)>;
+using FieldHandler = std::function<void(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)>;
 
-	// Tag types to disambiguate constructors
-	struct EnterpriseOnly {};
-	struct Deprecated { std::string msg; };
+// Tag types to disambiguate constructors
+struct EnterpriseOnly {
+};
+struct Deprecated {
+	std::string msg;
+};
 
-	struct FieldDescriptor {
-		std::string json_path;  // JSON pointer path like "/service/batch-index-threads"
-		size_t offset;          // offsetof(target_struct, field_name)
-		FieldHandler handler;   // optional custom handler
-		bool enterprise_only;
-		std::string deprecation_warning;
-		UnitType unit_type;  // Unit type for this field (NONE if not applicable)
+struct FieldDescriptor {
+	std::string json_path; // JSON pointer path like "/service/batch-index-threads"
+	size_t offset; // offsetof(target_struct, field_name)
+	FieldHandler handler; // optional custom handler
+	bool enterprise_only;
+	std::string deprecation_warning;
+	UnitType unit_type; // Unit type for this field (NONE if not applicable)
 
-		// Basic constructor (no units)
-		FieldDescriptor(const std::string& path, size_t off, FieldHandler h)
-			: json_path(path), offset(off),
-			handler(h), enterprise_only(false),
-			deprecation_warning(""), unit_type(UnitType::NONE) {}
+	// Basic constructor (no units)
+	FieldDescriptor(const std::string& path, size_t off, FieldHandler h)
+		: json_path(path), offset(off), handler(h), enterprise_only(false),
+		  deprecation_warning(""), unit_type(UnitType::NONE)
+	{
+	}
 
-		// Constructor with unit type
-		FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
-				UnitType unit)
-			: json_path(path), offset(off),
-			handler(h), enterprise_only(false),
-			deprecation_warning(""), unit_type(unit) {}
+	// Constructor with unit type
+	FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
+			UnitType unit)
+		: json_path(path), offset(off), handler(h), enterprise_only(false),
+		  deprecation_warning(""), unit_type(unit)
+	{
+	}
 
-		// Enterprise-only constructor (no units)
-		FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
-				EnterpriseOnly)
-			: json_path(path), offset(off),
-			handler(h), enterprise_only(true),
-			deprecation_warning(""), unit_type(UnitType::NONE) {}
+	// Enterprise-only constructor (no units)
+	FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
+			EnterpriseOnly)
+		: json_path(path), offset(off), handler(h), enterprise_only(true),
+		  deprecation_warning(""), unit_type(UnitType::NONE)
+	{
+	}
 
-		// Enterprise-only with unit type
-		FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
-				EnterpriseOnly, UnitType unit)
-			: json_path(path), offset(off),
-			handler(h), enterprise_only(true),
-			deprecation_warning(""), unit_type(unit) {}
+	// Enterprise-only with unit type
+	FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
+			EnterpriseOnly, UnitType unit)
+		: json_path(path), offset(off), handler(h), enterprise_only(true),
+		  deprecation_warning(""), unit_type(unit)
+	{
+	}
 
-		// Deprecated constructor (no units)
-		FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
-				Deprecated depr)
-			: json_path(path), offset(off),
-			handler(h), enterprise_only(false),
-			deprecation_warning(std::move(depr.msg)), unit_type(UnitType::NONE) {}
+	// Deprecated constructor (no units)
+	FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
+			Deprecated depr)
+		: json_path(path), offset(off), handler(h), enterprise_only(false),
+		  deprecation_warning(std::move(depr.msg)), unit_type(UnitType::NONE)
+	{
+	}
 
-		// Deprecated with unit type
-		FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
-				Deprecated depr, UnitType unit)
-			: json_path(path), offset(off),
-			handler(h), enterprise_only(false),
-			deprecation_warning(std::move(depr.msg)), unit_type(unit) {}
-	};
+	// Deprecated with unit type
+	FieldDescriptor(const std::string& path, size_t off, FieldHandler h,
+			Deprecated depr, UnitType unit)
+		: json_path(path), offset(off), handler(h), enterprise_only(false),
+		  deprecation_warning(std::move(depr.msg)), unit_type(unit)
+	{
+	}
+};
 
-	// Edition detection
-	static bool is_community_edition();
+// Edition detection
+static bool is_community_edition();
 
-	// Helper functions for generic field application
-	static bool get_json_value(const std::string& path,
-			const nlohmann::json& source,
-			nlohmann::json& result);
+// Helper functions for generic field application
+static bool get_json_value(const std::string& path,
+		const nlohmann::json& source, nlohmann::json& result);
 
-	// Handler forward declarations
-	static void apply_field(void* target, const nlohmann::json& source, const FieldDescriptor& desc);
-	static bool try_expand_unit_value(const FieldDescriptor& desc,
-			const nlohmann::json& in,
-			uint64_t& out);
+// Handler forward declarations
+static void apply_field(void* target, const nlohmann::json& source,
+		const FieldDescriptor& desc);
+static bool try_expand_unit_value(const FieldDescriptor& desc,
+		const nlohmann::json& in, uint64_t& out);
 
-	// Type-specific field appliers
-	static void apply_uint16_field(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void apply_uint32_field(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void apply_uint64_field(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void apply_bool_field(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void apply_cstring_field(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void apply_pct_w_minus_1_field(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
+// Type-specific field appliers
+static void apply_uint16_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void apply_uint32_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void apply_uint64_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void apply_bool_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void apply_cstring_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void apply_pct_w_minus_1_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
 
-	// Service context handlers
-	static void handle_service(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_advertise_ipv6(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_auto_pin(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_cluster_name(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_feature_key_file(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_feature_key_files(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_group(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_info_max_ms(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_log_local_time(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_log_milliseconds(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_node_id(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_os_group_perms(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_secret_address_port(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_secret_tls_context(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_secret_uds_path(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_tls_refresh_period(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_user(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
+// Service context handlers
+static void handle_service(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_advertise_ipv6(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_auto_pin(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_cluster_name(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_feature_key_file(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_feature_key_files(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_group(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_info_max_ms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_log_local_time(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_log_milliseconds(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_node_id(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_os_group_perms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_secret_address_port(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_secret_tls_context(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_secret_uds_path(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_tls_refresh_period(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_user(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
 
-	// mod-lua field handlers
-	static void handle_mod_lua(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_mod_lua_user_path(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
+// mod-lua field handlers
+static void handle_mod_lua(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_mod_lua_user_path(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
 
-	// namespace field handlers
-	static void handle_namespaces(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_storage_engine_type(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_storage_engine_compression(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_storage_engine_devices(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_storage_engine_encryption(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_storage_engine_files(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_storage_engine_flush_max_ms(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_sindex_mounts(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_sindex_type(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_index_mounts(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_index_type(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_sets(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_write_commit_level_override(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_read_consistency_level_override(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_xdr_bin_tombstone_ttl(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_namespace_conflict_resolution_policy(void* ns, const FieldDescriptor& desc, const nlohmann::json& value);
+// namespace field handlers
+static void handle_namespaces(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_namespace_storage_engine_type(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_storage_engine_compression(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_storage_engine_devices(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_storage_engine_encryption(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_storage_engine_files(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_storage_engine_flush_max_ms(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_sindex_mounts(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_sindex_type(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_namespace_index_mounts(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_namespace_index_type(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_namespace_sets(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_namespace_write_commit_level_override(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_read_consistency_level_override(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_xdr_bin_tombstone_ttl(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_namespace_conflict_resolution_policy(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value);
 
-	// network field handlers
-	static void handle_network(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_admin(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_admin_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_admin_tls_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_admin_tls_authenticate_client(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service_access_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service_alternate_access_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service_tls_access_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service_tls_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service_tls_alternate_access_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_service_tls_authenticate_client(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat_mesh_seed_address_ports(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat_mode(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat_multicast_groups(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat_protocol(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat_tls_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_heartbeat_tls_mesh_seed_address_ports(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_fabric(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_fabric_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_fabric_tls_addresses(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_network_tls(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
+// network field handlers
+static void handle_network(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_network_admin(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_network_admin_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_admin_tls_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_admin_tls_authenticate_client(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_service(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_network_service_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_service_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_service_alternate_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_service_tls_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_service_tls_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_service_tls_alternate_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_service_tls_authenticate_client(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_heartbeat(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_network_heartbeat_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_heartbeat_mesh_seed_address_ports(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_heartbeat_mode(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_heartbeat_multicast_groups(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_heartbeat_protocol(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_heartbeat_tls_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_heartbeat_tls_mesh_seed_address_ports(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_fabric(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_network_fabric_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_fabric_tls_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_network_tls(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
 
-	// xdr field handlers
-	static void handle_xdr(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_auth_mode(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_node_address_ports(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_period_ms(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_namespaces(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_bin_policy(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_ship_versions_policy(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_write_policy(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_ignore_bins(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_ignore_sets(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_ship_bins(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_ship_sets(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_xdr_dc_ns_ship_versions_interval(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
+// xdr field handlers
+static void handle_xdr(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_xdr_dc_auth_mode(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_xdr_dc_node_address_ports(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_period_ms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_xdr_dc_namespaces(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_xdr_dc_ns_bin_policy(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_ns_ship_versions_policy(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_ns_write_policy(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_ns_ignore_bins(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_ns_ignore_sets(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_ns_ship_bins(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_ns_ship_sets(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_xdr_dc_ns_ship_versions_interval(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
 
-	// security field handlers
-	static void handle_security(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_security_ldap(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_security_log(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_security_ldap_token_hash_method(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_security_ldap_role_query_patterns(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_security_log_report_data_op(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_security_log_report_data_op_role(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_security_log_report_data_op_user(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
+// security field handlers
+static void handle_security(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_security_ldap(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_security_log(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_security_ldap_token_hash_method(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_security_ldap_role_query_patterns(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_security_log_report_data_op(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_security_log_report_data_op_role(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_security_log_report_data_op_user(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
 
-	// logging field handlers
-	static void handle_logging(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_logging_facility(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_logging_syslog_path(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_logging_syslog_tag(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
-	static void handle_logging_context_level(void* target, const FieldDescriptor& desc, const nlohmann::json& value);
+// logging field handlers
+static void handle_logging(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_logging_facility(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_logging_syslog_path(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
+static void handle_logging_syslog_tag(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
+static void handle_logging_context_level(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value);
 
-	// Helper functions for applying specific fields
-	static void apply_xdr_dc(const std::string& name,
-			const nlohmann::json& dc_json, as_config* config);
-	static void apply_xdr_dc_namespace(const std::string& name,
-			const nlohmann::json& dc_ns_json, void* dc_cfg_ptr);
-	static void apply_logging_sink(int index, const nlohmann::json& sink_json);
-	static void apply_namespace_set(const std::string& name,
-			const nlohmann::json& set_json, as_namespace* namespace_struct);
+// Helper functions for applying specific fields
+static void apply_xdr_dc(const std::string& name, const nlohmann::json& dc_json,
+		as_config* config);
+static void apply_xdr_dc_namespace(const std::string& name,
+		const nlohmann::json& dc_ns_json, void* dc_cfg_ptr);
+static void apply_logging_sink(int index, const nlohmann::json& sink_json);
+static void apply_namespace_set(const std::string& name,
+		const nlohmann::json& set_json, as_namespace* namespace_struct);
 
-	//==========================================================
-	// Field descriptor tables.
-	//
+//==========================================================
+// Field descriptor tables.
+//
 
-
+// clang-format off
 	static const std::vector<FieldDescriptor> TOP_LEVEL_CONTEXT_DESCRIPTORS = {
 		{"/service", NO_OFFSET, handle_service},
 		{"/network", NO_OFFSET, handle_network},
@@ -279,6 +378,7 @@ namespace cfg_handlers
 		{"/batch-max-buffers-per-queue", offsetof(as_config, batch_max_buffers_per_queue), apply_uint32_field, UnitType::SIZE_U32},
 		{"/batch-max-requests", offsetof(as_config, batch_max_requests), apply_uint32_field, UnitType::SIZE_U32},
 		{"/batch-max-unused-buffers", offsetof(as_config, batch_max_unused_buffers), apply_uint32_field, UnitType::SIZE_U32},
+		{"/cgroup-mem-tracking", offsetof(as_config, cgroup_mem_tracking), apply_bool_field},
 		{"/cluster-name", NO_OFFSET, handle_cluster_name},
 		{"/debug-allocations", offsetof(as_config, debug_allocations), apply_bool_field},
 		{"/disable-udf-execution", offsetof(as_config, udf_execution_disabled), apply_bool_field},
@@ -483,6 +583,7 @@ namespace cfg_handlers
 		{"/strong-consistency-allow-expunge", offsetof(as_namespace, cp_allow_drops), apply_bool_field, EnterpriseOnly{}}, // enterprise-only
 		{"/tomb-raider-eligible-age", offsetof(as_namespace, tomb_raider_eligible_age), apply_uint32_field, EnterpriseOnly{}, UnitType::TIME_DURATION}, // enterprise-only
 		{"/tomb-raider-period", offsetof(as_namespace, tomb_raider_period), apply_uint32_field, EnterpriseOnly{}, UnitType::TIME_DURATION}, // enterprise-only
+		{"/tomb-raider-unmark-threads", offsetof(as_namespace, n_tomb_raider_unmark_threads), apply_uint32_field, EnterpriseOnly{}}, // enterprise-only
 		{"/transaction-pending-limit", offsetof(as_namespace, transaction_pending_limit), apply_uint32_field},
 		{"/truncate-threads", offsetof(as_namespace, n_truncate_threads), apply_uint32_field},
 		{"/write-commit-level-override", offsetof(as_namespace, write_commit_level), handle_namespace_write_commit_level_override},
@@ -543,7 +644,7 @@ namespace cfg_handlers
 		{"/default-read-touch-ttl-pct", offsetof(as_set, default_read_touch_ttl_pct), apply_pct_w_minus_1_field},
 		{"/default-ttl", offsetof(as_set, default_ttl), apply_uint32_field, UnitType::TIME_DURATION},
 		{"/disable-eviction", offsetof(as_set, eviction_disabled), apply_bool_field},
-		{"/enable-index", offsetof(as_set, index_enabled), apply_bool_field},
+		{"/enable-index", offsetof(as_set, index_enabled), apply_bool_field, Deprecated{"'enable-index' is deprecated - use 'sindex-create' and 'sindex-delete' info commands instead - see https://aerospike.com/docs/database/release/8-1-2/"}},
 		{"/stop-writes-count", offsetof(as_set, stop_writes_count), apply_uint64_field, UnitType::SIZE_U64},
 		{"/stop-writes-size", offsetof(as_set, stop_writes_size), apply_uint64_field, UnitType::SIZE_U64},
 	};
@@ -704,2496 +805,2454 @@ namespace cfg_handlers
 		{"/contexts/xdr-client", NO_OFFSET, handle_logging_context_level},
 		{"/contexts/masking", NO_OFFSET, handle_logging_context_level},
 	};
-
+// clang-format on
 
 //==========================================================
 // Public API.
 //
 
-	void
-	apply_config(as_config* config, const nlohmann::json& source)
-	{
-		for (const auto& desc : TOP_LEVEL_CONTEXT_DESCRIPTORS) {
-			apply_field(config, source, desc);
-		}
+void
+apply_config(as_config* config, const nlohmann::json& source)
+{
+	for (const auto& desc : TOP_LEVEL_CONTEXT_DESCRIPTORS) {
+		apply_field(config, source, desc);
 	}
+}
 
 //==========================================================
 // Local helpers.
 //
 
-	static bool
-	get_json_value(const std::string& path, const nlohmann::json& source,
-			nlohmann::json& result)
-	{
-		try {
-			result = source.at(nlohmann::json::json_pointer(path));
-			return true;
-		} catch (const nlohmann::json::exception&) {
-			return false;
+static bool
+get_json_value(const std::string& path, const nlohmann::json& source,
+		nlohmann::json& result)
+{
+	try {
+		result = source.at(nlohmann::json::json_pointer(path));
+		return true;
+	}
+	catch (const nlohmann::json::exception&) {
+		return false;
+	}
+}
+
+static bool
+is_community_edition()
+{
+	// In community edition, as_error_enterprise_only() returns true.
+	// In enterprise edition, it would return false (but this function
+	// doesn't exist in EE).
+	return as_error_enterprise_only();
+}
+
+static void
+apply_field(void* target, const nlohmann::json& source,
+		const FieldDescriptor& desc)
+{
+	nlohmann::json value;
+
+	// Skip if field is not present (optional fields)
+	if (! get_json_value(desc.json_path, source, value)) {
+		// Field not found - this is okay for optional fields
+		return;
+	}
+
+	// Check if this is an enterprise-only field in community edition
+	if (desc.enterprise_only && is_community_edition()) {
+		throw config_error(desc.json_path, "is enterprise-only");
+	}
+
+	if (! desc.deprecation_warning.empty()) {
+		as_info_warn_deprecated(desc.deprecation_warning.c_str());
+	}
+
+	// If this field supports units (e.g. seconds, mibibytes, etc),
+	// accept the new schema's object form:
+	//   { "value": <int>, "unit": "<suffix>" }
+	// and expand it to the base-unit integer the existing handlers expect.
+	if (desc.unit_type != UnitType::NONE) {
+		uint64_t expanded;
+		if (try_expand_unit_value(desc, value, expanded)) {
+			value = expanded;
 		}
 	}
 
-	static bool
-	is_community_edition()
-	{
-		// In community edition, as_error_enterprise_only() returns true.
-		// In enterprise edition, it would return false (but this function
-		// doesn't exist in EE).
-		return as_error_enterprise_only();
-	}
+	desc.handler(target, desc, value);
+}
 
-
-	static void
-	apply_field(void* target, const nlohmann::json& source,
-			const FieldDescriptor& desc)
-	{
-		nlohmann::json value;
-
-		// Skip if field is not present (optional fields)
-		if (! get_json_value(desc.json_path, source, value)) {
-			// Field not found - this is okay for optional fields
-			return;
-		}
-
-		// Check if this is an enterprise-only field in community edition
-		if (desc.enterprise_only && is_community_edition()) {
-			throw config_error(desc.json_path, "is enterprise-only");
-		}
-
-		if (! desc.deprecation_warning.empty()) {
-			as_info_warn_deprecated(desc.deprecation_warning.c_str());
-		}
-
-		// If this field supports units (e.g. seconds, mibibytes, etc),
-		// accept the new schema's object form:
-		//   { "value": <int>, "unit": "<suffix>" }
-		// and expand it to the base-unit integer the existing handlers expect.
-		if (desc.unit_type != UnitType::NONE) {
-			uint64_t expanded;
-			if (try_expand_unit_value(desc, value, expanded)) {
-				value = expanded;
-			}
-		}
-
-		desc.handler(target, desc, value);
-	}
-
-	// Unit expansion for schema object form: {value, unit}
-	//
-	// Returns true if 'in' was recognized as a unit-bearing representation and
-	// successfully expanded into 'out'. Throws config_error on malformed unit
-	// objects/strings for unit-capable fields.
-	//
-	static bool
-	try_expand_unit_value(const FieldDescriptor& desc, const nlohmann::json& in,
-			uint64_t& out)
-	{
-		if (desc.unit_type == UnitType::NONE) {
-			return false;
-		}
-
-		// value might be a unit-bearing object: {"value": <int>, "unit": "<suffix>"}.
-		if (in.is_object()) {
-			if (! in.contains("value") || ! in.contains("unit")) {
-				// Not our object form - let the specific handler validate.
-				return false;
-			}
-
-			const nlohmann::json& v = in.at("value");
-			const nlohmann::json& u = in.at("unit");
-
-			if (! (v.is_number_integer() || v.is_number_unsigned())) {
-				throw config_error(desc.json_path, "unit object 'value' must be an integer");
-			}
-			if (! u.is_string()) {
-				throw config_error(desc.json_path, "unit object 'unit' must be a string");
-			}
-
-			// Treat negative integers as invalid (schema minimums are almost always non-negative).
-			int64_t v_i = v.get<int64_t>();
-			if (v_i < 0) {
-				throw config_error(desc.json_path, "unit object 'value' must be non-negative");
-			}
-
-			std::string suffix = u.get<std::string>();
-			if (suffix.empty()) {
-				throw config_error(desc.json_path, "unit object 'unit' must be non-empty");
-			}
-
-			std::string combined = std::to_string(static_cast<uint64_t>(v_i)) + suffix;
-
-			switch (desc.unit_type) {
-				case UnitType::TIME_DURATION: {
-					uint32_t seconds;
-					if (cf_str_atoi_seconds(combined.c_str(), &seconds) != 0) {
-						throw config_error(desc.json_path,
-								"invalid time unit object (expected e.g. {value: 1, unit: s|m|h|d})");
-					}
-					out = seconds;
-					return true;
-				}
-				case UnitType::SIZE_U32:
-				case UnitType::SIZE_U64: {
-					uint64_t size;
-					if (cf_str_atoi_size(combined.c_str(), &size) != 0) {
-						throw config_error(desc.json_path,
-								"invalid size unit object (expected e.g. {value: 1, unit: k|m|g|t|p|ki|mi|gi|ti|pi})");
-					}
-					out = size;
-					return true;
-				}
-				case UnitType::NONE:
-				default:
-					return false;
-			}
-		}
-
+// Unit expansion for schema object form: {value, unit}
+//
+// Returns true if 'in' was recognized as a unit-bearing representation and
+// successfully expanded into 'out'. Throws config_error on malformed unit
+// objects/strings for unit-capable fields.
+//
+static bool
+try_expand_unit_value(const FieldDescriptor& desc, const nlohmann::json& in,
+		uint64_t& out)
+{
+	if (desc.unit_type == UnitType::NONE) {
 		return false;
 	}
 
-	static void
-	apply_uint16_field(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		uint64_t val;
-		if (value.is_number_unsigned() || value.is_number_integer()) {
-			val = value.get<uint64_t>();
-		}
-		else {
-			throw config_error(desc.json_path, "must be a positive integer");
+	// value might be a unit-bearing object: {"value": <int>, "unit": "<suffix>"}.
+	if (in.is_object()) {
+		if (! in.contains("value") || ! in.contains("unit")) {
+			// Not our object form - let the specific handler validate.
+			return false;
 		}
 
-		if (val > std::numeric_limits<uint16_t>::max()) {
-			throw config_error(desc.json_path, "value too large for uint16_t");
-		}
+		const nlohmann::json& v = in.at("value");
+		const nlohmann::json& u = in.at("unit");
 
-		uint16_t* field_ptr = reinterpret_cast<uint16_t*>(
-				static_cast<char*>(target) + desc.offset);
-		*field_ptr = static_cast<uint16_t>(val);
-	}
-
-	static void
-	apply_pct_w_minus_1_field(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_number_unsigned() && ! value.is_number_integer()) {
-			throw config_error(desc.json_path, "must be an integer");
-		}
-
-		int32_t val = value.get<int32_t>();
-
-		if (val > 100 || val < -1) {
+		if (! (v.is_number_integer() || v.is_number_unsigned())) {
 			throw config_error(desc.json_path,
-					"value must be between 0 and 100 or -1");
+					"unit object 'value' must be an integer");
+		}
+		if (! u.is_string()) {
+			throw config_error(desc.json_path,
+					"unit object 'unit' must be a string");
 		}
 
-		uint32_t* field_ptr = reinterpret_cast<uint32_t*>(
-				static_cast<char*>(target) + desc.offset);
-		*field_ptr = static_cast<uint32_t>(val);
-	}
-
-	static void
-	apply_uint32_field(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		uint64_t val;
-		if (value.is_number_unsigned() || value.is_number_integer()) {
-			val = value.get<uint64_t>();
-		}
-		else {
-			throw config_error(desc.json_path, "must be a positive integer");
+		// Treat negative integers as invalid (schema minimums are almost always non-negative).
+		int64_t v_i = v.get<int64_t>();
+		if (v_i < 0) {
+			throw config_error(desc.json_path,
+					"unit object 'value' must be non-negative");
 		}
 
-		if (val > std::numeric_limits<uint32_t>::max()) {
-			throw config_error(desc.json_path, "value too large for uint32_t");
+		std::string suffix = u.get<std::string>();
+		if (suffix.empty()) {
+			throw config_error(desc.json_path,
+					"unit object 'unit' must be non-empty");
 		}
 
-		uint32_t* field_ptr = reinterpret_cast<uint32_t*>(
-				static_cast<char*>(target) + desc.offset);
-		*field_ptr = static_cast<uint32_t>(val);
-	}
+		std::string combined =
+				std::to_string(static_cast<uint64_t>(v_i)) + suffix;
 
-	static void
-	apply_uint64_field(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		uint64_t val;
-		if (value.is_number_unsigned() || value.is_number_integer()) {
-			val = value.get<uint64_t>();
+		switch (desc.unit_type) {
+		case UnitType::TIME_DURATION: {
+			uint32_t seconds;
+			if (cf_str_atoi_seconds(combined.c_str(), &seconds) != 0) {
+				throw config_error(desc.json_path,
+						"invalid time unit object (expected e.g. {value: 1, unit: s|m|h|d})");
+			}
+			out = seconds;
+			return true;
 		}
-		else {
-			throw config_error(desc.json_path, "must be a positive integer");
+		case UnitType::SIZE_U32:
+		case UnitType::SIZE_U64: {
+			uint64_t size;
+			if (cf_str_atoi_size(combined.c_str(), &size) != 0) {
+				throw config_error(desc.json_path,
+						"invalid size unit object (expected e.g. {value: 1, unit: k|m|g|t|p|ki|mi|gi|ti|pi})");
+			}
+			out = size;
+			return true;
 		}
-
-		uint64_t* field_ptr = reinterpret_cast<uint64_t*>(
-				static_cast<char*>(target) + desc.offset);
-		*field_ptr = val;
-	}
-
-	static void
-	apply_bool_field(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_boolean()) {
-			throw config_error(desc.json_path, "must be a boolean");
-		}
-
-		bool* field_ptr = reinterpret_cast<bool*>(
-				static_cast<char*>(target) + desc.offset);
-		*field_ptr = value.get<bool>();
-	}
-
-	static void
-	apply_cstring_field(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_string()) {
-			throw config_error(desc.json_path, "must be a string");
-		}
-
-		std::string str_val = value.get<std::string>();
-
-		// For C strings, we need to allocate memory and copy the string.
-		// This assumes the target field is a char* that should be allocated.
-		char** field_ptr = reinterpret_cast<char**>(
-				static_cast<char*>(target) + desc.offset);
-
-		// Free existing string if any
-		if (*field_ptr != NULL) {
-			cf_free(*field_ptr);
-		}
-
-		// Allocate and copy new string.
-		*field_ptr = cf_strdup(str_val.c_str());
-	}
-
-	//------------------------------------------------
-	// Mod Lua Handlers.
-	//
-
-	static void
-	handle_mod_lua(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		for (const auto& desc : MOD_LUA_FIELD_DESCRIPTORS) {
-			apply_field(config, value, desc);
+		case UnitType::NONE:
+		default:
+			return false;
 		}
 	}
 
-	static void
-	handle_mod_lua_user_path(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
+	return false;
+}
 
-		if (! value.is_string()) {
-			throw config_error("/mod-lua/user-path", "must be a string");
-		}
-
-		std::string str_val = value.get<std::string>();
-
-		if (str_val.length() >= sizeof(config->mod_lua.user_path)) {
-			throw config_error("/mod-lua/user-path",
-					"string too long (max " +
-					std::to_string(sizeof(config->mod_lua.user_path) - 1) +
-					" characters)");
-		}
-
-		strcpy(config->mod_lua.user_path, str_val.c_str());
+static void
+apply_uint16_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	uint64_t val;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		val = value.get<uint64_t>();
+	}
+	else {
+		throw config_error(desc.json_path, "must be a positive integer");
 	}
 
-	//------------------------------------------------
-	// Service Handlers.
-	//
-
-	static void
-	handle_service(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		for (const auto& desc : SERVICE_FIELD_DESCRIPTORS) {
-			apply_field(config, value, desc);
-		}
+	if (val > std::numeric_limits<uint16_t>::max()) {
+		throw config_error(desc.json_path, "value too large for uint16_t");
 	}
 
-	static void
-	handle_user(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
+	uint16_t* field_ptr =
+			reinterpret_cast<uint16_t*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = static_cast<uint16_t>(val);
+}
 
-		if (! value.is_string()) {
-			throw config_error("/service/user", "must be a string");
+static void
+apply_pct_w_minus_1_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_number_unsigned() && ! value.is_number_integer()) {
+		throw config_error(desc.json_path, "must be an integer");
+	}
+
+	int32_t val = value.get<int32_t>();
+
+	if (val > 100 || val < -1) {
+		throw config_error(desc.json_path,
+				"value must be between 0 and 100 or -1");
+	}
+
+	uint32_t* field_ptr =
+			reinterpret_cast<uint32_t*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = static_cast<uint32_t>(val);
+}
+
+static void
+apply_uint32_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	uint64_t val;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		val = value.get<uint64_t>();
+	}
+	else {
+		throw config_error(desc.json_path, "must be a positive integer");
+	}
+
+	if (val > std::numeric_limits<uint32_t>::max()) {
+		throw config_error(desc.json_path, "value too large for uint32_t");
+	}
+
+	uint32_t* field_ptr =
+			reinterpret_cast<uint32_t*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = static_cast<uint32_t>(val);
+}
+
+static void
+apply_uint64_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	uint64_t val;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		val = value.get<uint64_t>();
+	}
+	else {
+		throw config_error(desc.json_path, "must be a positive integer");
+	}
+
+	uint64_t* field_ptr =
+			reinterpret_cast<uint64_t*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = val;
+}
+
+static void
+apply_bool_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_boolean()) {
+		throw config_error(desc.json_path, "must be a boolean");
+	}
+
+	bool* field_ptr =
+			reinterpret_cast<bool*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = value.get<bool>();
+}
+
+static void
+apply_cstring_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error(desc.json_path, "must be a string");
+	}
+
+	std::string str_val = value.get<std::string>();
+
+	// For C strings, we need to allocate memory and copy the string.
+	// This assumes the target field is a char* that should be allocated.
+	char** field_ptr =
+			reinterpret_cast<char**>(static_cast<char*>(target) + desc.offset);
+
+	// Free existing string if any
+	if (*field_ptr != NULL) {
+		cf_free(*field_ptr);
+	}
+
+	// Allocate and copy new string.
+	*field_ptr = cf_strdup(str_val.c_str());
+}
+
+//------------------------------------------------
+// Mod Lua Handlers.
+//
+
+static void
+handle_mod_lua(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	for (const auto& desc : MOD_LUA_FIELD_DESCRIPTORS) {
+		apply_field(config, value, desc);
+	}
+}
+
+static void
+handle_mod_lua_user_path(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/mod-lua/user-path", "must be a string");
+	}
+
+	std::string str_val = value.get<std::string>();
+
+	if (str_val.length() >= sizeof(config->mod_lua.user_path)) {
+		throw config_error("/mod-lua/user-path",
+				"string too long (max " +
+						std::to_string(sizeof(config->mod_lua.user_path) - 1) +
+						" characters)");
+	}
+
+	strcpy(config->mod_lua.user_path, str_val.c_str());
+}
+
+//------------------------------------------------
+// Service Handlers.
+//
+
+static void
+handle_service(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	for (const auto& desc : SERVICE_FIELD_DESCRIPTORS) {
+		apply_field(config, value, desc);
+	}
+}
+
+static void
+handle_user(void* target, const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/service/user", "must be a string");
+	}
+
+	{
+		as_info_warn_deprecated("'user' is deprecated");
+
+		struct passwd* pwd;
+
+		if (NULL == (pwd = getpwnam(value.get<std::string>().c_str()))) {
+			throw config_error("/service/user",
+					"user not found: " + value.get<std::string>());
 		}
 
-		{
-			as_info_warn_deprecated("'user' is deprecated");
+		config->uid = pwd->pw_uid;
+		endpwent();
+	}
+}
 
-			struct passwd* pwd;
+static void
+handle_tls_refresh_period(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	uint32_t resolved_val;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		resolved_val = value.get<uint32_t>();
+	}
+	else {
+		throw config_error("/service/tls-refresh-period",
+				"must be a positive integer");
+	}
 
-			if (NULL == (pwd = getpwnam(value.get<std::string>().c_str()))) {
-				throw config_error("/service/user",
-						"user not found: " + value.get<std::string>());
+	tls_set_refresh_period(resolved_val);
+}
+
+static void
+handle_secret_address_port(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error("/service/secret-address-port", "must be a string");
+	}
+
+	// format is "host:port:tls_name"
+	// host and port are required, tls_name is optional
+	std::string secrets_string = value.get<std::string>();
+	std::stringstream ss(secrets_string);
+	std::string host, port_str, tls_name;
+
+	std::getline(ss, host, ':');
+	std::getline(ss, port_str, ':');
+	std::getline(ss, tls_name, ':');
+
+	if (host.empty() || port_str.empty()) {
+		throw config_error("/service/secret-address-port",
+				"invalid address: " + secrets_string +
+						" (expected 'host:port[:tls_name]')");
+	}
+
+	char* host_dup = cf_strdup(host.c_str());
+	char* port_dup = cf_strdup(port_str.c_str());
+	char* tls_name_dup = tls_name.empty() ? NULL : cf_strdup(tls_name.c_str());
+
+	cfg_add_secrets_addr_port(host_dup, port_dup, tls_name_dup);
+}
+
+static void
+handle_secret_tls_context(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error("/service/secret-tls-context", "must be a string");
+	}
+
+	char* tls_context_dup = cf_strdup(value.get<std::string>().c_str());
+	g_secrets_cfg.tls_context = tls_context_dup;
+}
+
+static void
+handle_secret_uds_path(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error("/service/secret-uds-path", "must be a string");
+	}
+
+	char* uds_path_dup = cf_strdup(value.get<std::string>().c_str());
+	g_secrets_cfg.uds_path = uds_path_dup;
+}
+
+static void
+handle_node_id(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error("/service/node-id", "must be a string");
+	}
+
+	as_config* config = static_cast<as_config*>(target);
+
+	// node-id is a hex string
+	if (0 != cf_strtoul_x64(value.get<std::string>().c_str(), &config->self_node)) {
+		throw config_error("/service/node-id",
+				"failed to parse node-id as hex string");
+	}
+}
+
+static void
+handle_os_group_perms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_boolean()) {
+		throw config_error("/service/os-group-perms", "must be a boolean");
+	}
+
+	cf_os_use_group_perms(value.get<bool>());
+}
+
+static void
+handle_log_milliseconds(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_boolean()) {
+		throw config_error("/service/log-milliseconds", "must be a boolean");
+	}
+
+	cf_log_use_millis(value.get<bool>());
+}
+
+static void
+handle_log_local_time(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_boolean()) {
+		throw config_error("/service/log-local-time", "must be a boolean");
+	}
+
+	cf_log_use_local_time(value.get<bool>());
+}
+
+static void
+handle_group(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_info_warn_deprecated("'group' is deprecated");
+
+	if (! value.is_string()) {
+		throw config_error("/service/group", "must be a string");
+	}
+
+	struct group* grp;
+
+	if (NULL == (grp = getgrnam(value.get<std::string>().c_str()))) {
+		throw config_error("/service/group",
+				"group not found: " + value.get<std::string>());
+	}
+
+	as_config* config = static_cast<as_config*>(target);
+	config->gid = grp->gr_gid;
+	endgrent();
+}
+
+static void
+handle_info_max_ms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	uint64_t info_max_ms;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		info_max_ms = value.get<uint64_t>();
+	}
+	else {
+		throw config_error("/service/info-max-ms",
+				"must be a positive integer or an object with 'value' and 'unit' properties");
+	}
+
+	if (info_max_ms > MAX_INFO_MAX_MS) {
+		throw config_error("/service/info-max-ms",
+				"value must be less than " + std::to_string(MAX_INFO_MAX_MS) +
+						" milliseconds");
+	}
+
+	as_config* config = static_cast<as_config*>(target);
+	config->info_max_ns = info_max_ms * 1000000;
+}
+
+static void
+handle_feature_key_files(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_array()) {
+		throw config_error("/service/feature-key-files",
+				"must be an array of strings");
+	}
+
+	for (const auto& item : value) {
+		if (! item.is_string()) {
+			throw config_error("/service/feature-key-files",
+					"must be an array of strings");
+		}
+
+		// cfg_add_feature_key_file does NOT strdup
+		// it stores the pointer directly
+		// so we must strdup to ensure the string outlives the temporary.
+		const char* path_copy = cf_strdup(item.get<std::string>().c_str());
+		cfg_add_feature_key_file(path_copy);
+	}
+}
+
+static void
+handle_feature_key_file(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error("/service/feature-key-file", "must be a string");
+	}
+
+	// cfg_add_feature_key_file does NOT strdup
+	// it stores the pointer directly
+	// so we must strdup to ensure the string outlives the temporary.
+	const char* path_copy = cf_strdup(value.get<std::string>().c_str());
+	cfg_add_feature_key_file(path_copy);
+}
+
+static void
+handle_auto_pin(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/service/auto-pin", "must be a string");
+	}
+
+	std::string auto_pin = value.get<std::string>();
+
+	if (auto_pin == "none") {
+		config->auto_pin = CF_TOPO_AUTO_PIN_NONE;
+	}
+	else if (auto_pin == "cpu") {
+		config->auto_pin = CF_TOPO_AUTO_PIN_CPU;
+	}
+	else if (auto_pin == "numa") {
+		config->auto_pin = CF_TOPO_AUTO_PIN_NUMA;
+	}
+	else if (auto_pin == "adq") {
+		as_info_warn_deprecated("'auto-pin-adq' is deprecated");
+		config->auto_pin = CF_TOPO_AUTO_PIN_ADQ;
+	}
+	else {
+		throw config_error("/service/auto-pin", "invalid value: " + auto_pin);
+	}
+}
+
+static void
+handle_advertise_ipv6(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_boolean()) {
+		throw config_error("/service/advertise-ipv6", "must be a boolean");
+	}
+
+	cf_socket_set_advertise_ipv6(value.get<bool>());
+}
+
+static void
+handle_cluster_name(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_string()) {
+		throw config_error("/service/cluster-name", "must be a string");
+	}
+
+	std::string cluster_name = value.get<std::string>();
+
+	if (cluster_name.length() >= AS_CLUSTER_NAME_SZ) {
+		throw config_error("/service/cluster-name",
+				"string too long (max " +
+						std::to_string(AS_CLUSTER_NAME_SZ - 1) + " characters)");
+	}
+
+	as_config* config = static_cast<as_config*>(target);
+	std::strncpy(config->cluster_name, cluster_name.c_str(),
+			AS_CLUSTER_NAME_SZ - 1);
+	config->cluster_name[AS_CLUSTER_NAME_SZ - 1] = '\0';
+}
+
+static void
+apply_network_tls_context(std::string name, const nlohmann::json& tls_json,
+		as_config* config)
+{
+	if (! tls_json.is_object()) {
+		throw config_error("/network/tls/" + name, "must be an object");
+	}
+
+	if (name.empty()) {
+		throw config_error("/network/tls/" + name,
+				"name must be a non-empty string");
+	}
+
+	auto tls_spec = cfg_create_tls_spec(config, name.c_str());
+
+	for (const auto& desc : NETWORK_TLS_FIELD_DESCRIPTORS) {
+		apply_field(tls_spec, tls_json, desc);
+	}
+}
+
+//------------------------------------------------
+// Namespace Handlers.
+//
+
+static void
+apply_namespace(std::string name, const nlohmann::json& namespace_json)
+{
+	if (! namespace_json.is_object()) {
+		throw config_error("/namespaces/" + name, "must be an object");
+	}
+
+	auto namespace_struct = as_namespace_create(name.c_str());
+
+	for (const auto& desc : NAMESPACE_FIELD_DESCRIPTORS) {
+		apply_field(namespace_struct, namespace_json, desc);
+	}
+}
+
+static void
+handle_namespaces(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_object()) {
+		throw config_error("/namespaces", "must be an object");
+	}
+
+	// rely on config being initialized to 0
+	// config->n_namespaces = 0;
+
+	for (auto& el : value.items()) {
+		apply_namespace(el.key(), el.value());
+	}
+}
+
+static void
+handle_namespace_write_commit_level_override(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/write-commit-level-override",
+				"must be a string");
+	}
+
+	std::string write_commit_level_override = value.get<std::string>();
+
+	if (write_commit_level_override == "off") {
+		namespace_struct->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
+	}
+	else if (write_commit_level_override == "master") {
+		namespace_struct->write_commit_level = AS_WRITE_COMMIT_LEVEL_MASTER;
+	}
+	else if (write_commit_level_override == "all") {
+		namespace_struct->write_commit_level = AS_WRITE_COMMIT_LEVEL_ALL;
+	}
+	else {
+		throw config_error("/namespaces/write-commit-level-override",
+				"invalid value: " + write_commit_level_override);
+	}
+}
+
+static void
+handle_namespace_xdr_bin_tombstone_ttl(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	uint32_t ttl;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		ttl = value.get<uint32_t>();
+	}
+	else {
+		throw config_error("/namespaces/xdr-bin-tombstone-ttl",
+				"must be a positive integer");
+	}
+
+	if (ttl > MAX_ALLOWED_TTL) {
+		throw config_error("/namespaces/xdr-bin-tombstone-ttl",
+				"value must be less than " + std::to_string(MAX_ALLOWED_TTL) +
+						" seconds");
+	}
+
+	namespace_struct->xdr_bin_tombstone_ttl_ms = ttl * 1000;
+}
+
+static void
+handle_namespace_read_consistency_level_override(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/read-consistency-level-override",
+				"must be a string");
+	}
+
+	std::string read_consistency_level_override = value.get<std::string>();
+
+	if (read_consistency_level_override == "off") {
+		namespace_struct->read_consistency_level =
+				AS_READ_CONSISTENCY_LEVEL_PROTO;
+	}
+	else if (read_consistency_level_override == "one") {
+		namespace_struct->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_ONE;
+	}
+	else if (read_consistency_level_override == "all") {
+		namespace_struct->read_consistency_level = AS_READ_CONSISTENCY_LEVEL_ALL;
+	}
+	else {
+		throw config_error("/namespaces/read-consistency-level-override",
+				"invalid value: " + read_consistency_level_override);
+	}
+}
+
+static void
+handle_namespace_conflict_resolution_policy(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/conflict-resolution-policy",
+				"must be a string");
+	}
+
+	std::string policy = value.get<std::string>();
+
+	if (policy == "generation") {
+		namespace_struct->conflict_resolution_policy =
+				AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
+	}
+	else if (policy == "last-update-time") {
+		namespace_struct->conflict_resolution_policy =
+				AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
+	}
+	else {
+		throw config_error("/namespaces/conflict-resolution-policy",
+				"invalid value: " + policy);
+	}
+}
+
+//------------------------------------------------
+// Namespace Sindex-Type Handlers.
+//
+
+static void
+handle_namespace_sindex_mounts(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_array()) {
+		throw config_error("/namespaces/sindex-type/mounts", "must be an array");
+	}
+
+	for (const auto& mount : value) {
+		if (! mount.is_string()) {
+			throw config_error("/namespaces/sindex-type/mounts",
+					"entries must be a string");
+		}
+
+		// cfg_add_si_xmem_mount does NOT strdup
+		// it stores the pointer directly.
+		const char* mount_str = cf_strdup(mount.get<std::string>().c_str());
+		cfg_add_si_xmem_mount(namespace_struct, mount_str);
+	}
+}
+
+static void
+handle_namespace_sindex_type(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/sindex-type/type", "must be a string");
+	}
+
+	std::string sindex_type = value.get<std::string>();
+
+	if (sindex_type == "shmem") {
+		namespace_struct->si_xmem_type = CF_XMEM_TYPE_SHMEM;
+	}
+	else if (sindex_type == "pmem") {
+		namespace_struct->si_xmem_type = CF_XMEM_TYPE_PMEM;
+	}
+	else if (sindex_type == "flash") {
+		namespace_struct->si_xmem_type = CF_XMEM_TYPE_FLASH;
+	}
+	else {
+		throw config_error("/namespaces/sindex-type/type",
+				"invalid value: " + sindex_type);
+	}
+}
+
+//------------------------------------------------
+// Namespace Index-Type Handlers.
+//
+
+static void
+handle_namespace_index_mounts(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_array()) {
+		throw config_error("/namespaces/index-type/mounts", "must be an array");
+	}
+
+	for (const auto& mount : value) {
+		if (! mount.is_string()) {
+			throw config_error("/namespaces/index-type/mounts",
+					"entries must be a string");
+		}
+
+		// cfg_add_pi_xmem_mount does NOT strdup
+		// it stores the pointer directly.
+		const char* mount_str = cf_strdup(mount.get<std::string>().c_str());
+		cfg_add_pi_xmem_mount(namespace_struct, mount_str);
+	}
+}
+
+static void
+handle_namespace_index_type(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/index-type/type", "must be a string");
+	}
+
+	std::string index_type = value.get<std::string>();
+
+	if (index_type == "shmem") {
+		namespace_struct->pi_xmem_type = CF_XMEM_TYPE_SHMEM;
+	}
+	else if (index_type == "pmem") {
+		namespace_struct->pi_xmem_type = CF_XMEM_TYPE_PMEM;
+	}
+	else if (index_type == "flash") {
+		namespace_struct->pi_xmem_type = CF_XMEM_TYPE_FLASH;
+	}
+	else {
+		throw config_error("/namespaces/index-type/type",
+				"invalid value: " + index_type);
+	}
+}
+
+//------------------------------------------------
+// Namespace Set Handlers.
+//
+
+static void
+apply_namespace_set(const std::string& name, const nlohmann::json& set_json,
+		as_namespace* namespace_struct)
+{
+	if (! set_json.is_object()) {
+		throw config_error("/namespaces/sets", "set must be an object");
+	}
+
+	if (namespace_struct == NULL) {
+		throw config_error("/namespaces/sets", "namespace struct is null");
+	}
+
+	as_set* set_struct = cfg_add_set(namespace_struct);
+
+	if (name.empty()) {
+		throw config_error("namespaces/sets/", "name must be a non-empty string");
+	}
+
+	if (name.size() > AS_SET_NAME_MAX_SIZE) {
+		throw config_error("namespaces/sets/" + name,
+				"name must be less than " +
+						std::to_string(AS_SET_NAME_MAX_SIZE) + " characters");
+	}
+
+	strcpy(set_struct->name, name.c_str());
+
+	for (const auto& desc : NAMESPACE_SET_FIELD_DESCRIPTORS) {
+		apply_field(set_struct, set_json, desc);
+	}
+}
+
+static void
+handle_namespace_sets(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_object()) {
+		throw config_error("/namespaces/sets", "must be an object");
+	}
+
+	// NOTE: this function relies on namespace_struct->sets_cfg_count
+	// and namespace_struct->sets_cfg_array being initialized to 0 and NULL
+
+	for (auto& el : value.items()) {
+		apply_namespace_set(el.key(), el.value(), namespace_struct);
+	}
+}
+
+//------------------------------------------------
+// Namespace Storage-Engine Handlers.
+//
+
+static void
+handle_namespace_storage_engine_type(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/storage-engine/type", "must be a string");
+	}
+
+	if (namespace_struct->storage_type != AS_STORAGE_ENGINE_UNDEFINED) {
+		throw config_error("/namespaces/storage-engine/type",
+				"can only configure one 'storage-engine'");
+	}
+
+	std::string storage_engine_type = value.get<std::string>();
+
+	if (storage_engine_type == "memory") {
+		namespace_struct->storage_type = AS_STORAGE_ENGINE_MEMORY;
+		// Override non-0 default for info purposes.
+		namespace_struct->storage_post_write_cache = 0;
+	}
+	else if (storage_engine_type == "pmem") {
+		namespace_struct->storage_type = AS_STORAGE_ENGINE_PMEM;
+		// Override non-0 default for info purposes.
+		namespace_struct->storage_post_write_cache = 0;
+	}
+	else if (storage_engine_type == "device") {
+		namespace_struct->storage_type = AS_STORAGE_ENGINE_SSD;
+		namespace_struct->storage_flush_size = 0;
+	}
+	else {
+		throw config_error("/namespaces/storage-engine/type",
+				"invalid value: " + storage_engine_type);
+	}
+}
+
+static void
+handle_namespace_storage_engine_compression(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/storage-engine/compression",
+				"must be a string");
+	}
+
+	std::string compression_type = value.get<std::string>();
+
+	if (compression_type == "none") {
+		namespace_struct->storage_compression = AS_COMPRESSION_NONE;
+	}
+	else if (compression_type == "lz4") {
+		namespace_struct->storage_compression = AS_COMPRESSION_LZ4;
+	}
+	else if (compression_type == "snappy") {
+		namespace_struct->storage_compression = AS_COMPRESSION_SNAPPY;
+	}
+	else if (compression_type == "zstd") {
+		namespace_struct->storage_compression = AS_COMPRESSION_ZSTD;
+	}
+	else {
+		throw config_error("/namespaces/storage-engine/compression",
+				"invalid value: " + compression_type);
+	}
+}
+
+static void
+handle_namespace_storage_engine_devices(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_array()) {
+		throw config_error("/namespaces/storage-engine/devices",
+				"must be an array");
+	}
+
+	for (const auto& device : value) {
+		if (! device.is_string()) {
+			throw config_error("/namespaces/storage-engine/devices",
+					"entries must be a string");
+		}
+
+		// format is "device_name[:shadow_name]"
+		std::string device_str = device.get<std::string>();
+		std::string device_name, shadow_name;
+		device_name = device_str.substr(0, device_str.find(':'));
+		shadow_name = device_str.substr(device_str.find(':') + 1);
+
+		// cfg_add_storage_device does NOT strdup
+		// it stores the pointer directly.
+		const char* device_name_cpy = cf_strdup(device_name.c_str());
+		const char* shadow_name_cpy =
+				shadow_name.empty() ? NULL : cf_strdup(shadow_name.c_str());
+
+		cfg_add_storage_device(namespace_struct, device_name_cpy,
+				shadow_name_cpy);
+	}
+}
+
+static void
+handle_namespace_storage_engine_encryption(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_string()) {
+		throw config_error("/namespaces/storage-engine/encryption",
+				"must be a string");
+	}
+
+	std::string encryption_type = value.get<std::string>();
+
+	if (encryption_type == "aes-128") {
+		namespace_struct->storage_encryption = AS_ENCRYPTION_AES_128;
+	}
+	else if (encryption_type == "aes-256") {
+		namespace_struct->storage_encryption = AS_ENCRYPTION_AES_256;
+	}
+	else {
+		throw config_error("/namespaces/storage-engine/encryption",
+				"invalid value: " + encryption_type);
+	}
+}
+
+static void
+handle_namespace_storage_engine_files(void* ns, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_array()) {
+		throw config_error("/namespaces/storage-engine/files",
+				"must be an array");
+	}
+
+	for (const auto& file : value) {
+		if (! file.is_string()) {
+			throw config_error("/namespaces/storage-engine/files",
+					"entries must be a string");
+		}
+
+		// The format is "file_name[:shadow_name]".
+		std::string file_str = file.get<std::string>();
+		std::string file_name, shadow_name;
+		file_name = file_str.substr(0, file_str.find(':'));
+		shadow_name = file_str.substr(file_str.find(':') + 1);
+
+		// Pointer is stored directly by cfg_add_storage_file,
+		// which does NOT strdup.
+		const char* file_name_cpy = cf_strdup(file_name.c_str());
+		const char* shadow_name_cpy =
+				shadow_name.empty() ? NULL : cf_strdup(shadow_name.c_str());
+
+		cfg_add_storage_file(namespace_struct, file_name_cpy, shadow_name_cpy);
+	}
+}
+
+static void
+handle_namespace_storage_engine_flush_max_ms(void* ns,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
+
+	if (! value.is_number_unsigned() && ! value.is_number_integer()) {
+		throw config_error("/namespaces/storage-engine/flush-max-ms",
+				"must be a positive integer");
+	}
+
+	// Convert from milliseconds to microseconds as stored in the struct.
+	namespace_struct->storage_flush_max_us = value.get<uint64_t>() * 1000;
+}
+
+//------------------------------------------------
+// Network Handlers.
+//
+
+static void
+handle_network(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& source)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	for (const auto& desc : NETWORK_FIELD_DESCRIPTORS) {
+		try {
+			apply_field(config, source, desc);
+		}
+		catch (const std::exception& e) {
+			throw config_error("/network",
+					"error applying field: " + std::string(e.what()));
+		}
+	}
+}
+
+//------------------------------------------------
+// Network Admin Handlers.
+//
+
+static void
+handle_network_admin(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	for (const auto& desc : NETWORK_ADMIN_FIELD_DESCRIPTORS) {
+		apply_field(config, value, desc);
+	}
+}
+
+static void
+handle_network_admin_addresses(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/admin/addresses", "must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/admin/addresses",
+					"entries must be a string");
+		}
+
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->admin);
+	}
+}
+
+static void
+handle_network_admin_tls_addresses(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/admin/tls-addresses", "must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/admin/tls-addresses",
+					"entries must be a string");
+		}
+
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->tls_admin);
+	}
+}
+
+static void
+handle_network_admin_tls_authenticate_client(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (value.is_string()) {
+		// add_tls_peer_name copies its input so no need to strdup here.
+		std::string address_str = value.get<std::string>();
+		add_tls_peer_name(address_str.c_str(), &config->tls_admin);
+	}
+	else if (value.is_array()) {
+		for (const auto& address : value) {
+			if (! address.is_string()) {
+				throw config_error("/network/admin/tls-authenticate-client",
+						"entries must be a string");
 			}
 
-			config->uid = pwd->pw_uid;
-			endpwent();
+			// add_tls_peer_name copies its input so no need to strdup here.
+			std::string address_str = address.get<std::string>();
+			add_tls_peer_name(address_str.c_str(), &config->tls_admin);
 		}
 	}
+	else {
+		throw config_error("/network/admin/tls-authenticate-client",
+				"must be a string or array");
+	}
+}
 
-	static void
-	handle_tls_refresh_period(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		uint32_t resolved_val;
-		if (value.is_number_unsigned() || value.is_number_integer()) {
-			resolved_val = value.get<uint32_t>();
-		}
-		else {
-			throw config_error("/service/tls-refresh-period",
-					"must be a positive integer");
-		}
+//------------------------------------------------
+// Network Heartbeat Handlers.
+//
 
-		tls_set_refresh_period(resolved_val);
+static void
+handle_network_heartbeat(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	for (const auto& desc : NETWORK_HEARTBEAT_FIELD_DESCRIPTORS) {
+		apply_field(config, value, desc);
+	}
+}
+
+static void
+handle_network_heartbeat_mode(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/network/heartbeat/mode", "must be a string");
 	}
 
-	static void
-	handle_secret_address_port(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_string()) {
-			throw config_error("/service/secret-address-port",
-					"must be a string");
+	std::string mode = value.get<std::string>();
+
+	if (mode == "mesh") {
+		config->hb_config.mode = AS_HB_MODE_MESH;
+	}
+	else if (mode == "multicast") {
+		as_info_warn_deprecated("'multicast' is deprecated");
+		config->hb_config.mode = AS_HB_MODE_MULTICAST;
+	}
+	else {
+		throw config_error("/network/heartbeat/mode", "invalid value: " + mode);
+	}
+}
+
+static void
+handle_network_heartbeat_protocol(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/network/heartbeat/protocol", "must be a string");
+	}
+
+	std::string protocol = value.get<std::string>();
+
+	if (protocol == "none") {
+		config->hb_config.protocol = AS_HB_PROTOCOL_NONE;
+	}
+	else if (protocol == "v3") {
+		config->hb_config.protocol = AS_HB_PROTOCOL_V3;
+	}
+	else {
+		throw config_error("/network/heartbeat/protocol",
+				"invalid value: " + protocol);
+	}
+}
+
+static void
+handle_network_heartbeat_addresses(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/heartbeat/addresses", "must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/heartbeat/addresses",
+					"entries must be a string");
 		}
 
-		// format is "host:port:tls_name"
-		// host and port are required, tls_name is optional
-		std::string secrets_string = value.get<std::string>();
-		std::stringstream ss(secrets_string);
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->hb_serv_spec);
+	}
+}
+
+static void
+handle_network_heartbeat_mesh_seed_address_ports(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	if (! value.is_array()) {
+		throw config_error("/network/heartbeat/mesh-seed-address-ports",
+				"must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/heartbeat/mesh-seed-address-ports",
+					"entries must be a string");
+		}
+
+		// these addresses come in the format "hostname:port"
+		// so we split on the colon and get the port
+		std::string addr_str = address.get<std::string>();
+		std::stringstream ss(addr_str);
+		std::string host, port_str;
+
+		std::getline(ss, host, ':');
+		std::getline(ss, port_str, ':');
+
+		if (host.empty() || port_str.empty()) {
+			throw config_error("/network/heartbeat/mesh-seed-address-ports",
+					"invalid address: " + addr_str + " (expected 'host:port')");
+		}
+
+		uint16_t port = atoi(port_str.c_str());
+		// cfg_add_mesh_seed_addr_port takes ownership of the host string
+		// and does not copy it
+		char* host_dup = cf_strdup(host.c_str());
+		cfg_add_mesh_seed_addr_port(host_dup, port, false);
+	}
+}
+
+static void
+handle_network_heartbeat_multicast_groups(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/heartbeat/multicast-groups",
+				"must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/heartbeat/multicast-groups",
+					"entries must be a string");
+		}
+
+		// cfg_add_addr_alt copies its input so no need to strdup here
+		std::string address_str = address.get<std::string>();
+		add_addr(address_str.c_str(), &config->hb_multicast_groups);
+	}
+}
+
+static void
+handle_network_heartbeat_tls_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/heartbeat/tls-addresses",
+				"must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/heartbeat/tls-addresses",
+					"entries must be a string");
+		}
+
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->hb_tls_serv_spec);
+	}
+}
+
+static void
+handle_network_heartbeat_tls_mesh_seed_address_ports(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	if (! value.is_array()) {
+		throw config_error("/network/heartbeat/tls-mesh-seed-address-ports",
+				"must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/heartbeat/tls-mesh-seed-address-ports",
+					"entries must be a string");
+		}
+
+		// these addresses come in the format "hostname:port"
+		// so we split on the colon and get the port
+		std::string addr_str = address.get<std::string>();
+		std::stringstream ss(addr_str);
+		std::string host, port_str;
+
+		std::getline(ss, host, ':');
+		std::getline(ss, port_str, ':');
+
+		if (host.empty() || port_str.empty()) {
+			throw config_error("/network/heartbeat/tls-mesh-seed-address-ports",
+					"invalid address: " + addr_str + " (expected 'host:port')");
+		}
+
+		uint16_t port = atoi(port_str.c_str());
+		// cfg_add_mesh_seed_addr_port takes ownership of the host string
+		// and frees it internally, so we need to strdup it
+		char* host_dup = cf_strdup(host.c_str());
+		cfg_add_mesh_seed_addr_port(host_dup, port, true);
+	}
+}
+
+//------------------------------------------------
+// Network Service Handlers.
+//
+
+static void
+handle_network_service(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	for (const auto& desc : NETWORK_SERVICE_FIELD_DESCRIPTORS) {
+		apply_field(config, value, desc);
+	}
+}
+
+static void
+handle_network_service_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/service/access-addresses",
+				"must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/service/access-addresses",
+					"entries must be a string");
+		}
+
+		// cfg_add_addr_std copies its input so no need to strdup here
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_std(address_str.c_str(), &config->service);
+	}
+}
+
+static void
+handle_network_service_addresses(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/service/addresses",
+				"must be an array of strings");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/service/addresses",
+					"entries must be a string");
+		}
+
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->service);
+	}
+}
+
+static void
+handle_network_service_alternate_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/service/alternate-access-addresses",
+				"must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/service/alternate-access-addresses",
+					"entries must be a string");
+		}
+
+		// cfg_add_addr_alt copies its input so no need to strdup here.
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_alt(address_str.c_str(), &config->service);
+	}
+}
+
+static void
+handle_network_service_tls_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/service/tls-access-addresses",
+				"must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/service/tls-access-addresses",
+					"entries must be a string");
+		}
+
+		// cfg_add_addr_std copies its input so no need to strdup here.
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_std(address_str.c_str(), &config->tls_service);
+	}
+}
+
+static void
+handle_network_service_tls_addresses(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/service/tls-addresses", "must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/service/tls-addresses",
+					"entries must be a string");
+		}
+
+		// cfg_add_addr_bind copies its input so no need to strdup here.
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->tls_service);
+	}
+}
+
+void
+handle_network_service_tls_alternate_access_addresses(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/service/tls-alternate-access-addresses",
+				"must be an array of strings");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/service/tls-alternate-access-addresses",
+					"entries must be a string");
+		}
+
+		// cfg_add_addr_alt copies its input so no need to strdup here.
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_alt(address_str.c_str(), &config->tls_service);
+	}
+}
+
+static void
+handle_network_service_tls_authenticate_client(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (value.is_string()) {
+		// add_tls_peer_name copies its input so no need to strdup here.
+		std::string address_str = value.get<std::string>();
+		add_tls_peer_name(address_str.c_str(), &config->tls_service);
+	}
+	else if (value.is_array()) {
+		for (const auto& address : value) {
+			if (! address.is_string()) {
+				throw config_error("/network/service/tls-authenticate-client",
+						"entries must be a string");
+			}
+
+			// add_tls_peer_name copies its input so no need to strdup here.
+			std::string address_str = address.get<std::string>();
+			add_tls_peer_name(address_str.c_str(), &config->tls_service);
+		}
+	}
+	else {
+		throw config_error("/network/service/tls-authenticate-client",
+				"must be a string or array");
+	}
+}
+
+//------------------------------------------------
+// Network Fabric Handlers.
+//
+
+static void
+handle_network_fabric(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+	for (const auto& desc : NETWORK_FABRIC_FIELD_DESCRIPTORS) {
+		apply_field(config, value, desc);
+	}
+}
+
+static void
+handle_network_fabric_addresses(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/fabric/addresses", "must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/fabric/addresses",
+					"entries must be a string");
+		}
+
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->fabric);
+	}
+}
+
+static void
+handle_network_fabric_tls_addresses(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/network/fabric/tls-addresses", "must be an array");
+	}
+
+	for (const auto& address : value) {
+		if (! address.is_string()) {
+			throw config_error("/network/fabric/tls-addresses",
+					"entries must be a string");
+		}
+
+		std::string address_str = address.get<std::string>();
+		cfg_add_addr_bind(address_str.c_str(), &config->tls_fabric);
+	}
+}
+
+//------------------------------------------------
+// Network TLS Handlers.
+//
+
+static void
+handle_network_tls(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! value.is_object()) {
+		throw config_error("/network/tls",
+				"must be an object containing TLS context");
+	}
+
+	for (auto& el : value.items()) {
+		apply_network_tls_context(el.key(), el.value(), config);
+	}
+}
+
+//------------------------------------------------
+// XDR Handlers.
+//
+
+static void
+apply_xdr_dc(const std::string& name, const nlohmann::json& dc_json,
+		as_config* config)
+{
+	if (! dc_json.is_object()) {
+		throw config_error("/xdr/dc/" + name, "dc must be an object");
+	}
+
+	auto dc_cfg = as_xdr_startup_create_dc(name.c_str());
+
+	for (const auto& desc : XDR_DC_FIELD_DESCRIPTORS) {
+		apply_field(dc_cfg, dc_json, desc);
+	}
+}
+
+static void
+handle_xdr(void* target, const FieldDescriptor& desc, const nlohmann::json& source)
+{
+	if (is_community_edition()) {
+		throw config_error("/xdr", "is enterprise-only");
+	}
+
+	as_config* config = static_cast<as_config*>(target);
+
+	if (! source.is_object()) {
+		throw config_error("/xdr", "must be an object");
+	}
+
+	// TODO: handle this and similar fields with
+	// field descriptors if possible.
+	nlohmann::json src_id_value;
+
+	if (get_json_value("/src-id", source, src_id_value)) {
+		if (! src_id_value.is_number_unsigned() &&
+				! src_id_value.is_number_integer()) {
+			throw config_error("/xdr/src-id", "must be a positive integer");
+		}
+
+		uint64_t val = src_id_value.get<uint64_t>();
+
+		if (val < 1 || val > 255) {
+			throw config_error("/xdr/src-id", "must be between 1 and 255");
+		}
+
+		config->xdr_cfg.src_id = static_cast<uint8_t>(val);
+	}
+
+	// Handle DC contexts.
+	nlohmann::json dc_value;
+
+	if (get_json_value("/dcs", source, dc_value)) {
+		if (! dc_value.is_object()) {
+			throw config_error("/xdr/dcs", "must be an object");
+		}
+
+		for (auto& el : dc_value.items()) {
+			apply_xdr_dc(el.key(), el.value(), config);
+		}
+	}
+}
+
+//------------------------------------------------
+// XDR DC Handlers.
+//
+
+static void
+handle_xdr_dc_auth_mode(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/xdr/dc/auth-mode", "must be a string");
+	}
+
+	std::string auth_mode = value.get<std::string>();
+
+	if (auth_mode == "none") {
+		dc_cfg->auth_mode = XDR_AUTH_NONE;
+	}
+	else if (auth_mode == "internal") {
+		dc_cfg->auth_mode = XDR_AUTH_INTERNAL;
+	}
+	else if (auth_mode == "external") {
+		dc_cfg->auth_mode = XDR_AUTH_EXTERNAL;
+	}
+	else if (auth_mode == "external-insecure") {
+		dc_cfg->auth_mode = XDR_AUTH_EXTERNAL_INSECURE;
+	}
+	else if (auth_mode == "pki") {
+		dc_cfg->auth_mode = XDR_AUTH_PKI;
+	}
+	else {
+		throw config_error("/xdr/dc/auth-mode", "invalid value: " + auth_mode);
+	}
+}
+
+static void
+handle_xdr_dc_node_address_ports(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/xdr/dc/node-address-ports",
+				"must be an array of strings");
+	}
+
+	for (const auto& address_port : value) {
+		if (! address_port.is_string()) {
+			throw config_error("/xdr/dc/node-address-ports",
+					"entries must be a string");
+		}
+
+		// Parse "host:port[:tls_name]" format.
+		std::string addr_port_str = address_port.get<std::string>();
+		std::stringstream ss(addr_port_str);
 		std::string host, port_str, tls_name;
 
 		std::getline(ss, host, ':');
 		std::getline(ss, port_str, ':');
 		std::getline(ss, tls_name, ':');
 
-		if ( host.empty() || port_str.empty()) {
-			throw config_error("/service/secret-address-port",
-					"invalid address: " + secrets_string +
-					" (expected 'host:port[:tls_name]')");
+		if (host.empty() || port_str.empty()) {
+			throw config_error("/xdr/dc/node-address-ports",
+					"invalid format: " + addr_port_str +
+							" (expected 'host:port[:tls_name]')");
 		}
 
 		char* host_dup = cf_strdup(host.c_str());
 		char* port_dup = cf_strdup(port_str.c_str());
-		char* tls_name_dup = tls_name.empty() ?
-				NULL : cf_strdup(tls_name.c_str());
+		// tls_name is optional.
+		char* tls_name_dup = tls_name.empty() ? NULL
+											  : cf_strdup(tls_name.c_str());
 
-		cfg_add_secrets_addr_port(host_dup, port_dup, tls_name_dup);
+		as_xdr_startup_add_seed(dc_cfg, host_dup, port_dup, tls_name_dup);
+	}
+}
+
+static void
+handle_xdr_dc_period_ms(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
+
+	if (! value.is_number_unsigned() && ! value.is_number_integer()) {
+		throw config_error("/xdr/dc/period-ms", "must be a positive integer");
 	}
 
-	static void
-	handle_secret_tls_context(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_string()) {
-			throw config_error("/service/secret-tls-context",
+	uint32_t period_ms = value.get<uint32_t>();
+
+	if (period_ms < AS_XDR_MIN_PERIOD_MS || period_ms > AS_XDR_MAX_PERIOD_MS) {
+		throw config_error("/xdr/dc/period-ms",
+				"must be between " + std::to_string(AS_XDR_MIN_PERIOD_MS) +
+						" and " + std::to_string(AS_XDR_MAX_PERIOD_MS));
+	}
+
+	// Convert milliseconds to microseconds.
+	dc_cfg->period_us = period_ms * 1000;
+}
+
+//------------------------------------------------
+// XDR DC Namespace Handlers.
+//
+
+static void
+handle_xdr_dc_namespaces(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
+
+	if (! value.is_object()) {
+		throw config_error("/xdr/dc/namespaces", "must be an object");
+	}
+
+	for (auto& el : value.items()) {
+		apply_xdr_dc_namespace(el.key(), el.value(), dc_cfg);
+	}
+}
+
+static void
+apply_xdr_dc_namespace(const std::string& name,
+		const nlohmann::json& dc_ns_json, void* dc_cfg_ptr)
+{
+	as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(dc_cfg_ptr);
+
+	if (! dc_ns_json.is_object()) {
+		throw config_error("/xdr/dc/namespaces/" + name, "must be an object");
+	}
+
+	if (name.empty()) {
+		throw config_error("/xdr/dc/namespaces/" + name,
+				"namespace name must be a non-empty string");
+	}
+
+	// as_dc_create_ns_cfg inside as_xdr_startup_create_dc_ns_cfg strdups
+	// the ns_name, so no need to strdup here.
+	auto dc_ns_cfg = as_xdr_startup_create_dc_ns_cfg(name.c_str());
+	cf_vector_append_ptr(dc_cfg->ns_cfg_v, dc_ns_cfg);
+
+	for (const auto& desc : XDR_DC_NS_FIELD_DESCRIPTORS) {
+		apply_field(dc_ns_cfg, dc_ns_json, desc);
+	}
+}
+
+static void
+handle_xdr_dc_ns_bin_policy(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/xdr/dc/namespaces/bin-policy", "must be a string");
+	}
+
+	std::string bin_policy = value.get<std::string>();
+
+	if (bin_policy == "all") {
+		dc_ns_cfg->bin_policy = XDR_BIN_POLICY_ALL;
+	}
+	else if (bin_policy == "no-bins") {
+		dc_ns_cfg->bin_policy = XDR_BIN_POLICY_NO_BINS;
+	}
+	else if (bin_policy == "only-changed") {
+		dc_ns_cfg->bin_policy = XDR_BIN_POLICY_ONLY_CHANGED;
+	}
+	else if (bin_policy == "changed-and-specified") {
+		dc_ns_cfg->bin_policy = XDR_BIN_POLICY_CHANGED_AND_SPECIFIED;
+	}
+	else if (bin_policy == "changed-or-specified") {
+		dc_ns_cfg->bin_policy = XDR_BIN_POLICY_CHANGED_OR_SPECIFIED;
+	}
+	else {
+		throw config_error("/xdr/dc/namespaces/bin-policy",
+				"invalid value: " + bin_policy);
+	}
+}
+
+static void
+handle_xdr_dc_ns_ship_versions_policy(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/xdr/dc/namespaces/ship-versions-policy",
 				"must be a string");
-		}
-
-		char* tls_context_dup = cf_strdup(value.get<std::string>().c_str());
-		g_secrets_cfg.tls_context = tls_context_dup;
-	}
-
-	static void
-	handle_secret_uds_path(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_string()) {
-			throw config_error("/service/secret-uds-path", "must be a string");
-		}
-
-		char* uds_path_dup = cf_strdup(value.get<std::string>().c_str());
-		g_secrets_cfg.uds_path = uds_path_dup;
-	}
-
-	static void
-	handle_node_id(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_string()) {
-			throw config_error("/service/node-id", "must be a string");
-		}
-
-		as_config* config = static_cast<as_config*>(target);
-
-		// node-id is a hex string
-		if (0 != cf_strtoul_x64(value.get<std::string>().c_str(),
-				&config->self_node)) {
-			throw config_error("/service/node-id",
-					"failed to parse node-id as hex string");
-		}
-	}
-
-	static void
-	handle_os_group_perms(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_boolean()) {
-			throw config_error("/service/os-group-perms", "must be a boolean");
-		}
-
-		cf_os_use_group_perms(value.get<bool>());
-	}
-
-	static void
-	handle_log_milliseconds(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_boolean()) {
-			throw config_error("/service/log-milliseconds",
-					"must be a boolean");
-		}
-
-		cf_log_use_millis(value.get<bool>());
-	}
-
-	static void
-	handle_log_local_time(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_boolean()) {
-			throw config_error("/service/log-local-time", "must be a boolean");
-		}
-
-		cf_log_use_local_time(value.get<bool>());
-	}
-
-	static void
-	handle_group(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_info_warn_deprecated("'group' is deprecated");
-
-		if (! value.is_string()) {
-			throw config_error("/service/group", "must be a string");
-		}
-
-		struct group* grp;
-
-		if (NULL == (grp = getgrnam(value.get<std::string>().c_str()))) {
-			throw config_error("/service/group",
-					"group not found: " + value.get<std::string>());
-		}
-
-		as_config* config = static_cast<as_config*>(target);
-		config->gid = grp->gr_gid;
-		endgrent();
-	}
-
-	static void
-	handle_info_max_ms(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		uint64_t info_max_ms;
-		if (value.is_number_unsigned() || value.is_number_integer()) {
-			info_max_ms = value.get<uint64_t>();
-		}
-		else {
-			throw config_error("/service/info-max-ms",
-					"must be a positive integer or an object with 'value' and 'unit' properties");
-		}
-
-		if (info_max_ms > MAX_INFO_MAX_MS) {
-			throw config_error("/service/info-max-ms",
-					"value must be less than " +
-					std::to_string(MAX_INFO_MAX_MS) +
-					" milliseconds");
-		}
-
-		as_config* config = static_cast<as_config*>(target);
-		config->info_max_ns = info_max_ms * 1000000;
-	}
-
-	static void
-	handle_feature_key_files(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_array()) {
-			throw config_error("/service/feature-key-files",
-					"must be an array of strings");
-		}
-
-		for (const auto& item : value) {
-			if (! item.is_string()) {
-				throw config_error("/service/feature-key-files",
-						"must be an array of strings");
-			}
-
-			// cfg_add_feature_key_file does NOT strdup
-			// it stores the pointer directly
-			// so we must strdup to ensure the string outlives the temporary.
-			const char* path_copy = cf_strdup(item.get<std::string>().c_str());
-			cfg_add_feature_key_file(path_copy);
-		}
-	}
-
-	static void
-	handle_feature_key_file(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_string()) {
-			throw config_error("/service/feature-key-file",
-					"must be a string");
-		}
-
-		// cfg_add_feature_key_file does NOT strdup
-		// it stores the pointer directly
-		// so we must strdup to ensure the string outlives the temporary.
-		const char* path_copy = cf_strdup(value.get<std::string>().c_str());
-		cfg_add_feature_key_file(path_copy);
-	}
-
-	static void
-	handle_auto_pin(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_string()) {
-			throw config_error("/service/auto-pin", "must be a string");
-		}
-
-		std::string auto_pin = value.get<std::string>();
-
-		if (auto_pin == "none") {
-			config->auto_pin = CF_TOPO_AUTO_PIN_NONE;
-		}
-		else if (auto_pin == "cpu") {
-			config->auto_pin = CF_TOPO_AUTO_PIN_CPU;
-		}
-		else if (auto_pin == "numa") {
-			config->auto_pin = CF_TOPO_AUTO_PIN_NUMA;
-		}
-		else if (auto_pin == "adq") {
-			as_info_warn_deprecated("'auto-pin-adq' is deprecated");
-			config->auto_pin = CF_TOPO_AUTO_PIN_ADQ;
-		}
-		else {
-			throw config_error("/service/auto-pin", "invalid value: "
-					+ auto_pin);
-		}
-	}
-
-	static void
-	handle_advertise_ipv6(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_boolean()) {
-			throw config_error("/service/advertise-ipv6", "must be a boolean");
-		}
-
-		cf_socket_set_advertise_ipv6(value.get<bool>());
-	}
-
-	static void
-	handle_cluster_name(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_string()) {
-			throw config_error("/service/cluster-name", "must be a string");
-		}
-
-		std::string cluster_name = value.get<std::string>();
-
-		if (cluster_name.length() >= AS_CLUSTER_NAME_SZ) {
-			throw config_error("/service/cluster-name",
-					"string too long (max " +
-					std::to_string(AS_CLUSTER_NAME_SZ - 1) + " characters)");
-		}
-
-		as_config* config = static_cast<as_config*>(target);
-		std::strncpy(config->cluster_name, cluster_name.c_str(),
-				AS_CLUSTER_NAME_SZ - 1);
-		config->cluster_name[AS_CLUSTER_NAME_SZ - 1] = '\0';
-	}
-
-	static void
-	apply_network_tls_context(std::string name, const nlohmann::json& tls_json,
-			as_config* config)
-	{
-		if (! tls_json.is_object()) {
-			throw config_error("/network/tls/" + name,
-					"must be an object");
-		}
-
-		if (name.empty()) {
-			throw config_error("/network/tls/" + name,
-					"name must be a non-empty string");
-		}
-
-		auto tls_spec = cfg_create_tls_spec(config, name.c_str());
-
-		for (const auto& desc : NETWORK_TLS_FIELD_DESCRIPTORS) {
-			apply_field(tls_spec, tls_json, desc);
-		}
-	}
-
-	//------------------------------------------------
-	// Namespace Handlers.
-	//
-
-	static void
-	apply_namespace(std::string name, const nlohmann::json& namespace_json)
-	{
-		if (! namespace_json.is_object()) {
-			throw config_error("/namespaces/" + name,
-					"must be an object");
-		}
-
-		auto namespace_struct = as_namespace_create(name.c_str());
-
-		for (const auto& desc : NAMESPACE_FIELD_DESCRIPTORS) {
-			apply_field(namespace_struct, namespace_json, desc);
-		}
-	}
-
-	static void
-	handle_namespaces(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_object()) {
-			throw config_error("/namespaces", "must be an object");
-		}
-
-		// rely on config being initialized to 0
-		// config->n_namespaces = 0;
-
-		for (auto& el: value.items()) {
-			apply_namespace(el.key(), el.value());
-		}
-	}
-
-	static void
-	handle_namespace_write_commit_level_override(void* ns,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/write-commit-level-override",
-					"must be a string");
-		}
-
-		std::string write_commit_level_override = value.get<std::string>();
-
-		if (write_commit_level_override == "off") {
-			namespace_struct->write_commit_level = AS_WRITE_COMMIT_LEVEL_PROTO;
-		}
-		else if (write_commit_level_override == "master") {
-			namespace_struct->write_commit_level = AS_WRITE_COMMIT_LEVEL_MASTER;
-		}
-		else if (write_commit_level_override == "all") {
-			namespace_struct->write_commit_level = AS_WRITE_COMMIT_LEVEL_ALL;
-		}
-		else {
-			throw config_error("/namespaces/write-commit-level-override",
-					"invalid value: " + write_commit_level_override);
-		}
-	}
-
-	static void
-	handle_namespace_xdr_bin_tombstone_ttl(void* ns,
-			const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		uint32_t ttl;
-		if (value.is_number_unsigned() || value.is_number_integer()) {
-			ttl = value.get<uint32_t>();
-		}
-		else {
-			throw config_error("/namespaces/xdr-bin-tombstone-ttl",
-					"must be a positive integer");
-		}
-
-		if (ttl > MAX_ALLOWED_TTL) {
-			throw config_error("/namespaces/xdr-bin-tombstone-ttl",
-					"value must be less than " +
-					std::to_string(MAX_ALLOWED_TTL) +
-					" seconds");
-		}
-
-		namespace_struct->xdr_bin_tombstone_ttl_ms = ttl * 1000;
-	}
-
-	static void
-	handle_namespace_read_consistency_level_override(void* ns,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/read-consistency-level-override",
-					"must be a string");
-		}
-
-		std::string read_consistency_level_override = value.get<std::string>();
-
-		if (read_consistency_level_override == "off") {
-			namespace_struct->read_consistency_level =
-					AS_READ_CONSISTENCY_LEVEL_PROTO;
-		}
-		else if (read_consistency_level_override == "one") {
-			namespace_struct->read_consistency_level =
-					AS_READ_CONSISTENCY_LEVEL_ONE;
-		}
-		else if (read_consistency_level_override == "all") {
-			namespace_struct->read_consistency_level =
-					AS_READ_CONSISTENCY_LEVEL_ALL;
-		}
-		else {
-			throw config_error("/namespaces/read-consistency-level-override",
-					"invalid value: " + read_consistency_level_override);
-		}
-	}
-
-	static void
-	handle_namespace_conflict_resolution_policy(void* ns,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/conflict-resolution-policy",
-					"must be a string");
-		}
-
-		std::string policy = value.get<std::string>();
-
-		if (policy == "generation") {
-			namespace_struct->conflict_resolution_policy =
-					AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
-		}
-		else if (policy == "last-update-time") {
-			namespace_struct->conflict_resolution_policy =
-					AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
-		}
-		else {
-			throw config_error("/namespaces/conflict-resolution-policy",
-					"invalid value: " + policy);
-		}
-	}
-
-	//------------------------------------------------
-	// Namespace Sindex-Type Handlers.
-	//
-
-	static void
-	handle_namespace_sindex_mounts(void* ns, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_array()) {
-			throw config_error("/namespaces/sindex-type/mounts",
-					"must be an array");
-		}
-
-		for (const auto& mount : value) {
-			if (! mount.is_string()) {
-				throw config_error("/namespaces/sindex-type/mounts",
-						"entries must be a string");
-			}
-
-			// cfg_add_si_xmem_mount does NOT strdup
-			// it stores the pointer directly.
-			const char* mount_str = cf_strdup(mount.get<std::string>().c_str());
-			cfg_add_si_xmem_mount(namespace_struct, mount_str);
-		}
-	}
-
-	static void
-	handle_namespace_sindex_type(void* ns, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/sindex-type/type",
-					"must be a string");
-		}
-
-		std::string sindex_type = value.get<std::string>();
-
-		if (sindex_type == "shmem") {
-			namespace_struct->si_xmem_type = CF_XMEM_TYPE_SHMEM;
-		}
-		else if (sindex_type == "pmem") {
-			namespace_struct->si_xmem_type = CF_XMEM_TYPE_PMEM;
-		}
-		else if (sindex_type == "flash") {
-			namespace_struct->si_xmem_type = CF_XMEM_TYPE_FLASH;
-		}
-		else {
-			throw config_error("/namespaces/sindex-type/type",
-					"invalid value: " + sindex_type);
-		}
-	}
-
-	//------------------------------------------------
-	// Namespace Index-Type Handlers.
-	//
-
-	static void
-	handle_namespace_index_mounts(void* ns, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_array()) {
-			throw config_error("/namespaces/index-type/mounts",
-					"must be an array");
-		}
-
-		for (const auto& mount : value) {
-			if (! mount.is_string()) {
-				throw config_error("/namespaces/index-type/mounts",
-						"entries must be a string");
-			}
-
-			// cfg_add_pi_xmem_mount does NOT strdup
-			// it stores the pointer directly.
-			const char* mount_str = cf_strdup(mount.get<std::string>().c_str());
-			cfg_add_pi_xmem_mount(namespace_struct, mount_str);
-		}
-	}
-
-	static void
-	handle_namespace_index_type(void* ns, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/index-type/type",
-					"must be a string");
-		}
-
-		std::string index_type = value.get<std::string>();
-
-		if (index_type == "shmem") {
-			namespace_struct->pi_xmem_type = CF_XMEM_TYPE_SHMEM;
-		}
-		else if (index_type == "pmem") {
-			namespace_struct->pi_xmem_type = CF_XMEM_TYPE_PMEM;
-		}
-		else if (index_type == "flash") {
-			namespace_struct->pi_xmem_type = CF_XMEM_TYPE_FLASH;
-		}
-		else {
-			throw config_error("/namespaces/index-type/type",
-					"invalid value: " + index_type);
-		}
-	}
-
-	//------------------------------------------------
-	// Namespace Set Handlers.
-	//
-
-	static void
-	apply_namespace_set(const std::string& name, const nlohmann::json& set_json,
-			as_namespace* namespace_struct)
-	{
-		if (! set_json.is_object()) {
-			throw config_error("/namespaces/sets", "set must be an object");
-		}
-
-		if (namespace_struct == NULL) {
-			throw config_error("/namespaces/sets", "namespace struct is null");
-		}
-
-		as_set* set_struct = cfg_add_set(namespace_struct);
-
-		if (name.empty()) {
-			throw config_error("namespaces/sets/",
-					"name must be a non-empty string");
-		}
-
-		if (name.size() > AS_SET_NAME_MAX_SIZE) {
-			throw config_error("namespaces/sets/" + name,
-					"name must be less than " +
-					std::to_string(AS_SET_NAME_MAX_SIZE) + " characters");
-		}
-
-		strcpy(set_struct->name, name.c_str());
-
-		for (const auto& desc : NAMESPACE_SET_FIELD_DESCRIPTORS) {
-			apply_field(set_struct, set_json, desc);
-		}
-	}
-
-	static void
-	handle_namespace_sets(void* ns, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_object()) {
-			throw config_error("/namespaces/sets", "must be an object");
-		}
-
-		// NOTE: this function relies on namespace_struct->sets_cfg_count
-		// and namespace_struct->sets_cfg_array being initialized to 0 and NULL
-
-		for (auto& el: value.items()) {
-			apply_namespace_set(el.key(), el.value(), namespace_struct);
-		}
-	}
-
-	//------------------------------------------------
-	// Namespace Storage-Engine Handlers.
-	//
-
-	static void
-	handle_namespace_storage_engine_type(void* ns, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/storage-engine/type",
-					"must be a string");
-		}
-
-		if (namespace_struct->storage_type != AS_STORAGE_ENGINE_UNDEFINED) {
-			throw config_error("/namespaces/storage-engine/type",
-					"can only configure one 'storage-engine'");
-		}
-
-		std::string storage_engine_type = value.get<std::string>();
-
-		if (storage_engine_type == "memory") {
-			namespace_struct->storage_type = AS_STORAGE_ENGINE_MEMORY;
-			// Override non-0 default for info purposes.
-			namespace_struct->storage_post_write_cache = 0;
-		}
-		else if (storage_engine_type == "pmem") {
-			namespace_struct->storage_type = AS_STORAGE_ENGINE_PMEM;
-			// Override non-0 default for info purposes.
-			namespace_struct->storage_post_write_cache = 0;
-		}
-		else if (storage_engine_type == "device") {
-			namespace_struct->storage_type = AS_STORAGE_ENGINE_SSD;
-			namespace_struct->storage_flush_size = 0;
-		}
-		else {
-			throw config_error("/namespaces/storage-engine/type",
-					"invalid value: " + storage_engine_type);
-		}
-	}
-
-	static void
-	handle_namespace_storage_engine_compression(void* ns,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/storage-engine/compression",
-					"must be a string");
-		}
-
-		std::string compression_type = value.get<std::string>();
-
-		if (compression_type == "none") {
-			namespace_struct->storage_compression = AS_COMPRESSION_NONE;
-		}
-		else if (compression_type == "lz4") {
-			namespace_struct->storage_compression = AS_COMPRESSION_LZ4;
-		}
-		else if (compression_type == "snappy") {
-			namespace_struct->storage_compression = AS_COMPRESSION_SNAPPY;
-		}
-		else if (compression_type == "zstd") {
-			namespace_struct->storage_compression = AS_COMPRESSION_ZSTD;
-		}
-		else {
-			throw config_error("/namespaces/storage-engine/compression",
-					"invalid value: " + compression_type);
-		}
-	}
-
-	static void
-	handle_namespace_storage_engine_devices(void* ns,
-			const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_array()) {
-			throw config_error("/namespaces/storage-engine/devices",
-					"must be an array");
-		}
-
-		for (const auto& device : value) {
-			if (! device.is_string()) {
-				throw config_error("/namespaces/storage-engine/devices",
-						"entries must be a string");
-			}
-
-			// format is "device_name[:shadow_name]"
-			std::string device_str = device.get<std::string>();
-			std::string device_name, shadow_name;
-			device_name = device_str.substr(0, device_str.find(':'));
-			shadow_name = device_str.substr(device_str.find(':') + 1);
-
-			// cfg_add_storage_device does NOT strdup
-			// it stores the pointer directly.
-			const char* device_name_cpy = cf_strdup(device_name.c_str());
-			const char* shadow_name_cpy =
-					shadow_name.empty() ? NULL : cf_strdup(shadow_name.c_str());
-
-			cfg_add_storage_device(namespace_struct,
-					device_name_cpy, shadow_name_cpy);
-		}
-	}
-
-	static void
-	handle_namespace_storage_engine_encryption(void* ns,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_string()) {
-			throw config_error("/namespaces/storage-engine/encryption",
-					"must be a string");
-		}
-
-		std::string encryption_type = value.get<std::string>();
-
-		if (encryption_type == "aes-128") {
-			namespace_struct->storage_encryption = AS_ENCRYPTION_AES_128;
-		}
-		else if (encryption_type == "aes-256") {
-			namespace_struct->storage_encryption = AS_ENCRYPTION_AES_256;
-		}
-		else {
-			throw config_error("/namespaces/storage-engine/encryption",
-					"invalid value: " + encryption_type);
-		}
-	}
-
-	static void
-	handle_namespace_storage_engine_files(void* ns, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_array()) {
-			throw config_error("/namespaces/storage-engine/files",
-					"must be an array");
-		}
-
-		for (const auto& file : value) {
-			if (! file.is_string()) {
-				throw config_error("/namespaces/storage-engine/files",
-						"entries must be a string");
-			}
-
-			// The format is "file_name[:shadow_name]".
-			std::string file_str = file.get<std::string>();
-			std::string file_name, shadow_name;
-			file_name = file_str.substr(0, file_str.find(':'));
-			shadow_name = file_str.substr(file_str.find(':') + 1);
-
-			// Pointer is stored directly by cfg_add_storage_file,
-			// which does NOT strdup.
-			const char* file_name_cpy = cf_strdup(file_name.c_str());
-			const char* shadow_name_cpy = shadow_name.empty() ?
-					NULL : cf_strdup(shadow_name.c_str());
-
-			cfg_add_storage_file(namespace_struct, file_name_cpy,
-					shadow_name_cpy);
-		}
-	}
-
-	static void
-	handle_namespace_storage_engine_flush_max_ms(void* ns,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_namespace* namespace_struct = static_cast<as_namespace*>(ns);
-
-		if (! value.is_number_unsigned() && ! value.is_number_integer()) {
-			throw config_error("/namespaces/storage-engine/flush-max-ms",
-					"must be a positive integer");
-		}
-
-		// Convert from milliseconds to microseconds as stored in the struct.
-		namespace_struct->storage_flush_max_us = value.get<uint64_t>() * 1000;
-	}
-
-	//------------------------------------------------
-	// Network Handlers.
-	//
-
-	static void
-	handle_network(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& source)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		for (const auto& desc : NETWORK_FIELD_DESCRIPTORS) {
-			try {
-				apply_field(config, source, desc);
-			}
-			catch (const std::exception& e) {
-				throw config_error("/network", "error applying field: " +
-						std::string(e.what()));
-			}
-		}
-	}
-
-	//------------------------------------------------
-	// Network Admin Handlers.
-	//
-
-	static void
-	handle_network_admin(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		for (const auto& desc : NETWORK_ADMIN_FIELD_DESCRIPTORS) {
-			apply_field(config, value, desc);
-		}
 	}
 
-	static void
-	handle_network_admin_addresses(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
+	std::string policy = value.get<std::string>();
 
-		if (! value.is_array()) {
-			throw config_error("/network/admin/addresses", "must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/admin/addresses",
-						"entries must be a string");
-			}
-
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->admin);
-		}
-	}
-
-	static void
-	handle_network_admin_tls_addresses(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/admin/tls-addresses",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/admin/tls-addresses",
-						"entries must be a string");
-			}
-
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->tls_admin);
-		}
-	}
-
-	static void
-	handle_network_admin_tls_authenticate_client(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (value.is_string()) {
-			// add_tls_peer_name copies its input so no need to strdup here.
-			std::string address_str = value.get<std::string>();
-			add_tls_peer_name(address_str.c_str(), &config->tls_admin);
-		}
-		else if (value.is_array()) {
-			for (const auto& address : value) {
-				if (! address.is_string()) {
-					throw config_error("/network/admin/tls-authenticate-client",
-							"entries must be a string");
-				}
-
-				// add_tls_peer_name copies its input so no need to strdup here.
-				std::string address_str = address.get<std::string>();
-				add_tls_peer_name(address_str.c_str(), &config->tls_admin);
-			}
-		}
-		else {
-			throw config_error("/network/admin/tls-authenticate-client",
-					"must be a string or array");
-		}
-	}
-
-	//------------------------------------------------
-	// Network Heartbeat Handlers.
-	//
-
-	static void
-	handle_network_heartbeat(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		for (const auto& desc : NETWORK_HEARTBEAT_FIELD_DESCRIPTORS) {
-			apply_field(config, value, desc);
-		}
-	}
-
-	static void
-	handle_network_heartbeat_mode(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_string()) {
-			throw config_error("/network/heartbeat/mode", "must be a string");
-		}
-
-		std::string mode = value.get<std::string>();
-
-		if (mode == "mesh") {
-			config->hb_config.mode = AS_HB_MODE_MESH;
-		}
-		else if (mode == "multicast") {
-			as_info_warn_deprecated("'multicast' is deprecated");
-			config->hb_config.mode = AS_HB_MODE_MULTICAST;
-		}
-		else {
-			throw config_error("/network/heartbeat/mode",
-					"invalid value: " + mode);
-		}
-	}
-
-	static void
-	handle_network_heartbeat_protocol(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_string()) {
-			throw config_error("/network/heartbeat/protocol",
-					"must be a string");
-		}
-
-		std::string protocol = value.get<std::string>();
-
-		if (protocol == "none") {
-			config->hb_config.protocol = AS_HB_PROTOCOL_NONE;
-		}
-		else if (protocol == "v3") {
-			config->hb_config.protocol = AS_HB_PROTOCOL_V3;
-		}
-		else {
-			throw config_error("/network/heartbeat/protocol",
-					"invalid value: " + protocol);
-		}
-	}
-
-	static void
-	handle_network_heartbeat_addresses(void* target,
-			const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/heartbeat/addresses",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/heartbeat/addresses",
-						"entries must be a string");
-			}
-
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->hb_serv_spec);
-		}
-	}
-
-	static void
-	handle_network_heartbeat_mesh_seed_address_ports(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		if (! value.is_array()) {
-			throw config_error("/network/heartbeat/mesh-seed-address-ports",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/heartbeat/mesh-seed-address-ports",
-						"entries must be a string");
-			}
-
-			// these addresses come in the format "hostname:port"
-			// so we split on the colon and get the port
-			std::string addr_str = address.get<std::string>();
-			std::stringstream ss(addr_str);
-			std::string host, port_str;
-
-			std::getline(ss, host, ':');
-			std::getline(ss, port_str, ':');
-
-			if (host.empty() || port_str.empty()) {
-				throw config_error("/network/heartbeat/mesh-seed-address-ports",
-						"invalid address: " + addr_str +
-						" (expected 'host:port')");
-			}
-
-			uint16_t port = atoi(port_str.c_str());
-			// cfg_add_mesh_seed_addr_port takes ownership of the host string
-			// and does not copy it
-			char* host_dup = cf_strdup(host.c_str());
-			cfg_add_mesh_seed_addr_port(host_dup, port, false);
-		}
-	}
-
-	static void
-	handle_network_heartbeat_multicast_groups(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/heartbeat/multicast-groups",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/heartbeat/multicast-groups",
-						"entries must be a string");
-			}
-
-			// cfg_add_addr_alt copies its input so no need to strdup here
-			std::string address_str = address.get<std::string>();
-			add_addr(address_str.c_str(), &config->hb_multicast_groups);
-		}
-	}
-
-	static void
-	handle_network_heartbeat_tls_addresses(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/heartbeat/tls-addresses",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/heartbeat/tls-addresses",
-						"entries must be a string");
-			}
-
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->hb_tls_serv_spec);
-		}
-	}
-
-	static void
-	handle_network_heartbeat_tls_mesh_seed_address_ports(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		if (! value.is_array()) {
-			throw config_error("/network/heartbeat/tls-mesh-seed-address-ports",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error(
-						"/network/heartbeat/tls-mesh-seed-address-ports",
-						"entries must be a string");
-			}
-
-			// these addresses come in the format "hostname:port"
-			// so we split on the colon and get the port
-			std::string addr_str = address.get<std::string>();
-			std::stringstream ss(addr_str);
-			std::string host, port_str;
-
-			std::getline(ss, host, ':');
-			std::getline(ss, port_str, ':');
-
-			if (host.empty() || port_str.empty()) {
-				throw config_error(
-						"/network/heartbeat/tls-mesh-seed-address-ports",
-						"invalid address: " + addr_str +
-						" (expected 'host:port')");
-			}
-
-			uint16_t port = atoi(port_str.c_str());
-			// cfg_add_mesh_seed_addr_port takes ownership of the host string
-			// and frees it internally, so we need to strdup it
-			char* host_dup = cf_strdup(host.c_str());
-			cfg_add_mesh_seed_addr_port(host_dup, port, true);
-		}
-	}
-
-	//------------------------------------------------
-	// Network Service Handlers.
-	//
-
-	static void
-	handle_network_service(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		for (const auto& desc : NETWORK_SERVICE_FIELD_DESCRIPTORS) {
-			apply_field(config, value, desc);
-		}
-	}
-
-	static void
-	handle_network_service_access_addresses(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/service/access-addresses",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/service/access-addresses",
-						"entries must be a string");
-			}
-
-			// cfg_add_addr_std copies its input so no need to strdup here
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_std(address_str.c_str(), &config->service);
-		}
-	}
-
-	static void
-	handle_network_service_addresses(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/service/addresses",
-					"must be an array of strings");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/service/addresses",
-						"entries must be a string");
-			}
-
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->service);
-		}
-	}
-
-	static void
-	handle_network_service_alternate_access_addresses(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/service/alternate-access-addresses",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error(
-						"/network/service/alternate-access-addresses",
-						"entries must be a string");
-			}
-
-			// cfg_add_addr_alt copies its input so no need to strdup here.
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_alt(address_str.c_str(), &config->service);
-		}
-	}
-
-	static void
-	handle_network_service_tls_access_addresses(void* target,
-				const FieldDescriptor& desc, const nlohmann::json& value) {
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/service/tls-access-addresses",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/service/tls-access-addresses",
-						"entries must be a string");
-			}
-
-			// cfg_add_addr_std copies its input so no need to strdup here.
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_std(address_str.c_str(), &config->tls_service);
-		}
-	}
-
-	static void
-	handle_network_service_tls_addresses(void* target,
-				const FieldDescriptor& desc, const nlohmann::json& value) {
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/service/tls-addresses",
-					"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/service/tls-addresses",
-						"entries must be a string");
-			}
-
-			// cfg_add_addr_bind copies its input so no need to strdup here.
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->tls_service);
-		}
-	}
-
-	void
-	handle_network_service_tls_alternate_access_addresses(void* target,
-				const FieldDescriptor& desc, const nlohmann::json& value) {
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error(
-				"/network/service/tls-alternate-access-addresses",
-				"must be an array of strings");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error(
-					"/network/service/tls-alternate-access-addresses",
-					"entries must be a string");
-			}
-
-			// cfg_add_addr_alt copies its input so no need to strdup here.
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_alt(address_str.c_str(), &config->tls_service);
-		}
-	}
-
-	static void
-	handle_network_service_tls_authenticate_client(void* target,
-				const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (value.is_string()) {
-			// add_tls_peer_name copies its input so no need to strdup here.
-			std::string address_str = value.get<std::string>();
-			add_tls_peer_name(address_str.c_str(), &config->tls_service);
-		}
-		else if (value.is_array()) {
-			for (const auto& address : value) {
-				if (! address.is_string()) {
-					throw config_error(
-						"/network/service/tls-authenticate-client",
-						"entries must be a string");
-				}
-
-				// add_tls_peer_name copies its input so no need to strdup here.
-				std::string address_str = address.get<std::string>();
-				add_tls_peer_name(address_str.c_str(), &config->tls_service);
-			}
-		}
-		else {
-			throw config_error("/network/service/tls-authenticate-client",
-				"must be a string or array");
-		}
-	}
-
-	//------------------------------------------------
-	// Network Fabric Handlers.
-	//
-
-	static void
-	handle_network_fabric(void* target, const FieldDescriptor& desc,
-				const nlohmann::json& value) {
-		as_config* config = static_cast<as_config*>(target);
-		for (const auto& desc : NETWORK_FABRIC_FIELD_DESCRIPTORS) {
-			apply_field(config, value, desc);
-		}
-	}
-
-	static void
-	handle_network_fabric_addresses(void* target,
-				const FieldDescriptor& desc, const nlohmann::json& value) {
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/fabric/addresses", "must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/fabric/addresses",
-						"entries must be a string");
-			}
-
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->fabric);
-		}
+	if (policy == "latest") {
+		dc_ns_cfg->ship_versions_policy = XDR_SHIP_VERSIONS_POLICY_LATEST;
 	}
-
-	static void
-	handle_network_fabric_tls_addresses(void* target,
-				const FieldDescriptor& desc, const nlohmann::json& value) {
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/network/fabric/tls-addresses",
-				"must be an array");
-		}
-
-		for (const auto& address : value) {
-			if (! address.is_string()) {
-				throw config_error("/network/fabric/tls-addresses",
-					"entries must be a string");
-			}
-
-			std::string address_str = address.get<std::string>();
-			cfg_add_addr_bind(address_str.c_str(), &config->tls_fabric);
-		}
-	}
-
-	//------------------------------------------------
-	// Network TLS Handlers.
-	//
-
-	static void
-	handle_network_tls(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! value.is_object()) {
-			throw config_error("/network/tls",
-					"must be an object containing TLS context");
-		}
-
-		for (auto& el: value.items()) {
-			apply_network_tls_context(el.key(), el.value(), config);
-		}
-	}
-
-	//------------------------------------------------
-	// XDR Handlers.
-	//
-
-	static void
-	apply_xdr_dc(const std::string& name, const nlohmann::json& dc_json,
-			as_config* config)
-	{
-		if (! dc_json.is_object()) {
-			throw config_error("/xdr/dc/" + name,
-					"dc must be an object");
-		}
-
-		auto dc_cfg = as_xdr_startup_create_dc(name.c_str());
-
-		for (const auto& desc : XDR_DC_FIELD_DESCRIPTORS) {
-			apply_field(dc_cfg, dc_json, desc);
-		}
-	}
-
-	static void
-	handle_xdr(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& source)
-	{
-		if (is_community_edition()) {
-			throw config_error("/xdr", "is enterprise-only");
-		}
-
-		as_config* config = static_cast<as_config*>(target);
-
-		if (! source.is_object()) {
-			throw config_error("/xdr", "must be an object");
-		}
-
-		// TODO: handle this and similar fields with
-		// field descriptors if possible.
-		nlohmann::json src_id_value;
-
-		if (get_json_value("/src-id", source, src_id_value)) {
-			if (! src_id_value.is_number_unsigned() &&
-					! src_id_value.is_number_integer()) {
-				throw config_error("/xdr/src-id", "must be a positive integer");
-			}
-
-			uint64_t val = src_id_value.get<uint64_t>();
-
-			if (val < 1 || val > 255) {
-				throw config_error("/xdr/src-id", "must be between 1 and 255");
-			}
-
-			config->xdr_cfg.src_id = static_cast<uint8_t>(val);
-		}
-
-		// Handle DC contexts.
-		nlohmann::json dc_value;
-
-		if (get_json_value("/dcs", source, dc_value)) {
-			if (! dc_value.is_object()) {
-				throw config_error("/xdr/dcs", "must be an object");
-			}
-
-			for (auto& el: dc_value.items()) {
-				apply_xdr_dc(el.key(), el.value(), config);
-			}
-		}
+	else if (policy == "all") {
+		dc_ns_cfg->ship_versions_policy = XDR_SHIP_VERSIONS_POLICY_ALL;
 	}
-
-	//------------------------------------------------
-	// XDR DC Handlers.
-	//
-
-	static void
-	handle_xdr_dc_auth_mode(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
-
-		if (! value.is_string()) {
-			throw config_error("/xdr/dc/auth-mode", "must be a string");
-		}
-
-		std::string auth_mode = value.get<std::string>();
-
-		if (auth_mode == "none") {
-			dc_cfg->auth_mode = XDR_AUTH_NONE;
-		}
-		else if (auth_mode == "internal") {
-			dc_cfg->auth_mode = XDR_AUTH_INTERNAL;
-		}
-		else if (auth_mode == "external") {
-			dc_cfg->auth_mode = XDR_AUTH_EXTERNAL;
-		}
-		else if (auth_mode == "external-insecure") {
-			dc_cfg->auth_mode = XDR_AUTH_EXTERNAL_INSECURE;
-		}
-		else if (auth_mode == "pki") {
-			dc_cfg->auth_mode = XDR_AUTH_PKI;
-		}
-		else {
-			throw config_error("/xdr/dc/auth-mode",
-					"invalid value: " + auth_mode);
-		}
+	else if (policy == "interval") {
+		dc_ns_cfg->ship_versions_policy = XDR_SHIP_VERSIONS_POLICY_INTERVAL;
 	}
-
-	static void
-	handle_xdr_dc_node_address_ports(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
-
-		if (! value.is_array()) {
-			throw config_error("/xdr/dc/node-address-ports",
-					"must be an array of strings");
-		}
-
-		for (const auto& address_port : value) {
-			if (! address_port.is_string()) {
-				throw config_error("/xdr/dc/node-address-ports",
-						"entries must be a string");
-			}
-
-			// Parse "host:port[:tls_name]" format.
-			std::string addr_port_str = address_port.get<std::string>();
-			std::stringstream ss(addr_port_str);
-			std::string host, port_str, tls_name;
-
-			std::getline(ss, host, ':');
-			std::getline(ss, port_str, ':');
-			std::getline(ss, tls_name, ':');
-
-			if (host.empty() || port_str.empty()) {
-				throw config_error("/xdr/dc/node-address-ports",
-						"invalid format: " + addr_port_str +
-						" (expected 'host:port[:tls_name]')");
-			}
-
-			char* host_dup = cf_strdup(host.c_str());
-			char* port_dup = cf_strdup(port_str.c_str());
-			// tls_name is optional.
-			char* tls_name_dup = tls_name.empty() ? NULL :
-					cf_strdup(tls_name.c_str());
-
-			as_xdr_startup_add_seed(dc_cfg, host_dup, port_dup, tls_name_dup);
-		}
+	else {
+		throw config_error("/xdr/dc/namespaces/ship-versions-policy",
+				"invalid value: " + policy);
 	}
-
-	static void
-	handle_xdr_dc_period_ms(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
+}
 
-		if (! value.is_number_unsigned() && ! value.is_number_integer()) {
-			throw config_error("/xdr/dc/period-ms",
-					"must be a positive integer");
-		}
+static void
+handle_xdr_dc_ns_write_policy(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
 
-		uint32_t period_ms = value.get<uint32_t>();
-
-		if (period_ms < AS_XDR_MIN_PERIOD_MS ||
-				period_ms > AS_XDR_MAX_PERIOD_MS) {
-			throw config_error("/xdr/dc/period-ms",
-					"must be between " + std::to_string(AS_XDR_MIN_PERIOD_MS) +
-					" and " + std::to_string(AS_XDR_MAX_PERIOD_MS));
-		}
-
-		// Convert milliseconds to microseconds.
-		dc_cfg->period_us = period_ms * 1000;
+	if (! value.is_string()) {
+		throw config_error("/xdr/dc/namespaces/write-policy", "must be a string");
 	}
 
-	//------------------------------------------------
-	// XDR DC Namespace Handlers.
-	//
+	std::string policy = value.get<std::string>();
 
-	static void
-	handle_xdr_dc_namespaces(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(target);
-
-		if (! value.is_object()) {
-			throw config_error("/xdr/dc/namespaces", "must be an object");
-		}
-
-		for (auto& el: value.items()) {
-			apply_xdr_dc_namespace(el.key(), el.value(), dc_cfg);
-		}
+	if (policy == "auto") {
+		dc_ns_cfg->write_policy = XDR_WRITE_POLICY_AUTO;
 	}
-
-	static void
-	apply_xdr_dc_namespace(const std::string& name,
-			const nlohmann::json& dc_ns_json,
-			void* dc_cfg_ptr)
-	{
-		as_xdr_dc_cfg* dc_cfg = static_cast<as_xdr_dc_cfg*>(dc_cfg_ptr);
-
-		if (! dc_ns_json.is_object()) {
-			throw config_error("/xdr/dc/namespaces/" + name,
-					"must be an object");
-		}
-
-		if (name.empty()) {
-			throw config_error("/xdr/dc/namespaces/" + name,
-					"namespace name must be a non-empty string");
-		}
-
-		// as_dc_create_ns_cfg inside as_xdr_startup_create_dc_ns_cfg strdups
-		// the ns_name, so no need to strdup here.
-		auto dc_ns_cfg = as_xdr_startup_create_dc_ns_cfg(name.c_str());
-		cf_vector_append_ptr(dc_cfg->ns_cfg_v, dc_ns_cfg);
-
-		for (const auto& desc : XDR_DC_NS_FIELD_DESCRIPTORS) {
-			apply_field(dc_ns_cfg, dc_ns_json, desc);
-		}
+	else if (policy == "update") {
+		dc_ns_cfg->write_policy = XDR_WRITE_POLICY_UPDATE;
 	}
-
-	static void
-	handle_xdr_dc_ns_bin_policy(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
-
-		if (! value.is_string()) {
-			throw config_error("/xdr/dc/namespaces/bin-policy",
-					"must be a string");
-		}
-
-		std::string bin_policy = value.get<std::string>();
-
-		if (bin_policy == "all") {
-			dc_ns_cfg->bin_policy = XDR_BIN_POLICY_ALL;
-		}
-		else if (bin_policy == "no-bins") {
-			dc_ns_cfg->bin_policy = XDR_BIN_POLICY_NO_BINS;
-		}
-		else if (bin_policy == "only-changed") {
-			dc_ns_cfg->bin_policy = XDR_BIN_POLICY_ONLY_CHANGED;
-		}
-		else if (bin_policy == "changed-and-specified") {
-			dc_ns_cfg->bin_policy = XDR_BIN_POLICY_CHANGED_AND_SPECIFIED;
-		}
-		else if (bin_policy == "changed-or-specified") {
-			dc_ns_cfg->bin_policy = XDR_BIN_POLICY_CHANGED_OR_SPECIFIED;
-		}
-		else {
-			throw config_error("/xdr/dc/namespaces/bin-policy",
-					"invalid value: " + bin_policy);
-		}
+	else if (policy == "replace") {
+		dc_ns_cfg->write_policy = XDR_WRITE_POLICY_REPLACE;
 	}
-
-	static void
-	handle_xdr_dc_ns_ship_versions_policy(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
-
-		if (! value.is_string()) {
-			throw config_error("/xdr/dc/namespaces/ship-versions-policy",
-					"must be a string");
-		}
-
-		std::string policy = value.get<std::string>();
-
-		if (policy == "latest") {
-			dc_ns_cfg->ship_versions_policy = XDR_SHIP_VERSIONS_POLICY_LATEST;
-		}
-		else if (policy == "all") {
-			dc_ns_cfg->ship_versions_policy = XDR_SHIP_VERSIONS_POLICY_ALL;
-		}
-		else if (policy == "interval") {
-			dc_ns_cfg->ship_versions_policy = XDR_SHIP_VERSIONS_POLICY_INTERVAL;
-		}
-		else {
-			throw config_error("/xdr/dc/namespaces/ship-versions-policy",
-					"invalid value: " + policy);
-		}
+	else {
+		throw config_error("/xdr/dc/namespaces/write-policy",
+				"invalid value: " + policy);
 	}
+}
 
-	static void
-	handle_xdr_dc_ns_write_policy(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
+static void
+handle_xdr_dc_ns_ignore_bins(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
 
-		if (! value.is_string()) {
-			throw config_error("/xdr/dc/namespaces/write-policy",
-					"must be a string");
-		}
-
-		std::string policy = value.get<std::string>();
-
-		if (policy == "auto") {
-			dc_ns_cfg->write_policy = XDR_WRITE_POLICY_AUTO;
-		}
-		else if (policy == "update") {
-			dc_ns_cfg->write_policy = XDR_WRITE_POLICY_UPDATE;
-		}
-		else if (policy == "replace") {
-			dc_ns_cfg->write_policy = XDR_WRITE_POLICY_REPLACE;
-		}
-		else {
-			throw config_error("/xdr/dc/namespaces/write-policy",
-					"invalid value: " + policy);
-		}
+	if (! value.is_array()) {
+		throw config_error("/xdr/dc/namespaces/ignore-bins", "must be an array");
 	}
-
-	static void
-	handle_xdr_dc_ns_ignore_bins(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
 
-		if (! value.is_array()) {
+	for (const auto& bin : value) {
+		if (! bin.is_string()) {
 			throw config_error("/xdr/dc/namespaces/ignore-bins",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		for (const auto& bin : value) {
-			if (! bin.is_string()) {
-				throw config_error("/xdr/dc/namespaces/ignore-bins",
-						"entries must be a string");
-			}
+		std::string bin_name = bin.get<std::string>();
 
-			std::string bin_name = bin.get<std::string>();
-
-			if (bin_name.length() > AS_BIN_NAME_MAX_SZ) {
-				throw config_error("/xdr/dc/namespaces/ignore-bins",
-						"bin name too long: " + bin_name);
-			}
-
-			cf_vector_append_ptr(dc_ns_cfg->ignored_bins,
-					cf_strdup(bin_name.c_str()));
+		if (bin_name.length() > AS_BIN_NAME_MAX_SZ) {
+			throw config_error("/xdr/dc/namespaces/ignore-bins",
+					"bin name too long: " + bin_name);
 		}
+
+		cf_vector_append_ptr(dc_ns_cfg->ignored_bins,
+				cf_strdup(bin_name.c_str()));
+	}
+}
+
+static void
+handle_xdr_dc_ns_ignore_sets(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/xdr/dc/namespaces/ignore-sets", "must be an array");
 	}
 
-	static void
-	handle_xdr_dc_ns_ignore_sets(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
-
-		if (! value.is_array()) {
+	for (const auto& set : value) {
+		if (! set.is_string()) {
 			throw config_error("/xdr/dc/namespaces/ignore-sets",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		for (const auto& set : value) {
-			if (! set.is_string()) {
-				throw config_error("/xdr/dc/namespaces/ignore-sets",
-						"entries must be a string");
-			}
+		std::string set_name = set.get<std::string>();
 
-			std::string set_name = set.get<std::string>();
-
-			if (set_name.length() > AS_SET_NAME_MAX_SIZE) {
-				throw config_error("/xdr/dc/namespaces/ignore-sets",
-						"set name too long: " + set_name);
-			}
-
-			cf_vector_append_ptr(dc_ns_cfg->ignored_sets,
-					cf_strdup(set_name.c_str()));
+		if (set_name.length() > AS_SET_NAME_MAX_SIZE) {
+			throw config_error("/xdr/dc/namespaces/ignore-sets",
+					"set name too long: " + set_name);
 		}
+
+		cf_vector_append_ptr(dc_ns_cfg->ignored_sets,
+				cf_strdup(set_name.c_str()));
+	}
+}
+
+static void
+handle_xdr_dc_ns_ship_bins(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/xdr/dc/namespaces/ship-bins", "must be an array");
 	}
 
-	static void
-	handle_xdr_dc_ns_ship_bins(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
-
-		if (! value.is_array()) {
+	for (const auto& bin : value) {
+		if (! bin.is_string()) {
 			throw config_error("/xdr/dc/namespaces/ship-bins",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		for (const auto& bin : value) {
-			if (! bin.is_string()) {
-				throw config_error("/xdr/dc/namespaces/ship-bins",
-						"entries must be a string");
-			}
+		std::string bin_name = bin.get<std::string>();
 
-			std::string bin_name = bin.get<std::string>();
-
-			if (bin_name.length() > AS_BIN_NAME_MAX_SZ) {
-				throw config_error("/xdr/dc/namespaces/ship-bins",
-						"bin name too long: " + bin_name);
-			}
-
-			cf_vector_append_ptr(dc_ns_cfg->shipped_bins,
-					cf_strdup(bin_name.c_str()));
+		if (bin_name.length() > AS_BIN_NAME_MAX_SZ) {
+			throw config_error("/xdr/dc/namespaces/ship-bins",
+					"bin name too long: " + bin_name);
 		}
+
+		cf_vector_append_ptr(dc_ns_cfg->shipped_bins,
+				cf_strdup(bin_name.c_str()));
+	}
+}
+
+static void
+handle_xdr_dc_ns_ship_sets(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/xdr/dc/namespaces/ship-sets", "must be an array");
 	}
 
-	static void
-	handle_xdr_dc_ns_ship_sets(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
-
-		if (! value.is_array()) {
+	for (const auto& set : value) {
+		if (! set.is_string()) {
 			throw config_error("/xdr/dc/namespaces/ship-sets",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		for (const auto& set : value) {
-			if (! set.is_string()) {
-				throw config_error("/xdr/dc/namespaces/ship-sets",
-						"entries must be a string");
-			}
+		std::string set_name = set.get<std::string>();
 
-			std::string set_name = set.get<std::string>();
-
-			if (set_name.length() > AS_SET_NAME_MAX_SIZE) {
-				throw config_error("/xdr/dc/namespaces/ship-sets",
-						"set name too long: " + set_name);
-			}
-
-			cf_vector_append_ptr(dc_ns_cfg->shipped_sets,
-					cf_strdup(set_name.c_str()));
+		if (set_name.length() > AS_SET_NAME_MAX_SIZE) {
+			throw config_error("/xdr/dc/namespaces/ship-sets",
+					"set name too long: " + set_name);
 		}
+
+		cf_vector_append_ptr(dc_ns_cfg->shipped_sets,
+				cf_strdup(set_name.c_str()));
+	}
+}
+
+static void
+handle_xdr_dc_ns_ship_versions_interval(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
+
+	uint32_t interval_seconds;
+	if (value.is_number_unsigned() || value.is_number_integer()) {
+		interval_seconds = value.get<uint32_t>();
+	}
+	else {
+		throw config_error("/xdr/dc/namespaces/ship-versions-interval",
+				"must be a positive integer");
 	}
 
-	static void
-	handle_xdr_dc_ns_ship_versions_interval(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_xdr_dc_ns_cfg* dc_ns_cfg = static_cast<as_xdr_dc_ns_cfg*>(target);
-
-		uint32_t interval_seconds;
-		if (value.is_number_unsigned() || value.is_number_integer()) {
-			interval_seconds = value.get<uint32_t>();
-		}
-		else {
-			throw config_error("/xdr/dc/namespaces/ship-versions-interval",
-					"must be a positive integer");
-		}
-
-		if (interval_seconds < AS_XDR_MIN_SHIP_VERSIONS_INTERVAL ||
-				interval_seconds > AS_XDR_MAX_SHIP_VERSIONS_INTERVAL) {
-			throw config_error("/xdr/dc/namespaces/ship-versions-interval",
-					"must be between " +
-					std::to_string(AS_XDR_MIN_SHIP_VERSIONS_INTERVAL) +
-					" and " +
-					std::to_string(AS_XDR_MAX_SHIP_VERSIONS_INTERVAL) +
-					" seconds");
-		}
-
-
-		uint64_t interval_ms = interval_seconds * 1000;
-
-		if (interval_ms > std::numeric_limits<uint32_t>::max()) {
-			throw config_error("/xdr/dc/namespaces/ship-versions-interval",
-					"value too large");
-		}
-
-		dc_ns_cfg->ship_versions_interval_ms = static_cast<uint32_t>(interval_ms);
+	if (interval_seconds < AS_XDR_MIN_SHIP_VERSIONS_INTERVAL ||
+			interval_seconds > AS_XDR_MAX_SHIP_VERSIONS_INTERVAL) {
+		throw config_error("/xdr/dc/namespaces/ship-versions-interval",
+				"must be between " +
+						std::to_string(AS_XDR_MIN_SHIP_VERSIONS_INTERVAL) +
+						" and " +
+						std::to_string(AS_XDR_MAX_SHIP_VERSIONS_INTERVAL) +
+						" seconds");
 	}
 
-	//------------------------------------------------
-	// Security Handlers.
-	//
+	uint64_t interval_ms = interval_seconds * 1000;
 
-	static void
-	handle_security(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (is_community_edition()) {
-			throw config_error("/security", "is enterprise-only");
-		}
-
-		as_config* config = static_cast<as_config*>(target);
-		as_sec_config* sec_cfg = &config->sec_cfg;
-
-		if (! value.is_object()) {
-			throw config_error("/security", "must be an object");
-		}
-
-		// Set security_configured flag when security context is parsed.
-		sec_cfg->security_configured = true;
-
-		for (const auto& security_desc : SECURITY_FIELD_DESCRIPTORS) {
-			apply_field(sec_cfg, value, security_desc);
-		}
+	if (interval_ms > std::numeric_limits<uint32_t>::max()) {
+		throw config_error("/xdr/dc/namespaces/ship-versions-interval",
+				"value too large");
 	}
 
-	static void
-	handle_security_ldap(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_sec_config* sec_config = static_cast<as_sec_config*>(target);
+	dc_ns_cfg->ship_versions_interval_ms = static_cast<uint32_t>(interval_ms);
+}
 
-		if (! value.is_object()) {
-			throw config_error("/security/ldap", "must be an object");
-		}
+//------------------------------------------------
+// Security Handlers.
+//
 
-		// Set ldap_configured flag when ldap context is parsed.
-		sec_config->ldap_configured = true;
-
-		for (const auto& ldap_desc : SECURITY_LDAP_FIELD_DESCRIPTORS) {
-			apply_field(sec_config, value, ldap_desc);
-		}
+static void
+handle_security(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (is_community_edition()) {
+		throw config_error("/security", "is enterprise-only");
 	}
 
-	static void
-	handle_security_log(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		as_sec_config* sec_config = static_cast<as_sec_config*>(target);
+	as_config* config = static_cast<as_config*>(target);
+	as_sec_config* sec_cfg = &config->sec_cfg;
 
-		if (! value.is_object()) {
-			throw config_error("/security/log", "must be an object");
-		}
-
-		for (const auto& log_desc : SECURITY_LOG_FIELD_DESCRIPTORS) {
-			apply_field(sec_config, value, log_desc);
-		}
+	if (! value.is_object()) {
+		throw config_error("/security", "must be an object");
 	}
 
-	static void
-	handle_security_ldap_token_hash_method(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_sec_config* sec_config = static_cast<as_sec_config*>(target);
+	// Set security_configured flag when security context is parsed.
+	sec_cfg->security_configured = true;
 
-		if (! value.is_string()) {
-			throw config_error("/security/ldap/token-hash-method",
-					"must be a string");
-		}
+	for (const auto& security_desc : SECURITY_FIELD_DESCRIPTORS) {
+		apply_field(sec_cfg, value, security_desc);
+	}
+}
 
-		std::string hash_method = value.get<std::string>();
+static void
+handle_security_ldap(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_sec_config* sec_config = static_cast<as_sec_config*>(target);
 
-		if (hash_method == "sha-256") {
-			sec_config->ldap_token_hash_method = AS_LDAP_EVP_SHA_256;
-		}
-		else if (hash_method == "sha-512") {
-			sec_config->ldap_token_hash_method = AS_LDAP_EVP_SHA_512;
-		}
-		else {
-			throw config_error("/security/ldap/token-hash-method",
-					"invalid value: " + hash_method);
-		}
+	if (! value.is_object()) {
+		throw config_error("/security/ldap", "must be an object");
 	}
 
-	static void
-	handle_security_ldap_role_query_patterns(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		as_sec_config* sec_config = static_cast<as_sec_config*>(target);
+	// Set ldap_configured flag when ldap context is parsed.
+	sec_config->ldap_configured = true;
 
-		if (! value.is_array()) {
+	for (const auto& ldap_desc : SECURITY_LDAP_FIELD_DESCRIPTORS) {
+		apply_field(sec_config, value, ldap_desc);
+	}
+}
+
+static void
+handle_security_log(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	as_sec_config* sec_config = static_cast<as_sec_config*>(target);
+
+	if (! value.is_object()) {
+		throw config_error("/security/log", "must be an object");
+	}
+
+	for (const auto& log_desc : SECURITY_LOG_FIELD_DESCRIPTORS) {
+		apply_field(sec_config, value, log_desc);
+	}
+}
+
+static void
+handle_security_ldap_token_hash_method(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_sec_config* sec_config = static_cast<as_sec_config*>(target);
+
+	if (! value.is_string()) {
+		throw config_error("/security/ldap/token-hash-method",
+				"must be a string");
+	}
+
+	std::string hash_method = value.get<std::string>();
+
+	if (hash_method == "sha-256") {
+		sec_config->ldap_token_hash_method = AS_LDAP_EVP_SHA_256;
+	}
+	else if (hash_method == "sha-512") {
+		sec_config->ldap_token_hash_method = AS_LDAP_EVP_SHA_512;
+	}
+	else {
+		throw config_error("/security/ldap/token-hash-method",
+				"invalid value: " + hash_method);
+	}
+}
+
+static void
+handle_security_ldap_role_query_patterns(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	as_sec_config* sec_config = static_cast<as_sec_config*>(target);
+
+	if (! value.is_array()) {
+		throw config_error("/security/ldap/role-query-patterns",
+				"must be an array");
+	}
+
+	int pattern_index = 0;
+
+	for (const auto& pattern : value) {
+		if (! pattern.is_string()) {
 			throw config_error("/security/ldap/role-query-patterns",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		int pattern_index = 0;
-
-		for (const auto& pattern : value) {
-			if (! pattern.is_string()) {
-				throw config_error("/security/ldap/role-query-patterns",
-						"entries must be a string");
-			}
-
-			if (pattern_index >= MAX_ROLE_QUERY_PATTERNS) {
-				throw config_error("/security/ldap/role-query-patterns",
-						"too many patterns (max " +
-						std::to_string(MAX_ROLE_QUERY_PATTERNS) + ")");
-			}
-
-			std::string pattern_str = pattern.get<std::string>();
-			sec_config->ldap_role_query_patterns[pattern_index] =
-					cf_strdup(pattern_str.c_str());
-			pattern_index++;
+		if (pattern_index >= MAX_ROLE_QUERY_PATTERNS) {
+			throw config_error("/security/ldap/role-query-patterns",
+					"too many patterns (max " +
+							std::to_string(MAX_ROLE_QUERY_PATTERNS) + ")");
 		}
 
-		// Ensure null termination, this is relied on in the
-		// security_info::as_security_get_config function.
-		if (pattern_index < MAX_ROLE_QUERY_PATTERNS) {
-			sec_config->ldap_role_query_patterns[pattern_index] = NULL;
-		}
+		std::string pattern_str = pattern.get<std::string>();
+		sec_config->ldap_role_query_patterns[pattern_index] =
+				cf_strdup(pattern_str.c_str());
+		pattern_index++;
 	}
 
-	static void
-	handle_security_log_report_data_op(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		if (! value.is_array()) {
+	// Ensure null termination, this is relied on in the
+	// security_info::as_security_get_config function.
+	if (pattern_index < MAX_ROLE_QUERY_PATTERNS) {
+		sec_config->ldap_role_query_patterns[pattern_index] = NULL;
+	}
+}
+
+static void
+handle_security_log_report_data_op(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_array()) {
+		throw config_error("/security/log/report-data-op", "must be an array");
+	}
+
+	for (const auto& scope : value) {
+		if (! scope.is_string()) {
 			throw config_error("/security/log/report-data-op",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		for (const auto& scope : value) {
-			if (! scope.is_string()) {
-				throw config_error("/security/log/report-data-op",
-						"entries must be a string");
-			}
+		std::string scope_str = scope.get<std::string>();
 
-			std::string scope_str = scope.get<std::string>();
+		std::istringstream iss(scope_str);
+		std::string ns_name, set_name;
 
-			std::istringstream iss(scope_str);
-			std::string ns_name, set_name;
-
-			if (!(iss >> ns_name)) {
-				throw config_error("/security/log/report-data-op",
-						"invalid format: " + scope_str +
-						" (expected 'namespace [set]')");
-			}
-
-			// Set name is optional.
-			iss >> set_name;
-
-			as_security_config_log_scope(ns_name.c_str(),
-					set_name.empty() ? NULL : set_name.c_str());
+		if (! (iss >> ns_name)) {
+			throw config_error("/security/log/report-data-op",
+					"invalid format: " + scope_str +
+							" (expected 'namespace [set]')");
 		}
+
+		// Set name is optional.
+		iss >> set_name;
+
+		as_security_config_log_scope(ns_name.c_str(),
+				set_name.empty() ? NULL : set_name.c_str());
+	}
+}
+
+static void
+handle_security_log_report_data_op_role(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	if (! value.is_array()) {
+		throw config_error("/security/log/report-data-op-role",
+				"must be an array");
 	}
 
-	static void
-	handle_security_log_report_data_op_role(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		if (! value.is_array()) {
+	for (const auto& role : value) {
+		if (! role.is_string()) {
 			throw config_error("/security/log/report-data-op-role",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		for (const auto& role : value) {
-			if (! role.is_string()) {
-				throw config_error("/security/log/report-data-op-role",
-						"entries must be a string");
-			}
+		std::string role_str = role.get<std::string>();
+		as_security_config_log_role(role_str.c_str());
+	}
+}
 
-			std::string role_str = role.get<std::string>();
-			as_security_config_log_role(role_str.c_str());
-		}
+void
+handle_security_log_report_data_op_user(void* target,
+		const FieldDescriptor& desc, const nlohmann::json& value)
+{
+	if (! value.is_array()) {
+		throw config_error("/security/log/report-data-op-user",
+				"must be an array");
 	}
 
-	void
-	handle_security_log_report_data_op_user(void* target,
-			const FieldDescriptor& desc, const nlohmann::json& value)
-	{
-		if (! value.is_array()) {
+	for (const auto& user : value) {
+		if (! user.is_string()) {
 			throw config_error("/security/log/report-data-op-user",
-					"must be an array");
+					"entries must be a string");
 		}
 
-		for (const auto& user : value) {
-			if (! user.is_string()) {
-				throw config_error("/security/log/report-data-op-user",
-						"entries must be a string");
-			}
+		std::string user_str = user.get<std::string>();
+		as_security_config_log_user(user_str.c_str());
+	}
+}
 
-			std::string user_str = user.get<std::string>();
-			as_security_config_log_user(user_str.c_str());
-		}
+//------------------------------------------------
+// Logging Handlers.
+//
+
+static void
+handle_logging(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	if (! value.is_array()) {
+		throw config_error("/logging", "must be an array");
 	}
 
-	//------------------------------------------------
-	// Logging Handlers.
-	//
+	for (int i = 0; i < value.size(); ++i) {
+		apply_logging_sink(i, value[i]);
+	}
+}
 
-	static void
-	handle_logging(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		if (! value.is_array()) {
-			throw config_error("/logging", "must be an array");
-		}
-
-		for (int i = 0; i < value.size(); ++i) {
-			apply_logging_sink(i, value[i]);
-		}
+static void
+apply_logging_sink(int index, const nlohmann::json& sink_json)
+{
+	if (! sink_json.is_object()) {
+		throw config_error("/logging/" + std::to_string(index),
+				"must be an object");
 	}
 
-	static void
-	apply_logging_sink(int index, const nlohmann::json& sink_json)
-	{
-		if (! sink_json.is_object()) {
+	if (! sink_json.contains("type") || ! sink_json["type"].is_string()) {
+		throw config_error("/logging/" + std::to_string(index),
+				"must have a 'type' field");
+	}
+
+	std::string sink_type = sink_json["type"].get<std::string>();
+	cf_log_sink* sink = NULL;
+
+	if (sink_type == "console") {
+		sink = cf_log_init_sink(NULL, -1, NULL);
+	}
+	else if (sink_type == "file") {
+		if (! sink_json.contains("path") || ! sink_json["path"].is_string()) {
 			throw config_error("/logging/" + std::to_string(index),
-					"must be an object");
+					"must have a 'path' field");
 		}
 
-		if (! sink_json.contains("type") || ! sink_json["type"].is_string()) {
-			throw config_error("/logging/" + std::to_string(index),
-					"must have a 'type' field");
-		}
+		std::string path = sink_json["path"].get<std::string>();
 
-		std::string sink_type = sink_json["type"].get<std::string>();
-		cf_log_sink* sink = NULL;
-
-		if (sink_type == "console") {
-			sink = cf_log_init_sink(NULL, -1, NULL);
-		}
-		else if (sink_type == "file") {
-			if (! sink_json.contains("path") || ! sink_json["path"].is_string()) {
-				throw config_error("/logging/" + std::to_string(index),
-						"must have a 'path' field");
-			}
-
-			std::string path = sink_json["path"].get<std::string>();
-
-			sink = cf_log_init_sink(path.c_str(), -1, NULL);
-		}
-		else if (sink_type == "syslog") {
-			sink = cf_log_init_sink(DEFAULT_SYSLOG_PATH, LOG_LOCAL0, DEFAULT_SYSLOG_TAG);
-		}
-		else {
-			throw config_error("/logging/" + std::to_string(index),
-					"invalid sink type: " + sink_type);
-		}
-
-		if (sink == NULL) {
-			throw config_error("/logging/" + std::to_string(index),
-					"failed to create log sink");
-		}
-
-		for (const auto& logging_desc : LOGGING_FIELD_DESCRIPTORS) {
-			apply_field(static_cast<void*>(sink), sink_json, logging_desc);
-		}
+		sink = cf_log_init_sink(path.c_str(), -1, NULL);
+	}
+	else if (sink_type == "syslog") {
+		sink = cf_log_init_sink(DEFAULT_SYSLOG_PATH, LOG_LOCAL0,
+				DEFAULT_SYSLOG_TAG);
+	}
+	else {
+		throw config_error("/logging/" + std::to_string(index),
+				"invalid sink type: " + sink_type);
 	}
 
-	static void
-	handle_logging_facility(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		cf_log_sink* sink = static_cast<cf_log_sink*>(target);
-
-		if (! value.is_string()) {
-			throw config_error(desc.json_path, "must be a string");
-		}
-
-		if (! cf_log_init_facility(sink, value.get<std::string>().c_str())) {
-			throw config_error(desc.json_path,
-					"invalid facility: " + value.get<std::string>());
-		}
+	if (sink == NULL) {
+		throw config_error("/logging/" + std::to_string(index),
+				"failed to create log sink");
 	}
 
-	static void
-	handle_logging_syslog_path(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		cf_log_sink* sink = static_cast<cf_log_sink*>(target);
+	for (const auto& logging_desc : LOGGING_FIELD_DESCRIPTORS) {
+		apply_field(static_cast<void*>(sink), sink_json, logging_desc);
+	}
+}
 
-		if (! value.is_string()) {
-			throw config_error(desc.json_path, "must be a string");
-		}
+static void
+handle_logging_facility(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	cf_log_sink* sink = static_cast<cf_log_sink*>(target);
 
-		cf_log_init_path(sink, value.get<std::string>().c_str());
+	if (! value.is_string()) {
+		throw config_error(desc.json_path, "must be a string");
 	}
 
-	static void
-	handle_logging_syslog_tag(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		cf_log_sink* sink = static_cast<cf_log_sink*>(target);
+	if (! cf_log_init_facility(sink, value.get<std::string>().c_str())) {
+		throw config_error(desc.json_path,
+				"invalid facility: " + value.get<std::string>());
+	}
+}
 
-		if (! value.is_string()) {
-			throw config_error(desc.json_path, "must be a string");
-		}
+static void
+handle_logging_syslog_path(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	cf_log_sink* sink = static_cast<cf_log_sink*>(target);
 
-		cf_log_init_tag(sink, value.get<std::string>().c_str());
+	if (! value.is_string()) {
+		throw config_error(desc.json_path, "must be a string");
 	}
 
-	static void
-	handle_logging_context_level(void* target, const FieldDescriptor& desc,
-			const nlohmann::json& value)
-	{
-		cf_log_sink* sink = static_cast<cf_log_sink*>(target);
+	cf_log_init_path(sink, value.get<std::string>().c_str());
+}
 
-		if (! value.is_string()) {
-			throw config_error(desc.json_path, "log level must be a string");
-		}
+static void
+handle_logging_syslog_tag(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	cf_log_sink* sink = static_cast<cf_log_sink*>(target);
 
-		std::string level_str = value.get<std::string>();
-		// Extract context name from the JSON path (e.g., "/contexts/any" -> "any")
-		size_t last_slash = desc.json_path.rfind('/');
-		std::string context_name =
-			(last_slash == std::string::npos)
-				? desc.json_path
-				: desc.json_path.substr(last_slash + 1);
-
-		if (! cf_log_init_level(sink, context_name.c_str(),
-				level_str.c_str())) {
-			throw config_error(desc.json_path, "invalid context '" +
-					context_name + "' or level '" + level_str + "'");
-		}
+	if (! value.is_string()) {
+		throw config_error(desc.json_path, "must be a string");
 	}
+
+	cf_log_init_tag(sink, value.get<std::string>().c_str());
+}
+
+static void
+handle_logging_context_level(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	cf_log_sink* sink = static_cast<cf_log_sink*>(target);
+
+	if (! value.is_string()) {
+		throw config_error(desc.json_path, "log level must be a string");
+	}
+
+	std::string level_str = value.get<std::string>();
+	// Extract context name from the JSON path (e.g., "/contexts/any" -> "any")
+	size_t last_slash = desc.json_path.rfind('/');
+	std::string context_name = (last_slash == std::string::npos)
+			? desc.json_path
+			: desc.json_path.substr(last_slash + 1);
+
+	if (! cf_log_init_level(sink, context_name.c_str(), level_str.c_str())) {
+		throw config_error(desc.json_path,
+				"invalid context '" + context_name + "' or level '" +
+						level_str + "'");
+	}
+}
 } // namespace cfg_handlers

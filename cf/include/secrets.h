@@ -32,7 +32,6 @@
 
 #include "tls.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -52,7 +51,6 @@ typedef struct cf_secrets_config_s {
 	cf_tls_spec* tls_spec;
 	cf_tls_info* tls;
 } cf_secrets_config;
-
 
 //==========================================================
 // Public API.

@@ -32,14 +32,12 @@
 #include "socket.h"
 #include "tls.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_file_handle_s;
 struct as_transaction_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -63,7 +61,6 @@ typedef struct as_service_access_s {
 #define MIN_PROTO_FD_MAX 1024
 #define MAX_PROTO_FD_MAX INT32_MAX
 
-
 //==========================================================
 // Globals.
 //
@@ -73,7 +70,6 @@ extern cf_serv_cfg g_service_bind;
 extern cf_tls_info* g_tls_service;
 extern cf_serv_cfg g_admin_bind;
 extern cf_tls_info* g_tls_admin;
-
 
 //==========================================================
 // Public API.

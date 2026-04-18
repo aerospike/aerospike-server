@@ -1,7 +1,7 @@
 /*
  * exp.c
  *
- * Copyright (C) 2020-2025 Aerospike, Inc.
+ * Copyright (C) 2020-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike,),Inc. under one or more contributor
  * license agreements.
@@ -46,15 +46,14 @@
 #include "base/cdt.h"
 #include "base/datamodel.h"
 #include "base/masking.h"
-#include "base/proto.h"
 #include "base/particle.h"
 #include "base/particle_blob.h"
+#include "base/proto.h"
 #include "base/thr_info.h"
 #include "geospatial/geospatial.h"
 #include "storage/storage.h"
 
 // #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -62,11 +61,7 @@
 
 #define EXP_MAX_SIZE (1 * 1024 * 1024) // 1 MiB
 
-typedef enum {
-	GEO_CELL,
-	GEO_REGION,
-	GEO_REGION_NEED_FREE
-} geo_type;
+typedef enum { GEO_CELL, GEO_REGION, GEO_REGION_NEED_FREE } geo_type;
 
 typedef enum {
 	EXP_UNK = 0,
@@ -80,6 +75,7 @@ typedef enum {
 
 	EXP_CMP_REGEX = 7,
 	EXP_CMP_GEO = 8,
+	EXP_IN_LIST = 9,
 
 	EXP_AND = 16,
 	EXP_OR = 17,
@@ -131,6 +127,8 @@ typedef enum {
 	EXP_BIN_TYPE = 82,
 
 	EXP_RESULT_REMOVE = 100,
+	EXP_MAP_KEYS = 101,
+	EXP_MAP_VALUES = 102,
 
 	EXP_VAR_BUILTIN = 122,
 	EXP_COND = 123,
@@ -203,35 +201,31 @@ typedef enum {
 	RT_END
 } runtime_type;
 
-static const char* result_type_str[] = {
-		[TYPE_NIL] = "nil",
-		[TYPE_TRILEAN] = "bool",
-		[TYPE_INT] = "int",
-		[TYPE_STR] = "str",
-		[TYPE_LIST] = "list",
-		[TYPE_MAP] = "map",
-		[TYPE_BLOB] = "blob",
-		[TYPE_FLOAT] = "float",
-		[TYPE_GEOJSON] = "geojson",
-		[TYPE_HLL] = "hll",
-		[TYPE_RESULT_REMOVE] = "result_remove"
-};
+static const char* result_type_str[] = { [TYPE_NIL] = "nil",
+	[TYPE_TRILEAN] = "bool",
+	[TYPE_INT] = "int",
+	[TYPE_STR] = "str",
+	[TYPE_LIST] = "list",
+	[TYPE_MAP] = "map",
+	[TYPE_BLOB] = "blob",
+	[TYPE_FLOAT] = "float",
+	[TYPE_GEOJSON] = "geojson",
+	[TYPE_HLL] = "hll",
+	[TYPE_RESULT_REMOVE] = "result_remove" };
 
 ARRAY_ASSERT(result_type_str, TYPE_END);
 
-static const exp_op_code result_type_to_op_code[] = {
-		[TYPE_NIL] = VOP_VALUE_NIL,
-		[TYPE_TRILEAN] = VOP_VALUE_TRILEAN,
-		[TYPE_INT] = VOP_VALUE_INT,
-		[TYPE_STR] = VOP_VALUE_STR,
-		[TYPE_LIST] = VOP_VALUE_LIST,
-		[TYPE_MAP] = VOP_VALUE_MAP,
-		[TYPE_BLOB] = VOP_VALUE_BLOB,
-		[TYPE_FLOAT] = VOP_VALUE_FLOAT,
-		[TYPE_GEOJSON] = VOP_VALUE_GEO,
-		[TYPE_HLL] = VOP_VALUE_HLL,
-		[TYPE_RESULT_REMOVE] = EXP_RESULT_REMOVE
-};
+static const exp_op_code result_type_to_op_code[] = { [TYPE_NIL] = VOP_VALUE_NIL,
+	[TYPE_TRILEAN] = VOP_VALUE_TRILEAN,
+	[TYPE_INT] = VOP_VALUE_INT,
+	[TYPE_STR] = VOP_VALUE_STR,
+	[TYPE_LIST] = VOP_VALUE_LIST,
+	[TYPE_MAP] = VOP_VALUE_MAP,
+	[TYPE_BLOB] = VOP_VALUE_BLOB,
+	[TYPE_FLOAT] = VOP_VALUE_FLOAT,
+	[TYPE_GEOJSON] = VOP_VALUE_GEO,
+	[TYPE_HLL] = VOP_VALUE_HLL,
+	[TYPE_RESULT_REMOVE] = EXP_RESULT_REMOVE };
 
 ARRAY_ASSERT(result_type_to_op_code, TYPE_END);
 
@@ -246,7 +240,6 @@ typedef struct op_cmp_regex_s {
 	uint32_t regex_str_sz;
 	int32_t flags;
 } op_cmp_regex;
-
 typedef struct op_bin_name_s {
 	op_base_mem base;
 	const uint8_t* name;
@@ -304,8 +297,20 @@ typedef struct op_call_s {
 	result_type type;
 } op_call;
 
+typedef struct call_cleanup_s {
+	as_bin** bin;
+	uint32_t bin_ix;
+} call_cleanup;
+
+#define define_call_cleanup(_name, _count)                                     \
+	as_bin* _name##_bin[_count];                                               \
+	DEFER_ATTR(call_cleanup_fn)                                                \
+	call_cleanup _name = { .bin = _name##_bin, .bin_ix = 0 }
+
+#define call_cleanup_add(_name, _bin) _name.bin[_name.bin_ix++] = _bin;
+
 typedef struct geo_compiled_s {
-	geo_type type:8;
+	geo_type type : 8;
 
 	union {
 		uint64_t cellid;
@@ -384,7 +389,11 @@ typedef struct rt_value_s {
 			};
 		};
 	};
-} __attribute__ ((__packed__)) rt_value;
+} __attribute__((__packed__)) rt_value;
+
+#define defer_rt_value_destroy(_x)                                             \
+	DEFER_ATTR(rt_defer_value_destroy)                                         \
+	rt_value* DEFER_GLUE(_defer_rt_value_destroy, __LINE__) = &(_x)
 
 typedef struct rt_stack_s {
 	rt_value* stack;
@@ -431,8 +440,10 @@ typedef struct build_args_s {
 } build_args;
 
 typedef bool (*op_table_build_cb)(build_args* args);
-typedef void (*op_table_eval_cb)(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-typedef void (*op_table_display_cb)(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+typedef void (*op_table_eval_cb)(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+typedef void (*op_table_display_cb)(runtime* rt, const op_base_mem* ob,
+		cf_dyn_buf* db);
 
 typedef enum {
 	INSTR_SZ_CONST,
@@ -452,40 +463,42 @@ struct op_table_entry_s {
 	const char* name;
 };
 
-#define OP_TABLE_ENTRY(__code, __name, __size_name, __build_name, __eval_name, __display_name, __static_param_count, __eval_param_count, __r_type) \
-		[__code].code = __code, \
-		[__code].name = __name, \
-		[__code].size = (uint32_t)sizeof(__size_name), \
-		[__code].build_cb = __build_name, \
-		[__code].eval_cb = __eval_name, \
-		[__code].display_cb = __display_name, \
-		[__code].static_param_count = __static_param_count, \
-		[__code].eval_param_count = __eval_param_count, \
-		[__code].r_type = __r_type,
+// clang-format off
+#define OP_TABLE_ENTRY(_code, _name, _size_name, _build_name, _eval_name, _display_name, _static_param_count, _eval_param_count, _r_type) \
+		[_code].code = _code, \
+		[_code].name = _name, \
+		[_code].size = (uint32_t)sizeof(_size_name), \
+		[_code].build_cb = _build_name, \
+		[_code].eval_cb = _eval_name, \
+		[_code].display_cb = _display_name, \
+		[_code].static_param_count = _static_param_count, \
+		[_code].eval_param_count = _eval_param_count, \
+		[_code].r_type = _r_type,
+// clang-format on
 
 static const uint8_t* EMPTY_STRING = (uint8_t*)"";
 static const uint8_t call_eval_token[1] = "";
-static const rt_value rt_unk = {
-		.type = RT_TRILEAN,
-		.r_trilean = AS_EXP_UNK
-};
-
+static const rt_value rt_unk = { .type = RT_TRILEAN, .r_trilean = AS_EXP_UNK };
 
 //==========================================================
 // Forward declarations.
 //
 
 // Build.
-static as_exp* build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire, cf_vector* bins_info_r);
+static as_exp* build_internal(const uint8_t* buf, uint32_t buf_sz,
+		bool cpy_wire, cf_vector* bins_info_r);
 static bool build_next(build_args* args);
 static const op_table_entry* build_get_entry(result_type type);
-static bool build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count, uint32_t* counter_r);
-static var_entry* build_find_var_entry(build_args* args, const uint8_t* name, uint32_t name_sz);
+static bool build_count_sz(msgpack_in* mp, uint32_t* total_sz,
+		uint32_t* cleanup_count, uint32_t* counter_r);
+static var_entry* build_find_var_entry(build_args* args, const uint8_t* name,
+		uint32_t name_sz);
 static bool build_default(build_args* args);
 static bool build_meta_default(build_args* args);
 static bool build_compare(build_args* args);
 static bool build_cmp_regex(build_args* args);
 static bool build_cmp_geo(build_args* args);
+static bool build_in_list(build_args* args);
 static bool build_logical_vargs(build_args* args);
 static bool build_logical_not(build_args* args);
 static bool build_math_vargs(build_args* args);
@@ -511,6 +524,7 @@ static bool build_var(build_args* args);
 static bool build_let(build_args* args);
 static bool build_quote(build_args* args);
 static bool build_call(build_args* args);
+static bool build_map_kv(build_args* args);
 static bool build_value_nil(build_args* args);
 static bool build_value_bool(build_args* args);
 static bool build_value_int(build_args* args);
@@ -523,7 +537,7 @@ static bool build_value_msgpack(build_args* args);
 static bool parse_op_call(op_call* op, build_args* args);
 static bool build_set_expected_particle_type(build_args* args);
 static as_exp* check_filter_exp(as_exp* exp);
-static bool geo_mp_to_op(msgpack_in* mp, op_value_geo *op, const char* debug_str);
+static bool geo_mp_to_op(msgpack_in* mp, op_value_geo* op, const char* debug_str);
 
 // Runtime.
 static as_exp_trilean match_internal(const as_exp* exp, const as_exp_ctx* ctx);
@@ -531,6 +545,7 @@ static bool rt_eval(runtime* rt, rt_value* ret_val);
 static void eval_unknown(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
@@ -551,65 +566,98 @@ static void eval_int_and(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_int_or(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_int_xor(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_int_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_int_lshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_int_rshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_int_arshift(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_int_lshift(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_int_rshift(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_int_arshift(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
 static void eval_int_count(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_int_lscan(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_int_rscan(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_min(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_max(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_digest_mod(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_device_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_last_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_since_update(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_void_time(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_meta_digest_mod(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_device_size(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_last_update(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_since_update(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_void_time(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
 static void eval_meta_ttl(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_set_name(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_key_exists(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_meta_record_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_meta_set_name(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_key_exists(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_memory_size(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_meta_record_size(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
 static void eval_rec_key(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_result_remove(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_result_remove(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
+static void eval_map_keys_or_values(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val, bool is_values);
+static void eval_map_keys(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_map_values(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
 static void eval_cond(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
-static void eval_var_builtin(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
+static void eval_var_builtin(runtime* rt, const op_base_mem* ob,
+		rt_value* ret_val);
 static void eval_var(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_let(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 static void eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val);
 
 // Runtime utilities.
-static void rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from, cf_ll_buf* ll_buf);
+static void rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb,
+		const rt_value* from, cf_ll_buf* ll_buf);
 static void json_to_rt_geo(const uint8_t* json, size_t jsonsz, rt_value* val);
 static void particle_to_rt_geo(const as_particle* p, rt_value* val);
 static as_particle_type result_type_to_particle_type(result_type type);
 static bool bin_is_type(const as_bin* b, result_type type);
 static void rt_skip(runtime* rt, uint32_t instr_count);
 static void rt_value_translate(rt_value* to, const rt_value* from);
+static void rt_defer_value_destroy(rt_value** p_val);
 static void rt_value_destroy(rt_value* val);
 static void rt_value_get_geo(rt_value* val, geo_data* result);
-static bool get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin);
+static bool get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len,
+		as_bin** p_bin);
 static bool rt_is_type(const rt_value* v, result_type type);
 static void rt_init_builtin_vars(runtime* rt, op_value_geo* geo_mem);
 
 // Runtime compare utilities.
-static as_exp_trilean cmp_nil(exp_op_code code, const rt_value* e0, const rt_value* e1);
-static as_exp_trilean cmp_trilean(exp_op_code code, const rt_value* e0, const rt_value* e1);
-static as_exp_trilean cmp_int(exp_op_code code, const rt_value* e0, const rt_value* e1);
-static as_exp_trilean cmp_float(exp_op_code code, const rt_value* e0, const rt_value* e1);
+static as_exp_trilean cmp_nil(exp_op_code code, const rt_value* e0,
+		const rt_value* e1);
+static as_exp_trilean cmp_trilean(exp_op_code code, const rt_value* e0,
+		const rt_value* e1);
+static as_exp_trilean cmp_int(exp_op_code code, const rt_value* e0,
+		const rt_value* e1);
+static as_exp_trilean cmp_float(exp_op_code code, const rt_value* e0,
+		const rt_value* e1);
 static const uint8_t* rt_value_get_str(const rt_value* val, uint32_t* sz_r);
-static as_exp_trilean cmp_bytes(exp_op_code code, const rt_value* e0, const rt_value* e1);
-static as_exp_trilean cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1);
+static as_exp_trilean cmp_bytes(exp_op_code code, const rt_value* e0,
+		const rt_value* e1);
+static as_exp_trilean cmp_msgpack(exp_op_code code, const rt_value* v0,
+		const rt_value* v1);
 
 // Runtime call utilities.
-static void call_cleanup(void** blob, uint32_t blob_ix, as_bin** bin, uint32_t bin_ix);
-static void pack_typed_str(as_packer* pk, const uint8_t* buf, uint32_t sz, uint8_t type);
+static void call_cleanup_fn(call_cleanup* cc);
+static void pack_typed_str(as_packer* pk, const uint8_t* buf, uint32_t sz,
+		uint8_t type);
+static bool rt_value_to_msgpack_vec(as_packer* pk, msgpack_vec* vec,
+		rollback_alloc* alloc, const rt_value* from);
 static bool rt_value_bin_translate(rt_value* to, const rt_value* from);
 static void* rt_alloc_mem(runtime* rt, size_t sz, cf_ll_buf* ll_buf);
-static bool msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf);
+static bool msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from,
+		cf_ll_buf* ll_buf);
 
 // Runtime runtime display.
 static void rt_display(runtime* rt, cf_dyn_buf* db);
@@ -617,14 +665,18 @@ static void display_0_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
 static void display_1_arg(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
 static void display_2_args(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
 static void display_cmp_regex(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_logical_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_math_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_logical_vargs(runtime* rt, const op_base_mem* ob,
+		cf_dyn_buf* db);
+static void display_math_vargs(runtime* rt, const op_base_mem* ob,
+		cf_dyn_buf* db);
 static void display_int_vargs(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_meta_digest_mod(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_meta_digest_mod(runtime* rt, const op_base_mem* ob,
+		cf_dyn_buf* db);
 static void display_bin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
 static void display_bin_type(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
 static void display_cond(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
-static void display_var_builtin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
+static void display_var_builtin(runtime* rt, const op_base_mem* ob,
+		cf_dyn_buf* db);
 static void display_var(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
 static void display_let(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
 static void display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db);
@@ -636,7 +688,6 @@ static void display_msgpack(msgpack_in* mp, cf_dyn_buf* db);
 // Debug utilities.
 static void debug_exp_check(const as_exp* exp);
 
-
 //==========================================================
 // Inlines & macros.
 //
@@ -644,7 +695,9 @@ static void debug_exp_check(const as_exp* exp);
 static inline const char*
 result_type_to_str(result_type type)
 {
-	return (uint32_t)type >= TYPE_END ? "invalid" : result_type_str[type]; // (uint32_t) cast because enum can be signed
+	return (uint32_t)type >= TYPE_END
+			? "invalid"
+			: result_type_str[type]; // (uint32_t) cast because enum can be signed
 }
 
 static inline bool
@@ -670,8 +723,7 @@ build_args_setup(build_args* args, const char* name)
 {
 	const op_table_entry* entry = args->entry;
 
-	if (args->ele_count != entry->eval_param_count +
-			entry->static_param_count) {
+	if (args->ele_count != entry->eval_param_count + entry->static_param_count) {
 		cf_warning(AS_EXP, "%s - error %u expected %u args found %u", name,
 				AS_ERR_PARAMETER,
 				entry->eval_param_count + entry->static_param_count,
@@ -688,8 +740,7 @@ build_args_setup(build_args* args, const char* name)
 }
 
 static inline bool
-rt_value_need_destroy(const rt_value* bin_arg, const as_bin* old,
-		const as_bin* b)
+rt_value_need_destroy(const rt_value* bin_arg, const as_bin* old, const as_bin* b)
 {
 	return bin_arg->type == RT_BIN && ! bin_arg->do_not_destroy &&
 			old->particle != b->particle;
@@ -702,11 +753,11 @@ rt_value_keep_do_not_destroy(const rt_value* bin_arg, const as_bin* b)
 			bin_arg->r_bin.particle == b->particle;
 }
 
-
 //==========================================================
 // Op table.
 //
 
+// clang-format off
 static const op_table_entry op_table[] = {
 		OP_TABLE_ENTRY(EXP_UNK, "unknown", op_base_mem, build_default, eval_unknown, display_0_args, 0, 0, TYPE_TRILEAN)
 
@@ -719,6 +770,7 @@ static const op_table_entry op_table[] = {
 
 		OP_TABLE_ENTRY(EXP_CMP_REGEX, "cmp_regex", op_cmp_regex, build_cmp_regex, eval_cmp_regex, display_cmp_regex, 2, 1, TYPE_TRILEAN)
 		OP_TABLE_ENTRY(EXP_CMP_GEO, "cmp_geo", op_base_mem, build_cmp_geo, eval_compare, display_2_args, 0, 2, TYPE_TRILEAN)
+		OP_TABLE_ENTRY(EXP_IN_LIST, "in_list", op_base_mem, build_in_list, eval_in_list, display_2_args, 0, 2, TYPE_TRILEAN)
 
 		OP_TABLE_ENTRY(EXP_AND, "and", op_base_mem, build_logical_vargs, eval_and, display_logical_vargs, 0, 0, TYPE_TRILEAN)
 		OP_TABLE_ENTRY(EXP_OR, "or", op_base_mem, build_logical_vargs, eval_or, display_logical_vargs, 0, 0, TYPE_TRILEAN)
@@ -770,6 +822,9 @@ static const op_table_entry op_table[] = {
 
 		OP_TABLE_ENTRY(EXP_RESULT_REMOVE, "result_remove", op_base_mem, build_default, eval_result_remove, display_0_args, 0, 0, TYPE_RESULT_REMOVE)
 
+		OP_TABLE_ENTRY(EXP_MAP_KEYS, "map_keys", op_base_mem, build_map_kv, eval_map_keys, display_1_arg, 0, 1, TYPE_LIST)
+		OP_TABLE_ENTRY(EXP_MAP_VALUES, "map_values", op_base_mem, build_map_kv, eval_map_values, display_1_arg, 0, 1, TYPE_LIST)
+
 		OP_TABLE_ENTRY(EXP_VAR_BUILTIN, "var_builtin", op_var, build_var_builtin, eval_var_builtin, display_var_builtin, 2, 0, TYPE_END)
 		OP_TABLE_ENTRY(EXP_COND, "cond", op_cond, build_cond, eval_cond, display_cond, 0, 0, TYPE_END)
 		OP_TABLE_ENTRY(EXP_VAR, "var", op_var, build_var, eval_var, display_var, 1, 0, TYPE_END)
@@ -793,7 +848,7 @@ static const op_table_entry op_table[] = {
 
 		OP_TABLE_ENTRY(VOP_COND_CASE, "case", op_base_mem, NULL, NULL, display_case, 0, 0, TYPE_END)
 };
-
+// clang-format on
 
 //==========================================================
 // Public API.
@@ -835,10 +890,10 @@ as_exp_filter_build(const as_msg_field* m, bool cpy_wire)
 
 as_exp*
 as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
-		 cf_vector* bins_info_r)
+		cf_vector* bins_info_r)
 {
-	cf_debug(AS_EXP, "as_exp_build_buf - buf_sz %u buf-dump:\n%*pH",
-			buf_sz, buf_sz, buf);
+	cf_debug(AS_EXP, "as_exp_build_buf - buf_sz %u buf-dump:\n%*pH", buf_sz,
+			buf_sz, buf);
 
 	return build_internal(buf, buf_sz, cpy_wire, bins_info_r);
 }
@@ -850,12 +905,10 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 	rt_value vars[exp->max_var_count];
 	rt_value ret_val;
 
-	runtime rt = {
-			.ctx = ctx,
-			.instr_ptr = exp->mem,
-			.vars = vars,
-			.vars_builtin = {[0 ... (AS_EXP_BUILTIN_COUNT - 1)] = rt_unk}
-	};
+	runtime rt = { .ctx = ctx,
+		.instr_ptr = exp->mem,
+		.vars = vars,
+		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk } };
 
 	rt_eval(&rt, &ret_val);
 
@@ -873,7 +926,7 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_INTEGER);
 		break;
 	case RT_FLOAT:
-		*((double *)(&rb->particle)) = ret_val.r_float;
+		*((double*)(&rb->particle)) = ret_val.r_float;
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_FLOAT);
 		break;
 	case RT_TRILEAN:
@@ -881,21 +934,21 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 			return false;
 		}
 
-		rb->particle = (as_particle*)(uint64_t)
-				(ret_val.r_trilean == AS_EXP_TRUE ? 1 : 0);
+		rb->particle =
+				(as_particle*)(uint64_t)(ret_val.r_trilean == AS_EXP_TRUE ? 1
+																		  : 0);
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_BOOL);
 		break;
 	case RT_GEO_CONST:
-		rb->particle = rt_alloc_mem(&rt, as_geojson_particle_sz(
-				MAX_REGION_CELLS, ret_val.r_geo_const.op->content_sz),
+		rb->particle = rt_alloc_mem(&rt,
+				as_geojson_particle_sz(MAX_REGION_CELLS,
+						ret_val.r_geo_const.op->content_sz),
 				particles_llb); // over allocate
 		as_bin_state_set_from_type(rb, AS_PARTICLE_TYPE_GEOJSON);
 		((cdt_mem*)rb->particle)->type = AS_PARTICLE_TYPE_GEOJSON;
 
-		msgpack_in mp = {
-				.buf = ret_val.r_geo_const.op->contents,
-				.buf_sz = ret_val.r_geo_const.op->content_sz
-		};
+		msgpack_in mp = { .buf = ret_val.r_geo_const.op->contents,
+			.buf_sz = ret_val.r_geo_const.op->content_sz };
 
 		uint32_t json_sz = 0;
 		const char* json = (const char*)msgpack_get_bin(&mp, &json_sz);
@@ -919,9 +972,10 @@ as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
 	case RT_STR:
 	case RT_BLOB:
 	case RT_HLL: {
-		as_particle_type particle_type = ret_val.type == RT_STR ?
-			AS_PARTICLE_TYPE_STRING : (ret_val.type == RT_BLOB ?
-				AS_PARTICLE_TYPE_BLOB : AS_PARTICLE_TYPE_HLL);
+		as_particle_type particle_type = ret_val.type == RT_STR
+				? AS_PARTICLE_TYPE_STRING
+				: (ret_val.type == RT_BLOB ? AS_PARTICLE_TYPE_BLOB
+										   : AS_PARTICLE_TYPE_HLL);
 
 		rb->particle = rt_alloc_mem(&rt, sizeof(cdt_mem) + ret_val.r_bytes.sz,
 				particles_llb);
@@ -973,7 +1027,7 @@ as_exp_result_msgpack_sz(const as_exp_result* res)
 	switch (res->type) {
 	case AS_EXP_RESULT_BIN: {
 		as_bin b = {
-				.particle = res->particle.ptr,
+			.particle = res->particle.ptr,
 		};
 
 		as_bin_state_set_from_type(&b, res->particle.ptr->type);
@@ -1025,7 +1079,7 @@ as_exp_result_msgpack_sz(const as_exp_result* res)
 void
 as_exp_result_msgpack_write(const as_exp_result* res, uint8_t* wptr)
 {
-	as_packer pk = {.buffer = wptr, .capacity = UINT32_MAX};
+	as_packer pk = { .buffer = wptr, .capacity = UINT32_MAX };
 
 	as_exp_result_msgpack_pack(res, &pk);
 }
@@ -1036,7 +1090,7 @@ as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk)
 	switch (res->type) {
 	case AS_EXP_RESULT_BIN: {
 		as_bin b = {
-				.particle = res->particle.ptr,
+			.particle = res->particle.ptr,
 		};
 
 		as_bin_state_set_from_type(&b, res->particle.ptr->type);
@@ -1079,8 +1133,7 @@ as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk)
 		as_pack_append(pk, res->msgpack.ptr, res->msgpack.sz);
 		break;
 	case AS_EXP_RESULT_STR:
-		as_pack_str_with_type(pk, res->str.bytes_type, res->str.ptr,
-				res->str.sz);
+		as_pack_str_with_type(pk, res->str.bytes_type, res->str.ptr, res->str.sz);
 		break;
 	case AS_EXP_RESULT_REMOVE:
 		break;
@@ -1092,25 +1145,23 @@ as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk)
 bool
 as_exp_result_has_nonstorage(const as_exp_result* res)
 {
-	return res->type == AS_EXP_RESULT_MSGPACK &&
-			res->msgpack.has_nonstorage != 0;
+	return res->type == AS_EXP_RESULT_MSGPACK && res->msgpack.has_nonstorage != 0;
 }
 
 bool
-as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx,
-		as_exp_result* res)
+as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* res)
 {
 	rt_value vars[exp->max_var_count];
 	rt_value ret_val;
 
-	runtime rt = {
-			.ctx = ctx,
-			.instr_ptr = exp->mem,
-			.vars = vars,
-			.vars_builtin = {[0 ... (AS_EXP_BUILTIN_COUNT - 1)] = rt_unk}
-	};
+	runtime rt = { .ctx = ctx,
+		.instr_ptr = exp->mem,
+		.vars = vars,
+		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk } };
 
-	op_value_geo geo_mem = {.contents = NULL}; // 1 object -- only value built-in var should have geo
+	op_value_geo geo_mem = {
+		.contents = NULL
+	}; // 1 object -- only value built-in var should have geo
 
 	rt_init_builtin_vars(&rt, &geo_mem);
 	rt_eval(&rt, &ret_val);
@@ -1139,7 +1190,7 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx,
 	}
 
 	rt_value t_val;
-	as_packer pk = {.capacity = UINT32_MAX};
+	as_packer pk = { .capacity = UINT32_MAX };
 
 	if (! rt_value_bin_translate(&t_val, &ret_val)) {
 		cf_warning(AS_EXP, "as_exp_eval_to_result - unexpected result type (%u)",
@@ -1181,10 +1232,7 @@ as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx,
 		res->msgpack.sz = t_val.r_bytes.sz;
 		res->msgpack.ptr = t_val.r_bytes.contents;
 
-		msgpack_in mp = {
-				.buf = res->msgpack.ptr,
-				.buf_sz = res->msgpack.sz
-		};
+		msgpack_in mp = { .buf = res->msgpack.ptr, .buf_sz = res->msgpack.sz };
 
 		if (msgpack_sz(&mp) == 0) {
 			return false;
@@ -1240,7 +1288,7 @@ as_exp_result_destroy(as_exp_result* res)
 {
 	if (res->type == AS_EXP_RESULT_BIN) {
 		as_bin b = {
-				.particle = res->particle.ptr,
+			.particle = res->particle.ptr,
 		};
 
 		as_bin_state_set_from_type(&b, res->particle.ptr->type);
@@ -1269,7 +1317,7 @@ as_exp_matches_record(const as_exp* exp, const as_exp_ctx* ctx)
 }
 
 bool
-as_exp_display(const as_exp* exp, cf_dyn_buf *db)
+as_exp_display(const as_exp* exp, cf_dyn_buf* db)
 {
 	if (exp == NULL) {
 		cf_warning(AS_EXP, "as_exp_display - exp is NULL");
@@ -1310,7 +1358,6 @@ as_exp_destroy(as_exp* exp)
 	cf_free(exp);
 }
 
-
 //==========================================================
 // Local helpers - build.
 //
@@ -1319,15 +1366,12 @@ static as_exp*
 build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		cf_vector* bins_info_r)
 {
-	msgpack_in mp = {
-			.buf = buf,
-			.buf_sz = buf_sz
-	};
+	msgpack_in mp = { .buf = buf, .buf_sz = buf_sz };
 	uint32_t top_count;
 
 	if (msgpack_buf_get_list_ele_count(mp.buf, mp.buf_sz, &top_count) &&
 			top_count == 0) {
-		cf_warning(AS_EXP, "build_internal - invalid expression or empty list");
+		cf_warning(AS_EXP, "build_internal - empty list");
 		return NULL;
 	}
 
@@ -1340,13 +1384,15 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 	}
 
 	if (counter != 0) {
-		cf_warning(AS_EXP, "build_internal - incomplete expression field expected %u more elements",
+		cf_warning(AS_EXP,
+				"build_internal - incomplete expression field expected %u more elements",
 				counter);
 		return false;
 	}
 
 	if (total_sz >= EXP_MAX_SIZE) {
-		cf_warning(AS_EXP, "build_internal - expression size exceeds limit of %u bytes",
+		cf_warning(AS_EXP,
+				"build_internal - expression size exceeds limit of %u bytes",
 				EXP_MAX_SIZE);
 		return NULL;
 	}
@@ -1364,10 +1410,8 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		total_sz += mp.buf_sz;
 	}
 
-	build_args args = {
-			.exp = cf_calloc(1, sizeof(as_exp) + total_sz),
-			.bins_info_r = bins_info_r
-	};
+	build_args args = { .exp = cf_calloc(1, sizeof(as_exp) + total_sz),
+		.bins_info_r = bins_info_r };
 
 	args.mem = args.exp->mem;
 	args.exp->cleanup_stack = (void**)(args.mem + cleanup_offset);
@@ -1391,9 +1435,10 @@ build_internal(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
 		return NULL;
 	}
 
-	cf_assert(args.mem <= (uint8_t*)args.exp->cleanup_stack, AS_EXP, "read past cleanup_stack %p > %p",
-			args.mem, args.exp->cleanup_stack);
-	cf_assert(args.exp->cleanup_stack_ix <= cleanup_count, AS_EXP, "cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
+	cf_assert(args.mem <= (uint8_t*)args.exp->cleanup_stack, AS_EXP,
+			"read past cleanup_stack %p > %p", args.mem, args.exp->cleanup_stack);
+	cf_assert(args.exp->cleanup_stack_ix <= cleanup_count, AS_EXP,
+			"cleanup_stack_ix (%u) not equal to cleanup_count (%u)",
 			args.exp->cleanup_stack_ix, cleanup_count);
 
 	args.exp->max_var_count = args.max_var_idx;
@@ -1462,9 +1507,9 @@ build_next(build_args* args)
 		msgpack_get_uint64(&args->mp, &op_code);
 		ele_count--; // -1 for op_code
 
-		cf_assert(AS_EXP, op_code < EXP_OP_CODE_END &&
-				op_table[op_code].code != 0, "invalid expression op %lu",
-				op_code);
+		cf_assert(AS_EXP,
+				op_code < EXP_OP_CODE_END && op_table[op_code].code != 0,
+				"invalid expression op %lu", op_code);
 	}
 
 	args->entry = &op_table[op_code];
@@ -1499,7 +1544,8 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 		msgpack_type type = msgpack_peek_type(mp);
 
 		if (type == MSGPACK_TYPE_ERROR) {
-			cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+			cf_warning(AS_EXP,
+					"build_count_sz - invalid instruction at offset %u",
 					mp->offset);
 			return false;
 		}
@@ -1540,27 +1586,30 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				const uint8_t* buf = msgpack_get_bin(mp, &temp_sz);
 
 				if (buf == NULL || temp_sz == 0) {
-					cf_warning(AS_EXP, "build_count_sz - invalid blob at offset %u",
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid blob at offset %u",
 							mp->offset);
 					return false;
 				}
 
 				if (*buf != AS_BYTES_BLOB && *buf != AS_BYTES_HLL) {
-					cf_warning(AS_EXP, "build_count_sz - invalid blob type %d at offset %u",
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid blob type %d at offset %u",
 							*buf, mp->offset);
 					return false;
 				}
 			}
 			else if (msgpack_sz(mp) == 0) {
-				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
 						mp->offset);
 				return false;
 			}
 		}
 		else {
-			if (! msgpack_get_list_ele_count(mp, &ele_count) ||
-					ele_count == 0) {
-				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+			if (! msgpack_get_list_ele_count(mp, &ele_count) || ele_count == 0) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
 						mp->offset);
 				return false;
 			}
@@ -1568,13 +1617,15 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 			*counter_r += ele_count - 1;
 
 			if (! msgpack_get_uint64(mp, &op_code)) {
-				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
 						mp->offset);
 				return false;
 			}
 
 			if (op_code >= EXP_OP_CODE_END) {
-				cf_warning(AS_EXP, "build_count_sz - invalid op_code %lu", op_code);
+				cf_warning(AS_EXP, "build_count_sz - invalid op_code %lu",
+						op_code);
 				return false;
 			}
 		}
@@ -1583,13 +1634,14 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 
 		if (entry->size == 0) {
 			cf_warning(AS_EXP, "build_count_sz - invalid op_code %lu size %u",
-				op_code, entry->size);
+					op_code, entry->size);
 			return false;
 		}
 
 		if (entry->static_param_count != 0 &&
 				msgpack_sz_rep(mp, entry->static_param_count) == 0) {
-			cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+			cf_warning(AS_EXP,
+					"build_count_sz - invalid instruction at offset %u",
 					mp->offset);
 			return false;
 		}
@@ -1604,20 +1656,43 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 			(*counter_r)--;
 
 			if (! msgpack_get_list_ele_count(mp, &param_count) ||
-					param_count == 0 ||
-					! msgpack_get_uint64(mp, &call_op_code)) {
-				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+					param_count == 0 || ! msgpack_get_uint64(mp, &call_op_code)) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
 						mp->offset);
 				return false;
 			}
 
-			if (call_op_code == AS_CDT_OP_CONTEXT_EVAL && (param_count != 3 ||
-					msgpack_sz(mp) == 0 || // skip context
-					! msgpack_get_list_ele_count(mp, &param_count) ||
-					! msgpack_get_uint64(mp, &call_op_code))) {
-				cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+			if (call_op_code == AS_CDT_OP_CONTEXT_EVAL &&
+					(param_count != 3 || msgpack_sz(mp) == 0 || // skip context
+							! msgpack_get_list_ele_count(mp, &param_count) ||
+							! msgpack_get_uint64(mp, &call_op_code))) {
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid instruction at offset %u",
 						mp->offset);
 				return false;
+			}
+			else if (call_op_code == AS_CDT_OP_SELECT) {
+				uint64_t flags;
+
+				if (param_count < 3 || param_count > 4 ||
+						msgpack_peek_type(mp) != MSGPACK_TYPE_LIST ||
+						msgpack_sz(mp) == 0 || // skip context
+						! msgpack_get_uint64(mp, &flags)) {
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid instruction at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				if (param_count == 4 && msgpack_sz(mp) == 0) { // mod_exp
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid instruction at offset %u",
+							mp->offset);
+					return false;
+				}
+
+				param_count = 0; // already parsed
 			}
 
 			for (uint32_t i = 1; i < param_count; i++) {
@@ -1630,7 +1705,8 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				}
 
 				if (msgpack_sz(mp) == 0) {
-					cf_warning(AS_EXP, "build_count_sz - invalid instruction at offset %u",
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid instruction at offset %u",
 							mp->offset);
 					return false;
 				}
@@ -1641,7 +1717,8 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 		}
 		else if (op_code == EXP_LET) {
 			if (ele_count % 2 == 1) {
-				cf_warning(AS_EXP, "build_count_sz - invalid 'let' op at offset %u ele_count %u",
+				cf_warning(AS_EXP,
+						"build_count_sz - invalid 'let' op at offset %u ele_count %u",
 						mp->offset, ele_count);
 				return false;
 			}
@@ -1652,27 +1729,26 @@ build_count_sz(msgpack_in* mp, uint32_t* total_sz, uint32_t* cleanup_count,
 				(*counter_r)--;
 
 				if (msgpack_get_bin(mp, &sz) == NULL) {
-					cf_warning(AS_EXP, "build_count_sz - invalid 'let' var at offset %u",
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid 'let' var at offset %u",
 							mp->offset);
 					return false;
 				}
 
 				const uint8_t* start = mp->buf + mp->offset;
 
-				msgpack_in mp_var = {
-						.buf = start,
-						.buf_sz = msgpack_sz(mp)
-				};
+				msgpack_in mp_var = { .buf = start, .buf_sz = msgpack_sz(mp) };
 
 				if (mp_var.buf_sz == 0) {
-					cf_warning(AS_EXP, "build_count_sz - invalid msgpack at offset %u",
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid msgpack at offset %u",
 							mp->offset);
 					return false;
 				}
 
-				if (! build_count_sz(&mp_var, total_sz, cleanup_count,
-						counter_r)) {
-					cf_warning(AS_EXP, "build_count_sz - invalid 'let' value at offset %u",
+				if (! build_count_sz(&mp_var, total_sz, cleanup_count, counter_r)) {
+					cf_warning(AS_EXP,
+							"build_count_sz - invalid 'let' value at offset %u",
 							mp->offset);
 					return false;
 				}
@@ -1746,16 +1822,18 @@ build_compare(build_args* args)
 	result_type rtype = args->entry->r_type;
 
 	if (ltype != rtype) {
-		cf_warning(AS_EXP, "build_compare - error %u mismatched arg types ltype %u (%s) rtype %u (%s)",
-				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype),
-				rtype, result_type_to_str(rtype));
+		cf_warning(AS_EXP,
+				"build_compare - error %u mismatched arg types ltype %u (%s) rtype %u (%s)",
+				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype), rtype,
+				result_type_to_str(rtype));
 		return false;
 	}
 
 	switch (ltype) {
 	case TYPE_GEOJSON:
 	case TYPE_HLL:
-		cf_warning(AS_EXP, "build_compare - error %u cannot compare arg type %u (%s)",
+		cf_warning(AS_EXP,
+				"build_compare - error %u cannot compare arg type %u (%s)",
 				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype));
 		return false;
 	default:
@@ -1801,9 +1879,11 @@ build_cmp_regex(build_args* args)
 	}
 
 	if (args->entry->r_type != TYPE_STR) {
-		cf_warning(AS_EXP, "build_cmp_regex - error %u invalid arg type %u (%s) != %u (%s)",
-				AS_ERR_PARAMETER, args->entry->r_type, result_type_to_str(args->entry->r_type),
-				TYPE_STR, result_type_str[TYPE_STR]);
+		cf_warning(AS_EXP,
+				"build_cmp_regex - error %u invalid arg type %u (%s) != %u (%s)",
+				AS_ERR_PARAMETER, args->entry->r_type,
+				result_type_to_str(args->entry->r_type), TYPE_STR,
+				result_type_str[TYPE_STR]);
 		return false;
 	}
 
@@ -1853,7 +1933,8 @@ build_cmp_geo(build_args* args)
 	result_type ltype = args->entry->r_type;
 
 	if (ltype != TYPE_GEOJSON) {
-		cf_warning(AS_EXP, "build_cmp_geo - error %u mismatched arg types ltype %u (%s) != %u (%s)",
+		cf_warning(AS_EXP,
+				"build_cmp_geo - error %u mismatched arg types ltype %u (%s) != %u (%s)",
 				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype),
 				TYPE_GEOJSON, result_type_str[TYPE_GEOJSON]);
 		return false;
@@ -1866,9 +1947,40 @@ build_cmp_geo(build_args* args)
 	result_type rtype = args->entry->r_type;
 
 	if (ltype != rtype) {
-		cf_warning(AS_EXP, "build_cmp_geo - error %u mismatched arg types ltype %u (%s) rtype %u (%s)",
+		cf_warning(AS_EXP,
+				"build_cmp_geo - error %u mismatched arg types ltype %u (%s) rtype %u (%s)",
 				AS_ERR_PARAMETER, ltype, result_type_to_str(ltype), rtype,
 				result_type_to_str(rtype));
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static bool
+build_in_list(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_in_list")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	result_type rtype = args->entry->r_type;
+
+	if (rtype != TYPE_LIST) {
+		cf_warning(AS_EXP, "build_in_list - error %u invalid arg type %u (%s)",
+				AS_ERR_PARAMETER, rtype, result_type_to_str(rtype));
 		return false;
 	}
 
@@ -1925,7 +2037,8 @@ build_logical_not(build_args* args)
 	}
 
 	if (args->entry->r_type != TYPE_TRILEAN) {
-		cf_warning(AS_EXP, "build_logical_not - error %u invalid arg type %u (%s)",
+		cf_warning(AS_EXP,
+				"build_logical_not - error %u invalid arg type %u (%s)",
 				AS_ERR_PARAMETER, args->entry->r_type,
 				result_type_to_str(args->entry->r_type));
 		return false;
@@ -1975,15 +2088,16 @@ build_math_vargs(build_args* args)
 
 			return false;
 		default:
-			cf_warning(AS_EXP, "build_math - error %u invalid type %u (%s) at arg %u",
+			cf_warning(AS_EXP,
+					"build_math - error %u invalid type %u (%s) at arg %u",
 					AS_ERR_PARAMETER, args->entry->r_type,
 					result_type_to_str(args->entry->r_type), i + 1);
 			return false;
 		}
 	}
 
-	args->entry = &op_table[expected_type == TYPE_FLOAT ?
-			VOP_VALUE_FLOAT : VOP_VALUE_INT];
+	args->entry =
+			&op_table[expected_type == TYPE_FLOAT ? VOP_VALUE_FLOAT : VOP_VALUE_INT];
 
 	return true;
 }
@@ -1991,14 +2105,16 @@ build_math_vargs(build_args* args)
 static bool
 build_device_size(build_args* args)
 {
-	as_info_warn_deprecated("'device_size' expression is deprecated - use 'record_size' instead");
+	as_info_warn_deprecated(
+			"'device_size' expression is deprecated - use 'record_size' instead");
 	return build_meta_default(args);
 }
 
 static bool
 build_memory_size(build_args* args)
 {
-	as_info_warn_deprecated("'memory_size' expression is deprecated - use 'record_size' instead");
+	as_info_warn_deprecated(
+			"'memory_size' expression is deprecated - use 'record_size' instead");
 	return build_meta_default(args);
 }
 
@@ -2024,7 +2140,8 @@ build_math_pow(build_args* args)
 	result_type arg1 = args->entry->r_type;
 
 	if (! (arg0 == TYPE_FLOAT && arg1 == TYPE_FLOAT)) {
-		cf_warning(AS_EXP, "build_math_pow - error %u args are not numeric or different types - base %u (%s) exponent %u (%s)",
+		cf_warning(AS_EXP,
+				"build_math_pow - error %u args are not numeric or different types - base %u (%s) exponent %u (%s)",
 				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1,
 				result_type_to_str(arg1));
 		return false;
@@ -2057,8 +2174,10 @@ build_math_log(build_args* args)
 	result_type arg1 = args->entry->r_type;
 
 	if (! (arg0 == TYPE_FLOAT && arg1 == TYPE_FLOAT)) {
-		cf_warning(AS_EXP, "build_math_log - error %u args are not numeric or different types - num %u (%s) base %u (%s)",
-				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1, result_type_to_str(arg1));
+		cf_warning(AS_EXP,
+				"build_math_log - error %u args are not numeric or different types - num %u (%s) base %u (%s)",
+				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1,
+				result_type_to_str(arg1));
 		return false;
 	}
 
@@ -2089,8 +2208,10 @@ build_math_mod(build_args* args)
 	result_type arg1 = args->entry->r_type;
 
 	if (! (arg0 == TYPE_INT && arg1 == TYPE_INT)) {
-		cf_warning(AS_EXP, "build_math_mod - error %u args are not integers - numerator %u (%s) denominator %u (%s)",
-				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1, result_type_to_str(arg1));
+		cf_warning(AS_EXP,
+				"build_math_mod - error %u args are not integers - numerator %u (%s) denominator %u (%s)",
+				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), arg1,
+				result_type_to_str(arg1));
 		return false;
 	}
 
@@ -2128,7 +2249,6 @@ build_number_op(build_args* args)
 
 	return true;
 }
-
 
 static bool
 build_float_op(build_args* args)
@@ -2207,7 +2327,8 @@ build_int_vargs(build_args* args)
 		}
 
 		if (args->entry->r_type != TYPE_INT) {
-			cf_warning(AS_EXP, "build_int_vargs - error %u invalid type %u (%s) at arg %u",
+			cf_warning(AS_EXP,
+					"build_int_vargs - error %u invalid type %u (%s) at arg %u",
 					AS_ERR_PARAMETER, args->entry->r_type,
 					result_type_to_str(args->entry->r_type), i + 1);
 			return false;
@@ -2235,7 +2356,8 @@ build_int_one(build_args* args)
 	result_type arg0 = args->entry->r_type;
 
 	if (arg0 != TYPE_INT) {
-		cf_warning(AS_EXP, "build_int_one - error %u arg type %u (%s) is not %u (%s)",
+		cf_warning(AS_EXP,
+				"build_int_one - error %u arg type %u (%s) is not %u (%s)",
 				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), TYPE_INT,
 				result_type_str[TYPE_INT]);
 		return false;
@@ -2268,9 +2390,10 @@ build_int_shift(build_args* args)
 	result_type arg1 = args->entry->r_type;
 
 	if (! (arg0 == TYPE_INT && arg1 == TYPE_INT)) {
-		cf_warning(AS_EXP, "build_int_shift - error %u all args are type %u (%s) - arg0 %u (%s) arg1 %u (%s)",
-				AS_ERR_PARAMETER, TYPE_INT, result_type_str[TYPE_INT],
-				arg0, result_type_to_str(arg0), arg1, result_type_to_str(arg1));
+		cf_warning(AS_EXP,
+				"build_int_shift - error %u all args are type %u (%s) - arg0 %u (%s) arg1 %u (%s)",
+				AS_ERR_PARAMETER, TYPE_INT, result_type_str[TYPE_INT], arg0,
+				result_type_to_str(arg0), arg1, result_type_to_str(arg1));
 		return false;
 	}
 
@@ -2301,14 +2424,16 @@ build_int_scan(build_args* args)
 	result_type arg1 = args->entry->r_type;
 
 	if (arg0 != TYPE_INT) {
-		cf_warning(AS_EXP, "build_int_scan - error %u arg0 type %u (%s) is not %u (%s)",
+		cf_warning(AS_EXP,
+				"build_int_scan - error %u arg0 type %u (%s) is not %u (%s)",
 				AS_ERR_PARAMETER, arg0, result_type_to_str(arg0), TYPE_INT,
 				result_type_str[TYPE_INT]);
 		return false;
 	}
 
 	if (arg1 != TYPE_TRILEAN) {
-		cf_warning(AS_EXP, "build_int_scan - error %u arg1 type %u (%s) is not %u (%s)",
+		cf_warning(AS_EXP,
+				"build_int_scan - error %u arg1 type %u (%s) is not %u (%s)",
 				AS_ERR_PARAMETER, arg1, result_type_to_str(arg1), TYPE_TRILEAN,
 				result_type_str[TYPE_TRILEAN]);
 		return false;
@@ -2331,7 +2456,8 @@ build_meta_digest_mod(build_args* args)
 	int64_t mod64;
 
 	if (! msgpack_get_int64(&args->mp, &mod64)) {
-		cf_warning(AS_EXP, "build_rec_digest_modulo - error %u failed to parse an integer",
+		cf_warning(AS_EXP,
+				"build_rec_digest_modulo - error %u failed to parse an integer",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -2339,7 +2465,8 @@ build_meta_digest_mod(build_args* args)
 	op->mod = (int32_t)mod64;
 
 	if (op->mod == 0) {
-		cf_warning(AS_EXP, "build_rec_digest_modulo - error %u cannot modulo by zero",
+		cf_warning(AS_EXP,
+				"build_rec_digest_modulo - error %u cannot modulo by zero",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -2377,7 +2504,8 @@ build_rec_key(build_args* args)
 		op->type = RT_BLOB;
 		break;
 	default:
-		cf_warning(AS_EXP, "build_rec_key - error %u invalid result_type %lu (%s)",
+		cf_warning(AS_EXP,
+				"build_rec_key - error %u invalid result_type %lu (%s)",
 				AS_ERR_PARAMETER, type64, result_type_to_str(type64));
 		return false;
 	}
@@ -2471,7 +2599,8 @@ build_bin_type(build_args* args)
 		as_bin_info bin_info;
 
 		snprintf(bin_info.name, op->name_sz + 1, "%s", op->name);
-		bin_info.type = AS_PARTICLE_TYPE_NULL; // wildcard, we depend on bins with this name with *all* types.
+		bin_info.type =
+				AS_PARTICLE_TYPE_NULL; // wildcard, we depend on bins with this name with *all* types.
 		cf_vector_append(args->bins_info_r, &bin_info);
 	}
 
@@ -2510,7 +2639,8 @@ build_cond(build_args* args)
 		}
 
 		if (args->entry->r_type != TYPE_TRILEAN) {
-			cf_warning(AS_EXP, "build_cond - error %u invalid type %u (%s) at condition %u",
+			cf_warning(AS_EXP,
+					"build_cond - error %u invalid type %u (%s) at condition %u",
 					AS_ERR_PARAMETER, args->entry->r_type,
 					result_type_to_str(args->entry->r_type), i + 1);
 			return false;
@@ -2533,7 +2663,8 @@ build_cond(build_args* args)
 			}
 
 			if (args->entry->r_type != type) {
-				cf_warning(AS_EXP, "build_cond - error %u mismatched arg type %d (%s) expected type %d (%s) at condition %u",
+				cf_warning(AS_EXP,
+						"build_cond - error %u mismatched arg type %d (%s) expected type %d (%s) at condition %u",
 						AS_ERR_PARAMETER, args->entry->r_type,
 						result_type_to_str(args->entry->r_type), type,
 						result_type_to_str(type), i + 1);
@@ -2552,7 +2683,8 @@ build_cond(build_args* args)
 		type = args->entry->r_type;
 	}
 	else if (args->entry->code != EXP_UNK && args->entry->r_type != type) {
-		cf_warning(AS_EXP, "build_cond - error %u mismatched type %d (%s) expected type %d (%s) at default condition",
+		cf_warning(AS_EXP,
+				"build_cond - error %u mismatched type %d (%s) expected type %d (%s) at default condition",
 				AS_ERR_PARAMETER, args->entry->r_type,
 				result_type_to_str(args->entry->r_type), type,
 				result_type_to_str(type));
@@ -2578,7 +2710,8 @@ build_var_builtin(build_args* args)
 	uint64_t idx64;
 
 	if (! msgpack_get_uint64(&args->mp, &type64)) {
-		cf_warning(AS_EXP, "build_var_builtin - error %u failed to parse an integer",
+		cf_warning(AS_EXP,
+				"build_var_builtin - error %u failed to parse an integer",
 				AS_ERR_PARAMETER);
 		return false;
 	}
@@ -2586,18 +2719,21 @@ build_var_builtin(build_args* args)
 	op->type = (result_type)type64;
 
 	if (! msgpack_get_uint64(&args->mp, &idx64)) {
-		cf_warning(AS_EXP, "build_var_builtin - error %u failed to parse an integer at offset %u",
+		cf_warning(AS_EXP,
+				"build_var_builtin - error %u failed to parse an integer at offset %u",
 				AS_ERR_PARAMETER, args->mp.offset);
 		return false;
 	}
 
 	if (idx64 >= AS_EXP_BUILTIN_COUNT) {
-		cf_warning(AS_EXP, "build_var_builtin - error %u invalid builtin var %lu at offset %u",
+		cf_warning(AS_EXP,
+				"build_var_builtin - error %u invalid builtin var %lu at offset %u",
 				AS_ERR_PARAMETER, idx64, args->mp.offset);
 		return false;
 	}
 	else if (idx64 == AS_EXP_BUILTIN_INDEX && op->type != TYPE_INT) {
-		cf_warning(AS_EXP, "build_var_builtin - error %u invalid builtin var type %ld for index is not integer at offset %u",
+		cf_warning(AS_EXP,
+				"build_var_builtin - error %u invalid builtin var type %ld for index is not integer at offset %u",
 				AS_ERR_PARAMETER, idx64, args->mp.offset);
 		return false;
 	}
@@ -2605,7 +2741,8 @@ build_var_builtin(build_args* args)
 	op->idx = (uint32_t)idx64;
 
 	if ((args->entry = build_get_entry(op->type)) == NULL) {
-		cf_warning(AS_EXP, "build_var_builtin - error %u invalid result_type %d (%s)",
+		cf_warning(AS_EXP,
+				"build_var_builtin - error %u invalid result_type %d (%s)",
 				AS_ERR_PARAMETER, op->type, result_type_to_str(op->type));
 		return false;
 	}
@@ -2626,7 +2763,8 @@ build_var(build_args* args)
 	const uint8_t* name = msgpack_get_bin(&args->mp, &name_sz);
 
 	if (name == NULL) {
-		cf_warning(AS_EXP, "build_var - error %u failed to parse a string at offset %u",
+		cf_warning(AS_EXP,
+				"build_var - error %u failed to parse a string at offset %u",
 				AS_ERR_PARAMETER, args->mp.offset);
 		return false;
 	}
@@ -2634,7 +2772,8 @@ build_var(build_args* args)
 	var_entry* entry = build_find_var_entry(args, name, name_sz);
 
 	if (entry == NULL) {
-		cf_warning(AS_EXP, "build_var - error %u undefined var name %.*s at offset %u",
+		cf_warning(AS_EXP,
+				"build_var - error %u undefined var name %.*s at offset %u",
 				AS_ERR_PARAMETER, name_sz, name, args->mp.offset);
 		return false;
 	}
@@ -2644,7 +2783,8 @@ build_var(build_args* args)
 
 	switch (op->type) {
 	case TYPE_END:
-		cf_warning(AS_EXP, "build_var - error %u using var name %.*s while defining it at offset %u",
+		cf_warning(AS_EXP,
+				"build_var - error %u using var name %.*s while defining it at offset %u",
 				AS_ERR_PARAMETER, name_sz, name, args->mp.offset);
 		return false;
 	case TYPE_NIL:
@@ -2655,7 +2795,8 @@ build_var(build_args* args)
 		break;
 	default:
 		if ((args->entry = build_get_entry(op->type)) == NULL) {
-			cf_warning(AS_EXP, "build_var - error %u var name %.*s unknown entry type %d (%s)",
+			cf_warning(AS_EXP,
+					"build_var - error %u var name %.*s unknown entry type %d (%s)",
 					AS_ERR_PARAMETER, name_sz, name, op->type,
 					result_type_to_str(op->type));
 			return false;
@@ -2689,9 +2830,7 @@ build_let(build_args* args)
 	uint32_t n_vars = args->ele_count / 2;
 	var_entry entries[n_vars];
 	var_scope scope = {
-			.parent = args->current,
-			.n_entries = 0,
-			.entries = entries
+		.parent = args->current, .n_entries = 0, .entries = entries
 	};
 
 	args->current = &scope;
@@ -2703,7 +2842,8 @@ build_let(build_args* args)
 		const uint8_t* name = msgpack_get_bin(&args->mp, &name_sz);
 
 		if (name == NULL) {
-			cf_warning(AS_EXP, "build_let - error %u failed to parse blob - var at %u",
+			cf_warning(AS_EXP,
+					"build_let - error %u failed to parse blob - var at %u",
 					AS_ERR_PARAMETER, i);
 			return false;
 		}
@@ -2715,21 +2855,24 @@ build_let(build_args* args)
 		}
 
 		if (name[0] != '_' && isalpha(name[0]) == 0) {
-			cf_warning(AS_EXP, "build_let - error %u illegal variable name '%.*s' at %u - must begin with an alpha or underscore",
+			cf_warning(AS_EXP,
+					"build_let - error %u illegal variable name '%.*s' at %u - must begin with an alpha or underscore",
 					AS_ERR_PARAMETER, name_sz, name, i);
 			return false;
 		}
 
 		for (uint32_t j = 1; j < name_sz; j++) {
 			if (name[j] != '_' && isalnum(name[j]) == 0) {
-				cf_warning(AS_EXP, "build_let - error %u illegal variable name '%.*s' at %u - must contain only alpha, digits or underscore",
+				cf_warning(AS_EXP,
+						"build_let - error %u illegal variable name '%.*s' at %u - must contain only alpha, digits or underscore",
 						AS_ERR_PARAMETER, name_sz, name, i);
 				return false;
 			}
 		}
 
 		if (build_find_var_entry(args, name, name_sz) != NULL) {
-			cf_warning(AS_EXP, "build_let - error %u duplicate var name '%.*s' at %u",
+			cf_warning(AS_EXP,
+					"build_let - error %u duplicate var name '%.*s' at %u",
 					AS_ERR_PARAMETER, name_sz, name, i);
 			return false;
 		}
@@ -2834,9 +2977,9 @@ build_call(build_args* args)
 
 	switch (op->system_type & (uint32_t)~CALL_FLAG_MODIFY_LOCAL) {
 	case CALL_CDT:
-		if (args->entry->r_type != TYPE_LIST &&
-				args->entry->r_type != TYPE_MAP) {
-			cf_warning(AS_EXP, "build_call - error %u arg %u (%s) is not list or map",
+		if (args->entry->r_type != TYPE_LIST && args->entry->r_type != TYPE_MAP) {
+			cf_warning(AS_EXP,
+					"build_call - error %u arg %u (%s) is not list or map",
 					AS_ERR_PARAMETER, args->entry->r_type,
 					result_type_to_str(args->entry->r_type));
 			return false;
@@ -2906,7 +3049,6 @@ build_value_bool(build_args* args)
 
 	return true;
 }
-
 
 static bool
 build_value_int(build_args* args)
@@ -3019,7 +3161,8 @@ build_value_msgpack(build_args* args)
 	op->value = msgpack_get_ele(&args->mp, &op->value_sz);
 
 	if (op->value == NULL) {
-		cf_warning(AS_EXP, "build_value_msgpack - error %u failed to parse element from type %u",
+		cf_warning(AS_EXP,
+				"build_value_msgpack - error %u failed to parse element from type %u",
 				AS_ERR_PARAMETER, type);
 		return false;
 	}
@@ -3028,14 +3171,14 @@ build_value_msgpack(build_args* args)
 		args->entry = &op_table[VOP_VALUE_MAP];
 	}
 	else if (type == MSGPACK_TYPE_BYTES) {
-		cf_warning(AS_EXP, "build_value_msgpack - error %u unexpected msgpack blob",
+		cf_warning(AS_EXP,
+				"build_value_msgpack - error %u unexpected msgpack blob",
 				AS_ERR_PARAMETER);
 		return false;
 	}
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - build utilities.
@@ -3087,8 +3230,7 @@ parse_op_call(op_call* op, build_args* args)
 			return false;
 		}
 
-		if (ele_count == 4 && (msgpack_peek_type(mp) != MSGPACK_TYPE_LIST ||
-				msgpack_sz(mp) == 0)) { // mod_exp
+		if (ele_count == 4 && msgpack_sz(mp) == 0) { // mod_exp
 			return false;
 		}
 
@@ -3106,11 +3248,15 @@ parse_op_call(op_call* op, build_args* args)
 		case MSGPACK_TYPE_LIST:
 			if (op->vecs[idx].buf_sz != 0) {
 				idx++;
+				cf_assert(idx < OP_CALL_MAX_VEC_IDX, AS_EXP,
+						"unexpected idx %u", idx);
 			}
 
 			op->vecs[idx].buf = call_eval_token;
 			op->vecs[idx].buf_sz = 0;
 			idx++;
+			cf_assert(idx < OP_CALL_MAX_VEC_IDX, AS_EXP, "unexpected idx %u",
+					idx);
 			op->eval_count++;
 
 			if (! build_next(args)) {
@@ -3132,14 +3278,11 @@ parse_op_call(op_call* op, build_args* args)
 
 			break;
 		}
-
-		if (idx >= OP_CALL_MAX_VEC_IDX) {
-			return false;
-		}
 	}
 
 	if (op->vecs[idx].buf_sz != 0) {
 		idx++;
+		cf_assert(idx <= OP_CALL_MAX_VEC_IDX, AS_EXP, "unexpected idx %u", idx);
 	}
 
 	op->n_vecs = idx;
@@ -3182,11 +3325,13 @@ build_set_expected_particle_type(build_args* args)
 		args->exp->expected_type = AS_PARTICLE_TYPE_HLL;
 		break;
 	case TYPE_RESULT_REMOVE:
-		args->exp->expected_type = AS_PARTICLE_TYPE_NULL; // TODO - maybe need new type
+		args->exp->expected_type =
+				AS_PARTICLE_TYPE_NULL; // TODO - maybe need new type
 		break;
 	case TYPE_END:
 	default:
-		cf_warning(AS_EXP, "build_set_expected_particle_type - unexpected result_type %u",
+		cf_warning(AS_EXP,
+				"build_set_expected_particle_type - unexpected result_type %u",
 				args->entry->r_type);
 		return false;
 	}
@@ -3198,7 +3343,8 @@ static as_exp*
 check_filter_exp(as_exp* exp)
 {
 	if ((as_particle_type)exp->expected_type != AS_PARTICLE_TYPE_BOOL) {
-		cf_warning(AS_EXP, "check_filter_exp - filters must return type %u (bool) found %u",
+		cf_warning(AS_EXP,
+				"check_filter_exp - filters must return type %u (bool) found %u",
 				AS_PARTICLE_TYPE_BOOL, exp->expected_type);
 		as_exp_destroy(exp);
 		return NULL;
@@ -3208,7 +3354,7 @@ check_filter_exp(as_exp* exp)
 }
 
 static bool
-geo_mp_to_op(msgpack_in* mp, op_value_geo *op, const char* debug_str)
+geo_mp_to_op(msgpack_in* mp, op_value_geo* op, const char* debug_str)
 {
 	op->contents = mp->buf + mp->offset;
 
@@ -3220,8 +3366,8 @@ geo_mp_to_op(msgpack_in* mp, op_value_geo *op, const char* debug_str)
 	op->content_sz = (uint32_t)(mp->buf + mp->offset - op->contents);
 
 	if (json == NULL) {
-		cf_warning(AS_EXP, "%s - error %u failed to parse string",
-				debug_str, AS_ERR_PARAMETER);
+		cf_warning(AS_EXP, "%s - error %u failed to parse string", debug_str,
+				AS_ERR_PARAMETER);
 		return false;
 	}
 
@@ -3234,8 +3380,7 @@ geo_mp_to_op(msgpack_in* mp, op_value_geo *op, const char* debug_str)
 
 	op->compiled.region = NULL;
 
-	if (! as_geojson_parse(NULL, (const char*)json, json_sz, &cellid,
-			&region)) {
+	if (! as_geojson_parse(NULL, (const char*)json, json_sz, &cellid, &region)) {
 		cf_warning(AS_EXP, "build_value_geo - error %u invalid geojson",
 				AS_ERR_PARAMETER);
 		return false;
@@ -3253,7 +3398,6 @@ geo_mp_to_op(msgpack_in* mp, op_value_geo *op, const char* debug_str)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - runtime.
 //
@@ -3264,19 +3408,20 @@ match_internal(const as_exp* exp, const as_exp_ctx* ctx)
 	rt_value vars[exp->max_var_count];
 	rt_value ret_val;
 
-	runtime rt = {
-			.ctx = ctx,
-			.instr_ptr = exp->mem,
-			.vars = vars,
-			.vars_builtin = {[0 ... (AS_EXP_BUILTIN_COUNT - 1)] = rt_unk}
-	};
+	runtime rt = { .ctx = ctx,
+		.instr_ptr = exp->mem,
+		.vars = vars,
+		.vars_builtin = { [0 ...(AS_EXP_BUILTIN_COUNT - 1)] = rt_unk } };
 
-	op_value_geo geo_mem = {.contents = NULL}; // 1 object -- only value built-in var should have geo
+	op_value_geo geo_mem = {
+		.contents = NULL
+	}; // 1 object -- only value built-in var should have geo
 
 	rt_init_builtin_vars(&rt, &geo_mem);
 	rt_eval(&rt, &ret_val);
 
-	if (geo_mem.contents != NULL && geo_mem.compiled.type == GEO_REGION) { // geojson needs cleanup
+	if (geo_mem.contents != NULL &&
+			geo_mem.compiled.type == GEO_REGION) { // geojson needs cleanup
 		geo_region_destroy(geo_mem.compiled.region);
 	}
 
@@ -3369,8 +3514,8 @@ eval_compare(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		rt_value_get_geo(&v0, &gd0);
 		rt_value_get_geo(&v1, &gd1);
 
-		ret_val->r_trilean = as_geojson_match(gd0.region != NULL,
-				gd0.cellid, gd0.region, gd1.cellid, gd1.region, true);
+		ret_val->r_trilean = as_geojson_match(gd0.region != NULL, gd0.cellid,
+				gd0.region, gd1.cellid, gd1.region, true);
 
 		break;
 	}
@@ -3413,6 +3558,86 @@ eval_cmp_regex(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	rt_value_destroy(ret_val);
 	ret_val->type = RT_TRILEAN;
 	ret_val->r_trilean = (rv == 0) ? AS_EXP_TRUE : AS_EXP_FALSE;
+}
+
+static void
+eval_in_list(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	rt_value arg0;
+	rt_value arg1;
+
+	if (rt_eval(rt, &arg0)) {
+		*ret_val = rt_unk;
+		rt_skip(rt, ob->instr_end_ix);
+		return;
+	}
+
+	defer_rt_value_destroy(arg0);
+
+	if (rt_eval(rt, &arg1)) {
+		*ret_val = rt_unk;
+		return;
+	}
+
+	defer_rt_value_destroy(arg1);
+	rt_value list;
+
+	if (rt_value_is_unknown(&arg1) || ! rt_value_bin_translate(&list, &arg1)) {
+		*ret_val = rt_unk;
+		return;
+	}
+
+	defer_rt_value_destroy(list);
+
+	if (list.type != RT_MSGPACK) {
+		cf_warning(AS_EXP, "eval_in_list - list expected, got %u", list.type);
+		*ret_val = rt_unk;
+		return;
+	}
+
+	uint8_t buf[1 + sizeof(uint64_t)];
+	msgpack_vec vec;
+	define_rollback_alloc(alloc, NULL, 1);
+	DEFER_ROLLBACK_ALLOC(alloc);
+
+	as_packer pk = { .buffer = buf, .capacity = sizeof(buf) };
+
+	if (! rt_value_to_msgpack_vec(&pk, &vec, alloc, &arg0)) {
+		*ret_val = rt_unk;
+		return;
+	}
+
+	msgpack_in mp_list = { .buf = list.r_bytes.contents,
+		.buf_sz = list.r_bytes.sz };
+
+	uint32_t ele_count = 0;
+
+	if (! msgpack_get_list_ele_count(&mp_list, &ele_count)) {
+		*ret_val = rt_unk;
+		return;
+	}
+
+	msgpack_in mp_ele = { .buf = vec.buf, .buf_sz = vec.buf_sz };
+
+	for (uint32_t i = 0; i < ele_count; i++) {
+		mp_ele.offset = 0;
+
+		msgpack_cmp_type cmp = msgpack_cmp(&mp_ele, &mp_list);
+
+		if (cmp == MSGPACK_CMP_ERROR) {
+			*ret_val = rt_unk;
+			return;
+		}
+
+		if (cmp == MSGPACK_CMP_EQUAL) {
+			ret_val->type = RT_TRILEAN;
+			ret_val->r_trilean = AS_EXP_TRUE;
+			return;
+		}
+	}
+
+	ret_val->type = RT_TRILEAN;
+	ret_val->r_trilean = AS_EXP_FALSE;
 }
 
 static void
@@ -3475,8 +3700,8 @@ eval_not(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 
 	cf_assert(ret_val->type == RT_TRILEAN, AS_EXP, "unexpected");
 
-	ret_val->r_trilean = (ret_val->r_trilean == AS_EXP_TRUE) ?
-			AS_EXP_FALSE : AS_EXP_TRUE;
+	ret_val->r_trilean = (ret_val->r_trilean == AS_EXP_TRUE) ? AS_EXP_FALSE
+															 : AS_EXP_TRUE;
 }
 
 static void
@@ -3570,7 +3795,7 @@ eval_sub(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			ret_val->r_float -= arg.r_float;
 		}
 		else {
-			ret_val->r_int -= arg.r_int ;
+			ret_val->r_int -= arg.r_int;
 		}
 	}
 }
@@ -4071,8 +4296,9 @@ eval_meta_device_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	ret_val->type = RT_INT;
-	ret_val->r_int = as_namespace_is_memory_only(rt->ctx->ns) ?
-			0 : (int64_t)as_record_stored_size(rt->ctx->r);
+	ret_val->r_int = as_namespace_is_memory_only(rt->ctx->ns)
+			? 0
+			: (int64_t)as_record_stored_size(rt->ctx->r);
 }
 
 static void
@@ -4118,8 +4344,9 @@ eval_meta_void_time(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	ret_val->type = RT_INT;
-	ret_val->r_int = (rt->ctx->r->void_time == 0) ?
-			-1 : (int64_t)cf_utc_ns_from_clepoch_sec(rt->ctx->r->void_time);
+	ret_val->r_int = (rt->ctx->r->void_time == 0)
+			? -1
+			: (int64_t)cf_utc_ns_from_clepoch_sec(rt->ctx->r->void_time);
 }
 
 static void
@@ -4133,8 +4360,8 @@ eval_meta_ttl(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	ret_val->type = RT_INT;
-	ret_val->r_int = (int64_t)(int32_t)
-			cf_server_void_time_to_ttl(rt->ctx->r->void_time);
+	ret_val->r_int =
+			(int64_t)(int32_t)cf_server_void_time_to_ttl(rt->ctx->r->void_time);
 }
 
 static void
@@ -4174,8 +4401,8 @@ eval_meta_key_exists(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	ret_val->type = RT_TRILEAN;
-	ret_val->r_trilean = (rt->ctx->r->key_stored == 0 ?
-			AS_EXP_FALSE : AS_EXP_TRUE);
+	ret_val->r_trilean =
+			(rt->ctx->r->key_stored == 0 ? AS_EXP_FALSE : AS_EXP_TRUE);
 }
 
 static void
@@ -4189,8 +4416,8 @@ eval_meta_is_tombstone(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	ret_val->type = RT_TRILEAN;
-	ret_val->r_trilean = (as_record_is_live(rt->ctx->r) ?
-			AS_EXP_FALSE : AS_EXP_TRUE);
+	ret_val->r_trilean =
+			(as_record_is_live(rt->ctx->r) ? AS_EXP_FALSE : AS_EXP_TRUE);
 }
 
 // Deprecated - replaced with eval_meta_record_size().
@@ -4205,8 +4432,9 @@ eval_meta_memory_size(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	ret_val->type = RT_INT;
-	ret_val->r_int = rt->ctx->ns->storage_type == AS_STORAGE_ENGINE_MEMORY ?
-			(int64_t)as_record_stored_size(rt->ctx->r) : 0;
+	ret_val->r_int = rt->ctx->ns->storage_type == AS_STORAGE_ENGINE_MEMORY
+			? (int64_t)as_record_stored_size(rt->ctx->r)
+			: 0;
 }
 
 static void
@@ -4298,14 +4526,15 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	as_particle_type bin_type = as_bin_get_particle_type(bin);
 
 	if (! bin_is_type(bin, op->type)) {
-		cf_detail(AS_EXP, "eval_bin - bin (%.*s) type mismatch %u does not map to %u",
+		cf_detail(AS_EXP,
+				"eval_bin - bin (%.*s) type mismatch %u does not map to %u",
 				op->name_sz, op->name, bin_type, op->type);
 		*ret_val = rt_unk;
 		return;
 	}
 
 	if (as_masking_apply(rt->ctx->rd->mask_ctx, &ret_val->r_bin, bin)) {
-		switch(bin_type) {
+		switch (bin_type) {
 		case AS_PARTICLE_TYPE_INTEGER: {
 			int64_t val = as_bin_particle_integer_value(&ret_val->r_bin);
 			as_bin_particle_destroy(&ret_val->r_bin);
@@ -4320,7 +4549,7 @@ eval_bin(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			ret_val->r_float = val;
 			break;
 		}
-		case AS_PARTICLE_TYPE_BOOL:{
+		case AS_PARTICLE_TYPE_BOOL: {
 			bool val = as_bin_particle_bool_value(&ret_val->r_bin);
 			as_bin_particle_destroy(&ret_val->r_bin);
 			ret_val->type = RT_TRILEAN;
@@ -4386,14 +4615,90 @@ eval_bin_type(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 
 	ret_val->type = RT_INT;
-	ret_val->r_int = (b == NULL) ?
-			AS_PARTICLE_TYPE_NULL : (uint64_t)as_bin_get_particle_type(b);
+	ret_val->r_int = (b == NULL) ? AS_PARTICLE_TYPE_NULL
+								 : (uint64_t)as_bin_get_particle_type(b);
 }
 
 static void
 eval_result_remove(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	ret_val->type = RT_RESULT_REMOVE;
+}
+
+static bool
+build_map_kv(build_args* args)
+{
+	const op_table_entry* entry = args->entry;
+
+	if (! build_args_setup(args, "build_map_kv")) {
+		return false;
+	}
+
+	if (! build_next(args)) {
+		return false;
+	}
+
+	args->entry = entry;
+
+	return true;
+}
+
+static void
+eval_map_keys_or_values(runtime* rt, const op_base_mem* ob, rt_value* ret_val,
+		bool is_values)
+{
+	(void)ob;
+	rt_value arg;
+
+	if (rt_eval(rt, &arg)) {
+		*ret_val = rt_unk;
+		return;
+	}
+
+	defer_rt_value_destroy(arg);
+
+	rt_value rt_map;
+
+	if (! rt_value_bin_translate(&rt_map, &arg) || rt_map.type != RT_MSGPACK ||
+			msgpack_buf_peek_type(rt_map.r_bytes.contents, rt_map.r_bytes.sz) !=
+					MSGPACK_TYPE_MAP) {
+		*ret_val = rt_unk;
+		return;
+	}
+
+	as_bin rb;
+	define_rollback_alloc(alloc, NULL, 1);
+
+	cdt_result_data result = {
+		.alloc = alloc,
+		.type = is_values ? RESULT_TYPE_VALUE : RESULT_TYPE_KEY,
+		.result = &rb,
+		.is_multi = true,
+	};
+
+	if (! map_buf_get_all_k_or_v(rt_map.r_bytes.contents, rt_map.r_bytes.sz,
+				&result)) {
+		*ret_val = rt_unk;
+		rollback_alloc_rollback(alloc);
+		return;
+	}
+
+	*ret_val = (rt_value){
+		.type = RT_BIN,
+		.r_bin = rb,
+	};
+}
+
+static void
+eval_map_keys(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	eval_map_keys_or_values(rt, ob, ret_val, false);
+}
+
+static void
+eval_map_values(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
+{
+	eval_map_keys_or_values(rt, ob, ret_val, true);
 }
 
 static void
@@ -4483,10 +4788,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 {
 	const op_call* op = (const op_call*)ob;
 	msgpack_vec vecs[op->n_vecs];
-	msgpack_in_vec mv = {
-			.n_vecs = op->n_vecs + 1,
-			.vecs = vecs
-	};
+	msgpack_in_vec mv = { .n_vecs = op->n_vecs + 1, .vecs = vecs };
 
 	vecs[0].buf = op->vecs[0].buf;
 	vecs[0].buf_sz = op->vecs[0].buf_sz;
@@ -4496,22 +4798,17 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	uint32_t op_ix = 1;
 	uint8_t buf[1024];
 
-	as_packer pk = {
-			.buffer = buf,
-			.capacity = sizeof(buf)
-	};
+	as_packer pk = { .buffer = buf, .capacity = sizeof(buf) };
 
 	uint32_t param_idx = 0;
 	rt_value param_ret_vals[op->eval_count];
-	uint32_t blob_cleanup_ix = 0;
-	void* blob_cleanup[op->eval_count];
-	uint32_t bin_cleanup_ix = 0;
-	as_bin* bin_cleanup[op->eval_count];
+	define_call_cleanup(bin_cleanup, op->eval_count);
+	define_rollback_alloc(alloc, NULL, op->eval_count);
+	DEFER_ROLLBACK_ALLOC(alloc);
 
 	for (; op_ix < op->n_vecs; op_ix++) {
 		if (op->vecs[op_ix].buf == call_eval_token) {
 			rt_value* from = &param_ret_vals[param_idx++];
-			rt_value to;
 
 			rt_eval(rt, from);
 
@@ -4519,68 +4816,14 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			vecs[vec_ix].offset = 0;
 
 			if (from->type == RT_BIN && ! from->do_not_destroy) {
-				bin_cleanup[bin_cleanup_ix++] = &from->r_bin;
+				call_cleanup_add(bin_cleanup, &from->r_bin);
 			}
 
-			if (rt_value_is_unknown(from) ||
-					! rt_value_bin_translate(&to, from)) {
+			if (! rt_value_to_msgpack_vec(&pk, &vecs[vec_ix], alloc, from)) {
 				ret_val->type = RT_TRILEAN;
 				ret_val->r_trilean = AS_EXP_UNK;
 				rt_skip(rt, ob->instr_end_ix);
-				call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
-						bin_cleanup_ix);
 				return;
-			}
-
-			switch (to.type) {
-			case RT_NIL:
-				as_pack_nil(&pk);
-				vecs[vec_ix].buf_sz =
-						(uint32_t)(pk.buffer + pk.offset - vecs[vec_ix].buf);
-				break;
-			case RT_TRILEAN:
-				as_pack_bool(&pk, to.r_trilean == AS_EXP_TRUE);
-				vecs[vec_ix].buf_sz =
-						(uint32_t)(pk.buffer + pk.offset - vecs[vec_ix].buf);
-				break;
-			case RT_INT:
-				as_pack_int64(&pk, to.r_int);
-				vecs[vec_ix].buf_sz =
-						(uint32_t)(pk.buffer + pk.offset - vecs[vec_ix].buf);
-				break;
-			case RT_FLOAT:
-				as_pack_double(&pk, to.r_float);
-				vecs[vec_ix].buf_sz =
-						(uint32_t)(pk.buffer + pk.offset - vecs[vec_ix].buf);
-				break;
-			case RT_GEO_CONST:
-				vecs[vec_ix].buf = to.r_geo_const.op->contents;
-				vecs[vec_ix].buf_sz = to.r_geo_const.op->content_sz;
-				break;
-			case RT_STR:
-			case RT_BLOB:
-			case RT_HLL:
-			case RT_GEO_STR: {
-				uint8_t* p = cf_malloc(as_pack_str_size(to.r_bytes.sz + 1));
-				as_packer strpk = { .buffer = p, .capacity = UINT32_MAX };
-
-				pack_typed_str(&strpk, to.r_bytes.contents, to.r_bytes.sz,
-						to.type);
-
-				vecs[vec_ix].buf = p;
-				vecs[vec_ix].buf_sz = strpk.offset;
-				blob_cleanup[blob_cleanup_ix++] = p;
-				break;
-			}
-			case RT_MSGPACK:
-				vecs[vec_ix].buf = to.r_bytes.contents;
-				vecs[vec_ix].buf_sz = to.r_bytes.sz;
-				break;
-			case RT_BIN_PTR:
-			case RT_BIN:
-			case RT_GEO_COMPILED:
-			default:
-				cf_crash(AS_EXP, "unexpected type %d", to.type);
 			}
 		}
 		else {
@@ -4625,13 +4868,13 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		b = &bin_arg.r_bin;
 		bin_arg.type = RT_BIN;
 		bin_arg.do_not_destroy = 0;
-		bin_arg.r_bin.particle = rt_alloc_mem(rt, (size_t)temp.r_bytes.sz +
-				sizeof(cdt_mem), NULL);
+		bin_arg.r_bin.particle = rt_alloc_mem(rt,
+				(size_t)temp.r_bytes.sz + sizeof(cdt_mem), NULL);
 
 		cdt_mem* p_cdt_mem = (cdt_mem*)bin_arg.r_bin.particle;
 
-		p_cdt_mem->type = temp.type == RT_BLOB ?
-				AS_PARTICLE_TYPE_BLOB : AS_PARTICLE_TYPE_HLL;
+		p_cdt_mem->type = temp.type == RT_BLOB ? AS_PARTICLE_TYPE_BLOB
+											   : AS_PARTICLE_TYPE_HLL;
 		as_bin_state_set_from_type(&bin_arg.r_bin, p_cdt_mem->type);
 		p_cdt_mem->sz = temp.r_bytes.sz;
 		memcpy(p_cdt_mem->data, temp.r_bytes.contents, p_cdt_mem->sz);
@@ -4651,8 +4894,6 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 			rt_value_destroy(&temp);
 			ret_val->type = RT_TRILEAN;
 			ret_val->r_trilean = AS_EXP_UNK;
-			call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
-					bin_cleanup_ix);
 			return;
 		}
 
@@ -4664,8 +4905,6 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	default:
 		ret_val->type = RT_TRILEAN;
 		ret_val->r_trilean = AS_EXP_UNK;
-		call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup,
-				bin_cleanup_ix);
 		return;
 	}
 
@@ -4701,7 +4940,7 @@ eval_call(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		cf_crash(AS_EXP, "unexpected");
 	}
 
-	call_cleanup(blob_cleanup, blob_cleanup_ix, bin_cleanup, bin_cleanup_ix);
+	call_cleanup_fn(&bin_cleanup);
 
 	if (ret != AS_OK) {
 		rt_value_destroy(&bin_arg);
@@ -4805,8 +5044,8 @@ eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 		break;
 	case VOP_VALUE_BOOL:
 		ret_val->type = RT_TRILEAN;
-		ret_val->r_trilean = ((op_value_bool*)ob)->value ?
-				AS_EXP_TRUE : AS_EXP_FALSE;
+		ret_val->r_trilean = ((op_value_bool*)ob)->value ? AS_EXP_TRUE
+														 : AS_EXP_FALSE;
 		break;
 	case VOP_VALUE_INT:
 		ret_val->type = RT_INT;
@@ -4846,7 +5085,6 @@ eval_value(runtime* rt, const op_base_mem* ob, rt_value* ret_val)
 	}
 }
 
-
 //==========================================================
 // Local helpers - runtime utilities.
 //
@@ -4870,8 +5108,7 @@ rt_value_bin_ptr_to_bin(runtime* rt, as_bin* rb, const rt_value* from,
 	case AS_PARTICLE_TYPE_HLL:
 	case AS_PARTICLE_TYPE_MAP:
 	case AS_PARTICLE_TYPE_LIST:
-	case AS_PARTICLE_TYPE_GEOJSON:
-		;
+	case AS_PARTICLE_TYPE_GEOJSON:;
 		uint32_t sz = sizeof(cdt_mem) + ((cdt_mem*)b.particle)->sz;
 
 		rb->particle = rt_alloc_mem(rt, sz, ll_buf);
@@ -4945,7 +5182,6 @@ result_type_to_particle_type(result_type type)
 		cf_crash(AS_EXP, "unexpected type %u", type);
 	}
 	return AS_PARTICLE_TYPE_NULL; // never reached
-
 }
 
 static bool
@@ -5038,6 +5274,12 @@ rt_value_translate(rt_value* to, const rt_value* from)
 }
 
 static void
+rt_defer_value_destroy(rt_value** p_val)
+{
+	rt_value_destroy(*p_val);
+}
+
+static void
 rt_value_destroy(rt_value* val)
 {
 	if (val == NULL) {
@@ -5048,8 +5290,7 @@ rt_value_destroy(rt_value* val)
 		return;
 	}
 
-	if (val->type == RT_GEO_COMPILED &&
-			val->r_geo.type == GEO_REGION_NEED_FREE) {
+	if (val->type == RT_GEO_COMPILED && val->r_geo.type == GEO_REGION_NEED_FREE) {
 		geo_region_destroy(val->r_geo.region);
 	}
 	else if (val->type == RT_BIN) {
@@ -5076,10 +5317,10 @@ static bool
 get_live_bin(as_storage_rd* rd, const uint8_t* name, size_t len, as_bin** p_bin)
 {
 	// Note - empty bin name ok for now - single-bin "soft landing".
-//	if (len == 0) {
-//		cf_warning(AS_EXP, "get_live_bin - illegal zero length bin name for multi-bin");
-//		return false;
-//	}
+	//	if (len == 0) {
+	//		cf_warning(AS_EXP, "get_live_bin - illegal zero length bin name for multi-bin");
+	//		return false;
+	//	}
 
 	*p_bin = as_bin_get_live_w_len(rd, name, len);
 
@@ -5099,13 +5340,15 @@ rt_is_type(const rt_value* v, result_type type)
 	case TYPE_STR:
 		return v->type == RT_STR;
 	case TYPE_LIST:
-		return (v->type == RT_MSGPACK) ?
-				msgpack_buf_peek_type(v->r_bytes.contents, v->r_bytes.sz) ==
-						MSGPACK_TYPE_LIST : false;
+		return (v->type == RT_MSGPACK)
+				? msgpack_buf_peek_type(v->r_bytes.contents, v->r_bytes.sz) ==
+						MSGPACK_TYPE_LIST
+				: false;
 	case TYPE_MAP:
-		return (v->type == RT_MSGPACK) ?
-				msgpack_buf_peek_type(v->r_bytes.contents, v->r_bytes.sz) ==
-						MSGPACK_TYPE_MAP : false;
+		return (v->type == RT_MSGPACK)
+				? msgpack_buf_peek_type(v->r_bytes.contents, v->r_bytes.sz) ==
+						MSGPACK_TYPE_MAP
+				: false;
 	case TYPE_BLOB:
 		return v->type == RT_BLOB;
 	case TYPE_FLOAT:
@@ -5143,7 +5386,7 @@ rt_init_builtin_vars(runtime* rt, op_value_geo* geo_mem)
 			continue;
 		}
 
-		rt_value v = {.do_not_destroy = 1};
+		rt_value v = { .do_not_destroy = 1 };
 
 		switch (type) {
 		case MSGPACK_TYPE_NIL:
@@ -5220,7 +5463,6 @@ rt_init_builtin_vars(runtime* rt, op_value_geo* geo_mem)
 		}
 	}
 }
-
 
 //==========================================================
 // Local helpers - runtime compare utilities.
@@ -5376,15 +5618,9 @@ cmp_bytes(exp_op_code code, const rt_value* v0, const rt_value* v1)
 static as_exp_trilean
 cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
 {
-	msgpack_in mp0 = {
-			.buf = v0->r_bytes.contents,
-			.buf_sz = v0->r_bytes.sz
-	};
+	msgpack_in mp0 = { .buf = v0->r_bytes.contents, .buf_sz = v0->r_bytes.sz };
 
-	msgpack_in mp1 = {
-			.buf = v1->r_bytes.contents,
-			.buf_sz = v1->r_bytes.sz
-	};
+	msgpack_in mp1 = { .buf = v1->r_bytes.contents, .buf_sz = v1->r_bytes.sz };
 
 	msgpack_cmp_type cmp = msgpack_cmp(&mp0, &mp1);
 
@@ -5393,7 +5629,8 @@ cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
 	}
 
 	if (mp0.has_unordered_map || mp1.has_unordered_map) {
-		cf_debug(AS_EXP, "illegal comparison of structure containing unordered map - arg0 %s arg1 %s",
+		cf_debug(AS_EXP,
+				"illegal comparison of structure containing unordered map - arg0 %s arg1 %s",
 				mp0.has_unordered_map ? "has unordered" : "is ok",
 				mp1.has_unordered_map ? "has unordered" : "is ok");
 		return AS_EXP_UNK;
@@ -5407,13 +5644,15 @@ cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
 	case EXP_CMP_GT:
 		return (cmp == MSGPACK_CMP_GREATER) ? AS_EXP_TRUE : AS_EXP_FALSE;
 	case EXP_CMP_GE:
-		return (cmp == MSGPACK_CMP_EQUAL || cmp == MSGPACK_CMP_GREATER) ?
-				AS_EXP_TRUE : AS_EXP_FALSE;
+		return (cmp == MSGPACK_CMP_EQUAL || cmp == MSGPACK_CMP_GREATER)
+				? AS_EXP_TRUE
+				: AS_EXP_FALSE;
 	case EXP_CMP_LT:
 		return (cmp == MSGPACK_CMP_LESS) ? AS_EXP_TRUE : AS_EXP_FALSE;
 	case EXP_CMP_LE:
-		return (cmp == MSGPACK_CMP_EQUAL || cmp == MSGPACK_CMP_LESS) ?
-				AS_EXP_TRUE : AS_EXP_FALSE;
+		return (cmp == MSGPACK_CMP_EQUAL || cmp == MSGPACK_CMP_LESS)
+				? AS_EXP_TRUE
+				: AS_EXP_FALSE;
 	default:
 		cf_crash(AS_EXP, "unexpected code %u", code);
 	}
@@ -5421,21 +5660,18 @@ cmp_msgpack(exp_op_code code, const rt_value* v0, const rt_value* v1)
 	return AS_EXP_UNK; // deadcode for eclipse
 }
 
-
 //==========================================================
 // Local helpers - runtime call utilities
 //
 
 static void
-call_cleanup(void** blob, uint32_t blob_ix, as_bin** bin, uint32_t bin_ix)
+call_cleanup_fn(call_cleanup* cc)
 {
-	for (uint32_t i = 0; i < blob_ix; i++) {
-		cf_free(blob[i]);
+	for (uint32_t i = 0; i < cc->bin_ix; i++) {
+		as_bin_particle_destroy(cc->bin[i]);
 	}
 
-	for (uint32_t i = 0; i < bin_ix; i++) {
-		as_bin_particle_destroy(bin[i]);
-	}
+	cc->bin_ix = 0;
 }
 
 static void
@@ -5471,6 +5707,66 @@ pack_typed_str(as_packer* pk, const uint8_t* buf, uint32_t sz, uint8_t type)
 }
 
 static bool
+rt_value_to_msgpack_vec(as_packer* pk, msgpack_vec* vec, rollback_alloc* alloc,
+		const rt_value* from)
+{
+	rt_value to;
+
+	if (rt_value_is_unknown(from) || ! rt_value_bin_translate(&to, from)) {
+		return false;
+	}
+
+	uint32_t offset = pk->offset;
+
+	vec->buf = pk->buffer + offset;
+
+	switch (to.type) {
+	case RT_NIL:
+		as_pack_nil(pk);
+		break;
+	case RT_TRILEAN:
+		as_pack_bool(pk, to.r_trilean == AS_EXP_TRUE);
+		break;
+	case RT_INT:
+		as_pack_int64(pk, to.r_int);
+		break;
+	case RT_FLOAT:
+		as_pack_double(pk, to.r_float);
+		break;
+	case RT_GEO_CONST:
+		vec->buf = to.r_geo_const.op->contents;
+		vec->buf_sz = to.r_geo_const.op->content_sz;
+		return true;
+	case RT_STR:
+	case RT_BLOB:
+	case RT_HLL:
+	case RT_GEO_STR: {
+		uint8_t* p = rollback_alloc_reserve(alloc,
+				as_pack_str_size(to.r_bytes.sz + 1));
+		as_packer strpk = { .buffer = p, .capacity = UINT32_MAX };
+
+		pack_typed_str(&strpk, to.r_bytes.contents, to.r_bytes.sz, to.type);
+
+		vec->buf = p;
+		vec->buf_sz = strpk.offset;
+		return true;
+	}
+	case RT_MSGPACK:
+		vec->buf = to.r_bytes.contents;
+		vec->buf_sz = to.r_bytes.sz;
+		return true;
+	case RT_BIN_PTR:
+	case RT_BIN:
+	case RT_GEO_COMPILED:
+	default:
+		cf_crash(AS_EXP, "unexpected type %d", to.type);
+	}
+
+	vec->buf_sz = pk->offset - offset;
+	return true;
+}
+
+static bool
 rt_value_bin_translate(rt_value* to, const rt_value* from)
 {
 	as_bin b;
@@ -5493,8 +5789,8 @@ rt_value_bin_translate(rt_value* to, const rt_value* from)
 	switch (type) {
 	case AS_PARTICLE_TYPE_BOOL:
 		to->type = RT_TRILEAN;
-		to->r_trilean =
-				as_bin_particle_bool_value(&b) ? AS_EXP_TRUE : AS_EXP_FALSE;
+		to->r_trilean = as_bin_particle_bool_value(&b) ? AS_EXP_TRUE
+													   : AS_EXP_FALSE;
 		break;
 	case AS_PARTICLE_TYPE_INTEGER:
 		to->type = RT_INT;
@@ -5508,8 +5804,8 @@ rt_value_bin_translate(rt_value* to, const rt_value* from)
 	case AS_PARTICLE_TYPE_BLOB:
 	case AS_PARTICLE_TYPE_HLL:
 		to->type = type; // runtime_type matches particle type for these types
-		to->r_bytes.sz = as_bin_particle_string_ptr(&b,
-				(char**)&to->r_bytes.contents);
+		to->r_bytes.sz =
+				as_bin_particle_string_ptr(&b, (char**)&to->r_bytes.contents);
 		break;
 	case AS_PARTICLE_TYPE_GEOJSON:
 		to->type = type; // runtime_type matches particle type for AS_PARTICLE_TYPE_GEOJSON
@@ -5542,7 +5838,7 @@ static void*
 rt_alloc_mem(runtime* rt, size_t sz, cf_ll_buf* ll_buf)
 {
 	if (ll_buf != NULL) {
-		uint8_t *ptr;
+		uint8_t* ptr;
 
 		cf_ll_buf_reserve(ll_buf, sz, &ptr);
 
@@ -5555,8 +5851,8 @@ rt_alloc_mem(runtime* rt, size_t sz, cf_ll_buf* ll_buf)
 static bool
 msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 {
-	msgpack_type type = msgpack_buf_peek_type(from->r_bytes.contents,
-			from->r_bytes.sz);
+	msgpack_type type =
+			msgpack_buf_peek_type(from->r_bytes.contents, from->r_bytes.sz);
 	uint8_t p_type;
 
 	switch (type) {
@@ -5584,7 +5880,6 @@ msgpack_to_bin(runtime* rt, as_bin* to, rt_value* from, cf_ll_buf* ll_buf)
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - runtime display.
@@ -5710,9 +6005,8 @@ display_bin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 
 	op_bin* op = (op_bin*)ob;
 
-	cf_dyn_buf_append_format(db, "%s_%s(\"%.*s\")",
-			op_table[ob->code].name, result_type_str[op->type], op->name_sz,
-			op->name);
+	cf_dyn_buf_append_format(db, "%s_%s(\"%.*s\")", op_table[ob->code].name,
+			result_type_str[op->type], op->name_sz, op->name);
 }
 
 static void
@@ -5722,8 +6016,8 @@ display_bin_type(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 
 	op_bin* op = (op_bin*)ob;
 
-	cf_dyn_buf_append_format(db, "%s(\"%.*s\")",
-			op_table[ob->code].name, op->name_sz, op->name);
+	cf_dyn_buf_append_format(db, "%s(\"%.*s\")", op_table[ob->code].name,
+			op->name_sz, op->name);
 }
 
 static void
@@ -5754,8 +6048,7 @@ display_var_builtin(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 
 	op_var* op = (op_var*)ob;
 
-	cf_dyn_buf_append_format(db, "%s(%u)",
-			op_table[ob->code].name, op->idx);
+	cf_dyn_buf_append_format(db, "%s(%u)", op_table[ob->code].name, op->idx);
 }
 
 static void
@@ -5765,8 +6058,8 @@ display_var(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 
 	op_var* op = (op_var*)ob;
 
-	cf_dyn_buf_append_format(db, "%s(\"var_%u\")",
-			op_table[ob->code].name, op->idx);
+	cf_dyn_buf_append_format(db, "%s(\"var_%u\")", op_table[ob->code].name,
+			op->idx);
 }
 
 static void
@@ -5792,13 +6085,10 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 {
 	op_call* op = (op_call*)ob;
 
-	call_system_type system_type = op->system_type &
-			(uint32_t)~CALL_FLAG_MODIFY_LOCAL;
+	call_system_type system_type =
+			op->system_type & (uint32_t)~CALL_FLAG_MODIFY_LOCAL;
 	bool is_modify = op->system_type != system_type;
-	msgpack_in mp = {
-			.buf = op->vecs[0].buf,
-			.buf_sz = op->vecs[0].buf_sz
-	};
+	msgpack_in mp = { .buf = op->vecs[0].buf, .buf_sz = op->vecs[0].buf_sz };
 	uint32_t ele_count;
 
 	if (! msgpack_get_list_ele_count(&mp, &ele_count)) {
@@ -5853,7 +6143,8 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 				uint32_t mod_exp_sz = msgpack_sz(&mp);
 
 				cf_assert(mod_exp_sz != 0, AS_EXP, "unexpected");
-				cf_dyn_buf_append_format(db, ", 0x%x, <mod_exp/%u>, ", (uint32_t)flags, mod_exp_sz);
+				cf_dyn_buf_append_format(db, ", 0x%x, <mod_exp/%u>, ",
+						(uint32_t)flags, mod_exp_sz);
 			}
 			else {
 				cf_dyn_buf_append_format(db, ", 0x%x, ", (uint32_t)flags);
@@ -5870,8 +6161,8 @@ display_call(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 				as_bits_op_name((uint32_t)op_code, is_modify));
 		break;
 	case CALL_HLL:
-		cf_dyn_buf_append_format(db, "%s(", as_hll_op_name((uint32_t)op_code,
-				is_modify));
+		cf_dyn_buf_append_format(db, "%s(",
+				as_hll_op_name((uint32_t)op_code, is_modify));
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected");
@@ -5914,13 +6205,10 @@ display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 	case VOP_VALUE_NIL:
 		cf_dyn_buf_append_string(db, "nil");
 		break;
-	case VOP_VALUE_GEO:
-		;
+	case VOP_VALUE_GEO:;
 		uint32_t sz;
-		msgpack_in mp = {
-				.buf = ((op_value_geo*)ob)->contents,
-				.buf_sz = ((op_value_geo*)ob)->content_sz
-		};
+		msgpack_in mp = { .buf = ((op_value_geo*)ob)->contents,
+			.buf_sz = ((op_value_geo*)ob)->content_sz };
 
 		msgpack_get_bin(&mp, &sz);
 		cf_dyn_buf_append_format(db, "<geojson#%u>", sz - 1);
@@ -5938,7 +6226,7 @@ display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 		uint32_t ele_count = UINT32_MAX;
 
 		if (msgpack_buf_get_map_ele_count(op_b->value, op_b->value_sz,
-				&ele_count)) {
+					&ele_count)) {
 			cf_dyn_buf_append_format(db, "<map#%u>", ele_count);
 		}
 		else {
@@ -5961,12 +6249,10 @@ display_value(runtime* rt, const op_base_mem* ob, cf_dyn_buf* db)
 				((op_value_blob*)ob)->value_sz);
 		break;
 	case VOP_VALUE_BLOB:
-		cf_dyn_buf_append_format(db, "<blob#%u>",
-				((op_value_blob*)ob)->value_sz);
+		cf_dyn_buf_append_format(db, "<blob#%u>", ((op_value_blob*)ob)->value_sz);
 		break;
 	case VOP_VALUE_HLL:
-		cf_dyn_buf_append_format(db, "<hll#%u>",
-				((op_value_blob*)ob)->value_sz);
+		cf_dyn_buf_append_format(db, "<hll#%u>", ((op_value_blob*)ob)->value_sz);
 		break;
 	default:
 		cf_crash(AS_EXP, "unexpected code %u", ob->code);
@@ -6051,7 +6337,6 @@ display_msgpack(msgpack_in* mp, cf_dyn_buf* db)
 		break;
 	}
 }
-
 
 //==========================================================
 // Local helpers - debug utilites.

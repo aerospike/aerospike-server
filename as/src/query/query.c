@@ -61,10 +61,10 @@
 #include "base/cdt.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/masking.h"
 #include "base/exp.h"
 #include "base/expop.h"
 #include "base/index.h"
+#include "base/masking.h"
 #include "base/mrt_monitor.h"
 #include "base/proto.h"
 #include "base/security.h"
@@ -86,18 +86,17 @@
 
 //#include "warnings.h"
 
-
 //==============================================================================
 // Typedefs & constants.
 //
 
 typedef enum {
-	QUERY_TYPE_BASIC	= 0,
-	QUERY_TYPE_AGGR		= 1,
-	QUERY_TYPE_UDF_BG	= 2,
-	QUERY_TYPE_OPS_BG	= 3,
+	QUERY_TYPE_BASIC = 0,
+	QUERY_TYPE_AGGR = 1,
+	QUERY_TYPE_UDF_BG = 2,
+	QUERY_TYPE_OPS_BG = 3,
 
-	QUERY_TYPE_UNKNOWN	= -1
+	QUERY_TYPE_UNKNOWN = -1
 } query_type;
 
 #define RECORD_CHANGED_SAFETY_MS 3000 // clock skew & bins change after LUT
@@ -108,7 +107,6 @@ typedef enum {
 #define MAX_ACTIVE_TRANSACTIONS 200
 
 #define DEFAULT_TTL_NS 1000000000 // 1 second
-
 
 //==========================================================
 // Forward declarations.
@@ -129,50 +127,64 @@ static int ops_bg_query_job_start(as_transaction* tr, as_namespace* ns);
 
 static query_type get_query_type(const as_transaction* tr);
 
-static bool get_query_set(const as_transaction* tr, as_namespace* ns, char* set_name, uint16_t* set_id);
-static bool get_query_pids(const as_transaction* tr, as_query_pid** p_pids, uint16_t* n_pids_requested, uint16_t* n_keyds_requested);
-static bool get_query_range_and_def(const as_transaction* tr, as_namespace* ns, as_query_range* range, as_query_sindex_def* si_def);
+static bool get_query_set(const as_transaction* tr, as_namespace* ns,
+		char* set_name, uint16_t* set_id);
+static bool get_query_pids(const as_transaction* tr, as_query_pid** p_pids,
+		uint16_t* n_pids_requested, uint16_t* n_keyds_requested);
+static bool get_query_range_and_def(const as_transaction* tr, as_namespace* ns,
+		as_query_range* range, as_query_sindex_def* si_def);
 static bool get_query_rps(const as_transaction* tr, uint32_t* rps);
-static bool get_query_si_name(const as_transaction* tr, as_namespace* ns, char* si_name);
+static bool get_query_si_name(const as_transaction* tr, as_namespace* ns,
+		char* si_name);
 
 static bool get_query_socket_timeout(const as_transaction* tr, int32_t* timeout);
 
 static bool get_query_sample_max(const as_transaction* tr, uint64_t* sample_max);
 static bool get_query_filter_exp(const as_transaction* tr, as_exp** exp);
 
-static bool get_range_field(const as_transaction* tr, as_namespace* ns, as_query_range* range, as_query_sindex_def* si_def);
-static bool get_index_type_field(const as_transaction* tr, as_query_sindex_def* si_def);
-static bool get_index_expression_field(const as_transaction* tr, as_query_sindex_def* si_def);
-static bool get_index_context_field(const as_transaction* tr, as_query_sindex_def* si_def);
+static bool get_range_field(const as_transaction* tr, as_namespace* ns,
+		as_query_range* range, as_query_sindex_def* si_def);
+static bool get_index_type_field(const as_transaction* tr,
+		as_query_sindex_def* si_def);
+static bool get_index_expression_field(const as_transaction* tr,
+		as_query_sindex_def* si_def);
+static bool get_index_context_field(const as_transaction* tr,
+		as_query_sindex_def* si_def);
 
-static bool range_from_msg_integer(const uint8_t* data, as_query_range* range, uint32_t len);
-static bool range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len);
-static bool range_from_msg_blob(const uint8_t* data, as_query_range* range, uint32_t len);
-static bool range_from_msg_geojson(as_namespace* ns, const uint8_t* data, as_query_range* range, uint32_t len);
+static bool range_from_msg_integer(const uint8_t* data, as_query_range* range,
+		uint32_t len);
+static bool range_from_msg_string(const uint8_t* data, as_query_range* range,
+		uint32_t len);
+static bool range_from_msg_blob(const uint8_t* data, as_query_range* range,
+		uint32_t len);
+static bool range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
+		as_query_range* range, uint32_t len);
 static void sort_geo_range(as_query_geo_range* geo);
 
 static bool find_sindex(as_query_job* _job);
 static bool validate_background_query_rps(const as_namespace* ns, uint32_t* rps);
 
-static size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf, size_t size, int32_t timeout, bool compress, as_proto_comp_stat* comp_stat);
+static size_t send_blocking_response_chunk(as_file_handle* fd_h, uint8_t* buf,
+		size_t size, int32_t timeout, bool compress,
+		as_proto_comp_stat* comp_stat);
 
 static bool record_matches_query(as_query_job* _job, as_storage_rd* rd);
 static bool record_matches_query_cdt(as_query_job* _job, const as_bin* b);
 static bool match_mapkeys_foreach(msgpack_in* key, msgpack_in* val, void* udata);
-static bool match_mapvalues_foreach(msgpack_in* key, msgpack_in* val, void* udata);
+static bool match_mapvalues_foreach(msgpack_in* key, msgpack_in* val,
+		void* udata);
 static bool match_listeles_foreach(msgpack_in* element, void* udata);
 static bool match_integer_element(const as_query_job* _job, msgpack_in* element);
 static bool match_string_element(const as_query_job* _job, msgpack_in* element);
 static bool match_blob_element(const as_query_job* _job, msgpack_in* element);
 static bool match_geojson_element(const as_query_job* _job, msgpack_in* element);
 
-
 //==========================================================
 // Inlines & macros.
 //
 
 static inline bool
-record_changed_since_start(const as_query_job* _job, const as_record *r)
+record_changed_since_start(const as_query_job* _job, const as_record* r)
 {
 	return r->last_update_time + RECORD_CHANGED_SAFETY_MS >
 			_job->start_ms_clepoch;
@@ -183,8 +195,8 @@ strings_match(const as_query_range* range, const char* str, size_t len)
 {
 	return range->blob_sz == len &&
 			range->u.r.start == as_sindex_string_to_bval(str, len) &&
-			memcmp(range->stub, str, len < sizeof(range->stub) ?
-					len : sizeof(range->stub)) == 0;
+			memcmp(range->stub, str,
+					len < sizeof(range->stub) ? len : sizeof(range->stub)) == 0;
 }
 
 static inline bool
@@ -192,8 +204,8 @@ blobs_match(const as_query_range* range, const uint8_t* blob, size_t sz)
 {
 	return range->blob_sz == sz &&
 			range->u.r.start == as_sindex_blob_to_bval(blob, sz) &&
-			memcmp(range->stub, blob, sz < sizeof(range->stub) ?
-					sz : sizeof(range->stub)) == 0;
+			memcmp(range->stub, blob,
+					sz < sizeof(range->stub) ? sz : sizeof(range->stub)) == 0;
 }
 
 static inline const char*
@@ -230,7 +242,6 @@ throttle_sleep(as_query_job* _job)
 	}
 }
 
-
 //==============================================================================
 // Public API.
 //
@@ -252,7 +263,6 @@ as_query(as_transaction* tr, as_namespace* ns)
 	}
 }
 
-
 //==============================================================================
 // Non-class-specific utilities.
 //
@@ -261,8 +271,9 @@ static query_type
 get_query_type(const as_transaction* tr)
 {
 	if (! as_transaction_is_udf(tr)) {
-		return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0 ?
-				QUERY_TYPE_OPS_BG : QUERY_TYPE_BASIC;
+		return (tr->msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0
+				? QUERY_TYPE_OPS_BG
+				: QUERY_TYPE_BASIC;
 	}
 	// else - UDF query.
 
@@ -300,8 +311,8 @@ get_query_set(const as_transaction* tr, as_namespace* ns, char* set_name,
 		return true; // will query whole namespace
 	}
 
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_SET);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET);
 	uint32_t len = as_msg_field_get_value_sz(f);
 
 	if (len == 0) {
@@ -339,8 +350,7 @@ get_query_pids(const as_transaction* tr, as_query_pid** p_pids,
 	const as_msg* m = &tr->msgp->msg;
 
 	if (as_transaction_has_pids(tr)) {
-		const as_msg_field* f = as_msg_field_get(m,
-				AS_MSG_FIELD_TYPE_PID_ARRAY);
+		const as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_PID_ARRAY);
 
 		uint32_t n_pids = as_msg_field_get_value_sz(f) / sizeof(uint16_t);
 
@@ -369,11 +379,11 @@ get_query_pids(const as_transaction* tr, as_query_pid** p_pids,
 	bool has_where_clause = as_transaction_has_where_clause(tr);
 
 	if (as_transaction_has_digests(tr)) {
-		const as_msg_field* digest_f = as_msg_field_get(m,
-				AS_MSG_FIELD_TYPE_DIGEST_ARRAY);
+		const as_msg_field* digest_f =
+				as_msg_field_get(m, AS_MSG_FIELD_TYPE_DIGEST_ARRAY);
 
-		uint32_t n_digests = as_msg_field_get_value_sz(digest_f) /
-				sizeof(cf_digest);
+		uint32_t n_digests =
+				as_msg_field_get_value_sz(digest_f) / sizeof(cf_digest);
 
 		if (n_digests == 0 || n_digests > AS_PARTITIONS) {
 			cf_warning(AS_QUERY, "digest array empty or too big");
@@ -417,13 +427,12 @@ get_query_pids(const as_transaction* tr, as_query_pid** p_pids,
 				return false;
 			}
 
-			pids[pid] = (as_query_pid){
-					.requested = true,
-					.has_resume = true,
-					.keyd = *keyd,
-					.bval = bval_data == NULL ?
-							0 : (int64_t)cf_swap_from_le64(bval_data[i])
-			};
+			pids[pid] = (as_query_pid){ .requested = true,
+				.has_resume = true,
+				.keyd = *keyd,
+				.bval = bval_data == NULL
+						? 0
+						: (int64_t)cf_swap_from_le64(bval_data[i]) };
 
 			(*n_pids_requested)++;
 			(*n_keyds_requested)++;
@@ -479,12 +488,11 @@ get_query_rps(const as_transaction* tr, uint32_t* rps)
 		return false;
 	}
 
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_RECS_PER_SEC);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_RECS_PER_SEC);
 
 	if (as_msg_field_get_value_sz(f) != sizeof(uint32_t)) {
-		cf_warning(AS_QUERY, "recs-per-sec field size not %zu",
-				sizeof(uint32_t));
+		cf_warning(AS_QUERY, "recs-per-sec field size not %zu", sizeof(uint32_t));
 		return false;
 	}
 
@@ -505,8 +513,8 @@ get_query_si_name(const as_transaction* tr, as_namespace* ns, char* si_name)
 		return false;
 	}
 
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_INDEX_NAME);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_NAME);
 	uint32_t len = as_msg_field_get_value_sz(f);
 
 	if (len == 0 || len >= INAME_MAX_SZ) {
@@ -527,8 +535,8 @@ get_query_socket_timeout(const as_transaction* tr, int32_t* timeout)
 		return true;
 	}
 
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SOCKET_TIMEOUT);
 
 	if (as_msg_field_get_value_sz(f) != sizeof(uint32_t)) {
 		cf_warning(AS_QUERY, "socket-timeout field size not %zu",
@@ -550,8 +558,8 @@ get_query_sample_max(const as_transaction* tr, uint64_t* sample_max)
 		return true;
 	}
 
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_SAMPLE_MAX);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SAMPLE_MAX);
 
 	if (as_msg_field_get_value_sz(f) != sizeof(uint64_t)) {
 		cf_warning(AS_QUERY, "sample-max field size not %zu", sizeof(uint64_t));
@@ -570,8 +578,8 @@ get_query_filter_exp(const as_transaction* tr, as_exp** exp)
 		return true;
 	}
 
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_PREDEXP);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 
 	*exp = as_exp_filter_build(f, true);
 
@@ -582,8 +590,8 @@ static bool
 get_range_field(const as_transaction* tr, as_namespace* ns,
 		as_query_range* range, as_query_sindex_def* si_def)
 {
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_INDEX_RANGE);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_RANGE);
 	const uint8_t* data = f->data;
 	uint32_t len = as_msg_field_get_value_sz(f);
 
@@ -613,13 +621,15 @@ get_range_field(const as_transaction* tr, as_namespace* ns,
 
 	if (bin_name_len == 0) {
 		if (! has_index_name && ! has_index_exp) {
-			cf_warning(AS_QUERY, "missing expression and index name and bin name");
+			cf_warning(AS_QUERY,
+					"missing expression and index name and bin name");
 			return false;
 		}
 	}
 	else {
 		if (has_index_name || has_index_exp) {
-			cf_warning(AS_QUERY, "specified expression or index name with bin name");
+			cf_warning(AS_QUERY,
+					"specified expression or index name with bin name");
 			return false;
 		}
 
@@ -674,8 +684,8 @@ get_range_field(const as_transaction* tr, as_namespace* ns,
 static bool
 get_index_type_field(const as_transaction* tr, as_query_sindex_def* si_def)
 {
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_INDEX_TYPE);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_TYPE);
 
 	if (f != NULL && as_msg_field_get_value_sz(f) == 0) {
 		cf_warning(AS_QUERY, "cannot parse itype");
@@ -688,8 +698,7 @@ get_index_type_field(const as_transaction* tr, as_query_sindex_def* si_def)
 }
 
 static bool
-get_index_expression_field(const as_transaction* tr,
-		as_query_sindex_def* si_def)
+get_index_expression_field(const as_transaction* tr, as_query_sindex_def* si_def)
 {
 	if (! as_transaction_has_index_expression(tr)) {
 		return true;
@@ -700,8 +709,8 @@ get_index_expression_field(const as_transaction* tr,
 		return false;
 	}
 
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_INDEX_EXPRESSION);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_EXPRESSION);
 
 	if (as_msg_field_get_value_sz(f) == 0) {
 		cf_warning(AS_QUERY, "cannot parse index expression");
@@ -724,8 +733,8 @@ get_index_expression_field(const as_transaction* tr,
 static bool
 get_index_context_field(const as_transaction* tr, as_query_sindex_def* si_def)
 {
-	const as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_INDEX_CONTEXT);
+	const as_msg_field* f =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_INDEX_CONTEXT);
 
 	if (f == NULL) {
 		return true;
@@ -758,8 +767,8 @@ get_index_context_field(const as_transaction* tr, as_query_sindex_def* si_def)
 
 	bool was_modified;
 
-	si_def->ctx_buf_sz = msgpack_compactify(si_def->ctx_buf,
-			si_def->ctx_buf_sz, &was_modified);
+	si_def->ctx_buf_sz = msgpack_compactify(si_def->ctx_buf, si_def->ctx_buf_sz,
+			&was_modified);
 
 	if (si_def->ctx_buf_sz == 0) {
 		cf_warning(AS_QUERY, "invalid index context - could not compactify");
@@ -772,10 +781,7 @@ get_index_context_field(const as_transaction* tr, as_query_sindex_def* si_def)
 	}
 
 	msgpack_vec vecs[1];
-	msgpack_in_vec mv = {
-			.n_vecs = 1,
-			.vecs = vecs
-	};
+	msgpack_in_vec mv = { .n_vecs = 1, .vecs = vecs };
 
 	vecs[0].buf = si_def->ctx_buf;
 	vecs[0].buf_sz = si_def->ctx_buf_sz;
@@ -868,8 +874,8 @@ range_from_msg_string(const uint8_t* data, as_query_range* range, uint32_t len)
 	range->u.r.end = range->u.r.start;
 
 	range->blob_sz = startl;
-	memcpy(range->stub, startp, startl < sizeof(range->stub) ?
-			startl : sizeof(range->stub));
+	memcpy(range->stub, startp,
+			startl < sizeof(range->stub) ? startl : sizeof(range->stub));
 
 	range->isrange = false;
 
@@ -910,8 +916,8 @@ range_from_msg_blob(const uint8_t* data, as_query_range* range, uint32_t len)
 	range->u.r.end = range->u.r.start;
 
 	range->blob_sz = startl;
-	memcpy(range->stub, startp, startl < sizeof(range->stub) ?
-			startl : sizeof(range->stub));
+	memcpy(range->stub, startp,
+			startl < sizeof(range->stub) ? startl : sizeof(range->stub));
 
 	range->isrange = false;
 
@@ -961,7 +967,7 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 		uint32_t ncenters;
 
 		if (! geo_point_centers(geo->cellid, MAX_REGION_LEVELS, center,
-				&ncenters)) {
+					&ncenters)) {
 			// geo_point_centers will have printed a warning.
 			return false;
 		}
@@ -981,7 +987,7 @@ range_from_msg_geojson(as_namespace* ns, const uint8_t* data,
 		uint32_t ncells;
 
 		if (! geo_region_cover(ns, geo->region, MAX_REGION_CELLS, NULL, cellmin,
-				cellmax, &ncells)) {
+					cellmax, &ncells)) {
 			cf_warning(AS_QUERY, "geo_region_cover failed");
 			return false;
 		}
@@ -1042,8 +1048,7 @@ sindex_must_mask(as_query_job* _job)
 	as_set* p_set = as_namespace_get_set_by_name(_job->ns, _job->set_name);
 	as_masking_ctx ms;
 
-	if (! as_masking_ctx_init(&ms, _job->ns->name, p_set, _job->username,
-			NULL)) {
+	if (! as_masking_ctx_init(&ms, _job->ns->name, p_set, _job->username, NULL)) {
 		return false;
 	}
 
@@ -1053,7 +1058,9 @@ sindex_must_mask(as_query_job* _job)
 
 	if (_job->si->bin_name[0] != '\0') {
 		if (as_masking_has_rule(&ms, _job->si->bin_name, _job->si->ktype)) {
-			cf_warning(AS_QUERY, "query on masked bin '%s' denied for unauthorized user", _job->si->bin_name);
+			cf_warning(AS_QUERY,
+					"query on masked bin '%s' denied for unauthorized user",
+					_job->si->bin_name);
 			return true;
 		}
 	}
@@ -1062,11 +1069,13 @@ sindex_must_mask(as_query_job* _job)
 		uint32_t n_bins = cf_vector_size(_job->si->exp_bins_info);
 
 		for (uint32_t i = 0; i < n_bins; i++) {
-			as_bin_info* bin_info = (as_bin_info*)cf_vector_getp(
-					_job->si->exp_bins_info, i);
+			as_bin_info* bin_info =
+					(as_bin_info*)cf_vector_getp(_job->si->exp_bins_info, i);
 
 			if (as_masking_has_rule(&ms, bin_info->name, bin_info->type)) {
-				cf_warning(AS_QUERY, "query on expression with masked bin '%s' (type %d) denied for unauthorized user", bin_info->name, bin_info->type);
+				cf_warning(AS_QUERY,
+						"query on expression with masked bin '%s' (type %d) denied for unauthorized user",
+						bin_info->name, bin_info->type);
 				return true;
 			}
 		}
@@ -1159,9 +1168,11 @@ static bool
 record_matches_query(as_query_job* _job, as_storage_rd* rd)
 {
 	if (! record_changed_since_start(_job, rd->r) &&
-			_job->si->ktype != AS_PARTICLE_TYPE_GEOJSON && // geo needs to check bounds anyway
+			_job->si->ktype !=
+					AS_PARTICLE_TYPE_GEOJSON && // geo needs to check bounds anyway
 			_job->si->ktype != AS_PARTICLE_TYPE_STRING &&
-			_job->si->ktype != AS_PARTICLE_TYPE_BLOB) { // strings & blobs need to check for hash collisions
+			_job->si->ktype !=
+					AS_PARTICLE_TYPE_BLOB) { // strings & blobs need to check for hash collisions
 		return true;
 	}
 
@@ -1187,11 +1198,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 	else {
 		as_bin_set_empty(&rb);
 
-		as_exp_ctx ctx_rd = {
-				.ns = _job->ns,
-				.r = rd->r,
-				.rd = rd
-		};
+		as_exp_ctx ctx_rd = { .ns = _job->ns, .r = rd->r, .rd = rd };
 
 		if (! as_exp_eval(si->exp, &ctx_rd, &rb, NULL)) {
 			return false;
@@ -1210,8 +1217,7 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 			return false;
 		}
 
-		if (! as_bin_cdt_get_by_context(b, si->ctx_buf, si->ctx_buf_sz,
-				&ctx_bin)) {
+		if (! as_bin_cdt_get_by_context(b, si->ctx_buf, si->ctx_buf_sz, &ctx_bin)) {
 			return false;
 		}
 
@@ -1228,64 +1234,64 @@ record_matches_query(as_query_job* _job, as_storage_rd* rd)
 	bool ret = false;
 
 	switch (type) {
-		case AS_PARTICLE_TYPE_INTEGER:
-			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
-				break;
-			}
-
-			int64_t i = as_bin_particle_integer_value(b);
-
-			// Start and end are same for point query.
-			ret = range->u.r.start <= i && i <= range->u.r.end;
+	case AS_PARTICLE_TYPE_INTEGER:
+		if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
 			break;
-		case AS_PARTICLE_TYPE_STRING:
-			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
-				break;
-			}
+		}
 
-			char* str;
-			uint32_t len = as_bin_particle_string_ptr(b, &str);
+		int64_t i = as_bin_particle_integer_value(b);
 
-			ret = strings_match(range, str, len);
+		// Start and end are same for point query.
+		ret = range->u.r.start <= i && i <= range->u.r.end;
+		break;
+	case AS_PARTICLE_TYPE_STRING:
+		if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
 			break;
-		case AS_PARTICLE_TYPE_BLOB:
-			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
-				break;
-			}
+		}
 
-			uint8_t* blob;
-			uint32_t sz = as_bin_particle_blob_ptr(b, &blob);
+		char* str;
+		uint32_t len = as_bin_particle_string_ptr(b, &str);
 
-			ret = blobs_match(range, blob, sz);
+		ret = strings_match(range, str, len);
+		break;
+	case AS_PARTICLE_TYPE_BLOB:
+		if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
 			break;
-		case AS_PARTICLE_TYPE_GEOJSON:
-			if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
-				break;
-			}
+		}
 
-			as_namespace* ns = _job->ns;
+		uint8_t* blob;
+		uint32_t sz = as_bin_particle_blob_ptr(b, &blob);
 
-			bool iswithin = as_particle_geojson_match(b->particle,
-					range->u.geo.cellid, range->u.geo.region,
-					ns->geo2dsphere_within_strict);
-
-			if (iswithin) {
-				as_incr_uint64(&ns->geo_region_query_points);
-			}
-			else {
-				as_incr_uint64(&ns->geo_region_query_falsepos);
-			}
-
-			ret = iswithin;
+		ret = blobs_match(range, blob, sz);
+		break;
+	case AS_PARTICLE_TYPE_GEOJSON:
+		if (type != si->ktype || si->itype != AS_SINDEX_ITYPE_DEFAULT) {
 			break;
-		case AS_PARTICLE_TYPE_MAP:
-		case AS_PARTICLE_TYPE_LIST:
-			// For CDT bins, we need to see if any value within the CDT matches
-			// the query. This can be performance hit for big lists and maps.
-			ret = record_matches_query_cdt(_job, b);
-			break;
-		default:
-			break;
+		}
+
+		as_namespace* ns = _job->ns;
+
+		bool iswithin =
+				as_particle_geojson_match(b->particle, range->u.geo.cellid,
+						range->u.geo.region, ns->geo2dsphere_within_strict);
+
+		if (iswithin) {
+			as_incr_uint64(&ns->geo_region_query_points);
+		}
+		else {
+			as_incr_uint64(&ns->geo_region_query_falsepos);
+		}
+
+		ret = iswithin;
+		break;
+	case AS_PARTICLE_TYPE_MAP:
+	case AS_PARTICLE_TYPE_LIST:
+		// For CDT bins, we need to see if any value within the CDT matches
+		// the query. This can be performance hit for big lists and maps.
+		ret = record_matches_query_cdt(_job, b);
+		break;
+	default:
+		break;
 	}
 
 	if (si->exp != NULL) {
@@ -1471,7 +1477,6 @@ match_geojson_element(const as_query_job* _job, msgpack_in* element)
 			range->u.geo.region, _job->ns->geo2dsphere_within_strict);
 }
 
-
 //==============================================================================
 // conn_query_job derived class implementation - not final class.
 //
@@ -1497,7 +1502,8 @@ typedef struct conn_query_job_s {
 static void conn_query_job_init(conn_query_job* job, const as_transaction* tr);
 static void conn_query_job_destroy(conn_query_job* job);
 static void conn_query_job_finish(conn_query_job* job);
-static bool conn_query_job_send_response(conn_query_job* job, uint8_t* buf, size_t size);
+static bool conn_query_job_send_response(conn_query_job* job, uint8_t* buf,
+		size_t size);
 static void conn_query_job_release_fd(conn_query_job* job, bool force_close);
 static void conn_query_job_info(conn_query_job* job, cf_dyn_buf* db);
 
@@ -1574,12 +1580,11 @@ conn_query_job_send_response(conn_query_job* job, uint8_t* buf, size_t size)
 	}
 
 	size_t size_sent = send_blocking_response_chunk(job->fd_h, buf, size,
-			job->fd_timeout, job->compress_response,
-			&_job->ns->query_comp_stat);
+			job->fd_timeout, job->compress_response, &_job->ns->query_comp_stat);
 
 	if (size_sent == 0) {
-		int reason = errno == ETIMEDOUT ?
-				AS_QUERY_RESPONSE_TIMEOUT : AS_QUERY_RESPONSE_ERROR;
+		int reason = errno == ETIMEDOUT ? AS_QUERY_RESPONSE_TIMEOUT
+										: AS_QUERY_RESPONSE_ERROR;
 
 		conn_query_job_release_fd(job, true);
 		cf_mutex_unlock(&job->fd_lock);
@@ -1619,8 +1624,6 @@ conn_query_job_info(conn_query_job* job, cf_dyn_buf* db)
 			job->fd_timeout == -1 ? 0 : (uint32_t)job->fd_timeout);
 }
 
-
-
 //==============================================================================
 // basic_query_job derived class implementation.
 //
@@ -1640,19 +1643,17 @@ typedef struct basic_query_job_s {
 	uint64_t sample_count;
 	as_exp* filter_exp;
 	cf_vector* bin_names;
+	cl_msg* msgp;
 } basic_query_job;
 
-static void basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
+static void basic_query_job_slice(as_query_job* _job,
+		as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void basic_query_job_finish(as_query_job* _job);
 static void basic_query_job_destroy(as_query_job* _job);
 static void basic_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
-static const as_query_vtable basic_query_job_vtable = {
-	basic_query_job_slice,
-	basic_query_job_finish,
-	basic_query_job_destroy,
-	basic_query_job_info
-};
+static const as_query_vtable basic_query_job_vtable = { basic_query_job_slice,
+	basic_query_job_finish, basic_query_job_destroy, basic_query_job_info };
 
 typedef struct basic_query_slice_s {
 	basic_query_job* job;
@@ -1660,10 +1661,19 @@ typedef struct basic_query_slice_s {
 } basic_query_slice;
 
 static void basic_query_job_init(basic_query_job* job);
-static bool basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns, cf_vector** bin_names);
+static bool basic_query_get_ops(const as_transaction* tr, const char* ns_name,
+		cl_msg** msgp, cf_vector** bin_names);
 static bool basic_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
-static bool basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
-static bool basic_query_filter_meta(const basic_query_job* job, const as_record* r, as_exp** exp);
+static bool basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval,
+		void* udata);
+static bool basic_query_filter_meta(const basic_query_job* job,
+		const as_record* r, as_exp** exp);
+
+static bool apply_ops_make_response(cf_buf_builder** bb_r, as_storage_rd* rd,
+		cl_msg* msgp, bool send_bval, int64_t bval);
+static bool build_ops_response_msg(cf_buf_builder** bb_r, as_storage_rd* rd,
+		as_msg_op** ops, as_bin** response_bins, uint32_t n_response_bins,
+		bool send_bval, int64_t bval);
 
 //----------------------------------------------------------
 // basic_query_job public API.
@@ -1730,7 +1740,7 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 			return AS_ERR_SINDEX_NOT_READABLE;
 		}
 
-		if (sindex_must_mask (_job)) {
+		if (sindex_must_mask(_job)) {
 			as_query_job_destroy(_job);
 			return AS_SEC_ERR_ROLE_VIOLATION;
 		}
@@ -1751,16 +1761,18 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 
 	basic_query_job_init(job);
 
+	job->no_bin_data = (m->info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
+
 	if (! get_query_sample_max(tr, &job->sample_max) ||
-			! basic_query_get_bin_names(tr, ns, &job->bin_names) ||
+			(! job->no_bin_data && // if no bin data, don't get ops
+					! basic_query_get_ops(tr, ns->name, &job->msgp,
+							&job->bin_names)) ||
 			! get_query_filter_exp(tr, &job->filter_exp)) {
 		cf_warning(AS_QUERY, "basic query job failed msg field processing");
 		conn_query_job_destroy(conn_job);
 		as_query_job_destroy(_job);
 		return AS_ERR_PARAMETER;
 	}
-
-	job->no_bin_data = (m->info1 & AS_MSG_INFO1_GET_NO_BINS) != 0;
 
 	int result = as_security_check_rps(tr->from.proto_fd_h, _job->rps,
 			PERM_QUERY, false, &_job->rps_udata);
@@ -1774,15 +1786,16 @@ basic_query_job_start(as_transaction* tr, as_namespace* ns)
 
 	if (_job->is_short) {
 		if (m->transaction_ttl != 0) {
-			job->end_ns = tr->start_time +
-					((uint64_t)m->transaction_ttl * 1000000);
+			job->end_ns =
+					tr->start_time + ((uint64_t)m->transaction_ttl * 1000000);
 		}
 		else {
 			job->end_ns = tr->start_time + DEFAULT_TTL_NS;
 		}
 	}
 	else {
-		cf_debug(AS_QUERY, "starting basic query job %lu {%s:%s:%s} n-pids-requested (%hu,%hu) rps %u sample-max %lu%s socket-timeout %d from %s",
+		cf_debug(AS_QUERY,
+				"starting basic query job %lu {%s:%s:%s} n-pids-requested (%hu,%hu) rps %u sample-max %lu%s socket-timeout %d from %s",
 				_job->trid, ns->name, _job->set_name,
 				_job->si != NULL ? _job->si_name : "<pi-query>",
 				_job->n_pids_requested, _job->n_keyds_requested, _job->rps,
@@ -1869,7 +1882,7 @@ basic_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 		}
 		else {
 			if (! as_set_index_reduce(_job->ns, tree, _job->set_id, keyd,
-					basic_pi_query_job_reduce_cb, (void*)&slice)) {
+						basic_pi_query_job_reduce_cb, (void*)&slice)) {
 				as_index_reduce_from(tree, keyd, basic_pi_query_job_reduce_cb,
 						(void*)&slice);
 			}
@@ -1914,36 +1927,32 @@ basic_query_job_finish(as_query_job* _job)
 			}
 		}
 		else {
-			as_incr_uint64(_job->si == NULL ?
-					&ns->n_pi_query_long_basic_complete :
-					&ns->n_si_query_long_basic_complete);
+			as_incr_uint64(_job->si == NULL
+							? &ns->n_pi_query_long_basic_complete
+							: &ns->n_si_query_long_basic_complete);
 		}
 		break;
 	case AS_ERR_TIMEOUT:
 		// Note - can't timeout long queries.
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_short_basic_timeout :
-				&ns->n_si_query_short_basic_timeout);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_short_basic_timeout
+										: &ns->n_si_query_short_basic_timeout);
 		break;
 	case AS_ERR_QUERY_ABORT:
 		// Note - can't abort short queries.
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_long_basic_abort :
-				&ns->n_si_query_long_basic_abort);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_long_basic_abort
+										: &ns->n_si_query_long_basic_abort);
 		break;
 	case AS_ERR_UNKNOWN:
 	case AS_QUERY_RESPONSE_ERROR:
 	case AS_QUERY_RESPONSE_TIMEOUT:
 	default:
 		if (_job->is_short) {
-			as_incr_uint64(_job->si == NULL ?
-					&ns->n_pi_query_short_basic_error :
-					&ns->n_si_query_short_basic_error);
+			as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_short_basic_error
+											: &ns->n_si_query_short_basic_error);
 		}
 		else {
-			as_incr_uint64(_job->si == NULL ?
-					&ns->n_pi_query_long_basic_error :
-					&ns->n_si_query_long_basic_error);
+			as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_long_basic_error
+											: &ns->n_si_query_long_basic_error);
 		}
 		break;
 	}
@@ -1965,6 +1974,10 @@ basic_query_job_destroy(as_query_job* _job)
 	}
 
 	as_exp_destroy(job->filter_exp);
+
+	if (job->msgp != NULL) {
+		cf_free(job->msgp);
+	}
 }
 
 static void
@@ -1987,8 +2000,8 @@ basic_query_job_init(basic_query_job* job)
 }
 
 static bool
-basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
-		cf_vector** bin_names)
+basic_query_get_ops(const as_transaction* tr, const char* ns_name,
+		cl_msg** msgp, cf_vector** bin_names)
 {
 	bool has_binlist = as_transaction_has_query_binlist(tr);
 	const as_msg* m = &tr->msgp->msg;
@@ -2002,16 +2015,16 @@ basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
 	if (! has_binlist && ! has_ops) {
 		return true;
 	}
-	// else - bin selection requested.
 
 	// TODO - temporary - won't need bin-list support after January 2023.
 	if (has_binlist) {
-		const as_msg_field* f = as_msg_field_get(m,
-				AS_MSG_FIELD_TYPE_QUERY_BINLIST);
+		const as_msg_field* f =
+				as_msg_field_get(m, AS_MSG_FIELD_TYPE_QUERY_BINLIST);
 		const uint8_t* data = f->data;
 		uint32_t n_bins = *data++; // only <= 255 bins (ops do more)
 
-		as_info_warn_deprecated("queries using the deprecated list option for bin names - upgrade your client");
+		as_info_warn_deprecated(
+				"queries using the deprecated list option for bin names - upgrade your client");
 
 		*bin_names = cf_vector_create(AS_BIN_NAME_MAX_SZ, n_bins, 0);
 
@@ -2021,6 +2034,7 @@ basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
 			if (! as_bin_name_check(data, len)) {
 				cf_warning(AS_QUERY, "ignoring bad bin name %.*s (%u)", len,
 						data, len);
+				data += len;
 				continue;
 			}
 
@@ -2036,34 +2050,37 @@ basic_query_get_bin_names(const as_transaction* tr, as_namespace* ns,
 
 		return true;
 	}
-	// else - has ops
-
-	*bin_names = cf_vector_create(AS_BIN_NAME_MAX_SZ, m->n_ops, 0);
+	// else - projection ops requested.
 
 	as_msg_op* op = NULL;
-	uint16_t n = 0;
+	as_msg_op* first = NULL;
+	uint16_t i = 0;
+	size_t total_ops_sz = 0;
 
-	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
+	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
 		if (! as_bin_name_check(op->name, op->name_sz)) {
-			cf_warning(AS_QUERY, "ignoring bad bin name %.*s (%u)", op->name_sz,
+			cf_warning(AS_QUERY, "bad bin name %.*s (%u)", op->name_sz,
 					op->name, op->name_sz);
-			continue;
+			return false;
 		}
 
-		if (op->op != AS_MSG_OP_READ) {
-			char msg[100];
-			snprintf(msg, sizeof(msg), "queries should only provide read bin ops - not %u",
-				op->op);
-			as_info_warn_deprecated(msg);
+		if (! OP_IS_READ(op->op)) {
+			cf_warning(AS_QUERY,
+					"queries should only provide read ops - not %u", op->op);
+			return false;
 		}
 
-		char bin_name[AS_BIN_NAME_MAX_SZ];
+		if (first == NULL) {
+			first = op;
+		}
 
-		memcpy(bin_name, op->name, op->name_sz);
-		bin_name[op->name_sz] = '\0';
-
-		cf_vector_append(*bin_names, bin_name);
+		total_ops_sz += sizeof(op->op_sz) + op->op_sz;
 	}
+
+	uint8_t info2 = m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS;
+
+	*msgp = as_msg_create_internal(ns_name, AS_MSG_INFO1_READ, info2, 0, 0,
+			m->n_ops, (uint8_t*)first, total_ops_sz);
 
 	return true;
 }
@@ -2131,7 +2148,9 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 
 	as_masking_ctx ms;
 	rd.mask_ctx = as_masking_ctx_init(&ms, _job->ns->name, rd.p_set,
-			_job->username, NULL) ? &ms : NULL;
+						  _job->username, NULL)
+			? &ms
+			: NULL;
 
 	if (filter_exp != NULL && read_and_filter_bins(&rd, filter_exp) != 0) {
 		as_storage_record_close(&rd);
@@ -2173,9 +2192,10 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	}
 	else {
 		as_bin stack_bins[RECORD_MAX_BINS];
-		int result = (job->bin_names ?
-				as_storage_rd_lazy_load_bins(&rd, stack_bins) :
-				as_storage_rd_load_bins(&rd, stack_bins));
+
+		int result = (job->msgp != NULL || job->bin_names != NULL
+						? as_storage_rd_lazy_load_bins(&rd, stack_bins)
+						: as_storage_rd_load_bins(&rd, stack_bins));
 
 		if (result < 0) {
 			cf_warning(AS_QUERY, "job %lu - record unreadable", _job->trid);
@@ -2185,8 +2205,23 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 			return true;
 		}
 
-		as_msg_make_response_bufbuilder(slice->bb_r, &rd, false, job->bin_names,
-				_job->si != NULL, bval);
+		if (job->msgp != NULL) {
+			bool rv = apply_ops_make_response(slice->bb_r, &rd, job->msgp,
+					_job->si != NULL, bval);
+
+			if (! rv) {
+				cf_warning(AS_QUERY, "job %lu - apply_ops_make_response failed",
+						_job->trid);
+				as_storage_record_close(&rd);
+				as_record_done(r_ref, ns);
+				as_incr_uint64(&_job->n_failed);
+				return true;
+			}
+		}
+		else {
+			as_msg_make_response_bufbuilder(slice->bb_r, &rd, false,
+					job->bin_names, _job->si != NULL, bval);
+		}
 	}
 
 	as_storage_record_close(&rd);
@@ -2207,7 +2242,7 @@ basic_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata)
 	// and reset the buf-builder to start a new proto.
 	if (bb->used_sz > QUERY_CHUNK_LIMIT) {
 		if (! conn_query_job_send_response((conn_query_job*)job, bb->buf,
-				bb->used_sz)) {
+					bb->used_sz)) {
 			return true;
 		}
 
@@ -2242,6 +2277,199 @@ basic_query_filter_meta(const basic_query_job* job, const as_record* r,
 	return tv == AS_EXP_TRUE;
 }
 
+static bool
+build_ops_response_msg(cf_buf_builder** bb_r, as_storage_rd* rd,
+		as_msg_op** ops, as_bin** response_bins, uint32_t n_response_bins,
+		bool send_bval, int64_t bval)
+{
+	as_namespace* ns = rd->ns;
+	as_record* r = rd->r;
+	cf_digest* keyd = &r->keyd;
+	size_t ns_len = strlen(ns->name);
+	const char* set_name = as_index_get_set_name(r, ns);
+	size_t set_name_len = set_name ? strlen(set_name) : 0;
+
+	const uint8_t* key = NULL;
+	uint32_t key_size = 0;
+
+	if (r->key_stored == 1) {
+		if (! as_storage_rd_load_key(rd)) {
+			cf_warning(AS_QUERY, "{%s} build_ops_response_msg: can't get key %pD",
+					ns->name, keyd);
+			return false;
+		}
+
+		key = rd->key;
+		key_size = rd->key_size;
+	}
+
+	uint16_t n_fields = 2;
+	size_t msg_sz = sizeof(as_msg) + sizeof(as_msg_field) + ns_len +
+			sizeof(as_msg_field) + sizeof(cf_digest);
+
+	if (set_name) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + set_name_len;
+	}
+
+	if (key) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + key_size;
+	}
+
+	if (send_bval) {
+		n_fields++;
+		msg_sz += sizeof(as_msg_field) + sizeof(bval);
+	}
+
+	msg_sz += sizeof(as_msg_op) * n_response_bins;
+
+	for (uint32_t i = 0; i < n_response_bins; i++) {
+		msg_sz += ops[i]->name_sz;
+
+		if (response_bins[i]) {
+			msg_sz += as_bin_particle_client_value_size(response_bins[i]);
+		}
+	}
+
+	uint8_t* buf;
+	cf_buf_builder_reserve(bb_r, (int)msg_sz, &buf);
+
+	as_msg* m = (as_msg*)buf;
+	m->header_sz = sizeof(as_msg);
+	m->info1 = 0;
+	m->info2 = 0;
+	m->info3 = 0;
+	m->info4 = 0;
+	m->result_code = AS_OK;
+	m->generation = plain_generation(r->generation, ns);
+	m->record_ttl = r->void_time;
+	m->transaction_ttl = 0;
+	m->n_fields = n_fields;
+	m->n_ops = n_response_bins;
+
+	as_msg_swap_header(m);
+
+	buf = m->data;
+
+	as_msg_field* mf = (as_msg_field*)buf;
+	mf->field_sz = ns_len + 1;
+	mf->type = AS_MSG_FIELD_TYPE_NAMESPACE;
+	memcpy(mf->data, ns->name, ns_len);
+	as_msg_swap_field(mf);
+	buf += sizeof(as_msg_field) + ns_len;
+
+	mf = (as_msg_field*)buf;
+	mf->field_sz = sizeof(cf_digest) + 1;
+	mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
+	memcpy(mf->data, &r->keyd, sizeof(cf_digest));
+	as_msg_swap_field(mf);
+	buf += sizeof(as_msg_field) + sizeof(cf_digest);
+
+	if (set_name) {
+		mf = (as_msg_field*)buf;
+		mf->field_sz = set_name_len + 1;
+		mf->type = AS_MSG_FIELD_TYPE_SET;
+		memcpy(mf->data, set_name, set_name_len);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + set_name_len;
+	}
+
+	if (key) {
+		mf = (as_msg_field*)buf;
+		mf->field_sz = key_size + 1;
+		mf->type = AS_MSG_FIELD_TYPE_KEY;
+		memcpy(mf->data, key, key_size);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + key_size;
+	}
+
+	if (send_bval) {
+		mf = (as_msg_field*)buf;
+		mf->field_sz = sizeof(bval) + 1;
+		mf->type = AS_MSG_FIELD_TYPE_BVAL_ARRAY;
+		*(uint64_t*)mf->data = cf_swap_to_le64((uint64_t)bval);
+		as_msg_swap_field(mf);
+		buf += sizeof(as_msg_field) + sizeof(bval);
+	}
+
+	for (uint32_t i = 0; i < n_response_bins; i++) {
+		as_msg_op* op = (as_msg_op*)buf;
+
+		op->has_lut = 0;
+		op->unused_flags = 0;
+
+		op->op = ops[i]->op;
+		op->name_sz = ops[i]->name_sz;
+		memcpy(op->name, ops[i]->name, op->name_sz);
+		op->op_sz = OP_FIXED_SZ + op->name_sz;
+
+		buf += sizeof(as_msg_op) + op->name_sz;
+		buf += as_bin_particle_to_client(response_bins[i], op);
+
+		as_msg_swap_op(op);
+	}
+
+	return true;
+}
+
+static bool
+apply_ops_make_response(cf_buf_builder** bb_r, as_storage_rd* rd, cl_msg* msgp,
+		bool send_bval, int64_t bval)
+{
+	as_msg* m = &msgp->msg;
+	as_msg_op* op = NULL;
+	uint16_t n_ops = m->n_ops;
+	uint16_t i = 0;
+	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
+
+	if (n_ops > MAX_N_OPS) {
+		cf_warning(AS_QUERY,
+				"{%s} apply_ops_make_response: bad number of ops %u, can't exceed %u bin ops %pD",
+				rd->ns->name, n_ops, MAX_N_OPS, &rd->r->keyd);
+		return false;
+	}
+
+	as_msg_op* ops[n_ops];
+	as_bin* response_bins[n_ops];
+	uint32_t n_response_bins = 0;
+
+	as_bin result_bins[n_ops];
+	uint32_t n_result_bins = 0;
+
+	while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
+		as_bin bin;
+		as_bin* result_bin = &bin;
+		int error_code;
+
+		read_op_result read_result = process_bin_read_op(rd, op, respond_all_ops,
+				result_bins, &n_result_bins, &result_bin, &error_code);
+
+		if (read_result == READ_OP_RESULT_ERROR) {
+			// TODO: handle error code - add stats?
+			as_bin_destroy_all(result_bins, n_result_bins);
+			return false;
+		}
+		else if (read_result == READ_OP_RESULT_SUCCESS) {
+			if (respond_all_ops || result_bin != NULL) {
+				ops[n_response_bins] = op;
+				response_bins[n_response_bins++] = result_bin;
+			}
+		}
+	}
+
+	if (n_response_bins > 0) {
+		if (! build_ops_response_msg(bb_r, rd, ops, response_bins,
+					n_response_bins, send_bval, bval)) {
+			as_bin_destroy_all(result_bins, n_result_bins);
+			return false;
+		}
+	}
+
+	as_bin_destroy_all(result_bins, n_result_bins);
+
+	return true;
+}
 
 //==============================================================================
 // aggr_query_job derived class implementation.
@@ -2260,17 +2488,14 @@ typedef struct aggr_query_job_s {
 	bool ostream_failed; // TODO - hack for hotfix - replace eventually
 } aggr_query_job;
 
-static void aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
+static void aggr_query_job_slice(as_query_job* _job,
+		as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void aggr_query_job_finish(as_query_job* _job);
 static void aggr_query_job_destroy(as_query_job* _job);
 static void aggr_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
-static const as_query_vtable aggr_query_job_vtable = {
-	aggr_query_job_slice,
-	aggr_query_job_finish,
-	aggr_query_job_destroy,
-	aggr_query_job_info
-};
+static const as_query_vtable aggr_query_job_vtable = { aggr_query_job_slice,
+	aggr_query_job_finish, aggr_query_job_destroy, aggr_query_job_info };
 
 typedef struct aggr_query_slice_s {
 	aggr_query_job* job;
@@ -2281,20 +2506,21 @@ typedef struct aggr_query_slice_s {
 static void aggr_query_job_init(aggr_query_job* job);
 static bool aggr_query_init(as_aggr_call* call, const as_transaction* tr);
 static bool aggr_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
-static bool aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
-static void aggr_query_add_digest(const as_namespace* ns, cf_ll* ll, as_index_ref* r_ref);
+static bool aggr_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval,
+		void* udata);
+static void aggr_query_add_digest(const as_namespace* ns, cf_ll* ll,
+		as_index_ref* r_ref);
 static as_stream_status aggr_query_ostream_write(void* udata, as_val* val);
 static bool aggr_query_pre_check(void* udata, udf_record* urecord);
-static void aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val, bool success);
+static void aggr_query_add_val_response(aggr_query_slice* slice,
+		const as_val* val, bool success);
 
 static const as_aggr_hooks pi_query_aggr_hooks = {
-	.ostream_write = aggr_query_ostream_write,
-	.pre_check     = NULL
+	.ostream_write = aggr_query_ostream_write, .pre_check = NULL
 };
 
 static const as_aggr_hooks si_query_aggr_hooks = {
-	.ostream_write = aggr_query_ostream_write,
-	.pre_check     = aggr_query_pre_check
+	.ostream_write = aggr_query_ostream_write, .pre_check = aggr_query_pre_check
 };
 
 //----------------------------------------------------------
@@ -2316,7 +2542,8 @@ aggr_query_job_start(as_transaction* tr, as_namespace* ns)
 	}
 
 	if (as_transaction_has_predexp(tr)) {
-		cf_warning(AS_QUERY, "aggregation queries do not support predexp filters");
+		cf_warning(AS_QUERY,
+				"aggregation queries do not support predexp filters");
 		return AS_ERR_UNSUPPORTED_FEATURE;
 	}
 
@@ -2351,7 +2578,7 @@ aggr_query_job_start(as_transaction* tr, as_namespace* ns)
 			return AS_ERR_SINDEX_NOT_READABLE;
 		}
 
-		if (sindex_must_mask (_job)) {
+		if (sindex_must_mask(_job)) {
 			as_query_job_destroy(_job);
 			return AS_SEC_ERR_ROLE_VIOLATION;
 		}
@@ -2389,10 +2616,11 @@ aggr_query_job_start(as_transaction* tr, as_namespace* ns)
 		return AS_ERR_PARAMETER;
 	}
 
-	cf_debug(AS_QUERY, "starting aggregation query job %lu {%s:%s:%s} rps %u socket-timeout %d from %s",
+	cf_debug(AS_QUERY,
+			"starting aggregation query job %lu {%s:%s:%s} rps %u socket-timeout %d from %s",
 			_job->trid, ns->name, _job->set_name,
-			_job->si != NULL ? _job->si_name : "<pi-query>",
-			_job->rps, conn_job->fd_timeout, _job->client);
+			_job->si != NULL ? _job->si_name : "<pi-query>", _job->rps,
+			conn_job->fd_timeout, _job->client);
 
 	if ((result = as_query_manager_start_job(_job)) != AS_OK) {
 		cf_detail(AS_QUERY, "aggregation query job %lu failed to start (%d)",
@@ -2441,7 +2669,7 @@ aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	}
 	else {
 		if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
-				aggr_pi_query_job_reduce_cb, (void*)&slice)) {
+					aggr_pi_query_job_reduce_cb, (void*)&slice)) {
 			as_index_reduce(rsv->tree, aggr_pi_query_job_reduce_cb,
 					(void*)&slice);
 		}
@@ -2495,8 +2723,7 @@ aggr_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	cf_ll_reduce(&ll, true, as_aggr_keys_release_cb, &udata);
 
 	if (bb->used_sz > sizeof(as_proto)) {
-		conn_query_job_send_response((conn_query_job*)job, bb->buf,
-				bb->used_sz);
+		conn_query_job_send_response((conn_query_job*)job, bb->buf, bb->used_sz);
 	}
 
 	*bb_r = bb;
@@ -2518,19 +2745,19 @@ aggr_query_job_finish(as_query_job* _job)
 
 	switch (_job->abandoned) {
 	case 0:
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_aggr_complete : &ns->n_si_query_aggr_complete);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_aggr_complete
+										: &ns->n_si_query_aggr_complete);
 		break;
 	case AS_ERR_QUERY_ABORT:
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_aggr_abort : &ns->n_si_query_aggr_abort);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_aggr_abort
+										: &ns->n_si_query_aggr_abort);
 		break;
 	case AS_ERR_UNKNOWN:
 	case AS_QUERY_RESPONSE_ERROR:
 	case AS_QUERY_RESPONSE_TIMEOUT:
 	default:
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_aggr_error : &ns->n_si_query_aggr_error);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_aggr_error
+										: &ns->n_si_query_aggr_error);
 		break;
 	}
 
@@ -2574,8 +2801,9 @@ aggr_query_init(as_aggr_call* call, const as_transaction* tr)
 		return false;
 	}
 
-	call->aggr_hooks = as_transaction_has_where_clause(tr) ?
-			&si_query_aggr_hooks : &pi_query_aggr_hooks;
+	call->aggr_hooks = as_transaction_has_where_clause(tr)
+			? &si_query_aggr_hooks
+			: &pi_query_aggr_hooks;
 
 	return true;
 }
@@ -2721,7 +2949,7 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 	if ((size == 0 && (val->type == AS_LIST || val->type == AS_MAP)) ||
 			// 7 is name length of SUCCESS or FAILURE bin. TODO - clean up.
 			size + sizeof(as_msg) + sizeof(as_msg_op) + 7 + bb->used_sz >
-			PROTO_SIZE_MAX) {
+					PROTO_SIZE_MAX) {
 		cf_warning(AS_QUERY, "aggregation output too big (%u)", size);
 
 		// TODO - hack for hotfix - replace eventually ...
@@ -2748,7 +2976,6 @@ aggr_query_add_val_response(aggr_query_slice* slice, const as_val* val,
 	}
 }
 
-
 //==============================================================================
 // udf_bg_query_job derived class implementation.
 //
@@ -2766,21 +2993,19 @@ typedef struct udf_bg_query_job_s {
 	uint32_t n_active_tr;
 } udf_bg_query_job;
 
-static void udf_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
+static void udf_bg_query_job_slice(as_query_job* _job,
+		as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void udf_bg_query_job_finish(as_query_job* _job);
 static void udf_bg_query_job_destroy(as_query_job* _job);
 static void udf_bg_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
-static const as_query_vtable udf_bg_query_job_vtable = {
-	udf_bg_query_job_slice,
-	udf_bg_query_job_finish,
-	udf_bg_query_job_destroy,
-	udf_bg_query_job_info
-};
+static const as_query_vtable udf_bg_query_job_vtable = { udf_bg_query_job_slice,
+	udf_bg_query_job_finish, udf_bg_query_job_destroy, udf_bg_query_job_info };
 
 static void udf_bg_query_job_init(udf_bg_query_job* job);
 static bool udf_bg_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
-static bool udf_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
+static bool udf_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval,
+		void* udata);
 static bool udf_bg_query_record_check(void* udata, as_storage_rd* rd);
 static void udf_bg_query_tr_complete(void* udata, int result);
 
@@ -2838,7 +3063,7 @@ udf_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 			return AS_ERR_SINDEX_NOT_READABLE;
 		}
 
-		if (sindex_must_mask (_job)) {
+		if (sindex_must_mask(_job)) {
 			as_query_job_destroy(_job);
 			return AS_SEC_ERR_ROLE_VIOLATION;
 		}
@@ -2929,7 +3154,7 @@ udf_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	}
 	else {
 		if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
-				udf_bg_pi_query_job_reduce_cb, (void*)_job)) {
+					udf_bg_pi_query_job_reduce_cb, (void*)_job)) {
 			as_index_reduce(rsv->tree, udf_bg_pi_query_job_reduce_cb,
 					(void*)_job);
 		}
@@ -2952,19 +3177,18 @@ udf_bg_query_job_finish(as_query_job* _job)
 
 	switch (_job->abandoned) {
 	case 0:
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_udf_bg_complete :
-				&ns->n_si_query_udf_bg_complete);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_udf_bg_complete
+										: &ns->n_si_query_udf_bg_complete);
 		break;
 	case AS_ERR_QUERY_ABORT:
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_udf_bg_abort : &ns->n_si_query_udf_bg_abort);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_udf_bg_abort
+										: &ns->n_si_query_udf_bg_abort);
 		break;
 	case AS_ERR_UNKNOWN:
 	default:
 		// Note - this is unreachable for now - we only abandon via abort.
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_udf_bg_error : &ns->n_si_query_udf_bg_error);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_udf_bg_error
+										: &ns->n_si_query_udf_bg_error);
 		break;
 	}
 
@@ -2994,10 +3218,8 @@ udf_bg_query_job_info(as_query_job* _job, cf_dyn_buf* db)
 
 	udf_bg_query_job* job = (udf_bg_query_job*)_job;
 
-	cf_dyn_buf_append_format(db,
-			":udf-filename=%s:udf-function=%s:udf-active=%u",
-			job->origin.def.filename, job->origin.def.function,
-			job->n_active_tr);
+	cf_dyn_buf_append_format(db, ":udf-filename=%s:udf-function=%s:udf-active=%u",
+			job->origin.def.filename, job->origin.def.function, job->n_active_tr);
 }
 
 //----------------------------------------------------------
@@ -3115,8 +3337,6 @@ udf_bg_query_tr_complete(void* udata, int result)
 	as_decr_uint32_rls(&job->n_active_tr);
 }
 
-
-
 //==============================================================================
 // ops_bg_query_job derived class implementation.
 //
@@ -3134,22 +3354,20 @@ typedef struct ops_bg_query_job_s {
 	uint32_t n_active_tr;
 } ops_bg_query_job;
 
-static void ops_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv, cf_buf_builder** bb_r);
+static void ops_bg_query_job_slice(as_query_job* _job,
+		as_partition_reservation* rsv, cf_buf_builder** bb_r);
 static void ops_bg_query_job_finish(as_query_job* _job);
 static void ops_bg_query_job_destroy(as_query_job* _job);
 static void ops_bg_query_job_info(as_query_job* _job, cf_dyn_buf* db);
 
-static const as_query_vtable ops_bg_query_job_vtable = {
-	ops_bg_query_job_slice,
-	ops_bg_query_job_finish,
-	ops_bg_query_job_destroy,
-	ops_bg_query_job_info
-};
+static const as_query_vtable ops_bg_query_job_vtable = { ops_bg_query_job_slice,
+	ops_bg_query_job_finish, ops_bg_query_job_destroy, ops_bg_query_job_info };
 
 static void ops_bg_query_job_init(ops_bg_query_job* job);
 static uint8_t* ops_bg_query_get_ops(const as_msg* m, iops_expop** expops);
 static bool ops_bg_pi_query_job_reduce_cb(as_index_ref* r_ref, void* udata);
-static bool ops_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval, void* udata);
+static bool ops_bg_query_job_reduce_cb(as_index_ref* r_ref, int64_t bval,
+		void* udata);
 static bool ops_bg_query_record_check(void* udata, as_storage_rd* rd);
 static void ops_bg_query_tr_complete(void* udata, int result);
 
@@ -3201,7 +3419,7 @@ ops_bg_query_job_start(as_transaction* tr, as_namespace* ns)
 			return AS_ERR_SINDEX_NOT_READABLE;
 		}
 
-		if (sindex_must_mask (_job)) {
+		if (sindex_must_mask(_job)) {
 			as_query_job_destroy(_job);
 			return AS_SEC_ERR_ROLE_VIOLATION;
 		}
@@ -3297,7 +3515,7 @@ ops_bg_query_job_slice(as_query_job* _job, as_partition_reservation* rsv,
 	}
 	else {
 		if (! as_set_index_reduce(_job->ns, rsv->tree, _job->set_id, NULL,
-				ops_bg_pi_query_job_reduce_cb, (void*)_job)) {
+					ops_bg_pi_query_job_reduce_cb, (void*)_job)) {
 			as_index_reduce(rsv->tree, ops_bg_pi_query_job_reduce_cb,
 					(void*)_job);
 		}
@@ -3320,19 +3538,18 @@ ops_bg_query_job_finish(as_query_job* _job)
 
 	switch (_job->abandoned) {
 	case 0:
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_ops_bg_complete :
-				&ns->n_si_query_ops_bg_complete);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_ops_bg_complete
+										: &ns->n_si_query_ops_bg_complete);
 		break;
 	case AS_ERR_QUERY_ABORT:
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_ops_bg_abort : &ns->n_si_query_ops_bg_abort);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_ops_bg_abort
+										: &ns->n_si_query_ops_bg_abort);
 		break;
 	case AS_ERR_UNKNOWN:
 	default:
 		// Note - this is unreachable for now - we only abandon via abort.
-		as_incr_uint64(_job->si == NULL ?
-				&ns->n_pi_query_ops_bg_error : &ns->n_si_query_ops_bg_error);
+		as_incr_uint64(_job->si == NULL ? &ns->n_pi_query_ops_bg_error
+										: &ns->n_si_query_ops_bg_error);
 		break;
 	}
 
@@ -3416,7 +3633,7 @@ ops_bg_query_get_ops(const as_msg* m, iops_expop** p_expops)
 		while ((op = as_msg_op_iterate(m, op, &i)) != NULL) {
 			if (op->op == AS_MSG_OP_EXP_MODIFY) {
 				if (! as_exp_op_parse(op, &expops[i].exp, &expops[i].flags,
-						true, true)) {
+							true, true)) {
 					cf_warning(AS_QUERY, "ops query failed exp parse");
 					iops_expops_destroy(expops, i);
 					return NULL;

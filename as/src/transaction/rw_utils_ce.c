@@ -40,7 +40,6 @@
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -99,8 +98,7 @@ sufficient_replica_destinations(const as_namespace* ns, uint32_t n_dests)
 bool
 set_replica_destinations(as_transaction* tr, rw_request* rw)
 {
-	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
-			rw->dest_nodes);
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p, rw->dest_nodes);
 
 	return true;
 }
@@ -191,8 +189,7 @@ transition_delete_metadata(as_transaction* tr, as_record* r, bool is_delete,
 }
 
 bool
-forbid_resolve(const as_transaction* tr, const as_storage_rd* rd,
-		uint64_t msg_lut)
+forbid_resolve(const as_transaction* tr, const as_storage_rd* rd, uint64_t msg_lut)
 {
 	return false;
 }
@@ -234,7 +231,6 @@ delete_all_bins(as_storage_rd* rd)
 {
 	rd->n_bins = 0;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

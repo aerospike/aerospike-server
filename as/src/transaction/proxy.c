@@ -63,7 +63,6 @@
 #include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -89,33 +88,32 @@ COMPILER_ASSERT(sizeof(proxy_mt) / sizeof(msg_template) == NUM_PROXY_FIELDS);
 #define PROXY_MSG_SCRATCH_SIZE 128
 
 typedef struct proxy_request_s {
-	uint32_t		msg_fields;
+	uint32_t msg_fields;
 
-	uint8_t			origin;
-	uint8_t			from_flags;
+	uint8_t origin;
+	uint8_t from_flags;
 
 	union {
-		void*				any;
-		as_file_handle*		proto_fd_h;
-		as_batch_shared*	batch_shared;
+		void* any;
+		as_file_handle* proto_fd_h;
+		as_batch_shared* batch_shared;
 		monitor_roll_origin* monitor_roll_orig;
 		// No need yet for other members of this union.
 	} from;
 
 	// No need yet for a 'from_data" union.
-	uint32_t		batch_index;
+	uint32_t batch_index;
 
-	uint64_t		start_time;
-	uint64_t		end_time;
+	uint64_t start_time;
+	uint64_t end_time;
 
 	// The original proxy message.
-	msg*			fab_msg;
+	msg* fab_msg;
 
-	as_namespace*	ns;
+	as_namespace* ns;
 } proxy_request;
 
 #define TIMEOUT_PERIOD_US (5 * 1000) // 5 ms
-
 
 //==========================================================
 // Globals.
@@ -123,7 +121,6 @@ typedef struct proxy_request_s {
 
 static cf_shash* g_proxy_hash = NULL;
 static uint32_t g_proxy_tid = 0;
-
 
 //==========================================================
 // Forward declarations.
@@ -141,7 +138,6 @@ static void* run_proxy_timeout(void* arg);
 static int proxy_timeout_reduce_fn(const void* key, void* data, void* udata);
 
 static int proxy_msg_cb(cf_node src, msg* m, void* udata);
-
 
 //==========================================================
 // Inlines & macros.
@@ -185,7 +181,6 @@ batch_sub_proxy_update_stats(as_namespace* ns, uint8_t result_code)
 	}
 }
 
-
 //==========================================================
 // Public API.
 //
@@ -216,8 +211,8 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		cf_detail(AS_PROXY_DIVERT,
-				"{%s} diverting %pD from client %s to node %lx ",
-				ns->name, &tr->keyd, tr->from.proto_fd_h->client, dst);
+				"{%s} diverting %pD from client %s to node %lx ", ns->name,
+				&tr->keyd, tr->from.proto_fd_h->client, dst);
 		break;
 	case FROM_BATCH:
 		cf_detail(AS_PROXY_DIVERT,
@@ -226,14 +221,13 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns)
 				as_batch_get_fd_h(tr->from.batch_shared)->client, dst);
 		break;
 	case FROM_MONITOR_ROLL:
-		cf_detail(AS_PROXY_DIVERT,
-				"{%s} diverting %pD from monitor to node %lx ",
+		cf_detail(AS_PROXY_DIVERT, "{%s} diverting %pD from monitor to node %lx ",
 				ns->name, &tr->keyd, dst);
 		break;
 	case FROM_MONITOR_DELETE:
 		cf_detail(AS_PROXY_DIVERT,
-				"{%s} diverting monitor delete of %pD to node %lx ",
-				ns->name, &tr->keyd, dst);
+				"{%s} diverting monitor delete of %pD to node %lx ", ns->name,
+				&tr->keyd, dst);
 		break;
 	default:
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
@@ -321,8 +315,8 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
 	msg_set_uint32(m, PROXY_FIELD_TID, tr->from_data.proxy_tid);
 	msg_set_uint64(m, PROXY_FIELD_REDIRECT,
-			redirect_node == (cf_node)0 ? tr->from.proxy_orig->node :
-					redirect_node);
+			redirect_node == (cf_node)0 ? tr->from.proxy_orig->node
+										: redirect_node);
 
 	if (as_fabric_send(tr->from.proxy_orig->node, m, AS_FABRIC_CHANNEL_RW) !=
 			AS_FABRIC_SUCCESS) {
@@ -388,7 +382,6 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db,
 		as_fabric_msg_put(m);
 	}
 }
-
 
 //==========================================================
 // Local helpers - proxyer.
@@ -470,7 +463,7 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 	size_t proto_sz;
 
 	if (msg_get_buf(m, PROXY_FIELD_AS_PROTO, &proto, &proto_sz,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_PROXY, "msg get for proto failed");
 		return AS_ERR_UNKNOWN;
 	}
@@ -478,7 +471,7 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 	as_file_handle* fd_h = pr->from.proto_fd_h;
 
 	if (cf_socket_send_all(&fd_h->sock, proto, proto_sz, MSG_NOSIGNAL,
-			CF_SOCKET_TIMEOUT) < 0) {
+				CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		as_end_of_transaction_force_close(fd_h);
 		return AS_ERR_UNKNOWN;
@@ -495,7 +488,7 @@ proxyer_handle_batch_response(msg* m, proxy_request* pr)
 	size_t msgp_sz;
 
 	if (msg_get_buf(m, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp, &msgp_sz,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_PROXY, "msg get for proto failed");
 		return AS_ERR_UNKNOWN;
 	}
@@ -521,7 +514,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	cf_digest* keyd;
 
 	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_crash(AS_PROXY, "original msg get for digest failed");
 	}
 
@@ -547,7 +540,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	cl_msg* msgp;
 
 	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp, NULL,
-			MSG_GET_COPY_MALLOC) != 0) {
+				MSG_GET_COPY_MALLOC) != 0) {
 		cf_crash(AS_PROXY, "original msg get for proto failed");
 	}
 
@@ -571,7 +564,6 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	cf_mutex_unlock(lock);
 }
 
-
 //==========================================================
 // Local helpers - proxyee.
 //
@@ -582,7 +574,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	cf_digest* keyd;
 
 	if (msg_get_buf(m, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_PROXY, "msg get for digest failed");
 		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
@@ -592,7 +584,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	size_t msgp_sz;
 
 	if (msg_get_buf(m, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp, &msgp_sz,
-			MSG_GET_COPY_MALLOC) != 0) {
+				MSG_GET_COPY_MALLOC) != 0) {
 		cf_warning(AS_PROXY, "msg get for proto failed");
 		error_response(src, tid, AS_ERR_UNKNOWN);
 		return;
@@ -652,7 +644,6 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 
 	as_service_enqueue_internal(&tr);
 }
-
 
 //==========================================================
 // Local helpers - timeout.
@@ -724,7 +715,6 @@ proxy_timeout_reduce_fn(const void* key, void* data, void* udata)
 
 	return CF_SHASH_REDUCE_DELETE;
 }
-
 
 //==========================================================
 // Local helpers - handle PROXY fabric messages.

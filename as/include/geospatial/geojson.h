@@ -17,39 +17,39 @@
  */
 
 #ifndef __geojson_h
-#define __geojson_h		1
-
-#include <string>
+#define __geojson_h 1
 
 #include <jansson.h>
-
 #include <s2/s2cell_id.h>
 #include <s2/s2region.h>
+#include <string>
 
-namespace GeoJSON {
+namespace GeoJSON
+{
 
 class GeometryHandler
 {
 public:
 	virtual ~GeometryHandler() {}
 
-	virtual void handle_point(S2CellId const & cellid);
+	virtual void handle_point(S2CellId const& cellid);
 
-	virtual void handle_region(S2Region * i_regionp);
+	virtual void handle_region(S2Region* i_regionp);
 
-	virtual double earth_radius_meters() {
-		return 6371000.0;		// Wikipedia, mean radius.
+	virtual double earth_radius_meters()
+	{
+		return 6371000.0; // Wikipedia, mean radius.
 	}
 
-	void set_json(json_t * i_jsonp) { m_jsonp = i_jsonp; }
+	void set_json(json_t* i_jsonp) { m_jsonp = i_jsonp; }
 
-	json_t * get_json() { return m_jsonp; }
+	json_t* get_json() { return m_jsonp; }
 
 private:
-	json_t * m_jsonp;
+	json_t* m_jsonp;
 };
 
-void parse(GeometryHandler & geohand, std::string const & geostr);
+void parse(GeometryHandler& geohand, std::string const& geostr);
 
 } // end namespace GeoJSON
 

@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: audit
 
@@ -70,13 +70,14 @@ jobs:
           cond: ${{ github.event_name == 'pull_request' }}
           if_true: "github-pr-review"
           if_false: "github-check"
-      - uses: step-security/action-shfmt@51a443602d45eee5f745ffcb026154a33431cbc9 # v1.0.4
+      - uses: step-security/action-shfmt@efd9eed3c25dea0717f2adf3c92ac5d38b162fa6 # v1.0.5
         with:
-          reporter: ${{ steps.reporter.outputs.value }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           shfmt_flags: ''
           level: warning
-          filter_mode: file
+          filter_mode: added
           fail_level: any
+          reviewdog_flags: -reporter=${{ steps.reporter.outputs.value }}
 
   # hadolint:
   #   name: runner / hadolint

@@ -201,9 +201,8 @@
  * Set to a fraction of node timeout so that a new channel could be set up to
  * recover from a potentially bad connection before the node times out.
  */
-#define CHANNEL_NODE_READ_IDLE_TIMEOUT()					\
-(PULSE_TRANSMIT_INTERVAL()									\
-		* MAX(2, config_max_intervals_missed_get() / 3))
+#define CHANNEL_NODE_READ_IDLE_TIMEOUT()                                       \
+	(PULSE_TRANSMIT_INTERVAL() * MAX(2, config_max_intervals_missed_get() / 3))
 
 /**
  * Acquire a lock on the entire channel sub module.
@@ -361,14 +360,14 @@
 /**
  * Timeout for deeming a node dead based on received heartbeats.
  */
-#define HB_NODE_TIMEOUT()											\
-((config_max_intervals_missed_get() * config_tx_interval_get()))
+#define HB_NODE_TIMEOUT()                                                      \
+	((config_max_intervals_missed_get() * config_tx_interval_get()))
 
 /**
  * Intervals at which heartbeats are send.
  */
-#define PULSE_TRANSMIT_INTERVAL()							\
-(MAX(config_tx_interval_get(), AS_HB_TX_INTERVAL_MS_MIN))
+#define PULSE_TRANSMIT_INTERVAL()                                              \
+	(MAX(config_tx_interval_get(), AS_HB_TX_INTERVAL_MS_MIN))
 
 /**
  * Intervals at which adjacency tender runs.
@@ -384,14 +383,14 @@
 /**
  * Acquire a lock on the external event publisher.
  */
-#define EXTERNAL_EVENT_PUBLISH_LOCK()					\
-(pthread_mutex_lock(&g_external_event_publish_lock))
+#define EXTERNAL_EVENT_PUBLISH_LOCK()                                          \
+	(pthread_mutex_lock(&g_external_event_publish_lock))
 
 /**
  * Relinquish the lock on the external event publisher.
  */
-#define EXTERNAL_EVENT_PUBLISH_UNLOCK()					\
-(pthread_mutex_unlock(&g_external_event_publish_lock))
+#define EXTERNAL_EVENT_PUBLISH_UNLOCK()                                        \
+	(pthread_mutex_unlock(&g_external_event_publish_lock))
 
 /**
  * Acquire a lock on the heartbeat main module.
@@ -443,30 +442,33 @@
  * Allocate a buffer for heart beat messages. Larger buffers are heap allocated
  * to prevent stack overflows.
  */
-#define MSG_BUFF_ALLOC(size) (										\
-		(size) <= MSG_BUFFER_MAX_SIZE ?								\
-				(((size) > STACK_ALLOC_LIMIT) ?						\
-						cf_malloc(size) : alloca(size)) : NULL)
+#define MSG_BUFF_ALLOC(size)                                                   \
+	((size) <= MSG_BUFFER_MAX_SIZE                                             \
+					? (((size) > STACK_ALLOC_LIMIT) ? cf_malloc(size)          \
+													: alloca(size))            \
+					: NULL)
 
 /**
  * Allocate a buffer for heart beat messages. Larger buffers are heap allocated
  * to prevent stack overflows. Crashes the process on failure to allocate the
  * buffer.
  */
-#define MSG_BUFF_ALLOC_OR_DIE(size, crash_msg, ...)		\
-({														\
-	uint8_t* retval = MSG_BUFF_ALLOC((size));			\
-	if (!retval) {										\
-		CRASH(crash_msg, ##__VA_ARGS__);				\
-	}													\
-	retval;												\
-})
+#define MSG_BUFF_ALLOC_OR_DIE(size, crash_msg, ...)                            \
+	({                                                                         \
+		uint8_t* retval = MSG_BUFF_ALLOC((size));                              \
+		if (! retval) {                                                        \
+			CRASH(crash_msg, ##__VA_ARGS__);                                   \
+		}                                                                      \
+		retval;                                                                \
+	})
 
 /**
  * Free the buffer allocated by MSG_BUFF_ALLOC
  */
-#define MSG_BUFF_FREE(buffer, size)								\
-if (((size) > STACK_ALLOC_LIMIT) && buffer) {cf_free(buffer);}
+#define MSG_BUFF_FREE(buffer, size)                                            \
+	if (((size) > STACK_ALLOC_LIMIT) && buffer) {                              \
+		cf_free(buffer);                                                       \
+	}
 
 /**
  * Acquire a lock on the entire config sub module.
@@ -492,16 +494,19 @@ if (((size) > STACK_ALLOC_LIMIT) && buffer) {cf_free(buffer);}
  * Logging macros.
  */
 #define CRASH(format, ...) cf_crash(AS_HB, format, ##__VA_ARGS__)
-#define CRASH_NOSTACK(format, ...) cf_crash_nostack(AS_HB, format, ##__VA_ARGS__)
+#define CRASH_NOSTACK(format, ...)                                             \
+	cf_crash_nostack(AS_HB, format, ##__VA_ARGS__)
 #define WARNING(format, ...) cf_warning(AS_HB, format, ##__VA_ARGS__)
-#define TICKER_WARNING(format, ...)					\
-cf_ticker_warning(AS_HB, format, ##__VA_ARGS__)
+#define TICKER_WARNING(format, ...)                                            \
+	cf_ticker_warning(AS_HB, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_HB, format, ##__VA_ARGS__)
 #define TICKER_INFO(format, ...) cf_ticker_info(AS_HB, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_HB, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_HB, format, ##__VA_ARGS__)
-#define ASSERT(expression, message, ...)				\
-if (!(expression)) {WARNING(message, ##__VA_ARGS__);}
+#define ASSERT(expression, message, ...)                                       \
+	if (! (expression)) {                                                      \
+		WARNING(message, ##__VA_ARGS__);                                       \
+	}
 
 /*
  * ----------------------------------------------------------------------------
@@ -518,8 +523,7 @@ if (!(expression)) {WARNING(message, ##__VA_ARGS__);}
 /**
  * Heartbeat subsystem state.
  */
-typedef enum
-{
+typedef enum {
 	AS_HB_STATUS_UNINITIALIZED,
 	AS_HB_STATUS_RUNNING,
 	AS_HB_STATUS_SHUTTING_DOWN,
@@ -535,8 +539,7 @@ typedef enum
 /**
  * Mesh node status enum.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * The mesh node has an active channel.
 	 */
@@ -566,8 +569,7 @@ typedef enum
 /**
  * The info payload for a single node.
  */
-typedef struct as_hb_mesh_info_reply_s
-{
+typedef struct as_hb_mesh_info_reply_s {
 	/**
 	 * The nodeid of the node for which info reply is sent.
 	 */
@@ -578,13 +580,12 @@ typedef struct as_hb_mesh_info_reply_s
 	 * endpoint list. Always access as reply.endpoints[0].
 	 */
 	as_endpoint_list endpoint_list[];
-}__attribute__((__packed__)) as_hb_mesh_info_reply;
+} __attribute__((__packed__)) as_hb_mesh_info_reply;
 
 /**
  * Mesh endpoint search udata.
  */
-typedef struct
-{
+typedef struct {
 	/**
 	 * The endpoint to search.
 	 */
@@ -599,8 +600,7 @@ typedef struct
 /**
  * Mesh endpoint list search udata.
  */
-typedef struct as_hb_mesh_endpoint_list_reduce_udata_s
-{
+typedef struct as_hb_mesh_endpoint_list_reduce_udata_s {
 	/**
 	 * The endpoint to search.
 	 */
@@ -620,8 +620,7 @@ typedef struct as_hb_mesh_endpoint_list_reduce_udata_s
 /**
  * Information maintained for configured mesh seed nodes.
  */
-typedef struct as_hb_mesh_seed_s
-{
+typedef struct as_hb_mesh_seed_s {
 	/**
 	 * The name / ip address of this seed mesh host.
 	 */
@@ -677,8 +676,7 @@ typedef struct as_hb_mesh_seed_s
 /**
  * Information maintained for discovered mesh end points.
  */
-typedef struct as_hb_mesh_node_s
-{
+typedef struct as_hb_mesh_node_s {
 	/**
 	 * The heap allocated end point list for this mesh host. Should be freed
 	 * once the last mesh entry is removed from the mesh state.
@@ -709,8 +707,7 @@ typedef struct as_hb_mesh_node_s
 /**
  * State maintained for the mesh mode.
  */
-typedef struct as_hb_mesh_state_s
-{
+typedef struct as_hb_mesh_state_s {
 	/**
 	 * The sockets on which this instance accepts heartbeat tcp connections.
 	 */
@@ -762,8 +759,7 @@ typedef struct as_hb_mesh_state_s
 /**
  * Endpoint list of a single node(seed/non-seed).
  */
-typedef struct as_hb_node_to_connect_s
-{
+typedef struct as_hb_node_to_connect_s {
 	/**
 	 * The endpoint list.
 	 */
@@ -778,8 +774,7 @@ typedef struct as_hb_node_to_connect_s
 /**
  * Maintained by mesh tender to connect nodes(seeds/non-seeds).
  */
-typedef struct as_hb_mesh_nodes_to_connect_s
-{
+typedef struct as_hb_mesh_nodes_to_connect_s {
 	/**
 	 * The array of nodes to connect.
 	 */
@@ -810,8 +805,7 @@ typedef struct as_hb_mesh_nodes_to_connect_s
 /**
  * State maintained for the multicast mode.
  */
-typedef struct as_hb_multicast_state_s
-{
+typedef struct as_hb_multicast_state_s {
 	/**
 	 * The sockets associated with multicast mode.
 	 */
@@ -838,8 +832,7 @@ typedef struct as_hb_multicast_state_s
 /**
  * The type of a channel event.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * The endpoint has a channel tx/rx channel associated with it.
 	 */
@@ -866,8 +859,7 @@ typedef enum
 /**
  * Status for reads from a channel.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * The message was read successfully and parser.
 	 */
@@ -889,8 +881,7 @@ typedef enum
 	AS_HB_CHANNEL_MSG_READ_UNDEF
 } as_hb_channel_msg_read_status;
 
-typedef struct
-{
+typedef struct {
 	/**
 	 * The endpoint address to search channel by.
 	 */
@@ -907,8 +898,7 @@ typedef struct
 	cf_socket* socket;
 } as_hb_channel_endpoint_reduce_udata;
 
-typedef struct
-{
+typedef struct {
 	/**
 	 * The endpoint address to search channel by.
 	 */
@@ -920,8 +910,7 @@ typedef struct
 	bool found;
 } as_hb_channel_endpoint_iterate_udata;
 
-typedef struct
-{
+typedef struct {
 	/**
 	 * The message buffer to send.
 	 */
@@ -936,8 +925,7 @@ typedef struct
 /**
  * A channel represents a medium to send and receive messages.
  */
-typedef struct as_hb_channel_s
-{
+typedef struct as_hb_channel_s {
 	/**
 	 * Indicates if this channel is a multicast channel.
 	 */
@@ -978,8 +966,7 @@ typedef struct as_hb_channel_s
 /**
  * State maintained per heartbeat channel.
  */
-typedef struct as_hb_channel_state_s
-{
+typedef struct as_hb_channel_state_s {
 	/**
 	 * The poll handle. All IO wait across all heartbeat connections happens on
 	 * this handle.
@@ -1041,8 +1028,7 @@ typedef struct as_hb_channel_state_s
 /**
  * Entry queued up for socket close.
  */
-typedef struct as_hb_channel_socket_close_entry_s
-{
+typedef struct as_hb_channel_socket_close_entry_s {
 	/**
 	 * The node for which this event was generated.
 	 */
@@ -1060,8 +1046,7 @@ typedef struct as_hb_channel_socket_close_entry_s
 /**
  * An event generated by the channel sub module.
  */
-typedef struct as_hb_channel_event_s
-{
+typedef struct as_hb_channel_event_s {
 	/**
 	 * The channel event type.
 	 */
@@ -1094,8 +1079,7 @@ typedef struct as_hb_channel_event_s
 /**
  * Heartbeat message types.
  */
-typedef enum
-{
+typedef enum {
 	AS_HB_MSG_TYPE_PULSE,
 	AS_HB_MSG_TYPE_INFO_REQUEST,
 	AS_HB_MSG_TYPE_INFO_REPLY,
@@ -1105,8 +1089,7 @@ typedef enum
 /**
  * Events published by the heartbeat subsystem.
  */
-typedef enum
-{
+typedef enum {
 	AS_HB_INTERNAL_NODE_ARRIVE,
 	AS_HB_INTERNAL_NODE_DEPART,
 	AS_HB_INTERNAL_NODE_EVICT,
@@ -1116,13 +1099,11 @@ typedef enum
 /**
  * State maintained by the heartbeat subsystem for the selected mode.
  */
-typedef struct as_hb_mode_state_s
-{
+typedef struct as_hb_mode_state_s {
 	/**
 	 * The mesh / multicast state.
 	 */
-	union
-	{
+	union {
 		as_hb_mesh_state mesh_state;
 		as_hb_multicast_state multicast_state;
 	};
@@ -1131,8 +1112,7 @@ typedef struct as_hb_mode_state_s
 /**
  * Plugin data iterate reduce udata.
  */
-typedef struct
-{
+typedef struct {
 	/**
 	 * The plugin id.
 	 */
@@ -1152,8 +1132,7 @@ typedef struct
 /**
  * Information tracked for an adjacent nodes.
  */
-typedef struct as_hb_adjacent_node_s
-{
+typedef struct as_hb_adjacent_node_s {
 	/**
 	 * The heart beat protocol version.
 	 */
@@ -1209,8 +1188,7 @@ typedef struct as_hb_adjacent_node_s
 /**
  * Internal storage for external event listeners.
  */
-typedef struct as_hb_event_listener_s
-{
+typedef struct as_hb_event_listener_s {
 	/**
 	 * Registered callback function.
 	 */
@@ -1225,8 +1203,7 @@ typedef struct as_hb_event_listener_s
 /**
  * Heartbeat subsystem internal state.
  */
-typedef struct as_hb_s
-{
+typedef struct as_hb_s {
 	/**
 	 * The status of the subsystem.
 	 */
@@ -1296,8 +1273,7 @@ typedef struct as_hb_s
 /**
  * Registered heartbeat listeners.
  */
-typedef struct as_hb_external_events_s
-{
+typedef struct as_hb_external_events_s {
 	/**
 	 * Events are batched and published. Queue of unpublished heartbeat events.
 	 */
@@ -1317,8 +1293,7 @@ typedef struct as_hb_external_events_s
 /**
  * Shash reduce function to read current adjacency list.
  */
-typedef struct as_hb_adjacency_reduce_udata_s
-{
+typedef struct as_hb_adjacency_reduce_udata_s {
 	/**
 	 * The target adjacency list.
 	 */
@@ -1334,8 +1309,7 @@ typedef struct as_hb_adjacency_reduce_udata_s
  * Udata for finding nodes in the adjacency list not in the input succession
  * list.
  */
-typedef struct
-{
+typedef struct {
 	/**
 	 * Number of events generated.
 	 */
@@ -1365,8 +1339,7 @@ typedef struct
 /**
  * Shash reduce function to read current adjacency list.
  */
-typedef struct as_hb_adjacency_tender_udata_s
-{
+typedef struct as_hb_adjacency_tender_udata_s {
 	/**
 	 * The list of expired nodes.
 	 */
@@ -1391,8 +1364,7 @@ typedef struct as_hb_adjacency_tender_udata_s
 /**
  * Udata for tip clear.
  */
-typedef struct as_hb_mesh_tip_clear_udata_s
-{
+typedef struct as_hb_mesh_tip_clear_udata_s {
 	/**
 	 * Host IP or DNS name to be cleared from seed list.
 	 */
@@ -1427,8 +1399,7 @@ typedef struct as_hb_mesh_tip_clear_udata_s
 /**
  * Convert endpoint list to string in a process function.
  */
-typedef struct endpoint_list_to_string_udata_s
-{
+typedef struct endpoint_list_to_string_udata_s {
 	/**
 	 * The endpoint list in string format.
 	 */
@@ -1443,8 +1414,7 @@ typedef struct endpoint_list_to_string_udata_s
 /**
  * Udata to fill an endpoint list into a message.
  */
-typedef struct endpoint_list_to_msg_udata_s
-{
+typedef struct endpoint_list_to_msg_udata_s {
 	/**
 	 * The target message.
 	 */
@@ -1459,8 +1429,7 @@ typedef struct endpoint_list_to_msg_udata_s
 /**
  * Udata to test if this endpoint list overlaps with other endpoint list.
  */
-typedef struct endpoint_list_equal_check_udata_s
-{
+typedef struct endpoint_list_equal_check_udata_s {
 	/**
 	 * The endpoint list of the new node.
 	 */
@@ -1477,14 +1446,13 @@ typedef struct endpoint_list_equal_check_udata_s
  * @param endpoint current endpoint in the iteration.
  * @param udata udata passed through from the invoker of the iterate function.
  */
-typedef void
-(*endpoint_list_process_fn)(const as_endpoint_list* endpoint_list, void* udata);
+typedef void (*endpoint_list_process_fn)(const as_endpoint_list* endpoint_list,
+		void* udata);
 
 /**
  * Seed host list reduce udata.
  */
-typedef struct as_hb_seed_host_list_udata_s
-{
+typedef struct as_hb_seed_host_list_udata_s {
 	/**
 	 * The buffer to receive the list.
 	 */
@@ -1561,31 +1529,32 @@ static pthread_mutex_t g_set_protocol_lock =
  */
 static msg_template g_hb_msg_template[] = {
 
-{ AS_HB_MSG_ID, M_FT_UINT32 },
+	{ AS_HB_MSG_ID, M_FT_UINT32 },
 
-{ AS_HB_MSG_TYPE, M_FT_UINT32 },
+	{ AS_HB_MSG_TYPE, M_FT_UINT32 },
 
-{ AS_HB_MSG_NODE, M_FT_UINT64 },
+	{ AS_HB_MSG_NODE, M_FT_UINT64 },
 
-{ AS_HB_MSG_CLUSTER_NAME, M_FT_STR },
+	{ AS_HB_MSG_CLUSTER_NAME, M_FT_STR },
 
-{ AS_HB_MSG_HLC_TIMESTAMP, M_FT_UINT64 },
+	{ AS_HB_MSG_HLC_TIMESTAMP, M_FT_UINT64 },
 
-{ AS_HB_MSG_ENDPOINTS, M_FT_BUF },
+	{ AS_HB_MSG_ENDPOINTS, M_FT_BUF },
 
-{ AS_HB_MSG_COMPRESSED_PAYLOAD, M_FT_BUF },
+	{ AS_HB_MSG_COMPRESSED_PAYLOAD, M_FT_BUF },
 
-{ AS_HB_MSG_INFO_REQUEST, M_FT_BUF },
+	{ AS_HB_MSG_INFO_REQUEST, M_FT_BUF },
 
-{ AS_HB_MSG_INFO_REPLY, M_FT_BUF },
+	{ AS_HB_MSG_INFO_REPLY, M_FT_BUF },
 
-{ AS_HB_MSG_FABRIC_DATA, M_FT_BUF },
+	{ AS_HB_MSG_FABRIC_DATA, M_FT_BUF },
 
-{ AS_HB_MSG_HB_DATA, M_FT_BUF },
+	{ AS_HB_MSG_HB_DATA, M_FT_BUF },
 
-{ AS_HB_MSG_PAXOS_DATA, M_FT_BUF },
+	{ AS_HB_MSG_PAXOS_DATA, M_FT_BUF },
 
-{ AS_HB_MSG_SKEW_MONITOR_DATA, M_FT_UINT64 } };
+	{ AS_HB_MSG_SKEW_MONITOR_DATA, M_FT_UINT64 }
+};
 
 /*
  * ----------------------------------------------------------------------------
@@ -1593,13 +1562,16 @@ static msg_template g_hb_msg_template[] = {
  * ----------------------------------------------------------------------------
  */
 
-static void info_append_addrs(cf_dyn_buf *db, const char *name, const cf_addr_list *list);
+static void info_append_addrs(cf_dyn_buf* db, const char* name,
+		const cf_addr_list* list);
 static uint32_t round_up_pow2(uint32_t v);
 static int vector_find(cf_vector* vector, const void* element);
 
 static void endpoint_list_copy(as_endpoint_list** dest, as_endpoint_list* src);
-static void endpoint_list_to_string_process(const as_endpoint_list* endpoint_list, void* udata);
-static void endpoint_list_equal_process(const as_endpoint_list* endpoint_list, void* udata);
+static void endpoint_list_to_string_process(const as_endpoint_list* endpoint_list,
+		void* udata);
+static void endpoint_list_equal_process(const as_endpoint_list* endpoint_list,
+		void* udata);
 
 static int msg_compression_threshold(int mtu);
 static int msg_endpoint_list_get(msg* msg, as_endpoint_list** endpoint_list);
@@ -1608,12 +1580,16 @@ static int msg_nodeid_get(msg* msg, cf_node* nodeid);
 static int msg_send_hlc_ts_get(msg* msg, as_hlc_timestamp* send_ts);
 static int msg_type_get(msg* msg, as_hb_msg_type* type);
 static int msg_cluster_name_get(msg* msg, char** cluster_name);
-static int msg_node_list_get(msg* msg, int field_id, cf_node** adj_list, size_t* adj_length);
+static int msg_node_list_get(msg* msg, int field_id, cf_node** adj_list,
+		size_t* adj_length);
 static int msg_adjacency_get(msg* msg, cf_node** adj_list, size_t* adj_length);
-static void msg_node_list_set(msg* msg, int field_id, cf_node* node_list, size_t node_length);
+static void msg_node_list_set(msg* msg, int field_id, cf_node* node_list,
+		size_t node_length);
 static void msg_adjacency_set(msg* msg, cf_node* adj_list, size_t adj_length);
-static int msg_info_reply_get(msg* msg, as_hb_mesh_info_reply** reply, size_t* reply_count);
-static void msg_published_endpoints_fill(const as_endpoint_list* published_endpoint_list, void* udata);
+static int msg_info_reply_get(msg* msg, as_hb_mesh_info_reply** reply,
+		size_t* reply_count);
+static void msg_published_endpoints_fill(const as_endpoint_list* published_endpoint_list,
+		void* udata);
 static void msg_src_fields_fill(msg* msg);
 static void msg_type_set(msg* msg, as_hb_msg_type msg_type);
 
@@ -1633,7 +1609,8 @@ static as_hb_protocol config_protocol_get();
 static void config_protocol_set(as_hb_protocol new_protocol);
 static cf_node config_self_nodeid_get();
 static as_hb_mode config_mode_get();
-static void config_bind_serv_cfg_expand(const cf_serv_cfg* bind_cfg, cf_serv_cfg* published_cfg, bool ipv4_only);
+static void config_bind_serv_cfg_expand(const cf_serv_cfg* bind_cfg,
+		cf_serv_cfg* published_cfg, bool ipv4_only);
 static bool config_binding_is_valid(char** error, as_hb_protocol protocol);
 
 static void channel_init_channel(as_hb_channel* channel);
@@ -1650,27 +1627,38 @@ static void channel_socket_shutdown(cf_socket* socket);
 static int channel_socket_get(cf_node nodeid, cf_socket** socket);
 static bool channel_cf_sockets_contains(cf_sockets* sockets, cf_socket* to_find);
 static void channel_socket_destroy(cf_socket* sock);
-static void channel_socket_close(cf_socket* socket, bool remote_close, bool raise_close_event);
+static void channel_socket_close(cf_socket* socket, bool remote_close,
+		bool raise_close_event);
 static void channel_sockets_close(cf_vector* sockets);
-static void channel_socket_close_queue(cf_socket* socket, bool is_remote_close, bool raise_close_event);
+static void channel_socket_close_queue(cf_socket* socket, bool is_remote_close,
+		bool raise_close_event);
 static void channel_socket_close_pending();
-static void channel_socket_register(cf_socket* socket, bool is_multicast, bool is_inbound, cf_sock_addr* endpoint_addr);
+static void channel_socket_register(cf_socket* socket, bool is_multicast,
+		bool is_inbound, cf_sock_addr* endpoint_addr);
 static void channel_accept_connection(cf_socket* lsock);
-static as_hb_channel_msg_read_status channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len);
-static void channel_endpoint_find_iterate_fn(const as_endpoint* endpoint, void* udata);
-static int channel_endpoint_search_reduce(const void* key, void* data, void* udata);
+static as_hb_channel_msg_read_status channel_compressed_message_parse(msg* msg,
+		void* buffer, int buffer_content_len);
+static void channel_endpoint_find_iterate_fn(const as_endpoint* endpoint,
+		void* udata);
+static int channel_endpoint_search_reduce(const void* key, void* data,
+		void* udata);
 static bool channel_endpoint_is_connected(as_endpoint_list* endpoint_list);
-static as_hb_channel_msg_read_status channel_multicast_msg_read(cf_socket* socket, msg* msg);
-static as_hb_channel_msg_read_status channel_mesh_msg_read(cf_socket* socket, msg* msg);
-static void channel_node_attach(cf_socket* socket, as_hb_channel* channel, cf_node nodeid);
+static as_hb_channel_msg_read_status channel_multicast_msg_read(cf_socket* socket,
+		msg* msg);
+static as_hb_channel_msg_read_status channel_mesh_msg_read(cf_socket* socket,
+		msg* msg);
+static void channel_node_attach(cf_socket* socket, as_hb_channel* channel,
+		cf_node nodeid);
 static bool channel_socket_should_live(cf_socket* socket, as_hb_channel* channel);
 static cf_socket* channel_socket_resolve(cf_socket* socket1, cf_socket* socket2);
 static int channel_msg_sanity_check(as_hb_channel_event* msg_event);
-static int channel_msg_event_process(cf_socket* socket, as_hb_channel_event* event);
+static int channel_msg_event_process(cf_socket* socket,
+		as_hb_channel_event* event);
 static void channel_msg_read(cf_socket* socket);
 static void channel_channels_idle_check();
 void* channel_tender(void* arg);
-static bool channel_mesh_endpoint_filter(const as_endpoint* endpoint, void* udata);
+static bool channel_mesh_endpoint_filter(const as_endpoint* endpoint,
+		void* udata);
 static void channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect);
 static void channel_mesh_listening_socks_register(cf_sockets* listening_sockets);
 static void channel_mesh_listening_socks_deregister(cf_sockets* listening_sockets);
@@ -1680,11 +1668,14 @@ static void channel_init();
 static void channel_start();
 static int channel_sockets_get_reduce(const void* key, void* data, void* udata);
 static void channel_stop();
-static int channel_mesh_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length);
-static int channel_multicast_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length);
+static int channel_mesh_msg_send(cf_socket* socket, uint8_t* buff,
+		size_t buffer_length);
+static int channel_multicast_msg_send(cf_socket* socket, uint8_t* buff,
+		size_t buffer_length);
 static bool channel_msg_is_compression_required(msg* msg, int wire_size, int mtu);
 static int channel_msg_buffer_size_get(int wire_size, int mtu);
-static size_t channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu, uint8_t* buffer, size_t buffer_len);
+static size_t channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
+		uint8_t* buffer, size_t buffer_len);
 static int channel_msg_unicast(cf_node dest, msg* msg);
 static int channel_msg_broadcast_reduce(const void* key, void* data, void* udata);
 static int channel_msg_broadcast(msg* msg);
@@ -1694,17 +1685,22 @@ static void channel_dump(bool verbose);
 
 static bool mesh_is_running();
 static bool mesh_is_stopped();
-static void mesh_published_endpoints_process(endpoint_list_process_fn process_fn, void* udata);
+static void mesh_published_endpoints_process(endpoint_list_process_fn process_fn,
+		void* udata);
 static const char* mesh_node_status_string(as_hb_mesh_node_status status);
-static void mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname, const cf_ip_addr *addrs, uint32_t n_addrs, void *udata);
+static void mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname,
+		const cf_ip_addr* addrs, uint32_t n_addrs, void* udata);
 static int mesh_seed_dns_resolve(as_hb_mesh_seed* seed);
 static int mesh_seed_find_unsafe(char* host, int port);
-static void mesh_reinit_nodes_to_connect(as_hb_mesh_nodes_to_connect* to_connect, int mesh_node_count);
-static void mesh_node_status_change(as_hb_mesh_node* mesh_node, as_hb_mesh_node_status new_status);
+static void mesh_reinit_nodes_to_connect(as_hb_mesh_nodes_to_connect* to_connect,
+		int mesh_node_count);
+static void mesh_node_status_change(as_hb_mesh_node* mesh_node,
+		as_hb_mesh_node_status new_status);
 static void mesh_listening_sockets_close();
 static void mesh_seed_host_list_get(cf_dyn_buf* db, bool tls);
 static void mesh_seed_inactive_refresh_get_unsafe(cf_vector* inactive_seeds_p);
-static void mesh_seeds_mesh_node_match_update(cf_vector* inactive_seeds_p, as_hb_mesh_node* mesh_node, cf_node mesh_nodeid);
+static void mesh_seeds_mesh_node_match_update(cf_vector* inactive_seeds_p,
+		as_hb_mesh_node* mesh_node, cf_node mesh_nodeid);
 static int mesh_tend_reduce_cb(const void* key, void* data, void* udata);
 void* mesh_tender(void* arg);
 static void mesh_node_destroy(as_hb_mesh_node* mesh_node);
@@ -1714,10 +1710,13 @@ static int mesh_node_get(cf_node nodeid, as_hb_mesh_node* mesh_node);
 static void mesh_channel_on_node_disconnect(as_hb_channel_event* event);
 static bool mesh_node_check_fix_self_msg(as_hb_channel_event* event);
 static void mesh_node_data_update(as_hb_channel_event* event);
-static int mesh_info_reply_sizeof(as_hb_mesh_info_reply* reply, int reply_count, size_t* reply_size);
-static void mesh_nodes_send_info_reply(cf_node dest, as_hb_mesh_info_reply* reply, size_t reply_count);
+static int mesh_info_reply_sizeof(as_hb_mesh_info_reply* reply, int reply_count,
+		size_t* reply_size);
+static void mesh_nodes_send_info_reply(cf_node dest,
+		as_hb_mesh_info_reply* reply, size_t reply_count);
 static msg* mesh_info_msg_init(as_hb_msg_type msg_type);
-static void mesh_nodes_send_info_request(msg* in_msg, cf_node dest, cf_node* to_discover, size_t to_discover_count);
+static void mesh_nodes_send_info_request(msg* in_msg, cf_node dest,
+		cf_node* to_discover, size_t to_discover_count);
 static void mesh_channel_on_pulse(msg* msg);
 static void mesh_channel_on_info_request(msg* msg);
 static void mesh_channel_on_info_reply(msg* msg);
@@ -1753,23 +1752,32 @@ static void hb_msg_init();
 static uint32_t hb_protocol_identifier_get();
 static cf_clock hb_node_depart_time(cf_clock detect_time);
 static bool hb_is_mesh();
-static void hb_event_queue(as_hb_internal_event_type event_type, const cf_node* nodes, int node_count);
+static void hb_event_queue(as_hb_internal_event_type event_type,
+		const cf_node* nodes, int node_count);
 static void hb_event_publish_pending();
-static int hb_adjacency_free_data_reduce(const void* key, void* data, void* udata);
+static int hb_adjacency_free_data_reduce(const void* key, void* data,
+		void* udata);
 static void hb_clear();
 static int hb_adjacency_iterate_reduce(const void* key, void* data, void* udata);
 static void hb_plugin_set_fn(msg* msg);
-static void hb_plugin_parse_data_fn(msg* msg, cf_node source, as_hb_plugin_node_data* prev_plugin_data, as_hb_plugin_node_data* plugin_data);
+static void hb_plugin_parse_data_fn(msg* msg, cf_node source,
+		as_hb_plugin_node_data* prev_plugin_data,
+		as_hb_plugin_node_data* plugin_data);
 static msg* hb_msg_get();
 static void hb_msg_return(msg* msg);
 static void hb_plugin_msg_fill(msg* msg);
-static void hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node, as_hb_plugin* plugins, bool plugin_data_changed[]);
+static void hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node,
+		as_hb_plugin* plugins, bool plugin_data_changed[]);
 static void hb_plugin_init();
 void* hb_transmitter(void* arg);
-static int hb_adjacent_node_get(cf_node nodeid, as_hb_adjacent_node* adjacent_node);
-static void hb_adjacent_node_plugin_data_get(as_hb_adjacent_node* adjacent_node, as_hb_plugin_id plugin_id, void** plugin_data, size_t* plugin_data_size);
-static void hb_adjacent_node_adjacency_get(as_hb_adjacent_node* adjacent_node, cf_node** adjacency_list, size_t* adjacency_length);
-static bool hb_node_has_expired(cf_node nodeid, as_hb_adjacent_node* adjacent_node);
+static int hb_adjacent_node_get(cf_node nodeid,
+		as_hb_adjacent_node* adjacent_node);
+static void hb_adjacent_node_plugin_data_get(as_hb_adjacent_node* adjacent_node,
+		as_hb_plugin_id plugin_id, void** plugin_data, size_t* plugin_data_size);
+static void hb_adjacent_node_adjacency_get(as_hb_adjacent_node* adjacent_node,
+		cf_node** adjacency_list, size_t* adjacency_length);
+static bool hb_node_has_expired(cf_node nodeid,
+		as_hb_adjacent_node* adjacent_node);
 static bool hb_self_is_duplicate();
 static void hb_self_duplicate_update();
 static void hb_adjacent_node_destroy(as_hb_adjacent_node* adjacent_node);
@@ -1783,11 +1791,14 @@ static void hb_init();
 static void hb_start();
 static void hb_stop();
 static void hb_plugin_register(as_hb_plugin* plugin);
-static bool hb_msg_is_obsolete(as_hb_channel_event* event, as_hlc_timestamp send_ts);
-static void hb_endpoint_change_tracker_update(uint64_t* tracker, bool endpoint_changed);
+static bool hb_msg_is_obsolete(as_hb_channel_event* event,
+		as_hlc_timestamp send_ts);
+static void hb_endpoint_change_tracker_update(uint64_t* tracker,
+		bool endpoint_changed);
 static bool hb_endpoint_change_tracker_is_normal(uint64_t tracker);
 static bool hb_endpoint_change_tracker_has_changed(uint64_t tracker);
-static int hb_adjacent_node_update(as_hb_channel_event* msg_event, as_hb_adjacent_node* adjacent_node, bool plugin_data_changed[]);
+static int hb_adjacent_node_update(as_hb_channel_event* msg_event,
+		as_hb_adjacent_node* adjacent_node, bool plugin_data_changed[]);
 static bool hb_node_can_consider_adjacent(as_hb_adjacent_node* adjacent_node);
 static void hb_channel_on_self_pulse(as_hb_channel_event* msg_event);
 static void hb_channel_on_pulse(as_hb_channel_event* msg_event);
@@ -1799,7 +1810,8 @@ static int hb_dump_reduce(const void* key, void* data, void* udata);
 static void hb_dump(bool verbose);
 static void hb_adjacency_graph_invert(cf_vector* nodes, uint8_t** inverted_graph);
 static void hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict);
-static int hb_plugin_data_iterate_reduce(const void* key, void* data, void* udata);
+static int hb_plugin_data_iterate_reduce(const void* key, void* data,
+		void* udata);
 static void hb_plugin_data_iterate_all(as_hb_plugin_id pluginid,
 		as_hb_plugin_data_iterate_fn iterate_fn, void* udata);
 
@@ -1879,7 +1891,7 @@ as_hb_destroy()
 void
 as_hb_protocol_get_s(as_hb_protocol protocol, char* protocol_s)
 {
-	char *str;
+	char* str;
 	switch (protocol) {
 	case AS_HB_PROTOCOL_V3:
 		str = "v3";
@@ -1978,9 +1990,8 @@ Exit:
 void
 as_hb_plugin_register(as_hb_plugin* plugin)
 {
-	if (!hb_is_initialized()) {
-		WARNING(
-				"main heartbeat module uninitialized - not registering the plugin");
+	if (! hb_is_initialized()) {
+		WARNING("main heartbeat module uninitialized - not registering the plugin");
 		return;
 	}
 	hb_plugin_register(plugin);
@@ -1992,24 +2003,24 @@ as_hb_plugin_register(as_hb_plugin* plugin)
 void
 as_hb_register_listener(as_hb_event_fn event_callback, void* udata)
 {
-	if (!hb_is_initialized()) {
-		WARNING(
-				"main heartbeat module uninitialized - not registering the listener");
+	if (! hb_is_initialized()) {
+		WARNING("main heartbeat module uninitialized - not registering the listener");
 		return;
 	}
 
 	HB_LOCK();
 
-	if (g_hb_event_listeners.event_listener_count >=
-	AS_HB_EVENT_LISTENER_MAX) {
+	if (g_hb_event_listeners.event_listener_count >= AS_HB_EVENT_LISTENER_MAX) {
 		CRASH("cannot register more than %d event listeners",
 				AS_HB_EVENT_LISTENER_MAX);
 	}
 
-	g_hb_event_listeners.event_listeners[g_hb_event_listeners.event_listener_count].event_callback =
-			event_callback;
-	g_hb_event_listeners.event_listeners[g_hb_event_listeners.event_listener_count].udata =
-			udata;
+	g_hb_event_listeners
+			.event_listeners[g_hb_event_listeners.event_listener_count]
+			.event_callback = event_callback;
+	g_hb_event_listeners
+			.event_listeners[g_hb_event_listeners.event_listener_count]
+			.udata = udata;
 	g_hb_event_listeners.event_listener_count++;
 
 	HB_UNLOCK();
@@ -2021,16 +2032,15 @@ as_hb_register_listener(as_hb_event_fn event_callback, void* udata)
 void
 as_hb_config_validate()
 {
-	char *error;
+	char* error;
 	// Validate clustering and heartbeat version compatibility.
 	as_hb_protocol hb_protocol = config_protocol_get();
 
-	if (hb_protocol != AS_HB_PROTOCOL_V3
-			&& hb_protocol != AS_HB_PROTOCOL_NONE) {
+	if (hb_protocol != AS_HB_PROTOCOL_V3 && hb_protocol != AS_HB_PROTOCOL_NONE) {
 		CRASH_NOSTACK("clustering protocol v5 requires hearbeat version v3");
 	}
 
-	if (!config_binding_is_valid(&error, hb_protocol)) {
+	if (! config_binding_is_valid(&error, hb_protocol)) {
 		CRASH_NOSTACK("%s", error);
 	}
 }
@@ -2059,11 +2069,10 @@ as_hb_tx_interval_get()
 int
 as_hb_tx_interval_set(uint32_t new_interval)
 {
-	if (new_interval < AS_HB_TX_INTERVAL_MS_MIN
-			|| new_interval > AS_HB_TX_INTERVAL_MS_MAX) {
+	if (new_interval < AS_HB_TX_INTERVAL_MS_MIN ||
+			new_interval > AS_HB_TX_INTERVAL_MS_MAX) {
 		WARNING("heartbeat interval must be >= %u and <= %u - ignoring %u",
-				AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX,
-				new_interval);
+				AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX, new_interval);
 		return (-1);
 	}
 
@@ -2190,7 +2199,7 @@ as_hb_info_config_get(cf_dyn_buf* db)
 void
 as_hb_info_endpoints_get(cf_dyn_buf* db)
 {
-	const cf_serv_cfg *cfg = config_bind_cfg_get();
+	const cf_serv_cfg* cfg = config_bind_cfg_get();
 
 	if (cfg->n_cfgs == 0) {
 		// Will never happen in practice.
@@ -2199,7 +2208,7 @@ as_hb_info_endpoints_get(cf_dyn_buf* db)
 
 	info_append_int(db, "heartbeat.port", g_config.hb_serv_spec.bind_port);
 
-	char *string = as_info_bind_to_string(cfg, CF_SOCK_OWNER_HEARTBEAT);
+	char* string = as_info_bind_to_string(cfg, CF_SOCK_OWNER_HEARTBEAT);
 	info_append_string(db, "heartbeat.addresses", string);
 	cf_free(string);
 
@@ -2256,8 +2265,7 @@ as_hb_info_listen_addr_get(as_hb_mode* mode, char* addr_port,
 		endpoint_list_to_string_udata udata;
 		udata.endpoint_list_str = addr_port;
 		udata.endpoint_list_str_capacity = addr_port_capacity;
-		mesh_published_endpoints_process(endpoint_list_to_string_process,
-				&udata);
+		mesh_published_endpoints_process(endpoint_list_to_string_process, &udata);
 	}
 	else {
 		const cf_mserv_cfg* multicast_cfg = config_multicast_group_cfg_get();
@@ -2306,7 +2314,7 @@ as_hb_info_duplicates_get(cf_dyn_buf* db)
 	int num_probation = cf_shash_get_size(g_hb.on_probation);
 	cf_node duplicate_list[num_probation + 1];
 
-	if (!self_is_duplicate && num_probation == 0) {
+	if (! self_is_duplicate && num_probation == 0) {
 		cf_dyn_buf_append_string(db, "null");
 		goto Exit;
 	}
@@ -2322,8 +2330,7 @@ as_hb_info_duplicates_get(cf_dyn_buf* db)
 	}
 
 	int num_duplicates = probation_reduce_udata.adj_count;
-	qsort(duplicate_list, num_duplicates, sizeof(cf_node),
-			cf_node_compare_desc);
+	qsort(duplicate_list, num_duplicates, sizeof(cf_node), cf_node_compare_desc);
 
 	for (int i = 0; i < num_duplicates; i++) {
 		cf_dyn_buf_append_uint64_x(db, duplicate_list[i]);
@@ -2357,7 +2364,7 @@ as_hb_cluster_nodes_limit_set(uint32_t limit)
 int
 as_hb_mesh_tip(char* host, int port, bool tls)
 {
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		WARNING("tip not applicable for multicast");
 		return (-1);
 	}
@@ -2371,13 +2378,13 @@ as_hb_mesh_tip(char* host, int port, bool tls)
 int
 as_hb_mesh_tip_clear(char* host, int port)
 {
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		WARNING("tip clear not applicable for multicast");
 		return (-1);
 	}
 
-	if (host == NULL || host[0] == 0
-			|| strnlen(host, DNS_NAME_MAX_SIZE) == DNS_NAME_MAX_SIZE) {
+	if (host == NULL || host[0] == 0 ||
+			strnlen(host, DNS_NAME_MAX_SIZE) == DNS_NAME_MAX_SIZE) {
 		WARNING("invalid tip clear host:%s or port:%d", host, port);
 		return (-1);
 	}
@@ -2422,8 +2429,7 @@ as_hb_plugin_data_get(cf_node nodeid, as_hb_plugin_id plugin,
 	}
 
 	as_hb_plugin_node_data* plugin_data_internal =
-			&adjacent_node.plugin_data[plugin][adjacent_node.plugin_data_cycler
-					% 2];
+			&adjacent_node.plugin_data[plugin][adjacent_node.plugin_data_cycler % 2];
 
 	if (plugin_data_internal->data && plugin_data_internal->data_size) {
 		// Set the plugin data size
@@ -2555,9 +2561,10 @@ as_hb_dump(bool verbose)
 
 	// Dump the config.
 	INFO("HB Mode: %s (%d)",
-			(mode == AS_HB_MODE_MULTICAST ?
-					"multicast" :
-					(mode == AS_HB_MODE_MESH ? "mesh" : "undefined")), mode);
+			(mode == AS_HB_MODE_MULTICAST
+							? "multicast"
+							: (mode == AS_HB_MODE_MESH ? "mesh" : "undefined")),
+			mode);
 
 	INFO("HB Addresses: {%s}", endpoint_list_str);
 	INFO("HB MTU: %d", hb_mtu());
@@ -2589,8 +2596,8 @@ as_hb_is_alive(cf_node nodeid)
 	HB_LOCK();
 
 	as_hb_adjacent_node adjacent_node;
-	is_alive = (nodeid == config_self_nodeid_get())
-			|| (hb_adjacent_node_get(nodeid, &adjacent_node) == 0);
+	is_alive = (nodeid == config_self_nodeid_get()) ||
+			(hb_adjacent_node_get(nodeid, &adjacent_node) == 0);
 
 	HB_UNLOCK();
 	return is_alive;
@@ -2681,7 +2688,7 @@ hb_delete_all_reduce(const void* key, void* data, void* udata)
  * Append a address spec to a cf_dyn_buf.
  */
 static void
-info_append_addrs(cf_dyn_buf *db, const char *name, const cf_addr_list *list)
+info_append_addrs(cf_dyn_buf* db, const char* name, const cf_addr_list* list)
 {
 	for (uint32_t i = 0; i < list->n_addrs; ++i) {
 		info_append_string(db, name, list->addrs[i]);
@@ -2752,13 +2759,11 @@ endpoint_list_copy(as_endpoint_list** dest, as_endpoint_list* src)
  * Process function to convert endpoint list to a string.
  */
 static void
-endpoint_list_to_string_process(const as_endpoint_list* endpoint_list,
-		void* udata)
+endpoint_list_to_string_process(const as_endpoint_list* endpoint_list, void* udata)
 {
 	endpoint_list_to_string_udata* to_string_udata =
 			(endpoint_list_to_string_udata*)udata;
-	as_endpoint_list_to_string(endpoint_list,
-			to_string_udata->endpoint_list_str,
+	as_endpoint_list_to_string(endpoint_list, to_string_udata->endpoint_list_str,
 			to_string_udata->endpoint_list_str_capacity);
 }
 
@@ -2771,8 +2776,8 @@ endpoint_list_equal_process(const as_endpoint_list* endpoint_list, void* udata)
 	endpoint_list_equal_check_udata* equal_udata =
 			(endpoint_list_equal_check_udata*)udata;
 
-	equal_udata->are_equal = equal_udata->are_equal
-			|| as_endpoint_lists_are_equal(endpoint_list, equal_udata->other);
+	equal_udata->are_equal = equal_udata->are_equal ||
+			as_endpoint_lists_are_equal(endpoint_list, equal_udata->other);
 }
 
 /*
@@ -2804,13 +2809,14 @@ msg_endpoint_list_get(msg* msg, as_endpoint_list** endpoint_list)
 {
 	size_t endpoint_list_size;
 	if (msg_get_buf(msg, AS_HB_MSG_ENDPOINTS, (uint8_t**)endpoint_list,
-			&endpoint_list_size, MSG_GET_DIRECT) != 0) {
+				&endpoint_list_size, MSG_GET_DIRECT) != 0) {
 		return -1;
 	}
 
 	size_t parsed_size;
 	if (as_endpoint_list_nsizeof(*endpoint_list, &parsed_size,
-			endpoint_list_size) || parsed_size != endpoint_list_size) {
+				endpoint_list_size) ||
+			parsed_size != endpoint_list_size) {
 		return -1;
 	}
 	return 0;
@@ -2896,8 +2902,8 @@ msg_type_get(msg* msg, as_hb_msg_type* type)
 static int
 msg_cluster_name_get(msg* msg, char** cluster_name)
 {
-	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name,
-			MSG_GET_DIRECT) != 0) {
+	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name, MSG_GET_DIRECT) !=
+			0) {
 		return -1;
 	}
 
@@ -2916,11 +2922,10 @@ msg_cluster_name_get(msg* msg, char** cluster_name)
  * @return 0 on success. -1 if the adjacency list is absent.
  */
 static int
-msg_node_list_get(msg* msg, int field_id, cf_node** adj_list,
-		size_t* adj_length)
+msg_node_list_get(msg* msg, int field_id, cf_node** adj_list, size_t* adj_length)
 {
 	if (msg_get_buf(msg, field_id, (uint8_t**)adj_list, adj_length,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		return -1;
 	}
 
@@ -2955,8 +2960,7 @@ msg_adjacency_get(msg* msg, cf_node** adj_list, size_t* adj_length)
  * @para node_length the length of the adjacency list.
  */
 static void
-msg_node_list_set(msg* msg, int field_id, cf_node* node_list,
-		size_t node_length)
+msg_node_list_set(msg* msg, int field_id, cf_node* node_list, size_t node_length)
 {
 	msg_set_buf(msg, field_id, (uint8_t*)node_list,
 			sizeof(cf_node) * node_length, MSG_SET_COPY);
@@ -3011,7 +3015,7 @@ msg_info_reply_get(msg* msg, as_hb_mesh_info_reply** reply, size_t* reply_count)
 {
 	size_t reply_size;
 	if (msg_get_buf(msg, AS_HB_MSG_INFO_REPLY, (uint8_t**)reply, &reply_size,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		return -1;
 	}
 
@@ -3034,7 +3038,7 @@ msg_info_reply_get(msg* msg, as_hb_mesh_info_reply** reply, size_t* reply_count)
 
 		size_t endpoint_list_size = 0;
 		if (as_endpoint_list_nsizeof(reply_ptr->endpoint_list,
-				&endpoint_list_size, remaining_size) != 0) {
+					&endpoint_list_size, remaining_size) != 0) {
 			// Incomplete / garbled info reply message.
 			*reply_count = 0;
 			return -1;
@@ -3055,12 +3059,11 @@ static void
 msg_published_endpoints_fill(const as_endpoint_list* published_endpoint_list,
 		void* udata)
 {
-	endpoint_list_to_msg_udata* to_msg_udata =
-			(endpoint_list_to_msg_udata*)udata;
+	endpoint_list_to_msg_udata* to_msg_udata = (endpoint_list_to_msg_udata*)udata;
 	msg* msg = to_msg_udata->msg;
 	bool is_mesh = to_msg_udata->is_mesh;
 
-	if (!published_endpoint_list) {
+	if (! published_endpoint_list) {
 		if (is_mesh) {
 			// Something is messed up. Except for v3 multicast,
 			// published list should not be empty.
@@ -3074,9 +3077,8 @@ msg_published_endpoints_fill(const as_endpoint_list* published_endpoint_list,
 		// Set the source address
 		size_t endpoint_list_size = 0;
 		as_endpoint_list_sizeof(published_endpoint_list, &endpoint_list_size);
-		msg_set_buf(msg, AS_HB_MSG_ENDPOINTS,
-				(uint8_t*)published_endpoint_list, endpoint_list_size,
-				MSG_SET_COPY);
+		msg_set_buf(msg, AS_HB_MSG_ENDPOINTS, (uint8_t*)published_endpoint_list,
+				endpoint_list_size, MSG_SET_COPY);
 	}
 }
 
@@ -3378,8 +3380,8 @@ config_bind_serv_cfg_expand(const cf_serv_cfg* bind_cfg,
 
 			for (int j = 0; j < n_all_addrs; j++) {
 				// Skip local address if any is specified.
-				if (cf_ip_addr_is_local(&all_addrs[j])
-						|| (ipv4_only && !cf_ip_addr_is_legacy(&all_addrs[j]))) {
+				if (cf_ip_addr_is_local(&all_addrs[j]) ||
+						(ipv4_only && ! cf_ip_addr_is_legacy(&all_addrs[j]))) {
 					continue;
 				}
 
@@ -3391,12 +3393,11 @@ config_bind_serv_cfg_expand(const cf_serv_cfg* bind_cfg,
 
 			// TODO: Does not look like the right warning or the right message.
 			if (published_cfg->n_cfgs == 0) {
-				WARNING(
-						"no network interface addresses detected for heartbeat access");
+				WARNING("no network interface addresses detected for heartbeat access");
 			}
 		}
 		else {
-			if (ipv4_only && !cf_ip_addr_is_legacy(&bind_cfg->cfgs[i].addr)) {
+			if (ipv4_only && ! cf_ip_addr_is_legacy(&bind_cfg->cfgs[i].addr)) {
 				continue;
 			}
 
@@ -3437,8 +3438,7 @@ config_binding_is_valid(char** error, as_hb_protocol protocol)
 		cf_serv_cfg_init(&publish_serv_cfg);
 
 		if (multicast_group_cfg->n_cfgs != 0) {
-			*error =
-					"invalid config option: multicast-group not supported in mesh mode";
+			*error = "invalid config option: multicast-group not supported in mesh mode";
 			return false;
 		}
 	}
@@ -3461,8 +3461,7 @@ config_binding_is_valid(char** error, as_hb_protocol protocol)
 		}
 
 		if (g_config.hb_config.mesh_seed_addrs[0]) {
-			*error =
-					"invalid config option: mesh-seed-address-port not supported for multicast mode";
+			*error = "invalid config option: mesh-seed-address-port not supported for multicast mode";
 			return false;
 		}
 
@@ -3506,8 +3505,8 @@ static bool
 channel_is_running()
 {
 	CHANNEL_LOCK();
-	bool retval =
-			(g_hb.channel_state.status == AS_HB_STATUS_RUNNING) ? true : false;
+	bool retval = (g_hb.channel_state.status == AS_HB_STATUS_RUNNING) ? true
+																	  : false;
 	CHANNEL_UNLOCK();
 	return retval;
 }
@@ -3519,8 +3518,8 @@ static bool
 channel_is_stopped()
 {
 	CHANNEL_LOCK();
-	bool retval =
-			(g_hb.channel_state.status == AS_HB_STATUS_STOPPED) ? true : false;
+	bool retval = (g_hb.channel_state.status == AS_HB_STATUS_STOPPED) ? true
+																	  : false;
 	CHANNEL_UNLOCK();
 	return retval;
 }
@@ -3578,10 +3577,9 @@ channel_event_discard(as_hb_channel_event* event)
 static void
 channel_event_queue(as_hb_channel_event* event)
 {
-	if (!channel_are_events_enabled()) {
+	if (! channel_are_events_enabled()) {
 		channel_event_discard(event);
-		DETAIL(
-				"events disabled. Ignoring event of type %d with nodeid %" PRIx64,
+		DETAIL("events disabled. Ignoring event of type %d with nodeid %" PRIx64,
 				event->type, event->nodeid);
 		return;
 	}
@@ -3600,8 +3598,8 @@ channel_event_publish_pending()
 {
 	// No channel lock here to prevent deadlocks.
 	as_hb_channel_event event;
-	while (cf_queue_pop(&g_hb.channel_state.events_queue, &event, 0)
-			== CF_QUEUE_OK) {
+	while (cf_queue_pop(&g_hb.channel_state.events_queue, &event, 0) ==
+			CF_QUEUE_OK) {
 		// Nothing elaborate, using hardcoded list of event recipients.
 		mesh_channel_event_process(&event);
 		hb_channel_event_process(&event);
@@ -3624,8 +3622,8 @@ channel_get_channel(cf_socket* socket, as_hb_channel* result)
 	int status;
 	CHANNEL_LOCK();
 
-	if (cf_shash_get(g_hb.channel_state.socket_to_channel, &socket, result)
-			== CF_SHASH_OK) {
+	if (cf_shash_get(g_hb.channel_state.socket_to_channel, &socket, result) ==
+			CF_SHASH_OK) {
 		status = 0;
 	}
 	else {
@@ -3655,8 +3653,8 @@ channel_socket_get(cf_node nodeid, cf_socket** socket)
 {
 	int rv = -1;
 	CHANNEL_LOCK();
-	if (cf_shash_get(g_hb.channel_state.nodeid_to_socket, &nodeid, socket)
-			== CF_SHASH_ERR_NOT_FOUND) {
+	if (cf_shash_get(g_hb.channel_state.nodeid_to_socket, &nodeid, socket) ==
+			CF_SHASH_ERR_NOT_FOUND) {
 		rv = -1;
 	}
 	else {
@@ -3698,8 +3696,7 @@ channel_socket_destroy(cf_socket* sock)
  * the channel module using channel_socket_register.
  */
 static void
-channel_socket_close(cf_socket* socket, bool remote_close,
-		bool raise_close_event)
+channel_socket_close(cf_socket* socket, bool remote_close, bool raise_close_event)
 {
 	if (remote_close) {
 		DEBUG("remote close: fd %d event", CSFD(socket));
@@ -3707,8 +3704,7 @@ channel_socket_close(cf_socket* socket, bool remote_close,
 
 	CHANNEL_LOCK();
 
-	if (channel_cf_sockets_contains(g_hb.channel_state.listening_sockets,
-			socket)) {
+	if (channel_cf_sockets_contains(g_hb.channel_state.listening_sockets, socket)) {
 		// Listening sockets will be closed by the mode (mesh/multicast
 		// ) modules.
 		goto Exit;
@@ -3721,13 +3717,13 @@ channel_socket_close(cf_socket* socket, bool remote_close,
 	if (status == 0) {
 		if (channel.nodeid != 0) {
 			cf_socket* node_socket;
-			if (channel_socket_get(channel.nodeid, &node_socket) == 0
-					&& node_socket == socket) {
+			if (channel_socket_get(channel.nodeid, &node_socket) == 0 &&
+					node_socket == socket) {
 				// Remove associated node for this socket.
 				cf_shash_delete(g_hb.channel_state.nodeid_to_socket,
 						&channel.nodeid);
 
-				if (!channel.is_multicast && raise_close_event) {
+				if (! channel.is_multicast && raise_close_event) {
 					as_hb_channel_event event;
 					channel_event_init(&event);
 
@@ -3801,9 +3797,7 @@ static void
 channel_socket_close_queue(cf_socket* socket, bool is_remote_close,
 		bool raise_close_event)
 {
-	as_hb_channel_socket_close_entry close_entry = {
-		socket,
-		is_remote_close,
+	as_hb_channel_socket_close_entry close_entry = { socket, is_remote_close,
 		raise_close_event };
 	DETAIL("queuing close of fd %d", CSFD(socket));
 	cf_queue_push(&g_hb.channel_state.socket_close_queue, &close_entry);
@@ -3817,8 +3811,8 @@ channel_socket_close_pending()
 {
 	// No channel lock required here.
 	as_hb_channel_socket_close_entry close_entry;
-	while (cf_queue_pop(&g_hb.channel_state.socket_close_queue, &close_entry, 0)
-			== CF_QUEUE_OK) {
+	while (cf_queue_pop(&g_hb.channel_state.socket_close_queue, &close_entry,
+				   0) == CF_QUEUE_OK) {
 		channel_socket_close(close_entry.socket, close_entry.is_remote,
 				close_entry.raise_close_event);
 	}
@@ -3875,7 +3869,7 @@ channel_socket_register(cf_socket* socket, bool is_multicast, bool is_inbound,
 static void
 channel_accept_connection(cf_socket* lsock)
 {
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		// We do not accept connections in non mesh modes.
 		return;
 	}
@@ -3884,10 +3878,9 @@ channel_accept_connection(cf_socket* lsock)
 	cf_sock_addr caddr;
 
 	if (cf_socket_accept(lsock, &csock, &caddr) < 0) {
-		if ((errno == EMFILE) || (errno == ENFILE) || (errno == ENOMEM)
-				|| (errno == ENOBUFS)) {
-			TICKER_WARNING(
-					"failed to accept heartbeat connection due to error : %s",
+		if ((errno == EMFILE) || (errno == ENFILE) || (errno == ENOMEM) ||
+				(errno == ENOBUFS)) {
+			TICKER_WARNING("failed to accept heartbeat connection due to error : %s",
 					cf_strerror(errno));
 			// We are in an extreme situation where we ran out of system
 			// resources (file/mem). We should rather lie low and not do too
@@ -3910,13 +3903,12 @@ channel_accept_connection(cf_socket* lsock)
 	cf_sock_addr_to_string_safe(&caddr, caddr_str, sizeof(caddr_str));
 	DEBUG("new connection from %s", caddr_str);
 
-	cf_sock_cfg *cfg = lsock->cfg;
+	cf_sock_cfg* cfg = lsock->cfg;
 
 	if (cfg->owner == CF_SOCK_OWNER_HEARTBEAT_TLS) {
 		tls_socket_prepare_server(&csock, g_config.hb_config.tls);
 
-		if (tls_socket_accept_block(&csock,
-				config_connect_timeout_get()) != 1) {
+		if (tls_socket_accept_block(&csock, config_connect_timeout_get()) != 1) {
 			WARNING("heartbeat TLS server handshake with %s failed", caddr_str);
 			cf_socket_close(&csock);
 			cf_socket_term(&csock);
@@ -3954,7 +3946,7 @@ channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len)
 	size_t compressed_buffer_length = 0;
 
 	if (msg_get_buf(msg, AS_HB_MSG_COMPRESSED_PAYLOAD, &compressed_buffer,
-			&compressed_buffer_length, MSG_GET_DIRECT) != 0) {
+				&compressed_buffer_length, MSG_GET_DIRECT) != 0) {
 		return AS_HB_CHANNEL_MSG_PARSE_FAIL;
 	}
 
@@ -3965,10 +3957,9 @@ channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len)
 	// Keep trying till we allocate enough memory for the uncompressed buffer.
 	while (true) {
 		const size_t uncompressed_buffer_length = guess_len;
-		void* uncompressed_buffer =
-				MSG_BUFF_ALLOC_OR_DIE(uncompressed_buffer_length,
-						"error allocating memory size %zu for decompressing message",
-						uncompressed_buffer_length);
+		void* uncompressed_buffer = MSG_BUFF_ALLOC_OR_DIE(uncompressed_buffer_length,
+				"error allocating memory size %zu for decompressing message",
+				uncompressed_buffer_length);
 
 		int uncompress_rv = uncompress(uncompressed_buffer, &guess_len,
 				compressed_buffer, compressed_buffer_length);
@@ -4022,12 +4013,11 @@ channel_message_parse(msg* msg, void* buffer, int buffer_content_len)
 	// Peek into the buffer to get hold of the message type.
 	msg_type type = 0;
 	uint32_t msg_size = 0;
-	if (! msg_parse_hdr(&msg_size, &type, (uint8_t*)buffer, buffer_content_len)
-			|| type != msg->type) {
+	if (! msg_parse_hdr(&msg_size, &type, (uint8_t*)buffer, buffer_content_len) ||
+			type != msg->type) {
 		// Pre check because msg_parse considers this a warning but this would
 		// be common when protocol version between nodes do not match.
-		DEBUG("message type mismatch - expected:%d received:%d", msg->type,
-				type);
+		DEBUG("message type mismatch - expected:%d received:%d", msg->type, type);
 		return AS_HB_CHANNEL_MSG_PARSE_FAIL;
 	}
 
@@ -4047,8 +4037,7 @@ channel_message_parse(msg* msg, void* buffer, int buffer_content_len)
 		msg_preserve_all_fields(msg);
 	}
 
-	return parsed ?
-			AS_HB_CHANNEL_MSG_READ_SUCCESS : AS_HB_CHANNEL_MSG_PARSE_FAIL;
+	return parsed ? AS_HB_CHANNEL_MSG_READ_SUCCESS : AS_HB_CHANNEL_MSG_PARSE_FAIL;
 }
 
 /**
@@ -4068,9 +4057,8 @@ channel_endpoint_find_iterate_fn(const as_endpoint* endpoint, void* udata)
 		return;
 	}
 
-	iterate_data->found = iterate_data->found
-			|| (cf_sock_addr_compare(&sock_addr, iterate_data->addr_to_search)
-					== 0);
+	iterate_data->found = iterate_data->found ||
+			(cf_sock_addr_compare(&sock_addr, iterate_data->addr_to_search) == 0);
 }
 
 /**
@@ -4141,9 +4129,8 @@ channel_multicast_msg_read(cf_socket* socket, msg* msg)
 	const int buffer_len = MAX(hb_mtu(), STACK_ALLOC_LIMIT);
 	uint8_t* buffer = MSG_BUFF_ALLOC(buffer_len);
 
-	if (!buffer) {
-		WARNING(
-				"error allocating space for multicast recv buffer of size %d on fd %d",
+	if (! buffer) {
+		WARNING("error allocating space for multicast recv buffer of size %d on fd %d",
 				buffer_len, CSFD(socket));
 		goto Exit;
 	}
@@ -4189,7 +4176,7 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 	uint8_t len_buff[MSG_WIRE_LENGTH_SIZE];
 
 	if (cf_socket_recv_all(socket, len_buff, MSG_WIRE_LENGTH_SIZE, 0,
-			MESH_RW_TIMEOUT) < 0) {
+				MESH_RW_TIMEOUT) < 0) {
 		WARNING("mesh size recv failed fd %d : %s", CSFD(socket),
 				cf_strerror(errno));
 		CHANNEL_UNLOCK();
@@ -4199,9 +4186,8 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 	const uint32_t buffer_len = ntohl(*((uint32_t*)len_buff)) + 6;
 	uint8_t* buffer = MSG_BUFF_ALLOC(buffer_len);
 
-	if (!buffer) {
-		WARNING(
-				"error allocating space for mesh recv buffer of size %d on fd %d",
+	if (! buffer) {
+		WARNING("error allocating space for mesh recv buffer of size %d on fd %d",
 				buffer_len, CSFD(socket));
 		goto Exit;
 	}
@@ -4209,7 +4195,7 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 	memcpy(buffer, len_buff, MSG_WIRE_LENGTH_SIZE);
 
 	if (cf_socket_recv_all(socket, buffer + MSG_WIRE_LENGTH_SIZE,
-			buffer_len - MSG_WIRE_LENGTH_SIZE, 0, MESH_RW_TIMEOUT) < 0) {
+				buffer_len - MSG_WIRE_LENGTH_SIZE, 0, MESH_RW_TIMEOUT) < 0) {
 		DETAIL("mesh recv failed fd %d : %s", CSFD(socket), cf_strerror(errno));
 		rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
 		goto Exit;
@@ -4274,9 +4260,8 @@ channel_node_attach(cf_socket* socket, as_hb_channel* channel, cf_node nodeid)
 static bool
 channel_socket_should_live(cf_socket* socket, as_hb_channel* channel)
 {
-	if (channel->resolution_win_ts > 0
-			&& channel->resolution_win_ts + channel_win_grace_ms()
-					> cf_getms()) {
+	if (channel->resolution_win_ts > 0 &&
+			channel->resolution_win_ts + channel_win_grace_ms() > cf_getms()) {
 		// Losing socket was a previous winner. Allow it time to do some work
 		// before knocking it off.
 		DETAIL("giving %d unresolved fd some grace time", CSFD(socket));
@@ -4328,8 +4313,8 @@ channel_socket_resolve(cf_socket* socket1, cf_socket* socket2)
 		goto Exit;
 	}
 
-	cf_node remote_nodeid =
-			channel1.nodeid != 0 ? channel1.nodeid : channel2.nodeid;
+	cf_node remote_nodeid = channel1.nodeid != 0 ? channel1.nodeid
+												 : channel2.nodeid;
 
 	if (remote_nodeid == 0) {
 		// Should not happen in practice.
@@ -4340,10 +4325,10 @@ channel_socket_resolve(cf_socket* socket1, cf_socket* socket2)
 	}
 
 	// Choose the socket with the highest acceptor nodeid.
-	cf_node acceptor_nodeid1 =
-			channel1.is_inbound ? config_self_nodeid_get() : remote_nodeid;
-	cf_node acceptor_nodeid2 =
-			channel2.is_inbound ? config_self_nodeid_get() : remote_nodeid;
+	cf_node acceptor_nodeid1 = channel1.is_inbound ? config_self_nodeid_get()
+												   : remote_nodeid;
+	cf_node acceptor_nodeid2 = channel2.is_inbound ? config_self_nodeid_get()
+												   : remote_nodeid;
 
 	as_hb_channel* winner_channel = NULL;
 	cf_socket* winner_socket = NULL;
@@ -4358,8 +4343,7 @@ channel_socket_resolve(cf_socket* socket1, cf_socket* socket2)
 	else {
 		// Both connections have the same acceptor. Should not happen in
 		// practice. Despair and report resolution failure.
-		TICKER_INFO(
-				"found redundant connections to same node (%lx) - choosing at random",
+		TICKER_INFO("found redundant connections to same node (%lx) - choosing at random",
 				remote_nodeid);
 
 		if (cf_getms() % 2 == 0) {
@@ -4430,29 +4414,25 @@ channel_msg_sanity_check(as_hb_channel_event* msg_event)
 	}
 
 	if (msg_id_get(msg, &id) != 0) {
-		TICKER_WARNING(
-				"received message without heartbeat protocol identifier from node %" PRIx64,
+		TICKER_WARNING("received message without heartbeat protocol identifier from node %" PRIx64,
 				src_nodeid);
 		rv = -1;
 	}
 	else {
-		DETAIL(
-				"received message with heartbeat protocol identifier %d from node %" PRIx64,
+		DETAIL("received message with heartbeat protocol identifier %d from node %" PRIx64,
 				id, src_nodeid);
 
 		// Ignore the message if the protocol of the incoming message does not
 		// match.
 		if (id != hb_protocol_identifier_get()) {
-			TICKER_WARNING(
-					"received message with different heartbeat protocol identifier from node %" PRIx64,
+			TICKER_WARNING("received message with different heartbeat protocol identifier from node %" PRIx64,
 					src_nodeid);
 			rv = -1;
 		}
 	}
 
 	if (msg_type_get(msg, &type) != 0) {
-		TICKER_WARNING(
-				"received message without message type from node %" PRIx64,
+		TICKER_WARNING("received message without message type from node %" PRIx64,
 				src_nodeid);
 		rv = -1;
 	}
@@ -4461,10 +4441,9 @@ channel_msg_sanity_check(as_hb_channel_event* msg_event)
 	if (hb_is_mesh()) {
 		// Check only applies to v3 mesh.
 		// v3 multicast protocol does not advertise endpoint list.
-		if (msg_endpoint_list_get(msg, &endpoint_list) != 0
-				|| endpoint_list->n_endpoints <= 0) {
-			TICKER_WARNING(
-					"received message without address/port from node %" PRIx64,
+		if (msg_endpoint_list_get(msg, &endpoint_list) != 0 ||
+				endpoint_list->n_endpoints <= 0) {
+			TICKER_WARNING("received message without address/port from node %" PRIx64,
 					src_nodeid);
 			rv = -1;
 		}
@@ -4483,7 +4462,7 @@ channel_msg_sanity_check(as_hb_channel_event* msg_event)
 			remote_cluster_name = "";
 		}
 
-		if (!as_config_cluster_name_matches(remote_cluster_name)) {
+		if (! as_config_cluster_name_matches(remote_cluster_name)) {
 			// Generate cluster-name mismatch event.
 			as_hb_channel_event mismatch_event;
 			channel_event_init(&mismatch_event);
@@ -4497,7 +4476,8 @@ channel_msg_sanity_check(as_hb_channel_event* msg_event)
 
 			channel_event_queue(&mismatch_event);
 
-			TICKER_WARNING("ignoring message from %"PRIX64" with different cluster name '%s'",
+			TICKER_WARNING("ignoring message from %" PRIX64
+						   " with different cluster name '%s'",
 					src_nodeid, remote_cluster_name);
 			rv = -1;
 		}
@@ -4548,7 +4528,8 @@ channel_msg_event_process(cf_socket* socket, as_hb_channel_event* event)
 	if (channel.nodeid != 0 && channel.nodeid != nodeid) {
 		// The event nodeid does not match previously known event id. Something
 		// seriously wrong here.
-		WARNING("received a message from node with incorrect nodeid - expected %" PRIx64 " received %" PRIx64 "on fd %d",
+		WARNING("received a message from node with incorrect nodeid - expected %" PRIx64
+				" received %" PRIx64 "on fd %d",
 				channel.nodeid, nodeid, CSFD(socket));
 		rv = -1;
 		goto Exit;
@@ -4573,9 +4554,8 @@ channel_msg_event_process(cf_socket* socket, as_hb_channel_event* event)
 		// other.
 		cf_socket* resolved = channel_socket_resolve(socket, existing_socket);
 
-		if (!resolved) {
-			DEBUG(
-					"resolving between fd %d and %d failed - closing both connections",
+		if (! resolved) {
+			DEBUG("resolving between fd %d and %d failed - closing both connections",
 					CSFD(socket), CSFD(existing_socket));
 
 			// Resolution failed. Should not happen but there is a window where
@@ -4655,10 +4635,10 @@ channel_msg_read(cf_socket* socket)
 		goto Exit;
 	}
 
-	case AS_HB_CHANNEL_MSG_CHANNEL_FAIL:	// Falling through
+	case AS_HB_CHANNEL_MSG_CHANNEL_FAIL: // Falling through
 	default: {
 		DEBUG("could not read message from fd %d", CSFD(socket));
-		if (!channel.is_multicast) {
+		if (! channel.is_multicast) {
 			// Shut down only mesh socket.
 			channel_socket_shutdown(socket);
 		}
@@ -4710,15 +4690,16 @@ channel_channels_tend_reduce(const void* key, void* data, void* udata)
 	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
 
-	DETAIL("tending channel fd %d for node %" PRIx64 " - last received %" PRIu64 " endpoint %s",
+	DETAIL("tending channel fd %d for node %" PRIx64 " - last received %" PRIu64
+		   " endpoint %s",
 			CSFD(*socket), channel->nodeid, channel->last_received,
 			cf_sock_addr_print(&channel->endpoint_addr));
 
-	if (channel->last_received + CHANNEL_NODE_READ_IDLE_TIMEOUT()
-			< cf_getms()) {
+	if (channel->last_received + CHANNEL_NODE_READ_IDLE_TIMEOUT() < cf_getms()) {
 		// Shutdown associated socket if it is not a multicast socket.
-		if (!channel->is_multicast) {
-			DEBUG("channel shutting down idle fd %d for node %" PRIx64 " - last received %" PRIu64 " endpoint %s",
+		if (! channel->is_multicast) {
+			DEBUG("channel shutting down idle fd %d for node %" PRIx64
+				  " - last received %" PRIu64 " endpoint %s",
 					CSFD(*socket), channel->nodeid, channel->last_received,
 					cf_sock_addr_print(&channel->endpoint_addr));
 			channel_socket_shutdown(*socket);
@@ -4738,8 +4719,8 @@ channel_channels_idle_check()
 	CHANNEL_LOCK();
 
 	cf_clock now = cf_getms();
-	if (g_hb.channel_state.last_channel_idle_check + CHANNEL_IDLE_CHECK_PERIOD
-			<= now) {
+	if (g_hb.channel_state.last_channel_idle_check + CHANNEL_IDLE_CHECK_PERIOD <=
+			now) {
 		cf_shash_reduce(g_hb.channel_state.socket_to_channel,
 				channel_channels_tend_reduce, NULL);
 		g_hb.channel_state.last_channel_idle_check = now;
@@ -4765,9 +4746,9 @@ channel_tender(void* arg)
 
 		for (int32_t i = 0; i < nevents; i++) {
 			cf_socket* socket = events[i].data;
-			if (channel_cf_sockets_contains(
-					g_hb.channel_state.listening_sockets, socket)
-					&& hb_is_mesh()) {
+			if (channel_cf_sockets_contains(g_hb.channel_state.listening_sockets,
+						socket) &&
+					hb_is_mesh()) {
 				// Accept a new connection.
 				channel_accept_connection(socket);
 			}
@@ -4808,15 +4789,14 @@ channel_tender(void* arg)
 static bool
 channel_mesh_endpoint_filter(const as_endpoint* endpoint, void* udata)
 {
-	if ((cf_ip_addr_legacy_only())
-			&& endpoint->addr_type == AS_ENDPOINT_ADDR_TYPE_IPv6) {
+	if ((cf_ip_addr_legacy_only()) &&
+			endpoint->addr_type == AS_ENDPOINT_ADDR_TYPE_IPv6) {
 		return false;
 	}
 
 	// If we don't offer TLS, then we won't connect via TLS, either.
-	if (g_config.hb_tls_serv_spec.bind_port == 0
-			&& as_endpoint_capability_is_supported(endpoint,
-					AS_ENDPOINT_TLS_MASK)) {
+	if (g_config.hb_tls_serv_spec.bind_port == 0 &&
+			as_endpoint_capability_is_supported(endpoint, AS_ENDPOINT_TLS_MASK)) {
 		return false;
 	}
 
@@ -4837,8 +4817,7 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 				sizeof(endpoint_list_str));
 
 		if (channel_endpoint_is_connected(n->endpoint_list)) {
-			DEBUG(
-					"duplicate endpoint connect request - ignoring endpoint list {%s}",
+			DEBUG("duplicate endpoint connect request - ignoring endpoint list {%s}",
 					endpoint_list_str);
 			continue;
 		}
@@ -4847,9 +4826,10 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 
 		cf_socket* sock = (cf_socket*)cf_malloc(sizeof(cf_socket));
 
-		const as_endpoint* connected_endpoint = as_endpoint_connect_any(
-				n->endpoint_list, channel_mesh_endpoint_filter, NULL,
-				config_connect_timeout_get(), sock);
+		const as_endpoint* connected_endpoint =
+				as_endpoint_connect_any(n->endpoint_list,
+						channel_mesh_endpoint_filter, NULL,
+						config_connect_timeout_get(), sock);
 
 		if (connected_endpoint) {
 			as_incr_uint64(&g_stats.heartbeat_connections_opened);
@@ -4857,8 +4837,8 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 			cf_sock_addr endpoint_addr;
 			memset(&endpoint_addr, 0, sizeof(endpoint_addr));
 			cf_ip_addr_set_any(&endpoint_addr.addr);
-			if (as_endpoint_to_sock_addr(connected_endpoint, &endpoint_addr)
-					!= 0) {
+			if (as_endpoint_to_sock_addr(connected_endpoint, &endpoint_addr) !=
+					0) {
 				// Should never happen in practice.
 				WARNING("error converting endpoint to socket address");
 				channel_socket_destroy(sock);
@@ -4870,11 +4850,11 @@ channel_mesh_channel_establish(as_hb_mesh_nodes_to_connect* to_connect)
 			}
 
 			if (as_endpoint_capability_is_supported(connected_endpoint,
-					AS_ENDPOINT_TLS_MASK)) {
+						AS_ENDPOINT_TLS_MASK)) {
 				tls_socket_prepare_client(sock, g_config.hb_config.tls);
 
 				if (tls_socket_connect_block(sock,
-						config_connect_timeout_get()) != 1) {
+							config_connect_timeout_get()) != 1) {
 					WARNING("heartbeat TLS client handshake failed - %s {%s}",
 							n->seed_host_name == NULL ? "" : n->seed_host_name,
 							endpoint_list_str);
@@ -4911,8 +4891,7 @@ channel_mesh_listening_socks_register(cf_sockets* listening_sockets)
 	g_hb.channel_state.listening_sockets = listening_sockets;
 
 	cf_poll_add_sockets(g_hb.channel_state.poll,
-			g_hb.channel_state.listening_sockets,
-			EPOLLIN | EPOLLERR | EPOLLHUP);
+			g_hb.channel_state.listening_sockets, EPOLLIN | EPOLLERR | EPOLLHUP);
 	cf_socket_show_server(AS_HB, "mesh heartbeat",
 			g_hb.channel_state.listening_sockets);
 
@@ -4946,8 +4925,7 @@ channel_multicast_listening_socks_register(cf_sockets* listening_sockets)
 
 	// Create a new multicast channel for each multicast socket.
 	for (uint32_t i = 0;
-			i < g_hb.mode_state.multicast_state.listening_sockets.n_socks;
-			++i) {
+			i < g_hb.mode_state.multicast_state.listening_sockets.n_socks; ++i) {
 		channel_socket_register(&g_hb.channel_state.listening_sockets->socks[i],
 				true, false, NULL);
 	}
@@ -4982,7 +4960,7 @@ channel_init()
 
 	// Initialize unpublished event queue.
 	cf_queue_init(&g_hb.channel_state.events_queue, sizeof(as_hb_channel_event),
-	AS_HB_CLUSTER_MAX_SIZE_SOFT, true);
+			AS_HB_CLUSTER_MAX_SIZE_SOFT, true);
 
 	// Initialize sockets to close queue.
 	cf_queue_init(&g_hb.channel_state.socket_close_queue,
@@ -4990,14 +4968,14 @@ channel_init()
 			AS_HB_CLUSTER_MAX_SIZE_SOFT, true);
 
 	// Initialize the nodeid to socket hash.
-	g_hb.channel_state.nodeid_to_socket = cf_shash_create(cf_nodeid_shash_fn,
-			sizeof(cf_node), sizeof(cf_socket*), AS_HB_CLUSTER_MAX_SIZE_SOFT,
-			false);
+	g_hb.channel_state.nodeid_to_socket =
+			cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
+					sizeof(cf_socket*), AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	// Initialize the socket to channel state hash.
-	g_hb.channel_state.socket_to_channel = cf_shash_create(hb_socket_hash_fn,
-			sizeof(cf_socket*), sizeof(as_hb_channel),
-			AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
+	g_hb.channel_state.socket_to_channel =
+			cf_shash_create(hb_socket_hash_fn, sizeof(cf_socket*),
+					sizeof(as_hb_channel), AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	g_hb.channel_state.status = AS_HB_STATUS_STOPPED;
 
@@ -5056,7 +5034,7 @@ channel_sockets_get_reduce(const void* key, void* data, void* udata)
 static void
 channel_stop()
 {
-	if (!channel_is_running()) {
+	if (! channel_is_running()) {
 		WARNING("heartbeat channel already stopped");
 		return;
 	}
@@ -5112,12 +5090,12 @@ channel_mesh_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length)
 	CHANNEL_LOCK();
 	int rv;
 
-	if (cf_socket_send_all(socket, buff, buffer_length, 0,
-	MESH_RW_TIMEOUT) < 0) {
+	if (cf_socket_send_all(socket, buff, buffer_length, 0, MESH_RW_TIMEOUT) < 0) {
 		as_hb_channel channel;
 		if (channel_get_channel(socket, &channel) == 0) {
 			// Would happen if the channel was closed in the same epoll loop.
-			TICKER_WARNING("sending mesh message to %"PRIx64" on fd %d failed : %s",
+			TICKER_WARNING("sending mesh message to %" PRIx64
+						   " on fd %d failed : %s",
 					channel.nodeid, CSFD(socket), cf_strerror(errno));
 		}
 		else {
@@ -5144,8 +5122,7 @@ channel_mesh_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length)
  * @return 0 on successful send -1 on failure
  */
 static int
-channel_multicast_msg_send(cf_socket* socket, uint8_t* buff,
-		size_t buffer_length)
+channel_multicast_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length)
 {
 	CHANNEL_LOCK();
 	int rv = 0;
@@ -5214,8 +5191,7 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 	if (channel_msg_is_compression_required(original_msg, msg_size, mtu)) {
 		// Compression is required.
 		const size_t compressed_buffer_len = buffer_len;
-		uint8_t* compressed_buffer = MSG_BUFF_ALLOC_OR_DIE(
-				compressed_buffer_len,
+		uint8_t* compressed_buffer = MSG_BUFF_ALLOC_OR_DIE(compressed_buffer_len,
 				"error allocating memory size %zu for compressing message",
 				compressed_buffer_len);
 
@@ -5226,8 +5202,7 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 		if (compress_rv == Z_BUF_ERROR) {
 			// Compression result going to be larger than original input buffer.
 			// Skip compression and try to send the message as is.
-			DETAIL(
-					"skipping compression - compressed size larger than input size %zu",
+			DETAIL("skipping compression - compressed size larger than input size %zu",
 					msg_size);
 		}
 		else {
@@ -5241,7 +5216,6 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 		}
 
 		MSG_BUFF_FREE(compressed_buffer, compressed_buffer_len);
-
 	}
 
 	return msg_size;
@@ -5253,7 +5227,7 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 static int
 channel_msg_unicast(cf_node dest, msg* msg)
 {
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		// Can't send a unicast message in the multicast mode.
 		WARNING("ignoring sending unicast message in multicast mode");
 		return -1;
@@ -5278,8 +5252,8 @@ channel_msg_unicast(cf_node dest, msg* msg)
 			"error allocating memory size %zu for sending message to node %" PRIx64,
 			buffer_len, dest);
 
-	size_t msg_size = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
-			buffer_len);
+	size_t msg_size =
+			channel_msg_buffer_fill(msg, wire_size, mtu, buffer, buffer_len);
 
 	// Send over the buffer.
 	rv = channel_mesh_msg_send(connected_socket, buffer, msg_size);
@@ -5299,12 +5273,10 @@ channel_msg_broadcast_reduce(const void* key, void* data, void* udata)
 	CHANNEL_LOCK();
 	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
-	as_hb_channel_buffer_udata* buffer_udata =
-			(as_hb_channel_buffer_udata*)udata;
+	as_hb_channel_buffer_udata* buffer_udata = (as_hb_channel_buffer_udata*)udata;
 
-	if (!channel->is_multicast) {
-		DETAIL(
-				"broadcasting message of length %zu on channel %d assigned to node %" PRIx64,
+	if (! channel->is_multicast) {
+		DETAIL("broadcasting message of length %zu on channel %d assigned to node %" PRIx64,
 				buffer_udata->buffer_len, CSFD(*socket), channel->nodeid);
 
 		channel_mesh_msg_send(*socket, buffer_udata->buffer,
@@ -5342,8 +5314,8 @@ channel_msg_broadcast(msg* msg)
 	udata.buffer = buffer;
 
 	// Note this is the length of buffer to send.
-	udata.buffer_len = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
-			buffer_len);
+	udata.buffer_len =
+			channel_msg_buffer_fill(msg, wire_size, mtu, buffer, buffer_len);
 
 	cf_shash_reduce(g_hb.channel_state.socket_to_channel,
 			channel_msg_broadcast_reduce, &udata);
@@ -5359,7 +5331,7 @@ channel_msg_broadcast(msg* msg)
 static void
 channel_clear()
 {
-	if (!channel_is_stopped()) {
+	if (! channel_is_stopped()) {
 		WARNING("attempted channel clear without stopping the channel");
 		return;
 	}
@@ -5371,11 +5343,11 @@ channel_clear()
 
 	// Delete nodeid to socket hash.
 	cf_shash_reduce(g_hb.channel_state.nodeid_to_socket, hb_delete_all_reduce,
-	NULL);
+			NULL);
 
 	// Delete the socket_to_channel hash.
 	cf_shash_reduce(g_hb.channel_state.socket_to_channel, hb_delete_all_reduce,
-	NULL);
+			NULL);
 
 	DETAIL("cleared channel information");
 	CHANNEL_UNLOCK();
@@ -5390,13 +5362,14 @@ channel_dump_reduce(const void* key, void* data, void* udata)
 	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
 
-	INFO("\tHB Channel (%s): node-id %" PRIx64 " fd %d endpoint %s polarity %s last-received %" PRIu64,
+	INFO("\tHB Channel (%s): node-id %" PRIx64
+		 " fd %d endpoint %s polarity %s last-received %" PRIu64,
 			channel->is_multicast ? "multicast" : "mesh", channel->nodeid,
-			CSFD(*socket), (cf_sock_addr_is_any(&channel->endpoint_addr))
-			? "unknown"
-			: cf_sock_addr_print(&channel->endpoint_addr),
-			channel->is_inbound ? "inbound" : "outbound",
-			channel->last_received);
+			CSFD(*socket),
+			(cf_sock_addr_is_any(&channel->endpoint_addr))
+					? "unknown"
+					: cf_sock_addr_print(&channel->endpoint_addr),
+			channel->is_inbound ? "inbound" : "outbound", channel->last_received);
 
 	return CF_SHASH_OK;
 }
@@ -5434,9 +5407,9 @@ static bool
 mesh_is_running()
 {
 	MESH_LOCK();
-	bool retval =
-			(g_hb.mode_state.mesh_state.status == AS_HB_STATUS_RUNNING) ?
-					true : false;
+	bool retval = (g_hb.mode_state.mesh_state.status == AS_HB_STATUS_RUNNING)
+			? true
+			: false;
 	MESH_UNLOCK();
 	return retval;
 }
@@ -5448,9 +5421,9 @@ static bool
 mesh_is_stopped()
 {
 	MESH_LOCK();
-	bool retval =
-			(g_hb.mode_state.mesh_state.status == AS_HB_STATUS_STOPPED) ?
-					true : false;
+	bool retval = (g_hb.mode_state.mesh_state.status == AS_HB_STATUS_STOPPED)
+			? true
+			: false;
 	MESH_UNLOCK();
 	return retval;
 }
@@ -5466,9 +5439,9 @@ mesh_published_endpoint_list_refresh()
 	MESH_LOCK();
 
 	// TODO: Add interface addresses change detection logic here as well.
-	if (g_hb.mode_state.mesh_state.published_endpoint_list != NULL
-			&& g_hb.mode_state.mesh_state.published_endpoint_list_ipv4_only
-					== cf_ip_addr_legacy_only()) {
+	if (g_hb.mode_state.mesh_state.published_endpoint_list != NULL &&
+			g_hb.mode_state.mesh_state.published_endpoint_list_ipv4_only ==
+					cf_ip_addr_legacy_only()) {
 		rv = 0;
 		goto Exit;
 	}
@@ -5488,7 +5461,7 @@ mesh_published_endpoint_list_refresh()
 	g_hb.mode_state.mesh_state.published_endpoint_list =
 			as_endpoint_list_from_serv_cfg(&published_cfg);
 
-	if (!g_hb.mode_state.mesh_state.published_endpoint_list) {
+	if (! g_hb.mode_state.mesh_state.published_endpoint_list) {
 		CRASH("error initializing mesh published address list");
 	}
 
@@ -5498,8 +5471,7 @@ mesh_published_endpoint_list_refresh()
 	rv = 0;
 
 	char endpoint_list_str[ENDPOINT_LIST_STR_SIZE];
-	as_endpoint_list_to_string(
-			g_hb.mode_state.mesh_state.published_endpoint_list,
+	as_endpoint_list_to_string(g_hb.mode_state.mesh_state.published_endpoint_list,
 			endpoint_list_str, sizeof(endpoint_list_str));
 	INFO("updated heartbeat published address list to {%s}", endpoint_list_str);
 
@@ -5516,8 +5488,7 @@ Exit:
  * @param udata passed as is to the process function.
  */
 static void
-mesh_published_endpoints_process(endpoint_list_process_fn process_fn,
-		void* udata)
+mesh_published_endpoints_process(endpoint_list_process_fn process_fn, void* udata)
 {
 	MESH_LOCK();
 
@@ -5541,10 +5512,7 @@ mesh_published_endpoints_process(endpoint_list_process_fn process_fn,
 static const char*
 mesh_node_status_string(as_hb_mesh_node_status status)
 {
-	static char* status_str[] = {
-		"active",
-		"pending",
-		"inactive",
+	static char* status_str[] = { "active", "pending", "inactive",
 		"endpoint-unknown" };
 
 	if (status >= AS_HB_MESH_NODE_STATUS_SENTINEL) {
@@ -5558,8 +5526,7 @@ mesh_node_status_string(as_hb_mesh_node_status status)
  * calling state change for the first time.
  */
 static void
-mesh_seed_status_change(as_hb_mesh_seed* seed,
-		as_hb_mesh_node_status new_status)
+mesh_seed_status_change(as_hb_mesh_seed* seed, as_hb_mesh_node_status new_status)
 {
 	seed->status = new_status;
 	seed->last_status_updated = cf_getms();
@@ -5581,7 +5548,7 @@ mesh_seed_destroy(as_hb_mesh_seed* seed)
 
 static void
 mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname,
-		const cf_ip_addr *addrs, uint32_t n_addrs, void *udata)
+		const cf_ip_addr* addrs, uint32_t n_addrs, void* udata)
 {
 	if (n_addrs == 0) {
 		return;
@@ -5595,8 +5562,7 @@ mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname,
 	for (int i = 0; i < element_count; i++) {
 		as_hb_mesh_seed* s = cf_vector_getp(seeds, i);
 
-		if (strncmp(s->seed_host_name, hostname,
-				sizeof(s->seed_host_name)) == 0) {
+		if (strncmp(s->seed_host_name, hostname, sizeof(s->seed_host_name)) == 0) {
 			seed = s;
 			break;
 		}
@@ -5616,8 +5582,8 @@ mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname,
 
 	cf_sock_cfg sock_cfg;
 	cf_sock_cfg_init(&sock_cfg,
-			seed->seed_tls ?
-					CF_SOCK_OWNER_HEARTBEAT_TLS : CF_SOCK_OWNER_HEARTBEAT);
+			seed->seed_tls ? CF_SOCK_OWNER_HEARTBEAT_TLS
+						   : CF_SOCK_OWNER_HEARTBEAT);
 	sock_cfg.port = seed->seed_port;
 
 	for (int i = 0; i < n_addrs; i++) {
@@ -5630,8 +5596,7 @@ mesh_seed_dns_resolve_cb(bool is_resolved, const char* hostname,
 				cf_ip_addr_print(&addrs[i]));
 	}
 
-	seed->resolved_endpoint_list = as_endpoint_list_from_serv_cfg(
-			&temp_serv_cfg);
+	seed->resolved_endpoint_list = as_endpoint_list_from_serv_cfg(&temp_serv_cfg);
 
 	MESH_UNLOCK();
 }
@@ -5651,9 +5616,9 @@ mesh_seed_dns_resolve(as_hb_mesh_seed* seed)
 		return 0;
 	}
 
-	uint64_t resolve_interval = has_endpoints ?
-			MESH_INACTIVE_SEED_RESOLVE_ATTEMPT_INTERVAL() :
-			MESH_SEED_RESOLVE_ATTEMPT_INTERVAL();
+	uint64_t resolve_interval = has_endpoints
+			? MESH_INACTIVE_SEED_RESOLVE_ATTEMPT_INTERVAL()
+			: MESH_SEED_RESOLVE_ATTEMPT_INTERVAL();
 
 	cf_clock now = cf_getms();
 
@@ -5683,7 +5648,7 @@ mesh_seed_endpoint_list_overlapping_find_unsafe(as_endpoint_list* endpoint_list)
 	MESH_LOCK();
 
 	int match_index = -1;
-	if (!endpoint_list) {
+	if (! endpoint_list) {
 		// Null / empty endpoint list.
 		goto Exit;
 	}
@@ -5696,7 +5661,7 @@ mesh_seed_endpoint_list_overlapping_find_unsafe(as_endpoint_list* endpoint_list)
 		mesh_seed_dns_resolve(seed);
 
 		if (as_endpoint_lists_are_overlapping(endpoint_list,
-				seed->resolved_endpoint_list, true)) {
+					seed->resolved_endpoint_list, true)) {
 			match_index = i;
 			break;
 		}
@@ -5726,8 +5691,9 @@ mesh_seed_find_unsafe(char* host, int port)
 	int element_count = cf_vector_size(seeds);
 	for (int i = 0; i < element_count; i++) {
 		as_hb_mesh_seed* seed = cf_vector_getp(seeds, i);
-		if (strncmp(seed->seed_host_name, host, sizeof(seed->seed_host_name))
-				== 0 && seed->seed_port == port) {
+		if (strncmp(seed->seed_host_name, host, sizeof(seed->seed_host_name)) ==
+						0 &&
+				seed->seed_port == port) {
 			match_index = i;
 			break;
 		}
@@ -5760,12 +5726,12 @@ mesh_reinit_nodes_to_connect(as_hb_mesh_nodes_to_connect* to_connect,
 
 		if (i < old_capacity) {
 			// Free the old elements.
-			if(n->endpoint_list != NULL) {
+			if (n->endpoint_list != NULL) {
 				cf_free(n->endpoint_list);
 				n->endpoint_list = NULL;
 			}
 
-			if(n->seed_host_name != NULL) {
+			if (n->seed_host_name != NULL) {
 				cf_free(n->seed_host_name);
 				n->seed_host_name = NULL;
 			}
@@ -5791,9 +5757,9 @@ mesh_node_status_change(as_hb_mesh_node* mesh_node,
 	as_hb_mesh_node_status old_status = mesh_node->status;
 	mesh_node->status = new_status;
 
-	if ((new_status != AS_HB_MESH_NODE_CHANNEL_ACTIVE
-			&& old_status == AS_HB_MESH_NODE_CHANNEL_ACTIVE)
-			|| mesh_node->last_status_updated == 0) {
+	if ((new_status != AS_HB_MESH_NODE_CHANNEL_ACTIVE &&
+				old_status == AS_HB_MESH_NODE_CHANNEL_ACTIVE) ||
+			mesh_node->last_status_updated == 0) {
 		mesh_node->inactive_since = cf_getms();
 	}
 	mesh_node->last_status_updated = cf_getms();
@@ -5819,7 +5785,7 @@ mesh_listening_sockets_close()
 static void
 mesh_seed_host_list_get(cf_dyn_buf* db, bool tls)
 {
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		return;
 	}
 
@@ -5829,10 +5795,9 @@ mesh_seed_host_list_get(cf_dyn_buf* db, bool tls)
 	int element_count = cf_vector_size(seeds);
 	for (int i = 0; i < element_count; i++) {
 		as_hb_mesh_seed* seed = cf_vector_getp(seeds, i);
-		const char* info_key =
-				seed->seed_tls ?
-						"heartbeat.tls-mesh-seed-address-port=" :
-						"heartbeat.mesh-seed-address-port=";
+		const char* info_key = seed->seed_tls
+				? "heartbeat.tls-mesh-seed-address-port="
+				: "heartbeat.mesh-seed-address-port=";
 
 		cf_dyn_buf_append_string(db, info_key);
 		cf_dyn_buf_append_string(db, seed->seed_host_name);
@@ -5926,8 +5891,8 @@ static void
 mesh_seeds_mesh_node_match_update(cf_vector* inactive_seeds_p,
 		as_hb_mesh_node* mesh_node, cf_node mesh_nodeid)
 {
-	if (mesh_node->status
-			== AS_HB_MESH_NODE_ENDPOINT_UNKNOWN|| mesh_node->endpoint_list == NULL) {
+	if (mesh_node->status == AS_HB_MESH_NODE_ENDPOINT_UNKNOWN ||
+			mesh_node->endpoint_list == NULL) {
 		return;
 	}
 
@@ -5935,10 +5900,10 @@ mesh_seeds_mesh_node_match_update(cf_vector* inactive_seeds_p,
 	for (int i = 0; i < element_count; i++) {
 		// No null check required since we are iterating under a lock and within
 		// vector bounds.
-		as_hb_mesh_seed* seed = *(as_hb_mesh_seed**)cf_vector_getp(
-				inactive_seeds_p, i);
+		as_hb_mesh_seed* seed =
+				*(as_hb_mesh_seed**)cf_vector_getp(inactive_seeds_p, i);
 		if (as_endpoint_lists_are_overlapping(seed->resolved_endpoint_list,
-				mesh_node->endpoint_list, true)) {
+					mesh_node->endpoint_list, true)) {
 			// We found a matching mesh node for the seed, flip its status to
 			// active.
 			seed->mesh_nodeid = mesh_nodeid;
@@ -5961,13 +5926,12 @@ mesh_tend_reduce_cb(const void* key, void* data, void* udata)
 	int rv = CF_SHASH_OK;
 	cf_node nodeid = *(cf_node*)key;
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
-	as_hb_mesh_nodes_to_connect* to_connect =
-			(as_hb_mesh_nodes_to_connect*)udata;
+	as_hb_mesh_nodes_to_connect* to_connect = (as_hb_mesh_nodes_to_connect*)udata;
 
-	DETAIL("tending mesh node %"PRIx64" with status %s", nodeid,
+	DETAIL("tending mesh node %" PRIx64 " with status %s", nodeid,
 			mesh_node_status_string(mesh_node->status));
 
-	mesh_seeds_mesh_node_match_update(to_connect->inactive_seeds_p, mesh_node, 
+	mesh_seeds_mesh_node_match_update(to_connect->inactive_seeds_p, mesh_node,
 			nodeid);
 
 	if (mesh_node->status == AS_HB_MESH_NODE_CHANNEL_ACTIVE) {
@@ -5977,13 +5941,14 @@ mesh_tend_reduce_cb(const void* key, void* data, void* udata)
 
 	cf_clock now = cf_getms();
 
-	if (!mesh_node->endpoint_list) {
+	if (! mesh_node->endpoint_list) {
 		// Will happen if node discover and disconnect happen close together.
 		mesh_node_status_change(mesh_node, AS_HB_MESH_NODE_ENDPOINT_UNKNOWN);
 	}
 
 	if (now >= mesh_node->inactive_since + MESH_INACTIVE_TIMEOUT) {
-		DEBUG("mesh forgetting node %" PRIx64" because it could not be connected since %" PRIx64,
+		DEBUG("mesh forgetting node %" PRIx64
+			  " because it could not be connected since %" PRIx64,
 				nodeid, mesh_node->inactive_since);
 		rv = CF_SHASH_REDUCE_DELETE;
 		goto Exit;
@@ -5991,8 +5956,9 @@ mesh_tend_reduce_cb(const void* key, void* data, void* udata)
 
 	if (mesh_node->status == AS_HB_MESH_NODE_ENDPOINT_UNKNOWN) {
 		if (now >= mesh_node->last_status_updated +
-				MESH_ENDPOINT_UNKNOWN_TIMEOUT) {
-			DEBUG("mesh forgetting node %"PRIx64" ip address/port undiscovered since %"PRIu64,
+						MESH_ENDPOINT_UNKNOWN_TIMEOUT) {
+			DEBUG("mesh forgetting node %" PRIx64
+				  " ip address/port undiscovered since %" PRIu64,
 					nodeid, mesh_node->last_status_updated);
 
 			rv = CF_SHASH_REDUCE_DELETE;
@@ -6003,8 +5969,7 @@ mesh_tend_reduce_cb(const void* key, void* data, void* udata)
 
 	if (mesh_node->status == AS_HB_MESH_NODE_CHANNEL_PENDING) {
 		if (now >= mesh_node->last_status_updated + MESH_PENDING_TIMEOUT) {
-			mesh_node_status_change(mesh_node,
-					AS_HB_MESH_NODE_CHANNEL_INACTIVE);
+			mesh_node_status_change(mesh_node, AS_HB_MESH_NODE_CHANNEL_INACTIVE);
 		}
 		else {
 			goto Exit;
@@ -6016,7 +5981,8 @@ mesh_tend_reduce_cb(const void* key, void* data, void* udata)
 	if (to_connect->count >= to_connect->capacity) {
 		// New nodes found but we are out of capacity. Ultra defensive coding.
 		// This will never happen under the locks.
-		WARNING("skipping connecting to node %" PRIx64" - not enough memory allocated",
+		WARNING("skipping connecting to node %" PRIx64
+				" - not enough memory allocated",
 				nodeid);
 		goto Exit;
 	}
@@ -6063,9 +6029,8 @@ mesh_seeds_inactive_add_to_connect(cf_vector* seeds_p,
 		if (to_connect->count >= to_connect->capacity) {
 			// New nodes found but we are out of capacity. Ultra defensive
 			// coding. This will never happen under the locks.
-			WARNING(
-				"skipping connecting to %s:%d - not enough memory allocated",
-				seed->seed_host_name, seed->seed_port);
+			WARNING("skipping connecting to %s:%d - not enough memory allocated",
+					seed->seed_host_name, seed->seed_port);
 			MESH_UNLOCK();
 			return;
 		}
@@ -6112,10 +6077,11 @@ mesh_tender(void* arg)
 
 		// Unlocked access but this should be alright Set the discovered flag.
 		bool nodes_discovered = g_hb.mode_state.mesh_state.nodes_discovered;
-		if ((curr_time - last_time) < MESH_TEND_INTERVAL && !nodes_discovered) {
+		if ((curr_time - last_time) < MESH_TEND_INTERVAL && ! nodes_discovered) {
 			// Interval has not been reached for sending heartbeats
-			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN, (last_time +
-			MESH_TEND_INTERVAL) - curr_time) * 1000);
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+						   (last_time + MESH_TEND_INTERVAL) - curr_time) *
+					1000);
 			continue;
 		}
 		last_time = curr_time;
@@ -6130,9 +6096,9 @@ mesh_tender(void* arg)
 		mesh_seed_inactive_refresh_get_unsafe(&inactive_seeds_p);
 
 		// Make sure the udata has enough capacity.
-		int connect_count_max = cf_shash_get_size(
-				g_hb.mode_state.mesh_state.nodeid_to_mesh_node)
-				+ cf_vector_size(&inactive_seeds_p);
+		int connect_count_max =
+				cf_shash_get_size(g_hb.mode_state.mesh_state.nodeid_to_mesh_node) +
+				cf_vector_size(&inactive_seeds_p);
 		mesh_reinit_nodes_to_connect(&to_connect, connect_count_max);
 
 		to_connect.inactive_seeds_p = &inactive_seeds_p;
@@ -6233,9 +6199,9 @@ mesh_node_endpoint_list_is_valid(cf_node nodeid)
 	}
 
 	as_hb_mesh_node mesh_node;
-	return mesh_node_get(nodeid, &mesh_node) == 0
-			&& mesh_node.status != AS_HB_MESH_NODE_ENDPOINT_UNKNOWN
-			&& mesh_node.endpoint_list;
+	return mesh_node_get(nodeid, &mesh_node) == 0 &&
+			mesh_node.status != AS_HB_MESH_NODE_ENDPOINT_UNKNOWN &&
+			mesh_node.endpoint_list;
 }
 
 /**
@@ -6252,7 +6218,7 @@ mesh_node_get(cf_node nodeid, as_hb_mesh_node* mesh_node)
 
 	MESH_LOCK();
 	if (cf_shash_get(g_hb.mode_state.mesh_state.nodeid_to_mesh_node, &nodeid,
-			mesh_node) == CF_SHASH_OK) {
+				mesh_node) == CF_SHASH_OK) {
 		rv = 0;
 	}
 	else {
@@ -6278,7 +6244,7 @@ mesh_channel_on_node_disconnect(as_hb_channel_event* event)
 		goto Exit;
 	}
 
-	DEBUG("mesh setting node %" PRIx64" status as inactive on loss of channel",
+	DEBUG("mesh setting node %" PRIx64 " status as inactive on loss of channel",
 			event->nodeid);
 
 	// Mark this node inactive and move on. Mesh tender should remove this node
@@ -6318,11 +6284,11 @@ mesh_node_check_fix_self_msg(as_hb_channel_event* event)
 		if (udata.are_equal) {
 			// Definitely pulse message from self node.
 			int self_seed_index =
-					mesh_seed_endpoint_list_overlapping_find_unsafe(
-							msg_endpoint_list);
+					mesh_seed_endpoint_list_overlapping_find_unsafe(msg_endpoint_list);
 			if (self_seed_index >= 0) {
-				as_hb_mesh_seed* self_seed = cf_vector_getp(
-						&g_hb.mode_state.mesh_state.seeds, self_seed_index);
+				as_hb_mesh_seed* self_seed =
+						cf_vector_getp(&g_hb.mode_state.mesh_state.seeds,
+								self_seed_index);
 				INFO("removing self seed entry host:%s port:%d",
 						self_seed->seed_host_name, self_seed->seed_port);
 				as_hb_mesh_tip_clear(self_seed->seed_host_name,
@@ -6356,8 +6322,8 @@ mesh_node_data_update(as_hb_channel_event* event)
 
 	// Update the endpoint list to be the message endpoint list if the seed ip
 	// list and the published ip list differ
-	if (!as_endpoint_lists_are_equal(existing_mesh_node.endpoint_list,
-			msg_endpoint_list)) {
+	if (! as_endpoint_lists_are_equal(existing_mesh_node.endpoint_list,
+				msg_endpoint_list)) {
 		char endpoint_list_str1[ENDPOINT_LIST_STR_SIZE];
 		endpoint_list_str1[0] = 0;
 
@@ -6369,13 +6335,13 @@ mesh_node_data_update(as_hb_channel_event* event)
 				sizeof(endpoint_list_str2));
 
 		if (existing_mesh_node.endpoint_list) {
-			TICKER_INFO("for node %"PRIx64" updating mesh endpoint address from {%s} to {%s}",event->nodeid,
-					endpoint_list_str1, endpoint_list_str2);
+			TICKER_INFO("for node %" PRIx64
+						" updating mesh endpoint address from {%s} to {%s}",
+					event->nodeid, endpoint_list_str1, endpoint_list_str2);
 		}
 
 		// Update the endpoints.
-		endpoint_list_copy(&existing_mesh_node.endpoint_list,
-				msg_endpoint_list);
+		endpoint_list_copy(&existing_mesh_node.endpoint_list, msg_endpoint_list);
 		existing_mesh_node.endpoint_change_ts = as_hlc_timestamp_now();
 
 		needs_update = true;
@@ -6419,7 +6385,7 @@ mesh_info_reply_sizeof(as_hb_mesh_info_reply* reply, int reply_count,
 
 		size_t endpoint_list_size = 0;
 		if (as_endpoint_list_sizeof(&reply_ptr->endpoint_list[0],
-				&endpoint_list_size)) {
+					&endpoint_list_size)) {
 			// Incomplete / garbled info reply message.
 			*reply_size = 0;
 			return -1;
@@ -6452,8 +6418,7 @@ mesh_nodes_send_info_reply(cf_node dest, as_hb_mesh_info_reply* reply,
 
 	// Send the info reply.
 	if (channel_msg_unicast(dest, msg) != 0) {
-		TICKER_WARNING("error sending info reply message to node %" PRIx64,
-				dest);
+		TICKER_WARNING("error sending info reply message to node %" PRIx64, dest);
 	}
 
 	hb_msg_return(msg);
@@ -6513,7 +6478,7 @@ mesh_channel_on_pulse(msg* msg)
 	msg_nodeid_get(msg, &source);
 	if (msg_adjacency_get(msg, &adj_list, &adj_length) != 0) {
 		// Adjacency list absent.
-		WARNING("received message from %" PRIx64" without adjacency list",
+		WARNING("received message from %" PRIx64 " without adjacency list",
 				source);
 		return;
 	}
@@ -6527,19 +6492,18 @@ mesh_channel_on_pulse(msg* msg)
 
 	// Try and discover new nodes from this message's adjacency list.
 	for (int i = 0; i < adj_length; i++) {
-		if (!mesh_node_is_discovered(adj_list[i])) {
+		if (! mesh_node_is_discovered(adj_list[i])) {
 			DEBUG("discovered new mesh node %" PRIx64, adj_list[i]);
 
 			as_hb_mesh_node new_node;
 			memset(&new_node, 0, sizeof(new_node));
-			mesh_node_status_change(&new_node,
-					AS_HB_MESH_NODE_ENDPOINT_UNKNOWN);
+			mesh_node_status_change(&new_node, AS_HB_MESH_NODE_ENDPOINT_UNKNOWN);
 
 			// Add as a new node
 			mesh_node_add_update(adj_list[i], &new_node);
 		}
 
-		if (!mesh_node_endpoint_list_is_valid(adj_list[i])) {
+		if (! mesh_node_endpoint_list_is_valid(adj_list[i])) {
 			to_discover[num_to_discover++] = adj_list[i];
 		}
 	}
@@ -6565,7 +6529,7 @@ mesh_channel_on_info_request(msg* msg)
 	msg_nodeid_get(msg, &source);
 
 	if (msg_node_list_get(msg, AS_HB_MSG_INFO_REQUEST, &query_nodeids,
-			&query_count) != 0) {
+				&query_count) != 0) {
 		TICKER_WARNING("got an info request without query nodes from %" PRIx64,
 				source);
 		return;
@@ -6580,13 +6544,12 @@ mesh_channel_on_info_request(msg* msg)
 		as_hb_mesh_node mesh_node;
 
 		if (mesh_node_get(query_nodeids[i], &mesh_node) == 0) {
-			if (mesh_node.status != AS_HB_MESH_NODE_ENDPOINT_UNKNOWN
-					&& mesh_node.endpoint_list) {
+			if (mesh_node.status != AS_HB_MESH_NODE_ENDPOINT_UNKNOWN &&
+					mesh_node.endpoint_list) {
 				size_t endpoint_list_size = 0;
 				as_endpoint_list_sizeof(mesh_node.endpoint_list,
 						&endpoint_list_size);
-				reply_size += sizeof(as_hb_mesh_info_reply)
-						+ endpoint_list_size;
+				reply_size += sizeof(as_hb_mesh_info_reply) + endpoint_list_size;
 			}
 		}
 	}
@@ -6604,8 +6567,8 @@ mesh_channel_on_info_request(msg* msg)
 		DEBUG("mesh received info request for node %" PRIx64, query_nodeids[i]);
 
 		if (mesh_node_get(query_nodeids[i], &mesh_node) == 0) {
-			if (mesh_node.status != AS_HB_MESH_NODE_ENDPOINT_UNKNOWN
-					&& mesh_node.endpoint_list) {
+			if (mesh_node.status != AS_HB_MESH_NODE_ENDPOINT_UNKNOWN &&
+					mesh_node.endpoint_list) {
 				as_hb_mesh_info_reply* reply = (as_hb_mesh_info_reply*)reply_ptr;
 
 				reply->nodeid = query_nodeids[i];
@@ -6642,10 +6605,8 @@ mesh_channel_on_info_reply(msg* msg)
 	size_t reply_count = 0;
 	cf_node source = 0;
 	msg_nodeid_get(msg, &source);
-	if (msg_info_reply_get(msg, &reply, &reply_count) != 0
-			|| reply_count == 0) {
-		TICKER_WARNING(
-				"got an info reply from without query nodes from %" PRIx64,
+	if (msg_info_reply_get(msg, &reply, &reply_count) != 0 || reply_count == 0) {
+		TICKER_WARNING("got an info reply from without query nodes from %" PRIx64,
 				source);
 		return;
 	}
@@ -6654,7 +6615,7 @@ mesh_channel_on_info_reply(msg* msg)
 
 	MESH_LOCK();
 
-	uint8_t *start_ptr = (uint8_t*)reply;
+	uint8_t* start_ptr = (uint8_t*)reply;
 	for (int i = 0; i < reply_count; i++) {
 		as_hb_mesh_info_reply* reply_ptr = (as_hb_mesh_info_reply*)start_ptr;
 		as_hb_mesh_node existing_node;
@@ -6678,7 +6639,7 @@ mesh_channel_on_info_reply(msg* msg)
 			as_endpoint_list_to_string(existing_node.endpoint_list,
 					endpoint_list_str, sizeof(endpoint_list_str));
 
-			DEBUG("for node %" PRIx64" discovered endpoints {%s}",
+			DEBUG("for node %" PRIx64 " discovered endpoints {%s}",
 					reply_ptr->nodeid, endpoint_list_str);
 
 			// Update the hash.
@@ -6708,13 +6669,13 @@ mesh_channel_on_msg_rcvd(as_hb_channel_event* event)
 	msg_type_get(event->msg, &msg_type);
 
 	switch (msg_type) {
-	case AS_HB_MSG_TYPE_PULSE:	// A pulse message. Try and discover new nodes.
+	case AS_HB_MSG_TYPE_PULSE: // A pulse message. Try and discover new nodes.
 		mesh_channel_on_pulse(event->msg);
 		break;
-	case AS_HB_MSG_TYPE_INFO_REQUEST:	// Send back an info reply.
+	case AS_HB_MSG_TYPE_INFO_REQUEST: // Send back an info reply.
 		mesh_channel_on_info_request(event->msg);
 		break;
-	case AS_HB_MSG_TYPE_INFO_REPLY:	// Update the list of mesh nodes, if this is an undiscovered node.
+	case AS_HB_MSG_TYPE_INFO_REPLY: // Update the list of mesh nodes, if this is an undiscovered node.
 		mesh_channel_on_info_reply(event->msg);
 		break;
 	default:
@@ -6826,7 +6787,7 @@ static void
 mesh_channel_event_process(as_hb_channel_event* event)
 {
 	// Skip if we are not in mesh mode.
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		return;
 	}
 
@@ -6842,7 +6803,7 @@ mesh_channel_event_process(as_hb_channel_event* event)
 	case AS_HB_CHANNEL_MSG_RECEIVED:
 		mesh_channel_on_msg_rcvd(event);
 		break;
-	case AS_HB_CHANNEL_CLUSTER_NAME_MISMATCH:	// Ignore this event. HB module will handle it.
+	case AS_HB_CHANNEL_CLUSTER_NAME_MISMATCH: // Ignore this event. HB module will handle it.
 		break;
 	}
 
@@ -6855,7 +6816,7 @@ mesh_channel_event_process(as_hb_channel_event* event)
 static void
 mesh_init()
 {
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		return;
 	}
 
@@ -6864,13 +6825,13 @@ mesh_init()
 	g_hb.mode_state.mesh_state.status = AS_HB_STATUS_STOPPED;
 
 	// Initialize the mesh node hash.
-	g_hb.mode_state.mesh_state.nodeid_to_mesh_node = cf_shash_create(
-			cf_nodeid_shash_fn, sizeof(cf_node), sizeof(as_hb_mesh_node),
-			AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
+	g_hb.mode_state.mesh_state.nodeid_to_mesh_node =
+			cf_shash_create(cf_nodeid_shash_fn, sizeof(cf_node),
+					sizeof(as_hb_mesh_node), AS_HB_CLUSTER_MAX_SIZE_SOFT, false);
 
 	// Initialize the seed list.
 	cf_vector_init(&g_hb.mode_state.mesh_state.seeds, sizeof(as_hb_mesh_seed),
-	AS_HB_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+			AS_HB_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
 
 	MESH_UNLOCK();
 }
@@ -6915,9 +6876,8 @@ mesh_peer_endpoint_reduce(const void* key, void* data, void* udata)
 static void
 mesh_clear()
 {
-	if (!mesh_is_stopped()) {
-		WARNING(
-				"attempted clearing mesh module without stopping it - skip mesh clear!");
+	if (! mesh_is_stopped()) {
+		WARNING("attempted clearing mesh module without stopping it - skip mesh clear!");
 		return;
 	}
 
@@ -6960,9 +6920,9 @@ mesh_listening_sockets_open()
 		INFO("initializing mesh heartbeat socket: %s:%d", addr_string,
 				sock_cfg->port);
 
-		int bind_interface_mtu =
-				!cf_ip_addr_is_any(&sock_cfg->addr) ?
-						cf_inter_mtu(&sock_cfg->addr) : cf_inter_min_mtu();
+		int bind_interface_mtu = ! cf_ip_addr_is_any(&sock_cfg->addr)
+				? cf_inter_mtu(&sock_cfg->addr)
+				: cf_inter_min_mtu();
 
 		if (min_mtu == -1 || min_mtu > bind_interface_mtu) {
 			min_mtu = bind_interface_mtu;
@@ -6970,7 +6930,7 @@ mesh_listening_sockets_open()
 	}
 
 	if (cf_socket_init_server((cf_serv_cfg*)bind_cfg,
-			&g_hb.mode_state.mesh_state.listening_sockets) != 0) {
+				&g_hb.mode_state.mesh_state.listening_sockets) != 0) {
 		CRASH("couldn't initialize unicast heartbeat sockets");
 	}
 
@@ -6998,15 +6958,15 @@ mesh_listening_sockets_open()
 static void
 mesh_start()
 {
-	if (!hb_is_mesh()) {
+	if (! hb_is_mesh()) {
 		return;
 	}
 
 	MESH_LOCK();
 
 	mesh_listening_sockets_open();
-	channel_mesh_listening_socks_register(
-			&g_hb.mode_state.mesh_state.listening_sockets);
+	channel_mesh_listening_socks_register(&g_hb.mode_state.mesh_state
+												   .listening_sockets);
 
 	g_hb.mode_state.mesh_state.status = AS_HB_STATUS_RUNNING;
 
@@ -7023,7 +6983,7 @@ mesh_start()
 static void
 mesh_stop()
 {
-	if (!mesh_is_running()) {
+	if (! mesh_is_running()) {
 		WARNING("mesh is already stopped");
 		return;
 	}
@@ -7036,8 +6996,8 @@ mesh_stop()
 
 	MESH_LOCK();
 
-	channel_mesh_listening_socks_deregister(
-			&g_hb.mode_state.mesh_state.listening_sockets);
+	channel_mesh_listening_socks_deregister(&g_hb.mode_state.mesh_state
+													 .listening_sockets);
 
 	mesh_listening_sockets_close();
 
@@ -7065,7 +7025,8 @@ mesh_dump_reduce(const void* key, void* data, void* udata)
 	as_endpoint_list_to_string(mesh_node->endpoint_list, endpoint_list_str,
 			sizeof(endpoint_list_str));
 
-	INFO("\tHB Mesh Node: node-id %" PRIx64" status %s last-updated %" PRIu64 " endpoints {%s}",
+	INFO("\tHB Mesh Node: node-id %" PRIx64 " status %s last-updated %" PRIu64
+		 " endpoints {%s}",
 			nodeid, mesh_node_status_string(mesh_node->status),
 			mesh_node->last_status_updated, endpoint_list_str);
 
@@ -7079,7 +7040,7 @@ mesh_dump_reduce(const void* key, void* data, void* udata)
 static void
 mesh_dump(bool verbose)
 {
-	if (!hb_is_mesh() || !verbose) {
+	if (! hb_is_mesh() || ! verbose) {
 		return;
 	}
 
@@ -7092,12 +7053,14 @@ mesh_dump(bool verbose)
 		char endpoint_list_str[ENDPOINT_LIST_STR_SIZE];
 		as_endpoint_list_to_string(seed->resolved_endpoint_list,
 				endpoint_list_str, sizeof(endpoint_list_str));
-		INFO("\tHB Mesh Seed: host %s port %d node-id %" PRIx64" status %s endpoints {%s}",
-				seed->seed_host_name, seed->seed_port, seed->mesh_nodeid, mesh_node_status_string(seed->status),
-				endpoint_list_str);
+		INFO("\tHB Mesh Seed: host %s port %d node-id %" PRIx64
+			 " status %s endpoints {%s}",
+				seed->seed_host_name, seed->seed_port, seed->mesh_nodeid,
+				mesh_node_status_string(seed->status), endpoint_list_str);
 	}
 
-	INFO("HB Mesh Nodes Count %d", cf_shash_get_size(g_hb.mode_state.mesh_state.nodeid_to_mesh_node));
+	INFO("HB Mesh Nodes Count %d",
+			cf_shash_get_size(g_hb.mode_state.mesh_state.nodeid_to_mesh_node));
 	cf_shash_reduce(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
 			mesh_dump_reduce, NULL);
 	MESH_UNLOCK();
@@ -7147,9 +7110,9 @@ multicast_listening_sockets_open()
 		INFO("initializing multicast heartbeat socket: %s:%d", addr_string,
 				sock_cfg->port);
 
-		int bind_interface_mtu =
-				!cf_ip_addr_is_any(&sock_cfg->if_addr) ?
-						cf_inter_mtu(&sock_cfg->if_addr) : cf_inter_min_mtu();
+		int bind_interface_mtu = ! cf_ip_addr_is_any(&sock_cfg->if_addr)
+				? cf_inter_mtu(&sock_cfg->if_addr)
+				: cf_inter_min_mtu();
 
 		if (min_mtu == -1 || min_mtu > bind_interface_mtu) {
 			min_mtu = bind_interface_mtu;
@@ -7157,17 +7120,15 @@ multicast_listening_sockets_open()
 	}
 
 	if (cf_socket_mcast_init((cf_mserv_cfg*)mserv_cfg,
-			&g_hb.mode_state.multicast_state.listening_sockets) != 0) {
+				&g_hb.mode_state.multicast_state.listening_sockets) != 0) {
 		CRASH("couldn't initialize multicast heartbeat socket: %s",
 				cf_strerror(errno));
 	}
 
 	for (uint32_t i = 0;
-			i < g_hb.mode_state.multicast_state.listening_sockets.n_socks;
-			++i) {
+			i < g_hb.mode_state.multicast_state.listening_sockets.n_socks; ++i) {
 		DEBUG("opened multicast socket %d",
-				CSFD(
-						&g_hb.mode_state.multicast_state.listening_sockets.socks[i]));
+				CSFD(&g_hb.mode_state.multicast_state.listening_sockets.socks[i]));
 	}
 
 	if (min_mtu == -1) {
@@ -7190,8 +7151,8 @@ multicast_start()
 {
 	MULTICAST_LOCK();
 	multicast_listening_sockets_open();
-	channel_multicast_listening_socks_register(
-			&g_hb.mode_state.multicast_state.listening_sockets);
+	channel_multicast_listening_socks_register(&g_hb.mode_state.multicast_state
+														.listening_sockets);
 	MULTICAST_UNLOCK();
 }
 
@@ -7267,8 +7228,9 @@ multicast_supported_cluster_size_get()
 	// TODO: Compute the max cluster size using max storage per node in cluster
 	// and the min mtu.
 	int supported_cluster_size = MAX(1,
-			(((hb_mtu() - UDP_HEADER_SIZE_MAX) * MSG_COMPRESSION_RATIO)
-					- msg_fixed_size) / msg_plugin_per_node_size);
+			(((hb_mtu() - UDP_HEADER_SIZE_MAX) * MSG_COMPRESSION_RATIO) -
+					msg_fixed_size) /
+					msg_plugin_per_node_size);
 
 	return supported_cluster_size;
 }
@@ -7350,10 +7312,9 @@ static int
 hb_mtu()
 {
 	int __mtu = config_override_mtu_get();
-	if (!__mtu) {
-		__mtu = hb_is_mesh() ?
-				g_hb.mode_state.mesh_state.min_mtu :
-				g_hb.mode_state.multicast_state.min_mtu;
+	if (! __mtu) {
+		__mtu = hb_is_mesh() ? g_hb.mode_state.mesh_state.min_mtu
+							 : g_hb.mode_state.multicast_state.min_mtu;
 		__mtu = __mtu > 0 ? __mtu : DEFAULT_MIN_MTU;
 	}
 	return __mtu;
@@ -7369,8 +7330,7 @@ hb_msg_init()
 	// This permits getting / putting heartbeat msgs to be moderated via an idle
 	// msg queue.
 	as_fabric_register_msg_fn(M_TYPE_HEARTBEAT, g_hb_msg_template,
-			sizeof(g_hb_msg_template),
-			AS_HB_MSG_SCRATCH_SIZE, 0, 0);
+			sizeof(g_hb_msg_template), AS_HB_MSG_SCRATCH_SIZE, 0, 0);
 }
 
 /**
@@ -7456,8 +7416,8 @@ hb_event_publish_pending()
 
 	as_hb_event_node events[AS_HB_CLUSTER_MAX_SIZE_SOFT];
 	int published_count = 0;
-	while (published_count < AS_HB_CLUSTER_MAX_SIZE_SOFT
-			&& cf_queue_pop(&g_hb_event_listeners.external_events_queue,
+	while (published_count < AS_HB_CLUSTER_MAX_SIZE_SOFT &&
+			cf_queue_pop(&g_hb_event_listeners.external_events_queue,
 					&events[published_count], 0) == CF_QUEUE_OK) {
 		published_count++;
 	}
@@ -7467,9 +7427,8 @@ hb_event_publish_pending()
 		// no locks here.
 		DEBUG("publishing %d heartbeat events", published_count);
 		for (int i = 0; i < g_hb_event_listeners.event_listener_count; i++) {
-			(g_hb_event_listeners.event_listeners[i].event_callback)(
-					published_count, events,
-					g_hb_event_listeners.event_listeners[i].udata);
+			(g_hb_event_listeners.event_listeners[i].event_callback)(published_count,
+					events, g_hb_event_listeners.event_listeners[i].udata);
 		}
 	}
 
@@ -7502,7 +7461,7 @@ hb_adjacency_free_data_reduce(const void* key, void* data, void* udata)
 static void
 hb_clear()
 {
-	if (!hb_is_stopped()) {
+	if (! hb_is_stopped()) {
 		WARNING("attempted to clear heartbeat module without stopping it");
 		return;
 	}
@@ -7541,8 +7500,7 @@ hb_adjacency_iterate_reduce(const void* key, void* data, void* udata)
 	as_hb_adjacency_reduce_udata* adjacency_reduce_udata =
 			(as_hb_adjacency_reduce_udata*)udata;
 
-	adjacency_reduce_udata->adj_list[adjacency_reduce_udata->adj_count] =
-			*nodeid;
+	adjacency_reduce_udata->adj_list[adjacency_reduce_udata->adj_count] = *nodeid;
 	adjacency_reduce_udata->adj_count++;
 
 	return CF_SHASH_OK;
@@ -7598,10 +7556,10 @@ hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	if (guessed_data_size > plugin_data->data_capacity) {
 		// Round up to nearest multiple of block size to prevent very frequent
 		// reallocation.
-		size_t data_capacity = ((guessed_data_size + HB_PLUGIN_DATA_BLOCK_SIZE
-				- 1) /
-		HB_PLUGIN_DATA_BLOCK_SIZE) *
-		HB_PLUGIN_DATA_BLOCK_SIZE;
+		size_t data_capacity =
+				((guessed_data_size + HB_PLUGIN_DATA_BLOCK_SIZE - 1) /
+						HB_PLUGIN_DATA_BLOCK_SIZE) *
+				HB_PLUGIN_DATA_BLOCK_SIZE;
 
 		// Reallocate since we have outgrown existing capacity.
 		plugin_data->data = cf_realloc(plugin_data->data, data_capacity);
@@ -7679,12 +7637,12 @@ hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node,
 		plugin_data_changed[i] = false;
 		if (plugins[i].parse_fn) {
 			as_hb_plugin_node_data* curr_data =
-					&adjacent_node->plugin_data[i][adjacent_node->plugin_data_cycler
-							% 2];
+					&adjacent_node
+							 ->plugin_data[i][adjacent_node->plugin_data_cycler % 2];
 
 			as_hb_plugin_node_data* prev_data =
-					&adjacent_node->plugin_data[i][(adjacent_node->plugin_data_cycler
-							+ 1) % 2];
+					&adjacent_node->plugin_data
+							 [i][(adjacent_node->plugin_data_cycler + 1) % 2];
 
 			// Ensure there is a preallocated data pointer.
 			if (curr_data->data == NULL) {
@@ -7702,7 +7660,7 @@ hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node,
 			// Parse message data into current data.
 			(plugins[i]).parse_fn(msg, source, prev_data, curr_data);
 
-			if (!plugins[i].change_listener) {
+			if (! plugins[i].change_listener) {
 				// No change listener configured. Skip detecting change.
 				continue;
 			}
@@ -7720,8 +7678,8 @@ hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node,
 				continue;
 			}
 
-			if (prev_data_size != curr_data_size || prev_data_blob == NULL
-					|| curr_data_blob == NULL) {
+			if (prev_data_size != curr_data_size || prev_data_blob == NULL ||
+					curr_data_blob == NULL) {
 				// Plugin data definitely changed, as the data sizes differ or
 				// exactly one of old or new data pointers is NULL.
 				plugin_data_changed[i] = true;
@@ -7729,8 +7687,8 @@ hb_plugin_msg_parse(msg* msg, as_hb_adjacent_node* adjacent_node,
 			}
 
 			// The data sizes match at this point and neither values are NULL.
-			plugin_data_changed[i] = memcmp(prev_data_blob, curr_data_blob,
-					curr_data_size) != 0;
+			plugin_data_changed[i] =
+					memcmp(prev_data_blob, curr_data_blob, curr_data_size) != 0;
 		}
 	}
 }
@@ -7779,8 +7737,9 @@ hb_transmitter(void* arg)
 
 		if ((curr_time - last_time) < PULSE_TRANSMIT_INTERVAL()) {
 			// Interval has not been reached for sending heartbeats
-			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN, (last_time +
-			PULSE_TRANSMIT_INTERVAL()) - curr_time) * 1000);
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+						   (last_time + PULSE_TRANSMIT_INTERVAL()) - curr_time) *
+					1000);
 			continue;
 		}
 
@@ -7840,8 +7799,7 @@ hb_on_probation_node_get(cf_node nodeid, as_hb_adjacent_node* adjacent_node)
 	int rv = -1;
 	HB_LOCK();
 
-	if (cf_shash_get(g_hb.on_probation, &nodeid, adjacent_node)
-			== CF_SHASH_OK) {
+	if (cf_shash_get(g_hb.on_probation, &nodeid, adjacent_node) == CF_SHASH_OK) {
 		rv = 0;
 	}
 
@@ -7861,13 +7819,16 @@ hb_adjacent_node_plugin_data_get(as_hb_adjacent_node* adjacent_node,
 		as_hb_plugin_id plugin_id, void** plugin_data, size_t* plugin_data_size)
 {
 	*plugin_data_size =
-			adjacent_node->plugin_data[plugin_id][adjacent_node->plugin_data_cycler
-					% 2].data_size;
+			adjacent_node
+					->plugin_data[plugin_id][adjacent_node->plugin_data_cycler % 2]
+					.data_size;
 
-	*plugin_data =
-			*plugin_data_size ?
-					(cf_node*)(adjacent_node->plugin_data[plugin_id][adjacent_node->plugin_data_cycler
-							% 2].data) : NULL;
+	*plugin_data = *plugin_data_size
+			? (cf_node*)(adjacent_node
+								 ->plugin_data[plugin_id]
+											  [adjacent_node->plugin_data_cycler % 2]
+								 .data)
+			: NULL;
 }
 
 /**
@@ -7897,8 +7858,8 @@ hb_node_has_expired(cf_node nodeid, as_hb_adjacent_node* adjacent_node)
 
 	cf_clock now = cf_getms();
 
-	bool expired = adjacent_node->last_updated_monotonic_ts + HB_NODE_TIMEOUT()
-			< now;
+	bool expired =
+			adjacent_node->last_updated_monotonic_ts + HB_NODE_TIMEOUT() < now;
 
 	HB_UNLOCK();
 	return expired;
@@ -7908,7 +7869,8 @@ hb_node_has_expired(cf_node nodeid, as_hb_adjacent_node* adjacent_node)
  * Indicates if self node has duplicate ids.
  */
 static bool
-hb_self_is_duplicate(){
+hb_self_is_duplicate()
+{
 	HB_LOCK();
 	bool self_is_duplicate = g_hb.self_is_duplicate;
 	HB_UNLOCK();
@@ -7925,8 +7887,7 @@ hb_self_duplicate_update()
 	HB_LOCK();
 	if (g_hb.self_is_duplicate) {
 		uint32_t duplicate_block_interval =
-			config_endpoint_track_intervals_get()
-			* config_tx_interval_get();
+				config_endpoint_track_intervals_get() * config_tx_interval_get();
 		if (g_hb.self_duplicate_detected_ts + duplicate_block_interval <= now) {
 			// We have not seen duplicates for the endpoint change tracking
 			// interval. Mark ourself as non-duplicate.
@@ -7977,16 +7938,19 @@ hb_adjacency_tend_reduce(const void* key, void* data, void* udata)
 			(as_hb_adjacency_tender_udata*)udata;
 
 	int rv = CF_SHASH_OK;
-	bool cluster_name_mismatch = adjacent_node->cluster_name_mismatch_count
-			> CLUSTER_NAME_MISMATCH_MAX;
+	bool cluster_name_mismatch = adjacent_node->cluster_name_mismatch_count >
+			CLUSTER_NAME_MISMATCH_MAX;
 	if (hb_node_has_expired(nodeid, adjacent_node) || cluster_name_mismatch) {
-		INFO("node expired %" PRIx64" %s", nodeid, cluster_name_mismatch ? "(cluster name mismatch)" : "");
+		INFO("node expired %" PRIx64 " %s", nodeid,
+				cluster_name_mismatch ? "(cluster name mismatch)" : "");
 		if (cluster_name_mismatch) {
-			adjacency_tender_udata->evicted_nodes[adjacency_tender_udata->evicted_node_count++] =
+			adjacency_tender_udata
+					->evicted_nodes[adjacency_tender_udata->evicted_node_count++] =
 					nodeid;
 		}
 		else {
-			adjacency_tender_udata->dead_nodes[adjacency_tender_udata->dead_node_count++] =
+			adjacency_tender_udata
+					->dead_nodes[adjacency_tender_udata->dead_node_count++] =
 					nodeid;
 		}
 
@@ -8046,10 +8010,9 @@ hb_adjacency_tender(void* arg)
 			hb_event_publish_pending();
 
 			// Interval has not been reached for sending heartbeats
-			usleep(
-					MIN(AS_HB_TX_INTERVAL_MS_MIN,
-							(last_time + adjacency_tend_interval) - curr_time)
-							* 1000);
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+						   (last_time + adjacency_tend_interval) - curr_time) *
+					1000);
 			continue;
 		}
 
@@ -8104,8 +8067,8 @@ static void
 hb_tx_start()
 {
 	// Start the transmitter thread.
-	g_hb.transmitter_tid = cf_thread_create_joinable(hb_transmitter,
-			(void*)&g_hb);
+	g_hb.transmitter_tid =
+			cf_thread_create_joinable(hb_transmitter, (void*)&g_hb);
 }
 
 /**
@@ -8126,8 +8089,8 @@ static void
 hb_adjacency_tender_start()
 {
 	// Start the transmitter thread.
-	g_hb.adjacency_tender_tid = cf_thread_create_joinable(hb_adjacency_tender,
-			(void*)&g_hb);
+	g_hb.adjacency_tender_tid =
+			cf_thread_create_joinable(hb_adjacency_tender, (void*)&g_hb);
 }
 
 /**
@@ -8171,8 +8134,7 @@ hb_init()
 
 	// Initialize unpublished event queue.
 	cf_queue_init(&g_hb_event_listeners.external_events_queue,
-			sizeof(as_hb_event_node),
-			AS_HB_CLUSTER_MAX_SIZE_SOFT, true);
+			sizeof(as_hb_event_node), AS_HB_CLUSTER_MAX_SIZE_SOFT, true);
 
 	// Initialize the mode specific state.
 	hb_mode_init();
@@ -8230,7 +8192,7 @@ hb_start()
 static void
 hb_stop()
 {
-	if (!hb_is_running()) {
+	if (! hb_is_running()) {
 		WARNING("heartbeat is already stopped");
 		return;
 	}
@@ -8278,8 +8240,8 @@ hb_plugin_register(as_hb_plugin* plugin)
 static bool
 hb_msg_is_obsolete(as_hb_channel_event* event, as_hlc_timestamp last_send_ts)
 {
-	if (as_hlc_timestamp_order_get(event->msg_hlc_ts.send_ts, last_send_ts)
-			== AS_HLC_HAPPENS_BEFORE) {
+	if (as_hlc_timestamp_order_get(event->msg_hlc_ts.send_ts, last_send_ts) ==
+			AS_HLC_HAPPENS_BEFORE) {
 		// Received a delayed heartbeat send before the current heartbeat.
 		return true;
 	}
@@ -8309,8 +8271,8 @@ hb_endpoint_change_tracker_is_normal(uint64_t tracker)
 		return true;
 	}
 
-	uint32_t num_intervals_to_track = MIN(64,
-			config_endpoint_track_intervals_get());
+	uint32_t num_intervals_to_track =
+			MIN(64, config_endpoint_track_intervals_get());
 	uint64_t mask = ~(~(uint64_t)0 << num_intervals_to_track);
 
 	// Ignore older history.
@@ -8324,7 +8286,6 @@ hb_endpoint_change_tracker_is_normal(uint64_t tracker)
 
 	return flip_count <= config_endpoint_changes_allowed_get();
 }
-
 
 /**
  * Indicates if the change tracker just changed.
@@ -8355,18 +8316,16 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 
 	as_hlc_timestamp send_ts = adjacent_node->last_msg_hlc_ts.send_ts;
 
-	if (hb_endpoint_change_tracker_has_changed(
-			adjacent_node->endpoint_change_tracker)) {
+	if (hb_endpoint_change_tracker_has_changed(adjacent_node->endpoint_change_tracker)) {
 		// Allow a little more slack for obsolete checking because the two nodes
 		// might not have matching send timestamps.
-		send_ts = as_hlc_timestamp_subtract_ms(send_ts,
-				config_tx_interval_get());
+		send_ts = as_hlc_timestamp_subtract_ms(send_ts, config_tx_interval_get());
 	}
 
 	if (hb_msg_is_obsolete(msg_event, send_ts)) {
-		WARNING("ignoring delayed heartbeat - expected timestamp less than %" PRIu64" but was  %" PRIu64 " from node: %" PRIx64,
-				send_ts,
-				msg_event->msg_hlc_ts.send_ts, source);
+		WARNING("ignoring delayed heartbeat - expected timestamp less than %" PRIu64
+				" but was  %" PRIu64 " from node: %" PRIx64,
+				send_ts, msg_event->msg_hlc_ts.send_ts, source);
 		return -1;
 	}
 
@@ -8375,8 +8334,8 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 
 	// Get the ip address.
 	as_endpoint_list* msg_endpoint_list;
-	if (msg_endpoint_list_get(msg, &msg_endpoint_list) == 0
-			&& !as_endpoint_lists_are_equal(adjacent_node->endpoint_list,
+	if (msg_endpoint_list_get(msg, &msg_endpoint_list) == 0 &&
+			! as_endpoint_lists_are_equal(adjacent_node->endpoint_list,
 					msg_endpoint_list)) {
 		// Update the endpoints.
 		endpoint_list_copy(&adjacent_node->endpoint_list, msg_endpoint_list);
@@ -8391,20 +8350,20 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 	int64_t latency = as_hlc_timestamp_diff_ms(msg_event->msg_hlc_ts.send_ts,
 			msg_event->msg_hlc_ts.recv_ts);
 	latency = latency < 0 ? -latency : latency;
-	adjacent_node->avg_latency = ALPHA * latency
-			+ (1 - ALPHA) * adjacent_node->avg_latency;
+	adjacent_node->avg_latency =
+			ALPHA * latency + (1 - ALPHA) * adjacent_node->avg_latency;
 
 	// Reset the cluster-name mismatch counter to zero.
 	adjacent_node->cluster_name_mismatch_count = 0;
 
 	// Check if fabric endpoints have changed.
 	as_hb_plugin_node_data* curr_data =
-			&adjacent_node->plugin_data[AS_HB_PLUGIN_FABRIC][adjacent_node->plugin_data_cycler
-					% 2];
+			&adjacent_node->plugin_data[AS_HB_PLUGIN_FABRIC]
+									   [adjacent_node->plugin_data_cycler % 2];
 
 	as_hb_plugin_node_data* prev_data =
-			&adjacent_node->plugin_data[AS_HB_PLUGIN_FABRIC][(adjacent_node->plugin_data_cycler
-					+ 1) % 2];
+			&adjacent_node->plugin_data[AS_HB_PLUGIN_FABRIC]
+									   [(adjacent_node->plugin_data_cycler + 1) % 2];
 
 	as_endpoint_list* curr_fabric_endpoints =
 			as_fabric_hb_plugin_get_endpoint_list(curr_data);
@@ -8413,8 +8372,8 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 
 	// Endpoints changed if this is not the first update and if the endpoint
 	// lists do not match.
-	bool endpoints_changed = prev_fabric_endpoints != NULL
-			&& !as_endpoint_lists_are_equal(curr_fabric_endpoints,
+	bool endpoints_changed = prev_fabric_endpoints != NULL &&
+			! as_endpoint_lists_are_equal(curr_fabric_endpoints,
 					prev_fabric_endpoints);
 
 	if (endpoints_changed) {
@@ -8426,7 +8385,9 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 		as_endpoint_list_to_string(prev_fabric_endpoints,
 				prev_fabric_endpoints_str, sizeof(prev_fabric_endpoints_str));
 
-		TICKER_WARNING("node: %"PRIx64" fabric endpoints changed from {%s} to {%s} - possible duplicate node-id", source, prev_fabric_endpoints_str, curr_fabric_endpoints_str);
+		TICKER_WARNING("node: %" PRIx64
+					   " fabric endpoints changed from {%s} to {%s} - possible duplicate node-id",
+				source, prev_fabric_endpoints_str, curr_fabric_endpoints_str);
 	}
 
 	hb_endpoint_change_tracker_update(&adjacent_node->endpoint_change_tracker,
@@ -8442,8 +8403,7 @@ hb_adjacent_node_update(as_hb_channel_event* msg_event,
 static bool
 hb_node_can_consider_adjacent(as_hb_adjacent_node* adjacent_node)
 {
-	return hb_endpoint_change_tracker_is_normal(
-			adjacent_node->endpoint_change_tracker);
+	return hb_endpoint_change_tracker_is_normal(adjacent_node->endpoint_change_tracker);
 }
 
 /**
@@ -8455,18 +8415,18 @@ hb_channel_on_self_pulse(as_hb_channel_event* msg_event)
 	bool plugin_data_changed[AS_HB_PLUGIN_SENTINEL] = { 0 };
 
 	HB_LOCK();
-	if (hb_adjacent_node_update(msg_event, &g_hb.self_node, plugin_data_changed)
-			!= 0) {
+	if (hb_adjacent_node_update(msg_event, &g_hb.self_node,
+				plugin_data_changed) != 0) {
 		goto Exit;
 	}
 
 	as_hb_plugin_node_data* curr_data =
-			&g_hb.self_node.plugin_data[AS_HB_PLUGIN_FABRIC][g_hb.self_node.plugin_data_cycler
-					% 2];
+			&g_hb.self_node.plugin_data[AS_HB_PLUGIN_FABRIC]
+									   [g_hb.self_node.plugin_data_cycler % 2];
 	as_endpoint_list* curr_fabric_endpoints =
 			as_fabric_hb_plugin_get_endpoint_list(curr_data);
 
-	if (!as_fabric_is_published_endpoint_list(curr_fabric_endpoints)) {
+	if (! as_fabric_is_published_endpoint_list(curr_fabric_endpoints)) {
 		// Mark self as having duplicate node-id.
 		g_hb.self_is_duplicate = true;
 		g_hb.self_duplicate_detected_ts = cf_getms();
@@ -8475,7 +8435,9 @@ hb_channel_on_self_pulse(as_hb_channel_event* msg_event)
 		char endpoint_list_str[ENDPOINT_LIST_STR_SIZE];
 		as_endpoint_list_to_string(curr_fabric_endpoints, endpoint_list_str,
 				sizeof(endpoint_list_str));
-		TICKER_WARNING("duplicate node-id: %" PRIx64 " with fabric endpoints {%s}", config_self_nodeid_get(), endpoint_list_str);
+		TICKER_WARNING("duplicate node-id: %" PRIx64
+					   " with fabric endpoints {%s}",
+				config_self_nodeid_get(), endpoint_list_str);
 	}
 	else {
 		as_incr_uint64(&g_stats.heartbeat_received_self);
@@ -8514,23 +8476,23 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	bool is_in_adjacency = (hb_adjacent_node_get(source, &adjacent_node) == 0);
 	bool should_be_on_probation = false;
 
-	if (!is_in_adjacency) {
+	if (! is_in_adjacency) {
 		hb_on_probation_node_get(source, &adjacent_node);
 	}
 
 	// Update the adjacent node with contents of the message.
-	if (hb_adjacent_node_update(msg_event, &adjacent_node, plugin_data_changed)
-			!= 0) {
+	if (hb_adjacent_node_update(msg_event, &adjacent_node,
+				plugin_data_changed) != 0) {
 		// Update rejected.
 		goto Exit;
 	}
 
 	// Check if this node needs to be on probation.
-	should_be_on_probation = !hb_node_can_consider_adjacent(&adjacent_node);
+	should_be_on_probation = ! hb_node_can_consider_adjacent(&adjacent_node);
 
 	as_incr_uint64(&g_stats.heartbeat_received_foreign);
 
-	bool is_new = !should_be_on_probation && !is_in_adjacency;
+	bool is_new = ! should_be_on_probation && ! is_in_adjacency;
 
 	if (is_new) {
 		int mcsize = config_mcsize();
@@ -8538,7 +8500,8 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 		// (mcsize - 1) in the check.
 		if (cf_shash_get_size(g_hb.adjacency) >= (mcsize - 1)) {
 			if (last_cluster_breach_print != (cf_getms() / 1000L)) {
-				WARNING("ignoring node: %" PRIx64" - exceeding maximum supported cluster size %d",
+				WARNING("ignoring node: %" PRIx64
+						" - exceeding maximum supported cluster size %d",
 						source, mcsize);
 				last_cluster_breach_print = cf_getms() / 1000L;
 			}
@@ -8564,7 +8527,8 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	else if (should_be_on_probation && is_in_adjacency) {
 		// This node needs to be on probation, most likely due to duplicate
 		// node-ids.
-		WARNING("node expired %" PRIx64" - potentially duplicate node-id", source);
+		WARNING("node expired %" PRIx64 " - potentially duplicate node-id",
+				source);
 		hb_event_queue(AS_HB_INTERNAL_NODE_DEPART, &source, 1);
 	}
 
@@ -8574,13 +8538,13 @@ Exit:
 	// Publish any pending node arrival events.
 	hb_event_publish_pending();
 
-	if (!should_be_on_probation) {
+	if (! should_be_on_probation) {
 		// Call plugin change listeners outside of a lock to prevent deadlocks.
 		for (int i = 0; i < AS_HB_PLUGIN_SENTINEL; i++) {
 			if (plugin_data_changed[i] && g_hb.plugins[i].change_listener) {
 				// Notify that data for this plugin for the source node has
 				// changed.
-				DETAIL("plugin data for node %" PRIx64" changed for plugin %d",
+				DETAIL("plugin data for node %" PRIx64 " changed for plugin %d",
 						source, i);
 				(g_hb.plugins[i]).change_listener(source);
 			}
@@ -8599,10 +8563,10 @@ hb_channel_on_msg_rcvd(as_hb_channel_event* event)
 	msg_type_get(msg, &type);
 
 	switch (type) {
-	case AS_HB_MSG_TYPE_PULSE:	// A pulse message. Update the adjacent node data.
+	case AS_HB_MSG_TYPE_PULSE: // A pulse message. Update the adjacent node data.
 		hb_channel_on_pulse(event);
 		break;
-	default:	// Ignore other messages.
+	default: // Ignore other messages.
 		break;
 	}
 }
@@ -8624,7 +8588,8 @@ hb_handle_cluster_name_mismatch(as_hb_channel_event* event)
 	}
 
 	if (hb_msg_is_obsolete(event, adjacent_node.last_msg_hlc_ts.send_ts)) {
-		WARNING("ignoring delayed heartbeat - expected timestamp less than %" PRIu64" but was  %" PRIu64 " from node: %" PRIx64,
+		WARNING("ignoring delayed heartbeat - expected timestamp less than %" PRIu64
+				" but was  %" PRIu64 " from node: %" PRIx64,
 				adjacent_node.last_msg_hlc_ts.send_ts,
 				event->msg_hlc_ts.send_ts, event->nodeid);
 		goto Exit;
@@ -8651,8 +8616,8 @@ hb_channel_event_process(as_hb_channel_event* event)
 	case AS_HB_CHANNEL_CLUSTER_NAME_MISMATCH:
 		hb_handle_cluster_name_mismatch(event);
 		break;
-	default:	// Ignore channel active and inactive events. Rather rely on the adjacency
-	// tender to expire nodes.
+	default: // Ignore channel active and inactive events. Rather rely on the adjacency
+		// tender to expire nodes.
 		break;
 	}
 }
@@ -8685,10 +8650,11 @@ hb_dump_reduce(const void* key, void* data, void* udata)
 	as_endpoint_list_to_string(adjacent_node->endpoint_list, endpoint_list_str,
 			sizeof(endpoint_list_str));
 
-	INFO("\tHB %s Node: node-id %" PRIx64" protocol %" PRIu32" endpoints {%s} last-updated %" PRIu64 " latency-ms %" PRIu64 ,
-			(char*)udata,
-			*nodeid, adjacent_node->protocol_version, endpoint_list_str,
-			adjacent_node->last_updated_monotonic_ts, adjacent_node->avg_latency);
+	INFO("\tHB %s Node: node-id %" PRIx64 " protocol %" PRIu32
+		 " endpoints {%s} last-updated %" PRIu64 " latency-ms %" PRIu64,
+			(char*)udata, *nodeid, adjacent_node->protocol_version,
+			endpoint_list_str, adjacent_node->last_updated_monotonic_ts,
+			adjacent_node->avg_latency);
 
 	return CF_SHASH_OK;
 }
@@ -8773,7 +8739,8 @@ hb_adjacency_graph_invert(cf_vector* nodes, uint8_t** inverted_graph)
 
 			cf_node* adjacency_list = NULL;
 			size_t adjacency_length = 0;
-			hb_adjacent_node_adjacency_get(&node_info, &adjacency_list, &adjacency_length);
+			hb_adjacent_node_adjacency_get(&node_info, &adjacency_list,
+					&adjacency_length);
 
 			for (int j = 0; j < adjacency_length; j++) {
 				int other_node_index = -1;
@@ -8824,7 +8791,7 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
 	const int graph_alloc_size = sizeof(uint8_t) * num_nodes * num_nodes;
 	void* graph_data = MSG_BUFF_ALLOC(graph_alloc_size);
 
-	if (!graph_data) {
+	if (! graph_data) {
 		CRASH("error allocating space for clique finding data structure");
 	}
 
@@ -8856,18 +8823,17 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
 		}
 	}
 
-	cf_vector_delete_range(nodes_to_evict, 0,
-			cf_vector_size(nodes_to_evict) - 1);
+	cf_vector_delete_range(nodes_to_evict, 0, cf_vector_size(nodes_to_evict) - 1);
 
 	// Since we always decide to retain self node, first get rid of all nodes
 	// having missing links to self node.
 	if (self_node_index >= 0) {
 		for (int i = 0; i < num_nodes; i++) {
-			if (inverted_graph[self_node_index][i]
-					|| inverted_graph[i][self_node_index]) {
+			if (inverted_graph[self_node_index][i] ||
+					inverted_graph[i][self_node_index]) {
 				cf_node to_evict = 0;
 				cf_vector_get(nodes, i, &to_evict);
-				DEBUG("marking node %" PRIx64" for clique based eviction",
+				DEBUG("marking node %" PRIx64 " for clique based eviction",
 						to_evict);
 
 				cf_vector_append(nodes_to_evict, &to_evict);
@@ -8915,13 +8881,13 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
 				}
 			}
 
-			DETAIL("inverted degree for node %" PRIx64" is %d",
-					to_evict, degree);
+			DETAIL("inverted degree for node %" PRIx64 " is %d", to_evict,
+					degree);
 
 			// See if this node has a higher degree. On ties choose the node
 			// with a smaller nodeid
-			if (degree > max_degree
-					|| (degree == max_degree && max_degree_node > to_evict)) {
+			if (degree > max_degree ||
+					(degree == max_degree && max_degree_node > to_evict)) {
 				max_degree = degree;
 				max_degree_node = to_evict;
 				max_degree_node_idx = i;
@@ -8933,7 +8899,7 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
 			break;
 		}
 
-		DEBUG("marking node %" PRIx64" with degree %d for clique based eviction",
+		DEBUG("marking node %" PRIx64 " with degree %d for clique based eviction",
 				max_degree_node, max_degree);
 
 		cf_vector_append(nodes_to_evict, &max_degree_node);
@@ -8966,12 +8932,16 @@ hb_plugin_data_iterate_reduce(const void* key, void* data, void* udata)
 			(as_hb_adjacecny_iterate_reduce_udata*)udata;
 
 	size_t plugin_data_size =
-			adjacent_node->plugin_data[reduce_udata->pluginid][adjacent_node->plugin_data_cycler
-					% 2].data_size;
-	void* plugin_data =
-			plugin_data_size ?
-					adjacent_node->plugin_data[reduce_udata->pluginid][adjacent_node->plugin_data_cycler
-							% 2].data : NULL;
+			adjacent_node
+					->plugin_data[reduce_udata->pluginid]
+								 [adjacent_node->plugin_data_cycler % 2]
+					.data_size;
+	void* plugin_data = plugin_data_size
+			? adjacent_node
+					  ->plugin_data[reduce_udata->pluginid]
+								   [adjacent_node->plugin_data_cycler % 2]
+					  .data
+			: NULL;
 
 	reduce_udata->iterate_fn(*nodeid, plugin_data, plugin_data_size,
 			adjacent_node->last_updated_monotonic_ts,
@@ -9000,8 +8970,7 @@ hb_plugin_data_iterate_all(as_hb_plugin_id pluginid,
 	reduce_udata.pluginid = pluginid;
 	reduce_udata.iterate_fn = iterate_fn;
 	reduce_udata.udata = udata;
-	cf_shash_reduce(g_hb.adjacency, hb_plugin_data_iterate_reduce,
-			&reduce_udata);
+	cf_shash_reduce(g_hb.adjacency, hb_plugin_data_iterate_reduce, &reduce_udata);
 
 	HB_UNLOCK();
 }

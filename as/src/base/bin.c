@@ -37,7 +37,6 @@
 #include "base/index.h"
 #include "storage/storage.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -110,7 +109,8 @@ as_bin_get_w_len(as_storage_rd* rd, const uint8_t* name, size_t len)
 			break;
 		}
 
-		if ((at = as_flat_skip_bin_data(at + flat_name_len, rd->flat_end)) == NULL) {
+		if ((at = as_flat_skip_bin_data(at + flat_name_len, rd->flat_end)) ==
+				NULL) {
 			break;
 		}
 

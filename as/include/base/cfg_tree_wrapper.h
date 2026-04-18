@@ -31,12 +31,10 @@ extern "C" {
 // Opaque pointer to the C++ CFGTree object.
 typedef void* cfg_tree_t;
 
-typedef enum {
-	CFG_FORMAT_YAML = 0
-} cfg_format_t;
+typedef enum { CFG_FORMAT_YAML = 0 } cfg_format_t;
 
-
-cfg_tree_t cfg_tree_create(const char* config_file, const char* schema_file, cfg_format_t format);
+cfg_tree_t cfg_tree_create(const char* config_file, const char* schema_file,
+		cfg_format_t format);
 void cfg_tree_destroy(cfg_tree_t cfg_tree);
 int cfg_tree_validate(cfg_tree_t cfg_tree);
 char* cfg_tree_dump(cfg_tree_t cfg_tree);
@@ -46,4 +44,4 @@ const char* cfg_tree_get_last_error(void);
 
 #ifdef __cplusplus
 }
-#endif 
+#endif

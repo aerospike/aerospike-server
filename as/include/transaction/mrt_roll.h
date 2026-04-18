@@ -28,13 +28,11 @@
 
 #include "base/transaction.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_transaction_s;
-
 
 //==========================================================
 // Public API.

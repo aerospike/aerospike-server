@@ -1,7 +1,7 @@
 /*
  * cf_defer.h
  *
- * Copyright (C) 2025 Aerospike, Inc.
+ * Copyright (C) 2025-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -28,19 +28,19 @@
 
 #include <stddef.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
-
 
 //==========================================================
 // Public API.
 //
 
-#define DEFER_ATTR(__func) \
-		__attribute__((cleanup(__func)))
+#define DEFER_GLUE2(_a, _b) _a##_b
+#define DEFER_GLUE(_a, _b) DEFER_GLUE2(_a, _b)
 
-#define DEFER_FN(__x, __func) \
-		__attribute__((cleanup(__func))) \
-				__auto_type __defer_fn_##__LINE__ = &(__x)
+#define DEFER_ATTR(_func) __attribute__((cleanup(_func)))
+
+#define DEFER_FN(_x, _func)                                                    \
+	DEFER_ATTR(_func)                                                          \
+	__auto_type DEFER_GLUE(_defer_fn_, __LINE__) = &(_x)

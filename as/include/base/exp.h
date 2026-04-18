@@ -37,14 +37,13 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
-#define AS_EXP_HAS_DIGEST_MOD      (1 << 0)
+#define AS_EXP_HAS_DIGEST_MOD (1 << 0)
 #define AS_EXP_HAS_NON_DIGEST_META (1 << 1)
-#define AS_EXP_HAS_REC_KEY         (1 << 2)
+#define AS_EXP_HAS_REC_KEY (1 << 2)
 
 typedef struct as_exp_s {
 	uint8_t expected_type;
@@ -89,33 +88,32 @@ typedef struct as_exp_result_s {
 	union {
 		uint8_t type;
 
-		struct mp_small_s {
+		struct { // mp_small_s
 			uint16_t pad;
 			uint16_t sz;
 			uint8_t buf[1 + sizeof(uint64_t)];
-		} __attribute__ ((__packed__)) mp_small;
+		} __attribute__((__packed__)) mp_small;
 
-		struct msgpack_s {
+		struct { // msgpack_s
 			uint16_t pad;
 			uint16_t has_nonstorage;
 			uint32_t sz;
 			const uint8_t* ptr;
-		} __attribute__ ((__packed__)) msgpack;
+		} __attribute__((__packed__)) msgpack;
 
-		struct str_s {
+		struct { // str_s
 			uint8_t pad[3];
 			uint8_t bytes_type;
 			uint32_t sz;
 			const uint8_t* ptr;
-		} __attribute__ ((__packed__)) str;
+		} __attribute__((__packed__)) str;
 
-		struct particle_s {
+		struct { // particle_s
 			uint64_t pad;
 			as_particle* ptr;
-		} __attribute__ ((__packed__)) particle;
+		} __attribute__((__packed__)) particle;
 	};
-} __attribute__ ((__packed__)) as_exp_result;
-
+} __attribute__((__packed__)) as_exp_result;
 
 //==========================================================
 // Public API.
@@ -123,9 +121,12 @@ typedef struct as_exp_result_s {
 
 as_exp* as_exp_filter_build_base64(const char* buf64, uint32_t buf64_sz);
 as_exp* as_exp_filter_build(const as_msg_field* msg, bool cpy_instr);
-as_exp* as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire, cf_vector* bin_names_r);
-bool as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb, cf_ll_buf* particles_llb);
-as_exp_trilean as_exp_matches_metadata(const as_exp* predexp, const as_exp_ctx* ctx);
+as_exp* as_exp_build_buf(const uint8_t* buf, uint32_t buf_sz, bool cpy_wire,
+		cf_vector* bin_names_r);
+bool as_exp_eval(const as_exp* exp, const as_exp_ctx* ctx, as_bin* rb,
+		cf_ll_buf* particles_llb);
+as_exp_trilean as_exp_matches_metadata(const as_exp* predexp,
+		const as_exp_ctx* ctx);
 bool as_exp_matches_record(const as_exp* predexp, const as_exp_ctx* ctx);
 bool as_exp_display(const as_exp* exp, cf_dyn_buf* db);
 void as_exp_destroy(as_exp* exp);
@@ -135,9 +136,11 @@ void as_exp_result_msgpack_write(const as_exp_result* res, uint8_t* wptr);
 void as_exp_result_msgpack_pack(const as_exp_result* res, as_packer* pk);
 bool as_exp_result_has_nonstorage(const as_exp_result* res);
 static inline bool
-as_exp_result_is_remove(const as_exp_result* res) {
+as_exp_result_is_remove(const as_exp_result* res)
+{
 	return res->type == AS_EXP_RESULT_REMOVE;
 }
 
-bool as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx, as_exp_result* res);
+bool as_exp_eval_to_result(const as_exp* exp, const as_exp_ctx* ctx,
+		as_exp_result* res);
 void as_exp_result_destroy(as_exp_result* res);

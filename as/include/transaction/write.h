@@ -37,7 +37,6 @@
 #include "base/exp.h"
 #include "base/transaction.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -46,7 +45,6 @@ struct as_exp_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
 struct cl_msg_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -68,7 +66,6 @@ typedef struct iops_origin_s {
 	iops_done_cb done_cb;
 	void* udata;
 } iops_origin;
-
 
 //==========================================================
 // Public API.
@@ -99,9 +96,9 @@ iops_origin_destroy(iops_origin* origin)
 	}
 }
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
-int write_master_bin_ops(struct as_transaction_s* tr, struct as_storage_rd_s* rd, cf_ll_buf* particles_llb, cf_dyn_buf* db);
+int write_master_bin_ops(struct as_transaction_s* tr,
+		struct as_storage_rd_s* rd, cf_ll_buf* particles_llb, cf_dyn_buf* db);

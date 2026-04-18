@@ -34,14 +34,12 @@
 
 #include "base/datamodel.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_transaction_s;
 struct as_info_cmd_args_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -52,7 +50,7 @@ typedef struct as_masking_key_s {
 	char ns_name[AS_ID_NAMESPACE_SZ];
 	char set_name[AS_SET_NAME_MAX_SIZE];
 	char bin_name[AS_BIN_NAME_MAX_SZ];
-} __attribute__ ((__packed__)) as_masking_key;
+} __attribute__((__packed__)) as_masking_key;
 
 typedef struct as_masking_ctx_s {
 	as_masking_key key;
@@ -61,7 +59,6 @@ typedef struct as_masking_ctx_s {
 	bool set_uses_masking;
 } as_masking_ctx;
 
-
 //==========================================================
 // Public API.
 //
@@ -69,16 +66,20 @@ typedef struct as_masking_ctx_s {
 void as_masking_init(void);
 void as_masking_start(void);
 
-bool as_masking_ctx_init(as_masking_ctx* state, const char* ns_name, const as_set* p_set, const char* username, const struct as_transaction_s* tr);
-bool as_masking_has_rule(as_masking_ctx* state, const char* bin_name, as_particle_type bin_type);
+bool as_masking_ctx_init(as_masking_ctx* state, const char* ns_name,
+		const as_set* p_set, const char* username,
+		const struct as_transaction_s* tr);
+bool as_masking_has_rule(as_masking_ctx* state, const char* bin_name,
+		as_particle_type bin_type);
 bool as_masking_type_mismatch(as_masking_ctx* state, const as_bin* b);
 bool as_masking_apply(as_masking_ctx* state, as_bin* dst, const as_bin* src);
 
-uint8_t as_masking_log_violation(const struct as_transaction_s* tr, const char* action, const char* detail, const void* bin_name, size_t bin_name_sz);
+uint8_t as_masking_log_violation(const struct as_transaction_s* tr,
+		const char* action, const char* detail, const void* bin_name,
+		size_t bin_name_sz);
 
 // Info commands.
 void as_masking_info_cmd(struct as_info_cmd_args_s* args);
-
 
 //==========================================================
 // Inlines & macros.

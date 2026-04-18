@@ -20,29 +20,29 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#include <memory>
-#include <iostream>
+#include "geospatial/geojson.h"
+
 #include <iomanip>
-#include <stdexcept>
-
+#include <iostream>
 #include <jansson.h>
-
+#include <memory>
 #include <s2/s2cap.h>
 #include <s2/s2cell_id.h>
+#include <s2/s2latlng.h>
 #include <s2/s2polygon.h>
 #include <s2/s2region_union.h>
-#include <s2/s2latlng.h>
+#include <stdexcept>
 
 #include "geospatial/scoped.h"
 #include "geospatial/throwstream.h"
-#include "geospatial/geojson.h"
 
 using namespace std;
 
-namespace {
+namespace
+{
 
 S2Point
-traverse_point(json_t * coord)
+traverse_point(json_t* coord)
 {
 	if (! coord) {
 		throwstream(runtime_error, "missing coordinates");
@@ -53,12 +53,12 @@ traverse_point(json_t * coord)
 	}
 
 	if (json_array_size(coord) != 2) {
-		throwstream(runtime_error, "expected 2 coordinates, saw "
-					<< json_array_size(coord));
+		throwstream(runtime_error,
+				"expected 2 coordinates, saw " << json_array_size(coord));
 	}
 
 	double lngval;
-	json_t * lng = json_array_get(coord, 0);
+	json_t* lng = json_array_get(coord, 0);
 	if (json_is_real(lng)) {
 		lngval = json_real_value(lng);
 	}
@@ -70,7 +70,7 @@ traverse_point(json_t * coord)
 	}
 
 	double latval;
-	json_t * lat = json_array_get(coord, 1);
+	json_t* lat = json_array_get(coord, 1);
 	if (json_is_real(lat)) {
 		latval = json_real_value(lat);
 	}
@@ -93,7 +93,7 @@ traverse_point(json_t * coord)
 }
 
 unique_ptr<S2Loop>
-traverse_loop(json_t * vertices)
+traverse_loop(json_t* vertices)
 {
 	if (! vertices) {
 		throwstream(runtime_error, "missing vertices");
@@ -120,7 +120,7 @@ traverse_loop(json_t * vertices)
 	if (points.size() < 4) {
 		throwstream(runtime_error, "loop contains less than 4 points");
 	}
-	if (points[0] != points[points.size()-1]) {
+	if (points[0] != points[points.size() - 1]) {
 		throwstream(runtime_error, "loop not closed");
 	}
 	points.pop_back();
@@ -128,16 +128,16 @@ traverse_loop(json_t * vertices)
 	unique_ptr<S2Loop> loop(new S2Loop(points));
 
 	// TODO - caused rare odd results - be conservative until we know more.
-//	if (! loop->IsValid()) {
-//		throwstream(runtime_error, "invalid loop");
-//	}
+	//	if (! loop->IsValid()) {
+	//		throwstream(runtime_error, "invalid loop");
+	//	}
 
 	loop->Normalize();
 	return loop;
 }
 
 unique_ptr<S2Polygon>
-traverse_polygon(json_t * loops)
+traverse_polygon(json_t* loops)
 {
 	if (! loops) {
 		throwstream(runtime_error, "missing polygon body");
@@ -148,8 +148,7 @@ traverse_polygon(json_t * loops)
 	}
 
 	vector<unique_ptr<S2Loop>> loopv;
-	try
-	{
+	try {
 		for (size_t ii = 0; ii < json_array_size(loops); ++ii) {
 			loopv.push_back(traverse_loop(json_array_get(loops, ii)));
 		}
@@ -157,25 +156,25 @@ traverse_polygon(json_t * loops)
 		unique_ptr<S2Polygon> polygon = make_unique<S2Polygon>(move(loopv));
 
 		// TODO - caused rare odd results - be conservative until we know more.
-//		if (! polygon->IsValid()) {
-//			throwstream(runtime_error, "invalid polygon");
-//		}
+		//		if (! polygon->IsValid()) {
+		//			throwstream(runtime_error, "invalid polygon");
+		//		}
 
 		return polygon;
 	}
-	catch (...)
-	{
+	catch (...) {
 		throw;
 	}
 }
 
-void process_point(GeoJSON::GeometryHandler & geohand, json_t * coord)
+void
+process_point(GeoJSON::GeometryHandler& geohand, json_t* coord)
 {
 	geohand.handle_point(S2CellId(traverse_point(coord)));
 }
 
 void
-process_polygon(GeoJSON::GeometryHandler & geohand, json_t * coord)
+process_polygon(GeoJSON::GeometryHandler& geohand, json_t* coord)
 {
 	if (! coord) {
 		throwstream(runtime_error, "missing coordinates");
@@ -190,7 +189,7 @@ process_polygon(GeoJSON::GeometryHandler & geohand, json_t * coord)
 }
 
 void
-process_multipolygon(GeoJSON::GeometryHandler & geohand, json_t * coord)
+process_multipolygon(GeoJSON::GeometryHandler& geohand, json_t* coord)
 {
 	if (! coord) {
 		throwstream(runtime_error, "missing coordinates");
@@ -210,7 +209,7 @@ process_multipolygon(GeoJSON::GeometryHandler & geohand, json_t * coord)
 }
 
 void
-process_circle(GeoJSON::GeometryHandler & geohand, json_t * coord)
+process_circle(GeoJSON::GeometryHandler& geohand, json_t* coord)
 {
 	// {
 	//	   "type": "AeroCircle",
@@ -232,7 +231,7 @@ process_circle(GeoJSON::GeometryHandler & geohand, json_t * coord)
 	S2Point center = traverse_point(json_array_get(coord, 0));
 
 	double radius;
-	json_t * radiusobj = json_array_get(coord, 1);
+	json_t* radiusobj = json_array_get(coord, 1);
 	if (json_is_real(radiusobj)) {
 		radius = json_real_value(radiusobj);
 	}
@@ -248,14 +247,15 @@ process_circle(GeoJSON::GeometryHandler & geohand, json_t * coord)
 	unique_ptr<S2Cap> capp(new S2Cap(center, angle));
 
 	// TODO - caused rare odd results - be conservative until we know more.
-//	if (! capp->is_valid()) {
-//		throwstream(runtime_error, "invalid circle");
-//	}
+	//	if (! capp->is_valid()) {
+	//		throwstream(runtime_error, "invalid circle");
+	//	}
 
 	geohand.handle_region(capp.release());
 }
 
-void traverse_geometry(GeoJSON::GeometryHandler & geohand, json_t * geom)
+void
+traverse_geometry(GeoJSON::GeometryHandler& geohand, json_t* geom)
 {
 	if (! geom) {
 		throwstream(runtime_error, "missing geometry element");
@@ -265,7 +265,7 @@ void traverse_geometry(GeoJSON::GeometryHandler & geohand, json_t * geom)
 		throwstream(runtime_error, "geometry is not object");
 	}
 
-	json_t * type = json_object_get(geom, "type");
+	json_t* type = json_object_get(geom, "type");
 	if (! type) {
 		throwstream(runtime_error, "missing geometry type");
 	}
@@ -294,26 +294,30 @@ void traverse_geometry(GeoJSON::GeometryHandler & geohand, json_t * geom)
 
 } // end namespace
 
-namespace GeoJSON {
+namespace GeoJSON
+{
 
-void GeometryHandler::handle_point(S2CellId const & i_cellid)
+void
+GeometryHandler::handle_point(S2CellId const& i_cellid)
 {
 	// nothing by default
 }
 
-void GeometryHandler::handle_region(S2Region * i_regionp)
+void
+GeometryHandler::handle_region(S2Region* i_regionp)
 {
 	// nothing by default
 }
 
-void parse(GeometryHandler & geohand, string const & geostr)
+void
+parse(GeometryHandler& geohand, string const& geostr)
 {
 	json_error_t err;
-	Scoped<json_t *> geojson(json_loadb(geostr.data(), geostr.size(), 0, &err),
-							 NULL, json_decref);
+	Scoped<json_t*> geojson(json_loadb(geostr.data(), geostr.size(), 0, &err),
+			NULL, json_decref);
 	if (! geojson) {
-		throwstream(runtime_error, "failed to parse geojson: "
-					<< err.line << ": " << err.text);
+		throwstream(runtime_error,
+				"failed to parse geojson: " << err.line << ": " << err.text);
 	}
 
 	geohand.set_json(geojson);
@@ -322,7 +326,7 @@ void parse(GeometryHandler & geohand, string const & geostr)
 		throwstream(runtime_error, "top level geojson element not object");
 	}
 
-	json_t * type = json_object_get(geojson, "type");
+	json_t* type = json_object_get(geojson, "type");
 	if (! type) {
 		throwstream(runtime_error, "missing top-level type in geojson element");
 	}

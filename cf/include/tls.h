@@ -30,13 +30,11 @@
 
 #include "socket.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 typedef struct cf_tls_info_s cf_tls_info;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -53,10 +51,9 @@ typedef struct cf_tls_spec_s {
 	char* key_file;
 	char* key_file_password;
 	char* name;
-	bool  pki_user_append_ou;
+	bool pki_user_append_ou;
 	char* protocols;
 } cf_tls_spec;
-
 
 //==========================================================
 // Public API.
@@ -64,7 +61,8 @@ typedef struct cf_tls_spec_s {
 
 void cf_tls_init(void);
 void cf_tls_start(void);
-char* cf_resolve_tls_name(char* tls_name, const char* cluster_name, const char* which);
+char* cf_resolve_tls_name(char* tls_name, const char* cluster_name,
+		const char* which);
 
 void tls_socket_init(cf_socket* sock);
 void tls_socket_term(cf_socket* sock);
@@ -72,7 +70,8 @@ int tls_socket_shutdown(cf_socket* sock);
 void tls_socket_close(cf_socket* sock);
 
 char* tls_read_password(const char* path);
-cf_tls_info* tls_config_server_context(cf_tls_spec* tspec, bool auth_client, uint32_t n_peer_names, char** peer_names);
+cf_tls_info* tls_config_server_context(cf_tls_spec* tspec, bool auth_client,
+		uint32_t n_peer_names, char** peer_names);
 cf_tls_info* tls_config_intra_context(cf_tls_spec* tspec, const char* which);
 
 void tls_socket_prepare_server(cf_socket* sock, cf_tls_info* info);
@@ -85,9 +84,11 @@ int tls_socket_connect(cf_socket* sock);
 int tls_socket_accept_block(cf_socket* sock, uint32_t timeout);
 int tls_socket_connect_block(cf_socket* sock, uint32_t timeout);
 
-int tls_socket_recv(cf_socket* sock, void* buf, size_t sz, int32_t flags, uint64_t timeout_msec);
+int tls_socket_recv(cf_socket* sock, void* buf, size_t sz, int32_t flags,
+		uint64_t timeout_msec);
 
-int tls_socket_send(cf_socket* sock, void const* buf, size_t sz, int32_t flags, uint64_t timeout_msec);
+int tls_socket_send(cf_socket* sock, void const* buf, size_t sz, int32_t flags,
+		uint64_t timeout_msec);
 
 int tls_socket_pending(cf_socket* sock);
 

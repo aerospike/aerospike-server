@@ -26,8 +26,8 @@
 // Includes.
 //
 
-#include "dynbuf.h"
 #include "cfg_info.h"
+#include "dynbuf.h"
 
 //==========================================================
 // Public API.

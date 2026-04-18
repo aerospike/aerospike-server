@@ -367,6 +367,13 @@
           "dynamic": false,
           "enterpriseOnly": false
         },
+        "cgroup-mem-tracking": {
+          "type": "boolean",
+          "default": false,
+          "description": "",
+          "dynamic": true,
+          "enterpriseOnly": false
+        },
         "disable-udf-execution": {
           "type": "boolean",
           "default": false,
@@ -2326,6 +2333,15 @@
               ],
               "default": 86400,
               "description": "",
+              "dynamic": true,
+              "enterpriseOnly": true
+            },
+            "tomb-raider-unmark-threads": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 128,
+              "description": "Maximum number of threads for the tomb raider unmark phase. If set to 0, one thread per device is used.",
               "dynamic": true,
               "enterpriseOnly": true
             },

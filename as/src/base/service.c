@@ -68,7 +68,6 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -87,19 +86,16 @@ typedef struct thread_ctx_s {
 	cf_epoll_queue trans_q;
 } thread_ctx;
 
-
 //==========================================================
 // Globals.
 //
 
-as_service_access g_access = {
-	.service = { .addrs = { .n_addrs = 0 }, .port = 0 },
+as_service_access g_access = { .service = { .addrs = { .n_addrs = 0 }, .port = 0 },
 	.alt_service = { .addrs = { .n_addrs = 0 }, .port = 0 },
 	.tls_service = { .addrs = { .n_addrs = 0 }, .port = 0 },
 	.alt_tls_service = { .addrs = { .n_addrs = 0 }, .port = 0 },
 	.admin = { .addrs = { .n_addrs = 0 }, .port = 0 },
-	.tls_admin = { .addrs = { .n_addrs = 0 }, .port = 0 }
-};
+	.tls_admin = { .addrs = { .n_addrs = 0 }, .port = 0 } };
 
 cf_serv_cfg g_service_bind = { .n_cfgs = 0 };
 cf_tls_info* g_tls_service;
@@ -122,7 +118,6 @@ static cf_queue g_free_slots;
 static cf_mutex g_user_agents_db_lock = CF_MUTEX_INIT;
 static cf_dyn_buf g_user_agents_db;
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -136,8 +131,10 @@ static void add_localhost(cf_serv_cfg* serv_cfg, cf_sock_owner owner);
 static void* run_accept(void* udata);
 
 // Assign connections to threads.
-static void accept_service_connection(cf_sock_cfg* cfg, cf_socket* csock, cf_sock_addr* caddr);
-static void accept_admin_connection(cf_sock_cfg* cfg, cf_socket* csock, cf_sock_addr* caddr);
+static void accept_service_connection(cf_sock_cfg* cfg, cf_socket* csock,
+		cf_sock_addr* caddr);
+static void accept_admin_connection(cf_sock_cfg* cfg, cf_socket* csock,
+		cf_sock_addr* caddr);
 
 static void assign_service_socket(as_file_handle* fd_h);
 static void assign_admin_socket(as_file_handle* fd_h);
@@ -152,7 +149,8 @@ static void schedule_redistribution(void);
 static void* run_service(void* udata);
 static void* run_admin(void* udata);
 
-static bool handle_client_io_event(as_file_handle* fd_h, uint32_t mask, uint64_t events_ns);
+static bool handle_client_io_event(as_file_handle* fd_h, uint32_t mask,
+		uint64_t events_ns);
 static void stop_service(thread_ctx* ctx);
 static void delete_file_handle(as_file_handle* fd_h);
 static void release_file_handle(as_file_handle* fd_h);
@@ -172,7 +170,6 @@ static uint32_t ua_hash_fn(const void* key);
 static int ua_reduce_fn(const void* key, void* value, void* udata);
 static void ua_increment_count(cf_shash* uah, const user_agent_key* key);
 
-
 //==========================================================
 // Inlines & macros.
 //
@@ -182,7 +179,7 @@ init_file_handle(cf_socket* sock, cf_sock_addr* caddr, cf_poll_data_type type)
 {
 	as_file_handle* fd_h = cf_rc_alloc(sizeof(as_file_handle));
 
-	*fd_h = (as_file_handle) {
+	*fd_h = (as_file_handle){
 		.poll_data_type = type,
 		.last_used = cf_getns(),
 		.proto_unread = sizeof(as_proto),
@@ -201,7 +198,6 @@ rearm(as_file_handle* fd_h, uint32_t events)
 	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
 			events | EPOLLONESHOT | EPOLLRDHUP, fd_h);
 }
-
 
 //==========================================================
 // Public API.
@@ -345,8 +341,9 @@ void
 as_service_enqueue_internal(as_transaction* tr)
 {
 	while (true) {
-		uint32_t sid = as_config_is_cpu_pinned() ?
-				select_sid_pinned(cf_topo_current_cpu()) : select_sid();
+		uint32_t sid = as_config_is_cpu_pinned()
+				? select_sid_pinned(cf_topo_current_cpu())
+				: select_sid();
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -418,7 +415,6 @@ as_admin_start(void)
 
 	cf_socket_show_server(AS_SERVICE, "admin", &g_admin_sockets);
 }
-
 
 //==========================================================
 // Local helpers - setup.
@@ -492,7 +488,6 @@ add_localhost(cf_serv_cfg* serv_cfg, cf_sock_owner owner)
 	}
 }
 
-
 //==========================================================
 // Local helpers - accept client connections.
 //
@@ -544,21 +539,17 @@ run_accept(void* udata)
 	return NULL;
 }
 
-
 //==========================================================
 // Local helpers - assign client connections to threads.
 //
 
 static void
-accept_service_connection(cf_sock_cfg* cfg, cf_socket* csock,
-		cf_sock_addr* caddr)
+accept_service_connection(cf_sock_cfg* cfg, cf_socket* csock, cf_sock_addr* caddr)
 {
 	// Ensure that proto_connections_closed is read first.
-	uint64_t n_closed =
-			as_load_uint64(&g_stats.proto_connections_closed);
+	uint64_t n_closed = as_load_uint64(&g_stats.proto_connections_closed);
 	// TODO - ARM TSO plugin - will need barrier.
-	uint64_t n_opened =
-			as_load_uint64(&g_stats.proto_connections_opened);
+	uint64_t n_opened = as_load_uint64(&g_stats.proto_connections_opened);
 
 	if (n_opened - n_closed >= g_config.n_proto_fd_max) {
 		cf_ticker_warning(AS_SERVICE,
@@ -577,8 +568,7 @@ accept_service_connection(cf_sock_cfg* cfg, cf_socket* csock,
 	}
 
 	// Ref for epoll instance.
-	as_file_handle* fd_h = init_file_handle(csock, caddr,
-			CF_POLL_DATA_CLIENT_IO);
+	as_file_handle* fd_h = init_file_handle(csock, caddr, CF_POLL_DATA_CLIENT_IO);
 
 	cf_rc_reserve(fd_h); // ref for reaper
 
@@ -586,8 +576,7 @@ accept_service_connection(cf_sock_cfg* cfg, cf_socket* csock,
 
 	uint32_t slot;
 
-	if (cf_queue_pop(&g_free_slots, &slot, CF_QUEUE_NOWAIT) !=
-			CF_QUEUE_OK) {
+	if (cf_queue_pop(&g_free_slots, &slot, CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
 		cf_crash(AS_SERVICE, "cannot get free slot");
 	}
 
@@ -604,11 +593,9 @@ static void
 accept_admin_connection(cf_sock_cfg* cfg, cf_socket* csock, cf_sock_addr* caddr)
 {
 	// Ensure that admin_connections_closed is read first.
-	uint64_t n_closed =
-			as_load_uint64(&g_stats.admin_connections_closed);
+	uint64_t n_closed = as_load_uint64(&g_stats.admin_connections_closed);
 	// TODO - ARM TSO plugin - will need barrier.
-	uint64_t n_opened =
-			as_load_uint64(&g_stats.admin_connections_opened);
+	uint64_t n_opened = as_load_uint64(&g_stats.admin_connections_opened);
 
 	if (n_opened - n_closed >= MAX_ADMIN_CONNECTIONS) {
 		cf_ticker_warning(AS_SERVICE,
@@ -627,8 +614,7 @@ accept_admin_connection(cf_sock_cfg* cfg, cf_socket* csock, cf_sock_addr* caddr)
 	}
 
 	// Ref for epoll instance.
-	as_file_handle* fd_h = init_file_handle(csock, caddr,
-			CF_POLL_DATA_ADMIN_IO);
+	as_file_handle* fd_h = init_file_handle(csock, caddr, CF_POLL_DATA_ADMIN_IO);
 
 	assign_admin_socket(fd_h); // arms (EPOLLIN)
 
@@ -736,7 +722,6 @@ schedule_redistribution(void)
 	cf_mutex_unlock(&g_reaper_lock);
 }
 
-
 //==========================================================
 // Local helpers - demarshal client requests.
 //
@@ -829,7 +814,8 @@ run_admin(void* udata)
 			uint8_t type = fd_h->proto->type;
 
 			if (type != PROTO_TYPE_INFO && type != PROTO_TYPE_SECURITY) {
-				cf_warning(AS_SERVICE, "from %s - expected info or security type on admin port, got %u",
+				cf_warning(AS_SERVICE,
+						"from %s - expected info or security type on admin port, got %u",
 						fd_h->client, type);
 				delete_file_handle(fd_h);
 				continue;
@@ -991,8 +977,9 @@ release_file_handle(as_file_handle* proto_fd_h)
 static bool
 process_readable(as_file_handle* fd_h)
 {
-	uint8_t* end = fd_h->proto == NULL ?
-			(uint8_t*)&fd_h->proto_hdr + sizeof(as_proto) : // header
+	uint8_t* end = fd_h->proto == NULL
+			? (uint8_t*)&fd_h->proto_hdr + sizeof(as_proto)
+			: // header
 			fd_h->proto->body + fd_h->proto->sz; // body
 
 	while (true) {
@@ -1076,9 +1063,7 @@ start_transaction(as_file_handle* fd_h)
 
 	if (proto->type == PROTO_TYPE_INFO) {
 		as_info_transaction it = {
-			.fd_h = fd_h,
-			.proto = proto,
-			.start_time = start_ns
+			.fd_h = fd_h, .proto = proto, .start_time = start_ns
 		};
 
 		as_info(&it);
@@ -1098,8 +1083,8 @@ start_transaction(as_file_handle* fd_h)
 	}
 
 	if (proto->type == PROTO_TYPE_AS_MSG_COMPRESSED) {
-		uint32_t result = as_proto_uncompress((as_comp_proto*)proto,
-				(as_proto**)&tr.msgp);
+		uint32_t result =
+				as_proto_uncompress((as_comp_proto*)proto, (as_proto**)&tr.msgp);
 
 		if (result != AS_OK) {
 			as_transaction_demarshal_error(&tr, result);
@@ -1136,7 +1121,6 @@ config_xdr_socket(cf_socket* sock)
 	cf_socket_enable_nagle(sock);
 }
 
-
 //==========================================================
 // Local helpers - reap idle and bad connections.
 //
@@ -1164,7 +1148,7 @@ run_reaper(void* udata)
 	(void)udata;
 	user_agent_key unknownkey = { .size = 12, .b64data = "dW5rbm93bg==" };
 	cf_shash* ua_hash = cf_shash_create(ua_hash_fn, sizeof(user_agent_key),
-		sizeof(uint32_t), 512, false);
+			sizeof(uint32_t), 512, false);
 
 	while (true) {
 		sleep(1);
@@ -1229,7 +1213,6 @@ run_reaper(void* udata)
 
 	return NULL;
 }
-
 
 //==========================================================
 // Local helpers - transaction queue.

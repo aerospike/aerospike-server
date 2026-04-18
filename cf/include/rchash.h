@@ -30,7 +30,6 @@
 
 #include "cf_mutex.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -72,7 +71,6 @@ typedef struct cf_rchash_s {
 	cf_mutex* bucket_locks;
 } cf_rchash;
 
-
 //==========================================================
 // Public API - useful hash functions.
 //
@@ -80,12 +78,12 @@ typedef struct cf_rchash_s {
 uint32_t cf_rchash_fn_u32(const void* key);
 uint32_t cf_rchash_fn_zstr(const void* key);
 
-
 //==========================================================
 // Public API.
 //
 
-cf_rchash* cf_rchash_create(cf_rchash_hash_fn h_fn, cf_rchash_destructor_fn d_fn, uint32_t key_size, uint32_t n_buckets);
+cf_rchash* cf_rchash_create(cf_rchash_hash_fn h_fn,
+		cf_rchash_destructor_fn d_fn, uint32_t key_size, uint32_t n_buckets);
 void cf_rchash_destroy(cf_rchash* h);
 uint32_t cf_rchash_get_size(const cf_rchash* h);
 

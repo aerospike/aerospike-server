@@ -41,7 +41,6 @@
 
 //#include "warnings.h" // generates warnings we're living with for now
 
-
 //==========================================================
 // Public API.
 //
@@ -76,8 +75,8 @@ as_flat_record_size(const as_storage_rd* rd)
 }
 
 void
-as_flat_pack_record(const as_storage_rd* rd, uint32_t n_rblocks,
-		bool dirty, as_flat_record* flat)
+as_flat_pack_record(const as_storage_rd* rd, uint32_t n_rblocks, bool dirty,
+		as_flat_record* flat)
 {
 	uint8_t* buf = flatten_record_meta(rd, n_rblocks, dirty, NULL, flat);
 
@@ -112,7 +111,7 @@ as_flat_unpack_remote_record_meta(as_namespace* ns, as_remote_record* rr)
 	as_flat_opt_meta opt_meta = { { 0 } };
 
 	const uint8_t* flat_bins = as_flat_unpack_record_meta(flat,
-				rr->pickle + rr->pickle_sz, &opt_meta);
+			rr->pickle + rr->pickle_sz, &opt_meta);
 
 	if (flat_bins == NULL) {
 		return false;
@@ -240,8 +239,8 @@ as_flat_fix_padded_rr(as_remote_record* rr)
 		const uint8_t* flat_bins = rr->pickle + rr->meta_sz;
 		const uint8_t* end = rr->pickle + rr->pickle_sz;
 
-		const uint8_t* exact_end = as_flat_check_packed_bins(flat_bins, end,
-				rr->n_bins);
+		const uint8_t* exact_end =
+				as_flat_check_packed_bins(flat_bins, end, rr->n_bins);
 
 		if (exact_end == NULL) {
 			return false;
@@ -263,8 +262,7 @@ as_flat_unpack_remote_bins(as_remote_record* rr, as_bin* bins)
 	const uint8_t* flat_bins = rr->pickle + rr->meta_sz;
 	const uint8_t* end = rr->pickle + rr->pickle_sz;
 
-	if (! as_flat_decompress_buffer(&rr->cm, WBLOCK_SZ, &flat_bins, &end,
-			NULL)) {
+	if (! as_flat_decompress_buffer(&rr->cm, WBLOCK_SZ, &flat_bins, &end, NULL)) {
 		cf_warning(AS_FLAT, "failed record decompression");
 		return -AS_ERR_UNKNOWN;
 	}
@@ -384,8 +382,7 @@ as_flat_unpack_bins(as_namespace* ns, const uint8_t* at, const uint8_t* end,
 }
 
 const uint8_t*
-as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
-		uint32_t n_bins)
+as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end, uint32_t n_bins)
 {
 	for (uint32_t i = 0; i < n_bins; i++) {
 		if (at >= end) {
@@ -417,7 +414,6 @@ as_flat_check_packed_bins(const uint8_t* at, const uint8_t* end,
 
 	return at;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

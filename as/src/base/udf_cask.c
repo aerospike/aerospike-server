@@ -36,8 +36,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "jansson.h"
-
 #include "aerospike/as_module.h"
 #include "aerospike/mod_lua.h"
 #include "citrusleaf/alloc.h"
@@ -46,12 +44,12 @@
 
 #include "cf_str.h"
 #include "dynbuf.h"
+#include "jansson.h"
 #include "log.h"
 
 #include "base/cfg.h"
 #include "base/smd.h"
 #include "base/thr_info.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -70,20 +68,19 @@ typedef struct udf_get_data_s {
 	bool done;
 } udf_get_data_t;
 
-
 //==========================================================
 // Forward declarations.
 //
 
 // SMD callbacks.
-static void udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type);
+static void udf_cask_smd_accept_cb(const cf_vector* items,
+		as_smd_accept_type accept_type);
 static void udf_cask_smd_get_all_cb(const cf_vector* items, void* udata);
 
 // File utilities.
 static uint8_t* file_read(const char* filename, size_t* p_sz, int* err);
 static bool file_write(const char* filename, const uint8_t* buf, size_t sz);
 static void file_remove(const char* filename);
-
 
 //==========================================================
 // Inlines & macros.
@@ -94,7 +91,6 @@ is_valid_udf_type(const char* type)
 {
 	return strcmp(type, LUA_TYPE_STR) == 0;
 }
-
 
 //==========================================================
 // Public API - startup.
@@ -115,8 +111,7 @@ udf_cask_init(void)
 
 	while ((entry = readdir(dir)) != NULL) {
 		// readdir() also reads "." and ".." entries.
-		if (strcmp(entry->d_name, ".") == 0 ||
-				strcmp(entry->d_name, "..") == 0) {
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
 			continue;
 		}
 
@@ -134,7 +129,6 @@ udf_cask_init(void)
 
 	as_smd_module_load(AS_SMD_MODULE_UDF, udf_cask_smd_accept_cb, NULL, NULL);
 }
-
 
 //==========================================================
 // Public API - info commands.
@@ -175,8 +169,7 @@ udf_cask_info_get(as_info_cmd_args* args)
 	char filename[MAX_FILE_NAME_SZ];
 	int filename_len = (int)sizeof(filename);
 
-	if (as_info_parameter_get(params, "filename", filename,
-			&filename_len) != 0) {
+	if (as_info_parameter_get(params, "filename", filename, &filename_len) != 0) {
 		cf_warning(AS_UDF, "invalid or missing filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return;
@@ -263,8 +256,7 @@ udf_cask_info_put(as_info_cmd_args* args)
 	char filename[MAX_FILE_NAME_SZ];
 	int filename_len = (int)sizeof(filename);
 
-	if (as_info_parameter_get(params, "filename", filename,
-			&filename_len) != 0) {
+	if (as_info_parameter_get(params, "filename", filename, &filename_len) != 0) {
 		cf_warning(AS_UDF, "invalid or missing filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return;
@@ -283,7 +275,7 @@ udf_cask_info_put(as_info_cmd_args* args)
 	int content_len_len = (int)sizeof(content_len);
 
 	if (as_info_parameter_get(params, "content-len", content_len,
-			&content_len_len) != 0) {
+				&content_len_len) != 0) {
 		cf_warning(AS_UDF, "invalid or missing content-len");
 		cf_dyn_buf_append_string(out, "error=invalid_content_len");
 		return;
@@ -317,8 +309,8 @@ udf_cask_info_put(as_info_cmd_args* args)
 	char* content = (char*)cf_malloc((size_t)sz32);
 	int i_content_len = (int)sz32;
 
-	if (as_info_parameter_get(params, "content", content,
-			&i_content_len) != 0 || (uint32_t)i_content_len != len32) {
+	if (as_info_parameter_get(params, "content", content, &i_content_len) != 0 ||
+			(uint32_t)i_content_len != len32) {
 		cf_warning(AS_UDF, "invalid or missing content");
 		cf_dyn_buf_append_string(out, "error=invalid_content");
 		cf_free(content);
@@ -338,7 +330,7 @@ udf_cask_info_put(as_info_cmd_args* args)
 	char* decoded_str = cf_malloc(decoded_len);
 
 	if (! cf_b64_validate_and_decode(content, encoded_len,
-			(uint8_t*)decoded_str, &decoded_len) ) {
+				(uint8_t*)decoded_str, &decoded_len)) {
 		cf_warning(AS_UDF, "invalid base64 content");
 		cf_dyn_buf_append_string(out, "error=invalid_base64_content");
 		cf_free(decoded_str);
@@ -426,8 +418,7 @@ udf_cask_info_remove(as_info_cmd_args* args)
 	char filename[MAX_FILE_NAME_SZ];
 	int filename_len = (int)sizeof(filename);
 
-	if (as_info_parameter_get(params, "filename", filename,
-			&filename_len) != 0) {
+	if (as_info_parameter_get(params, "filename", filename, &filename_len) != 0) {
 		cf_warning(AS_UDF, "invalid or missing filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return;
@@ -446,7 +437,6 @@ udf_cask_info_remove(as_info_cmd_args* args)
 	cf_info(AS_UDF, "UDF module %s removed", file_path);
 	as_info_respond_ok(out);
 }
-
 
 //==========================================================
 // Local helpers - SMD callbacks.
@@ -472,10 +462,8 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 
 			file_remove(item->key);
 
-			as_module_event e = {
-					.type = AS_MODULE_EVENT_FILE_REMOVE,
-					.data.filename = item->key
-			};
+			as_module_event e = { .type = AS_MODULE_EVENT_FILE_REMOVE,
+				.data.filename = item->key };
 
 			as_module_update(&mod_lua, &e);
 
@@ -489,7 +477,8 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 		json_t* item_obj = json_loads(item->value, 0, &json_error);
 
 		if (item_obj == NULL) {
-			cf_warning(AS_UDF, "failed to parse UDF \"%s\" with JSON error: %s ; source: %s ; line: %d ; column: %d ; position: %d",
+			cf_warning(AS_UDF,
+					"failed to parse UDF \"%s\" with JSON error: %s ; source: %s ; line: %d ; column: %d ; position: %d",
 					item->key, json_error.text, json_error.source,
 					json_error.line, json_error.column, json_error.position);
 			continue;
@@ -503,7 +492,7 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 		char* decoded_str = cf_malloc(decoded_len);
 
 		if (! cf_b64_validate_and_decode(content, encoded_len,
-				(uint8_t*)decoded_str, &decoded_len)) {
+					(uint8_t*)decoded_str, &decoded_len)) {
 			cf_warning(AS_UDF, "invalid base64 content for %s", item->key);
 			cf_free(decoded_str);
 			json_decref(item_obj);
@@ -518,10 +507,8 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 		json_decref(item_obj);
 
 		if (rv) {
-			as_module_event e = {
-					.type = AS_MODULE_EVENT_FILE_ADD,
-					.data.filename = item->key
-			};
+			as_module_event e = { .type = AS_MODULE_EVENT_FILE_ADD,
+				.data.filename = item->key };
 
 			as_module_update(&mod_lua, &e);
 		}
@@ -567,7 +554,6 @@ udf_cask_smd_get_all_cb(const cf_vector* items, void* udata)
 
 	get_data->done = true;
 }
-
 
 //==========================================================
 // Local helpers - file utilities.

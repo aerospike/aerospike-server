@@ -34,14 +34,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 // return 0 on success, -1 on fail
-int cf_str_atoi(const char *s, int *value)
+int
+cf_str_atoi(const char* s, int* value)
 {
 	int i = 0;
 	bool neg = false;
 
-	if (*s == '-') { neg = true; s++; }
+	if (*s == '-') {
+		neg = true;
+		s++;
+	}
 
 	while (*s >= '0' && *s <= '9') {
 		i *= 10;
@@ -49,33 +52,34 @@ int cf_str_atoi(const char *s, int *value)
 		s++;
 	}
 	switch (*s) {
-		case 'k':
-		case 'K':
-			i *= 1024L;
-			s++;
-			break;
-		case 'M':
-		case 'm':
-			i *= (1024L * 1024L);
-			s++;
-			break;
-		case 'G':
-		case 'g':
-			i *= (1024L * 1024L * 1024L);
-			s++;
-			break;
-		default:
-			break;
+	case 'k':
+	case 'K':
+		i *= 1024L;
+		s++;
+		break;
+	case 'M':
+	case 'm':
+		i *= (1024L * 1024L);
+		s++;
+		break;
+	case 'G':
+	case 'g':
+		i *= (1024L * 1024L * 1024L);
+		s++;
+		break;
+	default:
+		break;
 	}
 	if (*s != 0) {
-		return(-1); // reached a non-num before EOL
+		return (-1); // reached a non-num before EOL
 	}
 	*value = neg ? -i : i;
-	return(0);
+	return (0);
 }
 
 // return 0 on success, -1 on fail
-int cf_str_atoi_u32(const char *s, unsigned int *value)
+int
+cf_str_atoi_u32(const char* s, unsigned int* value)
 {
 	unsigned int i = 0;
 
@@ -85,34 +89,35 @@ int cf_str_atoi_u32(const char *s, unsigned int *value)
 		s++;
 	}
 	switch (*s) {
-		case 'k':
-		case 'K':
-			i *= 1024L;
-			s++;
-			break;
-		case 'M':
-		case 'm':
-			i *= (1024L * 1024L);
-			s++;
-			break;
-		case 'G':
-		case 'g':
-			i *= (1024L * 1024L * 1024L);
-			s++;
-			break;
-		default:
-			break;
+	case 'k':
+	case 'K':
+		i *= 1024L;
+		s++;
+		break;
+	case 'M':
+	case 'm':
+		i *= (1024L * 1024L);
+		s++;
+		break;
+	case 'G':
+	case 'g':
+		i *= (1024L * 1024L * 1024L);
+		s++;
+		break;
+	default:
+		break;
 	}
 	if (*s != 0) {
-		return(-1); // reached a non-num before EOL
+		return (-1); // reached a non-num before EOL
 	}
 	*value = i;
-	return(0);
+	return (0);
 }
 
 // cf_str_atoi_size() supports both SI and IEC suffixes.
 // SI are powers of 10, IEC powers of 2.
-int cf_str_atoi_size(const char *s, uint64_t *value)
+int
+cf_str_atoi_size(const char* s, uint64_t* value)
 {
 	size_t length = strlen(s);
 	// If the string ends with 'i', use IEC suffixes.
@@ -125,7 +130,8 @@ int cf_str_atoi_size(const char *s, uint64_t *value)
 	return cf_str_atoi_si(s, value);
 }
 
-int cf_str_atoi_u64(const char *s, uint64_t *value)
+int
+cf_str_atoi_u64(const char* s, uint64_t* value)
 {
 	uint64_t i = 0;
 
@@ -135,42 +141,43 @@ int cf_str_atoi_u64(const char *s, uint64_t *value)
 		s++;
 	}
 	switch (*s) {
-		case 'k':
-		case 'K':
-			i *= 1024L;
-			s++;
-			break;
-		case 'M':
-		case 'm':
-			i *= (1024L * 1024L);
-			s++;
-			break;
-		case 'G':
-		case 'g':
-			i *= (1024L * 1024L * 1024L);
-			s++;
-			break;
-		case 'T':
-		case 't':
-			i *= (1024L * 1024L * 1024L * 1024L);
-			s++;
-			break;
-		case 'P':
-		case 'p':
-			i *= (1024L * 1024L * 1024L * 1024L * 1024L);
-			s++;
-			break;
-		default:
-			break;
+	case 'k':
+	case 'K':
+		i *= 1024L;
+		s++;
+		break;
+	case 'M':
+	case 'm':
+		i *= (1024L * 1024L);
+		s++;
+		break;
+	case 'G':
+	case 'g':
+		i *= (1024L * 1024L * 1024L);
+		s++;
+		break;
+	case 'T':
+	case 't':
+		i *= (1024L * 1024L * 1024L * 1024L);
+		s++;
+		break;
+	case 'P':
+	case 'p':
+		i *= (1024L * 1024L * 1024L * 1024L * 1024L);
+		s++;
+		break;
+	default:
+		break;
 	}
 	if (*s != 0) {
-		return(-1); // reached a non-num before EOL
+		return (-1); // reached a non-num before EOL
 	}
 	*value = i;
-	return(0);
+	return (0);
 }
 
-int cf_str_atoi_iec(const char *s, uint64_t *value)
+int
+cf_str_atoi_iec(const char* s, uint64_t* value)
 {
 	uint64_t i = 0;
 
@@ -180,33 +187,33 @@ int cf_str_atoi_iec(const char *s, uint64_t *value)
 		s++;
 	}
 	switch (*s) {
-		case 'k':
-		case 'K':
-			i *= 1024L;
-			s++;
-			break;
-		case 'M':
-		case 'm':
-			i *= (1024L * 1024L);
-			s++;
-			break;
-		case 'G':
-		case 'g':
-			i *= (1024L * 1024L * 1024L);
-			s++;
-			break;
-		case 'T':
-		case 't':
-			i *= (1024L * 1024L * 1024L * 1024L);
-			s++;
-			break;
-		case 'P':
-		case 'p':
-			i *= (1024L * 1024L * 1024L * 1024L * 1024L);
-			s++;
-			break;
-		default:
-			break;
+	case 'k':
+	case 'K':
+		i *= 1024L;
+		s++;
+		break;
+	case 'M':
+	case 'm':
+		i *= (1024L * 1024L);
+		s++;
+		break;
+	case 'G':
+	case 'g':
+		i *= (1024L * 1024L * 1024L);
+		s++;
+		break;
+	case 'T':
+	case 't':
+		i *= (1024L * 1024L * 1024L * 1024L);
+		s++;
+		break;
+	case 'P':
+	case 'p':
+		i *= (1024L * 1024L * 1024L * 1024L * 1024L);
+		s++;
+		break;
+	default:
+		break;
 	}
 	// Tolerate a missing 'i' suffix so that parsing plain numbers is supported.
 	if (*s == 'i' || *s == 'I') {
@@ -214,14 +221,15 @@ int cf_str_atoi_iec(const char *s, uint64_t *value)
 	}
 
 	if (*s != 0) {
-		return(-1); // reached a non-num before EOL
+		return (-1); // reached a non-num before EOL
 	}
 
 	*value = i;
-	return(0);
+	return (0);
 }
 
-int cf_str_atoi_si(const char *s, uint64_t *value)
+int
+cf_str_atoi_si(const char* s, uint64_t* value)
 {
 	uint64_t i = 0;
 
@@ -231,42 +239,43 @@ int cf_str_atoi_si(const char *s, uint64_t *value)
 		s++;
 	}
 	switch (*s) {
-		case 'k':
-		case 'K':
-			i *= 1000L;
-			s++;
-			break;
-		case 'M':
-		case 'm':
-			i *= (1000L * 1000L);
-			s++;
-			break;
-		case 'G':
-		case 'g':
-			i *= (1000L * 1000L * 1000L);
-			s++;
-			break;
-		case 'T':
-		case 't':
-			i *= (1000L * 1000L * 1000L * 1000L);
-			s++;
-			break;
-		case 'P':
-		case 'p':
-			i *= (1000L * 1000L * 1000L * 1000L * 1000L);
-			s++;
-			break;
-		default:
-			break;
+	case 'k':
+	case 'K':
+		i *= 1000L;
+		s++;
+		break;
+	case 'M':
+	case 'm':
+		i *= (1000L * 1000L);
+		s++;
+		break;
+	case 'G':
+	case 'g':
+		i *= (1000L * 1000L * 1000L);
+		s++;
+		break;
+	case 'T':
+	case 't':
+		i *= (1000L * 1000L * 1000L * 1000L);
+		s++;
+		break;
+	case 'P':
+	case 'p':
+		i *= (1000L * 1000L * 1000L * 1000L * 1000L);
+		s++;
+		break;
+	default:
+		break;
 	}
 	if (*s != 0) {
-		return(-1); // reached a non-num before EOL
+		return (-1); // reached a non-num before EOL
 	}
 	*value = i;
-	return(0);
+	return (0);
 }
 
-int cf_str_atoi_seconds(const char *s, uint32_t *value)
+int
+cf_str_atoi_seconds(const char* s, uint32_t* value)
 {
 	// Special case: accept -1.
 	if (*s == '-' && *(s + 1) == '1' && *(s + 2) == 0) {
@@ -282,44 +291,43 @@ int cf_str_atoi_seconds(const char *s, uint32_t *value)
 		s++;
 	}
 	switch (*s) {
-		case 'S':
-		case 's':
-			s++;
-			break;
-		case 'M':
-		case 'm':
-			i *= 60;
-			s++;
-			break;
-		case 'H':
-		case 'h':
-			i *= (60 * 60);
-			s++;
-			break;
-		case 'D':
-		case 'd':
-			i *= (60 * 60 * 24);
-			s++;
-			break;
-		default:
-			break;
+	case 'S':
+	case 's':
+		s++;
+		break;
+	case 'M':
+	case 'm':
+		i *= 60;
+		s++;
+		break;
+	case 'H':
+	case 'h':
+		i *= (60 * 60);
+		s++;
+		break;
+	case 'D':
+	case 'd':
+		i *= (60 * 60 * 24);
+		s++;
+		break;
+	default:
+		break;
 	}
 	if (*s != 0) {
-		return(-1); // reached a non-num before EOL
+		return (-1); // reached a non-num before EOL
 	}
 	if (i > UINT32_MAX) {
-		return(-1); // overflows a uint32_t
+		return (-1); // overflows a uint32_t
 	}
 	*value = (uint32_t)i;
-	return(0);
+	return (0);
 }
 
 int
-cf_strtoul_x64(const char *s, uint64_t *value)
+cf_strtoul_x64(const char* s, uint64_t* value)
 {
-	if (! ((*s >= '0' && *s <= '9') ||
-			(*s >= 'a' && *s <= 'f') ||
-			(*s >= 'A' && *s <= 'F'))) {
+	if (! ((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f') ||
+				(*s >= 'A' && *s <= 'F'))) {
 		return -1;
 	}
 
@@ -344,7 +352,7 @@ cf_strtoul_x64(const char *s, uint64_t *value)
 }
 
 int
-cf_strtoul_u32(const char *s, uint32_t *value)
+cf_strtoul_u32(const char* s, uint32_t* value)
 {
 	if (! (*s >= '0' && *s <= '9')) {
 		return -1;
@@ -371,7 +379,7 @@ cf_strtoul_u32(const char *s, uint32_t *value)
 }
 
 int
-cf_strtoul_u64(const char *s, uint64_t *value)
+cf_strtoul_u64(const char* s, uint64_t* value)
 {
 	if (! (*s >= '0' && *s <= '9')) {
 		return -1;
@@ -399,7 +407,7 @@ cf_strtoul_u64(const char *s, uint64_t *value)
 
 // Like cf_strtoul_u64() but doesn't force base 10, and allows sign character.
 int
-cf_strtoul_u64_raw(const char *s, uint64_t *value)
+cf_strtoul_u64_raw(const char* s, uint64_t* value)
 {
 	if (isspace(*s)) {
 		return -1;
@@ -426,7 +434,7 @@ cf_strtoul_u64_raw(const char *s, uint64_t *value)
 }
 
 int
-cf_strtol_i32(const char *s, int32_t *value)
+cf_strtol_i32(const char* s, int32_t* value)
 {
 	if (! ((*s >= '0' && *s <= '9') || *s == '-')) {
 		return -1;

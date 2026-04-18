@@ -1,7 +1,7 @@
 /*
  * msgpack_in.c
  *
- * Copyright (C) 2019-2022 Aerospike, Inc.
+ * Copyright (C) 2019-2026 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -37,21 +37,20 @@
 
 #include "log.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 #define CMP_EXT_TYPE 0xFF
 #define CMP_WILDCARD 0x00
-#define CMP_INF      0x01
+#define CMP_INF 0x01
 
 typedef struct {
-	const uint8_t *buf;
-	const uint8_t * const end;
+	const uint8_t* buf;
+	const uint8_t* const end;
 
 	union {
-		const uint8_t *data;
+		const uint8_t* data;
 		uint64_t i_num;
 		double d_num;
 	};
@@ -63,62 +62,62 @@ typedef struct {
 	bool has_unordered_map;
 } parse_meta;
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static inline msgpack_type bytes_internal_to_type(uint8_t type, uint32_t len);
 
-static inline const uint8_t *msgpack_sz_table(const uint8_t *buf, const uint8_t * const end, uint32_t *count, bool *has_nonstorage);
-static inline const uint8_t *msgpack_sz_internal(const uint8_t *buf, const uint8_t * const end, uint32_t count, bool *has_nonstorage);
+static inline const uint8_t* msgpack_sz_table(const uint8_t* buf,
+		const uint8_t* const end, uint32_t* count, bool* has_nonstorage);
+static inline const uint8_t* msgpack_sz_internal(const uint8_t* buf,
+		const uint8_t* const end, uint32_t count, bool* has_nonstorage);
 
-static inline uint64_t extract_uint64(const uint8_t *ptr, uint8_t sz);
-static inline uint64_t extract_neg_int64(const uint8_t *ptr, uint8_t sz);
-static inline void cmp_parse_container(parse_meta *meta, uint32_t count);
-static inline msgpack_cmp_type msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1);
-
+static inline uint64_t extract_uint64(const uint8_t* ptr, uint8_t sz);
+static inline uint64_t extract_neg_int64(const uint8_t* ptr, uint8_t sz);
+static inline void cmp_parse_container(parse_meta* meta, uint32_t count);
+static inline msgpack_cmp_type msgpack_cmp_internal(parse_meta* meta0,
+		parse_meta* meta1);
 
 //==========================================================
 // Inlines & macros.
 //
 
-#define MSGPACK_CMP_RETURN(__p0, __p1) \
-	if ((__p0) > (__p1)) { \
-		return MSGPACK_CMP_GREATER; \
-	} \
-	else if ((__p0) < (__p1)) { \
-		return MSGPACK_CMP_LESS; \
+#define MSGPACK_CMP_RETURN(_p0, _p1)                                           \
+	if ((_p0) > (_p1)) {                                                       \
+		return MSGPACK_CMP_GREATER;                                            \
+	}                                                                          \
+	else if ((_p0) < (_p1)) {                                                  \
+		return MSGPACK_CMP_LESS;                                               \
 	}
 
-#define SZ_PARSE_BUF_CHECK(__buf, __end, __sz) \
-	if ((__buf) + (__sz) > (__end)) { \
-		return NULL; \
+#define SZ_PARSE_BUF_CHECK(_buf, _end, _sz)                                    \
+	if ((_buf) + (_sz) > (_end)) {                                             \
+		return NULL;                                                           \
 	}
 
-#define CMP_PARSE_BUF_CHECK(__m, __sz) \
-	if ((__m)->buf + (__sz) > (__m)->end) { \
-		(__m)->buf = NULL; \
-		return; \
+#define CMP_PARSE_BUF_CHECK(_m, _sz)                                           \
+	if ((_m)->buf + (_sz) > (_m)->end) {                                       \
+		(_m)->buf = NULL;                                                      \
+		return;                                                                \
 	}
-
 
 //==========================================================
 // Public API.
 //
 
 uint32_t
-msgpack_sz_vec(msgpack_in_vec *mv)
+msgpack_sz_vec(msgpack_in_vec* mv)
 {
 	if (mv->idx >= mv->n_vecs) {
 		return 0;
 	}
 
 	uint32_t i = mv->idx;
-	const uint8_t * const start = mv->vecs[i].buf + mv->vecs[i].offset;
-	const uint8_t * const end = mv->vecs[i].buf + mv->vecs[i].buf_sz;
-	const uint8_t * const buf = msgpack_sz_internal(start, end, 1,
-			&mv->has_nonstorage);
+	const uint8_t* const start = mv->vecs[i].buf + mv->vecs[i].offset;
+	const uint8_t* const end = mv->vecs[i].buf + mv->vecs[i].buf_sz;
+	const uint8_t* const buf =
+			msgpack_sz_internal(start, end, 1, &mv->has_nonstorage);
 
 	if (buf == NULL) {
 		return 0;
@@ -133,7 +132,12 @@ msgpack_sz_vec(msgpack_in_vec *mv)
 	if (buf > end) {
 		mv->vecs[i].offset = mv->vecs[i].buf_sz;
 		i++;
-		mv->vecs[i].offset += (uint32_t)(buf - end);
+
+		if (i == mv->n_vecs) {
+			return 0;
+		}
+
+		mv->vecs[i].offset = (uint32_t)(buf - end);
 
 		if (mv->vecs[i].offset > mv->vecs[i].buf_sz) {
 			return 0;
@@ -154,16 +158,14 @@ msgpack_sz_vec(msgpack_in_vec *mv)
 }
 
 bool
-msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value)
+msgpack_get_bool_vec(msgpack_in_vec* mv, bool* value)
 {
 	if (mv->idx >= mv->n_vecs) {
 		return false;
 	}
 
-	msgpack_in mp = {
-			.buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
-			.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset
-	};
+	msgpack_in mp = { .buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
+		.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset };
 
 	if (! msgpack_get_bool(&mp, value)) {
 		return false;
@@ -179,16 +181,14 @@ msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value)
 }
 
 bool
-msgpack_get_uint64_vec(msgpack_in_vec *mv, uint64_t *i)
+msgpack_get_uint64_vec(msgpack_in_vec* mv, uint64_t* i)
 {
 	if (mv->idx >= mv->n_vecs) {
 		return false;
 	}
 
-	msgpack_in mp = {
-			.buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
-			.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset
-	};
+	msgpack_in mp = { .buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
+		.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset };
 
 	if (! msgpack_get_uint64(&mp, i)) {
 		return false;
@@ -204,16 +204,14 @@ msgpack_get_uint64_vec(msgpack_in_vec *mv, uint64_t *i)
 }
 
 bool
-msgpack_get_list_ele_count_vec(msgpack_in_vec *mv, uint32_t *count_r)
+msgpack_get_list_ele_count_vec(msgpack_in_vec* mv, uint32_t* count_r)
 {
 	if (mv->idx >= mv->n_vecs) {
 		return false;
 	}
 
-	msgpack_in mp = {
-			.buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
-			.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset
-	};
+	msgpack_in mp = { .buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset,
+		.buf_sz = mv->vecs[mv->idx].buf_sz - mv->vecs[mv->idx].offset };
 
 	if (! msgpack_get_list_ele_count(&mp, count_r)) {
 		return false;
@@ -229,23 +227,21 @@ msgpack_get_list_ele_count_vec(msgpack_in_vec *mv, uint32_t *count_r)
 }
 
 msgpack_type
-msgpack_peek_type_vec(const msgpack_in_vec *mv)
+msgpack_peek_type_vec(const msgpack_in_vec* mv)
 {
 	if (mv->idx >= mv->n_vecs) {
 		return MSGPACK_TYPE_ERROR;
 	}
 
-	msgpack_in mp = {
-			.buf = mv->vecs[mv->idx].buf,
-			.buf_sz = mv->vecs[mv->idx].buf_sz,
-			.offset = mv->vecs[mv->idx].offset
-	};
+	msgpack_in mp = { .buf = mv->vecs[mv->idx].buf,
+		.buf_sz = mv->vecs[mv->idx].buf_sz,
+		.offset = mv->vecs[mv->idx].offset };
 
 	return msgpack_peek_type(&mp);
 }
 
-const uint8_t *
-msgpack_get_ele_vec(msgpack_in_vec *mv, uint32_t *sz_r)
+const uint8_t*
+msgpack_get_ele_vec(msgpack_in_vec* mv, uint32_t* sz_r)
 {
 	if (mv->idx >= mv->n_vecs) {
 		return NULL;
@@ -260,14 +256,14 @@ msgpack_get_ele_vec(msgpack_in_vec *mv, uint32_t *sz_r)
 	return buf;
 }
 
-const uint8_t *
-msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r)
+const uint8_t*
+msgpack_get_bin_vec(msgpack_in_vec* mv, uint32_t* sz_r)
 {
 	if (mv->idx >= mv->n_vecs) {
 		return false;
 	}
 
-	const uint8_t *buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset;
+	const uint8_t* buf = mv->vecs[mv->idx].buf + mv->vecs[mv->idx].offset;
 	uint8_t b = *buf++;
 
 	switch (b) {
@@ -289,7 +285,7 @@ msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r)
 			return NULL;
 		}
 
-		*sz_r = (uint32_t)cf_swap_from_be16(*(uint16_t *)buf);
+		*sz_r = (uint32_t)cf_swap_from_be16(*(uint16_t*)buf);
 		break;
 	case 0xc6:
 	case 0xdb: // str/bin with 32 bit header
@@ -299,7 +295,7 @@ msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r)
 			return NULL;
 		}
 
-		*sz_r = cf_swap_from_be32(*(uint32_t *)buf);
+		*sz_r = cf_swap_from_be32(*(uint32_t*)buf);
 		break;
 	default:
 		if ((b & 0xe0) == 0xa0) { // str bytes with 8 bit combined header
@@ -326,7 +322,7 @@ msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r)
 }
 
 bool
-msgpack_display(msgpack_in *mp, msgpack_display_str *str)
+msgpack_display(msgpack_in* mp, msgpack_display_str* str)
 {
 	msgpack_type type = msgpack_peek_type(mp);
 
@@ -357,7 +353,7 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 	}
 	case MSGPACK_TYPE_STRING: {
 		uint32_t sz;
-		const uint8_t *p = msgpack_get_bin(mp, &sz);
+		const uint8_t* p = msgpack_get_bin(mp, &sz);
 
 		if (p == NULL) {
 			return false;
@@ -399,7 +395,7 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 	}
 	case MSGPACK_TYPE_BYTES: {
 		uint32_t sz;
-		const uint8_t *p = msgpack_get_bin(mp, &sz);
+		const uint8_t* p = msgpack_get_bin(mp, &sz);
 
 		if (p == NULL) {
 			return false;
@@ -431,7 +427,7 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 	}
 	case MSGPACK_TYPE_GEOJSON: {
 		uint32_t sz;
-		const uint8_t *p = msgpack_get_bin(mp, &sz);
+		const uint8_t* p = msgpack_get_bin(mp, &sz);
 
 		if (p == NULL) {
 			return false;
@@ -468,9 +464,10 @@ msgpack_display(msgpack_in *mp, msgpack_display_str *str)
 }
 
 void
-msgpack_print_vec(msgpack_in_vec *mv, const char *name)
+msgpack_print_vec(msgpack_in_vec* mv, const char* name)
 {
-	cf_warning(CF_MISC, "msgpack_print_vec{%s idx %u n_vecs %u}", name, mv->idx, mv->n_vecs);
+	cf_warning(CF_MISC, "msgpack_print_vec{%s idx %u n_vecs %u}", name, mv->idx,
+			mv->n_vecs);
 
 	for (uint32_t i = 0; i < mv->n_vecs; i++) {
 		cf_warning(CF_MISC, "[%u] sz %u off %u\n%*pH", i, mv->vecs[i].buf_sz,
@@ -479,10 +476,10 @@ msgpack_print_vec(msgpack_in_vec *mv, const char *name)
 }
 
 uint32_t
-msgpack_sz_rep(msgpack_in *mp, uint32_t rep_count)
+msgpack_sz_rep(msgpack_in* mp, uint32_t rep_count)
 {
-	const uint8_t * const start = mp->buf + mp->offset;
-	const uint8_t * const buf = msgpack_sz_internal(start, mp->buf + mp->buf_sz,
+	const uint8_t* const start = mp->buf + mp->offset;
+	const uint8_t* const buf = msgpack_sz_internal(start, mp->buf + mp->buf_sz,
 			rep_count, &mp->has_nonstorage);
 
 	if (buf == NULL) {
@@ -497,19 +494,15 @@ msgpack_sz_rep(msgpack_in *mp, uint32_t rep_count)
 }
 
 msgpack_cmp_type
-msgpack_cmp(msgpack_in *mp0, msgpack_in *mp1)
+msgpack_cmp(msgpack_in* mp0, msgpack_in* mp1)
 {
-	parse_meta meta0 = {
-			.buf = mp0->buf + mp0->offset,
-			.end = mp0->buf + mp0->buf_sz,
-			.remain = 1
-	};
+	parse_meta meta0 = { .buf = mp0->buf + mp0->offset,
+		.end = mp0->buf + mp0->buf_sz,
+		.remain = 1 };
 
-	parse_meta meta1 = {
-			.buf = mp1->buf + mp1->offset,
-			.end = mp1->buf + mp1->buf_sz,
-			.remain = 1
-	};
+	parse_meta meta1 = { .buf = mp1->buf + mp1->offset,
+		.end = mp1->buf + mp1->buf_sz,
+		.remain = 1 };
 
 	msgpack_cmp_type ret = msgpack_cmp_internal(&meta0, &meta1);
 
@@ -533,28 +526,24 @@ msgpack_cmp(msgpack_in *mp0, msgpack_in *mp1)
 }
 
 msgpack_cmp_type
-msgpack_cmp_peek(const msgpack_in *mp0, const msgpack_in *mp1)
+msgpack_cmp_peek(const msgpack_in* mp0, const msgpack_in* mp1)
 {
-	parse_meta meta0 = {
-			.buf = mp0->buf + mp0->offset,
-			.end = mp0->buf + mp0->buf_sz,
-			.remain = 1
-	};
+	parse_meta meta0 = { .buf = mp0->buf + mp0->offset,
+		.end = mp0->buf + mp0->buf_sz,
+		.remain = 1 };
 
-	parse_meta meta1 = {
-			.buf = mp1->buf + mp1->offset,
-			.end = mp1->buf + mp1->buf_sz,
-			.remain = 1
-	};
+	parse_meta meta1 = { .buf = mp1->buf + mp1->offset,
+		.end = mp1->buf + mp1->buf_sz,
+		.remain = 1 };
 
 	return msgpack_cmp_internal(&meta0, &meta1);
 }
 
 // Does not check buf_sz.
 msgpack_type
-msgpack_peek_type(const msgpack_in *mp)
+msgpack_peek_type(const msgpack_in* mp)
 {
-	const uint8_t *buf = mp->buf + mp->offset;
+	const uint8_t* buf = mp->buf + mp->offset;
 	uint8_t b = *buf++;
 
 	switch (b) {
@@ -586,11 +575,11 @@ msgpack_peek_type(const msgpack_in *mp)
 	case 0xc5:
 	case 0xda: // string/raw bytes with 16 bit header
 		return bytes_internal_to_type(*(buf + 2),
-				cf_swap_from_be16(*(uint16_t *)buf));
+				cf_swap_from_be16(*(uint16_t*)buf));
 	case 0xc6:
 	case 0xdb: // string/raw bytes with 32 bit header
 		return bytes_internal_to_type(*(buf + 4),
-				cf_swap_from_be32(*(uint32_t *)buf));
+				cf_swap_from_be32(*(uint32_t*)buf));
 	case 0xdc: // list with 16 bit header
 	case 0xdd: // list with 32 bit header
 		return MSGPACK_TYPE_LIST;
@@ -660,7 +649,7 @@ msgpack_peek_type(const msgpack_in *mp)
 }
 
 bool
-msgpack_peek_is_ext(const msgpack_in *mp)
+msgpack_peek_is_ext(const msgpack_in* mp)
 {
 	if (mp->offset >= mp->buf_sz) {
 		return false;
@@ -686,7 +675,8 @@ msgpack_peek_is_ext(const msgpack_in *mp)
 }
 
 bool
-msgpack_peek_is_cdt(const msgpack_in *mp){
+msgpack_peek_is_cdt(const msgpack_in* mp)
+{
 	switch (msgpack_peek_type(mp)) {
 	case MSGPACK_TYPE_LIST:
 	case MSGPACK_TYPE_MAP:
@@ -698,10 +688,10 @@ msgpack_peek_is_cdt(const msgpack_in *mp){
 	return false;
 }
 
-const uint8_t *
-msgpack_get_ele(msgpack_in *mp, uint32_t *sz_r)
+const uint8_t*
+msgpack_get_ele(msgpack_in* mp, uint32_t* sz_r)
 {
-	const uint8_t *buf = mp->buf + mp->offset;
+	const uint8_t* buf = mp->buf + mp->offset;
 	uint32_t sz = msgpack_sz(mp);
 
 	if (sz == 0) {
@@ -714,7 +704,7 @@ msgpack_get_ele(msgpack_in *mp, uint32_t *sz_r)
 }
 
 bool
-msgpack_get_bool(msgpack_in *mp, bool *value)
+msgpack_get_bool(msgpack_in* mp, bool* value)
 {
 	if (mp->offset >= mp->buf_sz) {
 		return false;
@@ -732,13 +722,13 @@ msgpack_get_bool(msgpack_in *mp, bool *value)
 }
 
 bool
-msgpack_get_uint64(msgpack_in *mp, uint64_t *i)
+msgpack_get_uint64(msgpack_in* mp, uint64_t* i)
 {
 	if (mp->offset >= mp->buf_sz) {
 		return false;
 	}
 
-	const uint8_t *buf = mp->buf + mp->offset;
+	const uint8_t* buf = mp->buf + mp->offset;
 	uint8_t b = *buf++;
 
 	switch (b) {
@@ -808,20 +798,20 @@ msgpack_get_uint64(msgpack_in *mp, uint64_t *i)
 		}
 
 		*i = (uint64_t)(int8_t)b;
-		return true ;
+		return true;
 	}
 
 	return false;
 }
 
 bool
-msgpack_get_double(msgpack_in *mp, double *x)
+msgpack_get_double(msgpack_in* mp, double* x)
 {
 	if (mp->offset >= mp->buf_sz) {
 		return false;
 	}
 
-	const uint8_t *buf = mp->buf + mp->offset;
+	const uint8_t* buf = mp->buf + mp->offset;
 
 	switch (*buf++) {
 	case 0xca: { // float
@@ -831,9 +821,9 @@ msgpack_get_double(msgpack_in *mp, double *x)
 			return false;
 		}
 
-		uint32_t i = cf_swap_from_be32(*(uint32_t *)buf);
+		uint32_t i = cf_swap_from_be32(*(uint32_t*)buf);
 
-		*x = (double)*(float *)&i;
+		*x = (double)*(float*)&i;
 		return true;
 	}
 	case 0xcb: { // double
@@ -843,9 +833,9 @@ msgpack_get_double(msgpack_in *mp, double *x)
 			return false;
 		}
 
-		uint64_t i = cf_swap_from_be64(*(uint64_t *)buf);
+		uint64_t i = cf_swap_from_be64(*(uint64_t*)buf);
 
-		*x = *(double *)&i;
+		*x = *(double*)&i;
 		return true;
 	}
 	default:
@@ -855,14 +845,14 @@ msgpack_get_double(msgpack_in *mp, double *x)
 	return false;
 }
 
-const uint8_t *
-msgpack_get_bin(msgpack_in *mp, uint32_t *sz_r)
+const uint8_t*
+msgpack_get_bin(msgpack_in* mp, uint32_t* sz_r)
 {
 	if (mp->offset >= mp->buf_sz) {
 		return NULL;
 	}
 
-	const uint8_t *buf = mp->buf + mp->offset;
+	const uint8_t* buf = mp->buf + mp->offset;
 	uint8_t b = *buf++;
 
 	switch (b) {
@@ -884,7 +874,7 @@ msgpack_get_bin(msgpack_in *mp, uint32_t *sz_r)
 			return NULL;
 		}
 
-		*sz_r = (uint32_t)cf_swap_from_be16(*(uint16_t *)buf);
+		*sz_r = (uint32_t)cf_swap_from_be16(*(uint16_t*)buf);
 		break;
 	case 0xc6:
 	case 0xdb: // str/bin with 32 bit header
@@ -894,7 +884,7 @@ msgpack_get_bin(msgpack_in *mp, uint32_t *sz_r)
 			return NULL;
 		}
 
-		*sz_r = cf_swap_from_be32(*(uint32_t *)buf);
+		*sz_r = cf_swap_from_be32(*(uint32_t*)buf);
 		break;
 	default:
 		if ((b & 0xe0) == 0xa0) { // str bytes with 8 bit combined header
@@ -917,14 +907,14 @@ msgpack_get_bin(msgpack_in *mp, uint32_t *sz_r)
 }
 
 bool
-msgpack_get_ext(msgpack_in *mp, msgpack_ext *ext)
+msgpack_get_ext(msgpack_in* mp, msgpack_ext* ext)
 {
 	// Need at least 3 bytes.
 	if (mp->buf_sz - mp->offset < 3) {
 		return false;
 	}
 
-	const uint8_t *buf = mp->buf + mp->offset++;
+	const uint8_t* buf = mp->buf + mp->offset++;
 
 	switch (*buf) {
 	case 0xd4: // fixext 1
@@ -944,7 +934,7 @@ msgpack_get_ext(msgpack_in *mp, msgpack_ext *ext)
 		break;
 	case 0xc7: // ext 8
 		mp->offset++;
-		ext->size = (uint32_t)*(buf + 1);
+		ext->size = (uint32_t) * (buf + 1);
 		break;
 	case 0xc8: // ext 16
 		mp->offset += 2;
@@ -953,7 +943,7 @@ msgpack_get_ext(msgpack_in *mp, msgpack_ext *ext)
 			return false;
 		}
 
-		ext->size = (uint32_t)cf_swap_from_be16(*(uint16_t *)(buf + 1));
+		ext->size = (uint32_t)cf_swap_from_be16(*(uint16_t*)(buf + 1));
 		break;
 	case 0xc9: // ext 32
 		mp->offset += 4;
@@ -962,7 +952,7 @@ msgpack_get_ext(msgpack_in *mp, msgpack_ext *ext)
 			return false;
 		}
 
-		ext->size = cf_swap_from_be32(*(uint32_t *)(buf + 1));
+		ext->size = cf_swap_from_be32(*(uint32_t*)(buf + 1));
 		break;
 	default:
 		return false;
@@ -981,13 +971,13 @@ msgpack_get_ext(msgpack_in *mp, msgpack_ext *ext)
 }
 
 bool
-msgpack_get_list_ele_count(msgpack_in *mp, uint32_t *count_r)
+msgpack_get_list_ele_count(msgpack_in* mp, uint32_t* count_r)
 {
 	if (mp->offset >= mp->buf_sz) {
 		return false;
 	}
 
-	const uint8_t *buf = mp->buf + mp->offset;
+	const uint8_t* buf = mp->buf + mp->offset;
 
 	switch (*buf) {
 	case 0xdc: // list with 16 bit header
@@ -997,7 +987,7 @@ msgpack_get_list_ele_count(msgpack_in *mp, uint32_t *count_r)
 			return false;
 		}
 
-		*count_r = (uint32_t)cf_swap_from_be16(*(uint16_t *)(buf + 1));
+		*count_r = (uint32_t)cf_swap_from_be16(*(uint16_t*)(buf + 1));
 		break;
 	case 0xdd: // list with 32 bit header
 		mp->offset += 5;
@@ -1006,7 +996,7 @@ msgpack_get_list_ele_count(msgpack_in *mp, uint32_t *count_r)
 			return false;
 		}
 
-		*count_r = cf_swap_from_be32(*(uint32_t *)(buf + 1));
+		*count_r = cf_swap_from_be32(*(uint32_t*)(buf + 1));
 		break;
 	default:
 		if ((*buf & 0xf0) == 0x90) { // list with 8 bit combined header
@@ -1022,13 +1012,13 @@ msgpack_get_list_ele_count(msgpack_in *mp, uint32_t *count_r)
 }
 
 bool
-msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r)
+msgpack_get_map_ele_count(msgpack_in* mp, uint32_t* count_r)
 {
 	if (mp->offset >= mp->buf_sz) {
 		return false;
 	}
 
-	const uint8_t *buf = mp->buf + mp->offset;
+	const uint8_t* buf = mp->buf + mp->offset;
 
 	switch (*buf) {
 	case 0xde: // map with 16 bit header
@@ -1038,7 +1028,7 @@ msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r)
 			return false;
 		}
 
-		*count_r = (uint32_t)cf_swap_from_be16(*(uint16_t *)(buf + 1));
+		*count_r = (uint32_t)cf_swap_from_be16(*(uint16_t*)(buf + 1));
 		break;
 	case 0xdf: // map with 32 bit header
 		mp->offset += 5;
@@ -1047,7 +1037,7 @@ msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r)
 			return false;
 		}
 
-		*count_r = cf_swap_from_be32(*(uint32_t *)(buf + 1));
+		*count_r = cf_swap_from_be32(*(uint32_t*)(buf + 1));
 		break;
 	default:
 		if ((*buf & 0xf0) == 0x80) { // map with 8 bit combined header
@@ -1063,28 +1053,29 @@ msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r)
 }
 
 uint32_t
-msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified)
+msgpack_compactify(uint8_t* buf, uint32_t buf_sz, bool* was_modified)
 {
 	uint32_t count = 1;
-	const uint8_t * const start = buf;
-	const uint8_t * const end = buf + buf_sz;
+	const uint8_t* const start = buf;
+	const uint8_t* const end = buf + buf_sz;
 	bool has_nonstorage = false;
-	uint8_t *dst_start = buf;
-	uint8_t *src_start = buf;
+	uint8_t* dst_start = buf;
+	uint8_t* src_start = buf;
 
 	if (was_modified != NULL) {
 		*was_modified = false;
 	}
 
 	for (uint32_t i = 0; i < count; i++) {
-		uint8_t * const ele_start = buf;
+		uint8_t* const ele_start = buf;
 		bool not_compact = false;
 
-		buf = (uint8_t *)msgpack_parse(buf, end, &count, NULL,
-				&has_nonstorage, &not_compact);
+		buf = (uint8_t*)msgpack_parse(buf, end, &count, NULL, &has_nonstorage,
+				&not_compact);
 
 		if (buf > end || buf == NULL) {
-			cf_warning(AS_PARTICLE, "msgpack_sz_internal: invalid at i %u count %u", i, count);
+			cf_warning(AS_PARTICLE,
+					"msgpack_sz_internal: invalid at i %u count %u", i, count);
 			return 0;
 		}
 
@@ -1117,7 +1108,6 @@ msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified)
 	return buf - start;
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -1141,9 +1131,9 @@ bytes_internal_to_type(uint8_t type, uint32_t len)
 	return MSGPACK_TYPE_BYTES;
 }
 
-static inline const uint8_t *
-msgpack_sz_table(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
-		bool *has_nonstorage)
+static inline const uint8_t*
+msgpack_sz_table(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
+		bool* has_nonstorage)
 {
 	SZ_PARSE_BUF_CHECK(buf, end, 1);
 
@@ -1181,29 +1171,29 @@ msgpack_sz_table(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xc5:
 	case 0xda: // string/raw bytes with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		return buf + 2 + cf_swap_from_be16(*(uint16_t *)buf);
+		return buf + 2 + cf_swap_from_be16(*(uint16_t*)buf);
 
 	case 0xc6:
 	case 0xdb: // string/raw bytes with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		return buf + 4 + cf_swap_from_be32(*(uint32_t *)buf);
+		return buf + 4 + cf_swap_from_be32(*(uint32_t*)buf);
 
 	case 0xdc: // list with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		*count += cf_swap_from_be16(*(uint16_t *)buf);
+		*count += cf_swap_from_be16(*(uint16_t*)buf);
 		return buf + 2;
 	case 0xdd: { // list with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		*count += cf_swap_from_be32(*(uint32_t *)buf);
+		*count += cf_swap_from_be32(*(uint32_t*)buf);
 		return buf + 4;
 	}
 	case 0xde: // map with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		*count += 2 * cf_swap_from_be16(*(uint16_t *)buf);
+		*count += 2 * cf_swap_from_be16(*(uint16_t*)buf);
 		return buf + 2;
 	case 0xdf: // map with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		*count += 2 * cf_swap_from_be32(*(uint32_t *)buf);
+		*count += 2 * cf_swap_from_be32(*(uint32_t*)buf);
 		return buf + 4;
 
 	case 0xd4: // fixext 1
@@ -1239,7 +1229,7 @@ msgpack_sz_table(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xc8: { // ext 16
 		SZ_PARSE_BUF_CHECK(buf, end, 3);
 
-		uint32_t len = cf_swap_from_be16(*(uint16_t *)buf);
+		uint32_t len = cf_swap_from_be16(*(uint16_t*)buf);
 
 		if (*(buf + 2) == CMP_EXT_TYPE && len < 4 && len != 0) {
 			*has_nonstorage = true;
@@ -1250,7 +1240,7 @@ msgpack_sz_table(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xc9: { // ext 32
 		SZ_PARSE_BUF_CHECK(buf, end, 5);
 
-		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+		uint32_t len = cf_swap_from_be32(*(uint32_t*)buf);
 
 		if (*(buf + 4) == CMP_EXT_TYPE && len < 4 && len != 0) {
 			*has_nonstorage = true;
@@ -1283,15 +1273,16 @@ msgpack_sz_table(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	return NULL;
 }
 
-static inline const uint8_t *
-msgpack_sz_internal(const uint8_t *buf, const uint8_t * const end,
-		uint32_t count, bool *has_nonstorage)
+static inline const uint8_t*
+msgpack_sz_internal(const uint8_t* buf, const uint8_t* const end,
+		uint32_t count, bool* has_nonstorage)
 {
 	for (uint32_t i = 0; i < count; i++) {
 		buf = msgpack_sz_table(buf, end, &count, has_nonstorage);
 
 		if (buf > end || buf == NULL) {
-			cf_warning(AS_PARTICLE, "msgpack_sz_internal: invalid at i %u count %u", i, count);
+			cf_warning(AS_PARTICLE,
+					"msgpack_sz_internal: invalid at i %u count %u", i, count);
 			return NULL;
 		}
 	}
@@ -1300,27 +1291,29 @@ msgpack_sz_internal(const uint8_t *buf, const uint8_t * const end,
 }
 
 static inline uint64_t
-extract_uint64(const uint8_t *ptr, uint8_t sz)
+extract_uint64(const uint8_t* ptr, uint8_t sz)
 {
-	const uint64_t *p64 = (const uint64_t *)(ptr - 8 + sz);
-	return cf_swap_from_be64(*p64) & ((~0ULL) >> (64 - 8 * sz)); // little endian mask
+	const uint64_t* p64 = (const uint64_t*)(ptr - 8 + sz);
+	return cf_swap_from_be64(*p64) &
+			((~0ULL) >> (64 - 8 * sz)); // little endian mask
 }
 
 static inline uint64_t
-extract_neg_int64(const uint8_t *ptr, uint8_t sz)
+extract_neg_int64(const uint8_t* ptr, uint8_t sz)
 {
-	const uint64_t *p64 = (const uint64_t *)(ptr - 8 + sz);
-	return cf_swap_from_be64(*p64) | ~((~0ULL) >> (64 - 8 * sz)); // little endian mask
+	const uint64_t* p64 = (const uint64_t*)(ptr - 8 + sz);
+	return cf_swap_from_be64(*p64) |
+			~((~0ULL) >> (64 - 8 * sz)); // little endian mask
 }
 
 static inline void
-cmp_parse_container(parse_meta *meta, uint32_t count)
+cmp_parse_container(parse_meta* meta, uint32_t count)
 {
 	if (meta->len == 0) {
 		return;
 	}
 
-	const uint8_t *buf = meta->buf;
+	const uint8_t* buf = meta->buf;
 	uint8_t type;
 
 	CMP_PARSE_BUF_CHECK(meta, 1);
@@ -1371,7 +1364,7 @@ cmp_parse_container(parse_meta *meta, uint32_t count)
 }
 
 static inline void
-msgpack_cmp_parse(parse_meta *meta)
+msgpack_cmp_parse(parse_meta* meta)
 {
 	CMP_PARSE_BUF_CHECK(meta, 1);
 
@@ -1439,9 +1432,9 @@ msgpack_cmp_parse(parse_meta *meta)
 	case 0xca: { // float
 		CMP_PARSE_BUF_CHECK(meta, 4);
 
-		uint32_t i = cf_swap_from_be32(*(uint32_t *)meta->buf);
+		uint32_t i = cf_swap_from_be32(*(uint32_t*)meta->buf);
 
-		meta->d_num = (double)*(float *)&i;
+		meta->d_num = (double)*(float*)&i;
 		meta->buf += 4;
 		meta->type = MSGPACK_TYPE_DOUBLE;
 		return;
@@ -1449,9 +1442,9 @@ msgpack_cmp_parse(parse_meta *meta)
 	case 0xcb: { // double
 		CMP_PARSE_BUF_CHECK(meta, 8);
 
-		uint64_t i = cf_swap_from_be64(*(uint64_t *)meta->buf);
+		uint64_t i = cf_swap_from_be64(*(uint64_t*)meta->buf);
 
-		meta->d_num = *(double *)&i;
+		meta->d_num = *(double*)&i;
 		meta->buf += 8;
 		meta->type = MSGPACK_TYPE_DOUBLE;
 		return;
@@ -1471,7 +1464,7 @@ msgpack_cmp_parse(parse_meta *meta)
 	case 0xda: // string/raw bytes with 16 bit header
 		CMP_PARSE_BUF_CHECK(meta, 2);
 		meta->data = meta->buf + 2;
-		meta->len = cf_swap_from_be16(*(uint16_t *)meta->buf);
+		meta->len = cf_swap_from_be16(*(uint16_t*)meta->buf);
 		meta->buf += 2 + meta->len;
 		CMP_PARSE_BUF_CHECK(meta, 0);
 		meta->type = bytes_internal_to_type(*meta->data, meta->len);
@@ -1481,7 +1474,7 @@ msgpack_cmp_parse(parse_meta *meta)
 	case 0xdb: // string/raw bytes with 32 bit header
 		CMP_PARSE_BUF_CHECK(meta, 4);
 		meta->data = meta->buf + 4;
-		meta->len = cf_swap_from_be32(*(uint32_t *)meta->buf);
+		meta->len = cf_swap_from_be32(*(uint32_t*)meta->buf);
 		meta->buf += 4 + meta->len;
 		CMP_PARSE_BUF_CHECK(meta, 0);
 		meta->type = bytes_internal_to_type(*meta->data, meta->len);
@@ -1489,7 +1482,7 @@ msgpack_cmp_parse(parse_meta *meta)
 
 	case 0xdc: { // list with 16 bit header
 		CMP_PARSE_BUF_CHECK(meta, 2);
-		meta->len = cf_swap_from_be16(*(uint16_t *)meta->buf);
+		meta->len = cf_swap_from_be16(*(uint16_t*)meta->buf);
 		meta->buf += 2;
 		meta->type = MSGPACK_TYPE_LIST;
 		cmp_parse_container(meta, 1);
@@ -1497,7 +1490,7 @@ msgpack_cmp_parse(parse_meta *meta)
 	}
 	case 0xdd: { // list with 32 bit header
 		CMP_PARSE_BUF_CHECK(meta, 4);
-		meta->len = cf_swap_from_be32(*(uint32_t *)meta->buf);
+		meta->len = cf_swap_from_be32(*(uint32_t*)meta->buf);
 		meta->buf += 4;
 		meta->type = MSGPACK_TYPE_LIST;
 		cmp_parse_container(meta, 1);
@@ -1505,14 +1498,14 @@ msgpack_cmp_parse(parse_meta *meta)
 	}
 	case 0xde: // map with 16 bit header
 		CMP_PARSE_BUF_CHECK(meta, 2);
-		meta->len = 2 * cf_swap_from_be16(*(uint16_t *)meta->buf);
+		meta->len = 2 * cf_swap_from_be16(*(uint16_t*)meta->buf);
 		meta->buf += 2;
 		meta->type = MSGPACK_TYPE_MAP;
 		cmp_parse_container(meta, 2);
 		return;
 	case 0xdf: // map with 32 bit header
 		CMP_PARSE_BUF_CHECK(meta, 4);
-		meta->len = 2 * cf_swap_from_be32(*(uint32_t *)meta->buf);
+		meta->len = 2 * cf_swap_from_be32(*(uint32_t*)meta->buf);
 		meta->buf += 4;
 		meta->type = MSGPACK_TYPE_MAP;
 		cmp_parse_container(meta, 2);
@@ -1596,7 +1589,7 @@ msgpack_cmp_parse(parse_meta *meta)
 		meta->type = MSGPACK_TYPE_EXT;
 		return;
 	case 0xc8: { // ext 16
-		meta->len = cf_swap_from_be16(*(uint16_t *)meta->buf);
+		meta->len = cf_swap_from_be16(*(uint16_t*)meta->buf);
 		meta->buf += 2;
 
 		if (*meta->buf++ == CMP_EXT_TYPE && meta->len < 4 && meta->len != 0) {
@@ -1608,7 +1601,7 @@ msgpack_cmp_parse(parse_meta *meta)
 		return;
 	}
 	case 0xc9: { // ext 32
-		meta->len = cf_swap_from_be32(*(uint32_t *)meta->buf);
+		meta->len = cf_swap_from_be32(*(uint32_t*)meta->buf);
 		meta->buf += 4;
 
 		if (*meta->buf++ == CMP_EXT_TYPE && meta->len < 4 && meta->len != 0) {
@@ -1662,7 +1655,7 @@ msgpack_cmp_parse(parse_meta *meta)
 }
 
 static inline msgpack_cmp_type
-msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1)
+msgpack_cmp_internal(parse_meta* meta0, parse_meta* meta1)
 {
 	uint32_t min_count = 1;
 	msgpack_cmp_type end_result = MSGPACK_CMP_EQUAL;
@@ -1675,7 +1668,7 @@ msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1)
 		msgpack_cmp_parse(meta1);
 
 		if (meta0->buf == NULL || meta0->buf > meta0->end ||
-					meta1->buf == NULL || meta1->buf > meta1->end) {
+				meta1->buf == NULL || meta1->buf > meta1->end) {
 			return MSGPACK_CMP_END;
 		}
 
@@ -1767,17 +1760,11 @@ msgpack_cmp_internal(parse_meta *meta0, parse_meta *meta1)
 }
 
 uint32_t
-msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
+msgpack_compactify_element(uint8_t* dest, const uint8_t* src)
 {
-	msgpack_in mp = {
-			.buf = src,
-			.buf_sz = UINT32_MAX
-	};
+	msgpack_in mp = { .buf = src, .buf_sz = UINT32_MAX };
 
-	as_packer pk = {
-			.buffer = dest,
-			.capacity = UINT32_MAX
-	};
+	as_packer pk = { .buffer = dest, .capacity = UINT32_MAX };
 
 	switch (*src) {
 	case 0xcc: // unsigned 8 bit integer
@@ -1811,7 +1798,7 @@ msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 	case 0xda: // str 16
 	case 0xdb: { // str 32
 		uint32_t buf_sz = 0; // init for Centos6
-		const uint8_t *buf = msgpack_get_bin(&mp, &buf_sz);
+		const uint8_t* buf = msgpack_get_bin(&mp, &buf_sz);
 
 		as_pack_str(&pk, NULL, buf_sz);
 
@@ -1873,9 +1860,9 @@ msgpack_compactify_element(uint8_t *dest, const uint8_t *src)
 	return pk.offset;
 }
 
-const uint8_t *
-msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
-		msgpack_type *type, bool *has_nonstorage, bool *not_compact)
+const uint8_t*
+msgpack_parse(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
+		msgpack_type* type, bool* has_nonstorage, bool* not_compact)
 {
 	SZ_PARSE_BUF_CHECK(buf, end, 1);
 
@@ -1909,17 +1896,17 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 		return buf + 1;
 	case 0xcd: // unsigned 16 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		*not_compact = cf_swap_from_be16(*(uint16_t *)buf) <= 0xff;
+		*not_compact = cf_swap_from_be16(*(uint16_t*)buf) <= 0xff;
 		*type = MSGPACK_TYPE_INT;
 		return buf + 2;
 	case 0xce: // unsigned 32 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		*not_compact = cf_swap_from_be32(*(uint32_t *)buf) <= 0xffff;
+		*not_compact = cf_swap_from_be32(*(uint32_t*)buf) <= 0xffff;
 		*type = MSGPACK_TYPE_INT;
 		return buf + 4;
 	case 0xcf: // unsigned 64 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 8);
-		*not_compact = cf_swap_from_be64(*(uint64_t *)buf) <= 0xffffffffULL;
+		*not_compact = cf_swap_from_be64(*(uint64_t*)buf) <= 0xffffffffULL;
 		*type = MSGPACK_TYPE_INT;
 		return buf + 8;
 
@@ -1931,19 +1918,19 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xd1: // signed 16 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
 		*not_compact = (*buf & 0x80) == 0 ||
-				cf_swap_from_be16(*(uint16_t *)buf) >= 0xff00;
+				cf_swap_from_be16(*(uint16_t*)buf) >= 0xff00;
 		*type = MSGPACK_TYPE_INT;
 		return buf + 2;
 	case 0xd2: // signed 32 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
 		*not_compact = (*buf & 0x80) == 0 ||
-				cf_swap_from_be32(*(uint32_t *)buf) >= 0xffff0000;
+				cf_swap_from_be32(*(uint32_t*)buf) >= 0xffff0000;
 		*type = MSGPACK_TYPE_INT;
 		return buf + 4;
 	case 0xd3: // signed 64 bit integer
 		SZ_PARSE_BUF_CHECK(buf, end, 8);
 		*not_compact = (*buf & 0x80) == 0 ||
-				cf_swap_from_be64(*(uint64_t *)buf) >= 0xffffffff00000000ULL;
+				cf_swap_from_be64(*(uint64_t*)buf) >= 0xffffffff00000000ULL;
 		*type = MSGPACK_TYPE_INT;
 		return buf + 8;
 
@@ -1972,7 +1959,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xda: { // str 16
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
 
-		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
+		uint16_t len = cf_swap_from_be16(*(uint16_t*)buf);
 
 		*not_compact = len <= 0xff;
 		*type = MSGPACK_TYPE_BYTES;
@@ -1986,7 +1973,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xdb: { // str 32
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
 
-		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+		uint32_t len = cf_swap_from_be32(*(uint32_t*)buf);
 
 		*not_compact = len <= 0xffff;
 		*type = MSGPACK_TYPE_BYTES;
@@ -1998,7 +1985,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xdc: { // list with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
 
-		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
+		uint16_t len = cf_swap_from_be16(*(uint16_t*)buf);
 
 		*not_compact = len <= 0x0f;
 		*count += len;
@@ -2009,7 +1996,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xdd: { // list with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
 
-		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+		uint32_t len = cf_swap_from_be32(*(uint32_t*)buf);
 
 		*not_compact = len <= 0xffff;
 		*count += len;
@@ -2021,7 +2008,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xde: { // map with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
 
-		uint16_t len = cf_swap_from_be16(*(uint16_t *)buf);
+		uint16_t len = cf_swap_from_be16(*(uint16_t*)buf);
 
 		*not_compact = len <= 0x0f;
 		*count += 2 * len;
@@ -2032,7 +2019,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xdf: // map with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
 
-		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+		uint32_t len = cf_swap_from_be32(*(uint32_t*)buf);
 
 		*not_compact = len <= 0xffff;
 		*count += 2 * len;
@@ -2080,7 +2067,8 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 				*has_nonstorage = true;
 			}
 
-			*not_compact = (*buf & 0xe0) == 0 && (*buf & (*buf - 1)) == 0; // *buf is 1, 2, 4, 8, or 16
+			*not_compact = (*buf & 0xe0) == 0 &&
+					(*buf & (*buf - 1)) == 0; // *buf is 1, 2, 4, 8, or 16
 		}
 
 		*type = MSGPACK_TYPE_EXT;
@@ -2089,7 +2077,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xc8: { // ext 16
 		SZ_PARSE_BUF_CHECK(buf, end, 3);
 
-		uint32_t len = cf_swap_from_be16(*(uint16_t *)buf);
+		uint32_t len = cf_swap_from_be16(*(uint16_t*)buf);
 
 		if (*(buf + 2) == CMP_EXT_TYPE && len < 4 && len != 0) {
 			*has_nonstorage = true;
@@ -2103,7 +2091,7 @@ msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count,
 	case 0xc9: { // ext 32
 		SZ_PARSE_BUF_CHECK(buf, end, 5);
 
-		uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
+		uint32_t len = cf_swap_from_be32(*(uint32_t*)buf);
 
 		if (*(buf + 4) == CMP_EXT_TYPE && len < 4 && len != 0) {
 			*has_nonstorage = true;

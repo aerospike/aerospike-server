@@ -42,7 +42,6 @@
 #include "secrets.h"
 #include "vault.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -57,7 +56,6 @@
 
 static const char TRAILING_NEWLINE[] = "\n\r";
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -66,11 +64,9 @@ static uint8_t* fetch_env_bytes(const char* path, size_t* size_r);
 static uint8_t* fetch_env_b64_bytes(const char* path, size_t* size_r);
 static uint8_t* fetch_bytes_from_file(const char* file_path, size_t* size_r);
 
-
 //==========================================================
 // Inlines & macros.
 //
-
 
 //==========================================================
 // Public API.
@@ -87,8 +83,7 @@ cf_fetch_path_type(const char* path)
 		return PATH_TYPE_ENV_B64;
 	}
 
-	if (strncmp(path, CF_SECRETS_PATH_PREFIX,
-			CF_SECRETS_PATH_PREFIX_LEN) == 0) {
+	if (strncmp(path, CF_SECRETS_PATH_PREFIX, CF_SECRETS_PATH_PREFIX_LEN) == 0) {
 		return PATH_TYPE_SECRETS;
 	}
 
@@ -158,7 +153,6 @@ cf_fetch_string(const char* path)
 
 	return (char*)buf;
 }
-
 
 //==========================================================
 // Local helpers.

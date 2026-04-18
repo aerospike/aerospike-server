@@ -38,13 +38,12 @@
 #include "cf_mutex.h"
 #include "log.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
-bool vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value);
-
+bool vhash_get(const vhash* h, const char* key, size_t key_len,
+		uint32_t* p_value);
 
 //==========================================================
 // Public API.
@@ -105,9 +104,9 @@ cf_vmapx_get_by_index(const cf_vmapx* vmap, uint32_t index, void** pp_value)
 	// just returned the value pointer.) And if necessary, we could make a
 	// "safe" version of this that does the check.
 
-//	if (index >= vmap->count) {
-//		return CF_VMAPX_ERR_BAD_PARAM;
-//	}
+	//	if (index >= vmap->count) {
+	//		return CF_VMAPX_ERR_BAD_PARAM;
+	//	}
 
 	*pp_value = vmapx_value_ptr(vmap, index);
 
@@ -165,8 +164,9 @@ cf_vmapx_get_index(const cf_vmapx* vmap, const char* name, uint32_t* p_index)
 		return CF_VMAPX_ERR_NAME_NOT_FOUND;
 	}
 
-	return vhash_get(vmap->hash, name, name_len, p_index) ?
-			CF_VMAPX_OK : CF_VMAPX_ERR_NAME_NOT_FOUND;
+	return vhash_get(vmap->hash, name, name_len, p_index)
+			? CF_VMAPX_OK
+			: CF_VMAPX_ERR_NAME_NOT_FOUND;
 }
 
 // Same as above, but non-null-terminated name.
@@ -178,8 +178,9 @@ cf_vmapx_get_index_w_len(const cf_vmapx* vmap, const char* name,
 		return CF_VMAPX_ERR_NAME_NOT_FOUND;
 	}
 
-	return vhash_get(vmap->hash, name, name_len, p_index) ?
-			CF_VMAPX_OK : CF_VMAPX_ERR_NAME_NOT_FOUND;
+	return vhash_get(vmap->hash, name, name_len, p_index)
+			? CF_VMAPX_OK
+			: CF_VMAPX_ERR_NAME_NOT_FOUND;
 }
 
 // The value must begin with a string which is its name. (The hash map is not
@@ -251,7 +252,6 @@ cf_vmapx_put_unique_w_len(cf_vmapx* vmap, const char* name, size_t name_len,
 	return CF_VMAPX_OK;
 }
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
@@ -264,7 +264,6 @@ vmapx_value_ptr(const cf_vmapx* vmap, uint32_t index)
 
 	return (void*)(vmap->values + (vmap->value_size * index));
 }
-
 
 //==========================================================
 // vhash "scoped class".
@@ -289,8 +288,8 @@ typedef struct vhash_ele_s {
 	uint8_t data[]; // key_size bytes of key, 4 bytes of value
 } vhash_ele;
 
-#define VHASH_ELE_KEY_PTR(_e)		((char*)_e->data)
-#define VHASH_ELE_VALUE_PTR(_h, _e)	((uint32_t*)(_e->data + _h->key_size))
+#define VHASH_ELE_KEY_PTR(_e) ((char*)_e->data)
+#define VHASH_ELE_VALUE_PTR(_h, _e) ((uint32_t*)(_e->data + _h->key_size))
 
 // Copy null-terminated key into hash, then pad with non-null characters.
 // Padding ensures quicker compare in vhash_get() when key in hash is shorter,

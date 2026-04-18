@@ -37,7 +37,6 @@
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //

@@ -53,8 +53,7 @@ typedef uint32_t as_cluster_proto_identifier;
 /**
  * Configuration for the clustering algorithm.
  */
-typedef struct as_clustering_config_s
-{
+typedef struct as_clustering_config_s {
 	/**
 	 * The smallest allowed  cluster size.
 	 */
@@ -75,8 +74,7 @@ typedef struct as_clustering_config_s
 /**
  * The clustering protocol versions.
  */
-typedef enum as_clustering_protocol_version
-{
+typedef enum as_clustering_protocol_version {
 	AS_CLUSTERING_PROTOCOL_UNDEF,
 	AS_CLUSTERING_PROTOCOL_NONE,
 	AS_CLUSTERING_PROTOCOL_V1,
@@ -89,8 +87,7 @@ typedef enum as_clustering_protocol_version
 /**
  * Clustering event type.
  */
-typedef enum as_clustering_event_type_e
-{
+typedef enum as_clustering_event_type_e {
 	/**
 	 * Cluster membership for this node changed.
 	 */
@@ -105,8 +102,7 @@ typedef enum as_clustering_event_type_e
 /**
  * Clustering event type.
  */
-typedef enum as_clustering_event_qualifier_e
-{
+typedef enum as_clustering_event_qualifier_e {
 	/**
 	 * The default qualifier for cases where a qualifier is not applicable.
 	 */
@@ -129,8 +125,7 @@ typedef enum as_clustering_event_qualifier_e
 /**
  * Clustering event.
  */
-typedef struct as_clustering_event_s
-{
+typedef struct as_clustering_event_s {
 	/**
 	 * The clustering event type.
 	 */
@@ -165,20 +160,17 @@ typedef struct as_clustering_event_s
 /**
  * Initialize clustering subsystem.
  */
-void
-as_clustering_init();
+void as_clustering_init();
 
 /**
  * Start clustering subsystem.
  */
-void
-as_clustering_start();
+void as_clustering_start();
 
 /**
  * Stop clustering subsystem.
  */
-void
-as_clustering_stop();
+void as_clustering_stop();
 
 /**
  * Reform the cluster with the same succession list.This would trigger the
@@ -186,15 +178,13 @@ as_clustering_stop();
  *
  * @return 0 if new clustering round started, -1 otherwise.
  */
-int
-as_clustering_cluster_reform();
+int as_clustering_cluster_reform();
 
 /**
  * Return the quantum interval, i.e., the interval at which cluster change
  * decisions are taken. The unit is milliseconds.
  */
-uint64_t
-as_clustering_quantum_interval();
+uint64_t as_clustering_quantum_interval();
 
 /**
  * Log a vector of node-ids at input severity spliting long vectors over
@@ -209,8 +199,7 @@ as_clustering_quantum_interval();
  * will be separated with a space. Can be NULL for no prefix.
  * @param nodes the vector of nodes.
  */
-void
-as_clustering_cf_node_vector_event(cf_log_level severity,
+void as_clustering_cf_node_vector_event(cf_log_level severity,
 		cf_log_context context, char* file_name, int line, char* message,
 		cf_vector* nodes);
 
@@ -228,8 +217,7 @@ as_clustering_cf_node_vector_event(cf_log_level severity,
  * @param nodes the array of nodes.
  * @param node_count the count of nodes in the array.
  */
-void
-as_clustering_cf_node_array_event(cf_log_level severity,
+void as_clustering_cf_node_array_event(cf_log_level severity,
 		cf_log_context context, char* file_name, int line, char* message,
 		cf_node* nodes, int node_count);
 
@@ -244,9 +232,9 @@ as_clustering_cf_node_array_event(cf_log_level severity,
  * will be separated with a space. Can be NULL for no prefix.
  * @param nodes the vector of nodes.
  */
-#define as_clustering_log_cf_node_vector(severity, context, message, nodes)					\
-	as_clustering_cf_node_vector_event(severity, context, __FILENAME__,	\
-									   __LINE__, message, nodes)
+#define as_clustering_log_cf_node_vector(severity, context, message, nodes)    \
+	as_clustering_cf_node_vector_event(severity, context, __FILENAME__,        \
+			__LINE__, message, nodes)
 
 /**
  * Log an array of node-ids at input severity spliting long vectors over
@@ -260,11 +248,10 @@ as_clustering_cf_node_array_event(cf_log_level severity,
  * @param nodes the array of nodes.
  * @param node_count the count of nodes in the array.
  */
-#define as_clustering_log_cf_node_array(severity, context, message, nodes,	\
-		node_count)															\
-as_clustering_cf_node_array_event(severity, context, __FILENAME__,			\
-		__LINE__, message, nodes, node_count);
-
+#define as_clustering_log_cf_node_array(severity, context, message, nodes,     \
+		node_count)                                                            \
+	as_clustering_cf_node_array_event(severity, context, __FILENAME__,         \
+			__LINE__, message, nodes, node_count);
 
 /*
  * ---- Clustering info command functions. ----
@@ -273,23 +260,19 @@ as_clustering_cf_node_array_event(severity, context, __FILENAME__,			\
  * If false means than either this node is orphaned, or is undergoing a cluster
  * change.
  */
-bool
-as_clustering_has_integrity();
+bool as_clustering_has_integrity();
 
 /**
  * Indicates if self node is orphaned.
  */
-bool
-as_clustering_is_orphan();
+bool as_clustering_is_orphan();
 
 /**
  * Dump clustering state to the log.
  */
-void
-as_clustering_dump(bool verbose);
+void as_clustering_dump(bool verbose);
 
 /**
  * Set the min cluster size.
  */
-int
-as_clustering_cluster_size_min_set(uint32_t new_cluster_size_min);
+int as_clustering_cluster_size_min_set(uint32_t new_cluster_size_min);

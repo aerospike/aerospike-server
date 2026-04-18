@@ -29,13 +29,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef struct msgpack_in_s {
-	const uint8_t *buf;
+	const uint8_t* buf;
 	uint32_t buf_sz;
 	uint32_t offset;
 	bool has_nonstorage;
@@ -52,21 +51,21 @@ typedef struct msgpack_in_vec_s {
 	uint32_t n_vecs;
 	uint32_t idx;
 	bool has_nonstorage;
-	msgpack_vec *vecs;
+	msgpack_vec* vecs;
 } msgpack_in_vec;
 
 typedef struct msgpack_ext_s {
-	const uint8_t *data;	// pointer to ext contents
-	uint32_t size;			// size of ext contents
-	uint32_t type_offset;	// offset where the type field is located
-	uint8_t type;			// type of ext contents
+	const uint8_t* data; // pointer to ext contents
+	uint32_t size; // size of ext contents
+	uint32_t type_offset; // offset where the type field is located
+	uint8_t type; // type of ext contents
 } msgpack_ext;
 
 typedef enum msgpack_cmp_e {
-	MSGPACK_CMP_ERROR	= -2,
-	MSGPACK_CMP_END		= -1,
-	MSGPACK_CMP_LESS	= 0,
-	MSGPACK_CMP_EQUAL	= 1,
+	MSGPACK_CMP_ERROR = -2,
+	MSGPACK_CMP_END = -1,
+	MSGPACK_CMP_LESS = 0,
+	MSGPACK_CMP_EQUAL = 1,
 	MSGPACK_CMP_GREATER = 2,
 } msgpack_cmp_type;
 
@@ -87,7 +86,7 @@ typedef enum {
 	MSGPACK_TYPE_EXT,
 	// Non-storage types, need to be after storage types.
 	MSGPACK_TYPE_CMP_WILDCARD, // not a storage type
-	MSGPACK_TYPE_CMP_INF,      // not a storage type, must be last (biggest value)
+	MSGPACK_TYPE_CMP_INF, // not a storage type, must be last (biggest value)
 
 	MSGPACK_N_TYPES
 } msgpack_type;
@@ -96,51 +95,50 @@ typedef struct msgpack_display_str_s {
 	char str[512];
 } msgpack_display_str;
 
-#define define_msgpack_vec_copy(__name, __copy_ptr) \
-		msgpack_vec __name ## __vecs[(__copy_ptr)->n_vecs]; \
-		for (uint32_t i = 0; i < (__copy_ptr)->n_vecs; i++) { \
-			__name ## __vecs[i] = (__copy_ptr)->vecs[i]; \
-		} \
-		msgpack_in_vec __name = *(__copy_ptr); \
-		__name.vecs = __name ## __vecs;
-
+#define define_msgpack_vec_copy(__name, __copy_ptr)                            \
+	msgpack_vec __name##__vecs[(__copy_ptr)->n_vecs];                          \
+	for (uint32_t i = 0; i < (__copy_ptr)->n_vecs; i++) {                      \
+		__name##__vecs[i] = (__copy_ptr)->vecs[i];                             \
+	}                                                                          \
+	msgpack_in_vec __name = *(__copy_ptr);                                     \
+	__name.vecs = __name##__vecs;
 
 //==========================================================
 // Public API.
 //
 
-uint32_t msgpack_sz_rep(msgpack_in *mp, uint32_t rep_count);
+uint32_t msgpack_sz_rep(msgpack_in* mp, uint32_t rep_count);
 static inline uint32_t
-msgpack_sz(msgpack_in *mp)
+msgpack_sz(msgpack_in* mp)
 {
 	return msgpack_sz_rep(mp, 1);
 }
 
-msgpack_cmp_type msgpack_cmp(msgpack_in *mp0, msgpack_in *mp1);
-msgpack_cmp_type msgpack_cmp_peek(const msgpack_in *mp0, const msgpack_in *mp1);
+msgpack_cmp_type msgpack_cmp(msgpack_in* mp0, msgpack_in* mp1);
+msgpack_cmp_type msgpack_cmp_peek(const msgpack_in* mp0, const msgpack_in* mp1);
 
-msgpack_type msgpack_peek_type(const msgpack_in *mp);
+msgpack_type msgpack_peek_type(const msgpack_in* mp);
 static inline msgpack_type
-msgpack_buf_peek_type(const uint8_t *buf, uint32_t buf_sz)
+msgpack_buf_peek_type(const uint8_t* buf, uint32_t buf_sz)
 {
 	const msgpack_in mp = {
-			.buf = buf,
-			.buf_sz = buf_sz,
+		.buf = buf,
+		.buf_sz = buf_sz,
 	};
 
 	return msgpack_peek_type(&mp);
 }
-bool msgpack_peek_is_ext(const msgpack_in *mp);
-bool msgpack_peek_is_cdt(const msgpack_in *mp);
+bool msgpack_peek_is_ext(const msgpack_in* mp);
+bool msgpack_peek_is_cdt(const msgpack_in* mp);
 
-const uint8_t *msgpack_get_ele(msgpack_in *mp, uint32_t *sz_r);
-bool msgpack_get_bool(msgpack_in *mp, bool *value);
+const uint8_t* msgpack_get_ele(msgpack_in* mp, uint32_t* sz_r);
+bool msgpack_get_bool(msgpack_in* mp, bool* value);
 
-bool msgpack_get_uint64(msgpack_in *mp, uint64_t *i);
+bool msgpack_get_uint64(msgpack_in* mp, uint64_t* i);
 static inline bool
-msgpack_get_int64(msgpack_in *mp, int64_t *i)
+msgpack_get_int64(msgpack_in* mp, int64_t* i)
 {
-	return msgpack_get_uint64(mp, (uint64_t *)i);
+	return msgpack_get_uint64(mp, (uint64_t*)i);
 }
 static inline bool
 msgpack_type_is_int(msgpack_type type)
@@ -148,18 +146,15 @@ msgpack_type_is_int(msgpack_type type)
 	return type == MSGPACK_TYPE_NEGINT || type == MSGPACK_TYPE_INT;
 }
 
-bool msgpack_get_double(msgpack_in *mp, double *x);
+bool msgpack_get_double(msgpack_in* mp, double* x);
 
-const uint8_t *msgpack_get_bin(msgpack_in *mp, uint32_t *sz_r);
+const uint8_t* msgpack_get_bin(msgpack_in* mp, uint32_t* sz_r);
 
-bool msgpack_get_ext(msgpack_in *mp, msgpack_ext *ext);
+bool msgpack_get_ext(msgpack_in* mp, msgpack_ext* ext);
 static inline uint32_t
-msgpack_buf_get_ext(const uint8_t *buf, uint32_t buf_sz, msgpack_ext *ext)
+msgpack_buf_get_ext(const uint8_t* buf, uint32_t buf_sz, msgpack_ext* ext)
 {
-	msgpack_in mp = {
-			.buf = buf,
-			.buf_sz = buf_sz
-	};
+	msgpack_in mp = { .buf = buf, .buf_sz = buf_sz };
 
 	if (! msgpack_get_ext(&mp, ext)) {
 		return 0;
@@ -168,50 +163,46 @@ msgpack_buf_get_ext(const uint8_t *buf, uint32_t buf_sz, msgpack_ext *ext)
 	return mp.offset;
 }
 
-bool msgpack_get_list_ele_count(msgpack_in *mp, uint32_t *count_r);
+bool msgpack_get_list_ele_count(msgpack_in* mp, uint32_t* count_r);
 static inline bool
-msgpack_buf_get_list_ele_count(const uint8_t *buf, uint32_t buf_sz,
-		uint32_t *count_r)
+msgpack_buf_get_list_ele_count(const uint8_t* buf, uint32_t buf_sz,
+		uint32_t* count_r)
 {
-	msgpack_in mp = {
-			.buf = buf,
-			.buf_sz = buf_sz
-	};
+	msgpack_in mp = { .buf = buf, .buf_sz = buf_sz };
 
 	return msgpack_get_list_ele_count(&mp, count_r);
 }
-bool msgpack_get_map_ele_count(msgpack_in *mp, uint32_t *count_r);
+bool msgpack_get_map_ele_count(msgpack_in* mp, uint32_t* count_r);
 static inline bool
-msgpack_buf_get_map_ele_count(const uint8_t *buf, uint32_t buf_sz,
-		uint32_t *count_r)
+msgpack_buf_get_map_ele_count(const uint8_t* buf, uint32_t buf_sz,
+		uint32_t* count_r)
 {
-	msgpack_in mp = {
-			.buf = buf,
-			.buf_sz = buf_sz
-	};
+	msgpack_in mp = { .buf = buf, .buf_sz = buf_sz };
 
 	return msgpack_get_map_ele_count(&mp, count_r);
 }
 
-uint32_t msgpack_compactify(uint8_t *buf, uint32_t buf_sz, bool *was_modified);
-uint32_t msgpack_compactify_element(uint8_t *dest, const uint8_t *src);
-const uint8_t *msgpack_parse(const uint8_t *buf, const uint8_t * const end, uint32_t *count, msgpack_type *type, bool *has_nonstorage, bool *not_compact);
+uint32_t msgpack_compactify(uint8_t* buf, uint32_t buf_sz, bool* was_modified);
+uint32_t msgpack_compactify_element(uint8_t* dest, const uint8_t* src);
+const uint8_t* msgpack_parse(const uint8_t* buf, const uint8_t* const end,
+		uint32_t* count, msgpack_type* type, bool* has_nonstorage,
+		bool* not_compact);
 
-uint32_t msgpack_sz_vec(msgpack_in_vec *mv);
-bool msgpack_get_bool_vec(msgpack_in_vec *mv, bool *value);
-bool msgpack_get_uint64_vec(msgpack_in_vec *mv, uint64_t *i);
+uint32_t msgpack_sz_vec(msgpack_in_vec* mv);
+bool msgpack_get_bool_vec(msgpack_in_vec* mv, bool* value);
+bool msgpack_get_uint64_vec(msgpack_in_vec* mv, uint64_t* i);
 
 static inline bool
-msgpack_get_int64_vec(msgpack_in_vec *mv, int64_t *i)
+msgpack_get_int64_vec(msgpack_in_vec* mv, int64_t* i)
 {
-	return msgpack_get_uint64_vec(mv, (uint64_t *)i);
+	return msgpack_get_uint64_vec(mv, (uint64_t*)i);
 }
 
-bool msgpack_get_list_ele_count_vec(msgpack_in_vec *mv, uint32_t *count_r);
-msgpack_type msgpack_peek_type_vec(const msgpack_in_vec *mv);
-const uint8_t *msgpack_get_ele_vec(msgpack_in_vec *mv, uint32_t *sz_r);
-const uint8_t *msgpack_get_bin_vec(msgpack_in_vec *mv, uint32_t *sz_r);
+bool msgpack_get_list_ele_count_vec(msgpack_in_vec* mv, uint32_t* count_r);
+msgpack_type msgpack_peek_type_vec(const msgpack_in_vec* mv);
+const uint8_t* msgpack_get_ele_vec(msgpack_in_vec* mv, uint32_t* sz_r);
+const uint8_t* msgpack_get_bin_vec(msgpack_in_vec* mv, uint32_t* sz_r);
 
-bool msgpack_display(msgpack_in *mp, msgpack_display_str *str);
+bool msgpack_display(msgpack_in* mp, msgpack_display_str* str);
 
-void msgpack_print_vec(msgpack_in_vec *mv, const char *name);
+void msgpack_print_vec(msgpack_in_vec* mv, const char* name);

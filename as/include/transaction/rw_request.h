@@ -44,7 +44,6 @@
 #include "fabric/hb.h"
 #include "fabric/partition.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -61,15 +60,14 @@ struct proxy_origin_s;
 struct rw_request_s;
 struct rw_wait_ele_s;
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
-typedef bool (*dup_res_done_cb) (struct rw_request_s* rw);
-typedef void (*repl_write_done_cb) (struct rw_request_s* rw);
-typedef void (*repl_ping_done_cb) (struct rw_request_s* rw);
-typedef void (*timeout_done_cb) (struct rw_request_s* rw);
+typedef bool (*dup_res_done_cb)(struct rw_request_s* rw);
+typedef void (*repl_write_done_cb)(struct rw_request_s* rw);
+typedef void (*repl_ping_done_cb)(struct rw_request_s* rw);
+typedef void (*timeout_done_cb)(struct rw_request_s* rw);
 
 typedef struct rw_request_s {
 
@@ -77,19 +75,19 @@ typedef struct rw_request_s {
 	// Matches as_transaction.
 	//
 
-	struct cl_msg_s*	msgp;
-	uint32_t			msg_fields;
+	struct cl_msg_s* msgp;
+	uint32_t msg_fields;
 
-	uint8_t				origin;
-	uint8_t				from_flags;
+	uint8_t origin;
+	uint8_t from_flags;
 
 	union {
-		void*						any;
-		struct as_file_handle_s*	proto_fd_h;
-		struct proxy_origin_s*		proxy_orig;
-		struct as_batch_shared_s*	batch_shared;
-		struct iudf_origin_s*		iudf_orig;
-		struct iops_origin_s*		iops_orig;
+		void* any;
+		struct as_file_handle_s* proto_fd_h;
+		struct proxy_origin_s* proxy_orig;
+		struct as_batch_shared_s* batch_shared;
+		struct iudf_origin_s* iudf_orig;
+		struct iops_origin_s* iops_orig;
 		struct monitor_roll_origin_s* monitor_roll_orig;
 	} from;
 
@@ -99,81 +97,80 @@ typedef struct rw_request_s {
 		uint32_t proxy_tid;
 	} from_data;
 
-	cf_digest			keyd;
+	cf_digest keyd;
 
-	uint64_t			start_time;
-	uint64_t			benchmark_time;
+	uint64_t start_time;
+	uint64_t benchmark_time;
 
 	as_partition_reservation rsv;
 
-	uint64_t			end_time;
-	uint8_t				result_code;
-	uint8_t				flags;
-	uint16_t			generation;
-	uint32_t			void_time;
-	uint64_t			last_update_time;
+	uint64_t end_time;
+	uint8_t result_code;
+	uint8_t flags;
+	uint16_t generation;
+	uint32_t void_time;
+	uint64_t last_update_time;
 
 	//
 	// End of as_transaction look-alike.
 	//------------------------------------------------------
 
-	cf_mutex			lock;
+	cf_mutex lock;
 
 	struct rw_wait_ele_s* wait_queue_head;
 	struct rw_wait_ele_s* wait_queue_tail;
-	uint32_t			wait_queue_depth;
+	uint32_t wait_queue_depth;
 
-	bool				is_set_up; // TODO - redundant with timeout_cb
+	bool is_set_up; // TODO - redundant with timeout_cb
 
 	// Store pickled data, for use in replica write.
-	uint8_t*			pickle;
-	size_t				pickle_sz;
-	const char*			set_name; // points directly into vmap - never free it
-	uint32_t			set_name_len;
-	uint8_t*			key;
-	uint32_t			key_size;
+	uint8_t* pickle;
+	size_t pickle_sz;
+	const char* set_name; // points directly into vmap - never free it
+	uint32_t set_name_len;
+	uint8_t* key;
+	uint32_t key_size;
 
 	// Store ops' responses here.
-	cf_dyn_buf			response_db;
+	cf_dyn_buf response_db;
 
 	// Manage responses for duplicate resolution and replica write requests, or
 	// alternatively, timeouts.
-	uint32_t			tid;
-	bool				dup_res_complete;
-	bool				repl_write_w_orig; // enterprise only
-	bool				repl_write_complete;
-	bool				repl_ping_complete;
-	dup_res_done_cb		dup_res_cb;
-	repl_write_done_cb	repl_write_cb;
-	repl_ping_done_cb	repl_ping_cb;
-	timeout_done_cb		timeout_cb;
+	uint32_t tid;
+	bool dup_res_complete;
+	bool repl_write_w_orig; // enterprise only
+	bool repl_write_complete;
+	bool repl_ping_complete;
+	dup_res_done_cb dup_res_cb;
+	repl_write_done_cb repl_write_cb;
+	repl_ping_done_cb repl_ping_cb;
+	timeout_done_cb timeout_cb;
 
 	// Message being sent to dest_nodes. May be duplicate resolution or replica
 	// write request. Message is kept in case it needs to be retransmitted.
-	msg*				dest_msg;
+	msg* dest_msg;
 
-	uint64_t			xmit_ms; // time of next retransmit
-	uint32_t			retry_interval_ms; // interval to add for next retransmit
+	uint64_t xmit_ms; // time of next retransmit
+	uint32_t retry_interval_ms; // interval to add for next retransmit
 
 	// Destination info for duplicate resolution and replica write requests.
-	uint32_t			n_dest_nodes;
-	cf_node				dest_nodes[AS_CLUSTER_SZ];
-	bool				dest_complete[AS_CLUSTER_SZ];
+	uint32_t n_dest_nodes;
+	cf_node dest_nodes[AS_CLUSTER_SZ];
+	bool dest_complete[AS_CLUSTER_SZ];
 
 	// Duplicate resolution response messages from nodes with duplicates.
-	msg*				best_dup_msg;
+	msg* best_dup_msg;
 	// TODO - could store best dup node-id - worth it?
-	uint8_t				best_dup_result_code;
-	uint16_t			best_dup_gen;
-	uint64_t			best_dup_lut;
+	uint8_t best_dup_result_code;
+	uint16_t best_dup_gen;
+	uint64_t best_dup_lut;
 
-	bool				tie_was_replicated; // enterprise only
+	bool tie_was_replicated; // enterprise only
 
 	// Node health related stat, to track replication latency.
-	uint64_t			repl_start_us;
+	uint64_t repl_start_us;
 
 } rw_request;
-
 
 //==========================================================
 // Public API.

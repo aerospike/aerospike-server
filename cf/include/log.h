@@ -35,7 +35,6 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -131,7 +130,6 @@ typedef struct cf_log_sink_s cf_log_sink;
 #define DEFAULT_SYSLOG_PATH "/dev/log"
 #define DEFAULT_SYSLOG_TAG "asd"
 
-
 //==========================================================
 // Public API - compile-time helpers.
 //
@@ -145,12 +143,14 @@ typedef struct cf_log_sink_s cf_log_sink;
 // e.g.
 // COMPILER_ASSERT(sizeof(my_int_array) / sizeof(int) == MY_INT_ARRAY_SIZE);
 //
-#define CGLUE(a, b) a##b
-#define CVERIFY(expr, c) typedef char CGLUE(assert_failed_, c)[(expr) ? 1 : -1]
-#define COMPILER_ASSERT(expr) CVERIFY(expr, __COUNTER__)
+#ifdef __cplusplus
+#define COMPILER_ASSERT(expr) static_assert(expr, #expr)
+#else
+#define COMPILER_ASSERT(expr) _Static_assert(expr, #expr)
+#endif
 
 // Use ARRAY_ASSERT() as a shortcut of above example.
-#define ARRAY_ASSERT(array, count) \
+#define ARRAY_ASSERT(array, count)                                             \
 	COMPILER_ASSERT(sizeof(array) / sizeof((array)[0]) == count)
 
 // Use CF_MUST_CHECK with declarations to force caller to handle return value.
@@ -172,13 +172,12 @@ typedef struct cf_log_sink_s cf_log_sink;
 // e.g.
 // CF_NEVER_FAILS(my_function());
 //
-#define CF_NEVER_FAILS(x) \
-do { \
-	if ((x) < 0) { \
-		cf_crash(CF_MISC, "this cannot happen..."); \
-	} \
-} while (false)
-
+#define CF_NEVER_FAILS(x)                                                      \
+	do {                                                                       \
+		if ((x) < 0) {                                                         \
+			cf_crash(CF_MISC, "this cannot happen...");                        \
+		}                                                                      \
+	} while (false)
 
 //==========================================================
 // Public API - config wrappers.
@@ -190,19 +189,20 @@ bool cf_log_is_using_local_time(void);
 void cf_log_use_millis(bool use);
 bool cf_log_is_using_millis(void);
 
-
 //==========================================================
 // Public API - manage logging.
 //
 
 void cf_log_init(bool early_verbose);
 cf_log_sink* cf_log_init_sink(const char* path, int facility, const char* tag);
-bool cf_log_init_level(cf_log_sink* sink, const char* context_str, const char* level_str);
+bool cf_log_init_level(cf_log_sink* sink, const char* context_str,
+		const char* level_str);
 bool cf_log_init_facility(cf_log_sink* sink, const char* facility_str);
 void cf_log_init_path(cf_log_sink* sink, const char* path);
 void cf_log_init_tag(cf_log_sink* sink, const char* tag);
 void cf_log_activate_sinks(void);
-bool cf_log_set_level(uint32_t id, const char* context_str, const char* level_str);
+bool cf_log_set_level(uint32_t id, const char* context_str,
+		const char* level_str);
 void cf_log_get_sinks(cf_dyn_buf* db);
 void cf_log_get_level(uint32_t id, const char* context_str, cf_dyn_buf* db);
 void cf_log_get_all_levels(uint32_t id, cf_dyn_buf* db);
@@ -217,7 +217,6 @@ int cf_log_get_sink_facility(uint32_t id);
 cf_log_level cf_log_get_sink_level(uint32_t id, cf_log_context context);
 void cf_log_reset_sinks(void);
 
-
 //==========================================================
 // Public API - write to log.
 //
@@ -228,11 +227,11 @@ void cf_log_stash_context(void);
 
 void cf_log_write(cf_log_context context, cf_log_level level,
 		const char* file_name, int line, const char* format, ...)
-		__attribute__ ((format (printf, 5, 6)));
+		__attribute__((format(printf, 5, 6)));
 
 void cf_log_write_no_return(int sig, cf_log_context context,
 		const char* file_name, int line, const char* format, ...)
-		__attribute__ ((noreturn, format (printf, 5, 6)));
+		__attribute__((noreturn, format(printf, 5, 6)));
 
 extern cf_log_level g_most_verbose_levels[];
 
@@ -245,37 +244,37 @@ extern __thread bool g_crash_ctx_valid;
 #define __FILENAME__ ""
 #endif
 
-#define cf_crash(context, ...) \
-	do { \
-		cf_log_stash_context(); \
-		cf_log_write_no_return(SIGUSR1, (context), __FILENAME__, __LINE__, \
-				__VA_ARGS__); \
+#define cf_crash(context, ...)                                                 \
+	do {                                                                       \
+		cf_log_stash_context();                                                \
+		cf_log_write_no_return(SIGUSR1, (context), __FILENAME__, __LINE__,     \
+				__VA_ARGS__);                                                  \
 	} while (false)
 
-#define cf_crash_nostack(context, ...) \
-	cf_log_write_no_return(SIGINT, (context), __FILENAME__, __LINE__, \
+#define cf_crash_nostack(context, ...)                                         \
+	cf_log_write_no_return(SIGINT, (context), __FILENAME__, __LINE__,          \
 			__VA_ARGS__)
 
-#define cf_assert(expr, context, ...) \
-	do { \
-		if (! (expr)) { \
-			cf_crash(context, __VA_ARGS__); \
-		} \
+#define cf_assert(expr, context, ...)                                          \
+	do {                                                                       \
+		if (! (expr)) {                                                        \
+			cf_crash(context, __VA_ARGS__);                                    \
+		}                                                                      \
 	} while (false)
 
-#define cf_assert_nostack(expr, context, ...) \
-	do { \
-		if (! (expr)) { \
-			cf_crash_nostack(context, __VA_ARGS__); \
-		} \
+#define cf_assert_nostack(expr, context, ...)                                  \
+	do {                                                                       \
+		if (! (expr)) {                                                        \
+			cf_crash_nostack(context, __VA_ARGS__);                            \
+		}                                                                      \
 	} while (false)
 
-#define cf_log_filter(level, context, ...) \
-	do { \
-		if ((level) <= g_most_verbose_levels[(context)]) { \
-			cf_log_write((context), (level), __FILENAME__, __LINE__, \
-					__VA_ARGS__); \
-		} \
+#define cf_log_filter(level, context, ...)                                     \
+	do {                                                                       \
+		if ((level) <= g_most_verbose_levels[(context)]) {                     \
+			cf_log_write((context), (level), __FILENAME__, __LINE__,           \
+					__VA_ARGS__);                                              \
+		}                                                                      \
 	} while (false)
 
 #define cf_warning(...) cf_log_filter(CF_WARNING, __VA_ARGS__)
@@ -292,21 +291,21 @@ extern const char aerospike_build_sha[];
 extern const char aerospike_build_ee_sha[];
 extern const char aerospike_build_fips_sha[];
 
-#define cf_log_version(level, context, prefix, ...) \
-	cf_log_filter(level, context, prefix " %s build %s os %s arch %s sha %.7s%s%.7s%s%.7s", \
-			##__VA_ARGS__, \
-			aerospike_build_type, aerospike_build_id, aerospike_build_os, \
-			aerospike_build_arch, aerospike_build_sha, \
-			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ", \
-			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha, \
-			*aerospike_build_fips_sha == '\0' ? "" : " fips-sha ", \
+#define cf_log_version(level, context, prefix, ...)                            \
+	cf_log_filter(level, context,                                              \
+			prefix " %s build %s os %s arch %s sha %.7s%s%.7s%s%.7s",          \
+			##__VA_ARGS__, aerospike_build_type, aerospike_build_id,           \
+			aerospike_build_os, aerospike_build_arch, aerospike_build_sha,     \
+			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",                 \
+			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha,     \
+			*aerospike_build_fips_sha == '\0' ? "" : " fips-sha ",             \
 			*aerospike_build_fips_sha == '\0' ? "" : aerospike_build_fips_sha);
 
-#define cf_strerror(err) ({ \
-	char _buf[200]; \
-	strerror_r(err, _buf, sizeof(_buf)); \
-})
-
+#define cf_strerror(err)                                                       \
+	({                                                                         \
+		char _buf[200];                                                        \
+		strerror_r(err, _buf, sizeof(_buf));                                   \
+	})
 
 //==========================================================
 // Public API - ticker logging.
@@ -314,23 +313,22 @@ extern const char aerospike_build_fips_sha[];
 
 void cf_log_write_cache(cf_log_context context, cf_log_level level,
 		const char* file_name, int line, const char* format, ...)
-		__attribute__ ((format (printf, 5, 6)));
+		__attribute__((format(printf, 5, 6)));
 
 void cf_log_dump_cache(void);
 
-#define cf_log_filter_cache(level, context, ...) \
-	do { \
-		if ((level) <= g_most_verbose_levels[(context)]) { \
-			cf_log_write_cache((context), (level), __FILENAME__, __LINE__, \
-					__VA_ARGS__); \
-		} \
+#define cf_log_filter_cache(level, context, ...)                               \
+	do {                                                                       \
+		if ((level) <= g_most_verbose_levels[(context)]) {                     \
+			cf_log_write_cache((context), (level), __FILENAME__, __LINE__,     \
+					__VA_ARGS__);                                              \
+		}                                                                      \
 	} while (false)
 
 #define cf_ticker_warning(...) cf_log_filter_cache(CF_WARNING, __VA_ARGS__)
 #define cf_ticker_info(...) cf_log_filter_cache(CF_INFO, __VA_ARGS__)
 #define cf_ticker_debug(...) cf_log_filter_cache(CF_DEBUG, __VA_ARGS__)
 #define cf_ticker_detail(...) cf_log_filter_cache(CF_DETAIL, __VA_ARGS__)
-
 
 //==========================================================
 // Public API - stack trace.

@@ -38,7 +38,6 @@
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -62,7 +61,7 @@ plain_generation(uint16_t regime_generation, const as_namespace* ns)
 }
 
 void
-as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms,
+as_record_set_lut(as_record* r, uint32_t regime, uint64_t now_ms,
 		const as_namespace* ns)
 {
 	// Note - last-update-time is not allowed to go backwards!
@@ -72,7 +71,7 @@ as_record_set_lut(as_record *r, uint32_t regime, uint64_t now_ms,
 }
 
 void
-as_record_increment_generation(as_record *r, const as_namespace* ns)
+as_record_increment_generation(as_record* r, const as_namespace* ns)
 {
 	// The generation might wrap - 0 is reserved as "uninitialized".
 	if (++r->generation == 0) {
@@ -110,8 +109,7 @@ as_record_drop_stats(as_record* r, as_namespace* ns)
 }
 
 void
-as_record_transition_stats(as_record* r, as_namespace* ns,
-		const as_record* old_r)
+as_record_transition_stats(as_record* r, as_namespace* ns, const as_record* old_r)
 {
 }
 
@@ -132,7 +130,6 @@ as_record_transition_set_index(as_index_tree* tree, as_index_ref* r_ref,
 	}
 }
 
-
 //==========================================================
 // Private API - for enterprise separation only.
 //
@@ -147,7 +144,7 @@ record_resolve_conflict_cp(uint16_t left_gen, uint64_t left_lut,
 }
 
 void
-replace_index_metadata(const as_remote_record *rr, as_record *r)
+replace_index_metadata(const as_remote_record* rr, as_record* r)
 {
 	r->generation = (uint16_t)rr->generation;
 	r->void_time = trim_void_time(rr->void_time);

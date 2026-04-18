@@ -23,33 +23,41 @@
 #pragma once
 
 #include <stdint.h>
+
 #include "aerospike/as_val.h"
+
 #include "base/datamodel.h"
 
 // The INTEGER particle interface function declarations are in this header file
 // since INTEGER functions are used by other particles derived from INTEGER.
 
 // Destructor, etc.
-void integer_destruct(as_particle *p);
-uint32_t integer_size(const as_particle *p);
+void integer_destruct(as_particle* p);
+uint32_t integer_size(const as_particle* p);
 
 // Handle "wire" format.
-int32_t integer_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int integer_append_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int integer_prepend_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int integer_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int32_t integer_size_from_wire(const uint8_t *wire_value, uint32_t value_size);
-int integer_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-uint32_t integer_wire_size(const as_particle *p);
-uint32_t integer_to_wire(const as_particle *p, uint8_t *wire);
+int32_t integer_concat_size_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int integer_append_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int integer_prepend_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int integer_incr_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int32_t integer_size_from_wire(const uint8_t* wire_value, uint32_t value_size);
+int integer_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
+uint32_t integer_wire_size(const as_particle* p);
+uint32_t integer_to_wire(const as_particle* p, uint8_t* wire);
 
 // Handle as_val translation.
-uint32_t integer_size_from_asval(const as_val *val);
-void integer_from_asval(const as_val *val, as_particle **pp);
-as_val *integer_to_asval(const as_particle *p);
-uint32_t integer_asval_wire_size(const as_val *val);
-uint32_t integer_asval_to_wire(const as_val *val, uint8_t *wire);
+uint32_t integer_size_from_asval(const as_val* val);
+void integer_from_asval(const as_val* val, as_particle** pp);
+as_val* integer_to_asval(const as_particle* p);
+uint32_t integer_asval_wire_size(const as_val* val);
+uint32_t integer_asval_to_wire(const as_val* val, uint8_t* wire);
 
 // Handle msgpack translation.
-uint32_t integer_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
-void integer_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
+uint32_t integer_size_from_msgpack(const uint8_t* packed, uint32_t packed_size);
+void integer_from_msgpack(const uint8_t* packed, uint32_t packed_size,
+		as_particle** pp);

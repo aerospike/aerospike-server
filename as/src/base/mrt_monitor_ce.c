@@ -38,7 +38,6 @@
 #include "base/transaction.h"
 #include "storage/storage.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -98,8 +97,7 @@ as_mrt_monitor_roll_done(monitor_roll_origin* orig, const cf_digest* keyd,
 }
 
 void
-as_mrt_monitor_proxyer_roll_done(msg* m, msg* fab_msg,
-		monitor_roll_origin* orig)
+as_mrt_monitor_proxyer_roll_done(msg* m, msg* fab_msg, monitor_roll_origin* orig)
 {
 	cf_crash(AS_MRT_MONITOR, "CE code called as_mrt_monitor_proxyer_roll_done()");
 }
@@ -107,7 +105,8 @@ as_mrt_monitor_proxyer_roll_done(msg* m, msg* fab_msg,
 void
 as_mrt_monitor_proxyer_roll_timeout(msg* fab_msg, monitor_roll_origin* orig)
 {
-	cf_crash(AS_MRT_MONITOR, "CE code called as_mrt_monitor_proxyer_roll_timeout()");
+	cf_crash(AS_MRT_MONITOR,
+			"CE code called as_mrt_monitor_proxyer_roll_timeout()");
 }
 
 uint32_t
