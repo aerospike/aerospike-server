@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 
+# Use VERSION file from build system if present
+if [[ -f /work/VERSION ]]; then
+    VERSION="$(cat /work/VERSION)"
+    # Extract ref from EVENT file to determine if we should trim version
+    if [[ -f /work/EVENT ]]; then
+        REF="$(grep -o '"ref":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
+        # For master or hotfix branches, trim version to x.y.z.w
+        if [[ "$REF" == "refs/heads/master" || "$REF" =~ refs/heads/hotfix/ ]]; then
+            VERSION="$(echo "$VERSION" | cut -d'-' -f1)"
+        fi
+    fi
+    echo "$VERSION"
+    exit 0
+fi
+
 # Get current branch
 branch="$(git branch --show-current)"
 

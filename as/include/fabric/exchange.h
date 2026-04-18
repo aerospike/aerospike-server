@@ -74,8 +74,7 @@
  * Exchange event raised for every well-formed cluster change, after exchange
  * concludes successfully.
  */
-typedef struct as_exchange_cluster_changed_event_s
-{
+typedef struct as_exchange_cluster_changed_event_s {
 	/**
 	 * The new cluster key.
 	 */
@@ -95,8 +94,7 @@ typedef struct as_exchange_cluster_changed_event_s
 /**
  * Cluster change event call back function for cluster changed event listeners.
  */
-typedef void
-(*as_exchange_cluster_changed_cb)(
+typedef void (*as_exchange_cluster_changed_cb)(
 		const as_exchange_cluster_changed_event* event, void* udata);
 
 /*
@@ -107,82 +105,70 @@ typedef void
 /**
  * Initialize exchange subsystem.
  */
-void
-as_exchange_init();
+void as_exchange_init();
 
 /**
  * Start exchange subsystem.
  */
-void
-as_exchange_start();
+void as_exchange_start();
 
 /**
  * Shut down exchange subsystem.
  */
-void
-as_exchange_shutdown();
+void as_exchange_shutdown();
 
 /**
  * Register to receive cluster-changed events.
  * TODO - may replace with simple static list someday.
  */
-void
-as_exchange_register_listener(as_exchange_cluster_changed_cb cb, void* udata);
+void as_exchange_register_listener(as_exchange_cluster_changed_cb cb,
+		void* udata);
 
 /**
  * Dump exchange state to log.
  */
-void
-as_exchange_dump(bool verbose);
+void as_exchange_dump(bool verbose);
 
 /**
  * Member-access method.
  */
-uint64_t
-as_exchange_cluster_key();
+uint64_t as_exchange_cluster_key();
 
 /**
  * Member-access method.
  */
-uint32_t
-as_exchange_cluster_size();
+uint32_t as_exchange_cluster_size();
 
 /**
  * Copy over the committed succession list.
  * Ensure the input vector has enough capacity.
  */
-void
-as_exchange_succession(cf_vector* succession);
+void as_exchange_succession(cf_vector* succession);
 
 /**
  * Return the committed succession list as a string in a dyn-buf.
  */
-void
-as_exchange_info_get_succession(cf_dyn_buf* db);
+void as_exchange_info_get_succession(cf_dyn_buf* db);
 
 /**
  * Member-access method.
  */
-cf_node
-as_exchange_principal();
+cf_node as_exchange_principal();
 
 /**
  * Used by exchange listeners during upgrades for compatibility purposes.
  */
-uint32_t*
-as_exchange_compatibility_ids(void);
+uint32_t* as_exchange_compatibility_ids(void);
 
 /**
  * Used during upgrades for compatibility purposes.
  */
-uint32_t
-as_exchange_min_compatibility_id(void);
+uint32_t as_exchange_min_compatibility_id(void);
 
 /**
  * Used during upgrades for compatibility purposes.
  */
-uint32_t
-as_exchange_max_compatibility_id(void);
+uint32_t as_exchange_max_compatibility_id(void);
 
 /**
  * Output exchange cluster state for info.
@@ -192,11 +178,9 @@ void as_exchange_cluster_info(cf_dyn_buf* db);
 /**
  * Lock before setting or getting exchanged info from non-exchange thread.
  */
-void
-as_exchange_info_lock();
+void as_exchange_info_lock();
 
 /**
  * Unlock after setting or getting exchanged info from non-exchange thread.
  */
-void
-as_exchange_info_unlock();
+void as_exchange_info_unlock();

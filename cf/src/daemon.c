@@ -29,15 +29,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <linux/capability.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <linux/capability.h>
 #include <sys/prctl.h>
-#include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "log.h"
 #include "os.h"
@@ -45,11 +43,9 @@
 extern int capset(cap_user_header_t header, cap_user_data_t data);
 extern int capget(cap_user_header_t header, cap_user_data_t data);
 
-
 static uint32_t g_startup_caps[2] = { 0, 0 }; // held during startup
 static uint32_t g_runtime_caps[2] = { 0, 0 }; // held forever
 static bool g_kept_caps = false;
-
 
 void
 cf_process_privsep(uid_t uid, gid_t gid)
@@ -88,7 +84,7 @@ cf_process_privsep(uid_t uid, gid_t gid)
 			return;
 		}
 
-		if (setgroups(0, (const gid_t *)0) < 0) {
+		if (setgroups(0, (const gid_t*)0) < 0) {
 			cf_crash(CF_MISC, "setgroups: %s", cf_strerror(errno));
 		}
 
@@ -101,10 +97,8 @@ cf_process_privsep(uid_t uid, gid_t gid)
 
 	// Started as root and not staying root: switch user (group), keep caps.
 
-	uint32_t caps[2] = {
-		g_startup_caps[0] | g_runtime_caps[0],
-		g_startup_caps[1] | g_runtime_caps[1]
-	};
+	uint32_t caps[2] = { g_startup_caps[0] | g_runtime_caps[0],
+		g_startup_caps[1] | g_runtime_caps[1] };
 
 	// If required, make capabilities survive the UID/GID switch.
 
@@ -117,7 +111,7 @@ cf_process_privsep(uid_t uid, gid_t gid)
 	}
 
 	if (gid != (gid_t)-1) {
-		if (setgroups(0, (const gid_t *)0) < 0) {
+		if (setgroups(0, (const gid_t*)0) < 0) {
 			cf_crash(CF_MISC, "setgroups: %s", cf_strerror(errno));
 		}
 
@@ -140,16 +134,14 @@ cf_process_privsep(uid_t uid, gid_t gid)
 		.version = _LINUX_CAPABILITY_VERSION_3
 	};
 
-	struct __user_cap_data_struct cap_data[2] = {
-		{ .permitted = caps[0], .effective = caps[0] },
-		{ .permitted = caps[1], .effective = caps[1] }
-	};
+	struct __user_cap_data_struct cap_data[2] = { { .permitted = caps[0],
+														  .effective = caps[0] },
+		{ .permitted = caps[1], .effective = caps[1] } };
 
 	if (capset(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }
-
 
 void
 cf_process_add_startup_cap(int cap)
@@ -157,13 +149,11 @@ cf_process_add_startup_cap(int cap)
 	g_startup_caps[cap >> 5] = 1 << (cap & 0x1f);
 }
 
-
 void
 cf_process_add_runtime_cap(int cap)
 {
 	g_runtime_caps[cap >> 5] = 1 << (cap & 0x1f);
 }
-
 
 void
 cf_process_drop_startup_caps(void)
@@ -177,15 +167,13 @@ cf_process_drop_startup_caps(void)
 	};
 
 	struct __user_cap_data_struct cap_data[2] = {
-		{ .permitted = g_runtime_caps[0] },
-		{ .permitted = g_runtime_caps[1] }
+		{ .permitted = g_runtime_caps[0] }, { .permitted = g_runtime_caps[1] }
 	};
 
 	if (capset(&cap_head, cap_data) < 0) {
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }
-
 
 bool
 cf_process_has_cap(int cap)
@@ -204,7 +192,6 @@ cf_process_has_cap(int cap)
 
 	return (perm & (1 << (cap & 0x1f))) != 0;
 }
-
 
 void
 cf_process_enable_cap(int cap)
@@ -230,7 +217,6 @@ cf_process_enable_cap(int cap)
 	}
 }
 
-
 void
 cf_process_disable_cap(int cap)
 {
@@ -254,7 +240,6 @@ cf_process_disable_cap(int cap)
 		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }
-
 
 // Daemonize the server - fork a new child process and exit the parent process.
 // Redirect console messages to a file.

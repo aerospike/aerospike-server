@@ -32,14 +32,12 @@
 #include "dynbuf.h"
 #include "socket.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_file_handle_s;
 struct as_proto_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -56,7 +54,6 @@ typedef struct as_info_transaction_s {
 	uint64_t start_time;
 } as_info_transaction;
 
-
 //==========================================================
 // Globals.
 //
@@ -64,14 +61,14 @@ typedef struct as_info_transaction_s {
 extern uint64_t g_start_sec;
 extern cf_dyn_buf g_bad_practices;
 
-
 //==========================================================
 // Public API.
 //
 
 void as_info_init();
 void as_info(as_info_transaction* it);
-int as_info_parameter_get(const char* param_str, const char* param, char* value, int* value_len);
+int as_info_parameter_get(const char* param_str, const char* param, char* value,
+		int* value_len);
 void as_info_buffer(uint8_t* req_buf, size_t req_buf_len, cf_dyn_buf* rsp);
 void as_info_set_num_info_threads(uint32_t n_threads);
 
@@ -82,4 +79,5 @@ char* as_info_bind_to_string(const cf_serv_cfg* cfg, cf_sock_owner owner);
 uint32_t as_info_queue_get_size();
 uint32_t process_cpu(void);
 void sys_cpu_info(uint32_t* user_pct, uint32_t* kernel_pct);
-void sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct, uint64_t* thp_mem_kbytes);
+void sys_mem_info(uint64_t* free_mem_kbytes, uint32_t* free_mem_pct,
+		uint64_t* thp_mem_kbytes);

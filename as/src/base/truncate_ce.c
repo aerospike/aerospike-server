@@ -31,7 +31,6 @@
 
 #include "base/datamodel.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -52,7 +51,6 @@ as_truncate_lut_is_truncated(uint64_t rec_lut, as_namespace* ns,
 {
 	return false;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

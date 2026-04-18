@@ -38,7 +38,6 @@
 #include "tls.h"
 #include "vector.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -46,7 +45,6 @@
 struct as_index_s;
 struct as_namespace_s;
 struct as_transaction_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -169,7 +167,6 @@ typedef struct as_xdr_submit_info_s {
 	bool xdr_nsup_tombstone;
 } as_xdr_submit_info;
 
-
 //==========================================================
 // Public API.
 //
@@ -181,10 +178,13 @@ void as_xdr_start(void);
 // Manager.
 as_xdr_dc_cfg* as_xdr_startup_create_dc(const char* name);
 as_xdr_dc_ns_cfg* as_xdr_startup_create_dc_ns_cfg(const char* ns_name);
-void as_xdr_startup_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port, char* tls_name);
+void as_xdr_startup_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port,
+		char* tls_name);
 void as_xdr_link_tls(void);
-void as_xdr_get_submit_info(const struct as_index_s* r, uint64_t prev_lut, as_xdr_submit_info* info);
-void as_xdr_submit(const struct as_namespace_s* ns, const as_xdr_submit_info* info);
+void as_xdr_get_submit_info(const struct as_index_s* r, uint64_t prev_lut,
+		as_xdr_submit_info* info);
+void as_xdr_submit(const struct as_namespace_s* ns,
+		const as_xdr_submit_info* info);
 void as_xdr_ticker(uint64_t delta_time);
 void as_xdr_cleanup_tl_stats(void);
 

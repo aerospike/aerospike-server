@@ -38,7 +38,6 @@
 #include "cf_mutex.h"
 #include "log.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -50,7 +49,6 @@ typedef struct cf_shash_ele_s {
 	uint8_t data[];
 } cf_shash_ele;
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -61,11 +59,11 @@ static inline uint32_t cf_shash_calculate_hash(cf_shash* h, const void* key);
 static inline cf_mutex* cf_shash_lock(cf_shash* h, uint32_t i);
 static inline void cf_shash_unlock(cf_mutex* l);
 static inline cf_shash_ele* cf_shash_get_bucket(cf_shash* h, uint32_t i);
-static inline void cf_shash_fill_element(cf_shash_ele* e, cf_shash* h, const void* key, const void* value);
+static inline void cf_shash_fill_element(cf_shash_ele* e, cf_shash* h,
+		const void* key, const void* value);
 static inline void cf_shash_size_incr(cf_shash* h);
 static inline void cf_shash_size_decr(cf_shash* h);
 static int cf_shash_delete_or_pop(cf_shash* h, const void* key, void* value);
-
 
 //==========================================================
 // Inlines & macros.
@@ -73,7 +71,6 @@ static int cf_shash_delete_or_pop(cf_shash* h, const void* key, void* value);
 
 #define ELE_KEY(_h, _e) ((void*)_e->data)
 #define ELE_VALUE(_h, _e) ((void*)(_e->data + _h->key_size))
-
 
 //==========================================================
 // Public API - useful hash functions.
@@ -101,7 +98,6 @@ cf_shash_fn_zstr(const void* key)
 {
 	return cf_wyhash32((const uint8_t*)key, strlen(key));
 }
-
 
 //==========================================================
 // Public API.
@@ -469,7 +465,6 @@ cf_shash_reduce(cf_shash* h, cf_shash_reduce_fn reduce_fn, void* udata)
 
 	return CF_SHASH_OK;
 }
-
 
 //==========================================================
 // Local helpers.

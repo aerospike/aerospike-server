@@ -31,13 +31,11 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_namespace_s;
-
 
 //==========================================================
 // Public API.
@@ -48,6 +46,7 @@ void as_nsup_start(void);
 
 bool as_nsup_handle_clock_skew(struct as_namespace_s* ns, uint64_t skew_ms);
 
-void as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str, cf_dyn_buf* db);
+void as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
+		cf_dyn_buf* db);
 
 bool as_cold_start_evict_if_needed(struct as_namespace_s* ns);

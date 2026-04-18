@@ -29,9 +29,8 @@
 struct as_namespace_s;
 struct as_transaction_s;
 
-
 //==========================================================
 // Public API.
 //
 
-int as_query(struct as_transaction_s *tr, struct as_namespace_s *ns);
+int as_query(struct as_transaction_s* tr, struct as_namespace_s* ns);

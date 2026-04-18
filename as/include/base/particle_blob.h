@@ -23,7 +23,9 @@
 #pragma once
 
 #include <stdint.h>
+
 #include "aerospike/as_val.h"
+
 #include "base/datamodel.h"
 
 // The BLOB particle interface function declarations are in this header file
@@ -34,12 +36,17 @@ void blob_destruct(as_particle* p);
 uint32_t blob_size(const as_particle* p);
 
 // Handle "wire" format.
-int32_t blob_concat_size_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
-int blob_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
-int blob_prepend_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
-int blob_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int32_t blob_concat_size_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int blob_append_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
+int blob_prepend_from_wire(as_particle_type wire_type,
+		const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int blob_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
 int32_t blob_size_from_wire(const uint8_t* wire_value, uint32_t value_size);
-int blob_from_wire(as_particle_type wire_type, const uint8_t* wire_value, uint32_t value_size, as_particle** pp);
+int blob_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
 uint32_t blob_wire_size(const as_particle* p);
 uint32_t blob_to_wire(const as_particle* p, uint8_t* wire);
 
@@ -52,10 +59,12 @@ uint32_t blob_asval_to_wire(const as_val* val, uint8_t* wire);
 
 // Handle msgpack translation.
 uint32_t blob_size_from_msgpack(const uint8_t* packed, uint32_t packed_size);
-void blob_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp);
+void blob_from_msgpack(const uint8_t* packed, uint32_t packed_size,
+		as_particle** pp);
 
 // Handle on-device "flat" format.
 const uint8_t* blob_skip_flat(const uint8_t* flat, const uint8_t* end);
-const uint8_t* blob_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp);
+const uint8_t* blob_from_flat(const uint8_t* flat, const uint8_t* end,
+		as_particle** pp);
 uint32_t blob_flat_size(const as_particle* p);
 uint32_t blob_to_flat(const as_particle* p, uint8_t* flat);

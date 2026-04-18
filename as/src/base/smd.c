@@ -27,22 +27,24 @@
 #include "base/smd.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "jansson.h"
-
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 
-#include "bits.h"
 #include "cf_mutex.h"
 #include "cf_thread.h"
 #include "dynbuf.h"
+#include "jansson.h"
 #include "log.h"
 #include "msg.h"
 #include "node.h"
@@ -52,10 +54,8 @@
 #include "base/cfg.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
-#include "fabric/hb.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -93,6 +93,7 @@ typedef enum {
 	NUM_SMD_FIELDS
 } smd_msg_fields;
 
+// clang-format off
 static const msg_template smd_mt[] = {
 		{ SMD_MSG_TID, M_FT_UINT64 },
 		{ SMD_MSG_VERSION, M_FT_UINT32 },
@@ -123,6 +124,7 @@ static const msg_template smd_mt[] = {
 };
 
 COMPILER_ASSERT(sizeof(smd_mt) / sizeof(msg_template) == NUM_SMD_FIELDS);
+// clang-format on
 
 #define SMD_MSG_SCRATCH_SIZE 64 // TODO - rethink... could be smaller?
 
@@ -149,24 +151,22 @@ typedef enum {
 	NUM_SMD_OP_TYPES
 } smd_op_type;
 
-static const char* const op_type_str[] = {
-		[SMD_OP_SET_TO_PR] = "set-to-pr",
-		[SMD_OP_REPORT_ALL_VERS_TO_PR] = "report-all-vers-to-pr",
-		[SMD_OP_REPORT_VER_TO_PR] = "report-ver-to-pr",
-		[SMD_OP_FULL_TO_PR] = "full-to-pr",
-		[SMD_OP_ACK_TO_PR] = "ack-to-pr",
+static const char* const op_type_str[] = { [SMD_OP_SET_TO_PR] = "set-to-pr",
+	[SMD_OP_REPORT_ALL_VERS_TO_PR] = "report-all-vers-to-pr",
+	[SMD_OP_REPORT_VER_TO_PR] = "report-ver-to-pr",
+	[SMD_OP_FULL_TO_PR] = "full-to-pr",
+	[SMD_OP_ACK_TO_PR] = "ack-to-pr",
 
-		[SMD_OP_SET_FROM_PR] = "set-from-pr",
-		[SMD_OP_REQ_VER_FROM_PR] = "req-ver-from-pr",
-		[SMD_OP_FULL_FROM_PR] = "full-from-pr",
-		[SMD_OP_REQ_FULL_FROM_PR] = "req-full-from-pr",
+	[SMD_OP_SET_FROM_PR] = "set-from-pr",
+	[SMD_OP_REQ_VER_FROM_PR] = "req-ver-from-pr",
+	[SMD_OP_FULL_FROM_PR] = "full-from-pr",
+	[SMD_OP_REQ_FULL_FROM_PR] = "req-full-from-pr",
 
-		[SMD_OP_SET_ACK] = "set-ack",
-		[SMD_OP_SET_NACK] = "set-nack",
+	[SMD_OP_SET_ACK] = "set-ack",
+	[SMD_OP_SET_NACK] = "set-nack",
 
-		[SMD_OP_CLUSTER_CHANGED] = "cluster-changed",
-		[SMD_OP_START_SET] = "start-set"
-};
+	[SMD_OP_CLUSTER_CHANGED] = "cluster-changed",
+	[SMD_OP_START_SET] = "start-set" };
 
 COMPILER_ASSERT(sizeof(op_type_str) / sizeof(const char*) == NUM_SMD_OP_TYPES);
 
@@ -181,14 +181,12 @@ typedef enum {
 	NUM_SMD_STATES
 } smd_state;
 
-static const char* const state_str[] = {
-		[STATE_PR] = "pr",
-		[STATE_NPR] = "npr",
-		[STATE_MERGING] = "merging",
-		[STATE_DIRTY] = "dirty",
-		[STATE_CLEAN] = "clean",
-		[STATE_SET] = "set"
-};
+static const char* const state_str[] = { [STATE_PR] = "pr",
+	[STATE_NPR] = "npr",
+	[STATE_MERGING] = "merging",
+	[STATE_DIRTY] = "dirty",
+	[STATE_CLEAN] = "clean",
+	[STATE_SET] = "set" };
 
 COMPILER_ASSERT(sizeof(state_str) / sizeof(const char*) == NUM_SMD_STATES);
 
@@ -318,7 +316,6 @@ static const char smd_empty_value[] = "";
 
 #define MAX_PATH_LEN 1024
 
-
 //==========================================================
 // Globals.
 //
@@ -326,19 +323,15 @@ static const char smd_empty_value[] = "";
 static smd g_smd = { .lock = CF_MUTEX_INIT };
 
 // In alpha order.
-static smd_module g_module_table[] = {
-		[AS_SMD_MODULE_EVICT] = { .name = "evict" },
-		[AS_SMD_MODULE_ROSTER] = { .name = "roster" },
-		[AS_SMD_MODULE_SECURITY] = { .name = "security" },
-		[AS_SMD_MODULE_SINDEX] = { .name = "sindex" },
-		[AS_SMD_MODULE_TRUNCATE] = { .name = "truncate" },
-		[AS_SMD_MODULE_UDF] = { .name = "UDF" },
-		[AS_SMD_MODULE_XDR] = { .name = "XDR", .save_throttle_sec = 30 }
-};
+static smd_module g_module_table[] = { [AS_SMD_MODULE_EVICT] = { .name = "evict" },
+	[AS_SMD_MODULE_ROSTER] = { .name = "roster" },
+	[AS_SMD_MODULE_SECURITY] = { .name = "security" },
+	[AS_SMD_MODULE_SINDEX] = { .name = "sindex" },
+	[AS_SMD_MODULE_TRUNCATE] = { .name = "truncate" },
+	[AS_SMD_MODULE_UDF] = { .name = "UDF" },
+	[AS_SMD_MODULE_XDR] = { .name = "XDR", .save_throttle_sec = 30 } };
 
-COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) ==
-		AS_SMD_NUM_MODULES);
-
+COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) == AS_SMD_NUM_MODULES);
 
 //==========================================================
 // Forward declarations.
@@ -346,7 +339,8 @@ COMPILER_ASSERT(sizeof(g_module_table) / sizeof(smd_module) ==
 
 // Callbacks.
 static int smd_msg_recv_cb(cf_node node_id, msg* m, void* udata);
-static void smd_cluster_changed_cb(const as_exchange_cluster_changed_event* ex_event, void* udata);
+static void smd_cluster_changed_cb(const as_exchange_cluster_changed_event* ex_event,
+		void* udata);
 static void smd_set_blocking_cb(bool result, void* udata);
 
 // Parse fabric msg.
@@ -406,10 +400,12 @@ static void module_append_item(smd_module* module, as_smd_item* item);
 static void module_fill_msg(smd_module* module, msg* m);
 static void module_merge_list(smd_module* module, cf_vector* list);
 static void module_set_npr(smd_module* module, as_smd_item* item);
-static const as_smd_item* module_set_pr(smd_module* module, char* key, char* value);
+static const as_smd_item* module_set_pr(smd_module* module, char* key,
+		char* value);
 static void module_restore_from_disk(smd_module* module);
 static void module_commit_to_disk(smd_module* module);
-static void module_set_default_items(smd_module* module, const cf_vector* default_items);
+static void module_set_default_items(smd_module* module,
+		const cf_vector* default_items);
 
 // Hash.
 static void smd_hash_init(smd_hash* h);
@@ -419,8 +415,10 @@ static bool smd_hash_get(const smd_hash* h, const char* key, uint32_t* value);
 static uint32_t smd_hash_get_row_i(const char* key);
 
 // as_smd_item.
-static as_smd_item* smd_item_create_copy(const char* key, const char* value, uint64_t ts, uint32_t gen);
-static as_smd_item* smd_item_create_handoff(char* key, char* value, uint64_t ts, uint32_t gen);
+static as_smd_item* smd_item_create_copy(const char* key, const char* value,
+		uint64_t ts, uint32_t gen);
+static as_smd_item* smd_item_create_handoff(char* key, char* value, uint64_t ts,
+		uint32_t gen);
 static bool smd_item_is_less(const as_smd_item* item0, const as_smd_item* item1);
 static void smd_item_destroy(as_smd_item* item);
 
@@ -428,16 +426,16 @@ static char* smd_item_value_ndup(uint8_t* value, uint32_t sz);
 static char* smd_item_value_dup(const char* value);
 static void smd_item_value_destroy(char* value);
 
-
 //==========================================================
 // Inlines & macros.
 //
 
-#define JSON_ENFORCE(x) { \
-	if ((x) != 0) { \
-		cf_crash(AS_SMD, "json alloc error"); \
-	} \
-}
+#define JSON_ENFORCE(x)                                                        \
+	{                                                                          \
+		if ((x) != 0) {                                                        \
+			cf_crash(AS_SMD, "json alloc error");                              \
+		}                                                                      \
+	}
 
 static inline smd_module*
 smd_get_module(as_smd_id id)
@@ -473,8 +471,8 @@ smd_set_entry_destroy(smd_set_entry* entry)
 	}
 }
 
-#define item_vec_define(_x, _cnt) \
-		cf_vector_define(_x, sizeof(as_smd_item*), _cnt, 0);
+#define item_vec_define(_x, _cnt)                                              \
+	cf_vector_define(_x, sizeof(as_smd_item*), _cnt, 0);
 
 static inline void
 item_vec_init(cf_vector* vec, uint32_t count)
@@ -583,16 +581,15 @@ smd_module_as_string(const smd_module* module)
 
 #define MODULE_AS_STRING(_module) (smd_module_as_string(_module).s)
 
-#define OP_TYPE_AS_STRING(_type) \
-	(((0 <= (_type) && (_type) < NUM_SMD_OP_TYPES)) ? \
-			op_type_str[_type] : "INVALID_OP_TYPE")
+#define OP_TYPE_AS_STRING(_type)                                               \
+	(((0 <= (_type) && (_type) < NUM_SMD_OP_TYPES)) ? op_type_str[_type]       \
+													: "INVALID_OP_TYPE")
 
-#define OP_TYPE_DETAIL(_type, _format, ...) \
-	cf_detail(AS_SMD, "{%s} %s - " _format, MODULE_AS_STRING(module), \
+#define OP_TYPE_DETAIL(_type, _format, ...)                                    \
+	cf_detail(AS_SMD, "{%s} %s - " _format, MODULE_AS_STRING(module),          \
 			OP_TYPE_AS_STRING(_type), ##__VA_ARGS__)
 
 #define OP_DETAIL(_format, ...) OP_TYPE_DETAIL(op->type, _format, ##__VA_ARGS__)
-
 
 //==========================================================
 // Public API.
@@ -622,12 +619,11 @@ void
 as_smd_start(void)
 {
 	if (! cf_queue_init(&g_smd.pending_set_q, sizeof(smd_op*), CF_QUEUE_ALLOCSZ,
-			true)) {
+				true)) {
 		cf_crash(AS_SMD, "failed to create set queue");
 	}
 
-	if (! cf_queue_init(&g_smd.event_q, sizeof(smd_op*), CF_QUEUE_ALLOCSZ,
-			true)) {
+	if (! cf_queue_init(&g_smd.event_q, sizeof(smd_op*), CF_QUEUE_ALLOCSZ, true)) {
 		cf_crash(AS_SMD, "failed to create event queue");
 	}
 
@@ -750,7 +746,6 @@ as_smd_get_info(cf_dyn_buf* db)
 	smd_unlock();
 }
 
-
 //==========================================================
 // Local helpers - callbacks.
 //
@@ -802,7 +797,6 @@ smd_set_blocking_cb(bool result, void* udata)
 	cf_queue_push((cf_queue*)udata, &result);
 }
 
-
 //==========================================================
 // Local helpers - parse fabric msg.
 //
@@ -836,7 +830,8 @@ smd_msg_parse(msg* m, smd_op* op)
 		uint64_t versions[count];
 
 		if (! msg_msgpack_list_get_uint64_array(m, SMD_MSG_VERSION_LIST,
-				versions, &count) || count == 0 || count % 3 != 0) {
+					versions, &count) ||
+				count == 0 || count % 3 != 0) {
 			cf_warning(AS_SMD, "msg missing or invalid version list");
 			return false;
 		}
@@ -872,8 +867,7 @@ smd_msg_parse(msg* m, smd_op* op)
 		}
 		return smd_msg_parse_items(m, op);
 	case SMD_OP_REPORT_VER_TO_PR:
-		if (msg_get_uint64(m, SMD_MSG_COMMITTED_CL_KEY,
-				&op->committed_key) != 0) {
+		if (msg_get_uint64(m, SMD_MSG_COMMITTED_CL_KEY, &op->committed_key) != 0) {
 			cf_warning(AS_SMD, "msg missing committed cluster key");
 			return false;
 		}
@@ -883,8 +877,7 @@ smd_msg_parse(msg* m, smd_op* op)
 		}
 		return true;
 	case SMD_OP_FULL_TO_PR:
-		if (msg_get_uint64(m, SMD_MSG_COMMITTED_CL_KEY,
-				&op->committed_key) != 0) {
+		if (msg_get_uint64(m, SMD_MSG_COMMITTED_CL_KEY, &op->committed_key) != 0) {
 			cf_warning(AS_SMD, "msg missing committed cluster key");
 			return false;
 		}
@@ -910,8 +903,7 @@ smd_msg_parse(msg* m, smd_op* op)
 	case SMD_OP_REQ_VER_FROM_PR:
 		return true;
 	case SMD_OP_FULL_FROM_PR:
-		if (msg_get_uint64(m, SMD_MSG_COMMITTED_CL_KEY,
-				&op->committed_key) != 0) {
+		if (msg_get_uint64(m, SMD_MSG_COMMITTED_CL_KEY, &op->committed_key) != 0) {
 			cf_warning(AS_SMD, "msg missing committed cluster key");
 			return false;
 		}
@@ -990,20 +982,20 @@ smd_msg_parse_items(msg* m, smd_op* op)
 	cf_vector_define(value_vec, sizeof(msg_buf_ele), count, 0);
 	uint32_t gen_list[count];
 
-	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_KEY_LIST,
-			&key_vec)) {
+	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_KEY_LIST, &key_vec)) {
 		cf_warning(AS_SMD, "msg missing key list");
 		return false;
 	}
 
 	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_VALUE_LIST,
-			&value_vec)) {
+				&value_vec)) {
 		cf_warning(AS_SMD, "msg missing value list");
 		return false;
 	}
 
 	if (! msg_msgpack_list_get_uint32_array(m, SMD_MSG_GEN_LIST, gen_list,
-			&check) && check != count) {
+				&check) &&
+			check != count) {
 		cf_warning(AS_SMD, "msg missing gen list");
 		return false;
 	}
@@ -1017,14 +1009,14 @@ smd_msg_parse_items(msg* m, smd_op* op)
 
 		msg_get_uint64_array(m, SMD_MSG_TS_ARRAY, i, &ts);
 
-		item_vec_append(&op->items, smd_item_create_handoff(
-				cf_strndup((char*)key_p->ptr, key_p->sz),
-				smd_item_value_ndup(val_p->ptr, val_p->sz), ts, gen_list[i]));
+		item_vec_append(&op->items,
+				smd_item_create_handoff(cf_strndup((char*)key_p->ptr, key_p->sz),
+						smd_item_value_ndup(val_p->ptr, val_p->sz), ts,
+						gen_list[i]));
 	}
 
 	return true;
 }
-
 
 //==========================================================
 // Local helpers - event loop.
@@ -1054,8 +1046,7 @@ run_smd(void* udata)
 			for (uint32_t i = 0; i < n_pending; i++) {
 				smd_op* pending_op;
 
-				cf_queue_pop(&g_smd.pending_set_q, &pending_op,
-						CF_QUEUE_NOWAIT);
+				cf_queue_pop(&g_smd.pending_set_q, &pending_op, CF_QUEUE_NOWAIT);
 
 				if (pending_op->module->state == STATE_PR) {
 					smd_lock();
@@ -1073,8 +1064,8 @@ run_smd(void* udata)
 		smd_op* op;
 
 		if (cf_queue_pop(&g_smd.event_q, &op,
-				wait_ms == INT_MAX ? CF_QUEUE_FOREVER : wait_ms) ==
-						CF_QUEUE_OK) {
+					wait_ms == INT_MAX ? CF_QUEUE_FOREVER : wait_ms) ==
+				CF_QUEUE_OK) {
 			smd_lock();
 			smd_event(op);
 			smd_unlock();
@@ -1114,10 +1105,7 @@ pr_try_retransmit(void)
 static int
 set_orig_try_retransmit_or_expire(void)
 {
-	set_orig_reduce_udata udata = {
-			.wait_ms = INT_MAX,
-			.now_ms = cf_getms()
-	};
+	set_orig_reduce_udata udata = { .wait_ms = INT_MAX, .now_ms = cf_getms() };
 
 	cf_shash_reduce(g_smd.set_h, set_orig_reduce_cb, &udata);
 
@@ -1165,8 +1153,7 @@ smd_event(smd_op* op)
 	smd_module* module = op->module;
 
 	if (op->type == SMD_OP_CLUSTER_CHANGED) {
-		OP_DETAIL("principal %lx -> %lx", g_smd.succession[0],
-				op->succession[0]);
+		OP_DETAIL("principal %lx -> %lx", g_smd.succession[0], op->succession[0]);
 		op_cluster_changed(op);
 		return;
 	}
@@ -1238,7 +1225,6 @@ smd_event(smd_op* op)
 	}
 }
 
-
 //==========================================================
 // Local helpers - events.
 //
@@ -1246,8 +1232,8 @@ smd_event(smd_op* op)
 static void
 op_cluster_changed(smd_op* op)
 {
-	cf_assert(op->node_count <= AS_CLUSTER_SZ, AS_SMD, "cluster count invalid %d > %d",
-			g_smd.node_count, AS_CLUSTER_SZ);
+	cf_assert(op->node_count <= AS_CLUSTER_SZ, AS_SMD,
+			"cluster count invalid %d > %d", g_smd.node_count, AS_CLUSTER_SZ);
 
 	bool was_pr = smd_is_pr();
 
@@ -1306,7 +1292,7 @@ op_cluster_changed(smd_op* op)
 		smd_op* pending_op;
 
 		while (cf_queue_pop(&g_smd.pending_set_q, &pending_op,
-				CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
+					   CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
 			smd_op_destroy(pending_op);
 		}
 	}
@@ -1386,8 +1372,7 @@ op_set_to_pr(smd_op* op)
 	}
 
 	as_smd_item* op_item = item_vec_get(&op->items, 0);
-	const as_smd_item* item =
-			module_set_pr(module, op_item->key, op_item->value);
+	const as_smd_item* item = module_set_pr(module, op_item->key, op_item->value);
 
 	op_item->key = NULL;
 	op_item->value = NULL;
@@ -1432,13 +1417,11 @@ op_report_all_vers_to_pr(smd_op* op)
 			continue;
 		}
 
-		smd_op module_op = {
-				.type = op->type,
-				.node_index = op->node_index,
-				.module = module,
-				.committed_key = cv_key,
-				.tid = cv_tid
-		};
+		smd_op module_op = { .type = op->type,
+			.node_index = op->node_index,
+			.module = module,
+			.committed_key = cv_key,
+			.tid = cv_tid };
 
 		op_report_ver_to_pr(&module_op);
 	}
@@ -1638,8 +1621,7 @@ op_set_from_pr(smd_op* op)
 	}
 
 	if (cf_vector_size(&op->items) != 1) {
-		cf_warning(AS_SMD, "set items count %d != 1",
-				cf_vector_size(&op->items));
+		cf_warning(AS_SMD, "set items count %d != 1", cf_vector_size(&op->items));
 		return;
 	}
 
@@ -1774,7 +1756,6 @@ op_finish_set(smd_op* op, bool success)
 	smd_set_entry_destroy(entry);
 }
 
-
 //==========================================================
 // Local helpers - pending set queue.
 //
@@ -1802,7 +1783,6 @@ pending_set_q_reduce_cb(void* ptr, void* udata)
 
 	return 0;
 }
-
 
 //==========================================================
 // Local helpers - fabric msg send/reply.
@@ -1917,8 +1897,8 @@ send_set_reply(smd_module* module, bool success)
 {
 	if (module->set_src == g_config.self_node) {
 		smd_op op = {
-				.cl_key = module->set_key,
-				.tid = module->set_tid,
+			.cl_key = module->set_key,
+			.tid = module->set_tid,
 		};
 
 		op_finish_set(&op, success);
@@ -1945,13 +1925,11 @@ send_set_from_orig(uint32_t set_tid, smd_set_entry* entry)
 	const as_smd_item* item = entry->item;
 
 	if (smd_is_pr()) {
-		smd_op op = {
-				.type = SMD_OP_SET_TO_PR,
-				.src = g_config.self_node,
-				.module = entry->module,
-				.cl_key = entry->cl_key,
-				.tid = set_tid
-		};
+		smd_op op = { .type = SMD_OP_SET_TO_PR,
+			.src = g_config.self_node,
+			.module = entry->module,
+			.cl_key = entry->cl_key,
+			.tid = set_tid };
 
 		item_vec_init(&op.items, 1);
 		item_vec_set(&op.items, 0,
@@ -1988,7 +1966,6 @@ send_set_from_orig(uint32_t set_tid, smd_set_entry* entry)
 	entry->retry_next_ms = cf_getms() + SET_RETRY_MS;
 }
 
-
 //==========================================================
 // Local helpers - fabric msg retransmit.
 //
@@ -2009,7 +1986,7 @@ pr_send_msgs(smd_module* module)
 		msg_incr_ref(module->retry_msgs[i]);
 
 		if (as_fabric_send(g_smd.succession[i], module->retry_msgs[i],
-				AS_FABRIC_CHANNEL_META) != AS_FABRIC_SUCCESS) {
+					AS_FABRIC_CHANNEL_META) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(module->retry_msgs[i]);
 		}
 	}
@@ -2073,7 +2050,6 @@ pr_clear_retry_msgs(smd_module* module)
 	module->retry_next_ms = 0;
 }
 
-
 //==========================================================
 // Local helpers - call module accept_cb.
 //
@@ -2113,7 +2089,6 @@ module_accept_startup(smd_module* module)
 	item_vec_disown_items(&vec);
 	item_vec_destroy(&vec);
 }
-
 
 //==========================================================
 // Local helpers - module.
@@ -2159,16 +2134,14 @@ module_fill_msg(smd_module* module, msg* m)
 	for (uint32_t i = 0; i < count; i++) {
 		const as_smd_item* item = item_vec_get_const(&module->db, i);
 
-		msg_buf_ele key_e = {
-				.sz = (uint32_t)strlen(item->key),
-				.ptr = (uint8_t*)item->key
-		};
+		msg_buf_ele key_e = { .sz = (uint32_t)strlen(item->key),
+			.ptr = (uint8_t*)item->key };
 
 		cf_vector_append(&key_vec, &key_e);
 
 		msg_buf_ele val_e = {
-				.sz = item->value != NULL ? (uint32_t)strlen(item->value) : 0,
-				.ptr = (uint8_t*)item->value
+			.sz = item->value != NULL ? (uint32_t)strlen(item->value) : 0,
+			.ptr = (uint8_t*)item->value
 		};
 
 		cf_vector_append(&val_vec, &val_e);
@@ -2195,8 +2168,8 @@ module_merge_list(smd_module* module, cf_vector* list)
 		if (smd_hash_get(merge_hash, new_item->key, &ix)) {
 			const as_smd_item* item = item_vec_get_const(&module->merge, ix);
 			bool has_tombstone = new_item->value == NULL || item->value == NULL;
-			as_smd_conflict_fn cb = has_tombstone ?
-					smd_item_is_less : module->conflict_cb;
+			as_smd_conflict_fn cb = has_tombstone ? smd_item_is_less
+												  : module->conflict_cb;
 
 			if (! cb(item, new_item)) {
 				continue;
@@ -2210,8 +2183,8 @@ module_merge_list(smd_module* module, cf_vector* list)
 		if (smd_hash_get(orig_hash, new_item->key, &ix)) {
 			const as_smd_item* item = item_vec_get_const(&module->db, ix);
 			bool has_tombstone = new_item->value == NULL || item->value == NULL;
-			as_smd_conflict_fn cb = has_tombstone ?
-					smd_item_is_less : module->conflict_cb;
+			as_smd_conflict_fn cb = has_tombstone ? smd_item_is_less
+												  : module->conflict_cb;
 
 			if (! cb(item, new_item)) {
 				continue;
@@ -2243,8 +2216,7 @@ module_set_npr(smd_module* module, as_smd_item* item)
 
 	const as_smd_item* old = item_vec_get_const(&module->db, ix);
 
-	if (item->generation != old->generation ||
-			item->timestamp != old->timestamp) {
+	if (item->generation != old->generation || item->timestamp != old->timestamp) {
 		OP_TYPE_DETAIL(SMD_OP_SET_FROM_PR, "key %s", item->key);
 
 		item_vec_replace(&module->db, ix, item);
@@ -2286,8 +2258,8 @@ module_set_pr(smd_module* module, char* key, char* value)
 			as_smd_item check_item = { .key = key, .value = value };
 
 			if (! module->conflict_cb(item, &check_item)) {
-				OP_TYPE_DETAIL(SMD_OP_SET_TO_PR, "key %s - module rejected item",
-						key);
+				OP_TYPE_DETAIL(SMD_OP_SET_TO_PR,
+						"key %s - module rejected item", key);
 				cf_free(key);
 				smd_item_value_destroy(value);
 				return NULL;
@@ -2303,8 +2275,8 @@ module_set_pr(smd_module* module, char* key, char* value)
 		}
 	}
 	else if (item->value == value) { // i.e. both are NULL
-		OP_TYPE_DETAIL(SMD_OP_SET_TO_PR, "key %s - rejected unchanged tombstone",
-				item->key);
+		OP_TYPE_DETAIL(SMD_OP_SET_TO_PR,
+				"key %s - rejected unchanged tombstone", item->key);
 		cf_free(key);
 		smd_item_value_destroy(value);
 		return NULL;
@@ -2353,7 +2325,8 @@ module_restore_from_disk(smd_module* module)
 	json_t* j_file = json_load_file(smd_path, load_flags, &json_error);
 
 	if (j_file == NULL) {
-		cf_warning(AS_SMD, "invalid file '%s' - module '%s' with JSON error %s source %s line %d column %d position %d",
+		cf_warning(AS_SMD,
+				"invalid file '%s' - module '%s' with JSON error %s source %s line %d column %d position %d",
 				smd_path, module->name, json_error.text, json_error.source,
 				json_error.line, json_error.column, json_error.position);
 		item_vec_init(&module->db, 0);
@@ -2393,30 +2366,29 @@ module_restore_from_disk(smd_module* module)
 		module->cv_tid = 1; // key 0 tid 1 means old SMD db with entries > 0
 	}
 
-	cf_detail(AS_SMD, "{%s} module_restore_from_disk",
-			MODULE_AS_STRING(module));
+	cf_detail(AS_SMD, "{%s} module_restore_from_disk", MODULE_AS_STRING(module));
 
 	item_vec_init(&module->db, (uint32_t)num_items - start);
 
 	for (uint32_t i = start; i < num_items; i++) {
 		j_item = json_array_get(j_file, i);
-		cf_assert(json_is_object(j_item), AS_SMD, "invalid file '%s'",
-				smd_path);
+		cf_assert(json_is_object(j_item), AS_SMD, "invalid file '%s'", smd_path);
 
 		const char* key = json_string_value(json_object_get(j_item, "key"));
 		cf_assert(key != NULL, AS_SMD, "invalid file '%s'", smd_path);
 
 		json_t* j_value = json_object_get(j_item, "value");
-		cf_assert(j_value != NULL && (json_is_string(j_value) ||
-				json_is_null(j_value)), AS_SMD, "invalid file '%s'", smd_path);
+		cf_assert(j_value != NULL &&
+						(json_is_string(j_value) || json_is_null(j_value)),
+				AS_SMD, "invalid file '%s'", smd_path);
 
 		json_t* j_gen = json_object_get(j_item, "generation");
-		cf_assert(j_gen != NULL && json_is_integer(j_gen), AS_SMD, "invalid file '%s'",
-				smd_path);
+		cf_assert(j_gen != NULL && json_is_integer(j_gen), AS_SMD,
+				"invalid file '%s'", smd_path);
 
 		json_t* j_ts = json_object_get(j_item, "timestamp");
-		cf_assert(j_ts != NULL && json_is_integer(j_ts), AS_SMD, "invalid file '%s'",
-				smd_path);
+		cf_assert(j_ts != NULL && json_is_integer(j_ts), AS_SMD,
+				"invalid file '%s'", smd_path);
 
 		item_vec_set(&module->db, i - start,
 				smd_item_create_copy(key, json_string_value(j_value),
@@ -2463,8 +2435,7 @@ module_commit_to_disk(smd_module* module)
 
 		cf_assert(j_item, AS_SMD, "failed to create json object");
 
-		JSON_ENFORCE(json_object_set_new(j_item, "key",
-				json_string(item->key)));
+		JSON_ENFORCE(json_object_set_new(j_item, "key", json_string(item->key)));
 
 		if (item->value == NULL) {
 			JSON_ENFORCE(json_object_set_new(j_item, "value", json_null()));
@@ -2521,7 +2492,6 @@ module_set_default_items(smd_module* module, const cf_vector* default_items)
 		}
 	}
 }
-
 
 //==========================================================
 // Local helpers - hash.
@@ -2603,14 +2573,12 @@ smd_hash_get_row_i(const char* key)
 	return cf_wyhash32((const uint8_t*)key, strlen(key)) % N_HASH_ROWS;
 }
 
-
 //==========================================================
 // Local helpers - as_smd_item.
 //
 
 static as_smd_item*
-smd_item_create_copy(const char* key, const char* value, uint64_t ts,
-		uint32_t gen)
+smd_item_create_copy(const char* key, const char* value, uint64_t ts, uint32_t gen)
 {
 	return smd_item_create_handoff(cf_strdup(key), smd_item_value_dup(value),
 			ts, gen);
@@ -2654,8 +2622,7 @@ smd_item_value_ndup(uint8_t* value, uint32_t sz)
 		return NULL;
 	}
 
-	return sz == 0 ?
-			(char*)smd_empty_value : cf_strndup((const char*)value, sz);
+	return sz == 0 ? (char*)smd_empty_value : cf_strndup((const char*)value, sz);
 }
 
 static char*

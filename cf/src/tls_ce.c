@@ -24,12 +24,12 @@
 // Includes.
 //
 
+#include "tls.h"
+
 #include <openssl/ssl.h>
 
 #include "log.h"
 #include "socket.h"
-#include "tls.h"
-
 
 //==========================================================
 // Public API
@@ -166,7 +166,7 @@ tls_socket_connect_block(cf_socket* sock, uint32_t timeout)
 
 int
 tls_socket_recv(cf_socket* sock, void* buf, size_t sz, int32_t flags,
-				uint64_t deadline_msec)
+		uint64_t deadline_msec)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return 1;
@@ -174,7 +174,7 @@ tls_socket_recv(cf_socket* sock, void* buf, size_t sz, int32_t flags,
 
 int
 tls_socket_send(cf_socket* sock, void const* buf, size_t sz, int32_t flags,
-				uint64_t deadline_msec)
+		uint64_t deadline_msec)
 {
 	cf_crash(CF_TLS, "unexpected TLS state");
 	return 1;

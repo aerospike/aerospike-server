@@ -22,88 +22,70 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <string.h>
-
-#include <stdexcept>
-
 #include <s2/s2region_coverer.h>
+#include <stdexcept>
+#include <string.h>
 
 extern "C" {
 #include "log.h"
+
 #include "base/datamodel.h"
 } // end extern "C"
 
-#include "geospatial/geospatial.h"
 #include "geospatial/geojson.h"
+#include "geospatial/geospatial.h"
 
 using namespace std;
 
-class PointRegionHandler: public GeoJSON::GeometryHandler
+class PointRegionHandler : public GeoJSON::GeometryHandler
 {
 public:
-	PointRegionHandler(const as_namespace * ns)
-		: m_earth_radius_meters(ns ?
-			double(ns->geo2dsphere_within_earth_radius_meters) :
-			6371000)
-		, m_cellid(0)
-		, m_regionp(NULL)
+	PointRegionHandler(const as_namespace* ns)
+		: m_earth_radius_meters(ns
+						  ? double(ns->geo2dsphere_within_earth_radius_meters)
+						  : 6371000),
+		  m_cellid(0), m_regionp(NULL)
 	{
 	}
 
-	virtual void handle_point(S2CellId const & cellid) {
-		m_cellid = cellid;
-	}
+	virtual void handle_point(S2CellId const& cellid) { m_cellid = cellid; }
 
-	virtual void handle_region(S2Region * regionp) {
-		m_regionp = regionp;
-	}
+	virtual void handle_region(S2Region* regionp) { m_regionp = regionp; }
 
-	virtual double earth_radius_meters() {
-		return m_earth_radius_meters;
-	}
+	virtual double earth_radius_meters() { return m_earth_radius_meters; }
 
 	double m_earth_radius_meters;
-	S2CellId	m_cellid;
-	S2Region * m_regionp;
+	S2CellId m_cellid;
+	S2Region* m_regionp;
 };
 
 bool
-geo_parse(const as_namespace * ns,
-		  const char * buf,
-		  size_t bufsz,
-		  uint64_t * cellidp,
-		  geo_region_t * regionp)
+geo_parse(const as_namespace* ns, const char* buf, size_t bufsz,
+		uint64_t* cellidp, geo_region_t* regionp)
 {
-	try
-	{
+	try {
 		PointRegionHandler prhandler(ns);
 		GeoJSON::parse(prhandler, string(buf, bufsz));
 		*cellidp = prhandler.m_cellid.id();
-		*regionp = (geo_region_t) prhandler.m_regionp;
+		*regionp = (geo_region_t)prhandler.m_regionp;
 		return true;
 	}
-	catch (exception const & ex)
-	{
-		cf_warning(AS_GEO, (char *) "failed to parse point: %s", ex.what());
+	catch (exception const& ex) {
+		cf_warning(AS_GEO, (char*)"failed to parse point: %s", ex.what());
 		return false;
 	}
 }
 
 bool
-geo_region_cover(const as_namespace * ns,
-				 geo_region_t region,
-				 uint32_t maxnumcells,
-				 uint64_t * cellctrp,
-				 uint64_t * cellminp,
-				 uint64_t * cellmaxp,
-				 uint32_t * numcellsp)
+geo_region_cover(const as_namespace* ns, geo_region_t region,
+		uint32_t maxnumcells, uint64_t* cellctrp, uint64_t* cellminp,
+		uint64_t* cellmaxp, uint32_t* numcellsp)
 {
-	try
-	{
-		S2Region * regionp = (S2Region *) region;
+	try {
+		S2Region* regionp = (S2Region*)region;
 
 		S2RegionCoverer coverer;
-		S2RegionCoverer::Options * options = coverer.mutable_options();
+		S2RegionCoverer::Options* options = coverer.mutable_options();
 		if (ns) {
 			options->set_min_level(ns->geo2dsphere_within_min_level);
 			options->set_max_level(ns->geo2dsphere_within_max_level);
@@ -128,12 +110,12 @@ geo_region_cover(const as_namespace * ns,
 			return false;
 		}
 
-		for (size_t ii = 0; ii < covering.size(); ++ii)
-		{
-			if (ii == maxnumcells)
-			{
-				cf_warning(AS_GEO, (char *) "region covered with %zu cells, "
-						   "only %u allowed", covering.size(), maxnumcells);
+		for (size_t ii = 0; ii < covering.size(); ++ii) {
+			if (ii == maxnumcells) {
+				cf_warning(AS_GEO,
+						(char*)"region covered with %zu cells, "
+							   "only %u allowed",
+						covering.size(), maxnumcells);
 				return false;
 			}
 
@@ -148,42 +130,35 @@ geo_region_cover(const as_namespace * ns,
 			}
 
 			if (cellctrp) {
-				cf_detail(AS_GEO, (char *) "cell[%zu]: 0x%lx",
-						  ii, cellctrp[ii]);
+				cf_detail(AS_GEO, (char*)"cell[%zu]: 0x%lx", ii, cellctrp[ii]);
 			}
 
 			if (cellminp && cellmaxp) {
-				cf_detail(AS_GEO, (char *) "cell[%zu]: [0x%lx, 0x%lx]",
-						  ii, cellminp[ii], cellmaxp[ii]);
+				cf_detail(AS_GEO, (char*)"cell[%zu]: [0x%lx, 0x%lx]", ii,
+						cellminp[ii], cellmaxp[ii]);
 			}
 		}
 
 		*numcellsp = covering.size();
 		return true;
 	}
-	catch (exception const & ex)
-	{
-		cf_warning(AS_GEO, (char *) "geo_region_cover failed: %s", ex.what());
+	catch (exception const& ex) {
+		cf_warning(AS_GEO, (char*)"geo_region_cover failed: %s", ex.what());
 		return false;
 	}
 }
 
 bool
-geo_point_centers(uint64_t cellidval,
-				  uint32_t maxnumcenters,
-				  uint64_t * center,
-				  uint32_t * numcentersp)
+geo_point_centers(uint64_t cellidval, uint32_t maxnumcenters, uint64_t* center,
+		uint32_t* numcentersp)
 {
-	try
-	{
+	try {
 		S2CellId incellid(cellidval);
 
 		*numcentersp = 0;
 
-		for (S2CellId cellid = incellid;
-			 cellid.level() > 0;
-			 cellid = cellid.parent())
-		{
+		for (S2CellId cellid = incellid; cellid.level() > 0;
+				cellid = cellid.parent()) {
 			// Make sure we don't overwrite the output array.
 			if (*numcentersp == maxnumcenters) {
 				break;
@@ -193,9 +168,8 @@ geo_point_centers(uint64_t cellidval,
 		}
 		return true;
 	}
-	catch (exception const & ex)
-	{
-		cf_warning(AS_GEO, (char *) "geo_point_centers failed: %s", ex.what());
+	catch (exception const& ex) {
+		cf_warning(AS_GEO, (char*)"geo_point_centers failed: %s", ex.what());
 		return false;
 	}
 }
@@ -203,17 +177,14 @@ geo_point_centers(uint64_t cellidval,
 bool
 geo_point_within(uint64_t cellidval, geo_region_t region)
 {
-	try
-	{
-		S2Region * regionp = (S2Region *) region;
+	try {
+		S2Region* regionp = (S2Region*)region;
 		S2CellId cellid(cellidval);
 		bool iswithin = regionp->Contains(cellid.ToPoint());
 		return iswithin;
 	}
-	catch (exception const & ex)
-	{
-		cf_warning(AS_GEO, (char *) "exception in geo_point_within: %s",
-				   ex.what());
+	catch (exception const& ex) {
+		cf_warning(AS_GEO, (char*)"exception in geo_point_within: %s", ex.what());
 		return false;
 	}
 }
@@ -221,7 +192,7 @@ geo_point_within(uint64_t cellidval, geo_region_t region)
 void
 geo_region_destroy(geo_region_t region)
 {
-	S2Region * regionp = (S2Region *) region;
+	S2Region* regionp = (S2Region*)region;
 	if (regionp) {
 		delete regionp;
 	}

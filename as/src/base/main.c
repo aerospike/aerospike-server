@@ -26,7 +26,6 @@
 
 extern int as_run(int argc, char** argv);
 
-
 //==========================================================
 // Public API - Main entry point.
 //

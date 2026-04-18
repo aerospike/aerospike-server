@@ -31,11 +31,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/epoll.h>
 #include <sys/resource.h>
-#include <sys/time.h>
 #include <unistd.h>
-#include <zlib.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
@@ -53,17 +52,16 @@
 
 #include "base/batch.h"
 #include "base/cfg.h"
-#include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "base/xdr.h"
 #include "fabric/partition.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -81,17 +79,14 @@ typedef struct thread_ctx_s {
 	cf_epoll_queue trans_q;
 } thread_ctx;
 
-
 //==========================================================
 // Globals.
 //
 
-as_service_access g_access = {
-	.service = { .addrs = { .n_addrs = 0 }, .port = 0 },
+as_service_access g_access = { .service = { .addrs = { .n_addrs = 0 }, .port = 0 },
 	.alt_service = { .addrs = { .n_addrs = 0 }, .port = 0 },
 	.tls_service = { .addrs = { .n_addrs = 0 }, .port = 0 },
-	.alt_tls_service = { .addrs = { .n_addrs = 0 }, .port = 0 }
-};
+	.alt_tls_service = { .addrs = { .n_addrs = 0 }, .port = 0 } };
 
 cf_serv_cfg g_service_bind = { .n_cfgs = 0 };
 cf_tls_info* g_service_tls;
@@ -105,7 +100,6 @@ static cf_mutex g_reaper_lock = CF_MUTEX_INIT;
 static uint32_t g_n_slots;
 static as_file_handle** g_file_handles;
 static cf_queue g_free_slots;
-
 
 //==========================================================
 // Forward declarations.
@@ -141,7 +135,6 @@ static void* run_reaper(void* udata);
 // Transaction queue.
 static bool start_internal_transaction(thread_ctx* ctx);
 
-
 //==========================================================
 // Inlines & macros.
 //
@@ -152,7 +145,6 @@ rearm(as_file_handle* fd_h, uint32_t events)
 	cf_poll_modify_socket(fd_h->poll, &fd_h->sock,
 			events | EPOLLONESHOT | EPOLLRDHUP, fd_h);
 }
-
 
 //==========================================================
 // Public API.
@@ -294,8 +286,9 @@ void
 as_service_enqueue_internal(as_transaction* tr)
 {
 	while (true) {
-		uint32_t sid = as_config_is_cpu_pinned() ?
-				select_sid_pinned(cf_topo_current_cpu()) : select_sid();
+		uint32_t sid = as_config_is_cpu_pinned()
+				? select_sid_pinned(cf_topo_current_cpu())
+				: select_sid();
 
 		cf_mutex_lock(&g_thread_locks[sid]);
 
@@ -330,7 +323,6 @@ as_service_enqueue_internal_keyd(as_transaction* tr)
 		cf_mutex_unlock(&g_thread_locks[sid]);
 	}
 }
-
 
 //==========================================================
 // Local helpers - setup.
@@ -396,7 +388,6 @@ add_localhost(cf_serv_cfg* serv_cfg, cf_sock_owner owner)
 	}
 }
 
-
 //==========================================================
 // Local helpers - accept client connections.
 //
@@ -435,11 +426,9 @@ run_accept(void* udata)
 			cf_sock_cfg* cfg = ssock->cfg;
 
 			// Ensure that proto_connections_closed is read first.
-			uint64_t n_closed =
-					as_load_uint64(&g_stats.proto_connections_closed);
+			uint64_t n_closed = as_load_uint64(&g_stats.proto_connections_closed);
 			// TODO - ARM TSO plugin - will need barrier.
-			uint64_t n_opened =
-					as_load_uint64(&g_stats.proto_connections_opened);
+			uint64_t n_opened = as_load_uint64(&g_stats.proto_connections_opened);
 
 			if (n_opened - n_closed >= g_config.n_proto_fd_max) {
 				cf_ticker_warning(AS_SERVICE,
@@ -498,7 +487,6 @@ run_accept(void* udata)
 
 	return NULL;
 }
-
 
 //==========================================================
 // Local helpers - assign client connections to threads.
@@ -595,7 +583,6 @@ schedule_redistribution(void)
 
 	cf_mutex_unlock(&g_reaper_lock);
 }
-
 
 //==========================================================
 // Local helpers - demarshal client requests.
@@ -778,8 +765,9 @@ service_release_file_handle(as_file_handle* fd_h)
 static bool
 process_readable(as_file_handle* fd_h)
 {
-	uint8_t* end = fd_h->proto == NULL ?
-			(uint8_t*)&fd_h->proto_hdr + sizeof(as_proto) : // header
+	uint8_t* end = fd_h->proto == NULL
+			? (uint8_t*)&fd_h->proto_hdr + sizeof(as_proto)
+			: // header
 			fd_h->proto->body + fd_h->proto->sz; // body
 
 	while (true) {
@@ -863,9 +851,7 @@ start_transaction(as_file_handle* fd_h)
 
 	if (proto->type == PROTO_TYPE_INFO) {
 		as_info_transaction it = {
-			.fd_h = fd_h,
-			.proto = proto,
-			.start_time = start_ns
+			.fd_h = fd_h, .proto = proto, .start_time = start_ns
 		};
 
 		as_info(&it);
@@ -885,8 +871,8 @@ start_transaction(as_file_handle* fd_h)
 	}
 
 	if (proto->type == PROTO_TYPE_AS_MSG_COMPRESSED) {
-		uint32_t result = as_proto_uncompress((as_comp_proto*)proto,
-				(as_proto**)&tr.msgp);
+		uint32_t result =
+				as_proto_uncompress((as_comp_proto*)proto, (as_proto**)&tr.msgp);
 
 		if (result != AS_OK) {
 			as_transaction_demarshal_error(&tr, result);
@@ -922,7 +908,6 @@ config_xdr_socket(cf_socket* sock)
 	cf_socket_set_window(sock, XDR_READ_BUFFER_SIZE);
 	cf_socket_enable_nagle(sock);
 }
-
 
 //==========================================================
 // Local helpers - reap idle and bad connections.
@@ -1003,7 +988,6 @@ run_reaper(void* udata)
 
 	return NULL;
 }
-
 
 //==========================================================
 // Local helpers - transaction queue.

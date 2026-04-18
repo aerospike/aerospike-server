@@ -35,13 +35,14 @@
 #include <unistd.h>
 
 #include "aerospike/as_arch.h"
-#include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_hash_math.h"
 
 #include "arenax.h"
 #include "bits.h"
+#include "cf_mutex.h"
 #include "log.h"
 #include "xmem.h"
 
@@ -58,7 +59,6 @@
 #pragma GCC diagnostic warning "-Wcast-align"
 
 #define BINARY_SEARCH 1
-
 
 //==========================================================
 // Typedefs & constants.
@@ -88,11 +88,7 @@ typedef struct key_bound_s {
 	bool equal;
 } key_bound;
 
-typedef enum key_mode_s {
-	KEY_MODE_MATCH,
-	KEY_MODE_MIN,
-	KEY_MODE_MAX
-} key_mode;
+typedef enum key_mode_s { KEY_MODE_MATCH, KEY_MODE_MIN, KEY_MODE_MAX } key_mode;
 
 typedef struct gc_collect_cb_info_s {
 	as_namespace* ns;
@@ -135,53 +131,80 @@ typedef struct cardinality_collect_cb_info_s {
 	search_key last;
 } cardinality_collect_cb_info;
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static void gc_reduce_and_delete(as_sindex* si, si_btree* bt);
 static bool gc_collect_cb(const si_btree_key* key, void* udata);
-static void query_reduce(as_sindex* si, as_partition_reservation* rsv, int64_t start_bval, int64_t end_bval, int64_t resume_bval, cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
+static void query_reduce(as_sindex* si, as_partition_reservation* rsv,
+		int64_t start_bval, int64_t end_bval, int64_t resume_bval,
+		cf_digest* keyd, bool de_dup, as_sindex_reduce_fn cb, void* udata);
 static bool query_collect_cb(const si_btree_key* key, void* udata);
-static void cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys, hyperloglog* bval_hll, hyperloglog* rec_hll);
+static void cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys,
+		hyperloglog* bval_hll, hyperloglog* rec_hll);
 static bool cardinality_collect_cb(const si_btree_key* key, void* udata);
 
-static si_btree* si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena, bool unsigned_bvals, uint32_t si_id, uint16_t tree_ix);
+static si_btree* si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena,
+		bool unsigned_bvals, uint32_t si_id, uint16_t tree_ix);
 static void si_btree_destroy(si_btree* bt);
 static bool si_btree_put(si_btree* bt, const si_btree_key* key);
 
 static void btree_destroy(si_btree* bt, si_arena_handle node_h);
 static bool btree_put(si_btree* bt, si_btree_node* node, const si_btree_key* key);
-static bool btree_delete(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out);
-static bool btree_reduce(si_btree* bt, si_btree_node* node, const search_key* start_skey, const search_key* end_skey, si_btree_reduce_fn cb, void* udata);
-static bool delete_case_1(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out);
-static bool delete_case_2(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, key_bound bound);
-static bool delete_case_2a(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child);
-static bool delete_case_2b(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child);
-static bool delete_case_2c(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* left, si_arena_handle right_h);
-static bool delete_case_3(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, key_bound bound);
-static bool delete_case_3a_left(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_btree_node* sibling);
-static bool delete_case_3a_right(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_btree_node* sibling);
-static bool delete_case_3b_left(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_arena_handle child_h, si_btree_node* sibling);
-static bool delete_case_3b_right(si_btree* bt, si_btree_node* node, key_mode mode, const si_btree_key* key_in, si_btree_key* key_out, uint32_t i, si_btree_node* child, si_arena_handle sibling_h);
+static bool btree_delete(si_btree* bt, si_btree_node* node, key_mode mode,
+		const si_btree_key* key_in, si_btree_key* key_out);
+static bool btree_reduce(si_btree* bt, si_btree_node* node,
+		const search_key* start_skey, const search_key* end_skey,
+		si_btree_reduce_fn cb, void* udata);
+static bool delete_case_1(si_btree* bt, si_btree_node* node, key_mode mode,
+		const si_btree_key* key_in, si_btree_key* key_out);
+static bool delete_case_2(si_btree* bt, si_btree_node* node, key_mode mode,
+		const si_btree_key* key_in, si_btree_key* key_out, key_bound bound);
+static bool delete_case_2a(si_btree* bt, si_btree_node* node, uint32_t i,
+		si_btree_node* child);
+static bool delete_case_2b(si_btree* bt, si_btree_node* node, uint32_t i,
+		si_btree_node* child);
+static bool delete_case_2c(si_btree* bt, si_btree_node* node, key_mode mode,
+		const si_btree_key* key_in, si_btree_key* key_out, uint32_t i,
+		si_btree_node* left, si_arena_handle right_h);
+static bool delete_case_3(si_btree* bt, si_btree_node* node, key_mode mode,
+		const si_btree_key* key_in, si_btree_key* key_out, key_bound bound);
+static bool delete_case_3a_left(si_btree* bt, si_btree_node* node,
+		key_mode mode, const si_btree_key* key_in, si_btree_key* key_out,
+		uint32_t i, si_btree_node* child, si_btree_node* sibling);
+static bool delete_case_3a_right(si_btree* bt, si_btree_node* node,
+		key_mode mode, const si_btree_key* key_in, si_btree_key* key_out,
+		uint32_t i, si_btree_node* child, si_btree_node* sibling);
+static bool delete_case_3b_left(si_btree* bt, si_btree_node* node,
+		key_mode mode, const si_btree_key* key_in, si_btree_key* key_out,
+		uint32_t i, si_arena_handle child_h, si_btree_node* sibling);
+static bool delete_case_3b_right(si_btree* bt, si_btree_node* node,
+		key_mode mode, const si_btree_key* key_in, si_btree_key* key_out,
+		uint32_t i, si_btree_node* child, si_arena_handle sibling_h);
 static si_arena_handle create_node(const si_btree* bt, bool leaf);
-static void move_keys(const si_btree* bt, si_btree_node* dst, uint32_t dst_i, si_btree_node* src, uint32_t src_i, uint32_t n_keys);
-static void move_children(const si_btree* bt, si_btree_node* dst, uint32_t dst_i, si_btree_node* src, uint32_t src_i, uint32_t n_children);
-static key_bound greatest_lower_bound(const si_btree* bt, const si_btree_node* node, const si_btree_key* key);
-static key_bound left_bound(const si_btree* bt, const si_btree_node* node, const search_key* skey);
-static void split_child(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child);
-static void merge_children(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* left, si_arena_handle right_h);
+static void move_keys(const si_btree* bt, si_btree_node* dst, uint32_t dst_i,
+		si_btree_node* src, uint32_t src_i, uint32_t n_keys);
+static void move_children(const si_btree* bt, si_btree_node* dst,
+		uint32_t dst_i, si_btree_node* src, uint32_t src_i, uint32_t n_children);
+static key_bound greatest_lower_bound(const si_btree* bt,
+		const si_btree_node* node, const si_btree_key* key);
+static key_bound left_bound(const si_btree* bt, const si_btree_node* node,
+		const search_key* skey);
+static void split_child(si_btree* bt, si_btree_node* node, uint32_t i,
+		si_btree_node* child);
+static void merge_children(si_btree* bt, si_btree_node* node, uint32_t i,
+		si_btree_node* left, si_arena_handle right_h);
 
 static void hll_add(hyperloglog* hll, const uint8_t* buf, size_t buf_sz);
 static uint64_t hll_estimate_cardinality(const hyperloglog* hll);
 
-static void hll_hash(const uint8_t* ele, size_t ele_sz, uint16_t* register_ix, uint64_t* value);
+static void hll_hash(const uint8_t* ele, size_t ele_sz, uint16_t* register_ix,
+		uint64_t* value);
 static uint64_t hll_get_register(const hyperloglog* hll, uint32_t r);
 static void hll_set_register(hyperloglog* hll, uint32_t r, uint64_t value);
 static double hll_tau(double val);
 static double hll_sigma(double val);
-
 
 //==========================================================
 // Inlines & macros.
@@ -208,17 +231,17 @@ bval_cmp(int64_t bval_1, int64_t bval_2)
 static inline int32_t
 bval_cmp_unsigned(int64_t bval_1, int64_t bval_2)
 {
-	return (uint64_t)bval_1 > (uint64_t)bval_2 ?
-			1 : ((uint64_t)bval_1 < (uint64_t)bval_2 ? -1 : 0);
+	return (uint64_t)bval_1 > (uint64_t)bval_2
+			? 1
+			: ((uint64_t)bval_1 < (uint64_t)bval_2 ? -1 : 0);
 }
 
 static inline int32_t
-key_cmp(const si_btree* bt, const si_btree_key* key_1,
-		const si_btree_key* key_2)
+key_cmp(const si_btree* bt, const si_btree_key* key_1, const si_btree_key* key_2)
 {
-	int32_t cmp = bt->unsigned_bvals ?
-			bval_cmp_unsigned(key_1->bval, key_2->bval) :
-			bval_cmp(key_1->bval, key_2->bval);
+	int32_t cmp = bt->unsigned_bvals
+			? bval_cmp_unsigned(key_1->bval, key_2->bval)
+			: bval_cmp(key_1->bval, key_2->bval);
 
 	if (cmp != 0) {
 		return cmp;
@@ -242,9 +265,8 @@ key_cmp(const si_btree* bt, const si_btree_key* key_1,
 static inline int32_t
 skey_cmp(const si_btree* bt, const search_key* skey, const si_btree_key* key)
 {
-	int32_t cmp = bt->unsigned_bvals ?
-			bval_cmp_unsigned(skey->bval, key->bval) :
-			bval_cmp(skey->bval, key->bval);
+	int32_t cmp = bt->unsigned_bvals ? bval_cmp_unsigned(skey->bval, key->bval)
+									 : bval_cmp(skey->bval, key->bval);
 
 	if (cmp != 0) {
 		return cmp;
@@ -269,12 +291,10 @@ skey_cmp(const si_btree* bt, const search_key* skey, const si_btree_key* key)
 }
 
 static inline int32_t
-end_skey_cmp(const si_btree* bt, const search_key* skey,
-		const si_btree_key* key)
+end_skey_cmp(const si_btree* bt, const search_key* skey, const si_btree_key* key)
 {
-	return bt->unsigned_bvals ?
-			bval_cmp_unsigned(skey->bval, key->bval) :
-			bval_cmp(skey->bval, key->bval);
+	return bt->unsigned_bvals ? bval_cmp_unsigned(skey->bval, key->bval)
+							  : bval_cmp(skey->bval, key->bval);
 }
 
 static inline si_btree_key*
@@ -335,11 +355,10 @@ set_child(const si_btree* bt, si_btree_node* node, uint32_t i,
 	node_children[i] = child_h;
 }
 
-#define SI_RESOLVE(_h) \
+#define SI_RESOLVE(_h)                                                         \
 	((si_btree_node*)as_sindex_arena_resolve(bt->si_arena, _h))
 
 #define ROUND_FRACTION(n, d) ((uint64_t)(((double)n / d) + 0.5))
-
 
 //==========================================================
 // Public API.
@@ -414,9 +433,7 @@ as_sindex_tree_put(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 	si_btree* bt = si->btrees[as_partition_getid(&r->keyd)];
 
 	si_btree_key key = {
-			.bval = bval,
-			.keyd_stub = get_keyd_stub(&r->keyd),
-			.r_h = r_h
+		.bval = bval, .keyd_stub = get_keyd_stub(&r->keyd), .r_h = r_h
 	};
 
 	return si_btree_put(bt, &key);
@@ -429,9 +446,7 @@ as_sindex_tree_delete(as_sindex* si, int64_t bval, cf_arenax_handle r_h)
 	si_btree* bt = si->btrees[as_partition_getid(&r->keyd)];
 
 	si_btree_key key = {
-			.bval = bval,
-			.keyd_stub = get_keyd_stub(&r->keyd),
-			.r_h = r_h
+		.bval = bval, .keyd_stub = get_keyd_stub(&r->keyd), .r_h = r_h
 	};
 
 	return si_btree_delete(bt, &key);
@@ -470,8 +485,9 @@ as_sindex_tree_collect_cardinality(as_sindex* si)
 {
 	uint64_t n_keys = 0;
 	hyperloglog bval_hll = { { 0 } };
-	hyperloglog* rec_hll = si->itype == AS_SINDEX_ITYPE_DEFAULT ?
-			NULL : cf_calloc(1, sizeof(hyperloglog));
+	hyperloglog* rec_hll = si->itype == AS_SINDEX_ITYPE_DEFAULT
+			? NULL
+			: cf_calloc(1, sizeof(hyperloglog));
 
 	for (uint32_t ix = 0; ix < si->n_btrees; ix++) {
 		if (si->dropped) {
@@ -507,7 +523,6 @@ as_sindex_tree_collect_cardinality(as_sindex* si)
 	}
 }
 
-
 //==========================================================
 // Local helpers - reduce utilities.
 //
@@ -517,17 +532,13 @@ gc_reduce_and_delete(as_sindex* si, si_btree* bt)
 {
 	as_namespace* ns = si->ns;
 
-	uint32_t max_burst = ns->pi_xmem_type == CF_XMEM_TYPE_FLASH ?
-			MAX_GC_BURST_AF : MAX_GC_BURST;
+	uint32_t max_burst = ns->pi_xmem_type == CF_XMEM_TYPE_FLASH ? MAX_GC_BURST_AF
+																: MAX_GC_BURST;
 
 	bool first = true;
 	si_btree_key keys[max_burst];
 
-	gc_collect_cb_info ci = {
-			.ns = ns,
-			.max_burst = max_burst,
-			.keys = keys
-	};
+	gc_collect_cb_info ci = { .ns = ns, .max_burst = max_burst, .keys = keys };
 
 	while (true) {
 		search_key* last = first ? NULL : &ci.last;
@@ -570,12 +581,10 @@ gc_collect_cb(const si_btree_key* key, void* udata)
 	}
 
 	if (++ci->n_keys_reduced == ci->max_burst) {
-		ci->last = (search_key){
-				.bval = key->bval,
-				.has_digest = true,
-				.keyd_stub = get_keyd_stub(&r->keyd),
-				.keyd = r->keyd
-		};
+		ci->last = (search_key){ .bval = key->bval,
+			.has_digest = true,
+			.keyd_stub = get_keyd_stub(&r->keyd),
+			.keyd = r->keyd };
 
 		return false; // stops si_btree_reduce()
 	}
@@ -599,28 +608,23 @@ query_reduce(as_sindex* si, as_partition_reservation* rsv, int64_t start_bval,
 	si_btree* bt = si->btrees[rsv->p->id];
 	si_btree_key keys[MAX_QUERY_BURST];
 
-	query_collect_cb_info ci = {
-			.arena = bt->arena,
-			.tree = rsv->tree,
-			.keys = keys,
-			.de_dup = de_dup,
-			.last = { .bval = start_bval }
-	};
+	query_collect_cb_info ci = { .arena = bt->arena,
+		.tree = rsv->tree,
+		.keys = keys,
+		.de_dup = de_dup,
+		.last = { .bval = start_bval } };
 
-	if (keyd != NULL && (bt->unsigned_bvals ?
-			(uint64_t)resume_bval >= (uint64_t)start_bval :
-			resume_bval >= start_bval)) {
-		ci.last = (search_key){
-				.bval = resume_bval,
-				.has_digest = true,
-				.keyd_stub = get_keyd_stub(keyd),
-				.keyd = *keyd
-		};
+	if (keyd != NULL &&
+			(bt->unsigned_bvals ? (uint64_t)resume_bval >= (uint64_t)start_bval
+								: resume_bval >= start_bval)) {
+		ci.last = (search_key){ .bval = resume_bval,
+			.has_digest = true,
+			.keyd_stub = get_keyd_stub(keyd),
+			.keyd = *keyd };
 	}
 
-	if (bt->unsigned_bvals ?
-			(uint64_t)ci.last.bval > (uint64_t)end_bval :
-			ci.last.bval > end_bval) {
+	if (bt->unsigned_bvals ? (uint64_t)ci.last.bval > (uint64_t)end_bval
+						   : ci.last.bval > end_bval) {
 		return;
 	}
 
@@ -639,11 +643,9 @@ query_reduce(as_sindex* si, as_partition_reservation* rsv, int64_t start_bval,
 			si_btree_key* key = &keys[i];
 
 			as_record* r = cf_arenax_resolve(bt->arena, key->r_h);
-			as_index_ref r_ref = {
-					.r = r,
-					.r_h = key->r_h,
-					.olock = as_index_olock_from_keyd(rsv->tree, &r->keyd)
-			};
+			as_index_ref r_ref = { .r = r,
+				.r_h = key->r_h,
+				.olock = as_index_olock_from_keyd(rsv->tree, &r->keyd) };
 
 			cf_mutex_lock(r_ref.olock);
 
@@ -684,8 +686,9 @@ query_collect_cb(const si_btree_key* key, void* udata)
 
 	as_index* r = cf_arenax_resolve(ci->arena, key->r_h);
 
-	if (r->tree_id == tree->id && r->generation != 0 && (r->rc == 1 ||
-			! (ci->de_dup && find_r_h(key->r_h, ci->keys, ci->n_keys)))) {
+	if (r->tree_id == tree->id && r->generation != 0 &&
+			(r->rc == 1 ||
+					! (ci->de_dup && find_r_h(key->r_h, ci->keys, ci->n_keys)))) {
 		cf_mutex* rlock = as_index_rlock_from_keyd(tree, &r->keyd);
 
 		cf_mutex_lock(rlock);
@@ -699,12 +702,10 @@ query_collect_cb(const si_btree_key* key, void* udata)
 	}
 
 	if (++ci->n_keys_reduced == MAX_QUERY_BURST) {
-		ci->last = (search_key){
-				.bval = key->bval,
-				.has_digest = true,
-				.keyd_stub = get_keyd_stub(&r->keyd),
-				.keyd = r->keyd
-		};
+		ci->last = (search_key){ .bval = key->bval,
+			.has_digest = true,
+			.keyd_stub = get_keyd_stub(&r->keyd),
+			.keyd = r->keyd };
 
 		return false; // stops si_btree_reduce()
 	}
@@ -719,10 +720,7 @@ cardinality_reduce(as_sindex* si, si_btree* bt, uint64_t* n_keys,
 	bool first = true;
 
 	cardinality_collect_cb_info ci = {
-			.si = si,
-			.n_keys = n_keys,
-			.bval_hll = bval_hll,
-			.rec_hll = rec_hll
+		.si = si, .n_keys = n_keys, .bval_hll = bval_hll, .rec_hll = rec_hll
 	};
 
 	while (true) {
@@ -774,7 +772,6 @@ cardinality_collect_cb(const si_btree_key* key, void* udata)
 	return true;
 }
 
-
 //==========================================================
 // Local helpers - si_btree layer.
 //
@@ -801,18 +798,24 @@ si_btree_create(cf_arenax* arena, as_sindex_arena* si_arena,
 
 	uint32_t node_sz = si_arena->ele_sz;
 
-	bt->inner_order = (uint32_t)
-			(((((node_sz - sizeof(si_btree_node) - sizeof(si_arena_handle)) /
-			(sizeof(si_btree_key) + sizeof(si_arena_handle))) + 1) / 2) * 2);
-			// 226
-	bt->leaf_order = (uint32_t)
-			(((((node_sz - sizeof(si_btree_node)) /
-			sizeof(si_btree_key)) + 1) / 2) * 2);
-			// 292
+	bt->inner_order =
+			(uint32_t)(((((node_sz - sizeof(si_btree_node) -
+								  sizeof(si_arena_handle)) /
+								 (sizeof(si_btree_key) + sizeof(si_arena_handle))) +
+								1) /
+							   2) *
+					2);
+	// 226
+	bt->leaf_order = (uint32_t)(((((node_sz - sizeof(si_btree_node)) /
+										  sizeof(si_btree_key)) +
+										 1) /
+										2) *
+			2);
+	// 292
 
 	bt->keys_off = (uint32_t)sizeof(si_btree_node);
-	bt->children_off = (uint32_t)
-			(node_sz - (bt->inner_order * sizeof(si_arena_handle)));
+	bt->children_off =
+			(uint32_t)(node_sz - (bt->inner_order * sizeof(si_arena_handle)));
 
 	bt->root_h = create_node(bt, true);
 	bt->n_nodes = 1;
@@ -898,7 +901,6 @@ si_btree_reduce(si_btree* bt, const search_key* start_skey,
 
 	pthread_rwlock_unlock(&bt->lock);
 }
-
 
 //==========================================================
 // Local helpers - lowest btree layer.
@@ -1048,8 +1050,8 @@ btree_reduce(si_btree* bt, si_btree_node* node, const search_key* start_skey,
 	}
 
 	uint32_t i = (uint32_t)(bound.index + 1);
-	const si_arena_handle* children = node->leaf == 0 ?
-			const_children(bt, node) : NULL;
+	const si_arena_handle* children = node->leaf == 0 ? const_children(bt, node)
+													  : NULL;
 
 	if (children != NULL &&
 			! btree_reduce(bt, SI_RESOLVE(children[i]), start_skey, end_skey,
@@ -1069,8 +1071,8 @@ btree_reduce(si_btree* bt, si_btree_node* node, const search_key* start_skey,
 		}
 
 		if (children != NULL &&
-				! btree_reduce(bt, SI_RESOLVE(children[i]), NULL, end_skey,
-						cb, udata)) {
+				! btree_reduce(bt, SI_RESOLVE(children[i]), NULL, end_skey, cb,
+						udata)) {
 			return false;
 		}
 
@@ -1153,8 +1155,7 @@ delete_case_2(si_btree* bt, si_btree_node* node, key_mode mode,
 }
 
 static bool
-delete_case_2a(si_btree* bt, si_btree_node* node, uint32_t i,
-		si_btree_node* child)
+delete_case_2a(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child)
 {
 	si_btree_key* node_key = mut_key(bt, node, i);
 
@@ -1165,8 +1166,7 @@ delete_case_2a(si_btree* bt, si_btree_node* node, uint32_t i,
 }
 
 static bool
-delete_case_2b(si_btree* bt, si_btree_node* node, uint32_t i,
-		si_btree_node* child)
+delete_case_2b(si_btree* bt, si_btree_node* node, uint32_t i, si_btree_node* child)
 {
 	si_btree_key* node_key = mut_key(bt, node, i);
 
@@ -1325,21 +1325,17 @@ create_node(const si_btree* bt, bool leaf)
 	si_btree_node* node = SI_RESOLVE(h);
 
 	if (leaf) {
-		*node = (si_btree_node){
-				.leaf = 1,
-				.si_id = bt->si_id,
-				.tree_ix = bt->tree_ix,
-				.min_degree = (uint16_t)(bt->leaf_order / 2),
-				.max_degree = (uint16_t)bt->leaf_order
-		};
+		*node = (si_btree_node){ .leaf = 1,
+			.si_id = bt->si_id,
+			.tree_ix = bt->tree_ix,
+			.min_degree = (uint16_t)(bt->leaf_order / 2),
+			.max_degree = (uint16_t)bt->leaf_order };
 	}
 	else {
-		*node = (si_btree_node){
-				.si_id = bt->si_id,
-				.tree_ix = bt->tree_ix,
-				.min_degree = (uint16_t)(bt->inner_order / 2),
-				.max_degree = (uint16_t)bt->inner_order
-		};
+		*node = (si_btree_node){ .si_id = bt->si_id,
+			.tree_ix = bt->tree_ix,
+			.min_degree = (uint16_t)(bt->inner_order / 2),
+			.max_degree = (uint16_t)bt->inner_order };
 	}
 
 	return h;
@@ -1440,8 +1436,7 @@ greatest_lower_bound(const si_btree* bt, const si_btree_node* node,
 
 #if BINARY_SEARCH == 0
 static key_bound
-left_bound(const si_btree* bt, const si_btree_node* node,
-		const search_key* skey)
+left_bound(const si_btree* bt, const si_btree_node* node, const search_key* skey)
 {
 	int32_t index = -1;
 	bool equal = false;
@@ -1476,8 +1471,7 @@ left_bound(const si_btree* bt, const si_btree_node* node,
 }
 #else
 static key_bound
-left_bound(const si_btree* bt, const si_btree_node* node,
-		const search_key* skey)
+left_bound(const si_btree* bt, const si_btree_node* node, const search_key* skey)
 {
 	int32_t lower = 0;
 	int32_t upper = node->n_keys - 1;
@@ -1561,8 +1555,8 @@ merge_children(si_btree* bt, si_btree_node* node, uint32_t i,
 	si_btree_node* root = SI_RESOLVE(bt->root_h);
 	si_btree_node* right = SI_RESOLVE(right_h);
 
-	cf_assert(node != root || node->n_keys > 0, AS_SINDEX,
-			"bad key count: %d", node->n_keys);
+	cf_assert(node != root || node->n_keys > 0, AS_SINDEX, "bad key count: %d",
+			node->n_keys);
 	cf_assert(node == root || node->n_keys >= node->min_degree, AS_SINDEX,
 			"bad key count: %d", node->n_keys);
 	cf_assert(node->leaf == 0, AS_SINDEX, "bad leaf flag");
@@ -1602,7 +1596,6 @@ merge_children(si_btree* bt, si_btree_node* node, uint32_t i,
 	bt->n_nodes--;
 }
 
-
 //==========================================================
 // Local helpers - HLL.
 // TODO - use refactored hmh lib code from particle_hll.c?
@@ -1639,13 +1632,11 @@ hll_estimate_cardinality(const hyperloglog* hll)
 
 	z += HLL_N_REGISTERS * hll_sigma(c[0] / (double)HLL_N_REGISTERS);
 
-	return (uint64_t)
-			(llroundl(HLL_ALPHA * HLL_N_REGISTERS * HLL_N_REGISTERS / z));
+	return (uint64_t)(llroundl(HLL_ALPHA * HLL_N_REGISTERS * HLL_N_REGISTERS / z));
 }
 
 static void
-hll_hash(const uint8_t* ele, size_t ele_sz, uint16_t* register_ix,
-		uint64_t* value)
+hll_hash(const uint8_t* ele, size_t ele_sz, uint16_t* register_ix, uint64_t* value)
 {
 	uint8_t hash[16];
 
@@ -1659,7 +1650,8 @@ hll_hash(const uint8_t* ele, size_t ele_sz, uint16_t* register_ix,
 }
 
 static uint64_t
-hll_get_register(const hyperloglog* hll, uint32_t r) {
+hll_get_register(const hyperloglog* hll, uint32_t r)
+{
 	uint32_t bit_offset = HLL_BITS * r;
 	uint32_t byte_offset = bit_offset / 8;
 	uint32_t bit_end = HLL_BITS * HLL_N_REGISTERS;
@@ -1683,7 +1675,8 @@ hll_get_register(const hyperloglog* hll, uint32_t r) {
 }
 
 static void
-hll_set_register(hyperloglog* hll, uint32_t r, uint64_t value) {
+hll_set_register(hyperloglog* hll, uint32_t r, uint64_t value)
+{
 	uint32_t bit_offset = HLL_BITS * r;
 	uint32_t byte_offset = bit_offset / 8;
 	uint32_t bit_end = HLL_BITS * HLL_N_REGISTERS;

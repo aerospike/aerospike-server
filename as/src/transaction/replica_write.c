@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -38,6 +39,7 @@
 #include "log.h"
 #include "msg.h"
 #include "node.h"
+#include "xmem.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -48,13 +50,11 @@
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
-#include "sindex/sindex.h"
+#include "storage/flat.h"
 #include "storage/storage.h"
-#include "transaction/delete.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
-
 
 //==========================================================
 // Forward declarations.
@@ -62,10 +62,10 @@
 
 static uint32_t pack_info_bits(as_transaction* tr);
 static void send_repl_write_ack(cf_node node, msg* m, uint32_t result);
-static void send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result, const cf_digest* keyd);
+static void send_repl_write_ack_w_digest(cf_node node, msg* m, uint32_t result,
+		const cf_digest* keyd);
 static uint32_t parse_result_code(msg* m);
 static void drop_replica(as_partition_reservation* rsv, cf_digest* keyd);
-
 
 //==========================================================
 // Public API.
@@ -229,7 +229,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	size_t ns_name_len;
 
 	if (msg_get_buf(m, RW_FIELD_NAMESPACE, &ns_name, &ns_name_len,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "repl_write_handle_op: no namespace");
 		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
@@ -248,7 +248,7 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	// Handle drops.
 	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, &keyd_size,
-			MSG_GET_DIRECT) == 0) {
+				MSG_GET_DIRECT) == 0) {
 		if (keyd_size != CF_DIGEST_KEY_SZ) {
 			cf_warning(AS_RW, "repl_write_handle_op: invalid digest");
 			send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
@@ -256,8 +256,8 @@ repl_write_handle_op(cf_node node, msg* m)
 		}
 
 		as_partition_reservation rsv;
-		uint32_t result = as_partition_reserve_replica(ns,
-				as_partition_getid(keyd), &rsv);
+		uint32_t result =
+				as_partition_reserve_replica(ns, as_partition_getid(keyd), &rsv);
 
 		if (result == AS_OK) {
 			drop_replica(&rsv, keyd);
@@ -275,7 +275,7 @@ repl_write_handle_op(cf_node node, msg* m)
 	msg_get_uint32(m, RW_FIELD_REGIME, &rr.regime);
 
 	if (msg_get_buf(m, RW_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "repl_write_handle_op: no record");
 		send_repl_write_ack(node, m, AS_ERR_UNKNOWN);
 		return;
@@ -294,8 +294,8 @@ repl_write_handle_op(cf_node node, msg* m)
 	}
 
 	as_partition_reservation rsv;
-	uint32_t result = as_partition_reserve_replica(ns,
-			as_partition_getid(rr.keyd), &rsv);
+	uint32_t result =
+			as_partition_reserve_replica(ns, as_partition_getid(rr.keyd), &rsv);
 
 	if (result != AS_OK) {
 		send_repl_write_ack_w_digest(node, m, result, rr.keyd);
@@ -324,7 +324,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 	cf_digest* keyd;
 
 	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "repl-write ack: no digest");
 		as_fabric_msg_put(m);
 		return;
@@ -412,8 +412,8 @@ repl_write_handle_ack(cf_node node, msg* m)
 	}
 
 	// Success for all replicas.
-	rw->repl_write_cb(rw);
 	repl_write_send_confirmation(rw);
+	rw->repl_write_cb(rw);
 
 	rw->repl_write_complete = true;
 
@@ -422,7 +422,6 @@ repl_write_handle_ack(cf_node node, msg* m)
 	rw_request_release(rw);
 	as_fabric_msg_put(m);
 }
-
 
 //==========================================================
 // Local helpers.

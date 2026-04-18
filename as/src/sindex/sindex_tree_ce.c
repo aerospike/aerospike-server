@@ -37,7 +37,6 @@
 #include "fabric/partition.h"
 #include "sindex/sindex.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -47,7 +46,6 @@ as_sindex_tree_resume(as_sindex* si)
 {
 	cf_crash(AS_SINDEX, "CE code called as_sindex_tree_resume()");
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

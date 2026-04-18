@@ -1,0 +1,83 @@
+# Aerospike Server C Coding Style - clang-format config
+# Compatible with clang-format 18–21
+
+BasedOnStyle: LLVM
+Language: Cpp
+
+# Indentation
+ContinuationIndentWidth: 8  # Continuation lines get 1 extra tab beyond the block level
+IndentWidth: 4             # A tab equals 4 spaces for visual alignment
+TabWidth: 4
+UseTab: Always             # Use tabs for all indentation
+
+# Braces and Blocks
+AllowShortIfStatementsOnASingleLine: Never
+AlwaysBreakAfterDefinitionReturnType: TopLevel
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterNamespace: true
+  AfterClass: true
+  AfterControlStatement: false
+  AfterFunction: true
+  AfterStruct: false
+  BeforeElse: true
+  BeforeCatch: true
+  BeforeWhile: false
+  SplitEmptyNamespace: false
+
+# Pointer formatting
+DerivePointerAlignment: false
+PointerAlignment: Left    # e.g., char* ptr;
+
+# Case label formatting
+IndentCaseLabels: false   # Align case labels with the switch
+
+# Include ordering
+IncludeBlocks: Regroup
+IncludeIsMainRegex: '(_ce|_ee)?$'  # foo_ce.c/foo_ee.c match foo.h as main
+IncludeCategories:
+  # Main include (Priority 0) is auto-assigned by IncludeIsMainRegex
+  - Regex: '^<'                         # System headers
+    Priority: 1
+  - Regex: '^"warnings\.h"$'            # warnings.h always last
+    Priority: 99
+  - Regex: '^"(aerospike|citrusleaf)/'  # External Aerospike libraries
+    Priority: 2
+  - Regex: '^"[^/]+\.h"$'               # CF headers (no path slash)
+    Priority: 3
+  - Regex: '^".+/.+\.h"$'               # AS headers (with path)
+    Priority: 4
+SortIncludes: CaseSensitive
+
+# Misc
+AlignAfterOpenBracket: DontAlign
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignOperands: DontAlign
+AlignTrailingComments: false
+AllowShortBlocksOnASingleLine: Never
+BinPackArguments: true
+BinPackParameters: true
+BreakBeforeTernaryOperators: true
+BreakStringLiterals: false
+ColumnLimit: 80
+Cpp11BracedListStyle: false
+InsertTrailingCommas: None
+MaxEmptyLinesToKeep: 1
+ReflowComments: false
+SpaceAfterLogicalNot: true
+SpaceInEmptyBlock: false
+
+# Penalties
+# This decides what order things should be done if a line is too long
+PenaltyBreakAssignment: 5
+PenaltyBreakBeforeFirstCallParameter: 0
+PenaltyBreakComment: 5
+PenaltyBreakFirstLessLess: 0
+PenaltyBreakOpenParenthesis: 300
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 10
+PenaltyReturnTypeOnItsOwnLine: 300
+
+# C++
+AccessModifierOffset: -4
