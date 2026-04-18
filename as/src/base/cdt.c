@@ -7471,6 +7471,8 @@ cdt_msgpack_ctx_to_dynbuf(msgpack_in* mp, cf_dyn_buf* db)
 
 	cf_dyn_buf_append_string(db, "[");
 
+	cf_dyn_buf_append_string(db, "[");
+
 	uint32_t ele_count;
 
 	if (! msgpack_get_list_ele_count(mp, &ele_count)) {
