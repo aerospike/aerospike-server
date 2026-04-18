@@ -37,7 +37,6 @@
 #include "base/datamodel.h"
 #include "base/transaction.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -92,8 +91,7 @@ as_xdr_cleanup_tl_stats(void)
 }
 
 void
-as_xdr_startup_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port,
-		char* tls_name)
+as_xdr_startup_add_seed(as_xdr_dc_cfg* cfg, char* host, char* port, char* tls_name)
 {
 	cf_crash(AS_XDR, "unreachable function for CE");
 }

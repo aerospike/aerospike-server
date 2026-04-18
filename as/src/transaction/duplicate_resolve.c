@@ -32,6 +32,8 @@
 #include <string.h>
 
 #include "aerospike/as_atomic.h"
+#include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
 #include "cf_mutex.h"
@@ -39,6 +41,7 @@
 #include "msg.h"
 #include "node.h"
 
+#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
@@ -53,18 +56,20 @@
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static int fill_ack_w_pickle(as_storage_rd* rd, msg* m);
-static void done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref, as_storage_rd* rd);
-static void send_dup_res_ack(cf_node node, msg* m, uint32_t result, uint32_t info);
-static void send_dup_res_ack_preserved(cf_node node, msg* m, uint32_t result, uint32_t info);
-static uint32_t parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time);
+static void done_handle_request(as_partition_reservation* rsv,
+		as_index_ref* r_ref, as_storage_rd* rd);
+static void send_dup_res_ack(cf_node node, msg* m, uint32_t result,
+		uint32_t info);
+static void send_dup_res_ack_preserved(cf_node node, msg* m, uint32_t result,
+		uint32_t info);
+static uint32_t parse_dup_meta(msg* m, uint32_t* p_generation,
+		uint64_t* p_last_update_time);
 static void apply_winner(rw_request* rw);
-
 
 //==========================================================
 // Public API.
@@ -165,7 +170,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	cf_digest* keyd;
 
 	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "dup-res handler: no digest");
 		send_dup_res_ack(node, m, AS_ERR_UNKNOWN, 0);
 		return;
@@ -175,7 +180,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	size_t ns_name_len;
 
 	if (msg_get_buf(m, RW_FIELD_NAMESPACE, &ns_name, &ns_name_len,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "dup-res handler: no namespace");
 		send_dup_res_ack(node, m, AS_ERR_UNKNOWN, 0);
 		return;
@@ -194,8 +199,7 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	bool local_conflict_check =
 			msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0 &&
-			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
-					&last_update_time) == 0;
+			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time) == 0;
 
 	as_partition_reservation rsv;
 
@@ -223,8 +227,8 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	if (local_conflict_check &&
 			(result = as_record_resolve_conflict(ns->conflict_resolution_policy,
-					generation, last_update_time, r->generation,
-					r->last_update_time)) <= 0) {
+					 generation, last_update_time, r->generation,
+					 r->last_update_time)) <= 0) {
 		done_handle_request(&rsv, &r_ref, NULL);
 		send_dup_res_ack(node, m,
 				result == 0 ? AS_ERR_RECORD_EXISTS : AS_ERR_GENERATION, info);
@@ -259,13 +263,13 @@ dup_res_handle_ack(cf_node node, msg* m)
 	cf_digest* keyd;
 
 	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		uint8_t* pickle;
 		size_t pickle_sz;
 
 		if (msg_get_buf(m, RW_FIELD_RECORD, &pickle, &pickle_sz,
-				MSG_GET_DIRECT) != 0 ||
-						pickle_sz < sizeof(as_flat_record)) {
+					MSG_GET_DIRECT) != 0 ||
+				pickle_sz < sizeof(as_flat_record)) {
 			cf_warning(AS_RW, "dup-res ack: no or bad digest");
 			as_fabric_msg_put(m);
 			return;
@@ -362,8 +366,8 @@ dup_res_handle_ack(cf_node node, msg* m)
 	// Compare this duplicate with previous best, if any.
 	bool keep_previous_best = rw->best_dup_msg &&
 			as_record_resolve_conflict(rw->rsv.ns->conflict_resolution_policy,
-					rw->best_dup_gen, rw->best_dup_lut,
-					(uint16_t)generation, last_update_time) <= 0;
+					rw->best_dup_gen, rw->best_dup_lut, (uint16_t)generation,
+					last_update_time) <= 0;
 
 	if (keep_previous_best) {
 		// This duplicate is no better than previous best - keep previous best.
@@ -425,7 +429,6 @@ dup_res_handle_ack(cf_node node, msg* m)
 
 	rw_request_release(rw);
 }
-
 
 //==========================================================
 // Local helpers.
@@ -522,8 +525,8 @@ parse_dup_meta(msg* m, uint32_t* p_generation, uint64_t* p_last_update_time)
 	uint8_t* pickle;
 	size_t pickle_sz;
 
-	if (msg_get_buf(m, RW_FIELD_RECORD, &pickle, &pickle_sz,
-			MSG_GET_DIRECT) != 0) {
+	if (msg_get_buf(m, RW_FIELD_RECORD, &pickle, &pickle_sz, MSG_GET_DIRECT) !=
+			0) {
 		cf_warning(AS_RW, "dup-res ack: no record");
 		return AS_ERR_UNKNOWN;
 	}
@@ -552,19 +555,17 @@ apply_winner(rw_request* rw)
 
 	msg* m = rw->best_dup_msg;
 
-	as_remote_record rr = {
-			.via = VIA_DUPLICATE_RESOLUTION,
-			// Skipping .src for now.
-			.rsv = &rw->rsv,
-			.keyd = &rw->keyd
-	};
+	as_remote_record rr = { .via = VIA_DUPLICATE_RESOLUTION,
+		// Skipping .src for now.
+		.rsv = &rw->rsv,
+		.keyd = &rw->keyd };
 
 	uint32_t info = 0;
 
 	msg_get_uint32(m, RW_FIELD_INFO, &info);
 
 	if (msg_get_buf(m, RW_FIELD_RECORD, &rr.pickle, &rr.pickle_sz,
-			MSG_GET_DIRECT) != 0) {
+				MSG_GET_DIRECT) != 0) {
 		cf_crash(AS_RW, "dup-res ack: no record"); // already parsed ok
 	}
 

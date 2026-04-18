@@ -33,7 +33,6 @@
 
 #include "base/transaction.h"
 
-
 //==========================================================
 // Forward declarations.
 //
@@ -47,37 +46,51 @@ struct as_remote_record_s;
 struct as_storage_rd_s;
 struct as_transaction_s;
 
-
 //==========================================================
 // Public API.
 //
 
 bool is_mrt_provisional(const struct as_index_s* r);
 bool is_mrt_original(const struct as_index_s* r);
-bool is_mrt_monitor_write(const struct as_namespace_s* ns, const struct as_index_s* r);
-bool is_mrt_setless_tombstone(const struct as_namespace_s* ns, const struct as_index_s* r);
-void mrt_free_orig(cf_arenax* arena, struct as_index_s* r, cf_arenax_puddle* puddle);
+bool is_mrt_monitor_write(const struct as_namespace_s* ns,
+		const struct as_index_s* r);
+bool is_mrt_setless_tombstone(const struct as_namespace_s* ns,
+		const struct as_index_s* r);
+void mrt_free_orig(cf_arenax* arena, struct as_index_s* r,
+		cf_arenax_puddle* puddle);
 
 int mrt_allow_read(struct as_transaction_s* tr, const struct as_index_s* r);
 int mrt_allow_write(struct as_transaction_s* tr, const struct as_index_s* r);
-bool mrt_write_on_locking_only(const struct as_transaction_s* tr, const struct as_index_s* r);
+bool mrt_write_on_locking_only(const struct as_transaction_s* tr,
+		const struct as_index_s* r);
 int mrt_allow_udf_write(struct as_transaction_s* tr, const struct as_index_s* r);
-struct as_index_s* read_r(struct as_namespace_s* ns, struct as_index_s* r, bool is_mrt);
+struct as_index_s* read_r(struct as_namespace_s* ns, struct as_index_s* r,
+		bool is_mrt);
 
-bool mrt_skip_cleanup(struct as_namespace_s* ns, struct as_index_tree_s* tree, struct as_index_ref_s* r_ref);
+bool mrt_skip_cleanup(struct as_namespace_s* ns, struct as_index_tree_s* tree,
+		struct as_index_ref_s* r_ref);
 
-int set_mrt_id_from_msg(struct as_storage_rd_s* rd, const struct as_transaction_s* tr);
+int set_mrt_id_from_msg(struct as_storage_rd_s* rd,
+		const struct as_transaction_s* tr);
 void set_mrt_id(struct as_storage_rd_s* rd, uint64_t mrt_id);
 bool is_first_mrt(const struct as_storage_rd_s* rd);
-void finish_first_mrt(struct as_storage_rd_s* rd, const struct as_index_s* old_r, cf_arenax_puddle* puddle);
+void finish_first_mrt(struct as_storage_rd_s* rd,
+		const struct as_index_s* old_r, cf_arenax_puddle* puddle);
 
-struct as_record_version_s* mrt_write_fill_version(struct as_record_version_s* v, const struct as_transaction_s* tr);
-struct as_record_version_s* mrt_read_fill_version(struct as_record_version_s* v, const struct as_transaction_s* tr);
+struct as_record_version_s* mrt_write_fill_version(struct as_record_version_s* v,
+		const struct as_transaction_s* tr);
+struct as_record_version_s* mrt_read_fill_version(struct as_record_version_s* v,
+		const struct as_transaction_s* tr);
 
-bool mrt_load_orig_pickle(struct as_namespace_s* ns, struct as_index_s* r, uint8_t** pickle, uint32_t* pickle_sz);
+bool mrt_load_orig_pickle(struct as_namespace_s* ns, struct as_index_s* r,
+		uint8_t** pickle, uint32_t* pickle_sz);
 
 bool is_rr_mrt(const struct as_remote_record_s* rr);
-bool is_rr_mrt_monitor_write(const struct as_remote_record_s* rr, uint32_t set_id);
-int mrt_apply_original(struct as_remote_record_s* rr, struct as_index_ref_s* r_ref);
-int mrt_apply_roll(struct as_remote_record_s* rr, struct as_index_ref_s* r_ref, struct as_storage_rd_s* rd);
-void finish_replace_mrt(struct as_storage_rd_s* rd, const struct as_index_s* old_r, cf_arenax_puddle* puddle);
+bool is_rr_mrt_monitor_write(const struct as_remote_record_s* rr,
+		uint32_t set_id);
+int mrt_apply_original(struct as_remote_record_s* rr,
+		struct as_index_ref_s* r_ref);
+int mrt_apply_roll(struct as_remote_record_s* rr, struct as_index_ref_s* r_ref,
+		struct as_storage_rd_s* rd);
+void finish_replace_mrt(struct as_storage_rd_s* rd,
+		const struct as_index_s* old_r, cf_arenax_puddle* puddle);

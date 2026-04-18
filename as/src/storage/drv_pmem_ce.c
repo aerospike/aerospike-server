@@ -24,8 +24,6 @@
 // Includes.
 //
 
-#include "storage/storage.h"
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -36,7 +34,7 @@
 
 #include "base/datamodel.h"
 #include "fabric/partition.h"
-
+#include "storage/storage.h"
 
 //==========================================================
 // Inlines & macros.
@@ -49,7 +47,6 @@ pmem_crash_ce(void)
 	// Not reached - just for noreturn.
 	abort();
 }
-
 
 //==========================================================
 // Public API.
@@ -207,8 +204,7 @@ as_storage_flush_pmeta_pmem(as_namespace* ns, uint32_t start_pid,
 }
 
 void
-as_storage_stats_pmem(as_namespace* ns, uint32_t* avail_pct,
-		uint64_t* used_bytes)
+as_storage_stats_pmem(as_namespace* ns, uint32_t* avail_pct, uint64_t* used_bytes)
 {
 	pmem_crash_ce();
 }

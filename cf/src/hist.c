@@ -43,7 +43,6 @@
 
 #include "warnings.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
@@ -70,14 +69,15 @@ struct histogram_s {
 	char dump_output[150];
 };
 
-#define HIST_TAG_MILLISECONDS	"msec"
-#define HIST_TAG_MICROSECONDS	"usec"
-#define HIST_TAG_SIZE			"bytes"
-#define HIST_TAG_COUNT			"count"
+#define HIST_TAG_MILLISECONDS "msec"
+#define HIST_TAG_MICROSECONDS "usec"
+#define HIST_TAG_SIZE "bytes"
+#define HIST_TAG_COUNT "count"
 
 // e.g. units=bytes:[128K-256K)=12345:[256K-512K)=54321 ... \0
 #define SNAPSHOT_SIZE (5 + 1 + 5 + 1 + (N_BUCKETS * (1 + 11 + 1 + 20)) + 1)
 
+// clang-format off
 static const char* SNAPSHOT_TAGS[] = {
 		"0",
 		"1",  "2",  "4",  "8",  "16",  "32",  "64",  "128",  "256",  "512",
@@ -121,7 +121,7 @@ static const char BYTE_MSB[] = {
 		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8,
 		8, 8, 8, 8, 8, 8, 8, 8,  8, 8, 8, 8, 8, 8, 8, 8
 };
-
+// clang-format on
 
 //==========================================================
 // Inlines & macros.
@@ -171,7 +171,6 @@ append_semicolon(char* out)
 	*out++ = ';';
 	*out = '\0';
 }
-
 
 //==========================================================
 // Public API.
@@ -320,7 +319,7 @@ histogram_dump(histogram* h)
 	cf_info(AS_INFO, "histogram dump: %s (%lu total) %s", h->name, total,
 			h->scale_tag);
 
-	for ( ; i <= j; i++) {
+	for (; i <= j; i++) {
 		if (counts[i] == 0) { // print only non-zero columns
 			continue;
 		}
@@ -373,8 +372,9 @@ histogram_dump(histogram* h)
 		uint64_t over = total - subtotals[b];
 
 		uint64_t diff_overs = over - h->overs[b];
-		double pct_over_b = diff_total != 0 ?
-				(double)(diff_overs * 100) / (double)diff_total : 0;
+		double pct_over_b = diff_total != 0
+				? (double)(diff_overs * 100) / (double)diff_total
+				: 0;
 
 		if (h->timestamp != 0) {
 			out += sprintf(out, ",%.2f", pct_over_b);

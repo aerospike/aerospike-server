@@ -37,14 +37,13 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef pthread_t cf_tid;
-typedef void* (*cf_thread_run_fn) (void* udata);
-typedef void (*cf_thread_exit_fn) (void* udata);
+typedef void* (*cf_thread_run_fn)(void* udata);
+typedef void (*cf_thread_exit_fn)(void* udata);
 
 typedef struct cf_thread_stats_s {
 	uint32_t n_joinable;
@@ -53,13 +52,11 @@ typedef struct cf_thread_stats_s {
 	uint32_t n_pool_active;
 } cf_thread_stats;
 
-
 //==========================================================
 // Globals.
 //
 
 extern __thread pid_t g_sys_tid;
-
 
 //==========================================================
 // Public API.

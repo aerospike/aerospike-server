@@ -42,6 +42,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "dynbuf.h"
 #include "socket.h"
 
 /**
@@ -52,8 +53,7 @@
 /**
  * Endpoint address type.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * Undefined address type.
 	 */
@@ -75,8 +75,7 @@ typedef enum
 /**
  * An endpoint definition.
  */
-typedef struct as_endpoint_s
-{
+typedef struct as_endpoint_s {
 	/**
 	 *  Bit field of capabilities. currently carries only tls enabled flag.
 	 */
@@ -98,13 +97,12 @@ typedef struct as_endpoint_s
 	 * the address type.
 	 */
 	uint8_t addr[];
-}__attribute__((__packed__)) as_endpoint;
+} __attribute__((__packed__)) as_endpoint;
 
 /**
  * A list of endpoints.
  */
-typedef struct as_endpoint_list_s
-{
+typedef struct as_endpoint_list_s {
 	/**
 	 * The number of endpoints contained in the list. Max of 255.
 	 */
@@ -114,15 +112,14 @@ typedef struct as_endpoint_list_s
 	 * The list of endpoints.
 	 */
 	as_endpoint endpoints[];
-}__attribute__((__packed__)) as_endpoint_list;
+} __attribute__((__packed__)) as_endpoint_list;
 
 /**
  * Iterate function for iterating over endpoints in an endpoint list.
  * @param endpoint current endpoint in the iteration.
  * @param udata udata passed through from the invoker of the iterate function.
  */
-typedef void
-	(*as_endpoint_iterate_fn)(const as_endpoint* endpoint, void* udata);
+typedef void (*as_endpoint_iterate_fn)(const as_endpoint* endpoint, void* udata);
 
 /**
  * Filter function for an endpoints in an endpoint list.
@@ -131,32 +128,30 @@ typedef void
  * @return should return true if this endpoint passes the filter, false if it
  * fails the filter.
  */
-typedef bool
-	(*as_endpoint_filter_fn)(const as_endpoint* endpoint, void* udata);
+typedef bool (*as_endpoint_filter_fn)(const as_endpoint* endpoint, void* udata);
 
 /**
  * Get the sizeof an endpoint. Accounts for variable size of the address field.
  * @return the size of the endpoint address. Zero if the endpoint address is
  * invalid.
  */
-size_t
-as_endpoint_sizeof(const as_endpoint* endpoint);
+size_t as_endpoint_sizeof(const as_endpoint* endpoint);
 
 /**
  * Enable a capability on an endpoint given its mask.
  * @param endpoint the endpoint.
  * @param capability_mask the capability mask.
  */
-void
-as_endpoint_capability_enable(as_endpoint* endpoint, uint8_t capability_mask);
+void as_endpoint_capability_enable(as_endpoint* endpoint,
+		uint8_t capability_mask);
 
 /**
  * Disable a capability on an endpoint given its mask.
  * @param endpoint the endpoint.
  * @param capability_mask the capability mask.
  */
-void
-as_endpoint_capability_disable(as_endpoint* endpoint, uint8_t capability_mask);
+void as_endpoint_capability_disable(as_endpoint* endpoint,
+		uint8_t capability_mask);
 
 /**
  * Connect to an endpoint.
@@ -167,8 +162,8 @@ as_endpoint_capability_disable(as_endpoint* endpoint, uint8_t capability_mask);
  * @param sock (output) will be populated if connections is successful.
  * @return -1 on success, 0 on failure.
  */
-int
-as_endpoint_connect(const as_endpoint* endpoint, int32_t timeout, cf_socket* sock);
+int as_endpoint_connect(const as_endpoint* endpoint, int32_t timeout,
+		cf_socket* sock);
 
 /**
  * Connect to the best matching endpoint in the endpoint list.
@@ -182,39 +177,38 @@ as_endpoint_connect(const as_endpoint* endpoint, int32_t timeout, cf_socket* soc
  * @return the connected endpoint on success, NULL if no endpoint count be
  * connected.
  */
-const as_endpoint*
-as_endpoint_connect_any(const as_endpoint_list* endpoint_list,
-	as_endpoint_filter_fn filter_fn, void* filter_udata, int32_t timeout, cf_socket* sock);
+const as_endpoint* as_endpoint_connect_any(const as_endpoint_list* endpoint_list,
+		as_endpoint_filter_fn filter_fn, void* filter_udata, int32_t timeout,
+		cf_socket* sock);
 /**
  * Convert a socket configuration to an endpoint inplace.
  * @return a heap allocated, converted endpoint. Should be freed using cf_free
  * once the endpoint is no longer needed.
  */
-void
-as_endpoint_from_sock_cfg_fill(const cf_sock_cfg* src, as_endpoint* endpoint);
+void as_endpoint_from_sock_cfg_fill(const cf_sock_cfg* src,
+		as_endpoint* endpoint);
 
 /**
  * Convert a socket configuration to an endpoint.
  * @return a heap allocated, converted endpoint. Should be freed using cf_free
  * once the endpoint is no longer needed.
  */
-as_endpoint*
-as_endpoint_from_sock_cfg(const cf_sock_cfg* src);
+as_endpoint* as_endpoint_from_sock_cfg(const cf_sock_cfg* src);
 
 /**
  * Convert an endpoint to a cf_sock_addr.
  * @param endpoint the source endpoint.
  * @param sock_addr the target socket address.
  */
-int
-as_endpoint_to_sock_addr(const as_endpoint* endpoint, cf_sock_addr* sock_addr);
+int as_endpoint_to_sock_addr(const as_endpoint* endpoint,
+		cf_sock_addr* sock_addr);
 
 /**
  * Indicates if an endpoint supports listed capabilities.
  * @return true if the endpoint supports the input capability.
  */
-bool
-as_endpoint_capability_is_supported(const as_endpoint* endpoint, uint8_t capability_mask);
+bool as_endpoint_capability_is_supported(const as_endpoint* endpoint,
+		uint8_t capability_mask);
 
 /**
  * Iterate over endpoints in an endpoint list and invoke the iterate function
@@ -225,9 +219,8 @@ as_endpoint_capability_is_supported(const as_endpoint* endpoint, uint8_t capabil
  * NULL if there is no plugin data.
  * @return the size of the plugin data. 0 if there is no plugin data.
  */
-void
-as_endpoint_list_iterate(const as_endpoint_list* endpoint_list, as_endpoint_iterate_fn iterate_fn,
-	void* udata);
+void as_endpoint_list_iterate(const as_endpoint_list* endpoint_list,
+		as_endpoint_iterate_fn iterate_fn, void* udata);
 
 /**
  * Return the in memory size in bytes of the endpoint list.
@@ -235,8 +228,7 @@ as_endpoint_list_iterate(const as_endpoint_list* endpoint_list, as_endpoint_iter
  * @param size (output) the size of the list on success.
  * @return 0 on successful size calculation, -1 otherwise.
  */
-int
-as_endpoint_list_sizeof(const as_endpoint_list* endpoint_list, size_t* size);
+int as_endpoint_list_sizeof(const as_endpoint_list* endpoint_list, size_t* size);
 
 /**
  * Return the in memory size in bytes of the endpoint list, but abort if the
@@ -246,8 +238,8 @@ as_endpoint_list_sizeof(const as_endpoint_list* endpoint_list, size_t* size);
  * @param size_max the maximum size until which parsing will be attempted.
  * @return 0 on successful size calculation, -1 otherwise.
  */
-int
-as_endpoint_list_nsizeof(const as_endpoint_list* endpoint_list, size_t* size, size_t size_max);
+int as_endpoint_list_nsizeof(const as_endpoint_list* endpoint_list,
+		size_t* size, size_t size_max);
 
 /**
  * Convert a server configuration to an endpoint list in place into the
@@ -255,8 +247,8 @@ as_endpoint_list_nsizeof(const as_endpoint_list* endpoint_list, size_t* size, si
  * @param serv_cfg source server configuration.
  * @param endpoint_list destination endpoint list.
  */
-void
-as_endpoint_list_from_serv_cfg_fill(const cf_serv_cfg* serv_cfg, as_endpoint_list* endpoint_list);
+void as_endpoint_list_from_serv_cfg_fill(const cf_serv_cfg* serv_cfg,
+		as_endpoint_list* endpoint_list);
 
 /**
  * Convert a server configuration to an endpoint list.
@@ -264,8 +256,7 @@ as_endpoint_list_from_serv_cfg_fill(const cf_serv_cfg* serv_cfg, as_endpoint_lis
  * @return a heap allocated endpoint list.  Should be freed using cf_free
  * once the endpoint is no longer needed.
  */
-as_endpoint_list*
-as_endpoint_list_from_serv_cfg(const cf_serv_cfg* serv_cfg);
+as_endpoint_list* as_endpoint_list_from_serv_cfg(const cf_serv_cfg* serv_cfg);
 
 /**
  * Compare two endpoint lists for equality.
@@ -273,8 +264,8 @@ as_endpoint_list_from_serv_cfg(const cf_serv_cfg* serv_cfg);
  * @param list2 the second list. NULL allowed.
  * @return true iff the lists are equals, false otherwise.
  */
-bool
-as_endpoint_lists_are_equal(const as_endpoint_list* list1, const as_endpoint_list* list2);
+bool as_endpoint_lists_are_equal(const as_endpoint_list* list1,
+		const as_endpoint_list* list2);
 
 /**
  * Check if two lists overlap in at least one endpoint.
@@ -284,9 +275,8 @@ as_endpoint_lists_are_equal(const as_endpoint_list* list1, const as_endpoint_lis
  * node capabilities, false if capabilities should also be matched.
  * @return true iff the lists are overlap, false otherwise.
  */
-bool
-as_endpoint_lists_are_overlapping(const as_endpoint_list* list1, const as_endpoint_list* list2,
-	bool ignore_capabilities);
+bool as_endpoint_lists_are_overlapping(const as_endpoint_list* list1,
+		const as_endpoint_list* list2, bool ignore_capabilities);
 
 /**
  * Convert an endpoint list to a string.
@@ -296,9 +286,8 @@ as_endpoint_lists_are_overlapping(const as_endpoint_list* list1, const as_endpoi
  * @return the number of characters printed (excluding the null  byte  used  to
  end  output  to strings)
  */
-int
-as_endpoint_list_to_string(const as_endpoint_list* endpoint_list, char* buffer,
-	size_t buffer_capacity);
+int as_endpoint_list_to_string(const as_endpoint_list* endpoint_list,
+		char* buffer, size_t buffer_capacity);
 
 /**
  * Convert an endpoint list to a string matching capabilities.
@@ -310,15 +299,13 @@ as_endpoint_list_to_string(const as_endpoint_list* endpoint_list, char* buffer,
  * @return the number of characters printed (excluding the null  byte  used  to
  * end output to strings)
  */
-int
-as_endpoint_list_to_string_match_capabilities(
-		const as_endpoint_list* endpoint_list, char* buffer,
-		size_t buffer_capacity, uint8_t capability_mask, uint8_t capabilities);
+int as_endpoint_list_to_string_match_capabilities(const as_endpoint_list* endpoint_list,
+		char* buffer, size_t buffer_capacity, uint8_t capability_mask,
+		uint8_t capabilities);
 
 /**
  * Populate dyn buf with endpoints info.
  * @param endpoint_list the input list. NULL allowed.
  * @param db the dynamic buffer.
  */
-void
-as_endpoint_list_info(const as_endpoint_list* endpoint_list, cf_dyn_buf* db);
+void as_endpoint_list_info(const as_endpoint_list* endpoint_list, cf_dyn_buf* db);

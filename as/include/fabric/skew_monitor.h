@@ -31,36 +31,30 @@
 /**
  * Initialize skew monitor.
  */
-void
-as_skew_monitor_init();
+void as_skew_monitor_init();
 
 /**
  * Return the current estimate of the clock skew in the cluster.
  */
-uint64_t
-as_skew_monitor_skew();
+uint64_t as_skew_monitor_skew();
 
 /**
  * Return the currently estimated outliers from our cluster.
  * Outliers should have space to hold at least AS_CLUSTER_SZ nodes.
  */
-uint32_t
-as_skew_monitor_outliers(cf_vector* outliers);
+uint32_t as_skew_monitor_outliers(cf_vector* outliers);
 
 /**
  * Print skew outliers to a dynamic buffer.
  */
-uint32_t
-as_skew_monitor_outliers_append(cf_dyn_buf* db);
+uint32_t as_skew_monitor_outliers_append(cf_dyn_buf* db);
 
 /**
  * Print skew monitor info to a dynamic buffer.
  */
-void
-as_skew_monitor_info(cf_dyn_buf* db);
+void as_skew_monitor_info(cf_dyn_buf* db);
 
 /**
  * Dump some debugging information to the logs.
  */
-void
-as_skew_monitor_dump();
+void as_skew_monitor_dump();

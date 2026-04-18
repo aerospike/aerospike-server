@@ -28,7 +28,6 @@
 
 #include "dynbuf.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -37,7 +36,8 @@
 void udf_cask_init(void);
 
 // Info commands.
-void udf_cask_info_clear_cache(const char* name, const char* params, cf_dyn_buf* out);
+void udf_cask_info_clear_cache(const char* name, const char* params,
+		cf_dyn_buf* out);
 void udf_cask_info_get(const char* name, const char* params, cf_dyn_buf* out);
 void udf_cask_info_list(const char* name, const char* params, cf_dyn_buf* out);
 void udf_cask_info_put(const char* name, const char* params, cf_dyn_buf* out);

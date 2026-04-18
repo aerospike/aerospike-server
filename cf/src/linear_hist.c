@@ -37,15 +37,14 @@
 #include "dynbuf.h"
 #include "log.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 #define LINEAR_HIST_NAME_SIZE 512
 
-#define LINEAR_HIST_TAG_SECONDS	"seconds"
-#define LINEAR_HIST_TAG_SIZE	"bytes"
+#define LINEAR_HIST_TAG_SECONDS "seconds"
+#define LINEAR_HIST_TAG_SIZE "bytes"
 
 struct linear_hist_s {
 	char name[LINEAR_HIST_NAME_SIZE];
@@ -55,7 +54,7 @@ struct linear_hist_s {
 	char* info_snapshot;
 
 	uint32_t num_buckets;
-	uint64_t *counts;
+	uint64_t* counts;
 
 	uint32_t start;
 	uint32_t bucket_width;
@@ -63,7 +62,6 @@ struct linear_hist_s {
 
 // e.g. units=bytes:hist-width=131072:bucket-width=1024:buckets=
 #define PREFIX_SIZE (5 + 1 + 5 + 1 + 10 + 1 + 10 + 1 + 12 + 1 + 10 + 1 + 7 + 1)
-
 
 //==========================================================
 // Public API.
@@ -73,7 +71,7 @@ struct linear_hist_s {
 // Create a linear histogram.
 //
 linear_hist*
-linear_hist_create(const char *name, linear_hist_scale scale, uint32_t start,
+linear_hist_create(const char* name, linear_hist_scale scale, uint32_t start,
 		uint32_t max_offset, uint32_t num_buckets)
 {
 	cf_assert(name, AS_INFO, "null histogram name");
@@ -84,7 +82,7 @@ linear_hist_create(const char *name, linear_hist_scale scale, uint32_t start,
 	cf_assert(start + max_offset >= start, AS_INFO, "max_offset overflow");
 	cf_assert(num_buckets != 0, AS_INFO, "num_buckets 0");
 
-	linear_hist *h = cf_malloc(sizeof(linear_hist));
+	linear_hist* h = cf_malloc(sizeof(linear_hist));
 
 	strcpy(h->name, name);
 
@@ -115,7 +113,7 @@ linear_hist_create(const char *name, linear_hist_scale scale, uint32_t start,
 // Destroy a linear histogram.
 //
 void
-linear_hist_destroy(linear_hist *h)
+linear_hist_destroy(linear_hist* h)
 {
 	cf_mutex_destroy(&h->info_lock);
 	cf_free(h->counts);
@@ -126,7 +124,7 @@ linear_hist_destroy(linear_hist *h)
 // Clear, re-scale/re-size a linear histogram.
 //
 void
-linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset,
+linear_hist_reset(linear_hist* h, uint32_t start, uint32_t max_offset,
 		uint32_t num_buckets)
 {
 	cf_assert(num_buckets != 0, AS_INFO, "num_buckets 0");
@@ -145,7 +143,7 @@ linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset,
 // Clear and (re-)scale a linear histogram.
 //
 void
-linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset)
+linear_hist_clear(linear_hist* h, uint32_t start, uint32_t max_offset)
 {
 	h->start = start;
 	h->bucket_width = (max_offset + (h->num_buckets - 1)) / h->num_buckets;
@@ -155,14 +153,14 @@ linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset)
 		h->bucket_width = 1;
 	}
 
-	memset((void *)h->counts, 0, sizeof(uint64_t) * h->num_buckets);
+	memset((void*)h->counts, 0, sizeof(uint64_t) * h->num_buckets);
 }
 
 //------------------------------------------------
 // Access method for total count.
 //
 uint64_t
-linear_hist_get_total(linear_hist *h)
+linear_hist_get_total(linear_hist* h)
 {
 	uint64_t total_count = 0;
 
@@ -177,10 +175,10 @@ linear_hist_get_total(linear_hist *h)
 // Merge h2 into h1.
 //
 void
-linear_hist_merge(linear_hist *h1, linear_hist *h2)
+linear_hist_merge(linear_hist* h1, linear_hist* h2)
 {
 	if (! (h1->num_buckets == h2->num_buckets && h1->start == h2->start &&
-			h1->bucket_width == h2->bucket_width)) {
+				h1->bucket_width == h2->bucket_width)) {
 		cf_crash(AS_INFO, "linear_hist_merge - dissimilar histograms");
 	}
 
@@ -198,7 +196,7 @@ linear_hist_merge(linear_hist *h1, linear_hist *h2)
 // atomic increment.
 //
 void
-linear_hist_insert_data_point(linear_hist *h, uint32_t point)
+linear_hist_insert_data_point(linear_hist* h, uint32_t point)
 {
 	int32_t offset = (int32_t)(point - h->start);
 	int32_t bucket = 0;
@@ -221,8 +219,8 @@ linear_hist_insert_data_point(linear_hist *h, uint32_t point)
 // bucket).
 //
 uint64_t
-linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
-		linear_hist_threshold *p_threshold)
+linear_hist_get_threshold_for_fraction(linear_hist* h, uint32_t tenths_pct,
+		linear_hist_threshold* p_threshold)
 {
 	return linear_hist_get_threshold_for_subtotal(h,
 			(linear_hist_get_total(h) * (uint64_t)tenths_pct) / 1000,
@@ -236,8 +234,8 @@ linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
 // bucket).
 //
 uint64_t
-linear_hist_get_threshold_for_subtotal(linear_hist *h, uint64_t subtotal,
-		linear_hist_threshold *p_threshold)
+linear_hist_get_threshold_for_subtotal(linear_hist* h, uint64_t subtotal,
+		linear_hist_threshold* p_threshold)
 {
 	p_threshold->bucket_width = h->bucket_width;
 	p_threshold->target_count = subtotal;
@@ -277,7 +275,7 @@ linear_hist_get_threshold_for_subtotal(linear_hist *h, uint64_t subtotal,
 // format.
 //
 void
-linear_hist_dump(linear_hist *h)
+linear_hist_dump(linear_hist* h)
 {
 	uint32_t i = h->num_buckets;
 	uint32_t j = 0;
@@ -312,7 +310,7 @@ linear_hist_dump(linear_hist *h)
 		return;
 	}
 
-	for ( ; i <= j; i++) {
+	for (; i <= j; i++) {
 		if (h->counts[i] == 0) { // print only non-zero columns
 			continue;
 		}
@@ -344,7 +342,7 @@ linear_hist_dump(linear_hist *h)
 // Save a linear histogram "snapshot".
 //
 void
-linear_hist_save_info(linear_hist *h)
+linear_hist_save_info(linear_hist* h)
 {
 	// For now, just don't bother if there's too much to save.
 	if (h->num_buckets > 1024) {
@@ -359,9 +357,9 @@ linear_hist_save_info(linear_hist *h)
 	h->info_snapshot = cf_realloc(h->info_snapshot, size);
 
 	int prefix_len = sprintf(h->info_snapshot,
-			"units=%s:hist-width=%u:bucket-width=%u:buckets=",
-			h->scale_tag, h->num_buckets * h->bucket_width, h->bucket_width);
-	char *at = h->info_snapshot + prefix_len;
+			"units=%s:hist-width=%u:bucket-width=%u:buckets=", h->scale_tag,
+			h->num_buckets * h->bucket_width, h->bucket_width);
+	char* at = h->info_snapshot + prefix_len;
 
 	for (uint32_t b = 0; b < h->num_buckets; b++) {
 		uint64_t count = h->counts[b];
@@ -378,7 +376,7 @@ linear_hist_save_info(linear_hist *h)
 // Append a linear histogram "snapshot" to db.
 //
 void
-linear_hist_get_info(linear_hist *h, cf_dyn_buf *db)
+linear_hist_get_info(linear_hist* h, cf_dyn_buf* db)
 {
 	cf_mutex_lock(&h->info_lock);
 	cf_dyn_buf_append_string(db, h->info_snapshot ? h->info_snapshot : "");

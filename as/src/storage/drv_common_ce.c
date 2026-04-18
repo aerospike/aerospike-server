@@ -38,7 +38,6 @@
 #include "storage/flat.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -90,8 +89,7 @@ drv_cold_start_sweeps_done(as_namespace* ns)
 }
 
 as_record*
-drv_current_record(as_namespace* ns, as_record* r, int file_id,
-		uint64_t rblock_id)
+drv_current_record(as_namespace* ns, as_record* r, int file_id, uint64_t rblock_id)
 {
 	if (r->file_id == file_id && r->rblock_id == rblock_id) {
 		return r;

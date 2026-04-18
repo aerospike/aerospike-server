@@ -32,14 +32,12 @@
 
 #include "base/transaction.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_transaction_s;
 struct rw_request_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -80,22 +78,21 @@ typedef enum {
 #define RW_OP_REPL_PING_ACK 7
 #define RW_OP_REPL_WRITE 8
 
-#define RW_INFO_UNUSED_1		0x0001 // was XDR (used in 4.9 & 5.0.0.3)
-#define RW_INFO_NO_REPL_ACK		0x0002
-#define RW_INFO_UNUSED_4		0x0004
-#define RW_INFO_UNUSED_8		0x0008
-#define RW_INFO_UNUSED_10		0x0010
-#define RW_INFO_UNUSED_20		0x0020
-#define RW_INFO_UNUSED_40		0x0040
-#define RW_INFO_UNUSED_80		0x0080 // was sindex-touched (used up to 5.6)
-#define RW_INFO_UNUSED_100		0x0100
-#define RW_INFO_UNREPLICATED	0x0200 // enterprise only
+#define RW_INFO_UNUSED_1 0x0001 // was XDR (used in 4.9 & 5.0.0.3)
+#define RW_INFO_NO_REPL_ACK 0x0002
+#define RW_INFO_UNUSED_4 0x0004
+#define RW_INFO_UNUSED_8 0x0008
+#define RW_INFO_UNUSED_10 0x0010
+#define RW_INFO_UNUSED_20 0x0020
+#define RW_INFO_UNUSED_40 0x0040
+#define RW_INFO_UNUSED_80 0x0080 // was sindex-touched (used up to 5.6)
+#define RW_INFO_UNUSED_100 0x0100
+#define RW_INFO_UNREPLICATED 0x0200 // enterprise only
 
 typedef struct rw_request_hkey_s {
-	uint32_t	ns_ix;
-	cf_digest	keyd;
+	uint32_t ns_ix;
+	cf_digest keyd;
 } __attribute__((__packed__)) rw_request_hkey;
-
 
 //==========================================================
 // Public API.
@@ -104,7 +101,8 @@ typedef struct rw_request_hkey_s {
 void as_rw_init();
 
 uint32_t rw_request_hash_count();
-transaction_status rw_request_hash_insert(rw_request_hkey* hkey, struct rw_request_s* rw, struct as_transaction_s* tr);
+transaction_status rw_request_hash_insert(rw_request_hkey* hkey,
+		struct rw_request_s* rw, struct as_transaction_s* tr);
 void rw_request_hash_delete(rw_request_hkey* hkey, struct rw_request_s* rw);
 struct rw_request_s* rw_request_hash_get(rw_request_hkey* hkey);
 

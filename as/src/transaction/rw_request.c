@@ -28,7 +28,6 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "aerospike/as_atomic.h"
 #include "citrusleaf/alloc.h"
@@ -38,13 +37,11 @@
 #include "dynbuf.h"
 #include "log.h"
 
-#include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/service.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -55,13 +52,11 @@ typedef struct rw_wait_ele_s {
 	struct rw_wait_ele_s* next;
 } rw_wait_ele;
 
-
 //==========================================================
 // Globals.
 //
 
 static uint32_t g_rw_tid = 0;
-
 
 //==========================================================
 // Public API.
@@ -73,24 +68,24 @@ rw_request_create(cf_digest* keyd)
 	rw_request* rw = cf_rc_alloc(sizeof(rw_request));
 
 	// as_transaction look-alike:
-	rw->msgp				= NULL;
-	rw->msg_fields			= 0;
-	rw->origin				= 0;
-	rw->from_flags			= 0;
-	rw->from.any			= NULL;
-	rw->from_data.any		= 0;
-	rw->keyd				= *keyd;
-	rw->start_time			= 0;
-	rw->benchmark_time		= 0;
+	rw->msgp = NULL;
+	rw->msg_fields = 0;
+	rw->origin = 0;
+	rw->from_flags = 0;
+	rw->from.any = NULL;
+	rw->from_data.any = 0;
+	rw->keyd = *keyd;
+	rw->start_time = 0;
+	rw->benchmark_time = 0;
 
 	AS_PARTITION_RESERVATION_INIT(rw->rsv);
 
-	rw->end_time			= 0;
-	rw->result_code			= AS_OK;
-	rw->flags				= 0;
-	rw->generation			= 0;
-	rw->void_time			= 0;
-	rw->last_update_time	= 0;
+	rw->end_time = 0;
+	rw->result_code = AS_OK;
+	rw->flags = 0;
+	rw->generation = 0;
+	rw->void_time = 0;
+	rw->last_update_time = 0;
 	// End of as_transaction look-alike.
 
 	cf_mutex_init(&rw->lock);

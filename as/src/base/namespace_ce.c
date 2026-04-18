@@ -38,13 +38,11 @@
 #include "base/index.h"
 #include "sindex/sindex_arena.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static void setup_namespace(as_namespace* ns);
-
 
 //==========================================================
 // Public API.
@@ -59,23 +57,21 @@ as_namespaces_setup(bool cold_start_cmd, uint32_t instance)
 }
 
 bool
-as_namespace_xmem_shutdown(as_namespace *ns, uint32_t instance)
+as_namespace_xmem_shutdown(as_namespace* ns, uint32_t instance)
 {
 	// For enterprise version only.
 	return true;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
 void
-as_namespace_finish_setup(as_namespace *ns, uint32_t instance)
+as_namespace_finish_setup(as_namespace* ns, uint32_t instance)
 {
 	// For enterprise version only.
 }
-
 
 //==========================================================
 // Local helpers.
@@ -92,8 +88,8 @@ setup_namespace(as_namespace* ns)
 	// Set up the set name vmap.
 	//
 
-	ns->p_sets_vmap = (cf_vmapx*)
-			cf_malloc(cf_vmapx_sizeof(sizeof(as_set), AS_SET_MAX_COUNT));
+	ns->p_sets_vmap = (cf_vmapx*)cf_malloc(cf_vmapx_sizeof(sizeof(as_set),
+			AS_SET_MAX_COUNT));
 
 	cf_vmapx_init(ns->p_sets_vmap, sizeof(as_set), AS_SET_MAX_COUNT,
 			AS_SET_MAX_COUNT + 1, AS_SET_NAME_MAX_SIZE);

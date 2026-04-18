@@ -27,8 +27,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 
@@ -45,16 +45,16 @@
 
 // State for any open info port.
 typedef struct {
-	int			recv_pos;
-	int			recv_alloc;
-	uint8_t		*recv_buf;
+	int recv_pos;
+	int recv_alloc;
+	uint8_t* recv_buf;
 
-	int			xmit_pos;    // where we're currently writing
-	int			xmit_limit;  // the end of the write buffer
-	int			xmit_alloc;
-	uint8_t		*xmit_buf;
+	int xmit_pos; // where we're currently writing
+	int xmit_limit; // the end of the write buffer
+	int xmit_alloc;
+	uint8_t* xmit_buf;
 
-	cf_socket	sock;
+	cf_socket sock;
 
 } info_port_state;
 
@@ -67,19 +67,20 @@ static cf_sockets g_sockets;
 static volatile int g_started = false;
 
 void
-info_port_state_free(info_port_state *ips)
+info_port_state_free(info_port_state* ips)
 {
-	if (ips->recv_buf) cf_free(ips->recv_buf);
-	if (ips->xmit_buf) cf_free(ips->xmit_buf);
+	if (ips->recv_buf)
+		cf_free(ips->recv_buf);
+	if (ips->xmit_buf)
+		cf_free(ips->xmit_buf);
 	cf_socket_close(&ips->sock);
 	cf_socket_term(&ips->sock);
 	memset(ips, -1, sizeof(info_port_state));
 	cf_free(ips);
 }
 
-
 int
-thr_info_port_readable(info_port_state *ips)
+thr_info_port_readable(info_port_state* ips)
 {
 	int sz = cf_socket_available(&ips->sock);
 
@@ -94,10 +95,13 @@ thr_info_port_readable(info_port_state *ips)
 		ips->recv_alloc = new_sz;
 	}
 
-	int n = cf_socket_recv(&ips->sock, ips->recv_buf + ips->recv_pos, ips->recv_alloc - ips->recv_pos, 0);
+	int n = cf_socket_recv(&ips->sock, ips->recv_buf + ips->recv_pos,
+			ips->recv_alloc - ips->recv_pos, 0);
 	if (n < 0) {
 		if (errno != EAGAIN) {
-			cf_detail(AS_INFO_PORT, "info socket: read fail: error: rv %d sz was %d errno %d", n, ips->recv_alloc - ips->recv_pos, errno);
+			cf_detail(AS_INFO_PORT,
+					"info socket: read fail: error: rv %d sz was %d errno %d",
+					n, ips->recv_alloc - ips->recv_pos, errno);
 		}
 		return -1;
 	}
@@ -133,16 +137,17 @@ thr_info_port_readable(info_port_state *ips)
 
 		// Fill out the db buffer with the response (always returns 0).
 		as_info_buffer(ips->recv_buf, len, &db);
-		if (db.used_sz == 0)   			cf_dyn_buf_append_char(&db, '\n');
+		if (db.used_sz == 0)
+			cf_dyn_buf_append_char(&db, '\n');
 
 		// See if it has a tab, get that location. It probably does.
-		int tab = cf_str_strnchr(db.buf, db.used_sz , '\t');
+		int tab = cf_str_strnchr(db.buf, db.used_sz, '\t');
 		tab++;
 
 		while (len < ips->recv_pos &&
 				((ips->recv_buf[len] == '\r') || (ips->recv_buf[len] == '\n'))) {
 
-			len ++ ;
+			len++;
 		}
 
 		// Move transmit buffer forward.
@@ -156,7 +161,8 @@ thr_info_port_readable(info_port_state *ips)
 
 		// Queue the response - set to the xmit buf.
 		if (ips->xmit_alloc - ips->xmit_limit < db.used_sz) {
-			ips->xmit_buf = cf_realloc(ips->xmit_buf, db.used_sz + ips->xmit_limit);
+			ips->xmit_buf =
+					cf_realloc(ips->xmit_buf, db.used_sz + ips->xmit_limit);
 			ips->xmit_alloc = db.used_sz + ips->xmit_limit;
 		}
 		memcpy(ips->xmit_buf + ips->xmit_limit, db.buf + tab, db.used_sz - tab);
@@ -168,15 +174,15 @@ thr_info_port_readable(info_port_state *ips)
 	return 0;
 }
 
-
 int
-thr_info_port_writable(info_port_state *ips)
+thr_info_port_writable(info_port_state* ips)
 {
 	// Do we have bytes to write?
 	if (ips->xmit_limit > 0) {
 
 		// Write them!
-		int rv = cf_socket_send(&ips->sock, ips->xmit_buf + ips->xmit_pos, ips->xmit_limit - ips->xmit_pos , MSG_NOSIGNAL);
+		int rv = cf_socket_send(&ips->sock, ips->xmit_buf + ips->xmit_pos,
+				ips->xmit_limit - ips->xmit_pos, MSG_NOSIGNAL);
 		if (rv < 0) {
 			if (errno != EAGAIN) {
 				return -1;
@@ -197,10 +203,9 @@ thr_info_port_writable(info_port_state *ips)
 	return 0;
 }
 
-
 // Demarshal info socket connections.
-void *
-run_info_port(void *arg)
+void*
+run_info_port(void* arg)
 {
 	cf_poll poll;
 	cf_debug(AS_INFO_PORT, "Info port process started");
@@ -223,7 +228,7 @@ run_info_port(void *arg)
 		int32_t n_ev = cf_poll_wait(poll, events, POLL_SZ, -1);
 
 		for (int32_t i = 0; i < n_ev; ++i) {
-			cf_socket *ssock = events[i].data;
+			cf_socket* ssock = events[i].data;
 
 			if (cf_sockets_has_socket(&g_sockets, ssock)) {
 				cf_socket csock;
@@ -232,15 +237,17 @@ run_info_port(void *arg)
 				if (cf_socket_accept(ssock, &csock, &addr) < 0) {
 					// This means we're out of file descriptors.
 					if (errno == EMFILE) {
-						cf_warning(AS_INFO_PORT, "Too many file descriptors in use, consider raising limit");
+						cf_warning(AS_INFO_PORT,
+								"Too many file descriptors in use, consider raising limit");
 						continue;
 					}
 
 					cf_crash(AS_INFO_PORT, "cf_socket_accept() failed");
 				}
 
-				cf_detail(AS_INFO_PORT, "New connection: %s", cf_sock_addr_print(&addr));
-				info_port_state *ips = cf_malloc(sizeof(info_port_state));
+				cf_detail(AS_INFO_PORT, "New connection: %s",
+						cf_sock_addr_print(&addr));
+				info_port_state* ips = cf_malloc(sizeof(info_port_state));
 
 				ips->recv_pos = 0;
 				ips->recv_alloc = 100;
@@ -250,31 +257,36 @@ run_info_port(void *arg)
 				ips->xmit_buf = cf_malloc(100);
 				cf_socket_copy(&csock, &ips->sock);
 
-				cf_poll_add_socket(poll, &csock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
+				cf_poll_add_socket(poll, &csock,
+						EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
 			}
 			else {
-				info_port_state *ips = events[i].data;
+				info_port_state* ips = events[i].data;
 
 				if (ips == NULL) {
 					cf_crash(AS_INFO_PORT, "Event with null handle");
 				}
 
-				cf_detail(AS_INFO_PORT, "Events %x on FD %d", events[i].events, CSFD(&ips->sock));
+				cf_detail(AS_INFO_PORT, "Events %x on FD %d", events[i].events,
+						CSFD(&ips->sock));
 
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
-					cf_detail(AS_INFO_PORT, "Remote close on FD %d", CSFD(&ips->sock));
+					cf_detail(AS_INFO_PORT, "Remote close on FD %d",
+							CSFD(&ips->sock));
 					cf_poll_delete_socket(poll, &ips->sock);
 					info_port_state_free(ips);
 					continue;
 				}
 
-				if ((events[i].events & EPOLLIN) != 0 && thr_info_port_readable(ips) < 0) {
+				if ((events[i].events & EPOLLIN) != 0 &&
+						thr_info_port_readable(ips) < 0) {
 					cf_poll_delete_socket(poll, &ips->sock);
 					info_port_state_free(ips);
 					continue;
 				}
 
-				if ((events[i].events & EPOLLOUT) != 0 && thr_info_port_writable(ips) < 0) {
+				if ((events[i].events & EPOLLOUT) != 0 &&
+						thr_info_port_writable(ips) < 0) {
 					cf_poll_delete_socket(poll, &ips->sock);
 					info_port_state_free(ips);
 					continue;
@@ -285,7 +297,6 @@ run_info_port(void *arg)
 
 	return NULL;
 }
-
 
 void
 as_info_port_start()

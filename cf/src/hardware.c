@@ -29,6 +29,12 @@
 #include <inttypes.h>
 #include <libgen.h>
 #include <limits.h>
+#include <linux/capability.h>
+#include <linux/ethtool.h>
+#include <linux/if.h>
+#include <linux/limits.h>
+#include <linux/mempolicy.h>
+#include <linux/sockios.h>
 #include <mntent.h>
 #include <regex.h>
 #include <sched.h>
@@ -38,9 +44,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syscall.h>
-#include <unistd.h>
-
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -48,13 +51,11 @@
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
+#include <syscall.h>
+#include <unistd.h>
 
-#include <linux/capability.h>
-#include <linux/ethtool.h>
-#include <linux/if.h>
-#include <linux/limits.h>
-#include <linux/mempolicy.h>
-#include <linux/sockios.h>
+#include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 
 #include "cf_mutex.h"
 #include "daemon.h"
@@ -63,20 +64,17 @@
 #include "shash.h"
 #include "socket.h"
 
-#include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_clock.h"
-
 #include "warnings.h"
 
 // Only available in Linux kernel version 3.19 and later; but we'd like to
 // allow compilation with older kernel headers.
-#if !defined SO_INCOMING_CPU
+#if ! defined SO_INCOMING_CPU
 #define SO_INCOMING_CPU 49
 #endif
 
 // Only available in Linux kernel version 4.12 and later; but we'd like to
 // allow compilation with older kernel headers.
-#if !defined SO_INCOMING_NAPI_ID
+#if ! defined SO_INCOMING_NAPI_ID
 #define SO_INCOMING_NAPI_ID 56
 #endif
 
@@ -110,7 +108,7 @@ struct nvme_admin_cmd {
 	uint32_t result;
 };
 
-#define INVALID_INDEX ((uint16_t)-1)
+#define INVALID_INDEX ((uint16_t) - 1)
 #define POLICY_SCRIPT "/etc/aerospike/irqbalance-ban.sh"
 
 #define MEM_PAGE_SIZE (4096L)
@@ -161,7 +159,7 @@ typedef struct dev_key_s {
 
 typedef struct dev_node_s {
 	uint32_t n_children;
-	struct dev_node_s *children[MAX_DEVICE_CHILDREN];
+	struct dev_node_s* children[MAX_DEVICE_CHILDREN];
 
 	char name[DEVICE_NAME_SIZE];
 	char dev_path[DEVICE_PATH_SIZE];
@@ -174,14 +172,14 @@ typedef struct path_data_s {
 	cf_clock mod_time;
 } path_data_t;
 
-static cf_shash *g_dev_graph;
+static cf_shash* g_dev_graph;
 
 static cf_mutex g_path_data_lock = CF_MUTEX_INIT;
-static cf_shash *g_path_data_hash;
-static path_data_t *g_fake_path_data = NULL;
+static cf_shash* g_path_data_hash;
+static path_data_t* g_fake_path_data = NULL;
 
 static cf_os_file_res
-write_file(const char *path, const void *buff, size_t limit)
+write_file(const char* path, const void* buff, size_t limit)
 {
 	cf_detail(CF_HARDWARE, "writing file %s with buffer size %zu", path, limit);
 	int32_t fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, cf_os_base_perms());
@@ -192,16 +190,18 @@ write_file(const char *path, const void *buff, size_t limit)
 			return CF_OS_FILE_RES_NOT_FOUND;
 		}
 
-		cf_warning(CF_HARDWARE, "error while opening file %s for writing: %d (%s)",
-				path, errno, cf_strerror(errno));
+		cf_warning(CF_HARDWARE,
+				"error while opening file %s for writing: %d (%s)", path, errno,
+				cf_strerror(errno));
 		return CF_OS_FILE_RES_ERROR;
 	}
 
 	size_t total = 0;
 
 	while (total < limit) {
-		cf_detail(CF_HARDWARE, "writing %zd byte(s) at offset %zu", limit - total, total);
-		ssize_t len = write(fd, (uint8_t *)buff + total, limit - total);
+		cf_detail(CF_HARDWARE, "writing %zd byte(s) at offset %zu",
+				limit - total, total);
+		ssize_t len = write(fd, (uint8_t*)buff + total, limit - total);
 
 		if (len < 0) {
 			cf_warning(CF_HARDWARE, "error while writing to file %s: %d (%s)",
@@ -219,32 +219,32 @@ write_file(const char *path, const void *buff, size_t limit)
 }
 
 static void
-write_file_safe(const char *path, const void *buff, size_t limit)
+write_file_safe(const char* path, const void* buff, size_t limit)
 {
 	if (write_file(path, buff, limit) != CF_OS_FILE_RES_OK) {
 		cf_crash(CF_HARDWARE, "write failed unexpectedly");
 	}
 }
 
-static DIR *
-opendir_safe(const char *path)
+static DIR*
+opendir_safe(const char* path)
 {
-	DIR *dir = opendir(path);
+	DIR* dir = opendir(path);
 
 	if (dir == NULL) {
-		cf_crash(CF_HARDWARE, "error while opening directory %s: %d (%s)",
-				path, errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE, "error while opening directory %s: %d (%s)", path,
+				errno, cf_strerror(errno));
 	}
 
 	return dir;
 }
 
 static int32_t
-readdir_safe(DIR *dir, struct dirent *ent)
+readdir_safe(DIR* dir, struct dirent* ent)
 {
 	while (true) {
 		errno = 0;
-		struct dirent *tmp = readdir(dir);
+		struct dirent* tmp = readdir(dir);
 
 		if (tmp == NULL) {
 			if (errno != 0) {
@@ -265,7 +265,7 @@ readdir_safe(DIR *dir, struct dirent *ent)
 }
 
 static void
-closedir_safe(DIR *dir)
+closedir_safe(DIR* dir)
 {
 	if (closedir(dir) < 0) {
 		cf_crash(CF_HARDWARE, "error while closing PCI device directory: %d (%s)",
@@ -274,7 +274,7 @@ closedir_safe(DIR *dir)
 }
 
 static bool
-path_exists(const char *path)
+path_exists(const char* path)
 {
 	struct stat st;
 
@@ -284,8 +284,8 @@ path_exists(const char *path)
 			return false;
 		}
 
-		cf_crash(CF_HARDWARE, "error while checking for path %s: %d (%s)",
-				path, errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE, "error while checking for path %s: %d (%s)", path,
+				errno, cf_strerror(errno));
 	}
 
 	cf_detail(CF_HARDWARE, "path %s exists", path);
@@ -293,25 +293,25 @@ path_exists(const char *path)
 }
 
 static bool
-path_is_dir(const char *path)
+path_is_dir(const char* path)
 {
 	struct stat st;
 
 	if (stat(path, &st) < 0) {
-		cf_crash(CF_HARDWARE, "error while checking path %s: %d (%s)",
-				path, errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE, "error while checking path %s: %d (%s)", path,
+				errno, cf_strerror(errno));
 	}
 
 	bool is_dir = S_ISDIR(st.st_mode);
 
-	cf_detail(CF_HARDWARE, "path %s is %s directory", path, is_dir ?
-			"a" : "not a");
+	cf_detail(CF_HARDWARE, "path %s is %s directory", path,
+			is_dir ? "a" : "not a");
 
 	return is_dir;
 }
 
 static bool
-path_works(const char *path)
+path_works(const char* path)
 {
 	int32_t fd = open(path, O_RDONLY);
 
@@ -346,7 +346,7 @@ path_works(const char *path)
 }
 
 static void
-set_mempolicy_safe(uint32_t mode, uint64_t *node_mask, size_t max_node)
+set_mempolicy_safe(uint32_t mode, uint64_t* node_mask, size_t max_node)
 {
 	if (syscall(__NR_set_mempolicy, mode, node_mask, max_node) < 0) {
 		cf_crash(CF_HARDWARE, "set_mempolicy() system call failed: %d (%s)",
@@ -355,22 +355,24 @@ set_mempolicy_safe(uint32_t mode, uint64_t *node_mask, size_t max_node)
 }
 
 static void
-migrate_pages_safe(pid_t pid, size_t max_node, uint64_t *from_mask, uint64_t *to_mask)
+migrate_pages_safe(pid_t pid, size_t max_node, uint64_t* from_mask,
+		uint64_t* to_mask)
 {
 	int64_t res = syscall(__NR_migrate_pages, pid, max_node, from_mask, to_mask);
 
 	if (res < 0) {
-		cf_crash(CF_HARDWARE, "migrate_pages() syscall failed: %d (%s)",
-				errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE, "migrate_pages() syscall failed: %d (%s)", errno,
+				cf_strerror(errno));
 	}
 
 	if (res > 0) {
-		cf_warning(CF_HARDWARE, "could not NUMA-migrate %" PRId64 " page(s)", res);
+		cf_warning(CF_HARDWARE, "could not NUMA-migrate %" PRId64 " page(s)",
+				res);
 	}
 }
 
 static void
-mask_to_string(cpu_set_t *mask, char *buff, size_t limit)
+mask_to_string(cpu_set_t* mask, char* buff, size_t limit)
 {
 	cf_topo_os_cpu_index max;
 
@@ -384,7 +386,8 @@ mask_to_string(cpu_set_t *mask, char *buff, size_t limit)
 	size_t size = (size_t)words * 9;
 
 	if (size > limit) {
-		cf_crash(CF_HARDWARE, "CPU mask buffer overflow: %zu vs. %zu", size, limit);
+		cf_crash(CF_HARDWARE, "CPU mask buffer overflow: %zu vs. %zu", size,
+				limit);
 	}
 
 	for (int32_t i = words - 1; i >= 0; --i) {
@@ -408,7 +411,7 @@ mask_to_string(cpu_set_t *mask, char *buff, size_t limit)
 }
 
 static cf_os_file_res
-read_index(const char *path, uint16_t *val)
+read_index(const char* path, uint16_t* val)
 {
 	int64_t x;
 	cf_os_file_res res = cf_os_read_int_from_file(path, &x);
@@ -427,7 +430,7 @@ read_index(const char *path, uint16_t *val)
 }
 
 static cf_os_file_res
-read_numa_node(const char *path, cf_topo_numa_node_index *i_numa_node)
+read_numa_node(const char* path, cf_topo_numa_node_index* i_numa_node)
 {
 	int64_t x;
 	cf_os_file_res res = cf_os_read_int_from_file(path, &x);
@@ -446,7 +449,7 @@ read_numa_node(const char *path, cf_topo_numa_node_index *i_numa_node)
 }
 
 static cf_os_file_res
-read_device_numbers(const char *path, uint32_t *major, uint32_t *minor)
+read_device_numbers(const char* path, uint32_t* major, uint32_t* minor)
 {
 	cf_detail(CF_HARDWARE, "reading device numbers from file %s", path);
 
@@ -472,7 +475,7 @@ read_device_numbers(const char *path, uint32_t *major, uint32_t *minor)
 }
 
 static cf_os_file_res
-read_list(const char *path, cpu_set_t *mask)
+read_list(const char* path, cpu_set_t* mask)
 {
 	cf_detail(CF_HARDWARE, "reading list from file %s", path);
 	char buff[1000];
@@ -491,14 +494,14 @@ read_list(const char *path, cpu_set_t *mask)
 	}
 
 	CPU_ZERO(mask);
-	char *walker = buff;
+	char* walker = buff;
 
 	while (true) {
-		char *delim;
+		char* delim;
 		uint64_t from = strtoul(walker, &delim, 10);
 		uint64_t thru;
 
-		if (*delim == ',' || *delim == '\0'){
+		if (*delim == ',' || *delim == '\0') {
 			thru = from;
 		}
 		else if (*delim == '-') {
@@ -515,7 +518,8 @@ read_list(const char *path, cpu_set_t *mask)
 			return CF_OS_FILE_RES_ERROR;
 		}
 
-		cf_detail(CF_HARDWARE, "marking %d through %d", (int32_t)from, (int32_t)thru);
+		cf_detail(CF_HARDWARE, "marking %d through %d", (int32_t)from,
+				(int32_t)thru);
 
 		for (size_t i = from; i <= thru; ++i) {
 			CPU_SET(i, mask);
@@ -583,10 +587,12 @@ detect(cf_topo_numa_node_index a_numa_node)
 		cf_detail(CF_HARDWARE, "detecting online CPUs");
 	}
 	else {
-		cf_detail(CF_HARDWARE, "detecting online CPUs on NUMA node %hu", a_numa_node);
+		cf_detail(CF_HARDWARE, "detecting online CPUs on NUMA node %hu",
+				a_numa_node);
 	}
 
-	if (read_list("/sys/devices/system/cpu/online", &g_os_cpus_available) != CF_OS_FILE_RES_OK) {
+	if (read_list("/sys/devices/system/cpu/online", &g_os_cpus_available) !=
+			CF_OS_FILE_RES_OK) {
 		cf_crash(CF_HARDWARE, "error while reading list of online CPUs");
 	}
 
@@ -645,7 +651,8 @@ detect(cf_topo_numa_node_index a_numa_node)
 		}
 
 		if (res != CF_OS_FILE_RES_OK) {
-			cf_crash(CF_HARDWARE, "error while reading OS package index from %s", path);
+			cf_crash(CF_HARDWARE,
+					"error while reading OS package index from %s", path);
 			break;
 		}
 
@@ -653,7 +660,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 		// Only consider CPUs that are actually in use.
 
-		if (!CPU_ISSET(g_n_os_cpus, &g_os_cpus_available)) {
+		if (! CPU_ISSET(g_n_os_cpus, &g_os_cpus_available)) {
 			cf_detail(CF_HARDWARE, "OS CPU index %hu is offline", g_n_os_cpus);
 			continue;
 		}
@@ -662,13 +669,13 @@ detect(cf_topo_numa_node_index a_numa_node)
 		// two (logical) CPUs share one (physical) core.
 
 		snprintf(path, sizeof(path),
-				"/sys/devices/system/cpu/cpu%hu/topology/core_id",
-				g_n_os_cpus);
+				"/sys/devices/system/cpu/cpu%hu/topology/core_id", g_n_os_cpus);
 		os_core_index i_os_core;
 		res = read_index(path, &i_os_core);
 
 		if (res != CF_OS_FILE_RES_OK) {
-			cf_crash(CF_HARDWARE, "error while reading OS core index from %s", path);
+			cf_crash(CF_HARDWARE, "error while reading OS core index from %s",
+					path);
 			break;
 		}
 
@@ -680,11 +687,13 @@ detect(cf_topo_numa_node_index a_numa_node)
 		bool new_core;
 
 		if (CPU_ISSET(i_os_core, &covered_cores[i_os_package])) {
-			cf_detail(CF_HARDWARE, "core (%hu, %hu) already covered", i_os_core, i_os_package);
+			cf_detail(CF_HARDWARE, "core (%hu, %hu) already covered", i_os_core,
+					i_os_package);
 			new_core = false;
 		}
 		else {
-			cf_detail(CF_HARDWARE, "core (%hu, %hu) is new", i_os_core, i_os_package);
+			cf_detail(CF_HARDWARE, "core (%hu, %hu) is new", i_os_core,
+					i_os_package);
 			new_core = true;
 			CPU_SET(i_os_core, &covered_cores[i_os_package]);
 		}
@@ -709,7 +718,8 @@ detect(cf_topo_numa_node_index a_numa_node)
 			}
 
 			if (res != CF_OS_FILE_RES_NOT_FOUND) {
-				cf_crash(CF_HARDWARE, "error while reading core number from %s", path);
+				cf_crash(CF_HARDWARE, "error while reading core number from %s",
+						path);
 			}
 		}
 
@@ -717,7 +727,8 @@ detect(cf_topo_numa_node_index a_numa_node)
 		// in /sys. In this case, assume a system with a single NUMA node.
 
 		if (i_os_numa_node == CPU_SETSIZE) {
-			cf_detail(CF_HARDWARE, "OS CPU index %hu does not have a NUMA node", g_n_os_cpus);
+			cf_detail(CF_HARDWARE, "OS CPU index %hu does not have a NUMA node",
+					g_n_os_cpus);
 			no_numa = true;
 			i_os_numa_node = 0;
 		}
@@ -730,18 +741,21 @@ detect(cf_topo_numa_node_index a_numa_node)
 		bool new_numa_node;
 
 		if (CPU_ISSET(i_os_numa_node, &covered_numa_nodes)) {
-			cf_detail(CF_HARDWARE, "OS NUMA node index %hu already covered", i_os_numa_node);
+			cf_detail(CF_HARDWARE, "OS NUMA node index %hu already covered",
+					i_os_numa_node);
 			new_numa_node = false;
 		}
 		else {
-			cf_detail(CF_HARDWARE, "OS NUMA node index %hu is new", i_os_numa_node);
+			cf_detail(CF_HARDWARE, "OS NUMA node index %hu is new",
+					i_os_numa_node);
 			new_numa_node = true;
 			CPU_SET(i_os_numa_node, &covered_numa_nodes);
 
 			// For now, we only support a 64-bit bitmask (= one uint64_t).
 
 			if (i_os_numa_node >= 64) {
-				cf_crash(CF_HARDWARE, "OS NUMA node index %hu too high", i_os_numa_node);
+				cf_crash(CF_HARDWARE, "OS NUMA node index %hu too high",
+						i_os_numa_node);
 			}
 		}
 
@@ -755,23 +769,27 @@ detect(cf_topo_numa_node_index a_numa_node)
 			++g_n_numa_nodes;
 			os_numa_node_index_to_numa_node_index[i_os_numa_node] = i_numa_node;
 			g_numa_node_index_to_os_numa_node_index[i_numa_node] = i_os_numa_node;
-			cf_detail(CF_HARDWARE, "OS NUMA node index %hu -> new NUMA node index %hu",
+			cf_detail(CF_HARDWARE,
+					"OS NUMA node index %hu -> new NUMA node index %hu",
 					i_os_numa_node, i_numa_node);
 		}
 		else {
 			i_numa_node = os_numa_node_index_to_numa_node_index[i_os_numa_node];
-			cf_detail(CF_HARDWARE, "OS NUMA node index %hu -> existing NUMA node index %hu",
+			cf_detail(CF_HARDWARE,
+					"OS NUMA node index %hu -> existing NUMA node index %hu",
 					i_os_numa_node, i_numa_node);
 		}
 
-		cf_detail(CF_HARDWARE, "OS CPU index %hu on NUMA node index %hu", g_n_os_cpus, i_numa_node);
+		cf_detail(CF_HARDWARE, "OS CPU index %hu on NUMA node index %hu",
+				g_n_os_cpus, i_numa_node);
 		CPU_SET(g_n_os_cpus, &g_numa_node_os_cpus_online[i_numa_node]);
 
 		// If we're in NUMA mode and the CPU isn't on the NUMA mode that we're
 		// running on, then ignore the CPU.
 
 		if (a_numa_node != INVALID_INDEX && a_numa_node != i_numa_node) {
-			cf_detail(CF_HARDWARE, "skipping unwanted NUMA node index %hu", i_numa_node);
+			cf_detail(CF_HARDWARE, "skipping unwanted NUMA node index %hu",
+					i_numa_node);
 			continue;
 		}
 
@@ -779,7 +797,8 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 		if (new_core) {
 			g_core_index_to_os_cpu_index[g_n_cores] = g_n_os_cpus;
-			cf_detail(CF_HARDWARE, "core index %hu -> OS CPU index %hu", g_n_cores, g_n_os_cpus);
+			cf_detail(CF_HARDWARE, "core index %hu -> OS CPU index %hu",
+					g_n_cores, g_n_os_cpus);
 			++g_n_cores;
 		}
 
@@ -788,7 +807,8 @@ detect(cf_topo_numa_node_index a_numa_node)
 		g_os_cpu_index_to_cpu_index[g_n_os_cpus] = g_n_cpus;
 		g_cpu_index_to_os_cpu_index[g_n_cpus] = g_n_os_cpus;
 
-		cf_detail(CF_HARDWARE, "OS CPU index %hu <-> CPU index %hu", g_n_os_cpus, g_n_cpus);
+		cf_detail(CF_HARDWARE, "OS CPU index %hu <-> CPU index %hu",
+				g_n_os_cpus, g_n_cpus);
 		++g_n_cpus;
 	}
 
@@ -824,13 +844,15 @@ pin_to_numa_node(cf_topo_numa_node_index a_numa_node)
 	cf_detail(CF_HARDWARE, "NUMA node %hu CPU mask: %s", a_numa_node, buff);
 
 	if (sched_setaffinity(0, sizeof(cpu_set), &cpu_set) < 0) {
-		cf_crash(CF_HARDWARE, "error while pinning thread to NUMA node %hu: %d (%s)",
+		cf_crash(CF_HARDWARE,
+				"error while pinning thread to NUMA node %hu: %d (%s)",
 				a_numa_node, errno, cf_strerror(errno));
 	}
 
 	// Force future memory allocations to the selected NUMA node.
 
-	os_numa_node_index i_os_numa_node = g_numa_node_index_to_os_numa_node_index[a_numa_node];
+	os_numa_node_index i_os_numa_node =
+			g_numa_node_index_to_os_numa_node_index[a_numa_node];
 	uint64_t to_mask = 1UL << i_os_numa_node;
 	cf_detail(CF_HARDWARE, "NUMA node mask (to): %016" PRIx64, to_mask);
 
@@ -907,19 +929,21 @@ cf_topo_current_cpu(void)
 }
 
 cf_topo_cpu_index
-cf_topo_socket_cpu(const cf_socket *sock)
+cf_topo_socket_cpu(const cf_socket* sock)
 {
-	uint32_t i_addr = ((cf_sock_cfg *)sock->cfg)->i_addr;
+	uint32_t i_addr = ((cf_sock_cfg*)sock->cfg)->i_addr;
 
-	cf_detail(CF_HARDWARE, "determining CPU index for address index %u, socket FD %d",
-			i_addr, CSFD(sock));
+	cf_detail(CF_HARDWARE,
+			"determining CPU index for address index %u, socket FD %d", i_addr,
+			CSFD(sock));
 
 	int32_t os;
 	socklen_t len = sizeof(os);
 
 	if (getsockopt(sock->fd, SOL_SOCKET, SO_INCOMING_CPU, &os, &len) < 0) {
-		cf_crash(CF_HARDWARE, "error while determining incoming OS CPU index: %d (%s)",
-				errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE,
+				"error while determining incoming OS CPU index: %d (%s)", errno,
+				cf_strerror(errno));
 	}
 
 	cf_detail(CF_HARDWARE, "OS CPU index is %d", os);
@@ -957,8 +981,7 @@ cf_topo_socket_cpu(const cf_socket *sock)
 	// with a probability of p2 = g_n_irq_cpus / g_n_cpus == 2 / 8 == 0.25, which
 	// yields the desired total probability of p1 * p2 = 0.5 * 0.25 = 0.125.
 
-	if (pick_random(100000) < g_n_irq_cpus[i_addr] * (uint32_t)100000 /
-			g_n_cpus) {
+	if (pick_random(100000) < g_n_irq_cpus[i_addr] * (uint32_t)100000 / g_n_cpus) {
 		cf_detail(CF_HARDWARE, "staying on CPU index %hu", i_cpu);
 		return i_cpu;
 	}
@@ -974,7 +997,7 @@ cf_topo_socket_cpu(const cf_socket *sock)
 }
 
 cf_topo_napi_id
-cf_topo_socket_napi_id(const cf_socket *sock)
+cf_topo_socket_napi_id(const cf_socket* sock)
 {
 	cf_topo_napi_id id;
 	socklen_t len = sizeof(id);
@@ -1028,7 +1051,7 @@ cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu)
 }
 
 static check_proc_res
-check_proc(const char *name, int32_t argc, const char *argv[])
+check_proc(const char* name, int32_t argc, const char* argv[])
 {
 	cf_detail(CF_HARDWARE, "looking for process %s", name);
 
@@ -1036,7 +1059,7 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 		cf_detail(CF_HARDWARE, "argv[%d]: %s", i, argv[i]);
 	}
 
-	DIR *dir = opendir_safe("/proc");
+	DIR* dir = opendir_safe("/proc");
 	struct dirent ent;
 	char cmd[10000];
 	size_t limit;
@@ -1046,13 +1069,13 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 		bool numeric = true;
 
 		for (int32_t i = 0; ent.d_name[i] != 0; ++i) {
-			if (!isascii(ent.d_name[i]) || !isdigit(ent.d_name[i])) {
+			if (! isascii(ent.d_name[i]) || ! isdigit(ent.d_name[i])) {
 				numeric = false;
 				break;
 			}
 		}
 
-		if (!numeric) {
+		if (! numeric) {
 			continue;
 		}
 
@@ -1075,7 +1098,7 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 			cmd[limit] = 0;
 		}
 
-		const char *name2 = strrchr(cmd, '/');
+		const char* name2 = strrchr(cmd, '/');
 
 		if (name2 != NULL) {
 			++name2;
@@ -1092,7 +1115,7 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 
 	closedir_safe(dir);
 
-	if (!found) {
+	if (! found) {
 		cf_detail(CF_HARDWARE, "process %s absent", name);
 		return CHECK_PROC_ABSENT;
 	}
@@ -1102,8 +1125,10 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 	if (argc > 0) {
 		int32_t i_arg = 0;
 
-		for (size_t off = strlen(cmd) + 1; off < limit; off += strlen(cmd + off) + 1) {
-			cf_detail(CF_HARDWARE, "checking argument %s against %s", cmd + off, argv[i_arg]);
+		for (size_t off = strlen(cmd) + 1; off < limit;
+				off += strlen(cmd + off) + 1) {
+			cf_detail(CF_HARDWARE, "checking argument %s against %s", cmd + off,
+					argv[i_arg]);
 
 			if (strcmp(cmd + off, argv[i_arg]) == 0) {
 				++i_arg;
@@ -1128,7 +1153,7 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 }
 
 static uint16_t
-interface_queues(const char *if_name, const char *format)
+interface_queues(const char* if_name, const char* format)
 {
 	uint16_t n_queues = 0;
 
@@ -1137,7 +1162,7 @@ interface_queues(const char *if_name, const char *format)
 		snprintf(path, sizeof(path), format, if_name, n_queues);
 		cf_detail(CF_HARDWARE, "checking for working path %s", path);
 
-		if (!path_works(path)) {
+		if (! path_works(path)) {
 			cf_detail(CF_HARDWARE, "path does not work");
 			break;
 		}
@@ -1151,31 +1176,31 @@ interface_queues(const char *if_name, const char *format)
 }
 
 static uint16_t
-interface_rx_queues(const char *if_name)
+interface_rx_queues(const char* if_name)
 {
 	cf_detail(CF_HARDWARE, "getting receive queues for interface %s", if_name);
 	return interface_queues(if_name, "/sys/class/net/%s/queues/rx-%hu/rps_cpus");
 }
 
 static uint16_t
-interface_tx_queues(const char *if_name)
+interface_tx_queues(const char* if_name)
 {
 	cf_detail(CF_HARDWARE, "getting transmit queues for interface %s", if_name);
 	return interface_queues(if_name, "/sys/class/net/%s/queues/tx-%hu/xps_cpus");
 }
 
 static int
-comp_irq_number(const void *lhs, const void *rhs)
+comp_irq_number(const void* lhs, const void* rhs)
 {
-	return *(irq_number *)lhs - *(irq_number *)rhs;
+	return *(irq_number*)lhs - *(irq_number*)rhs;
 }
 
 static void
-interface_irqs(const char *if_name, irq_list *irqs)
+interface_irqs(const char* if_name, irq_list* irqs)
 {
 	cf_detail(CF_HARDWARE, "getting IRQs for interface %s", if_name);
 
-	DIR *dir = opendir_safe("/sys/bus/pci/devices");
+	DIR* dir = opendir_safe("/sys/bus/pci/devices");
 	struct dirent ent;
 	char path[PATH_MAX];
 	bool found = false;
@@ -1185,9 +1210,10 @@ interface_irqs(const char *if_name, irq_list *irqs)
 				ent.d_name, if_name);
 		bool exists = path_exists(path);
 
-		if (!exists) {
+		if (! exists) {
 			for (int32_t i = 0; i < 100; ++i) {
-				snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/virtio%d/net/%s/ifindex",
+				snprintf(path, sizeof(path),
+						"/sys/bus/pci/devices/%s/virtio%d/net/%s/ifindex",
 						ent.d_name, i, if_name);
 				exists = path_exists(path);
 
@@ -1197,13 +1223,14 @@ interface_irqs(const char *if_name, irq_list *irqs)
 			}
 		}
 
-		if (!exists) {
+		if (! exists) {
 			continue;
 		}
 
-		snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/msi_irqs", ent.d_name);
+		snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/msi_irqs",
+				ent.d_name);
 
-		if (!path_exists(path)) {
+		if (! path_exists(path)) {
 			cf_crash(CF_HARDWARE, "interface %s does not support MSIs", if_name);
 		}
 
@@ -1214,8 +1241,9 @@ interface_irqs(const char *if_name, irq_list *irqs)
 
 	closedir_safe(dir);
 
-	if (!found) {
-		cf_crash(CF_HARDWARE, "interface %s does not have a PCI device entry", if_name);
+	if (! found) {
+		cf_crash(CF_HARDWARE, "interface %s does not have a PCI device entry",
+				if_name);
 	}
 
 	dir = opendir_safe(path);
@@ -1223,18 +1251,20 @@ interface_irqs(const char *if_name, irq_list *irqs)
 	irq_number irq_nums[CPU_SETSIZE];
 
 	while (readdir_safe(dir, &ent) >= 0) {
-		char *end;
+		char* end;
 		uint64_t tmp = strtoul(ent.d_name, &end, 10);
 
 		if (*end != 0 || tmp > 65535) {
-			cf_crash(CF_HARDWARE, "invalid IRQ number %s in %s", ent.d_name, path);
+			cf_crash(CF_HARDWARE, "invalid IRQ number %s in %s", ent.d_name,
+					path);
 		}
 
 		if (count >= CPU_SETSIZE) {
 			cf_crash(CF_HARDWARE, "too many IRQs in %s", path);
 		}
 
-		cf_detail(CF_HARDWARE, "interface %s has IRQ %hu", if_name, (irq_number)tmp);
+		cf_detail(CF_HARDWARE, "interface %s has IRQ %hu", if_name,
+				(irq_number)tmp);
 		irq_nums[count] = (irq_number)tmp;
 		++count;
 	}
@@ -1248,7 +1278,7 @@ interface_irqs(const char *if_name, irq_list *irqs)
 	char actions[count][100];
 	memset(actions, 0, sizeof(actions));
 
-	FILE *fh = fopen("/proc/interrupts", "r");
+	FILE* fh = fopen("/proc/interrupts", "r");
 
 	if (fh == NULL) {
 		cf_crash(CF_HARDWARE, "error while opening /proc/interrupts");
@@ -1291,10 +1321,11 @@ interface_irqs(const char *if_name, irq_list *irqs)
 			--i;
 		}
 
-		char *action = line + i + 1;
+		char* action = line + i + 1;
 
 		if (strlen(action) >= sizeof(actions[0])) {
-			cf_crash(CF_HARDWARE, "oversize action in line %d in /proc/interrupts: %s",
+			cf_crash(CF_HARDWARE,
+					"oversize action in line %d in /proc/interrupts: %s",
 					line_no, action);
 		}
 
@@ -1364,12 +1395,14 @@ interface_irqs(const char *if_name, irq_list *irqs)
 			}
 		}
 
-		cf_detail(CF_HARDWARE, "group %d has %d member(s)", n_groups, group_sizes[n_groups]);
+		cf_detail(CF_HARDWARE, "group %d has %d member(s)", n_groups,
+				group_sizes[n_groups]);
 
 		// Prefer groups whose action patterns have "rx", "tx", "input", or "output" in them.
 
 		if (strstr(actions[i], "rx") != NULL || strstr(actions[i], "tx") != NULL ||
-				strstr(actions[i], "input") != NULL || strstr(actions[i], "output") != NULL) {
+				strstr(actions[i], "input") != NULL ||
+				strstr(actions[i], "output") != NULL) {
 			cf_detail(CF_HARDWARE, "preferring group %d", n_groups);
 			group_extra[n_groups] = 1;
 		}
@@ -1384,7 +1417,9 @@ interface_irqs(const char *if_name, irq_list *irqs)
 
 	for (int32_t i = 0; i < n_groups; ++i) {
 		if (i != inactive_group &&
-				(a < 0 || group_sizes[i] + group_extra[i] > group_sizes[a] + group_extra[a])) {
+				(a < 0 ||
+						group_sizes[i] + group_extra[i] >
+								group_sizes[a] + group_extra[a])) {
 			a = i;
 		}
 	}
@@ -1395,7 +1430,9 @@ interface_irqs(const char *if_name, irq_list *irqs)
 
 	for (int32_t i = 0; i < n_groups; ++i) {
 		if (i != inactive_group && i != a &&
-				(b < 0 || group_sizes[i] + group_extra[i] > group_sizes[b] + group_extra[b])) {
+				(b < 0 ||
+						group_sizes[i] + group_extra[i] >
+								group_sizes[b] + group_extra[b])) {
 			b = i;
 		}
 	}
@@ -1438,7 +1475,8 @@ interface_irqs(const char *if_name, irq_list *irqs)
 	// Otherwise, we assume that it's a NIC with combined RX and TX queue IRQs
 	// and that the largest group contains these IRQs.
 
-	cf_detail(CF_HARDWARE, "assuming %d combined RX and TX queue IRQ(s)", group_sizes[a]);
+	cf_detail(CF_HARDWARE, "assuming %d combined RX and TX queue IRQ(s)",
+			group_sizes[a]);
 	int32_t ia = 0;
 
 	for (int32_t k = 0; k < count; ++k) {
@@ -1459,7 +1497,8 @@ interface_irqs(const char *if_name, irq_list *irqs)
 static void
 pin_irq(irq_number i_irq, cf_topo_os_cpu_index i_os_cpu)
 {
-	cf_detail(CF_HARDWARE, "pinning IRQ number %hu to OS CPU index %hu", i_irq, i_os_cpu);
+	cf_detail(CF_HARDWARE, "pinning IRQ number %hu to OS CPU index %hu", i_irq,
+			i_os_cpu);
 
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
@@ -1478,7 +1517,7 @@ pin_irq(irq_number i_irq, cf_topo_os_cpu_index i_os_cpu)
 }
 
 static cf_topo_os_cpu_index
-fix_os_cpu_index(cf_topo_os_cpu_index i_os_cpu, const cpu_set_t *online)
+fix_os_cpu_index(cf_topo_os_cpu_index i_os_cpu, const cpu_set_t* online)
 {
 	while (true) {
 		if (i_os_cpu >= g_n_os_cpus) {
@@ -1494,7 +1533,8 @@ fix_os_cpu_index(cf_topo_os_cpu_index i_os_cpu, const cpu_set_t *online)
 }
 
 static void
-config_steering(const char *format, const char *if_name, uint16_t n_queues, bool enable)
+config_steering(const char* format, const char* if_name, uint16_t n_queues,
+		bool enable)
 {
 	uint16_t i_queue;
 	cpu_set_t masks[n_queues];
@@ -1506,7 +1546,8 @@ config_steering(const char *format, const char *if_name, uint16_t n_queues, bool
 	if (enable) {
 		i_queue = 0;
 
-		for (cf_topo_os_cpu_index i_os_cpu = 0; i_os_cpu < g_n_os_cpus; ++i_os_cpu) {
+		for (cf_topo_os_cpu_index i_os_cpu = 0; i_os_cpu < g_n_os_cpus;
+				++i_os_cpu) {
 			if (CPU_ISSET(i_os_cpu, &g_os_cpus_available)) {
 				CPU_SET(i_os_cpu, &masks[i_queue % n_queues]);
 				++i_queue;
@@ -1528,54 +1569,61 @@ config_steering(const char *format, const char *if_name, uint16_t n_queues, bool
 }
 
 static void
-enable_xps(const char *if_name)
+enable_xps(const char* if_name)
 {
 	cf_detail(CF_HARDWARE, "enabling XPS for interface %s", if_name);
 	uint16_t n_queues = interface_tx_queues(if_name);
-	config_steering("/sys/class/net/%s/queues/tx-%hu/xps_cpus", if_name, n_queues, true);
+	config_steering("/sys/class/net/%s/queues/tx-%hu/xps_cpus", if_name,
+			n_queues, true);
 }
 
 static void
-disable_rps(const char *if_name)
+disable_rps(const char* if_name)
 {
 	cf_detail(CF_HARDWARE, "disabling RPS for interface %s", if_name);
 	uint16_t n_queues = interface_rx_queues(if_name);
-	config_steering("/sys/class/net/%s/queues/rx-%hu/rps_cpus", if_name, n_queues, false);
+	config_steering("/sys/class/net/%s/queues/rx-%hu/rps_cpus", if_name,
+			n_queues, false);
 }
 
 static void
-config_rfs(const char *if_name, bool enable)
+config_rfs(const char* if_name, bool enable)
 {
-	cf_detail(CF_HARDWARE, "%s RFS for interface %s", enable ? "enabling" : "disabling", if_name);
+	cf_detail(CF_HARDWARE, "%s RFS for interface %s",
+			enable ? "enabling" : "disabling", if_name);
 
 	uint16_t n_queues = interface_rx_queues(if_name);
 	uint32_t sz_glob = enable ? 1000000 : 0;
 	uint32_t sz_queue = sz_glob / n_queues;
 
-	cf_detail(CF_HARDWARE, "global size is %u, per-queue size is %u", sz_glob, sz_queue);
+	cf_detail(CF_HARDWARE, "global size is %u, per-queue size is %u", sz_glob,
+			sz_queue);
 
 	char string[50];
 	snprintf(string, sizeof(string), "%u", sz_glob);
-	write_file_safe("/proc/sys/net/core/rps_sock_flow_entries", string, strlen(string));
+	write_file_safe("/proc/sys/net/core/rps_sock_flow_entries", string,
+			strlen(string));
 
 	snprintf(string, sizeof(string), "%u", sz_queue);
 
 	for (uint16_t i_queue = 0; i_queue < n_queues; ++i_queue) {
 		char path[1000];
-		snprintf(path, sizeof(path), "/sys/class/net/%s/queues/rx-%hu/rps_flow_cnt",
-				if_name, i_queue);
+		snprintf(path, sizeof(path),
+				"/sys/class/net/%s/queues/rx-%hu/rps_flow_cnt", if_name, i_queue);
 		write_file_safe(path, string, strlen(string));
 	}
 }
 
 static void
-enable_coalescing(const char *if_name)
+enable_coalescing(const char* if_name)
 {
-	cf_detail(CF_HARDWARE, "enabling interrupt coalescing for interface %s", if_name);
+	cf_detail(CF_HARDWARE, "enabling interrupt coalescing for interface %s",
+			if_name);
 	int32_t sock = socket(AF_INET, SOCK_DGRAM, 0);
 
 	if (sock < 0) {
-		cf_crash(CF_HARDWARE, "error while create ethtool socket: %d (%s)", errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE, "error while create ethtool socket: %d (%s)",
+				errno, cf_strerror(errno));
 	}
 
 	struct ifreq req;
@@ -1591,7 +1639,8 @@ enable_coalescing(const char *if_name)
 
 	if (ioctl(sock, SIOCETHTOOL, &req) < 0) {
 		if (errno == EOPNOTSUPP) {
-			cf_detail(CF_HARDWARE, "interface %s does not support ETHTOOL_GCOALESCE", if_name);
+			cf_detail(CF_HARDWARE,
+					"interface %s does not support ETHTOOL_GCOALESCE", if_name);
 			goto cleanup1;
 		}
 
@@ -1599,7 +1648,8 @@ enable_coalescing(const char *if_name)
 				errno, cf_strerror(errno));
 	}
 
-	cf_detail(CF_HARDWARE, "current interface settings: adaptive = %u, usecs = %u",
+	cf_detail(CF_HARDWARE,
+			"current interface settings: adaptive = %u, usecs = %u",
 			coal.use_adaptive_rx_coalesce, coal.rx_coalesce_usecs);
 
 	if (coal.use_adaptive_rx_coalesce != 0 || coal.rx_coalesce_usecs >= 100) {
@@ -1610,12 +1660,14 @@ enable_coalescing(const char *if_name)
 	cf_detail(CF_HARDWARE, "adjusting interface settings");
 	coal = (struct ethtool_coalesce){
 		.cmd = ETHTOOL_SCOALESCE,
-		.rx_coalesce_usecs = 100 // .1 ms for now, which adds .05 ms to a request on average.
+		.rx_coalesce_usecs =
+				100 // .1 ms for now, which adds .05 ms to a request on average.
 	};
 
 	if (ioctl(sock, SIOCETHTOOL, &req) < 0) {
 		if (errno == EOPNOTSUPP) {
-			cf_detail(CF_HARDWARE, "interface %s does not support ETHTOOL_SCOALESCE", if_name);
+			cf_detail(CF_HARDWARE,
+					"interface %s does not support ETHTOOL_SCOALESCE", if_name);
 			goto cleanup1;
 		}
 
@@ -1632,37 +1684,30 @@ check_irqbalance(void)
 {
 	cf_detail(CF_HARDWARE, "checking irqbalance");
 
-	check_proc_res res = check_proc("irqbalance", 1, (const char *[]){
-		"--policyscript=" POLICY_SCRIPT
-	});
+	check_proc_res res = check_proc("irqbalance", 1,
+			(const char*[]){ "--policyscript=" POLICY_SCRIPT });
 
 	if (res == CHECK_PROC_PRESENT_NO_ARG) {
-		res = check_proc("irqbalance", 2, (const char *[]){
-			"--policyscript",
-			POLICY_SCRIPT
-		});
+		res = check_proc("irqbalance", 2,
+				(const char*[]){ "--policyscript", POLICY_SCRIPT });
 	}
 
 	if (res == CHECK_PROC_PRESENT_NO_ARG) {
-		res = check_proc("irqbalance", 1, (const char *[]){
-			"-l" POLICY_SCRIPT
-		});
+		res = check_proc("irqbalance", 1, (const char*[]){ "-l" POLICY_SCRIPT });
 	}
 
 	if (res == CHECK_PROC_PRESENT_NO_ARG) {
-		res = check_proc("irqbalance", 2, (const char *[]){
-			"-l",
-			POLICY_SCRIPT
-		});
+		res = check_proc("irqbalance", 2, (const char*[]){ "-l", POLICY_SCRIPT });
 	}
 
 	if (res == CHECK_PROC_PRESENT_NO_ARG) {
-		cf_crash_nostack(CF_HARDWARE, "please disable irqbalance or run it with the Aerospike policy script, /etc/aerospike/irqbalance-ban.sh");
+		cf_crash_nostack(CF_HARDWARE,
+				"please disable irqbalance or run it with the Aerospike policy script, /etc/aerospike/irqbalance-ban.sh");
 	}
 }
 
 static void
-config_interface(uint32_t i_addr, const char *if_name, bool rfs, irq_list *irqs)
+config_interface(uint32_t i_addr, const char* if_name, bool rfs, irq_list* irqs)
 {
 	uint16_t n_irq_cpus = 0;
 	cf_topo_os_cpu_index i_os_cpu = fix_os_cpu_index(0, &g_os_cpus_available);
@@ -1672,17 +1717,20 @@ config_interface(uint32_t i_addr, const char *if_name, bool rfs, irq_list *irqs)
 
 		if (i % irqs->per_cpu == irqs->per_cpu - 1) {
 			++n_irq_cpus;
-			i_os_cpu = fix_os_cpu_index((cf_topo_os_cpu_index)(i_os_cpu + 1), &g_os_cpus_available);
+			i_os_cpu = fix_os_cpu_index((cf_topo_os_cpu_index)(i_os_cpu + 1),
+					&g_os_cpus_available);
 		}
 	}
 
-	cf_detail(CF_HARDWARE, "interface %s with %hu RX interrupt(s)", if_name, n_irq_cpus);
+	cf_detail(CF_HARDWARE, "interface %s with %hu RX interrupt(s)", if_name,
+			n_irq_cpus);
 
 	if (g_n_irq_cpus[i_addr] == 0) {
 		g_n_irq_cpus[i_addr] = n_irq_cpus;
 	}
 	else if (n_irq_cpus != g_n_irq_cpus[i_addr]) {
-		cf_crash(CF_HARDWARE, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
+		cf_crash(CF_HARDWARE,
+				"interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
 				if_name, n_irq_cpus, g_n_irq_cpus[i_addr]);
 	}
 
@@ -1707,14 +1755,15 @@ config_interface(uint32_t i_addr, const char *if_name, bool rfs, irq_list *irqs)
 }
 
 static void
-config_interface_numa(uint32_t i_addr, const char *if_name, irq_list *irqs)
+config_interface_numa(uint32_t i_addr, const char* if_name, irq_list* irqs)
 {
 	uint16_t n_irq_cpus = 0;
 	cf_topo_os_cpu_index i_os_cpu[g_n_numa_nodes];
 	uint16_t i_numa_node;
 
 	for (i_numa_node = 0; i_numa_node < g_n_numa_nodes; ++i_numa_node) {
-		i_os_cpu[i_numa_node] = fix_os_cpu_index(0, &g_numa_node_os_cpus_online[i_numa_node]);
+		i_os_cpu[i_numa_node] =
+				fix_os_cpu_index(0, &g_numa_node_os_cpus_online[i_numa_node]);
 	}
 
 	i_numa_node = 0;
@@ -1725,8 +1774,10 @@ config_interface_numa(uint32_t i_addr, const char *if_name, irq_list *irqs)
 
 	for (uint16_t i = 0; i < irqs->n_irqs; ++i) {
 		char mask_str[200];
-		mask_to_string(&g_numa_node_os_cpus_online[i_numa_node], mask_str, sizeof(mask_str));
-		cf_detail(CF_HARDWARE, "NUMA node index %hu CPU mask is %s", i_numa_node, mask_str);
+		mask_to_string(&g_numa_node_os_cpus_online[i_numa_node], mask_str,
+				sizeof(mask_str));
+		cf_detail(CF_HARDWARE, "NUMA node index %hu CPU mask is %s",
+				i_numa_node, mask_str);
 
 		pin_irq(irqs->irqs[i], i_os_cpu[i_numa_node]);
 
@@ -1738,20 +1789,23 @@ config_interface_numa(uint32_t i_addr, const char *if_name, irq_list *irqs)
 			}
 
 			i_os_cpu[i_numa_node] =
-					fix_os_cpu_index((cf_topo_os_cpu_index)(i_os_cpu[i_numa_node] + 1),
-					&g_numa_node_os_cpus_online[i_numa_node]);
+					fix_os_cpu_index((cf_topo_os_cpu_index)(i_os_cpu[i_numa_node] +
+											 1),
+							&g_numa_node_os_cpus_online[i_numa_node]);
 			i_numa_node = (uint16_t)((i_numa_node + 1) % g_n_numa_nodes);
 		}
 	}
 
-	cf_detail(CF_HARDWARE, "interface %s with %hu RX interrupt(s) on NUMA node %hu",
-			if_name, n_irq_cpus, g_i_numa_node);
+	cf_detail(CF_HARDWARE,
+			"interface %s with %hu RX interrupt(s) on NUMA node %hu", if_name,
+			n_irq_cpus, g_i_numa_node);
 
 	if (g_n_irq_cpus[i_addr] == 0) {
 		g_n_irq_cpus[i_addr] = n_irq_cpus;
 	}
 	else if (n_irq_cpus != g_n_irq_cpus[i_addr]) {
-		cf_crash(CF_HARDWARE, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
+		cf_crash(CF_HARDWARE,
+				"interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
 				if_name, n_irq_cpus, g_n_irq_cpus[i_addr]);
 	}
 
@@ -1761,14 +1815,15 @@ config_interface_numa(uint32_t i_addr, const char *if_name, irq_list *irqs)
 }
 
 static void
-optimize_interface(uint32_t i_addr, const char *if_name)
+optimize_interface(uint32_t i_addr, const char* if_name)
 {
 	cf_detail(CF_HARDWARE, "optimizing interface %s", if_name);
 	uint16_t n_queues = interface_rx_queues(if_name);
 	irq_list irqs;
 	interface_irqs(if_name, &irqs);
 
-	cf_info(CF_HARDWARE, "detected %hu NIC receive queue(s), %hu interrupt(s) for %s",
+	cf_info(CF_HARDWARE,
+			"detected %hu NIC receive queue(s), %hu interrupt(s) for %s",
 			n_queues, irqs.n_irqs, if_name);
 
 	// We either expect one interrupt per RX queue (shared with TX) or two
@@ -1777,7 +1832,8 @@ optimize_interface(uint32_t i_addr, const char *if_name)
 	uint16_t n_irq_cpus = irqs.n_irqs / irqs.per_cpu;
 
 	if (n_irq_cpus != n_queues) {
-		cf_crash(CF_HARDWARE, "suspicious NIC interrupt count %hu with %hu NIC receive queue(s)",
+		cf_crash(CF_HARDWARE,
+				"suspicious NIC interrupt count %hu with %hu NIC receive queue(s)",
 				irqs.n_irqs, n_queues);
 	}
 
@@ -1793,7 +1849,8 @@ optimize_interface(uint32_t i_addr, const char *if_name)
 	}
 	else {
 		if (n_irq_cpus <= g_n_cpus / 4) {
-			cf_warning(CF_HARDWARE, "%s has very few NIC queues; only %hu out of %hu CPUs handle(s) NIC interrupts",
+			cf_warning(CF_HARDWARE,
+					"%s has very few NIC queues; only %hu out of %hu CPUs handle(s) NIC interrupts",
 					if_name, n_irq_cpus, g_n_cpus);
 		}
 
@@ -1810,7 +1867,7 @@ optimize_interface(uint32_t i_addr, const char *if_name)
 
 // Make sure that we are running on appropriate kernel.
 static void
-check_socket_option(int optname, const char *tag)
+check_socket_option(int optname, const char* tag)
 {
 	int32_t fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
@@ -1836,24 +1893,27 @@ check_socket_option(int optname, const char *tag)
 
 // Reconfigure NIC queues and interrupts.
 static void
-optimize_interfaces(const cf_addr_list *addrs)
+optimize_interfaces(const cf_addr_list* addrs)
 {
 	if (addrs->n_addrs == 0) {
-		cf_crash_nostack(CF_HARDWARE, "auto-pinning requires binding the service to one or more network interfaces");
+		cf_crash_nostack(CF_HARDWARE,
+				"auto-pinning requires binding the service to one or more network interfaces");
 	}
 
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
-		const char *if_name = addrs->addrs[i];
+		const char* if_name = addrs->addrs[i];
 
-		if (!cf_inter_is_inter_name(if_name)) {
-			cf_crash_nostack(CF_HARDWARE, "auto-pinning requires binding the service to network interfaces; \"%s\" isn't a network interface",
+		if (! cf_inter_is_inter_name(if_name)) {
+			cf_crash_nostack(CF_HARDWARE,
+					"auto-pinning requires binding the service to network interfaces; \"%s\" isn't a network interface",
 					if_name);
 		}
 
 		char phys_name[50];
-		CF_NEVER_FAILS(cf_inter_get_physical(if_name, phys_name, sizeof(phys_name)));
+		CF_NEVER_FAILS(cf_inter_get_physical(if_name, phys_name,
+				sizeof(phys_name)));
 
-		char *exp_names[100];
+		char* exp_names[100];
 		uint32_t n_exp = sizeof(exp_names) / sizeof(exp_names[0]);
 		cf_inter_expand_bond(phys_name, exp_names, &n_exp);
 
@@ -1866,7 +1926,7 @@ optimize_interfaces(const cf_addr_list *addrs)
 
 void
 cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
-		const cf_addr_list *addrs)
+		const cf_addr_list* addrs)
 {
 	// Detect the NUMA topology.
 
@@ -1887,7 +1947,9 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 		if (a_numa_node >= g_n_numa_nodes) {
 			cf_topo_numa_node_index orig = a_numa_node;
 			a_numa_node = (cf_topo_numa_node_index)(a_numa_node % g_n_numa_nodes);
-			cf_detail(CF_HARDWARE, "invalid NUMA node index: %hu, clamping to %hu", orig, a_numa_node);
+			cf_detail(CF_HARDWARE,
+					"invalid NUMA node index: %hu, clamping to %hu", orig,
+					a_numa_node);
 			detect(a_numa_node);
 		}
 
@@ -1926,7 +1988,7 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 }
 
 void
-cf_topo_force_map_memory(const uint8_t *from, size_t size)
+cf_topo_force_map_memory(const uint8_t* from, size_t size)
 {
 	if (g_i_numa_node == INVALID_INDEX || size == 0) {
 		return;
@@ -1936,10 +1998,10 @@ cf_topo_force_map_memory(const uint8_t *from, size_t size)
 
 	// Read one byte per memory page to force otherwise lazy mapping.
 
-	const uint8_t *start = (const uint8_t *)
-			(((int64_t)from + (MEM_PAGE_SIZE - 1)) & -MEM_PAGE_SIZE);
-	const uint8_t *end = from + size;
-	const volatile uint8_t *p_byte;
+	const uint8_t* start = (const uint8_t*)(((int64_t)from + (MEM_PAGE_SIZE - 1)) &
+			-MEM_PAGE_SIZE);
+	const uint8_t* end = from + size;
+	const volatile uint8_t* p_byte;
 
 	// In case 'from' was not page-aligned, take care of the partial page.
 	if (start > from) {
@@ -1961,13 +2023,15 @@ cf_topo_migrate_memory(void)
 
 	// Migrate existing memory allocations to the selected NUMA node.
 
-	os_numa_node_index i_os_numa_node = g_numa_node_index_to_os_numa_node_index[g_i_numa_node];
+	os_numa_node_index i_os_numa_node =
+			g_numa_node_index_to_os_numa_node_index[g_i_numa_node];
 	uint64_t to_mask = 1UL << i_os_numa_node;
 	cf_detail(CF_HARDWARE, "NUMA node mask (to): %016" PRIx64, to_mask);
 
 	uint64_t from_mask = 0;
 
-	for (cf_topo_numa_node_index i_numa_node = 0; i_numa_node < g_n_numa_nodes; ++i_numa_node) {
+	for (cf_topo_numa_node_index i_numa_node = 0; i_numa_node < g_n_numa_nodes;
+			++i_numa_node) {
 		i_os_numa_node = g_numa_node_index_to_os_numa_node_index[i_numa_node];
 		from_mask |= 1u << i_os_numa_node;
 	}
@@ -1976,7 +2040,8 @@ cf_topo_migrate_memory(void)
 	cf_detail(CF_HARDWARE, "NUMA node mask (from): %016" PRIx64, from_mask);
 
 	if (from_mask != 0) {
-		cf_info(CF_HARDWARE, "migrating shared memory to local NUMA node - this may take a bit");
+		cf_info(CF_HARDWARE,
+				"migrating shared memory to local NUMA node - this may take a bit");
 		// Unlike select(), we have to pass "number of valid bits + 1".
 		migrate_pages_safe(0, 65, &from_mask, &to_mask);
 	}
@@ -1990,42 +2055,43 @@ cf_topo_info(void)
 				g_n_cpus, g_n_cores, g_n_numa_nodes);
 	}
 	else {
-		cf_info(CF_HARDWARE, "detected %hu CPU(s), %hu core(s) on NUMA node %hu of %hu",
+		cf_info(CF_HARDWARE,
+				"detected %hu CPU(s), %hu core(s) on NUMA node %hu of %hu",
 				g_n_cpus, g_n_cores, g_i_numa_node, g_n_numa_nodes);
 	}
 }
 
 static uint32_t
-dev_key_hash(const void *k)
+dev_key_hash(const void* k)
 {
-	const dev_key_t *key = k;
+	const dev_key_t* key = k;
 	return (1 + key->major) * (1 + key->minor);
 }
 
 static void
-add_child(const dev_key_t *key, dev_node_t *node, const dev_key_t *child_key,
-		dev_node_t *child_node)
+add_child(const dev_key_t* key, dev_node_t* node, const dev_key_t* child_key,
+		dev_node_t* child_node)
 {
-	cf_detail(CF_HARDWARE, "parent %u:%u -> child %u:%u",
-			key->major, key->minor, child_key->major, child_key->minor);
+	cf_detail(CF_HARDWARE, "parent %u:%u -> child %u:%u", key->major,
+			key->minor, child_key->major, child_key->minor);
 
 	node->children[node->n_children] = child_node;
 	++node->n_children;
 }
 
 static void
-collect_edges(const char *sys_dir, const char *prefix, bool flip,
-		const dev_key_t *key, dev_node_t *node)
+collect_edges(const char* sys_dir, const char* prefix, bool flip,
+		const dev_key_t* key, dev_node_t* node)
 {
 	cf_detail(CF_HARDWARE, "collecting devices in %s", sys_dir);
 
-	if (!path_exists(sys_dir)) {
+	if (! path_exists(sys_dir)) {
 		return;
 	}
 
 	size_t prefix_len = strlen(prefix);
 
-	DIR *dir = opendir_safe(sys_dir);
+	DIR* dir = opendir_safe(sys_dir);
 	struct dirent ent;
 
 	while (readdir_safe(dir, &ent) >= 0) {
@@ -2039,7 +2105,7 @@ collect_edges(const char *sys_dir, const char *prefix, bool flip,
 		char sys_path[DEVICE_PATH_SIZE];
 		snprintf(sys_path, DEVICE_PATH_SIZE, "%s/%s", sys_dir, ent.d_name);
 
-		if (!path_is_dir(sys_path)) {
+		if (! path_is_dir(sys_path)) {
 			cf_detail(CF_HARDWARE, "not a directory");
 			continue;
 		}
@@ -2054,7 +2120,7 @@ collect_edges(const char *sys_dir, const char *prefix, bool flip,
 			continue;
 		}
 
-		dev_node_t *sub_node;
+		dev_node_t* sub_node;
 
 		if (cf_shash_get(g_dev_graph, &sub_key, &sub_node) != CF_SHASH_OK) {
 			cf_warning(CF_HARDWARE, "no node for sub device %s/%s (%u:%u)",
@@ -2062,7 +2128,7 @@ collect_edges(const char *sys_dir, const char *prefix, bool flip,
 			continue;
 		}
 
-		if (!flip) {
+		if (! flip) {
 			add_child(&sub_key, sub_node, key, node);
 		}
 		else {
@@ -2074,12 +2140,12 @@ collect_edges(const char *sys_dir, const char *prefix, bool flip,
 }
 
 static int32_t
-create_device_edges(const void *k, void *v, void *udata)
+create_device_edges(const void* k, void* v, void* udata)
 {
 	(void)udata;
 
-	const dev_key_t *key = k;
-	dev_node_t **node = v;
+	const dev_key_t* key = k;
+	dev_node_t** node = v;
 
 	cf_detail(CF_HARDWARE, "creating edges for %s", (*node)->sys_home);
 
@@ -2101,26 +2167,23 @@ build_device_graph(void)
 	// Step 1. Create a device map entry for each device. Don't yet link them
 	// into a device dependency graph.
 
-	static const char *sys_dirs[] = {
-		"/sys/class/nvme",
-		"/sys/class/block",
-		NULL
-	};
+	static const char* sys_dirs[] = { "/sys/class/nvme", "/sys/class/block",
+		NULL };
 
 	g_dev_graph = cf_shash_create(dev_key_hash, sizeof(dev_key_t),
-			sizeof(dev_node_t *), 256, false);
+			sizeof(dev_node_t*), 256, false);
 
 	for (int32_t i_dir = 0; sys_dirs[i_dir] != NULL; ++i_dir) {
-		const char *sys_dir = sys_dirs[i_dir];
+		const char* sys_dir = sys_dirs[i_dir];
 
 		cf_detail(CF_HARDWARE, "collecting devices in %s", sys_dir);
 
-		if (!path_exists(sys_dir)) {
+		if (! path_exists(sys_dir)) {
 			cf_detail(CF_HARDWARE, "directory does not exist");
 			continue;
 		}
 
-		DIR *dir = opendir_safe(sys_dir);
+		DIR* dir = opendir_safe(sys_dir);
 		struct dirent ent;
 
 		while (readdir_safe(dir, &ent) >= 0) {
@@ -2138,7 +2201,7 @@ build_device_graph(void)
 				continue;
 			}
 
-			dev_node_t *node = cf_malloc(sizeof(dev_node_t));
+			dev_node_t* node = cf_malloc(sizeof(dev_node_t));
 			memset(node, 0, sizeof(dev_node_t));
 
 			snprintf(node->name, DEVICE_NAME_SIZE, "%s", ent.d_name);
@@ -2181,22 +2244,22 @@ build_device_graph(void)
 	cf_shash_reduce(g_dev_graph, create_device_edges, NULL);
 }
 
-static char *
-get_mounted_device(const char *fs_path)
+static char*
+get_mounted_device(const char* fs_path)
 {
 	cf_detail(CF_HARDWARE, "mapping mount point %s", fs_path);
 
-	char *fs_real = realpath(fs_path, NULL);
+	char* fs_real = realpath(fs_path, NULL);
 
 	if (fs_real == NULL) {
-		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)",
-				fs_path, errno, cf_strerror(errno));
+		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)", fs_path,
+				errno, cf_strerror(errno));
 		return NULL;
 	}
 
 	cf_detail(CF_HARDWARE, "resolved path %s", fs_real);
 
-	FILE *fh = setmntent("/proc/mounts", "r");
+	FILE* fh = setmntent("/proc/mounts", "r");
 
 	struct mntent mnt;
 	char buff[1000];
@@ -2207,13 +2270,12 @@ get_mounted_device(const char *fs_path)
 	while (getmntent_r(fh, &mnt, buff, sizeof(buff)) != NULL) {
 		cf_detail(CF_HARDWARE, "mount point %s", mnt.mnt_dir);
 
-		char *mount_real = realpath(mnt.mnt_dir, NULL);
+		char* mount_real = realpath(mnt.mnt_dir, NULL);
 
 		if (mount_real == NULL) {
 			// Don't warn; current user may simply not be allowed access to all
 			// mount points.
-			cf_detail(CF_HARDWARE,
-					"failed to resolve mount point %s: %d (%s)",
+			cf_detail(CF_HARDWARE, "failed to resolve mount point %s: %d (%s)",
 					mnt.mnt_dir, errno, cf_strerror(errno));
 			continue;
 		}
@@ -2225,8 +2287,8 @@ get_mounted_device(const char *fs_path)
 		if (len > best_len && strncmp(fs_real, mount_real, len) == 0) {
 			strcpy(best_path, mnt.mnt_fsname);
 			best_len = len;
-			cf_detail(CF_HARDWARE, "new best %s with length %zu",
-					best_path, best_len);
+			cf_detail(CF_HARDWARE, "new best %s with length %zu", best_path,
+					best_len);
 		}
 
 		free(mount_real);
@@ -2247,19 +2309,18 @@ get_mounted_device(const char *fs_path)
 		return NULL;
 	}
 
-	char *best_real = realpath(best_path, NULL);
+	char* best_real = realpath(best_path, NULL);
 
 	if (best_real == NULL) {
 		// Don't warn; e.g. AER-6191 - normal in some container environments.
-		cf_detail(CF_HARDWARE,
-				"failed to resolve mounted device %s: %d (%s)", best_path,
-				errno, cf_strerror(errno));
+		cf_detail(CF_HARDWARE, "failed to resolve mounted device %s: %d (%s)",
+				best_path, errno, cf_strerror(errno));
 		return NULL;
 	}
 
 	// Return a result allocated with the cf_*() allocation functions.
 
-	char *res = cf_strdup(best_real);
+	char* res = cf_strdup(best_real);
 	free(best_real);
 
 	cf_detail(CF_HARDWARE, "mount point is %s", res);
@@ -2267,7 +2328,7 @@ get_mounted_device(const char *fs_path)
 }
 
 static bool
-get_dev_key(const char *dev_path, dev_key_t *key)
+get_dev_key(const char* dev_path, dev_key_t* key)
 {
 	cf_detail(CF_HARDWARE, "getting device key for %s", dev_path);
 
@@ -2279,7 +2340,7 @@ get_dev_key(const char *dev_path, dev_key_t *key)
 		return false;
 	}
 
-	if (!S_ISBLK(st.st_mode) && !S_ISCHR(st.st_mode)) {
+	if (! S_ISBLK(st.st_mode) && ! S_ISCHR(st.st_mode)) {
 		cf_warning(CF_HARDWARE, "%s is not a device", dev_path);
 		return false;
 	}
@@ -2292,15 +2353,15 @@ get_dev_key(const char *dev_path, dev_key_t *key)
 }
 
 static cf_topo_numa_node_index
-get_numa_node(const char *sys_path)
+get_numa_node(const char* sys_path)
 {
 	cf_detail(CF_HARDWARE, "finding NUMA node for %s", sys_path);
 
-	char *sys_real = realpath(sys_path, NULL);
+	char* sys_real = realpath(sys_path, NULL);
 
 	if (sys_real == NULL) {
-		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)",
-				sys_path, errno, cf_strerror(errno));
+		cf_warning(CF_HARDWARE, "failed to resolve path %s: %d (%s)", sys_path,
+				errno, cf_strerror(errno));
 		return INVALID_INDEX;
 	}
 
@@ -2340,15 +2401,14 @@ get_numa_node(const char *sys_path)
 }
 
 static int32_t
-get_nvme_age(const char *dev_path)
+get_nvme_age(const char* dev_path)
 {
 	static const uint32_t SZ_BUFF = 512;
 
 	cf_detail(CF_HARDWARE, "getting age for %s", dev_path);
 
-	if (!cf_process_has_cap(CAP_SYS_ADMIN)) {
-		cf_detail(CF_HARDWARE, "insufficient privileges to query %s",
-				dev_path);
+	if (! cf_process_has_cap(CAP_SYS_ADMIN)) {
+		cf_detail(CF_HARDWARE, "insufficient privileges to query %s", dev_path);
 		return -1;
 	}
 
@@ -2360,14 +2420,14 @@ get_nvme_age(const char *dev_path)
 					dev_path);
 		}
 		else {
-			cf_warning(CF_HARDWARE, "failed to open %s: %d (%s)",
-					dev_path, errno, cf_strerror(errno));
+			cf_warning(CF_HARDWARE, "failed to open %s: %d (%s)", dev_path,
+					errno, cf_strerror(errno));
 		}
 
 		return -1;
 	}
 
-	uint8_t *buff = cf_valloc(SZ_BUFF);
+	uint8_t* buff = cf_valloc(SZ_BUFF);
 
 	// Silence Valgrind, which doesn't know about this ioctl.
 
@@ -2381,17 +2441,17 @@ get_nvme_age(const char *dev_path)
 	// "0's based value" in the spec means that a value x in a data
 	// structure actually means x + 1.
 
-	uint32_t numdl = (SZ_BUFF / 4) - 1;	// number of dwords lower (0's based)
-	uint32_t lid = 2;					// log page identifier: 2 (SMART log)
+	uint32_t numdl = (SZ_BUFF / 4) - 1; // number of dwords lower (0's based)
+	uint32_t lid = 2; // log page identifier: 2 (SMART log)
 
 	uint32_t cdw10 = (numdl << 16) | lid;
 
 	struct nvme_admin_cmd cmd = {
-		.opcode = 0x02,			// Get Log Page
-		.nsid = 0xffffffff,		// no namespace
-		.addr = (uint64_t)buff,	// result buffer
-		.data_len = SZ_BUFF,	// size of result buffer
-		.cdw10 = cdw10			// command arguments
+		.opcode = 0x02, // Get Log Page
+		.nsid = 0xffffffff, // no namespace
+		.addr = (uint64_t)buff, // result buffer
+		.data_len = SZ_BUFF, // size of result buffer
+		.cdw10 = cdw10 // command arguments
 	};
 
 	cf_process_enable_cap(CAP_SYS_ADMIN);
@@ -2414,7 +2474,7 @@ get_nvme_age(const char *dev_path)
 		return -1;
 	}
 
-	if (res > 0){
+	if (res > 0) {
 		// Some virtualized environments don't provide a SMART log page.
 		if (res != NVME_SC_INVALID_LOG_PAGE) {
 			cf_warning(CF_HARDWARE, "failed to submit command to %s: 0x%x",
@@ -2439,9 +2499,9 @@ get_nvme_age(const char *dev_path)
 }
 
 static void
-update_path_data(path_data_t *data)
+update_path_data(path_data_t* data)
 {
-	cf_storage_device_info *info = &data->info;
+	cf_storage_device_info* info = &data->info;
 
 	cf_detail(CF_HARDWARE, "updating path data for %s", info->dev_path);
 
@@ -2454,9 +2514,9 @@ update_path_data(path_data_t *data)
 }
 
 static void
-visit_children(path_data_t *data, dev_node_t *node)
+visit_children(path_data_t* data, dev_node_t* node)
 {
-	cf_storage_device_info *info = &data->info;
+	cf_storage_device_info* info = &data->info;
 
 	cf_detail(CF_HARDWARE, "considering %s for %s", node->dev_path,
 			info->dev_path);
@@ -2487,12 +2547,12 @@ visit_children(path_data_t *data, dev_node_t *node)
 	}
 }
 
-static path_data_t *
-new_path_data(const char *any_path)
+static path_data_t*
+new_path_data(const char* any_path)
 {
 	cf_detail(CF_HARDWARE, "creating path data for %s", any_path);
 
-	path_data_t *data = cf_malloc(sizeof(path_data_t));
+	path_data_t* data = cf_malloc(sizeof(path_data_t));
 	struct stat st;
 
 	if (stat(any_path, &st) < 0) {
@@ -2502,7 +2562,7 @@ new_path_data(const char *any_path)
 		return NULL;
 	}
 
-	cf_storage_device_info *info = &data->info;
+	cf_storage_device_info* info = &data->info;
 
 	if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode)) {
 		cf_detail(CF_HARDWARE, "%s is a file or directory", any_path);
@@ -2528,13 +2588,13 @@ new_path_data(const char *any_path)
 
 	dev_key_t key;
 
-	if (!get_dev_key(info->dev_path, &key)) {
+	if (! get_dev_key(info->dev_path, &key)) {
 		cf_free(info->dev_path);
 		cf_free(data);
 		return NULL;
 	}
 
-	dev_node_t *node;
+	dev_node_t* node;
 
 	if (cf_shash_get(g_dev_graph, &key, &node) != CF_SHASH_OK) {
 		cf_warning(CF_HARDWARE, "no node for device key %u:%u", key.major,
@@ -2556,8 +2616,8 @@ new_path_data(const char *any_path)
 	return data;
 }
 
-static path_data_t *
-get_path_data(const char *any_path)
+static path_data_t*
+get_path_data(const char* any_path)
 {
 	cf_detail(CF_HARDWARE, "getting path data for %s", any_path);
 
@@ -2568,8 +2628,8 @@ get_path_data(const char *any_path)
 	}
 
 	if (g_path_data_hash == NULL) {
-		g_path_data_hash = cf_shash_create(cf_shash_fn_zstr,
-				DEVICE_PATH_SIZE, sizeof(path_data_t *), 256, false);
+		g_path_data_hash = cf_shash_create(cf_shash_fn_zstr, DEVICE_PATH_SIZE,
+				sizeof(path_data_t*), 256, false);
 	}
 
 	size_t len = strlen(any_path);
@@ -2585,7 +2645,7 @@ get_path_data(const char *any_path)
 	memcpy(key, any_path, len);
 	memset(key + len, 0, DEVICE_PATH_SIZE - len);
 
-	path_data_t *data;
+	path_data_t* data;
 
 	if (cf_shash_get(g_path_data_hash, key, &data) != CF_SHASH_OK) {
 		cf_detail(CF_HARDWARE, "no path data for %s", any_path);
@@ -2613,12 +2673,12 @@ get_path_data(const char *any_path)
 	return data;
 }
 
-cf_storage_device_info *
-cf_storage_get_device_info(const char *path)
+cf_storage_device_info*
+cf_storage_get_device_info(const char* path)
 {
 	cf_detail(CF_HARDWARE, "getting device info for %s", path);
 
-	path_data_t *data = get_path_data(path);
+	path_data_t* data = get_path_data(path);
 
 	if (data == NULL) {
 		return NULL;
@@ -2628,7 +2688,7 @@ cf_storage_get_device_info(const char *path)
 }
 
 int64_t
-cf_storage_file_system_size(const char *path)
+cf_storage_file_system_size(const char* path)
 {
 	struct stat file;
 
@@ -2644,15 +2704,15 @@ cf_storage_file_system_size(const char *path)
 
 		default:
 			cf_warning(CF_HARDWARE,
-					"error while querying mount point %s: %d (%s)", path,
-					errno, cf_strerror(errno));
+					"error while querying mount point %s: %d (%s)", path, errno,
+					cf_strerror(errno));
 			break;
 		}
 
 		return -1;
 	}
 
-	if (!S_ISDIR(file.st_mode)) {
+	if (! S_ISDIR(file.st_mode)) {
 		cf_warning(CF_HARDWARE, "mount point %s is not a directory", path);
 		return -1;
 	}
@@ -2660,9 +2720,8 @@ cf_storage_file_system_size(const char *path)
 	struct statfs fs;
 
 	if (statfs(path, &fs) < 0) {
-		cf_warning(CF_HARDWARE,
-				"error while querying mount point %s: %d (%s)", path,
-				errno, cf_strerror(errno));
+		cf_warning(CF_HARDWARE, "error while querying mount point %s: %d (%s)",
+				path, errno, cf_strerror(errno));
 		return -1;
 	}
 
@@ -2673,7 +2732,7 @@ cf_storage_file_system_size(const char *path)
 }
 
 bool
-cf_storage_is_root_fs(const char *path)
+cf_storage_is_root_fs(const char* path)
 {
 	struct statvfs vfs;
 
@@ -2693,7 +2752,7 @@ cf_storage_is_root_fs(const char *path)
 }
 
 static bool
-write_file_int_if(const char *path, uint32_t val)
+write_file_int_if(const char* path, uint32_t val)
 {
 	int64_t cur_val;
 
@@ -2715,10 +2774,11 @@ void
 cf_page_cache_dirty_limits(void)
 {
 	if (! (write_file_int_if("/proc/sys/vm/dirty_bytes", 16777216) &&
-			write_file_int_if("/proc/sys/vm/dirty_background_bytes", 1) &&
-			write_file_int_if("/proc/sys/vm/dirty_expire_centisecs", 1) &&
-			write_file_int_if("/proc/sys/vm/dirty_writeback_centisecs", 10))) {
-		cf_crash_nostack(CF_HARDWARE, "each of: "
+				write_file_int_if("/proc/sys/vm/dirty_background_bytes", 1) &&
+				write_file_int_if("/proc/sys/vm/dirty_expire_centisecs", 1) &&
+				write_file_int_if("/proc/sys/vm/dirty_writeback_centisecs", 10))) {
+		cf_crash_nostack(CF_HARDWARE,
+				"each of: "
 				"/proc/sys/vm/dirty_bytes = 16777216, "
 				"/proc/sys/vm/dirty_background_bytes = 1, "
 				"/proc/sys/vm/dirty_expire_centisecs = 1, "
@@ -2728,13 +2788,13 @@ cf_page_cache_dirty_limits(void)
 }
 
 bool
-cf_page_cache_get_stats(cf_arenax *arena, cf_page_cache_stats *stats)
+cf_page_cache_get_stats(cf_arenax* arena, cf_page_cache_stats* stats)
 {
 	char smaps_path[32];
 
 	sprintf(smaps_path, "/proc/%d/smaps", getpid());
 
-	FILE *f = fopen(smaps_path, "r");
+	FILE* f = fopen(smaps_path, "r");
 
 	if (f == NULL) {
 		cf_warning(CF_HARDWARE, "cannot open %s: %d (%s)", smaps_path, errno,
@@ -2752,11 +2812,11 @@ cf_page_cache_get_stats(cf_arenax *arena, cf_page_cache_stats *stats)
 		uint64_t start;
 
 		if (sscanf(line, "%lx-", &start) == 1) {
-			is_stage = cf_arenax_is_stage_address(arena, (void *)start);
+			is_stage = cf_arenax_is_stage_address(arena, (void*)start);
 			continue;
 		}
 
-		if (!is_stage) {
+		if (! is_stage) {
 			continue;
 		}
 
@@ -2778,14 +2838,14 @@ cf_page_cache_get_stats(cf_arenax *arena, cf_page_cache_stats *stats)
 }
 
 bool
-cf_mount_is_local(const char *path)
+cf_mount_is_local(const char* path)
 {
 	if (g_i_numa_node == INVALID_INDEX) {
 		cf_detail(CF_HARDWARE, "not NUMA pinned");
 		return true;
 	}
 
-	cf_storage_device_info *info = cf_storage_get_device_info(path);
+	cf_storage_device_info* info = cf_storage_get_device_info(path);
 
 	if (info == NULL) {
 		cf_crash(CF_HARDWARE, "couldn't get device info for %s", path);
@@ -2802,7 +2862,6 @@ cf_mount_is_local(const char *path)
 
 	return numa_node == g_i_numa_node;
 }
-
 
 // TODO - TEMPORARY tooling to count how often plug-in memory barriers are hit.
 
@@ -2839,8 +2898,8 @@ cf_tso_count_barrier(void)
 		g_tso_counters = mmap(NULL, TSO_PROF_DAT_SZ, PROT_READ | PROT_WRITE,
 				MAP_SHARED, fd, 0);
 
-		cf_assert(g_tso_counters != MAP_FAILED, CF_HARDWARE, "failed to map "
-				TSO_PROF_DAT);
+		cf_assert(g_tso_counters != MAP_FAILED, CF_HARDWARE,
+				"failed to map " TSO_PROF_DAT);
 
 		close(fd);
 

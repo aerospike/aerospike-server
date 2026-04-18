@@ -22,26 +22,28 @@
 
 #include "fabric/exchange.h"
 
-#include <errno.h>
+#include <alloca.h>
+#include <inttypes.h>
 #include <pthread.h>
-#include <unistd.h>
+#include <string.h>
 #include <sys/param.h> // For MAX() and MIN().
+#include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_queue.h"
 
 #include "cf_thread.h"
 #include "dynbuf.h"
 #include "log.h"
+#include "msg.h"
 #include "shash.h"
-#include "socket.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/stats.h"
+#include "fabric/clustering.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
+#include "fabric/partition.h"
 #include "fabric/partition_balance.h"
 #include "storage/storage.h"
 
@@ -138,8 +140,7 @@
 /**
  * Partition data exchanged for each unique vinfo for a namespace.
  */
-typedef struct as_exchange_vinfo_payload_s
-{
+typedef struct as_exchange_vinfo_payload_s {
 	/**
 	 * The partition vinfo.
 	 */
@@ -154,13 +155,12 @@ typedef struct as_exchange_vinfo_payload_s
 	 * Partition having this vinfo.
 	 */
 	uint16_t pids[];
-}__attribute__((__packed__)) as_exchange_vinfo_payload;
+} __attribute__((__packed__)) as_exchange_vinfo_payload;
 
 /**
  * Information exchanged for a single namespace.
  */
-typedef struct as_exchange_ns_vinfos_payload_s
-{
+typedef struct as_exchange_ns_vinfos_payload_s {
 	/**
 	 * Count of version infos.
 	 */
@@ -170,13 +170,12 @@ typedef struct as_exchange_ns_vinfos_payload_s
 	 * Parition version information for each unique version.
 	 */
 	as_exchange_vinfo_payload vinfos[];
-}__attribute__((__packed__)) as_exchange_ns_vinfos_payload;
+} __attribute__((__packed__)) as_exchange_ns_vinfos_payload;
 
 /**
  * Received data stored per node, per namespace, before actual commit.
  */
-typedef struct as_exchange_node_namespace_data_s
-{
+typedef struct as_exchange_node_namespace_data_s {
 	/**
 	 * Mapped local namespace.
 	 */
@@ -247,8 +246,7 @@ typedef struct as_exchange_node_namespace_data_s
 /**
  * Exchanged data for a single node.
  */
-typedef struct as_exchange_node_data_s
-{
+typedef struct as_exchange_node_data_s {
 	/**
 	 * Used by exchange listeners during upgrades for compatibility purposes.
 	 */
@@ -274,8 +272,7 @@ typedef struct as_exchange_node_data_s
 /**
  * Exchange subsystem status.
  */
-typedef enum
-{
+typedef enum {
 	AS_EXCHANGE_SYS_STATE_UNINITIALIZED,
 	AS_EXCHANGE_SYS_STATE_RUNNING,
 	AS_EXCHANGE_SYS_STATE_SHUTTING_DOWN,
@@ -285,8 +282,7 @@ typedef enum
 /**
  * Exchange message types.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * Exchange data for one node.
 	 */
@@ -322,8 +318,7 @@ typedef enum
 /**
  * Internal exchange event type.
  */
-typedef enum
-{
+typedef enum {
 	/**
 	 * Cluster change event.
 	 */
@@ -343,8 +338,7 @@ typedef enum
 /**
  * Internal exchange event.
  */
-typedef struct as_exchange_event_s
-{
+typedef struct as_exchange_event_s {
 	/**
 	 * The type of the event.
 	 */
@@ -369,8 +363,7 @@ typedef struct as_exchange_event_s
 /**
  * Exchange subsystem state in the state transition diagram.
  */
-typedef enum as_exchange_state_s
-{
+typedef enum as_exchange_state_s {
 	/**
 	 * Exchange subsystem is at rest will all data exchanged synchronized and
 	 * committed.
@@ -396,8 +389,7 @@ typedef enum as_exchange_state_s
 /**
  * State for a single node in the succession list.
  */
-typedef struct as_exchange_node_state_s
-{
+typedef struct as_exchange_node_state_s {
 	/**
 	 * Inidicates if peer node has acknowledged send from self.
 	 */
@@ -425,8 +417,7 @@ typedef struct as_exchange_node_state_s
 /**
  * State maintained by the exchange subsystem.
  */
-typedef struct as_exchange_s
-{
+typedef struct as_exchange_s {
 	/**
 	 * Exchange subsystem status.
 	 */
@@ -543,8 +534,7 @@ typedef struct as_exchange_s
 /**
  * Internal storage for external event listeners.
  */
-typedef struct as_exchange_event_listener_s
-{
+typedef struct as_exchange_event_listener_s {
 	/**
 	 * The listener's calback function.
 	 */
@@ -560,8 +550,7 @@ typedef struct as_exchange_event_listener_s
 /**
  * External event publisher state.
  */
-typedef struct as_exchange_external_event_publisher_s
-{
+typedef struct as_exchange_external_event_publisher_s {
 	/**
 	 * State of the external event publisher.
 	 */
@@ -613,8 +602,7 @@ typedef struct as_exchange_external_event_publisher_s
  * Externs
  * ----------------------------------------------------------------------------
  */
-void
-as_skew_monitor_update();
+void as_skew_monitor_update();
 
 /*
  * ----------------------------------------------------------------------------
@@ -630,8 +618,7 @@ static as_exchange g_exchange = { 0 };
 /**
  * Rebalance flags.
  */
-typedef enum
-{
+typedef enum {
 	AS_EXCHANGE_REBALANCE_FLAG_UNIFORM = 0x01,
 	AS_EXCHANGE_REBALANCE_FLAG_QUIESCE = 0x02
 } as_exchange_rebalance_flags;
@@ -640,8 +627,7 @@ typedef enum
  * The fields in the exchange message. Should never change the order or elements
  * in between.
  */
-typedef enum
-{
+typedef enum {
 	AS_EXCHANGE_MSG_ID,
 	AS_EXCHANGE_MSG_TYPE,
 	AS_EXCHANGE_MSG_CLUSTER_KEY,
@@ -666,22 +652,21 @@ typedef enum
  * Exchange message template.
  */
 static const msg_template exchange_msg_template[] = {
-		{ AS_EXCHANGE_MSG_ID, M_FT_UINT32 },
-		{ AS_EXCHANGE_MSG_TYPE, M_FT_UINT32 },
-		{ AS_EXCHANGE_MSG_CLUSTER_KEY, M_FT_UINT64 },
-		{ AS_EXCHANGE_MSG_NAMESPACES, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_RACK_IDS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_ROSTERS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_COMPATIBILITY_ID, M_FT_UINT32 },
-		{ AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_ACTIVE_RACKS, M_FT_MSGPACK },
-		{ AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS, M_FT_MSGPACK }
+	{ AS_EXCHANGE_MSG_ID, M_FT_UINT32 }, { AS_EXCHANGE_MSG_TYPE, M_FT_UINT32 },
+	{ AS_EXCHANGE_MSG_CLUSTER_KEY, M_FT_UINT64 },
+	{ AS_EXCHANGE_MSG_NAMESPACES, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_RACK_IDS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_ROSTERS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_COMPATIBILITY_ID, M_FT_UINT32 },
+	{ AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_ACTIVE_RACKS, M_FT_MSGPACK },
+	{ AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS, M_FT_MSGPACK }
 };
 
 COMPILER_ASSERT(sizeof(exchange_msg_template) / sizeof(msg_template) ==
@@ -700,20 +685,20 @@ pthread_mutex_t g_exchange_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 /**
  * Acquire a lock on the exchange subsystem.
  */
-#define EXCHANGE_LOCK()							\
-({												\
-	pthread_mutex_lock (&g_exchange_lock);		\
-	LOCK_DEBUG("locked in %s", __FUNCTION__);	\
-})
+#define EXCHANGE_LOCK()                                                        \
+	({                                                                         \
+		pthread_mutex_lock(&g_exchange_lock);                                  \
+		LOCK_DEBUG("locked in %s", __FUNCTION__);                              \
+	})
 
 /**
  * Relinquish the lock on the exchange subsystem.
  */
-#define EXCHANGE_UNLOCK()							\
-({													\
-	pthread_mutex_unlock (&g_exchange_lock);		\
-	LOCK_DEBUG("unLocked in %s", __FUNCTION__);		\
-})
+#define EXCHANGE_UNLOCK()                                                      \
+	({                                                                         \
+		pthread_mutex_unlock(&g_exchange_lock);                                \
+		LOCK_DEBUG("unLocked in %s", __FUNCTION__);                            \
+	})
 
 /**
  * Global lock to set or get committed exchange cluster. This is a lower
@@ -725,29 +710,29 @@ pthread_rwlock_t g_exchange_commited_cluster_lock = PTHREAD_RWLOCK_INITIALIZER;
 /**
  * Acquire a read lock on the committed exchange cluster.
  */
-#define EXCHANGE_COMMITTED_CLUSTER_RLOCK()						\
-({																\
-	pthread_rwlock_rdlock (&g_exchange_commited_cluster_lock);	\
-	LOCK_DEBUG("committed data locked in %s", __FUNCTION__);	\
-})
+#define EXCHANGE_COMMITTED_CLUSTER_RLOCK()                                     \
+	({                                                                         \
+		pthread_rwlock_rdlock(&g_exchange_commited_cluster_lock);              \
+		LOCK_DEBUG("committed data locked in %s", __FUNCTION__);               \
+	})
 
 /**
  * Acquire a write lock on the committed exchange cluster.
  */
-#define EXCHANGE_COMMITTED_CLUSTER_WLOCK()						\
-({																\
-	pthread_rwlock_wrlock (&g_exchange_commited_cluster_lock);	\
-	LOCK_DEBUG("committed data locked in %s", __FUNCTION__);	\
-})
+#define EXCHANGE_COMMITTED_CLUSTER_WLOCK()                                     \
+	({                                                                         \
+		pthread_rwlock_wrlock(&g_exchange_commited_cluster_lock);              \
+		LOCK_DEBUG("committed data locked in %s", __FUNCTION__);               \
+	})
 
 /**
  * Relinquish the lock on the committed exchange cluster.
  */
-#define EXCHANGE_COMMITTED_CLUSTER_UNLOCK()						\
-({																\
-	pthread_rwlock_unlock (&g_exchange_commited_cluster_lock);	\
-	LOCK_DEBUG("committed data unLocked in %s", __FUNCTION__);	\
-})
+#define EXCHANGE_COMMITTED_CLUSTER_UNLOCK()                                    \
+	({                                                                         \
+		pthread_rwlock_unlock(&g_exchange_commited_cluster_lock);              \
+		LOCK_DEBUG("committed data unLocked in %s", __FUNCTION__);             \
+	})
 
 /**
  * Singleton external events publisher.
@@ -763,20 +748,20 @@ static pthread_mutex_t g_external_event_publisher_lock =
 /**
  * Acquire a lock on the event publisher.
  */
-#define EXTERNAL_EVENT_PUBLISHER_LOCK()						\
-({															\
-	pthread_mutex_lock (&g_external_event_publisher_lock);	\
-	LOCK_DEBUG("publisher locked in %s", __FUNCTION__);		\
-})
+#define EXTERNAL_EVENT_PUBLISHER_LOCK()                                        \
+	({                                                                         \
+		pthread_mutex_lock(&g_external_event_publisher_lock);                  \
+		LOCK_DEBUG("publisher locked in %s", __FUNCTION__);                    \
+	})
 
 /**
  * Relinquish the lock on the external event publisher.
  */
-#define EXTERNAL_EVENT_PUBLISHER_UNLOCK()						\
-({																\
-	pthread_mutex_unlock (&g_external_event_publisher_lock);	\
-	LOCK_DEBUG("publisher unLocked in %s", __FUNCTION__);		\
-})
+#define EXTERNAL_EVENT_PUBLISHER_UNLOCK()                                      \
+	({                                                                         \
+		pthread_mutex_unlock(&g_external_event_publisher_lock);                \
+		LOCK_DEBUG("publisher unLocked in %s", __FUNCTION__);                  \
+	})
 
 /*
  * ----------------------------------------------------------------------------
@@ -793,14 +778,16 @@ static pthread_mutex_t g_external_event_publisher_lock =
 #define DEBUG(format, ...) cf_debug(AS_EXCHANGE, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_EXCHANGE, format, ##__VA_ARGS__)
 
-#define TICKER_INFO(format, ...) cf_ticker_info(AS_EXCHANGE, format, ##__VA_ARGS__)
+#define TICKER_INFO(format, ...)                                               \
+	cf_ticker_info(AS_EXCHANGE, format, ##__VA_ARGS__)
 
 /**
  * Size of the (per-namespace) self payload dynamic buffer.
  */
-#define AS_EXCHANGE_SELF_DYN_BUF_SIZE() (AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT		\
-		* ((AS_EXCHANGE_VINFO_NUM_PIDS_AVG * sizeof(uint16_t))						\
-				+ sizeof(as_partition_version)))
+#define AS_EXCHANGE_SELF_DYN_BUF_SIZE()                                        \
+	(AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT *                                  \
+			((AS_EXCHANGE_VINFO_NUM_PIDS_AVG * sizeof(uint16_t)) +             \
+					sizeof(as_partition_version)))
 
 /**
  * Scratch size for exchange messages.
@@ -838,32 +825,32 @@ static pthread_mutex_t g_external_event_publisher_lock =
  * Send timeout is a step function with this value as the interval for each
  * step.
  */
-#define EXCHANGE_SEND_STEP_INTERVAL()							\
-(MAX(EXCHANGE_SEND_MIN_TIMEOUT(), as_hb_tx_interval_get()))
+#define EXCHANGE_SEND_STEP_INTERVAL()                                          \
+	(MAX(EXCHANGE_SEND_MIN_TIMEOUT(), as_hb_tx_interval_get()))
 
 /**
  * Check if exchange is initialized.
  */
-#define EXCHANGE_IS_INITIALIZED()						\
-({														\
-	EXCHANGE_LOCK();									\
-	bool initialized = (g_exchange.sys_state			\
-			!= AS_EXCHANGE_SYS_STATE_UNINITIALIZED);	\
-	EXCHANGE_UNLOCK();									\
-	initialized;										\
-})
+#define EXCHANGE_IS_INITIALIZED()                                              \
+	({                                                                         \
+		EXCHANGE_LOCK();                                                       \
+		bool initialized =                                                     \
+				(g_exchange.sys_state != AS_EXCHANGE_SYS_STATE_UNINITIALIZED); \
+		EXCHANGE_UNLOCK();                                                     \
+		initialized;                                                           \
+	})
 
 /**
  * * Check if exchange is running.
  */
-#define EXCHANGE_IS_RUNNING()											\
-({																		\
-	EXCHANGE_LOCK();													\
-	bool running = (EXCHANGE_IS_INITIALIZED()							\
-			&& g_exchange.sys_state == AS_EXCHANGE_SYS_STATE_RUNNING);	\
-	EXCHANGE_UNLOCK();													\
-	running;															\
-})
+#define EXCHANGE_IS_RUNNING()                                                  \
+	({                                                                         \
+		EXCHANGE_LOCK();                                                       \
+		bool running = (EXCHANGE_IS_INITIALIZED() &&                           \
+				g_exchange.sys_state == AS_EXCHANGE_SYS_STATE_RUNNING);        \
+		EXCHANGE_UNLOCK();                                                     \
+		running;                                                               \
+	})
 
 /**
  * Create temporary stack variables.
@@ -874,36 +861,36 @@ static pthread_mutex_t g_external_event_publisher_lock =
 /**
  * Convert a vector to a stack allocated array.
  */
-#define cf_vector_to_stack_array(vector_p, nodes_array_p, num_nodes_p)	\
-({																		\
-	*num_nodes_p = cf_vector_size(vector_p);							\
-	if (*num_nodes_p > 0) {												\
-		*nodes_array_p = alloca(sizeof(cf_node) * (*num_nodes_p));		\
-		for (int i = 0; i < *num_nodes_p; i++) {						\
-			cf_vector_get(vector_p, i, &(*nodes_array_p)[i]);			\
-		}																\
-	}																	\
-	else {																\
-		*nodes_array_p = NULL;											\
-	}																	\
-})
+#define cf_vector_to_stack_array(vector_p, nodes_array_p, num_nodes_p)         \
+	({                                                                         \
+		*num_nodes_p = cf_vector_size(vector_p);                               \
+		if (*num_nodes_p > 0) {                                                \
+			*nodes_array_p = alloca(sizeof(cf_node) * (*num_nodes_p));         \
+			for (int i = 0; i < *num_nodes_p; i++) {                           \
+				cf_vector_get(vector_p, i, &(*nodes_array_p)[i]);              \
+			}                                                                  \
+		}                                                                      \
+		else {                                                                 \
+			*nodes_array_p = NULL;                                             \
+		}                                                                      \
+	})
 
 /**
  * Create and initialize a lockless stack allocated vector to initially sized to
  * store cluster node number of elements.
  */
-#define cf_vector_stack_create(value_type)											\
-({																					\
-	cf_vector * STACK_VAR(vector, __LINE__) = (cf_vector*)alloca(					\
-			sizeof(cf_vector));														\
-	size_t buffer_size = AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT							\
-			* sizeof(value_type);													\
-	void* STACK_VAR(buff, __LINE__) = alloca(buffer_size); cf_vector_init_with_buf(	\
-			STACK_VAR(vector, __LINE__), sizeof(value_type),						\
-			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, (uint8_t*)STACK_VAR(buff, __LINE__),	\
-			VECTOR_FLAG_INITZERO);													\
-	STACK_VAR(vector, __LINE__);													\
-})
+#define cf_vector_stack_create(value_type)                                     \
+	({                                                                         \
+		cf_vector* STACK_VAR(vector, __LINE__) =                               \
+				(cf_vector*)alloca(sizeof(cf_vector));                         \
+		size_t buffer_size =                                                   \
+				AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT * sizeof(value_type);        \
+		void* STACK_VAR(buff, __LINE__) = alloca(buffer_size);                 \
+		cf_vector_init_with_buf(STACK_VAR(vector, __LINE__),                   \
+				sizeof(value_type), AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT,         \
+				(uint8_t*)STACK_VAR(buff, __LINE__), VECTOR_FLAG_INITZERO);    \
+		STACK_VAR(vector, __LINE__);                                           \
+	})
 
 /*
  * ----------------------------------------------------------------------------
@@ -1022,8 +1009,8 @@ static bool
 exchange_external_event_publisher_is_running()
 {
 	EXTERNAL_EVENT_PUBLISHER_LOCK();
-	bool running = g_external_event_publisher.sys_state
-			== AS_EXCHANGE_SYS_STATE_RUNNING;
+	bool running = g_external_event_publisher.sys_state ==
+			AS_EXCHANGE_SYS_STATE_RUNNING;
 	EXTERNAL_EVENT_PUBLISHER_UNLOCK();
 	return running;
 }
@@ -1037,8 +1024,8 @@ exchange_external_event_publisher_init()
 	EXTERNAL_EVENT_PUBLISHER_LOCK();
 	memset(&g_external_event_publisher, 0, sizeof(g_external_event_publisher));
 	cf_vector_init(&g_external_event_publisher.published_succession_list,
-			sizeof(cf_node),
-			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+			sizeof(cf_node), AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT,
+			VECTOR_FLAG_INITZERO);
 
 	pthread_mutex_init(&g_external_event_publisher.is_pending_mutex, NULL);
 	pthread_cond_init(&g_external_event_publisher.is_pending, NULL);
@@ -1049,21 +1036,23 @@ exchange_external_event_publisher_init()
  * Register a clustering event listener.
  */
 static void
-exchange_external_event_listener_register(
-		as_exchange_cluster_changed_cb event_callback, void* udata)
+exchange_external_event_listener_register(as_exchange_cluster_changed_cb event_callback,
+		void* udata)
 {
 	EXTERNAL_EVENT_PUBLISHER_LOCK();
 
-	if (g_external_event_publisher.event_listener_count
-			>= AS_EXTERNAL_EVENT_LISTENER_MAX) {
+	if (g_external_event_publisher.event_listener_count >=
+			AS_EXTERNAL_EVENT_LISTENER_MAX) {
 		CRASH("cannot register more than %d event listeners",
 				AS_EXTERNAL_EVENT_LISTENER_MAX);
 	}
 
-	g_external_event_publisher.event_listeners[g_external_event_publisher.event_listener_count].event_callback =
-			event_callback;
-	g_external_event_publisher.event_listeners[g_external_event_publisher.event_listener_count].udata =
-			udata;
+	g_external_event_publisher
+			.event_listeners[g_external_event_publisher.event_listener_count]
+			.event_callback = event_callback;
+	g_external_event_publisher
+			.event_listeners[g_external_event_publisher.event_listener_count]
+			.udata = udata;
 	g_external_event_publisher.event_listener_count++;
 
 	EXTERNAL_EVENT_PUBLISHER_UNLOCK();
@@ -1095,13 +1084,11 @@ exchange_external_event_queue(as_exchange_cluster_changed_event* event)
 		// Use the static list for the published event, so that the input event
 		// object can be destroyed irrespective of when the it is published.
 		for (int i = 0; i < event->cluster_size; i++) {
-			cf_vector_append(
-					&g_external_event_publisher.published_succession_list,
+			cf_vector_append(&g_external_event_publisher.published_succession_list,
 					&event->succession[i]);
 		}
-		g_external_event_publisher.to_publish.succession = vector_to_array(
-				&g_external_event_publisher.published_succession_list);
-
+		g_external_event_publisher.to_publish.succession =
+				vector_to_array(&g_external_event_publisher.published_succession_list);
 	}
 	else {
 		g_external_event_publisher.to_publish.succession = NULL;
@@ -1127,8 +1114,8 @@ exchange_external_events_publish()
 		g_external_event_publisher.event_queued = false;
 		for (uint32_t i = 0;
 				i < g_external_event_publisher.event_listener_count; i++) {
-			(g_external_event_publisher.event_listeners[i].event_callback)(
-					&g_external_event_publisher.to_publish,
+			(g_external_event_publisher.event_listeners[i]
+							.event_callback)(&g_external_event_publisher.to_publish,
 					g_external_event_publisher.event_listeners[i].udata);
 		}
 	}
@@ -1291,8 +1278,8 @@ exchange_node_states_reset()
 		cf_node nodeid;
 
 		cf_vector_get(&g_exchange.succession_list, i, &nodeid);
-		if (cf_shash_get(g_exchange.nodeid_to_node_state, &nodeid, &temp_state)
-				== CF_SHASH_ERR_NOT_FOUND) {
+		if (cf_shash_get(g_exchange.nodeid_to_node_state, &nodeid,
+					&temp_state) == CF_SHASH_ERR_NOT_FOUND) {
 			exchange_node_state_init(&temp_state);
 
 			cf_shash_put(g_exchange.nodeid_to_node_state, &nodeid, &temp_state);
@@ -1306,14 +1293,13 @@ exchange_node_states_reset()
  * Reduce function to find nodes that had not acked self node's exchange data.
  */
 static int
-exchange_nodes_find_send_unacked_reduce(const void* key, void* data,
-		void* udata)
+exchange_nodes_find_send_unacked_reduce(const void* key, void* data, void* udata)
 {
 	const cf_node* node = (const cf_node*)key;
 	as_exchange_node_state* node_state = (as_exchange_node_state*)data;
 	cf_vector* unacked = (cf_vector*)udata;
 
-	if (!node_state->send_acked) {
+	if (! node_state->send_acked) {
 		cf_vector_append(unacked, node);
 	}
 	return CF_SHASH_OK;
@@ -1334,14 +1320,13 @@ exchange_nodes_find_send_unacked(cf_vector* unacked)
  * exchange data.
  */
 static int
-exchange_nodes_find_not_received_reduce(const void* key, void* data,
-		void* udata)
+exchange_nodes_find_not_received_reduce(const void* key, void* data, void* udata)
 {
 	const cf_node* node = (const cf_node*)key;
 	as_exchange_node_state* node_state = (as_exchange_node_state*)data;
 	cf_vector* not_received = (cf_vector*)udata;
 
-	if (!node_state->received) {
+	if (! node_state->received) {
 		cf_vector_append(not_received, node);
 	}
 	return CF_SHASH_OK;
@@ -1368,7 +1353,7 @@ exchange_nodes_find_not_ready_to_commit_reduce(const void* key, void* data,
 	as_exchange_node_state* node_state = (as_exchange_node_state*)data;
 	cf_vector* not_ready_to_commit = (cf_vector*)udata;
 
-	if (!node_state->is_ready_to_commit) {
+	if (! node_state->is_ready_to_commit) {
 		cf_vector_append(not_ready_to_commit, node);
 	}
 	return CF_SHASH_OK;
@@ -1381,8 +1366,7 @@ static void
 exchange_nodes_find_not_ready_to_commit(cf_vector* not_ready_to_commit)
 {
 	cf_shash_reduce(g_exchange.nodeid_to_node_state,
-			exchange_nodes_find_not_ready_to_commit_reduce,
-			not_ready_to_commit);
+			exchange_nodes_find_not_ready_to_commit_reduce, not_ready_to_commit);
 }
 
 /**
@@ -1401,10 +1385,10 @@ exchange_node_state_update(cf_node nodeid, as_exchange_node_state* node_state)
 static void
 exchange_node_state_get_safe(cf_node nodeid, as_exchange_node_state* node_state)
 {
-	if (cf_shash_get(g_exchange.nodeid_to_node_state, &nodeid, node_state)
-			== CF_SHASH_ERR_NOT_FOUND) {
-		CRASH(
-				"node entry for node %"PRIx64"  missing from node state hash", nodeid);
+	if (cf_shash_get(g_exchange.nodeid_to_node_state, &nodeid, node_state) ==
+			CF_SHASH_ERR_NOT_FOUND) {
+		CRASH("node entry for node %" PRIx64 "  missing from node state hash",
+				nodeid);
 	}
 }
 
@@ -1524,25 +1508,21 @@ exchange_msg_data_payload_set(msg* msg)
 	for (uint32_t ns_ix = 0; ns_ix < ns_count; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
-		msg_buf_ele ns_ele = {
-			.sz = (uint32_t)strlen(ns->name),
-			.ptr = (uint8_t*)ns->name
-		};
+		msg_buf_ele ns_ele = { .sz = (uint32_t)strlen(ns->name),
+			.ptr = (uint8_t*)ns->name };
 
 		msg_buf_ele pv_ele = {
 			.sz = (uint32_t)g_exchange.self_data_dyn_buf[ns_ix].used_sz,
 			.ptr = g_exchange.self_data_dyn_buf[ns_ix].buf
 		};
 
-		msg_buf_ele rn_ele = {
-			.sz = (uint32_t)(ns->smd_roster_count * sizeof(cf_node)),
-			.ptr = (uint8_t*)ns->smd_roster
-		};
+		msg_buf_ele rn_ele = { .sz = (uint32_t)(ns->smd_roster_count *
+									   sizeof(cf_node)),
+			.ptr = (uint8_t*)ns->smd_roster };
 
-		msg_buf_ele rri_ele = {
-			.sz = (uint32_t)(ns->smd_roster_count * sizeof(uint32_t)),
-			.ptr = (uint8_t*)ns->smd_roster_rack_ids
-		};
+		msg_buf_ele rri_ele = { .sz = (uint32_t)(ns->smd_roster_count *
+										sizeof(uint32_t)),
+			.ptr = (uint8_t*)ns->smd_roster_rack_ids };
 
 		cf_vector_append(&namespace_list, &ns_ele);
 		cf_vector_append(&partition_versions, &pv_ele);
@@ -1558,8 +1538,7 @@ exchange_msg_data_payload_set(msg* msg)
 		if (ns->smd_roster_generation != 0) {
 			have_roster = true;
 
-			if (! have_roster_active_rack &&
-					ns->smd_roster_active_rack != 0) {
+			if (! have_roster_active_rack && ns->smd_roster_active_rack != 0) {
 				have_roster_active_rack = true;
 			}
 
@@ -1656,18 +1635,17 @@ static bool
 exchange_msg_is_sane(cf_node source, msg* msg)
 {
 	uint32_t id = 0;
-	if (exchange_msg_id_get(msg, &id) != 0||
-	id != AS_EXCHANGE_PROTOCOL_IDENTIFIER) {
-		DEBUG(
-				"received exchange message with mismatching identifier - expected %u but was  %u",
+	if (exchange_msg_id_get(msg, &id) != 0 ||
+			id != AS_EXCHANGE_PROTOCOL_IDENTIFIER) {
+		DEBUG("received exchange message with mismatching identifier - expected %u but was  %u",
 				AS_EXCHANGE_PROTOCOL_IDENTIFIER, id);
 		return false;
 	}
 
 	as_exchange_msg_type msg_type = 0;
 
-	if (exchange_msg_type_get(msg, &msg_type) != 0
-			|| msg_type >= AS_EXCHANGE_MSG_TYPE_SENTINEL) {
+	if (exchange_msg_type_get(msg, &msg_type) != 0 ||
+			msg_type >= AS_EXCHANGE_MSG_TYPE_SENTINEL) {
 		WARNING("received exchange message with invalid message type  %u",
 				msg_type);
 		return false;
@@ -1678,17 +1656,18 @@ exchange_msg_is_sane(cf_node source, msg* msg)
 	bool is_in_cluster = vector_find(&g_exchange.succession_list, &source) >= 0;
 	EXCHANGE_UNLOCK();
 
-	if (!is_in_cluster) {
-		DEBUG("received exchange message from node %"PRIx64" not in cluster",
+	if (! is_in_cluster) {
+		DEBUG("received exchange message from node %" PRIx64 " not in cluster",
 				source);
 		return false;
 	}
 
 	as_cluster_key incoming_cluster_key = 0;
-	if (exchange_msg_cluster_key_get(msg, &incoming_cluster_key) != 0
-			|| (current_cluster_key != incoming_cluster_key)
-			|| current_cluster_key == 0) {
-		DEBUG("received exchange message with mismatching cluster key - expected %"PRIx64" but was  %"PRIx64,
+	if (exchange_msg_cluster_key_get(msg, &incoming_cluster_key) != 0 ||
+			(current_cluster_key != incoming_cluster_key) ||
+			current_cluster_key == 0) {
+		DEBUG("received exchange message with mismatching cluster key - expected %" PRIx64
+			  " but was  %" PRIx64,
 				current_cluster_key, incoming_cluster_key);
 		return false;
 	}
@@ -1709,7 +1688,7 @@ exchange_msg_send(msg* msg, cf_node dest, char* error_msg)
 	if (as_fabric_send(dest, msg, AS_FABRIC_CHANNEL_CTRL)) {
 		// Fabric will not return the message to the pool. Do it ourself.
 		exchange_msg_return(msg);
-		WARNING("%s (dest:%"PRIx64")", error_msg, dest);
+		WARNING("%s (dest:%" PRIx64 ")", error_msg, dest);
 	}
 }
 
@@ -1724,8 +1703,7 @@ exchange_msg_send(msg* msg, cf_node dest, char* error_msg)
 static void
 exchange_msg_send_list(msg* msg, cf_node* dests, int num_dests, char* error_msg)
 {
-	if (as_fabric_send_list(dests, num_dests, msg, AS_FABRIC_CHANNEL_CTRL)
-			!= 0) {
+	if (as_fabric_send_list(dests, num_dests, msg, AS_FABRIC_CHANNEL_CTRL) != 0) {
 		// Fabric will not return the message to the pool. Do it ourself.
 		exchange_msg_return(msg);
 		as_clustering_log_cf_node_array(CF_WARNING, AS_EXCHANGE, error_msg,
@@ -1741,7 +1719,7 @@ static void
 exchange_commit_msg_send(cf_node dest)
 {
 	msg* commit_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_COMMIT);
-	DEBUG("sending commit message to node %"PRIx64, dest);
+	DEBUG("sending commit message to node %" PRIx64, dest);
 	exchange_msg_send(commit_msg, dest, "error sending commit message");
 }
 
@@ -1771,9 +1749,9 @@ exchange_ready_to_commit_msg_send()
 	cf_node principal = g_exchange.principal;
 	EXCHANGE_UNLOCK();
 
-	msg* ready_to_commit_msg = exchange_msg_get(
-			AS_EXCHANGE_MSG_TYPE_READY_TO_COMMIT);
-	DEBUG("sending ready to commit message to node %"PRIx64, principal);
+	msg* ready_to_commit_msg =
+			exchange_msg_get(AS_EXCHANGE_MSG_TYPE_READY_TO_COMMIT);
+	DEBUG("sending ready to commit message to node %" PRIx64, principal);
 	exchange_msg_send(ready_to_commit_msg, principal,
 			"error sending ready to commit message");
 }
@@ -1797,7 +1775,7 @@ exchange_data_msg_send_pending_ack()
 
 	cf_vector_destroy(unacked_nodes_vector);
 
-	if (!num_unacked_nodes) {
+	if (! num_unacked_nodes) {
 		goto Exit;
 	}
 
@@ -1805,8 +1783,7 @@ exchange_data_msg_send_pending_ack()
 	cf_assert(g_exchange.data_msg != NULL, AS_EXCHANGE, "payload not built");
 
 	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
-			"sending exchange data to nodes:", unacked_nodes,
-			num_unacked_nodes);
+			"sending exchange data to nodes:", unacked_nodes, num_unacked_nodes);
 
 	msg_incr_ref(g_exchange.data_msg);
 
@@ -1824,7 +1801,7 @@ static void
 exchange_data_ack_msg_send(cf_node dest)
 {
 	msg* ack_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA_ACK);
-	DEBUG("sending data ack message to node %"PRIx64, dest);
+	DEBUG("sending data ack message to node %" PRIx64, dest);
 	exchange_msg_send(ack_msg, dest, "error sending data ack message");
 }
 
@@ -1852,7 +1829,7 @@ exchange_namespace_hash_pid_add(cf_shash* ns_hash, as_partition_version* vinfo,
 	if (cf_shash_get(ns_hash, vinfo, &pid_vector) != CF_SHASH_OK) {
 		// We are seeing this vinfo for the first time.
 		pid_vector = cf_vector_create(sizeof(uint16_t),
-		AS_EXCHANGE_VINFO_NUM_PIDS_AVG, 0);
+				AS_EXCHANGE_VINFO_NUM_PIDS_AVG, 0);
 		cf_shash_put(ns_hash, vinfo, &pid_vector);
 	}
 
@@ -1874,8 +1851,7 @@ exchange_namespace_hash_destroy_reduce(const void* key, void* data, void* udata)
  * Serialize each vinfo and accumulated pids to the input buffer.
  */
 static int
-exchange_namespace_hash_serialize_reduce(const void* key, void* data,
-		void* udata)
+exchange_namespace_hash_serialize_reduce(const void* key, void* data, void* udata)
 {
 	const as_partition_version* vinfo = (const as_partition_version*)key;
 	cf_vector* pid_vector = *(cf_vector**)data;
@@ -1987,97 +1963,97 @@ exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
 	uint32_t num_namespaces_sent = 0;
 	uint32_t num_namespace_elements_sent = 0;
 
-	if (!msg_msgpack_list_get_count(msg_event->msg,
-			AS_EXCHANGE_MSG_NAMESPACES, &num_namespaces_sent)
-			|| num_namespaces_sent > AS_NAMESPACE_SZ) {
-		WARNING("received invalid namespaces from node %"PRIx64,
+	if (! msg_msgpack_list_get_count(msg_event->msg, AS_EXCHANGE_MSG_NAMESPACES,
+				&num_namespaces_sent) ||
+			num_namespaces_sent > AS_NAMESPACE_SZ) {
+		WARNING("received invalid namespaces from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (!msg_msgpack_list_get_count(msg_event->msg,
-			AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, &num_namespace_elements_sent)
-			|| num_namespaces_sent != num_namespace_elements_sent) {
-		WARNING("received invalid partition versions from node %"PRIx64,
+	if (! msg_msgpack_list_get_count(msg_event->msg,
+				AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS,
+				&num_namespace_elements_sent) ||
+			num_namespaces_sent != num_namespace_elements_sent) {
+		WARNING("received invalid partition versions from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS)
-			&& (!msg_msgpack_list_get_count(msg_event->msg,
-					AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
-					&num_namespace_elements_sent)
-					|| num_namespaces_sent != num_namespace_elements_sent)) {
-		WARNING("received invalid replication factors from node %"PRIx64,
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS) &&
+			(! msg_msgpack_list_get_count(msg_event->msg,
+					 AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
+					 &num_namespace_elements_sent) ||
+					num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid replication factors from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
 	// TODO - prepare for this to be optional some time in the future...
-	if (!msg_msgpack_list_get_count(msg_event->msg,
-			AS_EXCHANGE_MSG_NS_RACK_IDS, &num_namespace_elements_sent)
-			|| num_namespaces_sent != num_namespace_elements_sent) {
-		WARNING("received invalid cluster groups from node %"PRIx64,
+	if (! msg_msgpack_list_get_count(msg_event->msg,
+				AS_EXCHANGE_MSG_NS_RACK_IDS, &num_namespace_elements_sent) ||
+			num_namespaces_sent != num_namespace_elements_sent) {
+		WARNING("received invalid cluster groups from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS)
-			&& (!msg_msgpack_list_get_count(msg_event->msg,
-					AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS,
-					&num_namespace_elements_sent)
-					|| num_namespaces_sent != num_namespace_elements_sent)) {
-		WARNING("received invalid roster generations from node %"PRIx64,
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS) &&
+			(! msg_msgpack_list_get_count(msg_event->msg,
+					 AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS,
+					 &num_namespace_elements_sent) ||
+					num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid roster generations from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS)
-			&& (!msg_msgpack_list_get_count(msg_event->msg,
-					AS_EXCHANGE_MSG_NS_ROSTERS,
-					&num_namespace_elements_sent)
-					|| num_namespaces_sent != num_namespace_elements_sent)) {
-		WARNING("received invalid rosters from node %"PRIx64,
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS) &&
+			(! msg_msgpack_list_get_count(msg_event->msg,
+					 AS_EXCHANGE_MSG_NS_ROSTERS, &num_namespace_elements_sent) ||
+					num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid rosters from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS)
-			&& (!msg_msgpack_list_get_count(msg_event->msg,
-					AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS,
-					&num_namespace_elements_sent)
-					|| num_namespaces_sent != num_namespace_elements_sent)) {
-		WARNING("received invalid rosters-rack-ids from node %"PRIx64,
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS) &&
+			(! msg_msgpack_list_get_count(msg_event->msg,
+					 AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS,
+					 &num_namespace_elements_sent) ||
+					num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid rosters-rack-ids from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES)
-			&& (!msg_msgpack_list_get_count(msg_event->msg,
-					AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES,
-					&num_namespace_elements_sent)
-					|| num_namespaces_sent != num_namespace_elements_sent)) {
-		WARNING("received invalid eventual regimes from node %"PRIx64,
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES) &&
+			(! msg_msgpack_list_get_count(msg_event->msg,
+					 AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES,
+					 &num_namespace_elements_sent) ||
+					num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid eventual regimes from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES)
-			&& (!msg_msgpack_list_get_count(msg_event->msg,
-					AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
-					&num_namespace_elements_sent)
-					|| num_namespaces_sent != num_namespace_elements_sent)) {
-		WARNING("received invalid rebalance regimes from node %"PRIx64,
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES) &&
+			(! msg_msgpack_list_get_count(msg_event->msg,
+					 AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES,
+					 &num_namespace_elements_sent) ||
+					num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid rebalance regimes from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
 
-	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS)
-			&& (!msg_msgpack_list_get_count(msg_event->msg,
-					AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
-					&num_namespace_elements_sent)
-					|| num_namespaces_sent != num_namespace_elements_sent)) {
-		WARNING("received invalid rebalance flags from node %"PRIx64,
+	if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS) &&
+			(! msg_msgpack_list_get_count(msg_event->msg,
+					 AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS,
+					 &num_namespace_elements_sent) ||
+					num_namespaces_sent != num_namespace_elements_sent)) {
+		WARNING("received invalid rebalance flags from node %" PRIx64,
 				msg_event->msg_source);
 		return 0;
 	}
@@ -2164,8 +2140,7 @@ exchange_namespace_payload_is_valid(as_exchange_ns_vinfos_payload* ns_payload,
  * @param succession the new succession. Can be NULL, for orphan state.
  */
 static void
-exchange_commited_cluster_update(as_cluster_key cluster_key,
-								 cf_vector* succession)
+exchange_commited_cluster_update(as_cluster_key cluster_key, cf_vector* succession)
 {
 	EXCHANGE_COMMITTED_CLUSTER_WLOCK();
 	g_exchange.committed_cluster_key = cluster_key;
@@ -2173,7 +2148,7 @@ exchange_commited_cluster_update(as_cluster_key cluster_key,
 
 	if (succession && cf_vector_size(succession) > 0) {
 		vector_copy(&g_exchange.committed_succession_list,
-					&g_exchange.succession_list);
+				&g_exchange.succession_list);
 		g_exchange.committed_cluster_size = cf_vector_size(succession);
 		cf_vector_get(succession, 0, &g_exchange.committed_principal);
 	}
@@ -2227,13 +2202,13 @@ exchange_dump(bool verbose)
 
 	if (g_exchange.state == AS_EXCHANGE_STATE_ORPHANED) {
 		INFO("EXG: client transactions blocked: %s",
-				g_exchange.orphan_state_are_transactions_blocked ?
-						"true" : "false");
-		INFO("EXG: orphan since: %"PRIu64"(millis)",
+				g_exchange.orphan_state_are_transactions_blocked ? "true"
+																 : "false");
+		INFO("EXG: orphan since: %" PRIu64 "(millis)",
 				cf_getms() - g_exchange.orphan_state_start_time);
 	}
 	else {
-		INFO("EXG: cluster key: %"PRIx64, g_exchange.cluster_key);
+		INFO("EXG: cluster key: %" PRIx64, g_exchange.cluster_key);
 		as_clustering_log_cf_node_vector(CF_INFO, AS_EXCHANGE,
 				"EXG: succession:", &g_exchange.succession_list);
 
@@ -2319,9 +2294,9 @@ exchange_orphaned_handle(as_clustering_event* orphaned_event)
 
 	EXCHANGE_LOCK();
 
-	if (g_exchange.state != AS_EXCHANGE_STATE_REST
-			&& g_exchange.state != AS_EXCHANGE_STATE_ORPHANED) {
-		INFO("aborting partition exchange with cluster key %"PRIx64,
+	if (g_exchange.state != AS_EXCHANGE_STATE_REST &&
+			g_exchange.state != AS_EXCHANGE_STATE_ORPHANED) {
+		INFO("aborting partition exchange with cluster key %" PRIx64,
 				g_exchange.cluster_key);
 	}
 
@@ -2352,9 +2327,9 @@ exchange_cluster_change_handle(as_clustering_event* clustering_event)
 
 	DEBUG("got cluster change event");
 
-	if (g_exchange.state != AS_EXCHANGE_STATE_REST
-			&& g_exchange.state != AS_EXCHANGE_STATE_ORPHANED) {
-		INFO("aborting partition exchange with cluster key %"PRIx64,
+	if (g_exchange.state != AS_EXCHANGE_STATE_REST &&
+			g_exchange.state != AS_EXCHANGE_STATE_ORPHANED) {
+		INFO("aborting partition exchange with cluster key %" PRIx64,
 				g_exchange.cluster_key);
 	}
 
@@ -2363,7 +2338,7 @@ exchange_cluster_change_handle(as_clustering_event* clustering_event)
 
 	g_exchange.state = AS_EXCHANGE_STATE_EXCHANGING;
 
-	INFO("data exchange started with cluster key %"PRIx64,
+	INFO("data exchange started with cluster key %" PRIx64,
 			g_exchange.cluster_key);
 
 	// Prepare the data payload.
@@ -2407,8 +2382,8 @@ exchange_clustering_event_handle(as_exchange_event* exchange_clustering_event)
 static uint32_t
 exchange_orphan_transaction_block_timeout()
 {
-	return (uint32_t)as_clustering_quantum_interval()
-			* AS_EXCHANGE_REVERT_ORPHAN_INTERVALS;
+	return (uint32_t)as_clustering_quantum_interval() *
+			AS_EXCHANGE_REVERT_ORPHAN_INTERVALS;
 }
 
 /**
@@ -2420,8 +2395,8 @@ exchange_orphan_timer_event_handle()
 {
 	uint32_t timeout = exchange_orphan_transaction_block_timeout();
 	EXCHANGE_LOCK();
-	if (!g_exchange.orphan_state_are_transactions_blocked
-			&& g_exchange.orphan_state_start_time + timeout < cf_getms()) {
+	if (! g_exchange.orphan_state_are_transactions_blocked &&
+			g_exchange.orphan_state_start_time + timeout < cf_getms()) {
 		exchange_orphan_commit();
 	}
 	EXCHANGE_UNLOCK();
@@ -2459,26 +2434,24 @@ exchange_rest_msg_event_handle(as_exchange_event* msg_event)
 {
 	EXCHANGE_LOCK();
 
-	if (!exchange_msg_is_sane(msg_event->msg_source, msg_event->msg)) {
+	if (! exchange_msg_is_sane(msg_event->msg_source, msg_event->msg)) {
 		goto Exit;
 	}
 
 	as_exchange_msg_type msg_type;
 	exchange_msg_type_get(msg_event->msg, &msg_type);
 
-	if (exchange_self_is_principal()
-			&& msg_type == AS_EXCHANGE_MSG_TYPE_READY_TO_COMMIT) {
+	if (exchange_self_is_principal() &&
+			msg_type == AS_EXCHANGE_MSG_TYPE_READY_TO_COMMIT) {
 		// The commit message did not make it to the source node, hence it send
 		// us the ready to commit message. Resend the commit message.
-		DEBUG("received a ready to commit message from %"PRIx64,
+		DEBUG("received a ready to commit message from %" PRIx64,
 				msg_event->msg_source);
 		exchange_commit_msg_send(msg_event->msg_source);
 	}
 	else {
-		DEBUG(
-				"rest state received unexpected mesage of type %d from node %"PRIx64,
+		DEBUG("rest state received unexpected mesage of type %d from node %" PRIx64,
 				msg_type, msg_event->msg_source);
-
 	}
 
 Exit:
@@ -2537,8 +2510,8 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 					&vinfo_payload->vinfo, sizeof(vinfo_payload->vinfo));
 		}
 
-		read_ptr += sizeof(as_exchange_vinfo_payload)
-				+ vinfo_payload->num_pids * sizeof(uint16_t);
+		read_ptr += sizeof(as_exchange_vinfo_payload) +
+				vinfo_payload->num_pids * sizeof(uint16_t);
 	}
 
 	if (namespace_data->replication_factor < ns->lo_repl_factor) {
@@ -2587,13 +2560,13 @@ exchange_namespace_payload_pre_commit_for_node(cf_node node,
 	ns->rebalance_regimes[sl_ix] = namespace_data->rebalance_regime;
 
 	// Prefer uniform balance only if all nodes prefer it.
-	if ((namespace_data->rebalance_flags &
-			AS_EXCHANGE_REBALANCE_FLAG_UNIFORM) == 0) {
+	if ((namespace_data->rebalance_flags & AS_EXCHANGE_REBALANCE_FLAG_UNIFORM) ==
+			0) {
 		ns->prefer_uniform_balance = false;
 	}
 
 	bool is_node_quiesced = (namespace_data->rebalance_flags &
-			AS_EXCHANGE_REBALANCE_FLAG_QUIESCE) != 0;
+									AS_EXCHANGE_REBALANCE_FLAG_QUIESCE) != 0;
 
 	if (node == g_config.self_node) {
 		ns->is_quiesced = is_node_quiesced;
@@ -2672,8 +2645,7 @@ exchange_data_pre_commit_repl_factor_check()
 		as_namespace* ns = g_config.namespaces[i];
 
 		// Note: lo of 0 means there was at least one pre-5.8 node.
-		if (ns->lo_repl_factor != 0 &&
-				ns->lo_repl_factor != ns->hi_repl_factor) {
+		if (ns->lo_repl_factor != 0 && ns->lo_repl_factor != ns->hi_repl_factor) {
 			WARNING("{%s} has unmatched replication factors from %u to %u",
 					ns->name, ns->lo_repl_factor, ns->hi_repl_factor);
 			return false;
@@ -2695,8 +2667,7 @@ exchange_exchanging_pre_commit()
 	EXCHANGE_LOCK();
 	pthread_mutex_lock(&g_exchanged_info_lock);
 
-	memset(g_exchange.compatibility_ids, 0,
-			sizeof(g_exchange.compatibility_ids));
+	memset(g_exchange.compatibility_ids, 0, sizeof(g_exchange.compatibility_ids));
 
 	uint32_t min_compatibility_id = UINT32_MAX;
 	uint32_t max_compatibility_id = 0;
@@ -2753,8 +2724,8 @@ exchange_exchanging_pre_commit()
 	}
 
 	// Collected all exchanged data - do final configuration consistency checks.
-	if (!exchange_data_pre_commit_ap_cp_check() ||
-			!exchange_data_pre_commit_repl_factor_check()) {
+	if (! exchange_data_pre_commit_ap_cp_check() ||
+			! exchange_data_pre_commit_repl_factor_check()) {
 		WARNING("abandoned exchange - fix configuration conflict");
 		pthread_mutex_unlock(&g_exchanged_info_lock);
 		EXCHANGE_UNLOCK();
@@ -2762,9 +2733,9 @@ exchange_exchanging_pre_commit()
 	}
 
 	INFO("exchange-compatibility-id: self %u cluster-min %u -> %u cluster-max %u -> %u",
-			AS_EXCHANGE_COMPATIBILITY_ID,
-			g_exchange.min_compatibility_id, min_compatibility_id,
-			g_exchange.max_compatibility_id, max_compatibility_id);
+			AS_EXCHANGE_COMPATIBILITY_ID, g_exchange.min_compatibility_id,
+			min_compatibility_id, g_exchange.max_compatibility_id,
+			max_compatibility_id);
 
 	g_exchange.min_compatibility_id = min_compatibility_id;
 	g_exchange.max_compatibility_id = max_compatibility_id;
@@ -2781,8 +2752,7 @@ exchange_exchanging_pre_commit()
 
 			as_storage_save_regime(ns);
 
-			INFO("{%s} eventual-regime %u ready", ns->name,
-					ns->eventual_regime);
+			INFO("{%s} eventual-regime %u ready", ns->name, ns->eventual_regime);
 		}
 	}
 
@@ -2803,8 +2773,8 @@ exchange_exchanging_check_switch_ready_to_commit()
 
 	cf_vector* node_vector = cf_vector_stack_create(cf_node);
 
-	if (g_exchange.state == AS_EXCHANGE_STATE_REST
-			|| g_exchange.cluster_key == 0) {
+	if (g_exchange.state == AS_EXCHANGE_STATE_REST ||
+			g_exchange.cluster_key == 0) {
 		goto Exit;
 	}
 
@@ -2822,14 +2792,14 @@ exchange_exchanging_check_switch_ready_to_commit()
 		goto Exit;
 	}
 
-	if (!exchange_exchanging_pre_commit()) {
+	if (! exchange_exchanging_pre_commit()) {
 		// Pre-commit failed. We are not ready to commit.
 		goto Exit;
 	}
 
 	g_exchange.state = AS_EXCHANGE_STATE_READY_TO_COMMIT;
 
-	DEBUG("ready to commit exchange data for cluster key %"PRIx64,
+	DEBUG("ready to commit exchange data for cluster key %" PRIx64,
 			g_exchange.cluster_key);
 
 Exit:
@@ -2852,21 +2822,21 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 {
 	EXCHANGE_LOCK();
 
-	DEBUG("received exchange data from node %"PRIx64, msg_event->msg_source);
+	DEBUG("received exchange data from node %" PRIx64, msg_event->msg_source);
 
 	as_exchange_node_state node_state;
 	exchange_node_state_get_safe(msg_event->msg_source, &node_state);
 
-	if (!node_state.received) {
+	if (! node_state.received) {
 		node_state.data->compatibility_id = 0;
 		msg_get_uint32(msg_event->msg, AS_EXCHANGE_MSG_COMPATIBILITY_ID,
 				&node_state.data->compatibility_id);
 
-		uint32_t num_namespaces_sent = exchange_data_msg_get_num_namespaces(
-				msg_event);
+		uint32_t num_namespaces_sent =
+				exchange_data_msg_get_num_namespaces(msg_event);
 
 		if (num_namespaces_sent == 0) {
-			WARNING("ignoring invalid exchange data from node %"PRIx64,
+			WARNING("ignoring invalid exchange data from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
@@ -2903,27 +2873,27 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 		memset(rebalance_regimes, 0, sizeof(rebalance_regimes));
 		memset(rebalance_flags, 0, sizeof(rebalance_flags));
 
-		if (!msg_msgpack_list_get_buf_array_presized(msg_event->msg,
-				AS_EXCHANGE_MSG_NAMESPACES, &namespace_list)) {
-			WARNING("received invalid namespaces from node %"PRIx64,
+		if (! msg_msgpack_list_get_buf_array_presized(msg_event->msg,
+					AS_EXCHANGE_MSG_NAMESPACES, &namespace_list)) {
+			WARNING("received invalid namespaces from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
-		if (!msg_msgpack_list_get_buf_array_presized(msg_event->msg,
-				AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, &partition_versions)) {
-			WARNING("received invalid partition versions from node %"PRIx64,
+		if (! msg_msgpack_list_get_buf_array_presized(msg_event->msg,
+					AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, &partition_versions)) {
+			WARNING("received invalid partition versions from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
 		uint32_t num_replication_factors = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS)
-				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS) &&
+				! msg_msgpack_list_get_uint32_array(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_REPLICATION_FACTORS,
 						replication_factors, &num_replication_factors)) {
-			WARNING("received invalid replication factors from node %"PRIx64,
+			WARNING("received invalid replication factors from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
@@ -2931,92 +2901,91 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 		uint32_t num_rack_ids = num_namespaces_sent;
 
 		// TODO - prepare for this to be optional some time in the future...
-		if (!msg_msgpack_list_get_uint32_array(msg_event->msg,
-				AS_EXCHANGE_MSG_NS_RACK_IDS, rack_ids, &num_rack_ids)) {
-			WARNING("received invalid cluster groups from node %"PRIx64,
+		if (! msg_msgpack_list_get_uint32_array(msg_event->msg,
+					AS_EXCHANGE_MSG_NS_RACK_IDS, rack_ids, &num_rack_ids)) {
+			WARNING("received invalid cluster groups from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
 		uint32_t num_active_racks = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ACTIVE_RACKS)
-				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ACTIVE_RACKS) &&
+				! msg_msgpack_list_get_uint32_array(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_ACTIVE_RACKS, active_racks,
 						&num_active_racks)) {
-			WARNING("received invalid active racks from node %"PRIx64,
+			WARNING("received invalid active racks from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
 		uint32_t num_roster_generations = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS)
-				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS) &&
+				! msg_msgpack_list_get_uint32_array(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_ROSTER_GENERATIONS,
 						roster_generations, &num_roster_generations)) {
-			WARNING("received invalid roster generations from node %"PRIx64,
+			WARNING("received invalid roster generations from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
 		uint32_t num_roster_active_racks = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS)
-				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS) &&
+				! msg_msgpack_list_get_uint32_array(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_ROSTER_ACTIVE_RACKS,
 						roster_active_racks, &num_roster_active_racks)) {
-			WARNING("received invalid roster active racks from node %"PRIx64,
+			WARNING("received invalid roster active racks from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS)
-				&& !msg_msgpack_list_get_buf_array_presized(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS) &&
+				! msg_msgpack_list_get_buf_array_presized(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_ROSTERS, &rosters)) {
-			WARNING("received invalid rosters from node %"PRIx64,
+			WARNING("received invalid rosters from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS)
-				&& !msg_msgpack_list_get_buf_array_presized(msg_event->msg,
-						AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS,
-						&rosters_rack_ids)) {
-			WARNING("received invalid rosters-rack-ids from node %"PRIx64,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS) &&
+				! msg_msgpack_list_get_buf_array_presized(msg_event->msg,
+						AS_EXCHANGE_MSG_NS_ROSTERS_RACK_IDS, &rosters_rack_ids)) {
+			WARNING("received invalid rosters-rack-ids from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
 		uint32_t num_eventual_regimes = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES)
-				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES) &&
+				! msg_msgpack_list_get_uint32_array(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_EVENTUAL_REGIMES, eventual_regimes,
 						&num_eventual_regimes)) {
-			WARNING("received invalid eventual regimes from node %"PRIx64,
+			WARNING("received invalid eventual regimes from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
 		uint32_t num_rebalance_regimes = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES)
-				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES) &&
+				! msg_msgpack_list_get_uint32_array(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_REBALANCE_REGIMES, rebalance_regimes,
 						&num_rebalance_regimes)) {
-			WARNING("received invalid rebalance regimes from node %"PRIx64,
+			WARNING("received invalid rebalance regimes from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
 		uint32_t num_rebalance_flags = num_namespaces_sent;
 
-		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS)
-				&& !msg_msgpack_list_get_uint32_array(msg_event->msg,
+		if (msg_is_set(msg_event->msg, AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS) &&
+				! msg_msgpack_list_get_uint32_array(msg_event->msg,
 						AS_EXCHANGE_MSG_NS_REBALANCE_FLAGS, rebalance_flags,
 						&num_rebalance_flags)) {
-			WARNING("received invalid rebalance flags from node %"PRIx64,
+			WARNING("received invalid rebalance flags from node %" PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
@@ -3024,14 +2993,15 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 		node_state.data->num_namespaces = 0;
 
 		for (uint32_t i = 0; i < num_namespaces_sent; i++) {
-			msg_buf_ele* namespace_name_element = cf_vector_getp(
-					&namespace_list, i);
+			msg_buf_ele* namespace_name_element =
+					cf_vector_getp(&namespace_list, i);
 
 			// Find a match for the namespace.
-			as_namespace* matching_namespace = as_namespace_get_bybuf(
-					namespace_name_element->ptr, namespace_name_element->sz);
+			as_namespace* matching_namespace =
+					as_namespace_get_bybuf(namespace_name_element->ptr,
+							namespace_name_element->sz);
 
-			if (!matching_namespace) {
+			if (! matching_namespace) {
 				continue;
 			}
 
@@ -3050,21 +3020,21 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 			namespace_data->rebalance_flags = rebalance_flags[i];
 
 			// Copy partition versions.
-			msg_buf_ele* partition_versions_element = cf_vector_getp(
-					&partition_versions, i);
+			msg_buf_ele* partition_versions_element =
+					cf_vector_getp(&partition_versions, i);
 
-			if (!exchange_namespace_payload_is_valid(
-					(as_exchange_ns_vinfos_payload*)partition_versions_element->ptr,
-					partition_versions_element->sz)) {
-				WARNING(
-						"received invalid partition versions for namespace %s from node %"PRIx64,
+			if (! exchange_namespace_payload_is_valid(
+						(as_exchange_ns_vinfos_payload*)
+								partition_versions_element->ptr,
+						partition_versions_element->sz)) {
+				WARNING("received invalid partition versions for namespace %s from node %" PRIx64,
 						matching_namespace->name, msg_event->msg_source);
 				goto Exit;
 			}
 
-			namespace_data->partition_versions = cf_realloc(
-					namespace_data->partition_versions,
-					partition_versions_element->sz);
+			namespace_data->partition_versions =
+					cf_realloc(namespace_data->partition_versions,
+							partition_versions_element->sz);
 
 			memcpy(namespace_data->partition_versions,
 					partition_versions_element->ptr,
@@ -3080,17 +3050,16 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 
 				namespace_data->roster_count = roster_ele->sz / sizeof(cf_node);
 
-				if (namespace_data->roster_count == 0
-						|| namespace_data->roster_count > AS_CLUSTER_SZ
-						|| roster_ele->sz % sizeof(cf_node) != 0) {
-					WARNING(
-							"received invalid roster for namespace %s from node %"PRIx64,
+				if (namespace_data->roster_count == 0 ||
+						namespace_data->roster_count > AS_CLUSTER_SZ ||
+						roster_ele->sz % sizeof(cf_node) != 0) {
+					WARNING("received invalid roster for namespace %s from node %" PRIx64,
 							matching_namespace->name, msg_event->msg_source);
 					goto Exit;
 				}
 
-				namespace_data->roster = cf_realloc(namespace_data->roster,
-						roster_ele->sz);
+				namespace_data->roster =
+						cf_realloc(namespace_data->roster, roster_ele->sz);
 
 				memcpy(namespace_data->roster, roster_ele->ptr, roster_ele->sz);
 
@@ -3102,18 +3071,17 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 					if (rri_ele->sz != 0) {
 						rri_ele_sz = rri_ele->sz;
 
-						if (rri_ele_sz
-								!= namespace_data->roster_count
-										* sizeof(uint32_t)) {
-							WARNING(
-									"received invalid roster-rack-ids for namespace %s from node %"PRIx64,
+						if (rri_ele_sz !=
+								namespace_data->roster_count * sizeof(uint32_t)) {
+							WARNING("received invalid roster-rack-ids for namespace %s from node %" PRIx64,
 									matching_namespace->name,
 									msg_event->msg_source);
 							goto Exit;
 						}
 
-						namespace_data->roster_rack_ids = cf_realloc(
-								namespace_data->roster_rack_ids, rri_ele_sz);
+						namespace_data->roster_rack_ids =
+								cf_realloc(namespace_data->roster_rack_ids,
+										rri_ele_sz);
 
 						memcpy(namespace_data->roster_rack_ids, rri_ele->ptr,
 								rri_ele_sz);
@@ -3156,13 +3124,12 @@ exchange_exchanging_data_ack_msg_handle(as_exchange_event* msg_event)
 {
 	EXCHANGE_LOCK();
 
-	DEBUG("received exchange data ack from node %"PRIx64,
-			msg_event->msg_source);
+	DEBUG("received exchange data ack from node %" PRIx64, msg_event->msg_source);
 
 	as_exchange_node_state node_state;
 	exchange_node_state_get_safe(msg_event->msg_source, &node_state);
 
-	if (!node_state.send_acked) {
+	if (! node_state.send_acked) {
 		// Mark send as acked in the node state.
 		node_state.send_acked = true;
 		exchange_node_state_update(msg_event->msg_source, &node_state);
@@ -3186,7 +3153,7 @@ exchange_exchanging_msg_event_handle(as_exchange_event* msg_event)
 {
 	EXCHANGE_LOCK();
 
-	if (!exchange_msg_is_sane(msg_event->msg_source, msg_event->msg)) {
+	if (! exchange_msg_is_sane(msg_event->msg_source, msg_event->msg)) {
 		goto Exit;
 	}
 
@@ -3201,8 +3168,7 @@ exchange_exchanging_msg_event_handle(as_exchange_event* msg_event)
 		exchange_exchanging_data_ack_msg_handle(msg_event);
 		break;
 	default:
-		DEBUG(
-				"exchanging state received unexpected mesage of type %d from node %"PRIx64,
+		DEBUG("exchanging state received unexpected mesage of type %d from node %" PRIx64,
 				msg_type, msg_event->msg_source);
 	}
 Exit:
@@ -3227,8 +3193,7 @@ exchange_exchanging_timer_event_handle(as_exchange_event* msg_event)
 	uint32_t step_interval = EXCHANGE_SEND_STEP_INTERVAL();
 	cf_clock timeout = MAX(min_timeout,
 			MIN(max_timeout,
-					min_timeout
-							* ((now - g_exchange.send_ts) / step_interval)));
+					min_timeout * ((now - g_exchange.send_ts) / step_interval)));
 
 	if (g_exchange.send_ts + timeout < now) {
 		send_data = true;
@@ -3274,21 +3239,21 @@ exchange_exchanging_event_handle(as_exchange_event* event)
 static void
 exchange_ready_to_commit_rtc_msg_handle(as_exchange_event* msg_event)
 {
-	if (!exchange_self_is_principal()) {
-		WARNING(
-				"non-principal self received ready to commit message from %"PRIx64" - ignoring",
+	if (! exchange_self_is_principal()) {
+		WARNING("non-principal self received ready to commit message from %" PRIx64
+				" - ignoring",
 				msg_event->msg_source);
 		return;
 	}
 
 	EXCHANGE_LOCK();
 
-	DEBUG("received ready to commit from node %"PRIx64, msg_event->msg_source);
+	DEBUG("received ready to commit from node %" PRIx64, msg_event->msg_source);
 
 	as_exchange_node_state node_state;
 	exchange_node_state_get_safe(msg_event->msg_source, &node_state);
 
-	if (!node_state.is_ready_to_commit) {
+	if (! node_state.is_ready_to_commit) {
 		// Mark as ready to commit in the node state.
 		node_state.is_ready_to_commit = true;
 		exchange_node_state_update(msg_event->msg_source, &node_state);
@@ -3323,7 +3288,7 @@ exchange_data_commit()
 {
 	EXCHANGE_LOCK();
 
-	INFO("data exchange completed with cluster key %"PRIx64,
+	INFO("data exchange completed with cluster key %" PRIx64,
 			g_exchange.cluster_key);
 
 	// Exchange is done, use the current cluster details as the committed
@@ -3354,13 +3319,13 @@ exchange_ready_to_commit_commit_msg_handle(as_exchange_event* msg_event)
 	EXCHANGE_LOCK();
 
 	if (msg_event->msg_source != g_exchange.principal) {
-		WARNING(
-				"ignoring commit message from node %"PRIx64" - expected message from %"PRIx64,
+		WARNING("ignoring commit message from node %" PRIx64
+				" - expected message from %" PRIx64,
 				msg_event->msg_source, g_exchange.principal);
 		goto Exit;
 	}
 
-	INFO("received commit command from principal node %"PRIx64,
+	INFO("received commit command from principal node %" PRIx64,
 			msg_event->msg_source);
 
 	// Commit exchanged data.
@@ -3374,8 +3339,8 @@ exchange_ready_to_commit_commit_msg_handle(as_exchange_event* msg_event)
 
 	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 	cluster_change_event.cluster_key = g_exchange.committed_cluster_key;
-	cluster_change_event.succession = vector_to_array(
-			&g_exchange.committed_succession_list);
+	cluster_change_event.succession =
+			vector_to_array(&g_exchange.committed_succession_list);
 	cluster_change_event.cluster_size = g_exchange.committed_cluster_size;
 	exchange_external_event_queue(&cluster_change_event);
 	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
@@ -3394,7 +3359,7 @@ exchange_ready_to_commit_data_msg_handle(as_exchange_event* msg_event)
 {
 	EXCHANGE_LOCK();
 
-	DEBUG("received exchange data from node %"PRIx64, msg_event->msg_source);
+	DEBUG("received exchange data from node %" PRIx64, msg_event->msg_source);
 
 	// The source must have missed self node's data ack. Send an
 	// acknowledgement.
@@ -3411,7 +3376,7 @@ exchange_ready_to_commit_msg_event_handle(as_exchange_event* msg_event)
 {
 	EXCHANGE_LOCK();
 
-	if (!exchange_msg_is_sane(msg_event->msg_source, msg_event->msg)) {
+	if (! exchange_msg_is_sane(msg_event->msg_source, msg_event->msg)) {
 		goto Exit;
 	}
 
@@ -3429,8 +3394,7 @@ exchange_ready_to_commit_msg_event_handle(as_exchange_event* msg_event)
 		exchange_ready_to_commit_data_msg_handle(msg_event);
 		break;
 	default:
-		DEBUG(
-				"ready to commit state received unexpected message of type %d from node %"PRIx64,
+		DEBUG("ready to commit state received unexpected message of type %d from node %" PRIx64,
 				msg_type, msg_event->msg_source);
 	}
 Exit:
@@ -3445,8 +3409,8 @@ exchange_ready_to_commit_timer_event_handle(as_exchange_event* msg_event)
 {
 	EXCHANGE_LOCK();
 
-	if (g_exchange.ready_to_commit_send_ts + EXCHANGE_READY_TO_COMMIT_TIMEOUT()
-			< cf_getms()) {
+	if (g_exchange.ready_to_commit_send_ts + EXCHANGE_READY_TO_COMMIT_TIMEOUT() <
+			cf_getms()) {
 		// Its been a while since ready to commit has been sent to the
 		// principal, retransmit it so that the principal gets it this time and
 		// supplies a commit message.
@@ -3531,9 +3495,9 @@ exchange_timer_thr(void* arg)
 static int
 exchange_fabric_msg_listener(cf_node source, msg* msg, void* udata)
 {
-	if (!EXCHANGE_IS_RUNNING()) {
+	if (! EXCHANGE_IS_RUNNING()) {
 		// Ignore this message.
-		DEBUG("exchange stopped - ignoring message from %"PRIx64, source);
+		DEBUG("exchange stopped - ignoring message from %" PRIx64, source);
 		goto Exit;
 	}
 
@@ -3555,7 +3519,7 @@ Exit:
 void
 exchange_clustering_event_listener(as_clustering_event* event)
 {
-	if (!EXCHANGE_IS_RUNNING()) {
+	if (! EXCHANGE_IS_RUNNING()) {
 		// Ignore this message.
 		DEBUG("exchange stopped - ignoring cluster change event");
 		return;
@@ -3607,11 +3571,11 @@ exchange_init()
 			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, false);
 
 	cf_vector_init(&g_exchange.succession_list, sizeof(cf_node),
-	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
 
 	EXCHANGE_COMMITTED_CLUSTER_WLOCK();
 	cf_vector_init(&g_exchange.committed_succession_list, sizeof(cf_node),
-	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
+			AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
 	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 
 	// Initialize exchange fabric messaging.
@@ -3620,7 +3584,7 @@ exchange_init()
 	// Initialize self exchange data dynamic buffers.
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		cf_dyn_buf_init_heap(&g_exchange.self_data_dyn_buf[ns_ix],
-			AS_EXCHANGE_SELF_DYN_BUF_SIZE());
+				AS_EXCHANGE_SELF_DYN_BUF_SIZE());
 	}
 
 	// Initialize external event publishing.
@@ -3640,7 +3604,7 @@ exchange_init()
 static void
 exchange_stop()
 {
-	if (!EXCHANGE_IS_RUNNING()) {
+	if (! EXCHANGE_IS_RUNNING()) {
 		WARNING("exchange is already stopped");
 		return;
 	}
@@ -3676,8 +3640,8 @@ exchange_start()
 
 	g_exchange.sys_state = AS_EXCHANGE_SYS_STATE_RUNNING;
 
-	g_exchange.timer_tid = cf_thread_create_joinable(exchange_timer_thr,
-			(void*)&g_exchange);
+	g_exchange.timer_tid =
+			cf_thread_create_joinable(exchange_timer_thr, (void*)&g_exchange);
 
 	DEBUG("exchange module started");
 
@@ -3840,11 +3804,14 @@ as_exchange_max_compatibility_id(void)
 /**
  * Exchange cluster state output for info calls.
  */
-void as_exchange_cluster_info(cf_dyn_buf* db) {
+void
+as_exchange_cluster_info(cf_dyn_buf* db)
+{
 	EXCHANGE_COMMITTED_CLUSTER_RLOCK();
 	info_append_uint32(db, "cluster_size", g_exchange.committed_cluster_size);
 	info_append_uint64_x(db, "cluster_key", g_exchange.committed_cluster_key);
-	info_append_uint64(db, "cluster_generation", g_exchange.committed_cluster_generation);
+	info_append_uint64(db, "cluster_generation",
+			g_exchange.committed_cluster_generation);
 	info_append_uint64_x(db, "cluster_principal", g_exchange.committed_principal);
 	EXCHANGE_COMMITTED_CLUSTER_UNLOCK();
 }

@@ -42,6 +42,7 @@
 #include "base/proto.h"
 #include "base/service.h"
 #include "base/transaction.h"
+#include "base/xdr.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/mrt_utils.h"
@@ -50,14 +51,12 @@
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
 
-
 //==========================================================
 // Typedefs & constants.
 //
 
 #define USE_CONFIG_DEFAULT 0
-#define NEVER_TOUCH ((uint32_t)-1)
-
+#define NEVER_TOUCH ((uint32_t) - 1)
 
 //==========================================================
 // Forward declarations.
@@ -75,8 +74,8 @@ static void rt_done(as_transaction* tr);
 static void rt_timeout_cb(rw_request* rw);
 
 static transaction_status read_touch_master(rw_request* rw, as_transaction* tr);
-static void read_touch_master_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd, int result_code);
-
+static void read_touch_master_done(as_transaction* tr, as_index_ref* r_ref,
+		as_storage_rd* rd, int result_code);
 
 //==========================================================
 // Inlines & macros.
@@ -91,9 +90,8 @@ default_rt_ttl_pct(const as_namespace* ns, const as_set* p_set)
 
 	uint32_t set_pct = as_load_uint32(&p_set->default_read_touch_ttl_pct);
 
-	return set_pct == 0 ?
-			ns->default_read_touch_ttl_pct :
-			(set_pct == NEVER_TOUCH ? 0 : set_pct);
+	return set_pct == 0 ? ns->default_read_touch_ttl_pct
+						: (set_pct == NEVER_TOUCH ? 0 : set_pct);
 }
 
 static inline void
@@ -115,7 +113,6 @@ rt_update_stats(as_namespace* ns, uint8_t result_code)
 		break;
 	}
 }
-
 
 //==========================================================
 // Public API.
@@ -230,7 +227,6 @@ as_read_touch_start(as_transaction* tr)
 	return TRANS_IN_PROGRESS;
 }
 
-
 //==========================================================
 // Local helpers - transaction trigger.
 //
@@ -255,7 +251,6 @@ rt_enqueue(as_namespace* ns, const cf_digest* keyd, uint32_t ttl)
 
 	as_service_enqueue_internal(&tr);
 }
-
 
 //==========================================================
 // Local helpers - transaction flow.
@@ -350,7 +345,6 @@ rt_repl_write_cb(rw_request* rw)
 	// Finished transaction - rw_request cleans up reservation and msgp!
 }
 
-
 //==========================================================
 // Local helpers - transaction end.
 //
@@ -370,7 +364,7 @@ rt_done(as_transaction* tr)
 	HIST_ACTIVATE_INSERT_DATA_POINT(tr, read_touch_hist);
 	rt_update_stats(tr->rsv.ns, tr->result_code);
 
-//	tr->from.any = NULL; // no respond-on-master-complete
+	//	tr->from.any = NULL; // no respond-on-master-complete
 }
 
 static void
@@ -388,7 +382,6 @@ rt_timeout_cb(rw_request* rw)
 
 	rw->from.any = NULL; // inform other callback it lost the race
 }
-
 
 //==========================================================
 // Local helpers - read touch master.

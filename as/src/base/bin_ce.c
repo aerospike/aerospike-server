@@ -32,7 +32,6 @@
 #include "base/datamodel.h"
 #include "storage/storage.h"
 
-
 //==========================================================
 // Public API.
 //

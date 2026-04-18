@@ -28,38 +28,33 @@
 
 #include <stddef.h>
 
-
 //==========================================================
 // Public API.
 //
 
-struct meta_in_q_s *
+struct meta_in_q_s*
 meta_in_q_create()
 {
 	return NULL;
 }
 
-
 void
-meta_in_q_destroy(struct meta_in_q_s *iq)
+meta_in_q_destroy(struct meta_in_q_s* iq)
 {
 }
 
-
 void
-meta_in_q_rejected(struct meta_in_q_s *iq)
+meta_in_q_rejected(struct meta_in_q_s* iq)
 {
 }
 
-
-struct meta_out_q_s *
+struct meta_out_q_s*
 meta_out_q_create()
 {
 	return NULL;
 }
 
-
 void
-meta_out_q_destroy(struct meta_out_q_s *oq)
+meta_out_q_destroy(struct meta_out_q_s* oq)
 {
 }

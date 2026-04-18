@@ -20,6 +20,15 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 #include "base/batch.h"
+
+#include <alloca.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include "aerospike/as_atomic.h"
 #include "aerospike/as_buffer_pool.h"
 #include "citrusleaf/alloc.h"
@@ -27,6 +36,14 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
+
+#include "cf_mutex.h"
+#include "cf_thread.h"
+#include "hardware.h"
+#include "hist.h"
+#include "log.h"
+#include "socket.h"
+
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/exp.h"
@@ -37,22 +54,15 @@
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "storage/storage.h"
 #include "transaction/rw_utils.h"
-#include "cf_mutex.h"
-#include "cf_thread.h"
-#include "hardware.h"
-#include "log.h"
-#include "socket.h"
-#include <errno.h>
-#include <pthread.h>
-#include <unistd.h>
 
 //---------------------------------------------------------
 // MACROS
 //---------------------------------------------------------
 
 #define BATCH_BLOCK_SIZE (1024 * 128) // 128K
-#define BATCH_REPEAT_SIZE 25  // index(4),digest(20) and repeat(1)
+#define BATCH_REPEAT_SIZE 25 // index(4),digest(20) and repeat(1)
 
 #define BATCH_ABANDON_LIMIT (30UL * 1000 * 1000 * 1000) // 30 seconds
 
@@ -61,17 +71,17 @@
 #define BATCH_DELAY 1
 
 // Batch parent flags.
-#define INLINE_DATA_IN_MEMORY   0x1 // or data in pmem
-#define INLINE_DATA_ON_DEVICE   0x2
-#define REPORT_ALL_ERRORS       0x4
-#define REPORT_ERROR_REC        0x8
+#define INLINE_DATA_IN_MEMORY 0x1 // or data in pmem
+#define INLINE_DATA_ON_DEVICE 0x2
+#define REPORT_ALL_ERRORS 0x4
+#define REPORT_ERROR_REC 0x8
 
 // as_batch_input repeat (or not) flags.
-#define REPEAT          0x1
-#define HAS_EXTRA_INFO  0x2
-#define HAS_GENERATION  0x4
-#define HAS_RECORD_TTL  0x8
-#define HAS_INFO4       0x10
+#define REPEAT 0x1
+#define HAS_EXTRA_INFO 0x2
+#define HAS_GENERATION 0x4
+#define HAS_RECORD_TTL 0x8
+#define HAS_INFO4 0x10
 
 //---------------------------------------------------------
 // TYPES
@@ -156,7 +166,8 @@ typedef struct thread_pool_s {
 	uint32_t n_threads;
 } thread_pool;
 
-static void thread_pool_init(thread_pool* pool, uint32_t n_threads, task_fn fn, uint32_t task_size, uint32_t task_complete_offset);
+static void thread_pool_init(thread_pool* pool, uint32_t n_threads, task_fn fn,
+		uint32_t task_size, uint32_t task_complete_offset);
 static void thread_pool_resize(thread_pool* pool, uint32_t n_threads);
 static bool thread_pool_queue_task(thread_pool* pool, void* task);
 
@@ -206,9 +217,11 @@ as_batch_send_error(as_transaction* btr, int result_code)
 
 	// Use blocking send because error occured before batch transaction was
 	// placed on batch queue.
-	if (cf_socket_send_all(sock, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
+	if (cf_socket_send_all(sock, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL,
+				CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
-		cf_debug(AS_BATCH, "Batch send response error, errno %d fd %d", errno, CSFD(sock));
+		cf_debug(AS_BATCH, "Batch send response error, errno %d fd %d", errno,
+				CSFD(sock));
 		status = -1;
 	}
 
@@ -228,7 +241,8 @@ as_batch_send_error(as_transaction* btr, int result_code)
 }
 
 static int
-as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer, int32_t flags)
+as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer,
+		int32_t flags)
 {
 	cf_socket* sock = &shared->fd_h->sock;
 	uint8_t* buf = (uint8_t*)&buffer->proto;
@@ -255,7 +269,7 @@ static inline void
 as_batch_release_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 {
 	if (as_buffer_pool_push_limit(&batch_buffer_pool, buffer, buffer->capacity,
-			g_config.batch_max_unused_buffers) != 0) {
+				g_config.batch_max_unused_buffers) != 0) {
 		// The push frees buffer on failure, so we just increment stat.
 		as_incr_uint64(&g_stats.batch_index_destroyed_buffers);
 	}
@@ -304,7 +318,8 @@ as_batch_complete(as_batch_queue* queue, as_batch_shared* shared, int status)
 }
 
 static bool
-as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared,
+		as_batch_buffer* buffer)
 {
 	// Use existing buffer to store trailer message.
 	as_proto* proto = &buffer->proto;
@@ -342,7 +357,8 @@ as_batch_send_trailer(as_batch_queue* queue, as_batch_shared* shared, as_batch_b
 }
 
 static inline bool
-as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer, int status)
+as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared,
+		as_batch_buffer* buffer, int status)
 {
 	// If we're invoked for the trailer, we're done. Free buffer and batch.
 	if (shared->in_trailer) {
@@ -373,10 +389,12 @@ as_batch_buffer_end(as_batch_queue* queue, as_batch_shared* shared, as_batch_buf
 }
 
 static inline bool
-as_batch_abandon(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+as_batch_abandon(as_batch_queue* queue, as_batch_shared* shared,
+		as_batch_buffer* buffer)
 {
 	if (cf_getns() >= shared->end) {
-		cf_warning(AS_BATCH, "abandoned batch from %s with %u transactions after %lu ms",
+		cf_warning(AS_BATCH,
+				"abandoned batch from %s with %u transactions after %lu ms",
 				shared->fd_h->client, shared->tran_max,
 				(shared->end - shared->start) / 1000000);
 		shared->bad_response_fd = true;
@@ -388,7 +406,8 @@ as_batch_abandon(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer
 }
 
 static bool
-as_batch_send_delayed(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer* buffer)
+as_batch_send_delayed(as_batch_queue* queue, as_batch_shared* shared,
+		as_batch_buffer* buffer)
 {
 	// If we get here, other buffers in this batch can't have affected or
 	// reacted to this batch's status. All that happened is this buffer was
@@ -404,7 +423,8 @@ as_batch_send_delayed(as_batch_queue* queue, as_batch_shared* shared, as_batch_b
 }
 
 static bool
-as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared, as_batch_buffer** p_buffer)
+as_batch_send_response(as_batch_queue* queue, as_batch_shared* shared,
+		as_batch_buffer** p_buffer)
 {
 	as_batch_buffer* buffer = *p_buffer;
 
@@ -476,7 +496,8 @@ as_batch_worker(void* udata)
 	as_batch_shared* shared;
 	as_batch_buffer* buffer;
 
-	while (cf_queue_pop(response_queue, &response, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
+	while (cf_queue_pop(response_queue, &response, CF_QUEUE_FOREVER) ==
+			CF_QUEUE_OK) {
 		// Check if this thread task should end.
 		shared = response.shared;
 		if (! shared) {
@@ -542,8 +563,10 @@ as_batch_create_thread_queues(uint32_t begin, uint32_t end)
 
 	for (uint32_t i = begin; i < end; i++) {
 		work.batch_queue = &batch_queues[i];
-		work.batch_queue->response_queue = cf_queue_create(sizeof(as_batch_response), true);
-		work.batch_queue->complete_queue = cf_queue_create(sizeof(uint32_t), true);
+		work.batch_queue->response_queue =
+				cf_queue_create(sizeof(as_batch_response), true);
+		work.batch_queue->complete_queue =
+				cf_queue_create(sizeof(uint32_t), true);
 		work.batch_queue->tran_count = 0;
 		work.batch_queue->delay_count = 0;
 		work.batch_queue->active = true;
@@ -579,15 +602,16 @@ as_batch_shutdown_thread_queues(uint32_t begin, uint32_t end)
 	// Wait till there are no more active batch transactions on the queues.
 	// Timeout after 30 seconds.
 	uint64_t limitus = cf_getus() + (1000 * 1000 * 30);
-	usleep(50 * 1000);  // Sleep 50ms
+	usleep(50 * 1000); // Sleep 50ms
 	do {
 		if (as_batch_wait(begin, end)) {
 			break;
 		}
-		usleep(500 * 1000);  // Sleep 500ms
+		usleep(500 * 1000); // Sleep 500ms
 
 		if (cf_getus() > limitus) {
-			cf_warning(AS_BATCH, "Batch shutdown threads failed on timeout. Transactions remain on queue.");
+			cf_warning(AS_BATCH,
+					"Batch shutdown threads failed on timeout. Transactions remain on queue.");
 			// Reactivate queues.
 			for (uint32_t i = begin; i < end; i++) {
 				batch_queues[i].active = true;
@@ -624,7 +648,9 @@ as_batch_find_queue(int queue_index)
 	for (int index = queue_index - 1; index >= 0; index--) {
 		as_batch_queue* bq = &batch_queues[index];
 
-		if (bq->active && cf_queue_sz(bq->response_queue) < g_config.batch_max_buffers_per_queue) {
+		if (bq->active &&
+				cf_queue_sz(bq->response_queue) <
+						g_config.batch_max_buffers_per_queue) {
 			return bq;
 		}
 	}
@@ -638,7 +664,8 @@ as_batch_find_queue(int queue_index)
 			break;
 		}
 
-		if (cf_queue_sz(bq->response_queue) < g_config.batch_max_buffers_per_queue) {
+		if (cf_queue_sz(bq->response_queue) <
+				g_config.batch_max_buffers_per_queue) {
 			return bq;
 		}
 	}
@@ -669,10 +696,12 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 	else {
 		// Pop existing buffer from queue.
 		// The extra lock here is unavoidable.
-		int status = cf_queue_pop(batch_buffer_pool.queue, &buffer, CF_QUEUE_NOWAIT);
+		int status =
+				cf_queue_pop(batch_buffer_pool.queue, &buffer, CF_QUEUE_NOWAIT);
 
 		if (status == CF_QUEUE_OK) {
-			buffer->capacity = batch_buffer_pool.buffer_size - batch_buffer_pool.header_size;
+			buffer->capacity = batch_buffer_pool.buffer_size -
+					batch_buffer_pool.header_size;
 		}
 		else if (status == CF_QUEUE_EMPTY) {
 			// Queue is empty.  Create new buffer.
@@ -702,13 +731,14 @@ as_batch_buffer_complete(as_batch_shared* shared, as_batch_buffer* buffer)
 
 	// Flush when all writers have finished writing into the buffer.
 	if (n_writers == 0) {
-		as_batch_response response = {.shared = shared, .buffer = buffer};
+		as_batch_response response = { .shared = shared, .buffer = buffer };
 		cf_queue_push(shared->response_queue, &response);
 	}
 }
 
 static uint8_t*
-as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_batch_buffer** buffer_out, bool* complete)
+as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code,
+		as_batch_buffer** buffer_out, bool* complete)
 {
 	as_batch_buffer* buffer;
 	uint8_t* data;
@@ -761,7 +791,8 @@ as_batch_reserve(as_batch_shared* shared, uint32_t size, int result_code, as_bat
 }
 
 static inline void
-as_batch_transaction_end(as_batch_shared* shared, as_batch_buffer* buffer, bool complete)
+as_batch_transaction_end(as_batch_shared* shared, as_batch_buffer* buffer,
+		bool complete)
 {
 	// This flush can only be triggered when the buffer is full.
 	as_batch_buffer_complete(shared, buffer);
@@ -790,7 +821,7 @@ as_batch_terminate(as_batch_shared* shared, uint32_t tran_count, int result_code
 		// No previous buffer.  Get new buffer.
 		as_batch_buffer_pop(shared, 0);
 		buffer = shared->buffer;
-		buffer->tran_count = tran_count;  // Override tran_count.
+		buffer->tran_count = tran_count; // Override tran_count.
 	}
 	else {
 		// Buffer exists. Add phantom transactions.
@@ -819,12 +850,15 @@ as_batch_init()
 		}
 	}
 
-	cf_info(AS_BATCH, "starting %u batch-index-threads", g_config.n_batch_index_threads);
+	cf_info(AS_BATCH, "starting %u batch-index-threads",
+			g_config.n_batch_index_threads);
 
-	thread_pool_init(&batch_thread_pool, g_config.n_batch_index_threads, as_batch_worker,
-			sizeof(as_batch_work), offsetof(as_batch_work,complete));
+	thread_pool_init(&batch_thread_pool, g_config.n_batch_index_threads,
+			as_batch_worker, sizeof(as_batch_work),
+			offsetof(as_batch_work, complete));
 
-	int rc = as_buffer_pool_init(&batch_buffer_pool, sizeof(as_batch_buffer), BATCH_BLOCK_SIZE);
+	int rc = as_buffer_pool_init(&batch_buffer_pool, sizeof(as_batch_buffer),
+			BATCH_BLOCK_SIZE);
 
 	if (rc) {
 		cf_warning(AS_BATCH, "Failed to initialize batch buffer pool: %d", rc);
@@ -847,7 +881,8 @@ as_batch_queue_task(as_transaction* btr)
 	uint32_t thread_size = batch_thread_pool.n_threads;
 
 	if (thread_size == 0 || thread_size > MAX_BATCH_THREADS) {
-		cf_warning(AS_BATCH, "batch-index-threads has been disabled: %d", thread_size);
+		cf_warning(AS_BATCH, "batch-index-threads has been disabled: %d",
+				thread_size);
 		return as_batch_send_error(btr, AS_ERR_BATCH_DISABLED);
 	}
 	uint32_t queue_index = counter % thread_size;
@@ -856,13 +891,15 @@ as_batch_queue_task(as_transaction* btr)
 	as_proto* bproto = &btr->msgp->proto;
 
 	if (bproto->sz > PROTO_SIZE_MAX) {
-		cf_warning(AS_BATCH, "can't process message: invalid size %lu should be %d or less",
+		cf_warning(AS_BATCH,
+				"can't process message: invalid size %lu should be %d or less",
 				(uint64_t)bproto->sz, PROTO_SIZE_MAX);
 		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
 	if (bproto->type != PROTO_TYPE_AS_MSG) {
-		cf_warning(AS_BATCH, "Invalid proto type. Expected %d Received %d", PROTO_TYPE_AS_MSG, bproto->type);
+		cf_warning(AS_BATCH, "Invalid proto type. Expected %d Received %d",
+				PROTO_TYPE_AS_MSG, bproto->type);
 		return as_batch_send_error(btr, AS_ERR_PARAMETER);
 	}
 
@@ -893,7 +930,8 @@ as_batch_queue_task(as_transaction* btr)
 		as_msg_swap_field(mf);
 		end = as_msg_field_get_next(mf);
 
-		if (mf->type == AS_MSG_FIELD_TYPE_BATCH || mf->type == AS_MSG_FIELD_TYPE_BATCH_WITH_SET) {
+		if (mf->type == AS_MSG_FIELD_TYPE_BATCH ||
+				mf->type == AS_MSG_FIELD_TYPE_BATCH_WITH_SET) {
 			bf = mf;
 		}
 		else if (mf->type == AS_MSG_FIELD_TYPE_PREDEXP) {
@@ -939,9 +977,10 @@ as_batch_queue_task(as_transaction* btr)
 
 	// Abandon batch at batch timeout if batch timeout is defined.
 	// If batch timeout is zero, abandon after 30 seconds.
-	shared->end = btr->start_time + (bmsg->transaction_ttl != 0 ?
-			(uint64_t)bmsg->transaction_ttl * 1000 * 1000 :
-			BATCH_ABANDON_LIMIT);
+	shared->end = btr->start_time +
+			(bmsg->transaction_ttl != 0
+							? (uint64_t)bmsg->transaction_ttl * 1000 * 1000
+							: BATCH_ABANDON_LIMIT);
 
 	shared->start = btr->start_time;
 	shared->fd_h = btr->from.proto_fd_h;
@@ -955,14 +994,17 @@ as_batch_queue_task(as_transaction* btr)
 	as_batch_queue* batch_queue = &batch_queues[queue_index];
 
 	// batch_max_buffers_per_queue is a soft limit, but still must be checked under lock.
-	if (! (batch_queue->active && cf_queue_sz(batch_queue->response_queue) < g_config.batch_max_buffers_per_queue)) {
+	if (! (batch_queue->active &&
+				cf_queue_sz(batch_queue->response_queue) <
+						g_config.batch_max_buffers_per_queue)) {
 		// Queue buffer limit has been exceeded or thread has been shutdown (probably due to
 		// downwards thread resize).  Search for an available queue.
 		// cf_warning(AS_BATCH, "Queue %u full %d", queue_index, cf_queue_sz(batch_queue->response_queue));
 		batch_queue = as_batch_find_queue(queue_index);
 
 		if (! batch_queue) {
-			cf_ticker_warning(AS_BATCH, "failed to find active batch queue that is not full");
+			cf_ticker_warning(AS_BATCH,
+					"failed to find active batch queue that is not full");
 			cf_free(shared);
 			return as_batch_send_error(btr, AS_ERR_BATCH_QUEUES_FULL);
 		}
@@ -1169,16 +1211,18 @@ as_batch_queue_task(as_transaction* btr)
 		}
 
 		if (ns->batch_sub_benchmarks_enabled) {
-			tr.benchmark_time = histogram_insert_data_point(
-					ns->batch_sub_prestart_hist, tr.start_time);
+			tr.benchmark_time =
+					histogram_insert_data_point(ns->batch_sub_prestart_hist,
+							tr.start_time);
 		}
 		else {
 			tr.benchmark_time = 0;
 		}
 
 		// Submit transaction.
-		if (tran_count == 1 || (ns->storage_type == AS_STORAGE_ENGINE_SSD ?
-				inline_dev : inline_dim)) {
+		if (tran_count == 1 ||
+				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? inline_dev
+														   : inline_dim)) {
 			as_tsvc_process_transaction(&tr);
 		}
 		else {
@@ -1192,7 +1236,8 @@ as_batch_queue_task(as_transaction* btr)
 TranEnd:
 	if (tran_row < tran_count) {
 		// Mismatch between tran_count and actual data.  Terminate transaction.
-		cf_warning(AS_BATCH, "Batch keys mismatch. Expected %u Received %u", tran_count, tran_row);
+		cf_warning(AS_BATCH, "Batch keys mismatch. Expected %u Received %u",
+				tran_count, tran_row);
 		as_batch_terminate(shared, tran_count - tran_row, AS_ERR_PARAMETER);
 	}
 
@@ -1239,7 +1284,8 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 
 	as_batch_buffer* buffer;
 	bool complete;
-	uint8_t* data = as_batch_reserve(shared, size, tr->result_code, &buffer, &complete);
+	uint8_t* data =
+			as_batch_reserve(shared, size, tr->result_code, &buffer, &complete);
 
 	if (data) {
 		// Write header.
@@ -1264,11 +1310,11 @@ as_batch_add_result(as_transaction* tr, uint16_t n_bins, as_bin** bins,
 		p += sizeof(as_msg);
 
 		if (v != NULL) {
-			as_msg_field *mf = (as_msg_field *)p;
+			as_msg_field* mf = (as_msg_field*)p;
 
 			mf->field_sz = 1 + sizeof(as_record_version);
 			mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
-			*(as_record_version *)mf->data = *v;
+			*(as_record_version*)mf->data = *v;
 			as_msg_swap_field(mf);
 			p += sizeof(as_msg_field) + sizeof(as_record_version);
 		}
@@ -1307,8 +1353,8 @@ as_batch_add_made_result(as_batch_shared* shared, uint32_t index, cl_msg* msgp,
 
 	as_batch_buffer* buffer;
 	bool complete;
-	uint8_t* data = as_batch_reserve(shared, sz, m->result_code, &buffer,
-			&complete);
+	uint8_t* data =
+			as_batch_reserve(shared, sz, m->result_code, &buffer, &complete);
 
 	if (data != NULL) {
 		m->transaction_ttl = cf_swap_to_be32(index);
@@ -1334,8 +1380,8 @@ as_batch_add_ack(as_transaction* tr, as_record_version* v)
 	as_batch_shared* shared = tr->from.batch_shared;
 	as_batch_buffer* buffer;
 	bool complete;
-	uint8_t* data = as_batch_reserve(shared, size, tr->result_code, &buffer,
-			&complete);
+	uint8_t* data =
+			as_batch_reserve(shared, size, tr->result_code, &buffer, &complete);
 
 	if (data != NULL) {
 		as_msg* m = (as_msg*)data;
@@ -1356,13 +1402,13 @@ as_batch_add_ack(as_transaction* tr, as_record_version* v)
 		uint8_t* p = m->data;
 
 		if (v != NULL) {
-			as_msg_field *mf = (as_msg_field *)p;
+			as_msg_field* mf = (as_msg_field*)p;
 
 			mf->field_sz = 1 + sizeof(as_record_version);
 			mf->type = AS_MSG_FIELD_TYPE_RECORD_VERSION;
-			*(as_record_version *)mf->data = *v;
+			*(as_record_version*)mf->data = *v;
 			as_msg_swap_field(mf);
-//			p += sizeof(as_msg_field) + sizeof(as_record_version);
+			//			p += sizeof(as_msg_field) + sizeof(as_record_version);
 		}
 	}
 
@@ -1374,7 +1420,8 @@ as_batch_add_error(as_batch_shared* shared, uint32_t index, int result_code)
 {
 	as_batch_buffer* buffer;
 	bool complete;
-	uint8_t* data = as_batch_reserve(shared, sizeof(as_msg), result_code, &buffer, &complete);
+	uint8_t* data = as_batch_reserve(shared, sizeof(as_msg), result_code,
+			&buffer, &complete);
 
 	if (data) {
 		// Write error.
@@ -1400,7 +1447,8 @@ int
 as_batch_threads_resize(uint32_t threads)
 {
 	if (threads > MAX_BATCH_THREADS) {
-		cf_warning(AS_BATCH, "batch-index-threads %u exceeds max %u", threads, MAX_BATCH_THREADS);
+		cf_warning(AS_BATCH, "batch-index-threads %u exceeds max %u", threads,
+				MAX_BATCH_THREADS);
 		return -1;
 	}
 
@@ -1408,7 +1456,8 @@ as_batch_threads_resize(uint32_t threads)
 
 	// Resize thread pool.  The threads will wait for graceful shutdown on downwards resize.
 	uint32_t threads_orig = batch_thread_pool.n_threads;
-	cf_info(AS_BATCH, "Resize batch-index-threads from %u to %u", threads_orig, threads);
+	cf_info(AS_BATCH, "Resize batch-index-threads from %u to %u", threads_orig,
+			threads);
 	int status = 0;
 
 	if (threads != threads_orig) {
@@ -1448,9 +1497,10 @@ as_batch_queues_info(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ',');
 		}
 		as_batch_queue* bq = &batch_queues[i];
-		cf_dyn_buf_append_uint32(db, bq->tran_count);  // Batch count
+		cf_dyn_buf_append_uint32(db, bq->tran_count); // Batch count
 		cf_dyn_buf_append_char(db, ':');
-		cf_dyn_buf_append_uint32(db, cf_queue_sz(bq->response_queue));  // Buffer count
+		cf_dyn_buf_append_uint32(db,
+				cf_queue_sz(bq->response_queue)); // Buffer count
 	}
 	cf_mutex_unlock(&batch_resize_lock);
 }
@@ -1478,7 +1528,6 @@ as_batch_get_predexp(as_batch_shared* shared)
 {
 	return shared->predexp;
 }
-
 
 //==========================================================
 // thread_pool class.
@@ -1525,8 +1574,8 @@ thread_pool_resize(thread_pool* pool, uint32_t n_threads)
 	}
 	else {
 		// Start new threads.
-		pool->n_threads += thread_pool_create_threads(pool,
-				n_threads - pool->n_threads);
+		pool->n_threads +=
+				thread_pool_create_threads(pool, n_threads - pool->n_threads);
 	}
 }
 
@@ -1583,8 +1632,7 @@ run_pool_worker(void* data)
 	bool* shutdown = (bool*)(task + pool->task_complete_offset);
 
 	// Retrieve tasks from queue and execute.
-	while (cf_queue_pop(pool->dispatch_q, task, CF_QUEUE_FOREVER) ==
-			CF_QUEUE_OK) {
+	while (cf_queue_pop(pool->dispatch_q, task, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
 		// Check if thread should be shut down.
 		if (*shutdown) {
 			break;

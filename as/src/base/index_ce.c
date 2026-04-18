@@ -35,7 +35,6 @@
 
 #include "base/datamodel.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -47,7 +46,6 @@ as_index_tree_resume(as_index_tree_shared* shared, as_treex* xmem_trees,
 	cf_crash(AS_INDEX, "CE code called as_index_tree_resume()");
 	return NULL;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.

@@ -23,8 +23,8 @@
 #pragma once
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "base/datamodel.h"
 
@@ -32,24 +32,15 @@
 extern "C" {
 #endif
 
-extern bool geo_parse(const as_namespace * ns,
-					  const char * buf,
-					  size_t bufsz,
-					  uint64_t * cellidp,
-					  geo_region_t * regionp);
-	
-extern bool geo_region_cover(const as_namespace * ns,
-							 geo_region_t region,
-							 uint32_t maxnumcells,
-							 uint64_t * cellctrp,
-							 uint64_t * cellminp,
-							 uint64_t * cellmaxp,
-							 uint32_t * numcellsp);
+extern bool geo_parse(const as_namespace* ns, const char* buf, size_t bufsz,
+		uint64_t* cellidp, geo_region_t* regionp);
 
-extern bool geo_point_centers(uint64_t cellidval,
-							  uint32_t maxnumcenters,
-							  uint64_t * center,
-							  uint32_t * numcentersp);
+extern bool geo_region_cover(const as_namespace* ns, geo_region_t region,
+		uint32_t maxnumcells, uint64_t* cellctrp, uint64_t* cellminp,
+		uint64_t* cellmaxp, uint32_t* numcellsp);
+
+extern bool geo_point_centers(uint64_t cellidval, uint32_t maxnumcenters,
+		uint64_t* center, uint32_t* numcentersp);
 
 extern bool geo_point_within(uint64_t cellidval, geo_region_t region);
 

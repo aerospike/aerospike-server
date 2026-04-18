@@ -25,7 +25,6 @@
 //
 
 #include "base/security.h"
-#include "base/security_config.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -42,8 +41,8 @@
 
 #include "base/datamodel.h"
 #include "base/proto.h"
+#include "base/security_config.h"
 #include "base/transaction.h"
-
 
 //==========================================================
 // Public API.
@@ -72,8 +71,7 @@ as_security_check_info_cmd(const as_file_handle* fd_h, const char* cmd,
 
 // Security is an enterprise feature - here, allow all operations.
 bool
-as_security_check_data_op(as_transaction* tr, as_namespace* ns,
-		as_sec_perm perm)
+as_security_check_data_op(as_transaction* tr, as_namespace* ns, as_sec_perm perm)
 {
 	return true;
 }
@@ -162,12 +160,11 @@ as_security_transact(as_transaction* tr)
 	p_sec_msg->result = AS_SEC_ERR_NOT_SUPPORTED;
 
 	// Send the complete response.
-	cf_socket *sock = &tr->from.proto_fd_h->sock;
+	cf_socket* sock = &tr->from.proto_fd_h->sock;
 
 	if (cf_socket_send_all(sock, resp, resp_size, MSG_NOSIGNAL,
-			CF_SOCKET_TIMEOUT) < 0) {
-		cf_warning(AS_SECURITY, "fd %d send failed, errno %d",
-				CSFD(sock), errno);
+				CF_SOCKET_TIMEOUT) < 0) {
+		cf_warning(AS_SECURITY, "fd %d send failed, errno %d", CSFD(sock), errno);
 		as_end_of_transaction_force_close(tr->from.proto_fd_h);
 		tr->from.proto_fd_h = NULL;
 		return;
@@ -176,7 +173,6 @@ as_security_transact(as_transaction* tr)
 	as_end_of_transaction_ok(tr->from.proto_fd_h);
 	tr->from.proto_fd_h = NULL;
 }
-
 
 //==========================================================
 // Public API - security configuration.
@@ -199,7 +195,6 @@ as_security_config_log_user(const char* user)
 {
 	cf_crash(AS_SECURITY, "CE called as_security_config_log_user()");
 }
-
 
 //==========================================================
 // Public API - security info commands.

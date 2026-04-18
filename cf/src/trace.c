@@ -35,11 +35,9 @@
 #include <string.h>
 
 #include "backtrace.h"
-
 #include "log.h"
 
 #include "warnings.h"
-
 
 //==========================================================
 // Typedefs & constants.
@@ -48,22 +46,21 @@
 extern char __executable_start;
 extern char __etext;
 
-
 //==========================================================
 // Globals.
 //
 
 struct backtrace_state* g_bt_state;
 
-
 //==========================================================
 // Forward declarations.
 //
 
 static void error_cb(void* data, const char* msg, int errnum);
-static int pcinfo_cb(void* data, uintptr_t pc, const char* file, int lineno, const char* func);
-static void syminfo_cb(void* data, uintptr_t pc, const char* sn, uintptr_t sv, uintptr_t ss);
-
+static int pcinfo_cb(void* data, uintptr_t pc, const char* file, int lineno,
+		const char* func);
+static void syminfo_cb(void* data, uintptr_t pc, const char* sn, uintptr_t sv,
+		uintptr_t ss);
 
 //==========================================================
 // Public API.
@@ -94,8 +91,8 @@ cf_strip_aslr(const void* addr)
 	const void* end = &__etext;
 	uint64_t aslr_offset = _r_debug.r_map->l_addr;
 
-	return addr >= start && addr < end ?
-			(uint64_t)addr - aslr_offset : (uint64_t)addr;
+	return addr >= start && addr < end ? (uint64_t)addr - aslr_offset
+									   : (uint64_t)addr;
 }
 
 // Caller must ensure buf can't overflow.
@@ -129,7 +126,6 @@ cf_addr_to_sym_str(char* buf, const void* addr)
 	*buf = '\0';
 }
 
-
 //==========================================================
 // Local helpers.
 //
@@ -143,8 +139,7 @@ error_cb(void* data, const char* msg, int errnum)
 }
 
 static int
-pcinfo_cb(void* data, uintptr_t pc, const char* file, int lineno,
-		const char* func)
+pcinfo_cb(void* data, uintptr_t pc, const char* file, int lineno, const char* func)
 {
 	(void)pc;
 

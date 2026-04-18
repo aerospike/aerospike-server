@@ -26,12 +26,17 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/param.h>
 
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_clock.h"
 
+#include "log.h"
 #include "msg.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -39,6 +44,7 @@
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
 #include "fabric/hb.h"
+#include "fabric/hlc.h"
 
 /*
  * Overview
@@ -98,7 +104,8 @@
  * the peer node will be assumed to have hlc delta same as self node. Limited
  * between 3 and 5.
  */
-#define BAD_HLC_STREAK_MAX (MIN(5, MAX(3, as_hb_max_intervals_missed_get() / 2)))
+#define BAD_HLC_STREAK_MAX                                                     \
+	(MIN(5, MAX(3, as_hb_max_intervals_missed_get() / 2)))
 
 /**
  * Ring buffer maximum capacity. The actual capacity is a function of the
@@ -118,14 +125,15 @@
  * ----------------------------------------------------------------------------
  */
 #define CRASH(format, ...) cf_crash(AS_SKEW, format, ##__VA_ARGS__)
-#define TICKER_WARNING(format, ...)					\
-cf_ticker_warning(AS_SKEW, format, ##__VA_ARGS__)
+#define TICKER_WARNING(format, ...)                                            \
+	cf_ticker_warning(AS_SKEW, format, ##__VA_ARGS__)
 #define WARNING(format, ...) cf_warning(AS_SKEW, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_SKEW, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_SKEW, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_SKEW, format, ##__VA_ARGS__)
-#define ring_buffer_log(buffer, message, severity) ring_buffer_log_event(buffer, message, severity, AS_SKEW,	\
-		__FILENAME__, __LINE__);
+#define ring_buffer_log(buffer, message, severity)                             \
+	ring_buffer_log_event(buffer, message, severity, AS_SKEW, __FILENAME__,    \
+			__LINE__);
 
 /*
  * ----------------------------------------------------------------------------
@@ -136,8 +144,7 @@ cf_ticker_warning(AS_SKEW, format, ##__VA_ARGS__)
 /**
  * Ring buffer holding a window of skew delta for a node.
  */
-typedef struct as_skew_ring_buffer_s
-{
+typedef struct as_skew_ring_buffer_s {
 	int64_t data[RING_BUFFER_CAPACITY_MAX];
 	int start;
 	int size;
@@ -147,8 +154,7 @@ typedef struct as_skew_ring_buffer_s
 /**
  * Skew plugin data stored for all adjacent nodes.
  */
-typedef struct as_skew_plugin_data_s
-{
+typedef struct as_skew_plugin_data_s {
 	as_skew_ring_buffer ring_buffer;
 	uint8_t bad_hlc_streak;
 } as_skew_plugin_data;
@@ -156,8 +162,7 @@ typedef struct as_skew_plugin_data_s
 /**
  * Skew summary for a node for the current skew update interval.
  */
-typedef struct as_skew_node_summary_s
-{
+typedef struct as_skew_node_summary_s {
 	cf_node nodeid;
 	int64_t delta;
 } as_skew_node_summary;
@@ -165,8 +170,7 @@ typedef struct as_skew_node_summary_s
 /**
  * HB plugin data iterate struct to get node hlc deltas.
  */
-typedef struct as_skew_monitor_hlc_delta_udata_s
-{
+typedef struct as_skew_monitor_hlc_delta_udata_s {
 	int num_nodes;
 	as_skew_node_summary skew_summary[AS_CLUSTER_SZ];
 } as_skew_monitor_hlc_delta_udata;
@@ -176,8 +180,7 @@ typedef struct as_skew_monitor_hlc_delta_udata_s
  * External protected API for skew monitor
  * ----------------------------------------------------------------------------
  */
-extern int
-as_hb_msg_send_hlc_ts_get(msg* msg, as_hlc_timestamp* send_ts);
+extern int as_hb_msg_send_hlc_ts_get(msg* msg, as_hlc_timestamp* send_ts);
 
 /*
  * ----------------------------------------------------------------------------
@@ -242,12 +245,11 @@ skew_monitor_outlier_detection_threshold()
  */
 static void
 ring_buffer_log_event(as_skew_ring_buffer* ring_buffer, char* prefix,
-		cf_log_level severity, cf_log_context context, char* file_name,
-		int line)
+		cf_log_level severity, cf_log_context context, char* file_name, int line)
 {
 	int max_per_line = 25;
-	int max_bytes_per_value = 21;	// Include the space as well
-	char log_buffer[(max_per_line * max_bytes_per_value) + 1];	// For the NULL terminator.
+	int max_bytes_per_value = 21; // Include the space as well
+	char log_buffer[(max_per_line * max_bytes_per_value) + 1]; // For the NULL terminator.
 	char* value_buffer_start = log_buffer;
 
 	if (prefix) {
@@ -258,8 +260,8 @@ ring_buffer_log_event(as_skew_ring_buffer* ring_buffer, char* prefix,
 		char* buffer = value_buffer_start;
 		for (int j = 0; j < max_per_line && i < ring_buffer->size; j++) {
 			buffer += sprintf(buffer, "%ld ",
-					ring_buffer->data[(ring_buffer->start + i)
-							% ring_buffer->capacity]);
+					ring_buffer->data[(ring_buffer->start + i) %
+							ring_buffer->capacity]);
 			i++;
 		}
 
@@ -305,8 +307,7 @@ ring_buffer_current_capacity()
  * Adjust the contents of the ring buffer to new capacity.
  */
 static void
-ring_buffer_adjust_to_capacity(as_skew_ring_buffer* buffer,
-		const int new_capacity)
+ring_buffer_adjust_to_capacity(as_skew_ring_buffer* buffer, const int new_capacity)
 {
 	if (buffer->capacity == new_capacity) {
 		// No adjustments to data needed.
@@ -377,7 +378,7 @@ skew_monitor_delta_collect_iterate(cf_node nodeid, void* plugin_data,
 	as_skew_monitor_hlc_delta_udata* deltas =
 			(as_skew_monitor_hlc_delta_udata*)udata;
 
-	if (!plugin_data || plugin_data_size < sizeof(as_skew_plugin_data)) {
+	if (! plugin_data || plugin_data_size < sizeof(as_skew_plugin_data)) {
 		// Assume missing nodes share the same delta as self.
 		// Note: self node will not be in adjacency list and hence will also
 		// follow same code path.
@@ -386,8 +387,7 @@ skew_monitor_delta_collect_iterate(cf_node nodeid, void* plugin_data,
 		pthread_mutex_unlock(&g_self_skew_lock);
 	}
 	else {
-		as_skew_plugin_data* skew_plugin_data =
-				(as_skew_plugin_data*)plugin_data;
+		as_skew_plugin_data* skew_plugin_data = (as_skew_plugin_data*)plugin_data;
 		delta = ring_buffer_hlc_delta(&skew_plugin_data->ring_buffer);
 	}
 
@@ -537,8 +537,8 @@ skew_monitor_outliers_from_skew_summary(cf_vector* outliers,
 		// Most deltas are very close to the median. Call values significantly
 		// away as outliers.
 		for (int i = 0; i < udata->num_nodes; i++) {
-			if (fabsf(udata->skew_summary[i].delta - median)
-					> skew_monitor_outlier_detection_threshold()) {
+			if (fabsf(udata->skew_summary[i].delta - median) >
+					skew_monitor_outlier_detection_threshold()) {
 				if (outliers) {
 					cf_vector_append(outliers, &udata->skew_summary[i].nodeid);
 				}
@@ -551,8 +551,8 @@ skew_monitor_outliers_from_skew_summary(cf_vector* outliers,
 		// Any node with delta deviating significantly compared to MAD is an
 		// outlier.
 		for (int i = 0; i < udata->num_nodes; i++) {
-			if ((fabsf(udata->skew_summary[i].delta - median) / mad)
-					> MAD_RATIO_OUTLIER_THRESHOLD) {
+			if ((fabsf(udata->skew_summary[i].delta - median) / mad) >
+					MAD_RATIO_OUTLIER_THRESHOLD) {
 				if (outliers) {
 					cf_vector_append(outliers, &udata->skew_summary[i].nodeid);
 				}
@@ -646,8 +646,8 @@ skew_monitor_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	as_hlc_timestamp send_hlc_ts = 0;
 	as_hlc_timestamp hlc_now = as_hlc_timestamp_now();
 
-	if (msg_get_uint64(msg, AS_HB_MSG_SKEW_MONITOR_DATA, &send_ts) != 0
-			|| as_hb_msg_send_hlc_ts_get(msg, &send_hlc_ts) != 0) {
+	if (msg_get_uint64(msg, AS_HB_MSG_SKEW_MONITOR_DATA, &send_ts) != 0 ||
+			as_hb_msg_send_hlc_ts_get(msg, &send_hlc_ts) != 0) {
 		// Pre SC mode node. For now assumes it shares the same delta with hlc
 		// as us.
 		send_hlc_ts = hlc_now;
@@ -696,8 +696,8 @@ skew_monitor_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	}
 
 	int64_t delta = 0;
-	if ((skew_plugin_data->bad_hlc_streak > 0)
-			&& skew_plugin_data->bad_hlc_streak <= BAD_HLC_STREAK_MAX) {
+	if ((skew_plugin_data->bad_hlc_streak > 0) &&
+			skew_plugin_data->bad_hlc_streak <= BAD_HLC_STREAK_MAX) {
 		// The peer is in a tolerable bad hlc streak. Assume it has nominal hlc
 		// delta. This is most likely a restarted or a new node that hasn't
 		// caught up with the cluster HLC yet.

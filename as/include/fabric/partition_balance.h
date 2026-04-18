@@ -38,13 +38,11 @@
 #include "fabric/hb.h"
 #include "fabric/partition.h"
 
-
 //==========================================================
 // Forward declarations.
 //
 
 struct as_namespace_s;
-
 
 //==========================================================
 // Typedefs & constants.
@@ -68,7 +66,6 @@ typedef struct pb_task_s {
 #define MAX_RACK_ID 1000000
 #define MAX_RACK_ID_LEN 7 // number of decimal characters
 
-
 //==========================================================
 // Public API - regulate migrations.
 //
@@ -77,7 +74,6 @@ void as_partition_balance_disallow_migrations();
 bool as_partition_balance_are_migrations_allowed();
 void as_partition_balance_synchronize_migrations();
 void as_partition_balance_emigration_yield();
-
 
 //==========================================================
 // Public API - balance partitions.
@@ -93,19 +89,24 @@ bool as_partition_balance_revive(struct as_namespace_s* ns);
 void as_partition_balance_protect_roster_set(struct as_namespace_s* ns);
 void as_partition_balance_effective_rack_ids(cf_dyn_buf* db);
 
-
 //==========================================================
 // Public API - migration-related as_partition methods.
 //
 
 bool as_partition_pending_migrations(as_partition* p);
 
-bool as_partition_pre_emigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags);
-void as_partition_emigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node dest_node, uint32_t tx_flags);
-as_migrate_result as_partition_immigrate_start(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
-as_migrate_result as_partition_immigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
-as_migrate_result as_partition_migrations_all_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key);
-void as_partition_signal_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key);
+bool as_partition_pre_emigrate_done(struct as_namespace_s* ns, uint32_t pid,
+		uint64_t orig_cluster_key, uint32_t tx_flags);
+void as_partition_emigrate_done(struct as_namespace_s* ns, uint32_t pid,
+		uint64_t orig_cluster_key, cf_node dest_node, uint32_t tx_flags);
+as_migrate_result as_partition_immigrate_start(struct as_namespace_s* ns,
+		uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
+as_migrate_result as_partition_immigrate_done(struct as_namespace_s* ns,
+		uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
+as_migrate_result as_partition_migrations_all_done(struct as_namespace_s* ns,
+		uint32_t pid, uint64_t orig_cluster_key);
+void as_partition_signal_done(struct as_namespace_s* ns, uint32_t pid,
+		uint64_t orig_cluster_key);
 
 // Counter that tells clients partition ownership has changed.
 extern int32_t g_partition_generation;
@@ -115,7 +116,6 @@ extern uint64_t g_rebalance_sec;
 
 // Count rebalances.
 extern uint64_t g_rebalance_generation;
-
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -147,7 +147,6 @@ extern const as_partition_version ZERO_VERSION;
 #define PIDS_PER_GROUP (REBALANCE_FLUSH_SIZE / PMETA_SIZE) // 256
 #define NUM_PID_GROUPS (AS_PARTITIONS / PIDS_PER_GROUP) // 16
 
-
 //------------------------------------------------
 // Globals.
 //
@@ -163,14 +162,14 @@ extern cf_node* g_succession;
 extern cf_node g_full_node_seq_table[AS_CLUSTER_SZ * AS_PARTITIONS];
 extern sl_ix_t g_full_sl_ix_table[AS_CLUSTER_SZ * AS_PARTITIONS];
 
-
 //------------------------------------------------
 // Forward declarations.
 //
 
 void partition_balance_init();
 
-void pb_task_init(pb_task* task, cf_node dest, struct as_namespace_s* ns, uint32_t pid, uint64_t cluster_key, pb_task_type type, uint32_t tx_flags);
+void pb_task_init(pb_task* task, cf_node dest, struct as_namespace_s* ns,
+		uint32_t pid, uint64_t cluster_key, pb_task_type type, uint32_t tx_flags);
 
 void balance_namespace(struct as_namespace_s* ns, cf_queue* mq);
 void prepare_for_appeals();
@@ -179,37 +178,60 @@ void balance_namespace_ap(struct as_namespace_s* ns, cf_queue* mq);
 void set_active_size(struct as_namespace_s* ns);
 uint32_t rack_count(const struct as_namespace_s* ns);
 void fill_translation(int translation[], const struct as_namespace_s* ns);
-void init_target_claims_ap(const struct as_namespace_s* ns, const int translation[], uint32_t* target_claims);
-void fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix, cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, const int translation[]);
-void quiesce_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
-void uniform_adjust_row(cf_node* node_seq, uint32_t n_nodes, sl_ix_t* ns_sl_ix, uint32_t n_replicas, uint32_t* claims, const uint32_t* target_claims, const uint32_t* rack_ids, uint32_t n_racks);
-void rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t n_ids, uint32_t n_racks, uint32_t start_n);
-void active_rack_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, uint32_t replication_factor, const uint32_t* rack_ids, uint32_t active_rack);
+void init_target_claims_ap(const struct as_namespace_s* ns,
+		const int translation[], uint32_t* target_claims);
+void fill_namespace_rows(const cf_node* full_node_seq,
+		const sl_ix_t* full_sl_ix, cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
+		const struct as_namespace_s* ns, const int translation[]);
+void quiesce_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
+		struct as_namespace_s* ns);
+void uniform_adjust_row(cf_node* node_seq, uint32_t n_nodes, sl_ix_t* ns_sl_ix,
+		uint32_t n_replicas, uint32_t* claims, const uint32_t* target_claims,
+		const uint32_t* rack_ids, uint32_t n_racks);
+void rack_aware_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
+		uint32_t replication_factor, const uint32_t* rack_ids, uint32_t n_ids,
+		uint32_t n_racks, uint32_t start_n);
+void active_rack_adjust_row(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
+		uint32_t replication_factor, const uint32_t* rack_ids,
+		uint32_t active_rack);
 uint32_t find_self(const cf_node* ns_node_seq, const struct as_namespace_s* ns);
-int shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, int working_master_n, const as_partition_version* working_master_version);
-uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns, uint32_t working_master_n, uint32_t n_dupl);
-void emig_lead_flags_ap(const as_partition* p, const sl_ix_t* ns_sl_ix, const struct as_namespace_s* ns, uint32_t lead_flags[]);
-void queue_namespace_migrations(as_partition* p, struct as_namespace_s* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], const uint32_t lead_flags[], cf_queue* mq);
+int shift_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix,
+		const struct as_namespace_s* ns, int working_master_n,
+		const as_partition_version* working_master_version);
+uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix,
+		struct as_namespace_s* ns, uint32_t working_master_n, uint32_t n_dupl);
+void emig_lead_flags_ap(const as_partition* p, const sl_ix_t* ns_sl_ix,
+		const struct as_namespace_s* ns, uint32_t lead_flags[]);
+void queue_namespace_migrations(as_partition* p, struct as_namespace_s* ns,
+		uint32_t self_n, cf_node working_master, uint32_t n_dupl,
+		cf_node dupls[], const uint32_t lead_flags[], cf_queue* mq);
 bool drop_superfluous_version(as_partition* p, struct as_namespace_s* ns);
 bool adjust_superfluous_version(as_partition* p, struct as_namespace_s* ns);
-void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
-void handle_version_change(as_partition* p, struct as_namespace_s* ns, as_partition_version* orig_version);
+void fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
+		const sl_ix_t* ns_sl_ix, struct as_namespace_s* ns);
+void handle_version_change(as_partition* p, struct as_namespace_s* ns,
+		as_partition_version* orig_version);
 
-void emigrate_done_advance_non_master_version(struct as_namespace_s* ns, as_partition* p, uint32_t tx_flags);
-void emigrate_done_advance_non_master_version_ap(struct as_namespace_s* ns, as_partition* p, uint32_t tx_flags);
-void immigrate_start_advance_non_master_version(struct as_namespace_s* ns, as_partition* p);
+void emigrate_done_advance_non_master_version(struct as_namespace_s* ns,
+		as_partition* p, uint32_t tx_flags);
+void emigrate_done_advance_non_master_version_ap(struct as_namespace_s* ns,
+		as_partition* p, uint32_t tx_flags);
+void immigrate_start_advance_non_master_version(struct as_namespace_s* ns,
+		as_partition* p);
 void immigrate_start_advance_non_master_version_ap(as_partition* p);
-void immigrate_done_advance_final_master_version(struct as_namespace_s* ns, as_partition* p);
-void immigrate_done_advance_final_master_version_ap(struct as_namespace_s* ns, as_partition* p);
+void immigrate_done_advance_final_master_version(struct as_namespace_s* ns,
+		as_partition* p);
+void immigrate_done_advance_final_master_version_ap(struct as_namespace_s* ns,
+		as_partition* p);
 bool immigrate_yield();
-
 
 //------------------------------------------------
 // Inlines and macros.
 //
 
 static inline bool
-is_same_as_full_master(const as_partition_version* mv, const as_partition_version* v)
+is_same_as_full_master(const as_partition_version* mv,
+		const as_partition_version* v)
 {
 	// Works for CP too, even with family check.
 	return v->subset == 0 && mv->ckey == v->ckey && mv->family == v->family &&

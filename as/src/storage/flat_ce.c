@@ -35,7 +35,6 @@
 #include "base/datamodel.h"
 #include "storage/storage.h"
 
-
 //==========================================================
 // Public API.
 //
@@ -63,7 +62,7 @@ as_flat_skip_bins(const as_flat_comp_meta* cm, as_storage_rd* rd)
 }
 
 bool
-as_flat_decompress_bins(const as_flat_comp_meta *cm, as_storage_rd *rd)
+as_flat_decompress_bins(const as_flat_comp_meta* cm, as_storage_rd* rd)
 {
 	return true;
 }
@@ -74,7 +73,6 @@ as_flat_decompress_buffer(const as_flat_comp_meta* cm, uint32_t max_orig_sz,
 {
 	return true;
 }
-
 
 //==========================================================
 // Private API - for enterprise separation only.
@@ -110,8 +108,7 @@ set_remote_record_xdr_flags(const as_flat_record* flat,
 }
 
 void
-set_remote_record_mrt_flags(const as_flat_opt_meta* opt_meta,
-		as_remote_record* rr)
+set_remote_record_mrt_flags(const as_flat_opt_meta* opt_meta, as_remote_record* rr)
 {
 }
 
@@ -172,8 +169,7 @@ unpack_bin_xdr_write(uint8_t flags, as_bin* b)
 }
 
 const uint8_t*
-unpack_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* end,
-		as_bin* b)
+unpack_bin_src_id(uint8_t flags, const uint8_t* at, const uint8_t* end, as_bin* b)
 {
 	return at;
 }

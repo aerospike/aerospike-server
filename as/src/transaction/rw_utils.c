@@ -32,8 +32,6 @@
 #include <string.h>
 
 #include "aerospike/as_atomic.h"
-#include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_digest.h"
 
 #include "log.h"
 #include "msg.h"
@@ -52,7 +50,6 @@
 #include "transaction/rw_request.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
-
 
 //==========================================================
 // Public API.
@@ -89,7 +86,7 @@ send_rw_messages(rw_request* rw)
 		msg_incr_ref(rw->dest_msg);
 
 		if (as_fabric_send(rw->dest_nodes[i], rw->dest_msg,
-				AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
+					AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(rw->dest_msg);
 			rw->xmit_ms = 0; // force a retransmit on next cycle
 		}
@@ -103,7 +100,7 @@ send_rw_messages_forget(rw_request* rw)
 		msg_incr_ref(rw->dest_msg);
 
 		if (as_fabric_send(rw->dest_nodes[i], rw->dest_msg,
-				AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
+					AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(rw->dest_msg);
 		}
 	}
@@ -136,7 +133,7 @@ set_name_check(const as_transaction* tr, const as_record* r)
 			set_name[msg_set_name_len] != 0) {
 		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
 				set_name == NULL ? "(null)" : set_name, msg_set_name_len,
-						f->data, msg_set_name_len, &tr->keyd);
+				f->data, msg_set_name_len, &tr->keyd);
 		return false;
 	}
 
@@ -167,8 +164,9 @@ set_name_check_on_update(const as_transaction* tr, as_record* r)
 	as_namespace* ns = tr->rsv.ns;
 	const char* set_name = as_index_get_set_name(r, ns);
 
-	as_msg_field* f = as_transaction_has_set(tr) ?
-			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
+	as_msg_field* f = as_transaction_has_set(tr)
+			? as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET)
+			: NULL;
 
 	uint32_t msg_set_name_len = f != NULL ? as_msg_field_get_value_sz(f) : 0;
 
@@ -192,7 +190,7 @@ set_name_check_on_update(const as_transaction* tr, as_record* r)
 			set_name[msg_set_name_len] != 0) {
 		cf_warning(AS_RW, "{%s} set name mismatch %s %.*s (%u) %pD", ns->name,
 				set_name ? set_name : "(null)", msg_set_name_len,
-						(const char*)f->data, msg_set_name_len, &tr->keyd);
+				(const char*)f->data, msg_set_name_len, &tr->keyd);
 		return AS_ERR_PARAMETER;
 	}
 
@@ -205,8 +203,8 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 	switch (tr->origin) {
 	case FROM_BATCH:
 		if (as_transaction_has_predexp(tr)) {
-			as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-					AS_MSG_FIELD_TYPE_PREDEXP);
+			as_msg_field* f =
+					as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 			if ((*exp = as_exp_filter_build(f, false)) == NULL) {
 				return AS_ERR_PARAMETER;
 			}
@@ -226,8 +224,8 @@ handle_meta_filter(const as_transaction* tr, const as_record* r, as_exp** exp)
 			*exp = NULL;
 			return AS_OK;
 		}
-		as_msg_field* f = as_msg_field_get(&tr->msgp->msg,
-				AS_MSG_FIELD_TYPE_PREDEXP);
+		as_msg_field* f =
+				as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
 		if ((*exp = as_exp_filter_build(f, false)) == NULL) {
 			return AS_ERR_PARAMETER;
 		}
@@ -447,7 +445,7 @@ update_sindex(as_namespace* ns, as_index_ref* r_ref, as_bin* old_bins,
 
 		if (found) {
 			if (as_bin_get_particle_type(b_old) !=
-					as_bin_get_particle_type(b_new) ||
+							as_bin_get_particle_type(b_new) ||
 					b_old->particle != b_new->particle) {
 				n_populated += as_sindex_sbins_from_bin(ns, set_id, b_old,
 						&sbins[n_populated], AS_SINDEX_OP_DELETE);

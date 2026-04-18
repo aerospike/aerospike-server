@@ -20,7 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -36,7 +35,6 @@
 #include "base/particle_integer.h"
 #include "base/proto.h"
 
-
 //==========================================================
 // FLOAT particle interface - function declarations.
 //
@@ -45,28 +43,32 @@
 // functions. Here are the differences...
 
 // Handle "wire" format.
-int float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
-int float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
+int float_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
+int float_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp);
 
 // Handle as_val translation.
-void float_from_asval(const as_val *val, as_particle **pp);
-as_val *float_to_asval(const as_particle *p);
-uint32_t float_asval_to_wire(const as_val *val, uint8_t *wire);
+void float_from_asval(const as_val* val, as_particle** pp);
+as_val* float_to_asval(const as_particle* p);
+uint32_t float_asval_to_wire(const as_val* val, uint8_t* wire);
 
 // Handle msgpack translation.
-void float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
+void float_from_msgpack(const uint8_t* packed, uint32_t packed_size,
+		as_particle** pp);
 
 // Handle on-device "flat" format.
-const uint8_t *float_skip_flat(const uint8_t *flat, const uint8_t *end);
-const uint8_t *float_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp);
-uint32_t float_flat_size(const as_particle *p);
-uint32_t float_to_flat(const as_particle *p, uint8_t *flat);
-
+const uint8_t* float_skip_flat(const uint8_t* flat, const uint8_t* end);
+const uint8_t* float_from_flat(const uint8_t* flat, const uint8_t* end,
+		as_particle** pp);
+uint32_t float_flat_size(const as_particle* p);
+uint32_t float_to_flat(const as_particle* p, uint8_t* flat);
 
 //==========================================================
 // FLOAT particle interface - vtable.
 //
 
+// clang-format off
 const as_particle_vtable float_vtable = {
 		integer_destruct,
 		integer_size,
@@ -94,17 +96,16 @@ const as_particle_vtable float_vtable = {
 		float_flat_size,
 		float_to_flat
 };
-
+// clang-format on
 
 //==========================================================
 // Typedefs & constants.
 //
 
 typedef struct float_flat_s {
-	uint8_t		type;
-	uint64_t	i;
-} __attribute__ ((__packed__)) float_flat;
-
+	uint8_t type;
+	uint64_t i;
+} __attribute__((__packed__)) float_flat;
 
 //==========================================================
 // FLOAT particle interface - function definitions.
@@ -118,7 +119,8 @@ typedef struct float_flat_s {
 //
 
 int
-float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
+float_incr_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	// For now we won't allow adding integers (or anything else) to floats.
 	if (wire_type != AS_PARTICLE_TYPE_FLOAT) {
@@ -130,20 +132,21 @@ float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint
 
 	switch (value_size) {
 	case 8:
-		i = cf_swap_from_be64(*(uint64_t *)wire_value);
+		i = cf_swap_from_be64(*(uint64_t*)wire_value);
 		break;
 	default:
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
 		return -AS_ERR_PARAMETER;
 	}
 
-	(*(double *)pp) += *(double *)&i;
+	(*(double*)pp) += *(double*)&i;
 
 	return 0;
 }
 
 int
-float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp)
+float_from_wire(as_particle_type wire_type, const uint8_t* wire_value,
+		uint32_t value_size, as_particle** pp)
 {
 	if (value_size != 8) {
 		cf_warning(AS_PARTICLE, "unexpected value size %u", value_size);
@@ -158,23 +161,23 @@ float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t 
 //
 
 void
-float_from_asval(const as_val *val, as_particle **pp)
+float_from_asval(const as_val* val, as_particle** pp)
 {
-	*(double *)pp = as_double_get(as_double_fromval(val));
+	*(double*)pp = as_double_get(as_double_fromval(val));
 }
 
-as_val *
-float_to_asval(const as_particle *p)
+as_val*
+float_to_asval(const as_particle* p)
 {
-	return (as_val *)as_double_new(*(double *)&p);
+	return (as_val*)as_double_new(*(double*)&p);
 }
 
 uint32_t
-float_asval_to_wire(const as_val *val, uint8_t *wire)
+float_asval_to_wire(const as_val* val, uint8_t* wire)
 {
 	double x = as_double_get(as_double_fromval(val));
 
-	*(uint64_t *)wire = cf_swap_to_be64(*(uint64_t *)&x);
+	*(uint64_t*)wire = cf_swap_to_be64(*(uint64_t*)&x);
 
 	return (uint32_t)sizeof(uint64_t);
 }
@@ -184,36 +187,33 @@ float_asval_to_wire(const as_val *val, uint8_t *wire)
 //
 
 void
-float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
+float_from_msgpack(const uint8_t* packed, uint32_t packed_size, as_particle** pp)
 {
 	double x;
-	msgpack_in mp = {
-			.buf = packed,
-			.buf_sz = packed_size
-	};
+	msgpack_in mp = { .buf = packed, .buf_sz = packed_size };
 
 	if (! msgpack_get_double(&mp, &x)) {
 		cf_crash(AS_PARTICLE, "invalid float");
 	}
 
-	*(double *)pp = x;
+	*(double*)pp = x;
 }
 
 //------------------------------------------------
 // Handle on-device "flat" format.
 //
 
-const uint8_t *
-float_skip_flat(const uint8_t *flat, const uint8_t *end)
+const uint8_t*
+float_skip_flat(const uint8_t* flat, const uint8_t* end)
 {
 	// Type is correct, since we got here - no need to check against end.
 	return flat + sizeof(float_flat);
 }
 
-const uint8_t *
-float_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
+const uint8_t*
+float_from_flat(const uint8_t* flat, const uint8_t* end, as_particle** pp)
 {
-	const float_flat *p_float_flat = (const float_flat *)flat;
+	const float_flat* p_float_flat = (const float_flat*)flat;
 
 	flat += sizeof(float_flat);
 
@@ -224,21 +224,21 @@ float_from_flat(const uint8_t *flat, const uint8_t *end, as_particle **pp)
 
 	// Float values live in an as_bin instead of a pointer. Also, flat floats
 	// are host order, so no byte swap.
-	*pp = (as_particle *)p_float_flat->i;
+	*pp = (as_particle*)p_float_flat->i;
 
 	return flat;
 }
 
 uint32_t
-float_flat_size(const as_particle *p)
+float_flat_size(const as_particle* p)
 {
 	return sizeof(float_flat);
 }
 
 uint32_t
-float_to_flat(const as_particle *p, uint8_t *flat)
+float_to_flat(const as_particle* p, uint8_t* flat)
 {
-	float_flat *p_float_flat = (float_flat *)flat;
+	float_flat* p_float_flat = (float_flat*)flat;
 
 	// Already wrote the type.
 	p_float_flat->i = (uint64_t)p;
@@ -246,13 +246,12 @@ float_to_flat(const as_particle *p, uint8_t *flat)
 	return float_flat_size(p);
 }
 
-
 //==========================================================
 // as_bin particle functions specific to FLOAT.
 //
 
 double
-as_bin_particle_float_value(const as_bin *b)
+as_bin_particle_float_value(const as_bin* b)
 {
 	// Caller must ensure this is called only for FLOAT particles.
 	return *(double*)&b->particle;
