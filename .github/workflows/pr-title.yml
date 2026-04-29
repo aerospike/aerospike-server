@@ -1,0 +1,32 @@
+name: PR title check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require JIRA ticket ID in title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s' "$TITLE" | grep -qE '^[A-Z]+-[0-9]+ - '; then
+            echo "OK: '$TITLE' begins with an uppercase JIRA ticket ID"
+          else
+            echo "::error::PR title must begin with an uppercase JIRA ticket ID (e.g. SERVER-1234). Got: '$TITLE'"
+            exit 1
+          fi
+      - name: Comment on PR
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body "PR title must begin with an uppercase JIRA ticket ID (e.g. SERVER-1234)."
