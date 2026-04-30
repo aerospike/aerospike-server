@@ -3354,7 +3354,7 @@ cmd_sindex_stat(const char* name, const char* params, cf_dyn_buf* db)
 		return;
 	}
 
-	cf_info(AS_INFO, "sindex-stat - received request on index %s - namespace %s",
+	cf_detail(AS_INFO, "sindex-stat - received request on index %s - namespace %s",
 			index_name_str, ns_str);
 
 	if (! as_sindex_stats_str(ns, index_name_str, db)) {
