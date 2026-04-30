@@ -4819,7 +4819,7 @@ as_info_parse_ns_iname(const char* params, as_namespace** ns, char** iname,
 		return -1;
 	}
 
-	cf_info(AS_SINDEX, "%s : received request on index %s - namespace %s",
+	cf_detail(AS_SINDEX, "%s : received request on index %s - namespace %s",
 			sindex_cmd, index_name_str, ns_str);
 
 	*iname = cf_strdup(index_name_str);
