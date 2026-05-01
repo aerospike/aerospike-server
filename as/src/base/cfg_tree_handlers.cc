@@ -47,6 +47,7 @@ extern "C" {
 #include "base/datamodel.h"
 #include "base/security_config.h"
 #include "base/thr_info.h"
+#include "storage/storage.h"
 }
 
 //==========================================================
@@ -1453,6 +1454,25 @@ apply_namespace(std::string name, const nlohmann::json& namespace_json)
 	for (const auto& desc : NAMESPACE_FIELD_DESCRIPTORS) {
 		apply_field(namespace_struct, namespace_json, desc);
 	}
+
+	// Match the .conf parser's NAMESPACE_STORAGE_MEMORY context-end checks
+	// (cfg.c:3784-3792). 'flush-size' is only meaningful for memory storage
+	// when shadow devices/files are configured: configuring it without
+	// shadows is a misconfiguration, and configuring shadows without an
+	// explicit flush-size needs the same default the .conf parser applies.
+	// (For 'storage-engine: device', the default is already applied when the
+	// 'type' field is processed.)
+	if (namespace_struct->storage_type == AS_STORAGE_ENGINE_MEMORY) {
+		if (namespace_struct->n_storage_shadows == 0 &&
+				namespace_struct->storage_flush_size != 0) {
+			throw config_error("/namespaces/storage-engine/flush-size",
+					"can't configure 'flush-size' if not using storage backing");
+		}
+		if (namespace_struct->n_storage_shadows != 0 &&
+				namespace_struct->storage_flush_size == 0) {
+			namespace_struct->storage_flush_size = DEFAULT_FLUSH_SIZE;
+		}
+	}
 }
 
 static void
@@ -1773,7 +1793,10 @@ handle_namespace_storage_engine_type(void* ns, const FieldDescriptor& desc,
 	}
 	else if (storage_engine_type == "device") {
 		namespace_struct->storage_type = AS_STORAGE_ENGINE_SSD;
-		namespace_struct->storage_flush_size = 0;
+		// Match the .conf parser default - it gets overridden later if the
+		// user supplies an explicit 'flush-size' (descriptors are iterated in
+		// order, and 'flush-size' is processed after 'type').
+		namespace_struct->storage_flush_size = DEFAULT_FLUSH_SIZE;
 	}
 	else {
 		throw config_error("/namespaces/storage-engine/type",
