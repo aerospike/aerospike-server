@@ -35,7 +35,7 @@ jobs:
       RELEASE: ${{ steps.set_env.outputs.release }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -108,7 +108,7 @@ jobs:
           sleep 1800
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v4
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37  # v4
         with:
           role-to-assume: ${{ env.AWS_ROLE }}
           role-session-name: aerospike-download-artifacts
@@ -148,7 +148,7 @@ jobs:
           echo "Extracted PACKAGE_VERSION: $pkg_version"
 
       - name: Upload packaged Artifacts
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
           path: build-artifacts
@@ -157,7 +157,7 @@ jobs:
 
   sign-artifacts:
     needs: [setup, download-artifacts]
-    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.2.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_sign-artifacts.yaml@v3.4.1
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}
@@ -169,7 +169,7 @@ jobs:
 
   upload-artifacts-to-jfrog:
     needs: [setup, download-artifacts, sign-artifacts]
-    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.2.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_deploy-artifacts.yaml@v3.4.1
     with:
       jf-project: database
       jf-build-name: "aerospike-server"
@@ -189,7 +189,7 @@ jobs:
       id-token: write
       attestations: write
     needs: [setup, download-artifacts, sign-artifacts, upload-artifacts-to-jfrog]
-    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.2.0
+    uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.4.1
     with:
       jf-project: "database"
       jf-build-names: "aerospike-server:${{ needs.setup.outputs.VERSION }}"
@@ -208,7 +208,7 @@ jobs:
       time_display: ${{ steps.timestamp.outputs.time_display }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d  # v2.16.1
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2.19.0
         with:
           egress-policy: audit
 
@@ -226,7 +226,7 @@ jobs:
 
       - name: Install JFrog CLI
         id: jf
-        uses: step-security/setup-jfrog-cli@893a92f96c7727242adf0e603c77b1f2a22390e1 # v4.9.1
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
         env:
           JF_URL: https://artifact.aerospike.io
           JF_PROJECT: database
@@ -236,7 +236,7 @@ jobs:
           oidc-audience: database-gh-citrusleaf
 
       - name: Docker login to Artifactory
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v3
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v3
         with:
           registry: artifact.aerospike.io
           username: ${{ steps.jf.outputs.oidc-user }}
@@ -285,12 +285,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d  # v2.16.1
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40  # v2.19.0
         with:
           egress-policy: audit
 
       - name: Setup JFrog CLI
-        uses: step-security/setup-jfrog-cli@893a92f96c7727242adf0e603c77b1f2a22390e1 # v4.9.1
+        uses: step-security/setup-jfrog-cli@3054b554c0fb4915b3d58847fb7730c593dbb934 # v5.0.0
         env:
           JF_URL: ${{ env.JFROG_URL }}
           JF_PROJECT: ${{ env.JFROG_PROJECT }}
@@ -337,7 +337,7 @@ jobs:
         artifact.aerospike.io/database-docker-dev-local/aerospike-server:${{ needs.download-artifacts.outputs.PACKAGE_VERSION }}-${{ needs.docker-deploy.outputs.time }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -367,7 +367,7 @@ jobs:
 
       - name: Send Slack message to QE
         continue-on-error: true
-        uses: step-security/slack-github-action@77483a1a06c0ce2933c1f2f144fb5a85db7f3e80 # v2.1.1
+        uses: step-security/slack-github-action@161b08a5bf8cbe9bcdb0ed1386ade4a21fb4c380 # v3.0.1
         with:
           method: chat.postMessage
           token: ${{ secrets.QE_SLACK_BOT_TOKEN }}
@@ -383,7 +383,7 @@ jobs:
 
       - name: Send Slack message to CORE
         continue-on-error: true
-        uses: step-security/slack-github-action@77483a1a06c0ce2933c1f2f144fb5a85db7f3e80 # v2.1.1
+        uses: step-security/slack-github-action@161b08a5bf8cbe9bcdb0ed1386ade4a21fb4c380 # v3.0.1
         with:
           method: chat.postMessage
           token: ${{ secrets.DB_SLACK_BOT_TOKEN }}
