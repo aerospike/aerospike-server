@@ -181,7 +181,7 @@ jobs:
       dry-run: false
       jf-build-id: ${{ needs.setup.outputs.VERSION }}
       jf-metadata-build-id: ${{ needs.setup.outputs.VERSION }}-metadata
-      gh-workflows-ref: "v3.1.1"
+      gh-workflows-ref: "v3.4.1"
 
   create-release-bundle:
     permissions:
@@ -197,7 +197,7 @@ jobs:
       oidc-provider-name: gh-citrusleaf
       oidc-audience: citrusleaf
       version: ${{ needs.setup.outputs.BUNDLE_VERSION }}
-      gh-workflows-ref: "v3.1.1"
+      gh-workflows-ref: "v3.4.1"
       dry-run: false
 
   docker-deploy:
