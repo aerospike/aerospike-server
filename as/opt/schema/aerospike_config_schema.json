@@ -3208,7 +3208,7 @@
                     },
                     "max-write-cache": {
                       "oneOf": [
-                        { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+                        { "type": "integer", "minimum": 67108864, "maximum": 9223372036854775807 },
                         {
                           "type": "object",
                           "additionalProperties": false,
@@ -3218,16 +3218,16 @@
                             "unit": { "type": "string" }
                           },
                           "oneOf": [
-                            { "properties": { "unit": { "enum": ["k", "K"] }, "value": { "maximum": 9223372036854775 } } },
-                            { "properties": { "unit": { "enum": ["m", "M"] }, "value": { "maximum": 9223372036854 } } },
-                            { "properties": { "unit": { "enum": ["g", "G"] }, "value": { "maximum": 9223372036 } } },
-                            { "properties": { "unit": { "enum": ["t", "T"] }, "value": { "maximum": 9223372 } } },
-                            { "properties": { "unit": { "enum": ["p", "P"] }, "value": { "maximum": 9223 } } },
-                            { "properties": { "unit": { "enum": ["ki", "Ki"] }, "value": { "maximum": 9007199254740991 } } },
-                            { "properties": { "unit": { "enum": ["mi", "Mi"] }, "value": { "maximum": 8796093022207 } } },
-                            { "properties": { "unit": { "enum": ["gi", "Gi"] }, "value": { "maximum": 8589934591 } } },
-                            { "properties": { "unit": { "enum": ["ti", "Ti"] }, "value": { "maximum": 8388607 } } },
-                            { "properties": { "unit": { "enum": ["pi", "Pi"] }, "value": { "maximum": 8191 } } }
+                            { "properties": { "unit": { "enum": ["k", "K"] }, "value": { "minimum": 67109, "maximum": 9223372036854775 } } },
+                            { "properties": { "unit": { "enum": ["m", "M"] }, "value": { "minimum": 68, "maximum": 9223372036854 } } },
+                            { "properties": { "unit": { "enum": ["g", "G"] }, "value": { "minimum": 1, "maximum": 9223372036 } } },
+                            { "properties": { "unit": { "enum": ["t", "T"] }, "value": { "minimum": 1, "maximum": 9223372 } } },
+                            { "properties": { "unit": { "enum": ["p", "P"] }, "value": { "minimum": 1, "maximum": 9223 } } },
+                            { "properties": { "unit": { "enum": ["ki", "Ki"] }, "value": { "minimum": 65536, "maximum": 9007199254740991 } } },
+                            { "properties": { "unit": { "enum": ["mi", "Mi"] }, "value": { "minimum": 64, "maximum": 8796093022207 } } },
+                            { "properties": { "unit": { "enum": ["gi", "Gi"] }, "value": { "minimum": 1, "maximum": 8589934591 } } },
+                            { "properties": { "unit": { "enum": ["ti", "Ti"] }, "value": { "minimum": 1, "maximum": 8388607 } } },
+                            { "properties": { "unit": { "enum": ["pi", "Pi"] }, "value": { "minimum": 1, "maximum": 8191 } } }
                           ]
                         }
                       ],
@@ -3518,7 +3518,7 @@
                     },
                     "max-write-cache": {
                       "oneOf": [
-                        { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+                        { "type": "integer", "minimum": 67108864, "maximum": 9223372036854775807 },
                         {
                           "type": "object",
                           "additionalProperties": false,
@@ -3528,16 +3528,16 @@
                             "unit": { "type": "string" }
                           },
                           "oneOf": [
-                            { "properties": { "unit": { "enum": ["k", "K"] }, "value": { "maximum": 9223372036854775 } } },
-                            { "properties": { "unit": { "enum": ["m", "M"] }, "value": { "maximum": 9223372036854 } } },
-                            { "properties": { "unit": { "enum": ["g", "G"] }, "value": { "maximum": 9223372036 } } },
-                            { "properties": { "unit": { "enum": ["t", "T"] }, "value": { "maximum": 9223372 } } },
-                            { "properties": { "unit": { "enum": ["p", "P"] }, "value": { "maximum": 9223 } } },
-                            { "properties": { "unit": { "enum": ["ki", "Ki"] }, "value": { "maximum": 9007199254740991 } } },
-                            { "properties": { "unit": { "enum": ["mi", "Mi"] }, "value": { "maximum": 8796093022207 } } },
-                            { "properties": { "unit": { "enum": ["gi", "Gi"] }, "value": { "maximum": 8589934591 } } },
-                            { "properties": { "unit": { "enum": ["ti", "Ti"] }, "value": { "maximum": 8388607 } } },
-                            { "properties": { "unit": { "enum": ["pi", "Pi"] }, "value": { "maximum": 8191 } } }
+                            { "properties": { "unit": { "enum": ["k", "K"] }, "value": { "minimum": 67109, "maximum": 9223372036854775 } } },
+                            { "properties": { "unit": { "enum": ["m", "M"] }, "value": { "minimum": 68, "maximum": 9223372036854 } } },
+                            { "properties": { "unit": { "enum": ["g", "G"] }, "value": { "minimum": 1, "maximum": 9223372036 } } },
+                            { "properties": { "unit": { "enum": ["t", "T"] }, "value": { "minimum": 1, "maximum": 9223372 } } },
+                            { "properties": { "unit": { "enum": ["p", "P"] }, "value": { "minimum": 1, "maximum": 9223 } } },
+                            { "properties": { "unit": { "enum": ["ki", "Ki"] }, "value": { "minimum": 65536, "maximum": 9007199254740991 } } },
+                            { "properties": { "unit": { "enum": ["mi", "Mi"] }, "value": { "minimum": 64, "maximum": 8796093022207 } } },
+                            { "properties": { "unit": { "enum": ["gi", "Gi"] }, "value": { "minimum": 1, "maximum": 8589934591 } } },
+                            { "properties": { "unit": { "enum": ["ti", "Ti"] }, "value": { "minimum": 1, "maximum": 8388607 } } },
+                            { "properties": { "unit": { "enum": ["pi", "Pi"] }, "value": { "minimum": 1, "maximum": 8191 } } }
                           ]
                         }
                       ],
@@ -3821,7 +3821,7 @@
                     },
                     "max-write-cache": {
                       "oneOf": [
-                        { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
+                        { "type": "integer", "minimum": 67108864, "maximum": 9223372036854775807 },
                         {
                           "type": "object",
                           "additionalProperties": false,
@@ -3831,16 +3831,16 @@
                             "unit": { "type": "string" }
                           },
                           "oneOf": [
-                            { "properties": { "unit": { "enum": ["k", "K"] }, "value": { "maximum": 9223372036854775 } } },
-                            { "properties": { "unit": { "enum": ["m", "M"] }, "value": { "maximum": 9223372036854 } } },
-                            { "properties": { "unit": { "enum": ["g", "G"] }, "value": { "maximum": 9223372036 } } },
-                            { "properties": { "unit": { "enum": ["t", "T"] }, "value": { "maximum": 9223372 } } },
-                            { "properties": { "unit": { "enum": ["p", "P"] }, "value": { "maximum": 9223 } } },
-                            { "properties": { "unit": { "enum": ["ki", "Ki"] }, "value": { "maximum": 9007199254740991 } } },
-                            { "properties": { "unit": { "enum": ["mi", "Mi"] }, "value": { "maximum": 8796093022207 } } },
-                            { "properties": { "unit": { "enum": ["gi", "Gi"] }, "value": { "maximum": 8589934591 } } },
-                            { "properties": { "unit": { "enum": ["ti", "Ti"] }, "value": { "maximum": 8388607 } } },
-                            { "properties": { "unit": { "enum": ["pi", "Pi"] }, "value": { "maximum": 8191 } } }
+                            { "properties": { "unit": { "enum": ["k", "K"] }, "value": { "minimum": 67109, "maximum": 9223372036854775 } } },
+                            { "properties": { "unit": { "enum": ["m", "M"] }, "value": { "minimum": 68, "maximum": 9223372036854 } } },
+                            { "properties": { "unit": { "enum": ["g", "G"] }, "value": { "minimum": 1, "maximum": 9223372036 } } },
+                            { "properties": { "unit": { "enum": ["t", "T"] }, "value": { "minimum": 1, "maximum": 9223372 } } },
+                            { "properties": { "unit": { "enum": ["p", "P"] }, "value": { "minimum": 1, "maximum": 9223 } } },
+                            { "properties": { "unit": { "enum": ["ki", "Ki"] }, "value": { "minimum": 65536, "maximum": 9007199254740991 } } },
+                            { "properties": { "unit": { "enum": ["mi", "Mi"] }, "value": { "minimum": 64, "maximum": 8796093022207 } } },
+                            { "properties": { "unit": { "enum": ["gi", "Gi"] }, "value": { "minimum": 1, "maximum": 8589934591 } } },
+                            { "properties": { "unit": { "enum": ["ti", "Ti"] }, "value": { "minimum": 1, "maximum": 8388607 } } },
+                            { "properties": { "unit": { "enum": ["pi", "Pi"] }, "value": { "minimum": 1, "maximum": 8191 } } }
                           ]
                         }
                       ],

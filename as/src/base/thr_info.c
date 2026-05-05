@@ -3142,7 +3142,7 @@ cmd_sindex_stat(as_info_cmd_args* args)
 		return;
 	}
 
-	cf_info(AS_INFO, "sindex-stat - received request on index %s - namespace %s",
+	cf_detail(AS_INFO, "sindex-stat - received request on index %s - namespace %s",
 			index_name_str, ns_str);
 
 	if (! as_sindex_manager_stats_str(ns, index_name_str, db)) {

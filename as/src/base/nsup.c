@@ -278,6 +278,14 @@ as_nsup_eviction_reset_cmd(const char* ns_name, const char* ttl_str,
 bool
 as_cold_start_evict_if_needed(as_namespace* ns)
 {
+	// Sample lock-free - only every EVAL_WRITE_STATE_FREQUENCY'th record
+	// reaches cold_start_evict_lock. Avoids per-record contention when many
+	// device threads sweep in parallel at cold start.
+	if (as_faa_uint32(&ns->cold_start_record_add_count, 1) %
+			EVAL_WRITE_STATE_FREQUENCY != 0) {
+		return true;
+	}
+
 	cf_mutex_lock(&ns->cold_start_evict_lock);
 
 	bool result = cold_start_evict(ns);
@@ -1191,10 +1199,8 @@ nsup_histograms_reduce_cb(as_index_ref* r_ref, void* udata)
 static bool
 cold_start_evict(as_namespace* ns)
 {
-	if (ns->cold_start_record_add_count++ % EVAL_WRITE_STATE_FREQUENCY != 0) {
-		return true;
-	}
-
+	// Note - sampling happens lock-free in as_cold_start_evict_if_needed(),
+	// so callers only reach this on the sampled record.
 	uint32_t now = as_record_void_time_get();
 
 	if (now > ns->cold_start_now) {

@@ -977,25 +977,38 @@ smd_msg_parse_items(msg* m, smd_op* op)
 		return false;
 	}
 
-	cf_vector_define(key_vec, sizeof(msg_buf_ele), count, 0);
-	cf_vector_define(value_vec, sizeof(msg_buf_ele), count, 0);
-	uint32_t gen_list[count];
+	cf_vector key_vec;
+	cf_vector value_vec;
 
-	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_KEY_LIST, &key_vec)) {
+	cf_vector_init(&key_vec, sizeof(msg_buf_ele), count, 0);
+	cf_vector_init(&value_vec, sizeof(msg_buf_ele), count, 0);
+
+	uint32_t* gen_list = cf_malloc(count * sizeof(uint32_t));
+
+	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_KEY_LIST,
+			&key_vec)) {
 		cf_warning(AS_SMD, "msg missing key list");
+		cf_vector_destroy(&key_vec);
+		cf_vector_destroy(&value_vec);
+		cf_free(gen_list);
 		return false;
 	}
 
 	if (! msg_msgpack_list_get_buf_array_presized(m, SMD_MSG_VALUE_LIST,
-				&value_vec)) {
+			&value_vec)) {
 		cf_warning(AS_SMD, "msg missing value list");
+		cf_vector_destroy(&key_vec);
+		cf_vector_destroy(&value_vec);
+		cf_free(gen_list);
 		return false;
 	}
 
 	if (! msg_msgpack_list_get_uint32_array(m, SMD_MSG_GEN_LIST, gen_list,
-				&check) &&
-			check != count) {
+			&check) && check != count) {
 		cf_warning(AS_SMD, "msg missing gen list");
+		cf_vector_destroy(&key_vec);
+		cf_vector_destroy(&value_vec);
+		cf_free(gen_list);
 		return false;
 	}
 
@@ -1013,6 +1026,10 @@ smd_msg_parse_items(msg* m, smd_op* op)
 						smd_item_value_ndup(val_p->ptr, val_p->sz), ts,
 						gen_list[i]));
 	}
+
+	cf_vector_destroy(&key_vec);
+	cf_vector_destroy(&value_vec);
+	cf_free(gen_list);
 
 	return true;
 }
@@ -2124,9 +2141,13 @@ module_fill_msg(smd_module* module, msg* m)
 
 	uint32_t count = cf_vector_size(&module->db);
 
-	cf_vector_define(key_vec, sizeof(msg_buf_ele), count, 0);
-	cf_vector_define(val_vec, sizeof(msg_buf_ele), count, 0);
-	uint32_t gen_list[count];
+	cf_vector key_vec;
+	cf_vector val_vec;
+
+	cf_vector_init(&key_vec, sizeof(msg_buf_ele), count, 0);
+	cf_vector_init(&val_vec, sizeof(msg_buf_ele), count, 0);
+
+	uint32_t* gen_list = cf_malloc(count * sizeof(uint32_t));
 
 	msg_set_uint64_array_size(m, SMD_MSG_TS_ARRAY, count);
 
@@ -2152,6 +2173,10 @@ module_fill_msg(smd_module* module, msg* m)
 	msg_msgpack_list_set_buf(m, SMD_MSG_KEY_LIST, &key_vec);
 	msg_msgpack_list_set_buf(m, SMD_MSG_VALUE_LIST, &val_vec);
 	msg_msgpack_list_set_uint32(m, SMD_MSG_GEN_LIST, gen_list, count);
+
+	cf_vector_destroy(&key_vec);
+	cf_vector_destroy(&val_vec);
+	cf_free(gen_list);
 }
 
 static void
