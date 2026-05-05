@@ -1454,6 +1454,7 @@ apply_namespace(std::string name, const nlohmann::json& namespace_json)
 	for (const auto& desc : NAMESPACE_FIELD_DESCRIPTORS) {
 		apply_field(namespace_struct, namespace_json, desc);
 	}
+}
 
 	// Match the .conf parser's NAMESPACE_STORAGE_MEMORY context-end checks
 	// (cfg.c:3784-3792). 'flush-size' is only meaningful for memory storage
@@ -1501,6 +1502,7 @@ handle_namespace_write_commit_level_override(void* ns,
 		throw config_error("/namespaces/write-commit-level-override",
 				"must be a string");
 	}
+}
 
 	std::string write_commit_level_override = value.get<std::string>();
 
@@ -1533,6 +1535,7 @@ handle_namespace_xdr_bin_tombstone_ttl(void* ns, const FieldDescriptor& desc,
 		throw config_error("/namespaces/xdr-bin-tombstone-ttl",
 				"must be a positive integer");
 	}
+}
 
 	if (ttl > MAX_ALLOWED_TTL) {
 		throw config_error("/namespaces/xdr-bin-tombstone-ttl",
