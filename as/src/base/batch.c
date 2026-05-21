@@ -1181,8 +1181,9 @@ as_batch_queue_task(as_transaction* btr)
 					}
 
 					as_msg_swap_op(op);
-					op = as_msg_op_get_next(op);
-					data = (uint8_t*)op;
+					if (! (data = as_msg_op_skip(op))) {
+						goto TranEnd;
+					}
 				}
 			}
 

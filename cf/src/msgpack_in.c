@@ -1073,9 +1073,9 @@ msgpack_compactify(uint8_t* buf, uint32_t buf_sz, bool* was_modified)
 		buf = (uint8_t*)msgpack_parse(buf, end, &count, NULL, &has_nonstorage,
 				&not_compact);
 
-		if (buf > end || buf == NULL) {
+		if (buf == NULL || buf > end) {
 			cf_warning(AS_PARTICLE,
-					"msgpack_sz_internal: invalid at i %u count %u", i, count);
+					"msgpack_compactify: invalid at i %u count %u", i, count);
 			return 0;
 		}
 
@@ -1131,6 +1131,31 @@ bytes_internal_to_type(uint8_t type, uint32_t len)
 	return MSGPACK_TYPE_BYTES;
 }
 
+// msgpack_sz_internal() uses count as a pending element queue. Container
+// headers append their nested elements to that queue, so overflow would make a
+// truncated object look complete.
+static inline bool
+msgpack_sz_count_add(uint32_t* count, uint32_t delta)
+{
+	if (delta > UINT32_MAX - *count) {
+		return false;
+	}
+
+	*count += delta;
+
+	return true;
+}
+
+static inline bool
+msgpack_sz_count_add_map(uint32_t* count, uint32_t map_count)
+{
+	if (map_count > UINT32_MAX / 2) {
+		return false;
+	}
+
+	return msgpack_sz_count_add(count, 2 * map_count);
+}
+
 static inline const uint8_t*
 msgpack_sz_table(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 		bool* has_nonstorage)
@@ -1180,20 +1205,32 @@ msgpack_sz_table(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 
 	case 0xdc: // list with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		*count += cf_swap_from_be16(*(uint16_t*)buf);
+		if (! msgpack_sz_count_add(count,
+				cf_swap_from_be16(*(uint16_t*)buf))) {
+			return NULL;
+		}
 		return buf + 2;
 	case 0xdd: { // list with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		*count += cf_swap_from_be32(*(uint32_t*)buf);
+		if (! msgpack_sz_count_add(count,
+				cf_swap_from_be32(*(uint32_t*)buf))) {
+			return NULL;
+		}
 		return buf + 4;
 	}
 	case 0xde: // map with 16 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 2);
-		*count += 2 * cf_swap_from_be16(*(uint16_t*)buf);
+		if (! msgpack_sz_count_add_map(count,
+				cf_swap_from_be16(*(uint16_t*)buf))) {
+			return NULL;
+		}
 		return buf + 2;
 	case 0xdf: // map with 32 bit header
 		SZ_PARSE_BUF_CHECK(buf, end, 4);
-		*count += 2 * cf_swap_from_be32(*(uint32_t*)buf);
+		if (! msgpack_sz_count_add_map(count,
+				cf_swap_from_be32(*(uint32_t*)buf))) {
+			return NULL;
+		}
 		return buf + 4;
 
 	case 0xd4: // fixext 1
@@ -1261,12 +1298,16 @@ msgpack_sz_table(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 	}
 
 	if ((b & 0xf0) == 0x80) { // map with 8 bit combined header
-		*count += 2 * (b & 0x0f);
+		if (! msgpack_sz_count_add_map(count, b & 0x0f)) {
+			return NULL;
+		}
 		return buf;
 	}
 
 	if ((b & 0xf0) == 0x90) { // list with 8 bit combined header
-		*count += b & 0x0f;
+		if (! msgpack_sz_count_add(count, b & 0x0f)) {
+			return NULL;
+		}
 		return buf;
 	}
 
@@ -1280,7 +1321,7 @@ msgpack_sz_internal(const uint8_t* buf, const uint8_t* const end,
 	for (uint32_t i = 0; i < count; i++) {
 		buf = msgpack_sz_table(buf, end, &count, has_nonstorage);
 
-		if (buf > end || buf == NULL) {
+		if (buf == NULL || buf > end) {
 			cf_warning(AS_PARTICLE,
 					"msgpack_sz_internal: invalid at i %u count %u", i, count);
 			return NULL;
@@ -1988,7 +2029,10 @@ msgpack_parse(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 		uint16_t len = cf_swap_from_be16(*(uint16_t*)buf);
 
 		*not_compact = len <= 0x0f;
-		*count += len;
+		if (! msgpack_sz_count_add(count, len)) {
+			*type = MSGPACK_TYPE_ERROR;
+			return NULL;
+		}
 		*type = MSGPACK_TYPE_LIST;
 
 		return buf + 2;
@@ -1999,7 +2043,10 @@ msgpack_parse(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 		uint32_t len = cf_swap_from_be32(*(uint32_t*)buf);
 
 		*not_compact = len <= 0xffff;
-		*count += len;
+		if (! msgpack_sz_count_add(count, len)) {
+			*type = MSGPACK_TYPE_ERROR;
+			return NULL;
+		}
 		*type = MSGPACK_TYPE_LIST;
 
 		return buf + 4;
@@ -2011,7 +2058,10 @@ msgpack_parse(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 		uint16_t len = cf_swap_from_be16(*(uint16_t*)buf);
 
 		*not_compact = len <= 0x0f;
-		*count += 2 * len;
+		if (! msgpack_sz_count_add_map(count, len)) {
+			*type = MSGPACK_TYPE_ERROR;
+			return NULL;
+		}
 		*type = MSGPACK_TYPE_MAP;
 
 		return buf + 2;
@@ -2022,7 +2072,10 @@ msgpack_parse(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 		uint32_t len = cf_swap_from_be32(*(uint32_t*)buf);
 
 		*not_compact = len <= 0xffff;
-		*count += 2 * len;
+		if (! msgpack_sz_count_add_map(count, len)) {
+			*type = MSGPACK_TYPE_ERROR;
+			return NULL;
+		}
 		*type = MSGPACK_TYPE_MAP;
 
 		return buf + 4;
@@ -2114,13 +2167,19 @@ msgpack_parse(const uint8_t* buf, const uint8_t* const end, uint32_t* count,
 		}
 
 		if ((b & 0xf0) == 0x80) { // map with 8 bit combined header
-			*count += 2 * (b & 0x0f);
+			if (! msgpack_sz_count_add_map(count, b & 0x0f)) {
+				*type = MSGPACK_TYPE_ERROR;
+				return NULL;
+			}
 			*type = MSGPACK_TYPE_MAP;
 			return buf;
 		}
 
 		if ((b & 0xf0) == 0x90) { // list with 8 bit combined header
-			*count += b & 0x0f;
+			if (! msgpack_sz_count_add(count, b & 0x0f)) {
+				*type = MSGPACK_TYPE_ERROR;
+				return NULL;
+			}
 			*type = MSGPACK_TYPE_LIST;
 			return buf;
 		}
