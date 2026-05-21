@@ -1852,11 +1852,17 @@ handle_namespace_storage_engine_devices(void* ns, const FieldDescriptor& desc,
 					"entries must be a string");
 		}
 
-		// format is "device_name[:shadow_name]"
+		// Format is "device_name[:shadow_name]". A bare entry (no colon)
+		// must register the device with NO shadow - matching the .conf
+		// parser, which passes shadow_name=NULL in that case. Note that
+		// std::string::find returns npos when ':' is missing, and
+		// npos + 1 wraps to 0, so substr(npos + 1) returns the whole
+		// string - that's the bug we have to avoid here.
 		std::string device_str = device.get<std::string>();
-		std::string device_name, shadow_name;
-		device_name = device_str.substr(0, device_str.find(':'));
-		shadow_name = device_str.substr(device_str.find(':') + 1);
+		size_t colon_pos = device_str.find(':');
+		std::string device_name = device_str.substr(0, colon_pos);
+		std::string shadow_name = colon_pos == std::string::npos
+				? std::string() : device_str.substr(colon_pos + 1);
 
 		// cfg_add_storage_device does NOT strdup
 		// it stores the pointer directly.
@@ -1911,11 +1917,17 @@ handle_namespace_storage_engine_files(void* ns, const FieldDescriptor& desc,
 					"entries must be a string");
 		}
 
-		// The format is "file_name[:shadow_name]".
+		// Format is "file_name[:shadow_name]". A bare entry (no colon)
+		// must register the file with NO shadow - matching the .conf
+		// parser, which passes shadow_name=NULL in that case. Note that
+		// std::string::find returns npos when ':' is missing, and
+		// npos + 1 wraps to 0, so substr(npos + 1) returns the whole
+		// string - that's the bug we have to avoid here.
 		std::string file_str = file.get<std::string>();
-		std::string file_name, shadow_name;
-		file_name = file_str.substr(0, file_str.find(':'));
-		shadow_name = file_str.substr(file_str.find(':') + 1);
+		size_t colon_pos = file_str.find(':');
+		std::string file_name = file_str.substr(0, colon_pos);
+		std::string shadow_name = colon_pos == std::string::npos
+				? std::string() : file_str.substr(colon_pos + 1);
 
 		// Pointer is stored directly by cfg_add_storage_file,
 		// which does NOT strdup.
