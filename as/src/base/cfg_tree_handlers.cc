@@ -156,6 +156,8 @@ static void apply_uint64_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void apply_bool_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
+static void apply_inverted_bool_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value);
 static void apply_cstring_field(void* target, const FieldDescriptor& desc,
 		const nlohmann::json& value);
 static void apply_pct_w_minus_1_field(void* target, const FieldDescriptor& desc,
@@ -527,6 +529,7 @@ static void apply_namespace_set(const std::string& name,
 
 	// Mod-lua field descriptors /mod-lua
 	static const std::vector<FieldDescriptor> MOD_LUA_FIELD_DESCRIPTORS = {
+		{"/allow-unsafe-lua", offsetof(as_config, mod_lua.unsafe_lua_disabled), apply_inverted_bool_field},
 		{"/cache-enabled", offsetof(as_config, mod_lua.cache_enabled), apply_bool_field},
 		{"/user-path", NO_OFFSET, handle_mod_lua_user_path},
 	};
@@ -1049,6 +1052,22 @@ apply_bool_field(void* target, const FieldDescriptor& desc,
 	bool* field_ptr =
 			reinterpret_cast<bool*>(static_cast<char*>(target) + desc.offset);
 	*field_ptr = value.get<bool>();
+}
+
+static void
+apply_inverted_bool_field(void* target, const FieldDescriptor& desc,
+		const nlohmann::json& value)
+{
+	// For positive YAML keys backed by a negated C field (e.g. enable-X
+	// mapped to X_disabled), so the C struct's zero-init still yields the
+	// legacy default.
+	if (! value.is_boolean()) {
+		throw config_error(desc.json_path, "must be a boolean");
+	}
+
+	bool* field_ptr =
+			reinterpret_cast<bool*>(static_cast<char*>(target) + desc.offset);
+	*field_ptr = ! value.get<bool>();
 }
 
 static void

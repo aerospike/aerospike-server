@@ -284,6 +284,17 @@ udf_cask_info_put(as_info_cmd_args* args)
 		return;
 	}
 
+	// Allowlist: with the sandbox on, only .lua UDFs are accepted. Catches
+	// SONAME shapes (foo.so.1) and any other extension a ".so" denylist would
+	// miss. Case-sensitive (see udf_filename_has_ext below) - foo.LUA is
+	// rejected here rather than persisted and silently failing at invocation.
+	if (g_config.mod_lua.unsafe_lua_disabled &&
+			! udf_filename_has_ext(filename, ".lua")) {
+		cf_warning(AS_UDF, "udf-put: unsafe Lua disabled: %s", filename);
+		cf_dyn_buf_append_string(out, "error=unsafe_lua_disabled");
+		return;
+	}
+
 	char content_len[10 + 1];
 	int content_len_len = (int)sizeof(content_len);
 
@@ -312,7 +323,7 @@ udf_cask_info_put(as_info_cmd_args* args)
 	uint32_t len32;
 
 	if (cf_str_atoi_u32(content_len, &len32) != 0 || len32 % 4 != 0) {
-		cf_warning(AS_UDF, "invalid content-len %s", udf_type);
+		cf_warning(AS_UDF, "invalid content-len %s", content_len);
 		cf_dyn_buf_append_string(out, "error=invalid_content_len");
 		return;
 	}
@@ -503,6 +514,14 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 			continue;
 		}
 		// else - set (startup and runtime).
+
+		if (g_config.mod_lua.unsafe_lua_disabled &&
+				! udf_filename_has_ext(item->key, ".lua")) {
+			cf_warning(AS_UDF,
+					"ignoring SMD UDF item (unsafe Lua disabled): %s (accept_type %d)",
+					item->key, accept_type);
+			continue;
+		}
 
 		json_error_t json_error;
 		json_t* item_obj = json_loads(item->value, 0, &json_error);

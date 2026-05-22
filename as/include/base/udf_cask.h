@@ -46,6 +46,26 @@ void udf_cask_info_list(struct as_info_cmd_args_s* args);
 void udf_cask_info_put(struct as_info_cmd_args_s* args);
 void udf_cask_info_remove(struct as_info_cmd_args_s* args);
 
+// Case-sensitive: the mod-lua runtime open path is byte-exact (create_state's
+// "%s/%s.lua" + luaL_loadfilex, require()'s "%s/?.lua", is_native_module's
+// "%s/%s.so"), so a case-insensitive gate would accept foo.LUA at the
+// info-handler boundary only for invocation to fail with a generic UDF error
+// when the open misses the lowercase path. Mirror the runtime instead.
+// Aligned with mod-lua's hasext / dropext / cache_add_file (all strncmp /
+// strcmp). Dev environments on case-insensitive filesystems (default macOS,
+// vfat, NTFS) must use lowercase extensions. Defined in the header so unit
+// tests can link against it without exposing the symbol through a separate
+// header - same treatment as udf_filename_is_valid.
+static inline bool
+udf_filename_has_ext(const char* filename, const char* ext)
+{
+	size_t filename_len = strlen(filename);
+	size_t ext_len = strlen(ext);
+
+	return ext_len < filename_len &&
+			strcmp(filename + filename_len - ext_len, ext) == 0;
+}
+
 // Returns true iff filename is a single basename safe to combine with the
 // UDF user_path. Accepts only the byte set [A-Za-z0-9._-$]; additionally
 // rejects empty names, names beginning with '.', and the substring "..".

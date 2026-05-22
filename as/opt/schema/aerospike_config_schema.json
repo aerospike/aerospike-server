@@ -3896,6 +3896,13 @@
           "dynamic": false,
           "enterpriseOnly": false
         },
+        "allow-unsafe-lua": {
+          "type": "boolean",
+          "default": true,
+          "description": "If false, restricts UDFs to text-mode .lua files and removes the os, io, debug, dofile, loadfile, load, loadstring, package.searchpath, package.loadlib, and package.cpath Lua globals; mitigates UDF sandbox-escape vectors. Default true preserves pre-mitigation behavior.",
+          "dynamic": false,
+          "enterpriseOnly": false
+        },
         "user-path": {
           "type": "string",
           "default": "/opt/aerospike/usr/udf/lua",

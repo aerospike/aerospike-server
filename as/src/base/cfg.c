@@ -215,6 +215,7 @@ cfg_set_defaults()
 	// Mod-lua defaults.
 	c->mod_lua.server_mode = true;
 	c->mod_lua.cache_enabled = true;
+	c->mod_lua.unsafe_lua_disabled = false;
 	strcpy(c->mod_lua.user_path, "/opt/aerospike/usr/udf/lua");
 
 	// TODO - security set default config API?
@@ -706,6 +707,7 @@ typedef enum {
 
 	// Mod-lua options:
 	CASE_MOD_LUA_CACHE_ENABLED,
+	CASE_MOD_LUA_ALLOW_UNSAFE_LUA,
 	CASE_MOD_LUA_USER_PATH,
 
 	// Security options:
@@ -1348,6 +1350,7 @@ const cfg_opt NAMESPACE_GEO2DSPHERE_WITHIN_OPTS[] = {
 
 const cfg_opt MOD_LUA_OPTS[] = {
 		{ "cache-enabled",					CASE_MOD_LUA_CACHE_ENABLED },
+		{ "allow-unsafe-lua",				CASE_MOD_LUA_ALLOW_UNSAFE_LUA },
 		{ "user-path",						CASE_MOD_LUA_USER_PATH },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -4269,6 +4272,13 @@ as_config_init(const char* config_file)
 			case CASE_MOD_LUA_CACHE_ENABLED:
 				c->mod_lua.cache_enabled = cfg_bool(&line);
 				break;
+			case CASE_MOD_LUA_ALLOW_UNSAFE_LUA:
+				// User-facing knob is positive ("allow unsafe Lua"); the
+				// internal flag is negative ("unsafe Lua disabled") so
+				// embedders that zero-init the mod_lua_config struct get the
+				// legacy permissive default.
+				c->mod_lua.unsafe_lua_disabled = ! cfg_bool(&line);
+				break;
 			case CASE_MOD_LUA_USER_PATH:
 				cfg_strcpy(&line, c->mod_lua.user_path,
 						sizeof(c->mod_lua.user_path));
@@ -4773,6 +4783,13 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	// Configuration checks and special defaults that differ between CE and EE.
 	cfg_post_process();
+
+	if (! c->mod_lua.unsafe_lua_disabled) {
+		cf_warning(AS_CFG, "mod-lua: allow-unsafe-lua is true - Lua UDFs have "
+				"access to os/io/debug and can load native .so modules; set "
+				"allow-unsafe-lua false in the mod-lua stanza to harden the "
+				"UDF sandbox");
+	}
 
 	// Check the configured file descriptor limit against the system limit.
 	struct rlimit fd_limit;
