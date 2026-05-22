@@ -311,7 +311,7 @@ find_cgroup_path(const char* rscctrl, char* mount_pth_buf, size_t mount_buf_len,
 	bool v2_found = false;
 
 	cf_dyn_buf db;
-	cf_dyn_buf_init_heap(&db, 16 * 1024);
+	cf_dyn_buf_init_heap(&db, 128 * 1024);
 
 	cf_os_file_res res;
 	size_t limit;
@@ -329,6 +329,7 @@ find_cgroup_path(const char* rscctrl, char* mount_pth_buf, size_t mount_buf_len,
 			cf_dyn_buf_reserve(&db, db.alloc_sz * 2, NULL);
 		}
 		else {
+			cf_warning(AS_INFO, "failed to read /proc/self/mountinfo, falling back to host memory");
 			cf_dyn_buf_free(&db);
 			return 0;
 		}
