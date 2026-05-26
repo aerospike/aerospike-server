@@ -21,10 +21,14 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          if printf '%s' "$TITLE" | grep -qE '^[A-Z]+-[0-9]+ - '; then
-            echo "OK: '$TITLE' begins with an uppercase JIRA ticket ID"
+          # Allow dependabot / automated dependency-bump PRs.
+          if printf '%s' "$TITLE" | grep -qiE '^bump '; then
+            echo "OK: '$TITLE' is an automated dependency bump"
+          # One or more comma-separated JIRA ticket IDs followed by " - ".
+          elif printf '%s' "$TITLE" | grep -qE '^[A-Z]+-[0-9]+(, [A-Z]+-[0-9]+)* - '; then
+            echo "OK: '$TITLE' begins with JIRA ticket ID(s)"
           else
-            echo "::error::PR title must begin with an uppercase JIRA ticket ID (e.g. SERVER-1234). Got: '$TITLE'"
+            echo "::error::PR title must begin with JIRA ticket ID(s) (e.g. SERVER-1234 or SERVER-1234, AER-5678) or be a dependency bump. Got: '$TITLE'"
             exit 1
           fi
       - name: Comment on PR
@@ -34,4 +38,4 @@ jobs:
         run: |
           gh pr comment "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
-            --body "PR title must begin with an uppercase JIRA ticket ID (e.g. SERVER-1234)."
+            --body "PR title must begin with JIRA ticket ID(s) (e.g. SERVER-1234 or SERVER-1234, AER-5678), or be a dependency bump."
