@@ -1,0 +1,272 @@
+name: Tag release
+
+# Maintainer notes:
+# - Three Git histories: tag *names* match across aerospike-server, aerospike-server-enterprise,
+#   and aerospike-server-fips; each repo can have different SHAs for the same tag (separate empty
+#   commits per repo).
+# - Partial failure (runbook): if aerospike-server push succeeded but enterprise/fips failed (or
+#   vice versa), tags and branch tips can diverge across repos. Before re-running:
+#   1) On each origin, list tags and branch tip: `git ls-remote --tags origin` and `git ls-remote origin refs/heads/<branch>`.
+#   2) Decide whether to delete mistaken tags (per org policy), reset branch tips, or add compensating commits so all three repos agree.
+#   3) Only re-run workflow_dispatch after refs are consistent; duplicate-tag guards then allow safe retries.
+# - Duplicate-tag checks: a dedicated pre-push step runs `git ls-remote` on all three origins before
+#   any local tag or push. A tag could still appear between that check and `git push` if two runs
+#   overlap; this workflow is manual-only. If `git push` fails with "already exists", treat like
+#   partial failure above and reconcile before retry.
+# - Tag naming: **release** tags are `vX.Y.Z.W`; the **next-release** marker on the empty commit is
+#   bare `X.Y.Z.(W+1)` (no leading v). `build/build_number` counts first-parent commits after that
+#   bare tag only (see build/README-VERSIONING.md).
+# - Each push sends only HEAD + the tag ref(s) created in that step (not a blanket `git push --tags`).
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag: vX.Y.Z.W (trimmed; bare X.Y.Z.W is accepted and stored as v-prefixed). Empty = first line of `bash build/version` (bare), then prefixed with v.'
+        required: false
+        type: string
+        default: ''
+      next_pretag:
+        description: 'Start-of-next-release tag: bare X.Y.Z.W only (no v). Empty = increment 4th segment from the release tag (ignored in release-only).'
+        required: false
+        type: string
+        default: ''
+      mode:
+        description: 'What to tag: "both" (default) tags release + pre-release, "release-only" tags only the release, "pretag-only" tags only the next pre-release on an empty commit.'
+        required: false
+        type: choice
+        options:
+          - both
+          - release-only
+          - pretag-only
+        default: both
+
+concurrency:
+  group: tag-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  setup:
+    if: github.ref_name == 'master' || startsWith(github.ref_name, 'hotfix/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      next_pretag: ${{ steps.resolve.outputs.next_pretag }}
+      mode: ${{ steps.resolve.outputs.mode }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve release and next pre-release tags
+        id: resolve
+        env:
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          INPUT_NEXT_PRETAG: ${{ github.event.inputs.next_pretag }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+        run: |
+          set -euo pipefail
+
+          is_empty() { [[ -z "${1// }" ]]; }
+
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          # Parse to bare X.Y.Z.W; release tags are created as vX.Y.Z.W, next-start tags stay bare.
+          bare_semver() {
+            local raw
+            raw="$(trim "${1:-}")"
+            raw="${raw#v}"
+            if [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              printf '%s' "$raw"
+            else
+              echo "${2:-Invalid tag}: expected X.Y.Z.W or vX.Y.Z.W (got: '${1}')" >&2
+              return 1
+            fi
+          }
+
+          MODE="$(trim "${INPUT_MODE:-both}")"
+          MODE="${MODE:-both}"
+
+          # Reject any value not in the allowed set (guards against direct API calls).
+          case "$MODE" in
+            both|release-only|pretag-only) ;;
+            *) echo "Invalid mode: '${MODE}'. Must be one of: both, release-only, pretag-only." >&2; exit 1 ;;
+          esac
+          echo "Mode: ${MODE}"
+
+          RELEASE_TAG="$(trim "${INPUT_RELEASE_TAG:-}")"
+          NEXT_PRETAG="$(trim "${INPUT_NEXT_PRETAG:-}")"
+
+          # Warn about inputs that are ignored by the chosen mode.
+          if [[ "$MODE" == "pretag-only" ]] && ! is_empty "$RELEASE_TAG"; then
+            echo "Warning: release_tag input ('${RELEASE_TAG}') is ignored in pretag-only mode." >&2
+          fi
+          if [[ "$MODE" == "release-only" ]] && ! is_empty "$NEXT_PRETAG"; then
+            echo "Warning: next_pretag input ('${NEXT_PRETAG}') is ignored in release-only mode." >&2
+          fi
+
+          # Derive / validate RELEASE_TAG unless we are pretag-only (no release tag needed).
+          if [[ "$MODE" != "pretag-only" ]]; then
+            if is_empty "$RELEASE_TAG"; then
+              # Same as build-sign-deploy / sign-build-deploy: release=$(bash build/version)
+              ver="$(bash build/version)"
+              ver="${ver//$'\r'/}"
+              ver="${ver%%$'\n'*}"
+              ver="$(trim "$ver")"
+              if ! [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "build/version first line is not x.y.z.w (got: '${ver}'). Set release_tag input to override." >&2
+                exit 1
+              fi
+              rel_bare="$(bare_semver "$ver" "build/version")" || exit 1
+              RELEASE_TAG="v${rel_bare}"
+              echo "Derived RELEASE_TAG from build/version (${ver}): ${RELEASE_TAG}"
+            else
+              rel_bare="$(bare_semver "$RELEASE_TAG" "release_tag")" || exit 1
+              RELEASE_TAG="v${rel_bare}"
+              echo "Using RELEASE_TAG from input: ${RELEASE_TAG}"
+            fi
+          fi
+
+          # Derive / validate NEXT_PRETAG unless we are release-only (no pre-release tag needed).
+          if [[ "$MODE" != "release-only" ]]; then
+            if is_empty "$NEXT_PRETAG"; then
+              # Auto-increment the last (4th) component of the release tag.
+              # For pretag-only, RELEASE_TAG is not set; require explicit next_pretag input.
+              if [[ "$MODE" == "pretag-only" ]]; then
+                echo "next_pretag input is required when mode is pretag-only (no release_tag to derive from)." >&2
+                exit 1
+              fi
+              rver="${RELEASE_TAG#v}"
+              IFS=. read -r a b c w <<< "$rver"
+              NEXT_PRETAG="${a}.${b}.${c}.$((10#$w + 1))"
+              echo "Derived NEXT_PRETAG (4th segment +1, decimal; bare tag on empty commit): ${NEXT_PRETAG}"
+            else
+              NEXT_PRETAG="$(bare_semver "$NEXT_PRETAG" "next_pretag")" || exit 1
+              echo "Using NEXT_PRETAG from input: ${NEXT_PRETAG}"
+            fi
+
+            if [[ "$MODE" == "both" && "$NEXT_PRETAG" == "${RELEASE_TAG#v}" ]]; then
+              echo "next_pretag (bare) must differ from release version (both are ${RELEASE_TAG#v})" >&2
+              exit 1
+            fi
+          fi
+
+          # Summary log — only print values relevant to the chosen mode.
+          case "$MODE" in
+            both)         echo "Using MODE=${MODE} RELEASE_TAG=${RELEASE_TAG} NEXT_PRETAG=${NEXT_PRETAG}" ;;
+            release-only) echo "Using MODE=${MODE} RELEASE_TAG=${RELEASE_TAG}" ;;
+            pretag-only)  echo "Using MODE=${MODE} NEXT_PRETAG=${NEXT_PRETAG}" ;;
+          esac
+
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          d1="REL_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT:-0}"
+          {
+            echo "release_tag<<${d1}"
+            printf '%s\n' "${RELEASE_TAG}"
+            echo "${d1}"
+          } >> "$GITHUB_OUTPUT"
+          d2="PRE_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT:-0}"
+          {
+            echo "next_pretag<<${d2}"
+            printf '%s\n' "${NEXT_PRETAG}"
+            echo "${d2}"
+          } >> "$GITHUB_OUTPUT"
+
+  tag-release:
+    needs: setup
+    if: success() && (github.ref_name == 'master' || startsWith(github.ref_name, 'hotfix/'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ needs.setup.outputs.release_tag }}
+      NEXT_PRETAG: ${{ needs.setup.outputs.next_pretag }}
+      MODE: ${{ needs.setup.outputs.mode }}
+      GIT_USER_NAME: ${{ github.triggering_actor }}
+      GIT_USER_EMAIL: ${{ github.actor_id }}+${{ github.triggering_actor }}@users.noreply.github.com
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Fetch app token
+        id: app-token
+        # v3 line is Node24-ready; requires modern runner (GH-hosted Ubuntu runners satisfy this).
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Configure git credential rewriting
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/configure_git_github_app_token.sh"
+
+      - name: Verify tag names absent on all origins (pre-push)
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/verify_tag_release_refs.sh"
+
+      - name: Tag aerospike-server (this repository)
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/tag_release_repo.sh" ce
+
+      # App must be installed on these repos (not only aerospike-server).
+      - name: Tag aerospike-server-enterprise
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/tag_release_repo.sh" enterprise
+
+      - name: Tag aerospike-server-fips
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/tag_release_repo.sh" fips
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Tag Release Summary"
+            echo "| Key | Value |"
+            echo "| --- | --- |"
+            echo "| Mode | \`${MODE}\` |"
+            [[ "$MODE" != "pretag-only" ]] && echo "| Release tag | \`${RELEASE_TAG}\` |" || true
+            [[ "$MODE" != "release-only" ]] && echo "| Next pre-release tag | \`${NEXT_PRETAG}\` |" || true
+            echo "| Branch | \`${BRANCH}\` |"
+            echo "| Triggered by | @${GIT_USER_NAME} |"
+            echo ""
+            echo "Each \`git push\` updates \`HEAD\` on the branch plus only the new tag ref(s) from this run (not a blanket \`--tags\`)."
+            echo "If a downstream repo step failed after an earlier step pushed, reconcile tags across repos before re-running."
+          } >> "$GITHUB_STEP_SUMMARY"

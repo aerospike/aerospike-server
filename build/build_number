@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
 
-# Count commits since the most recent start tag (x.y.z.w-start) only
-# Only for master or hotfix/* branches; otherwise return 1
+# Count first-parent commits after the **next-release** marker tag only.
+#
+# `tag-release` (mode `both`): **release** tag is `vX.Y.Z.W` on the release commit; an empty
+# commit follows; **start of next release** is a **bare** tag `X.Y.Z.(W+1)` (no `v`) on that empty
+# commit. Build numbers must count from **that bare tag only**, never from the `v…` release tag.
+#
+# Implementation: `git describe --first-parent --tags --abbrev=0 --match '[0-9]*…'` matches only
+# bare semver tags, so the pretag on HEAD is the anchor while `vX.Y.Z.W` on the parent is ignored.
+# `git rev-list --first-parent --count "${base_tag}..HEAD"` counts commits strictly after that tag.
+#
+# If no bare tag exists yet (e.g. `release-only`), fall back to `--match 'v[0-9]*…'` so the release
+# tag still produces a sensible count until the bare next-release tag is created.
+#
+# See build/README-VERSIONING.md.
+# Only for master or hotfix/* branches; otherwise return 1.
 
 branch="$(git branch --show-current)"
 
@@ -17,12 +30,15 @@ if [[ "$branch" != "master" && ! "$branch" =~ ^hotfix/ ]]; then
     exit 0
 fi
 
-# Most recent start tag (x.y.z.w-start) on first-parent history; --abbrev=0 gives tag name only
-start_tag=$(git describe --first-parent --tags --match "*.*.*.*-start" --abbrev=0 2>/dev/null) || start_tag=""
+# Nearest semver tag on first-parent (--abbrev=0 => tag name only). After a
+# normal tag-release `both` run this is the bare pre-release tag on the empty commit.
+base_tag=$(git describe --first-parent --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null) || true
+if [[ -z "$base_tag" ]]; then
+    base_tag=$(git describe --first-parent --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null) || true
+fi
 
-# Count commits from start tag
-if [[ -n "$start_tag" ]]; then
-    build_number=$(git rev-list --first-parent --count "${start_tag}..HEAD")
+if [[ -n "$base_tag" ]]; then
+    build_number=$(git rev-list --first-parent --count "${base_tag}..HEAD")
 else
     build_number=1
 fi

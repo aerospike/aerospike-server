@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# Emits generated C build-id header. Version rules must stay aligned with build/version.
+# Semver / *-start migration: build/README-VERSIONING.md
+#
+# Resolution (non-/work path): same as build/version — first-parent + --long on master/hotfix;
+# other branches use --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' then generic describe; see build/version.
 
 EDITION=${1:-community}
 BUILD_OS=${2:-unknown}
@@ -20,7 +26,7 @@ if [[ -f /work/VERSION ]]; then
         REF="$(grep -o '"ref":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
         # For master or hotfix branches, trim version to x.y.z.w
         if [[ "$REF" == "refs/heads/master" || "$REF" =~ refs/heads/hotfix/ ]]; then
-            VERSION="$(echo "$VERSION" | cut -d'-' -f1)"
+            VERSION="$(echo "$VERSION" | sed 's/-[0-9]*-g[0-9a-f]*$//')"
         fi
     fi
     [[ -z "$CE_SHA" ]] && CE_SHA="unknown"
@@ -36,12 +42,12 @@ else
 
     # For master or hotfix/* branches, use only x.y.z.w part
     if [[ "$BRANCH" == "master" || "$BRANCH" =~ ^hotfix/ ]]; then
-        VERSION="$(git describe --tags --always --long | cut -d'-' -f1)"
+        VERSION="$(git describe --first-parent --tags --always --long | sed 's/-[0-9]*-g[0-9a-f]*$//')"
     else
-        # Other branches: prefer describe from start tag (x.y.z.w-start); fall back to nearest tag (e.g. GA) if no -start tag
-        VERSION="$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)"
+        # Other branches: nearest semver-like tag (glob); --long so exact tags still include -count-gSHA.
+        VERSION="$(git describe --first-parent --tags --always --abbrev=9 --long --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
         if [[ "$VERSION" != *-*-* ]]; then
-            VERSION="$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)"
+            VERSION="$(git describe --first-parent --tags --always --long --abbrev=9 2>/dev/null)"
         fi
         if [[ -z "$VERSION" ]]; then
             VERSION="$(git rev-parse --short=9 HEAD)"

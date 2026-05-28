@@ -60,28 +60,36 @@ jobs:
           INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || '' }}
         run: |
           set -euo pipefail
-          version=$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)
-          if [[ "$version" != *-*-* ]]; then
-            version=$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)
+          # Align with build/version: no *.*.*.*-start tags; semver-like x.y.z.w tags + --long on feature branches.
+          if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^hotfix/ ]]; then
+            # Strip git describe --long suffix (-<n>-g<hash>); do not use cut -f1 — hyphenated tags (e.g. 8.0.0.1-rc1) would truncate wrong.
+            version="$(git describe --first-parent --tags --always --long | sed 's/-[0-9]*-g[0-9a-f]*$//')"
+          else
+            version="$(git describe --first-parent --tags --always --abbrev=9 --long --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
+            if [[ "$version" != *-*-* ]]; then
+              version="$(git describe --first-parent --tags --always --abbrev=9 --long 2>/dev/null)"
+            fi
           fi
           if [[ -z "$version" ]]; then
-            version=$(git rev-parse --short=9 HEAD)
+            version="$(git rev-parse --short=9 HEAD)"
           fi
           if [[ -n "${INPUT_VERSION:-}" ]]; then
             version="$INPUT_VERSION"
           fi
-          count=$(source .github/bin/artifact_count.bash)
-          release=$(source build/version)
+          count=$(bash .github/bin/artifact_count.bash)
+          release=$(bash build/version)
           if [[ ! "$GITHUB_REF_NAME" =~ ^[a-zA-Z0-9._/\-]+$ ]]; then
             echo "ERROR: GITHUB_REF_NAME contains unsafe characters: '$GITHUB_REF_NAME'" >&2
             exit 1
           fi
           branch_prefix="${GITHUB_REF_NAME//\//-}"
           bundle_version="TEST-${branch_prefix}-${version}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "bundle_version=$bundle_version" >> "$GITHUB_OUTPUT"
-          echo "count=$count"     >> "$GITHUB_OUTPUT"
-          echo "release=$release" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "bundle_version=$bundle_version"
+            echo "count=$count"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set distro list
         id: distros
@@ -202,10 +210,16 @@ jobs:
         working-directory: aerospike-server
         env:
           DISTRO: ${{ matrix.distro }}
+          # Expose the host arch under two names:
+          #   MATRIX_HOST - used by the YAML `if [[ ... ]]` below; aliased to dodge shellcheck SC2153
+          #                 (shellcheck can't see that the lowercase matrix.host token drives this env).
+          #   HOST        - required by .github/bin/build_edition.bash (see script header comment); the
+          #                 fips branch inside do_edition() uses ${HOST:?...} to skip fips on arm64.
+          MATRIX_HOST: ${{ matrix.host }}
           HOST: ${{ matrix.host }}
           EXT: ${{ github.event_name == 'push' && 'TEST' || github.event.inputs.ext }}
         run: |
-          if [[ "${{ matrix.host }}" == *arm* ]]; then
+          if [[ "${MATRIX_HOST}" == *arm* ]]; then
             bash .github/bin/build_edition.bash -e community -e enterprise
           else
             bash .github/bin/build_edition.bash
@@ -303,7 +317,7 @@ jobs:
 
       # AWS credentials from Configure step above last ~4 hour. Keep retries within that window so token does not expire; use "Re-run failed jobs" in Actions UI for a fresh token if this step fails.
       - name: Download artifacts from QE server (retry until complete)
-        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60  # v4.0.0
+        uses: step-security/retry@38808b4332b98bb36ca031abff0c100231608288  # v4.0.0
         env:
           GH_EVENT: ${{ github.event_name }}
           S3_PATH: "s3://${{ env.S3_BUCKET }}/${{ env.ORG }}/${{ env.ARTIFACT_NAME }}/${{ env.VERSION }}/build/"
@@ -361,7 +375,7 @@ jobs:
     with:
       gh-artifact-name: signed-artifacts-${{ needs.setup.outputs.VERSION }}      
       gh-unsigned-artifacts: unsigned-artifacts-${{ needs.setup.outputs.VERSION }}      
-      gh-workflows-ref: "v3.1.1"
+      gh-workflows-ref: "v3.4.1"
     secrets:
       gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
       gpg-public-key: ${{ secrets.GPG_PUBLIC_KEY }}
@@ -382,15 +396,15 @@ jobs:
       dry-run: false
       jf-build-id: ${{ needs.setup.outputs.VERSION }}
       jf-metadata-build-id: ${{ needs.setup.outputs.VERSION }}-metadata
-      gh-workflows-ref: "v3.1.1"
+      gh-workflows-ref: "v3.4.1"
 
   create-release-bundle:
     permissions:
       contents: read
       id-token: write
       attestations: write
-    needs: [setup, sign-artifacts, upload-artifacts-to-jfrog]
-    if: always() && needs.upload-artifacts-to-jfrog.result == 'success'
+    needs: [setup, sign-artifacts, upload-artifacts-to-jfrog, docker-deploy]
+    if: always() && needs.upload-artifacts-to-jfrog.result == 'success' && needs.docker-deploy.result == 'success'
     uses: aerospike/shared-workflows/.github/workflows/reusable_create-release-bundle.yaml@v3.4.1
     with:
       jf-project: "database"
@@ -399,17 +413,17 @@ jobs:
       oidc-provider-name: gh-citrusleaf
       oidc-audience: citrusleaf
       version: ${{ needs.setup.outputs.BUNDLE_VERSION }}
-      gh-workflows-ref: "v3.1.1"
+      gh-workflows-ref: "v3.4.1"
       dry-run: false
 
   docker-deploy:
-    needs: [setup, artifacts-ready, sign-artifacts, upload-artifacts-to-jfrog, create-release-bundle]
-    if: always() && needs.create-release-bundle.result == 'success'
+    needs: [setup, artifacts-ready, sign-artifacts]
+    if: always() && needs.sign-artifacts.result == 'success'
     runs-on: ubuntu-24.04
     outputs:
       time: ${{ steps.timestamp.outputs.time }}
       time_display: ${{ steps.timestamp.outputs.time_display }}
-      snyk_warning: ${{ steps.snyk_scan.outputs.warning }}
+      snyk_summary: ${{ steps.snyk_scan.outputs.summary }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
@@ -440,7 +454,7 @@ jobs:
           oidc-audience: database-gh-citrusleaf
 
       - name: Docker login to Artifactory
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: step-security/docker-login-action@870af644803bf9f204aed474adbad2958fec048b # v4.1.0
         with:
           registry: artifact.aerospike.io
           username: ${{ steps.jf.outputs.oidc-user }}
@@ -451,14 +465,14 @@ jobs:
         with:
           repository: aerospike/aerospike-server.docker
           path: pkg/docker
-          ref: 8bd6f9a02af93c940b2fc86dde12c67693b247ea
+          ref: 3e3e9923050f40f0f860a382f420c726c37a5f3d
           fetch-depth: 1
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: step-security/setup-qemu-action@109c6ed9f089be1a250c75fd6a534e30df44e030 # v4.0.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: step-security/setup-buildx-action@f931205d68723ad9589fd2a7e2ece238bf9de341 # v4.0.0
 
       - name: Get current timestamp
         id: timestamp
@@ -477,45 +491,29 @@ jobs:
         run: npm install -g snyk
 
       - name: Test Docker images
-        run: |
-          set -euo pipefail
-          cd pkg/docker
-          ./test.sh ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }} -d ubuntu -a amd64 arm64 -c
-
-      - name: Scan for high/critical container vulnerabilities
-        id: snyk_scan
-        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           set -euo pipefail
-          pkg_version="${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }}"
-          registry="artifact.aerospike.io/database-docker-dev-local"
-          warning=""
-          for image_name in aerospike-server-enterprise aerospike-server-federal aerospike-server; do
-            image="${registry}/${image_name}:${pkg_version}-amd64"
-            case "$image_name" in
-              aerospike-server-enterprise) edition="enterprise" ;;
-              aerospike-server-federal)    edition="federal" ;;
-              aerospike-server)            edition="community" ;;
-            esac
-            dockerfile=$(find pkg/docker/releases -path "*/${edition}/*/Dockerfile" -print -quit 2>/dev/null || true)
-            if docker image inspect "$image" >/dev/null 2>&1; then
-              echo "Scanning ${image_name} for high/critical vulnerabilities..."
-              snyk_args=("$image" --severity-threshold=high)
-              [[ -n "$dockerfile" ]] && snyk_args+=(--file="$dockerfile")
-              if ! snyk container test "${snyk_args[@]}"; then
-                warning="${warning}:rotating_light: *${image_name}*: high/critical vulnerabilities detected"$'\n'
-              else
-                echo "  ${image_name}: clean"
-              fi
-            fi
-          done
-          delimiter="WARN_$(date +%s)"
-          echo "warning<<${delimiter}" >> "$GITHUB_OUTPUT"
-          printf '%s' "$warning" >> "$GITHUB_OUTPUT"
-          echo >> "$GITHUB_OUTPUT"
-          echo "${delimiter}" >> "$GITHUB_OUTPUT"
+          cd pkg/docker
+          ./test.sh ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }} -d ubuntu -a amd64 arm64 -c -s
+
+      - name: Upload Snyk scan logs
+        id: upload_snyk
+        if: always() && hashFiles('pkg/docker/*.snyk') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: snyk-logs-${{ needs.setup.outputs.VERSION }}
+          path: pkg/docker/*.snyk
+          retention-days: 14
+
+      - name: Summarize Snyk scan results
+        id: snyk_scan
+        if: always()
+        continue-on-error: true
+        env:
+          ARTIFACT_URL: ${{ steps.upload_snyk.outputs.artifact-url }}
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/summarize_snyk_scan.sh"
 
       - name: Push Docker image
         run: |
@@ -524,8 +522,8 @@ jobs:
           ./docker-build.sh -p ${{ needs.artifacts-ready.outputs.PACKAGE_VERSION }} -d ubuntu -u ../../signed-artifacts -r artifact.aerospike.io/database-docker-dev-local -T ${{ steps.timestamp.outputs.time }}
 
   promote-to-test:
-    needs: [setup, create-release-bundle, docker-deploy]
-    if: always() && needs.docker-deploy.result == 'success'
+    needs: [setup, create-release-bundle]
+    if: always() && needs.create-release-bundle.result == 'success'
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -565,8 +563,11 @@ jobs:
 
   notify-slack:
     needs: [setup, artifacts-ready, docker-deploy, promote-to-test]
-    if: always() && needs.promote-to-test.result == 'success'
+    if: always() && needs.promote-to-test.result == 'success' && needs.docker-deploy.result == 'success'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     env:
       VERSION: ${{ needs.setup.outputs.VERSION }}
       BUNDLE_VERSION: ${{ needs.setup.outputs.BUNDLE_VERSION }}
@@ -582,6 +583,27 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Checkout (for changelog)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute changelog since last successful build
+        id: changelog
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_SHA: ${{ github.sha }}
+          MAX_COMMITS: "50"
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: bash "${GITHUB_WORKSPACE}/.github/bin/changelog_since_last_successful_run.sh"
+
       - name: Set Slack message text
         id: slack_text
         env:
@@ -594,50 +616,73 @@ jobs:
             *Bundle Version:* ${{ env.BUNDLE_VERSION }}
         run: |
           set -euo pipefail
-          delimiter="SLACK_$(date +%s)"
-          echo "title<<${delimiter}" >> "$GITHUB_OUTPUT"
-          echo "$SLACK_TITLE" >> "$GITHUB_OUTPUT"
-          echo "${delimiter}" >> "$GITHUB_OUTPUT"
-          echo "body<<${delimiter}" >> "$GITHUB_OUTPUT"
-          echo "$SLACK_MSG" >> "$GITHUB_OUTPUT"
-          echo "${delimiter}" >> "$GITHUB_OUTPUT"
+          random_delim() { bash "${GITHUB_WORKSPACE}/.github/bin/random_output_delimiter.sh" "$1"; }
+          delimiter="$(random_delim SLACK)"
+          {
+            echo "title<<${delimiter}"
+            echo "$SLACK_TITLE"
+            echo "${delimiter}"
+            echo "body<<${delimiter}"
+            echo "$SLACK_MSG"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
           # Slack linkifies URLs in mrkdwn (including fenced code). plain_text sections do not auto-link;
           # one block per docker pull keeps each command on its own line.
-          uid="$(date +%s)_$$"
           reg='artifact.aerospike.io/database-docker-dev-local'
           pv="${PACKAGE_VERSION}"
           ts="${TIME}"
 
-          hd="DH_${uid}"
+          hd="$(random_delim DH)"
           {
             echo "docker_heading<<${hd}"
             printf '%s\n' '*Docker images:*'
             echo "${hd}"
           } >> "$GITHUB_OUTPUT"
 
-          d1="DP1_${uid}"
+          d1="$(random_delim DP1)"
           {
             echo "docker_pull_1<<${d1}"
             printf 'docker pull %s/aerospike-server-enterprise:%s-%s\n' "$reg" "$pv" "$ts"
             echo "${d1}"
           } >> "$GITHUB_OUTPUT"
-          d2="DP2_${uid}"
+          d2="$(random_delim DP2)"
           {
             echo "docker_pull_2<<${d2}"
             printf 'docker pull %s/aerospike-server-federal:%s-%s\n' "$reg" "$pv" "$ts"
             echo "${d2}"
           } >> "$GITHUB_OUTPUT"
-          d3="DP3_${uid}"
+          d3="$(random_delim DP3)"
           {
             echo "docker_pull_3<<${d3}"
             printf 'docker pull %s/aerospike-server:%s-%s\n' "$reg" "$pv" "$ts"
             echo "${d3}"
           } >> "$GITHUB_OUTPUT"
-          dwf="SLACK_WF_$(date +%s)"
+          dwf="$(random_delim SLACK_WF)"
           {
             echo "workflow_mrk<<${dwf}"
             echo "<${RUN_URL}|Workflow run>"
             echo "${dwf}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build Slack message with Snyk summary
+        id: slack_body
+        env:
+          BASE_BODY: ${{ steps.slack_text.outputs.body }}
+          SNYK_SUMMARY: ${{ needs.docker-deploy.outputs.snyk_summary }}
+        run: |
+          set -euo pipefail
+          delimiter="$(bash "${GITHUB_WORKSPACE}/.github/bin/random_output_delimiter.sh" SLACK_BODY)"
+          {
+            echo "body<<${delimiter}"
+            echo "$BASE_BODY"
+            echo ""
+            echo "*Snyk Container Scan:*"
+            if [[ -n "${SNYK_SUMMARY}" ]]; then
+              echo "$SNYK_SUMMARY"
+            else
+              echo "_scan did not run_"
+            fi
+            echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Send Slack message to QE
@@ -652,7 +697,8 @@ jobs:
               "text": ${{ toJSON(steps.slack_text.outputs.title) }},
               "blocks": [
                 { "type": "header", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.title) }}, "emoji": true } },
-                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.body) }} } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_body.outputs.body) }} } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.changelog.outputs.body) }} } },
                 { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.docker_heading) }} } },
                 { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_1) }}, "emoji": false } },
                 { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_2) }}, "emoji": false } },
@@ -660,22 +706,6 @@ jobs:
                 { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.workflow_mrk) }} } }
               ]
             }
-
-      - name: Build CORE message with Snyk warnings
-        id: core_text
-        env:
-          BASE_BODY: ${{ steps.slack_text.outputs.body }}
-          SNYK_WARNING: ${{ needs.docker-deploy.outputs.snyk_warning }}
-        run: |
-          delimiter="CORE_$(date +%s)"
-          echo "body<<${delimiter}" >> "$GITHUB_OUTPUT"
-          echo "$BASE_BODY" >> "$GITHUB_OUTPUT"
-          if [[ -n "${SNYK_WARNING}" ]]; then
-            echo "" >> "$GITHUB_OUTPUT"
-            echo ":rotating_light: *Snyk Container Scan — High/Critical Vulnerabilities*" >> "$GITHUB_OUTPUT"
-            echo "$SNYK_WARNING" >> "$GITHUB_OUTPUT"
-          fi
-          echo "${delimiter}" >> "$GITHUB_OUTPUT"
 
       - name: Send Slack message to CORE
         continue-on-error: true
@@ -689,7 +719,8 @@ jobs:
               "text": ${{ toJSON(steps.slack_text.outputs.title) }},
               "blocks": [
                 { "type": "header", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.title) }}, "emoji": true } },
-                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.core_text.outputs.body) }} } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_body.outputs.body) }} } },
+                { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.changelog.outputs.body) }} } },
                 { "type": "section", "text": { "type": "mrkdwn", "text": ${{ toJSON(steps.slack_text.outputs.docker_heading) }} } },
                 { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_1) }}, "emoji": false } },
                 { "type": "section", "text": { "type": "plain_text", "text": ${{ toJSON(steps.slack_text.outputs.docker_pull_2) }}, "emoji": false } },
