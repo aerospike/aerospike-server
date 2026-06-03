@@ -13,7 +13,7 @@ For more information on Aerospike, please visit: [`http://aerospike.com`](http:/
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
-current 64-bit GNU/Linux platform versions, such as Red Hat Enterprise Linux 8/9, Amazon Linux 2023, 
+current 64-bit GNU/Linux platform versions, such as Red Hat Enterprise Linux 8/9, Amazon Linux 2023,
 Debian 11 or later, and Ubuntu 20.04 or later.
 
 ### Dependencies
@@ -28,7 +28,7 @@ In particular, the following tools and libraries are needed:
 
 #### C Compiler Toolchain
 
-Building Aerospike requires the GCC 4.1 or later C compiler toolchain,
+Building Aerospike requires the GCC 5.1 or later C compiler toolchain,
 with the standard GNU/Linux development tools and libraries installed in
 the build environment, including:
 
@@ -142,16 +142,16 @@ as an experimental feature. This format provides structured configuration with a
 validation against a schema file.
 
   To use YAML configuration:
-  
+
   1. Enable the feature with the `--experimental` flag when starting the server
   2. Optionally specify a custom schema file with `--schema-file <file>` (default location:
      `/opt/aerospike/schema/aerospike_config_schema.json`)
   3. Supply a YAML based configuration file that adheres to the schema.
-  
+
   **Converting existing configurations**: Use the `asconfig` tool to convert traditional
   `.conf` files to YAML format. The tool generates YAML files with metadata headers that
   include version information.
-  
+
   **Schema validation**: The JSON schema file validates your YAML configuration at startup,
   catching configuration errors early and providing better error messages for invalid settings.
 
