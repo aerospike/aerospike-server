@@ -175,6 +175,12 @@ udf_cask_info_get(as_info_cmd_args* args)
 		return;
 	}
 
+	if (! udf_filename_is_valid(filename)) {
+		cf_warning(AS_UDF, "udf-get: rejecting invalid filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return;
+	}
+
 	mod_lua_rdlock(&mod_lua);
 
 	size_t buf_sz;
@@ -262,12 +268,30 @@ udf_cask_info_put(as_info_cmd_args* args)
 		return;
 	}
 
+	if (! udf_filename_is_valid(filename)) {
+		cf_warning(AS_UDF, "udf-put: rejecting invalid filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return;
+	}
+
+	// Leading-dot is already rejected by udf_filename_is_valid.
 	char* dot = strchr(filename, '.');
 
-	if (dot == NULL || dot == filename || strlen(dot) == 1) {
-		// Invalid - no dot, OR dot at beginning, OR dot at end.
-		cf_warning(AS_UDF, "filename must have an extension");
+	if (dot == NULL || strlen(dot) == 1) {
+		// Invalid - no dot, OR dot at end.
+		cf_warning(AS_UDF, "udf-put: filename must have an extension");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return;
+	}
+
+	// Allowlist: with the sandbox on, only .lua UDFs are accepted. Catches
+	// SONAME shapes (foo.so.1) and any other extension a ".so" denylist would
+	// miss. Case-sensitive (see udf_filename_has_ext below) - foo.LUA is
+	// rejected here rather than persisted and silently failing at invocation.
+	if (g_config.mod_lua.unsafe_lua_disabled &&
+			! udf_filename_has_ext(filename, ".lua")) {
+		cf_warning(AS_UDF, "udf-put: unsafe Lua disabled: %s", filename);
+		cf_dyn_buf_append_string(out, "error=unsafe_lua_disabled");
 		return;
 	}
 
@@ -299,7 +323,7 @@ udf_cask_info_put(as_info_cmd_args* args)
 	uint32_t len32;
 
 	if (cf_str_atoi_u32(content_len, &len32) != 0 || len32 % 4 != 0) {
-		cf_warning(AS_UDF, "invalid content-len %s", udf_type);
+		cf_warning(AS_UDF, "invalid content-len %s", content_len);
 		cf_dyn_buf_append_string(out, "error=invalid_content_len");
 		return;
 	}
@@ -424,6 +448,12 @@ udf_cask_info_remove(as_info_cmd_args* args)
 		return;
 	}
 
+	if (! udf_filename_is_valid(filename)) {
+		cf_warning(AS_UDF, "udf-remove: rejecting invalid filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return;
+	}
+
 	char file_path[strlen(g_config.mod_lua.user_path) + 1 + filename_len + 1];
 
 	sprintf(file_path, "%s/%s", g_config.mod_lua.user_path, filename);
@@ -448,8 +478,20 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
 		as_smd_item* item = cf_vector_get_ptr(items, i);
 
-		if (strlen(item->key) >= MAX_FILE_NAME_SZ) {
-			cf_warning(AS_UDF, "filename %s too long - ignoring", item->key);
+		size_t key_len = strlen(item->key);
+
+		if (key_len >= MAX_FILE_NAME_SZ) {
+			cf_warning(AS_UDF, "ignoring UDF SMD item: filename too long (%zu)",
+					key_len);
+			continue;
+		}
+
+		// item->key fails the predicate, so by definition it contains a byte
+		// outside [A-Za-z0-9._-$] or starts with '.' - don't echo it raw.
+		if (! udf_filename_is_valid(item->key)) {
+			cf_warning(AS_UDF,
+					"ignoring UDF SMD item: invalid filename (len %zu)",
+					key_len);
 			continue;
 		}
 
@@ -472,6 +514,14 @@ udf_cask_smd_accept_cb(const cf_vector* items, as_smd_accept_type accept_type)
 			continue;
 		}
 		// else - set (startup and runtime).
+
+		if (g_config.mod_lua.unsafe_lua_disabled &&
+				! udf_filename_has_ext(item->key, ".lua")) {
+			cf_warning(AS_UDF,
+					"ignoring SMD UDF item (unsafe Lua disabled): %s (accept_type %d)",
+					item->key, accept_type);
+			continue;
+		}
 
 		json_error_t json_error;
 		json_t* item_obj = json_loads(item->value, 0, &json_error);
@@ -527,6 +577,15 @@ udf_cask_smd_get_all_cb(const cf_vector* items, void* udata)
 		as_smd_item* item = cf_vector_get_ptr(items, i);
 
 		if (item->value == NULL) {
+			continue;
+		}
+
+		// Belt-and-braces: udf_cask_smd_accept_cb already filters bad keys at
+		// ingest, but list runs over whatever the local SMD store contains -
+		// peer state from older builds or pre-fix on-disk state could still
+		// hold a poisoned key, and the response separators are ',' and ';'.
+		if (strlen(item->key) >= MAX_FILE_NAME_SZ ||
+				! udf_filename_is_valid(item->key)) {
 			continue;
 		}
 

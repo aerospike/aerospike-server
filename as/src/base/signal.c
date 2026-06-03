@@ -197,10 +197,10 @@ sig_handle_hup(int sig_num, siginfo_t* info, void* ctx)
 static void
 sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 {
-	(void)info;
 	(void)ctx;
 
 	log_abort(sig_num);
+	log_siginfo(info);
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -215,10 +215,17 @@ static void
 sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 {
 	(void)sig_num;
-	(void)info;
 	(void)ctx;
 
-	cf_log_version(CF_INFO, AS_AS, "SIGTERM received, shutting down");
+	if (info->si_code == SI_USER || info->si_code == SI_QUEUE) {
+		cf_log_version(CF_INFO, AS_AS,
+				"SIGTERM received from uid %u pid %d, shutting down",
+				info->si_uid, info->si_pid);
+	}
+	else {
+		cf_log_version(CF_INFO, AS_AS,
+				"SIGTERM received from kernel or unknown source, shutting down");
+	}
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -252,8 +259,8 @@ log_siginfo(const siginfo_t* info)
 		at += sprintf(at, " si_addr 0x%016lx", (uintptr_t)info->si_addr);
 	}
 
-	if (info->si_code == SI_USER) {
-		at += sprintf(at, " si_uid %d si_pid %u", info->si_uid, info->si_pid);
+	if (info->si_code == SI_USER || info->si_code == SI_QUEUE) {
+		at += sprintf(at, " si_uid %u si_pid %d", info->si_uid, info->si_pid);
 	}
 
 	if (info->si_signo == SIGBUS &&

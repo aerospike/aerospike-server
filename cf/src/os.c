@@ -311,7 +311,7 @@ find_cgroup_path(const char* rscctrl, char* mount_pth_buf, size_t mount_buf_len,
 	bool v2_found = false;
 
 	cf_dyn_buf db;
-	cf_dyn_buf_init_heap(&db, 16 * 1024);
+	cf_dyn_buf_init_heap(&db, 128 * 1024);
 
 	cf_os_file_res res;
 	size_t limit;
@@ -329,6 +329,7 @@ find_cgroup_path(const char* rscctrl, char* mount_pth_buf, size_t mount_buf_len,
 			cf_dyn_buf_reserve(&db, db.alloc_sz * 2, NULL);
 		}
 		else {
+			cf_warning(AS_INFO, "failed to read /proc/self/mountinfo, falling back to host memory");
 			cf_dyn_buf_free(&db);
 			return 0;
 		}
@@ -550,6 +551,48 @@ find_smallest_cgroup_limit_v2(const char* mount_path,
 }
 
 static bool
+cgroup_stat_value(const char* stat_path, const char* key, uint64_t* value)
+{
+	cf_dyn_buf db;
+	cf_dyn_buf_init_heap(&db, 16 * 1024);
+
+	cf_os_file_res res;
+	size_t limit;
+
+	while (true) {
+		limit = db.alloc_sz - 1;
+		res = mem_read_file(stat_path, db.buf, &limit);
+
+		if (res == CF_OS_FILE_RES_OK) {
+			db.buf[limit] = '\0';
+			break;
+		}
+
+		if (res != CF_OS_FILE_RES_ERROR || db.alloc_sz >= 1024 * 1024) {
+			cf_dyn_buf_free(&db);
+			return false;
+		}
+
+		cf_dyn_buf_reserve(&db, db.alloc_sz * 2, NULL);
+	}
+
+	size_t key_len = strlen(key);
+	char* saveptr_line;
+
+	for (char* line = strtok_r((char*)db.buf, "\n", &saveptr_line);
+			line != NULL; line = strtok_r(NULL, "\n", &saveptr_line)) {
+		if (strncmp(line, key, key_len) == 0 && line[key_len] == ' ') {
+			*value = strtoull(line + key_len + 1, NULL, 10);
+			cf_dyn_buf_free(&db);
+			return true;
+		}
+	}
+
+	cf_dyn_buf_free(&db);
+	return false;
+}
+
+static bool
 cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 		uint32_t* free_mem_pct)
 {
@@ -594,11 +637,14 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 
 	char nested_limit_pth[PATH_MAX] = { 0 };
 	char nested_used_pth[PATH_MAX] = { 0 };
+	char nested_stat_pth[PATH_MAX] = { 0 };
 
 	if (version == 2) {
 		snprintf(nested_limit_pth, sizeof(nested_limit_pth), "%s/memory.max",
 				base_path);
 		snprintf(nested_used_pth, sizeof(nested_used_pth), "%s/memory.current",
+				base_path);
+		snprintf(nested_stat_pth, sizeof(nested_stat_pth), "%s/memory.stat",
 				base_path);
 	}
 	else {
@@ -606,6 +652,8 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 				"%s/memory.limit_in_bytes", base_path);
 		snprintf(nested_used_pth, sizeof(nested_used_pth),
 				"%s/memory.usage_in_bytes", base_path);
+		snprintf(nested_stat_pth, sizeof(nested_stat_pth),
+				"%s/memory.stat", base_path);
 	}
 
 	*free_mem_kbytes = 0;
@@ -613,6 +661,7 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 
 	cf_detail(CF_OS, "nested_limit_pth: %s", nested_limit_pth);
 	cf_detail(CF_OS, "nested_used_pth: %s", nested_used_pth);
+	cf_detail(CF_OS, "nested_stat_pth: %s", nested_stat_pth);
 
 	char cg_limit[64] = { 0 };
 	char cg_used[64] = { 0 };
@@ -627,8 +676,20 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 		"/sys/fs/cgroup/memory.current",
 		"/sys/fs/cgroup/memory/memory.usage_in_bytes",
 	};
+	const char* cg_stat_path[] = {
+		nested_stat_pth,
+		"/sys/fs/cgroup/memory.stat",
+		"/sys/fs/cgroup/memory/memory.stat",
+	};
+	const char* cg_inactive_file_key[] = {
+		version == 2 ? "inactive_file" : "total_inactive_file",
+		"inactive_file",
+		"total_inactive_file",
+	};
 	uint64_t cg_used_bytes = 0;
 	uint64_t cg_limit_bytes = 0;
+	const char* found_stat_path = NULL;
+	const char* found_inactive_file_key = NULL;
 
 	long page_size = sysconf(_SC_PAGESIZE);
 
@@ -665,6 +726,8 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 
 			cg_used_bytes = strtoull(cg_used, NULL, 10);
 			cg_limit_bytes = strtoull(cg_limit, NULL, 10);
+			found_stat_path = cg_stat_path[i];
+			found_inactive_file_key = cg_inactive_file_key[i];
 
 			break;
 		}
@@ -672,6 +735,20 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 
 	if (cg_limit_bytes == 0) {
 		return false;
+	}
+
+	if (found_stat_path != NULL) {
+		uint64_t inactive_file_bytes = 0;
+
+		if (cgroup_stat_value(found_stat_path, found_inactive_file_key,
+					&inactive_file_bytes)) {
+			cf_detail(CF_OS,
+					"subtracting cgroup %s bytes %lu from used bytes %lu",
+					found_inactive_file_key, inactive_file_bytes, cg_used_bytes);
+
+			cg_used_bytes = inactive_file_bytes < cg_used_bytes ?
+					cg_used_bytes - inactive_file_bytes : 0;
+		}
 	}
 
 	if (cg_used_bytes > cg_limit_bytes) {
@@ -704,7 +781,7 @@ cgroup_mem_info(uint64_t host_free_mem_kbytes, uint64_t* free_mem_kbytes,
 	}
 
 	*free_mem_kbytes = effective_free_kbytes;
-	*free_mem_pct = (effective_free_kbytes * 100) / cg_limit_kbytes;
+	*free_mem_pct = (uint32_t)((effective_free_kbytes * 100) / cg_limit_kbytes);
 
 	if (*free_mem_pct <= 10) {
 		cf_warning(CF_OS,
