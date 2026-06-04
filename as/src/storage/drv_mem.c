@@ -84,15 +84,6 @@ typedef struct mem_load_records_info_s {
 	void* complete_rc;
 } mem_load_records_info;
 
-#define DEFRAG_PEN_INIT_CAPACITY (8 * 1024)
-
-typedef struct defrag_pen_s {
-	uint32_t n_ids;
-	uint32_t capacity;
-	uint32_t* ids;
-	uint32_t stack_ids[DEFRAG_PEN_INIT_CAPACITY];
-} defrag_pen;
-
 #define LOG_STATS_INTERVAL_sec 20
 
 // All in microseconds since we're using usleep().
@@ -121,9 +112,6 @@ static void init_pristine_wblock_id(drv_mem* mem, uint64_t offset);
 static void start_loading_records(drv_mems* mems, cf_queue* complete_q);
 static void load_wblock_queues(drv_mems* mems);
 static void* run_load_queues(void* pv_data);
-static void defrag_pen_init(defrag_pen* pen);
-static void defrag_pen_destroy(defrag_pen* pen);
-static void defrag_pen_add(defrag_pen* pen, uint32_t wblock_id);
 static void defrag_pen_transfer(defrag_pen* pen, drv_mem* mem);
 static void defrag_pens_dump(defrag_pen pens[], uint32_t n_pens,
 		const char* mem_name);
@@ -1696,7 +1684,7 @@ run_load_queues(void* pv_data)
 	defrag_pen pens[lwm_pct];
 
 	for (uint32_t n = 0; n < lwm_pct; n++) {
-		defrag_pen_init(&pens[n]);
+		drv_defrag_pen_init(&pens[n]);
 	}
 
 	uint32_t first_id = mem->first_wblock_id;
@@ -1718,7 +1706,8 @@ run_load_queues(void* pv_data)
 		}
 		else if (inuse_sz < lwm_size &&
 				! mem->wblock_state[wblock_id].short_lived) {
-			defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size], wblock_id);
+			drv_defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size],
+					wblock_id);
 		}
 		else {
 			mem->wblock_state[wblock_id].state = WBLOCK_STATE_USED;
@@ -1729,46 +1718,12 @@ run_load_queues(void* pv_data)
 
 	for (uint32_t n = 0; n < lwm_pct; n++) {
 		defrag_pen_transfer(&pens[n], mem);
-		defrag_pen_destroy(&pens[n]);
+		drv_defrag_pen_destroy(&pens[n]);
 	}
 
 	mem->n_defrag_wblock_reads = (uint64_t)cf_queue_sz(mem->defrag_wblock_q);
 
 	return NULL;
-}
-
-static void
-defrag_pen_init(defrag_pen* pen)
-{
-	pen->n_ids = 0;
-	pen->capacity = DEFRAG_PEN_INIT_CAPACITY;
-	pen->ids = pen->stack_ids;
-}
-
-static void
-defrag_pen_destroy(defrag_pen* pen)
-{
-	if (pen->ids != pen->stack_ids) {
-		cf_free(pen->ids);
-	}
-}
-
-static void
-defrag_pen_add(defrag_pen* pen, uint32_t wblock_id)
-{
-	if (pen->n_ids == pen->capacity) {
-		if (pen->capacity == DEFRAG_PEN_INIT_CAPACITY) {
-			pen->capacity <<= 2;
-			pen->ids = cf_malloc(pen->capacity * sizeof(uint32_t));
-			memcpy(pen->ids, pen->stack_ids, sizeof(pen->stack_ids));
-		}
-		else {
-			pen->capacity <<= 1;
-			pen->ids = cf_realloc(pen->ids, pen->capacity * sizeof(uint32_t));
-		}
-	}
-
-	pen->ids[pen->n_ids++] = wblock_id;
 }
 
 static void

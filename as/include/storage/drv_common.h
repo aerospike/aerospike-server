@@ -168,9 +168,22 @@ typedef struct vacated_wblock_s {
 #define WBLOCK_STATE_DEFRAG 3
 #define WBLOCK_STATE_EMPTYING 4
 
+#define DRV_DEFRAG_PEN_INIT_CAPACITY (8 * 1024)
+
+typedef struct defrag_pen_s {
+	uint32_t n_ids;
+	uint32_t capacity;
+	uint32_t* ids;
+	uint32_t stack_ids[DRV_DEFRAG_PEN_INIT_CAPACITY];
+} defrag_pen;
+
 //==========================================================
 // Public API - shared code between storage engines.
 //
+
+void drv_defrag_pen_init(defrag_pen* pen);
+void drv_defrag_pen_destroy(defrag_pen* pen);
+void drv_defrag_pen_add(defrag_pen* pen, uint32_t wblock_id);
 
 void drv_adjust_sc_version_flags(struct as_namespace_s* ns, drv_pmeta* pmeta,
 		bool wiped_drives, bool dirty);

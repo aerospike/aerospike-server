@@ -29,7 +29,10 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 #include <unistd.h>
+
+#include "citrusleaf/alloc.h"
 
 #include "base/datamodel.h"
 #include "storage/flat.h"
@@ -37,6 +40,40 @@
 //==========================================================
 // Public API - shared code between storage engines.
 //
+
+void
+drv_defrag_pen_init(defrag_pen* pen)
+{
+	pen->n_ids = 0;
+	pen->capacity = DRV_DEFRAG_PEN_INIT_CAPACITY;
+	pen->ids = pen->stack_ids;
+}
+
+void
+drv_defrag_pen_destroy(defrag_pen* pen)
+{
+	if (pen->ids != pen->stack_ids) {
+		cf_free(pen->ids);
+	}
+}
+
+void
+drv_defrag_pen_add(defrag_pen* pen, uint32_t wblock_id)
+{
+	if (pen->n_ids == pen->capacity) {
+		if (pen->capacity == DRV_DEFRAG_PEN_INIT_CAPACITY) {
+			pen->capacity <<= 2;
+			pen->ids = cf_malloc(pen->capacity * sizeof(uint32_t));
+			memcpy(pen->ids, pen->stack_ids, sizeof(pen->stack_ids));
+		}
+		else {
+			pen->capacity <<= 1;
+			pen->ids = cf_realloc(pen->ids, pen->capacity * sizeof(uint32_t));
+		}
+	}
+
+	pen->ids[pen->n_ids++] = wblock_id;
+}
 
 bool
 drv_is_set_evictable(const as_namespace* ns, const as_flat_opt_meta* opt_meta)

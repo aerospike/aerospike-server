@@ -889,49 +889,6 @@ ssd_start_defrag_threads(drv_ssds* ssds)
 // defrag_pen class.
 //
 
-#define DEFRAG_PEN_INIT_CAPACITY (8 * 1024)
-
-typedef struct defrag_pen_s {
-	uint32_t n_ids;
-	uint32_t capacity;
-	uint32_t* ids;
-	uint32_t stack_ids[DEFRAG_PEN_INIT_CAPACITY];
-} defrag_pen;
-
-static void
-defrag_pen_init(defrag_pen* pen)
-{
-	pen->n_ids = 0;
-	pen->capacity = DEFRAG_PEN_INIT_CAPACITY;
-	pen->ids = pen->stack_ids;
-}
-
-static void
-defrag_pen_destroy(defrag_pen* pen)
-{
-	if (pen->ids != pen->stack_ids) {
-		cf_free(pen->ids);
-	}
-}
-
-static void
-defrag_pen_add(defrag_pen* pen, uint32_t wblock_id)
-{
-	if (pen->n_ids == pen->capacity) {
-		if (pen->capacity == DEFRAG_PEN_INIT_CAPACITY) {
-			pen->capacity <<= 2;
-			pen->ids = cf_malloc(pen->capacity * sizeof(uint32_t));
-			memcpy(pen->ids, pen->stack_ids, sizeof(pen->stack_ids));
-		}
-		else {
-			pen->capacity <<= 1;
-			pen->ids = cf_realloc(pen->ids, pen->capacity * sizeof(uint32_t));
-		}
-	}
-
-	pen->ids[pen->n_ids++] = wblock_id;
-}
-
 static void
 defrag_pen_transfer(defrag_pen* pen, drv_ssd* ssd)
 {
@@ -979,7 +936,7 @@ run_load_queues(void* pv_data)
 	defrag_pen pens[lwm_pct];
 
 	for (uint32_t n = 0; n < lwm_pct; n++) {
-		defrag_pen_init(&pens[n]);
+		drv_defrag_pen_init(&pens[n]);
 	}
 
 	uint32_t first_id = ssd->first_wblock_id;
@@ -1001,7 +958,8 @@ run_load_queues(void* pv_data)
 		}
 		else if (inuse_sz < lwm_size &&
 				! ssd->wblock_state[wblock_id].short_lived) {
-			defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size], wblock_id);
+			drv_defrag_pen_add(&pens[(inuse_sz * lwm_pct) / lwm_size],
+					wblock_id);
 		}
 		else {
 			ssd->wblock_state[wblock_id].state = WBLOCK_STATE_USED;
@@ -1012,7 +970,7 @@ run_load_queues(void* pv_data)
 
 	for (uint32_t n = 0; n < lwm_pct; n++) {
 		defrag_pen_transfer(&pens[n], ssd);
-		defrag_pen_destroy(&pens[n]);
+		drv_defrag_pen_destroy(&pens[n]);
 	}
 
 	ssd->n_defrag_wblock_reads = (uint64_t)cf_queue_sz(ssd->defrag_wblock_q);
