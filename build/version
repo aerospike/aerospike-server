@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+#
+# Prints one line: release version string for packaging / CI (see also build/gen_version).
+# Semver / *-start migration and build_number alignment: build/README-VERSIONING.md
+#
+# Resolution rules (keep in sync with build/gen_version):
+# - master & hotfix/*: git describe --first-parent --tags --always --long, then strip the
+#   describe --long suffix (-<n>-g<hash>) via sed (same as CI workflows; cut -f1 would break
+#   hyphenated tags such as 8.0.0.1-rc1). --long keeps exact-tag output parseable.
+# - Other branches: describe with --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' and --long; if the result
+#   lacks two hyphens (*-*-*), fall back to a generic describe; else short SHA.
 
 # Use VERSION file from build system if present
 if [[ -f /work/VERSION ]]; then
@@ -8,7 +18,7 @@ if [[ -f /work/VERSION ]]; then
         REF="$(grep -o '"ref":"[^"]*"' /work/EVENT 2>/dev/null | head -1 | cut -d'"' -f4)"
         # For master or hotfix branches, trim version to x.y.z.w
         if [[ "$REF" == "refs/heads/master" || "$REF" =~ refs/heads/hotfix/ ]]; then
-            VERSION="$(echo "$VERSION" | cut -d'-' -f1)"
+            VERSION="$(echo "$VERSION" | sed 's/-[0-9]*-g[0-9a-f]*$//')"
         fi
     fi
     echo "$VERSION"
@@ -26,12 +36,13 @@ fi
 
 # For master or hotfix/* branches, use only x.y.z.w part
 if [[ "$branch" == "master" || "$branch" =~ ^hotfix/ ]]; then
-    rev="$(git describe --tags --always --long | cut -d'-' -f1)"
+    rev="$(git describe --first-parent --tags --always --long | sed 's/-[0-9]*-g[0-9a-f]*$//')"
 else
-    # Other branches: prefer describe from start tag (x.y.z.w-start); fall back to nearest tag (e.g. GA) if no -start tag
-    rev="$(git describe --first-parent --tags --always --abbrev=9 --match '*.*.*.*-start' 2>/dev/null)"
+    # Other branches: nearest ancestor tagged with semver-like x.y.z.w (glob); --long keeps
+    # exact-tag output in tag-count-gSHA form so the *-*-* guard can detect bare tags.
+    rev="$(git describe --first-parent --tags --always --abbrev=9 --long --match '[0-9]*.[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
     if [[ "$rev" != *-*-* ]]; then
-        rev="$(git describe --first-parent --tags --always --abbrev=9 2>/dev/null)"
+        rev="$(git describe --first-parent --tags --always --abbrev=9 --long 2>/dev/null)"
     fi
     if [[ -z "$rev" ]]; then
         rev="$(git rev-parse --short=9 HEAD)"
