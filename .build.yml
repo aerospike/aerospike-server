@@ -16,6 +16,7 @@ container:
       - docker.qe.aerospike.com/build/aerospike-server:arm-rhel-9
       - docker.qe.aerospike.com/build/aerospike-server:arm-debian-11
       - docker.qe.aerospike.com/build/aerospike-server:arm-debian-12
+      - docker.qe.aerospike.com/build/aerospike-server:arm-debian-13
       - docker.qe.aerospike.com/build/aerospike-server:arm-ubuntu-20.04
       - docker.qe.aerospike.com/build/aerospike-server:arm-ubuntu-22.04
       - docker.qe.aerospike.com/build/aerospike-server:arm-amazonlinux-2023
@@ -24,6 +25,7 @@ container:
       - docker.qe.aerospike.com/build/aerospike-server:x86-rhel-9
       - docker.qe.aerospike.com/build/aerospike-server:x86-debian-11
       - docker.qe.aerospike.com/build/aerospike-server:x86-debian-12
+      - docker.qe.aerospike.com/build/aerospike-server:x86-debian-13
       - docker.qe.aerospike.com/build/aerospike-server:x86-ubuntu-20.04
       - docker.qe.aerospike.com/build/aerospike-server:x86-ubuntu-22.04
       - docker.qe.aerospike.com/build/aerospike-server:x86-amazonlinux-2023
@@ -33,7 +35,7 @@ build:
     environment:
       EEREPO:
     script:
-      - make -j
+      - make -j$(nproc)
       - make $PKG
       - make source
     artifact:
@@ -42,7 +44,7 @@ build:
     environment:
       EEREPO: /work/source/$EEREPO
     script:
-      - make -j +ee
+      - make -j$(nproc) +ee
       - make $PKG+ee
       - make source+ee
     artifact:
@@ -52,7 +54,7 @@ build:
       EEREPO: /work/source/$EEREPO
       FIPSREPO: /work/source/$FIPSREPO
     script:
-      - make -j +fips
+      - make -j$(nproc) +fips
       - make $PKG+fips
     artifact:
       - pkg/packages/*
