@@ -106,20 +106,20 @@ el9)
 *) ;;
 esac
 
-JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+#JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 do_edition() {
     local edition="$1"
     case "$edition" in
     community)
         make clean
-        make -j"${JOBS}"
+        make
         make "${pkg}"
         ;;
 
     enterprise)
         make clean clean+ee
-        make -j"${JOBS}" +ee
+        make +ee
         make "${pkg}+ee"
         ;;
 
@@ -129,7 +129,7 @@ do_edition() {
             return 0
         fi
         make clean clean+ee
-        make -j"${JOBS}" +fips
+        make +fips
         make "${pkg}+fips"
         ;;
     esac

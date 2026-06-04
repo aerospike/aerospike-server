@@ -205,10 +205,10 @@ sig_handle_hup(int sig_num, siginfo_t* info, void* ctx)
 static void
 sig_handle_int(int sig_num, siginfo_t* info, void* ctx)
 {
-	(void)info;
 	(void)ctx;
 
 	log_abort(sig_num);
+	log_siginfo(info);
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -223,15 +223,29 @@ static void
 sig_handle_term(int sig_num, siginfo_t* info, void* ctx)
 {
 	(void)sig_num;
-	(void)info;
 	(void)ctx;
 
-	cf_info(AS_AS,
-			"SIGTERM received, shutting down %s build %s os %s arch %s sha %.7s%s%.7s",
-			aerospike_build_type, aerospike_build_id, aerospike_build_os,
-			aerospike_build_arch, aerospike_build_sha,
-			*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
-			*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
+	if (info->si_code == SI_USER || info->si_code == SI_QUEUE) {
+		cf_info(AS_AS,
+				"SIGTERM received from uid %u pid %d, shutting down"
+				" %s build %s os %s arch %s sha %.7s%s%.7s",
+				info->si_uid, info->si_pid,
+				aerospike_build_type, aerospike_build_id,
+				aerospike_build_os, aerospike_build_arch,
+				aerospike_build_sha,
+				*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
+				*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
+	}
+	else {
+		cf_info(AS_AS,
+				"SIGTERM received from kernel or unknown source, shutting down"
+				" %s build %s os %s arch %s sha %.7s%s%.7s",
+				aerospike_build_type, aerospike_build_id,
+				aerospike_build_os, aerospike_build_arch,
+				aerospike_build_sha,
+				*aerospike_build_ee_sha == '\0' ? "" : " ee-sha ",
+				*aerospike_build_ee_sha == '\0' ? "" : aerospike_build_ee_sha);
+	}
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -269,8 +283,8 @@ log_siginfo(const siginfo_t* info)
 		at += sprintf(at, " si_addr 0x%016lx", (uintptr_t)info->si_addr);
 	}
 
-	if (info->si_code == SI_USER) {
-		at += sprintf(at, " si_uid %d si_pid %u", info->si_uid, info->si_pid);
+	if (info->si_code == SI_USER || info->si_code == SI_QUEUE) {
+		at += sprintf(at, " si_uid %u si_pid %d", info->si_uid, info->si_pid);
 	}
 
 	if (info->si_signo == SIGBUS &&

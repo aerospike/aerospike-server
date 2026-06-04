@@ -22,7 +22,7 @@ The majority of the Aerospike source code is written in the C
 programming language, conforming to the ANSI C99 standard.
 
 To install dependencies for a development environment run
-`./bin/install-dependencies.sh` in the aerospike-server repo.
+`.github/bin/install_deps.bash <distro>` (e.g. `ubuntu24.04`, `el9`).
 
 In particular, the following tools and libraries are needed:
 
