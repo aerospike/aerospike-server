@@ -48,6 +48,8 @@
 #include "base/thr_info.h"
 #include <sys/stat.h>
 
+#define MAX_FILE_NAME_SZ 128
+
 char *as_udf_type_name[] = {"LUA", 0};
 
 static int file_read(char *, uint8_t **, size_t *, unsigned char *);
@@ -219,6 +221,15 @@ static void udf_cask_get_metadata_cb(const cf_vector *items, void *udata)
 			continue;
 		}
 
+		// Belt-and-braces: udf_cask_smd_accept_fn already filters bad keys at
+		// ingest, but list runs over whatever the local SMD store contains -
+		// peer state from older builds or pre-fix on-disk state could still
+		// hold a poisoned key, and the response separators are ',' and ';'.
+		if (strlen(item->key) >= MAX_FILE_NAME_SZ ||
+				! udf_filename_is_valid(item->key)) {
+			continue;
+		}
+
 		cf_debug(AS_UDF, "UDF metadata item[%d]:  key \"%s\" ; value \"%s\" ; generation %u ; timestamp %lu",
 				 index, item->key, item->value, item->generation, item->timestamp);
 		cf_dyn_buf_append_string(out, "filename=");
@@ -271,6 +282,12 @@ int udf_cask_info_get(char *name, char * params, cf_dyn_buf * out) {
 	// get (required) script filename
 	if ( as_info_parameter_get(params, "filename", filename, &filename_len) ) {
 		cf_info(AS_INFO, "invalid or missing filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return 0;
+	}
+
+	if (! udf_filename_is_valid(filename)) {
+		cf_warning(AS_UDF, "udf-get: rejecting invalid filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return 0;
 	}
@@ -351,6 +368,12 @@ int udf_cask_info_put(char *name, char * params, cf_dyn_buf * out) {
 			|| tmp_char == filename                              // '.' at the begining of filename
 			|| strlen (tmp_char) <= 1) {                         // '.' in filename, but no extnsion e.g. "abc."
 		cf_info(AS_INFO, "invalid or missing filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return 0;
+	}
+
+	if (! udf_filename_is_valid(filename)) {
+		cf_warning(AS_UDF, "udf-put: rejecting invalid filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
 		return 0;
 	}
@@ -495,6 +518,13 @@ int udf_cask_info_remove(char *name, char * params, cf_dyn_buf * out) {
 	if ( as_info_parameter_get(params, "filename", filename, &filename_len) ) {
 		cf_info(AS_UDF, "invalid or missing filename");
 		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return 0;
+	}
+
+	if (! udf_filename_is_valid(filename)) {
+		cf_warning(AS_UDF, "udf-remove: rejecting invalid filename");
+		cf_dyn_buf_append_string(out, "error=invalid_filename");
+		return 0;
 	}
 
 	// now check if such a file-name exists :
@@ -557,6 +587,23 @@ udf_cask_smd_accept_fn(const cf_vector *items, as_smd_accept_type accept_type)
 	// and if the new item is new, write to the storage directory
 	for (uint32_t i = 0; i < cf_vector_size(items); i++) {
 		as_smd_item *item = cf_vector_get_ptr(items, i);
+
+		size_t key_len = strlen(item->key);
+
+		if (key_len >= MAX_FILE_NAME_SZ) {
+			cf_warning(AS_UDF, "ignoring UDF SMD item: filename too long (%zu)",
+					key_len);
+			continue;
+		}
+
+		// item->key fails the predicate, so by definition it contains a byte
+		// outside [A-Za-z0-9._-$] or starts with '.' - don't echo it raw.
+		if (! udf_filename_is_valid(item->key)) {
+			cf_warning(AS_UDF,
+					"ignoring UDF SMD item: invalid filename (len %zu)",
+					key_len);
+			continue;
+		}
 
 		if (item->value != NULL) {
 			json_error_t json_error;
