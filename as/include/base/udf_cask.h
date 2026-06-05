@@ -60,6 +60,28 @@ int udf_cask_info_reconfigure(char * name, char * params, cf_dyn_buf * buf);
 int udf_cask_info_list(char *name, cf_dyn_buf * out);
 
 //------------------------------------------------
+// Filename predicate for the Lua sandbox's .lua allowlist. Defined here
+// (static inline) rather than in udf_cask.c so a future unit test could link
+// it without a separate header. Path-traversal validation of UDF filenames
+// is a separate concern handled by udf_filename_is_valid (AER-6907, PR #1396).
+
+// Case-sensitive extension check that mirrors the mod-lua runtime open path
+// (create_state's "%s/%s.lua", require()'s "%s/?.lua", is_native_module's
+// "%s/%s.so") - all byte-exact on case-sensitive filesystems. A
+// case-insensitive gate would accept foo.LUA at registration only for
+// invocation to fail when the open misses the lowercase path. Aligned with
+// mod-lua's hasext / dropext / cache_add_file.
+static inline bool
+udf_filename_has_ext(const char* filename, const char* ext)
+{
+	size_t filename_len = strlen(filename);
+	size_t ext_len = strlen(ext);
+
+	return ext_len < filename_len &&
+			strcmp(filename + filename_len - ext_len, ext) == 0;
+}
+
+//------------------------------------------------
 // these are called by the modules that need to run UDFs
 
 // called by a module to get the data associated with a udf (the file contents)

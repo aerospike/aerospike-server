@@ -378,6 +378,18 @@ int udf_cask_info_put(char *name, char * params, cf_dyn_buf * out) {
 		return 0;
 	}
 
+	// Allowlist: with the sandbox on, only .lua UDFs are accepted. Catches
+	// SONAME shapes (foo.so.1) and any other extension a ".so" denylist would
+	// miss. Case-sensitive (udf_filename_has_ext) - foo.LUA is rejected here
+	// rather than persisted and silently failing at invocation. Path-traversal
+	// validation is handled just above by udf_filename_is_valid (AER-6907).
+	if (g_config.mod_lua.unsafe_lua_disabled &&
+			! udf_filename_has_ext(filename, ".lua")) {
+		cf_warning(AS_UDF, "udf-put: unsafe Lua disabled: %s", filename);
+		cf_dyn_buf_append_string(out, "error=unsafe_lua_disabled");
+		return 0;
+	}
+
 	if ( as_info_parameter_get(params, "content-len", content_len, &(clen)) ) {
 		cf_info(AS_INFO, "invalid or missing content-len");
 		cf_dyn_buf_append_string(out, "error=invalid_content_len");
@@ -606,6 +618,24 @@ udf_cask_smd_accept_fn(const cf_vector *items, as_smd_accept_type accept_type)
 		}
 
 		if (item->value != NULL) {
+			// Allowlist: with the sandbox on, only .lua UDFs may be registered.
+			// (Gate the set path only - a stale non-.lua key can still be
+			// deleted.) Path-traversal/length validation of item->key is
+			// handled just above by udf_filename_is_valid / MAX_FILE_NAME_SZ
+			// (AER-6907).
+			if (g_config.mod_lua.unsafe_lua_disabled &&
+					! udf_filename_has_ext(item->key, ".lua")) {
+				// Rate-limited: this loop runs over an externally-influenced
+				// item vector during SMD accept (cluster-state propagation), so
+				// a peer or poisoned/restored SMD set carrying many bad keys
+				// would otherwise emit one line per item in a single pass. Log
+				// only the length, never the raw key.
+				cf_ticker_warning(AS_UDF,
+						"ignoring SMD UDF item (unsafe Lua disabled, len %zu)",
+						key_len);
+				continue;
+			}
+
 			json_error_t json_error;
 			json_t *item_obj = json_loads(item->value, 0 /*flags*/, &json_error);
 
