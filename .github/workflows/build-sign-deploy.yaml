@@ -94,7 +94,7 @@ jobs:
       - name: Set distro list
         id: distros
         run: |
-          echo 'distros=["amzn2023","debian12","debian13","el10","el8","el9","ubuntu22.04","ubuntu24.04"]' >> "$GITHUB_OUTPUT"
+          echo 'distros=["amzn2023","debian12","el8","el9","ubuntu22.04","ubuntu24.04"]' >> "$GITHUB_OUTPUT"
 
   build-artifacts:
     needs: setup
