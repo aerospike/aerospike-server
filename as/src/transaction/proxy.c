@@ -608,6 +608,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	tr.origin = FROM_PROXY;
 	tr.from.proxy_orig = cf_malloc(sizeof(proxy_origin));
 	tr.from.proxy_orig->node = src;
+	tr.from.proxy_orig->username[0] = '\0'; // proxy msg may omit username
 	tr.from_data.proxy_tid = tid;
 
 	char* username = NULL;
