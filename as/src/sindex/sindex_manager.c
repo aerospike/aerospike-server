@@ -395,7 +395,7 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 				cf_warning(AS_INFO, "sindex-create %s: bad 'type' '%s'",
 						idx_name_str, ktype_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"bad 'type' - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
+						"bad 'type' - must be one of 'integer', 'string', 'blob', 'geo2dsphere'");
 				return;
 			}
 
@@ -512,7 +512,7 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 						"sindex-create %s: bad 'indexdata' bin type '%s'",
 						idx_name_str, p_ktype_str);
 				as_info_respond_error(db, AS_ERR_PARAMETER,
-						"bad 'indexdata' bin type - must be one of 'numeric', 'string', 'blob', 'geo2dsphere'");
+						"bad 'indexdata' bin type - must be one of 'integer', 'string', 'blob', 'geo2dsphere'");
 				return;
 			}
 		}
@@ -525,7 +525,7 @@ as_sindex_manager_sindex_create(as_info_cmd_args* args)
 					"sindex-create %s: bad 'indexdata' bin type '%s' for 'indextype' 'mapkeys'",
 					idx_name_str, p_ktype_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
-					"bad 'indexdata' bin type for 'indextype' 'mapkeys' - must be one of 'numeric', 'string', 'blob'");
+					"bad 'indexdata' bin type for 'indextype' 'mapkeys' - must be one of 'integer', 'string', 'blob'");
 			return;
 		}
 
@@ -779,15 +779,42 @@ sindex_list(as_info_cmd_args* args)
 		}
 	}
 
+	char v_str[16];
+	int v_len = sizeof(v_str);
+	bool use_integer = false;
+
+	rv = as_info_parameter_get(params, "v", v_str, &v_len);
+	rv = as_info_optional_param_is_ok(db, "v", v_str, rv);
+
+	if (rv == INFO_PARAM_FAIL_REPLIED) {
+		return;
+	}
+
+	if (rv == INFO_PARAM_OK) {
+		if (strcmp(v_str, "v1") == 0) {
+			use_integer = false;
+		}
+		else if (strcmp(v_str, "v2") == 0) {
+			use_integer = true;
+		}
+		else {
+			cf_warning(AS_INFO, "sindex-list: bad version '%s'", v_str);
+			as_info_respond_error(db, AS_ERR_PARAMETER,
+					"bad version - must be 'v1' or 'v2'");
+			return;
+		}
+	}
+
 	if (ns == NULL) {
 		for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-			as_sindex_list_str(g_config.namespaces[ns_ix], b64, db);
+			as_sindex_list_str(g_config.namespaces[ns_ix], b64,
+					use_integer, db);
 		}
 
 		cf_dyn_buf_chomp_char(db, ';');
 	}
 	else {
-		as_sindex_list_str(ns, b64, db);
+		as_sindex_list_str(ns, b64, use_integer, db);
 		cf_dyn_buf_chomp_char(db, ';');
 	}
 }

@@ -111,7 +111,7 @@ static void add_string_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 static void add_blob_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 static void add_geojson_from_msgpack(msgpack_in* element, as_sindex_bin* sbin);
 
-static char const* ktype_str(as_particle_type ktype);
+static char const* ktype_str(as_particle_type ktype, bool use_integer);
 const char* sindex_particle_type_str(as_particle_type type);
 static as_particle_type itype_to_exp_particle_type(as_sindex_type itype);
 
@@ -383,7 +383,13 @@ as_sindex_lookup_by_iname(const as_namespace* ns, const char* iname)
 as_particle_type
 as_sindex_ktype_from_string(const char* ktype_str)
 {
+	if (strcasecmp(ktype_str, "integer") == 0) {
+		return AS_PARTICLE_TYPE_INTEGER;
+	}
+
 	if (strcasecmp(ktype_str, "numeric") == 0) {
+		as_info_warn_deprecated(
+				"sindex ktype 'numeric' is deprecated - use 'integer' instead");
 		return AS_PARTICLE_TYPE_INTEGER;
 	}
 
@@ -434,7 +440,8 @@ as_sindex_itype_from_string(const char* itype_str)
 }
 
 void
-as_sindex_list_str(const as_namespace* ns, bool b64, cf_dyn_buf* db)
+as_sindex_list_str(const as_namespace* ns, bool b64, bool use_integer,
+		cf_dyn_buf* db)
 {
 	SINDEX_GRLOCK();
 
@@ -456,7 +463,7 @@ as_sindex_list_str(const as_namespace* ns, bool b64, cf_dyn_buf* db)
 		cf_dyn_buf_append_string(db,
 				si->bin_name[0] != '\0' ? si->bin_name : "null");
 		cf_dyn_buf_append_string(db, ":type=");
-		cf_dyn_buf_append_string(db, ktype_str(si->ktype));
+		cf_dyn_buf_append_string(db, ktype_str(si->ktype, use_integer));
 		cf_dyn_buf_append_string(db, ":indextype=");
 		cf_dyn_buf_append_string(db, as_sindex_type_names[si->itype]);
 		cf_dyn_buf_append_string(db, ":context=");
@@ -1328,11 +1335,11 @@ add_geojson_from_msgpack(msgpack_in* element, as_sindex_bin* sbin)
 //
 
 static char const*
-ktype_str(as_particle_type ktype)
+ktype_str(as_particle_type ktype, bool use_integer)
 {
 	switch (ktype) {
 	case AS_PARTICLE_TYPE_INTEGER:
-		return "numeric";
+		return use_integer ? "integer" : "numeric";
 	case AS_PARTICLE_TYPE_STRING:
 		return "string";
 	case AS_PARTICLE_TYPE_BLOB:
@@ -1349,10 +1356,6 @@ ktype_str(as_particle_type ktype)
 const char*
 sindex_particle_type_str(as_particle_type type)
 {
-	if (type == AS_PARTICLE_TYPE_INTEGER) {
-		return "numeric";
-	}
-
 	return as_particle_type_str(type);
 }
 

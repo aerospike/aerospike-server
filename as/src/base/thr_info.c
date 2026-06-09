@@ -3068,13 +3068,13 @@ cmd_sindex(as_info_cmd_args* args)
 
 	if (ns == NULL) {
 		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-			as_sindex_list_str(g_config.namespaces[i], false, db);
+			as_sindex_list_str(g_config.namespaces[i], false, false, db);
 		}
 
 		cf_dyn_buf_chomp_char(db, ';');
 	}
 	else if (index_name == NULL) {
-		as_sindex_list_str(ns, false, db);
+		as_sindex_list_str(ns, false, false, db);
 		cf_dyn_buf_chomp_char(db, ';');
 	}
 	else if (! as_sindex_manager_stats_str(ns, index_name, db)) {
@@ -3089,12 +3089,12 @@ cmd_sindex_create(as_info_cmd_args* args)
 {
 	// Secondary index command format:
 	// Old command format:
-	// sindex-create:ns=usermap;set=demo;indexname=um_age;indextype=list;indexdata=age,numeric
+	// sindex-create:ns=usermap;set=demo;indexname=um_age;indextype=list;indexdata=age,integer
 	// sindex-create:ns=usermap;set=demo;indexname=um_state;indexdata=state,string
-	// sindex-create:ns=usermap;set=demo;indexname=um_highscore;context=<base64-cdt-ctx>;indexdata=scores,numeric
+	// sindex-create:ns=usermap;set=demo;indexname=um_highscore;context=<base64-cdt-ctx>;indexdata=scores,integer
 
 	// New command format:
-	// sindex-create:ns=usermap;set=demo;indexname=um_highscore;*context=<base64-cdt-ctx>;exp=<base64-exp>;indextype=list;type=numeric;*bin=scores
+	// sindex-create:ns=usermap;set=demo;indexname=um_highscore;*context=<base64-cdt-ctx>;exp=<base64-exp>;indextype=list;type=integer;*bin=scores
 	// * - mutually exclusive with expression
 
 	// Set index command format:

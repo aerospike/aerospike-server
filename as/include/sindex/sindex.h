@@ -67,7 +67,7 @@ struct si_btree_s;
 
 // Info command parsing buffer sizes.
 #define INDEXTYPE_MAX_SZ 10 // (default/list/mapkeys/mapvalues)
-#define KTYPE_MAX_SZ (11 + 1) // (string/blob/numeric/geo2dsphere)
+#define KTYPE_MAX_SZ (11 + 1) // (string/blob/integer/geo2dsphere)
 #define INDEXDATA_MAX_SZ (AS_BIN_NAME_MAX_SZ + KTYPE_MAX_SZ) // bin-name,type
 #define CTX_B64_MAX_SZ 2048
 #define EXP_B64_MAX_SZ (16 * 1024)
@@ -126,7 +126,7 @@ struct as_sindex_s* as_sindex_lookup_by_iname(const struct as_namespace_s* ns,
 as_particle_type as_sindex_ktype_from_string(const char* ktype_str);
 as_sindex_type as_sindex_itype_from_string(const char* itype_str);
 void as_sindex_list_str(const struct as_namespace_s* ns, bool b64,
-		cf_dyn_buf* db);
+		bool use_integer, cf_dyn_buf* db);
 bool as_sindex_stats_str(const struct as_sindex_s* si, cf_dyn_buf* db);
 int32_t as_sindex_cdt_ctx_b64_decode(const char* ctx_b64, uint32_t ctx_b64_len,
 		uint8_t** buf_r);
