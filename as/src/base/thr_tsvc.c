@@ -187,14 +187,14 @@ as_tsvc_process_transaction(as_transaction* tr)
 
 	if (as_transaction_is_query(tr)) {
 		if (! as_security_check_data_op(tr, ns, query_perm(tr))) {
-			as_multi_rec_transaction_error(tr, tr->result_code);
+			as_query_error(tr, tr->result_code);
 			goto Cleanup;
 		}
 
 		rv = as_query(tr, ns);
 
 		if (rv != 0) {
-			as_multi_rec_transaction_error(tr, rv);
+			as_query_error(tr, rv);
 		}
 
 		goto Cleanup;

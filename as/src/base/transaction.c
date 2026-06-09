@@ -455,7 +455,7 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 // TODO - temporary, until query can do its own synchronous failure responses.
 // (Here we forfeit namespace info and add to global-scope error.)
 void
-as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
+as_query_error(as_transaction* tr, uint32_t error_code)
 {
 	if (error_code == 0) {
 		cf_warning(AS_PROTO, "converting error code 0 to 1 (unknown)");
