@@ -1647,37 +1647,43 @@ cmd_dump_wb_summary(as_info_cmd_args* args)
 	const char* params = args->params;
 	cf_dyn_buf* db = args->db;
 
-	// Command format: dump-wb-summary:ns=<Namespace>
-	// where <Namespace> is the name of an existing namespace.
+	// Command format: dump-wb-summary:ns=<Namespace>[;verbose=<opt>]
+	// where <Namespace> is the name of an existing namespace and the
+	// optional "verbose" argument <opt> is one of {"true" | "false"} and
+	// defaults to "false".
 
 	as_namespace* ns;
 	bool verbose = false;
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-	info_param_result rv =
-			as_info_param_get_namespace_ns(params, param_str, &param_str_len);
+	char ns_str[100];
+	int ns_str_len = sizeof(ns_str);
+	info_param_result ns_rv =
+			as_info_param_get_namespace_ns(params, ns_str, &ns_str_len);
 
-	if (! info_param_required_local_namespace_is_ok(db, param_str, &ns, rv)) {
+	if (! info_param_required_local_namespace_is_ok(db, ns_str, &ns, ns_rv)) {
 		return;
 	}
 
-	rv = as_info_optional_param_is_ok(db, "verbose", param_str, rv);
+	char verbose_str[100];
+	int verbose_str_len = sizeof(verbose_str);
+	info_param_result rv = as_info_parameter_get(params, "verbose", verbose_str,
+			&verbose_str_len);
+	rv = as_info_optional_param_is_ok(db, "verbose", verbose_str, rv);
 
 	if (rv == INFO_PARAM_FAIL_REPLIED) {
 		return;
 	}
 
 	if (rv == INFO_PARAM_OK) {
-		if (strcmp(param_str, "true") == 0) {
+		if (strcmp(verbose_str, "true") == 0) {
 			verbose = true;
 		}
-		else if (strcmp(param_str, "false") == 0) {
+		else if (strcmp(verbose_str, "false") == 0) {
 			verbose = false;
 		}
 		else {
 			cf_warning(AS_INFO,
 					"the '%s:' command argument 'verbose' value must be one of {'true', 'false'}, not '%s'",
-					name, param_str);
+					name, verbose_str);
 			as_info_respond_error(db, AS_ERR_PARAMETER,
 					"'verbose' may be either 'true' or 'false'");
 			return;
