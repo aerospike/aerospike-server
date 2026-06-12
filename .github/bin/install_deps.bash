@@ -20,8 +20,8 @@ if [[ $(id -u) -ne 0 ]] && command -v sudo >/dev/null; then
     SUDO=sudo
 fi
 
-DEBIAN_COMMON_DEPS='libssl-dev zlib1g-dev autoconf automake cmake dpkg-dev fakeroot g++ git libtool make pkg-config libcurl4-openssl-dev libldap2-dev libgtest-dev'
-EL_COMMON_DEPS='openssl-devel zlib-devel autoconf automake make cmake gcc gcc-c++ git libtool glibc-devel rpm-build libcurl-devel openldap-devel'
+DEBIAN_COMMON_DEPS='libssl-dev zlib1g-dev autoconf automake cmake dpkg-dev fakeroot g++ git libtool make pkg-config libcurl4-openssl-dev libldap2-dev libgtest-dev libzstd-dev'
+EL_COMMON_DEPS='openssl-devel zlib-devel autoconf automake make cmake gcc gcc-c++ git libtool glibc-devel rpm-build libcurl-devel openldap-devel libzstd-devel'
 
 # --- Per-distro install functions ---------------------------------------------------
 
